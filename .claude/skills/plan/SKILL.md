@@ -37,6 +37,10 @@ Create or update a plan in `docs/plans/active/`.
 - One paragraph summary of what is in scope
 - Explicit statement of what remains unknown
 
+## Anti-bottleneck
+
+Before asking the user for confirmation or choices during planning, first check whether the answer is available from the codebase, existing plans, docs, or reasonable defaults. See the `anti-bottleneck` skill for the full checklist.
+
 ## Additional resources
 
 - [template.md](template.md)
