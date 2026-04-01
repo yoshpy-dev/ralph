@@ -1,4 +1,4 @@
-# coding-agent-harness-scaffold
+# harness-scaffolding-template
 
 A language-agnostic scaffold for practicing harness engineering with **Claude Code first** and **cross-vendor portability second**.
 
