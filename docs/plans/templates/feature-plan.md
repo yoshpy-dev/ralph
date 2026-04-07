@@ -4,6 +4,8 @@
 - Owner: Claude Code
 - Date: __DATE__
 - Related request: __REQUEST__
+- Related issue: __ISSUE__
+- Branch: __BRANCH__
 
 ## Objective
 
@@ -38,6 +40,8 @@
 ## Progress checklist
 
 - [ ] Plan reviewed
+- [ ] Branch created
 - [ ] Implementation started
 - [ ] Review artifact created
 - [ ] Verification artifact created
+- [ ] PR created
