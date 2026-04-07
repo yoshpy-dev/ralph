@@ -6,7 +6,12 @@ Work from the active plan, not from memory alone.
 
 ## Steps
 
-0. Confirm you are on a feature branch (not main/master). If not, inform the user to run /plan first.
+0. **Create feature branch** (if not already on one):
+   a. Read the active plan in `docs/plans/active/` to extract metadata (type, issue number, slug).
+   b. Determine branch name: `<type>/<issue>/<slug>` (with issue) or `<type>/<slug>` (without issue).
+   c. If already on a feature branch (not main/master), skip creation.
+   d. Otherwise, run `git checkout -b <branch-name>`.
+   e. Update the plan file: replace `Branch: TBD` (or any TBD variant) with the actual branch name.
 1. Read the current active plan in `docs/plans/active/`.
 2. Confirm acceptance criteria, verify plan, and test plan before editing code.
 3. Implement in small slices that can be reviewed and verified independently.

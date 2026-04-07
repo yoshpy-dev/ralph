@@ -5,7 +5,7 @@
 - Date: __DATE__
 - Related request: __REQUEST__
 - Related issue: __ISSUE__
-- Branch: __BRANCH__
+- Branch: TBD
 
 ## Objective
 

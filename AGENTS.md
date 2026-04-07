@@ -20,8 +20,8 @@ Build coding-agent workflows that are:
 ## Primary loop
 
 1. Explore
-2. Plan (manual — creates branch)
-3. Work (auto)
+2. Plan (manual — creates plan, selects flow)
+3. Work (auto — creates branch) or Loop (auto — creates worktree)
 4. Self-review (auto — diff quality)
 5. Verify (auto — spec compliance + static analysis)
 6. Test (auto — behavioral tests)

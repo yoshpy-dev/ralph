@@ -1,6 +1,6 @@
 ---
 name: plan
-description: Create or refresh a scoped implementation plan before risky, ambiguous, long-running, or multi-file work. Accepts an optional GitHub issue number or URL for context pre-fill. Creates a feature branch after plan approval. Manual trigger only.
+description: Create or refresh a scoped implementation plan before risky, ambiguous, long-running, or multi-file work. Accepts an optional GitHub issue number or URL for context pre-fill. Does not create a branch — branch/worktree creation is deferred to the chosen flow skill. Manual trigger only.
 disable-model-invocation: true
 allowed-tools: Read, Grep, Glob, Write, Edit, Bash, AskUserQuestion
 ---
@@ -35,13 +35,7 @@ Create or update a plan in `docs/plans/active/`.
    - evidence targets
 5. Keep the plan high-level enough to avoid cascading low-level mistakes.
 6. End with a short readiness checklist.
-7. Create feature branch:
-   a. Determine type from context (feat/fix/docs/refactor/chore).
-   b. With issue: `git checkout -b <type>/<issue>/<slug>`
-   c. Without issue: `git checkout -b <type>/<slug>`
-   d. Slug = plan filename slug. Do NOT push yet.
-
-8. **Flow selection**: Use **AskUserQuestion** to ask the user which execution flow to use.
+7. **Flow selection**: Use **AskUserQuestion** to ask the user which execution flow to use.
    - Question: "どちらの開発フローで進めますか？"
    - Options:
      1. **標準フロー (/work)** — Claude Code 内で対話的に実装を進める（短〜中規模タスク向け）
@@ -55,7 +49,7 @@ Create or update a plan in `docs/plans/active/`.
 - Updated or newly created plan file
 - One paragraph summary of what is in scope
 - Explicit statement of what remains unknown
-- Feature branch created and checked out
+- Branch/Worktree creation is deferred to the chosen flow skill
 - Chosen execution flow (standard /work or Ralph Loop /loop)
 
 ## Anti-bottleneck
