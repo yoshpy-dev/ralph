@@ -1,7 +1,6 @@
 ---
 name: audit-harness
-description: Audit the harness itself for drift, weak spots, overgrown instructions, missing deterministic checks, or language-pack gaps.
-disable-model-invocation: true
+description: Audit the harness itself for drift, weak spots, overgrown instructions, missing deterministic checks, or language-pack gaps. Invoke automatically when harness-level changes accumulate and need consistency review.
 allowed-tools: Read, Grep, Glob, Bash, Write
 ---
 Audit the harness, not the product code alone.

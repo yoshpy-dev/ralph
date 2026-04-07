@@ -1,7 +1,6 @@
 ---
 name: review
-description: Produce a written review artifact for a change, covering correctness, security, maintainability, testing, and documentation gaps.
-disable-model-invocation: true
+description: Produce a written review artifact for a change, covering correctness, security, maintainability, testing, and documentation gaps. Invoke automatically after /work completes or when significant code changes are staged.
 allowed-tools: Read, Grep, Glob, Bash, Write
 ---
 Perform a review and write a report to `docs/reports/`.

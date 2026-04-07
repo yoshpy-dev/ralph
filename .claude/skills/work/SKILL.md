@@ -1,12 +1,12 @@
 ---
 name: work
-description: Execute an approved plan in small coherent slices, updating progress, evidence, and docs as implementation evolves.
-disable-model-invocation: true
+description: Execute an approved plan in small coherent slices, updating progress, evidence, and docs as implementation evolves. Invoke automatically after an approved plan exists and the current branch is a feature branch.
 ---
 Work from the active plan, not from memory alone.
 
 ## Steps
 
+0. Confirm you are on a feature branch (not main/master). If not, inform the user to run /plan first.
 1. Read the current active plan in `docs/plans/active/`.
 2. Confirm acceptance criteria and verification strategy before editing code.
 3. Implement in small slices that can be reviewed and verified independently.
@@ -14,17 +14,14 @@ Work from the active plan, not from memory alone.
 5. If the task splits cleanly, delegate focused research or review to subagents.
 6. If repeated failures occur, reduce scope, inspect evidence, and revise the plan instead of thrashing.
 7. Keep docs, contracts, and tests aligned with behavior changes.
-8. Before presenting completion, run `/review` and `/verify` or equivalent deterministic checks.
-9. After all acceptance criteria are met and verification passes, archive the plan with `./scripts/archive-plan.sh <slug>`.
+8. Before presenting completion, run `./scripts/run-verify.sh` or equivalent deterministic checks.
+9. After criteria met, proceed to /review, /verify, then /pr.
 
 ## Completion gate
 
 Do NOT present a task as complete unless ALL of the following are true:
 
 - [ ] `./scripts/run-verify.sh` exits 0 (or a project-specific verifier passes)
-- [ ] A verify report exists in `docs/reports/`
-- [ ] Raw evidence is saved in `docs/evidence/`
-- [ ] A review report exists in `docs/reports/` (or was explicitly deemed unnecessary for docs-only changes)
 - [ ] The active plan's progress checklist is fully updated
 - [ ] Any discovered tech debt is recorded in `docs/tech-debt/`
 

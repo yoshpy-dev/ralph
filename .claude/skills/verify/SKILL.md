@@ -1,7 +1,6 @@
 ---
 name: verify
-description: Run or design evidence-backed verification for a change. Use before claiming a task is done, especially after non-trivial edits.
-disable-model-invocation: true
+description: Run or design evidence-backed verification for a change. Use before claiming a task is done, especially after non-trivial edits. Invoke automatically after /review completes or when deterministic verification is needed.
 allowed-tools: Read, Grep, Glob, Bash, Write
 ---
 Verify the current work using deterministic checks first.
