@@ -82,10 +82,7 @@ The default philosophy here is:
    ```
 
 5. In Claude Code, follow the loop:
-   - `/plan`
-   - `/work`
-   - `/review`
-   - `/verify`
+   - `/plan` → `/work` (or `/loop`) → `/review` → `/verify` → `/test` → `/pr`
 
 6. Before claiming a task is done, run:
 
@@ -105,28 +102,31 @@ This scaffold assumes the following default loop. Only `/plan` is a manual trigg
    - Create or refresh a file-backed plan in `docs/plans/active/`
    - Define acceptance criteria, contracts, risks, and verification
    - Optionally link a GitHub issue for context pre-fill
-   - Create a feature branch (`<type>/<issue>/<slug>` or `<type>/<slug>`)
+   - Select execution flow: standard (`/work`) or Ralph Loop (`/loop`)
 
-3. **Work** (auto)
-   - Implement in small coherent slices
-   - Update plan progress as you go
-   - Keep evidence and docs aligned with code changes
+3. **Work** (auto — `/work`) or **Loop** (auto — `/loop`)
+   - `/work`: creates a branch (`git checkout -b`) and implements interactively in Claude Code
+   - `/loop`: creates a Git Worktree and sets up autonomous iteration via `claude -p`
 
-4. **Review** (auto)
-   - Produce a written review artifact, not just a verbal "looks good"
+4. **Self-review** (auto — `/review`)
+   - Produce a written review artifact (diff quality only)
    - Prefer read-only reviewer agents for audit tasks
 
-5. **Verify** (auto)
-   - Run deterministic checks first
-   - Record verification results in `docs/reports/`
-   - Note any remaining coverage gaps explicitly
+5. **Verify** (auto — `/verify`)
+   - Check spec compliance against acceptance criteria
+   - Run static analysis and documentation drift checks
+   - Record results in `docs/reports/`
 
-6. **PR** (auto — `/pr`)
+6. **Test** (auto — `/test`)
+   - Run behavioral tests (unit, integration, regression)
+   - Tests must pass before PR creation
+
+7. **PR** (auto — `/pr`)
    - Create a pull request with structured summary
    - Archive finished plans from `active/` to `archive/`
    - Include walkthrough for large diffs
 
-7. **CI + Human merge**
+8. **CI + Human merge**
    - `verify.yml` runs `run-verify.sh` on the PR
    - Human reviews and merges
 

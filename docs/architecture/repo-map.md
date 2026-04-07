@@ -25,14 +25,16 @@
 
 ## Skills
 
-- `.claude/skills/plan/`: create plans and feature branches (manual trigger)
-- `.claude/skills/work/`: execute plans (auto)
-- `.claude/skills/review/`: produce review artifacts (auto)
-- `.claude/skills/verify/`: run deterministic verification (auto)
+- `.claude/skills/plan/`: create plans, select execution flow (manual trigger)
+- `.claude/skills/work/`: create branch and execute plans interactively (auto)
+- `.claude/skills/loop/`: create worktree and set up Ralph Loop autonomous iteration (auto)
+- `.claude/skills/review/`: self-review diff quality (auto)
+- `.claude/skills/verify/`: spec compliance and static analysis (auto)
+- `.claude/skills/test/`: behavioral tests (auto)
 - `.claude/skills/pr/`: create PRs, archive plans, hand off (auto)
-- `.claude/skills/loop/`: Ralph Loop autonomous iteration (auto)
 - `.claude/skills/sync-docs/`: documentation sync (auto)
 - `.claude/skills/audit-harness/`: harness consistency audit (auto)
+- `.claude/skills/anti-bottleneck/`: reduce unnecessary human interruptions (internal)
 
 ## Extensions
 

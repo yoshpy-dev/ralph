@@ -118,16 +118,18 @@ This means the agent reconstructs context from files each iteration, avoiding st
 ## Integration with the operating loop
 
 ```
-/plan  →  Create plan in docs/plans/active/
+/plan    →  Create plan in docs/plans/active/, select /loop flow
   ↓
-/loop  →  Initialize Ralph Loop with plan reference
+/loop    →  Create Git Worktree, initialize Ralph Loop with plan reference
   ↓
 Terminal: ./scripts/ralph-loop.sh --verify
   ↓
 Return to Claude Code
   ↓
-/review  →  Review the loop's output
-/verify  →  Run verification
+/review  →  Self-review the loop's diff
+/verify  →  Spec compliance + static analysis
+/test    →  Run behavioral tests
+/pr      →  Create PR, archive plan
 ```
 
 ## Tips

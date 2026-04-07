@@ -12,7 +12,7 @@
 - simple done criteria
 
 ## Level 2: Workflow scaffold
-- `/plan`, `/work`, `/review`, `/verify`
+- `/plan`, `/work`, `/review`, `/verify`, `/test`, `/pr`
 - report templates
 - archived plans
 - explicit evidence
