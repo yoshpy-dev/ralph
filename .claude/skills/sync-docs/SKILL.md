@@ -28,4 +28,4 @@ When skills, hooks, rules, scripts, or language packs changed, also check:
 - **Language packs added/removed**: Does `scripts/detect-languages.sh` detect the language? Is there a matching `.claude/rules/<lang>.md`? Does `packs/languages/<lang>/verify.sh` run a real verifier (not the placeholder)?
 - **Scripts added/removed**: Does `README.md` Quick Start still reference valid scripts? Does `docs/architecture/repo-map.md` list the current scripts?
 - **Quality gates changed**: Does `docs/quality/definition-of-done.md` match the actual completion workflow in `/work`? Does `docs/quality/quality-gates.md` list verifiers that actually exist?
-- **PR skill consistency**: Does `/pr` SKILL.md pre-checks align with `/review` and `/verify` output? Does the PR template match the current plan template fields? Does `AGENTS.md` primary loop include the PR step?
+- **PR skill consistency**: Does `/pr` SKILL.md pre-checks align with `/review`, `/verify`, and `/test` output? Does the PR template match the current plan template fields? Does `AGENTS.md` primary loop include the PR step?

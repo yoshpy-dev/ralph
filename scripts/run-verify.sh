@@ -1,6 +1,13 @@
 #!/usr/bin/env sh
 set -eu
 
+# HARNESS_VERIFY_MODE controls which checks to run:
+#   static — linters, type checks, static analysis only
+#   test   — tests only
+#   all    — both static and test (default, backward-compatible)
+HARNESS_VERIFY_MODE="${HARNESS_VERIFY_MODE:-all}"
+export HARNESS_VERIFY_MODE
+
 mkdir -p .harness/state .harness/logs docs/evidence
 
 ts="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
@@ -19,6 +26,7 @@ status_file=".harness/state/verify-exit-code"
 
   echo "# Verification run"
   echo "- Timestamp: $ts"
+  echo "- Mode: $HARNESS_VERIFY_MODE"
   echo ""
 
   if [ -x ./scripts/verify.local.sh ]; then

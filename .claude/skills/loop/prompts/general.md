@@ -20,7 +20,10 @@ Then run `git status` and `git log --oneline -5` to understand the current state
 Each iteration must:
 1. Pick ONE small, concrete next step based on progress.log
 2. Implement or investigate that step
-3. Verify the change works (run tests, linters, or `./scripts/run-verify.sh`)
+3. Verify the change works:
+   - Static analysis: `./scripts/run-static-verify.sh` (linters, type checks)
+   - Tests: `./scripts/run-test.sh` (unit, integration tests)
+   - All checks: `./scripts/run-verify.sh` (both static and tests, default)
 4. Append a summary to `.harness/state/loop/progress.log`:
    ```
    ## Iteration N — <timestamp>

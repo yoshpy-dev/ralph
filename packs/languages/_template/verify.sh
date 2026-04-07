@@ -1,6 +1,26 @@
 #!/usr/bin/env sh
 set -eu
 
-echo "Customize packs/languages/__LANGUAGE__/verify.sh for your stack."
-echo "This starter exits non-zero so you do not mistake a placeholder for a real verifier."
-exit 2
+# HARNESS_VERIFY_MODE is set by the caller (run-verify.sh).
+# Supported values: static, test, all (default).
+mode="${HARNESS_VERIFY_MODE:-all}"
+
+run_static() {
+  echo "TODO: Add linters, type checks, and static analysis for __LANGUAGE__."
+  return 2
+}
+
+run_tests() {
+  echo "TODO: Add test runner for __LANGUAGE__."
+  return 2
+}
+
+case "$mode" in
+  static) run_static ;;
+  test)   run_tests ;;
+  all)    run_static && run_tests ;;
+  *)
+    echo "Unknown HARNESS_VERIFY_MODE: $mode" >&2
+    exit 2
+    ;;
+esac

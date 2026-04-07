@@ -8,14 +8,31 @@ Work from the active plan, not from memory alone.
 
 0. Confirm you are on a feature branch (not main/master). If not, inform the user to run /plan first.
 1. Read the current active plan in `docs/plans/active/`.
-2. Confirm acceptance criteria and verification strategy before editing code.
+2. Confirm acceptance criteria, verify plan, and test plan before editing code.
 3. Implement in small slices that can be reviewed and verified independently.
 4. Update the plan's progress checklist while working.
 5. If the task splits cleanly, delegate focused research or review to subagents.
 6. If repeated failures occur, reduce scope, inspect evidence, and revise the plan instead of thrashing.
 7. Keep docs, contracts, and tests aligned with behavior changes.
 8. Before presenting completion, run `./scripts/run-verify.sh` or equivalent deterministic checks.
-9. After criteria met, proceed to /review, /verify, then /pr.
+9. After criteria met, proceed to /review, /verify, /test, then /pr.
+
+## Scope discipline
+
+- Work only on items listed in the plan's scope. If you discover work outside scope, record it in the plan's open questions or tech-debt, do not implement it.
+- Each slice should map to one or more acceptance criteria. If a slice does not advance any criterion, question whether it belongs.
+
+## Plan drift detection
+
+- Before each major slice, re-read the plan to confirm alignment.
+- If your implementation diverges from the plan (new files, changed interfaces, different approach), update the plan FIRST with a deviation note before continuing.
+- Never silently drift. The plan is the contract.
+
+## Uncertainty management
+
+- If you encounter ambiguity that the plan does not address, check repo context and subagents first (anti-bottleneck).
+- If still uncertain, record the uncertainty in the plan's open questions and make the smallest safe choice.
+- Do not make large irreversible decisions under uncertainty — flag them.
 
 ## Completion gate
 

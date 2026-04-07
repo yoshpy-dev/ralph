@@ -1,4 +1,4 @@
-# Review report: __TITLE__
+# Self-review report: __TITLE__
 
 - Date:
 - Plan:
@@ -9,12 +9,13 @@
 
 ## Findings
 
+<!-- Area recommended values: naming, readability, unnecessary-change, typo,
+     null-safety, debug-code, secrets, exception-handling, security, maintainability -->
+
 | Severity | Area | Finding | Evidence | Recommendation |
 | --- | --- | --- | --- | --- |
 
 ## Positive notes
-
-## Coverage gaps
 
 ## Tech debt identified
 

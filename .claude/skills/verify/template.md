@@ -6,9 +6,19 @@
 - Scope:
 - Evidence: `docs/evidence/verify-<date>-<slug>.log`
 
-## Deterministic checks run
+## Spec compliance
+
+| Acceptance criterion | Status | Evidence |
+| --- | --- | --- |
+
+## Static analysis
 
 | Command | Result | Notes |
+| --- | --- | --- |
+
+## Documentation drift
+
+| Doc / contract | In sync? | Notes |
 | --- | --- | --- |
 
 ## Observational checks

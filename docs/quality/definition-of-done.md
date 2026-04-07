@@ -6,8 +6,9 @@ A task is done only when all applicable items are satisfied.
 
 - [ ] Active plan exists or was explicitly deemed unnecessary
 - [ ] Acceptance criteria were addressed
-- [ ] Verification was run and recorded
-- [ ] Review artifact exists
+- [ ] Self-review artifact exists (diff quality)
+- [ ] Verification was run and recorded (spec compliance + static analysis)
+- [ ] Test artifact exists (behavioral tests pass)
 - [ ] Docs and contracts were updated if behavior changed
 - [ ] Remaining gaps are explicit
 - [ ] PR created via /pr skill (includes plan archival and hand-off)

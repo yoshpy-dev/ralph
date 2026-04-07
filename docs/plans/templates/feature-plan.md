@@ -25,10 +25,19 @@
 
 1.
 
-## Verification strategy
+## Verify plan
 
-- Deterministic checks:
-- Manual or observational checks:
+- Static analysis checks:
+- Spec compliance criteria to confirm:
+- Documentation drift to check:
+- Evidence to capture:
+
+## Test plan
+
+- Unit tests:
+- Integration tests:
+- Regression tests:
+- Edge cases:
 - Evidence to capture:
 
 ## Risks and mitigations
@@ -44,4 +53,5 @@
 - [ ] Implementation started
 - [ ] Review artifact created
 - [ ] Verification artifact created
+- [ ] Test artifact created
 - [ ] PR created

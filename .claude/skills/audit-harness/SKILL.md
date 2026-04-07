@@ -9,9 +9,9 @@ Audit the harness, not the product code alone.
 
 - `AGENTS.md` and `CLAUDE.md`
 - `.claude/rules/`
-- `.claude/skills/`
+- `.claude/skills/` (including `/test` skill)
 - `.claude/hooks/`
-- `scripts/run-verify.sh`
+- `scripts/run-verify.sh`, `scripts/run-static-verify.sh`, `scripts/run-test.sh`
 - `packs/languages/`
 - CI and report templates
 
@@ -23,12 +23,13 @@ Audit the harness, not the product code alone.
 - Are there missing language packs or pack-specific verifiers?
 - Are reports and plans actually helping, or only adding ceremony?
 - Is the harness complexity still justified by the current task and model quality?
+- Do `/review`, `/verify`, and `/test` have clear non-overlapping responsibilities?
 
 ## Quality gate alignment
 
 Check whether `docs/quality/` still matches reality:
 
-- Does `docs/quality/definition-of-done.md` reflect the actual completion workflow? Compare against `/work`, `/review`, and `/verify` skill steps.
+- Does `docs/quality/definition-of-done.md` reflect the actual completion workflow? Compare against `/work`, `/review`, `/verify`, `/test`, and `/pr` skill steps.
 - Does `docs/quality/quality-gates.md` list the verifiers and CI checks that actually exist in `scripts/` and `.github/workflows/`?
 - Are there new verification tools, linters, or test frameworks in use that are not mentioned in the quality gates?
 - Are there gates listed that no longer apply or have been removed?

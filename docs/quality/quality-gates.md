@@ -22,7 +22,9 @@ Use these in CI or later-stage review:
 
 ### Must pass locally before "done"
 
-- `./scripts/run-verify.sh`
+- `./scripts/run-verify.sh` (all checks, backward-compatible)
+- `./scripts/run-static-verify.sh` (static analysis only — used by /verify)
+- `./scripts/run-test.sh` (tests only — used by /test)
 - project-specific local checks
 - plan and docs sync if behavior changed
 

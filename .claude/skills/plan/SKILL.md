@@ -28,7 +28,8 @@ Create or update a plan in `docs/plans/active/`.
    - affected files or systems
    - acceptance criteria
    - implementation outline
-   - verification strategy
+   - verify plan (static analysis checks, spec compliance criteria, documentation drift checks, evidence to capture)
+   - test plan (unit tests, integration tests, regression tests, edge cases, evidence to capture)
    - risk register
    - rollout or rollback notes
    - evidence targets

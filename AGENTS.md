@@ -22,10 +22,11 @@ Build coding-agent workflows that are:
 1. Explore
 2. Plan (manual — creates branch)
 3. Work (auto)
-4. Review (auto)
-5. Verify (auto)
-6. PR (auto — includes hand-off)
-7. CI verify + human merge
+4. Self-review (auto — diff quality)
+5. Verify (auto — spec compliance + static analysis)
+6. Test (auto — behavioral tests)
+7. PR (auto — includes hand-off)
+8. CI verify + human merge
 
 ## Source of truth
 
@@ -38,7 +39,7 @@ Build coding-agent workflows that are:
 
 - `docs/plans/active/` — current plans
 - `docs/plans/archive/` — completed plans
-- `docs/reports/` — review, verify, walkthrough artifacts
+- `docs/reports/` — review, verify, test, walkthrough artifacts
 - `docs/quality/` — definition of done and quality gates
 - `.claude/rules/` — path-scoped guidance
 - `.claude/skills/` — on-demand workflows
@@ -55,7 +56,8 @@ Every non-trivial task should have:
 - scope and non-goals
 - affected files or modules
 - acceptance criteria
-- verification strategy
+- verify plan (static analysis, spec compliance, doc drift)
+- test plan (unit, integration, regression, edge cases)
 - risk register
 - rollout or rollback note
 - evidence targets
@@ -63,7 +65,7 @@ Every non-trivial task should have:
 ## Review contract
 
 Reviews should produce artifacts, not only chat output:
-- findings with severity
+- findings with severity (diff quality only)
 - evidence
 - merge or no-merge recommendation
 - follow-ups
@@ -72,13 +74,25 @@ Reviews should produce artifacts, not only chat output:
 ## Verification contract
 
 Prefer this order:
-1. tests
-2. linters and type checks
-3. targeted runtime commands
-4. screenshots, logs, traces, or metrics
-5. structured manual walkthrough
+1. spec compliance check against acceptance criteria
+2. linters and type checks (static analysis)
+3. documentation drift check
+4. targeted runtime commands
+5. screenshots, logs, traces, or metrics
+6. structured manual walkthrough
 
 Never say "done" without saying what was verified and what remains unverified.
+
+## Test contract
+
+Tests should produce artifacts:
+- test execution results with pass/fail counts
+- coverage metrics
+- failure analysis with root causes
+- regression check results
+- explicit test gaps
+
+Tests must pass before PR creation.
 
 ## Hard rules
 
