@@ -31,7 +31,7 @@ This scaffold therefore chooses a **hybrid default**:
 | Claude-native workflow layering | Use CLAUDE.md, rules, skills, subagents, hooks, and MCP for layered control | Native to Claude Code, flexible, strong progressive disclosure story | Easy to overbuild or create routing conflicts | Claude Code primary workflow | core control plane of this scaffold |
 | Skill orchestration and description tuning | Treat SKILL.md as an orchestration layer, use support files and scripts, tune descriptions, audit routing quality | Great for reusable workflows, scales specialized behavior | Description conflicts and trigger drift can appear | Mature Claude Code setups with many workflows | workflow skills, support templates, harness audit skill |
 | Runtime-enforced harness plugin | Guardrails on the execution path, stage-gated workflow, evidence pack, hook-heavy safety model | Strong protection and repeatability | More moving parts, can become heavy for simple repos | Teams or repos with strong safety and review needs | minimal runtime hooks, explicit reports, staged loop |
-| Continuous loop / Ralph style | Keep the agent iterating continuously, often with a while loop and persistent task file | High autonomy, strong for greenfield exploration | Needs very careful tuning; can wander in brownfield work | greenfield, event-consistency-friendly tasks | idea of persistent plan/spec files, not the default runtime |
+| Continuous loop / Ralph style | Keep the agent iterating continuously, often with a while loop and persistent task file | High autonomy, strong for greenfield exploration | Needs very careful tuning; can wander in brownfield work | greenfield, event-consistency-friendly tasks | `/loop` skill, `ralph-loop.sh` orchestrator, task-specific prompt templates, stuck detection, iteration limits |
 
 ## Trade-offs that matter most
 
@@ -95,6 +95,12 @@ This scaffold therefore chooses a **hybrid default**:
 
 6. **Optional escalation**
    - Worktrees, teams, evaluator loops, and external observability are recipes, not defaults
+
+7. **Autonomous iteration via Ralph Loop**
+   - `/loop` skill initializes a self-contained loop session
+   - Task-specific prompt templates (general, refactor, test-coverage, bugfix, docs, migration)
+   - Safety rails: iteration limits, stuck detection, verification integration
+   - File-system memory (progress.log) bridges fresh-context invocations
 
 ## What this scaffold intentionally does not do by default
 

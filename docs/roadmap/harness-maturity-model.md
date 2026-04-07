@@ -31,6 +31,7 @@
 
 ## Level 5: Frontier orchestration
 - evaluator loops
+- Ralph Loop for autonomous multi-iteration work (`/loop`)
 - agent teams where justified
 - richer logs, traces, browser automation
 - systematic harness audits and simplification passes

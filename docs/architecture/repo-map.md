@@ -23,14 +23,27 @@
 - `docs/tech-debt/`: known debt and follow-ups
 - `docs/evidence/`: what counts as evidence
 
+## Skills
+
+- `.claude/skills/plan/`: create plans and feature branches (manual trigger)
+- `.claude/skills/work/`: execute plans (auto)
+- `.claude/skills/review/`: produce review artifacts (auto)
+- `.claude/skills/verify/`: run deterministic verification (auto)
+- `.claude/skills/pr/`: create PRs, archive plans, hand off (auto)
+- `.claude/skills/loop/`: Ralph Loop autonomous iteration (auto)
+- `.claude/skills/sync-docs/`: documentation sync (auto)
+- `.claude/skills/audit-harness/`: harness consistency audit (auto)
+
 ## Extensions
 
 - `packs/languages/`: stack-specific rules and verification
-- `scripts/`: bootstrap, plan creation, verification, status
+- `scripts/`: bootstrap, plan creation, verification, status, Ralph Loop orchestration
 - `examples/`: testing prompts and examples
-- `.github/workflows/`: outer loop checks
+- `.github/workflows/`: CI checks (verify.yml, check-template.yml)
 
 ## Runtime state
 
 - `.harness/state/`: transient markers and summaries
+- `.harness/state/loop/`: Ralph Loop state (PROMPT.md, progress.log, iteration logs)
+- `.harness/state/loop-archive/`: archived loop sessions
 - `.harness/logs/`: local logs

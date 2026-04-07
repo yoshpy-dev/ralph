@@ -10,11 +10,13 @@ A task is done only when all applicable items are satisfied.
 - [ ] Review artifact exists
 - [ ] Docs and contracts were updated if behavior changed
 - [ ] Remaining gaps are explicit
+- [ ] PR created via /pr skill (includes plan archival and hand-off)
+- [ ] CI verify passes on the PR
 
 ## For risky or broad changes
 
 Add:
-- [ ] Walkthrough note for human comprehension
+- [ ] Walkthrough included in PR or `docs/reports/`
 - [ ] Rollback note or recovery path
 - [ ] Known follow-ups or tech debt recorded
 

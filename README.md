@@ -95,33 +95,40 @@ The default philosophy here is:
 
 ## Operating loop
 
-This scaffold assumes the following default loop:
+This scaffold assumes the following default loop. Only `/plan` is a manual trigger; all other steps are auto-invoked.
 
 1. **Explore**
    - Read relevant code, docs, rules, and open plans
    - Decide whether the task is small enough to stay single-session
 
-2. **Plan**
+2. **Plan** (manual — `/plan`)
    - Create or refresh a file-backed plan in `docs/plans/active/`
    - Define acceptance criteria, contracts, risks, and verification
+   - Optionally link a GitHub issue for context pre-fill
+   - Create a feature branch (`<type>/<issue>/<slug>` or `<type>/<slug>`)
 
-3. **Work**
+3. **Work** (auto)
    - Implement in small coherent slices
    - Update plan progress as you go
    - Keep evidence and docs aligned with code changes
 
-4. **Review**
+4. **Review** (auto)
    - Produce a written review artifact, not just a verbal "looks good"
    - Prefer read-only reviewer agents for audit tasks
 
-5. **Verify**
+5. **Verify** (auto)
    - Run deterministic checks first
    - Record verification results in `docs/reports/`
    - Note any remaining coverage gaps explicitly
 
-6. **Hand off**
-   - Provide a concise walkthrough when the diff is large or subtle
+6. **PR** (auto — `/pr`)
+   - Create a pull request with structured summary
    - Archive finished plans from `active/` to `archive/`
+   - Include walkthrough for large diffs
+
+7. **CI + Human merge**
+   - `verify.yml` runs `run-verify.sh` on the PR
+   - Human reviews and merges
 
 ## Minimal vs advanced profiles
 
@@ -159,6 +166,24 @@ Then wire it into:
 - `packs/languages/<name>/verify.sh`
 - `.claude/rules/<name>.md`
 - project build/test/tooling
+
+## Ralph Loop (autonomous iteration)
+
+For tasks that benefit from sustained autonomous work, the Ralph Loop runs `claude -p` in a shell loop with file-system memory.
+
+```sh
+# Initialize a loop session
+./scripts/ralph-loop-init.sh general "Implement user authentication"
+
+# Run it
+./scripts/ralph-loop.sh --verify --max-iterations 10
+```
+
+Or use the `/loop` skill inside Claude Code for interactive setup.
+
+Task-specific templates are available for: general, refactor, test-coverage, bugfix, docs, and migration work. Safety rails include iteration limits, stuck detection (3 consecutive no-change iterations), and optional verification after each iteration.
+
+See `docs/recipes/ralph-loop.md` for the full guide.
 
 ## Portability model
 

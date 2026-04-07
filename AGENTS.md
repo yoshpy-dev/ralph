@@ -20,11 +20,12 @@ Build coding-agent workflows that are:
 ## Primary loop
 
 1. Explore
-2. Plan
-3. Work
-4. Review
-5. Verify
-6. Hand off
+2. Plan (manual — creates branch)
+3. Work (auto)
+4. Review (auto)
+5. Verify (auto)
+6. PR (auto — includes hand-off)
+7. CI verify + human merge
 
 ## Source of truth
 

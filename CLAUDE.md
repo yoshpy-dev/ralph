@@ -6,8 +6,10 @@ Use this file only for Claude-specific guidance that must be always-on.
 
 ## Default behavior
 
-- Use `/plan` before risky, ambiguous, or multi-file work.
-- Use `/review` and `/verify` before presenting a task as complete.
+- `/plan` is the only manual-trigger skill. All others (work, review, verify, pr, sync-docs, audit-harness, loop) are auto-invoked.
+- Use `/plan` before risky, ambiguous, or multi-file work. It creates the branch.
+- After /work, proceed through /review, /verify, then /pr automatically.
+- `/pr` creates the pull request, archives the plan, and completes the hand-off. A task is "done" when the PR is created.
 - Prefer `.claude/rules/` for topic or path-specific guidance.
 - Prefer `.claude/skills/` for workflows and reusable playbooks.
 - Use `planner`, `reviewer`, `verifier`, and `doc-maintainer` subagents when they clearly reduce context pressure or improve auditability.
