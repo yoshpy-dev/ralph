@@ -33,7 +33,7 @@ Run tests and write a report to `docs/reports/`.
 ## What /test does NOT do
 
 - **Static analysis**: That is the responsibility of `/verify`.
-- **Diff quality**: That is the responsibility of `/review`.
+- **Diff quality**: That is the responsibility of `/self-review`.
 - **Spec compliance**: That is the responsibility of `/verify`.
 
 ## Output

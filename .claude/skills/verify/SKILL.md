@@ -1,6 +1,6 @@
 ---
 name: verify
-description: Verify spec compliance and run static analysis for a change. Checks acceptance criteria, documentation drift, linters, and type checks. Does NOT run tests — that is /test. Invoke automatically after /review completes.
+description: Verify spec compliance and run static analysis for a change. Checks acceptance criteria, documentation drift, linters, and type checks. Does NOT run tests — that is /test. Invoke automatically after /self-review completes.
 allowed-tools: Read, Grep, Glob, Bash, Write
 ---
 Verify the current work against the plan's acceptance criteria and run static analysis.
@@ -23,7 +23,7 @@ Verify the current work against the plan's acceptance criteria and run static an
 ## What /verify does NOT do
 
 - **Tests**: Running tests is the responsibility of `/test`. Do not run `run-test.sh` here.
-- **Diff quality**: That is the responsibility of `/review`.
+- **Diff quality**: That is the responsibility of `/self-review`.
 
 ## Output
 

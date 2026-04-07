@@ -126,10 +126,11 @@ Terminal: ./scripts/ralph-loop.sh --verify
   ↓
 Return to Claude Code
   ↓
-/review  →  Self-review the loop's diff
-/verify  →  Spec compliance + static analysis
-/test    →  Run behavioral tests
-/pr      →  Create PR, archive plan
+/self-review    →  Self-review the loop's diff
+/verify        →  Spec compliance + static analysis
+/test          →  Run behavioral tests
+/codex-review  →  Cross-model second opinion (optional)
+/pr            →  Create PR, archive plan
 ```
 
 ## Tips

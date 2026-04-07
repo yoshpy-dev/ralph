@@ -20,13 +20,14 @@ Build coding-agent workflows that are:
 ## Primary loop
 
 1. Explore
-2. Plan (manual — creates plan, selects flow)
+2. Plan (manual — creates plan, selects flow) [+ optional Codex plan advisory]
 3. Work (auto — creates branch) or Loop (auto — creates worktree)
-4. Self-review (auto — diff quality)
+4. Self-review (auto — /self-review)
 5. Verify (auto — spec compliance + static analysis)
 6. Test (auto — behavioral tests)
-7. PR (auto — includes hand-off)
-8. CI verify + human merge
+7. Codex review (auto, optional — cross-model second opinion)
+8. PR (auto — includes hand-off)
+9. CI verify + human merge
 
 ## Source of truth
 
@@ -39,7 +40,7 @@ Build coding-agent workflows that are:
 
 - `docs/plans/active/` — current plans
 - `docs/plans/archive/` — completed plans
-- `docs/reports/` — review, verify, test, walkthrough artifacts
+- `docs/reports/` — self-review, verify, test, walkthrough artifacts
 - `docs/quality/` — definition of done and quality gates
 - `.claude/rules/` — path-scoped guidance
 - `.claude/skills/` — on-demand workflows

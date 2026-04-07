@@ -6,7 +6,7 @@ This repository is intentionally designed as a **map, not a manual**:
 - `AGENTS.md` is the vendor-neutral map for any coding agent.
 - `CLAUDE.md` imports `AGENTS.md` and adds Claude Code specific guidance.
 - `.claude/rules/` keeps conditional guidance out of the always-on context.
-- `.claude/skills/` provides on-demand workflows for plan, work, review, verify, and harness auditing.
+- `.claude/skills/` provides on-demand workflows for plan, work, self-review, verify, and harness auditing.
 - `.claude/hooks/` adds deterministic runtime guardrails where instructions alone are not enough.
 - `packs/languages/` provides opt-in language specializations without hard-coding the core scaffold to one stack.
 
@@ -82,7 +82,7 @@ The default philosophy here is:
    ```
 
 5. In Claude Code, follow the loop:
-   - `/plan` → `/work` (or `/loop`) → `/review` → `/verify` → `/test` → `/pr`
+   - `/plan` → `/work` (or `/loop`) → `/self-review` → `/verify` → `/test` → `/codex-review` (optional) → `/pr`
 
 6. Before claiming a task is done, run:
 
@@ -108,7 +108,7 @@ This scaffold assumes the following default loop. Only `/plan` is a manual trigg
    - `/work`: creates a branch (`git checkout -b`) and implements interactively in Claude Code
    - `/loop`: creates a Git Worktree and sets up autonomous iteration via `claude -p`
 
-4. **Self-review** (auto — `/review`)
+4. **Self-review** (auto — `/self-review`)
    - Produce a written review artifact (diff quality only)
    - Prefer read-only reviewer agents for audit tasks
 
@@ -121,12 +121,17 @@ This scaffold assumes the following default loop. Only `/plan` is a manual trigg
    - Run behavioral tests (unit, integration, regression)
    - Tests must pass before PR creation
 
-7. **PR** (auto — `/pr`)
+7. **Codex review** (auto, optional — `/codex-review`)
+   - Cross-model second opinion on the diff using Codex CLI
+   - Silently skipped if Codex is unavailable
+   - Findings are advisory — user decides whether to act
+
+8. **PR** (auto — `/pr`)
    - Create a pull request with structured summary
    - Archive finished plans from `active/` to `archive/`
    - Include walkthrough for large diffs
 
-8. **CI + Human merge**
+9. **CI + Human merge**
    - `verify.yml` runs `run-verify.sh` on the PR
    - Human reviews and merges
 
@@ -200,7 +205,7 @@ That gives you a base you can keep if you later add Codex, Gemini CLI, or anothe
 See `docs/roadmap/harness-maturity-model.md`, but the short version is:
 
 1. Map + verify
-2. Plan/work/review/verify skills
+2. Plan/work/self-review/verify skills
 3. Deterministic hooks
 4. Path-scoped rules and subagents
 5. Worktrees and agent teams for genuinely parallel tasks

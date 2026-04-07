@@ -20,9 +20,9 @@
 
 ## 検証結果
 
-<!-- /review と /verify の要約。レポートへのリンク -->
+<!-- /self-review と /verify の要約。レポートへのリンク -->
 
-- Self-review: `docs/reports/review-<date>-<slug>.md`
+- Self-review: `docs/reports/self-review-<date>-<slug>.md`
 - Verify: `docs/reports/verify-<date>-<slug>.md`
 
 ## テスト結果

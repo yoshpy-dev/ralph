@@ -18,7 +18,7 @@
 
 - `docs/plans/active/`: in-flight plans
 - `docs/plans/archive/`: completed plans
-- `docs/reports/`: review, verify, and walkthrough reports
+- `docs/reports/`: self-review, verify, test, and walkthrough reports
 - `docs/quality/`: definition of done and gates
 - `docs/tech-debt/`: known debt and follow-ups
 - `docs/evidence/`: what counts as evidence
@@ -28,9 +28,10 @@
 - `.claude/skills/plan/`: create plans, select execution flow (manual trigger)
 - `.claude/skills/work/`: create branch and execute plans interactively (auto)
 - `.claude/skills/loop/`: create worktree and set up Ralph Loop autonomous iteration (auto)
-- `.claude/skills/review/`: self-review diff quality (auto)
+- `.claude/skills/self-review/`: self-review diff quality (auto)
 - `.claude/skills/verify/`: spec compliance and static analysis (auto)
 - `.claude/skills/test/`: behavioral tests (auto)
+- `.claude/skills/codex-review/`: cross-model second opinion via Codex (auto, optional)
 - `.claude/skills/pr/`: create PRs, archive plans, hand off (auto)
 - `.claude/skills/sync-docs/`: documentation sync (auto)
 - `.claude/skills/audit-harness/`: harness consistency audit (auto)
@@ -39,7 +40,7 @@
 ## Extensions
 
 - `packs/languages/`: stack-specific rules and verification
-- `scripts/`: bootstrap, plan creation, verification, status, Ralph Loop orchestration
+- `scripts/`: bootstrap, plan creation, verification, status, Ralph Loop orchestration, Codex availability check
 - `examples/`: testing prompts and examples
 - `.github/workflows/`: CI checks (verify.yml, check-template.yml)
 

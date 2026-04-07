@@ -90,7 +90,7 @@ After approval, print the run command:
 When the user returns after running the loop:
 1. Read `.harness/state/loop/status` to check outcome
 2. Read `.harness/state/loop/progress.log` for what happened
-3. Suggest `/review` and `/verify` to validate the results
+3. Suggest the post-implementation chain: `/self-review` → `/verify` → `/test` → `/codex-review` (optional) → `/pr`
 4. If a worktree was created, ask the user whether to keep or remove it (`git worktree remove .claude/worktrees/<slug>`)
 
 ## Anti-bottleneck

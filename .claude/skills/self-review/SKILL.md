@@ -1,5 +1,5 @@
 ---
-name: review
+name: self-review
 description: Self-review the diff for code quality before formal verification. Covers naming, readability, unnecessary changes, typos, null safety, debug code, secrets, exception handling, security, and maintainability. Invoke automatically after /work completes or when significant code changes are staged.
 allowed-tools: Read, Grep, Glob, Bash, Write
 ---
@@ -32,7 +32,7 @@ Evaluate the diff for:
 
 ## Output
 
-- `docs/reports/review-<date>-<slug>.md`
+- `docs/reports/self-review-<date>-<slug>.md`
 - severity-tagged findings
 - merge or no-merge recommendation
 - tech-debt entries in `docs/tech-debt/` if deferred work was identified

@@ -1,6 +1,6 @@
 ---
 name: pr
-description: Create a pull request after review, verify, and test pass. Handles branch push, PR creation, plan archiving, and hand-off. Invoke automatically when review, verify, and test reports all exist with passing verdicts.
+description: Create a pull request after self-review, verify, and test pass. Handles branch push, PR creation, plan archiving, and hand-off. Invoke automatically after /codex-review completes (or is skipped), when self-review, verify, and test reports all exist with passing verdicts.
 allowed-tools: Read, Grep, Glob, Bash, Write
 ---
 Create a PR to hand off completed work for human review and merge.
@@ -9,7 +9,7 @@ Create a PR to hand off completed work for human review and merge.
 
 Before creating a PR, confirm ALL of the following:
 
-1. A review report exists in `docs/reports/` with no CRITICAL findings.
+1. A self-review report exists in `docs/reports/` with no CRITICAL findings.
 2. A verify report exists in `docs/reports/` with pass or partial-pass verdict.
 3. A test report exists in `docs/reports/` with pass verdict. **If tests failed, do NOT create the PR.**
 4. Raw evidence is saved in `docs/evidence/`.

@@ -4,7 +4,7 @@ description: Self-review specialist for diff quality — naming, readability, un
 tools: Read, Grep, Glob, Bash, Write, Edit
 model: sonnet
 skills:
-  - review
+  - self-review
 memory: project
 ---
 You are the self-review specialist.
