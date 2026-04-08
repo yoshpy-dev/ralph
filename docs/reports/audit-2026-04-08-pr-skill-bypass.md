@@ -82,12 +82,16 @@ f. **Invoke /pr via the Skill tool** — do NOT run `gh pr create` directly.
 
 `settings.local.json` に `settings.advanced.example.json` の hooks 設定を追加。これにより `pre_bash_guard.sh`（`gh pr create` deny 含む）が有効化された。
 
-### 構造的課題
+### 構造的修正
 
-`settings.local.json` は gitignore 対象のため、新しいクローンでは再度セットアップが必要。`settings.advanced.example.json` からコピーする手順が README やセットアップスクリプトで案内されるべき。
+`settings.json` を gitignore から除外し、hooks 設定を含めて git 管理下に置いた。これにより:
+- クローン直後から全フックが有効
+- `settings.local.json`（gitignore）は個人の permissions オーバーライド専用
+- 旧 example ファイル（`settings.minimal.example.json`、`settings.advanced.example.json`）は削除
+- `bootstrap.sh` から settings コピー処理を削除（不要になったため）
 
 ## 残存リスク
 
 - `/sync-docs` と `/codex-review` のスキップは今回のフック追加では防げない（これらは `gh` コマンドではなく Skill tool の呼び忘れ）。ただし `/work` Step 9 の明示化で prose レベルでは対処済み。
 - パイプライン全体の deterministic enforcement（例: 「全レポートが存在しないと /pr が進まない」）は `/pr` SKILL.md の pre-checks で部分的にカバーされている。
-- 新しいクローンではフックが未有効化の状態になる。初回セットアップで `settings.advanced.example.json` → `settings.local.json` コピーを案内する仕組みが必要。
+- `settings.json` の git 管理化により、新規クローンでのフック未有効化問題は解消済み。
