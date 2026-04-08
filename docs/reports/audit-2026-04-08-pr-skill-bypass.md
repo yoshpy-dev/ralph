@@ -72,7 +72,22 @@ f. **Invoke /pr via the Skill tool** — do NOT run `gh pr create` directly.
 | L3: Template (content) | `template.md` が全日本語見出し | スキル経由なら品質保証 |
 | L4: Skill (pre-check) | `/pr` SKILL.md が「日本語で書け」と明記 | 最終防衛線 |
 
+## 追加発見: フック未有効化の構造問題
+
+### 問題
+
+`.claude/hooks/` にスクリプトは存在するが、`.claude/settings.local.json`（gitignore 対象）に hooks 設定がなかったため、**全フックが死んでいた**。`settings.advanced.example.json` に完全な設定例があるが、実際にコピーされていなかった。
+
+### 修正
+
+`settings.local.json` に `settings.advanced.example.json` の hooks 設定を追加。これにより `pre_bash_guard.sh`（`gh pr create` deny 含む）が有効化された。
+
+### 構造的課題
+
+`settings.local.json` は gitignore 対象のため、新しいクローンでは再度セットアップが必要。`settings.advanced.example.json` からコピーする手順が README やセットアップスクリプトで案内されるべき。
+
 ## 残存リスク
 
 - `/sync-docs` と `/codex-review` のスキップは今回のフック追加では防げない（これらは `gh` コマンドではなく Skill tool の呼び忘れ）。ただし `/work` Step 9 の明示化で prose レベルでは対処済み。
 - パイプライン全体の deterministic enforcement（例: 「全レポートが存在しないと /pr が進まない」）は `/pr` SKILL.md の pre-checks で部分的にカバーされている。
+- 新しいクローンではフックが未有効化の状態になる。初回セットアップで `settings.advanced.example.json` → `settings.local.json` コピーを案内する仕組みが必要。
