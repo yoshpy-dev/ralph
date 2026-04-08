@@ -1,7 +1,7 @@
 ---
 name: planner
 description: Turn rough requests into scoped, verifiable implementation plans with risks, contracts, and evidence targets.
-tools: Read, Grep, Glob, Write
+tools: Read, Grep, Glob, Write, Edit, Bash, AskUserQuestion
 model: sonnet
 skills:
   - plan
