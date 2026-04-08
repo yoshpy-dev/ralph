@@ -10,20 +10,20 @@ if command -v git >/dev/null 2>&1; then
 fi
 
 {
-  printf '# Session end summary\n\n'
-  printf '- Timestamp: %s\n' "$ts"
-  printf '- Branch: %s\n\n' "$branch"
-  printf '## Git status\n\n'
+  printf '%s\n\n' '# Session end summary'
+  printf '%s\n' "- Timestamp: $ts"
+  printf '%s\n\n' "- Branch: $branch"
+  printf '%s\n\n' '## Git status'
   if command -v git >/dev/null 2>&1; then
     git status --short 2>/dev/null || true
   else
-    printf 'git not available\n'
+    printf '%s\n' 'git not available'
   fi
-  printf '\n## Recent edited files\n\n'
+  printf '\n%s\n\n' '## Recent edited files'
   if [ -f .harness/state/edited-files.log ]; then
     tail -n 20 .harness/state/edited-files.log
   else
-    printf 'No tracked edits in this session.\n'
+    printf '%s\n' 'No tracked edits in this session.'
   fi
 } > .harness/state/session-end.md
 
