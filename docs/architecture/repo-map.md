@@ -12,7 +12,7 @@
 - `.claude/skills/`: on-demand workflows
 - `.claude/agents/`: specialized subagents
 - `.claude/hooks/`: deterministic hook scripts
-- `.claude/settings.*.example.json`: hook profiles
+- `.claude/settings.json`: hook and permission configuration
 
 ## Process artifacts
 

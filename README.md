@@ -33,8 +33,7 @@ The default philosophy here is:
 ├── AGENTS.md
 ├── CLAUDE.md
 ├── .claude/
-│   ├── settings.minimal.example.json
-│   ├── settings.advanced.example.json
+│   ├── settings.json
 │   ├── hooks/
 │   ├── skills/
 │   ├── agents/
@@ -57,34 +56,28 @@ The default philosophy here is:
 
 ## Quick start
 
-1. Copy the minimal hook profile.
-
-   ```sh
-   cp .claude/settings.minimal.example.json .claude/settings.json
-   ```
-
-2. Bootstrap local runtime folders.
+1. Bootstrap local runtime folders.
 
    ```sh
    ./scripts/bootstrap.sh
    ```
 
-3. Edit these files first:
+2. Edit these files first:
    - `AGENTS.md`
    - `CLAUDE.md`
    - `.claude/rules/*.md`
    - `packs/languages/*/verify.sh` or `scripts/verify.local.sh`
 
-4. Create your first plan.
+3. Create your first plan.
 
    ```sh
    ./scripts/new-feature-plan.sh login-form
    ```
 
-5. In Claude Code, follow the loop:
+4. In Claude Code, follow the loop:
    - `/plan` → `/work` (or `/loop`) → `/self-review` → `/verify` → `/test` → `/codex-review` (optional) → `/pr`
 
-6. Before claiming a task is done, run:
+5. Before claiming a task is done, run:
 
    ```sh
    ./scripts/run-verify.sh
@@ -135,21 +128,19 @@ This scaffold assumes the following default loop. Only `/plan` is a manual trigg
    - `verify.yml` runs `run-verify.sh` on the PR
    - Human reviews and merges
 
-## Minimal vs advanced profiles
+## Hook configuration
 
-- `settings.minimal.example.json`
-  - Session start context
-  - Bash guardrails
-  - Edit/write reminders
-  - Failure feedback
-  - Session end summary
+`.claude/settings.json` ships with all hooks pre-configured:
 
-- `settings.advanced.example.json`
-  - Adds prompt-level reminders
-  - Adds compaction checkpoints
-  - Adds instruction-load observability
+- Session start context
+- Prompt-level reminders
+- Bash guardrails
+- Edit/write verification reminders
+- Tool failure feedback
+- Compaction checkpoints
+- Session end summary
 
-Keep the minimal profile first. Only adopt the advanced profile after the base loop is already useful.
+Customize by editing `.claude/settings.json` directly. Use `.claude/settings.local.json` for personal overrides (gitignored).
 
 ## Language packs
 

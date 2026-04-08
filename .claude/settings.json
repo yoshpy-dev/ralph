@@ -53,17 +53,6 @@
         ]
       }
     ],
-    "InstructionsLoaded": [
-      {
-        "matcher": "session_start|nested_traversal|path_glob_match|include|compact",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "./.claude/hooks/instructions_loaded_log.sh"
-          }
-        ]
-      }
-    ],
     "PreToolUse": [
       {
         "matcher": "Bash",
