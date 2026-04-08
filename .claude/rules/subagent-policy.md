@@ -38,6 +38,12 @@ If a subagent fails to execute (tool error, not a review finding), run the corre
 
 `/plan` runs in the main context because it relies heavily on `AskUserQuestion` for user interaction (task type selection, objective confirmation, flow selection, Codex advisory response). Subagent execution would add indirection without benefit. No agent definition exists for this skill.
 
+## Codex triage — always inline
+
+`/codex-review` triage runs in the main context (not delegated to a subagent) because triage accuracy depends on implementation context — knowing *why* the code was written that way, what design decisions were made, what the plan's non-goals are, and what the self-review already addressed. A subagent would lack this context and produce unreliable classifications (more false negatives in DISMISSED, more false positives in ACTION_REQUIRED).
+
+The triage step reads existing artifacts (plan, self-review report, verify report) and produces `docs/reports/codex-triage-<slug>.md`. No new subagent definition is needed.
+
 ## Documentation sync — always delegate
 
 After implementation and before PR creation, run `/sync-docs` via the `doc-maintainer` subagent:

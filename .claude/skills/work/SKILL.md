@@ -30,7 +30,7 @@ Work from the active plan, not from memory alone.
    b. `Task(subagent_type="verifier")` → `/verify` — stop if fail verdict
    c. `Task(subagent_type="tester")` → `/test` — stop if fail verdict
    d. `Task(subagent_type="doc-maintainer")` → `/sync-docs`
-   e. `/codex-review` (optional, inline) → `/pr`
+   e. `/codex-review` (optional, inline — findings are triaged before user presentation) → `/pr`
 
 ## Scope discipline
 
