@@ -34,6 +34,9 @@ case "$command" in
   *"rm -rf "*)
     emit_decision "ask" "Recursive delete requires explicit confirmation."
     ;;
+  *"gh pr create"*)
+    emit_decision "deny" "Do not call 'gh pr create' directly. Use the /pr skill (Skill tool) instead — it enforces the Japanese PR template, pre-checks, and plan archiving."
+    ;;
 esac
 
 exit 0

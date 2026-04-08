@@ -39,12 +39,12 @@
 
 <!-- レビュー時に特に見てほしいポイント、設計判断の背景など -->
 
-## Related
+## 関連リンク
 
-- Plan: `docs/plans/archive/<slug>.md`
+- プラン: `docs/plans/archive/<slug>.md`
 - Issue: #__ISSUE__
 
-## Walkthrough
+## ウォークスルー
 
 <!-- 大きな diff (>500行) の場合: docs/reports/walkthrough-<date>-<slug>.md へのリンク -->
 <!-- 小さな diff の場合: このセクションを削除 -->
