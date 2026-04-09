@@ -49,7 +49,7 @@ When running in pipeline mode, the orchestrator enforces its own gates autonomou
 | Gate | Mechanism | On failure |
 |------|-----------|------------|
 | Preflight probe | `--preflight` checks claude CLI, jq, CLAUDE.md, git | Pipeline blocked |
-| Hook parity check | `check_hook_parity()` emulates hook safety checks | Warning logged |
+| Hook parity check | `run_hook_parity()` emulates hook safety checks | Warning logged |
 | Stuck detection | HEAD commit hash comparison (3 consecutive no-change) | Pipeline aborted |
 | Test pass | `run-test.sh` or `run-verify.sh HARNESS_VERIFY_MODE=test` | Retry Inner Loop |
 | Repair attempt limit | `MAX_REPAIR_ATTEMPTS` (default 5) | Escalate to human |

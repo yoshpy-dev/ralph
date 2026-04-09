@@ -204,7 +204,7 @@
 - [x] Phase 2 implemented (シグナル検出 2層化 + ライフサイクル管理)
 - [x] Phase 3 implemented (PR URL 外部検証)
 - [x] Phase 4 implemented (軽微な不整合修正)
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Review artifact created (docs/reports/self-review-2026-04-09-pipeline-robustness.md)
+- [x] Verification artifact created (docs/reports/verify-2026-04-09-pipeline-robustness.md)
+- [x] Test artifact created (docs/reports/test-2026-04-09-pipeline-robustness.md)
 - [ ] PR updated

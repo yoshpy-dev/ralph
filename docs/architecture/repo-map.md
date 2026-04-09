@@ -49,6 +49,6 @@
 - `.harness/state/`: transient markers and summaries
 - `.harness/state/loop/`: Ralph Loop state (PROMPT.md, progress.log, iteration logs)
 - `.harness/state/loop-archive/`: archived loop sessions
-- `.harness/state/pipeline/`: pipeline mode state (checkpoint.json, phase logs, execution events)
+- `.harness/state/pipeline/`: pipeline mode state (checkpoint.json, phase logs, execution events, `.agent-signal` sidecar, `.pr-url` sidecar)
 - `.harness/state/orchestrator/`: multi-worktree orchestrator state (slice status, PIDs)
 - `.harness/logs/`: local logs

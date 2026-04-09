@@ -198,6 +198,29 @@ Outer Loop (after tests pass):
 
 Pipeline state lives in `.harness/state/pipeline/checkpoint.json`. Use `./scripts/ralph status` to inspect it.
 
+### Agent signal protocol (pipeline mode)
+
+The implementation agent signals completion or abort via two layers, both of which are detected by the orchestrator:
+
+| Layer | Mechanism | Written by |
+|-------|-----------|-----------|
+| Sidecar file | `echo COMPLETE > .harness/state/pipeline/.agent-signal` | Agent (Bash tool) |
+| Marker tag | `<promise>COMPLETE</promise>` in output | Agent (stdout) |
+
+The orchestrator detects ABORT and COMPLETE from either layer. When COMPLETE is detected, verify and test still run before proceeding to the Outer Loop — the signal is not a bypass.
+
+### PR URL detection (pipeline mode)
+
+The orchestrator uses a 3-layer approach to find the PR URL after creation:
+
+1. **gh CLI** — `gh pr list --head <branch>` (external verification, most reliable)
+2. **Sidecar file** — `.harness/state/pipeline/.pr-url` written by the outer agent
+3. **Log grep** — `https://github.com/.*/pull/[0-9]+` pattern in the PR log (legacy fallback)
+
+### JSON output mode (pipeline mode)
+
+When the Claude CLI supports `--output-format json`, the pipeline runs in JSON mode and captures `session_id` for `--resume` continuity across Inner Loop cycles. If JSON mode is not supported, the pipeline falls back to text mode automatically. The preflight probe (`--preflight`) checks JSON support before the pipeline starts.
+
 ### When to choose pipeline mode
 
 - Large-scale features or refactors where you want the full cycle handled autonomously
