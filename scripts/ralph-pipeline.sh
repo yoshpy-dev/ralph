@@ -412,7 +412,7 @@ run_inner_loop() {
 
   run_claude "$_impl_prompt" "$_impl_log" "$_impl_extra"
 
-  # In dry-run mode, simulate COMPLETE signal after first cycle
+  # In dry-run mode, simulate COMPLETE signal (cleared each cycle start)
   if [ "$DRY_RUN" -eq 1 ]; then
     echo "COMPLETE" > "${PIPELINE_DIR}/.agent-signal"
   fi
@@ -703,7 +703,8 @@ PR_PROMPT
   if [ -n "$_pr_url" ]; then
     log "PR created: ${_pr_url}"
     ckpt_update --arg url "$_pr_url" '.pr_created = true | .pr_url = $url | .status = "complete"'
-    report_event "pr-created" "{\"cycle\":${_cycle},\"url\":\"${_pr_url}\"}"
+    _pr_event="$(jq -n --argjson c "$_cycle" --arg u "$_pr_url" '{"cycle":$c,"url":$u}')"
+    report_event "pr-created" "$_pr_event"
   else
     log "PR creation step completed but URL not detected (check log for details)"
     ckpt_update ".status = \"complete\""
