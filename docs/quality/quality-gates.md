@@ -52,6 +52,7 @@ When running in pipeline mode, the orchestrator enforces its own gates autonomou
 | Hook parity check | `run_hook_parity()` emulates hook safety checks | Warning logged |
 | Stuck detection | HEAD commit hash comparison (3 consecutive no-change) | Pipeline aborted |
 | Test pass | `run-test.sh` or `run-verify.sh HARNESS_VERIFY_MODE=test` | Retry Inner Loop |
+| COMPLETE gating | Tests pass + COMPLETE signal required to advance; tests pass without COMPLETE → continue Inner Loop (return 6) | Inner Loop continues |
 | Repair attempt limit | `MAX_REPAIR_ATTEMPTS` (default 5) | Escalate to human |
 
 ### Outer Loop gates

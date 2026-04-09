@@ -207,7 +207,10 @@ The implementation agent signals completion or abort via two layers, both of whi
 | Sidecar file | `echo COMPLETE > .harness/state/pipeline/.agent-signal` | Agent (Bash tool) |
 | Marker tag | `<promise>COMPLETE</promise>` in output | Agent (stdout) |
 
-The orchestrator detects ABORT and COMPLETE from either layer. When COMPLETE is detected, verify and test still run before proceeding to the Outer Loop — the signal is not a bypass.
+The orchestrator detects ABORT and COMPLETE from either layer. Two important rules apply:
+
+1. **Tests passing is not enough**: if tests pass but COMPLETE is not signalled, the Inner Loop continues (the agent gets another cycle to complete remaining work). The pipeline returns `6` internally and increments the inner cycle counter.
+2. **COMPLETE is not a bypass**: when COMPLETE is signalled, verify and test still run before proceeding to the Outer Loop. COMPLETE + tests pass → Outer Loop.
 
 ### PR URL detection (pipeline mode)
 
