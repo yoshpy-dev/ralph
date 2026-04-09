@@ -199,11 +199,11 @@
 
 - [x] Plan reviewed
 - [x] Codex advisory reviewed (6件 → 全件反映)
-- [ ] Branch created
-- [ ] Phase 1 implemented (run_claude JSON 移行 + Preflight 拡張)
-- [ ] Phase 2 implemented (シグナル検出 2層化 + ライフサイクル管理)
-- [ ] Phase 3 implemented (PR URL 外部検証)
-- [ ] Phase 4 implemented (軽微な不整合修正)
+- [x] Branch created (feat/ralph-loop-v2 — 既存ブランチに追加コミット)
+- [x] Phase 1 implemented (run_claude JSON 移行 + Preflight 拡張)
+- [x] Phase 2 implemented (シグナル検出 2層化 + ライフサイクル管理)
+- [x] Phase 3 implemented (PR URL 外部検証)
+- [x] Phase 4 implemented (軽微な不整合修正)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
