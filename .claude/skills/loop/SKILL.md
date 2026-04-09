@@ -87,7 +87,8 @@ After approval, print the run command:
 
 ## After the loop
 
-When the user returns after running the loop:
+**Trigger**: When the user returns to the Claude Code session after running `./scripts/ralph-loop.sh`, detect loop completion by reading `.harness/state/loop/status`. If the file exists (any status), automatically proceed with the post-implementation pipeline below. If the user explicitly mentions the loop is done, proceed even without the status file.
+
 1. Read `.harness/state/loop/status` to check outcome
 2. Read `.harness/state/loop/progress.log` for what happened
 3. Delegate the post-implementation pipeline to subagents per `.claude/rules/subagent-policy.md`:
@@ -95,7 +96,7 @@ When the user returns after running the loop:
    b. `Task(subagent_type="verifier")` → `/verify` — stop if fail verdict
    c. `Task(subagent_type="tester")` → `/test` — stop if fail verdict
    d. `Task(subagent_type="doc-maintainer")` → `/sync-docs`
-   e. `/codex-review` (optional, inline — findings are triaged before user presentation)
+   e. **Invoke `/codex-review` via the Skill tool** (optional, inline — if Codex CLI unavailable, skip to `/pr`)
    f. **Invoke `/pr` via the Skill tool** — do NOT run `gh pr create` directly. The `/pr` skill enforces the Japanese template, pre-checks, and plan archiving.
 4. If a worktree was created, ask the user whether to keep or remove it (`git worktree remove .claude/worktrees/<slug>`)
 

@@ -11,8 +11,9 @@ After implementation completes (`/work` or `/loop`), run the post-implementation
 | 1 | `reviewer` | `/self-review` | Diff quality |
 | 2 | `verifier` | `/verify` | Spec compliance + static analysis |
 | 3 | `tester` | `/test` | Behavioral tests |
+| 4 | `doc-maintainer` | `/sync-docs` | Documentation sync |
 
-Each step runs sequentially (output of one informs the next). Use the Task tool with `subagent_type` matching the agent name.
+Steps 1–3 run sequentially (output of one informs the next). Step 4 runs after tests pass. After step 4, `/codex-review` runs inline (optional), then `/pr`. Use the Task tool with `subagent_type` matching the agent name.
 
 ### Execution
 

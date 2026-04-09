@@ -2,9 +2,10 @@
 name: codex-review
 description: >
   Optional cross-model second opinion on the current diff using Codex.
-  Invoked automatically after /test passes. If Codex CLI is unavailable,
-  silently skips and proceeds to /pr. Findings are triaged by Claude Code
-  using implementation context before presentation to the user.
+  Runs inline in the main context (not delegated as subagent) after /sync-docs
+  completes. If Codex CLI is unavailable, silently skips and proceeds to /pr.
+  Findings are triaged by Claude Code using implementation context before
+  presentation to the user.
 allowed-tools: Read, Grep, Glob, Bash, AskUserQuestion, Write
 ---
 Provide a cross-model second opinion on the current diff before PR creation.

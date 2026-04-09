@@ -35,7 +35,10 @@ if command -v git >/dev/null 2>&1; then
     *)
       if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
         git add -A 2>/dev/null || true
-        git commit -m 'wip: checkpoint before session end' 2>/dev/null || true
+        if ! git commit -m 'wip: checkpoint before session end' 2>/dev/null; then
+          mkdir -p .harness/logs
+          printf '%s WIP commit failed (session_end on branch %s)\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$current_branch" >> .harness/logs/hook-failures.log
+        fi
       fi
       ;;
   esac

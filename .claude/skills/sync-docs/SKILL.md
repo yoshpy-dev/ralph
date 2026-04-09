@@ -1,6 +1,6 @@
 ---
 name: sync-docs
-description: Sync plans, docs, and instruction files after behavior, commands, contracts, or workflows change. Also covers harness-internal consistency after skill, hook, rule, or script changes. Invoke automatically after behavior, workflow, or harness structure changes.
+description: Sync plans, docs, and instruction files after behavior, commands, contracts, or workflows change. Also covers harness-internal consistency after skill, hook, rule, or script changes. Invoked as a delegated subagent task via Task(subagent_type="doc-maintainer") in the post-implementation pipeline, after /test and before /codex-review.
 allowed-tools: Read, Grep, Glob, Write, Edit, Bash
 ---
 Use this skill when implementation or harness structure changed enough that documentation may have drifted.
