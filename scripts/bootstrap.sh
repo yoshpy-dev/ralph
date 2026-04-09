@@ -24,7 +24,31 @@ else
   echo "       This file should be committed to git. Check if it was accidentally removed."
 fi
 
-# --- 4. Run template structure check ---
+# --- 4. Install commit-msg hook ---
+if [ -d .git ]; then
+  hook_src="scripts/commit-msg-guard.sh"
+  hook_dst=".git/hooks/commit-msg"
+  if [ -f "$hook_src" ]; then
+    if [ ! -f "$hook_dst" ]; then
+      cp "$hook_src" "$hook_dst"
+      chmod +x "$hook_dst"
+      echo "[ok] commit-msg hook installed."
+    elif grep -q 'commit-msg-guard' "$hook_dst" 2>/dev/null; then
+      cp "$hook_src" "$hook_dst"
+      chmod +x "$hook_dst"
+      echo "[ok] commit-msg hook updated."
+    else
+      echo "[skip] .git/hooks/commit-msg already exists (not ours). Skipping."
+      echo "       To install manually: cp $hook_src $hook_dst"
+    fi
+  else
+    echo "[warn] $hook_src not found. Skipping commit-msg hook install."
+  fi
+else
+  echo "[skip] Not a git repository. Skipping commit-msg hook install."
+fi
+
+# --- 5. Run template structure check ---
 if [ -x scripts/check-template.sh ]; then
   echo
   echo "--- Running template structure check ---"

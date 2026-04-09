@@ -47,6 +47,27 @@ Before risky or hard-to-reverse operations:
 Create a checkpoint commit first: `chore: checkpoint before <operation>`.
 This is guidance, not enforced by tooling.
 
+## Safe Quoting for Commit Messages
+
+Shell command substitution inside double-quoted `git commit -m "..."` can leak secrets. For example, backticks or `$(...)` inside double quotes are interpreted by the shell, potentially expanding environment variables (API keys, tokens) into the commit message.
+
+**Background:** In the Apache httpd incident, a commit message containing `` `set` `` inside double quotes caused all environment variables to be expanded and published in the commit history.
+
+**Rules:**
+
+- **Multiline messages:** Always use HEREDOC with single-quoted delimiter:
+  ```sh
+  git commit -m "$(cat <<'EOF'
+  feat: add feature
+
+  Details here with `backticks` safely preserved.
+  EOF
+  )"
+  ```
+- **Single-line messages:** Prefer single quotes: `git commit -m 'fix: description'`
+- **Never:** Place backticks or `$(...)` inside double-quoted `-m "..."` arguments
+- **Enforcement:** `pre_bash_guard.sh` blocks dangerous patterns at command time; `commit-msg-guard.sh` scans for leaked secrets at commit time
+
 ## Commit Format
 
 Follow Conventional Commits (see `git-workflow.md`):

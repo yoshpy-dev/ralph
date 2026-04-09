@@ -39,4 +39,19 @@ case "$command" in
     ;;
 esac
 
+# Layer: detect command substitution inside double-quoted git commit -m messages
+# Prevents shell expansion of backticks or $() that could leak env vars / secrets
+case "$command" in
+  *"git commit"*"-m "*)
+    # Extract the part after -m
+    msg_part="${command#*-m }"
+    # Check if message uses double quotes containing backticks or $(...)
+    case "$msg_part" in
+      '"'*'`'*|'"'*'$('*)
+        emit_decision "deny" "コミットメッセージのダブルクォート内にバッククォートまたは \$() を検出しました。シェルのコマンド置換として解釈され、環境変数やシークレットが漏洩する恐れがあります。代わりにシングルクォートまたは HEREDOC (<<'EOF') を使用してください。"
+        ;;
+    esac
+    ;;
+esac
+
 exit 0

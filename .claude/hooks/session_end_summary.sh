@@ -35,7 +35,7 @@ if command -v git >/dev/null 2>&1; then
     *)
       if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
         git add -A 2>/dev/null || true
-        git commit -m "wip: checkpoint before session end" 2>/dev/null || true
+        git commit -m 'wip: checkpoint before session end' 2>/dev/null || true
       fi
       ;;
   esac
