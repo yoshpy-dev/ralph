@@ -14,6 +14,7 @@ __pycache__/
 .claude/settings.local.json
 .claude/agent-memory-local/
 .claude/agent-memory/
+.claude/worktrees/
 .harness/logs/
 .harness/state/
 !.harness/state/.gitkeep

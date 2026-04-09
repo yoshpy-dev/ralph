@@ -28,7 +28,14 @@
       "Bash(gh api:*)",
       "Bash(codex exec:*)",
       "Bash(mkdir:*)",
-      "Bash(chmod:*)"
+      "Bash(chmod:*)",
+      "Bash(rm:*)",
+      "Bash(mv:*)",
+      "Bash(sort:*)",
+      "Bash(tail:*)",
+      "Bash(head:*)",
+      "Bash(sh -n:*)",
+      "Bash(claude:*)"
     ]
   },
   "hooks": {

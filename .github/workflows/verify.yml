@@ -8,5 +8,21 @@ jobs:
       - uses: actions/checkout@v5
       - name: Bootstrap harness
         run: ./scripts/bootstrap.sh
+      - name: Shell syntax check
+        run: |
+          echo "Checking shell script syntax..."
+          fail=0
+          for f in scripts/*.sh; do
+            if ! sh -n "$f" 2>/dev/null; then
+              echo "FAIL: $f"
+              sh -n "$f"
+              fail=1
+            fi
+          done
+          if [ "$fail" -eq 1 ]; then
+            echo "Shell syntax check failed"
+            exit 1
+          fi
+          echo "All shell scripts passed syntax check"
       - name: Run verification
         run: ./scripts/run-verify.sh
