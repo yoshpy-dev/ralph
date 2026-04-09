@@ -399,7 +399,7 @@ Ralph Loop を「実装のみ」から「実装→レビュー→検証→テス
 - [x] Phase 3: マルチエージェント並列実装 (ralph-orchestrator.sh, ralph-loop-plan.md template)
 - [x] Phase 4: CLI ラッパー実装 (scripts/ralph with plan/run/status/abort)
 - [x] ドキュメント更新 (loop/SKILL.md, plan/SKILL.md, subagent-policy.md, CLAUDE.md, AGENTS.md)
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [x] Test artifact created
+- [x] Review artifact created (docs/reports/self-review-2026-04-10-ralph-loop-v2.md)
+- [x] Verification artifact created (docs/reports/verify-2026-04-10-ralph-loop-v2.md)
+- [x] Test artifact created (docs/reports/test-2026-04-10-ralph-loop-v2.md)
 - [ ] PR created

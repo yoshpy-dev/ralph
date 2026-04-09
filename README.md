@@ -71,7 +71,11 @@ The default philosophy here is:
 3. Create your first plan.
 
    ```sh
+   # Standard flow or Ralph Loop single pipeline
    ./scripts/new-feature-plan.sh login-form
+
+   # Ralph Loop parallel slices (directory-based plan)
+   ./scripts/new-ralph-plan.sh login-form N/A 3
    ```
 
 4. In Claude Code, follow the loop:

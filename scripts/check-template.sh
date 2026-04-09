@@ -18,6 +18,7 @@ docs/research/approach-comparison.md
 docs/roadmap/harness-maturity-model.md
 scripts/run-verify.sh
 scripts/archive-plan.sh
+scripts/new-ralph-plan.sh
 "
 
 for file in $required_files; do

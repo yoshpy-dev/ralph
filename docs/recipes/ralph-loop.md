@@ -129,6 +129,8 @@ This means the agent reconstructs context from files each iteration, avoiding st
 
 ## Integration with the operating loop
 
+### Standard mode
+
 ```
 /plan    →  Create plan in docs/plans/active/, select /loop flow
   ↓
@@ -143,6 +145,39 @@ Return to Claude Code
 /test          →  Run behavioral tests
 /codex-review  →  Cross-model second opinion (optional)
 /pr            →  Create PR, archive plan
+```
+
+### Pipeline mode (single)
+
+```
+/plan    →  Create plan in docs/plans/active/, select Ralph Loop single pipeline
+  ↓
+/loop    →  Create Git Worktree, initialize with --pipeline flag
+  ↓
+Terminal: ./scripts/ralph run
+  ↓
+Pipeline handles: implement → self-review → verify → test → sync-docs → codex-review → PR
+  ↓
+Return to Claude Code: check ./scripts/ralph status
+```
+
+### Pipeline mode (parallel slices)
+
+```
+/plan    →  Create directory-based plan (docs/plans/active/<date>-<slug>/)
+            using ./scripts/new-ralph-plan.sh <slug> [issue] [slice-count]
+  ↓
+/loop    →  Select parallel slices mode
+  ↓
+Terminal: ./scripts/ralph run --plan docs/plans/active/<date>-<slug>/ --unified-pr
+  ↓
+Orchestrator handles:
+  - Creates worktree per slice (.claude/worktrees/<slug>)
+  - Runs ralph-pipeline.sh in each worktree (parallel where no deps)
+  - Sequential merge to integration/<slug> branch
+  - Unified PR from integration branch
+  ↓
+Return to Claude Code: check ./scripts/ralph status
 ```
 
 ## Tips
