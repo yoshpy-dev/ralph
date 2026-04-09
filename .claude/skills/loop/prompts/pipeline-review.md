@@ -22,20 +22,20 @@ Evaluate the diff for:
 7. Security — injection risks, XSS, path traversal
 8. Maintainability — tight coupling, magic numbers
 
-Write findings to `docs/reports/self-review-<date>-pipeline.md`.
+Write findings to `.harness/state/pipeline/self-review.md`.
 Tag each finding with severity: CRITICAL, HIGH, MEDIUM, LOW.
 
 ## Verification (static analysis)
 
 Run: `./scripts/run-static-verify.sh` (or `HARNESS_VERIFY_MODE=static ./scripts/run-verify.sh`)
 
-Record results in `docs/reports/verify-<date>-pipeline.md`.
+Record results in `.harness/state/pipeline/verify.md`.
 
 ## Testing
 
 Run: `./scripts/run-test.sh` (or `HARNESS_VERIFY_MODE=test ./scripts/run-verify.sh`)
 
-Record results in `docs/reports/test-<date>-pipeline.md`.
+Record results in `.harness/state/pipeline/test.md`.
 
 ## Output
 

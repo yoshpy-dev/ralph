@@ -54,7 +54,9 @@ If checkpoint.json contains `failure_triage` entries:
 
 When ALL acceptance criteria from the plan are met AND verification passes:
 1. Write a final summary to progress.log
-2. Output exactly: `<promise>COMPLETE</promise>`
+2. Signal completion via **both** methods:
+   - Run: `echo COMPLETE > .harness/state/pipeline/.agent-signal`
+   - Output exactly: `<promise>COMPLETE</promise>`
 
 Do NOT output COMPLETE if:
 - Tests are failing
@@ -65,7 +67,9 @@ Do NOT output COMPLETE if:
 
 If you discover the task is fundamentally blocked:
 1. Write the blocker to progress.log
-2. Output exactly: `<promise>ABORT</promise>`
+2. Signal abort via **both** methods:
+   - Run: `echo ABORT > .harness/state/pipeline/.agent-signal`
+   - Output exactly: `<promise>ABORT</promise>`
 
 ## Safety rules
 

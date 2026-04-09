@@ -50,6 +50,11 @@ If there are no ACTION_REQUIRED findings (or codex was skipped):
 If ACTION_REQUIRED findings exist, do NOT create the PR.
 Instead, document the findings and output a summary.
 
+After successfully creating a PR, write the URL to a sidecar file:
+```sh
+echo "https://github.com/owner/repo/pull/123" > .harness/state/pipeline/.pr-url
+```
+
 ## Output
 
 At the end, output a JSON summary:

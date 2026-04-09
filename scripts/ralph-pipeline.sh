@@ -18,6 +18,7 @@ MAX_REPAIR_ATTEMPTS=5
 DRY_RUN=0
 PREFLIGHT_ONLY=0
 RESUME=0
+JSON_OUTPUT_SUPPORTED=0
 
 usage() {
   cat <<'USAGE'
@@ -35,7 +36,7 @@ Options:
   --dry-run                Print what would run without executing claude
   -h, --help               Show this help
 USAGE
-  exit 1
+  exit 0
 }
 
 while [ $# -gt 0 ]; do
@@ -103,6 +104,7 @@ report_event() {
 }
 
 # Run claude -p with a prompt file
+# Outputs result text to $_log_file and full JSON (if available) to ${_log_file}.json
 run_claude() {
   _prompt_file="$1"
   _log_file="$2"
@@ -110,10 +112,29 @@ run_claude() {
   if [ "$DRY_RUN" -eq 1 ]; then
     log "[dry-run] Would run: claude -p < ${_prompt_file} ${_extra_args}"
     echo "[dry-run] iteration output" > "$_log_file"
+    printf '{"result":"[dry-run] iteration output","session_id":null}' > "${_log_file}.json"
     return 0
   fi
-  # shellcheck disable=SC2086
-  claude -p --output-format text ${_extra_args} < "$_prompt_file" 2>&1 | tee "$_log_file"
+  if [ "$JSON_OUTPUT_SUPPORTED" -eq 1 ]; then
+    # JSON mode: separate stdout (JSON) from stderr
+    # shellcheck disable=SC2086
+    claude -p --output-format json ${_extra_args} < "$_prompt_file" > "${_log_file}.json" 2>"${_log_file}.stderr" || true
+    # Extract .result from JSON; fall back to raw output on parse failure
+    if jq -e '.result' "${_log_file}.json" >/dev/null 2>&1; then
+      jq -r '.result // empty' "${_log_file}.json" > "$_log_file"
+    else
+      log "Warning: JSON parse failed for ${_log_file}.json, using raw output"
+      cp "${_log_file}.json" "$_log_file"
+    fi
+    # Show result on stdout for visibility
+    cat "$_log_file"
+  else
+    # Text fallback mode (older claude CLI or JSON not supported)
+    # shellcheck disable=SC2086
+    claude -p --output-format text ${_extra_args} < "$_prompt_file" 2>&1 | tee "$_log_file"
+    # No JSON sidecar in text mode
+    : > "${_log_file}.json"
+  fi
 }
 
 # Check for uncommitted changes and warn
@@ -269,7 +290,29 @@ run_preflight() {
   _probes="$(printf '%s' "$_probes" | jq --arg s "$_git_check" '. += [{"probe":"git_available","result":$s}]')"
   log "  git: ${_git_check}"
 
-  # Probe 5: codex CLI (optional)
+  # Probe 5: claude -p --output-format json support
+  _json_check="fail"
+  if [ "$DRY_RUN" -eq 1 ]; then
+    _json_check="skip_dry_run"
+    JSON_OUTPUT_SUPPORTED=1
+  elif [ "$_cli_check" = "pass" ]; then
+    _json_probe_prompt="${PIPELINE_DIR}/.json-probe.txt"
+    mkdir -p "$PIPELINE_DIR"
+    printf 'Reply with exactly the text JSON_PROBE_OK. Nothing else.' > "$_json_probe_prompt"
+    _json_probe_raw="$(claude -p --output-format json < "$_json_probe_prompt" 2>/dev/null || true)"
+    rm -f "$_json_probe_prompt"
+    if printf '%s' "$_json_probe_raw" | jq -e '.result' >/dev/null 2>&1; then
+      _json_check="pass"
+      JSON_OUTPUT_SUPPORTED=1
+    else
+      _json_check="not_supported"
+      log "Warning: --output-format json not supported, falling back to text mode"
+    fi
+  fi
+  _probes="$(printf '%s' "$_probes" | jq --arg s "$_json_check" '. += [{"probe":"json_output_format","result":$s}]')"
+  log "  JSON output format: ${_json_check}"
+
+  # Probe 6: codex CLI (optional)
   _codex_check="not_available"
   if [ -x ./scripts/codex-check.sh ]; then
     if ./scripts/codex-check.sh >/dev/null 2>&1; then
@@ -305,6 +348,9 @@ run_inner_loop() {
   log "=== Inner Loop cycle ${_cycle}/${MAX_INNER_CYCLES} ==="
   ckpt_update ".phase = \"inner\" | .inner_cycle = ${_cycle}"
   ckpt_transition "$(ckpt_read 'phase' || echo 'start')" "inner" "$_context"
+
+  # --- Clear stale sidecar files at cycle start ---
+  rm -f "${PIPELINE_DIR}/.agent-signal" "${PIPELINE_DIR}/.pr-url"
 
   # --- Implementation phase ---
   log "--- Phase: implement ---"
@@ -365,26 +411,49 @@ run_inner_loop() {
 
   run_claude "$_impl_prompt" "$_impl_log" "$_impl_extra"
 
-  # Capture session ID from log if possible
-  _new_session="$(grep -o 'session_id=[^ ]*' "$_impl_log" 2>/dev/null | head -1 | cut -d= -f2 || true)"
-  if [ -n "$_new_session" ]; then
+  # Capture session ID from JSON output (primary) or log grep (fallback)
+  _new_session=""
+  if [ -f "${_impl_log}.json" ] && [ -s "${_impl_log}.json" ]; then
+    _new_session="$(jq -r '.session_id // empty' "${_impl_log}.json" 2>/dev/null || true)"
+  fi
+  if [ -z "$_new_session" ]; then
+    log "Warning: session_id not found in JSON output"
+  else
     ckpt_update ".session_id = \"${_new_session}\""
   fi
 
   report_event "implement" "{\"cycle\":${_cycle},\"log\":\"${_impl_log}\"}"
 
-  # Check for COMPLETE/ABORT signals
-  # COMPLETE: agent believes acceptance criteria are met. Still run verify/test
-  # to honour the test contract before proceeding to Outer Loop.
-  _agent_complete=0
-  if grep -q '<promise>COMPLETE</promise>' "$_impl_log" 2>/dev/null; then
-    log "Agent signalled COMPLETE — will still run verify/test before proceeding"
-    _agent_complete=1
+  # Check for COMPLETE/ABORT signals (2-layer detection)
+  # Layer 1: sidecar file .agent-signal (written by agent via Bash)
+  # Layer 2: marker tag in result text (grep fallback)
+  _agent_signal=""
+  if [ -f "${PIPELINE_DIR}/.agent-signal" ]; then
+    _agent_signal="$(cat "${PIPELINE_DIR}/.agent-signal" 2>/dev/null || true)"
   fi
-  if grep -q '<promise>ABORT</promise>' "$_impl_log" 2>/dev/null; then
+
+  # ABORT detection
+  _agent_abort=0
+  if printf '%s' "$_agent_signal" | grep -qi 'ABORT' 2>/dev/null; then
+    _agent_abort=1
+  elif grep -q '<promise>ABORT</promise>' "$_impl_log" 2>/dev/null; then
+    _agent_abort=1
+  fi
+  if [ "$_agent_abort" -eq 1 ]; then
     log "Agent signalled ABORT during implementation"
     ckpt_update '.status = "aborted"'
     return 2
+  fi
+
+  # COMPLETE detection: agent believes acceptance criteria are met.
+  # Still run verify/test to honour the test contract before proceeding to Outer Loop.
+  _agent_complete=0
+  if printf '%s' "$_agent_signal" | grep -qi 'COMPLETE' 2>/dev/null; then
+    log "Agent signalled COMPLETE (via sidecar) — will still run verify/test before proceeding"
+    _agent_complete=1
+  elif grep -q '<promise>COMPLETE</promise>' "$_impl_log" 2>/dev/null; then
+    log "Agent signalled COMPLETE (via marker) — will still run verify/test before proceeding"
+    _agent_complete=1
   fi
 
   # Stuck detection
@@ -590,18 +659,47 @@ Follow the repository's PR workflow:
 4. Archive the plan
 
 Use gh pr create with the standard template.
+
+After creating the PR, write the PR URL to .harness/state/pipeline/.pr-url:
+  echo "https://github.com/..." > .harness/state/pipeline/.pr-url
 PR_PROMPT
 
   run_claude "$_pr_prompt" "$_pr_log" ""
 
-  # Check if PR was created
-  _pr_url="$(grep -oE 'https://github\.com/[^ ]+/pull/[0-9]+' "$_pr_log" 2>/dev/null | head -1 || true)"
+  # Detect PR URL (3-layer defense)
+  _pr_url=""
+
+  # Layer 1: external verification via gh CLI
+  _head_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+  if [ -n "$_head_branch" ] && command -v gh >/dev/null 2>&1; then
+    _pr_url="$(gh pr list --head "$_head_branch" --state open --json url --jq '.[0].url' 2>/dev/null || true)"
+    if [ -n "$_pr_url" ]; then
+      log "PR detected via gh pr list: ${_pr_url}"
+    fi
+  fi
+
+  # Layer 2: sidecar file written by agent
+  if [ -z "$_pr_url" ] && [ -f "${PIPELINE_DIR}/.pr-url" ]; then
+    _pr_url="$(cat "${PIPELINE_DIR}/.pr-url" 2>/dev/null | grep -oE 'https://github\.com/[^ ]+/pull/[0-9]+' | head -1 || true)"
+    if [ -n "$_pr_url" ]; then
+      log "PR detected via sidecar file: ${_pr_url}"
+    fi
+  fi
+
+  # Layer 3: grep agent output log (legacy fallback)
+  if [ -z "$_pr_url" ]; then
+    _pr_url="$(grep -oE 'https://github\.com/[^ ]+/pull/[0-9]+' "$_pr_log" 2>/dev/null | head -1 || true)"
+    if [ -n "$_pr_url" ]; then
+      log "PR detected via log grep: ${_pr_url}"
+    fi
+  fi
+
   if [ -n "$_pr_url" ]; then
     log "PR created: ${_pr_url}"
     ckpt_update ".pr_created = true | .pr_url = \"${_pr_url}\" | .status = \"complete\""
     report_event "pr-created" "{\"cycle\":${_cycle},\"url\":\"${_pr_url}\"}"
   else
-    log "PR creation step completed (check log for details)"
+    log "PR creation step completed but URL not detected (check log for details)"
     ckpt_update ".status = \"complete\""
     report_event "pr-step" "{\"cycle\":${_cycle},\"log\":\"${_pr_log}\"}"
   fi
