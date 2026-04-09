@@ -24,6 +24,7 @@ Build coding-agent workflows that are:
 3. Work (auto — creates branch) or Loop (auto — creates worktree)
    - Loop standard: implementation-only, post-impl pipeline runs via subagents
    - Loop pipeline: full autonomous Inner/Outer Loop (implement → review → verify → test → docs → codex → PR)
+   - Loop parallel slices: directory-based plan → multi-worktree → integration branch → sequential merge → unified PR
 4. Self-review (auto — via `reviewer` subagent, or pipeline-internal)
 5. Verify (auto — via `verifier` subagent, or pipeline-internal)
 6. Test (auto — via `tester` subagent, or pipeline-internal)
@@ -40,8 +41,9 @@ Build coding-agent workflows that are:
 
 ## Repo map
 
-- `docs/plans/active/` — current plans
+- `docs/plans/active/` — current plans (single files or `<date>-<slug>/` directories with `_manifest.md` + `slice-*.md`)
 - `docs/plans/archive/` — completed plans
+- `docs/plans/templates/` — plan templates (`feature-plan.md`, `ralph-loop-plan.md`, `ralph-loop-manifest.md`, `ralph-loop-slice.md`)
 - `docs/reports/` — self-review, verify, test, walkthrough artifacts
 - `docs/quality/` — definition of done and quality gates
 - `.claude/rules/` — path-scoped guidance
@@ -49,7 +51,7 @@ Build coding-agent workflows that are:
 - `.claude/agents/` — specialized subagents
 - `.claude/hooks/` — deterministic runtime checks
 - `packs/languages/` — language-specific depth
-- `scripts/` — reusable verification and bootstrap scripts (includes `ralph` CLI, `ralph-pipeline.sh`, `ralph-orchestrator.sh`)
+- `scripts/` — reusable verification and bootstrap scripts (includes `ralph` CLI, `ralph-pipeline.sh`, `ralph-orchestrator.sh`, `new-ralph-plan.sh`)
 - `.harness/state/` — runtime state, not canonical truth
 
 ## Planning contract
