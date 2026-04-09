@@ -412,6 +412,11 @@ run_inner_loop() {
 
   run_claude "$_impl_prompt" "$_impl_log" "$_impl_extra"
 
+  # In dry-run mode, simulate COMPLETE signal after first cycle
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "COMPLETE" > "${PIPELINE_DIR}/.agent-signal"
+  fi
+
   # Capture session ID from JSON output (no grep fallback — warns if absent)
   _new_session=""
   if [ -f "${_impl_log}.json" ] && [ -s "${_impl_log}.json" ]; then
@@ -552,16 +557,19 @@ REVIEW
   log "Tests PASSED in Inner Loop cycle ${_cycle}"
   ckpt_update '.last_test_result = "pass"'
 
-  # If agent signalled COMPLETE and tests passed, mark as complete
-  if [ "$_agent_complete" -eq 1 ]; then
-    log "Agent COMPLETE confirmed — verify/test passed"
-    ckpt_update '.status = "complete"'
-  fi
-
   # Run hook parity check
   run_hook_parity || log "Warning: hook parity check had issues"
 
-  return 0
+  # If agent signalled COMPLETE and tests passed, proceed to Outer Loop
+  if [ "$_agent_complete" -eq 1 ]; then
+    log "Agent COMPLETE confirmed — verify/test passed"
+    ckpt_update '.status = "complete"'
+    return 0
+  fi
+
+  # Tests passed but agent has not signalled COMPLETE — keep iterating
+  log "Tests passed but COMPLETE not signalled — continuing Inner Loop"
+  return 6
 }
 
 # ═══════════════════════════════════════════════════════════════════
@@ -587,11 +595,8 @@ run_outer_loop() {
     cat > "$_docs_prompt" <<'DOCS'
 Synchronize documentation with the current implementation changes.
 Update any affected docs, rules, and reports.
-Then run a codex review of the diff if codex CLI is available.
-If codex is not available, skip the review.
-
-After sync-docs and optional codex-review, if there are no ACTION_REQUIRED findings,
-create a PR using the repository's PR template (Japanese).
+Commit documentation changes with: docs: <description>
+Do NOT create a PR or run codex review — those are handled by the pipeline.
 DOCS
   fi
 
@@ -784,13 +789,18 @@ INIT_JSON
       run_inner_loop "$_inner_cycle" "$_context" || _inner_result=$?
 
       case "$_inner_result" in
-        0) # Tests passed → move to Outer Loop
+        0) # COMPLETE + tests passed → move to Outer Loop
           break
           ;;
         1) # Tests failed → retry Inner Loop
           _inner_cycle=$((_inner_cycle + 1))
           _total_iteration=$((_total_iteration + 1))
           _context="test failure — retry"
+          ;;
+        6) # Tests passed but COMPLETE not signalled → continue Inner Loop
+          _inner_cycle=$((_inner_cycle + 1))
+          _total_iteration=$((_total_iteration + 1))
+          _context="tests pass, awaiting COMPLETE signal"
           ;;
         2) # ABORT
           log "=== Pipeline aborted by agent ==="
