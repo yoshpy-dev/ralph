@@ -178,15 +178,17 @@ run_hook_parity() {
 }
 
 # Stuck detection: returns 0 if stuck, 1 if not
+# Compares HEAD commit hash before/after iteration to detect real progress,
+# not working tree diff (which is empty after commits, causing false positives).
 check_stuck() {
   _stuck_count="$(ckpt_read 'stuck_count' || echo 0)"
   _stuck_count="${_stuck_count:-0}"
   if command -v git >/dev/null 2>&1; then
-    _diff_after="$(git diff HEAD 2>/dev/null || true)"
-    _diff_before="$(cat "${PIPELINE_DIR}/.diff_before" 2>/dev/null || true)"
-    if [ "$_diff_before" = "$_diff_after" ]; then
+    _head_after="$(git rev-parse HEAD 2>/dev/null || true)"
+    _head_before="$(cat "${PIPELINE_DIR}/.head_before" 2>/dev/null || true)"
+    if [ "$_head_before" = "$_head_after" ]; then
       _stuck_count=$((_stuck_count + 1))
-      log "Warning: no file changes detected (stuck count: ${_stuck_count}/3)"
+      log "Warning: no new commits detected (stuck count: ${_stuck_count}/3)"
     else
       _stuck_count=0
     fi
@@ -198,10 +200,10 @@ check_stuck() {
   return 1
 }
 
-# Save git diff state before an iteration
+# Save HEAD commit hash before an iteration
 save_diff_before() {
   if command -v git >/dev/null 2>&1; then
-    git diff HEAD 2>/dev/null > "${PIPELINE_DIR}/.diff_before" || true
+    git rev-parse HEAD 2>/dev/null > "${PIPELINE_DIR}/.head_before" || true
   fi
 }
 
@@ -372,10 +374,12 @@ run_inner_loop() {
   report_event "implement" "{\"cycle\":${_cycle},\"log\":\"${_impl_log}\"}"
 
   # Check for COMPLETE/ABORT signals
+  # COMPLETE: agent believes acceptance criteria are met. Still run verify/test
+  # to honour the test contract before proceeding to Outer Loop.
+  _agent_complete=0
   if grep -q '<promise>COMPLETE</promise>' "$_impl_log" 2>/dev/null; then
-    log "Agent signalled COMPLETE during implementation"
-    ckpt_update '.status = "complete"'
-    return 0
+    log "Agent signalled COMPLETE — will still run verify/test before proceeding"
+    _agent_complete=1
   fi
   if grep -q '<promise>ABORT</promise>' "$_impl_log" 2>/dev/null; then
     log "Agent signalled ABORT during implementation"
@@ -477,6 +481,12 @@ REVIEW
   # Tests passed
   log "Tests PASSED in Inner Loop cycle ${_cycle}"
   ckpt_update '.last_test_result = "pass"'
+
+  # If agent signalled COMPLETE and tests passed, mark as complete
+  if [ "$_agent_complete" -eq 1 ]; then
+    log "Agent COMPLETE confirmed — verify/test passed"
+    ckpt_update '.status = "complete"'
+  fi
 
   # Run hook parity check
   run_hook_parity || log "Warning: hook parity check had issues"

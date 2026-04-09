@@ -512,18 +512,23 @@ ORCH_JSON
       run_slice "$s" "$o"
     done < "$_slices_file"
 
-    # Update status counts
+    # Update status counts and rebuild running_files from currently-running slices
     _completed=0
     _failed=0
     _running=0
-    for status_file in "${ORCH_STATE}"/slice-*.status; do
-      [ -f "$status_file" ] || continue
-      case "$(cat "$status_file")" in
+    : > "${ORCH_STATE}/.running_files"
+    while IFS='|' read -r _rf_s _rf_o _rf_d _rf_f; do
+      _rf_status="$(check_slice_status "$_rf_s")"
+      case "$_rf_status" in
         complete)                        _completed=$((_completed + 1)) ;;
         failed|stuck|repair_limit|aborted) _failed=$((_failed + 1)) ;;
-        running)                         _running=$((_running + 1)) ;;
+        running)
+          _running=$((_running + 1))
+          # Re-add only currently running slice files to locklist
+          echo "$_rf_f" | tr ',' '\n' >> "${ORCH_STATE}/.running_files"
+          ;;
       esac
-    done
+    done < "$_slices_file"
 
     if [ "$((_completed + _failed))" -ge "$_total" ]; then
       break

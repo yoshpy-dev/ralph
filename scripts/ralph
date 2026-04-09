@@ -117,11 +117,17 @@ cmd_run() {
     exec "${SCRIPT_DIR}/ralph-orchestrator.sh" --plan "$_plan" ${_extra_args}
   else
     log "Running single-pipeline mode..."
-    # Initialize if not already done
-    if [ ! -f "${PIPELINE_DIR}/checkpoint.json" ] || echo "$_extra_args" | grep -q -- '--resume'; then
+    # Initialize only if checkpoint is missing AND we are NOT resuming
+    _is_resume=0
+    echo "$_extra_args" | grep -q -- '--resume' && _is_resume=1 || true
+    if [ ! -f "${PIPELINE_DIR}/checkpoint.json" ] && [ "$_is_resume" -eq 0 ]; then
       _objective="$(grep '^## Objective' "$_plan" -A 5 | grep -v '^##' | grep -v '^$' | head -1 | sed 's/^[ ]*//' || echo "Pipeline execution")"
       _slug="$(basename "$_plan" .md)"
       "${SCRIPT_DIR}/ralph-loop-init.sh" --pipeline general "$_objective" "$_slug"
+    fi
+    if [ "$_is_resume" -eq 1 ] && [ ! -f "${PIPELINE_DIR}/checkpoint.json" ]; then
+      log_error "Cannot resume: no checkpoint found at ${PIPELINE_DIR}/checkpoint.json"
+      exit 1
     fi
     # shellcheck disable=SC2086
     exec "${SCRIPT_DIR}/ralph-pipeline.sh" ${_extra_args}
