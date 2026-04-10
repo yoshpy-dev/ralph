@@ -2,9 +2,9 @@
 
 Single source of truth for when to delegate work to subagents.
 
-## Post-implementation pipeline — always delegate
+## Post-implementation pipeline for /work — delegate via subagents
 
-After implementation completes (`/work` or `/loop`), run the post-implementation pipeline via subagents:
+After `/work` completes, run the post-implementation pipeline via subagents:
 
 | Step | Subagent | Skill | Purpose |
 |------|----------|-------|---------|
@@ -45,9 +45,9 @@ If a subagent fails to execute (tool error, not a review finding), run the corre
 
 The triage step reads existing artifacts (plan, self-review report, verify report) and produces `docs/reports/codex-triage-<slug>.md`. No new subagent definition is needed.
 
-## Documentation sync — always delegate
+## Documentation sync for /work — delegate
 
-After implementation and before PR creation, run `/sync-docs` via the `doc-maintainer` subagent:
+In the `/work` flow, after tests pass and before PR creation, run `/sync-docs` via the `doc-maintainer` subagent:
 
 ```
 Task(subagent_type="doc-maintainer", prompt="Run /sync-docs after <slug> implementation")
@@ -56,9 +56,13 @@ Task(subagent_type="doc-maintainer", prompt="Run /sync-docs after <slug> impleme
 
 This runs after the test step and before `/pr`, producing documentation updates as a separate concern from implementation.
 
-## Ralph Loop — self-contained parallel pipelines
+## Post-implementation pipeline for /loop — orchestrator-internal
 
-When running Ralph Loop (`ralph-orchestrator.sh`), each slice gets its own worktree and runs `ralph-pipeline.sh` independently. Each pipeline invokes phases (implement, self-review, verify, test, sync-docs, codex-review, PR) as separate `claude -p` calls. No subagent delegation is needed from the main context.
+When running Ralph Loop (`ralph-orchestrator.sh`), each slice gets its own worktree and runs `ralph-pipeline.sh` independently. Each pipeline invokes phases (implement, self-review, verify, test, sync-docs, codex-review, PR) as separate `claude -p` calls with dedicated prompts. No subagent delegation is needed from the main context.
+
+The pipeline order is identical to `/work` (`/self-review` → `/verify` → `/test` → `/sync-docs` → `/codex-review` → `/pr`), but execution differs:
+- `/work`: subagent Task calls in Claude Code session
+- `/loop`: `claude -p` invocations orchestrated by `ralph-pipeline.sh`
 
 The orchestrator:
 1. Creates an integration branch (`integration/<slug>`)
@@ -72,7 +76,8 @@ When a user returns after a Ralph Loop run, check `./scripts/ralph status` for t
 
 ## Rationale
 
-- Post-implementation steps produce independent artifacts with clear boundaries — ideal for subagent isolation.
+- Post-implementation steps produce independent artifacts with clear boundaries — ideal for subagent isolation in `/work`.
 - Subagent execution preserves main context tokens for implementation work.
 - Sequential execution ensures each step can react to prior findings.
-- Ralph Loop internalizes the subagent chain into the orchestrator/pipeline scripts, making it self-contained for autonomous execution.
+- Ralph Loop internalizes the same pipeline into `claude -p` calls with dedicated prompts, achieving quality parity without subagent delegation.
+- Both flows produce reports in `docs/reports/` — the output format is identical regardless of execution model.

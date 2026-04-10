@@ -105,12 +105,17 @@ When presenting AskUserQuestion choices, always pre-select or recommend the most
 
 ## Additional resources
 
-### Pipeline prompts
-- [prompts/pipeline-inner.md](prompts/pipeline-inner.md) — Implementation agent
-- [prompts/pipeline-self-review.md](prompts/pipeline-self-review.md) — Self-review agent (diff quality, 10-item checklist)
-- [prompts/pipeline-verify.md](prompts/pipeline-verify.md) — Verify agent (spec compliance + static analysis + doc drift)
-- [prompts/pipeline-test.md](prompts/pipeline-test.md) — Test agent (behavioral tests + root cause analysis)
-- [prompts/pipeline-outer.md](prompts/pipeline-outer.md) — Sync-docs agent (product-level + harness-internal sync)
+### Pipeline prompts (used by `ralph-pipeline.sh` as `claude -p` inputs)
+
+Each prompt is a standalone `claude -p` invocation — the Ralph Loop equivalent of a subagent in `/work`:
+
+| Prompt | Phase | Equivalent `/work` subagent |
+|--------|-------|-----------------------------|
+| [pipeline-inner.md](prompts/pipeline-inner.md) | Implementation (Inner Loop) | — (interactive in `/work`) |
+| [pipeline-self-review.md](prompts/pipeline-self-review.md) | Self-review (Inner Loop) | `reviewer` |
+| [pipeline-verify.md](prompts/pipeline-verify.md) | Verify (Inner Loop) | `verifier` |
+| [pipeline-test.md](prompts/pipeline-test.md) | Test (Inner Loop) | `tester` |
+| [pipeline-outer.md](prompts/pipeline-outer.md) | Sync-docs (Outer Loop) | `doc-maintainer` |
 
 ### Scripts
 - `scripts/ralph-orchestrator.sh` — Multi-worktree parallel orchestrator
