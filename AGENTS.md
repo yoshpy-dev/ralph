@@ -22,7 +22,7 @@ Build coding-agent workflows that are:
 1. Explore
 2. Plan (manual — creates plan, selects flow) [+ optional Codex plan advisory]
 3. **標準フロー**: Work (auto — creates branch, interactive implementation)
-   **Ralph Loop**: Loop (auto — directory-based plan → `ralph-orchestrator.sh` → multi-worktree parallel → integration branch → unified PR)
+   **Ralph Loop**: Loop (auto — directory-based plan → `ralph-orchestrator.sh` → multi-worktree parallel → integration branch → integration pipeline → unified PR)
 4. Self-review (auto — via `reviewer` subagent, or pipeline-internal)
 5. Verify (auto — via `verifier` subagent, or pipeline-internal)
 6. Test (auto — via `tester` subagent, or pipeline-internal)

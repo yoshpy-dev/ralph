@@ -32,10 +32,11 @@ If `/codex-review` finds ACTION_REQUIRED issues and the user chooses to fix them
 - [ ] Each `slice-*.md` has self-contained AC, affected files, and verify/test plan
 - [ ] All slice pipelines completed (`ralph status` shows all slices `complete`)
 - [ ] Sequential merge to integration branch passed without conflicts
+- [ ] Integration pipeline passed on merged branch (`--skip-pr --fix-all`)
 - [ ] Unified PR created from `integration/<slug>` to base branch
 - [ ] Plan directory archived from `docs/plans/active/` to `docs/plans/archive/`
 
-Ralph Loop handles the full lifecycle autonomously per slice (implement → self-review → verify → test → sync-docs → codex-review) then merges and creates a unified PR.
+Ralph Loop handles the full lifecycle autonomously per slice (implement → self-review → verify → test → sync-docs → codex-review), then merges slices into the integration branch, runs an integration pipeline (`--skip-pr --fix-all`) to catch cross-module issues, and creates a unified PR.
 
 **Pipeline report output:** Each pipeline agent (self-review, verify, test) writes reports to both `.harness/state/pipeline/` (for orchestrator consumption) and `docs/reports/` (for PR pre-checks and human review). This dual-write ensures pipeline artifacts are available for the same quality checks as the standard flow.
 

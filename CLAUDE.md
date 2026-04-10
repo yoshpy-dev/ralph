@@ -10,7 +10,7 @@ Use this file only for Claude-specific guidance that must be always-on.
 - Use `/plan` before risky, ambiguous, or multi-file work. It does not create a branch — branch/worktree creation is deferred to the chosen flow skill.
 - `/plan` asks one decision: 標準フロー (/work) or Ralph Loop (/loop)。Follow the user's choice.
 - `/work` creates a normal branch (`git checkout -b`) and starts interactive implementation. Post-impl pipeline runs via subagents.
-- `/loop` uses a directory-based plan and runs `ralph-orchestrator.sh` for autonomous parallel-slice execution: multi-worktree (`git worktree add` × N) → `ralph-pipeline.sh` per slice → integration branch → sequential merge → unified PR.
+- `/loop` uses a directory-based plan and runs `ralph-orchestrator.sh` for autonomous parallel-slice execution: multi-worktree (`git worktree add` × N) → `ralph-pipeline.sh` per slice → integration branch → sequential merge → integration pipeline (`--skip-pr --fix-all`) → unified PR.
 - In Ralph Loop, the scripts handle the full lifecycle autonomously — no manual subagent chain needed. Use `./scripts/ralph run` or `./scripts/ralph status` to operate.
 - After /work, the post-implementation pipeline runs via subagents (`/self-review` → `/verify` → `/test` → `/sync-docs`), then `/codex-review` (optional, inline), then `/pr`.
 - `/self-review` is diff quality only. `/verify` is spec compliance + static analysis. `/test` is behavioral tests. Each produces a separate report.

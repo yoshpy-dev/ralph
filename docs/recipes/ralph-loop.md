@@ -163,6 +163,7 @@ Orchestrator handles:
   - Creates worktree per slice (.claude/worktrees/<slug>)
   - Runs ralph-pipeline.sh in each worktree (parallel where no deps)
   - Sequential merge to integration/<slug> branch
+  - Integration pipeline on merged branch (--skip-pr --fix-all)
   - Unified PR from integration branch
   ↓
 Return to Claude Code: check ./scripts/ralph status
