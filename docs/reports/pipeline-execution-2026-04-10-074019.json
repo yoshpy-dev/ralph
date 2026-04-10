@@ -1,0 +1,51 @@
+{
+  "status": "complete",
+  "started": "2026-04-10T07:40:18Z",
+  "ended": "2026-04-10T07:40:19Z",
+  "checkpoint": {
+    "schema_version": 1,
+    "iteration": 1,
+    "phase": "outer",
+    "status": "complete",
+    "inner_cycle": 1,
+    "outer_cycle": 1,
+    "stuck_count": 1,
+    "last_test_result": "pass",
+    "test_failures": [],
+    "failure_triage": [],
+    "self_review_result": {
+      "critical": 0
+    },
+    "verify_result": "pass",
+    "review_findings": [],
+    "codex_triage": {
+      "action_required": 0,
+      "worth_considering": 0,
+      "dismissed": 0
+    },
+    "acceptance_criteria_met": [],
+    "acceptance_criteria_remaining": [],
+    "session_id": null,
+    "pr_created": true,
+    "pr_url": "https://github.com/yoshpy-dev/harness-engineering-scaffolding-template/pull/5",
+    "phase_transitions": [
+      {
+        "from": "preflight",
+        "to": "inner",
+        "timestamp": "2026-04-10T07:40:18Z",
+        "reason": "pipeline start"
+      },
+      {
+        "from": "preflight",
+        "to": "inner",
+        "timestamp": "2026-04-10T07:40:18Z"
+      },
+      {
+        "from": "inner",
+        "to": "outer",
+        "timestamp": "2026-04-10T07:40:18Z",
+        "reason": "tests passed"
+      }
+    ]
+  }
+}
