@@ -338,7 +338,7 @@ run_slice() {
   # Initialize pipeline state in the worktree
   (
     cd "$_wt_path"
-    "${SCRIPT_DIR}/ralph-loop-init.sh" --pipeline general "$_objective" "$_wt_plan_path" 2>&1 || true
+    "${SCRIPT_DIR}/ralph-loop-init.sh" general "$_objective" "$_wt_plan_path" 2>&1 || true
     "${SCRIPT_DIR}/ralph-pipeline.sh" \
       --max-iterations "$MAX_ITERATIONS" \
       2>&1
@@ -624,9 +624,9 @@ ORCH_JSON
     while IFS='|' read -r s o d f p; do
       _s_status="$(check_slice_status "$s")"
 
-      # Skip if already started or done
+      # Skip if already started or done (includes all terminal pipeline statuses)
       case "$_s_status" in
-        running|complete|failed|stuck|repair_limit|aborted) continue ;;
+        running|complete|failed|stuck|repair_limit|aborted|config_error|max_iterations|max_inner_cycles|max_outer_cycles) continue ;;
       esac
 
       # Check dependency satisfaction (avoid pipe-subshell by using temp file)
@@ -679,7 +679,7 @@ ORCH_JSON
       _rf_status="$(check_slice_status "$_rf_s")"
       case "$_rf_status" in
         complete)                        _completed=$((_completed + 1)) ;;
-        failed|stuck|repair_limit|aborted) _failed=$((_failed + 1)) ;;
+        failed|stuck|repair_limit|aborted|config_error|max_iterations|max_inner_cycles|max_outer_cycles) _failed=$((_failed + 1)) ;;
         running)
           _running=$((_running + 1))
           # Re-add only currently running slice files to locklist
