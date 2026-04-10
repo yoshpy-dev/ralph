@@ -60,8 +60,8 @@ if [ -f .claude/settings.json ]; then
   done
 fi
 
-# --- commit-msg hook installation check ---
-if [ -d .git ]; then
+# --- commit-msg hook installation check (local only) ---
+if [ -d .git ] && [ "${CI:-}" != "true" ]; then
   if [ ! -f .git/hooks/commit-msg ]; then
     fail "commit-msg hook not installed. Run: ./scripts/bootstrap.sh"
   elif ! grep -q 'commit-msg-guard' .git/hooks/commit-msg 2>/dev/null; then
