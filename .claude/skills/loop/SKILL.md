@@ -1,33 +1,21 @@
 ---
 name: loop
-description: Initialize a Ralph Loop session for autonomous multi-iteration work. Supports two modes — standard (implementation-only loop) and pipeline (full autonomous Inner/Outer Loop with review, verify, test, docs, codex-review, and PR). Invoke automatically when a task benefits from sustained autonomous iteration outside Claude Code.
+description: Initialize a Ralph Loop session for autonomous parallel-slice execution. Creates a directory-based plan and runs ralph-orchestrator.sh for multi-worktree parallel pipelines with unified PR. Invoke automatically when a task benefits from sustained autonomous iteration outside Claude Code.
 allowed-tools: Read, Grep, Glob, Write, Edit, Bash, AskUserQuestion
 ---
-Set up a Ralph Loop for autonomous iteration outside Claude Code.
+Set up a Ralph Loop for autonomous parallel-slice execution outside Claude Code.
 
 ## Goals
 
-- Turn a task into a self-contained loop that runs autonomously
-- Choose the right mode: **standard** (implementation-only) or **pipeline** (full autonomous pipeline)
-- Choose the right prompt template for the task type
-- Leave the user ready to start the loop from their terminal
+- Turn a task into a self-contained parallel pipeline that runs autonomously
+- Set up a directory-based plan with slices for parallel execution
+- Leave the user ready to start the orchestrator from their terminal
 
 ## Steps
 
 ### Step 1 — コンテキスト把握
 
 Read `AGENTS.md` and scan `docs/plans/active/` to understand the current project state.
-
-### Step 1.5 — ループモード選択
-
-First, detect the plan type:
-- If the active plan is a **directory** (contains `_manifest.md` + `slice-*.md`): auto-select **並列スライスパイプライン** mode → skip to Step 2 (no question needed).
-- Otherwise (single file plan or no plan): use **AskUserQuestion** to let the user pick a loop mode.
-
-AskUserQuestion options (single plan / no plan):
-  1. **標準ループ** — implementation-only loop (`ralph-loop.sh`). Post-implementation pipeline runs via subagents after the loop.
-  2. **パイプラインループ (Recommended)** — full autonomous pipeline (`ralph-pipeline.sh`): implement → self-review → verify → test → sync-docs → codex-review → PR.
-- If the plan involves large-scale work, multi-step features, or the user wants full autonomy, recommend パイプラインループ.
 
 ### Step 2 — タスクタイプ選択
 
@@ -43,13 +31,13 @@ Use **AskUserQuestion** to let the user pick a task type.
   - docs — documentation updates
   - migration — language, framework, or API migration
 
-### Step 3 — 目的と計画ファイルの確認
+### Step 3 — 目的と計画ディレクトリの確認
 
-Use **AskUserQuestion** to confirm the objective and optionally link a plan file.
+Use **AskUserQuestion** to confirm the objective and link the plan directory.
 
 - Pre-fill the question with an objective inferred from conversation context.
-- If `docs/plans/active/` contains plan files, list them as options (plus "None" for no plan).
-- If no plans exist, skip the plan selection and only confirm the objective.
+- If `docs/plans/active/` contains directory-based plans (with `_manifest.md`), list them as options.
+- Ralph Loop requires a directory-based plan. If none exists, instruct the user to create one with `./scripts/new-ralph-plan.sh <slug> [issue] [slice-count]`.
 
 ### Step 3.5 — Git Worktree 作成
 
@@ -65,12 +53,9 @@ If already on a feature branch (not main/master), skip worktree creation and wor
 
 ### Step 4 — init スクリプト実行
 
-Run the init script with the confirmed parameters. Add `--pipeline` if pipeline mode was selected:
+Run the init script with the confirmed parameters:
 ```sh
-# Standard mode:
-./scripts/ralph-loop-init.sh <task-type> "<objective>" [plan-slug]
-# Pipeline mode:
-./scripts/ralph-loop-init.sh --pipeline <task-type> "<objective>" [plan-slug]
+./scripts/ralph-loop-init.sh <task-type> "<objective>" <plan-directory>
 ```
 
 ### Step 5 — PROMPT.md の承認
@@ -85,30 +70,14 @@ Read the generated `.harness/state/loop/PROMPT.md` and display its contents. The
 
 ### Step 6 — 実行コマンドの提示
 
-After approval, print the run command based on the selected mode:
+After approval, print the run command:
 
-**Standard mode:**
 ```sh
-./scripts/ralph-loop.sh                          # basic
-./scripts/ralph-loop.sh --verify                  # with verification
-./scripts/ralph-loop.sh --verify --max-iterations 10  # bounded
-```
-
-**Pipeline mode (single):**
-```sh
-./scripts/ralph run                              # auto-detect plan, single pipeline
-./scripts/ralph run --preflight --dry-run         # validate setup first
-./scripts/ralph run --max-iterations 15           # bounded
-```
-
-**Pipeline mode (parallel slices with unified PR):**
-```sh
-# Directory-based plan (auto-detects --slices mode)
 ./scripts/ralph run --plan docs/plans/active/<date>-<slug>/ --unified-pr
-# Explicit slices mode
-./scripts/ralph run --slices --plan <plan-directory> --unified-pr
 # Dry run to verify slice parsing
-./scripts/ralph run --slices --plan <plan-dir> --dry-run
+./scripts/ralph run --plan docs/plans/active/<date>-<slug>/ --dry-run
+# Bounded iterations
+./scripts/ralph run --plan docs/plans/active/<date>-<slug>/ --unified-pr --max-iterations 15
 ```
 
 ## Output
@@ -121,30 +90,14 @@ After approval, print the run command based on the selected mode:
 
 ## After the loop
 
-### Standard mode
-
-**Trigger**: When the user returns to the Claude Code session after running `./scripts/ralph-loop.sh`, detect loop completion by reading `.harness/state/loop/status`. If the file exists (any status), automatically proceed with the post-implementation pipeline below. If the user explicitly mentions the loop is done, proceed even without the status file.
-
-1. Read `.harness/state/loop/status` to check outcome
-2. Read `.harness/state/loop/progress.log` for what happened
-3. Delegate the post-implementation pipeline to subagents per `.claude/rules/subagent-policy.md`:
-   a. `Task(subagent_type="reviewer")` → `/self-review` — stop if CRITICAL findings
-   b. `Task(subagent_type="verifier")` → `/verify` — stop if fail verdict
-   c. `Task(subagent_type="tester")` → `/test` — stop if fail verdict
-   d. `Task(subagent_type="doc-maintainer")` → `/sync-docs`
-   e. **Invoke `/codex-review` via the Skill tool** (optional, inline — if Codex CLI unavailable, skip to `/pr`)
-   f. **Invoke `/pr` via the Skill tool** — do NOT run `gh pr create` directly. The `/pr` skill enforces the Japanese template, pre-checks, and plan archiving.
-4. If a worktree was created, ask the user whether to keep or remove it (`git worktree remove .claude/worktrees/<slug>`)
-
-### Pipeline mode
-
-The pipeline handles everything autonomously (self-review, verify, test, docs, codex-review, PR). When the user returns:
+The orchestrator handles everything autonomously (parallel pipeline per slice → integration merge → unified PR). When the user returns:
 
 1. Run `./scripts/ralph status` to check outcome
-2. Read `.harness/state/pipeline/checkpoint.json` for final state
-3. If `status` is `complete` and `pr_created` is true — the pipeline finished successfully. Show the PR URL.
-4. If `status` is `stuck`, `repair_limit`, or `aborted` — review the failure context and help the user decide next steps (resume, abort, or manual intervention).
-5. The pipeline already creates the PR, so no further post-implementation pipeline is needed.
+2. Read `.harness/state/orchestrator/orchestrator.json` for final state
+3. If all slices are `complete` and the unified PR was created — show the PR URL.
+4. If any slice is `stuck`, `repair_limit`, or `aborted` — review the failure context and help the user decide next steps (resume, abort, or manual intervention).
+5. The orchestrator already creates the PR, so no further post-implementation pipeline is needed.
+6. If worktrees were created, ask the user whether to keep or remove them.
 
 ## Anti-bottleneck
 
@@ -152,22 +105,14 @@ When presenting AskUserQuestion choices, always pre-select or recommend the most
 
 ## Additional resources
 
-### Standard mode prompts
-- [prompts/general.md](prompts/general.md)
-- [prompts/refactor.md](prompts/refactor.md)
-- [prompts/test-coverage.md](prompts/test-coverage.md)
-- [prompts/bugfix.md](prompts/bugfix.md)
-- [prompts/docs.md](prompts/docs.md)
-- [prompts/migration.md](prompts/migration.md)
-
-### Pipeline mode prompts
+### Pipeline prompts
 - [prompts/pipeline-inner.md](prompts/pipeline-inner.md) — Implementation agent
 - [prompts/pipeline-review.md](prompts/pipeline-review.md) — Self-review + verify + test agent
 - [prompts/pipeline-outer.md](prompts/pipeline-outer.md) — Sync-docs + codex-review + PR agent
 
 ### Scripts
-- `scripts/ralph-pipeline.sh` — Single pipeline orchestrator (Inner/Outer Loop)
 - `scripts/ralph-orchestrator.sh` — Multi-worktree parallel orchestrator
+- `scripts/ralph-pipeline.sh` — Per-slice pipeline (Inner/Outer Loop)
 - `scripts/ralph` — CLI wrapper (plan/run/status/abort)
 
 ### Other

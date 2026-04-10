@@ -24,19 +24,12 @@ Create or update a plan in `docs/plans/active/`.
    - Question: "どちらの開発フローで進めますか？"
    - Options:
      1. **標準フロー (/work)** — Claude Code 内で対話的に実装を進める（短〜中規模タスク向け）
-     2. **Ralph Loop (/loop)** — ターミナルで自律反復実行する（大規模・持続的自律作業向け）
+     2. **Ralph Loop (/loop)** — ディレクトリベースプランで並列スライス自律実行する（大規模・分割可能タスク向け）
    - If the plan mentions large-scale refactoring, migration, test-coverage campaigns, or multi-file autonomous work, recommend Ralph Loop.
-   - After the user chooses, if Ralph Loop was selected, proceed to step 2.8. Otherwise, proceed to step 3.
-2.8. **Plan structure** (Ralph Loop only): Use **AskUserQuestion** to determine the plan structure.
-   - Question: "プラン構造はどちらにしますか？"
-   - Options:
-     1. **単一プラン** — 1つのプランファイルで実行（ほとんどのタスク向け）(Recommended)
-     2. **並列スライスプラン** — ディレクトリベースプランで複数スライスを並列実行（大規模・分割可能タスク向け）
-   - If the work can be split into independent slices, recommend 並列スライスプラン.
-   - Note: ループモード（標準ループ / パイプラインループ）は `/loop` 実行時に選択します。並列スライスプラン選択時は常にパイプラインモードになります。
-3. Choose one active plan file based on the structure selected in 2.7/2.8:
-   - **標準フロー** or **Ralph Loop 単一プラン**: Create with `./scripts/new-feature-plan.sh <slug> [issue-number]` or from [template.md](template.md).
-   - **Ralph Loop 並列スライスプラン**: Create with `./scripts/new-ralph-plan.sh <slug> [issue-number] [slice-count]` to generate a directory-based plan structure under `docs/plans/active/<date>-<slug>/`.
+   - After the user chooses, proceed to step 3.
+3. Choose one active plan file based on the flow selected in 2.7:
+   - **標準フロー**: Create with `./scripts/new-feature-plan.sh <slug> [issue-number]` or from [template.md](template.md).
+   - **Ralph Loop**: Create with `./scripts/new-ralph-plan.sh <slug> [issue-number] [slice-count]` to generate a directory-based plan structure under `docs/plans/active/<date>-<slug>/`.
 4. Fill in:
    - objective
    - scope and non-goals
@@ -66,7 +59,7 @@ Create or update a plan in `docs/plans/active/`.
    g. After user decision, proceed to step 7.
 7. **Flow confirmation**: Confirm the flow selected in step 2.7 and state which skill to invoke next:
    - 標準フロー → `/work`
-   - Ralph Loop → `/loop`（ループモード選択は `/loop` にて）
+   - Ralph Loop → `/loop`
 
 ## Output
 

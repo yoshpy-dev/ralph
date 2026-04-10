@@ -1,6 +1,6 @@
 # Post-implementation pipeline order
 
-Single source of truth for the post-implementation pipeline. All flows (standard, loop, pipeline mode) must follow this order.
+Single source of truth for the post-implementation pipeline. All flows (standard /work, Ralph Loop) must follow this order.
 
 ## Canonical order
 

@@ -7,9 +7,7 @@ Autonomous multi-iteration coding with `claude -p` and file-system memory.
 | Flow | Trigger | Script | Branch | Post-impl pipeline | Use case |
 |------|---------|--------|--------|--------------------|----------|
 | 標準フロー | `/work` | (Claude Code session) | `git checkout -b` | subagents | 短〜中規模、対話的 |
-| Ralph Loop 標準ループ | `/loop` → 標準ループ | `ralph-loop.sh` | `git worktree add` | subagents (after loop) | 大規模、実装のみ自律 |
-| Ralph Loop パイプライン | `/loop` → パイプライン | `ralph-pipeline.sh` | `git worktree add` | pipeline-internal | 大規模、完全自律 |
-| Ralph Loop 並列スライス | `/loop` (auto) | `ralph-orchestrator.sh` | `git worktree add` × N | pipeline-internal × N | 大規模、分割可能、並列 |
+| Ralph Loop | `/loop` | `ralph-orchestrator.sh` | `git worktree add` × N | pipeline-internal × N | 大規模、分割可能、並列自律 |
 
 ### Decision flow
 
@@ -17,13 +15,8 @@ Autonomous multi-iteration coding with `claude -p` and file-system memory.
 /plan
   ├── "標準フロー (/work)" → /work → 対話的実装 → subagents → /pr
   └── "Ralph Loop (/loop)" → /loop
-        │
-        ├── [ディレクトリプラン検出] → 並列スライスパイプライン (auto)
-        │     ralph-orchestrator.sh → pipeline × N → integration merge → unified PR
-        │
-        ├── "標準ループ" → ralph-loop.sh → 実装 → (return to CC) → subagents → /pr
-        │
-        └── "パイプラインループ" → ralph-pipeline.sh → 完全自律 → PR
+        directory-based plan → ralph-orchestrator.sh
+        → pipeline × N (parallel) → integration merge → unified PR
 ```
 
 ## What is it
@@ -153,45 +146,11 @@ This means the agent reconstructs context from files each iteration, avoiding st
 
 ## Integration with the operating loop
 
-### Standard mode
-
-```
-/plan    →  Create plan in docs/plans/active/, select /loop flow
-  ↓
-/loop    →  Create Git Worktree, initialize Ralph Loop with plan reference
-  ↓
-Terminal: ./scripts/ralph-loop.sh --verify
-  ↓
-Return to Claude Code
-  ↓
-/self-review    →  Self-review the loop's diff
-/verify        →  Spec compliance + static analysis
-/test          →  Run behavioral tests
-/codex-review  →  Cross-model second opinion (optional)
-/pr            →  Create PR, archive plan
-```
-
-### Pipeline mode (single)
-
-```
-/plan    →  Create plan in docs/plans/active/, select Ralph Loop single pipeline
-  ↓
-/loop    →  Create Git Worktree, initialize with --pipeline flag
-  ↓
-Terminal: ./scripts/ralph run
-  ↓
-Pipeline handles: implement → self-review → verify → test → sync-docs → codex-review → PR
-  ↓
-Return to Claude Code: check ./scripts/ralph status
-```
-
-### Pipeline mode (parallel slices)
-
 ```
 /plan    →  Create directory-based plan (docs/plans/active/<date>-<slug>/)
             using ./scripts/new-ralph-plan.sh <slug> [issue] [slice-count]
   ↓
-/loop    →  Select parallel slices mode
+/loop    →  Set up the Ralph Loop session
   ↓
 Terminal: ./scripts/ralph run --plan docs/plans/active/<date>-<slug>/ --unified-pr
   ↓
@@ -222,28 +181,20 @@ Edit `.harness/state/loop/PROMPT.md` directly after initialization. Common custo
 - Add acceptance criteria
 - Reference specific plan sections
 
-## Pipeline mode (full autonomous pipeline)
+## Pipeline architecture
 
-Pipeline mode extends the standard loop with a full Inner/Outer Loop architecture that handles implementation, review, verification, testing, docs sync, codex review, and PR creation autonomously.
+Each slice in the Ralph Loop runs a full Inner/Outer Loop pipeline autonomously:
 
 ```sh
 # Use the ralph CLI
-./scripts/ralph run                             # auto-detect plan, run pipeline
-./scripts/ralph run --preflight --dry-run       # validate setup first
-./scripts/ralph run --max-iterations 15         # bounded pipeline
-./scripts/ralph run --slices --plan <plan-directory> # multi-worktree parallel slices
+./scripts/ralph run --plan docs/plans/active/<date>-<slug>/ --unified-pr
+./scripts/ralph run --plan <dir> --dry-run      # validate setup first
+./scripts/ralph run --plan <dir> --unified-pr --max-iterations 15  # bounded
 ./scripts/ralph status                          # check progress
 ./scripts/ralph abort                           # safely stop and archive state
 ```
 
-Or initialize manually and run directly:
-
-```sh
-./scripts/ralph-loop-init.sh --pipeline general "Implement user authentication" my-plan
-./scripts/ralph-pipeline.sh --max-inner-cycles 5
-```
-
-### Inner / Outer Loop architecture
+### Inner / Outer Loop architecture (per slice)
 
 ```
 Inner Loop (per cycle):
@@ -255,41 +206,12 @@ Outer Loop (after tests pass):
   → if codex ACTION_REQUIRED: regress to Inner Loop
 ```
 
-Pipeline state lives in `.harness/state/pipeline/checkpoint.json`. Use `./scripts/ralph status` to inspect it.
+### When to use Ralph Loop
 
-### Agent signal protocol (pipeline mode)
-
-The implementation agent signals completion or abort via two layers, both of which are detected by the orchestrator:
-
-| Layer | Mechanism | Written by |
-|-------|-----------|-----------|
-| Sidecar file | `echo COMPLETE > .harness/state/pipeline/.agent-signal` | Agent (Bash tool) |
-| Marker tag | `<promise>COMPLETE</promise>` in output | Agent (stdout) |
-
-The orchestrator detects ABORT and COMPLETE from either layer. Two important rules apply:
-
-1. **Tests passing is not enough**: if tests pass but COMPLETE is not signalled, the Inner Loop continues (the agent gets another cycle to complete remaining work). The pipeline returns `6` internally and increments the inner cycle counter.
-2. **COMPLETE is not a bypass**: when COMPLETE is signalled, verify and test still run before proceeding to the Outer Loop. COMPLETE + tests pass → Outer Loop.
-
-### PR URL detection (pipeline mode)
-
-The orchestrator uses a 3-layer approach to find the PR URL after creation:
-
-1. **gh CLI** — `gh pr list --head <branch>` (external verification, most reliable)
-2. **Sidecar file** — `.harness/state/pipeline/.pr-url` written by the outer agent
-3. **Log grep** — `https://github.com/.*/pull/[0-9]+` pattern in the PR log (legacy fallback)
-
-### JSON output mode (pipeline mode)
-
-When the Claude CLI supports `--output-format json`, the pipeline runs in JSON mode and captures `session_id` for `--resume` continuity across Inner Loop cycles. If JSON mode is not supported, the pipeline falls back to text mode automatically. The preflight probe (`--preflight`) checks JSON support before the pipeline starts.
-
-### When to choose pipeline mode
-
-- Large-scale features or refactors where you want the full cycle handled autonomously
-- When you have a Ralph Loop plan with vertical slices for parallel execution
-- When you want PR creation without returning to Claude Code
-
-For smaller tasks, the standard loop plus manual post-implementation pipeline is simpler.
+- Large-scale features or refactors that can be split into independent slices
+- Test coverage campaigns across many files
+- Migration work (dependency, framework, API)
+- When you want the full cycle handled autonomously without returning to Claude Code
 
 ## Archiving
 

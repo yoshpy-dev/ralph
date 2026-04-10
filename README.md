@@ -71,10 +71,10 @@ The default philosophy here is:
 3. Create your first plan.
 
    ```sh
-   # Standard flow or Ralph Loop single pipeline
+   # Standard flow
    ./scripts/new-feature-plan.sh login-form
 
-   # Ralph Loop parallel slices (directory-based plan)
+   # Ralph Loop (directory-based plan with parallel slices)
    ./scripts/new-ralph-plan.sh login-form N/A 3
    ```
 
@@ -167,34 +167,27 @@ Then wire it into:
 - `.claude/rules/<name>.md`
 - project build/test/tooling
 
-## Ralph Loop (autonomous iteration)
+## Ralph Loop (autonomous parallel execution)
 
-For tasks that benefit from sustained autonomous work, the Ralph Loop runs `claude -p` in a shell loop with file-system memory. Two modes are available:
-
-**Standard mode** — implementation-only loop. Post-implementation pipeline runs via subagents after the loop.
+For large tasks that can be split into independent slices, the Ralph Loop runs parallel pipelines across multiple Git worktrees. Each slice gets its own `claude -p` pipeline that handles the full lifecycle autonomously (implement → self-review → verify → test → sync-docs → codex-review). Completed slices are sequentially merged into an integration branch, and a unified PR is created.
 
 ```sh
-# Initialize a loop session
-./scripts/ralph-loop-init.sh general "Implement user authentication"
+# Create a directory-based plan with slices
+./scripts/new-ralph-plan.sh my-feature N/A 3
 
-# Run it
-./scripts/ralph-loop.sh --verify --max-iterations 10
+# Run the orchestrator
+./scripts/ralph run --plan docs/plans/active/2026-01-01-my-feature/ --unified-pr
+
+# Check progress
+./scripts/ralph status
+
+# Safely stop
+./scripts/ralph abort
 ```
 
-**Pipeline mode** — full autonomous pipeline (implement → self-review → verify → test → sync-docs → codex-review → PR). The loop handles everything from implementation through PR creation.
+Or use the `/loop` skill inside Claude Code for interactive setup.
 
-```sh
-# Use the ralph CLI (auto-detects plan from docs/plans/active/)
-./scripts/ralph run
-./scripts/ralph run --preflight --dry-run   # validate setup first
-./scripts/ralph run --slices                 # multi-worktree parallel mode
-./scripts/ralph status                       # check progress
-./scripts/ralph abort                        # safely stop and archive state
-```
-
-Or use the `/loop` skill inside Claude Code for interactive setup of either mode.
-
-Task-specific templates are available for: general, refactor, test-coverage, bugfix, docs, and migration work. Safety rails include iteration limits, stuck detection (3 consecutive no-change iterations), Inner/Outer Loop architecture with repair attempt caps, and hook parity checks.
+Safety rails include iteration limits, stuck detection (3 consecutive no-change iterations), Inner/Outer Loop architecture with repair attempt caps, and hook parity checks.
 
 See `docs/recipes/ralph-loop.md` for the full guide.
 

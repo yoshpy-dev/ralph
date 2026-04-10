@@ -30,28 +30,27 @@ Usage: ralph <command> [options]
 
 Commands:
   plan                       Start a planning session
-  run [options]              Execute the pipeline
+  run [options]              Execute the orchestrator (parallel slices)
   status                     Show current pipeline progress
   abort [--slice <name>]     Safely stop and clean up
 
 Run Options:
-  --plan <path>              Plan file or directory (auto-detected from docs/plans/active/ if omitted)
-  --slices                   Run multi-worktree orchestrator mode
+  --plan <path>              Plan directory (auto-detected from docs/plans/active/ if omitted)
   --max-iterations N         Total iteration cap (default: 20)
-  --max-parallel N           Max concurrent slices in orchestrator mode (default: 4)
+  --max-parallel N           Max concurrent slices (default: 4)
   --preflight                Run capability probe only
   --resume                   Resume from existing checkpoint
   --dry-run                  Show what would run without executing
+  --unified-pr               Create a unified PR from integration branch
 
 Abort Options:
-  --slice <name>             Abort a specific slice only (orchestrator mode)
+  --slice <name>             Abort a specific slice only
   --keep-state               Archive state but don't delete worktrees
 
 Examples:
   ralph plan
-  ralph run
-  ralph run --plan docs/plans/active/my-plan.md --max-iterations 15
-  ralph run --slices --plan docs/plans/active/2026-01-01-my-feature/
+  ralph run --plan docs/plans/active/2026-01-01-my-feature/ --unified-pr
+  ralph run --dry-run
   ralph status
   ralph abort
 USAGE
@@ -80,13 +79,11 @@ cmd_plan() {
 
 cmd_run() {
   _plan=""
-  _slices=0
   _extra_args=""
 
   while [ $# -gt 0 ]; do
     case "$1" in
       --plan)           shift; _plan="${1:?requires a file path}" ;;
-      --slices)         _slices=1 ;;
       --max-iterations|--max-parallel|--max-inner-cycles|--max-outer-cycles|--max-repair-attempts)
         _flag="$1"; shift; _extra_args="${_extra_args} ${_flag} ${1:?requires a number}" ;;
       --preflight|--resume|--dry-run|--unified-pr)
@@ -99,53 +96,26 @@ cmd_run() {
 
   # Auto-detect plan if not specified
   if [ -z "$_plan" ]; then
-    # Check for directory-based plans first (newest by modification time)
+    # Check for directory-based plans (newest by modification time)
     _plan="$(find docs/plans/active -maxdepth 1 -type d ! -name active 2>/dev/null | while read -r d; do
       if [ -f "${d}/_manifest.md" ]; then echo "$d"; fi
     done | head -1 || true)"
-    # Fall back to single-file plans
     if [ -z "$_plan" ]; then
-      _plan="$(ls -t docs/plans/active/*.md 2>/dev/null | head -1 || true)"
-    fi
-    if [ -z "$_plan" ]; then
-      echo "Error: no plan found. Run 'ralph plan' first or specify --plan <file-or-directory>"
+      echo "Error: no directory-based plan found. Create one with './scripts/new-ralph-plan.sh <slug>' or specify --plan <directory>"
       exit 1
     fi
     log "Auto-detected plan: ${_plan}"
   fi
 
-  if [ ! -f "$_plan" ] && [ ! -d "$_plan" ]; then
-    echo "Error: plan not found: ${_plan}"
+  if [ ! -d "$_plan" ]; then
+    echo "Error: Ralph Loop requires a directory-based plan: ${_plan}"
+    echo "Create one with: ./scripts/new-ralph-plan.sh <slug> [issue] [slice-count]"
     exit 1
   fi
 
-  # Auto-enable slices mode for directory-based plans
-  if [ -d "$_plan" ] && [ "$_slices" -eq 0 ]; then
-    log "Directory-based plan detected, enabling --slices mode automatically"
-    _slices=1
-  fi
-
-  if [ "$_slices" -eq 1 ]; then
-    log "Running orchestrator (multi-worktree) mode..."
-    # shellcheck disable=SC2086
-    exec "${SCRIPT_DIR}/ralph-orchestrator.sh" --plan "$_plan" ${_extra_args}
-  else
-    log "Running single-pipeline mode..."
-    # Initialize only if checkpoint is missing AND we are NOT resuming
-    _is_resume=0
-    echo "$_extra_args" | grep -q -- '--resume' && _is_resume=1 || true
-    if [ ! -f "${PIPELINE_DIR}/checkpoint.json" ] && [ "$_is_resume" -eq 0 ]; then
-      _objective="$(grep '^## Objective' "$_plan" -A 5 | grep -v '^##' | grep -v '^$' | head -1 | sed 's/^[ ]*//' || echo "Pipeline execution")"
-      _slug="$(basename "$_plan" .md)"
-      "${SCRIPT_DIR}/ralph-loop-init.sh" --pipeline general "$_objective" "$_slug"
-    fi
-    if [ "$_is_resume" -eq 1 ] && [ ! -f "${PIPELINE_DIR}/checkpoint.json" ]; then
-      log_error "Cannot resume: no checkpoint found at ${PIPELINE_DIR}/checkpoint.json"
-      exit 1
-    fi
-    # shellcheck disable=SC2086
-    exec "${SCRIPT_DIR}/ralph-pipeline.sh" ${_extra_args}
-  fi
+  log "Running orchestrator (multi-worktree) mode..."
+  # shellcheck disable=SC2086
+  exec "${SCRIPT_DIR}/ralph-orchestrator.sh" --plan "$_plan" ${_extra_args}
 }
 
 # ═══════════════════════════════════════════════════════════════════
@@ -155,27 +125,6 @@ cmd_run() {
 cmd_status() {
   echo "═══ Ralph Pipeline Status ═══"
   echo ""
-
-  # Single pipeline status
-  if [ -f "${PIPELINE_DIR}/checkpoint.json" ]; then
-    echo "Pipeline (single):"
-    _phase="$(jq -r '.phase // "unknown"' "${PIPELINE_DIR}/checkpoint.json" 2>/dev/null || echo "?")"
-    _status="$(jq -r '.status // "unknown"' "${PIPELINE_DIR}/checkpoint.json" 2>/dev/null || echo "?")"
-    _iter="$(jq -r '.iteration // 0' "${PIPELINE_DIR}/checkpoint.json" 2>/dev/null || echo "0")"
-    _inner="$(jq -r '.inner_cycle // 0' "${PIPELINE_DIR}/checkpoint.json" 2>/dev/null || echo "0")"
-    _outer="$(jq -r '.outer_cycle // 0' "${PIPELINE_DIR}/checkpoint.json" 2>/dev/null || echo "0")"
-    _test="$(jq -r '.last_test_result // "n/a"' "${PIPELINE_DIR}/checkpoint.json" 2>/dev/null || echo "n/a")"
-    _pr="$(jq -r '.pr_url // "n/a"' "${PIPELINE_DIR}/checkpoint.json" 2>/dev/null || echo "n/a")"
-
-    printf "  Phase:       %s\n" "$_phase"
-    printf "  Status:      %s\n" "$_status"
-    printf "  Iteration:   %s\n" "$_iter"
-    printf "  Inner cycle: %s\n" "$_inner"
-    printf "  Outer cycle: %s\n" "$_outer"
-    printf "  Last test:   %s\n" "$_test"
-    printf "  PR:          %s\n" "$_pr"
-    echo ""
-  fi
 
   # Orchestrator status
   if [ -f "${ORCH_STATE}/orchestrator.json" ]; then
@@ -208,9 +157,9 @@ cmd_status() {
   fi
 
   # Check for no state at all
-  if [ ! -f "${PIPELINE_DIR}/checkpoint.json" ] && [ ! -f "${ORCH_STATE}/orchestrator.json" ]; then
-    echo "No active pipeline or orchestrator state found."
-    echo "Run 'ralph run' to start a pipeline."
+  if [ ! -f "${ORCH_STATE}/orchestrator.json" ]; then
+    echo "No active orchestrator state found."
+    echo "Run 'ralph run --plan <dir> --unified-pr' to start."
   fi
 }
 

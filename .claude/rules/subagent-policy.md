@@ -56,15 +56,9 @@ Task(subagent_type="doc-maintainer", prompt="Run /sync-docs after <slug> impleme
 
 This runs after the test step and before `/pr`, producing documentation updates as a separate concern from implementation.
 
-## Ralph Pipeline mode — self-contained
+## Ralph Loop — self-contained parallel pipelines
 
-When running in pipeline mode (`ralph-pipeline.sh`), the orchestrator invokes each phase (implement, self-review, verify, test, sync-docs, codex-review, PR) as separate `claude -p` calls. The pipeline itself handles the full lifecycle — no subagent delegation is needed from the main context.
-
-The pipeline replaces the standard post-implementation subagent chain. When a user returns after a pipeline run, check `checkpoint.json` for the final status rather than running the subagent chain.
-
-## Ralph Orchestrator mode — parallel pipelines
-
-When running in orchestrator mode (`ralph-orchestrator.sh`), each slice gets its own worktree and runs `ralph-pipeline.sh` independently. No cross-slice subagent coordination is needed — each pipeline is self-contained.
+When running Ralph Loop (`ralph-orchestrator.sh`), each slice gets its own worktree and runs `ralph-pipeline.sh` independently. Each pipeline invokes phases (implement, self-review, verify, test, sync-docs, codex-review, PR) as separate `claude -p` calls. No subagent delegation is needed from the main context.
 
 The orchestrator:
 1. Creates an integration branch (`integration/<slug>`)
@@ -74,9 +68,11 @@ The orchestrator:
 
 Plan input is directory-based only: `docs/plans/active/<date>-<slug>/` with `_manifest.md` + `slice-*.md`.
 
+When a user returns after a Ralph Loop run, check `./scripts/ralph status` for the final outcome rather than running the subagent chain.
+
 ## Rationale
 
 - Post-implementation steps produce independent artifacts with clear boundaries — ideal for subagent isolation.
 - Subagent execution preserves main context tokens for implementation work.
 - Sequential execution ensures each step can react to prior findings.
-- Pipeline mode internalizes the subagent chain into the orchestrator script, making it self-contained for autonomous execution.
+- Ralph Loop internalizes the subagent chain into the orchestrator/pipeline scripts, making it self-contained for autonomous execution.
