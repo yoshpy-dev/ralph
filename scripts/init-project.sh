@@ -60,6 +60,27 @@ if [ -d .claude/agent-memory ]; then
   ' _ {} \;
 fi
 
+# Tech debt: reset entries table, keep header and column structure
+if [ -f docs/tech-debt/README.md ]; then
+  cat > docs/tech-debt/README.md <<'TECHDEBT'
+# Tech debt
+
+Record debt that should not disappear into chat history.
+
+Recommended fields:
+- debt item
+- impact
+- why it was deferred
+- trigger for paying it down
+- related plan or report
+
+## Entries
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+TECHDEBT
+fi
+
 echo "[ok] Template artifacts cleaned."
 
 # --- 2. Run bootstrap ---
