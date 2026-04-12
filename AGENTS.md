@@ -21,7 +21,7 @@ Build coding-agent workflows that are:
 
 1. Explore
 1.5. Spec (manual, optional — refines vague ideas into detailed specifications via codebase exploration, web research, and user clarification → `docs/specs/` or GitHub issue)
-2. Plan (manual — creates plan, selects flow) [+ optional Codex plan advisory]
+2. Plan (auto — creates plan, selects flow) [+ optional Codex plan advisory]
 3. **標準フロー**: Work (auto — creates branch, interactive implementation)
    **Ralph Loop**: Loop (auto — directory-based plan → `ralph-orchestrator.sh` → multi-worktree parallel → integration branch → integration pipeline → unified PR)
 4. Self-review (auto — via `reviewer` subagent, or pipeline-internal)

@@ -6,7 +6,7 @@ Use this file only for Claude-specific guidance that must be always-on.
 
 ## Default behavior
 
-- `/spec` and `/plan` are manual-trigger skills. All others (work, loop, self-review, verify, test, codex-review, pr, sync-docs, audit-harness) are auto-invoked.
+- `/spec` is the only manual-trigger skill. All others (plan, work, loop, self-review, verify, test, codex-review, pr, sync-docs, audit-harness) are auto-invoked.
 - Use `/spec` when the request is too vague for `/plan`. `/spec` refines abstract ideas into detailed specifications (`docs/specs/`) through codebase exploration, web research, and interactive clarification. It can then hand off to `/plan` or create a GitHub issue.
 - Use `/plan` before risky, ambiguous, or multi-file work. It does not create a branch — branch/worktree creation is deferred to the chosen flow skill.
 - `/plan` asks one decision: 標準フロー (/work) or Ralph Loop (/loop)。Follow the user's choice.

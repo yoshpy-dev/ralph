@@ -16,6 +16,7 @@
 
 ## Process artifacts
 
+- `docs/specs/`: spec files produced by `/spec`
 - `docs/plans/active/`: in-flight plans
 - `docs/plans/archive/`: completed plans
 - `docs/reports/`: self-review, verify, test, and walkthrough reports
@@ -25,7 +26,8 @@
 
 ## Skills
 
-- `.claude/skills/plan/`: create plans, select execution flow (manual trigger)
+- `.claude/skills/spec/`: refine vague ideas into detailed specifications (manual trigger)
+- `.claude/skills/plan/`: create plans, select execution flow (auto)
 - `.claude/skills/work/`: create branch and execute plans interactively (auto)
 - `.claude/skills/loop/`: create worktree and set up Ralph Loop autonomous iteration (auto)
 - `.claude/skills/self-review/`: self-review diff quality (auto)

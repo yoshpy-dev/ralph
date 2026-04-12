@@ -89,7 +89,7 @@ The default philosophy here is:
 
 ## Operating loop
 
-This scaffold assumes the following default loop. `/spec` and `/plan` are manual triggers; all other steps are auto-invoked.
+This scaffold assumes the following default loop. `/spec` is the only manual trigger; all other steps are auto-invoked.
 
 1. **Explore**
    - Read relevant code, docs, rules, and open plans
@@ -101,7 +101,7 @@ This scaffold assumes the following default loop. `/spec` and `/plan` are manual
    - Produces a spec file in `docs/specs/` and optionally creates a GitHub issue
    - Can hand off directly to `/plan` after completion
 
-2. **Plan** (manual — `/plan`)
+2. **Plan** (auto — `/plan`)
    - Create or refresh a file-backed plan in `docs/plans/active/`
    - Define acceptance criteria, contracts, risks, and verification
    - Optionally link a GitHub issue for context pre-fill
@@ -160,7 +160,7 @@ Included starter packs:
 - `typescript/`
 - `python/`
 - `rust/`
-- `go/`
+- `golang/`
 - `dart/` (Flutter support included)
 - `_template/` for new packs
 
