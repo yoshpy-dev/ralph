@@ -43,8 +43,10 @@ The default philosophy here is:
 │   ├── architecture/
 │   ├── quality/
 │   ├── plans/
+│   ├── specs/
 │   ├── reports/
 │   ├── evidence/
+│   ├── tech-debt/
 │   ├── recipes/
 │   ├── roadmap/
 │   └── references/
@@ -78,7 +80,7 @@ The default philosophy here is:
    ```
 
 4. In Claude Code, follow the loop:
-   - `/plan` → `/work` (or `/loop`) → `/self-review` → `/verify` → `/test` → `/codex-review` (optional) → `/pr`
+   - `/spec` (optional) → `/plan` → `/work` (or `/loop`) → `/self-review` → `/verify` → `/test` → `/sync-docs` → `/codex-review` (optional) → `/pr`
 
 5. Before claiming a task is done, run:
 
@@ -88,13 +90,19 @@ The default philosophy here is:
 
 ## Operating loop
 
-This scaffold assumes the following default loop. Only `/plan` is a manual trigger; all other steps are auto-invoked.
+This scaffold assumes the following default loop. `/spec` is the only manual trigger; all other steps are auto-invoked.
 
 1. **Explore**
    - Read relevant code, docs, rules, and open plans
    - Decide whether the task is small enough to stay single-session
 
-2. **Plan** (manual — `/plan`)
+1.5. **Spec** (manual, optional — `/spec`)
+   - Use when the request is too vague for `/plan`
+   - Explores the codebase, researches best practices, and clarifies requirements interactively
+   - Produces a spec file in `docs/specs/` and optionally creates a GitHub issue
+   - Can hand off directly to `/plan` after completion
+
+2. **Plan** (auto — `/plan`)
    - Create or refresh a file-backed plan in `docs/plans/active/`
    - Define acceptance criteria, contracts, risks, and verification
    - Optionally link a GitHub issue for context pre-fill
@@ -117,17 +125,21 @@ This scaffold assumes the following default loop. Only `/plan` is a manual trigg
    - Run behavioral tests (unit, integration, regression)
    - Tests must pass before PR creation
 
-7. **Codex review** (auto, optional — `/codex-review`)
+7. **Sync docs** (auto — `/sync-docs`)
+   - Sync plans, docs, and instruction files after behavior changes
+   - Check for documentation drift across AGENTS.md, CLAUDE.md, rules, and README
+
+8. **Codex review** (auto, optional — `/codex-review`)
    - Cross-model second opinion on the diff using Codex CLI
    - Silently skipped if Codex is unavailable
    - Findings are advisory — user decides whether to act
 
-8. **PR** (auto — `/pr`)
+9. **PR** (auto — `/pr`)
    - Create a pull request with structured summary
    - Archive finished plans from `active/` to `archive/`
    - Include walkthrough for large diffs
 
-9. **CI + Human merge**
+10. **CI + Human merge**
    - `verify.yml` runs `run-verify.sh` on the PR
    - Human reviews and merges
 
@@ -153,7 +165,7 @@ Included starter packs:
 - `typescript/`
 - `python/`
 - `rust/`
-- `go/`
+- `golang/`
 - `dart/` (Flutter support included)
 - `_template/` for new packs
 

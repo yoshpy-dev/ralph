@@ -31,6 +31,8 @@ REFS="
 .claude/rules/subagent-policy.md
 CLAUDE.md
 docs/quality/definition-of-done.md
+README.md
+AGENTS.md
 "
 
 for ref in $REFS; do

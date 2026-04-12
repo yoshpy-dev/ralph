@@ -23,7 +23,7 @@ Keep `AGENTS.md` short and stable. If a new rule is path- or topic-specific, put
 When skills, hooks, rules, scripts, or language packs changed, also check:
 
 - **Skills added/removed/renamed**: Does `AGENTS.md` Repo map still reflect the skill set? Does `README.md` list the current operating loop?
-- **Hooks added/removed**: Do `.claude/settings.minimal.example.json` and `.claude/settings.advanced.example.json` reference the correct hook scripts? Are removed hooks cleaned out of both profiles?
+- **Hooks added/removed**: Does `.claude/settings.json` reference the correct hook scripts? Are removed hooks cleaned out?
 - **Rules added/removed**: Does `.claude/rules/` match the languages and topics actually in the project? Are `paths:` globs still accurate?
 - **Language packs added/removed**: Does `scripts/detect-languages.sh` detect the language? Is there a matching `.claude/rules/<lang>.md`? Does `packs/languages/<lang>/verify.sh` run a real verifier (not the placeholder)?
 - **Scripts added/removed**: Does `README.md` Quick Start still reference valid scripts? Does `docs/architecture/repo-map.md` list the current scripts?

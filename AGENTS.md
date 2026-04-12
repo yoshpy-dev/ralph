@@ -20,14 +20,15 @@ Build coding-agent workflows that are:
 ## Primary loop
 
 1. Explore
-2. Plan (manual — creates plan, selects flow) [+ optional Codex plan advisory]
+1.5. Spec (manual, optional — refines vague ideas into detailed specifications via codebase exploration, web research, and user clarification → `docs/specs/` or GitHub issue)
+2. Plan (auto — creates plan, selects flow) [+ optional Codex plan advisory]
 3. **標準フロー**: Work (auto — creates branch, interactive implementation)
    **Ralph Loop**: Loop (auto — directory-based plan → `ralph-orchestrator.sh` → multi-worktree parallel → integration branch → integration pipeline → unified PR)
 4. Self-review (auto — via `reviewer` subagent, or pipeline-internal)
 5. Verify (auto — via `verifier` subagent, or pipeline-internal)
 6. Test (auto — via `tester` subagent, or pipeline-internal)
-7. Sync docs (auto — via `doc-maintainer` subagent, or pipeline-internal)
-8. Codex review (auto, optional — cross-model second opinion)
+7. Sync-docs (auto — via `doc-maintainer` subagent, or pipeline-internal)
+8. Codex-review (auto, optional — cross-model second opinion)
 9. PR (auto — includes hand-off)
 10. CI verify + human merge
 
@@ -42,6 +43,7 @@ Steps 4–9 run via subagents in 標準フロー. In Ralph Loop, they are handle
 
 ## Repo map
 
+- `docs/specs/` — spec files produced by `/spec` (`<date>-<slug>.md`)
 - `docs/plans/active/` — current plans (single files for standard flow; `<date>-<slug>/` directories with `_manifest.md` + `slice-*.md` for Ralph Loop)
 - `docs/plans/archive/` — completed plans
 - `docs/plans/templates/` — plan templates (`feature-plan.md`, `ralph-loop-manifest.md`, `ralph-loop-slice.md`)

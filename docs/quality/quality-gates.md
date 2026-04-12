@@ -33,7 +33,7 @@ Use these in CI or later-stage review:
 - `./scripts/run-verify.sh` (`.github/workflows/verify.yml`)
 - `./scripts/check-template.sh` (`.github/workflows/check-template.yml`)
 - `./scripts/check-coverage.sh` — language-pack coverage gate (graceful skip if no packs)
-- `./scripts/check-pipeline-sync.sh` — pipeline order consistency across 6 reference files
+- `./scripts/check-pipeline-sync.sh` — pipeline order consistency across 8 reference files
 
 ### Not yet implemented in CI
 

@@ -40,6 +40,8 @@ After all slices are merged into the integration branch, `ralph-orchestrator.sh`
 - `--skip-pr`: PR creation is handled by the orchestrator, not the pipeline
 - `--fix-all`: ALL self-review findings (CRITICAL+HIGH+MEDIUM+LOW > 0) override COMPLETE; WORTH_CONSIDERING codex findings trigger Inner Loop regression (same as ACTION_REQUIRED)
 
+**Intentional deviation in Ralph Loop:** Per-slice pipelines (`ralph-pipeline.sh`) do NOT stop on CRITICAL self-review findings — they log them and let verify/test catch real issues. This differs from the standard `/work` flow where CRITICAL findings block the pipeline. The rationale is that autonomous pipelines benefit from letting downstream gates (verify, test) confirm whether the finding is a true positive before halting. This deviation is tracked in `docs/tech-debt/README.md`.
+
 See `.claude/rules/subagent-policy.md` for execution model details.
 
 ## Where this order is referenced
@@ -51,3 +53,5 @@ If you update this order, update all of these locations:
 - `.claude/rules/subagent-policy.md` (Post-implementation pipeline table)
 - `CLAUDE.md` (Default behavior)
 - `docs/quality/definition-of-done.md` (Pipeline order)
+- `README.md` (Quick start and Operating loop sections)
+- `AGENTS.md` (Primary loop section)

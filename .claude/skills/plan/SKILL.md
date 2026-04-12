@@ -1,7 +1,6 @@
 ---
 name: plan
-description: Create or refresh a scoped implementation plan before risky, ambiguous, long-running, or multi-file work. Accepts an optional GitHub issue number or URL for context pre-fill. Does not create a branch — branch/worktree creation is deferred to the chosen flow skill. Manual trigger only.
-disable-model-invocation: true
+description: Create or refresh a scoped implementation plan before risky, ambiguous, long-running, or multi-file work. Accepts an optional GitHub issue number or URL for context pre-fill. Does not create a branch — branch/worktree creation is deferred to the chosen flow skill.
 allowed-tools: Read, Grep, Glob, Write, Edit, Bash, AskUserQuestion
 ---
 Create or update a plan in `docs/plans/active/`.
@@ -48,7 +47,7 @@ Create or update a plan in `docs/plans/active/`.
    a. Run `./scripts/codex-check.sh` via Bash.
    b. If exit 1 (not available): note "Codex CLI not available — skipping plan advisory" and proceed to step 7.
    c. If exit 0 (available): invoke Codex to adversarially review the plan via Bash:
-      `codex exec --sandbox read-only -q "You are an adversarial plan reviewer. Your job is to break confidence in this plan, not to validate it. Default to skepticism — assume the plan can fail in subtle, high-cost ways until evidence says otherwise. Review for: (1) blind spots and missing risks — what failure modes are not addressed? (2) scope concerns — too broad, too narrow, or poorly bounded? (3) acceptance criteria gaps — can each criterion be verified deterministically? (4) design decision weaknesses — are there simpler or safer alternatives? (5) rollback and partial-failure scenarios — what happens if implementation stalls halfway? Report only material findings. Each finding must answer: What can go wrong? Why is this plan vulnerable? What is the likely impact? What concrete change would reduce the risk? Number each finding with severity [HIGH/MEDIUM/LOW]. Prefer one strong finding over several weak ones. If the plan looks solid, say so directly with no findings." < docs/plans/active/<plan-file>`
+      `codex exec --sandbox read-only "You are an adversarial plan reviewer. Your job is to break confidence in this plan, not to validate it. Default to skepticism — assume the plan can fail in subtle, high-cost ways until evidence says otherwise. Review for: (1) blind spots and missing risks — what failure modes are not addressed? (2) scope concerns — too broad, too narrow, or poorly bounded? (3) acceptance criteria gaps — can each criterion be verified deterministically? (4) design decision weaknesses — are there simpler or safer alternatives? (5) rollback and partial-failure scenarios — what happens if implementation stalls halfway? Report only material findings. Each finding must answer: What can go wrong? Why is this plan vulnerable? What is the likely impact? What concrete change would reduce the risk? Number each finding with severity [HIGH/MEDIUM/LOW]. Prefer one strong finding over several weak ones. If the plan looks solid, say so directly with no findings. Here is the plan file to review: docs/plans/active/<plan-file>"`
    d. Present Codex findings to the user as a numbered list.
    e. If Codex returned no actionable findings: note "Codex: 指摘なし" and proceed to step 7.
    f. If findings exist, use AskUserQuestion:

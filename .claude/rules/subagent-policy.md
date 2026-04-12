@@ -35,6 +35,10 @@ Task(subagent_type="tester", prompt="Run /test against plan <slug>")
 
 If a subagent fails to execute (tool error, not a review finding), run the corresponding skill inline and note the fallback in the report.
 
+## Spec — always inline
+
+`/spec` runs in the main context because it relies heavily on `AskUserQuestion` for requirement clarification (active back-and-forth with the user) and on `AskUserQuestion` for output selection (save file / create issue / both / transition to `/plan`). Subagent execution would cut off the interactive clarification loop. No agent definition exists for this skill.
+
 ## Planning — always inline
 
 `/plan` runs in the main context because it relies heavily on `AskUserQuestion` for user interaction (task type selection, objective confirmation, flow selection, Codex advisory response). Subagent execution would add indirection without benefit. No agent definition exists for this skill.
