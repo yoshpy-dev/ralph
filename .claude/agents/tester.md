@@ -2,7 +2,7 @@
 name: tester
 description: Test execution specialist. Runs unit, integration, and regression tests. Produces test reports with coverage, failure analysis, and pass/fail verdicts.
 tools: Read, Grep, Glob, Bash, Write
-model: sonnet
+model: opus
 skills:
   - test
 memory: project

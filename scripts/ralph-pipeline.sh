@@ -125,7 +125,7 @@ run_claude() {
   if [ "$JSON_OUTPUT_SUPPORTED" -eq 1 ]; then
     # JSON mode: separate stdout (JSON) from stderr
     # shellcheck disable=SC2086
-    claude -p --output-format json ${_extra_args} < "$_prompt_file" > "${_log_file}.json" 2>"${_log_file}.stderr" || true
+    claude -p --model opus --effort max --output-format json ${_extra_args} < "$_prompt_file" > "${_log_file}.json" 2>"${_log_file}.stderr" || true
     # Extract .result from JSON; fall back to raw output on parse failure
     if jq -e '.result' "${_log_file}.json" >/dev/null 2>&1; then
       jq -r '.result // empty' "${_log_file}.json" > "$_log_file"
@@ -138,7 +138,7 @@ run_claude() {
   else
     # Text fallback mode (older claude CLI or JSON not supported)
     # shellcheck disable=SC2086
-    claude -p --output-format text ${_extra_args} < "$_prompt_file" 2>&1 | tee "$_log_file"
+    claude -p --model opus --effort max --output-format text ${_extra_args} < "$_prompt_file" 2>&1 | tee "$_log_file"
     # No JSON sidecar in text mode
     : > "${_log_file}.json"
   fi
@@ -276,7 +276,7 @@ run_preflight() {
     _probe_prompt="${PIPELINE_DIR}/.preflight-probe.txt"
     mkdir -p "$PIPELINE_DIR"
     printf 'Reply with exactly the text PROBE_OK if you can read CLAUDE.md in this repository. Nothing else.' > "$_probe_prompt"
-    _probe_output="$(claude -p --output-format text < "$_probe_prompt" 2>/dev/null || true)"
+    _probe_output="$(claude -p --model opus --effort max --output-format text < "$_probe_prompt" 2>/dev/null || true)"
     if printf '%s' "$_probe_output" | grep -q 'PROBE_OK'; then
       _claudemd_check="pass"
     else
@@ -306,7 +306,7 @@ run_preflight() {
     _json_probe_prompt="${PIPELINE_DIR}/.json-probe.txt"
     mkdir -p "$PIPELINE_DIR"
     printf 'Reply with exactly the text JSON_PROBE_OK. Nothing else.' > "$_json_probe_prompt"
-    _json_probe_raw="$(claude -p --output-format json < "$_json_probe_prompt" 2>/dev/null || true)"
+    _json_probe_raw="$(claude -p --model opus --effort max --output-format json < "$_json_probe_prompt" 2>/dev/null || true)"
     rm -f "$_json_probe_prompt"
     if printf '%s' "$_json_probe_raw" | jq -e '.result' >/dev/null 2>&1; then
       _json_check="pass"
