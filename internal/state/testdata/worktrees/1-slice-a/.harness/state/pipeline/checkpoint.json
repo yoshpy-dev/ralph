@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "iteration": 3,
+  "phase": "done",
+  "status": "complete",
+  "inner_cycle": 3,
+  "outer_cycle": 1,
+  "stuck_count": 0,
+  "last_test_result": "pass",
+  "test_failures": [],
+  "failure_triage": [],
+  "self_review_result": "COMPLETE",
+  "verify_result": "PASS",
+  "review_findings": [],
+  "codex_triage": {
+    "action_required": 0,
+    "worth_considering": 1,
+    "dismissed": 2
+  },
+  "acceptance_criteria_met": ["AC-1", "AC-2"],
+  "acceptance_criteria_remaining": [],
+  "session_id": "sess-abc",
+  "pr_created": true,
+  "pr_url": "https://github.com/example/repo/pull/42",
+  "phase_transitions": [
+    {
+      "from": "preflight",
+      "to": "inner",
+      "timestamp": "2026-04-15T05:31:00Z",
+      "reason": "pipeline start"
+    },
+    {
+      "from": "inner",
+      "to": "outer",
+      "timestamp": "2026-04-15T05:40:00Z",
+      "reason": "tests pass"
+    }
+  ]
+}
