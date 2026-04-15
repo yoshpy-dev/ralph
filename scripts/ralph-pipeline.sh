@@ -125,7 +125,7 @@ run_claude() {
   if [ "$JSON_OUTPUT_SUPPORTED" -eq 1 ]; then
     # JSON mode: separate stdout (JSON) from stderr
     # shellcheck disable=SC2086
-    claude -p --model opus --effort high --output-format json ${_extra_args} < "$_prompt_file" > "${_log_file}.json" 2>"${_log_file}.stderr" || true
+    claude -p --model opus --effort high --permission-mode bypassPermissions --output-format json ${_extra_args} < "$_prompt_file" > "${_log_file}.json" 2>"${_log_file}.stderr" || true
     # Extract .result from JSON; fall back to raw output on parse failure
     if jq -e '.result' "${_log_file}.json" >/dev/null 2>&1; then
       jq -r '.result // empty' "${_log_file}.json" > "$_log_file"
@@ -138,7 +138,7 @@ run_claude() {
   else
     # Text fallback mode (older claude CLI or JSON not supported)
     # shellcheck disable=SC2086
-    claude -p --model opus --effort high --output-format text ${_extra_args} < "$_prompt_file" 2>&1 | tee "$_log_file"
+    claude -p --model opus --effort high --permission-mode bypassPermissions --output-format text ${_extra_args} < "$_prompt_file" 2>&1 | tee "$_log_file"
     # No JSON sidecar in text mode
     : > "${_log_file}.json"
   fi

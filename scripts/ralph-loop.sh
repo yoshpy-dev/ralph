@@ -98,7 +98,7 @@ while [ "$iteration" -lt "$MAX_ITERATIONS" ]; do
     echo "[dry-run] Output would be saved to: ${log_file}"
     echo "[dry-run] iteration ${iteration} complete" > "$log_file"
   else
-    cat "${LOOP_DIR}/PROMPT.md" | claude -p --model opus --effort high 2>&1 | tee "$log_file"
+    cat "${LOOP_DIR}/PROMPT.md" | claude -p --model opus --effort high --permission-mode bypassPermissions 2>&1 | tee "$log_file"
   fi
 
   # Check for completion signal
