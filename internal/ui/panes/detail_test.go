@@ -14,11 +14,10 @@ func TestDetailViewFields(t *testing.T) {
 		Name:       "slice-1",
 		Status:     state.StatusRunning,
 		Phase:      "inner",
-		Cycle:      2,
-		MaxCycles:  5,
-		Elapsed:    125,
-		TestResult: "pass",
-		PRURL:      "https://github.com/org/repo/pull/42",
+		InnerCycle:  2,
+		ElapsedSecs: 125,
+		TestResult:  "pass",
+		PRUrl:       "https://github.com/org/repo/pull/42",
 	}
 	m.SetSlice(&s)
 
@@ -33,7 +32,7 @@ func TestDetailViewFields(t *testing.T) {
 		{"status icon", "*"},
 		{"status value", "running"},
 		{"phase", "inner"},
-		{"cycle", "2/5"},
+		{"cycle", "Cycle:   2"},
 		{"elapsed", "2m5s"},
 		{"test result", "pass"},
 		{"PR URL", "https://github.com/org/repo/pull/42"},
@@ -75,12 +74,12 @@ func TestDetailCycleWithoutMax(t *testing.T) {
 	s := state.SliceState{
 		Name:   "test",
 		Status: state.StatusRunning,
-		Cycle:  3,
+		InnerCycle: 3,
 	}
 	m.SetSlice(&s)
 
 	view := m.View()
-	if !strings.Contains(view, "Cycle:   3") {
+	if !strings.Contains(view, "Cycle:   3") { //nolint:dupword
 		t.Errorf("expected cycle without max, got:\n%s", view)
 	}
 }
@@ -90,7 +89,7 @@ func TestDetailNoCycleNoPhasePRTestResult(t *testing.T) {
 	s := state.SliceState{
 		Name:    "minimal",
 		Status:  state.StatusPending,
-		Elapsed: 0,
+		ElapsedSecs: 0,
 	}
 	m.SetSlice(&s)
 

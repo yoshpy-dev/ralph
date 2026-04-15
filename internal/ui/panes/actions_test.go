@@ -72,16 +72,13 @@ func TestActionsModel_FailedSliceActions(t *testing.T) {
 		}
 	})
 
-	t.Run("abort available", func(t *testing.T) {
+	t.Run("abort disabled for failed", func(t *testing.T) {
 		_, req, consumed := m.HandleKey(makeKeyPress("a"))
 		if !consumed {
 			t.Error("a should be consumed for failed slice")
 		}
-		if req == nil {
-			t.Fatal("expected confirmation request for abort")
-		}
-		if !strings.Contains(req.Tag, "abort:") {
-			t.Errorf("tag should start with abort:, got: %s", req.Tag)
+		if req != nil {
+			t.Error("abort should be disabled for failed slice (only running can abort)")
 		}
 	})
 

@@ -10,9 +10,9 @@ import (
 
 func TestProgressBarView(t *testing.T) {
 	slices := []state.SliceState{
-		{Name: "s1", Status: state.StatusComplete, Elapsed: 120},
-		{Name: "s2", Status: state.StatusComplete, Elapsed: 180},
-		{Name: "s3", Status: state.StatusRunning, Elapsed: 60},
+		{Name: "s1", Status: state.StatusComplete, ElapsedSecs: 120},
+		{Name: "s2", Status: state.StatusComplete, ElapsedSecs: 180},
+		{Name: "s3", Status: state.StatusRunning, ElapsedSecs: 60},
 		{Name: "s4", Status: state.StatusPending},
 		{Name: "s5", Status: state.StatusPending},
 	}
@@ -43,8 +43,8 @@ func TestProgressBarView(t *testing.T) {
 
 func TestProgressBarAllComplete(t *testing.T) {
 	slices := []state.SliceState{
-		{Name: "s1", Status: state.StatusComplete, Elapsed: 60},
-		{Name: "s2", Status: state.StatusComplete, Elapsed: 90},
+		{Name: "s1", Status: state.StatusComplete, ElapsedSecs: 60},
+		{Name: "s2", Status: state.StatusComplete, ElapsedSecs: 90},
 	}
 
 	m := NewProgress(slices, 60)
@@ -76,7 +76,7 @@ func TestProgressBarEmpty(t *testing.T) {
 
 func TestProgressBarSingleSlice(t *testing.T) {
 	slices := []state.SliceState{
-		{Name: "only", Status: state.StatusRunning, Elapsed: 30},
+		{Name: "only", Status: state.StatusRunning, ElapsedSecs: 30},
 	}
 
 	m := NewProgress(slices, 60)
@@ -108,7 +108,7 @@ func TestComputeStats(t *testing.T) {
 		{
 			name: "half done",
 			slices: []state.SliceState{
-				{Status: state.StatusComplete, Elapsed: 100},
+				{Status: state.StatusComplete, ElapsedSecs: 100},
 				{Status: state.StatusRunning},
 			},
 			wantTotal: 2,
@@ -118,8 +118,8 @@ func TestComputeStats(t *testing.T) {
 		{
 			name: "all done",
 			slices: []state.SliceState{
-				{Status: state.StatusComplete, Elapsed: 60},
-				{Status: state.StatusComplete, Elapsed: 60},
+				{Status: state.StatusComplete, ElapsedSecs: 60},
+				{Status: state.StatusComplete, ElapsedSecs: 60},
 			},
 			wantTotal: 2,
 			wantComp:  2,
@@ -169,13 +169,11 @@ func TestProgressStateUpdatedMsg(t *testing.T) {
 	m := NewProgress(nil, 60)
 
 	newSlices := []state.SliceState{
-		{Name: "s1", Status: state.StatusComplete, Elapsed: 60},
+		{Name: "s1", Status: state.StatusComplete, ElapsedSecs: 60},
 	}
 	m, _ = m.Update(ui.StateUpdatedMsg{
 		Status: state.FullStatus{
-			Orchestrator: state.OrchestratorState{
-				Slices: newSlices,
-			},
+			Slices: newSlices,
 		},
 	})
 
