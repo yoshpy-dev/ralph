@@ -775,7 +775,7 @@ DOCS
   if ! command -v gh >/dev/null 2>&1; then
     log_error "gh CLI not found — cannot create PR. Install gh and retry."
     ckpt_update '.status = "gh_unavailable"'
-    return 1
+    return 2  # distinct from 1 (ACTION_REQUIRED) — terminal config error
   fi
   _pr_log="${PIPELINE_DIR}/outer-${_cycle}-pr.log"
   _pr_prompt="${PIPELINE_DIR}/.pr-prompt.md"
@@ -982,6 +982,11 @@ INIT_JSON
         _inner_cycle=$((_inner_cycle + 1))
         _context="codex ACTION_REQUIRED — regressed from Outer Loop"
         ckpt_transition "outer" "inner" "codex ACTION_REQUIRED"
+        ;;
+      2) # Terminal config error (e.g., gh_unavailable) → stop pipeline
+        log "=== Pipeline stopped: missing dependency ==="
+        _finalize "gh_unavailable"
+        return 0
         ;;
     esac
   done

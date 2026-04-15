@@ -772,7 +772,7 @@ ORCH_JSON
 
       # Skip if already started or done (includes all terminal pipeline statuses)
       case "$_s_status" in
-        running|complete|failed|stuck|repair_limit|aborted|config_error|timeout|max_iterations|max_inner_cycles|max_outer_cycles) continue ;;
+        running|complete|failed|stuck|repair_limit|aborted|config_error|gh_unavailable|timeout|max_iterations|max_inner_cycles|max_outer_cycles) continue ;;
       esac
 
       # Check dependency satisfaction (avoid pipe-subshell by using temp file)
@@ -842,7 +842,7 @@ ORCH_JSON
       _rf_status="$(check_slice_status "$_rf_s")"
       case "$_rf_status" in
         complete)                        _completed=$((_completed + 1)) ;;
-        failed|stuck|repair_limit|aborted|config_error|timeout|max_iterations|max_inner_cycles|max_outer_cycles) _failed=$((_failed + 1)) ;;
+        failed|stuck|repair_limit|aborted|config_error|gh_unavailable|timeout|max_iterations|max_inner_cycles|max_outer_cycles) _failed=$((_failed + 1)) ;;
         running)
           # Check for timeout
           _started_file="${ORCH_STATE}/slice-${_rf_s}.started"

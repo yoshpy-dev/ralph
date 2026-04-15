@@ -110,7 +110,7 @@ resolve_display_phase() {
     complete)
       printf '%b' "${C_GREEN}done${C_RESET}"
       ;;
-    failed|stuck|repair_limit|aborted|config_error|max_iterations|max_inner_cycles|max_outer_cycles)
+    failed|stuck|repair_limit|aborted|config_error|gh_unavailable|max_iterations|max_inner_cycles|max_outer_cycles)
       printf '%b' "${C_RED}${_status}${C_RESET}"
       ;;
     pending)
@@ -165,7 +165,7 @@ status_icon() {
     complete)  printf '%b' "${C_GREEN}+${C_RESET}" ;;
     running)   printf '%b' "${C_CYAN}*${C_RESET}" ;;
     pending)   printf '%b' "${C_DIM}-${C_RESET}" ;;
-    failed|stuck|repair_limit|aborted|config_error|max_*) printf '%b' "${C_RED}!${C_RESET}" ;;
+    failed|stuck|repair_limit|aborted|config_error|gh_unavailable|max_*) printf '%b' "${C_RED}!${C_RESET}" ;;
     *)         printf '%b' "${C_DIM}?${C_RESET}" ;;
   esac
 }
