@@ -40,9 +40,35 @@ type SliceState struct {
 	ElapsedSecs int64               `json:"elapsed_seconds"`
 	TestResult  string              `json:"test_result"`
 	PRUrl       string              `json:"pr_url"`
-	PID         int                 `json:"pid,omitempty"`
-	StartedAt   *time.Time          `json:"started_at,omitempty"`
-	Checkpoint  *PipelineCheckpoint `json:"checkpoint,omitempty"`
+	PID          int                 `json:"pid,omitempty"`
+	StartedAt    *time.Time          `json:"started_at,omitempty"`
+	Checkpoint   *PipelineCheckpoint `json:"checkpoint,omitempty"`
+	LogPath      string              `json:"log_path,omitempty"`
+	WorktreePath string              `json:"worktree_path,omitempty"`
+}
+
+// CanRetry returns true if the slice is in a retryable status.
+func (s *SliceState) CanRetry() bool {
+	switch s.Status {
+	case StatusFailed, StatusStuck, StatusRepairLimit, StatusMaxRetries:
+		return true
+	}
+	return false
+}
+
+// CanAbort returns true if the slice is in an abortable status.
+func (s *SliceState) CanAbort() bool {
+	return s.Status == StatusRunning
+}
+
+// HasLogs returns true if the slice has a log file path set.
+func (s *SliceState) HasLogs() bool {
+	return s.LogPath != ""
+}
+
+// HasWorktree returns true if the slice has a worktree path set.
+func (s *SliceState) HasWorktree() bool {
+	return s.WorktreePath != ""
 }
 
 // PipelineCheckpoint represents .harness/state/pipeline/checkpoint.json.

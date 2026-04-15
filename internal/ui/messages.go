@@ -16,3 +16,9 @@ type LogLineMsg struct {
 type StateUpdatedMsg struct {
 	Status state.FullStatus
 }
+
+// StatusMsg is sent to display a status message in the status bar.
+type StatusMsg struct {
+	Text    string
+	IsError bool
+}
