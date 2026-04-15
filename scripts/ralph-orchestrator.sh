@@ -93,16 +93,12 @@ _on_signal() {
   exit 1
 }
 
-# Kill tracked child processes and update orchestrator status
+# Kill active child processes and update orchestrator status.
+# Uses .pid files as the authoritative source of running slice processes.
+# (The in-memory _CHILD_PIDS list is NOT used here because completed PIDs
+# are never removed from it, risking PID reuse kills on long-running sessions.)
 cleanup_on_exit() {
-  # Kill all tracked child PIDs
-  for _cpid in $_CHILD_PIDS; do
-    if kill -0 "$_cpid" 2>/dev/null; then
-      kill "$_cpid" 2>/dev/null || true
-      log "Killed child process: $_cpid"
-    fi
-  done
-  # Also kill any PIDs recorded in state files
+  # Kill PIDs recorded in state files (.pid files are deleted when slices complete)
   for _pf in "${ORCH_STATE}"/slice-*.pid; do
     [ -f "$_pf" ] || continue
     _spid="$(cat "$_pf" 2>/dev/null || true)"
