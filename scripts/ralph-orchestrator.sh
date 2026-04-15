@@ -21,9 +21,6 @@ MAX_ITERATIONS="$RALPH_MAX_ITERATIONS"
 DRY_RUN=0
 UNIFIED_PR=0
 
-# Child PID tracking for cleanup
-_CHILD_PIDS=""
-
 usage() {
   cat <<'USAGE'
 Usage: ralph-orchestrator.sh --plan <plan-directory> [OPTIONS]
@@ -81,11 +78,6 @@ log_error() { printf '[%s] ERROR: %s\n' "$(ts)" "$*" >&2; }
 # ═══════════════════════════════════════════════════════════════════
 
 _INTERRUPTED=0
-
-# Register a child PID for cleanup tracking
-register_child() {
-  _CHILD_PIDS="${_CHILD_PIDS:+${_CHILD_PIDS} }$1"
-}
 
 # Signal handler — sets flag and exits to trigger EXIT trap
 _on_signal() {
@@ -402,7 +394,6 @@ run_slice() {
   echo "$_pid" > "${ORCH_STATE}/slice-${_slug}.pid"
   echo "running" > "${ORCH_STATE}/slice-${_slug}.status"
   date +%s > "${ORCH_STATE}/slice-${_slug}.started"
-  register_child "$_pid"
   log "Slice ${_slug} started (PID: ${_pid})"
 }
 
