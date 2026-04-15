@@ -49,6 +49,8 @@ while [ $# -gt 0 ]; do
   shift
 done
 
+validate_all_numeric
+
 # --- Pre-flight checks ---
 
 if [ ! -f "${LOOP_DIR}/PROMPT.md" ]; then

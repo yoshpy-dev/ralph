@@ -159,21 +159,6 @@ test_validate_all() {
 }
 
 # ═══════════════════════════════════════════════════════════════════
-# ralph_claude_flags helper
-# ═══════════════════════════════════════════════════════════════════
-
-test_claude_flags() {
-  echo ""
-  echo "=== ralph_claude_flags tests ==="
-
-  _flags="$(. "$CONFIG"; ralph_claude_flags)"
-  assert_eq "default flags" "--model opus --effort high --permission-mode bypassPermissions" "$_flags"
-
-  _flags="$(RALPH_MODEL=sonnet; RALPH_EFFORT=low; . "$CONFIG"; ralph_claude_flags)"
-  assert_eq "overridden flags" "--model sonnet --effort low --permission-mode bypassPermissions" "$_flags"
-}
-
-# ═══════════════════════════════════════════════════════════════════
 # Main
 # ═══════════════════════════════════════════════════════════════════
 
@@ -184,7 +169,6 @@ main() {
   test_env_override
   test_validate_numeric
   test_validate_all
-  test_claude_flags
 
   echo ""
   echo "========================================="

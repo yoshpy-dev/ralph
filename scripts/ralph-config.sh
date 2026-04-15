@@ -55,9 +55,3 @@ validate_all_numeric() {
   validate_numeric "RALPH_MAX_PARALLEL" "$RALPH_MAX_PARALLEL"
   validate_numeric "RALPH_SLICE_TIMEOUT" "$RALPH_SLICE_TIMEOUT"
 }
-
-# ralph_claude_flags — return the common claude -p flags
-# Usage: claude -p $(ralph_claude_flags) < prompt.md
-ralph_claude_flags() {
-  printf '%s' "--model ${RALPH_MODEL} --effort ${RALPH_EFFORT} --permission-mode ${RALPH_PERMISSION_MODE}"
-}

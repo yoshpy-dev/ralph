@@ -54,6 +54,8 @@ while [ $# -gt 0 ]; do
   shift
 done
 
+validate_all_numeric
+
 if [ -z "$PLAN_FILE" ]; then
   echo "Error: --plan <directory> is required"
   usage
@@ -108,8 +110,8 @@ cleanup_on_exit() {
   if [ -f "${ORCH_STATE}/orchestrator.json" ] && [ "$_exit_code" -ne 0 ]; then
     if command -v jq >/dev/null 2>&1; then
       jq --arg s "interrupted" '.status = $s | .ended = "'"$(ts)"'"' \
-        "${ORCH_STATE}/orchestrator.json" > "${ORCH_STATE}/orchestrator.tmp.json" 2>/dev/null \
-        && mv "${ORCH_STATE}/orchestrator.tmp.json" "${ORCH_STATE}/orchestrator.json" 2>/dev/null || true
+        "${ORCH_STATE}/orchestrator.json" > "${ORCH_STATE}/orchestrator.tmp.$$.json" 2>/dev/null \
+        && mv "${ORCH_STATE}/orchestrator.tmp.$$.json" "${ORCH_STATE}/orchestrator.json" 2>/dev/null || true
     fi
   fi
 }
@@ -932,8 +934,8 @@ REPORT_JSON
   jq --arg s "$([ "$_failed" -gt 0 ] && echo "partial" || echo "complete")" \
     --arg pr "${_pr_url}" \
     '.status = $s | .ended = "'"$(ts)"'" | .pr_url = $pr' \
-    "${ORCH_STATE}/orchestrator.json" > "${ORCH_STATE}/orchestrator.tmp.json" \
-    && mv "${ORCH_STATE}/orchestrator.tmp.json" "${ORCH_STATE}/orchestrator.json"
+    "${ORCH_STATE}/orchestrator.json" > "${ORCH_STATE}/orchestrator.tmp.$$.json" \
+    && mv "${ORCH_STATE}/orchestrator.tmp.$$.json" "${ORCH_STATE}/orchestrator.json"
 
   if [ "$_failed" -gt 0 ]; then
     log_error "Some slices failed. Check individual slice logs in ${ORCH_STATE}/"

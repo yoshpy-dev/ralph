@@ -64,6 +64,9 @@ while [ $# -gt 0 ]; do
   shift
 done
 
+# Validate all numeric config (catches bad env vars even without CLI args)
+validate_all_numeric
+
 # ═══════════════════════════════════════════════════════════════════
 # Cleanup trap
 # ═══════════════════════════════════════════════════════════════════
@@ -291,7 +294,7 @@ run_preflight() {
     _probe_prompt="${PIPELINE_DIR}/.preflight-probe.txt"
     mkdir -p "$PIPELINE_DIR"
     printf 'Reply with exactly the text PROBE_OK if you can read CLAUDE.md in this repository. Nothing else.' > "$_probe_prompt"
-    _probe_output="$(claude -p --model "$RALPH_MODEL" --effort "$RALPH_EFFORT" --output-format text < "$_probe_prompt" 2>/dev/null || true)"
+    _probe_output="$(claude -p --model "$RALPH_MODEL" --effort "$RALPH_EFFORT" --permission-mode "$RALPH_PERMISSION_MODE" --output-format text < "$_probe_prompt" 2>/dev/null || true)"
     if printf '%s' "$_probe_output" | grep -q 'PROBE_OK'; then
       _claudemd_check="pass"
     else
@@ -326,7 +329,7 @@ run_preflight() {
     _json_probe_prompt="${PIPELINE_DIR}/.json-probe.txt"
     mkdir -p "$PIPELINE_DIR"
     printf 'Reply with exactly the text JSON_PROBE_OK. Nothing else.' > "$_json_probe_prompt"
-    _json_probe_raw="$(claude -p --model "$RALPH_MODEL" --effort "$RALPH_EFFORT" --output-format json < "$_json_probe_prompt" 2>/dev/null || true)"
+    _json_probe_raw="$(claude -p --model "$RALPH_MODEL" --effort "$RALPH_EFFORT" --permission-mode "$RALPH_PERMISSION_MODE" --output-format json < "$_json_probe_prompt" 2>/dev/null || true)"
     rm -f "$_json_probe_prompt"
     if printf '%s' "$_json_probe_raw" | jq -e '.result' >/dev/null 2>&1; then
       _json_check="pass"
