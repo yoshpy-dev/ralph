@@ -408,4 +408,3 @@ func (m *appModel) resizePanes() {
 	m.logView.SetSize(logsW-2, lowerHeight-2)
 	m.progress.SetWidth(w)
 }
-

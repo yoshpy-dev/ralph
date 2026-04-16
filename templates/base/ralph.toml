@@ -1,0 +1,16 @@
+# ralph.toml — project-level configuration for the ralph CLI.
+
+[pipeline]
+model = "claude-sonnet-4-20250514"
+effort = "high"
+max_iterations = 20
+max_parallel = 4
+slice_timeout = "30m"
+permission_mode = "auto"
+
+[pipeline.prompts]
+dir = ".ralph/prompts"
+
+[doctor]
+require_claude_cli = true
+require_go = false
