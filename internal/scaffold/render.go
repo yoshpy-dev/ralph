@@ -81,19 +81,33 @@ func RenderFS(src fs.FS, opts RenderOptions) (*RenderResult, map[string]string, 
 			return fmt.Errorf("creating parent dir for %s: %w", path, err)
 		}
 
-		// Preserve execute permission for .sh files.
-		perm := fs.FileMode(0644)
-		if info, infoErr := d.Info(); infoErr == nil && info.Mode().Perm()&0111 != 0 {
-			perm = 0755
-		} else if strings.HasSuffix(path, ".sh") {
-			perm = 0755
-		}
+		// Determine file permission. go:embed returns 0444 for all files,
+		// so we cannot rely on FS metadata for execute bits. Instead, use
+		// suffix and name heuristics to identify executable scripts.
+		perm := filePerm(path)
 
 		return os.WriteFile(target, content, perm)
 	})
 
 	return result, hashes, err
 }
+
+// FilePerm returns the appropriate file permission for the given path.
+// Shell scripts (.sh suffix) and the extensionless "ralph" script in
+// scripts/ get 0755; all others get 0644.
+// Note: go:embed returns 0444 for all files, so FS metadata cannot be used.
+func FilePerm(path string) fs.FileMode {
+	if strings.HasSuffix(path, ".sh") {
+		return 0755
+	}
+	if filepath.Base(path) == "ralph" && strings.Contains(path, "scripts/") {
+		return 0755
+	}
+	return 0644
+}
+
+// filePerm is an unexported alias for internal use in this package.
+func filePerm(path string) fs.FileMode { return FilePerm(path) }
 
 // HashBytes returns the SHA256 hash of data as "sha256:<hex>".
 func HashBytes(data []byte) string {

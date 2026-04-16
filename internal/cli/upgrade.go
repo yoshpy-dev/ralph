@@ -6,27 +6,12 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/yoshpy-dev/harness-engineering-scaffolding-template/internal/scaffold"
 	"github.com/yoshpy-dev/harness-engineering-scaffolding-template/internal/upgrade"
 )
-
-// filePerm returns the appropriate file permission for the given path.
-// Shell scripts (.sh suffix or shebang-bearing extensionless files like "ralph")
-// get 0755; all others get 0644.
-func filePerm(path string) fs.FileMode {
-	if strings.HasSuffix(path, ".sh") {
-		return 0755
-	}
-	// The "ralph" script in scripts/ has no extension but needs execute permission.
-	if filepath.Base(path) == "ralph" && strings.Contains(path, "scripts") {
-		return 0755
-	}
-	return 0644
-}
 
 func newUpgradeCmd() *cobra.Command {
 	var force bool
@@ -109,7 +94,7 @@ func runUpgrade(targetDir string, force bool) error {
 			if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
 				return fmt.Errorf("creating parent dir for %s: %w", d.Path, err)
 			}
-			if err := os.WriteFile(targetPath, d.NewContent, filePerm(d.Path)); err != nil {
+			if err := os.WriteFile(targetPath, d.NewContent, scaffold.FilePerm(d.Path)); err != nil {
 				return fmt.Errorf("writing %s: %w", d.Path, err)
 			}
 			manifest.SetFile(d.Path, d.NewHash)
@@ -119,7 +104,7 @@ func runUpgrade(targetDir string, force bool) error {
 		case upgrade.ActionConflict:
 			if force {
 				targetPath := filepath.Join(absDir, d.Path)
-				if err := os.WriteFile(targetPath, d.NewContent, filePerm(d.Path)); err != nil {
+				if err := os.WriteFile(targetPath, d.NewContent, scaffold.FilePerm(d.Path)); err != nil {
 					return fmt.Errorf("writing %s: %w", d.Path, err)
 				}
 				manifest.SetFile(d.Path, d.NewHash)
@@ -131,7 +116,7 @@ func runUpgrade(targetDir string, force bool) error {
 				switch resolution {
 				case "overwrite":
 					targetPath := filepath.Join(absDir, d.Path)
-					if err := os.WriteFile(targetPath, d.NewContent, filePerm(d.Path)); err != nil {
+					if err := os.WriteFile(targetPath, d.NewContent, scaffold.FilePerm(d.Path)); err != nil {
 						return fmt.Errorf("writing %s: %w", d.Path, err)
 					}
 					manifest.SetFile(d.Path, d.NewHash)
@@ -150,7 +135,7 @@ func runUpgrade(targetDir string, force bool) error {
 			if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
 				return fmt.Errorf("creating parent dir for %s: %w", d.Path, err)
 			}
-			if err := os.WriteFile(targetPath, d.NewContent, filePerm(d.Path)); err != nil {
+			if err := os.WriteFile(targetPath, d.NewContent, scaffold.FilePerm(d.Path)); err != nil {
 				return fmt.Errorf("writing %s: %w", d.Path, err)
 			}
 			manifest.SetFile(d.Path, d.NewHash)
