@@ -2,6 +2,9 @@ package scaffold
 
 import (
 	"io/fs"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 	"testing/fstest"
 )
@@ -41,6 +44,52 @@ func TestAvailablePacks_WithMockFS(t *testing.T) {
 // TestEmbedFSInterface verifies the exported variable is the right type.
 func TestEmbedFSInterface(t *testing.T) {
 	var _ = EmbeddedFS // type is embed.FS
+}
+
+// TestTemplateBaseScriptsExist verifies all required scripts are present
+// in templates/base/scripts/ on disk. This catches distribution gaps where
+// template docs reference scripts that are not actually included.
+func TestTemplateBaseScriptsExist(t *testing.T) {
+	// Locate the repo root from this test file's location.
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("cannot determine test file location")
+	}
+	// thisFile is internal/scaffold/embed_test.go → repo root is ../../
+	repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..")
+	scriptsDir := filepath.Join(repoRoot, "templates", "base", "scripts")
+
+	required := []string{
+		"run-verify.sh",
+		"run-static-verify.sh",
+		"run-test.sh",
+		"detect-languages.sh",
+		"archive-plan.sh",
+		"new-feature-plan.sh",
+		"new-ralph-plan.sh",
+		"codex-check.sh",
+		"ralph-loop-init.sh",
+		"ralph-loop.sh",
+		"ralph",
+		"ralph-config.sh",
+		"ralph-orchestrator.sh",
+		"ralph-pipeline.sh",
+		"ralph-status-helpers.sh",
+		"commit-msg-guard.sh",
+	}
+
+	for _, name := range required {
+		path := filepath.Join(scriptsDir, name)
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Errorf("required script missing: templates/base/scripts/%s", name)
+			continue
+		}
+		// Verify executable permission on Unix.
+		if runtime.GOOS != "windows" && info.Mode().Perm()&0111 == 0 {
+			t.Errorf("script not executable: templates/base/scripts/%s (mode %o)", name, info.Mode().Perm())
+		}
+	}
 }
 
 // TestAvailablePacksExcludesTemplate verifies _template is excluded.
