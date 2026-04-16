@@ -109,10 +109,10 @@ cmd_run() {
 
   # Auto-detect plan if not specified
   if [ -z "$_plan" ]; then
-    # Check for directory-based plans (newest by modification time)
+    # Check for directory-based plans (newest by name — date-prefixed names sort chronologically)
     _plan="$(find docs/plans/active -maxdepth 1 -type d ! -name active 2>/dev/null | while read -r d; do
       if [ -f "${d}/_manifest.md" ]; then echo "$d"; fi
-    done | head -1 || true)"
+    done | sort -r | head -1 || true)"
     if [ -z "$_plan" ]; then
       echo "Error: no directory-based plan found. Create one with './scripts/new-ralph-plan.sh <slug>' or specify --plan <directory>"
       exit 1

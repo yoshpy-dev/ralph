@@ -185,10 +185,13 @@ run_hook_parity() {
   if [ -x ./scripts/commit-msg-guard.sh ]; then
     _last_msg="$(git log -1 --format='%B' 2>/dev/null || true)"
     if [ -n "$_last_msg" ]; then
-      if ! printf '%s' "$_last_msg" | ./scripts/commit-msg-guard.sh 2>/dev/null; then
+      _tmp_msg="$(mktemp)"
+      printf '%s' "$_last_msg" > "$_tmp_msg"
+      if ! ./scripts/commit-msg-guard.sh "$_tmp_msg" 2>/dev/null; then
         _secret_check="fail"
         _all_pass=false
       fi
+      rm -f "$_tmp_msg"
     fi
   fi
   _checks="$(printf '%s' "$_checks" | jq --arg s "$_secret_check" '. += [{"check":"secret_leak_detection","result":$s}]')"

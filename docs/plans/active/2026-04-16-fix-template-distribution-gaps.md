@@ -131,6 +131,13 @@
 - テンプレートファイルの追加のみ。既存ファイルの変更は quality-gates.md と git-commit-strategy.md のみ
 - `ralph upgrade` でスクリプトが既存プロジェクトに追加される（新規ファイルは add 判定）
 
+## Deviations
+
+- **2026-04-16**: Codex WORTH_CONSIDERING 3件をユーザー判断でスコープに追加。ソーススクリプト側とテンプレート側の両方を修正する。
+  1. `ralph-pipeline.sh:185-188` — commit-msg-guard.sh の呼び出し方法修正
+  2. `new-ralph-plan.sh:92` — 無効な `--slices` フラグを修正
+  3. `ralph:112-115` — plan 自動検出のソート修正
+
 ## Open questions
 
 なし
