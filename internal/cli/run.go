@@ -44,7 +44,10 @@ func newRunCmd() *cobra.Command {
 
 func runPipeline(planPath string, maxIter, maxPar int, preflight, resume, dryRun, unifiedPR bool) error {
 	// Load config for defaults.
-	cfg, _ := config.Load("ralph.toml")
+	cfg, err := config.Load("ralph.toml")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: ralph.toml parse error: %v — using defaults\n", err)
+	}
 
 	// Build environment from TOML config.
 	env := os.Environ()

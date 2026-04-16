@@ -30,8 +30,16 @@ type checkResult struct {
 }
 
 func runDoctor(targetDir string) error {
-	cfg, _ := config.Load(filepath.Join(targetDir, "ralph.toml"))
+	cfg, cfgErr := config.Load(filepath.Join(targetDir, "ralph.toml"))
 	var results []checkResult
+
+	if cfgErr != nil && !os.IsNotExist(cfgErr) {
+		results = append(results, checkResult{
+			Name:   "ralph.toml",
+			Status: "warn",
+			Detail: fmt.Sprintf("parse error: %v — using defaults", cfgErr),
+		})
+	}
 
 	// Check 1: Claude Code CLI.
 	results = append(results, checkClaudeCLI(cfg))
@@ -72,11 +80,20 @@ func runDoctor(targetDir string) error {
 	fmt.Println()
 	if allPass {
 		fmt.Println("All checks passed.")
-	} else {
-		fmt.Println("Some checks failed. Fix the issues above.")
+		return nil
 	}
+	fmt.Println("Some checks failed. Fix the issues above.")
+	return fmt.Errorf("doctor: %d check(s) failed", countFailed(results))
+}
 
-	return nil
+func countFailed(results []checkResult) int {
+	n := 0
+	for _, r := range results {
+		if r.Status == "fail" {
+			n++
+		}
+	}
+	return n
 }
 
 func checkClaudeCLI(cfg config.Config) checkResult {

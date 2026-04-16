@@ -96,7 +96,8 @@ func runStatusJSON(orchDir, worktreeBase, planDir string) error {
 }
 
 func runStatusTable(orchDir, worktreeBase, planDir string) error {
-	// Fallback table output — delegates to the same state reader.
+	// TODO: implement proper table rendering. Currently uses the same
+	// simple output as JSON mode. This will be replaced in Phase 6b.
 	return runStatusJSON(orchDir, worktreeBase, planDir)
 }
 

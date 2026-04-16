@@ -2,7 +2,9 @@ package scaffold
 
 import (
 	"embed"
+	"fmt"
 	"io/fs"
+	"slices"
 )
 
 // EmbeddedFS holds the embedded template filesystem.
@@ -16,7 +18,15 @@ func BaseFS() (fs.FS, error) {
 }
 
 // PackFS returns the filesystem for a specific language pack.
+// The lang parameter is validated against the known pack list.
 func PackFS(lang string) (fs.FS, error) {
+	packs, err := AvailablePacks()
+	if err != nil {
+		return nil, err
+	}
+	if !slices.Contains(packs, lang) {
+		return nil, fmt.Errorf("unknown language pack: %q", lang)
+	}
 	return fs.Sub(EmbeddedFS, "templates/packs/"+lang)
 }
 

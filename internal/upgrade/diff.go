@@ -2,6 +2,7 @@ package upgrade
 
 import (
 	"io/fs"
+	"path/filepath"
 
 	"github.com/yoshpy-dev/harness-engineering-scaffolding-template/internal/scaffold"
 )
@@ -64,7 +65,7 @@ func ComputeDiffs(manifestPath string, targetDir string, newFS fs.FS) ([]FileDif
 		}
 
 		// File exists in manifest. Check disk state.
-		diskPath := targetDir + "/" + path
+		diskPath := filepath.Join(targetDir, path)
 		diskHash, diskErr := scaffold.HashFile(diskPath)
 
 		if diskErr != nil {
