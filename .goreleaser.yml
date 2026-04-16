@@ -42,6 +42,7 @@ brews:
   - repository:
       owner: yoshpy-dev
       name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     homepage: "https://github.com/yoshpy-dev/harness-engineering-scaffolding-template"
     description: "Harness engineering scaffold and autonomous pipeline CLI"
     license: MIT
