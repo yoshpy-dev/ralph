@@ -29,7 +29,19 @@ type FileDiff struct {
 }
 
 // ComputeDiffs compares the manifest, disk state, and new template to determine actions.
+// Use CheckRemovals=true only for the primary (base) FS, not for supplementary pack FSes.
 func ComputeDiffs(manifestPath string, targetDir string, newFS fs.FS) ([]FileDiff, error) {
+	return computeDiffsOpts(manifestPath, targetDir, newFS, true)
+}
+
+// ComputeDiffsNoRemovals is like ComputeDiffs but skips removal detection.
+// Use for supplementary FS layers (language packs) where missing base files
+// should not trigger removal notifications.
+func ComputeDiffsNoRemovals(manifestPath string, targetDir string, newFS fs.FS) ([]FileDiff, error) {
+	return computeDiffsOpts(manifestPath, targetDir, newFS, false)
+}
+
+func computeDiffsOpts(manifestPath string, targetDir string, newFS fs.FS, checkRemovals bool) ([]FileDiff, error) {
 	manifest, err := scaffold.ReadManifest(manifestPath)
 	if err != nil {
 		return nil, err
@@ -118,13 +130,16 @@ func ComputeDiffs(manifestPath string, targetDir string, newFS fs.FS) ([]FileDif
 	}
 
 	// Check for files in manifest that are no longer in the template → remove notification.
-	for path := range manifest.Files {
-		if !newFiles[path] {
-			diffs = append(diffs, FileDiff{
-				Path:    path,
-				Action:  ActionRemove,
-				OldHash: manifest.Files[path].Hash,
-			})
+	// Only performed for the primary FS (base), not for supplementary pack FSes.
+	if checkRemovals {
+		for path := range manifest.Files {
+			if !newFiles[path] {
+				diffs = append(diffs, FileDiff{
+					Path:    path,
+					Action:  ActionRemove,
+					OldHash: manifest.Files[path].Hash,
+				})
+			}
 		}
 	}
 

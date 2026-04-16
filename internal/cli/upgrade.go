@@ -66,7 +66,7 @@ func runUpgrade(targetDir string, force bool) error {
 		if pErr != nil {
 			continue
 		}
-		packDiffs, pErr := upgrade.ComputeDiffs(manifestPath, absDir, packFS)
+		packDiffs, pErr := upgrade.ComputeDiffsNoRemovals(manifestPath, absDir, packFS)
 		if pErr != nil {
 			continue
 		}

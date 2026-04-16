@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -50,8 +51,8 @@ func runDoctor(targetDir string) error {
 	// Check 3: Manifest version.
 	results = append(results, checkManifestVersion(targetDir))
 
-	// Check 4: Language pack verify.sh.
-	results = append(results, checkLanguagePacks()...)
+	// Check 4: Language pack verify.sh (checks project's installed packs via manifest).
+	results = append(results, checkInstalledPacks(targetDir)...)
 
 	// Check 5: Go availability.
 	results = append(results, checkGo(cfg))
@@ -204,7 +205,73 @@ func checkManifestVersion(targetDir string) checkResult {
 	return r
 }
 
-func checkLanguagePacks() []checkResult {
+// checkInstalledPacks checks packs that are actually installed in the project
+// (detected from manifest), not just what's available in embedded templates.
+func checkInstalledPacks(targetDir string) []checkResult {
+	manifestPath := filepath.Join(targetDir, ".ralph", "manifest.toml")
+	m, err := scaffold.ReadManifest(manifestPath)
+	if err != nil {
+		// No manifest — fall back to checking embedded packs.
+		return checkEmbeddedPacks()
+	}
+
+	// Detect installed packs by checking which pack files appear in the manifest.
+	availPacks, err := scaffold.AvailablePacks()
+	if err != nil {
+		return []checkResult{{Name: "Language packs", Status: "warn", Detail: "could not list packs"}}
+	}
+
+	installedPacks := make(map[string]bool)
+	for _, p := range availPacks {
+		packFS, pErr := scaffold.PackFS(p)
+		if pErr != nil {
+			continue
+		}
+		// If any file from this pack is in the manifest, the pack is installed.
+		_ = fs.WalkDir(packFS, ".", func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return err
+			}
+			if _, ok := m.Files[path]; ok {
+				installedPacks[p] = true
+				return fs.SkipAll
+			}
+			return nil
+		})
+	}
+
+	if len(installedPacks) == 0 {
+		return []checkResult{{Name: "Language packs", Status: "pass", Detail: "none installed"}}
+	}
+
+	var results []checkResult
+	for p := range installedPacks {
+		r := checkResult{Name: fmt.Sprintf("Pack: %s", p)}
+		// Check that verify.sh is executable on disk.
+		verifyPath := filepath.Join(targetDir, "verify.sh")
+		packFS, pErr := scaffold.PackFS(p)
+		if pErr != nil {
+			r.Status = "warn"
+			r.Detail = "pack not found in templates"
+			results = append(results, r)
+			continue
+		}
+		if _, fErr := packFS.Open("verify.sh"); fErr != nil {
+			r.Status = "warn"
+			r.Detail = "verify.sh missing in template"
+		} else if _, sErr := os.Stat(verifyPath); os.IsNotExist(sErr) {
+			r.Status = "warn"
+			r.Detail = "verify.sh not found on disk"
+		} else {
+			r.Status = "pass"
+		}
+		results = append(results, r)
+	}
+	return results
+}
+
+// checkEmbeddedPacks is the fallback when no manifest exists.
+func checkEmbeddedPacks() []checkResult {
 	packs, err := scaffold.AvailablePacks()
 	if err != nil {
 		return []checkResult{{Name: "Language packs", Status: "warn", Detail: "could not list packs"}}
@@ -213,15 +280,14 @@ func checkLanguagePacks() []checkResult {
 	var results []checkResult
 	for _, p := range packs {
 		r := checkResult{Name: fmt.Sprintf("Pack: %s", p)}
-		// Check if verify.sh exists in the pack.
-		packFS, err := scaffold.PackFS(p)
-		if err != nil {
+		packFS, pErr := scaffold.PackFS(p)
+		if pErr != nil {
 			r.Status = "warn"
 			r.Detail = "pack not found"
 			results = append(results, r)
 			continue
 		}
-		if _, err := packFS.Open("verify.sh"); err != nil {
+		if _, fErr := packFS.Open("verify.sh"); fErr != nil {
 			r.Status = "warn"
 			r.Detail = "verify.sh missing"
 		} else {

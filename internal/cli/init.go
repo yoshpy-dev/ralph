@@ -47,8 +47,6 @@ agents, rules, and pipeline settings. Supports both new and existing projects.`,
 type initConfig struct {
 	ProjectName string
 	Packs       []string
-	IncludeLoop bool
-	IncludeTUI  bool
 }
 
 func runInitInteractive(targetDir string) error {
@@ -61,14 +59,13 @@ func runInitInteractive(targetDir string) error {
 
 	cfg := initConfig{
 		ProjectName: defaultName,
-		IncludeLoop: true,
-		IncludeTUI:  true,
+		Packs:       availPacks, // Default: all packs selected.
 	}
 
-	// Build multi-select options for packs.
+	// Build multi-select options with all packs pre-selected.
 	packOptions := make([]huh.Option[string], len(availPacks))
 	for i, p := range availPacks {
-		packOptions[i] = huh.NewOption(p, p)
+		packOptions[i] = huh.NewOption(p, p).Selected(true)
 	}
 
 	form := huh.NewForm(
@@ -80,12 +77,6 @@ func runInitInteractive(targetDir string) error {
 				Title("Language packs").
 				Options(packOptions...).
 				Value(&cfg.Packs),
-			huh.NewConfirm().
-				Title("Include Ralph Loop (parallel slices)?").
-				Value(&cfg.IncludeLoop),
-			huh.NewConfirm().
-				Title("Include TUI monitoring?").
-				Value(&cfg.IncludeTUI),
 		),
 	)
 
@@ -105,8 +96,6 @@ func runInitNonInteractive(targetDir string) error {
 	cfg := initConfig{
 		ProjectName: filepath.Base(targetDir),
 		Packs:       availPacks,
-		IncludeLoop: true,
-		IncludeTUI:  true,
 	}
 
 	return executeInit(targetDir, cfg)

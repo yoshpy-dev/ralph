@@ -10,7 +10,8 @@ import (
 // EmbeddedFS holds the embedded template filesystem.
 // It is set from cmd/ralph/main.go where the go:embed directive lives
 // (embed directives can only reference files in the same package's directory tree).
-var EmbeddedFS embed.FS
+// Declared as fs.FS (not embed.FS) to allow test injection with fstest.MapFS.
+var EmbeddedFS fs.FS = embed.FS{}
 
 // BaseFS returns the filesystem rooted at templates/base/.
 func BaseFS() (fs.FS, error) {
