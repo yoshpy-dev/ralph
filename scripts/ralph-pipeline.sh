@@ -8,13 +8,16 @@ set -eu
 # State lives in .harness/state/pipeline/
 # Requires: claude CLI, jq, git
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "${SCRIPT_DIR}/ralph-config.sh"
+
 PIPELINE_DIR=".harness/state/pipeline"
 EVIDENCE_DIR="docs/evidence"
 REPORTS_DIR="docs/reports"
-MAX_ITERATIONS=20
-MAX_INNER_CYCLES=10
-MAX_OUTER_CYCLES=3
-MAX_REPAIR_ATTEMPTS=5
+MAX_ITERATIONS="$RALPH_MAX_ITERATIONS"
+MAX_INNER_CYCLES="$RALPH_MAX_INNER_CYCLES"
+MAX_OUTER_CYCLES="$RALPH_MAX_OUTER_CYCLES"
+MAX_REPAIR_ATTEMPTS="$RALPH_MAX_REPAIR_ATTEMPTS"
 DRY_RUN=0
 PREFLIGHT_ONLY=0
 RESUME=0
@@ -46,10 +49,10 @@ USAGE
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --max-iterations)     shift; MAX_ITERATIONS="${1:?requires a number}" ;;
-    --max-inner-cycles)   shift; MAX_INNER_CYCLES="${1:?requires a number}" ;;
-    --max-outer-cycles)   shift; MAX_OUTER_CYCLES="${1:?requires a number}" ;;
-    --max-repair-attempts) shift; MAX_REPAIR_ATTEMPTS="${1:?requires a number}" ;;
+    --max-iterations)     shift; MAX_ITERATIONS="${1:?requires a number}"; validate_numeric "--max-iterations" "$MAX_ITERATIONS" ;;
+    --max-inner-cycles)   shift; MAX_INNER_CYCLES="${1:?requires a number}"; validate_numeric "--max-inner-cycles" "$MAX_INNER_CYCLES" ;;
+    --max-outer-cycles)   shift; MAX_OUTER_CYCLES="${1:?requires a number}"; validate_numeric "--max-outer-cycles" "$MAX_OUTER_CYCLES" ;;
+    --max-repair-attempts) shift; MAX_REPAIR_ATTEMPTS="${1:?requires a number}"; validate_numeric "--max-repair-attempts" "$MAX_REPAIR_ATTEMPTS" ;;
     --skip-pr)            SKIP_PR=1 ;;
     --fix-all)            FIX_ALL=1 ;;
     --preflight)          PREFLIGHT_ONLY=1 ;;
@@ -60,6 +63,21 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
+
+# Validate all numeric config (catches bad env vars even without CLI args)
+validate_all_numeric
+
+# ═══════════════════════════════════════════════════════════════════
+# Cleanup trap
+# ═══════════════════════════════════════════════════════════════════
+
+_pipeline_cleanup() {
+  rm -f "${PIPELINE_DIR}/.impl-prompt.md" "${PIPELINE_DIR}/.review-prompt.md" \
+        "${PIPELINE_DIR}/.verify-prompt.md" "${PIPELINE_DIR}/.test-prompt.md" \
+        "${PIPELINE_DIR}/.docs-prompt.md" "${PIPELINE_DIR}/.pr-prompt.md" \
+        "${PIPELINE_DIR}/.preflight-probe.txt" "${PIPELINE_DIR}/.json-probe.txt" 2>/dev/null || true
+}
+trap _pipeline_cleanup EXIT
 
 # ═══════════════════════════════════════════════════════════════════
 # Utility functions
@@ -125,7 +143,7 @@ run_claude() {
   if [ "$JSON_OUTPUT_SUPPORTED" -eq 1 ]; then
     # JSON mode: separate stdout (JSON) from stderr
     # shellcheck disable=SC2086
-    claude -p --model opus --effort high --permission-mode bypassPermissions --output-format json ${_extra_args} < "$_prompt_file" > "${_log_file}.json" 2>"${_log_file}.stderr" || true
+    claude -p --model "$RALPH_MODEL" --effort "$RALPH_EFFORT" --permission-mode "$RALPH_PERMISSION_MODE" --output-format json ${_extra_args} < "$_prompt_file" > "${_log_file}.json" 2>"${_log_file}.stderr" || true
     # Extract .result from JSON; fall back to raw output on parse failure
     if jq -e '.result' "${_log_file}.json" >/dev/null 2>&1; then
       jq -r '.result // empty' "${_log_file}.json" > "$_log_file"
@@ -138,7 +156,7 @@ run_claude() {
   else
     # Text fallback mode (older claude CLI or JSON not supported)
     # shellcheck disable=SC2086
-    claude -p --model opus --effort high --permission-mode bypassPermissions --output-format text ${_extra_args} < "$_prompt_file" 2>&1 | tee "$_log_file"
+    claude -p --model "$RALPH_MODEL" --effort "$RALPH_EFFORT" --permission-mode "$RALPH_PERMISSION_MODE" --output-format text ${_extra_args} < "$_prompt_file" 2>&1 | tee "$_log_file"
     # No JSON sidecar in text mode
     : > "${_log_file}.json"
   fi
@@ -276,7 +294,7 @@ run_preflight() {
     _probe_prompt="${PIPELINE_DIR}/.preflight-probe.txt"
     mkdir -p "$PIPELINE_DIR"
     printf 'Reply with exactly the text PROBE_OK if you can read CLAUDE.md in this repository. Nothing else.' > "$_probe_prompt"
-    _probe_output="$(claude -p --model opus --effort high --output-format text < "$_probe_prompt" 2>/dev/null || true)"
+    _probe_output="$(claude -p --model "$RALPH_MODEL" --effort "$RALPH_EFFORT" --permission-mode "$RALPH_PERMISSION_MODE" --output-format text < "$_probe_prompt" 2>/dev/null || true)"
     if printf '%s' "$_probe_output" | grep -q 'PROBE_OK'; then
       _claudemd_check="pass"
     else
@@ -311,7 +329,7 @@ run_preflight() {
     _json_probe_prompt="${PIPELINE_DIR}/.json-probe.txt"
     mkdir -p "$PIPELINE_DIR"
     printf 'Reply with exactly the text JSON_PROBE_OK. Nothing else.' > "$_json_probe_prompt"
-    _json_probe_raw="$(claude -p --model opus --effort high --output-format json < "$_json_probe_prompt" 2>/dev/null || true)"
+    _json_probe_raw="$(claude -p --model "$RALPH_MODEL" --effort "$RALPH_EFFORT" --permission-mode "$RALPH_PERMISSION_MODE" --output-format json < "$_json_probe_prompt" 2>/dev/null || true)"
     rm -f "$_json_probe_prompt"
     if printf '%s' "$_json_probe_raw" | jq -e '.result' >/dev/null 2>&1; then
       _json_check="pass"
@@ -324,7 +342,17 @@ run_preflight() {
   _probes="$(printf '%s' "$_probes" | jq --arg s "$_json_check" '. += [{"probe":"json_output_format","result":$s}]')"
   log "  JSON output format: ${_json_check}"
 
-  # Probe 6: codex CLI (optional)
+  # Probe 6: gh CLI (optional but needed for PR creation)
+  _gh_check="not_available"
+  if command -v gh >/dev/null 2>&1; then
+    _gh_check="available"
+  else
+    log "Warning: gh CLI not found — PR creation will be unavailable"
+  fi
+  _probes="$(printf '%s' "$_probes" | jq --arg s "$_gh_check" '. += [{"probe":"gh_cli","result":$s}]')"
+  log "  gh CLI: ${_gh_check}"
+
+  # Probe 7: codex CLI (optional)
   _codex_check="not_available"
   if [ -x ./scripts/codex-check.sh ]; then
     if ./scripts/codex-check.sh >/dev/null 2>&1; then
@@ -744,6 +772,11 @@ DOCS
   fi
 
   log "--- Phase: PR creation ---"
+  if ! command -v gh >/dev/null 2>&1; then
+    log_error "gh CLI not found — cannot create PR. Install gh and retry."
+    ckpt_update '.status = "gh_unavailable"'
+    return 2  # distinct from 1 (ACTION_REQUIRED) — terminal config error
+  fi
   _pr_log="${PIPELINE_DIR}/outer-${_cycle}-pr.log"
   _pr_prompt="${PIPELINE_DIR}/.pr-prompt.md"
 
@@ -949,6 +982,11 @@ INIT_JSON
         _inner_cycle=$((_inner_cycle + 1))
         _context="codex ACTION_REQUIRED — regressed from Outer Loop"
         ckpt_transition "outer" "inner" "codex ACTION_REQUIRED"
+        ;;
+      2) # Terminal config error (e.g., gh_unavailable) → stop pipeline
+        log "=== Pipeline stopped: missing dependency ==="
+        _finalize "gh_unavailable"
+        return 0
         ;;
     esac
   done

@@ -124,8 +124,34 @@ All loop state lives in `.harness/state/loop/`:
 | Stuck detection | 3 consecutive iterations with no git diff → auto-stop |
 | Completion gate | Agent must output `<promise>COMPLETE</promise>` explicitly |
 | Abort signal | Agent can output `<promise>ABORT</promise>` when blocked |
+| Slice timeout | `RALPH_SLICE_TIMEOUT` seconds per slice (default 1800 = 30 min) |
+| Signal handling | Separate INT/TERM and EXIT traps with `_INTERRUPTED` flag for clean signal/exit discrimination |
+| Numeric validation | All numeric config values validated at startup |
 | Verification | `--verify` flag runs `run-verify.sh` after each iteration |
 | Prompt rules | Safety rules embedded in every template (no sudo, no force push) |
+
+### Configuration via environment variables
+
+All Ralph pipeline settings are centralized in `scripts/ralph-config.sh`. Override any default via environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RALPH_MODEL` | `opus` | Claude model name |
+| `RALPH_EFFORT` | `high` | Effort level for `claude -p` |
+| `RALPH_PERMISSION_MODE` | `bypassPermissions` | Permission mode for `claude -p` |
+| `RALPH_MAX_ITERATIONS` | `20` | Total iteration cap across all cycles |
+| `RALPH_MAX_INNER_CYCLES` | `10` | Max Inner Loop cycles before escalation |
+| `RALPH_MAX_OUTER_CYCLES` | `3` | Max Outer Loop regressions before escalation |
+| `RALPH_MAX_REPAIR_ATTEMPTS` | `5` | Max fix attempts per failing test |
+| `RALPH_MAX_PARALLEL` | `4` | Max concurrent worktree pipelines |
+| `RALPH_SLICE_TIMEOUT` | `1800` | Per-slice timeout in seconds |
+
+Priority: CLI argument > environment variable > default value.
+
+Example:
+```sh
+RALPH_MODEL=sonnet RALPH_SLICE_TIMEOUT=3600 ./scripts/ralph run --plan <dir> --unified-pr
+```
 
 ### Commit verification
 

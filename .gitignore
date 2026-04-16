@@ -4,6 +4,7 @@
 node_modules/
 dist/
 build/
+bin/
 target/
 .venv/
 __pycache__/
@@ -18,6 +19,9 @@ __pycache__/
 .harness/logs/
 .harness/state/
 !.harness/state/.gitkeep
+
+# Go test coverage artifacts
+coverage.out
 
 # Auto-generated verification evidence (run-verify.sh output)
 docs/evidence/*.log

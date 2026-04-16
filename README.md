@@ -38,6 +38,13 @@ The default philosophy here is:
 │   ├── skills/
 │   ├── agents/
 │   └── rules/
+├── cmd/
+│   └── ralph-tui/          # TUI entrypoint (Go)
+├── internal/
+│   ├── state/              # Pipeline state reader
+│   ├── watcher/            # File system watcher
+│   ├── ui/                 # Bubble Tea TUI components
+│   └── action/             # CLI action executor
 ├── docs/
 │   ├── research/
 │   ├── architecture/
@@ -187,16 +194,33 @@ For large tasks that can be split into independent slices, the Ralph Loop runs p
 # Run the orchestrator
 ./scripts/ralph run --plan docs/plans/active/2026-01-01-my-feature/ --unified-pr
 
-# Check progress
+# Check progress (launches TUI when available, table output otherwise)
 ./scripts/ralph status
 
-# Safely stop
+# Table output only (skip TUI)
+./scripts/ralph status --no-tui
+
+# JSON output
+./scripts/ralph status --json
+
+# Retry a failed/stuck slice
+./scripts/ralph retry <slice-name>
+
+# Abort a single slice
+./scripts/ralph abort --slice <slice-name>
+
+# Abort all slices
 ./scripts/ralph abort
+
+# Build the TUI binary (requires Go 1.22+)
+./scripts/build-tui.sh
 ```
 
 Or use the `/loop` skill inside Claude Code for interactive setup.
 
-Safety rails include iteration limits, stuck detection (3 consecutive no-change iterations), Inner/Outer Loop architecture with repair attempt caps, and hook parity checks.
+When a TUI binary (`bin/ralph-tui`) is available and the terminal is a TTY, `ralph status` launches a Lazygit-style 4-pane interface for real-time slice monitoring, log tailing, and interactive retry/abort. If the binary is missing or outdated, it falls back to the existing table output.
+
+Safety rails include iteration limits, stuck detection (3 consecutive no-change iterations), Inner/Outer Loop architecture with repair attempt caps, slice timeout detection, signal handlers for clean shutdown, and hook parity checks. All pipeline settings (model, effort, permission mode, iteration caps, timeouts) are configurable via environment variables through `scripts/ralph-config.sh`.
 
 See `docs/recipes/ralph-loop.md` for the full guide.
 

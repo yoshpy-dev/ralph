@@ -42,6 +42,11 @@ Steps 4–9 run via subagents in 標準フロー. In Ralph Loop, they are handle
 
 ## Repo map
 
+- `cmd/ralph-tui/` — Go entrypoint for Bubble Tea TUI (`main.go`, `version.go`)
+- `internal/state/` — pipeline state reader (checkpoint, orchestrator, manifest parsing)
+- `internal/watcher/` — fsnotify-based file watcher with polling fallback
+- `internal/ui/` — Bubble Tea model, layout, panes, keybindings, styles
+- `internal/action/` — CLI action executor (retry, abort via `scripts/ralph`)
 - `docs/specs/` — spec files produced by `/spec` (`<date>-<slug>.md`)
 - `docs/plans/active/` — current plans (single files for standard flow; `<date>-<slug>/` directories with `_manifest.md` + `slice-*.md` for Ralph Loop)
 - `docs/plans/archive/` — completed plans
@@ -53,7 +58,7 @@ Steps 4–9 run via subagents in 標準フロー. In Ralph Loop, they are handle
 - `.claude/agents/` — specialized subagents
 - `.claude/hooks/` — deterministic runtime checks
 - `packs/languages/` — language-specific depth
-- `scripts/` — reusable verification and bootstrap scripts (includes `ralph` CLI, `ralph-pipeline.sh`, `ralph-orchestrator.sh`, `new-ralph-plan.sh`)
+- `scripts/` — reusable verification and bootstrap scripts (includes `ralph` CLI, `ralph-config.sh`, `ralph-pipeline.sh`, `ralph-orchestrator.sh`, `new-ralph-plan.sh`, `build-tui.sh`)
 - `.harness/state/` — runtime state, not canonical truth
 
 ## Planning contract

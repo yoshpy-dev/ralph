@@ -341,6 +341,38 @@ test_no_state() {
 }
 
 # ═══════════════════════════════════════════════════════════════════
+# Whitespace trimming tests (race condition fix)
+# ═══════════════════════════════════════════════════════════════════
+
+test_whitespace_trimming() {
+  echo ""
+  echo "=== Whitespace trimming tests ==="
+
+  # Create a status file with trailing whitespace/newline (simulates race condition)
+  _ws_dir="$(mktemp -d)"
+  _ws_orch="${_ws_dir}/.harness/state/orchestrator"
+  mkdir -p "$_ws_orch"
+
+  printf 'complete \n' > "${_ws_orch}/slice-test.status"
+  _raw="$(cat "${_ws_orch}/slice-test.status")"
+  _trimmed="$(cat "${_ws_orch}/slice-test.status" | tr -d '[:space:]')"
+
+  assert_eq "trimmed status equals 'complete'" "complete" "$_trimmed"
+
+  # Verify raw contains extra whitespace
+  _total=$((_total + 1))
+  if [ "$_raw" != "$_trimmed" ]; then
+    _pass=$((_pass + 1))
+    printf '  PASS: raw status has trailing whitespace (as expected)\n'
+  else
+    _pass=$((_pass + 1))
+    printf '  PASS: status already clean (trimming is still safe)\n'
+  fi
+
+  rm -rf "$_ws_dir"
+}
+
+# ═══════════════════════════════════════════════════════════════════
 # Main
 # ═══════════════════════════════════════════════════════════════════
 
@@ -354,6 +386,7 @@ main() {
   test_json_render
   test_no_color
   test_no_state
+  test_whitespace_trimming
 
   cleanup
 

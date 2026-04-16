@@ -1,0 +1,11 @@
+{
+  "plan": "docs/plans/active/2026-04-15-ralph-tui/_manifest.md",
+  "started": "2026-04-15T06:00:00Z",
+  "ended": "2026-04-15T08:30:00Z",
+  "max_parallel": 3,
+  "max_iterations": 10,
+  "unified_pr": true,
+  "status": "complete",
+  "pr_url": "https://github.com/yoshpy-dev/harness-engineering-scaffolding-template/pull/42",
+  "integration_branch": "integration/ralph-tui"
+}

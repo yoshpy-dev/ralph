@@ -10,6 +10,8 @@ set -eu
 #   abort    Safely stop and clean up pipeline state
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "${SCRIPT_DIR}/ralph-config.sh"
+
 LOOP_DIR=".harness/state/loop"
 PIPELINE_DIR=".harness/state/pipeline"
 ORCH_STATE=".harness/state/orchestrator"
@@ -32,6 +34,7 @@ Commands:
   plan                       Start a planning session
   run [options]              Execute the orchestrator (parallel slices)
   status [options]           Show current pipeline progress
+  retry <slice-name>         Retry a failed/stuck slice via orchestrator
   abort [--slice <name>]     Safely stop and clean up
 
 Run Options:
@@ -52,6 +55,7 @@ Status Options:
   --watch                    Auto-refresh display (Ctrl+C to stop)
   --interval N               Refresh interval in seconds (default: 5, requires --watch)
   --no-color                 Disable ANSI color codes
+  --no-tui                   Force table output even when TUI binary is available
 
 Examples:
   ralph plan
@@ -60,6 +64,7 @@ Examples:
   ralph status
   ralph status --json
   ralph status --watch --interval 3
+  ralph retry my-slice
   ralph abort
 USAGE
 }
@@ -134,6 +139,7 @@ cmd_status() {
   _json_mode=0
   _watch_mode=0
   _watch_interval=5
+  _no_tui=0
   STATUS_NO_COLOR=0
 
   while [ $# -gt 0 ]; do
@@ -142,6 +148,7 @@ cmd_status() {
       --watch)     _watch_mode=1 ;;
       --interval)  shift; _watch_interval="${1:?requires a number}" ;;
       --no-color)  STATUS_NO_COLOR=1 ;;
+      --no-tui)    _no_tui=1 ;;
       *)           echo "Unknown status option: $1"; exit 1 ;;
     esac
     shift
@@ -149,30 +156,160 @@ cmd_status() {
 
   export STATUS_NO_COLOR
 
-  # Source helpers
+  # JSON mode always uses existing renderer (no TUI)
+  if [ "$_json_mode" -eq 1 ]; then
+    . "${SCRIPT_DIR}/ralph-status-helpers.sh"
+    detect_color
+    if [ "$_watch_mode" -eq 1 ]; then
+      trap 'printf "\n"; exit 0' INT
+      while true; do
+        clear
+        _render_json "$ORCH_STATE" "$WORKTREE_BASE"
+        sleep "$_watch_interval"
+      done
+    else
+      _render_json "$ORCH_STATE" "$WORKTREE_BASE"
+    fi
+    return
+  fi
+
+  # TUI mode: TTY + binary exists + not --no-tui + not outdated
+  _tui_bin="${SCRIPT_DIR}/../bin/ralph-tui"
+  if [ "$_no_tui" -eq 0 ] && [ -t 1 ] && [ -x "$_tui_bin" ]; then
+    # Check if binary is older than source
+    _newest_src="$(find "${SCRIPT_DIR}/../cmd" "${SCRIPT_DIR}/../internal" -name '*.go' -newer "$_tui_bin" 2>/dev/null | head -1)"
+    if [ -n "$_newest_src" ]; then
+      echo "Warning: bin/ralph-tui is outdated. Run scripts/build-tui.sh to rebuild." >&2
+      # Fall through to table output
+    else
+      if [ "$_watch_mode" -eq 1 ]; then
+        log "Note: --watch is ignored in TUI mode (TUI auto-refreshes)."
+      fi
+      # Auto-detect plan dir for dependency graph
+      _plan_dir="$(find docs/plans/active -maxdepth 1 -type d ! -name active 2>/dev/null | while read -r d; do
+        if [ -f "${d}/_manifest.md" ]; then echo "$d"; fi
+      done | head -1 || true)"
+      _plan_args=""
+      if [ -n "$_plan_dir" ]; then
+        _plan_args="--plan-dir ${_plan_dir}"
+      fi
+      # shellcheck disable=SC2086
+      exec "$_tui_bin" --orch-dir "$ORCH_STATE" --worktree-base "$WORKTREE_BASE" $_plan_args
+    fi
+  fi
+
+  # Table output (fallback)
   . "${SCRIPT_DIR}/ralph-status-helpers.sh"
   detect_color
 
   if [ "$_watch_mode" -eq 1 ]; then
-    # Watch mode: clear + render in a loop, trap SIGINT for clean exit
     trap 'printf "\n"; exit 0' INT
     while true; do
       clear
-      if [ "$_json_mode" -eq 1 ]; then
-        _render_json "$ORCH_STATE" "$WORKTREE_BASE"
-      else
-        _render_table "$ORCH_STATE" "$WORKTREE_BASE"
-        printf '\n%bAuto-refresh every %ds. Press Ctrl+C to stop.%b\n' "$C_DIM" "$_watch_interval" "$C_RESET"
-      fi
+      _render_table "$ORCH_STATE" "$WORKTREE_BASE"
+      printf '\n%bAuto-refresh every %ds. Press Ctrl+C to stop.%b\n' "$C_DIM" "$_watch_interval" "$C_RESET"
       sleep "$_watch_interval"
     done
   else
-    if [ "$_json_mode" -eq 1 ]; then
-      _render_json "$ORCH_STATE" "$WORKTREE_BASE"
-    else
-      _render_table "$ORCH_STATE" "$WORKTREE_BASE"
-    fi
+    _render_table "$ORCH_STATE" "$WORKTREE_BASE"
   fi
+}
+
+# ═══════════════════════════════════════════════════════════════════
+# Subcommand: retry
+# ═══════════════════════════════════════════════════════════════════
+
+cmd_retry() {
+  if [ $# -eq 0 ]; then
+    echo "Usage: ralph retry <slice-name>"
+    exit 1
+  fi
+  _slice="$1"
+
+  log "═══ Ralph Retry: ${_slice} ═══"
+
+  # --- Check slice status file ---
+  _status_file="${ORCH_STATE}/slice-${_slice}.status"
+  if [ ! -f "$_status_file" ]; then
+    log_error "No status file for slice '${_slice}'. Check the name and try again."
+    exit 1
+  fi
+
+  _current_status="$(cat "$_status_file" 2>/dev/null || echo "")"
+  case "$_current_status" in
+    failed|stuck|repair_limit|max_retries|config_error|timeout|gh_unavailable)
+      log "Slice '${_slice}' is in status '${_current_status}' — eligible for retry."
+      ;;
+    running)
+      log_error "Slice '${_slice}' is currently running. Abort it first if you want to restart."
+      exit 1
+      ;;
+    complete)
+      log_error "Slice '${_slice}' is already complete. Nothing to retry."
+      exit 1
+      ;;
+    pending)
+      log_error "Slice '${_slice}' is pending. It will be scheduled automatically."
+      exit 1
+      ;;
+    *)
+      log_error "Slice '${_slice}' has unexpected status '${_current_status}'."
+      exit 1
+      ;;
+  esac
+
+  # --- Check orchestrator is running ---
+  _orch_json="${ORCH_STATE}/orchestrator.json"
+  if [ ! -f "$_orch_json" ]; then
+    log_error "No orchestrator state found. Is the orchestrator running?"
+    exit 1
+  fi
+
+  # --- Parallel limit check ---
+  _running_count=0
+  for sf in "${ORCH_STATE}"/slice-*.status; do
+    [ -f "$sf" ] || continue
+    _s="$(cat "$sf" 2>/dev/null || echo "")"
+    if [ "$_s" = "running" ]; then
+      _running_count=$((_running_count + 1))
+    fi
+  done
+
+  _max_parallel=4
+  if command -v jq >/dev/null 2>&1 && [ -f "$_orch_json" ]; then
+    _mp="$(jq -r '.max_parallel // 4' "$_orch_json" 2>/dev/null || echo "4")"
+    _max_parallel="${_mp:-4}"
+  fi
+
+  if [ "$_running_count" -ge "$_max_parallel" ]; then
+    log_error "Already ${_running_count} slices running (max: ${_max_parallel}). Wait for one to finish."
+    exit 1
+  fi
+
+  # --- Locate worktree ---
+  _wt_path="${WORKTREE_BASE}/${_slice}"
+  if [ ! -d "$_wt_path" ]; then
+    log_error "Worktree not found: ${_wt_path}"
+    exit 1
+  fi
+
+  # --- Update status and reset timeout baseline ---
+  echo "running" > "$_status_file"
+  # Reset start time so the orchestrator's timeout check uses the retry time, not the original.
+  date -u +"%Y-%m-%dT%H:%M:%SZ" > "${ORCH_STATE}/slice-${_slice}.started"
+  log "Updated status to 'running' and reset start time."
+
+  # Launch pipeline in background
+  (
+    cd "$_wt_path"
+    "${SCRIPT_DIR}/ralph-pipeline.sh" --resume 2>&1
+  ) &
+  _pid=$!
+
+  # Record PID
+  echo "$_pid" > "${ORCH_STATE}/slice-${_slice}.pid"
+  log "Pipeline started (PID: ${_pid}) in worktree: ${_wt_path}"
+  log "Monitor with: ralph status"
 }
 
 # ═══════════════════════════════════════════════════════════════════
@@ -332,6 +469,7 @@ case "$_command" in
   plan)   cmd_plan "$@" ;;
   run)    cmd_run "$@" ;;
   status) cmd_status "$@" ;;
+  retry)  cmd_retry "$@" ;;
   abort)  cmd_abort "$@" ;;
   -h|--help) print_usage; exit 0 ;;
   *)      echo "Unknown command: ${_command}"; usage ;;

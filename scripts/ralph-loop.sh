@@ -5,8 +5,11 @@ set -eu
 # Runs `cat PROMPT.md | claude -p` in a loop with safety rails.
 # State lives in .harness/state/loop/
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "${SCRIPT_DIR}/ralph-config.sh"
+
 LOOP_DIR=".harness/state/loop"
-MAX_ITERATIONS=20
+MAX_ITERATIONS="$RALPH_MAX_ITERATIONS"
 VERIFY=0
 DRY_RUN=0
 
@@ -27,6 +30,7 @@ while [ $# -gt 0 ]; do
     --max-iterations)
       shift
       MAX_ITERATIONS="${1:?--max-iterations requires a number}"
+      validate_numeric "--max-iterations" "$MAX_ITERATIONS"
       ;;
     --verify)
       VERIFY=1
@@ -44,6 +48,8 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
+
+validate_all_numeric
 
 # --- Pre-flight checks ---
 
@@ -66,6 +72,13 @@ uncommitted_count=0
 if [ -f "${LOOP_DIR}/stuck.count" ]; then
   stuck_count="$(cat "${LOOP_DIR}/stuck.count")"
 fi
+
+_loop_interrupted() {
+  echo "interrupted" > "${LOOP_DIR}/status"
+  printf '\n=== Ralph Loop interrupted ===\n'
+  exit 130
+}
+trap _loop_interrupted INT TERM
 
 echo "running" > "${LOOP_DIR}/status"
 
@@ -98,7 +111,7 @@ while [ "$iteration" -lt "$MAX_ITERATIONS" ]; do
     echo "[dry-run] Output would be saved to: ${log_file}"
     echo "[dry-run] iteration ${iteration} complete" > "$log_file"
   else
-    cat "${LOOP_DIR}/PROMPT.md" | claude -p --model opus --effort high --permission-mode bypassPermissions 2>&1 | tee "$log_file"
+    cat "${LOOP_DIR}/PROMPT.md" | claude -p --model "$RALPH_MODEL" --effort "$RALPH_EFFORT" --permission-mode "$RALPH_PERMISSION_MODE" 2>&1 | tee "$log_file"
   fi
 
   # Check for completion signal

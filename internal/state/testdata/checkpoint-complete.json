@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "iteration": 5,
+  "phase": "outer",
+  "status": "complete",
+  "inner_cycle": 3,
+  "outer_cycle": 1,
+  "stuck_count": 0,
+  "last_test_result": "pass",
+  "test_failures": [],
+  "failure_triage": [
+    {
+      "iteration": 2,
+      "hypothesis": "missing import in types.go",
+      "action": "added import statement",
+      "result": "resolved"
+    }
+  ],
+  "self_review_result": "pass",
+  "verify_result": "pass",
+  "review_findings": [],
+  "codex_triage": {
+    "action_required": 0,
+    "worth_considering": 1,
+    "dismissed": 2
+  },
+  "acceptance_criteria_met": ["AC-1", "AC-2", "AC-3"],
+  "acceptance_criteria_remaining": [],
+  "session_id": "sess-abc-123",
+  "pr_created": true,
+  "pr_url": "https://github.com/yoshpy-dev/harness-engineering-scaffolding-template/pull/7",
+  "phase_transitions": [
+    {
+      "from": "preflight",
+      "to": "inner",
+      "timestamp": "2026-04-15T06:10:00Z",
+      "reason": "pipeline start"
+    },
+    {
+      "from": "inner",
+      "to": "outer",
+      "timestamp": "2026-04-15T07:00:00Z",
+      "reason": "tests passed"
+    }
+  ]
+}
