@@ -6,6 +6,9 @@ import (
 )
 
 // Model is the root Bubble Tea model for ralph-tui.
+// It manages pane focus, help overlay, and confirmation dialog.
+// Sub-model composition is done in cmd/ralph-tui/main.go (appModel)
+// to avoid import cycles between ui and ui/panes.
 type Model struct {
 	Width    int
 	Height   int
@@ -14,6 +17,7 @@ type Model struct {
 	Keys     KeyMap
 	Panes    PaneContents
 	Quitting bool
+	Confirm  ConfirmModel
 }
 
 // New creates a new Model with placeholder pane contents.
@@ -22,12 +26,13 @@ func New() Model {
 		Focused: PaneSlices,
 		Keys:    DefaultKeyMap(),
 		Panes: PaneContents{
-			Slices:  "Slices (placeholder)",
-			Detail:  "Detail (placeholder)",
-			Deps:    "Dependencies (placeholder)",
-			Actions: "Actions (placeholder)",
-			Logs:    "Logs (placeholder)",
+			Slices:  "Loading...",
+			Detail:  "No slice selected",
+			Deps:    "No dependencies",
+			Actions: "No actions",
+			Logs:    "No logs",
 		},
+		Confirm: NewConfirmModel(),
 	}
 }
 
@@ -38,6 +43,20 @@ func (m Model) Init() tea.Cmd {
 
 // Update handles incoming messages.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmds []tea.Cmd
+
+	// Confirmation dialog captures all input when visible.
+	if m.Confirm.Visible {
+		if kmsg, ok := msg.(tea.KeyPressMsg); ok {
+			var cmd tea.Cmd
+			m.Confirm, cmd = m.Confirm.Update(kmsg)
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			return m, tea.Batch(cmds...)
+		}
+	}
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.Width = msg.Width
@@ -79,9 +98,16 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.Focused = NextPane(m.Focused)
 	case key.Matches(msg, m.Keys.PrevPane):
 		m.Focused = PrevPane(m.Focused)
+	case key.Matches(msg, m.Keys.FocusDep):
+		m.Focused = PaneDeps
 	}
 
 	return m, nil
+}
+
+// ShowConfirm displays a confirmation dialog.
+func (m *Model) ShowConfirm(message, tag string) {
+	m.Confirm = m.Confirm.Show(message, tag)
 }
 
 // View renders the UI.
@@ -97,6 +123,17 @@ func (m Model) View() tea.View {
 		return tea.NewView(RenderHelp(m.Width, m.Height))
 	}
 
-	progress := " Progress: 0/0 (0%)"
-	return tea.NewView(RenderLayout(m.Width, m.Height, m.Panes, m.Focused, progress))
+	progress := m.Panes.Progress
+	if progress == "" {
+		progress = " Progress: 0/0 (0%)"
+	}
+
+	content := RenderLayout(m.Width, m.Height, m.Panes, m.Focused, progress)
+
+	// Overlay confirmation dialog if visible.
+	if m.Confirm.Visible {
+		content = content + "\n" + m.Confirm.View()
+	}
+
+	return tea.NewView(content)
 }

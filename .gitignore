@@ -20,6 +20,9 @@ __pycache__/
 .harness/state/
 !.harness/state/.gitkeep
 
+# Go test coverage artifacts
+coverage.out
+
 # Auto-generated verification evidence (run-verify.sh output)
 docs/evidence/*.log
 docs/evidence/*.json

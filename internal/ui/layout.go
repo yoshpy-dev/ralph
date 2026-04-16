@@ -8,14 +8,14 @@ import (
 )
 
 // PaneContents holds the rendered text for each pane.
-// Each field is a pre-rendered string. Slice 4/5 will replace
-// these with dynamic sub-model output.
+// Sub-models render their output into these strings via appModel.
 type PaneContents struct {
-	Slices  string
-	Detail  string
-	Deps    string
-	Actions string
-	Logs    string
+	Slices   string
+	Detail   string
+	Deps     string
+	Actions  string
+	Logs     string
+	Progress string
 }
 
 // MinWidth is the minimum terminal width for the full layout.

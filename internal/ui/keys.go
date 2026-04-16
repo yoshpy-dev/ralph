@@ -17,8 +17,8 @@ type KeyMap struct {
 	Abort    key.Binding
 	AbortAll key.Binding
 	ViewLog  key.Binding
-	Expand   key.Binding
-	Dismiss  key.Binding
+	Editor   key.Binding
+	FocusDep key.Binding
 	Search   key.Binding
 	Enter    key.Binding
 }
@@ -78,13 +78,13 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("L"),
 			key.WithHelp("L", "view log"),
 		),
-		Expand: key.NewBinding(
+		Editor: key.NewBinding(
 			key.WithKeys("e"),
-			key.WithHelp("e", "expand"),
+			key.WithHelp("e", "open editor"),
 		),
-		Dismiss: key.NewBinding(
+		FocusDep: key.NewBinding(
 			key.WithKeys("d"),
-			key.WithHelp("d", "dismiss"),
+			key.WithHelp("d", "focus deps"),
 		),
 		Search: key.NewBinding(
 			key.WithKeys("/"),

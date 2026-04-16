@@ -70,7 +70,7 @@ func StatusIcon(status string) string {
 		return "*"
 	case "pending":
 		return "-"
-	case "failed", "stuck", "repair_limit", "aborted", "config_error", "max_retries":
+	case "failed", "stuck", "repair_limit", "aborted", "config_error", "max_retries", "timeout", "gh_unavailable":
 		return "!"
 	default:
 		return "?"
@@ -86,7 +86,7 @@ func StatusColor(status string) color.Color {
 		return lipgloss.Color("#00FFFF")
 	case "pending":
 		return lipgloss.Color("#808080")
-	case "failed", "stuck", "repair_limit", "aborted", "config_error", "max_retries":
+	case "failed", "stuck", "repair_limit", "aborted", "config_error", "max_retries", "timeout", "gh_unavailable":
 		return lipgloss.Color("#FF0000")
 	default:
 		return lipgloss.Color("#808080")

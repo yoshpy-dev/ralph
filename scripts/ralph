@@ -237,7 +237,7 @@ cmd_retry() {
 
   _current_status="$(cat "$_status_file" 2>/dev/null || echo "")"
   case "$_current_status" in
-    failed|stuck|repair_limit|max_retries|config_error)
+    failed|stuck|repair_limit|max_retries|config_error|timeout|gh_unavailable)
       log "Slice '${_slice}' is in status '${_current_status}' — eligible for retry."
       ;;
     running)

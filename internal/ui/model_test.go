@@ -126,8 +126,8 @@ func TestDefaultKeyMap(t *testing.T) {
 		{"Abort", km.Abort.Keys()},
 		{"AbortAll", km.AbortAll.Keys()},
 		{"ViewLog", km.ViewLog.Keys()},
-		{"Expand", km.Expand.Keys()},
-		{"Dismiss", km.Dismiss.Keys()},
+		{"Editor", km.Editor.Keys()},
+		{"FocusDep", km.FocusDep.Keys()},
 		{"Search", km.Search.Keys()},
 		{"Enter", km.Enter.Keys()},
 	}
@@ -282,7 +282,7 @@ func TestNew(t *testing.T) {
 		t.Error("New().Quitting should be false")
 	}
 	if m.Panes.Slices == "" {
-		t.Error("New().Panes.Slices should not be empty")
+		t.Error("New().Panes.Slices should have default text")
 	}
 }
 

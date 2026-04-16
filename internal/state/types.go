@@ -6,15 +6,17 @@ import "time"
 type SliceStatus = string
 
 const (
-	StatusComplete    SliceStatus = "complete"
-	StatusRunning     SliceStatus = "running"
-	StatusPending     SliceStatus = "pending"
-	StatusFailed      SliceStatus = "failed"
-	StatusStuck       SliceStatus = "stuck"
-	StatusAborted     SliceStatus = "aborted"
-	StatusRepairLimit SliceStatus = "repair_limit"
-	StatusConfigError SliceStatus = "config_error"
-	StatusMaxRetries  SliceStatus = "max_retries"
+	StatusComplete      SliceStatus = "complete"
+	StatusRunning       SliceStatus = "running"
+	StatusPending       SliceStatus = "pending"
+	StatusFailed        SliceStatus = "failed"
+	StatusStuck         SliceStatus = "stuck"
+	StatusAborted       SliceStatus = "aborted"
+	StatusRepairLimit   SliceStatus = "repair_limit"
+	StatusConfigError   SliceStatus = "config_error"
+	StatusMaxRetries    SliceStatus = "max_retries"
+	StatusTimeout       SliceStatus = "timeout"
+	StatusGhUnavailable SliceStatus = "gh_unavailable"
 )
 
 // OrchestratorState represents the orchestrator.json file written by ralph-orchestrator.sh.
@@ -51,7 +53,7 @@ type SliceState struct {
 // CanRetry returns true if the slice is in a retryable status.
 func (s *SliceState) CanRetry() bool {
 	switch s.Status {
-	case StatusFailed, StatusStuck, StatusRepairLimit, StatusMaxRetries:
+	case StatusFailed, StatusStuck, StatusRepairLimit, StatusMaxRetries, StatusTimeout, StatusGhUnavailable:
 		return true
 	}
 	return false
