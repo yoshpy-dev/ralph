@@ -44,6 +44,12 @@ if [ -z "$VERSION" ]; then
   fi
 fi
 
+# Sanitize version string — allow only digits and dots.
+case "$VERSION" in
+  *[!0-9.]*) echo "Error: unexpected version format: $VERSION"; exit 1 ;;
+  "") echo "Error: empty version string."; exit 1 ;;
+esac
+
 # Download and verify.
 FILENAME="${BINARY}_${VERSION}_${OS}_${ARCH}.tar.gz"
 URL="https://github.com/${REPO}/releases/download/v${VERSION}/${FILENAME}"
@@ -63,7 +69,9 @@ if command -v sha256sum >/dev/null 2>&1; then
 elif command -v shasum >/dev/null 2>&1; then
   grep "$FILENAME" checksums.txt | shasum -a 256 -c --quiet
 else
-  echo "Warning: no checksum tool found, skipping verification."
+  echo "Error: no checksum verification tool found (sha256sum or shasum required)."
+  echo "Install one of these tools or verify the binary manually."
+  exit 1
 fi
 
 # Extract and install.

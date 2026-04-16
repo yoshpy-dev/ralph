@@ -38,12 +38,12 @@ func TestExecuteInit_NewProject(t *testing.T) {
 		Packs:       []string{"golang"},
 	}
 
-	if err := executeInit(target, cfg); err != nil {
+	if err := executeInit(target, cfg, false); err != nil {
 		t.Fatalf("executeInit: %v", err)
 	}
 
 	// Check files created.
-	for _, f := range []string{"AGENTS.md", "CLAUDE.md", "ralph.toml", ".ralph/manifest.toml"} {
+	for _, f := range []string{"AGENTS.md", "CLAUDE.md", "ralph.toml", ".ralph/manifest.toml", "packs/languages/golang/verify.sh"} {
 		if _, err := os.Stat(filepath.Join(target, f)); err != nil {
 			t.Errorf("expected %s to exist: %v", f, err)
 		}
@@ -75,7 +75,7 @@ func TestExecuteInit_ExistingProject_DelegatesToUpgrade(t *testing.T) {
 
 	// First init.
 	cfg := initConfig{ProjectName: "test", Packs: []string{"golang"}}
-	if err := executeInit(dir, cfg); err != nil {
+	if err := executeInit(dir, cfg, false); err != nil {
 		t.Fatalf("first init: %v", err)
 	}
 
@@ -86,7 +86,7 @@ func TestExecuteInit_ExistingProject_DelegatesToUpgrade(t *testing.T) {
 	}
 
 	// Re-init (should delegate to upgrade, preserving user files).
-	if err := executeInit(dir, cfg); err != nil {
+	if err := executeInit(dir, cfg, false); err != nil {
 		t.Fatalf("re-init: %v", err)
 	}
 
@@ -111,7 +111,7 @@ func TestExecuteInit_GitSkippedIfExists(t *testing.T) {
 	}
 
 	cfg := initConfig{ProjectName: "test", Packs: nil}
-	if err := executeInit(dir, cfg); err != nil {
+	if err := executeInit(dir, cfg, false); err != nil {
 		t.Fatalf("executeInit: %v", err)
 	}
 
@@ -130,7 +130,7 @@ func TestRunUpgrade_AutoUpdate(t *testing.T) {
 	// Create initial state with old version.
 	cfg := initConfig{ProjectName: "test", Packs: []string{"golang"}}
 	Version = "0.1.0-test"
-	if err := executeInit(dir, cfg); err != nil {
+	if err := executeInit(dir, cfg, false); err != nil {
 		t.Fatalf("init: %v", err)
 	}
 
@@ -158,7 +158,7 @@ func TestRunDoctor_Passes(t *testing.T) {
 
 	// Init a project first.
 	cfg := initConfig{ProjectName: "test", Packs: []string{"golang"}}
-	if err := executeInit(dir, cfg); err != nil {
+	if err := executeInit(dir, cfg, false); err != nil {
 		t.Fatalf("init: %v", err)
 	}
 

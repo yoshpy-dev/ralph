@@ -2,7 +2,9 @@ package watcher
 
 import (
 	"bufio"
+	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"sync"
 	"time"
@@ -19,6 +21,7 @@ type Tailer struct {
 	offset       int64
 	msgCh        chan tea.Msg
 	done         chan struct{}
+	loopCancel   chan struct{} // per-loop cancel; closed by SwitchFile to stop the current readLoop/waitForFile
 	closeOnce    sync.Once
 	pollInterval time.Duration
 	mu           sync.Mutex
@@ -32,12 +35,13 @@ func NewTailer(sliceName, filepath string) (*Tailer, error) {
 		sliceName:    sliceName,
 		msgCh:        make(chan tea.Msg, 64),
 		done:         make(chan struct{}),
+		loopCancel:   make(chan struct{}),
 		pollInterval: 200 * time.Millisecond,
 	}
 
 	f, err := os.Open(filepath)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, fs.ErrNotExist) {
 			// File doesn't exist yet — tailer will poll until it appears.
 			go t.waitForFile(filepath)
 			return t, nil
@@ -78,6 +82,10 @@ func (t *Tailer) SwitchFile(sliceName, filepath string) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
+	// Cancel the previous readLoop/waitForFile goroutine.
+	close(t.loopCancel)
+	t.loopCancel = make(chan struct{})
+
 	// Close existing file.
 	if t.file != nil {
 		_ = t.file.Close()
@@ -88,7 +96,7 @@ func (t *Tailer) SwitchFile(sliceName, filepath string) error {
 
 	f, err := os.Open(filepath)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, fs.ErrNotExist) {
 			go t.waitForFile(filepath)
 			return nil
 		}
@@ -122,6 +130,10 @@ func (t *Tailer) Stop() {
 
 // readLoop polls the file for new data and sends lines as messages.
 func (t *Tailer) readLoop() {
+	t.mu.Lock()
+	cancel := t.loopCancel
+	t.mu.Unlock()
+
 	ticker := time.NewTicker(t.pollInterval)
 	defer ticker.Stop()
 
@@ -129,6 +141,8 @@ func (t *Tailer) readLoop() {
 		select {
 		case <-ticker.C:
 			t.readNewLines()
+		case <-cancel:
+			return
 		case <-t.done:
 			return
 		}
@@ -192,6 +206,10 @@ func (t *Tailer) readNewLines() {
 
 // waitForFile polls until the file appears, then starts reading.
 func (t *Tailer) waitForFile(filepath string) {
+	t.mu.Lock()
+	cancel := t.loopCancel
+	t.mu.Unlock()
+
 	ticker := time.NewTicker(t.pollInterval)
 	defer ticker.Stop()
 
@@ -207,6 +225,8 @@ func (t *Tailer) waitForFile(filepath string) {
 			t.offset = 0
 			t.mu.Unlock()
 			t.readLoop()
+			return
+		case <-cancel:
 			return
 		case <-t.done:
 			return

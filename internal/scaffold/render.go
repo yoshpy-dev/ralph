@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // RenderOptions controls how files are expanded.
@@ -30,12 +31,26 @@ func RenderFS(src fs.FS, opts RenderOptions) (*RenderResult, map[string]string, 
 	result := &RenderResult{}
 	hashes := make(map[string]string)
 
-	err := fs.WalkDir(src, ".", func(path string, d fs.DirEntry, err error) error {
+	absTarget, err := filepath.Abs(opts.TargetDir)
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolving target dir: %w", err)
+	}
+
+	err = fs.WalkDir(src, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 
 		target := filepath.Join(opts.TargetDir, path)
+
+		// Boundary check: ensure target does not escape TargetDir.
+		absFile, absErr := filepath.Abs(target)
+		if absErr != nil {
+			return fmt.Errorf("resolving path %s: %w", path, absErr)
+		}
+		if !strings.HasPrefix(absFile, absTarget+string(filepath.Separator)) && absFile != absTarget {
+			return fmt.Errorf("template path %q escapes target directory", path)
+		}
 
 		if d.IsDir() {
 			return os.MkdirAll(target, 0755)
@@ -66,7 +81,15 @@ func RenderFS(src fs.FS, opts RenderOptions) (*RenderResult, map[string]string, 
 			return fmt.Errorf("creating parent dir for %s: %w", path, err)
 		}
 
-		return os.WriteFile(target, content, 0644)
+		// Preserve execute permission for .sh files.
+		perm := fs.FileMode(0644)
+		if info, infoErr := d.Info(); infoErr == nil && info.Mode().Perm()&0111 != 0 {
+			perm = 0755
+		} else if strings.HasSuffix(path, ".sh") {
+			perm = 0755
+		}
+
+		return os.WriteFile(target, content, perm)
 	})
 
 	return result, hashes, err

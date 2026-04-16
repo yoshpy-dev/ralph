@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/yoshpy-dev/harness-engineering-scaffolding-template/internal/action"
 	"github.com/yoshpy-dev/harness-engineering-scaffolding-template/internal/config"
 )
 
@@ -106,6 +107,9 @@ func newRetryCmd() *cobra.Command {
 		Short: "Retry a failed or stuck slice",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := action.ValidateSliceName(args[0]); err != nil {
+				return fmt.Errorf("invalid slice name: %w", err)
+			}
 			scriptPath, err := findScript("ralph")
 			if err != nil {
 				return err
@@ -131,6 +135,9 @@ func newAbortCmd() *cobra.Command {
 			}
 			scriptArgs := []string{"abort"}
 			if sliceName != "" {
+				if err := action.ValidateSliceName(sliceName); err != nil {
+					return fmt.Errorf("invalid slice name: %w", err)
+				}
 				scriptArgs = append(scriptArgs, "--slice", sliceName)
 			}
 			execCmd := exec.Command(scriptPath, scriptArgs...)

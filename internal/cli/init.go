@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,7 +15,10 @@ import (
 )
 
 func newInitCmd() *cobra.Command {
-	var nonInteractive bool
+	var (
+		nonInteractive bool
+		force          bool
+	)
 
 	cmd := &cobra.Command{
 		Use:   "init [directory]",
@@ -33,13 +38,14 @@ agents, rules, and pipeline settings. Supports both new and existing projects.`,
 			}
 
 			if nonInteractive {
-				return runInitNonInteractive(absDir)
+				return runInitNonInteractive(absDir, force)
 			}
-			return runInitInteractive(absDir)
+			return runInitInteractive(absDir, force)
 		},
 	}
 
 	cmd.Flags().BoolVar(&nonInteractive, "yes", false, "skip interactive prompts, use defaults")
+	cmd.Flags().BoolVar(&force, "force", false, "overwrite existing files without prompting")
 
 	return cmd
 }
@@ -49,7 +55,7 @@ type initConfig struct {
 	Packs       []string
 }
 
-func runInitInteractive(targetDir string) error {
+func runInitInteractive(targetDir string, force bool) error {
 	defaultName := filepath.Base(targetDir)
 
 	availPacks, err := scaffold.AvailablePacks()
@@ -84,10 +90,10 @@ func runInitInteractive(targetDir string) error {
 		return fmt.Errorf("interactive form: %w", err)
 	}
 
-	return executeInit(targetDir, cfg)
+	return executeInit(targetDir, cfg, force)
 }
 
-func runInitNonInteractive(targetDir string) error {
+func runInitNonInteractive(targetDir string, force bool) error {
 	availPacks, err := scaffold.AvailablePacks()
 	if err != nil {
 		return fmt.Errorf("listing packs: %w", err)
@@ -98,10 +104,10 @@ func runInitNonInteractive(targetDir string) error {
 		Packs:       availPacks,
 	}
 
-	return executeInit(targetDir, cfg)
+	return executeInit(targetDir, cfg, force)
 }
 
-func executeInit(targetDir string, cfg initConfig) error {
+func executeInit(targetDir string, cfg initConfig, force bool) error {
 	// Ensure target directory exists.
 	if err := os.MkdirAll(targetDir, 0755); err != nil {
 		return fmt.Errorf("creating directory: %w", err)
@@ -117,7 +123,7 @@ func executeInit(targetDir string, cfg initConfig) error {
 
 	fmt.Printf("\nScaffolding %q into %s ...\n\n", cfg.ProjectName, targetDir)
 
-	// Step 1: Render base templates (fresh init — no manifest, safe to overwrite).
+	// Step 1: Render base templates.
 	baseFS, err := scaffold.BaseFS()
 	if err != nil {
 		return fmt.Errorf("loading base templates: %w", err)
@@ -125,37 +131,40 @@ func executeInit(targetDir string, cfg initConfig) error {
 
 	result, hashes, err := scaffold.RenderFS(baseFS, scaffold.RenderOptions{
 		TargetDir: targetDir,
-		Overwrite: true,
+		Overwrite: force,
 	})
 	if err != nil {
 		return fmt.Errorf("rendering base templates: %w", err)
 	}
 	printRenderSummary("base", result)
 
-	// Step 2: Render selected language packs.
+	// Step 2: Render selected language packs into packs/languages/<lang>/.
 	for _, pack := range cfg.Packs {
 		packFS, err := scaffold.PackFS(pack)
 		if err != nil {
 			fmt.Printf("  ⚠ pack %s: %v\n", pack, err)
 			continue
 		}
+		packDir := filepath.Join(targetDir, "packs", "languages", pack)
 		packResult, packHashes, err := scaffold.RenderFS(packFS, scaffold.RenderOptions{
-			TargetDir: targetDir,
-			Overwrite: true,
+			TargetDir: packDir,
+			Overwrite: force,
 		})
 		if err != nil {
 			fmt.Printf("  ⚠ pack %s: %v\n", pack, err)
 			continue
 		}
-		// Merge pack hashes (prefix with pack path for manifest).
+		// Merge pack hashes with namespaced paths for manifest.
+		packPrefix := filepath.Join("packs", "languages", pack)
 		for k, v := range packHashes {
-			hashes[k] = v
+			hashes[filepath.Join(packPrefix, k)] = v
 		}
 		printRenderSummary("pack/"+pack, packResult)
 	}
 
 	// Step 3: Create manifest.
 	manifest := scaffold.NewManifest(Version)
+	manifest.Meta.Packs = cfg.Packs
 	for path, hash := range hashes {
 		manifest.SetFile(path, hash)
 	}
@@ -172,7 +181,7 @@ func executeInit(targetDir string, cfg initConfig) error {
 
 	// Step 4: Git init if needed.
 	gitDir := filepath.Join(targetDir, ".git")
-	if _, err := os.Stat(gitDir); os.IsNotExist(err) {
+	if _, err := os.Stat(gitDir); errors.Is(err, fs.ErrNotExist) {
 		if gitBin, err := exec.LookPath("git"); err == nil {
 			cmd := exec.Command(gitBin, "init")
 			cmd.Dir = targetDir

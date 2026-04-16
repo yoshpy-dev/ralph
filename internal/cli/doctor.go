@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -34,7 +35,7 @@ func runDoctor(targetDir string) error {
 	cfg, cfgErr := config.Load(filepath.Join(targetDir, "ralph.toml"))
 	var results []checkResult
 
-	if cfgErr != nil && !os.IsNotExist(cfgErr) {
+	if cfgErr != nil && !errors.Is(cfgErr, fs.ErrNotExist) {
 		results = append(results, checkResult{
 			Name:   "ralph.toml",
 			Status: "warn",
@@ -169,7 +170,7 @@ func checkHooks(targetDir string) checkResult {
 				if !ok {
 					continue
 				}
-				if _, err := os.Stat(filepath.Join(targetDir, cmd)); os.IsNotExist(err) {
+				if _, err := os.Stat(filepath.Join(targetDir, cmd)); errors.Is(err, fs.ErrNotExist) {
 					missing++
 				}
 			}
@@ -259,7 +260,7 @@ func checkInstalledPacks(targetDir string) []checkResult {
 		if _, fErr := packFS.Open("verify.sh"); fErr != nil {
 			r.Status = "warn"
 			r.Detail = "verify.sh missing in template"
-		} else if _, sErr := os.Stat(verifyPath); os.IsNotExist(sErr) {
+		} else if _, sErr := os.Stat(verifyPath); errors.Is(sErr, fs.ErrNotExist) {
 			r.Status = "warn"
 			r.Detail = "verify.sh not found on disk"
 		} else {

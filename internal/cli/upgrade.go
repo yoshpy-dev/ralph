@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -36,7 +38,7 @@ func runUpgrade(targetDir string, force bool) error {
 	}
 
 	manifestPath := filepath.Join(absDir, ".ralph", "manifest.toml")
-	if _, err := os.Stat(manifestPath); os.IsNotExist(err) {
+	if _, err := os.Stat(manifestPath); errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("no .ralph/manifest.toml found — run 'ralph init' first")
 	}
 
@@ -58,17 +60,24 @@ func runUpgrade(targetDir string, force bool) error {
 		return fmt.Errorf("computing diffs: %w", err)
 	}
 
-	// Also diff installed language packs. Detect which packs are in the
-	// manifest (files that exist in a pack's FS) and compute diffs for each.
-	availPacks, _ := scaffold.AvailablePacks()
-	for _, pack := range availPacks {
+	// Only diff packs that were installed (recorded in manifest metadata).
+	installedPacks := oldManifest.Meta.Packs
+	for _, pack := range installedPacks {
 		packFS, pErr := scaffold.PackFS(pack)
+		if pErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: pack %s: %v\n", pack, pErr)
+			continue
+		}
+		packDir := filepath.Join(absDir, "packs", "languages", pack)
+		packManifestPath := manifestPath // same manifest, namespaced paths
+		packDiffs, pErr := upgrade.ComputeDiffsNoRemovals(packManifestPath, packDir, packFS)
 		if pErr != nil {
 			continue
 		}
-		packDiffs, pErr := upgrade.ComputeDiffsNoRemovals(manifestPath, absDir, packFS)
-		if pErr != nil {
-			continue
+		// Namespace pack diff paths under packs/languages/<pack>/.
+		packPrefix := filepath.Join("packs", "languages", pack)
+		for i := range packDiffs {
+			packDiffs[i].Path = filepath.Join(packPrefix, packDiffs[i].Path)
 		}
 		diffs = append(diffs, packDiffs...)
 	}
@@ -76,13 +85,14 @@ func runUpgrade(targetDir string, force bool) error {
 	var updated, skipped, notified int
 
 	manifest := scaffold.NewManifest(Version)
+	manifest.Meta.Packs = installedPacks
 
 	for _, d := range diffs {
 		switch d.Action {
 		case upgrade.ActionAutoUpdate:
 			targetPath := filepath.Join(absDir, d.Path)
 			if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
-				return err
+				return fmt.Errorf("creating parent dir for %s: %w", d.Path, err)
 			}
 			if err := os.WriteFile(targetPath, d.NewContent, 0644); err != nil {
 				return fmt.Errorf("writing %s: %w", d.Path, err)
@@ -123,7 +133,7 @@ func runUpgrade(targetDir string, force bool) error {
 		case upgrade.ActionAdd:
 			targetPath := filepath.Join(absDir, d.Path)
 			if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
-				return err
+				return fmt.Errorf("creating parent dir for %s: %w", d.Path, err)
 			}
 			if err := os.WriteFile(targetPath, d.NewContent, 0644); err != nil {
 				return fmt.Errorf("writing %s: %w", d.Path, err)
@@ -133,6 +143,8 @@ func runUpgrade(targetDir string, force bool) error {
 			updated++
 
 		case upgrade.ActionRemove:
+			// Preserve the old manifest entry so next upgrade doesn't re-notify.
+			manifest.SetFile(d.Path, d.OldHash)
 			fmt.Printf("  ⚠ %s (removed from template — review and delete manually)\n", d.Path)
 			notified++
 
@@ -163,6 +175,7 @@ func resolveConflict(d upgrade.FileDiff) string {
 	var choice string
 	for {
 		if _, err := fmt.Scanln(&choice); err != nil {
+			fmt.Fprintf(os.Stderr, "\n  (non-interactive input detected, skipping)\n")
 			return "skip"
 		}
 		switch choice {

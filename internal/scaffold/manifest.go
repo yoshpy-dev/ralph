@@ -15,9 +15,10 @@ type Manifest struct {
 
 // ManifestMeta holds manifest-level metadata.
 type ManifestMeta struct {
-	Version string `toml:"version"`
-	Created string `toml:"created"`
-	Updated string `toml:"updated"`
+	Version string   `toml:"version"`
+	Created string   `toml:"created"`
+	Updated string   `toml:"updated"`
+	Packs   []string `toml:"packs,omitempty"`
 }
 
 // ManifestFile tracks a single managed file.
