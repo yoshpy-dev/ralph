@@ -30,10 +30,8 @@ Use these in CI or later-stage review:
 
 ### Must pass in CI before merge
 
-- `./scripts/run-verify.sh` (`.github/workflows/verify.yml`)
-- `./scripts/check-template.sh` (`.github/workflows/check-template.yml`)
-- `./scripts/check-coverage.sh` — language-pack coverage gate (graceful skip if no packs)
-- `./scripts/check-pipeline-sync.sh` — pipeline order consistency across 8 reference files
+- `./scripts/run-verify.sh` — add to your CI workflow (e.g., `.github/workflows/verify.yml`)
+- project-specific CI checks as needed
 
 ### Not yet implemented in CI
 
