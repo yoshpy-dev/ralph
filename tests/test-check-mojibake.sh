@@ -88,10 +88,12 @@ assert_exit "D. Allowlisted U+FFFD exits 0" 0 "$actual"
 # ── Case E: jq missing → exit 0 + marker ────────────────────────────
 mkdir -p "$alt_root/.harness/state"
 rm -f "$alt_root/.harness/state/mojibake-jq-missing"
-# Restrict PATH so jq cannot be resolved. Link only the essentials.
+# Restrict PATH so jq cannot be resolved. Link only the essentials the
+# hook needs during startup (dirname/pwd/cd) plus a few helpers used
+# inside the jq-missing branch (mkdir for marker). We do NOT link jq.
 minimal_path="$workdir/no-jq-bin"
 mkdir -p "$minimal_path"
-for tool in sh bash dash cat grep sed mkdir rm cd command pwd printf; do
+for tool in sh bash dash cat grep sed mkdir rm cd command pwd printf dirname env ln test; do
   resolved="$(command -v "$tool" 2>/dev/null || true)"
   [ -n "$resolved" ] && ln -sf "$resolved" "$minimal_path/$tool" 2>/dev/null || true
 done
