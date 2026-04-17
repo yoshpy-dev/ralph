@@ -1,6 +1,6 @@
 # mojibake-postedit-guard
 
-- Status: Implementation complete — awaiting pipeline (self-review / verify / test / sync-docs / codex-review / pr)
+- Status: Done — PR #25 (https://github.com/yoshpy-dev/harness-engineering-scaffolding-template/pull/25)
 - Owner: Claude Code
 - Date: 2026-04-17
 - Related request: Claude Code の文字化け (U+FFFD 混入) 対策を記事（https://nyosegawa.com/posts/claude-code-mojibake-workaround/）に沿って導入
@@ -172,4 +172,4 @@ Claude Code の `Write` / `Edit` / `MultiEdit` ツールが SSE チャンク境�
 - [x] Review artifact created (`docs/reports/self-review-mojibake-postedit-guard.md`)
 - [x] Verification artifact created (`docs/reports/verify-mojibake-postedit-guard.md`)
 - [x] Test artifact created (`docs/reports/test-mojibake-postedit-guard.md`)
-- [ ] PR created
+- [x] PR created (#25)
