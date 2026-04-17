@@ -55,6 +55,7 @@ ROOT_ONLY_EXCLUSIONS=(
   "docs/reports/self-review-"
   "docs/reports/verify-"
   "docs/reports/test-"
+  "docs/reports/sync-docs-"
   "docs/reports/codex-triage-"
   "docs/reports/walkthrough-"
   # Harness runtime state
