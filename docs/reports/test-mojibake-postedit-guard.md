@@ -188,3 +188,62 @@ No regression introduced by the additional PATH entries; the hook's `command -v 
 - Cumulative assertion count across original + re-test: 88 original + 77 re-run (11 mojibake + 11 mojibake standalone + 23 config + 3 signals + 40 status − overlaps counted once for primary reporting) = no failures anywhere.
 
 Codex P1/P2/P3 fixes land cleanly without regression. Safe to proceed to `/sync-docs`.
+
+## Re-test after post_edit_verify fix (commit 29d71a2)
+
+- Date: 2026-04-17
+- Commit under test: `29d71a2 fix: extract file_path from tool_input.file_path, not top-level`
+- Prior verdict: PASS (88 assertions + mode-split re-run)
+- Scope of delta:
+  1. `.claude/hooks/lib_json.sh` — `extract_json_field` now accepts dotted paths (`tool_input.file_path`). `jq` path uses the full dotted selector; sed fallback strips to the leaf key so the non-dotted caller (`pre_bash_guard.sh` reading `command`) keeps working.
+  2. `.claude/hooks/post_edit_verify.sh` — call site updated from `extract_json_field "$payload" "file_path"` to `extract_json_field "$payload" "tool_input.file_path"`. Matches Claude Code's real PostToolUse payload shape.
+  3. `templates/base/.claude/hooks/lib_json.sh` + `templates/base/.claude/hooks/post_edit_verify.sh` — byte-for-byte mirror.
+- Evidence: `docs/evidence/test-retest-29d71a2-*.log` (6 logs: all-mode, standalone-mojibake, regress-config, regress-signals, regress-status, post-edit-smoke).
+
+### Re-test execution table
+
+| # | Command | Expected | Actual exit | Verdict |
+| --- | --- | --- | --- | --- |
+| 1 | `./scripts/run-verify.sh` (HARNESS_VERIFY_MODE=all default) | exit 0 | 0 | PASS |
+| 2 | `bash tests/test-check-mojibake.sh` standalone | 11/11 PASS, exit 0 | 0 (11/11) | PASS |
+| 3a | `bash tests/test-ralph-config.sh` regression | 23/23 PASS | 0 (23/23) | PASS |
+| 3b | `bash tests/test-ralph-signals.sh` regression | 3/3 PASS | 0 (3/3) | PASS |
+| 3c | `bash tests/test-ralph-status.sh` regression | 40/40 PASS | 0 (40/40) | PASS |
+
+### Behavioral smoke for post_edit_verify.sh (the fix's target)
+
+Setup: `: > .harness/state/edited-files.log` (cleared, wc -l = 0).
+
+| Case | Payload | `tool_name` | `tool_input.file_path` | Expected | Actual exit | edited-files.log tail | Verdict |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| P1 | `{"session_id":"t","tool_name":"Edit","tool_input":{"file_path":"/tmp/demo-edit.txt","old_string":"a","new_string":"b"}}` | Edit | `/tmp/demo-edit.txt` | exit 0 + path appended | 0 | `/tmp/demo-edit.txt` | PASS |
+| P2 | `{"session_id":"t","tool_name":"Write","tool_input":{"file_path":"/tmp/demo-write.txt","content":"hi"}}` | Write | `/tmp/demo-write.txt` | exit 0 + path appended | 0 | `/tmp/demo-write.txt` | PASS |
+| P3 | `{"session_id":"t","tool_name":"MultiEdit","tool_input":{"file_path":"/tmp/demo-multi.txt","edits":[{"old_string":"a","new_string":"b"},{"old_string":"c","new_string":"d"}]}}` | MultiEdit | `/tmp/demo-multi.txt` | exit 0 + path appended | 0 | `/tmp/demo-multi.txt` | PASS |
+| P4 | `wc -l .harness/state/edited-files.log` after P1+P2+P3 | — | — | exactly 3 lines | 3 | 3 lines (edit, write, multi) | PASS |
+| P5 | `{"tool_name":"Bash","tool_input":{"command":"echo hi"}}` via `.claude/hooks/pre_bash_guard.sh` | Bash | n/a (uses `command`) | exit 0 (no error) | 0 | — | PASS |
+
+P5 validates that the `lib_json.sh` dotted-path change is backward-compatible for the non-dotted top-level caller `pre_bash_guard.sh`, which calls `extract_json_field "$payload" "command"` (no dot). `jq -r ".command // empty"` still resolves to the top-level `command` field just as before; the sed fallback path uses the leaf-key strip which is identical to the previous behavior for a non-dotted argument.
+
+Teardown: `cp /tmp/edited-files.log.backup-29d71a2 .harness/state/edited-files.log` (3 lines restored — matches backup taken before P1).
+
+### Evidence verification
+
+Observed on `.harness/state/edited-files.log` through the P1→P2→P3 sequence:
+
+```
+(cleared)    0 lines
+after P1:    1 line  (/tmp/demo-edit.txt)
+after P2:    2 lines (… + /tmp/demo-write.txt)
+after P3:    3 lines (… + /tmp/demo-multi.txt)
+```
+
+This confirms the fix: prior to 29d71a2, `extract_json_field "$payload" "file_path"` resolved to `jq -r ".file_path"` which is always `null` / `empty` against a PostToolUse payload where `file_path` lives under `tool_input`. The `if [ -n "$file_path" ]` guard consequently short-circuited, and the log stayed empty. Post-fix, all three payload variants correctly populate the log.
+
+### Re-test verdict
+
+- Pass: yes (6/6 commands exit 0; all P1–P5 behavioral smokes green)
+- Fail: none
+- Blocked: none
+- Cumulative assertion count: 88 original + 77 Codex re-run + 82 post-edit re-run (11 mojibake standalone + 23 config + 3 signals + 40 status + 5 P-cases) = 247 green, 0 failures across the three rounds.
+
+Commit 29d71a2 fixes the extraction bug without regressing any prior test. Safe to proceed to `/pr`.

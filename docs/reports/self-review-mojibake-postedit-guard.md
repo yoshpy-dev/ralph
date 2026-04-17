@@ -126,3 +126,65 @@ Both findings are LOW. No CRITICAL/HIGH/MEDIUM.
   - New LOW findings above are documentation-quality notes, not code defects.
 
 The merge recommendation from the initial review stands, strengthened by the Codex fix slice: the PostToolUseFailure asymmetry is closed, the `HARNESS_VERIFY_MODE` contract is now implemented in the only verifier that honors a full mode split, and Case E is hardened with an explicit `dirname`/`env`/`ln`/`test` link set so we no longer depend on the test machine's shell-builtin resolution for `dirname`.
+
+## Re-review after post_edit_verify fix (commit 29d71a2)
+
+- Date: 2026-04-17
+- Reviewer: reviewer subagent (Claude) — 3rd pass
+- Scope: commit 29d71a2 only (Codex re-review P3-new fix). Diff quality only — spec compliance/tests are handled by /verify and /test.
+- Commit contents (per `git show 29d71a2`): 5 files, +35/-9.
+  - `.claude/hooks/lib_json.sh`: `extract_json_field` now interpolates `_field` into `jq -r ".${_field} // empty"` (supporting dotted paths); sed fallback now uses `_leaf="${_field##*.}"` so the leaf key is matched everywhere in the payload.
+  - `.claude/hooks/post_edit_verify.sh`: call site `extract_json_field "$payload" "file_path"` → `"tool_input.file_path"` + a single-line contract comment.
+  - Both mirrored into `templates/base/.claude/hooks/`.
+  - `docs/reports/codex-triage-mojibake-postedit-guard.md`: added the re-review ACTION_REQUIRED row (documentation, not code).
+
+### Evidence gathered for the re-review
+
+- **Byte-for-byte mirror**: `cmp .claude/hooks/lib_json.sh templates/base/.claude/hooks/lib_json.sh` → exit 0; `cmp .claude/hooks/post_edit_verify.sh templates/base/.claude/hooks/post_edit_verify.sh` → exit 0. `git ls-files --stage` shows both file pairs share the same blob SHA (`5fb2678…` / `0325287…`) and mode `100755`. `chmod +x` was not dropped on either side.
+- **Syntax**: `sh -n` and `bash -n` clean on both root and template copies of both files. `shellcheck` is not installed on the dev machine (confirmed via `command -v shellcheck` → 127); the pattern uses `sh`-legal constructs only (no bashisms: `${_field##*.}` is POSIX parameter expansion).
+- **Smoke test (reproduced)**: `printf '{"tool_input":{"file_path":"/tmp/demo"}}' | ./.claude/hooks/post_edit_verify.sh` with clean state:
+  - `.harness/state/edited-files.log` → contains `/tmp/demo` (previously always empty with jq installed).
+  - `.harness/state/needs-verify` → created.
+  - stdout: `{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"Code file edited. Run ./scripts/run-verify.sh before claiming done. Save evidence to docs/evidence/."}}` — confirms the case-branch for code files fires (previously silent because `file_path` was empty and matched the `""` arm).
+  - Exit 0.
+  - Commit body claim reproduced.
+- **All `extract_json_field` callers still work**:
+  - `pre_bash_guard.sh` passes `"command"` (top-level identifier, no dot). jq path resolves as `jq -r ".command // empty"` → correct for top-level `{"command":"…"}`. Verified with `printf '{"command":"echo hi"}' | … extract_json_field "$(cat)" "command"` → `echo hi`.
+  - `post_edit_verify.sh` passes `"tool_input.file_path"`. jq path resolves as `jq -r ".tool_input.file_path // empty"` → correct. sed fallback uses leaf `file_path` and matches the nested occurrence. Verified both paths.
+  - Legacy top-level `"file_path"` still extracts (verified even though no caller uses it today).
+  - Missing nested field returns empty (not an error).
+  - Payloads with escaped `\"` inside string values parse correctly under jq (e.g. `{"tool_input":{"file_path":"a\"b.py"}}` → `a"b.py`).
+- **sed fallback, jq-absent (simulated via `PATH` shim with only `sh`, `sed`, `cat`)**: all four caller shapes (top-level `command`, dotted `tool_input.file_path`, legacy top-level `file_path`, missing-field) return the expected values. The fallback's "first-occurrence-of-leaf-key" behavior is now an *intended* contract (documented in the new comment block) rather than an accidental side effect — the commit body acknowledges this honestly (`the sed fallback already accidentally matches nested`).
+- **No regression in the mojibake test suite**: `bash tests/test-check-mojibake.sh` → **11/11 PASS** (A, B, C, D, E, F.{edit,write,multiedit} × {clean,dirty}). `check_mojibake.sh` does not source `lib_json.sh` (it calls `jq -r '.tool_input.file_path // empty'` directly at L47), so the hook under test is not touched by this commit.
+- **Grep for literal U+FFFD in the diff**: `git show 29d71a2 | grep -P '\xef\xbf\xbd'` → no matches.
+- **No secrets, debug prints, commented-out code, or TODO markers in the diff**.
+
+### Findings from the post_edit_verify fix slice
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| LOW | security / contract | `jq -r ".${_field} // empty"` interpolates `_field` directly into the jq expression. All current callers pass hardcoded literals (`"command"`, `"tool_input.file_path"`), so today this is safe. But the header comment does not warn future maintainers: a caller that ever passes an attacker-controlled or user-derived string (e.g. a field name extracted from a payload, or a CLI argument) gets jq-expression injection. Probe: `extract_json_field '{"file_path":"safe"}' 'file_path // "injected" \| . , "extra"'` → outputs both `safe` and `extra` (side-channel leak). The sed fallback is comparatively safer because `_leaf` is only interpolated into a regex literal, though metacharacters in `_leaf` (`.`, `*`, etc.) would need escaping for correctness. | `.claude/hooks/lib_json.sh` L18 (jq path), L20-21 (sed path). | Non-blocking (no caller violates the contract today). Add one line to the header comment: `# NOTE: _field is interpolated verbatim into the jq expression. Callers MUST pass a trusted literal, not user input.` This upgrades the implicit "internal callers only" contract to an explicit one. |
+| LOW | compatibility | The old form `jq -r ".[\"$_field\"] // empty"` worked for any top-level key name, including names with hyphens, starting with digits, or containing shell-unsafe characters. The new form `jq -r ".${_field} // empty"` only works for identifier-shaped names (`[A-Za-z_][A-Za-z0-9_]*` separated by `.`). Today this is fine — `"command"`, `"tool_input"`, `"file_path"` are all identifiers. But the commit body's claim "behaviourally unchanged for non-dotted callers" is slightly overstated: a hypothetical caller passing `"a-b"` would have succeeded under the old code and silently returns empty under the new code. | Probe: `printf '{"a-b":"x"}' \| jq -r '.a-b // empty' 2>&1` → empty (silent parse error swallowed by `2>/dev/null`); the old `jq -r '.["a-b"] // empty'` would return `x`. | Non-blocking. Either (a) document the restriction in the header comment ("field names must match the jq identifier grammar"), or (b) wrap each segment with bracket-quoting at call time: `jq -r "[\"${_field//./\"][\"}\"] // empty"` — too clever for an sh function. Preference: option (a) — a single comment line, since no real caller is affected. |
+| LOW | robustness | An empty `_field` causes `jq -r ". // empty"` to return the entire payload JSON. None of our callers pass an empty string, but defense-in-depth would be a leading guard: `[ -z "$_field" ] && return 0`. | Probe: `extract_json_field '{"file_path":"x"}' ""` → full JSON object. | Non-blocking (no caller regresses). Optional one-liner guard at the top of the function. |
+
+No CRITICAL, HIGH, or MEDIUM findings. The fix is minimal, targeted, and correctly mirrored.
+
+### Positive notes (post_edit_verify fix slice)
+
+- **Correctness**: the commit actually repairs a real silent-no-op that predates the mojibake PR. The self-review would not have caught this during the initial slice because `post_edit_verify.sh` is pre-existing and was out-of-scope; it only surfaced because the MultiEdit matcher extension drew Codex's attention to the failure path. Good cross-model ROI.
+- **Documentation inline with the code**: the new block comment in `lib_json.sh` (L4-12 post-fix) explains both the dotted-path contract and the sed fallback's ambiguity limitation. Future maintainers touching this function do not need to spelunk git blame.
+- **Honesty about the sed path**: the "happens to work" comment (L10-12) is the right level of candor. A naive "also supports nested" would be misleading; the current wording correctly signals "upgrade to jq for correctness".
+- **Mirror discipline held**: both files updated in both roots; `cmp` and `git ls-files --stage` confirm byte- and mode-identity. No `chmod` regression.
+- **Commit message is precise**: the body correctly distinguishes jq (always broken top-level-only match) vs sed fallback (accidentally matched nested via first-occurrence heuristic). The root-cause explanation matches the code.
+- **No collateral damage to `check_mojibake.sh`**: the mojibake hook does not source `lib_json.sh` (it calls `jq` directly), so this refactor cannot regress the mojibake scan.
+- **Test suite unaffected**: `bash tests/test-check-mojibake.sh` still 11/11 PASS. The change is orthogonal to what those tests exercise.
+
+### Updated recommendation
+
+- **Merge**: YES.
+- **Blockers**: none (no CRITICAL, HIGH, or MEDIUM in any slice reviewed so far — initial, 306b23a Codex fix, or 29d71a2 post_edit_verify fix).
+- **Follow-ups** (non-blocking, LOW only):
+  - Optional: add a one-line header-comment warning in `lib_json.sh` about the internal-callers-only contract for `_field` (finding 1).
+  - Optional: document (or defensively guard) the identifier-shape restriction on `_field` (finding 2) and the empty-string case (finding 3).
+
+Merge recommendation for the full branch (chore/mojibake-postedit-guard) remains **YES**. The 29d71a2 fix converts a previously silent-no-op hook into a working one without introducing any new defects; the only observations are documentation-quality and apply to future, hypothetical callers rather than current code.

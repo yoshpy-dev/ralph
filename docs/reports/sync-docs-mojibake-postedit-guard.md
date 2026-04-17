@@ -130,3 +130,24 @@ None. The two behavior changes in 306b23a are **narrow enough that no external d
 ### Conclusion
 
 Re-sync pass made **zero doc edits**. The prior sync-docs pass's conclusion ("Two files updated… everything else already in sync") still holds for the whole branch including 306b23a. Proceed to `/pr`.
+
+## Re-sync-docs after post_edit_verify fix (commit 29d71a2)
+
+- Date: 2026-04-17
+- Trigger: Codex re-review P3-new exposed a pre-existing silent-no-op in `post_edit_verify.sh` (extracted top-level `file_path` against a payload where the field nests under `tool_input`). Commit 29d71a2 fixes `lib_json.sh` (accept dotted paths, backward-compatible for `pre_bash_guard.sh`'s non-dotted `"command"`) and updates the `post_edit_verify.sh` call site to `tool_input.file_path`. Re-self-review / re-verify / re-test all PASS.
+
+### Docs checked for drift
+
+| File | Checked for | Result |
+| --- | --- | --- |
+| `.claude/hooks/lib_json.sh` header comment | "top-level only" language that would contradict the new dotted-path contract | **Already synced in 29d71a2 itself** — L4-6 now reads "The field argument accepts a dotted path (e.g. `tool_input.file_path`)…Top-level keys work without a dot." Inline contract is accurate. No edit needed. |
+| `README.md` "Hook configuration" section (L178-190) | any description of edited-files.log behavior or `lib_json.sh` extraction contract | No mention of either — the section describes hook categories at behavior level ("Edit/write verification reminders"). No drift. |
+| `AGENTS.md`, `CLAUDE.md` | any mention of `lib_json.sh` / `edited-files.log` | None. Per task instruction, not edited. |
+| `docs/architecture/repo-map.md`, `docs/architecture/design-principles.md` | any mention of `lib_json.sh` / `edited-files.log` | None (`.claude/hooks/` referenced generically). No drift. |
+| `docs/quality/*.md` | any dependency on `edited-files.log` being populated | None. Quality gates are pipeline-shaped, not log-shaped. No drift. |
+| `.claude/rules/*.md` | any reference to the extraction contract or log | None. No drift. |
+| `templates/base/.claude/hooks/lib_json.sh` + `post_edit_verify.sh` | mirror parity | `cmp` → exit 0 (verified via `/verify` delta pass). No drift. |
+
+### Docs updated in this pass
+
+**None.** The extraction contract is documented exactly where it should be — in the `lib_json.sh` header comment, which 29d71a2 updated in the same commit as the behavior change. `.harness/state/edited-files.log` is runtime state (per AGENTS.md: "not canonical truth"), and no user-facing doc previously described it, so no retrofitted prose is needed. The branch is now fully in sync across the three sync-docs passes.

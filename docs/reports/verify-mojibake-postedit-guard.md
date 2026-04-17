@@ -227,3 +227,148 @@ A single real-session probe: edit any Japanese-heavy file in a fresh Claude Code
 ### Minimal additional check to raise confidence (delta)
 
 The same real-session probe recommended in the initial verify, extended by one step: deliberately fail a `MultiEdit` (e.g., stale `old_string`) in a fresh session and confirm `.harness/state/tool_failures.count` increments. Before 306b23a, MultiEdit failures silently did not count; after, they should. If the count moves, the P3 fix is confirmed end-to-end. This is a `/test` walkthrough, not a static check.
+
+## Re-verify after post_edit_verify fix (commit 29d71a2)
+
+- Date: 2026-04-17 (UTC 07:45)
+- Branch HEAD: `29d71a2` (`fix: extract file_path from tool_input.file_path, not top-level`)
+- Verifier: `verifier` subagent (3rd pass)
+- Scope: delta verification of the Codex re-review P3-new fix. Static analysis only; behavioral test execution stays with `/test`.
+- Working tree: clean except for the pending `docs/reports/self-review-mojibake-postedit-guard.md` addendum (expected pipeline artifact) and this report update itself. No uncommitted source changes — the fix is in the committed tree.
+- Evidence: `docs/evidence/verify-2026-04-17-mojibake-postedit-guard-reverify-29d71a2.log`
+
+### Commit under test (`git show --stat 29d71a2`)
+
+| File | Change |
+| --- | --- |
+| `.claude/hooks/lib_json.sh` | `extract_json_field` now interpolates `_field` into `jq -r ".${_field} // empty"` (dotted-path support); sed fallback uses `_leaf="${_field##*.}"` so the leaf key is matched anywhere; header comment updated to document the contract |
+| `.claude/hooks/post_edit_verify.sh` | Call site `extract_json_field "$payload" "file_path"` → `"tool_input.file_path"` + a 1-line contract comment |
+| `templates/base/.claude/hooks/lib_json.sh` | Mirrored |
+| `templates/base/.claude/hooks/post_edit_verify.sh` | Mirrored |
+| `docs/reports/codex-triage-mojibake-postedit-guard.md` | +12 lines — added the re-review ACTION_REQUIRED entry (documentation only) |
+
+Diff size: `+35/-9`, 5 files. No other files touched.
+
+### Delta spec compliance — do the 13 plan AC still hold?
+
+| # | Acceptance criterion | Status after 29d71a2 | Evidence |
+| --- | --- | --- | --- |
+| 1 | `check_mojibake.sh` POSIX sh / stdin JSON / `jq` extracts `tool_input.file_path` | PASS (unchanged) | `.claude/hooks/check_mojibake.sh` not touched in this commit. `check_mojibake.sh` does not source `lib_json.sh` — it calls `jq -r '.tool_input.file_path // empty'` inline, so this refactor cannot regress it |
+| 2 | `jq` missing → exit 0 + marker | PASS (unchanged) | Same hook, unchanged behavior |
+| 3 | U+FFFD detected + not allowlisted → stderr + exit 2 | PASS (unchanged) | Same hook, unchanged behavior |
+| 4 | Allowlist / empty / missing → exit 0 | PASS (unchanged) | Same hook, unchanged behavior |
+| 5 | Self + `tests/fixtures/**` allowlisted | PASS (unchanged) | Allowlist files untouched |
+| 6 | `PostToolUse` matcher is `Edit\|Write\|MultiEdit`; both hooks registered | PASS (unchanged) | `jq '.hooks.PostToolUse' .claude/settings.json` → `matcher: "Edit\|Write\|MultiEdit"`, hooks: `post_edit_verify.sh` then `check_mojibake.sh`. Template mirrors root |
+| 7 | `templates/base/` mirror byte-identical for hook/allowlist/settings | PASS (extended) | `cmp .claude/hooks/lib_json.sh templates/base/.claude/hooks/lib_json.sh` → exit 0. `cmp .claude/hooks/post_edit_verify.sh templates/base/.claude/hooks/post_edit_verify.sh` → exit 0. Prior identical pairs (check_mojibake.sh / allowlist / settings.json) still identical |
+| 8 | 6 test cases green | PASS (unchanged — test suite unaffected) | `check_mojibake.sh` is the script under test; lib_json.sh refactor is orthogonal. `/test` re-run will confirm authoritatively |
+| 9 | `verify.local.sh` aggregates shellcheck → sh -n → jq -e → tests | PASS (unchanged) | No change to `verify.local.sh`. Mode split preserved |
+| 10 | `./scripts/run-verify.sh` invokes `verify.local.sh`; all pass | PASS | `HARNESS_VERIFY_MODE=static ./scripts/run-verify.sh` → exit 0. Evidence saved to `docs/evidence/verify-2026-04-17-mojibake-postedit-guard-reverify-29d71a2.log` (395 lines) |
+| 11 | `check-sync.sh` PASS; repo-only files excluded | PASS | `./scripts/check-sync.sh` → `IDENTICAL: 107, DRIFTED: 0, ROOT_ONLY: 0, TEMPLATE_ONLY: 9, KNOWN_DIFF: 3`. Final: "PASS: all files in sync." |
+| 12 | Hook source has no U+FFFD literal | PASS | `LC_ALL=C grep` for `$(printf '\357\277\275')` against the 4 modified files → exit 1 (no match) |
+| 13 | AGENTS.md repo map note | PASS (unchanged) | `AGENTS.md` not touched in this commit |
+
+**Delta verdict: 13/13 still PASS.** The post_edit_verify fix is upstream of the mojibake AC surface; none regress. Additionally, the fix repairs a pre-existing silent-no-op in `post_edit_verify.sh` that was not covered by any mojibake AC — a genuine bug-fix bonus orthogonal to this plan's acceptance surface.
+
+### Delta static analysis
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `cmp .claude/hooks/lib_json.sh templates/base/.claude/hooks/lib_json.sh` | exit 0 | byte-identical mirror |
+| `cmp .claude/hooks/post_edit_verify.sh templates/base/.claude/hooks/post_edit_verify.sh` | exit 0 | byte-identical mirror |
+| `sh -n .claude/hooks/lib_json.sh` | OK | POSIX clean |
+| `sh -n templates/base/.claude/hooks/lib_json.sh` | OK | POSIX clean |
+| `sh -n .claude/hooks/post_edit_verify.sh` | OK | POSIX clean |
+| `sh -n templates/base/.claude/hooks/post_edit_verify.sh` | OK | POSIX clean |
+| `jq -e . < .claude/settings.json` | OK | Valid JSON (settings not touched but re-checked) |
+| `jq -e . < templates/base/.claude/settings.json` | OK | Valid JSON |
+| bash-ism scan on both `lib_json.sh` (`[[`, `]]`, `<<<`, `$'...'`, `((`, `))`) | CLEAN | Only match is `[[:space:]]` inside a sed character class at L21 (POSIX regex, not bash test construct). `${_field##*.}` is POSIX parameter expansion. Safe |
+| bash-ism scan on both `post_edit_verify.sh` | CLEAN | no hits |
+| U+FFFD byte scan across all 4 modified source files | CLEAN | `grep -l "$(printf '\357\277\275')"` → exit 1 on each |
+| `./scripts/check-sync.sh` | PASS | `IDENTICAL: 107, DRIFTED: 0, ROOT_ONLY: 0` |
+| `HARNESS_VERIFY_MODE=static ./scripts/run-verify.sh` | exit 0 | verify.local.sh (static block) + check-sync + golang verifier all OK. Full log at `docs/evidence/verify-2026-04-17-mojibake-postedit-guard-reverify-29d71a2.log` |
+| `git ls-files --stage` modes | unchanged | `100755` preserved for both `post_edit_verify.sh` pair; `lib_json.sh` pair mode unchanged. `chmod +x` not regressed |
+
+### Delta extract_json_field caller survey
+
+Two live callers, both probed.
+
+| Caller | Field argument | Probe | Result |
+| --- | --- | --- | --- |
+| `.claude/hooks/pre_bash_guard.sh:8` | `"command"` (top-level, no dot) | `printf '{"command":"echo hi"}' \| extract_json_field "$(cat)" "command"` | `echo hi` — top-level extraction still works via `jq -r ".command // empty"` |
+| `.claude/hooks/post_edit_verify.sh:9` | `"tool_input.file_path"` (dotted) | `printf '{"tool_name":"Edit","tool_input":{"file_path":"/tmp/foo.txt"}}' \| post_edit_verify.sh` | `.harness/state/edited-files.log` populated with `/tmp/foo.txt`; stdout emits `"Code file edited..."` additionalContext; exit 0 |
+
+Additional sanity probes:
+- `Write` / `Edit` / `MultiEdit` tool-name payloads all extract correctly (same shape: `tool_input.file_path`) — confirmed via a loop over `Write`, `Edit`, `MultiEdit` against a clean `.harness/state`. All three populate `edited-files.log`.
+- Missing `tool_input` (`{"tool_name":"Edit"}`) → empty `file_path`, no `edited-files.log` entry, no additionalContext emitted, exit 0. Matches the `""` arm of the case statement — fail-open on malformed payloads.
+- Doc-path (`docs/foo.md`) → `additionalContext: "Instruction or documentation files changed..."` fires via the `*"/docs/"*` pattern. Confirms the case-branch routing is now actually reachable (previously unreachable because `file_path` was always empty).
+- Legacy top-level payload `{"file_path":"x"}` passed with dotted selector `"tool_input.file_path"` → returns empty (schema-correct — mismatched payload shape should not accidentally extract).
+- Missing top-level field (`pre_bash_guard` case) → returns empty.
+
+No regression in any caller. The dotted-path support is additive.
+
+### Delta documentation drift
+
+| Doc / contract | In sync? | Notes |
+| --- | --- | --- |
+| `lib_json.sh` header comment | Updated in this commit | Now documents the dotted-path contract (L4-6: "The field argument accepts a dotted path (e.g. `tool_input.file_path`) to reach nested values. Top-level keys work without a dot.") plus the sed-fallback ambiguity (L9-12). Honest and accurate |
+| `post_edit_verify.sh` L8 contract comment | Added in this commit | `# Claude Code PostToolUse payloads nest the target path under tool_input.` — future-maintainer-friendly |
+| Plan AC list (L60–72) | STALE (unchanged from prior verify) | Checkboxes remain `- [ ]`. Known item for `/sync-docs` or `/pr`; per `.claude/agent-memory/verifier/feedback_plan_ac_checklist_drift.md`, not a blocker |
+| `docs/reports/codex-triage-mojibake-postedit-guard.md` | Updated in this commit (+12 lines) | Adds the P3-new row marking this fix as applied. Factual, matches commit message |
+| Commit message claims | Verified | "behaviourally unchanged for non-dotted callers" is very slightly overstated (see self-review re-review LOW-2: field names with non-identifier characters would regress), but no live caller exercises that path, so the claim is correct for the population of actual callers. Fine for a 1-line commit-body paraphrase |
+| `templates/base/AGENTS.md` / CLAUDE.md | Unchanged (KNOWN_DIFF) | Template intentionally does not carry the repo-specific hook note; matches plan Non-goals |
+
+No new documentation drift introduced by this fix.
+
+### Delta observational checks
+
+- **Root-cause validity**: the commit message's root-cause analysis is correct — `extract_json_field "$payload" "file_path"` under the previous implementation resolved to `jq -r '.["file_path"] // empty'`, which is top-level-only. Against Claude Code's real PostToolUse payload (schema: `{tool_name, tool_input: {file_path, ...}}`), this always returned empty under jq. The sed fallback "happens to match" because it looked for the leaf `"file_path":` anywhere in the flattened payload — but jq is the preferred path and jq was installed, so the sed fallback was not being exercised. The fix aligns both paths with the actual schema. Verified end-to-end.
+- **End-to-end probe**: feeding a realistic payload (`{"tool_name":"Edit","tool_input":{"file_path":"/tmp/probe.txt","old_string":"a","new_string":"b"}}`) through `./.claude/hooks/post_edit_verify.sh` now populates `.harness/state/edited-files.log` with `/tmp/probe.txt`. Before 29d71a2, this log was always empty when `jq` was installed. The "run verify" additionalContext is now actually emitted for code paths.
+- **No collateral damage to `check_mojibake.sh`**: that hook calls `jq` directly (not through `lib_json.sh`), so the refactor cannot regress mojibake detection. The 11/11 test suite is orthogonal and confirmed unaffected by the self-reviewer on the same commit.
+- **Mirror discipline held**: `cmp` + `git ls-files --stage` confirm byte-identity AND mode preservation (`100755`) for both `lib_json.sh` and `post_edit_verify.sh` pairs. No `chmod +x` regression.
+- **Sed-fallback leaf-matching contract**: now explicitly acknowledged in the header comment as a pragmatic compromise. "Works for unique key names" is an accurate characterization for the current payload shape (Claude Code PostToolUse never has a duplicate `file_path` at both top and nested levels).
+
+### Delta coverage gaps (no new blockers)
+
+| Gap | Severity | Notes |
+| --- | --- | --- |
+| shellcheck not installed on verify host | LOW (unchanged) | CI authoritative. `verify.local.sh` wires it on, and `lib_json.sh` is a clean POSIX refactor |
+| `lib_json.sh` jq-expression injection surface (noted by re-self-review) | LOW | No live caller violates the "trusted literal" contract. Self-review re-review LOW-1 recommends a 1-line header note; non-blocking |
+| `_field` with non-identifier characters (hyphens, leading digits) regresses from old bracket-quoted behavior | LOW | No live caller affected. Self-review re-review LOW-2 recommends a 1-line header note; non-blocking |
+| Empty `_field` returns full payload (defense-in-depth) | LOW | No live caller passes empty. Self-review re-review LOW-3 recommends a leading `[ -z "$_field" ] && return 0` guard; non-blocking |
+| Real-session PostToolUse dispatch (now with working `edited-files.log`) | UNVERIFIED | Belongs to `/test` walkthrough. Before 29d71a2, this walkthrough would have silently found an empty log; now it should find populated entries |
+
+### Re-verify verdict
+
+- **PASS (delta).**
+- All 13 plan acceptance criteria remain satisfied after 29d71a2.
+- The fix correctly addresses Codex re-review P3-new: `post_edit_verify.sh` now populates `.harness/state/edited-files.log` end-to-end, as demonstrated by a sandboxed probe with a realistic payload.
+- Mirror discipline is intact (byte-identical root ↔ template for both touched files; mode 100755 preserved).
+- All other `extract_json_field` callers still work (`pre_bash_guard.sh` path verified explicitly).
+- No CRITICAL, HIGH, or MEDIUM static-analysis finding. Only pre-existing LOW items remain (shellcheck host, plan AC checkbox drift, golang pack mode-ignoring), plus three new LOW self-review notes on `lib_json.sh` contract documentation — none blocking.
+- Pipeline may proceed (or return to `/test` for behavioral regression coverage of the now-functional `edited-files.log` path, then `/sync-docs` and `/pr`).
+
+### Verified (delta)
+
+- Byte-identical mirror of `lib_json.sh` and `post_edit_verify.sh` root ↔ `templates/base/.claude/hooks/` after 29d71a2.
+- POSIX `sh -n` clean on all four files.
+- Both settings.json files still valid JSON with `PostToolUse` matcher `Edit|Write|MultiEdit` and both hooks registered in order (post_edit_verify first, check_mojibake second).
+- `check-sync.sh` PASS (0 DRIFTED / 0 ROOT_ONLY).
+- `HARNESS_VERIFY_MODE=static ./scripts/run-verify.sh` → exit 0 including the golang verifier.
+- Live caller survey: `pre_bash_guard.sh` (top-level `"command"`) and `post_edit_verify.sh` (dotted `"tool_input.file_path"`) both produce correct extractions under the new `extract_json_field`.
+- End-to-end probe: realistic PostToolUse payload now populates `edited-files.log` (previously always empty under jq).
+- Edit/Write/MultiEdit all extract file_path correctly (same nested schema).
+- No U+FFFD literal in any of the 4 modified source files.
+
+### Likely but unverified (statically, delta)
+
+- Real Claude Code session dispatch actually delivers payloads in the `tool_input.file_path` shape. The probe matches the documented schema, but only `/test`'s walkthrough can confirm in a live session.
+- The `additionalContext` emitted by the fixed hook is actually surfaced to Claude as expected (Claude Code runtime spec — not a static check).
+
+### Not verified (delta)
+
+- shellcheck on the updated `lib_json.sh` (tool unavailable on host). CI should catch.
+- Behavior under payloads with jq-expression-like field values (e.g., pathological nested field name — no caller passes such a field today, but the `_field` interpolation does not escape jq special characters).
+
+### Minimal additional check to raise confidence (delta)
+
+A single real-session probe: edit any file in a fresh Claude Code session with `jq` installed, then confirm `.harness/state/edited-files.log` contains the edited file path (previously always empty). Combined with the existing `post_edit_verify.sh` re-verify for `needs-verify` and `tool_failures.count`, this closes the loop on the silent-no-op fix. This is a `/test` walkthrough, not a static check.
