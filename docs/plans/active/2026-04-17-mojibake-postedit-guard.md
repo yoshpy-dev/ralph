@@ -1,6 +1,6 @@
 # mojibake-postedit-guard
 
-- Status: Draft
+- Status: Implementation complete — awaiting pipeline (self-review / verify / test / sync-docs / codex-review / pr)
 - Owner: Claude Code
 - Date: 2026-04-17
 - Related request: Claude Code の文字化け (U+FFFD 混入) 対策を記事（https://nyosegawa.com/posts/claude-code-mojibake-workaround/）に沿って導入
