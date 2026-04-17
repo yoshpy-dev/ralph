@@ -76,6 +76,7 @@ func TestTemplateBaseScriptsExist(t *testing.T) {
 		"ralph-pipeline.sh",
 		"ralph-status-helpers.sh",
 		"commit-msg-guard.sh",
+		"check-template.sh",
 	}
 
 	for _, name := range required {

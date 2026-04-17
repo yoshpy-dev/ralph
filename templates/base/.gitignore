@@ -1,0 +1,32 @@
+.DS_Store
+.idea/
+.vscode/
+node_modules/
+dist/
+build/
+bin/
+target/
+.venv/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+.claude/settings.local.json
+.claude/agent-memory-local/
+.claude/agent-memory/
+.claude/worktrees/
+.harness/logs/
+!.harness/logs/.gitkeep
+.harness/state/
+!.harness/state/.gitkeep
+
+# Test coverage artifacts
+coverage.out
+
+# Auto-generated verification evidence (run-verify.sh output)
+docs/evidence/*.log
+docs/evidence/*.json
+
+# Auto-generated pipeline execution logs
+docs/reports/pipeline-execution-*.json
