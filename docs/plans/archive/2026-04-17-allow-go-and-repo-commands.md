@@ -182,4 +182,4 @@
 - [x] Review artifact created (`docs/reports/self-review-2026-04-17-allow-go-and-repo-commands.md`)
 - [x] Verification artifact created (`docs/reports/verify-2026-04-17-allow-go-and-repo-commands.md`)
 - [x] Test artifact created (`docs/reports/test-2026-04-17-allow-go-and-repo-commands.md`)
-- [ ] PR created
+- [x] PR created (https://github.com/yoshpy-dev/harness-engineering-scaffolding-template/pull/24)
