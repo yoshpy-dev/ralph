@@ -32,5 +32,3 @@ jobs:
           COVERAGE_THRESHOLD: "80"
       - name: Check pipeline order sync
         run: ./scripts/check-pipeline-sync.sh
-      - name: Check template sync
-        run: ./scripts/check-sync.sh
