@@ -44,6 +44,8 @@ ROOT_ONLY_EXCLUSIONS=(
   ".claude/agent-memory/"
   ".claude/settings.local.json"
   ".claude/worktrees/"
+  # User-local hooks (gitignored; not distributed via template)
+  ".claude/hooks/local/"
   # Repo-specific docs (not template content)
   "docs/architecture/design-principles.md"
   "docs/architecture/repo-map.md"
