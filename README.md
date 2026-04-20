@@ -46,15 +46,13 @@ The default philosophy here is:
 │   ├── scaffold/           # Template embedding + manifest
 │   ├── upgrade/            # Diff engine + conflict resolution
 │   ├── config/             # ralph.toml parser
-│   ├── prompt/             # Prompt template resolver
 │   ├── state/              # Pipeline state reader
 │   ├── watcher/            # File system watcher
 │   ├── ui/                 # Bubble Tea TUI components
 │   └── action/             # CLI action executor
 ├── templates/              # go:embed source for ralph init
 │   ├── base/               # Base scaffold (.claude/, AGENTS.md, scripts/, etc.)
-│   ├── packs/              # Language packs
-│   └── prompts/            # Default pipeline prompt templates
+│   └── packs/              # Language packs
 ├── docs/
 │   ├── specs/
 │   ├── plans/
