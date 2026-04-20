@@ -29,7 +29,8 @@ for file in $required_files; do
 done
 
 # --- Shell scripts must be executable ---
-for script in $(find .claude/hooks packs scripts -type f -name '*.sh'); do
+# .claude/hooks/local/ is reserved for user-local (gitignored) hooks; skip.
+for script in $(find .claude/hooks packs scripts -type f -name '*.sh' -not -path '.claude/hooks/local/*'); do
   if [ ! -x "$script" ]; then
     fail "Script is not executable: $script"
   fi
