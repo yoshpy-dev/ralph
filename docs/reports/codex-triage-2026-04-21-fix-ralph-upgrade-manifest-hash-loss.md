@@ -39,3 +39,24 @@
 （なし）
 
 Categories: false-positive, already-addressed, style-preference, out-of-scope, context-aware-safe
+
+---
+
+## Round 2 (post-d16cb4d)
+
+- Codex findings: 2 (both P2)
+- After triage: ACTION_REQUIRED=1, WORTH_CONSIDERING=1, DISMISSED=0
+
+### ACTION_REQUIRED
+
+| # | Codex finding | Triage rationale | Affected file(s) |
+|---|---------------|------------------|-------------------|
+| 3 | [P2] Avoid repeating pack-removal notices on every upgrade — `internal/cli/upgrade.go:143-147`. `checkRemovals=true` にしたことで削除された pack ファイルが `ActionRemove` で通知されるが、現在の ActionRemove 分岐は `manifest.SetFile(d.Path, d.OldHash)` でエントリを保持するため、次回 upgrade でも同じファイルが再通知され続ける。idempotency 契約を破る。| 真の regression（pre-existing バグを私の pack-removal 復活で顕在化）。base ファイルにも同じロジックが効いているため、過去も "removed from template" が永続警告として出続けていた可能性が高い。修正方針: ActionRemove で manifest エントリをドロップする（"review and delete manually" とユーザに伝えた通り、次回以降 manifest からも外す）。Axis1=Yes, Axis2=Yes。| `internal/cli/upgrade.go:225-229`, `internal/upgrade/diff.go:171-183` |
+
+### WORTH_CONSIDERING
+
+| # | Codex finding | Triage rationale | Affected file(s) |
+|---|---------------|------------------|-------------------|
+| 4 | [P2] Normalize pack manifest keys in tests for Windows — `internal/cli/cli_test.go:181-182`. テストが `"packs/languages/golang/README.md"` のようにスラッシュで直書きしているが、`executeInit` は `filepath.Join` で manifest キーを作るので Windows では `\` 区切りになり lookup が失敗する。| 実装側は `splitManifestForPack` が `filepath.ToSlash` で正規化済みで正しく動作する。テストの portability だけの問題。CI が Linux/macOS しか回っていない現状で regression 相当ではなく WORTH_CONSIDERING。ただし `filepath.Join` へ書き換えるのは 5 行・低リスクなので同時に直しても良い。Axis1=Debatable, Axis2=Debatable。| `internal/cli/cli_test.go:182, 265, 269, 282, 298, 319, 323` |
+
+

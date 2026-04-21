@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -178,8 +180,9 @@ func TestRunUpgrade_SameVersionIsIdempotent(t *testing.T) {
 		}
 	}
 	// Pack files must be tracked under the namespaced key exactly once.
-	if _, ok := m.Files["packs/languages/golang/README.md"]; !ok {
-		t.Error("manifest missing packs/languages/golang/README.md")
+	packReadme := filepath.Join("packs", "languages", "golang", "README.md")
+	if _, ok := m.Files[packReadme]; !ok {
+		t.Errorf("manifest missing %s", packReadme)
 	}
 	if _, ok := m.Files["README.md"]; ok {
 		t.Error("manifest has unprefixed README.md (pack namespace leak)")
@@ -253,7 +256,9 @@ func TestRunUpgrade_DropsPacksRemovedFromTemplates(t *testing.T) {
 		t.Fatalf("ReadManifest: %v", err)
 	}
 	m.Meta.Packs = []string{"golang", "ghostpack"}
-	m.SetFile("packs/languages/ghostpack/verify.sh", "sha256:deadbeef")
+	ghostEntry := filepath.Join("packs", "languages", "ghostpack", "verify.sh")
+	golangEntry := filepath.Join("packs", "languages", "golang", "README.md")
+	m.SetFile(ghostEntry, "sha256:deadbeef")
 	if err := m.Write(manifestPath); err != nil {
 		t.Fatalf("Write manifest: %v", err)
 	}
@@ -266,24 +271,35 @@ func TestRunUpgrade_DropsPacksRemovedFromTemplates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadManifest: %v", err)
 	}
-	if _, ok := m2.Files["packs/languages/ghostpack/verify.sh"]; ok {
-		t.Error("ghostpack manifest entry should be dropped when pack is absent from templates")
+	if _, ok := m2.Files[ghostEntry]; ok {
+		t.Errorf("%s should be dropped when pack is absent from templates", ghostEntry)
 	}
-	if _, ok := m2.Files["packs/languages/golang/README.md"]; !ok {
-		t.Error("golang entry was dropped — only the removed pack should drop")
+	if _, ok := m2.Files[golangEntry]; !ok {
+		t.Errorf("%s was dropped — only the removed pack should drop", golangEntry)
 	}
+	ghostFound := false
+	golangFound := false
 	for _, p := range m2.Meta.Packs {
 		if p == "ghostpack" {
-			t.Error("ghostpack should be removed from Meta.Packs")
+			ghostFound = true
 		}
+		if p == "golang" {
+			golangFound = true
+		}
+	}
+	if ghostFound {
+		t.Error("ghostpack should be removed from Meta.Packs")
+	}
+	if !golangFound {
+		t.Error("golang should be retained in Meta.Packs")
 	}
 }
 
 // Regression: a file dropped from a pack template but still tracked in the
-// manifest must surface as ActionRemove (not silently disappear from the
-// manifest). The pack-scoped diff now runs with checkRemovals=true so the
-// user still sees the "removed from template" warning.
-func TestRunUpgrade_ReportsDeletedPackFile(t *testing.T) {
+// manifest must surface as ActionRemove (namespaced pack path) on the first
+// upgrade, and the entry must be dropped from the manifest afterwards so a
+// second same-version upgrade does NOT re-emit the notice.
+func TestRunUpgrade_ReportsDeletedPackFileOnceThenDrops(t *testing.T) {
 	setupTestEmbedFS(t)
 	Version = "1.0.0-test"
 
@@ -293,35 +309,52 @@ func TestRunUpgrade_ReportsDeletedPackFile(t *testing.T) {
 		t.Fatalf("init: %v", err)
 	}
 
-	// Seed a ghost file that the manifest tracks but the pack template never
-	// contained — simulates a file that was dropped from the template.
 	manifestPath := filepath.Join(dir, ".ralph", "manifest.toml")
 	m, err := scaffold.ReadManifest(manifestPath)
 	if err != nil {
 		t.Fatalf("ReadManifest: %v", err)
 	}
-	m.SetFile("packs/languages/golang/deprecated.sh", "sha256:cafef00d")
+	deprecatedEntry := filepath.Join("packs", "languages", "golang", "deprecated.sh")
+	m.SetFile(deprecatedEntry, "sha256:cafef00d")
 	if err := m.Write(manifestPath); err != nil {
 		t.Fatalf("Write manifest: %v", err)
 	}
 
-	if err := runUpgrade(dir, false); err != nil {
-		t.Fatalf("upgrade: %v", err)
+	// Capture stdout of the first upgrade to assert the user-facing notice.
+	origStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	upgradeErr := runUpgrade(dir, false)
+	_ = w.Close()
+	os.Stdout = origStdout
+	out, _ := io.ReadAll(r)
+	if upgradeErr != nil {
+		t.Fatalf("first upgrade: %v", upgradeErr)
+	}
+	if !strings.Contains(string(out), deprecatedEntry) {
+		t.Errorf("first upgrade stdout missing pack-scoped remove notice for %s; got:\n%s", deprecatedEntry, out)
 	}
 
-	// After upgrade, the deprecated entry must be retained so the next run
-	// does not re-notify (ActionRemove preserves OldHash), OR it must be
-	// gone if we explicitly cleared it. The current contract keeps the
-	// entry via OldHash. What we assert here is the Remove *path* was
-	// correctly namespaced (via re-prefix) so the user saw a pack-scoped
-	// notice rather than the file silently disappearing from manifest
-	// without any user-facing signal.
 	m2, err := scaffold.ReadManifest(manifestPath)
 	if err != nil {
-		t.Fatalf("ReadManifest: %v", err)
+		t.Fatalf("ReadManifest after first upgrade: %v", err)
 	}
-	if _, ok := m2.Files["packs/languages/golang/deprecated.sh"]; !ok {
-		t.Error("deprecated pack file entry silently disappeared — expected ActionRemove path to preserve OldHash for next-upgrade idempotency")
+	if _, ok := m2.Files[deprecatedEntry]; ok {
+		t.Errorf("%s should be dropped from manifest after ActionRemove (idempotency)", deprecatedEntry)
+	}
+
+	// Second same-version upgrade must NOT re-emit the notice.
+	r2, w2, _ := os.Pipe()
+	os.Stdout = w2
+	err = runUpgrade(dir, false)
+	_ = w2.Close()
+	os.Stdout = origStdout
+	out2, _ := io.ReadAll(r2)
+	if err != nil {
+		t.Fatalf("second upgrade: %v", err)
+	}
+	if strings.Contains(string(out2), "removed from template") {
+		t.Errorf("second same-version upgrade re-emitted removal notice; got:\n%s", out2)
 	}
 }
 

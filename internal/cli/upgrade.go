@@ -223,8 +223,11 @@ func runUpgrade(targetDir string, force bool) error {
 			updated++
 
 		case upgrade.ActionRemove:
-			// Preserve the old manifest entry so next upgrade doesn't re-notify.
-			manifest.SetFile(d.Path, d.OldHash)
+			// Drop the entry from the new manifest. Preserving it caused the
+			// same removal to be re-notified on every subsequent upgrade,
+			// which breaks idempotency. The user was told to "review and
+			// delete manually", so untracking the file after one warning is
+			// the intended contract.
 			fmt.Printf("  ⚠ %s (removed from template — review and delete manually)\n", d.Path)
 			notified++
 
