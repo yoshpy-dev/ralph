@@ -136,8 +136,8 @@ All Ralph pipeline settings are centralized in `scripts/ralph-config.sh`. Overri
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `RALPH_MODEL` | `opus` | Claude model name |
-| `RALPH_EFFORT` | `high` | Effort level for `claude -p` |
+| `RALPH_MODEL` | `claude-opus-4-7` | Claude model name |
+| `RALPH_EFFORT` | `xhigh` | Effort level for `claude -p` |
 | `RALPH_PERMISSION_MODE` | `bypassPermissions` | Permission mode for `claude -p` |
 | `RALPH_MAX_ITERATIONS` | `20` | Total iteration cap across all cycles |
 | `RALPH_MAX_INNER_CYCLES` | `10` | Max Inner Loop cycles before escalation |

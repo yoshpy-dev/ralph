@@ -51,10 +51,10 @@ test_defaults() {
 
   # Source in a subshell to avoid polluting this shell
   _model="$(unset RALPH_MODEL; . "$CONFIG"; echo "$RALPH_MODEL")"
-  assert_eq "default RALPH_MODEL" "opus" "$_model"
+  assert_eq "default RALPH_MODEL" "claude-opus-4-7" "$_model"
 
   _effort="$(unset RALPH_EFFORT; . "$CONFIG"; echo "$RALPH_EFFORT")"
-  assert_eq "default RALPH_EFFORT" "high" "$_effort"
+  assert_eq "default RALPH_EFFORT" "xhigh" "$_effort"
 
   _perm="$(unset RALPH_PERMISSION_MODE; . "$CONFIG"; echo "$RALPH_PERMISSION_MODE")"
   assert_eq "default RALPH_PERMISSION_MODE" "bypassPermissions" "$_perm"

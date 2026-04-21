@@ -40,8 +40,8 @@ type DoctorConfig struct {
 func Default() Config {
 	return Config{
 		Pipeline: PipelineConfig{
-			Model:          "claude-sonnet-4-20250514",
-			Effort:         "high",
+			Model:          "claude-opus-4-7",
+			Effort:         "xhigh",
 			MaxIterations:  20,
 			MaxParallel:    4,
 			SliceTimeout:   "30m",

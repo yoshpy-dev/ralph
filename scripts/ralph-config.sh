@@ -15,8 +15,8 @@
 # Defaults (override via environment variables)
 # ═══════════════════════════════════════════════════════════════════
 
-RALPH_MODEL="${RALPH_MODEL:-opus}"
-RALPH_EFFORT="${RALPH_EFFORT:-high}"
+RALPH_MODEL="${RALPH_MODEL:-claude-opus-4-7}"
+RALPH_EFFORT="${RALPH_EFFORT:-xhigh}"
 RALPH_PERMISSION_MODE="${RALPH_PERMISSION_MODE:-bypassPermissions}"
 RALPH_MAX_ITERATIONS="${RALPH_MAX_ITERATIONS:-20}"
 RALPH_MAX_INNER_CYCLES="${RALPH_MAX_INNER_CYCLES:-10}"
