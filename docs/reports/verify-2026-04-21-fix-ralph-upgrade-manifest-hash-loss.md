@@ -171,3 +171,90 @@ No code-level blockers. Proceed to `/test` (or re-run `/test` if fix-and-revalid
 
 - Raw Round 2 verification output: `docs/evidence/verify-2026-04-21-fix-ralph-upgrade-manifest-hash-loss-round2.log`
 - This report (updated in-place): `docs/reports/verify-2026-04-21-fix-ralph-upgrade-manifest-hash-loss.md`
+
+## Round 3 (post-codex-2)
+
+- Date: 2026-04-21
+- Trigger: Re-verify after commit `6f038de` addressed two Round 2 Codex findings (1 ACTION_REQUIRED + 1 WORTH_CONSIDERING).
+- Scope: confirm the `ActionRemove`-drops-entry fix does not regress base-file removal contracts, confirm test-key portability migration is still green under `run-verify.sh`, and re-flag spec drift for `/sync-docs`.
+- Verifier: verifier subagent (Claude Code).
+
+### What changed since Round 2
+
+Commit `6f038de` (`fix(upgrade): drop removed entries from manifest and harden tests`):
+
+1. **[ACTION_REQUIRED resolved]** `internal/cli/upgrade.go:225-232` — the `ActionRemove` branch no longer calls `manifest.SetFile(d.Path, d.OldHash)`. The entry is dropped from the new manifest entirely, so the `"removed from template — review and delete manually"` notice fires exactly once per removal. This applies uniformly to base and pack paths (same switch handles both, pack paths having been re-prefixed to `packs/languages/<pack>/<rel>` at `upgrade.go:154-156`). Comment at `upgrade.go:226-230` documents the rationale.
+2. **[WORTH_CONSIDERING resolved]** `internal/cli/cli_test.go` — all hard-coded pack manifest keys (`"packs/languages/…"`) replaced with `filepath.Join("packs","languages",…)` so assertions continue to match on Windows where `executeInit` builds manifest keys via `filepath.Join`. Touches `TestRunUpgrade_SameVersionIsIdempotent` (lines 182–189), `TestRunUpgrade_DropsPacksRemovedFromTemplates` (lines 259–295), and the rename of `TestRunUpgrade_ReportsDeletedPackFile` → `TestRunUpgrade_ReportsDeletedPackFileOnceThenDrops` (lines 298–359) with stdout capture asserting (a) first-upgrade notice fires, (b) manifest entry dropped after first upgrade, (c) second same-version upgrade does NOT re-emit `"removed from template"`.
+3. **[LOW bonus]** `TestRunUpgrade_DropsPacksRemovedFromTemplates` now positively asserts `golang` is retained in `Meta.Packs` (closes the Round 2 self-review LOW).
+
+### Deterministic checks re-run
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `./scripts/run-verify.sh` | `EXIT=0` | All shell/hook syntax checks, settings.json jq parse, `check-sync` (107 identical / 0 drifted), mojibake tests (11/11 PASS), golang verifier (gofmt ok, `go vet` 0 issues, `go test ./...` all packages PASS, `internal/cli` + `internal/upgrade` cached green). Evidence: `docs/evidence/verify-2026-04-21-fix-ralph-upgrade-manifest-hash-loss-round3.log` |
+| `go vet ./...` | `EXIT=0` | No output |
+| `gofmt -l internal/` | `EXIT=0` | No output |
+| `git status` | clean | Working tree clean after commit; branch 3 commits ahead of origin, expected |
+
+### Base-file removal contract — regression check
+
+Concern: prior to Round 3, the `ActionRemove` branch called `manifest.SetFile(d.Path, d.OldHash)` for **both** base and pack paths (pack paths only reached it after `d16cb4d` restored pack-removal detection). Dropping the manifest entry is the new behavior for both.
+
+- **Detection contract (unchanged)**: `internal/upgrade/diff.go:171-183` still emits `ActionRemove` for any manifest entry not present in the walked FS when `checkRemovals=true`. Base calls with `checkRemovals=true` (`upgrade.go:103`) still surface base-file deletions. `TestComputeDiffs_RemoveFile` (`diff_test.go:108-130`) still green.
+- **User-visible notice (unchanged)**: `fmt.Printf("  ⚠ %s (removed from template — review and delete manually)\n", d.Path)` still fires once at `upgrade.go:231`, and the `notified++` counter still drives the `Removed from template: N files (review manually)` summary line.
+- **Manifest bookkeeping (changed, in direction of idempotency)**: before Round 3 a base file removed from the template would re-trigger the notice on every subsequent upgrade (because the old hash was re-written into the new manifest, keeping the entry present and un-rescued by the `newFiles` set). That was a latent idempotency bug that Round 3 fixes uniformly with packs. No downstream caller depends on base `ActionRemove` entries persisting; the in-tree consumers of the new manifest (`manifest.Write`, `scaffold.ReadManifest` on the next run) never reference a removed path.
+- **No test covers the base-file drop-after-notice end-to-end**. The pack-path equivalent is covered by `TestRunUpgrade_ReportsDeletedPackFileOnceThenDrops` (`cli_test.go:302-359`) which asserts both "entry dropped" and "second upgrade silent". The same switch-case handles base paths, so the structural symmetry gives reasonable confidence, but this is "likely but unverified" rather than verified. Lowest-cost addition would be a base-file twin of the pack test; not a blocker.
+
+No base-contract regression detected. The change narrows a latent bug rather than widening behavior.
+
+### Test-key portability — post-migration check
+
+All previously hard-coded forward-slash manifest keys replaced:
+
+| Test | Line(s) | Before | After |
+| --- | --- | --- | --- |
+| `TestRunUpgrade_SameVersionIsIdempotent` | 183 | `"packs/languages/golang/README.md"` | `filepath.Join("packs","languages","golang","README.md")` |
+| `TestRunUpgrade_DropsPacksRemovedFromTemplates` | 259–260 | `"packs/languages/ghostpack/verify.sh"`, `"packs/languages/golang/README.md"` | `filepath.Join(...)` variants |
+| `TestRunUpgrade_ReportsDeletedPackFileOnceThenDrops` | 317 | `"packs/languages/golang/deprecated.sh"` | `filepath.Join(...)` variant |
+
+`run-verify.sh` golang verifier on Linux/macOS still passes (keys collapse to forward-slash, matching `executeInit`'s `filepath.Join` output on POSIX). The assertion `!strings.Contains(out, "removed from template")` at line 356 uses a string literal that matches the stdout template at `upgrade.go:231` verbatim, so the idempotency guard is tight.
+
+No Windows CI in this repo, so the Windows-portability claim itself is not dynamically verified — the migration is static-only. This is consistent with the WORTH_CONSIDERING triage (portability fix, not a regression).
+
+### Spec compliance re-check
+
+All Round 1 ACs remain Verified. No acceptance criterion regresses from the Round 3 change. The new idempotency contract ("removed entry is dropped after one-time notice") is a strengthening of the implicit "same-version upgrade prints nothing new" guarantee in AC1, not a relaxation.
+
+### Documentation drift — still a gap for /sync-docs
+
+`docs/specs/2026-04-16-ralph-cli-tool.md` was updated in Round 2 (commit `af16b7e`) to document split-manifest mechanism and the temporary-preserve vs. release-drop split, but it does **not** yet mention the Round 3 behavior:
+
+- **Missing sentence**: the spec at line 290 says pack-file deletions surface as `removed from template` with the full pack path, but does not state that the manifest entry is dropped after that one-time notice (idempotent on re-run). The same applies to base-file deletions — the spec's idempotency bullet (line 288) lists `removed from template` in the "never shown on same-version re-run for unchanged files" list, which is correct for same-version unchanged files, but the release-boundary case (file actually removed from template in the new version) now has its own "notice once, then silent" guarantee that the spec does not articulate.
+- **Recommended fix for /sync-docs**: extend the bullet at line 290 (or add a new sub-bullet under `### 冪等性と自動修復`) with wording such as:
+  > 削除通知は 1 回限り: template から削除されたファイルは初回 upgrade で `removed from template — review and delete manually` を表示し、同時にマニフェストからエントリをドロップする。以降の同一バージョン upgrade では再通知されない（ユーザがファイルを削除するかどうかは手動判断のため、warning を永続化しない）。base ファイル・pack ファイル双方に同じ挙動が適用される。
+
+No drift in `AGENTS.md`, `CLAUDE.md`, `README.md`, `docs/recipes/*`, or the archived plan. `/sync-docs` should update this single line in the spec before `/pr`.
+
+### Coverage gaps (non-blocking, for /test awareness)
+
+- No end-to-end test exercises the base-file `ActionRemove` drop-after-notice path (pack-path twin is covered). Structurally symmetric code; low risk.
+- Transient `PackFS` / pack-diff failure branches (`upgrade.go:134-140`, `147-153`) still lack direct tests after the Round 2 ghostpack fixture repurposing — carried forward from Round 2.
+
+### Smallest useful additional check
+
+A 4-line twin of `TestRunUpgrade_ReportsDeletedPackFileOnceThenDrops` targeting a base file (e.g. inject a ghost `AGENTS.md.old` into the manifest, run upgrade twice, assert the entry is dropped and the second run is silent). That would lock in the base-file leg of the Round 3 idempotency contract independent of the pack path. Non-blocking.
+
+### Round 3 verdict
+
+- **Verified**: `run-verify.sh` green; `go vet` clean; `gofmt` clean; pack-path `ActionRemove` idempotency exercised end-to-end by `TestRunUpgrade_ReportsDeletedPackFileOnceThenDrops`; `Meta.Packs` positive retention covered; all manifest-key assertions use `filepath.Join`. Round 1 ACs all remain Verified. No contract regression on base-file removal (detection + notice unchanged; bookkeeping fixed uniformly).
+- **Likely but unverified**: base-file end-to-end drop-after-notice behavior (structural symmetry with pack path). Windows-portability of the test key migration (no Windows CI).
+- **Documentation drift**: spec needs one-line update noting the "notice once, then drop from manifest" contract (applies to both base and pack paths). Flagged for `/sync-docs`.
+
+**Overall Round 3 verdict: PASS (with doc-drift flag for `/sync-docs`)**
+
+No code-level blockers. Proceed to `/test`. `/sync-docs` must extend `docs/specs/2026-04-16-ralph-cli-tool.md` around line 290 to cover the Round 3 idempotency refinement before `/pr`.
+
+### Round 3 artifacts
+
+- Raw Round 3 verification output: `docs/evidence/verify-2026-04-21-fix-ralph-upgrade-manifest-hash-loss-round3.log`
+- This report (updated in-place): `docs/reports/verify-2026-04-21-fix-ralph-upgrade-manifest-hash-loss.md`

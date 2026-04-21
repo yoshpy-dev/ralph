@@ -136,3 +136,74 @@ The prior round flagged five LOW / one MEDIUM items. Commit `d16cb4d` resolves s
   4. Consider covering the transient `PackFS` / `ComputeDiffsWithManifest` failure branches (may require a custom `fs.FS` wrapper that injects errors mid-walk).
 
 No tech-debt entry needed — findings are small and directly actionable. The Codex ACTION_REQUIRED concerns are genuinely addressed by the code changes, not just papered over.
+
+## Round 3 (post-codex-2)
+
+- Date: 2026-04-21
+- Trigger: Re-review after Round 2 Codex findings landed in commit `6f038de` (ACTION_REQUIRED: drop manifest entry on `ActionRemove`; WORTH_CONSIDERING: Windows-portable test path assertions; plus Round 2 self-review LOW: positive `golang` retention assertion; plus new stdout-capture test).
+- Scope: `git show 6f038de` only. All prior commits were approved in Rounds 1–2.
+- Reviewer: reviewer subagent (self-review, diff quality only).
+
+### Evidence reviewed
+
+- `git show 6f038de --stat`: 3 files, +86 / −29
+  - `internal/cli/upgrade.go` (−5 / +7, net +2; only the `ActionRemove` branch at `:225-232` plus comment)
+  - `internal/cli/cli_test.go` (+63 / −24, net +39)
+  - `docs/reports/codex-triage-*.md` (triage append — out of code-quality scope)
+- Full re-read of `internal/cli/upgrade.go:223-253` to confirm the `ActionRemove` drop is consistent with the surrounding switch arms (`ActionAutoUpdate` / `ActionConflict/skip` / `ActionAdd` / `ActionSkip`) and with the `notified` counter + summary line at `:247-249`.
+- Cross-check of `internal/upgrade/diff.go:171-183` (`checkRemovals` loop) to confirm that dropping the entry in `upgrade.go` does NOT cause the diff engine to re-emit `ActionRemove` on the next run (since on a successful second upgrade the entry is gone from `manifest.Files`, the iteration never fires for that key).
+- Inspection of `internal/cli/cli_test.go:1-12` (imports), `:300-359` (the renamed + hardened `TestRunUpgrade_ReportsDeletedPackFileOnceThenDrops`), `:253-296` (hardened `TestRunUpgrade_DropsPacksRemovedFromTemplates` with positive `golang` retention).
+- Confirmed no `t.Parallel()` in `cli_test.go` (grep `-n "t.Parallel"` → none), so swapping `os.Stdout` is test-local and does not race with other tests in the package.
+
+### What the commit does
+
+1. `ActionRemove` no longer calls `manifest.SetFile(d.Path, d.OldHash)`. The entry is simply dropped from the new manifest on the same run where the user was notified. Fixes the perpetual re-notify bug.
+2. Every hard-coded pack manifest key in the tests (`"packs/languages/golang/README.md"`, `"packs/languages/ghostpack/verify.sh"`, `"packs/languages/golang/deprecated.sh"`) is now constructed via `filepath.Join`. On Windows the generated separator is `\`, matching what `executeInit` writes. On Linux/macOS the value is byte-identical to the previous string literal, so CI behavior is unchanged.
+3. `TestRunUpgrade_DropsPacksRemovedFromTemplates` now asserts both directions: `ghostpack` removed AND `golang` retained in `Meta.Packs`. Uses boolean flags + post-loop assertions instead of `t.Error` inside the iteration (which would otherwise fail only on a seen-then-not-retained scenario, not a never-seen scenario).
+4. `TestRunUpgrade_ReportsDeletedPackFile` was renamed to `TestRunUpgrade_ReportsDeletedPackFileOnceThenDrops` and now:
+   - Captures stdout via `os.Pipe()` around the first `runUpgrade` call.
+   - Asserts the pack-scoped path appears in stdout (the "removed from template" user-facing notice is actually emitted).
+   - Asserts the entry is dropped from the manifest after the first upgrade.
+   - Runs a second same-version upgrade, captures its stdout, and asserts the string `"removed from template"` is NOT present — the idempotency contract.
+
+### Findings
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| LOW | `internal/cli/cli_test.go:324-330, 347-352` — stdout capture pattern | The stdout-capture uses `os.Pipe()` with a synchronous `runUpgrade` call between `os.Stdout = w` and `w.Close()`. If `runUpgrade` ever emits more than one pipe-buffer's worth of output (typically 16–64 KiB depending on kernel), the writer would block and the test would deadlock because no goroutine is draining the reader concurrently. Current output is ~1–2 KiB for this scenario (1 `ActionRemove` print + 3 summary lines), so the risk is theoretical. But if a future change adds per-file prints over many files, this test could hang intermittently. | `cli_test.go:324-336` — the reader `io.ReadAll(r)` runs AFTER `w.Close()` and after the upgrade completes. No draining goroutine. The `fmt.Printf` count in `upgrade.go` is 19 sites, most per-file. | Optional: drain the pipe concurrently (`go func() { out, _ = io.ReadAll(r) }()`) or use a `bytes.Buffer` swap via `log`-style redirection. Non-blocking for this PR. |
+| LOW | `internal/cli/cli_test.go:324-336, 347-358` — `os.Stdout` restoration on panic | If `runUpgrade` panics between `os.Stdout = w` and the manual restore at line 329/351, subsequent tests in the package run with a broken `os.Stdout` pointing at a closed pipe end. There is no `t.Cleanup` or `defer` guarding the restore. | Lines 324-329 and 347-351 — no defer on the stdout swap. | Optional: wrap as `defer func() { os.Stdout = origStdout }()` or `t.Cleanup(func() { os.Stdout = origStdout })` immediately after the swap. Defensive, not blocking. |
+| LOW | `internal/cli/cli_test.go:325, 347` — discarded `os.Pipe` errors | `r, w, _ := os.Pipe()` and `r2, w2, _ := os.Pipe()` both discard the error return. In practice `os.Pipe` can fail under `EMFILE` (file-descriptor exhaustion). Test would then proceed with nil `w`, panic on `os.Stdout = w` → nil `Write`. | `cli_test.go:325, 347`. | Optional: `r, w, err := os.Pipe(); if err != nil { t.Fatalf("pipe: %v", err) }`. Low-frequency failure mode, fine to ignore but easy to harden. |
+| LOW | `internal/cli/cli_test.go:330, 352` — discarded `io.ReadAll` errors | `out, _ := io.ReadAll(r)` discards the error. If the read fails, the test falls back to asserting against an empty buffer and produces a misleading failure message ("first upgrade stdout missing pack-scoped remove notice"). The actual error (e.g., EBADF on a closed pipe) would be lost. | `cli_test.go:330, 352`. | Optional: capture and `t.Logf` the error on non-nil. Not blocking. |
+| LOW | `internal/cli/upgrade.go:225-232` — `ActionRemove` comment is accurate but no longer tracks `notified` semantics | The comment now says "Drop the entry from the new manifest" but does not explain WHY the `notified` counter is still incremented (for the summary line at `:247-249`). A reader coming fresh might wonder if the removal and the count are linked. | `upgrade.go:225-232`. | Optional: add one line like `// notified++ still fires so the summary ("Removed from template: N files") is accurate.` Cosmetic only. |
+
+No CRITICAL, HIGH, or MEDIUM findings.
+
+### Cross-check against Round 2 follow-ups
+
+- **LOW test misses stdout-capture for `ActionRemove` notice** → **resolved** by Round 3. The new `TestRunUpgrade_ReportsDeletedPackFileOnceThenDrops` captures stdout and asserts the `deprecated.sh` path appears. ✓
+- **LOW golang not positively asserted as retained in `Meta.Packs`** → **resolved** by Round 3. The two-flag pattern explicitly asserts both directions. ✓
+- **LOW `%q` vs `%s` inconsistency in stderr messages** → **unchanged**. Out of scope for this commit (no diff in those lines). Remains a non-blocking cosmetic item.
+
+### Correctness spot-checks
+
+- **`ActionRemove` drop interacts correctly with `maps.Copy(manifest.Files, preservedPackEntries)` at `upgrade.go:168`**: `preservedPackEntries` only contains entries for packs whose `PackFS` or `ComputeDiffsWithManifest` failed. In the happy-path test scenario (`golang` loads successfully, `deprecated.sh` is `ActionRemove`d), `preservedPackEntries` is empty, so the `maps.Copy` is a no-op and the entry is truly gone from the final manifest. ✓
+- **Second-upgrade idempotency**: after the first upgrade drops `deprecated.sh`, the second `ReadManifest` does not have that key; `ComputeDiffsWithManifest` walks `packFS` (which also does not have `deprecated.sh`); the `checkRemovals` loop at `diff.go:173-183` iterates `manifest.Files` — since the key is absent, no `ActionRemove` is emitted. No notice printed. The test's stdout-absence assertion matches the code path. ✓
+- **`notified` counter consistency**: the `ActionRemove` arm still increments `notified++`, so the summary `"Removed from template: N files"` line remains correct. The only thing that changed is whether the manifest persists the tracking — not the user-facing count. ✓
+- **Windows-path portability of the stdout substring assertion**: on Windows, `deprecatedEntry = filepath.Join("packs", "languages", "golang", "deprecated.sh")` = `"packs\\languages\\golang\\deprecated.sh"`. The stdout comes from `fmt.Printf("  ⚠ %s ...", d.Path)` where `d.Path` is built at `upgrade.go:155` via `filepath.Join("packs", "languages", pack, packDiffs[i].Path)` — same `filepath.Join` producing the same separator. So `strings.Contains` matches on all platforms. ✓
+- **No new debug prints, TODOs, commented-out code, or secrets.** ✓
+- **No exception swallowing in production code.** Test-side error discards (LOW findings above) are localized to test scaffolding. ✓
+
+### Coverage gaps (for `/test`, not blocking merge here)
+
+- The stdout-capture pattern does not verify that the PRE-notice summary (`"Removed from template: 1 files (review manually)"` at `upgrade.go:247-248`) is also emitted. A `strings.Contains(out, "Removed from template")` assertion on the first run would catch a regression that stripped the summary while keeping the per-file notice.
+- The second-upgrade assertion uses the string `"removed from template"` (lowercase, matching the per-file notice template). It would also match the summary line `"Removed from template:"` if the summary were ever emitted with N=0. The summary is guarded by `if notified > 0` at `:247`, so no false positive today — but the assertion string is not a perfect oracle.
+
+### Recommendation
+
+- Merge: **approve** (no CRITICAL, HIGH, or MEDIUM findings).
+- All Round 3 findings are LOW defensiveness / test-scaffolding hygiene items. None block the fix, and several (pipe deadlock, stdout-restore-on-panic, discarded pipe errors) are generic patterns any future stdout-capture test in this repo could adopt uniformly later.
+- The Round 2 Codex ACTION_REQUIRED ("drop entry on `ActionRemove`") is substantively resolved, with a regression test that exercises both the user-facing notice AND the idempotency contract on a second run.
+- The Round 2 Codex WORTH_CONSIDERING ("Windows-portable path assertions") is resolved uniformly across every hard-coded pack-manifest key in `cli_test.go`.
+- The Round 2 self-review LOW ("positive golang retention") is closed.
+
+No tech-debt entry needed. Round 3 introduces no new accumulated complexity — it removes a latent idempotency bug and hardens test portability.

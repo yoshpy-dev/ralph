@@ -77,3 +77,29 @@ Documentation now matches implementation for the four behaviors flagged by `/ver
 ### Round 2 verdict
 
 Spec lines 290–291 now match the post-`d16cb4d` implementation. No remaining doc drift identified by Verify Round 2. Ready for re-run of `/codex-review` and `/pr`.
+
+## Round 3 (post-codex-2)
+
+- Date: 2026-04-21
+- Trigger: Verify Round 3 flagged remaining spec drift in `docs/specs/2026-04-16-ralph-cli-tool.md` around line 290 (`#### 冪等性と自動修復` subsection) after commit `6f038de` (`fix(upgrade): drop removed entries from manifest and harden tests`). The subsection described the `ActionRemove` surfacing for pack files but did not state that the entry is dropped from the manifest after the one-time notice (idempotent on re-run), and did not clarify that the same treatment applies to base files.
+
+### Files updated
+
+| File | Change | Reason |
+| --- | --- | --- |
+| `docs/specs/2026-04-16-ralph-cli-tool.md` (new bullet appended to `#### 冪等性と自動修復` subsection, after the pack preservation/drop bullet) | Added a concise `ActionRemove` 後のマニフェスト・ドロップ bullet: entry is dropped from the manifest after the one-time "review and delete manually" notice; same-version re-run does NOT re-emit the notice; applies equally to base file removals. | Commit `6f038de` changed the `ActionRemove` handler in `internal/cli/upgrade.go` (lines 225–232) to drop the entry instead of preserving it via `OldHash`. Prior behavior re-emitted the removal notice on every subsequent upgrade, breaking same-version idempotency. The user-facing contract ("review and delete manually" — one warning) is now codified in the spec. The existing pack-preservation/drop bullet covered the `scaffold.AvailablePacks()` path but not the per-file `ActionRemove` handler that now applies uniformly to base and pack files. |
+
+### Scope discipline
+
+- Only the single targeted bullet was added under the existing `#### 冪等性と自動修復` subsection. No unrelated sections of the spec were modified.
+- No implementation or test files modified.
+- `AGENTS.md` / `CLAUDE.md` / `README.md` / `docs/recipes/*` / `.claude/rules/*` / `docs/quality/*` untouched — the fix is a refinement of `ActionRemove` semantics within `internal/cli/upgrade.go`, not a new public contract. The `internal/upgrade/` repo-map description in `AGENTS.md` ("hash-based diff engine, conflict resolution (auto-update, conflict, add, remove)") still accurately names the action.
+
+### Evidence
+
+- Commit `6f038de` diff: `internal/cli/upgrade.go` lines 225–232 (drop entry on `ActionRemove`, exact comment: "Drop the entry from the new manifest. Preserving it caused the same removal to be re-notified on every subsequent upgrade, which breaks idempotency. The user was told to 'review and delete manually', so untracking the file after one warning is the intended contract.").
+- Test coverage anchor: `internal/cli/cli_test.go` — `TestRunUpgrade_ReportsDeletedPackFile` hardened to assert (a) first-run notice, (b) manifest entry dropped, (c) second same-version upgrade emits no re-notice.
+
+### Round 3 verdict
+
+Spec bullet added for `ActionRemove` manifest drop behavior. No remaining doc drift identified by Verify Round 3. Ready for re-run of `/codex-review` and `/pr`.

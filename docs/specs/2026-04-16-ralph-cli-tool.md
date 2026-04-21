@@ -291,6 +291,7 @@ Checking for updates...
 - **pack の一時的失敗時のエントリ保持 vs release 削除時の明示的ドロップ**: これらは反対の挙動を持つ 2 経路として区別される。
   - *一時的失敗（preservation）*: pack が `scaffold.AvailablePacks()` には存在するが、埋め込み FS のロードまたは diff 計算が失敗した場合、その pack に対応する旧マニフェストのエントリは新マニフェストへそのままコピーされ、追跡情報は失われない（Warning を stderr に出力）。一時的不具合で既存エントリが消えて再生成扱いになることを防ぐ。
   - *release で削除された pack（explicit drop）*: pack が `scaffold.AvailablePacks()` に存在しない（リリースで削除・改名された）場合、マニフェスト追跡は明示的にドロップされ、`Meta.Packs` からも外れる。ディスク上のファイルはそのまま残され、`Notice: pack "<pack>" no longer exists in templates — manifest tracking dropped (files on disk left untouched)` が stderr に出力される。
+- **`ActionRemove` 後のマニフェスト・ドロップ**: `ActionRemove` 後、マニフェストから該当エントリが削除される。「review and delete manually」の通知は 1 回のみで、同一バージョン再実行しても再通知されない。base ファイルの削除にも同じ扱いが適用される。
 
 ## セキュリティ考慮事項
 

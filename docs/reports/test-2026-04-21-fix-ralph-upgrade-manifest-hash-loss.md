@@ -194,3 +194,88 @@ All previously-green plan-targeted tests still PASS in Round 2:
 - Regressions: none
 
 **Tests remain green after the Codex-driven pack-removal fix. Safe to proceed to `/sync-docs` → `/codex-review` (re-run) → `/pr`.**
+
+## Round 3 (post-codex-2)
+
+- Date: 2026-04-21
+- Trigger: Round 2 Codex follow-up — (1) ACTION_REQUIRED: `ActionRemove` used to preserve the manifest entry via `OldHash`, re-emitting the "removed from template" notice on every subsequent upgrade (broke same-version idempotency, surfaced now that pack files correctly trigger `ActionRemove`). (2) WORTH_CONSIDERING: test manifest-key assertions were hard-coded with forward slashes and would fail on Windows (`executeInit` builds keys via `filepath.Join`). Fix landed in commit `6f038de` ("fix(upgrade): drop removed entries from manifest and harden tests").
+- Evidence: `docs/evidence/test-2026-04-21-fix-ralph-upgrade-manifest-hash-loss-round3.log`
+- Command: `go test ./... -count=1` (green, exit 0)
+
+### Test suite delta vs. Round 2
+
+| Item | Round 2 | Round 3 | Delta |
+| --- | --- | --- | --- |
+| Total Go tests | 168 | 168 | 0 |
+| Passed | 166 | 166 | 0 |
+| Failed | 0 | 0 | 0 |
+| Skipped | 2 | 2 | 0 |
+
+Net 0 tests added. Round 3 is a **rename + strengthen** of an existing test, plus assertion-hardening across the two new Round 2 tests:
+- `TestRunUpgrade_ReportsDeletedPackFile` → **renamed** to `TestRunUpgrade_ReportsDeletedPackFileOnceThenDrops` (reflects the new two-phase contract: notice emitted once, then dropped).
+- Body expanded to (a) capture stdout via `os.Pipe()` and assert the pack-scoped notice appears on the first upgrade, (b) re-read the manifest and assert the entry is dropped, (c) run a second same-version upgrade with stdout captured and assert "removed from template" is NOT re-emitted.
+- `TestRunUpgrade_DropsPacksRemovedFromTemplates` gained a positive assertion that `golang` is retained in `Meta.Packs` (closes the Round 2 self-review LOW).
+- `TestRunUpgrade_SameVersionIsIdempotent` pack-key assertions switched from `"packs/languages/golang/README.md"` string literals to `filepath.Join("packs", "languages", "golang", "README.md")` for Windows portability.
+
+### Round 3 targeted tests — status
+
+| Test | Package | Status | Evidence |
+| --- | --- | --- | --- |
+| `TestRunUpgrade_ReportsDeletedPackFileOnceThenDrops` (renamed + strengthened) | `internal/cli` | PASS (0.03–0.04s) | First-upgrade stdout contains the namespaced pack-file notice (`packs/languages/golang/deprecated.sh`); manifest drop verified by `m2.Files[deprecatedEntry]` check; second upgrade stdout does NOT contain `"removed from template"` |
+| `TestRunUpgrade_DropsPacksRemovedFromTemplates` (positive retention assertion added) | `internal/cli` | PASS (0.03s) | `ghostpack` dropped from `Meta.Packs` AND `golangFound == true` retention assertion passes |
+| `TestRunUpgrade_SameVersionIsIdempotent` (`filepath.Join` keys) | `internal/cli` | PASS (0.03s) | `packReadme := filepath.Join("packs", "languages", "golang", "README.md")` found in manifest; no empty-hash entries; no unprefixed `README.md` leak |
+
+### Round 2 regression check (no regressions elsewhere)
+
+All previously-green plan-targeted tests still PASS in Round 3:
+
+| Test | Package | Round 3 status |
+| --- | --- | --- |
+| `TestComputeDiffs_Skip_PreservesHash` | `internal/upgrade` | PASS |
+| `TestComputeDiffsWithManifest_PackPrefixedSubset` | `internal/upgrade` | PASS |
+| `TestComputeDiffs_HealsEmptyHash_WhenDiskMatchesTemplate` | `internal/upgrade` | PASS |
+| `TestComputeDiffs_EmptyHashConflictsWhenDiskDiffers` | `internal/upgrade` | PASS |
+| `TestComputeDiffs_AutoUpdate` / `_Conflict` / `_AddNewFile` / `_RemoveFile` | `internal/upgrade` | PASS (all four) |
+| `TestRunUpgrade_HealsCorruptedManifest` | `internal/cli` | PASS |
+| `TestRunUpgrade_AutoUpdate` | `internal/cli` | PASS |
+| `TestExecuteInit_*` (3 tests), `TestRunDoctor_Passes`, `TestNewRootCmd_HasAllSubcommands` | `internal/cli` | PASS |
+
+### Package breakdown (Round 3)
+
+| Package | Result | Duration |
+| --- | --- | --- |
+| `internal/action` | ok | 2.248s |
+| `internal/cli` | ok | 0.597s |
+| `internal/config` | ok | 0.550s |
+| `internal/scaffold` | ok | 0.725s |
+| `internal/state` | ok | 1.408s |
+| `internal/ui` | ok | 0.913s |
+| `internal/ui/panes` | ok | 1.818s |
+| `internal/upgrade` | ok | 1.063s |
+| `internal/watcher` | ok | 3.200s |
+| root, `cmd/ralph`, `cmd/ralph-tui` | no test files | — |
+
+### Coverage (Round 3)
+
+- `internal/upgrade`: **80.9%** (unchanged — no production code changes in this package in Round 3)
+- `internal/cli`: **31.6%** (+0.5pp vs. Round 2's 31.1% — new stdout-capture branches in `TestRunUpgrade_ReportsDeletedPackFileOnceThenDrops` hit additional `upgrade.go` print paths)
+
+### Skipped (unchanged)
+
+`TestBaseFS_WithMockFS` and `TestAvailablePacks_WithMockFS` in `internal/scaffold` — pre-existing placeholder skips, unrelated to this change.
+
+### Round 3 totals
+
+- Total: 168
+- Passed: 166
+- Failed: 0
+- Skipped: 2
+
+### Round 3 verdict
+
+- Pass: yes
+- Fail: no
+- Blocked: no
+- Regressions: none
+
+**Tests remain green after the Round 2 Codex follow-up fixes (manifest drop on `ActionRemove` + `filepath.Join` portability). All three specifically-called-out assertions (renamed stdout-capture test, positive golang retention, `filepath.Join` keys) pass. Safe to proceed to `/sync-docs` → `/codex-review` (re-run) → `/pr`.**
