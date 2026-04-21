@@ -235,8 +235,8 @@ managed = true
 ```toml
 # ralph.toml（プロジェクトルート）
 [pipeline]
-model = "claude-sonnet-4-20250514"
-effort = "high"
+model = "claude-opus-4-7"
+effort = "xhigh"
 max_iterations = 20
 max_parallel = 4
 slice_timeout = "30m"
