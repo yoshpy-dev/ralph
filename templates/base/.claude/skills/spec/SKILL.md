@@ -14,7 +14,7 @@ Turn an abstract idea into a detailed specification.
 | Focus | **What** to build (requirements, constraints) | **How** to build (implementation strategy, files) |
 | Output | Spec doc (`docs/specs/*.md`) / GitHub issue | Implementation plan (`docs/plans/active/*.md`) |
 | Research | Codebase exploration, web search, best practices | Affected files, risk analysis |
-| User interaction | Iterative brainstorming (divergent) + clarification (convergent) | Flow selection (standard/Ralph) |
+| User interaction | Iterative brainstorming (divergent) + clarification (convergent) | Flow selection (standard/Ralph) + critical-fork resolution (convergent) |
 
 `/spec` comes before `/plan`. Use `/spec` when the request is too vague for `/plan`.
 

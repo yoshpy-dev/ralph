@@ -17,6 +17,11 @@
 
 ## Affected areas
 
+## Design decisions
+
+<!-- Critical forks resolved with the user. Each entry: 判断・採用した選択肢・理由（rationale）。 -->
+<!-- No critical forks? Write: "Critical forks: なし" -->
+
 ## Acceptance criteria
 
 - [ ]

@@ -41,7 +41,7 @@ If a subagent fails to execute (tool error, not a review finding), run the corre
 
 ## Planning — always inline
 
-`/plan` runs in the main context because it relies heavily on `AskUserQuestion` for user interaction (task type selection, objective confirmation, flow selection, Codex advisory response). Subagent execution would add indirection without benefit. No agent definition exists for this skill.
+`/plan` runs in the main context because it relies heavily on `AskUserQuestion` for user interaction (task type selection, objective confirmation, flow selection, critical-fork resolution during drafting, Codex advisory response). Subagent execution would add indirection without benefit. No agent definition exists for this skill.
 
 ## Codex triage — always inline
 

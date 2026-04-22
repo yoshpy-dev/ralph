@@ -1,6 +1,6 @@
 ---
 name: plan
-description: Create or refresh a scoped implementation plan before risky, ambiguous, long-running, or multi-file work. Accepts an optional GitHub issue number or URL for context pre-fill. Does not create a branch — branch/worktree creation is deferred to the chosen flow skill.
+description: Create or refresh a scoped implementation plan before risky, ambiguous, long-running, or multi-file work. Accepts an optional GitHub issue number or URL for context pre-fill. Resolves high-leverage implementation forks with the user before finalizing. Does not create a branch — branch/worktree creation is deferred to the chosen flow skill.
 allowed-tools: Read, Grep, Glob, Write, Edit, Bash, AskUserQuestion
 ---
 Create or update a plan in `docs/plans/active/`.
@@ -41,6 +41,26 @@ Create or update a plan in `docs/plans/active/`.
    - risk register
    - rollout or rollback notes
    - evidence targets
+4.5. **Critical forks (convergent)**: After the initial draft is in place, scan the plan for "critical forks" — implementation decisions that meet **all three** of:
+   - Two or more approaches differ materially in risk, cost, or rollback profile
+   - The choice cannot be resolved from the codebase, existing `.claude/rules/`, docs, or a reasonable default
+   - Reversing the decision mid-implementation would cost more than roughly one slice of rework
+
+   For each critical fork identified:
+   a. Use `AskUserQuestion` with one focused question and 2-4 concrete options. Each option must briefly state its pros/cons so the user can choose informedly.
+   b. Record the chosen approach and its rationale in the plan's "Design decisions" section (see [template.md](template.md)).
+   c. If the chosen option invalidates other plan sections (outline, risks, affected files), revise them before continuing.
+
+   If no critical forks exist after scanning, write "Critical forks: なし" in the Design decisions section and proceed.
+
+   **Do NOT ask about**:
+   - Stylistic or easily reversible choices (internal naming, helper placement inside an established module pattern)
+   - Decisions already settled by `.claude/rules/`, `AGENTS.md`, or the upstream `/spec` output
+   - The flow-level choice already made in step 2.7
+   - Anything a reasonable default + explicit assumption would cover
+
+   Purpose is **convergent** — narrow between enumerated options, not expand the design space. Divergent ideation belongs to `/spec`, not here.
+
 5. Keep the plan high-level enough to avoid cascading low-level mistakes.
 6. End with a short readiness checklist.
 6.5. **Codex plan advisory (optional)**:
