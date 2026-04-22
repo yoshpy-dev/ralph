@@ -56,6 +56,16 @@ type initConfig struct {
 }
 
 func runInitInteractive(targetDir string, force bool) error {
+	// Detect an existing project up front so the user is not asked for a
+	// project name and language packs that will be ignored by the upgrade
+	// path. executeInit retains the same check as a safety net for
+	// non-interactive callers.
+	manifestPath := filepath.Join(targetDir, ".ralph", "manifest.toml")
+	if _, err := os.Stat(manifestPath); err == nil {
+		fmt.Printf("\nExisting project detected. Running upgrade instead...\n\n")
+		return runUpgrade(targetDir, false)
+	}
+
 	defaultName := filepath.Base(targetDir)
 
 	availPacks, err := scaffold.AvailablePacks()
