@@ -151,9 +151,11 @@
 
 ## Progress checklist
 
-- [ ] Plan reviewed
-- [ ] Branch created
-- [ ] Implementation started
+- [x] Plan reviewed (Codex adversarial review incorporated: Managed=false convergence + DI + fallback)
+- [x] Branch created (`feat/upgrade-detect-local-edits`)
+- [x] Implementation started
+- [x] Acceptance criteria met (unit + integration tests)
+- [x] `./scripts/run-verify.sh` green
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created

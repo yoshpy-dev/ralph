@@ -100,8 +100,8 @@ func runUpgradeIO(targetDir string, force bool, in io.Reader, out, errOut io.Wri
 		return fmt.Errorf("reading manifest: %w", err)
 	}
 
-	fmt.Fprintf(out, "Checking for updates...\n")
-	fmt.Fprintf(out, "  Current: %s → Available: %s\n\n", oldManifest.Meta.Version, Version)
+	writef(out, "Checking for updates...\n")
+	writef(out, "  Current: %s → Available: %s\n\n", oldManifest.Meta.Version, Version)
 
 	baseFS, err := scaffold.BaseFS()
 	if err != nil {
@@ -121,7 +121,7 @@ func runUpgradeIO(targetDir string, force bool, in io.Reader, out, errOut io.Wri
 	retainedPacks := make([]string, 0, len(installedPacks))
 
 	if apErr != nil {
-		fmt.Fprintf(errOut, "Warning: unable to list available packs: %v (preserving installed pack entries)\n", apErr)
+		writef(errOut, "Warning: unable to list available packs: %v (preserving installed pack entries)\n", apErr)
 		for _, pack := range installedPacks {
 			preservePackEntries(oldManifest, packPrefixFor(pack), preservedPackEntries)
 			retainedPacks = append(retainedPacks, pack)
@@ -137,13 +137,13 @@ func runUpgradeIO(targetDir string, force bool, in io.Reader, out, errOut io.Wri
 		prefix := packPrefixFor(pack)
 
 		if !available[pack] {
-			fmt.Fprintf(errOut, "Notice: pack %q no longer exists in templates — manifest tracking dropped (files on disk left untouched)\n", pack)
+			writef(errOut, "Notice: pack %q no longer exists in templates — manifest tracking dropped (files on disk left untouched)\n", pack)
 			continue
 		}
 
 		packFS, pErr := scaffold.PackFS(pack)
 		if pErr != nil {
-			fmt.Fprintf(errOut, "Warning: pack %s load failed: %v (preserving manifest entries)\n", pack, pErr)
+			writef(errOut, "Warning: pack %s load failed: %v (preserving manifest entries)\n", pack, pErr)
 			preservePackEntries(oldManifest, prefix, preservedPackEntries)
 			retainedPacks = append(retainedPacks, pack)
 			continue
@@ -152,7 +152,7 @@ func runUpgradeIO(targetDir string, force bool, in io.Reader, out, errOut io.Wri
 		packManifest := splitManifestForPack(oldManifest, pack)
 		packDiffs, pErr := upgrade.ComputeDiffsWithManifest(packManifest, packDir, packFS, true)
 		if pErr != nil {
-			fmt.Fprintf(errOut, "Warning: pack %s diff failed: %v (preserving manifest entries)\n", pack, pErr)
+			writef(errOut, "Warning: pack %s diff failed: %v (preserving manifest entries)\n", pack, pErr)
 			preservePackEntries(oldManifest, prefix, preservedPackEntries)
 			retainedPacks = append(retainedPacks, pack)
 			continue
@@ -183,7 +183,7 @@ func runUpgradeIO(targetDir string, force bool, in io.Reader, out, errOut io.Wri
 				return fmt.Errorf("writing %s: %w", d.Path, err)
 			}
 			manifest.SetFile(d.Path, d.NewHash)
-			fmt.Fprintf(out, "  ✓ %s (unchanged, auto-update)\n", d.Path)
+			writef(out, "  ✓ %s (unchanged, auto-update)\n", d.Path)
 			updated++
 
 		case upgrade.ActionConflict:
@@ -193,7 +193,7 @@ func runUpgradeIO(targetDir string, force bool, in io.Reader, out, errOut io.Wri
 					return fmt.Errorf("writing %s: %w", d.Path, err)
 				}
 				manifest.SetFile(d.Path, d.NewHash)
-				fmt.Fprintf(out, "  ✓ %s (force overwritten)\n", d.Path)
+				writef(out, "  ✓ %s (force overwritten)\n", d.Path)
 				updated++
 				continue
 			}
@@ -219,7 +219,7 @@ func runUpgradeIO(targetDir string, force bool, in io.Reader, out, errOut io.Wri
 					}
 				}
 				manifest.SetFileUnmanaged(d.Path, hash)
-				fmt.Fprintf(out, "  ⊘ %s (kept local; future upgrades will skip silently)\n", d.Path)
+				writef(out, "  ⊘ %s (kept local; future upgrades will skip silently)\n", d.Path)
 				skipped++
 			}
 
@@ -232,11 +232,11 @@ func runUpgradeIO(targetDir string, force bool, in io.Reader, out, errOut io.Wri
 				return fmt.Errorf("writing %s: %w", d.Path, err)
 			}
 			manifest.SetFile(d.Path, d.NewHash)
-			fmt.Fprintf(out, "  + %s (new file)\n", d.Path)
+			writef(out, "  + %s (new file)\n", d.Path)
 			updated++
 
 		case upgrade.ActionRemove:
-			fmt.Fprintf(out, "  ⚠ %s (removed from template — review and delete manually)\n", d.Path)
+			writef(out, "  ⚠ %s (removed from template — review and delete manually)\n", d.Path)
 			notified++
 
 		case upgrade.ActionSkip:
@@ -255,12 +255,12 @@ func runUpgradeIO(targetDir string, force bool, in io.Reader, out, errOut io.Wri
 		return fmt.Errorf("writing manifest: %w", err)
 	}
 
-	fmt.Fprintf(out, "\n  Updated: %d files\n", updated)
-	fmt.Fprintf(out, "  Skipped: %d files (user-modified)\n", skipped)
+	writef(out, "\n  Updated: %d files\n", updated)
+	writef(out, "  Skipped: %d files (user-modified)\n", skipped)
 	if notified > 0 {
-		fmt.Fprintf(out, "  Removed from template: %d files (review manually)\n", notified)
+		writef(out, "  Removed from template: %d files (review manually)\n", notified)
 	}
-	fmt.Fprintf(out, "  Manifest updated: .ralph/manifest.toml\n")
+	writef(out, "  Manifest updated: .ralph/manifest.toml\n")
 
 	return nil
 }
@@ -276,6 +276,14 @@ func preservePackEntries(src *scaffold.Manifest, prefix string, dst map[string]s
 	}
 }
 
+// writef is a best-effort write for progress text. The write destination is an
+// io.Writer (for testability) so the static-analyzer cannot rule out a failing
+// write the way it can for os.Stdout — silence the error explicitly here
+// rather than sprinkling `_, _ =` across every call site.
+func writef(w io.Writer, format string, args ...any) {
+	_, _ = fmt.Fprintf(w, format, args...)
+}
+
 type resolution int
 
 const (
@@ -288,13 +296,13 @@ const (
 // or any read error collapses to a safe skip so non-interactive runs do not
 // silently overwrite edits.
 func resolveConflict(d upgrade.FileDiff, absDir, version string, in *bufio.Reader, out, errOut io.Writer) resolution {
-	fmt.Fprintf(out, "  ⚠ %s (modified locally)\n", d.Path)
+	writef(out, "  ⚠ %s (modified locally)\n", d.Path)
 
 	for {
-		fmt.Fprintf(out, "    [o]verwrite / [s]kip / [d]iff ? ")
+		writef(out, "    [o]verwrite / [s]kip / [d]iff ? ")
 		line, err := in.ReadString('\n')
 		if err != nil && line == "" {
-			fmt.Fprintf(errOut, "\n  (non-interactive input detected, skipping)\n")
+			writef(errOut, "\n  (non-interactive input detected, skipping)\n")
 			return resolutionSkip
 		}
 		switch strings.TrimSpace(line) {
@@ -319,9 +327,9 @@ func showDiff(d upgrade.FileDiff, absDir, version string, out, errOut io.Writer)
 	localPath := filepath.Join(absDir, d.Path)
 	localBytes, err := os.ReadFile(localPath)
 	if err != nil {
-		fmt.Fprintf(errOut, "    (could not read %s: %v — falling back to hash summary)\n", d.Path, err)
-		fmt.Fprintf(out, "    template hash: %s\n", d.NewHash)
-		fmt.Fprintf(out, "    local hash:    %s\n", d.DiskHash)
+		writef(errOut, "    (could not read %s: %v — falling back to hash summary)\n", d.Path, err)
+		writef(out, "    template hash: %s\n", d.NewHash)
+		writef(out, "    local hash:    %s\n", d.DiskHash)
 		return
 	}
 	diff := upgrade.UnifiedDiff(
@@ -331,9 +339,9 @@ func showDiff(d upgrade.FileDiff, absDir, version string, out, errOut io.Writer)
 		fmt.Sprintf("template (%s)", version),
 	)
 	if diff == "" {
-		fmt.Fprintf(out, "    (no textual difference — manifest hash drift only)\n")
+		writef(out, "    (no textual difference — manifest hash drift only)\n")
 	} else {
-		fmt.Fprint(out, diff)
+		_, _ = io.WriteString(out, diff)
 	}
-	fmt.Fprintf(out, "    template hash: %s  local hash: %s\n", d.NewHash, d.DiskHash)
+	writef(out, "    template hash: %s  local hash: %s\n", d.NewHash, d.DiskHash)
 }
