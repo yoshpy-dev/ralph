@@ -46,6 +46,8 @@ ROOT_ONLY_EXCLUSIONS=(
   ".claude/worktrees/"
   # User-local hooks (gitignored; not distributed via template)
   ".claude/hooks/local/"
+  # Repo-specific skills (not part of scaffolded baseline)
+  ".claude/skills/release/"
   # Repo-specific docs (not template content)
   "docs/architecture/design-principles.md"
   "docs/architecture/repo-map.md"
