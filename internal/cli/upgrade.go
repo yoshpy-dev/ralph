@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"maps"
 	"os"
@@ -76,6 +78,13 @@ func splitManifestForPack(m *scaffold.Manifest, pack string) *scaffold.Manifest 
 }
 
 func runUpgrade(targetDir string, force bool) error {
+	return runUpgradeIO(targetDir, force, os.Stdin, os.Stdout, os.Stderr)
+}
+
+// runUpgradeIO is the testable core of the upgrade command. I/O is injected so
+// integration tests can drive interactive conflict resolution without touching
+// the real stdin/stdout.
+func runUpgradeIO(targetDir string, force bool, in io.Reader, out, errOut io.Writer) error {
 	absDir, err := filepath.Abs(targetDir)
 	if err != nil {
 		return fmt.Errorf("resolving directory: %w", err)
@@ -91,8 +100,8 @@ func runUpgrade(targetDir string, force bool) error {
 		return fmt.Errorf("reading manifest: %w", err)
 	}
 
-	fmt.Printf("Checking for updates...\n")
-	fmt.Printf("  Current: %s → Available: %s\n\n", oldManifest.Meta.Version, Version)
+	fmt.Fprintf(out, "Checking for updates...\n")
+	fmt.Fprintf(out, "  Current: %s → Available: %s\n\n", oldManifest.Meta.Version, Version)
 
 	baseFS, err := scaffold.BaseFS()
 	if err != nil {
@@ -108,23 +117,16 @@ func runUpgrade(targetDir string, force bool) error {
 	installedPacks := oldManifest.Meta.Packs
 	availablePacks, apErr := scaffold.AvailablePacks()
 
-	// Track pack entries whose diff could not be computed so a transient
-	// error does not permanently drop their tracking. Packs that have been
-	// removed from the template release are explicitly NOT preserved.
 	preservedPackEntries := make(map[string]scaffold.ManifestFile)
 	retainedPacks := make([]string, 0, len(installedPacks))
 
-	// If pack enumeration failed, treat it as a transient error: preserve
-	// every installed pack's entries and skip per-pack diffing rather than
-	// aborting the entire upgrade (which would block base-file updates over
-	// a pack-metadata issue).
 	if apErr != nil {
-		fmt.Fprintf(os.Stderr, "Warning: unable to list available packs: %v (preserving installed pack entries)\n", apErr)
+		fmt.Fprintf(errOut, "Warning: unable to list available packs: %v (preserving installed pack entries)\n", apErr)
 		for _, pack := range installedPacks {
 			preservePackEntries(oldManifest, packPrefixFor(pack), preservedPackEntries)
 			retainedPacks = append(retainedPacks, pack)
 		}
-		installedPacks = nil // skip the per-pack loop below
+		installedPacks = nil
 	}
 	available := make(map[string]bool, len(availablePacks))
 	for _, p := range availablePacks {
@@ -134,29 +136,23 @@ func runUpgrade(targetDir string, force bool) error {
 	for _, pack := range installedPacks {
 		prefix := packPrefixFor(pack)
 
-		// Pack was removed or renamed in this release: drop manifest tracking
-		// and notify the user that the on-disk files are now unmanaged.
 		if !available[pack] {
-			fmt.Fprintf(os.Stderr, "Notice: pack %q no longer exists in templates — manifest tracking dropped (files on disk left untouched)\n", pack)
+			fmt.Fprintf(errOut, "Notice: pack %q no longer exists in templates — manifest tracking dropped (files on disk left untouched)\n", pack)
 			continue
 		}
 
 		packFS, pErr := scaffold.PackFS(pack)
 		if pErr != nil {
-			fmt.Fprintf(os.Stderr, "Warning: pack %s load failed: %v (preserving manifest entries)\n", pack, pErr)
+			fmt.Fprintf(errOut, "Warning: pack %s load failed: %v (preserving manifest entries)\n", pack, pErr)
 			preservePackEntries(oldManifest, prefix, preservedPackEntries)
 			retainedPacks = append(retainedPacks, pack)
 			continue
 		}
 		packDir := filepath.Join(absDir, "packs", "languages", pack)
 		packManifest := splitManifestForPack(oldManifest, pack)
-		// checkRemovals=true: a file dropped from the pack template but still
-		// tracked in the manifest surfaces as ActionRemove (with the pack
-		// prefix re-applied below) so the user still sees the "removed from
-		// template" warning for genuine pack-file deletions.
 		packDiffs, pErr := upgrade.ComputeDiffsWithManifest(packManifest, packDir, packFS, true)
 		if pErr != nil {
-			fmt.Fprintf(os.Stderr, "Warning: pack %s diff failed: %v (preserving manifest entries)\n", pack, pErr)
+			fmt.Fprintf(errOut, "Warning: pack %s diff failed: %v (preserving manifest entries)\n", pack, pErr)
 			preservePackEntries(oldManifest, prefix, preservedPackEntries)
 			retainedPacks = append(retainedPacks, pack)
 			continue
@@ -172,10 +168,9 @@ func runUpgrade(targetDir string, force bool) error {
 
 	manifest := scaffold.NewManifest(Version)
 	manifest.Meta.Packs = retainedPacks
-
-	// Carry over entries for packs we could not diff so a transient pack
-	// error does not permanently drop their tracking.
 	maps.Copy(manifest.Files, preservedPackEntries)
+
+	reader := bufio.NewReader(in)
 
 	for _, d := range diffs {
 		switch d.Action {
@@ -188,7 +183,7 @@ func runUpgrade(targetDir string, force bool) error {
 				return fmt.Errorf("writing %s: %w", d.Path, err)
 			}
 			manifest.SetFile(d.Path, d.NewHash)
-			fmt.Printf("  ✓ %s (unchanged, auto-update)\n", d.Path)
+			fmt.Fprintf(out, "  ✓ %s (unchanged, auto-update)\n", d.Path)
 			updated++
 
 		case upgrade.ActionConflict:
@@ -198,26 +193,34 @@ func runUpgrade(targetDir string, force bool) error {
 					return fmt.Errorf("writing %s: %w", d.Path, err)
 				}
 				manifest.SetFile(d.Path, d.NewHash)
-				fmt.Printf("  ✓ %s (force overwritten)\n", d.Path)
+				fmt.Fprintf(out, "  ✓ %s (force overwritten)\n", d.Path)
 				updated++
-			} else {
-				// Interactive conflict resolution.
-				resolution := resolveConflict(d)
-				switch resolution {
-				case "overwrite":
-					targetPath := filepath.Join(absDir, d.Path)
-					if err := os.WriteFile(targetPath, d.NewContent, scaffold.FilePerm(d.Path)); err != nil {
-						return fmt.Errorf("writing %s: %w", d.Path, err)
-					}
-					manifest.SetFile(d.Path, d.NewHash)
-					updated++
-				case "skip":
-					// Preserve the OLD template hash so next upgrade still
-					// detects this file as user-modified (not auto-overwritable).
-					manifest.SetFile(d.Path, d.OldHash)
-					fmt.Printf("  ⊘ %s (skipped)\n", d.Path)
-					skipped++
+				continue
+			}
+			switch resolveConflict(d, absDir, Version, reader, out, errOut) {
+			case resolutionOverwrite:
+				targetPath := filepath.Join(absDir, d.Path)
+				if err := os.WriteFile(targetPath, d.NewContent, scaffold.FilePerm(d.Path)); err != nil {
+					return fmt.Errorf("writing %s: %w", d.Path, err)
 				}
+				manifest.SetFile(d.Path, d.NewHash)
+				updated++
+			case resolutionSkip:
+				// Mark the entry as user-owned so subsequent upgrades converge
+				// to silent skip. Prefer the on-disk hash (what the user
+				// actually wants kept); fall back to the recorded or new hash
+				// if the disk hash is unknown.
+				hash := d.DiskHash
+				if hash == "" {
+					if d.OldHash != "" {
+						hash = d.OldHash
+					} else {
+						hash = d.NewHash
+					}
+				}
+				manifest.SetFileUnmanaged(d.Path, hash)
+				fmt.Fprintf(out, "  ⊘ %s (kept local; future upgrades will skip silently)\n", d.Path)
+				skipped++
 			}
 
 		case upgrade.ActionAdd:
@@ -229,22 +232,22 @@ func runUpgrade(targetDir string, force bool) error {
 				return fmt.Errorf("writing %s: %w", d.Path, err)
 			}
 			manifest.SetFile(d.Path, d.NewHash)
-			fmt.Printf("  + %s (new file)\n", d.Path)
+			fmt.Fprintf(out, "  + %s (new file)\n", d.Path)
 			updated++
 
 		case upgrade.ActionRemove:
-			// Drop the entry from the new manifest. Preserving it caused the
-			// same removal to be re-notified on every subsequent upgrade,
-			// which breaks idempotency. The user was told to "review and
-			// delete manually", so untracking the file after one warning is
-			// the intended contract.
-			fmt.Printf("  ⚠ %s (removed from template — review and delete manually)\n", d.Path)
+			fmt.Fprintf(out, "  ⚠ %s (removed from template — review and delete manually)\n", d.Path)
 			notified++
 
 		case upgrade.ActionSkip:
-			// Template unchanged → write the real template hash into the
-			// manifest so future upgrades can keep comparing correctly.
-			manifest.SetFile(d.Path, d.NewHash)
+			// Preserve the manifest state for the path. Unmanaged entries (a
+			// prior skip resolution) must stay unmanaged; otherwise record the
+			// current template hash so future comparisons stay coherent.
+			if prev, ok := oldManifest.Files[d.Path]; ok && !prev.Managed {
+				manifest.SetFileUnmanaged(d.Path, prev.Hash)
+			} else {
+				manifest.SetFile(d.Path, d.NewHash)
+			}
 		}
 	}
 
@@ -252,12 +255,12 @@ func runUpgrade(targetDir string, force bool) error {
 		return fmt.Errorf("writing manifest: %w", err)
 	}
 
-	fmt.Printf("\n  Updated: %d files\n", updated)
-	fmt.Printf("  Skipped: %d files (user-modified)\n", skipped)
+	fmt.Fprintf(out, "\n  Updated: %d files\n", updated)
+	fmt.Fprintf(out, "  Skipped: %d files (user-modified)\n", skipped)
 	if notified > 0 {
-		fmt.Printf("  Removed from template: %d files (review manually)\n", notified)
+		fmt.Fprintf(out, "  Removed from template: %d files (review manually)\n", notified)
 	}
-	fmt.Printf("  Manifest updated: .ralph/manifest.toml\n")
+	fmt.Fprintf(out, "  Manifest updated: .ralph/manifest.toml\n")
 
 	return nil
 }
@@ -273,32 +276,64 @@ func preservePackEntries(src *scaffold.Manifest, prefix string, dst map[string]s
 	}
 }
 
-func resolveConflict(d upgrade.FileDiff) string {
-	fmt.Printf("  ⚠ %s (modified locally)\n", d.Path)
-	fmt.Printf("    [o]verwrite / [s]kip / [d]iff ? ")
+type resolution int
 
-	var choice string
+const (
+	resolutionSkip resolution = iota
+	resolutionOverwrite
+)
+
+// resolveConflict prompts the user to pick between overwriting with the
+// template content, keeping the local variant, or viewing a unified diff. EOF
+// or any read error collapses to a safe skip so non-interactive runs do not
+// silently overwrite edits.
+func resolveConflict(d upgrade.FileDiff, absDir, version string, in *bufio.Reader, out, errOut io.Writer) resolution {
+	fmt.Fprintf(out, "  ⚠ %s (modified locally)\n", d.Path)
+
 	for {
-		if _, err := fmt.Scanln(&choice); err != nil {
-			fmt.Fprintf(os.Stderr, "\n  (non-interactive input detected, skipping)\n")
-			return "skip"
+		fmt.Fprintf(out, "    [o]verwrite / [s]kip / [d]iff ? ")
+		line, err := in.ReadString('\n')
+		if err != nil && line == "" {
+			fmt.Fprintf(errOut, "\n  (non-interactive input detected, skipping)\n")
+			return resolutionSkip
 		}
-		switch choice {
+		switch strings.TrimSpace(line) {
 		case "o", "overwrite":
-			return "overwrite"
+			return resolutionOverwrite
 		case "s", "skip":
-			return "skip"
+			return resolutionSkip
 		case "d", "diff":
-			// Show a simple diff indication.
-			fmt.Printf("    --- ralph template (%s)\n", Version)
-			fmt.Printf("    +++ local\n")
-			fmt.Printf("    (template hash: %s)\n", d.NewHash)
-			fmt.Printf("    (local hash:    %s)\n", d.DiskHash)
-			fmt.Printf("    [o]verwrite / [s]kip ? ")
-			continue
+			showDiff(d, absDir, version, out, errOut)
+			// Loop back to the prompt so the user still picks overwrite or skip.
 		default:
-			fmt.Printf("    [o]verwrite / [s]kip / [d]iff ? ")
-			continue
+			// Unrecognized input — reprompt.
 		}
 	}
+}
+
+// showDiff renders the local-vs-template unified diff for a conflict entry.
+// Disk read failures degrade gracefully to a hash summary so the user can
+// still make an informed choice when, e.g., the file was moved between diff
+// computation and the prompt.
+func showDiff(d upgrade.FileDiff, absDir, version string, out, errOut io.Writer) {
+	localPath := filepath.Join(absDir, d.Path)
+	localBytes, err := os.ReadFile(localPath)
+	if err != nil {
+		fmt.Fprintf(errOut, "    (could not read %s: %v — falling back to hash summary)\n", d.Path, err)
+		fmt.Fprintf(out, "    template hash: %s\n", d.NewHash)
+		fmt.Fprintf(out, "    local hash:    %s\n", d.DiskHash)
+		return
+	}
+	diff := upgrade.UnifiedDiff(
+		localBytes,
+		d.NewContent,
+		"local",
+		fmt.Sprintf("template (%s)", version),
+	)
+	if diff == "" {
+		fmt.Fprintf(out, "    (no textual difference — manifest hash drift only)\n")
+	} else {
+		fmt.Fprint(out, diff)
+	}
+	fmt.Fprintf(out, "    template hash: %s  local hash: %s\n", d.NewHash, d.DiskHash)
 }
