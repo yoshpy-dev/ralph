@@ -100,6 +100,41 @@ func TestExecuteInit_ExistingProject_DelegatesToUpgrade(t *testing.T) {
 	}
 }
 
+// Regression: runInitInteractive must short-circuit to upgrade BEFORE the
+// huh form runs when a manifest already exists. We can't drive the TTY form
+// in tests, but we can verify the early-return path completes without error
+// (form.Run() would block on stdin in a non-tty environment) and that the
+// existing project files remain intact.
+func TestRunInitInteractive_ExistingProjectSkipsForm(t *testing.T) {
+	setupTestEmbedFS(t)
+	Version = "0.1.0-test"
+
+	dir := t.TempDir()
+
+	// Seed an initialized project.
+	cfg := initConfig{ProjectName: "test", Packs: []string{"golang"}}
+	if err := executeInit(dir, cfg, false); err != nil {
+		t.Fatalf("seed init: %v", err)
+	}
+
+	userFile := filepath.Join(dir, "user-edit.md")
+	if err := os.WriteFile(userFile, []byte("keep me"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runInitInteractive(dir, false); err != nil {
+		t.Fatalf("runInitInteractive on existing project: %v", err)
+	}
+
+	content, err := os.ReadFile(userFile)
+	if err != nil {
+		t.Fatalf("user file missing after re-init: %v", err)
+	}
+	if string(content) != "keep me" {
+		t.Errorf("user file content = %q, want %q", content, "keep me")
+	}
+}
+
 func TestExecuteInit_GitSkippedIfExists(t *testing.T) {
 	setupTestEmbedFS(t)
 	Version = "0.1.0-test"
