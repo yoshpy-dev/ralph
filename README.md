@@ -13,6 +13,8 @@ Scaffold, upgrade, and run opinionated agent harnesses — small always-on maps,
 [![Homebrew](https://img.shields.io/badge/homebrew-yoshpy--dev%2Ftap%2Fralph-orange)](#install)
 [![downloads](https://img.shields.io/github/downloads/yoshpy-dev/ralph/total)](https://github.com/yoshpy-dev/ralph/releases)
 
+[Why ralph?](#why-ralph) &middot; [Install](#install) &middot; [Quick start](#quick-start) &middot; [Features](#features) &middot; [Commands](#commands) &middot; [Operating loop](#operating-loop) &middot; [Ralph Loop](#ralph-loop-autonomous-parallel-execution) &middot; [Language packs](#language-packs) &middot; [Portability](#portability)
+
 </div>
 
 ## Why ralph?
@@ -81,6 +83,15 @@ Before claiming a task is done:
 ./scripts/run-verify.sh
 ```
 
+## Features
+
+| | |
+|:---|:---|
+| **Maps, not manuals**<br/>Short `AGENTS.md` / `CLAUDE.md`; push detail into rules and skills, promote repeats into hooks. | **Canonical pipeline**<br/>`self-review → verify → test → sync-docs → codex-review → pr` enforced in standard flow and Ralph Loop. |
+| **Deterministic hooks**<br/>Mojibake guard, commit-msg secret scan, Bash guardrails, verification reminders — pre-wired in `settings.json`. | **Ralph Loop**<br/>Multi-worktree autonomous parallel slices, integration branch, unified PR — orchestrated by `ralph run`. |
+| **Language packs**<br/>TypeScript, Python, Rust, Go, Dart starters (opt-in) with per-language `verify.sh` and path-scoped rules. | **Drift-proof upgrades**<br/>Hash-based `ralph upgrade` with per-file conflict resolution — keeps N projects aligned as the scaffold evolves. |
+| **Evidence over prose**<br/>Every review, verify, test, and codex pass produces a dated artifact in `docs/reports/`. | **Cross-agent portable**<br/>`AGENTS.md` + `scripts/` + `packs/` stay neutral; `.claude/` is the Claude-native layer you can stack others beside. |
+
 ## Commands
 
 | Command | Purpose |
@@ -98,6 +109,11 @@ Before claiming a task is done:
 Run `ralph help <command>` for flags.
 
 ## What `ralph init` scaffolds
+
+The philosophy: **a map, not a manual**. Keep `AGENTS.md` small, push detail into rules and skills, promote repeated mistakes into hooks, scripts, tests, or CI.
+
+<details>
+<summary>Scaffold tree</summary>
 
 ```text
 .
@@ -122,7 +138,7 @@ Run `ralph help <command>` for flags.
 └── .github/workflows/        # CI
 ```
 
-The philosophy: **a map, not a manual**. Keep `AGENTS.md` small, push detail into rules and skills, promote repeated mistakes into hooks, scripts, tests, or CI.
+</details>
 
 ## Operating loop
 
@@ -225,6 +241,9 @@ See `docs/roadmap/harness-maturity-model.md`. Short version:
 
 ## Repository layout (this repo)
 
+<details>
+<summary>Source tree</summary>
+
 ```text
 .
 ├── cmd/
@@ -247,6 +266,8 @@ See `docs/roadmap/harness-maturity-model.md`. Short version:
 ├── .goreleaser.yml
 └── .github/workflows/
 ```
+
+</details>
 
 ## License
 
