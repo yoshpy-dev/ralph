@@ -358,6 +358,72 @@ func TestComputeDiffs_Unmanaged_IsSilentSkip(t *testing.T) {
 	}
 }
 
+// Unmanaged entries must survive template-side removal. Prior behavior emitted
+// ActionRemove which dropped the manifest entry, breaking the "user owns this
+// forever until --resync" contract when the template later reintroduced the
+// same path (the reintroduction became an add/conflict instead of silent skip).
+func TestComputeDiffs_Unmanaged_SurvivesTemplateRemoval(t *testing.T) {
+	dir := t.TempDir()
+	m := scaffold.NewManifest("0.1.0")
+	m.SetFileUnmanaged("kept-by-user.md", "sha256:userhash")
+
+	// Template no longer ships kept-by-user.md.
+	newFS := fstest.MapFS{
+		"other.md": {Data: []byte("other")},
+	}
+
+	diffs, err := ComputeDiffsWithManifest(m, dir, newFS, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var skipFound bool
+	for _, d := range diffs {
+		if d.Path == "kept-by-user.md" {
+			if d.Action != ActionSkip {
+				t.Errorf("action = %d, want ActionSkip (unmanaged must survive removal)", d.Action)
+			}
+			skipFound = true
+		}
+		if d.Path == "kept-by-user.md" && d.Action == ActionRemove {
+			t.Error("unmanaged entry must not surface as ActionRemove")
+		}
+	}
+	if !skipFound {
+		t.Error("unmanaged entry missing from diffs — it was silently dropped")
+	}
+}
+
+// Unmanaged-skip entries must carry NewContent so the caller can re-adopt
+// them under `--force`. Without this, the force path cannot restore template
+// coverage in one invocation.
+func TestComputeDiffs_Unmanaged_CarriesNewContentForForceReadoption(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "owned.md"), []byte("local"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	m := scaffold.NewManifest("0.1.0")
+	m.SetFileUnmanaged("owned.md", scaffold.HashBytes([]byte("local")))
+
+	template := []byte("template content")
+	newFS := fstest.MapFS{
+		"owned.md": {Data: template},
+	}
+
+	diffs, err := ComputeDiffsWithManifest(m, dir, newFS, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(diffs) != 1 {
+		t.Fatalf("diffs = %d, want 1", len(diffs))
+	}
+	if diffs[0].NewContent == nil {
+		t.Error("unmanaged skip must carry NewContent so --force can re-adopt")
+	}
+	if string(diffs[0].NewContent) != string(template) {
+		t.Errorf("NewContent = %q, want template bytes", diffs[0].NewContent)
+	}
+}
+
 // Unmanaged entries where the user later deletes the file on disk must also
 // silent-skip: the entry exists to block re-adoption, not to enforce
 // presence. This prevents a surprise re-add if the template still ships the

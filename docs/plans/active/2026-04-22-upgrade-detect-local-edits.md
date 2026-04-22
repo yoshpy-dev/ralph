@@ -65,6 +65,8 @@
 - [ ] `skip` 選択でローカルが維持され、manifest エントリが `{Hash: diskHash, Managed: false}` に更新される（次回 upgrade で silent skip 収束）
 - [ ] `Managed=false` のエントリは `ComputeDiffsWithManifest` で `ActionSkip` になり、プロンプトも auto-update も発生しない
 - [ ] `ralph upgrade --force` は従来通り全て上書き（`Managed` は true に戻る）
+- [ ] `--force` は `Managed=false` エントリも再管理下に戻す（テンプレート内容を書き込み、manifest を `{Hash: newHash, Managed: true}` に flip）
+- [ ] `Managed=false` エントリはテンプレート側から削除されても manifest から drop されず silent skip で維持される（user-owned 契約がテンプレート変更を跨いで生存）
 - [ ] `./scripts/run-verify.sh` と `go test ./...` が緑
 
 ## Implementation outline

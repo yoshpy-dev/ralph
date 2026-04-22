@@ -240,12 +240,34 @@ func runUpgradeIO(targetDir string, force bool, in io.Reader, out, errOut io.Wri
 			notified++
 
 		case upgrade.ActionSkip:
-			// Preserve the manifest state for the path. Unmanaged entries (a
-			// prior skip resolution) must stay unmanaged; otherwise record the
-			// current template hash so future comparisons stay coherent.
-			if prev, ok := oldManifest.Files[d.Path]; ok && !prev.Managed {
+			// Preserve the manifest state for the path.
+			// - Unmanaged + --force + template still has the file → re-adopt:
+			//   overwrite the disk with template content and flip Managed=true
+			//   so a single `ralph upgrade --force` restores full template
+			//   coverage (matches the flag's "overwrite all files without
+			//   prompting" contract).
+			// - Unmanaged + no template content (e.g. the template deleted
+			//   this path) → keep the entry unmanaged; force cannot re-adopt
+			//   a file that no longer exists upstream.
+			// - Otherwise (managed skip, heal path) → record the current
+			//   template hash so future comparisons stay coherent.
+			prev, hadEntry := oldManifest.Files[d.Path]
+			wasUnmanaged := hadEntry && !prev.Managed
+			switch {
+			case force && wasUnmanaged && d.NewContent != nil:
+				targetPath := filepath.Join(absDir, d.Path)
+				if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+					return fmt.Errorf("creating parent dir for %s: %w", d.Path, err)
+				}
+				if err := os.WriteFile(targetPath, d.NewContent, scaffold.FilePerm(d.Path)); err != nil {
+					return fmt.Errorf("writing %s: %w", d.Path, err)
+				}
+				manifest.SetFile(d.Path, d.NewHash)
+				writef(out, "  ✓ %s (force re-adopted)\n", d.Path)
+				updated++
+			case wasUnmanaged:
 				manifest.SetFileUnmanaged(d.Path, prev.Hash)
-			} else {
+			default:
 				manifest.SetFile(d.Path, d.NewHash)
 			}
 		}

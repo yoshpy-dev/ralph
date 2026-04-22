@@ -639,6 +639,120 @@ func TestRunUpgrade_InteractiveDiff_RepromptsOnInvalid(t *testing.T) {
 	}
 }
 
+// --force must re-adopt files the user previously skipped to Managed=false.
+// Otherwise the flag's "overwrite all files without prompting" contract is
+// broken: the user has no single-command path to restore template coverage.
+func TestRunUpgrade_ForceReadoptsUnmanaged(t *testing.T) {
+	setupTestEmbedFS(t)
+	Version = "1.0.0-test"
+
+	dir := t.TempDir()
+	cfg := initConfig{ProjectName: "test", Packs: nil}
+	if err := executeInit(dir, cfg, false); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	agents := filepath.Join(dir, "AGENTS.md")
+	if err := os.WriteFile(agents, []byte("# local edit\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// First upgrade: user chooses skip → manifest records Managed=false.
+	var out, errOut bytes.Buffer
+	if err := runUpgradeIO(dir, false, strings.NewReader("s\n"), &out, &errOut); err != nil {
+		t.Fatalf("first upgrade: %v", err)
+	}
+	m1, _ := scaffold.ReadManifest(filepath.Join(dir, ".ralph", "manifest.toml"))
+	if m1.Files["AGENTS.md"].Managed {
+		t.Fatalf("setup: expected AGENTS.md to be unmanaged after skip")
+	}
+
+	// Second upgrade with --force must overwrite and re-manage.
+	if err := runUpgrade(dir, true); err != nil {
+		t.Fatalf("force upgrade: %v", err)
+	}
+
+	got, err := os.ReadFile(agents)
+	if err != nil {
+		t.Fatalf("read AGENTS.md: %v", err)
+	}
+	if string(got) != "# AGENTS\n" {
+		t.Errorf("AGENTS.md = %q, want template content restored by --force", got)
+	}
+
+	m2, err := scaffold.ReadManifest(filepath.Join(dir, ".ralph", "manifest.toml"))
+	if err != nil {
+		t.Fatalf("ReadManifest: %v", err)
+	}
+	entry := m2.Files["AGENTS.md"]
+	if !entry.Managed {
+		t.Errorf("AGENTS.md.Managed = false after --force, want true (re-adopted)")
+	}
+	if entry.Hash != scaffold.HashBytes([]byte("# AGENTS\n")) {
+		t.Errorf("AGENTS.md hash not restored to template hash: got %q", entry.Hash)
+	}
+}
+
+// When a file the user owns (Managed=false) is deleted from the template,
+// the manifest must keep the entry so a later reintroduction of the same
+// path still silent-skips — not re-add or re-conflict.
+func TestRunUpgrade_UnmanagedSurvivesTemplateRemovalAcrossRuns(t *testing.T) {
+	setupTestEmbedFS(t)
+	Version = "1.0.0-test"
+
+	dir := t.TempDir()
+	cfg := initConfig{ProjectName: "test", Packs: nil}
+	if err := executeInit(dir, cfg, false); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	agents := filepath.Join(dir, "AGENTS.md")
+	if err := os.WriteFile(agents, []byte("# my variant\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Skip → Managed=false.
+	var out, errOut bytes.Buffer
+	if err := runUpgradeIO(dir, false, strings.NewReader("s\n"), &out, &errOut); err != nil {
+		t.Fatalf("first upgrade: %v", err)
+	}
+
+	// Simulate a later release that no longer ships AGENTS.md.
+	scaffold.EmbeddedFS = fstest.MapFS{
+		"templates/base/CLAUDE.md":             {Data: []byte("# CLAUDE\n")},
+		"templates/base/ralph.toml":            {Data: []byte("[pipeline]\nmodel = \"test\"\n")},
+		"templates/base/.claude/settings.json": {Data: []byte("{}\n")},
+		"templates/packs/golang/verify.sh":     {Data: []byte("#!/bin/sh\necho ok\n")},
+		"templates/packs/golang/README.md":     {Data: []byte("# Go\n")},
+		"templates/packs/typescript/verify.sh": {Data: []byte("#!/bin/sh\necho ok\n")},
+		"templates/packs/typescript/README.md": {Data: []byte("# TS\n")},
+	}
+	t.Cleanup(func() { setupTestEmbedFS(t) })
+
+	out.Reset()
+	errOut.Reset()
+	if err := runUpgradeIO(dir, false, strings.NewReader(""), &out, &errOut); err != nil {
+		t.Fatalf("upgrade after removal: %v", err)
+	}
+
+	// AGENTS.md must NOT be reported as removed — it is user-owned.
+	if strings.Contains(out.String(), "AGENTS.md") && strings.Contains(out.String(), "removed from template") {
+		t.Errorf("unmanaged entry surfaced as ActionRemove; out:\n%s", out.String())
+	}
+
+	m, err := scaffold.ReadManifest(filepath.Join(dir, ".ralph", "manifest.toml"))
+	if err != nil {
+		t.Fatalf("ReadManifest: %v", err)
+	}
+	entry, ok := m.Files["AGENTS.md"]
+	if !ok {
+		t.Fatal("unmanaged entry dropped when template removed the path")
+	}
+	if entry.Managed {
+		t.Errorf("unmanaged entry flipped to Managed=true across template removal")
+	}
+}
+
 // Convergence: after a skip, running upgrade again must not re-prompt — the
 // file is now user-owned.
 func TestRunUpgrade_NextRunAfterSkip_IsSilent(t *testing.T) {
