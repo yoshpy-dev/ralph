@@ -5,7 +5,7 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Check template structure
         run: ./scripts/check-template.sh
       - name: Run verification
