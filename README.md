@@ -124,7 +124,7 @@ ralph doctor          # verify setup
 
 ## Operating loop
 
-This scaffold assumes the following default loop. `/spec` is the only manual trigger; all other steps are auto-invoked.
+This scaffold assumes the following default loop. `/spec` is the only manual trigger in the loop; all other steps are auto-invoked. (`/release` is also manual-only but lives outside the loop — repo-specific, not distributed via template.)
 
 1. **Spec** (manual, optional — `/spec`)
    - Use when the request is too vague for `/plan`

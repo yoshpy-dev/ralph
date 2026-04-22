@@ -38,6 +38,7 @@
 - `.claude/skills/sync-docs/`: documentation sync (auto)
 - `.claude/skills/audit-harness/`: harness consistency audit (auto)
 - `.claude/skills/anti-bottleneck/`: reduce unnecessary human interruptions (internal)
+- `.claude/skills/release/`: cut a Homebrew release tag (manual trigger; repo-only, not distributed via template)
 
 ## Extensions
 
