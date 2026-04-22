@@ -192,14 +192,21 @@ Codex の指摘を受け、**repo rename を merge の前に実行する**よう
 
 ## Open questions
 
-- リポジトリ description / topics を何に設定するか（例: description = "ralph — a CLI for harness engineering with Claude Code"、topics = `cli`, `claude-code`, `harness-engineering`, `go`）
-- README のキービジュアル（ヒーロー）を用意するか（対象外と仮置き）
+- リポジトリ description / topics: 確定（description = "ralph — a CLI for harness engineering with Claude Code"、topics = `cli`, `claude-code`, `go`, `agent-harness`, `harness-engineering`）。`template` / `harnessengineering` トピックは削除済み。
+- README のキービジュアル（ヒーロー）を用意するか（対象外・保留）
 
 ## Progress checklist
 
 - [x] Plan reviewed
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+- [x] GitHub repo renamed & remote updated
+- [x] Go module path migrated, tests passing
+- [x] install.sh + .goreleaser.yml updated
+- [x] README rewritten
+- [x] AGENTS.md + CLAUDE.md reframed
+- [x] GitHub description + topics updated
+- [x] Scoped grep clean (only archive/specs/this plan retain old name)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
