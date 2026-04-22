@@ -128,7 +128,7 @@ This scaffold assumes the following default loop. `/spec` is the only manual tri
 
 1. **Spec** (manual, optional — `/spec`)
    - Use when the request is too vague for `/plan`
-   - Explores the codebase, researches best practices, and clarifies requirements interactively
+   - Expands sparse inputs through iterative brainstorming (壁打ち), explores the codebase, researches best practices, and clarifies residual requirements interactively
    - Produces a spec file in `docs/specs/` and optionally creates a GitHub issue
    - Can hand off directly to `/plan` after completion
 
