@@ -156,7 +156,7 @@
 - [x] Implementation started
 - [x] Acceptance criteria met (unit + integration tests)
 - [x] `./scripts/run-verify.sh` green
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Review artifact created (`docs/reports/self-review-2026-04-22-upgrade-detect-local-edits.md`)
+- [x] Verification artifact created (`docs/reports/verify-2026-04-22-upgrade-detect-local-edits.md`)
+- [x] Test artifact created (`docs/reports/test-2026-04-22-upgrade-detect-local-edits.md`)
 - [ ] PR created

@@ -294,6 +294,7 @@ Checking for updates...
   - *pack 列挙自体の失敗（enumeration failure）*: pack 列挙 (`scaffold.AvailablePacks()`) 自体が失敗した場合は、Warning を stderr に出しつつ全 installed pack エントリを preservation 扱いにし、base ファイルの upgrade は継続する。pack メタデータ不具合で base 更新が止まることはない。
 - **`ActionRemove` 後のマニフェスト・ドロップ**: `ActionRemove` 後、マニフェストから該当エントリが削除される。「review and delete manually」の通知は 1 回のみで、同一バージョン再実行しても再通知されない。base ファイルの削除にも同じ扱いが適用される。
 - **再導入ファイルの安全側判定 (reintroduction safeguard)**: 旧マニフェストに存在せず、かつディスクに同名ファイルが存在する場合、ディスク内容がテンプレートと一致すれば `ActionAdd`、異なれば `ActionConflict` としてユーザに確認を求める。以前のリリースで削除されたファイルをユーザが手元で保持しておき、後のリリースで再導入された際にローカル編集が無言で上書きされるのを防ぐためのガード。
+- **ローカル編集検知と `Managed=false` 収束 (local-edit detection & user-owned convergence)**: テンプレートが未変更 (`newHash == manifestHash`) でもディスク内容がマニフェストハッシュと乖離している場合は `ActionConflict` として扱い、`[o]verwrite / [s]kip / [d]iff` を提示する。`[d]iff` 選択時は `internal/upgrade/unified_diff.go` が生成する unified diff（`--- local` / `+++ template (version)`、`-` はローカル行・`+` はテンプレート行）を表示する。`skip` 選択時はマニフェストへ `{Hash: diskHash, Managed: false}` を書き込み、以降そのエントリは `ComputeDiffsWithManifest` で早期 `ActionSkip`（プロンプトも auto-update も抑制）となるため、同一バージョンの再実行で prompt storm が起きない。`overwrite` 選択や `--force` はローカルをテンプレートへ揃え、マニフェストを `{Hash: newHash, Managed: true}` に戻す。ディスク読み取り失敗時は警告 + hash サマリにフォールバックし、abort しない。`--resync` / `--adopt` など `Managed=false` を再び管理下に戻すエスケープハッチは将来スコープ (`docs/tech-debt/README.md` を参照)。
 
 ## セキュリティ考慮事項
 
