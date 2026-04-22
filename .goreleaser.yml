@@ -43,8 +43,8 @@ brews:
       owner: yoshpy-dev
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-    homepage: "https://github.com/yoshpy-dev/harness-engineering-scaffolding-template"
-    description: "Harness engineering scaffold and autonomous pipeline CLI"
+    homepage: "https://github.com/yoshpy-dev/ralph"
+    description: "ralph — a CLI for harness engineering with Claude Code"
     license: MIT
     install: |
       bin.install "ralph"

@@ -4,10 +4,10 @@ set -eu
 # install.sh — Install ralph CLI binary from GitHub Releases.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/yoshpy-dev/harness-engineering-scaffolding-template/main/scripts/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/yoshpy-dev/ralph/main/scripts/install.sh | sh
 #   curl -fsSL ... | sh -s -- --version 0.1.0
 
-REPO="yoshpy-dev/harness-engineering-scaffolding-template"
+REPO="yoshpy-dev/ralph"
 BINARY="ralph"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
 
