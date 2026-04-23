@@ -123,7 +123,8 @@ Provide a cross-model second opinion on the current diff before PR creation.
    Note "Codex: 全指摘トリアージ済み（要対応なし）— トリアージレポート: docs/reports/codex-triage-<slug>.md" and proceed to /pr.
 
 7. **Proceed**:
-   - If the user chooses a re-run path (including the cap-reached "上限を一時的に引き上げて再実行" option) AND `active-plan.json` exists: increment `cycle-count.json` (`cycle += 1`), then guide them back to `/self-review`. The "raise the cap" option also requires the user to export a new `RALPH_STANDARD_MAX_PIPELINE_CYCLES` before re-running; simply incrementing without raising the cap would trip the same cap immediately.
+   - **Non-cap re-run** (Case A / Case B, `CAP_REACHED = false`): If `active-plan.json` exists, increment `cycle-count.json` (`cycle += 1`), then guide the user back to `/self-review`. The incremented cycle represents "the pass the user is about to enter".
+   - **Cap-reached Option 1** ("上限を一時的に引き上げて再実行"): Do **NOT** increment `cycle-count.json`. Instruct the user to `export RALPH_STANDARD_MAX_PIPELINE_CYCLES=<current cycle + 1>` (or higher) before re-running, so the unchanged `cycle` falls below the new cap. Then guide them back to `/self-review`. Rationale: incrementing here would immediately re-trip the raised cap on the next `/codex-review` entry, leaving the user with zero extra passes.
    - If the user chooses `/pr`: invoke /pr (which is responsible for deleting `active-plan.json` and `cycle-count.json` on success).
    - If the user chooses 中止: stop without invoking /pr; leave state files in place so the next `/work` can resume.
 

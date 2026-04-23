@@ -6,25 +6,25 @@ Work from the active plan, not from memory alone.
 
 ## Steps
 
-0. **Create feature branch** (if not already on one):
-   a. Read the active plan in `docs/plans/active/` to extract metadata (type, issue number, slug).
+0. **Resolve the target plan path** (must run before any branch or plan-file operations):
+   - If exactly one file or directory exists under `docs/plans/active/` (excluding `.gitkeep`), use it.
+   - If multiple candidates exist, ask via AskUserQuestion which plan this `/work` run targets, and use the selected path.
+   - If none exist, stop and ask the user to run `/plan` first.
+   - Downstream steps in this skill — and downstream skills (`/codex-review`, `/pr`) — MUST use this resolved path instead of rescanning `docs/plans/active/`.
+0.5. **Create feature branch** (if not already on one), based on the plan resolved in Step 0:
+   a. Read the resolved plan to extract metadata (type, issue number, slug).
    b. Determine branch name: `<type>/<issue>/<slug>` (with issue) or `<type>/<slug>` (without issue).
    c. If already on a feature branch (not main/master), skip creation.
    d. Otherwise, run `git checkout -b <branch-name>`.
-   e. Update the plan file: replace `Branch: TBD` (or any TBD variant) with the actual branch name.
-0.5. **Pin the active plan and initialize the pipeline cycle counter** (enforces the 2-cycle cap):
-   a. Determine the target plan path:
-      - If exactly one file or directory exists under `docs/plans/active/` (excluding `.gitkeep`), use it.
-      - If multiple candidates exist, ask via AskUserQuestion which plan this `/work` run targets, and use the selected path.
-      - If none exist, stop and ask the user to run `/plan` first.
-   b. Create `.harness/state/standard-pipeline/` if missing (`mkdir -p`). This directory is already covered by the existing `.harness/state/` gitignore.
-   c. Write the resolved absolute path to `.harness/state/standard-pipeline/active-plan.json` as `{"plan_path": "<absolute-path>", "created_at": "<UTC ISO8601>"}`. If the file already exists with a different `plan_path`, warn the user and ask whether to overwrite (resume) or abort.
-   d. Handle `.harness/state/standard-pipeline/cycle-count.json`:
+   e. Update the resolved plan file: replace `Branch: TBD` (or any TBD variant) with the actual branch name.
+0.7. **Pin the plan identity and initialize the pipeline cycle counter** (enforces the 2-cycle cap):
+   a. Create `.harness/state/standard-pipeline/` if missing (`mkdir -p`). This directory is already covered by the existing `.harness/state/` gitignore.
+   b. Write the Step-0 resolved absolute path to `.harness/state/standard-pipeline/active-plan.json` as `{"plan_path": "<absolute-path>", "created_at": "<UTC ISO8601>"}`. If the file already exists with a different `plan_path`, warn the user and ask whether to overwrite (resume) or abort.
+   c. Handle `.harness/state/standard-pipeline/cycle-count.json`:
       - If the file is missing: initialize as `{"plan_path": "<absolute-path>", "cycle": 1}`.
       - If the file exists AND its `plan_path` matches the pinned plan: **preserve the existing counter** (do NOT reset to 1). This keeps the cap effective when the user resumes a plan after context compaction or a later session. Inform the user of the resumed cycle number.
       - If the file exists AND its `plan_path` differs from the pinned plan: warn and prompt via AskUserQuestion whether to reset the counter for the new plan or abort.
       - The counter reflects the **current** pipeline run (1 = first run, 2 = one re-run after Codex ACTION_REQUIRED).
-   e. Downstream skills (`/codex-review`, `/pr`) MUST read `active-plan.json` instead of rescanning `docs/plans/active/`.
 1. Read the current active plan using the path recorded in `active-plan.json`.
 2. Confirm acceptance criteria, verify plan, and test plan before editing code.
 3. Implement in small slices that can be reviewed and verified independently.
