@@ -25,6 +25,8 @@ The full pipeline must run in this order — no steps may be skipped:
 
 If `/codex-review` finds ACTION_REQUIRED issues and the user chooses to fix them, the **full pipeline** re-runs from `/self-review` through `/codex-review` again. `/sync-docs` must not be skipped in the re-run.
 
+The pipeline is capped at **2 total runs by default** (initial + 1 re-run). Standard flow uses `RALPH_STANDARD_MAX_PIPELINE_CYCLES` (default `2`), Ralph Loop uses `RALPH_MAX_OUTER_CYCLES` (default `2`). See `.claude/rules/post-implementation-pipeline.md` for cap semantics and state files.
+
 ## For Ralph Loop (/loop)
 
 - [ ] Directory-based plan exists under `docs/plans/active/<date>-<slug>/`

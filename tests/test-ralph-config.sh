@@ -66,7 +66,7 @@ test_defaults() {
   assert_eq "default RALPH_MAX_INNER_CYCLES" "10" "$_max_inner"
 
   _max_outer="$(unset RALPH_MAX_OUTER_CYCLES; . "$CONFIG"; echo "$RALPH_MAX_OUTER_CYCLES")"
-  assert_eq "default RALPH_MAX_OUTER_CYCLES" "3" "$_max_outer"
+  assert_eq "default RALPH_MAX_OUTER_CYCLES" "2" "$_max_outer"
 
   _max_repair="$(unset RALPH_MAX_REPAIR_ATTEMPTS; . "$CONFIG"; echo "$RALPH_MAX_REPAIR_ATTEMPTS")"
   assert_eq "default RALPH_MAX_REPAIR_ATTEMPTS" "5" "$_max_repair"
@@ -76,6 +76,9 @@ test_defaults() {
 
   _timeout="$(unset RALPH_SLICE_TIMEOUT; . "$CONFIG"; echo "$RALPH_SLICE_TIMEOUT")"
   assert_eq "default RALPH_SLICE_TIMEOUT" "1800" "$_timeout"
+
+  _standard_cycles="$(unset RALPH_STANDARD_MAX_PIPELINE_CYCLES; . "$CONFIG"; echo "$RALPH_STANDARD_MAX_PIPELINE_CYCLES")"
+  assert_eq "default RALPH_STANDARD_MAX_PIPELINE_CYCLES" "2" "$_standard_cycles"
 }
 
 # ═══════════════════════════════════════════════════════════════════
@@ -99,6 +102,9 @@ test_env_override() {
 
   _timeout="$(RALPH_SLICE_TIMEOUT=3600; . "$CONFIG"; echo "$RALPH_SLICE_TIMEOUT")"
   assert_eq "override RALPH_SLICE_TIMEOUT=3600" "3600" "$_timeout"
+
+  _standard_cycles="$(RALPH_STANDARD_MAX_PIPELINE_CYCLES=5; . "$CONFIG"; echo "$RALPH_STANDARD_MAX_PIPELINE_CYCLES")"
+  assert_eq "override RALPH_STANDARD_MAX_PIPELINE_CYCLES=5" "5" "$_standard_cycles"
 }
 
 # ═══════════════════════════════════════════════════════════════════
@@ -156,6 +162,12 @@ test_validate_all() {
 
   assert_exits_nonzero "validate_all_numeric rejects bad RALPH_MAX_ITERATIONS" \
     sh -c "RALPH_MAX_ITERATIONS=abc . '$CONFIG'; validate_all_numeric"
+
+  assert_exits_nonzero "validate_all_numeric rejects bad RALPH_STANDARD_MAX_PIPELINE_CYCLES" \
+    sh -c "RALPH_STANDARD_MAX_PIPELINE_CYCLES=abc . '$CONFIG'; validate_all_numeric"
+
+  assert_exits_nonzero "validate_all_numeric rejects zero RALPH_STANDARD_MAX_PIPELINE_CYCLES" \
+    sh -c "RALPH_STANDARD_MAX_PIPELINE_CYCLES=0 . '$CONFIG'; validate_all_numeric"
 }
 
 # ═══════════════════════════════════════════════════════════════════

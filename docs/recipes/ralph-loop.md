@@ -141,10 +141,11 @@ All Ralph pipeline settings are centralized in `scripts/ralph-config.sh`. Overri
 | `RALPH_PERMISSION_MODE` | `bypassPermissions` | Permission mode for `claude -p` |
 | `RALPH_MAX_ITERATIONS` | `20` | Total iteration cap across all cycles |
 | `RALPH_MAX_INNER_CYCLES` | `10` | Max Inner Loop cycles before escalation |
-| `RALPH_MAX_OUTER_CYCLES` | `3` | Max Outer Loop regressions before escalation |
+| `RALPH_MAX_OUTER_CYCLES` | `2` | Max Outer Loop cycles (total pipeline runs) before escalation |
 | `RALPH_MAX_REPAIR_ATTEMPTS` | `5` | Max fix attempts per failing test |
 | `RALPH_MAX_PARALLEL` | `4` | Max concurrent worktree pipelines |
 | `RALPH_SLICE_TIMEOUT` | `1800` | Per-slice timeout in seconds |
+| `RALPH_STANDARD_MAX_PIPELINE_CYCLES` | `2` | (Standard flow only) Max post-implementation pipeline runs before requiring user confirmation |
 
 Priority: CLI argument > environment variable > default value.
 

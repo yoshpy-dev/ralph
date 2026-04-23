@@ -34,7 +34,7 @@ Full autonomous development pipeline with Inner/Outer Loop architecture.
 Options:
   --max-iterations N       Total iteration cap across all cycles (default: 20)
   --max-inner-cycles N     Max Inner Loop cycles before escalation (default: 10)
-  --max-outer-cycles N     Max Outer Loop regressions before escalation (default: 3)
+  --max-outer-cycles N     Max Outer Loop regressions before escalation (default: 2)
   --max-repair-attempts N  Max fix attempts per failing test (default: 5)
   --preflight              Run capability probe only, then exit
   --resume                 Resume from existing checkpoint.json

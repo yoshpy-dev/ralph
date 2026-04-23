@@ -33,6 +33,15 @@ fix → /self-review → /verify → /test → /sync-docs → /codex-review
 
 Not just `/self-review → /verify → /test → /codex-review`. The `/sync-docs` step must be included because fixes may change behavior that requires documentation updates.
 
+### Pipeline cycle cap (default 2 total runs)
+
+The post-implementation pipeline is capped at **2 total runs by default**: the initial run plus at most one fix-and-revalidate re-run. After the second run, the pipeline does not automatically regress even if Codex still reports ACTION_REQUIRED.
+
+- **Standard flow (`/work`)**: controlled by `RALPH_STANDARD_MAX_PIPELINE_CYCLES` (default `2`). The counter is persisted to `.harness/state/standard-pipeline/cycle-count.json`, keyed by the pinned plan path in `.harness/state/standard-pipeline/active-plan.json`. When the cap is reached, `/codex-review` drops the "fix" option from Case A/B and offers: (1) raise the cap and re-run, (2) proceed to `/pr` and record remaining findings as known gaps, (3) abort.
+- **Ralph Loop (`/loop`)**: controlled by `RALPH_MAX_OUTER_CYCLES` (default `2`). When exceeded, `ralph-pipeline.sh` calls `_finalize "max_outer_cycles"` and stops autonomously.
+
+Both variables accept environment-variable overrides. Raise them only when you consciously accept additional churn; the default is a deliberate "fail fast, hand back to the operator" stance.
+
 ## Integration pipeline (Ralph Loop only)
 
 After all slices are merged into the integration branch, `ralph-orchestrator.sh` runs `ralph-pipeline.sh --skip-pr --fix-all` as a unified quality gate. This follows the same canonical order above but with stricter thresholds:

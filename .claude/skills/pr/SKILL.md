@@ -21,13 +21,18 @@ If any pre-check fails, stop and explain what is missing.
 
 ## Steps
 
+0. **Resolve pinned plan identity** (standard flow):
+   Read `.harness/state/standard-pipeline/active-plan.json` to obtain the exact plan path persisted by `/work`. Use this path for archival in Step 5 instead of rescanning `docs/plans/active/`. If the file is absent (e.g. Ralph Loop or legacy session), fall back to the single file under `docs/plans/active/` or ask the user which plan to archive.
 1. Check for uncommitted changes with `git status --porcelain`.
    - **If uncommitted changes exist**: Stage with `git add` (prefer specific files over `-A`) and create a conventional commit: `<type>: <description>`. If a GitHub issue is linked, append `Refs #<number>` to the commit body.
    - **If working tree is clean** (intermediate commits already exist): Skip staging and committing — proceed directly to push.
 2. Push the branch: `git push -u origin HEAD`.
 3. Create the PR with `gh pr create` using [template.md](template.md) for the body structure. **PR title and body must be written in Japanese.**
 4. For large diffs (>500 changed lines), create a walkthrough in `docs/reports/walkthrough-<date>-<slug>.md`.
-5. Archive the plan: `./scripts/archive-plan.sh <slug>`.
+5. Archive the plan using the path resolved in Step 0: `./scripts/archive-plan.sh <absolute-plan-path>`.
+6. **Clear standard-pipeline state** (on successful PR creation):
+   `rm -f .harness/state/standard-pipeline/active-plan.json .harness/state/standard-pipeline/cycle-count.json`.
+   If PR creation fails, leave the state files in place so the user can resume.
 
 ## Completion gate
 
@@ -37,3 +42,4 @@ Do NOT present the PR as complete unless ALL of the following are true:
 - [ ] Plan archived from `docs/plans/active/` to `docs/plans/archive/`
 - [ ] For large diffs: walkthrough report exists
 - [ ] Commit follows conventional commit format
+- [ ] `.harness/state/standard-pipeline/` state files removed on success
