@@ -150,6 +150,39 @@ func TestUnifiedDiff_GutterWidth_Scales(t *testing.T) {
 	assertContains(t, got, "    100 │ +Y\n")
 }
 
+// gutterWidth must scale beyond the common 2-3 digit range so very large
+// generated files (e.g. minified JSON, vendored sources) still align the
+// pipe separator. Confirms the 5-digit boundary the verifier flagged as a
+// coverage gap. Building a 10_000-line file is cheap (~80 KB).
+func TestUnifiedDiff_GutterWidth_FiveDigitLineNumbers(t *testing.T) {
+	const total = 10_000
+	const changeAt = 9_999 // 4-digit change line forces 5-digit max via end-of-hunk numbering
+	var oldB, newB strings.Builder
+	oldB.Grow(total * 2)
+	newB.Grow(total * 2)
+	for i := 1; i <= total; i++ {
+		switch i {
+		case changeAt:
+			oldB.WriteString("X\n")
+			newB.WriteString("Y\n")
+		default:
+			oldB.WriteString("line\n")
+			newB.WriteString("line\n")
+		}
+	}
+	got := UnifiedDiff([]byte(oldB.String()), []byte(newB.String()), "old", "new")
+	// gutterWidth uses oldStart+oldCount as the upper bound, which for a hunk
+	// touching line 9999 with 3 lines of trailing context reaches 10000+ → 5
+	// columns. The change line "9999" therefore right-aligns in a 5-char column
+	// (one leading space). Assert the exact spacing so any width regression is
+	// caught at the byte level.
+	assertContains(t, got, " 9999       │ -X\n")
+	assertContains(t, got, "       9999 │ +Y\n")
+	// Trailing-context line 10000 must also right-align inside the 5-char
+	// gutter on both sides.
+	assertContains(t, got, "10000 10000 │  line\n")
+}
+
 func assertContains(t *testing.T, got, want string) {
 	t.Helper()
 	if !strings.Contains(got, want) {

@@ -270,10 +270,15 @@ Checking for updates...
   ✓ .claude/skills/verify/SKILL.md (unchanged, auto-update)
   ⚠ .claude/rules/testing.md (modified locally)
     [o]verwrite / [s]kip / [d]iff ? d
-    --- ralph template (0.6.0)
-    +++ local
-    @@ -5,3 +5,5 @@
-     ...
+    --- local
+    +++ template (0.6.0)
+    @@ 旧 L5–7  →  新 L5–9 @@
+      5   5 │  ...
+      6     │ -old line
+          6 │ +new line A
+          7 │ +new line B
+      7   8 │  ...
+    template hash: sha256:...  local hash: sha256:...
     [o]verwrite / [s]kip ? s
   ✓ AGENTS.md (unchanged, auto-update)
   ...
@@ -294,7 +299,7 @@ Checking for updates...
   - *pack 列挙自体の失敗（enumeration failure）*: pack 列挙 (`scaffold.AvailablePacks()`) 自体が失敗した場合は、Warning を stderr に出しつつ全 installed pack エントリを preservation 扱いにし、base ファイルの upgrade は継続する。pack メタデータ不具合で base 更新が止まることはない。
 - **`ActionRemove` 後のマニフェスト・ドロップ**: `ActionRemove` 後、マニフェストから該当エントリが削除される。「review and delete manually」の通知は 1 回のみで、同一バージョン再実行しても再通知されない。base ファイルの削除にも同じ扱いが適用される。ただし `Managed=false` エントリはこの契約から除外され、テンプレート側から該当ファイルが削除されても `ActionRemove` には昇格せず `ActionSkip` として扱われ、マニフェスト上にそのまま残る（下記 user-owned 収束の契約を参照）。
 - **再導入ファイルの安全側判定 (reintroduction safeguard)**: 旧マニフェストに存在せず、かつディスクに同名ファイルが存在する場合、ディスク内容がテンプレートと一致すれば `ActionAdd`、異なれば `ActionConflict` としてユーザに確認を求める。以前のリリースで削除されたファイルをユーザが手元で保持しておき、後のリリースで再導入された際にローカル編集が無言で上書きされるのを防ぐためのガード。
-- **ローカル編集検知と `Managed=false` 収束 (local-edit detection & user-owned convergence)**: テンプレートが未変更 (`newHash == manifestHash`) でもディスク内容がマニフェストハッシュと乖離している場合は `ActionConflict` として扱い、`[o]verwrite / [s]kip / [d]iff` を提示する。`[d]iff` 選択時は `internal/upgrade/unified_diff.go` が生成する unified diff（`--- local` / `+++ template (version)`、`-` はローカル行・`+` はテンプレート行）を表示する。`skip` 選択時はマニフェストへ `{Hash: diskHash, Managed: false}` を書き込み、以降そのエントリは `ComputeDiffsWithManifest` で早期 `ActionSkip`（プロンプトも auto-update も抑制）となるため、同一バージョンの再実行で prompt storm が起きない。`overwrite` 選択はローカルをテンプレートへ揃え、マニフェストを `{Hash: newHash, Managed: true}` に戻す。`--force` は `ActionConflict` 経路の上書きに加え、既に `Managed=false` となっているエントリに対してもテンプレート内容をディスクへ書き込み、マニフェストを `{Hash: newHash, Managed: true}` に flip させる（tree 全体を対象とした再管理化エスケープハッチ）。ただしテンプレート側から該当ファイルが削除されている場合は `--force` でも書き戻す元データが無いため `ActionSkip` が維持され、`Managed=false` エントリはディスクとマニフェスト双方で保全される（user-owned 契約がテンプレート変更を跨いで生存）。ディスク読み取り失敗時は警告 + hash サマリにフォールバックし、abort しない。特定パスのみを対象とする `--resync <path>` / `--adopt` は将来スコープ (`docs/tech-debt/README.md` を参照)。
+- **ローカル編集検知と `Managed=false` 収束 (local-edit detection & user-owned convergence)**: テンプレートが未変更 (`newHash == manifestHash`) でもディスク内容がマニフェストハッシュと乖離している場合は `ActionConflict` として扱い、`[o]verwrite / [s]kip / [d]iff` を提示する。`[d]iff` 選択時は `internal/upgrade/unified_diff.go` が生成する unified diff（`--- local` / `+++ template (version)`、`-` はローカル行・`+` はテンプレート行）を表示する。各変更行には `<旧行番号> <新行番号> │ <prefix><内容>` 形式の右寄せ行番号ガッター（最小2桁、ファイル長に応じて動的拡張）が付与され、ハンクヘッダは `@@ 旧 L<start>–<end>  →  新 L<start>–<end> @@`（片側が空の場合は `(空)`）で表示される。出力先が TTY かつ `NO_COLOR` 環境変数が未設定（空文字）の場合のみ ANSI カラー（`---` 太字赤 / `+++` 太字緑 / `@@` シアン / `-` 行赤 / `+` 行緑）が付与される。`NO_COLOR=1` を含む `NO_COLOR` の任意の非空値、またはパイプ／ファイルへのリダイレクト時はカラーが抑制される（https://no-color.org 準拠）。`skip` 選択時はマニフェストへ `{Hash: diskHash, Managed: false}` を書き込み、以降そのエントリは `ComputeDiffsWithManifest` で早期 `ActionSkip`（プロンプトも auto-update も抑制）となるため、同一バージョンの再実行で prompt storm が起きない。`overwrite` 選択はローカルをテンプレートへ揃え、マニフェストを `{Hash: newHash, Managed: true}` に戻す。`--force` は `ActionConflict` 経路の上書きに加え、既に `Managed=false` となっているエントリに対してもテンプレート内容をディスクへ書き込み、マニフェストを `{Hash: newHash, Managed: true}` に flip させる（tree 全体を対象とした再管理化エスケープハッチ）。ただしテンプレート側から該当ファイルが削除されている場合は `--force` でも書き戻す元データが無いため `ActionSkip` が維持され、`Managed=false` エントリはディスクとマニフェスト双方で保全される（user-owned 契約がテンプレート変更を跨いで生存）。ディスク読み取り失敗時は警告 + hash サマリにフォールバックし、abort しない。特定パスのみを対象とする `--resync <path>` / `--adopt` は将来スコープ (`docs/tech-debt/README.md` を参照)。
 
 ## セキュリティ考慮事項
 

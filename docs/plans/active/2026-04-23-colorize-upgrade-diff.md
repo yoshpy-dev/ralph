@@ -139,7 +139,8 @@ Critical forks: なし（案A vs 案B はユーザーと合意済み）。
 - [x] テスト更新（`unified_diff_test.go`, `colorize_test.go`, `cli_test.go`）
 - [x] `./scripts/run-verify.sh` グリーン (evidence: `docs/evidence/verify-2026-04-23-040315.log`)
 - [x] 視覚確認: 実バイナリで scaffold → upgrade → `[d]iff` を実行し新フォーマット出力を確認
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Review artifact created (`docs/reports/self-review-2026-04-23-colorize-upgrade-diff.md`)
+- [x] Verification artifact created (`docs/reports/verify-2026-04-23-colorize-upgrade-diff.md`)
+- [x] Test artifact created (`docs/reports/test-2026-04-23-colorize-upgrade-diff.md`)
+- [x] Sync-docs artifact created (`docs/reports/sync-docs-2026-04-23-colorize-upgrade-diff.md`)
 - [ ] PR created

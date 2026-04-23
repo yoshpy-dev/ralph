@@ -108,6 +108,10 @@ Before claiming a task is done:
 
 Run `ralph help <command>` for flags.
 
+### `ralph upgrade` interactive diff
+
+When `ralph upgrade` detects local edits, it prompts `[o]verwrite / [s]kip / [d]iff ?`. Choosing `d` renders a line-numbered unified diff: each change line carries a right-aligned `<old> <new> │ <prefix><content>` gutter, hunk headers read `@@ 旧 L<start>–<end>  →  新 L<start>–<end> @@`, and `-` / `+` are colorized (red / green; `---` / `+++` bold; `@@` cyan) when stdout is a terminal. Set `NO_COLOR=1` (or any non-empty value, per [no-color.org](https://no-color.org)) to suppress ANSI escapes; piping or redirecting also disables them automatically.
+
 ## What `ralph init` scaffolds
 
 The philosophy: **a map, not a manual**. Keep `AGENTS.md` small, push detail into rules and skills, promote repeated mistakes into hooks, scripts, tests, or CI.
