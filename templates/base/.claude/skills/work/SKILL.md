@@ -7,8 +7,10 @@ Work from the active plan, not from memory alone.
 ## Steps
 
 0. **Resolve the target plan path** (must run before any branch or plan-file operations):
-   - If exactly one file or directory exists under `docs/plans/active/` (excluding `.gitkeep`), use it.
-   - If multiple candidates exist, ask via AskUserQuestion which plan this `/work` run targets, and use the selected path.
+   - `/work` is the standard-flow skill — it only operates on single-file plans (`docs/plans/active/<date>-<slug>.md`). Ralph Loop directory plans (`docs/plans/active/<date>-<slug>/`) must be handled by `/loop` instead.
+   - Enumerate candidates: `.md` files directly under `docs/plans/active/` (excluding `.gitkeep`). **Ignore directories** — if a directory is the only entry, stop and ask the user to run `/loop` (Ralph Loop).
+   - If exactly one candidate file exists, use it.
+   - If multiple candidate files exist, ask via AskUserQuestion which plan this `/work` run targets, and use the selected path.
    - If none exist, stop and ask the user to run `/plan` first.
    - Downstream steps in this skill — and downstream skills (`/codex-review`, `/pr`) — MUST use this resolved path instead of rescanning `docs/plans/active/`.
 0.5. **Create feature branch** (if not already on one), based on the plan resolved in Step 0:

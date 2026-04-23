@@ -20,8 +20,10 @@ Provide a cross-model second opinion on the current diff before PR creation.
 ## Steps
 
 0. **Resolve active plan identity and read cycle counter** (standard flow cap enforcement):
-   a. Read `.harness/state/standard-pipeline/active-plan.json` to get the pinned plan path. If missing, warn the user, fall back to selecting the most recently modified file under `docs/plans/active/`, and continue without a persisted identity (the cap cannot be enforced in this fallback mode).
-   b. Read `.harness/state/standard-pipeline/cycle-count.json`. If missing, initialize `{"plan_path": "<path>", "cycle": 1}` (first /codex-review run of this plan).
+   a. Read `.harness/state/standard-pipeline/active-plan.json` to get the pinned plan path.
+      - **If present**: proceed to step 0.b (persisted-identity mode).
+      - **If missing**: warn the user and continue in **fallback mode** — no persisted identity. In fallback mode: skip step 0.b entirely (do NOT read or create `cycle-count.json`, to avoid reusing stale counters from other plans or leaking orphan state) and set `cycle=1`, `cap=∞` for step 6 (cap cannot be enforced).
+   b. (Persisted-identity mode only) Read `.harness/state/standard-pipeline/cycle-count.json`. If its `plan_path` matches `active-plan.json`, use its `cycle`. If missing, initialize `{"plan_path": "<path>", "cycle": 1}` (first /codex-review run of this plan). If its `plan_path` does **not** match, warn and treat as fallback mode for this run (do not overwrite — `/work` is responsible for resolving mismatched state).
    c. Read `RALPH_STANDARD_MAX_PIPELINE_CYCLES` by sourcing `./scripts/ralph-config.sh` in a subshell (default `2`).
    d. Record the current cycle number and the cap for use in Step 6.
 
