@@ -19,7 +19,11 @@ Work from the active plan, not from memory alone.
       - If none exist, stop and ask the user to run `/plan` first.
    b. Create `.harness/state/standard-pipeline/` if missing (`mkdir -p`). This directory is already covered by the existing `.harness/state/` gitignore.
    c. Write the resolved absolute path to `.harness/state/standard-pipeline/active-plan.json` as `{"plan_path": "<absolute-path>", "created_at": "<UTC ISO8601>"}`. If the file already exists with a different `plan_path`, warn the user and ask whether to overwrite (resume) or abort.
-   d. Initialize `.harness/state/standard-pipeline/cycle-count.json` as `{"plan_path": "<absolute-path>", "cycle": 1}`. This counts the **current** pipeline run (1 = first run, 2 = one re-run after Codex ACTION_REQUIRED).
+   d. Handle `.harness/state/standard-pipeline/cycle-count.json`:
+      - If the file is missing: initialize as `{"plan_path": "<absolute-path>", "cycle": 1}`.
+      - If the file exists AND its `plan_path` matches the pinned plan: **preserve the existing counter** (do NOT reset to 1). This keeps the cap effective when the user resumes a plan after context compaction or a later session. Inform the user of the resumed cycle number.
+      - If the file exists AND its `plan_path` differs from the pinned plan: warn and prompt via AskUserQuestion whether to reset the counter for the new plan or abort.
+      - The counter reflects the **current** pipeline run (1 = first run, 2 = one re-run after Codex ACTION_REQUIRED).
    e. Downstream skills (`/codex-review`, `/pr`) MUST read `active-plan.json` instead of rescanning `docs/plans/active/`.
 1. Read the current active plan using the path recorded in `active-plan.json`.
 2. Confirm acceptance criteria, verify plan, and test plan before editing code.

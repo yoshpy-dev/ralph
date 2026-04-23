@@ -112,7 +112,12 @@ Provide a cross-model second opinion on the current diff before PR creation.
      - Options:
        1. 検討して修正する — review WORTH_CONSIDERING findings, fix as needed, then re-run the full post-implementation pipeline: /self-review → /verify → /test → /sync-docs → /codex-review
        2. PR を作成する — proceed to /pr
-   - If `CAP_REACHED`: Skip the re-run option and proceed directly to /pr, noting the cap in the triage report.
+   - If `CAP_REACHED` (cap-reached flow, Case B variant): Use AskUserQuestion:
+     - Question: "パイプライン再実行の上限（`RALPH_STANDARD_MAX_PIPELINE_CYCLES=<cap>`）に到達しました。検討推奨の指摘が残っていますが、どうしますか？"
+     - Options:
+       1. 上限を一時的に引き上げて再実行 — have the user export a higher `RALPH_STANDARD_MAX_PIPELINE_CYCLES` and re-run the pipeline
+       2. PR を作成する — add unresolved WORTH_CONSIDERING findings to the PR body's Known gaps section, then proceed to /pr
+       3. 中止 — stop without creating a PR; the user will resume manually
 
    **Case C — All findings DISMISSED (or no findings)**:
    Note "Codex: 全指摘トリアージ済み（要対応なし）— トリアージレポート: docs/reports/codex-triage-<slug>.md" and proceed to /pr.
