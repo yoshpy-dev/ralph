@@ -56,7 +56,7 @@ See `.claude/rules/subagent-policy.md` for execution model details.
 ## Where this order is referenced
 
 If you update this order, update all of these locations:
-- `.claude/skills/work/SKILL.md` (Step 9)
+- `.claude/skills/work/SKILL.md` (Step 13)
 - `.claude/skills/loop/SKILL.md` (After the loop section)
 - `.claude/skills/codex-review/SKILL.md` (Case A and Case B re-run)
 - `.claude/rules/subagent-policy.md` (Post-implementation pipeline table)

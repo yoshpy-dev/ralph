@@ -19,37 +19,37 @@ Provide a cross-model second opinion on the current diff before PR creation.
 
 ## Steps
 
-0. **Resolve active plan identity and read cycle counter** (standard flow cap enforcement):
+1. **Resolve active plan identity and read cycle counter** (standard flow cap enforcement):
    a. Read `.harness/state/standard-pipeline/active-plan.json` to get the pinned plan path.
-      - **If present**: proceed to step 0.b (persisted-identity mode).
-      - **If missing**: warn the user and continue in **fallback mode** — no persisted identity. In fallback mode: skip step 0.b entirely (do NOT read or create `cycle-count.json`, to avoid reusing stale counters from other plans or leaking orphan state) and set `cycle=1`, `cap=∞` for step 6 (cap cannot be enforced).
+      - **If present**: proceed to step 1.b (persisted-identity mode).
+      - **If missing**: warn the user and continue in **fallback mode** — no persisted identity. In fallback mode: skip step 1.b entirely (do NOT read or create `cycle-count.json`, to avoid reusing stale counters from other plans or leaking orphan state) and set `cycle=1`, `cap=∞` for step 7 (cap cannot be enforced).
    b. (Persisted-identity mode only) Read `.harness/state/standard-pipeline/cycle-count.json`. If its `plan_path` matches `active-plan.json`, use its `cycle`. If missing, initialize `{"plan_path": "<path>", "cycle": 1}` (first /codex-review run of this plan). If its `plan_path` does **not** match, warn and treat as fallback mode for this run (do not overwrite — `/work` is responsible for resolving mismatched state).
    c. Read `RALPH_STANDARD_MAX_PIPELINE_CYCLES` by sourcing `./scripts/ralph-config.sh` in a subshell (default `2`).
-   d. Record the current cycle number and the cap for use in Step 6.
+   d. Record the current cycle number and the cap for use in Step 7.
 
    **Hard prohibition**: Do NOT rediscover the plan by rescanning `docs/plans/active/` once `active-plan.json` exists. Always consume the persisted path. This prevents cross-plan counter leakage when multiple plans coexist.
 
-1. **Check Codex availability**:
+2. **Check Codex availability**:
    Run `./scripts/codex-check.sh` via Bash.
    If exit 1: note "Codex CLI not available — skipping to /pr" and invoke /pr.
 
-2. **Invoke Codex review**:
+3. **Invoke Codex review**:
    - Determine base branch via Bash: `BASE=$(git rev-parse --abbrev-ref HEAD@{upstream} 2>/dev/null | sed 's|origin/||' || echo main)`
    - Check the diff is non-empty: `git diff "$BASE"...HEAD --quiet` — if exit 0 (no diff), skip with a note and proceed to /pr.
    - Run native Codex reviewer via Bash:
      `codex exec review --base "$BASE"`
    - The native reviewer analyzes the full diff and returns structured findings with severity, affected files, and recommendations. It covers: correctness issues, security concerns, error handling gaps, logic errors, and missing test coverage.
 
-3. **Triage findings** (new — noise reduction):
+4. **Triage findings** (new — noise reduction):
    Triage each Codex finding using implementation context. This step runs inline (main context) because triage value depends on knowing *why* the code was written that way.
 
    **Load triage context:**
-   - Read the active plan using the path recorded in `active-plan.json` from Step 0 — do not rescan `docs/plans/active/`. If `active-plan.json` is absent (fallback mode), use the path resolved in Step 0's fallback.
+   - Read the active plan using the path recorded in `active-plan.json` from Step 1 — do not rescan `docs/plans/active/`. If `active-plan.json` is absent (fallback mode), use the path resolved in Step 1's fallback.
    - Read the self-review report from `docs/reports/` (if available)
    - Read the verify report from `docs/reports/` (if available)
    - Consider implementation decisions made during the current session
 
-   **If Codex returned non-structured output** (no clear severity/file/recommendation per finding): skip triage, fall back to Step 5-legacy (present all findings as-is, same as pre-triage behavior).
+   **If Codex returned non-structured output** (no clear severity/file/recommendation per finding): skip triage, fall back to Step 6 legacy behavior (present all findings as-is, same as pre-triage behavior).
 
    **2-axis evaluation** (Semgrep pattern):
    For each finding, evaluate on two independent axes:
@@ -75,22 +75,22 @@ Provide a cross-model second opinion on the current diff before PR creation.
    - `out-of-scope` — valid concern but outside the plan's scope/non-goals
    - `context-aware-safe` — appears risky in isolation but is safe given the implementation context
 
-4. **Write triage report**:
+5. **Write triage report**:
    Write the triage report to `docs/reports/codex-triage-<plan-slug>.md` using the template at `docs/reports/templates/codex-triage-report.md`. Include:
    - All findings in their classified sections (ACTION_REQUIRED, WORTH_CONSIDERING, DISMISSED)
    - Triage rationale (1-2 sentences per finding to limit token cost)
    - Dismissal reasons with category for all DISMISSED findings
    - Summary counts in the header
-   - Current cycle and cap (from Step 0) in the header, e.g. `Cycle: 2/2 (cap reached)`
+   - Current cycle and cap (from Step 1) in the header, e.g. `Cycle: 2/2 (cap reached)`
 
-5. **Present triaged findings**:
+6. **Present triaged findings**:
    Display findings grouped by classification:
    - **ACTION_REQUIRED**: Show full details (finding + triage rationale + affected files). Header: "要対応 (ACTION_REQUIRED)"
    - **WORTH_CONSIDERING**: Show full details. Header: "検討推奨 (WORTH_CONSIDERING)"
    - **DISMISSED**: Show count and note that details are in the triage report. Example: "除外: N 件（詳細は docs/reports/codex-triage-<slug>.md を参照）"
 
-6. **User decision**:
-   Branch based on triage results **and** on whether the pipeline cycle cap has been reached (see Step 0 — cycle vs `RALPH_STANDARD_MAX_PIPELINE_CYCLES`).
+7. **User decision**:
+   Branch based on triage results **and** on whether the pipeline cycle cap has been reached (see Step 1 — cycle vs `RALPH_STANDARD_MAX_PIPELINE_CYCLES`).
 
    Let `CAP_REACHED = (cycle >= RALPH_STANDARD_MAX_PIPELINE_CYCLES)`. At the default cap of 2, `CAP_REACHED` is true during the second (and final) `/codex-review` run.
 
@@ -124,7 +124,7 @@ Provide a cross-model second opinion on the current diff before PR creation.
    **Case C — All findings DISMISSED (or no findings)**:
    Note "Codex: 全指摘トリアージ済み（要対応なし）— トリアージレポート: docs/reports/codex-triage-<slug>.md" and proceed to /pr.
 
-7. **Proceed**:
+8. **Proceed**:
    - **Non-cap re-run** (Case A / Case B, `CAP_REACHED = false`): If `active-plan.json` exists, increment `cycle-count.json` (`cycle += 1`), then guide the user back to `/self-review`. The incremented cycle represents "the pass the user is about to enter".
    - **Cap-reached Option 1** ("上限を一時的に引き上げて再実行"): Do **NOT** increment `cycle-count.json`. Instruct the user to `export RALPH_STANDARD_MAX_PIPELINE_CYCLES=<current cycle + 1>` (or higher) before re-running, so the unchanged `cycle` falls below the new cap. Then guide them back to `/self-review`. Rationale: incrementing here would immediately re-trip the raised cap on the next `/codex-review` entry, leaving the user with zero extra passes.
    - If the user chooses `/pr`: invoke /pr (which is responsible for deleting `active-plan.json` and `cycle-count.json` on success).
