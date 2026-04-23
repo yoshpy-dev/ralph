@@ -1,0 +1,119 @@
+Checking for updates...
+  Current: dev → Available: dev
+
+  ⚠ AGENTS.md (modified locally)
+    [o]verwrite / [s]kip / [d]iff ? --- local
++++ template (dev)
+@@ 旧 L1–4  →  新 L1–103 @@
+  1     │ -# my AGENTS
+      1 │ +# AGENTS.md
+  2   2 │  
+  3     │ -local note line A
+  4     │ -local note line B
+      3 │ +Treat this file as a **map**:
+      4 │ +- short
+      5 │ +- stable
+      6 │ +- cross-vendor
+      7 │ +- easy to verify against the repo
+      8 │ +
+      9 │ +## Mission
+     10 │ +
+     11 │ +Build coding-agent workflows that are:
+     12 │ +- reliable
+     13 │ +- inspectable
+     14 │ +- evidence-backed
+     15 │ +- easy to extend
+     16 │ +
+     17 │ +## Primary loop
+     18 │ +
+     19 │ +1. Spec (manual, optional — refines vague ideas into detailed specifications via iterative brainstorming, codebase exploration, web research, and user clarification → `docs/specs/` or GitHub issue)
+     20 │ +2. Plan (auto — creates plan, selects flow) [+ optional Codex plan advisory]
+     21 │ +3. **Standard flow**: Work (auto — creates branch, interactive implementation)
+     22 │ +   **Ralph Loop**: Loop (auto — directory-based plan → `ralph-orchestrator.sh` → multi-worktree parallel → integration branch → integration pipeline → unified PR)
+     23 │ +4. Self-review (auto — via `reviewer` subagent, or pipeline-internal)
+     24 │ +5. Verify (auto — via `verifier` subagent, or pipeline-internal)
+     25 │ +6. Test (auto — via `tester` subagent, or pipeline-internal)
+     26 │ +7. Sync-docs (auto — via `doc-maintainer` subagent, or pipeline-internal)
+     27 │ +8. Codex-review (auto, optional — cross-model second opinion)
+     28 │ +9. PR (auto — includes hand-off)
+     29 │ +10. CI verify + human merge
+     30 │ +
+     31 │ +Steps 4–9 run via subagents in standard flow. In Ralph Loop, they are handled internally by the pipeline scripts.
+     32 │ +
+     33 │ +## Source of truth
+     34 │ +
+     35 │ +- Repo files beat memory
+     36 │ +- Versioned docs beat chat history
+     37 │ +- Deterministic scripts beat informal promises
+     38 │ +- Evidence beats confidence statements
+     39 │ +
+     40 │ +## Repo map
+     41 │ +
+     42 │ +<!-- Update this section to reflect your project's structure -->
+     43 │ +
+     44 │ +- `docs/specs/` — spec files produced by `/spec`
+     45 │ +- `docs/plans/active/` — current plans
+     46 │ +- `docs/plans/archive/` — completed plans
+     47 │ +- `docs/plans/templates/` — plan templates
+     48 │ +- `docs/reports/` — self-review, verify, test, walkthrough artifacts
+     49 │ +- `docs/quality/` — definition of done and quality gates
+     50 │ +- `.claude/rules/` — path-scoped guidance
+     51 │ +- `.claude/skills/` — on-demand workflows
+     52 │ +- `.claude/agents/` — specialized subagents
+     53 │ +- `.claude/hooks/` — deterministic runtime checks
+     54 │ +- `scripts/` — reusable verification and bootstrap scripts
+     55 │ +
+     56 │ +## Planning contract
+     57 │ +
+     58 │ +Every non-trivial task should have:
+     59 │ +- objective
+     60 │ +- scope and non-goals
+     61 │ +- affected files or modules
+     62 │ +- acceptance criteria
+     63 │ +- verify plan (static analysis, spec compliance, doc drift)
+     64 │ +- test plan (unit, integration, regression, edge cases)
+     65 │ +- risk register
+     66 │ +- rollout or rollback note
+     67 │ +- evidence targets
+     68 │ +
+     69 │ +## Review contract
+     70 │ +
+     71 │ +Reviews should produce artifacts, not only chat output:
+     72 │ +- findings with severity (diff quality only)
+     73 │ +- evidence
+     74 │ +- merge or no-merge recommendation
+     75 │ +- follow-ups
+     76 │ +- known gaps
+     77 │ +
+     78 │ +## Verification & test contracts
+     79 │ +
+     80 │ +See `docs/quality/definition-of-done.md` for full checklists.
+     81 │ +
+     82 │ +Key rule: never say "done" without saying what was verified and what remains unverified. Tests must pass before PR creation.
+     83 │ +
+     84 │ +## Hard rules
+     85 │ +
+     86 │ +- Keep this file short
+     87 │ +- Keep `CLAUDE.md` short
+     88 │ +- Move detailed topic guidance into `.claude/rules/`
+     89 │ +- Move step-by-step workflows into `.claude/skills/`
+     90 │ +- Promote repeated mistakes into hooks, tests, CI, or scripts
+     91 │ +- Do not expand plans into brittle low-level instructions unless the task truly needs it
+     92 │ +- Keep names grep-able and boundaries explicit
+     93 │ +- Update docs when behavior, contracts, or workflows change
+     94 │ +
+     95 │ +## Human escalation boundaries
+     96 │ +
+     97 │ +Escalate to a human only for:
+     98 │ +- irreversible destructive actions
+     99 │ +- secrets or credentials you cannot access
+    100 │ +- product or design judgment that cannot be verified from repo context
+    101 │ +- external approvals that are genuinely required
+    102 │ +
+    103 │ +Everything else should first attempt self-verification.
+    template hash: sha256:1960acaf487b0a314b71fe0c09b89e178d246929eca88471426d25226b9d78f2  local hash: sha256:8dcb013a6b0348c1ce478ae3876f36ef27aeb1447454cbabbf77521d66054a48
+    [o]verwrite / [s]kip / [d]iff ?   ⊘ AGENTS.md (kept local; future upgrades will skip silently)
+
+  Updated: 0 files
+  Skipped: 1 files (user-modified)
+  Manifest updated: .ralph/manifest.toml

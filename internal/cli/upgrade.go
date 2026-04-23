@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 
 	"github.com/yoshpy-dev/ralph/internal/scaffold"
@@ -78,13 +79,28 @@ func splitManifestForPack(m *scaffold.Manifest, pack string) *scaffold.Manifest 
 }
 
 func runUpgrade(targetDir string, force bool) error {
-	return runUpgradeIO(targetDir, force, os.Stdin, os.Stdout, os.Stderr)
+	return runUpgradeIO(targetDir, force, os.Stdin, os.Stdout, os.Stderr, shouldColorize(os.Stdout))
+}
+
+// shouldColorize reports whether ANSI color escapes should be emitted for the
+// given output. Honors the de-facto NO_COLOR standard (https://no-color.org)
+// and only enables color when writing directly to a terminal — pipes,
+// redirects, and CI capture all stay plain text.
+func shouldColorize(out *os.File) bool {
+	if v := os.Getenv("NO_COLOR"); v != "" {
+		return false
+	}
+	if out == nil {
+		return false
+	}
+	return term.IsTerminal(out.Fd())
 }
 
 // runUpgradeIO is the testable core of the upgrade command. I/O is injected so
 // integration tests can drive interactive conflict resolution without touching
-// the real stdin/stdout.
-func runUpgradeIO(targetDir string, force bool, in io.Reader, out, errOut io.Writer) error {
+// the real stdin/stdout. `colorize` controls whether the unified-diff render
+// is wrapped in ANSI escapes — callers must decide based on the destination.
+func runUpgradeIO(targetDir string, force bool, in io.Reader, out, errOut io.Writer, colorize bool) error {
 	absDir, err := filepath.Abs(targetDir)
 	if err != nil {
 		return fmt.Errorf("resolving directory: %w", err)
@@ -197,7 +213,7 @@ func runUpgradeIO(targetDir string, force bool, in io.Reader, out, errOut io.Wri
 				updated++
 				continue
 			}
-			switch resolveConflict(d, absDir, Version, reader, out, errOut) {
+			switch resolveConflict(d, absDir, Version, reader, out, errOut, colorize) {
 			case resolutionOverwrite:
 				targetPath := filepath.Join(absDir, d.Path)
 				if err := os.WriteFile(targetPath, d.NewContent, scaffold.FilePerm(d.Path)); err != nil {
@@ -317,7 +333,7 @@ const (
 // template content, keeping the local variant, or viewing a unified diff. EOF
 // or any read error collapses to a safe skip so non-interactive runs do not
 // silently overwrite edits.
-func resolveConflict(d upgrade.FileDiff, absDir, version string, in *bufio.Reader, out, errOut io.Writer) resolution {
+func resolveConflict(d upgrade.FileDiff, absDir, version string, in *bufio.Reader, out, errOut io.Writer, colorize bool) resolution {
 	writef(out, "  ⚠ %s (modified locally)\n", d.Path)
 
 	for {
@@ -333,7 +349,7 @@ func resolveConflict(d upgrade.FileDiff, absDir, version string, in *bufio.Reade
 		case "s", "skip":
 			return resolutionSkip
 		case "d", "diff":
-			showDiff(d, absDir, version, out, errOut)
+			showDiff(d, absDir, version, out, errOut, colorize)
 			// Loop back to the prompt so the user still picks overwrite or skip.
 		default:
 			// Unrecognized input — reprompt.
@@ -342,10 +358,11 @@ func resolveConflict(d upgrade.FileDiff, absDir, version string, in *bufio.Reade
 }
 
 // showDiff renders the local-vs-template unified diff for a conflict entry.
-// Disk read failures degrade gracefully to a hash summary so the user can
-// still make an informed choice when, e.g., the file was moved between diff
-// computation and the prompt.
-func showDiff(d upgrade.FileDiff, absDir, version string, out, errOut io.Writer) {
+// When colorize is true the diff is wrapped in ANSI escapes for terminal
+// display. Disk read failures degrade gracefully to a hash summary so the
+// user can still make an informed choice when, e.g., the file was moved
+// between diff computation and the prompt.
+func showDiff(d upgrade.FileDiff, absDir, version string, out, errOut io.Writer, colorize bool) {
 	localPath := filepath.Join(absDir, d.Path)
 	localBytes, err := os.ReadFile(localPath)
 	if err != nil {
@@ -363,6 +380,9 @@ func showDiff(d upgrade.FileDiff, absDir, version string, out, errOut io.Writer)
 	if diff == "" {
 		writef(out, "    (no textual difference — manifest hash drift only)\n")
 	} else {
+		if colorize {
+			diff = upgrade.Colorize(diff)
+		}
 		_, _ = io.WriteString(out, diff)
 	}
 	writef(out, "    template hash: %s  local hash: %s\n", d.NewHash, d.DiskHash)

@@ -5,10 +5,20 @@ import (
 	"strings"
 )
 
-// UnifiedDiff returns a minimal unified-diff representation of oldText → newText
-// at line granularity. Labels are rendered in the `--- oldLabel` / `+++ newLabel`
-// header. The algorithm is LCS-based with 3 lines of context. Output is a
-// display artifact — callers must not parse it.
+// diffSeparator is the visual separator between the line-number gutter and the
+// diff prefix. Multi-byte (`│` is U+2502, three bytes in UTF-8) — code that
+// scans for this marker (e.g. Colorize) must use byte length.
+const diffSeparator = " │ "
+
+// UnifiedDiff returns a human-readable line-numbered diff representation of
+// oldText → newText at line granularity. Labels are rendered in the
+// `--- oldLabel` / `+++ newLabel` header. The algorithm is LCS-based with 3
+// lines of context. Output is a display artifact — callers must not parse it.
+//
+// Each emitted change line carries two gutter columns showing the 1-based
+// line numbers in the old and new files (blank when the line does not exist
+// on that side). The hunk header replaces the cryptic `@@ -a,b +c,d @@`
+// notation with a human-friendly range summary.
 //
 // When either side lacks a trailing newline, a single
 // `\ No newline at end of file` marker is appended after the diff so the
@@ -24,31 +34,41 @@ func UnifiedDiff(oldText, newText []byte, oldLabel, newLabel string) string {
 	ops := lcsDiff(oldLines, newLines)
 	hunks := groupHunks(ops, 3)
 
+	width := gutterWidth(hunks)
+	blank := strings.Repeat(" ", width)
+
 	var b strings.Builder
 	fmt.Fprintf(&b, "--- %s\n", oldLabel)
 	fmt.Fprintf(&b, "+++ %s\n", newLabel)
 
 	for _, h := range hunks {
-		oldStart := h.oldStart + 1
-		newStart := h.newStart + 1
-		if h.oldCount == 0 {
-			oldStart = h.oldStart
-		}
-		if h.newCount == 0 {
-			newStart = h.newStart
-		}
-		fmt.Fprintf(&b, "@@ -%d,%d +%d,%d @@\n", oldStart, h.oldCount, newStart, h.newCount)
+		fmt.Fprintf(&b, "@@ 旧 %s  →  新 %s @@\n",
+			formatRange(h.oldStart, h.oldCount),
+			formatRange(h.newStart, h.newCount))
+
+		oldNo := h.oldStart // 0-based; pre-increment before emit makes it 1-based.
+		newNo := h.newStart
 		for _, op := range h.ops {
+			oldCol := blank
+			newCol := blank
+			var prefix byte
 			switch op.kind {
 			case opEqual:
-				b.WriteString(" ")
+				oldNo++
+				newNo++
+				oldCol = fmt.Sprintf("%*d", width, oldNo)
+				newCol = fmt.Sprintf("%*d", width, newNo)
+				prefix = ' '
 			case opDel:
-				b.WriteString("-")
+				oldNo++
+				oldCol = fmt.Sprintf("%*d", width, oldNo)
+				prefix = '-'
 			case opAdd:
-				b.WriteString("+")
+				newNo++
+				newCol = fmt.Sprintf("%*d", width, newNo)
+				prefix = '+'
 			}
-			b.WriteString(op.line)
-			b.WriteString("\n")
+			fmt.Fprintf(&b, "%s %s%s%c%s\n", oldCol, newCol, diffSeparator, prefix, op.line)
 		}
 	}
 
@@ -57,6 +77,42 @@ func UnifiedDiff(oldText, newText []byte, oldLabel, newLabel string) string {
 	}
 
 	return b.String()
+}
+
+// formatRange renders a hunk's line range. Empty sides (count == 0) collapse
+// to "(空)" so the user can immediately tell that the file was created from
+// nothing or fully deleted on one side.
+func formatRange(start, count int) string {
+	if count == 0 {
+		return "(空)"
+	}
+	if count == 1 {
+		return fmt.Sprintf("L%d", start+1)
+	}
+	return fmt.Sprintf("L%d–%d", start+1, start+count)
+}
+
+// gutterWidth returns the column width needed to right-align every line
+// number that may appear across all hunks. Floors at 2 so single-digit files
+// still produce a stable two-column gutter.
+func gutterWidth(hunks []hunk) int {
+	maxLine := 0
+	for _, h := range hunks {
+		if v := h.oldStart + h.oldCount; v > maxLine {
+			maxLine = v
+		}
+		if v := h.newStart + h.newCount; v > maxLine {
+			maxLine = v
+		}
+	}
+	w := 1
+	for n := maxLine; n >= 10; n /= 10 {
+		w++
+	}
+	if w < 2 {
+		w = 2
+	}
+	return w
 }
 
 // splitLines splits text on '\n'. The returned slice never has a trailing

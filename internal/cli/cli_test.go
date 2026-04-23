@@ -500,7 +500,7 @@ func TestRunUpgrade_InteractiveOverwrite_WritesManaged(t *testing.T) {
 	}
 
 	var out, errOut bytes.Buffer
-	if err := runUpgradeIO(dir, false, strings.NewReader("o\n"), &out, &errOut); err != nil {
+	if err := runUpgradeIO(dir, false, strings.NewReader("o\n"), &out, &errOut, false); err != nil {
 		t.Fatalf("upgrade: %v", err)
 	}
 
@@ -544,7 +544,7 @@ func TestRunUpgrade_InteractiveSkip_WritesUnmanaged(t *testing.T) {
 	}
 
 	var out, errOut bytes.Buffer
-	if err := runUpgradeIO(dir, false, strings.NewReader("s\n"), &out, &errOut); err != nil {
+	if err := runUpgradeIO(dir, false, strings.NewReader("s\n"), &out, &errOut, false); err != nil {
 		t.Fatalf("upgrade: %v", err)
 	}
 
@@ -589,7 +589,7 @@ func TestRunUpgrade_InteractiveDiff_ShowsUnifiedDiff(t *testing.T) {
 
 	var out, errOut bytes.Buffer
 	// d → re-prompt → s (keep local).
-	if err := runUpgradeIO(dir, false, strings.NewReader("d\ns\n"), &out, &errOut); err != nil {
+	if err := runUpgradeIO(dir, false, strings.NewReader("d\ns\n"), &out, &errOut, false); err != nil {
 		t.Fatalf("upgrade: %v", err)
 	}
 
@@ -597,12 +597,50 @@ func TestRunUpgrade_InteractiveDiff_ShowsUnifiedDiff(t *testing.T) {
 	for _, want := range []string{
 		"--- local",
 		"+++ template (1.0.0-test)",
-		"-# my agents",
-		"+# AGENTS",
+		"│ -# my agents",
+		"│ +# AGENTS",
 	} {
 		if !strings.Contains(combined, want) {
 			t.Errorf("diff output missing %q; got:\n%s", want, combined)
 		}
+	}
+	// Non-TTY destination (bytes.Buffer) and colorize=false must not emit ANSI.
+	if strings.Contains(combined, "\x1b[") {
+		t.Errorf("ANSI escape leaked into non-TTY output:\n%q", combined)
+	}
+}
+
+// When colorize is true the diff render must wrap recognized lines in ANSI
+// escapes so terminal users get a readable color-coded view.
+func TestRunUpgrade_InteractiveDiff_ColorizesWhenEnabled(t *testing.T) {
+	setupTestEmbedFS(t)
+	Version = "1.0.0-test"
+
+	dir := t.TempDir()
+	cfg := initConfig{ProjectName: "test", Packs: nil}
+	if err := executeInit(dir, cfg, false); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	agents := filepath.Join(dir, "AGENTS.md")
+	if err := os.WriteFile(agents, []byte("# my agents\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errOut bytes.Buffer
+	if err := runUpgradeIO(dir, false, strings.NewReader("d\ns\n"), &out, &errOut, true); err != nil {
+		t.Fatalf("upgrade: %v", err)
+	}
+
+	got := out.String()
+	if !strings.Contains(got, "\x1b[1;31m--- local") {
+		t.Errorf("expected bold-red --- header; got:\n%q", got)
+	}
+	if !strings.Contains(got, "\x1b[1;32m+++ template (1.0.0-test)") {
+		t.Errorf("expected bold-green +++ header; got:\n%q", got)
+	}
+	if !strings.Contains(got, "\x1b[36m@@ ") {
+		t.Errorf("expected cyan hunk header; got:\n%q", got)
 	}
 }
 
@@ -627,7 +665,7 @@ func TestRunUpgrade_InteractiveDiff_RepromptsOnInvalid(t *testing.T) {
 	var out, errOut bytes.Buffer
 	// garbage → d → d → s
 	input := strings.NewReader("xyz\nd\nd\ns\n")
-	if err := runUpgradeIO(dir, false, input, &out, &errOut); err != nil {
+	if err := runUpgradeIO(dir, false, input, &out, &errOut, false); err != nil {
 		t.Fatalf("upgrade: %v", err)
 	}
 
@@ -659,7 +697,7 @@ func TestRunUpgrade_ForceReadoptsUnmanaged(t *testing.T) {
 
 	// First upgrade: user chooses skip → manifest records Managed=false.
 	var out, errOut bytes.Buffer
-	if err := runUpgradeIO(dir, false, strings.NewReader("s\n"), &out, &errOut); err != nil {
+	if err := runUpgradeIO(dir, false, strings.NewReader("s\n"), &out, &errOut, false); err != nil {
 		t.Fatalf("first upgrade: %v", err)
 	}
 	m1, _ := scaffold.ReadManifest(filepath.Join(dir, ".ralph", "manifest.toml"))
@@ -713,7 +751,7 @@ func TestRunUpgrade_UnmanagedSurvivesTemplateRemovalAcrossRuns(t *testing.T) {
 
 	// Skip → Managed=false.
 	var out, errOut bytes.Buffer
-	if err := runUpgradeIO(dir, false, strings.NewReader("s\n"), &out, &errOut); err != nil {
+	if err := runUpgradeIO(dir, false, strings.NewReader("s\n"), &out, &errOut, false); err != nil {
 		t.Fatalf("first upgrade: %v", err)
 	}
 
@@ -731,7 +769,7 @@ func TestRunUpgrade_UnmanagedSurvivesTemplateRemovalAcrossRuns(t *testing.T) {
 
 	out.Reset()
 	errOut.Reset()
-	if err := runUpgradeIO(dir, false, strings.NewReader(""), &out, &errOut); err != nil {
+	if err := runUpgradeIO(dir, false, strings.NewReader(""), &out, &errOut, false); err != nil {
 		t.Fatalf("upgrade after removal: %v", err)
 	}
 
@@ -771,7 +809,7 @@ func TestRunUpgrade_NextRunAfterSkip_IsSilent(t *testing.T) {
 	}
 
 	var out, errOut bytes.Buffer
-	if err := runUpgradeIO(dir, false, strings.NewReader("s\n"), &out, &errOut); err != nil {
+	if err := runUpgradeIO(dir, false, strings.NewReader("s\n"), &out, &errOut, false); err != nil {
 		t.Fatalf("first upgrade: %v", err)
 	}
 
@@ -781,7 +819,7 @@ func TestRunUpgrade_NextRunAfterSkip_IsSilent(t *testing.T) {
 	// Empty stdin: if the second run re-prompts, the EOF branch would flip
 	// "(non-interactive input detected, skipping)" into errOut and we'd see
 	// a warning. No prompt means no such output.
-	if err := runUpgradeIO(dir, false, strings.NewReader(""), &out, &errOut); err != nil {
+	if err := runUpgradeIO(dir, false, strings.NewReader(""), &out, &errOut, false); err != nil {
 		t.Fatalf("second upgrade: %v", err)
 	}
 
@@ -821,7 +859,7 @@ func TestRunUpgrade_DiskReadFailure_FallsBackToHash(t *testing.T) {
 	}
 
 	var out, errOut bytes.Buffer
-	if err := runUpgradeIO(dir, false, reader, &out, &errOut); err != nil {
+	if err := runUpgradeIO(dir, false, reader, &out, &errOut, false); err != nil {
 		t.Fatalf("upgrade: %v", err)
 	}
 
@@ -875,6 +913,33 @@ func TestRunDoctor_Passes(t *testing.T) {
 	// Doctor should not error fatally (it may warn about missing claude CLI).
 	// We just verify it doesn't panic.
 	_ = runDoctor(dir)
+}
+
+// shouldColorize must respect NO_COLOR (any non-empty value disables) and
+// must return false when out is nil or not a terminal. Pipes / regular files
+// (the typical test path) are not terminals.
+func TestShouldColorize_HonorsNoColorAndTTY(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	if shouldColorize(nil) {
+		t.Errorf("nil out should disable color")
+	}
+
+	// A regular temp file is not a terminal.
+	f, err := os.CreateTemp(t.TempDir(), "out")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	if shouldColorize(f) {
+		t.Errorf("regular file should not be classified as terminal")
+	}
+
+	// NO_COLOR=1 must short-circuit even when destination would otherwise be
+	// eligible.
+	t.Setenv("NO_COLOR", "1")
+	if shouldColorize(f) {
+		t.Errorf("NO_COLOR=1 must disable color regardless of destination")
+	}
 }
 
 func TestNewRootCmd_HasAllSubcommands(t *testing.T) {
