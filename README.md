@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/assets/ralph-banner.svg" alt="ralph — Claude Code-first CLI for harness engineering" width="100%">
+
 # ralph
 
 **Claude Code–first CLI for harness engineering.**
@@ -91,6 +93,20 @@ Before claiming a task is done:
 | **Deterministic hooks**<br/>Mojibake guard, commit-msg secret scan, Bash guardrails, verification reminders — pre-wired in `settings.json`. | **Ralph Loop**<br/>Multi-worktree autonomous parallel slices, integration branch, unified PR — orchestrated by `ralph run`. |
 | **Language packs**<br/>TypeScript, Python, Rust, Go, Dart starters (opt-in) with per-language `verify.sh` and path-scoped rules. | **Drift-proof upgrades**<br/>Hash-based `ralph upgrade` with per-file conflict resolution — keeps N projects aligned as the scaffold evolves. |
 | **Evidence over prose**<br/>Every review, verify, test, and codex pass produces a dated artifact in `docs/reports/`. | **Cross-agent portable**<br/>`AGENTS.md` + `scripts/` + `packs/` stay neutral; `.claude/` is the Claude-native layer you can stack others beside. |
+
+## Demos
+
+Animated walkthroughs are produced by [VHS](https://github.com/charmbracelet/vhs). Tapes live under `docs/assets/vhs/`; see [`docs/assets/vhs/README.md`](docs/assets/vhs/README.md) for prerequisites.
+
+```sh
+# ralph init (scaffold flow)
+vhs docs/assets/vhs/demo-init.tape       # -> docs/assets/demo-init.gif
+
+# ralph status (Lazygit-style TUI)
+vhs docs/assets/vhs/demo-status.tape     # -> docs/assets/demo-status.gif
+```
+
+Once rendered, the GIFs drop into `docs/assets/` and can be embedded directly from GitHub.
 
 ## Commands
 
