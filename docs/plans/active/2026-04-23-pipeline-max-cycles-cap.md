@@ -154,9 +154,14 @@
 
 ## Progress checklist
 
-- [ ] Plan reviewed
-- [ ] Branch created
-- [ ] Implementation started
+- [x] Plan reviewed
+- [x] Branch created (feat/pipeline-max-cycles-cap)
+- [x] Implementation started
+- [x] Slice 1: ralph-config.sh + tests (commit 5a42478)
+- [x] Slice 2: ralph-pipeline.sh --help text (commit 009428f)
+- [x] Slice 3: skill docs (work/codex-review/pr) (commit 7568755)
+- [x] Slice 4: rules + docs sync (commit 7b2e2e2)
+- [x] Final verification (tests 27/27, check-sync PASS, run-verify PASS)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
