@@ -208,6 +208,7 @@
 - [x] `internal/cli/run.go` で TOML→env propagation
 - [x] `ralph.toml` テンプレ更新 + Go 側 `Loop` 構造体 + パーステスト
 - [x] `ralph doctor` 出力更新 (effective driver + source) + テスト
+- [x] `ralph status` driver 行 + AGENTS.md primary-loop ノート (AC-6 follow-up — commit 3351df2)
 - [x] `.claude/skills/loop/` と `.agents/skills/loop/` の同期更新
 - [x] `.claude/skills/cross-review/` と `.agents/skills/cross-review/` の同期更新
 - [x] `docs/recipes/ralph-loop.md` 更新
