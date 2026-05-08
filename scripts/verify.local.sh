@@ -101,6 +101,9 @@ run_hook_tests() {
   if [ -x tests/test-check-skill-sync.sh ]; then
     run "tests/test-check-skill-sync.sh" tests/test-check-skill-sync.sh
   fi
+  if [ -x tests/test-ralph-cli-driver.sh ]; then
+    run "tests/test-ralph-cli-driver.sh" tests/test-ralph-cli-driver.sh
+  fi
 }
 
 case "$mode" in

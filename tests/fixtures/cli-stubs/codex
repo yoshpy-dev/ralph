@@ -1,0 +1,64 @@
+#!/usr/bin/env sh
+# fake-codex — deterministic test stub for `codex` (Phase 2 / issue #44).
+#
+# Records every invocation to $RALPH_FAKE_CALL_LOG so the test can assert
+# argv, stdin (after consumption), cwd, and the value passed to
+# --output-last-message. Honours the following knobs:
+#
+#   RALPH_FAKE_CALL_LOG     — path to write the call record (required)
+#   RALPH_FAKE_EXIT_CODE    — exit code (default 0); lets tests exercise
+#                             the wrapper's failure / fallback paths
+#   RALPH_FAKE_LAST_MESSAGE — text written to the file passed to
+#                             --output-last-message (default "fake codex
+#                             ok"); empty value skips writing the file so
+#                             the wrapper's "missing .last" branch can be
+#                             exercised
+#
+# The stub never reads stdin beyond capturing it for the call log so the
+# caller cannot block on a stub that forgets to drain its input.
+
+set -u
+
+call_log="${RALPH_FAKE_CALL_LOG:-/dev/null}"
+exit_code="${RALPH_FAKE_EXIT_CODE:-0}"
+last_message="${RALPH_FAKE_LAST_MESSAGE-fake codex ok}"
+
+# Capture argv as a JSON array.
+argv_json="$(printf '%s\n' "$@" | jq -R . | jq -sc .)"
+
+# Find --output-last-message / -o target if present so the test can verify
+# the wrapper passed the right path.
+out_path=""
+prev=""
+for a in "$@"; do
+  case "$prev" in
+    --output-last-message|-o) out_path="$a" ;;
+  esac
+  prev="$a"
+done
+
+# Drain stdin into a buffer for the call log (truncate to 4 KiB to keep the
+# JSON readable even when the prompt is large).
+stdin_buf="$(head -c 4096 || true)"
+
+# Write the requested last-message file unless the test asked us to skip.
+if [ -n "$out_path" ] && [ -n "$last_message" ]; then
+  printf '%s\n' "$last_message" > "$out_path"
+fi
+
+# Record the call.
+if [ -n "$call_log" ] && [ "$call_log" != "/dev/null" ]; then
+  jq -n \
+    --arg bin   "fake-codex" \
+    --arg cwd   "$PWD" \
+    --arg stdin "$stdin_buf" \
+    --arg out   "$out_path" \
+    --argjson argv "$argv_json" \
+    '{bin:$bin, cwd:$cwd, stdin:$stdin, output_last_message:$out, argv:$argv}' \
+    > "$call_log"
+fi
+
+# Mimic codex stdout so callers that pipe the output get a stable signal.
+printf 'fake-codex stdout — call recorded\n'
+
+exit "$exit_code"
