@@ -800,7 +800,7 @@ DOCS
       # Parse triage results from the latest triage report (CLI-neutral path).
       # The template ships with literal `## ACTION_REQUIRED` / `## WORTH_CONSIDERING`
       # / `## DISMISSED` headings plus a summary header line, so a naive
-      # `grep -c 'ACTION_REQUIRED'` over the whole file always reports ≥2
+      # `grep -c 'ACTION_REQUIRED'` over the whole file always reports >=2
       # matches even on a clean report and forces a spurious Inner Loop
       # regression. Prefer the canonical `After triage: ACTION_REQUIRED=N, ...`
       # summary line; fall back to counting `|` table rows under each heading

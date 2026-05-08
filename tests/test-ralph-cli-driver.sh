@@ -309,6 +309,22 @@ EOF
 check "7c-i. no-summary fallback → ACTION_REQUIRED=1" test "$(count_triage_findings "$TRIAGE_NOSUM" ACTION_REQUIRED)" = "1"
 check "7c-ii. no-summary fallback → WORTH_CONSIDERING=0" test "$(count_triage_findings "$TRIAGE_NOSUM" WORTH_CONSIDERING)" = "0"
 
+# 7e. Reviewer prose mentions "ACTION_REQUIRED=2" but no canonical summary
+# header — must NOT match the summary path (cycle-2 self-review MEDIUM #1).
+TRIAGE_PROSE="$WORK_DIR/triage-prose.md"
+cat > "$TRIAGE_PROSE" <<'EOF'
+# Cross-review triage report: prose-only
+
+The reviewer pointed out that historically, ACTION_REQUIRED=2 issues
+have produced spurious regressions, so this report avoids that header.
+
+## ACTION_REQUIRED
+
+| # | Reviewer finding | Triage rationale | Affected file(s) |
+|---|-------------------|------------------|-------------------|
+EOF
+check "7e. prose mention not picked as summary → ACTION_REQUIRED=0" test "$(count_triage_findings "$TRIAGE_PROSE" ACTION_REQUIRED)" = "0"
+
 # 7d. Missing file → 0 (must not error)
 check "7d. missing file → 0" test "$(count_triage_findings "$WORK_DIR/does-not-exist.md" ACTION_REQUIRED)" = "0"
 

@@ -39,7 +39,11 @@ count_triage_findings() {
     printf '0\n'
     return 0
   fi
-  _summary="$(grep -m1 -E 'ACTION_REQUIRED=[0-9]+' "$_file" 2>/dev/null || true)"
+  # Anchor the summary match at the start of a line so a reviewer's prose
+  # ("the diff includes ACTION_REQUIRED=2 as an example") cannot trigger the
+  # summary path. The triage template (docs/reports/templates/cross-review-triage-report.md)
+  # writes the canonical line as `- After triage: ACTION_REQUIRED=N, ...`.
+  _summary="$(grep -m1 -E '^[- ]*After triage: ACTION_REQUIRED=[0-9]+' "$_file" 2>/dev/null || true)"
   if [ -n "$_summary" ]; then
     _n="$(printf '%s' "$_summary" | grep -oE "${_category}=[0-9]+" | head -1 | cut -d= -f2)"
     printf '%s\n' "${_n:-0}"
