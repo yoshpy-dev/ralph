@@ -200,21 +200,21 @@
 - [x] Plan reviewed
 - [x] Branch created (feat/44/ralph-loop-codex-driver)
 - [x] Implementation started — Slice 1: foundation (config, env defaults, ralph.toml [loop])
-- [ ] `ralph-cli-driver.sh` 新設 + fake-CLI 統合テスト
-- [ ] `ralph-pipeline.sh` の `run_claude` → `run_agent` 移行 + driver-aware preflight
-- [ ] `ralph-pipeline.sh` の cross-review dispatcher 化 (driver=codex 時は claude -p をレビュアーに)
-- [ ] `.claude/skills/cross-review/prompts/adversarial-claude.md` 新設 + .agents/skills 側へ同期
-- [ ] `ralph-orchestrator.sh` の env エクスポート
-- [ ] `internal/cli/run.go` で TOML→env propagation
-- [ ] `ralph.toml` テンプレ更新 + Go 側 `Loop` 構造体 + パーステスト
-- [ ] `ralph doctor` 出力更新 (effective driver + source) + テスト
-- [ ] `.claude/skills/loop/` と `.agents/skills/loop/` の同期更新
-- [ ] `.claude/skills/cross-review/` と `.agents/skills/cross-review/` の同期更新
-- [ ] `docs/recipes/ralph-loop.md` 更新
-- [ ] AGENTS.md / README.md / definition-of-done.md の差分確認
-- [ ] `./scripts/run-verify.sh` green
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] `ralph-cli-driver.sh` 新設 + fake-CLI 統合テスト (38/38 assertions green)
+- [x] `ralph-pipeline.sh` の `run_claude` → `run_agent` 移行 + driver-aware preflight
+- [x] `ralph-pipeline.sh` の cross-review dispatcher 化 (driver=codex 時は claude -p をレビュアーに)
+- [x] `.claude/skills/cross-review/prompts/adversarial-claude.md` 新設 + .agents/skills 側へ同期
+- [x] `ralph-orchestrator.sh` の env エクスポート
+- [x] `internal/cli/run.go` で TOML→env propagation
+- [x] `ralph.toml` テンプレ更新 + Go 側 `Loop` 構造体 + パーステスト
+- [x] `ralph doctor` 出力更新 (effective driver + source) + テスト
+- [x] `.claude/skills/loop/` と `.agents/skills/loop/` の同期更新
+- [x] `.claude/skills/cross-review/` と `.agents/skills/cross-review/` の同期更新
+- [x] `docs/recipes/ralph-loop.md` 更新
+- [x] README.md / definition-of-done.md の差分反映
+- [x] `./scripts/run-verify.sh` green
+- [ ] Review artifact created (post-implementation pipeline)
+- [ ] Verification artifact created (post-implementation pipeline)
+- [ ] Test artifact created (post-implementation pipeline)
 - [ ] Walkthrough artifact (Codex 利用可なら実行、不可なら fake-codex 経路を記録)
 - [ ] PR created
