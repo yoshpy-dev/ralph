@@ -65,7 +65,10 @@ func runDoctor(targetDir string) error {
 	// Check 6: Language pack verify.sh (checks project's installed packs via manifest).
 	results = append(results, checkInstalledPacks(targetDir)...)
 
-	// Check 7: Go availability.
+	// Check 7: Loop driver effective value (env > TOML > default).
+	results = append(results, checkLoopDriver(cfg, os.Getenv))
+
+	// Check 8: Go availability.
 	results = append(results, checkGo(cfg))
 
 	// Print results.
@@ -420,6 +423,42 @@ func checkEmbeddedPacks() []checkResult {
 		results = append(results, r)
 	}
 	return results
+}
+
+// checkLoopDriver reports the effective Ralph Loop driver — the value
+// ralph-pipeline.sh will actually see — and which source it came from
+// (env > TOML > default). Implements AC-6 of issue #44. The lookup function
+// is injected so the test can supply a deterministic env without
+// monkey-patching os.Getenv.
+func checkLoopDriver(cfg config.Config, getenv func(string) string) checkResult {
+	r := checkResult{Name: "Loop driver"}
+
+	envVal := getenv("RALPH_LOOP_DRIVER")
+	tomlVal := cfg.Loop.Driver
+	defaultVal := config.Default().Loop.Driver
+
+	var effective, source string
+	switch {
+	case envVal != "":
+		effective, source = envVal, "env"
+	case tomlVal != "" && tomlVal != defaultVal:
+		effective, source = tomlVal, "toml"
+	case tomlVal != "":
+		// TOML matches default — still report toml as the source so users
+		// who explicitly write `driver = "claude"` see their choice acknowledged.
+		effective, source = tomlVal, "toml"
+	default:
+		effective, source = defaultVal, "default"
+	}
+
+	r.Status = "pass"
+	if effective == "codex" {
+		r.Detail = fmt.Sprintf("%s (source: %s, sandbox: %s, approval: %s)",
+			effective, source, cfg.Loop.CodexSandbox, cfg.Loop.CodexApprovalPolicy)
+	} else {
+		r.Detail = fmt.Sprintf("%s (source: %s)", effective, source)
+	}
+	return r
 }
 
 func checkGo(cfg config.Config) checkResult {
