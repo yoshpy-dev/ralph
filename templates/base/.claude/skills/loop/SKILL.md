@@ -167,7 +167,7 @@ RALPH_LOOP_DRIVER=codex ./scripts/ralph run \
 
 `/cross-review` は driver の **逆** CLI をレビュアーに使う。driver=claude
 なら従来どおり `codex exec review`、driver=codex なら `claude -p
---permission-mode plan` を `.claude/skills/cross-review/prompts/adversarial-claude.md`
+--permission-mode auto` を `.claude/skills/cross-review/prompts/adversarial-claude.md`
 で起動する。triage report の `Driver:` / `Reviewer:` 行と
 `report_event "cross-review"` JSONL の `driver`/`reviewer` フィールドで
 どのペアが走ったか確認できる。

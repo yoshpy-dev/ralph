@@ -225,7 +225,7 @@ What changes inside the pipeline:
   `--output-last-message`, `-s`, and `-c` are present; missing flags fail
   the probe instead of silently degrading.
 - The cross-review reviewer is **inverted**: with driver=codex the pipeline
-  invokes `claude -p --permission-mode plan` against
+  invokes `claude -p --permission-mode auto` against
   `.claude/skills/cross-review/prompts/adversarial-claude.md` so the
   cross-model gate is preserved. The triage report's `Driver:` / `Reviewer:`
   header records which pair ran.

@@ -207,10 +207,10 @@ assert_jq_contains '.argv | join(" ")' "exec review" "$CALL_X" "6a-ii. exec revi
 RALPH_LOOP_DRIVER=codex RALPH_FAKE_CALL_LOG="$CALL_C" \
   PATH="$PATH_FAKES" \
   claude -p --model "$RALPH_CLAUDE_REVIEWER_MODEL" \
-    --permission-mode plan --output-format text \
+    --permission-mode auto --output-format text \
     < "$PROMPT_ADV" >/dev/null 2>&1 || true
 assert_jq_equal '.bin'                 "fake-claude"      "$CALL_C" "6b-i. driver=codex path used fake-claude"
-assert_jq_contains '.argv | join(" ")' "--permission-mode plan" "$CALL_C" "6b-ii. plan permission mode (read-only review)"
+assert_jq_contains '.argv | join(" ")' "--permission-mode auto" "$CALL_C" "6b-ii. auto permission mode (allows triage-report write)"
 assert_jq_contains '.stdin'            "Adversarial review" "$CALL_C" "6b-iii. adversarial prompt arrived via stdin"
 
 # ── Test 7: count_triage_findings parser (P1 fix from cross-review #44) ─
