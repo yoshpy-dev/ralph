@@ -146,13 +146,67 @@ All Ralph pipeline settings are centralized in `scripts/ralph-config.sh`. Overri
 | `RALPH_MAX_PARALLEL` | `4` | Max concurrent worktree pipelines |
 | `RALPH_SLICE_TIMEOUT` | `1800` | Per-slice timeout in seconds |
 | `RALPH_STANDARD_MAX_PIPELINE_CYCLES` | `2` | (Standard flow only) Max post-implementation pipeline runs before requiring user confirmation |
+| `RALPH_LOOP_DRIVER` | `claude` | Which CLI drives `ralph-pipeline.sh` per slice (`claude` or `codex`). Phase 2 / issue #44. |
+| `RALPH_CODEX_SANDBOX` | `workspace-write` | `codex exec -s` value when driver=codex (`read-only` / `workspace-write` / `danger-full-access`) |
+| `RALPH_CODEX_APPROVAL_POLICY` | `on-failure` | Codex `approval_policy` override (`untrusted` / `on-failure` / `on-request` / `never`) |
+| `RALPH_CLAUDE_REVIEWER_MODEL` | `claude-opus-4-7` | Model used by `claude -p` when it plays adversarial reviewer (driver=codex cross-review path) |
 
-Priority: CLI argument > environment variable > default value.
+Priority: CLI argument > environment variable > `ralph.toml` > default value. The
+loop-driver knobs also accept `[loop] driver = "..."` etc. in `ralph.toml`,
+which `ralph run` propagates to the orchestrator only when the env var is
+unset.
 
 Example:
 ```sh
 RALPH_MODEL=sonnet RALPH_SLICE_TIMEOUT=3600 ./scripts/ralph run --plan <dir> --unified-pr
 ```
+
+### Running Loop under the Codex driver
+
+Phase 2 (issue #44) wires `ralph-pipeline.sh` through a driver-aware
+dispatcher. To drive a Loop run from Codex:
+
+1. **Trust the project once.** Codex silently ignores `.codex/config.toml`,
+   `[features]`, and `[hooks]` until you run `codex trust .` from the repo
+   root. Without trust the per-slice pipeline still works but project-level
+   hooks won't fire.
+2. **Confirm setup.** `ralph doctor` prints `Loop driver: <effective>
+   (source: env|toml|default)` so you can verify the switch took. When
+   driver=codex it also shows the active `codex_sandbox` and
+   `codex_approval_policy`.
+3. **Start the orchestrator with the Codex driver.**
+
+   ```sh
+   RALPH_LOOP_DRIVER=codex ./scripts/ralph run \
+     --plan docs/plans/active/<date>-<slug>/ --unified-pr
+   ```
+
+   Or set it persistently in `ralph.toml`:
+
+   ```toml
+   [loop]
+   driver = "codex"
+   codex_sandbox = "workspace-write"
+   codex_approval_policy = "on-failure"
+   ```
+
+   The env var wins when both are set, so a one-shot `RALPH_LOOP_DRIVER=claude`
+   easily reverts to Claude for a single run.
+
+What changes inside the pipeline:
+
+- Per-slice agent calls go through `codex exec -s <sandbox>
+  -c approval_policy=<policy> --output-last-message <log>.last -` (stdin
+  prompt). The wrapper synthesises `<log>.json` so existing parsers work
+  unchanged.
+- Preflight Probe 5 inspects `codex exec --help` to confirm
+  `--output-last-message`, `-s`, and `-c` are present; missing flags fail
+  the probe instead of silently degrading.
+- The cross-review reviewer is **inverted**: with driver=codex the pipeline
+  invokes `claude -p --permission-mode plan` against
+  `.claude/skills/cross-review/prompts/adversarial-claude.md` so the
+  cross-model gate is preserved. The triage report's `Driver:` / `Reviewer:`
+  header records which pair ran.
 
 ### Commit verification
 

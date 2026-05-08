@@ -42,6 +42,12 @@ The pipeline is capped at **2 total runs by default** (initial + 1 re-run). Stan
 
 Ralph Loop handles the full lifecycle autonomously per slice (implement → self-review → verify → test → sync-docs → cross-review), then merges slices into the integration branch, runs an integration pipeline (`--skip-pr --fix-all`) to catch cross-module issues, and creates a unified PR.
 
+**Driver selection (Phase 2 / issue #44):** Loop runs under whichever CLI is
+selected by `RALPH_LOOP_DRIVER` (env > `[loop] driver` in `ralph.toml` >
+default `claude`). The cross-review reviewer is always the *opposite* CLI,
+so the cross-model gate holds regardless of driver. `ralph doctor` prints
+the effective driver and source.
+
 **Pipeline report output:** Each pipeline agent (self-review, verify, test) writes reports to both `.harness/state/pipeline/` (for orchestrator consumption) and `docs/reports/` (for PR pre-checks and human review). This dual-write ensures pipeline artifacts are available for the same quality checks as the standard flow.
 
 ## For risky or broad changes
