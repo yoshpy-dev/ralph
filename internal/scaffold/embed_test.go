@@ -71,6 +71,7 @@ func TestTemplateBaseScriptsExist(t *testing.T) {
 		"ralph-loop-init.sh",
 		"ralph-loop.sh",
 		"ralph",
+		"ralph-cli-driver.sh",
 		"ralph-config.sh",
 		"ralph-orchestrator.sh",
 		"ralph-pipeline.sh",
