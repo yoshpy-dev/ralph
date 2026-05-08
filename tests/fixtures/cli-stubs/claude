@@ -37,7 +37,14 @@ case "${1:-}" in
   -p|--print) mode="print" ;;
 esac
 
-stdin_buf="$(head -c 4096 || true)"
+# Skip the stdin read when running under a TTY — see fake-codex stub for
+# the same defense; an interactive direct-test run would otherwise block
+# on terminal stdin (#44 cycle-3 cross-review P2 #1).
+if [ -t 0 ]; then
+  stdin_buf=""
+else
+  stdin_buf="$(head -c 4096 || true)"
+fi
 
 if [ -n "$call_log" ] && [ "$call_log" != "/dev/null" ]; then
   jq -n \

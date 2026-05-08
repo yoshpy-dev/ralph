@@ -38,8 +38,15 @@ for a in "$@"; do
 done
 
 # Drain stdin into a buffer for the call log (truncate to 4 KiB to keep the
-# JSON readable even when the prompt is large).
-stdin_buf="$(head -c 4096 || true)"
+# JSON readable even when the prompt is large). Skip the read entirely when
+# stdin is a TTY — otherwise an interactive `tests/test-ralph-cli-driver.sh`
+# run would hang here waiting for the developer to type EOF (#44 cycle-3
+# cross-review P2 #1).
+if [ -t 0 ]; then
+  stdin_buf=""
+else
+  stdin_buf="$(head -c 4096 || true)"
+fi
 
 # Write the requested last-message file unless the test asked us to skip.
 if [ -n "$out_path" ] && [ -n "$last_message" ]; then

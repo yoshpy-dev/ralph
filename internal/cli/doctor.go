@@ -430,34 +430,48 @@ func checkEmbeddedPacks() []checkResult {
 // (env > TOML > default). Implements AC-6 of issue #44. The lookup function
 // is injected so the test can supply a deterministic env without
 // monkey-patching os.Getenv.
+//
+// Issue #44 cycle-3 cross-review hardenings:
+//   - When driver=codex is effective but the codex binary is absent, return
+//     fail. Otherwise doctor reports pass while the next `ralph run`
+//     preflight blocks immediately on the missing required CLI.
+//   - Sandbox / approval / reviewer-model values are resolved through the
+//     same env > TOML > default priority before display, so an operator
+//     who exports RALPH_CODEX_SANDBOX=danger-full-access does not see
+//     `sandbox: workspace-write` in doctor and assume the safer default.
 func checkLoopDriver(cfg config.Config, getenv func(string) string) checkResult {
 	r := checkResult{Name: "Loop driver"}
 
-	envVal := getenv("RALPH_LOOP_DRIVER")
-	tomlVal := cfg.Loop.Driver
-	defaultVal := config.Default().Loop.Driver
+	defaults := config.Default().Loop
+	pick := func(envKey, tomlVal, defaultVal string) (string, string) {
+		if v := getenv(envKey); v != "" {
+			return v, "env"
+		}
+		if tomlVal != "" {
+			// TOML matching default still reports toml as the source so users
+			// who explicitly write `driver = "claude"` see their choice acknowledged.
+			return tomlVal, "toml"
+		}
+		return defaultVal, "default"
+	}
 
-	var effective, source string
-	switch {
-	case envVal != "":
-		effective, source = envVal, "env"
-	case tomlVal != "" && tomlVal != defaultVal:
-		effective, source = tomlVal, "toml"
-	case tomlVal != "":
-		// TOML matches default — still report toml as the source so users
-		// who explicitly write `driver = "claude"` see their choice acknowledged.
-		effective, source = tomlVal, "toml"
-	default:
-		effective, source = defaultVal, "default"
+	effective, source := pick("RALPH_LOOP_DRIVER", cfg.Loop.Driver, defaults.Driver)
+	sandbox, _ := pick("RALPH_CODEX_SANDBOX", cfg.Loop.CodexSandbox, defaults.CodexSandbox)
+	approval, _ := pick("RALPH_CODEX_APPROVAL_POLICY", cfg.Loop.CodexApprovalPolicy, defaults.CodexApprovalPolicy)
+	reviewer, _ := pick("RALPH_CLAUDE_REVIEWER_MODEL", cfg.Loop.ClaudeReviewerModel, defaults.ClaudeReviewerModel)
+
+	if effective == "codex" {
+		if _, err := exec.LookPath("codex"); err != nil {
+			r.Status = "fail"
+			r.Detail = fmt.Sprintf("%s (source: %s) — codex CLI not found in PATH; `ralph run` preflight will fail", effective, source)
+			return r
+		}
 	}
 
 	r.Status = "pass"
 	if effective == "codex" {
-		// Surface reviewer model alongside sandbox/approval so operators can
-		// see the full Codex-driven setup at a glance — including which Claude
-		// model will be invoked when the cross-review reviewer inverts.
 		r.Detail = fmt.Sprintf("%s (source: %s, sandbox: %s, approval: %s, reviewer: claude/%s)",
-			effective, source, cfg.Loop.CodexSandbox, cfg.Loop.CodexApprovalPolicy, cfg.Loop.ClaudeReviewerModel)
+			effective, source, sandbox, approval, reviewer)
 	} else {
 		r.Detail = fmt.Sprintf("%s (source: %s)", effective, source)
 	}

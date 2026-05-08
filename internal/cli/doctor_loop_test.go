@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -60,9 +62,20 @@ func TestCheckLoopDriver_PriorityAndSource(t *testing.T) {
 				}
 				return tc.env[k]
 			}
+			// Provide a sham `codex` binary on PATH so the codex-driver path
+			// reaches the detail string instead of short-circuiting to fail
+			// (the missing-binary case has its own focused test below).
+			if tc.wantValue == "codex" {
+				dir := t.TempDir()
+				stub := filepath.Join(dir, "codex")
+				if err := os.WriteFile(stub, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+			}
 			r := checkLoopDriver(cfg, getenv)
 			if r.Status != "pass" {
-				t.Errorf("status = %q, want pass", r.Status)
+				t.Errorf("status = %q, want pass (detail=%q)", r.Status, r.Detail)
 			}
 			if !strings.Contains(r.Detail, tc.wantValue) {
 				t.Errorf("detail %q missing value %q", r.Detail, tc.wantValue)
@@ -74,5 +87,62 @@ func TestCheckLoopDriver_PriorityAndSource(t *testing.T) {
 				t.Errorf("detail %q missing sandbox %q (codex driver should expose it)", r.Detail, tc.wantSandbox)
 			}
 		})
+	}
+}
+
+// TestCheckLoopDriver_FailsWhenCodexMissing pins the cycle-3 cross-review
+// fix: doctor must surface the mismatch when driver=codex is effective but
+// the codex CLI is not installed, instead of reporting pass and letting
+// the next `ralph run` preflight block.
+func TestCheckLoopDriver_FailsWhenCodexMissing(t *testing.T) {
+	// Empty PATH directory → no codex binary discoverable.
+	t.Setenv("PATH", t.TempDir())
+
+	cfg := config.Config{Loop: config.LoopConfig{Driver: "codex", CodexSandbox: "workspace-write", CodexApprovalPolicy: "on-failure", ClaudeReviewerModel: "claude-opus-4-7"}}
+	getenv := func(string) string { return "" }
+
+	r := checkLoopDriver(cfg, getenv)
+	if r.Status != "fail" {
+		t.Errorf("status = %q, want fail (codex absent + driver=codex)", r.Status)
+	}
+	if !strings.Contains(r.Detail, "codex CLI not found") {
+		t.Errorf("detail %q should explain the mismatch", r.Detail)
+	}
+}
+
+// TestCheckLoopDriver_EnvOverridesShownInDetail covers cycle-3 cross-review
+// finding #3: when RALPH_CODEX_SANDBOX or RALPH_CODEX_APPROVAL_POLICY is
+// set in the environment, doctor's detail line must reflect the env value
+// instead of silently showing the TOML/default.
+func TestCheckLoopDriver_EnvOverridesShownInDetail(t *testing.T) {
+	// Sham codex on PATH so the function does not short-circuit to fail.
+	dir := t.TempDir()
+	stub := filepath.Join(dir, "codex")
+	if err := os.WriteFile(stub, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	cfg := config.Config{Loop: config.LoopConfig{
+		Driver:              "codex",
+		CodexSandbox:        "workspace-write",
+		CodexApprovalPolicy: "on-failure",
+		ClaudeReviewerModel: "claude-opus-4-7",
+	}}
+	env := map[string]string{
+		"RALPH_CODEX_SANDBOX":         "danger-full-access",
+		"RALPH_CODEX_APPROVAL_POLICY": "never",
+	}
+	getenv := func(k string) string { return env[k] }
+
+	r := checkLoopDriver(cfg, getenv)
+	if r.Status != "pass" {
+		t.Fatalf("status = %q, want pass (detail=%q)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "sandbox: danger-full-access") {
+		t.Errorf("detail should reflect env-overridden sandbox; got %q", r.Detail)
+	}
+	if !strings.Contains(r.Detail, "approval: never") {
+		t.Errorf("detail should reflect env-overridden approval; got %q", r.Detail)
 	}
 }
