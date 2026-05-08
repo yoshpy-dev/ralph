@@ -33,6 +33,8 @@ Build coding-agent workflows that are:
 
 Steps 4–9 run via subagents in 標準フロー. In Ralph Loop, they are handled internally by the pipeline scripts.
 
+Ralph Loop runs under whichever CLI is selected by `RALPH_LOOP_DRIVER` (or `[loop] driver` in `ralph.toml`); the cross-review reviewer is always the *opposite* CLI. `ralph status` and `ralph doctor` print the effective driver and source.
+
 ## Source of truth
 
 - Repo files beat memory

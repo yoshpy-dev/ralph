@@ -36,6 +36,11 @@ In Claude Code's standard flow, steps 4–7 run via subagents (`reviewer`,
 `verifier`, `tester`, `doc-maintainer`). In Codex they run sequentially in
 one agent. In Ralph Loop they are handled internally by the pipeline scripts.
 
+Ralph Loop runs under whichever CLI is selected by `RALPH_LOOP_DRIVER` (or
+`[loop] driver` in `ralph.toml`); the cross-review reviewer is always the
+*opposite* CLI. `ralph status` and `ralph doctor` print the effective driver
+and source.
+
 ## Skill invocation
 
 | CLI | How to invoke a skill | Notes |
