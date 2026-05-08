@@ -112,7 +112,7 @@ func TestTemplateBaseCodexAssetsExist(t *testing.T) {
 		".codex/config.toml",
 		".codex/AGENTS.override.md",
 		".codex/README.md",
-		".codex/hooks/.gitkeep",
+		".codex/hooks/README.md",
 		".agents/skills/.gitkeep",
 	}
 
