@@ -9,11 +9,27 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/yoshpy-dev/ralph/internal/action"
+	"github.com/yoshpy-dev/ralph/internal/config"
 	"github.com/yoshpy-dev/ralph/internal/state"
 	"github.com/yoshpy-dev/ralph/internal/ui"
 	"github.com/yoshpy-dev/ralph/internal/ui/panes"
 	"github.com/yoshpy-dev/ralph/internal/watcher"
 )
+
+// resolveLoopDriver returns the effective driver and source ("env" / "toml" /
+// "default"), reusing the same priority that runDoctor and runPipeline honour.
+// Lives here so `ralph status` can show what the next /loop run will use
+// (AC-6 of issue #44).
+func resolveLoopDriver() (driver, source string) {
+	if v := os.Getenv("RALPH_LOOP_DRIVER"); v != "" {
+		return v, "env"
+	}
+	cfg, _ := config.Load("ralph.toml")
+	if cfg.Loop.Driver != "" {
+		return cfg.Loop.Driver, "toml"
+	}
+	return config.Default().Loop.Driver, "default"
+}
 
 func newStatusCmd() *cobra.Command {
 	var (
@@ -86,6 +102,9 @@ func runStatusJSON(orchDir, worktreeBase, planDir string) error {
 	if err != nil {
 		return fmt.Errorf("reading state: %w", err)
 	}
+
+	driver, source := resolveLoopDriver()
+	fmt.Printf("Loop driver: %s (source: %s)\n", driver, source)
 
 	// Simple JSON-like output for now; will be replaced with proper JSON marshaling.
 	fmt.Printf("Slices: %d\n", len(status.Slices))

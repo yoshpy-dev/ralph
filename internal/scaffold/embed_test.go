@@ -71,6 +71,7 @@ func TestTemplateBaseScriptsExist(t *testing.T) {
 		"ralph-loop-init.sh",
 		"ralph-loop.sh",
 		"ralph",
+		"ralph-cli-driver.sh",
 		"ralph-config.sh",
 		"ralph-orchestrator.sh",
 		"ralph-pipeline.sh",
@@ -122,6 +123,46 @@ func TestTemplateBaseCodexAssetsExist(t *testing.T) {
 			t.Errorf("required template missing: templates/base/%s (%v)", rel, err)
 		}
 	}
+}
+
+// TestTemplateBaseRalphTomlHasLoopSection enforces that scaffolded projects
+// receive the Phase 2 [loop] driver settings out of the box. Without this,
+// `ralph init` users couldn't switch to the Codex driver via TOML alone.
+func TestTemplateBaseRalphTomlHasLoopSection(t *testing.T) {
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("cannot determine test file location")
+	}
+	repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..")
+	tomlPath := filepath.Join(repoRoot, "templates", "base", "ralph.toml")
+
+	data, err := os.ReadFile(tomlPath)
+	if err != nil {
+		t.Fatalf("read ralph.toml: %v", err)
+	}
+	body := string(data)
+	for _, want := range []string{
+		"[loop]",
+		`driver = "claude"`,
+		`codex_sandbox = "workspace-write"`,
+		`codex_approval_policy = "on-failure"`,
+		`claude_reviewer_model = "claude-opus-4-7"`,
+	} {
+		if !contains(body, want) {
+			t.Errorf("templates/base/ralph.toml missing %q", want)
+		}
+	}
+}
+
+// contains is a tiny substring helper to avoid pulling in strings just for
+// this assertion.
+func contains(haystack, needle string) bool {
+	for i := 0; i+len(needle) <= len(haystack); i++ {
+		if haystack[i:i+len(needle)] == needle {
+			return true
+		}
+	}
+	return false
 }
 
 // TestAvailablePacksExcludesTemplate verifies _template is excluded.

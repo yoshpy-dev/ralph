@@ -7,6 +7,7 @@ description: >
   If the reviewer CLI is unavailable, silently skips and proceeds to /pr.
   Findings are triaged by the driving CLI using implementation context before
   presentation to the user.
+allowed-tools: Read, Grep, Glob, Bash, AskUserQuestion, Write
 ---
 Provide a cross-model second opinion on the current diff before PR creation.
 
@@ -155,6 +156,22 @@ Provide a cross-model second opinion on the current diff before PR creation.
 | 出力ファイル | `docs/reports/cross-review-triage-<slug>.md` | 同上 |
 
 driver / reviewer の判定は Step 2 のロジックを共通で使う。`RALPH_PRIMARY_CLI` を export しておけば曖昧さなく切り替わる。
+
+### Ralph Loop 内での reviewer 反転 (Phase 2 / 課題 #44)
+
+Ralph Loop (`/loop` → `ralph-pipeline.sh`) でも同じ「reviewer は driver の逆」契約が
+適用される。判定は `RALPH_PRIMARY_CLI` ではなく **`RALPH_LOOP_DRIVER`** を見る点だけが
+違い、`scripts/ralph-cli-driver.sh` の `pick_reviewer` ヘルパが結論を返す。
+
+| Loop driver | Reviewer 起動 | プロンプト |
+|-------------|---------------|------------|
+| `claude` | `codex exec review --base "$base"` | (Codex 内蔵 `review` サブコマンド) |
+| `codex`  | `claude -p --permission-mode auto --output-format text` | `.claude/skills/cross-review/prompts/adversarial-claude.md` |
+
+切替時は driver と reviewer の両方が triage report (`Driver:` / `Reviewer:`) と
+`report_event "cross-review"` JSONL (`driver` / `reviewer`) に記録され、後続の
+判定で実際にどちらが走ったか確認できる。fake-CLI を使った回帰テストは
+`tests/test-ralph-cli-driver.sh` の Test 5 / Test 6 で網羅。
 
 ## What /cross-review does NOT do
 

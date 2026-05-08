@@ -1,0 +1,70 @@
+#!/usr/bin/env sh
+# fake-claude — deterministic test stub for `claude` (Phase 2 / issue #44).
+#
+# Mirrors fake-codex but with claude -p output semantics: when the caller
+# asks for --output-format json, write a parseable JSON envelope to stdout
+# so the wrapper's jq -e '.result' probe succeeds. Otherwise stream a plain
+# text response. Used by tests/test-ralph-cli-driver.sh.
+#
+#   RALPH_FAKE_CALL_LOG  — path to write the call record (required)
+#   RALPH_FAKE_EXIT_CODE — exit code (default 0)
+#   RALPH_FAKE_RESULT    — body for the JSON `.result` field / text body
+#                          (default "fake claude ok")
+
+set -u
+
+call_log="${RALPH_FAKE_CALL_LOG:-/dev/null}"
+exit_code="${RALPH_FAKE_EXIT_CODE:-0}"
+result="${RALPH_FAKE_RESULT:-fake claude ok}"
+
+# Capture argv.
+argv_json="$(printf '%s\n' "$@" | jq -R . | jq -sc .)"
+
+# Detect output mode.
+out_mode="text"
+prev=""
+for a in "$@"; do
+  case "$prev" in
+    --output-format) out_mode="$a" ;;
+  esac
+  prev="$a"
+done
+
+# Detect first positional / subcommand (e.g. `--version`, `-p`).
+mode=""
+case "${1:-}" in
+  --version) mode="version" ;;
+  -p|--print) mode="print" ;;
+esac
+
+# Skip the stdin read when running under a TTY — see fake-codex stub for
+# the same defense; an interactive direct-test run would otherwise block
+# on terminal stdin (#44 cycle-3 cross-review P2 #1).
+if [ -t 0 ]; then
+  stdin_buf=""
+else
+  stdin_buf="$(head -c 4096 || true)"
+fi
+
+if [ -n "$call_log" ] && [ "$call_log" != "/dev/null" ]; then
+  jq -n \
+    --arg bin   "fake-claude" \
+    --arg cwd   "$PWD" \
+    --arg stdin "$stdin_buf" \
+    --arg mode  "$mode" \
+    --arg outmode "$out_mode" \
+    --argjson argv "$argv_json" \
+    '{bin:$bin, cwd:$cwd, stdin:$stdin, mode:$mode, output_format:$outmode, argv:$argv}' \
+    > "$call_log"
+fi
+
+# Emit the fake response.
+if [ "$mode" = "version" ]; then
+  printf 'fake-claude 0.0.0\n'
+elif [ "$out_mode" = "json" ]; then
+  jq -n --arg r "$result" --arg sid "fake-session-id" '{result:$r, session_id:$sid}'
+else
+  printf '%s\n' "$result"
+fi
+
+exit "$exit_code"

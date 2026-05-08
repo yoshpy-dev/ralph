@@ -52,8 +52,9 @@ The triage step reads existing artifacts (plan, self-review report, verify repor
 ## Post-implementation pipeline under Codex — sequential inline
 
 Codex CLI does not have a subagent (`Task`) mechanism. When ralph runs under
-Codex (`RALPH_PRIMARY_CLI=codex` or detected at runtime), the four
-post-implementation skills run **sequentially inline in the single agent**:
+Codex in the standard flow (`RALPH_PRIMARY_CLI=codex` or detected at
+runtime), the four post-implementation skills run **sequentially inline in
+the single agent**:
 the agent walks the canonical order step-by-step, writing the same reports to
 `docs/reports/` that the Claude subagent path produces. This keeps artifact
 parity for `/cross-review` triage, the cycle cap, and `/pr`.
@@ -63,7 +64,7 @@ so a runaway inline pipeline cannot loop more than `cap` total runs.
 
 ## Post-implementation pipeline for /loop — orchestrator-internal
 
-Ralph Loop uses `ralph-pipeline.sh` per slice (not subagents). Same pipeline order as `/work` (see `post-implementation-pipeline.md`), but executed via `claude -p` calls with dedicated prompts.
+Ralph Loop uses `ralph-pipeline.sh` per slice (not subagents). Same pipeline order as `/work` (see `post-implementation-pipeline.md`), but executed via the driver-aware `run_agent` wrapper (`scripts/ralph-cli-driver.sh`) — `claude -p` when `RALPH_LOOP_DRIVER=claude` (default) and `codex exec` when `RALPH_LOOP_DRIVER=codex`. The cross-review dispatcher inverts the reviewer to the *opposite* CLI so the cross-model gate holds in either direction. `RALPH_LOOP_DRIVER` is the Loop-side analogue of `RALPH_PRIMARY_CLI` and resolves env > `[loop] driver` in `ralph.toml` > default.
 
 After all slices are merged into the integration branch, `ralph-orchestrator.sh` runs `ralph-pipeline.sh --skip-pr --fix-all` on the integration branch as a unified quality gate. This catches cross-module issues and fixes ALL findings (including MEDIUM/LOW and WORTH_CONSIDERING) before unified PR creation.
 

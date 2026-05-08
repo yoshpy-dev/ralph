@@ -114,6 +114,88 @@ require_go = false
 	}
 }
 
+// TestDefault_Loop verifies the [loop] defaults stay claude-driven so existing
+// users see no behaviour change after Phase 2 lands.
+func TestDefault_Loop(t *testing.T) {
+	cfg := Default()
+	if cfg.Loop.Driver != "claude" {
+		t.Errorf("loop.driver default = %q, want claude", cfg.Loop.Driver)
+	}
+	if cfg.Loop.CodexSandbox != "workspace-write" {
+		t.Errorf("loop.codex_sandbox default = %q, want workspace-write", cfg.Loop.CodexSandbox)
+	}
+	if cfg.Loop.CodexApprovalPolicy != "on-failure" {
+		t.Errorf("loop.codex_approval_policy default = %q, want on-failure", cfg.Loop.CodexApprovalPolicy)
+	}
+}
+
+func TestLoad_LoopCodexDriver(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ralph.toml")
+	content := `[loop]
+driver = "codex"
+codex_sandbox = "read-only"
+codex_approval_policy = "untrusted"
+claude_reviewer_model = "claude-sonnet-4-6"
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Loop.Driver != "codex" {
+		t.Errorf("driver = %q, want codex", cfg.Loop.Driver)
+	}
+	if cfg.Loop.CodexSandbox != "read-only" {
+		t.Errorf("codex_sandbox = %q, want read-only", cfg.Loop.CodexSandbox)
+	}
+	if cfg.Loop.CodexApprovalPolicy != "untrusted" {
+		t.Errorf("codex_approval_policy = %q, want untrusted", cfg.Loop.CodexApprovalPolicy)
+	}
+	if cfg.Loop.ClaudeReviewerModel != "claude-sonnet-4-6" {
+		t.Errorf("claude_reviewer_model = %q, want claude-sonnet-4-6", cfg.Loop.ClaudeReviewerModel)
+	}
+}
+
+func TestLoad_LoopRejectsInvalidDriver(t *testing.T) {
+	cases := []struct {
+		name    string
+		body    string
+		wantSub string
+	}{
+		{"unknown driver", `[loop]` + "\n" + `driver = "foo"` + "\n", "[loop].driver"},
+		{"unknown sandbox", `[loop]` + "\n" + `codex_sandbox = "bogus"` + "\n", "[loop].codex_sandbox"},
+		{"unknown approval", `[loop]` + "\n" + `codex_approval_policy = "asap"` + "\n", "[loop].codex_approval_policy"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "ralph.toml")
+			if err := os.WriteFile(path, []byte(tc.body), 0644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Load(path)
+			if err == nil {
+				t.Fatalf("Load: expected error for %s, got nil", tc.name)
+			}
+			if !contains(err.Error(), tc.wantSub) {
+				t.Errorf("error %q does not mention %q", err.Error(), tc.wantSub)
+			}
+		})
+	}
+}
+
+func contains(haystack, needle string) bool {
+	for i := 0; i+len(needle) <= len(haystack); i++ {
+		if haystack[i:i+len(needle)] == needle {
+			return true
+		}
+	}
+	return false
+}
+
 // TestLoad_RequireCodexCLI verifies the new toml field round-trips. The doctor
 // command relies on this knob to switch between warn (default) and fail when
 // the codex binary is missing.

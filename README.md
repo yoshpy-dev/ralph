@@ -214,6 +214,13 @@ For large tasks that can be split into independent slices, Ralph Loop runs paral
 
 Or use the `/loop` skill inside Claude Code for interactive setup.
 
+The Loop driver is selectable via `RALPH_LOOP_DRIVER=claude|codex` (or
+`[loop] driver = "..."` in `ralph.toml`). With `driver=codex`, per-slice
+agent calls go through `codex exec` and the cross-review reviewer is
+inverted to `claude -p` so the cross-model gate is preserved. See
+[Ralph Loop recipe](docs/recipes/ralph-loop.md#running-loop-under-the-codex-driver)
+for the full Codex driver workflow.
+
 Safety rails: iteration limits, stuck detection (3 consecutive no-change iterations), Inner/Outer Loop architecture with repair caps, slice timeout detection, signal handlers, hook parity checks. Configure via env vars in `scripts/ralph-config.sh`.
 
 See `docs/recipes/ralph-loop.md` for the full guide.

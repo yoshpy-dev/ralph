@@ -33,6 +33,8 @@ Build coding-agent workflows that are:
 
 Steps 4–9 run via subagents in 標準フロー. In Ralph Loop, they are handled internally by the pipeline scripts.
 
+Ralph Loop runs under whichever CLI is selected by `RALPH_LOOP_DRIVER` (or `[loop] driver` in `ralph.toml`); the cross-review reviewer is always the *opposite* CLI. `ralph status` and `ralph doctor` print the effective driver and source.
+
 ## Source of truth
 
 - Repo files beat memory
@@ -68,7 +70,7 @@ Steps 4–9 run via subagents in 標準フロー. In Ralph Loop, they are handle
 - `.codex/` — Codex project config for this meta-repo (`config.toml`, `hooks/`, `AGENTS.override.md`, `README.md`); same shape as `templates/base/.codex/` so ralph dogfoods the parity it ships
 - `templates/base/.codex/` — `ralph init` source for the same surface; root `.codex/` and template `.codex/` are kept identical via `scripts/check-sync.sh` (no KNOWN_DIFFS today)
 - `packs/languages/` — language-specific depth (also copied to `templates/packs/` for embedding)
-- `scripts/` — reusable verification and bootstrap scripts (includes legacy `ralph` shell CLI, `ralph-config.sh`, `ralph-pipeline.sh`, `ralph-orchestrator.sh`, `install.sh`, drift gate `check-skill-sync.sh`, Codex availability probe `codex-check.sh`)
+- `scripts/` — reusable verification and bootstrap scripts (includes legacy `ralph` shell CLI, `ralph-config.sh`, `ralph-pipeline.sh`, `ralph-orchestrator.sh`, `ralph-cli-driver.sh` (driver dispatcher: `run_agent` / `pick_reviewer` / `count_triage_findings`), `install.sh`, drift gate `check-skill-sync.sh`, Codex availability probe `codex-check.sh`)
 - `docs/recipes/` — hands-on recipes (Codex setup, Ralph Loop, language packs, worktrees)
 - `.harness/state/` — runtime state, not canonical truth
 

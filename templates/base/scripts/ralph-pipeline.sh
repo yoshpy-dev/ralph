@@ -6,10 +6,13 @@ set -eu
 # Outer Loop: sync-docs → cross-review (repeat on ACTION_REQUIRED) → PR
 #
 # State lives in .harness/state/pipeline/
-# Requires: claude CLI, jq, git
+# Requires: jq, git, and one of {claude, codex} CLI (selected by
+#           RALPH_LOOP_DRIVER, default claude). cross-review prefers the
+#           other CLI as the adversarial reviewer when available.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "${SCRIPT_DIR}/ralph-config.sh"
+. "${SCRIPT_DIR}/ralph-cli-driver.sh"
 
 PIPELINE_DIR=".harness/state/pipeline"
 EVIDENCE_DIR="docs/evidence"
@@ -128,39 +131,9 @@ report_event() {
   printf '{"timestamp":"%s","event":"%s","details":%s}\n' "$(ts)" "$_event_type" "$_details" >> "$_report"
 }
 
-# Run claude -p with a prompt file
-# Outputs result text to $_log_file and full JSON (if available) to ${_log_file}.json
-run_claude() {
-  _prompt_file="$1"
-  _log_file="$2"
-  _extra_args="${3:-}"
-  if [ "$DRY_RUN" -eq 1 ]; then
-    log "[dry-run] Would run: claude -p < ${_prompt_file} ${_extra_args}"
-    echo "[dry-run] iteration output" > "$_log_file"
-    printf '{"result":"[dry-run] iteration output","session_id":null}' > "${_log_file}.json"
-    return 0
-  fi
-  if [ "$JSON_OUTPUT_SUPPORTED" -eq 1 ]; then
-    # JSON mode: separate stdout (JSON) from stderr
-    # shellcheck disable=SC2086
-    claude -p --model "$RALPH_MODEL" --effort "$RALPH_EFFORT" --permission-mode "$RALPH_PERMISSION_MODE" --output-format json ${_extra_args} < "$_prompt_file" > "${_log_file}.json" 2>"${_log_file}.stderr" || true
-    # Extract .result from JSON; fall back to raw output on parse failure
-    if jq -e '.result' "${_log_file}.json" >/dev/null 2>&1; then
-      jq -r '.result // empty' "${_log_file}.json" > "$_log_file"
-    else
-      log "Warning: JSON parse failed for ${_log_file}.json, using raw output"
-      cp "${_log_file}.json" "$_log_file"
-    fi
-    # Show result on stdout for visibility
-    cat "$_log_file"
-  else
-    # Text fallback mode (older claude CLI or JSON not supported)
-    # shellcheck disable=SC2086
-    claude -p --model "$RALPH_MODEL" --effort "$RALPH_EFFORT" --permission-mode "$RALPH_PERMISSION_MODE" --output-format text ${_extra_args} < "$_prompt_file" 2>&1 | tee "$_log_file"
-    # No JSON sidecar in text mode
-    : > "${_log_file}.json"
-  fi
-}
+# run_agent is provided by ralph-cli-driver.sh — it dispatches to claude or
+# codex based on RALPH_LOOP_DRIVER and writes the same <log>/<log>.json
+# artefacts the rest of this script consumes.
 
 # Check for uncommitted changes and warn
 check_uncommitted() {
@@ -262,22 +235,30 @@ save_diff_before() {
 
 run_preflight() {
   log "=== Preflight capability probe ==="
+  log "  driver: ${RALPH_LOOP_DRIVER}"
+  validate_loop_driver
   mkdir -p "$EVIDENCE_DIR"
   _probe_result="${EVIDENCE_DIR}/preflight-probe.json"
   _all_pass=true
   _probes="[]"
 
-  # Probe 1: claude CLI available
+  # Probe 1: driver CLI available — claude or codex depending on RALPH_LOOP_DRIVER.
+  # When driver=codex we still tolerate `claude` being absent here because the
+  # cross-review reviewer-inversion path checks for it separately at use time.
   _cli_check="fail"
-  if command -v claude >/dev/null 2>&1; then
+  case "$RALPH_LOOP_DRIVER" in
+    claude) _cli_bin="claude" ;;
+    codex)  _cli_bin="codex"  ;;
+  esac
+  if command -v "$_cli_bin" >/dev/null 2>&1; then
     _cli_check="pass"
   elif [ "$DRY_RUN" -eq 1 ]; then
     _cli_check="skip_dry_run"
   else
     _all_pass=false
   fi
-  _probes="$(printf '%s' "$_probes" | jq --arg s "$_cli_check" '. += [{"probe":"claude_cli_available","result":$s}]')"
-  log "  claude CLI: ${_cli_check}"
+  _probes="$(printf '%s' "$_probes" | jq --arg s "$_cli_check" --arg n "${_cli_bin}_cli_available" '. += [{"probe":$n,"result":$s}]')"
+  log "  ${_cli_bin} CLI: ${_cli_check}"
 
   # Probe 2: jq available
   _jq_check="fail"
@@ -289,29 +270,45 @@ run_preflight() {
   _probes="$(printf '%s' "$_probes" | jq --arg s "$_jq_check" '. += [{"probe":"jq_available","result":$s}]')"
   log "  jq: ${_jq_check}"
 
-  # Probe 3: CLAUDE.md readable from -p mode (soft check — warn only, do not block)
-  _claudemd_check="fail"
-  if [ "$DRY_RUN" -eq 1 ]; then
-    _claudemd_check="skip_dry_run"
-  elif command -v claude >/dev/null 2>&1; then
-    _probe_prompt="${PIPELINE_DIR}/.preflight-probe.txt"
-    mkdir -p "$PIPELINE_DIR"
-    printf 'Reply with exactly the text PROBE_OK if you can read CLAUDE.md in this repository. Nothing else.' > "$_probe_prompt"
-    _probe_output="$(claude -p --model "$RALPH_MODEL" --effort "$RALPH_EFFORT" --permission-mode "$RALPH_PERMISSION_MODE" --output-format text < "$_probe_prompt" 2>/dev/null || true)"
-    if printf '%s' "$_probe_output" | grep -q 'PROBE_OK'; then
-      _claudemd_check="pass"
-    else
-      # Soft failure: warn but do not block pipeline.
-      # Nested worktrees (.claude/worktrees/<parent>/.claude/worktrees/<slice>/)
-      # can cause claude -p to fail CLAUDE.md resolution even when the file exists.
-      _claudemd_check="warn"
-      log "Warning: CLAUDE.md not readable from claude -p mode. Pipeline context may be limited."
-      log "Warning: This is expected in nested worktree scenarios."
-    fi
-    rm -f "$_probe_prompt"
-  fi
-  _probes="$(printf '%s' "$_probes" | jq --arg s "$_claudemd_check" '. += [{"probe":"claude_md_readable","result":$s}]')"
-  log "  CLAUDE.md readable: ${_claudemd_check}"
+  # Probe 3: instruction file readable from non-interactive mode.
+  # driver=claude → CLAUDE.md via `claude -p`
+  # driver=codex  → AGENTS.md is the source of truth (see AGENTS.md and
+  #                 .codex/AGENTS.override.md). We do a static existence
+  #                 check rather than booting codex to avoid the latency
+  #                 cost of a full agent turn just for a smoke test.
+  _ctxfile_check="fail"
+  case "$RALPH_LOOP_DRIVER" in
+    claude)
+      _probe_name="claude_md_readable"
+      if [ "$DRY_RUN" -eq 1 ]; then
+        _ctxfile_check="skip_dry_run"
+      elif command -v claude >/dev/null 2>&1; then
+        _probe_prompt="${PIPELINE_DIR}/.preflight-probe.txt"
+        mkdir -p "$PIPELINE_DIR"
+        printf 'Reply with exactly the text PROBE_OK if you can read CLAUDE.md in this repository. Nothing else.' > "$_probe_prompt"
+        _probe_output="$(claude -p --model "$RALPH_MODEL" --effort "$RALPH_EFFORT" --permission-mode "$RALPH_PERMISSION_MODE" --output-format text < "$_probe_prompt" 2>/dev/null || true)"
+        if printf '%s' "$_probe_output" | grep -q 'PROBE_OK'; then
+          _ctxfile_check="pass"
+        else
+          _ctxfile_check="warn"
+          log "Warning: CLAUDE.md not readable from claude -p mode. Pipeline context may be limited."
+          log "Warning: This is expected in nested worktree scenarios."
+        fi
+        rm -f "$_probe_prompt"
+      fi
+      ;;
+    codex)
+      _probe_name="agents_md_readable"
+      if [ -f AGENTS.md ]; then
+        _ctxfile_check="pass"
+      else
+        _ctxfile_check="warn"
+        log "Warning: AGENTS.md not found — Codex will fall back to default instructions."
+      fi
+      ;;
+  esac
+  _probes="$(printf '%s' "$_probes" | jq --arg s "$_ctxfile_check" --arg n "$_probe_name" '. += [{"probe":$n,"result":$s}]')"
+  log "  ${_probe_name}: ${_ctxfile_check}"
 
   # Probe 4: git available
   _git_check="fail"
@@ -323,27 +320,65 @@ run_preflight() {
   _probes="$(printf '%s' "$_probes" | jq --arg s "$_git_check" '. += [{"probe":"git_available","result":$s}]')"
   log "  git: ${_git_check}"
 
-  # Probe 5: claude -p --output-format json support
-  _json_check="fail"
-  if [ "$DRY_RUN" -eq 1 ]; then
-    _json_check="skip_dry_run"
-    JSON_OUTPUT_SUPPORTED=1
-  elif [ "$_cli_check" = "pass" ]; then
-    _json_probe_prompt="${PIPELINE_DIR}/.json-probe.txt"
-    mkdir -p "$PIPELINE_DIR"
-    printf 'Reply with exactly the text JSON_PROBE_OK. Nothing else.' > "$_json_probe_prompt"
-    _json_probe_raw="$(claude -p --model "$RALPH_MODEL" --effort "$RALPH_EFFORT" --permission-mode "$RALPH_PERMISSION_MODE" --output-format json < "$_json_probe_prompt" 2>/dev/null || true)"
-    rm -f "$_json_probe_prompt"
-    if printf '%s' "$_json_probe_raw" | jq -e '.result' >/dev/null 2>&1; then
-      _json_check="pass"
-      JSON_OUTPUT_SUPPORTED=1
-    else
-      _json_check="not_supported"
-      log "Warning: --output-format json not supported, falling back to text mode"
-    fi
-  fi
-  _probes="$(printf '%s' "$_probes" | jq --arg s "$_json_check" '. += [{"probe":"json_output_format","result":$s}]')"
-  log "  JSON output format: ${_json_check}"
+  # Probe 5: structured-output capability for the active driver.
+  # claude → `claude -p --output-format json` round-trip
+  # codex  → `codex exec --help` exposes --output-last-message + -s + -c
+  case "$RALPH_LOOP_DRIVER" in
+    claude)
+      _so_check="fail"
+      _so_name="json_output_format"
+      if [ "$DRY_RUN" -eq 1 ]; then
+        _so_check="skip_dry_run"
+        JSON_OUTPUT_SUPPORTED=1
+      elif [ "$_cli_check" = "pass" ]; then
+        _json_probe_prompt="${PIPELINE_DIR}/.json-probe.txt"
+        mkdir -p "$PIPELINE_DIR"
+        printf 'Reply with exactly the text JSON_PROBE_OK. Nothing else.' > "$_json_probe_prompt"
+        _json_probe_raw="$(claude -p --model "$RALPH_MODEL" --effort "$RALPH_EFFORT" --permission-mode "$RALPH_PERMISSION_MODE" --output-format json < "$_json_probe_prompt" 2>/dev/null || true)"
+        rm -f "$_json_probe_prompt"
+        if printf '%s' "$_json_probe_raw" | jq -e '.result' >/dev/null 2>&1; then
+          _so_check="pass"
+          JSON_OUTPUT_SUPPORTED=1
+        else
+          _so_check="not_supported"
+          log "Warning: --output-format json not supported, falling back to text mode"
+        fi
+      fi
+      ;;
+    codex)
+      _so_check="fail"
+      _so_name="codex_exec_flags"
+      # JSON_OUTPUT_SUPPORTED only gates the claude branch in
+      # ralph-cli-driver.sh — the codex branch synthesises <log>.json itself
+      # via jq. Pin it to 0 so the var is defined for any caller that
+      # inspects it; the codex path does not read it.
+      # shellcheck disable=SC2034  # exported for any future inspector
+      JSON_OUTPUT_SUPPORTED=0
+      if [ "$DRY_RUN" -eq 1 ]; then
+        _so_check="skip_dry_run"
+      elif command -v codex >/dev/null 2>&1; then
+        _help="$(codex exec --help 2>&1 || true)"
+        _missing=""
+        for _flag in "--output-last-message" "--sandbox" "--config"; do
+          if ! printf '%s' "$_help" | grep -q -- "$_flag"; then
+            _missing="${_missing:+${_missing}, }${_flag}"
+          fi
+        done
+        if [ -z "$_missing" ]; then
+          _so_check="pass"
+        else
+          _so_check="missing_flags"
+          log_error "codex exec is missing required flags: ${_missing}"
+          _all_pass=false
+        fi
+      else
+        _so_check="codex_missing"
+        _all_pass=false
+      fi
+      ;;
+  esac
+  _probes="$(printf '%s' "$_probes" | jq --arg s "$_so_check" --arg n "$_so_name" '. += [{"probe":$n,"result":$s}]')"
+  log "  ${_so_name}: ${_so_check}"
 
   # Probe 6: gh CLI (optional but needed for PR creation)
   _gh_check="not_available"
@@ -355,15 +390,20 @@ run_preflight() {
   _probes="$(printf '%s' "$_probes" | jq --arg s "$_gh_check" '. += [{"probe":"gh_cli","result":$s}]')"
   log "  gh CLI: ${_gh_check}"
 
-  # Probe 7: codex CLI (optional)
-  _codex_check="not_available"
-  if [ -x ./scripts/codex-check.sh ]; then
-    if ./scripts/codex-check.sh >/dev/null 2>&1; then
-      _codex_check="available"
-    fi
+  # Probe 7: opposite-CLI availability — needed for cross-review reviewer
+  # inversion. When driver=claude the reviewer is codex, and vice versa.
+  case "$RALPH_LOOP_DRIVER" in
+    claude) _other_bin="codex"  ;;
+    codex)  _other_bin="claude" ;;
+  esac
+  _other_check="not_available"
+  if command -v "$_other_bin" >/dev/null 2>&1; then
+    _other_check="available"
+  else
+    log "Warning: ${_other_bin} CLI not found — cross-review will be skipped"
   fi
-  _probes="$(printf '%s' "$_probes" | jq --arg s "$_codex_check" '. += [{"probe":"codex_cli","result":$s}]')"
-  log "  codex CLI: ${_codex_check}"
+  _probes="$(printf '%s' "$_probes" | jq --arg s "$_other_check" --arg n "${_other_bin}_cli" '. += [{"probe":$n,"result":$s}]')"
+  log "  ${_other_bin} CLI: ${_other_check}"
 
   # Write probe results
   jq -n --argjson probes "$_probes" --arg ts "$(ts)" --arg pass "$_all_pass" \
@@ -454,7 +494,7 @@ run_inner_loop() {
     _impl_extra="--resume ${_session_id}"
   fi
 
-  run_claude "$_impl_prompt" "$_impl_log" "$_impl_extra"
+  run_agent "$_impl_prompt" "$_impl_log" "$_impl_extra"
 
   # In dry-run mode, simulate COMPLETE signal (cleared each cycle start)
   if [ "$DRY_RUN" -eq 1 ]; then
@@ -537,7 +577,7 @@ Write a sidecar: echo '{"critical":0,"high":0,"medium":0,"low":0}' > .harness/st
 REVIEW
   fi
 
-  run_claude "$_review_prompt" "$_review_log" ""
+  run_agent "$_review_prompt" "$_review_log" ""
   report_event "self-review" "{\"cycle\":${_cycle},\"log\":\"${_review_log}\"}"
 
   # Check for findings (3-layer detection)
@@ -592,7 +632,7 @@ Write a sidecar: echo '{"verdict":"pass","ac_met":0,"ac_total":0}' > .harness/st
 VERIFY
   fi
 
-  run_claude "$_verify_prompt" "$_verify_log" ""
+  run_agent "$_verify_prompt" "$_verify_log" ""
   report_event "verify" "{\"cycle\":${_cycle},\"log\":\"${_verify_log}\"}"
 
   # Parse verify verdict (3-layer detection)
@@ -626,7 +666,7 @@ Write a sidecar: echo '{"verdict":"pass","total":0,"passed":0,"failed":0}' > .ha
 TESTPROMPT
   fi
 
-  run_claude "$_test_prompt" "$_test_log" ""
+  run_agent "$_test_prompt" "$_test_log" ""
 
   # Parse test verdict (3-layer detection)
   _test_verdict="pass"
@@ -709,58 +749,84 @@ Do NOT create a PR or run cross-review — those are handled by the pipeline.
 DOCS
   fi
 
-  run_claude "$_docs_prompt" "$_docs_log" ""
+  run_agent "$_docs_prompt" "$_docs_log" ""
   report_event "sync-docs" "{\"cycle\":${_cycle},\"log\":\"${_docs_log}\"}"
 
-  # --- Cross-review phase ---
+  # --- Cross-review phase (driver-aware reviewer inversion) ---
   #
-  # NOTE: Loop is Claude-driven only at this point. The standard /work flow's
-  # cross-review skill is bidirectional (RALPH_PRIMARY_CLI=codex flips the
-  # reviewer to claude -p), but the Loop pipeline runs `claude -p` exclusively
-  # for the Inner Loop, so the reviewer side here is always Codex. Surrounding
-  # variable names (_codex_log, _has_codex, _codex_check, "codex
-  # ACTION_REQUIRED" context strings) intentionally retain the codex_ prefix
-  # to mark "this is the Codex-as-reviewer code path" — they are the
-  # bookmark for the follow-up Loop driver work tracked in
-  # https://github.com/yoshpy-dev/ralph/issues/44. Once Loop accepts a Codex
-  # driver, this block should branch on driver and rename the bookkeeping.
+  # The contract is that the reviewer is the *opposite* CLI from the driver,
+  # so the cross-model gate is preserved regardless of which CLI ran the
+  # Inner Loop. Phase 2 (issue #44) adds the codex-driven branch.
   log "--- Phase: cross-review ---"
-  _codex_log="${PIPELINE_DIR}/outer-${_cycle}-cross-review.log"
-  _has_codex=false
+  _xreview_log="${PIPELINE_DIR}/outer-${_cycle}-cross-review.log"
+  _reviewer="$(pick_reviewer)"
 
-  if [ -x ./scripts/codex-check.sh ] && ./scripts/codex-check.sh >/dev/null 2>&1; then
-    _has_codex=true
+  _has_reviewer=false
+  if command -v "$_reviewer" >/dev/null 2>&1; then
+    _has_reviewer=true
   fi
 
   _action_required=0
   _worth_considering=0
   _dismissed=0
 
-  if [ "$_has_codex" = "true" ] && [ "$DRY_RUN" -eq 0 ]; then
-    log "Running cross-review (reviewer=codex)..."
-    _base="$(git rev-parse --abbrev-ref HEAD@{upstream} 2>/dev/null | sed 's|origin/||')"
+  if [ "$_has_reviewer" = "true" ] && [ "$DRY_RUN" -eq 0 ]; then
+    log "Running cross-review (driver=${RALPH_LOOP_DRIVER}, reviewer=${_reviewer})..."
+    _base="$(git rev-parse --abbrev-ref 'HEAD@{upstream}' 2>/dev/null | sed 's|origin/||')"
     _base="${_base:-main}"
     if ! git diff "${_base}...HEAD" --quiet 2>/dev/null; then
-      codex exec review --base "$_base" 2>&1 | tee "$_codex_log" || true
+      case "$_reviewer" in
+        codex)
+          codex exec review --base "$_base" 2>&1 | tee "$_xreview_log" || true
+          ;;
+        claude)
+          # When codex drove the Inner Loop, ask claude -p to play adversarial
+          # reviewer. The prompt lives under .claude/skills/cross-review/prompts/
+          # and writes the triage report itself; we only stream its stdout to
+          # the per-cycle log.
+          _adv_prompt=".claude/skills/cross-review/prompts/adversarial-claude.md"
+          if [ -f "$_adv_prompt" ]; then
+            # `--permission-mode auto` (not plan) is required because the
+            # adversarial reviewer must write the triage report into
+            # docs/reports/. Plan mode is read-only and silently drops the
+            # write — the parser then sees zero findings and the cross-model
+            # gate is bypassed (cycle-2 cross-review P1, #44).
+            BASE_BRANCH="$_base" REPORTS_DIR="$REPORTS_DIR" \
+              claude -p --model "$RALPH_CLAUDE_REVIEWER_MODEL" \
+                --permission-mode auto --output-format text \
+                < "$_adv_prompt" 2>&1 | tee "$_xreview_log" || true
+          else
+            log "Warning: adversarial-claude prompt missing at ${_adv_prompt}"
+            echo "missing_adversarial_prompt" > "$_xreview_log"
+          fi
+          ;;
+      esac
 
-      # Parse triage results from the codex output or triage report
+      # Parse triage results from the latest triage report (CLI-neutral path).
+      # The template ships with literal `## ACTION_REQUIRED` / `## WORTH_CONSIDERING`
+      # / `## DISMISSED` headings plus a summary header line, so a naive
+      # `grep -c 'ACTION_REQUIRED'` over the whole file always reports >=2
+      # matches even on a clean report and forces a spurious Inner Loop
+      # regression. Prefer the canonical `After triage: ACTION_REQUIRED=N, ...`
+      # summary line; fall back to counting `|` table rows under each heading
+      # when the summary is missing.
       _triage_report="$(find "$REPORTS_DIR" -name 'cross-review-triage-*' -newer "${PIPELINE_DIR}/checkpoint.json" 2>/dev/null | tail -1 || true)"
       if [ -n "$_triage_report" ]; then
-        _action_required="$(grep -c 'ACTION_REQUIRED' "$_triage_report" 2>/dev/null || echo 0)"
-        _worth_considering="$(grep -c 'WORTH_CONSIDERING' "$_triage_report" 2>/dev/null || echo 0)"
-        _dismissed="$(grep -c 'DISMISSED' "$_triage_report" 2>/dev/null || echo 0)"
+        _action_required="$(count_triage_findings "$_triage_report" ACTION_REQUIRED)"
+        _worth_considering="$(count_triage_findings "$_triage_report" WORTH_CONSIDERING)"
+        _dismissed="$(count_triage_findings "$_triage_report" DISMISSED)"
       fi
     else
       log "No diff against ${_base} — skipping cross-review"
-      echo "no_diff" > "$_codex_log"
+      echo "no_diff" > "$_xreview_log"
     fi
   else
-    log "Codex CLI not available — skipping cross-review (reviewer=codex unavailable)"
-    echo "codex_not_available" > "$_codex_log"
+    log "${_reviewer} CLI not available — skipping cross-review"
+    printf '%s_not_available\n' "$_reviewer" > "$_xreview_log"
   fi
 
-  ckpt_update ".cross_review_triage = {\"action_required\":${_action_required},\"worth_considering\":${_worth_considering},\"dismissed\":${_dismissed}}"
-  report_event "cross-review" "{\"cycle\":${_cycle},\"action_required\":${_action_required},\"worth_considering\":${_worth_considering},\"dismissed\":${_dismissed}}"
+  ckpt_update ".cross_review_triage = {\"driver\":\"${RALPH_LOOP_DRIVER}\",\"reviewer\":\"${_reviewer}\",\"action_required\":${_action_required},\"worth_considering\":${_worth_considering},\"dismissed\":${_dismissed}}"
+  report_event "cross-review" "{\"cycle\":${_cycle},\"driver\":\"${RALPH_LOOP_DRIVER}\",\"reviewer\":\"${_reviewer}\",\"action_required\":${_action_required},\"worth_considering\":${_worth_considering},\"dismissed\":${_dismissed}}"
 
   # Decision: regress to Inner Loop or proceed to PR
   if [ "$_action_required" -gt 0 ]; then
@@ -808,7 +874,7 @@ After creating the PR, write the PR URL to .harness/state/pipeline/.pr-url:
   echo "https://github.com/..." > .harness/state/pipeline/.pr-url
 PR_PROMPT
 
-  run_claude "$_pr_prompt" "$_pr_log" ""
+  run_agent "$_pr_prompt" "$_pr_log" ""
 
   # Detect PR URL (3-layer defense)
   _pr_url=""
@@ -902,7 +968,7 @@ main() {
   "self_review_result": null,
   "verify_result": null,
   "review_findings": [],
-  "cross_review_triage": {"action_required": 0, "worth_considering": 0, "dismissed": 0},
+  "cross_review_triage": {"driver": null, "reviewer": null, "action_required": 0, "worth_considering": 0, "dismissed": 0},
   "acceptance_criteria_met": [],
   "acceptance_criteria_remaining": [],
   "session_id": null,

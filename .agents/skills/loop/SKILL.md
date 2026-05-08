@@ -1,6 +1,7 @@
 ---
 name: loop
 description: Initialize a Ralph Loop session for autonomous parallel-slice execution. Creates a directory-based plan and runs ralph-orchestrator.sh for multi-worktree parallel pipelines with unified PR. Invoke automatically when a task benefits from sustained autonomous iteration outside Claude Code.
+allowed-tools: Read, Grep, Glob, Write, Edit, Bash, AskUserQuestion
 ---
 Set up a Ralph Loop for autonomous parallel-slice execution outside Claude Code.
 
@@ -136,6 +137,40 @@ Each prompt is a standalone `claude -p` invocation — the Ralph Loop equivalent
 | サブエージェント | `Task(subagent_type=...)` で並列呼び出し可 | 順次 inline 実行 — 単一 agent 内で連続実行 |
 | 構造化対話 | `AskUserQuestion` | 番号付き選択肢を stdout に出して数字を待機 |
 | 成果物 | `docs/reports/`, `docs/plans/`, `docs/specs/` 共通 | 同左 (CLI 非依存) |
+
+### Loop driver の選択 (Phase 2 / 課題 #44)
+
+`ralph-pipeline.sh` がスライスごとに呼ぶ CLI は **driver** で切り替える。
+切替手段は二段:
+
+1. `ralph.toml` の `[loop] driver = "claude" | "codex"` (静的既定、**Go バイナリ `ralph run` 経由でのみ有効**)
+2. 環境変数 `RALPH_LOOP_DRIVER=claude|codex` (実行時上書き、TOML より強い、シェルラッパー
+   `./scripts/ralph` でもそのまま効く)
+
+シェルラッパー (`./scripts/ralph`, `scripts/ralph-orchestrator.sh`) は
+`ralph.toml` を読まないので、TOML だけで Codex driver を有効化したい場合は
+Go バイナリ `ralph run` を使うか、`RALPH_LOOP_DRIVER` を shell profile / direnv で
+export する。`ralph doctor` は実効値と source (`env` / `toml` / `default`) を
+1 行で表示するので、どちらの手段で効いたかを確認できる。
+
+Codex driver では `RALPH_CODEX_SANDBOX` (既定 `workspace-write`) と
+`RALPH_CODEX_APPROVAL_POLICY` (既定 `on-failure`) も合わせて出力される。
+
+Codex driver でフローを回す例:
+
+```sh
+codex trust .                                   # 一度だけ
+ralph doctor                                    # Loop driver 行で codex を確認
+RALPH_LOOP_DRIVER=codex ./scripts/ralph run \
+  --plan docs/plans/active/<date>-<slug>/ --unified-pr
+```
+
+`/cross-review` は driver の **逆** CLI をレビュアーに使う。driver=claude
+なら従来どおり `codex exec review`、driver=codex なら `claude -p
+--permission-mode auto` を `.claude/skills/cross-review/prompts/adversarial-claude.md`
+で起動する。triage report の `Driver:` / `Reviewer:` 行と
+`report_event "cross-review"` JSONL の `driver`/`reviewer` フィールドで
+どのペアが走ったか確認できる。
 
 drift check (`./scripts/check-skill-sync.sh`) は両側の本文と起動メタデータを
 照合する — 片側だけ編集すると CI で fail する。

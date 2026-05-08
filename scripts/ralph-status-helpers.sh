@@ -325,6 +325,7 @@ _render_table() {
   _now="$(now_epoch)"
 
   printf '%b\n' "${C_BOLD}=== Ralph Pipeline Status ===${C_RESET}"
+  printf 'Loop driver: %s\n' "${RALPH_LOOP_DRIVER:-claude}"
   echo ""
 
   # Read orchestrator state
