@@ -55,10 +55,16 @@ Follow the template exactly. The header MUST set:
 - `Reviewer: claude`
 - `Triager: Claude Code (loop pipeline reviewer-inversion)`
 
-The pipeline parses the file via `grep -c 'ACTION_REQUIRED'` /
-`grep -c 'WORTH_CONSIDERING'` / `grep -c 'DISMISSED'` against the table
-sections, so keep the section headings exactly `## ACTION_REQUIRED`,
-`## WORTH_CONSIDERING`, `## DISMISSED`. One row per finding.
+The pipeline parses the file via `count_triage_findings`
+(`scripts/ralph-cli-driver.sh`), which prefers the canonical summary line
+`- After triage: ACTION_REQUIRED=N, WORTH_CONSIDERING=N, DISMISSED=N` and
+falls back to counting `|` table rows under each `## <CATEGORY>` heading.
+So:
+
+- Always emit the `- After triage: ...` summary line in the header (the
+  triage template already includes it).
+- Keep the section headings exactly `## ACTION_REQUIRED`,
+  `## WORTH_CONSIDERING`, `## DISMISSED`. One row per finding.
 
 Print a one-line summary to stdout when you are done so the surrounding
 shell log captures it (e.g. `cross-review-triage written: <path>`). Do not
