@@ -68,6 +68,14 @@ func runPipeline(planPath string, maxIter, maxPar int, preflight, resume, dryRun
 		fmt.Sprintf("RALPH_MAX_PARALLEL=%d", maxPar),
 	)
 
+	// Phase 2 (issue #44) — propagate [loop] settings only when the user has
+	// not already set the env var. This makes `[loop] driver = "codex"` in
+	// ralph.toml runtime-effective for `ralph run`, while preserving the
+	// documented priority "env > TOML > default".
+	env = appendEnvIfMissing(env, "RALPH_LOOP_DRIVER", cfg.Loop.Driver)
+	env = appendEnvIfMissing(env, "RALPH_CODEX_SANDBOX", cfg.Loop.CodexSandbox)
+	env = appendEnvIfMissing(env, "RALPH_CODEX_APPROVAL_POLICY", cfg.Loop.CodexApprovalPolicy)
+
 	// Find the orchestrator script.
 	scriptPath, err := findScript("ralph-orchestrator.sh")
 	if err != nil {
@@ -159,4 +167,18 @@ func findScript(name string) (string, error) {
 		return path, nil
 	}
 	return "", fmt.Errorf("script %q not found in scripts/", name)
+}
+
+// appendEnvIfMissing appends "KEY=value" to env only when KEY is not already
+// present. Used to propagate ralph.toml [loop] settings to the orchestrator
+// while letting an explicit env var win — the documented priority is
+// env > TOML > built-in default.
+func appendEnvIfMissing(env []string, key, value string) []string {
+	prefix := key + "="
+	for _, e := range env {
+		if len(e) >= len(prefix) && e[:len(prefix)] == prefix {
+			return env
+		}
+	}
+	return append(env, prefix+value)
 }
