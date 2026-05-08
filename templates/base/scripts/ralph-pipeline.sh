@@ -798,11 +798,18 @@ DOCS
       esac
 
       # Parse triage results from the latest triage report (CLI-neutral path).
+      # The template ships with literal `## ACTION_REQUIRED` / `## WORTH_CONSIDERING`
+      # / `## DISMISSED` headings plus a summary header line, so a naive
+      # `grep -c 'ACTION_REQUIRED'` over the whole file always reports ≥2
+      # matches even on a clean report and forces a spurious Inner Loop
+      # regression. Prefer the canonical `After triage: ACTION_REQUIRED=N, ...`
+      # summary line; fall back to counting `|` table rows under each heading
+      # when the summary is missing.
       _triage_report="$(find "$REPORTS_DIR" -name 'cross-review-triage-*' -newer "${PIPELINE_DIR}/checkpoint.json" 2>/dev/null | tail -1 || true)"
       if [ -n "$_triage_report" ]; then
-        _action_required="$(grep -c 'ACTION_REQUIRED' "$_triage_report" 2>/dev/null || echo 0)"
-        _worth_considering="$(grep -c 'WORTH_CONSIDERING' "$_triage_report" 2>/dev/null || echo 0)"
-        _dismissed="$(grep -c 'DISMISSED' "$_triage_report" 2>/dev/null || echo 0)"
+        _action_required="$(count_triage_findings "$_triage_report" ACTION_REQUIRED)"
+        _worth_considering="$(count_triage_findings "$_triage_report" WORTH_CONSIDERING)"
+        _dismissed="$(count_triage_findings "$_triage_report" DISMISSED)"
       fi
     else
       log "No diff against ${_base} — skipping cross-review"

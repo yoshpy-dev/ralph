@@ -22,6 +22,37 @@
 #   JSON_OUTPUT_SUPPORTED      1 if `claude -p --output-format json` works
 #   DRY_RUN                    1 to skip CLI invocation entirely
 
+# count_triage_findings — print the count for one triage category from a
+# cross-review-triage report. Prefers the canonical summary header line
+# (`After triage: ACTION_REQUIRED=N, ...`) and falls back to counting the
+# `|` table rows under each `## <CATEGORY>` heading. Lives here so the
+# pipeline parser is testable in isolation: the previous in-line
+# `grep -c '<CATEGORY>' "$file"` overcounted the literal headings (#44
+# cross-review P1).
+#
+# Args: $1 = triage report path
+#       $2 = category (ACTION_REQUIRED | WORTH_CONSIDERING | DISMISSED)
+count_triage_findings() {
+  _file="$1"
+  _category="$2"
+  if [ ! -s "$_file" ]; then
+    printf '0\n'
+    return 0
+  fi
+  _summary="$(grep -m1 -E 'ACTION_REQUIRED=[0-9]+' "$_file" 2>/dev/null || true)"
+  if [ -n "$_summary" ]; then
+    _n="$(printf '%s' "$_summary" | grep -oE "${_category}=[0-9]+" | head -1 | cut -d= -f2)"
+    printf '%s\n' "${_n:-0}"
+    return 0
+  fi
+  awk -v cat="## ${_category}" '
+    $0 == cat { f = 1; next }
+    /^## / { f = 0 }
+    f && /^\|/ && !/^\| *# / && !/^\| *-+/ { n++ }
+    END { print n+0 }
+  ' "$_file" 2>/dev/null || printf '0\n'
+}
+
 # pick_reviewer — return the *opposite* CLI of the active driver, used by
 # cross-review to keep the cross-model quality gate even when codex drives
 # the Inner Loop. Prints "codex" or "claude" on stdout. Defined here so the

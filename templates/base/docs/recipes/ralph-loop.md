@@ -176,22 +176,44 @@ dispatcher. To drive a Loop run from Codex:
    `codex_approval_policy`.
 3. **Start the orchestrator with the Codex driver.**
 
+   The shell wrapper picks the driver from the **environment only**:
+
    ```sh
    RALPH_LOOP_DRIVER=codex ./scripts/ralph run \
      --plan docs/plans/active/<date>-<slug>/ --unified-pr
    ```
 
-   Or set it persistently in `ralph.toml`:
+   To make the choice persistent without re-typing the env var, you have two
+   options:
 
-   ```toml
-   [loop]
-   driver = "codex"
-   codex_sandbox = "workspace-write"
-   codex_approval_policy = "on-failure"
-   ```
+   - Use the **Go binary** entrypoint, which reads `ralph.toml` and propagates
+     the result to the orchestrator:
 
-   The env var wins when both are set, so a one-shot `RALPH_LOOP_DRIVER=claude`
-   easily reverts to Claude for a single run.
+     ```toml
+     # ralph.toml
+     [loop]
+     driver = "codex"
+     codex_sandbox = "workspace-write"
+     codex_approval_policy = "on-failure"
+     ```
+
+     ```sh
+     ralph run --plan docs/plans/active/<date>-<slug>/ --unified-pr
+     ```
+
+   - Or export `RALPH_LOOP_DRIVER` in your shell profile / direnv so every
+     invocation of `./scripts/ralph` inherits it.
+
+   Important asymmetry: the shell wrapper (`./scripts/ralph` and
+   `scripts/ralph-orchestrator.sh`) does **not** parse `ralph.toml` itself.
+   `[loop] driver = "codex"` alone, paired with `./scripts/ralph run`, will
+   silently fall back to the claude driver. `ralph doctor` reports the
+   effective driver and source so you can confirm which knob actually took
+   effect.
+
+   The env var always wins when both are set, so a one-shot
+   `RALPH_LOOP_DRIVER=claude ./scripts/ralph run ...` easily reverts to Claude
+   for a single run.
 
 What changes inside the pipeline:
 

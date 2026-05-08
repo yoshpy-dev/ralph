@@ -213,6 +213,105 @@ assert_jq_equal '.bin'                 "fake-claude"      "$CALL_C" "6b-i. drive
 assert_jq_contains '.argv | join(" ")' "--permission-mode plan" "$CALL_C" "6b-ii. plan permission mode (read-only review)"
 assert_jq_contains '.stdin'            "Adversarial review" "$CALL_C" "6b-iii. adversarial prompt arrived via stdin"
 
+# ── Test 7: count_triage_findings parser (P1 fix from cross-review #44) ─
+echo
+echo "── Test 7: count_triage_findings respects table rows, not headings"
+
+# 7a. Empty triage with only the template scaffolding (no findings)
+TRIAGE_EMPTY="$WORK_DIR/triage-empty.md"
+cat > "$TRIAGE_EMPTY" <<'EOF'
+# Cross-review triage report: smoke
+
+- Date: 2026-05-08
+- Driver: claude
+- Reviewer: codex
+- Total reviewer findings: 0
+- After triage: ACTION_REQUIRED=0, WORTH_CONSIDERING=0, DISMISSED=0
+
+## ACTION_REQUIRED
+
+| # | Reviewer finding | Triage rationale | Affected file(s) |
+|---|-------------------|------------------|-------------------|
+
+## WORTH_CONSIDERING
+
+| # | Reviewer finding | Triage rationale | Affected file(s) |
+|---|-------------------|------------------|-------------------|
+
+## DISMISSED
+
+| # | Reviewer finding | Dismissal reason | Category |
+|---|-------------------|------------------|----------|
+EOF
+
+got_a="$(count_triage_findings "$TRIAGE_EMPTY" ACTION_REQUIRED)"
+got_w="$(count_triage_findings "$TRIAGE_EMPTY" WORTH_CONSIDERING)"
+got_d="$(count_triage_findings "$TRIAGE_EMPTY" DISMISSED)"
+check "7a-i. clean report → ACTION_REQUIRED=0 (got '$got_a')" test "$got_a" = "0"
+check "7a-ii. clean report → WORTH_CONSIDERING=0 (got '$got_w')" test "$got_w" = "0"
+check "7a-iii. clean report → DISMISSED=0 (got '$got_d')" test "$got_d" = "0"
+
+# 7b. Real triage with findings — counts via the summary header line
+TRIAGE_REAL="$WORK_DIR/triage-real.md"
+cat > "$TRIAGE_REAL" <<'EOF'
+# Cross-review triage report: example
+
+- Total reviewer findings: 5
+- After triage: ACTION_REQUIRED=2, WORTH_CONSIDERING=1, DISMISSED=2
+
+## ACTION_REQUIRED
+
+| # | Reviewer finding | Triage rationale | Affected file(s) |
+|---|-------------------|------------------|-------------------|
+| 1 | foo | bar | a.go |
+| 2 | baz | qux | b.go |
+
+## WORTH_CONSIDERING
+
+| # | Reviewer finding | Triage rationale | Affected file(s) |
+|---|-------------------|------------------|-------------------|
+| 1 | maybe | optional | c.go |
+
+## DISMISSED
+
+| # | Reviewer finding | Dismissal reason | Category |
+|---|-------------------|------------------|----------|
+| 1 | nope | false-positive | x |
+| 2 | nope2 | already-addressed | y |
+EOF
+
+check "7b-i. real report → ACTION_REQUIRED=2"   test "$(count_triage_findings "$TRIAGE_REAL" ACTION_REQUIRED)" = "2"
+check "7b-ii. real report → WORTH_CONSIDERING=1" test "$(count_triage_findings "$TRIAGE_REAL" WORTH_CONSIDERING)" = "1"
+check "7b-iii. real report → DISMISSED=2"        test "$(count_triage_findings "$TRIAGE_REAL" DISMISSED)" = "2"
+
+# 7c. Report missing the summary line (fallback path counts table rows)
+TRIAGE_NOSUM="$WORK_DIR/triage-no-summary.md"
+cat > "$TRIAGE_NOSUM" <<'EOF'
+# Cross-review triage report: legacy
+
+## ACTION_REQUIRED
+
+| # | Reviewer finding | Triage rationale | Affected file(s) |
+|---|-------------------|------------------|-------------------|
+| 1 | only finding | rationale | a.go |
+
+## WORTH_CONSIDERING
+
+| # | Reviewer finding | Triage rationale | Affected file(s) |
+|---|-------------------|------------------|-------------------|
+
+## DISMISSED
+
+| # | Reviewer finding | Dismissal reason | Category |
+|---|-------------------|------------------|----------|
+EOF
+
+check "7c-i. no-summary fallback → ACTION_REQUIRED=1" test "$(count_triage_findings "$TRIAGE_NOSUM" ACTION_REQUIRED)" = "1"
+check "7c-ii. no-summary fallback → WORTH_CONSIDERING=0" test "$(count_triage_findings "$TRIAGE_NOSUM" WORTH_CONSIDERING)" = "0"
+
+# 7d. Missing file → 0 (must not error)
+check "7d. missing file → 0" test "$(count_triage_findings "$WORK_DIR/does-not-exist.md" ACTION_REQUIRED)" = "0"
+
 echo
 echo "── Summary ──"
 printf '  PASS: %d\n  FAIL: %d\n' "$PASS" "$FAIL"

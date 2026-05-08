@@ -143,10 +143,16 @@ Each prompt is a standalone `claude -p` invocation — the Ralph Loop equivalent
 `ralph-pipeline.sh` がスライスごとに呼ぶ CLI は **driver** で切り替える。
 切替手段は二段:
 
-1. `ralph.toml` の `[loop] driver = "claude" | "codex"` (静的既定)
-2. 環境変数 `RALPH_LOOP_DRIVER=claude|codex` (実行時上書き、TOML より強い)
+1. `ralph.toml` の `[loop] driver = "claude" | "codex"` (静的既定、**Go バイナリ `ralph run` 経由でのみ有効**)
+2. 環境変数 `RALPH_LOOP_DRIVER=claude|codex` (実行時上書き、TOML より強い、シェルラッパー
+   `./scripts/ralph` でもそのまま効く)
 
-`ralph doctor` は実効値と source (`env` / `toml` / `default`) を 1 行で表示する。
+シェルラッパー (`./scripts/ralph`, `scripts/ralph-orchestrator.sh`) は
+`ralph.toml` を読まないので、TOML だけで Codex driver を有効化したい場合は
+Go バイナリ `ralph run` を使うか、`RALPH_LOOP_DRIVER` を shell profile / direnv で
+export する。`ralph doctor` は実効値と source (`env` / `toml` / `default`) を
+1 行で表示するので、どちらの手段で効いたかを確認できる。
+
 Codex driver では `RALPH_CODEX_SANDBOX` (既定 `workspace-write`) と
 `RALPH_CODEX_APPROVAL_POLICY` (既定 `on-failure`) も合わせて出力される。
 
