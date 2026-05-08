@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 
@@ -11,7 +12,17 @@ import (
 // Config represents the ralph.toml project configuration.
 type Config struct {
 	Pipeline PipelineConfig `toml:"pipeline"`
+	Loop     LoopConfig     `toml:"loop"`
 	Doctor   DoctorConfig   `toml:"doctor"`
+}
+
+// LoopConfig holds Ralph Loop driver settings — which CLI drives the
+// per-slice pipeline, and how the Codex driver runs (sandbox + approvals).
+// Phase 2 of the Codex CLI parity work; see issue #44.
+type LoopConfig struct {
+	Driver              string `toml:"driver"`
+	CodexSandbox        string `toml:"codex_sandbox"`
+	CodexApprovalPolicy string `toml:"codex_approval_policy"`
 }
 
 // PipelineConfig holds pipeline execution settings.
@@ -51,12 +62,38 @@ func Default() Config {
 				Dir: ".ralph/prompts",
 			},
 		},
+		Loop: LoopConfig{
+			Driver:              "claude",
+			CodexSandbox:        "workspace-write",
+			CodexApprovalPolicy: "on-failure",
+		},
 		Doctor: DoctorConfig{
 			RequireClaudeCLI: true,
 			RequireCodexCLI:  false,
 			RequireGo:        false,
 		},
 	}
+}
+
+// Allowed driver values for [loop].driver.
+var loopDriverAllowed = map[string]bool{
+	"claude": true,
+	"codex":  true,
+}
+
+// Allowed sandbox values, mirroring `codex exec -s` choices.
+var codexSandboxAllowed = map[string]bool{
+	"read-only":          true,
+	"workspace-write":    true,
+	"danger-full-access": true,
+}
+
+// Allowed approval policies recognised by Codex CLI.
+var codexApprovalAllowed = map[string]bool{
+	"untrusted":  true,
+	"on-failure": true,
+	"on-request": true,
+	"never":      true,
 }
 
 // Load reads ralph.toml from the given path, falling back to defaults.
@@ -96,6 +133,26 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.Pipeline.Prompts.Dir == "" {
 		cfg.Pipeline.Prompts.Dir = Default().Pipeline.Prompts.Dir
+	}
+
+	if cfg.Loop.Driver == "" {
+		cfg.Loop.Driver = Default().Loop.Driver
+	}
+	if cfg.Loop.CodexSandbox == "" {
+		cfg.Loop.CodexSandbox = Default().Loop.CodexSandbox
+	}
+	if cfg.Loop.CodexApprovalPolicy == "" {
+		cfg.Loop.CodexApprovalPolicy = Default().Loop.CodexApprovalPolicy
+	}
+
+	if !loopDriverAllowed[cfg.Loop.Driver] {
+		return cfg, fmt.Errorf("invalid [loop].driver %q (must be claude or codex)", cfg.Loop.Driver)
+	}
+	if !codexSandboxAllowed[cfg.Loop.CodexSandbox] {
+		return cfg, fmt.Errorf("invalid [loop].codex_sandbox %q (must be read-only, workspace-write, or danger-full-access)", cfg.Loop.CodexSandbox)
+	}
+	if !codexApprovalAllowed[cfg.Loop.CodexApprovalPolicy] {
+		return cfg, fmt.Errorf("invalid [loop].codex_approval_policy %q (must be untrusted, on-failure, on-request, or never)", cfg.Loop.CodexApprovalPolicy)
 	}
 
 	return cfg, nil

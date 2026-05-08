@@ -26,6 +26,17 @@ RALPH_MAX_PARALLEL="${RALPH_MAX_PARALLEL:-4}"
 RALPH_SLICE_TIMEOUT="${RALPH_SLICE_TIMEOUT:-1800}"
 RALPH_STANDARD_MAX_PIPELINE_CYCLES="${RALPH_STANDARD_MAX_PIPELINE_CYCLES:-2}"
 
+# Ralph Loop driver settings (Phase 2 / issue #44).
+# RALPH_LOOP_DRIVER selects which CLI ralph-pipeline.sh invokes per slice
+# (claude|codex). When driver=codex, ralph-cli-driver.sh assembles
+# `codex exec -s <sandbox> -c approval_policy=<policy> --output-last-message ...`.
+# RALPH_CLAUDE_REVIEWER_MODEL is used when cross-review inverts the reviewer
+# (driver=codex → claude -p as the adversarial reviewer).
+RALPH_LOOP_DRIVER="${RALPH_LOOP_DRIVER:-claude}"
+RALPH_CODEX_SANDBOX="${RALPH_CODEX_SANDBOX:-workspace-write}"
+RALPH_CODEX_APPROVAL_POLICY="${RALPH_CODEX_APPROVAL_POLICY:-on-failure}"
+RALPH_CLAUDE_REVIEWER_MODEL="${RALPH_CLAUDE_REVIEWER_MODEL:-claude-opus-4-7}"
+
 # ═══════════════════════════════════════════════════════════════════
 # Validation helpers
 # ═══════════════════════════════════════════════════════════════════
@@ -56,4 +67,31 @@ validate_all_numeric() {
   validate_numeric "RALPH_MAX_PARALLEL" "$RALPH_MAX_PARALLEL"
   validate_numeric "RALPH_SLICE_TIMEOUT" "$RALPH_SLICE_TIMEOUT"
   validate_numeric "RALPH_STANDARD_MAX_PIPELINE_CYCLES" "$RALPH_STANDARD_MAX_PIPELINE_CYCLES"
+}
+
+# validate_loop_driver — verify RALPH_LOOP_DRIVER is one of the supported
+# values. Called early so a typo fails before we attempt to invoke the wrong
+# CLI binary. Mirrors the Go-side allowlist in internal/config/config.go.
+validate_loop_driver() {
+  case "$RALPH_LOOP_DRIVER" in
+    claude|codex) ;;
+    *)
+      printf 'Error: RALPH_LOOP_DRIVER must be "claude" or "codex", got: %s\n' "$RALPH_LOOP_DRIVER" >&2
+      exit 1
+      ;;
+  esac
+  case "$RALPH_CODEX_SANDBOX" in
+    read-only|workspace-write|danger-full-access) ;;
+    *)
+      printf 'Error: RALPH_CODEX_SANDBOX must be one of read-only|workspace-write|danger-full-access, got: %s\n' "$RALPH_CODEX_SANDBOX" >&2
+      exit 1
+      ;;
+  esac
+  case "$RALPH_CODEX_APPROVAL_POLICY" in
+    untrusted|on-failure|on-request|never) ;;
+    *)
+      printf 'Error: RALPH_CODEX_APPROVAL_POLICY must be one of untrusted|on-failure|on-request|never, got: %s\n' "$RALPH_CODEX_APPROVAL_POLICY" >&2
+      exit 1
+      ;;
+  esac
 }
