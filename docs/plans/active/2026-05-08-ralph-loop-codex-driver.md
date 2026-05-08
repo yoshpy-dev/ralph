@@ -214,8 +214,10 @@
 - [x] `docs/recipes/ralph-loop.md` 更新
 - [x] README.md / definition-of-done.md の差分反映
 - [x] `./scripts/run-verify.sh` green
-- [ ] Review artifact created (post-implementation pipeline)
-- [ ] Verification artifact created (post-implementation pipeline)
-- [ ] Test artifact created (post-implementation pipeline)
-- [ ] Walkthrough artifact (Codex 利用可なら実行、不可なら fake-codex 経路を記録)
+- [x] Review artifact created (post-implementation pipeline) — cycle 1: `docs/reports/self-review-2026-05-08-ralph-loop-codex-driver.md`; cycle 2: `docs/reports/self-review-2026-05-08-ralph-loop-codex-driver-cycle2.md` (cycle-2 closes P1 parser + P2 TOML/shell asymmetry via commit `91232dc`; cycle-2 polish `0663f50` anchors the triage summary regex and ASCII-fies one comment)
+- [x] Verification artifact created (post-implementation pipeline) — cycle 1: `docs/reports/verify-2026-05-08-ralph-loop-codex-driver.md`; cycle 2: `docs/reports/verify-2026-05-08-ralph-loop-codex-driver-cycle2.md` (145 sync items + 13 skill-sync items in lock-step)
+- [x] Test artifact created (post-implementation pipeline) — `docs/reports/test-2026-05-08-ralph-loop-codex-driver-cycle2.md` (299/299 PASS, 0 FAIL, 2 SKIP; cycle-2 deltas locked by Test 7 + Test 7e)
+- [x] Walkthrough artifact (Codex 利用可なら実行、不可なら fake-codex 経路を記録) — `docs/reports/walkthrough-2026-05-08-ralph-loop-codex-driver.md` (smoke walkthrough with codex 0.128.0; dispatcher + dry-run + doctor + cmp evidence; no real codex turn invoked per /test contract)
+- [x] Cross-review triage artifact — `docs/reports/cross-review-triage-2026-05-08-ralph-loop-codex-driver.md` (cycle 1 ACTION_REQUIRED P1+P2; resolved in cycle-2 commits `91232dc` + `0663f50`)
+- [x] Pipeline cycle reached cap (2 of 2) — outer-cycle counter at `RALPH_MAX_OUTER_CYCLES` default; remaining LOW findings handed to tech-debt rather than re-running
 - [ ] PR created
