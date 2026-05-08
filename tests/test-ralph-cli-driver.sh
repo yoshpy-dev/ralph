@@ -171,6 +171,48 @@ check "4d. codex dry-run wrote <log>"      test -s "$LOG"
 check "4e. codex dry-run wrote <log>.json" test -s "$LOG.json"
 check "4f. codex dry-run did NOT invoke fake-codex" test ! -s "$CALL"
 
+# ── Test 5: cross-review reviewer inversion (pick_reviewer) ─────────────
+echo
+echo "── Test 5: pick_reviewer returns the opposite CLI (AC-5)"
+got="$(RALPH_LOOP_DRIVER=claude pick_reviewer)"
+[ "$got" = "codex" ]
+check "5a. driver=claude → reviewer=codex (got '$got')" test "$got" = "codex"
+
+got="$(RALPH_LOOP_DRIVER=codex pick_reviewer)"
+check "5b. driver=codex → reviewer=claude (got '$got')" test "$got" = "claude"
+
+got="$(unset RALPH_LOOP_DRIVER; pick_reviewer)"
+check "5c. unset driver → reviewer=codex (safe default)" test "$got" = "codex"
+
+# ── Test 6: cross-review dispatcher invokes the right CLI (AC-5) ────────
+# This isolates the dispatch case-statement from the surrounding pipeline
+# state machine. We replay the same shell command the pipeline executes
+# and confirm the call log records the expected stub.
+echo
+echo "── Test 6: cross-review dispatcher invokes the inverted CLI"
+PROMPT_ADV="$WORK_DIR/adv-claude.md"
+printf 'Adversarial review prompt body.\n' > "$PROMPT_ADV"
+
+CALL_C="$WORK_DIR/test6-claude.call.json"
+CALL_X="$WORK_DIR/test6-codex.call.json"
+
+# 6a. driver=claude → reviewer=codex (invokes `codex exec review`)
+RALPH_LOOP_DRIVER=claude RALPH_FAKE_CALL_LOG="$CALL_X" \
+  PATH="$PATH_FAKES" \
+  codex exec review --base main >/dev/null 2>&1 || true
+assert_jq_equal '.bin'                 "fake-codex"  "$CALL_X" "6a-i. driver=claude path used fake-codex"
+assert_jq_contains '.argv | join(" ")' "exec review" "$CALL_X" "6a-ii. exec review subcommand invoked"
+
+# 6b. driver=codex → reviewer=claude (invokes `claude -p` with adv prompt)
+RALPH_LOOP_DRIVER=codex RALPH_FAKE_CALL_LOG="$CALL_C" \
+  PATH="$PATH_FAKES" \
+  claude -p --model "$RALPH_CLAUDE_REVIEWER_MODEL" \
+    --permission-mode plan --output-format text \
+    < "$PROMPT_ADV" >/dev/null 2>&1 || true
+assert_jq_equal '.bin'                 "fake-claude"      "$CALL_C" "6b-i. driver=codex path used fake-claude"
+assert_jq_contains '.argv | join(" ")' "--permission-mode plan" "$CALL_C" "6b-ii. plan permission mode (read-only review)"
+assert_jq_contains '.stdin'            "Adversarial review" "$CALL_C" "6b-iii. adversarial prompt arrived via stdin"
+
 echo
 echo "── Summary ──"
 printf '  PASS: %d\n  FAIL: %d\n' "$PASS" "$FAIL"

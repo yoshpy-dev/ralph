@@ -755,12 +755,7 @@ DOCS
   # Inner Loop. Phase 2 (issue #44) adds the codex-driven branch.
   log "--- Phase: cross-review ---"
   _xreview_log="${PIPELINE_DIR}/outer-${_cycle}-cross-review.log"
-
-  case "$RALPH_LOOP_DRIVER" in
-    claude) _reviewer="codex"  ;;
-    codex)  _reviewer="claude" ;;
-    *)      _reviewer="codex"  ;;  # fall through (validate_loop_driver already ran)
-  esac
+  _reviewer="$(pick_reviewer)"
 
   _has_reviewer=false
   if command -v "$_reviewer" >/dev/null 2>&1; then

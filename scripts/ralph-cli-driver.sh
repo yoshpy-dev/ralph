@@ -22,6 +22,18 @@
 #   JSON_OUTPUT_SUPPORTED      1 if `claude -p --output-format json` works
 #   DRY_RUN                    1 to skip CLI invocation entirely
 
+# pick_reviewer — return the *opposite* CLI of the active driver, used by
+# cross-review to keep the cross-model quality gate even when codex drives
+# the Inner Loop. Prints "codex" or "claude" on stdout. Defined here so the
+# inversion logic lives next to the dispatcher and is testable in isolation.
+pick_reviewer() {
+  case "${RALPH_LOOP_DRIVER:-claude}" in
+    claude) printf 'codex\n'  ;;
+    codex)  printf 'claude\n' ;;
+    *)      printf 'codex\n'  ;;  # safe fallback; validate_loop_driver should have caught this
+  esac
+}
+
 # run_agent — dispatch one agent turn. Writes <log_file> (text) and
 # <log_file>.json (thin metadata) regardless of which driver runs.
 run_agent() {
