@@ -3,7 +3,7 @@ set -eu
 
 # Ralph Pipeline orchestrator — full autonomous development pipeline
 # Inner Loop: implement → self-review → verify → test (repeat on failure)
-# Outer Loop: sync-docs → codex-review (repeat on ACTION_REQUIRED) → PR
+# Outer Loop: sync-docs → cross-review (repeat on ACTION_REQUIRED) → PR
 #
 # State lives in .harness/state/pipeline/
 # Requires: claude CLI, jq, git
@@ -682,7 +682,7 @@ TESTPROMPT
 }
 
 # ═══════════════════════════════════════════════════════════════════
-# Outer Loop: sync-docs → codex-review → PR
+# Outer Loop: sync-docs → cross-review → PR
 # ═══════════════════════════════════════════════════════════════════
 
 run_outer_loop() {
@@ -705,16 +705,27 @@ run_outer_loop() {
 Synchronize documentation with the current implementation changes.
 Update any affected docs, rules, and reports.
 Commit documentation changes with: docs: <description>
-Do NOT create a PR or run codex review — those are handled by the pipeline.
+Do NOT create a PR or run cross-review — those are handled by the pipeline.
 DOCS
   fi
 
   run_claude "$_docs_prompt" "$_docs_log" ""
   report_event "sync-docs" "{\"cycle\":${_cycle},\"log\":\"${_docs_log}\"}"
 
-  # --- Codex review phase ---
-  log "--- Phase: codex-review ---"
-  _codex_log="${PIPELINE_DIR}/outer-${_cycle}-codex-review.log"
+  # --- Cross-review phase ---
+  #
+  # NOTE: Loop is Claude-driven only at this point. The standard /work flow's
+  # cross-review skill is bidirectional (RALPH_PRIMARY_CLI=codex flips the
+  # reviewer to claude -p), but the Loop pipeline runs `claude -p` exclusively
+  # for the Inner Loop, so the reviewer side here is always Codex. Surrounding
+  # variable names (_codex_log, _has_codex, _codex_check, "codex
+  # ACTION_REQUIRED" context strings) intentionally retain the codex_ prefix
+  # to mark "this is the Codex-as-reviewer code path" — they are the
+  # bookmark for the follow-up Loop driver work tracked in
+  # https://github.com/yoshpy-dev/ralph/issues/44. Once Loop accepts a Codex
+  # driver, this block should branch on driver and rename the bookkeeping.
+  log "--- Phase: cross-review ---"
+  _codex_log="${PIPELINE_DIR}/outer-${_cycle}-cross-review.log"
   _has_codex=false
 
   if [ -x ./scripts/codex-check.sh ] && ./scripts/codex-check.sh >/dev/null 2>&1; then
@@ -726,30 +737,30 @@ DOCS
   _dismissed=0
 
   if [ "$_has_codex" = "true" ] && [ "$DRY_RUN" -eq 0 ]; then
-    log "Running codex review..."
+    log "Running cross-review (reviewer=codex)..."
     _base="$(git rev-parse --abbrev-ref HEAD@{upstream} 2>/dev/null | sed 's|origin/||')"
     _base="${_base:-main}"
     if ! git diff "${_base}...HEAD" --quiet 2>/dev/null; then
       codex exec review --base "$_base" 2>&1 | tee "$_codex_log" || true
 
       # Parse triage results from the codex output or triage report
-      _triage_report="$(find "$REPORTS_DIR" -name 'codex-triage-*' -newer "${PIPELINE_DIR}/checkpoint.json" 2>/dev/null | tail -1 || true)"
+      _triage_report="$(find "$REPORTS_DIR" -name 'cross-review-triage-*' -newer "${PIPELINE_DIR}/checkpoint.json" 2>/dev/null | tail -1 || true)"
       if [ -n "$_triage_report" ]; then
         _action_required="$(grep -c 'ACTION_REQUIRED' "$_triage_report" 2>/dev/null || echo 0)"
         _worth_considering="$(grep -c 'WORTH_CONSIDERING' "$_triage_report" 2>/dev/null || echo 0)"
         _dismissed="$(grep -c 'DISMISSED' "$_triage_report" 2>/dev/null || echo 0)"
       fi
     else
-      log "No diff against ${_base} — skipping codex review"
+      log "No diff against ${_base} — skipping cross-review"
       echo "no_diff" > "$_codex_log"
     fi
   else
-    log "Codex CLI not available — skipping codex review"
+    log "Codex CLI not available — skipping cross-review (reviewer=codex unavailable)"
     echo "codex_not_available" > "$_codex_log"
   fi
 
-  ckpt_update ".codex_triage = {\"action_required\":${_action_required},\"worth_considering\":${_worth_considering},\"dismissed\":${_dismissed}}"
-  report_event "codex-review" "{\"cycle\":${_cycle},\"action_required\":${_action_required},\"worth_considering\":${_worth_considering},\"dismissed\":${_dismissed}}"
+  ckpt_update ".cross_review_triage = {\"action_required\":${_action_required},\"worth_considering\":${_worth_considering},\"dismissed\":${_dismissed}}"
+  report_event "cross-review" "{\"cycle\":${_cycle},\"action_required\":${_action_required},\"worth_considering\":${_worth_considering},\"dismissed\":${_dismissed}}"
 
   # Decision: regress to Inner Loop or proceed to PR
   if [ "$_action_required" -gt 0 ]; then
@@ -891,7 +902,7 @@ main() {
   "self_review_result": null,
   "verify_result": null,
   "review_findings": [],
-  "codex_triage": {"action_required": 0, "worth_considering": 0, "dismissed": 0},
+  "cross_review_triage": {"action_required": 0, "worth_considering": 0, "dismissed": 0},
   "acceptance_criteria_met": [],
   "acceptance_criteria_remaining": [],
   "session_id": null,
@@ -983,8 +994,8 @@ INIT_JSON
         ;;
       1) # ACTION_REQUIRED → regress to Inner Loop
         _inner_cycle=$((_inner_cycle + 1))
-        _context="codex ACTION_REQUIRED — regressed from Outer Loop"
-        ckpt_transition "outer" "inner" "codex ACTION_REQUIRED"
+        _context="cross-review ACTION_REQUIRED — regressed from Outer Loop"
+        ckpt_transition "outer" "inner" "cross-review ACTION_REQUIRED"
         ;;
       2) # Terminal config error (e.g., gh_unavailable) → stop pipeline
         log "=== Pipeline stopped: missing dependency ==="

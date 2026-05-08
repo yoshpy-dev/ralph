@@ -14,16 +14,18 @@ A task is done only when all applicable items are satisfied.
 - [ ] Remaining gaps are explicit
 - [ ] PR created via `/pr` skill (includes plan archival and hand-off)
 - [ ] CI verify passes on the PR
+- [ ] Skill drift check (`./scripts/check-skill-sync.sh`) is green so `.claude/skills/` and `.agents/skills/` stay in lock-step
+- [ ] If the change touches `.claude/`, `.codex/`, `.agents/skills/`, or shared rules, both CLIs were exercised (or the gap is recorded explicitly)
 
 ### Post-implementation pipeline order
 
 The full pipeline must run in this order — no steps may be skipped:
 
 ```
-/self-review → /verify → /test → /sync-docs → /codex-review → /pr
+/self-review → /verify → /test → /sync-docs → /cross-review → /pr
 ```
 
-If `/codex-review` finds ACTION_REQUIRED issues and the user chooses to fix them, the **full pipeline** re-runs from `/self-review` through `/codex-review` again. `/sync-docs` must not be skipped in the re-run.
+If `/cross-review` finds ACTION_REQUIRED issues and the user chooses to fix them, the **full pipeline** re-runs from `/self-review` through `/cross-review` again. `/sync-docs` must not be skipped in the re-run.
 
 The pipeline is capped at **2 total runs by default** (initial + 1 re-run). Standard flow uses `RALPH_STANDARD_MAX_PIPELINE_CYCLES` (default `2`), Ralph Loop uses `RALPH_MAX_OUTER_CYCLES` (default `2`). See `.claude/rules/post-implementation-pipeline.md` for cap semantics and state files.
 
@@ -38,7 +40,7 @@ The pipeline is capped at **2 total runs by default** (initial + 1 re-run). Stan
 - [ ] Unified PR created from `integration/<slug>` to base branch
 - [ ] Plan directory archived from `docs/plans/active/` to `docs/plans/archive/`
 
-Ralph Loop handles the full lifecycle autonomously per slice (implement → self-review → verify → test → sync-docs → codex-review), then merges slices into the integration branch, runs an integration pipeline (`--skip-pr --fix-all`) to catch cross-module issues, and creates a unified PR.
+Ralph Loop handles the full lifecycle autonomously per slice (implement → self-review → verify → test → sync-docs → cross-review), then merges slices into the integration branch, runs an integration pipeline (`--skip-pr --fix-all`) to catch cross-module issues, and creates a unified PR.
 
 **Pipeline report output:** Each pipeline agent (self-review, verify, test) writes reports to both `.harness/state/pipeline/` (for orchestrator consumption) and `docs/reports/` (for PR pre-checks and human review). This dual-write ensures pipeline artifacts are available for the same quality checks as the standard flow.
 

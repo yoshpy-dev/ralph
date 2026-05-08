@@ -10,7 +10,7 @@ Autonomous multi-iteration coding with `claude -p` and file-system memory.
 | **実装** | Claude Code セッション内で対話的 | `claude -p` で自律実行 × N slice |
 | **ブランチ** | `git checkout -b` | `git worktree add` × N |
 | **post-impl 実行モデル** | subagent Task calls (`reviewer`, `verifier`, `tester`, `doc-maintainer`) | `claude -p` × 専用プロンプト (`pipeline-self-review.md`, `pipeline-verify.md`, `pipeline-test.md`, `pipeline-outer.md`) |
-| **パイプライン順序** | `/self-review` → `/verify` → `/test` → `/sync-docs` → `/codex-review` → `/pr` | 同一 |
+| **パイプライン順序** | `/self-review` → `/verify` → `/test` → `/sync-docs` → `/cross-review` → `/pr` | 同一 |
 | **レポート出力** | `docs/reports/` | `docs/reports/` + `.harness/state/pipeline/` (dual-write) |
 | **ユースケース** | 短〜中規模、対話的 | 大規模、分割可能、並列自律 |
 
@@ -236,7 +236,7 @@ Inner Loop (per cycle):
   → if tests fail: retry (up to --max-inner-cycles)
 
 Outer Loop (after tests pass):
-  sync-docs (claude -p) → codex-review → PR (claude -p)
+  sync-docs (claude -p) → cross-review → PR (claude -p)
   → if codex ACTION_REQUIRED: regress to Inner Loop
 ```
 

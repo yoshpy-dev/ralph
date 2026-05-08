@@ -13,17 +13,24 @@ import (
 )
 
 // setupTestEmbedFS injects a minimal mock FS into scaffold.EmbeddedFS for testing.
+// Includes the Codex parity tree (.codex/ + .agents/skills/) so tests can
+// assert all three CLI surfaces are rendered by `ralph init`.
 func setupTestEmbedFS(t *testing.T) {
 	t.Helper()
 	scaffold.EmbeddedFS = fstest.MapFS{
-		"templates/base/AGENTS.md":             {Data: []byte("# AGENTS\n")},
-		"templates/base/CLAUDE.md":             {Data: []byte("# CLAUDE\n")},
-		"templates/base/ralph.toml":            {Data: []byte("[pipeline]\nmodel = \"test\"\n")},
-		"templates/base/.claude/settings.json": {Data: []byte("{}\n")},
-		"templates/packs/golang/verify.sh":     {Data: []byte("#!/bin/sh\necho ok\n")},
-		"templates/packs/golang/README.md":     {Data: []byte("# Go\n")},
-		"templates/packs/typescript/verify.sh": {Data: []byte("#!/bin/sh\necho ok\n")},
-		"templates/packs/typescript/README.md": {Data: []byte("# TS\n")},
+		"templates/base/AGENTS.md":                    {Data: []byte("# AGENTS\n")},
+		"templates/base/CLAUDE.md":                    {Data: []byte("# CLAUDE\n")},
+		"templates/base/ralph.toml":                   {Data: []byte("[pipeline]\nmodel = \"test\"\n[doctor]\nrequire_codex_cli = false\n")},
+		"templates/base/.claude/settings.json":        {Data: []byte("{}\n")},
+		"templates/base/.codex/config.toml":           {Data: []byte("model = \"gpt-5.5\"\n[features]\ncodex_hooks = true\n")},
+		"templates/base/.codex/AGENTS.override.md":    {Data: []byte("# codex overrides\n")},
+		"templates/base/.codex/README.md":             {Data: []byte("# codex setup\n")},
+		"templates/base/.agents/skills/.gitkeep":      {Data: []byte("")},
+		"templates/base/.agents/skills/spec/SKILL.md": {Data: []byte("---\nname: spec\ndescription: refine\n---\nbody\n")},
+		"templates/packs/golang/verify.sh":            {Data: []byte("#!/bin/sh\necho ok\n")},
+		"templates/packs/golang/README.md":            {Data: []byte("# Go\n")},
+		"templates/packs/typescript/verify.sh":        {Data: []byte("#!/bin/sh\necho ok\n")},
+		"templates/packs/typescript/README.md":        {Data: []byte("# TS\n")},
 	}
 }
 
@@ -65,6 +72,55 @@ func TestExecuteInit_NewProject(t *testing.T) {
 	}
 	if m.Meta.Version != "0.1.0-test" {
 		t.Errorf("manifest version = %q, want 0.1.0-test", m.Meta.Version)
+	}
+}
+
+// TestExecuteInit_RendersCodexSurfaces enforces AC-1 of the Codex CLI parity
+// spec: a fresh `ralph init` must scaffold .claude/, .codex/, AND
+// .agents/skills/ in lock-step. Without this gate the embed FS could quietly
+// drop the Codex tree (e.g. stale go:embed pattern) and produce projects that
+// look fine to Claude users but break for Codex users.
+func TestExecuteInit_RendersCodexSurfaces(t *testing.T) {
+	setupTestEmbedFS(t)
+	Version = "0.1.0-test"
+
+	dir := t.TempDir()
+	target := filepath.Join(dir, "codex-parity-project")
+
+	cfg := initConfig{ProjectName: "codex-parity-project", Packs: []string{"golang"}}
+	if err := executeInit(target, cfg, false); err != nil {
+		t.Fatalf("executeInit: %v", err)
+	}
+
+	required := []string{
+		// Claude surfaces (pre-existing).
+		".claude/settings.json",
+		// Codex project surfaces.
+		".codex/config.toml",
+		".codex/AGENTS.override.md",
+		".codex/README.md",
+		// Codex skill surface.
+		".agents/skills/spec/SKILL.md",
+	}
+	for _, rel := range required {
+		if _, err := os.Stat(filepath.Join(target, rel)); err != nil {
+			t.Errorf("Codex parity: %s missing after init: %v", rel, err)
+		}
+	}
+
+	// Manifest should track every Codex-side path so future `ralph upgrade`
+	// runs can detect drift on these files.
+	m, err := scaffold.ReadManifest(filepath.Join(target, ".ralph", "manifest.toml"))
+	if err != nil {
+		t.Fatalf("ReadManifest: %v", err)
+	}
+	for _, rel := range []string{
+		".codex/config.toml",
+		".agents/skills/spec/SKILL.md",
+	} {
+		if _, ok := m.Files[rel]; !ok {
+			t.Errorf("manifest missing Codex-side path %q", rel)
+		}
 	}
 }
 
@@ -913,6 +969,152 @@ func TestRunDoctor_Passes(t *testing.T) {
 	// Doctor should not error fatally (it may warn about missing claude CLI).
 	// We just verify it doesn't panic.
 	_ = runDoctor(dir)
+}
+
+// TestProbeBinary_BrokenShimFails covers the codex-cross-review finding that
+// `LookPath("codex")` is not enough — a broken shim on PATH lets `ralph
+// doctor` falsely report `pass` while every subsequent /work or /cross-review
+// invocation crashes. probeBinary must run `<bin> --version` and surface the
+// failure so doctor can warn or fail.
+func TestProbeBinary_BrokenShimFails(t *testing.T) {
+	dir := t.TempDir()
+	shim := filepath.Join(dir, "claude")
+	// Shim that exits non-zero on any invocation, simulating a stale entry
+	// script that lost its target.
+	if err := os.WriteFile(shim, []byte("#!/bin/sh\necho 'shim broken' >&2\nexit 1\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Point PATH at this directory only so the probe finds the shim.
+	t.Setenv("PATH", dir)
+
+	if _, err := probeBinary("claude"); err == nil {
+		t.Fatal("probeBinary returned nil error for a broken shim — should have surfaced --version failure")
+	}
+}
+
+// TestProbeBinary_MissingBinary distinguishes "not on PATH" from "shim
+// broken". Both should be errors but for different reasons; the test pins the
+// LookPath branch so a future refactor cannot silently swallow it.
+func TestProbeBinary_MissingBinary(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PATH", dir)
+
+	if _, err := probeBinary("claude"); err == nil {
+		t.Fatal("probeBinary returned nil error for missing binary")
+	}
+}
+
+// TestCheckCodexEffectiveConfig_MissingFile asserts that we degrade to a
+// warning (not a fail) when the project has no .codex/config.toml — the
+// .codex/ tree is template-driven, so a missing file just means the user has
+// not run `ralph init` or `ralph upgrade` against this revision yet.
+func TestCheckCodexEffectiveConfig_MissingFile(t *testing.T) {
+	dir := t.TempDir()
+	r := checkCodexEffectiveConfig(dir)
+	if r.Status != "warn" {
+		t.Errorf("status = %q, want warn", r.Status)
+	}
+	if !strings.Contains(r.Detail, "not found") {
+		t.Errorf("detail = %q, want substring 'not found'", r.Detail)
+	}
+}
+
+// TestCheckCodexEffectiveConfig_MissingFeatureFlag_Warns covers the failure
+// mode Codex documents explicitly: project [hooks] are silently ignored unless
+// `[features] codex_hooks = true` is set. Doctor must surface this as a warn
+// even when [hooks] are otherwise wired up.
+func TestCheckCodexEffectiveConfig_MissingFeatureFlag_Warns(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".codex"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	contents := `model = "gpt-5.5"
+
+[hooks]
+[[hooks.PostToolUse]]
+command = ["./scripts/hello.sh"]
+`
+	if err := os.WriteFile(filepath.Join(dir, ".codex", "config.toml"), []byte(contents), 0644); err != nil {
+		t.Fatal(err)
+	}
+	r := checkCodexEffectiveConfig(dir)
+	if r.Status != "warn" {
+		t.Errorf("status = %q, want warn", r.Status)
+	}
+	if !strings.Contains(r.Detail, "codex_hooks") {
+		t.Errorf("detail = %q, want substring 'codex_hooks'", r.Detail)
+	}
+}
+
+// TestCheckCodexEffectiveConfig_NoHooks_Warns ensures the check distinguishes
+// "feature flag missing" from "no hooks wired" so the operator gets a precise
+// remediation hint.
+func TestCheckCodexEffectiveConfig_NoHooks_Warns(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".codex"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	contents := `model = "gpt-5.5"
+
+[features]
+codex_hooks = true
+`
+	if err := os.WriteFile(filepath.Join(dir, ".codex", "config.toml"), []byte(contents), 0644); err != nil {
+		t.Fatal(err)
+	}
+	r := checkCodexEffectiveConfig(dir)
+	if r.Status != "warn" {
+		t.Errorf("status = %q, want warn", r.Status)
+	}
+	if !strings.Contains(r.Detail, "codex trust") {
+		t.Errorf("detail = %q, want substring 'codex trust'", r.Detail)
+	}
+}
+
+// TestCheckCodexEffectiveConfig_FullyWired exercises the success path: feature
+// flag on AND at least one hook entry. The detail must remind the operator
+// that effective loading still requires `codex trust .` because we cannot
+// probe Codex's trust state from Go.
+func TestCheckCodexEffectiveConfig_FullyWired(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".codex"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	contents := `model = "gpt-5.5"
+
+[features]
+codex_hooks = true
+
+[[hooks.PostToolUse]]
+command = ["./scripts/check_mojibake.sh"]
+`
+	if err := os.WriteFile(filepath.Join(dir, ".codex", "config.toml"), []byte(contents), 0644); err != nil {
+		t.Fatal(err)
+	}
+	r := checkCodexEffectiveConfig(dir)
+	if r.Status != "pass" {
+		t.Errorf("status = %q, want pass (detail=%q)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "codex trust") {
+		t.Errorf("detail must mention `codex trust .` reminder, got %q", r.Detail)
+	}
+}
+
+// TestCheckCodexEffectiveConfig_InvalidTOML_Fails proves the doctor surfaces
+// a fail (not warn) when the TOML cannot be parsed — silently warning would
+// hide a configuration error from the operator.
+func TestCheckCodexEffectiveConfig_InvalidTOML_Fails(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".codex"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".codex", "config.toml"), []byte("not [valid toml=="), 0644); err != nil {
+		t.Fatal(err)
+	}
+	r := checkCodexEffectiveConfig(dir)
+	if r.Status != "fail" {
+		t.Errorf("status = %q, want fail", r.Status)
+	}
 }
 
 // shouldColorize must respect NO_COLOR (any non-empty value disables) and

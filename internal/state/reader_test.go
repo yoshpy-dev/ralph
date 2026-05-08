@@ -202,8 +202,8 @@ func TestReadPipelineCheckpoint(t *testing.T) {
 		if c.FailureTriage[0].Hypothesis != "missing import in types.go" {
 			t.Errorf("failure_triage[0].hypothesis = %q, unexpected", c.FailureTriage[0].Hypothesis)
 		}
-		if c.CodexTriage.WorthConsidering != 1 {
-			t.Errorf("codex_triage.worth_considering = %d, want 1", c.CodexTriage.WorthConsidering)
+		if c.CrossReviewTriage.WorthConsidering != 1 {
+			t.Errorf("cross_review_triage.worth_considering = %d, want 1", c.CrossReviewTriage.WorthConsidering)
 		}
 		if !c.PRCreated {
 			t.Error("pr_created = false, want true")

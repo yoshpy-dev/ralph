@@ -27,7 +27,7 @@ Build coding-agent workflows that are:
 5. Verify (auto — via `verifier` subagent, or pipeline-internal)
 6. Test (auto — via `tester` subagent, or pipeline-internal)
 7. Sync-docs (auto — via `doc-maintainer` subagent, or pipeline-internal)
-8. Codex-review (auto, optional — cross-model second opinion)
+8. Cross-review (auto, optional — cross-model second opinion via the other CLI: Claude → Codex; Codex → Claude)
 9. PR (auto — includes hand-off)
 10. CI verify + human merge
 
@@ -59,13 +59,17 @@ Steps 4–9 run via subagents in 標準フロー. In Ralph Loop, they are handle
 - `docs/plans/templates/` — plan templates (`feature-plan.md`, `ralph-loop-manifest.md`, `ralph-loop-slice.md`)
 - `docs/reports/` — self-review, verify, test, walkthrough artifacts
 - `docs/quality/` — definition of done and quality gates
-- `.claude/rules/` — path-scoped guidance
-- `.claude/skills/` — on-demand workflows
-- `.claude/agents/` — specialized subagents
+- `.claude/rules/` — path-scoped guidance (read by both CLIs)
+- `.claude/skills/` — Claude-side on-demand workflows
+- `.claude/agents/` — specialized subagents (Claude only)
 - `.claude/hooks/` — deterministic runtime checks
   - `check_mojibake.sh` + `mojibake-allowlist` — temporary U+FFFD detection guard for Claude Code SSE mojibake (remove once upstream Issue #43746 ships)
+- `.agents/skills/` — Codex-side skill bodies (mirrors `.claude/skills/`; kept in lock-step by `scripts/check-skill-sync.sh`)
+- `.codex/` — Codex project config for this meta-repo (`config.toml`, `hooks/`, `AGENTS.override.md`, `README.md`); same shape as `templates/base/.codex/` so ralph dogfoods the parity it ships
+- `templates/base/.codex/` — `ralph init` source for the same surface; root `.codex/` and template `.codex/` are kept identical via `scripts/check-sync.sh` (no KNOWN_DIFFS today)
 - `packs/languages/` — language-specific depth (also copied to `templates/packs/` for embedding)
-- `scripts/` — reusable verification and bootstrap scripts (includes legacy `ralph` shell CLI, `ralph-config.sh`, `ralph-pipeline.sh`, `ralph-orchestrator.sh`, `install.sh`)
+- `scripts/` — reusable verification and bootstrap scripts (includes legacy `ralph` shell CLI, `ralph-config.sh`, `ralph-pipeline.sh`, `ralph-orchestrator.sh`, `install.sh`, drift gate `check-skill-sync.sh`, Codex availability probe `codex-check.sh`)
+- `docs/recipes/` — hands-on recipes (Codex setup, Ralph Loop, language packs, worktrees)
 - `.harness/state/` — runtime state, not canonical truth
 
 ## Planning contract

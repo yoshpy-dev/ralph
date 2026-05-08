@@ -8,11 +8,18 @@
 
 ## Claude control plane
 
-- `.claude/rules/`: path-scoped or topic-scoped guidance
-- `.claude/skills/`: on-demand workflows
-- `.claude/agents/`: specialized subagents
+- `.claude/rules/`: path-scoped or topic-scoped guidance (read by both CLIs)
+- `.claude/skills/`: Claude-side skill bodies (mirrored to `.agents/skills/`)
+- `.claude/agents/`: specialized subagents (Claude only)
 - `.claude/hooks/`: deterministic hook scripts
 - `.claude/settings.json`: hook and permission configuration
+
+## Codex control plane
+
+- `.agents/skills/`: Codex-side skill bodies (kept in lock-step with `.claude/skills/` via `scripts/check-skill-sync.sh`)
+- `.codex/`: project-level Codex config for the meta-repo itself (`config.toml`, `hooks/`, `AGENTS.override.md`, `README.md`); same shape as `templates/base/.codex/` so ralph dogfoods the parity it ships
+- `templates/base/.codex/`: `ralph init` source for the same surface; root `.codex/` and template `.codex/` are kept byte-identical, validated by `scripts/check-sync.sh` (no KNOWN_DIFFS today)
+- `internal/state/PipelineCheckpoint.CrossReviewTriage`: post-rename JSON key (`cross_review_triage`) recorded by the cross-review skill
 
 ## Process artifacts
 
@@ -23,6 +30,7 @@
 - `docs/quality/`: definition of done and gates
 - `docs/tech-debt/`: known debt and follow-ups
 - `docs/evidence/`: what counts as evidence
+- `docs/recipes/`: hands-on recipes (Codex setup, Ralph Loop, language packs, agent teams, worktrees)
 
 ## Skills
 
@@ -33,7 +41,7 @@
 - `.claude/skills/self-review/`: self-review diff quality (auto)
 - `.claude/skills/verify/`: spec compliance and static analysis (auto)
 - `.claude/skills/test/`: behavioral tests (auto)
-- `.claude/skills/codex-review/`: cross-model second opinion via Codex (auto, optional)
+- `.claude/skills/cross-review/`: cross-model second opinion via the other CLI (Claude → Codex; Codex → Claude) (auto, optional)
 - `.claude/skills/pr/`: create PRs, archive plans, hand off (auto)
 - `.claude/skills/sync-docs/`: documentation sync (auto)
 - `.claude/skills/audit-harness/`: harness consistency audit (auto)
@@ -43,7 +51,7 @@
 ## Extensions
 
 - `packs/languages/`: stack-specific rules and verification
-- `scripts/`: init (`init-project.sh`), bootstrap (`bootstrap.sh`), install one-liner (`install.sh`), plan creation (`new-feature-plan.sh`, `new-ralph-plan.sh`), plan archival (`archive-plan.sh`), verification (`run-verify.sh`, `run-static-verify.sh`, `run-test.sh`), CI checks (`check-coverage.sh`, `check-pipeline-sync.sh`, `check-sync.sh`, `check-template.sh`), commit safety (`commit-msg-guard.sh`), language detection (`detect-languages.sh`), language pack creation (`new-language-pack.sh`), Ralph Loop orchestration (`ralph-loop.sh`, `ralph-loop-init.sh`, `ralph-status-helpers.sh`), pipeline orchestration (`ralph-pipeline.sh`, `ralph-orchestrator.sh`, `ralph-config.sh`, `ralph` CLI), TUI build (`build-tui.sh`), Codex availability check (`codex-check.sh`)
+- `scripts/`: init (`init-project.sh`), bootstrap (`bootstrap.sh`), install one-liner (`install.sh`), plan creation (`new-feature-plan.sh`, `new-ralph-plan.sh`), plan archival (`archive-plan.sh`), verification (`run-verify.sh`, `run-static-verify.sh`, `run-test.sh`), CI checks (`check-coverage.sh`, `check-pipeline-sync.sh`, `check-skill-sync.sh`, `check-sync.sh`, `check-template.sh`), commit safety (`commit-msg-guard.sh`), language detection (`detect-languages.sh`), language pack creation (`new-language-pack.sh`), Ralph Loop orchestration (`ralph-loop.sh`, `ralph-loop-init.sh`, `ralph-status-helpers.sh`), pipeline orchestration (`ralph-pipeline.sh`, `ralph-orchestrator.sh`, `ralph-config.sh`, `ralph` CLI), TUI build (`build-tui.sh`), Codex availability check (`codex-check.sh`)
 - `.github/workflows/`: CI checks (verify.yml, check-template.yml) and release automation (release.yml for goreleaser)
 
 ## Runtime state

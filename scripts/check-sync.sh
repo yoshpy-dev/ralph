@@ -65,6 +65,9 @@ ROOT_ONLY_EXCLUSIONS=(
   "docs/reports/verify-"
   "docs/reports/test-"
   "docs/reports/sync-docs-"
+  "docs/reports/cross-review-triage-"
+  # Pre-rename historical triage reports kept for archival purposes only
+  # (the skill rename in 2026-05 stopped emitting this prefix).
   "docs/reports/codex-triage-"
   "docs/reports/walkthrough-"
   # Harness runtime state

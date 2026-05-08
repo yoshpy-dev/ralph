@@ -2,9 +2,9 @@
 
 # ralph
 
-**Claude Code–first CLI for harness engineering.**
+**Claude Code + Codex CLI harness engineering.**
 
-Scaffold, upgrade, and run opinionated agent harnesses — small always-on maps, on-demand skills, deterministic hooks, evidence-backed reviews, and optional autonomous parallel execution (Ralph Loop).
+Scaffold, upgrade, and run opinionated agent harnesses that work with both Claude Code and the OpenAI Codex CLI from the same project — small always-on maps, on-demand skills, deterministic hooks, evidence-backed reviews, and optional autonomous parallel execution (Ralph Loop).
 
 [![verify](https://github.com/yoshpy-dev/ralph/actions/workflows/verify.yml/badge.svg)](https://github.com/yoshpy-dev/ralph/actions/workflows/verify.yml)
 [![latest release](https://img.shields.io/github/v/release/yoshpy-dev/ralph?sort=semver)](https://github.com/yoshpy-dev/ralph/releases/latest)
@@ -56,8 +56,12 @@ ralph doctor
 ```sh
 ralph init my-project
 cd my-project
-ralph doctor                  # environment check
+ralph doctor                  # environment check (Claude + Codex)
 ```
+
+Both CLIs are wired up automatically. To make Codex's project-level config and
+hooks actually load, run `codex trust .` once after `ralph init`. `ralph doctor`
+flags trust gaps so you do not lose hooks silently.
 
 Create your first plan and run the loop inside Claude Code:
 
@@ -69,12 +73,21 @@ Create your first plan and run the loop inside Claude Code:
 ./scripts/new-ralph-plan.sh login-form N/A 3
 ```
 
-In Claude Code, follow the loop:
+In Claude Code, follow the loop with slash commands:
 
 ```
 /spec (optional) → /plan → /work (or /loop)
 → /self-review → /verify → /test → /sync-docs
-→ /codex-review (optional) → /pr
+→ /cross-review (optional) → /pr
+```
+
+In Codex, the same flow runs via skill mention syntax (`/spec` collides with
+Codex built-in slash commands — use `$skill-name` or the `/skills` menu):
+
+```
+$spec (optional) → $plan → $work (or $loop)
+→ $self-review → $verify → $test → $sync-docs
+→ $cross-review (optional) → $pr
 ```
 
 Before claiming a task is done:
@@ -87,7 +100,7 @@ Before claiming a task is done:
 
 | | |
 |:---|:---|
-| **Maps, not manuals**<br/>Short `AGENTS.md` / `CLAUDE.md`; push detail into rules and skills, promote repeats into hooks. | **Canonical pipeline**<br/>`self-review → verify → test → sync-docs → codex-review → pr` enforced in standard flow and Ralph Loop. |
+| **Maps, not manuals**<br/>Short `AGENTS.md` / `CLAUDE.md`; push detail into rules and skills, promote repeats into hooks. | **Canonical pipeline**<br/>`self-review → verify → test → sync-docs → cross-review → pr` enforced in standard flow and Ralph Loop. |
 | **Deterministic hooks**<br/>Mojibake guard, commit-msg secret scan, Bash guardrails, verification reminders — pre-wired in `settings.json`. | **Ralph Loop**<br/>Multi-worktree autonomous parallel slices, integration branch, unified PR — orchestrated by `ralph run`. |
 | **Language packs**<br/>TypeScript, Python, Rust, Go, Dart starters (opt-in) with per-language `verify.sh` and path-scoped rules. | **Drift-proof upgrades**<br/>Hash-based `ralph upgrade` with per-file conflict resolution — keeps N projects aligned as the scaffold evolves. |
 | **Evidence over prose**<br/>Every review, verify, test, and codex pass produces a dated artifact in `docs/reports/`. | **Cross-agent portable**<br/>`AGENTS.md` + `scripts/` + `packs/` stay neutral; `.claude/` is the Claude-native layer you can stack others beside. |
@@ -121,14 +134,21 @@ The philosophy: **a map, not a manual**. Keep `AGENTS.md` small, push detail int
 
 ```text
 .
-├── AGENTS.md                 # vendor-neutral map for any coding agent
+├── AGENTS.md                 # vendor-neutral map shared by Claude and Codex
 ├── CLAUDE.md                 # Claude Code specific guidance (imports AGENTS.md)
 ├── .claude/
 │   ├── settings.json         # hooks, permissions, env
 │   ├── hooks/                # deterministic runtime guardrails
 │   ├── skills/               # on-demand workflows (plan, work, verify, ...)
-│   ├── agents/               # specialized subagents
-│   └── rules/                # conditional, path-scoped guidance
+│   ├── agents/               # specialized subagents (Claude only)
+│   └── rules/                # conditional, path-scoped guidance (read by both CLIs)
+├── .codex/
+│   ├── config.toml           # model, sandbox, approval, hooks (loads after `codex trust .`)
+│   ├── hooks/                # Codex hook scripts
+│   ├── AGENTS.override.md    # Codex-only execution rules
+│   └── README.md             # Codex setup and operator guide
+├── .agents/
+│   └── skills/               # Codex-side skill bodies (mirrors .claude/skills/)
 ├── docs/
 │   ├── specs/                # refined specifications from /spec
 │   ├── plans/active/         # plans in flight
@@ -156,7 +176,7 @@ flowchart LR
     E --> F["/verify"]
     F --> G["/test"]
     G --> H["/sync-docs"]
-    H --> I["/codex-review<br/>(optional)"]
+    H --> I["/cross-review<br/>(optional)"]
     I --> J["/pr"]
     J --> K["CI +<br/>human merge"]
 ```
@@ -170,7 +190,7 @@ flowchart LR
 5. **Verify** (auto — `/verify`) — spec compliance + static analysis.
 6. **Test** (auto — `/test`) — behavioral tests must pass before PR.
 7. **Sync docs** (auto — `/sync-docs`) — alignment across AGENTS.md / CLAUDE.md / rules / README.
-8. **Codex review** (auto, optional — `/codex-review`) — cross-model second opinion via Codex CLI; silently skipped if unavailable.
+8. **Cross-review** (auto, optional — `/cross-review`) — cross-model second opinion via the OTHER CLI: Claude Code calls Codex; Codex calls `claude -p`. Silently skipped if the reviewer side is unavailable.
 9. **PR** (auto — `/pr`) — structured PR, plan archival, hand-off.
 10. **CI + human merge**.
 
@@ -178,7 +198,7 @@ See `.claude/rules/post-implementation-pipeline.md` for the canonical pipeline o
 
 ## Ralph Loop (autonomous parallel execution)
 
-For large tasks that can be split into independent slices, Ralph Loop runs parallel pipelines across multiple Git worktrees. Each slice handles its own lifecycle autonomously (implement → self-review → verify → test → sync-docs → codex-review). Completed slices are sequentially merged into an integration branch, and a unified PR is created.
+For large tasks that can be split into independent slices, Ralph Loop runs parallel pipelines across multiple Git worktrees. Each slice handles its own lifecycle autonomously (implement → self-review → verify → test → sync-docs → cross-review). Completed slices are sequentially merged into an integration branch, and a unified PR is created.
 
 ```sh
 ./scripts/new-ralph-plan.sh my-feature N/A 3
@@ -218,10 +238,27 @@ Wire it into `packs/languages/<name>/verify.sh`, `.claude/rules/<name>.md`, and 
 
 ## Portability
 
-`ralph` is Claude-native, but the scaffold separates portable vs. Claude-specific surfaces so you can keep the base when adding Codex, Gemini CLI, or another agent:
+`ralph` ships both Claude Code and Codex surfaces always-on, plus a portable
+core that any future CLI can reuse:
 
-- **Portable**: `AGENTS.md`, `scripts/`, `.github/workflows/`, `packs/languages/`
+- **Portable**: `AGENTS.md`, `scripts/`, `.github/workflows/`, `packs/languages/`, `docs/`
 - **Claude-native**: `CLAUDE.md`, `.claude/rules/`, `.claude/skills/`, `.claude/hooks/`, `.claude/agents/`
+- **Codex-native**: `.codex/config.toml`, `.codex/hooks/`, `.codex/AGENTS.override.md`, `.codex/README.md`, `.agents/skills/`
+
+`scripts/check-skill-sync.sh` keeps `.claude/skills/` and `.agents/skills/` in
+lock-step on body, name, description, and implicit-invocation policy. CI fails
+on drift so the two CLIs cannot quietly diverge.
+
+### Known differences between Claude Code and Codex
+
+| Concern | Claude Code | Codex |
+|---------|-------------|-------|
+| Skill invocation | `/skill-name` slash command | `$skill-name` mention or `/skills` menu — `/skill-name` collides with Codex built-ins (`/plan`, `/review`, `/status`) |
+| Subagents in `/work` post-impl | `Task(subagent_type=...)` parallel | sequential inline (single agent) |
+| Structured prompts | `AskUserQuestion` | numbered stdin prompt |
+| Cross-model reviewer | calls `codex exec review` | calls `claude -p` with adversarial reviewer prompt |
+| Permission policy | `permission_mode = "auto"` | `sandbox_mode = "workspace-write"` + `approval_policy = "on-request"` |
+| Config trust | always loads `.claude/settings.json` | only loads `.codex/config.toml` after `codex trust .` AND `[features] codex_hooks = true` |
 
 ## Adoption order
 

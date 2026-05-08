@@ -13,4 +13,8 @@ dir = ".ralph/prompts"
 
 [doctor]
 require_claude_cli = true
+# Codex CLI is optional by default — set to true to fail `ralph doctor` when
+# the codex binary is missing. The accompanying `.codex/config.toml` is loaded
+# only when `codex trust .` has been run for this project; see .codex/README.md.
+require_codex_cli = false
 require_go = false

@@ -23,6 +23,11 @@ func TestDefault(t *testing.T) {
 	if !cfg.Doctor.RequireClaudeCLI {
 		t.Error("require_claude_cli should be true by default")
 	}
+	// Codex CLI is opt-in: defaults to false so projects without Codex
+	// installed do not see `ralph doctor` exit non-zero.
+	if cfg.Doctor.RequireCodexCLI {
+		t.Error("require_codex_cli should default to false")
+	}
 }
 
 func TestLoad_MissingFile(t *testing.T) {
@@ -106,5 +111,33 @@ require_go = false
 	}
 	if cfg.Doctor.RequireGo {
 		t.Error("require_go should be false")
+	}
+}
+
+// TestLoad_RequireCodexCLI verifies the new toml field round-trips. The doctor
+// command relies on this knob to switch between warn (default) and fail when
+// the codex binary is missing.
+func TestLoad_RequireCodexCLI(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ralph.toml")
+
+	content := `[doctor]
+require_claude_cli = false
+require_codex_cli = true
+require_go = false
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.Doctor.RequireCodexCLI {
+		t.Error("require_codex_cli = false after loading explicit true")
+	}
+	if cfg.Doctor.RequireClaudeCLI {
+		t.Error("require_claude_cli = true after loading explicit false")
 	}
 }

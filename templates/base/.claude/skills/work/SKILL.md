@@ -12,7 +12,7 @@ Work from the active plan, not from memory alone.
    - If exactly one candidate file exists, use it.
    - If multiple candidate files exist, ask via AskUserQuestion which plan this `/work` run targets, and use the selected path.
    - If none exist, stop and ask the user to run `/plan` first.
-   - Downstream steps in this skill — and downstream skills (`/codex-review`, `/pr`) — MUST use this resolved path instead of rescanning `docs/plans/active/`.
+   - Downstream steps in this skill — and downstream skills (`/cross-review`, `/pr`) — MUST use this resolved path instead of rescanning `docs/plans/active/`.
 2. **Create feature branch** (if not already on one), based on the plan resolved in Step 1:
    a. Read the resolved plan to extract metadata (type, issue number, slug).
    b. Determine branch name: `<type>/<issue>/<slug>` (with issue) or `<type>/<slug>` (without issue).
@@ -45,7 +45,7 @@ Work from the active plan, not from memory alone.
     b. `Task(subagent_type="verifier")` → `/verify` — stop if fail verdict
     c. `Task(subagent_type="tester")` → `/test` — stop if fail verdict
     d. `Task(subagent_type="doc-maintainer")` → `/sync-docs`
-    e. **Invoke `/codex-review` via the Skill tool** (optional, inline — if Codex CLI unavailable, skip to `/pr`). The skill reads `cycle-count.json` and enforces `RALPH_STANDARD_MAX_PIPELINE_CYCLES` (default 2). On re-run after ACTION_REQUIRED fixes, `/codex-review` increments `cycle-count.json`.
+    e. **Invoke `/cross-review` via the Skill tool** (optional, inline — if Codex CLI unavailable, skip to `/pr`). The skill reads `cycle-count.json` and enforces `RALPH_STANDARD_MAX_PIPELINE_CYCLES` (default 2). On re-run after ACTION_REQUIRED fixes, `/cross-review` increments `cycle-count.json`.
     f. **Invoke `/pr` via the Skill tool** — do NOT run `gh pr create` directly. The `/pr` skill enforces the Japanese template, pre-checks, and plan archiving. On success, `/pr` deletes `.harness/state/standard-pipeline/active-plan.json` and `cycle-count.json`.
 
 ## Scope discipline
@@ -86,3 +86,19 @@ Before asking the user for confirmation, next steps, or choices, first check whe
 - Evidence before confidence
 - Versioned plan over chat-only plan
 - Smaller diffs over heroic rewrites
+
+## CLI 別実行ガイダンス
+
+このスキルは Claude Code と Codex の両方で動作する。実行モードは AGENTS.md と
+`.codex/AGENTS.override.md` の規約に従う。
+
+| 観点 | Claude Code | Codex |
+|------|-------------|-------|
+| Skill 起動 | `/skill-name` slash command | `$skill-name` mention または `/skills` メニュー (`/skill-name` 形式は built-in 衝突のため使わない) |
+| Skill 本体パス | `.claude/skills/<name>/SKILL.md` | `.agents/skills/<name>/SKILL.md` |
+| サブエージェント | `Task(subagent_type=...)` で並列呼び出し可 | 順次 inline 実行 — 単一 agent 内で連続実行 |
+| 構造化対話 | `AskUserQuestion` | 番号付き選択肢を stdout に出して数字を待機 |
+| 成果物 | `docs/reports/`, `docs/plans/`, `docs/specs/` 共通 | 同左 (CLI 非依存) |
+
+drift check (`./scripts/check-skill-sync.sh`) は両側の本文と起動メタデータを
+照合する — 片側だけ編集すると CI で fail する。

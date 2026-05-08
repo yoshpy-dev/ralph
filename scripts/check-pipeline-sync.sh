@@ -2,7 +2,7 @@
 set -eu
 
 # Pipeline order sync checker
-# Canonical: /self-review -> /verify -> /test -> /sync-docs -> /codex-review -> /pr
+# Canonical: /self-review -> /verify -> /test -> /sync-docs -> /cross-review -> /pr
 # Source of truth: .claude/rules/post-implementation-pipeline.md
 
 CANONICAL=".claude/rules/post-implementation-pipeline.md"
@@ -17,7 +17,7 @@ if [ ! -f "$CANONICAL" ]; then
   exit 1
 fi
 
-if ! grep -q 'self-review.*verify.*test.*sync-docs.*codex-review' "$CANONICAL"; then
+if ! grep -q 'self-review.*verify.*test.*sync-docs.*cross-review' "$CANONICAL"; then
   fail "Canonical order not found in $CANONICAL"
   exit 1
 fi
@@ -27,7 +27,7 @@ ok "Canonical source valid"
 REFS="
 .claude/skills/work/SKILL.md
 .claude/skills/loop/SKILL.md
-.claude/skills/codex-review/SKILL.md
+.claude/skills/cross-review/SKILL.md
 .claude/rules/subagent-policy.md
 CLAUDE.md
 docs/quality/definition-of-done.md
@@ -40,7 +40,7 @@ for ref in $REFS; do
 
   # Check that the file mentions all 5 pipeline steps
   missing=""
-  for step in self-review verify test sync-docs codex-review; do
+  for step in self-review verify test sync-docs cross-review; do
     if ! grep -qi "$step" "$ref" 2>/dev/null; then
       missing="${missing:+${missing}, }${step}"
     fi

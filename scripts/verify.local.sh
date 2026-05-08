@@ -80,11 +80,26 @@ run_static_checks() {
   if [ -x scripts/check-sync.sh ]; then
     run "scripts/check-sync.sh" scripts/check-sync.sh
   fi
+
+  # 5. Pipeline order sync.
+  if [ -x scripts/check-pipeline-sync.sh ]; then
+    run "scripts/check-pipeline-sync.sh" scripts/check-pipeline-sync.sh
+  fi
+
+  # 6. Skill drift between .claude/skills/ and .agents/skills/. The Codex
+  # parity contract relies on these trees staying byte-identical (body) and
+  # carrying matching trigger metadata (name/description/policy).
+  if [ -x scripts/check-skill-sync.sh ]; then
+    run "scripts/check-skill-sync.sh" scripts/check-skill-sync.sh
+  fi
 }
 
 run_hook_tests() {
   if [ -x tests/test-check-mojibake.sh ]; then
     run "tests/test-check-mojibake.sh" tests/test-check-mojibake.sh
+  fi
+  if [ -x tests/test-check-skill-sync.sh ]; then
+    run "tests/test-check-skill-sync.sh" tests/test-check-skill-sync.sh
   fi
 }
 

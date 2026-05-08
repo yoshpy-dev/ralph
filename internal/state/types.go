@@ -89,7 +89,7 @@ type PipelineCheckpoint struct {
 	SelfReviewResult            *string           `json:"self_review_result"`
 	VerifyResult                *string           `json:"verify_result"`
 	ReviewFindings              []string          `json:"review_findings"`
-	CodexTriage                 CodexTriage       `json:"codex_triage"`
+	CrossReviewTriage           CrossReviewTriage `json:"cross_review_triage"`
 	AcceptanceCriteriaMet       []string          `json:"acceptance_criteria_met"`
 	AcceptanceCriteriaRemaining []string          `json:"acceptance_criteria_remaining"`
 	SessionID                   *string           `json:"session_id"`
@@ -106,8 +106,8 @@ type FailureEntry struct {
 	Result     string `json:"result"`
 }
 
-// CodexTriage represents the codex_triage object in checkpoint.json.
-type CodexTriage struct {
+// CrossReviewTriage represents the cross_review_triage object in checkpoint.json.
+type CrossReviewTriage struct {
 	ActionRequired   int `json:"action_required"`
 	WorthConsidering int `json:"worth_considering"`
 	Dismissed        int `json:"dismissed"`

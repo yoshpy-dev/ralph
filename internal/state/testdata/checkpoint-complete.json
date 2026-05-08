@@ -19,7 +19,7 @@
   "self_review_result": "pass",
   "verify_result": "pass",
   "review_findings": [],
-  "codex_triage": {
+  "cross_review_triage": {
     "action_required": 0,
     "worth_considering": 1,
     "dismissed": 2

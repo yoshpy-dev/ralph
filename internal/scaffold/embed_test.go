@@ -77,6 +77,7 @@ func TestTemplateBaseScriptsExist(t *testing.T) {
 		"ralph-status-helpers.sh",
 		"commit-msg-guard.sh",
 		"check-template.sh",
+		"check-skill-sync.sh",
 	}
 
 	for _, name := range required {
@@ -89,6 +90,36 @@ func TestTemplateBaseScriptsExist(t *testing.T) {
 		// Verify executable permission on Unix.
 		if runtime.GOOS != "windows" && info.Mode().Perm()&0111 == 0 {
 			t.Errorf("script not executable: templates/base/scripts/%s (mode %o)", name, info.Mode().Perm())
+		}
+	}
+}
+
+// TestTemplateBaseCodexAssetsExist enforces the Codex parity contract
+// (docs/specs/2026-05-07-codex-cli-parity.md): every fresh `ralph init`
+// project must ship .codex/{config.toml, AGENTS.override.md, README.md} and
+// the .agents/skills/ tree alongside the existing .claude/ surface. Drift in
+// either tree breaks AC-1, so guard the on-disk template directly rather than
+// relying on go:embed inspection (the embed FS is empty in unit tests).
+func TestTemplateBaseCodexAssetsExist(t *testing.T) {
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("cannot determine test file location")
+	}
+	repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..")
+	baseDir := filepath.Join(repoRoot, "templates", "base")
+
+	required := []string{
+		".codex/config.toml",
+		".codex/AGENTS.override.md",
+		".codex/README.md",
+		".codex/hooks/README.md",
+		".agents/skills/.gitkeep",
+	}
+
+	for _, rel := range required {
+		path := filepath.Join(baseDir, rel)
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("required template missing: templates/base/%s (%v)", rel, err)
 		}
 	}
 }

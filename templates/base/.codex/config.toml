@@ -1,0 +1,90 @@
+# .codex/config.toml — project-scoped configuration for the Codex CLI.
+#
+# IMPORTANT: Codex only loads this file when the project is **trusted**.
+# Run `codex trust .` (or accept the trust prompt on first invocation) before
+# expecting model/sandbox/approval/hooks settings to take effect. Use
+# `ralph doctor` to confirm the effective configuration.
+#
+# References:
+# - https://developers.openai.com/codex/config-reference
+# - https://developers.openai.com/codex/hooks
+
+# Default model used by Codex when working in this project.
+# ralph runs the post-implementation pipeline sequentially (no multi-agent),
+# so the model must be capable of long-running structured edits.
+model = "gpt-5.5"
+
+# Sandbox mode: workspace-write keeps all writes inside the project worktree.
+# Pair with approval_policy below to gate destructive shell calls.
+sandbox_mode = "workspace-write"
+
+# approval_policy: when Codex pauses for user approval.
+# - "never"      : autonomous (Claude Code's permission_mode = auto equivalent)
+# - "on-request" : tool asks → user approves (default for ralph)
+# - "untrusted"  : every tool call needs approval
+approval_policy = "on-request"
+
+# Web search: prefer cached results to keep runs deterministic.
+# Switch to "live" only when researching very recent topics.
+web_search = "cached"
+
+[features]
+# Required: project-level [hooks] are only loaded when codex_hooks is enabled.
+# Without this flag the [hooks] table below is silently ignored.
+codex_hooks = true
+
+[tui]
+# Notify the operator when Codex finishes a long-running task.
+notifications = true
+
+# ---------------------------------------------------------------------------
+# Profiles — switch between flows with `codex --profile <name>`.
+# ---------------------------------------------------------------------------
+
+[profiles.work]
+# Standard /work-style implementation profile.
+model = "gpt-5.5"
+approval_policy = "on-request"
+
+[profiles.review]
+# Read-only review/advisory mode (used by the /cross-review skill).
+model = "gpt-5.5"
+sandbox_mode = "read-only"
+approval_policy = "never"
+
+# ---------------------------------------------------------------------------
+# Hooks — wired to the same scripts/ used by Claude Code's .claude/hooks/.
+#
+# IMPORTANT: hooks ONLY run when the project is trusted AND
+# [features] codex_hooks = true (see above). `ralph doctor` verifies both.
+#
+# Add or extend entries to mirror .claude/hooks/ behaviour.
+# ---------------------------------------------------------------------------
+
+# Default-on: detect U+FFFD mojibake injection after Edit/Write tool calls.
+# Reuses the same script the Claude-side hook calls (.claude/hooks/check_mojibake.sh)
+# so behaviour stays identical across CLIs. Path is a real file shipped by
+# `ralph init` — these entries satisfy `checkCodexEffectiveConfig`'s "at least
+# one [hooks.*] entry" requirement out of the box.
+[[hooks.PostToolUse]]
+match = { tool = "Edit" }
+command = ["./.claude/hooks/check_mojibake.sh"]
+
+[[hooks.PostToolUse]]
+match = { tool = "Write" }
+command = ["./.claude/hooks/check_mojibake.sh"]
+
+# Note: `scripts/commit-msg-guard.sh` is a git commit-msg hook (consumes
+# `$1` = path to .git/COMMIT_EDITMSG), NOT a Codex PostToolUse hook. Wiring
+# it as a PostToolUse on `^git commit` would invoke it with no $1 and exit 1
+# on every commit. Install it as a real `.git/hooks/commit-msg` instead, or
+# write a Codex-shaped wrapper before adding a PostToolUse entry here.
+
+# ---------------------------------------------------------------------------
+# MCP servers — uncomment and supply credentials via environment variables.
+# Never check in raw tokens; use ${ENV_VAR} substitution instead.
+# ---------------------------------------------------------------------------
+
+# [mcp_servers.example]
+# url = "https://example.invalid/mcp"
+# bearer_token_env = "EXAMPLE_MCP_TOKEN"

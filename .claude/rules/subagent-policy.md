@@ -13,7 +13,7 @@ After `/work` completes, run the post-implementation pipeline via subagents:
 | 3 | `tester` | `/test` | Behavioral tests |
 | 4 | `doc-maintainer` | `/sync-docs` | Documentation sync |
 
-Steps 1–3 run sequentially (output of one informs the next). Step 4 runs after tests pass. After step 4, `/codex-review` runs inline (optional), then `/pr`. Use the Task tool with `subagent_type` matching the agent name.
+Steps 1–3 run sequentially (output of one informs the next). Step 4 runs after tests pass. After step 4, `/cross-review` runs inline (optional), then `/pr`. Use the Task tool with `subagent_type` matching the agent name.
 
 ### Execution
 
@@ -45,9 +45,21 @@ If a subagent fails to execute (tool error, not a review finding), run the corre
 
 ## Codex triage — always inline
 
-`/codex-review` triage runs in the main context (not delegated to a subagent) because triage accuracy depends on implementation context — knowing *why* the code was written that way, what design decisions were made, what the plan's non-goals are, and what the self-review already addressed. A subagent would lack this context and produce unreliable classifications (more false negatives in DISMISSED, more false positives in ACTION_REQUIRED).
+`/cross-review` triage runs in the main context (not delegated to a subagent) because triage accuracy depends on implementation context — knowing *why* the code was written that way, what design decisions were made, what the plan's non-goals are, and what the self-review already addressed. A subagent would lack this context and produce unreliable classifications (more false negatives in DISMISSED, more false positives in ACTION_REQUIRED).
 
-The triage step reads existing artifacts (plan, self-review report, verify report) and produces `docs/reports/codex-triage-<slug>.md`. No new subagent definition is needed.
+The triage step reads existing artifacts (plan, self-review report, verify report) and produces `docs/reports/cross-review-triage-<slug>.md`. No new subagent definition is needed.
+
+## Post-implementation pipeline under Codex — sequential inline
+
+Codex CLI does not have a subagent (`Task`) mechanism. When ralph runs under
+Codex (`RALPH_PRIMARY_CLI=codex` or detected at runtime), the four
+post-implementation skills run **sequentially inline in the single agent**:
+the agent walks the canonical order step-by-step, writing the same reports to
+`docs/reports/` that the Claude subagent path produces. This keeps artifact
+parity for `/cross-review` triage, the cycle cap, and `/pr`.
+
+Cap protection: the same `RALPH_STANDARD_MAX_PIPELINE_CYCLES` ceiling applies,
+so a runaway inline pipeline cannot loop more than `cap` total runs.
 
 ## Post-implementation pipeline for /loop — orchestrator-internal
 

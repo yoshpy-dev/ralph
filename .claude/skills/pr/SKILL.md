@@ -1,6 +1,6 @@
 ---
 name: pr
-description: Create a pull request after self-review, verify, and test pass. Handles branch push, PR creation, plan archiving, and hand-off. Invoke automatically after /codex-review completes (or is skipped), when self-review, verify, and test reports all exist with passing verdicts.
+description: Create a pull request after self-review, verify, and test pass. Handles branch push, PR creation, plan archiving, and hand-off. Invoke automatically after /cross-review completes (or is skipped), when self-review, verify, and test reports all exist with passing verdicts.
 allowed-tools: Read, Grep, Glob, Bash, Write
 ---
 Create a PR to hand off completed work for human review and merge.
@@ -43,3 +43,19 @@ Do NOT present the PR as complete unless ALL of the following are true:
 - [ ] For large diffs: walkthrough report exists
 - [ ] Commit follows conventional commit format
 - [ ] `.harness/state/standard-pipeline/` state files removed on success
+
+## CLI 別実行ガイダンス
+
+このスキルは Claude Code と Codex の両方で動作する。実行モードは AGENTS.md と
+`.codex/AGENTS.override.md` の規約に従う。
+
+| 観点 | Claude Code | Codex |
+|------|-------------|-------|
+| Skill 起動 | `/skill-name` slash command | `$skill-name` mention または `/skills` メニュー (`/skill-name` 形式は built-in 衝突のため使わない) |
+| Skill 本体パス | `.claude/skills/<name>/SKILL.md` | `.agents/skills/<name>/SKILL.md` |
+| サブエージェント | `Task(subagent_type=...)` で並列呼び出し可 | 順次 inline 実行 — 単一 agent 内で連続実行 |
+| 構造化対話 | `AskUserQuestion` | 番号付き選択肢を stdout に出して数字を待機 |
+| 成果物 | `docs/reports/`, `docs/plans/`, `docs/specs/` 共通 | 同左 (CLI 非依存) |
+
+drift check (`./scripts/check-skill-sync.sh`) は両側の本文と起動メタデータを
+照合する — 片側だけ編集すると CI で fail する。

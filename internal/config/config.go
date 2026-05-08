@@ -33,6 +33,7 @@ type PromptConfig struct {
 // DoctorConfig holds doctor check settings.
 type DoctorConfig struct {
 	RequireClaudeCLI bool `toml:"require_claude_cli"`
+	RequireCodexCLI  bool `toml:"require_codex_cli"`
 	RequireGo        bool `toml:"require_go"`
 }
 
@@ -52,6 +53,7 @@ func Default() Config {
 		},
 		Doctor: DoctorConfig{
 			RequireClaudeCLI: true,
+			RequireCodexCLI:  false,
 			RequireGo:        false,
 		},
 	}

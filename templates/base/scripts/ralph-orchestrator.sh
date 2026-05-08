@@ -551,7 +551,7 @@ done)
 ## Test plan
 
 - [x] All slice pipelines passed (self-review, verify, test)
-- [x] Integration pipeline passed (self-review, verify, test, sync-docs, codex-review)
+- [x] Integration pipeline passed (self-review, verify, test, sync-docs, cross-review)
 - [x] All self-review findings fixed (--fix-all)
 - [x] Integration merge passed without conflicts
 - [ ] CI checks pass on this PR
