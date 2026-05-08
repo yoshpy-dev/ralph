@@ -748,38 +748,57 @@ DOCS
   run_agent "$_docs_prompt" "$_docs_log" ""
   report_event "sync-docs" "{\"cycle\":${_cycle},\"log\":\"${_docs_log}\"}"
 
-  # --- Cross-review phase ---
+  # --- Cross-review phase (driver-aware reviewer inversion) ---
   #
-  # NOTE: Loop is Claude-driven only at this point. The standard /work flow's
-  # cross-review skill is bidirectional (RALPH_PRIMARY_CLI=codex flips the
-  # reviewer to claude -p), but the Loop pipeline runs `claude -p` exclusively
-  # for the Inner Loop, so the reviewer side here is always Codex. Surrounding
-  # variable names (_codex_log, _has_codex, _codex_check, "codex
-  # ACTION_REQUIRED" context strings) intentionally retain the codex_ prefix
-  # to mark "this is the Codex-as-reviewer code path" — they are the
-  # bookmark for the follow-up Loop driver work tracked in
-  # https://github.com/yoshpy-dev/ralph/issues/44. Once Loop accepts a Codex
-  # driver, this block should branch on driver and rename the bookkeeping.
+  # The contract is that the reviewer is the *opposite* CLI from the driver,
+  # so the cross-model gate is preserved regardless of which CLI ran the
+  # Inner Loop. Phase 2 (issue #44) adds the codex-driven branch.
   log "--- Phase: cross-review ---"
-  _codex_log="${PIPELINE_DIR}/outer-${_cycle}-cross-review.log"
-  _has_codex=false
+  _xreview_log="${PIPELINE_DIR}/outer-${_cycle}-cross-review.log"
 
-  if [ -x ./scripts/codex-check.sh ] && ./scripts/codex-check.sh >/dev/null 2>&1; then
-    _has_codex=true
+  case "$RALPH_LOOP_DRIVER" in
+    claude) _reviewer="codex"  ;;
+    codex)  _reviewer="claude" ;;
+    *)      _reviewer="codex"  ;;  # fall through (validate_loop_driver already ran)
+  esac
+
+  _has_reviewer=false
+  if command -v "$_reviewer" >/dev/null 2>&1; then
+    _has_reviewer=true
   fi
 
   _action_required=0
   _worth_considering=0
   _dismissed=0
 
-  if [ "$_has_codex" = "true" ] && [ "$DRY_RUN" -eq 0 ]; then
-    log "Running cross-review (reviewer=codex)..."
-    _base="$(git rev-parse --abbrev-ref HEAD@{upstream} 2>/dev/null | sed 's|origin/||')"
+  if [ "$_has_reviewer" = "true" ] && [ "$DRY_RUN" -eq 0 ]; then
+    log "Running cross-review (driver=${RALPH_LOOP_DRIVER}, reviewer=${_reviewer})..."
+    _base="$(git rev-parse --abbrev-ref 'HEAD@{upstream}' 2>/dev/null | sed 's|origin/||')"
     _base="${_base:-main}"
     if ! git diff "${_base}...HEAD" --quiet 2>/dev/null; then
-      codex exec review --base "$_base" 2>&1 | tee "$_codex_log" || true
+      case "$_reviewer" in
+        codex)
+          codex exec review --base "$_base" 2>&1 | tee "$_xreview_log" || true
+          ;;
+        claude)
+          # When codex drove the Inner Loop, ask claude -p to play adversarial
+          # reviewer. The prompt lives under .claude/skills/cross-review/prompts/
+          # and writes the triage report itself; we only stream its stdout to
+          # the per-cycle log.
+          _adv_prompt=".claude/skills/cross-review/prompts/adversarial-claude.md"
+          if [ -f "$_adv_prompt" ]; then
+            BASE_BRANCH="$_base" REPORTS_DIR="$REPORTS_DIR" \
+              claude -p --model "$RALPH_CLAUDE_REVIEWER_MODEL" \
+                --permission-mode plan --output-format text \
+                < "$_adv_prompt" 2>&1 | tee "$_xreview_log" || true
+          else
+            log "Warning: adversarial-claude prompt missing at ${_adv_prompt}"
+            echo "missing_adversarial_prompt" > "$_xreview_log"
+          fi
+          ;;
+      esac
 
-      # Parse triage results from the codex output or triage report
+      # Parse triage results from the latest triage report (CLI-neutral path).
       _triage_report="$(find "$REPORTS_DIR" -name 'cross-review-triage-*' -newer "${PIPELINE_DIR}/checkpoint.json" 2>/dev/null | tail -1 || true)"
       if [ -n "$_triage_report" ]; then
         _action_required="$(grep -c 'ACTION_REQUIRED' "$_triage_report" 2>/dev/null || echo 0)"
@@ -788,15 +807,15 @@ DOCS
       fi
     else
       log "No diff against ${_base} — skipping cross-review"
-      echo "no_diff" > "$_codex_log"
+      echo "no_diff" > "$_xreview_log"
     fi
   else
-    log "Codex CLI not available — skipping cross-review (reviewer=codex unavailable)"
-    echo "codex_not_available" > "$_codex_log"
+    log "${_reviewer} CLI not available — skipping cross-review"
+    printf '%s_not_available\n' "$_reviewer" > "$_xreview_log"
   fi
 
-  ckpt_update ".cross_review_triage = {\"action_required\":${_action_required},\"worth_considering\":${_worth_considering},\"dismissed\":${_dismissed}}"
-  report_event "cross-review" "{\"cycle\":${_cycle},\"action_required\":${_action_required},\"worth_considering\":${_worth_considering},\"dismissed\":${_dismissed}}"
+  ckpt_update ".cross_review_triage = {\"driver\":\"${RALPH_LOOP_DRIVER}\",\"reviewer\":\"${_reviewer}\",\"action_required\":${_action_required},\"worth_considering\":${_worth_considering},\"dismissed\":${_dismissed}}"
+  report_event "cross-review" "{\"cycle\":${_cycle},\"driver\":\"${RALPH_LOOP_DRIVER}\",\"reviewer\":\"${_reviewer}\",\"action_required\":${_action_required},\"worth_considering\":${_worth_considering},\"dismissed\":${_dismissed}}"
 
   # Decision: regress to Inner Loop or proceed to PR
   if [ "$_action_required" -gt 0 ]; then
@@ -938,7 +957,7 @@ main() {
   "self_review_result": null,
   "verify_result": null,
   "review_findings": [],
-  "cross_review_triage": {"action_required": 0, "worth_considering": 0, "dismissed": 0},
+  "cross_review_triage": {"driver": null, "reviewer": null, "action_required": 0, "worth_considering": 0, "dismissed": 0},
   "acceptance_criteria_met": [],
   "acceptance_criteria_remaining": [],
   "session_id": null,
