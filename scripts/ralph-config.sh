@@ -37,6 +37,12 @@ RALPH_CODEX_SANDBOX="${RALPH_CODEX_SANDBOX:-workspace-write}"
 RALPH_CODEX_APPROVAL_POLICY="${RALPH_CODEX_APPROVAL_POLICY:-on-failure}"
 RALPH_CLAUDE_REVIEWER_MODEL="${RALPH_CLAUDE_REVIEWER_MODEL:-claude-opus-4-7}"
 
+# Export so values reach grandchild processes (e.g. ralph-pipeline.sh
+# spawned from ralph-orchestrator.sh, or codex/claude invoked via xargs).
+# Without `export`, shell-local defaults set above would be invisible to
+# children that did not source this file directly.
+export RALPH_LOOP_DRIVER RALPH_CODEX_SANDBOX RALPH_CODEX_APPROVAL_POLICY RALPH_CLAUDE_REVIEWER_MODEL
+
 # ═══════════════════════════════════════════════════════════════════
 # Validation helpers
 # ═══════════════════════════════════════════════════════════════════

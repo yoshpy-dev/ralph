@@ -52,6 +52,7 @@ while [ $# -gt 0 ]; do
 done
 
 validate_all_numeric
+validate_loop_driver
 
 if [ -z "$PLAN_FILE" ]; then
   echo "Error: --plan <directory> is required"
@@ -656,6 +657,11 @@ INT_TASK
 main() {
   log "═══ Ralph Orchestrator ═══"
   log "Plan: ${PLAN_FILE}"
+  log "Loop driver: ${RALPH_LOOP_DRIVER}"
+  if [ "$RALPH_LOOP_DRIVER" = "codex" ]; then
+    log "  codex sandbox: ${RALPH_CODEX_SANDBOX}"
+    log "  codex approval policy: ${RALPH_CODEX_APPROVAL_POLICY}"
+  fi
   log "Max parallel: ${MAX_PARALLEL}"
   log "Max iterations per slice: ${MAX_ITERATIONS}"
   log "Unified PR: ${UNIFIED_PR}"
