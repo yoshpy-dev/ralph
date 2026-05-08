@@ -786,9 +786,14 @@ DOCS
           # the per-cycle log.
           _adv_prompt=".claude/skills/cross-review/prompts/adversarial-claude.md"
           if [ -f "$_adv_prompt" ]; then
+            # `--permission-mode auto` (not plan) is required because the
+            # adversarial reviewer must write the triage report into
+            # docs/reports/. Plan mode is read-only and silently drops the
+            # write — the parser then sees zero findings and the cross-model
+            # gate is bypassed (cycle-2 cross-review P1, #44).
             BASE_BRANCH="$_base" REPORTS_DIR="$REPORTS_DIR" \
               claude -p --model "$RALPH_CLAUDE_REVIEWER_MODEL" \
-                --permission-mode plan --output-format text \
+                --permission-mode auto --output-format text \
                 < "$_adv_prompt" 2>&1 | tee "$_xreview_log" || true
           else
             log "Warning: adversarial-claude prompt missing at ${_adv_prompt}"

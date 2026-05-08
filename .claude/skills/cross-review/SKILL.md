@@ -166,7 +166,7 @@ Ralph Loop (`/loop` → `ralph-pipeline.sh`) でも同じ「reviewer は driver 
 | Loop driver | Reviewer 起動 | プロンプト |
 |-------------|---------------|------------|
 | `claude` | `codex exec review --base "$base"` | (Codex 内蔵 `review` サブコマンド) |
-| `codex`  | `claude -p --permission-mode plan --output-format text` | `.claude/skills/cross-review/prompts/adversarial-claude.md` |
+| `codex`  | `claude -p --permission-mode auto --output-format text` | `.claude/skills/cross-review/prompts/adversarial-claude.md` |
 
 切替時は driver と reviewer の両方が triage report (`Driver:` / `Reviewer:`) と
 `report_event "cross-review"` JSONL (`driver` / `reviewer`) に記録され、後続の

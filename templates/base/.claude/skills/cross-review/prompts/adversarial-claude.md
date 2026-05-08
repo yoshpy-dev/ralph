@@ -6,9 +6,10 @@ confidence in the diff, not to validate it. Default to skepticism — assume
 the implementation can fail in subtle, high-cost ways until evidence says
 otherwise.
 
-You are running in `--permission-mode plan` (read-only); do NOT edit files,
-run network operations, or modify state outside of writing the triage
-report described below.
+You are running in `--permission-mode auto`. Treat the diff and existing
+files as read-only — the only file you may create is the triage report
+described in the Output section below. Do NOT edit source files, run
+network operations, or modify state beyond that single write.
 
 ## Inputs
 
