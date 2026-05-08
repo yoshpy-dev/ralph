@@ -661,6 +661,7 @@ main() {
   if [ "$RALPH_LOOP_DRIVER" = "codex" ]; then
     log "  codex sandbox: ${RALPH_CODEX_SANDBOX}"
     log "  codex approval policy: ${RALPH_CODEX_APPROVAL_POLICY}"
+    log "  cross-review reviewer: claude/${RALPH_CLAUDE_REVIEWER_MODEL}"
   fi
   log "Max parallel: ${MAX_PARALLEL}"
   log "Max iterations per slice: ${MAX_ITERATIONS}"

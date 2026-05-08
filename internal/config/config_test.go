@@ -136,6 +136,7 @@ func TestLoad_LoopCodexDriver(t *testing.T) {
 driver = "codex"
 codex_sandbox = "read-only"
 codex_approval_policy = "untrusted"
+claude_reviewer_model = "claude-sonnet-4-6"
 `
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		t.Fatal(err)
@@ -152,6 +153,9 @@ codex_approval_policy = "untrusted"
 	}
 	if cfg.Loop.CodexApprovalPolicy != "untrusted" {
 		t.Errorf("codex_approval_policy = %q, want untrusted", cfg.Loop.CodexApprovalPolicy)
+	}
+	if cfg.Loop.ClaudeReviewerModel != "claude-sonnet-4-6" {
+		t.Errorf("claude_reviewer_model = %q, want claude-sonnet-4-6", cfg.Loop.ClaudeReviewerModel)
 	}
 }
 

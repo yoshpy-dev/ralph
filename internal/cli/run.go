@@ -75,6 +75,7 @@ func runPipeline(planPath string, maxIter, maxPar int, preflight, resume, dryRun
 	env = appendEnvIfMissing(env, "RALPH_LOOP_DRIVER", cfg.Loop.Driver)
 	env = appendEnvIfMissing(env, "RALPH_CODEX_SANDBOX", cfg.Loop.CodexSandbox)
 	env = appendEnvIfMissing(env, "RALPH_CODEX_APPROVAL_POLICY", cfg.Loop.CodexApprovalPolicy)
+	env = appendEnvIfMissing(env, "RALPH_CLAUDE_REVIEWER_MODEL", cfg.Loop.ClaudeReviewerModel)
 
 	// Find the orchestrator script.
 	scriptPath, err := findScript("ralph-orchestrator.sh")

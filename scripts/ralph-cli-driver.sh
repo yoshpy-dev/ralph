@@ -113,8 +113,18 @@ _run_agent_codex() {
   if [ -f "$_last_file" ]; then
     cp "$_last_file" "$_log_file"
   else
-    printf 'Warning: codex did not write %s; falling back to stdout\n' "$_last_file" >&2
-    cp "${_log_file}.stdout" "$_log_file" 2>/dev/null || : > "$_log_file"
+    # Codex did not produce a final-message file. Surface stdout AND stderr
+    # in <log_file> so the operator (and the surrounding pipeline parser)
+    # actually sees the failure mode — without this, an empty log + a single
+    # warning line was the only evidence and the real error stayed buried in
+    # ${_log_file}.stderr.
+    printf 'Warning: codex did not write %s; falling back to stdout/stderr\n' "$_last_file" >&2
+    {
+      printf '=== codex stdout (no --output-last-message file produced) ===\n'
+      cat "${_log_file}.stdout" 2>/dev/null || true
+      printf '\n=== codex stderr ===\n'
+      cat "${_log_file}.stderr" 2>/dev/null || true
+    } > "$_log_file"
   fi
 
   # Synthesise driver-neutral metadata. Codex doesn't expose a Claude-shaped

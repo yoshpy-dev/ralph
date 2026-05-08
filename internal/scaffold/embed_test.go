@@ -146,6 +146,7 @@ func TestTemplateBaseRalphTomlHasLoopSection(t *testing.T) {
 		`driver = "claude"`,
 		`codex_sandbox = "workspace-write"`,
 		`codex_approval_policy = "on-failure"`,
+		`claude_reviewer_model = "claude-opus-4-7"`,
 	} {
 		if !contains(body, want) {
 			t.Errorf("templates/base/ralph.toml missing %q", want)

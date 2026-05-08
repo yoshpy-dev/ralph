@@ -23,6 +23,11 @@ type LoopConfig struct {
 	Driver              string `toml:"driver"`
 	CodexSandbox        string `toml:"codex_sandbox"`
 	CodexApprovalPolicy string `toml:"codex_approval_policy"`
+	// ClaudeReviewerModel is the model used by `claude -p` when it plays
+	// adversarial reviewer in the cross-review reviewer-inversion path
+	// (driver=codex). Lives on LoopConfig so it shares the same env > TOML >
+	// default priority as the other Phase 2 knobs.
+	ClaudeReviewerModel string `toml:"claude_reviewer_model"`
 }
 
 // PipelineConfig holds pipeline execution settings.
@@ -66,6 +71,7 @@ func Default() Config {
 			Driver:              "claude",
 			CodexSandbox:        "workspace-write",
 			CodexApprovalPolicy: "on-failure",
+			ClaudeReviewerModel: "claude-opus-4-7",
 		},
 		Doctor: DoctorConfig{
 			RequireClaudeCLI: true,
@@ -143,6 +149,9 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.Loop.CodexApprovalPolicy == "" {
 		cfg.Loop.CodexApprovalPolicy = Default().Loop.CodexApprovalPolicy
+	}
+	if cfg.Loop.ClaudeReviewerModel == "" {
+		cfg.Loop.ClaudeReviewerModel = Default().Loop.ClaudeReviewerModel
 	}
 
 	if !loopDriverAllowed[cfg.Loop.Driver] {

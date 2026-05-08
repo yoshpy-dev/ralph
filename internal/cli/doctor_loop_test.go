@@ -37,7 +37,7 @@ func TestCheckLoopDriver_PriorityAndSource(t *testing.T) {
 		{
 			name:        "TOML alone selects codex",
 			env:         nil,
-			toml:        config.LoopConfig{Driver: "codex", CodexSandbox: "read-only", CodexApprovalPolicy: "on-failure"},
+			toml:        config.LoopConfig{Driver: "codex", CodexSandbox: "read-only", CodexApprovalPolicy: "on-failure", ClaudeReviewerModel: "claude-opus-4-7"},
 			wantValue:   "codex",
 			wantSource:  "toml",
 			wantSandbox: "read-only",

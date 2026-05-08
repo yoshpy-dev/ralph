@@ -453,8 +453,11 @@ func checkLoopDriver(cfg config.Config, getenv func(string) string) checkResult 
 
 	r.Status = "pass"
 	if effective == "codex" {
-		r.Detail = fmt.Sprintf("%s (source: %s, sandbox: %s, approval: %s)",
-			effective, source, cfg.Loop.CodexSandbox, cfg.Loop.CodexApprovalPolicy)
+		// Surface reviewer model alongside sandbox/approval so operators can
+		// see the full Codex-driven setup at a glance — including which Claude
+		// model will be invoked when the cross-review reviewer inverts.
+		r.Detail = fmt.Sprintf("%s (source: %s, sandbox: %s, approval: %s, reviewer: claude/%s)",
+			effective, source, cfg.Loop.CodexSandbox, cfg.Loop.CodexApprovalPolicy, cfg.Loop.ClaudeReviewerModel)
 	} else {
 		r.Detail = fmt.Sprintf("%s (source: %s)", effective, source)
 	}

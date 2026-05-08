@@ -348,8 +348,12 @@ run_preflight() {
     codex)
       _so_check="fail"
       _so_name="codex_exec_flags"
-      # shellcheck disable=SC2034  # consumed by ralph-cli-driver.sh via shell inheritance
-      JSON_OUTPUT_SUPPORTED=0  # codex driver synthesises JSON itself; no probe of claude
+      # JSON_OUTPUT_SUPPORTED only gates the claude branch in
+      # ralph-cli-driver.sh — the codex branch synthesises <log>.json itself
+      # via jq. Pin it to 0 so the var is defined for any caller that
+      # inspects it; the codex path does not read it.
+      # shellcheck disable=SC2034  # exported for any future inspector
+      JSON_OUTPUT_SUPPORTED=0
       if [ "$DRY_RUN" -eq 1 ]; then
         _so_check="skip_dry_run"
       elif command -v codex >/dev/null 2>&1; then
