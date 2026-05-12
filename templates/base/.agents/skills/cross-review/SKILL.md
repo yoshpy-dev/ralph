@@ -101,9 +101,9 @@ Provide a cross-model second opinion on the current diff before PR creation.
 
 7. **Present triaged findings**:
    Display findings grouped by classification:
-   - **ACTION_REQUIRED**: Show full details (finding + triage rationale + affected files). Header: "要対応 (ACTION_REQUIRED)"
-   - **WORTH_CONSIDERING**: Show full details. Header: "検討推奨 (WORTH_CONSIDERING)"
-   - **DISMISSED**: Show count and note that details are in the triage report. Example: "除外: N 件（詳細は docs/reports/cross-review-triage-<slug>.md を参照）"
+   - **ACTION_REQUIRED**: Show full details (finding + triage rationale + affected files). Header: "Action required (ACTION_REQUIRED)"
+   - **WORTH_CONSIDERING**: Show full details. Header: "Worth considering (WORTH_CONSIDERING)"
+   - **DISMISSED**: Show count and note that details are in the triage report. Example: "Dismissed: N items (see docs/reports/cross-review-triage-<slug>.md for details)"
 
 8. **User decision**:
    Branch based on triage results **and** on whether the pipeline cycle cap has been reached (see Step 1 — cycle vs `RALPH_STANDARD_MAX_PIPELINE_CYCLES`).
@@ -112,66 +112,68 @@ Provide a cross-model second opinion on the current diff before PR creation.
 
    **Case A — ACTION_REQUIRED findings exist**:
    - If NOT `CAP_REACHED`: Use AskUserQuestion (Claude) or numbered stdin prompt (Codex):
-     - Question: "クロスレビューで要対応の指摘があります。どう対応しますか？"
+     - Question: "Cross-review reported ACTION_REQUIRED findings. How do you want to proceed?"
      - Options:
-       1. 修正する — fix ACTION_REQUIRED issues, then re-run the full post-implementation pipeline: /self-review → /verify → /test → /sync-docs → /cross-review
-       2. WORTH_CONSIDERING も確認する — review both ACTION_REQUIRED and WORTH_CONSIDERING, then decide
-       3. 指摘を確認済み、PR を作成する — proceed to /pr
+       1. Fix — fix ACTION_REQUIRED issues, then re-run the full post-implementation pipeline: /self-review → /verify → /test → /sync-docs → /cross-review
+       2. Also review WORTH_CONSIDERING — review both ACTION_REQUIRED and WORTH_CONSIDERING, then decide
+       3. Acknowledge and create PR — proceed to /pr
    - If `CAP_REACHED` (cap-reached flow):
-     - Question: "パイプライン再実行の上限（`RALPH_STANDARD_MAX_PIPELINE_CYCLES=<cap>`）に到達しました。要対応の指摘が残っていますが、どうしますか？"
+     - Question: "Pipeline re-run cap (`RALPH_STANDARD_MAX_PIPELINE_CYCLES=<cap>`) reached, but ACTION_REQUIRED findings remain. What do you want to do?"
      - Options:
-       1. 上限を一時的に引き上げて再実行 — have the user set a higher `RALPH_STANDARD_MAX_PIPELINE_CYCLES` (e.g. export it) and re-run the pipeline
-       2. 指摘は記録し PR を作成する — add unresolved ACTION_REQUIRED findings to the PR body's Known gaps section, then proceed to /pr
-       3. 中止 — stop without creating a PR; the user will resume manually
+       1. Raise the cap temporarily and re-run — have the user set a higher `RALPH_STANDARD_MAX_PIPELINE_CYCLES` (e.g. export it) and re-run the pipeline
+       2. Record findings and create PR — add unresolved ACTION_REQUIRED findings to the PR body's Known gaps section, then proceed to /pr
+       3. Abort — stop without creating a PR; the user will resume manually
 
    **Case B — No ACTION_REQUIRED, but WORTH_CONSIDERING exist**:
    - If NOT `CAP_REACHED`:
-     - Question: "クロスレビューで検討推奨の指摘があります（要対応はなし）。どう対応しますか？"
+     - Question: "Cross-review reported WORTH_CONSIDERING findings (no ACTION_REQUIRED). How do you want to proceed?"
      - Options:
-       1. 検討して修正する — review WORTH_CONSIDERING findings, fix as needed, then re-run the full post-implementation pipeline
-       2. PR を作成する — proceed to /pr
+       1. Review and fix — review WORTH_CONSIDERING findings, fix as needed, then re-run the full post-implementation pipeline
+       2. Create PR — proceed to /pr
    - If `CAP_REACHED`:
-     - Question: "パイプライン再実行の上限（`RALPH_STANDARD_MAX_PIPELINE_CYCLES=<cap>`）に到達しました。検討推奨の指摘が残っていますが、どうしますか？"
+     - Question: "Pipeline re-run cap (`RALPH_STANDARD_MAX_PIPELINE_CYCLES=<cap>`) reached, but WORTH_CONSIDERING findings remain. What do you want to do?"
      - Options:
-       1. 上限を一時的に引き上げて再実行
-       2. PR を作成する — add unresolved WORTH_CONSIDERING findings to the PR body's Known gaps section, then proceed to /pr
-       3. 中止
+       1. Raise the cap temporarily and re-run
+       2. Create PR — add unresolved WORTH_CONSIDERING findings to the PR body's Known gaps section, then proceed to /pr
+       3. Abort
 
    **Case C — All findings DISMISSED (or no findings)**:
-   Note "Cross-review: 全指摘トリアージ済み（要対応なし）— トリアージレポート: docs/reports/cross-review-triage-<slug>.md" and proceed to /pr.
+   Note "Cross-review: all findings triaged (no ACTION_REQUIRED) — triage report: docs/reports/cross-review-triage-<slug>.md" and proceed to /pr.
 
 9. **Proceed**:
    - **Non-cap re-run** (Case A / Case B, `CAP_REACHED = false`): If `active-plan.json` exists, increment `cycle-count.json` (`cycle += 1`), then guide the user back to `/self-review`. The incremented cycle represents "the pass the user is about to enter".
-   - **Cap-reached Option 1** ("上限を一時的に引き上げて再実行"): Do **NOT** increment `cycle-count.json`. Instruct the user to `export RALPH_STANDARD_MAX_PIPELINE_CYCLES=<current cycle + 1>` (or higher) before re-running, so the unchanged `cycle` falls below the new cap. Then guide them back to `/self-review`.
+   - **Cap-reached Option 1** ("Raise the cap temporarily and re-run"): Do **NOT** increment `cycle-count.json`. Instruct the user to `export RALPH_STANDARD_MAX_PIPELINE_CYCLES=<current cycle + 1>` (or higher) before re-running, so the unchanged `cycle` falls below the new cap. Then guide them back to `/self-review`.
    - If the user chooses `/pr`: invoke /pr (which is responsible for deleting `active-plan.json` and `cycle-count.json` on success).
-   - If the user chooses 中止: stop without invoking /pr; leave state files in place so the next `/work` can resume.
+   - If the user chooses Abort: stop without invoking /pr; leave state files in place so the next `/work` can resume.
 
-## CLI 別実行ガイダンス
+## CLI execution modes
 
-| 観点 | Claude Code (driver = claude) | Codex (driver = codex) |
-|------|-------------------------------|------------------------|
-| Reviewer 呼び出し | `codex exec review --base "$BASE"` | `claude -p --model claude-opus-4-7 --permission-mode auto --output-format json` (adversarial reviewer prompt) |
-| Step 8 ユーザ対話 | `AskUserQuestion` で構造化選択 | 番号付き選択肢を stdout に出して数字 1-3 を待つ |
-| トリアージ実行 | inline (main context) | inline — 単一 agent 内で連続実行 |
-| 出力ファイル | `docs/reports/cross-review-triage-<slug>.md` | 同上 |
+| Aspect | Claude Code (driver = claude) | Codex (driver = codex) |
+|--------|-------------------------------|------------------------|
+| Reviewer invocation | `codex exec review --base "$BASE"` | `claude -p --model claude-opus-4-7 --permission-mode auto --output-format json` (adversarial reviewer prompt) |
+| Step 8 user dialog | Structured choices via `AskUserQuestion` | Numbered options printed to stdout, awaiting a digit 1–3 |
+| Triage execution | inline (main context) | inline — chained within a single agent |
+| Output file | `docs/reports/cross-review-triage-<slug>.md` | Same |
 
-driver / reviewer の判定は Step 2 のロジックを共通で使う。`RALPH_PRIMARY_CLI` を export しておけば曖昧さなく切り替わる。
+Driver / reviewer detection reuses the Step 2 logic. Exporting `RALPH_PRIMARY_CLI` makes the choice unambiguous.
 
-### Ralph Loop 内での reviewer 反転 (Phase 2 / 課題 #44)
+### Reviewer inversion inside Ralph Loop (Phase 2 / issue #44)
 
-Ralph Loop (`/loop` → `ralph-pipeline.sh`) でも同じ「reviewer は driver の逆」契約が
-適用される。判定は `RALPH_PRIMARY_CLI` ではなく **`RALPH_LOOP_DRIVER`** を見る点だけが
-違い、`scripts/ralph-cli-driver.sh` の `pick_reviewer` ヘルパが結論を返す。
+Ralph Loop (`/loop` → `ralph-pipeline.sh`) follows the same "reviewer is the
+driver's opposite" contract. The only difference is that the decision reads
+**`RALPH_LOOP_DRIVER`** instead of `RALPH_PRIMARY_CLI`, and the
+`pick_reviewer` helper in `scripts/ralph-cli-driver.sh` returns the result.
 
-| Loop driver | Reviewer 起動 | プロンプト |
-|-------------|---------------|------------|
-| `claude` | `codex exec review --base "$base"` | (Codex 内蔵 `review` サブコマンド) |
+| Loop driver | Reviewer launch | Prompt |
+|-------------|-----------------|--------|
+| `claude` | `codex exec review --base "$base"` | (Codex built-in `review` subcommand) |
 | `codex`  | `claude -p --permission-mode auto --output-format text` | `.claude/skills/cross-review/prompts/adversarial-claude.md` |
 
-切替時は driver と reviewer の両方が triage report (`Driver:` / `Reviewer:`) と
-`report_event "cross-review"` JSONL (`driver` / `reviewer`) に記録され、後続の
-判定で実際にどちらが走ったか確認できる。fake-CLI を使った回帰テストは
-`tests/test-ralph-cli-driver.sh` の Test 5 / Test 6 で網羅。
+Both driver and reviewer are recorded in the triage report (`Driver:` /
+`Reviewer:`) and in the `report_event "cross-review"` JSONL fields
+(`driver` / `reviewer`), so downstream consumers can confirm which pair
+actually ran. The fake-CLI regression coverage lives in
+`tests/test-ralph-cli-driver.sh` Test 5 / Test 6.
 
 ## What /cross-review does NOT do
 

@@ -1,101 +1,101 @@
 # __TITLE__
 
-## 概要
+## Summary
 
-<!-- 何を作るか・何を解決するかを 1〜3 行で -->
+<!-- What we are building and what it solves, in 1-3 lines. -->
 
-## 背景と課題
+## Background and problem
 
-<!-- なぜこの仕様が必要か。現状の課題、モチベーション、ユーザーへの影響 -->
+<!-- Why this spec is needed: current problems, motivation, user impact. -->
 
-### 現状
+### Current state
 
-<!-- 今どうなっているか（現在の動作、制約、不便な点） -->
+<!-- How things work today (current behavior, constraints, pain points). -->
 
-### 理想状態
+### Desired state
 
-<!-- この仕様が実現したらどうなるか（期待される改善、ユーザー体験の変化） -->
+<!-- What it looks like once this spec ships (expected improvements, UX changes). -->
 
-## 要件
+## Requirements
 
-### 機能要件
+### Functional requirements
 
-<!-- 実装すべき振る舞いを箇条書きで。各項目は検証可能な形で記述する -->
-
-- [ ]
-
-### 非機能要件
-
-<!-- パフォーマンス、セキュリティ、アクセシビリティ、互換性など -->
+<!-- Bullet the behavior to implement. Each item must be verifiable. -->
 
 - [ ]
 
-## 受け入れ基準
+### Non-functional requirements
 
-<!-- この仕様が「完了」と見なされる条件。テスト可能な形で記述する -->
-<!-- 形式: 「〜した場合、〜となること」 -->
+<!-- Performance, security, accessibility, compatibility, etc. -->
 
 - [ ]
 
-## ユーザーストーリー
+## Acceptance criteria
 
-<!-- ユーザー視点のシナリオ。「〜として、〜したい。なぜなら〜だから」形式 -->
+<!-- Conditions for this spec to be considered "done". Write in a testable form. -->
+<!-- Format: "Given ..., when ..., then ..." -->
+
+- [ ]
+
+## User stories
+
+<!-- User-perspective scenarios. Format: "As <role>, I want to <action>, so that <outcome>." -->
 
 1.
 
-## 制約条件
+## Constraints
 
-<!-- 技術的制約、互換性要件、依存関係の制限、スコープ外とする事項 -->
+<!-- Technical constraints, compatibility requirements, dependency limits, anything explicitly out of scope. -->
 
-### スコープ内
+### In scope
 
-<!-- この仕様で対応する範囲 -->
+<!-- What this spec covers. -->
 
-### スコープ外
+### Out of scope
 
-<!-- 明示的に対象外とする事項（将来対応や別 issue で扱うもの） -->
+<!-- Items explicitly excluded (future work, separate issues). -->
 
-## 影響範囲
+## Impact
 
-<!-- この変更が影響するモジュール、ファイル、既存機能、ユーザーフロー -->
+<!-- Modules, files, existing features, and user flows affected by this change. -->
 
-| 影響対象 | 影響内容 | 深刻度 |
-|---------|---------|--------|
+| Target | Impact | Severity |
+|--------|--------|----------|
 | | | |
 
-## 依存関係
+## Dependencies
 
-<!-- 外部ライブラリ、API、他チームの成果物、前提となる作業 -->
+<!-- External libraries, APIs, other teams' deliverables, prerequisite work. -->
 
-## 調査結果
+## Research findings
 
-<!-- コードベース調査、Web 検索、ベストプラクティス調査の結果 -->
+<!-- Codebase exploration, web search, and best-practice findings. -->
 
-### コードベース分析
+### Codebase analysis
 
-<!-- 既存コードの関連部分、既存パターン、再利用可能なコンポーネント -->
+<!-- Related existing code, current patterns, reusable components. -->
 
-### ベストプラクティス
+### Best practices
 
-<!-- 調査で見つかったベストプラクティス、参考実装、業界標準のアプローチ -->
+<!-- Best practices found during research, reference implementations, industry-standard approaches. -->
 
-### 検討した代替案とトレードオフ
+### Alternatives considered and trade-offs
 
-<!-- 比較した選択肢と採用理由 -->
+<!-- Options compared and the reason for the chosen approach. -->
 
-| 選択肢 | メリット | デメリット | 採用 |
-|--------|---------|-----------|------|
+| Option | Pros | Cons | Adopted |
+|--------|------|------|---------|
 | | | | |
 
-## セキュリティ考慮事項
+## Security considerations
 
-<!-- 認証・認可、入力バリデーション、データ保護、OWASP Top 10 に該当する懸念 -->
-<!-- 該当なしの場合は「該当なし」と明記 -->
+<!-- AuthN/Z, input validation, data protection, OWASP Top 10 concerns. -->
+<!-- If none, state "None" explicitly. -->
 
-## 未解決の課題
+## Open questions
 
-<!-- 仕様策定中に解決できなかった疑問点。解決済みのものは削除する -->
+<!-- Questions left unresolved during spec drafting. Remove resolved ones. -->
 
-## 参考資料
+## References
 
-<!-- 参考リンク、ドキュメント、類似実装、関連 issue -->
+<!-- Reference links, docs, similar implementations, related issues. -->

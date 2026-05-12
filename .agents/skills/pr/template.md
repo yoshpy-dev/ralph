@@ -1,50 +1,50 @@
-## 概要
+## Summary
 
-<!-- この PR が何をするか、1-3 行で -->
+<!-- What this PR does, in 1-3 lines. -->
 
-## 背景
+## Background
 
-<!-- なぜこの変更が必要か。課題やコンテキストを簡潔に -->
+<!-- Why this change is needed. The problem or context, briefly. -->
 
-## 変更点
+## Changes
 
-<!-- 主な変更をエリア別にリスト -->
+<!-- Main changes grouped by area. -->
 
-## スコープ
+## In scope
 
-<!-- この PR に含まれる範囲 -->
+<!-- What this PR covers. -->
 
-## スコープ外
+## Out of scope
 
-<!-- 意図的に含めなかったもの、後続タスクに回すもの -->
+<!-- Deliberately excluded; deferred to follow-up tasks. -->
 
-## 検証結果
+## Verification
 
-<!-- /self-review と /verify の要約。レポートへのリンク -->
+<!-- Summary of /self-review and /verify with links to reports. -->
 
 - Self-review: `docs/reports/self-review-<date>-<slug>.md`
 - Verify: `docs/reports/verify-<date>-<slug>.md`
 
-## テスト結果
+## Test results
 
-<!-- /test の要約。レポートへのリンク -->
+<!-- Summary of /test with a link to the report. -->
 
 - Test: `docs/reports/test-<date>-<slug>.md`
 
-## リスク
+## Risks
 
-<!-- 既知のリスク、影響範囲、ロールバック方法 -->
+<!-- Known risks, impact surface, and rollback approach. -->
 
-## レビュアーへの備考
+## Notes for reviewers
 
-<!-- レビュー時に特に見てほしいポイント、設計判断の背景など -->
+<!-- Areas to focus on during review, design rationale, etc. -->
 
-## 関連リンク
+## Related links
 
-- プラン: `docs/plans/archive/<slug>.md`
+- Plan: `docs/plans/archive/<slug>.md`
 - Issue: #__ISSUE__
 
-## ウォークスルー
+## Walkthrough
 
-<!-- 大きな diff (>500行) の場合: docs/reports/walkthrough-<date>-<slug>.md へのリンク -->
-<!-- 小さな diff の場合: このセクションを削除 -->
+<!-- Large diffs (>500 lines): link to docs/reports/walkthrough-<date>-<slug>.md -->
+<!-- Small diffs: delete this section. -->

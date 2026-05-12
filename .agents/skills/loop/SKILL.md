@@ -13,11 +13,11 @@ Set up a Ralph Loop for autonomous parallel-slice execution outside Claude Code.
 
 ## Steps
 
-### Step 1 — コンテキスト把握
+### Step 1 — Context survey
 
 Read `AGENTS.md` and scan `docs/plans/active/` to understand the current project state.
 
-### Step 2 — タスクタイプ選択
+### Step 2 — Task type selection
 
 Use **AskUserQuestion** to let the user pick a task type.
 
@@ -31,7 +31,7 @@ Use **AskUserQuestion** to let the user pick a task type.
   - docs — documentation updates
   - migration — language, framework, or API migration
 
-### Step 3 — 目的と計画ディレクトリの確認
+### Step 3 — Confirm objective and plan directory
 
 Use **AskUserQuestion** to confirm the objective and link the plan directory.
 
@@ -39,7 +39,7 @@ Use **AskUserQuestion** to confirm the objective and link the plan directory.
 - If `docs/plans/active/` contains directory-based plans (with `_manifest.md`), list them as options.
 - Ralph Loop requires a directory-based plan. If none exists, instruct the user to create one with `./scripts/new-ralph-plan.sh <slug> [issue] [slice-count]`.
 
-### Step 3.5 — Git Worktree 作成
+### Step 3.5 — Git worktree creation
 
 Create an isolated worktree for the loop session:
 
@@ -51,24 +51,24 @@ Create an isolated worktree for the loop session:
 
 If already on a feature branch (not main/master), skip worktree creation and work in-place.
 
-### Step 4 — init スクリプト実行
+### Step 4 — Run init script
 
 Run the init script with the confirmed parameters:
 ```sh
 ./scripts/ralph-loop-init.sh <task-type> "<objective>" <plan-directory>
 ```
 
-### Step 5 — PROMPT.md の承認
+### Step 5 — Approve PROMPT.md
 
 Read the generated `.harness/state/loop/PROMPT.md` and display its contents. Then use **AskUserQuestion** to get approval:
 
 - Options:
-  1. **このまま実行** — proceed as-is
-  2. **調整が必要** — user provides edits; apply them to PROMPT.md and re-display for confirmation
-  3. **キャンセル** — abort the loop setup
-- If the user chooses "調整が必要", edit PROMPT.md per their instructions, then re-ask for approval.
+  1. **Proceed as-is** — run with the current PROMPT.md
+  2. **Adjust** — user provides edits; apply them to PROMPT.md and re-display for confirmation
+  3. **Cancel** — abort the loop setup
+- If the user chooses "Adjust", edit PROMPT.md per their instructions, then re-ask for approval.
 
-### Step 6 — 実行コマンドの提示
+### Step 6 — Print run command
 
 After approval, print the run command:
 
@@ -125,52 +125,52 @@ Each prompt is a standalone `claude -p` invocation — the Ralph Loop equivalent
 ### Other
 - [Recipe: Ralph Loop](../../../docs/recipes/ralph-loop.md)
 
-## CLI 別実行ガイダンス
+## CLI execution modes
 
-このスキルは Claude Code と Codex の両方で動作する。実行モードは AGENTS.md と
-`.codex/AGENTS.override.md` の規約に従う。
+This skill runs under both Claude Code and Codex. The execution mode follows
+the conventions in AGENTS.md and `.codex/AGENTS.override.md`.
 
-| 観点 | Claude Code | Codex |
-|------|-------------|-------|
-| Skill 起動 | `/skill-name` slash command | `$skill-name` mention または `/skills` メニュー (`/skill-name` 形式は built-in 衝突のため使わない) |
-| Skill 本体パス | `.claude/skills/<name>/SKILL.md` | `.agents/skills/<name>/SKILL.md` |
-| サブエージェント | `Task(subagent_type=...)` で並列呼び出し可 | 順次 inline 実行 — 単一 agent 内で連続実行 |
-| 構造化対話 | `AskUserQuestion` | 番号付き選択肢を stdout に出して数字を待機 |
-| 成果物 | `docs/reports/`, `docs/plans/`, `docs/specs/` 共通 | 同左 (CLI 非依存) |
+| Aspect | Claude Code | Codex |
+|--------|-------------|-------|
+| Skill invocation | `/skill-name` slash command | `$skill-name` mention or the `/skills` menu (avoid the `/skill-name` form — it collides with built-ins) |
+| Skill body path | `.claude/skills/<name>/SKILL.md` | `.agents/skills/<name>/SKILL.md` |
+| Subagents | Parallel calls via `Task(subagent_type=...)` | Sequential inline execution — chained within a single agent |
+| Structured prompts | `AskUserQuestion` | Numbered options printed to stdout, awaiting a digit reply |
+| Artifacts | `docs/reports/`, `docs/plans/`, `docs/specs/` (shared) | Same (CLI-agnostic) |
 
-### Loop driver の選択 (Phase 2 / 課題 #44)
+### Loop driver selection (Phase 2 / issue #44)
 
-`ralph-pipeline.sh` がスライスごとに呼ぶ CLI は **driver** で切り替える。
-切替手段は二段:
+The CLI invoked by `ralph-pipeline.sh` per slice is controlled by a **driver**.
+Selection has two layers:
 
-1. `ralph.toml` の `[loop] driver = "claude" | "codex"` (静的既定、**Go バイナリ `ralph run` 経由でのみ有効**)
-2. 環境変数 `RALPH_LOOP_DRIVER=claude|codex` (実行時上書き、TOML より強い、シェルラッパー
-   `./scripts/ralph` でもそのまま効く)
+1. `[loop] driver = "claude" | "codex"` in `ralph.toml` (static default; **honoured only via the Go binary `ralph run`**)
+2. Environment variable `RALPH_LOOP_DRIVER=claude|codex` (runtime override, takes precedence over TOML, and also works through the shell wrapper `./scripts/ralph`)
 
-シェルラッパー (`./scripts/ralph`, `scripts/ralph-orchestrator.sh`) は
-`ralph.toml` を読まないので、TOML だけで Codex driver を有効化したい場合は
-Go バイナリ `ralph run` を使うか、`RALPH_LOOP_DRIVER` を shell profile / direnv で
-export する。`ralph doctor` は実効値と source (`env` / `toml` / `default`) を
-1 行で表示するので、どちらの手段で効いたかを確認できる。
+The shell wrappers (`./scripts/ralph`, `scripts/ralph-orchestrator.sh`) do not
+read `ralph.toml`, so if you want to enable the Codex driver via TOML only,
+either use the Go binary `ralph run` or export `RALPH_LOOP_DRIVER` from your
+shell profile / direnv. `ralph doctor` prints the effective value and its
+source (`env` / `toml` / `default`) on one line, so you can confirm which
+layer took effect.
 
-Codex driver では `RALPH_CODEX_SANDBOX` (既定 `workspace-write`) と
-`RALPH_CODEX_APPROVAL_POLICY` (既定 `on-failure`) も合わせて出力される。
+Under the Codex driver, `RALPH_CODEX_SANDBOX` (default `workspace-write`) and
+`RALPH_CODEX_APPROVAL_POLICY` (default `on-failure`) are also reported.
 
-Codex driver でフローを回す例:
+Example of running the flow under the Codex driver:
 
 ```sh
-codex trust .                                   # 一度だけ
-ralph doctor                                    # Loop driver 行で codex を確認
+codex trust .                                   # one-time
+ralph doctor                                    # confirm "codex" on the Loop driver line
 RALPH_LOOP_DRIVER=codex ./scripts/ralph run \
   --plan docs/plans/active/<date>-<slug>/ --unified-pr
 ```
 
-`/cross-review` は driver の **逆** CLI をレビュアーに使う。driver=claude
-なら従来どおり `codex exec review`、driver=codex なら `claude -p
---permission-mode auto` を `.claude/skills/cross-review/prompts/adversarial-claude.md`
-で起動する。triage report の `Driver:` / `Reviewer:` 行と
-`report_event "cross-review"` JSONL の `driver`/`reviewer` フィールドで
-どのペアが走ったか確認できる。
+`/cross-review` always uses the **opposite** CLI as the reviewer. When
+driver=claude, the reviewer is the existing `codex exec review`; when
+driver=codex, the reviewer is `claude -p --permission-mode auto` invoked with
+`.claude/skills/cross-review/prompts/adversarial-claude.md`. The `Driver:` /
+`Reviewer:` header in the triage report and the `driver` / `reviewer` fields
+in the `report_event "cross-review"` JSONL record which pair actually ran.
 
-drift check (`./scripts/check-skill-sync.sh`) は両側の本文と起動メタデータを
-照合する — 片側だけ編集すると CI で fail する。
+The drift check (`./scripts/check-skill-sync.sh`) cross-checks both bodies and
+invocation metadata — editing only one side will fail CI.
