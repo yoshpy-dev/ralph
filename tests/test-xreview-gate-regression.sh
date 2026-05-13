@@ -160,9 +160,17 @@ write_triage() {
 # gate_decision <triage_path> — returns the same exit-code semantics as
 # the inner cross-review block: 0 = proceed, 1 = regress. Implements
 # only the decision logic (the parser feeds it).
+#
+# RENDER_FAILED=1 simulates the pipeline-side _render_failed flag: when
+# the renderer (or allowlist guard) refuses to produce a usable prompt,
+# the gate must fail closed BEFORE consulting the triage parser.
 gate_decision() {
   local triage="$1"
   local fix_all="${FIX_ALL:-0}"
+  local render_failed="${RENDER_FAILED:-0}"
+  if [ "$render_failed" -ne 0 ]; then
+    return 1
+  fi
   local action_required worth_considering
   action_required="$(count_triage_findings "$triage" ACTION_REQUIRED)"
   worth_considering="$(count_triage_findings "$triage" WORTH_CONSIDERING)"
@@ -267,20 +275,27 @@ else
   pass=$((pass + 1))
 fi
 
-# ─── Phase 5: pre-fix regression — literal placeholders must NOT pass the gate
-# Confirms that the very failure mode reported in issue #50 (literal
-# ${REPORTS_DIR} reaching the reviewer) would be caught by the allowlist
-# guard before any reviewer invocation, so the gate cannot silently pass
-# in the broken path.
+# ─── Phase 5: render-failure path → gate fails closed end-to-end ────────────
+# The renderer in scripts/ralph-pipeline.sh sets _render_failed=1 on awk
+# failure, allowlist-guard trip, or any other render-time problem. The
+# gate decision must then return 1 (regress) WITHOUT consulting the
+# triage parser — otherwise an empty REPORTS_DIR would leave
+# _action_required at 0 and the gate would silently pass, reproducing
+# the exact silent-bypass shape of issue #50 inside the very code path
+# meant to fix it.
 echo
-echo "── Phase 5: pre-fix path (literal placeholders) → allowlist guard catches"
+echo "── Phase 5: render-failure path → gate MUST regress end-to-end"
 
+# Step 1: confirm the allowlist guard detects literal placeholders in an
+# unrendered prompt. This is the input the pipeline's allowlist check
+# would receive when someone forgets to update the renderer for a new
+# placeholder.
 BROKEN="$PIPELINE_DIR/outer-1-broken.md"
 cp "$ADV_PROMPT" "$BROKEN"   # NOT rendered — placeholders still literal
 leftover="$(allowlist_leftovers "$BROKEN" || true)"
 case "$leftover" in
   *'${BASE_BRANCH}'*|*'${REPORTS_DIR}'*)
-    echo "  PASS  5a. allowlist guard would flag literal placeholders (gate fails closed)"
+    echo "  PASS  5a. allowlist guard would flag literal placeholders"
     pass=$((pass + 1))
     ;;
   *)
@@ -288,6 +303,56 @@ case "$leftover" in
     fail=$((fail + 1))
     ;;
 esac
+
+# Step 2: drive the gate end-to-end on a render-failure path. We simulate
+# the pipeline state where no reviewer ran (no triage report exists for
+# this cycle), but _render_failed=1. The gate MUST regress.
+EMPTY_REPORTS="$WORK_DIR/empty-reports"
+mkdir -p "$EMPTY_REPORTS"
+# Use a triage path that does not exist — gate_decision should never
+# consult it on the render-failure path.
+NONEXISTENT_TRIAGE="$EMPTY_REPORTS/cross-review-triage-never-written.md"
+
+if RENDER_FAILED=1 gate_decision "$NONEXISTENT_TRIAGE"; then
+  echo "  FAIL  5b. RENDER_FAILED=1 did not regress the gate — issue #50 silent bypass returned"
+  fail=$((fail + 1))
+else
+  echo "  PASS  5b. RENDER_FAILED=1 regresses the gate without consulting the parser"
+  pass=$((pass + 1))
+fi
+
+# Step 3: sanity-check the inverse — same nonexistent triage path with
+# RENDER_FAILED=0 must NOT regress (otherwise we are over-firing the
+# gate on the happy path).
+if RENDER_FAILED=0 gate_decision "$NONEXISTENT_TRIAGE"; then
+  echo "  PASS  5c. RENDER_FAILED=0 with no findings does not regress (no false positives)"
+  pass=$((pass + 1))
+else
+  echo "  FAIL  5c. RENDER_FAILED=0 with no findings regressed — false positive"
+  fail=$((fail + 1))
+fi
+
+# Step 4: drift assertion against the pipeline source — the production
+# script must (a) initialize _render_failed=0, (b) set it to 1 in at
+# least one error branch, and (c) gate-return on it before consulting
+# _action_required. If any of these three drift, this test catches it
+# even when the gate_decision shell helper still passes its synthetic
+# cases above.
+check "5d. pipeline initializes _render_failed=0" \
+  grep -q '^[[:space:]]*_render_failed=0[[:space:]]*$' "$PIPELINE_SH"
+check "5e. pipeline sets _render_failed=1 on error" \
+  grep -q '_render_failed=1' "$PIPELINE_SH"
+check "5f. pipeline gates on _render_failed before _action_required" \
+  bash -c '
+    awk "
+      /_render_failed.*-ne/ { if (!saw_render) saw_render = NR }
+      /_action_required.*-gt/ { if (!saw_action) saw_action = NR }
+      END {
+        if (saw_render > 0 && saw_action > 0 && saw_render < saw_action) exit 0
+        exit 1
+      }
+    " "$1"
+  ' _ "$PIPELINE_SH"
 
 # ─── Summary ────────────────────────────────────────────────────────────────
 echo

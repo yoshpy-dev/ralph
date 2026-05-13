@@ -3,8 +3,8 @@
   pre-rendered by `scripts/ralph-pipeline.sh` (cross-review phase) before
   the prompt is piped to `claude -p`. The renderer uses awk
   index()/substr() so replacement values are treated as literal strings
-  (git refs with `#` / `&` / `/` and configurable `REPORTS_DIR` paths
-  pass through unchanged).
+  (git refs with `#` / `&` / `\` / `/` and configurable `REPORTS_DIR`
+  paths pass through unchanged).
 
   Adding a new `${...}` placeholder requires updating the renderer in
   `scripts/ralph-pipeline.sh` AND extending the allowlist guard that

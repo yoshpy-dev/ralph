@@ -769,6 +769,7 @@ DOCS
   _action_required=0
   _worth_considering=0
   _dismissed=0
+  _render_failed=0
 
   if [ "$_has_reviewer" = "true" ] && [ "$DRY_RUN" -eq 0 ]; then
     log "Running cross-review (driver=${RALPH_LOOP_DRIVER}, reviewer=${_reviewer})..."
@@ -799,50 +800,48 @@ DOCS
             # backslashes. index()+substr() treats the replacement value as
             # a literal string, so git refs with `#` / `&` / `\` / `/` and
             # configurable REPORTS_DIR values pass through unchanged.
+            # Render failure must fail the gate CLOSED — set _render_failed=1
+            # so the gate decision below treats it like ACTION_REQUIRED.
+            # Without that, a render that produces no triage report would
+            # leave _action_required at its initial 0 and the gate would
+            # silently pass — the exact failure shape of issue #50 the
+            # renderer is meant to fix.
             _rendered_prompt="${PIPELINE_DIR}/outer-${_cycle}-adversarial-claude.md"
-            if [ -z "${_base:-}" ]; then
-              log_error "cross-review: empty _base; cannot render adversarial prompt"
-              echo "render_failed_empty_base" > "$_xreview_log"
-              # Skip reviewer invocation; gate will see no triage report and
-              # _action_required stays 0, but the failure is in the log.
-              _adv_prompt=""
+            if ! BASE_BRANCH="$_base" REPORTS_DIR="$REPORTS_DIR" \
+                 awk '
+                   function lreplace(s, needle, repl,    out, idx) {
+                     out = ""
+                     while ((idx = index(s, needle)) > 0) {
+                       out = out substr(s, 1, idx - 1) repl
+                       s = substr(s, idx + length(needle))
+                     }
+                     return out s
+                   }
+                   {
+                     line = $0
+                     line = lreplace(line, "${BASE_BRANCH}", ENVIRON["BASE_BRANCH"])
+                     line = lreplace(line, "${REPORTS_DIR}", ENVIRON["REPORTS_DIR"])
+                     print line
+                   }
+                 ' "$_adv_prompt" > "$_rendered_prompt"; then
+              log_error "cross-review: failed to render adversarial prompt to ${_rendered_prompt}"
+              echo "render_failed_awk" > "$_xreview_log"
+              _render_failed=1
             else
-              if ! BASE_BRANCH="$_base" REPORTS_DIR="$REPORTS_DIR" \
-                   awk '
-                     function lreplace(s, needle, repl,    out, idx) {
-                       out = ""
-                       while ((idx = index(s, needle)) > 0) {
-                         out = out substr(s, 1, idx - 1) repl
-                         s = substr(s, idx + length(needle))
-                       }
-                       return out s
-                     }
-                     {
-                       line = $0
-                       line = lreplace(line, "${BASE_BRANCH}", ENVIRON["BASE_BRANCH"])
-                       line = lreplace(line, "${REPORTS_DIR}", ENVIRON["REPORTS_DIR"])
-                       print line
-                     }
-                   ' "$_adv_prompt" > "$_rendered_prompt"; then
-                log_error "cross-review: failed to render adversarial prompt to ${_rendered_prompt}"
-                echo "render_failed_awk" > "$_xreview_log"
-                _adv_prompt=""
-              else
-                # Allowlist-based unresolved-placeholder guard. Any ${...}
-                # token remaining in the rendered output means a placeholder
-                # was added to the prompt without updating the renderer.
-                # Fail the gate closed rather than passing a broken prompt
-                # to the reviewer.
-                _leftover_placeholders="$(grep -oE '\$\{[A-Z_][A-Z0-9_]*\}' "$_rendered_prompt" 2>/dev/null | sort -u || true)"
-                if [ -n "$_leftover_placeholders" ]; then
-                  log_error "cross-review: unresolved placeholders in rendered prompt: ${_leftover_placeholders}"
-                  echo "render_failed_unresolved_placeholders" > "$_xreview_log"
-                  _adv_prompt=""
-                fi
+              # Allowlist-based unresolved-placeholder guard. Any ${...}
+              # token remaining in the rendered output means a placeholder
+              # was added to the prompt without updating the renderer.
+              # Fail the gate closed rather than passing a broken prompt
+              # to the reviewer.
+              _leftover_placeholders="$(grep -oE '\$\{[A-Z_][A-Z0-9_]*\}' "$_rendered_prompt" 2>/dev/null | sort -u || true)"
+              if [ -n "$_leftover_placeholders" ]; then
+                log_error "cross-review: unresolved placeholders in rendered prompt: ${_leftover_placeholders}"
+                echo "render_failed_unresolved_placeholders" > "$_xreview_log"
+                _render_failed=1
               fi
             fi
 
-            if [ -n "$_adv_prompt" ]; then
+            if [ "$_render_failed" -eq 0 ]; then
               # `--permission-mode auto` (not plan) is required because the
               # adversarial reviewer must write the triage report into
               # docs/reports/. Plan mode is read-only and silently drops the
@@ -882,10 +881,20 @@ DOCS
     printf '%s_not_available\n' "$_reviewer" > "$_xreview_log"
   fi
 
-  ckpt_update ".cross_review_triage = {\"driver\":\"${RALPH_LOOP_DRIVER}\",\"reviewer\":\"${_reviewer}\",\"action_required\":${_action_required},\"worth_considering\":${_worth_considering},\"dismissed\":${_dismissed}}"
-  report_event "cross-review" "{\"cycle\":${_cycle},\"driver\":\"${RALPH_LOOP_DRIVER}\",\"reviewer\":\"${_reviewer}\",\"action_required\":${_action_required},\"worth_considering\":${_worth_considering},\"dismissed\":${_dismissed}}"
+  ckpt_update ".cross_review_triage = {\"driver\":\"${RALPH_LOOP_DRIVER}\",\"reviewer\":\"${_reviewer}\",\"action_required\":${_action_required},\"worth_considering\":${_worth_considering},\"dismissed\":${_dismissed},\"render_failed\":${_render_failed}}"
+  report_event "cross-review" "{\"cycle\":${_cycle},\"driver\":\"${RALPH_LOOP_DRIVER}\",\"reviewer\":\"${_reviewer}\",\"action_required\":${_action_required},\"worth_considering\":${_worth_considering},\"dismissed\":${_dismissed},\"render_failed\":${_render_failed}}"
 
-  # Decision: regress to Inner Loop or proceed to PR
+  # Decision: regress to Inner Loop or proceed to PR.
+  #
+  # Render failure is treated as gate failure (fail closed) — without
+  # this, a renderer that produces no triage report would leave
+  # _action_required at 0 and the gate would silently pass. That is the
+  # exact silent-bypass shape of issue #50.
+  if [ "$_render_failed" -ne 0 ]; then
+    log "Adversarial prompt render failed — regressing to Inner Loop (gate fails closed)"
+    return 1
+  fi
+
   if [ "$_action_required" -gt 0 ]; then
     log "ACTION_REQUIRED findings (${_action_required}) detected — regressing to Inner Loop"
     return 1  # Signal to re-enter Inner Loop
