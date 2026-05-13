@@ -9,7 +9,7 @@ Verify the current work against the plan's acceptance criteria and run static an
 1. Read the active plan and acceptance criteria.
 2. **Spec compliance**: Walk through each acceptance criterion and record whether it is met, partially met, or not met, with evidence.
 3. **Documentation drift**: Check whether behavior changes are reflected in docs, contracts, and rules. Flag any drift.
-4. Run `./scripts/run-static-verify.sh` (static analysis only) unless there is a stronger project-specific verifier.
+4. Run `./scripts/run-static-verify.sh` (static analysis only, changed-language scope by default) unless there is a stronger project-specific verifier.
 5. Capture commands, outcomes, failures, and coverage gaps in a report from [template.md](template.md).
 6. Save raw verification output to `docs/evidence/verify-<date>-<slug>.log`.
 7. If deterministic checks are missing, say so explicitly and propose the smallest useful verifier to add.

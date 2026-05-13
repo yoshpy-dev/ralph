@@ -70,6 +70,18 @@ done
 # Validate all numeric config (catches bad env vars even without CLI args)
 validate_all_numeric
 
+# Per-slice Ralph Loop pipelines use the fast changed-language verifier/tester.
+# The integration pipeline (`--skip-pr --fix-all`) is the broad merged-branch
+# gate and keeps full repository language coverage unless explicitly overridden.
+if [ -z "${RALPH_VERIFY_SCOPE:-}" ]; then
+  if [ "$SKIP_PR" -eq 1 ] && [ "$FIX_ALL" -eq 1 ]; then
+    RALPH_VERIFY_SCOPE="full"
+  else
+    RALPH_VERIFY_SCOPE="changed"
+  fi
+  export RALPH_VERIFY_SCOPE
+fi
+
 # ═══════════════════════════════════════════════════════════════════
 # Cleanup trap
 # ═══════════════════════════════════════════════════════════════════
@@ -996,6 +1008,7 @@ main() {
   log "Max repair attempts: ${MAX_REPAIR_ATTEMPTS}"
   log "Skip PR: ${SKIP_PR}"
   log "Fix all: ${FIX_ALL}"
+  log "Verify scope: ${RALPH_VERIFY_SCOPE}"
   log "Dry run: ${DRY_RUN}"
   log ""
 

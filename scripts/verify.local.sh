@@ -146,7 +146,7 @@ run_static_checks() {
     # Build the argument list via positional parameters so shellcheck
     # does not flag unquoted expansion.
     set --
-    for f in .claude/hooks/*.sh templates/base/.claude/hooks/*.sh scripts/verify.local.sh tests/test-check-mojibake.sh tests/test-verify-mode-split.sh tests/test-self-review-scope.sh tests/test-agent-phase-boundaries.sh; do
+    for f in .claude/hooks/*.sh templates/base/.claude/hooks/*.sh scripts/verify.local.sh tests/test-check-mojibake.sh tests/test-verify-mode-split.sh tests/test-run-verify-scope.sh tests/test-detect-changed-languages.sh tests/test-self-review-scope.sh tests/test-agent-phase-boundaries.sh; do
       [ -f "$f" ] || continue
       set -- "$@" "$f"
     done
@@ -211,6 +211,12 @@ run_hook_tests() {
   fi
   if [ -x tests/test-detect-languages-terraform.sh ]; then
     run "tests/test-detect-languages-terraform.sh" tests/test-detect-languages-terraform.sh
+  fi
+  if [ -x tests/test-detect-changed-languages.sh ]; then
+    run "tests/test-detect-changed-languages.sh" tests/test-detect-changed-languages.sh
+  fi
+  if [ -x tests/test-run-verify-scope.sh ]; then
+    run "tests/test-run-verify-scope.sh" tests/test-run-verify-scope.sh
   fi
   if [ -x tests/test-terraform-pack-verify.sh ]; then
     run "tests/test-terraform-pack-verify.sh" tests/test-terraform-pack-verify.sh

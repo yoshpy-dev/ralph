@@ -17,7 +17,9 @@ Your job is to answer:
 - what minimal additional check would increase confidence most?
 
 Run static verification through `./scripts/run-static-verify.sh` unless the
-plan names a narrower deterministic static verifier. Do NOT run
+plan names a narrower deterministic static verifier. The wrapper defaults to
+changed-language scope; use `RALPH_VERIFY_SCOPE=full` only for explicit full
+gates. Do NOT run
 `./scripts/run-test.sh` or behavioral test suites — that is the tester's job.
 
 Update project memory with useful verifier commands, flaky checks, and recurring blind spots.

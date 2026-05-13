@@ -16,7 +16,9 @@ Your job is to:
 - produce a clear pass/fail verdict
 
 Use `./scripts/run-test.sh` unless the plan names a narrower deterministic test
-runner. Do NOT run `./scripts/run-static-verify.sh`, formatters, linters,
+runner. The wrapper defaults to changed-language scope; use
+`RALPH_VERIFY_SCOPE=full` only for explicit full gates. Do NOT run
+`./scripts/run-static-verify.sh`, formatters, linters,
 static analyzers, type checks, syntax-only gates, or drift checks — those are
 the verifier's job.
 

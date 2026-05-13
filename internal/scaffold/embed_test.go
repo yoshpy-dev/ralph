@@ -63,6 +63,7 @@ func TestTemplateBaseScriptsExist(t *testing.T) {
 		"run-verify.sh",
 		"run-static-verify.sh",
 		"run-test.sh",
+		"detect-changed-languages.sh",
 		"detect-languages.sh",
 		"archive-plan.sh",
 		"new-feature-plan.sh",

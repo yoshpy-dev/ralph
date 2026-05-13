@@ -18,6 +18,8 @@ Execute the test runner:
 ```sh
 ./scripts/run-test.sh
 ```
+Honor `RALPH_VERIFY_SCOPE` when it is set by the pipeline; otherwise the
+wrapper defaults to changed-language scope.
 
 If the script is not available, try:
 ```sh

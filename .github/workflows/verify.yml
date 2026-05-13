@@ -26,6 +26,8 @@ jobs:
           echo "All shell scripts passed syntax check"
       - name: Run verification
         run: ./scripts/run-verify.sh
+        env:
+          RALPH_VERIFY_SCOPE: full
       - name: Check test coverage
         run: ./scripts/check-coverage.sh
         env:

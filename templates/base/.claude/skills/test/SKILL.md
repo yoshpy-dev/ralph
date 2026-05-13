@@ -8,7 +8,7 @@ Run tests and write a report to `docs/reports/`.
 ## Preferred flow
 
 1. Read the active plan and its test plan section.
-2. Run `./scripts/run-test.sh` (tests only) unless there is a stronger project-specific test runner.
+2. Run `./scripts/run-test.sh` (tests only, changed-language scope by default) unless there is a stronger project-specific test runner.
 3. Capture test results, coverage, and failure analysis in a report from [template.md](template.md).
 4. Save raw test output to `docs/evidence/test-<date>-<slug>.log`.
 5. If no tests exist or test infrastructure is missing, say so explicitly and propose the smallest useful test to add.
