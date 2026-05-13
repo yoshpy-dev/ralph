@@ -29,9 +29,9 @@ approval_policy = "on-request"
 web_search = "cached"
 
 [features]
-# Required: project-level [hooks] are only loaded when codex_hooks is enabled.
+# Required: project-level [hooks] are only loaded when hooks is enabled.
 # Without this flag the [hooks] table below is silently ignored.
-codex_hooks = true
+hooks = true
 
 [tui]
 # Notify the operator when Codex finishes a long-running task.
@@ -56,7 +56,7 @@ approval_policy = "never"
 # Hooks — wired to the same scripts/ used by Claude Code's .claude/hooks/.
 #
 # IMPORTANT: hooks ONLY run when the project is trusted AND
-# [features] codex_hooks = true (see above). `ralph doctor` verifies both.
+# [features] hooks = true (see above). `ralph doctor` verifies both.
 #
 # Keep Codex hooks in this file as inline `[[hooks.*]]` entries. Do not add a
 # sibling `.codex/hooks.json`; Codex warns when both representations exist in

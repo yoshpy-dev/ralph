@@ -53,7 +53,7 @@ func runDoctor(targetDir string) error {
 	// Check 2: Codex CLI.
 	results = append(results, checkCodexCLI(cfg))
 
-	// Check 3: Codex effective config (project trust + codex_hooks + at least one hook).
+	// Check 3: Codex effective config (project trust + hooks feature + at least one hook).
 	results = append(results, checkCodexEffectiveConfig(targetDir))
 
 	// Check 4: Hooks integrity.
@@ -180,7 +180,7 @@ func checkCodexCLI(cfg config.Config) checkResult {
 
 // checkCodexEffectiveConfig confirms that .codex/config.toml is present and
 // carries the bits Codex actually loads from a project-level config:
-// `[features] codex_hooks = true` plus at least one [hooks.<event>] entry.
+// `[features] hooks = true` plus at least one [hooks.<event>] entry.
 // We cannot probe Codex's trust state from Go, so the result stays a warning
 // when the file is structurally fine — the user has to confirm trust via
 // `codex trust .` and the .codex/README.md guidance.
@@ -206,10 +206,10 @@ func checkCodexEffectiveConfig(targetDir string) checkResult {
 		return r
 	}
 
-	codexHooks := false
+	hooksFeatureEnabled := false
 	if features, ok := raw["features"].(map[string]any); ok {
-		if v, ok := features["codex_hooks"].(bool); ok {
-			codexHooks = v
+		if v, ok := features["hooks"].(bool); ok {
+			hooksFeatureEnabled = v
 		}
 	}
 
@@ -243,15 +243,15 @@ func checkCodexEffectiveConfig(targetDir string) checkResult {
 	}
 
 	switch {
-	case !codexHooks:
+	case !hooksFeatureEnabled:
 		r.Status = "warn"
-		r.Detail = "[features] codex_hooks = true is not set; project hooks will be ignored"
+		r.Detail = "[features] hooks = true is not set; project hooks will be ignored"
 	case hookEntries == 0:
 		r.Status = "warn"
-		r.Detail = "no [hooks.*] entries — codex_hooks enabled but nothing wired up. Run `codex trust .` once configured"
+		r.Detail = "no [hooks.*] entries — hooks feature enabled but nothing wired up. Run `codex trust .` once configured"
 	default:
 		r.Status = "pass"
-		r.Detail = fmt.Sprintf("codex_hooks=true, %d hook entry(ies). Confirm `codex trust .` ran for this project", hookEntries)
+		r.Detail = fmt.Sprintf("hooks=true, %d hook entry(ies). Confirm `codex trust .` ran for this project", hookEntries)
 	}
 	return r
 }

@@ -26,7 +26,7 @@ representation to avoid Codex startup warnings about loading hooks from both
 files.
 
 See also:
-- `.codex/config.toml` — `[features] codex_hooks = true` and the
+- `.codex/config.toml` — `[features] hooks = true` and the
   `[[hooks.*]]` blocks.
 - `.codex/README.md` — operator-facing hooks guidance.
 - `.claude/hooks/` — the shared script bodies.

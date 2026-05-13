@@ -93,7 +93,7 @@ EOF
 model = "gpt-5.5"
 
 [features]
-codex_hooks = true
+hooks = true
 EOF
 
   codex_config_has_inline_hooks "$with_hooks"

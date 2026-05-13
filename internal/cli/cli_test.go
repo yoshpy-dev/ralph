@@ -22,7 +22,7 @@ func setupTestEmbedFS(t *testing.T) {
 		"templates/base/CLAUDE.md":                         {Data: []byte("# CLAUDE\n")},
 		"templates/base/ralph.toml":                        {Data: []byte("[pipeline]\nmodel = \"test\"\n[doctor]\nrequire_codex_cli = false\n")},
 		"templates/base/.claude/settings.json":             {Data: []byte("{}\n")},
-		"templates/base/.codex/config.toml":                {Data: []byte("model = \"gpt-5.5\"\n[features]\ncodex_hooks = true\n")},
+		"templates/base/.codex/config.toml":                {Data: []byte("model = \"gpt-5.5\"\n[features]\nhooks = true\n")},
 		"templates/base/.codex/AGENTS.override.md":         {Data: []byte("# codex overrides\n")},
 		"templates/base/.codex/README.md":                  {Data: []byte("# codex setup\n")},
 		"templates/base/.codex/agents/doc-maintainer.toml": {Data: []byte("name = \"doc-maintainer\"\n")},
@@ -1030,7 +1030,7 @@ func TestCheckCodexEffectiveConfig_MissingFile(t *testing.T) {
 
 // TestCheckCodexEffectiveConfig_MissingFeatureFlag_Warns covers the failure
 // mode Codex documents explicitly: project [hooks] are silently ignored unless
-// `[features] codex_hooks = true` is set. Doctor must surface this as a warn
+// `[features] hooks = true` is set. Doctor must surface this as a warn
 // even when [hooks] are otherwise wired up.
 func TestCheckCodexEffectiveConfig_MissingFeatureFlag_Warns(t *testing.T) {
 	dir := t.TempDir()
@@ -1050,8 +1050,36 @@ command = ["./scripts/hello.sh"]
 	if r.Status != "warn" {
 		t.Errorf("status = %q, want warn", r.Status)
 	}
-	if !strings.Contains(r.Detail, "codex_hooks") {
-		t.Errorf("detail = %q, want substring 'codex_hooks'", r.Detail)
+	if !strings.Contains(r.Detail, "[features] hooks = true") {
+		t.Errorf("detail = %q, want substring '[features] hooks = true'", r.Detail)
+	}
+}
+
+// TestCheckCodexEffectiveConfig_DeprecatedFeatureFlag_Warns ensures the old
+// `[features] codex_hooks` flag does not satisfy the current Codex config
+// contract.
+func TestCheckCodexEffectiveConfig_DeprecatedFeatureFlag_Warns(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".codex"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	contents := `model = "gpt-5.5"
+
+[features]
+codex_hooks = true
+
+[[hooks.PostToolUse]]
+command = ["./scripts/check_mojibake.sh"]
+`
+	if err := os.WriteFile(filepath.Join(dir, ".codex", "config.toml"), []byte(contents), 0644); err != nil {
+		t.Fatal(err)
+	}
+	r := checkCodexEffectiveConfig(dir)
+	if r.Status != "warn" {
+		t.Errorf("status = %q, want warn", r.Status)
+	}
+	if !strings.Contains(r.Detail, "[features] hooks = true") {
+		t.Errorf("detail = %q, want substring '[features] hooks = true'", r.Detail)
 	}
 }
 
@@ -1066,7 +1094,7 @@ func TestCheckCodexEffectiveConfig_NoHooks_Warns(t *testing.T) {
 	contents := `model = "gpt-5.5"
 
 [features]
-codex_hooks = true
+hooks = true
 `
 	if err := os.WriteFile(filepath.Join(dir, ".codex", "config.toml"), []byte(contents), 0644); err != nil {
 		t.Fatal(err)
@@ -1092,7 +1120,7 @@ func TestCheckCodexEffectiveConfig_FullyWired(t *testing.T) {
 	contents := `model = "gpt-5.5"
 
 [features]
-codex_hooks = true
+hooks = true
 
 [[hooks.PostToolUse]]
 command = ["./scripts/check_mojibake.sh"]
@@ -1122,7 +1150,7 @@ func TestCheckCodexEffectiveConfig_DuplicateHooksJSON_Fails(t *testing.T) {
 	contents := `model = "gpt-5.5"
 
 [features]
-codex_hooks = true
+hooks = true
 
 [[hooks.PostToolUse]]
 command = ["./scripts/check_mojibake.sh"]

@@ -35,7 +35,7 @@ ignores it.
 |---------------|------------------|---------------------------|
 | auto-approve safe writes | `sandbox_mode = "workspace-write"` | enabled |
 | confirm risky tools only | `approval_policy = "on-request"` | enabled |
-| project-level hooks | `[features] codex_hooks = true` + project trust | enabled, requires `codex trust .` |
+| project-level hooks | `[features] hooks = true` + project trust | enabled, requires `codex trust .` |
 | autonomous loops | `approval_policy = "never"` | **not** enabled by default |
 
 If `ralph doctor` reports any of these as missing, follow the remediation it

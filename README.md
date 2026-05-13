@@ -266,7 +266,7 @@ on drift so the two CLIs cannot quietly diverge.
 | Structured prompts | `AskUserQuestion` | numbered stdin prompt |
 | Cross-model reviewer | calls `codex exec review` | calls `claude -p` with adversarial reviewer prompt |
 | Permission policy | `permission_mode = "auto"` | `sandbox_mode = "workspace-write"` + `approval_policy = "on-request"` |
-| Config trust | always loads `.claude/settings.json` | only loads `.codex/config.toml` after `codex trust .` AND `[features] codex_hooks = true` |
+| Config trust | always loads `.claude/settings.json` | only loads `.codex/config.toml` after `codex trust .` AND `[features] hooks = true` |
 
 ## Adoption order
 

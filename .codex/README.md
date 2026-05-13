@@ -25,7 +25,7 @@ the same artifacts no matter which CLI drove the work.
    ```
 
    `ralph doctor` checks that the Codex CLI is on `$PATH`, that the project is
-   trusted, that `[features] codex_hooks = true` is set, and that at least one
+   trusted, that `[features] hooks = true` is set, and that at least one
    `[hooks]` entry is visible to Codex.
 
 ## Daily usage
