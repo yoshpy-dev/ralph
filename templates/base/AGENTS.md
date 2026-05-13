@@ -114,7 +114,7 @@ starting any flow:
 1. Install Codex CLI (>= 0.128.0).
 2. `codex trust .` — without trust, `.codex/config.toml`, `[features]`, and
    `[hooks]` are silently ignored.
-3. `ralph doctor` — confirms CLI presence, project trust, `codex_hooks` flag,
+3. `ralph doctor` — confirms CLI presence, project trust, `hooks` flag,
    and at least one effective `[hooks]` entry.
 
 See `.codex/README.md` for the full guide.

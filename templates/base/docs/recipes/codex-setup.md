@@ -18,11 +18,11 @@ cd <project>
 codex trust .                  # required: only then are .codex/config.toml
                                # and [hooks] actually loaded
 ralph doctor                   # confirms claude/codex CLI presence,
-                               # codex_hooks=true, hook entries
+                               # hooks=true, hook entries
 ```
 
 `ralph doctor` warns if the project is unwritten / untrusted, if
-`[features] codex_hooks = true` is missing, or if no `[hooks]` entries are
+`[features] hooks = true` is missing, or if no `[hooks]` entries are
 visible. Resolve every warning before relying on hook-driven safety.
 
 ## Daily flow
