@@ -144,6 +144,7 @@ The philosophy: **a map, not a manual**. Keep `AGENTS.md` small, push detail int
 │   └── rules/                # conditional, path-scoped guidance (read by both CLIs)
 ├── .codex/
 │   ├── config.toml           # model, sandbox, approval, hooks (loads after `codex trust .`)
+│   ├── agents/               # Codex role definitions for review/verify/test/docs
 │   ├── hooks/                # Codex hook scripts
 │   ├── AGENTS.override.md    # Codex-only execution rules
 │   └── README.md             # Codex setup and operator guide
@@ -250,7 +251,7 @@ core that any future CLI can reuse:
 
 - **Portable**: `AGENTS.md`, `scripts/`, `.github/workflows/`, `packs/languages/`, `docs/`
 - **Claude-native**: `CLAUDE.md`, `.claude/rules/`, `.claude/skills/`, `.claude/hooks/`, `.claude/agents/`
-- **Codex-native**: `.codex/config.toml`, `.codex/hooks/`, `.codex/AGENTS.override.md`, `.codex/README.md`, `.agents/skills/`
+- **Codex-native**: `.codex/config.toml`, `.codex/agents/`, `.codex/hooks/`, `.codex/AGENTS.override.md`, `.codex/README.md`, `.agents/skills/`
 
 `scripts/check-skill-sync.sh` keeps `.claude/skills/` and `.agents/skills/` in
 lock-step on body, name, description, and implicit-invocation policy. CI fails

@@ -18,19 +18,23 @@ import (
 func setupTestEmbedFS(t *testing.T) {
 	t.Helper()
 	scaffold.EmbeddedFS = fstest.MapFS{
-		"templates/base/AGENTS.md":                    {Data: []byte("# AGENTS\n")},
-		"templates/base/CLAUDE.md":                    {Data: []byte("# CLAUDE\n")},
-		"templates/base/ralph.toml":                   {Data: []byte("[pipeline]\nmodel = \"test\"\n[doctor]\nrequire_codex_cli = false\n")},
-		"templates/base/.claude/settings.json":        {Data: []byte("{}\n")},
-		"templates/base/.codex/config.toml":           {Data: []byte("model = \"gpt-5.5\"\n[features]\ncodex_hooks = true\n")},
-		"templates/base/.codex/AGENTS.override.md":    {Data: []byte("# codex overrides\n")},
-		"templates/base/.codex/README.md":             {Data: []byte("# codex setup\n")},
-		"templates/base/.agents/skills/.gitkeep":      {Data: []byte("")},
-		"templates/base/.agents/skills/spec/SKILL.md": {Data: []byte("---\nname: spec\ndescription: refine\n---\nbody\n")},
-		"templates/packs/golang/verify.sh":            {Data: []byte("#!/bin/sh\necho ok\n")},
-		"templates/packs/golang/README.md":            {Data: []byte("# Go\n")},
-		"templates/packs/typescript/verify.sh":        {Data: []byte("#!/bin/sh\necho ok\n")},
-		"templates/packs/typescript/README.md":        {Data: []byte("# TS\n")},
+		"templates/base/AGENTS.md":                         {Data: []byte("# AGENTS\n")},
+		"templates/base/CLAUDE.md":                         {Data: []byte("# CLAUDE\n")},
+		"templates/base/ralph.toml":                        {Data: []byte("[pipeline]\nmodel = \"test\"\n[doctor]\nrequire_codex_cli = false\n")},
+		"templates/base/.claude/settings.json":             {Data: []byte("{}\n")},
+		"templates/base/.codex/config.toml":                {Data: []byte("model = \"gpt-5.5\"\n[features]\ncodex_hooks = true\n")},
+		"templates/base/.codex/AGENTS.override.md":         {Data: []byte("# codex overrides\n")},
+		"templates/base/.codex/README.md":                  {Data: []byte("# codex setup\n")},
+		"templates/base/.codex/agents/doc-maintainer.toml": {Data: []byte("name = \"doc-maintainer\"\n")},
+		"templates/base/.codex/agents/reviewer.toml":       {Data: []byte("name = \"reviewer\"\n")},
+		"templates/base/.codex/agents/tester.toml":         {Data: []byte("name = \"tester\"\n")},
+		"templates/base/.codex/agents/verifier.toml":       {Data: []byte("name = \"verifier\"\n")},
+		"templates/base/.agents/skills/.gitkeep":           {Data: []byte("")},
+		"templates/base/.agents/skills/spec/SKILL.md":      {Data: []byte("---\nname: spec\ndescription: refine\n---\nbody\n")},
+		"templates/packs/golang/verify.sh":                 {Data: []byte("#!/bin/sh\necho ok\n")},
+		"templates/packs/golang/README.md":                 {Data: []byte("# Go\n")},
+		"templates/packs/typescript/verify.sh":             {Data: []byte("#!/bin/sh\necho ok\n")},
+		"templates/packs/typescript/README.md":             {Data: []byte("# TS\n")},
 	}
 }
 
@@ -99,6 +103,10 @@ func TestExecuteInit_RendersCodexSurfaces(t *testing.T) {
 		".codex/config.toml",
 		".codex/AGENTS.override.md",
 		".codex/README.md",
+		".codex/agents/doc-maintainer.toml",
+		".codex/agents/reviewer.toml",
+		".codex/agents/tester.toml",
+		".codex/agents/verifier.toml",
 		// Codex skill surface.
 		".agents/skills/spec/SKILL.md",
 	}
@@ -116,6 +124,7 @@ func TestExecuteInit_RendersCodexSurfaces(t *testing.T) {
 	}
 	for _, rel := range []string{
 		".codex/config.toml",
+		".codex/agents/reviewer.toml",
 		".agents/skills/spec/SKILL.md",
 	} {
 		if _, ok := m.Files[rel]; !ok {

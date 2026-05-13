@@ -57,6 +57,19 @@ will not run the ralph skill.
 trees in lock-step. CI fails on drift, so fix both sides whenever you change
 either.
 
+## Agent roles
+
+Codex role definitions live in `.codex/agents/` for the same
+post-implementation responsibilities used by the standard ralph flow:
+
+- `reviewer` — diff quality only
+- `verifier` — acceptance criteria, docs drift, and static checks
+- `tester` — behavioral tests and failure analysis
+- `doc-maintainer` — plans, docs, templates, and reports
+
+When a Codex environment cannot dispatch separate agents, the standard flow
+still runs these responsibilities inline in the same canonical order.
+
 ## Upgrading
 
 Before running `ralph upgrade`, commit local changes (or take a backup) so the
