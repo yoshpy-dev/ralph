@@ -28,6 +28,81 @@ esac
 
 status=0
 
+codex_config_has_inline_hooks() {
+  config_file="$1"
+
+  if command -v python3 >/dev/null 2>&1 && python3 -c 'import tomllib' >/dev/null 2>&1; then
+    python3 -c '
+import sys
+import tomllib
+
+with open(sys.argv[1], "rb") as fh:
+    data = tomllib.load(fh)
+sys.exit(0 if "hooks" in data else 1)
+' "$config_file"
+    return "$?"
+  fi
+
+  awk '
+    /^[[:space:]]*\[/ {
+      line = $0
+      gsub(/[[:space:]]/, "", line)
+      if (line ~ /^\[\[?hooks(\.|\]\]?)/) {
+        found = 1
+      }
+    }
+    END { exit found ? 0 : 1 }
+  ' "$config_file"
+}
+
+check_codex_hook_single_source() {
+  for base in "." "templates/base"; do
+    config_file="${base}/.codex/config.toml"
+    hooks_json="${base}/.codex/hooks.json"
+
+    [ -f "$config_file" ] || continue
+
+    if codex_config_has_inline_hooks "$config_file" && [ -f "$hooks_json" ]; then
+      printf '%s\n' "Codex hook config: duplicate project-level hook representations detected"
+      printf '%s\n' "  - ${config_file} contains inline hooks entries"
+      printf '%s\n' "  - ${hooks_json} also exists"
+      printf '%s\n' "Remove one representation; this repo uses .codex/config.toml as the source of truth."
+      return 1
+    fi
+  done
+}
+
+test_codex_inline_hook_detector() {
+  tmp_dir="$(mktemp -d)"
+  trap 'rm -rf "$tmp_dir"' EXIT HUP INT TERM
+
+  with_hooks="$tmp_dir/with-hooks.toml"
+  without_hooks="$tmp_dir/without-hooks.toml"
+
+  cat > "$with_hooks" <<'EOF'
+model = "gpt-5.5"
+
+[[ hooks.PostToolUse ]]
+command = ["./.claude/hooks/check_mojibake.sh"]
+
+[ hooks.PostToolUse.match ]
+tool = "Edit"
+EOF
+
+  cat > "$without_hooks" <<'EOF'
+model = "gpt-5.5"
+
+[features]
+codex_hooks = true
+EOF
+
+  codex_config_has_inline_hooks "$with_hooks"
+  if codex_config_has_inline_hooks "$without_hooks"; then
+    printf '%s\n' "Codex inline hook detector: false positive for config without hooks"
+    return 1
+  fi
+}
+
 run() {
   label="$1"
   shift
@@ -76,17 +151,21 @@ run_static_checks() {
     printf '==> jq not installed; skipping JSON validity check\n'
   fi
 
-  # 4. Template sync.
+  # 4. Codex hook configuration: one project-layer representation only.
+  run "Codex hook single-source guard" check_codex_hook_single_source
+  run "Codex inline hook detector smoke test" test_codex_inline_hook_detector
+
+  # 5. Template sync.
   if [ -x scripts/check-sync.sh ]; then
     run "scripts/check-sync.sh" scripts/check-sync.sh
   fi
 
-  # 5. Pipeline order sync.
+  # 6. Pipeline order sync.
   if [ -x scripts/check-pipeline-sync.sh ]; then
     run "scripts/check-pipeline-sync.sh" scripts/check-pipeline-sync.sh
   fi
 
-  # 6. Skill drift between .claude/skills/ and .agents/skills/. The Codex
+  # 7. Skill drift between .claude/skills/ and .agents/skills/. The Codex
   # parity contract relies on these trees staying byte-identical (body) and
   # carrying matching trigger metadata (name/description/policy).
   if [ -x scripts/check-skill-sync.sh ]; then

@@ -9,15 +9,15 @@ the same artifacts no matter which CLI drove the work.
 
 1. **Install the Codex CLI** (>= 0.128.0).
    See [https://developers.openai.com/codex/cli](https://developers.openai.com/codex/cli).
-2. **Trust this project** so Codex loads `.codex/config.toml` and the
-   `[hooks]` block:
+2. **Trust this project** so Codex loads `.codex/config.toml` and the inline
+   `[[hooks.*]]` entries:
 
    ```sh
    codex trust .
    ```
 
-   Without trust, `model`, `sandbox_mode`, `approval_policy`, and `[hooks]`
-   are silently ignored.
+   Without trust, `model`, `sandbox_mode`, `approval_policy`, and project
+   hooks are silently ignored.
 3. **Verify the setup**:
 
    ```sh
@@ -65,9 +65,15 @@ hash-based diff engine can be replayed cleanly. Skill renames are surfaced as
 
 ## Hooks
 
-Project-level Codex hooks live in `.codex/config.toml` under `[hooks]`. They
-shell out to the same scripts under `.claude/hooks/`, so behaviour stays
-identical across the two CLIs.
+Project-level Codex hooks live in `.codex/config.toml` as inline
+`[[hooks.*]]` entries. They shell out to the same scripts under
+`.claude/hooks/`, so behaviour stays identical across the two CLIs.
+
+Do not add `.codex/hooks.json` beside inline hooks in `.codex/config.toml`.
+Codex loads hooks per configuration layer, and two hook representations in the
+same `.codex/` layer trigger a startup warning about duplicate hook loading.
+The local verifier checks this so the duplicate representation does not come
+back silently.
 
 The template ships **default-on** with two `PostToolUse` hooks that point at
 `./.claude/hooks/check_mojibake.sh` (one for `Edit`, one for `Write`). These
@@ -76,8 +82,9 @@ fresh `ralph init` and reuse the same script the Claude side calls, so a
 single edit to `check_mojibake.sh` covers both CLIs.
 
 To extend the hook surface, add new `[[hooks.<event>]]` entries that point at
-real scripts — and add the matching Claude-side hook in `.claude/settings.json`
-when behaviour parity matters. `scripts/commit-msg-guard.sh` is intentionally
+real scripts, keep commands relative to the repo, and add the matching
+Claude-side hook in `.claude/settings.json` when behaviour parity matters.
+`scripts/commit-msg-guard.sh` is intentionally
 **not** wired as a Codex `PostToolUse` hook: it is a git `commit-msg` hook
 (consumes `$1` = path to `COMMIT_EDITMSG`) and would exit 1 on every commit if
 attached to `^git commit`. Install it as `.git/hooks/commit-msg` instead, or
