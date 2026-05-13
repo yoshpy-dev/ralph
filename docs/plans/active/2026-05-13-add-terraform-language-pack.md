@@ -1,6 +1,6 @@
 # add-terraform-language-pack
 
-- Status: Draft
+- Status: Implementation complete (awaiting pipeline)
 - Owner: Claude Code
 - Date: 2026-05-13
 - Related request: Add Terraform / OpenTofu 向け language pack so ralph users can verify IaC repos.
@@ -74,19 +74,19 @@ Critical forks resolved with the user: **None**（仕様が issue で十分に�
 
 ## Acceptance criteria
 
-- [ ] `packs/languages/terraform/README.md` と `packs/languages/terraform/verify.sh` が存在し、`verify.sh` は実行可能（`chmod +x`）。
-- [ ] `templates/packs/terraform/` が `packs/languages/terraform/` と byte 一致（`scripts/check-sync.sh` が PASS）。
-- [ ] `.claude/rules/terraform.md` が存在し、`paths:` frontmatter で `**/*.tf` / `**/*.tofu` / `**/*.tftest.hcl` をスコープする。
-- [ ] `templates/base/.claude/rules/terraform.md` が `.claude/rules/terraform.md` と byte 一致で存在（`scripts/check-sync.sh` の ROOT_ONLY を回避）。
-- [ ] `scripts/detect-languages.sh` が `*.tf` / `*.tofu` / `.terraform.lock.hcl` のいずれかが存在するリポジトリで `terraform` を emit する。
-- [ ] `internal/scaffold.PackFS("terraform")` が `templates/packs/terraform/` を解決し、`ralph pack list` の出力に `terraform` が含まれる。（`ralph pack add terraform` 経由の配置先確認は本 PR の必須項目に含めない — 既存 `addPack` バグのため。Risks 参照）
-- [ ] `HARNESS_VERIFY_MODE=static` で IaC CLI（`tofu` 優先、無ければ `terraform`）の `fmt -check -recursive` と（`.terraform/` 有る時のみ）`validate` を実行し、未 init はスキップ + 警告。
-- [ ] `HARNESS_VERIFY_MODE=test` で `*.tftest.hcl` がある場合のみ IaC CLI の `test` サブコマンドを実行、無ければ "no terraform tests" を表示して skip。
-- [ ] `tflint` / `tfsec` / `trivy config` は未インストール時にスキップ表示（CI で fail しない）。
-- [ ] `.tf` / `.tofu` / `.terraform.lock.hcl` 不在時は警告メッセージ + `exit 0`（pack 不発火）。
-- [ ] 上記マーカー有りで `terraform` / `tofu` のどちらも未インストール時は明示エラー + `exit 1`（fail-open 回避、Codex HIGH#2）。
-- [ ] `docs/recipes/adding-a-language-pack.md` で `terraform` を例として参照（既存 `go` 例を `terraform` に差し替え or 併記）し、`detect-languages.sh` への手書き追記が必要なことを明記。
-- [ ] `scripts/check-skill-sync.sh` がグリーン（今回 skill は触らないが念のため）。
+- [x] `packs/languages/terraform/README.md` と `packs/languages/terraform/verify.sh` が存在し、`verify.sh` は実行可能（`chmod +x`）。
+- [x] `templates/packs/terraform/` が `packs/languages/terraform/` と byte 一致（`scripts/check-sync.sh` が PASS）。
+- [x] `.claude/rules/terraform.md` が存在し、`paths:` frontmatter で `**/*.tf` / `**/*.tofu` / `**/*.tftest.hcl` / `**/.terraform.lock.hcl` をスコープする。
+- [x] `templates/base/.claude/rules/terraform.md` が `.claude/rules/terraform.md` と byte 一致で存在（`scripts/check-sync.sh` の ROOT_ONLY を回避）。
+- [x] `scripts/detect-languages.sh` が `*.tf` / `*.tofu` / `.terraform.lock.hcl` のいずれかが存在するリポジトリで `terraform` を emit する（`.terraform/` ディレクトリは prune）。
+- [x] `internal/scaffold.PackFS("terraform")` が `templates/packs/terraform/` を解決し、`ralph pack list` の出力に `terraform` が含まれる。（`ralph pack add terraform` 経由の配置先確認は本 PR の必須項目に含めない — 既存 `addPack` バグのため。Risks 参照）
+- [x] `HARNESS_VERIFY_MODE=static` で IaC CLI（`tofu` 優先、無ければ `terraform`）の `fmt -check -recursive` と（`.terraform/` 有る時のみ）`validate` を実行し、未 init はスキップ + 警告。
+- [x] `HARNESS_VERIFY_MODE=test` で `*.tftest.hcl` がある場合のみ IaC CLI の `test` サブコマンドを実行、無ければ "no terraform tests" を表示して skip。
+- [x] `tflint` / `tfsec` / `trivy config` は未インストール時にスキップ表示（CI で fail しない）。
+- [x] `.tf` / `.tofu` / `.terraform.lock.hcl` 不在時は警告メッセージ + `exit 0`（pack 不発火）。
+- [x] 上記マーカー有りで `terraform` / `tofu` のどちらも未インストール時は明示エラー + `exit 1`（fail-open 回避、Codex HIGH#2）。
+- [x] `docs/recipes/adding-a-language-pack.md` で `terraform` を例として全面差し替え、`detect-languages.sh` への手書き追記が必要なことを明記、mirror-checklist セクション追加。
+- [x] `scripts/check-skill-sync.sh` がグリーン（今回 skill は触らないが念のため）。
 
 ## Implementation outline
 
@@ -171,9 +171,10 @@ Critical forks resolved with the user: **None**（仕様が issue で十分に�
 
 ## Progress checklist
 
-- [ ] Plan reviewed
-- [ ] Branch created
-- [ ] Implementation started
+- [x] Plan reviewed
+- [x] Branch created (`feat/52/add-terraform-language-pack`)
+- [x] Implementation started
+- [x] Implementation complete (4 slices committed)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
