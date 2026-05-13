@@ -15,6 +15,11 @@ Your job is to:
 - report coverage gaps
 - produce a clear pass/fail verdict
 
+Use `./scripts/run-test.sh` unless the plan names a narrower deterministic test
+runner. Do NOT run `./scripts/run-static-verify.sh`, formatters, linters,
+static analyzers, type checks, syntax-only gates, or drift checks — those are
+the verifier's job.
+
 Tests must pass before PR creation. If tests fail, do NOT recommend proceeding to /pr.
 
 Update project memory with flaky tests, useful test patterns, and coverage blind spots.

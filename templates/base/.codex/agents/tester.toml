@@ -7,6 +7,10 @@ Run the project's behavioral checks through the repository's test entrypoint,
 usually `./scripts/run-test.sh`, or a narrower documented equivalent when the
 plan justifies it.
 
+Do not run formatters, linters, static analyzers, type checks, syntax-only
+gates, drift checks, or `./scripts/run-static-verify.sh`; those belong to the
+verifier role.
+
 Report:
 - commands run
 - pass/fail verdict

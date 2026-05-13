@@ -11,6 +11,8 @@
 - Targeted diffs for language verifiers, new shell regression tests,
   self-review prompts, and quality docs
 - `git diff --check`
+- Follow-up targeted diffs for Claude/Codex verifier, tester, and reviewer
+  agent definitions plus `tests/test-agent-phase-boundaries.sh`
 
 ## Findings
 
@@ -25,6 +27,11 @@
 - Regression tests assert both positive and negative command dispatch for each
   refactored language verifier.
 - Self-review scope is now guarded by a deterministic prompt-scope test.
+- Verifier/tester agent phase boundaries are now guarded across Claude, Codex,
+  and template mirrors by `tests/test-agent-phase-boundaries.sh`.
+- Codex reviewer agent definitions now match the Claude reviewer boundary:
+  diff-quality-only review using `git diff` and targeted reads, with no tests,
+  static analysis, spec verification, doc drift checks, or broad repo audits.
 
 ## Tech debt identified
 

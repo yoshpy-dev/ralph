@@ -17,9 +17,12 @@
 | `run-verify.sh` default mode remains backward-compatible. | met | Full `./scripts/run-verify.sh` passed in `all` mode; evidence `docs/evidence/verify-2026-05-13-141419.log`. |
 | Pipeline verify prompts call only static verification. | met | Existing pipeline verify prompts call `./scripts/run-static-verify.sh`; `check-pipeline-sync.sh` passed. |
 | Pipeline test prompts call only behavioral test execution. | met | Existing pipeline test prompts call `./scripts/run-test.sh`; `check-pipeline-sync.sh` passed. |
+| Verifier subagents call only static verification. | met | Claude/Codex verifier agent definitions and template mirrors now name `./scripts/run-static-verify.sh`, forbid `./scripts/run-test.sh` and behavioral tests, and are covered by `tests/test-agent-phase-boundaries.sh`. |
+| Tester subagents call only behavioral tests. | met | Claude/Codex tester agent definitions and template mirrors now name `./scripts/run-test.sh`, forbid `./scripts/run-static-verify.sh`, static analyzers, type checks, and drift checks, and are covered by `tests/test-agent-phase-boundaries.sh`. |
 | Self-review is defined and guarded as diff-quality only. | met | Self-review skill bodies, reviewer agent, and pipeline self-review prompts now forbid tests/static/spec/doc-drift/broad audits; `tests/test-self-review-scope.sh` passed. |
+| Codex reviewer agents follow the self-review definition. | met | `.codex/agents/reviewer.toml` and template mirror now forbid tests/static/spec/doc-drift/broad audits and are included in `tests/test-self-review-scope.sh`. |
 | Root/template and Claude/Codex mirrors remain synchronized. | met | `scripts/check-sync.sh` and `scripts/check-skill-sync.sh` passed inside `run-static-verify.sh`. |
-| Regression tests cover mode separation and self-review scope. | met | Added `tests/test-verify-mode-split.sh` and `tests/test-self-review-scope.sh`; both are wired into `verify.local.sh` test mode. |
+| Regression tests cover mode separation, self-review scope, and subagent phase boundaries. | met | Added `tests/test-verify-mode-split.sh`, `tests/test-self-review-scope.sh`, and `tests/test-agent-phase-boundaries.sh`; all are wired into `verify.local.sh` test mode. |
 | Documentation matches the implementation contract. | met | `docs/quality/quality-gates.md` and `docs/quality/definition-of-done.md` plus template mirrors updated; sync checks passed. |
 
 ## Static analysis
@@ -27,6 +30,11 @@
 | Command | Result | Notes |
 | --- | --- | --- |
 | `./scripts/run-static-verify.sh` | pass | Evidence `docs/evidence/verify-2026-05-13-141403.log`; shellcheck, `sh -n`, `jq`, sync checks, skill sync, `gofmt`, `go vet`, and `golangci-lint` passed. |
+| `sh -n tests/test-agent-phase-boundaries.sh tests/test-self-review-scope.sh scripts/verify.local.sh` | pass | Syntax check for the new/changed shell regression guards. |
+| `shellcheck --severity=warning tests/test-agent-phase-boundaries.sh tests/test-self-review-scope.sh scripts/verify.local.sh` | pass | Focused shellcheck for the new/changed shell scripts. |
+| `tests/test-agent-phase-boundaries.sh` | pass | 44/44 assertions passed for Claude/Codex verifier and tester agent boundaries. |
+| `tests/test-self-review-scope.sh` | pass | 96/96 assertions passed after adding Codex reviewer agent definitions to scope. |
+| `./scripts/run-verify.sh` | pass | Final all-mode gate passed after subagent boundary reinforcement; evidence `docs/evidence/verify-2026-05-13-170321.log`. |
 | `git diff --check` | pass | No whitespace errors. |
 
 ## Documentation drift
@@ -36,6 +44,7 @@
 | `docs/quality/quality-gates.md` | yes | Defines non-overlap for static/test wrappers and pipeline phase scopes. |
 | `docs/quality/definition-of-done.md` | yes | Treats phase boundary violations as not done. |
 | `.claude/skills/` and `.agents/skills/` | yes | Self-review scope tightened and skill sync passed. |
+| `.claude/agents/` and `.codex/agents/` | yes | Reviewer/verifier/tester role boundaries are explicit and covered by regression tests. |
 | `templates/base/` and `templates/packs/` | yes | Mirrors updated; `check-sync.sh` passed. |
 
 ## Observational checks

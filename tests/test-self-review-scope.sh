@@ -27,7 +27,7 @@ assert_contains() {
   _desc="$1"
   _needle="$2"
   _file="$3"
-  if grep -Fq -- "$_needle" "$_file"; then
+  if grep -Fiq -- "$_needle" "$_file"; then
     record_pass "$_desc"
   else
     record_fail "$_desc (missing: $_needle in $_file)"
@@ -56,6 +56,8 @@ templates/base/.agents/skills/loop/prompts/pipeline-self-review.md
 templates/base/.claude/skills/loop/prompts/pipeline-self-review.md
 .claude/agents/reviewer.md
 templates/base/.claude/agents/reviewer.md
+.codex/agents/reviewer.toml
+templates/base/.codex/agents/reviewer.toml
 "
 
 for file in $self_review_files; do

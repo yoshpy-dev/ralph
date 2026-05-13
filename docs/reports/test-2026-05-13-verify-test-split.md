@@ -11,9 +11,10 @@
 | Suite / Command | Tests | Passed | Failed | Skipped | Duration |
 | --- | --- | --- | --- | --- | --- |
 | `tests/test-verify-mode-split.sh` | 59 | 59 | 0 | 0 | <1s focused; also inside `run-test.sh` |
-| `tests/test-self-review-scope.sh` | 80 | 80 | 0 | 0 | <1s focused; also inside `run-test.sh` |
+| `tests/test-self-review-scope.sh` | 96 | 96 | 0 | 0 | <1s focused; also inside `run-test.sh` |
+| `tests/test-agent-phase-boundaries.sh` | 44 | 44 | 0 | 0 | <1s focused; also inside `run-test.sh` |
 | `./scripts/run-test.sh` | aggregate | pass | 0 | 0 | ~16s |
-| `./scripts/run-verify.sh` | aggregate all-mode regression | pass | 0 | 0 | ~19s |
+| `./scripts/run-verify.sh` | aggregate all-mode regression | pass | 0 | 0 | ~19s; final evidence `docs/evidence/verify-2026-05-13-170321.log` |
 
 ## Coverage
 
@@ -36,6 +37,7 @@
 | `run-test.sh` re-runs Go static checks through `packs/languages/golang/verify.sh`. | fixed | `tests/test-verify-mode-split.sh` verifies Go test mode calls `go test ./...` and skips `gofmt`, `go vet`, and `staticcheck`. |
 | Non-Go language verifiers ignore `HARNESS_VERIFY_MODE`. | fixed | Same regression suite covers TypeScript, Python, Rust, and Dart. |
 | Self-review scope can drift into verification/test responsibilities. | fixed | `tests/test-self-review-scope.sh` checks self-review files for boundary language and banned wrapper calls. |
+| Verifier/tester subagents can drift back to aggregate verification or cross-phase commands. | fixed | `tests/test-agent-phase-boundaries.sh` checks Claude/Codex verifier and tester definitions plus template mirrors. |
 
 ## Test gaps
 
