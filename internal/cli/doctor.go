@@ -214,7 +214,9 @@ func checkCodexEffectiveConfig(targetDir string) checkResult {
 	}
 
 	hookEntries := 0
+	hasInlineHookRepresentation := false
 	if hooks, ok := raw["hooks"].(map[string]any); ok {
+		hasInlineHookRepresentation = true
 		for _, eventHooks := range hooks {
 			switch v := eventHooks.(type) {
 			case []any:
@@ -224,6 +226,19 @@ func checkCodexEffectiveConfig(targetDir string) checkResult {
 					hookEntries++
 				}
 			}
+		}
+	}
+
+	hooksJSONPath := filepath.Join(targetDir, ".codex", "hooks.json")
+	if hasInlineHookRepresentation {
+		if _, err := os.Stat(hooksJSONPath); err == nil {
+			r.Status = "fail"
+			r.Detail = "both .codex/config.toml [hooks] and .codex/hooks.json exist; remove hooks.json because this project uses config.toml as the Codex hook source of truth"
+			return r
+		} else if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			r.Status = "warn"
+			r.Detail = fmt.Sprintf("could not inspect .codex/hooks.json: %v", err)
+			return r
 		}
 	}
 

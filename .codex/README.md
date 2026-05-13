@@ -85,8 +85,8 @@ Project-level Codex hooks live in `.codex/config.toml` as inline
 Do not add `.codex/hooks.json` beside inline hooks in `.codex/config.toml`.
 Codex loads hooks per configuration layer, and two hook representations in the
 same `.codex/` layer trigger a startup warning about duplicate hook loading.
-The local verifier checks this so the duplicate representation does not come
-back silently.
+`ralph doctor` and the local verifier check this so the duplicate
+representation does not come back silently.
 
 The template ships **default-on** with two `PostToolUse` hooks that point at
 `./.claude/hooks/check_mojibake.sh` (one for `Edit`, one for `Write`). These

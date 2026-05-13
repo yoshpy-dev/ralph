@@ -60,7 +60,8 @@ approval_policy = "never"
 #
 # Keep Codex hooks in this file as inline `[[hooks.*]]` entries. Do not add a
 # sibling `.codex/hooks.json`; Codex warns when both representations exist in
-# the same project layer, and `scripts/verify.local.sh` rejects that drift.
+# the same project layer, and `ralph doctor` / `scripts/verify.local.sh`
+# reject that drift.
 #
 # Add or extend entries to mirror .claude/hooks/ behaviour.
 # ---------------------------------------------------------------------------
