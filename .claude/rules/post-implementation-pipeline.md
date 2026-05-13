@@ -34,9 +34,9 @@ and PR pre-checks behave identically. The driver detection used by
 
 | Step | Agent | Purpose | Stop condition |
 |------|-------|---------|----------------|
-| `/self-review` | `reviewer` | Diff quality | CRITICAL findings |
-| `/verify` | `verifier` | Spec compliance + static analysis | Fail verdict |
-| `/test` | `tester` | Behavioral tests | Fail verdict |
+| `/self-review` | `reviewer` | Diff quality only; no tests/static/spec/doc-drift/broad audit | CRITICAL findings |
+| `/verify` | `verifier` | Spec compliance + static analysis via `./scripts/run-static-verify.sh`; no tests | Fail verdict |
+| `/test` | `tester` | Behavioral tests via `./scripts/run-test.sh`; no static analysis | Fail verdict |
 | `/sync-docs` | `doc-maintainer` | Documentation sync | — |
 | `/cross-review` | inline | Cross-model second opinion | ACTION_REQUIRED triggers re-run |
 | `/pr` | inline | PR creation + plan archival | — |

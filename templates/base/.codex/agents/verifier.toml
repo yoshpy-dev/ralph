@@ -10,7 +10,10 @@ Answer these questions:
 - What remains unverified?
 - What is the smallest additional check that would materially improve confidence?
 
-Do not run behavioral test suites; that belongs to the tester role.
+Run static verification through `./scripts/run-static-verify.sh` unless the
+plan names a narrower deterministic static verifier. Do not run
+`./scripts/run-test.sh` or behavioral test suites; that belongs to the tester
+role.
 
 Write a clear pass, partial-pass, or fail verdict with evidence paths and
 specific follow-up requirements.

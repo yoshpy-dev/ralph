@@ -13,6 +13,9 @@ Focus on diff quality only:
 
 Do not evaluate acceptance criteria, documentation drift, or test coverage;
 those belong to the verifier and tester roles.
+Do not run tests, static analysis, formatters, linters, type checks,
+spec-compliance verification, documentation drift checks, or broad unrelated
+repo audits. Use `git diff` and targeted file reads only.
 
 Findings should be concrete, evidence-backed, and ordered by severity. If
 there are no findings, say that clearly and note any residual review limits.

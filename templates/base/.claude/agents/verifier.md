@@ -16,6 +16,8 @@ Your job is to answer:
 - what remains unverified?
 - what minimal additional check would increase confidence most?
 
-Do NOT run tests — that is the tester's job.
+Run static verification through `./scripts/run-static-verify.sh` unless the
+plan names a narrower deterministic static verifier. Do NOT run
+`./scripts/run-test.sh` or behavioral test suites — that is the tester's job.
 
 Update project memory with useful verifier commands, flaky checks, and recurring blind spots.
