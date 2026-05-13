@@ -74,7 +74,7 @@ lock-step (body, name, description, implicit-invocation policy).
 - `.claude/agents/` — Claude Code subagent definitions
 - `.claude/hooks/` — Claude Code runtime hooks
 - `.agents/skills/` — Codex skill bodies (mirrors `.claude/skills/`)
-- `.codex/` — Codex project config, hooks, override docs
+- `.codex/` — Codex project config, role definitions, hooks, override docs
 - `scripts/` — reusable verification, hook, and bootstrap scripts (shared)
 
 ## Planning contract

@@ -178,6 +178,7 @@ echo "=== Checking for root-only files not in templates/base/ ==="
 # Directories to scan at root for potential template candidates
 SCAN_DIRS=(
   ".claude"
+  ".codex"
   ".github/workflows"
   "docs"
   "scripts"
