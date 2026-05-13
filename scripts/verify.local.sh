@@ -146,7 +146,7 @@ run_static_checks() {
     # Build the argument list via positional parameters so shellcheck
     # does not flag unquoted expansion.
     set --
-    for f in .claude/hooks/*.sh templates/base/.claude/hooks/*.sh scripts/verify.local.sh tests/test-check-mojibake.sh; do
+    for f in .claude/hooks/*.sh templates/base/.claude/hooks/*.sh scripts/verify.local.sh tests/test-check-mojibake.sh tests/test-verify-mode-split.sh tests/test-self-review-scope.sh; do
       [ -f "$f" ] || continue
       set -- "$@" "$f"
     done
@@ -220,6 +220,12 @@ run_hook_tests() {
   fi
   if [ -x tests/test-terraform-gitignore.sh ]; then
     run "tests/test-terraform-gitignore.sh" tests/test-terraform-gitignore.sh
+  fi
+  if [ -x tests/test-verify-mode-split.sh ]; then
+    run "tests/test-verify-mode-split.sh" tests/test-verify-mode-split.sh
+  fi
+  if [ -x tests/test-self-review-scope.sh ]; then
+    run "tests/test-self-review-scope.sh" tests/test-self-review-scope.sh
   fi
 }
 

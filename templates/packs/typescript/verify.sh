@@ -1,13 +1,22 @@
 #!/usr/bin/env sh
 set -eu
 
+mode="${HARNESS_VERIFY_MODE:-all}"
+case "$mode" in
+  static|test|all) ;;
+  *)
+    echo "Unknown HARNESS_VERIFY_MODE: $mode" >&2
+    exit 2
+    ;;
+esac
+
 if [ ! -f package.json ]; then
   echo "Skipping TypeScript verifier: package.json not found."
   exit 0
 fi
 
 has_script() {
-  grep -q ""$1"[[:space:]]*:" package.json
+  grep -q "\"$1\"[[:space:]]*:" package.json
 }
 
 pm="npm"
@@ -43,6 +52,21 @@ run_script() {
   esac
 }
 
-run_script lint
-run_script typecheck
-run_script test
+status=0
+
+run_static() {
+  run_script lint || status=1
+  run_script typecheck || status=1
+}
+
+run_tests() {
+  run_script test || status=1
+}
+
+case "$mode" in
+  static) run_static ;;
+  test)   run_tests ;;
+  all)    run_static; run_tests ;;
+esac
+
+exit "$status"

@@ -28,6 +28,15 @@ Use these in CI or later-stage review:
 - project-specific local checks
 - plan and docs sync if behavior changed
 
+`run-static-verify.sh` and `run-test.sh` must stay non-overlapping:
+- static mode runs format checks, linters, static analyzers, type checks,
+  syntax checks, and drift checks; it must not run behavioral tests
+- test mode runs behavioral unit, integration, and regression tests; it must not
+  run format checks, linters, static analyzers, type checks, syntax-only gates,
+  or drift checks
+- `run-verify.sh` without `HARNESS_VERIFY_MODE` remains the backward-compatible
+  aggregate and may run both static verification and tests
+
 ### Must pass in CI before merge
 
 - `./scripts/run-verify.sh` (`.github/workflows/verify.yml`)
@@ -54,9 +63,9 @@ When running in pipeline mode, the orchestrator enforces its own gates autonomou
 | Preflight probe | `--preflight` checks claude CLI, jq, CLAUDE.md, git | Pipeline blocked |
 | Hook parity check | `run_hook_parity()` emulates hook safety checks | Warning logged |
 | Stuck detection | HEAD commit hash comparison (3 consecutive no-change) | Pipeline aborted |
-| Self-review | `claude -p` with `pipeline-self-review.md` (agent-driven, 10-item checklist) | CRITICAL findings logged |
-| Verify | `claude -p` with `pipeline-verify.md` (agent-driven, runs `run-static-verify.sh` internally) | Verdict logged |
-| Test | `claude -p` with `pipeline-test.md` (agent-driven, runs `run-test.sh` internally + root cause analysis) | Retry Inner Loop |
+| Self-review | `claude -p` with `pipeline-self-review.md` (diff quality only; no tests, static analysis, spec verification, doc drift, or broad repo audit) | CRITICAL findings logged |
+| Verify | `claude -p` with `pipeline-verify.md` (spec compliance + static analysis + documentation drift; runs `run-static-verify.sh` internally) | Verdict logged |
+| Test | `claude -p` with `pipeline-test.md` (behavioral tests only; runs `run-test.sh` internally + root cause analysis) | Retry Inner Loop |
 | COMPLETE gating | Tests pass + COMPLETE signal required to advance; tests pass without COMPLETE → continue Inner Loop (return 6) | Inner Loop continues |
 | Repair attempt limit | `MAX_REPAIR_ATTEMPTS` (default 5) | Escalate to human |
 

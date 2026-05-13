@@ -8,6 +8,9 @@ Perform a self-review of the current diff and write a report to `docs/reports/`.
 ## Review scope — diff quality only
 
 Focus exclusively on the diff itself. Do NOT evaluate spec compliance, test coverage, or documentation drift — those belong to `/verify` and `/test`.
+Do NOT run tests, static analysis, formatters, linters, type checks,
+spec-compliance verification, documentation drift checks, or broad unrelated
+repo audits. Use `git diff` and targeted file reads only.
 
 Evaluate the diff for:
 1. **Unnecessary changes** — unrelated modifications, formatting-only diffs, accidental includes
