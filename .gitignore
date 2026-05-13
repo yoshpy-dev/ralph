@@ -12,6 +12,21 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 
+# Terraform / OpenTofu state and cache (often contain provider secrets)
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfstate.*.backup
+*.tfplan
+*.auto.tfvars
+*.auto.tfvars.json
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+crash.log
+crash.*.log
+
 .claude/settings.local.json
 .claude/agent-memory-local/
 .claude/agent-memory/

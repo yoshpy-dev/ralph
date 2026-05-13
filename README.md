@@ -231,7 +231,7 @@ See `docs/recipes/ralph-loop.md` for the full guide.
 
 ## Language packs
 
-Core scaffold stays stack-agnostic. Language-specific depth lives in `packs/languages/`. Starter packs included: `typescript/`, `python/`, `rust/`, `golang/`, `dart/` (Flutter), plus a `_template/` for new packs.
+Core scaffold stays stack-agnostic. Language-specific depth lives in `packs/languages/`. Starter packs included: `typescript/`, `python/`, `rust/`, `golang/`, `dart/` (Flutter), `terraform/` (Terraform / OpenTofu), plus a `_template/` for new packs.
 
 Add a pack:
 

@@ -104,6 +104,18 @@ run_hook_tests() {
   if [ -x tests/test-ralph-cli-driver.sh ]; then
     run "tests/test-ralph-cli-driver.sh" tests/test-ralph-cli-driver.sh
   fi
+  if [ -x tests/test-detect-languages-terraform.sh ]; then
+    run "tests/test-detect-languages-terraform.sh" tests/test-detect-languages-terraform.sh
+  fi
+  if [ -x tests/test-terraform-pack-verify.sh ]; then
+    run "tests/test-terraform-pack-verify.sh" tests/test-terraform-pack-verify.sh
+  fi
+  if [ -x tests/test-terraform-rule-frontmatter.sh ]; then
+    run "tests/test-terraform-rule-frontmatter.sh" tests/test-terraform-rule-frontmatter.sh
+  fi
+  if [ -x tests/test-terraform-gitignore.sh ]; then
+    run "tests/test-terraform-gitignore.sh" tests/test-terraform-gitignore.sh
+  fi
 }
 
 case "$mode" in
