@@ -37,3 +37,7 @@ fi
 if [ -f pom.xml ] || [ -f build.gradle ] || [ -f build.gradle.kts ]; then
   emit jvm
 fi
+
+if [ -f .terraform.lock.hcl ] || find . -type d -name .terraform -prune -o -type f \( -name '*.tf' -o -name '*.tofu' \) -print 2>/dev/null | grep -q .; then
+  emit terraform
+fi
