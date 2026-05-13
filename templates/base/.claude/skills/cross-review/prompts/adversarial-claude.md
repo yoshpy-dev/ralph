@@ -1,3 +1,19 @@
+<!--
+  Placeholders `${BASE_BRANCH}` and `${REPORTS_DIR}` in this file are
+  pre-rendered by `scripts/ralph-pipeline.sh` (cross-review phase) before
+  the prompt is piped to `claude -p`. The renderer uses awk
+  index()/substr() so replacement values are treated as literal strings
+  (git refs with `#` / `&` / `/` and configurable `REPORTS_DIR` paths
+  pass through unchanged).
+
+  Adding a new `${...}` placeholder requires updating the renderer in
+  `scripts/ralph-pipeline.sh` AND extending the allowlist guard that
+  fails the cross-review gate if any unsupported `${...}` token remains
+  in the rendered prompt. Without that, the gate silently bypasses on
+  the path where the reviewer cannot find the substituted value
+  (regression history: issue #50).
+-->
+
 # Adversarial cross-review (claude as reviewer)
 
 You are running as the **opposite** CLI from the one that drove this Ralph

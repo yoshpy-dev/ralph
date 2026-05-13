@@ -786,15 +786,72 @@ DOCS
           # the per-cycle log.
           _adv_prompt=".claude/skills/cross-review/prompts/adversarial-claude.md"
           if [ -f "$_adv_prompt" ]; then
-            # `--permission-mode auto` (not plan) is required because the
-            # adversarial reviewer must write the triage report into
-            # docs/reports/. Plan mode is read-only and silently drops the
-            # write — the parser then sees zero findings and the cross-model
-            # gate is bypassed (cycle-2 cross-review P1, #44).
-            BASE_BRANCH="$_base" REPORTS_DIR="$REPORTS_DIR" \
+            # Pre-render ${BASE_BRANCH} / ${REPORTS_DIR} into a per-cycle copy
+            # before piping to `claude -p`. `claude -p` does NOT template-
+            # substitute its stdin, so literal `${BASE_BRANCH}` previously
+            # reached the reviewer and the triage report landed at a literal
+            # path the parser could not find — silently bypassing the gate
+            # (issue #50).
+            #
+            # The renderer uses awk index()/substr() instead of gsub() because
+            # gsub's replacement string interprets `&` (matched text) and `\`
+            # specially, and valid git refs can contain `&` (`feature&1`) and
+            # backslashes. index()+substr() treats the replacement value as
+            # a literal string, so git refs with `#` / `&` / `\` / `/` and
+            # configurable REPORTS_DIR values pass through unchanged.
+            _rendered_prompt="${PIPELINE_DIR}/outer-${_cycle}-adversarial-claude.md"
+            if [ -z "${_base:-}" ]; then
+              log_error "cross-review: empty _base; cannot render adversarial prompt"
+              echo "render_failed_empty_base" > "$_xreview_log"
+              # Skip reviewer invocation; gate will see no triage report and
+              # _action_required stays 0, but the failure is in the log.
+              _adv_prompt=""
+            else
+              if ! BASE_BRANCH="$_base" REPORTS_DIR="$REPORTS_DIR" \
+                   awk '
+                     function lreplace(s, needle, repl,    out, idx) {
+                       out = ""
+                       while ((idx = index(s, needle)) > 0) {
+                         out = out substr(s, 1, idx - 1) repl
+                         s = substr(s, idx + length(needle))
+                       }
+                       return out s
+                     }
+                     {
+                       line = $0
+                       line = lreplace(line, "${BASE_BRANCH}", ENVIRON["BASE_BRANCH"])
+                       line = lreplace(line, "${REPORTS_DIR}", ENVIRON["REPORTS_DIR"])
+                       print line
+                     }
+                   ' "$_adv_prompt" > "$_rendered_prompt"; then
+                log_error "cross-review: failed to render adversarial prompt to ${_rendered_prompt}"
+                echo "render_failed_awk" > "$_xreview_log"
+                _adv_prompt=""
+              else
+                # Allowlist-based unresolved-placeholder guard. Any ${...}
+                # token remaining in the rendered output means a placeholder
+                # was added to the prompt without updating the renderer.
+                # Fail the gate closed rather than passing a broken prompt
+                # to the reviewer.
+                _leftover_placeholders="$(grep -oE '\$\{[A-Z_][A-Z0-9_]*\}' "$_rendered_prompt" 2>/dev/null | sort -u || true)"
+                if [ -n "$_leftover_placeholders" ]; then
+                  log_error "cross-review: unresolved placeholders in rendered prompt: ${_leftover_placeholders}"
+                  echo "render_failed_unresolved_placeholders" > "$_xreview_log"
+                  _adv_prompt=""
+                fi
+              fi
+            fi
+
+            if [ -n "$_adv_prompt" ]; then
+              # `--permission-mode auto` (not plan) is required because the
+              # adversarial reviewer must write the triage report into
+              # docs/reports/. Plan mode is read-only and silently drops the
+              # write — the parser then sees zero findings and the cross-model
+              # gate is bypassed (cycle-2 cross-review P1, #44).
               claude -p --model "$RALPH_CLAUDE_REVIEWER_MODEL" \
                 --permission-mode auto --output-format text \
-                < "$_adv_prompt" 2>&1 | tee "$_xreview_log" || true
+                < "$_rendered_prompt" 2>&1 | tee "$_xreview_log" || true
+            fi
           else
             log "Warning: adversarial-claude prompt missing at ${_adv_prompt}"
             echo "missing_adversarial_prompt" > "$_xreview_log"
