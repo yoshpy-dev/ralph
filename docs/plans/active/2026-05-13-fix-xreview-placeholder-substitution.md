@@ -190,7 +190,7 @@ Trade-offs considered:
 - [x] `./scripts/run-verify.sh` green — evidence `docs/evidence/verify-2026-05-13-024222.log`
 - [x] `./scripts/check-skill-sync.sh` green (13 skills in lock-step)
 - [x] `./scripts/check-sync.sh` green (145 identical, 0 drifted)
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Review artifact created (`docs/reports/self-review-2026-05-13-fix-xreview-placeholder-substitution.md`, cycle 2: `…-cycle2.md`)
+- [x] Verification artifact created (`docs/reports/verify-2026-05-13-fix-xreview-placeholder-substitution.md`)
+- [x] Test artifact created (`docs/reports/test-2026-05-13-fix-xreview-placeholder-substitution.md`)
 - [ ] PR created
