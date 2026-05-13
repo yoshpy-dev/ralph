@@ -24,6 +24,10 @@ ignores it.
   PR by default. Do not pass `--draft` and do not use draft PR creation unless
   the operator explicitly asks for a draft; if a connector creates a draft
   anyway, mark it ready before reporting the PR as complete.
+- **PR and branch naming**: do not add a Codex identity prefix to PR titles or
+  branch names. Avoid titles like `[codex] ...`, and avoid branch names that
+  start with `codex-` or `codex/`. Use task-focused repo naming instead, such
+  as `<type>/<slug>` or `<type>/<issue>/<slug>`.
 
 ## Permission and sandbox mapping
 
