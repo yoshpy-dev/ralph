@@ -50,7 +50,8 @@ and source.
 
 Both CLIs read the same skill bodies. Claude reads `.claude/skills/`, Codex
 reads `.agents/skills/`. `scripts/check-skill-sync.sh` keeps the two trees in
-lock-step (body, name, description, implicit-invocation policy).
+lock-step (body, name, description, implicit-invocation policy), while
+normalizing driver-specific PR provenance examples.
 
 ## Source of truth
 

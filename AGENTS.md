@@ -66,7 +66,7 @@ Ralph Loop runs under whichever CLI is selected by `RALPH_LOOP_DRIVER` (or `[loo
 - `.claude/agents/` — specialized subagents (Claude only)
 - `.claude/hooks/` — deterministic runtime checks
   - `check_mojibake.sh` + `mojibake-allowlist` — temporary U+FFFD detection guard for Claude Code SSE mojibake (remove once upstream Issue #43746 ships)
-- `.agents/skills/` — Codex-side skill bodies (mirrors `.claude/skills/`; kept in lock-step by `scripts/check-skill-sync.sh`)
+- `.agents/skills/` — Codex-side skill bodies (mirrors `.claude/skills/`; kept in lock-step by `scripts/check-skill-sync.sh`, with driver-specific PR provenance examples normalized)
 - `.codex/` — Codex project config for this meta-repo (`config.toml`, `agents/`, `hooks/`, `AGENTS.override.md`, `README.md`); same shape as `templates/base/.codex/` so ralph dogfoods the parity it ships
 - `templates/base/.codex/` — `ralph init` source for the same surface; root `.codex/` and template `.codex/` are kept identical via `scripts/check-sync.sh` (no KNOWN_DIFFS today)
 - `packs/languages/` — language-specific depth (also copied to `templates/packs/` for embedding)
