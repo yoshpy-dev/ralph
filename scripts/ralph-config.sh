@@ -27,7 +27,7 @@ RALPH_SLICE_TIMEOUT="${RALPH_SLICE_TIMEOUT:-1800}"
 RALPH_STANDARD_MAX_PIPELINE_CYCLES="${RALPH_STANDARD_MAX_PIPELINE_CYCLES:-2}"
 
 # Ralph Loop driver settings (Phase 2 / issue #44).
-# RALPH_LOOP_DRIVER selects which CLI ralph-pipeline.sh invokes per slice
+# RALPH_LOOP_DRIVER selects which driver ralph-pipeline.sh invokes per slice
 # (claude|codex). When driver=codex, ralph-cli-driver.sh assembles
 # `codex exec -s <sandbox> -c approval_policy=<policy> --output-last-message ...`.
 # RALPH_CLAUDE_REVIEWER_MODEL is used when cross-review inverts the reviewer

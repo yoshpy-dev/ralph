@@ -146,7 +146,7 @@ All Ralph pipeline settings are centralized in `scripts/ralph-config.sh`. Overri
 | `RALPH_MAX_PARALLEL` | `4` | Max concurrent worktree pipelines |
 | `RALPH_SLICE_TIMEOUT` | `1800` | Per-slice timeout in seconds |
 | `RALPH_STANDARD_MAX_PIPELINE_CYCLES` | `2` | (Standard flow only) Max post-implementation pipeline runs before requiring user confirmation |
-| `RALPH_LOOP_DRIVER` | `claude` | Which CLI drives `ralph-pipeline.sh` per slice (`claude` or `codex`). Phase 2 / issue #44. |
+| `RALPH_LOOP_DRIVER` | `claude` | Which driver runs `ralph-pipeline.sh` per slice (`claude` or `codex`). Phase 2 / issue #44. |
 | `RALPH_CODEX_SANDBOX` | `workspace-write` | `codex exec -s` value when driver=codex (`read-only` / `workspace-write` / `danger-full-access`) |
 | `RALPH_CODEX_APPROVAL_POLICY` | `on-failure` | Codex `approval_policy` override (`untrusted` / `on-failure` / `on-request` / `never`) |
 | `RALPH_CLAUDE_REVIEWER_MODEL` | `claude-opus-4-7` | Model used by `claude -p` when it plays adversarial reviewer (driver=codex cross-review path) |

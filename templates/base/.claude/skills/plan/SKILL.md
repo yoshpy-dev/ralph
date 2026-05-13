@@ -65,7 +65,7 @@ Create or update a plan in `docs/plans/active/`.
 9. End with a short readiness checklist.
 10. **Codex plan advisory (optional)**:
     a. Run `./scripts/codex-check.sh` via Bash.
-    b. If exit 1 (not available): note "Codex CLI not available — skipping plan advisory" and proceed to step 11.
+    b. If exit 1 (not available): note "Codex not available — skipping plan advisory" and proceed to step 11.
     c. If exit 0 (available): invoke Codex to adversarially review the plan via Bash:
        `codex exec --sandbox read-only "You are an adversarial plan reviewer. Your job is to break confidence in this plan, not to validate it. Default to skepticism — assume the plan can fail in subtle, high-cost ways until evidence says otherwise. Review for: (1) blind spots and missing risks — what failure modes are not addressed? (2) scope concerns — too broad, too narrow, or poorly bounded? (3) acceptance criteria gaps — can each criterion be verified deterministically? (4) design decision weaknesses — are there simpler or safer alternatives? (5) rollback and partial-failure scenarios — what happens if implementation stalls halfway? Report only material findings. Each finding must answer: What can go wrong? Why is this plan vulnerable? What is the likely impact? What concrete change would reduce the risk? Number each finding with severity [HIGH/MEDIUM/LOW]. Prefer one strong finding over several weak ones. If the plan looks solid, say so directly with no findings. Here is the plan file to review: docs/plans/active/<plan-file>"`
     d. Present Codex findings to the user as a numbered list.

@@ -11,7 +11,7 @@ permission_mode = "auto"
 [pipeline.prompts]
 dir = ".ralph/prompts"
 
-# Ralph Loop driver — which CLI drives `ralph-pipeline.sh` per slice.
+# Ralph Loop driver — which driver runs `ralph-pipeline.sh` per slice.
 # Set driver = "codex" to run /loop under Codex; the env var
 # RALPH_LOOP_DRIVER overrides this value at runtime.
 # When driver = "codex", the cross-review reviewer is inverted (claude -p).
@@ -24,7 +24,7 @@ claude_reviewer_model = "claude-opus-4-7"
 
 [doctor]
 require_claude_cli = true
-# Codex CLI is optional by default — set to true to fail `ralph doctor` when
+# Codex is optional by default — set to true to fail `ralph doctor` when
 # the codex binary is missing. The accompanying `.codex/config.toml` is loaded
 # only when `codex trust .` has been run for this project; see .codex/README.md.
 require_codex_cli = false

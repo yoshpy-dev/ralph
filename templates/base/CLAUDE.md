@@ -3,7 +3,7 @@
 # Claude Code
 
 Use this file only for Claude-Code-specific guidance that must be always-on.
-Shared workflow rules live in `AGENTS.md` (read by both CLIs). Codex-specific
+Shared workflow rules live in `AGENTS.md` (read by both agents). Codex-specific
 guidance lives in `.codex/AGENTS.override.md` and `.codex/README.md`.
 
 ## Default behavior
@@ -27,8 +27,8 @@ guidance lives in `.codex/AGENTS.override.md` and `.codex/README.md`.
   (optional, inline), then `/pr`.
 - `/self-review` is diff quality only. `/verify` is spec compliance + static
   analysis. `/test` is behavioral tests. Each produces a separate report.
-- Codex advisory is optional. If `codex` CLI is available, `/plan` and
-  `/cross-review` invoke it for second-opinion feedback. If unavailable, the
+- Codex advisory is optional. If the `codex` binary is available, `/plan` and
+  `/cross-review` invoke Codex for second-opinion feedback. If unavailable, the
   step is silently skipped and the flow continues unchanged.
 - Codex findings are presented to the user for judgment — never auto-applied.
 - `/pr` creates the pull request, archives the plan, and completes the

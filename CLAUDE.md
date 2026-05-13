@@ -15,7 +15,7 @@ Use this file only for Claude-specific guidance that must be always-on.
 - In Ralph Loop, the scripts handle the full lifecycle autonomously — no manual subagent chain needed. Use `./scripts/ralph run` or `./scripts/ralph status` to operate.
 - After /work, the post-implementation pipeline runs via subagents (`/self-review` → `/verify` → `/test` → `/sync-docs`), then `/cross-review` (optional, inline), then `/pr`.
 - `/self-review` is diff quality only. `/verify` is spec compliance + static analysis. `/test` is behavioral tests. Each produces a separate report.
-- Codex advisory is optional. If `codex` CLI is available, `/plan` and `/cross-review` invoke it for second-opinion feedback. If unavailable, the step is silently skipped and the flow continues unchanged.
+- Codex advisory is optional. If the `codex` binary is available, `/plan` and `/cross-review` invoke Codex for second-opinion feedback. If unavailable, the step is silently skipped and the flow continues unchanged.
 - Codex findings are presented to the user for judgment — never auto-applied.
 - `/pr` creates the pull request, archives the plan, and completes the hand-off. A task is "done" when the PR is created.
 - Prefer `.claude/rules/` for topic or path-specific guidance.

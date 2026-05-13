@@ -23,7 +23,7 @@ func TestDefault(t *testing.T) {
 	if !cfg.Doctor.RequireClaudeCLI {
 		t.Error("require_claude_cli should be true by default")
 	}
-	// Codex CLI is opt-in: defaults to false so projects without Codex
+	// Codex is opt-in: defaults to false so projects without Codex
 	// installed do not see `ralph doctor` exit non-zero.
 	if cfg.Doctor.RequireCodexCLI {
 		t.Error("require_codex_cli should default to false")

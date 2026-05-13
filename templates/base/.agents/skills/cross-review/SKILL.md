@@ -43,7 +43,7 @@ Provide a cross-model second opinion on the current diff before PR creation.
    Record the resolved driver and reviewer for the rest of the skill. Both must be reported in the triage report header.
 
 3. **Check reviewer availability**:
-   - reviewer = `codex`: run `./scripts/codex-check.sh`. If exit 1: note "Codex CLI not available — skipping to /pr" and invoke /pr.
+   - reviewer = `codex`: run `./scripts/codex-check.sh`. If exit 1: note "Codex not available — skipping to /pr" and invoke /pr.
    - reviewer = `claude`: run `command -v claude` via Bash. If not found: note "Claude CLI not available — skipping to /pr" and invoke /pr.
 
 4. **Invoke reviewer**:

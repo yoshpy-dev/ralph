@@ -1,4 +1,4 @@
-# .codex/config.toml — project-scoped configuration for the Codex CLI.
+# .codex/config.toml — project-scoped configuration for Codex.
 #
 # IMPORTANT: Codex only loads this file when the project is **trusted**.
 # Run `codex trust .` (or accept the trust prompt on first invocation) before
@@ -68,7 +68,7 @@ approval_policy = "never"
 
 # Default-on: detect U+FFFD mojibake injection after Edit/Write tool calls.
 # Reuses the same script the Claude-side hook calls (.claude/hooks/check_mojibake.sh)
-# so behaviour stays identical across CLIs. Path is a real file shipped by
+# so behaviour stays identical across agents. Path is a real file shipped by
 # `ralph init` — these entries satisfy `checkCodexEffectiveConfig`'s "at least
 # one [hooks.*] entry" requirement out of the box.
 [[hooks.PostToolUse]]

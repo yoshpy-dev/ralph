@@ -51,7 +51,7 @@ The triage step reads existing artifacts (plan, self-review report, verify repor
 
 ## Post-implementation pipeline under Codex — sequential inline
 
-Codex CLI does not have a subagent (`Task`) mechanism. When ralph runs under
+Codex does not have a subagent (`Task`) mechanism. When ralph runs under
 Codex in the standard flow (`RALPH_PRIMARY_CLI=codex` or detected at
 runtime), the four post-implementation skills run **sequentially inline in
 the single agent**:

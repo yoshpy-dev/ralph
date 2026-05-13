@@ -2,9 +2,9 @@
 
 # ralph
 
-**Claude Code + Codex CLI harness engineering.**
+**Claude Code + Codex harness engineering.**
 
-Scaffold, upgrade, and run opinionated agent harnesses that work with both Claude Code and the OpenAI Codex CLI from the same project — small always-on maps, on-demand skills, deterministic hooks, evidence-backed reviews, and optional autonomous parallel execution (Ralph Loop).
+Scaffold, upgrade, and run opinionated agent harnesses that work with both Claude Code and OpenAI Codex from the same project — small always-on maps, on-demand skills, deterministic hooks, evidence-backed reviews, and optional autonomous parallel execution (Ralph Loop).
 
 [![verify](https://github.com/yoshpy-dev/ralph/actions/workflows/verify.yml/badge.svg)](https://github.com/yoshpy-dev/ralph/actions/workflows/verify.yml)
 [![latest release](https://img.shields.io/github/v/release/yoshpy-dev/ralph?sort=semver)](https://github.com/yoshpy-dev/ralph/releases/latest)
@@ -59,7 +59,7 @@ cd my-project
 ralph doctor                  # environment check (Claude + Codex)
 ```
 
-Both CLIs are wired up automatically. To make Codex's project-level config and
+Both agent surfaces are wired up automatically. To make Codex's project-level config and
 hooks actually load, run `codex trust .` once after `ralph init`. `ralph doctor`
 flags trust gaps so you do not lose hooks silently.
 
@@ -103,7 +103,7 @@ Before claiming a task is done:
 | **Maps, not manuals**<br/>Short `AGENTS.md` / `CLAUDE.md`; push detail into rules and skills, promote repeats into hooks. | **Canonical pipeline**<br/>`self-review → verify → test → sync-docs → cross-review → pr` enforced in standard flow and Ralph Loop. |
 | **Deterministic hooks**<br/>Mojibake guard, commit-msg secret scan, Bash guardrails, verification reminders — pre-wired in `settings.json`. | **Ralph Loop**<br/>Multi-worktree autonomous parallel slices, integration branch, unified PR — orchestrated by `ralph run`. |
 | **Language packs**<br/>TypeScript, Python, Rust, Go, Dart starters (opt-in) with per-language `verify.sh` and path-scoped rules. | **Drift-proof upgrades**<br/>Hash-based `ralph upgrade` with per-file conflict resolution — keeps N projects aligned as the scaffold evolves. |
-| **Evidence over prose**<br/>Every review, verify, test, and codex pass produces a dated artifact in `docs/reports/`. | **Cross-agent portable**<br/>`AGENTS.md` + `scripts/` + `packs/` stay neutral; `.claude/` is the Claude-native layer you can stack others beside. |
+| **Evidence over prose**<br/>Every review, verify, test, and codex pass produces a dated artifact in `docs/reports/`. | **Cross-agent portable**<br/>`AGENTS.md` + `scripts/` + `packs/` stay neutral; `.claude/` and `.codex/` are agent-specific layers you can stack others beside. |
 
 ## Commands
 
@@ -116,7 +116,7 @@ Before claiming a task is done:
 | `ralph retry <slice>` | Retry a failed or stuck slice. |
 | `ralph abort [--slice <name>]` | Abort a single slice or all slices. |
 | `ralph pack add <lang>` | Install a language pack. |
-| `ralph doctor` | Check Claude Code CLI, hooks, manifest drift, language packs. |
+| `ralph doctor` | Check Claude Code, Codex, hooks, manifest drift, language packs. |
 | `ralph version` | Show semver + commit + build date. |
 
 Run `ralph help <command>` for flags.
@@ -141,7 +141,7 @@ The philosophy: **a map, not a manual**. Keep `AGENTS.md` small, push detail int
 │   ├── hooks/                # deterministic runtime guardrails
 │   ├── skills/               # on-demand workflows (plan, work, verify, ...)
 │   ├── agents/               # specialized subagents (Claude only)
-│   └── rules/                # conditional, path-scoped guidance (read by both CLIs)
+│   └── rules/                # conditional, path-scoped guidance (read by both agents)
 ├── .codex/
 │   ├── config.toml           # model, sandbox, approval, hooks (loads after `codex trust .`)
 │   ├── agents/               # Codex role definitions for review/verify/test/docs
@@ -191,7 +191,7 @@ flowchart LR
 5. **Verify** (auto — `/verify`) — spec compliance + static analysis.
 6. **Test** (auto — `/test`) — behavioral tests must pass before PR.
 7. **Sync docs** (auto — `/sync-docs`) — alignment across AGENTS.md / CLAUDE.md / rules / README.
-8. **Cross-review** (auto, optional — `/cross-review`) — cross-model second opinion via the OTHER CLI: Claude Code calls Codex; Codex calls `claude -p`. Silently skipped if the reviewer side is unavailable.
+8. **Cross-review** (auto, optional — `/cross-review`) — cross-model second opinion via the other agent: Claude Code calls Codex; Codex calls `claude -p`. Silently skipped if the reviewer side is unavailable.
 9. **PR** (auto — `/pr`) — structured PR, plan archival, hand-off.
 10. **CI + human merge**.
 
@@ -247,7 +247,7 @@ Wire it into `packs/languages/<name>/verify.sh`, `.claude/rules/<name>.md`, and 
 ## Portability
 
 `ralph` ships both Claude Code and Codex surfaces always-on, plus a portable
-core that any future CLI can reuse:
+core that any future agent surface can reuse:
 
 - **Portable**: `AGENTS.md`, `scripts/`, `.github/workflows/`, `packs/languages/`, `docs/`
 - **Claude-native**: `CLAUDE.md`, `.claude/rules/`, `.claude/skills/`, `.claude/hooks/`, `.claude/agents/`
@@ -255,7 +255,7 @@ core that any future CLI can reuse:
 
 `scripts/check-skill-sync.sh` keeps `.claude/skills/` and `.agents/skills/` in
 lock-step on body, name, description, and implicit-invocation policy. CI fails
-on drift so the two CLIs cannot quietly diverge.
+on drift so the two agent surfaces cannot quietly diverge.
 
 ### Known differences between Claude Code and Codex
 
