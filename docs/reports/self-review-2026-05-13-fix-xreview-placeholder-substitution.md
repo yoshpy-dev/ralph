@@ -1,0 +1,74 @@
+# Self-review report: fix-xreview-placeholder-substitution
+
+- Date: 2026-05-13
+- Plan: `docs/plans/active/2026-05-13-fix-xreview-placeholder-substitution.md`
+- Reviewer: `reviewer` subagent (self-review skill, Claude Code)
+- Scope: diff quality only on `git diff main...HEAD` (5 commits on `fix/50/xreview-placeholder-substitution`). Spec compliance, doc drift, and test execution intentionally deferred to `/verify` and `/test`.
+
+## Evidence reviewed
+
+- `git diff main...HEAD` (11 files changed, +938 / -14)
+- `scripts/ralph-pipeline.sh` cross-review block (lines 760–883, with focus on the new renderer + allowlist guard at 786–858)
+- `.claude/skills/cross-review/prompts/adversarial-claude.md` top-of-file comment block
+- `.claude/skills/cross-review/SKILL.md` + `.agents/skills/cross-review/SKILL.md` rendering-contract note (identical bodies)
+- `tests/test-xreview-prompt-render.sh` (renderer unit test, 232 lines)
+- `tests/test-xreview-gate-regression.sh` (end-to-end parser+gate test, 298 lines)
+- `templates/base/` mirrors: `cmp` confirms byte-identical with root-side files (`scripts/ralph-pipeline.sh`, prompt, both SKILL.md bodies). Git index shows `100755` for both pipeline scripts and both test scripts.
+- Downstream consumers of `_xreview_log`: confirmed via `grep` that nothing else parses `outer-*-cross-review.log` — the marker-file overwrite is safe.
+- Cross-checked the upstream `_base` assignment: `_base="${_base:-main}"` at line 776 forces a non-empty value before the renderer runs.
+
+## Findings
+
+<!-- Area recommended values: naming, readability, unnecessary-change, typo,
+     null-safety, debug-code, secrets, exception-handling, security, maintainability -->
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| CRITICAL | exception-handling | **Renderer failure silently bypasses the gate — same failure mode the PR claims to fix.** When the renderer hits any of the three failure paths (`render_failed_empty_base`, `render_failed_awk`, `render_failed_unresolved_placeholders`), the code sets `_adv_prompt=""` and skips the `claude -p` invocation. Control then falls through to `_triage_report="$(find … -newer …)"` at line 870. Because no reviewer ran, no triage report exists, `_triage_report` is empty, the `count_triage_findings` calls inside `if [ -n "$_triage_report" ]` are skipped, and `_action_required` keeps its initial value of `0` (line 769). The decision at line 889 (`if [ "$_action_required" -gt 0 ]`) then proceeds to PR creation. This **violates the plan's acceptance criterion** "If rendering fails …, the pipeline … does NOT silently pass the cross-review gate" and reproduces the exact silent-bypass shape of issue #50. | `scripts/ralph-pipeline.sh:769-779` (`_action_required=0` init), `:803-843` (failure paths set `_adv_prompt=""`), `:870-875` (parser is gated on `[ -n "$_triage_report" ]`), `:889-892` (decision). | Set a "gate-failed" sentinel on the render-failure paths so the post-case logic surfaces a regression. Simplest fix: `_action_required=1` (or a separate `_render_failed=1` flag checked alongside `$_action_required` at line 889) in each of the three render-failure branches; add a log line clarifying the regression cause. Reasonable behaviour: treat render failure as ACTION_REQUIRED for that cycle so the Inner Loop regresses, matching the "fail closed" contract. Update `tests/test-xreview-gate-regression.sh` Phase 5 to actually drive the gate decision (today it only asserts the allowlist-guard would flag the literal placeholders — it does not assert the gate returns non-zero). |
+| MEDIUM | maintainability | **Renderer duplicated in two test files.** The `render()` helper (awk `lreplace` function body) is copy-pasted verbatim into `tests/test-xreview-prompt-render.sh:36-55` and `tests/test-xreview-gate-regression.sh:80-99`. The unit test has a "drift guard" (3 `grep` assertions against the pipeline source) but it only checks that the production file contains the strings — it does not verify the test copy and the pipeline copy are byte-identical, so silent drift is still possible. A future change to the awk function in `ralph-pipeline.sh` that adds e.g. error reporting will not be reflected in either test copy until someone notices. | `scripts/ralph-pipeline.sh:810-826`, `tests/test-xreview-prompt-render.sh:36-55`, `tests/test-xreview-gate-regression.sh:80-99`. | Two reasonable options: (a) extract the renderer into a small standalone shell function that the pipeline sources from (e.g. `scripts/ralph-cli-driver.sh` or a new `scripts/render-prompt.sh`), and have both tests source the same helper; or (b) tighten the drift guard so it byte-compares the awk function body across all three files (e.g. extract the awk script between two sentinel comments and `diff` it). Option (a) is preferable since `count_triage_findings` already lives in `ralph-cli-driver.sh` for the same reason. |
+| MEDIUM | readability | **`_adv_prompt=""` overloaded as "skip reviewer" sentinel.** The variable holds the prompt path (`.claude/skills/cross-review/prompts/adversarial-claude.md`) up to the `if [ -f "$_adv_prompt" ]` branch, then is repurposed as a boolean-ish "skip" signal by clearing it. The `if [ -n "$_adv_prompt" ]` check at line 845 reads as "do we have a prompt file?" but actually means "did rendering succeed?". This makes the control flow harder to follow and made the CRITICAL finding above non-obvious during review. | `scripts/ralph-pipeline.sh:787-858`. | Introduce a dedicated boolean: `_render_ok=1` (initial) → `_render_ok=0` on each failure path; gate the `claude -p` call on `[ "$_render_ok" -eq 1 ]`. Also gives a natural place to surface the failure into `_action_required` (see CRITICAL finding). |
+| LOW | dead-code | **Defensive `[ -z "${_base:-}" ]` check is unreachable.** Line 776 unconditionally falls back: `_base="${_base:-main}"`. By the time the renderer runs at line 803, `_base` is guaranteed non-empty (worst case literal `main`). The `render_failed_empty_base` branch can never fire as the code is written today. The plan's acceptance criterion (`_base may be unset / empty if git rev-parse failed upstream`) is no longer accurate. | `scripts/ralph-pipeline.sh:775-776` vs `:803`. | Either drop the dead branch (preferable — defensive code that can never run is a maintenance trap), or remove the `:-main` default at line 776 so the check has a real reason to exist. If the intent is "treat upstream-detection failure as a render failure", the default-to-`main` line is the bug, not the renderer guard. |
+| LOW | readability | **Comment overstates portability claim.** The `.claude/skills/cross-review/prompts/adversarial-claude.md` top-of-file comment says "git refs with `#` / `&` / `/` … pass through unchanged" but omits `\`, even though the test file explicitly covers `feature\back`. The pipeline comment (lines 796–801) lists `#` / `&` / `\` / `/`. Either both should list the same set or both should drop the per-character enumeration in favour of "any literal string". | `.claude/skills/cross-review/prompts/adversarial-claude.md:5-7`, `scripts/ralph-pipeline.sh:796-801`, `tests/test-xreview-prompt-render.sh:101-107`. | Add `\` to the prompt-side comment, or simplify both comments to "treated as a literal string". |
+| LOW | maintainability | **`grep ... || true` with empty-string check is a double safety net.** Line 836 has `grep -oE … 2>/dev/null | sort -u || true` — the `|| true` is redundant given the subsequent `[ -n "$_leftover_placeholders" ]` check (empty match prints nothing, which is the success case). It's harmless but reads as if `grep` returning 1 (no match) is something to defend against, which is exactly the expected success case. | `scripts/ralph-pipeline.sh:836-837`. | Either drop `|| true` (relying on `[ -n … ]`) or add a one-line comment explaining `grep`'s convention of exit-1 on no match — both communicate intent better than the current form. Same applies to the test files (`allowlist_leftovers () { grep … 2>/dev/null | sort -u; }` — they also `|| true` on the call site). |
+| LOW | readability | **`_xreview_log` overwritten with marker strings is fine but undocumented.** Lines 805/828/839/857/878/882 write short marker strings (`render_failed_awk`, etc.) to `${PIPELINE_DIR}/outer-N-cross-review.log`. Prior to this diff the log was reviewer stdout. No downstream consumer parses these markers (verified by `grep`), so this is harmless, but the convention is now mixed: sometimes captured stdout, sometimes a sentinel keyword. A reader following the log path may be confused. | `scripts/ralph-pipeline.sh:805,828,839,857,878,882`. | One-line comment near the first `echo "render_failed_*" > "$_xreview_log"` documenting that the log doubles as a sentinel channel when the reviewer is skipped. No code change required. |
+
+## Positive notes
+
+- **Mirror discipline is solid.** `cmp` confirms byte-identical files between root and `templates/base/` for all four mirrored paths; both pipeline scripts have `100755` mode in the git index. No `scripts/check-sync.sh` exclusion was needed.
+- **awk `index()`/`substr()` choice is correct and well-justified.** The pipeline comment (lines 796–801) explicitly explains why `gsub` was rejected (`&`/`\` interpretation), and the unit test parameterises across `feature#1`, `feature&1`, `feature\back`, `release/3.5`, `docs/reports#1`, `docs/reports&backup` to lock that contract in. This is the kind of test-as-documentation pairing that future maintainers will thank.
+- **Allowlist-based unresolved-placeholder guard is the right shape.** Failing closed on unknown `${[A-Z_][A-Z0-9_]*}` tokens forces a deliberate edit when new placeholders are added, and the prompt-file comment block explicitly tells future contributors how to extend it. Defence-in-depth around an LLM-driven path.
+- **`set -eu` discipline preserved.** All new shell uses `${VAR:-}` (line 803), `|| true` on tolerant grep/sort, and `if !` for command-status branching — no risk of accidental `set -e` exits inside the new block.
+- **Comments explain *why*, not *what*.** The 14-line comment at lines 789–801 captures the bug history (`claude -p` not template-substituting), the design rationale (gsub vs index/substr), and the regression reference (issue #50) — all three of which a future grep will find. Same for the prompt-file header block.
+- **Tests cover the negative path.** The renderer test includes a `${UNKNOWN_PLACEHOLDER}` negative case (neg.a/neg.b) that asserts the allowlist guard catches unsupported placeholders *and* does not flag supported ones. That second assertion is the easy one to forget.
+- **No drive-by changes.** The 11-file diff list matches the plan's affected-areas section exactly: pipeline + prompt + two SKILL.md mirrors + plan + two new tests + four `templates/base/` mirrors. No accidental formatter sweeps, no commented-out code, no debug prints, no secrets.
+- **No security concerns introduced by the new awk block.** The awk program is single-quoted (no shell expansion in the program text); replacement values are read via `ENVIRON[]` (no command substitution); both `BASE_BRANCH` and `REPORTS_DIR` are constrained to values the same shell already trusts (git ref name, repo-relative path). No injection surface added.
+
+## Tech debt identified
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| Renderer awk body duplicated across `ralph-pipeline.sh` + 2 test files | MEDIUM — silent drift between production renderer and test renderer if someone edits one and not the others | Extracting to a shared helper is a larger refactor than the bug fix scope; the unit test's drift guard partially mitigates by asserting the pipeline contains the function name | Next time the renderer needs to grow (e.g. another placeholder, error reporting) — extract into `scripts/ralph-cli-driver.sh` alongside `count_triage_findings` | This report; #50 |
+| `_action_required` initialisation pattern conflates "no reviewer ran" with "reviewer ran and found nothing" | HIGH (covered by CRITICAL finding) — silent-bypass under render failure | — | Must be fixed before merge per CRITICAL finding | This report; #50 |
+
+The first row should be appended to `docs/tech-debt/README.md` if this PR ships. The second row is **not** deferred work — it's the CRITICAL finding and must be fixed before merge, so it is not added to the tech-debt register.
+
+## Recommendation
+
+- Merge: **no-merge** — one CRITICAL finding blocks. The renderer correctly substitutes placeholders on the happy path (acceptance criteria 1–2 met) and the allowlist guard fails closed for *unknown* placeholders on the rendered file, but the upstream render-failure paths (empty `_base`, awk crash, allowlist trip) still let the gate proceed silently because `_action_required` keeps its initial 0. That is the same silent-bypass shape issue #50 set out to fix. Fix is small (~3 lines plus a Phase 5 test update).
+- Follow-ups:
+  1. **(blocking)** Set `_action_required=1` (or a dedicated `_render_failed=1` flag consulted at line 889) in each of the three render-failure branches at lines 805/828/839. Update `tests/test-xreview-gate-regression.sh` Phase 5 to drive the gate decision end-to-end on a literal-placeholder prompt, not just the allowlist guard in isolation.
+  2. **(blocking, optional)** Rename `_adv_prompt=""` sentinel to a dedicated `_render_ok` boolean for readability. Same diff.
+  3. **(non-blocking)** Decide between dropping the `_base="${_base:-main}"` default at line 776 (so the empty-base check has real teeth) or removing the unreachable empty-`_base` branch in the renderer.
+  4. **(non-blocking, tech-debt)** Extract the awk renderer into a single sourced function so the two test files and the pipeline cannot drift.
+  5. **(non-blocking, doc)** Align the prompt-file comment's metacharacter list with the pipeline comment (add `\` or simplify both).
+
+## STOP-condition summary
+
+Per `.claude/skills/self-review/SKILL.md` and `.claude/rules/post-implementation-pipeline.md`, the pipeline must stop on CRITICAL findings before `/verify`.
+
+- **CRITICAL findings: 1** — silent-bypass-on-render-failure (`scripts/ralph-pipeline.sh` cross-review block).
+- **HIGH findings: 0**.
+- **MEDIUM findings: 2** — renderer duplicated across three files; `_adv_prompt=""` overloaded as control signal.
+- **LOW findings: 3** — dead empty-`_base` branch, comment metacharacter list mismatch, redundant `|| true` on grep.
+
+**STOP condition met. The CRITICAL finding must be fixed before `/verify` is invoked.** After the fix, the full post-implementation pipeline (`/self-review` → `/verify` → `/test` → `/sync-docs` → `/cross-review` → `/pr`) re-runs from this step, per the canonical order in `.claude/rules/post-implementation-pipeline.md`.

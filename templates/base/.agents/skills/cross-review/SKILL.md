@@ -175,6 +175,19 @@ Both driver and reviewer are recorded in the triage report (`Driver:` /
 actually ran. The fake-CLI regression coverage lives in
 `tests/test-ralph-cli-driver.sh` Test 5 / Test 6.
 
+**Prompt rendering contract (claude reviewer path).** The
+`adversarial-claude.md` prompt contains `${BASE_BRANCH}` and
+`${REPORTS_DIR}` placeholders. `ralph-pipeline.sh` pre-renders these
+into a per-cycle copy under `${PIPELINE_DIR}/outer-N-adversarial-claude.md`
+using awk `index()`/`substr()` (literal replacement — safe against
+git refs containing `#`, `&`, `\`, `/`). An allowlist guard fails the
+cross-review gate closed if any unsupported `${...}` placeholder remains
+in the rendered prompt. Adding a new placeholder therefore requires
+updating both the prompt and the renderer; the gate will not silently
+pass on partial substitution (regression: issue #50). Regression coverage
+lives in `tests/test-xreview-prompt-render.sh` and
+`tests/test-xreview-gate-regression.sh`.
+
 ## What /cross-review does NOT do
 
 - **Auto-fix**: Findings are advisory only. No code changes.
