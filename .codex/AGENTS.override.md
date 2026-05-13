@@ -20,6 +20,10 @@ ignores it.
   Claude second opinion when Codex is the primary driver. Set
   `RALPH_PRIMARY_CLI=codex` before invoking the post-implementation pipeline so
   the skill picks the correct reviewer side.
+- **Pull requests**: when creating a PR from Codex, create a ready-for-review
+  PR by default. Do not pass `--draft` and do not use draft PR creation unless
+  the operator explicitly asks for a draft; if a connector creates a draft
+  anyway, mark it ready before reporting the PR as complete.
 
 ## Permission and sandbox mapping
 
