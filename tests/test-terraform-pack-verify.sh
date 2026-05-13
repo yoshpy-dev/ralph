@@ -80,10 +80,36 @@ workdir="$(mktemp -d "${TMPDIR:-/tmp}/tf-pack-test.XXXXXX")"
 cleanup() { rm -rf "$workdir"; }
 trap cleanup EXIT
 
-# Build a minimal PATH that has the system essentials we need
-# (find, grep, sed, sh, etc.) but no terraform/tofu/tflint/tfsec/trivy.
-# We point at /usr/bin:/bin which is enough for POSIX coreutils.
-clean_path="/usr/bin:/bin"
+# Build a hermetic PATH that contains ONLY the POSIX coreutils we need,
+# never the IaC tools. We must not point at /usr/bin or /bin directly,
+# because CI hosts often have terraform/tofu/tflint/tfsec/trivy installed
+# system-wide (apt-get install terraform, etc.) — exposing them would
+# make the "no CLI" / "optional tool absent" branches non-hermetic.
+#
+# Strategy: create a fresh directory and populate it with symlinks to
+# the host's resolved paths for each coreutil we depend on. If a
+# required coreutil is missing on the host, fail loudly rather than
+# silently degrade.
+coreutils_dir="$workdir/.coreutils"
+mkdir -p "$coreutils_dir"
+for _tool in sh find grep sed cat chmod mkdir rm printf ls test true false head tr; do
+  _resolved="$(command -v "$_tool" 2>/dev/null || true)"
+  if [ -z "$_resolved" ]; then
+    echo "FAIL: required coreutil '$_tool' not found on host PATH" >&2
+    exit 1
+  fi
+  ln -s "$_resolved" "$coreutils_dir/$_tool"
+done
+# Guard: refuse to start if any IaC tool somehow leaked into the
+# coreutils dir. This prevents a future maintainer from accidentally
+# adding 'terraform' or 'tofu' to the symlink list above.
+for _banned in terraform tofu tflint tfsec trivy; do
+  if [ -e "$coreutils_dir/$_banned" ]; then
+    echo "FAIL: hermetic PATH leak — '$_banned' present in $coreutils_dir" >&2
+    exit 1
+  fi
+done
+clean_path="$coreutils_dir"
 
 make_stub_dir() {
   # $1 = directory to populate; $2..$N = names of stubs to create.
