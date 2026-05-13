@@ -27,13 +27,13 @@ Build coding-agent workflows that are:
 5. Verify (auto — via `verifier` subagent, or pipeline-internal)
 6. Test (auto — via `tester` subagent, or pipeline-internal)
 7. Sync-docs (auto — via `doc-maintainer` subagent, or pipeline-internal)
-8. Cross-review (auto, optional — cross-model second opinion via the other CLI: Claude → Codex; Codex → Claude)
+8. Cross-review (auto, optional — cross-model second opinion via the other agent: Claude → Codex; Codex → Claude)
 9. PR (auto — includes hand-off)
 10. CI verify + human merge
 
 Steps 4–9 run via subagents in 標準フロー. In Ralph Loop, they are handled internally by the pipeline scripts.
 
-Ralph Loop runs under whichever CLI is selected by `RALPH_LOOP_DRIVER` (or `[loop] driver` in `ralph.toml`); the cross-review reviewer is always the *opposite* CLI. `ralph status` and `ralph doctor` print the effective driver and source.
+Ralph Loop runs under whichever driver is selected by `RALPH_LOOP_DRIVER` (or `[loop] driver` in `ralph.toml`); the cross-review reviewer is always the opposite agent. `ralph status` and `ralph doctor` print the effective driver and source.
 
 ## Source of truth
 
@@ -61,7 +61,7 @@ Ralph Loop runs under whichever CLI is selected by `RALPH_LOOP_DRIVER` (or `[loo
 - `docs/plans/templates/` — plan templates (`feature-plan.md`, `ralph-loop-manifest.md`, `ralph-loop-slice.md`)
 - `docs/reports/` — self-review, verify, test, walkthrough artifacts
 - `docs/quality/` — definition of done and quality gates
-- `.claude/rules/` — path-scoped guidance (read by both CLIs)
+- `.claude/rules/` — path-scoped guidance (read by both agents)
 - `.claude/skills/` — Claude-side on-demand workflows
 - `.claude/agents/` — specialized subagents (Claude only)
 - `.claude/hooks/` — deterministic runtime checks

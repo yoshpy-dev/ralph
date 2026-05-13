@@ -6,9 +6,9 @@ set -eu
 # Outer Loop: sync-docs → cross-review (repeat on ACTION_REQUIRED) → PR
 #
 # State lives in .harness/state/pipeline/
-# Requires: jq, git, and one of {claude, codex} CLI (selected by
+# Requires: jq, git, and one of {claude, codex} binaries (selected by
 #           RALPH_LOOP_DRIVER, default claude). cross-review prefers the
-#           other CLI as the adversarial reviewer when available.
+#           other reviewer binary when available.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "${SCRIPT_DIR}/ralph-config.sh"
@@ -242,7 +242,7 @@ run_preflight() {
   _all_pass=true
   _probes="[]"
 
-  # Probe 1: driver CLI available — claude or codex depending on RALPH_LOOP_DRIVER.
+  # Probe 1: driver binary available — claude or codex depending on RALPH_LOOP_DRIVER.
   # When driver=codex we still tolerate `claude` being absent here because the
   # cross-review reviewer-inversion path checks for it separately at use time.
   _cli_check="fail"
@@ -258,7 +258,7 @@ run_preflight() {
     _all_pass=false
   fi
   _probes="$(printf '%s' "$_probes" | jq --arg s "$_cli_check" --arg n "${_cli_bin}_cli_available" '. += [{"probe":$n,"result":$s}]')"
-  log "  ${_cli_bin} CLI: ${_cli_check}"
+  log "  ${_cli_bin} binary: ${_cli_check}"
 
   # Probe 2: jq available
   _jq_check="fail"
@@ -390,7 +390,7 @@ run_preflight() {
   _probes="$(printf '%s' "$_probes" | jq --arg s "$_gh_check" '. += [{"probe":"gh_cli","result":$s}]')"
   log "  gh CLI: ${_gh_check}"
 
-  # Probe 7: opposite-CLI availability — needed for cross-review reviewer
+  # Probe 7: opposite reviewer availability — needed for cross-review reviewer
   # inversion. When driver=claude the reviewer is codex, and vice versa.
   case "$RALPH_LOOP_DRIVER" in
     claude) _other_bin="codex"  ;;
@@ -400,10 +400,10 @@ run_preflight() {
   if command -v "$_other_bin" >/dev/null 2>&1; then
     _other_check="available"
   else
-    log "Warning: ${_other_bin} CLI not found — cross-review will be skipped"
+    log "Warning: ${_other_bin} binary not found — cross-review will be skipped"
   fi
   _probes="$(printf '%s' "$_probes" | jq --arg s "$_other_check" --arg n "${_other_bin}_cli" '. += [{"probe":$n,"result":$s}]')"
-  log "  ${_other_bin} CLI: ${_other_check}"
+  log "  ${_other_bin} binary: ${_other_check}"
 
   # Write probe results
   jq -n --argjson probes "$_probes" --arg ts "$(ts)" --arg pass "$_all_pass" \
@@ -754,8 +754,8 @@ DOCS
 
   # --- Cross-review phase (driver-aware reviewer inversion) ---
   #
-  # The contract is that the reviewer is the *opposite* CLI from the driver,
-  # so the cross-model gate is preserved regardless of which CLI ran the
+  # The contract is that the reviewer is the other driver,
+  # so the cross-model gate is preserved regardless of which driver ran the
   # Inner Loop. Phase 2 (issue #44) adds the codex-driven branch.
   log "--- Phase: cross-review ---"
   _xreview_log="${PIPELINE_DIR}/outer-${_cycle}-cross-review.log"
@@ -877,7 +877,7 @@ DOCS
       echo "no_diff" > "$_xreview_log"
     fi
   else
-    log "${_reviewer} CLI not available — skipping cross-review"
+    log "${_reviewer} binary not available — skipping cross-review"
     printf '%s_not_available\n' "$_reviewer" > "$_xreview_log"
   fi
 

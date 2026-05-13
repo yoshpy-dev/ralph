@@ -79,7 +79,7 @@ func TestExecuteInit_NewProject(t *testing.T) {
 	}
 }
 
-// TestExecuteInit_RendersCodexSurfaces enforces AC-1 of the Codex CLI parity
+// TestExecuteInit_RendersCodexSurfaces enforces AC-1 of the Codex parity
 // spec: a fresh `ralph init` must scaffold .claude/, .codex/, AND
 // .agents/skills/ in lock-step. Without this gate the embed FS could quietly
 // drop the Codex tree (e.g. stale go:embed pattern) and produce projects that

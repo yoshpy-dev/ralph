@@ -1,7 +1,7 @@
 # Codex agent overrides
 
 Loaded by Codex on top of the project-root `AGENTS.md` (later files win in Codex's
-root-down concatenation). This file applies only to the Codex CLI; Claude Code
+root-down concatenation). This file applies only to Codex; Claude Code
 ignores it.
 
 ## Codex execution model

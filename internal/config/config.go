@@ -16,9 +16,9 @@ type Config struct {
 	Doctor   DoctorConfig   `toml:"doctor"`
 }
 
-// LoopConfig holds Ralph Loop driver settings — which CLI drives the
+// LoopConfig holds Ralph Loop driver settings — which driver runs the
 // per-slice pipeline, and how the Codex driver runs (sandbox + approvals).
-// Phase 2 of the Codex CLI parity work; see issue #44.
+// Phase 2 of the Codex parity work; see issue #44.
 type LoopConfig struct {
 	Driver              string `toml:"driver"`
 	CodexSandbox        string `toml:"codex_sandbox"`
@@ -94,7 +94,7 @@ var codexSandboxAllowed = map[string]bool{
 	"danger-full-access": true,
 }
 
-// Allowed approval policies recognised by Codex CLI.
+// Allowed approval policies recognised by Codex.
 var codexApprovalAllowed = map[string]bool{
 	"untrusted":  true,
 	"on-failure": true,

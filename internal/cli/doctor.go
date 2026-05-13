@@ -50,7 +50,7 @@ func runDoctor(targetDir string) error {
 	// Check 1: Claude Code CLI.
 	results = append(results, checkClaudeCLI(cfg))
 
-	// Check 2: Codex CLI.
+	// Check 2: Codex.
 	results = append(results, checkCodexCLI(cfg))
 
 	// Check 3: Codex effective config (project trust + hooks feature + at least one hook).
@@ -161,7 +161,7 @@ func checkClaudeCLI(cfg config.Config) checkResult {
 }
 
 func checkCodexCLI(cfg config.Config) checkResult {
-	r := checkResult{Name: "Codex CLI"}
+	r := checkResult{Name: "Codex"}
 	version, err := probeBinary("codex")
 	if err != nil {
 		if cfg.Doctor.RequireCodexCLI {
@@ -478,7 +478,7 @@ func checkLoopDriver(cfg config.Config, getenv func(string) string) checkResult 
 	if effective == "codex" {
 		if _, err := exec.LookPath("codex"); err != nil {
 			r.Status = "fail"
-			r.Detail = fmt.Sprintf("%s (source: %s) — codex CLI not found in PATH; `ralph run` preflight will fail", effective, source)
+			r.Detail = fmt.Sprintf("%s (source: %s) — codex binary not found in PATH; `ralph run` preflight will fail", effective, source)
 			return r
 		}
 	}

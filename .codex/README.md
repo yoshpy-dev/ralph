@@ -1,13 +1,13 @@
 # Codex setup for ralph projects
 
-This directory carries Codex CLI configuration. ralph treats Claude Code and
+This directory carries Codex configuration. ralph treats Claude Code and
 Codex as **first-class peers**: every skill that exists in `.claude/skills/`
 also lives in `.agents/skills/`, and the post-implementation pipeline produces
-the same artifacts no matter which CLI drove the work.
+the same artifacts no matter which agent drove the work.
 
 ## One-time setup
 
-1. **Install the Codex CLI** (>= 0.128.0).
+1. **Install Codex** (>= 0.128.0).
    See [https://developers.openai.com/codex/cli](https://developers.openai.com/codex/cli).
 2. **Trust this project** so Codex loads `.codex/config.toml` and the inline
    `[[hooks.*]]` entries:
@@ -24,7 +24,7 @@ the same artifacts no matter which CLI drove the work.
    ralph doctor
    ```
 
-   `ralph doctor` checks that the Codex CLI is on `$PATH`, that the project is
+   `ralph doctor` checks that the `codex` binary is on `$PATH`, that the project is
    trusted, that `[features] hooks = true` is set, and that at least one
    `[hooks]` entry is visible to Codex.
 
@@ -80,7 +80,7 @@ hash-based diff engine can be replayed cleanly. Skill renames are surfaced as
 
 Project-level Codex hooks live in `.codex/config.toml` as inline
 `[[hooks.*]]` entries. They shell out to the same scripts under
-`.claude/hooks/`, so behaviour stays identical across the two CLIs.
+`.claude/hooks/`, so behaviour stays identical across the two agents.
 
 Do not add `.codex/hooks.json` beside inline hooks in `.codex/config.toml`.
 Codex loads hooks per configuration layer, and two hook representations in the
@@ -92,7 +92,7 @@ The template ships **default-on** with two `PostToolUse` hooks that point at
 `./.claude/hooks/check_mojibake.sh` (one for `Edit`, one for `Write`). These
 satisfy `ralph doctor`'s "at least one `[hooks]` entry visible" check on a
 fresh `ralph init` and reuse the same script the Claude side calls, so a
-single edit to `check_mojibake.sh` covers both CLIs.
+single edit to `check_mojibake.sh` covers both agents.
 
 To extend the hook surface, add new `[[hooks.<event>]]` entries that point at
 real scripts, keep commands relative to the repo, and add the matching

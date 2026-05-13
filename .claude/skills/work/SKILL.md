@@ -45,7 +45,7 @@ Work from the active plan, not from memory alone.
     b. `Task(subagent_type="verifier")` → `/verify` — stop if fail verdict
     c. `Task(subagent_type="tester")` → `/test` — stop if fail verdict
     d. `Task(subagent_type="doc-maintainer")` → `/sync-docs`
-    e. **Invoke `/cross-review` via the Skill tool** (optional, inline — if Codex CLI unavailable, skip to `/pr`). The skill reads `cycle-count.json` and enforces `RALPH_STANDARD_MAX_PIPELINE_CYCLES` (default 2). On re-run after ACTION_REQUIRED fixes, `/cross-review` increments `cycle-count.json`.
+    e. **Invoke `/cross-review` via the Skill tool** (optional, inline — if Codex unavailable, skip to `/pr`). The skill reads `cycle-count.json` and enforces `RALPH_STANDARD_MAX_PIPELINE_CYCLES` (default 2). On re-run after ACTION_REQUIRED fixes, `/cross-review` increments `cycle-count.json`.
     f. **Invoke `/pr` via the Skill tool** — do NOT run `gh pr create` directly. The `/pr` skill enforces the Japanese template, pre-checks, and plan archiving. On success, `/pr` deletes `.harness/state/standard-pipeline/active-plan.json` and `cycle-count.json`.
 
 ## Scope discipline

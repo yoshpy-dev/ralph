@@ -2,11 +2,11 @@
 set -eu
 # Exit 0 = available, Exit 1 = not available
 if ! command -v codex >/dev/null 2>&1; then
-  echo "codex CLI not found"
+  echo "codex binary not found"
   exit 1
 fi
 if ! codex --version >/dev/null 2>&1; then
-  echo "codex CLI not functional"
+  echo "codex binary not functional"
   exit 1
 fi
 codex --version

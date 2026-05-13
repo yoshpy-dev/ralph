@@ -28,7 +28,7 @@ Build coding-agent workflows that are:
 5. Verify (auto)
 6. Test (auto)
 7. Sync-docs (auto)
-8. Cross-review (auto, optional — cross-model second opinion via the other CLI: Claude → Codex; Codex → Claude)
+8. Cross-review (auto, optional — cross-model second opinion via the other agent: Claude → Codex; Codex → Claude)
 9. PR (auto — includes hand-off)
 10. CI verify + human merge
 
@@ -36,19 +36,19 @@ In Claude Code's standard flow, steps 4–7 run via subagents (`reviewer`,
 `verifier`, `tester`, `doc-maintainer`). In Codex they run sequentially in
 one agent. In Ralph Loop they are handled internally by the pipeline scripts.
 
-Ralph Loop runs under whichever CLI is selected by `RALPH_LOOP_DRIVER` (or
+Ralph Loop runs under whichever driver is selected by `RALPH_LOOP_DRIVER` (or
 `[loop] driver` in `ralph.toml`); the cross-review reviewer is always the
-*opposite* CLI. `ralph status` and `ralph doctor` print the effective driver
+opposite agent. `ralph status` and `ralph doctor` print the effective driver
 and source.
 
 ## Skill invocation
 
-| CLI | How to invoke a skill | Notes |
+| Agent | How to invoke a skill | Notes |
 |-----|------------------------|-------|
 | Claude Code | `/skill-name` slash command | Set in `.claude/skills/<name>/SKILL.md` frontmatter |
 | Codex | `$skill-name` mention or `/skills` menu | `/skill-name` collides with Codex built-ins (e.g. `/plan`) — do not use |
 
-Both CLIs read the same skill bodies. Claude reads `.claude/skills/`, Codex
+Both agents read the same skill bodies. Claude reads `.claude/skills/`, Codex
 reads `.agents/skills/`. `scripts/check-skill-sync.sh` keeps the two trees in
 lock-step (body, name, description, implicit-invocation policy).
 
@@ -69,7 +69,7 @@ lock-step (body, name, description, implicit-invocation policy).
 - `docs/plans/templates/` — plan templates
 - `docs/reports/` — self-review, verify, test, walkthrough artifacts
 - `docs/quality/` — definition of done and quality gates
-- `.claude/rules/` — path-scoped guidance (read by both CLIs)
+- `.claude/rules/` — path-scoped guidance (read by both agents)
 - `.claude/skills/` — Claude Code skill bodies
 - `.claude/agents/` — Claude Code subagent definitions
 - `.claude/hooks/` — Claude Code runtime hooks
@@ -111,10 +111,10 @@ unverified. Tests must pass before PR creation.
 If you intend to drive ralph from Codex, finish this once per project before
 starting any flow:
 
-1. Install Codex CLI (>= 0.128.0).
+1. Install Codex (>= 0.128.0).
 2. `codex trust .` — without trust, `.codex/config.toml`, `[features]`, and
    `[hooks]` are silently ignored.
-3. `ralph doctor` — confirms CLI presence, project trust, `hooks` flag,
+3. `ralph doctor` — confirms Claude Code/Codex presence, project trust, `hooks` flag,
    and at least one effective `[hooks]` entry.
 
 See `.codex/README.md` for the full guide.
@@ -123,7 +123,7 @@ See `.codex/README.md` for the full guide.
 
 - Keep this file short
 - Keep `CLAUDE.md` short
-- Move detailed topic guidance into `.claude/rules/` (read by both CLIs)
+- Move detailed topic guidance into `.claude/rules/` (read by both agents)
 - Move step-by-step workflows into `.claude/skills/` and mirror in `.agents/skills/`
 - Promote repeated mistakes into hooks, tests, CI, or scripts
 - Do not expand plans into brittle low-level instructions unless the task truly needs it

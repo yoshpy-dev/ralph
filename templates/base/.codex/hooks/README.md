@@ -3,7 +3,7 @@
 ralph does not ship Codex-specific hook scripts here. The default-on Codex
 hooks (`PostToolUse` mojibake guard on `Edit` / `Write`) are wired in
 `.codex/config.toml` inline `[[hooks.*]]` entries and call into the
-**shared scripts under `.claude/hooks/`** so a single edit covers both CLIs:
+**shared scripts under `.claude/hooks/`** so a single edit covers both agents:
 
 ```toml
 [[hooks.PostToolUse]]

@@ -92,7 +92,7 @@ func TestCheckLoopDriver_PriorityAndSource(t *testing.T) {
 
 // TestCheckLoopDriver_FailsWhenCodexMissing pins the cycle-3 cross-review
 // fix: doctor must surface the mismatch when driver=codex is effective but
-// the codex CLI is not installed, instead of reporting pass and letting
+// the codex binary is not installed, instead of reporting pass and letting
 // the next `ralph run` preflight block.
 func TestCheckLoopDriver_FailsWhenCodexMissing(t *testing.T) {
 	// Empty PATH directory → no codex binary discoverable.
@@ -105,7 +105,7 @@ func TestCheckLoopDriver_FailsWhenCodexMissing(t *testing.T) {
 	if r.Status != "fail" {
 		t.Errorf("status = %q, want fail (codex absent + driver=codex)", r.Status)
 	}
-	if !strings.Contains(r.Detail, "codex CLI not found") {
+	if !strings.Contains(r.Detail, "codex binary not found") {
 		t.Errorf("detail %q should explain the mismatch", r.Detail)
 	}
 }

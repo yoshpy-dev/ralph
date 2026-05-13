@@ -8,7 +8,7 @@
 
 ## Claude control plane
 
-- `.claude/rules/`: path-scoped or topic-scoped guidance (read by both CLIs)
+- `.claude/rules/`: path-scoped or topic-scoped guidance (read by both agents)
 - `.claude/skills/`: Claude-side skill bodies (mirrored to `.agents/skills/`)
 - `.claude/agents/`: specialized subagents (Claude only)
 - `.claude/hooks/`: deterministic hook scripts
@@ -41,7 +41,7 @@
 - `.claude/skills/self-review/`: self-review diff quality (auto)
 - `.claude/skills/verify/`: spec compliance and static analysis (auto)
 - `.claude/skills/test/`: behavioral tests (auto)
-- `.claude/skills/cross-review/`: cross-model second opinion via the other CLI (Claude → Codex; Codex → Claude) (auto, optional)
+- `.claude/skills/cross-review/`: cross-model second opinion via the other agent (Claude → Codex; Codex → Claude) (auto, optional)
 - `.claude/skills/pr/`: create PRs, archive plans, hand off (auto)
 - `.claude/skills/sync-docs/`: documentation sync (auto)
 - `.claude/skills/audit-harness/`: harness consistency audit (auto)

@@ -1,12 +1,12 @@
 # Codex setup recipe
 
-Operate ralph from the OpenAI Codex CLI in a project that was scaffolded with
+Operate ralph from OpenAI Codex in a project that was scaffolded with
 `ralph init`. Both Claude Code and Codex are first-class drivers — pick the
 one you prefer and the standard flow is identical.
 
 ## Prerequisites
 
-- Codex CLI **>= 0.128.0** on `$PATH` (`codex --version`).
+- Codex **>= 0.128.0** on `$PATH` (`codex --version`).
 - A project that has been initialized with a recent `ralph` (`ralph init` or
   `ralph upgrade` produces `.codex/` and `.agents/skills/`).
 - Ralph CLI for `ralph doctor` (optional but recommended).
@@ -17,7 +17,7 @@ one you prefer and the standard flow is identical.
 cd <project>
 codex trust .                  # required: only then are .codex/config.toml
                                # and [hooks] actually loaded
-ralph doctor                   # confirms claude/codex CLI presence,
+ralph doctor                   # confirms Claude Code/Codex presence,
                                # hooks=true, hook entries
 ```
 
