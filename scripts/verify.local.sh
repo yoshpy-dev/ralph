@@ -113,6 +113,9 @@ run_hook_tests() {
   if [ -x tests/test-terraform-rule-frontmatter.sh ]; then
     run "tests/test-terraform-rule-frontmatter.sh" tests/test-terraform-rule-frontmatter.sh
   fi
+  if [ -x tests/test-terraform-gitignore.sh ]; then
+    run "tests/test-terraform-gitignore.sh" tests/test-terraform-gitignore.sh
+  fi
 }
 
 case "$mode" in
