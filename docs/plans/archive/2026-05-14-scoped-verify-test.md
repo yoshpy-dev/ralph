@@ -6,6 +6,7 @@
 - Related request: Scope post-implementation verify/test to changed languages
 - Related issue: #71
 - Branch: codex-scoped-verify-test
+- PR: https://github.com/yoshpy-dev/ralph/pull/72
 
 ## Objective
 
@@ -116,4 +117,4 @@ gates with CI and Ralph Loop integration retaining full-scope coverage.
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
-- [ ] PR created
+- [x] PR created
