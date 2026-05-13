@@ -1109,6 +1109,40 @@ command = ["./scripts/check_mojibake.sh"]
 	}
 }
 
+// TestCheckCodexEffectiveConfig_DuplicateHooksJSON_Fails mirrors the Codex
+// startup warning for projects that carry both hook representations in the
+// same .codex layer. ralph standardizes on inline config.toml hooks, so doctor
+// must catch a stray hooks.json before the next Codex launch does.
+func TestCheckCodexEffectiveConfig_DuplicateHooksJSON_Fails(t *testing.T) {
+	dir := t.TempDir()
+	codexDir := filepath.Join(dir, ".codex")
+	if err := os.MkdirAll(codexDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	contents := `model = "gpt-5.5"
+
+[features]
+codex_hooks = true
+
+[[hooks.PostToolUse]]
+command = ["./scripts/check_mojibake.sh"]
+`
+	if err := os.WriteFile(filepath.Join(codexDir, "config.toml"), []byte(contents), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(codexDir, "hooks.json"), []byte(`{"PostToolUse":[]}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := checkCodexEffectiveConfig(dir)
+	if r.Status != "fail" {
+		t.Errorf("status = %q, want fail (detail=%q)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "hooks.json") {
+		t.Errorf("detail = %q, want substring 'hooks.json'", r.Detail)
+	}
+}
+
 // TestCheckCodexEffectiveConfig_InvalidTOML_Fails proves the doctor surfaces
 // a fail (not warn) when the TOML cannot be parsed — silently warning would
 // hide a configuration error from the operator.
