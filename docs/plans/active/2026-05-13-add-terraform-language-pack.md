@@ -175,7 +175,8 @@ Critical forks resolved with the user: **None**（仕様が issue で十分に�
 - [x] Branch created (`feat/52/add-terraform-language-pack`)
 - [x] Implementation started
 - [x] Implementation complete (4 slices committed)
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Review artifact created (`docs/reports/self-review-2026-05-13-add-terraform-language-pack.md`)
+- [x] Verification artifact created (`docs/reports/verify-2026-05-13-add-terraform-language-pack.md`)
+- [x] Test artifact created (`docs/reports/test-2026-05-13-add-terraform-language-pack.md`)
+- [x] Sync-docs artifact created (`docs/reports/sync-docs-2026-05-13-add-terraform-language-pack.md`)
 - [ ] PR created
