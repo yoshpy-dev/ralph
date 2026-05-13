@@ -42,7 +42,15 @@
 ## Related links
 
 - Plan: `docs/plans/archive/<slug>.md`
-- Issue: #__ISSUE__
+- Closes #__ISSUE__
+
+<!--
+Issue reference rule:
+- Use `Closes #<number>` only when this PR fully completes the issue.
+- Use `Refs #<number>` for partial work or related follow-up that should keep the issue open.
+- For multiple issues, repeat the keyword for each issue: `Closes #123, closes #456`.
+- GitHub closing keywords only work in normal PR body text, not in HTML comments, code blocks, or block quotes.
+-->
 
 ## Walkthrough
 
