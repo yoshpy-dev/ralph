@@ -313,7 +313,7 @@ Inner Loop (per cycle):
 
 Outer Loop (after tests pass):
   sync-docs (claude -p) → cross-review → PR (claude -p)
-  → if codex ACTION_REQUIRED: regress to Inner Loop
+  → if cross-review ACTION_REQUIRED: regress to Inner Loop
 ```
 
 Each post-implementation agent (self-review, verify, test) runs as a dedicated `claude -p` invocation with a single-responsibility prompt. Agents execute scripts internally (e.g., `run-static-verify.sh`, `run-test.sh`) and produce structured analysis — not just exit codes. Reports are dual-written to `.harness/state/pipeline/` and `docs/reports/`, with machine-readable sidecar signal files for pass/fail detection.
