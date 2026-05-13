@@ -6,37 +6,46 @@
 - Driver: claude
 - Reviewer: codex
 - Triager: Claude Code (main context)
-- Self-review cross-ref: yes
-- Cycle: 1/2
-- Total reviewer findings: 4 (3 LOW in inline table + 1 P2 summary)
-- After triage: ACTION_REQUIRED=1, WORTH_CONSIDERING=0, DISMISSED=3
+- Self-review cross-ref: yes (cycle 1 + cycle 2)
+- Cycle: 2/2 (cap reached — `RALPH_STANDARD_MAX_PIPELINE_CYCLES=2`)
+- Total reviewer findings (cycle 2): 2 (P1, P2)
+- After triage (cycle 2): ACTION_REQUIRED=0, WORTH_CONSIDERING=1, DISMISSED=1
+- Cycle 1 findings (previous run, preserved for traceability): ACTION_REQUIRED=1 (RESOLVED in commit `f27e1a2`), DISMISSED=3
 
 ## Triage context
 
 - Active plan: `docs/plans/active/2026-05-13-add-terraform-language-pack.md`
-- Self-review report: `docs/reports/self-review-2026-05-13-add-terraform-language-pack.md`
-- Verify report: `docs/reports/verify-2026-05-13-add-terraform-language-pack.md`
-- Implementation context summary: Issue #52 adds a Terraform/OpenTofu language pack. The pack body, rule file, detect-languages.sh wiring, and recipe doc are all complete and verified. The plan explicitly defers the `ralph pack add <lang>` pathing bug (Codex /plan HIGH#1) as out-of-scope. Tests live in `tests/test-*-terraform-*.sh` and exercise hermetic stubs via PATH narrowing.
+- Self-review reports: cycle 1 + cycle 2 in `docs/reports/`
+- Verify reports: cycle 1 + cycle 2 in `docs/reports/`
+- Test reports: cycle 1 + cycle 2 in `docs/reports/`
+- Implementation context summary: Cycle 1 shipped the terraform pack body, rule, detection, and recipe doc. Cycle 1 cross-review flagged a test-hermeticity issue (P2) which was fixed in `f27e1a2`. Cycle 2 (this run) targets the post-fix diff. The plan explicitly defers `ralph pack add <lang>` pathing bug (Codex /plan HIGH#1) and tracks it in `docs/tech-debt/README.md`.
 
 ## ACTION_REQUIRED
-
-| # | Reviewer finding | Triage rationale | Affected file(s) |
-|---|-------------------|------------------|-------------------|
-| 1 | **[P2] Terraform verifier tests are non-hermetic on hosts with system-installed IaC tooling.** `clean_path="/usr/bin:/bin"` (`tests/test-terraform-pack-verify.sh:86`) still exposes `/usr/bin/terraform`, `/usr/bin/tofu`, `/usr/bin/tflint`, `/usr/bin/tfsec`, or `/usr/bin/trivy` if any of them are apt-installed (common in CI). Tests that intend to exercise the "no CLI" or "optional tool absent" branches will silently call real binaries instead, producing false PASS or random failure depending on what the host has. | Real issue (Axis 1 YES) — test hermeticity is a foundational property of behavioral regression suites. Worth fixing (Axis 2 YES) — the tester's report cites 8 stub-CLI scenarios that depend on this guarantee; if the guarantee is leaky on CI hosts, those 8 assertions can't catch regressions in the fail-open code path (which itself is a Codex /plan HIGH#2 mitigation we explicitly committed to). Fix is small and contained to the test file. | `tests/test-terraform-pack-verify.sh:83-86`, `tests/test-terraform-pack-verify.sh` stub-CLI scenarios that rely on `clean_path` |
-
-## WORTH_CONSIDERING
 
 | # | Reviewer finding | Triage rationale | Affected file(s) |
 |---|-------------------|------------------|-------------------|
 
 (none)
 
+## WORTH_CONSIDERING
+
+| # | Reviewer finding | Triage rationale | Affected file(s) |
+|---|-------------------|------------------|-------------------|
+| 1 | **[P2] Add Terraform state files to scaffold gitignore.** `.claude/rules/terraform.md:11` warns "never commit `terraform.tfstate`, `*.tfstate.backup`, `.terraform/`" but neither root `.gitignore` nor `templates/base/.gitignore` was updated. A routine `git add .` in a scaffolded project that runs terraform locally can stage state files containing secrets. | Real issue (Axis 1 YES) — Terraform state files routinely contain provider credentials, resource ARNs, and other secrets; secret-in-git-history incidents from tfstate are well documented. Worth fixing (Axis 2 DEBATABLE) — the change is 3 lines and fits the existing pattern (templates/base/.gitignore already enumerates `node_modules/`, `target/`, `.venv/`, etc., one set per ecosystem). Scope is adjacent but not strictly inside "add a language pack". Cap-reached, so the user must decide: extend cycle, accept inline, or record in Known gaps. | `templates/base/.gitignore`, optionally root `.gitignore` |
+
 ## DISMISSED
 
 | # | Reviewer finding | Dismissal reason | Category |
 |---|-------------------|------------------|----------|
-| 1 | [LOW] `verify.sh` validates `HARNESS_VERIFY_MODE` only after marker detection — `HARNESS_VERIFY_MODE=foo` in an empty dir gets silent exit 0 instead of a config error. | Codex itself notes this "matches no other pack's behavior" — peer packs (`golang`, `python`, `rust`) early-exit on missing markers before mode handling. Diverging from peers for stricter feedback would be inconsistent. | style-preference |
-| 2 | [LOW] Marker-detection `find` expression duplicated between `verify.sh:11-12`, `verify.sh:67`, and `scripts/detect-languages.sh:41`. | Codex itself says "acceptable for a small pack; if a fourth copy appears, extract `has_iac_sources`." Already triaged in self-review LOW #2 (same content). Refactoring across pack/script boundaries is out of scope for this PR. | out-of-scope |
-| 3 | [LOW] `.claude/rules/terraform.md` declares `paths: - "**/.terraform.lock.hcl"`; hidden-file glob handling by the editor matcher is not exercised by any existing rule in the repo. | Already triaged in self-review LOW #3 and verify report (verifier deferred to `/test`, and tester noted runtime hidden-glob behavior is a Claude Code editor concern, not a deterministic test target). Codex itself classifies this as "not a diff-quality blocker." | already-addressed |
+| 1 | [P1] `ralph pack add terraform` installs the pack at the project root instead of `packs/languages/terraform/` and can overwrite an existing `README.md`. Codex empirically reproduced this (built ralph, ran `pack add` in a tempdir, found `README.md`/`verify.sh` landed at the root). | Pre-existing bug in `internal/cli/pack.go:64-67`, identical to Codex /plan HIGH#1 which the user explicitly accepted as out-of-scope. Affects ALL existing packs (golang/python/rust/dart/typescript) equally, not specific to terraform. Already recorded in `docs/tech-debt/README.md` with a concrete fix recipe (use `filepath.Join(absDir, "packs", "languages", lang)` to match `init.go:158`). The plan's documented mitigation is to ship packs via `ralph init` with `packs:` array, which the recipe doc reflects. | already-addressed |
 
 Categories: false-positive, already-addressed, style-preference, out-of-scope, context-aware-safe
+
+## Cycle-1 findings (preserved for traceability)
+
+| Cycle | Severity | Finding | Status |
+|-------|----------|---------|--------|
+| 1 | P2 | Non-hermetic test PATH (`clean_path="/usr/bin:/bin"`) | **RESOLVED** in commit `f27e1a2` (symlink-only coreutils dir + leak-guard) |
+| 1 | LOW | Mode case validation order | DISMISSED (style-preference, peer-pack parity) |
+| 1 | LOW | Duplicated `find` expression | DISMISSED (out-of-scope, three callers only) |
+| 1 | LOW | Hidden-file glob in rule frontmatter | DISMISSED (already-addressed in cycle-1 verify/test triage) |

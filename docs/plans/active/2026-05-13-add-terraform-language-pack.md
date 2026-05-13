@@ -180,4 +180,5 @@ Critical forks resolved with the user: **None**（仕様が issue で十分に�
 - [x] Test artifact created (`docs/reports/test-2026-05-13-add-terraform-language-pack.md`)
 - [x] Sync-docs artifact created (`docs/reports/sync-docs-2026-05-13-add-terraform-language-pack.md`)
 - [x] Cycle-2 pipeline complete (Codex ACTION_REQUIRED P2 hermeticity fix `f27e1a2` — self-review MERGE / verify PASS / test PASS 114/114 + 3 hermeticity probes; reports: `*-cycle2.md` siblings)
+- [x] Cycle-3 pipeline complete (cap raised 2 → 3 by user direction; gitignore safety net `03c5598` for Codex cycle-2 WORTH_CONSIDERING P2 + behavioral test `68cc41f` (`tests/test-terraform-gitignore.sh`, 47 assertions) — self-review MERGE / verify PASS / test PASS 155/155; reports: `*-cycle3.md` siblings)
 - [ ] PR created

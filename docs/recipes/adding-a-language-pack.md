@@ -57,3 +57,13 @@ A new pack typically touches at least these locations — keep them in lock-step
 - `packs/languages/<lang>/` ↔ `templates/packs/<lang>/`
 - `.claude/rules/<lang>.md` ↔ `templates/base/.claude/rules/<lang>.md`
 - `scripts/detect-languages.sh` ↔ `templates/base/scripts/detect-languages.sh`
+
+## Gitignore block (when your pack ships state, cache, or secret-bearing files)
+
+If your pack documents files that "must never be committed" (e.g., `terraform.tfstate`, provider credentials, build caches that may capture environment), ship the matching `.gitignore` block in the same commit. A rule that exists only in prose (`.claude/rules/<lang>.md`) but is not enforced by `.gitignore` is a recurring leak vector — a routine `git add .` in a scaffolded project will stage exactly the files the rule warns about.
+
+Mirror the block to both root and scaffold:
+
+- `.gitignore` ↔ `templates/base/.gitignore`
+
+Both files are checked for byte-identity by `scripts/check-sync.sh` (they appear in its `SCAN_FILES` list), so a missing mirror fails the static gate. The Terraform pack ships the canonical example (see `.gitignore:15-28`).
