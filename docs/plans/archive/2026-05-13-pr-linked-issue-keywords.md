@@ -91,4 +91,4 @@ None.
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
-- [ ] PR created (pending)
+- [x] PR created: https://github.com/yoshpy-dev/ralph/pull/61
