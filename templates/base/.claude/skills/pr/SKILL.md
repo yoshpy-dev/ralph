@@ -28,6 +28,7 @@ If any pre-check fails, stop and explain what is missing.
    - **If working tree is clean** (intermediate commits already exist): Skip staging and committing — proceed directly to push.
 3. Push the branch: `git push -u origin HEAD`.
 4. Create the PR with `gh pr create` using [template.md](template.md) for the body structure. **PR title and body must be written in Japanese.**
+   - **Linked issue handling**: If the PR fully completes a linked GitHub issue (from branch name `<type>/<issue>/<slug>` or the plan's `Related issue:` field), include `Closes #<number>` in the PR body so GitHub auto-closes the issue on merge. For partial work or related follow-up that should keep the issue open, use `Refs #<number>` instead. For multiple issues, repeat the keyword for each issue, such as `Closes #123, closes #456`. The closing keyword must appear in normal PR body text, not inside HTML comments, code blocks, or block quotes.
 5. For large diffs (>500 changed lines), create a walkthrough in `docs/reports/walkthrough-<date>-<slug>.md`.
 6. Archive the plan using the path resolved in Step 1: `./scripts/archive-plan.sh <absolute-plan-path>`.
 7. **Clear standard-pipeline state** (on successful PR creation):
