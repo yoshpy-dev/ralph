@@ -108,11 +108,23 @@ calls="$workdir/wrapper.calls"
 : > "$calls"
 (
   cd "$repo"
+  unset RALPH_VERIFY_SCOPE
   COMMAND_LOG="$calls" ./scripts/run-test.sh >/dev/null
 )
 assert_called "test wrapper defaults local gate to changed" "local:test:changed" "$calls"
 assert_called "test wrapper defaults language pack to changed" "golang:test:changed" "$calls"
 assert_not_called "test wrapper skips unrelated pack by default" "python:test:changed" "$calls"
+
+# Wrapper override: explicit full scope is honored, as used by CI.
+calls="$workdir/wrapper-full.calls"
+: > "$calls"
+(
+  cd "$repo"
+  COMMAND_LOG="$calls" RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh >/dev/null
+)
+assert_called "test wrapper honors explicit full local gate" "local:test:full" "$calls"
+assert_called "test wrapper honors explicit full golang pack" "golang:test:full" "$calls"
+assert_called "test wrapper honors explicit full python pack" "python:test:full" "$calls"
 
 # Shared changes fall back to full and run every detected language pack.
 (
