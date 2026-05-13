@@ -1,6 +1,6 @@
 # fix-xreview-placeholder-substitution
 
-- Status: Draft
+- Status: In review
 - Owner: Claude Code
 - Date: 2026-05-13
 - Related request: Cross-review gate silently bypassed under codex driver due to unexpanded `${BASE_BRANCH}` / `${REPORTS_DIR}` placeholders
@@ -180,9 +180,16 @@ Trade-offs considered:
 
 ## Progress checklist
 
-- [ ] Plan reviewed
-- [ ] Branch created
-- [ ] Implementation started
+- [x] Plan reviewed (Codex advisory absorbed; 3 findings → plan updates)
+- [x] Branch created (`fix/50/xreview-placeholder-substitution`)
+- [x] Implementation started
+- [x] Renderer + allowlist guard in `scripts/ralph-pipeline.sh` (commit `0304686`)
+- [x] Renderer unit test `tests/test-xreview-prompt-render.sh` (54/54, commit `4f15681`)
+- [x] End-to-end gate-regression test `tests/test-xreview-gate-regression.sh` (16/16, commit `d2dd875`)
+- [x] templates/base/ mirrors restored (commit `f3363b6`)
+- [x] `./scripts/run-verify.sh` green — evidence `docs/evidence/verify-2026-05-13-024222.log`
+- [x] `./scripts/check-skill-sync.sh` green (13 skills in lock-step)
+- [x] `./scripts/check-sync.sh` green (145 identical, 0 drifted)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
