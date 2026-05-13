@@ -58,6 +58,10 @@ approval_policy = "never"
 # IMPORTANT: hooks ONLY run when the project is trusted AND
 # [features] codex_hooks = true (see above). `ralph doctor` verifies both.
 #
+# Keep Codex hooks in this file as inline `[[hooks.*]]` entries. Do not add a
+# sibling `.codex/hooks.json`; Codex warns when both representations exist in
+# the same project layer, and `scripts/verify.local.sh` rejects that drift.
+#
 # Add or extend entries to mirror .claude/hooks/ behaviour.
 # ---------------------------------------------------------------------------
 
