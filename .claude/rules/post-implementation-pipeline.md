@@ -35,8 +35,8 @@ and PR pre-checks behave identically. The driver detection used by
 | Step | Agent | Purpose | Stop condition |
 |------|-------|---------|----------------|
 | `/self-review` | `reviewer` | Diff quality only; no tests/static/spec/doc-drift/broad audit | CRITICAL findings |
-| `/verify` | `verifier` | Spec compliance + static analysis via `./scripts/run-static-verify.sh`; no tests | Fail verdict |
-| `/test` | `tester` | Behavioral tests via `./scripts/run-test.sh`; no static analysis | Fail verdict |
+| `/verify` | `verifier` | Spec compliance + static analysis via `./scripts/run-static-verify.sh`; changed-language scope by default; no tests | Fail verdict |
+| `/test` | `tester` | Behavioral tests via `./scripts/run-test.sh`; changed-language scope by default; no static analysis | Fail verdict |
 | `/sync-docs` | `doc-maintainer` | Documentation sync | — |
 | `/cross-review` | inline | Cross-model second opinion | ACTION_REQUIRED triggers re-run |
 | `/pr` | inline | PR creation + plan archival | — |
@@ -66,6 +66,7 @@ After all slices are merged into the integration branch, `ralph-orchestrator.sh`
 
 - `--skip-pr`: PR creation is handled by the orchestrator, not the pipeline
 - `--fix-all`: ALL self-review findings (CRITICAL+HIGH+MEDIUM+LOW > 0) override COMPLETE; WORTH_CONSIDERING codex findings trigger Inner Loop regression (same as ACTION_REQUIRED)
+- Integration runs set `RALPH_VERIFY_SCOPE=full` unless explicitly overridden, so verify/test cover every detected language on the merged branch.
 
 **Intentional deviation in Ralph Loop:** Per-slice pipelines (`ralph-pipeline.sh`) do NOT stop on CRITICAL self-review findings — they log them and let verify/test catch real issues. This differs from the standard `/work` flow where CRITICAL findings block the pipeline. The rationale is that autonomous pipelines benefit from letting downstream gates (verify, test) confirm whether the finding is a true positive before halting. This deviation is tracked in `docs/tech-debt/README.md`.
 

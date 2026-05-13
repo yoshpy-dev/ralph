@@ -8,11 +8,26 @@ set -eu
 HARNESS_VERIFY_MODE="${HARNESS_VERIFY_MODE:-all}"
 export HARNESS_VERIFY_MODE
 
+# RALPH_VERIFY_SCOPE controls which language packs to run:
+#   full    — all languages detected in the repository (default)
+#   changed — only language packs affected by the current git diff, with
+#             conservative fallback to full for shared or ambiguous changes
+RALPH_VERIFY_SCOPE="${RALPH_VERIFY_SCOPE:-full}"
+case "$RALPH_VERIFY_SCOPE" in
+  full|changed) ;;
+  *)
+    echo "run-verify.sh: unknown RALPH_VERIFY_SCOPE=$RALPH_VERIFY_SCOPE (expected full|changed)" >&2
+    exit 2
+    ;;
+esac
+export RALPH_VERIFY_SCOPE
+
 mkdir -p .harness/state .harness/logs docs/evidence
 
 ts="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 evidence_file="docs/evidence/verify-$(date -u '+%Y-%m-%d-%H%M%S').log"
 status_file=".harness/state/verify-exit-code"
+scope_file=".harness/state/verify-scope"
 
 # NOTE: The { } | tee pipeline runs the block in a subshell (POSIX sh).
 # Variables set inside (ran_any, status, docs_only) do NOT propagate to the
@@ -27,6 +42,7 @@ status_file=".harness/state/verify-exit-code"
   echo "# Verification run"
   echo "- Timestamp: $ts"
   echo "- Mode: $HARNESS_VERIFY_MODE"
+  echo "- Requested scope: $RALPH_VERIFY_SCOPE"
   echo ""
 
   if [ -x ./scripts/verify.local.sh ]; then
@@ -37,7 +53,87 @@ status_file=".harness/state/verify-exit-code"
     fi
   fi
 
-  languages="$(./scripts/detect-languages.sh || true)"
+  scope_docs_only=""
+  if [ "$RALPH_VERIFY_SCOPE" = "changed" ]; then
+    if [ -x ./scripts/detect-changed-languages.sh ]; then
+      scope_tmp="$(mktemp "${TMPDIR:-/tmp}/ralph-verify-scope.XXXXXX")"
+      if ./scripts/detect-changed-languages.sh > "$scope_tmp"; then
+        cp "$scope_tmp" "$scope_file"
+        selected_scope="$(sed -n 's/^scope=//p' "$scope_tmp" | sed -n '1p')"
+        scope_reason="$(sed -n 's/^reason=//p' "$scope_tmp" | sed -n '1p')"
+        scope_docs_only="$(sed -n 's/^docs_only=//p' "$scope_tmp" | sed -n '1p')"
+        languages="$(sed -n 's/^languages=//p' "$scope_tmp" | sed -n '1p')"
+        rm -f "$scope_tmp"
+      else
+        rm -f "$scope_tmp"
+        selected_scope="full"
+        scope_reason="changed_detector_failed"
+        scope_docs_only="false"
+        languages=""
+        {
+          echo "scope=full"
+          echo "reason=$scope_reason"
+          echo "docs_only=false"
+          echo "languages="
+        } > "$scope_file"
+      fi
+    else
+      selected_scope="full"
+      scope_reason="changed_detector_missing"
+      scope_docs_only="false"
+      languages=""
+      {
+        echo "scope=full"
+        echo "reason=$scope_reason"
+        echo "docs_only=false"
+        echo "languages="
+      } > "$scope_file"
+    fi
+
+    case "$selected_scope" in
+      changed)
+        echo "==> Language scope: changed ($scope_reason)"
+        ;;
+      full)
+        echo "==> Language scope: full fallback ($scope_reason)"
+        languages="$(./scripts/detect-languages.sh || true)"
+        {
+          echo "scope=full"
+          echo "reason=$scope_reason"
+          echo "docs_only=$scope_docs_only"
+          echo "languages=$languages"
+        } > "$scope_file"
+        ;;
+      *)
+        echo "==> Language scope: full fallback (invalid_detector_output)"
+        scope_reason="invalid_detector_output"
+        scope_docs_only="false"
+        languages="$(./scripts/detect-languages.sh || true)"
+        {
+          echo "scope=full"
+          echo "reason=$scope_reason"
+          echo "docs_only=false"
+          echo "languages=$languages"
+        } > "$scope_file"
+        ;;
+    esac
+  else
+    echo "==> Language scope: full"
+    languages="$(./scripts/detect-languages.sh || true)"
+    {
+      echo "scope=full"
+      echo "reason=requested_full"
+      echo "docs_only=false"
+      echo "languages=$languages"
+    } > "$scope_file"
+  fi
+
+  if [ -n "$languages" ]; then
+    echo "==> Language packs selected: $languages"
+  else
+    echo "==> Language packs selected: none"
+  fi
+
   for lang in $languages; do
     verifier="packs/languages/$lang/verify.sh"
     if [ -x "$verifier" ]; then
@@ -55,7 +151,12 @@ status_file=".harness/state/verify-exit-code"
   fi
 
   docs_only=1
-  if [ -n "$changed_files" ]; then
+  if [ -n "$scope_docs_only" ]; then
+    case "$scope_docs_only" in
+      true) docs_only=1 ;;
+      false) docs_only=0 ;;
+    esac
+  elif [ -n "$changed_files" ]; then
     printf '%s\n' "$changed_files" | while IFS= read -r file; do
       case "$file" in
         ""|docs/*|README.md|AGENTS.md|CLAUDE.md|.claude/*)

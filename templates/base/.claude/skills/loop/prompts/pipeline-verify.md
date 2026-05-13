@@ -24,7 +24,8 @@ Use this table format:
 
 ## Step 2: Static analysis
 
-Run the static analysis script:
+Run the static analysis script. Honor `RALPH_VERIFY_SCOPE` when it is set by
+the pipeline; otherwise the wrapper defaults to changed-language scope:
 ```sh
 ./scripts/run-static-verify.sh
 ```

@@ -24,7 +24,10 @@ Worked example: adding a Terraform / OpenTofu pack (`packs/languages/terraform/`
    - `.claude/rules/terraform.md` — minimal conventions (state hygiene, provider pinning, `variable`/`output` discipline, etc.)
    - Mirror to `templates/base/.claude/rules/terraform.md` (same `cp` pattern) so scaffolded projects receive it.
 
-5. Teach `scripts/detect-languages.sh` to emit the new pack name. Edit both the root and `templates/base/` copies — this is a hand-edit, no scaffolding script handles it for you:
+5. Teach `scripts/detect-languages.sh` to emit the new pack name and
+   `scripts/detect-changed-languages.sh` to map changed files to it. Edit both
+   the root and `templates/base/` copies — this is a hand-edit, no scaffolding
+   script handles it for you:
 
    ```sh
    # In scripts/detect-languages.sh
@@ -32,6 +35,11 @@ Worked example: adding a Terraform / OpenTofu pack (`packs/languages/terraform/`
        -o -type f \( -name '*.tf' -o -name '*.tofu' \) -print 2>/dev/null | grep -q .; then
      emit terraform
    fi
+
+   # In scripts/detect-changed-languages.sh
+   *.tf|*.tofu|*.tftest.hcl|.terraform.lock.hcl)
+     printf 'terraform\n'
+     ;;
    ```
 
 6. Run the gates:
@@ -57,6 +65,7 @@ A new pack typically touches at least these locations — keep them in lock-step
 - `packs/languages/<lang>/` ↔ `templates/packs/<lang>/`
 - `.claude/rules/<lang>.md` ↔ `templates/base/.claude/rules/<lang>.md`
 - `scripts/detect-languages.sh` ↔ `templates/base/scripts/detect-languages.sh`
+- `scripts/detect-changed-languages.sh` ↔ `templates/base/scripts/detect-changed-languages.sh`
 
 ## Gitignore block (when your pack ships state, cache, or secret-bearing files)
 

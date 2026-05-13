@@ -8,8 +8,8 @@ A task is done only when all applicable items are satisfied.
 - [ ] Acceptance criteria were addressed
 - [ ] Each implementation slice is individually committed (see `.claude/rules/git-commit-strategy.md`)
 - [ ] Self-review artifact exists in `docs/reports/` (diff quality only; no test/static/spec/doc-drift execution)
-- [ ] Verification was run and recorded in `docs/reports/` (spec compliance + static analysis via `./scripts/run-static-verify.sh`; no tests)
-- [ ] Test artifact exists in `docs/reports/` (behavioral tests via `./scripts/run-test.sh`; no static analysis)
+- [ ] Verification was run and recorded in `docs/reports/` (spec compliance + static analysis via `./scripts/run-static-verify.sh`; changed-language scope by default; no tests)
+- [ ] Test artifact exists in `docs/reports/` (behavioral tests via `./scripts/run-test.sh`; changed-language scope by default; no static analysis)
 - [ ] Docs and contracts were updated if behavior changed (`/sync-docs`)
 - [ ] Remaining gaps are explicit
 - [ ] PR created via `/pr` skill (includes plan archival and hand-off)
@@ -44,7 +44,7 @@ verification work during `/self-review` is not valid.
 - [ ] Unified PR created from `integration/<slug>` to base branch
 - [ ] Plan directory archived from `docs/plans/active/` to `docs/plans/archive/`
 
-Ralph Loop handles the full lifecycle autonomously per slice (implement → self-review → verify → test → sync-docs → cross-review), then merges slices into the integration branch, runs an integration pipeline (`--skip-pr --fix-all`) to catch cross-module issues, and creates a unified PR.
+Ralph Loop handles the full lifecycle autonomously per slice (implement → self-review → verify → test → sync-docs → cross-review), then merges slices into the integration branch, runs a full-scope integration pipeline (`--skip-pr --fix-all`) to catch cross-module issues, and creates a unified PR.
 
 **Driver selection (Phase 2 / issue #44):** Loop runs under whichever driver is
 selected by `RALPH_LOOP_DRIVER` (env > `[loop] driver` in `ralph.toml` >
