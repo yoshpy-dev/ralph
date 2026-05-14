@@ -39,6 +39,10 @@ codex
 > $work
 ```
 
+Spec, plan, and work flows create or resume clean-base task worktrees before
+writing repo artifacts; PR hand-off cleans up the task worktree and local
+branch.
+
 Use the `/skills` menu to browse skills if you forget a name. Do **not** type
 `/spec`, `/plan`, etc. — `/plan` (and several others) are Codex built-ins and
 will not run the ralph skill.

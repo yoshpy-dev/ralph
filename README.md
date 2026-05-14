@@ -29,6 +29,7 @@ Claude Code gives you a powerful agent, but the default setup is a blank slate. 
 | On-demand skills (plan, work, verify, loop, ...) | manual | 10+ bundled |
 | Deterministic hooks (mojibake guard, commit-msg, bash guard, ...) | manual | pre-wired |
 | Evidence-backed pipeline (self-review → verify → test → sync-docs) | ad hoc | canonical order, enforced |
+| Isolated task execution | ad hoc branches | clean-base task worktrees |
 | Autonomous parallel execution | — | Ralph Loop (multi-worktree) |
 | Language packs (TS, Python, Rust, Go, Dart) | — | opt-in |
 | Drift management between projects | manual copy | `ralph upgrade` |
@@ -63,15 +64,16 @@ Both agent surfaces are wired up automatically. To make Codex's project-level co
 hooks actually load, run `codex trust .` once after `ralph init`. `ralph doctor`
 flags trust gaps so you do not lose hooks silently.
 
-Create your first plan and run the loop inside Claude Code:
+Create your first plan and run the loop inside Claude Code. Prefer the skills
+because they create clean-base task worktrees before writing plan artifacts:
 
-```sh
-# Standard flow
-./scripts/new-feature-plan.sh --type feat login-form
-
-# Ralph Loop (directory-based plan with parallel slices)
-./scripts/new-ralph-plan.sh --type feat login-form N/A 3
 ```
+/plan
+```
+
+The lower-level `./scripts/new-feature-plan.sh` and
+`./scripts/new-ralph-plan.sh` helpers remain available inside an already
+resolved task worktree.
 
 In Claude Code, follow the loop with slash commands:
 
@@ -101,9 +103,10 @@ Before claiming a task is done:
 | | |
 |:---|:---|
 | **Maps, not manuals**<br/>Short `AGENTS.md` / `CLAUDE.md`; push detail into rules and skills, promote repeats into hooks. | **Canonical pipeline**<br/>`self-review → verify → test → sync-docs → cross-review → pr` enforced in standard flow and Ralph Loop. |
-| **Deterministic hooks**<br/>Mojibake guard, commit-msg secret scan, Bash guardrails, verification reminders — pre-wired in `settings.json`. | **Ralph Loop**<br/>Multi-worktree autonomous parallel slices, integration branch, unified PR — orchestrated by `ralph run`. |
-| **Language packs**<br/>TypeScript, Python, Rust, Go, Dart starters (opt-in) with per-language `verify.sh` and path-scoped rules. | **Drift-proof upgrades**<br/>Hash-based `ralph upgrade` with per-file conflict resolution — keeps N projects aligned as the scaffold evolves. |
-| **Evidence over prose**<br/>Every review, verify, test, and codex pass produces a dated artifact in `docs/reports/`. | **Cross-agent portable**<br/>`AGENTS.md` + `scripts/` + `packs/` stay neutral; `.claude/` and `.codex/` are agent-specific layers you can stack others beside. |
+| **Deterministic hooks**<br/>Mojibake guard, commit-msg secret scan, Bash guardrails, verification reminders — pre-wired in `settings.json`. | **Worktree-first flow**<br/>Spec, plan, work, and PR artifacts are produced from clean-base task worktrees, with local cleanup after hand-off. |
+| **Ralph Loop**<br/>Multi-worktree autonomous parallel slices, integration branch, unified PR — orchestrated by `ralph run`. | **Language packs**<br/>TypeScript, Python, Rust, Go, Dart starters (opt-in) with per-language `verify.sh` and path-scoped rules. |
+| **Drift-proof upgrades**<br/>Hash-based `ralph upgrade` with per-file conflict resolution — keeps N projects aligned as the scaffold evolves. | **Evidence over prose**<br/>Every review, verify, test, and codex pass produces a dated artifact in `docs/reports/`. |
+| **Cross-agent portable**<br/>`AGENTS.md` + `scripts/` + `packs/` stay neutral; `.claude/` and `.codex/` are agent-specific layers you can stack others beside. | **Local state, not repo churn**<br/>Worktree lifecycle records live under `git-common-dir`, outside tracked files and branch checkouts. |
 
 ## Commands
 
@@ -184,15 +187,15 @@ flowchart LR
 
 `/spec` is the only manual trigger in the loop; all other steps are auto-invoked. `/release` is also manual-only but lives outside the loop (repo maintainer use).
 
-1. **Spec** (manual, optional — `/spec`) — refine vague requests through brainstorming, codebase exploration, and interactive clarification. Produces `docs/specs/<date>-<slug>.md` and optionally a GitHub issue.
-2. **Plan** (auto — `/plan`) — file-backed plan in `docs/plans/active/` with acceptance criteria, verify plan, test plan, risks. Selects flow: `/work` or `/loop`.
-3. **Work** (auto — `/work`) **or Loop** (auto — `/loop`) — `/work` creates a branch and implements interactively; `/loop` runs autonomous parallel slices.
+1. **Spec** (manual, optional — `/spec`) — refine vague requests through brainstorming, codebase exploration, and interactive clarification. Issue-only specs use a temporary clean-base worktree and cleanup; saved specs create a docs/spec PR or hand off to `/plan`.
+2. **Plan** (auto — `/plan`) — ensures a clean-base task worktree, then writes a file-backed plan in `docs/plans/active/` with acceptance criteria, verify plan, test plan, risks. Selects flow: `/work` or `/loop`.
+3. **Work** (auto — `/work`) **or Loop** (auto — `/loop`) — `/work` resumes the task worktree and implements interactively; `/loop` runs autonomous parallel slices from the task worktree.
 4. **Self-review** (auto — `/self-review`) — diff quality artifact.
 5. **Verify** (auto — `/verify`) — spec compliance + static analysis.
 6. **Test** (auto — `/test`) — behavioral tests must pass before PR.
 7. **Sync docs** (auto — `/sync-docs`) — alignment across AGENTS.md / CLAUDE.md / rules / README.
 8. **Cross-review** (auto, optional — `/cross-review`) — cross-model second opinion via the other agent: Claude Code calls Codex; Codex calls `claude -p`. Silently skipped if the reviewer side is unavailable.
-9. **PR** (auto — `/pr`) — structured PR, plan archival, hand-off.
+9. **PR** (auto — `/pr`) — structured PR, plan archival, hand-off, and task worktree/local branch cleanup.
 10. **CI + human merge**.
 
 See `.claude/rules/post-implementation-pipeline.md` for the canonical pipeline order.

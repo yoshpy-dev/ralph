@@ -20,9 +20,9 @@ Build coding-agent workflows that are:
 
 ## Primary loop
 
-1. Spec (manual, optional — refines vague ideas into detailed specifications via iterative brainstorming, codebase exploration, web research, and user clarification → `docs/specs/` or GitHub issue)
-2. Plan (auto — creates plan, selects flow) [+ optional Codex plan advisory]
-3. **Standard flow**: Work (auto — creates branch, interactive implementation)
+1. Spec (manual, optional — refines vague ideas into detailed specifications via iterative brainstorming, codebase exploration, web research, and user clarification; issue-only specs use a temporary worktree and cleanup, saved specs create a docs/spec PR or hand off to planning)
+2. Plan (auto — ensures a clean-base task worktree, creates plan, selects flow) [+ optional Codex plan advisory]
+3. **Standard flow**: Work (auto — resumes task worktree, interactive implementation)
    **Ralph Loop**: Loop (auto — directory-based plan → `ralph-orchestrator.sh` → multi-worktree parallel → integration branch → integration pipeline → unified PR)
 4. Self-review (auto)
 5. Verify (auto)
@@ -40,6 +40,11 @@ Ralph Loop runs under whichever driver is selected by `RALPH_LOOP_DRIVER` (or
 `[loop] driver` in `ralph.toml`); the cross-review reviewer is always the
 opposite agent. `ralph status` and `ralph doctor` print the effective driver
 and source.
+
+All repo writes in spec/plan/work flows must happen inside a task worktree
+created from a clean default branch. Local task state lives under
+`$(git rev-parse --git-common-dir)/ralph/worktrees/`; PR success cleans up the
+task worktree and local branch while leaving the remote PR branch intact.
 
 ## Skill invocation
 
@@ -75,7 +80,7 @@ lock-step (body, name, description, implicit-invocation policy).
 - `.claude/hooks/` — Claude Code runtime hooks
 - `.agents/skills/` — Codex skill bodies (mirrors `.claude/skills/`)
 - `.codex/` — Codex project config, role definitions, hooks, override docs
-- `scripts/` — reusable verification, hook, and bootstrap scripts (shared)
+- `scripts/` — reusable verification, hook, worktree, and bootstrap scripts (shared)
 
 ## Planning contract
 

@@ -80,6 +80,7 @@ func TestTemplateBaseScriptsExist(t *testing.T) {
 		"ralph-orchestrator.sh",
 		"ralph-pipeline.sh",
 		"ralph-status-helpers.sh",
+		"ralph-worktree.sh",
 		"secret-scan.sh",
 		"pre-commit-secret-guard.sh",
 		"commit-msg-guard.sh",

@@ -38,8 +38,8 @@ and PR pre-checks behave identically. The driver detection used by
 | `/verify` | `verifier` | Spec compliance + static analysis via `./scripts/run-static-verify.sh`; changed-language scope by default; no tests | Fail verdict |
 | `/test` | `tester` | Behavioral tests via `./scripts/run-test.sh`; changed-language scope by default; no static analysis | Fail verdict |
 | `/sync-docs` | `doc-maintainer` | Documentation sync | — |
-| `/cross-review` | inline | Cross-model second opinion | ACTION_REQUIRED triggers re-run |
-| `/pr` | inline | PR creation + plan archival | — |
+| `/cross-review` | inline | Cross-model second opinion using pinned plan/worktree state | ACTION_REQUIRED triggers re-run |
+| `/pr` | inline | PR creation + plan archival + task worktree/local branch cleanup | — |
 
 ## Re-run after Codex ACTION_REQUIRED fix
 
@@ -55,7 +55,7 @@ Not just `/self-review → /verify → /test → /cross-review`. The `/sync-docs
 
 The post-implementation pipeline is capped at **2 total runs by default**: the initial run plus at most one fix-and-revalidate re-run. After the second run, the pipeline does not automatically regress even if Codex still reports ACTION_REQUIRED.
 
-- **Standard flow (`/work`)**: controlled by `RALPH_STANDARD_MAX_PIPELINE_CYCLES` (default `2`). The counter is persisted to `.harness/state/standard-pipeline/cycle-count.json`, keyed by the pinned plan path in `.harness/state/standard-pipeline/active-plan.json`. When the cap is reached, `/cross-review` drops the "fix" option from Case A/B and offers: (1) raise the cap and re-run, (2) proceed to `/pr` and record remaining findings as known gaps, (3) abort.
+- **Standard flow (`/work`)**: controlled by `RALPH_STANDARD_MAX_PIPELINE_CYCLES` (default `2`). The counter is persisted to `.harness/state/standard-pipeline/cycle-count.json`, keyed by the pinned plan path and task worktree state in `.harness/state/standard-pipeline/active-plan.json`. When the cap is reached, `/cross-review` drops the "fix" option from Case A/B and offers: (1) raise the cap and re-run, (2) proceed to `/pr` and record remaining findings as known gaps, (3) abort.
 - **Ralph Loop (`/loop`)**: controlled by `RALPH_MAX_OUTER_CYCLES` (default `2`). When exceeded, `ralph-pipeline.sh` calls `_finalize "max_outer_cycles"` and stops autonomously.
 
 Both variables accept environment-variable overrides. Raise them only when you consciously accept additional churn; the default is a deliberate "fail fast, hand back to the operator" stance.

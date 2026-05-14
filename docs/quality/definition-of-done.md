@@ -5,6 +5,7 @@ A task is done only when all applicable items are satisfied.
 ## For non-trivial code changes (standard /work flow)
 
 - [ ] Active plan exists or was explicitly deemed unnecessary
+- [ ] Repo writes happened inside a clean-base task worktree, not the default checkout
 - [ ] Acceptance criteria were addressed
 - [ ] Each implementation slice is individually committed (see `.claude/rules/git-commit-strategy.md`)
 - [ ] Self-review artifact exists in `docs/reports/` (diff quality only; no test/static/spec/doc-drift execution)
@@ -12,7 +13,7 @@ A task is done only when all applicable items are satisfied.
 - [ ] Test artifact exists in `docs/reports/` (behavioral tests via `./scripts/run-test.sh`; changed-language scope by default; no static analysis)
 - [ ] Docs and contracts were updated if behavior changed (`/sync-docs`)
 - [ ] Remaining gaps are explicit
-- [ ] PR created via `/pr` skill (includes plan archival and hand-off)
+- [ ] PR created via `/pr` skill (includes plan archival, hand-off, and task worktree/local branch cleanup)
 - [ ] PR title starts with the branch type prefix (`feat/...` -> `feat: ...`) and `./scripts/ensure-pr-title-prefix.sh` passed
 - [ ] CI verify passes on the PR
 - [ ] Skill drift check (`./scripts/check-skill-sync.sh`) is green so `.claude/skills/` and `.agents/skills/` stay in lock-step

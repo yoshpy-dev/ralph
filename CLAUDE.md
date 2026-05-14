@@ -7,17 +7,17 @@ Use this file only for Claude-specific guidance that must be always-on.
 ## Default behavior
 
 - Manual-trigger skills (`disable-model-invocation: true`): `/spec` (refine vague ideas) and `/release` (cut a Homebrew release tag for the `ralph` CLI — repo-maintainer only, not included in `ralph init`). All others (plan, work, loop, self-review, verify, test, cross-review, pr, sync-docs, audit-harness) are auto-invoked.
-- Use `/spec` when the request is too vague for `/plan`. `/spec` refines abstract ideas into detailed specifications (`docs/specs/`) through iterative brainstorming (壁打ち), codebase exploration, web research, and interactive clarification. It can then hand off to `/plan` or create a GitHub issue.
-- Use `/plan` before risky, ambiguous, or multi-file work. It does not create a branch — branch/worktree creation is deferred to the chosen flow skill.
+- Use `/spec` when the request is too vague for `/plan`. `/spec` refines abstract ideas through iterative brainstorming (壁打ち), codebase exploration, web research, and interactive clarification. Issue-only specs use a temporary clean-base worktree and cleanup; saved specs either create a docs/spec PR or hand off to `/plan` in the same task worktree.
+- Use `/plan` before risky, ambiguous, or multi-file work. `/plan` ensures a clean-base task worktree before writing plan artifacts.
 - `/plan` asks at minimum one decision — 標準フロー (/work) or Ralph Loop (/loop) — and, when critical forks are detected during drafting (two+ approaches with materially different risk/cost that cannot be resolved from repo context), asks targeted AskUserQuestion follow-ups before finalizing.
-- `/work` creates a normal branch (`git checkout -b`) and starts interactive implementation. Post-impl pipeline runs via subagents.
+- `/work` resumes the task worktree and starts interactive implementation. Post-impl pipeline runs via subagents.
 - `/loop` uses a directory-based plan and runs `ralph-orchestrator.sh` for autonomous parallel-slice execution: multi-worktree (`git worktree add` × N) → `ralph-pipeline.sh` per slice → integration branch → sequential merge → integration pipeline (`--skip-pr --fix-all`) → unified PR.
 - In Ralph Loop, the scripts handle the full lifecycle autonomously — no manual subagent chain needed. Use `./scripts/ralph run` or `./scripts/ralph status` to operate.
 - After /work, the post-implementation pipeline runs via subagents (`/self-review` → `/verify` → `/test` → `/sync-docs`), then `/cross-review` (optional, inline), then `/pr`.
 - `/self-review` is diff quality only. `/verify` is spec compliance + static analysis. `/test` is behavioral tests. Each produces a separate report.
 - Codex advisory is optional. If the `codex` binary is available, `/plan` and `/cross-review` invoke Codex for second-opinion feedback. If unavailable, the step is silently skipped and the flow continues unchanged.
 - Codex findings are presented to the user for judgment — never auto-applied.
-- `/pr` creates the pull request, archives the plan, and completes the hand-off. A task is "done" when the PR is created.
+- `/pr` creates the pull request, archives the plan, cleans up the task worktree/local branch, and completes the hand-off. A task is "done" when the PR is created and cleanup has either succeeded or reported recoverable state.
 - Prefer `.claude/rules/` for topic or path-specific guidance.
 - Prefer `.claude/skills/` for workflows and reusable playbooks.
 - In `/work`, the post-implementation pipeline (`/self-review` → `/verify` → `/test` → `/sync-docs`) runs via subagents (`reviewer`, `verifier`, `tester`, `doc-maintainer`). In Ralph Loop, the same pipeline runs internally via dedicated `claude -p` prompts per slice. See `.claude/rules/subagent-policy.md` for details.
