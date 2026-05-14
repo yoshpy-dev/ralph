@@ -61,7 +61,7 @@ fi
 if [ ! -d "$PLAN_FILE" ]; then
   echo "Error: --plan must be a directory-based plan (with _manifest.md + slice-*.md files)"
   echo "  Got: ${PLAN_FILE}"
-  echo "  Create one with: ./scripts/new-ralph-plan.sh <slug> [issue] [slice-count]"
+  echo "  Create one with: ./scripts/new-ralph-plan.sh --type <type> <slug> [issue] [slice-count]"
   exit 1
 fi
 
@@ -299,9 +299,9 @@ extract_plan_slug() {
 
 # Create an integration branch for unified PR workflow
 create_integration_branch() {
-  _slug="$1"
+  _plan_file="$1"
   _base="$2"
-  INTEGRATION_BRANCH="integration/${_slug}"
+  INTEGRATION_BRANCH="$("${SCRIPT_DIR}/branch-name.sh" from-plan "$_plan_file")" || return 1
 
   if git rev-parse --verify "$INTEGRATION_BRANCH" >/dev/null 2>&1; then
     log "Integration branch already exists: ${INTEGRATION_BRANCH}"
@@ -324,7 +324,11 @@ create_worktree() {
   # Always use integration branch as base
   _base_branch="${INTEGRATION_BRANCH:-$(git rev-parse --abbrev-ref HEAD)}"
   _wt_path="${WORKTREE_BASE}/${_slug}"
-  _wt_branch="slice/${PLAN_SLUG}/${_slug}"
+  _wt_branch="${INTEGRATION_BRANCH}-${_slug}"
+  if ! "${SCRIPT_DIR}/branch-name.sh" validate "$_wt_branch" >/dev/null 2>&1; then
+    log_error "Invalid generated slice branch name: ${_wt_branch}"
+    return 1
+  fi
 
   if [ -d "$_wt_path" ]; then
     log "Worktree already exists: ${_wt_path}"
@@ -523,6 +527,11 @@ create_unified_pr() {
     log_error "gh CLI not found — cannot create PR. Install gh and retry."
     return 1
   fi
+  if ! "${SCRIPT_DIR}/branch-name.sh" validate "$_int_branch" >/dev/null 2>&1; then
+    log_error "Invalid unified PR branch name: ${_int_branch}"
+    return 1
+  fi
+  _pr_type="$(printf '%s' "$_int_branch" | cut -d/ -f1)"
 
   # Push integration branch
   git push -u origin "$_int_branch" 2>/dev/null || {
@@ -564,11 +573,21 @@ PR_BODY
   _pr_url="$(gh pr create \
     --base "$_base_branch" \
     --head "$_int_branch" \
-    --title "feat: ${_plan_slug}" \
+    --title "${_pr_type}: ${_plan_slug}" \
     --body "$_pr_body" 2>/dev/null)" || {
     log_error "Failed to create unified PR"
     return 1
   }
+
+  if ! "${SCRIPT_DIR}/ensure-pr-title-prefix.sh" "$_pr_url" >/dev/null 2>&1; then
+    log_error "Unified PR exists but could not be verified with branch type title prefix: ${_pr_url}"
+    return 1
+  fi
+
+  if ! "${SCRIPT_DIR}/ensure-pr-ready.sh" "$_pr_url" >/dev/null 2>&1; then
+    log_error "Unified PR exists but could not be verified as ready-for-review: ${_pr_url}"
+    return 1
+  fi
 
   log "Unified PR created: ${_pr_url}"
   echo "$_pr_url"
@@ -674,7 +693,7 @@ main() {
   _base_branch="$(git rev-parse --abbrev-ref HEAD)"
 
   # Always create an integration branch for sequential merge
-  create_integration_branch "$PLAN_SLUG" "$_base_branch"
+  create_integration_branch "$PLAN_FILE" "$_base_branch"
   log "Integration branch: ${INTEGRATION_BRANCH}"
   log ""
 

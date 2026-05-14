@@ -62,7 +62,7 @@ Both variables accept environment-variable overrides. Raise them only when you c
 
 ## Integration pipeline (Ralph Loop only)
 
-After all slices are merged into the integration branch, `ralph-orchestrator.sh` runs `ralph-pipeline.sh --skip-pr --fix-all` as a unified quality gate. This follows the same canonical order above but with stricter thresholds:
+After all slices are merged into the typed integration branch generated from the plan metadata, `ralph-orchestrator.sh` runs `ralph-pipeline.sh --skip-pr --fix-all` as a unified quality gate. This follows the same canonical order above but with stricter thresholds:
 
 - `--skip-pr`: PR creation is handled by the orchestrator, not the pipeline
 - `--fix-all`: ALL self-review findings (CRITICAL+HIGH+MEDIUM+LOW > 0) override COMPLETE; WORTH_CONSIDERING codex findings trigger Inner Loop regression (same as ACTION_REQUIRED)

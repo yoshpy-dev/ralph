@@ -5,8 +5,9 @@
 - Date: __DATE__
 - Related request: __REQUEST__
 - Related issue: __ISSUE__
+- Type: __TYPE__
 - Branch: TBD
-- Integration branch: integration/__SLUG__
+- Integration branch: TBD
 - Execution: Ralph Loop (parallel slices)
 
 ## Objective
@@ -72,6 +73,6 @@ dependencies complete.
 - [ ] Integration branch created
 - [ ] Pipeline execution started
 - [ ] All slices complete
-- [ ] Sequential merge to integration branch passed
+- [ ] Sequential merge to typed integration branch passed
 - [ ] Integration-level verification passed
 - [ ] Unified PR created

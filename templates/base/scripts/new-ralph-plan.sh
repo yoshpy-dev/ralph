@@ -3,7 +3,7 @@ set -eu
 
 # Generate a directory-based Ralph Loop plan with manifest + N slice files.
 #
-# Usage: ./scripts/new-ralph-plan.sh <slug> [issue-number] [slice-count]
+# Usage: ./scripts/new-ralph-plan.sh [--type <type>] <slug> [issue-number] [slice-count]
 #
 # Creates:
 #   docs/plans/active/<date>-<slug>/
@@ -13,14 +13,23 @@ set -eu
 #     ...
 
 usage() {
-  echo "Usage: ./scripts/new-ralph-plan.sh <slug> [issue-number] [slice-count]"
+  echo "Usage: ./scripts/new-ralph-plan.sh [--type <type>] <slug> [issue-number] [slice-count]"
   echo ""
   echo "Arguments:"
+  echo "  --type TYPE   Branch type prefix (default: feat)"
   echo "  slug          Short identifier for the plan (e.g., auth-api)"
   echo "  issue-number  GitHub issue number (default: N/A)"
   echo "  slice-count   Number of slice files to generate (default: 2)"
+  echo "Allowed types: $(./scripts/branch-name.sh allowed-types)"
   exit 1
 }
+
+type="feat"
+if [ "${1:-}" = "--type" ]; then
+  [ "${2:-}" != "" ] || usage
+  type="${2:-}"
+  shift 2
+fi
 
 if [ "${1:-}" = "" ] || [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
   usage
@@ -32,6 +41,12 @@ slice_count="${3:-2}"
 date_str="$(date '+%Y-%m-%d')"
 plan_dir="docs/plans/active/${date_str}-${slug}"
 template_dir="docs/plans/templates"
+
+if ! ./scripts/branch-name.sh validate "${type}/placeholder" >/dev/null 2>&1; then
+  echo "Error: invalid branch type: ${type}"
+  echo "Allowed types: $(./scripts/branch-name.sh allowed-types)"
+  exit 1
+fi
 
 if [ -d "$plan_dir" ]; then
   echo "Plan directory already exists: ${plan_dir}"
@@ -63,6 +78,7 @@ sed \
   -e "s#__DATE__#${date_str}#g" \
   -e "s#__REQUEST__#${slug}#g" \
   -e "s#__ISSUE__#${issue}#g" \
+  -e "s#__TYPE__#${type}#g" \
   -e "s#__SLUG__#${slug}#g" \
   "${template_dir}/ralph-loop-manifest.md" > "${plan_dir}/_manifest.md"
 

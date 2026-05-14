@@ -53,6 +53,10 @@ setup() {
   mkdir -p "$MOCK_PLAN"
   cat > "${MOCK_PLAN}/_manifest.md" <<'MD'
 # Test Plan
+
+- Type: feat
+- Related issue: N/A
+
 ## Slices
 - slice-1-test
 MD

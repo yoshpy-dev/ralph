@@ -49,7 +49,7 @@ Named after Geoffrey Huntley's original `while :; do cat PROMPT.md | claude -p; 
 
 ```sh
 # 1. Create a directory-based plan with slices
-./scripts/new-ralph-plan.sh <slug> [issue] [slice-count]
+./scripts/new-ralph-plan.sh --type <type> <slug> [issue] [slice-count]
 
 # 2. Edit the plan: _manifest.md + slice-*.md files
 $EDITOR docs/plans/active/<date>-<slug>/
@@ -257,7 +257,7 @@ This means the agent reconstructs context from files each iteration, avoiding st
 
 ```
 /plan    →  Create directory-based plan (docs/plans/active/<date>-<slug>/)
-            using ./scripts/new-ralph-plan.sh <slug> [issue] [slice-count]
+            using ./scripts/new-ralph-plan.sh --type <type> <slug> [issue] [slice-count]
   ↓
 /loop    →  Set up the Ralph Loop session
   ↓
@@ -266,9 +266,9 @@ Terminal: ./scripts/ralph run --plan docs/plans/active/<date>-<slug>/ --unified-
 Orchestrator handles:
   - Creates worktree per slice (.claude/worktrees/<slug>)
   - Runs ralph-pipeline.sh in each worktree (parallel where no deps)
-  - Sequential merge to integration/<slug> branch
+  - Sequential merge to typed branch from ./scripts/branch-name.sh from-plan
   - Integration pipeline on merged branch (--skip-pr --fix-all)
-  - Unified PR from integration branch
+  - Unified PR from the typed integration branch with matching `<type>:` title prefix
   ↓
 Return to Claude Code: check ./scripts/ralph status
 ```
