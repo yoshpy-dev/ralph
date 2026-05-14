@@ -80,7 +80,7 @@ Each agent writes reports to both `.harness/state/pipeline/` (orchestrator) and 
 
 | Gate | Mechanism | On failure |
 |------|-----------|------------|
-| Codex ACTION_REQUIRED | Codex triage finds actionable issues | Regress to Inner Loop |
+| Cross-review ACTION_REQUIRED | Cross-review triage finds actionable issues | Regress to Inner Loop |
 | Iteration limit | `MAX_ITERATIONS` (default 20) | Pipeline stopped |
 | Inner cycle limit | `MAX_INNER_CYCLES` (default 10) | Move to Outer Loop |
 

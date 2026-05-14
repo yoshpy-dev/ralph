@@ -26,7 +26,7 @@
 - `docs/specs/`: spec files produced by `/spec`
 - `docs/plans/active/`: in-flight plans
 - `docs/plans/archive/`: completed plans
-- `docs/reports/`: self-review, verify, test, and walkthrough reports
+- `docs/reports/`: self-review, verify, test, sync-docs, cross-review triage, and walkthrough reports
 - `docs/quality/`: definition of done and gates
 - `docs/tech-debt/`: known debt and follow-ups
 - `docs/evidence/`: what counts as evidence
@@ -51,7 +51,7 @@
 ## Extensions
 
 - `packs/languages/`: stack-specific rules and verification
-- `scripts/`: init (`init-project.sh`), bootstrap (`bootstrap.sh`), install one-liner (`install.sh`), plan creation (`new-feature-plan.sh`, `new-ralph-plan.sh`), plan archival (`archive-plan.sh`), branch/PR guards (`branch-name.sh`, `ensure-pr-ready.sh`, `ensure-pr-title-prefix.sh`), verification (`run-verify.sh`, `run-static-verify.sh`, `run-test.sh`), CI checks (`check-coverage.sh`, `check-pipeline-sync.sh`, `check-skill-sync.sh`, `check-sync.sh`, `check-template.sh`), commit safety (`commit-msg-guard.sh`), language detection (`detect-languages.sh`, `detect-changed-languages.sh`), language pack creation (`new-language-pack.sh`), Ralph Loop orchestration (`ralph-loop.sh`, `ralph-loop-init.sh`, `ralph-status-helpers.sh`), pipeline orchestration (`ralph-pipeline.sh`, `ralph-orchestrator.sh`, `ralph-config.sh`, `ralph` CLI), TUI build (`build-tui.sh`), Codex availability check (`codex-check.sh`)
+- `scripts/`: init/bootstrap/install (`init-project.sh`, `bootstrap.sh`, `install.sh`), plan creation and archival (`new-feature-plan.sh`, `new-ralph-plan.sh`, `archive-plan.sh`), branch/worktree/PR guards (`branch-name.sh`, `ralph-worktree.sh`, `ensure-pr-ready.sh`, `ensure-pr-title-prefix.sh`), verification (`run-verify.sh`, `run-static-verify.sh`, `run-test.sh`, `verify.local.sh`), CI and drift checks (`check-coverage.sh`, `check-pipeline-sync.sh`, `check-skill-sync.sh`, `check-sync.sh`, `check-template.sh`), secret and commit safety (`secret-scan.sh`, `pre-commit-secret-guard.sh`, `commit-msg-guard.sh`, `prepare-commit-msg-secret-guard.sh`, `pre-merge-commit-secret-guard.sh`), language detection (`detect-languages.sh`, `detect-changed-languages.sh`), language pack creation (`new-language-pack.sh`), Ralph Loop orchestration (`ralph-loop.sh`, `ralph-loop-init.sh`, `ralph-status-helpers.sh`), pipeline orchestration (`ralph-pipeline.sh`, `ralph-orchestrator.sh`, `ralph-config.sh`, `ralph-cli-driver.sh`, `ralph` CLI), TUI build (`build-tui.sh`), Codex availability check (`codex-check.sh`)
 - `.github/workflows/`: CI checks (verify.yml, check-template.yml) and release automation (release.yml for goreleaser)
 
 ## Runtime state

@@ -28,7 +28,7 @@ Work from the active plan, not from memory alone.
       - If the file is missing: initialize as `{"plan_path": "<absolute-path>", "cycle": 1}`.
       - If the file exists AND its `plan_path` matches the pinned plan: **preserve the existing counter** (do NOT reset to 1). This keeps the cap effective when the user resumes a plan after context compaction or a later session. Inform the user of the resumed cycle number.
       - If the file exists AND its `plan_path` differs from the pinned plan: warn and prompt via AskUserQuestion whether to reset the counter for the new plan or abort.
-      - The counter reflects the **current** pipeline run (1 = first run, 2 = one re-run after Codex ACTION_REQUIRED).
+      - The counter reflects the **current** pipeline run (1 = first run, 2 = one re-run after cross-review ACTION_REQUIRED).
 4. Read the current active plan using the path recorded in `active-plan.json`.
 5. Confirm acceptance criteria, verify plan, and test plan before editing code.
 6. Implement in small slices that can be reviewed and verified independently.
@@ -47,7 +47,7 @@ Work from the active plan, not from memory alone.
     b. `Task(subagent_type="verifier")` → `/verify` — stop if fail verdict
     c. `Task(subagent_type="tester")` → `/test` — stop if fail verdict
     d. `Task(subagent_type="doc-maintainer")` → `/sync-docs`
-    e. **Invoke `/cross-review` via the Skill tool** (optional, inline — if Codex unavailable, skip to `/pr`). The skill reads `cycle-count.json` and enforces `RALPH_STANDARD_MAX_PIPELINE_CYCLES` (default 2). On re-run after ACTION_REQUIRED fixes, `/cross-review` increments `cycle-count.json`.
+    e. **Invoke `/cross-review` via the Skill tool** (optional, inline — if the reviewer CLI is unavailable, skip to `/pr`). The skill reads `cycle-count.json` and enforces `RALPH_STANDARD_MAX_PIPELINE_CYCLES` (default 2). On re-run after ACTION_REQUIRED fixes, `/cross-review` increments `cycle-count.json`.
     f. **Invoke `/pr` via the Skill tool** — do NOT run `gh pr create` directly. The `/pr` skill enforces the Japanese template, pre-checks, plan archiving, and task worktree/local branch cleanup. On success, `/pr` deletes `.harness/state/standard-pipeline/active-plan.json` and `cycle-count.json`.
 
 ## Scope discipline

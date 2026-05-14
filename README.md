@@ -28,10 +28,10 @@ Claude Code gives you a powerful agent, but the default setup is a blank slate. 
 | Always-on map (`AGENTS.md` / `CLAUDE.md`) | — | ✓ |
 | On-demand skills (plan, work, verify, loop, ...) | manual | 10+ bundled |
 | Deterministic hooks (mojibake guard, commit-msg, bash guard, ...) | manual | pre-wired |
-| Evidence-backed pipeline (self-review → verify → test → sync-docs) | ad hoc | canonical order, enforced |
+| Evidence-backed pipeline (self-review → verify → test → sync-docs → cross-review) | ad hoc | canonical order, enforced |
 | Isolated task execution | ad hoc branches | clean-base task worktrees |
 | Autonomous parallel execution | — | Ralph Loop (multi-worktree) |
-| Language packs (TS, Python, Rust, Go, Dart) | — | opt-in |
+| Language packs (TS, Python, Rust, Go, Dart, Terraform) | — | opt-in |
 | Drift management between projects | manual copy | `ralph upgrade` |
 | Cross-agent portability | — | portable `AGENTS.md` + scripts |
 
@@ -104,8 +104,8 @@ Before claiming a task is done:
 |:---|:---|
 | **Maps, not manuals**<br/>Short `AGENTS.md` / `CLAUDE.md`; push detail into rules and skills, promote repeats into hooks. | **Canonical pipeline**<br/>`self-review → verify → test → sync-docs → cross-review → pr` enforced in standard flow and Ralph Loop. |
 | **Deterministic hooks**<br/>Mojibake guard, commit-msg secret scan, Bash guardrails, verification reminders — pre-wired in `settings.json`. | **Worktree-first flow**<br/>Spec, plan, work, and PR artifacts are produced from clean-base task worktrees, with local cleanup after hand-off. |
-| **Ralph Loop**<br/>Multi-worktree autonomous parallel slices, integration branch, unified PR — orchestrated by `ralph run`. | **Language packs**<br/>TypeScript, Python, Rust, Go, Dart starters (opt-in) with per-language `verify.sh` and path-scoped rules. |
-| **Drift-proof upgrades**<br/>Hash-based `ralph upgrade` with per-file conflict resolution — keeps N projects aligned as the scaffold evolves. | **Evidence over prose**<br/>Every review, verify, test, and codex pass produces a dated artifact in `docs/reports/`. |
+| **Ralph Loop**<br/>Multi-worktree autonomous parallel slices, integration branch, unified PR — orchestrated by `ralph run`. | **Language packs**<br/>TypeScript, Python, Rust, Go, Dart, and Terraform starters (opt-in) with per-language `verify.sh` and path-scoped rules. |
+| **Drift-proof upgrades**<br/>Hash-based `ralph upgrade` with per-file conflict resolution — keeps N projects aligned as the scaffold evolves. | **Evidence over prose**<br/>Every self-review, verify, test, sync-docs, and cross-review triage pass produces a dated artifact in `docs/reports/`. |
 | **Cross-agent portable**<br/>`AGENTS.md` + `scripts/` + `packs/` stay neutral; `.claude/` and `.codex/` are agent-specific layers you can stack others beside. | **Local state, not repo churn**<br/>Worktree lifecycle records live under `git-common-dir`, outside tracked files and branch checkouts. |
 
 ## Commands
