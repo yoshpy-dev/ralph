@@ -579,6 +579,11 @@ PR_BODY
     return 1
   }
 
+  if ! "${SCRIPT_DIR}/ensure-pr-title-prefix.sh" "$_pr_url" >/dev/null 2>&1; then
+    log_error "Unified PR exists but could not be verified with branch type title prefix: ${_pr_url}"
+    return 1
+  fi
+
   if ! "${SCRIPT_DIR}/ensure-pr-ready.sh" "$_pr_url" >/dev/null 2>&1; then
     log_error "Unified PR exists but could not be verified as ready-for-review: ${_pr_url}"
     return 1

@@ -13,6 +13,7 @@ A task is done only when all applicable items are satisfied.
 - [ ] Docs and contracts were updated if behavior changed (`/sync-docs`)
 - [ ] Remaining gaps are explicit
 - [ ] PR created via `/pr` skill (includes plan archival and hand-off)
+- [ ] PR title starts with the branch type prefix (`feat/...` -> `feat: ...`) and `./scripts/ensure-pr-title-prefix.sh` passed
 - [ ] CI verify passes on the PR
 - [ ] Skill drift check (`./scripts/check-skill-sync.sh`) is green so `.claude/skills/` and `.agents/skills/` stay in lock-step
 - [ ] If the change touches `.claude/`, `.codex/`, `.agents/skills/`, or shared rules, both agent surfaces were exercised (or the gap is recorded explicitly)
@@ -42,6 +43,7 @@ verification work during `/self-review` is not valid.
 - [ ] Sequential merge to typed integration branch passed without conflicts
 - [ ] Integration pipeline passed on merged branch (`--skip-pr --fix-all`)
 - [ ] Unified PR created from `<type>/<slug>` or `<type>/<issue>/<slug>` to base branch
+- [ ] Unified PR title starts with the same branch type prefix (`<type>: ...`)
 - [ ] Plan directory archived from `docs/plans/active/` to `docs/plans/archive/`
 
 Ralph Loop handles the full lifecycle autonomously per slice (implement → self-review → verify → test → sync-docs → cross-review), then merges slices into the typed integration branch generated from plan metadata, runs a full-scope integration pipeline (`--skip-pr --fix-all`) to catch cross-module issues, and creates a unified PR.

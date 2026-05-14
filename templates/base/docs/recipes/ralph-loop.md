@@ -268,7 +268,7 @@ Orchestrator handles:
   - Runs ralph-pipeline.sh in each worktree (parallel where no deps)
   - Sequential merge to typed branch from ./scripts/branch-name.sh from-plan
   - Integration pipeline on merged branch (--skip-pr --fix-all)
-  - Unified PR from the typed integration branch
+  - Unified PR from the typed integration branch with matching `<type>:` title prefix
   ↓
 Return to Claude Code: check ./scripts/ralph status
 ```

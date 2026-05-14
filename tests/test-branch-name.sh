@@ -85,6 +85,9 @@ _out="$("$BRANCH_NAME" from-plan "$_tmp/docs/plans/active/2026-05-14-fix-loop-po
 assert_eq "directory plan without issue" "fix/fix-loop-policy" "$_out"
 
 assert_exit "missing Type fails closed" 1 "$BRANCH_NAME" from-plan "$_tmp/docs/plans/active/2026-05-14-missing-type.md"
+assert_eq "branch type from branch name" "fix" "$("$BRANCH_NAME" type "fix/50/pr-ready-check")"
+assert_eq "title prefix from branch name" "docs:" "$("$BRANCH_NAME" title-prefix "docs/update-readme")"
+assert_exit "title prefix rejects invalid branch" 1 "$BRANCH_NAME" title-prefix "codex-update-readme"
 
 printf '==> branch-name.sh validation\n'
 for branch in \

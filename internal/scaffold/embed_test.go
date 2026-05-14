@@ -68,6 +68,7 @@ func TestTemplateBaseScriptsExist(t *testing.T) {
 		"archive-plan.sh",
 		"branch-name.sh",
 		"ensure-pr-ready.sh",
+		"ensure-pr-title-prefix.sh",
 		"new-feature-plan.sh",
 		"new-ralph-plan.sh",
 		"codex-check.sh",

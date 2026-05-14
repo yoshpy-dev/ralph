@@ -13,12 +13,14 @@
 Make PR readiness and branch type prefixes deterministic across both Claude Code
 and Codex flows. PR creation must not remain Draft unless explicitly requested,
 and new task branches must use a controlled type prefix such as `feat/`,
-`fix/`, `docs/`, or `chore/`.
+`fix/`, `docs/`, or `chore/`. PR titles must use the matching conventional
+prefix, such as `feat: ...` for `feat/...`.
 
 ## Scope
 
 - Add shared scripts for branch-name generation/validation and PR ready-state
   enforcement.
+- Add shared PR title prefix enforcement derived from the PR head branch.
 - Wire the scripts into the standard PR skill and Ralph Loop pipeline paths.
 - Add branch `Type` metadata to plan templates and plan creation scripts.
 - Mirror all shipped scaffold changes under `templates/base/`.
@@ -73,10 +75,13 @@ verification rather than another natural-language instruction.
 - [x] AC-6: Regression tests cover branch generation/validation and PR
   ready-state enforcement without making network calls.
 - [x] AC-7: Root and `templates/base/` scaffold copies remain in sync.
+- [x] AC-8: PR titles are verified and corrected to start with the branch type
+  prefix, such as `feat: ...` for a `feat/...` branch.
 
 ## Implementation outline
 
-1. Add `scripts/branch-name.sh` and `scripts/ensure-pr-ready.sh`.
+1. Add `scripts/branch-name.sh`, `scripts/ensure-pr-ready.sh`, and
+   `scripts/ensure-pr-title-prefix.sh`.
 2. Update plan templates and creation scripts for `Type`.
 3. Update skills and pipeline scripts to use the shared scripts.
 4. Add shell regression tests.
@@ -94,12 +99,13 @@ verification rather than another natural-language instruction.
 ## Test plan
 
 - Unit tests: none for Go unless script wiring affects Go code.
-- Integration tests: focused shell tests for branch naming and PR ready
-  enforcement.
+- Integration tests: focused shell tests for branch naming, PR ready
+  enforcement, and PR title prefix enforcement.
 - Regression tests: `check-skill-sync`, `check-sync`, static verify, changed
   test runner.
 - Edge cases: invalid type, issue/no-issue branch names, draft PR converted to
-  ready, ready PR left unchanged, `gh` failure propagates.
+  ready, ready PR left unchanged, missing/wrong PR title prefixes corrected,
+  invalid PR branch rejected, `gh` failure propagates.
 - Evidence to capture: `docs/evidence/test-2026-05-14-pr-ready-branch-type-enforcement.log`.
 
 ## Risks and mitigations
@@ -109,6 +115,9 @@ verification rather than another natural-language instruction.
   add `Type` going forward.
 - Risk: `gh pr ready` is unavailable or fails. Mitigation: the script fails
   closed and prevents the PR from being reported as complete.
+- Risk: a connector creates a PR with a missing or wrong title prefix.
+  Mitigation: `ensure-pr-title-prefix.sh` edits the title from the PR head
+  branch type and fails closed if the title remains wrong.
 
 ## Rollout or rollback notes
 

@@ -7,7 +7,7 @@
 
 ## Documentation updates
 
-- Updated Claude Code and Codex PR skills to require ready-for-review PR creation by default and post-create ready-state verification.
+- Updated Claude Code and Codex PR skills to require typed PR title prefixes, ready-for-review PR creation by default, and post-create title/ready-state verification.
 - Updated Claude Code and Codex work/loop/plan skills to use typed branch metadata and `scripts/branch-name.sh`.
 - Updated plan templates to include `Type`.
 - Updated Ralph Loop recipe, definition of done, repo map, README, and Codex override notes for branch and PR guard behavior.

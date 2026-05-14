@@ -20,6 +20,7 @@ scripts/run-verify.sh
 scripts/archive-plan.sh
 scripts/branch-name.sh
 scripts/ensure-pr-ready.sh
+scripts/ensure-pr-title-prefix.sh
 scripts/new-ralph-plan.sh
 scripts/commit-msg-guard.sh
 "

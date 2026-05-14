@@ -9,6 +9,8 @@ usage() {
 Usage:
   ./scripts/branch-name.sh from-plan <plan-path>
   ./scripts/branch-name.sh validate <branch-name>
+  ./scripts/branch-name.sh type <branch-name>
+  ./scripts/branch-name.sh title-prefix <branch-name>
   ./scripts/branch-name.sh allowed-types
 
 Branch names must follow:
@@ -117,6 +119,17 @@ validate() {
   return 1
 }
 
+branch_type() {
+  _branch="$1"
+  validate "$_branch" >/dev/null || return 1
+  printf '%s\n' "${_branch%%/*}"
+}
+
+title_prefix() {
+  _type="$(branch_type "$1")" || return 1
+  printf '%s:\n' "$_type"
+}
+
 cmd="${1:-}"
 case "$cmd" in
   from-plan)
@@ -126,6 +139,14 @@ case "$cmd" in
   validate)
     [ "${2:-}" != "" ] || { usage >&2; exit 1; }
     validate "$2"
+    ;;
+  type)
+    [ "${2:-}" != "" ] || { usage >&2; exit 1; }
+    branch_type "$2"
+    ;;
+  title-prefix)
+    [ "${2:-}" != "" ] || { usage >&2; exit 1; }
+    title_prefix "$2"
     ;;
   allowed-types)
     printf '%s\n' "$ALLOWED_TYPES"

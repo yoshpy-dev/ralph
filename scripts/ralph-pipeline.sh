@@ -941,19 +941,21 @@ DOCS
     ckpt_update '.status = "invalid_branch_name"'
     return 2
   fi
+  _title_prefix="$(./scripts/branch-name.sh title-prefix "$_head_branch")"
   _pr_log="${PIPELINE_DIR}/outer-${_cycle}-pr.log"
   _pr_prompt="${PIPELINE_DIR}/.pr-prompt.md"
 
-  cat > "$_pr_prompt" <<'PR_PROMPT'
+  cat > "$_pr_prompt" <<PR_PROMPT
 Create a pull request for the current branch.
 Follow the repository's PR workflow:
 1. Check for uncommitted changes and commit them
 2. Push the branch
-3. Create a ready-for-review PR with Japanese title and body
+3. Create a ready-for-review PR with Japanese title and body. The PR title must start with "${_title_prefix} ".
 4. Archive the plan
 
 Use gh pr create with the standard template. Do not pass --draft unless the
 operator explicitly requested a draft. After creation, run:
+  ./scripts/ensure-pr-title-prefix.sh <pr-url-or-current-branch>
   ./scripts/ensure-pr-ready.sh <pr-url-or-current-branch>
 
 After creating the PR, write the PR URL to .harness/state/pipeline/.pr-url:
@@ -990,6 +992,11 @@ PR_PROMPT
   fi
 
   if [ -n "$_pr_url" ]; then
+    if ! ./scripts/ensure-pr-title-prefix.sh "$_pr_url" >> "$_pr_log" 2>&1; then
+      log_error "PR exists but could not be verified with branch type title prefix: ${_pr_url}"
+      ckpt_update --arg url "$_pr_url" '.pr_created = true | .pr_url = $url | .status = "pr_title_prefix_check_failed"'
+      return 2
+    fi
     if ! ./scripts/ensure-pr-ready.sh "$_pr_url" >> "$_pr_log" 2>&1; then
       log_error "PR exists but could not be verified as ready-for-review: ${_pr_url}"
       ckpt_update --arg url "$_pr_url" '.pr_created = true | .pr_url = $url | .status = "pr_draft_or_ready_check_failed"'

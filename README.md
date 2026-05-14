@@ -158,7 +158,7 @@ The philosophy: **a map, not a manual**. Keep `AGENTS.md` small, push detail int
 │   ├── quality/              # definition of done, quality gates
 │   └── tech-debt/            # tracked debt
 ├── packs/languages/          # opt-in language specializations
-├── scripts/                  # branch-name.sh, ensure-pr-ready.sh, run-verify.sh, etc.
+├── scripts/                  # branch-name.sh, ensure-pr-ready.sh, ensure-pr-title-prefix.sh, run-verify.sh, etc.
 ├── ralph.toml                # CLI config
 └── .github/workflows/        # CI
 ```
