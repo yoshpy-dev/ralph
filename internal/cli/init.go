@@ -205,6 +205,11 @@ func executeInit(targetDir string, cfg initConfig, force bool) error {
 		fmt.Printf("  ✓ .git exists (skipped)\n")
 	}
 
+	// Step 5: Install local git hooks when possible. This is a runtime side
+	// effect rather than a manifest-managed template file because .git/ is
+	// local to each clone/worktree.
+	installManagedGitHooks(targetDir, os.Stdout, os.Stdout)
+
 	fmt.Printf("\nDone. Next steps:\n")
 	if targetDir != "." {
 		fmt.Printf("  cd %s\n", targetDir)

@@ -203,6 +203,9 @@ run_hook_tests() {
   if [ -x tests/test-check-mojibake.sh ]; then
     run "tests/test-check-mojibake.sh" tests/test-check-mojibake.sh
   fi
+  if [ -x tests/test-secret-scan.sh ]; then
+    run "tests/test-secret-scan.sh" tests/test-secret-scan.sh
+  fi
   if [ -x tests/test-check-skill-sync.sh ]; then
     run "tests/test-check-skill-sync.sh" tests/test-check-skill-sync.sh
   fi

@@ -19,7 +19,11 @@ docs/roadmap/harness-maturity-model.md
 scripts/run-verify.sh
 scripts/archive-plan.sh
 scripts/new-ralph-plan.sh
+scripts/secret-scan.sh
+scripts/pre-commit-secret-guard.sh
 scripts/commit-msg-guard.sh
+scripts/prepare-commit-msg-secret-guard.sh
+scripts/pre-merge-commit-secret-guard.sh
 "
 
 for file in $required_files; do
@@ -61,13 +65,23 @@ if [ -f .claude/settings.json ]; then
   done
 fi
 
-# --- commit-msg hook installation check (local only) ---
+# --- git secret hook installation check (local only) ---
 if [ -d .git ] && [ "${CI:-}" != "true" ]; then
-  if [ ! -f .git/hooks/commit-msg ]; then
-    fail "commit-msg hook not installed. Run: ./scripts/bootstrap.sh"
-  elif ! grep -q 'commit-msg-guard' .git/hooks/commit-msg 2>/dev/null; then
-    fail "commit-msg hook exists but is not our guard. Run: ./scripts/bootstrap.sh"
-  fi
+  for hook_spec in \
+    "pre-commit:pre-commit-secret-guard" \
+    "commit-msg:commit-msg-guard" \
+    "prepare-commit-msg:prepare-commit-msg-secret-guard" \
+    "pre-merge-commit:pre-merge-commit-secret-guard"
+  do
+    hook=${hook_spec%%:*}
+    marker=${hook_spec#*:}
+    hook_path=".git/hooks/$hook"
+    if [ ! -f "$hook_path" ]; then
+      fail "$hook hook not installed. Run: ralph upgrade"
+    elif ! grep -Eq "ralph git hook wrapper|$marker" "$hook_path" 2>/dev/null; then
+      fail "$hook hook exists but is not managed by ralph. Run: ralph upgrade to chain it, or keep it intentionally"
+    fi
+  done
 fi
 
 if [ "$status" -eq 0 ]; then
