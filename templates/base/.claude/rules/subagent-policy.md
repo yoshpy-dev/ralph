@@ -37,7 +37,7 @@ If a subagent fails to execute (tool error, not a review finding), run the corre
 
 ## Spec — always inline
 
-`/spec` runs in the main context because it relies heavily on `AskUserQuestion` for requirement clarification (active back-and-forth with the user) and on `AskUserQuestion` for output selection (save file / create issue / both / transition to `/plan`). Subagent execution would cut off the interactive clarification loop. No agent definition exists for this skill.
+`/spec` runs in the main context because it relies heavily on `AskUserQuestion` for requirement clarification (active back-and-forth with the user) and on `AskUserQuestion` for output selection (issue-only / save spec file as docs PR / save spec file and transition to `/plan`). Subagent execution would cut off the interactive clarification loop. No agent definition exists for this skill.
 
 ## Planning — always inline
 

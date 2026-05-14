@@ -24,11 +24,12 @@ Provide a cross-model second opinion on the current diff before PR creation.
    a. Read `.harness/state/standard-pipeline/active-plan.json` to get the pinned plan path.
       - **If present**: proceed to step 1.b (persisted-identity mode).
       - **If missing**: warn the user and continue in **fallback mode** — no persisted identity. In fallback mode: skip step 1.b entirely (do NOT read or create `cycle-count.json`, to avoid reusing stale counters from other plans or leaking orphan state) and set `cycle=1`, `cap=∞` for step 7 (cap cannot be enforced).
-   b. (Persisted-identity mode only) Read `.harness/state/standard-pipeline/cycle-count.json`. If its `plan_path` matches `active-plan.json`, use its `cycle`. If missing, initialize `{"plan_path": "<path>", "cycle": 1}` (first /cross-review run of this plan). If its `plan_path` does **not** match, warn and treat as fallback mode for this run (do not overwrite — `/work` is responsible for resolving mismatched state).
-   c. Read `RALPH_STANDARD_MAX_PIPELINE_CYCLES` by sourcing `./scripts/ralph-config.sh` in a subshell (default `2`).
-   d. Record the current cycle number and the cap for use in Step 7.
+   b. (Persisted-identity mode only) Confirm `active-plan.json` includes the task worktree metadata written by `/work`: `plan_path`, `worktree_path`, `branch`, and `worktree_state_id`. If `plan_path` no longer exists, try `./scripts/ralph-worktree.sh resume --id <worktree_state_id>` and recover the plan from the recorded canonical reference before falling back. Do not rescan `docs/plans/active/` while valid pinned state exists.
+   c. (Persisted-identity mode only) Read `.harness/state/standard-pipeline/cycle-count.json`. If its `plan_path` matches `active-plan.json`, use its `cycle`. If missing, initialize `{"plan_path": "<path>", "cycle": 1}` (first /cross-review run of this plan). If its `plan_path` does **not** match, warn and treat as fallback mode for this run (do not overwrite — `/work` is responsible for resolving mismatched state).
+   d. Read `RALPH_STANDARD_MAX_PIPELINE_CYCLES` by sourcing `./scripts/ralph-config.sh` in a subshell (default `2`).
+   e. Record the current cycle number and the cap for use in Step 7.
 
-   **Hard prohibition**: Do NOT rediscover the plan by rescanning `docs/plans/active/` once `active-plan.json` exists. Always consume the persisted path. This prevents cross-plan counter leakage when multiple plans coexist.
+   **Hard prohibition**: Do NOT rediscover the plan by rescanning `docs/plans/active/` once `active-plan.json` exists. Always consume the persisted path and worktree state. This prevents cross-plan counter leakage when multiple plans coexist.
 
 2. **Resolve driver and reviewer CLIs**:
    The skill must call the CLI other than the one currently driving the work. Two-step detection:

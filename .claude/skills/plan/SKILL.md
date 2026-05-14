@@ -1,15 +1,17 @@
 ---
 name: plan
-description: Create or refresh a scoped implementation plan before risky, ambiguous, long-running, or multi-file work. Accepts an optional GitHub issue number or URL for context pre-fill. Resolves high-leverage implementation forks with the user before finalizing. Does not create a branch — branch/worktree creation is deferred to the chosen flow skill.
-allowed-tools: Read, Grep, Glob, Write, Edit, Bash, AskUserQuestion
+description: Create or refresh a scoped implementation plan before risky, ambiguous, long-running, or multi-file work. Accepts an optional GitHub issue number or URL for context pre-fill. Resolves high-leverage implementation forks with the user before finalizing. Ensures a clean-base task worktree before writing plan artifacts.
 ---
-Create or update a plan in `docs/plans/active/`.
+Create or update a plan in `docs/plans/active/` from an isolated task
+worktree.
 
 ## Goals
 
 - Turn a request into a versioned plan that survives context loss
 - Define acceptance criteria and evidence before deep implementation
 - Make later review and verification cheaper
+- Keep plan artifacts out of the default checkout by ensuring a task worktree
+  before the first file write
 
 ## Steps
 
@@ -26,10 +28,18 @@ Create or update a plan in `docs/plans/active/`.
      2. **Ralph Loop (/loop)** — directory-based plan with autonomous parallel slice execution (large, divisible tasks)
    - If the plan mentions large-scale refactoring, migration, test-coverage campaigns, or multi-file autonomous work, recommend Ralph Loop.
    - After the user chooses, proceed to step 5.
-5. Choose a branch type (`feat`, `fix`, `docs`, `chore`, `refactor`, `test`, `ci`, `build`, `perf`, `release`, or `security`) from the request and create one active plan file based on the flow selected in step 4:
+5. Choose a branch type (`feat`, `fix`, `docs`, `chore`, `refactor`, `test`, `ci`, `build`, `perf`, `release`, or `security`) and a stable slug from the request.
+6. **Ensure the task worktree before creating the plan file**:
+   - First run `./scripts/ralph-worktree.sh current`. If it returns a matching task state (for example from `/spec` handoff), adopt that worktree and do not create a second one.
+   - Otherwise run `./scripts/ralph-worktree.sh ensure --id plan-<slug> --kind <standard|loop> --branch <type>/<slug> --path .claude/worktrees/<slug> --canonical-ref "<issue URL, spec reference, or request summary>" --cleanup-policy pr-success`, where the kind matches the flow selected in step 4.
+   - The helper must create the worktree from a clean default branch and store state under `$(git rev-parse --git-common-dir)/ralph/worktrees/`.
+   - If a matching state record exists, resume it. If the branch/path exists with mismatched state, stop instead of overwriting.
+   - All subsequent plan creation and edits happen inside the returned worktree path.
+7. Create one active plan file inside the task worktree based on the flow selected in step 4:
    - **Standard flow**: Create with `./scripts/new-feature-plan.sh --type <type> <slug> [issue-number]` or from [template.md](template.md).
    - **Ralph Loop**: Create with `./scripts/new-ralph-plan.sh --type <type> <slug> [issue-number] [slice-count]` to generate a directory-based plan structure under `docs/plans/active/<date>-<slug>/`.
-6. Fill in:
+   - Set `Branch:` to the branch recorded in the worktree state rather than leaving it as `TBD`.
+8. Fill in:
    - objective
    - scope and non-goals
    - assumptions
@@ -41,7 +51,7 @@ Create or update a plan in `docs/plans/active/`.
    - risk register
    - rollout or rollback notes
    - evidence targets
-7. **Critical forks (convergent)**: After the initial draft is in place, scan the plan for "critical forks" — implementation decisions that meet **all three** of:
+9. **Critical forks (convergent)**: After the initial draft is in place, scan the plan for "critical forks" — implementation decisions that meet **all three** of:
    - Two or more approaches differ materially in risk, cost, or rollback profile
    - The choice cannot be resolved from the codebase, existing `.claude/rules/`, docs, or a reasonable default
    - Reversing the decision mid-implementation would cost more than roughly one slice of rework
@@ -61,9 +71,9 @@ Create or update a plan in `docs/plans/active/`.
 
    Purpose is **convergent** — narrow between enumerated options, not expand the design space. Divergent ideation belongs to `/spec`, not here.
 
-8. Keep the plan high-level enough to avoid cascading low-level mistakes.
-9. End with a short readiness checklist.
-10. **Codex plan advisory (optional)**:
+10. Keep the plan high-level enough to avoid cascading low-level mistakes.
+11. End with a short readiness checklist.
+12. **Codex plan advisory (optional)**:
     a. Run `./scripts/codex-check.sh` via Bash.
     b. If exit 1 (not available): note "Codex not available — skipping plan advisory" and proceed to step 11.
     c. If exit 0 (available): invoke Codex to adversarially review the plan via Bash:
@@ -75,8 +85,8 @@ Create or update a plan in `docs/plans/active/`.
        - Options:
          1. Update plan — edit plan per relevant findings, then re-display
          2. Acknowledge findings, continue — proceed without changes
-    g. After user decision, proceed to step 11.
-11. **Flow confirmation**: Confirm the flow selected in step 4 and state which skill to invoke next:
+    g. After user decision, proceed to step 13.
+13. **Flow confirmation**: Confirm the flow selected in step 4 and state which skill to invoke next:
     - Standard flow → `/work`
     - Ralph Loop → `/loop`
 
@@ -85,7 +95,7 @@ Create or update a plan in `docs/plans/active/`.
 - Updated or newly created plan file
 - One paragraph summary of what is in scope
 - Explicit statement of what remains unknown
-- Branch/Worktree creation is deferred to the chosen flow skill
+- Task worktree path and branch recorded by `ralph-worktree.sh`
 - Chosen execution flow (standard /work or Ralph Loop /loop)
 
 ## Anti-bottleneck

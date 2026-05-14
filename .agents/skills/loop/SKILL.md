@@ -39,18 +39,20 @@ Use **AskUserQuestion** to confirm the objective and link the plan directory.
 - If `docs/plans/active/` contains directory-based plans (with `_manifest.md`), list them as options.
 - Ralph Loop requires a directory-based plan. If none exists, instruct the user to create one with `./scripts/new-ralph-plan.sh --type <type> <slug> [issue] [slice-count]`.
 
-### Step 3.5 — Git worktree creation
+### Step 3.5 — Task worktree resolution
 
-Create an isolated worktree for the loop session:
+Resolve the isolated task worktree for the loop session:
 
 1. Read the active plan to extract metadata (type, issue number, slug).
 2. Determine branch name by running `./scripts/branch-name.sh from-plan <manifest-path>`.
    Branch names must validate with `./scripts/branch-name.sh validate <branch-name>`.
-3. Run `git worktree add .claude/worktrees/<slug> -b <branch-name>` to create the worktree.
-4. Update the plan file: replace `Branch: TBD` (or any TBD variant) with the actual branch name.
-5. All subsequent steps (init script, PROMPT.md generation, etc.) execute inside the worktree directory.
+3. Run `./scripts/ralph-worktree.sh current`. If it returns a state file for the current worktree, use that task worktree. Otherwise run `./scripts/ralph-worktree.sh ensure --id plan-<slug> --kind loop --branch <branch-name> --path .claude/worktrees/<slug> --plan-path <absolute-manifest-path> --cleanup-policy pr-success`.
+4. If the command resumes an existing matching state, continue in that worktree. If it reports a branch/path collision with mismatched state, stop rather than overwriting.
+5. Update the plan file inside the task worktree: replace `Branch: TBD` (or any TBD variant) with the actual branch name.
+6. All subsequent steps (init script, PROMPT.md generation, etc.) execute inside the task worktree directory.
 
-If already on a feature branch (not main/master), skip worktree creation and work in-place.
+The task worktree is the control worktree. Ralph Loop's orchestrator still
+creates per-slice worktrees under `.claude/worktrees/` for parallel execution.
 
 ### Step 4 — Run init script
 
@@ -86,7 +88,7 @@ After approval, print the run command:
 - `.harness/state/loop/PROMPT.md` ready to run
 - `.harness/state/loop/task.json` with metadata
 - `.harness/state/loop/progress.log` initialized
-- Worktree path at `.claude/worktrees/<slug>` (if created)
+- Task worktree path at `.claude/worktrees/<slug>`
 - Terminal command for the user to start the loop
 
 ## After the loop
@@ -98,7 +100,7 @@ The orchestrator handles everything autonomously (parallel pipeline per slice �
 3. If all slices are `complete` and the unified PR was created — show the PR URL.
 4. If any slice is `stuck`, `repair_limit`, or `aborted` — review the failure context and help the user decide next steps (resume, abort, or manual intervention).
 5. The orchestrator already creates the PR, so no further post-implementation pipeline is needed.
-6. If worktrees were created, ask the user whether to keep or remove them.
+6. Task worktree cleanup is handled by the unified PR path. Per-slice worktrees remain governed by `ralph run` / `ralph abort` cleanup behavior.
 
 ## Anti-bottleneck
 

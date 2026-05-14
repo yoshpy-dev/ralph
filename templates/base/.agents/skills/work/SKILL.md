@@ -1,6 +1,6 @@
 ---
 name: work
-description: Execute an approved plan in small coherent slices, updating progress, evidence, and docs as implementation evolves. Invoke automatically after an approved plan exists and the current branch is a feature branch.
+description: Execute an approved plan in small coherent slices from an isolated task worktree, updating progress, evidence, and docs as implementation evolves. Invoke automatically after an approved plan exists and the task worktree is ready.
 ---
 Work from the active plan, not from memory alone.
 
@@ -13,16 +13,17 @@ Work from the active plan, not from memory alone.
    - If multiple candidate files exist, ask via AskUserQuestion which plan this `/work` run targets, and use the selected path.
    - If none exist, stop and ask the user to run `/plan` first.
    - Downstream steps in this skill — and downstream skills (`/cross-review`, `/pr`) — MUST use this resolved path instead of rescanning `docs/plans/active/`.
-2. **Create typed feature branch** (if not already on one), based on the plan resolved in Step 1:
+2. **Resolve or resume the task worktree**, based on the plan resolved in Step 1:
    a. Read the resolved plan to extract metadata (type, issue number, slug).
    b. Determine branch name by running `./scripts/branch-name.sh from-plan <resolved-plan-path>`.
    c. Branch names must validate with `./scripts/branch-name.sh validate <branch-name>`. Allowed user-facing branch shapes are `<type>/<issue>/<slug>` (with issue) or `<type>/<slug>` (without issue), where `<type>` is one of `feat`, `fix`, `docs`, `chore`, `refactor`, `test`, `ci`, `build`, `perf`, `release`, or `security`.
-   d. If already on a feature branch (not main/master), validate the current branch with `./scripts/branch-name.sh validate "$(git branch --show-current)"`; if it fails, stop and create/switch to the generated typed branch before continuing.
-   e. Otherwise, run `git checkout -b <branch-name>`.
-   f. Update the resolved plan file: replace `Branch: TBD` (or any TBD variant) with the actual branch name.
+   d. Run `./scripts/ralph-worktree.sh current`. If it returns a state file for the current worktree, use that state id. Otherwise run `./scripts/ralph-worktree.sh ensure --id plan-<slug> --kind standard --branch <branch-name> --path .claude/worktrees/<slug> --plan-path <absolute-plan-path> --canonical-ref <issue/spec/request reference> --cleanup-policy pr-success` unless a matching task worktree state already exists.
+   e. If this `/work` invocation is already running inside the returned worktree path, continue. If it is running outside that path, switch all subsequent commands and edits to the returned worktree path.
+   f. If the resolved plan file is a legacy plan outside the task worktree, stop and migrate it intentionally instead of silently copying it; new `/plan` runs should already create plans inside the task worktree.
+   g. Update the resolved plan file inside the task worktree: replace `Branch: TBD` (or any TBD variant) with the actual branch name.
 3. **Pin the plan identity and initialize the pipeline cycle counter** (enforces the 2-cycle cap):
    a. Create `.harness/state/standard-pipeline/` if missing (`mkdir -p`). This directory is already covered by the existing `.harness/state/` gitignore.
-   b. Write the Step-1 resolved absolute path to `.harness/state/standard-pipeline/active-plan.json` as `{"plan_path": "<absolute-path>", "created_at": "<UTC ISO8601>"}`. If the file already exists with a different `plan_path`, warn the user and ask whether to overwrite (resume) or abort.
+   b. Write the Step-1 resolved absolute path plus worktree metadata to `.harness/state/standard-pipeline/active-plan.json` as `{"plan_path": "<absolute-path>", "worktree_path": "<absolute-worktree-path>", "branch": "<branch>", "base_sha": "<base-sha>", "worktree_state_id": "plan-<slug>", "created_at": "<UTC ISO8601>"}`. If the file already exists with a different `plan_path` or `worktree_state_id`, warn the user and ask whether to overwrite (resume) or abort.
    c. Handle `.harness/state/standard-pipeline/cycle-count.json`:
       - If the file is missing: initialize as `{"plan_path": "<absolute-path>", "cycle": 1}`.
       - If the file exists AND its `plan_path` matches the pinned plan: **preserve the existing counter** (do NOT reset to 1). This keeps the cap effective when the user resumes a plan after context compaction or a later session. Inform the user of the resumed cycle number.
@@ -47,7 +48,7 @@ Work from the active plan, not from memory alone.
     c. `Task(subagent_type="tester")` → `/test` — stop if fail verdict
     d. `Task(subagent_type="doc-maintainer")` → `/sync-docs`
     e. **Invoke `/cross-review` via the Skill tool** (optional, inline — if Codex unavailable, skip to `/pr`). The skill reads `cycle-count.json` and enforces `RALPH_STANDARD_MAX_PIPELINE_CYCLES` (default 2). On re-run after ACTION_REQUIRED fixes, `/cross-review` increments `cycle-count.json`.
-    f. **Invoke `/pr` via the Skill tool** — do NOT run `gh pr create` directly. The `/pr` skill enforces the Japanese template, pre-checks, and plan archiving. On success, `/pr` deletes `.harness/state/standard-pipeline/active-plan.json` and `cycle-count.json`.
+    f. **Invoke `/pr` via the Skill tool** — do NOT run `gh pr create` directly. The `/pr` skill enforces the Japanese template, pre-checks, plan archiving, and task worktree/local branch cleanup. On success, `/pr` deletes `.harness/state/standard-pipeline/active-plan.json` and `cycle-count.json`.
 
 ## Scope discipline
 

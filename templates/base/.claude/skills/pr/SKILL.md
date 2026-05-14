@@ -1,7 +1,6 @@
 ---
 name: pr
 description: Create a pull request after self-review, verify, and test pass. Handles branch push, PR creation, plan archiving, and hand-off. Invoke automatically after /cross-review completes (or is skipped), when self-review, verify, and test reports all exist with passing verdicts.
-allowed-tools: Read, Grep, Glob, Bash, Write
 ---
 Create a PR to hand off completed work for human review and merge.
 
@@ -16,13 +15,14 @@ Before creating a PR, confirm ALL of the following:
 5. Branch name passes `./scripts/branch-name.sh validate "$(git branch --show-current)"`.
 6. You are NOT on main or master.
 7. `gh` CLI is available (if not, provide manual commands instead).
+8. If `.harness/state/standard-pipeline/active-plan.json` exists, it includes `worktree_path`, `branch`, and `worktree_state_id` for post-PR cleanup.
 
 If any pre-check fails, stop and explain what is missing.
 
 ## Steps
 
 1. **Resolve pinned plan identity** (standard flow):
-   Read `.harness/state/standard-pipeline/active-plan.json` to obtain the exact plan path persisted by `/work`. Use this path for archival in Step 6 instead of rescanning `docs/plans/active/`. If the file is absent (e.g. Ralph Loop or legacy session), fall back to the single file under `docs/plans/active/` or ask the user which plan to archive.
+   Read `.harness/state/standard-pipeline/active-plan.json` to obtain the exact plan path and task worktree metadata persisted by `/work`. Use this path for archival in Step 6 instead of rescanning `docs/plans/active/`. If the file is absent (e.g. Ralph Loop or legacy session), fall back to the single file under `docs/plans/active/` or ask the user which plan to archive.
 2. Check for uncommitted changes with `git status --porcelain`.
    - **If uncommitted changes exist**: Stage with `git add` (prefer specific files over `-A`) and create a conventional commit: `<type>: <description>`. If a GitHub issue is linked, append `Refs #<number>` to the commit body.
    - **If working tree is clean** (intermediate commits already exist): Skip staging and committing — proceed directly to push.
@@ -36,6 +36,12 @@ If any pre-check fails, stop and explain what is missing.
 8. **Clear standard-pipeline state** (on successful PR creation):
    `rm -f .harness/state/standard-pipeline/active-plan.json .harness/state/standard-pipeline/cycle-count.json`.
    If PR creation fails, leave the state files in place so the user can resume.
+9. **Cleanup task worktree and local branch** (standard flow only):
+   - Only run cleanup after the PR URL exists, title/ready checks pass, and the branch has been pushed to `origin`.
+   - Resolve `worktree_state_id` from the Step-1 `active-plan.json`.
+   - Run `./scripts/ralph-worktree.sh cleanup --id <worktree_state_id> --force-branch`.
+   - `--force-branch` is allowed here because the remote PR branch is already the durable hand-off. Do not delete the remote branch while the PR is open.
+   - If cleanup fails, leave the git-common-dir state file in place and report the exact recovery command (`./scripts/ralph-worktree.sh gc` or `cleanup --id <id>`) instead of hiding the failure.
 
 ## Completion gate
 
@@ -48,6 +54,7 @@ Do NOT present the PR as complete unless ALL of the following are true:
 - [ ] For large diffs: walkthrough report exists
 - [ ] Commit follows conventional commit format
 - [ ] `.harness/state/standard-pipeline/` state files removed on success
+- [ ] Standard-flow task worktree and local branch removed, or cleanup failure reported with state preserved
 
 ## CLI execution modes
 

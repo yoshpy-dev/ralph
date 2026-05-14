@@ -12,13 +12,14 @@ guidance lives in `.codex/AGENTS.override.md` and `.codex/README.md`.
   `/loop`, `/self-review`, `/verify`, `/test`, `/sync-docs`, `/cross-review`,
   `/pr`, `/audit-harness`) are auto-invoked.
 - Use `/spec` when the request is too vague for `/plan`. `/spec` refines
-  abstract ideas into detailed specifications (`docs/specs/`) through iterative
-  brainstorming (壁打ち), codebase exploration, web research, and interactive
-  clarification. It can hand off to `/plan` or create a GitHub issue.
-- Use `/plan` before risky, ambiguous, or multi-file work. It does not create a
-  branch — branch/worktree creation is deferred to the chosen flow skill.
-- `/work` creates a normal branch (`git checkout -b`) and starts interactive
-  implementation. Post-impl pipeline runs via subagents.
+  abstract ideas through iterative brainstorming (壁打ち), codebase exploration,
+  web research, and interactive clarification. Issue-only specs use a temporary
+  clean-base worktree and cleanup; saved specs either create a docs/spec PR or
+  hand off to `/plan` in the same task worktree.
+- Use `/plan` before risky, ambiguous, or multi-file work. `/plan` ensures a
+  clean-base task worktree before writing plan artifacts.
+- `/work` resumes the task worktree and starts interactive implementation.
+  Post-impl pipeline runs via subagents.
 - `/loop` uses a directory-based plan and runs `ralph-orchestrator.sh` for
   autonomous parallel-slice execution. Use `./scripts/ralph run` or
   `./scripts/ralph status` to operate.
@@ -31,8 +32,9 @@ guidance lives in `.codex/AGENTS.override.md` and `.codex/README.md`.
   `/cross-review` invoke Codex for second-opinion feedback. If unavailable, the
   step is silently skipped and the flow continues unchanged.
 - Codex findings are presented to the user for judgment — never auto-applied.
-- `/pr` creates the pull request, archives the plan, and completes the
-  hand-off. A task is "done" when the PR is created.
+- `/pr` creates the pull request, archives the plan, cleans up the task
+  worktree/local branch, and completes the hand-off. A task is "done" when the
+  PR is created and cleanup has either succeeded or reported recoverable state.
 - Subagent execution model: in `/work`, the post-impl pipeline runs via
   `Task(subagent_type=...)` calls (`reviewer`, `verifier`, `tester`,
   `doc-maintainer`). In Ralph Loop, the same pipeline runs internally via

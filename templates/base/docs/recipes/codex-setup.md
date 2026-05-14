@@ -30,9 +30,9 @@ visible. Resolve every warning before relying on hook-driven safety.
 Inside a `codex` session, kick off the standard flow with skill mentions:
 
 ```
-$spec    # optional, refines vague requests into docs/specs/<date>-<slug>.md
-$plan    # creates docs/plans/active/<date>-<slug>.md
-$work    # creates the feature branch and starts implementation
+$spec    # optional; uses an isolated spec worktree for issue/spec outputs
+$plan    # ensures a clean-base task worktree, then creates docs/plans/active/<date>-<slug>.md
+$work    # resumes the task worktree and starts implementation
 $self-review
 $verify
 $test

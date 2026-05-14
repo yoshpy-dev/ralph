@@ -23,6 +23,8 @@ Turn an abstract idea into a detailed specification.
 - Discover requirements through codebase analysis and best-practice research
 - Resolve residual ambiguity through targeted user questions
 - Produce a versioned spec that survives context loss
+- Isolate every temporary or versioned spec artifact in a clean-base task
+  worktree before writing it
 
 ## Steps
 
@@ -79,26 +81,39 @@ Turn an abstract idea into a detailed specification.
 
 8. **Output selection**: Use `AskUserQuestion` to ask:
    - Question: "The spec is ready. How should it be processed?"
-   - Options (4 choices):
-     1. **Create a GitHub issue** — file the spec as an issue
-     2. **Save the spec file** — write markdown only to `docs/specs/`
-     3. **Save the spec file and create a GitHub issue** — do both
-     4. **Save the spec file and hand off to /plan** — save, then enter the implementation planning phase
+   - Options (3 choices):
+     1. **Issue-only** — create a GitHub issue and leave no repo-tracked spec file
+     2. **Save spec file** — write `docs/specs/<date>-<slug>.md` and create a docs/spec PR
+     3. **Save spec file and hand off to /plan** — write the spec, then enter implementation planning in the same worktree
 
-9. **Execute the chosen path** (write only after user approval in step 7):
+9. **Ensure a spec task worktree before any output write**:
+   - Derive a stable `<slug>` from the approved spec title.
+   - Run `./scripts/ralph-worktree.sh ensure --id spec-<slug> --kind spec --branch docs/spec-<slug> --path .claude/worktrees/spec-<slug> --canonical-ref "<source request or issue URL>" --cleanup-policy <mode>`.
+   - The helper must create the worktree from a clean default branch, refuse branch/path collisions unless they match an existing state record, and store local state under `$(git rev-parse --git-common-dir)/ralph/worktrees/`.
+   - All output work below executes inside the returned worktree path.
 
-   **File save** (options 2, 3, 4):
-   - Ensure `docs/specs/` directory exists
-   - Write the approved spec to `docs/specs/<date>-<slug>.md`
+10. **Execute the chosen path** (write only after user approval in step 7 and after step 9 worktree ensure):
 
-   **GitHub issue creation** (options 1, 3):
-   - Save the spec file first (always, as fallback), then run: `gh issue create --title "<spec title>" --body-file docs/specs/<date>-<slug>.md`
-   - If `gh` fails (auth error, network issue):
-     a. Warn the user: "GitHub issue creation failed. The spec has been saved to docs/specs/<date>-<slug>.md."
+   **Issue-only** (option 1):
+   - Write the issue body to `.harness/state/specs/<date>-<slug>.md` inside the spec worktree.
+   - Run `gh issue create --title "<spec title>" --body-file .harness/state/specs/<date>-<slug>.md`.
+   - Treat the GitHub issue URL / issue number as the canonical reference for future `/plan` runs.
+   - On successful issue creation, run `./scripts/ralph-worktree.sh cleanup --id spec-<slug> --force-branch` so the temporary worktree and local branch do not linger.
+   - If `gh` fails, leave the worktree and local state in place so the user can retry or recover the issue body.
 
-   **Plan transition** (option 4):
-   - After saving the spec file, invoke: `Skill(skill="plan")`
-   - The spec file path should be referenced in the plan's "Related request" field
+   **Save spec file** (option 2):
+   - Ensure `docs/specs/` exists inside the spec worktree.
+   - Write the approved spec to `docs/specs/<date>-<slug>.md`.
+   - Commit with `docs: add <slug> spec`.
+   - Create a docs/spec PR using the same PR title/body standards as `/pr`, but without requiring implementation review/test artifacts.
+   - On successful PR creation and push verification, run `./scripts/ralph-worktree.sh cleanup --id spec-<slug> --force-branch`.
+
+   **Save spec file and hand off to /plan** (option 3):
+   - Ensure `docs/specs/` exists inside the spec worktree.
+   - Write the approved spec to `docs/specs/<date>-<slug>.md`.
+   - Commit with `docs: add <slug> spec`.
+   - Invoke `Skill(skill="plan")` from the same worktree.
+   - The spec file path may be recorded in the plan, but future resumes must prefer the canonical issue/spec reference over stale absolute worktree paths.
 
 ## Anti-bottleneck
 
@@ -113,8 +128,9 @@ Only use `AskUserQuestion` for genuine ambiguity that cannot be resolved from re
 ## Output
 
 - Spec file at `docs/specs/<date>-<slug>.md`
-- Optionally: GitHub issue with spec content
-- Optionally: `/plan` skill invocation for immediate implementation planning
+- Or GitHub issue with spec content and immediate spec worktree cleanup
+- Or docs/spec PR with immediate spec worktree cleanup
+- Or `/plan` skill invocation for immediate implementation planning in the same worktree
 
 ## CLI execution modes
 

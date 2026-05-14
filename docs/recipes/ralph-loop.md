@@ -8,7 +8,7 @@ Autonomous multi-iteration coding with `claude -p` and file-system memory.
 |---|---|---|
 | **トリガー** | `/work` skill | `/loop` skill → ターミナルで `ralph run` |
 | **実装** | Claude Code セッション内で対話的 | `claude -p` で自律実行 × N slice |
-| **ブランチ** | `git checkout -b` | `git worktree add` × N |
+| **ブランチ / worktree** | clean-base task worktree | task worktree + `git worktree add` × N slice worktrees |
 | **post-impl 実行モデル** | subagent Task calls (`reviewer`, `verifier`, `tester`, `doc-maintainer`) | `claude -p` × 専用プロンプト (`pipeline-self-review.md`, `pipeline-verify.md`, `pipeline-test.md`, `pipeline-outer.md`) |
 | **パイプライン順序** | `/self-review` → `/verify` → `/test` → `/sync-docs` → `/cross-review` → `/pr` | 同一 |
 | **レポート出力** | `docs/reports/` | `docs/reports/` + `.harness/state/pipeline/` (dual-write) |
@@ -17,8 +17,8 @@ Autonomous multi-iteration coding with `claude -p` and file-system memory.
 ### Decision flow
 
 ```
-/plan (フロー選択)
-  ├── 標準フロー → /work → 対話的実装 → subagent pipeline → /pr
+/plan (clean-base task worktree 作成 + フロー選択)
+  ├── 標準フロー → /work → 対話的実装 → subagent pipeline → /pr → task worktree cleanup
   └── Ralph Loop → /loop → セットアップ → ターミナルで ralph run
         → orchestrator: worktree × N → pipeline × N (parallel)
         → integration merge → unified PR
@@ -48,10 +48,10 @@ Named after Geoffrey Huntley's original `while :; do cat PROMPT.md | claude -p; 
 ## Quick start
 
 ```sh
-# 1. Create a directory-based plan with slices
+# 1. Create or resume a clean-base task worktree via /plan, then create a directory-based plan with slices
 ./scripts/new-ralph-plan.sh --type <type> <slug> [issue] [slice-count]
 
-# 2. Edit the plan: _manifest.md + slice-*.md files
+# 2. Edit the plan inside the task worktree: _manifest.md + slice-*.md files
 $EDITOR docs/plans/active/<date>-<slug>/
 
 # 3. Set up via /loop skill in Claude Code (or manually via ralph-loop-init.sh)
@@ -256,14 +256,15 @@ This means the agent reconstructs context from files each iteration, avoiding st
 ## Integration with the operating loop
 
 ```
-/plan    →  Create directory-based plan (docs/plans/active/<date>-<slug>/)
+/plan    →  Ensure clean-base task worktree and create directory-based plan (docs/plans/active/<date>-<slug>/)
             using ./scripts/new-ralph-plan.sh --type <type> <slug> [issue] [slice-count]
   ↓
-/loop    →  Set up the Ralph Loop session
+/loop    →  Set up the Ralph Loop session from the task worktree
   ↓
 Terminal: ./scripts/ralph run --plan docs/plans/active/<date>-<slug>/ --unified-pr
   ↓
 Orchestrator handles:
+  - Uses the task worktree as the control worktree
   - Creates worktree per slice (.claude/worktrees/<slug>)
   - Runs ralph-pipeline.sh in each worktree (parallel where no deps)
   - Sequential merge to typed branch from ./scripts/branch-name.sh from-plan
