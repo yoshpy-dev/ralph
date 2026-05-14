@@ -77,7 +77,11 @@ func TestTemplateBaseScriptsExist(t *testing.T) {
 		"ralph-orchestrator.sh",
 		"ralph-pipeline.sh",
 		"ralph-status-helpers.sh",
+		"secret-scan.sh",
+		"pre-commit-secret-guard.sh",
 		"commit-msg-guard.sh",
+		"prepare-commit-msg-secret-guard.sh",
+		"pre-merge-commit-secret-guard.sh",
 		"check-template.sh",
 		"check-skill-sync.sh",
 	}

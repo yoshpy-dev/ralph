@@ -79,11 +79,9 @@ command = ["./.claude/hooks/check_mojibake.sh"]
 match = { tool = "Write" }
 command = ["./.claude/hooks/check_mojibake.sh"]
 
-# Note: `scripts/commit-msg-guard.sh` is a git commit-msg hook (consumes
-# `$1` = path to .git/COMMIT_EDITMSG), NOT a Codex PostToolUse hook. Wiring
-# it as a PostToolUse on `^git commit` would invoke it with no $1 and exit 1
-# on every commit. Install it as a real `.git/hooks/commit-msg` instead, or
-# write a Codex-shaped wrapper before adding a PostToolUse entry here.
+# Note: the scripts/*secret-guard.sh files are real git hooks, NOT Codex
+# PostToolUse hooks. `ralph init` / `ralph upgrade` install them into Git's hook
+# directory and chain pre-existing local hooks when needed.
 
 # ---------------------------------------------------------------------------
 # MCP servers — uncomment and supply credentials via environment variables.

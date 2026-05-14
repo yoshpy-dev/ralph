@@ -12,30 +12,52 @@ import (
 	"github.com/yoshpy-dev/ralph/internal/scaffold"
 )
 
+const testCommitMsgGuard = "#!/usr/bin/env sh\n# commit-msg-guard\nexit 0\n"
+const testPreCommitGuard = "#!/usr/bin/env sh\n# pre-commit-secret-guard\nexit 0\n"
+const testPrepareCommitMsgGuard = "#!/usr/bin/env sh\n# prepare-commit-msg-secret-guard\nexit 0\n"
+const testPreMergeCommitGuard = "#!/usr/bin/env sh\n# pre-merge-commit-secret-guard\nexit 0\n"
+
 // setupTestEmbedFS injects a minimal mock FS into scaffold.EmbeddedFS for testing.
 // Includes the Codex parity tree (.codex/ + .agents/skills/) so tests can
 // assert all three CLI surfaces are rendered by `ralph init`.
 func setupTestEmbedFS(t *testing.T) {
 	t.Helper()
+	isolateGitConfig(t)
+	setupTestEmbedFSWithCommitGuard(t, []byte(testCommitMsgGuard))
+}
+
+func setupTestEmbedFSWithCommitGuard(t *testing.T, commitMsgGuard []byte) {
+	t.Helper()
+	isolateGitConfig(t)
 	scaffold.EmbeddedFS = fstest.MapFS{
-		"templates/base/AGENTS.md":                         {Data: []byte("# AGENTS\n")},
-		"templates/base/CLAUDE.md":                         {Data: []byte("# CLAUDE\n")},
-		"templates/base/ralph.toml":                        {Data: []byte("[pipeline]\nmodel = \"test\"\n[doctor]\nrequire_codex_cli = false\n")},
-		"templates/base/.claude/settings.json":             {Data: []byte("{}\n")},
-		"templates/base/.codex/config.toml":                {Data: []byte("model = \"gpt-5.5\"\n[features]\nhooks = true\n")},
-		"templates/base/.codex/AGENTS.override.md":         {Data: []byte("# codex overrides\n")},
-		"templates/base/.codex/README.md":                  {Data: []byte("# codex setup\n")},
-		"templates/base/.codex/agents/doc-maintainer.toml": {Data: []byte("name = \"doc-maintainer\"\n")},
-		"templates/base/.codex/agents/reviewer.toml":       {Data: []byte("name = \"reviewer\"\n")},
-		"templates/base/.codex/agents/tester.toml":         {Data: []byte("name = \"tester\"\n")},
-		"templates/base/.codex/agents/verifier.toml":       {Data: []byte("name = \"verifier\"\n")},
-		"templates/base/.agents/skills/.gitkeep":           {Data: []byte("")},
-		"templates/base/.agents/skills/spec/SKILL.md":      {Data: []byte("---\nname: spec\ndescription: refine\n---\nbody\n")},
-		"templates/packs/golang/verify.sh":                 {Data: []byte("#!/bin/sh\necho ok\n")},
-		"templates/packs/golang/README.md":                 {Data: []byte("# Go\n")},
-		"templates/packs/typescript/verify.sh":             {Data: []byte("#!/bin/sh\necho ok\n")},
-		"templates/packs/typescript/README.md":             {Data: []byte("# TS\n")},
+		"templates/base/AGENTS.md":                                  {Data: []byte("# AGENTS\n")},
+		"templates/base/CLAUDE.md":                                  {Data: []byte("# CLAUDE\n")},
+		"templates/base/ralph.toml":                                 {Data: []byte("[pipeline]\nmodel = \"test\"\n[doctor]\nrequire_codex_cli = false\n")},
+		"templates/base/.claude/settings.json":                      {Data: []byte("{}\n")},
+		"templates/base/.codex/config.toml":                         {Data: []byte("model = \"gpt-5.5\"\n[features]\nhooks = true\n")},
+		"templates/base/.codex/AGENTS.override.md":                  {Data: []byte("# codex overrides\n")},
+		"templates/base/.codex/README.md":                           {Data: []byte("# codex setup\n")},
+		"templates/base/.codex/agents/doc-maintainer.toml":          {Data: []byte("name = \"doc-maintainer\"\n")},
+		"templates/base/.codex/agents/reviewer.toml":                {Data: []byte("name = \"reviewer\"\n")},
+		"templates/base/.codex/agents/tester.toml":                  {Data: []byte("name = \"tester\"\n")},
+		"templates/base/.codex/agents/verifier.toml":                {Data: []byte("name = \"verifier\"\n")},
+		"templates/base/.agents/skills/.gitkeep":                    {Data: []byte("")},
+		"templates/base/.agents/skills/spec/SKILL.md":               {Data: []byte("---\nname: spec\ndescription: refine\n---\nbody\n")},
+		"templates/base/scripts/pre-commit-secret-guard.sh":         {Data: []byte(testPreCommitGuard)},
+		"templates/base/scripts/commit-msg-guard.sh":                {Data: commitMsgGuard},
+		"templates/base/scripts/prepare-commit-msg-secret-guard.sh": {Data: []byte(testPrepareCommitMsgGuard)},
+		"templates/base/scripts/pre-merge-commit-secret-guard.sh":   {Data: []byte(testPreMergeCommitGuard)},
+		"templates/packs/golang/verify.sh":                          {Data: []byte("#!/bin/sh\necho ok\n")},
+		"templates/packs/golang/README.md":                          {Data: []byte("# Go\n")},
+		"templates/packs/typescript/verify.sh":                      {Data: []byte("#!/bin/sh\necho ok\n")},
+		"templates/packs/typescript/README.md":                      {Data: []byte("# TS\n")},
 	}
+}
+
+func isolateGitConfig(t *testing.T) {
+	t.Helper()
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 }
 
 func TestExecuteInit_NewProject(t *testing.T) {
@@ -76,6 +98,42 @@ func TestExecuteInit_NewProject(t *testing.T) {
 	}
 	if m.Meta.Version != "0.1.0-test" {
 		t.Errorf("manifest version = %q, want 0.1.0-test", m.Meta.Version)
+	}
+}
+
+func TestExecuteInit_InstallsManagedGitHooks(t *testing.T) {
+	isolateGitConfig(t)
+	setupTestEmbedFSWithCommitGuard(t, []byte(testCommitMsgGuard))
+	Version = "0.1.0-test"
+
+	dir := t.TempDir()
+	cfg := initConfig{ProjectName: "test", Packs: nil}
+	if err := executeInit(dir, cfg, false); err != nil {
+		t.Fatalf("executeInit: %v", err)
+	}
+
+	expected := map[string]string{
+		"pre-commit":         testPreCommitGuard,
+		"commit-msg":         testCommitMsgGuard,
+		"prepare-commit-msg": testPrepareCommitMsgGuard,
+		"pre-merge-commit":   testPreMergeCommitGuard,
+	}
+	for name, want := range expected {
+		hookPath := filepath.Join(dir, ".git", "hooks", name)
+		got, err := os.ReadFile(hookPath)
+		if err != nil {
+			t.Fatalf("%s hook not installed: %v", name, err)
+		}
+		if string(got) != want {
+			t.Errorf("%s hook content = %q, want %q", name, got, want)
+		}
+		info, err := os.Stat(hookPath)
+		if err != nil {
+			t.Fatalf("stat %s hook: %v", name, err)
+		}
+		if info.Mode().Perm()&0100 == 0 {
+			t.Errorf("%s hook is not executable: mode %v", name, info.Mode().Perm())
+		}
 	}
 }
 
@@ -248,6 +306,135 @@ func TestRunUpgrade_AutoUpdate(t *testing.T) {
 	}
 	if m.Meta.Version != "0.2.0-test" {
 		t.Errorf("manifest version = %q, want 0.2.0-test", m.Meta.Version)
+	}
+}
+
+func TestRunUpgrade_UpdatesManagedCommitMsgHook(t *testing.T) {
+	isolateGitConfig(t)
+	v1 := "#!/usr/bin/env sh\n# commit-msg-guard\nexit 0\n"
+	v2 := "#!/usr/bin/env sh\n# commit-msg-guard\nprintf '%s\\n' upgraded\n"
+	setupTestEmbedFSWithCommitGuard(t, []byte(v1))
+	Version = "1.0.0-test"
+
+	dir := t.TempDir()
+	cfg := initConfig{ProjectName: "test", Packs: nil}
+	if err := executeInit(dir, cfg, false); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	setupTestEmbedFSWithCommitGuard(t, []byte(v2))
+	Version = "2.0.0-test"
+	if err := runUpgrade(dir, true); err != nil {
+		t.Fatalf("upgrade: %v", err)
+	}
+
+	hookPath := filepath.Join(dir, ".git", "hooks", "commit-msg")
+	got, err := os.ReadFile(hookPath)
+	if err != nil {
+		t.Fatalf("read commit-msg hook: %v", err)
+	}
+	if string(got) != v2 {
+		t.Errorf("commit-msg hook was not updated from template script; got %q want %q", got, v2)
+	}
+}
+
+func TestRunUpgrade_ChainsUserCommitMsgHook(t *testing.T) {
+	isolateGitConfig(t)
+	setupTestEmbedFSWithCommitGuard(t, []byte(testCommitMsgGuard))
+	Version = "1.0.0-test"
+
+	dir := t.TempDir()
+	cfg := initConfig{ProjectName: "test", Packs: nil}
+	if err := executeInit(dir, cfg, false); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	hookPath := filepath.Join(dir, ".git", "hooks", "commit-msg")
+	customHook := "#!/usr/bin/env sh\n# custom hook\nexit 0\n"
+	if err := os.WriteFile(hookPath, []byte(customHook), 0755); err != nil {
+		t.Fatalf("write custom hook: %v", err)
+	}
+
+	updatedGuard := "#!/usr/bin/env sh\n# commit-msg-guard\nprintf '%s\\n' upgraded\n"
+	setupTestEmbedFSWithCommitGuard(t, []byte(updatedGuard))
+	Version = "2.0.0-test"
+	if err := runUpgrade(dir, true); err != nil {
+		t.Fatalf("upgrade: %v", err)
+	}
+
+	got, err := os.ReadFile(hookPath)
+	if err != nil {
+		t.Fatalf("read commit-msg hook: %v", err)
+	}
+	if !strings.Contains(string(got), "ralph git hook wrapper") {
+		t.Errorf("commit-msg hook was not replaced with ralph wrapper; got %q", got)
+	}
+
+	originalPath := filepath.Join(dir, ".git", "hooks", "commit-msg.ralph-original")
+	original, err := os.ReadFile(originalPath)
+	if err != nil {
+		t.Fatalf("read preserved original hook: %v", err)
+	}
+	if string(original) != customHook {
+		t.Errorf("original commit-msg hook was not preserved; got %q want %q", original, customHook)
+	}
+
+	guardPath := filepath.Join(dir, ".git", "hooks", "commit-msg.ralph-guard")
+	guard, err := os.ReadFile(guardPath)
+	if err != nil {
+		t.Fatalf("read ralph guard hook: %v", err)
+	}
+	if string(guard) != updatedGuard {
+		t.Errorf("ralph guard hook was not updated; got %q want %q", guard, updatedGuard)
+	}
+}
+
+func TestRunUpgrade_ChainsUserPreCommitHook(t *testing.T) {
+	isolateGitConfig(t)
+	setupTestEmbedFSWithCommitGuard(t, []byte(testCommitMsgGuard))
+	Version = "1.0.0-test"
+
+	dir := t.TempDir()
+	cfg := initConfig{ProjectName: "test", Packs: nil}
+	if err := executeInit(dir, cfg, false); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	hookPath := filepath.Join(dir, ".git", "hooks", "pre-commit")
+	customHook := "#!/usr/bin/env sh\n# custom pre-commit\nexit 0\n"
+	if err := os.WriteFile(hookPath, []byte(customHook), 0755); err != nil {
+		t.Fatalf("write custom hook: %v", err)
+	}
+
+	Version = "2.0.0-test"
+	if err := runUpgrade(dir, true); err != nil {
+		t.Fatalf("upgrade: %v", err)
+	}
+
+	got, err := os.ReadFile(hookPath)
+	if err != nil {
+		t.Fatalf("read pre-commit hook: %v", err)
+	}
+	if !strings.Contains(string(got), "ralph git hook wrapper") {
+		t.Errorf("pre-commit hook was not replaced with ralph wrapper; got %q", got)
+	}
+
+	originalPath := filepath.Join(dir, ".git", "hooks", "pre-commit.ralph-original")
+	original, err := os.ReadFile(originalPath)
+	if err != nil {
+		t.Fatalf("read preserved original hook: %v", err)
+	}
+	if string(original) != customHook {
+		t.Errorf("original pre-commit hook was not preserved; got %q want %q", original, customHook)
+	}
+
+	guardPath := filepath.Join(dir, ".git", "hooks", "pre-commit.ralph-guard")
+	guard, err := os.ReadFile(guardPath)
+	if err != nil {
+		t.Fatalf("read ralph guard hook: %v", err)
+	}
+	if string(guard) != testPreCommitGuard {
+		t.Errorf("ralph pre-commit guard hook = %q, want %q", guard, testPreCommitGuard)
 	}
 }
 
@@ -974,6 +1161,18 @@ func TestRunDoctor_Passes(t *testing.T) {
 	if err := executeInit(dir, cfg, false); err != nil {
 		t.Fatalf("init: %v", err)
 	}
+
+	binDir := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, bin := range []string{"claude", "codex", "go"} {
+		path := filepath.Join(binDir, bin)
+		if err := os.WriteFile(path, []byte("#!/bin/sh\necho '"+bin+" test-version'\n"), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", binDir)
 
 	// Doctor should not error fatally (it may warn about missing claude CLI).
 	// We just verify it doesn't panic.

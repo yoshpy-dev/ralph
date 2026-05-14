@@ -97,8 +97,11 @@ single edit to `check_mojibake.sh` covers both agents.
 To extend the hook surface, add new `[[hooks.<event>]]` entries that point at
 real scripts, keep commands relative to the repo, and add the matching
 Claude-side hook in `.claude/settings.json` when behaviour parity matters.
-`scripts/commit-msg-guard.sh` is intentionally
-**not** wired as a Codex `PostToolUse` hook: it is a git `commit-msg` hook
-(consumes `$1` = path to `COMMIT_EDITMSG`) and would exit 1 on every commit if
-attached to `^git commit`. Install it as `.git/hooks/commit-msg` instead, or
-write a Codex-shaped wrapper before adding a `PostToolUse` entry.
+The secret-guard scripts are intentionally **not** wired as Codex
+`PostToolUse` hooks. They are real git hooks:
+`scripts/pre-commit-secret-guard.sh`, `scripts/commit-msg-guard.sh`, and
+`scripts/prepare-commit-msg-secret-guard.sh`, plus
+`scripts/pre-merge-commit-secret-guard.sh` for automatic merge commits.
+`ralph init` and `ralph upgrade` install them into Git's hook directory. If a
+local hook already exists, Ralph keeps it as `<hook>.ralph-original` and runs it
+after the guard.

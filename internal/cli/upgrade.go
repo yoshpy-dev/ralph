@@ -293,6 +293,8 @@ func runUpgradeIO(targetDir string, force bool, in io.Reader, out, errOut io.Wri
 		return fmt.Errorf("writing manifest: %w", err)
 	}
 
+	installManagedGitHooks(absDir, out, errOut)
+
 	writef(out, "\n  Updated: %d files\n", updated)
 	writef(out, "  Skipped: %d files (user-modified)\n", skipped)
 	if notified > 0 {
