@@ -245,6 +245,9 @@ run_hook_tests() {
   if [ -x tests/test-ralph-worktree.sh ]; then
     run "tests/test-ralph-worktree.sh" tests/test-ralph-worktree.sh
   fi
+  if [ -x tests/test-ralph-orchestrator-branch-names.sh ]; then
+    run "tests/test-ralph-orchestrator-branch-names.sh" tests/test-ralph-orchestrator-branch-names.sh
+  fi
   if [ -x tests/test-ralph-run-options.sh ]; then
     run "tests/test-ralph-run-options.sh" tests/test-ralph-run-options.sh
   fi
