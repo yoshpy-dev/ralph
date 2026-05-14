@@ -1,7 +1,7 @@
 # Test report: add-terraform-language-pack
 
 - Date: 2026-05-13
-- Plan: `docs/plans/active/2026-05-13-add-terraform-language-pack.md` (issue #52)
+- Plan: `docs/plans/archive/2026-05-13-add-terraform-language-pack.md` (issue #52)
 - Tester: tester subagent (Claude Code)
 - Scope: behavioral tests for the new Terraform/OpenTofu language pack on branch `feat/52/add-terraform-language-pack` (5 implementation commits vs `main`). Covers `scripts/detect-languages.sh` terraform branch, `packs/languages/terraform/verify.sh` mode dispatch + fail-open guard, `internal/scaffold.PackFS("terraform")` resolution via `ralph pack list`, and `.claude/rules/terraform.md` frontmatter contract.
 - Evidence: `docs/evidence/test-2026-05-13-add-terraform-language-pack.log`
@@ -48,7 +48,7 @@
 | Empty dir → no `terraform` emit | `test-detect-languages-terraform.sh` Case 5 | Negative-space sanity. |
 | Mixed Go + Terraform repo emits both packs | `test-detect-languages-terraform.sh` Case 6 | Confirms terraform branch does not short-circuit other detectors. |
 | Multiple markers → `terraform` emitted exactly once | `test-detect-languages-terraform.sh` Case 7 | Validates the existing `seen` dedup loop covers terraform. |
-| `tofu` preferred over `terraform` when both on PATH (OpenTofu support) | `test-terraform-pack-verify.sh` Case D | Validates design decision #1 ([plan §Design decisions](../plans/active/2026-05-13-add-terraform-language-pack.md)) at runtime. |
+| `tofu` preferred over `terraform` when both on PATH (OpenTofu support) | `test-terraform-pack-verify.sh` Case D | Validates design decision #1 ([plan §Design decisions](../plans/archive/2026-05-13-add-terraform-language-pack.md)) at runtime. |
 | `tflint` / `tfsec` / `trivy config` absent → "Skipping …" + still exit 0 | `test-terraform-pack-verify.sh` Case C | Optional-linter contract: missing optional tools must not fail the gate. |
 | Unknown `HARNESS_VERIFY_MODE` → exit 2 with explicit error naming the bad mode | `test-terraform-pack-verify.sh` Case H | Documents the explicit-error contract instead of silent fallback. |
 | `.terraform/` present → `validate` IS invoked (inverse of Case C) | `test-terraform-pack-verify.sh` Case I | Pins the positive branch so a future refactor cannot regress it to "always skip". |
