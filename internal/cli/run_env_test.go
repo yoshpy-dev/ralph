@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -57,4 +59,109 @@ func containsKV(env []string, key, value string) bool {
 		}
 	}
 	return false
+}
+
+func TestDetectLatestPlanDir_SelectsNewestManifestDirectory(t *testing.T) {
+	dir := t.TempDir()
+	activeDir := filepath.Join(dir, "docs", "plans", "active")
+	for _, plan := range []string{
+		"2026-01-01-old-plan",
+		"2026-05-14-new-plan",
+	} {
+		manifestDir := filepath.Join(activeDir, plan)
+		if err := os.MkdirAll(manifestDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(manifestDir, "_manifest.md"), []byte("# plan\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(activeDir, "2026-12-31-no-manifest"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := detectLatestPlanDir(activeDir)
+	if err != nil {
+		t.Fatalf("detectLatestPlanDir: %v", err)
+	}
+	want := filepath.Join(activeDir, "2026-05-14-new-plan")
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestDetectLatestPlanDir_NoManifestDirectoryFails(t *testing.T) {
+	dir := t.TempDir()
+	activeDir := filepath.Join(dir, "docs", "plans", "active")
+	if err := os.MkdirAll(filepath.Join(activeDir, "2026-05-14-no-manifest"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := detectLatestPlanDir(activeDir)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "no directory-based plan found") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRunPipelineAutoDetectsPlan(t *testing.T) {
+	dir := t.TempDir()
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(oldWD); err != nil {
+			t.Fatalf("restore cwd: %v", err)
+		}
+	})
+
+	if err := os.Mkdir("scripts", 0755); err != nil {
+		t.Fatal(err)
+	}
+	stub := "#!/usr/bin/env sh\nfor arg in \"$@\"; do printf '%s\\n' \"$arg\"; done > args.txt\n"
+	if err := os.WriteFile(filepath.Join("scripts", "ralph-orchestrator.sh"), []byte(stub), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, plan := range []string{
+		"2026-01-01-old-plan",
+		"2026-05-14-new-plan",
+	} {
+		manifestDir := filepath.Join(activePlansDir, plan)
+		if err := os.MkdirAll(manifestDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(manifestDir, "_manifest.md"), []byte("# plan\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := runPipeline("", 0, 0, false, false, true, false); err != nil {
+		t.Fatalf("runPipeline: %v", err)
+	}
+
+	data, err := os.ReadFile("args.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Fields(string(data))
+	wantPlan := filepath.Join(activePlansDir, "2026-05-14-new-plan")
+	for _, want := range []string{"--plan", wantPlan, "--dry-run"} {
+		found := false
+		for _, arg := range got {
+			if arg == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("forwarded args %v missing %q", got, want)
+		}
+	}
 }
