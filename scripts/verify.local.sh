@@ -245,6 +245,9 @@ run_hook_tests() {
   if [ -x tests/test-ralph-worktree.sh ]; then
     run "tests/test-ralph-worktree.sh" tests/test-ralph-worktree.sh
   fi
+  if [ -x tests/test-ralph-run-options.sh ]; then
+    run "tests/test-ralph-run-options.sh" tests/test-ralph-run-options.sh
+  fi
   if [ -x tests/test-ensure-pr-ready.sh ]; then
     run "tests/test-ensure-pr-ready.sh" tests/test-ensure-pr-ready.sh
   fi

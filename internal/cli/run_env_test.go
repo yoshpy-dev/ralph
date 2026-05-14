@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -57,4 +59,51 @@ func containsKV(env []string, key, value string) bool {
 		}
 	}
 	return false
+}
+
+func TestRunPipeline_ForwardsRunModeFlags(t *testing.T) {
+	dir := t.TempDir()
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(oldWD); err != nil {
+			t.Fatalf("restore cwd: %v", err)
+		}
+	})
+
+	if err := os.Mkdir("scripts", 0755); err != nil {
+		t.Fatal(err)
+	}
+	argsFile := filepath.Join(dir, "args.txt")
+	stub := "#!/usr/bin/env sh\nprintf '%s\\n' \"$@\" > " + argsFile + "\n"
+	if err := os.WriteFile(filepath.Join("scripts", "ralph-orchestrator.sh"), []byte(stub), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runPipeline("docs/plans/active/example", 0, 0, true, true, true, true); err != nil {
+		t.Fatalf("runPipeline: %v", err)
+	}
+
+	data, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Fields(string(data))
+	for _, want := range []string{"--plan", "docs/plans/active/example", "--preflight", "--resume", "--dry-run", "--unified-pr"} {
+		found := false
+		for _, arg := range got {
+			if arg == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("forwarded args %v missing %q", got, want)
+		}
+	}
 }
