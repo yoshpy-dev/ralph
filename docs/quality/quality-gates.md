@@ -15,7 +15,7 @@ Use these in CI or later-stage review:
 - wider test suites
 - integration and e2e checks (when implemented)
 - architecture or structure checks
-- dependency and security scans (when implemented)
+- secret scanning, dependency checks, and broader security scans (when implemented)
 - deployment validation (when implemented)
 
 ## Suggested gate policy
@@ -43,6 +43,7 @@ Use these in CI or later-stage review:
 
 ### Must pass in CI before merge
 
+- `./scripts/secret-scan.sh --range <merge-base>..HEAD` — pull request secret leak scan (`.github/workflows/verify.yml`)
 - `RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh` (`.github/workflows/verify.yml`)
 - `./scripts/check-template.sh` (`.github/workflows/check-template.yml`)
 - `./scripts/check-sync.sh` — templates/root parity (`.github/workflows/check-template.yml`)
@@ -53,7 +54,7 @@ Use these in CI or later-stage review:
 
 The following are aspirational gates listed for future adoption:
 - broader test coverage (unit, integration, e2e)
-- dependency and security scans
+- dependency vulnerability scans and broader security scans beyond secret leak detection
 - org or repo-specific policy checks
 
 ## Pipeline mode gates (`ralph-pipeline.sh`)
