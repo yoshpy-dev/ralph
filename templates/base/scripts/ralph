@@ -302,7 +302,7 @@ cmd_retry() {
   # Launch pipeline in background
   (
     cd "$_wt_path"
-    "${SCRIPT_DIR}/ralph-pipeline.sh" --resume 2>&1
+    "${SCRIPT_DIR}/ralph-pipeline.sh" --resume --skip-pr 2>&1
   ) &
   _pid=$!
 
