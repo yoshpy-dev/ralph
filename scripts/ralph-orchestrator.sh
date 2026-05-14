@@ -315,6 +315,11 @@ create_integration_branch() {
   log "Created integration branch: ${INTEGRATION_BRANCH} (from ${_base})"
 }
 
+slice_branch_name() {
+  _slug="$1"
+  printf '%s-%s\n' "$INTEGRATION_BRANCH" "$_slug"
+}
+
 # ═══════════════════════════════════════════════════════════════════
 # Worktree management
 # ═══════════════════════════════════════════════════════════════════
@@ -324,7 +329,7 @@ create_worktree() {
   # Always use integration branch as base
   _base_branch="${INTEGRATION_BRANCH:-$(git rev-parse --abbrev-ref HEAD)}"
   _wt_path="${WORKTREE_BASE}/${_slug}"
-  _wt_branch="${INTEGRATION_BRANCH}-${_slug}"
+  _wt_branch="$(slice_branch_name "$_slug")"
   if ! "${SCRIPT_DIR}/branch-name.sh" validate "$_wt_branch" >/dev/null 2>&1; then
     log_error "Invalid generated slice branch name: ${_wt_branch}"
     return 1
@@ -489,7 +494,7 @@ integration_merge() {
       continue
     fi
 
-    _slice_branch="slice/${PLAN_SLUG}/${s}"
+    _slice_branch="$(slice_branch_name "$s")"
 
     log "Merging ${_slice_branch} into ${_int_branch}..."
     # Intentionally unquoted heredoc: branch names are safe and need expansion
@@ -756,7 +761,7 @@ ORCH_JSON
     log "[DRY RUN] Integration branch: ${INTEGRATION_BRANCH}"
     log "[DRY RUN] Unified PR: $([ "$UNIFIED_PR" -eq 1 ] && echo "yes" || echo "no (merge only)")"
     echo "$slices_data" | while IFS='|' read -r s o d f p; do
-      log "[DRY RUN] Slice ${s}: worktree at ${WORKTREE_BASE}/${s}, branch slice/${PLAN_SLUG}/${s}, plan: ${p:-none}"
+      log "[DRY RUN] Slice ${s}: worktree at ${WORKTREE_BASE}/${s}, branch $(slice_branch_name "$s"), plan: ${p:-none}"
     done
     return 0
   fi
