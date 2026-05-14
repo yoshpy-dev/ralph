@@ -408,6 +408,7 @@ run_slice() {
     # shellcheck disable=SC2086  # optional single flag
     "${SCRIPT_DIR}/ralph-pipeline.sh" \
       $_resume_arg \
+      --skip-pr \
       --max-iterations "$MAX_ITERATIONS" \
       2>&1
   ) > "$_log_file" 2>&1 &
