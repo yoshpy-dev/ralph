@@ -67,10 +67,10 @@ Create your first plan and run the loop inside Claude Code:
 
 ```sh
 # Standard flow
-./scripts/new-feature-plan.sh login-form
+./scripts/new-feature-plan.sh --type feat login-form
 
 # Ralph Loop (directory-based plan with parallel slices)
-./scripts/new-ralph-plan.sh login-form N/A 3
+./scripts/new-ralph-plan.sh --type feat login-form N/A 3
 ```
 
 In Claude Code, follow the loop with slash commands:
@@ -158,7 +158,7 @@ The philosophy: **a map, not a manual**. Keep `AGENTS.md` small, push detail int
 │   ├── quality/              # definition of done, quality gates
 │   └── tech-debt/            # tracked debt
 ├── packs/languages/          # opt-in language specializations
-├── scripts/                  # run-verify.sh, new-feature-plan.sh, etc.
+├── scripts/                  # branch-name.sh, ensure-pr-ready.sh, run-verify.sh, etc.
 ├── ralph.toml                # CLI config
 └── .github/workflows/        # CI
 ```
@@ -199,10 +199,10 @@ See `.claude/rules/post-implementation-pipeline.md` for the canonical pipeline o
 
 ## Ralph Loop (autonomous parallel execution)
 
-For large tasks that can be split into independent slices, Ralph Loop runs parallel pipelines across multiple Git worktrees. Each slice handles its own lifecycle autonomously (implement → self-review → verify → test → sync-docs → cross-review). Completed slices are sequentially merged into an integration branch, and a unified PR is created.
+For large tasks that can be split into independent slices, Ralph Loop runs parallel pipelines across multiple Git worktrees. Each slice handles its own lifecycle autonomously (implement → self-review → verify → test → sync-docs → cross-review). Completed slices are sequentially merged into a typed integration branch generated from the plan metadata, and a unified PR is created.
 
 ```sh
-./scripts/new-ralph-plan.sh my-feature N/A 3
+./scripts/new-ralph-plan.sh --type feat my-feature N/A 3
 ./scripts/ralph run --plan docs/plans/active/2026-01-01-my-feature/ --unified-pr
 ./scripts/ralph status                  # launches TUI if available
 ./scripts/ralph status --no-tui         # table output

@@ -66,6 +66,8 @@ func TestTemplateBaseScriptsExist(t *testing.T) {
 		"detect-changed-languages.sh",
 		"detect-languages.sh",
 		"archive-plan.sh",
+		"branch-name.sh",
+		"ensure-pr-ready.sh",
 		"new-feature-plan.sh",
 		"new-ralph-plan.sh",
 		"codex-check.sh",

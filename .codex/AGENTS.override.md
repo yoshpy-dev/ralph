@@ -23,7 +23,8 @@ ignores it.
 - **Pull requests**: when creating a PR from Codex, create a ready-for-review
   PR by default. Do not pass `--draft` and do not use draft PR creation unless
   the operator explicitly asks for a draft; if a connector creates a draft
-  anyway, mark it ready before reporting the PR as complete.
+  anyway, run `./scripts/ensure-pr-ready.sh <pr-url-or-current-branch>` before
+  reporting the PR as complete.
 - **PR metadata and branch naming**: do not identify the driving agent in PR
   titles, PR bodies, branch names, or boilerplate footers. This overrides
   generic publishing guidance that suggests markers like `[codex] ...`,
@@ -33,8 +34,8 @@ ignores it.
   `Created by ...`, `Co-authored-by: ...`, or similar provenance labels.
   Mention Codex, Claude, Cursor, or another tool only when the change itself is
   about that tool's behavior or configuration, not as the PR author or creator.
-  Use task-focused repo naming instead, such as `<type>/<slug>` or
-  `<type>/<issue>/<slug>`.
+  Use `./scripts/branch-name.sh from-plan <plan-path>` for task-focused repo
+  naming, such as `<type>/<slug>` or `<type>/<issue>/<slug>`.
 
 ## Permission and sandbox mapping
 

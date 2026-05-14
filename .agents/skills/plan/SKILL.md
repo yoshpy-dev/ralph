@@ -25,9 +25,9 @@ Create or update a plan in `docs/plans/active/`.
      2. **Ralph Loop (/loop)** — directory-based plan with autonomous parallel slice execution (large, divisible tasks)
    - If the plan mentions large-scale refactoring, migration, test-coverage campaigns, or multi-file autonomous work, recommend Ralph Loop.
    - After the user chooses, proceed to step 5.
-5. Choose one active plan file based on the flow selected in step 4:
-   - **Standard flow**: Create with `./scripts/new-feature-plan.sh <slug> [issue-number]` or from [template.md](template.md).
-   - **Ralph Loop**: Create with `./scripts/new-ralph-plan.sh <slug> [issue-number] [slice-count]` to generate a directory-based plan structure under `docs/plans/active/<date>-<slug>/`.
+5. Choose a branch type (`feat`, `fix`, `docs`, `chore`, `refactor`, `test`, `ci`, `build`, `perf`, `release`, or `security`) from the request and create one active plan file based on the flow selected in step 4:
+   - **Standard flow**: Create with `./scripts/new-feature-plan.sh --type <type> <slug> [issue-number]` or from [template.md](template.md).
+   - **Ralph Loop**: Create with `./scripts/new-ralph-plan.sh --type <type> <slug> [issue-number] [slice-count]` to generate a directory-based plan structure under `docs/plans/active/<date>-<slug>/`.
 6. Fill in:
    - objective
    - scope and non-goals

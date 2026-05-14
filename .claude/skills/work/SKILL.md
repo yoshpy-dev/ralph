@@ -13,12 +13,13 @@ Work from the active plan, not from memory alone.
    - If multiple candidate files exist, ask via AskUserQuestion which plan this `/work` run targets, and use the selected path.
    - If none exist, stop and ask the user to run `/plan` first.
    - Downstream steps in this skill — and downstream skills (`/cross-review`, `/pr`) — MUST use this resolved path instead of rescanning `docs/plans/active/`.
-2. **Create feature branch** (if not already on one), based on the plan resolved in Step 1:
+2. **Create typed feature branch** (if not already on one), based on the plan resolved in Step 1:
    a. Read the resolved plan to extract metadata (type, issue number, slug).
-   b. Determine branch name: `<type>/<issue>/<slug>` (with issue) or `<type>/<slug>` (without issue).
-   c. If already on a feature branch (not main/master), skip creation.
-   d. Otherwise, run `git checkout -b <branch-name>`.
-   e. Update the resolved plan file: replace `Branch: TBD` (or any TBD variant) with the actual branch name.
+   b. Determine branch name by running `./scripts/branch-name.sh from-plan <resolved-plan-path>`.
+   c. Branch names must validate with `./scripts/branch-name.sh validate <branch-name>`. Allowed user-facing branch shapes are `<type>/<issue>/<slug>` (with issue) or `<type>/<slug>` (without issue), where `<type>` is one of `feat`, `fix`, `docs`, `chore`, `refactor`, `test`, `ci`, `build`, `perf`, `release`, or `security`.
+   d. If already on a feature branch (not main/master), validate the current branch with `./scripts/branch-name.sh validate "$(git branch --show-current)"`; if it fails, stop and create/switch to the generated typed branch before continuing.
+   e. Otherwise, run `git checkout -b <branch-name>`.
+   f. Update the resolved plan file: replace `Branch: TBD` (or any TBD variant) with the actual branch name.
 3. **Pin the plan identity and initialize the pipeline cycle counter** (enforces the 2-cycle cap):
    a. Create `.harness/state/standard-pipeline/` if missing (`mkdir -p`). This directory is already covered by the existing `.harness/state/` gitignore.
    b. Write the Step-1 resolved absolute path to `.harness/state/standard-pipeline/active-plan.json` as `{"plan_path": "<absolute-path>", "created_at": "<UTC ISO8601>"}`. If the file already exists with a different `plan_path`, warn the user and ask whether to overwrite (resume) or abort.

@@ -39,12 +39,12 @@ verification work during `/self-review` is not valid.
 - [ ] `_manifest.md` has shared-file locklist and dependency graph
 - [ ] Each `slice-*.md` has self-contained AC, affected files, and verify/test plan
 - [ ] All slice pipelines completed (`ralph status` shows all slices `complete`)
-- [ ] Sequential merge to integration branch passed without conflicts
+- [ ] Sequential merge to typed integration branch passed without conflicts
 - [ ] Integration pipeline passed on merged branch (`--skip-pr --fix-all`)
-- [ ] Unified PR created from `integration/<slug>` to base branch
+- [ ] Unified PR created from `<type>/<slug>` or `<type>/<issue>/<slug>` to base branch
 - [ ] Plan directory archived from `docs/plans/active/` to `docs/plans/archive/`
 
-Ralph Loop handles the full lifecycle autonomously per slice (implement → self-review → verify → test → sync-docs → cross-review), then merges slices into the integration branch, runs a full-scope integration pipeline (`--skip-pr --fix-all`) to catch cross-module issues, and creates a unified PR.
+Ralph Loop handles the full lifecycle autonomously per slice (implement → self-review → verify → test → sync-docs → cross-review), then merges slices into the typed integration branch generated from plan metadata, runs a full-scope integration pipeline (`--skip-pr --fix-all`) to catch cross-module issues, and creates a unified PR.
 
 **Driver selection (Phase 2 / issue #44):** Loop runs under whichever driver is
 selected by `RALPH_LOOP_DRIVER` (env > `[loop] driver` in `ralph.toml` >

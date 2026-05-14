@@ -146,7 +146,7 @@ run_static_checks() {
     # Build the argument list via positional parameters so shellcheck
     # does not flag unquoted expansion.
     set --
-    for f in .claude/hooks/*.sh templates/base/.claude/hooks/*.sh scripts/verify.local.sh tests/test-check-mojibake.sh tests/test-verify-mode-split.sh tests/test-run-verify-scope.sh tests/test-detect-changed-languages.sh tests/test-self-review-scope.sh tests/test-agent-phase-boundaries.sh; do
+    for f in .claude/hooks/*.sh templates/base/.claude/hooks/*.sh scripts/branch-name.sh scripts/ensure-pr-ready.sh scripts/verify.local.sh tests/test-check-mojibake.sh tests/test-verify-mode-split.sh tests/test-run-verify-scope.sh tests/test-detect-changed-languages.sh tests/test-self-review-scope.sh tests/test-agent-phase-boundaries.sh tests/test-branch-name.sh tests/test-ensure-pr-ready.sh; do
       [ -f "$f" ] || continue
       set -- "$@" "$f"
     done
@@ -235,6 +235,12 @@ run_hook_tests() {
   fi
   if [ -x tests/test-agent-phase-boundaries.sh ]; then
     run "tests/test-agent-phase-boundaries.sh" tests/test-agent-phase-boundaries.sh
+  fi
+  if [ -x tests/test-branch-name.sh ]; then
+    run "tests/test-branch-name.sh" tests/test-branch-name.sh
+  fi
+  if [ -x tests/test-ensure-pr-ready.sh ]; then
+    run "tests/test-ensure-pr-ready.sh" tests/test-ensure-pr-ready.sh
   fi
 }
 

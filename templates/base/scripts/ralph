@@ -114,7 +114,7 @@ cmd_run() {
       if [ -f "${d}/_manifest.md" ]; then echo "$d"; fi
     done | sort -r | head -1 || true)"
     if [ -z "$_plan" ]; then
-      echo "Error: no directory-based plan found. Create one with './scripts/new-ralph-plan.sh <slug>' or specify --plan <directory>"
+      echo "Error: no directory-based plan found. Create one with './scripts/new-ralph-plan.sh --type <type> <slug>' or specify --plan <directory>"
       exit 1
     fi
     log "Auto-detected plan: ${_plan}"
@@ -122,7 +122,7 @@ cmd_run() {
 
   if [ ! -d "$_plan" ]; then
     echo "Error: Ralph Loop requires a directory-based plan: ${_plan}"
-    echo "Create one with: ./scripts/new-ralph-plan.sh <slug> [issue] [slice-count]"
+    echo "Create one with: ./scripts/new-ralph-plan.sh --type <type> <slug> [issue] [slice-count]"
     exit 1
   fi
 

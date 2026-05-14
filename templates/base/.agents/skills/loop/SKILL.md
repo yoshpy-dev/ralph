@@ -37,14 +37,15 @@ Use **AskUserQuestion** to confirm the objective and link the plan directory.
 
 - Pre-fill the question with an objective inferred from conversation context.
 - If `docs/plans/active/` contains directory-based plans (with `_manifest.md`), list them as options.
-- Ralph Loop requires a directory-based plan. If none exists, instruct the user to create one with `./scripts/new-ralph-plan.sh <slug> [issue] [slice-count]`.
+- Ralph Loop requires a directory-based plan. If none exists, instruct the user to create one with `./scripts/new-ralph-plan.sh --type <type> <slug> [issue] [slice-count]`.
 
 ### Step 3.5 — Git worktree creation
 
 Create an isolated worktree for the loop session:
 
 1. Read the active plan to extract metadata (type, issue number, slug).
-2. Determine branch name: `<type>/<issue>/<slug>` (with issue) or `<type>/<slug>` (without issue).
+2. Determine branch name by running `./scripts/branch-name.sh from-plan <manifest-path>`.
+   Branch names must validate with `./scripts/branch-name.sh validate <branch-name>`.
 3. Run `git worktree add .claude/worktrees/<slug> -b <branch-name>` to create the worktree.
 4. Update the plan file: replace `Branch: TBD` (or any TBD variant) with the actual branch name.
 5. All subsequent steps (init script, PROMPT.md generation, etc.) execute inside the worktree directory.

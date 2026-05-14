@@ -935,6 +935,12 @@ DOCS
     ckpt_update '.status = "gh_unavailable"'
     return 2  # distinct from 1 (ACTION_REQUIRED) — terminal config error
   fi
+  _head_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+  if ! ./scripts/branch-name.sh validate "$_head_branch" >/dev/null 2>&1; then
+    log_error "Invalid PR branch name: ${_head_branch}. Expected <type>/<slug> or <type>/<issue>/<slug>."
+    ckpt_update '.status = "invalid_branch_name"'
+    return 2
+  fi
   _pr_log="${PIPELINE_DIR}/outer-${_cycle}-pr.log"
   _pr_prompt="${PIPELINE_DIR}/.pr-prompt.md"
 
@@ -943,10 +949,12 @@ Create a pull request for the current branch.
 Follow the repository's PR workflow:
 1. Check for uncommitted changes and commit them
 2. Push the branch
-3. Create the PR with Japanese title and body
+3. Create a ready-for-review PR with Japanese title and body
 4. Archive the plan
 
-Use gh pr create with the standard template.
+Use gh pr create with the standard template. Do not pass --draft unless the
+operator explicitly requested a draft. After creation, run:
+  ./scripts/ensure-pr-ready.sh <pr-url-or-current-branch>
 
 After creating the PR, write the PR URL to .harness/state/pipeline/.pr-url:
   echo "https://github.com/..." > .harness/state/pipeline/.pr-url
@@ -958,7 +966,6 @@ PR_PROMPT
   _pr_url=""
 
   # Layer 1: external verification via gh CLI
-  _head_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
   if [ -n "$_head_branch" ] && command -v gh >/dev/null 2>&1; then
     _pr_url="$(gh pr list --head "$_head_branch" --state open --json url --jq '.[0].url' 2>/dev/null || true)"
     if [ -n "$_pr_url" ]; then
@@ -983,6 +990,11 @@ PR_PROMPT
   fi
 
   if [ -n "$_pr_url" ]; then
+    if ! ./scripts/ensure-pr-ready.sh "$_pr_url" >> "$_pr_log" 2>&1; then
+      log_error "PR exists but could not be verified as ready-for-review: ${_pr_url}"
+      ckpt_update --arg url "$_pr_url" '.pr_created = true | .pr_url = $url | .status = "pr_draft_or_ready_check_failed"'
+      return 2
+    fi
     log "PR created: ${_pr_url}"
     ckpt_update --arg url "$_pr_url" '.pr_created = true | .pr_url = $url | .status = "complete"'
     _pr_event="$(jq -n --argjson c "$_cycle" --arg u "$_pr_url" '{"cycle":$c,"url":$u}')"
