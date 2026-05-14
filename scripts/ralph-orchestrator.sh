@@ -391,6 +391,7 @@ run_slice() {
     cd "$_wt_path"
     "${SCRIPT_DIR}/ralph-loop-init.sh" general "$_objective" "$_wt_plan_path" 2>&1 || true
     "${SCRIPT_DIR}/ralph-pipeline.sh" \
+      --skip-pr \
       --max-iterations "$MAX_ITERATIONS" \
       2>&1
   ) > "$_log_file" 2>&1 &
