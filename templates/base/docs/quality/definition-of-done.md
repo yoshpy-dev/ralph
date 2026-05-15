@@ -39,6 +39,7 @@ verification work during `/self-review` is not valid.
 
 - [ ] Directory-based plan exists under `docs/plans/active/<date>-<slug>/`
 - [ ] `_manifest.md` has shared-file locklist and dependency graph
+- [ ] `_manifest.md` records the PR strategy decision: AI recommendation, rationale, and human approval state
 - [ ] Each `slice-*.md` has self-contained AC, affected files, and verify/test plan
 - [ ] All slice pipelines completed (`ralph status` shows all slices `complete`)
 - [ ] Sequential merge to typed integration branch passed without conflicts
@@ -48,7 +49,7 @@ verification work during `/self-review` is not valid.
 - [ ] Temporary integration branch cleanup completed on success, or diagnostic branches retained with cleanup instructions on failure
 - [ ] Plan directory archived from `docs/plans/active/` to `docs/plans/archive/`
 
-Ralph Loop handles the full lifecycle autonomously per slice (implement → self-review → verify → test → sync-docs → cross-review), then merges slices into the typed integration branch generated from plan metadata and runs a full-scope integration pipeline (`--skip-pr --fix-all`) to catch cross-module issues. The default PR strategy is `grouped`: related slices are submitted as reviewable PR groups from `pr_groups`. `unified` remains an explicit fallback for small or atomic changes, and `stacked` is available when group order is a real dependency chain.
+Ralph Loop handles the full lifecycle autonomously per slice (implement → self-review → verify → test → sync-docs → cross-review), then merges slices into the typed integration branch generated from plan metadata and runs a full-scope integration pipeline (`--skip-pr --fix-all`) to catch cross-module issues. The default PR strategy is `grouped`: related slices are submitted as reviewable PR groups from `pr_groups`. `unified` remains an explicit fallback for small or atomic changes, and `stacked` is available when group order is a real dependency chain. The AI recommends the PR strategy in the manifest, including rationale; human approval at plan approval time makes that strategy final.
 
 **Driver selection (Phase 2 / issue #44):** Loop runs under whichever driver is
 selected by `RALPH_LOOP_DRIVER` (env > `[loop] driver` in `ralph.toml` >

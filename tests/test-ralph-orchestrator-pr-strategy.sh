@@ -65,6 +65,13 @@ setup_repo() {
 ```toml
 pr_strategy = "grouped"
 
+[pr_strategy_decision]
+selected = "grouped"
+recommended_by = "ai"
+human_approved = false
+approval_note = ""
+rationale = "Grouped PRs are independently reviewable."
+
 [[pr_groups]]
 name = "core"
 slices = ["slice-1-api"]
@@ -72,6 +79,12 @@ slices = ["slice-1-api"]
 [[pr_groups]]
 name = "docs-tests"
 slices = ["slice-2-docs"]
+
+[[pr_strategy_decision.group_rationale]]
+name = "core"
+independent = true
+depends_on = []
+reason = "Core can be reviewed against main."
 ```
 MD
   cat > "${plan_dir}/slice-1-api.md" <<'MD'
@@ -102,6 +115,7 @@ trap cleanup_repo EXIT HUP INT TERM
 
 "$ORCHESTRATOR" --plan "$plan_dir" --dry-run > grouped.log
 assert_contains "dry-run reports grouped strategy" "[DRY RUN] PR strategy: grouped" grouped.log
+assert_contains "dry-run reports decision approval state" "[DRY RUN] PR strategy decision: selected=grouped, human approved=false" grouped.log
 assert_contains "dry-run reports core group branch" "PR group core: branch feat/90/grouped-core, slices 1-api" grouped.log
 assert_contains "dry-run reports docs group branch" "PR group docs-tests: branch feat/90/grouped-docs-tests, slices 2-docs" grouped.log
 assert_not_exists "dry-run does not write orchestrator state" ".harness/state/orchestrator/orchestrator.json"
@@ -115,6 +129,10 @@ else
   pass "invalid strategy exits non-zero"
 fi
 assert_contains "invalid strategy message" "must be one of grouped, stacked, unified" invalid.log
+
+"$ORCHESTRATOR" --plan "$plan_dir" --dry-run --pr-strategy stacked > stacked-warning.log 2>&1
+assert_contains "override mismatch warning includes both strategies" "Runtime --pr-strategy 'stacked' overrides manifest PR strategy 'grouped'." stacked-warning.log
+assert_contains "stacked without dependency rationale warns" "Stacked PR strategy selected without dependency rationale" stacked-warning.log
 
 "$RALPH" cleanup --plan "$plan_dir" --dry-run > cleanup.log
 assert_contains "cleanup dry-run reports plan" "Cleanup plan: ${plan_dir}" cleanup.log

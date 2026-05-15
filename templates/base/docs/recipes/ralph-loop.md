@@ -267,6 +267,8 @@ Orchestrator handles:
   - Uses the task worktree as the control worktree
   - Creates worktree per slice (.claude/worktrees/<slug>)
   - Runs ralph-pipeline.sh in each worktree (parallel where no deps)
+  - Uses the manifest PR strategy decision as the source of truth
+  - Warns when runtime `--pr-strategy` overrides the recorded decision
   - Sequential merge to typed branch from ./scripts/branch-name.sh from-plan
   - Integration pipeline on merged branch (--skip-pr --fix-all)
   - Grouped PRs from manifest `pr_groups` by default
@@ -280,6 +282,8 @@ Return to Claude Code: check ./scripts/ralph status
 
 - Start with `--max-iterations 5` to calibrate before long runs
 - Always use `--verify` for code changes
+- Record the PR strategy decision before running: AI recommends `grouped`, `stacked`, or `unified`; human approval at plan approval time makes it final.
+- Use `stacked` only when the manifest records a real dependency chain between PR groups.
 - Review `progress.log` after the loop finishes — it tells the full story
 - If the agent gets stuck, edit `PROMPT.md` with more specific guidance and restart
 - For complex tasks, create a plan first (`/plan`) and pass the slug to init

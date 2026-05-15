@@ -30,13 +30,27 @@
 
 Ralph Loop defaults to grouped PRs. Keep related slices together so each PR is reviewable.
 Use `unified` only for small or atomic changes, and `stacked` only when group order is a real dependency chain.
+The AI proposes this strategy during planning; human approval at plan approval time makes it final.
 
 ```toml
 pr_strategy = "grouped" # grouped | stacked | unified
 
+[pr_strategy_decision]
+selected = "grouped" # grouped | stacked | unified
+recommended_by = "ai"
+human_approved = false
+approval_note = ""
+rationale = "Generated default: grouped PRs keep Ralph Loop work reviewable while allowing parallel CI and review."
+
 [[pr_groups]]
 name = "implementation"
 slices = [__PR_GROUP_SLICES__]
+
+[[pr_strategy_decision.group_rationale]]
+name = "implementation"
+independent = true
+depends_on = []
+reason = "Generated default group; split this if slices can be reviewed independently."
 ```
 
 ## Shared-file locklist
