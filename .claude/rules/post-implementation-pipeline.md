@@ -62,11 +62,12 @@ Both variables accept environment-variable overrides. Raise them only when you c
 
 ## Integration pipeline (Ralph Loop only)
 
-After all slices are merged into the typed integration branch generated from the plan metadata, `ralph-orchestrator.sh` runs `ralph-pipeline.sh --skip-pr --fix-all` as a unified quality gate. This follows the same canonical order above but with stricter thresholds:
+After all slices are merged into the typed integration branch generated from the plan metadata, `ralph-orchestrator.sh` runs `ralph-pipeline.sh --skip-pr --fix-all` as a full integration quality gate. This follows the same canonical order above but with stricter thresholds:
 
 - `--skip-pr`: PR creation is handled by the orchestrator, not the pipeline
 - `--fix-all`: ALL self-review findings (CRITICAL+HIGH+MEDIUM+LOW > 0) override COMPLETE; WORTH_CONSIDERING cross-review findings trigger Inner Loop regression (same as ACTION_REQUIRED)
 - Integration runs set `RALPH_VERIFY_SCOPE=full` unless explicitly overridden, so verify/test cover every detected language on the merged branch.
+- The default PR strategy is `grouped`; `unified` is an explicit fallback. In grouped/stacked mode, integration fixes must be applied back to submitted group branches before PRs are marked ready.
 
 **Intentional deviation in Ralph Loop:** Per-slice pipelines (`ralph-pipeline.sh`) do NOT stop on CRITICAL self-review findings — they log them and let verify/test catch real issues. This differs from the standard `/work` flow where CRITICAL findings block the pipeline. The rationale is that autonomous pipelines benefit from letting downstream gates (verify, test) confirm whether the finding is a true positive before halting. This deviation is tracked in `docs/tech-debt/README.md`.
 

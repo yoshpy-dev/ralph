@@ -21,7 +21,7 @@ Autonomous multi-iteration coding with `claude -p` and file-system memory.
   ├── 標準フロー → /work → 対話的実装 → subagent pipeline → /pr → task worktree cleanup
   └── Ralph Loop → /loop → セットアップ → ターミナルで ralph run
         → orchestrator: worktree × N → pipeline × N (parallel)
-        → integration merge → unified PR
+        → integration merge → grouped PRs (default) / unified PR (fallback)
 ```
 
 ## What is it
@@ -57,7 +57,7 @@ $EDITOR docs/plans/active/<date>-<slug>/
 # 3. Set up via /loop skill in Claude Code (or manually via ralph-loop-init.sh)
 
 # 4. Run the orchestrator
-./scripts/ralph run --plan docs/plans/active/<date>-<slug>/ --unified-pr
+./scripts/ralph run --plan docs/plans/active/<date>-<slug>/
 
 # 5. Check results
 ./scripts/ralph status
@@ -158,7 +158,7 @@ unset.
 
 Example:
 ```sh
-RALPH_MODEL=sonnet RALPH_SLICE_TIMEOUT=3600 ./scripts/ralph run --plan <dir> --unified-pr
+RALPH_MODEL=sonnet RALPH_SLICE_TIMEOUT=3600 ./scripts/ralph run --plan <dir>
 ```
 
 ### Running Loop under the Codex driver
@@ -180,7 +180,7 @@ dispatcher. To drive a Loop run from Codex:
 
    ```sh
    RALPH_LOOP_DRIVER=codex ./scripts/ralph run \
-     --plan docs/plans/active/<date>-<slug>/ --unified-pr
+     --plan docs/plans/active/<date>-<slug>/
    ```
 
    To make the choice persistent without re-typing the env var, you have two
@@ -198,7 +198,7 @@ dispatcher. To drive a Loop run from Codex:
      ```
 
      ```sh
-     ralph run --plan docs/plans/active/<date>-<slug>/ --unified-pr
+     ralph run --plan docs/plans/active/<date>-<slug>/
      ```
 
    - Or export `RALPH_LOOP_DRIVER` in your shell profile / direnv so every
@@ -261,7 +261,7 @@ This means the agent reconstructs context from files each iteration, avoiding st
   ↓
 /loop    →  Set up the Ralph Loop session from the task worktree
   ↓
-Terminal: ./scripts/ralph run --plan docs/plans/active/<date>-<slug>/ --unified-pr
+Terminal: ./scripts/ralph run --plan docs/plans/active/<date>-<slug>/
   ↓
 Orchestrator handles:
   - Uses the task worktree as the control worktree
@@ -269,7 +269,9 @@ Orchestrator handles:
   - Runs ralph-pipeline.sh in each worktree (parallel where no deps)
   - Sequential merge to typed branch from ./scripts/branch-name.sh from-plan
   - Integration pipeline on merged branch (--skip-pr --fix-all)
-  - Unified PR from the typed integration branch with matching `<type>:` title prefix
+  - Grouped PRs from manifest `pr_groups` by default
+  - Temporary integration branch cleanup after grouped/stacked PR creation succeeds
+  - Unified PR from the typed integration branch only when `pr_strategy = "unified"` or `--pr-strategy unified`
   ↓
 Return to Claude Code: check ./scripts/ralph status
 ```
@@ -298,10 +300,12 @@ Each slice in the Ralph Loop runs a full Inner/Outer Loop pipeline autonomously:
 
 ```sh
 # Use the ralph CLI
-./scripts/ralph run --plan docs/plans/active/<date>-<slug>/ --unified-pr
+./scripts/ralph run --plan docs/plans/active/<date>-<slug>/
 ./scripts/ralph run --plan <dir> --dry-run      # validate setup first
-./scripts/ralph run --plan <dir> --unified-pr --max-iterations 15  # bounded
+./scripts/ralph run --plan <dir> --max-iterations 15  # bounded
+./scripts/ralph run --plan <dir> --pr-strategy unified # fallback single PR
 ./scripts/ralph status                          # check progress
+./scripts/ralph cleanup --plan <dir>             # remove retained diagnostics after inspection
 ./scripts/ralph abort                           # safely stop and archive state
 ```
 

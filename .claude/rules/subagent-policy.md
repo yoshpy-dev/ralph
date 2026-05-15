@@ -66,7 +66,7 @@ so a runaway inline pipeline cannot loop more than `cap` total runs.
 
 Ralph Loop uses `ralph-pipeline.sh` per slice (not subagents). Same pipeline order as `/work` (see `post-implementation-pipeline.md`), but executed via the driver-aware `run_agent` wrapper (`scripts/ralph-cli-driver.sh`) — `claude -p` when `RALPH_LOOP_DRIVER=claude` (default) and `codex exec` when `RALPH_LOOP_DRIVER=codex`. The cross-review dispatcher inverts the reviewer to the *opposite* CLI so the cross-model gate holds in either direction. `RALPH_LOOP_DRIVER` is the Loop-side analogue of `RALPH_PRIMARY_CLI` and resolves env > `[loop] driver` in `ralph.toml` > default.
 
-After all slices are merged into the typed integration branch generated from the plan metadata, `ralph-orchestrator.sh` runs `ralph-pipeline.sh --skip-pr --fix-all` on that branch as a unified quality gate. This catches cross-module issues and fixes ALL findings (including MEDIUM/LOW and WORTH_CONSIDERING) before unified PR creation.
+After all slices are merged into the typed integration branch generated from the plan metadata, `ralph-orchestrator.sh` runs `ralph-pipeline.sh --skip-pr --fix-all` on that branch as a full integration quality gate. This catches cross-module issues and fixes ALL findings (including MEDIUM/LOW and WORTH_CONSIDERING). The default PR strategy is grouped PRs from manifest `pr_groups`; unified PR creation is an explicit fallback.
 That integration run uses full language scope by default; per-slice pipeline
 runs use changed-language scope for faster feedback.
 

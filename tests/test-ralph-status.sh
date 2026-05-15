@@ -37,7 +37,17 @@ setup() {
   "started": "2026-04-10T10:00:00Z",
   "max_parallel": 4,
   "max_iterations": 20,
-  "unified_pr": true,
+  "pr_strategy": "grouped",
+  "pr_groups": [
+    {"name":"core","slices":["1-auth-api","2-user-model"],"depends":[]},
+    {"name":"docs-tests","slices":["3-migrations","4-docs"],"depends":["core"]}
+  ],
+  "integration_branch": "feat/auth-api",
+  "cleanup_status": "pending",
+  "pr_urls": [
+    {"name":"core","branch":"feat/auth-api-core","base":"main","url":"https://github.com/example/repo/pull/101"}
+  ],
+  "unified_pr": false,
   "status": "running"
 }
 JSON
@@ -238,6 +248,10 @@ test_table_render() {
   _output="$(_render_table "$MOCK_ORCH" "$MOCK_WT")"
 
   assert_contains "table: shows plan" "docs/plans/active/2026-04-10-auth-api/" "$_output"
+  assert_contains "table: shows PR mode" "PR mode: grouped" "$_output"
+  assert_contains "table: shows integration branch" "Integration: feat/auth-api" "$_output"
+  assert_contains "table: shows cleanup status" "Cleanup: pending" "$_output"
+  assert_contains "table: shows PR group" "core: 1-auth-api,2-user-model" "$_output"
   assert_contains "table: shows Slice header" "Slice" "$_output"
   assert_contains "table: shows 1-auth-api" "1-auth-api" "$_output"
   assert_contains "table: shows 2-user-model" "2-user-model" "$_output"
@@ -283,6 +297,18 @@ test_json_render() {
 
   _j_plan="$(printf '%s' "$_json" | jq -r '.plan' 2>/dev/null || echo "")"
   assert_eq "json: plan field" "docs/plans/active/2026-04-10-auth-api/" "$_j_plan"
+
+  _j_strategy="$(printf '%s' "$_json" | jq -r '.pr_strategy' 2>/dev/null || echo "")"
+  assert_eq "json: pr_strategy=grouped" "grouped" "$_j_strategy"
+
+  _j_cleanup="$(printf '%s' "$_json" | jq -r '.cleanup_status' 2>/dev/null || echo "")"
+  assert_eq "json: cleanup_status=pending" "pending" "$_j_cleanup"
+
+  _j_group_count="$(printf '%s' "$_json" | jq '.pr_groups | length' 2>/dev/null || echo "")"
+  assert_eq "json: 2 pr groups" "2" "$_j_group_count"
+
+  _j_pr_count="$(printf '%s' "$_json" | jq '.pr_urls | length' 2>/dev/null || echo "")"
+  assert_eq "json: 1 group PR" "1" "$_j_pr_count"
 
   _j_completed="$(printf '%s' "$_json" | jq -r '.progress.completed' 2>/dev/null || echo "")"
   assert_eq "json: progress.completed=1" "1" "$_j_completed"

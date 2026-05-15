@@ -9,6 +9,7 @@
 - Branch: TBD
 - Integration branch: TBD
 - Execution: Ralph Loop (parallel slices)
+- PR strategy: grouped
 
 ## Objective
 
@@ -24,6 +25,19 @@
 
 <!-- Critical forks resolved with the user. Each entry: decision, chosen option, rationale. -->
 <!-- No critical forks? Write: "Critical forks: None" -->
+
+## PR grouping
+
+Ralph Loop defaults to grouped PRs. Keep related slices together so each PR is reviewable.
+Use `unified` only for small or atomic changes, and `stacked` only when group order is a real dependency chain.
+
+```toml
+pr_strategy = "grouped" # grouped | stacked | unified
+
+[[pr_groups]]
+name = "implementation"
+slices = [__PR_GROUP_SLICES__]
+```
 
 ## Shared-file locklist
 
@@ -75,4 +89,5 @@ dependencies complete.
 - [ ] All slices complete
 - [ ] Sequential merge to typed integration branch passed
 - [ ] Integration-level verification passed
-- [ ] Unified PR created
+- [ ] Grouped PRs created, or unified PR created when explicitly selected
+- [ ] Temporary integration branch cleanup completed, or diagnostics retained with cleanup instructions

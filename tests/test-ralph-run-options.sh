@@ -60,5 +60,8 @@ check_contains "preflight dry-run does not invoke pipeline" "[DRY RUN] Preflight
 check_contains "resume flag is accepted" "Resume: 1" resume.log
 check_contains "resume dry-run parses plan" "[DRY RUN] Plan parsed successfully" resume.log
 
+"$RALPH" run --plan "$plan_dir" --pr-strategy stacked --dry-run > strategy.log 2>&1
+check_contains "pr-strategy flag is accepted" "[DRY RUN] PR strategy: stacked" strategy.log
+
 printf '\nralph run option tests: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

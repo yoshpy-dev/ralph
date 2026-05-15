@@ -332,13 +332,17 @@ _render_table() {
   _orch_file="${_orch_dir}/orchestrator.json"
   if [ ! -f "$_orch_file" ]; then
     echo "No active orchestrator state found."
-    echo "Run 'ralph run --plan <dir> --unified-pr' to start."
+    echo "Run 'ralph run --plan <dir>' to start with grouped PRs, or add '--pr-strategy unified'."
     return
   fi
 
   _orch_plan="$(jq -r '.plan // "unknown"' "$_orch_file" 2>/dev/null || echo "?")"
   _orch_status="$(jq -r '.status // "unknown"' "$_orch_file" 2>/dev/null || echo "?")"
   _orch_started="$(jq -r '.started // ""' "$_orch_file" 2>/dev/null || echo "")"
+  _pr_strategy="$(jq -r '.pr_strategy // (if (.unified_pr // false) then "unified" else "grouped" end)' "$_orch_file" 2>/dev/null || echo "grouped")"
+  _integration_branch="$(jq -r '.integration_branch // ""' "$_orch_file" 2>/dev/null || echo "")"
+  _cleanup_status="$(jq -r '.cleanup_status // "unknown"' "$_orch_file" 2>/dev/null || echo "unknown")"
+  _pr_urls_count="$(jq -r '(.pr_urls // []) | length' "$_orch_file" 2>/dev/null || echo "0")"
 
   _elapsed_str="—"
   if [ -n "$_orch_started" ]; then
@@ -350,6 +354,19 @@ _render_table() {
   fi
 
   printf 'Plan:    %s\n' "$_orch_plan"
+  printf 'PR mode: %s' "$_pr_strategy"
+  if [ -n "$_integration_branch" ] && [ "$_integration_branch" != "null" ]; then
+    printf '  Integration: %s' "$_integration_branch"
+  fi
+  printf '  Cleanup: %s' "$_cleanup_status"
+  if [ "$_pr_urls_count" -gt 0 ] 2>/dev/null; then
+    printf '  PRs: %s' "$_pr_urls_count"
+  fi
+  printf '\n'
+  _group_lines="$(jq -r '(.pr_groups // [])[] | "  - " + .name + ": " + ((.slices // []) | join(","))' "$_orch_file" 2>/dev/null || true)"
+  if [ -n "$_group_lines" ]; then
+    printf 'Groups:\n%s\n' "$_group_lines"
+  fi
   _status_color="$C_YELLOW"
   case "$_orch_status" in
     running)  _status_color="$C_CYAN" ;;
@@ -467,6 +484,11 @@ _render_json() {
   _orch_plan="$(jq -r '.plan // "unknown"' "$_orch_file" 2>/dev/null || echo "unknown")"
   _orch_status="$(jq -r '.status // "unknown"' "$_orch_file" 2>/dev/null || echo "unknown")"
   _orch_started="$(jq -r '.started // ""' "$_orch_file" 2>/dev/null || echo "")"
+  _pr_strategy="$(jq -r '.pr_strategy // (if (.unified_pr // false) then "unified" else "grouped" end)' "$_orch_file" 2>/dev/null || echo "grouped")"
+  _integration_branch="$(jq -r '.integration_branch // ""' "$_orch_file" 2>/dev/null || echo "")"
+  _cleanup_status="$(jq -r '.cleanup_status // "unknown"' "$_orch_file" 2>/dev/null || echo "unknown")"
+  _pr_groups="$(jq -c '.pr_groups // []' "$_orch_file" 2>/dev/null || echo "[]")"
+  _pr_urls="$(jq -c '.pr_urls // []' "$_orch_file" 2>/dev/null || echo "[]")"
 
   _elapsed=0
   if [ -n "$_orch_started" ]; then
@@ -528,10 +550,15 @@ _render_json() {
   jq -n \
     --arg plan "$_orch_plan" \
     --arg status "$_orch_status" \
+    --arg pr_strategy "$_pr_strategy" \
+    --arg integration_branch "$_integration_branch" \
+    --arg cleanup_status "$_cleanup_status" \
+    --argjson pr_groups "$_pr_groups" \
+    --argjson pr_urls "$_pr_urls" \
     --argjson elapsed "$_elapsed" \
     --argjson slices "$_slices_json" \
     --argjson completed "$_completed" \
     --argjson total "$_total" \
     --argjson pct "$_pct" \
-    '{plan:$plan,status:$status,elapsed_seconds:$elapsed,slices:$slices,progress:{completed:$completed,total:$total,percent:$pct}}'
+    '{plan:$plan,status:$status,pr_strategy:$pr_strategy,integration_branch:$integration_branch,cleanup_status:$cleanup_status,pr_groups:$pr_groups,pr_urls:$pr_urls,elapsed_seconds:$elapsed,slices:$slices,progress:{completed:$completed,total:$total,percent:$pct}}'
 }

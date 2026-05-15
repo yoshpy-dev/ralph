@@ -22,6 +22,8 @@ DRY_RUN=0
 PREFLIGHT_ONLY=0
 RESUME=0
 UNIFIED_PR=0
+PR_STRATEGY_OVERRIDE=""
+PR_STRATEGY=""
 
 usage() {
   cat <<'USAGE'
@@ -35,7 +37,8 @@ Options:
   --max-iterations N     Per-slice iteration cap passed to ralph-pipeline.sh (default: 20)
   --preflight            Parse the plan and run the per-slice pipeline preflight once
   --resume               Resume existing per-slice pipeline checkpoints
-  --unified-pr           Create a single unified PR instead of per-slice PRs
+  --pr-strategy <mode>   PR strategy: grouped (default), stacked, or unified
+  --unified-pr           Compatibility alias for --pr-strategy unified
   --dry-run              Parse plan and show what would run without executing
   -h, --help             Show this help
 USAGE
@@ -49,7 +52,15 @@ while [ $# -gt 0 ]; do
     --max-iterations)  shift; MAX_ITERATIONS="${1:?requires a number}"; validate_numeric "--max-iterations" "$MAX_ITERATIONS" ;;
     --preflight)       PREFLIGHT_ONLY=1 ;;
     --resume)          RESUME=1 ;;
-    --unified-pr)      UNIFIED_PR=1 ;;
+    --pr-strategy)
+      shift
+      PR_STRATEGY_OVERRIDE="${1:?requires a strategy}"
+      case "$PR_STRATEGY_OVERRIDE" in
+        grouped|stacked|unified) ;;
+        *) echo "Error: --pr-strategy must be one of grouped, stacked, unified"; exit 1 ;;
+      esac
+      ;;
+    --unified-pr)      UNIFIED_PR=1; PR_STRATEGY_OVERRIDE="unified" ;;
     --dry-run)         DRY_RUN=1 ;;
     -h|--help)         usage ;;
     *)                 echo "Unknown option: $1"; usage ;;
@@ -251,6 +262,192 @@ parse_locklist_from_file() {
   done < "$_file"
 }
 
+# Parse PR strategy from _manifest.md. Supports either:
+#   pr_strategy = "grouped"
+#   - PR strategy: grouped
+parse_pr_strategy() {
+  _plan_dir="$1"
+  _manifest="${_plan_dir}/_manifest.md"
+  [ -f "$_manifest" ] || return 0
+
+  awk '
+    {
+      line = $0
+      sub(/[[:space:]]*#.*/, "", line)
+      sub(/^[[:space:]]*[-*]?[[:space:]]*/, "", line)
+      key = tolower(line)
+      if (key ~ /^pr[_ -]?strategy[[:space:]]*[:=]/) {
+        sub(/^[^:=]*[:=][[:space:]]*/, "", line)
+        gsub(/["'\''`]/, "", line)
+        sub(/[[:space:]].*$/, "", line)
+        print tolower(line)
+        exit
+      }
+    }
+  ' "$_manifest"
+}
+
+normalize_list_value() {
+  _raw="$1"
+  printf '%s' "$_raw" |
+    sed -E 's/^[^:=]*[:=][[:space:]]*//' |
+    tr -d '[]"` ' |
+    sed -E 's/[[:space:]]+//g;s/,+/,/g;s/^,//;s/,$//'
+}
+
+sanitize_branch_component() {
+  printf '%s' "$1" |
+    tr '[:upper:]' '[:lower:]' |
+    sed -E 's/[^a-z0-9._-]+/-/g;s/-+/-/g;s/^-//;s/-$//'
+}
+
+# Parse explicit PR groups from _manifest.md.
+# Output: name|slice_csv|depends_csv
+parse_pr_groups() {
+  _plan_dir="$1"
+  _manifest="${_plan_dir}/_manifest.md"
+  [ -f "$_manifest" ] || return 0
+
+  _name=""
+  _slices=""
+  _depends=""
+  while IFS= read -r line; do
+    _clean="$(printf '%s' "$line" | sed -E 's/[[:space:]]*#.*$//;s/^[[:space:]]*//;s/[[:space:]]*$//')"
+    [ -n "$_clean" ] || continue
+
+    case "$_clean" in
+      "[[pr_groups]]")
+        if [ -n "$_name" ] || [ -n "$_slices" ]; then
+          printf '%s|%s|%s\n' "$_name" "$_slices" "$_depends"
+        fi
+        _name=""
+        _slices=""
+        _depends=""
+        ;;
+      name[[:space:]]*=*|"- name:"*)
+        _name="$(printf '%s' "$_clean" | sed -E 's/^[^:=]*[:=][[:space:]]*//;s/["'\''`]//g;s/^[[:space:]]*//;s/[[:space:]]*$//')"
+        _name="$(sanitize_branch_component "$_name")"
+        ;;
+      slices[[:space:]]*=*|"- slices:"*)
+        _slices="$(normalize_list_value "$_clean")"
+        ;;
+      depends[[:space:]]*=*|dependencies[[:space:]]*=*|"- depends:"*|"- dependencies:"*)
+        _depends="$(normalize_list_value "$_clean")"
+        ;;
+    esac
+  done < "$_manifest"
+
+  if [ -n "$_name" ] || [ -n "$_slices" ]; then
+    printf '%s|%s|%s\n' "$_name" "$_slices" "$_depends"
+  fi
+}
+
+all_slice_csv() {
+  _slices_file="$1"
+  _csv=""
+  while IFS='|' read -r s _o _d _f _p; do
+    [ -n "$s" ] || continue
+    _csv="${_csv:+${_csv},}${s}"
+  done < "$_slices_file"
+  printf '%s\n' "$_csv"
+}
+
+default_pr_groups() {
+  _slices_file="$1"
+  _all="$(all_slice_csv "$_slices_file")"
+  [ -n "$_all" ] || return 0
+  printf 'all|%s|\n' "$_all"
+}
+
+resolve_slice_ref() {
+  _ref="$1"
+  _slices_file="$2"
+  _ref="$(printf '%s' "$_ref" | sed -E 's/^slice[-_ ]*//;s/^[[:space:]]*//;s/[[:space:]]*$//')"
+  [ -n "$_ref" ] || return 1
+
+  _match=""
+  _matches=0
+  while IFS='|' read -r s _o _d _f _p; do
+    [ -n "$s" ] || continue
+    case "$s" in
+      "$_ref")
+        printf '%s\n' "$s"
+        return 0
+        ;;
+      "$_ref"-*)
+        _match="$s"
+        _matches=$((_matches + 1))
+        ;;
+    esac
+  done < "$_slices_file"
+
+  if [ "$_matches" -eq 1 ]; then
+    printf '%s\n' "$_match"
+    return 0
+  fi
+
+  return 1
+}
+
+normalize_pr_groups() {
+  _groups_raw_file="$1"
+  _slices_file="$2"
+  _groups_out_file="$3"
+
+  : > "$_groups_out_file"
+  while IFS='|' read -r name slices depends; do
+    [ -n "$name" ] || name="group"
+    _name="$(sanitize_branch_component "$name")"
+    if [ -z "$_name" ]; then
+      log_error "Invalid PR group name: ${name}"
+      return 1
+    fi
+    if [ -z "$slices" ]; then
+      log_error "PR group '${_name}' has no slices"
+      return 1
+    fi
+
+    _resolved=""
+    printf '%s\n' "$slices" | tr ',' '\n' | while IFS= read -r ref; do
+      [ -n "$ref" ] || continue
+      if _slice="$(resolve_slice_ref "$ref" "$_slices_file")"; then
+        printf '%s\n' "$_slice"
+      else
+        printf 'ERROR:%s\n' "$ref"
+      fi
+    done > "${_groups_out_file}.$$.slices"
+
+    if grep -q '^ERROR:' "${_groups_out_file}.$$.slices"; then
+      _bad="$(grep '^ERROR:' "${_groups_out_file}.$$.slices" | sed 's/^ERROR://' | head -1)"
+      rm -f "${_groups_out_file}.$$.slices"
+      log_error "PR group '${_name}' references unknown slice: ${_bad}"
+      return 1
+    fi
+
+    _resolved="$(paste -sd, "${_groups_out_file}.$$.slices" 2>/dev/null || true)"
+    rm -f "${_groups_out_file}.$$.slices"
+    if [ -z "$_resolved" ]; then
+      log_error "PR group '${_name}' resolved to no slices"
+      return 1
+    fi
+    printf '%s|%s|%s\n' "$_name" "$_resolved" "$depends" >> "$_groups_out_file"
+  done < "$_groups_raw_file"
+}
+
+pr_groups_json() {
+  _groups_file="$1"
+  _json="[]"
+  while IFS='|' read -r name slices depends; do
+    [ -n "$name" ] || continue
+    _json="$(printf '%s' "$_json" | jq \
+      --arg name "$name" \
+      --arg slices "$slices" \
+      --arg depends "$depends" \
+      '. += [{name:$name,slices:($slices | split(",") | map(select(. != ""))),depends:($depends | split(",") | map(select(. != "")))}]')"
+  done < "$_groups_file"
+  printf '%s\n' "$_json"
+}
+
 # Auto-detect shared files: files that appear in more than one slice
 detect_shared_files() {
   _slices_data="$1"
@@ -303,7 +500,7 @@ extract_plan_slug() {
   fi
 }
 
-# Create an integration branch for unified PR workflow
+# Create the integration branch used for full merged verification.
 create_integration_branch() {
   _plan_file="$1"
   _base="$2"
@@ -324,6 +521,12 @@ create_integration_branch() {
 slice_branch_name() {
   _slug="$1"
   printf '%s-%s\n' "$INTEGRATION_BRANCH" "$_slug"
+}
+
+group_branch_name() {
+  _group="$1"
+  _safe_group="$(sanitize_branch_component "$_group")"
+  printf '%s-%s\n' "$INTEGRATION_BRANCH" "$_safe_group"
 }
 
 # ═══════════════════════════════════════════════════════════════════
@@ -531,6 +734,202 @@ integration_merge() {
   return 0
 }
 
+merge_group_branch() {
+  _group_name="$1"
+  _group_slices="$2"
+  _branch="$3"
+  _base_branch="$4"
+  _orig_branch="$(git rev-parse --abbrev-ref HEAD)"
+
+  if git rev-parse --verify "$_branch" >/dev/null 2>&1; then
+    git branch -D "$_branch" >/dev/null 2>&1 || {
+      log_error "Failed to reset existing group branch: ${_branch}"
+      return 1
+    }
+  fi
+
+  git branch "$_branch" "$_base_branch" 2>/dev/null || {
+    log_error "Failed to create group branch: ${_branch}"
+    return 1
+  }
+  git checkout "$_branch" >/dev/null 2>&1 || {
+    log_error "Failed to checkout group branch: ${_branch}"
+    return 1
+  }
+
+  log "Building PR group '${_group_name}' on ${_branch}..."
+  _group_slices_tmp="${ORCH_STATE}/.group-${_group_name}-slices.$$"
+  printf '%s\n' "$_group_slices" | tr ',' '\n' > "$_group_slices_tmp"
+  _rc=0
+  while IFS= read -r s; do
+    [ -n "$s" ] || continue
+    _slice_branch="$(slice_branch_name "$s")"
+    log "Merging ${_slice_branch} into ${_branch}..."
+    _merge_msg="chore: merge ${_slice_branch} into ${_branch}"
+    git merge --no-ff "$_slice_branch" -m "$_merge_msg" >/dev/null 2>&1 || {
+      log_error "CONFLICT merging ${_slice_branch} into group branch ${_branch}"
+      git merge --abort >/dev/null 2>&1 || true
+      _rc=1
+      break
+    }
+  done < "$_group_slices_tmp"
+  rm -f "$_group_slices_tmp"
+
+  git checkout "$_orig_branch" >/dev/null 2>&1 || true
+  if [ "$_rc" -ne 0 ]; then
+    return 1
+  fi
+  log "Group branch ready: ${_branch}"
+}
+
+create_pr_groups() {
+  _strategy="$1"
+  _groups_file="$2"
+  _base_branch="$3"
+  _plan_slug="$4"
+  _integration_sha="$5"
+  _pr_urls_file="${ORCH_STATE}/.pr-urls.jsonl"
+  : > "$_pr_urls_file"
+
+  if ! command -v gh >/dev/null 2>&1; then
+    log_error "gh CLI not found — cannot create grouped PRs. Install gh and retry."
+    return 1
+  fi
+
+  _previous_base="$_base_branch"
+  while IFS='|' read -r name slices depends; do
+    [ -n "$name" ] || continue
+    _branch="$(group_branch_name "$name")"
+    _pr_base="$_base_branch"
+    if [ "$_strategy" = "stacked" ]; then
+      _pr_base="$_previous_base"
+    fi
+
+    merge_group_branch "$name" "$slices" "$_branch" "$_pr_base" || return 1
+
+    _pr_type="$(printf '%s' "$_branch" | cut -d/ -f1)"
+    log "Creating ${_strategy} PR for group '${name}': ${_branch} → ${_pr_base}..."
+    git push -u origin "$_branch" >/dev/null 2>&1 || {
+      log_error "Failed to push group branch: ${_branch}"
+      return 1
+    }
+
+    _pr_body="$(cat <<PR_BODY
+## Summary
+
+Ralph Loop ${_strategy} PR group: ${name}
+
+- Plan: ${_plan_slug}
+- Strategy: ${_strategy}
+- Group branch: ${_branch}
+- Integration branch: ${INTEGRATION_BRANCH}
+- Integration verification SHA: ${_integration_sha}
+- Slices: ${slices}
+- Group dependencies: ${depends:-none}
+
+## Related PRs
+
+Other group PRs are recorded in \`${ORCH_STATE}/.pr-urls.jsonl\` as they are created.
+
+## Test plan
+
+- [x] Slice pipelines passed before grouping
+- [x] Full integration merge passed
+- [x] Full integration pipeline passed without producing unsubmitted fix commits
+- [ ] CI checks pass on this PR
+
+Generated by Ralph Orchestrator
+PR_BODY
+)"
+
+    _pr_url="$(gh pr create \
+      --base "$_pr_base" \
+      --head "$_branch" \
+      --title "${_pr_type}: ${_plan_slug} (${name})" \
+      --body "$_pr_body" 2>/dev/null)" || {
+      log_error "Failed to create PR for group '${name}'"
+      return 1
+    }
+
+    if ! "${SCRIPT_DIR}/ensure-pr-title-prefix.sh" "$_pr_url" >/dev/null 2>&1; then
+      log_error "Grouped PR exists but could not be verified with branch type title prefix: ${_pr_url}"
+      return 1
+    fi
+    if ! "${SCRIPT_DIR}/ensure-pr-ready.sh" "$_pr_url" >/dev/null 2>&1; then
+      log_error "Grouped PR exists but could not be verified as ready-for-review: ${_pr_url}"
+      return 1
+    fi
+
+    jq -n --arg name "$name" --arg branch "$_branch" --arg base "$_pr_base" --arg url "$_pr_url" \
+      '{name:$name,branch:$branch,base:$base,url:$url}' >> "$_pr_urls_file"
+    log "Grouped PR created: ${_pr_url}"
+
+    if [ "$_strategy" = "stacked" ]; then
+      _previous_base="$_branch"
+    fi
+  done < "$_groups_file"
+
+  return 0
+}
+
+pr_urls_json() {
+  _file="${1:-${ORCH_STATE}/.pr-urls.jsonl}"
+  _json="[]"
+  [ -f "$_file" ] || { printf '%s\n' "$_json"; return; }
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    _json="$(printf '%s' "$_json" | jq --argjson item "$line" '. += [$item]')"
+  done < "$_file"
+  printf '%s\n' "$_json"
+}
+
+cleanup_success_artifacts() {
+  _strategy="$1"
+  _slices_file="$2"
+  [ "$_strategy" != "unified" ] || return 0
+
+  log "Cleaning temporary Ralph Loop branches/worktrees after successful ${_strategy} PR creation..."
+  _orig_branch="$(git rev-parse --abbrev-ref HEAD)"
+
+  while IFS='|' read -r s _o _d _f _p; do
+    [ -n "$s" ] || continue
+    remove_worktree "$s"
+    _slice_branch="$(slice_branch_name "$s")"
+    if git rev-parse --verify "$_slice_branch" >/dev/null 2>&1; then
+      git branch -D "$_slice_branch" >/dev/null 2>&1 || {
+        log_error "Failed to delete temporary slice branch: ${_slice_branch}"
+        return 1
+      }
+      log "Deleted temporary slice branch: ${_slice_branch}"
+    fi
+  done < "$_slices_file"
+
+  case "$_orig_branch" in
+    "$INTEGRATION_BRANCH"|"$INTEGRATION_BRANCH"-*)
+      git checkout "$_base_branch" >/dev/null 2>&1 || true
+      ;;
+  esac
+
+  if git rev-parse --verify "$INTEGRATION_BRANCH" >/dev/null 2>&1; then
+    git branch -D "$INTEGRATION_BRANCH" >/dev/null 2>&1 || {
+      log_error "Failed to delete temporary integration branch: ${INTEGRATION_BRANCH}"
+      return 1
+    }
+    log "Deleted temporary integration branch: ${INTEGRATION_BRANCH}"
+  fi
+
+  jq --arg cleanup "success" \
+    '.cleanup_status = $cleanup' \
+    "${ORCH_STATE}/orchestrator.json" > "${ORCH_STATE}/orchestrator.tmp.$$.json" \
+    && mv "${ORCH_STATE}/orchestrator.tmp.$$.json" "${ORCH_STATE}/orchestrator.json"
+}
+
+print_cleanup_instructions() {
+  _reason="$1"
+  log_error "Temporary Ralph Loop branches retained for diagnosis (${_reason})."
+  log_error "After inspection, run: ./scripts/ralph cleanup --plan ${PLAN_FILE}"
+}
+
 # Create a unified PR from the integration branch to the base branch
 create_unified_pr() {
   _int_branch="$1"
@@ -573,7 +972,7 @@ $(for sf in "${ORCH_STATE}"/slice-*.status; do
   [ -f "$sf" ] || continue
   _name="$(basename "$sf" | sed 's/^slice-//;s/\.status$//')"
   _ss="$(cat "$sf")"
-  printf '- %s: %s\n' "$_name" "$_ss"
+  printf '%s %s: %s\n' "-" "$_name" "$_ss"
 done)
 
 ## Test plan
@@ -616,7 +1015,7 @@ PR_BODY
 # ═══════════════════════════════════════════════════════════════════
 
 # Run ralph-pipeline.sh on the integration branch with --skip-pr --fix-all
-# to catch cross-module issues and fix ALL findings before unified PR creation.
+# to catch cross-module issues before grouped/stacked/unified PR creation.
 run_integration_pipeline() {
   _int_branch="$1"
   _base_branch="$2"
@@ -704,7 +1103,6 @@ main() {
   log "Max iterations per slice: ${MAX_ITERATIONS}"
   log "Preflight only: ${PREFLIGHT_ONLY}"
   log "Resume: ${RESUME}"
-  log "Unified PR: ${UNIFIED_PR}"
   log "Dry run: ${DRY_RUN}"
   log ""
 
@@ -714,6 +1112,21 @@ main() {
   INTEGRATION_BRANCH="$("${SCRIPT_DIR}/branch-name.sh" from-plan "$PLAN_FILE")" || return 1
   slices_data="$(parse_slices "$PLAN_FILE")"
   locklist="$(parse_locklist "$PLAN_FILE")"
+  _manifest_strategy="$(parse_pr_strategy "$PLAN_FILE" || true)"
+  PR_STRATEGY="${PR_STRATEGY_OVERRIDE:-${_manifest_strategy:-grouped}}"
+  case "$PR_STRATEGY" in
+    grouped|stacked|unified) ;;
+    *)
+      log_error "Invalid PR strategy '${PR_STRATEGY}'. Expected grouped, stacked, or unified."
+      return 1
+      ;;
+  esac
+  if [ "$PR_STRATEGY" = "unified" ]; then
+    UNIFIED_PR=1
+  else
+    UNIFIED_PR=0
+  fi
+  log "PR strategy: ${PR_STRATEGY}"
 
   # Auto-detect additional shared files
   auto_shared="$(detect_shared_files "$slices_data")"
@@ -733,11 +1146,31 @@ main() {
     exit 1
   fi
 
+  _tmp_slices_file="${TMPDIR:-/tmp}/ralph-orch-slices.$$"
+  _tmp_groups_raw_file="${TMPDIR:-/tmp}/ralph-orch-pr-groups-raw.$$"
+  _tmp_groups_file="${TMPDIR:-/tmp}/ralph-orch-pr-groups.$$"
+  _slices_file="$_tmp_slices_file"
+  _groups_file="$_tmp_groups_file"
+  echo "$slices_data" > "$_slices_file"
+
+  _groups_raw_file="$_tmp_groups_raw_file"
+  parse_pr_groups "$PLAN_FILE" > "$_groups_raw_file"
+  if [ ! -s "$_groups_raw_file" ]; then
+    default_pr_groups "$_slices_file" > "$_groups_raw_file"
+  fi
+  normalize_pr_groups "$_groups_raw_file" "$_slices_file" "$_groups_file" || return 1
+
   log ""
   log "Slices:"
   echo "$slices_data" | while IFS='|' read -r s o d f p; do
     log "  ${s}: ${o} (deps: ${d:-none}, plan: ${p:-none})"
   done
+  log ""
+
+  log "PR groups:"
+  while IFS='|' read -r name slices depends; do
+    log "  ${name}: ${slices} (depends: ${depends:-none})"
+  done < "$_groups_file"
   log ""
 
   if [ -n "$locklist" ]; then
@@ -762,10 +1195,14 @@ main() {
   if [ "$DRY_RUN" -eq 1 ]; then
     log "[DRY RUN] Plan parsed successfully. Would create ${_slice_count} worktree(s)."
     log "[DRY RUN] Integration branch: ${INTEGRATION_BRANCH}"
-    log "[DRY RUN] Unified PR: $([ "$UNIFIED_PR" -eq 1 ] && echo "yes" || echo "no (merge only)")"
+    log "[DRY RUN] PR strategy: ${PR_STRATEGY}"
     echo "$slices_data" | while IFS='|' read -r s o d f p; do
       log "[DRY RUN] Slice ${s}: worktree at ${WORKTREE_BASE}/${s}, branch $(slice_branch_name "$s"), plan: ${p:-none}"
     done
+    while IFS='|' read -r name slices depends; do
+      log "[DRY RUN] PR group ${name}: branch $(group_branch_name "$name"), slices ${slices}, depends: ${depends:-none}"
+    done < "$_groups_file"
+    rm -f "$_tmp_slices_file" "$_tmp_groups_raw_file" "$_tmp_groups_file"
     return 0
   fi
 
@@ -775,9 +1212,17 @@ main() {
   log ""
 
   mkdir -p "$ORCH_STATE" "$EVIDENCE_DIR"
+  _slices_file="${ORCH_STATE}/.slices.dat"
+  _groups_raw_file="${ORCH_STATE}/.pr-groups.raw"
+  _groups_file="${ORCH_STATE}/.pr-groups.dat"
+  cp "$_tmp_slices_file" "$_slices_file"
+  cp "$_tmp_groups_raw_file" "$_groups_raw_file"
+  cp "$_tmp_groups_file" "$_groups_file"
+  rm -f "$_tmp_slices_file" "$_tmp_groups_raw_file" "$_tmp_groups_file"
 
   # Save orchestrator state
   _started="$(ts)"
+  _groups_json="$(pr_groups_json "$_groups_file")"
   cat > "${ORCH_STATE}/orchestrator.json" <<ORCH_JSON
 {
   "schema_version": 1,
@@ -785,14 +1230,14 @@ main() {
   "started": "${_started}",
   "max_parallel": ${MAX_PARALLEL},
   "max_iterations": ${MAX_ITERATIONS},
+  "pr_strategy": "${PR_STRATEGY}",
+  "pr_groups": ${_groups_json},
   "unified_pr": $([ "$UNIFIED_PR" -eq 1 ] && echo true || echo false),
+  "integration_branch": "${INTEGRATION_BRANCH}",
+  "cleanup_status": "pending",
   "status": "running"
 }
 ORCH_JSON
-
-  # --- Save slices to temp file for iteration without pipe-subshell ---
-  _slices_file="${ORCH_STATE}/.slices.dat"
-  echo "$slices_data" > "$_slices_file"
 
   # --- Create worktrees ---
   while IFS='|' read -r s o d f p; do
@@ -928,6 +1373,9 @@ ORCH_JSON
   # --- Integration merge ---
   _merge_status="skipped"
   _pr_url=""
+  _pr_urls_json="[]"
+  _cleanup_status="pending"
+  _integration_sha=""
 
   if [ "$_completed" -gt 0 ] && [ "$_failed" -eq 0 ]; then
     # Sequential merge into integration branch
@@ -938,26 +1386,51 @@ ORCH_JSON
       # Run integration pipeline on the merged branch
       _orig_branch="$(git rev-parse --abbrev-ref HEAD)"
       git checkout "$INTEGRATION_BRANCH" 2>/dev/null || true
+      _integration_pre_pipeline_sha="$(git rev-parse HEAD)"
 
       if run_integration_pipeline "$INTEGRATION_BRANCH" "$_base_branch" "$PLAN_SLUG"; then
         _merge_status="pipeline_passed"
-        if [ "$UNIFIED_PR" -eq 1 ]; then
+        _integration_sha="$(git rev-parse HEAD)"
+        if [ "$PR_STRATEGY" != "unified" ] && [ "$_integration_sha" != "$_integration_pre_pipeline_sha" ]; then
+          _merge_status="pipeline_fixed_unsubmitted"
+          log_error "Integration pipeline produced fix commits on ${INTEGRATION_BRANCH}; grouped/stacked PRs would not contain those fixes."
+          log_error "Apply the integration fixes back to the owning PR group branch or create an integration-fixes group, then rerun."
+          print_cleanup_instructions "$_merge_status"
+        elif [ "$PR_STRATEGY" = "unified" ]; then
           _pr_url="$(create_unified_pr "$INTEGRATION_BRANCH" "$_base_branch" "$PLAN_SLUG" "$_total" "$_completed")" || {
             log_error "Unified PR creation failed."
+            print_cleanup_instructions "pr_creation_failed"
             _pr_url=""
           }
         else
-          log "Skipping PR creation (--unified-pr not set). Integration pipeline passed on ${INTEGRATION_BRANCH}."
+          if create_pr_groups "$PR_STRATEGY" "$_groups_file" "$_base_branch" "$PLAN_SLUG" "$_integration_sha"; then
+            _pr_urls_json="$(pr_urls_json "${ORCH_STATE}/.pr-urls.jsonl")"
+            _pr_url="$(printf '%s' "$_pr_urls_json" | jq -r '.[0].url // ""')"
+            if cleanup_success_artifacts "$PR_STRATEGY" "$_slices_file"; then
+              _cleanup_status="success"
+            else
+              _cleanup_status="failed"
+              print_cleanup_instructions "cleanup_failed"
+            fi
+          else
+            _merge_status="pr_creation_failed"
+            _cleanup_status="retained_for_diagnosis"
+            print_cleanup_instructions "$_merge_status"
+          fi
         fi
       else
         _merge_status="pipeline_failed"
         log_error "Integration pipeline failed. PR not created."
+        _cleanup_status="retained_for_diagnosis"
+        print_cleanup_instructions "$_merge_status"
       fi
 
       git checkout "$_orig_branch" 2>/dev/null || true
     else
       _merge_status="conflict"
       log_error "Sequential merge failed. Manual resolution needed on ${INTEGRATION_BRANCH}."
+      _cleanup_status="retained_for_diagnosis"
+      print_cleanup_instructions "$_merge_status"
     fi
   fi
 
@@ -974,23 +1447,47 @@ ORCH_JSON
   "completed": ${_completed},
   "failed": ${_failed},
   "merge_status": "${_merge_status}",
+  "pr_strategy": "${PR_STRATEGY}",
+  "pr_groups": $(pr_groups_json "$_groups_file"),
   "unified_pr": $([ "$UNIFIED_PR" -eq 1 ] && echo true || echo false),
-  "integration_branch": "$([ "$UNIFIED_PR" -eq 1 ] && echo "${INTEGRATION_BRANCH}" || echo "")",
-  "pr_url": "${_pr_url}"
+  "integration_branch": "${INTEGRATION_BRANCH}",
+  "integration_sha": "${_integration_sha}",
+  "cleanup_status": "${_cleanup_status}",
+  "pr_url": "${_pr_url}",
+  "pr_urls": ${_pr_urls_json}
 }
 REPORT_JSON
 
   log "Report: ${_report_file}"
 
   # Update orchestrator status
-  jq --arg s "$([ "$_failed" -gt 0 ] && echo "partial" || echo "complete")" \
+  _final_status="complete"
+  if [ "$_failed" -gt 0 ]; then
+    _final_status="partial"
+  else
+    case "$_merge_status" in
+      pipeline_passed) _final_status="complete" ;;
+      *) _final_status="partial" ;;
+    esac
+  fi
+
+  jq --arg s "$_final_status" \
     --arg pr "${_pr_url}" \
-    '.status = $s | .ended = "'"$(ts)"'" | .pr_url = $pr' \
+    --arg merge_status "${_merge_status}" \
+    --arg cleanup_status "${_cleanup_status}" \
+    --arg integration_sha "${_integration_sha}" \
+    --argjson pr_urls "${_pr_urls_json}" \
+    '.status = $s | .ended = "'"$(ts)"'" | .pr_url = $pr | .pr_urls = $pr_urls | .merge_status = $merge_status | .cleanup_status = $cleanup_status | .integration_sha = $integration_sha' \
     "${ORCH_STATE}/orchestrator.json" > "${ORCH_STATE}/orchestrator.tmp.$$.json" \
     && mv "${ORCH_STATE}/orchestrator.tmp.$$.json" "${ORCH_STATE}/orchestrator.json"
 
   if [ "$_failed" -gt 0 ]; then
     log_error "Some slices failed. Check individual slice logs in ${ORCH_STATE}/"
+    return 1
+  fi
+
+  if [ "$_final_status" != "complete" ]; then
+    log_error "Ralph Orchestrator did not complete cleanly (merge_status=${_merge_status})."
     return 1
   fi
 

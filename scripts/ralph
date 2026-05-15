@@ -8,6 +8,7 @@ set -eu
 #   run      Execute the pipeline (delegates to ralph-pipeline.sh or ralph-orchestrator.sh)
 #   status   Show pipeline/orchestrator progress
 #   abort    Safely stop and clean up pipeline state
+#   cleanup  Remove retained Ralph Loop diagnostic artifacts
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "${SCRIPT_DIR}/ralph-config.sh"
@@ -36,6 +37,7 @@ Commands:
   status [options]           Show current pipeline progress
   retry <slice-name>         Retry a failed/stuck slice via orchestrator
   abort [--slice <name>]     Safely stop and clean up
+  cleanup [options]          Clean retained Ralph Loop worktrees/branches
 
 Run Options:
   --plan <path>              Plan directory (auto-detected from docs/plans/active/ if omitted)
@@ -44,11 +46,18 @@ Run Options:
   --preflight                Run capability probe only
   --resume                   Resume from existing checkpoint
   --dry-run                  Show what would run without executing
-  --unified-pr               Create a unified PR from integration branch
+  --pr-strategy <mode>       PR strategy: grouped (default), stacked, or unified
+  --unified-pr               Compatibility alias for --pr-strategy unified
 
 Abort Options:
   --slice <name>             Abort a specific slice only
   --keep-state               Archive state but don't delete worktrees
+
+Cleanup Options:
+  --plan <path>              Clean artifacts for a Ralph Loop plan directory
+  --stale                    Clean current orchestrator artifacts if older than --older-than
+  --older-than N[d]          Stale threshold in days (default: 14d)
+  --dry-run                  Print cleanup actions without changing branches/worktrees
 
 Status Options:
   --json                     Output machine-readable JSON
@@ -59,13 +68,15 @@ Status Options:
 
 Examples:
   ralph plan
-  ralph run --plan docs/plans/active/2026-01-01-my-feature/ --unified-pr
+  ralph run --plan docs/plans/active/2026-01-01-my-feature/
+  ralph run --plan docs/plans/active/2026-01-01-my-feature/ --pr-strategy unified
   ralph run --dry-run
   ralph status
   ralph status --json
   ralph status --watch --interval 3
   ralph retry my-slice
   ralph abort
+  ralph cleanup --plan docs/plans/active/2026-01-01-my-feature/
 USAGE
 }
 
@@ -99,6 +110,8 @@ cmd_run() {
       --plan)           shift; _plan="${1:?requires a file path}" ;;
       --max-iterations|--max-parallel|--max-inner-cycles|--max-outer-cycles|--max-repair-attempts)
         _flag="$1"; shift; _extra_args="${_extra_args} ${_flag} ${1:?requires a number}" ;;
+      --pr-strategy)
+        _flag="$1"; shift; _extra_args="${_extra_args} ${_flag} ${1:?requires a strategy}" ;;
       --preflight|--resume|--dry-run|--unified-pr)
         _extra_args="${_extra_args} $1" ;;
       *)
@@ -455,6 +468,135 @@ AUDIT_JSON
 }
 
 # ═══════════════════════════════════════════════════════════════════
+# Subcommand: cleanup
+# ═══════════════════════════════════════════════════════════════════
+
+file_mtime_epoch() {
+  _path="$1"
+  stat -f '%m' "$_path" 2>/dev/null || stat -c '%Y' "$_path" 2>/dev/null || echo 0
+}
+
+default_branch() {
+  _remote_head="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)"
+  if [ -n "$_remote_head" ]; then
+    printf '%s\n' "${_remote_head#origin/}"
+    return
+  fi
+  if git show-ref --verify --quiet refs/heads/main; then
+    printf 'main\n'
+  else
+    printf 'master\n'
+  fi
+}
+
+cleanup_plan_artifacts() {
+  _plan="$1"
+  _dry_run="$2"
+
+  if [ ! -d "$_plan" ] || [ ! -f "${_plan%/}/_manifest.md" ]; then
+    log_error "cleanup requires a Ralph Loop plan directory with _manifest.md: ${_plan}"
+    return 1
+  fi
+
+  _int_branch="$("${SCRIPT_DIR}/branch-name.sh" from-plan "$_plan")" || return 1
+  _base_branch="$(default_branch)"
+  _current_branch="$(git branch --show-current 2>/dev/null || true)"
+
+  log "Cleanup plan: ${_plan}"
+  log "Integration branch: ${_int_branch}"
+  log "Dry run: ${_dry_run}"
+
+  if [ "$_dry_run" -eq 0 ]; then
+    case "$_current_branch" in
+      "$_int_branch"|"$_int_branch"-*)
+        git checkout "$_base_branch" >/dev/null 2>&1 || {
+          log_error "Failed to leave cleanup target branch. Current branch: ${_current_branch}"
+          return 1
+        }
+        ;;
+    esac
+  fi
+
+  for _slice_file in "${_plan%/}"/slice-*.md; do
+    [ -f "$_slice_file" ] || continue
+    _slug="$(basename "$_slice_file" .md | sed 's/^slice-//')"
+    _wt_path="${WORKTREE_BASE}/${_slug}"
+    if [ -d "$_wt_path" ]; then
+      if [ "$_dry_run" -eq 1 ]; then
+        log "[DRY RUN] Would remove worktree: ${_wt_path}"
+      else
+        git worktree remove "$_wt_path" --force >/dev/null 2>&1 || true
+        log "Removed worktree: ${_wt_path}"
+      fi
+    fi
+  done
+
+  _branches_tmp="$(mktemp)"
+  {
+    git for-each-ref --format='%(refname:short)' "refs/heads/${_int_branch}-*" 2>/dev/null || true
+    git for-each-ref --format='%(refname:short)' "refs/heads/${_int_branch}" 2>/dev/null || true
+  } | sort -u > "$_branches_tmp"
+
+  while IFS= read -r _branch; do
+    [ -n "$_branch" ] || continue
+    if [ "$_dry_run" -eq 1 ]; then
+      log "[DRY RUN] Would delete local branch: ${_branch}"
+    else
+      git branch -D "$_branch" >/dev/null 2>&1 || {
+        log_error "Failed to delete local branch: ${_branch}"
+        rm -f "$_branches_tmp"
+        return 1
+      }
+      log "Deleted local branch: ${_branch}"
+    fi
+  done < "$_branches_tmp"
+  rm -f "$_branches_tmp"
+
+  log "Cleanup complete."
+}
+
+cmd_cleanup() {
+  _plan=""
+  _stale=0
+  _older_than="14d"
+  _dry_run=0
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --plan) shift; _plan="${1:?requires a plan directory}" ;;
+      --stale) _stale=1 ;;
+      --older-than) shift; _older_than="${1:?requires a threshold}" ;;
+      --dry-run) _dry_run=1 ;;
+      *) echo "Unknown cleanup option: $1"; exit 1 ;;
+    esac
+    shift
+  done
+
+  if [ "$_stale" -eq 1 ]; then
+    _orch_json="${ORCH_STATE}/orchestrator.json"
+    [ -f "$_orch_json" ] || { log "No orchestrator state found."; return 0; }
+    _plan="$(jq -r '.plan // ""' "$_orch_json" 2>/dev/null || echo "")"
+    [ -n "$_plan" ] || { log_error "orchestrator state does not record a plan"; return 1; }
+
+    _days="$(printf '%s' "$_older_than" | sed -E 's/d$//')"
+    if ! printf '%s' "$_days" | grep -Eq '^[0-9]+$'; then
+      log_error "--older-than must be a day count such as 14 or 14d"
+      return 1
+    fi
+    _mtime="$(file_mtime_epoch "$_orch_json")"
+    _now="$(date '+%s')"
+    _age_days=$(( (_now - _mtime) / 86400 ))
+    if [ "$_age_days" -lt "$_days" ]; then
+      log "Current orchestrator state is ${_age_days}d old; threshold is ${_days}d. Nothing to clean."
+      return 0
+    fi
+  fi
+
+  [ -n "$_plan" ] || { echo "Usage: ralph cleanup --plan <plan-dir> [--dry-run]"; exit 1; }
+  cleanup_plan_artifacts "$_plan" "$_dry_run"
+}
+
+# ═══════════════════════════════════════════════════════════════════
 # Main dispatcher
 # ═══════════════════════════════════════════════════════════════════
 
@@ -471,6 +613,7 @@ case "$_command" in
   status) cmd_status "$@" ;;
   retry)  cmd_retry "$@" ;;
   abort)  cmd_abort "$@" ;;
+  cleanup) cmd_cleanup "$@" ;;
   -h|--help) print_usage; exit 0 ;;
   *)      echo "Unknown command: ${_command}"; usage ;;
 esac
