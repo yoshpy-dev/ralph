@@ -1,14 +1,12 @@
 # AGENTS.md
 
-Treat this file as a **map** that both Claude Code and Codex read:
+This repository hosts `ralph`, a CLI for harness engineering. Run `ralph init` to scaffold a new project from this source.
+
+Treat this file as a **map**:
 - short
 - stable
 - cross-vendor
 - easy to verify against the repo
-
-This file is the shared source of truth. Claude-only details live in
-`CLAUDE.md`. Codex-only details live in `.codex/AGENTS.override.md` and
-`.codex/README.md`.
 
 ## Mission
 
@@ -17,45 +15,30 @@ Build coding-agent workflows that are:
 - inspectable
 - evidence-backed
 - easy to extend
+- cheap by default, richer only when needed
 
 ## Primary loop
 
 1. Spec (manual, optional — refines vague ideas into detailed specifications via iterative brainstorming, codebase exploration, web research, and user clarification; issue-only specs use a temporary worktree and cleanup, saved specs create a docs/spec PR or hand off to planning)
 2. Plan (auto — ensures a clean-base task worktree, creates plan, selects flow) [+ optional Codex plan advisory]
-3. **Standard flow**: Work (auto — resumes task worktree, interactive implementation)
-   **Ralph Loop**: Loop (auto — directory-based plan → `ralph-orchestrator.sh` → multi-worktree parallel → integration branch → integration pipeline → unified PR)
-4. Self-review (auto)
-5. Verify (auto)
-6. Test (auto)
-7. Sync-docs (auto)
+3. **標準フロー**: Work (auto — resumes task worktree, interactive implementation)
+   **Ralph Loop**: Loop (auto — directory-based plan → `ralph-orchestrator.sh` → multi-worktree parallel → integration branch → integration pipeline → grouped PRs by default; unified PR as explicit fallback)
+4. Self-review (auto — via `reviewer` subagent, or pipeline-internal)
+5. Verify (auto — via `verifier` subagent, or pipeline-internal)
+6. Test (auto — via `tester` subagent, or pipeline-internal)
+7. Sync-docs (auto — via `doc-maintainer` subagent, or pipeline-internal)
 8. Cross-review (auto, optional — cross-model second opinion via the other agent: Claude → Codex; Codex → Claude)
 9. PR (auto — includes hand-off)
 10. CI verify + human merge
 
-In Claude Code's standard flow, steps 4–7 run via subagents (`reviewer`,
-`verifier`, `tester`, `doc-maintainer`). In Codex they run sequentially in
-one agent. In Ralph Loop they are handled internally by the pipeline scripts.
+Steps 4–9 run via subagents in 標準フロー. In Ralph Loop, they are handled internally by the pipeline scripts.
 
-Ralph Loop runs under whichever driver is selected by `RALPH_LOOP_DRIVER` (or
-`[loop] driver` in `ralph.toml`); the cross-review reviewer is always the
-opposite agent. `ralph status` and `ralph doctor` print the effective driver
-and source.
+Ralph Loop runs under whichever driver is selected by `RALPH_LOOP_DRIVER` (or `[loop] driver` in `ralph.toml`); the cross-review reviewer is always the opposite agent. `ralph status` and `ralph doctor` print the effective driver and source.
 
 All repo writes in spec/plan/work flows must happen inside a task worktree
 created from a clean default branch. Local task state lives under
 `$(git rev-parse --git-common-dir)/ralph/worktrees/`; PR success cleans up the
 task worktree and local branch while leaving the remote PR branch intact.
-
-## Skill invocation
-
-| Agent | How to invoke a skill | Notes |
-|-----|------------------------|-------|
-| Claude Code | `/skill-name` slash command | Set in `.claude/skills/<name>/SKILL.md` frontmatter |
-| Codex | `$skill-name` mention or `/skills` menu | `/skill-name` collides with Codex built-ins (e.g. `/plan`) — do not use |
-
-Both agents read the same skill bodies. Claude reads `.claude/skills/`, Codex
-reads `.agents/skills/`. `scripts/check-skill-sync.sh` keeps the two trees in
-lock-step (body, name, description, implicit-invocation policy).
 
 ## Source of truth
 
@@ -66,21 +49,35 @@ lock-step (body, name, description, implicit-invocation policy).
 
 ## Repo map
 
-<!-- Update this section to reflect your project's structure -->
-
-- `docs/specs/` — spec files produced by `/spec`
-- `docs/plans/active/` — current plans
+- `cmd/ralph/` — Go entrypoint for the ralph CLI (cobra root, ldflags injection, go:embed wiring)
+- `cmd/ralph-tui/` — Legacy TUI entrypoint (to be removed in Phase 9)
+- `internal/cli/` — cobra subcommands (init, upgrade, run, status, retry, abort, doctor, pack, version)
+- `internal/scaffold/` — go:embed template system, manifest TOML, file render with SHA256 hashes
+- `internal/upgrade/` — hash-based diff engine, conflict resolution (auto-update, conflict, add, remove)
+- `internal/config/` — ralph.toml parser with defaults
+- `internal/state/` — pipeline state reader (checkpoint, orchestrator, manifest parsing)
+- `internal/watcher/` — fsnotify-based file watcher with polling fallback
+- `internal/ui/` — Bubble Tea model, layout, panes, keybindings, styles
+- `internal/action/` — CLI action executor (retry, abort)
+- `templates/` — go:embed source: base scaffold, language packs
+- `docs/specs/` — spec files produced by `/spec` (`<date>-<slug>.md`)
+- `docs/plans/active/` — current plans (single files for standard flow; `<date>-<slug>/` directories with `_manifest.md` + `slice-*.md` for Ralph Loop)
 - `docs/plans/archive/` — completed plans
-- `docs/plans/templates/` — plan templates
+- `docs/plans/templates/` — plan templates (`feature-plan.md`, `ralph-loop-manifest.md`, `ralph-loop-slice.md`)
 - `docs/reports/` — self-review, verify, test, walkthrough artifacts
 - `docs/quality/` — definition of done and quality gates
 - `.claude/rules/` — path-scoped guidance (read by both agents)
-- `.claude/skills/` — Claude Code skill bodies
-- `.claude/agents/` — Claude Code subagent definitions
-- `.claude/hooks/` — Claude Code runtime hooks
-- `.agents/skills/` — Codex skill bodies (mirrors `.claude/skills/`)
-- `.codex/` — Codex project config, role definitions, hooks, override docs
-- `scripts/` — reusable verification, hook, worktree, and bootstrap scripts (shared)
+- `.claude/skills/` — Claude-side on-demand workflows
+- `.claude/agents/` — specialized subagents (Claude only)
+- `.claude/hooks/` — deterministic runtime checks
+  - `check_mojibake.sh` + `mojibake-allowlist` — temporary U+FFFD detection guard for Claude Code SSE mojibake (remove once upstream Issue #43746 ships)
+- `.agents/skills/` — Codex-side skill bodies (mirrors `.claude/skills/`; kept in lock-step by `scripts/check-skill-sync.sh`)
+- `.codex/` — Codex project config for this meta-repo (`config.toml`, `agents/`, `hooks/`, `AGENTS.override.md`, `README.md`); same shape as `templates/base/.codex/` so ralph dogfoods the parity it ships
+- `templates/base/.codex/` — `ralph init` source for the same surface; root `.codex/` and template `.codex/` are kept identical via `scripts/check-sync.sh` (no KNOWN_DIFFS today)
+- `packs/languages/` — language-specific depth (also copied to `templates/packs/` for embedding)
+- `scripts/` — reusable verification and bootstrap scripts (includes legacy `ralph` shell CLI, `ralph-config.sh`, `ralph-worktree.sh`, `ralph-pipeline.sh`, `ralph-orchestrator.sh`, `ralph-cli-driver.sh` (driver dispatcher: `run_agent` / `pick_reviewer` / `count_triage_findings`), `install.sh`, drift gate `check-skill-sync.sh`, Codex availability probe `codex-check.sh`)
+- `docs/recipes/` — hands-on recipes (Codex setup, Ralph Loop, language packs, worktrees)
+- `.harness/state/` — runtime state, not canonical truth
 
 ## Planning contract
 
@@ -108,28 +105,14 @@ Reviews should produce artifacts, not only chat output:
 
 See `docs/quality/definition-of-done.md` for full checklists.
 
-Key rule: never say "done" without saying what was verified and what remains
-unverified. Tests must pass before PR creation.
-
-## Codex setup checklist
-
-If you intend to drive ralph from Codex, finish this once per project before
-starting any flow:
-
-1. Install Codex (>= 0.128.0).
-2. `codex trust .` — without trust, `.codex/config.toml`, `[features]`, and
-   `[hooks]` are silently ignored.
-3. `ralph doctor` — confirms Claude Code/Codex presence, project trust, `hooks` flag,
-   and at least one effective `[hooks]` entry.
-
-See `.codex/README.md` for the full guide.
+Key rule: never say "done" without saying what was verified and what remains unverified. Tests must pass before PR creation.
 
 ## Hard rules
 
 - Keep this file short
 - Keep `CLAUDE.md` short
-- Move detailed topic guidance into `.claude/rules/` (read by both agents)
-- Move step-by-step workflows into `.claude/skills/` and mirror in `.agents/skills/`
+- Move detailed topic guidance into `.claude/rules/`
+- Move step-by-step workflows into `.claude/skills/`
 - Promote repeated mistakes into hooks, tests, CI, or scripts
 - Do not expand plans into brittle low-level instructions unless the task truly needs it
 - Keep names grep-able and boundaries explicit

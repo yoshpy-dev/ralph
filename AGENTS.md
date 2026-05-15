@@ -22,7 +22,7 @@ Build coding-agent workflows that are:
 1. Spec (manual, optional — refines vague ideas into detailed specifications via iterative brainstorming, codebase exploration, web research, and user clarification; issue-only specs use a temporary worktree and cleanup, saved specs create a docs/spec PR or hand off to planning)
 2. Plan (auto — ensures a clean-base task worktree, creates plan, selects flow) [+ optional Codex plan advisory]
 3. **標準フロー**: Work (auto — resumes task worktree, interactive implementation)
-   **Ralph Loop**: Loop (auto — directory-based plan → `ralph-orchestrator.sh` → multi-worktree parallel → integration branch → integration pipeline → unified PR)
+   **Ralph Loop**: Loop (auto — directory-based plan → `ralph-orchestrator.sh` → multi-worktree parallel → integration branch → integration pipeline → grouped PRs by default; unified PR as explicit fallback)
 4. Self-review (auto — via `reviewer` subagent, or pipeline-internal)
 5. Verify (auto — via `verifier` subagent, or pipeline-internal)
 6. Test (auto — via `tester` subagent, or pipeline-internal)

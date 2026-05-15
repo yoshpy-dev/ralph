@@ -1,0 +1,124 @@
+#!/usr/bin/env sh
+set -eu
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+ORCHESTRATOR="${PROJECT_ROOT}/scripts/ralph-orchestrator.sh"
+RALPH="${PROJECT_ROOT}/scripts/ralph"
+
+PASS=0
+FAIL=0
+
+pass() {
+  PASS=$((PASS + 1))
+  printf '  PASS: %s\n' "$1"
+}
+
+fail() {
+  FAIL=$((FAIL + 1))
+  printf '  FAIL: %s\n' "$1"
+}
+
+assert_contains() {
+  _label="$1"
+  _needle="$2"
+  _file="$3"
+  if grep -Fq "$_needle" "$_file"; then
+    pass "$_label"
+  else
+    fail "$_label"
+    printf '    missing: %s\n' "$_needle"
+  fi
+}
+
+assert_not_exists() {
+  _label="$1"
+  _path="$2"
+  if [ ! -e "$_path" ]; then
+    pass "$_label"
+  else
+    fail "$_label"
+    printf '    unexpected path exists: %s\n' "$_path"
+  fi
+}
+
+setup_repo() {
+  _tmp="$(mktemp -d "${TMPDIR:-/tmp}/ralph-pr-strategy.XXXXXX")"
+  cd "$_tmp"
+  git init -q -b main
+  git config user.email test@example.com
+  git config user.name "Test User"
+  printf 'seed\n' > README.md
+  git add README.md
+  git commit -q -m 'chore: seed'
+
+  plan_dir="docs/plans/active/2026-05-15-grouped"
+  mkdir -p "$plan_dir"
+  cat > "${plan_dir}/_manifest.md" <<'MD'
+# Grouped
+
+- Type: feat
+- Related issue: #90
+
+## PR grouping
+
+```toml
+pr_strategy = "grouped"
+
+[[pr_groups]]
+name = "core"
+slices = ["slice-1-api"]
+
+[[pr_groups]]
+name = "docs-tests"
+slices = ["slice-2-docs"]
+```
+MD
+  cat > "${plan_dir}/slice-1-api.md" <<'MD'
+# Slice 1
+
+- Objective: API
+- Dependencies: none
+- Affected files: internal/api.go
+MD
+  cat > "${plan_dir}/slice-2-docs.md" <<'MD'
+# Slice 2
+
+- Objective: Docs
+- Dependencies: none
+- Affected files: README.md
+MD
+}
+
+cleanup_repo() {
+  cd "$PROJECT_ROOT"
+  rm -rf "$_tmp"
+}
+
+printf '==> Ralph orchestrator PR strategy tests\n'
+
+setup_repo
+trap cleanup_repo EXIT HUP INT TERM
+
+"$ORCHESTRATOR" --plan "$plan_dir" --dry-run > grouped.log
+assert_contains "dry-run reports grouped strategy" "[DRY RUN] PR strategy: grouped" grouped.log
+assert_contains "dry-run reports core group branch" "PR group core: branch feat/90/grouped-core, slices 1-api" grouped.log
+assert_contains "dry-run reports docs group branch" "PR group docs-tests: branch feat/90/grouped-docs-tests, slices 2-docs" grouped.log
+assert_not_exists "dry-run does not write orchestrator state" ".harness/state/orchestrator/orchestrator.json"
+
+"$ORCHESTRATOR" --plan "$plan_dir" --dry-run --unified-pr > unified.log
+assert_contains "--unified-pr aliases unified strategy" "[DRY RUN] PR strategy: unified" unified.log
+
+if "$ORCHESTRATOR" --plan "$plan_dir" --dry-run --pr-strategy bogus > invalid.log 2>&1; then
+  fail "invalid strategy exits non-zero"
+else
+  pass "invalid strategy exits non-zero"
+fi
+assert_contains "invalid strategy message" "must be one of grouped, stacked, unified" invalid.log
+
+"$RALPH" cleanup --plan "$plan_dir" --dry-run > cleanup.log
+assert_contains "cleanup dry-run reports plan" "Cleanup plan: ${plan_dir}" cleanup.log
+assert_contains "cleanup dry-run reports integration branch" "Integration branch: feat/90/grouped" cleanup.log
+
+printf '\nRalph orchestrator PR strategy tests: %d passed, %d failed\n' "$PASS" "$FAIL"
+[ "$FAIL" -eq 0 ]

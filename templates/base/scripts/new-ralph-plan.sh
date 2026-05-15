@@ -73,6 +73,13 @@ fi
 mkdir -p "$plan_dir"
 
 # Generate manifest
+pr_group_slices=""
+i=1
+while [ "$i" -le "$slice_count" ]; do
+  pr_group_slices="${pr_group_slices:+${pr_group_slices}, }\"slice-${i}-${slug}\""
+  i=$((i + 1))
+done
+
 sed \
   -e "s#__TITLE__#${slug}#g" \
   -e "s#__DATE__#${date_str}#g" \
@@ -80,6 +87,7 @@ sed \
   -e "s#__ISSUE__#${issue}#g" \
   -e "s#__TYPE__#${type}#g" \
   -e "s#__SLUG__#${slug}#g" \
+  -e "s#__PR_GROUP_SLICES__#${pr_group_slices}#g" \
   "${template_dir}/ralph-loop-manifest.md" > "${plan_dir}/_manifest.md"
 
 echo "Created ${plan_dir}/_manifest.md"
@@ -104,5 +112,6 @@ echo "  Slices:   ${slice_count}"
 echo ""
 echo "Next steps:"
 echo "  1. Fill in the manifest (objective, scope, locklist, dependency graph)"
-echo "  2. Fill in each slice (objective, AC, affected files, dependencies)"
-echo "  3. Run: ./scripts/ralph run --plan ${plan_dir} --unified-pr"
+echo "  2. Adjust PR grouping (default: grouped) if the generated group is too broad"
+echo "  3. Fill in each slice (objective, AC, affected files, dependencies)"
+echo "  4. Run: ./scripts/ralph run --plan ${plan_dir}"
