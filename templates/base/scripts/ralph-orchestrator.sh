@@ -19,6 +19,8 @@ PLAN_FILE=""
 MAX_PARALLEL="$RALPH_MAX_PARALLEL"
 MAX_ITERATIONS="$RALPH_MAX_ITERATIONS"
 DRY_RUN=0
+PREFLIGHT_ONLY=0
+RESUME=0
 UNIFIED_PR=0
 
 usage() {
@@ -31,6 +33,8 @@ Options:
   --plan <directory>     Path to a plan directory with _manifest.md + slice-*.md files (required)
   --max-parallel N       Max concurrent worktree pipelines (default: 4)
   --max-iterations N     Per-slice iteration cap passed to ralph-pipeline.sh (default: 20)
+  --preflight            Parse the plan and run the per-slice pipeline preflight once
+  --resume               Resume existing per-slice pipeline checkpoints
   --unified-pr           Create a single unified PR instead of per-slice PRs
   --dry-run              Parse plan and show what would run without executing
   -h, --help             Show this help
@@ -43,6 +47,8 @@ while [ $# -gt 0 ]; do
     --plan)            shift; PLAN_FILE="${1:?requires a file path}" ;;
     --max-parallel)    shift; MAX_PARALLEL="${1:?requires a number}"; validate_numeric "--max-parallel" "$MAX_PARALLEL" ;;
     --max-iterations)  shift; MAX_ITERATIONS="${1:?requires a number}"; validate_numeric "--max-iterations" "$MAX_ITERATIONS" ;;
+    --preflight)       PREFLIGHT_ONLY=1 ;;
+    --resume)          RESUME=1 ;;
     --unified-pr)      UNIFIED_PR=1 ;;
     --dry-run)         DRY_RUN=1 ;;
     -h|--help)         usage ;;
@@ -395,7 +401,13 @@ run_slice() {
   (
     cd "$_wt_path"
     "${SCRIPT_DIR}/ralph-loop-init.sh" general "$_objective" "$_wt_plan_path" 2>&1 || true
+    _resume_arg=""
+    if [ "$RESUME" -eq 1 ]; then
+      _resume_arg="--resume"
+    fi
+    # shellcheck disable=SC2086  # optional single flag
     "${SCRIPT_DIR}/ralph-pipeline.sh" \
+      $_resume_arg \
       --skip-pr \
       --max-iterations "$MAX_ITERATIONS" \
       2>&1
@@ -690,6 +702,8 @@ main() {
   fi
   log "Max parallel: ${MAX_PARALLEL}"
   log "Max iterations per slice: ${MAX_ITERATIONS}"
+  log "Preflight only: ${PREFLIGHT_ONLY}"
+  log "Resume: ${RESUME}"
   log "Unified PR: ${UNIFIED_PR}"
   log "Dry run: ${DRY_RUN}"
   log ""
@@ -732,6 +746,17 @@ main() {
       log "  - $f"
     done
     log ""
+  fi
+
+  if [ "$PREFLIGHT_ONLY" -eq 1 ]; then
+    if [ "$DRY_RUN" -eq 1 ]; then
+      log "[DRY RUN] Preflight parsed ${_slice_count} slice(s). Would run: ${SCRIPT_DIR}/ralph-pipeline.sh --preflight"
+      return 0
+    fi
+    mkdir -p "$ORCH_STATE" "$EVIDENCE_DIR"
+    log "Running per-slice pipeline preflight probe once..."
+    "${SCRIPT_DIR}/ralph-pipeline.sh" --preflight
+    return $?
   fi
 
   if [ "$DRY_RUN" -eq 1 ]; then

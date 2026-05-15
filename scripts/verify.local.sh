@@ -251,6 +251,9 @@ run_hook_tests() {
   if [ -x tests/test-ralph-dry-run-side-effects.sh ]; then
     run "tests/test-ralph-dry-run-side-effects.sh" tests/test-ralph-dry-run-side-effects.sh
   fi
+  if [ -x tests/test-ralph-run-options.sh ]; then
+    run "tests/test-ralph-run-options.sh" tests/test-ralph-run-options.sh
+  fi
   if [ -x tests/test-ralph-slice-skip-pr.sh ]; then
     run "tests/test-ralph-slice-skip-pr.sh" tests/test-ralph-slice-skip-pr.sh
   fi
