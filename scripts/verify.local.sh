@@ -248,6 +248,9 @@ run_hook_tests() {
   if [ -x tests/test-ralph-orchestrator-branch-names.sh ]; then
     run "tests/test-ralph-orchestrator-branch-names.sh" tests/test-ralph-orchestrator-branch-names.sh
   fi
+  if [ -x tests/test-ralph-dry-run-side-effects.sh ]; then
+    run "tests/test-ralph-dry-run-side-effects.sh" tests/test-ralph-dry-run-side-effects.sh
+  fi
   if [ -x tests/test-ralph-run-options.sh ]; then
     run "tests/test-ralph-run-options.sh" tests/test-ralph-run-options.sh
   fi

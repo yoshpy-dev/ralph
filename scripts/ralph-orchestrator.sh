@@ -711,7 +711,7 @@ main() {
   # --- Extract plan slug and parse plan ---
   PLAN_SLUG="$(extract_plan_slug "$PLAN_FILE")"
   _base_branch="$(git rev-parse --abbrev-ref HEAD)"
-
+  INTEGRATION_BRANCH="$("${SCRIPT_DIR}/branch-name.sh" from-plan "$PLAN_FILE")" || return 1
   slices_data="$(parse_slices "$PLAN_FILE")"
   locklist="$(parse_locklist "$PLAN_FILE")"
 
@@ -749,14 +749,24 @@ main() {
   fi
 
   if [ "$PREFLIGHT_ONLY" -eq 1 ]; then
-    mkdir -p "$ORCH_STATE" "$EVIDENCE_DIR"
     if [ "$DRY_RUN" -eq 1 ]; then
       log "[DRY RUN] Preflight parsed ${_slice_count} slice(s). Would run: ${SCRIPT_DIR}/ralph-pipeline.sh --preflight"
       return 0
     fi
+    mkdir -p "$ORCH_STATE" "$EVIDENCE_DIR"
     log "Running per-slice pipeline preflight probe once..."
     "${SCRIPT_DIR}/ralph-pipeline.sh" --preflight
     return $?
+  fi
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    log "[DRY RUN] Plan parsed successfully. Would create ${_slice_count} worktree(s)."
+    log "[DRY RUN] Integration branch: ${INTEGRATION_BRANCH}"
+    log "[DRY RUN] Unified PR: $([ "$UNIFIED_PR" -eq 1 ] && echo "yes" || echo "no (merge only)")"
+    echo "$slices_data" | while IFS='|' read -r s o d f p; do
+      log "[DRY RUN] Slice ${s}: worktree at ${WORKTREE_BASE}/${s}, branch $(slice_branch_name "$s"), plan: ${p:-none}"
+    done
+    return 0
   fi
 
   # Always create an integration branch for sequential merge
@@ -779,16 +789,6 @@ main() {
   "status": "running"
 }
 ORCH_JSON
-
-  if [ "$DRY_RUN" -eq 1 ]; then
-    log "[DRY RUN] Plan parsed successfully. Would create ${_slice_count} worktree(s)."
-    log "[DRY RUN] Integration branch: ${INTEGRATION_BRANCH}"
-    log "[DRY RUN] Unified PR: $([ "$UNIFIED_PR" -eq 1 ] && echo "yes" || echo "no (merge only)")"
-    echo "$slices_data" | while IFS='|' read -r s o d f p; do
-      log "[DRY RUN] Slice ${s}: worktree at ${WORKTREE_BASE}/${s}, branch $(slice_branch_name "$s"), plan: ${p:-none}"
-    done
-    return 0
-  fi
 
   # --- Save slices to temp file for iteration without pipe-subshell ---
   _slices_file="${ORCH_STATE}/.slices.dat"
