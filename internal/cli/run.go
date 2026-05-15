@@ -5,12 +5,15 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 
 	"github.com/spf13/cobra"
 
 	"github.com/yoshpy-dev/ralph/internal/action"
 	"github.com/yoshpy-dev/ralph/internal/config"
 )
+
+const activePlansDir = "docs/plans/active"
 
 func newRunCmd() *cobra.Command {
 	var (
@@ -77,6 +80,14 @@ func runPipeline(planPath string, maxIter, maxPar int, preflight, resume, dryRun
 	env = appendEnvIfMissing(env, "RALPH_CODEX_APPROVAL_POLICY", cfg.Loop.CodexApprovalPolicy)
 	env = appendEnvIfMissing(env, "RALPH_CLAUDE_REVIEWER_MODEL", cfg.Loop.ClaudeReviewerModel)
 
+	if planPath == "" {
+		planPath, err = detectLatestPlanDir(activePlansDir)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "Auto-detected plan: %s\n", planPath)
+	}
+
 	// Find the orchestrator script.
 	scriptPath, err := findScript("ralph-orchestrator.sh")
 	if err != nil {
@@ -108,6 +119,37 @@ func runPipeline(planPath string, maxIter, maxPar int, preflight, resume, dryRun
 	execCmd.Stdin = os.Stdin
 
 	return execCmd.Run()
+}
+
+func detectLatestPlanDir(activeDir string) (string, error) {
+	entries, err := os.ReadDir(activeDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("no directory-based plan found. Create one with './scripts/new-ralph-plan.sh --type <type> <slug>' or specify --plan <directory>")
+		}
+		return "", fmt.Errorf("read active plans: %w", err)
+	}
+
+	var plans []string
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		planDir := filepath.Join(activeDir, entry.Name())
+		manifest := filepath.Join(planDir, "_manifest.md")
+		if _, err := os.Stat(manifest); err == nil {
+			plans = append(plans, planDir)
+		} else if !os.IsNotExist(err) {
+			return "", fmt.Errorf("inspect plan manifest %q: %w", manifest, err)
+		}
+	}
+
+	if len(plans) == 0 {
+		return "", fmt.Errorf("no directory-based plan found. Create one with './scripts/new-ralph-plan.sh --type <type> <slug>' or specify --plan <directory>")
+	}
+
+	sort.Sort(sort.Reverse(sort.StringSlice(plans)))
+	return plans[0], nil
 }
 
 func newRetryCmd() *cobra.Command {
