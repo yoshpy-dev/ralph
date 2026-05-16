@@ -555,6 +555,47 @@ cleanup_plan_artifacts() {
   log "Cleanup complete."
 }
 
+cleanup_stale_orchestrator_without_plan() {
+  _plan="$1"
+  _dry_run="$2"
+
+  log "Current orchestrator state is stale."
+  log "Plan missing: ${_plan:-not recorded}"
+
+  for _status_file in "${ORCH_STATE}"/slice-*.status; do
+    [ -f "$_status_file" ] || continue
+    _slug="$(basename "$_status_file" .status | sed 's/^slice-//')"
+    _wt_path="${WORKTREE_BASE}/${_slug}"
+    if [ -d "$_wt_path" ]; then
+      if [ "$_dry_run" -eq 1 ]; then
+        log "[DRY RUN] Would remove worktree: ${_wt_path}"
+      else
+        git worktree remove "$_wt_path" --force >/dev/null 2>&1 || true
+        log "Removed worktree: ${_wt_path}"
+      fi
+    fi
+  done
+
+  if [ "$_dry_run" -eq 1 ]; then
+    log "[DRY RUN] Would remove stale orchestrator state: ${ORCH_STATE}"
+    log "[DRY RUN] Branch cleanup skipped because plan metadata is unavailable."
+    return 0
+  fi
+
+  if [ -d "$ORCH_STATE" ]; then
+    _archive_ts="$(ts_file)"
+    _archive_dest="${ARCHIVE_DIR}/${_archive_ts}/orchestrator"
+    mkdir -p "$_archive_dest"
+    cp -r "${ORCH_STATE}/." "$_archive_dest"/
+    rm -rf "$ORCH_STATE"
+    log "Archived stale orchestrator state to ${_archive_dest}"
+    log "Removed stale orchestrator state: ${ORCH_STATE}"
+  else
+    log "No orchestrator state found."
+  fi
+  log "Branch cleanup skipped because plan metadata is unavailable."
+}
+
 cmd_cleanup() {
   _plan=""
   _stale=0
@@ -576,7 +617,6 @@ cmd_cleanup() {
     _orch_json="${ORCH_STATE}/orchestrator.json"
     [ -f "$_orch_json" ] || { log "No orchestrator state found."; return 0; }
     _plan="$(jq -r '.plan // ""' "$_orch_json" 2>/dev/null || echo "")"
-    [ -n "$_plan" ] || { log_error "orchestrator state does not record a plan"; return 1; }
 
     _days="$(printf '%s' "$_older_than" | sed -E 's/d$//')"
     if ! printf '%s' "$_days" | grep -Eq '^[0-9]+$'; then
@@ -589,6 +629,11 @@ cmd_cleanup() {
     if [ "$_age_days" -lt "$_days" ]; then
       log "Current orchestrator state is ${_age_days}d old; threshold is ${_days}d. Nothing to clean."
       return 0
+    fi
+
+    if [ -z "$_plan" ] || [ ! -d "$_plan" ] || [ ! -f "${_plan%/}/_manifest.md" ]; then
+      cleanup_stale_orchestrator_without_plan "$_plan" "$_dry_run"
+      return $?
     fi
   fi
 

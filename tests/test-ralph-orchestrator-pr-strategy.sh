@@ -138,5 +138,46 @@ assert_contains "stacked without dependency rationale warns" "Stacked PR strateg
 assert_contains "cleanup dry-run reports plan" "Cleanup plan: ${plan_dir}" cleanup.log
 assert_contains "cleanup dry-run reports integration branch" "Integration branch: feat/90/grouped" cleanup.log
 
+missing_plan="${_tmp}/missing-plan"
+mkdir -p .harness/state/orchestrator
+cat > .harness/state/orchestrator/orchestrator.json <<JSON
+{
+  "schema_version": 1,
+  "plan": "${missing_plan}",
+  "started": "2026-05-13T04:41:39Z",
+  "max_parallel": 4,
+  "max_iterations": 20,
+  "unified_pr": false,
+  "status": "running"
+}
+JSON
+
+"$RALPH" cleanup --stale --older-than 0d --dry-run > stale-missing-dry-run.log
+assert_contains "stale cleanup dry-run reports stale state" "Current orchestrator state is stale." stale-missing-dry-run.log
+assert_contains "stale cleanup dry-run reports missing plan" "Plan missing: ${missing_plan}" stale-missing-dry-run.log
+assert_contains "stale cleanup dry-run reports state removal" "[DRY RUN] Would remove stale orchestrator state: .harness/state/orchestrator" stale-missing-dry-run.log
+assert_contains "stale cleanup dry-run skips branch cleanup" "[DRY RUN] Branch cleanup skipped because plan metadata is unavailable." stale-missing-dry-run.log
+if [ -f .harness/state/orchestrator/orchestrator.json ]; then
+  pass "stale cleanup dry-run preserves orchestrator state"
+else
+  fail "stale cleanup dry-run preserves orchestrator state"
+fi
+
+"$RALPH" cleanup --stale --older-than 0d > stale-missing-cleanup.log
+assert_contains "stale cleanup archives missing-plan state" "Archived stale orchestrator state to .harness/state/loop-archive/" stale-missing-cleanup.log
+assert_contains "stale cleanup removes missing-plan state" "Removed stale orchestrator state: .harness/state/orchestrator" stale-missing-cleanup.log
+assert_contains "stale cleanup skips branch cleanup without metadata" "Branch cleanup skipped because plan metadata is unavailable." stale-missing-cleanup.log
+assert_not_exists "stale cleanup removes orchestrator json" ".harness/state/orchestrator/orchestrator.json"
+
+"$RALPH" status --json > stale-status.json
+assert_contains "status no longer reports stale run" "\"error\":\"no_active_orchestrator\"" stale-status.json
+
+if "$RALPH" cleanup --plan "$missing_plan" --dry-run > missing-explicit.log 2>&1; then
+  fail "explicit missing plan exits non-zero"
+else
+  pass "explicit missing plan exits non-zero"
+fi
+assert_contains "explicit missing plan still fails clearly" "cleanup requires a Ralph Loop plan directory with _manifest.md: ${missing_plan}" missing-explicit.log
+
 printf '\nRalph orchestrator PR strategy tests: %d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
