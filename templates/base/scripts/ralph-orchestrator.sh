@@ -89,6 +89,7 @@ fi
 ts() { date -u '+%Y-%m-%dT%H:%M:%SZ'; }
 ts_file() { date -u '+%Y-%m-%d-%H%M%S'; }
 log() { printf '[%s] %s\n' "$(ts)" "$*"; }
+log_warn() { printf '[%s] WARNING: %s\n' "$(ts)" "$*" >&2; }
 log_error() { printf '[%s] ERROR: %s\n' "$(ts)" "$*" >&2; }
 
 # ═══════════════════════════════════════════════════════════════════
@@ -287,6 +288,168 @@ parse_pr_strategy() {
   ' "$_manifest"
 }
 
+# Parse a scalar field from the optional [pr_strategy_decision] manifest block.
+parse_pr_strategy_decision_field() {
+  _plan_dir="$1"
+  _field="$2"
+  _manifest="${_plan_dir}/_manifest.md"
+  [ -f "$_manifest" ] || return 0
+
+  awk -v want="$_field" '
+    function trim(s) {
+      sub(/^[[:space:]]+/, "", s)
+      sub(/[[:space:]]+$/, "", s)
+      return s
+    }
+    function clean_value(v) {
+      sub(/[[:space:]]*#.*/, "", v)
+      v = trim(v)
+      gsub(/^["`]|["`]$/, "", v)
+      return v
+    }
+    /^[[:space:]]*\[pr_strategy_decision\][[:space:]]*$/ {
+      in_decision = 1
+      next
+    }
+    /^[[:space:]]*\[/ {
+      if (in_decision) {
+        exit
+      }
+    }
+    in_decision {
+      line = $0
+      sub(/[[:space:]]*#.*/, "", line)
+      key = line
+      sub(/[[:space:]]*=.*/, "", key)
+      key = trim(key)
+      if (key == want) {
+        sub(/^[^=]*=[[:space:]]*/, "", line)
+        print clean_value(line)
+        exit
+      }
+    }
+  ' "$_manifest"
+}
+
+count_pr_strategy_group_rationales() {
+  _plan_dir="$1"
+  _manifest="${_plan_dir}/_manifest.md"
+  [ -f "$_manifest" ] || { printf '0\n'; return 0; }
+  grep -c '^[[:space:]]*\[\[pr_strategy_decision\.group_rationale\]\]' "$_manifest" 2>/dev/null || true
+}
+
+has_stacked_dependency_rationale() {
+  _plan_dir="$1"
+  _manifest="${_plan_dir}/_manifest.md"
+  [ -f "$_manifest" ] || return 1
+
+  awk '
+    function trim(s) {
+      sub(/^[[:space:]]+/, "", s)
+      sub(/[[:space:]]+$/, "", s)
+      return s
+    }
+    function value(line) {
+      sub(/[[:space:]]*#.*/, "", line)
+      sub(/^[^=]*=[[:space:]]*/, "", line)
+      line = trim(line)
+      gsub(/^["`]|["`]$/, "", line)
+      return line
+    }
+    function list_value(line) {
+      line = value(line)
+      gsub(/[\[\]"`]/, "", line)
+      gsub(/[[:space:]]/, "", line)
+      return line
+    }
+    function flush_group() {
+      if (in_group && reason != "" && depends_on != "") {
+        found = 1
+      }
+    }
+    /^[[:space:]]*\[\[pr_strategy_decision\.group_rationale\]\][[:space:]]*$/ {
+      flush_group()
+      in_group = 1
+      reason = ""
+      depends_on = ""
+      next
+    }
+    /^[[:space:]]*\[/ {
+      if (in_group) {
+        flush_group()
+        in_group = 0
+      }
+      next
+    }
+    in_group {
+      line = $0
+      sub(/[[:space:]]*#.*/, "", line)
+      key = line
+      sub(/[[:space:]]*=.*/, "", key)
+      key = trim(key)
+      if (key == "reason") {
+        reason = value(line)
+      } else if (key == "depends_on" || key == "depends") {
+        depends_on = list_value(line)
+      }
+    }
+    END {
+      flush_group()
+      exit(found ? 0 : 1)
+    }
+  ' "$_manifest"
+}
+
+pr_strategy_decision_json() {
+  _plan_dir="$1"
+  _effective="$2"
+  _recorded="$3"
+  _override="$4"
+  _override_mismatch="$5"
+
+  _selected="$(parse_pr_strategy_decision_field "$_plan_dir" selected || true)"
+  _recommended_by="$(parse_pr_strategy_decision_field "$_plan_dir" recommended_by || true)"
+  _human_approved="$(parse_pr_strategy_decision_field "$_plan_dir" human_approved || true)"
+  _approval_note="$(parse_pr_strategy_decision_field "$_plan_dir" approval_note || true)"
+  _rationale="$(parse_pr_strategy_decision_field "$_plan_dir" rationale || true)"
+  _group_rationale_count="$(count_pr_strategy_group_rationales "$_plan_dir")"
+  _stacked_dependency_rationale=false
+  if has_stacked_dependency_rationale "$_plan_dir"; then
+    _stacked_dependency_rationale=true
+  fi
+
+  jq -n \
+    --arg effective "$_effective" \
+    --arg selected "$_selected" \
+    --arg recorded "$_recorded" \
+    --arg recommended_by "$_recommended_by" \
+    --arg human_approved "$_human_approved" \
+    --arg approval_note "$_approval_note" \
+    --arg rationale "$_rationale" \
+    --arg override "$_override" \
+    --argjson override_mismatch "$_override_mismatch" \
+    --argjson group_rationale_count "$_group_rationale_count" \
+    --argjson stacked_dependency_rationale "$_stacked_dependency_rationale" \
+    '{
+      effective: $effective,
+      selected: (if $selected == "" then null else $selected end),
+      recorded_strategy: (if $recorded == "" then null else $recorded end),
+      recommended_by: (if $recommended_by == "" then null else $recommended_by end),
+      human_approved: (
+        if $human_approved == "true" then true
+        elif $human_approved == "false" then false
+        elif $human_approved == "" then null
+        else $human_approved end
+      ),
+      approval_note: (if $approval_note == "" then null else $approval_note end),
+      rationale: (if $rationale == "" then null else $rationale end),
+      override: (if $override == "" then null else $override end),
+      override_mismatch: $override_mismatch,
+      group_rationale_count: $group_rationale_count,
+      stacked_dependency_rationale: $stacked_dependency_rationale
+    }'
+}
+
 normalize_list_value() {
   _raw="$1"
   printf '%s' "$_raw" |
@@ -311,19 +474,37 @@ parse_pr_groups() {
   _name=""
   _slices=""
   _depends=""
+  _in_group=0
   while IFS= read -r line; do
     _clean="$(printf '%s' "$line" | sed -E 's/[[:space:]]*#.*$//;s/^[[:space:]]*//;s/[[:space:]]*$//')"
     [ -n "$_clean" ] || continue
 
     case "$_clean" in
       "[[pr_groups]]")
-        if [ -n "$_name" ] || [ -n "$_slices" ]; then
+        if [ "$_in_group" -eq 1 ] && { [ -n "$_name" ] || [ -n "$_slices" ]; }; then
           printf '%s|%s|%s\n' "$_name" "$_slices" "$_depends"
         fi
+        _in_group=1
         _name=""
         _slices=""
         _depends=""
+        continue
         ;;
+      "["*)
+        if [ "$_in_group" -eq 1 ] && { [ -n "$_name" ] || [ -n "$_slices" ]; }; then
+          printf '%s|%s|%s\n' "$_name" "$_slices" "$_depends"
+        fi
+        _in_group=0
+        _name=""
+        _slices=""
+        _depends=""
+        continue
+        ;;
+    esac
+
+    [ "$_in_group" -eq 1 ] || continue
+
+    case "$_clean" in
       name[[:space:]]*=*|"- name:"*)
         _name="$(printf '%s' "$_clean" | sed -E 's/^[^:=]*[:=][[:space:]]*//;s/["'\''`]//g;s/^[[:space:]]*//;s/[[:space:]]*$//')"
         _name="$(sanitize_branch_component "$_name")"
@@ -337,7 +518,7 @@ parse_pr_groups() {
     esac
   done < "$_manifest"
 
-  if [ -n "$_name" ] || [ -n "$_slices" ]; then
+  if [ "$_in_group" -eq 1 ] && { [ -n "$_name" ] || [ -n "$_slices" ]; }; then
     printf '%s|%s|%s\n' "$_name" "$_slices" "$_depends"
   fi
 }
@@ -1113,7 +1294,15 @@ main() {
   slices_data="$(parse_slices "$PLAN_FILE")"
   locklist="$(parse_locklist "$PLAN_FILE")"
   _manifest_strategy="$(parse_pr_strategy "$PLAN_FILE" || true)"
-  PR_STRATEGY="${PR_STRATEGY_OVERRIDE:-${_manifest_strategy:-grouped}}"
+  _decision_strategy="$(parse_pr_strategy_decision_field "$PLAN_FILE" selected || true)"
+  _recorded_strategy="${_decision_strategy:-$_manifest_strategy}"
+  _override_mismatch=false
+
+  if [ -n "$_manifest_strategy" ] && [ -n "$_decision_strategy" ] && [ "$_manifest_strategy" != "$_decision_strategy" ]; then
+    log_warn "Manifest pr_strategy '${_manifest_strategy}' differs from pr_strategy_decision.selected '${_decision_strategy}'; using decision selected value."
+  fi
+
+  PR_STRATEGY="${PR_STRATEGY_OVERRIDE:-${_recorded_strategy:-grouped}}"
   case "$PR_STRATEGY" in
     grouped|stacked|unified) ;;
     *)
@@ -1121,12 +1310,22 @@ main() {
       return 1
       ;;
   esac
+  if [ -n "$PR_STRATEGY_OVERRIDE" ] && [ -n "$_recorded_strategy" ] && [ "$PR_STRATEGY_OVERRIDE" != "$_recorded_strategy" ]; then
+    _override_mismatch=true
+    log_warn "Runtime --pr-strategy '${PR_STRATEGY_OVERRIDE}' overrides manifest PR strategy '${_recorded_strategy}'."
+  fi
+  if [ "$PR_STRATEGY" = "stacked" ] && ! has_stacked_dependency_rationale "$PLAN_FILE"; then
+    log_warn "Stacked PR strategy selected without dependency rationale. Add [[pr_strategy_decision.group_rationale]] with depends_on and reason before plan approval."
+  fi
+  _decision_human_approved="$(parse_pr_strategy_decision_field "$PLAN_FILE" human_approved || true)"
+  _decision_json="$(pr_strategy_decision_json "$PLAN_FILE" "$PR_STRATEGY" "${_recorded_strategy:-}" "$PR_STRATEGY_OVERRIDE" "$_override_mismatch")"
   if [ "$PR_STRATEGY" = "unified" ]; then
     UNIFIED_PR=1
   else
     UNIFIED_PR=0
   fi
   log "PR strategy: ${PR_STRATEGY}"
+  log "PR strategy decision: selected=${_decision_strategy:-not-recorded}, human approved=${_decision_human_approved:-not-recorded}"
 
   # Auto-detect additional shared files
   auto_shared="$(detect_shared_files "$slices_data")"
@@ -1196,6 +1395,7 @@ main() {
     log "[DRY RUN] Plan parsed successfully. Would create ${_slice_count} worktree(s)."
     log "[DRY RUN] Integration branch: ${INTEGRATION_BRANCH}"
     log "[DRY RUN] PR strategy: ${PR_STRATEGY}"
+    log "[DRY RUN] PR strategy decision: selected=${_decision_strategy:-not-recorded}, human approved=${_decision_human_approved:-not-recorded}"
     echo "$slices_data" | while IFS='|' read -r s o d f p; do
       log "[DRY RUN] Slice ${s}: worktree at ${WORKTREE_BASE}/${s}, branch $(slice_branch_name "$s"), plan: ${p:-none}"
     done
@@ -1231,6 +1431,7 @@ main() {
   "max_parallel": ${MAX_PARALLEL},
   "max_iterations": ${MAX_ITERATIONS},
   "pr_strategy": "${PR_STRATEGY}",
+  "pr_strategy_decision": ${_decision_json},
   "pr_groups": ${_groups_json},
   "unified_pr": $([ "$UNIFIED_PR" -eq 1 ] && echo true || echo false),
   "integration_branch": "${INTEGRATION_BRANCH}",
@@ -1448,6 +1649,7 @@ ORCH_JSON
   "failed": ${_failed},
   "merge_status": "${_merge_status}",
   "pr_strategy": "${PR_STRATEGY}",
+  "pr_strategy_decision": ${_decision_json},
   "pr_groups": $(pr_groups_json "$_groups_file"),
   "unified_pr": $([ "$UNIFIED_PR" -eq 1 ] && echo true || echo false),
   "integration_branch": "${INTEGRATION_BRANCH}",

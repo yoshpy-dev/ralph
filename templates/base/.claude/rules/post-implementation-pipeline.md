@@ -68,6 +68,7 @@ After all slices are merged into the typed integration branch generated from the
 - `--fix-all`: ALL self-review findings (CRITICAL+HIGH+MEDIUM+LOW > 0) override COMPLETE; WORTH_CONSIDERING cross-review findings trigger Inner Loop regression (same as ACTION_REQUIRED)
 - Integration runs set `RALPH_VERIFY_SCOPE=full` unless explicitly overridden, so verify/test cover every detected language on the merged branch.
 - The default PR strategy is `grouped`; `unified` is an explicit fallback. In grouped/stacked mode, integration fixes must be applied back to submitted group branches before PRs are marked ready.
+- The Ralph Loop manifest records the PR strategy decision. AI recommends the strategy and rationale; human approval at plan approval time makes the decision final. Runtime overrides must be visible warnings, not silent changes.
 
 **Intentional deviation in Ralph Loop:** Per-slice pipelines (`ralph-pipeline.sh`) do NOT stop on CRITICAL self-review findings — they log them and let verify/test catch real issues. This differs from the standard `/work` flow where CRITICAL findings block the pipeline. The rationale is that autonomous pipelines benefit from letting downstream gates (verify, test) confirm whether the finding is a true positive before halting. This deviation is tracked in `docs/tech-debt/README.md`.
 

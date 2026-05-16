@@ -38,6 +38,19 @@ setup() {
   "max_parallel": 4,
   "max_iterations": 20,
   "pr_strategy": "grouped",
+  "pr_strategy_decision": {
+    "effective": "grouped",
+    "selected": "grouped",
+    "recorded_strategy": "grouped",
+    "recommended_by": "ai",
+    "human_approved": false,
+    "approval_note": "pending plan approval",
+    "rationale": "Grouped PRs are independently reviewable.",
+    "override": null,
+    "override_mismatch": false,
+    "group_rationale_count": 2,
+    "stacked_dependency_rationale": false
+  },
   "pr_groups": [
     {"name":"core","slices":["1-auth-api","2-user-model"],"depends":[]},
     {"name":"docs-tests","slices":["3-migrations","4-docs"],"depends":["core"]}
@@ -249,6 +262,7 @@ test_table_render() {
 
   assert_contains "table: shows plan" "docs/plans/active/2026-04-10-auth-api/" "$_output"
   assert_contains "table: shows PR mode" "PR mode: grouped" "$_output"
+  assert_contains "table: shows strategy decision" "Decision: selected=grouped  human approved=false" "$_output"
   assert_contains "table: shows integration branch" "Integration: feat/auth-api" "$_output"
   assert_contains "table: shows cleanup status" "Cleanup: pending" "$_output"
   assert_contains "table: shows PR group" "core: 1-auth-api,2-user-model" "$_output"
@@ -300,6 +314,12 @@ test_json_render() {
 
   _j_strategy="$(printf '%s' "$_json" | jq -r '.pr_strategy' 2>/dev/null || echo "")"
   assert_eq "json: pr_strategy=grouped" "grouped" "$_j_strategy"
+
+  _j_decision_selected="$(printf '%s' "$_json" | jq -r '.pr_strategy_decision.selected' 2>/dev/null || echo "")"
+  assert_eq "json: decision selected=grouped" "grouped" "$_j_decision_selected"
+
+  _j_decision_approved="$(printf '%s' "$_json" | jq -r '.pr_strategy_decision.human_approved' 2>/dev/null || echo "")"
+  assert_eq "json: human_approved=false" "false" "$_j_decision_approved"
 
   _j_cleanup="$(printf '%s' "$_json" | jq -r '.cleanup_status' 2>/dev/null || echo "")"
   assert_eq "json: cleanup_status=pending" "pending" "$_j_cleanup"
