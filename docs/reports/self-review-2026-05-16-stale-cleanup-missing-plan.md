@@ -19,6 +19,8 @@ No CRITICAL, HIGH, or MEDIUM findings.
 
 - The missing-plan recovery path is only reachable from `cleanup --stale` after
   the stale threshold is met.
+- `file_mtime_epoch` prefers GNU `stat -c` and falls back to BSD `stat -f`, so
+  Linux does not parse `stat -f` filesystem output as an epoch value.
 - Explicit `cleanup --plan <missing-dir>` continues to use
   `cleanup_plan_artifacts` and fail clearly.
 - Branch cleanup is skipped when plan metadata is unavailable, avoiding guessed

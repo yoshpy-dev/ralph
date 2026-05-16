@@ -15,10 +15,15 @@
 - `scripts/check-sync.sh`: PASS
 - `scripts/check-skill-sync.sh`: PASS
 - `scripts/run-verify.sh`: PASS after rerun with normal filesystem permissions
+- CI follow-up: PR #95 failed on Ubuntu because `stat -f '%m'` produced
+  filesystem metadata instead of an epoch value. `file_mtime_epoch` now tries
+  GNU `stat -c '%Y'` first and validates numeric output before falling back to
+  BSD `stat -f '%m'`.
 
 ## Evidence
 
 - Raw full verify evidence: `docs/evidence/verify-2026-05-16-041215.log`
+- Raw full verify evidence after CI follow-up: `docs/evidence/verify-2026-05-16-045002.log`
 - Initial sandboxed full verify failed only on Go build cache access under
   `~/Library/Caches/go-build`; raw evidence: `docs/evidence/verify-2026-05-16-041053.log`
 

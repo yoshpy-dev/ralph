@@ -24,3 +24,4 @@ Covered:
 
 - `scripts/run-verify.sh`: PASS
 - Raw evidence: `docs/evidence/verify-2026-05-16-041215.log`
+- Raw evidence after CI follow-up: `docs/evidence/verify-2026-05-16-045002.log`

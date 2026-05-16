@@ -473,7 +473,17 @@ AUDIT_JSON
 
 file_mtime_epoch() {
   _path="$1"
-  stat -f '%m' "$_path" 2>/dev/null || stat -c '%Y' "$_path" 2>/dev/null || echo 0
+  _mtime="$(stat -c '%Y' "$_path" 2>/dev/null || true)"
+  case "$_mtime" in
+    ''|*[!0-9]*) ;;
+    *) printf '%s\n' "$_mtime"; return ;;
+  esac
+
+  _mtime="$(stat -f '%m' "$_path" 2>/dev/null || true)"
+  case "$_mtime" in
+    ''|*[!0-9]*) printf '0\n' ;;
+    *) printf '%s\n' "$_mtime" ;;
+  esac
 }
 
 default_branch() {
