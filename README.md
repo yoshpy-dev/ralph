@@ -143,7 +143,7 @@ The philosophy: **a map, not a manual**. Keep `AGENTS.md` small, push detail int
 │   ├── settings.json         # hooks, permissions, env
 │   ├── hooks/                # deterministic runtime guardrails
 │   ├── skills/               # on-demand workflows (plan, work, verify, ...)
-│   ├── agents/               # specialized subagents (Claude only)
+│   ├── agents/               # Claude Code subagent definitions
 │   └── rules/                # conditional, path-scoped guidance (read by both agents)
 ├── .codex/
 │   ├── config.toml           # model, sandbox, approval, hooks (loads after `codex trust .`)
@@ -265,7 +265,7 @@ on drift so the two agent surfaces cannot quietly diverge.
 | Concern | Claude Code | Codex |
 |---------|-------------|-------|
 | Skill invocation | `/skill-name` slash command | `$skill-name` mention or `/skills` menu — `/skill-name` collides with Codex built-ins (`/plan`, `/review`, `/status`) |
-| Subagents in `/work` post-impl | `Task(subagent_type=...)` parallel | sequential inline (single agent) |
+| Subagents in `/work` post-impl | `Task(subagent_type=...)` calls | `.codex/agents/` custom agents with the same phase roles |
 | Structured prompts | `AskUserQuestion` | numbered stdin prompt |
 | Cross-model reviewer | calls `codex exec review` | calls `claude -p` with adversarial reviewer prompt |
 | Permission policy | `permission_mode = "auto"` | `sandbox_mode = "workspace-write"` + `approval_policy = "on-request"` |

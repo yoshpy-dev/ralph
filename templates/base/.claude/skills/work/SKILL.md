@@ -42,11 +42,15 @@ Work from the active plan, not from memory alone.
 10. If repeated failures occur, reduce scope, inspect evidence, and revise the plan instead of thrashing.
 11. Keep docs, contracts, and tests aligned with behavior changes.
 12. Before presenting completion, run `./scripts/run-verify.sh` or equivalent deterministic checks.
-13. After criteria met, delegate the post-implementation pipeline to subagents per `.claude/rules/subagent-policy.md`:
-    a. `Task(subagent_type="reviewer")` → `/self-review` — stop if CRITICAL findings
-    b. `Task(subagent_type="verifier")` → `/verify` — stop if fail verdict
-    c. `Task(subagent_type="tester")` → `/test` — stop if fail verdict
-    d. `Task(subagent_type="doc-maintainer")` → `/sync-docs`
+13. After criteria met, run the post-implementation pipeline per `.claude/rules/subagent-policy.md`:
+    a. `reviewer` → `/self-review` — stop if CRITICAL findings
+    b. `verifier` → `/verify` — stop if fail verdict
+    c. `tester` → `/test` — stop if fail verdict
+    d. `doc-maintainer` → `/sync-docs`
+    In Claude Code, use `Task(subagent_type=...)` calls. In Codex, use the
+    matching `.codex/agents/` custom agents and keep the same order. If a
+    subagent dispatch fails, run that step inline and note the fallback in the
+    report.
     e. **Invoke `/cross-review` via the Skill tool** (optional, inline — if the reviewer CLI is unavailable, skip to `/pr`). The skill reads `cycle-count.json` and enforces `RALPH_STANDARD_MAX_PIPELINE_CYCLES` (default 2). On re-run after ACTION_REQUIRED fixes, `/cross-review` increments `cycle-count.json`.
     f. **Invoke `/pr` via the Skill tool** — do NOT run `gh pr create` directly. The `/pr` skill enforces the Japanese template, pre-checks, plan archiving, and task worktree/local branch cleanup. On success, `/pr` deletes `.harness/state/standard-pipeline/active-plan.json` and `cycle-count.json`.
 
@@ -98,7 +102,7 @@ the conventions in AGENTS.md and `.codex/AGENTS.override.md`.
 |--------|-------------|-------|
 | Skill invocation | `/skill-name` slash command | `$skill-name` mention or the `/skills` menu (avoid the `/skill-name` form — it collides with built-ins) |
 | Skill body path | `.claude/skills/<name>/SKILL.md` | `.agents/skills/<name>/SKILL.md` |
-| Subagents | Parallel calls via `Task(subagent_type=...)` | Sequential inline execution — chained within a single agent |
+| Subagent mechanism | `Task(subagent_type=...)` when a policy delegates | `.codex/agents/` custom agents when a policy delegates |
 | Structured prompts | `AskUserQuestion` | Numbered options printed to stdout, awaiting a digit reply |
 | Artifacts | `docs/reports/`, `docs/plans/`, `docs/specs/` (shared) | Same (CLI-agnostic) |
 

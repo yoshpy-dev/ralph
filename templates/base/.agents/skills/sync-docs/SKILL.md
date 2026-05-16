@@ -1,6 +1,6 @@
 ---
 name: sync-docs
-description: Sync plans, docs, and instruction files after behavior, commands, contracts, or workflows change. Also covers harness-internal consistency after skill, hook, rule, or script changes. Invoked as a delegated subagent task via Task(subagent_type="doc-maintainer") in the post-implementation pipeline, after /test and before /cross-review.
+description: Sync plans, docs, and instruction files after behavior, commands, contracts, or workflows change. Also covers harness-internal consistency after skill, hook, rule, or script changes. Invoked after /test and before /cross-review as the doc-maintainer agent; inline execution is only a dispatch-failure fallback.
 ---
 Use this skill when implementation or harness structure changed enough that documentation may have drifted.
 
@@ -38,7 +38,7 @@ the conventions in AGENTS.md and `.codex/AGENTS.override.md`.
 |--------|-------------|-------|
 | Skill invocation | `/skill-name` slash command | `$skill-name` mention or the `/skills` menu (avoid the `/skill-name` form — it collides with built-ins) |
 | Skill body path | `.claude/skills/<name>/SKILL.md` | `.agents/skills/<name>/SKILL.md` |
-| Subagents | Parallel calls via `Task(subagent_type=...)` | Sequential inline execution — chained within a single agent |
+| Subagent mechanism | `Task(subagent_type=...)` when a policy delegates | `.codex/agents/` custom agents when a policy delegates |
 | Structured prompts | `AskUserQuestion` | Numbered options printed to stdout, awaiting a digit reply |
 | Artifacts | `docs/reports/`, `docs/plans/`, `docs/specs/` (shared) | Same (CLI-agnostic) |
 

@@ -31,7 +31,9 @@ Build coding-agent workflows that are:
 9. PR (auto — includes hand-off)
 10. CI verify + human merge
 
-Steps 4–9 run via subagents in 標準フロー. In Ralph Loop, they are handled internally by the pipeline scripts.
+Steps 4–7 run through phase-specific subagents in 標準フロー for both
+Claude Code and Codex; `/cross-review` and `/pr` remain inline. In Ralph Loop,
+steps 4–9 are handled internally by the pipeline scripts.
 
 Ralph Loop runs under whichever driver is selected by `RALPH_LOOP_DRIVER` (or `[loop] driver` in `ralph.toml`); the cross-review reviewer is always the opposite agent. `ralph status` and `ralph doctor` print the effective driver and source.
 
@@ -68,11 +70,11 @@ task worktree and local branch while leaving the remote PR branch intact.
 - `docs/quality/` — definition of done and quality gates
 - `.claude/rules/` — path-scoped guidance (read by both agents)
 - `.claude/skills/` — Claude-side on-demand workflows
-- `.claude/agents/` — specialized subagents (Claude only)
+- `.claude/agents/` — Claude Code subagent definitions
 - `.claude/hooks/` — deterministic runtime checks
   - `check_mojibake.sh` + `mojibake-allowlist` — temporary U+FFFD detection guard for Claude Code SSE mojibake (remove once upstream Issue #43746 ships)
 - `.agents/skills/` — Codex-side skill bodies (mirrors `.claude/skills/`; kept in lock-step by `scripts/check-skill-sync.sh`)
-- `.codex/` — Codex project config for this meta-repo (`config.toml`, `agents/`, `hooks/`, `AGENTS.override.md`, `README.md`); same shape as `templates/base/.codex/` so ralph dogfoods the parity it ships
+- `.codex/` — Codex project config for this meta-repo (`config.toml`, `agents/`, `hooks/`, `AGENTS.override.md`, `README.md`); `agents/` contains Codex custom agent definitions; same shape as `templates/base/.codex/` so ralph dogfoods the parity it ships
 - `templates/base/.codex/` — `ralph init` source for the same surface; root `.codex/` and template `.codex/` are kept identical via `scripts/check-sync.sh` (no KNOWN_DIFFS today)
 - `packs/languages/` — language-specific depth (also copied to `templates/packs/` for embedding)
 - `scripts/` — reusable verification and bootstrap scripts (includes legacy `ralph` shell CLI, `ralph-config.sh`, `ralph-worktree.sh`, `ralph-pipeline.sh`, `ralph-orchestrator.sh`, `ralph-cli-driver.sh` (driver dispatcher: `run_agent` / `pick_reviewer` / `count_triage_findings`), `install.sh`, drift gate `check-skill-sync.sh`, Codex availability probe `codex-check.sh`)
