@@ -10,14 +10,14 @@
 
 - `.claude/rules/`: path-scoped or topic-scoped guidance (read by both agents)
 - `.claude/skills/`: Claude-side skill bodies (mirrored to `.agents/skills/`)
-- `.claude/agents/`: specialized subagents (Claude only)
+- `.claude/agents/`: Claude Code subagent definitions
 - `.claude/hooks/`: deterministic hook scripts
 - `.claude/settings.json`: hook and permission configuration
 
 ## Codex control plane
 
 - `.agents/skills/`: Codex-side skill bodies (kept in lock-step with `.claude/skills/` via `scripts/check-skill-sync.sh`)
-- `.codex/`: project-level Codex config for the meta-repo itself (`config.toml`, `hooks/`, `AGENTS.override.md`, `README.md`); same shape as `templates/base/.codex/` so ralph dogfoods the parity it ships
+- `.codex/`: project-level Codex config for the meta-repo itself (`config.toml`, `agents/`, `hooks/`, `AGENTS.override.md`, `README.md`); `agents/` contains Codex custom agent definitions; same shape as `templates/base/.codex/` so ralph dogfoods the parity it ships
 - `templates/base/.codex/`: `ralph init` source for the same surface; root `.codex/` and template `.codex/` are kept byte-identical, validated by `scripts/check-sync.sh` (no KNOWN_DIFFS today)
 - `internal/state/PipelineCheckpoint.CrossReviewTriage`: post-rename JSON key (`cross_review_triage`) recorded by the cross-review skill
 
