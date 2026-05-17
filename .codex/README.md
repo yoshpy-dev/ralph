@@ -52,7 +52,7 @@ will not run the ralph skill.
 | Concern | Claude Code | Codex |
 |---------|-------------|-------|
 | Skill invocation | `/skill-name` slash | `$skill-name` mention or `/skills` menu |
-| Subagents in `/work` post-impl | `Task(subagent_type=...)` parallel | Sequential, in this single agent |
+| Subagents in `/work` post-impl | `Task(subagent_type=...)` calls | `.codex/agents/` custom agents with the same phase roles |
 | Interactive choices | `AskUserQuestion` | Numbered prompt + single-digit reply |
 | Cross-model second opinion | `/cross-review` calls `codex exec review` | `/cross-review` calls `claude -p` |
 | Permission policy | `permission_mode = auto` | `sandbox_mode = workspace-write` + `approval_policy = on-request` |
@@ -71,8 +71,9 @@ post-implementation responsibilities used by the standard ralph flow:
 - `tester` — behavioral tests and failure analysis
 - `doc-maintainer` — plans, docs, templates, and reports
 
-When a Codex environment cannot dispatch separate agents, the standard flow
-still runs these responsibilities inline in the same canonical order.
+The standard Codex flow uses these custom agents by default, in the same
+canonical order as Claude Code. If Codex cannot dispatch a subagent, run that
+step inline and record the fallback in the report.
 
 ## Upgrading
 

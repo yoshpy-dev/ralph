@@ -50,6 +50,6 @@ guidance lives in `.codex/AGENTS.override.md` and `.codex/README.md`.
 
 - `.claude/rules/` — conditional rules (also read by Codex)
 - `.claude/skills/` — Claude Code skill bodies (mirrored in `.agents/skills/`)
-- `.claude/agents/` — Claude Code subagent definitions (no Codex equivalent)
+- `.claude/agents/` — Claude Code subagent definitions (Codex custom agents live under `.codex/agents/`)
 - `.claude/hooks/` — Claude Code runtime hooks (Codex equivalents in
   `.codex/config.toml` `[hooks]`)

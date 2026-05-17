@@ -2,9 +2,10 @@
 
 When and how to delegate work to subagents. Pipeline order is defined in `post-implementation-pipeline.md`.
 
-## Post-implementation pipeline for /work — delegate via subagents
+## Post-implementation pipeline for /work — phase roles
 
-After `/work` completes, run the post-implementation pipeline via subagents:
+After `/work` completes, run the post-implementation pipeline through the
+phase-specific subagents below:
 
 | Step | Subagent | Skill | Purpose |
 |------|----------|-------|---------|
@@ -13,20 +14,25 @@ After `/work` completes, run the post-implementation pipeline via subagents:
 | 3 | `tester` | `/test` | Behavioral tests |
 | 4 | `doc-maintainer` | `/sync-docs` | Documentation sync |
 
-Steps 1–3 run sequentially (output of one informs the next). Step 4 runs after tests pass. After step 4, `/cross-review` runs inline (optional), then `/pr`. Use the Task tool with `subagent_type` matching the agent name.
+Steps 1–3 run sequentially (output of one informs the next). Step 4 runs after
+tests pass. After step 4, `/cross-review` runs inline (optional), then `/pr`.
+Claude Code uses the Task tool with `subagent_type` matching the agent name.
+Codex uses the matching `.codex/agents/` custom agents. Do not fan out steps
+1–3 in parallel; verifier output may rely on self-review context, and tester
+output may rely on verifier scope.
 
 ### Execution
 
 ```
-Task(subagent_type="reviewer", prompt="Run /self-review for the current diff against plan <slug>")
+reviewer: run /self-review for the current diff against plan <slug>
   → reviewer produces docs/reports/self-review-*.md
   → if CRITICAL findings: stop and fix before continuing
 
-Task(subagent_type="verifier", prompt="Run /verify against plan <slug>")
+verifier: run /verify against plan <slug>
   → verifier produces docs/reports/verify-*.md
   → if fail verdict: stop and fix before continuing
 
-Task(subagent_type="tester", prompt="Run /test against plan <slug>")
+tester: run /test against plan <slug>
   → tester produces docs/reports/test-*.md
   → if fail verdict: do NOT proceed to /pr
 ```
@@ -49,15 +55,19 @@ If a subagent fails to execute (tool error, not a review finding), run the corre
 
 The triage step reads existing artifacts (plan, self-review report, verify report) and produces `docs/reports/cross-review-triage-<slug>.md`. No new subagent definition is needed.
 
-## Post-implementation pipeline under Codex — sequential inline
+## Post-implementation pipeline under Codex
 
-Codex does not have a subagent (`Task`) mechanism. When ralph runs under
-Codex in the standard flow (`RALPH_PRIMARY_CLI=codex` or detected at
-runtime), the four post-implementation skills run **sequentially inline in
-the single agent**:
-the agent walks the canonical order step-by-step, writing the same reports to
-`docs/reports/` that the Claude subagent path produces. This keeps artifact
-parity for `/cross-review` triage, the cycle cap, and `/pr`.
+Codex supports subagents and project-scoped custom agents under
+`.codex/agents/`. When ralph runs under Codex in the standard flow
+(`RALPH_PRIMARY_CLI=codex` or detected at runtime), use the matching custom
+agents (`reviewer`, `verifier`, `tester`, `doc-maintainer`) in the canonical
+order. Each agent writes the same reports to `docs/reports/` that the Claude
+Code subagent path produces. This keeps artifact parity for `/cross-review`
+triage, the cycle cap, and `/pr`.
+
+If Codex cannot dispatch a subagent (tool error, missing agent definition, or
+environment limitation), run that step inline and note the fallback in the
+report. Do not silently skip the phase.
 
 Cap protection: the same `RALPH_STANDARD_MAX_PIPELINE_CYCLES` ceiling applies,
 so a runaway inline pipeline cannot loop more than `cap` total runs.
@@ -71,7 +81,7 @@ That integration run uses full language scope by default; per-slice pipeline
 runs use changed-language scope for faster feedback.
 
 Execution model difference:
-- `/work`: subagent Task calls in Claude Code session
+- `/work`: phase-specific subagent calls in both Claude Code and Codex
 - `/loop`: `claude -p` invocations orchestrated by `ralph-pipeline.sh`
 
 When a user returns after a Ralph Loop run, check `./scripts/ralph status` for the final outcome rather than running the subagent chain.

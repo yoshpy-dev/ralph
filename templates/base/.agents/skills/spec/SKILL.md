@@ -42,7 +42,7 @@ Turn an abstract idea into a detailed specification.
    - Continue until the user signals that the idea is sufficiently shaped, or until further questions stop yielding new information.
    - Respect anti-bottleneck: before asking, check whether the repo already answers the question.
 
-3. **Explore the codebase**: Use `Task(subagent_type="Explore")` to investigate:
+3. **Explore the codebase**: Explore inline to investigate:
    - Existing code related to the request
    - Current patterns and conventions
    - Potential impact areas and dependencies
@@ -141,7 +141,7 @@ the conventions in AGENTS.md and `.codex/AGENTS.override.md`.
 |--------|-------------|-------|
 | Skill invocation | `/skill-name` slash command | `$skill-name` mention or the `/skills` menu (avoid the `/skill-name` form — it collides with built-ins) |
 | Skill body path | `.claude/skills/<name>/SKILL.md` | `.agents/skills/<name>/SKILL.md` |
-| Subagents | Parallel calls via `Task(subagent_type=...)` | Sequential inline execution — chained within a single agent |
+| Subagent mechanism | `Task(subagent_type=...)` when a policy delegates | `.codex/agents/` custom agents when a policy delegates |
 | Structured prompts | `AskUserQuestion` | Numbered options printed to stdout, awaiting a digit reply |
 | Artifacts | `docs/reports/`, `docs/plans/`, `docs/specs/` (shared) | Same (CLI-agnostic) |
 

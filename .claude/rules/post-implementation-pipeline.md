@@ -19,10 +19,10 @@ model differs:
 
 | Step | Claude Code (`/work`) | Codex |
 |------|------------------------|-------|
-| `/self-review` | `Task(subagent_type="reviewer")` parallel-capable | sequential inline in the single agent |
-| `/verify` | `Task(subagent_type="verifier")` | sequential inline |
-| `/test` | `Task(subagent_type="tester")` | sequential inline |
-| `/sync-docs` | `Task(subagent_type="doc-maintainer")` | sequential inline |
+| `/self-review` | `Task(subagent_type="reviewer")` | `.codex/agents/reviewer.toml` custom agent |
+| `/verify` | `Task(subagent_type="verifier")` | `.codex/agents/verifier.toml` custom agent |
+| `/test` | `Task(subagent_type="tester")` | `.codex/agents/tester.toml` custom agent |
+| `/sync-docs` | `Task(subagent_type="doc-maintainer")` | `.codex/agents/doc-maintainer.toml` custom agent |
 | `/cross-review` | inline; calls `codex exec review` | inline; calls `claude -p` reviewer prompt |
 | `/pr` | inline | inline |
 

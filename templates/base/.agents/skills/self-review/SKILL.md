@@ -48,7 +48,7 @@ the conventions in AGENTS.md and `.codex/AGENTS.override.md`.
 |--------|-------------|-------|
 | Skill invocation | `/skill-name` slash command | `$skill-name` mention or the `/skills` menu (avoid the `/skill-name` form — it collides with built-ins) |
 | Skill body path | `.claude/skills/<name>/SKILL.md` | `.agents/skills/<name>/SKILL.md` |
-| Subagents | Parallel calls via `Task(subagent_type=...)` | Sequential inline execution — chained within a single agent |
+| Subagent mechanism | `Task(subagent_type=...)` when a policy delegates | `.codex/agents/` custom agents when a policy delegates |
 | Structured prompts | `AskUserQuestion` | Numbered options printed to stdout, awaiting a digit reply |
 | Artifacts | `docs/reports/`, `docs/plans/`, `docs/specs/` (shared) | Same (CLI-agnostic) |
 

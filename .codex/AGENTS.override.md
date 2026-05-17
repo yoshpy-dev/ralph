@@ -10,9 +10,11 @@ ignores it.
   or pick from the `/skills` menu. Do **not** type `/skill-name` — the leading
   slash collides with Codex built-ins (`/plan`, `/review`, `/status`, etc.) and
   triggers the wrong handler.
-- **Subagents**: ralph runs the post-implementation pipeline (`self-review` →
-  `verify` → `test` → `sync-docs`) **sequentially in this single agent**. Do
-  not spawn parallel agents. Reports go to `docs/reports/*.md`.
+- **Subagents**: use Codex subagents from `.codex/agents/` for the standard
+  ralph post-implementation pipeline (`self-review` → `verify` → `test` →
+  `sync-docs`). Run `reviewer`, `verifier`, `tester`, and `doc-maintainer`
+  sequentially in that order. If dispatch fails, run the step inline and note
+  the fallback in the report. Reports go to `docs/reports/*.md`.
 - **Interactive prompts**: when a skill needs the operator to choose between
   options, present a numbered list and ask the operator to reply with a single
   digit. Treat that as the equivalent of Claude Code's `AskUserQuestion`.
@@ -56,8 +58,8 @@ suggests before relying on the harness.
 
 ## What Codex must not do
 
-- Do not edit `.claude/skills/`, `.claude/agents/`, or `.claude/hooks/` — those
-  are Claude Code's surface. Edit `.agents/skills/` and `.codex/` instead, and
-  let `scripts/check-skill-sync.sh` keep them in step.
+- Do not edit `.claude/skills/`, `.claude/agents/`, or `.claude/hooks/` when
+  you are changing Codex-only behavior. Edit `.agents/skills/` and `.codex/`
+  instead, and let `scripts/check-skill-sync.sh` keep mirrored skills in step.
 - Do not invent skill names. Use the inventory in `.agents/skills/`.
 - Do not bypass `./scripts/run-verify.sh` before claiming work is done.

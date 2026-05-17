@@ -32,14 +32,13 @@ Inside a `codex` session, kick off the standard flow with skill mentions:
 ```
 $spec    # optional; uses an isolated spec worktree for issue/spec outputs
 $plan    # ensures a clean-base task worktree, then creates docs/plans/active/<date>-<slug>.md
-$work    # resumes the task worktree and starts implementation
-$self-review
-$verify
-$test
-$sync-docs
-$cross-review   # optional — calls `claude -p` for a Claude second opinion
-$pr
+$work    # resumes the task worktree, implements, runs the post-impl pipeline, then hands off to PR
 ```
+
+After `$work` completes implementation, the standard pipeline runs
+`self-review → verify → test → sync-docs` through Codex custom agents,
+then runs `$cross-review` and `$pr` inline. Invoke individual phase skills
+manually only when recovering from a failed or interrupted run.
 
 Important: do **not** type `/spec`, `/plan`, etc. `/plan`, `/review`, and
 `/status` are Codex built-in slash commands — leading-slash invocation will
@@ -64,11 +63,16 @@ If the user wants Codex to review a Claude-driven flow, set
 
 ## Subagents
 
-Codex does not have a `Task(subagent_type=...)` mechanism. The
-post-implementation pipeline (`self-review → verify → test → sync-docs`) runs
-**sequentially inline in the single agent** — each step writes its own report
-to `docs/reports/`. The cycle cap (`RALPH_STANDARD_MAX_PIPELINE_CYCLES`) still
-applies, so a fix-and-revalidate run cannot exceed two passes by default.
+Codex supports subagents and project-scoped custom agents under
+`.codex/agents/`. The standard ralph post-implementation pipeline uses those
+agents by default: `reviewer` → `verifier` → `tester` → `doc-maintainer`.
+Keep that order so phase boundaries, report writes, and the cycle cap stay
+predictable.
+
+If Codex cannot dispatch a subagent, run that step inline and record the
+fallback in the report. The cycle cap (`RALPH_STANDARD_MAX_PIPELINE_CYCLES`)
+still applies, so a fix-and-revalidate run cannot exceed two passes by
+default.
 
 ## Drift safety
 
