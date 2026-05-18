@@ -20,7 +20,7 @@ const (
 // Recognized line shapes:
 //   - "--- ..."   → bold red    (old-file header)
 //   - "+++ ..."   → bold green  (new-file header)
-//   - "@@ ... @@" → cyan        (hunk header)
+//   - "@@ ... @@" → cyan        (range header)
 //   - "<gutter> │ -..." → red   (removal)
 //   - "<gutter> │ +..." → green (addition)
 //   - "\ ..."     → dim         (no-newline marker)

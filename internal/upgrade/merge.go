@@ -2,24 +2,9 @@ package upgrade
 
 import "strings"
 
-// MergeChoice identifies how a single merge hunk should be resolved.
-type MergeChoice int
-
-const (
-	MergeUseLocal MergeChoice = iota
-	MergeUseTemplate
-	MergeUseEdited
-)
-
-// MergeDecision stores the chosen replacement for one merge hunk.
-type MergeDecision struct {
-	Choice      MergeChoice
-	EditedLines []string
-}
-
-// MergeHunk is a line-range conflict between local disk and new template,
+// ConflictRegion is a line-range conflict between local disk and new template,
 // expressed relative to the old template baseline.
-type MergeHunk struct {
+type ConflictRegion struct {
 	Index         int
 	BaseStart     int
 	BaseEnd       int
@@ -27,20 +12,20 @@ type MergeHunk struct {
 	TemplateLines []string
 }
 
-// NeedsDecision reports whether local and template differ for this hunk.
-func (h MergeHunk) NeedsDecision() bool {
-	return !equalSlices(h.LocalLines, h.TemplateLines)
+// NeedsResolution reports whether local and template differ for this region.
+func (r ConflictRegion) NeedsResolution() bool {
+	return !equalSlices(r.LocalLines, r.TemplateLines)
 }
 
-// MergePlan contains all hunk-level replacements needed to transform the old
-// template baseline into a resolved file.
+// MergePlan contains the line ranges needed to build a file-level conflict
+// marker view from old template, local disk, and new template content.
 type MergePlan struct {
 	BaseLines               []string
 	LocalLines              []string
 	TemplateLines           []string
 	LocalTrailingNewline    bool
 	TemplateTrailingNewline bool
-	Hunks                   []MergeHunk
+	Regions                 []ConflictRegion
 }
 
 // PlanMerge builds a line-based 3-way merge plan from old template, local disk,
@@ -54,12 +39,12 @@ func PlanMerge(baseText, localText, templateText []byte) MergePlan {
 	templateEdits := diffEdits(baseLines, templateLines)
 	groups := mergeEditGroups(localEdits, templateEdits)
 
-	hunks := make([]MergeHunk, 0, len(groups))
+	regions := make([]ConflictRegion, 0, len(groups))
 	for _, group := range groups {
 		localReplacement := replacementForSpan(baseLines, localLines, localEdits, group.start, group.end)
 		templateReplacement := replacementForSpan(baseLines, templateLines, templateEdits, group.start, group.end)
-		hunks = append(hunks, MergeHunk{
-			Index:         len(hunks),
+		regions = append(regions, ConflictRegion{
+			Index:         len(regions),
 			BaseStart:     group.start,
 			BaseEnd:       group.end,
 			LocalLines:    localReplacement,
@@ -73,62 +58,20 @@ func PlanMerge(baseText, localText, templateText []byte) MergePlan {
 		TemplateLines:           templateLines,
 		LocalTrailingNewline:    localNL,
 		TemplateTrailingNewline: templateNL,
-		Hunks:                   hunks,
+		Regions:                 regions,
 	}
 }
 
-// DecisionCount returns the number of hunks that require a user decision.
-func (p MergePlan) DecisionCount() int {
+// ConflictCount returns the number of regions that require file-level conflict
+// resolution.
+func (p MergePlan) ConflictCount() int {
 	count := 0
-	for _, h := range p.Hunks {
-		if h.NeedsDecision() {
+	for _, region := range p.Regions {
+		if region.NeedsResolution() {
 			count++
 		}
 	}
 	return count
-}
-
-// Render applies decisions to the plan and returns resolved file content.
-// Missing decisions default to keeping local content for safety.
-func (p MergePlan) Render(decisions map[int]MergeDecision) []byte {
-	resolved := make([]string, 0, len(p.TemplateLines))
-	cursor := 0
-	for _, h := range p.Hunks {
-		if h.BaseStart > cursor {
-			resolved = append(resolved, p.BaseLines[cursor:h.BaseStart]...)
-		}
-		decision, ok := decisions[h.Index]
-		if !ok && !h.NeedsDecision() {
-			decision = MergeDecision{Choice: MergeUseTemplate}
-			ok = true
-		}
-		if !ok {
-			decision = MergeDecision{Choice: MergeUseLocal}
-		}
-		switch decision.Choice {
-		case MergeUseTemplate:
-			resolved = append(resolved, h.TemplateLines...)
-		case MergeUseEdited:
-			resolved = append(resolved, decision.EditedLines...)
-		default:
-			resolved = append(resolved, h.LocalLines...)
-		}
-		cursor = h.BaseEnd
-	}
-	if cursor < len(p.BaseLines) {
-		resolved = append(resolved, p.BaseLines[cursor:]...)
-	}
-
-	trailingNewline := p.TemplateTrailingNewline
-	switch {
-	case equalSlices(resolved, p.LocalLines):
-		trailingNewline = p.LocalTrailingNewline
-	case equalSlices(resolved, p.TemplateLines):
-		trailingNewline = p.TemplateTrailingNewline
-	case p.LocalTrailingNewline:
-		trailingNewline = true
-	}
-	return JoinLines(resolved, trailingNewline)
 }
 
 // JoinLines serializes splitLines-style lines back to bytes.

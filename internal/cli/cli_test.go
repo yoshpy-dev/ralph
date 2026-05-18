@@ -1030,9 +1030,9 @@ func TestRunUpgrade_InteractiveOverwrite_WritesManaged(t *testing.T) {
 	}
 }
 
-// Interactive "skip" path: disk is left as-is and the manifest is flipped to
-// Managed=false with the disk hash, converging future upgrades to silent skip.
-func TestRunUpgrade_InteractiveSkip_WritesUnmanaged(t *testing.T) {
+// Interactive "keep local file" path: disk is left as-is and the manifest
+// records the file as a managed partial resolution against the new baseline.
+func TestRunUpgrade_InteractiveKeep_RecordsPartialManaged(t *testing.T) {
 	setupTestEmbedFS(t)
 	Version = "1.0.0-test"
 
@@ -1049,11 +1049,11 @@ func TestRunUpgrade_InteractiveSkip_WritesUnmanaged(t *testing.T) {
 	}
 
 	var out, errOut bytes.Buffer
-	if err := runUpgradeIO(dir, false, strings.NewReader("s\ny\n"), &out, &errOut, false); err != nil {
+	if err := runUpgradeIO(dir, false, strings.NewReader("k\ny\n"), &out, &errOut, false); err != nil {
 		t.Fatalf("upgrade: %v", err)
 	}
-	if !strings.Contains(out.String(), "Skip file:      1 files") {
-		t.Errorf("skip-file summary missing; got:\n%s", out.String())
+	if !strings.Contains(out.String(), "Keep local:     1 files") {
+		t.Errorf("keep-local summary missing; got:\n%s", out.String())
 	}
 
 	got, err := os.ReadFile(agents)
@@ -1069,11 +1069,14 @@ func TestRunUpgrade_InteractiveSkip_WritesUnmanaged(t *testing.T) {
 		t.Fatalf("ReadManifest: %v", err)
 	}
 	entry := m.Files["AGENTS.md"]
-	if entry.Managed {
-		t.Errorf("AGENTS.md.Managed = true after skip, want false (unmanaged)")
+	if !entry.Managed || entry.State != scaffold.FileStatePartial {
+		t.Errorf("AGENTS.md state = managed:%v state:%q, want managed partial", entry.Managed, entry.State)
 	}
-	if entry.Hash != scaffold.HashBytes(local) {
-		t.Errorf("AGENTS.md hash = %q, want disk hash %q", entry.Hash, scaffold.HashBytes(local))
+	if entry.Hash != scaffold.HashBytes([]byte("# AGENTS\n")) || entry.TemplateHash != scaffold.HashBytes([]byte("# AGENTS\n")) {
+		t.Errorf("template hash fields = hash:%q template:%q, want template hash", entry.Hash, entry.TemplateHash)
+	}
+	if entry.DiskHash != scaffold.HashBytes(local) {
+		t.Errorf("AGENTS.md disk_hash = %q, want disk hash %q", entry.DiskHash, scaffold.HashBytes(local))
 	}
 }
 
@@ -1112,9 +1115,9 @@ func TestRunUpgrade_InteractiveDiff_ShowsUnifiedDiff(t *testing.T) {
 		}
 	}
 	diffIdx := strings.Index(combined, "--- local")
-	promptIdx := strings.Index(combined, "[a]pply template hunk")
+	promptIdx := strings.Index(combined, "[a]pply template file")
 	if diffIdx < 0 || promptIdx < 0 || diffIdx > promptIdx {
-		t.Errorf("hunk diff should be visible before the command prompt; got:\n%s", combined)
+		t.Errorf("file diff should be visible before the command prompt; got:\n%s", combined)
 	}
 	for _, notWant := range []string{
 		"@@ ",
@@ -1161,7 +1164,7 @@ func TestRunUpgrade_InteractiveDiff_ColorizesWhenEnabled(t *testing.T) {
 		t.Errorf("expected bold-green +++ header; got:\n%q", got)
 	}
 	if strings.Contains(got, "\x1b[36m@@ ") || strings.Contains(got, "@@ ") {
-		t.Errorf("upgrade UI should omit hunk headers; got:\n%q", got)
+		t.Errorf("upgrade UI should omit range headers; got:\n%q", got)
 	}
 	if !strings.Contains(got, "\x1b[31m") || !strings.Contains(got, "\x1b[32m") {
 		t.Errorf("expected colored removal/addition lines; got:\n%q", got)
@@ -1193,7 +1196,7 @@ func TestRunUpgrade_InteractiveDiff_IgnoresPagerAlways(t *testing.T) {
 	}
 
 	combined := out.String()
-	if !strings.Contains(combined, "--- local") || !strings.Contains(combined, "[a]pply template hunk") {
+	if !strings.Contains(combined, "--- local") || !strings.Contains(combined, "[a]pply template file") {
 		t.Errorf("interactive output should include both diff and prompt; got:\n%s", combined)
 	}
 	if strings.Contains(errOut.String(), "pager failed") {
@@ -1267,7 +1270,7 @@ func TestRunUpgrade_InteractiveDiff_RepromptsOnInvalid(t *testing.T) {
 	}
 
 	var out, errOut bytes.Buffer
-	// garbage → edit → keep local
+	// garbage -> edit with missing editor -> keep local file
 	t.Setenv("VISUAL", "")
 	t.Setenv("EDITOR", "")
 	input := strings.NewReader("xyz\ne\nk\ny\n")
@@ -1276,19 +1279,18 @@ func TestRunUpgrade_InteractiveDiff_RepromptsOnInvalid(t *testing.T) {
 	}
 
 	got := out.String()
-	if strings.Count(got, "[a]pply template hunk / [k]eep local hunk / [e]dit / [s]kip file ?") < 3 {
+	if strings.Count(got, "[a]pply template file / [k]eep local file / [e]dit file ?") < 3 {
 		t.Errorf("expected prompt to re-render on invalid and edit inputs; got:\n%s", got)
 	}
-	if strings.Contains(got, "[n]ext") || strings.Contains(got, "[q]uit") {
-		t.Errorf("baseline-backed prompt must not offer next/quit; got:\n%s", got)
+	if strings.Contains(got, "[s]kip") || strings.Contains(got, "[n]ext") || strings.Contains(got, "[q]uit") {
+		t.Errorf("baseline-backed prompt must not offer skip/next/quit; got:\n%s", got)
 	}
 }
 
-func TestRunUpgrade_HunkApplyAndKeep_WritesPartialManaged(t *testing.T) {
+func TestRunUpgrade_FileApply_WritesTemplateManaged(t *testing.T) {
 	initial := []byte("alpha\nbase-local\nmiddle\nbase-template\nomega\n")
 	local := []byte("alpha\nLOCAL\nmiddle\nbase-template\nomega\n")
 	template := []byte("alpha\nTEMPLATE\nmiddle\nTEMPLATE-ONLY\nomega\n")
-	want := []byte("alpha\nLOCAL\nmiddle\nTEMPLATE-ONLY\nomega\n")
 
 	setupTestEmbedFSWithAgents(t, initial)
 	Version = "1.0.0-test"
@@ -1308,7 +1310,7 @@ func TestRunUpgrade_HunkApplyAndKeep_WritesPartialManaged(t *testing.T) {
 	Version = "2.0.0-test"
 
 	var out, errOut bytes.Buffer
-	if err := runUpgradeIO(dir, false, strings.NewReader("k\na\ny\n"), &out, &errOut, false); err != nil {
+	if err := runUpgradeIO(dir, false, strings.NewReader("a\ny\n"), &out, &errOut, false); err != nil {
 		t.Fatalf("upgrade: %v", err)
 	}
 
@@ -1316,8 +1318,8 @@ func TestRunUpgrade_HunkApplyAndKeep_WritesPartialManaged(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read AGENTS.md: %v", err)
 	}
-	if string(got) != string(want) {
-		t.Fatalf("AGENTS.md = %q, want partial merge %q", got, want)
+	if string(got) != string(template) {
+		t.Fatalf("AGENTS.md = %q, want template content %q", got, template)
 	}
 
 	manifestPath := filepath.Join(dir, ".ralph", "manifest.toml")
@@ -1326,14 +1328,14 @@ func TestRunUpgrade_HunkApplyAndKeep_WritesPartialManaged(t *testing.T) {
 		t.Fatalf("ReadManifest: %v", err)
 	}
 	entry := m.Files["AGENTS.md"]
-	if !entry.Managed || entry.State != scaffold.FileStatePartial {
-		t.Fatalf("AGENTS.md state = managed:%v state:%q, want managed partial", entry.Managed, entry.State)
+	if !entry.Managed || entry.State != scaffold.FileStateManaged {
+		t.Fatalf("AGENTS.md state = managed:%v state:%q, want managed", entry.Managed, entry.State)
 	}
 	if entry.Hash != scaffold.HashBytes(template) || entry.TemplateHash != scaffold.HashBytes(template) {
 		t.Errorf("template hash fields = hash:%q template:%q, want %q", entry.Hash, entry.TemplateHash, scaffold.HashBytes(template))
 	}
-	if entry.DiskHash != scaffold.HashBytes(want) {
-		t.Errorf("DiskHash = %q, want resolved hash %q", entry.DiskHash, scaffold.HashBytes(want))
+	if entry.DiskHash != scaffold.HashBytes(template) {
+		t.Errorf("DiskHash = %q, want template hash %q", entry.DiskHash, scaffold.HashBytes(template))
 	}
 	baseline, err := scaffold.ReadBaseline(dir, entry)
 	if err != nil {
@@ -1346,14 +1348,13 @@ func TestRunUpgrade_HunkApplyAndKeep_WritesPartialManaged(t *testing.T) {
 	combined := out.String()
 	for _, wantText := range []string{
 		"Apply summary",
-		"Apply template: 1 files / 1 hunks",
-		"Keep local:     1 files / 1 hunks",
+		"Apply template: 1 files",
 	} {
 		if !strings.Contains(combined, wantText) {
 			t.Errorf("output missing %q; got:\n%s", wantText, combined)
 		}
 	}
-	for _, notWant := range []string{"[n]ext", "[q]uit", "template hash:", "local hash:"} {
+	for _, notWant := range []string{"[s]kip", "files /", "[n]ext", "[q]uit", "template hash:", "local hash:"} {
 		if strings.Contains(combined, notWant) {
 			t.Errorf("output should not include %q; got:\n%s", notWant, combined)
 		}
@@ -1372,7 +1373,7 @@ func TestRunUpgrade_HunkApplyAndKeep_WritesPartialManaged(t *testing.T) {
 	}
 }
 
-func TestRunUpgrade_HunkSummaryNo_DoesNotWrite(t *testing.T) {
+func TestRunUpgrade_FileSummaryNo_DoesNotWrite(t *testing.T) {
 	initial := []byte("base\n")
 	local := []byte("LOCAL\n")
 	template := []byte("TEMPLATE\n")
@@ -1443,7 +1444,7 @@ func TestRunUpgrade_HunkSummaryNo_DoesNotWrite(t *testing.T) {
 	}
 }
 
-func TestRunUpgrade_HunkEdit_UsesEditor(t *testing.T) {
+func TestRunUpgrade_FileEdit_UsesEditor(t *testing.T) {
 	initial := []byte("base\n")
 	local := []byte("LOCAL\n")
 	template := []byte("TEMPLATE\n")
@@ -1484,7 +1485,7 @@ func TestRunUpgrade_HunkEdit_UsesEditor(t *testing.T) {
 		t.Fatalf("read AGENTS.md: %v", err)
 	}
 	if string(got) != string(edited) {
-		t.Errorf("AGENTS.md = %q, want edited hunk %q", got, edited)
+		t.Errorf("AGENTS.md = %q, want edited file %q", got, edited)
 	}
 	m, err := scaffold.ReadManifest(filepath.Join(dir, ".ralph", "manifest.toml"))
 	if err != nil {
@@ -1494,12 +1495,123 @@ func TestRunUpgrade_HunkEdit_UsesEditor(t *testing.T) {
 	if entry.State != scaffold.FileStatePartial || entry.DiskHash != scaffold.HashBytes(edited) {
 		t.Errorf("entry = %+v, want partial with edited disk hash", entry)
 	}
-	if !strings.Contains(out.String(), "Edited:         1 files / 1 hunks") {
-		t.Errorf("summary missing edited hunk count; got:\n%s", out.String())
+	if !strings.Contains(out.String(), "Edited:         1 files") {
+		t.Errorf("summary missing edited file count; got:\n%s", out.String())
 	}
 }
 
-// --force must re-adopt files the user previously skipped to Managed=false.
+func TestRunUpgrade_FileEdit_SeedsConflictMarkersWhenLocalSideEmpty(t *testing.T) {
+	initial := []byte("alpha\nremove-me\nomega\n")
+	local := []byte("alpha\nomega\n")
+	template := []byte("alpha\ntemplate replacement\nomega\n")
+	edited := []byte("EDITED\n")
+
+	setupTestEmbedFSWithAgents(t, initial)
+	Version = "1.0.0-test"
+
+	dir := t.TempDir()
+	cfg := initConfig{ProjectName: "test", Packs: nil}
+	if err := executeInit(dir, cfg, false); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	agents := filepath.Join(dir, "AGENTS.md")
+	if err := os.WriteFile(agents, local, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	setupTestEmbedFSWithAgents(t, template)
+	Version = "2.0.0-test"
+
+	editorDir := t.TempDir()
+	capturedSeed := filepath.Join(editorDir, "seed.txt")
+	editor := filepath.Join(editorDir, "editor.sh")
+	editorScript := "#!/bin/sh\ncat \"$1\" > \"$RALPH_CAPTURE_EDIT_SEED\"\nprintf '%s\\n' 'EDITED' > \"$1\"\n"
+	if err := os.WriteFile(editor, []byte(editorScript), 0755); err != nil {
+		t.Fatalf("write editor script: %v", err)
+	}
+	t.Setenv("RALPH_CAPTURE_EDIT_SEED", capturedSeed)
+	t.Setenv("VISUAL", editor)
+	t.Setenv("EDITOR", "")
+
+	var out, errOut bytes.Buffer
+	if err := runUpgradeIO(dir, false, strings.NewReader("e\ny\n"), &out, &errOut, false); err != nil {
+		t.Fatalf("upgrade: %v", err)
+	}
+
+	seed, err := os.ReadFile(capturedSeed)
+	if err != nil {
+		t.Fatalf("read captured editor seed: %v", err)
+	}
+	wantSeed := "alpha\n<<<<<<< local\n=======\ntemplate replacement\n>>>>>>> template (2.0.0-test)\nomega\n"
+	if string(seed) != wantSeed {
+		t.Fatalf("editor seed = %q, want full-file conflict marker block %q", seed, wantSeed)
+	}
+
+	got, err := os.ReadFile(agents)
+	if err != nil {
+		t.Fatalf("read AGENTS.md: %v", err)
+	}
+	if string(got) != string(edited) {
+		t.Errorf("AGENTS.md = %q, want edited file %q", got, edited)
+	}
+}
+
+func TestRunUpgrade_FileEdit_RejectsUnresolvedConflictMarkers(t *testing.T) {
+	initial := []byte("base\n")
+	local := []byte("LOCAL\n")
+	template := []byte("TEMPLATE\n")
+	edited := []byte("EDITED\n")
+
+	setupTestEmbedFSWithAgents(t, initial)
+	Version = "1.0.0-test"
+
+	dir := t.TempDir()
+	cfg := initConfig{ProjectName: "test", Packs: nil}
+	if err := executeInit(dir, cfg, false); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	agents := filepath.Join(dir, "AGENTS.md")
+	if err := os.WriteFile(agents, local, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	setupTestEmbedFSWithAgents(t, template)
+	Version = "2.0.0-test"
+
+	editorDir := t.TempDir()
+	countFile := filepath.Join(editorDir, "count")
+	editor := filepath.Join(editorDir, "editor.sh")
+	editorScript := "#!/bin/sh\nif [ ! -f \"$RALPH_EDIT_COUNT\" ]; then touch \"$RALPH_EDIT_COUNT\"; exit 0; fi\nprintf '%s\\n' 'EDITED' > \"$1\"\n"
+	if err := os.WriteFile(editor, []byte(editorScript), 0755); err != nil {
+		t.Fatalf("write editor script: %v", err)
+	}
+	t.Setenv("RALPH_EDIT_COUNT", countFile)
+	t.Setenv("VISUAL", editor)
+	t.Setenv("EDITOR", "")
+
+	var out, errOut bytes.Buffer
+	if err := runUpgradeIO(dir, false, strings.NewReader("e\ne\ny\n"), &out, &errOut, false); err != nil {
+		t.Fatalf("upgrade: %v", err)
+	}
+
+	got, err := os.ReadFile(agents)
+	if err != nil {
+		t.Fatalf("read AGENTS.md: %v", err)
+	}
+	if string(got) != string(edited) {
+		t.Errorf("AGENTS.md = %q, want edited file %q", got, edited)
+	}
+	if !strings.Contains(errOut.String(), "unresolved conflict markers remain") {
+		t.Errorf("missing unresolved marker warning; errOut:\n%s", errOut.String())
+	}
+	if strings.Count(out.String(), "[a]pply template file / [k]eep local file / [e]dit file ?") < 2 {
+		t.Errorf("expected edit prompt to reappear after unresolved markers; got:\n%s", out.String())
+	}
+}
+
+// --force must re-adopt files previously marked Managed=false.
 // Otherwise the flag's "overwrite all files without prompting" contract is
 // broken: the user has no single-command path to restore template coverage.
 func TestRunUpgrade_ForceReadoptsUnmanaged(t *testing.T) {
@@ -1517,14 +1629,18 @@ func TestRunUpgrade_ForceReadoptsUnmanaged(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// First upgrade: user chooses skip → manifest records Managed=false.
-	var out, errOut bytes.Buffer
-	if err := runUpgradeIO(dir, false, strings.NewReader("s\ny\n"), &out, &errOut, false); err != nil {
-		t.Fatalf("first upgrade: %v", err)
+	// Setup: simulate a user-owned file from a legacy skip path.
+	manifestPath := filepath.Join(dir, ".ralph", "manifest.toml")
+	m1, err := scaffold.ReadManifest(manifestPath)
+	if err != nil {
+		t.Fatalf("ReadManifest: %v", err)
 	}
-	m1, _ := scaffold.ReadManifest(filepath.Join(dir, ".ralph", "manifest.toml"))
+	m1.SetFileUnmanaged("AGENTS.md", scaffold.HashBytes([]byte("# local edit\n")))
+	if err := m1.Write(manifestPath); err != nil {
+		t.Fatalf("write unmanaged manifest: %v", err)
+	}
 	if m1.Files["AGENTS.md"].Managed {
-		t.Fatalf("setup: expected AGENTS.md to be unmanaged after skip")
+		t.Fatalf("setup: expected AGENTS.md to be unmanaged")
 	}
 
 	// Second upgrade with --force must overwrite and re-manage.
@@ -1571,10 +1687,15 @@ func TestRunUpgrade_UnmanagedSurvivesTemplateRemovalAcrossRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Skip → Managed=false.
-	var out, errOut bytes.Buffer
-	if err := runUpgradeIO(dir, false, strings.NewReader("s\ny\n"), &out, &errOut, false); err != nil {
-		t.Fatalf("first upgrade: %v", err)
+	// Simulate a user-owned file from a legacy skip path.
+	manifestPath := filepath.Join(dir, ".ralph", "manifest.toml")
+	m, err := scaffold.ReadManifest(manifestPath)
+	if err != nil {
+		t.Fatalf("ReadManifest: %v", err)
+	}
+	m.SetFileUnmanaged("AGENTS.md", scaffold.HashBytes([]byte("# my variant\n")))
+	if err := m.Write(manifestPath); err != nil {
+		t.Fatalf("write unmanaged manifest: %v", err)
 	}
 
 	// Simulate a later release that no longer ships AGENTS.md.
@@ -1589,6 +1710,7 @@ func TestRunUpgrade_UnmanagedSurvivesTemplateRemovalAcrossRuns(t *testing.T) {
 	}
 	t.Cleanup(func() { setupTestEmbedFS(t) })
 
+	var out, errOut bytes.Buffer
 	out.Reset()
 	errOut.Reset()
 	if err := runUpgradeIO(dir, false, strings.NewReader(""), &out, &errOut, false); err != nil {
@@ -1600,11 +1722,11 @@ func TestRunUpgrade_UnmanagedSurvivesTemplateRemovalAcrossRuns(t *testing.T) {
 		t.Errorf("unmanaged entry surfaced as ActionRemove; out:\n%s", out.String())
 	}
 
-	m, err := scaffold.ReadManifest(filepath.Join(dir, ".ralph", "manifest.toml"))
+	m2, err := scaffold.ReadManifest(filepath.Join(dir, ".ralph", "manifest.toml"))
 	if err != nil {
 		t.Fatalf("ReadManifest: %v", err)
 	}
-	entry, ok := m.Files["AGENTS.md"]
+	entry, ok := m2.Files["AGENTS.md"]
 	if !ok {
 		t.Fatal("unmanaged entry dropped when template removed the path")
 	}
@@ -1613,9 +1735,10 @@ func TestRunUpgrade_UnmanagedSurvivesTemplateRemovalAcrossRuns(t *testing.T) {
 	}
 }
 
-// Convergence: after a skip, running upgrade again must not re-prompt — the
-// file is now user-owned.
-func TestRunUpgrade_NextRunAfterSkip_IsSilent(t *testing.T) {
+// Convergence: after keeping a local file, running the same upgrade again must
+// not re-prompt because the local disk hash is recorded as a partial managed
+// resolution.
+func TestRunUpgrade_NextRunAfterKeep_IsSilent(t *testing.T) {
 	setupTestEmbedFS(t)
 	Version = "1.0.0-test"
 
@@ -1631,16 +1754,15 @@ func TestRunUpgrade_NextRunAfterSkip_IsSilent(t *testing.T) {
 	}
 
 	var out, errOut bytes.Buffer
-	if err := runUpgradeIO(dir, false, strings.NewReader("s\ny\n"), &out, &errOut, false); err != nil {
+	if err := runUpgradeIO(dir, false, strings.NewReader("k\ny\n"), &out, &errOut, false); err != nil {
 		t.Fatalf("first upgrade: %v", err)
 	}
 
 	out.Reset()
 	errOut.Reset()
 
-	// Empty stdin: if the second run re-prompts, the EOF branch would flip
-	// "(non-interactive input detected, skipping)" into errOut and we'd see
-	// a warning. No prompt means no such output.
+	// Empty stdin: if the second run re-prompts, the EOF branch would print a
+	// non-interactive warning. No prompt means no such output.
 	if err := runUpgradeIO(dir, false, strings.NewReader(""), &out, &errOut, false); err != nil {
 		t.Fatalf("second upgrade: %v", err)
 	}
@@ -1649,7 +1771,7 @@ func TestRunUpgrade_NextRunAfterSkip_IsSilent(t *testing.T) {
 		t.Errorf("second upgrade re-prompted for skipped file; got:\n%s", out.String())
 	}
 	if strings.Contains(errOut.String(), "non-interactive input detected") {
-		t.Errorf("second upgrade hit the non-interactive skip branch — it should silent-skip unmanaged entries; got:\n%s", errOut.String())
+		t.Errorf("second upgrade hit the non-interactive branch; got:\n%s", errOut.String())
 	}
 }
 

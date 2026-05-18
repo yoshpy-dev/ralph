@@ -17,7 +17,7 @@ const diffSeparator = " │ "
 //
 // Each emitted change line carries two gutter columns showing the 1-based
 // line numbers in the old and new files (blank when the line does not exist
-// on that side). The hunk header replaces the cryptic `@@ -a,b +c,d @@`
+// on that side). The range header replaces the cryptic `@@ -a,b +c,d @@`
 // notation with a human-friendly range summary.
 //
 // When either side lacks a trailing newline, a single
@@ -32,23 +32,23 @@ func UnifiedDiff(oldText, newText []byte, oldLabel, newLabel string) string {
 	}
 
 	ops := lcsDiff(oldLines, newLines)
-	hunks := groupHunks(ops, 3)
+	blocks := groupDiffBlocks(ops, 3)
 
-	width := gutterWidth(hunks)
+	width := gutterWidth(blocks)
 	blank := strings.Repeat(" ", width)
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "--- %s\n", oldLabel)
 	fmt.Fprintf(&b, "+++ %s\n", newLabel)
 
-	for _, h := range hunks {
+	for _, block := range blocks {
 		fmt.Fprintf(&b, "@@ 旧 %s  →  新 %s @@\n",
-			formatRange(h.oldStart, h.oldCount),
-			formatRange(h.newStart, h.newCount))
+			formatRange(block.oldStart, block.oldCount),
+			formatRange(block.newStart, block.newCount))
 
-		oldNo := h.oldStart // 0-based; pre-increment before emit makes it 1-based.
-		newNo := h.newStart
-		for _, op := range h.ops {
+		oldNo := block.oldStart // 0-based; pre-increment before emit makes it 1-based.
+		newNo := block.newStart
+		for _, op := range block.ops {
 			oldCol := blank
 			newCol := blank
 			var prefix byte
@@ -79,9 +79,9 @@ func UnifiedDiff(oldText, newText []byte, oldLabel, newLabel string) string {
 	return b.String()
 }
 
-// formatRange renders a hunk's line range. Empty sides (count == 0) collapse
-// to "(空)" so the user can immediately tell that the file was created from
-// nothing or fully deleted on one side.
+// formatRange renders a diff block's line range. Empty sides (count == 0)
+// collapse to "(空)" so the user can immediately tell that the file was
+// created from nothing or fully deleted on one side.
 func formatRange(start, count int) string {
 	if count == 0 {
 		return "(空)"
@@ -93,15 +93,15 @@ func formatRange(start, count int) string {
 }
 
 // gutterWidth returns the column width needed to right-align every line
-// number that may appear across all hunks. Floors at 2 so single-digit files
+// number that may appear across all diff blocks. Floors at 2 so single-digit files
 // still produce a stable two-column gutter.
-func gutterWidth(hunks []hunk) int {
+func gutterWidth(blocks []diffBlock) int {
 	maxLine := 0
-	for _, h := range hunks {
-		if v := h.oldStart + h.oldCount; v > maxLine {
+	for _, block := range blocks {
+		if v := block.oldStart + block.oldCount; v > maxLine {
 			maxLine = v
 		}
-		if v := h.newStart + h.newCount; v > maxLine {
+		if v := block.newStart + block.newCount; v > maxLine {
 			maxLine = v
 		}
 	}
@@ -201,16 +201,16 @@ func lcsDiff(oldLines, newLines []string) []diffOp {
 	return ops
 }
 
-type hunk struct {
+type diffBlock struct {
 	oldStart, newStart int
 	oldCount, newCount int
 	ops                []diffOp
 }
 
-// groupHunks collects runs of non-equal ops surrounded by up to `context` lines
+// groupDiffBlocks collects runs of non-equal ops surrounded by up to `context` lines
 // of equality on each side. Adjacent changes whose context windows overlap
-// (distance ≤ 2*context) are merged into one hunk.
-func groupHunks(ops []diffOp, context int) []hunk {
+// (distance <= 2*context) are merged into one diff block.
+func groupDiffBlocks(ops []diffOp, context int) []diffBlock {
 	type indexed struct {
 		op     diffOp
 		oldIdx int
@@ -231,7 +231,7 @@ func groupHunks(ops []diffOp, context int) []hunk {
 		}
 	}
 
-	var hunks []hunk
+	var blocks []diffBlock
 	i := 0
 	for i < len(idx) {
 		if idx[i].op.kind == opEqual {
@@ -281,7 +281,7 @@ func groupHunks(ops []diffOp, context int) []hunk {
 				newCount++
 			}
 		}
-		hunks = append(hunks, hunk{
+		blocks = append(blocks, diffBlock{
 			oldStart: idx[start].oldIdx,
 			newStart: idx[start].newIdx,
 			oldCount: oldCount,
@@ -290,5 +290,5 @@ func groupHunks(ops []diffOp, context int) []hunk {
 		})
 		i = end
 	}
-	return hunks
+	return blocks
 }

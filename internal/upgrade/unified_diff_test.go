@@ -55,7 +55,7 @@ func TestUnifiedDiff_EmptyToNonEmpty(t *testing.T) {
 	got := UnifiedDiff(nil, []byte("hello\n"), "old", "new")
 	assertContains(t, got, "--- old\n")
 	assertContains(t, got, "│ +hello\n")
-	// Hunk header must mark the empty old side as `(空)`.
+	// Range header must mark the empty old side as `(空)`.
 	assertContains(t, got, "@@ 旧 (空)  →  新 L1 @@")
 }
 
@@ -122,8 +122,8 @@ func TestUnifiedDiff_LineNumbersGutter(t *testing.T) {
 	assertContains(t, got, " 3  3 │  c\n")
 }
 
-// Range header should collapse single-line hunks to "Lk" instead of "Lk–k".
-func TestUnifiedDiff_HunkHeader_SingleLineRange(t *testing.T) {
+// Range header should collapse single-line diff blocks to "Lk" instead of "Lk–k".
+func TestUnifiedDiff_RangeHeader_SingleLineRange(t *testing.T) {
 	old := []byte("only\n")
 	new := []byte("ONLY\n")
 	got := UnifiedDiff(old, new, "old", "new")
@@ -156,7 +156,7 @@ func TestUnifiedDiff_GutterWidth_Scales(t *testing.T) {
 // coverage gap. Building a 10_000-line file is cheap (~80 KB).
 func TestUnifiedDiff_GutterWidth_FiveDigitLineNumbers(t *testing.T) {
 	const total = 10_000
-	const changeAt = 9_999 // 4-digit change line forces 5-digit max via end-of-hunk numbering
+	const changeAt = 9_999 // 4-digit change line forces 5-digit max via end-of-block numbering
 	var oldB, newB strings.Builder
 	oldB.Grow(total * 2)
 	newB.Grow(total * 2)
@@ -171,7 +171,7 @@ func TestUnifiedDiff_GutterWidth_FiveDigitLineNumbers(t *testing.T) {
 		}
 	}
 	got := UnifiedDiff([]byte(oldB.String()), []byte(newB.String()), "old", "new")
-	// gutterWidth uses oldStart+oldCount as the upper bound, which for a hunk
+	// gutterWidth uses oldStart+oldCount as the upper bound, which for a diff block
 	// touching line 9999 with 3 lines of trailing context reaches 10000+ → 5
 	// columns. The change line "9999" therefore right-aligns in a 5-char column
 	// (one leading space). Assert the exact spacing so any width regression is
