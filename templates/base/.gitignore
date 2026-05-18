@@ -12,6 +12,12 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 
+# Local environment files (examples stay tracked)
+.env
+.env.*
+!.env.example
+!.env.sample
+
 # Terraform / OpenTofu state and cache (often contain provider secrets)
 .terraform/
 *.tfstate
