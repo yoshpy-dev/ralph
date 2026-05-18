@@ -144,11 +144,12 @@ func ComputeDiffsWithManifest(manifest *scaffold.Manifest, targetDir string, new
 		if mf.Hash == "" {
 			if diskHash == newHash {
 				diffs = append(diffs, FileDiff{
-					Path:     path,
-					Action:   ActionSkip,
-					OldHash:  mf.Hash,
-					DiskHash: diskHash,
-					NewHash:  newHash,
+					Path:       path,
+					Action:     ActionSkip,
+					OldHash:    mf.Hash,
+					DiskHash:   diskHash,
+					NewHash:    newHash,
+					NewContent: content,
 				})
 				return nil
 			}
@@ -177,11 +178,12 @@ func ComputeDiffsWithManifest(manifest *scaffold.Manifest, targetDir string, new
 		if newHash == mf.Hash {
 			if diskHash == mf.Hash {
 				diffs = append(diffs, FileDiff{
-					Path:     path,
-					Action:   ActionSkip,
-					OldHash:  mf.Hash,
-					DiskHash: diskHash,
-					NewHash:  newHash,
+					Path:       path,
+					Action:     ActionSkip,
+					OldHash:    mf.Hash,
+					DiskHash:   diskHash,
+					NewHash:    newHash,
+					NewContent: content,
 				})
 				return nil
 			}

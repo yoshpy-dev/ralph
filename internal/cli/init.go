@@ -146,6 +146,10 @@ func executeInit(targetDir string, cfg initConfig, force bool) error {
 	if err != nil {
 		return fmt.Errorf("rendering base templates: %w", err)
 	}
+	baselinePaths, err := writeRenderedBaselines(targetDir, baseFS, "", result)
+	if err != nil {
+		return err
+	}
 	printRenderSummary("base", result)
 
 	// Step 2: Render selected language packs into packs/languages/<lang>/.
@@ -169,6 +173,13 @@ func executeInit(targetDir string, cfg initConfig, force bool) error {
 		for k, v := range packHashes {
 			hashes[filepath.Join(packPrefix, k)] = v
 		}
+		packBaselines, err := writeRenderedBaselines(targetDir, packFS, packPrefix, packResult)
+		if err != nil {
+			return err
+		}
+		for k, v := range packBaselines {
+			baselinePaths[k] = v
+		}
 		printRenderSummary("pack/"+pack, packResult)
 	}
 
@@ -176,6 +187,10 @@ func executeInit(targetDir string, cfg initConfig, force bool) error {
 	manifest := scaffold.NewManifest(Version)
 	manifest.Meta.Packs = cfg.Packs
 	for path, hash := range hashes {
+		if baselinePath, ok := baselinePaths[path]; ok {
+			manifest.SetFileWithBaseline(path, hash, baselinePath)
+			continue
+		}
 		manifest.SetFile(path, hash)
 	}
 
@@ -218,6 +233,30 @@ func executeInit(targetDir string, cfg initConfig, force bool) error {
 	fmt.Printf("  ralph doctor to verify setup\n")
 
 	return nil
+}
+
+func writeRenderedBaselines(targetDir string, src fs.FS, prefix string, result *scaffold.RenderResult) (map[string]string, error) {
+	out := make(map[string]string)
+	written := make(map[string]bool, len(result.Created)+len(result.Overwritten))
+	for _, path := range result.Created {
+		written[path] = true
+	}
+	for _, path := range result.Overwritten {
+		written[path] = true
+	}
+	for path := range written {
+		content, err := fs.ReadFile(src, path)
+		if err != nil {
+			return nil, fmt.Errorf("reading baseline source %s: %w", path, err)
+		}
+		manifestPath := filepath.Join(prefix, path)
+		baselinePath, err := scaffold.WriteBaseline(targetDir, manifestPath, content)
+		if err != nil {
+			return nil, err
+		}
+		out[manifestPath] = baselinePath
+	}
+	return out, nil
 }
 
 func printRenderSummary(label string, result *scaffold.RenderResult) {

@@ -23,9 +23,28 @@ type ManifestMeta struct {
 
 // ManifestFile tracks a single managed file.
 type ManifestFile struct {
+	// v1 compatibility fields. Keep writing these until every supported
+	// consumer understands the v2 metadata below.
 	Hash    string `toml:"hash"`
 	Managed bool   `toml:"managed"`
+
+	// v2 metadata. These fields are additive and must not be required when
+	// reading existing manifests.
+	State          string `toml:"state,omitempty"`
+	TemplateHash   string `toml:"template_hash,omitempty"`
+	DiskHash       string `toml:"disk_hash,omitempty"`
+	BaselineStatus string `toml:"baseline_status,omitempty"`
+	BaselinePath   string `toml:"baseline_path,omitempty"`
 }
+
+const (
+	FileStateManaged   = "managed"
+	FileStateUnmanaged = "unmanaged"
+	FileStatePartial   = "partial"
+
+	BaselineStatusMissing   = "missing"
+	BaselineStatusAvailable = "available"
+)
 
 // NewManifest creates a new manifest with the given version.
 func NewManifest(version string) *Manifest {
@@ -70,8 +89,25 @@ func (m *Manifest) Write(path string) error {
 // template for future upgrades).
 func (m *Manifest) SetFile(relPath, hash string) {
 	m.Files[relPath] = ManifestFile{
-		Hash:    hash,
-		Managed: true,
+		Hash:           hash,
+		Managed:        true,
+		State:          FileStateManaged,
+		TemplateHash:   hash,
+		BaselineStatus: BaselineStatusMissing,
+	}
+}
+
+// SetFileWithBaseline records a managed file whose template content is
+// available in the local baseline cache. The legacy Hash field remains the
+// template hash so v1 readers continue to compare the same value.
+func (m *Manifest) SetFileWithBaseline(relPath, hash, baselinePath string) {
+	m.Files[relPath] = ManifestFile{
+		Hash:           hash,
+		Managed:        true,
+		State:          FileStateManaged,
+		TemplateHash:   hash,
+		BaselineStatus: BaselineStatusAvailable,
+		BaselinePath:   baselinePath,
 	}
 }
 
@@ -82,7 +118,33 @@ func (m *Manifest) SetFile(relPath, hash string) {
 // instead of re-prompting.
 func (m *Manifest) SetFileUnmanaged(relPath, hash string) {
 	m.Files[relPath] = ManifestFile{
-		Hash:    hash,
-		Managed: false,
+		Hash:           hash,
+		Managed:        false,
+		State:          FileStateUnmanaged,
+		DiskHash:       hash,
+		BaselineStatus: BaselineStatusMissing,
 	}
+}
+
+// IsBaselineAvailable reports whether the manifest entry has usable baseline
+// metadata. Callers must still verify that BaselinePath exists before using it.
+func (f ManifestFile) IsBaselineAvailable() bool {
+	return f.BaselineStatus == BaselineStatusAvailable && f.BaselinePath != ""
+}
+
+// WithTemplateHash returns a copy with v2 template metadata filled in while
+// preserving any existing baseline metadata.
+func (f ManifestFile) WithTemplateHash(hash string) ManifestFile {
+	f.Hash = hash
+	f.Managed = true
+	if f.State == "" {
+		f.State = FileStateManaged
+	}
+	if f.TemplateHash == "" {
+		f.TemplateHash = hash
+	}
+	if f.BaselineStatus == "" {
+		f.BaselineStatus = BaselineStatusMissing
+	}
+	return f
 }
