@@ -20,6 +20,18 @@ if ! command -v go >/dev/null 2>&1; then
   exit 1
 fi
 
+if [ -z "${GOCACHE:-}" ]; then
+  GOCACHE="$PWD/.harness/cache/go-build"
+  export GOCACHE
+fi
+mkdir -p "$GOCACHE"
+
+if [ -z "${STATICCHECK_CACHE:-}" ]; then
+  STATICCHECK_CACHE="$PWD/.harness/cache/staticcheck"
+  export STATICCHECK_CACHE
+fi
+mkdir -p "$STATICCHECK_CACHE"
+
 status=0
 
 run_static() {
