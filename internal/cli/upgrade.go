@@ -48,7 +48,7 @@ auto-updates unchanged files, and prompts for conflict resolution on edited file
 	cmd.Flags().BoolVar(&force, "force", false, "overwrite all files without prompting")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "preview upgrade actions without writing files")
 	cmd.Flags().BoolVar(&diffPreview, "diff", false, "show conflict diffs without writing files (implies --dry-run)")
-	cmd.Flags().StringVar(&pager, "pager", pagerAuto, "diff pager mode: auto, always, or never")
+	cmd.Flags().StringVar(&pager, "pager", pagerAuto, "dry-run diff pager mode: auto, always, or never")
 
 	return cmd
 }
@@ -278,7 +278,7 @@ func runUpgradeIOWithOptions(targetDir string, opts upgradeOptions, in io.Reader
 				}
 				continue
 			}
-			result := resolveConflict(d, oldManifest, absDir, Version, reader, out, errOut, colorize, opts.Pager)
+			result := resolveConflict(d, oldManifest, absDir, Version, reader, out, errOut, colorize)
 			applyPlan.mergeHunkStats(result.stats)
 			if result.hunkReviewed {
 				applyPlan.needsConfirmation = true
@@ -621,16 +621,18 @@ type conflictResult struct {
 }
 
 // resolveConflict prompts the user to pick between overwriting with the
-// template content, keeping the local variant, or viewing a unified diff. EOF
-// or any read error collapses to a safe skip so non-interactive runs do not
-// silently overwrite edits.
-func resolveConflict(d upgrade.FileDiff, oldManifest *scaffold.Manifest, absDir, version string, in *bufio.Reader, out, errOut io.Writer, colorize bool, pagerMode string) conflictResult {
+// template content or keeping the local variant. The conflict diff is rendered
+// inline before the prompt so the decision and evidence are visible together.
+// EOF or any read error collapses to a safe skip so non-interactive runs do
+// not silently overwrite edits.
+func resolveConflict(d upgrade.FileDiff, oldManifest *scaffold.Manifest, absDir, version string, in *bufio.Reader, out, errOut io.Writer, colorize bool) conflictResult {
 	writef(out, "  ⚠ %s (modified locally)\n", d.Path)
 
 	if hasReadableBaseline(oldManifest, absDir, d) {
-		return resolveConflictWithBaseline(d, oldManifest, absDir, version, in, out, errOut, colorize, pagerMode)
+		return resolveConflictWithBaseline(d, oldManifest, absDir, version, in, out, errOut, colorize)
 	}
 
+	showDiff(d, absDir, version, out, errOut, colorize, pagerNever)
 	for {
 		writef(out, "    [o]verwrite / [s]kip / [d]iff ? ")
 		line, err := in.ReadString('\n')
@@ -644,7 +646,7 @@ func resolveConflict(d upgrade.FileDiff, oldManifest *scaffold.Manifest, absDir,
 		case "s", "skip":
 			return conflictResult{kind: resolutionSkip}
 		case "d", "diff":
-			showDiff(d, absDir, version, out, errOut, colorize, pagerMode)
+			showDiff(d, absDir, version, out, errOut, colorize, pagerNever)
 			// Loop back to the prompt so the user still picks overwrite or skip.
 		default:
 			// Unrecognized input — reprompt.
@@ -706,7 +708,7 @@ func hasReadableBaseline(oldManifest *scaffold.Manifest, absDir string, d upgrad
 	return true
 }
 
-func resolveConflictWithBaseline(d upgrade.FileDiff, oldManifest *scaffold.Manifest, absDir, version string, in *bufio.Reader, out, errOut io.Writer, colorize bool, pagerMode string) conflictResult {
+func resolveConflictWithBaseline(d upgrade.FileDiff, oldManifest *scaffold.Manifest, absDir, version string, in *bufio.Reader, out, errOut io.Writer, colorize bool) conflictResult {
 	prev := oldManifest.Files[d.Path]
 	baselineBytes, err := scaffold.ReadBaseline(absDir, prev)
 	if err != nil {
@@ -734,7 +736,7 @@ func resolveConflictWithBaseline(d upgrade.FileDiff, oldManifest *scaffold.Manif
 		}
 		decisionIndex++
 		writef(out, "\n  %s (hunk %d/%d)\n", d.Path, decisionIndex, decisionCount)
-		showHunkDiff(hunk, version, out, errOut, colorize, pagerMode)
+		showHunkDiff(hunk, version, out, errOut, colorize)
 		for {
 			writef(out, "    [a]pply template hunk / [k]eep local hunk / [e]dit / [s]kip file ? ")
 			line, err := in.ReadString('\n')
@@ -781,7 +783,7 @@ func resolveConflictWithBaseline(d upgrade.FileDiff, oldManifest *scaffold.Manif
 	}
 }
 
-func showHunkDiff(hunk upgrade.MergeHunk, version string, out, errOut io.Writer, colorize bool, pagerMode string) {
+func showHunkDiff(hunk upgrade.MergeHunk, version string, out, errOut io.Writer, colorize bool) {
 	diff := upgrade.UnifiedDiff(
 		upgrade.JoinLines(hunk.LocalLines, true),
 		upgrade.JoinLines(hunk.TemplateLines, true),
@@ -796,7 +798,7 @@ func showHunkDiff(hunk upgrade.MergeHunk, version string, out, errOut io.Writer,
 	if colorize {
 		diff = upgrade.Colorize(diff)
 	}
-	writeDiffOutput(diff, out, errOut, pagerMode)
+	writeDiffOutput(diff, out, errOut, pagerNever)
 }
 
 func editHunkLines(lines []string, out, errOut io.Writer) ([]string, error) {

@@ -614,6 +614,38 @@ func TestRunUpgrade_DryRunDiff_DoesNotMutateFilesOrManifest(t *testing.T) {
 	}
 }
 
+func TestRunUpgrade_DryRunDiff_HonorsPagerAlwaysFallback(t *testing.T) {
+	setupTestEmbedFS(t)
+	Version = "1.0.0-test"
+
+	dir := t.TempDir()
+	cfg := initConfig{ProjectName: "test", Packs: nil}
+	if err := executeInit(dir, cfg, false); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte("# local edit\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("PAGER", "false")
+	var out, errOut bytes.Buffer
+	err := runUpgradeIOWithOptions(dir, upgradeOptions{
+		DryRun:      true,
+		DiffPreview: true,
+		Pager:       pagerAlways,
+	}, strings.NewReader(""), &out, &errOut, false)
+	if err != nil {
+		t.Fatalf("dry-run upgrade: %v", err)
+	}
+
+	if !strings.Contains(errOut.String(), "pager failed") {
+		t.Errorf("dry-run diff should still honor --pager=always and report fallback; errOut:\n%s", errOut.String())
+	}
+	if !strings.Contains(out.String(), "--- local") || !strings.Contains(out.String(), "│ -# local edit") {
+		t.Errorf("dry-run pager fallback should still write the diff to stdout; out:\n%s", out.String())
+	}
+}
+
 func TestRunUpgrade_DoesNotAddUnselectedPackRules(t *testing.T) {
 	setupTestEmbedFS(t)
 	Version = "1.0.0-test"
@@ -1079,6 +1111,11 @@ func TestRunUpgrade_InteractiveDiff_ShowsUnifiedDiff(t *testing.T) {
 			t.Errorf("diff output missing %q; got:\n%s", want, combined)
 		}
 	}
+	diffIdx := strings.Index(combined, "--- local")
+	promptIdx := strings.Index(combined, "[a]pply template hunk")
+	if diffIdx < 0 || promptIdx < 0 || diffIdx > promptIdx {
+		t.Errorf("hunk diff should be visible before the command prompt; got:\n%s", combined)
+	}
 	for _, notWant := range []string{
 		"@@ ",
 		"template hash:",
@@ -1131,6 +1168,39 @@ func TestRunUpgrade_InteractiveDiff_ColorizesWhenEnabled(t *testing.T) {
 	}
 }
 
+func TestRunUpgrade_InteractiveDiff_IgnoresPagerAlways(t *testing.T) {
+	setupTestEmbedFS(t)
+	Version = "1.0.0-test"
+
+	dir := t.TempDir()
+	cfg := initConfig{ProjectName: "test", Packs: nil}
+	if err := executeInit(dir, cfg, false); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	agents := filepath.Join(dir, "AGENTS.md")
+	if err := os.WriteFile(agents, []byte("# pager should not run\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("PAGER", "false")
+	var out, errOut bytes.Buffer
+	err := runUpgradeIOWithOptions(dir, upgradeOptions{
+		Pager: pagerAlways,
+	}, strings.NewReader("k\ny\n"), &out, &errOut, false)
+	if err != nil {
+		t.Fatalf("upgrade: %v", err)
+	}
+
+	combined := out.String()
+	if !strings.Contains(combined, "--- local") || !strings.Contains(combined, "[a]pply template hunk") {
+		t.Errorf("interactive output should include both diff and prompt; got:\n%s", combined)
+	}
+	if strings.Contains(errOut.String(), "pager failed") {
+		t.Errorf("interactive conflict resolution should not invoke pager; errOut:\n%s", errOut.String())
+	}
+}
+
 func TestRunUpgrade_V1ManifestConflict_UsesLegacyPrompt(t *testing.T) {
 	setupTestEmbedFS(t)
 	Version = "1.0.0-test"
@@ -1161,12 +1231,17 @@ func TestRunUpgrade_V1ManifestConflict_UsesLegacyPrompt(t *testing.T) {
 	}
 
 	var out, errOut bytes.Buffer
-	if err := runUpgradeIO(dir, false, strings.NewReader("d\ns\n"), &out, &errOut, false); err != nil {
+	if err := runUpgradeIO(dir, false, strings.NewReader("s\n"), &out, &errOut, false); err != nil {
 		t.Fatalf("upgrade: %v", err)
 	}
 	got := out.String()
 	if !strings.Contains(got, "[o]verwrite / [s]kip / [d]iff") {
 		t.Errorf("v1 manifest should use legacy prompt; got:\n%s", got)
+	}
+	diffIdx := strings.Index(got, "--- local")
+	promptIdx := strings.Index(got, "[o]verwrite / [s]kip / [d]iff")
+	if diffIdx < 0 || promptIdx < 0 || diffIdx > promptIdx {
+		t.Errorf("v1 manifest should render the diff before the command prompt; got:\n%s", got)
 	}
 	if strings.Contains(got, "[a]pply template file") {
 		t.Errorf("v1 manifest without baseline must not enter baseline-backed prompt; got:\n%s", got)
