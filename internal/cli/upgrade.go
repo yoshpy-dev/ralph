@@ -279,8 +279,8 @@ func runUpgradeIOWithOptions(targetDir string, opts upgradeOptions, in io.Reader
 				continue
 			}
 			result := resolveConflict(d, oldManifest, absDir, Version, reader, out, errOut, colorize)
-			applyPlan.mergeHunkStats(result.stats)
-			if result.hunkReviewed {
+			applyPlan.mergeConflictStats(result.stats)
+			if result.conflictReviewed {
 				applyPlan.needsConfirmation = true
 			}
 			switch result.kind {
@@ -305,8 +305,14 @@ func runUpgradeIOWithOptions(targetDir string, opts upgradeOptions, in io.Reader
 				applyPlan.addMessage(fmt.Sprintf("  ⊘ %s (kept local; future upgrades will skip silently)\n", d.Path))
 				applyPlan.skipped++
 			case resolutionResolved:
-				if err := applyPlan.addResolvedWrite(manifest, d.Path, d.NewHash, d.NewContent, result.content); err != nil {
-					return err
+				if result.message != "" {
+					if err := applyPlan.addResolvedWriteWithMessage(manifest, d.Path, d.NewHash, d.NewContent, result.content, result.message); err != nil {
+						return err
+					}
+				} else {
+					if err := applyPlan.addResolvedWrite(manifest, d.Path, d.NewHash, d.NewContent, result.content); err != nil {
+						return err
+					}
 				}
 			}
 
@@ -405,7 +411,7 @@ type upgradeApplyPlan struct {
 	skipped           int
 	notified          int
 	needsConfirmation bool
-	hunkStats         hunkReviewStats
+	conflictStats     conflictReviewStats
 }
 
 func (p *upgradeApplyPlan) addMessage(message string) {
@@ -419,7 +425,7 @@ func (p *upgradeApplyPlan) addTemplateWrite(manifest *scaffold.Manifest, relPath
 }
 
 func (p *upgradeApplyPlan) addResolvedWrite(manifest *scaffold.Manifest, relPath, templateHash string, templateContent, resolvedContent []byte) error {
-	return p.addResolvedWriteWithMessage(manifest, relPath, templateHash, templateContent, resolvedContent, fmt.Sprintf("  ✓ %s (hunk selections applied)\n", relPath))
+	return p.addResolvedWriteWithMessage(manifest, relPath, templateHash, templateContent, resolvedContent, fmt.Sprintf("  ✓ %s (file conflict resolved)\n", relPath))
 }
 
 func (p *upgradeApplyPlan) addResolvedWriteWithMessage(manifest *scaffold.Manifest, relPath, templateHash string, templateContent, resolvedContent []byte, message string) error {
@@ -474,53 +480,38 @@ func (p *upgradeApplyPlan) writeMessages(out io.Writer) {
 	}
 }
 
-func (p *upgradeApplyPlan) mergeHunkStats(stats hunkReviewStats) {
-	p.hunkStats.merge(stats)
+func (p *upgradeApplyPlan) mergeConflictStats(stats conflictReviewStats) {
+	p.conflictStats.merge(stats)
 }
 
-type hunkReviewStats struct {
-	applyHunks int
-	keepHunks  int
-	editHunks  int
-	skipFiles  int
+type conflictReviewStats struct {
 	applyFiles map[string]bool
 	keepFiles  map[string]bool
 	editFiles  map[string]bool
 }
 
-func (s *hunkReviewStats) addApply(path string) {
+func (s *conflictReviewStats) addApply(path string) {
 	if s.applyFiles == nil {
 		s.applyFiles = make(map[string]bool)
 	}
-	s.applyHunks++
 	s.applyFiles[path] = true
 }
 
-func (s *hunkReviewStats) addKeep(path string) {
-	if s.keepFiles == nil {
-		s.keepFiles = make(map[string]bool)
-	}
-	s.keepHunks++
-	s.keepFiles[path] = true
-}
-
-func (s *hunkReviewStats) addEdit(path string) {
+func (s *conflictReviewStats) addEdit(path string) {
 	if s.editFiles == nil {
 		s.editFiles = make(map[string]bool)
 	}
-	s.editHunks++
 	s.editFiles[path] = true
 }
 
-func (s *hunkReviewStats) addSkipFile() {
-	s.skipFiles++
+func (s *conflictReviewStats) addKeep(path string) {
+	if s.keepFiles == nil {
+		s.keepFiles = make(map[string]bool)
+	}
+	s.keepFiles[path] = true
 }
 
-func (s *hunkReviewStats) merge(other hunkReviewStats) {
-	s.applyHunks += other.applyHunks
-	s.keepHunks += other.keepHunks
-	s.editHunks += other.editHunks
-	s.skipFiles += other.skipFiles
+func (s *conflictReviewStats) merge(other conflictReviewStats) {
 	mergeBoolMap(&s.applyFiles, other.applyFiles)
 	mergeBoolMap(&s.keepFiles, other.keepFiles)
 	mergeBoolMap(&s.editFiles, other.editFiles)
@@ -539,19 +530,16 @@ func mergeBoolMap(dst *map[string]bool, src map[string]bool) {
 }
 
 func confirmApplySummary(plan *upgradeApplyPlan, in *bufio.Reader, out, errOut io.Writer) bool {
-	stats := plan.hunkStats
+	stats := plan.conflictStats
 	writef(out, "\nApply summary\n")
-	if stats.applyHunks > 0 {
-		writef(out, "  Apply template: %d files / %d hunks\n", len(stats.applyFiles), stats.applyHunks)
+	if len(stats.applyFiles) > 0 {
+		writef(out, "  Apply template: %d files\n", len(stats.applyFiles))
 	}
-	if stats.keepHunks > 0 {
-		writef(out, "  Keep local:     %d files / %d hunks\n", len(stats.keepFiles), stats.keepHunks)
+	if len(stats.keepFiles) > 0 {
+		writef(out, "  Keep local:     %d files\n", len(stats.keepFiles))
 	}
-	if stats.editHunks > 0 {
-		writef(out, "  Edited:         %d files / %d hunks\n", len(stats.editFiles), stats.editHunks)
-	}
-	if stats.skipFiles > 0 {
-		writef(out, "  Skip file:      %d files\n", stats.skipFiles)
+	if len(stats.editFiles) > 0 {
+		writef(out, "  Edited:         %d files\n", len(stats.editFiles))
 	}
 	writef(out, "\nApply these changes? [y/N] ")
 	line, err := in.ReadString('\n')
@@ -614,17 +602,17 @@ const (
 )
 
 type conflictResult struct {
-	kind         resolution
-	content      []byte
-	hunkReviewed bool
-	stats        hunkReviewStats
+	kind             resolution
+	content          []byte
+	message          string
+	conflictReviewed bool
+	stats            conflictReviewStats
 }
 
-// resolveConflict prompts the user to pick between overwriting with the
-// template content or keeping the local variant. The conflict diff is rendered
-// inline before the prompt so the decision and evidence are visible together.
-// EOF or any read error collapses to a safe skip so non-interactive runs do
-// not silently overwrite edits.
+// resolveConflict prompts the user to pick a file-level resolution. The
+// conflict diff is rendered inline before the prompt so the decision and
+// evidence are visible together. EOF or any read error collapses to a safe skip
+// so non-interactive runs do not silently overwrite edits.
 func resolveConflict(d upgrade.FileDiff, oldManifest *scaffold.Manifest, absDir, version string, in *bufio.Reader, out, errOut io.Writer, colorize bool) conflictResult {
 	writef(out, "  ⚠ %s (modified locally)\n", d.Path)
 
@@ -657,7 +645,7 @@ func resolveConflict(d upgrade.FileDiff, oldManifest *scaffold.Manifest, absDir,
 // showDiff renders the local-vs-template unified diff for a conflict entry.
 // When colorize is true the diff is wrapped in ANSI escapes for terminal
 // display. Disk read failures degrade gracefully to a warning so the user can
-// still make a keep/apply decision when, e.g., the file was moved between diff
+// still make a file-level decision when, e.g., the file was moved between diff
 // computation and the prompt.
 func showDiff(d upgrade.FileDiff, absDir, version string, out, errOut io.Writer, colorize bool, pagerMode string) {
 	localPath := filepath.Join(absDir, d.Path)
@@ -672,7 +660,7 @@ func showDiff(d upgrade.FileDiff, absDir, version string, out, errOut io.Writer,
 		"local",
 		fmt.Sprintf("template (%s)", version),
 	)
-	diff = omitHunkHeaders(diff)
+	diff = omitRangeHeaders(diff)
 	if diff == "" {
 		writef(out, "    (no textual difference — manifest hash drift only)\n")
 	} else {
@@ -683,7 +671,7 @@ func showDiff(d upgrade.FileDiff, absDir, version string, out, errOut io.Writer,
 	}
 }
 
-func omitHunkHeaders(diff string) string {
+func omitRangeHeaders(diff string) string {
 	if diff == "" {
 		return ""
 	}
@@ -722,86 +710,101 @@ func resolveConflictWithBaseline(d upgrade.FileDiff, oldManifest *scaffold.Manif
 	}
 
 	mergePlan := upgrade.PlanMerge(baselineBytes, localBytes, d.NewContent)
-	decisionCount := mergePlan.DecisionCount()
-	if decisionCount == 0 {
-		return conflictResult{kind: resolutionResolved, content: mergePlan.Render(nil)}
+	if mergePlan.ConflictCount() == 0 {
+		return conflictResult{kind: resolutionResolved, content: d.NewContent}
 	}
 
-	decisions := make(map[int]upgrade.MergeDecision, decisionCount)
-	stats := hunkReviewStats{}
-	decisionIndex := 0
-	for _, hunk := range mergePlan.Hunks {
-		if !hunk.NeedsDecision() {
-			continue
+	stats := conflictReviewStats{}
+	showDiff(d, absDir, version, out, errOut, colorize, pagerNever)
+	for {
+		writef(out, "    [a]pply template file / [k]eep local file / [e]dit file ? ")
+		line, err := in.ReadString('\n')
+		if err != nil && line == "" {
+			writef(errOut, "\n  (non-interactive input detected, keeping local file)\n")
+			stats.addKeep(d.Path)
+			return conflictResult{kind: resolutionSkip, conflictReviewed: true, stats: stats}
 		}
-		decisionIndex++
-		writef(out, "\n  %s (hunk %d/%d)\n", d.Path, decisionIndex, decisionCount)
-		showHunkDiff(hunk, version, out, errOut, colorize)
-		for {
-			writef(out, "    [a]pply template hunk / [k]eep local hunk / [e]dit / [s]kip file ? ")
-			line, err := in.ReadString('\n')
-			if err != nil && line == "" {
-				writef(errOut, "\n  (non-interactive input detected, keeping local file)\n")
-				skipStats := hunkReviewStats{}
-				skipStats.addSkipFile()
-				return conflictResult{kind: resolutionSkip, hunkReviewed: true, stats: skipStats}
+		switch strings.TrimSpace(line) {
+		case "a", "apply":
+			stats.addApply(d.Path)
+			return conflictResult{kind: resolutionOverwrite, conflictReviewed: true, stats: stats}
+		case "k", "keep":
+			stats.addKeep(d.Path)
+			return conflictResult{
+				kind:             resolutionResolved,
+				content:          localBytes,
+				message:          fmt.Sprintf("  ✓ %s (kept local file)\n", d.Path),
+				conflictReviewed: true,
+				stats:            stats,
 			}
-			switch strings.TrimSpace(line) {
-			case "a", "apply":
-				decisions[hunk.Index] = upgrade.MergeDecision{Choice: upgrade.MergeUseTemplate}
-				stats.addApply(d.Path)
-				goto nextHunk
-			case "k", "keep":
-				decisions[hunk.Index] = upgrade.MergeDecision{Choice: upgrade.MergeUseLocal}
-				stats.addKeep(d.Path)
-				goto nextHunk
-			case "e", "edit":
-				editedLines, editErr := editHunkLines(hunk.LocalLines, out, errOut)
-				if editErr != nil {
-					writef(errOut, "    (manual edit failed: %v)\n", editErr)
-					continue
-				}
-				decisions[hunk.Index] = upgrade.MergeDecision{Choice: upgrade.MergeUseEdited, EditedLines: editedLines}
-				stats.addEdit(d.Path)
-				goto nextHunk
-			case "s", "skip":
-				skipStats := hunkReviewStats{}
-				skipStats.addSkipFile()
-				return conflictResult{kind: resolutionSkip, hunkReviewed: true, stats: skipStats}
-			default:
-				// Unrecognized input — reprompt.
+		case "e", "edit":
+			editedContent, editErr := editConflictFile(mergePlan, version, out, errOut)
+			if editErr != nil {
+				writef(errOut, "    (manual edit failed: %v)\n", editErr)
+				continue
 			}
+			stats.addEdit(d.Path)
+			return conflictResult{
+				kind:             resolutionResolved,
+				content:          editedContent,
+				conflictReviewed: true,
+				stats:            stats,
+			}
+		default:
+			// Unrecognized input — reprompt.
 		}
-	nextHunk:
-	}
-
-	return conflictResult{
-		kind:         resolutionResolved,
-		content:      mergePlan.Render(decisions),
-		hunkReviewed: true,
-		stats:        stats,
 	}
 }
 
-func showHunkDiff(hunk upgrade.MergeHunk, version string, out, errOut io.Writer, colorize bool) {
-	diff := upgrade.UnifiedDiff(
-		upgrade.JoinLines(hunk.LocalLines, true),
-		upgrade.JoinLines(hunk.TemplateLines, true),
-		"local",
-		fmt.Sprintf("template (%s)", version),
-	)
-	diff = omitHunkHeaders(diff)
-	if diff == "" {
-		writef(out, "    (no textual difference)\n")
-		return
+func editConflictFile(plan upgrade.MergePlan, version string, out, errOut io.Writer) ([]byte, error) {
+	editedContent, err := editContentBytes(upgrade.JoinLines(conflictMarkerFileLines(plan, version), true), out, errOut)
+	if err != nil {
+		return nil, err
 	}
-	if colorize {
-		diff = upgrade.Colorize(diff)
+	if hasConflictMarkers(editedContent) {
+		return nil, fmt.Errorf("unresolved conflict markers remain")
 	}
-	writeDiffOutput(diff, out, errOut, pagerNever)
+	return editedContent, nil
 }
 
-func editHunkLines(lines []string, out, errOut io.Writer) ([]string, error) {
+func conflictMarkerFileLines(plan upgrade.MergePlan, version string) []string {
+	lines := make([]string, 0, len(plan.LocalLines)+len(plan.TemplateLines)+len(plan.Regions)*3)
+	cursor := 0
+	for _, region := range plan.Regions {
+		if region.BaseStart > cursor {
+			lines = append(lines, plan.BaseLines[cursor:region.BaseStart]...)
+		}
+		if region.NeedsResolution() {
+			lines = append(lines, "<<<<<<< local")
+			lines = append(lines, region.LocalLines...)
+			lines = append(lines, "=======")
+			lines = append(lines, region.TemplateLines...)
+			lines = append(lines, fmt.Sprintf(">>>>>>> template (%s)", version))
+		} else {
+			lines = append(lines, region.TemplateLines...)
+		}
+		cursor = region.BaseEnd
+	}
+	if cursor < len(plan.BaseLines) {
+		lines = append(lines, plan.BaseLines[cursor:]...)
+	}
+	return lines
+}
+
+func hasConflictMarkers(content []byte) bool {
+	for _, line := range strings.Split(string(content), "\n") {
+		line = strings.TrimSuffix(line, "\r")
+		if strings.HasPrefix(line, "<<<<<<< ") ||
+			line == "=======" ||
+			strings.HasPrefix(line, ">>>>>>> ") ||
+			strings.HasPrefix(line, "||||||| ") {
+			return true
+		}
+	}
+	return false
+}
+
+func editContentBytes(initial []byte, out, errOut io.Writer) ([]byte, error) {
 	editor := os.Getenv("VISUAL")
 	if editor == "" {
 		editor = os.Getenv("EDITOR")
@@ -809,12 +812,12 @@ func editHunkLines(lines []string, out, errOut io.Writer) ([]string, error) {
 	if strings.TrimSpace(editor) == "" {
 		return nil, fmt.Errorf("VISUAL/EDITOR is not set")
 	}
-	tmp, err := os.CreateTemp("", "ralph-upgrade-hunk-*")
+	tmp, err := os.CreateTemp("", "ralph-upgrade-conflict-*")
 	if err != nil {
 		return nil, err
 	}
 	tmpPath := tmp.Name()
-	if _, err := tmp.Write(upgrade.JoinLines(lines, true)); err != nil {
+	if _, err := tmp.Write(initial); err != nil {
 		_ = tmp.Close()
 		_ = os.Remove(tmpPath)
 		return nil, err
@@ -837,16 +840,7 @@ func editHunkLines(lines []string, out, errOut io.Writer) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return splitEditedLines(edited), nil
-}
-
-func splitEditedLines(data []byte) []string {
-	text := string(data)
-	text = strings.TrimSuffix(text, "\n")
-	if text == "" {
-		return nil
-	}
-	return strings.Split(text, "\n")
+	return edited, nil
 }
 
 func renderUpgradePreview(diffs []upgrade.FileDiff, absDir, version string, out, errOut io.Writer, colorize bool, opts upgradeOptions) {

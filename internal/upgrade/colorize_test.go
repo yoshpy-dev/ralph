@@ -22,11 +22,11 @@ func TestColorize_FileHeaders(t *testing.T) {
 	}
 }
 
-func TestColorize_HunkHeader(t *testing.T) {
+func TestColorize_RangeHeader(t *testing.T) {
 	in := "@@ 旧 L1  →  新 L1 @@\n"
 	got := Colorize(in)
 	if !strings.Contains(got, ansiCyan+"@@ 旧 L1  →  新 L1 @@"+ansiReset+"\n") {
-		t.Errorf("hunk header not wrapped in cyan; got:\n%q", got)
+		t.Errorf("range header not wrapped in cyan; got:\n%q", got)
 	}
 }
 
