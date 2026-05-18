@@ -159,4 +159,4 @@ confirmation.
 - [x] Verification artifact created: `docs/reports/verify-2026-05-18-upgrade-hunk-apply.md`
 - [x] Test artifact created: `docs/reports/test-2026-05-18-upgrade-hunk-apply.md`
 - [x] Sync-docs artifact created: `docs/reports/sync-docs-2026-05-18-upgrade-hunk-apply.md`
-- [ ] PR created
+- [x] PR created: https://github.com/yoshpy-dev/ralph/pull/100
