@@ -16,9 +16,11 @@ No blocking diff-quality findings after the prompt wording fix.
 - Checked for unrelated broad refactors: none found. Changes stay inside upgrade/init/manifest behavior plus matching docs/tests.
 - Checked path handling in baseline cache: `WriteBaseline` rejects non-local template paths, and `ReadBaseline` requires `.ralph/baseline/` prefix before reading.
 - Checked prompt wording: baseline-backed prompt is explicitly file-scoped
-  (`apply template file / keep local file / edit / skip file`); no `next` or
+  (`apply template file / keep local file / edit`); no `skip`, `next`, or
   `quit` option appears.
-- Checked deferred behavior is explicit: full 3-way planner/manual edit/final summary is recorded in `docs/tech-debt/README.md`.
+- Checked diff display: upgrade UI omits hunk headers and template/local hash
+  summaries; low-level diff rendering remains unchanged.
+- Checked deferred behavior is explicit: full 3-way planner/manual edit/pre-apply summary is recorded in `docs/tech-debt/README.md`.
 
 ## Recommendation
 

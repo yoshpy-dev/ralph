@@ -479,16 +479,14 @@ func resolveConflict(d upgrade.FileDiff, oldManifest *scaffold.Manifest, absDir,
 
 // showDiff renders the local-vs-template unified diff for a conflict entry.
 // When colorize is true the diff is wrapped in ANSI escapes for terminal
-// display. Disk read failures degrade gracefully to a hash summary so the
-// user can still make an informed choice when, e.g., the file was moved
-// between diff computation and the prompt.
+// display. Disk read failures degrade gracefully to a warning so the user can
+// still make a keep/apply decision when, e.g., the file was moved between diff
+// computation and the prompt.
 func showDiff(d upgrade.FileDiff, absDir, version string, out, errOut io.Writer, colorize bool, pagerMode string) {
 	localPath := filepath.Join(absDir, d.Path)
 	localBytes, err := os.ReadFile(localPath)
 	if err != nil {
-		writef(errOut, "    (could not read %s: %v — falling back to hash summary)\n", d.Path, err)
-		writef(out, "    template hash: %s\n", d.NewHash)
-		writef(out, "    local hash:    %s\n", d.DiskHash)
+		writef(errOut, "    (could not read %s: %v)\n", d.Path, err)
 		return
 	}
 	diff := upgrade.UnifiedDiff(
@@ -497,6 +495,7 @@ func showDiff(d upgrade.FileDiff, absDir, version string, out, errOut io.Writer,
 		"local",
 		fmt.Sprintf("template (%s)", version),
 	)
+	diff = omitHunkHeaders(diff)
 	if diff == "" {
 		writef(out, "    (no textual difference — manifest hash drift only)\n")
 	} else {
@@ -505,7 +504,20 @@ func showDiff(d upgrade.FileDiff, absDir, version string, out, errOut io.Writer,
 		}
 		writeDiffOutput(diff, out, errOut, pagerMode)
 	}
-	writef(out, "    template hash: %s  local hash: %s\n", d.NewHash, d.DiskHash)
+}
+
+func omitHunkHeaders(diff string) string {
+	if diff == "" {
+		return ""
+	}
+	var b strings.Builder
+	for _, line := range strings.SplitAfter(diff, "\n") {
+		if strings.HasPrefix(strings.TrimSuffix(line, "\n"), "@@ ") {
+			continue
+		}
+		b.WriteString(line)
+	}
+	return b.String()
 }
 
 func hasReadableBaseline(oldManifest *scaffold.Manifest, absDir string, d upgrade.FileDiff) bool {
@@ -522,19 +534,19 @@ func hasReadableBaseline(oldManifest *scaffold.Manifest, absDir string, d upgrad
 func resolveConflictWithBaseline(d upgrade.FileDiff, absDir, version string, in *bufio.Reader, out, errOut io.Writer, colorize bool, pagerMode string) resolution {
 	showDiff(d, absDir, version, out, errOut, colorize, pagerMode)
 	for {
-		writef(out, "    [a]pply template file / [k]eep local file / [e]dit / [s]kip file ? ")
+		writef(out, "    [a]pply template file / [k]eep local file / [e]dit ? ")
 		line, err := in.ReadString('\n')
 		if err != nil && line == "" {
-			writef(errOut, "\n  (non-interactive input detected, skipping)\n")
+			writef(errOut, "\n  (non-interactive input detected, keeping local file)\n")
 			return resolutionSkip
 		}
 		switch strings.TrimSpace(line) {
 		case "a", "apply":
 			return resolutionOverwrite
-		case "k", "keep", "s", "skip":
+		case "k", "keep":
 			return resolutionSkip
 		case "e", "edit":
-			writef(errOut, "    (manual edit is not available yet; choose apply, keep, or skip file)\n")
+			writef(errOut, "    (manual edit is not available yet; choose apply or keep local)\n")
 		default:
 			// Unrecognized input — reprompt.
 		}

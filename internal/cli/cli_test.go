@@ -922,6 +922,15 @@ func TestRunUpgrade_InteractiveDiff_ShowsUnifiedDiff(t *testing.T) {
 			t.Errorf("diff output missing %q; got:\n%s", want, combined)
 		}
 	}
+	for _, notWant := range []string{
+		"@@ ",
+		"template hash:",
+		"local hash:",
+	} {
+		if strings.Contains(combined, notWant) {
+			t.Errorf("diff output should not include %q; got:\n%s", notWant, combined)
+		}
+	}
 	// Non-TTY destination (bytes.Buffer) and colorize=false must not emit ANSI.
 	if strings.Contains(combined, "\x1b[") {
 		t.Errorf("ANSI escape leaked into non-TTY output:\n%q", combined)
@@ -957,8 +966,11 @@ func TestRunUpgrade_InteractiveDiff_ColorizesWhenEnabled(t *testing.T) {
 	if !strings.Contains(got, "\x1b[1;32m+++ template (1.0.0-test)") {
 		t.Errorf("expected bold-green +++ header; got:\n%q", got)
 	}
-	if !strings.Contains(got, "\x1b[36m@@ ") {
-		t.Errorf("expected cyan hunk header; got:\n%q", got)
+	if strings.Contains(got, "\x1b[36m@@ ") || strings.Contains(got, "@@ ") {
+		t.Errorf("upgrade UI should omit hunk headers; got:\n%q", got)
+	}
+	if !strings.Contains(got, "\x1b[31m") || !strings.Contains(got, "\x1b[32m") {
+		t.Errorf("expected colored removal/addition lines; got:\n%q", got)
 	}
 }
 
@@ -1030,11 +1042,11 @@ func TestRunUpgrade_InteractiveDiff_RepromptsOnInvalid(t *testing.T) {
 	}
 
 	got := out.String()
-	if strings.Count(got, "[a]pply template file / [k]eep local file / [e]dit / [s]kip file") < 3 {
+	if strings.Count(got, "[a]pply template file / [k]eep local file / [e]dit ?") < 3 {
 		t.Errorf("expected prompt to re-render on invalid and edit inputs; got:\n%s", got)
 	}
-	if strings.Contains(got, "[n]ext") || strings.Contains(got, "[q]uit") {
-		t.Errorf("baseline-backed prompt must not offer next/quit; got:\n%s", got)
+	if strings.Contains(got, "[s]kip") || strings.Contains(got, "[n]ext") || strings.Contains(got, "[q]uit") {
+		t.Errorf("baseline-backed prompt must not offer skip/next/quit; got:\n%s", got)
 	}
 }
 
@@ -1193,9 +1205,9 @@ func TestRunUpgrade_NextRunAfterSkip_IsSilent(t *testing.T) {
 }
 
 // If the local file vanishes between diff computation and the prompt render,
-// showDiff must fall back to a hash summary and let the user continue
-// choosing rather than abort the whole upgrade.
-func TestRunUpgrade_DiskReadFailure_FallsBackToHash(t *testing.T) {
+// showDiff must fall back to a warning and let the user continue choosing
+// rather than abort the whole upgrade.
+func TestRunUpgrade_DiskReadFailure_FallsBackToWarning(t *testing.T) {
 	setupTestEmbedFS(t)
 	Version = "1.0.0-test"
 
@@ -1239,8 +1251,8 @@ func TestRunUpgrade_DiskReadFailure_FallsBackToHash(t *testing.T) {
 	if !strings.Contains(errOut.String(), "could not read") {
 		t.Errorf("expected disk-read fallback warning; errOut:\n%s", errOut.String())
 	}
-	if !strings.Contains(out.String(), "template hash:") {
-		t.Errorf("expected hash fallback summary; out:\n%s", out.String())
+	if strings.Contains(out.String(), "template hash:") || strings.Contains(out.String(), "local hash:") {
+		t.Errorf("hash fallback summary should stay out of normal UI; out:\n%s", out.String())
 	}
 }
 

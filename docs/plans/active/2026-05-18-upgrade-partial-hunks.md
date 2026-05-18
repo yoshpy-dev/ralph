@@ -13,7 +13,7 @@
 Add the first implementation slice for safer `ralph upgrade` conflict review:
 manifest v2-compatible baseline metadata, baseline cache writes for accepted
 template files, a dry-run diff preview, pager support for large diffs, and a
-baseline-gated file-level review path that uses `apply / keep / edit / skip file`
+baseline-gated file-level review path that uses `apply / keep / edit`
 without changing existing v1-project behavior destructively.
 
 ## Scope
@@ -30,7 +30,7 @@ without changing existing v1-project behavior destructively.
 - Add pager support for diff display with safe fallback to stdout.
 - Add the baseline-gated review prompt shape only when baseline content is
   available:
-  `[a]pply template file / [k]eep local file / [e]dit / [s]kip file`.
+  `[a]pply template file / [k]eep local file / [e]dit`.
   Full hunk-level manual edit and multi-hunk staged merge semantics are tracked
   as follow-up debt before #97 can close.
 
@@ -88,9 +88,9 @@ without changing existing v1-project behavior destructively.
 - [x] Conflict diff display can use a pager when requested and falls back to
       stdout if the pager cannot start.
 - [x] Baseline-available conflicts expose only
-      `apply template file / keep local file / edit / skip file`; no `next` or
+      `apply template file / keep local file / edit`; no `skip`, `next`, or
       `quit` prompt text is introduced.
-- [x] Full hunk-level edit/final-summary semantics are explicitly tracked as
+- [x] Full hunk-level edit/pre-apply summary semantics are explicitly tracked as
       follow-up debt instead of silently implied by this first slice.
 - [x] Tests cover manifest compatibility, baseline writing, dry-run behavior,
       and baseline-backed prompt option shape.

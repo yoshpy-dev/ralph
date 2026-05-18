@@ -3,7 +3,7 @@
 - Plan: `docs/plans/active/2026-05-18-upgrade-partial-hunks.md`
 - Related issue: #97
 - Verdict: PASS for this PR slice
-- Evidence: `docs/evidence/verify-2026-05-18-023436.log`
+- Evidence: `docs/evidence/verify-2026-05-18-030318.log`
 
 ## Acceptance Criteria
 
@@ -13,9 +13,10 @@
 | Newly initialized and accepted template files record `baseline_status = "available"` and `baseline_path` | PASS | `TestExecuteInit_NewProject`, `TestManifestRoundTripV2BaselineFields`, overwrite/force paths use `setManagedWithBaseline` |
 | `Managed=false` entries remain unmanaged across v2 metadata writes and baseline creation | PASS | Existing unmanaged regression tests still pass; `preserveUnmanaged` keeps `Managed=false` |
 | `ralph upgrade --dry-run --diff` previews changes without writing target files or manifest | PASS | `TestRunUpgrade_DryRunDiff_DoesNotMutateFilesOrManifest` |
+| Upgrade diff UI omits hunk headers and hash summaries | PASS | `TestRunUpgrade_InteractiveDiff_ShowsUnifiedDiff`, `TestRunUpgrade_DiskReadFailure_FallsBackToWarning` |
 | Conflict diff display can use pager and fall back to stdout | PASS | `--pager` validation and `writeDiffOutput` fallback path implemented; full verify passed. Direct pager failure integration remains a low-value edge gap. |
-| Baseline-available conflicts expose only `apply template file / keep local file / edit / skip file`; no `next` or `quit` | PASS | `TestRunUpgrade_InteractiveDiff_RepromptsOnInvalid` asserts prompt shape and absence of `next`/`quit` |
-| Full hunk-level edit/final-summary semantics are tracked as follow-up debt | PASS | `docs/tech-debt/README.md` entry added |
+| Baseline-available conflicts expose only `apply template file / keep local file / edit`; no `skip`, `next`, or `quit` | PASS | `TestRunUpgrade_InteractiveDiff_RepromptsOnInvalid` asserts prompt shape and absence of `skip`/`next`/`quit` |
+| Full hunk-level edit/pre-apply summary semantics are tracked as follow-up debt | PASS | `docs/tech-debt/README.md` entry added |
 | Tests cover manifest compatibility, baseline writing, dry-run behavior, and prompt option shape | PASS | New/updated tests in `internal/scaffold` and `internal/cli` |
 
 ## Static Verification
@@ -28,4 +29,4 @@ Updated `docs/specs/2026-04-16-ralph-cli-tool.md` with manifest v2 baseline meta
 
 ## Remaining Gaps
 
-- This PR does not implement full old-template/local/new-template hunk planning, manual edit, or final staged apply summary. Those are explicitly deferred before #97 can be closed.
+- This PR does not implement full old-template/local/new-template hunk planning, manual edit, or final pre-apply summary. Those are explicitly deferred before #97 can be closed.

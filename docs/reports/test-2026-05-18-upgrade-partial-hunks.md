@@ -7,6 +7,7 @@
   - `docs/evidence/verify-2026-05-18-021543.log` (`./scripts/run-test.sh`)
   - `docs/evidence/verify-2026-05-18-021712.log` (`./scripts/run-verify.sh`)
   - `docs/evidence/verify-2026-05-18-023436.log` (`./scripts/run-verify.sh` after prompt wording fix)
+  - `docs/evidence/verify-2026-05-18-030318.log` (`./scripts/run-verify.sh` after compact diff UI fix)
 
 ## Test Runs
 
@@ -21,7 +22,7 @@
 
 - `internal/scaffold/baseline_test.go`: baseline write/read, escaping-path rejection, read-path prefix guard.
 - `internal/scaffold/manifest_test.go`: v2 baseline field round trip and v1 manifest compatibility.
-- `internal/cli/cli_test.go`: init baseline metadata, dry-run diff no-mutation behavior, v1 prompt fallback, baseline-backed prompt option shape, baseline metadata after apply.
+- `internal/cli/cli_test.go`: init baseline metadata, dry-run diff no-mutation behavior, v1 prompt fallback, baseline-backed prompt option shape, compact diff UI without hunk/hash metadata, baseline metadata after apply.
 
 ## Residual Risk
 
