@@ -44,6 +44,34 @@ func TestRenderFS_CreatesFiles(t *testing.T) {
 	}
 }
 
+func TestRenderFS_SkipsConfiguredPaths(t *testing.T) {
+	src := fstest.MapFS{
+		"README.md": {Data: []byte("# Pack")},
+		"rule.md":   {Data: []byte("# Rule")},
+	}
+
+	dir := t.TempDir()
+	result, hashes, err := RenderFS(src, RenderOptions{
+		TargetDir: dir,
+		SkipPaths: map[string]bool{
+			"rule.md": true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("RenderFS: %v", err)
+	}
+
+	if len(result.Created) != 1 || result.Created[0] != "README.md" {
+		t.Errorf("created = %v, want [README.md]", result.Created)
+	}
+	if _, ok := hashes["rule.md"]; ok {
+		t.Fatal("skipped rule.md should not be hashed")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "rule.md")); !os.IsNotExist(err) {
+		t.Errorf("skipped rule.md should not exist; stat err = %v", err)
+	}
+}
+
 func TestRenderFS_SkipsExisting(t *testing.T) {
 	src := fstest.MapFS{
 		"existing.md": {Data: []byte("new content")},

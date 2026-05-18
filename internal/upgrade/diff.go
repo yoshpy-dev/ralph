@@ -7,6 +7,17 @@ import (
 	"github.com/yoshpy-dev/ralph/internal/scaffold"
 )
 
+// DiffOptions controls template diff computation.
+type DiffOptions struct {
+	// CheckRemovals reports manifest entries that no longer exist in the
+	// template. Use true for a fully scoped layer and false when the caller is
+	// diffing only an additive overlay.
+	CheckRemovals bool
+	// SkipPaths lists template-relative paths that are handled by the caller
+	// through another destination mapping.
+	SkipPaths map[string]bool
+}
+
 // FileAction describes what should happen to a file during upgrade.
 type FileAction int
 
@@ -55,6 +66,14 @@ func ComputeDiffsNoRemovals(manifestPath string, targetDir string, newFS fs.FS) 
 // prefix stripped) so that removal detection and key lookups operate over the
 // correct namespace.
 func ComputeDiffsWithManifest(manifest *scaffold.Manifest, targetDir string, newFS fs.FS, checkRemovals bool) ([]FileDiff, error) {
+	return ComputeDiffsWithManifestOptions(manifest, targetDir, newFS, DiffOptions{
+		CheckRemovals: checkRemovals,
+	})
+}
+
+// ComputeDiffsWithManifestOptions is ComputeDiffsWithManifest with additional
+// layer controls for callers that remap selected template files.
+func ComputeDiffsWithManifestOptions(manifest *scaffold.Manifest, targetDir string, newFS fs.FS, opts DiffOptions) ([]FileDiff, error) {
 	var diffs []FileDiff
 
 	// Walk new template to find adds and updates.
@@ -63,172 +82,16 @@ func ComputeDiffsWithManifest(manifest *scaffold.Manifest, targetDir string, new
 		if err != nil || d.IsDir() {
 			return err
 		}
+		if opts.SkipPaths[path] {
+			return nil
+		}
 		newFiles[path] = true
 
 		content, err := fs.ReadFile(newFS, path)
 		if err != nil {
 			return err
 		}
-		newHash := scaffold.HashBytes(content)
-
-		mf, inManifest := manifest.Files[path]
-
-		// Peek at disk state up front so the ActionAdd path can distinguish
-		// a safe add (disk missing or already matches template) from a
-		// potentially overwriting add (disk has different content — e.g. a
-		// file that was previously removed from the template, kept locally
-		// by the user, and now reintroduced in a later release).
-		diskPath := filepath.Join(targetDir, path)
-		diskHash, diskErr := scaffold.HashFile(diskPath)
-
-		// User-accepted local variant: a prior `ralph upgrade` run recorded
-		// Managed=false for this path (the user chose skip on a conflict).
-		// Respect that ownership and silent-skip regardless of disk/template
-		// drift until an explicit resync (or `--force`) brings the file back
-		// under template management. NewContent is carried so the caller can
-		// implement re-adoption without a second FS walk.
-		if inManifest && !mf.Managed {
-			diffs = append(diffs, FileDiff{
-				Path:       path,
-				Action:     ActionSkip,
-				OldHash:    mf.Hash,
-				DiskHash:   diskHash,
-				NewHash:    newHash,
-				NewContent: content,
-			})
-			return nil
-		}
-
-		if !inManifest {
-			// New file not in manifest. If disk has something different,
-			// surface as a conflict so the user is asked rather than
-			// silently overwritten. OldHash=newHash mirrors the empty-hash
-			// heal contract: skip writes the template hash into the
-			// manifest so the next upgrade resolves cleanly.
-			if diskErr == nil && diskHash != newHash {
-				diffs = append(diffs, FileDiff{
-					Path:       path,
-					Action:     ActionConflict,
-					OldHash:    newHash,
-					DiskHash:   diskHash,
-					NewHash:    newHash,
-					NewContent: content,
-				})
-				return nil
-			}
-			diffs = append(diffs, FileDiff{
-				Path:       path,
-				Action:     ActionAdd,
-				NewHash:    newHash,
-				NewContent: content,
-			})
-			return nil
-		}
-
-		if diskErr != nil {
-			// File in manifest but missing on disk → treat as add.
-			diffs = append(diffs, FileDiff{
-				Path:       path,
-				Action:     ActionAdd,
-				NewHash:    newHash,
-				NewContent: content,
-			})
-			return nil
-		}
-
-		// Heal corrupted manifest entries where hash is empty (caused by a
-		// prior bug that wrote ActionSkip entries without a hash). Treat
-		// "disk matches new template" as equivalent to an unchanged file and
-		// silently repair the manifest hash. If disk differs, fall through to
-		// the conflict path so the user is still asked.
-		if mf.Hash == "" {
-			if diskHash == newHash {
-				diffs = append(diffs, FileDiff{
-					Path:       path,
-					Action:     ActionSkip,
-					OldHash:    mf.Hash,
-					DiskHash:   diskHash,
-					NewHash:    newHash,
-					NewContent: content,
-				})
-				return nil
-			}
-			// Empty-hash heal + user edit: use newHash as OldHash so the
-			// "skip" resolution path rewrites the manifest with a real
-			// hash, ending the perpetual-conflict loop on non-interactive
-			// re-runs. If the user overwrites, they accept the template;
-			// if they skip, we mark the template as the new baseline and
-			// let future upgrades detect edits against it.
-			diffs = append(diffs, FileDiff{
-				Path:       path,
-				Action:     ActionConflict,
-				OldHash:    newHash,
-				DiskHash:   diskHash,
-				NewHash:    newHash,
-				NewContent: content,
-			})
-			return nil
-		}
-
-		recordedTemplateHash := mf.Hash
-		if mf.TemplateHash != "" {
-			recordedTemplateHash = mf.TemplateHash
-		}
-		recordedDiskHash := mf.Hash
-		if mf.DiskHash != "" {
-			recordedDiskHash = mf.DiskHash
-		}
-
-		// Template hasn't changed. If disk matches the recorded disk hash, the
-		// file is untouched → skip. If disk drifted from the recorded disk hash, the
-		// user edited a managed file locally: surface it as a conflict so the
-		// user can choose overwrite / skip / diff. Skip resolution writes
-		// Managed=false, converging subsequent upgrades to silent skip.
-		if newHash == recordedTemplateHash {
-			if diskHash == recordedDiskHash {
-				diffs = append(diffs, FileDiff{
-					Path:       path,
-					Action:     ActionSkip,
-					OldHash:    recordedTemplateHash,
-					DiskHash:   diskHash,
-					NewHash:    newHash,
-					NewContent: content,
-				})
-				return nil
-			}
-			diffs = append(diffs, FileDiff{
-				Path:       path,
-				Action:     ActionConflict,
-				OldHash:    recordedTemplateHash,
-				DiskHash:   diskHash,
-				NewHash:    newHash,
-				NewContent: content,
-			})
-			return nil
-		}
-
-		// Template changed. Did user also edit?
-		if diskHash == recordedTemplateHash {
-			// User didn't edit → auto update.
-			diffs = append(diffs, FileDiff{
-				Path:       path,
-				Action:     ActionAutoUpdate,
-				OldHash:    recordedTemplateHash,
-				DiskHash:   diskHash,
-				NewHash:    newHash,
-				NewContent: content,
-			})
-		} else {
-			// User edited → conflict.
-			diffs = append(diffs, FileDiff{
-				Path:       path,
-				Action:     ActionConflict,
-				OldHash:    recordedTemplateHash,
-				DiskHash:   diskHash,
-				NewHash:    newHash,
-				NewContent: content,
-			})
-		}
+		appendFileDiff(&diffs, manifest, targetDir, path, content)
 
 		return nil
 	})
@@ -241,9 +104,9 @@ func ComputeDiffsWithManifest(manifest *scaffold.Manifest, targetDir string, new
 	// Managed=false entries are preserved as ActionSkip across template
 	// removals so the "user-owned forever until resync" contract survives
 	// arbitrary template changes (including path deletions).
-	if checkRemovals {
+	if opts.CheckRemovals {
 		for path, mf := range manifest.Files {
-			if newFiles[path] {
+			if newFiles[path] || opts.SkipPaths[path] {
 				continue
 			}
 			if !mf.Managed {
@@ -263,4 +126,174 @@ func ComputeDiffsWithManifest(manifest *scaffold.Manifest, targetDir string, new
 	}
 
 	return diffs, nil
+}
+
+// ComputeFileDiff compares one remapped template file against a manifest path.
+func ComputeFileDiff(manifest *scaffold.Manifest, targetDir, path string, content []byte) FileDiff {
+	var diffs []FileDiff
+	appendFileDiff(&diffs, manifest, targetDir, path, content)
+	return diffs[0]
+}
+
+func appendFileDiff(diffs *[]FileDiff, manifest *scaffold.Manifest, targetDir, path string, content []byte) {
+	newHash := scaffold.HashBytes(content)
+
+	mf, inManifest := manifest.Files[path]
+
+	// Peek at disk state up front so the ActionAdd path can distinguish
+	// a safe add (disk missing or already matches template) from a
+	// potentially overwriting add (disk has different content — e.g. a
+	// file that was previously removed from the template, kept locally
+	// by the user, and now reintroduced in a later release).
+	diskPath := filepath.Join(targetDir, path)
+	diskHash, diskErr := scaffold.HashFile(diskPath)
+
+	// User-accepted local variant: a prior `ralph upgrade` run recorded
+	// Managed=false for this path (the user chose skip on a conflict).
+	// Respect that ownership and silent-skip regardless of disk/template
+	// drift until an explicit resync (or `--force`) brings the file back
+	// under template management. NewContent is carried so the caller can
+	// implement re-adoption without a second FS walk.
+	if inManifest && !mf.Managed {
+		*diffs = append(*diffs, FileDiff{
+			Path:       path,
+			Action:     ActionSkip,
+			OldHash:    mf.Hash,
+			DiskHash:   diskHash,
+			NewHash:    newHash,
+			NewContent: content,
+		})
+		return
+	}
+
+	if !inManifest {
+		// New file not in manifest. If disk has something different,
+		// surface as a conflict so the user is asked rather than
+		// silently overwritten. OldHash=newHash mirrors the empty-hash
+		// heal contract: skip writes the template hash into the
+		// manifest so the next upgrade resolves cleanly.
+		if diskErr == nil && diskHash != newHash {
+			*diffs = append(*diffs, FileDiff{
+				Path:       path,
+				Action:     ActionConflict,
+				OldHash:    newHash,
+				DiskHash:   diskHash,
+				NewHash:    newHash,
+				NewContent: content,
+			})
+			return
+		}
+		*diffs = append(*diffs, FileDiff{
+			Path:       path,
+			Action:     ActionAdd,
+			NewHash:    newHash,
+			NewContent: content,
+		})
+		return
+	}
+
+	if diskErr != nil {
+		// File in manifest but missing on disk → treat as add.
+		*diffs = append(*diffs, FileDiff{
+			Path:       path,
+			Action:     ActionAdd,
+			NewHash:    newHash,
+			NewContent: content,
+		})
+		return
+	}
+
+	// Heal corrupted manifest entries where hash is empty (caused by a
+	// prior bug that wrote ActionSkip entries without a hash). Treat
+	// "disk matches new template" as equivalent to an unchanged file and
+	// silently repair the manifest hash. If disk differs, fall through to
+	// the conflict path so the user is still asked.
+	if mf.Hash == "" {
+		if diskHash == newHash {
+			*diffs = append(*diffs, FileDiff{
+				Path:       path,
+				Action:     ActionSkip,
+				OldHash:    mf.Hash,
+				DiskHash:   diskHash,
+				NewHash:    newHash,
+				NewContent: content,
+			})
+			return
+		}
+		// Empty-hash heal + user edit: use newHash as OldHash so the
+		// "skip" resolution path rewrites the manifest with a real
+		// hash, ending the perpetual-conflict loop on non-interactive
+		// re-runs. If the user overwrites, they accept the template;
+		// if they skip, we mark the template as the new baseline and
+		// let future upgrades detect edits against it.
+		*diffs = append(*diffs, FileDiff{
+			Path:       path,
+			Action:     ActionConflict,
+			OldHash:    newHash,
+			DiskHash:   diskHash,
+			NewHash:    newHash,
+			NewContent: content,
+		})
+		return
+	}
+
+	recordedTemplateHash := mf.Hash
+	if mf.TemplateHash != "" {
+		recordedTemplateHash = mf.TemplateHash
+	}
+	recordedDiskHash := mf.Hash
+	if mf.DiskHash != "" {
+		recordedDiskHash = mf.DiskHash
+	}
+
+	// Template hasn't changed. If disk matches the recorded disk hash, the
+	// file is untouched → skip. If disk drifted from the recorded disk hash, the
+	// user edited a managed file locally: surface it as a conflict so the
+	// user can choose overwrite / skip / diff. Skip resolution writes
+	// Managed=false, converging subsequent upgrades to silent skip.
+	if newHash == recordedTemplateHash {
+		if diskHash == recordedDiskHash {
+			*diffs = append(*diffs, FileDiff{
+				Path:       path,
+				Action:     ActionSkip,
+				OldHash:    recordedTemplateHash,
+				DiskHash:   diskHash,
+				NewHash:    newHash,
+				NewContent: content,
+			})
+			return
+		}
+		*diffs = append(*diffs, FileDiff{
+			Path:       path,
+			Action:     ActionConflict,
+			OldHash:    recordedTemplateHash,
+			DiskHash:   diskHash,
+			NewHash:    newHash,
+			NewContent: content,
+		})
+		return
+	}
+
+	// Template changed. Did user also edit?
+	if diskHash == recordedTemplateHash {
+		// User didn't edit → auto update.
+		*diffs = append(*diffs, FileDiff{
+			Path:       path,
+			Action:     ActionAutoUpdate,
+			OldHash:    recordedTemplateHash,
+			DiskHash:   diskHash,
+			NewHash:    newHash,
+			NewContent: content,
+		})
+	} else {
+		// User edited → conflict.
+		*diffs = append(*diffs, FileDiff{
+			Path:       path,
+			Action:     ActionConflict,
+			OldHash:    recordedTemplateHash,
+			DiskHash:   diskHash,
+			NewHash:    newHash,
+			NewContent: content,
+		})
+	}
 }

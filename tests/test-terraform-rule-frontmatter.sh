@@ -8,15 +8,16 @@
 # because a silent drift here would un-scope the rule for Claude Code's
 # editor path matcher with no other gate catching it.
 #
-# Also asserts that the templates/base mirror is byte-identical with the
-# root rule (covered by check-sync.sh too, but cheap to belt-and-brace).
+# Also asserts that the pack rule sources are byte-identical with the
+# root dogfood rule (covered by check-sync.sh too, but cheap to belt-and-brace).
 
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 RULE="$PROJECT_ROOT/.claude/rules/terraform.md"
-RULE_MIRROR="$PROJECT_ROOT/templates/base/.claude/rules/terraform.md"
+PACK_RULE="$PROJECT_ROOT/packs/languages/terraform/rule.md"
+TEMPLATE_PACK_RULE="$PROJECT_ROOT/templates/packs/terraform/rule.md"
 
 _pass=0
 _fail=0
@@ -52,7 +53,8 @@ assert_grep() {
 }
 
 assert_file "rule file exists at .claude/rules/terraform.md" "$RULE"
-assert_file "mirror exists at templates/base/.claude/rules/terraform.md" "$RULE_MIRROR"
+assert_file "pack rule exists at packs/languages/terraform/rule.md" "$PACK_RULE"
+assert_file "template pack rule exists at templates/packs/terraform/rule.md" "$TEMPLATE_PACK_RULE"
 
 # Frontmatter sanity: the first non-empty line must be '---', and a
 # closing '---' must appear before any markdown heading.
@@ -98,15 +100,25 @@ else
   printf '  FAIL: frontmatter missing paths: key\n'
 fi
 
-# Mirror byte-identical.
+# Pack rule sources are byte-identical.
 _total=$((_total + 1))
-if cmp -s "$RULE" "$RULE_MIRROR"; then
+if cmp -s "$RULE" "$PACK_RULE"; then
   _pass=$((_pass + 1))
-  printf '  PASS: rule and templates/base mirror are byte-identical\n'
+  printf '  PASS: root rule and pack rule are byte-identical\n'
 else
   _fail=$((_fail + 1))
-  printf '  FAIL: rule and templates/base mirror differ\n'
-  diff -u "$RULE" "$RULE_MIRROR" || true
+  printf '  FAIL: root rule and pack rule differ\n'
+  diff -u "$RULE" "$PACK_RULE" || true
+fi
+
+_total=$((_total + 1))
+if cmp -s "$PACK_RULE" "$TEMPLATE_PACK_RULE"; then
+  _pass=$((_pass + 1))
+  printf '  PASS: pack rule and template pack rule are byte-identical\n'
+else
+  _fail=$((_fail + 1))
+  printf '  FAIL: pack rule and template pack rule differ\n'
+  diff -u "$PACK_RULE" "$TEMPLATE_PACK_RULE" || true
 fi
 
 printf '\n── Summary ──\n'

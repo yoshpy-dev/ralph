@@ -112,6 +112,22 @@ is_known_diff() {
   return 1
 }
 
+pack_rule_source() {
+  local path lang candidate
+  path="$1"
+  case "$path" in
+    .claude/rules/*.md)
+      lang="$(basename "$path" .md)"
+      candidate="packs/languages/${lang}/rule.md"
+      if [ -f "$candidate" ]; then
+        printf '%s\n' "$candidate"
+        return 0
+      fi
+      ;;
+  esac
+  return 1
+}
+
 # ─── Counters ─────────────────────────────────────────────────────────
 
 identical=0
@@ -195,6 +211,16 @@ for scan_dir in "${SCAN_DIRS[@]}"; do
   [ -d "$scan_dir" ] || continue
   while IFS= read -r root_file; do
     if is_excluded "$root_file"; then
+      continue
+    fi
+    if pack_rule="$(pack_rule_source "$root_file")"; then
+      if diff -q "$root_file" "$pack_rule" >/dev/null 2>&1; then
+        identical=$((identical + 1))
+      else
+        drifted=$((drifted + 1))
+        echo "  DRIFTED        $root_file"
+        errors+=("DRIFTED: $root_file ($root_file vs $pack_rule)")
+      fi
       continue
     fi
     tpl_file="templates/base/$root_file"

@@ -16,6 +16,8 @@ const testCommitMsgGuard = "#!/usr/bin/env sh\n# commit-msg-guard\nexit 0\n"
 const testPreCommitGuard = "#!/usr/bin/env sh\n# pre-commit-secret-guard\nexit 0\n"
 const testPrepareCommitMsgGuard = "#!/usr/bin/env sh\n# prepare-commit-msg-secret-guard\nexit 0\n"
 const testPreMergeCommitGuard = "#!/usr/bin/env sh\n# pre-merge-commit-secret-guard\nexit 0\n"
+const testGoRule = "---\npaths:\n  - \"**/*.go\"\n---\n# Go rules\n"
+const testTypescriptRule = "---\npaths:\n  - \"**/*.ts\"\n---\n# TS rules\n"
 
 // setupTestEmbedFS injects a minimal mock FS into scaffold.EmbeddedFS for testing.
 // Includes the Codex parity tree (.codex/ + .agents/skills/) so tests can
@@ -60,8 +62,10 @@ func setupTestEmbedFSWithAgentsAndCommitGuard(t *testing.T, agents, commitMsgGua
 		"templates/base/scripts/pre-merge-commit-secret-guard.sh":   {Data: []byte(testPreMergeCommitGuard)},
 		"templates/packs/golang/verify.sh":                          {Data: []byte("#!/bin/sh\necho ok\n")},
 		"templates/packs/golang/README.md":                          {Data: []byte("# Go\n")},
+		"templates/packs/golang/rule.md":                            {Data: []byte(testGoRule)},
 		"templates/packs/typescript/verify.sh":                      {Data: []byte("#!/bin/sh\necho ok\n")},
 		"templates/packs/typescript/README.md":                      {Data: []byte("# TS\n")},
+		"templates/packs/typescript/rule.md":                        {Data: []byte(testTypescriptRule)},
 	}
 }
 
@@ -88,10 +92,16 @@ func TestExecuteInit_NewProject(t *testing.T) {
 	}
 
 	// Check files created.
-	for _, f := range []string{"AGENTS.md", "CLAUDE.md", "ralph.toml", ".ralph/manifest.toml", "packs/languages/golang/verify.sh"} {
+	for _, f := range []string{"AGENTS.md", "CLAUDE.md", "ralph.toml", ".ralph/manifest.toml", "packs/languages/golang/verify.sh", ".claude/rules/golang.md"} {
 		if _, err := os.Stat(filepath.Join(target, f)); err != nil {
 			t.Errorf("expected %s to exist: %v", f, err)
 		}
+	}
+	if _, err := os.Stat(filepath.Join(target, "packs", "languages", "golang", "rule.md")); !os.IsNotExist(err) {
+		t.Errorf("pack control rule.md should not render under packs/languages/golang; stat err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(target, ".claude", "rules", "typescript.md")); !os.IsNotExist(err) {
+		t.Errorf("unselected typescript rule should not be rendered; stat err = %v", err)
 	}
 
 	// Check git init happened.
@@ -106,6 +116,12 @@ func TestExecuteInit_NewProject(t *testing.T) {
 	}
 	if _, ok := m.Files["AGENTS.md"]; !ok {
 		t.Error("manifest missing AGENTS.md")
+	}
+	if _, ok := m.Files[filepath.Join(".claude", "rules", "golang.md")]; !ok {
+		t.Error("manifest missing selected pack rule .claude/rules/golang.md")
+	}
+	if _, ok := m.Files[filepath.Join("packs", "languages", "golang", "rule.md")]; ok {
+		t.Error("manifest should not track packs/languages/golang/rule.md")
 	}
 	agentsEntry := m.Files["AGENTS.md"]
 	if agentsEntry.BaselineStatus != scaffold.BaselineStatusAvailable {
@@ -595,6 +611,133 @@ func TestRunUpgrade_DryRunDiff_DoesNotMutateFilesOrManifest(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "│ -# local edit") || !strings.Contains(out.String(), "│ +# AGENTS") {
 		t.Errorf("dry run diff missing expected lines; out:\n%s", out.String())
+	}
+}
+
+func TestRunUpgrade_DoesNotAddUnselectedPackRules(t *testing.T) {
+	setupTestEmbedFS(t)
+	Version = "1.0.0-test"
+
+	dir := t.TempDir()
+	cfg := initConfig{ProjectName: "test", Packs: nil}
+	if err := executeInit(dir, cfg, false); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	if err := runUpgrade(dir, false); err != nil {
+		t.Fatalf("upgrade: %v", err)
+	}
+
+	for _, path := range []string{
+		filepath.Join(".claude", "rules", "golang.md"),
+		filepath.Join(".claude", "rules", "typescript.md"),
+	} {
+		if _, err := os.Stat(filepath.Join(dir, path)); !os.IsNotExist(err) {
+			t.Errorf("unselected pack rule %s should not be rendered; stat err = %v", path, err)
+		}
+	}
+
+	m, err := scaffold.ReadManifest(filepath.Join(dir, ".ralph", "manifest.toml"))
+	if err != nil {
+		t.Fatalf("ReadManifest: %v", err)
+	}
+	for _, path := range []string{
+		filepath.Join(".claude", "rules", "golang.md"),
+		filepath.Join(".claude", "rules", "typescript.md"),
+	} {
+		if _, ok := m.Files[path]; ok {
+			t.Errorf("manifest should not track unselected pack rule %s", path)
+		}
+	}
+}
+
+func TestRunUpgrade_MigratesInstalledPackRuleFromBaseManifest(t *testing.T) {
+	setupTestEmbedFS(t)
+	Version = "1.0.0-test"
+
+	dir := t.TempDir()
+	scaffold.EmbeddedFS = fstest.MapFS{
+		"templates/base/AGENTS.md":                   {Data: []byte("# AGENTS\n")},
+		"templates/base/CLAUDE.md":                   {Data: []byte("# CLAUDE\n")},
+		"templates/base/ralph.toml":                  {Data: []byte("[pipeline]\nmodel = \"test\"\n")},
+		"templates/base/.claude/settings.json":       {Data: []byte("{}\n")},
+		"templates/base/.claude/rules/golang.md":     {Data: []byte("# Old Go rule\n")},
+		"templates/packs/golang/verify.sh":           {Data: []byte("#!/bin/sh\necho ok\n")},
+		"templates/packs/golang/README.md":           {Data: []byte("# Go\n")},
+		"templates/packs/typescript/verify.sh":       {Data: []byte("#!/bin/sh\necho ok\n")},
+		"templates/packs/typescript/README.md":       {Data: []byte("# TS\n")},
+		"templates/packs/typescript/rule.md":         {Data: []byte(testTypescriptRule)},
+		"templates/base/scripts/commit-msg-guard.sh": {Data: []byte(testCommitMsgGuard)},
+	}
+	cfg := initConfig{ProjectName: "test", Packs: []string{"golang"}}
+	if err := executeInit(dir, cfg, false); err != nil {
+		t.Fatalf("legacy init: %v", err)
+	}
+
+	setupTestEmbedFS(t)
+	var out, errOut bytes.Buffer
+	if err := runUpgradeIO(dir, false, strings.NewReader(""), &out, &errOut, false); err != nil {
+		t.Fatalf("upgrade: %v", err)
+	}
+	if strings.Contains(out.String(), ".claude/rules/golang.md") && strings.Contains(out.String(), "removed from template") {
+		t.Errorf("installed pack rule should migrate, not be reported removed; out:\n%s", out.String())
+	}
+
+	got, err := os.ReadFile(filepath.Join(dir, ".claude", "rules", "golang.md"))
+	if err != nil {
+		t.Fatalf("read migrated rule: %v", err)
+	}
+	if string(got) != testGoRule {
+		t.Errorf("migrated golang rule = %q, want pack rule", got)
+	}
+	m, err := scaffold.ReadManifest(filepath.Join(dir, ".ralph", "manifest.toml"))
+	if err != nil {
+		t.Fatalf("ReadManifest: %v", err)
+	}
+	rulePath := filepath.Join(".claude", "rules", "golang.md")
+	if _, ok := m.Files[rulePath]; !ok {
+		t.Fatalf("manifest missing migrated rule %s", rulePath)
+	}
+	if _, ok := m.Files[filepath.Join("packs", "languages", "golang", "rule.md")]; ok {
+		t.Fatal("manifest should not track packs/languages/golang/rule.md after migration")
+	}
+}
+
+func TestRunUpgrade_DropsLegacyUninstalledBaseRule(t *testing.T) {
+	setupTestEmbedFS(t)
+	Version = "1.0.0-test"
+
+	dir := t.TempDir()
+	scaffold.EmbeddedFS = fstest.MapFS{
+		"templates/base/AGENTS.md":               {Data: []byte("# AGENTS\n")},
+		"templates/base/CLAUDE.md":               {Data: []byte("# CLAUDE\n")},
+		"templates/base/ralph.toml":              {Data: []byte("[pipeline]\nmodel = \"test\"\n")},
+		"templates/base/.claude/settings.json":   {Data: []byte("{}\n")},
+		"templates/base/.claude/rules/golang.md": {Data: []byte("# Old Go rule\n")},
+		"templates/packs/golang/verify.sh":       {Data: []byte("#!/bin/sh\necho ok\n")},
+		"templates/packs/golang/README.md":       {Data: []byte("# Go\n")},
+		"templates/packs/golang/rule.md":         {Data: []byte(testGoRule)},
+	}
+	cfg := initConfig{ProjectName: "test", Packs: nil}
+	if err := executeInit(dir, cfg, false); err != nil {
+		t.Fatalf("legacy init: %v", err)
+	}
+
+	setupTestEmbedFS(t)
+	var out, errOut bytes.Buffer
+	if err := runUpgradeIO(dir, false, strings.NewReader(""), &out, &errOut, false); err != nil {
+		t.Fatalf("upgrade: %v", err)
+	}
+	if !strings.Contains(out.String(), ".claude/rules/golang.md") || !strings.Contains(out.String(), "removed from template") {
+		t.Errorf("uninstalled legacy base rule should be reported removed once; out:\n%s", out.String())
+	}
+
+	m, err := scaffold.ReadManifest(filepath.Join(dir, ".ralph", "manifest.toml"))
+	if err != nil {
+		t.Fatalf("ReadManifest: %v", err)
+	}
+	if _, ok := m.Files[filepath.Join(".claude", "rules", "golang.md")]; ok {
+		t.Fatal("legacy uninstalled base rule should be dropped from manifest")
 	}
 }
 
