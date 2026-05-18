@@ -1,6 +1,6 @@
 ---
 name: loop
-description: Initialize a Ralph Loop session for autonomous parallel-slice execution. Creates a directory-based plan and runs ralph-orchestrator.sh for multi-worktree parallel pipelines with unified PR. Invoke automatically when a task benefits from sustained autonomous iteration outside Claude Code.
+description: Initialize a Ralph Loop session for autonomous parallel-slice execution. Creates a directory-based plan and runs ralph-orchestrator.sh for multi-worktree parallel pipelines with the manifest-selected PR strategy. Invoke automatically when a task benefits from sustained autonomous iteration outside Claude Code.
 allowed-tools: Read, Grep, Glob, Write, Edit, Bash, AskUserQuestion
 ---
 Set up a Ralph Loop for autonomous parallel-slice execution outside Claude Code.
@@ -76,11 +76,13 @@ Read the generated `.harness/state/loop/PROMPT.md` and display its contents. The
 After approval, print the run command:
 
 ```sh
-./scripts/ralph run --plan docs/plans/active/<date>-<slug>/ --unified-pr
+./scripts/ralph run --plan docs/plans/active/<date>-<slug>/
 # Dry run to verify slice parsing
 ./scripts/ralph run --plan docs/plans/active/<date>-<slug>/ --dry-run
 # Bounded iterations
-./scripts/ralph run --plan docs/plans/active/<date>-<slug>/ --unified-pr --max-iterations 15
+./scripts/ralph run --plan docs/plans/active/<date>-<slug>/ --max-iterations 15
+# Fallback single PR
+./scripts/ralph run --plan docs/plans/active/<date>-<slug>/ --pr-strategy unified
 ```
 
 ## Output
@@ -93,14 +95,14 @@ After approval, print the run command:
 
 ## After the loop
 
-The orchestrator handles everything autonomously (parallel pipeline per slice → integration merge → **integration pipeline** (`--skip-pr --fix-all`) → unified PR). The integration pipeline runs `ralph-pipeline.sh` on the merged branch following the canonical post-implementation order (`/self-review` → `/verify` → `/test` → `/sync-docs` → `/cross-review`) to catch cross-module issues and fix ALL findings before PR creation. When the user returns:
+The orchestrator handles everything autonomously (parallel pipeline per slice → integration merge → **integration pipeline** (`--skip-pr --fix-all`) → manifest-selected PR strategy). The integration pipeline runs `ralph-pipeline.sh` on the merged branch following the canonical post-implementation order (`/self-review` → `/verify` → `/test` → `/sync-docs` → `/cross-review`) to catch cross-module issues and fix ALL findings before PR creation. When the user returns:
 
 1. Run `./scripts/ralph status` to check outcome
 2. Read `.harness/state/orchestrator/orchestrator.json` for final state
-3. If all slices are `complete` and the unified PR was created — show the PR URL.
+3. If all slices are `complete` and PRs were created — show the PR URL(s).
 4. If any slice is `stuck`, `repair_limit`, or `aborted` — review the failure context and help the user decide next steps (resume, abort, or manual intervention).
 5. The orchestrator already creates the PR, so no further post-implementation pipeline is needed.
-6. Task worktree cleanup is handled by the unified PR path. Per-slice worktrees remain governed by `ralph run` / `ralph abort` cleanup behavior.
+6. Task worktree cleanup is handled by the PR creation path. Grouped/stacked mode also cleans up the temporary integration branch on success. Per-slice worktrees remain governed by `ralph run` / `ralph abort` cleanup behavior.
 
 ## Anti-bottleneck
 
@@ -165,7 +167,7 @@ Example of running the flow under the Codex driver:
 codex trust .                                   # one-time
 ralph doctor                                    # confirm "codex" on the Loop driver line
 RALPH_LOOP_DRIVER=codex ./scripts/ralph run \
-  --plan docs/plans/active/<date>-<slug>/ --unified-pr
+  --plan docs/plans/active/<date>-<slug>/
 ```
 
 `/cross-review` always uses the **opposite** CLI as the reviewer. When

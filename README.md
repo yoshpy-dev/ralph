@@ -104,7 +104,7 @@ Before claiming a task is done:
 |:---|:---|
 | **Maps, not manuals**<br/>Short `AGENTS.md` / `CLAUDE.md`; push detail into rules and skills, promote repeats into hooks. | **Canonical pipeline**<br/>`self-review → verify → test → sync-docs → cross-review → pr` enforced in standard flow and Ralph Loop. |
 | **Deterministic hooks**<br/>Mojibake guard, commit-msg secret scan, Bash guardrails, verification reminders — pre-wired in `settings.json`. | **Worktree-first flow**<br/>Spec, plan, work, and PR artifacts are produced from clean-base task worktrees, with local cleanup after hand-off. |
-| **Ralph Loop**<br/>Multi-worktree autonomous parallel slices, integration branch, unified PR — orchestrated by `ralph run`. | **Language packs**<br/>TypeScript, Python, Rust, Go, Dart, and Terraform starters (opt-in) with per-language `verify.sh` and path-scoped rules. |
+| **Ralph Loop**<br/>Multi-worktree autonomous parallel slices, integration branch, grouped PRs by default — orchestrated by `ralph run`. | **Language packs**<br/>TypeScript, Python, Rust, Go, Dart, and Terraform starters (opt-in) with per-language `verify.sh` and path-scoped rules. |
 | **Drift-proof upgrades**<br/>Hash-based `ralph upgrade` with per-file conflict resolution — keeps N projects aligned as the scaffold evolves. | **Evidence over prose**<br/>Every self-review, verify, test, sync-docs, and cross-review triage pass produces a dated artifact in `docs/reports/`. |
 | **Cross-agent portable**<br/>`AGENTS.md` + `scripts/` + `packs/` stay neutral; `.claude/` and `.codex/` are agent-specific layers you can stack others beside. | **Local state, not repo churn**<br/>Worktree lifecycle records live under `git-common-dir`, outside tracked files and branch checkouts. |
 
@@ -206,11 +206,12 @@ See `.claude/rules/post-implementation-pipeline.md` for the canonical pipeline o
 
 ## Ralph Loop (autonomous parallel execution)
 
-For large tasks that can be split into independent slices, Ralph Loop runs parallel pipelines across multiple Git worktrees. Each slice handles its own lifecycle autonomously (implement → self-review → verify → test → sync-docs → cross-review). Completed slices are sequentially merged into a typed integration branch generated from the plan metadata, and a unified PR is created.
+For large tasks that can be split into independent slices, Ralph Loop runs parallel pipelines across multiple Git worktrees. Each slice handles its own lifecycle autonomously (implement → self-review → verify → test → sync-docs → cross-review). Completed slices are sequentially merged into a typed integration branch generated from the plan metadata, then submitted using the manifest PR strategy: grouped PRs by default, with unified or stacked PRs only when explicitly selected.
 
 ```sh
 ./scripts/new-ralph-plan.sh --type feat my-feature N/A 3
-./scripts/ralph run --plan docs/plans/active/2026-01-01-my-feature/ --unified-pr
+./scripts/ralph run --plan docs/plans/active/2026-01-01-my-feature/
+./scripts/ralph run --plan docs/plans/active/2026-01-01-my-feature/ --pr-strategy unified  # fallback single PR
 ./scripts/ralph status                  # launches TUI if available
 ./scripts/ralph status --no-tui         # table output
 ./scripts/ralph status --json           # JSON output
