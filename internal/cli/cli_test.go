@@ -96,6 +96,17 @@ func TestExecuteInit_NewProject(t *testing.T) {
 	if _, ok := m.Files["AGENTS.md"]; !ok {
 		t.Error("manifest missing AGENTS.md")
 	}
+	agentsEntry := m.Files["AGENTS.md"]
+	if agentsEntry.BaselineStatus != scaffold.BaselineStatusAvailable {
+		t.Errorf("AGENTS.md baseline_status = %q, want available", agentsEntry.BaselineStatus)
+	}
+	baselineBytes, err := scaffold.ReadBaseline(target, agentsEntry)
+	if err != nil {
+		t.Fatalf("ReadBaseline(AGENTS.md): %v", err)
+	}
+	if string(baselineBytes) != "# AGENTS\n" {
+		t.Errorf("AGENTS.md baseline = %q, want template content", baselineBytes)
+	}
 	if m.Meta.Version != "0.1.0-test" {
 		t.Errorf("manifest version = %q, want 0.1.0-test", m.Meta.Version)
 	}
@@ -523,6 +534,59 @@ func TestRunUpgrade_HealsCorruptedManifest(t *testing.T) {
 	}
 }
 
+func TestRunUpgrade_DryRunDiff_DoesNotMutateFilesOrManifest(t *testing.T) {
+	setupTestEmbedFS(t)
+	Version = "1.0.0-test"
+
+	dir := t.TempDir()
+	cfg := initConfig{ProjectName: "test", Packs: nil}
+	if err := executeInit(dir, cfg, false); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	agents := filepath.Join(dir, "AGENTS.md")
+	local := []byte("# local edit\n")
+	if err := os.WriteFile(agents, local, 0644); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(dir, ".ralph", "manifest.toml")
+	beforeManifest, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+
+	var out, errOut bytes.Buffer
+	err = runUpgradeIOWithOptions(dir, upgradeOptions{
+		DryRun:      true,
+		DiffPreview: true,
+		Pager:       pagerNever,
+	}, strings.NewReader(""), &out, &errOut, false)
+	if err != nil {
+		t.Fatalf("dry-run upgrade: %v", err)
+	}
+
+	got, err := os.ReadFile(agents)
+	if err != nil {
+		t.Fatalf("read AGENTS.md: %v", err)
+	}
+	if string(got) != string(local) {
+		t.Errorf("dry run mutated AGENTS.md: got %q want %q", got, local)
+	}
+	afterManifest, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read manifest after dry run: %v", err)
+	}
+	if string(afterManifest) != string(beforeManifest) {
+		t.Errorf("dry run mutated manifest\nbefore:\n%s\nafter:\n%s", beforeManifest, afterManifest)
+	}
+	if !strings.Contains(out.String(), "Upgrade preview (dry run)") {
+		t.Errorf("dry run preview missing; out:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "│ -# local edit") || !strings.Contains(out.String(), "│ +# AGENTS") {
+		t.Errorf("dry run diff missing expected lines; out:\n%s", out.String())
+	}
+}
+
 // Regression: when a pack was removed/renamed in a later release
 // (scaffold.AvailablePacks no longer contains it), upgrade must drop the
 // manifest tracking and the Meta.Packs entry rather than carrying a stale
@@ -752,7 +816,7 @@ func TestRunUpgrade_InteractiveOverwrite_WritesManaged(t *testing.T) {
 	}
 
 	var out, errOut bytes.Buffer
-	if err := runUpgradeIO(dir, false, strings.NewReader("o\n"), &out, &errOut, false); err != nil {
+	if err := runUpgradeIO(dir, false, strings.NewReader("a\n"), &out, &errOut, false); err != nil {
 		t.Fatalf("upgrade: %v", err)
 	}
 
@@ -774,6 +838,9 @@ func TestRunUpgrade_InteractiveOverwrite_WritesManaged(t *testing.T) {
 	}
 	if entry.Hash != scaffold.HashBytes([]byte("# AGENTS\n")) {
 		t.Errorf("AGENTS.md hash not updated to template hash: got %q", entry.Hash)
+	}
+	if entry.BaselineStatus != scaffold.BaselineStatusAvailable {
+		t.Errorf("AGENTS.md baseline_status = %q, want available", entry.BaselineStatus)
 	}
 }
 
@@ -840,8 +907,7 @@ func TestRunUpgrade_InteractiveDiff_ShowsUnifiedDiff(t *testing.T) {
 	}
 
 	var out, errOut bytes.Buffer
-	// d → re-prompt → s (keep local).
-	if err := runUpgradeIO(dir, false, strings.NewReader("d\ns\n"), &out, &errOut, false); err != nil {
+	if err := runUpgradeIO(dir, false, strings.NewReader("k\n"), &out, &errOut, false); err != nil {
 		t.Fatalf("upgrade: %v", err)
 	}
 
@@ -880,7 +946,7 @@ func TestRunUpgrade_InteractiveDiff_ColorizesWhenEnabled(t *testing.T) {
 	}
 
 	var out, errOut bytes.Buffer
-	if err := runUpgradeIO(dir, false, strings.NewReader("d\ns\n"), &out, &errOut, true); err != nil {
+	if err := runUpgradeIO(dir, false, strings.NewReader("k\n"), &out, &errOut, true); err != nil {
 		t.Fatalf("upgrade: %v", err)
 	}
 
@@ -896,9 +962,50 @@ func TestRunUpgrade_InteractiveDiff_ColorizesWhenEnabled(t *testing.T) {
 	}
 }
 
-// Invalid prompt input (blank line, unknown token) must re-prompt without
-// terminating. Repeated `d` entries must re-render the diff cleanly instead
-// of collapsing into a broken loop.
+func TestRunUpgrade_V1ManifestConflict_UsesLegacyPrompt(t *testing.T) {
+	setupTestEmbedFS(t)
+	Version = "1.0.0-test"
+
+	dir := t.TempDir()
+	cfg := initConfig{ProjectName: "test", Packs: nil}
+	if err := executeInit(dir, cfg, false); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	manifestPath := filepath.Join(dir, ".ralph", "manifest.toml")
+	m, err := scaffold.ReadManifest(manifestPath)
+	if err != nil {
+		t.Fatalf("ReadManifest: %v", err)
+	}
+	entry := m.Files["AGENTS.md"]
+	entry.State = ""
+	entry.TemplateHash = ""
+	entry.BaselineStatus = ""
+	entry.BaselinePath = ""
+	m.Files["AGENTS.md"] = entry
+	if err := m.Write(manifestPath); err != nil {
+		t.Fatalf("Write manifest: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte("# v1 local\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errOut bytes.Buffer
+	if err := runUpgradeIO(dir, false, strings.NewReader("d\ns\n"), &out, &errOut, false); err != nil {
+		t.Fatalf("upgrade: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "[o]verwrite / [s]kip / [d]iff") {
+		t.Errorf("v1 manifest should use legacy prompt; got:\n%s", got)
+	}
+	if strings.Contains(got, "[a]pply template hunk") {
+		t.Errorf("v1 manifest without baseline must not enter hunk prompt; got:\n%s", got)
+	}
+}
+
+// Invalid hunk prompt input must re-prompt without terminating. `edit` is
+// currently acknowledged as a reserved option and re-prompts without writing.
 func TestRunUpgrade_InteractiveDiff_RepromptsOnInvalid(t *testing.T) {
 	setupTestEmbedFS(t)
 	Version = "1.0.0-test"
@@ -915,17 +1022,18 @@ func TestRunUpgrade_InteractiveDiff_RepromptsOnInvalid(t *testing.T) {
 	}
 
 	var out, errOut bytes.Buffer
-	// garbage → d → d → s
-	input := strings.NewReader("xyz\nd\nd\ns\n")
+	// garbage → edit → keep local
+	input := strings.NewReader("xyz\ne\nk\n")
 	if err := runUpgradeIO(dir, false, input, &out, &errOut, false); err != nil {
 		t.Fatalf("upgrade: %v", err)
 	}
 
 	got := out.String()
-	// Prompt line should appear at least four times (initial, after garbage,
-	// after first diff, after second diff).
-	if strings.Count(got, "[o]verwrite / [s]kip / [d]iff") < 4 {
+	if strings.Count(got, "[a]pply template hunk / [k]eep local hunk / [e]dit / [s]kip file") < 3 {
 		t.Errorf("expected prompt to re-render on invalid and diff inputs; got:\n%s", got)
+	}
+	if strings.Contains(got, "[n]ext") || strings.Contains(got, "[q]uit") {
+		t.Errorf("hunk prompt must not offer next/quit; got:\n%s", got)
 	}
 }
 
@@ -1099,6 +1207,18 @@ func TestRunUpgrade_DiskReadFailure_FallsBackToHash(t *testing.T) {
 	agents := filepath.Join(dir, "AGENTS.md")
 	if err := os.WriteFile(agents, []byte("# will be removed mid-run\n"), 0644); err != nil {
 		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(dir, ".ralph", "manifest.toml")
+	m, err := scaffold.ReadManifest(manifestPath)
+	if err != nil {
+		t.Fatalf("ReadManifest: %v", err)
+	}
+	entry := m.Files["AGENTS.md"]
+	entry.BaselineStatus = ""
+	entry.BaselinePath = ""
+	m.Files["AGENTS.md"] = entry
+	if err := m.Write(manifestPath); err != nil {
+		t.Fatalf("Write manifest: %v", err)
 	}
 
 	// removingReader simulates the file being deleted after diff computation

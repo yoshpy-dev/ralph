@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -19,7 +20,12 @@ import (
 )
 
 func newUpgradeCmd() *cobra.Command {
-	var force bool
+	var (
+		force       bool
+		dryRun      bool
+		diffPreview bool
+		pager       string
+	)
 
 	cmd := &cobra.Command{
 		Use:   "upgrade",
@@ -27,13 +33,37 @@ func newUpgradeCmd() *cobra.Command {
 		Long: `Compares the current project files against the embedded templates,
 auto-updates unchanged files, and prompts for conflict resolution on edited files.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runUpgrade(".", force)
+			if diffPreview {
+				dryRun = true
+			}
+			return runUpgradeWithOptions(".", upgradeOptions{
+				Force:       force,
+				DryRun:      dryRun,
+				DiffPreview: diffPreview,
+				Pager:       pager,
+			})
 		},
 	}
 
 	cmd.Flags().BoolVar(&force, "force", false, "overwrite all files without prompting")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "preview upgrade actions without writing files")
+	cmd.Flags().BoolVar(&diffPreview, "diff", false, "show conflict diffs without writing files (implies --dry-run)")
+	cmd.Flags().StringVar(&pager, "pager", pagerAuto, "diff pager mode: auto, always, or never")
 
 	return cmd
+}
+
+const (
+	pagerAuto   = "auto"
+	pagerAlways = "always"
+	pagerNever  = "never"
+)
+
+type upgradeOptions struct {
+	Force       bool
+	DryRun      bool
+	DiffPreview bool
+	Pager       string
 }
 
 // packNamespacePrefix is the root namespace for all language pack entries in
@@ -79,7 +109,14 @@ func splitManifestForPack(m *scaffold.Manifest, pack string) *scaffold.Manifest 
 }
 
 func runUpgrade(targetDir string, force bool) error {
-	return runUpgradeIO(targetDir, force, os.Stdin, os.Stdout, os.Stderr, shouldColorize(os.Stdout))
+	return runUpgradeWithOptions(targetDir, upgradeOptions{
+		Force: force,
+		Pager: pagerAuto,
+	})
+}
+
+func runUpgradeWithOptions(targetDir string, opts upgradeOptions) error {
+	return runUpgradeIOWithOptions(targetDir, opts, os.Stdin, os.Stdout, os.Stderr, shouldColorize(os.Stdout))
 }
 
 // shouldColorize reports whether ANSI color escapes should be emitted for the
@@ -101,6 +138,23 @@ func shouldColorize(out *os.File) bool {
 // the real stdin/stdout. `colorize` controls whether the unified-diff render
 // is wrapped in ANSI escapes — callers must decide based on the destination.
 func runUpgradeIO(targetDir string, force bool, in io.Reader, out, errOut io.Writer, colorize bool) error {
+	return runUpgradeIOWithOptions(targetDir, upgradeOptions{
+		Force: force,
+		Pager: pagerNever,
+	}, in, out, errOut, colorize)
+}
+
+func runUpgradeIOWithOptions(targetDir string, opts upgradeOptions, in io.Reader, out, errOut io.Writer, colorize bool) error {
+	if opts.Pager == "" {
+		opts.Pager = pagerAuto
+	}
+	if opts.DiffPreview {
+		opts.DryRun = true
+	}
+	if err := validatePagerMode(opts.Pager); err != nil {
+		return err
+	}
+
 	absDir, err := filepath.Abs(targetDir)
 	if err != nil {
 		return fmt.Errorf("resolving directory: %w", err)
@@ -180,6 +234,11 @@ func runUpgradeIO(targetDir string, force bool, in io.Reader, out, errOut io.Wri
 		retainedPacks = append(retainedPacks, pack)
 	}
 
+	if opts.DryRun {
+		renderUpgradePreview(diffs, absDir, Version, out, errOut, colorize, opts)
+		return nil
+	}
+
 	var updated, skipped, notified int
 
 	manifest := scaffold.NewManifest(Version)
@@ -198,28 +257,34 @@ func runUpgradeIO(targetDir string, force bool, in io.Reader, out, errOut io.Wri
 			if err := os.WriteFile(targetPath, d.NewContent, scaffold.FilePerm(d.Path)); err != nil {
 				return fmt.Errorf("writing %s: %w", d.Path, err)
 			}
-			manifest.SetFile(d.Path, d.NewHash)
+			if err := setManagedWithBaseline(manifest, absDir, d.Path, d.NewHash, d.NewContent); err != nil {
+				return err
+			}
 			writef(out, "  ✓ %s (unchanged, auto-update)\n", d.Path)
 			updated++
 
 		case upgrade.ActionConflict:
-			if force {
+			if opts.Force {
 				targetPath := filepath.Join(absDir, d.Path)
 				if err := os.WriteFile(targetPath, d.NewContent, scaffold.FilePerm(d.Path)); err != nil {
 					return fmt.Errorf("writing %s: %w", d.Path, err)
 				}
-				manifest.SetFile(d.Path, d.NewHash)
+				if err := setManagedWithBaseline(manifest, absDir, d.Path, d.NewHash, d.NewContent); err != nil {
+					return err
+				}
 				writef(out, "  ✓ %s (force overwritten)\n", d.Path)
 				updated++
 				continue
 			}
-			switch resolveConflict(d, absDir, Version, reader, out, errOut, colorize) {
+			switch resolveConflict(d, oldManifest, absDir, Version, reader, out, errOut, colorize, opts.Pager) {
 			case resolutionOverwrite:
 				targetPath := filepath.Join(absDir, d.Path)
 				if err := os.WriteFile(targetPath, d.NewContent, scaffold.FilePerm(d.Path)); err != nil {
 					return fmt.Errorf("writing %s: %w", d.Path, err)
 				}
-				manifest.SetFile(d.Path, d.NewHash)
+				if err := setManagedWithBaseline(manifest, absDir, d.Path, d.NewHash, d.NewContent); err != nil {
+					return err
+				}
 				updated++
 			case resolutionSkip:
 				// Mark the entry as user-owned so subsequent upgrades converge
@@ -247,7 +312,9 @@ func runUpgradeIO(targetDir string, force bool, in io.Reader, out, errOut io.Wri
 			if err := os.WriteFile(targetPath, d.NewContent, scaffold.FilePerm(d.Path)); err != nil {
 				return fmt.Errorf("writing %s: %w", d.Path, err)
 			}
-			manifest.SetFile(d.Path, d.NewHash)
+			if err := setManagedWithBaseline(manifest, absDir, d.Path, d.NewHash, d.NewContent); err != nil {
+				return err
+			}
 			writef(out, "  + %s (new file)\n", d.Path)
 			updated++
 
@@ -270,7 +337,7 @@ func runUpgradeIO(targetDir string, force bool, in io.Reader, out, errOut io.Wri
 			prev, hadEntry := oldManifest.Files[d.Path]
 			wasUnmanaged := hadEntry && !prev.Managed
 			switch {
-			case force && wasUnmanaged && d.NewContent != nil:
+			case opts.Force && wasUnmanaged && d.NewContent != nil:
 				targetPath := filepath.Join(absDir, d.Path)
 				if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
 					return fmt.Errorf("creating parent dir for %s: %w", d.Path, err)
@@ -278,13 +345,17 @@ func runUpgradeIO(targetDir string, force bool, in io.Reader, out, errOut io.Wri
 				if err := os.WriteFile(targetPath, d.NewContent, scaffold.FilePerm(d.Path)); err != nil {
 					return fmt.Errorf("writing %s: %w", d.Path, err)
 				}
-				manifest.SetFile(d.Path, d.NewHash)
+				if err := setManagedWithBaseline(manifest, absDir, d.Path, d.NewHash, d.NewContent); err != nil {
+					return err
+				}
 				writef(out, "  ✓ %s (force re-adopted)\n", d.Path)
 				updated++
 			case wasUnmanaged:
-				manifest.SetFileUnmanaged(d.Path, prev.Hash)
+				preserveUnmanaged(manifest, d.Path, prev)
 			default:
-				manifest.SetFile(d.Path, d.NewHash)
+				if err := preserveManagedSkip(manifest, oldManifest, absDir, d); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -316,6 +387,49 @@ func preservePackEntries(src *scaffold.Manifest, prefix string, dst map[string]s
 	}
 }
 
+func setManagedWithBaseline(manifest *scaffold.Manifest, absDir, relPath, hash string, content []byte) error {
+	baselinePath, err := scaffold.WriteBaseline(absDir, relPath, content)
+	if err != nil {
+		return err
+	}
+	manifest.SetFileWithBaseline(relPath, hash, baselinePath)
+	return nil
+}
+
+func preserveUnmanaged(manifest *scaffold.Manifest, relPath string, prev scaffold.ManifestFile) {
+	if prev.State == "" {
+		prev.State = scaffold.FileStateUnmanaged
+	}
+	if prev.BaselineStatus == "" {
+		prev.BaselineStatus = scaffold.BaselineStatusMissing
+	}
+	manifest.Files[relPath] = prev
+}
+
+func preserveManagedSkip(manifest, oldManifest *scaffold.Manifest, absDir string, d upgrade.FileDiff) error {
+	if prev, ok := oldManifest.Files[d.Path]; ok {
+		prev = prev.WithTemplateHash(d.NewHash)
+		if _, err := scaffold.ReadBaseline(absDir, prev); err == nil {
+			manifest.Files[d.Path] = prev
+			return nil
+		}
+	}
+	if d.NewContent != nil && d.DiskHash == d.NewHash {
+		return setManagedWithBaseline(manifest, absDir, d.Path, d.NewHash, d.NewContent)
+	}
+	manifest.SetFile(d.Path, d.NewHash)
+	return nil
+}
+
+func validatePagerMode(mode string) error {
+	switch mode {
+	case pagerAuto, pagerAlways, pagerNever:
+		return nil
+	default:
+		return fmt.Errorf("invalid --pager %q (want auto, always, or never)", mode)
+	}
+}
+
 // writef is a best-effort write for progress text. The write destination is an
 // io.Writer (for testability) so the static-analyzer cannot rule out a failing
 // write the way it can for os.Stdout — silence the error explicitly here
@@ -335,8 +449,12 @@ const (
 // template content, keeping the local variant, or viewing a unified diff. EOF
 // or any read error collapses to a safe skip so non-interactive runs do not
 // silently overwrite edits.
-func resolveConflict(d upgrade.FileDiff, absDir, version string, in *bufio.Reader, out, errOut io.Writer, colorize bool) resolution {
+func resolveConflict(d upgrade.FileDiff, oldManifest *scaffold.Manifest, absDir, version string, in *bufio.Reader, out, errOut io.Writer, colorize bool, pagerMode string) resolution {
 	writef(out, "  ⚠ %s (modified locally)\n", d.Path)
+
+	if canReviewHunks(oldManifest, absDir, d) {
+		return resolveConflictHunks(d, absDir, version, in, out, errOut, colorize, pagerMode)
+	}
 
 	for {
 		writef(out, "    [o]verwrite / [s]kip / [d]iff ? ")
@@ -351,7 +469,7 @@ func resolveConflict(d upgrade.FileDiff, absDir, version string, in *bufio.Reade
 		case "s", "skip":
 			return resolutionSkip
 		case "d", "diff":
-			showDiff(d, absDir, version, out, errOut, colorize)
+			showDiff(d, absDir, version, out, errOut, colorize, pagerMode)
 			// Loop back to the prompt so the user still picks overwrite or skip.
 		default:
 			// Unrecognized input — reprompt.
@@ -364,7 +482,7 @@ func resolveConflict(d upgrade.FileDiff, absDir, version string, in *bufio.Reade
 // display. Disk read failures degrade gracefully to a hash summary so the
 // user can still make an informed choice when, e.g., the file was moved
 // between diff computation and the prompt.
-func showDiff(d upgrade.FileDiff, absDir, version string, out, errOut io.Writer, colorize bool) {
+func showDiff(d upgrade.FileDiff, absDir, version string, out, errOut io.Writer, colorize bool, pagerMode string) {
 	localPath := filepath.Join(absDir, d.Path)
 	localBytes, err := os.ReadFile(localPath)
 	if err != nil {
@@ -385,7 +503,145 @@ func showDiff(d upgrade.FileDiff, absDir, version string, out, errOut io.Writer,
 		if colorize {
 			diff = upgrade.Colorize(diff)
 		}
-		_, _ = io.WriteString(out, diff)
+		writeDiffOutput(diff, out, errOut, pagerMode)
 	}
 	writef(out, "    template hash: %s  local hash: %s\n", d.NewHash, d.DiskHash)
+}
+
+func canReviewHunks(oldManifest *scaffold.Manifest, absDir string, d upgrade.FileDiff) bool {
+	prev, ok := oldManifest.Files[d.Path]
+	if !ok || !prev.IsBaselineAvailable() {
+		return false
+	}
+	if _, err := scaffold.ReadBaseline(absDir, prev); err != nil {
+		return false
+	}
+	return true
+}
+
+func resolveConflictHunks(d upgrade.FileDiff, absDir, version string, in *bufio.Reader, out, errOut io.Writer, colorize bool, pagerMode string) resolution {
+	showDiff(d, absDir, version, out, errOut, colorize, pagerMode)
+	for {
+		writef(out, "    [a]pply template hunk / [k]eep local hunk / [e]dit / [s]kip file ? ")
+		line, err := in.ReadString('\n')
+		if err != nil && line == "" {
+			writef(errOut, "\n  (non-interactive input detected, skipping)\n")
+			return resolutionSkip
+		}
+		switch strings.TrimSpace(line) {
+		case "a", "apply":
+			return resolutionOverwrite
+		case "k", "keep", "s", "skip":
+			return resolutionSkip
+		case "e", "edit":
+			writef(errOut, "    (manual hunk edit is not available yet; choose apply, keep, or skip file)\n")
+		default:
+			// Unrecognized input — reprompt.
+		}
+	}
+}
+
+func renderUpgradePreview(diffs []upgrade.FileDiff, absDir, version string, out, errOut io.Writer, colorize bool, opts upgradeOptions) {
+	var autoUpdate, conflict, add, remove, skip int
+	for _, d := range diffs {
+		switch d.Action {
+		case upgrade.ActionAutoUpdate:
+			autoUpdate++
+		case upgrade.ActionConflict:
+			conflict++
+		case upgrade.ActionAdd:
+			add++
+		case upgrade.ActionRemove:
+			remove++
+		case upgrade.ActionSkip:
+			skip++
+		}
+	}
+
+	writef(out, "Upgrade preview (dry run)\n")
+	writef(out, "  auto-update: %d files\n", autoUpdate)
+	writef(out, "  conflict:    %d files\n", conflict)
+	writef(out, "  add:         %d files\n", add)
+	writef(out, "  remove:      %d files\n", remove)
+	writef(out, "  skip:        %d files\n", skip)
+
+	if len(diffs) == 0 {
+		writef(out, "\nNo changes.\n")
+		return
+	}
+
+	writef(out, "\nFiles:\n")
+	for _, d := range diffs {
+		writef(out, "  %-11s %s\n", actionLabel(d.Action), d.Path)
+	}
+
+	if !opts.DiffPreview {
+		return
+	}
+
+	for _, d := range diffs {
+		if d.Action != upgrade.ActionConflict && d.Action != upgrade.ActionAutoUpdate {
+			continue
+		}
+		writef(out, "\n--- %s ---\n", d.Path)
+		showDiff(d, absDir, version, out, errOut, colorize, opts.Pager)
+	}
+}
+
+func actionLabel(action upgrade.FileAction) string {
+	switch action {
+	case upgrade.ActionAutoUpdate:
+		return "auto-update"
+	case upgrade.ActionConflict:
+		return "conflict"
+	case upgrade.ActionAdd:
+		return "add"
+	case upgrade.ActionRemove:
+		return "remove"
+	case upgrade.ActionSkip:
+		return "skip"
+	default:
+		return "unknown"
+	}
+}
+
+func writeDiffOutput(diff string, out, errOut io.Writer, pagerMode string) {
+	if !shouldUsePager(pagerMode, out) {
+		_, _ = io.WriteString(out, diff)
+		return
+	}
+	if err := writeThroughPager(diff, out, errOut); err != nil {
+		writef(errOut, "    (pager failed: %v — writing diff directly)\n", err)
+		_, _ = io.WriteString(out, diff)
+	}
+}
+
+func shouldUsePager(pagerMode string, out io.Writer) bool {
+	switch pagerMode {
+	case pagerNever:
+		return false
+	case pagerAlways:
+		return true
+	case pagerAuto:
+		f, ok := out.(*os.File)
+		return ok && term.IsTerminal(f.Fd())
+	default:
+		return false
+	}
+}
+
+func writeThroughPager(diff string, out, errOut io.Writer) error {
+	pager := os.Getenv("PAGER")
+	if pager == "" {
+		pager = "less -R"
+	}
+	parts := strings.Fields(pager)
+	if len(parts) == 0 {
+		return fmt.Errorf("empty pager")
+	}
+	cmd := exec.Command(parts[0], parts[1:]...)
+	cmd.Stdin = strings.NewReader(diff)
+	cmd.Stdout = out
+	cmd.Stderr = errOut
+	return cmd.Run()
 }
