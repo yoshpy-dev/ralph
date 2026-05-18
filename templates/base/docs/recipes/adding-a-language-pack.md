@@ -11,6 +11,7 @@ Worked example: adding a Terraform / OpenTofu pack (`packs/languages/terraform/`
 2. Customize the pack body (`packs/languages/terraform/`):
    - `README.md` — verification order, activation rules, customization points
    - `verify.sh` — honor `HARNESS_VERIFY_MODE` (`static` / `test` / `all`); skip when no marker files; fail when markers exist but the required CLI is missing (avoid fail-open)
+   - `rule.md` — the language-scoped `.claude/rules/<lang>.md` content
 
 3. Mirror the pack into the embedded templates (required for `ralph init` / `PackFS`):
 
@@ -20,9 +21,12 @@ Worked example: adding a Terraform / OpenTofu pack (`packs/languages/terraform/`
 
    `scripts/check-sync.sh` enforces byte-identical mirroring.
 
-4. Add a rule file scoped to the language's file globs:
-   - `.claude/rules/terraform.md` — minimal conventions (state hygiene, provider pinning, `variable`/`output` discipline, etc.)
-   - Mirror to `templates/base/.claude/rules/terraform.md` (same `cp` pattern) so scaffolded projects receive it.
+4. Add `rule.md` scoped to the language's file globs. During `ralph init` and
+   `ralph upgrade`, the pack renderer writes it to `.claude/rules/<lang>.md`
+   only when that pack is selected. Keep the root dogfood copy
+   (`.claude/rules/terraform.md`) byte-identical with
+   `packs/languages/terraform/rule.md`; `scripts/check-sync.sh` verifies this
+   mapping.
 
 5. Teach `scripts/detect-languages.sh` to emit the new pack name and
    `scripts/detect-changed-languages.sh` to map changed files to it. Edit both
@@ -63,7 +67,7 @@ Keep the pack focused on:
 A new pack typically touches at least these locations — keep them in lock-step:
 
 - `packs/languages/<lang>/` ↔ `templates/packs/<lang>/`
-- `.claude/rules/<lang>.md` ↔ `templates/base/.claude/rules/<lang>.md`
+- `.claude/rules/<lang>.md` ↔ `packs/languages/<lang>/rule.md`
 - `scripts/detect-languages.sh` ↔ `templates/base/scripts/detect-languages.sh`
 - `scripts/detect-changed-languages.sh` ↔ `templates/base/scripts/detect-changed-languages.sh`
 
