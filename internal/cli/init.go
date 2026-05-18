@@ -153,23 +153,26 @@ func executeInit(targetDir string, cfg initConfig, force bool) error {
 	printRenderSummary("base", result)
 
 	// Step 2: Render selected language packs into packs/languages/<lang>/.
+	// Pack rule.md files are control files: they render to
+	// .claude/rules/<lang>.md instead of packs/languages/<lang>/rule.md.
 	for _, pack := range cfg.Packs {
 		packFS, err := scaffold.PackFS(pack)
 		if err != nil {
 			fmt.Printf("  ⚠ pack %s: %v\n", pack, err)
 			continue
 		}
-		packDir := filepath.Join(targetDir, "packs", "languages", pack)
+		packDir := filepath.Join(targetDir, packRelDir(pack))
 		packResult, packHashes, err := scaffold.RenderFS(packFS, scaffold.RenderOptions{
 			TargetDir: packDir,
 			Overwrite: force,
+			SkipPaths: packRenderSkipPaths,
 		})
 		if err != nil {
 			fmt.Printf("  ⚠ pack %s: %v\n", pack, err)
 			continue
 		}
 		// Merge pack hashes with namespaced paths for manifest.
-		packPrefix := filepath.Join("packs", "languages", pack)
+		packPrefix := packRelDir(pack)
 		for k, v := range packHashes {
 			hashes[filepath.Join(packPrefix, k)] = v
 		}
@@ -179,6 +182,29 @@ func executeInit(targetDir string, cfg initConfig, force bool) error {
 		}
 		for k, v := range packBaselines {
 			baselinePaths[k] = v
+		}
+
+		ruleContent, ok, err := packRuleContent(packFS)
+		if err != nil {
+			fmt.Printf("  ⚠ pack %s rule: %v\n", pack, err)
+			continue
+		}
+		if ok {
+			rulePath := packRuleRelPath(pack)
+			ruleResult, ruleHash, err := renderMappedFile(targetDir, rulePath, ruleContent, force)
+			if err != nil {
+				fmt.Printf("  ⚠ pack %s rule: %v\n", pack, err)
+				continue
+			}
+			hashes[rulePath] = ruleHash
+			if len(ruleResult.Created)+len(ruleResult.Overwritten) > 0 {
+				baselinePath, err := scaffold.WriteBaseline(targetDir, rulePath, ruleContent)
+				if err != nil {
+					return err
+				}
+				baselinePaths[rulePath] = baselinePath
+			}
+			mergeRenderResult(packResult, ruleResult)
 		}
 		printRenderSummary("pack/"+pack, packResult)
 	}

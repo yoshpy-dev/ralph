@@ -84,8 +84,13 @@ func splitManifestForBase(m *scaffold.Manifest) *scaffold.Manifest {
 	out := scaffold.NewManifest(m.Meta.Version)
 	out.Meta = m.Meta
 	out.Files = make(map[string]scaffold.ManifestFile, len(m.Files))
+	packRulePaths := make(map[string]bool, len(m.Meta.Packs))
+	for _, pack := range m.Meta.Packs {
+		packRulePaths[filepath.ToSlash(packRuleRelPath(pack))] = true
+	}
 	for k, v := range m.Files {
-		if strings.HasPrefix(filepath.ToSlash(k), packNamespacePrefix) {
+		slashPath := filepath.ToSlash(k)
+		if strings.HasPrefix(slashPath, packNamespacePrefix) || packRulePaths[slashPath] {
 			continue
 		}
 		out.Files[k] = v
@@ -193,7 +198,7 @@ func runUpgradeIOWithOptions(targetDir string, opts upgradeOptions, in io.Reader
 	if apErr != nil {
 		writef(errOut, "Warning: unable to list available packs: %v (preserving installed pack entries)\n", apErr)
 		for _, pack := range installedPacks {
-			preservePackEntries(oldManifest, packPrefixFor(pack), preservedPackEntries)
+			preservePackState(oldManifest, pack, preservedPackEntries)
 			retainedPacks = append(retainedPacks, pack)
 		}
 		installedPacks = nil
@@ -204,8 +209,6 @@ func runUpgradeIOWithOptions(targetDir string, opts upgradeOptions, in io.Reader
 	}
 
 	for _, pack := range installedPacks {
-		prefix := packPrefixFor(pack)
-
 		if !available[pack] {
 			writef(errOut, "Notice: pack %q no longer exists in templates — manifest tracking dropped (files on disk left untouched)\n", pack)
 			continue
@@ -214,21 +217,36 @@ func runUpgradeIOWithOptions(targetDir string, opts upgradeOptions, in io.Reader
 		packFS, pErr := scaffold.PackFS(pack)
 		if pErr != nil {
 			writef(errOut, "Warning: pack %s load failed: %v (preserving manifest entries)\n", pack, pErr)
-			preservePackEntries(oldManifest, prefix, preservedPackEntries)
+			preservePackState(oldManifest, pack, preservedPackEntries)
 			retainedPacks = append(retainedPacks, pack)
 			continue
 		}
-		packDir := filepath.Join(absDir, "packs", "languages", pack)
+		packDir := filepath.Join(absDir, packRelDir(pack))
 		packManifest := splitManifestForPack(oldManifest, pack)
-		packDiffs, pErr := upgrade.ComputeDiffsWithManifest(packManifest, packDir, packFS, true)
+		packDiffs, pErr := upgrade.ComputeDiffsWithManifestOptions(packManifest, packDir, packFS, upgrade.DiffOptions{
+			CheckRemovals: true,
+			SkipPaths:     packRenderSkipPaths,
+		})
 		if pErr != nil {
 			writef(errOut, "Warning: pack %s diff failed: %v (preserving manifest entries)\n", pack, pErr)
-			preservePackEntries(oldManifest, prefix, preservedPackEntries)
+			preservePackState(oldManifest, pack, preservedPackEntries)
 			retainedPacks = append(retainedPacks, pack)
 			continue
 		}
 		for i := range packDiffs {
-			packDiffs[i].Path = filepath.Join("packs", "languages", pack, packDiffs[i].Path)
+			packDiffs[i].Path = filepath.Join(packRelDir(pack), packDiffs[i].Path)
+		}
+
+		ruleContent, ok, pErr := packRuleContent(packFS)
+		if pErr != nil {
+			writef(errOut, "Warning: pack %s rule diff failed: %v (preserving manifest entries)\n", pack, pErr)
+			preservePackState(oldManifest, pack, preservedPackEntries)
+			retainedPacks = append(retainedPacks, pack)
+			continue
+		}
+		if ok {
+			rulePath := packRuleRelPath(pack)
+			packDiffs = append(packDiffs, upgrade.ComputeFileDiff(oldManifest, absDir, rulePath, ruleContent))
 		}
 		diffs = append(diffs, packDiffs...)
 		retainedPacks = append(retainedPacks, pack)
@@ -364,6 +382,13 @@ func preservePackEntries(src *scaffold.Manifest, prefix string, dst map[string]s
 		if strings.HasPrefix(filepath.ToSlash(k), prefix) {
 			dst[k] = v
 		}
+	}
+}
+
+func preservePackState(src *scaffold.Manifest, pack string, dst map[string]scaffold.ManifestFile) {
+	preservePackEntries(src, packPrefixFor(pack), dst)
+	if v, ok := src.Files[packRuleRelPath(pack)]; ok {
+		dst[packRuleRelPath(pack)] = v
 	}
 }
 

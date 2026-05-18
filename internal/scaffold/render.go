@@ -16,6 +16,8 @@ type RenderOptions struct {
 	TargetDir string
 	// Overwrite controls whether existing files are overwritten.
 	Overwrite bool
+	// SkipPaths lists source-relative paths that should not be rendered.
+	SkipPaths map[string]bool
 }
 
 // RenderResult tracks what happened during rendering.
@@ -39,6 +41,10 @@ func RenderFS(src fs.FS, opts RenderOptions) (*RenderResult, map[string]string, 
 	err = fs.WalkDir(src, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
+		}
+
+		if opts.SkipPaths[path] {
+			return nil
 		}
 
 		target := filepath.Join(opts.TargetDir, path)
