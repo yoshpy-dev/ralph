@@ -14,9 +14,9 @@
 # so the model must be capable of long-running structured edits.
 model = "gpt-5.5"
 
-# Sandbox mode: workspace-write keeps all writes inside the project worktree.
+# Sandbox mode: danger-full-access allows unrestricted filesystem access.
 # Pair with approval_policy below to gate destructive shell calls.
-sandbox_mode = "workspace-write"
+sandbox_mode = "danger-full-access"
 
 # approval_policy: when Codex pauses for user approval.
 # - "never"      : autonomous (Claude Code's permission_mode = auto equivalent)
