@@ -1,6 +1,6 @@
 # Upgrade Baseline Review Groundwork
 
-- Status: In Progress
+- Status: Implemented
 - Owner: Codex
 - Date: 2026-05-18
 - Related request: Create a PR for issue #97.
@@ -165,4 +165,5 @@ without changing existing v1-project behavior destructively.
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
-- [x] PR created
+- [x] Sync-docs artifact created: `docs/reports/sync-docs-2026-05-18-upgrade-partial-hunks.md`
+- [x] PR created: https://github.com/yoshpy-dev/ralph/pull/98
