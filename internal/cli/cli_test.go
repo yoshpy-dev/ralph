@@ -23,14 +23,25 @@ const testPreMergeCommitGuard = "#!/usr/bin/env sh\n# pre-merge-commit-secret-gu
 func setupTestEmbedFS(t *testing.T) {
 	t.Helper()
 	isolateGitConfig(t)
-	setupTestEmbedFSWithCommitGuard(t, []byte(testCommitMsgGuard))
+	setupTestEmbedFSWithAgentsAndCommitGuard(t, []byte("# AGENTS\n"), []byte(testCommitMsgGuard))
 }
 
 func setupTestEmbedFSWithCommitGuard(t *testing.T, commitMsgGuard []byte) {
 	t.Helper()
 	isolateGitConfig(t)
+	setupTestEmbedFSWithAgentsAndCommitGuard(t, []byte("# AGENTS\n"), commitMsgGuard)
+}
+
+func setupTestEmbedFSWithAgents(t *testing.T, agents []byte) {
+	t.Helper()
+	isolateGitConfig(t)
+	setupTestEmbedFSWithAgentsAndCommitGuard(t, agents, []byte(testCommitMsgGuard))
+}
+
+func setupTestEmbedFSWithAgentsAndCommitGuard(t *testing.T, agents, commitMsgGuard []byte) {
+	t.Helper()
 	scaffold.EmbeddedFS = fstest.MapFS{
-		"templates/base/AGENTS.md":                                  {Data: []byte("# AGENTS\n")},
+		"templates/base/AGENTS.md":                                  {Data: agents},
 		"templates/base/CLAUDE.md":                                  {Data: []byte("# CLAUDE\n")},
 		"templates/base/ralph.toml":                                 {Data: []byte("[pipeline]\nmodel = \"test\"\n[doctor]\nrequire_codex_cli = false\n")},
 		"templates/base/.claude/settings.json":                      {Data: []byte("{}\n")},
@@ -816,7 +827,7 @@ func TestRunUpgrade_InteractiveOverwrite_WritesManaged(t *testing.T) {
 	}
 
 	var out, errOut bytes.Buffer
-	if err := runUpgradeIO(dir, false, strings.NewReader("a\n"), &out, &errOut, false); err != nil {
+	if err := runUpgradeIO(dir, false, strings.NewReader("a\ny\n"), &out, &errOut, false); err != nil {
 		t.Fatalf("upgrade: %v", err)
 	}
 
@@ -863,8 +874,11 @@ func TestRunUpgrade_InteractiveSkip_WritesUnmanaged(t *testing.T) {
 	}
 
 	var out, errOut bytes.Buffer
-	if err := runUpgradeIO(dir, false, strings.NewReader("s\n"), &out, &errOut, false); err != nil {
+	if err := runUpgradeIO(dir, false, strings.NewReader("s\ny\n"), &out, &errOut, false); err != nil {
 		t.Fatalf("upgrade: %v", err)
+	}
+	if !strings.Contains(out.String(), "Skip file:      1 files") {
+		t.Errorf("skip-file summary missing; got:\n%s", out.String())
 	}
 
 	got, err := os.ReadFile(agents)
@@ -907,7 +921,7 @@ func TestRunUpgrade_InteractiveDiff_ShowsUnifiedDiff(t *testing.T) {
 	}
 
 	var out, errOut bytes.Buffer
-	if err := runUpgradeIO(dir, false, strings.NewReader("k\n"), &out, &errOut, false); err != nil {
+	if err := runUpgradeIO(dir, false, strings.NewReader("k\ny\n"), &out, &errOut, false); err != nil {
 		t.Fatalf("upgrade: %v", err)
 	}
 
@@ -955,7 +969,7 @@ func TestRunUpgrade_InteractiveDiff_ColorizesWhenEnabled(t *testing.T) {
 	}
 
 	var out, errOut bytes.Buffer
-	if err := runUpgradeIO(dir, false, strings.NewReader("k\n"), &out, &errOut, true); err != nil {
+	if err := runUpgradeIO(dir, false, strings.NewReader("k\ny\n"), &out, &errOut, true); err != nil {
 		t.Fatalf("upgrade: %v", err)
 	}
 
@@ -1036,17 +1050,234 @@ func TestRunUpgrade_InteractiveDiff_RepromptsOnInvalid(t *testing.T) {
 
 	var out, errOut bytes.Buffer
 	// garbage → edit → keep local
-	input := strings.NewReader("xyz\ne\nk\n")
+	t.Setenv("VISUAL", "")
+	t.Setenv("EDITOR", "")
+	input := strings.NewReader("xyz\ne\nk\ny\n")
 	if err := runUpgradeIO(dir, false, input, &out, &errOut, false); err != nil {
 		t.Fatalf("upgrade: %v", err)
 	}
 
 	got := out.String()
-	if strings.Count(got, "[a]pply template file / [k]eep local file / [e]dit ?") < 3 {
+	if strings.Count(got, "[a]pply template hunk / [k]eep local hunk / [e]dit / [s]kip file ?") < 3 {
 		t.Errorf("expected prompt to re-render on invalid and edit inputs; got:\n%s", got)
 	}
-	if strings.Contains(got, "[s]kip") || strings.Contains(got, "[n]ext") || strings.Contains(got, "[q]uit") {
-		t.Errorf("baseline-backed prompt must not offer skip/next/quit; got:\n%s", got)
+	if strings.Contains(got, "[n]ext") || strings.Contains(got, "[q]uit") {
+		t.Errorf("baseline-backed prompt must not offer next/quit; got:\n%s", got)
+	}
+}
+
+func TestRunUpgrade_HunkApplyAndKeep_WritesPartialManaged(t *testing.T) {
+	initial := []byte("alpha\nbase-local\nmiddle\nbase-template\nomega\n")
+	local := []byte("alpha\nLOCAL\nmiddle\nbase-template\nomega\n")
+	template := []byte("alpha\nTEMPLATE\nmiddle\nTEMPLATE-ONLY\nomega\n")
+	want := []byte("alpha\nLOCAL\nmiddle\nTEMPLATE-ONLY\nomega\n")
+
+	setupTestEmbedFSWithAgents(t, initial)
+	Version = "1.0.0-test"
+
+	dir := t.TempDir()
+	cfg := initConfig{ProjectName: "test", Packs: nil}
+	if err := executeInit(dir, cfg, false); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	agents := filepath.Join(dir, "AGENTS.md")
+	if err := os.WriteFile(agents, local, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	setupTestEmbedFSWithAgents(t, template)
+	Version = "2.0.0-test"
+
+	var out, errOut bytes.Buffer
+	if err := runUpgradeIO(dir, false, strings.NewReader("k\na\ny\n"), &out, &errOut, false); err != nil {
+		t.Fatalf("upgrade: %v", err)
+	}
+
+	got, err := os.ReadFile(agents)
+	if err != nil {
+		t.Fatalf("read AGENTS.md: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("AGENTS.md = %q, want partial merge %q", got, want)
+	}
+
+	manifestPath := filepath.Join(dir, ".ralph", "manifest.toml")
+	m, err := scaffold.ReadManifest(manifestPath)
+	if err != nil {
+		t.Fatalf("ReadManifest: %v", err)
+	}
+	entry := m.Files["AGENTS.md"]
+	if !entry.Managed || entry.State != scaffold.FileStatePartial {
+		t.Fatalf("AGENTS.md state = managed:%v state:%q, want managed partial", entry.Managed, entry.State)
+	}
+	if entry.Hash != scaffold.HashBytes(template) || entry.TemplateHash != scaffold.HashBytes(template) {
+		t.Errorf("template hash fields = hash:%q template:%q, want %q", entry.Hash, entry.TemplateHash, scaffold.HashBytes(template))
+	}
+	if entry.DiskHash != scaffold.HashBytes(want) {
+		t.Errorf("DiskHash = %q, want resolved hash %q", entry.DiskHash, scaffold.HashBytes(want))
+	}
+	baseline, err := scaffold.ReadBaseline(dir, entry)
+	if err != nil {
+		t.Fatalf("ReadBaseline: %v", err)
+	}
+	if string(baseline) != string(template) {
+		t.Errorf("baseline = %q, want new template", baseline)
+	}
+
+	combined := out.String()
+	for _, wantText := range []string{
+		"Apply summary",
+		"Apply template: 1 files / 1 hunks",
+		"Keep local:     1 files / 1 hunks",
+	} {
+		if !strings.Contains(combined, wantText) {
+			t.Errorf("output missing %q; got:\n%s", wantText, combined)
+		}
+	}
+	for _, notWant := range []string{"[n]ext", "[q]uit", "template hash:", "local hash:"} {
+		if strings.Contains(combined, notWant) {
+			t.Errorf("output should not include %q; got:\n%s", notWant, combined)
+		}
+	}
+
+	out.Reset()
+	errOut.Reset()
+	if err := runUpgradeIO(dir, false, strings.NewReader(""), &out, &errOut, false); err != nil {
+		t.Fatalf("second upgrade: %v", err)
+	}
+	if strings.Contains(out.String(), "modified locally") {
+		t.Errorf("partial managed file re-prompted when template and disk hashes were unchanged; got:\n%s", out.String())
+	}
+	if strings.Contains(errOut.String(), "non-interactive input detected") {
+		t.Errorf("second upgrade should not require input; errOut:\n%s", errOut.String())
+	}
+}
+
+func TestRunUpgrade_HunkSummaryNo_DoesNotWrite(t *testing.T) {
+	initial := []byte("base\n")
+	local := []byte("LOCAL\n")
+	template := []byte("TEMPLATE\n")
+
+	setupTestEmbedFSWithAgents(t, initial)
+	Version = "1.0.0-test"
+
+	dir := t.TempDir()
+	cfg := initConfig{ProjectName: "test", Packs: nil}
+	if err := executeInit(dir, cfg, false); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	manifestPath := filepath.Join(dir, ".ralph", "manifest.toml")
+	beforeManifest, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read manifest before upgrade: %v", err)
+	}
+	beforeEntry, err := scaffold.ReadManifest(manifestPath)
+	if err != nil {
+		t.Fatalf("ReadManifest before upgrade: %v", err)
+	}
+	beforeBaseline, err := scaffold.ReadBaseline(dir, beforeEntry.Files["AGENTS.md"])
+	if err != nil {
+		t.Fatalf("ReadBaseline before upgrade: %v", err)
+	}
+
+	agents := filepath.Join(dir, "AGENTS.md")
+	if err := os.WriteFile(agents, local, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	setupTestEmbedFSWithAgents(t, template)
+	Version = "2.0.0-test"
+
+	var out, errOut bytes.Buffer
+	if err := runUpgradeIO(dir, false, strings.NewReader("a\nn\n"), &out, &errOut, false); err != nil {
+		t.Fatalf("upgrade: %v", err)
+	}
+
+	got, err := os.ReadFile(agents)
+	if err != nil {
+		t.Fatalf("read AGENTS.md: %v", err)
+	}
+	if string(got) != string(local) {
+		t.Errorf("AGENTS.md = %q, want local content untouched", got)
+	}
+	afterManifest, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read manifest after upgrade: %v", err)
+	}
+	if string(afterManifest) != string(beforeManifest) {
+		t.Errorf("manifest changed despite summary rejection\nbefore:\n%s\nafter:\n%s", beforeManifest, afterManifest)
+	}
+	afterEntry, err := scaffold.ReadManifest(manifestPath)
+	if err != nil {
+		t.Fatalf("ReadManifest after upgrade: %v", err)
+	}
+	afterBaseline, err := scaffold.ReadBaseline(dir, afterEntry.Files["AGENTS.md"])
+	if err != nil {
+		t.Fatalf("ReadBaseline after upgrade: %v", err)
+	}
+	if string(afterBaseline) != string(beforeBaseline) {
+		t.Errorf("baseline changed despite summary rejection: got %q want %q", afterBaseline, beforeBaseline)
+	}
+	if !strings.Contains(out.String(), "No changes applied.") {
+		t.Errorf("output missing cancellation notice; got:\n%s", out.String())
+	}
+}
+
+func TestRunUpgrade_HunkEdit_UsesEditor(t *testing.T) {
+	initial := []byte("base\n")
+	local := []byte("LOCAL\n")
+	template := []byte("TEMPLATE\n")
+	edited := []byte("EDITED\n")
+
+	setupTestEmbedFSWithAgents(t, initial)
+	Version = "1.0.0-test"
+
+	dir := t.TempDir()
+	cfg := initConfig{ProjectName: "test", Packs: nil}
+	if err := executeInit(dir, cfg, false); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	agents := filepath.Join(dir, "AGENTS.md")
+	if err := os.WriteFile(agents, local, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	setupTestEmbedFSWithAgents(t, template)
+	Version = "2.0.0-test"
+
+	editorDir := t.TempDir()
+	editor := filepath.Join(editorDir, "editor.sh")
+	if err := os.WriteFile(editor, []byte("#!/bin/sh\nprintf '%s\\n' 'EDITED' > \"$1\"\n"), 0755); err != nil {
+		t.Fatalf("write editor script: %v", err)
+	}
+	t.Setenv("VISUAL", editor)
+	t.Setenv("EDITOR", "")
+
+	var out, errOut bytes.Buffer
+	if err := runUpgradeIO(dir, false, strings.NewReader("e\ny\n"), &out, &errOut, false); err != nil {
+		t.Fatalf("upgrade: %v", err)
+	}
+
+	got, err := os.ReadFile(agents)
+	if err != nil {
+		t.Fatalf("read AGENTS.md: %v", err)
+	}
+	if string(got) != string(edited) {
+		t.Errorf("AGENTS.md = %q, want edited hunk %q", got, edited)
+	}
+	m, err := scaffold.ReadManifest(filepath.Join(dir, ".ralph", "manifest.toml"))
+	if err != nil {
+		t.Fatalf("ReadManifest: %v", err)
+	}
+	entry := m.Files["AGENTS.md"]
+	if entry.State != scaffold.FileStatePartial || entry.DiskHash != scaffold.HashBytes(edited) {
+		t.Errorf("entry = %+v, want partial with edited disk hash", entry)
+	}
+	if !strings.Contains(out.String(), "Edited:         1 files / 1 hunks") {
+		t.Errorf("summary missing edited hunk count; got:\n%s", out.String())
 	}
 }
 
@@ -1070,7 +1301,7 @@ func TestRunUpgrade_ForceReadoptsUnmanaged(t *testing.T) {
 
 	// First upgrade: user chooses skip → manifest records Managed=false.
 	var out, errOut bytes.Buffer
-	if err := runUpgradeIO(dir, false, strings.NewReader("s\n"), &out, &errOut, false); err != nil {
+	if err := runUpgradeIO(dir, false, strings.NewReader("s\ny\n"), &out, &errOut, false); err != nil {
 		t.Fatalf("first upgrade: %v", err)
 	}
 	m1, _ := scaffold.ReadManifest(filepath.Join(dir, ".ralph", "manifest.toml"))
@@ -1124,7 +1355,7 @@ func TestRunUpgrade_UnmanagedSurvivesTemplateRemovalAcrossRuns(t *testing.T) {
 
 	// Skip → Managed=false.
 	var out, errOut bytes.Buffer
-	if err := runUpgradeIO(dir, false, strings.NewReader("s\n"), &out, &errOut, false); err != nil {
+	if err := runUpgradeIO(dir, false, strings.NewReader("s\ny\n"), &out, &errOut, false); err != nil {
 		t.Fatalf("first upgrade: %v", err)
 	}
 
@@ -1182,7 +1413,7 @@ func TestRunUpgrade_NextRunAfterSkip_IsSilent(t *testing.T) {
 	}
 
 	var out, errOut bytes.Buffer
-	if err := runUpgradeIO(dir, false, strings.NewReader("s\n"), &out, &errOut, false); err != nil {
+	if err := runUpgradeIO(dir, false, strings.NewReader("s\ny\n"), &out, &errOut, false); err != nil {
 		t.Fatalf("first upgrade: %v", err)
 	}
 

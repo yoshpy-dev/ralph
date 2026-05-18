@@ -239,53 +239,37 @@ func runUpgradeIOWithOptions(targetDir string, opts upgradeOptions, in io.Reader
 		return nil
 	}
 
-	var updated, skipped, notified int
-
 	manifest := scaffold.NewManifest(Version)
 	manifest.Meta.Packs = retainedPacks
 	maps.Copy(manifest.Files, preservedPackEntries)
 
 	reader := bufio.NewReader(in)
+	applyPlan := &upgradeApplyPlan{}
 
 	for _, d := range diffs {
 		switch d.Action {
 		case upgrade.ActionAutoUpdate:
-			targetPath := filepath.Join(absDir, d.Path)
-			if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
-				return fmt.Errorf("creating parent dir for %s: %w", d.Path, err)
-			}
-			if err := os.WriteFile(targetPath, d.NewContent, scaffold.FilePerm(d.Path)); err != nil {
-				return fmt.Errorf("writing %s: %w", d.Path, err)
-			}
-			if err := setManagedWithBaseline(manifest, absDir, d.Path, d.NewHash, d.NewContent); err != nil {
+			if err := applyPlan.addTemplateWrite(manifest, d.Path, d.NewHash, d.NewContent, fmt.Sprintf("  ✓ %s (unchanged, auto-update)\n", d.Path)); err != nil {
 				return err
 			}
-			writef(out, "  ✓ %s (unchanged, auto-update)\n", d.Path)
-			updated++
 
 		case upgrade.ActionConflict:
 			if opts.Force {
-				targetPath := filepath.Join(absDir, d.Path)
-				if err := os.WriteFile(targetPath, d.NewContent, scaffold.FilePerm(d.Path)); err != nil {
-					return fmt.Errorf("writing %s: %w", d.Path, err)
-				}
-				if err := setManagedWithBaseline(manifest, absDir, d.Path, d.NewHash, d.NewContent); err != nil {
+				if err := applyPlan.addTemplateWrite(manifest, d.Path, d.NewHash, d.NewContent, fmt.Sprintf("  ✓ %s (force overwritten)\n", d.Path)); err != nil {
 					return err
 				}
-				writef(out, "  ✓ %s (force overwritten)\n", d.Path)
-				updated++
 				continue
 			}
-			switch resolveConflict(d, oldManifest, absDir, Version, reader, out, errOut, colorize, opts.Pager) {
+			result := resolveConflict(d, oldManifest, absDir, Version, reader, out, errOut, colorize, opts.Pager)
+			applyPlan.mergeHunkStats(result.stats)
+			if result.hunkReviewed {
+				applyPlan.needsConfirmation = true
+			}
+			switch result.kind {
 			case resolutionOverwrite:
-				targetPath := filepath.Join(absDir, d.Path)
-				if err := os.WriteFile(targetPath, d.NewContent, scaffold.FilePerm(d.Path)); err != nil {
-					return fmt.Errorf("writing %s: %w", d.Path, err)
-				}
-				if err := setManagedWithBaseline(manifest, absDir, d.Path, d.NewHash, d.NewContent); err != nil {
+				if err := applyPlan.addTemplateWrite(manifest, d.Path, d.NewHash, d.NewContent, ""); err != nil {
 					return err
 				}
-				updated++
 			case resolutionSkip:
 				// Mark the entry as user-owned so subsequent upgrades converge
 				// to silent skip. Prefer the on-disk hash (what the user
@@ -300,27 +284,22 @@ func runUpgradeIOWithOptions(targetDir string, opts upgradeOptions, in io.Reader
 					}
 				}
 				manifest.SetFileUnmanaged(d.Path, hash)
-				writef(out, "  ⊘ %s (kept local; future upgrades will skip silently)\n", d.Path)
-				skipped++
+				applyPlan.addMessage(fmt.Sprintf("  ⊘ %s (kept local; future upgrades will skip silently)\n", d.Path))
+				applyPlan.skipped++
+			case resolutionResolved:
+				if err := applyPlan.addResolvedWrite(manifest, d.Path, d.NewHash, d.NewContent, result.content); err != nil {
+					return err
+				}
 			}
 
 		case upgrade.ActionAdd:
-			targetPath := filepath.Join(absDir, d.Path)
-			if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
-				return fmt.Errorf("creating parent dir for %s: %w", d.Path, err)
-			}
-			if err := os.WriteFile(targetPath, d.NewContent, scaffold.FilePerm(d.Path)); err != nil {
-				return fmt.Errorf("writing %s: %w", d.Path, err)
-			}
-			if err := setManagedWithBaseline(manifest, absDir, d.Path, d.NewHash, d.NewContent); err != nil {
+			if err := applyPlan.addTemplateWrite(manifest, d.Path, d.NewHash, d.NewContent, fmt.Sprintf("  + %s (new file)\n", d.Path)); err != nil {
 				return err
 			}
-			writef(out, "  + %s (new file)\n", d.Path)
-			updated++
 
 		case upgrade.ActionRemove:
-			writef(out, "  ⚠ %s (removed from template — review and delete manually)\n", d.Path)
-			notified++
+			applyPlan.addMessage(fmt.Sprintf("  ⚠ %s (removed from template — review and delete manually)\n", d.Path))
+			applyPlan.notified++
 
 		case upgrade.ActionSkip:
 			// Preserve the manifest state for the path.
@@ -338,27 +317,28 @@ func runUpgradeIOWithOptions(targetDir string, opts upgradeOptions, in io.Reader
 			wasUnmanaged := hadEntry && !prev.Managed
 			switch {
 			case opts.Force && wasUnmanaged && d.NewContent != nil:
-				targetPath := filepath.Join(absDir, d.Path)
-				if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
-					return fmt.Errorf("creating parent dir for %s: %w", d.Path, err)
-				}
-				if err := os.WriteFile(targetPath, d.NewContent, scaffold.FilePerm(d.Path)); err != nil {
-					return fmt.Errorf("writing %s: %w", d.Path, err)
-				}
-				if err := setManagedWithBaseline(manifest, absDir, d.Path, d.NewHash, d.NewContent); err != nil {
+				if err := applyPlan.addTemplateWrite(manifest, d.Path, d.NewHash, d.NewContent, fmt.Sprintf("  ✓ %s (force re-adopted)\n", d.Path)); err != nil {
 					return err
 				}
-				writef(out, "  ✓ %s (force re-adopted)\n", d.Path)
-				updated++
 			case wasUnmanaged:
 				preserveUnmanaged(manifest, d.Path, prev)
 			default:
-				if err := preserveManagedSkip(manifest, oldManifest, absDir, d); err != nil {
+				if err := preserveManagedSkip(manifest, oldManifest, absDir, applyPlan, d); err != nil {
 					return err
 				}
 			}
 		}
 	}
+
+	if applyPlan.needsConfirmation && !confirmApplySummary(applyPlan, reader, out, errOut) {
+		writef(out, "\nNo changes applied.\n")
+		return nil
+	}
+
+	if err := applyPlan.apply(absDir); err != nil {
+		return err
+	}
+	applyPlan.writeMessages(out)
 
 	if err := manifest.Write(manifestPath); err != nil {
 		return fmt.Errorf("writing manifest: %w", err)
@@ -366,10 +346,10 @@ func runUpgradeIOWithOptions(targetDir string, opts upgradeOptions, in io.Reader
 
 	installManagedGitHooks(absDir, out, errOut)
 
-	writef(out, "\n  Updated: %d files\n", updated)
-	writef(out, "  Skipped: %d files (user-modified)\n", skipped)
-	if notified > 0 {
-		writef(out, "  Removed from template: %d files (review manually)\n", notified)
+	writef(out, "\n  Updated: %d files\n", applyPlan.updated)
+	writef(out, "  Skipped: %d files (user-modified)\n", applyPlan.skipped)
+	if applyPlan.notified > 0 {
+		writef(out, "  Removed from template: %d files (review manually)\n", applyPlan.notified)
 	}
 	writef(out, "  Manifest updated: .ralph/manifest.toml\n")
 
@@ -387,13 +367,175 @@ func preservePackEntries(src *scaffold.Manifest, prefix string, dst map[string]s
 	}
 }
 
-func setManagedWithBaseline(manifest *scaffold.Manifest, absDir, relPath, hash string, content []byte) error {
-	baselinePath, err := scaffold.WriteBaseline(absDir, relPath, content)
+type plannedFileWrite struct {
+	relPath string
+	content []byte
+}
+
+type upgradeApplyPlan struct {
+	writes            []plannedFileWrite
+	baselines         []plannedFileWrite
+	messages          []string
+	updated           int
+	skipped           int
+	notified          int
+	needsConfirmation bool
+	hunkStats         hunkReviewStats
+}
+
+func (p *upgradeApplyPlan) addMessage(message string) {
+	if message != "" {
+		p.messages = append(p.messages, message)
+	}
+}
+
+func (p *upgradeApplyPlan) addTemplateWrite(manifest *scaffold.Manifest, relPath, templateHash string, content []byte, message string) error {
+	return p.addResolvedWriteWithMessage(manifest, relPath, templateHash, content, content, message)
+}
+
+func (p *upgradeApplyPlan) addResolvedWrite(manifest *scaffold.Manifest, relPath, templateHash string, templateContent, resolvedContent []byte) error {
+	return p.addResolvedWriteWithMessage(manifest, relPath, templateHash, templateContent, resolvedContent, fmt.Sprintf("  ✓ %s (hunk selections applied)\n", relPath))
+}
+
+func (p *upgradeApplyPlan) addResolvedWriteWithMessage(manifest *scaffold.Manifest, relPath, templateHash string, templateContent, resolvedContent []byte, message string) error {
+	baselinePath, err := scaffold.BaselinePath(relPath)
 	if err != nil {
 		return err
 	}
-	manifest.SetFileWithBaseline(relPath, hash, baselinePath)
+	diskHash := scaffold.HashBytes(resolvedContent)
+	state := scaffold.FileStatePartial
+	if diskHash == templateHash {
+		state = scaffold.FileStateManaged
+	}
+	manifest.SetFileResolvedWithBaseline(relPath, templateHash, diskHash, state, baselinePath)
+	p.writes = append(p.writes, plannedFileWrite{relPath: relPath, content: resolvedContent})
+	p.baselines = append(p.baselines, plannedFileWrite{relPath: relPath, content: templateContent})
+	p.addMessage(message)
+	p.updated++
 	return nil
+}
+
+func (p *upgradeApplyPlan) addBaselineOnly(manifest *scaffold.Manifest, relPath, templateHash string, templateContent []byte) error {
+	baselinePath, err := scaffold.BaselinePath(relPath)
+	if err != nil {
+		return err
+	}
+	manifest.SetFileResolvedWithBaseline(relPath, templateHash, templateHash, scaffold.FileStateManaged, baselinePath)
+	p.baselines = append(p.baselines, plannedFileWrite{relPath: relPath, content: templateContent})
+	return nil
+}
+
+func (p *upgradeApplyPlan) apply(absDir string) error {
+	for _, write := range p.writes {
+		target := filepath.Join(absDir, filepath.FromSlash(write.relPath))
+		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+			return fmt.Errorf("creating parent for %s: %w", write.relPath, err)
+		}
+		if err := os.WriteFile(target, write.content, scaffold.FilePerm(write.relPath)); err != nil {
+			return fmt.Errorf("writing %s: %w", write.relPath, err)
+		}
+	}
+	for _, baseline := range p.baselines {
+		if _, err := scaffold.WriteBaseline(absDir, baseline.relPath, baseline.content); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (p *upgradeApplyPlan) writeMessages(out io.Writer) {
+	for _, message := range p.messages {
+		writef(out, "%s", message)
+	}
+}
+
+func (p *upgradeApplyPlan) mergeHunkStats(stats hunkReviewStats) {
+	p.hunkStats.merge(stats)
+}
+
+type hunkReviewStats struct {
+	applyHunks int
+	keepHunks  int
+	editHunks  int
+	skipFiles  int
+	applyFiles map[string]bool
+	keepFiles  map[string]bool
+	editFiles  map[string]bool
+}
+
+func (s *hunkReviewStats) addApply(path string) {
+	if s.applyFiles == nil {
+		s.applyFiles = make(map[string]bool)
+	}
+	s.applyHunks++
+	s.applyFiles[path] = true
+}
+
+func (s *hunkReviewStats) addKeep(path string) {
+	if s.keepFiles == nil {
+		s.keepFiles = make(map[string]bool)
+	}
+	s.keepHunks++
+	s.keepFiles[path] = true
+}
+
+func (s *hunkReviewStats) addEdit(path string) {
+	if s.editFiles == nil {
+		s.editFiles = make(map[string]bool)
+	}
+	s.editHunks++
+	s.editFiles[path] = true
+}
+
+func (s *hunkReviewStats) addSkipFile() {
+	s.skipFiles++
+}
+
+func (s *hunkReviewStats) merge(other hunkReviewStats) {
+	s.applyHunks += other.applyHunks
+	s.keepHunks += other.keepHunks
+	s.editHunks += other.editHunks
+	s.skipFiles += other.skipFiles
+	mergeBoolMap(&s.applyFiles, other.applyFiles)
+	mergeBoolMap(&s.keepFiles, other.keepFiles)
+	mergeBoolMap(&s.editFiles, other.editFiles)
+}
+
+func mergeBoolMap(dst *map[string]bool, src map[string]bool) {
+	if len(src) == 0 {
+		return
+	}
+	if *dst == nil {
+		*dst = make(map[string]bool, len(src))
+	}
+	for k, v := range src {
+		(*dst)[k] = v
+	}
+}
+
+func confirmApplySummary(plan *upgradeApplyPlan, in *bufio.Reader, out, errOut io.Writer) bool {
+	stats := plan.hunkStats
+	writef(out, "\nApply summary\n")
+	if stats.applyHunks > 0 {
+		writef(out, "  Apply template: %d files / %d hunks\n", len(stats.applyFiles), stats.applyHunks)
+	}
+	if stats.keepHunks > 0 {
+		writef(out, "  Keep local:     %d files / %d hunks\n", len(stats.keepFiles), stats.keepHunks)
+	}
+	if stats.editHunks > 0 {
+		writef(out, "  Edited:         %d files / %d hunks\n", len(stats.editFiles), stats.editHunks)
+	}
+	if stats.skipFiles > 0 {
+		writef(out, "  Skip file:      %d files\n", stats.skipFiles)
+	}
+	writef(out, "\nApply these changes? [y/N] ")
+	line, err := in.ReadString('\n')
+	if err != nil && line == "" {
+		writef(errOut, "\n  (non-interactive input detected, no changes applied)\n")
+		return false
+	}
+	choice := strings.ToLower(strings.TrimSpace(line))
+	return choice == "y" || choice == "yes"
 }
 
 func preserveUnmanaged(manifest *scaffold.Manifest, relPath string, prev scaffold.ManifestFile) {
@@ -406,7 +548,7 @@ func preserveUnmanaged(manifest *scaffold.Manifest, relPath string, prev scaffol
 	manifest.Files[relPath] = prev
 }
 
-func preserveManagedSkip(manifest, oldManifest *scaffold.Manifest, absDir string, d upgrade.FileDiff) error {
+func preserveManagedSkip(manifest, oldManifest *scaffold.Manifest, absDir string, plan *upgradeApplyPlan, d upgrade.FileDiff) error {
 	if prev, ok := oldManifest.Files[d.Path]; ok {
 		prev = prev.WithTemplateHash(d.NewHash)
 		if _, err := scaffold.ReadBaseline(absDir, prev); err == nil {
@@ -415,7 +557,7 @@ func preserveManagedSkip(manifest, oldManifest *scaffold.Manifest, absDir string
 		}
 	}
 	if d.NewContent != nil && d.DiskHash == d.NewHash {
-		return setManagedWithBaseline(manifest, absDir, d.Path, d.NewHash, d.NewContent)
+		return plan.addBaselineOnly(manifest, d.Path, d.NewHash, d.NewContent)
 	}
 	manifest.SetFile(d.Path, d.NewHash)
 	return nil
@@ -443,17 +585,25 @@ type resolution int
 const (
 	resolutionSkip resolution = iota
 	resolutionOverwrite
+	resolutionResolved
 )
+
+type conflictResult struct {
+	kind         resolution
+	content      []byte
+	hunkReviewed bool
+	stats        hunkReviewStats
+}
 
 // resolveConflict prompts the user to pick between overwriting with the
 // template content, keeping the local variant, or viewing a unified diff. EOF
 // or any read error collapses to a safe skip so non-interactive runs do not
 // silently overwrite edits.
-func resolveConflict(d upgrade.FileDiff, oldManifest *scaffold.Manifest, absDir, version string, in *bufio.Reader, out, errOut io.Writer, colorize bool, pagerMode string) resolution {
+func resolveConflict(d upgrade.FileDiff, oldManifest *scaffold.Manifest, absDir, version string, in *bufio.Reader, out, errOut io.Writer, colorize bool, pagerMode string) conflictResult {
 	writef(out, "  ⚠ %s (modified locally)\n", d.Path)
 
 	if hasReadableBaseline(oldManifest, absDir, d) {
-		return resolveConflictWithBaseline(d, absDir, version, in, out, errOut, colorize, pagerMode)
+		return resolveConflictWithBaseline(d, oldManifest, absDir, version, in, out, errOut, colorize, pagerMode)
 	}
 
 	for {
@@ -461,13 +611,13 @@ func resolveConflict(d upgrade.FileDiff, oldManifest *scaffold.Manifest, absDir,
 		line, err := in.ReadString('\n')
 		if err != nil && line == "" {
 			writef(errOut, "\n  (non-interactive input detected, skipping)\n")
-			return resolutionSkip
+			return conflictResult{kind: resolutionSkip}
 		}
 		switch strings.TrimSpace(line) {
 		case "o", "overwrite":
-			return resolutionOverwrite
+			return conflictResult{kind: resolutionOverwrite}
 		case "s", "skip":
-			return resolutionSkip
+			return conflictResult{kind: resolutionSkip}
 		case "d", "diff":
 			showDiff(d, absDir, version, out, errOut, colorize, pagerMode)
 			// Loop back to the prompt so the user still picks overwrite or skip.
@@ -531,26 +681,145 @@ func hasReadableBaseline(oldManifest *scaffold.Manifest, absDir string, d upgrad
 	return true
 }
 
-func resolveConflictWithBaseline(d upgrade.FileDiff, absDir, version string, in *bufio.Reader, out, errOut io.Writer, colorize bool, pagerMode string) resolution {
-	showDiff(d, absDir, version, out, errOut, colorize, pagerMode)
-	for {
-		writef(out, "    [a]pply template file / [k]eep local file / [e]dit ? ")
-		line, err := in.ReadString('\n')
-		if err != nil && line == "" {
-			writef(errOut, "\n  (non-interactive input detected, keeping local file)\n")
-			return resolutionSkip
-		}
-		switch strings.TrimSpace(line) {
-		case "a", "apply":
-			return resolutionOverwrite
-		case "k", "keep":
-			return resolutionSkip
-		case "e", "edit":
-			writef(errOut, "    (manual edit is not available yet; choose apply or keep local)\n")
-		default:
-			// Unrecognized input — reprompt.
-		}
+func resolveConflictWithBaseline(d upgrade.FileDiff, oldManifest *scaffold.Manifest, absDir, version string, in *bufio.Reader, out, errOut io.Writer, colorize bool, pagerMode string) conflictResult {
+	prev := oldManifest.Files[d.Path]
+	baselineBytes, err := scaffold.ReadBaseline(absDir, prev)
+	if err != nil {
+		writef(errOut, "    (could not read baseline for %s: %v)\n", d.Path, err)
+		return conflictResult{kind: resolutionSkip}
 	}
+	localBytes, err := os.ReadFile(filepath.Join(absDir, d.Path))
+	if err != nil {
+		writef(errOut, "    (could not read %s: %v)\n", d.Path, err)
+		return conflictResult{kind: resolutionSkip}
+	}
+
+	mergePlan := upgrade.PlanMerge(baselineBytes, localBytes, d.NewContent)
+	decisionCount := mergePlan.DecisionCount()
+	if decisionCount == 0 {
+		return conflictResult{kind: resolutionResolved, content: mergePlan.Render(nil)}
+	}
+
+	decisions := make(map[int]upgrade.MergeDecision, decisionCount)
+	stats := hunkReviewStats{}
+	decisionIndex := 0
+	for _, hunk := range mergePlan.Hunks {
+		if !hunk.NeedsDecision() {
+			continue
+		}
+		decisionIndex++
+		writef(out, "\n  %s (hunk %d/%d)\n", d.Path, decisionIndex, decisionCount)
+		showHunkDiff(hunk, version, out, errOut, colorize, pagerMode)
+		for {
+			writef(out, "    [a]pply template hunk / [k]eep local hunk / [e]dit / [s]kip file ? ")
+			line, err := in.ReadString('\n')
+			if err != nil && line == "" {
+				writef(errOut, "\n  (non-interactive input detected, keeping local file)\n")
+				skipStats := hunkReviewStats{}
+				skipStats.addSkipFile()
+				return conflictResult{kind: resolutionSkip, hunkReviewed: true, stats: skipStats}
+			}
+			switch strings.TrimSpace(line) {
+			case "a", "apply":
+				decisions[hunk.Index] = upgrade.MergeDecision{Choice: upgrade.MergeUseTemplate}
+				stats.addApply(d.Path)
+				goto nextHunk
+			case "k", "keep":
+				decisions[hunk.Index] = upgrade.MergeDecision{Choice: upgrade.MergeUseLocal}
+				stats.addKeep(d.Path)
+				goto nextHunk
+			case "e", "edit":
+				editedLines, editErr := editHunkLines(hunk.LocalLines, out, errOut)
+				if editErr != nil {
+					writef(errOut, "    (manual edit failed: %v)\n", editErr)
+					continue
+				}
+				decisions[hunk.Index] = upgrade.MergeDecision{Choice: upgrade.MergeUseEdited, EditedLines: editedLines}
+				stats.addEdit(d.Path)
+				goto nextHunk
+			case "s", "skip":
+				skipStats := hunkReviewStats{}
+				skipStats.addSkipFile()
+				return conflictResult{kind: resolutionSkip, hunkReviewed: true, stats: skipStats}
+			default:
+				// Unrecognized input — reprompt.
+			}
+		}
+	nextHunk:
+	}
+
+	return conflictResult{
+		kind:         resolutionResolved,
+		content:      mergePlan.Render(decisions),
+		hunkReviewed: true,
+		stats:        stats,
+	}
+}
+
+func showHunkDiff(hunk upgrade.MergeHunk, version string, out, errOut io.Writer, colorize bool, pagerMode string) {
+	diff := upgrade.UnifiedDiff(
+		upgrade.JoinLines(hunk.LocalLines, true),
+		upgrade.JoinLines(hunk.TemplateLines, true),
+		"local",
+		fmt.Sprintf("template (%s)", version),
+	)
+	diff = omitHunkHeaders(diff)
+	if diff == "" {
+		writef(out, "    (no textual difference)\n")
+		return
+	}
+	if colorize {
+		diff = upgrade.Colorize(diff)
+	}
+	writeDiffOutput(diff, out, errOut, pagerMode)
+}
+
+func editHunkLines(lines []string, out, errOut io.Writer) ([]string, error) {
+	editor := os.Getenv("VISUAL")
+	if editor == "" {
+		editor = os.Getenv("EDITOR")
+	}
+	if strings.TrimSpace(editor) == "" {
+		return nil, fmt.Errorf("VISUAL/EDITOR is not set")
+	}
+	tmp, err := os.CreateTemp("", "ralph-upgrade-hunk-*")
+	if err != nil {
+		return nil, err
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(upgrade.JoinLines(lines, true)); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return nil, err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return nil, err
+	}
+	defer func() { _ = os.Remove(tmpPath) }()
+
+	parts := strings.Fields(editor)
+	cmd := exec.Command(parts[0], append(parts[1:], tmpPath)...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = out
+	cmd.Stderr = errOut
+	if err := cmd.Run(); err != nil {
+		return nil, err
+	}
+	edited, err := os.ReadFile(tmpPath)
+	if err != nil {
+		return nil, err
+	}
+	return splitEditedLines(edited), nil
+}
+
+func splitEditedLines(data []byte) []string {
+	text := string(data)
+	text = strings.TrimSuffix(text, "\n")
+	if text == "" {
+		return nil
+	}
+	return strings.Split(text, "\n")
 }
 
 func renderUpgradePreview(diffs []upgrade.FileDiff, absDir, version string, out, errOut io.Writer, colorize bool, opts upgradeOptions) {

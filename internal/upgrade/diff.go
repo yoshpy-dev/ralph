@@ -170,17 +170,26 @@ func ComputeDiffsWithManifest(manifest *scaffold.Manifest, targetDir string, new
 			return nil
 		}
 
-		// Template hasn't changed. If disk matches the recorded hash, the file
-		// is untouched → skip. If disk drifted from the recorded hash, the
+		recordedTemplateHash := mf.Hash
+		if mf.TemplateHash != "" {
+			recordedTemplateHash = mf.TemplateHash
+		}
+		recordedDiskHash := mf.Hash
+		if mf.DiskHash != "" {
+			recordedDiskHash = mf.DiskHash
+		}
+
+		// Template hasn't changed. If disk matches the recorded disk hash, the
+		// file is untouched → skip. If disk drifted from the recorded disk hash, the
 		// user edited a managed file locally: surface it as a conflict so the
 		// user can choose overwrite / skip / diff. Skip resolution writes
 		// Managed=false, converging subsequent upgrades to silent skip.
-		if newHash == mf.Hash {
-			if diskHash == mf.Hash {
+		if newHash == recordedTemplateHash {
+			if diskHash == recordedDiskHash {
 				diffs = append(diffs, FileDiff{
 					Path:       path,
 					Action:     ActionSkip,
-					OldHash:    mf.Hash,
+					OldHash:    recordedTemplateHash,
 					DiskHash:   diskHash,
 					NewHash:    newHash,
 					NewContent: content,
@@ -190,7 +199,7 @@ func ComputeDiffsWithManifest(manifest *scaffold.Manifest, targetDir string, new
 			diffs = append(diffs, FileDiff{
 				Path:       path,
 				Action:     ActionConflict,
-				OldHash:    mf.Hash,
+				OldHash:    recordedTemplateHash,
 				DiskHash:   diskHash,
 				NewHash:    newHash,
 				NewContent: content,
@@ -199,12 +208,12 @@ func ComputeDiffsWithManifest(manifest *scaffold.Manifest, targetDir string, new
 		}
 
 		// Template changed. Did user also edit?
-		if diskHash == mf.Hash {
+		if diskHash == recordedTemplateHash {
 			// User didn't edit → auto update.
 			diffs = append(diffs, FileDiff{
 				Path:       path,
 				Action:     ActionAutoUpdate,
-				OldHash:    mf.Hash,
+				OldHash:    recordedTemplateHash,
 				DiskHash:   diskHash,
 				NewHash:    newHash,
 				NewContent: content,
@@ -214,7 +223,7 @@ func ComputeDiffsWithManifest(manifest *scaffold.Manifest, targetDir string, new
 			diffs = append(diffs, FileDiff{
 				Path:       path,
 				Action:     ActionConflict,
-				OldHash:    mf.Hash,
+				OldHash:    recordedTemplateHash,
 				DiskHash:   diskHash,
 				NewHash:    newHash,
 				NewContent: content,
