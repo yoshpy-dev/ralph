@@ -111,6 +111,21 @@ func (m *Manifest) SetFileWithBaseline(relPath, hash, baselinePath string) {
 	}
 }
 
+// SetFileResolvedWithBaseline records a managed file resolved from template
+// metadata and local choices. Hash remains the template hash for v1-compatible
+// upgrade comparisons; DiskHash records the actual resolved content.
+func (m *Manifest) SetFileResolvedWithBaseline(relPath, templateHash, diskHash, state, baselinePath string) {
+	m.Files[relPath] = ManifestFile{
+		Hash:           templateHash,
+		Managed:        true,
+		State:          state,
+		TemplateHash:   templateHash,
+		DiskHash:       diskHash,
+		BaselineStatus: BaselineStatusAvailable,
+		BaselinePath:   baselinePath,
+	}
+}
+
 // SetFileUnmanaged records a file in the manifest as user-owned. The ralph
 // upgrade flow uses this when the user chooses to keep a local variant over
 // the template: the entry is preserved (so the path is not mistaken for a

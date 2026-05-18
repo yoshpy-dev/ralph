@@ -43,6 +43,7 @@ func TestManifestRoundTripV2BaselineFields(t *testing.T) {
 
 	m := NewManifest("0.3.0")
 	m.SetFileWithBaseline("AGENTS.md", "sha256:abc123", ".ralph/baseline/AGENTS.md")
+	m.SetFileResolvedWithBaseline("partial.md", "sha256:template", "sha256:disk", FileStatePartial, ".ralph/baseline/partial.md")
 	m.SetFileUnmanaged("CLAUDE.md", "sha256:local")
 
 	if err := m.Write(path); err != nil {
@@ -66,6 +67,17 @@ func TestManifestRoundTripV2BaselineFields(t *testing.T) {
 	}
 	if agents.BaselinePath != ".ralph/baseline/AGENTS.md" {
 		t.Errorf("BaselinePath = %q", agents.BaselinePath)
+	}
+
+	partial := got.Files["partial.md"]
+	if !partial.Managed || partial.State != FileStatePartial {
+		t.Fatalf("partial.md state = managed:%v state:%q, want partial managed", partial.Managed, partial.State)
+	}
+	if partial.Hash != "sha256:template" || partial.TemplateHash != "sha256:template" {
+		t.Errorf("partial.md template hash fields = hash:%q template:%q", partial.Hash, partial.TemplateHash)
+	}
+	if partial.DiskHash != "sha256:disk" {
+		t.Errorf("partial.md DiskHash = %q, want sha256:disk", partial.DiskHash)
 	}
 
 	claude := got.Files["CLAUDE.md"]

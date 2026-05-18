@@ -1,6 +1,6 @@
 # Upgrade Hunk Apply
 
-- Status: Draft
+- Status: Implemented
 - Owner: Codex
 - Date: 2026-05-18
 - Related request: Create a PR for issue #99.
@@ -57,6 +57,7 @@ confirmation.
   summary confirmation, and manifest writes.
 - `internal/cli/cli_test.go` integration coverage.
 - `internal/scaffold/manifest.go` helper for partial/resolved baseline entries.
+- `README.md`.
 - `docs/specs/2026-04-16-ralph-cli-tool.md`.
 - `docs/tech-debt/README.md`.
 - `docs/reports/` evidence reports.
@@ -73,22 +74,22 @@ confirmation.
 
 ## Acceptance criteria
 
-- [ ] Baseline-missing / v1 conflicts still use legacy `overwrite / skip / diff`.
-- [ ] Baseline-available conflicts expose hunk-level
+- [x] Baseline-missing / v1 conflicts still use legacy `overwrite / skip / diff`.
+- [x] Baseline-available conflicts expose hunk-level
       `apply template hunk / keep local hunk / edit / skip file`.
-- [ ] `keep local hunk` preserves only the current hunk and keeps the file
+- [x] `keep local hunk` preserves only the current hunk and keeps the file
       managed/partial rather than making the whole file unmanaged.
-- [ ] `skip file` leaves the local file unchanged and marks the file unmanaged.
-- [ ] Prompt output does not include `next` or `quit`.
-- [ ] Hunk choices do not write the target file until the pre-apply summary is
+- [x] `skip file` leaves the local file unchanged and marks the file unmanaged.
+- [x] Prompt output does not include `next` or `quit`.
+- [x] Hunk choices do not write the target file until the pre-apply summary is
       confirmed.
-- [ ] `N` / EOF at the summary leaves target file, manifest, and baseline cache
+- [x] `N` / EOF at the summary leaves target file, manifest, and baseline cache
       unchanged for hunk-reviewed files.
-- [ ] `y` writes resolved target content and updates manifest/baseline metadata.
-- [ ] Partial results record `state = "partial"` and `disk_hash`; all-template
+- [x] `y` writes resolved target content and updates manifest/baseline metadata.
+- [x] Partial results record `state = "partial"` and `disk_hash`; all-template
       results record `state = "managed"`.
-- [ ] Normal upgrade diff UI continues to omit hunk headers and hash summaries.
-- [ ] Missing editor / editor failure is safe and non-destructive.
+- [x] Normal upgrade diff UI continues to omit hunk headers and hash summaries.
+- [x] Missing editor / editor failure is safe and non-destructive.
 
 ## Implementation outline
 
@@ -154,7 +155,8 @@ confirmation.
 - [x] Plan reviewed
 - [x] Branch created
 - [x] Implementation started
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Review artifact created: `docs/reports/self-review-2026-05-18-upgrade-hunk-apply.md`
+- [x] Verification artifact created: `docs/reports/verify-2026-05-18-upgrade-hunk-apply.md`
+- [x] Test artifact created: `docs/reports/test-2026-05-18-upgrade-hunk-apply.md`
+- [x] Sync-docs artifact created: `docs/reports/sync-docs-2026-05-18-upgrade-hunk-apply.md`
 - [ ] PR created
