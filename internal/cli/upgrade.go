@@ -452,8 +452,8 @@ const (
 func resolveConflict(d upgrade.FileDiff, oldManifest *scaffold.Manifest, absDir, version string, in *bufio.Reader, out, errOut io.Writer, colorize bool, pagerMode string) resolution {
 	writef(out, "  ⚠ %s (modified locally)\n", d.Path)
 
-	if canReviewHunks(oldManifest, absDir, d) {
-		return resolveConflictHunks(d, absDir, version, in, out, errOut, colorize, pagerMode)
+	if hasReadableBaseline(oldManifest, absDir, d) {
+		return resolveConflictWithBaseline(d, absDir, version, in, out, errOut, colorize, pagerMode)
 	}
 
 	for {
@@ -508,7 +508,7 @@ func showDiff(d upgrade.FileDiff, absDir, version string, out, errOut io.Writer,
 	writef(out, "    template hash: %s  local hash: %s\n", d.NewHash, d.DiskHash)
 }
 
-func canReviewHunks(oldManifest *scaffold.Manifest, absDir string, d upgrade.FileDiff) bool {
+func hasReadableBaseline(oldManifest *scaffold.Manifest, absDir string, d upgrade.FileDiff) bool {
 	prev, ok := oldManifest.Files[d.Path]
 	if !ok || !prev.IsBaselineAvailable() {
 		return false
@@ -519,10 +519,10 @@ func canReviewHunks(oldManifest *scaffold.Manifest, absDir string, d upgrade.Fil
 	return true
 }
 
-func resolveConflictHunks(d upgrade.FileDiff, absDir, version string, in *bufio.Reader, out, errOut io.Writer, colorize bool, pagerMode string) resolution {
+func resolveConflictWithBaseline(d upgrade.FileDiff, absDir, version string, in *bufio.Reader, out, errOut io.Writer, colorize bool, pagerMode string) resolution {
 	showDiff(d, absDir, version, out, errOut, colorize, pagerMode)
 	for {
-		writef(out, "    [a]pply template hunk / [k]eep local hunk / [e]dit / [s]kip file ? ")
+		writef(out, "    [a]pply template file / [k]eep local file / [e]dit / [s]kip file ? ")
 		line, err := in.ReadString('\n')
 		if err != nil && line == "" {
 			writef(errOut, "\n  (non-interactive input detected, skipping)\n")
@@ -534,7 +534,7 @@ func resolveConflictHunks(d upgrade.FileDiff, absDir, version string, in *bufio.
 		case "k", "keep", "s", "skip":
 			return resolutionSkip
 		case "e", "edit":
-			writef(errOut, "    (manual hunk edit is not available yet; choose apply, keep, or skip file)\n")
+			writef(errOut, "    (manual edit is not available yet; choose apply, keep, or skip file)\n")
 		default:
 			// Unrecognized input — reprompt.
 		}

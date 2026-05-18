@@ -999,13 +999,14 @@ func TestRunUpgrade_V1ManifestConflict_UsesLegacyPrompt(t *testing.T) {
 	if !strings.Contains(got, "[o]verwrite / [s]kip / [d]iff") {
 		t.Errorf("v1 manifest should use legacy prompt; got:\n%s", got)
 	}
-	if strings.Contains(got, "[a]pply template hunk") {
-		t.Errorf("v1 manifest without baseline must not enter hunk prompt; got:\n%s", got)
+	if strings.Contains(got, "[a]pply template file") {
+		t.Errorf("v1 manifest without baseline must not enter baseline-backed prompt; got:\n%s", got)
 	}
 }
 
-// Invalid hunk prompt input must re-prompt without terminating. `edit` is
-// currently acknowledged as a reserved option and re-prompts without writing.
+// Invalid baseline-backed prompt input must re-prompt without terminating.
+// `edit` is currently acknowledged as a reserved option and re-prompts without
+// writing.
 func TestRunUpgrade_InteractiveDiff_RepromptsOnInvalid(t *testing.T) {
 	setupTestEmbedFS(t)
 	Version = "1.0.0-test"
@@ -1029,11 +1030,11 @@ func TestRunUpgrade_InteractiveDiff_RepromptsOnInvalid(t *testing.T) {
 	}
 
 	got := out.String()
-	if strings.Count(got, "[a]pply template hunk / [k]eep local hunk / [e]dit / [s]kip file") < 3 {
-		t.Errorf("expected prompt to re-render on invalid and diff inputs; got:\n%s", got)
+	if strings.Count(got, "[a]pply template file / [k]eep local file / [e]dit / [s]kip file") < 3 {
+		t.Errorf("expected prompt to re-render on invalid and edit inputs; got:\n%s", got)
 	}
 	if strings.Contains(got, "[n]ext") || strings.Contains(got, "[q]uit") {
-		t.Errorf("hunk prompt must not offer next/quit; got:\n%s", got)
+		t.Errorf("baseline-backed prompt must not offer next/quit; got:\n%s", got)
 	}
 }
 

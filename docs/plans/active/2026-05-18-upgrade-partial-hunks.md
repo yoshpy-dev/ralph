@@ -1,4 +1,4 @@
-# Upgrade Partial Hunk Adoption
+# Upgrade Baseline Review Groundwork
 
 - Status: In Progress
 - Owner: Codex
@@ -13,7 +13,7 @@
 Add the first implementation slice for safer `ralph upgrade` conflict review:
 manifest v2-compatible baseline metadata, baseline cache writes for accepted
 template files, a dry-run diff preview, pager support for large diffs, and a
-baseline-gated hunk review path that uses `apply / keep / edit / skip file`
+baseline-gated file-level review path that uses `apply / keep / edit / skip file`
 without changing existing v1-project behavior destructively.
 
 ## Scope
@@ -28,10 +28,11 @@ without changing existing v1-project behavior destructively.
 - Add `ralph upgrade --dry-run --diff` to preview conflicts without writing
   target files or manifest changes.
 - Add pager support for diff display with safe fallback to stdout.
-- Add the baseline-gated hunk prompt shape only when baseline content is
-  available: `[a]pply template hunk / [k]eep local hunk / [e]dit / [s]kip file`.
-  Full manual edit and multi-hunk staged merge semantics are tracked as
-  follow-up debt before #97 can close.
+- Add the baseline-gated review prompt shape only when baseline content is
+  available:
+  `[a]pply template file / [k]eep local file / [e]dit / [s]kip file`.
+  Full hunk-level manual edit and multi-hunk staged merge semantics are tracked
+  as follow-up debt before #97 can close.
 
 ## Non-goals
 
@@ -48,7 +49,7 @@ without changing existing v1-project behavior destructively.
   rendering and diff walks.
 - The first PR may leave deeper merge refinements as follow-up as long as
   baseline-missing entries remain on the current safe flow.
-- `$EDITOR`/`VISUAL` may be absent; hunk edit mode can return a clear error
+- `$EDITOR`/`VISUAL` may be absent; edit mode can return a clear error
   without writing partial changes.
 
 ## Affected areas
@@ -69,15 +70,15 @@ without changing existing v1-project behavior destructively.
 - `baseline_status` is the manifest field name, per the issue discussion.
 - Baseline-missing entries stay on the existing overwrite/skip/diff path; this
   is the central non-destructive migration rule.
-- Hunk decisions are staged in memory and written only after final file
-  confirmation.
+- This slice keeps apply/keep decisions explicitly file-scoped; hunk-level
+  decisions remain follow-up work before #97 closes.
 - Critical forks: None remaining. The high-risk product choices were already
   settled in issue #97.
 
 ## Acceptance criteria
 
-- [x] Existing v1 manifests still read successfully and do not force partial
-      hunk UI when baseline content is missing.
+- [x] Existing v1 manifests still read successfully and do not force the
+      baseline-backed review prompt when baseline content is missing.
 - [x] Newly initialized and accepted template files record
       `baseline_status = "available"` and `baseline_path`.
 - [x] `Managed=false` entries remain unmanaged across v2 metadata writes and
@@ -87,12 +88,12 @@ without changing existing v1-project behavior destructively.
 - [x] Conflict diff display can use a pager when requested and falls back to
       stdout if the pager cannot start.
 - [x] Baseline-available conflicts expose only
-      `apply / keep / edit / skip file`; no `next` or `quit` prompt text is
-      introduced.
-- [x] Full hunk edit/final-summary semantics are explicitly tracked as
+      `apply template file / keep local file / edit / skip file`; no `next` or
+      `quit` prompt text is introduced.
+- [x] Full hunk-level edit/final-summary semantics are explicitly tracked as
       follow-up debt instead of silently implied by this first slice.
 - [x] Tests cover manifest compatibility, baseline writing, dry-run behavior,
-      and hunk prompt option shape.
+      and baseline-backed prompt option shape.
 
 ## Implementation outline
 
@@ -105,8 +106,8 @@ without changing existing v1-project behavior destructively.
 4. Add upgrade options: `--dry-run`, `--diff`, and `--pager`.
 5. Render dry-run summaries/diffs from computed `FileDiff` values without
    mutating disk.
-6. Introduce a baseline-gated hunk prompt path while deferring the full merge
-   planner/editor to tech debt.
+6. Introduce a baseline-gated file-level review prompt while deferring the full
+   merge planner/editor to tech debt.
 7. Add focused tests and update docs/spec text.
 
 ## Verify plan
@@ -120,7 +121,7 @@ without changing existing v1-project behavior destructively.
 
 ## Test plan
 
-- Unit tests: manifest v1/v2 round trip; baseline path validation; hunk
+- Unit tests: manifest v1/v2 round trip; baseline path validation; prompt
   decision rendering.
 - Integration tests: init baseline writes; upgrade accepted paths update
   baseline metadata; dry-run diff does not mutate files/manifest.
@@ -136,9 +137,9 @@ without changing existing v1-project behavior destructively.
   keep `hash`/`managed`, gate partial UI on baseline availability, add v1 tests.
 - Risk: baseline cache path escapes `.ralph/baseline`. Mitigation: validate
   cleaned relative paths before write/read.
-- Risk: hunk resolver writes partial files before all choices are known.
-  Mitigation: stage resolved content in memory and write only after final
-  confirmation.
+- Risk: prompt wording implies hunk-level changes while implementation writes
+  file-level changes. Mitigation: keep the prompt explicitly file-scoped until
+  the real hunk resolver lands.
 - Risk: pager invocation blocks or fails. Mitigation: only use explicit or TTY
   mode and fall back to stdout on error.
 
@@ -153,8 +154,8 @@ without changing existing v1-project behavior destructively.
 
 - Whether future PRs should compress or hash baseline cache paths for very
   long filenames.
-- Whether hunk edit mode should require `$EDITOR` or support inline editing as
-  a fallback.
+- Whether future hunk edit mode should require `$EDITOR` or support inline
+  editing as a fallback.
 
 ## Progress checklist
 

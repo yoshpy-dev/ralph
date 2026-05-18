@@ -6,7 +6,7 @@
 
 ## Docs Updated
 
-- `docs/specs/2026-04-16-ralph-cli-tool.md`: documented v2 baseline metadata, dry-run diff, pager mode, hunk prompt gating, and v1 fallback.
+- `docs/specs/2026-04-16-ralph-cli-tool.md`: documented v2 baseline metadata, dry-run diff, pager mode, baseline-backed file-level prompt gating, and v1 fallback.
 - `docs/tech-debt/README.md`: recorded remaining #97 work for full 3-way merge planner, manual edit, and final staged summary.
 - `docs/plans/active/2026-05-18-upgrade-partial-hunks.md`: scoped this PR as the first implementation slice and updated acceptance criteria to match shipped behavior.
 
