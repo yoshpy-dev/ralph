@@ -70,13 +70,13 @@ chmod +x "$repo/scripts/verify.local.sh"
 
 cat > "$repo/packs/languages/golang/verify.sh" <<'SH'
 #!/usr/bin/env sh
-printf 'golang:%s:%s\n' "$HARNESS_VERIFY_MODE" "$RALPH_VERIFY_SCOPE" >> "$COMMAND_LOG"
+printf 'golang:%s:%s:%s\n' "$HARNESS_VERIFY_MODE" "$RALPH_VERIFY_SCOPE" "${RALPH_VERIFY_PROJECT_ROOTS:-}" >> "$COMMAND_LOG"
 SH
 chmod +x "$repo/packs/languages/golang/verify.sh"
 
 cat > "$repo/packs/languages/python/verify.sh" <<'SH'
 #!/usr/bin/env sh
-printf 'python:%s:%s\n' "$HARNESS_VERIFY_MODE" "$RALPH_VERIFY_SCOPE" >> "$COMMAND_LOG"
+printf 'python:%s:%s:%s\n' "$HARNESS_VERIFY_MODE" "$RALPH_VERIFY_SCOPE" "${RALPH_VERIFY_PROJECT_ROOTS:-}" >> "$COMMAND_LOG"
 SH
 chmod +x "$repo/packs/languages/python/verify.sh"
 
@@ -92,7 +92,9 @@ chmod +x "$repo/packs/languages/python/verify.sh"
 )
 
 # Changed scope: local gate always runs; only the changed language pack runs.
-printf 'package main\n' > "$repo/main.go"
+mkdir -p "$repo/service"
+printf 'module example.com/service\n\ngo 1.22\n' > "$repo/service/go.mod"
+printf 'package main\n' > "$repo/service/main.go"
 calls="$workdir/changed.calls"
 : > "$calls"
 (
@@ -100,8 +102,8 @@ calls="$workdir/changed.calls"
   COMMAND_LOG="$calls" RALPH_VERIFY_SCOPE=changed HARNESS_VERIFY_MODE=static ./scripts/run-verify.sh >/dev/null
 )
 assert_called "changed scope runs local static gate" "local:static:changed" "$calls"
-assert_called "changed scope runs changed language pack" "golang:static:changed" "$calls"
-assert_not_called "changed scope skips unrelated language pack" "python:static:changed" "$calls"
+assert_called "changed scope runs changed language pack root" "golang:static:changed:service" "$calls"
+assert_not_called "changed scope skips unrelated language pack" "python:static:changed:" "$calls"
 
 # Wrapper default: /test wrapper defaults RALPH_VERIFY_SCOPE to changed.
 calls="$workdir/wrapper.calls"
@@ -112,8 +114,8 @@ calls="$workdir/wrapper.calls"
   COMMAND_LOG="$calls" ./scripts/run-test.sh >/dev/null
 )
 assert_called "test wrapper defaults local gate to changed" "local:test:changed" "$calls"
-assert_called "test wrapper defaults language pack to changed" "golang:test:changed" "$calls"
-assert_not_called "test wrapper skips unrelated pack by default" "python:test:changed" "$calls"
+assert_called "test wrapper defaults language pack to changed root" "golang:test:changed:service" "$calls"
+assert_not_called "test wrapper skips unrelated pack by default" "python:test:changed:" "$calls"
 
 # Wrapper override: explicit full scope is honored, as used by CI.
 calls="$workdir/wrapper-full.calls"
@@ -123,13 +125,13 @@ calls="$workdir/wrapper-full.calls"
   COMMAND_LOG="$calls" RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh >/dev/null
 )
 assert_called "test wrapper honors explicit full local gate" "local:test:full" "$calls"
-assert_called "test wrapper honors explicit full golang pack" "golang:test:full" "$calls"
-assert_called "test wrapper honors explicit full python pack" "python:test:full" "$calls"
+assert_called "test wrapper honors explicit full golang pack" "golang:test:full:" "$calls"
+assert_called "test wrapper honors explicit full python pack" "python:test:full:" "$calls"
 
 # Shared changes fall back to full and run every detected language pack.
 (
   cd "$repo"
-  git add main.go
+  git add service
   git commit -q -m "add go"
   mkdir -p .github/workflows
   printf 'name: verify\n' > .github/workflows/verify.yml
@@ -141,8 +143,8 @@ calls="$workdir/full.calls"
   COMMAND_LOG="$calls" RALPH_VERIFY_SCOPE=changed HARNESS_VERIFY_MODE=test ./scripts/run-verify.sh >/dev/null
 )
 assert_called "full fallback runs local test gate" "local:test:changed" "$calls"
-assert_called "full fallback runs golang pack" "golang:test:changed" "$calls"
-assert_called "full fallback runs python pack" "python:test:changed" "$calls"
+assert_called "full fallback runs golang pack" "golang:test:changed:" "$calls"
+assert_called "full fallback runs python pack" "python:test:changed:" "$calls"
 
 printf '\n-- Summary --\n'
 printf '  PASS: %d / %d\n' "$_pass" "$_total"

@@ -14,30 +14,53 @@ emit() {
   esac
 }
 
-if [ -f tsconfig.json ] || find . -type f \( -name '*.ts' -o -name '*.tsx' \) | grep -q .; then
+has_file() {
+  marker="$(find . \
+    \( -type d \( \
+      -name .git -o \
+      -name node_modules -o \
+      -name .pnpm-store -o \
+      -name .yarn -o \
+      -name .venv -o \
+      -name venv -o \
+      -name env -o \
+      -name __pycache__ -o \
+      -name .mypy_cache -o \
+      -name .pytest_cache -o \
+      -name .ruff_cache -o \
+      -name target -o \
+      -name .dart_tool -o \
+      -name .terraform -o \
+      -name .terragrunt-cache -o \
+      -name .harness -o \
+      -name coverage -o \
+      -name dist -o \
+      -name build \
+    \) -prune \) -o \
+    -type f \( "$@" \) -print -quit 2>/dev/null)"
+  [ -n "$marker" ]
+}
+
+if has_file -name package.json -o -name tsconfig.json -o -name 'tsconfig.*.json' -o -name '*.ts' -o -name '*.tsx'; then
   emit typescript
 fi
 
-if [ -f pyproject.toml ] || [ -f requirements.txt ] || [ -f setup.py ] || find . -type f -name '*.py' | grep -q .; then
+if has_file -name pyproject.toml -o -name requirements.txt -o -name 'requirements-*.txt' -o -name setup.py -o -name tox.ini -o -name '*.py'; then
   emit python
 fi
 
-if [ -f Cargo.toml ] || find . -type f -name '*.rs' | grep -q .; then
+if has_file -name Cargo.toml -o -name '*.rs'; then
   emit rust
 fi
 
-if [ -f go.mod ]; then
+if has_file -name go.mod; then
   emit golang
 fi
 
-if [ -f pubspec.yaml ] || find . -type f -name '*.dart' | grep -q .; then
+if has_file -name pubspec.yaml -o -name '*.dart'; then
   emit dart
 fi
 
-if [ -f pom.xml ] || [ -f build.gradle ] || [ -f build.gradle.kts ]; then
-  emit jvm
-fi
-
-if [ -f .terraform.lock.hcl ] || find . -type d -name .terraform -prune -o -type f \( -name '*.tf' -o -name '*.tofu' \) -print 2>/dev/null | grep -q .; then
+if has_file -name '.terraform.lock.hcl' -o -name '*.tf' -o -name '*.tofu'; then
   emit terraform
 fi

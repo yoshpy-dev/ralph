@@ -1,7 +1,7 @@
 # Dart / Flutter pack
 
 Default verification order:
-- dart format --set-exit-if-changed
+- dart format --output=none --set-exit-if-changed
 - dart analyze (or flutter analyze)
 - dart test (or flutter test)
 

@@ -172,6 +172,24 @@ run_detect "$repo" "$out"
 assert_field "branch diff uses changed scope" scope changed "$out"
 assert_field "branch diff selects golang" languages golang "$out"
 
+# 8. JVM markers are not emitted because no JVM pack is shipped.
+repo="$(make_repo)"
+printf 'plugins {}\n' > "$repo/build.gradle"
+out="$workdir/jvm.out"
+run_detect "$repo" "$out"
+assert_field "JVM marker falls back instead of selecting missing pack" scope full "$out"
+assert_field_prefix "JVM marker records unclassified reason" reason "unclassified:build.gradle" "$out"
+
+# 9. Nested project roots are emitted for changed-scope narrowing.
+repo="$(make_repo)"
+mkdir -p "$repo/service"
+printf 'module example.com/service\n\ngo 1.22\n' > "$repo/service/go.mod"
+printf 'package main\n' > "$repo/service/main.go"
+out="$workdir/go-root.out"
+run_detect "$repo" "$out"
+assert_field "nested go change selects golang" languages golang "$out"
+assert_field "nested go change emits project root" golang_roots service "$out"
+
 printf '\n-- Summary --\n'
 printf '  PASS: %d / %d\n' "$_pass" "$_total"
 printf '  FAIL: %d\n' "$_fail"
