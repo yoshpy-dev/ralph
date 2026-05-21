@@ -12,6 +12,15 @@ case "$mode" in
     ;;
 esac
 
+init_validate="${RALPH_TERRAFORM_INIT_VALIDATE:-false}"
+case "$init_validate" in
+  true|false|"") ;;
+  *)
+    echo "Unknown RALPH_TERRAFORM_INIT_VALIDATE: $init_validate (expected true|false)" >&2
+    exit 2
+    ;;
+esac
+
 # Marker detection: only run the pack if Terraform/OpenTofu sources exist.
 roots_file="$(mktemp "${TMPDIR:-/tmp}/ralph-terraform-roots.XXXXXX")"
 cleanup() {
@@ -108,8 +117,15 @@ run_static() {
     echo "$IAC_CLI fmt: ok"
   fi
 
-  # Validate (only if init has been run)
-  if [ -d .terraform ]; then
+  # Optional backend-less init/validate for generic CI. Backend-backed plans
+  # require repo-specific credentials and must live in trusted workflows.
+  if [ "$init_validate" = "true" ]; then
+    if "$IAC_CLI" init -backend=false; then
+      "$IAC_CLI" validate || status=1
+    else
+      status=1
+    fi
+  elif [ -d .terraform ]; then
     "$IAC_CLI" validate || status=1
   else
     echo "Skipping $IAC_CLI validate: .terraform/ not found (run '$IAC_CLI init' first)."

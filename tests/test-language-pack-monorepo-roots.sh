@@ -47,6 +47,18 @@ assert_called() {
   fi
 }
 
+assert_not_called() {
+  _desc="$1"
+  _needle="$2"
+  _log="$3"
+  if grep -Fqx -- "$_needle" "$_log" 2>/dev/null; then
+    record_fail "$_desc (unexpected call: $_needle)"
+    sed 's/^/    call: /' "$_log"
+  else
+    record_pass "$_desc"
+  fi
+}
+
 assert_contains() {
   _desc="$1"
   _needle="$2"
@@ -194,11 +206,35 @@ assert_called "Dart runs analysis in nested root" "dart|$repo_dart/apps/mobile|a
 
 # Terraform: nested module dispatches IaC CLI from that root and prunes cache noise.
 repo_tf="$workdir/terraform"
-mkdir -p "$repo_tf/infra/prod" "$repo_tf/.terraform/modules/noise"
+mkdir -p "$repo_tf/infra/prod" "$repo_tf/infra/stage" "$repo_tf/.terraform/modules/noise"
 printf 'terraform {}\n' >"$repo_tf/infra/prod/main.tf"
+printf 'terraform {}\n' >"$repo_tf/infra/stage/main.tf"
 printf 'terraform {}\n' >"$repo_tf/.terraform/modules/noise/main.tf"
 run_verify "terraform" "$PROJECT_ROOT/packs/languages/terraform/verify.sh" "$repo_tf" static
 assert_called "Terraform runs fmt in nested root" "tofu|$repo_tf/infra/prod|fmt -check" "$CALL_LOG"
+assert_called "Terraform runs fmt in each nested root" "tofu|$repo_tf/infra/stage|fmt -check" "$CALL_LOG"
+assert_not_called "Terraform default skips backendless init" "tofu|$repo_tf/infra/prod|init -backend=false" "$CALL_LOG"
+assert_not_called "Terraform default skips validate without .terraform" "tofu|$repo_tf/infra/prod|validate" "$CALL_LOG"
+
+terraform_opt_calls="$workdir/terraform-opt-in.calls"
+: >"$terraform_opt_calls"
+(
+  cd "$repo_tf"
+  COMMAND_LOG="$terraform_opt_calls" \
+    HARNESS_VERIFY_MODE=static \
+    RALPH_TERRAFORM_INIT_VALIDATE=true \
+    PATH="$stub_dir:$PATH" \
+    "$PROJECT_ROOT/packs/languages/terraform/verify.sh"
+) >/dev/null 2>&1
+assert_called "Terraform opt-in runs backendless init in nested root" "tofu|$repo_tf/infra/prod|init -backend=false" "$terraform_opt_calls"
+assert_called "Terraform opt-in runs validate after init in nested root" "tofu|$repo_tf/infra/prod|validate" "$terraform_opt_calls"
+assert_called "Terraform opt-in runs backendless init in each nested root" "tofu|$repo_tf/infra/stage|init -backend=false" "$terraform_opt_calls"
+assert_called "Terraform opt-in runs validate in each nested root" "tofu|$repo_tf/infra/stage|validate" "$terraform_opt_calls"
+if grep -Fq ".terraform/modules/noise" "$terraform_opt_calls" 2>/dev/null; then
+  record_fail "Terraform opt-in prunes cache roots"
+else
+  record_pass "Terraform opt-in prunes cache roots"
+fi
 
 # Detection: nested go.mod is detected, JVM markers are intentionally not emitted.
 repo_detect="$workdir/detect"
