@@ -139,7 +139,16 @@ scope_file=".harness/state/verify-scope"
     if [ -x "$verifier" ]; then
       echo "==> Running $lang verifier"
       ran_any=1
-      if ! "$verifier"; then
+      lang_roots=""
+      if [ -f "$scope_file" ]; then
+        lang_roots="$(sed -n "s/^${lang}_roots=//p" "$scope_file" | sed -n '1p')"
+      fi
+      if [ -n "$lang_roots" ]; then
+        echo "==> ${lang} project roots selected: $lang_roots"
+        if ! RALPH_VERIFY_PROJECT_ROOTS="$lang_roots" "$verifier"; then
+          status=1
+        fi
+      elif ! "$verifier"; then
         status=1
       fi
     fi

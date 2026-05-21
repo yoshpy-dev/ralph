@@ -92,7 +92,7 @@ trap cleanup EXIT
 # silently degrade.
 coreutils_dir="$workdir/.coreutils"
 mkdir -p "$coreutils_dir"
-for _tool in sh find grep sed cat chmod mkdir rm printf ls test true false head tr; do
+for _tool in sh find grep sed cat chmod mkdir rm printf ls test true false head tr dirname sort mktemp; do
   _resolved="$(command -v "$_tool" 2>/dev/null || true)"
   if [ -z "$_resolved" ]; then
     echo "FAIL: required coreutil '$_tool' not found on host PATH" >&2
@@ -183,7 +183,7 @@ assert_exit "C. markers + stub terraform + no .terraform/ → exit 0" 0 "$rcC"
 assert_stdout_contains "C. announces using terraform CLI" \
   "Using IaC CLI: terraform" "$logC"
 assert_stdout_contains "C. fmt was invoked on terraform stub" \
-  "terraform fmt -check -recursive" "$stubsC/calls.log"
+  "terraform fmt -check" "$stubsC/calls.log"
 assert_stdout_not_contains "C. validate NOT invoked when .terraform/ absent" \
   "terraform validate" "$stubsC/calls.log"
 assert_stdout_contains "C. explicit skip message for validate" \
@@ -211,7 +211,7 @@ assert_stdout_contains "D. tofu wins over terraform (OpenTofu preference)" \
 assert_stdout_not_contains "D. terraform stub was NOT invoked" \
   "terraform " "$stubsD/calls.log"
 assert_stdout_contains "D. tofu fmt invoked" \
-  "tofu fmt -check -recursive" "$stubsD/calls.log"
+  "tofu fmt -check" "$stubsD/calls.log"
 
 # ── Case E: HARNESS_VERIFY_MODE=test with no *.tftest.hcl → skip ───────
 caseE="$workdir/caseE-test-mode-no-tests"
@@ -268,7 +268,7 @@ rcG=$?
 set -e
 assert_exit "G. mode=all → exit 0" 0 "$rcG"
 assert_stdout_contains "G. mode=all invokes fmt" \
-  "terraform fmt -check -recursive" "$stubsG/calls.log"
+  "terraform fmt -check" "$stubsG/calls.log"
 assert_stdout_contains "G. mode=all invokes test" \
   "terraform test" "$stubsG/calls.log"
 

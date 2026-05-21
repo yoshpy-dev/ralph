@@ -243,7 +243,7 @@ check_dart() {
   _dir="$(make_project_dir dart-static)"
   printf 'name: dart_static\n' >"$_dir/pubspec.yaml"
   run_mode_case dart "$_verify" "$_dir" static 0
-  assert_called "Dart static runs format" "dart format --set-exit-if-changed ." "$MODE_CALLS"
+  assert_called "Dart static runs format" "dart format --output=none --set-exit-if-changed ." "$MODE_CALLS"
   assert_called "Dart static runs analyze" "dart analyze --fatal-infos" "$MODE_CALLS"
   assert_not_called "Dart static skips tests" "dart test" "$MODE_CALLS"
 
@@ -252,14 +252,14 @@ check_dart() {
   mkdir -p "$_dir/test"
   run_mode_case dart "$_verify" "$_dir" test 0
   assert_called "Dart test runs tests" "dart test" "$MODE_CALLS"
-  assert_not_called "Dart test skips format" "dart format --set-exit-if-changed ." "$MODE_CALLS"
+  assert_not_called "Dart test skips format" "dart format --output=none --set-exit-if-changed ." "$MODE_CALLS"
   assert_not_called "Dart test skips analyze" "dart analyze --fatal-infos" "$MODE_CALLS"
 
   _dir="$(make_project_dir dart-all)"
   printf 'name: dart_all\n' >"$_dir/pubspec.yaml"
   mkdir -p "$_dir/test"
   run_mode_case dart "$_verify" "$_dir" all 0
-  assert_called "Dart all runs format" "dart format --set-exit-if-changed ." "$MODE_CALLS"
+  assert_called "Dart all runs format" "dart format --output=none --set-exit-if-changed ." "$MODE_CALLS"
   assert_called "Dart all runs tests" "dart test" "$MODE_CALLS"
 }
 

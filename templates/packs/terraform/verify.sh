@@ -4,20 +4,65 @@ set -eu
 # HARNESS_VERIFY_MODE is set by the caller (run-verify.sh).
 # Supported values: static, test, all (default).
 mode="${HARNESS_VERIFY_MODE:-all}"
+case "$mode" in
+  static|test|all) ;;
+  *)
+    echo "Unknown HARNESS_VERIFY_MODE: $mode" >&2
+    exit 2
+    ;;
+esac
 
 # Marker detection: only run the pack if Terraform/OpenTofu sources exist.
-has_markers() {
-  if [ -f .terraform.lock.hcl ]; then
-    return 0
-  fi
-  if find . -type d -name .terraform -prune -o -type f \
-      \( -name '*.tf' -o -name '*.tofu' \) -print 2>/dev/null | grep -q .; then
-    return 0
-  fi
+roots_file="$(mktemp "${TMPDIR:-/tmp}/ralph-terraform-roots.XXXXXX")"
+cleanup() {
+  rm -f "$roots_file"
+}
+trap cleanup EXIT HUP INT TERM
+
+find_project_roots() {
+  find . \
+    \( -type d \( \
+      -name .git -o \
+      -name .terraform -o \
+      -name .terragrunt-cache -o \
+      -name node_modules -o \
+      -name .dart_tool -o \
+      -name target -o \
+      -name dist -o \
+      -name build \
+    \) -prune \) -o \
+    -type f \( \
+      -name '*.tf' -o \
+      -name '*.tofu' -o \
+      -name '.terraform.lock.hcl' \
+    \) -print 2>/dev/null |
+    while IFS= read -r marker; do
+      dirname "$marker"
+    done |
+    sort -u
+}
+
+root_selected() {
+  [ -z "${RALPH_VERIFY_PROJECT_ROOTS:-}" ] && return 0
+  root="${1#./}"
+  [ -n "$root" ] || root="."
+
+  for selected in $RALPH_VERIFY_PROJECT_ROOTS; do
+    selected="${selected#./}"
+    [ -n "$selected" ] || selected="."
+    [ "$root" = "$selected" ] && return 0
+  done
   return 1
 }
 
-if ! has_markers; then
+find_project_roots |
+  while IFS= read -r project_root; do
+    if root_selected "$project_root"; then
+      printf '%s\n' "$project_root"
+    fi
+  done > "$roots_file"
+
+if [ ! -s "$roots_file" ]; then
   echo "Skipping Terraform verifier: no .tf / .tofu / .terraform.lock.hcl files found."
   exit 0
 fi
@@ -38,9 +83,25 @@ echo "Using IaC CLI: $IAC_CLI"
 
 status=0
 
+has_terraform_tests() {
+  test_marker="$(find . \
+    \( -type d \( \
+      -name .git -o \
+      -name .terraform -o \
+      -name .terragrunt-cache -o \
+      -name node_modules -o \
+      -name .dart_tool -o \
+      -name target -o \
+      -name dist -o \
+      -name build \
+    \) -prune \) -o \
+    -type f -name '*.tftest.hcl' -print -quit 2>/dev/null)"
+  [ -n "$test_marker" ]
+}
+
 run_static() {
   # Format check
-  if ! "$IAC_CLI" fmt -check -recursive; then
+  if ! "$IAC_CLI" fmt -check; then
     echo "$IAC_CLI fmt: formatting issues detected."
     status=1
   else
@@ -72,21 +133,37 @@ run_static() {
 }
 
 run_tests() {
-  if find . -type d -name .terraform -prune -o -type f -name '*.tftest.hcl' -print 2>/dev/null | grep -q .; then
+  if has_terraform_tests; then
     "$IAC_CLI" test || status=1
   else
     echo "Skipping $IAC_CLI test: no terraform tests found (*.tftest.hcl)."
   fi
 }
 
-case "$mode" in
-  static) run_static ;;
-  test)   run_tests ;;
-  all)    run_static; run_tests ;;
-  *)
-    echo "Unknown HARNESS_VERIFY_MODE: $mode" >&2
-    exit 2
-    ;;
-esac
+verify_root() {
+  project_root="$1"
+  echo "==> Terraform project root: $project_root"
 
-exit "$status"
+  status=0
+  case "$mode" in
+    static) run_static ;;
+    test)   run_tests ;;
+    all)    run_static; run_tests ;;
+    *)
+      echo "Unknown HARNESS_VERIFY_MODE: $mode" >&2
+      return 2
+      ;;
+  esac
+
+  return "$status"
+}
+
+overall_status=0
+while IFS= read -r project_root; do
+  [ -n "$project_root" ] || continue
+  if ! (cd "$project_root" && verify_root "$project_root"); then
+    overall_status=1
+  fi
+done < "$roots_file"
+
+exit "$overall_status"

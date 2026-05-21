@@ -8,12 +8,19 @@ set -eu
 #   reason=<machine-readable reason>
 #   docs_only=true|false
 #   languages=<space-separated language pack names>
+#   <language>_roots=<space-separated project roots, when changed scope can narrow safely>
 #
 # A "full" scope is intentionally conservative. Shared harness files,
 # unclassified code-like files, or missing diff context fall back to the
 # repository-wide language detector.
 
 languages=""
+typescript_roots=""
+python_roots=""
+rust_roots=""
+golang_roots=""
+dart_roots=""
+terraform_roots=""
 
 emit_lang() {
   lang="$1"
@@ -29,6 +36,53 @@ emit_lang() {
   esac
 }
 
+emit_root() {
+  lang="$1"
+  root="$2"
+  [ -n "$root" ] || return 0
+  root="${root#./}"
+  [ -n "$root" ] || root="."
+
+  case "$lang" in
+    typescript)
+      case " $typescript_roots " in
+        *" $root "*) ;;
+        *) typescript_roots="${typescript_roots:+$typescript_roots }$root" ;;
+      esac
+      ;;
+    python)
+      case " $python_roots " in
+        *" $root "*) ;;
+        *) python_roots="${python_roots:+$python_roots }$root" ;;
+      esac
+      ;;
+    rust)
+      case " $rust_roots " in
+        *" $root "*) ;;
+        *) rust_roots="${rust_roots:+$rust_roots }$root" ;;
+      esac
+      ;;
+    golang)
+      case " $golang_roots " in
+        *" $root "*) ;;
+        *) golang_roots="${golang_roots:+$golang_roots }$root" ;;
+      esac
+      ;;
+    dart)
+      case " $dart_roots " in
+        *" $root "*) ;;
+        *) dart_roots="${dart_roots:+$dart_roots }$root" ;;
+      esac
+      ;;
+    terraform)
+      case " $terraform_roots " in
+        *" $root "*) ;;
+        *) terraform_roots="${terraform_roots:+$terraform_roots }$root" ;;
+      esac
+      ;;
+  esac
+}
+
 emit_result() {
   scope="$1"
   reason="$2"
@@ -39,6 +93,13 @@ emit_result() {
   printf 'reason=%s\n' "$reason"
   printf 'docs_only=%s\n' "$docs_only"
   printf 'languages=%s\n' "$langs"
+  [ -n "$typescript_roots" ] && printf 'typescript_roots=%s\n' "$typescript_roots"
+  [ -n "$python_roots" ] && printf 'python_roots=%s\n' "$python_roots"
+  [ -n "$rust_roots" ] && printf 'rust_roots=%s\n' "$rust_roots"
+  [ -n "$golang_roots" ] && printf 'golang_roots=%s\n' "$golang_roots"
+  [ -n "$dart_roots" ] && printf 'dart_roots=%s\n' "$dart_roots"
+  [ -n "$terraform_roots" ] && printf 'terraform_roots=%s\n' "$terraform_roots"
+  return 0
 }
 
 fallback_full() {
@@ -139,14 +200,15 @@ is_shared_full_file() {
 
 classify_language() {
   file="$1"
-  case "$file" in
+  base="${file##*/}"
+  case "$base" in
     *.go|go.mod|go.sum)
       printf 'golang\n'
       ;;
     *.ts|*.tsx|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|tsconfig.json|tsconfig.*.json|vite.config.*|vitest.config.*|jest.config.*|next.config.*|eslint.config.*|.eslintrc|.eslintrc.*)
       printf 'typescript\n'
       ;;
-    *.py|pyproject.toml|requirements.txt|requirements-*.txt|setup.py|setup.cfg|tox.ini|poetry.lock)
+    *.py|pyproject.toml|requirements.txt|requirements-*.txt|setup.cfg|tox.ini|poetry.lock)
       printf 'python\n'
       ;;
     *.rs|Cargo.toml|Cargo.lock)
@@ -158,10 +220,81 @@ classify_language() {
     *.tf|*.tofu|*.tftest.hcl|.terraform.lock.hcl)
       printf 'terraform\n'
       ;;
-    pom.xml|build.gradle|build.gradle.kts)
-      printf 'jvm\n'
+  esac
+}
+
+file_dir() {
+  file="$1"
+  case "$file" in
+    */*) dirname "$file" ;;
+    *) printf '.\n' ;;
+  esac
+}
+
+has_name_in_dir() {
+  dir="$1"
+  pattern="$2"
+  marker="$(find "$dir" -maxdepth 1 -type f -name "$pattern" -print -quit 2>/dev/null)"
+  [ -n "$marker" ]
+}
+
+has_project_marker() {
+  lang="$1"
+  dir="$2"
+
+  case "$lang" in
+    typescript)
+      [ -f "$dir/package.json" ] ||
+        [ -f "$dir/package-lock.json" ] ||
+        [ -f "$dir/pnpm-lock.yaml" ] ||
+        [ -f "$dir/yarn.lock" ] ||
+        [ -f "$dir/tsconfig.json" ] ||
+        has_name_in_dir "$dir" 'tsconfig.*.json'
+      ;;
+    python)
+      [ -f "$dir/pyproject.toml" ] ||
+        [ -f "$dir/requirements.txt" ] ||
+        [ -f "$dir/setup.py" ] ||
+        [ -f "$dir/tox.ini" ] ||
+        has_name_in_dir "$dir" 'requirements-*.txt'
+      ;;
+    rust)
+      [ -f "$dir/Cargo.toml" ]
+      ;;
+    golang)
+      [ -f "$dir/go.mod" ]
+      ;;
+    dart)
+      [ -f "$dir/pubspec.yaml" ]
+      ;;
+    terraform)
+      return 0
+      ;;
+    *)
+      return 1
       ;;
   esac
+}
+
+nearest_project_root() {
+  lang="$1"
+  file="$2"
+  dir="$(file_dir "$file")"
+
+  if [ "$lang" = "terraform" ]; then
+    printf '%s\n' "$dir"
+    return 0
+  fi
+
+  while :; do
+    if has_project_marker "$lang" "$dir"; then
+      printf '%s\n' "$dir"
+      return 0
+    fi
+
+    [ "$dir" = "." ] && return 1
+    dir="$(dirname "$dir")"
+  done
 }
 
 while IFS= read -r file; do
@@ -174,6 +307,10 @@ while IFS= read -r file; do
   lang="$(classify_language "$file")"
   if [ -n "$lang" ]; then
     emit_lang "$lang"
+    root="$(nearest_project_root "$lang" "$file" || true)"
+    if [ -n "$root" ]; then
+      emit_root "$lang" "$root"
+    fi
     continue
   fi
 

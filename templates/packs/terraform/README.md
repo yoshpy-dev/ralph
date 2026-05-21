@@ -5,7 +5,7 @@ Verifies Terraform / OpenTofu projects. The pack auto-selects the IaC CLI: it pr
 Default verification order:
 
 - static mode (`HARNESS_VERIFY_MODE=static`):
-  - `fmt -check -recursive`
+  - `fmt -check` in each detected Terraform/OpenTofu root
   - `validate` (only when `.terraform/` exists — skipped with a warning otherwise, since `validate` requires `init`)
   - `tflint` (if available)
   - `tfsec` (if available) or `trivy config .` (fallback)
@@ -15,7 +15,7 @@ Default verification order:
 
 Activation:
 
-- The pack runs only when at least one `*.tf`, `*.tofu`, or `.terraform.lock.hcl` file exists in the project. With no markers, it exits 0 silently.
+- The pack runs only when at least one `*.tf`, `*.tofu`, or `.terraform.lock.hcl` file exists in the project. In monorepos, each marker directory is treated as a root and cache directories such as `.terraform/` are pruned. With no markers, it exits 0 silently.
 - If markers are present but neither `tofu` nor `terraform` is on `PATH`, the pack exits **1** to avoid fail-open verification.
 
 Customize this pack if your repo uses:
