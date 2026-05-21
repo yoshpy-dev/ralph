@@ -15,7 +15,7 @@ Default verification order:
 
 Optional backend-less validation:
 
-- Set `RALPH_TERRAFORM_INIT_VALIDATE=true` to run `<terraform|tofu> init -backend=false` followed by `<terraform|tofu> validate` in each detected root.
+- Set `RALPH_TERRAFORM_INIT_VALIDATE=true` to run `<terraform|tofu> init -backend=false -input=false` followed by `<terraform|tofu> validate` in each detected root.
 - Existing provider plugin cache configuration is honored by the selected CLI, for example via `TF_PLUGIN_CACHE_DIR` or CLI config. The pack does not create or require a cache.
 - Backend-backed `plan` evidence is intentionally out of scope for this generic pack because it depends on remote state, WIF, and environment credentials. Put backend-backed plan workflows in the repository's trusted CI instead.
 

@@ -17,7 +17,7 @@
 | Criterion | Status | Evidence |
 | --- | --- | --- |
 | Default Terraform pack behavior remains compatible | Verified | Default static mode still skips validate when `.terraform/` is absent and still validates when `.terraform/` exists. |
-| `RALPH_TERRAFORM_INIT_VALIDATE=true` runs backend-less init and validate per root | Verified | `tests/test-language-pack-monorepo-roots.sh` covers nested roots and `tests/test-terraform-pack-verify.sh` covers the pack-local opt-in branch. |
+| `RALPH_TERRAFORM_INIT_VALIDATE=true` runs non-interactive backend-less init and validate per root | Verified | `tests/test-language-pack-monorepo-roots.sh` covers nested roots and `tests/test-terraform-pack-verify.sh` covers `init -backend=false -input=false` in the pack-local opt-in branch. |
 | Backend-backed plan/workflow behavior is not implemented in the generic pack | Verified | Diff contains no plan/workflow dispatch logic; README documents the repo-specific trusted CI boundary. |
 | Provider plugin cache remains caller-managed | Verified | The pack does not set or require cache configuration; selected CLI inherits existing environment/config. |
 | Template mirror is synchronized | Verified | `./scripts/check-sync.sh` passed with 0 drifted files. |

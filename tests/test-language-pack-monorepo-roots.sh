@@ -213,7 +213,7 @@ printf 'terraform {}\n' >"$repo_tf/.terraform/modules/noise/main.tf"
 run_verify "terraform" "$PROJECT_ROOT/packs/languages/terraform/verify.sh" "$repo_tf" static
 assert_called "Terraform runs fmt in nested root" "tofu|$repo_tf/infra/prod|fmt -check" "$CALL_LOG"
 assert_called "Terraform runs fmt in each nested root" "tofu|$repo_tf/infra/stage|fmt -check" "$CALL_LOG"
-assert_not_called "Terraform default skips backendless init" "tofu|$repo_tf/infra/prod|init -backend=false" "$CALL_LOG"
+assert_not_called "Terraform default skips backendless init" "tofu|$repo_tf/infra/prod|init -backend=false -input=false" "$CALL_LOG"
 assert_not_called "Terraform default skips validate without .terraform" "tofu|$repo_tf/infra/prod|validate" "$CALL_LOG"
 
 terraform_opt_calls="$workdir/terraform-opt-in.calls"
@@ -226,9 +226,9 @@ terraform_opt_calls="$workdir/terraform-opt-in.calls"
     PATH="$stub_dir:$PATH" \
     "$PROJECT_ROOT/packs/languages/terraform/verify.sh"
 ) >/dev/null 2>&1
-assert_called "Terraform opt-in runs backendless init in nested root" "tofu|$repo_tf/infra/prod|init -backend=false" "$terraform_opt_calls"
+assert_called "Terraform opt-in runs backendless init in nested root" "tofu|$repo_tf/infra/prod|init -backend=false -input=false" "$terraform_opt_calls"
 assert_called "Terraform opt-in runs validate after init in nested root" "tofu|$repo_tf/infra/prod|validate" "$terraform_opt_calls"
-assert_called "Terraform opt-in runs backendless init in each nested root" "tofu|$repo_tf/infra/stage|init -backend=false" "$terraform_opt_calls"
+assert_called "Terraform opt-in runs backendless init in each nested root" "tofu|$repo_tf/infra/stage|init -backend=false -input=false" "$terraform_opt_calls"
 assert_called "Terraform opt-in runs validate in each nested root" "tofu|$repo_tf/infra/stage|validate" "$terraform_opt_calls"
 if grep -Fq ".terraform/modules/noise" "$terraform_opt_calls" 2>/dev/null; then
   record_fail "Terraform opt-in prunes cache roots"

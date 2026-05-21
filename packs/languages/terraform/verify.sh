@@ -120,7 +120,7 @@ run_static() {
   # Optional backend-less init/validate for generic CI. Backend-backed plans
   # require repo-specific credentials and must live in trusted workflows.
   if [ "$init_validate" = "true" ]; then
-    if "$IAC_CLI" init -backend=false; then
+    if "$IAC_CLI" init -backend=false -input=false; then
       "$IAC_CLI" validate || status=1
     else
       status=1

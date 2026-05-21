@@ -217,7 +217,7 @@ rcC2=$?
 set -e
 assert_exit "C2. opt-in init validate without .terraform/ → exit 0" 0 "$rcC2"
 assert_stdout_contains "C2. backend-less init invoked" \
-  "terraform init -backend=false" "$stubsC2/calls.log"
+  "terraform init -backend=false -input=false" "$stubsC2/calls.log"
 assert_stdout_contains "C2. validate invoked after opt-in init" \
   "terraform validate" "$stubsC2/calls.log"
 assert_stdout_not_contains "C2. no default validate skip message" \
