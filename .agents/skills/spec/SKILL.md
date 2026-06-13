@@ -1,6 +1,6 @@
 ---
 name: spec
-description: Turn vague ideas or abstract prompts into detailed, actionable specifications through iterative brainstorming, codebase exploration, web research, and interactive clarification with the user. Manual trigger only.
+description: Turn vague ideas or abstract prompts into detailed, actionable specifications through a grill-me-style decision-tree questioning loop with recommended answers, codebase exploration, web research, and interactive clarification with the user. Manual trigger only.
 ---
 Turn an abstract idea into a detailed specification.
 
@@ -12,14 +12,14 @@ Turn an abstract idea into a detailed specification.
 | Focus | **What** to build (requirements, constraints) | **How** to build (implementation strategy, files) |
 | Output | Spec doc (`docs/specs/*.md`) / GitHub issue | Implementation plan (`docs/plans/active/*.md`) |
 | Research | Codebase exploration, web search, best practices | Affected files, risk analysis |
-| User interaction | Iterative brainstorming (divergent) + clarification (convergent) | Flow selection (standard/Ralph) + critical-fork resolution (convergent) |
+| User interaction | Decision-tree questioning with recommended answers + clarification | Flow selection (standard/Ralph) + critical-fork resolution (convergent) |
 
 `/spec` comes before `/plan`. Use `/spec` when the request is too vague for `/plan`.
 
 ## Goals
 
 - Transform ambiguous requests into implementation-ready specifications
-- Expand sparse inputs (even a one-line prompt) through iterative brainstorming
+- Expand sparse inputs (even a one-line prompt) through decision-tree questioning with recommended answers
 - Discover requirements through codebase analysis and best-practice research
 - Resolve residual ambiguity through targeted user questions
 - Produce a versioned spec that survives context loss
@@ -30,46 +30,34 @@ Turn an abstract idea into a detailed specification.
 
 1. **Understand the request** (internal, no user interaction): Read the user's input. List what is clear and what is ambiguous or missing. This is an internal triage step — do NOT call `AskUserQuestion` here. The list feeds the next step.
 
-2. **Brainstorm to expand the idea**: Use `AskUserQuestion` iteratively to widen the problem space before converging. This step is mandatory when the input is sparse (e.g., a single sentence like "I want to achieve X"); skip or shorten when the input is already detailed.
-   - Explore these axes one at a time (repeat as needed, no iteration cap):
-     - Purpose and background (why this matters, the problem to solve)
-     - Target users and usage scenarios
-     - Alternative approaches (other ways to solve it, and their trade-offs)
-     - Success criteria (what "done" looks like)
-     - Scope boundaries and priority (what is explicitly out, MVP scope)
-     - Known constraints (technical, time, team)
-   - Purpose is **divergent** (expand options), distinct from step 5 which is **convergent** (resolve remaining ambiguity).
-   - Continue until the user signals that the idea is sufficiently shaped, or until further questions stop yielding new information.
-   - Respect anti-bottleneck: before asking, check whether the repo already answers the question.
+2. **Interrogate the decision tree with research-backed questions**: Use `AskUserQuestion` iteratively to question the user about every aspect of the spec until there is shared understanding. Treat this as a grill-me-style planning loop, not as an open-ended ideation pass.
+   - Walk the design tree branch by branch, resolving upstream decisions before downstream ones and making decision dependencies explicit.
+   - Ask questions in batches of five, unless fewer than five unresolved decisions remain.
+   - For every question, include the recommended answer and a short rationale so the user can accept, reject, or refine it.
+   - When the user asks questions or challenges a recommendation, answer directly, update the decision map, and then continue the loop.
+   - As the user answers, maintain an in-memory decision map/spec outline with resolved decisions, rejected alternatives, dependencies, and remaining branches.
+   - Before asking any question, check whether codebase exploration can answer it. If the repository answers the question, investigate instead of asking, record the evidence, and move to the next unresolved decision.
+   - Explore inline for existing related code, current patterns and conventions, impact areas, dependencies, and similar implementations.
+   - When a branch depends on external best practices, current library/framework behavior, or reference implementations, use `WebSearch`/`WebFetch` or Context7 MCP as appropriate before asking the user to decide.
+   - Continue until the user signals that the idea is sufficiently shaped, or until additional questions stop producing new implementation-relevant information.
+   - Respect anti-bottleneck: ask only for genuine product, scope, or trade-off decisions that cannot be resolved from repo context, research, or a reasonable default.
 
-3. **Explore the codebase**: Explore inline to investigate:
-   - Existing code related to the request
-   - Current patterns and conventions
-   - Potential impact areas and dependencies
-   - Similar implementations that already exist
-
-4. **Research best practices**: Use `WebSearch` and `WebFetch` to investigate:
-   - Industry best practices for the problem domain
-   - Common approaches and trade-offs
-   - Reference implementations in well-known projects
-   - Relevant library/framework documentation (via Context7 MCP if applicable)
-
-5. **Clarify residual requirements**: Use `AskUserQuestion` actively to resolve any ambiguity that remains after brainstorming and research:
+3. **Clarify residual requirements**: Use `AskUserQuestion` only for ambiguity that remains after the decision-tree loop:
    - Underspecified aspects surfaced by exploration/research
    - Trade-off decisions informed by newly gathered context (e.g., simplicity vs extensibility)
    - Priority and scope boundaries not yet nailed down
    - User preferences and constraints tied to findings
-   - Repeat this step as many times as needed. Do not guess when you can ask.
+   - Ask in batches of five with recommended answers when several residual decisions remain.
    - Purpose is **convergent** — narrow toward a single, implementable spec.
 
-6. **Draft the spec** (in memory — do NOT write to file yet):
-   - Compose the full spec content from [template.md](template.md) using findings from steps 2-5
+4. **Draft the spec** (in memory — do NOT write to file yet):
+   - Compose the full spec content from [template.md](template.md) using findings from steps 2-3
    - Include trade-off analysis with rationale
    - List resolved and remaining open questions
    - Add references to research sources
    - Keep the draft in memory for user review in the next step
 
-7. **Final review with user**: Present the draft spec to the user for approval before any file or issue creation.
+5. **Final review with user**: Present the draft spec to the user for approval before any file or issue creation.
    - Show a structured summary covering: overview, functional requirements (bullet points), acceptance criteria, in/out of scope, open questions
    - Use `AskUserQuestion` to ask:
      - Question: "Confirm the spec content above?"
@@ -77,22 +65,22 @@ Turn an abstract idea into a detailed specification.
        1. **Approve** — finalize the spec as shown
        2. **Needs changes** — apply feedback before finalizing
    - If the user selects "Needs changes": apply the feedback to the in-memory draft and repeat this step
-   - If the user selects "Approve": proceed to step 8
+   - If the user selects "Approve": proceed to step 6
 
-8. **Output selection**: Use `AskUserQuestion` to ask:
+6. **Output selection**: Use `AskUserQuestion` to ask:
    - Question: "The spec is ready. How should it be processed?"
    - Options (3 choices):
      1. **Issue-only** — create a GitHub issue and leave no repo-tracked spec file
      2. **Save spec file** — write `docs/specs/<date>-<slug>.md` and create a docs/spec PR
      3. **Save spec file and hand off to /plan** — write the spec, then enter implementation planning in the same worktree
 
-9. **Ensure a spec task worktree before any output write**:
+7. **Ensure a spec task worktree before any output write**:
    - Derive a stable `<slug>` from the approved spec title.
    - Run `./scripts/ralph-worktree.sh ensure --id spec-<slug> --kind spec --branch docs/spec-<slug> --path .claude/worktrees/spec-<slug> --canonical-ref "<source request or issue URL>" --cleanup-policy <mode>`.
    - The helper must create the worktree from a clean default branch, refuse branch/path collisions unless they match an existing state record, and store local state under `$(git rev-parse --git-common-dir)/ralph/worktrees/`.
    - All output work below executes inside the returned worktree path.
 
-10. **Execute the chosen path** (write only after user approval in step 7 and after step 9 worktree ensure):
+8. **Execute the chosen path** (write only after user approval in step 5 and after step 7 worktree ensure):
 
    **Issue-only** (option 1):
    - Write the issue body to `.harness/state/specs/<date>-<slug>.md` inside the spec worktree.
