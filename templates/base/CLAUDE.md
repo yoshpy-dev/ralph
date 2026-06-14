@@ -12,10 +12,10 @@ guidance lives in `.codex/AGENTS.override.md` and `.codex/README.md`.
   `/loop`, `/self-review`, `/verify`, `/test`, `/sync-docs`, `/cross-review`,
   `/pr`, `/audit-harness`) are auto-invoked.
 - Use `/spec` when the request is too vague for `/plan`. `/spec` refines
-  abstract ideas through iterative brainstorming (壁打ち), codebase exploration,
-  web research, and interactive clarification. Issue-only specs use a temporary
-  clean-base worktree and cleanup; saved specs either create a docs/spec PR or
-  hand off to `/plan` in the same task worktree.
+  abstract ideas through decision-tree questioning with recommended answers,
+  codebase exploration, web research, and interactive clarification. Issue-only
+  specs use a temporary clean-base worktree and cleanup; saved specs either
+  create a docs/spec PR or hand off to `/plan` in the same task worktree.
 - Use `/plan` before risky, ambiguous, or multi-file work. `/plan` ensures a
   clean-base task worktree before writing plan artifacts.
 - `/work` resumes the task worktree and starts interactive implementation.
