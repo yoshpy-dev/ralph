@@ -1,4 +1,5 @@
 #!/usr/bin/env sh
+# shellcheck disable=SC1090  # the whole point is sourcing $CONFIG dynamically
 set -eu
 
 # test-ralph-config.sh — tests for ralph-config.sh shared configuration module

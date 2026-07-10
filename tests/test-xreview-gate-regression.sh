@@ -19,7 +19,7 @@
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$REPO_ROOT"
+cd "$REPO_ROOT" || exit 1
 
 PIPELINE_SH="$REPO_ROOT/scripts/ralph-pipeline.sh"
 DRIVER_SH="$REPO_ROOT/scripts/ralph-cli-driver.sh"
