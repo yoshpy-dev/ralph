@@ -173,3 +173,43 @@ Covered by `go test ./internal/cli/...` (2 specific tests, all PASS):
 - Blocked: No
 
 `./scripts/run-test.sh` exited 0. All 29 shell test suites (762 assertions) and all 9 Go packages passed. The 5 plan-specific test targets named by `/verify` (TestDefault_Phases, TestLoad_PhasesAbsent/PartialBackfill/FullRoundTrip, TestLoad_TemplateRalphToml, TestRunPipeline_ExportsPhaseModelEnv, TestRunPipeline_ExportsForceModelWhenSet) were confirmed individually against a cold test cache. AC1 through AC3b and AC4 behavioral execution are all confirmed PASS. No regressions detected in existing suites.
+
+---
+
+## Cycle 2 addendum — 2026-07-11
+
+- Trigger: commits 8f7ed8d and 9c56232 (escalate on first fix pass + `write_model_receipt` `driver_override` 5th argument; header comment update)
+- Evidence: `docs/evidence/test-2026-07-11-loop-model-routing-cycle2.log`
+- Tester: tester subagent (claude-sonnet-4-6)
+
+### Suite deltas since cycle 1
+
+| Suite | Cycle 1 | Cycle 2 | Delta |
+| --- | --- | --- | --- |
+| `tests/test-model-routing.sh` | 19 | **24** | +5 (Case 4: resolver 1-based escalation × 4 assertions + cycle assertion 1j) |
+| `tests/test-ralph-cli-driver.sh` | 77 | **88** | +11 (Test 12 a/b/c: `write_model_receipt` driver_override × 11 assertions) |
+| All other suites | unchanged | unchanged | 0 |
+| **Shell subtotal** | **762** | **791** | **+29** |
+| Go packages | all ok | all ok (cached) | 0 |
+
+### New assertions confirmed
+
+**test-model-routing.sh Case 4 (4 assertions + 1j cycle check):**
+- 1j: implement cycle=1 (1-based pass numbering) — PASS
+- 4a: implement pass 1 → sonnet (no escalation) — PASS
+- 4b: implement pass 2 → opus (escalation on first fix pass) — PASS
+- 4c: implement pass 3 → opus (still escalated) — PASS
+- 4d: FORCE_MODEL=haiku overrides escalation on pass 2 → haiku — PASS
+
+**test-ralph-cli-driver.sh Test 12 (11 assertions):**
+- 12a-i through 12a-iv: driver_override=codex → driver=codex, effective_model=codex-default, honored=false, requested_model unchanged — all PASS
+- 12b-i through 12b-iv: driver_override=claude → driver=claude, effective_model=requested, honored=true, requested_model unchanged — all PASS
+- 12c-i through 12c-iii: no override → driver from RALPH_LOOP_DRIVER=claude, effective_model=requested, honored=true — all PASS
+
+### Cycle 2 verdict
+
+- Pass: YES
+- Fail: 0
+- Blocked: No
+
+`./scripts/run-test.sh` exited 0. All 29 shell test suites (791 assertions) and all 9 Go packages passed. The 5 new Case 4 assertions confirm 1-based escalation semantics at the resolver level. The 11 Test 12 assertions confirm `write_model_receipt` `driver_override` 5th argument correctly overrides `RALPH_LOOP_DRIVER` for receipt metadata. No regressions in any pre-existing assertions.
