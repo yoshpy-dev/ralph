@@ -32,13 +32,50 @@ type LoopConfig struct {
 
 // PipelineConfig holds pipeline execution settings.
 type PipelineConfig struct {
-	Model          string       `toml:"model"`
-	Effort         string       `toml:"effort"`
-	MaxIterations  int          `toml:"max_iterations"`
-	MaxParallel    int          `toml:"max_parallel"`
-	SliceTimeout   string       `toml:"slice_timeout"`
-	PermissionMode string       `toml:"permission_mode"`
-	Prompts        PromptConfig `toml:"prompts"`
+	Model          string           `toml:"model"`
+	Effort         string           `toml:"effort"`
+	MaxIterations  int              `toml:"max_iterations"`
+	MaxParallel    int              `toml:"max_parallel"`
+	SliceTimeout   string           `toml:"slice_timeout"`
+	PermissionMode string           `toml:"permission_mode"`
+	Prompts        PromptConfig     `toml:"prompts"`
+	Phases         PhaseModelConfig `toml:"phases"`
+}
+
+// PhaseModelConfig holds per-phase model routing for the Ralph Loop pipeline.
+//
+// Values here mirror the RALPH_<PHASE>_MODEL shell defaults in
+// scripts/ralph-config.sh and must change in lock-step (see
+// .claude/rules/model-routing.md). Precedence at runtime is:
+//
+//	env RALPH_<PHASE>_MODEL > [pipeline.phases] value > built-in default
+//
+// Force overrides everything: when RALPH_FORCE_MODEL is set (or
+// [pipeline.phases] force is non-empty), every phase resolves to that model.
+// Force is intentionally not backfilled in Load() — an empty force is
+// semantically meaningful ("no override").
+type PhaseModelConfig struct {
+	// Implement is the model for the Inner Loop implement/fix phase (default sonnet).
+	Implement string `toml:"implement"`
+	// SelfReview is the model for the self-review judgment seat (default opus).
+	SelfReview string `toml:"self_review"`
+	// Verify is the model for spec-compliance / static-analysis (default sonnet).
+	Verify string `toml:"verify"`
+	// Test is the model for behavioral test execution (default sonnet).
+	Test string `toml:"test"`
+	// SyncDocs is the model for the documentation-sync phase (default sonnet).
+	SyncDocs string `toml:"sync_docs"`
+	// PR is the model for the PR-creation agent turn (default sonnet).
+	PR string `toml:"pr"`
+	// Probe is the model for CLI capability probes (default haiku — cheapest seat).
+	Probe string `toml:"probe"`
+	// Escalation is the model used for the implement seat when the Outer Loop
+	// enters a fix-and-revalidate cycle (outer cycle >= 2) (default opus).
+	Escalation string `toml:"escalation"`
+	// Force, when non-empty, overrides every phase model for the current run.
+	// Use RALPH_FORCE_MODEL=opus to restore pre-routing behaviour in one knob.
+	// Not backfilled — empty string means "no override".
+	Force string `toml:"force"`
 }
 
 // PromptConfig holds prompt template settings.
@@ -65,6 +102,17 @@ func Default() Config {
 			PermissionMode: "auto",
 			Prompts: PromptConfig{
 				Dir: ".ralph/prompts",
+			},
+			Phases: PhaseModelConfig{
+				Implement:  "sonnet",
+				SelfReview: "opus",
+				Verify:     "sonnet",
+				Test:       "sonnet",
+				SyncDocs:   "sonnet",
+				PR:         "sonnet",
+				Probe:      "haiku",
+				Escalation: "opus",
+				Force:      "", // empty = no override; not backfilled in Load()
 			},
 		},
 		Loop: LoopConfig{
@@ -139,6 +187,33 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.Pipeline.Prompts.Dir == "" {
 		cfg.Pipeline.Prompts.Dir = Default().Pipeline.Prompts.Dir
+	}
+
+	// Backfill [pipeline.phases] zero values.
+	// Force is intentionally excluded: empty string means "no override".
+	if cfg.Pipeline.Phases.Implement == "" {
+		cfg.Pipeline.Phases.Implement = Default().Pipeline.Phases.Implement
+	}
+	if cfg.Pipeline.Phases.SelfReview == "" {
+		cfg.Pipeline.Phases.SelfReview = Default().Pipeline.Phases.SelfReview
+	}
+	if cfg.Pipeline.Phases.Verify == "" {
+		cfg.Pipeline.Phases.Verify = Default().Pipeline.Phases.Verify
+	}
+	if cfg.Pipeline.Phases.Test == "" {
+		cfg.Pipeline.Phases.Test = Default().Pipeline.Phases.Test
+	}
+	if cfg.Pipeline.Phases.SyncDocs == "" {
+		cfg.Pipeline.Phases.SyncDocs = Default().Pipeline.Phases.SyncDocs
+	}
+	if cfg.Pipeline.Phases.PR == "" {
+		cfg.Pipeline.Phases.PR = Default().Pipeline.Phases.PR
+	}
+	if cfg.Pipeline.Phases.Probe == "" {
+		cfg.Pipeline.Phases.Probe = Default().Pipeline.Phases.Probe
+	}
+	if cfg.Pipeline.Phases.Escalation == "" {
+		cfg.Pipeline.Phases.Escalation = Default().Pipeline.Phases.Escalation
 	}
 
 	if cfg.Loop.Driver == "" {
