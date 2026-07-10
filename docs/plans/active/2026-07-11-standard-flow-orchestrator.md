@@ -238,6 +238,13 @@ Both findings fixed in this pass. See
 docs/reports/cross-review-triage-standard-flow-orchestrator.md for the full
 triage record.
 
+### Deviation: git-commit-strategy.md note (cycle 2)
+
+The cycle-1 fix pass surfaced that `git-commit-strategy.md`'s Validation Gate
+described only the inline path. A two-sentence note pointing delegated slices
+to the orchestrator-adjudication gate was added to both copies (root +
+templates/base) — small scope extension, recorded here per plan-drift rules.
+
 ## Open questions
 
 - None blocking. Follow-up candidates (recorded, not in scope): a haiku
