@@ -1,6 +1,6 @@
 # Subagent Delegation Policy
 
-When and how to delegate work to subagents. Pipeline order is defined in `post-implementation-pipeline.md`.
+When and how to delegate work to subagents. Pipeline order is defined in `post-implementation-pipeline.md`. Model tier assignment per seat is defined in `model-routing.md`.
 
 ## Post-implementation pipeline for /work — phase roles
 

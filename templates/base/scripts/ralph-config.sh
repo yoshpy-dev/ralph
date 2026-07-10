@@ -15,8 +15,8 @@
 # Defaults (override via environment variables)
 # ═══════════════════════════════════════════════════════════════════
 
-RALPH_MODEL="${RALPH_MODEL:-claude-opus-4-7}"
-RALPH_EFFORT="${RALPH_EFFORT:-xhigh}"
+RALPH_MODEL="${RALPH_MODEL:-opus}"
+RALPH_EFFORT="${RALPH_EFFORT:-high}"
 RALPH_PERMISSION_MODE="${RALPH_PERMISSION_MODE:-bypassPermissions}"
 RALPH_MAX_ITERATIONS="${RALPH_MAX_ITERATIONS:-20}"
 RALPH_MAX_INNER_CYCLES="${RALPH_MAX_INNER_CYCLES:-10}"
@@ -35,7 +35,7 @@ RALPH_STANDARD_MAX_PIPELINE_CYCLES="${RALPH_STANDARD_MAX_PIPELINE_CYCLES:-2}"
 RALPH_LOOP_DRIVER="${RALPH_LOOP_DRIVER:-claude}"
 RALPH_CODEX_SANDBOX="${RALPH_CODEX_SANDBOX:-workspace-write}"
 RALPH_CODEX_APPROVAL_POLICY="${RALPH_CODEX_APPROVAL_POLICY:-on-failure}"
-RALPH_CLAUDE_REVIEWER_MODEL="${RALPH_CLAUDE_REVIEWER_MODEL:-claude-opus-4-7}"
+RALPH_CLAUDE_REVIEWER_MODEL="${RALPH_CLAUDE_REVIEWER_MODEL:-opus}"
 
 # Export so values reach grandchild processes (e.g. ralph-pipeline.sh
 # spawned from ralph-orchestrator.sh, or codex/claude invoked via xargs).

@@ -1,8 +1,8 @@
 # ralph.toml — project-level configuration for the ralph CLI.
 
 [pipeline]
-model = "claude-opus-4-7"
-effort = "xhigh"
+model = "opus"
+effort = "high"
 max_iterations = 20
 max_parallel = 4
 slice_timeout = "30m"
@@ -20,7 +20,7 @@ dir = ".ralph/prompts"
 driver = "claude"
 codex_sandbox = "workspace-write"
 codex_approval_policy = "on-failure"
-claude_reviewer_model = "claude-opus-4-7"
+claude_reviewer_model = "opus"
 
 [doctor]
 require_claude_cli = true

@@ -8,10 +8,10 @@ import (
 
 func TestDefault(t *testing.T) {
 	cfg := Default()
-	if cfg.Pipeline.Model != "claude-opus-4-7" {
+	if cfg.Pipeline.Model != "opus" {
 		t.Errorf("model = %q", cfg.Pipeline.Model)
 	}
-	if cfg.Pipeline.Effort != "xhigh" {
+	if cfg.Pipeline.Effort != "high" {
 		t.Errorf("effort = %q", cfg.Pipeline.Effort)
 	}
 	if cfg.Pipeline.MaxIterations != 20 {
@@ -70,8 +70,8 @@ max_parallel = 8
 	if cfg.Pipeline.MaxIterations != 20 {
 		t.Errorf("max_iterations = %d, want 20", cfg.Pipeline.MaxIterations)
 	}
-	if cfg.Pipeline.Effort != "xhigh" {
-		t.Errorf("effort = %q, want xhigh", cfg.Pipeline.Effort)
+	if cfg.Pipeline.Effort != "high" {
+		t.Errorf("effort = %q, want high", cfg.Pipeline.Effort)
 	}
 }
 
@@ -80,8 +80,8 @@ func TestLoad_FullRoundTrip(t *testing.T) {
 	path := filepath.Join(dir, "ralph.toml")
 
 	content := `[pipeline]
-model = "claude-opus-4-7"
-effort = "xhigh"
+model = "opus"
+effort = "high"
 max_iterations = 20
 max_parallel = 4
 slice_timeout = "30m"
@@ -103,7 +103,7 @@ require_go = false
 		t.Fatalf("Load: %v", err)
 	}
 
-	if cfg.Pipeline.Model != "claude-opus-4-7" {
+	if cfg.Pipeline.Model != "opus" {
 		t.Errorf("model = %q", cfg.Pipeline.Model)
 	}
 	if cfg.Pipeline.SliceTimeout != "30m" {

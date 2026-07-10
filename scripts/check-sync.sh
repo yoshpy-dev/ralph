@@ -90,6 +90,9 @@ KNOWN_DIFFS=(
   "AGENTS.md"
   # verify.yml: root adds bootstrap, syntax checks, coverage, pipeline-sync
   ".github/workflows/verify.yml"
+  # model-routing.md: root documents the Go-layer default (internal/config)
+  # which does not exist in scaffolded projects
+  ".claude/rules/model-routing.md"
 )
 
 # ─── Helpers ──────────────────────────────────────────────────────────
