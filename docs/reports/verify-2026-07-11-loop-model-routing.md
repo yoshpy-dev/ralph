@@ -84,3 +84,52 @@ PASS
 - **Not verified**: Runtime CLI execution (actual `claude -p --model sonnet` flag passing, Codex driver behavior, escalation triggering in a live pipeline run). These are behavioral tests — delegated to /test.
 - **Documentation drift**: None found. All variable names, receipt schema fields, and doc cross-references are consistent across shell, TOML, Go, and markdown.
 - **Known gap carried forward**: LOW-1 from self-review — `write_model_receipt reason` can say "escalation" under RALPH_FORCE_MODEL at outer cycle ≥ 2. Audit field values (`requested_model`, `effective_model`) remain accurate; only the free-text `reason` is slightly misleading. Not a blocker.
+
+---
+
+## Cycle 2 addendum
+
+- Date: 2026-07-11
+- Verifier: verifier subagent (claude-sonnet-4-6)
+- Scope: commits 8f7ed8d and 9c56232 only (escalation 1-based pass numbering + write_model_receipt driver_override 5th arg)
+- Evidence: `docs/evidence/verify-2026-07-10-192135.log`
+
+### AC delta table (cycle 2 scope)
+
+| AC | Focus | Cycle 2 finding | Delta vs cycle 1 |
+|----|-------|-----------------|------------------|
+| AC3 (escalation semantics) | Plan says "outer cycle ≥ 2"; fix introduces 1-based pass numbering (`_outer_cycle + 1` passed to `run_inner_loop`). Do these match? | PASS — semantic equivalence confirmed: `_outer_cycle` starts at 0, initial Inner Loop call is `0+1=1` (no escalation); after first Outer Loop increment `_outer_cycle=1`, fix pass call is `1+1=2` (escalation triggered). Both map identically to "the fix-and-revalidate pass". `resolve_phase_model` checks `cycle >= 2`, which fires on pass 2. | No drift. Plan wording ("outer cycle ≥ 2") describes external behavior; 1-based conversion is an internal detail. `model-routing.md` uses the same "outer cycle ≥ 2" language — doc in sync. |
+| AC3 (default default guard) | `run_inner_loop` 3rd arg default changed from `0` to `1` (`${3:-1}`). | PASS — callers that omit the arg now get pass=1 (no escalation), which is the correct non-escalating default. Old default of `0` would have also been non-escalating (`0 < 2`) but was semantically misleading as a "0th pass". Fix removes ambiguity. | Improvement only; no regression. |
+| AC3b (cross-review receipts record actual reviewer CLI) | `write_model_receipt` gains optional 5th arg `driver_override`; both cross-review call sites in `ralph-pipeline.sh` now pass the actual reviewer CLI (`"codex"` at line 815, `"claude"` at line 888). | PASS — static verification: (a) `write_model_receipt` signature updated at lines 4 and 87 of `ralph-cli-driver.sh`; (b) driver resolution logic: non-empty `_wmr_driver_override` wins over `RALPH_LOOP_DRIVER`; (c) pipeline call sites confirmed: L815 passes `"codex"` under driver=claude path, L888 passes `"claude"` under driver=codex path. Schema fields `driver/effective_model/honored` are determined by the override value, not `RALPH_LOOP_DRIVER`. | Fixes cross-review finding 2. Receipts no longer misreport reviewer CLI for cross-review phases. |
+| AC3b (test coverage for driver_override) | `tests/test-ralph-cli-driver.sh` Test 12 (3 sub-cases: 12a codex override, 12b claude override, 12c no override). `tests/test-model-routing.sh` Case 4 (4 sub-cases: 4a pass 1 → sonnet, 4b pass 2 → opus escalation, 4c pass 3 → opus, 4d FORCE_MODEL bypasses escalation on pass 2) + assertion 1j (DRY_RUN cycle field = 1 with 1-based numbering). | PASS (static) — test logic verified by reading diff; behavioral execution delegated to /test. | Strengthened test coverage for both fixed issues. |
+| AC5 (byte-identity) | `scripts/ralph-cli-driver.sh` and `scripts/ralph-pipeline.sh` vs `templates/base/` mirrors after the fix commits. | PASS — `cmp -s` confirms IDENTICAL for both pairs. | No regression introduced. |
+| AC7 (run-static-verify.sh) | Re-run after fix commits. | PASS — exit 0, "All verifiers passed." DRIFTED=0, 9/9 pipeline refs, 13 skills in lock-step, gofmt OK, go vet 0 issues. Log: `docs/evidence/verify-2026-07-10-192135.log`. | No change vs cycle 1 result. |
+
+### Remaining ACs (spot-check, no regression found)
+
+AC1, AC2, AC4, AC6 — not in the scope of the fix commits. Re-read key lines confirm no collateral changes: `ralph-config.sh` export list unchanged; `_run_agent_claude` model flag path unchanged; Go config struct and `appendEnvIfMissing` in `run.go` unchanged; `model-routing.md` escalation section unchanged.
+
+### Documentation drift check (cycle 2)
+
+- `model-routing.md` "Escalation" paragraph: "outer cycle ≥ 2" — consistent with 1-based pass numbering (external view). No update required.
+- `subagent-policy.md` loop section: "escalation to `RALPH_ESCALATION_MODEL` on outer cycle ≥ 2" — consistent. No update required.
+- Header comment in `ralph-cli-driver.sh` line 4: signature updated to `write_model_receipt <phase> <cycle> <requested_model> <reason> [driver_override]` in commit 9c56232. In sync with implementation.
+
+### Static analysis (cycle 2)
+
+| Command | Result |
+|---------|--------|
+| `sh -n scripts/ralph-cli-driver.sh` | OK |
+| `sh -n scripts/ralph-pipeline.sh` | OK |
+| `cmp -s scripts/ralph-cli-driver.sh templates/base/scripts/ralph-cli-driver.sh` | IDENTICAL |
+| `cmp -s scripts/ralph-pipeline.sh templates/base/scripts/ralph-pipeline.sh` | IDENTICAL |
+| `./scripts/run-static-verify.sh` | Exit 0 — All verifiers passed |
+
+### Cycle 2 verdict
+
+PASS
+
+- **Verified (cycle 2)**: AC3 escalation semantics (1-based pass numbering is semantically equivalent to "outer cycle ≥ 2"; no doc drift); AC3 default guard fix (`${3:-1}` non-escalating default); AC3b `driver_override` 5th arg in `write_model_receipt` (implementation, call sites, tests); AC5 byte-identity maintained; AC7 static analysis exit 0.
+- **Not regressed**: AC1, AC2, AC4, AC6 spot-checked — no collateral changes.
+- **Still delegated to /test**: DRY_RUN=1 pipeline behavioral execution (Case 1/2/3/4 in `test-model-routing.sh`); Test 12 behavioral execution in `test-ralph-cli-driver.sh`; `go test ./...`.
+- **Known gaps carried forward**: same as cycle 1 (LOW-1 reason/FORCE_MODEL interaction; Codex driver untestable without binary).
