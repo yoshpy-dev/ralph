@@ -52,7 +52,7 @@ Provide a cross-model second opinion on the current diff before PR creation.
    - Check the diff is non-empty: `git diff "$BASE"...HEAD --quiet` — if exit 0 (no diff), skip with a note and proceed to /pr.
    - **reviewer = `codex`**: `codex exec review --base "$BASE"`
      The native reviewer analyzes the full diff and returns structured findings with severity, affected files, and recommendations.
-   - **reviewer = `claude`**: `claude -p --model claude-opus-4-7 --permission-mode auto --output-format json` with a prompt that instructs Claude to act as an adversarial diff reviewer (see prompt template at the end of this file).
+   - **reviewer = `claude`**: `claude -p --model opus --permission-mode auto --output-format json` with a prompt that instructs Claude to act as an adversarial diff reviewer (see prompt template at the end of this file).
 
    Both paths must produce findings with: severity (HIGH/MEDIUM/LOW), affected file/line refs, what-can-go-wrong, recommended fix.
 
@@ -151,7 +151,7 @@ Provide a cross-model second opinion on the current diff before PR creation.
 
 | Aspect | Claude Code (driver = claude) | Codex (driver = codex) |
 |--------|-------------------------------|------------------------|
-| Reviewer invocation | `codex exec review --base "$BASE"` | `claude -p --model claude-opus-4-7 --permission-mode auto --output-format json` (adversarial reviewer prompt) |
+| Reviewer invocation | `codex exec review --base "$BASE"` | `claude -p --model opus --permission-mode auto --output-format json` (adversarial reviewer prompt) |
 | Step 8 user dialog | Structured choices via `AskUserQuestion` | Numbered options printed to stdout, awaiting a digit 1–3 |
 | Triage execution | inline (main context) | inline — chained within a single agent |
 | Output file | `docs/reports/cross-review-triage-<slug>.md` | Same |

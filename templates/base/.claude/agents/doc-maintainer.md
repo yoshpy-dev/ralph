@@ -2,7 +2,7 @@
 name: doc-maintainer
 description: Keep plans, docs, rules, and reports aligned with the current implementation and workflow.
 tools: Read, Grep, Glob, Write, Edit, Bash
-model: opus
+model: sonnet
 skills:
   - sync-docs
 memory: project

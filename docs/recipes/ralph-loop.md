@@ -136,8 +136,8 @@ All Ralph pipeline settings are centralized in `scripts/ralph-config.sh`. Overri
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `RALPH_MODEL` | `claude-opus-4-7` | Claude model name |
-| `RALPH_EFFORT` | `xhigh` | Effort level for `claude -p` |
+| `RALPH_MODEL` | `opus` | Claude model name |
+| `RALPH_EFFORT` | `high` | Effort level for `claude -p` |
 | `RALPH_PERMISSION_MODE` | `bypassPermissions` | Permission mode for `claude -p` |
 | `RALPH_MAX_ITERATIONS` | `20` | Total iteration cap across all cycles |
 | `RALPH_MAX_INNER_CYCLES` | `10` | Max Inner Loop cycles before escalation |
@@ -149,7 +149,7 @@ All Ralph pipeline settings are centralized in `scripts/ralph-config.sh`. Overri
 | `RALPH_LOOP_DRIVER` | `claude` | Which driver runs `ralph-pipeline.sh` per slice (`claude` or `codex`). Phase 2 / issue #44. |
 | `RALPH_CODEX_SANDBOX` | `workspace-write` | `codex exec -s` value when driver=codex (`read-only` / `workspace-write` / `danger-full-access`) |
 | `RALPH_CODEX_APPROVAL_POLICY` | `on-failure` | Codex `approval_policy` override (`untrusted` / `on-failure` / `on-request` / `never`) |
-| `RALPH_CLAUDE_REVIEWER_MODEL` | `claude-opus-4-7` | Model used by `claude -p` when it plays adversarial reviewer (driver=codex cross-review path) |
+| `RALPH_CLAUDE_REVIEWER_MODEL` | `opus` | Model used by `claude -p` when it plays adversarial reviewer (driver=codex cross-review path) |
 
 Priority: CLI argument > environment variable > `ralph.toml` > default value. The
 loop-driver knobs also accept `[loop] driver = "..."` etc. in `ralph.toml`,

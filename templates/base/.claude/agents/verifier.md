@@ -2,7 +2,7 @@
 name: verifier
 description: Spec compliance and static analysis specialist. Checks acceptance criteria, documentation drift, linters, and type checks. Does NOT run tests.
 tools: Read, Grep, Glob, Bash, Write
-model: opus
+model: sonnet
 skills:
   - verify
 memory: project
