@@ -85,3 +85,56 @@ Per AC1b (amended in the plan), this section records the runtime dispatch eviden
 - Pass: 710 shell tests (0 failures) + 9 Go packages (all ok)
 - Fail: 0
 - Blocked: none — tests must pass before PR creation; this condition is met
+
+---
+
+## Cycle 2 addendum (2026-07-11)
+
+- Re-run trigger: commits 4726ef7, a910547, 1de7a20, 4a1da5b + verify addendum (docs/agent-definition and skill/rule text changes only — no behavioral shell or Go code modified).
+- Evidence: `docs/evidence/test-2026-07-11-standard-flow-orchestrator-cycle2.log`
+- Runner: `./scripts/run-test.sh` (HARNESS_VERIFY_MODE=test, full-fallback scope triggered by `.codex/agents/implementer.toml` as unclassified file)
+
+### Suite counts — identical to cycle 1
+
+| Suite | Tests | Passed | Failed |
+| --- | --- | --- | --- |
+| test-agent-phase-boundaries.sh | 44 | 44 | 0 |
+| test-branch-name.sh | 29 | 29 | 0 |
+| test-check-mojibake.sh | 11 | 11 | 0 |
+| test-check-skill-sync.sh | 7 | 7 | 0 |
+| test-detect-changed-languages.sh | 23 | 23 | 0 |
+| test-detect-languages-terraform.sh | 8 | 8 | 0 |
+| test-ensure-pr-ready.sh | 7 | 7 | 0 |
+| test-ensure-pr-title-prefix.sh | 13 | 13 | 0 |
+| test-language-pack-monorepo-roots.sh | 29 | 29 | 0 |
+| test-ralph-cli-driver.sh | 48 | 48 | 0 |
+| test-ralph-config.sh | 27 | 27 | 0 |
+| test-ralph-dry-run-side-effects.sh | 5 | 5 | 0 |
+| test-ralph-orchestrator-branch-names.sh | 3 | 3 | 0 |
+| test-ralph-orchestrator-pr-strategy.sh | 24 | 24 | 0 |
+| test-ralph-run-options.sh | 5 | 5 | 0 |
+| test-ralph-signals.sh | 3 | 3 | 0 |
+| test-ralph-slice-skip-pr.sh | 4 | 4 | 0 |
+| test-ralph-status.sh | 51 | 51 | 0 |
+| test-ralph-worktree.sh | 17 | 17 | 0 |
+| test-run-verify-scope.sh | 12 | 12 | 0 |
+| test-secret-scan.sh | 6 | 6 | 0 |
+| test-self-review-scope.sh | 96 | 96 | 0 |
+| test-terraform-gitignore.sh | 47 | 47 | 0 |
+| test-terraform-pack-verify.sh | 36 | 36 | 0 |
+| test-terraform-rule-frontmatter.sh | 11 | 11 | 0 |
+| test-verify-mode-split.sh | 59 | 59 | 0 |
+| test-xreview-gate-regression.sh | 21 | 21 | 0 |
+| test-xreview-prompt-render.sh | 54 | 54 | 0 |
+| go test ./... (9 packages) | — | 9 pkg ok | 0 |
+| **Total** | **710 shell + 9 Go pkgs** | **710 / 710 + all pkgs** | **0** |
+
+### AC1b dispatch smoke record — unchanged from cycle 1
+
+The cycle 1 dispatch smoke record (Agent type 'implementer' not found → inline fallback exercised) remains valid and unchanged. No new dispatch attempt was made in cycle 2 because the commits between cycles were docs/agent-definition text changes only; the agent registry limitation (registry loaded from project root at session start, not from the task worktree) is a structural property of the environment that has not changed between cycles.
+
+### Cycle 2 verdict
+
+- Pass: 710 shell tests (0 failures) + 9 Go packages (all ok)
+- Fail: 0
+- No regression introduced by commits 4726ef7, a910547, 1de7a20, 4a1da5b + verify addendum.
