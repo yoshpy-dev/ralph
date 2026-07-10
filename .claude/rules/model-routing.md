@@ -49,3 +49,7 @@ cheaper model with a precise plan beats an expensive model with a vague one.
   `ralph.toml`, so keep both in sync when changing defaults
 - `ralph.toml` — declarative mirror of the same values for the ralph CLI
   (present in project instances generated from `templates/base/`)
+- `internal/config/config.go` `Default()` — Go CLI defaults, exported as
+  `RALPH_*` env vars by `ralph run` and therefore overriding the shell
+  fallbacks at runtime. Any default model/effort change must update the shell,
+  toml, and Go values in lock-step (this repo only; not scaffolded downstream)

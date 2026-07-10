@@ -34,6 +34,13 @@ sonnet」の階層に揃え、委譲基準を always-on ルールとして明文
 9. （実装中の追加）`internal/scaffold/embed_test.go` の
    `TestTemplateBaseRalphTomlHasLoopSection` が `claude_reviewer_model` の旧値を
    ピンしていたため期待値を `opus` に更新
+10. （self-review HIGH 対応）`internal/config/config.go` の `Default()` も
+    `opus`/`high`/`opus` に更新。`ralph run` が `cfg.Pipeline.Model` 等を
+    `RALPH_*` 環境変数として export するため、Go 層を残すとシェル側の新デフォルトが
+    実行時にマスクされる。`internal/config/config_test.go` と
+    `internal/cli/doctor_loop_test.go` のフィクスチャも同期。ルート側
+    model-routing.md に「シェル・toml・Go の3箇所を lock-step で更新」の注意を追記
+    （テンプレート側コピーには Go 層が存在しないため追記しない。意図的な差分）
 
 ## Non-goals
 

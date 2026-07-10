@@ -57,8 +57,8 @@ type DoctorConfig struct {
 func Default() Config {
 	return Config{
 		Pipeline: PipelineConfig{
-			Model:          "claude-opus-4-7",
-			Effort:         "xhigh",
+			Model:          "opus",
+			Effort:         "high",
 			MaxIterations:  20,
 			MaxParallel:    4,
 			SliceTimeout:   "30m",
@@ -71,7 +71,7 @@ func Default() Config {
 			Driver:              "claude",
 			CodexSandbox:        "workspace-write",
 			CodexApprovalPolicy: "on-failure",
-			ClaudeReviewerModel: "claude-opus-4-7",
+			ClaudeReviewerModel: "opus",
 		},
 		Doctor: DoctorConfig{
 			RequireClaudeCLI: true,

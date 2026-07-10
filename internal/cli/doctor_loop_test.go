@@ -39,7 +39,7 @@ func TestCheckLoopDriver_PriorityAndSource(t *testing.T) {
 		{
 			name:        "TOML alone selects codex",
 			env:         nil,
-			toml:        config.LoopConfig{Driver: "codex", CodexSandbox: "read-only", CodexApprovalPolicy: "on-failure", ClaudeReviewerModel: "claude-opus-4-7"},
+			toml:        config.LoopConfig{Driver: "codex", CodexSandbox: "read-only", CodexApprovalPolicy: "on-failure", ClaudeReviewerModel: "opus"},
 			wantValue:   "codex",
 			wantSource:  "toml",
 			wantSandbox: "read-only",
@@ -98,7 +98,7 @@ func TestCheckLoopDriver_FailsWhenCodexMissing(t *testing.T) {
 	// Empty PATH directory → no codex binary discoverable.
 	t.Setenv("PATH", t.TempDir())
 
-	cfg := config.Config{Loop: config.LoopConfig{Driver: "codex", CodexSandbox: "workspace-write", CodexApprovalPolicy: "on-failure", ClaudeReviewerModel: "claude-opus-4-7"}}
+	cfg := config.Config{Loop: config.LoopConfig{Driver: "codex", CodexSandbox: "workspace-write", CodexApprovalPolicy: "on-failure", ClaudeReviewerModel: "opus"}}
 	getenv := func(string) string { return "" }
 
 	r := checkLoopDriver(cfg, getenv)
@@ -127,7 +127,7 @@ func TestCheckLoopDriver_EnvOverridesShownInDetail(t *testing.T) {
 		Driver:              "codex",
 		CodexSandbox:        "workspace-write",
 		CodexApprovalPolicy: "on-failure",
-		ClaudeReviewerModel: "claude-opus-4-7",
+		ClaudeReviewerModel: "opus",
 	}}
 	env := map[string]string{
 		"RALPH_CODEX_SANDBOX":         "danger-full-access",
