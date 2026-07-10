@@ -110,7 +110,7 @@ write_model_receipt() {
   fi
 
   if command -v jq >/dev/null 2>&1; then
-    jq -n \
+    jq -cn \
       --arg ts              "$_wmr_ts" \
       --arg phase           "$_wmr_phase" \
       --arg cycle           "$_wmr_cycle" \

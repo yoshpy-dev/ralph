@@ -298,7 +298,7 @@ run_preflight() {
         _probe_prompt="${PIPELINE_DIR}/.preflight-probe.txt"
         mkdir -p "$PIPELINE_DIR"
         printf 'Reply with exactly the text PROBE_OK if you can read CLAUDE.md in this repository. Nothing else.' > "$_probe_prompt"
-        _probe_output="$(claude -p --model "$RALPH_MODEL" --effort "$RALPH_EFFORT" --permission-mode "$RALPH_PERMISSION_MODE" --output-format text < "$_probe_prompt" 2>/dev/null || true)"
+        _probe_output="$(claude -p --model "$(resolve_phase_model probe 1)" --effort "$RALPH_EFFORT" --permission-mode "$RALPH_PERMISSION_MODE" --output-format text < "$_probe_prompt" 2>/dev/null || true)"
         if printf '%s' "$_probe_output" | grep -q 'PROBE_OK'; then
           _ctxfile_check="pass"
         else
@@ -346,7 +346,7 @@ run_preflight() {
         _json_probe_prompt="${PIPELINE_DIR}/.json-probe.txt"
         mkdir -p "$PIPELINE_DIR"
         printf 'Reply with exactly the text JSON_PROBE_OK. Nothing else.' > "$_json_probe_prompt"
-        _json_probe_raw="$(claude -p --model "$RALPH_MODEL" --effort "$RALPH_EFFORT" --permission-mode "$RALPH_PERMISSION_MODE" --output-format json < "$_json_probe_prompt" 2>/dev/null || true)"
+        _json_probe_raw="$(claude -p --model "$(resolve_phase_model probe 1)" --effort "$RALPH_EFFORT" --permission-mode "$RALPH_PERMISSION_MODE" --output-format json < "$_json_probe_prompt" 2>/dev/null || true)"
         rm -f "$_json_probe_prompt"
         if printf '%s' "$_json_probe_raw" | jq -e '.result' >/dev/null 2>&1; then
           _so_check="pass"
@@ -440,7 +440,8 @@ run_preflight() {
 run_inner_loop() {
   _cycle="$1"
   _context="${2:-}"
-  log "=== Inner Loop cycle ${_cycle}/${MAX_INNER_CYCLES} ==="
+  _outer_cycle_num="${3:-0}"
+  log "=== Inner Loop cycle ${_cycle}/${MAX_INNER_CYCLES} (outer=${_outer_cycle_num}) ==="
   _prev_phase="$(ckpt_read 'phase' || echo 'start')"
   ckpt_update ".phase = \"inner\" | .inner_cycle = ${_cycle}"
   ckpt_transition "$_prev_phase" "inner" "$_context"
@@ -506,7 +507,15 @@ run_inner_loop() {
     _impl_extra="--resume ${_session_id}"
   fi
 
-  run_agent "$_impl_prompt" "$_impl_log" "$_impl_extra"
+  # Per-phase model routing: escalate to RALPH_ESCALATION_MODEL on outer cycle >= 2.
+  _impl_model="$(resolve_phase_model implement "$_outer_cycle_num")"
+  if [ "$_outer_cycle_num" -ge 2 ] 2>/dev/null; then
+    _impl_reason="escalation"
+  else
+    _impl_reason="phase-default"
+  fi
+  write_model_receipt implement "$_outer_cycle_num" "$_impl_model" "$_impl_reason"
+  run_agent "$_impl_prompt" "$_impl_log" "$_impl_extra" "$_impl_model"
 
   # In dry-run mode, simulate COMPLETE signal (cleared each cycle start)
   if [ "$DRY_RUN" -eq 1 ]; then
@@ -589,7 +598,9 @@ Write a sidecar: echo '{"critical":0,"high":0,"medium":0,"low":0}' > .harness/st
 REVIEW
   fi
 
-  run_agent "$_review_prompt" "$_review_log" ""
+  _review_model="$(resolve_phase_model self_review "$_outer_cycle_num")"
+  write_model_receipt self_review "$_outer_cycle_num" "$_review_model" "phase-default"
+  run_agent "$_review_prompt" "$_review_log" "" "$_review_model"
   report_event "self-review" "{\"cycle\":${_cycle},\"log\":\"${_review_log}\"}"
 
   # Check for findings (3-layer detection)
@@ -644,7 +655,9 @@ Write a sidecar: echo '{"verdict":"pass","ac_met":0,"ac_total":0}' > .harness/st
 VERIFY
   fi
 
-  run_agent "$_verify_prompt" "$_verify_log" ""
+  _verify_model="$(resolve_phase_model verify "$_outer_cycle_num")"
+  write_model_receipt verify "$_outer_cycle_num" "$_verify_model" "phase-default"
+  run_agent "$_verify_prompt" "$_verify_log" "" "$_verify_model"
   report_event "verify" "{\"cycle\":${_cycle},\"log\":\"${_verify_log}\"}"
 
   # Parse verify verdict (3-layer detection)
@@ -678,7 +691,9 @@ Write a sidecar: echo '{"verdict":"pass","total":0,"passed":0,"failed":0}' > .ha
 TESTPROMPT
   fi
 
-  run_agent "$_test_prompt" "$_test_log" ""
+  _test_model="$(resolve_phase_model test "$_outer_cycle_num")"
+  write_model_receipt test "$_outer_cycle_num" "$_test_model" "phase-default"
+  run_agent "$_test_prompt" "$_test_log" "" "$_test_model"
 
   # Parse test verdict (3-layer detection)
   _test_verdict="pass"
@@ -761,7 +776,9 @@ Do NOT create a PR or run cross-review — those are handled by the pipeline.
 DOCS
   fi
 
-  run_agent "$_docs_prompt" "$_docs_log" ""
+  _docs_model="$(resolve_phase_model sync_docs "$_cycle")"
+  write_model_receipt sync_docs "$_cycle" "$_docs_model" "phase-default"
+  run_agent "$_docs_prompt" "$_docs_log" "" "$_docs_model"
   report_event "sync-docs" "{\"cycle\":${_cycle},\"log\":\"${_docs_log}\"}"
 
   # --- Cross-review phase (driver-aware reviewer inversion) ---
@@ -790,6 +807,8 @@ DOCS
     if ! git diff "${_base}...HEAD" --quiet 2>/dev/null; then
       case "$_reviewer" in
         codex)
+          # model routing: codex-side cross-review uses codex-default (driver ignores model arg)
+          write_model_receipt cross_review "$_cycle" "codex-default" "cross-review-codex"
           codex exec review --base "$_base" 2>&1 | tee "$_xreview_log" || true
           ;;
         claude)
@@ -859,6 +878,7 @@ DOCS
               # docs/reports/. Plan mode is read-only and silently drops the
               # write — the parser then sees zero findings and the cross-model
               # gate is bypassed (cycle-2 cross-review P1, #44).
+              write_model_receipt cross_review "$_cycle" "$RALPH_CLAUDE_REVIEWER_MODEL" "reviewer-inversion"
               claude -p --model "$RALPH_CLAUDE_REVIEWER_MODEL" \
                 --permission-mode auto --output-format text \
                 < "$_rendered_prompt" 2>&1 | tee "$_xreview_log" || true
@@ -962,7 +982,9 @@ After creating the PR, write the PR URL to .harness/state/pipeline/.pr-url:
   echo "https://github.com/..." > .harness/state/pipeline/.pr-url
 PR_PROMPT
 
-  run_agent "$_pr_prompt" "$_pr_log" ""
+  _pr_model="$(resolve_phase_model pr "$_cycle")"
+  write_model_receipt pr "$_cycle" "$_pr_model" "phase-default"
+  run_agent "$_pr_prompt" "$_pr_log" "" "$_pr_model"
 
   # Detect PR URL (3-layer defense)
   _pr_url=""
@@ -1093,7 +1115,7 @@ INIT_JSON
     # Inner Loop
     while [ "$_inner_cycle" -le "$MAX_INNER_CYCLES" ] && [ "$_total_iteration" -le "$MAX_ITERATIONS" ]; do
       _inner_result=0
-      run_inner_loop "$_inner_cycle" "$_context" || _inner_result=$?
+      run_inner_loop "$_inner_cycle" "$_context" "$_outer_cycle" || _inner_result=$?
 
       case "$_inner_result" in
         0) # COMPLETE + tests passed → move to Outer Loop
