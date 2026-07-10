@@ -90,3 +90,54 @@ The three cycle-1 observations (1 MEDIUM `skills:` omission, 2 LOW stylistic) ar
 
 - Merge: YES. No CRITICAL, no HIGH, no new findings. The cross-review ACTION_REQUIRED fixes are correctly and consistently applied across all mirror copies; the cycle-1 MERGE verdict still holds for the full diff.
 - CRITICAL: none.
+
+## Cycle 3 addendum (2026-07-11)
+
+Scope: diff-quality review of the single new commit `435ce16`
+("fix: clarify delegated gate tolerance for out-of-scope bookkeeping dirt")
+only. This commit is the cross-review cycle-2 WORTH_CONSIDERING fix.
+
+### What changed
+
+- work SKILL.md step 7 delegated-gate wording: `commit-boundary evidence clean`
+  → `commit-boundary evidence shows no in-scope or unexpected dirt
+  (pre-existing out-of-scope bookkeeping noted in the report is acceptable)`.
+  Applied identically to all 4 mirror copies.
+- Triage report: appended a "Cycle 2" section recording the finding, the
+  cap-reached decision (option 1 — raise cap to 3 for this run), and the fix.
+
+### Evidence
+
+- `git show 435ce16` read in full: 5 files, +22/-4. No code, docs-only.
+- 4-copy mirror integrity: `cmp` on `.claude/skills/work/SKILL.md` against
+  `.agents/skills/work/SKILL.md`, `templates/base/.agents/skills/work/SKILL.md`,
+  and `templates/base/.claude/skills/work/SKILL.md` — all IDENTICAL. The
+  reworded line is byte-for-byte the same in every copy.
+- Contract coherence (new phrasing vs referenced contracts):
+  - **implementer.md line 21** states "Pre-existing modifications OUTSIDE your
+    files-in-scope (e.g. the orchestrator's active-plan bookkeeping) are normal:
+    note them in your report, never stage them, and proceed." The new gate
+    phrasing ("pre-existing out-of-scope bookkeeping noted in the report is
+    acceptable") is the orchestrator-side mirror of exactly this producer rule.
+    No contradiction — the tightening ("no in-scope or unexpected dirt") still
+    enforces the anti-absorption guarantee for in-scope overlap.
+  - **git-commit-strategy.md** describes the delegated-slice ownership boundary
+    (implementer verifies + owns commit; orchestrator adjudicates) and does not
+    speak to dirt tolerance at all, so there is nothing for the new wording to
+    contradict. No divergence.
+
+### Cycle 3 findings
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| — | — | No new findings. | The reword resolves the self-contradiction the reviewer flagged (gate no longer rejects the out-of-scope bookkeeping that step 6 and implementer.md explicitly permit). All 4 copies identical; no typos; no code; triage section is accurate bookkeeping. | None. |
+
+The three cycle-1 observations (1 MEDIUM `skills:` omission, 2 LOW stylistic)
+are untouched by this commit and remain as previously adjudicated (non-blocking).
+
+### Cycle 3 verdict
+
+- Merge: YES. No CRITICAL, no HIGH, no new findings. The wording fix is applied
+  consistently across all mirror copies and aligns with implementer.md and
+  git-commit-strategy.md.
+- CRITICAL: none.
