@@ -95,3 +95,64 @@ No drift between agent prompt and rule documentation.
 ## Verdict
 
 **PASS** — all 5 ACs verified. Static analysis exits 0. Documentation is internally consistent. No specification drift found. Known gaps are honest and properly scoped to /test and post-merge verification.
+
+---
+
+## Cycle 2 Addendum
+
+- Date: 2026-07-11
+- HEAD at addendum: `4a1da5b`
+- New commits since cycle 1 (HEAD `57dd233`): `4726ef7` (cross-review triage report), `a910547` (baseline rule narrowing + two-mode validation gate), `1de7a20` (git-commit-strategy delegated-slice note), `4a1da5b` (self-review cycle 2 addendum)
+- Static verifier re-run: exit 0 (PASS — identical to cycle 1)
+- Working tree: clean (`git status --porcelain` empty)
+
+### Changes vs cycle 1
+
+| Commit | What changed | Verify impact |
+|--------|-------------|---------------|
+| `4726ef7` | Cross-review triage report added (docs only) | No AC impact |
+| `a910547` | implementer baseline rule narrowed (overlap-only STOP); work SKILL.md step 6-7 rewritten as two-mode gate; all 4 copies updated | AC1, AC2 re-checked — see below |
+| `1de7a20` | git-commit-strategy.md delegated-slice note added (both root + template copies) | Minor scope extension, documented in plan deviation section |
+| `4a1da5b` | self-review cycle 2 addendum added | No AC impact |
+
+### AC re-check (cycle 2)
+
+| AC | Re-check result |
+|----|----------------|
+| AC1 | PASS — implementer.md baseline rule reworded; all 4 copies byte-identical (`cmp` confirms). check-sync.sh still IDENTICAL: 170, DRIFTED: 0 |
+| AC2 | PASS — work SKILL.md step 7 rewritten as two-mode gate; all 4 copies byte-identical. check-skill-sync.sh still 13 skills in lock-step |
+| AC3 | PASS — `grep -rn 'claude -p --model opus' .claude .agents templates/base` → 0 hits (grep exit 1) |
+| AC4 | PASS — `grep -l 'Standard flow delegation'` hits both model-routing.md copies |
+| AC5 | PASS — static verifier exit 0 |
+
+### Scope 1(b) wording drift assessment
+
+Plan Scope 1(b) reads: "confirms a clean baseline (`git status --porcelain`) before starting."
+Implemented text (commit `a910547`): "run `git status --porcelain` and record the result. Pre-existing
+modifications OUTSIDE files-in-scope are normal: note them, never stage them, proceed. STOP only if
+overlap with files-in-scope."
+
+This is a semantic narrowing — the "clean baseline" requirement was relaxed to allow orchestrator
+bookkeeping dirt outside the handoff-listed scope. The narrowing is explicitly captured in the plan's
+"Cross-review cycle 1 (evidence)" section as P1: "Clean-baseline check blocks dispatch on normal plan
+bookkeeping — implementer.md rule narrowed." The deviation is documented; the Scope 1(b) prose has not
+been back-updated to match the implementation. This constitutes minor doc drift (plan scope description
+lags implementation) but is non-blocking: the cross-review record is the authoritative deviation note
+per project convention.
+
+### Three-way coherence (implementer.md / work SKILL.md / git-commit-strategy.md)
+
+All three locations are mutually consistent after cycle 2 fixes:
+- implementer.md: STOP only on scope-overlapping dirt
+- work SKILL.md step 6: orchestrator commits outstanding bookkeeping "or confirm no overlap" before dispatch (symmetric with implementer STOP condition)
+- work SKILL.md step 7: two-mode gate (delegated = adjudicate SHA + spot-check; inline = original verify→stage→commit)
+- git-commit-strategy.md: delegated-slice note restates implementer owns commit; orchestrator adjudicates
+
+No contradiction found. One consistent story across all four documents.
+
+### Cycle 2 verdict
+
+**PASS** — all 5 ACs still hold. Static analysis exits 0. Cross-review fixes are correctly and
+consistently applied across all mirror copies. One doc drift item (Scope 1(b) prose vs. implemented
+narrowing) is non-blocking and covered by plan deviation notation. Cycle 1 PASS verdict stands for
+the full diff.
