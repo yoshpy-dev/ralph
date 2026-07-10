@@ -484,6 +484,71 @@ assert_jq_equal '.reason'          "escalation-cycle-2"  "$_tmp_receipt" "11b-v.
 _invalid="$(jq -c . "$RECEIPT_FILE" 2>&1 | grep -c 'parse error' || true)"
 check "11c. all receipt lines are valid JSON (parse errors: $_invalid)" test "$_invalid" = "0"
 
+# ── Test 12: write_model_receipt 5th-arg driver_override ─────────────────
+echo
+echo "── Test 12: write_model_receipt driver_override overrides RALPH_LOOP_DRIVER for receipts"
+
+# 12a. driver_override=codex under RALPH_LOOP_DRIVER=claude
+# Simulates the cross-review codex call site: pipeline driver is claude but
+# the reviewer is codex — the receipt must record driver=codex, honored=false,
+# effective_model=codex-default (not the requested model).
+RECEIPT_DIR12A="$WORK_DIR/receipt12a"
+mkdir -p "$RECEIPT_DIR12A"
+RECEIPT_FILE12A="$RECEIPT_DIR12A/.harness/state/pipeline/model-receipts.jsonl"
+(
+  cd "$RECEIPT_DIR12A" || exit 1
+  RALPH_LOOP_DRIVER=claude \
+    RALPH_EFFORT=high \
+    write_model_receipt "cross_review" "1" "codex-default" "cross-review-codex" "codex"
+)
+_tmp12a="$WORK_DIR/last-receipt-12a.json"
+_last12a="$(cat "$RECEIPT_FILE12A" 2>/dev/null || printf '')"
+printf '%s\n' "$_last12a" > "$_tmp12a"
+assert_jq_equal '.driver'          "codex"           "$_tmp12a" "12a-i. driver_override=codex → driver=codex"
+assert_jq_equal '.effective_model' "codex-default"   "$_tmp12a" "12a-ii. driver_override=codex → effective_model=codex-default"
+assert_jq_equal '.honored'         "false"           "$_tmp12a" "12a-iii. driver_override=codex → honored=false"
+assert_jq_equal '.requested_model' "codex-default"   "$_tmp12a" "12a-iv. requested_model unchanged"
+
+# 12b. driver_override=claude under RALPH_LOOP_DRIVER=codex
+# Simulates the cross-review claude reviewer call site: pipeline driver is codex
+# but the reviewer is claude — the receipt must record driver=claude,
+# effective_model=requested_model, honored=true.
+RECEIPT_DIR12B="$WORK_DIR/receipt12b"
+mkdir -p "$RECEIPT_DIR12B"
+RECEIPT_FILE12B="$RECEIPT_DIR12B/.harness/state/pipeline/model-receipts.jsonl"
+_claude_reviewer_model="${RALPH_CLAUDE_REVIEWER_MODEL:-opus}"
+(
+  cd "$RECEIPT_DIR12B" || exit 1
+  RALPH_LOOP_DRIVER=codex \
+    RALPH_EFFORT=high \
+    write_model_receipt "cross_review" "1" "$_claude_reviewer_model" "reviewer-inversion" "claude"
+)
+_tmp12b="$WORK_DIR/last-receipt-12b.json"
+_last12b="$(cat "$RECEIPT_FILE12B" 2>/dev/null || printf '')"
+printf '%s\n' "$_last12b" > "$_tmp12b"
+assert_jq_equal '.driver'          "claude"                  "$_tmp12b" "12b-i. driver_override=claude → driver=claude"
+assert_jq_equal '.effective_model' "$_claude_reviewer_model" "$_tmp12b" "12b-ii. driver_override=claude → effective_model=requested"
+assert_jq_equal '.honored'         "true"                    "$_tmp12b" "12b-iii. driver_override=claude → honored=true"
+assert_jq_equal '.requested_model' "$_claude_reviewer_model" "$_tmp12b" "12b-iv. requested_model unchanged"
+
+# 12c. no driver_override (5th arg omitted) — existing behavior unchanged
+# Confirms the default path still reads RALPH_LOOP_DRIVER.
+RECEIPT_DIR12C="$WORK_DIR/receipt12c"
+mkdir -p "$RECEIPT_DIR12C"
+RECEIPT_FILE12C="$RECEIPT_DIR12C/.harness/state/pipeline/model-receipts.jsonl"
+(
+  cd "$RECEIPT_DIR12C" || exit 1
+  RALPH_LOOP_DRIVER=claude \
+    RALPH_EFFORT=high \
+    write_model_receipt "implement" "1" "sonnet" "phase-default"
+)
+_tmp12c="$WORK_DIR/last-receipt-12c.json"
+_last12c="$(cat "$RECEIPT_FILE12C" 2>/dev/null || printf '')"
+printf '%s\n' "$_last12c" > "$_tmp12c"
+assert_jq_equal '.driver'          "claude"  "$_tmp12c" "12c-i. no override → driver from RALPH_LOOP_DRIVER=claude"
+assert_jq_equal '.effective_model' "sonnet"  "$_tmp12c" "12c-ii. no override → effective_model=requested"
+assert_jq_equal '.honored'         "true"    "$_tmp12c" "12c-iii. no override → honored=true"
+
 echo
 echo "── Summary ──"
 printf '  PASS: %d\n  FAIL: %d\n' "$PASS" "$FAIL"

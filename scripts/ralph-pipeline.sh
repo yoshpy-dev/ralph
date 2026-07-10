@@ -440,7 +440,9 @@ run_preflight() {
 run_inner_loop() {
   _cycle="$1"
   _context="${2:-}"
-  _outer_cycle_num="${3:-0}"
+  # 3rd arg: 1-based pass number (1 = initial pass, >= 2 = post-cross-review fix pass).
+  # Default to 1 so callers that omit the arg get the non-escalation path.
+  _outer_cycle_num="${3:-1}"
   log "=== Inner Loop cycle ${_cycle}/${MAX_INNER_CYCLES} (outer=${_outer_cycle_num}) ==="
   _prev_phase="$(ckpt_read 'phase' || echo 'start')"
   ckpt_update ".phase = \"inner\" | .inner_cycle = ${_cycle}"
@@ -807,8 +809,10 @@ DOCS
     if ! git diff "${_base}...HEAD" --quiet 2>/dev/null; then
       case "$_reviewer" in
         codex)
-          # model routing: codex-side cross-review uses codex-default (driver ignores model arg)
-          write_model_receipt cross_review "$_cycle" "codex-default" "cross-review-codex"
+          # model routing: reviewer=codex (driver inverted from RALPH_LOOP_DRIVER=claude).
+          # Pass "codex" as 5th arg so the receipt records the actual reviewer CLI,
+          # not RALPH_LOOP_DRIVER (which is "claude" at this call site).
+          write_model_receipt cross_review "$_cycle" "codex-default" "cross-review-codex" "codex"
           codex exec review --base "$_base" 2>&1 | tee "$_xreview_log" || true
           ;;
         claude)
@@ -878,7 +882,10 @@ DOCS
               # docs/reports/. Plan mode is read-only and silently drops the
               # write — the parser then sees zero findings and the cross-model
               # gate is bypassed (cycle-2 cross-review P1, #44).
-              write_model_receipt cross_review "$_cycle" "$RALPH_CLAUDE_REVIEWER_MODEL" "reviewer-inversion"
+              # reviewer=claude (driver inverted from RALPH_LOOP_DRIVER=codex).
+              # Pass "claude" as 5th arg so the receipt records driver=claude,
+              # effective_model=$RALPH_CLAUDE_REVIEWER_MODEL, honored=true.
+              write_model_receipt cross_review "$_cycle" "$RALPH_CLAUDE_REVIEWER_MODEL" "reviewer-inversion" "claude"
               claude -p --model "$RALPH_CLAUDE_REVIEWER_MODEL" \
                 --permission-mode auto --output-format text \
                 < "$_rendered_prompt" 2>&1 | tee "$_xreview_log" || true
@@ -1115,7 +1122,7 @@ INIT_JSON
     # Inner Loop
     while [ "$_inner_cycle" -le "$MAX_INNER_CYCLES" ] && [ "$_total_iteration" -le "$MAX_ITERATIONS" ]; do
       _inner_result=0
-      run_inner_loop "$_inner_cycle" "$_context" "$_outer_cycle" || _inner_result=$?
+      run_inner_loop "$_inner_cycle" "$_context" "$((_outer_cycle + 1))" || _inner_result=$?
 
       case "$_inner_result" in
         0) # COMPLETE + tests passed → move to Outer Loop

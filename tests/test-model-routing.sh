@@ -153,6 +153,12 @@ assert_eq "1h. implement honored=true (claude driver)" "true" "$_impl_honored"
 _impl_driver="$(grep '"phase":"implement"' "$RECEIPT" 2>/dev/null | head -1 | jq -r '.driver // empty' 2>/dev/null || true)"
 assert_eq "1i. implement driver=claude" "claude" "$_impl_driver"
 
+# With 1-based pass numbering, the first DRY_RUN pass is pass 1 (_outer_cycle=0
+# in main() → passed as _outer_cycle+1=1 to run_inner_loop). The receipt's
+# cycle field records this 1-based value.
+_impl_cycle="$(grep '"phase":"implement"' "$RECEIPT" 2>/dev/null | head -1 | jq -r '.cycle // empty' 2>/dev/null || true)"
+assert_eq "1j. implement cycle=1 (1-based pass numbering)" "1" "$_impl_cycle"
+
 cd "$OLD_DIR"
 rm -rf "$TMP1"
 trap - EXIT INT TERM
@@ -242,6 +248,39 @@ assert_eq "3d. codex driver field" "codex" "$_codex_driver"
 cd "$OLD_DIR"
 rm -rf "$TMP3"
 trap - EXIT INT TERM
+
+# ── Case 4: resolver-level 1-based escalation ────────────────────────────────
+# Verifies that resolve_phase_model implement 2 → opus (escalation model),
+# confirming escalation is reachable on the first fix-and-revalidate pass
+# (outer_cycle=1 in main() → passed as 1+1=2 to run_inner_loop).
+# Does NOT require running the pipeline — resolver is a pure function.
+printf '\n==> Case 4: resolver-level 1-based escalation\n'
+
+# Source driver functions so resolve_phase_model is available.
+# shellcheck source=/dev/null
+. "${REPO_ROOT}/scripts/ralph-config.sh"
+# shellcheck source=/dev/null
+. "${REPO_ROOT}/scripts/ralph-cli-driver.sh"
+
+# 4a. pass 1 (initial attempt) → sonnet (no escalation)
+_r4a="$(RALPH_IMPLEMENT_MODEL=sonnet RALPH_ESCALATION_MODEL=opus RALPH_FORCE_MODEL='' \
+  resolve_phase_model implement 1)"
+assert_eq "4a. implement pass 1 → sonnet (no escalation)" "sonnet" "$_r4a"
+
+# 4b. pass 2 (first fix-and-revalidate pass) → opus (escalation)
+_r4b="$(RALPH_IMPLEMENT_MODEL=sonnet RALPH_ESCALATION_MODEL=opus RALPH_FORCE_MODEL='' \
+  resolve_phase_model implement 2)"
+assert_eq "4b. implement pass 2 → opus (escalation on first fix pass)" "opus" "$_r4b"
+
+# 4c. pass 3 (second fix pass, beyond default cap but still >= 2) → opus
+_r4c="$(RALPH_IMPLEMENT_MODEL=sonnet RALPH_ESCALATION_MODEL=opus RALPH_FORCE_MODEL='' \
+  resolve_phase_model implement 3)"
+assert_eq "4c. implement pass 3 → opus (still escalated)" "opus" "$_r4c"
+
+# 4d. RALPH_FORCE_MODEL bypasses escalation on pass 2
+_r4d="$(RALPH_IMPLEMENT_MODEL=sonnet RALPH_ESCALATION_MODEL=opus RALPH_FORCE_MODEL=haiku \
+  resolve_phase_model implement 2)"
+assert_eq "4d. FORCE_MODEL=haiku overrides escalation on pass 2 → haiku" "haiku" "$_r4d"
 
 # ── Summary ──────────────────────────────────────────────────────────────────
 printf '\nmodel-routing tests: %d passed, %d failed\n' "$PASS" "$FAIL"

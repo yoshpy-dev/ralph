@@ -79,7 +79,7 @@ resolve_phase_model() {
   esac
 }
 
-# write_model_receipt <phase> <cycle> <requested_model> <reason>
+# write_model_receipt <phase> <cycle> <requested_model> <reason> [driver_override]
 #
 # Appends one JSONL line to .harness/state/pipeline/model-receipts.jsonl.
 # Fields: ts, phase, cycle, driver, requested_model, effective_model, honored,
@@ -87,13 +87,23 @@ resolve_phase_model() {
 # driver=claude → effective_model=requested_model, honored=true.
 # driver=codex  → effective_model="codex-default",  honored=false
 #                 (codex exec does not receive a model argument).
+# Optional 5th arg driver_override: when non-empty, overrides RALPH_LOOP_DRIVER
+# for determining driver/effective_model/honored. Used at cross-review call
+# sites where the reviewer CLI is always the *opposite* of RALPH_LOOP_DRIVER —
+# the receipt must record the CLI that actually ran, not the driver that owns
+# the pipeline.
 # Safe to call in DRY_RUN mode (no CLI involved; receipt is still written).
 write_model_receipt() {
   _wmr_phase="$1"
   _wmr_cycle="$2"
   _wmr_requested="$3"
   _wmr_reason="$4"
-  _wmr_driver="${RALPH_LOOP_DRIVER:-claude}"
+  _wmr_driver_override="${5:-}"
+  if [ -n "$_wmr_driver_override" ]; then
+    _wmr_driver="$_wmr_driver_override"
+  else
+    _wmr_driver="${RALPH_LOOP_DRIVER:-claude}"
+  fi
   _wmr_effort="${RALPH_EFFORT:-high}"
   _wmr_ts="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || printf 'unknown')"
   _wmr_dir=".harness/state/pipeline"
