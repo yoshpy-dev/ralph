@@ -63,17 +63,17 @@ either.
 
 ## Agent roles
 
-Codex role definitions live in `.codex/agents/` for the same
-post-implementation responsibilities used by the standard ralph flow:
+Codex role definitions live in `.codex/agents/`:
 
-- `reviewer` — diff quality only
-- `verifier` — acceptance criteria, docs drift, and static checks
-- `tester` — behavioral tests and failure analysis
-- `doc-maintainer` — plans, docs, templates, and reports
+- `implementer` — scoped implementation worker (sonnet); receives structured handoff from the orchestrator during `/work` step 6; stages only handoff-listed paths, runs verification, and returns a report with commit-boundary evidence
+- `reviewer` — diff quality only (post-implementation)
+- `verifier` — acceptance criteria, docs drift, and static checks (post-implementation)
+- `tester` — behavioral tests and failure analysis (post-implementation)
+- `doc-maintainer` — plans, docs, templates, and reports (post-implementation)
 
-The standard Codex flow uses these custom agents by default, in the same
-canonical order as Claude Code. If Codex cannot dispatch a subagent, run that
-step inline and record the fallback in the report.
+The standard Codex flow uses `reviewer`, `verifier`, `tester`, and
+`doc-maintainer` in the canonical post-implementation order. If Codex cannot
+dispatch a subagent, run that step inline and record the fallback in the report.
 
 ## Upgrading
 

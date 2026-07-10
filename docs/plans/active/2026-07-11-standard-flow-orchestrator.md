@@ -232,7 +232,7 @@ Codex (codex-cli 0.139.0, read-only) returned 4 findings; all adopted:
 - [x] Plan reviewed
 - [x] Branch created (feat/standard-flow-orchestrator)
 - [x] Implementation started
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Review artifact created
+- [x] Verification artifact created
+- [x] Test artifact created
 - [ ] PR created
