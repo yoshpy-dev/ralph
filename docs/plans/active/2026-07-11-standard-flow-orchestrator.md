@@ -131,12 +131,17 @@ Critical forks resolved autonomously (goal session; pre-authorized):
   `git status --porcelain` check, and status/diff evidence in the report);
   `.codex/agents/implementer.toml` carries equivalent instructions; all four
   copies (root + templates/base) exist and `check-sync.sh` passes.
-- [ ] AC1b (dispatch smoke): Slices 2–3 of THIS plan are implemented via
-  `Task(subagent_type="implementer")` after Slice 1 lands — successful
-  dispatch + a conforming report is the runtime smoke evidence, recorded in
-  the test report. Codex-side custom-agent dispatch is NOT runtime-verified
-  here and is recorded as a known gap (per definition-of-done: state what
-  remains unverified).
+- [ ] AC1b (dispatch smoke — AMENDED, see deviation note): dispatch of
+  `Task(subagent_type="implementer")` was attempted for Slice 2 and failed
+  with "Agent type 'implementer' not found" — the subagent registry loads at
+  session start from the project root, and the new definition exists only in
+  this task worktree until merge. The documented fallback convention was
+  exercised instead (inline-role fallback, noted in slice reports), which
+  itself validates the skill's exception path. Runtime dispatch smoke for
+  BOTH Claude Code and Codex is therefore recorded as a known gap: verify in
+  a fresh session after merge (`Task(subagent_type="implementer")` appears in
+  the agent list). This gap and the failed-dispatch evidence must appear in
+  the test report and PR body.
 - [ ] AC2: `/work` SKILL.md (all 4 copies) instructs delegating
   implementation slices to `implementer` with the structured handoff, states
   the two inline exceptions, and `check-skill-sync.sh` passes.
