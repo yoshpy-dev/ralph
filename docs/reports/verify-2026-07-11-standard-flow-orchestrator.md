@@ -156,3 +156,47 @@ No contradiction found. One consistent story across all four documents.
 consistently applied across all mirror copies. One doc drift item (Scope 1(b) prose vs. implemented
 narrowing) is non-blocking and covered by plan deviation notation. Cycle 1 PASS verdict stands for
 the full diff.
+
+---
+
+## Cycle 3 Addendum
+
+- Date: 2026-07-11
+- HEAD at addendum: `18e41d6`
+- New commits since cycle 2 (HEAD `4a1da5b`): `435ce16` (wording fix — delegated gate tolerance for out-of-scope bookkeeping dirt; work SKILL.md ×4 + cross-review triage update), `18e41d6` (self-review cycle 3 addendum)
+- Static verifier re-run: exit 0 (PASS — IDENTICAL: 170, DRIFTED: 0, 13 skills in lock-step, gofmt OK)
+- Working tree: clean (`git status --porcelain` empty — confirmed before this addendum)
+
+### Changes vs cycle 2
+
+| Commit | What changed | Verify impact |
+|--------|-------------|---------------|
+| `435ce16` | work SKILL.md step 7 "Delegated slices" sentence reworded: `commit-boundary evidence clean` → `commit-boundary evidence shows no in-scope or unexpected dirt (pre-existing out-of-scope bookkeeping noted in the report is acceptable)`. Applied to all 4 copies. Cross-review triage report updated with cycle-2 outcome. | AC2 re-checked — see below |
+| `18e41d6` | self-review cycle 3 addendum added (docs only) | No AC impact |
+
+### AC re-check (cycle 3)
+
+| AC | Re-check result |
+|----|----------------|
+| AC1 | PASS — implementer.md unchanged; all 4 copies byte-identical. check-sync.sh IDENTICAL: 170, DRIFTED: 0 |
+| AC2 | PASS — work SKILL.md step 7 wording refined; all 4 copies byte-identical (`cmp` confirmed: root↔.agents IDENTICAL, root↔templates/base/.claude IDENTICAL, templates/base/.claude↔templates/base/.agents IDENTICAL). check-skill-sync.sh 13 skills in lock-step |
+| AC3 | PASS — `grep -rn 'claude -p --model opus' .claude .agents templates/base` → 0 hits |
+| AC4 | PASS — `grep -l 'Standard flow delegation'` hits both model-routing.md copies |
+| AC5 | PASS — static verifier exit 0 |
+
+### AC2 wording change assessment
+
+The change in `435ce16` is a semantic clarification of the cycle-2 two-mode gate, not a reversion.
+Cycle 2 text (`a910547`): "commit-boundary evidence clean"
+Cycle 3 text (`435ce16`): "commit-boundary evidence shows no in-scope or unexpected dirt (pre-existing out-of-scope bookkeeping noted in the report is acceptable)"
+
+This mirrors the same narrowing already applied to implementer.md in cycle 2 (P1 fix): out-of-scope
+orchestrator bookkeeping dirt is acceptable and should be noted, not blocked. The orchestrator-adjudication
+gate now consistently uses the same tolerance as the implementer-side STOP condition. Three-way coherence
+across implementer.md / work SKILL.md / git-commit-strategy.md is maintained.
+
+### Cycle 3 verdict
+
+**PASS** — all 5 ACs hold unchanged. Static analysis exits 0. The cycle-3 wording refinement is a
+consistent semantic extension of the cycle-2 cross-review fix, correctly applied across all 4 mirror
+copies. No new gaps introduced. Cycles 1–2 PASS verdicts stand.
