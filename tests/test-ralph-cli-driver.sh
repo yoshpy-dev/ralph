@@ -10,7 +10,7 @@
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$REPO_ROOT"
+cd "$REPO_ROOT" || exit 1
 
 STUBS="$REPO_ROOT/tests/fixtures/cli-stubs"
 WORK_DIR="$(mktemp -d -t ralph-cli-driver-XXXXXX)"

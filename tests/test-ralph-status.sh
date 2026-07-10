@@ -1,4 +1,5 @@
 #!/usr/bin/env sh
+# shellcheck disable=SC1090,SC2034  # helpers are sourced dynamically; vars are consumed by sourced functions
 set -eu
 
 # test-ralph-status.sh — tests for ralph status display
@@ -8,7 +9,6 @@ set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-RALPH="${PROJECT_ROOT}/scripts/ralph"
 HELPERS="${PROJECT_ROOT}/scripts/ralph-status-helpers.sh"
 
 # Test counters

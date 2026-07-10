@@ -146,7 +146,7 @@ run_static_checks() {
     # Build the argument list via positional parameters so shellcheck
     # does not flag unquoted expansion.
     set --
-    for f in .claude/hooks/*.sh templates/base/.claude/hooks/*.sh scripts/branch-name.sh scripts/ensure-pr-ready.sh scripts/ensure-pr-title-prefix.sh scripts/ralph-worktree.sh scripts/verify.local.sh tests/test-check-mojibake.sh tests/test-verify-mode-split.sh tests/test-run-verify-scope.sh tests/test-detect-changed-languages.sh tests/test-language-pack-monorepo-roots.sh tests/test-self-review-scope.sh tests/test-agent-phase-boundaries.sh tests/test-branch-name.sh tests/test-ralph-worktree.sh tests/test-ralph-orchestrator-pr-strategy.sh tests/test-ensure-pr-ready.sh tests/test-ensure-pr-title-prefix.sh; do
+    for f in .claude/hooks/*.sh templates/base/.claude/hooks/*.sh scripts/branch-name.sh scripts/ensure-pr-ready.sh scripts/ensure-pr-title-prefix.sh scripts/ralph-worktree.sh scripts/verify.local.sh tests/test-*.sh; do
       [ -f "$f" ] || continue
       set -- "$@" "$f"
     done
@@ -200,75 +200,13 @@ run_static_checks() {
 }
 
 run_hook_tests() {
-  if [ -x tests/test-check-mojibake.sh ]; then
-    run "tests/test-check-mojibake.sh" tests/test-check-mojibake.sh
-  fi
-  if [ -x tests/test-secret-scan.sh ]; then
-    run "tests/test-secret-scan.sh" tests/test-secret-scan.sh
-  fi
-  if [ -x tests/test-check-skill-sync.sh ]; then
-    run "tests/test-check-skill-sync.sh" tests/test-check-skill-sync.sh
-  fi
-  if [ -x tests/test-ralph-cli-driver.sh ]; then
-    run "tests/test-ralph-cli-driver.sh" tests/test-ralph-cli-driver.sh
-  fi
-  if [ -x tests/test-detect-languages-terraform.sh ]; then
-    run "tests/test-detect-languages-terraform.sh" tests/test-detect-languages-terraform.sh
-  fi
-  if [ -x tests/test-detect-changed-languages.sh ]; then
-    run "tests/test-detect-changed-languages.sh" tests/test-detect-changed-languages.sh
-  fi
-  if [ -x tests/test-language-pack-monorepo-roots.sh ]; then
-    run "tests/test-language-pack-monorepo-roots.sh" tests/test-language-pack-monorepo-roots.sh
-  fi
-  if [ -x tests/test-run-verify-scope.sh ]; then
-    run "tests/test-run-verify-scope.sh" tests/test-run-verify-scope.sh
-  fi
-  if [ -x tests/test-terraform-pack-verify.sh ]; then
-    run "tests/test-terraform-pack-verify.sh" tests/test-terraform-pack-verify.sh
-  fi
-  if [ -x tests/test-terraform-rule-frontmatter.sh ]; then
-    run "tests/test-terraform-rule-frontmatter.sh" tests/test-terraform-rule-frontmatter.sh
-  fi
-  if [ -x tests/test-terraform-gitignore.sh ]; then
-    run "tests/test-terraform-gitignore.sh" tests/test-terraform-gitignore.sh
-  fi
-  if [ -x tests/test-verify-mode-split.sh ]; then
-    run "tests/test-verify-mode-split.sh" tests/test-verify-mode-split.sh
-  fi
-  if [ -x tests/test-self-review-scope.sh ]; then
-    run "tests/test-self-review-scope.sh" tests/test-self-review-scope.sh
-  fi
-  if [ -x tests/test-agent-phase-boundaries.sh ]; then
-    run "tests/test-agent-phase-boundaries.sh" tests/test-agent-phase-boundaries.sh
-  fi
-  if [ -x tests/test-branch-name.sh ]; then
-    run "tests/test-branch-name.sh" tests/test-branch-name.sh
-  fi
-  if [ -x tests/test-ralph-worktree.sh ]; then
-    run "tests/test-ralph-worktree.sh" tests/test-ralph-worktree.sh
-  fi
-  if [ -x tests/test-ralph-orchestrator-branch-names.sh ]; then
-    run "tests/test-ralph-orchestrator-branch-names.sh" tests/test-ralph-orchestrator-branch-names.sh
-  fi
-  if [ -x tests/test-ralph-dry-run-side-effects.sh ]; then
-    run "tests/test-ralph-dry-run-side-effects.sh" tests/test-ralph-dry-run-side-effects.sh
-  fi
-  if [ -x tests/test-ralph-orchestrator-pr-strategy.sh ]; then
-    run "tests/test-ralph-orchestrator-pr-strategy.sh" tests/test-ralph-orchestrator-pr-strategy.sh
-  fi
-  if [ -x tests/test-ralph-run-options.sh ]; then
-    run "tests/test-ralph-run-options.sh" tests/test-ralph-run-options.sh
-  fi
-  if [ -x tests/test-ralph-slice-skip-pr.sh ]; then
-    run "tests/test-ralph-slice-skip-pr.sh" tests/test-ralph-slice-skip-pr.sh
-  fi
-  if [ -x tests/test-ensure-pr-ready.sh ]; then
-    run "tests/test-ensure-pr-ready.sh" tests/test-ensure-pr-ready.sh
-  fi
-  if [ -x tests/test-ensure-pr-title-prefix.sh ]; then
-    run "tests/test-ensure-pr-title-prefix.sh" tests/test-ensure-pr-title-prefix.sh
-  fi
+  # Run every tests/test-*.sh, not a hand-maintained list: enumeration drift
+  # left 5 of 28 suites (ralph-config, ralph-signals, ralph-status,
+  # xreview-gate-regression, xreview-prompt-render) silently unexecuted.
+  for f in tests/test-*.sh; do
+    [ -x "$f" ] || continue
+    run "$f" "$f"
+  done
 }
 
 case "$mode" in
