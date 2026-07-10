@@ -50,3 +50,43 @@ _No new tech debt. The AC1b runtime-dispatch smoke gap is already tracked in the
 
 - Merge: YES (no CRITICAL or HIGH findings). One MEDIUM consistency observation (`skills:` frontmatter omission) and two LOW stylistic notes; all optional and non-blocking.
 - Follow-ups: (1) decide whether implementer's skill-less frontmatter should be documented as intentional; (2) optional: unify the "acceptance criteria addressed" field label across the three contract locations; (3) optional: de-nest the cross-review env-var parenthetical.
+
+## Cycle 2 addendum
+
+- Date: 2026-07-11
+- Trigger: pipeline cycle 2/2 re-run after cross-review ACTION_REQUIRED fixes (see `docs/reports/cross-review-triage-standard-flow-orchestrator.md`).
+- New commits reviewed: `a910547` (baseline-rule narrowing + two-mode validation gate) and `1de7a20` (git-commit-strategy delegated-slice note).
+- Scope unchanged: diff quality only; still a docs/agent-definition-only diff, no code.
+
+### Evidence reviewed (cycle 2)
+
+- `git show a910547 1de7a20` read in full.
+- 4-copy mirror integrity re-verified with `cmp` on every file the two commits touched:
+  - `.claude/agents/implementer.md` ↔ `templates/base/.claude/agents/implementer.md` — IDENTICAL
+  - `.codex/agents/implementer.toml` ↔ `templates/base/.codex/agents/implementer.toml` — IDENTICAL
+  - work SKILL.md: `.claude` ↔ `.agents` ↔ `templates/base/.claude` ↔ `templates/base/.agents` — all IDENTICAL
+  - `.claude/rules/git-commit-strategy.md` ↔ template copy — IDENTICAL
+- Mojibake/U+FFFD scan across all `main...HEAD` changed files — clean.
+- Working tree clean (`git status --porcelain` empty); no stray edits.
+
+### Three-way coherence check (implementer.md ↔ work SKILL.md ↔ git-commit-strategy.md)
+
+Verified the reworded baseline rule and two-mode gate are mutually consistent, with no contradiction:
+
+- **implementer.md / .toml (baseline rule):** run `git status --porcelain`; pre-existing mods OUTSIDE files-in-scope are normal (note, never stage, proceed); STOP only when dirt OVERLAPS files-in-scope. This resolves cross-review finding 1 (bookkeeping dirt no longer blocks dispatch) while preserving the anti-absorption guarantee for in-scope overlap.
+- **work SKILL.md step 6:** orchestrator commits outstanding plan/bookkeeping edits "or confirm they do not overlap the slice's files in scope" before dispatch — the exact mirror image of the implementer's STOP condition. Producer/consumer symmetry is clean: what the orchestrator promises not to leave overlapping is precisely what the implementer refuses to absorb.
+- **work SKILL.md step 7 (two-mode gate):** delegated → adjudicate report + confirm SHA (`git log -1 <sha>`) + optional spot-check, no re-stage/re-commit; inline → original verify→stage→commit. Resolves finding 2 (double-commit). The "one slice = one commit, owned by the implementer" invariant is stated explicitly and matches step 6's dispatch precondition.
+- **git-commit-strategy.md (delegated-slice note):** restates the same ownership boundary (implementer verifies + owns commit; orchestrator adjudicates, does not re-stage/re-commit) and cross-links to SKILL.md step 7. No divergence from the SKILL wording; the earlier gap where git-commit-strategy.md described only the inline path is now closed. This resolves the cycle-1 concern that a reader landing on git-commit-strategy.md first would infer the orchestrator always commits.
+
+### Cycle 2 findings
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| — | — | No new findings. | Two-mode step 7 reads coherently; baseline rule reworded identically across all 4 copies; no contradiction between implementer.md, work SKILL.md, and git-commit-strategy.md. | None. |
+
+The three cycle-1 observations (1 MEDIUM `skills:` omission, 2 LOW stylistic) are untouched by these commits and remain as previously adjudicated (non-blocking).
+
+### Cycle 2 verdict
+
+- Merge: YES. No CRITICAL, no HIGH, no new findings. The cross-review ACTION_REQUIRED fixes are correctly and consistently applied across all mirror copies; the cycle-1 MERGE verdict still holds for the full diff.
+- CRITICAL: none.
