@@ -220,6 +220,24 @@ Codex (codex-cli 0.139.0, read-only) returned 4 findings; all adopted:
 4. [MEDIUM] model-routing.md is KNOWN_DIFF so the sync gate cannot catch a
    missing template section → AC4 adds an explicit both-copies grep.
 
+## Cross-review cycle 1 (evidence)
+
+Codex reviewer returned 2 ACTION_REQUIRED findings (cycle 1/2):
+
+1. [P1] Clean-baseline check blocks dispatch on normal plan bookkeeping —
+   implementer.md rule narrowed: pre-existing modifications outside files-in-scope
+   (e.g. orchestrator's active-plan edits) are noted and skipped, not blocking;
+   STOP only if dirty overlap with files-in-scope. Same semantics applied to
+   .codex toml mirrors.
+2. [P2] Double-commit: step 7 Validation Gate told the orchestrator to
+   verify/stage/commit after each delegated slice, duplicating the implementer's
+   commit — rewritten as two-mode gate (delegated: adjudicate report + spot-check
+   SHA; inline: original verify→stage→commit). Applied to all 4 SKILL.md copies.
+
+Both findings fixed in this pass. See
+docs/reports/cross-review-triage-standard-flow-orchestrator.md for the full
+triage record.
+
 ## Open questions
 
 - None blocking. Follow-up candidates (recorded, not in scope): a haiku

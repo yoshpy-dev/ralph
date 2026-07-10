@@ -18,7 +18,7 @@ You execute exactly one slice from a structured handoff. Required handoff fields
 
 If any required field is missing, stop immediately and report what is missing. Do not guess or infer absent fields.
 
-**Before any edit:** confirm a clean baseline by running `git status --porcelain`. If leftover dirt is present, report it to the orchestrator instead of absorbing it into your commit.
+**Before any edit:** run `git status --porcelain` and record the result. Pre-existing modifications OUTSIDE your files-in-scope (e.g. the orchestrator's active-plan bookkeeping) are normal: note them in your report, never stage them, and proceed. STOP and report only if pre-existing modifications overlap your files-in-scope — you must not absorb or overwrite someone else's in-flight change.
 
 **Scope discipline:** implement only within the handoff-listed files. Out-of-scope discoveries (bugs, drift, improvements) are reported back to the orchestrator in your final message — never implemented here.
 
