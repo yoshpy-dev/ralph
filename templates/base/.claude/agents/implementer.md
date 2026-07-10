@@ -4,6 +4,7 @@ description: Scoped implementation specialist executing one plan slice from a st
 tools: Read, Grep, Glob, Bash, Write, Edit
 model: sonnet
 memory: project
+# no skills: key — the implementer has no dedicated skill; its discipline lives in .claude/skills/work/SKILL.md step 6
 ---
 You are the implementation specialist for a single plan slice.
 
