@@ -41,6 +41,30 @@ tester: run /test against plan <slug>
 
 If a subagent fails to execute (tool error, not a review finding), run the corresponding skill inline and note the fallback in the report.
 
+## Implementation slices (/work) — delegate to implementer
+
+During `/work` step 6 (implementation), each implementation slice is dispatched
+to the `implementer` subagent:
+
+- **Claude Code:** `Task(subagent_type="implementer")`
+- **Codex:** `.codex/agents/implementer.toml` custom agent
+
+The orchestrator authors the structured handoff (defined in
+`model-routing.md` — "Standard flow delegation (/work)") and does not write
+slice code itself. The handoff must carry: plan path, slice objective,
+acceptance criteria, files in scope, exact verification commands, and commit
+message format. The implementer returns: changed files, decisions/deviations,
+verification evidence, commit-boundary evidence, and commit SHA.
+
+**Inline exceptions** (dispatch not required):
+
+- Trivial single-file edits where the handoff cost exceeds the change cost.
+- Dispatch failure → inline fallback, noted in the report.
+
+The post-implementation pipeline (`reviewer` → `verifier` → `tester` →
+`doc-maintainer`) is unchanged and remains the quality floor regardless of
+whether slices were delegated or implemented inline.
+
 ## Spec — always inline
 
 `/spec` runs in the main context because it relies heavily on `AskUserQuestion` for requirement clarification (active back-and-forth with the user) and on `AskUserQuestion` for output selection (issue-only / save spec file as docs PR / save spec file and transition to `/plan`). Subagent execution would cut off the interactive clarification loop. No agent definition exists for this skill.
