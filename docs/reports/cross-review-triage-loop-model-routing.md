@@ -47,3 +47,18 @@ self-selected option 1 "Fix", per the pre-authorized recommended-option rule
 recorded in the plan. Fixes above will be applied, then the full pipeline
 re-runs (/self-review → /verify → /test → /sync-docs → /cross-review) as
 cycle 2/2.
+
+## Cycle 2 (2026-07-11)
+
+- Driver: claude / Reviewer: codex / Cycle: 2/2 (cap reached)
+- Fixes applied in 8f7ed8d (1-based pass numbering for escalation;
+  `driver_override` 5th arg on `write_model_receipt` at both cross-review
+  call sites) + 9c56232 (header comment signature).
+- Full pipeline re-ran: self-review MERGE (cumulative 4 LOW, 0 blocking;
+  LOW-4 fixed in 9c56232), verify PASS, test PASS (791/791 shell + Go ok),
+  sync-docs applied (receipts paragraph in model-routing.md).
+- Reviewer result: **no findings** — "No actionable correctness issues were
+  found in the diff. The routing, config propagation, receipt behavior, and
+  tests appear consistent with the intended change."
+- After triage: ACTION_REQUIRED=0, WORTH_CONSIDERING=0, DISMISSED=0 →
+  Case C → proceed to /pr.
