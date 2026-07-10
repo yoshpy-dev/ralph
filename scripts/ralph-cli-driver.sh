@@ -4,7 +4,7 @@
 # Exposes these functions:
 #   run_agent <prompt_file> <log_file> [extra_args] [model]
 #   resolve_phase_model <phase> [cycle]
-#   write_model_receipt <phase> <cycle> <requested_model> <reason>
+#   write_model_receipt <phase> <cycle> <requested_model> <reason> [driver_override]
 #   count_triage_findings <triage_report_path> <category>
 #   pick_reviewer
 #
