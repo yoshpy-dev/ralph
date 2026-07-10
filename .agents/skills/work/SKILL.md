@@ -31,7 +31,7 @@ Work from the active plan, not from memory alone.
       - The counter reflects the **current** pipeline run (1 = first run, 2 = one re-run after cross-review ACTION_REQUIRED).
 4. Read the current active plan using the path recorded in `active-plan.json`.
 5. Confirm acceptance criteria, verify plan, and test plan before editing code.
-6. Implement in small slices that can be reviewed and verified independently.
+6. Implement in small slices that can be reviewed and verified independently. **Delegate each implementation slice to the `implementer` subagent** (Claude Code: `Task(subagent_type="implementer")`; Codex: the `.codex/agents/implementer.toml` custom agent) with a structured handoff carrying: plan path, slice objective, acceptance criteria addressed, files in scope, exact verification commands, and commit message format. The main session (orchestrator) stays on decomposition, handoff authoring, report adjudication, and plan upkeep. Inline implementation is allowed only for (a) trivial single-file edits where a handoff costs more than the change, or (b) implementer dispatch failure (fall back inline and note the fallback in the report, same convention as the post-implementation pipeline). See `.claude/rules/model-routing.md` and `.claude/rules/subagent-policy.md`.
 7. **Commit after each verified slice** (Validation Gate):
    - Run `./scripts/run-verify.sh` (or equivalent) after completing a slice.
    - If verification passes, stage the slice's files and commit with conventional format: `<type>: <description>`.
@@ -92,6 +92,7 @@ Before asking the user for confirmation, next steps, or choices, first check whe
 - Evidence before confidence
 - Versioned plan over chat-only plan
 - Smaller diffs over heroic rewrites
+- Delegated slices over orchestrator-written code
 
 ## CLI execution modes
 
