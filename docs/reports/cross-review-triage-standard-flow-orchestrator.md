@@ -43,3 +43,21 @@ Categories: false-positive, already-addressed, style-preference, out-of-scope, c
 
 Autonomous goal session: Case A (ACTION_REQUIRED, cap not reached) →
 self-selected "Fix"; full pipeline re-runs as cycle 2/2 after the fix.
+
+## Cycle 2 (2026-07-11)
+
+- Driver: claude / Reviewer: codex / Cycle: 2/2 (cap reached)
+- Cycle-1 fixes applied in a910547 + 1de7a20; re-run: self-review MERGE,
+  verify PASS, test PASS (710/710 + Go ok), sync-docs no drift.
+- Reviewer result: 1 finding.
+
+| # | Reviewer finding | Triage | Classification |
+|---|-------------------|--------|----------------|
+| 1 | [P2] Step 7 delegated gate says "commit-boundary evidence clean", which a literal read rejects when allowed out-of-scope bookkeeping dirt is present (step 6 explicitly permits it) | Wording ambiguity in guidance, not a behavior defect; trivially fixable in the 4 work SKILL.md copies | WORTH_CONSIDERING |
+
+- Cap-reached decision (Case B options): self-selected **option 1 — raise the
+  cap temporarily** (`RALPH_STANDARD_MAX_PIPELINE_CYCLES=3` for this run)
+  rather than shipping a self-contradictory instruction as a known gap. The
+  fix rewords the delegated gate to "no in-scope or unexpected dirt
+  (pre-existing out-of-scope bookkeeping noted in the report is acceptable)".
+  Full pipeline re-runs as cycle 3/3.
