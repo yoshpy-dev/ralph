@@ -88,8 +88,8 @@ Critical forks: None（上流での新規判断なし。決定済み内容の移
 
 - [x] Plan reviewed
 - [x] Branch created
-- [ ] Implementation started
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Implementation started
+- [x] Review artifact created
+- [x] Verification artifact created
+- [x] Test artifact created
 - [ ] PR created
