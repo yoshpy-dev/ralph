@@ -138,3 +138,56 @@ The cycle 1 dispatch smoke record (Agent type 'implementer' not found → inline
 - Pass: 710 shell tests (0 failures) + 9 Go packages (all ok)
 - Fail: 0
 - No regression introduced by commits 4726ef7, a910547, 1de7a20, 4a1da5b + verify addendum.
+
+---
+
+## Cycle 3 addendum (2026-07-11)
+
+- Re-run trigger: commits 435ce16, 18e41d6, 3d29f9c (docs-only — clarify delegated gate tolerance, self-review cycle 3 addendum, verify cycle 3 addendum; no behavioral shell or Go code modified).
+- Evidence: `docs/evidence/test-2026-07-11-standard-flow-orchestrator-cycle3.log`
+- Runner: `./scripts/run-test.sh` (HARNESS_VERIFY_MODE=test, full-fallback scope triggered by `.codex/agents/implementer.toml` as unclassified file)
+
+### Suite counts — identical to cycles 1 and 2
+
+| Suite | Tests | Passed | Failed |
+| --- | --- | --- | --- |
+| test-agent-phase-boundaries.sh | 44 | 44 | 0 |
+| test-branch-name.sh | 29 | 29 | 0 |
+| test-check-mojibake.sh | 11 | 11 | 0 |
+| test-check-skill-sync.sh | 7 | 7 | 0 |
+| test-detect-changed-languages.sh | 23 | 23 | 0 |
+| test-detect-languages-terraform.sh | 8 | 8 | 0 |
+| test-ensure-pr-ready.sh | 7 | 7 | 0 |
+| test-ensure-pr-title-prefix.sh | 13 | 13 | 0 |
+| test-language-pack-monorepo-roots.sh | 29 | 29 | 0 |
+| test-ralph-cli-driver.sh | 48 | 48 | 0 |
+| test-ralph-config.sh | 27 | 27 | 0 |
+| test-ralph-dry-run-side-effects.sh | 5 | 5 | 0 |
+| test-ralph-orchestrator-branch-names.sh | 3 | 3 | 0 |
+| test-ralph-orchestrator-pr-strategy.sh | 24 | 24 | 0 |
+| test-ralph-run-options.sh | 5 | 5 | 0 |
+| test-ralph-signals.sh | 3 | 3 | 0 |
+| test-ralph-slice-skip-pr.sh | 4 | 4 | 0 |
+| test-ralph-status.sh | 51 | 51 | 0 |
+| test-ralph-worktree.sh | 17 | 17 | 0 |
+| test-run-verify-scope.sh | 12 | 12 | 0 |
+| test-secret-scan.sh | 6 | 6 | 0 |
+| test-self-review-scope.sh | 96 | 96 | 0 |
+| test-terraform-gitignore.sh | 47 | 47 | 0 |
+| test-terraform-pack-verify.sh | 36 | 36 | 0 |
+| test-terraform-rule-frontmatter.sh | 11 | 11 | 0 |
+| test-verify-mode-split.sh | 59 | 59 | 0 |
+| test-xreview-gate-regression.sh | 21 | 21 | 0 |
+| test-xreview-prompt-render.sh | 54 | 54 | 0 |
+| go test ./... (9 packages) | — | 9 pkg ok | 0 |
+| **Total** | **710 shell + 9 Go pkgs** | **710 / 710 + all pkgs** | **0** |
+
+### AC1b dispatch smoke record — unchanged from cycles 1 and 2
+
+The cycle 1 dispatch smoke record (Agent type 'implementer' not found → inline fallback exercised) remains valid and unchanged. Cycles 2 and 3 introduced docs-only commits; the agent registry limitation is a structural property of the environment that has not changed between cycles.
+
+### Cycle 3 verdict
+
+- Pass: 710 shell tests (0 failures) + 9 Go packages (all ok)
+- Fail: 0
+- No regression introduced by docs-only commits 435ce16, 18e41d6, 3d29f9c.
