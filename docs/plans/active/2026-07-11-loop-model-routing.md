@@ -278,7 +278,7 @@ addressed with recorded rationale:
 
 - [x] Plan reviewed
 - [x] Branch created (feat/loop-model-routing)
-- [ ] Implementation started
+- [x] Implementation started
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
