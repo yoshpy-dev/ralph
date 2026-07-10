@@ -83,6 +83,66 @@ test_defaults() {
 }
 
 # ═══════════════════════════════════════════════════════════════════
+# Per-phase model variable defaults
+# ═══════════════════════════════════════════════════════════════════
+
+test_phase_model_defaults() {
+  echo ""
+  echo "=== Per-phase model variable default tests ==="
+
+  _force="$(unset RALPH_FORCE_MODEL; . "$CONFIG"; echo "${RALPH_FORCE_MODEL:-}")"
+  assert_eq "default RALPH_FORCE_MODEL is empty" "" "$_force"
+
+  _impl="$(unset RALPH_IMPLEMENT_MODEL; . "$CONFIG"; echo "$RALPH_IMPLEMENT_MODEL")"
+  assert_eq "default RALPH_IMPLEMENT_MODEL" "sonnet" "$_impl"
+
+  _sr="$(unset RALPH_SELF_REVIEW_MODEL; . "$CONFIG"; echo "$RALPH_SELF_REVIEW_MODEL")"
+  assert_eq "default RALPH_SELF_REVIEW_MODEL" "opus" "$_sr"
+
+  _verify="$(unset RALPH_VERIFY_MODEL; . "$CONFIG"; echo "$RALPH_VERIFY_MODEL")"
+  assert_eq "default RALPH_VERIFY_MODEL" "sonnet" "$_verify"
+
+  _test="$(unset RALPH_TEST_MODEL; . "$CONFIG"; echo "$RALPH_TEST_MODEL")"
+  assert_eq "default RALPH_TEST_MODEL" "sonnet" "$_test"
+
+  _sync="$(unset RALPH_SYNC_DOCS_MODEL; . "$CONFIG"; echo "$RALPH_SYNC_DOCS_MODEL")"
+  assert_eq "default RALPH_SYNC_DOCS_MODEL" "sonnet" "$_sync"
+
+  _pr="$(unset RALPH_PR_MODEL; . "$CONFIG"; echo "$RALPH_PR_MODEL")"
+  assert_eq "default RALPH_PR_MODEL" "sonnet" "$_pr"
+
+  _probe="$(unset RALPH_PROBE_MODEL; . "$CONFIG"; echo "$RALPH_PROBE_MODEL")"
+  assert_eq "default RALPH_PROBE_MODEL" "haiku" "$_probe"
+
+  _esc="$(unset RALPH_ESCALATION_MODEL; . "$CONFIG"; echo "$RALPH_ESCALATION_MODEL")"
+  assert_eq "default RALPH_ESCALATION_MODEL" "opus" "$_esc"
+}
+
+# ═══════════════════════════════════════════════════════════════════
+# Per-phase model variable env overrides
+# ═══════════════════════════════════════════════════════════════════
+
+test_phase_model_overrides() {
+  echo ""
+  echo "=== Per-phase model variable env override tests ==="
+
+  _impl="$(RALPH_IMPLEMENT_MODEL=opus; . "$CONFIG"; echo "$RALPH_IMPLEMENT_MODEL")"
+  assert_eq "override RALPH_IMPLEMENT_MODEL=opus" "opus" "$_impl"
+
+  _sr="$(RALPH_SELF_REVIEW_MODEL=sonnet; . "$CONFIG"; echo "$RALPH_SELF_REVIEW_MODEL")"
+  assert_eq "override RALPH_SELF_REVIEW_MODEL=sonnet" "sonnet" "$_sr"
+
+  _probe="$(RALPH_PROBE_MODEL=sonnet; . "$CONFIG"; echo "$RALPH_PROBE_MODEL")"
+  assert_eq "override RALPH_PROBE_MODEL=sonnet" "sonnet" "$_probe"
+
+  _force="$(RALPH_FORCE_MODEL=haiku; . "$CONFIG"; echo "$RALPH_FORCE_MODEL")"
+  assert_eq "override RALPH_FORCE_MODEL=haiku" "haiku" "$_force"
+
+  _esc="$(RALPH_ESCALATION_MODEL=sonnet; . "$CONFIG"; echo "$RALPH_ESCALATION_MODEL")"
+  assert_eq "override RALPH_ESCALATION_MODEL=sonnet" "sonnet" "$_esc"
+}
+
+# ═══════════════════════════════════════════════════════════════════
 # Environment variable override
 # ═══════════════════════════════════════════════════════════════════
 
@@ -179,7 +239,9 @@ main() {
   echo "=== ralph-config.sh tests ==="
 
   test_defaults
+  test_phase_model_defaults
   test_env_override
+  test_phase_model_overrides
   test_validate_numeric
   test_validate_all
 

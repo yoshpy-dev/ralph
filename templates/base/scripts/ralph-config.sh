@@ -37,11 +37,39 @@ RALPH_CODEX_SANDBOX="${RALPH_CODEX_SANDBOX:-workspace-write}"
 RALPH_CODEX_APPROVAL_POLICY="${RALPH_CODEX_APPROVAL_POLICY:-on-failure}"
 RALPH_CLAUDE_REVIEWER_MODEL="${RALPH_CLAUDE_REVIEWER_MODEL:-opus}"
 
+# ═══════════════════════════════════════════════════════════════════
+# Per-phase model routing (plan-big-execute-small)
+#
+# Routing rationale: .claude/rules/model-routing.md
+# Precedence: RALPH_FORCE_MODEL > RALPH_<PHASE>_MODEL > phase default.
+# RALPH_MODEL remains the fallback for any unrouted agent turn.
+# ═══════════════════════════════════════════════════════════════════
+
+# Single-knob override: when non-empty, all phase models resolve to this value.
+# Use for rollback (RALPH_FORCE_MODEL=opus) or "run everything on X".
+RALPH_FORCE_MODEL="${RALPH_FORCE_MODEL:-}"
+
+# Per-phase defaults (implement/upgrade seat is sonnet; judgment seat is opus).
+RALPH_IMPLEMENT_MODEL="${RALPH_IMPLEMENT_MODEL:-sonnet}"
+RALPH_SELF_REVIEW_MODEL="${RALPH_SELF_REVIEW_MODEL:-opus}"
+RALPH_VERIFY_MODEL="${RALPH_VERIFY_MODEL:-sonnet}"
+RALPH_TEST_MODEL="${RALPH_TEST_MODEL:-sonnet}"
+RALPH_SYNC_DOCS_MODEL="${RALPH_SYNC_DOCS_MODEL:-sonnet}"
+RALPH_PR_MODEL="${RALPH_PR_MODEL:-sonnet}"
+RALPH_PROBE_MODEL="${RALPH_PROBE_MODEL:-haiku}"
+
+# Escalation: when the Outer Loop enters a fix-and-revalidate cycle (cycle >= 2),
+# the implement phase runs on this model instead of RALPH_IMPLEMENT_MODEL.
+RALPH_ESCALATION_MODEL="${RALPH_ESCALATION_MODEL:-opus}"
+
 # Export so values reach grandchild processes (e.g. ralph-pipeline.sh
 # spawned from ralph-orchestrator.sh, or codex/claude invoked via xargs).
 # Without `export`, shell-local defaults set above would be invisible to
 # children that did not source this file directly.
 export RALPH_LOOP_DRIVER RALPH_CODEX_SANDBOX RALPH_CODEX_APPROVAL_POLICY RALPH_CLAUDE_REVIEWER_MODEL
+export RALPH_FORCE_MODEL RALPH_IMPLEMENT_MODEL RALPH_SELF_REVIEW_MODEL
+export RALPH_VERIFY_MODEL RALPH_TEST_MODEL RALPH_SYNC_DOCS_MODEL RALPH_PR_MODEL
+export RALPH_PROBE_MODEL RALPH_ESCALATION_MODEL
 
 # ═══════════════════════════════════════════════════════════════════
 # Validation helpers

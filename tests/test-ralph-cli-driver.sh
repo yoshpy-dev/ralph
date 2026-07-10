@@ -328,6 +328,162 @@ check "7e. prose mention not picked as summary → ACTION_REQUIRED=0" test "$(co
 # 7d. Missing file → 0 (must not error)
 check "7d. missing file → 0" test "$(count_triage_findings "$WORK_DIR/does-not-exist.md" ACTION_REQUIRED)" = "0"
 
+# ── Test 8: resolve_phase_model routing ─────────────────────────────────
+echo
+echo "── Test 8: resolve_phase_model — per-phase routing and escalation"
+
+# 8a. implement cycle 1 → RALPH_IMPLEMENT_MODEL (sonnet)
+got="$(RALPH_IMPLEMENT_MODEL=sonnet RALPH_FORCE_MODEL='' resolve_phase_model implement 1)"
+check "8a. implement cycle 1 → sonnet (got '$got')" test "$got" = "sonnet"
+
+# 8b. implement cycle 2 → RALPH_ESCALATION_MODEL (opus)
+got="$(RALPH_ESCALATION_MODEL=opus RALPH_FORCE_MODEL='' resolve_phase_model implement 2)"
+check "8b. implement cycle 2 → opus escalation (got '$got')" test "$got" = "opus"
+
+# 8c. implement empty cycle → treated as 1, no escalation
+got="$(RALPH_IMPLEMENT_MODEL=sonnet RALPH_FORCE_MODEL='' resolve_phase_model implement "")"
+check "8c. implement empty cycle → sonnet (no escalation) (got '$got')" test "$got" = "sonnet"
+
+# 8d. self_review → RALPH_SELF_REVIEW_MODEL (opus)
+got="$(RALPH_SELF_REVIEW_MODEL=opus RALPH_FORCE_MODEL='' resolve_phase_model self_review 1)"
+check "8d. self_review → opus (got '$got')" test "$got" = "opus"
+
+# 8e. probe → RALPH_PROBE_MODEL (haiku)
+got="$(RALPH_PROBE_MODEL=haiku RALPH_FORCE_MODEL='' resolve_phase_model probe 1)"
+check "8e. probe → haiku (got '$got')" test "$got" = "haiku"
+
+# 8f. unknown phase → $RALPH_MODEL fallback
+got="$(RALPH_MODEL=opus RALPH_FORCE_MODEL='' resolve_phase_model unknown_phase 1)"
+check "8f. unknown phase → RALPH_MODEL (got '$got')" test "$got" = "opus"
+
+# 8g. verify → sonnet
+got="$(RALPH_VERIFY_MODEL=sonnet RALPH_FORCE_MODEL='' resolve_phase_model verify 1)"
+check "8g. verify → sonnet (got '$got')" test "$got" = "sonnet"
+
+# 8h. test → sonnet
+got="$(RALPH_TEST_MODEL=sonnet RALPH_FORCE_MODEL='' resolve_phase_model test 1)"
+check "8h. test → sonnet (got '$got')" test "$got" = "sonnet"
+
+# ── Test 9: RALPH_FORCE_MODEL overrides everything ───────────────────────
+echo
+echo "── Test 9: RALPH_FORCE_MODEL single-knob override"
+
+# 9a. implement cycle 1 forced to haiku
+got="$(RALPH_FORCE_MODEL=haiku resolve_phase_model implement 1)"
+check "9a. FORCE_MODEL=haiku forces implement cycle 1 → haiku (got '$got')" test "$got" = "haiku"
+
+# 9b. implement cycle 2 (would normally escalate to opus) forced to haiku
+got="$(RALPH_FORCE_MODEL=haiku RALPH_ESCALATION_MODEL=opus resolve_phase_model implement 2)"
+check "9b. FORCE_MODEL=haiku forces implement cycle 2 → haiku (not opus) (got '$got')" test "$got" = "haiku"
+
+# 9c. self_review (would normally be opus) forced to haiku
+got="$(RALPH_FORCE_MODEL=haiku RALPH_SELF_REVIEW_MODEL=opus resolve_phase_model self_review 1)"
+check "9c. FORCE_MODEL=haiku forces self_review → haiku (got '$got')" test "$got" = "haiku"
+
+# 9d. probe forced to haiku (same as default, but confirms the override path)
+got="$(RALPH_FORCE_MODEL=haiku RALPH_PROBE_MODEL=haiku resolve_phase_model probe 1)"
+check "9d. FORCE_MODEL=haiku forces probe → haiku (got '$got')" test "$got" = "haiku"
+
+# ── Test 10: run_agent 4th arg model → --model flag via stub claude ──────
+echo
+echo "── Test 10: run_agent 4th-arg model passed as --model to claude"
+
+LOG10="$WORK_DIR/test10.log"
+CALL10="$WORK_DIR/test10.call.json"
+
+# 10a. 4th arg "sonnet" → stub claude receives --model sonnet
+RALPH_LOOP_DRIVER=claude \
+  JSON_OUTPUT_SUPPORTED=1 \
+  DRY_RUN=0 \
+  RALPH_MODEL=opus \
+  RALPH_EFFORT=high \
+  RALPH_PERMISSION_MODE=bypassPermissions \
+  RALPH_FAKE_CALL_LOG="$CALL10" \
+  RALPH_FAKE_RESULT="model-arg test" \
+  PATH="$PATH_FAKES" \
+  run_agent "$PROMPT_FILE" "$LOG10" "" "sonnet" >/dev/null 2>&1
+assert_jq_contains '.argv | join(" ")' "--model sonnet" "$CALL10" "10a. 4th arg sonnet → --model sonnet"
+
+# 10b. omitted 4th arg → stub claude receives --model $RALPH_MODEL (opus)
+LOG10B="$WORK_DIR/test10b.log"
+CALL10B="$WORK_DIR/test10b.call.json"
+RALPH_LOOP_DRIVER=claude \
+  JSON_OUTPUT_SUPPORTED=1 \
+  DRY_RUN=0 \
+  RALPH_MODEL=opus \
+  RALPH_EFFORT=high \
+  RALPH_PERMISSION_MODE=bypassPermissions \
+  RALPH_FAKE_CALL_LOG="$CALL10B" \
+  RALPH_FAKE_RESULT="fallback model test" \
+  PATH="$PATH_FAKES" \
+  run_agent "$PROMPT_FILE" "$LOG10B" "" >/dev/null 2>&1
+assert_jq_contains '.argv | join(" ")' "--model opus" "$CALL10B" "10b. omitted 4th arg → --model RALPH_MODEL (opus)"
+
+# 10c. empty string 4th arg → same as omitted, falls back to RALPH_MODEL
+LOG10C="$WORK_DIR/test10c.log"
+CALL10C="$WORK_DIR/test10c.call.json"
+RALPH_LOOP_DRIVER=claude \
+  JSON_OUTPUT_SUPPORTED=1 \
+  DRY_RUN=0 \
+  RALPH_MODEL=opus \
+  RALPH_EFFORT=high \
+  RALPH_PERMISSION_MODE=bypassPermissions \
+  RALPH_FAKE_CALL_LOG="$CALL10C" \
+  RALPH_FAKE_RESULT="empty model test" \
+  PATH="$PATH_FAKES" \
+  run_agent "$PROMPT_FILE" "$LOG10C" "" "" >/dev/null 2>&1
+assert_jq_contains '.argv | join(" ")' "--model opus" "$CALL10C" "10c. empty 4th arg → --model RALPH_MODEL (opus)"
+
+# ── Test 11: write_model_receipt JSONL output ────────────────────────────
+echo
+echo "── Test 11: write_model_receipt produces parseable JSONL"
+
+RECEIPT_DIR="$WORK_DIR/harness-state"
+mkdir -p "$RECEIPT_DIR"
+
+# 11a. driver=claude → honored=true, effective_model=requested_model
+(
+  cd "$WORK_DIR" || exit 1
+  mkdir -p .harness/state/pipeline
+  RALPH_LOOP_DRIVER=claude \
+    RALPH_EFFORT=high \
+    write_model_receipt "implement" "1" "sonnet" "phase-default"
+)
+RECEIPT_FILE="$WORK_DIR/.harness/state/pipeline/model-receipts.jsonl"
+check "11a. receipt file created" test -s "$RECEIPT_FILE"
+assert_jq_equal '.phase'           "implement"     "$RECEIPT_FILE" "11a-i. phase=implement"
+assert_jq_equal '.cycle'           "1"             "$RECEIPT_FILE" "11a-ii. cycle=1"
+assert_jq_equal '.driver'          "claude"        "$RECEIPT_FILE" "11a-iii. driver=claude"
+assert_jq_equal '.requested_model' "sonnet"        "$RECEIPT_FILE" "11a-iv. requested_model=sonnet"
+assert_jq_equal '.effective_model' "sonnet"        "$RECEIPT_FILE" "11a-v. effective_model=sonnet (honored)"
+assert_jq_equal '.honored'         "true"          "$RECEIPT_FILE" "11a-vi. honored=true"
+assert_jq_equal '.reason'          "phase-default" "$RECEIPT_FILE" "11a-vii. reason=phase-default"
+
+# 11b. driver=codex → honored=false, effective_model=codex-default
+# Use a separate WORK_DIR subdir so receipts are fully isolated from 11a.
+RECEIPT_DIR2="$WORK_DIR/receipt2"
+mkdir -p "$RECEIPT_DIR2"
+RECEIPT_FILE2="$RECEIPT_DIR2/.harness/state/pipeline/model-receipts.jsonl"
+(
+  cd "$RECEIPT_DIR2" || exit 1
+  RALPH_LOOP_DRIVER=codex \
+    RALPH_EFFORT=high \
+    write_model_receipt "self_review" "2" "opus" "escalation-cycle-2"
+)
+_tmp_receipt="$WORK_DIR/last-receipt.json"
+# The file should have exactly one line; read it directly.
+_last_line="$(cat "$RECEIPT_FILE2" 2>/dev/null || printf '')"
+printf '%s\n' "$_last_line" > "$_tmp_receipt"
+assert_jq_equal '.driver'          "codex"               "$_tmp_receipt" "11b-i. driver=codex"
+assert_jq_equal '.requested_model' "opus"                "$_tmp_receipt" "11b-ii. requested_model=opus"
+assert_jq_equal '.effective_model' "codex-default"       "$_tmp_receipt" "11b-iii. effective_model=codex-default"
+assert_jq_equal '.honored'         "false"               "$_tmp_receipt" "11b-iv. honored=false"
+assert_jq_equal '.reason'          "escalation-cycle-2"  "$_tmp_receipt" "11b-v. reason=escalation-cycle-2"
+
+# 11c. receipt is valid JSON (all lines parse)
+_invalid="$(jq -c . "$RECEIPT_FILE" 2>&1 | grep -c 'parse error' || true)"
+check "11c. all receipt lines are valid JSON (parse errors: $_invalid)" test "$_invalid" = "0"
+
 echo
 echo "── Summary ──"
 printf '  PASS: %d\n  FAIL: %d\n' "$PASS" "$FAIL"
