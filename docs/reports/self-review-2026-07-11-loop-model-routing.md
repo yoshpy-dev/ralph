@@ -156,3 +156,84 @@ receipt-accuracy/maintainability notes local to two adjacent lines; the codex
 - `appendEnvIfMissing` early-return + Force `!= ""` guard prevent blank-override
   masking.
 - No secrets/debug/swallowed-error patterns introduced.
+
+---
+
+## Cycle 2 addendum (2026-07-11)
+
+Fix-and-revalidate re-run after cross-review ACTION_REQUIRED. Reviews the new
+commit only; cycle-1 findings were spot-checked for invalidation, not re-derived.
+
+- Commit reviewed: `8f7ed8d` (fix: escalate on first fix pass and record actual
+  reviewer CLI in receipts)
+- Scope: diff quality only. Implements the 2 ACTION_REQUIRED findings in
+  `docs/reports/cross-review-triage-loop-model-routing.md` (1-based pass
+  numbering for escalation; `driver_override` 5th arg on `write_model_receipt`).
+
+### Verdict (cycle 2)
+
+MERGE. The fix is correct and minimal. Both ACTION_REQUIRED items are addressed
+without collateral change. One new LOW (stale function-index comment) plus the
+three carried-over LOWs. No CRITICAL or HIGH. Cycle-1 verdict still holds.
+
+### Finding counts by severity (cycle 2 delta)
+
+| Severity | New this cycle | Cumulative |
+|----------|----------------|------------|
+| CRITICAL | 0 | 0 |
+| HIGH     | 0 | 0 |
+| MEDIUM   | 0 | 0 |
+| LOW      | 1 | 4 |
+
+### Correctness of the fix
+
+**1-based pass numbering (escalation).** Traced end-to-end:
+
+- `run_inner_loop` default 3rd arg changed `0 → 1`; callers that omit it now get
+  the non-escalation path (pass 1). Correct.
+- `main()` now calls `run_inner_loop ... "$((_outer_cycle + 1))"` (L1125).
+  Initial pass: `_outer_cycle=0 → 0+1=1` → no escalation (sonnet). First
+  fix-and-revalidate pass after ACTION_REQUIRED regress: `_outer_cycle` was
+  incremented to `1` at L1172 before `run_outer_loop`, so the regressed inner
+  loop passes `1+1=2` → escalates to `RALPH_ESCALATION_MODEL` (opus). This is
+  exactly the intended behavior: the *first fix pass* now escalates, which the
+  pre-fix `0`/`1` numbering missed (it only escalated on the second fix pass).
+- Escalation-reason derivation (`[ "$_outer_cycle_num" -ge 2 ]`, L514) and the
+  resolver's `>= 2` branch (ralph-cli-driver.sh:63) both operate on the same
+  1-based value, so the `reason=escalation` label and the resolved model stay in
+  agreement. LOW-1/LOW-2 from cycle 1 are unchanged by this fix.
+- Receipt `cycle` field consistency: inner-loop phases record `_outer_cycle+1`;
+  outer-loop phases (`run_outer_loop "$_outer_cycle"`, L1180) record the raw
+  `_outer_cycle`. For any given pass these coincide (initial: both 1; first
+  regress: both 2), so the receipt trail is internally consistent across
+  inner/outer phases within a pass.
+
+**`driver_override` 5th arg (`write_model_receipt`).** Correct:
+
+- Optional 5th arg (`_wmr_driver_override="${5:-}"`); when non-empty it overrides
+  `RALPH_LOOP_DRIVER` for driver/effective_model/honored derivation, else the
+  existing `${RALPH_LOOP_DRIVER:-claude}` path is preserved. Backward compatible.
+- Both cross-review call sites pass the *actual reviewer CLI* (the inverse of
+  `RALPH_LOOP_DRIVER`): `"codex"` at the codex reviewer site (L815) and
+  `"claude"` at the claude reviewer site (L888). This fixes the receipt claiming
+  the pipeline driver rather than the CLI that actually ran the cross-review.
+- Tests cover all three paths (12a override=codex, 12b override=claude, 12c
+  omitted → default), asserting driver/effective_model/honored/requested_model.
+
+**Mirror discipline.** `scripts/ralph-cli-driver.sh` and
+`scripts/ralph-pipeline.sh` are byte-identical to their `templates/base/`
+copies (matching blob hashes `e08f948…` / `669e67c…`), both mode 100755.
+
+### New finding
+
+#### LOW-4: file-header function index still shows the pre-fix `write_model_receipt` signature
+
+The detailed doc block above `write_model_receipt` (ralph-cli-driver.sh:82) was
+correctly updated to `write_model_receipt <phase> <cycle> <requested_model>
+<reason> [driver_override]`, but the summary function index at the top of the
+file (L7) still reads the old 4-arg form without `[driver_override]`. The two
+doc locations now disagree. Authoritative block is correct; the index is merely
+stale. Cosmetic, non-blocking — worth a one-line touch-up to L7 (and its
+`templates/base/` mirror) if convenient.
+
+Evidence: ralph-cli-driver.sh:7 (stale) vs. :82 (updated).
