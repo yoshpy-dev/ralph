@@ -65,7 +65,7 @@ either.
 
 Codex role definitions live in `.codex/agents/`:
 
-- `implementer` — scoped implementation worker (sonnet); receives structured handoff from the orchestrator during `/work` step 6; stages only handoff-listed paths, runs verification, and returns a report with commit-boundary evidence
+- `implementer` — scoped implementation worker; receives structured handoff from the orchestrator during `/work` step 6; stages only handoff-listed paths, runs verification, and returns a report with commit-boundary evidence. Like the other Codex custom agents, no per-agent model is pinned here — the `sonnet` tier applies to the Claude Code counterpart (`.claude/agents/implementer.md`); Codex runs follow the session/config model
 - `reviewer` — diff quality only (post-implementation)
 - `verifier` — acceptance criteria, docs drift, and static checks (post-implementation)
 - `tester` — behavioral tests and failure analysis (post-implementation)

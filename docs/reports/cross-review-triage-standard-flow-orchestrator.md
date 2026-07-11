@@ -61,3 +61,24 @@ self-selected "Fix"; full pipeline re-runs as cycle 2/2 after the fix.
   fix rewords the delegated gate to "no in-scope or unexpected dirt
   (pre-existing out-of-scope bookkeeping noted in the report is acceptable)".
   Full pipeline re-runs as cycle 3/3.
+
+## Cycle 3 (2026-07-11)
+
+- Driver: claude / Reviewer: codex / Cycle: 3/3 (raised cap reached)
+- Cycle-2 fix applied in 435ce16; re-run: self-review MERGE, verify PASS,
+  test PASS (710/710 + Go ok), sync-docs no drift.
+- Reviewer result: 2 findings.
+
+| # | Reviewer finding | Triage | Classification |
+|---|-------------------|--------|----------------|
+| 1 | [P2] `.codex/agents/implementer.toml` carries no model pin while `.codex/README.md` calls it "(sonnet)" | The toml intentionally omits `model` (consistent with all four existing Codex custom agents; Codex-side per-agent model control is a recorded known gap in docs/tech-debt). The real defect is the README overclaim | WORTH_CONSIDERING (README wording fixed; toml unchanged by design) |
+| 2 | [P2] `git log -1 <sha>` accepts any existing commit object; does not prove the reported slice commit is the new branch HEAD | Real wording weakness in the adjudication gate | WORTH_CONSIDERING (gate reworded to require `git rev-parse HEAD` == reported SHA) |
+
+- Cap decision: the cap was already raised once; raising again to chase
+  prose-level P2s contradicts the harness's fail-fast stance. Self-selected
+  **option 2 — record findings and proceed to /pr**, with both wording fixes
+  applied first (2 lines each, README ×2 / work SKILL ×4) and deterministic
+  gates re-run (`check-skill-sync.sh`, `check-sync.sh`, `run-verify.sh`).
+  **Deviation recorded**: no fourth full pipeline cycle was run for these
+  prose fixes; the 710-test regression suite cannot exercise prose, and all
+  mirror/sync gates re-passed. Residual findings after fixes: none open.
