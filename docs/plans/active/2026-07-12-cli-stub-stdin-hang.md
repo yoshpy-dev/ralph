@@ -137,8 +137,8 @@ tech-debt row → run suite + run-verify → commit.
 
 - [x] Plan reviewed
 - [x] Branch created (fix/cli-stub-stdin-hang)
-- [ ] Implementation started
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Implementation started
+- [x] Review artifact created
+- [x] Verification artifact created
+- [x] Test artifact created
 - [ ] PR created
