@@ -261,4 +261,4 @@ templates/base) — small scope extension, recorded here per plan-drift rules.
 - [x] Verification artifact created
 - [x] Test artifact created
 - [x] Sync-docs completed (cycle 1: .codex/README.md; cycle 2: no drift found; cycle 3: no drift found — "commit-boundary evidence clean" phrase absent from all source files; check-sync + check-skill-sync PASS)
-- [ ] PR created
+- [x] PR created
