@@ -197,9 +197,10 @@ CALL_C="$WORK_DIR/test6-claude.call.json"
 CALL_X="$WORK_DIR/test6-codex.call.json"
 
 # 6a. driver=claude → reviewer=codex (invokes `codex exec review`)
+# < /dev/null: defense-in-depth; stub must not block on inherited harness stdin.
 RALPH_LOOP_DRIVER=claude RALPH_FAKE_CALL_LOG="$CALL_X" \
   PATH="$PATH_FAKES" \
-  codex exec review --base main >/dev/null 2>&1 || true
+  codex exec review --base main < /dev/null >/dev/null 2>&1 || true
 assert_jq_equal '.bin'                 "fake-codex"  "$CALL_X" "6a-i. driver=claude path used fake-codex"
 assert_jq_contains '.argv | join(" ")' "exec review" "$CALL_X" "6a-ii. exec review subcommand invoked"
 
@@ -327,6 +328,67 @@ check "7e. prose mention not picked as summary → ACTION_REQUIRED=0" test "$(co
 
 # 7d. Missing file → 0 (must not error)
 check "7d. missing file → 0" test "$(count_triage_findings "$WORK_DIR/does-not-exist.md" ACTION_REQUIRED)" = "0"
+
+# ── Test 8: stub hang-proof regression — never-closing pipe stdin ────────
+# Reproduces the exact hang shape discovered during PR #116: a background
+# harness shell holds the write-end of a FIFO open without writing; the old
+# `head -c 4096` inside the TTY-only guard would block until the writer
+# closed its end (~5s). The fixed stub skips the drain for non-regular-file
+# stdin and returns immediately. A regressed stub fails the elapsed < 3s
+# assertion deterministically.
+#
+# Mechanism: mkfifo + sleep in background (keeps write-end open, no data
+# written) → stub reads from FIFO → elapsed measured around stub only.
+echo
+echo "── Test 8: stub hang-proof — never-closing pipe stdin exits immediately"
+
+_stub_elapsed() {
+  # _stub_elapsed <stub-path> <call-log> <last-msg-path|"">
+  # Returns elapsed seconds for a stub invocation fed from a never-closing FIFO.
+  local stub="$1" call_log="$2" last_msg_path="$3"
+  local fifo_dir
+  fifo_dir="$(mktemp -d -t ralph-fifo-XXXXXX)"
+  local fifo="$fifo_dir/stdin.fifo"
+  mkfifo "$fifo"
+  # Writer holds the FIFO write-end open for 5s without sending any data.
+  ( sleep 5 > "$fifo" ) &
+  local writer_pid=$!
+  local t_start t_end
+  t_start="$(date +%s)"
+  if [ -n "$last_msg_path" ]; then
+    RALPH_FAKE_CALL_LOG="$call_log" \
+    RALPH_FAKE_LAST_MESSAGE="stub-ok" \
+      "$stub" exec review --base main \
+        --output-last-message "$last_msg_path" \
+        < "$fifo" >/dev/null 2>&1 || true
+  else
+    RALPH_FAKE_CALL_LOG="$call_log" \
+    RALPH_FAKE_RESULT="stub-ok" \
+      "$stub" -p --output-format text \
+        < "$fifo" >/dev/null 2>&1 || true
+  fi
+  t_end="$(date +%s)"
+  kill "$writer_pid" 2>/dev/null || true
+  wait "$writer_pid" 2>/dev/null || true
+  rm -rf "$fifo_dir"
+  printf '%d' $(( t_end - t_start ))
+}
+
+# 8a. fake-codex: elapsed < 3s AND call log written
+CALL_8A="$WORK_DIR/test8a.call.json"
+LAST_8A="$WORK_DIR/test8a.last"
+elapsed_8a="$(_stub_elapsed "$STUBS/codex" "$CALL_8A" "$LAST_8A")"
+check "8a-i. codex stub exits with open-pipe stdin in < 3s (elapsed=${elapsed_8a}s)" \
+  test "$elapsed_8a" -lt 3
+check "8a-ii. codex stub still wrote call log despite no-drain" test -s "$CALL_8A"
+check "8a-iii. codex stub still wrote last-message file" test -s "$LAST_8A"
+
+# 8b. fake-claude: elapsed < 3s AND call log written
+CALL_8B="$WORK_DIR/test8b.call.json"
+elapsed_8b="$(_stub_elapsed "$STUBS/claude" "$CALL_8B" "")"
+check "8b-i. claude stub exits with open-pipe stdin in < 3s (elapsed=${elapsed_8b}s)" \
+  test "$elapsed_8b" -lt 3
+check "8b-ii. claude stub still wrote call log despite no-drain" test -s "$CALL_8B"
 
 echo
 echo "── Summary ──"
