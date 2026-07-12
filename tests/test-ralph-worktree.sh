@@ -109,23 +109,31 @@ _gc_state_dir="$_repo/.git/ralph/worktrees"
 mkdir -p "$_gc_state_dir"
 
 # (a) no state files -> exit 0 + "No stale" message
+set +e
 _gc_out="$(cd "$_repo" && "$RALPH_WORKTREE" gc 2>&1)"; rc=$?
+set -e
 assert_eq "gc with no state exits 0" 0 "$rc"
 assert_eq "gc with no state prints No stale message" "No stale ralph worktree state." "$_gc_out"
 
 # (b) one stale state (path missing) -> gc exits 0, lists STALE, file NOT deleted
 _stale_json="$_gc_state_dir/stale-task.json"
 printf '{"id":"stale-task","branch":"feat/stale","worktree_path":"%s/nonexistent-path","kind":"standard"}\n' "$_repo" > "$_stale_json"
+set +e
 _gc_out="$(cd "$_repo" && "$RALPH_WORKTREE" gc 2>&1)"; rc=$?
+set -e
 assert_eq "gc with stale entry exits 0" 0 "$rc"
 assert_eq "gc lists stale entry" "STALE $_stale_json branch=feat/stale path=$_repo/nonexistent-path" "$_gc_out"
 assert_exit "gc does not delete state file without --prune" 0 test -f "$_stale_json"
 
 # (c) gc --prune -> exits 0, file deleted, second run reports "No stale" with exit 0
+set +e
 _gc_prune_out="$(cd "$_repo" && "$RALPH_WORKTREE" gc --prune 2>&1)"; rc=$?
+set -e
 assert_eq "gc --prune exits 0" 0 "$rc"
 assert_exit "gc --prune deletes stale state file" 1 test -f "$_stale_json"
+set +e
 _gc_second_out="$(cd "$_repo" && "$RALPH_WORKTREE" gc 2>&1)"; rc=$?
+set -e
 assert_eq "gc after prune exits 0" 0 "$rc"
 assert_eq "gc after prune prints No stale message" "No stale ralph worktree state." "$_gc_second_out"
 
@@ -134,7 +142,9 @@ _live_wt_path="$_tmp/live-worktree"
 mkdir -p "$_live_wt_path"
 _live_json="$_gc_state_dir/live-task.json"
 printf '{"id":"live-task","branch":"feat/live","worktree_path":"%s","kind":"standard"}\n' "$_live_wt_path" > "$_live_json"
+set +e
 _gc_live_out="$(cd "$_repo" && "$RALPH_WORKTREE" gc 2>&1)"; rc=$?
+set -e
 assert_eq "gc with non-stale entry exits 0" 0 "$rc"
 assert_eq "gc with non-stale entry prints No stale message" "No stale ralph worktree state." "$_gc_live_out"
 assert_exit "gc does not delete non-stale state file" 0 test -f "$_live_json"
