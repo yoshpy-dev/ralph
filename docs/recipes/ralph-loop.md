@@ -157,7 +157,7 @@ All Ralph pipeline settings are centralized in `scripts/ralph-config.sh`. Overri
 | `RALPH_CODEX_SANDBOX` | `workspace-write` | `codex exec -s` value when driver=codex (`read-only` / `workspace-write` / `danger-full-access`) |
 | `RALPH_CODEX_APPROVAL_POLICY` | `on-failure` | Codex `approval_policy` override (`untrusted` / `on-failure` / `on-request` / `never`) |
 | `RALPH_CLAUDE_REVIEWER_MODEL` | `opus` | Model used by `claude -p` when it plays adversarial reviewer (driver=codex cross-review path) |
-| `RALPH_XREVIEW_BASE` | _(unset)_ | Explicit cross-review base branch; when set, takes priority over `refs/remotes/origin/HEAD` detection. Exported automatically by `ralph-orchestrator.sh` from the launch branch so Loop runs from `develop`/`release/*` diff against the true merge target. Can also be set by the operator for one-off overrides. |
+| `RALPH_XREVIEW_BASE` | _(unset)_ | Explicit cross-review base branch; when set, takes priority over `refs/remotes/origin/HEAD` detection. Exported automatically by `ralph-orchestrator.sh` from the launch branch so Loop runs started from a non-default branch (e.g. `release/*`) diff against the true merge target. Can also be set by the operator for one-off overrides. |
 
 Per-phase model routing (Loop pipeline only — resolved by `resolve_phase_model` in `scripts/ralph-cli-driver.sh`):
 

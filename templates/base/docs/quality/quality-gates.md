@@ -49,6 +49,7 @@ Use these in CI or later-stage review:
 - `./scripts/check-sync.sh` — templates/root parity (`.github/workflows/check-template.yml`)
 - `./scripts/check-coverage.sh` — language-pack coverage gate (graceful skip if no packs) (`.github/workflows/verify.yml`)
 - `./scripts/check-pipeline-sync.sh` — pipeline order consistency across 8 reference files (`.github/workflows/verify.yml`)
+- `./scripts/check-skill-sync.sh` — `.claude/skills/` ↔ `.agents/skills/` mirror parity (`.github/workflows/verify.yml`)
 
 ### Not yet implemented in CI
 
