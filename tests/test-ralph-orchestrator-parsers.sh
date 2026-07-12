@@ -277,5 +277,66 @@ else
   fail "parse_pr_groups: empty output when _manifest.md absent" "got: ${_groups7}"
 fi
 
+# ═══════════════════════════════════════════════════════════════════
+# MAX_PARALLEL running-slice count regression
+# Regression for: grep -c with 2+ files emits "file:count" lines
+# instead of an integer, breaking -ge comparison.
+# ═══════════════════════════════════════════════════════════════════
+
+printf '\n--- MAX_PARALLEL: running-slice count with 2+ status files ---\n'
+
+STATUS_DIR="${SANDBOX}/status-multi"
+mkdir -p "$STATUS_DIR"
+
+# Simulate ORCH_STATE with 3 running status files
+_orig_orch_state="${ORCH_STATE:-}"
+ORCH_STATE="$STATUS_DIR"
+printf 'running\n' > "${STATUS_DIR}/slice-1-alpha.status"
+printf 'running\n' > "${STATUS_DIR}/slice-2-beta.status"
+printf 'running\n' > "${STATUS_DIR}/slice-3-gamma.status"
+
+# The fixed counting expression (mirrors orchestrator line exactly):
+_counted="$(cat "${ORCH_STATE}"/slice-*.status 2>/dev/null | grep -c '^running' || true)"
+: "${_counted:=0}"
+assert_eq "running-count: 3 status files yield integer 3" "3" "$_counted"
+
+# Verify integer comparison works (was broken with old grep -c multi-file output)
+_cmp_ok=0
+if [ "$_counted" -ge 1 ] 2>/dev/null; then
+  _cmp_ok=1
+fi
+assert_eq "running-count: integer -ge comparison succeeds" "1" "$_cmp_ok"
+
+# Zero-file case: no status files → count is 0
+_zero_dir="${SANDBOX}/status-empty"
+mkdir -p "$_zero_dir"
+ORCH_STATE="$_zero_dir"
+_counted_zero="$(cat "${ORCH_STATE}"/slice-*.status 2>/dev/null | grep -c '^running' || true)"
+: "${_counted_zero:=0}"
+assert_eq "running-count: zero files yields 0" "0" "$_counted_zero"
+
+# Single-file case: one running status file → count is 1
+_one_dir="${SANDBOX}/status-one"
+mkdir -p "$_one_dir"
+ORCH_STATE="$_one_dir"
+printf 'running\n' > "${_one_dir}/slice-1-only.status"
+_counted_one="$(cat "${ORCH_STATE}"/slice-*.status 2>/dev/null | grep -c '^running' || true)"
+: "${_counted_one:=0}"
+assert_eq "running-count: one file yields 1" "1" "$_counted_one"
+
+# MAX_PARALLEL gating: with MAX_PARALLEL=2 and 3 running, gate should block
+MAX_PARALLEL=2
+ORCH_STATE="$STATUS_DIR"
+_gated=0
+_cnt="$(cat "${ORCH_STATE}"/slice-*.status 2>/dev/null | grep -c '^running' || true)"
+: "${_cnt:=0}"
+if [ "$_cnt" -ge "$MAX_PARALLEL" ]; then
+  _gated=1
+fi
+assert_eq "running-count: MAX_PARALLEL gate blocks when running >= cap" "1" "$_gated"
+
+# Restore ORCH_STATE
+ORCH_STATE="$_orig_orch_state"
+
 printf '\n==> ralph-orchestrator.sh parser tests: %d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

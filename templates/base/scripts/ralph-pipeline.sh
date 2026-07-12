@@ -602,6 +602,7 @@ run_inner_loop() {
   if [ "$_agent_abort" -eq 1 ]; then
     log "Agent signalled ABORT during implementation"
     ckpt_update '.status = "aborted"'
+    _outer_fail_reason="aborted"
     return 2
   fi
 
@@ -1017,6 +1018,9 @@ DOCS
       log "No diff against ${_base} — skipping cross-review"
       echo "no_diff" > "$_xreview_log"
     fi
+  elif [ "$DRY_RUN" -eq 1 ]; then
+    log "cross-review skipped (dry-run)"
+    printf 'skipped_dry_run\n' > "$_xreview_log"
   else
     log "${_reviewer} binary not available — skipping cross-review"
     printf '%s_not_available\n' "$_reviewer" > "$_xreview_log"
@@ -1094,12 +1098,14 @@ DOCS
   if ! command -v gh >/dev/null 2>&1; then
     log_error "gh CLI not found — cannot create PR. Install gh and retry."
     ckpt_update '.status = "gh_unavailable"'
+    _outer_fail_reason="gh_unavailable"
     return 2  # distinct from 1 (ACTION_REQUIRED) — terminal config error
   fi
   _head_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
   if ! ./scripts/branch-name.sh validate "$_head_branch" >/dev/null 2>&1; then
     log_error "Invalid PR branch name: ${_head_branch}. Expected <type>/<slug> or <type>/<issue>/<slug>."
     ckpt_update '.status = "invalid_branch_name"'
+    _outer_fail_reason="invalid_branch_name"
     return 2
   fi
   _title_prefix="$(./scripts/branch-name.sh title-prefix "$_head_branch")"
@@ -1158,11 +1164,13 @@ PR_PROMPT
     if ! ./scripts/ensure-pr-title-prefix.sh "$_pr_url" >> "$_pr_log" 2>&1; then
       log_error "PR exists but could not be verified with branch type title prefix: ${_pr_url}"
       ckpt_update --arg url "$_pr_url" '.pr_created = true | .pr_url = $url | .status = "pr_title_prefix_check_failed"'
+      _outer_fail_reason="pr_title_prefix_check_failed"
       return 2
     fi
     if ! ./scripts/ensure-pr-ready.sh "$_pr_url" >> "$_pr_log" 2>&1; then
       log_error "PR exists but could not be verified as ready-for-review: ${_pr_url}"
       ckpt_update --arg url "$_pr_url" '.pr_created = true | .pr_url = $url | .status = "pr_draft_or_ready_check_failed"'
+      _outer_fail_reason="pr_draft_or_ready_check_failed"
       return 2
     fi
     log "PR created: ${_pr_url}"
@@ -1274,6 +1282,10 @@ INIT_JSON
 
   _total_iteration=0
   _context=""
+  # _outer_fail_reason is set at each return-2 site in run_outer_loop so the
+  # return-2 handler can finalize with the specific reason instead of the
+  # generic "gh_unavailable" fallback.
+  _outer_fail_reason=""
 
   # --- Main loop ---
   while [ "$_total_iteration" -lt "$MAX_ITERATIONS" ]; do
@@ -1351,9 +1363,11 @@ INIT_JSON
         _context="cross-review ACTION_REQUIRED — regressed from Outer Loop"
         ckpt_transition "outer" "inner" "cross-review ACTION_REQUIRED"
         ;;
-      2) # Terminal config error (e.g., gh_unavailable) → stop pipeline
-        log "=== Pipeline stopped: missing dependency ==="
-        _finalize "gh_unavailable"
+      2) # Terminal config error (gh_unavailable, invalid_branch_name, etc.) → stop pipeline
+        log "=== Pipeline stopped: terminal error ==="
+        # Use the reason set at the return-2 site; fall back to gh_unavailable
+        # for backward compatibility if a new site forgets to set it.
+        _finalize "${_outer_fail_reason:-gh_unavailable}"
         return 0
         ;;
     esac

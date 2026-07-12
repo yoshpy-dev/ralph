@@ -1525,9 +1525,14 @@ ORCH_JSON
         continue
       fi
 
-      # Check parallel capacity
+      # Check parallel capacity.
+      # grep -c with 2+ files emits "file:count" lines instead of an integer,
+      # breaking the -ge comparison (bash: integer expression expected).
+      # cat all status files first so grep receives a single stdin stream and
+      # always emits a plain integer regardless of how many files match.
       _current_running=0
-      _current_running="$(grep -c 'running' "${ORCH_STATE}"/slice-*.status 2>/dev/null)" || _current_running=0
+      _current_running="$(cat "${ORCH_STATE}"/slice-*.status 2>/dev/null | grep -c '^running' || true)"
+      : "${_current_running:=0}"
       if [ "$_current_running" -ge "$MAX_PARALLEL" ]; then
         continue
       fi
