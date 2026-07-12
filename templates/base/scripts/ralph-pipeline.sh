@@ -164,20 +164,17 @@ emit_insight_event() {
     return 0
   fi
 
-  # Build base args. PIPELINE_RUN_ID and PIPELINE_SLUG are set in main().
-  _eie_args="--slug ${PIPELINE_SLUG:-unknown} --flow loop --phase ${_eie_phase} --verdict ${_eie_verdict} --source pipeline --cycle ${_eie_cycle}"
+  # Build base args as an array so values survive unusual characters in a
+  # branch-derived slug. PIPELINE_RUN_ID and PIPELINE_SLUG are set in main().
+  _eie_base_args=(--slug "${PIPELINE_SLUG:-unknown}" --flow loop --phase "${_eie_phase}" --verdict "${_eie_verdict}" --source pipeline --cycle "${_eie_cycle}")
   if [ -n "${PIPELINE_RUN_ID:-}" ]; then
-    _eie_args="${_eie_args} --run-id ${PIPELINE_RUN_ID}"
+    _eie_base_args+=(--run-id "${PIPELINE_RUN_ID}")
   fi
-  _eie_args="${_eie_args} --driver ${RALPH_LOOP_DRIVER:-claude}"
+  _eie_base_args+=(--driver "${RALPH_LOOP_DRIVER:-claude}")
 
   # Pass remaining args (count flags and routing overrides) through.
-  # shellcheck disable=SC2086  # word splitting intentional for arg list
-  bash "$_eie_appender" ${_eie_args} "$@" || log "Warning: insight event append failed (non-fatal)"
+  bash "$_eie_appender" "${_eie_base_args[@]}" "$@" || log "Warning: insight event append failed (non-fatal)"
 }
-
-# log_warn — alias used in emit_insight_event guard messages
-log_warn() { log "Warning: $*"; }
 
 # run_agent is provided by ralph-cli-driver.sh — it dispatches to claude or
 # codex based on RALPH_LOOP_DRIVER and writes the same <log>/<log>.json
