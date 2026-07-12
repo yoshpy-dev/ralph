@@ -204,6 +204,17 @@ scope_file=".harness/state/verify-scope"
 echo ""
 echo "Evidence saved to: $evidence_file"
 
+# Prune old evidence logs: keep newest 20 verify-*.log files.
+if [ -d "docs/evidence" ]; then
+  ev_count=0
+  while IFS= read -r ev_file; do
+    ev_count=$((ev_count + 1))
+    if [ "$ev_count" -gt 20 ]; then
+      rm -f "$ev_file"
+    fi
+  done < <(find docs/evidence -maxdepth 1 -name "verify-*.log" -type f 2>/dev/null | sort -r)
+fi
+
 # Read exit code from status file
 verify_status=0
 if [ -f "$status_file" ]; then
