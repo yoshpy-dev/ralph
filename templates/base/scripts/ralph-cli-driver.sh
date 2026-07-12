@@ -6,6 +6,7 @@
 #   resolve_phase_model <phase> [cycle]
 #   write_model_receipt <phase> <cycle> <requested_model> <reason> [driver_override]
 #   count_triage_findings <triage_report_path> <category>
+#   detect_base_branch
 #   pick_reviewer
 #
 # run_agent branches on $RALPH_LOOP_DRIVER (claude|codex) to invoke the right
@@ -175,6 +176,42 @@ count_triage_findings() {
     f && /^\|/ && !/^\| *# / && !/^\| *-+/ { n++ }
     END { print n+0 }
   ' "$_file" 2>/dev/null || printf '0\n'
+}
+
+# detect_base_branch — print the repo's true merge-target branch name.
+#
+# Resolution order (mirrors the design decision in the xreview-base-detection
+# plan — Scope 1a/1b/1c):
+#   1. $RALPH_XREVIEW_BASE — explicit override (exported by orchestrator or operator).
+#   2. git symbolic-ref --quiet --short refs/remotes/origin/HEAD with the leading
+#      "origin/" stripped — the repo's actual default branch.
+#   3. Fallback: "main" if refs/heads/main exists, else "master" — mirrors the
+#      exact semantics of default_branch() in scripts/ralph and ralph-worktree.sh.
+#
+# Note: the pipeline gate treats a failing diff (invalid base) as "has changes"
+# and runs the review — fail-open-to-review is the safe direction and is kept.
+# Pure function: no side effects beyond reading git refs.
+detect_base_branch() {
+  # 1. Explicit override wins.
+  if [ -n "${RALPH_XREVIEW_BASE:-}" ]; then
+    printf '%s\n' "$RALPH_XREVIEW_BASE"
+    return 0
+  fi
+
+  # 2. Symbolic-ref: repo default branch (correct merge target).
+  _dbb_remote_head="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)"
+  if [ -n "$_dbb_remote_head" ]; then
+    printf '%s\n' "${_dbb_remote_head#origin/}"
+    return 0
+  fi
+
+  # 3. Local branch fallback — same main/master semantics as default_branch() in
+  #    scripts/ralph and scripts/ralph-worktree.sh.
+  if git show-ref --verify --quiet refs/heads/main 2>/dev/null; then
+    printf 'main\n'
+    return 0
+  fi
+  printf 'master\n'
 }
 
 # pick_reviewer — return the *opposite* CLI of the active driver, used by
