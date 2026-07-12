@@ -21,9 +21,12 @@ user's env var loses to ralph.toml — contradicting the documented priority
 1. **Default unification to `bypassPermissions`** (user decision, Option A):
    - `templates/base/ralph.toml` `[pipeline] permission_mode = "auto"` →
      `"bypassPermissions"`, with a short comment: unattended Loop runs cannot
-     answer permission prompts; safety is provided by deterministic hooks
-     (pre_bash_guard, commit-msg-guard), worktree isolation, and verify/test
-     gates; set `auto` here or via env to run more conservatively.
+     answer permission prompts; guardrails for bypassed headless turns are
+     task-worktree isolation, the pipeline's post-hoc checks (commit-message
+     secret scan, uncommitted-change detection), verify/test gates, and human
+     PR review — NOT interactive hooks, which do not fire under `claude -p`
+     (docs/recipes/ralph-loop.md:46). Set `auto` via env (all entry points)
+     or here (honored by the Go `ralph run` path) to run conservatively.
    - `internal/config/config.go` `Default()` PermissionMode `"auto"` →
      `"bypassPermissions"`; adjust the Load() backfill only if it references
      the literal (it backfills from Default(), so no extra change expected).
@@ -33,10 +36,12 @@ user's env var loses to ralph.toml — contradicting the documented priority
      unconditional `append` → `appendEnvIfMissing` (env > toml > default; no
      CLI flags exist for these).
    - `RALPH_MAX_ITERATIONS`, `RALPH_MAX_PARALLEL` (lines ~63-72): these have
-     CLI flags. Honor documented priority CLI > env > toml: when the flag was
-     explicitly passed (value != 0), export unconditionally (CLI wins over
-     env); when not passed, resolve toml default and export via
-     `appendEnvIfMissing` (env wins over toml).
+     CLI flags. Honor documented priority CLI > env > toml using
+     `cmd.Flags().Changed("max-iterations"/"max-parallel")` (Cobra flag
+     presence — NOT the `!= 0` heuristic; Codex advisory finding 4): flag
+     present → export unconditionally; absent → toml default via
+     `appendEnvIfMissing`. Thread the two presence booleans into
+     `runPipeline` (signature change is contained in run.go + its tests).
 3. **Tests** (`internal/cli/run_env_test.go`, `internal/config/config_test.go`):
    - defaults now `bypassPermissions` (config Default/Load + template toml
      round-trip via TestLoad_TemplateRalphToml if it asserts permission_mode);
@@ -48,7 +53,19 @@ user's env var loses to ralph.toml — contradicting the documented priority
      entry points; conservative override via env or ralph.toml.
    - `docs/tech-debt/README.md`: mark the permission-mode divergence row
      RESOLVED (existing strike-through convention, commit ref).
+   - `README.md` (~L276) and `.codex/README.md` + template mirror (~L58):
+     statements that Claude policy is `permission_mode = "auto"` must be
+     updated to the new default (Codex advisory finding 6).
    - `.claude/rules/model-routing.md` untouched (no model semantics change).
+
+## Env-priority contract note (Codex advisory finding 3)
+
+The effective contract is "**non-empty env wins**": `appendEnvIfMissing`
+treats `KEY=` (present-but-empty) as present and skips the toml export, but
+the downstream shell layer expands `${VAR:-default}`, so an empty value falls
+back to the shell default (`bypassPermissions`), not to the toml value. Tests
+must assert the end-to-end contract (what the shell layer would resolve), not
+merely the contents of `cmd.Env`.
 
 ## Non-goals
 
@@ -94,7 +111,15 @@ user's env var loses to ralph.toml — contradicting the documented priority
 - [ ] AC3: MAX_ITERATIONS/MAX_PARALLEL: explicit CLI flag wins over env;
   without the flag, env wins over toml — asserted in run_env_test.
 - [ ] AC4: Recipe row shows the single unified default in both copies;
-  tech-debt row marked RESOLVED.
+  tech-debt row marked RESOLVED; README.md and .codex/README.md (+ template)
+  no longer claim `auto` as the effective policy; rollback/override wording
+  everywhere states: env works from every entry point, ralph.toml only via
+  the Go `ralph run` path (shell wrappers do not read TOML — advisory
+  finding 2).
+- [ ] AC4b: `TestLoad_TemplateRalphToml` (or sibling) asserts the template's
+  `permission_mode` equals `Default()`'s (advisory finding 5); PR body notes
+  the upgrade-path nuance (unchanged managed ralph.toml auto-updates; locally
+  edited ones surface as conflict/skip per the upgrade engine).
 - [ ] AC5: `go test ./...`, full `./scripts/run-test.sh < /dev/null`, and
   `./scripts/run-verify.sh < /dev/null` pass; check-sync/check-skill-sync
   pass.
@@ -115,9 +140,13 @@ tests → docs → gates → commit.
 - Unit: run_env_test (env-wins cases ×3 vars; MAX_* flag/env/toml matrix),
   config_test (default + backfill + template round-trip).
 - Regression: full shell glob + go test.
-- Edge: empty env value (`RALPH_PERMISSION_MODE=`) — appendEnvIfMissing
-  treats a present-but-empty key as present; document expected behavior in
-  the test (present key wins, exporting nothing extra).
+- Edge: empty env value (`RALPH_PERMISSION_MODE=`) — assert the documented
+  "non-empty env wins" contract (see contract note): Go exports nothing
+  extra AND the shell layer's `${VAR:-default}` resolves to the shell
+  default; test via sourcing scripts/ralph-config.sh, not only cmd.Env.
+- Optional live smoke (advisory finding 7): if `claude` binary is available,
+  `claude -p --permission-mode bypassPermissions` one-liner accepts the flag
+  (skip with a note when absent) — do NOT add to CI-critical path.
 - Evidence: docs/reports/test-2026-07-12-unify-permission-mode.md.
 
 ## Risks and mitigations
@@ -132,6 +161,17 @@ tests → docs → gates → commit.
 
 - Rollback: revert PR, or set `[pipeline] permission_mode = "auto"` /
   `RALPH_PERMISSION_MODE=auto` (now honored from both entry points).
+
+## Codex plan advisory (evidence)
+
+7 findings; all adopted: (1) HIGH — hook-protection claim corrected (hooks do
+not fire under `claude -p`; guardrails restated accurately in toml comment,
+docs, and this plan); (2) HIGH — rollback wording fixed to "env everywhere,
+toml only via Go path"; (3) MEDIUM — empty-env contract defined as non-empty
+env wins, tested end-to-end; (4) MEDIUM — Cobra `Flags().Changed()` instead
+of `!=0`; (5) MEDIUM — template-toml permission assertion + upgrade-path
+nuance in PR body; (6) MEDIUM — README/.codex README doc scope added;
+(7) LOW — optional live smoke.
 
 ## Progress checklist
 
