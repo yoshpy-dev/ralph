@@ -114,3 +114,4 @@ Per-phase model variables for `ralph-pipeline.sh`. Resolved by `resolve_phase_mo
   `RALPH_*` env vars by `ralph run` and therefore overriding the shell
   fallbacks at runtime. Any default model/effort change must update the shell,
   toml, and Go values in lock-step (this repo only; not scaffolded downstream)
+- `internal/config/defaults_sync_test.go` — tripwire that fails if the three surfaces above drift; also asserts the cross-review SKILL.md reviewer-model fallback matches `RALPH_CLAUDE_REVIEWER_MODEL` in ralph-config.sh
