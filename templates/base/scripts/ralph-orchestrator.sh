@@ -1351,7 +1351,9 @@ main() {
     done
   fi
 
-  _slice_count="$(echo "$slices_data" | grep -c '|' || echo 0)"
+  # Count non-empty lines; each parse_slices record occupies exactly one line
+  # (grep -c '|' was removed when the record delimiter changed from | to US 0x1F)
+  _slice_count="$(printf '%s\n' "$slices_data" | grep -c . || true)"
   log "Found ${_slice_count} slice(s)"
 
   if [ "$_slice_count" -eq 0 ]; then
