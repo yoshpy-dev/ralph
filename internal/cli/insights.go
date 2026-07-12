@@ -351,6 +351,11 @@ func runInsightsBackfill(reportsDir, eventsDir string, apply bool, cmd *cobra.Co
 	written := 0
 	for _, e := range entries {
 		if e.isDupe || existing[e.key] {
+			if !e.isDupe {
+				// Same-batch collision skipped here — keep the summary count
+				// consistent with what was actually skipped.
+				dupeCount++
+			}
 			continue
 		}
 		if err := insights.AppendBackfillEvent(eventsDir, e.ev.Event); err != nil {

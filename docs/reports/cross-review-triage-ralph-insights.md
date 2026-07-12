@@ -29,3 +29,30 @@ None.
 Per `.claude/rules/post-implementation-pipeline.md`, ACTION_REQUIRED triggers a
 fix followed by a full pipeline re-run (self-review → verify → test →
 sync-docs → cross-review). This is pipeline cycle 2 of the default cap 2.
+
+## Cycle 2 (2026-07-13)
+
+- Reviewer: codex (fix-verification pass over the fix delta)
+- After triage: ACTION_REQUIRED=0, WORTH_CONSIDERING=2, DISMISSED=0
+
+Findings #1 (multi-cycle backfill), #3 (path-normalized dedupe), and #4
+(--json zero-data) verified RESOLVED with file:line evidence and regression
+tests. Finding #2 verified fixed for all future appends (appender defaults
+cycle=1); the residual was this branch's own committed sample events still
+carrying `cycle:null`.
+
+Cycle-2 residuals, both LOW:
+
+| # | Finding | Resolution |
+|---|---------|------------|
+| 1 | Branch-created `docs/insights/events/2026-07-12-ralph-insights.jsonl` contained `cycle:null` lines (pre-default data written by this PR's own pipeline runs) | Rewritten to `cycle:1` in-branch — this is not history rewriting; the file is new in this PR |
+| 2 | Same-batch dedupe skips not counted in the "duplicates skipped" summary (data integrity unaffected) | Counter incremented in the apply loop |
+
+### Cap deviation note
+
+The pipeline cycle cap (2) was reached with only these two LOW residuals
+outstanding. Instead of a third full pipeline cycle, both were fixed inline
+and validated with the deterministic gates (`go test ./...`,
+`./scripts/run-verify.sh`). This is a conscious, recorded deviation matching
+the cap rule's "proceed and record known gaps" option — strictly better,
+since the gaps ship fixed rather than recorded.
