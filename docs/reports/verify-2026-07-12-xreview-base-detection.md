@@ -61,3 +61,57 @@ PASS — all acceptance criteria met at the static/structural level.
 - **Verified**: AC1 (detect_base_branch defined + HEAD@{upstream} removed from all 6 production files), AC2 (test assertions structure + gate-proof shape), AC2b (export position at L1297, before L1526 run_slice and L1597 run_integration_pipeline), AC3 (xreview suites unchanged), AC4 (tech-debt RESOLVED row + mirrors byte-identical + run-static-verify exits 0). All 4 Codex advisory findings adopted.
 - **Likely but unverified**: test execution (AC2 pass/fail at runtime) and AC3 (xreview suites still green) — delegated to /test.
 - **Not verified**: live cross-review base detection against a real remote (belongs to /test or manual smoke test).
+
+---
+
+## Cycle 2 addendum
+
+- Date: 2026-07-12
+- Commits in scope: `4de8dc9` (docs: sync docs), `c3d89f2` (fix: preserve operator-supplied RALPH_XREVIEW_BASE), `d3c39f8` (docs: self-review cycle 2 addendum)
+- Verifier: verifier subagent (Claude Code, /verify, cycle 2)
+- Evidence: `docs/evidence/verify-2026-07-12-122848.log`
+
+### AC2b re-check (preserve-form)
+
+Commit `c3d89f2` changed `scripts/ralph-orchestrator.sh:1298` from the unconditional one-liner:
+
+```sh
+export RALPH_XREVIEW_BASE="$_base_branch"
+```
+
+to the split preserve-form:
+
+```sh
+RALPH_XREVIEW_BASE="${RALPH_XREVIEW_BASE:-$_base_branch}"
+export RALPH_XREVIEW_BASE
+```
+
+Verification:
+
+- **AC2b still holds**: the export of `RALPH_XREVIEW_BASE` from `_base_branch` is preserved. `_base_branch` is unconditionally assigned at L1292 with no early return in between, so the fallback operand is always set. Splitting assignment from `export` is behavior-neutral.
+- **Operator-supplied value is now preserved**: `${RALPH_XREVIEW_BASE:-$_base_branch}` is a no-op when `RALPH_XREVIEW_BASE` is already non-empty (e.g. set by the operator). This closes the clobber identified by the cross-review ACTION_REQUIRED finding. Detection priority in `detect_base_branch()` (L196: `[ -n "${RALPH_XREVIEW_BASE:-}" ]`) is now consistent end-to-end.
+- **`set -eu` safety**: `${VAR:-default}` is the correct idiom under `set -u` for an unset-or-empty variable. No unbound-variable abort risk.
+- **Mirror identity**: `scripts/ralph-orchestrator.sh` and `templates/base/scripts/ralph-orchestrator.sh` are byte-identical (cmp PASS, same git blob hash `3f51770`).
+
+### Recipe row check
+
+Commit `4de8dc9` added a `RALPH_XREVIEW_BASE` row to the env-table in `docs/recipes/ralph-loop.md` and its `templates/base` mirror. Verified:
+
+- Row line 160 present in both copies with identical wording.
+- `docs/recipes/ralph-loop.md` vs `templates/base/docs/recipes/ralph-loop.md`: byte-identical (cmp PASS, same blob `97bccb7`).
+- Row description accurately reflects: (a) operator override semantics, (b) auto-export by orchestrator from launch branch, (c) Loop base-branch use case (`develop`/`release/*`).
+
+### Static analysis (cycle 2)
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `./scripts/run-static-verify.sh < /dev/null` (worktree) | EXIT 0 | All gates passed. check-sync: IDENTICAL=171, DRIFTED=0. check-pipeline-sync: all 8 consumer files OK. check-skill-sync: 13 in lock-step. gofmt: ok. golangci-lint: 0 issues. |
+| `sh -n scripts/ralph-orchestrator.sh` | PASS | No POSIX syntax errors in the preserve-form change. |
+| Mirror parity (cmp) — orchestrator + recipe | PASS | Both pairs byte-identical after c3d89f2 and 4de8dc9. |
+
+### Cycle 2 verdict
+
+PASS — all cycle-1 ACs continue to hold. The cross-review ACTION_REQUIRED fix (preserve-form in orchestrator) is correct, mirror-clean, and `set -u`-safe. Recipe row is accurate and byte-identical across root and template. No new findings.
+
+- **Verified (cycle 2 additions)**: operator-supplied `RALPH_XREVIEW_BASE` is preserved by the `${:-}` form; mirror identity of orchestrator + recipe; `run-static-verify.sh` exits 0.
+- **Unchanged gaps**: test execution and live remote detection remain delegated to /test (unchanged from cycle 1).
