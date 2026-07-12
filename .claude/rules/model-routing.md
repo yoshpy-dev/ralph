@@ -17,6 +17,43 @@ the prompt must carry acceptance criteria, exact verification commands, and a
 report contract (changed files, key decisions, verification evidence). A
 cheaper model with a precise plan beats an expensive model with a vague one.
 
+## Standard flow delegation (/work)
+
+Implementation slices in `/work` are delegated to the `implementer` subagent
+(`model: sonnet` pinned in frontmatter; Codex: `.codex/agents/implementer.toml`).
+The orchestrator (session model) retains planning, decomposition, handoff
+authoring, report adjudication, and final review — it does not write slice code
+itself.
+
+**Structured handoff must carry:**
+
+| Field | Required content |
+|-------|-----------------|
+| Plan path | worktree-relative path to the active plan |
+| Slice objective | single-sentence goal |
+| Acceptance criteria | the ACs this slice addresses |
+| Files in scope | exact list; implementer stages only these paths |
+| Exact verification commands | copy-paste ready |
+| Commit message format | conventional format string |
+
+**Report contract (implementer → orchestrator):** changed files, decisions/deviations,
+verification evidence, commit-boundary evidence (`git status --porcelain` +
+`git show --stat HEAD` output), commit SHA.
+
+**Inline exceptions** (no subagent dispatch needed):
+
+- Trivial single-file edits where the handoff overhead exceeds the change cost.
+- Dispatch failure → inline fallback, noted in the report (same convention as
+  the post-implementation pipeline fallback).
+
+**Escalating a judgment-heavy slice:** pass an explicit `model` on the Task
+call (e.g. `opus` for security-sensitive changes) — no new env knob.
+
+**Cross-review sync note:** `.claude/skills/cross-review/SKILL.md` reads
+`RALPH_CLAUDE_REVIEWER_MODEL` (with an `opus` fallback) for the claude reviewer
+path. Keep reviewer-model defaults in sync when changing `RALPH_CLAUDE_REVIEWER_MODEL`
+in `scripts/ralph-config.sh`.
+
 ## Rules
 
 - **Always pin `model:` in agent frontmatter.** Omitted `model:` means
@@ -41,15 +78,39 @@ cheaper model with a precise plan beats an expensive model with a vague one.
 - Keep `effort` at the default (`high`) unless measured evidence justifies a
   change; `xhigh`/`max` have documented diminishing returns.
 
+## Ralph Loop per-phase routing
+
+Per-phase model variables for `ralph-pipeline.sh`. Resolved by `resolve_phase_model <phase> <cycle>` in `scripts/ralph-cli-driver.sh`.
+
+| Phase | Variable | Default | Notes |
+|-------|----------|---------|-------|
+| `implement` | `RALPH_IMPLEMENT_MODEL` | `sonnet` | Inner Loop implement/fix seat |
+| `self_review` | `RALPH_SELF_REVIEW_MODEL` | `opus` | Judgment seat — always quality tier |
+| `verify` | `RALPH_VERIFY_MODEL` | `sonnet` | Interprets deterministic script output |
+| `test` | `RALPH_TEST_MODEL` | `sonnet` | Interprets deterministic script output |
+| `sync_docs` | `RALPH_SYNC_DOCS_MODEL` | `sonnet` | Doc maintenance |
+| `pr` | `RALPH_PR_MODEL` | `sonnet` | PR-creation agent turn |
+| `probe` | `RALPH_PROBE_MODEL` | `haiku` | CLI capability probes — cheap; no intelligence needed |
+| `escalation` | `RALPH_ESCALATION_MODEL` | `opus` | Replaces implement seat on outer cycle ≥ 2 |
+
+**Precedence:** `RALPH_FORCE_MODEL` > `RALPH_<PHASE>_MODEL` (env) > `[pipeline.phases]` (ralph.toml) > built-in default. `RALPH_MODEL` remains the global fallback for unrouted turns.
+
+**Escalation:** When the Outer Loop enters fix-and-revalidate (outer cycle ≥ 2), the implement seat runs on `RALPH_ESCALATION_MODEL` instead of `RALPH_IMPLEMENT_MODEL`. Deterministic trigger — the existing verify/test/cross-review gates act as quality floor; no LLM router is involved.
+
+**Single-knob rollback:** `RALPH_FORCE_MODEL=opus` overrides every phase at once, restoring pre-routing behavior. Finer-grained: `RALPH_IMPLEMENT_MODEL=opus` for the implement seat only.
+
+**Receipts:** Each routed `run_agent` call appends one JSON line to `.harness/state/pipeline/model-receipts.jsonl` with fields `ts / phase / cycle / driver / requested_model / effective_model / honored / effort / reason`. The Codex driver ignores per-phase model args — its receipts record `effective_model="codex-default"` and `honored=false` (known gap, non-fixable without Codex API support). Receipt writes also occur at cross-review call sites and in `DRY_RUN=1` mode. At cross-review call sites the optional 5th arg `driver_override` is passed to `write_model_receipt` so the receipt records the reviewer CLI (always the opposite of `RALPH_LOOP_DRIVER`), not the pipeline driver — ensuring cross-review receipts show `honored=true` when Claude is the reviewer even under `RALPH_LOOP_DRIVER=codex`.
+
 ## Where the values live
 
 - `.claude/agents/*.md` — pipeline subagent tiers (frontmatter `model:`)
 - `scripts/ralph-config.sh` — effective Ralph defaults (`RALPH_MODEL`,
-  `RALPH_EFFORT`, `RALPH_CLAUDE_REVIEWER_MODEL`); shell wrappers do not read
+  `RALPH_EFFORT`, `RALPH_CLAUDE_REVIEWER_MODEL`; plus all 8 per-phase vars above); shell wrappers do not read
   `ralph.toml`, so keep both in sync when changing defaults
-- `ralph.toml` — declarative mirror of the same values for the ralph CLI
+- `ralph.toml` — declarative mirror of the same values for the ralph CLI;
+  `[pipeline.phases]` section holds per-phase keys
   (present in project instances generated from `templates/base/`)
-- `internal/config/config.go` `Default()` — Go CLI defaults, exported as
+- `internal/config/config.go` `Default()` — Go CLI defaults, including `PhaseModelConfig` fields exported as
   `RALPH_*` env vars by `ralph run` and therefore overriding the shell
   fallbacks at runtime. Any default model/effort change must update the shell,
   toml, and Go values in lock-step (this repo only; not scaffolded downstream)

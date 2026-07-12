@@ -13,8 +13,11 @@ ignores it.
 - **Subagents**: use Codex subagents from `.codex/agents/` for the standard
   ralph post-implementation pipeline (`self-review` → `verify` → `test` →
   `sync-docs`). Run `reviewer`, `verifier`, `tester`, and `doc-maintainer`
-  sequentially in that order. If dispatch fails, run the step inline and note
-  the fallback in the report. Reports go to `docs/reports/*.md`.
+  sequentially in that order. During `/work` step 6 (implementation), dispatch
+  each slice to the `implementer` subagent (`.codex/agents/implementer.toml`)
+  with the structured handoff defined in `.claude/rules/model-routing.md`. If
+  dispatch fails, run the step inline and note the fallback in the report.
+  Reports go to `docs/reports/*.md`.
 - **Interactive prompts**: when a skill needs the operator to choose between
   options, present a numbered list and ask the operator to reply with a single
   digit. Treat that as the equivalent of Claude Code's `AskUserQuestion`.

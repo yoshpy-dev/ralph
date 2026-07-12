@@ -41,6 +41,30 @@ tester: run /test against plan <slug>
 
 If a subagent fails to execute (tool error, not a review finding), run the corresponding skill inline and note the fallback in the report.
 
+## Implementation slices (/work) — delegate to implementer
+
+During `/work` step 6 (implementation), each implementation slice is dispatched
+to the `implementer` subagent:
+
+- **Claude Code:** `Task(subagent_type="implementer")`
+- **Codex:** `.codex/agents/implementer.toml` custom agent
+
+The orchestrator authors the structured handoff (defined in
+`model-routing.md` — "Standard flow delegation (/work)") and does not write
+slice code itself. The handoff must carry: plan path, slice objective,
+acceptance criteria, files in scope, exact verification commands, and commit
+message format. The implementer returns: changed files, decisions/deviations,
+verification evidence, commit-boundary evidence, and commit SHA.
+
+**Inline exceptions** (dispatch not required):
+
+- Trivial single-file edits where the handoff cost exceeds the change cost.
+- Dispatch failure → inline fallback, noted in the report.
+
+The post-implementation pipeline (`reviewer` → `verifier` → `tester` →
+`doc-maintainer`) is unchanged and remains the quality floor regardless of
+whether slices were delegated or implemented inline.
+
 ## Spec — always inline
 
 `/spec` runs in the main context because it relies heavily on `AskUserQuestion` for requirement clarification (active back-and-forth with the user) and on `AskUserQuestion` for output selection (issue-only / save spec file as docs PR / save spec file and transition to `/plan`). Subagent execution would cut off the interactive clarification loop. No agent definition exists for this skill.
@@ -74,7 +98,7 @@ so a runaway inline pipeline cannot loop more than `cap` total runs.
 
 ## Post-implementation pipeline for /loop — orchestrator-internal
 
-Ralph Loop uses `ralph-pipeline.sh` per slice (not subagents). Same pipeline order as `/work` (see `post-implementation-pipeline.md`), but executed via the driver-aware `run_agent` wrapper (`scripts/ralph-cli-driver.sh`) — `claude -p` when `RALPH_LOOP_DRIVER=claude` (default) and `codex exec` when `RALPH_LOOP_DRIVER=codex`. The cross-review dispatcher inverts the reviewer to the *opposite* CLI so the cross-model gate holds in either direction. `RALPH_LOOP_DRIVER` is the Loop-side analogue of `RALPH_PRIMARY_CLI` and resolves env > `[loop] driver` in `ralph.toml` > default.
+Ralph Loop uses `ralph-pipeline.sh` per slice (not subagents). Same pipeline order as `/work` (see `post-implementation-pipeline.md`), but executed via the driver-aware `run_agent` wrapper (`scripts/ralph-cli-driver.sh`) — `claude -p` when `RALPH_LOOP_DRIVER=claude` (default) and `codex exec` when `RALPH_LOOP_DRIVER=codex`. Per-slice pipeline phases run on per-phase models resolved by `resolve_phase_model` (implement/verify/test/sync-docs/pr on procedural seats, self-review on the judgment seat, escalation to `RALPH_ESCALATION_MODEL` on outer cycle ≥ 2) with an auditable receipt trail in `.harness/state/pipeline/model-receipts.jsonl`; see `model-routing.md` for the full per-phase table and precedence rules. The cross-review dispatcher inverts the reviewer to the *opposite* CLI so the cross-model gate holds in either direction. `RALPH_LOOP_DRIVER` is the Loop-side analogue of `RALPH_PRIMARY_CLI` and resolves env > `[loop] driver` in `ralph.toml` > default.
 
 After all slices are merged into the typed integration branch generated from the plan metadata, `ralph-orchestrator.sh` runs `ralph-pipeline.sh --skip-pr --fix-all` on that branch as a full integration quality gate. This catches cross-module issues and fixes ALL findings (including MEDIUM/LOW and WORTH_CONSIDERING). The default PR strategy is grouped PRs from manifest `pr_groups`; unified PR creation is an explicit fallback. The manifest also records the PR strategy decision contract: AI recommends, humans approve at plan approval time, and runtime overrides are warning-worthy escape hatches.
 That integration run uses full language scope by default; per-slice pipeline

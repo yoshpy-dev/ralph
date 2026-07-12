@@ -11,6 +11,24 @@ permission_mode = "auto"
 [pipeline.prompts]
 dir = ".ralph/prompts"
 
+# Per-phase model routing (plan-big-execute-small).
+# These mirror the RALPH_<PHASE>_MODEL shell defaults in scripts/ralph-config.sh.
+# Precedence: env RALPH_<PHASE>_MODEL > this section > built-in default.
+# Escalation applies to the implement seat when the Outer Loop enters a
+# fix-and-revalidate cycle (outer cycle >= 2).
+# To run everything on a single model (e.g. for rollback), set force:
+#   force = "opus"   # overrides all phase models; leave commented out normally
+[pipeline.phases]
+implement   = "sonnet"
+self_review = "opus"
+verify      = "sonnet"
+test        = "sonnet"
+sync_docs   = "sonnet"
+pr          = "sonnet"
+probe       = "haiku"
+escalation  = "opus"
+# force = "opus"
+
 # Ralph Loop driver — which driver runs `ralph-pipeline.sh` per slice.
 # Set driver = "codex" to run /loop under Codex; the env var
 # RALPH_LOOP_DRIVER overrides this value at runtime.
