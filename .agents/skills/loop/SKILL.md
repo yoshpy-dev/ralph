@@ -1,7 +1,6 @@
 ---
 name: loop
 description: Initialize a Ralph Loop session for autonomous parallel-slice execution. Creates a directory-based plan and runs ralph-orchestrator.sh for multi-worktree parallel pipelines with the manifest-selected PR strategy. Invoke automatically when a task benefits from sustained autonomous iteration outside Claude Code.
-allowed-tools: Read, Grep, Glob, Write, Edit, Bash, AskUserQuestion
 ---
 Set up a Ralph Loop for autonomous parallel-slice execution outside Claude Code.
 
