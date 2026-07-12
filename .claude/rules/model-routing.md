@@ -17,6 +17,43 @@ the prompt must carry acceptance criteria, exact verification commands, and a
 report contract (changed files, key decisions, verification evidence). A
 cheaper model with a precise plan beats an expensive model with a vague one.
 
+## Standard flow delegation (/work)
+
+Implementation slices in `/work` are delegated to the `implementer` subagent
+(`model: sonnet` pinned in frontmatter; Codex: `.codex/agents/implementer.toml`).
+The orchestrator (session model) retains planning, decomposition, handoff
+authoring, report adjudication, and final review — it does not write slice code
+itself.
+
+**Structured handoff must carry:**
+
+| Field | Required content |
+|-------|-----------------|
+| Plan path | worktree-relative path to the active plan |
+| Slice objective | single-sentence goal |
+| Acceptance criteria | the ACs this slice addresses |
+| Files in scope | exact list; implementer stages only these paths |
+| Exact verification commands | copy-paste ready |
+| Commit message format | conventional format string |
+
+**Report contract (implementer → orchestrator):** changed files, decisions/deviations,
+verification evidence, commit-boundary evidence (`git status --porcelain` +
+`git show --stat HEAD` output), commit SHA.
+
+**Inline exceptions** (no subagent dispatch needed):
+
+- Trivial single-file edits where the handoff overhead exceeds the change cost.
+- Dispatch failure → inline fallback, noted in the report (same convention as
+  the post-implementation pipeline fallback).
+
+**Escalating a judgment-heavy slice:** pass an explicit `model` on the Task
+call (e.g. `opus` for security-sensitive changes) — no new env knob.
+
+**Cross-review sync note:** `.claude/skills/cross-review/SKILL.md` reads
+`RALPH_CLAUDE_REVIEWER_MODEL` (with an `opus` fallback) for the claude reviewer
+path. Keep reviewer-model defaults in sync when changing `RALPH_CLAUDE_REVIEWER_MODEL`
+in `scripts/ralph-config.sh`.
+
 ## Rules
 
 - **Always pin `model:` in agent frontmatter.** Omitted `model:` means
