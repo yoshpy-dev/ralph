@@ -57,3 +57,35 @@ None identified for this plan. The worktree fixture (14e) covers the shared-comm
 ## Verdict
 
 PASS — 103/103 + 21/21 + 54/54 on targeted suites; full regression glob clean; 0 failures across all shell suites and Go packages. Proceed to /pr.
+
+---
+
+## Cycle 2 addendum (2026-07-12)
+
+**Trigger:** docs + 2-line orchestrator preserve-form fix committed since Cycle 1 (commits c3d89f2, d3c39f8, 9e79bdf).
+
+**Commits since Cycle 1:**
+- `c3d89f2 fix: preserve operator-supplied RALPH_XREVIEW_BASE in orchestrator`
+- `d3c39f8 docs: self-review cycle 2 addendum for xreview-base-detection`
+- `9e79bdf docs: verify cycle 2 addendum for xreview-base-detection`
+
+### Test execution (Cycle 2)
+
+| Suite / Command | Tests | Passed | Failed | Notes |
+| --- | --- | --- | --- | --- |
+| `tests/test-ralph-cli-driver.sh` | 103 | 103 | 0 | All 10 Test-14 gate-proof cases pass |
+| `tests/test-ralph-orchestrator-branch-names.sh` | 3 | 3 | 0 | orchestrator branch-name regression |
+| `tests/test-ralph-orchestrator-pr-strategy.sh` | 24 | 24 | 0 | PR strategy + override mismatch warning |
+| `./scripts/run-test.sh` (full regression glob) | all | all | 0 | 0 failures across all shell suites and Go packages |
+
+### Go packages (Cycle 2)
+
+All 8 packages pass: `internal/action`, `internal/cli`, `internal/config`, `internal/scaffold`, `internal/state`, `internal/ui`, `internal/ui/panes`, `internal/upgrade` — some from cache, `internal/scaffold` freshly run.
+
+### Regression specific to the orchestrator fix (c3d89f2)
+
+The `RALPH_XREVIEW_BASE` preserve-form fix is covered by Test 14b (`RALPH_XREVIEW_BASE=develop` override wins): PASS. The orchestrator-pr-strategy suite (24 tests) exercises the orchestrator code path that surrounds the fix, with no regressions.
+
+### Verdict (Cycle 2)
+
+PASS — 103 + 3 + 24 targeted tests clean; full regression glob clean; 0 failures. No new coverage gaps introduced by the docs/fix commits.
