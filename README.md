@@ -314,6 +314,7 @@ See `docs/roadmap/harness-maturity-model.md`. Short version:
 │   ├── upgrade/              # Diff engine + conflict resolution
 │   ├── config/               # ralph.toml parser
 │   ├── state/                # Pipeline state reader
+│   ├── insights/             # Insight event aggregation + backfill
 │   ├── watcher/              # fsnotify + polling fallback
 │   ├── ui/                   # Bubble Tea TUI
 │   └── action/               # CLI action executor
