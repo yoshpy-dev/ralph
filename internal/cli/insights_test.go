@@ -62,6 +62,33 @@ func TestInsightsCmd_NoData(t *testing.T) {
 	}
 }
 
+// TestInsightsCmd_JSONZeroData verifies that --json on an empty data dir
+// emits valid JSON (not the human-readable "no data yet" message). Fix 4.
+func TestInsightsCmd_JSONZeroData(t *testing.T) {
+	dir := t.TempDir()
+	eventsDir := filepath.Join(dir, "events")
+	receiptsPath := filepath.Join(dir, "receipts.jsonl")
+
+	out := runInsightsCmd(t,
+		"--events-dir", eventsDir,
+		"--receipts", receiptsPath,
+		"--json",
+	)
+
+	// Must be parseable JSON, not a human message.
+	var agg insights.AggregateResult
+	if err := json.Unmarshal([]byte(out), &agg); err != nil {
+		t.Fatalf("--json zero-data output is not valid JSON: %v\noutput:\n%s", err, out)
+	}
+	if agg.TotalEvents != 0 {
+		t.Errorf("TotalEvents = %d, want 0 (empty events dir)", agg.TotalEvents)
+	}
+	// Must NOT contain human-mode text.
+	if strings.Contains(out, "No insight data yet") {
+		t.Errorf("--json mode must not emit human message, got:\n%s", out)
+	}
+}
+
 func TestInsightsCmd_HumanOutput(t *testing.T) {
 	dir := t.TempDir()
 	eventsDir := filepath.Join(dir, "events")

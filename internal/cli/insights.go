@@ -68,18 +68,20 @@ func runInsights(eventsDir, receiptsPath string, jsonMode bool, cmd *cobra.Comma
 		insights.AggregateWithReceipts(agg, receipts, rStats)
 	}
 
-	// Zero-data early return.
+	if jsonMode {
+		// JSON mode always emits valid JSON — zero data is represented as an
+		// empty aggregate object, not a human-readable message.
+		enc := json.NewEncoder(cmd.OutOrStdout())
+		enc.SetIndent("", "  ")
+		return enc.Encode(agg)
+	}
+
+	// Zero-data early return — human mode only.
 	if agg.TotalEvents == 0 && !agg.Receipts.Present {
 		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "No insight data yet.")
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Expected events:   %s\n", eventsDir)
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Expected receipts: %s\n", receiptsPath)
 		return nil
-	}
-
-	if jsonMode {
-		enc := json.NewEncoder(cmd.OutOrStdout())
-		enc.SetIndent("", "  ")
-		return enc.Encode(agg)
 	}
 
 	return printInsightsHuman(agg, cmd)
@@ -297,20 +299,23 @@ func runInsightsBackfill(reportsDir, eventsDir string, apply bool, cmd *cobra.Co
 	var parseMiss int
 
 	for _, f := range files {
-		bev, err := insights.ParseReport(f)
+		bevs, err := insights.ParseReport(f)
 		if err != nil {
 			parseMiss++
 			continue
 		}
-		if bev == nil {
+		if bevs == nil {
 			continue // unrecognised file type
 		}
-		if bev.ParseMiss {
-			parseMiss++
-			continue
+		for i := range bevs {
+			bev := &bevs[i]
+			if bev.ParseMiss {
+				parseMiss++
+				continue
+			}
+			key := insights.DedupeKey(bev.Event)
+			entries = append(entries, entry{ev: bev, key: key, isDupe: existing[key]})
 		}
-		key := insights.DedupeKey(bev.Event)
-		entries = append(entries, entry{ev: bev, key: key, isDupe: existing[key]})
 	}
 
 	newCount := 0

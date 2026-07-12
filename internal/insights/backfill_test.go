@@ -9,17 +9,30 @@ import (
 
 const testdataReports = "testdata/reports"
 
+// firstEvent is a helper that asserts ParseReport returns exactly one event
+// and returns it. Used for single-cycle report types (self_review, verify, test)
+// and single-cycle cross-review fixtures.
+func firstEvent(t *testing.T, path string) BackfillEvent {
+	t.Helper()
+	bevs, err := ParseReport(path)
+	if err != nil {
+		t.Fatalf("ParseReport: %v", err)
+	}
+	if len(bevs) == 0 {
+		t.Fatal("expected at least one BackfillEvent, got none")
+	}
+	if len(bevs) != 1 {
+		t.Fatalf("expected exactly 1 BackfillEvent, got %d", len(bevs))
+	}
+	return bevs[0]
+}
+
 // --- ParseReport tests ---
 
 func TestParseReport_SelfReview_WithFindings(t *testing.T) {
 	path := filepath.Join(testdataReports, "self-review-2026-07-12-worktree-gc-exit-code.md")
-	bev, err := ParseReport(path)
-	if err != nil {
-		t.Fatalf("ParseReport: %v", err)
-	}
-	if bev == nil {
-		t.Fatal("expected non-nil BackfillEvent")
-	}
+	bev := firstEvent(t, path)
+
 	if bev.ParseMiss {
 		t.Errorf("ParseMiss = true: %s", bev.ParseMissReason)
 	}
@@ -35,8 +48,10 @@ func TestParseReport_SelfReview_WithFindings(t *testing.T) {
 	if bev.Source != "backfill" {
 		t.Errorf("source = %q, want backfill", bev.Source)
 	}
-	if bev.SourceReportPath != path {
-		t.Errorf("source_report_path = %q, want %q", bev.SourceReportPath, path)
+	// SourceReportPath must be the absolute form of path (Fix 3: filepath.Abs).
+	absPath, _ := filepath.Abs(path)
+	if bev.SourceReportPath != absPath {
+		t.Errorf("source_report_path = %q, want %q", bev.SourceReportPath, absPath)
 	}
 	// Fixture has 1 LOW finding → verdict=pass (no CRITICAL/HIGH)
 	if bev.Findings.Low != 1 {
@@ -50,13 +65,8 @@ func TestParseReport_SelfReview_WithFindings(t *testing.T) {
 func TestParseReport_SelfReview_MultipleFindings(t *testing.T) {
 	// self-review-2026-07-11-loop-model-routing.md has 3 LOW findings
 	path := filepath.Join(testdataReports, "self-review-2026-07-11-loop-model-routing.md")
-	bev, err := ParseReport(path)
-	if err != nil {
-		t.Fatalf("ParseReport: %v", err)
-	}
-	if bev == nil {
-		t.Fatal("nil BackfillEvent")
-	}
+	bev := firstEvent(t, path)
+
 	if bev.ParseMiss {
 		t.Errorf("ParseMiss = true: %s", bev.ParseMissReason)
 	}
@@ -70,13 +80,8 @@ func TestParseReport_SelfReview_MultipleFindings(t *testing.T) {
 
 func TestParseReport_Verify_Pass(t *testing.T) {
 	path := filepath.Join(testdataReports, "verify-2026-07-12-worktree-gc-exit-code.md")
-	bev, err := ParseReport(path)
-	if err != nil {
-		t.Fatalf("ParseReport: %v", err)
-	}
-	if bev == nil {
-		t.Fatal("nil BackfillEvent")
-	}
+	bev := firstEvent(t, path)
+
 	if bev.ParseMiss {
 		t.Errorf("ParseMiss = true: %s", bev.ParseMissReason)
 	}
@@ -93,13 +98,8 @@ func TestParseReport_Verify_Pass(t *testing.T) {
 
 func TestParseReport_Verify_Fail(t *testing.T) {
 	path := filepath.Join(testdataReports, "verify-fail-example.md")
-	bev, err := ParseReport(path)
-	if err != nil {
-		t.Fatalf("ParseReport: %v", err)
-	}
-	if bev == nil {
-		t.Fatal("nil BackfillEvent")
-	}
+	bev := firstEvent(t, path)
+
 	if bev.ParseMiss {
 		t.Errorf("ParseMiss = true: %s", bev.ParseMissReason)
 	}
@@ -110,13 +110,8 @@ func TestParseReport_Verify_Fail(t *testing.T) {
 
 func TestParseReport_Test_Pass(t *testing.T) {
 	path := filepath.Join(testdataReports, "test-2026-07-12-worktree-gc-exit-code.md")
-	bev, err := ParseReport(path)
-	if err != nil {
-		t.Fatalf("ParseReport: %v", err)
-	}
-	if bev == nil {
-		t.Fatal("nil BackfillEvent")
-	}
+	bev := firstEvent(t, path)
+
 	if bev.ParseMiss {
 		t.Errorf("ParseMiss = true: %s", bev.ParseMissReason)
 	}
@@ -130,13 +125,8 @@ func TestParseReport_Test_Pass(t *testing.T) {
 
 func TestParseReport_Test_Fail(t *testing.T) {
 	path := filepath.Join(testdataReports, "test-fail-example.md")
-	bev, err := ParseReport(path)
-	if err != nil {
-		t.Fatalf("ParseReport: %v", err)
-	}
-	if bev == nil {
-		t.Fatal("nil BackfillEvent")
-	}
+	bev := firstEvent(t, path)
+
 	if bev.ParseMiss {
 		t.Errorf("ParseMiss = true: %s", bev.ParseMissReason)
 	}
@@ -147,13 +137,8 @@ func TestParseReport_Test_Fail(t *testing.T) {
 
 func TestParseReport_CrossReview_ZeroCounts(t *testing.T) {
 	path := filepath.Join(testdataReports, "cross-review-triage-worktree-gc-exit-code.md")
-	bev, err := ParseReport(path)
-	if err != nil {
-		t.Fatalf("ParseReport: %v", err)
-	}
-	if bev == nil {
-		t.Fatal("nil BackfillEvent")
-	}
+	bev := firstEvent(t, path)
+
 	if bev.ParseMiss {
 		t.Errorf("ParseMiss = true: %s", bev.ParseMissReason)
 	}
@@ -168,23 +153,67 @@ func TestParseReport_CrossReview_ZeroCounts(t *testing.T) {
 	}
 }
 
-func TestParseReport_CrossReview_ActionRequired(t *testing.T) {
+// TestParseReport_CrossReview_MultiCycle verifies that a two-cycle cross-review
+// report (cycle-1 ACTION_REQUIRED, cycle-2 pass) yields two distinct BackfillEvents
+// with the correct triage counts per cycle.
+//
+// The fixture cross-review-triage-loop-model-routing.md has:
+//   - Line 9:  "After triage: ACTION_REQUIRED=2, ..." (no preceding ## Cycle heading → cycle 1)
+//   - Line 51: "## Cycle 2 (2026-07-11)"            (explicit heading → pendingCycle=2)
+//   - Line 63: "After triage: ACTION_REQUIRED=0, ..." (uses pendingCycle=2)
+func TestParseReport_CrossReview_MultiCycle(t *testing.T) {
 	path := filepath.Join(testdataReports, "cross-review-triage-loop-model-routing.md")
-	bev, err := ParseReport(path)
+	bevs, err := ParseReport(path)
 	if err != nil {
 		t.Fatalf("ParseReport: %v", err)
 	}
-	if bev == nil {
-		t.Fatal("nil BackfillEvent")
+	if len(bevs) != 2 {
+		t.Fatalf("expected 2 BackfillEvents (one per cycle), got %d", len(bevs))
 	}
-	if bev.ParseMiss {
-		t.Errorf("ParseMiss = true: %s", bev.ParseMissReason)
+
+	// Cycle 1: ACTION_REQUIRED=2 → verdict=action_required
+	c1 := bevs[0]
+	if c1.ParseMiss {
+		t.Errorf("cycle 1 ParseMiss = true: %s", c1.ParseMissReason)
 	}
-	if bev.Triage.ActionRequired != 2 {
-		t.Errorf("triage.action_required = %d, want 2", bev.Triage.ActionRequired)
+	if c1.Cycle != 1 {
+		t.Errorf("cycle 1 Cycle = %d, want 1", c1.Cycle)
 	}
-	if bev.Verdict != "action_required" {
-		t.Errorf("verdict = %q, want action_required", bev.Verdict)
+	if c1.Triage.ActionRequired != 2 {
+		t.Errorf("cycle 1 triage.action_required = %d, want 2", c1.Triage.ActionRequired)
+	}
+	if c1.Verdict != "action_required" {
+		t.Errorf("cycle 1 verdict = %q, want action_required", c1.Verdict)
+	}
+
+	// Cycle 2: ACTION_REQUIRED=0 → verdict=pass
+	c2 := bevs[1]
+	if c2.ParseMiss {
+		t.Errorf("cycle 2 ParseMiss = true: %s", c2.ParseMissReason)
+	}
+	if c2.Cycle != 2 {
+		t.Errorf("cycle 2 Cycle = %d, want 2", c2.Cycle)
+	}
+	if c2.Triage.ActionRequired != 0 {
+		t.Errorf("cycle 2 triage.action_required = %d, want 0", c2.Triage.ActionRequired)
+	}
+	if c2.Verdict != "pass" {
+		t.Errorf("cycle 2 verdict = %q, want pass", c2.Verdict)
+	}
+
+	// Both events must share the same slug and phase.
+	if c1.Slug != c2.Slug {
+		t.Errorf("slug mismatch: cycle1=%q cycle2=%q", c1.Slug, c2.Slug)
+	}
+	if c1.Phase != "cross_review" || c2.Phase != "cross_review" {
+		t.Errorf("phase mismatch: cycle1=%q cycle2=%q", c1.Phase, c2.Phase)
+	}
+
+	// DedupeKeys must be distinct (different cycle suffix).
+	k1 := DedupeKey(c1.Event)
+	k2 := DedupeKey(c2.Event)
+	if k1 == k2 {
+		t.Errorf("DedupeKey collision: both = %q", k1)
 	}
 }
 
@@ -195,12 +224,12 @@ func TestParseReport_UnrecognisedType(t *testing.T) {
 	if err := os.WriteFile(path, []byte("# Walkthrough\nsome content\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	bev, err := ParseReport(path)
+	bevs, err := ParseReport(path)
 	if err != nil {
 		t.Fatalf("ParseReport: %v", err)
 	}
-	if bev != nil {
-		t.Errorf("expected nil for unrecognised type, got %+v", bev)
+	if bevs != nil {
+		t.Errorf("expected nil for unrecognised type, got %+v", bevs)
 	}
 }
 
@@ -208,6 +237,50 @@ func TestParseReport_MissingFile(t *testing.T) {
 	_, err := ParseReport("/nonexistent/self-review-something.md")
 	if err == nil {
 		t.Error("expected error for missing file")
+	}
+}
+
+// TestParseReport_PathNormalization verifies that a relative path and the
+// corresponding absolute path yield events with the same SourceReportPath
+// (the absolute form), so their DedupeKeys are identical. (Fix 3 regression)
+func TestParseReport_PathNormalization(t *testing.T) {
+	absPath, err := filepath.Abs(filepath.Join(testdataReports, "verify-2026-07-12-worktree-gc-exit-code.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Parse with relative path (cwd is package dir when running go test).
+	relPath := filepath.Join(testdataReports, "verify-2026-07-12-worktree-gc-exit-code.md")
+	bevsRel, err := ParseReport(relPath)
+	if err != nil {
+		t.Fatalf("ParseReport(relative): %v", err)
+	}
+	if len(bevsRel) == 0 {
+		t.Fatal("no events from relative path")
+	}
+
+	// Parse with absolute path.
+	bevsAbs, err := ParseReport(absPath)
+	if err != nil {
+		t.Fatalf("ParseReport(absolute): %v", err)
+	}
+	if len(bevsAbs) == 0 {
+		t.Fatal("no events from absolute path")
+	}
+
+	// Both must yield the same SourceReportPath (absolute).
+	if bevsRel[0].SourceReportPath != absPath {
+		t.Errorf("relative parse SourceReportPath = %q, want %q", bevsRel[0].SourceReportPath, absPath)
+	}
+	if bevsAbs[0].SourceReportPath != absPath {
+		t.Errorf("absolute parse SourceReportPath = %q, want %q", bevsAbs[0].SourceReportPath, absPath)
+	}
+
+	// DedupeKeys must be identical.
+	kRel := DedupeKey(bevsRel[0].Event)
+	kAbs := DedupeKey(bevsAbs[0].Event)
+	if kRel != kAbs {
+		t.Errorf("DedupeKey mismatch: rel=%q abs=%q", kRel, kAbs)
 	}
 }
 
@@ -253,6 +326,134 @@ func TestRunBackfill_Idempotency(t *testing.T) {
 	if stats2.Duplicate != stats1.Written {
 		t.Errorf("second run duplicate=%d, want %d (all first-run events should be dupes)",
 			stats2.Duplicate, stats1.Written)
+	}
+}
+
+// TestRunBackfill_RelThenAbsDedupe verifies that applying backfill with a
+// relative reports-dir and then again with the absolute form of the same dir
+// produces zero new events on the second run. (Fix 3 regression test)
+func TestRunBackfill_RelThenAbsDedupe(t *testing.T) {
+	eventsDir := t.TempDir()
+
+	// Use testdata/reports as a relative path (tests run with cwd = package dir).
+	relDir := testdataReports
+	absDir, err := filepath.Abs(relDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// First run with relative path.
+	stats1, err := RunBackfill(relDir, eventsDir, true)
+	if err != nil {
+		t.Fatalf("first RunBackfill (relative): %v", err)
+	}
+	if stats1.Written == 0 {
+		t.Fatal("first run wrote 0 events, expected > 0")
+	}
+	t.Logf("first run (relative): written=%d", stats1.Written)
+
+	// Second run with absolute path — must write zero new events.
+	stats2, err := RunBackfill(absDir, eventsDir, true)
+	if err != nil {
+		t.Fatalf("second RunBackfill (absolute): %v", err)
+	}
+	if stats2.Written != 0 {
+		t.Errorf("second run (absolute) wrote %d new events, want 0 (rel-then-abs dedupe)", stats2.Written)
+	}
+	t.Logf("second run (absolute): duplicate=%d written=%d", stats2.Duplicate, stats2.Written)
+}
+
+// TestRunBackfill_MultiCycleReport verifies that a cross-review report with
+// two cycles (cycle-1 action_required, cycle-2 pass) yields two distinct
+// events with correct triage counts, and that a second apply run adds zero
+// new events (idempotent per cycle).
+func TestRunBackfill_MultiCycleReport(t *testing.T) {
+	reportsDir := t.TempDir()
+	eventsDir := t.TempDir()
+
+	// Write a two-cycle cross-review-triage fixture.
+	content := `# Cross-review triage report: multi-cycle-slug
+
+- Date: 2026-07-13
+- After triage: ACTION_REQUIRED=3, WORTH_CONSIDERING=1, DISMISSED=0
+
+## ACTION_REQUIRED
+
+| # | Finding | Rationale | Files |
+|---|---------|-----------|-------|
+| 1 | Bug A   | Verified  | foo.go |
+
+## Cycle 2 (2026-07-13)
+
+- Fixes applied.
+- After triage: ACTION_REQUIRED=0, WORTH_CONSIDERING=0, DISMISSED=0
+`
+	fixturePath := filepath.Join(reportsDir, "cross-review-triage-multi-cycle-slug.md")
+	if err := os.WriteFile(fixturePath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// First apply.
+	stats1, err := RunBackfill(reportsDir, eventsDir, true)
+	if err != nil {
+		t.Fatalf("first RunBackfill: %v", err)
+	}
+	if stats1.Written != 2 {
+		t.Errorf("first run written = %d, want 2 (one per cycle)", stats1.Written)
+	}
+
+	// Read back events and verify per-cycle correctness.
+	events, _, err := ReadEvents(eventsDir)
+	if err != nil {
+		t.Fatalf("ReadEvents: %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("events = %d, want 2", len(events))
+	}
+
+	byC := make(map[int]Event)
+	for _, ev := range events {
+		byC[ev.Cycle] = ev
+	}
+
+	c1, ok1 := byC[1]
+	c2, ok2 := byC[2]
+	if !ok1 || !ok2 {
+		t.Fatalf("missing events: cycles present = %v", func() []int {
+			var cs []int
+			for k := range byC {
+				cs = append(cs, k)
+			}
+			return cs
+		}())
+	}
+
+	// Cycle 1: ACTION_REQUIRED=3 → verdict=action_required
+	if c1.Triage.ActionRequired != 3 {
+		t.Errorf("cycle1 action_required = %d, want 3", c1.Triage.ActionRequired)
+	}
+	if c1.Verdict != "action_required" {
+		t.Errorf("cycle1 verdict = %q, want action_required", c1.Verdict)
+	}
+
+	// Cycle 2: ACTION_REQUIRED=0 → verdict=pass
+	if c2.Triage.ActionRequired != 0 {
+		t.Errorf("cycle2 action_required = %d, want 0", c2.Triage.ActionRequired)
+	}
+	if c2.Verdict != "pass" {
+		t.Errorf("cycle2 verdict = %q, want pass", c2.Verdict)
+	}
+
+	// Second apply must write zero new events (idempotent per cycle).
+	stats2, err := RunBackfill(reportsDir, eventsDir, true)
+	if err != nil {
+		t.Fatalf("second RunBackfill: %v", err)
+	}
+	if stats2.Written != 0 {
+		t.Errorf("second run written = %d, want 0 (idempotent)", stats2.Written)
+	}
+	if stats2.Duplicate != 2 {
+		t.Errorf("second run duplicate = %d, want 2", stats2.Duplicate)
 	}
 }
 

@@ -17,14 +17,14 @@ Each event is one JSON line appended to a per-task file under `events/`.
 | `slug` | string | yes | Task slug (matches plan file basename, e.g. `ralph-insights`). |
 | `flow` | string | yes | `standard` or `loop`. Pipeline-emitted events are always `loop`. Skill-emitted events use `standard`. |
 | `phase` | string | yes | Phase name: `implement`, `self_review`, `verify`, `test`, `sync_docs`, `cross_review`, `pr`. |
-| `cycle` | integer | yes | 1-based outer cycle number. |
+| `cycle` | integer | yes | 1-based outer cycle number. Default: `1` when `--cycle` is omitted from `insights-append.sh`. |
 | `verdict` | string | yes | `pass`, `fail`, `complete`, `action_required`, or `n/a`. |
 | `findings` | object | yes | `{"critical": N, "high": N, "medium": N, "low": N}`. Use `0` for phases where findings are not applicable. |
 | `triage` | object | yes | `{"action_required": N, "worth_considering": N, "dismissed": N}`. Use `0` for non-cross-review phases. |
-| `driver` | string | yes | `claude` or `codex`. |
-| `requested_model` | string | yes | Model requested for this phase (e.g. `sonnet`, `opus`). |
-| `effective_model` | string | yes | Model actually used. Equals `requested_model` for the Claude driver; `codex-default` for the Codex driver. |
-| `honored` | boolean | yes | `true` if `effective_model == requested_model`. `false` for Codex driver (known gap). |
+| `driver` | string | required for `source:pipeline`; optional for `source:skill\|backfill` | `claude` or `codex`. |
+| `requested_model` | string | required for `source:pipeline`; optional for `source:skill\|backfill` | Model requested for this phase (e.g. `sonnet`, `opus`). |
+| `effective_model` | string | required for `source:pipeline`; optional for `source:skill\|backfill` | Model actually used. Equals `requested_model` for the Claude driver; `codex-default` for the Codex driver. |
+| `honored` | boolean | required for `source:pipeline`; optional for `source:skill\|backfill` | `true` if `effective_model == requested_model`. `false` for Codex driver (known gap). |
 | `source` | string | yes | `pipeline` (written by `ralph-pipeline.sh`), `skill` (written by a post-implementation skill agent), or `backfill` (written by `ralph insights backfill`). |
 
 ### Optional fields

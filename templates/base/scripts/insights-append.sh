@@ -51,7 +51,7 @@ Required:
 
 Optional:
   --run-id ID              Per-pipeline-invocation ID (default: omitted)
-  --cycle N                1-based outer cycle number (default: omitted)
+  --cycle N                1-based outer cycle number (default: 1)
   --critical N             CRITICAL finding count (default: 0)
   --high N                 HIGH finding count (default: 0)
   --medium N               MEDIUM finding count (default: 0)
@@ -170,9 +170,11 @@ validate_nonneg_int "action-required"   "$_action_required"
 validate_nonneg_int "worth-considering" "$_worth_considering"
 validate_nonneg_int "dismissed"         "$_dismissed"
 
-if [ -n "$_cycle" ]; then
-  validate_nonneg_int "cycle" "$_cycle"
-fi
+# Default cycle to 1 when omitted (source:pipeline events are always cycle >= 1;
+# source:skill events written by post-implementation skills also use cycle 1 for
+# the standard flow where --cycle is typically omitted).
+_cycle="${_cycle:-1}"
+validate_nonneg_int "cycle" "$_cycle"
 
 # ─── Destination ─────────────────────────────────────────────────────────────
 
@@ -193,7 +195,7 @@ _jq_filter='{
   slug: $slug,
   flow: $flow,
   phase: $phase,
-  cycle: ($cycle | if . == "" then null else tonumber end),
+  cycle: ($cycle | tonumber),
   verdict: $verdict,
   findings: {
     critical: ($critical | tonumber),

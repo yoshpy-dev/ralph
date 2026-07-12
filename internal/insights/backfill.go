@@ -29,12 +29,39 @@ type BackfillStats struct {
 	Written   int
 }
 
-// ParseReport parses one docs/reports/*.md file into a BackfillEvent.
+// ParseReport parses one docs/reports/*.md file into zero or more BackfillEvents.
 // The phase is inferred from the filename prefix.
 // ts is set to the file's mtime (not now) so history ordering is meaningful.
-// source_report_path is embedded in the event for dedup.
+// source_report_path is embedded in each event for dedup.
+//
+// For cross-review-triage reports, one event is emitted per pipeline cycle found
+// in the file. Cycle detection strategy:
+//   - Each occurrence of "After triage: ACTION_REQUIRED=N, ..." is assigned to a
+//     cycle in order: 1st occurrence = cycle 1, 2nd = cycle 2, etc.
+//   - When an explicit "## Cycle N" section heading appears before an "After triage:"
+//     line, the heading's cycle number takes precedence over the occurrence counter.
+//     This matches the real report format in docs/reports/cross-review-triage-*.md
+//     where the initial triage result appears in the file header (cycle 1) and
+//     subsequent pipeline cycles are introduced by "## Cycle N (date)" headings.
+//   - Explicit markers are preferred over occurrence counting when present, because
+//     they are author-stated and survive reordering or future format changes.
+//
+// For self-review, verify, and test reports, a single event is emitted.
+// Cycle-2 addenda sections are not present in this repo's current report format
+// for these types — each phase gets a separate report file per pipeline run, so
+// multi-cycle output is represented as multiple files rather than addenda in one.
+//
 // Returns (nil, nil) when the file is not a recognised report type.
-func ParseReport(path string) (*BackfillEvent, error) {
+func ParseReport(path string) ([]BackfillEvent, error) {
+	// Normalize path to absolute so dedupe keys are stable regardless of
+	// whether the caller passes a relative or absolute path. Fix 3: filepath.Abs
+	// before storing to prevent rel-vs-abs duplicate events.
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("abs %s: %w", path, err)
+	}
+	path = absPath
+
 	base := filepath.Base(path)
 
 	// Determine phase from filename prefix.
@@ -59,23 +86,27 @@ func ParseReport(path string) (*BackfillEvent, error) {
 	}
 	mtime := info.ModTime().UTC()
 
-	slug, cycle := slugAndCycleFromFilename(base, phase)
+	slug, _ := slugAndCycleFromFilename(base, phase)
+	flow := detectFlow(path)
 
-	ev := &BackfillEvent{}
-	ev.Schema = 1
-	ev.TS = mtime.Format(time.RFC3339)
-	ev.Slug = slug
-	ev.Phase = phase
-	ev.Cycle = cycle
-	ev.Source = "backfill"
-	ev.SourceReportPath = path
-
-	// Flow is best-effort: we can't reliably detect standard vs loop from
-	// report content in all cases, so we omit it (empty string → omitted from JSON).
-	ev.Flow = detectFlow(path)
+	makeBase := func(cycle int) BackfillEvent {
+		ev := BackfillEvent{}
+		ev.Schema = 1
+		ev.TS = mtime.Format(time.RFC3339)
+		ev.Slug = slug
+		ev.Phase = phase
+		ev.Cycle = cycle
+		ev.Source = "backfill"
+		ev.SourceReportPath = path
+		// Flow is best-effort: we can't reliably detect standard vs loop from
+		// report content in all cases, so we omit it (empty string → omitted from JSON).
+		ev.Flow = flow
+		return ev
+	}
 
 	switch phase {
 	case "self_review":
+		ev := makeBase(1)
 		findings, miss, reason := parseSelfReviewFindings(path)
 		if miss {
 			ev.ParseMiss = true
@@ -85,7 +116,10 @@ func ParseReport(path string) (*BackfillEvent, error) {
 			ev.Findings = findings
 			ev.Verdict = selfReviewVerdict(findings)
 		}
+		return []BackfillEvent{ev}, nil
+
 	case "verify":
+		ev := makeBase(1)
 		verdict, miss, reason := parseVerifyVerdict(path)
 		if miss {
 			ev.ParseMiss = true
@@ -94,7 +128,10 @@ func ParseReport(path string) (*BackfillEvent, error) {
 		} else {
 			ev.Verdict = verdict
 		}
+		return []BackfillEvent{ev}, nil
+
 	case "test":
+		ev := makeBase(1)
 		verdict, miss, reason := parseTestVerdict(path)
 		if miss {
 			ev.ParseMiss = true
@@ -103,28 +140,41 @@ func ParseReport(path string) (*BackfillEvent, error) {
 		} else {
 			ev.Verdict = verdict
 		}
+		return []BackfillEvent{ev}, nil
+
 	case "cross_review":
-		triage, miss, reason := parseCrossReviewTriage(path)
+		// parseCrossReviewAllCycles returns one entry per cycle found in the file.
+		entries, miss, reason := parseCrossReviewAllCycles(path)
 		if miss {
+			ev := makeBase(1)
 			ev.ParseMiss = true
 			ev.ParseMissReason = reason
 			ev.Verdict = "n/a"
-		} else {
-			ev.Triage = triage
-			ev.Verdict = crossReviewVerdict(triage)
+			return []BackfillEvent{ev}, nil
 		}
+		var evs []BackfillEvent
+		for _, entry := range entries {
+			ev := makeBase(entry.cycle)
+			ev.Triage = entry.triage
+			ev.Verdict = crossReviewVerdict(entry.triage)
+			evs = append(evs, ev)
+		}
+		return evs, nil
 	}
 
-	return ev, nil
+	return nil, nil
 }
 
-// slugAndCycleFromFilename extracts the task slug and cycle from a report filename.
+// slugAndCycleFromFilename extracts the task slug from a report filename.
+// The cycle return value is always 1 — callers that need per-body-cycle
+// splitting (cross_review) use parseCrossReviewAllCycles instead.
+//
 // Naming conventions handled:
 //
-//	self-review-<date>-<slug>.md   → slug=<slug>, cycle=1
-//	self-review-<slug>.md          → slug=<slug>, cycle=1
-//	verify-<date>-<slug>.md        → slug=<slug>, cycle=1
-//	cross-review-triage-<slug>.md  → slug=<slug>, cycle=1
+//	self-review-<date>-<slug>.md   → slug=<slug>
+//	self-review-<slug>.md          → slug=<slug>
+//	verify-<date>-<slug>.md        → slug=<slug>
+//	cross-review-triage-<slug>.md  → slug=<slug>
 func slugAndCycleFromFilename(base, phase string) (slug string, cycle int) {
 	// Strip phase prefix and .md suffix.
 	var prefix string
@@ -149,9 +199,8 @@ func slugAndCycleFromFilename(base, phase string) (slug string, cycle int) {
 		slug = name
 	}
 
-	// Cycle is always 1 for backfill from a single report file.
-	// Multi-cycle addenda (cycle-2 markers in the report body) are not
-	// a pattern seen in this repo's reports.
+	// Cycle is always 1 for the filename-level assignment; body-level
+	// cycle splitting is handled by parseCrossReviewAllCycles for cross_review.
 	cycle = 1
 	return slug, cycle
 }
@@ -321,37 +370,92 @@ func parseTestVerdict(path string) (string, bool, string) {
 	return "", true, "no verdict section with Fail: N found"
 }
 
-// parseCrossReviewTriage extracts triage counts from a cross-review report.
-// It looks for "After triage: ACTION_REQUIRED=N, WORTH_CONSIDERING=N, DISMISSED=N".
-func parseCrossReviewTriage(path string) (Triage, bool, string) {
+// crossReviewCycleEntry holds one cycle's triage result from a cross-review report.
+type crossReviewCycleEntry struct {
+	cycle  int
+	triage Triage
+}
+
+// parseCrossReviewAllCycles extracts triage counts for every pipeline cycle
+// present in a cross-review-triage report. It looks for two kinds of markers:
+//
+//  1. Explicit section headings of the form "## Cycle N" or "## Cycle N (date)".
+//     When such a heading appears before an "After triage:" line, the heading's N
+//     is used as the cycle number, overriding the occurrence counter. This matches
+//     the real report format in docs/reports/cross-review-triage-*.md where cycle-1
+//     data appears in the file header and subsequent cycles start a new "## Cycle N"
+//     section (e.g. "## Cycle 2 (2026-07-11)" at line 51 of loop-model-routing).
+//
+//  2. "After triage: ACTION_REQUIRED=N, WORTH_CONSIDERING=N, DISMISSED=N" lines.
+//     Each occurrence produces one event. When no explicit "## Cycle N" heading has
+//     been seen since the previous triage line, the occurrence counter (starting at 1)
+//     determines the cycle number.
+//
+// Explicit markers are preferred over occurrence counting because they are
+// author-stated and survive future format changes or section reordering.
+func parseCrossReviewAllCycles(path string) ([]crossReviewCycleEntry, bool, string) {
 	f, err := os.Open(path)
 	if err != nil {
-		return Triage{}, true, fmt.Sprintf("open: %v", err)
+		return nil, true, fmt.Sprintf("open: %v", err)
 	}
 	defer func() { _ = f.Close() }()
 
 	// Match: "After triage: ACTION_REQUIRED=N, WORTH_CONSIDERING=N, DISMISSED=N"
 	triageRe := regexp.MustCompile(`(?i)After triage:\s*ACTION_REQUIRED=(\d+),\s*WORTH_CONSIDERING=(\d+),\s*DISMISSED=(\d+)`)
+	// Match: "## Cycle N" or "## Cycle N (date)" — explicit cycle section headings.
+	cycleHeadingRe := regexp.MustCompile(`(?i)^##\s+Cycle\s+(\d+)`)
+
+	var entries []crossReviewCycleEntry
+	occurrenceCount := 0
+	// pendingCycle tracks the cycle number from the most recent "## Cycle N"
+	// heading seen since the last "After triage:" line. 0 means no explicit
+	// heading has been seen; in that case occurrence counting is used.
+	pendingCycle := 0
 
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
-		m := triageRe.FindStringSubmatch(scanner.Text())
-		if m != nil {
+		line := scanner.Text()
+
+		// Check for an explicit "## Cycle N" heading.
+		if m := cycleHeadingRe.FindStringSubmatch(line); m != nil {
+			n, _ := strconv.Atoi(m[1])
+			pendingCycle = n
+			continue
+		}
+
+		// Check for a triage summary line.
+		if m := triageRe.FindStringSubmatch(line); m != nil {
+			occurrenceCount++
 			ar, _ := strconv.Atoi(m[1])
 			wc, _ := strconv.Atoi(m[2])
 			d, _ := strconv.Atoi(m[3])
-			return Triage{
-				ActionRequired:   ar,
-				WorthConsidering: wc,
-				Dismissed:        d,
-			}, false, ""
+
+			cycle := occurrenceCount
+			if pendingCycle > 0 {
+				// Explicit heading takes precedence over occurrence counter.
+				cycle = pendingCycle
+			}
+			// Reset pending heading after consuming it.
+			pendingCycle = 0
+
+			entries = append(entries, crossReviewCycleEntry{
+				cycle: cycle,
+				triage: Triage{
+					ActionRequired:   ar,
+					WorthConsidering: wc,
+					Dismissed:        d,
+				},
+			})
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return Triage{}, true, fmt.Sprintf("scan: %v", err)
+		return nil, true, fmt.Sprintf("scan: %v", err)
 	}
 
-	return Triage{}, true, "no 'After triage:' line found"
+	if len(entries) == 0 {
+		return nil, true, "no 'After triage:' line found"
+	}
+	return entries, false, ""
 }
 
 // crossReviewVerdict returns the verdict based on triage counts.
@@ -439,36 +543,40 @@ func RunBackfill(reportsDir, eventsDir string, apply bool) (BackfillStats, error
 	}
 
 	for _, f := range files {
-		bev, err := ParseReport(f)
+		bevs, err := ParseReport(f)
 		if err != nil {
 			// Non-fatal: count as parse miss.
 			stats.ParseMiss++
 			continue
 		}
-		if bev == nil {
+		if bevs == nil {
 			// Unrecognised file type — skip silently.
 			continue
 		}
-		if bev.ParseMiss {
-			stats.ParseMiss++
-			continue
-		}
 
-		key := DedupeKey(bev.Event)
-		if existing[key] {
-			stats.Duplicate++
-			continue
-		}
-
-		stats.Parsed++
-
-		if apply {
-			if err := AppendBackfillEvent(eventsDir, bev.Event); err != nil {
-				return stats, fmt.Errorf("appending event for %s: %w", f, err)
+		for i := range bevs {
+			bev := &bevs[i]
+			if bev.ParseMiss {
+				stats.ParseMiss++
+				continue
 			}
-			// Mark as existing so a second call in the same run dedupes correctly.
-			existing[key] = true
-			stats.Written++
+
+			key := DedupeKey(bev.Event)
+			if existing[key] {
+				stats.Duplicate++
+				continue
+			}
+
+			stats.Parsed++
+
+			if apply {
+				if err := AppendBackfillEvent(eventsDir, bev.Event); err != nil {
+					return stats, fmt.Errorf("appending event for %s: %w", f, err)
+				}
+				// Mark as existing so a second call in the same run dedupes correctly.
+				existing[key] = true
+				stats.Written++
+			}
 		}
 	}
 

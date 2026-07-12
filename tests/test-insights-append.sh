@@ -295,9 +295,9 @@ _model7="$(printf '%s\n' "$_line7" | jq -r '.requested_model // "ABSENT"')"
 assert_eq "7a. driver absent when not provided"          "ABSENT" "$_driver7"
 assert_eq "7b. requested_model absent when not provided" "ABSENT" "$_model7"
 
-# cycle null when not provided
+# cycle defaults to 1 when --cycle is omitted (Fix 2: default cycle=1)
 _cycle7="$(printf '%s\n' "$_line7" | jq -r '.cycle | tostring')"
-assert_eq "7c. cycle=null when not provided" "null" "$_cycle7"
+assert_eq "7c. cycle=1 when --cycle omitted (default)" "1" "$_cycle7"
 
 cd "$OLD_DIR"; rm -rf "$TMP7"; trap - EXIT INT TERM
 
