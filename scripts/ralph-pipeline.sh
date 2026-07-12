@@ -1,5 +1,5 @@
-#!/usr/bin/env sh
-set -eu
+#!/usr/bin/env bash
+set -euo pipefail
 
 # Ralph Pipeline orchestrator — full autonomous development pipeline
 # Inner Loop: implement → self-review → verify → test (repeat on failure)

@@ -1,5 +1,5 @@
-#!/usr/bin/env sh
-set -eu
+#!/usr/bin/env bash
+set -euo pipefail
 
 # Ralph Orchestrator — multi-worktree parallel pipeline execution
 #
@@ -597,7 +597,8 @@ normalize_pr_groups() {
     done > "${_groups_out_file}.$$.slices"
 
     if grep -q '^ERROR:' "${_groups_out_file}.$$.slices"; then
-      _bad="$(grep '^ERROR:' "${_groups_out_file}.$$.slices" | sed 's/^ERROR://' | head -1)"
+      # head -1 may cause SIGPIPE to sed/grep if multiple ERROR lines exist; || true suppresses SIGPIPE propagation under pipefail
+      _bad="$(grep '^ERROR:' "${_groups_out_file}.$$.slices" | sed 's/^ERROR://' | head -1 || true)"
       rm -f "${_groups_out_file}.$$.slices"
       log_error "PR group '${_name}' references unknown slice: ${_bad}"
       return 1
