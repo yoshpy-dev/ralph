@@ -182,4 +182,4 @@ nuance in PR body; (6) MEDIUM — README/.codex README doc scope added;
 - [x] Verification artifact created (docs/reports/verify-2026-07-12-unify-permission-mode.md)
 - [x] Test artifact created (docs/reports/test-2026-07-12-unify-permission-mode.md)
 - [x] Sync-docs complete (no drift found; run-verify.sh + check-sync.sh + check-skill-sync.sh all passed)
-- [ ] PR created
+- [x] PR created
