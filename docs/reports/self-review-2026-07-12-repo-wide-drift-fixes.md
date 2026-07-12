@@ -48,3 +48,38 @@ None. Both findings are trivial cosmetic nits within the changed diff, not defer
 
 - Merge: **Yes.** No CRITICAL or HIGH findings. Two LOW cosmetic notes (a benign `sed`-anchor divergence and a stale "five drift modes" comment in the test header) may be addressed inline if convenient but do not block.
 - Follow-ups: (1) optionally bump the test header comment from "five" to "six drift modes"; (2) optionally align the `sed` anchor between the prompt and `ralph-pipeline.sh`.
+
+---
+
+## Cycle 2 addendum
+
+- Date: 2026-07-12
+- Scope: new commits since cycle-1 MERGE verdict — `e11a49b` (sync-docs: Five→Six checks + codex-setup axes), `924d45b` (checklist tick), `501d164` (cross-review fixes: symbolic-ref base detection ×4 + recursive prompts-parity gate + test cases L/M + triage report). Reviewed via `git show 501d164 e11a49b`. Diff quality only.
+
+### Evidence reviewed (cycle 2)
+
+- **Symbolic-ref fallback (fresh clone, `origin/HEAD` unset):** `git init` throwaway repo → `git symbolic-ref --short refs/remotes/origin/HEAD` exits 128, stderr suppressed, stdout empty → `${_base:-main}` yields `main`. Fallback covers the fresh-clone / no-remote-HEAD case correctly.
+- **Symbolic-ref on a feature branch (the P2 bug scenario):** synthetic repo with `origin/HEAD → origin/main`, checked out `feature/foo` → snippet resolves `_base=main` (not `feature/foo`). Confirms the fix defeats the original `HEAD@{upstream}` bug where the base collapsed to the same branch and made `git diff base...HEAD` empty.
+- **4-copy byte-identity:** `cmp` confirms `.claude/skills/loop/prompts/pipeline-outer.md` == `.agents/...` == `templates/base/.claude/...` == `templates/base/.agents/...`. `check-skill-sync.sh` == `templates/base/scripts/check-skill-sync.sh`. All identical.
+- **Recursive find correctness:** reproduced the old-vs-new logic on a fixture with a nested-only file (`cl/prompts/sub/x.md`, absent on `cx`). Old `-maxdepth 1`: `comm -23` yields empty → the drift is invisible (test would falsely pass). New recursive: `comm -23` yields `sub/x.md` → drift caught. Relative-path comparison via `sed "s\|^$dir/\|\|"` produces `sub/x.md` on both sides, so paths sort/compare correctly.
+- **No false positive on empty dirs:** both sides empty → `find` returns nothing → `echo "$var"` emits one blank line on each side → `comm` sees them equal → `only_cl`/`only_cx` empty. The downstream `[ -z "$f" ] && continue` guard skips the blank line in the byte-compare loop.
+- **Byte-compare loop uses relative path correctly:** `cmp -s "$cl_prompts/$f" "$cx_prompts/$f"` with `$f="sub/x.md"` reconstructs the correct nested absolute path on both sides.
+- **Test cases L/M bite:** ran full suite → 13/13 PASS. L asserts exit 1 for a nested-only file; confirmed it would have FAILED against the old `-maxdepth 1` code (which misses the file) and PASSES against the recursive code — a genuine regression test, not a tautology. M asserts exit 0 for a nested byte-identical pair.
+
+### New findings (cycle 2)
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| HIGH (follow-up, not a diff defect) | maintainability / correctness | The P2 base-detection fix was applied to the 4 prompt copies but **not** to the two production call sites that actually gate cross-review with the same `HEAD@{upstream}` construct. `scripts/ralph-pipeline.sh:807` (and its `templates/base/` mirror) still does `_base="$(git rev-parse --abbrev-ref 'HEAD@{upstream}' … )"` and then gates cross-review on `git diff "${_base}...HEAD" --quiet` (line 809). On any pushed feature branch the upstream ref resolves to `origin/<same-branch>`, the diff is empty, and **cross-review is silently skipped** — the exact failure the P2 finding described, still live where it matters most. `.claude/skills/cross-review/SKILL.md:51` (+ `.agents/` mirror) has the same `HEAD@{upstream}` construct for the standard-flow base. The repo now has *inconsistent* base detection: `scripts/ralph:490` and `scripts/ralph-worktree.sh:85` already use the correct `git symbolic-ref … refs/remotes/origin/HEAD` form. | `grep -rn "HEAD@{upstream}\|symbolic-ref"` across `scripts/` + skills shows 4 buggy `HEAD@{upstream}` sites (ralph-pipeline.sh ×2 via mirror, cross-review/SKILL.md ×2 via mirror) vs 4 correct `symbolic-ref` sites (ralph, ralph-worktree, pipeline-outer.md ×2 via mirror). | Not a defect *introduced* by this diff — the diff strictly improves the prompt copies — so it does not block this PR. But file a HIGH follow-up (or tech-debt entry) to port the `symbolic-ref` form to `ralph-pipeline.sh:807` and `cross-review/SKILL.md:51` (+ both mirrors), since those are the sites that actually run the cross-review gate. Without it, the prompt now documents a base-detection strategy that diverges from the shell that executes it. |
+| LOW | typo | `tests/test-check-skill-sync.sh:3-4` header now reads "the six drift modes (inventory, body, name, description, policy)" — the count was bumped Five→Six but the parenthetical still lists only five modes; **prompts parity** is missing from the enumerated list. Half-fix of the cycle-1 LOW nit (count updated, list not). | `tests/test-check-skill-sync.sh:3-4` | Append "prompts parity" to the parenthetical so the list matches the count and `check-skill-sync.sh`'s own six-check header. Cosmetic; non-blocking. |
+
+### Cycle-1 LOW follow-ups status
+
+- **`sed` anchor divergence (cycle-1 LOW):** now superseded — the prompt copies switched base commands entirely (`symbolic-ref` with anchored `s\|^origin/\|\|`), while `ralph-pipeline.sh:807` kept `HEAD@{upstream}` with unanchored `s\|origin/\|\|`. This has escalated from a benign `sed`-anchor nit to the HIGH strategy-divergence follow-up above.
+- **Test-header "five drift modes" (cycle-1 LOW):** partially addressed (count is now "six") but the mode list is still incomplete — see the LOW typo above.
+
+### Cycle 2 verdict
+
+- **Merge: Yes.** No CRITICAL findings. The two `501d164` fixes are correct: symbolic-ref resolves the base to the repo default branch on feature branches and falls back to `main` on fresh clones; the recursive prompts-parity gate catches nested drift, avoids empty-dir false positives, and is guarded by genuine regression tests (L/M bite). All 13 test cases pass; 4-copy + mirror byte-identity holds.
+- **One HIGH follow-up** (not a defect in this diff): port the same base-detection fix to `scripts/ralph-pipeline.sh:807` and `.claude/skills/cross-review/SKILL.md:51` (+ mirrors), the two sites that actually gate cross-review. Recorded as tech debt.
+- **One LOW:** complete the test-header mode list (add "prompts parity").
