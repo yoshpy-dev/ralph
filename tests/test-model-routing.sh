@@ -109,7 +109,7 @@ DRY_RUN=1 \
   RALPH_PROBE_MODEL=haiku \
   RALPH_ESCALATION_MODEL=opus \
   RALPH_FORCE_MODEL='' \
-  sh "$PIPELINE_SH" --dry-run --max-iterations 3 --max-inner-cycles 2 \
+  bash "$PIPELINE_SH" --dry-run --max-iterations 3 --max-inner-cycles 2 \
     > "${TMP1}/pipeline.log" 2>&1 || true
 
 assert_file_exists "1a. model-receipts.jsonl exists" "$RECEIPT"
@@ -185,7 +185,7 @@ DRY_RUN=1 \
   RALPH_PROBE_MODEL=haiku \
   RALPH_ESCALATION_MODEL=opus \
   RALPH_FORCE_MODEL=opus \
-  sh "$PIPELINE_SH" --dry-run --max-iterations 3 --max-inner-cycles 2 \
+  bash "$PIPELINE_SH" --dry-run --max-iterations 3 --max-inner-cycles 2 \
     > "${TMP2}/pipeline.log" 2>&1 || true
 
 assert_file_exists "2a. model-receipts.jsonl exists (FORCE_MODEL run)" "$RECEIPT2"
@@ -232,7 +232,7 @@ DRY_RUN=1 \
   RALPH_FORCE_MODEL='' \
   RALPH_CODEX_SANDBOX=workspace-write \
   RALPH_CODEX_APPROVAL_POLICY=on-failure \
-  sh "$PIPELINE_SH" --dry-run --max-iterations 3 --max-inner-cycles 2 \
+  bash "$PIPELINE_SH" --dry-run --max-iterations 3 --max-inner-cycles 2 \
     > "${TMP3}/pipeline.log" 2>&1 || true
 
 assert_file_exists "3a. model-receipts.jsonl exists (codex driver)" "$RECEIPT3"
