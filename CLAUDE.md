@@ -28,6 +28,6 @@ Use this file only for Claude-specific guidance that must be always-on.
 ## Claude-specific directories
 
 - `.claude/rules/` for conditional rules (also read by Codex)
-- `.claude/skills/` for on-demand workflows (mirrored to `.agents/skills/` for Codex; drift-checked by `scripts/check-skill-sync.sh`)
+- `.claude/skills/` for on-demand workflows (mirrored to `.agents/skills/` for Codex; regenerate the mirror with `scripts/sync-skills.sh`; drift-checked by `scripts/check-skill-sync.sh`)
 - `.claude/agents/` for Claude Code subagent definitions (Codex custom agents live under `.codex/agents/`)
 - `.claude/hooks/` for deterministic runtime controls (Codex equivalents live under `.codex/config.toml` `[hooks]` for the meta-repo and `templates/base/.codex/config.toml` for scaffolded projects; the two are kept byte-identical)
