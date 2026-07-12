@@ -136,7 +136,7 @@ func TestDefaultsLockStep(t *testing.T) {
 
 	// ── per-phase models ──────────────────────────────────────────────────────
 	phaseChecks := []struct {
-		label   string
+		label    string
 		shellVar string
 		tomlVal  string
 		goVal    string
