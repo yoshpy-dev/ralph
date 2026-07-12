@@ -166,6 +166,125 @@ func TestRunPipelineAutoDetectsPlan(t *testing.T) {
 	}
 }
 
+// TestRunPipeline_ExportsPhaseModelEnv verifies that `ralph run` exports the
+// per-phase RALPH_<PHASE>_MODEL variables to the orchestrator with the
+// documented priority env > TOML > default, and that RALPH_FORCE_MODEL is
+// NOT exported when [pipeline.phases] force is empty/absent — an empty force
+// knob must never mask a user's env var or look like an explicit override.
+func TestRunPipeline_ExportsPhaseModelEnv(t *testing.T) {
+	dir := t.TempDir()
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(oldWD); err != nil {
+			t.Fatalf("restore cwd: %v", err)
+		}
+	})
+
+	if err := os.Mkdir("scripts", 0755); err != nil {
+		t.Fatal(err)
+	}
+	stub := "#!/usr/bin/env sh\nenv > env.txt\n"
+	if err := os.WriteFile(filepath.Join("scripts", "ralph-orchestrator.sh"), []byte(stub), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// TOML overrides one phase; force stays absent (default empty).
+	toml := `[pipeline.phases]
+verify = "opus"
+`
+	if err := os.WriteFile("ralph.toml", []byte(toml), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Env var must win over the TOML/default value for implement.
+	t.Setenv("RALPH_IMPLEMENT_MODEL", "opus")
+
+	if err := runPipeline("docs/plans/active/example", 0, 0, false, false, true, false); err != nil {
+		t.Fatalf("runPipeline: %v", err)
+	}
+
+	data, err := os.ReadFile("env.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	envLines := strings.Split(strings.TrimSpace(string(data)), "\n")
+
+	want := map[string]string{
+		"RALPH_IMPLEMENT_MODEL":   "opus",   // env wins
+		"RALPH_SELF_REVIEW_MODEL": "opus",   // default
+		"RALPH_VERIFY_MODEL":      "opus",   // toml wins over default sonnet
+		"RALPH_TEST_MODEL":        "sonnet", // default
+		"RALPH_SYNC_DOCS_MODEL":   "sonnet", // default
+		"RALPH_PR_MODEL":          "sonnet", // default
+		"RALPH_PROBE_MODEL":       "haiku",  // default
+		"RALPH_ESCALATION_MODEL":  "opus",   // default
+	}
+	for key, val := range want {
+		if !containsKV(envLines, key, val) {
+			t.Errorf("expected %s=%s in orchestrator env", key, val)
+		}
+	}
+
+	// Empty force must not be exported at all.
+	for _, e := range envLines {
+		if strings.HasPrefix(e, "RALPH_FORCE_MODEL=") {
+			t.Errorf("RALPH_FORCE_MODEL must not be exported when force is empty, got %q", e)
+		}
+	}
+}
+
+// TestRunPipeline_ExportsForceModelWhenSet verifies that a non-empty
+// [pipeline.phases] force value IS exported as RALPH_FORCE_MODEL.
+func TestRunPipeline_ExportsForceModelWhenSet(t *testing.T) {
+	dir := t.TempDir()
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(oldWD); err != nil {
+			t.Fatalf("restore cwd: %v", err)
+		}
+	})
+
+	if err := os.Mkdir("scripts", 0755); err != nil {
+		t.Fatal(err)
+	}
+	stub := "#!/usr/bin/env sh\nenv > env.txt\n"
+	if err := os.WriteFile(filepath.Join("scripts", "ralph-orchestrator.sh"), []byte(stub), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	toml := `[pipeline.phases]
+force = "opus"
+`
+	if err := os.WriteFile("ralph.toml", []byte(toml), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runPipeline("docs/plans/active/example", 0, 0, false, false, true, false); err != nil {
+		t.Fatalf("runPipeline: %v", err)
+	}
+
+	data, err := os.ReadFile("env.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	envLines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if !containsKV(envLines, "RALPH_FORCE_MODEL", "opus") {
+		t.Error("expected RALPH_FORCE_MODEL=opus in orchestrator env when [pipeline.phases] force is set")
+	}
+}
+
 func TestRunPipeline_ForwardsRunModeFlags(t *testing.T) {
 	dir := t.TempDir()
 	oldWD, err := os.Getwd()
