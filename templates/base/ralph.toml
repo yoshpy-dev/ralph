@@ -9,6 +9,7 @@ slice_timeout = "30m"
 permission_mode = "auto"
 
 [pipeline.prompts]
+# The pipeline currently reads its prompts from `.claude/skills/loop/prompts/`; this key is reserved for future prompt-dir override support.
 dir = ".ralph/prompts"
 
 # Per-phase model routing (plan-big-execute-small).
