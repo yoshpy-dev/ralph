@@ -9,7 +9,8 @@ set -euo pipefail
 #
 # Requires: git, jq, ralph-pipeline.sh
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# Use BASH_SOURCE[0] so SCRIPT_DIR resolves correctly when the script is sourced by tests
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "${SCRIPT_DIR}/ralph-config.sh"
 . "${SCRIPT_DIR}/ralph-common.sh"
 
@@ -46,41 +47,45 @@ USAGE
   exit 1
 }
 
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --plan)            shift; PLAN_FILE="${1:?requires a file path}" ;;
-    --max-parallel)    shift; MAX_PARALLEL="${1:?requires a number}"; validate_numeric "--max-parallel" "$MAX_PARALLEL" ;;
-    --max-iterations)  shift; MAX_ITERATIONS="${1:?requires a number}"; validate_numeric "--max-iterations" "$MAX_ITERATIONS" ;;
-    --preflight)       PREFLIGHT_ONLY=1 ;;
-    --resume)          RESUME=1 ;;
-    --pr-strategy)
-      shift
-      PR_STRATEGY_OVERRIDE="${1:?requires a strategy}"
-      case "$PR_STRATEGY_OVERRIDE" in
-        grouped|stacked|unified) ;;
-        *) echo "Error: --pr-strategy must be one of grouped, stacked, unified"; exit 1 ;;
-      esac
-      ;;
-    --unified-pr)      UNIFIED_PR=1; PR_STRATEGY_OVERRIDE="unified" ;;
-    --dry-run)         DRY_RUN=1 ;;
-    -h|--help)         usage ;;
-    *)                 echo "Unknown option: $1"; usage ;;
-  esac
-  shift
-done
+# Source guard: CLI argument parsing and plan-directory validation only run
+# when the script is executed directly, not when sourced by tests.
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --plan)            shift; PLAN_FILE="${1:?requires a file path}" ;;
+      --max-parallel)    shift; MAX_PARALLEL="${1:?requires a number}"; validate_numeric "--max-parallel" "$MAX_PARALLEL" ;;
+      --max-iterations)  shift; MAX_ITERATIONS="${1:?requires a number}"; validate_numeric "--max-iterations" "$MAX_ITERATIONS" ;;
+      --preflight)       PREFLIGHT_ONLY=1 ;;
+      --resume)          RESUME=1 ;;
+      --pr-strategy)
+        shift
+        PR_STRATEGY_OVERRIDE="${1:?requires a strategy}"
+        case "$PR_STRATEGY_OVERRIDE" in
+          grouped|stacked|unified) ;;
+          *) echo "Error: --pr-strategy must be one of grouped, stacked, unified"; exit 1 ;;
+        esac
+        ;;
+      --unified-pr)      UNIFIED_PR=1; PR_STRATEGY_OVERRIDE="unified" ;;
+      --dry-run)         DRY_RUN=1 ;;
+      -h|--help)         usage ;;
+      *)                 echo "Unknown option: $1"; usage ;;
+    esac
+    shift
+  done
 
-validate_all_numeric
-validate_loop_driver
+  validate_all_numeric
+  validate_loop_driver
 
-if [ -z "$PLAN_FILE" ]; then
-  echo "Error: --plan <directory> is required"
-  usage
-fi
-if [ ! -d "$PLAN_FILE" ]; then
-  echo "Error: --plan must be a directory-based plan (with _manifest.md + slice-*.md files)"
-  echo "  Got: ${PLAN_FILE}"
-  echo "  Create one with: ./scripts/new-ralph-plan.sh --type <type> <slug> [issue] [slice-count]"
-  exit 1
+  if [ -z "$PLAN_FILE" ]; then
+    echo "Error: --plan <directory> is required"
+    usage
+  fi
+  if [ ! -d "$PLAN_FILE" ]; then
+    echo "Error: --plan must be a directory-based plan (with _manifest.md + slice-*.md files)"
+    echo "  Got: ${PLAN_FILE}"
+    echo "  Create one with: ./scripts/new-ralph-plan.sh --type <type> <slug> [issue] [slice-count]"
+    exit 1
+  fi
 fi
 
 # ═══════════════════════════════════════════════════════════════════
@@ -1702,4 +1707,6 @@ REPORT_JSON
   return 0
 }
 
-main
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  main
+fi
