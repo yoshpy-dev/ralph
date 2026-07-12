@@ -66,7 +66,7 @@ task worktree and local branch while leaving the remote PR branch intact.
 - `docs/plans/active/` — current plans (single files for standard flow; `<date>-<slug>/` directories with `_manifest.md` + `slice-*.md` for Ralph Loop)
 - `docs/plans/archive/` — completed plans
 - `docs/plans/templates/` — plan templates (`feature-plan.md`, `ralph-loop-manifest.md`, `ralph-loop-slice.md`)
-- `docs/reports/` — self-review, verify, test, walkthrough artifacts
+- `docs/reports/` — self-review, verify, test, sync-docs, cross-review triage, walkthrough artifacts
 - `docs/quality/` — definition of done and quality gates
 - `.claude/rules/` — path-scoped guidance (read by both agents)
 - `.claude/skills/` — Claude-side on-demand workflows
