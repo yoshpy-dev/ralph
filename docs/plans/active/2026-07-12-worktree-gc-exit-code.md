@@ -66,8 +66,8 @@ Evidence: docs/reports/{self-review,verify,test}-2026-07-12-worktree-gc-exit-cod
 
 - [x] Plan reviewed
 - [x] Branch created (fix/worktree-gc-exit-code)
-- [ ] Implementation started
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
-- [ ] PR created
+- [x] Implementation started
+- [x] Review artifact created
+- [x] Verification artifact created
+- [x] Test artifact created
+- [x] PR created
