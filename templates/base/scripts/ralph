@@ -490,7 +490,10 @@ cleanup_plan_artifacts() {
   fi
 
   _int_branch="$("${SCRIPT_DIR}/branch-name.sh" from-plan "$_plan")" || return 1
-  _base_branch="$(default_branch)"
+  # _base_branch is resolved lazily: only when we actually need to check out the
+  # base branch (non-dry-run, current branch is the integration branch).
+  # Eager resolution under set -euo pipefail kills cleanup in repos with no
+  # remote and no main/master even when the base is never used on the taken path.
   _current_branch="$(git branch --show-current 2>/dev/null || true)"
 
   log "Cleanup plan: ${_plan}"
@@ -500,6 +503,11 @@ cleanup_plan_artifacts() {
   if [ "$_dry_run" -eq 0 ]; then
     case "$_current_branch" in
       "$_int_branch"|"$_int_branch"-*)
+        _base_branch="$(default_branch 2>/dev/null || true)"
+        if [ -z "$_base_branch" ]; then
+          log_error "Cannot determine default branch to check out after cleanup. Current branch: ${_current_branch}"
+          return 1
+        fi
         git checkout "$_base_branch" >/dev/null 2>&1 || {
           log_error "Failed to leave cleanup target branch. Current branch: ${_current_branch}"
           return 1

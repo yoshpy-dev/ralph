@@ -342,7 +342,10 @@ case "$cmd" in
     ;;
   validate-clean-base)
     shift
-    validate_clean_base "${1:-$(default_branch)}"
+    # Pass the optional argument through as-is; validate_clean_base resolves
+    # default_branch internally when no argument is given. Resolving here AND
+    # in the function produced two identical error messages on failure.
+    validate_clean_base "${1:-}"
     ;;
   ensure)
     shift
