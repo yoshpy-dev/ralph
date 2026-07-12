@@ -330,7 +330,10 @@ gc_worktrees() {
       [ "$prune" -eq 1 ] && rm -f "$file"
     fi
   done
-  [ "$count" -eq 0 ] && printf 'No stale ralph worktree state.\n'
+  if [ "$count" -eq 0 ]; then
+    printf 'No stale ralph worktree state.\n'
+  fi
+  return 0
 }
 
 cmd="${1:-}"
