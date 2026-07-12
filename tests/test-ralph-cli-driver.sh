@@ -549,6 +549,67 @@ assert_jq_equal '.driver'          "claude"  "$_tmp12c" "12c-i. no override → 
 assert_jq_equal '.effective_model' "sonnet"  "$_tmp12c" "12c-ii. no override → effective_model=requested"
 assert_jq_equal '.honored'         "true"    "$_tmp12c" "12c-iii. no override → honored=true"
 
+# ── Test 13: stub hang-proof regression — never-closing pipe stdin ────────
+# Reproduces the exact hang shape discovered during PR #116: a background
+# harness shell holds the write-end of a FIFO open without writing; the old
+# `head -c 4096` inside the TTY-only guard would block until the writer
+# closed its end (~5s). The fixed stub skips the drain for non-regular-file
+# stdin and returns immediately. A regressed stub fails the elapsed < 3s
+# assertion deterministically.
+#
+# Mechanism: mkfifo + sleep in background (keeps write-end open, no data
+# written) → stub reads from FIFO → elapsed measured around stub only.
+echo
+echo "── Test 13: stub hang-proof — never-closing pipe stdin exits immediately"
+
+_stub_elapsed() {
+  # _stub_elapsed <stub-path> <call-log> <last-msg-path|"">
+  # Returns elapsed seconds for a stub invocation fed from a never-closing FIFO.
+  local stub="$1" call_log="$2" last_msg_path="$3"
+  local fifo_dir
+  fifo_dir="$(mktemp -d -t ralph-fifo-XXXXXX)"
+  local fifo="$fifo_dir/stdin.fifo"
+  mkfifo "$fifo"
+  # Writer holds the FIFO write-end open for 5s without sending any data.
+  ( sleep 5 > "$fifo" ) &
+  local writer_pid=$!
+  local t_start t_end
+  t_start="$(date +%s)"
+  if [ -n "$last_msg_path" ]; then
+    RALPH_FAKE_CALL_LOG="$call_log" \
+    RALPH_FAKE_LAST_MESSAGE="stub-ok" \
+      "$stub" exec review --base main \
+        --output-last-message "$last_msg_path" \
+        < "$fifo" >/dev/null 2>&1 || true
+  else
+    RALPH_FAKE_CALL_LOG="$call_log" \
+    RALPH_FAKE_RESULT="stub-ok" \
+      "$stub" -p --output-format text \
+        < "$fifo" >/dev/null 2>&1 || true
+  fi
+  t_end="$(date +%s)"
+  kill "$writer_pid" 2>/dev/null || true
+  wait "$writer_pid" 2>/dev/null || true
+  rm -rf "$fifo_dir"
+  printf '%d' $(( t_end - t_start ))
+}
+
+# 13a. fake-codex: elapsed < 3s AND call log written
+CALL_13A="$WORK_DIR/test13a.call.json"
+LAST_13A="$WORK_DIR/test13a.last"
+elapsed_13a="$(_stub_elapsed "$STUBS/codex" "$CALL_13A" "$LAST_13A")"
+check "13a-i. codex stub exits with open-pipe stdin in < 3s (elapsed=${elapsed_13a}s)" \
+  test "$elapsed_13a" -lt 3
+check "13a-ii. codex stub still wrote call log despite no-drain" test -s "$CALL_13A"
+check "13a-iii. codex stub still wrote last-message file" test -s "$LAST_13A"
+
+# 13b. fake-claude: elapsed < 3s AND call log written
+CALL_13B="$WORK_DIR/test13b.call.json"
+elapsed_13b="$(_stub_elapsed "$STUBS/claude" "$CALL_13B" "")"
+check "13b-i. claude stub exits with open-pipe stdin in < 3s (elapsed=${elapsed_13b}s)" \
+  test "$elapsed_13b" -lt 3
+check "13b-ii. claude stub still wrote call log despite no-drain" test -s "$CALL_13B"
+
 echo
 echo "── Summary ──"
 printf '  PASS: %d\n  FAIL: %d\n' "$PASS" "$FAIL"
