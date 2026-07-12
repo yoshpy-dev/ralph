@@ -40,3 +40,5 @@ jobs:
           COVERAGE_THRESHOLD: "80"
       - name: Check pipeline order sync
         run: ./scripts/check-pipeline-sync.sh
+      - name: Check skill mirror sync
+        run: ./scripts/check-skill-sync.sh
