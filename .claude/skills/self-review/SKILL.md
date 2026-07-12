@@ -40,6 +40,15 @@ Evaluate the diff for:
 - merge or no-merge recommendation
 - tech-debt entries in `docs/tech-debt/` if deferred work was identified
 
+## Insight event (best-effort)
+
+After writing the report, append one insight event (errors are non-fatal):
+```
+./scripts/insights-append.sh --slug <slug> --flow standard --phase self_review \
+  --verdict pass --critical <N> --high <N> --medium <N> --low <N> --source skill || true
+```
+Use `--verdict fail` if CRITICAL findings block the review; set counts from the report.
+
 ## CLI execution modes
 
 This skill runs under both Claude Code and Codex. The execution mode follows

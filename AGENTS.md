@@ -67,6 +67,7 @@ task worktree and local branch while leaving the remote PR branch intact.
 - `docs/plans/archive/` — completed plans
 - `docs/plans/templates/` — plan templates (`feature-plan.md`, `ralph-loop-manifest.md`, `ralph-loop-slice.md`)
 - `docs/reports/` — self-review, verify, test, sync-docs, cross-review triage, walkthrough artifacts
+- `docs/insights/` — committed insight events (`events/<date>-<slug>.jsonl`); schema in `docs/insights/README.md`; consumed by `ralph insights`
 - `docs/quality/` — definition of done and quality gates
 - `.claude/rules/` — path-scoped guidance (read by both agents)
 - `.claude/skills/` — Claude-side on-demand workflows
