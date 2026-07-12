@@ -345,10 +345,12 @@ func runInsightsBackfill(reportsDir, eventsDir string, apply bool, cmd *cobra.Co
 		return nil
 	}
 
-	// Apply mode: write new events.
+	// Apply mode: write new events. Re-check `existing` inside the loop so
+	// two same-batch entries sharing a DedupeKey cannot both be written
+	// (isDupe only reflects the state at scan time).
 	written := 0
 	for _, e := range entries {
-		if e.isDupe {
+		if e.isDupe || existing[e.key] {
 			continue
 		}
 		if err := insights.AppendBackfillEvent(eventsDir, e.ev.Event); err != nil {
