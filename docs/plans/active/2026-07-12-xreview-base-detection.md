@@ -166,8 +166,9 @@ Codex CLI/runtime changes".
 
 - [x] Plan reviewed
 - [x] Branch created (fix/xreview-base-detection)
-- [ ] Implementation started
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Implementation started
+- [x] Review artifact created (docs/reports/self-review-2026-07-12-xreview-base-detection.md)
+- [x] Verification artifact created (docs/reports/verify-2026-07-12-xreview-base-detection.md)
+- [x] Test artifact created (docs/reports/test-2026-07-12-xreview-base-detection.md)
+- [x] Sync-docs: RALPH_XREVIEW_BASE added to ralph-loop recipe env table (docs/recipes/ralph-loop.md + templates/base mirror, byte-identical)
 - [ ] PR created
