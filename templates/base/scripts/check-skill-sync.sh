@@ -5,7 +5,7 @@
 #
 # Spec: AC-3 of docs/specs/2026-05-07-codex-cli-parity.md
 #
-# Five checks per skill name:
+# Six checks per skill name:
 #   1. Inventory parity     : skill directories on both sides match
 #   2. SKILL.md body parity : frontmatter stripped, leading/trailing whitespace
 #                             normalized, trailing whitespace dropped per line

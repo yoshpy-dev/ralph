@@ -123,7 +123,7 @@ byte-identity) before editing.
 - [x] Plan reviewed
 - [x] Branch created (docs/repo-wide-drift-fixes)
 - [ ] Implementation started
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Review artifact created
+- [x] Verification artifact created
+- [x] Test artifact created
 - [ ] PR created
