@@ -188,6 +188,16 @@ pass on partial substitution (regression: issue #50). Regression coverage
 lives in `tests/test-xreview-prompt-render.sh` and
 `tests/test-xreview-gate-regression.sh`.
 
+## Insight event (best-effort)
+
+After writing the triage report (Step 6), append one insight event (errors are non-fatal):
+```
+./scripts/insights-append.sh --slug <slug> --flow standard --phase cross_review \
+  --verdict <pass|action_required> --action-required <N> --worth-considering <N> \
+  --dismissed <N> --source skill || true
+```
+Use `--verdict action_required` when ACTION_REQUIRED findings exist; `pass` otherwise.
+
 ## What /cross-review does NOT do
 
 - **Auto-fix**: Findings are advisory only. No code changes.
