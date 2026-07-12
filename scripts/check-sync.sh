@@ -86,8 +86,6 @@ ROOT_ONLY_EXCLUSIONS=(
 KNOWN_DIFFS=(
   # CLAUDE.md: root has repo-specific /plan details; template is generic
   "CLAUDE.md"
-  # AGENTS.md: root has repo-specific repo map; template has placeholder
-  "AGENTS.md"
   # verify.yml: root adds bootstrap, syntax checks, coverage, pipeline-sync
   ".github/workflows/verify.yml"
   # model-routing.md: root documents the Go-layer default (internal/config)

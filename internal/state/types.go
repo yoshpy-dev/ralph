@@ -19,7 +19,7 @@ const (
 	StatusGhUnavailable SliceStatus = "gh_unavailable"
 )
 
-// OrchestratorState represents the orchestrator.json file written by ralph-orchestrator.sh.
+// OrchestratorState represents a subset of orchestrator.json (fields needed by the TUI/status; unknown fields are ignored).
 type OrchestratorState struct {
 	Plan              string `json:"plan"`
 	Started           string `json:"started"`

@@ -130,6 +130,38 @@ printf -- '---\nname: pr\ndescription: Create a pull request.\n---\n%s\n' \
 run_case "G. driver-specific PR provenance drift" 1 "$G_DIR"
 rm -rf "$G_DIR"
 
+# ── H. prompts/ missing on mirror (claude has prompts/, codex does not) ──────
+H_DIR="$(mktemp -d)"
+mk_skill_pair "$H_DIR" "alpha" "Alpha description." "Body" "" ""
+mkdir -p "$H_DIR/.claude/skills/alpha/prompts"
+printf 'prompt content\n' > "$H_DIR/.claude/skills/alpha/prompts/adversarial-claude.md"
+run_case "H. prompts/ missing on codex mirror" 1 "$H_DIR"
+rm -rf "$H_DIR"
+
+# ── I. prompts/ present on both sides but content differs ─────────────────────
+I_DIR="$(mktemp -d)"
+mk_skill_pair "$I_DIR" "alpha" "Alpha description." "Body" "" ""
+mkdir -p "$I_DIR/.claude/skills/alpha/prompts" "$I_DIR/.agents/skills/alpha/prompts"
+printf 'original prompt\n' > "$I_DIR/.claude/skills/alpha/prompts/adversarial-claude.md"
+printf 'different prompt\n' > "$I_DIR/.agents/skills/alpha/prompts/adversarial-claude.md"
+run_case "I. prompts/ content differs between sides" 1 "$I_DIR"
+rm -rf "$I_DIR"
+
+# ── J. prompts/ byte-identical on both sides (should pass) ────────────────────
+J_DIR="$(mktemp -d)"
+mk_skill_pair "$J_DIR" "alpha" "Alpha description." "Body" "" ""
+mkdir -p "$J_DIR/.claude/skills/alpha/prompts" "$J_DIR/.agents/skills/alpha/prompts"
+printf 'prompt content\n' > "$J_DIR/.claude/skills/alpha/prompts/adversarial-claude.md"
+cp "$J_DIR/.claude/skills/alpha/prompts/adversarial-claude.md" \
+   "$J_DIR/.agents/skills/alpha/prompts/adversarial-claude.md"
+run_case "J. prompts/ byte-identical on both sides (parity)" 0 "$J_DIR"
+rm -rf "$J_DIR"
+
+# ── K. loop prompts/ already mirrored (real cross-review + loop skills) ───────
+# Verify the real skill tree (cross-review prompts now present on both sides,
+# loop prompts already mirrored) passes check 6 without regression.
+run_case "K. real skill tree passes prompts/ parity" 0 "$REPO_ROOT"
+
 echo ""
 echo "  PASS: $pass"
 echo "  FAIL: $fail"

@@ -85,6 +85,13 @@ Inside Claude Code, run `/loop` to interactively set up a Ralph Loop session. Th
 
 ## How it works
 
+> **Note (legacy flow):** The flow described in this section (`ralph-loop.sh`
+> single-slice runner) is the **legacy standalone runner**. Current multi-slice
+> execution via `ralph run` uses `ralph-orchestrator.sh` →
+> `ralph-pipeline.sh` per slice instead. See the
+> ["Integration with the operating loop"](#integration-with-the-operating-loop)
+> section below for the current architecture.
+
 ### Flow
 
 ```

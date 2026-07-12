@@ -19,6 +19,15 @@
 #                             Codex `policy.allow_implicit_invocation: false`
 #                             (in agents/openai.yaml). Default on both sides
 #                             is "implicit invocation allowed".
+#   6. prompts/ parity      : every file under each skill's prompts/ directory
+#                             must exist on both sides and be byte-identical;
+#                             missing-in-mirror and extra-in-mirror both fail.
+#
+# NOTE on frontmatter parity scope: `allowed-tools` and
+# `disable-model-invocation` are Claude Code-specific frontmatter fields and
+# are intentionally NOT mirrored to the Codex side. Codex equivalents live in
+# agents/openai.yaml policy metadata. This script checks body parity and the
+# cross-vendor policy abstraction (check 5) — not raw frontmatter equality.
 #
 # Exit 0 = parity / exit 1 = drift; problem details printed to stderr.
 
@@ -221,6 +230,44 @@ while IFS= read -r skill; do
   cx_pol="$(codex_policy "$skill")"
   if [ "$cl_pol" != "$cx_pol" ]; then
     fail "skill '$skill': implicit-invocation policy drift claude=$cl_pol codex=$cx_pol"
+  fi
+
+  # 6. prompts/ parity (byte-identical; missing-in-mirror and extra-in-mirror both fail).
+  cl_prompts="$CLAUDE_ROOT/$skill/prompts"
+  cx_prompts="$CODEX_ROOT/$skill/prompts"
+  cl_has_prompts=0; cx_has_prompts=0
+  [ -d "$cl_prompts" ] && cl_has_prompts=1
+  [ -d "$cx_prompts" ] && cx_has_prompts=1
+  if [ "$cl_has_prompts" -ne "$cx_has_prompts" ]; then
+    if [ "$cl_has_prompts" -eq 1 ]; then
+      fail "skill '$skill': prompts/ exists in $CLAUDE_ROOT but not in $CODEX_ROOT"
+    else
+      fail "skill '$skill': prompts/ exists in $CODEX_ROOT but not in $CLAUDE_ROOT"
+    fi
+  elif [ "$cl_has_prompts" -eq 1 ]; then
+    # Both sides have a prompts/ directory — compare file lists and content.
+    cl_files="$(find "$cl_prompts" -maxdepth 1 -type f | sed "s|^$cl_prompts/||" | LC_ALL=C sort)"
+    cx_files="$(find "$cx_prompts" -maxdepth 1 -type f | sed "s|^$cx_prompts/||" | LC_ALL=C sort)"
+    only_cl="$(LC_ALL=C comm -23 <(echo "$cl_files") <(echo "$cx_files"))"
+    only_cx="$(LC_ALL=C comm -13 <(echo "$cl_files") <(echo "$cx_files"))"
+    if [ -n "$only_cl" ]; then
+      while IFS= read -r f; do
+        [ -n "$f" ] && fail "skill '$skill': prompts/$f exists in $CLAUDE_ROOT but not in $CODEX_ROOT"
+      done <<<"$only_cl"
+    fi
+    if [ -n "$only_cx" ]; then
+      while IFS= read -r f; do
+        [ -n "$f" ] && fail "skill '$skill': prompts/$f exists in $CODEX_ROOT but not in $CLAUDE_ROOT"
+      done <<<"$only_cx"
+    fi
+    # Byte-identical check for files present on both sides.
+    common_files="$(LC_ALL=C comm -12 <(echo "$cl_files") <(echo "$cx_files"))"
+    while IFS= read -r f; do
+      [ -z "$f" ] && continue
+      if ! cmp -s "$cl_prompts/$f" "$cx_prompts/$f"; then
+        fail "skill '$skill': prompts/$f content differs between $CLAUDE_ROOT and $CODEX_ROOT"
+      fi
+    done <<<"$common_files"
   fi
 done <<<"$INTERSECT"
 

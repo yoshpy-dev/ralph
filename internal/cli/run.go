@@ -38,8 +38,8 @@ func newRunCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&planPath, "plan", "", "plan directory (auto-detected if omitted)")
-	cmd.Flags().IntVar(&maxIterations, "max-iterations", 0, "total iteration cap (default from ralph.toml)")
-	cmd.Flags().IntVar(&maxParallel, "max-parallel", 0, "max concurrent slices (default from ralph.toml)")
+	cmd.Flags().IntVar(&maxIterations, "max-iterations", 0, "total iteration cap (default from RALPH_MAX_ITERATIONS env or ralph.toml)")
+	cmd.Flags().IntVar(&maxParallel, "max-parallel", 0, "max concurrent slices (default from RALPH_MAX_PARALLEL env or ralph.toml)")
 	cmd.Flags().BoolVar(&preflight, "preflight", false, "run capability probe only")
 	cmd.Flags().BoolVar(&resume, "resume", false, "resume from existing checkpoint")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would run without executing")

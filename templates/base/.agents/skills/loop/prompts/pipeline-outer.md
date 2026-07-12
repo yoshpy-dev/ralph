@@ -12,7 +12,12 @@ Read these files in order:
 4. Recent reports in `.harness/state/pipeline/` (self-review, verify, test)
 5. Recent reports in `docs/reports/` (dual-written by pipeline agents)
 
-Then run `git diff main...HEAD --stat` to understand the full scope of changes.
+Then determine the base branch dynamically and run `git diff` to understand the full scope of changes:
+```sh
+_base="$(git rev-parse --abbrev-ref 'HEAD@{upstream}' 2>/dev/null | sed 's|^origin/||')"
+_base="${_base:-main}"
+git diff "${_base}...HEAD" --stat
+```
 
 ## Product-level sync
 
