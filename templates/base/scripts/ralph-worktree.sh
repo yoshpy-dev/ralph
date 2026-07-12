@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+_WORKTREE_SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=ralph-common.sh
+. "${_WORKTREE_SCRIPT_DIR}/ralph-common.sh"
+
 usage() {
   cat <<'USAGE'
 Usage:
@@ -80,23 +84,7 @@ abs_from_repo_root() {
   esac
 }
 
-default_branch() {
-  local remote_head
-  remote_head="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)"
-  if [ -n "$remote_head" ]; then
-    printf '%s\n' "${remote_head#origin/}"
-    return 0
-  fi
-  if git show-ref --verify --quiet refs/heads/main; then
-    printf 'main\n'
-    return 0
-  fi
-  if git show-ref --verify --quiet refs/heads/master; then
-    printf 'master\n'
-    return 0
-  fi
-  die "could not resolve default branch"
-}
+# default_branch is provided by ralph-common.sh (sourced above).
 
 validate_clean_base() {
   local base current dirty

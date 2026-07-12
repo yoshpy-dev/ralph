@@ -12,6 +12,7 @@ set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "${SCRIPT_DIR}/ralph-config.sh"
+. "${SCRIPT_DIR}/ralph-common.sh"
 
 LOOP_DIR=".harness/state/loop"
 PIPELINE_DIR=".harness/state/pipeline"
@@ -19,11 +20,6 @@ ORCH_STATE=".harness/state/orchestrator"
 ARCHIVE_DIR=".harness/state/loop-archive"
 WORKTREE_BASE=".claude/worktrees"
 EVIDENCE_DIR="docs/evidence"
-
-ts() { date -u '+%Y-%m-%dT%H:%M:%SZ'; }
-ts_file() { date -u '+%Y-%m-%d-%H%M%S'; }
-log() { printf '[%s] %s\n' "$(ts)" "$*"; }
-log_error() { printf '[%s] ERROR: %s\n' "$(ts)" "$*" >&2; }
 
 print_usage() {
   cat <<'USAGE'
@@ -123,9 +119,7 @@ cmd_run() {
   # Auto-detect plan if not specified
   if [ -z "$_plan" ]; then
     # Check for directory-based plans (newest by name — date-prefixed names sort chronologically)
-    _plan="$(find docs/plans/active -maxdepth 1 -type d ! -name active 2>/dev/null | while read -r d; do
-      if [ -f "${d}/_manifest.md" ]; then echo "$d"; fi
-    done | sort -r | head -1 || true)"
+    _plan="$(detect_active_plan_dir)"
     if [ -z "$_plan" ]; then
       echo "Error: no directory-based plan found. Create one with './scripts/new-ralph-plan.sh --type <type> <slug>' or specify --plan <directory>"
       exit 1
@@ -199,9 +193,7 @@ cmd_status() {
         log "Note: --watch is ignored in TUI mode (TUI auto-refreshes)."
       fi
       # Auto-detect plan dir for dependency graph
-      _plan_dir="$(find docs/plans/active -maxdepth 1 -type d ! -name active 2>/dev/null | while read -r d; do
-        if [ -f "${d}/_manifest.md" ]; then echo "$d"; fi
-      done | head -1 || true)"
+      _plan_dir="$(detect_active_plan_dir)"
       _plan_args=""
       if [ -n "$_plan_dir" ]; then
         _plan_args="--plan-dir ${_plan_dir}"
@@ -486,18 +478,6 @@ file_mtime_epoch() {
   esac
 }
 
-default_branch() {
-  _remote_head="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)"
-  if [ -n "$_remote_head" ]; then
-    printf '%s\n' "${_remote_head#origin/}"
-    return
-  fi
-  if git show-ref --verify --quiet refs/heads/main; then
-    printf 'main\n'
-  else
-    printf 'master\n'
-  fi
-}
 
 cleanup_plan_artifacts() {
   _plan="$1"
@@ -650,6 +630,14 @@ cmd_cleanup() {
   [ -n "$_plan" ] || { echo "Usage: ralph cleanup --plan <plan-dir> [--dry-run]"; exit 1; }
   cleanup_plan_artifacts "$_plan" "$_dry_run"
 }
+
+# ═══════════════════════════════════════════════════════════════════
+# Deprecation notice
+# ═══════════════════════════════════════════════════════════════════
+
+if [ -z "${RALPH_NO_DEPRECATION:-}" ] && command -v ralph >/dev/null 2>&1; then
+  printf 'ralph (shell): note: the Go CLI '\''ralph'\'' is installed; prefer '\''ralph <cmd>'\'' -- this shell entrypoint is legacy (set RALPH_NO_DEPRECATION=1 to silence)\n' >&2
+fi
 
 # ═══════════════════════════════════════════════════════════════════
 # Main dispatcher

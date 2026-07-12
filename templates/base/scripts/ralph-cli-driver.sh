@@ -180,13 +180,21 @@ count_triage_findings() {
 
 # detect_base_branch — print the repo's true merge-target branch name.
 #
+# INTENTIONALLY different from default_branch() in ralph-common.sh:
+#   default_branch() resolves the repo's default branch (main/master) for
+#   worktree and plan operations. detect_base_branch() additionally accepts a
+#   RALPH_XREVIEW_BASE override so cross-review can target a non-default merge
+#   base (e.g. a release branch). The merge-base heuristic here is specific to
+#   the cross-review gate; do not consolidate with ralph-common.sh's
+#   default_branch().
+#
 # Resolution order (mirrors the design decision in the xreview-base-detection
 # plan — Scope 1a/1b/1c):
 #   1. $RALPH_XREVIEW_BASE — explicit override (exported by orchestrator or operator).
 #   2. git symbolic-ref --quiet --short refs/remotes/origin/HEAD with the leading
 #      "origin/" stripped — the repo's actual default branch.
 #   3. Fallback: "main" if refs/heads/main exists, else "master" — mirrors the
-#      exact semantics of default_branch() in scripts/ralph and ralph-worktree.sh.
+#      exact semantics of default_branch() in ralph-common.sh.
 #
 # Note: the pipeline gate treats a failing diff (invalid base) as "has changes"
 # and runs the review — fail-open-to-review is the safe direction and is kept.

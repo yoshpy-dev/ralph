@@ -12,6 +12,7 @@ set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "${SCRIPT_DIR}/ralph-config.sh"
+. "${SCRIPT_DIR}/ralph-common.sh"
 . "${SCRIPT_DIR}/ralph-cli-driver.sh"
 
 PIPELINE_DIR=".harness/state/pipeline"
@@ -98,11 +99,7 @@ trap _pipeline_cleanup EXIT
 # Utility functions
 # ═══════════════════════════════════════════════════════════════════
 
-ts() { date -u '+%Y-%m-%dT%H:%M:%SZ'; }
-ts_file() { date -u '+%Y-%m-%d-%H%M%S'; }
-
-log() { printf '[%s] %s\n' "$(ts)" "$*"; }
-log_error() { printf '[%s] ERROR: %s\n' "$(ts)" "$*" >&2; }
+# ts, ts_file, log, log_error are provided by ralph-common.sh (sourced above).
 
 # Read a field from checkpoint.json using jq
 ckpt_read() {
