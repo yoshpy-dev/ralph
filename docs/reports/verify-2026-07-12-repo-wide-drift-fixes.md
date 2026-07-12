@@ -81,3 +81,53 @@
 - Not verified: none (all claims have static evidence)
 
 **Overall: PASS (static gates)**. No blocking issues. Proceed to `/test`.
+
+---
+
+## Cycle 2 addendum
+
+- New commits: e11a49b (sync-docs: check-skill-sync header + codex-setup.md "six axes"), 924d45b (plan checkbox), 501d164 (symbolic-ref fix in all 4 pipeline-outer.md copies; -maxdepth removal in check-skill-sync.sh check 6; test cases L/M), f84e459 (self-review addendum + tech-debt base-detection entry), 3706452 (test header drift-mode list)
+- Scope: AC1 (gate now recursive, new test cases L/M), AC2 (HEAD@{upstream} absence in all 4 prompt copies), AC6 static side (run-static-verify.sh re-run), tech-debt entry format and line-ref accuracy
+
+### AC1 re-check (gate now recursive + test cases L/M)
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Test case L exists (nested prompts/sub/x.md missing on mirror → exit 1) | PASS | `tests/test-check-skill-sync.sh:164-172` |
+| Test case M exists (nested prompts/sub/x.md byte-identical → exit 0) | PASS | `tests/test-check-skill-sync.sh:174-182` |
+| `-maxdepth 1` removed from check 6 `find` calls (now recursive) | PASS | `scripts/check-skill-sync.sh:251-252`, `templates/base/scripts/check-skill-sync.sh:251-252` — both use `find "$cl_prompts" -type f` without `-maxdepth` |
+| `bash tests/test-check-skill-sync.sh` all 13 cases PASS | PASS | Run result: 13/0 (PASS/FAIL); cases H–M all PASS |
+| `bash scripts/check-skill-sync.sh` on real tree | PASS | "13 skill(s) in lock-step" |
+
+### AC2 re-check (no HEAD@{upstream} literal in any pipeline-outer.md copy)
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| `grep -rn "HEAD@{upstream}"` across all 4 pipeline-outer.md copies | PASS (0 hits in prompt files) | Hits exist only in cross-review/SKILL.md, ralph-pipeline.sh, tech-debt/README.md, and reports — all expected/out-of-scope |
+| All 4 copies use `git symbolic-ref --short refs/remotes/origin/HEAD` | PASS | `pipeline-outer.md:17` in all 4 locations |
+| All 4 copies byte-identical | PASS | `cmp` root .claude vs .agents → IDENTICAL; root .claude vs templates/base .claude → IDENTICAL |
+
+### AC6 static side re-check
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `./scripts/run-static-verify.sh < /dev/null` | PASS (exit 0) | All verifiers passed; evidence at `docs/evidence/verify-2026-07-12-111338.log` |
+| `scripts/check-sync.sh` | PASS | IDENTICAL:171, DRIFTED:0, ROOT_ONLY:0, TEMPLATE_ONLY:10, KNOWN_DIFF:3 |
+| `scripts/check-skill-sync.sh` | PASS | 13 skills in lock-step |
+| Go verifier (gofmt + go vet) | PASS | 0 issues |
+| All hooks `sh -n` | PASS | 18 hook files OK |
+
+### Tech-debt entry (base-detection divergence)
+
+- Entry appended at `docs/tech-debt/README.md` row 44 (last row before closing tag)
+- Format matches existing entries (pipe-delimited table row with 5 fields: debt item, impact, why deferred, trigger, related plan/report)
+- File:line refs verified accurate: `scripts/ralph-pipeline.sh:807` (confirmed HEAD@{upstream} at that line), `.claude/skills/cross-review/SKILL.md:51` (confirmed), plus both template/agents mirrors
+- The "related plan/report" field correctly points to `docs/reports/self-review-2026-07-12-repo-wide-drift-fixes.md` (Cycle 2 addendum, HIGH follow-up)
+
+### Remaining gaps (unchanged from Cycle 1)
+
+- `run-test.sh` (behavioral tests) not run here — tester's responsibility
+- Runtime correction of symbolic-ref form is "likely but unverified" until a live cross-review run on a pushed feature branch is observed
+- The HIGH follow-up (porting symbolic-ref to `ralph-pipeline.sh:807` and `cross-review/SKILL.md:51`) is correctly deferred as out-of-scope for this PR per tech-debt entry and self-review addendum
+
+**Cycle 2 verdict: PASS (static gates)**. All three targeted ACs (AC1, AC2, AC6 static) confirmed. No new blocking issues introduced by the fix commits.
