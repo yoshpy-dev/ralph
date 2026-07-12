@@ -142,3 +142,56 @@ None of the gaps above block the PR. All are non-critical coverage improvements.
 - G1: slug unusual character path sanitization — LOW, no PR block
 - G2: sparse-field event tolerance fixture — LOW, no PR block
 - G3: backfill CLI against real report directory — LOW, no PR block
+
+---
+
+## Cycle 2 (2026-07-13)
+
+- Trigger: cross-review ACTION_REQUIRED findings fixed in commits 45355e5 and 2f237d1
+- Evidence: docs/evidence/test-2026-07-13-ralph-insights-cycle2.log
+
+### Suite counts
+
+| Suite | Cycle 1 | Cycle 2 | Delta | Result |
+|-------|---------|---------|-------|--------|
+| `tests/test-insights-append.sh` | 39 | 39 | 0 | PASS 39/39 |
+| `tests/test-insights-pipeline-events.sh` | 37 | 37 | 0 | PASS 37/37 |
+| `go test ./internal/insights/...` | 28 | 31 | +3 | PASS 31/31 |
+| `go test ./internal/cli/...` | 79 | 80 | +1 | PASS 80/80 |
+| `tests/test-model-routing.sh` (regression spot) | 24 | 24 | 0 | PASS 24/24 |
+| `tests/test-ralph-config.sh` (regression spot) | 43 | 43 | 0 | PASS 43/43 |
+| `tests/test-ralph-worktree.sh` (regression spot) | 29 | 29 | 0 | PASS 29/29 |
+| Canonical gate `./scripts/run-test.sh` | PASS | PASS | — | PASS |
+
+**Cycle 2 total: 523 assertions, 0 failures.**
+
+### New regression tests from fixes (named)
+
+All 5 new tests PASS:
+
+| Test name | Package | What it guards |
+|-----------|---------|----------------|
+| `TestParseReport_CrossReview_MultiCycle` | `internal/insights` | Multi-cycle cross-review report yields distinct events with correct cycle numbers |
+| `TestParseReport_PathNormalization` | `internal/insights` | Relative path and its `filepath.Abs` form produce the same `source_report_path` |
+| `TestRunBackfill_RelThenAbsDedupe` | `internal/insights` | Apply with relative path then absolute path adds 0 duplicates (rel-then-abs dedupe) |
+| `TestRunBackfill_MultiCycleReport` | `internal/insights` | Multi-cycle backfill produces N distinct events matching cycle numbers |
+| `TestInsightsCmd_JSONZeroData` | `internal/cli` | `ralph insights --json` on empty data dir exits 0 with valid JSON (not an error) |
+
+### Same-batch dedupe guard coverage assessment
+
+The fix in commit 2f237d1 adds `existing[e.key]` check inside the apply loop so two same-batch entries sharing a `DedupeKey` cannot both be written. No dedicated unit test covers this exact path: `TestBackfillCmd_Idempotent` tests second-run idempotency (different-batch scenario) but not same-batch. This is noted as **G4** below.
+
+### Spot-check rationale
+
+The fix delta touched only: `internal/cli/insights.go`, `internal/insights/backfill.go`, `internal/insights/backfill_test.go`, `scripts/insights-append.sh`, `docs/insights/README.md`, template mirrors, and test-insights-append.sh (enum default). No pipeline orchestration scripts were changed. Full re-run of all shell suites not required; model-routing, ralph-config, and ralph-worktree spot-checks confirm no regression in pipeline-adjacent code.
+
+### Updated gaps
+
+| Gap | Severity | Status |
+|-----|----------|--------|
+| G1: slug unusual character path sanitization | LOW | Carried forward |
+| G2: sparse-field event tolerance fixture | LOW | Carried forward |
+| G3: backfill CLI against real report directory | LOW | Carried forward |
+| G4 (new): same-batch dedupe guard unit test | LOW | No test for `existing[e.key]` path in CLI apply loop; `TestBackfillCmd_Idempotent` covers different-batch only. No PR block. |
+
+### Verdict: PASS
