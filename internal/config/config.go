@@ -99,7 +99,7 @@ func Default() Config {
 			MaxIterations:  20,
 			MaxParallel:    4,
 			SliceTimeout:   "30m",
-			PermissionMode: "auto",
+			PermissionMode: "bypassPermissions",
 			Prompts: PromptConfig{
 				Dir: ".ralph/prompts",
 			},

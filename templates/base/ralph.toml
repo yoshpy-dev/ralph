@@ -6,7 +6,17 @@ effort = "high"
 max_iterations = 20
 max_parallel = 4
 slice_timeout = "30m"
-permission_mode = "auto"
+permission_mode = "bypassPermissions"
+# Unattended `claude -p` Loop runs cannot answer permission prompts; the
+# pipeline uses bypassPermissions by default.  Guardrails for bypassed headless
+# turns are: task-worktree isolation, post-hoc pipeline checks (commit-message
+# secret scan, uncommitted-change detection), verify/test gates, and human PR
+# review.  Note: interactive hooks do NOT fire under `claude -p` (see
+# docs/recipes/ralph-loop.md), so they are not part of the safety story here.
+# To run conservatively, set RALPH_PERMISSION_MODE=auto in the environment
+# (works from every entry point: shell scripts and `ralph run`) or set this
+# value to "auto" (honoured only when launching via the Go `ralph run` binary;
+# shell wrappers do not parse ralph.toml).
 
 [pipeline.prompts]
 # The pipeline currently reads its prompts from `.claude/skills/loop/prompts/`; this key is reserved for future prompt-dir override support.
