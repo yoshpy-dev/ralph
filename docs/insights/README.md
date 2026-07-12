@@ -13,7 +13,7 @@ Each event is one JSON line appended to a per-task file under `events/`.
 |-------|------|----------|----------------|
 | `schema` | integer | yes | Always `1` for schema v1. Bumps on breaking change. |
 | `ts` | string | yes | ISO8601 UTC timestamp (e.g. `2026-07-13T01:23:45Z`). |
-| `run_id` | string | yes | Per-pipeline-invocation identifier (`<ts>-<pid>`). Constant across all events in one `ralph-pipeline.sh` run. |
+| `run_id` | string | required for `source:pipeline`; optional for `source:skill\|backfill` | Per-pipeline-invocation identifier (`<ts>-<pid>`). Constant across all events in one `ralph-pipeline.sh` run. Omitted when written by a skill agent or by `ralph insights backfill` (no single run context). |
 | `slug` | string | yes | Task slug (matches plan file basename, e.g. `ralph-insights`). |
 | `flow` | string | yes | `standard` or `loop`. Pipeline-emitted events are always `loop`. Skill-emitted events use `standard`. |
 | `phase` | string | yes | Phase name: `implement`, `self_review`, `verify`, `test`, `sync_docs`, `cross_review`, `pr`. |
@@ -84,6 +84,16 @@ ralph insights
 ralph insights --json
 ralph insights backfill [--apply]
 ```
+
+### JSON output sentinel: `honored_rate: -1`
+
+When `ralph insights --json` is used, the aggregate object includes
+`honored_rate` in the routing section. A value of `-1` means no routing
+data is available (no events with `honored` field present, or zero events
+total). Machine consumers must treat `-1` as "no data" and not as a real
+honor rate. Example: a fresh repo with only backfill events derived from
+Markdown reports will see `"honored_rate": -1` because backfill events
+do not carry routing fields.
 
 ## Appending events
 

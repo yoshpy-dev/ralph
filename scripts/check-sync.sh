@@ -61,6 +61,8 @@ ROOT_ONLY_EXCLUSIONS=(
   "docs/roadmap/harness-maturity-model.md"
   # Evidence and reports are runtime artifacts
   "docs/evidence/"
+  # Insight events are per-task runtime artifacts (only .gitkeep is in templates)
+  "docs/insights/events/"
   "docs/reports/self-review-"
   "docs/reports/verify-"
   "docs/reports/test-"

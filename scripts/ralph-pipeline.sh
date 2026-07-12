@@ -1214,8 +1214,8 @@ main() {
   # PIPELINE_SLUG: derived from branch name (<type>/<slug> → <slug>).
   # Both are exported so emit_insight_event can read them as globals.
   _pii_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
-  # Strip type prefix (everything up to and including the first '/').
-  # If branch has issue component (type/NNN/slug), strip two prefixes.
+  # Strip all path components except the last one (##*/ strips everything
+  # up to and including the last '/'), giving the final slug segment.
   _pii_slug="${_pii_branch##*/}"
   if [ -z "$_pii_slug" ] || [ "$_pii_slug" = "$_pii_branch" ]; then
     _pii_slug="unknown"

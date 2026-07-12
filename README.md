@@ -120,6 +120,8 @@ Before claiming a task is done:
 | `ralph abort [--slice <name>]` | Abort a single slice or all slices. |
 | `ralph pack add <lang>` | Install a language pack. |
 | `ralph doctor` | Check Claude Code, Codex, hooks, manifest drift, language packs. |
+| `ralph insights [--json]` | Aggregate pipeline insight events into a routing/pipeline summary. |
+| `ralph insights backfill [--apply]` | Derive events from existing Markdown reports (dry-run by default). |
 | `ralph version` | Show semver + commit + build date. |
 
 Run `ralph help <command>` for flags.
