@@ -31,6 +31,9 @@
 - `docs/tech-debt/`: known debt and follow-ups
 - `docs/evidence/`: what counts as evidence
 - `docs/recipes/`: hands-on recipes (Codex setup, Ralph Loop, language packs, agent teams, worktrees)
+- `docs/roadmap/`: maturity-model and future direction documents
+- `docs/research/`: approach comparisons and investigation notes
+- `docs/references/`: source notes and external reference links
 
 ## Skills
 

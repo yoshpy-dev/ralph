@@ -77,9 +77,11 @@ default.
 ## Drift safety
 
 `scripts/check-skill-sync.sh` compares `.claude/skills/<name>/SKILL.md` and
-`.agents/skills/<name>/SKILL.md` on five axes: inventory, body,
-frontmatter `name`, frontmatter `description`, and implicit-invocation
-policy (`disable-model-invocation` ⇔ `policy.allow_implicit_invocation`).
+`.agents/skills/<name>/SKILL.md` on six axes: inventory, body,
+frontmatter `name`, frontmatter `description`, implicit-invocation
+policy (`disable-model-invocation` ⇔ `policy.allow_implicit_invocation`),
+and `prompts/` directory parity (every file must exist on both sides and
+be byte-identical).
 CI fails on drift, so always edit both sides whenever you touch a skill.
 
 ## Recovery from a half-applied upgrade
