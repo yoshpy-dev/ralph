@@ -360,40 +360,23 @@ func checkInstalledPacks(targetDir string) []checkResult {
 		return checkEmbeddedPacks()
 	}
 
-	// Detect installed packs by checking which pack files appear in the manifest.
-	availPacks, err := scaffold.AvailablePacks()
-	if err != nil {
-		return []checkResult{{Name: "Language packs", Status: "warn", Detail: "could not list packs"}}
-	}
-
-	installedPacks := make(map[string]bool)
-	for _, p := range availPacks {
-		packFS, pErr := scaffold.PackFS(p)
-		if pErr != nil {
-			continue
-		}
-		// If any file from this pack is in the manifest, the pack is installed.
-		_ = fs.WalkDir(packFS, ".", func(path string, d fs.DirEntry, err error) error {
-			if err != nil || d.IsDir() {
-				return err
-			}
-			if _, ok := m.Files[path]; ok {
-				installedPacks[p] = true
-				return fs.SkipAll
-			}
-			return nil
-		})
-	}
-
-	if len(installedPacks) == 0 {
+	// Use Meta.Packs as the authoritative installed-pack list.
+	// Both `ralph init` (init.go) and `ralph pack add` (pack.go) maintain this
+	// field, so it reliably reflects which packs were installed.
+	// The previous approach walked PackFS and probed m.Files[pack-root-relative
+	// path], but manifest keys are namespaced (e.g. "packs/languages/golang/…"),
+	// so the lookup always missed and reported "none installed".
+	if len(m.Meta.Packs) == 0 {
 		return []checkResult{{Name: "Language packs", Status: "pass", Detail: "none installed"}}
 	}
 
 	var results []checkResult
-	for p := range installedPacks {
+	for _, p := range m.Meta.Packs {
 		r := checkResult{Name: fmt.Sprintf("Pack: %s", p)}
-		// Check that verify.sh is executable on disk.
-		verifyPath := filepath.Join(targetDir, "verify.sh")
+		// verify.sh lives under packs/languages/<lang>/verify.sh on disk.
+		// The previous code probed filepath.Join(targetDir, "verify.sh") (project
+		// root), which always produced a misleading "not found on disk" warning.
+		verifyPath := filepath.Join(targetDir, packRelDir(p), "verify.sh")
 		packFS, pErr := scaffold.PackFS(p)
 		if pErr != nil {
 			r.Status = "warn"
@@ -406,7 +389,7 @@ func checkInstalledPacks(targetDir string) []checkResult {
 			r.Detail = "verify.sh missing in template"
 		} else if _, sErr := os.Stat(verifyPath); errors.Is(sErr, fs.ErrNotExist) {
 			r.Status = "warn"
-			r.Detail = "verify.sh not found on disk"
+			r.Detail = fmt.Sprintf("verify.sh not found on disk: %s", verifyPath)
 		} else {
 			r.Status = "pass"
 		}
