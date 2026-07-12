@@ -7,7 +7,6 @@ description: >
   If the reviewer CLI is unavailable, silently skips and proceeds to /pr.
   Findings are triaged by the driving CLI using implementation context before
   presentation to the user.
-allowed-tools: Read, Grep, Glob, Bash, AskUserQuestion, Write
 ---
 Provide a cross-model second opinion on the current diff before PR creation.
 
