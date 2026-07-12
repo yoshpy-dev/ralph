@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -194,6 +195,152 @@ func contains(haystack, needle string) bool {
 		}
 	}
 	return false
+}
+
+// TestDefault_Phases verifies the [pipeline.phases] defaults mirror the
+// RALPH_<PHASE>_MODEL shell defaults in scripts/ralph-config.sh — the two
+// must change in lock-step (see .claude/rules/model-routing.md).
+func TestDefault_Phases(t *testing.T) {
+	p := Default().Pipeline.Phases
+	cases := []struct {
+		name string
+		got  string
+		want string
+	}{
+		{"implement", p.Implement, "sonnet"},
+		{"self_review", p.SelfReview, "opus"},
+		{"verify", p.Verify, "sonnet"},
+		{"test", p.Test, "sonnet"},
+		{"sync_docs", p.SyncDocs, "sonnet"},
+		{"pr", p.PR, "sonnet"},
+		{"probe", p.Probe, "haiku"},
+		{"escalation", p.Escalation, "opus"},
+		// force is an override knob, not a default: empty means "no override".
+		{"force", p.Force, ""},
+	}
+	for _, tc := range cases {
+		if tc.got != tc.want {
+			t.Errorf("phases.%s default = %q, want %q", tc.name, tc.got, tc.want)
+		}
+	}
+}
+
+// TestLoad_PhasesAbsent verifies that a ralph.toml without [pipeline.phases]
+// yields all phase defaults (backward compatibility for existing projects).
+func TestLoad_PhasesAbsent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ralph.toml")
+	content := `[pipeline]
+model = "opus"
+max_parallel = 8
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Pipeline.Phases != Default().Pipeline.Phases {
+		t.Errorf("phases = %+v, want defaults %+v", cfg.Pipeline.Phases, Default().Pipeline.Phases)
+	}
+}
+
+// TestLoad_PhasesPartialBackfill verifies that a partial [pipeline.phases]
+// section keeps the explicit value and backfills every other key — except
+// force, which must stay empty because empty is meaningful (no override).
+func TestLoad_PhasesPartialBackfill(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ralph.toml")
+	content := `[pipeline.phases]
+implement = "opus"
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Pipeline.Phases.Implement != "opus" {
+		t.Errorf("implement = %q, want opus (explicit value)", cfg.Pipeline.Phases.Implement)
+	}
+	if cfg.Pipeline.Phases.SelfReview != "opus" {
+		t.Errorf("self_review = %q, want opus (backfilled)", cfg.Pipeline.Phases.SelfReview)
+	}
+	if cfg.Pipeline.Phases.Verify != "sonnet" {
+		t.Errorf("verify = %q, want sonnet (backfilled)", cfg.Pipeline.Phases.Verify)
+	}
+	if cfg.Pipeline.Phases.Probe != "haiku" {
+		t.Errorf("probe = %q, want haiku (backfilled)", cfg.Pipeline.Phases.Probe)
+	}
+	if cfg.Pipeline.Phases.Force != "" {
+		t.Errorf("force = %q, want empty (never backfilled)", cfg.Pipeline.Phases.Force)
+	}
+}
+
+// TestLoad_PhasesFullRoundTrip verifies every [pipeline.phases] key, including
+// force, survives a full parse unchanged.
+func TestLoad_PhasesFullRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ralph.toml")
+	content := `[pipeline.phases]
+implement   = "haiku"
+self_review = "sonnet"
+verify      = "opus"
+test        = "opus"
+sync_docs   = "haiku"
+pr          = "haiku"
+probe       = "sonnet"
+escalation  = "sonnet"
+force       = "opus"
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	want := PhaseModelConfig{
+		Implement:  "haiku",
+		SelfReview: "sonnet",
+		Verify:     "opus",
+		Test:       "opus",
+		SyncDocs:   "haiku",
+		PR:         "haiku",
+		Probe:      "sonnet",
+		Escalation: "sonnet",
+		Force:      "opus",
+	}
+	if cfg.Pipeline.Phases != want {
+		t.Errorf("phases = %+v, want %+v", cfg.Pipeline.Phases, want)
+	}
+}
+
+// TestLoad_TemplateRalphToml verifies the shipped templates/base/ralph.toml
+// parses cleanly and its [pipeline.phases] values match the Go defaults —
+// catching drift between the scaffolded file and Default(). Repo-root
+// discovery follows the runtime.Caller pattern used by
+// internal/scaffold/embed_test.go.
+func TestLoad_TemplateRalphToml(t *testing.T) {
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("cannot determine test file location")
+	}
+	// thisFile is internal/config/config_test.go → repo root is ../../
+	path := filepath.Join(filepath.Dir(thisFile), "..", "..", "templates", "base", "ralph.toml")
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("templates/base/ralph.toml not found: %v", err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load(templates/base/ralph.toml): %v", err)
+	}
+	if cfg.Pipeline.Phases != Default().Pipeline.Phases {
+		t.Errorf("template phases = %+v, want defaults %+v (template and Default() must stay in lock-step)",
+			cfg.Pipeline.Phases, Default().Pipeline.Phases)
+	}
 }
 
 // TestLoad_RequireCodexCLI verifies the new toml field round-trips. The doctor

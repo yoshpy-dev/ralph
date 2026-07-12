@@ -80,6 +80,27 @@ func runPipeline(planPath string, maxIter, maxPar int, preflight, resume, dryRun
 	env = appendEnvIfMissing(env, "RALPH_CODEX_APPROVAL_POLICY", cfg.Loop.CodexApprovalPolicy)
 	env = appendEnvIfMissing(env, "RALPH_CLAUDE_REVIEWER_MODEL", cfg.Loop.ClaudeReviewerModel)
 
+	// Per-phase model routing — propagate [pipeline.phases] values only when
+	// the user has not already set the corresponding env var (env > TOML > default).
+	// RALPH_FORCE_MODEL is only exported when the toml value is non-empty.
+	// appendEnvIfMissing skips adding when the key is already present in env
+	// (i.e. when the user exported it), so an empty cfg.Pipeline.Phases.Force
+	// would append "RALPH_FORCE_MODEL=" which would then mask any user-set env
+	// var on subsequent reads (the loop finds "RALPH_FORCE_MODEL=" and returns
+	// early). To avoid that, we guard with an explicit non-empty check so that
+	// an absent/empty [pipeline.phases] force never writes a blank override.
+	env = appendEnvIfMissing(env, "RALPH_IMPLEMENT_MODEL", cfg.Pipeline.Phases.Implement)
+	env = appendEnvIfMissing(env, "RALPH_SELF_REVIEW_MODEL", cfg.Pipeline.Phases.SelfReview)
+	env = appendEnvIfMissing(env, "RALPH_VERIFY_MODEL", cfg.Pipeline.Phases.Verify)
+	env = appendEnvIfMissing(env, "RALPH_TEST_MODEL", cfg.Pipeline.Phases.Test)
+	env = appendEnvIfMissing(env, "RALPH_SYNC_DOCS_MODEL", cfg.Pipeline.Phases.SyncDocs)
+	env = appendEnvIfMissing(env, "RALPH_PR_MODEL", cfg.Pipeline.Phases.PR)
+	env = appendEnvIfMissing(env, "RALPH_PROBE_MODEL", cfg.Pipeline.Phases.Probe)
+	env = appendEnvIfMissing(env, "RALPH_ESCALATION_MODEL", cfg.Pipeline.Phases.Escalation)
+	if cfg.Pipeline.Phases.Force != "" {
+		env = appendEnvIfMissing(env, "RALPH_FORCE_MODEL", cfg.Pipeline.Phases.Force)
+	}
+
 	if planPath == "" {
 		planPath, err = detectLatestPlanDir(activePlansDir)
 		if err != nil {

@@ -136,7 +136,7 @@ All Ralph pipeline settings are centralized in `scripts/ralph-config.sh`. Overri
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `RALPH_MODEL` | `opus` | Claude model name |
+| `RALPH_MODEL` | `opus` | Global fallback model for unrouted turns; Loop pipeline phases use per-phase vars below |
 | `RALPH_EFFORT` | `high` | Effort level for `claude -p` |
 | `RALPH_PERMISSION_MODE` | `bypassPermissions` | Permission mode for `claude -p` |
 | `RALPH_MAX_ITERATIONS` | `20` | Total iteration cap across all cycles |
@@ -151,6 +151,22 @@ All Ralph pipeline settings are centralized in `scripts/ralph-config.sh`. Overri
 | `RALPH_CODEX_APPROVAL_POLICY` | `on-failure` | Codex `approval_policy` override (`untrusted` / `on-failure` / `on-request` / `never`) |
 | `RALPH_CLAUDE_REVIEWER_MODEL` | `opus` | Model used by `claude -p` when it plays adversarial reviewer (driver=codex cross-review path) |
 
+Per-phase model routing (Loop pipeline only — resolved by `resolve_phase_model` in `scripts/ralph-cli-driver.sh`):
+
+| Variable | Default | Phase |
+|----------|---------|-------|
+| `RALPH_IMPLEMENT_MODEL` | `sonnet` | Inner Loop implement/fix seat |
+| `RALPH_SELF_REVIEW_MODEL` | `opus` | Self-review (judgment seat) |
+| `RALPH_VERIFY_MODEL` | `sonnet` | Verify |
+| `RALPH_TEST_MODEL` | `sonnet` | Test |
+| `RALPH_SYNC_DOCS_MODEL` | `sonnet` | Sync-docs |
+| `RALPH_PR_MODEL` | `sonnet` | PR creation |
+| `RALPH_PROBE_MODEL` | `haiku` | CLI capability probes |
+| `RALPH_ESCALATION_MODEL` | `opus` | Implement seat on outer cycle ≥ 2 |
+| `RALPH_FORCE_MODEL` | _(unset)_ | When set, overrides **all** phase models (single-knob rollback) |
+
+Precedence per phase: `RALPH_FORCE_MODEL` > `RALPH_<PHASE>_MODEL` (env) > `[pipeline.phases]` in `ralph.toml` > built-in default. Routing is auditable via `.harness/state/pipeline/model-receipts.jsonl`. See `.claude/rules/model-routing.md` for full details.
+
 Priority: CLI argument > environment variable > `ralph.toml` > default value. The
 loop-driver knobs also accept `[loop] driver = "..."` etc. in `ralph.toml`,
 which `ralph run` propagates to the orchestrator only when the env var is
@@ -158,7 +174,11 @@ unset.
 
 Example:
 ```sh
-RALPH_MODEL=sonnet RALPH_SLICE_TIMEOUT=3600 ./scripts/ralph run --plan <dir>
+# Override the implement seat only (keep other phases at their defaults)
+RALPH_IMPLEMENT_MODEL=opus RALPH_SLICE_TIMEOUT=3600 ./scripts/ralph run --plan <dir>
+
+# Single-knob: run every phase on opus (pre-routing rollback)
+RALPH_FORCE_MODEL=opus ./scripts/ralph run --plan <dir>
 ```
 
 ### Running Loop under the Codex driver
