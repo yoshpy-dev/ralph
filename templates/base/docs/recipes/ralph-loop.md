@@ -138,7 +138,7 @@ All Ralph pipeline settings are centralized in `scripts/ralph-config.sh`. Overri
 |----------|---------|-------------|
 | `RALPH_MODEL` | `opus` | Global fallback model for unrouted turns; Loop pipeline phases use per-phase vars below |
 | `RALPH_EFFORT` | `high` | Effort level for `claude -p` |
-| `RALPH_PERMISSION_MODE` | `bypassPermissions` | Permission mode for `claude -p`. Default is `bypassPermissions` when invoking the shell scripts directly (`scripts/ralph-config.sh`); `auto` when launched via `ralph run` (value from `ralph.toml` `[pipeline] permission_mode`). |
+| `RALPH_PERMISSION_MODE` | `bypassPermissions` | Permission mode for `claude -p`. Default is `bypassPermissions` for shell entry points — direct script invocation AND the `./scripts/ralph run` wrapper (both source `scripts/ralph-config.sh` and do not read TOML); `auto` only when launched via the Go binary `ralph run`, which exports `ralph.toml` `[pipeline] permission_mode`. |
 | `RALPH_MAX_ITERATIONS` | `20` | Total iteration cap across all cycles |
 | `RALPH_MAX_INNER_CYCLES` | `10` | Max Inner Loop cycles before escalation |
 | `RALPH_MAX_OUTER_CYCLES` | `2` | Max Outer Loop cycles (total pipeline runs) before escalation |
