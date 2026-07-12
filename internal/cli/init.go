@@ -155,58 +155,21 @@ func executeInit(targetDir string, cfg initConfig, force bool) error {
 	// Step 2: Render selected language packs into packs/languages/<lang>/.
 	// Pack rule.md files are control files: they render to
 	// .claude/rules/<lang>.md instead of packs/languages/<lang>/rule.md.
+	// renderPackInto (language_pack.go) is the shared helper used here and by
+	// addPack (pack.go) so the two code paths cannot diverge.
 	for _, pack := range cfg.Packs {
-		packFS, err := scaffold.PackFS(pack)
+		pr, err := renderPackInto(targetDir, pack, force)
 		if err != nil {
 			fmt.Printf("  ⚠ pack %s: %v\n", pack, err)
 			continue
 		}
-		packDir := filepath.Join(targetDir, packRelDir(pack))
-		packResult, packHashes, err := scaffold.RenderFS(packFS, scaffold.RenderOptions{
-			TargetDir: packDir,
-			Overwrite: force,
-			SkipPaths: packRenderSkipPaths,
-		})
-		if err != nil {
-			fmt.Printf("  ⚠ pack %s: %v\n", pack, err)
-			continue
+		for k, v := range pr.hashes {
+			hashes[k] = v
 		}
-		// Merge pack hashes with namespaced paths for manifest.
-		packPrefix := packRelDir(pack)
-		for k, v := range packHashes {
-			hashes[filepath.Join(packPrefix, k)] = v
-		}
-		packBaselines, err := writeRenderedBaselines(targetDir, packFS, packPrefix, packResult)
-		if err != nil {
-			return err
-		}
-		for k, v := range packBaselines {
+		for k, v := range pr.baselinePaths {
 			baselinePaths[k] = v
 		}
-
-		ruleContent, ok, err := packRuleContent(packFS)
-		if err != nil {
-			fmt.Printf("  ⚠ pack %s rule: %v\n", pack, err)
-			continue
-		}
-		if ok {
-			rulePath := packRuleRelPath(pack)
-			ruleResult, ruleHash, err := renderMappedFile(targetDir, rulePath, ruleContent, force)
-			if err != nil {
-				fmt.Printf("  ⚠ pack %s rule: %v\n", pack, err)
-				continue
-			}
-			hashes[rulePath] = ruleHash
-			if len(ruleResult.Created)+len(ruleResult.Overwritten) > 0 {
-				baselinePath, err := scaffold.WriteBaseline(targetDir, rulePath, ruleContent)
-				if err != nil {
-					return err
-				}
-				baselinePaths[rulePath] = baselinePath
-			}
-			mergeRenderResult(packResult, ruleResult)
-		}
-		printRenderSummary("pack/"+pack, packResult)
+		printRenderSummary("pack/"+pack, pr.result)
 	}
 
 	// Step 3: Create manifest.

@@ -2134,3 +2134,137 @@ func TestNewRootCmd_HasAllSubcommands(t *testing.T) {
 		}
 	}
 }
+
+// TestAddPack_RendersIntoPackSubdir verifies AC1 and AC2 of the fix-known-breakage
+// plan: ralph pack add <lang> must write files under packs/languages/<lang>/,
+// never at the project root, map rule.md to .claude/rules/<lang>.md, and
+// record namespaced manifest keys with Meta.Packs updated.
+func TestAddPack_RendersIntoPackSubdir(t *testing.T) {
+	setupTestEmbedFS(t)
+	Version = "0.1.0-test"
+
+	// Create a project with a minimal manifest so addPack can read/update it.
+	dir := t.TempDir()
+	cfg := initConfig{ProjectName: "test", Packs: nil}
+	if err := executeInit(dir, cfg, false); err != nil {
+		t.Fatalf("executeInit (seed): %v", err)
+	}
+
+	// Choose a pack that is available in the test FS ("golang").
+	lang := "golang"
+
+	if err := addPack(dir, lang); err != nil {
+		t.Fatalf("addPack(%q): %v", lang, err)
+	}
+
+	// AC1a: pack payload file must exist under packs/languages/<lang>/.
+	packVerify := filepath.Join(dir, "packs", "languages", lang, "verify.sh")
+	if _, err := os.Stat(packVerify); err != nil {
+		t.Errorf("pack payload packs/languages/%s/verify.sh missing: %v", lang, err)
+	}
+
+	// AC1b: pack payload file must NOT exist at the project root.
+	rootVerify := filepath.Join(dir, "verify.sh")
+	if _, err := os.Stat(rootVerify); err == nil {
+		t.Errorf("verify.sh was written at project root — pack dir layout is wrong")
+	}
+
+	// AC1c: rule.md control file must render to .claude/rules/<lang>.md.
+	ruleFile := filepath.Join(dir, ".claude", "rules", lang+".md")
+	if _, err := os.Stat(ruleFile); err != nil {
+		t.Errorf(".claude/rules/%s.md missing: %v", lang, err)
+	}
+
+	// AC1d: rule.md must NOT appear as packs/languages/<lang>/rule.md.
+	packRule := filepath.Join(dir, "packs", "languages", lang, "rule.md")
+	if _, err := os.Stat(packRule); err == nil {
+		t.Errorf("packs/languages/%s/rule.md should not exist (it is a control file)", lang)
+	}
+
+	// AC2a: manifest keys must be namespaced under packs/languages/<lang>/.
+	m, err := scaffold.ReadManifest(filepath.Join(dir, ".ralph", "manifest.toml"))
+	if err != nil {
+		t.Fatalf("ReadManifest: %v", err)
+	}
+	packVerifyKey := filepath.Join("packs", "languages", lang, "verify.sh")
+	if _, ok := m.Files[packVerifyKey]; !ok {
+		t.Errorf("manifest missing namespaced key %q", packVerifyKey)
+	}
+	// Ensure no un-namespaced pack key leaks into the manifest root.
+	if _, ok := m.Files["verify.sh"]; ok {
+		t.Error("manifest has un-namespaced key 'verify.sh' (pack namespace leak)")
+	}
+	// rule.md must be tracked under .claude/rules/<lang>.md (not the pack dir).
+	ruleKey := filepath.Join(".claude", "rules", lang+".md")
+	if _, ok := m.Files[ruleKey]; !ok {
+		t.Errorf("manifest missing rule key %q", ruleKey)
+	}
+	if _, ok := m.Files[filepath.Join("packs", "languages", lang, "rule.md")]; ok {
+		t.Error("manifest must not track packs/languages/<lang>/rule.md")
+	}
+
+	// AC2b: Meta.Packs must include the added lang.
+	found := false
+	for _, p := range m.Meta.Packs {
+		if p == lang {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Meta.Packs = %v, want %q to be present", m.Meta.Packs, lang)
+	}
+}
+
+// TestAddPack_MetaPacksNotDuplicated verifies that running addPack twice on
+// the same lang does not duplicate the entry in Meta.Packs.
+func TestAddPack_MetaPacksNotDuplicated(t *testing.T) {
+	setupTestEmbedFS(t)
+	Version = "0.1.0-test"
+
+	dir := t.TempDir()
+	cfg := initConfig{ProjectName: "test", Packs: nil}
+	if err := executeInit(dir, cfg, false); err != nil {
+		t.Fatalf("executeInit: %v", err)
+	}
+
+	lang := "golang"
+	if err := addPack(dir, lang); err != nil {
+		t.Fatalf("first addPack: %v", err)
+	}
+	if err := addPack(dir, lang); err != nil {
+		t.Fatalf("second addPack: %v", err)
+	}
+
+	m, err := scaffold.ReadManifest(filepath.Join(dir, ".ralph", "manifest.toml"))
+	if err != nil {
+		t.Fatalf("ReadManifest: %v", err)
+	}
+	count := 0
+	for _, p := range m.Meta.Packs {
+		if p == lang {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("Meta.Packs has %d occurrences of %q, want 1: %v", count, lang, m.Meta.Packs)
+	}
+}
+
+// TestAddPack_UnknownLangErrors verifies that addPack returns an error for an
+// unrecognised language pack name (no side effects on the project directory).
+func TestAddPack_UnknownLangErrors(t *testing.T) {
+	setupTestEmbedFS(t)
+	Version = "0.1.0-test"
+
+	dir := t.TempDir()
+	cfg := initConfig{ProjectName: "test", Packs: nil}
+	if err := executeInit(dir, cfg, false); err != nil {
+		t.Fatalf("executeInit: %v", err)
+	}
+
+	err := addPack(dir, "nonexistent-lang")
+	if err == nil {
+		t.Fatal("addPack with unknown lang: expected error, got nil")
+	}
+}
