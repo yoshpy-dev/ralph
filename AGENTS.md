@@ -67,6 +67,7 @@ task worktree and local branch while leaving the remote PR branch intact.
 - `docs/plans/archive/` — completed plans
 - `docs/plans/templates/` — plan templates (`feature-plan.md`, `ralph-loop-manifest.md`, `ralph-loop-slice.md`)
 - `docs/reports/` — self-review, verify, test, sync-docs, cross-review triage, walkthrough artifacts
+- `docs/insights/` — committed insight events (`events/<date>-<slug>.jsonl`); schema in `docs/insights/README.md`; consumed by `ralph insights`
 - `docs/quality/` — definition of done and quality gates
 - `.claude/rules/` — path-scoped guidance (read by both agents)
 - `.claude/skills/` — Claude-side on-demand workflows
@@ -77,7 +78,7 @@ task worktree and local branch while leaving the remote PR branch intact.
 - `.codex/` — Codex project config for this meta-repo (`config.toml`, `agents/`, `hooks/`, `AGENTS.override.md`, `README.md`); `agents/` contains Codex custom agent definitions; same shape as `templates/base/.codex/` so ralph dogfoods the parity it ships
 - `templates/base/.codex/` — `ralph init` source for the same surface; root `.codex/` and template `.codex/` are kept identical via `scripts/check-sync.sh` (no KNOWN_DIFFS today)
 - `packs/languages/` — language-specific depth (also copied to `templates/packs/` for embedding)
-- `scripts/` — reusable verification and bootstrap scripts (includes legacy `ralph` shell CLI, `ralph-config.sh`, `ralph-worktree.sh`, `ralph-pipeline.sh`, `ralph-orchestrator.sh`, `ralph-cli-driver.sh` (driver dispatcher: `run_agent` / `pick_reviewer` / `detect_base_branch` / `count_triage_findings` / `resolve_phase_model` / `write_model_receipt`), `install.sh`, drift gate `check-skill-sync.sh`, Codex availability probe `codex-check.sh`)
+- `scripts/` — reusable verification and bootstrap scripts (includes `ralph-common.sh` (shared shell helpers: ts/log/default_branch/detect_active_plan_dir); legacy `ralph` shell CLI (prints deprecation notice when Go `ralph` binary is on PATH; retirement tracked in docs/tech-debt/README.md), `ralph-config.sh`, `ralph-worktree.sh`, `ralph-pipeline.sh`, `ralph-orchestrator.sh`, `ralph-cli-driver.sh` (driver dispatcher: `run_agent` / `pick_reviewer` / `detect_base_branch` / `count_triage_findings` / `resolve_phase_model` / `write_model_receipt`), `install.sh`, drift gate `check-skill-sync.sh`, Codex availability probe `codex-check.sh`)
 - `docs/recipes/` — hands-on recipes (Codex setup, Ralph Loop, language packs, worktrees)
 - `.harness/state/` — runtime state, not canonical truth
 

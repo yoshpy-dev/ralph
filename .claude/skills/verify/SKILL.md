@@ -32,6 +32,14 @@ Verify the current work against the plan's acceptance criteria and run static an
 - clear pass/fail/partial verdict
 - explicit remaining gaps
 
+## Insight event (best-effort)
+
+After writing the report, append one insight event (errors are non-fatal):
+```
+./scripts/insights-append.sh --slug <slug> --flow standard --phase verify \
+  --verdict <pass|fail> --source skill || true
+```
+
 ## CLI execution modes
 
 This skill runs under both Claude Code and Codex. The execution mode follows

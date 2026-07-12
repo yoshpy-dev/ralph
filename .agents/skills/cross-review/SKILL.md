@@ -7,7 +7,6 @@ description: >
   If the reviewer CLI is unavailable, silently skips and proceeds to /pr.
   Findings are triaged by the driving CLI using implementation context before
   presentation to the user.
-allowed-tools: Read, Grep, Glob, Bash, AskUserQuestion, Write
 ---
 Provide a cross-model second opinion on the current diff before PR creation.
 
@@ -188,6 +187,16 @@ updating both the prompt and the renderer; the gate will not silently
 pass on partial substitution (regression: issue #50). Regression coverage
 lives in `tests/test-xreview-prompt-render.sh` and
 `tests/test-xreview-gate-regression.sh`.
+
+## Insight event (best-effort)
+
+After writing the triage report (Step 6), append one insight event (errors are non-fatal):
+```
+./scripts/insights-append.sh --slug <slug> --flow standard --phase cross_review \
+  --verdict <pass|action_required> --action-required <N> --worth-considering <N> \
+  --dismissed <N> --source skill || true
+```
+Use `--verdict action_required` when ACTION_REQUIRED findings exist; `pass` otherwise.
 
 ## What /cross-review does NOT do
 

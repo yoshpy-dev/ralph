@@ -36,6 +36,10 @@ func ReadSliceStatus(orchDir, sliceName string) (string, error) {
 }
 
 // ReadPipelineCheckpoint reads checkpoint.json from a worktree's .harness/state/pipeline/ directory.
+// It handles the legacy key rename: files written before the rename use
+// "codex_review_triage"; current files use "cross_review_triage". When only
+// the legacy key is present its value is promoted to CrossReviewTriage. When
+// both keys are present the new key wins. The file is never rewritten.
 func ReadPipelineCheckpoint(worktreeBase, sliceName string) (*PipelineCheckpoint, error) {
 	path := filepath.Join(worktreeBase, sliceName, ".harness", "state", "pipeline", "checkpoint.json")
 	data, err := os.ReadFile(path)
@@ -46,6 +50,20 @@ func ReadPipelineCheckpoint(worktreeBase, sliceName string) (*PipelineCheckpoint
 	if err := json.Unmarshal(data, &c); err != nil {
 		return nil, fmt.Errorf("parsing checkpoint for %s: %w", sliceName, err)
 	}
+
+	// Legacy-key migration: probe for the pre-rename key "codex_review_triage".
+	// Only migrate when the current key "cross_review_triage" is absent (i.e.
+	// all three sub-fields are zero) and the legacy key is present.
+	if c.CrossReviewTriage == (CrossReviewTriage{}) {
+		var raw map[string]json.RawMessage
+		if jsonErr := json.Unmarshal(data, &raw); jsonErr == nil {
+			if legacyVal, ok := raw["codex_review_triage"]; ok {
+				// Ignore unmarshal errors: best-effort migration.
+				_ = json.Unmarshal(legacyVal, &c.CrossReviewTriage)
+			}
+		}
+	}
+
 	return &c, nil
 }
 

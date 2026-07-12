@@ -27,6 +27,7 @@ detect_color() {
     C_RED='\033[31m'
     C_CYAN='\033[36m'
     C_BLUE='\033[34m'
+    # shellcheck disable=SC2034  # reserved for future phase color; part of the color palette
     C_MAGENTA='\033[35m'
   else
     C_RESET=''
@@ -37,6 +38,7 @@ detect_color() {
     C_RED=''
     C_CYAN=''
     C_BLUE=''
+    # shellcheck disable=SC2034  # reserved for future phase color; part of the color palette
     C_MAGENTA=''
   fi
 }

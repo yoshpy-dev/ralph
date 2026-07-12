@@ -443,6 +443,109 @@ func TestReadFullStatus_NoOrchestrator(t *testing.T) {
 	}
 }
 
+// TestReadPipelineCheckpoint_LegacyTriageKey verifies AC3 of the
+// fix-known-breakage plan: checkpoint files that contain only the legacy
+// "codex_review_triage" key must load with triage counts intact.
+func TestReadPipelineCheckpoint_LegacyTriageKey(t *testing.T) {
+	dir := t.TempDir()
+	sliceDir := filepath.Join(dir, "legacy", ".harness", "state", "pipeline")
+	mustMkdirAll(t, sliceDir)
+	data := mustReadFixture(t, "testdata/checkpoint-legacy-triage.json")
+	mustWriteFile(t, filepath.Join(sliceDir, "checkpoint.json"), data)
+
+	c, err := ReadPipelineCheckpoint(dir, "legacy")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Counts from the legacy "codex_review_triage" field must be migrated.
+	if c.CrossReviewTriage.ActionRequired != 2 {
+		t.Errorf("action_required = %d, want 2 (migrated from legacy key)", c.CrossReviewTriage.ActionRequired)
+	}
+	if c.CrossReviewTriage.WorthConsidering != 3 {
+		t.Errorf("worth_considering = %d, want 3 (migrated from legacy key)", c.CrossReviewTriage.WorthConsidering)
+	}
+	if c.CrossReviewTriage.Dismissed != 5 {
+		t.Errorf("dismissed = %d, want 5 (migrated from legacy key)", c.CrossReviewTriage.Dismissed)
+	}
+	// Other fields must still be readable.
+	if c.Phase != "outer" {
+		t.Errorf("phase = %q, want outer", c.Phase)
+	}
+}
+
+// TestReadPipelineCheckpoint_BothKeys verifies that when both
+// "cross_review_triage" and the legacy "codex_review_triage" are present,
+// the new key wins (legacy is ignored).
+func TestReadPipelineCheckpoint_BothKeys(t *testing.T) {
+	dir := t.TempDir()
+	sliceDir := filepath.Join(dir, "both", ".harness", "state", "pipeline")
+	mustMkdirAll(t, sliceDir)
+	data := mustReadFixture(t, "testdata/checkpoint-both-keys.json")
+	mustWriteFile(t, filepath.Join(sliceDir, "checkpoint.json"), data)
+
+	c, err := ReadPipelineCheckpoint(dir, "both")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// New key values (1, 0, 4) must win over legacy values (99, 99, 99).
+	if c.CrossReviewTriage.ActionRequired != 1 {
+		t.Errorf("action_required = %d, want 1 (new key wins)", c.CrossReviewTriage.ActionRequired)
+	}
+	if c.CrossReviewTriage.WorthConsidering != 0 {
+		t.Errorf("worth_considering = %d, want 0 (new key wins)", c.CrossReviewTriage.WorthConsidering)
+	}
+	if c.CrossReviewTriage.Dismissed != 4 {
+		t.Errorf("dismissed = %d, want 4 (new key wins)", c.CrossReviewTriage.Dismissed)
+	}
+}
+
+// TestReadPipelineCheckpoint_ExistingFixturesUnaffected checks that the
+// existing test fixtures (checkpoint.json / checkpoint-complete.json) still
+// parse correctly after the legacy-migration code was added.
+func TestReadPipelineCheckpoint_ExistingFixturesUnaffected(t *testing.T) {
+	t.Run("running checkpoint", func(t *testing.T) {
+		dir := t.TempDir()
+		sliceDir := filepath.Join(dir, "run", ".harness", "state", "pipeline")
+		mustMkdirAll(t, sliceDir)
+		data := mustReadFixture(t, "testdata/checkpoint.json")
+		mustWriteFile(t, filepath.Join(sliceDir, "checkpoint.json"), data)
+
+		c, err := ReadPipelineCheckpoint(dir, "run")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if c.Phase != "inner" {
+			t.Errorf("phase = %q, want inner", c.Phase)
+		}
+		// cross_review_triage is all zeros in the running fixture — migration
+		// must not corrupt it (no legacy key present either).
+		if c.CrossReviewTriage != (CrossReviewTriage{}) {
+			t.Errorf("CrossReviewTriage = %+v, want zero value", c.CrossReviewTriage)
+		}
+	})
+
+	t.Run("complete checkpoint", func(t *testing.T) {
+		dir := t.TempDir()
+		sliceDir := filepath.Join(dir, "done", ".harness", "state", "pipeline")
+		mustMkdirAll(t, sliceDir)
+		data := mustReadFixture(t, "testdata/checkpoint-complete.json")
+		mustWriteFile(t, filepath.Join(sliceDir, "checkpoint.json"), data)
+
+		c, err := ReadPipelineCheckpoint(dir, "done")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if c.CrossReviewTriage.WorthConsidering != 1 {
+			t.Errorf("worth_considering = %d, want 1 (from new key)", c.CrossReviewTriage.WorthConsidering)
+		}
+		if c.CrossReviewTriage.ActionRequired != 0 {
+			t.Errorf("action_required = %d, want 0", c.CrossReviewTriage.ActionRequired)
+		}
+	})
+}
+
 func TestOrchestratorState_StartedTime(t *testing.T) {
 	s := &OrchestratorState{Started: "2026-04-15T06:00:00Z"}
 	ts, err := s.StartedTime()

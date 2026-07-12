@@ -43,6 +43,14 @@ Run tests and write a report to `docs/reports/`.
 - clear pass/fail verdict
 - explicit test gaps
 
+## Insight event (best-effort)
+
+After writing the report, append one insight event (errors are non-fatal):
+```
+./scripts/insights-append.sh --slug <slug> --flow standard --phase test \
+  --verdict <pass|fail> --source skill || true
+```
+
 ## CLI execution modes
 
 This skill runs under both Claude Code and Codex. The execution mode follows

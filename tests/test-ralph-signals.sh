@@ -82,7 +82,7 @@ test_sigint_cleanup() {
 
   # Run orchestrator in dry-run mode in background, then send SIGINT
   cd "$PROJECT_ROOT"
-  sh "$ORCHESTRATOR" --plan "$MOCK_PLAN" --dry-run > "${MOCK_DIR}/output.log" 2>&1 &
+  bash "$ORCHESTRATOR" --plan "$MOCK_PLAN" --dry-run > "${MOCK_DIR}/output.log" 2>&1 &
   _pid=$!
 
   # Wait briefly for startup, then send SIGINT

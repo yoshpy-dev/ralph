@@ -99,7 +99,7 @@ Per-phase model variables for `ralph-pipeline.sh`. Resolved by `resolve_phase_mo
 
 **Single-knob rollback:** `RALPH_FORCE_MODEL=opus` overrides every phase at once, restoring pre-routing behavior. Finer-grained: `RALPH_IMPLEMENT_MODEL=opus` for the implement seat only.
 
-**Receipts:** Each routed `run_agent` call appends one JSON line to `.harness/state/pipeline/model-receipts.jsonl` with fields `ts / phase / cycle / driver / requested_model / effective_model / honored / effort / reason`. The Codex driver ignores per-phase model args — its receipts record `effective_model="codex-default"` and `honored=false` (known gap, non-fixable without Codex API support). Receipt writes also occur at cross-review call sites and in `DRY_RUN=1` mode. At cross-review call sites the optional 5th arg `driver_override` is passed to `write_model_receipt` so the receipt records the reviewer CLI (always the opposite of `RALPH_LOOP_DRIVER`), not the pipeline driver — ensuring cross-review receipts show `honored=true` when Claude is the reviewer even under `RALPH_LOOP_DRIVER=codex`.
+**Receipts:** Each routed `run_agent` call appends one JSON line to `.harness/state/pipeline/model-receipts.jsonl` with fields `ts / phase / cycle / driver / requested_model / effective_model / honored / effort / reason`. The Codex driver ignores per-phase model args — its receipts record `effective_model="codex-default"` and `honored=false` (known gap, non-fixable without Codex API support). Receipt writes also occur at cross-review call sites and in `DRY_RUN=1` mode. At cross-review call sites the optional 5th arg `driver_override` is passed to `write_model_receipt` so the receipt records the reviewer CLI (always the opposite of `RALPH_LOOP_DRIVER`), not the pipeline driver — ensuring cross-review receipts show `honored=true` when Claude is the reviewer even under `RALPH_LOOP_DRIVER=codex`. Insight events (committed to `docs/insights/events/`) embed `requested_model / effective_model / honored` per phase so `ralph insights` can aggregate routing honor-rate from durable data; receipts remain local diagnostics only and are never joined against events.
 
 ## Where the values live
 
@@ -114,3 +114,4 @@ Per-phase model variables for `ralph-pipeline.sh`. Resolved by `resolve_phase_mo
   `RALPH_*` env vars by `ralph run` and therefore overriding the shell
   fallbacks at runtime. Any default model/effort change must update the shell,
   toml, and Go values in lock-step (this repo only; not scaffolded downstream)
+- `internal/config/defaults_sync_test.go` — tripwire that fails if the three surfaces above drift; also asserts the cross-review SKILL.md reviewer-model fallback matches `RALPH_CLAUDE_REVIEWER_MODEL` in ralph-config.sh
