@@ -55,7 +55,7 @@ will not run the ralph skill.
 | Subagents in `/work` post-impl | `Task(subagent_type=...)` calls | `.codex/agents/` custom agents with the same phase roles |
 | Interactive choices | `AskUserQuestion` | Numbered prompt + single-digit reply |
 | Cross-model second opinion | `/cross-review` calls `codex exec review` | `/cross-review` calls `claude -p` |
-| Permission policy | `permission_mode = auto` | `sandbox_mode = workspace-write` + `approval_policy = on-request` |
+| Permission policy | `permission_mode = bypassPermissions` (default; set env `RALPH_PERMISSION_MODE=auto` or `ralph.toml` `[pipeline] permission_mode = "auto"` for conservative mode — toml only honoured via `ralph run`) | `sandbox_mode = workspace-write` + `approval_policy = on-request` |
 
 `scripts/check-skill-sync.sh` keeps the `.claude/skills/` and `.agents/skills/`
 trees in lock-step. CI fails on drift, so fix both sides whenever you change

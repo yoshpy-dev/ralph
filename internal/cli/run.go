@@ -31,7 +31,9 @@ func newRunCmd() *cobra.Command {
 		Short: "Execute the autonomous development pipeline",
 		Long:  "Runs the Ralph Loop orchestrator for parallel slice execution.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runPipeline(planPath, maxIterations, maxParallel, preflight, resume, dryRun, unifiedPR)
+			maxIterChanged := cmd.Flags().Changed("max-iterations")
+			maxParChanged := cmd.Flags().Changed("max-parallel")
+			return runPipeline(planPath, maxIterations, maxParallel, preflight, resume, dryRun, unifiedPR, maxIterChanged, maxParChanged)
 		},
 	}
 
@@ -46,30 +48,36 @@ func newRunCmd() *cobra.Command {
 	return cmd
 }
 
-func runPipeline(planPath string, maxIter, maxPar int, preflight, resume, dryRun, unifiedPR bool) error {
+func runPipeline(planPath string, maxIter, maxPar int, preflight, resume, dryRun, unifiedPR bool, maxIterChanged, maxParChanged bool) error {
 	// Load config for defaults.
 	cfg, err := config.Load("ralph.toml")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: ralph.toml parse error: %v — using defaults\n", err)
 	}
 
-	// Build environment from TOML config.
+	// Build environment with env > TOML > default priority.
+	// RALPH_MODEL, RALPH_EFFORT, RALPH_PERMISSION_MODE have no CLI flags;
+	// use appendEnvIfMissing so a pre-set env var wins over the TOML value.
 	env := os.Environ()
-	env = append(env,
-		"RALPH_MODEL="+cfg.Pipeline.Model,
-		"RALPH_EFFORT="+cfg.Pipeline.Effort,
-		"RALPH_PERMISSION_MODE="+cfg.Pipeline.PermissionMode,
-	)
-	if maxIter == 0 {
-		maxIter = cfg.Pipeline.MaxIterations
+	env = appendEnvIfMissing(env, "RALPH_MODEL", cfg.Pipeline.Model)
+	env = appendEnvIfMissing(env, "RALPH_EFFORT", cfg.Pipeline.Effort)
+	env = appendEnvIfMissing(env, "RALPH_PERMISSION_MODE", cfg.Pipeline.PermissionMode)
+
+	// RALPH_MAX_ITERATIONS and RALPH_MAX_PARALLEL honour CLI > env > TOML.
+	// Use Flags().Changed() (Cobra flag-presence) — NOT the != 0 heuristic —
+	// to detect whether the flag was explicitly set. When the flag was set,
+	// export the CLI value unconditionally (it wins over any env var). When
+	// absent, fall back to the env-or-TOML value via appendEnvIfMissing.
+	if maxIterChanged {
+		env = append(env, fmt.Sprintf("RALPH_MAX_ITERATIONS=%d", maxIter))
+	} else {
+		env = appendEnvIfMissing(env, "RALPH_MAX_ITERATIONS", fmt.Sprintf("%d", cfg.Pipeline.MaxIterations))
 	}
-	if maxPar == 0 {
-		maxPar = cfg.Pipeline.MaxParallel
+	if maxParChanged {
+		env = append(env, fmt.Sprintf("RALPH_MAX_PARALLEL=%d", maxPar))
+	} else {
+		env = appendEnvIfMissing(env, "RALPH_MAX_PARALLEL", fmt.Sprintf("%d", cfg.Pipeline.MaxParallel))
 	}
-	env = append(env,
-		fmt.Sprintf("RALPH_MAX_ITERATIONS=%d", maxIter),
-		fmt.Sprintf("RALPH_MAX_PARALLEL=%d", maxPar),
-	)
 
 	// Phase 2 (issue #44) — propagate [loop] settings only when the user has
 	// not already set the env var. This makes `[loop] driver = "codex"` in

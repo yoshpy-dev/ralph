@@ -273,7 +273,7 @@ on drift so the two agent surfaces cannot quietly diverge.
 | Subagents in `/work` post-impl | `Task(subagent_type=...)` calls | `.codex/agents/` custom agents with the same phase roles |
 | Structured prompts | `AskUserQuestion` | numbered stdin prompt |
 | Cross-model reviewer | calls `codex exec review` | calls `claude -p` with adversarial reviewer prompt |
-| Permission policy | `permission_mode = "auto"` | `sandbox_mode = "workspace-write"` + `approval_policy = "on-request"` |
+| Permission policy | `permission_mode = "bypassPermissions"` (default; set env `RALPH_PERMISSION_MODE=auto` or `ralph.toml` `[pipeline] permission_mode = "auto"` for conservative mode) | `sandbox_mode = "workspace-write"` + `approval_policy = "on-request"` |
 | Config trust | always loads `.claude/settings.json` | only loads `.codex/config.toml` after `codex trust .` AND `[features] hooks = true` |
 
 ## Adoption order

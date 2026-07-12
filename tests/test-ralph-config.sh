@@ -169,6 +169,29 @@ test_env_override() {
 }
 
 # ═══════════════════════════════════════════════════════════════════
+# Empty-env edge cases
+# Tests the "non-empty env wins; empty env falls back to shell default"
+# contract described in the plan's Env-priority contract note.
+# When RALPH_PERMISSION_MODE is present-but-empty the shell layer's
+# ${RALPH_PERMISSION_MODE:-bypassPermissions} resolves to bypassPermissions.
+# ═══════════════════════════════════════════════════════════════════
+
+test_empty_env() {
+  echo ""
+  echo "=== Empty-env edge-case tests ==="
+
+  # RALPH_PERMISSION_MODE="" — empty value must fall back to bypassPermissions
+  # via the ${VAR:-default} expansion in ralph-config.sh, not be passed through
+  # as an empty string to claude -p.
+  _perm="$(RALPH_PERMISSION_MODE=''; . "$CONFIG"; echo "$RALPH_PERMISSION_MODE")"
+  assert_eq "empty RALPH_PERMISSION_MODE falls back to bypassPermissions" "bypassPermissions" "$_perm"
+
+  # Sanity-check: a non-empty value still wins.
+  _perm_auto="$(RALPH_PERMISSION_MODE='auto'; . "$CONFIG"; echo "$RALPH_PERMISSION_MODE")"
+  assert_eq "non-empty RALPH_PERMISSION_MODE=auto is preserved" "auto" "$_perm_auto"
+}
+
+# ═══════════════════════════════════════════════════════════════════
 # Numeric validation
 # ═══════════════════════════════════════════════════════════════════
 
@@ -241,6 +264,7 @@ main() {
   test_defaults
   test_phase_model_defaults
   test_env_override
+  test_empty_env
   test_phase_model_overrides
   test_validate_numeric
   test_validate_all

@@ -142,7 +142,7 @@ func TestRunPipelineAutoDetectsPlan(t *testing.T) {
 		}
 	}
 
-	if err := runPipeline("", 0, 0, false, false, true, false); err != nil {
+	if err := runPipeline("", 0, 0, false, false, true, false, false, false); err != nil {
 		t.Fatalf("runPipeline: %v", err)
 	}
 
@@ -205,7 +205,7 @@ verify = "opus"
 	// Env var must win over the TOML/default value for implement.
 	t.Setenv("RALPH_IMPLEMENT_MODEL", "opus")
 
-	if err := runPipeline("docs/plans/active/example", 0, 0, false, false, true, false); err != nil {
+	if err := runPipeline("docs/plans/active/example", 0, 0, false, false, true, false, false, false); err != nil {
 		t.Fatalf("runPipeline: %v", err)
 	}
 
@@ -271,7 +271,7 @@ force = "opus"
 		t.Fatal(err)
 	}
 
-	if err := runPipeline("docs/plans/active/example", 0, 0, false, false, true, false); err != nil {
+	if err := runPipeline("docs/plans/active/example", 0, 0, false, false, true, false, false, false); err != nil {
 		t.Fatalf("runPipeline: %v", err)
 	}
 
@@ -309,7 +309,7 @@ func TestRunPipeline_ForwardsRunModeFlags(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := runPipeline("docs/plans/active/example", 0, 0, true, true, true, true); err != nil {
+	if err := runPipeline("docs/plans/active/example", 0, 0, true, true, true, true, false, false); err != nil {
 		t.Fatalf("runPipeline: %v", err)
 	}
 
@@ -329,5 +329,187 @@ func TestRunPipeline_ForwardsRunModeFlags(t *testing.T) {
 		if !found {
 			t.Fatalf("forwarded args %v missing %q", got, want)
 		}
+	}
+}
+
+// setupEnvStub creates a temp dir, changes to it, installs an env-dumping
+// orchestrator stub, and returns cleanup. Callers must defer the returned func.
+func setupEnvStub(t *testing.T) func() {
+	t.Helper()
+	dir := t.TempDir()
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir("scripts", 0755); err != nil {
+		t.Fatal(err)
+	}
+	stub := "#!/usr/bin/env sh\nenv > env.txt\n"
+	if err := os.WriteFile(filepath.Join("scripts", "ralph-orchestrator.sh"), []byte(stub), 0755); err != nil {
+		t.Fatal(err)
+	}
+	return func() {
+		if err := os.Chdir(oldWD); err != nil {
+			t.Fatalf("restore cwd: %v", err)
+		}
+	}
+}
+
+func readEnvLines(t *testing.T) []string {
+	t.Helper()
+	data, err := os.ReadFile("env.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.Split(strings.TrimSpace(string(data)), "\n")
+}
+
+// TestRunPipeline_EnvWinsOverTomlForModelEtc asserts AC2:
+// when RALPH_MODEL, RALPH_EFFORT, RALPH_PERMISSION_MODE are pre-set in the
+// environment, ralph run must forward those values unchanged — not replace
+// them with ralph.toml values.
+func TestRunPipeline_EnvWinsOverTomlForModelEtc(t *testing.T) {
+	cleanup := setupEnvStub(t)
+	defer cleanup()
+
+	// TOML sets different values for every key under test.
+	tomlContent := `[pipeline]
+model = "sonnet"
+effort = "low"
+permission_mode = "auto"
+`
+	if err := os.WriteFile("ralph.toml", []byte(tomlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Pre-set env vars that must win.
+	t.Setenv("RALPH_MODEL", "haiku")
+	t.Setenv("RALPH_EFFORT", "high")
+	t.Setenv("RALPH_PERMISSION_MODE", "bypassPermissions")
+
+	if err := runPipeline("docs/plans/active/example", 0, 0, false, false, true, false, false, false); err != nil {
+		t.Fatalf("runPipeline: %v", err)
+	}
+
+	envLines := readEnvLines(t)
+	for _, tc := range []struct{ key, want string }{
+		{"RALPH_MODEL", "haiku"},
+		{"RALPH_EFFORT", "high"},
+		{"RALPH_PERMISSION_MODE", "bypassPermissions"},
+	} {
+		if !containsKV(envLines, tc.key, tc.want) {
+			t.Errorf("AC2: expected %s=%s (env wins over toml), got something else in env", tc.key, tc.want)
+		}
+		// Also assert the TOML value is NOT present (no duplicate entry).
+		count := 0
+		for _, e := range envLines {
+			if strings.HasPrefix(e, tc.key+"=") {
+				count++
+			}
+		}
+		if count != 1 {
+			t.Errorf("AC2: expected exactly 1 entry for %s, got %d", tc.key, count)
+		}
+	}
+}
+
+// TestRunPipeline_MaxIterFlagBeatsEnv asserts AC3 (flag path):
+// when --max-iterations is explicitly set (maxIterChanged=true), the CLI value
+// must win over any pre-existing RALPH_MAX_ITERATIONS in the environment.
+func TestRunPipeline_MaxIterFlagBeatsEnv(t *testing.T) {
+	cleanup := setupEnvStub(t)
+	defer cleanup()
+
+	// Pre-set env var that the flag must override.
+	t.Setenv("RALPH_MAX_ITERATIONS", "99")
+
+	// maxIterChanged=true simulates --max-iterations 5 on the CLI.
+	if err := runPipeline("docs/plans/active/example", 5, 0, false, false, true, false, true, false); err != nil {
+		t.Fatalf("runPipeline: %v", err)
+	}
+
+	envLines := readEnvLines(t)
+	// The last RALPH_MAX_ITERATIONS wins in a process env; we check the
+	// exported value is the CLI value (5), not the env value (99).
+	// Because exec.Cmd.Env is the complete env, containsKV is the right check.
+	if !containsKV(envLines, "RALPH_MAX_ITERATIONS", "5") {
+		t.Errorf("AC3: expected RALPH_MAX_ITERATIONS=5 (CLI flag wins), envLines=%v", envLines)
+	}
+}
+
+// TestRunPipeline_MaxIterEnvBeatsTomlWhenNoFlag asserts AC3 (env path):
+// when --max-iterations is absent (maxIterChanged=false), a pre-set env var
+// must win over the ralph.toml value.
+func TestRunPipeline_MaxIterEnvBeatsTomlWhenNoFlag(t *testing.T) {
+	cleanup := setupEnvStub(t)
+	defer cleanup()
+
+	tomlContent := `[pipeline]
+max_iterations = 7
+`
+	if err := os.WriteFile("ralph.toml", []byte(tomlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("RALPH_MAX_ITERATIONS", "42")
+
+	// maxIterChanged=false: no CLI flag, env should win over toml.
+	if err := runPipeline("docs/plans/active/example", 0, 0, false, false, true, false, false, false); err != nil {
+		t.Fatalf("runPipeline: %v", err)
+	}
+
+	envLines := readEnvLines(t)
+	if !containsKV(envLines, "RALPH_MAX_ITERATIONS", "42") {
+		t.Errorf("AC3: expected RALPH_MAX_ITERATIONS=42 (env wins over toml when flag absent), envLines=%v", envLines)
+	}
+}
+
+// TestRunPipeline_EmptyPermissionModeEnv asserts the "non-empty env wins"
+// contract for RALPH_PERMISSION_MODE: when the env var is present but empty
+// (RALPH_PERMISSION_MODE=), appendEnvIfMissing treats it as "present" and
+// does NOT export the toml value — the downstream shell's ${VAR:-default}
+// then resolves it to the shell default (bypassPermissions).
+//
+// This test verifies the Go side of the contract: that cmd.Env does NOT
+// contain a RALPH_PERMISSION_MODE=<toml-value> entry that would override the
+// empty var already in the environment.  The shell-layer resolution
+// (${RALPH_PERMISSION_MODE:-bypassPermissions}) is tested by
+// tests/test-ralph-config.sh which sources scripts/ralph-config.sh directly.
+func TestRunPipeline_EmptyPermissionModeEnv(t *testing.T) {
+	cleanup := setupEnvStub(t)
+	defer cleanup()
+
+	tomlContent := `[pipeline]
+permission_mode = "auto"
+`
+	if err := os.WriteFile("ralph.toml", []byte(tomlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Present-but-empty: signals "user explicitly set this" even though value is empty.
+	t.Setenv("RALPH_PERMISSION_MODE", "")
+
+	if err := runPipeline("docs/plans/active/example", 0, 0, false, false, true, false, false, false); err != nil {
+		t.Fatalf("runPipeline: %v", err)
+	}
+
+	envLines := readEnvLines(t)
+	// The toml value "auto" must NOT appear — empty env wins over toml.
+	if containsKV(envLines, "RALPH_PERMISSION_MODE", "auto") {
+		t.Error("empty env var must win over toml: RALPH_PERMISSION_MODE=auto must not appear in orchestrator env")
+	}
+	// The empty entry IS present (inherited from os.Environ via t.Setenv).
+	found := false
+	for _, e := range envLines {
+		if e == "RALPH_PERMISSION_MODE=" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected RALPH_PERMISSION_MODE= (empty) to appear in orchestrator env")
 	}
 }

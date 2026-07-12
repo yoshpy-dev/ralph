@@ -86,7 +86,7 @@ effort = "high"
 max_iterations = 20
 max_parallel = 4
 slice_timeout = "30m"
-permission_mode = "auto"
+permission_mode = "bypassPermissions"
 
 [pipeline.prompts]
 dir = ".ralph/prompts"
@@ -112,6 +112,35 @@ require_go = false
 	}
 	if cfg.Doctor.RequireGo {
 		t.Error("require_go should be false")
+	}
+}
+
+// TestDefault_PermissionMode asserts that Default() returns bypassPermissions,
+// matching the template toml and the shell default in scripts/ralph-config.sh.
+func TestDefault_PermissionMode(t *testing.T) {
+	cfg := Default()
+	if cfg.Pipeline.PermissionMode != "bypassPermissions" {
+		t.Errorf("Default().Pipeline.PermissionMode = %q, want bypassPermissions", cfg.Pipeline.PermissionMode)
+	}
+}
+
+// TestLoad_PermissionModeBackfill verifies that a ralph.toml without
+// permission_mode yields the bypassPermissions default (not the zero string).
+func TestLoad_PermissionModeBackfill(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ralph.toml")
+	content := `[pipeline]
+model = "opus"
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Pipeline.PermissionMode != "bypassPermissions" {
+		t.Errorf("PermissionMode after backfill = %q, want bypassPermissions", cfg.Pipeline.PermissionMode)
 	}
 }
 
@@ -323,6 +352,11 @@ force       = "opus"
 // catching drift between the scaffolded file and Default(). Repo-root
 // discovery follows the runtime.Caller pattern used by
 // internal/scaffold/embed_test.go.
+//
+// AC4b: also asserts that [pipeline] permission_mode equals Default()'s value
+// so the template, the Go default, and the shell default stay in lock-step.
+// Upgrade-path note: managed ralph.toml files auto-update on `ralph upgrade`;
+// locally-edited ones surface as conflict/skip per the upgrade engine.
 func TestLoad_TemplateRalphToml(t *testing.T) {
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
@@ -340,6 +374,11 @@ func TestLoad_TemplateRalphToml(t *testing.T) {
 	if cfg.Pipeline.Phases != Default().Pipeline.Phases {
 		t.Errorf("template phases = %+v, want defaults %+v (template and Default() must stay in lock-step)",
 			cfg.Pipeline.Phases, Default().Pipeline.Phases)
+	}
+	// AC4b: template permission_mode must equal Default() so all entry points agree.
+	if cfg.Pipeline.PermissionMode != Default().Pipeline.PermissionMode {
+		t.Errorf("template permission_mode = %q, want %q (template and Default() must stay in lock-step)",
+			cfg.Pipeline.PermissionMode, Default().Pipeline.PermissionMode)
 	}
 }
 
