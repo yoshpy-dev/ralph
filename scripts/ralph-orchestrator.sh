@@ -1290,6 +1290,13 @@ main() {
   # --- Extract plan slug and parse plan ---
   PLAN_SLUG="$(extract_plan_slug "$PLAN_FILE")"
   _base_branch="$(git rev-parse --abbrev-ref HEAD)"
+  # Export the launch branch as RALPH_XREVIEW_BASE so per-slice pipelines and the
+  # integration pipeline diff against the true merge target (the branch the Loop
+  # was started from), not the repo default. detect_base_branch() in
+  # ralph-cli-driver.sh checks this variable first. An operator-supplied
+  # RALPH_XREVIEW_BASE takes precedence and is preserved as-is.
+  RALPH_XREVIEW_BASE="${RALPH_XREVIEW_BASE:-$_base_branch}"
+  export RALPH_XREVIEW_BASE
   INTEGRATION_BRANCH="$("${SCRIPT_DIR}/branch-name.sh" from-plan "$PLAN_FILE")" || return 1
   slices_data="$(parse_slices "$PLAN_FILE")"
   locklist="$(parse_locklist "$PLAN_FILE")"

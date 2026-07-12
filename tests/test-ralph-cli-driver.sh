@@ -610,6 +610,146 @@ check "13b-i. claude stub exits with open-pipe stdin in < 3s (elapsed=${elapsed_
   test "$elapsed_13b" -lt 3
 check "13b-ii. claude stub still wrote call log despite no-drain" test -s "$CALL_13B"
 
+# ── Test 14: detect_base_branch ─────────────────────────────────────────
+echo
+echo "── Test 14: detect_base_branch — resolution order and gate proof"
+
+# Helper: create a bare "remote" repo and a local clone with one commit on main.
+_make_repo_with_origin() {
+  local dir="$1"
+  local remote_dir="${dir}-remote"
+  mkdir -p "$remote_dir"
+  git -C "$remote_dir" init -b main --bare >/dev/null 2>&1 ||
+    git -C "$remote_dir" init --bare >/dev/null 2>&1
+  mkdir -p "$dir"
+  git -C "$dir" init -b main >/dev/null 2>&1 ||
+    git -C "$dir" init >/dev/null 2>&1
+  git -C "$dir" config user.email "test@example.com"
+  git -C "$dir" config user.name "Ralph Test"
+  git -C "$dir" remote add origin "$remote_dir"
+  printf 'initial\n' > "$dir/README.md"
+  git -C "$dir" add README.md
+  git -C "$dir" commit -m 'chore: initial' >/dev/null 2>&1
+  git -C "$dir" push -u origin main >/dev/null 2>&1
+  # Ensure origin/HEAD is set (git clone does this automatically; we set it explicitly).
+  git -C "$dir" remote set-head origin main >/dev/null 2>&1
+}
+
+# 14a: End-to-end gate proof — pushed feature branch tracking itself.
+#
+# On a feature branch pushed with `git push -u`, the OLD detection
+# (rev-parse HEAD@{upstream} | sed 's|origin/||') returns the feature branch
+# name, making `git diff <feature>...HEAD` empty — gate silently passes.
+# detect_base_branch() must return "main" (via origin/HEAD) so the diff
+# against main is NON-EMPTY — gate correctly fires.
+echo
+echo "  14a: end-to-end gate proof (pushed feature branch)"
+_REPO_14A="$WORK_DIR/repo-14a"
+_make_repo_with_origin "$_REPO_14A"
+
+# Create a feature branch, add a commit, push with -u (tracking = origin/feature).
+git -C "$_REPO_14A" checkout -b feature/add-widget >/dev/null 2>&1
+printf 'widget\n' > "$_REPO_14A/widget.sh"
+git -C "$_REPO_14A" add widget.sh
+git -C "$_REPO_14A" commit -m 'feat: add widget' >/dev/null 2>&1
+git -C "$_REPO_14A" push -u origin feature/add-widget >/dev/null 2>&1
+
+# OLD detection: HEAD@{upstream} -> origin/feature/add-widget -> strip "origin/" -> feature/add-widget
+_old_base_14a="$(git -C "$_REPO_14A" rev-parse --abbrev-ref 'HEAD@{upstream}' 2>/dev/null | sed 's|origin/||' || true)"
+check "14a-i. OLD detection yields feature branch (not main)" \
+  test "$_old_base_14a" = "feature/add-widget"
+
+# OLD gate: diff feature/add-widget...HEAD -> empty (comparing branch to itself)
+_old_diff_14a=0
+git -C "$_REPO_14A" diff "feature/add-widget...HEAD" --quiet 2>/dev/null || _old_diff_14a=$?
+check "14a-ii. OLD gate sees EMPTY diff (cross-review would be skipped)" \
+  test "$_old_diff_14a" -eq 0
+
+# NEW detection: detect_base_branch() -> main (via origin/HEAD)
+_new_base_14a="$(cd "$_REPO_14A" && RALPH_XREVIEW_BASE="" detect_base_branch)"
+check "14a-iii. detect_base_branch yields 'main' (not the feature branch)" \
+  test "$_new_base_14a" = "main"
+
+# NEW gate: diff main...HEAD -> non-empty (the widget.sh commit is new)
+_new_diff_14a=0
+git -C "$_REPO_14A" diff "main...HEAD" --quiet 2>/dev/null || _new_diff_14a=$?
+check "14a-iv. NEW gate sees NON-EMPTY diff (cross-review correctly fires)" \
+  test "$_new_diff_14a" -ne 0
+
+# 14b: RALPH_XREVIEW_BASE override wins over origin/HEAD.
+echo
+echo "  14b: RALPH_XREVIEW_BASE override wins"
+_REPO_14B="$WORK_DIR/repo-14b"
+_make_repo_with_origin "$_REPO_14B"
+# origin/HEAD -> main; override to "develop"
+_got_14b="$(cd "$_REPO_14B" && RALPH_XREVIEW_BASE=develop detect_base_branch)"
+check "14b. RALPH_XREVIEW_BASE=develop wins over origin/HEAD=main" \
+  test "$_got_14b" = "develop"
+
+# 14c: origin/HEAD pointing at a non-main default branch is honoured.
+echo
+echo "  14c: non-main origin/HEAD (develop) is honoured"
+_REPO_14C="$WORK_DIR/repo-14c"
+_make_repo_with_origin "$_REPO_14C"
+# Redirect origin/HEAD to a "develop" branch.
+git -C "$_REPO_14C" remote set-head origin -d >/dev/null 2>&1 || true
+# Set origin/HEAD manually via the git symbolic-ref the helper reads.
+git -C "$_REPO_14C" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/develop >/dev/null 2>&1
+_got_14c="$(cd "$_REPO_14C" && RALPH_XREVIEW_BASE="" detect_base_branch)"
+check "14c. non-main origin/HEAD -> develop returned" \
+  test "$_got_14c" = "develop"
+
+# 14c-edge: origin/HEAD pointing at origin/release/1.0 — strip only leading "origin/".
+echo
+echo "  14c-edge: origin/HEAD -> origin/release/1.0 strips only leading origin/"
+_REPO_14CE="$WORK_DIR/repo-14ce"
+_make_repo_with_origin "$_REPO_14CE"
+git -C "$_REPO_14CE" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/release/1.0 >/dev/null 2>&1
+_got_14ce="$(cd "$_REPO_14CE" && RALPH_XREVIEW_BASE="" detect_base_branch)"
+check "14c-edge. release/1.0 stripped of leading origin/ only" \
+  test "$_got_14ce" = "release/1.0"
+
+# 14d: no origin/HEAD -> falls back to main/master local branch detection.
+echo
+echo "  14d: no origin/HEAD -> main/master fallback"
+_REPO_14D="$WORK_DIR/repo-14d"
+mkdir -p "$_REPO_14D"
+git -C "$_REPO_14D" init -b main >/dev/null 2>&1 || git -C "$_REPO_14D" init >/dev/null 2>&1
+git -C "$_REPO_14D" config user.email "test@example.com"
+git -C "$_REPO_14D" config user.name "Ralph Test"
+printf 'hello\n' > "$_REPO_14D/README.md"
+git -C "$_REPO_14D" add README.md
+git -C "$_REPO_14D" commit -m 'chore: initial' >/dev/null 2>&1
+# No remote, so no origin/HEAD. refs/heads/main exists.
+_got_14d_main="$(cd "$_REPO_14D" && RALPH_XREVIEW_BASE="" detect_base_branch)"
+check "14d-i. no origin/HEAD + refs/heads/main exists -> main" \
+  test "$_got_14d_main" = "main"
+
+# 14d-ii: repo with only master branch falls back to master.
+_REPO_14DM="$WORK_DIR/repo-14dm"
+mkdir -p "$_REPO_14DM"
+git -C "$_REPO_14DM" init -b master >/dev/null 2>&1 || git -C "$_REPO_14DM" init >/dev/null 2>&1
+git -C "$_REPO_14DM" config user.email "test@example.com"
+git -C "$_REPO_14DM" config user.name "Ralph Test"
+printf 'hello\n' > "$_REPO_14DM/README.md"
+git -C "$_REPO_14DM" add README.md
+git -C "$_REPO_14DM" commit -m 'chore: initial' >/dev/null 2>&1
+_got_14d_master="$(cd "$_REPO_14DM" && RALPH_XREVIEW_BASE="" detect_base_branch)"
+check "14d-ii. no origin/HEAD + no main + refs/heads/master exists -> master" \
+  test "$_got_14d_master" = "master"
+
+# 14e: git worktree shares origin/HEAD from the common git dir.
+echo
+echo "  14e: git worktree resolves origin/HEAD through shared common dir"
+_REPO_14E="$WORK_DIR/repo-14e"
+_make_repo_with_origin "$_REPO_14E"
+# Add a worktree on a new branch.
+git -C "$_REPO_14E" worktree add "$WORK_DIR/wt-14e" -b feat/wt-test >/dev/null 2>&1
+# detect_base_branch from INSIDE the worktree must still resolve origin/HEAD -> main.
+_got_14e="$(cd "$WORK_DIR/wt-14e" && RALPH_XREVIEW_BASE="" detect_base_branch)"
+check "14e. worktree resolves origin/HEAD -> main via shared common dir" \
+  test "$_got_14e" = "main"
+
 echo
 echo "── Summary ──"
 printf '  PASS: %d\n  FAIL: %d\n' "$PASS" "$FAIL"

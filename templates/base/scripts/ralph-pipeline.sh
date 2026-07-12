@@ -804,8 +804,7 @@ DOCS
 
   if [ "$_has_reviewer" = "true" ] && [ "$DRY_RUN" -eq 0 ]; then
     log "Running cross-review (driver=${RALPH_LOOP_DRIVER}, reviewer=${_reviewer})..."
-    _base="$(git rev-parse --abbrev-ref 'HEAD@{upstream}' 2>/dev/null | sed 's|origin/||')"
-    _base="${_base:-main}"
+    _base="$(detect_base_branch)"
     if ! git diff "${_base}...HEAD" --quiet 2>/dev/null; then
       case "$_reviewer" in
         codex)
