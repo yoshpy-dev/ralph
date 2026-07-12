@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # tests/test-check-skill-sync.sh — exercise scripts/check-skill-sync.sh against
-# synthetic fixtures. Verifies the five drift modes (inventory, body, name,
+# synthetic fixtures. Verifies the six drift modes (inventory, body, name,
 # description, policy) each fail closed, and that a clean fixture passes.
 #
 # Spec: AC-3 of docs/specs/2026-05-07-codex-cli-parity.md.
