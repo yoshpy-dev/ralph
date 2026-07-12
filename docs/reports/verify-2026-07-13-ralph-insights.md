@@ -97,3 +97,47 @@ This satisfies the AC's intent: the semantic mapping from parsed outcome to emit
   1. `docs/insights/README.md`: clarify `run_id` as required for `source:pipeline` events, optional for `source:skill|backfill`
   2. `docs/insights/README.md`: document `honored_rate: -1` sentinel meaning in JSON output section
   3. `scripts/ralph-pipeline.sh` line 1218: correct slug comment to "strip last path component (`##*/`)"
+
+## Cycle 2 (2026-07-13)
+
+- Trigger: cross-review ACTION_REQUIRED=3, WORTH_CONSIDERING=1 (4 triage findings)
+- Fix commits: 45355e5 (main fixes), 2f237d1 (same-batch dedupe guard)
+- Evidence: `docs/evidence/verify-2026-07-13-ralph-insights-cycle2.log`
+
+### Per-finding resolution table
+
+| Finding | Severity | Status | File:line evidence |
+| --- | --- | --- | --- |
+| #1: Backfill collapses multi-cycle reports (AC5) | HIGH | **RESOLVED** | `internal/insights/backfill.go:396` — `parseCrossReviewAllCycles` replaces single-line parser; `cycleHeadingRe` at line 406; fixture `testdata/reports/cross-review-triage-loop-model-routing.md` has 2 "After triage:" lines; regression tests `TestParseReport_CrossReview_MultiCycle` (backfill_test.go:164), `TestRunBackfill_MultiCycleReport` (line 370) |
+| #2: Appender emits cycle:null when --cycle omitted (AC1) | HIGH | **RESOLVED** | `scripts/insights-append.sh:176` — `_cycle="${_cycle:-1}"` default added; `docs/insights/README.md:20` documents "Default: `1` when `--cycle` is omitted"; `templates/base/scripts/insights-append.sh:176` mirror identical |
+| #3: Backfill dedupe uses verbatim path (AC5) | MEDIUM | **RESOLVED** | `internal/insights/backfill.go:59` — `filepath.Abs(path)` normalizes before storing; regression test `TestRunBackfill_RelThenAbsDedupe` (backfill_test.go:332) |
+| #4: --json emits human text in zero-data case (AC3) | LOW | **RESOLVED** | `internal/cli/insights.go:71-77` — `jsonMode` branch moved before zero-data check; test `TestInsightsCmd_JSONZeroData` (insights_test.go:67) |
+| Same-batch dedupe collision (follow-up 2f237d1) | LOW | **RESOLVED** | `internal/cli/insights.go:353-359` — `existing[e.key]` re-checked and set in apply loop |
+
+### Static analysis (cycle 2)
+
+| Command | Result |
+| --- | --- |
+| `./scripts/run-static-verify.sh` | **PASS** (exit 0) — All verifiers passed |
+| `gofmt -l internal/ cmd/` | **PASS** — no output |
+| `go vet ./...` | **PASS** — 0 issues |
+| `shellcheck --severity=warning scripts/insights-append.sh` | **PASS** (exit 0) |
+| `shellcheck --severity=warning scripts/ralph-pipeline.sh` | **PASS** (exit 0) |
+
+### Doc drift (cycle 2)
+
+- `docs/insights/README.md` cycle row vs `scripts/insights-append.sh` default: **IN SYNC** — README line 20 states "Default: `1` when `--cycle` is omitted from `insights-append.sh`"; appender line 176 is `_cycle="${_cycle:-1}"`
+- `templates/base/scripts/insights-append.sh`: mirror is identical (check-sync DRIFTED=0 confirmed)
+- Known-accepted: `docs/insights/events/2026-07-12-ralph-insights.jsonl` contains 3 lines with `cycle:null` predating the fix — README documents null tolerance; no rewrite needed
+
+### Remaining doc drift (still non-blocking, unchanged from cycle 1)
+
+1. `docs/insights/README.md`: clarify `run_id` as required for `source:pipeline` events, optional for `source:skill|backfill`
+2. `docs/insights/README.md`: document `honored_rate: -1` sentinel meaning in JSON output section
+3. `scripts/ralph-pipeline.sh`: slug comment (line ~1218) still says "strip two prefixes" — code does `##*/`
+
+### Cycle 2 verdict
+
+**PASS**
+
+All 4 triage findings (ACTION_REQUIRED×3 + WORTH_CONSIDERING×1) are resolved with file:line evidence. Static analysis clean. Doc drift from cycle 1 remains non-blocking and unchanged. No new drift introduced by the fixes.
