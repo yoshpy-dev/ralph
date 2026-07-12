@@ -1,5 +1,5 @@
-#!/usr/bin/env sh
-set -eu
+#!/usr/bin/env bash
+set -euo pipefail
 
 # Ralph Orchestrator — multi-worktree parallel pipeline execution
 #
@@ -9,7 +9,8 @@ set -eu
 #
 # Requires: git, jq, ralph-pipeline.sh
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# Use BASH_SOURCE[0] so SCRIPT_DIR resolves correctly when the script is sourced by tests
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "${SCRIPT_DIR}/ralph-config.sh"
 . "${SCRIPT_DIR}/ralph-common.sh"
 
@@ -46,41 +47,45 @@ USAGE
   exit 1
 }
 
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --plan)            shift; PLAN_FILE="${1:?requires a file path}" ;;
-    --max-parallel)    shift; MAX_PARALLEL="${1:?requires a number}"; validate_numeric "--max-parallel" "$MAX_PARALLEL" ;;
-    --max-iterations)  shift; MAX_ITERATIONS="${1:?requires a number}"; validate_numeric "--max-iterations" "$MAX_ITERATIONS" ;;
-    --preflight)       PREFLIGHT_ONLY=1 ;;
-    --resume)          RESUME=1 ;;
-    --pr-strategy)
-      shift
-      PR_STRATEGY_OVERRIDE="${1:?requires a strategy}"
-      case "$PR_STRATEGY_OVERRIDE" in
-        grouped|stacked|unified) ;;
-        *) echo "Error: --pr-strategy must be one of grouped, stacked, unified"; exit 1 ;;
-      esac
-      ;;
-    --unified-pr)      UNIFIED_PR=1; PR_STRATEGY_OVERRIDE="unified" ;;
-    --dry-run)         DRY_RUN=1 ;;
-    -h|--help)         usage ;;
-    *)                 echo "Unknown option: $1"; usage ;;
-  esac
-  shift
-done
+# Source guard: CLI argument parsing and plan-directory validation only run
+# when the script is executed directly, not when sourced by tests.
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --plan)            shift; PLAN_FILE="${1:?requires a file path}" ;;
+      --max-parallel)    shift; MAX_PARALLEL="${1:?requires a number}"; validate_numeric "--max-parallel" "$MAX_PARALLEL" ;;
+      --max-iterations)  shift; MAX_ITERATIONS="${1:?requires a number}"; validate_numeric "--max-iterations" "$MAX_ITERATIONS" ;;
+      --preflight)       PREFLIGHT_ONLY=1 ;;
+      --resume)          RESUME=1 ;;
+      --pr-strategy)
+        shift
+        PR_STRATEGY_OVERRIDE="${1:?requires a strategy}"
+        case "$PR_STRATEGY_OVERRIDE" in
+          grouped|stacked|unified) ;;
+          *) echo "Error: --pr-strategy must be one of grouped, stacked, unified"; exit 1 ;;
+        esac
+        ;;
+      --unified-pr)      UNIFIED_PR=1; PR_STRATEGY_OVERRIDE="unified" ;;
+      --dry-run)         DRY_RUN=1 ;;
+      -h|--help)         usage ;;
+      *)                 echo "Unknown option: $1"; usage ;;
+    esac
+    shift
+  done
 
-validate_all_numeric
-validate_loop_driver
+  validate_all_numeric
+  validate_loop_driver
 
-if [ -z "$PLAN_FILE" ]; then
-  echo "Error: --plan <directory> is required"
-  usage
-fi
-if [ ! -d "$PLAN_FILE" ]; then
-  echo "Error: --plan must be a directory-based plan (with _manifest.md + slice-*.md files)"
-  echo "  Got: ${PLAN_FILE}"
-  echo "  Create one with: ./scripts/new-ralph-plan.sh --type <type> <slug> [issue] [slice-count]"
-  exit 1
+  if [ -z "$PLAN_FILE" ]; then
+    echo "Error: --plan <directory> is required"
+    usage
+  fi
+  if [ ! -d "$PLAN_FILE" ]; then
+    echo "Error: --plan must be a directory-based plan (with _manifest.md + slice-*.md files)"
+    echo "  Got: ${PLAN_FILE}"
+    echo "  Create one with: ./scripts/new-ralph-plan.sh --type <type> <slug> [issue] [slice-count]"
+    exit 1
+  fi
 fi
 
 # ═══════════════════════════════════════════════════════════════════
@@ -217,7 +222,10 @@ parse_slices() {
       esac
     done < "$_slice_file"
 
-    printf '%s|%s|%s|%s|%s\n' "$_slug" "$_objective" "$_deps" "$_files" "$_slice_file"
+    # Use ASCII unit separator (0x1F) as record delimiter so that Objective,
+    # Dependencies, or Affected files fields containing literal '|' characters
+    # do not break consumers that split on the delimiter.
+    printf '%s\x1f%s\x1f%s\x1f%s\x1f%s\n' "$_slug" "$_objective" "$_deps" "$_files" "$_slice_file"
   done
 
   if [ "$_found" -eq 0 ]; then
@@ -524,7 +532,7 @@ parse_pr_groups() {
 all_slice_csv() {
   _slices_file="$1"
   _csv=""
-  while IFS='|' read -r s _o _d _f _p; do
+  while IFS=$'\x1f' read -r s _o _d _f _p; do
     [ -n "$s" ] || continue
     _csv="${_csv:+${_csv},}${s}"
   done < "$_slices_file"
@@ -546,7 +554,7 @@ resolve_slice_ref() {
 
   _match=""
   _matches=0
-  while IFS='|' read -r s _o _d _f _p; do
+  while IFS=$'\x1f' read -r s _o _d _f _p; do
     [ -n "$s" ] || continue
     case "$s" in
       "$_ref")
@@ -597,7 +605,8 @@ normalize_pr_groups() {
     done > "${_groups_out_file}.$$.slices"
 
     if grep -q '^ERROR:' "${_groups_out_file}.$$.slices"; then
-      _bad="$(grep '^ERROR:' "${_groups_out_file}.$$.slices" | sed 's/^ERROR://' | head -1)"
+      # head -1 may cause SIGPIPE to sed/grep if multiple ERROR lines exist; || true suppresses SIGPIPE propagation under pipefail
+      _bad="$(grep '^ERROR:' "${_groups_out_file}.$$.slices" | sed 's/^ERROR://' | head -1 || true)"
       rm -f "${_groups_out_file}.$$.slices"
       log_error "PR group '${_name}' references unknown slice: ${_bad}"
       return 1
@@ -632,7 +641,7 @@ detect_shared_files() {
   _slices_data="$1"
   _all_files=""
 
-  echo "$_slices_data" | while IFS='|' read -r _s _o _d files _p; do
+  echo "$_slices_data" | while IFS=$'\x1f' read -r _s _o _d files _p; do
     echo "$files" | tr ',' '\n' | while IFS= read -r f; do
       _f="$(echo "$f" | tr -d ' ')"
       if [ -n "$_f" ]; then
@@ -879,7 +888,7 @@ integration_merge() {
   }
 
   # Merge each completed slice in order
-  while IFS='|' read -r s _o _d _f _p; do
+  while IFS=$'\x1f' read -r s _o _d _f _p; do
     _status_file="${ORCH_STATE}/slice-${s}.status"
     [ -f "$_status_file" ] || continue
     _status="$(cat "$_status_file")"
@@ -1070,7 +1079,7 @@ cleanup_success_artifacts() {
   log "Cleaning temporary Ralph Loop branches/worktrees after successful ${_strategy} PR creation..."
   _orig_branch="$(git rev-parse --abbrev-ref HEAD)"
 
-  while IFS='|' read -r s _o _d _f _p; do
+  while IFS=$'\x1f' read -r s _o _d _f _p; do
     [ -n "$s" ] || continue
     remove_worktree "$s"
     _slice_branch="$(slice_branch_name "$s")"
@@ -1366,7 +1375,7 @@ main() {
 
   log ""
   log "Slices:"
-  echo "$slices_data" | while IFS='|' read -r s o d f p; do
+  echo "$slices_data" | while IFS=$'\x1f' read -r s o d f p; do
     log "  ${s}: ${o} (deps: ${d:-none}, plan: ${p:-none})"
   done
   log ""
@@ -1401,7 +1410,7 @@ main() {
     log "[DRY RUN] Integration branch: ${INTEGRATION_BRANCH}"
     log "[DRY RUN] PR strategy: ${PR_STRATEGY}"
     log "[DRY RUN] PR strategy decision: selected=${_decision_strategy:-not-recorded}, human approved=${_decision_human_approved:-not-recorded}"
-    echo "$slices_data" | while IFS='|' read -r s o d f p; do
+    echo "$slices_data" | while IFS=$'\x1f' read -r s o d f p; do
       log "[DRY RUN] Slice ${s}: worktree at ${WORKTREE_BASE}/${s}, branch $(slice_branch_name "$s"), plan: ${p:-none}"
     done
     while IFS='|' read -r name slices depends; do
@@ -1446,7 +1455,7 @@ main() {
 ORCH_JSON
 
   # --- Create worktrees ---
-  while IFS='|' read -r s o d f p; do
+  while IFS=$'\x1f' read -r s o d f p; do
     create_worktree "$s"
   done < "$_slices_file"
 
@@ -1461,7 +1470,7 @@ ORCH_JSON
 
   while [ "$((_completed + _failed))" -lt "$_total" ]; do
     # Try to start eligible slices
-    while IFS='|' read -r s o d f p; do
+    while IFS=$'\x1f' read -r s o d f p; do
       _s_status="$(check_slice_status "$s")"
 
       # Skip if already started or done (includes all terminal pipeline statuses)
@@ -1482,7 +1491,7 @@ ORCH_JSON
           # include a suffix like "1-ralph-tui". Match by prefix.
           _resolved_slug="$_dep_slug"
           _match_count=0
-          while IFS='|' read -r _rs _ro _rd _rf _rp; do
+          while IFS=$'\x1f' read -r _rs _ro _rd _rf _rp; do
             case "$_rs" in
               "${_dep_slug}"-*|"${_dep_slug}") _resolved_slug="$_rs"; _match_count=$((_match_count + 1)) ;;
             esac
@@ -1532,7 +1541,7 @@ ORCH_JSON
     _running=0
     : > "${ORCH_STATE}/.running_files"
     _now_epoch="$(date +%s)"
-    while IFS='|' read -r _rf_s _rf_o _rf_d _rf_f _rf_p; do
+    while IFS=$'\x1f' read -r _rf_s _rf_o _rf_d _rf_f _rf_p; do
       _rf_status="$(check_slice_status "$_rf_s")"
       case "$_rf_status" in
         complete)                        _completed=$((_completed + 1)) ;;
@@ -1701,4 +1710,6 @@ REPORT_JSON
   return 0
 }
 
-main
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  main
+fi
