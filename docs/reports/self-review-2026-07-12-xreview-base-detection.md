@@ -48,3 +48,31 @@ None. (The single LOW finding is a one-line comment nicety, not deferred work; n
 
 - Merge: Yes (no blocking findings; the one LOW is optional and behavior is correct as written).
 - Follow-ups: Optionally tighten the helper comment (LOW above) at next touch. No standalone follow-up task needed.
+
+---
+
+## Cycle 2 addendum
+
+- Date: 2026-07-12
+- Scope: diff quality of the two new commits since cycle-1 MERGE.
+  - `4de8dc9` docs: sync docs — plan ticks + `RALPH_XREVIEW_BASE` recipe env-table row (root + `templates/base` mirror)
+  - `c3d89f2` fix: preserve operator-supplied `RALPH_XREVIEW_BASE` in orchestrator (both copies) + cross-review triage report
+- Method: `git show` on both commits, targeted file reads. No tests/static/spec/doc-drift. `< /dev/null` throughout.
+
+### Checks performed
+
+- **(a) param-expansion correctness under `set -u`** — orchestrator declares `set -eu` (L2). The new `RALPH_XREVIEW_BASE="${RALPH_XREVIEW_BASE:-$_base_branch}"` uses the `${VAR:-default}` form, which is exactly the `set -u`-safe idiom: an unset/empty `RALPH_XREVIEW_BASE` is tolerated (no unbound-variable abort) and falls back to `$_base_branch`. The fallback operand `$_base_branch` is unconditionally assigned five lines above at L1292 (`_base_branch="$(git rev-parse --abbrev-ref HEAD)"`) in the same `main()` scope with no early-return in between, so it is guaranteed set. Splitting assignment from `export` (vs. the old `export RALPH_XREVIEW_BASE="..."` one-liner) is behavior-neutral and correct. No word-splitting/globbing risk: the RHS is fully double-quoted.
+- **(b) precedence matches detection** — `detect_base_branch()` (`ralph-cli-driver.sh`) checks `[ -n "${RALPH_XREVIEW_BASE:-}" ]` first, so preserving an operator-set value at export time makes the override actually reach the pipelines. The fix closes exactly the clobber the cross-review finding identified. Behavior confirmed consistent with the priority-1 branch of the helper.
+- **(c) comment accuracy** — the amended comment ("An operator-supplied `RALPH_XREVIEW_BASE` takes precedence and is preserved as-is") accurately describes the `${:-}` semantics and the downstream `detect_base_branch` priority. No drift between comment and code.
+- **(d) recipe row wording vs behavior** — the env-table row states the variable "takes priority over `refs/remotes/origin/HEAD` detection" (matches helper priority 1 > 2) and is "Exported automatically by `ralph-orchestrator.sh` from the launch branch so Loop runs from `develop`/`release/*` diff against the true merge target." Accurate: for a Loop launched from `develop`, the launch branch *is* the correct diff base, and the export sets `RALPH_XREVIEW_BASE=develop`. "Can also be set by the operator for one-off overrides" now matches the preserved-value behavior introduced by `c3d89f2`. No overclaim.
+- **(e) plan ticks** — the three referenced report paths (`self-review`, `verify`, `test`) all exist on disk; the sync-docs tick describes the mirror-identical recipe row, which holds. Ticks are accurate.
+- **(f) mirror identity** — `scripts/ralph-orchestrator.sh` vs `templates/base/` mirror: `cmp`-identical AND identical git blob hash `3f51770`, mode `100755` both sides. `docs/recipes/ralph-loop.md` vs `templates/base/` mirror: `cmp`-identical AND identical blob `97bccb7`. `check-sync.sh` PASS under its declared `bash` interpreter.
+- **triage report** (`cross-review-triage-xreview-base-detection.md`) — new doc-only artifact; content matches the fix applied. No code impact.
+
+### Findings
+
+None. No CRITICAL/HIGH/MEDIUM/LOW. No secrets, debug code, swallowed errors, or unnecessary changes in either commit. The cycle-1 LOW (helper-comment `default_branch()` phrasing) is untouched by these commits and remains optional.
+
+### Recommendation
+
+- Merge: Yes. Both commits are correct, minimal, and mirror-clean. `set -u` safety and precedence semantics verified. Cycle-2 verdict unchanged from cycle 1: MERGE.
