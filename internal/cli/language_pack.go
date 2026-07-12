@@ -11,6 +11,95 @@ import (
 	"github.com/yoshpy-dev/ralph/internal/scaffold"
 )
 
+// packRenderResult bundles the output of renderPackInto so callers can use
+// it to update a manifest and print summaries without re-implementing the
+// same book-keeping in both init.go and pack.go.
+type packRenderResult struct {
+	// result is the raw RenderResult from scaffold.RenderFS (pack payload files
+	// only, not the rule.md control file).
+	result *scaffold.RenderResult
+	// hashes maps manifest keys (namespaced with packRelDir(lang)) to SHA256
+	// hashes for all written files (payload + rule).
+	hashes map[string]string
+	// baselinePaths maps manifest keys to on-disk baseline cache paths for
+	// files whose baselines were written.
+	baselinePaths map[string]string
+}
+
+// renderPackInto renders a language pack into its canonical subdirectory
+// (packs/languages/<lang>/) inside targetDir, handles the rule.md control
+// file (→ .claude/rules/<lang>.md), and writes baselines so the upgrade
+// engine can diff pack files later.
+//
+// The returned packRenderResult contains all namespaced hashes and baseline
+// paths ready to be merged into the project manifest.
+//
+// This helper is shared by executeInit (init.go) and addPack (pack.go) so the
+// two code paths cannot diverge.
+func renderPackInto(targetDir, lang string, force bool) (*packRenderResult, error) {
+	packFS, err := scaffold.PackFS(lang)
+	if err != nil {
+		return nil, fmt.Errorf("language pack %q not found: %w", lang, err)
+	}
+
+	packDir := filepath.Join(targetDir, packRelDir(lang))
+	packResult, packHashes, err := scaffold.RenderFS(packFS, scaffold.RenderOptions{
+		TargetDir: packDir,
+		Overwrite: force,
+		SkipPaths: packRenderSkipPaths,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("rendering pack %s: %w", lang, err)
+	}
+
+	out := &packRenderResult{
+		result:        packResult,
+		hashes:        make(map[string]string),
+		baselinePaths: make(map[string]string),
+	}
+
+	// Namespace hashes with the pack subdirectory prefix.
+	packPrefix := packRelDir(lang)
+	for k, v := range packHashes {
+		out.hashes[filepath.Join(packPrefix, k)] = v
+	}
+
+	// Write baselines for pack payload files so the upgrade engine can diff
+	// them later.
+	bls, err := writeRenderedBaselines(targetDir, packFS, packPrefix, packResult)
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range bls {
+		out.baselinePaths[k] = v
+	}
+
+	// Handle the rule.md control file: it renders to .claude/rules/<lang>.md
+	// instead of packs/languages/<lang>/rule.md.
+	ruleContent, ok, err := packRuleContent(packFS)
+	if err != nil {
+		return nil, fmt.Errorf("reading pack %s rule: %w", lang, err)
+	}
+	if ok {
+		rulePath := packRuleRelPath(lang)
+		ruleResult, ruleHash, err := renderMappedFile(targetDir, rulePath, ruleContent, force)
+		if err != nil {
+			return nil, fmt.Errorf("rendering pack %s rule: %w", lang, err)
+		}
+		out.hashes[rulePath] = ruleHash
+		if len(ruleResult.Created)+len(ruleResult.Overwritten) > 0 {
+			baselinePath, err := scaffold.WriteBaseline(targetDir, rulePath, ruleContent)
+			if err != nil {
+				return nil, err
+			}
+			out.baselinePaths[rulePath] = baselinePath
+		}
+		mergeRenderResult(packResult, ruleResult)
+	}
+
+	return out, nil
+}
+
 const packRuleSourcePath = "rule.md"
 
 var packRenderSkipPaths = map[string]bool{

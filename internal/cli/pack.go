@@ -50,41 +50,55 @@ func newPackListCmd() *cobra.Command {
 	}
 }
 
+// addPack adds a language pack to an existing project rooted at targetDir.
+// Pack payload files are written to packs/languages/<lang>/ and the rule.md
+// control file is mapped to .claude/rules/<lang>.md (matching init.go's layout).
+// The shared renderPackInto helper (language_pack.go) is used here so this
+// path cannot diverge from ralph init's pack rendering.
 func addPack(targetDir string, lang string) error {
 	absDir, err := filepath.Abs(targetDir)
 	if err != nil {
 		return err
 	}
 
-	packFS, err := scaffold.PackFS(lang)
+	// renderPackInto handles directory layout, rule.md mapping, and baseline
+	// writes — identical to what executeInit does for each pack.
+	pr, err := renderPackInto(absDir, lang, true /* overwrite existing files */)
 	if err != nil {
-		return fmt.Errorf("language pack %q not found", lang)
+		return err
 	}
 
-	result, hashes, err := scaffold.RenderFS(packFS, scaffold.RenderOptions{
-		TargetDir: absDir,
-		Overwrite: true,
-	})
-	if err != nil {
-		return fmt.Errorf("rendering pack %s: %w", lang, err)
-	}
-
-	// Update manifest.
+	// Update manifest: read existing, merge pack entries, write back.
 	manifestPath := filepath.Join(absDir, ".ralph", "manifest.toml")
 	manifest, err := scaffold.ReadManifest(manifestPath)
 	if err != nil {
 		fmt.Printf("⚠ Could not update manifest: %v\n", err)
 	} else {
-		for path, hash := range hashes {
-			manifest.SetFile(path, hash)
+		for path, hash := range pr.hashes {
+			if baselinePath, ok := pr.baselinePaths[path]; ok {
+				manifest.SetFileWithBaseline(path, hash, baselinePath)
+			} else {
+				manifest.SetFile(path, hash)
+			}
+		}
+		// Record the pack in Meta.Packs if not already present.
+		alreadyListed := false
+		for _, p := range manifest.Meta.Packs {
+			if p == lang {
+				alreadyListed = true
+				break
+			}
+		}
+		if !alreadyListed {
+			manifest.Meta.Packs = append(manifest.Meta.Packs, lang)
 		}
 		if err := manifest.Write(manifestPath); err != nil {
 			fmt.Printf("⚠ Could not write manifest: %v\n", err)
 		}
 	}
 
-	created := len(result.Created)
-	updated := len(result.Overwritten)
+	created := len(pr.result.Created)
+	updated := len(pr.result.Overwritten)
 	fmt.Printf("✓ Pack %s added (%d created, %d updated)\n", lang, created, updated)
 
 	return nil
