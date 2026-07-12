@@ -14,7 +14,7 @@ Read these files in order:
 
 Then determine the base branch dynamically and run `git diff` to understand the full scope of changes:
 ```sh
-_base="$(git rev-parse --abbrev-ref 'HEAD@{upstream}' 2>/dev/null | sed 's|^origin/||')"
+_base="$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')"
 _base="${_base:-main}"
 git diff "${_base}...HEAD" --stat
 ```

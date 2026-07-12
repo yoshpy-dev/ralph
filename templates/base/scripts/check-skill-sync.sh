@@ -233,6 +233,8 @@ while IFS= read -r skill; do
   fi
 
   # 6. prompts/ parity (byte-identical; missing-in-mirror and extra-in-mirror both fail).
+  #    Recursively compares all files under prompts/ (including nested subdirectories)
+  #    using relative paths so e.g. prompts/sub/foo.md participates in both checks.
   cl_prompts="$CLAUDE_ROOT/$skill/prompts"
   cx_prompts="$CODEX_ROOT/$skill/prompts"
   cl_has_prompts=0; cx_has_prompts=0
@@ -245,9 +247,9 @@ while IFS= read -r skill; do
       fail "skill '$skill': prompts/ exists in $CODEX_ROOT but not in $CLAUDE_ROOT"
     fi
   elif [ "$cl_has_prompts" -eq 1 ]; then
-    # Both sides have a prompts/ directory — compare file lists and content.
-    cl_files="$(find "$cl_prompts" -maxdepth 1 -type f | sed "s|^$cl_prompts/||" | LC_ALL=C sort)"
-    cx_files="$(find "$cx_prompts" -maxdepth 1 -type f | sed "s|^$cx_prompts/||" | LC_ALL=C sort)"
+    # Both sides have a prompts/ directory — compare file lists and content recursively.
+    cl_files="$(find "$cl_prompts" -type f | sed "s|^$cl_prompts/||" | LC_ALL=C sort)"
+    cx_files="$(find "$cx_prompts" -type f | sed "s|^$cx_prompts/||" | LC_ALL=C sort)"
     only_cl="$(LC_ALL=C comm -23 <(echo "$cl_files") <(echo "$cx_files"))"
     only_cx="$(LC_ALL=C comm -13 <(echo "$cl_files") <(echo "$cx_files"))"
     if [ -n "$only_cl" ]; then

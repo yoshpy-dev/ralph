@@ -162,6 +162,26 @@ rm -rf "$J_DIR"
 # loop prompts already mirrored) passes check 6 without regression.
 run_case "K. real skill tree passes prompts/ parity" 0 "$REPO_ROOT"
 
+# ── L. nested prompts/ file missing on mirror side (must fail closed) ─────────
+L_DIR="$(mktemp -d)"
+mk_skill_pair "$L_DIR" "alpha" "Alpha description." "Body" "" ""
+mkdir -p "$L_DIR/.claude/skills/alpha/prompts/sub"
+printf 'nested prompt content\n' > "$L_DIR/.claude/skills/alpha/prompts/sub/x.md"
+# Mirror has prompts/ but NOT the nested file
+mkdir -p "$L_DIR/.agents/skills/alpha/prompts"
+run_case "L. nested prompts/sub/x.md missing on codex mirror (must fail)" 1 "$L_DIR"
+rm -rf "$L_DIR"
+
+# ── M. nested prompts/ file present and byte-identical on both sides ──────────
+M_DIR="$(mktemp -d)"
+mk_skill_pair "$M_DIR" "alpha" "Alpha description." "Body" "" ""
+mkdir -p "$M_DIR/.claude/skills/alpha/prompts/sub" "$M_DIR/.agents/skills/alpha/prompts/sub"
+printf 'nested prompt content\n' > "$M_DIR/.claude/skills/alpha/prompts/sub/x.md"
+cp "$M_DIR/.claude/skills/alpha/prompts/sub/x.md" \
+   "$M_DIR/.agents/skills/alpha/prompts/sub/x.md"
+run_case "M. nested prompts/sub/x.md byte-identical on both sides (parity)" 0 "$M_DIR"
+rm -rf "$M_DIR"
+
 echo ""
 echo "  PASS: $pass"
 echo "  FAIL: $fail"
