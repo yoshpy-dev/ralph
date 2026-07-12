@@ -1,5 +1,5 @@
-#!/usr/bin/env sh
-set -eu
+#!/usr/bin/env bash
+set -euo pipefail
 
 # ralph — CLI wrapper for Ralph Loop autonomous development pipeline
 #
@@ -184,7 +184,8 @@ cmd_status() {
   _tui_bin="${SCRIPT_DIR}/../bin/ralph-tui"
   if [ "$_no_tui" -eq 0 ] && [ -t 1 ] && [ -x "$_tui_bin" ]; then
     # Check if binary is older than source
-    _newest_src="$(find "${SCRIPT_DIR}/../cmd" "${SCRIPT_DIR}/../internal" -name '*.go' -newer "$_tui_bin" 2>/dev/null | head -1)"
+    # head -1 may cause SIGPIPE to find if multiple files match; || true suppresses SIGPIPE propagation under pipefail
+    _newest_src="$(find "${SCRIPT_DIR}/../cmd" "${SCRIPT_DIR}/../internal" -name '*.go' -newer "$_tui_bin" 2>/dev/null | head -1 || true)"
     if [ -n "$_newest_src" ]; then
       echo "Warning: bin/ralph-tui is outdated. Run scripts/build-tui.sh to rebuild." >&2
       # Fall through to table output

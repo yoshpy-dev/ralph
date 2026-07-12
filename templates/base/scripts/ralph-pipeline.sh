@@ -1,5 +1,5 @@
-#!/usr/bin/env sh
-set -eu
+#!/usr/bin/env bash
+set -euo pipefail
 
 # Ralph Pipeline orchestrator — full autonomous development pipeline
 # Inner Loop: implement → self-review → verify → test (repeat on failure)
@@ -10,7 +10,8 @@ set -eu
 #           RALPH_LOOP_DRIVER, default claude). cross-review prefers the
 #           other reviewer binary when available.
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# Use BASH_SOURCE[0] so SCRIPT_DIR resolves correctly when the script is sourced by tests
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "${SCRIPT_DIR}/ralph-config.sh"
 . "${SCRIPT_DIR}/ralph-common.sh"
 . "${SCRIPT_DIR}/ralph-cli-driver.sh"
@@ -1234,4 +1235,8 @@ _finalize() {
   fi
 }
 
-main
+# Source guard: allow test files to source this script to reach functions
+# without triggering pipeline execution.
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  main "$@"
+fi

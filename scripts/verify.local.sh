@@ -146,7 +146,7 @@ run_static_checks() {
     # Build the argument list via positional parameters so shellcheck
     # does not flag unquoted expansion.
     set --
-    for f in .claude/hooks/*.sh templates/base/.claude/hooks/*.sh scripts/branch-name.sh scripts/ensure-pr-ready.sh scripts/ensure-pr-title-prefix.sh scripts/ralph-worktree.sh scripts/verify.local.sh tests/test-*.sh; do
+    for f in .claude/hooks/*.sh templates/base/.claude/hooks/*.sh scripts/branch-name.sh scripts/ensure-pr-ready.sh scripts/ensure-pr-title-prefix.sh scripts/ralph-worktree.sh scripts/verify.local.sh scripts/ralph-common.sh scripts/ralph-orchestrator.sh scripts/ralph-pipeline.sh scripts/ralph-status-helpers.sh scripts/ralph-cli-driver.sh scripts/ralph tests/test-*.sh; do
       [ -f "$f" ] || continue
       set -- "$@" "$f"
     done
