@@ -32,10 +32,13 @@ instead of intuition.
      backfill is the safety net when an agent forgets)
 3. **Go aggregation** — new `internal/insights` package:
    - event reader (glob `docs/insights/events/*.jsonl`, schema-tolerant)
-   - receipts reader (`.harness/state/pipeline/model-receipts.jsonl`, optional)
+   - receipts reader (`.harness/state/pipeline/model-receipts.jsonl`,
+     optional; reported as a separate local-diagnostics section, NEVER joined
+     against events — events carry their own routing fields, see schema)
    - backfill parser for existing `docs/reports/*.md` (best-effort: self-review
      severity counts, verify/test verdicts, cross-review triage counts)
-   - aggregator (per-phase catch profile, escalation outcomes, honored-rate)
+   - aggregator (per-phase catch profile, escalation outcomes, honored-rate
+     computed from event-embedded routing fields)
 4. **CLI** — `ralph insights` (human table) and `ralph insights --json`;
    `ralph insights backfill [--apply]` (dry-run by default, idempotent via
    slug+phase dedupe key, emits `source:"backfill"` events).
@@ -90,12 +93,29 @@ instead of intuition.
   commit on separate branches; appends to a single file would conflict on
   every merge. Per-task files (`events/<date>-<slug>.jsonl`) make merges
   trivially clean. (Derived; recorded here, not asked.)
-- **Schema v1 (frozen fields)**: `schema`, `ts`, `slug`, `flow`
+- **Schema v1 (frozen fields)**: `schema`, `ts`, `run_id`, `slug`, `flow`
   (`standard|loop`), `phase`, `cycle`, `verdict` (`pass|fail|complete|
   action_required|n/a`), `findings` (`{critical,high,medium,low}`), `triage`
-  (`{action_required,worth_considering,dismissed}`), `driver`, `model`,
-  `source` (`pipeline|skill|backfill`). Unknown extra fields tolerated on
-  read; `schema` bumps on breaking change.
+  (`{action_required,worth_considering,dismissed}`), `driver`,
+  `requested_model`, `effective_model`, `honored`, `source`
+  (`pipeline|skill|backfill`). Unknown extra fields tolerated on read;
+  `schema` bumps on breaking change.
+- **Routing fields are embedded in events, not joined from receipts**
+  (Codex advisory HIGH#1): receipts are local uncommitted state with no
+  durable join key; any join is unsafe after clone or across runs sharing
+  phase/cycle. The pipeline hook already has `requested/effective/honored`
+  in hand at write time, so events are self-contained. Receipts stay as a
+  supplementary local-diagnostics section with no cross-referencing.
+- **Hook point is after canonical result parsing, not phase exit**
+  (Codex advisory HIGH#2): each phase's event is emitted at the exact spot
+  where the pipeline has parsed the phase outcome (severity counts, verdict,
+  triage counts) — the same variables the checkpoint update uses. Semantic
+  correctness (not just presence) is asserted by tests that force failure
+  paths.
+- **Backfill dedupe key includes the source and cycle**
+  (Codex advisory MEDIUM#3): key = `source_report_path + phase + cycle`
+  (not `slug+phase`), so multi-cycle addenda produce distinct events and
+  escalation history survives backfill.
 
 Critical forks beyond the three above: None.
 
@@ -106,7 +126,10 @@ Critical forks beyond the three above: None.
       args with exit ≠ 0 and a usage message; shellcheck-clean.
 - [ ] AC2: a `DRY_RUN=1` `ralph-pipeline.sh` pass emits one event per executed
       phase (asserted by a shell test, same fixture style as
-      `tests/test-model-routing.sh`).
+      `tests/test-model-routing.sh`), and forced-outcome tests (self-review
+      findings present, verify fail, test fail, cross-review ACTION_REQUIRED)
+      assert the exact emitted JSON values — verdict, findings, and triage
+      counts must reflect the parsed phase outcome, not defaults.
 - [ ] AC3: `ralph insights` prints a per-phase summary (events found,
       verdicts, findings by severity, escalation outcomes, receipts
       honored-rate when receipts exist) and `ralph insights --json` emits the
@@ -116,7 +139,8 @@ Critical forks beyond the three above: None.
 - [ ] AC5: `ralph insights backfill` (dry-run) lists derivable events from at
       least self-review, verify, test, and cross-review-triage report types;
       `--apply` writes them with `source:"backfill"`; a second `--apply` run
-      adds zero duplicates (idempotency test).
+      adds zero duplicates while a multi-cycle report fixture yields distinct
+      events per cycle (dedupe key = source_report_path+phase+cycle).
 - [ ] AC6: post-implementation skill bodies instruct the event append; mirror
       regenerated via `scripts/sync-skills.sh`; `check-skill-sync.sh`,
       `check-sync.sh`, `check-template.sh` all pass.
