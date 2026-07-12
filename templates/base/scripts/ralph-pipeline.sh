@@ -141,6 +141,44 @@ report_event() {
   printf '{"timestamp":"%s","event":"%s","details":%s}\n' "$(ts)" "$_event_type" "$_details" >> "$_report"
 }
 
+# emit_insight_event — fire-and-forget wrapper around insights-append.sh.
+#
+# Usage: emit_insight_event <phase> <cycle> <verdict> \
+#          [--critical N] [--high N] [--medium N] [--low N] \
+#          [--action-required N] [--worth-considering N] [--dismissed N] \
+#          [--requested-model M] [--effective-model M] [--honored bool]
+#
+# All routing and identity fields (run_id, slug, flow, driver) are
+# injected from the pipeline globals set during main() init.
+# The call is guarded with || log_warn so it is provably non-fatal.
+emit_insight_event() {
+  _eie_phase="$1"
+  _eie_cycle="$2"
+  _eie_verdict="$3"
+  shift 3
+
+  # Locate insights-append.sh relative to this script.
+  _eie_appender="${SCRIPT_DIR}/insights-append.sh"
+  if [ ! -x "$_eie_appender" ]; then
+    log "Warning: insights-append.sh not found or not executable — skipping insight event"
+    return 0
+  fi
+
+  # Build base args. PIPELINE_RUN_ID and PIPELINE_SLUG are set in main().
+  _eie_args="--slug ${PIPELINE_SLUG:-unknown} --flow loop --phase ${_eie_phase} --verdict ${_eie_verdict} --source pipeline --cycle ${_eie_cycle}"
+  if [ -n "${PIPELINE_RUN_ID:-}" ]; then
+    _eie_args="${_eie_args} --run-id ${PIPELINE_RUN_ID}"
+  fi
+  _eie_args="${_eie_args} --driver ${RALPH_LOOP_DRIVER:-claude}"
+
+  # Pass remaining args (count flags and routing overrides) through.
+  # shellcheck disable=SC2086  # word splitting intentional for arg list
+  bash "$_eie_appender" ${_eie_args} "$@" || log "Warning: insight event append failed (non-fatal)"
+}
+
+# log_warn — alias used in emit_insight_event guard messages
+log_warn() { log "Warning: $*"; }
+
 # run_agent is provided by ralph-cli-driver.sh — it dispatches to claude or
 # codex based on RALPH_LOOP_DRIVER and writes the same <log>/<log>.json
 # artefacts the rest of this script consumes.
@@ -535,6 +573,20 @@ run_inner_loop() {
 
   report_event "implement" "{\"cycle\":${_cycle},\"log\":\"${_impl_log}\"}"
 
+  # Insight event: implement — emitted on iteration success (no parsed verdict;
+  # verdict=complete is set on successful agent invocation, before signal check).
+  _impl_effective_model="$_impl_model"
+  if [ "${RALPH_LOOP_DRIVER:-claude}" = "codex" ]; then
+    _impl_effective_model="codex-default"
+    _impl_honored="false"
+  else
+    _impl_honored="true"
+  fi
+  emit_insight_event implement "$_cycle" complete \
+    --requested-model "$_impl_model" \
+    --effective-model "$_impl_effective_model" \
+    --honored "$_impl_honored"
+
   # Check for COMPLETE/ABORT signals (2-layer detection)
   # Layer 1: sidecar file .agent-signal (written by agent via Bash)
   # Layer 2: marker tag in result text (grep fallback)
@@ -628,6 +680,23 @@ REVIEW
   fi
   ckpt_update ".self_review_result = {\"critical\":${_sr_critical},\"high\":${_sr_high},\"medium\":${_sr_medium},\"low\":${_sr_low}}"
 
+  # Insight event: self_review — emitted after severity counts are parsed.
+  _sr_verdict="pass"
+  if [ "$_sr_critical" -gt 0 ]; then _sr_verdict="fail"; fi
+  _sr_effective_model="$_review_model"
+  if [ "${RALPH_LOOP_DRIVER:-claude}" = "codex" ]; then
+    _sr_effective_model="codex-default"
+    _sr_honored="false"
+  else
+    _sr_honored="true"
+  fi
+  emit_insight_event self_review "$_cycle" "$_sr_verdict" \
+    --critical "$_sr_critical" --high "$_sr_high" \
+    --medium "$_sr_medium" --low "$_sr_low" \
+    --requested-model "$_review_model" \
+    --effective-model "$_sr_effective_model" \
+    --honored "$_sr_honored"
+
   # --fix-all: ANY self-review findings → override COMPLETE, force retry
   if [ "$FIX_ALL" -eq 1 ]; then
     _sr_total=$((_sr_critical + _sr_high + _sr_medium + _sr_low))
@@ -672,6 +741,19 @@ VERIFY
   fi
   ckpt_update --arg v "$_verify_verdict" '.verify_result = $v'
 
+  # Insight event: verify — emitted after verdict is parsed (same variables as ckpt_update above).
+  _verify_effective_model="$_verify_model"
+  if [ "${RALPH_LOOP_DRIVER:-claude}" = "codex" ]; then
+    _verify_effective_model="codex-default"
+    _verify_honored="false"
+  else
+    _verify_honored="true"
+  fi
+  emit_insight_event verify "$_cycle" "$_verify_verdict" \
+    --requested-model "$_verify_model" \
+    --effective-model "$_verify_effective_model" \
+    --honored "$_verify_honored"
+
   # --- Test phase (agent-driven) ---
   log "--- Phase: test ---"
   _test_log="${PIPELINE_DIR}/inner-${_cycle}-test.log"
@@ -710,6 +792,19 @@ TESTPROMPT
   fi
 
   report_event "test" "{\"cycle\":${_cycle},\"exit_code\":${_test_exit},\"log\":\"${_test_log}\"}"
+
+  # Insight event: test — emitted after verdict is parsed (same variables as _test_verdict above).
+  _test_effective_model="$_test_model"
+  if [ "${RALPH_LOOP_DRIVER:-claude}" = "codex" ]; then
+    _test_effective_model="codex-default"
+    _test_honored="false"
+  else
+    _test_honored="true"
+  fi
+  emit_insight_event test "$_cycle" "$_test_verdict" \
+    --requested-model "$_test_model" \
+    --effective-model "$_test_effective_model" \
+    --honored "$_test_honored"
 
   if [ "$_test_exit" -ne 0 ]; then
     log "Tests FAILED in Inner Loop cycle ${_cycle}"
@@ -780,6 +875,19 @@ DOCS
   write_model_receipt sync_docs "$_cycle" "$_docs_model" "phase-default"
   run_agent "$_docs_prompt" "$_docs_log" "" "$_docs_model"
   report_event "sync-docs" "{\"cycle\":${_cycle},\"log\":\"${_docs_log}\"}"
+
+  # Insight event: sync_docs — emitted after agent run (no parsed result; verdict=complete).
+  _docs_effective_model="$_docs_model"
+  if [ "${RALPH_LOOP_DRIVER:-claude}" = "codex" ]; then
+    _docs_effective_model="codex-default"
+    _docs_honored="false"
+  else
+    _docs_honored="true"
+  fi
+  emit_insight_event sync_docs "$_cycle" complete \
+    --requested-model "$_docs_model" \
+    --effective-model "$_docs_effective_model" \
+    --honored "$_docs_honored"
 
   # --- Cross-review phase (driver-aware reviewer inversion) ---
   #
@@ -920,6 +1028,38 @@ DOCS
   ckpt_update ".cross_review_triage = {\"driver\":\"${RALPH_LOOP_DRIVER}\",\"reviewer\":\"${_reviewer}\",\"action_required\":${_action_required},\"worth_considering\":${_worth_considering},\"dismissed\":${_dismissed},\"render_failed\":${_render_failed}}"
   report_event "cross-review" "{\"cycle\":${_cycle},\"driver\":\"${RALPH_LOOP_DRIVER}\",\"reviewer\":\"${_reviewer}\",\"action_required\":${_action_required},\"worth_considering\":${_worth_considering},\"dismissed\":${_dismissed},\"render_failed\":${_render_failed}}"
 
+  # Insight event: cross_review — emitted after triage counts are parsed.
+  # verdict: action_required when render failed or _action_required > 0; pass otherwise.
+  # Render failure is checked first (same order as the gate below: render → action_required).
+  # Routing fields: cross-review uses the *reviewer* CLI, not RALPH_LOOP_DRIVER.
+  # The reviewer model and driver come from write_model_receipt call sites above.
+  _xr_verdict="pass"
+  if [ "$_render_failed" -ne 0 ]; then
+    _xr_verdict="action_required"
+  elif [ "$_action_required" -gt 0 ]; then
+    _xr_verdict="action_required"
+  fi
+  # Reviewer is always the inverted CLI; model is the reviewer model used above.
+  case "$_reviewer" in
+    codex)
+      _xr_req_model="codex-default"
+      _xr_eff_model="codex-default"
+      _xr_honored="false"
+      ;;
+    *)
+      _xr_req_model="${RALPH_CLAUDE_REVIEWER_MODEL:-opus}"
+      _xr_eff_model="${RALPH_CLAUDE_REVIEWER_MODEL:-opus}"
+      _xr_honored="true"
+      ;;
+  esac
+  emit_insight_event cross_review "$_cycle" "$_xr_verdict" \
+    --action-required "$_action_required" \
+    --worth-considering "$_worth_considering" \
+    --dismissed "$_dismissed" \
+    --requested-model "$_xr_req_model" \
+    --effective-model "$_xr_eff_model" \
+    --honored "$_xr_honored"
+
   # Decision: regress to Inner Loop or proceed to PR.
   #
   # Render failure is treated as gate failure (fail closed) — without
@@ -1038,6 +1178,19 @@ PR_PROMPT
     report_event "pr-step" "{\"cycle\":${_cycle},\"log\":\"${_pr_log}\"}"
   fi
 
+  # Insight event: pr — emitted after PR creation step completes.
+  _pr_effective_model="$_pr_model"
+  if [ "${RALPH_LOOP_DRIVER:-claude}" = "codex" ]; then
+    _pr_effective_model="codex-default"
+    _pr_honored="false"
+  else
+    _pr_honored="true"
+  fi
+  emit_insight_event pr "$_cycle" complete \
+    --requested-model "$_pr_model" \
+    --effective-model "$_pr_effective_model" \
+    --honored "$_pr_honored"
+
   return 0
 }
 
@@ -1058,6 +1211,20 @@ main() {
   log ""
 
   mkdir -p "$PIPELINE_DIR" "$EVIDENCE_DIR" "$REPORTS_DIR"
+
+  # --- Insight event identity: run_id and slug ---
+  # PIPELINE_RUN_ID: unique per invocation; ts_file format avoids colons/spaces.
+  # PIPELINE_SLUG: derived from branch name (<type>/<slug> → <slug>).
+  # Both are exported so emit_insight_event can read them as globals.
+  _pii_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+  # Strip type prefix (everything up to and including the first '/').
+  # If branch has issue component (type/NNN/slug), strip two prefixes.
+  _pii_slug="${_pii_branch##*/}"
+  if [ -z "$_pii_slug" ] || [ "$_pii_slug" = "$_pii_branch" ]; then
+    _pii_slug="unknown"
+  fi
+  PIPELINE_SLUG="$_pii_slug"
+  PIPELINE_RUN_ID="$(ts_file)-$$"
 
   # --- Preflight ---
   if ! run_preflight; then
