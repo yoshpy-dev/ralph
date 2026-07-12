@@ -171,4 +171,4 @@ Codex CLI/runtime changes".
 - [x] Verification artifact created (docs/reports/verify-2026-07-12-xreview-base-detection.md)
 - [x] Test artifact created (docs/reports/test-2026-07-12-xreview-base-detection.md)
 - [x] Sync-docs: RALPH_XREVIEW_BASE added to ralph-loop recipe env table (docs/recipes/ralph-loop.md + templates/base mirror, byte-identical)
-- [ ] PR created
+- [x] PR created

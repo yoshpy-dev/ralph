@@ -19,3 +19,14 @@
 
 Fix applied; mirrors byte-identical; check-sync PASS; syntax check PASS.
 Cycle-2 re-run (compact addenda) follows before /pr.
+
+## Cycle 2 (2026-07-12)
+
+- Driver: claude / Reviewer: codex / Cycle: 2/2 (cap reached)
+- Cycle-1 fix applied in c3d89f2 (preserve operator-supplied
+  RALPH_XREVIEW_BASE); re-run: self-review MERGE (0 findings), verify PASS,
+  test PASS (103 driver + orchestrator suites + full regression, 0 failures).
+- Reviewer result: no findings — "No actionable correctness issues were
+  found in the diff. The new base detection helper, pipeline integration,
+  orchestrator export, mirrors, and tests appear consistent."
+- Case C → proceed to /pr.
