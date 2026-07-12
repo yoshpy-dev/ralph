@@ -49,3 +49,46 @@
   2. Remove the dead `log_warn` definition from `ralph-pipeline.sh` + mirror (LOW).
   3. Fix the misleading two-prefix slug comment (LOW).
   4. Document or `null`-encode the `honored_rate: -1` sentinel in the JSON schema (LOW).
+
+---
+
+## Cycle 2 (2026-07-13)
+
+- Reviewer: reviewer subagent (self-review, diff quality only)
+- Trigger: fix-and-revalidate after cross-review `ACTION_REQUIRED=3, WORTH_CONSIDERING=1` (see `docs/reports/cross-review-triage-ralph-insights.md`)
+- Fix commits reviewed in depth: `d3b30e3` (arg-array quoting + dead `log_warn` removal), `45355e5` (backfill multi-cycle, cycle default, rel/abs dedupe, `--json` zero-data)
+- Full-diff sanity re-scan: `git diff origin/develop..HEAD`
+
+### Cross-review fixes — verification against the cycle-1 findings
+
+| Cross-review item | Fix commit | Verdict | Evidence |
+| --- | --- | --- | --- |
+| AR#1 multi-cycle collapse | `45355e5` | Correctly fixed | `ParseReport` now returns `[]BackfillEvent`; `parseCrossReviewAllCycles` emits one entry per cycle with explicit `## Cycle N` heading precedence over occurrence counting. Covered by `TestParseReport_CrossReview_MultiCycle`, `TestRunBackfill_MultiCycleReport`, real-shaped fixture `internal/insights/testdata/reports/cross-review-triage-loop-model-routing.md` (added `## Cycle 2` section). |
+| AR#2 `cycle: null` default | `45355e5` | Correctly fixed | `insights-append.sh` now `_cycle="${_cycle:-1}"` before validation; `jq` filter simplified to `($cycle | tonumber)`; README marks routing fields optional for `source:skill\|backfill`; test 7c flipped to expect `1`. Mirror byte-identical. |
+| AR#3 rel/abs dedupe duplication | `45355e5` | Correctly fixed | `ParseReport` calls `filepath.Abs(path)` before building events; `TestParseReport_PathNormalization` and `TestRunBackfill_RelThenAbsDedupe` cover it. |
+| WC#4 `--json` zero-data | `45355e5` | Correctly fixed | `jsonMode` branch moved ahead of the human zero-data early return; `TestInsightsCmd_JSONZeroData` asserts parseable JSON and absence of the human message. |
+| Cycle-1 MEDIUM arg-splitting | `d3b30e3` | Correctly fixed | `_eie_base_args` is now a quoted bash array (`+=(...)`); `SC2086` disable removed; branch-derived slug survives unusual characters. |
+| Cycle-1 LOW dead `log_warn` | `d3b30e3` | Correctly fixed | Definition removed from `ralph-pipeline.sh` + mirror; guards already used `log` directly. |
+
+### New findings (diff-quality only)
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| LOW | maintainability | The two backfill apply paths handle in-run same-key duplicates inconsistently. `RunBackfill` (`backfill.go`) checks and updates the `existing` map inside a single loop, so a file that produces two entries with the *same* `DedupeKey` catches the second as a duplicate. The CLI path (`insights.go`) computes `isDupe` from `existing` at scan time (`:317`) but the apply loop (`:350-358`) only marks `existing[e.key]` *after* writing and never re-checks within the loop — two scan-time-non-dupe entries sharing a key would both be written. Only reachable with malformed input (two `After triage:` lines mapping to the same cycle number, e.g. duplicate `## Cycle 1` headings); normal multi-cycle files differ by cycle so keys are distinct. | `internal/cli/insights.go:316-317, 348-359` vs `internal/insights/backfill.go:543-582` | Optional: in the CLI apply loop, `if existing[e.key] { continue }` before writing, then set it — mirrors `RunBackfill` and makes the two paths converge. Non-blocking; malformed-input-only. |
+| LOW (informational) | data-consistency | The committed example events file `docs/insights/events/2026-07-12-ralph-insights.jsonl` still carries `"cycle": null` (written before the appender default landed), so it now contradicts the newly-documented `cycle` default of `1`. Not touched by either fix commit — pre-existing committed data, not part of this diff. Regenerating/consistency of committed sample data is doc-drift territory (belongs to `/verify` / `/sync-docs`), flagged here only for hand-off visibility. | `docs/insights/events/2026-07-12-ralph-insights.jsonl` (3 lines, all `cycle: null`); new default at `scripts/insights-append.sh:175` | Out of self-review scope; `/verify` or `/sync-docs` should decide whether to regenerate the sample file. |
+
+### Positive notes (cycle 2)
+
+- `parseCrossReviewAllCycles` is readable: the `pendingCycle` / `occurrenceCount` interplay is documented in a precise doc comment, explicit `## Cycle N` headings take precedence over the occurrence counter, and `pendingCycle` is reset after each consumed triage line so a stray heading cannot leak into a later cycle.
+- `ParseReport` signature change (`*BackfillEvent` → `[]BackfillEvent`) was propagated to both callers (`RunBackfill` in `backfill.go` and `runInsightsBackfill` in `insights.go`); the `bev == nil` / `bevs == nil` unrecognised-type branch and the `ParseMiss` handling were preserved in both. The `makeBase(cycle)` closure removes the prior field-by-field duplication cleanly.
+- `filepath.Abs` error is handled explicitly (`return nil, fmt.Errorf("abs %s: %w", path, err)`), not swallowed.
+- The appender `_cycle="${_cycle:-1}"` default is applied *before* `validate_nonneg_int`, so an explicitly-passed `--cycle 0` or negative value is still validated rather than silently defaulted.
+- Both mirrors (`scripts/` vs `templates/base/scripts/`) and the README pair remain byte-identical (`cmp` exit 0) after the fixes.
+- No secrets, no debug prints, no leftover TODO/FIXME, no commented-out code introduced by the fix commits.
+
+### Verdict (cycle 2)
+
+- **CRITICAL: none.** No blocking diff-quality issues in `d3b30e3` or `45355e5`.
+- All four cross-review ACTION_REQUIRED/WORTH_CONSIDERING items and both cycle-1 findings (MEDIUM arg-splitting, LOW dead `log_warn`) are correctly resolved with matching regression tests.
+- Two new LOW findings, both non-blocking: one malformed-input-only apply-path inconsistency, one informational data-consistency hand-off to `/verify` / `/sync-docs`.
+- **Recommendation: proceed.** No no-merge condition from diff quality.
