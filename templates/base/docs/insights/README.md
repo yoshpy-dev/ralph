@@ -33,6 +33,17 @@ Optional fields that are absent are omitted entirely (not emitted as `null`).
 Go readers must tolerate absent optional fields and unknown extra fields
 (forward-compatible with future schema versions).
 
+### Backfill-only fields
+
+Events written by `ralph insights backfill` carry one additional field:
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `source_report_path` | string | Absolute path to the source report file used for deduplication. Present only when `source == "backfill"`. Used as part of the dedup key (`source_report_path + ":" + phase + ":" + cycle`). |
+
+The `source_report_path` field is not emitted by pipeline or skill writers.
+Readers that do not use backfill can safely ignore it (unknown extra fields are tolerated).
+
 ### Example line
 
 ```json

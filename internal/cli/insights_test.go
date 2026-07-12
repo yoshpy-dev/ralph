@@ -156,3 +156,82 @@ func TestInsightsCmd_EscalationShown(t *testing.T) {
 		t.Errorf("expected 'final=pass', got:\n%s", out)
 	}
 }
+
+// runBackfillCmd runs "ralph insights backfill" with the given args and returns stdout.
+func runBackfillCmd(t *testing.T, args ...string) string {
+	t.Helper()
+	root := NewRootCmd()
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs(append([]string{"insights", "backfill"}, args...))
+	if err := root.Execute(); err != nil {
+		t.Fatalf("command error: %v (output: %s)", err, buf.String())
+	}
+	return buf.String()
+}
+
+func TestBackfillCmd_DryRun(t *testing.T) {
+	// Use the package testdata/reports fixtures as the reports dir.
+	reportsDir := filepath.Join("..", "insights", "testdata", "reports")
+	eventsDir := t.TempDir()
+
+	out := runBackfillCmd(t,
+		"--reports-dir", reportsDir,
+		"--events-dir", eventsDir,
+	)
+
+	if !strings.Contains(out, "dry-run") {
+		t.Errorf("expected 'dry-run' in output, got:\n%s", out)
+	}
+	// At least some events should be derivable.
+	if !strings.Contains(out, "verify") && !strings.Contains(out, "self_review") {
+		t.Errorf("expected phase names in output, got:\n%s", out)
+	}
+	// Dry-run must not write any files.
+	entries, err := os.ReadDir(eventsDir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("dry-run wrote %d files, want 0", len(entries))
+	}
+}
+
+func TestBackfillCmd_Apply(t *testing.T) {
+	reportsDir := filepath.Join("..", "insights", "testdata", "reports")
+	eventsDir := t.TempDir()
+
+	out := runBackfillCmd(t,
+		"--reports-dir", reportsDir,
+		"--events-dir", eventsDir,
+		"--apply",
+	)
+
+	if !strings.Contains(out, "applied") {
+		t.Errorf("expected 'applied' in output, got:\n%s", out)
+	}
+
+	// At least one event file should exist.
+	entries, err := os.ReadDir(eventsDir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Error("apply wrote 0 files, expected at least 1")
+	}
+}
+
+func TestBackfillCmd_Idempotent(t *testing.T) {
+	reportsDir := filepath.Join("..", "insights", "testdata", "reports")
+	eventsDir := t.TempDir()
+
+	// First apply.
+	runBackfillCmd(t, "--reports-dir", reportsDir, "--events-dir", eventsDir, "--apply")
+
+	// Second apply: output must say 0 new events written.
+	out := runBackfillCmd(t, "--reports-dir", reportsDir, "--events-dir", eventsDir, "--apply")
+	if !strings.Contains(out, "0 new events") {
+		t.Errorf("second apply: expected '0 new events', got:\n%s", out)
+	}
+}

@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"sort"
 
 	"github.com/spf13/cobra"
@@ -69,9 +70,9 @@ func runInsights(eventsDir, receiptsPath string, jsonMode bool, cmd *cobra.Comma
 
 	// Zero-data early return.
 	if agg.TotalEvents == 0 && !agg.Receipts.Present {
-		fmt.Fprintln(cmd.OutOrStdout(), "No insight data yet.")
-		fmt.Fprintf(cmd.OutOrStdout(), "  Expected events:   %s\n", eventsDir)
-		fmt.Fprintf(cmd.OutOrStdout(), "  Expected receipts: %s\n", receiptsPath)
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "No insight data yet.")
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Expected events:   %s\n", eventsDir)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Expected receipts: %s\n", receiptsPath)
 		return nil
 	}
 
@@ -87,10 +88,10 @@ func runInsights(eventsDir, receiptsPath string, jsonMode bool, cmd *cobra.Comma
 func printInsightsHuman(agg *insights.AggregateResult, cmd *cobra.Command) error {
 	out := cmd.OutOrStdout()
 
-	fmt.Fprintf(out, "\n=== Events (%d total, %d lines skipped) ===\n\n", agg.TotalEvents, agg.SkippedLines)
+	_, _ = fmt.Fprintf(out, "\n=== Events (%d total, %d lines skipped) ===\n\n", agg.TotalEvents, agg.SkippedLines)
 
 	if len(agg.PerPhase) == 0 {
-		fmt.Fprintln(out, "  (no events)")
+		_, _ = fmt.Fprintln(out, "  (no events)")
 	} else {
 		// Canonical phase order.
 		phaseOrder := []string{"implement", "self_review", "verify", "test", "sync_docs", "cross_review", "pr"}
@@ -108,11 +109,11 @@ func printInsightsHuman(agg *insights.AggregateResult, cmd *cobra.Command) error
 		sort.Strings(extras)
 		orderedPhases := append(phaseOrder, extras...)
 
-		fmt.Fprintf(out, "%-14s %6s %6s %6s %6s %6s  %3s %3s %3s %3s  %3s %3s %3s\n",
+		_, _ = fmt.Fprintf(out, "%-14s %6s %6s %6s %6s %6s  %3s %3s %3s %3s  %3s %3s %3s\n",
 			"Phase", "Events", "Pass", "Fail", "AR", "NA",
 			"C", "H", "M", "L",
 			"AR", "WC", "D")
-		fmt.Fprintf(out, "%-14s %6s %6s %6s %6s %6s  %3s %3s %3s %3s  %3s %3s %3s\n",
+		_, _ = fmt.Fprintf(out, "%-14s %6s %6s %6s %6s %6s  %3s %3s %3s %3s  %3s %3s %3s\n",
 			"---", "---", "---", "---", "---", "---",
 			"---", "---", "---", "---",
 			"---", "---", "---")
@@ -122,7 +123,7 @@ func printInsightsHuman(agg *insights.AggregateResult, cmd *cobra.Command) error
 			if !ok {
 				continue
 			}
-			fmt.Fprintf(out, "%-14s %6d %6d %6d %6d %6d  %3d %3d %3d %3d  %3d %3d %3d\n",
+			_, _ = fmt.Fprintf(out, "%-14s %6d %6d %6d %6d %6d  %3d %3d %3d %3d  %3d %3d %3d\n",
 				phase,
 				ps.Events,
 				ps.Verdicts.Pass, ps.Verdicts.Fail, ps.Verdicts.ActionRequired, ps.Verdicts.NA,
@@ -133,9 +134,9 @@ func printInsightsHuman(agg *insights.AggregateResult, cmd *cobra.Command) error
 	}
 
 	// Routing section (from event routing fields).
-	fmt.Fprintf(out, "\n=== Routing (honored-rate per phase from events) ===\n\n")
+	_, _ = fmt.Fprintf(out, "\n=== Routing (honored-rate per phase from events) ===\n\n")
 	if len(agg.PerPhase) == 0 {
-		fmt.Fprintln(out, "  (no events with routing fields)")
+		_, _ = fmt.Fprintln(out, "  (no events with routing fields)")
 	} else {
 		anyRouting := false
 		phaseOrder := []string{"implement", "self_review", "verify", "test", "sync_docs", "cross_review", "pr"}
@@ -161,20 +162,20 @@ func printInsightsHuman(agg *insights.AggregateResult, cmd *cobra.Command) error
 				continue // no routing data for this phase
 			}
 			anyRouting = true
-			fmt.Fprintf(out, "  %-14s honored-rate: %.0f%%\n", phase, ps.HonoredRate*100)
+			_, _ = fmt.Fprintf(out, "  %-14s honored-rate: %.0f%%\n", phase, ps.HonoredRate*100)
 		}
 		if !anyRouting {
-			fmt.Fprintln(out, "  (no events with routing fields)")
+			_, _ = fmt.Fprintln(out, "  (no events with routing fields)")
 		}
 	}
 
 	// Escalation section.
-	fmt.Fprintf(out, "\n=== Escalation (slugs with cycle >= 2) ===\n\n")
+	_, _ = fmt.Fprintf(out, "\n=== Escalation (slugs with cycle >= 2) ===\n\n")
 	if len(agg.Escalations) == 0 {
-		fmt.Fprintln(out, "  none observed")
+		_, _ = fmt.Fprintln(out, "  none observed")
 	} else {
 		for _, esc := range agg.Escalations {
-			fmt.Fprintf(out, "  %s (max cycle: %d)\n", esc.Slug, esc.MaxCycle)
+			_, _ = fmt.Fprintf(out, "  %s (max cycle: %d)\n", esc.Slug, esc.MaxCycle)
 			// Canonical phases for display.
 			for _, phase := range []string{"implement", "self_review", "verify", "test", "sync_docs", "cross_review", "pr"} {
 				c1, hasC1 := esc.Cycle1Verdicts[phase]
@@ -188,22 +189,22 @@ func printInsightsHuman(agg *insights.AggregateResult, cmd *cobra.Command) error
 				if !hasCF {
 					cf = "-"
 				}
-				fmt.Fprintf(out, "    %-14s cycle1=%-16s final=%s\n", phase, c1, cf)
+				_, _ = fmt.Fprintf(out, "    %-14s cycle1=%-16s final=%s\n", phase, c1, cf)
 			}
 		}
 	}
 
 	// Local receipts section (supplementary / machine-local).
-	fmt.Fprintf(out, "\n=== Local receipts (machine-local supplementary diagnostics) ===\n\n")
+	_, _ = fmt.Fprintf(out, "\n=== Local receipts (machine-local supplementary diagnostics) ===\n\n")
 	diag := agg.Receipts
 	if !diag.Present {
-		fmt.Fprintln(out, "  not present — run a ralph pipeline loop to generate receipts")
-		fmt.Fprintln(out, "  (receipts are machine-local state, not committed to the repo)")
+		_, _ = fmt.Fprintln(out, "  not present — run a ralph pipeline loop to generate receipts")
+		_, _ = fmt.Fprintln(out, "  (receipts are machine-local state, not committed to the repo)")
 	} else {
-		fmt.Fprintf(out, "  total: %d  skipped: %d  honored-rate: %.0f%%\n",
+		_, _ = fmt.Fprintf(out, "  total: %d  skipped: %d  honored-rate: %.0f%%\n",
 			diag.TotalCount, diag.SkippedLines, diag.HonoredRate*100)
 		if len(diag.PerPhase) > 0 {
-			fmt.Fprintln(out, "  per phase:")
+			_, _ = fmt.Fprintln(out, "  per phase:")
 			phaseOrder := []string{"implement", "self_review", "verify", "test", "sync_docs", "cross_review", "pr"}
 			seen := make(map[string]bool)
 			for _, p := range phaseOrder {
@@ -221,23 +222,138 @@ func printInsightsHuman(agg *insights.AggregateResult, cmd *cobra.Command) error
 				if !ok {
 					continue
 				}
-				fmt.Fprintf(out, "    %-14s %.0f%%\n", phase, rate*100)
+				_, _ = fmt.Fprintf(out, "    %-14s %.0f%%\n", phase, rate*100)
 			}
 		}
 	}
-	fmt.Fprintln(out)
+	_, _ = fmt.Fprintln(out)
 	return nil
 }
 
 // newInsightsBackfillCmd returns the "ralph insights backfill" subcommand.
-// Full implementation is in insights_backfill.go (Slice 5); this stub
-// makes the Slice 4 build self-contained until Slice 5 replaces it.
 func newInsightsBackfillCmd() *cobra.Command {
-	return &cobra.Command{
+	var (
+		reportsDir string
+		eventsDir  string
+		apply      bool
+	)
+
+	cmd := &cobra.Command{
 		Use:   "backfill",
 		Short: "Parse existing docs/reports/ and emit backfill insight events",
+		Long: `Parse historical pipeline reports (self-review, verify, test, cross-review-triage)
+from docs/reports/ and derive insight events with source:"backfill".
+
+By default this is a dry-run: events are printed but not written.
+Pass --apply to write them to the events directory.
+
+Deduplication key: source_report_path + phase + cycle — running --apply
+twice produces zero new events (idempotent). Multi-cycle addenda produce
+distinct events per cycle.
+
+Event timestamps are set to the report file's mtime, not the current time,
+so historical ordering is preserved.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("backfill not yet implemented")
+			if reportsDir == "" {
+				reportsDir = "docs/reports"
+			}
+			if eventsDir == "" {
+				eventsDir = "docs/insights/events"
+			}
+			return runInsightsBackfill(reportsDir, eventsDir, apply, cmd)
 		},
 	}
+
+	cmd.Flags().StringVar(&reportsDir, "reports-dir", "", "directory containing report .md files (default: docs/reports)")
+	cmd.Flags().StringVar(&eventsDir, "events-dir", "", "directory to write insight events (default: docs/insights/events)")
+	cmd.Flags().BoolVar(&apply, "apply", false, "write events; default is dry-run (print only)")
+
+	return cmd
+}
+
+func runInsightsBackfill(reportsDir, eventsDir string, apply bool, cmd *cobra.Command) error {
+	out := cmd.OutOrStdout()
+
+	// Collect parse misses for summary.
+	pattern := reportsDir + "/*.md"
+	files, err := filepath.Glob(pattern)
+	if err != nil {
+		return fmt.Errorf("globbing %s: %w", reportsDir, err)
+	}
+
+	// Load existing dedup keys first.
+	existing, err := insights.LoadExistingDedupeKeys(eventsDir)
+	if err != nil {
+		return fmt.Errorf("loading existing events: %w", err)
+	}
+
+	type entry struct {
+		ev     *insights.BackfillEvent
+		key    string
+		isDupe bool
+	}
+
+	var entries []entry
+	var parseMiss int
+
+	for _, f := range files {
+		bev, err := insights.ParseReport(f)
+		if err != nil {
+			parseMiss++
+			continue
+		}
+		if bev == nil {
+			continue // unrecognised file type
+		}
+		if bev.ParseMiss {
+			parseMiss++
+			continue
+		}
+		key := insights.DedupeKey(bev.Event)
+		entries = append(entries, entry{ev: bev, key: key, isDupe: existing[key]})
+	}
+
+	newCount := 0
+	dupeCount := 0
+	for _, e := range entries {
+		if e.isDupe {
+			dupeCount++
+		} else {
+			newCount++
+		}
+	}
+
+	if !apply {
+		_, _ = fmt.Fprintf(out, "Backfill dry-run: %d reports scanned, %d derivable events, %d duplicates, %d parse misses\n\n",
+			len(files), newCount+dupeCount, dupeCount, parseMiss)
+		for _, e := range entries {
+			dupeMark := ""
+			if e.isDupe {
+				dupeMark = " [duplicate — would skip]"
+			}
+			_, _ = fmt.Fprintf(out, "  %s  phase=%-12s cycle=%d  verdict=%-16s%s\n",
+				e.ev.Slug, e.ev.Phase, e.ev.Cycle, e.ev.Verdict, dupeMark)
+		}
+		if parseMiss > 0 {
+			_, _ = fmt.Fprintf(out, "\n  parse misses: %d (unrecognised format or missing verdict)\n", parseMiss)
+		}
+		return nil
+	}
+
+	// Apply mode: write new events.
+	written := 0
+	for _, e := range entries {
+		if e.isDupe {
+			continue
+		}
+		if err := insights.AppendBackfillEvent(eventsDir, e.ev.Event); err != nil {
+			return fmt.Errorf("writing event for %s: %w", e.ev.SourceReportPath, err)
+		}
+		existing[e.key] = true
+		written++
+	}
+
+	_, _ = fmt.Fprintf(out, "Backfill applied: %d new events written, %d duplicates skipped, %d parse misses\n",
+		written, dupeCount, parseMiss)
+	return nil
 }
