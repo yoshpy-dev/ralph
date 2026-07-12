@@ -44,6 +44,8 @@ Events written by `ralph insights backfill` carry one additional field:
 The `source_report_path` field is not emitted by pipeline or skill writers.
 Readers that do not use backfill can safely ignore it (unknown extra fields are tolerated).
 
+Cross-review triage reports may contain multiple pipeline cycles (each introduced by a `## Cycle N` section heading); `ralph insights backfill` emits one event per cycle found, so a single report file can produce multiple events with different `cycle` values.
+
 ### Example line
 
 ```json

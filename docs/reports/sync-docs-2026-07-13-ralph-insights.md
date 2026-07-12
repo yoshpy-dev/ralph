@@ -100,3 +100,31 @@ No code change — comment only.
 | `./scripts/run-verify.sh` | PASS — all verifiers passed (gofmt ok, go vet clean, go test all ok, shellcheck clean) |
 
 Evidence: `docs/evidence/verify-2026-07-12-181637.log`
+
+## Cycle 2 (2026-07-13)
+
+### Scope
+
+Drift confirmation sweep over the fix delta (commits 45355e5, 2f237d1) since
+cycle-1 sync-docs (7dce50a). Checked: `docs/insights/README.md`, `scripts/insights-append.sh`, `internal/insights/backfill.go`, `internal/cli/insights.go`, `README.md`, `docs/recipes/`. No second pass was needed on `docs/recipes/` or root `README.md`; neither was touched by the fix commits.
+
+### Items checked
+
+| Area | Finding | Action |
+| --- | --- | --- |
+| `cycle` default wording in schema table | `docs/insights/README.md` line 20 already reads "Default: `1` when `--cycle` is omitted from `insights-append.sh`." — matches appender behavior after fix. | Confirmed — no change needed. |
+| Multi-cycle backfill behavior — per-cycle events | `### Backfill-only fields` section did not mention that cross-review triage reports produce one event per pipeline cycle. `internal/insights/backfill.go` and `internal/cli/insights.go` now call `parseCrossReviewAllCycles` and iterate `[]BackfillEvent`. | Added one sentence to `### Backfill-only fields` explaining per-cycle event emission for cross-review triage reports. |
+| `docs/recipes/` | No recipe references changed by fix commits. | Confirmed — no change needed. |
+| Root `README.md` | Not modified by fix commits; `ralph insights` rows already present from cycle-1. | Confirmed — no change needed. |
+| Template mirror `templates/base/docs/insights/README.md` | Must be byte-identical after README edit. | `cp` applied; `check-sync.sh` confirms IDENTICAL: 177, DRIFTED: 0. |
+
+### Verification results
+
+| Check | Result |
+| --- | --- |
+| `./scripts/check-sync.sh` | PASS — IDENTICAL: 177, DRIFTED: 0, ROOT_ONLY: 0, KNOWN_DIFF: 3 |
+| `./scripts/check-skill-sync.sh` | PASS — 13 skills in lock-step |
+| `./scripts/check-template.sh` | PASS — Template structure looks good. |
+| `./scripts/run-verify.sh` | PASS — all verifiers passed (gofmt ok, go vet clean, go test all ok, shellcheck clean) |
+
+Evidence: `docs/evidence/verify-2026-07-12-185944.log`
