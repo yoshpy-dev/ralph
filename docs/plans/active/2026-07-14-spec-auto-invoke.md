@@ -77,18 +77,18 @@ Critical forks: None
 
 ## Acceptance criteria
 
-- [ ] `.claude/skills/spec/SKILL.md` に `disable-model-invocation` 行が存在しない
-- [ ] description が自動起動のトリガー条件(肯定条件+否定条件)を含み「Manual trigger only.」を含まない
-- [ ] `test ! -e .agents/skills/spec/agents/openai.yaml` かつ
+- [x] `.claude/skills/spec/SKILL.md` に `disable-model-invocation` 行が存在しない
+- [x] description が自動起動のトリガー条件(肯定条件+否定条件)を含み「Manual trigger only.」を含まない
+- [x] `test ! -e .agents/skills/spec/agents/openai.yaml` かつ
       `test ! -e templates/base/.agents/skills/spec/agents/openai.yaml` が成立する
-- [ ] `./scripts/check-skill-sync.sh` がパスする(ルート)
-- [ ] `CLAUDE_ROOT=templates/base/.claude/skills CODEX_ROOT=templates/base/.agents/skills ./scripts/check-skill-sync.sh` がパスする(テンプレート側)
-- [ ] `./scripts/check-sync.sh` がパスする(ルート⇔templates/base)
-- [ ] `tests/test-sync-skills.sh` に「flag 削除→再同期で openai.yaml が削除される」ケースが追加され、パスする
-- [ ] `CLAUDE.md` / `AGENTS.md` / `README.md` / `docs/architecture/repo-map.md` /
+- [x] `./scripts/check-skill-sync.sh` がパスする(ルート)
+- [x] `CLAUDE_ROOT=templates/base/.claude/skills CODEX_ROOT=templates/base/.agents/skills ./scripts/check-skill-sync.sh` がパスする(テンプレート側)
+- [x] `./scripts/check-sync.sh` がパスする(ルート⇔templates/base)
+- [x] `tests/test-sync-skills.sh` に「flag 削除→再同期で openai.yaml が削除される」ケースが追加され、パスする
+- [x] `CLAUDE.md` / `AGENTS.md` / `README.md` / `docs/architecture/repo-map.md` /
       `templates/base/CLAUDE.md` / `templates/base/AGENTS.md` に
       spec を手動トリガーとする記述が残っていない
-- [ ] `./scripts/run-verify.sh` がパスする
+- [x] `./scripts/run-verify.sh` がパスする
 
 ## Implementation outline
 
@@ -137,7 +137,7 @@ Critical forks: None
 
 - [x] Plan reviewed
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
