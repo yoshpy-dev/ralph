@@ -37,7 +37,7 @@
 
 ## Skills
 
-- `.claude/skills/spec/`: refine vague ideas into detailed specifications (manual trigger)
+- `.claude/skills/spec/`: refine vague ideas into detailed specifications (auto-invoked when a request is too vague for /plan)
 - `.claude/skills/plan/`: create plans, select execution flow (auto)
 - `.claude/skills/work/`: create branch and execute plans interactively (auto)
 - `.claude/skills/loop/`: create worktree and set up Ralph Loop autonomous iteration (auto)

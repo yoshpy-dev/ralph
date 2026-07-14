@@ -1,6 +1,6 @@
 ---
 name: spec
-description: Turn vague ideas or abstract prompts into detailed, actionable specifications through a grill-me-style decision-tree questioning loop with recommended answers, codebase exploration, web research, and interactive clarification with the user. Manual trigger only.
+description: Turn vague ideas or abstract prompts into detailed, actionable specifications through a grill-me-style decision-tree questioning loop with recommended answers, codebase exploration, web research, and interactive clarification with the user. Invoke when a repository-change request is too vague or abstract for /plan — missing objective, scope, or acceptance criteria. Do not invoke for reviews, Q&A or explanations, execution of an existing plan, trivial fixes, or when the user explicitly requests another skill.
 ---
 Turn an abstract idea into a detailed specification.
 

@@ -11,6 +11,8 @@
 #   E. auxiliary files (template.md, prompts/) are copied verbatim
 #   F. real skill tree: generator on the current tree is idempotent
 #      (second run produces no diff)
+#   G. removing disable-model-invocation and re-syncing deletes agents/openai.yaml
+#      and removes the empty agents/ dir
 
 set -eu
 
@@ -187,11 +189,52 @@ run_case "E. prompts/adversarial.md byte-identical" 0 \
 run_case "E. check-skill-sync.sh passes (prompts/ parity)" 0 \
   bash -c "cd '$E_DIR' && CLAUDE_ROOT=.claude/skills CODEX_ROOT=.agents/skills '$CHECK_SCRIPT'"
 
+# ── G. removing disable-model-invocation and re-syncing deletes openai.yaml ───
+# Verifies that the openai.yaml cleanup branch in sync-skills.sh fires when the
+# flag is removed from a skill that previously had it.
+G_DIR="$(mktemp -d)"
+trap 'rm -rf "$A_DIR" "$B_DIR" "$C_DIR" "$D_DIR" "$E_DIR" "$G_DIR"' EXIT
+git -C "$G_DIR" init -q
+git -C "$G_DIR" config user.email "test@example.com"
+git -C "$G_DIR" config user.name "Test"
+mkdir -p "$G_DIR/.claude/skills/gamma_dm" "$G_DIR/.agents/skills"
+cat > "$G_DIR/.claude/skills/gamma_dm/SKILL.md" <<'EOF'
+---
+name: gamma_dm
+description: Gamma-dm skill. Manual trigger only.
+disable-model-invocation: true
+---
+Gamma-dm body.
+EOF
+
+# First sync: disable-model-invocation: true → openai.yaml should be created.
+bash -c "cd '$G_DIR' && CLAUDE_ROOT=.claude/skills CODEX_ROOT=.agents/skills '$SYNC_SCRIPT'" >/dev/null 2>&1
+run_case "G. openai.yaml present after initial sync with disable-model-invocation: true" 0 \
+  test -f "$G_DIR/.agents/skills/gamma_dm/agents/openai.yaml"
+
+# Rewrite source SKILL.md without the flag.
+cat > "$G_DIR/.claude/skills/gamma_dm/SKILL.md" <<'EOF'
+---
+name: gamma_dm
+description: Gamma-dm skill. Auto-invoked when relevant.
+---
+Gamma-dm body.
+EOF
+
+# Second sync: flag removed → openai.yaml must be deleted and agents/ dir gone.
+bash -c "cd '$G_DIR' && CLAUDE_ROOT=.claude/skills CODEX_ROOT=.agents/skills '$SYNC_SCRIPT'" >/dev/null 2>&1
+run_case "G. openai.yaml removed after re-sync without disable-model-invocation" 1 \
+  test -f "$G_DIR/.agents/skills/gamma_dm/agents/openai.yaml"
+run_case "G. agents/ dir removed when empty after openai.yaml deletion" 1 \
+  test -d "$G_DIR/.agents/skills/gamma_dm/agents"
+run_case "G. check-skill-sync.sh passes after flag removal and re-sync" 0 \
+  bash -c "cd '$G_DIR' && CLAUDE_ROOT=.claude/skills CODEX_ROOT=.agents/skills '$CHECK_SCRIPT'"
+
 # ── F. real skill tree: generator is idempotent ───────────────────────────────
 # Run the generator on the actual repo twice; diff the two snapshots.
 FIRST_SNAP="$(mktemp -d)"
 SECOND_SNAP="$(mktemp -d)"
-trap 'rm -rf "$A_DIR" "$B_DIR" "$C_DIR" "$D_DIR" "$E_DIR" "$FIRST_SNAP" "$SECOND_SNAP"' EXIT
+trap 'rm -rf "$A_DIR" "$B_DIR" "$C_DIR" "$D_DIR" "$E_DIR" "$G_DIR" "$FIRST_SNAP" "$SECOND_SNAP"' EXIT
 
 bash -c "cd '$REPO_ROOT' && './scripts/sync-skills.sh'" >/dev/null 2>&1
 cp -a "$REPO_ROOT/.agents/skills/." "$FIRST_SNAP/"

@@ -191,9 +191,9 @@ flowchart LR
     J --> K["CI +<br/>human merge"]
 ```
 
-`/spec` is the only manual trigger in the loop; all other steps are auto-invoked. `/release` is also manual-only but lives outside the loop (repo maintainer use).
+Every step in the loop, including `/spec`, is auto-invoked. `/release` is the only manual-trigger skill and lives outside the loop (repo maintainer use).
 
-1. **Spec** (manual, optional — `/spec`) — refine vague requests through decision-tree questioning with recommended answers, codebase exploration, and interactive clarification. Issue-only specs use a temporary clean-base worktree and cleanup; saved specs create a docs/spec PR or hand off to `/plan`.
+1. **Spec** (auto, optional — `/spec`) — refine vague requests through decision-tree questioning with recommended answers, codebase exploration, and interactive clarification. Issue-only specs use a temporary clean-base worktree and cleanup; saved specs create a docs/spec PR or hand off to `/plan`.
 2. **Plan** (auto — `/plan`) — ensures a clean-base task worktree, then writes a file-backed plan in `docs/plans/active/` with acceptance criteria, verify plan, test plan, risks. Selects flow: `/work` or `/loop`.
 3. **Work** (auto — `/work`) **or Loop** (auto — `/loop`) — `/work` resumes the task worktree and implements interactively; `/loop` runs autonomous parallel slices from the task worktree.
 4. **Self-review** (auto — `/self-review`) — diff quality artifact.
