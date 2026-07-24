@@ -112,5 +112,25 @@ check_not_contains \
   "this shell entrypoint is legacy" \
   "$stdout_out"
 
+# ─── 5. scripts/ on PATH resolves 'ralph' to this script itself → no notice ───
+# When scripts/ is at the front of PATH, 'command -v ralph' resolves to the
+# script itself. The -ef self-exclusion must prevent the notice from firing.
+# We also assert the script started normally (guards against early sibling-source
+# failure producing a false green on the notice-absence check).
+combined_out="$(PATH="${PROJECT_ROOT}/scripts:/usr/bin:/bin" RALPH_NO_DEPRECATION="" \
+  ralph status --no-color 2>&1 || true)"
+check_not_contains \
+  "self-detect: no notice when scripts/ is on PATH (ralph resolves to itself)" \
+  "this shell entrypoint is legacy" \
+  "$combined_out"
+check_not_contains \
+  "self-detect: no sibling-source failure (No such file or directory)" \
+  "No such file or directory" \
+  "$combined_out"
+check_contains \
+  "self-detect: script started normally (status header present)" \
+  "=== Ralph Pipeline Status ===" \
+  "$combined_out"
+
 printf '\nralph deprecation notice tests: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

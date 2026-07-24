@@ -644,8 +644,11 @@ cmd_cleanup() {
 # Deprecation notice
 # ═══════════════════════════════════════════════════════════════════
 
-if [ -z "${RALPH_NO_DEPRECATION:-}" ] && command -v ralph >/dev/null 2>&1; then
-  printf 'ralph (shell): note: the Go CLI '\''ralph'\'' is installed; prefer '\''ralph <cmd>'\'' -- this shell entrypoint is legacy (set RALPH_NO_DEPRECATION=1 to silence)\n' >&2
+if [ -z "${RALPH_NO_DEPRECATION:-}" ]; then
+  _ralph_resolved="$(command -v ralph 2>/dev/null || true)"
+  if [ -n "$_ralph_resolved" ] && ! [ "$_ralph_resolved" -ef "$0" ]; then
+    printf 'ralph (shell): note: the Go CLI '\''ralph'\'' is installed; prefer '\''ralph <cmd>'\'' -- this shell entrypoint is legacy (set RALPH_NO_DEPRECATION=1 to silence)\n' >&2
+  fi
 fi
 
 # ═══════════════════════════════════════════════════════════════════
