@@ -50,11 +50,11 @@ Critical forks: None
 
 ## Acceptance criteria
 
-- [ ] AC1: Go CLI 未導入 + `PATH="$PWD/scripts:$PATH" ralph <cmd>` 起動 → notice が stderr に出ない
-- [ ] AC2: Go CLI(ダミー)が別パスに導入済み + `./scripts/ralph <cmd>` 起動 → notice が stderr に出る(現行どおり)
-- [ ] AC3: `RALPH_NO_DEPRECATION=1` → 条件によらず notice が出ない(現行どおり)
-- [ ] AC4: `scripts/ralph` と `templates/base/scripts/ralph` が引き続き byte-identical(`cmp` で確認)
-- [ ] AC5: `tests/test-ralph-deprecation-notice.sh` に自己検出回帰ケース(notice 不在 + 正常起動の両方を assert)が追加され、全ケース pass
+- [x] AC1: Go CLI 未導入 + `PATH="$PWD/scripts:$PATH" ralph <cmd>` 起動 → notice が stderr に出ない(テストケース5で検証)
+- [x] AC2: Go CLI(ダミー)が別パスに導入済み + `./scripts/ralph <cmd>` 起動 → notice が stderr に出る(既存テストケース1で検証)
+- [x] AC3: `RALPH_NO_DEPRECATION=1` → 条件によらず notice が出ない(既存テストケース3で検証)
+- [x] AC4: `scripts/ralph` と `templates/base/scripts/ralph` が引き続き byte-identical(`cmp` exit 0 で確認)
+- [x] AC5: `tests/test-ralph-deprecation-notice.sh` に自己検出回帰ケース(notice 不在 + 正常起動の両方を assert)が追加され、全ケース pass(7 passed, 0 failed)
 
 ## Implementation outline
 
@@ -110,7 +110,7 @@ Critical forks: None
 
 - [x] Plan reviewed
 - [x] Branch created (fix/134/deprecation-notice-self-detect)
-- [ ] Implementation started
+- [x] Implementation started (implementer subagent, commit 46d8ff0)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
