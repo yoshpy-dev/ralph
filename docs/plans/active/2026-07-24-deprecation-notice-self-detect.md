@@ -111,7 +111,7 @@ Critical forks: None
 - [x] Plan reviewed
 - [x] Branch created (fix/134/deprecation-notice-self-detect)
 - [x] Implementation started (implementer subagent, commit 46d8ff0)
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Review artifact created (docs/reports/self-review-deprecation-notice-self-detect.md)
+- [x] Verification artifact created (docs/reports/verify-deprecation-notice-self-detect.md)
+- [x] Test artifact created (docs/reports/test-deprecation-notice-self-detect.md; 7 passed, 0 failed)
 - [ ] PR created
