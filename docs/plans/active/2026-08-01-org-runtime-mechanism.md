@@ -62,16 +62,16 @@ org runtime の機構層(PR①)を実装する: `ralph org` 動詞セット(spaw
 
 ## Acceptance criteria
 
-- [ ] AC-1: プール外モデルで `ralph org spawn` → 非ゼロ終了、拒否イベントが manifest に記録され、receipts に `commanded_model` / `honored: false` が残る。
-- [ ] AC-2: 同一 `org_id` 内で `max_seats` 到達後の spawn → 拒否+manifest 記録。別 `org_id` の座席は集計に混入しない(並行 2 名前空間テストで検証)。
-- [ ] AC-3: 同一 `--id` での spawn 再実行 → 既存座席を返すか中間状態から再開し、pane / agmsg 参加が重複しない(冪等)。
-- [ ] AC-4: `ralph org status` は herdr / agmsg / LLM が全て停止・不在でも manifest から全座席の状態(saga 状態含む)と履歴を表示する。dry-run イベントは既定で除外される。
-- [ ] AC-5: `ralph doctor` は herdr / agmsg 不在を報告し、`--probe-models` でプール内の無効なモデル ID を警告する。
-- [ ] AC-6: `[org]` 既定値が config.go / templates/base/ralph.toml / ralph-config.sh の 3 面で一致し、`defaults_sync_test.go` が drift を検出する。
-- [ ] AC-7: `go test ./...` と `./scripts/run-verify.sh` が green。既存フロー(`/work`・Ralph Loop)の関連ファイルに差分がない。
-- [ ] AC-8: 全動詞が `--dry-run` で実プロセス起動なしに検証+`dry_run: true` 付き記録を行える。
-- [ ] AC-9(互換): `[org]` セクションのない既存 ralph.toml が警告なしで load でき、herdr / agmsg 不在でも `ralph doctor` の exit code が悪化しない(informational のみ)。既存テスト全件が新規警告なしで pass する。
-- [ ] AC-10(saga): spawn の各外部ステップ(pane 作成 / agmsg 参加 / プロンプト投入)で失敗を注入すると、manifest に `spawn_failed` と補償結果が記録され、孤児リソースの ID が manifest から追跡できる。
+- [x] AC-1: プール外モデルで `ralph org spawn` → 非ゼロ終了、拒否イベントが manifest に記録され、receipts に `commanded_model` / `honored: false` が残る。(`TestOrgSpawn_Rejected_OutOfPoolModel`, verify+test reports)
+- [x] AC-2: 同一 `org_id` 内で `max_seats` 到達後の spawn → 拒否+manifest 記録。別 `org_id` の座席は集計に混入しない(並行 2 名前空間テストで検証)。(`TestOrgSpawn_Rejected_MaxSeatsReached_OrgIsolated`)
+- [x] AC-3: 同一 `--id` での spawn 再実行 → 既存座席を返すか中間状態から再開し、pane / agmsg 参加が重複しない(冪等)。(`TestOrgSpawn_Idempotent_AlreadySpawned_NoNewDriverCalls`, `TestOrgSpawn_StaleInFlight_CompensatesThenRespawnsFresh`)
+- [x] AC-4: `ralph org status` は herdr / agmsg / LLM が全て停止・不在でも manifest から全座席の状態(saga 状態含む)と履歴を表示する。dry-run イベントは既定で除外される。(`TestRoster_DryRunExclusionAndInclusion`, `TestManifestStore_Read_SkipsAndCountsCorruptLines`)
+- [x] AC-5: `ralph doctor` は herdr / agmsg 不在を報告し、`--probe-models` でプール内の無効なモデル ID を警告する。(`internal/cli/doctor_org_test.go`)
+- [x] AC-6: `[org]` 既定値が config.go / templates/base/ralph.toml / ralph-config.sh の 3 面で一致し、`defaults_sync_test.go` が drift を検出する。(`TestDefaultsLockStep`)
+- [x] AC-7: `go test ./...` と `./scripts/run-verify.sh` が green。既存フロー(`/work`・Ralph Loop)の関連ファイルに差分がない。(0 failures across 12 packages; `git diff main...HEAD` confirms zero touches to the plan's do-not-touch list)
+- [x] AC-8: 全動詞が `--dry-run` で実プロセス起動なしに検証+`dry_run: true` 付き記録を行える。(4 mutating verbs — spawn/send/stop/disband; wait/read/status are read-only observational verbs with no side effect to skip, per verify report note)
+- [x] AC-9(互換): `[org]` セクションのない既存 ralph.toml が警告なしで load でき、herdr / agmsg 不在でも `ralph doctor` の exit code が悪化しない(informational のみ)。既存テスト全件が新規警告なしで pass する。(`TestLoad_OrgMissingSection`)
+- [x] AC-10(saga): spawn の各外部ステップ(pane 作成 / agmsg 参加 / プロンプト投入)で失敗を注入すると、manifest に `spawn_failed` と補償結果が記録され、孤児リソースの ID が manifest から追跡できる。(4 failure-injection tests, `internal/org/spawn_test.go`)
 
 ## Implementation outline
 
@@ -133,9 +133,9 @@ org runtime の機構層(PR①)を実装する: `ralph org` 動詞セット(spaw
 - [x] Branch created (docs/spec-org-runtime, spec ハンドオフ)
 - [x] Implementation started
 - [x] Implementation complete (Slices 1–5 committed: 077e952 / f466e18+e1514ff / bb5be6e / 6d55f88 / 844df05+55bba4b+766c1f3+f90d989; run-verify.sh all pass — docs/evidence/verify-2026-08-01-033222.log)
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Review artifact created (docs/reports/self-review-2026-08-01-org-runtime-mechanism.md)
+- [x] Verification artifact created (docs/reports/verify-2026-08-01-org-runtime-mechanism.md)
+- [x] Test artifact created (docs/reports/test-2026-08-01-org-runtime-mechanism.md)
 - [ ] PR created
 
 ## Readiness checklist
