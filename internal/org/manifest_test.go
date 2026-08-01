@@ -1,0 +1,232 @@
+package org
+
+import (
+	"os"
+	"path/filepath"
+	"sync"
+	"testing"
+)
+
+func newTestManifestStore(t *testing.T) *ManifestStore {
+	t.Helper()
+	dir := t.TempDir()
+	return NewManifestStoreAtPath(filepath.Join(dir, "manifest.jsonl"))
+}
+
+func TestManifestStore_AppendReadRoundTrip(t *testing.T) {
+	store := newTestManifestStore(t)
+
+	events := []ManifestEvent{
+		{TS: "2026-08-01T00:00:00Z", OrgID: "org-a", SeatID: "seat-1", Event: EventSpawnStarted, Driver: "claude", Model: "sonnet"},
+		{TS: "2026-08-01T00:00:01Z", OrgID: "org-a", SeatID: "seat-1", Event: EventSpawned, Driver: "claude", Model: "sonnet", PaneID: "pane-123"},
+	}
+	for _, ev := range events {
+		if err := store.Append(ev); err != nil {
+			t.Fatalf("Append failed: %v", err)
+		}
+	}
+
+	result, err := store.Read()
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+	if result.CorruptLines != 0 {
+		t.Fatalf("expected 0 corrupt lines, got %d", result.CorruptLines)
+	}
+	if len(result.Events) != len(events) {
+		t.Fatalf("expected %d events, got %d", len(events), len(result.Events))
+	}
+	for i, ev := range events {
+		if result.Events[i] != ev {
+			t.Errorf("event %d mismatch: want %+v, got %+v", i, ev, result.Events[i])
+		}
+	}
+}
+
+func TestManifestStore_Read_MissingFileIsEmpty(t *testing.T) {
+	store := newTestManifestStore(t)
+	result, err := store.Read()
+	if err != nil {
+		t.Fatalf("expected no error reading missing manifest, got: %v", err)
+	}
+	if len(result.Events) != 0 || result.CorruptLines != 0 {
+		t.Fatalf("expected empty result for missing manifest, got: %+v", result)
+	}
+}
+
+func TestManifestStore_Read_SkipsAndCountsCorruptLines(t *testing.T) {
+	store := newTestManifestStore(t)
+
+	good1 := ManifestEvent{TS: "2026-08-01T00:00:00Z", OrgID: "org-a", SeatID: "seat-1", Event: EventSpawnStarted}
+	good2 := ManifestEvent{TS: "2026-08-01T00:00:01Z", OrgID: "org-a", SeatID: "seat-2", Event: EventSpawnStarted}
+	if err := store.Append(good1); err != nil {
+		t.Fatalf("Append good1 failed: %v", err)
+	}
+
+	// Inject a corrupt line directly (not through Append, which always
+	// writes valid JSON).
+	f, err := os.OpenFile(store.Path(), os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatalf("failed to open manifest for corrupt-line injection: %v", err)
+	}
+	if _, err := f.WriteString("{not valid json\n"); err != nil {
+		t.Fatalf("failed to write corrupt line: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("failed to close manifest after corrupt-line injection: %v", err)
+	}
+
+	if err := store.Append(good2); err != nil {
+		t.Fatalf("Append good2 failed: %v", err)
+	}
+
+	result, err := store.Read()
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+	if result.CorruptLines != 1 {
+		t.Fatalf("expected 1 corrupt line, got %d", result.CorruptLines)
+	}
+	if len(result.Events) != 2 {
+		t.Fatalf("expected 2 good events despite corrupt line, got %d", len(result.Events))
+	}
+}
+
+func TestRoster_DryRunExclusionAndInclusion(t *testing.T) {
+	events := []ManifestEvent{
+		{TS: "2026-08-01T00:00:00Z", OrgID: "org-a", SeatID: "seat-1", Event: EventSpawned, DryRun: false},
+		{TS: "2026-08-01T00:00:01Z", OrgID: "org-a", SeatID: "seat-2", Event: EventSpawned, DryRun: true},
+	}
+
+	activeDefault := ActiveSeatCount(events, "org-a", RosterOptions{})
+	if activeDefault != 1 {
+		t.Fatalf("expected dry-run seat excluded by default, active count = 1, got %d", activeDefault)
+	}
+
+	activeWithDryRun := ActiveSeatCount(events, "org-a", RosterOptions{IncludeDryRun: true})
+	if activeWithDryRun != 2 {
+		t.Fatalf("expected dry-run seat included with IncludeDryRun, active count = 2, got %d", activeWithDryRun)
+	}
+
+	roster := Roster(events, RosterOptions{})
+	if len(roster) != 1 {
+		t.Fatalf("expected roster to exclude dry-run seat by default, got %d seats", len(roster))
+	}
+
+	rosterAll := Roster(events, RosterOptions{IncludeDryRun: true})
+	if len(rosterAll) != 2 {
+		t.Fatalf("expected roster --all to include dry-run seat, got %d seats", len(rosterAll))
+	}
+}
+
+func TestRoster_SagaProgressionToStoppedIsInactive(t *testing.T) {
+	events := []ManifestEvent{
+		{TS: "2026-08-01T00:00:00Z", OrgID: "org-a", SeatID: "seat-1", Event: EventSpawnStarted},
+		{TS: "2026-08-01T00:00:01Z", OrgID: "org-a", SeatID: "seat-1", Event: EventSpawned},
+		{TS: "2026-08-01T00:00:02Z", OrgID: "org-a", SeatID: "seat-1", Event: EventStopped},
+	}
+
+	roster := Roster(events, RosterOptions{})
+	if len(roster) != 1 {
+		t.Fatalf("expected 1 seat in roster, got %d", len(roster))
+	}
+	if roster[0].Active {
+		t.Fatalf("expected seat-1 to be inactive after stopped, got active status")
+	}
+	if roster[0].Event != EventStopped {
+		t.Fatalf("expected latest event to be %q, got %q", EventStopped, roster[0].Event)
+	}
+}
+
+func TestRoster_SpawnStartedAloneCountsAsActive(t *testing.T) {
+	events := []ManifestEvent{
+		{TS: "2026-08-01T00:00:00Z", OrgID: "org-a", SeatID: "seat-1", Event: EventSpawnStarted},
+	}
+
+	count := ActiveSeatCount(events, "org-a", RosterOptions{})
+	if count != 1 {
+		t.Fatalf("expected stale spawn_started-only seat to count as active (visible in status), got %d", count)
+	}
+}
+
+func TestRoster_UnknownEventTypeTolerated(t *testing.T) {
+	events := []ManifestEvent{
+		{TS: "2026-08-01T00:00:00Z", OrgID: "org-a", SeatID: "seat-1", Event: "some_future_event_v2"},
+	}
+
+	roster := Roster(events, RosterOptions{})
+	if len(roster) != 1 {
+		t.Fatalf("expected roster derivation to tolerate unknown event type, got %d seats", len(roster))
+	}
+	if roster[0].Active {
+		t.Fatalf("expected unknown event type to be treated as inactive (not in activeEvents), got active")
+	}
+}
+
+func TestRoster_DisbandedOrgLevelEventDeactivatesAllSeats(t *testing.T) {
+	events := []ManifestEvent{
+		{TS: "2026-08-01T00:00:00Z", OrgID: "org-a", SeatID: "seat-1", Event: EventSpawned},
+		{TS: "2026-08-01T00:00:01Z", OrgID: "org-a", SeatID: "seat-2", Event: EventSpawned},
+		{TS: "2026-08-01T00:00:02Z", OrgID: "org-a", SeatID: "", Event: EventDisbanded},
+	}
+
+	roster := Roster(events, RosterOptions{})
+	for _, s := range roster {
+		if s.Active {
+			t.Errorf("expected seat %s to be inactive after org-level disbanded, got active", s.SeatID)
+		}
+	}
+}
+
+func TestManifestStore_ConcurrentAppendsAllLinesIntact(t *testing.T) {
+	store := newTestManifestStore(t)
+
+	const n = 50
+	var wg sync.WaitGroup
+	wg.Add(n)
+	errCh := make(chan error, n)
+	for i := 0; i < n; i++ {
+		go func(i int) {
+			defer wg.Done()
+			ev := ManifestEvent{
+				TS:      "2026-08-01T00:00:00Z",
+				OrgID:   "org-a",
+				SeatID:  "seat-concurrent",
+				Event:   EventSpawnStarted,
+				Details: repeatDigit(i),
+			}
+			if err := store.Append(ev); err != nil {
+				errCh <- err
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		t.Fatalf("concurrent Append failed: %v", err)
+	}
+
+	result, err := store.Read()
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+	if result.CorruptLines != 0 {
+		t.Fatalf("expected 0 corrupt lines from concurrent appends, got %d", result.CorruptLines)
+	}
+	if len(result.Events) != n {
+		t.Fatalf("expected %d intact events from concurrent appends, got %d", n, len(result.Events))
+	}
+}
+
+// repeatDigit gives each concurrent goroutine's event distinguishable
+// content so a corrupted/interleaved write is detectable via failed
+// unmarshal, not just a wrong count.
+func repeatDigit(i int) string {
+	digits := "0123456789"
+	d := digits[i%10]
+	out := make([]byte, 32)
+	for j := range out {
+		out[j] = d
+	}
+	return string(out)
+}
