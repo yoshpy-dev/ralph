@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -153,6 +154,35 @@ func TestDefaultsLockStep(t *testing.T) {
 	for _, pc := range phaseChecks {
 		check(pc.label, pc.shellVar, pc.tomlVal, pc.goVal)
 	}
+
+	// ── [org] envelope defaults ────────────────────────────────────────────────
+	// Shell vars are comma-joined strings (RALPH_ORG_DRIVER_POOL,
+	// RALPH_ORG_MODEL_POOL as "driver:model,driver:model,...") since shell has
+	// no native array type; the Go/TOML sides are canonicalized to the same
+	// joined form before comparing so the three surfaces line up textually.
+	check("org.driver_pool", "RALPH_ORG_DRIVER_POOL",
+		strings.Join(tomlCfg.Org.DriverPool, ","), strings.Join(goCfg.Org.DriverPool, ","))
+
+	formatOrgModelPool := func(entries []OrgModelPoolEntry) string {
+		parts := make([]string, len(entries))
+		for i, e := range entries {
+			parts[i] = e.Driver + ":" + e.Model
+		}
+		return strings.Join(parts, ",")
+	}
+	check("org.model_pool", "RALPH_ORG_MODEL_POOL",
+		formatOrgModelPool(tomlCfg.Org.ModelPool), formatOrgModelPool(goCfg.Org.ModelPool))
+
+	check("org.max_seats", "RALPH_ORG_MAX_SEATS",
+		strconv.Itoa(tomlCfg.Org.MaxSeats), strconv.Itoa(goCfg.Org.MaxSeats))
+	check("org.budget.seat_wall_clock_minutes", "RALPH_ORG_SEAT_BUDGET_MINUTES",
+		strconv.Itoa(tomlCfg.Org.Budget.SeatWallClockMinutes), strconv.Itoa(goCfg.Org.Budget.SeatWallClockMinutes))
+	check("org.budget.total_wall_clock_minutes", "RALPH_ORG_TOTAL_BUDGET_MINUTES",
+		strconv.Itoa(tomlCfg.Org.Budget.TotalWallClockMinutes), strconv.Itoa(goCfg.Org.Budget.TotalWallClockMinutes))
+	check("org.budget.max_fix_rounds", "RALPH_ORG_MAX_FIX_ROUNDS",
+		strconv.Itoa(tomlCfg.Org.Budget.MaxFixRounds), strconv.Itoa(goCfg.Org.Budget.MaxFixRounds))
+	check("org.deadman_minutes", "RALPH_ORG_DEADMAN_MINUTES",
+		strconv.Itoa(tomlCfg.Org.DeadmanMinutes), strconv.Itoa(goCfg.Org.DeadmanMinutes))
 
 	// ── loop.claude_reviewer_model ────────────────────────────────────────────
 	// Shell var: RALPH_CLAUDE_REVIEWER_MODEL; toml: [loop].claude_reviewer_model;
