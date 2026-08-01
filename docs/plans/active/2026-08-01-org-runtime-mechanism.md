@@ -116,15 +116,23 @@ org runtime の機構層(PR①)を実装する: `ralph org` 動詞セット(spaw
 
 ## Open questions
 
-- doctor `--probe-models` の実行コスト(モデル×driver ごとに CLI 起動)— 実装時に計測し、遅ければ並列化かキャッシュ。
-- agmsg チーム名の正規形(`ralph-<org_id>` を仮置き)— PR② の座席プロンプト設計と同時に確定。
-- `spawn_started` のまま残った stale レコードの回収ポリシー(gc 動詞 or status 表示のみ)— 実装時に決め、plan に追記。
+- agmsg チーム名の正規形(実装では `ralph-<org_id>` を採用。agmsg CLI の `--team/--as` フラグ形状は未確認の仮定として `internal/org/driver/agmsg.go` に一元化 — 実 CLI 初回利用前に検証必須)— PR② で確定。
+- doctor `--probe-models` の実コスト計測は実バイナリ環境でのみ可能(スタブでは pass)。PR② の実機検証と同時に測る。
+
+## Implementation notes (deviations from initial outline)
+
+- Roster 導出を「最新イベント」から「最新 **state** イベント」に精緻化: state イベント(spawn_started / spawn_step / spawned / spawn_failed / rejected / stopped / disbanded)のみが座席の活性判定に関与し、非 state イベント(`sent` 等)は履歴のみ。`spawn_step`(in-flight、活性扱い)と `org_workspace_created`(org レベル)、`sent` を追加。
+- `spawn_started` / `spawn_step` の stale レコードは「respawn 時に補償(C-c)して `spawn_failed`(superseded)を追記→新規 saga」で回収する方式を採用(専用 gc 動詞なし)。
+- doctor は新設の `info` ステータス(exit code 非影響)で org 依存を報告。`--probe-models` の codex 失敗は advisory 文言付き warn。
+- errcheck 対応(`_, _ = fmt.Fprint*` / `defer func() { _ = f.Close() }()`)と modernize lint(SplitSeq / slices.Contains / range int)は既存流儀に追従。
+- templates/base ミラー(AGENTS.md / ralph-config.sh)は check-sync 検出に基づき同期済み。
 
 ## Progress checklist
 
-- [ ] Plan reviewed
+- [x] Plan reviewed
 - [x] Branch created (docs/spec-org-runtime, spec ハンドオフ)
-- [ ] Implementation started
+- [x] Implementation started
+- [x] Implementation complete (Slices 1–5 committed: 077e952 / f466e18+e1514ff / bb5be6e / 6d55f88 / 844df05+55bba4b+766c1f3+f90d989; run-verify.sh all pass — docs/evidence/verify-2026-08-01-033222.log)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
