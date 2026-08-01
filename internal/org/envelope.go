@@ -8,8 +8,9 @@ import (
 )
 
 // SpawnRequest describes a proposed `ralph org spawn` invocation prior to
-// any external side effect (herdr/agmsg calls are Slice 3/4 concerns; this
-// package validates and records only).
+// any external side effect. The herdr/agmsg calls themselves live in
+// spawn.go (via HerdrClient/AgmsgClient) and internal/org/driver; this file
+// only validates the request against the [org] envelope.
 type SpawnRequest struct {
 	OrgID  string
 	SeatID string

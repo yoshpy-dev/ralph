@@ -236,7 +236,7 @@ func newOrgWaitCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			result := rt.Wait(org.WaitParams{Seat: seat, Until: splitCommaList(until), TimeoutMS: timeoutMS})
+			result := rt.Wait(org.WaitParams{OrgID: *orgID, Seat: seat, Until: splitCommaList(until), TimeoutMS: timeoutMS})
 			if result.Output != "" {
 				_, _ = fmt.Fprintln(cmd.OutOrStdout(), result.Output)
 			}

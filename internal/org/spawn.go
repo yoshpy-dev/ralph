@@ -186,7 +186,7 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	if p.Prompt != "" {
 		agentArgs = append(agentArgs, p.Prompt)
 	}
-	if _, err := o.Herdr.AgentStart(ctx, p.SeatID, p.Driver, paneID, p.TimeoutMS, agentArgs); err != nil {
+	if _, err := o.Herdr.AgentStart(ctx, herdrAgentName(p.OrgID, p.SeatID), p.Driver, paneID, p.TimeoutMS, agentArgs); err != nil {
 		return o.failStep(p, "agent_start", err, paneID)
 	}
 	if err := o.appendEvent(ManifestEvent{
@@ -234,6 +234,20 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 // PR②'s seat prompt design).
 func agmsgTeam(orgID string) string {
 	return fmt.Sprintf("ralph-%s", orgID)
+}
+
+// herdrAgentName is the single, grep-able definition of the herdr agent-name
+// convention: every call site that names or targets a herdr agent (spawn's
+// AgentStart, and send/wait's AgentWait) must derive the name through this
+// function rather than passing the bare seat id. herdr's agent namespace is
+// global across all orgs, so two org_ids that both spawn a seat named
+// (for example) "reviewer" would otherwise register (and later target)
+// exactly the same herdr agent -- silently colliding across org boundaries.
+// Namespacing by org_id here mirrors the agmsgTeam convention above and
+// keeps the external-resource boundary isolated the same way manifest
+// accounting already is.
+func herdrAgentName(orgID, seatID string) string {
+	return fmt.Sprintf("%s-%s", orgID, seatID)
 }
 
 // reject records an envelope-validation rejection: a `rejected` manifest

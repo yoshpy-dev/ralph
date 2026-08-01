@@ -101,15 +101,35 @@ type RosterOptions struct {
 	// (false) excludes dry-run events from both the roster and
 	// max_seats/ActiveSeatCount accounting -- dry-run audit trail stays
 	// visible only via `status --all` (AC-8, dry-run audit separation).
+	// A dry-run seat is always a distinct entry from a real seat sharing
+	// the same seat_id -- it never overrides a real seat's derived latest
+	// state or its org-level disbanded flag (see seatKey/disbandKey).
 	IncludeDryRun bool
 }
 
-// seatKey identifies a seat within the org_id namespace it was spawned in.
-// The same seat_id in two different org_id namespaces is never conflated
-// (AC-2).
+// seatKey identifies a seat within the org_id namespace it was spawned in,
+// and within the real/dry-run axis it was recorded on. The same seat_id in
+// two different org_id namespaces is never conflated (AC-2); including
+// DryRun in the key means a dry-run event for a seat_id never becomes (or
+// clears) the "latest applicable event" for a real seat sharing that same
+// seat_id, and vice versa -- dry-run audit trail stays a fully separate
+// entry rather than mutating real seat state (see disbandKey below for the
+// same isolation at the org-level disbanded event).
 type seatKey struct {
 	OrgID  string
 	SeatID string
+	DryRun bool
+}
+
+// disbandKey identifies an org-level `disbanded` event's real/dry-run axis,
+// mirroring seatKey. A dry-run `disband --dry-run` must only deactivate the
+// dry-run seat entries derived under RosterOptions{IncludeDryRun: true}; a
+// real `disband` must only deactivate real seats. Without this split, a
+// dry-run disbanded event would otherwise mark every *real* seat in the org
+// inactive the moment IncludeDryRun is true (`status --all`).
+type disbandKey struct {
+	OrgID  string
+	DryRun bool
 }
 
 // Roster derives per-(org_id, seat_id) SeatStatus from a sequence of
@@ -120,14 +140,16 @@ type seatKey struct {
 //
 // An org-level `disbanded` event (SeatID == "") marks every seat in that
 // org_id inactive from that point forward, regardless of the seat's own
-// latest saga event.
+// latest saga event -- but only within the same real/dry-run axis: a
+// `disband --dry-run` event only deactivates dry-run seats, and a real
+// `disband` only deactivates real seats (see disbandKey).
 func Roster(events []ManifestEvent, opts RosterOptions) []SeatStatus {
 	type seatEntry struct {
 		ev  ManifestEvent
 		idx int
 	}
 	latest := make(map[seatKey]seatEntry)
-	disbandedIdx := make(map[string]int)
+	disbandedIdx := make(map[disbandKey]int)
 
 	for i, ev := range events {
 		if !opts.IncludeDryRun && ev.DryRun {
@@ -135,7 +157,7 @@ func Roster(events []ManifestEvent, opts RosterOptions) []SeatStatus {
 		}
 		if ev.SeatID == "" {
 			if ev.Event == EventDisbanded {
-				disbandedIdx[ev.OrgID] = i
+				disbandedIdx[disbandKey{OrgID: ev.OrgID, DryRun: ev.DryRun}] = i
 			}
 			continue
 		}
@@ -147,13 +169,13 @@ func Roster(events []ManifestEvent, opts RosterOptions) []SeatStatus {
 		if !isStateEvent(ev.Event) {
 			continue
 		}
-		latest[seatKey{OrgID: ev.OrgID, SeatID: ev.SeatID}] = seatEntry{ev: ev, idx: i}
+		latest[seatKey{OrgID: ev.OrgID, SeatID: ev.SeatID, DryRun: ev.DryRun}] = seatEntry{ev: ev, idx: i}
 	}
 
 	result := make([]SeatStatus, 0, len(latest))
 	for key, entry := range latest {
 		active := isActiveEvent(entry.ev.Event)
-		if dIdx, ok := disbandedIdx[key.OrgID]; ok && dIdx > entry.idx {
+		if dIdx, ok := disbandedIdx[disbandKey{OrgID: key.OrgID, DryRun: key.DryRun}]; ok && dIdx > entry.idx {
 			active = false
 		}
 		result = append(result, SeatStatus{
@@ -177,7 +199,13 @@ func Roster(events []ManifestEvent, opts RosterOptions) []SeatStatus {
 		if result[i].OrgID != result[j].OrgID {
 			return result[i].OrgID < result[j].OrgID
 		}
-		return result[i].SeatID < result[j].SeatID
+		if result[i].SeatID != result[j].SeatID {
+			return result[i].SeatID < result[j].SeatID
+		}
+		// Same org_id/seat_id can now appear twice under IncludeDryRun (one
+		// real entry, one dry-run entry, per the seatKey split above) --
+		// order the real entry first for a deterministic, readable listing.
+		return !result[i].DryRun && result[j].DryRun
 	})
 	return result
 }

@@ -9,8 +9,8 @@ import (
 // receipts must be honest, not optimistic). "true" is reserved for cases
 // where a driver-observed confirmation of the effective model actually
 // exists; "unknown" is the correct default whenever no such observation is
-// possible yet (this package only stores the value -- callers in later
-// slices decide which value applies).
+// possible yet -- this package only stores the value; spawn.go's Spawn (and
+// its dry-run path) is the current caller deciding which value applies.
 const (
 	HonoredTrue    = "true"
 	HonoredFalse   = "false"

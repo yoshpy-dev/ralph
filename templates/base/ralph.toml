@@ -60,10 +60,10 @@ require_codex_cli = false
 require_go = false
 
 # [org] — envelope config for the `ralph org` verb set (spawn / send / wait /
-# read / stop / status / disband). This section is config-only in PR①: no
-# seats run yet, but the fields are validated so downstream PRs (seat-ification,
-# Lead autonomy, Watchdog) have a stable foundation. Absent [org] is fully
-# compatible — Load() backfills these exact defaults with no warnings.
+# read / stop / status / disband) and for `ralph doctor`'s org checks. The
+# fields are validated so downstream PRs (seat-ification, Lead autonomy,
+# Watchdog) build on a stable foundation. Absent [org] is fully compatible —
+# Load() backfills these exact defaults with no warnings.
 [org]
 driver_pool = ["claude", "codex"]
 # model_pool entries are CLI-native model names/aliases, passed verbatim to

@@ -80,7 +80,7 @@ func (o *Org) Send(p SendParams) SendResult {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutMS)*time.Millisecond)
 	defer cancel()
 
-	if _, err := o.Herdr.AgentWait(ctx, p.To, []string{"idle"}, timeoutMS); err != nil {
+	if _, err := o.Herdr.AgentWait(ctx, herdrAgentName(p.OrgID, p.To), []string{"idle"}, timeoutMS); err != nil {
 		return SendResult{Err: fmt.Errorf("org: send: wait for seat %q idle: %w", p.To, err)}
 	}
 	if err := o.Herdr.PaneSendText(ctx, seat.PaneID, p.Text); err != nil {
@@ -109,8 +109,12 @@ func truncateForDetails(text string) string {
 }
 
 // WaitParams describes one `ralph org wait` invocation. Wait is a pure
-// passthrough to Herdr.AgentWait -- it never touches the manifest.
+// passthrough to Herdr.AgentWait -- it never touches the manifest. OrgID is
+// required: it namespaces the herdr agent name (see herdrAgentName) so wait
+// targets the seat spawned within this org_id, not any same-named seat in a
+// different org_id.
 type WaitParams struct {
+	OrgID     string
 	Seat      string
 	Until     []string
 	TimeoutMS int
@@ -131,7 +135,7 @@ func (o *Org) Wait(p WaitParams) WaitResult {
 		ctx, cancel = context.WithTimeout(ctx, time.Duration(p.TimeoutMS)*time.Millisecond)
 		defer cancel()
 	}
-	out, err := o.Herdr.AgentWait(ctx, p.Seat, p.Until, p.TimeoutMS)
+	out, err := o.Herdr.AgentWait(ctx, herdrAgentName(p.OrgID, p.Seat), p.Until, p.TimeoutMS)
 	return WaitResult{Output: out, Err: err}
 }
 

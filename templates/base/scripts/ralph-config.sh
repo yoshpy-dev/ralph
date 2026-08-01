@@ -65,9 +65,9 @@ RALPH_ESCALATION_MODEL="${RALPH_ESCALATION_MODEL:-opus}"
 # ═══════════════════════════════════════════════════════════════════
 # [org] envelope defaults — mirror internal/config/config.go OrgConfig
 # and templates/base/ralph.toml [org]. Must change in lock-step (see
-# .claude/rules/model-routing.md and defaults_sync_test.go). Config-only
-# in PR① of the org-runtime-mechanism plan — no `ralph org` verbs read
-# these shell vars yet; they exist here so the three surfaces agree.
+# .claude/rules/model-routing.md and defaults_sync_test.go). No `ralph
+# org` verb reads these shell vars — the Go config (internal/config) is
+# the runtime source; these exist only so the three surfaces agree.
 # ═══════════════════════════════════════════════════════════════════
 
 RALPH_ORG_DRIVER_POOL="${RALPH_ORG_DRIVER_POOL:-claude,codex}"

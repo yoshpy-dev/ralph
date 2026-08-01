@@ -201,6 +201,81 @@ func TestRoster_DisbandedOrgLevelEventDeactivatesAllSeats(t *testing.T) {
 	}
 }
 
+func TestRoster_DryRunDisbandLeavesRealSeatsActive(t *testing.T) {
+	events := []ManifestEvent{
+		{TS: "2026-08-01T00:00:00Z", OrgID: "org-a", SeatID: "seat-1", Event: EventSpawned},
+		{TS: "2026-08-01T00:00:01Z", OrgID: "org-a", SeatID: "", Event: EventDisbanded, DryRun: true},
+	}
+
+	roster := Roster(events, RosterOptions{IncludeDryRun: true})
+	found := false
+	for _, s := range roster {
+		if s.SeatID == "seat-1" {
+			found = true
+			if !s.Active {
+				t.Errorf("expected real seat-1 to remain active after a dry-run disbanded event, got inactive: %+v", s)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected seat-1 present in roster, got %+v", roster)
+	}
+}
+
+func TestRoster_RealDisbandLeavesDryRunSeatsUntouched(t *testing.T) {
+	events := []ManifestEvent{
+		{TS: "2026-08-01T00:00:00Z", OrgID: "org-a", SeatID: "seat-1", Event: EventSpawned, DryRun: true},
+		{TS: "2026-08-01T00:00:01Z", OrgID: "org-a", SeatID: "", Event: EventDisbanded},
+	}
+
+	roster := Roster(events, RosterOptions{IncludeDryRun: true})
+	found := false
+	for _, s := range roster {
+		if s.SeatID == "seat-1" && s.DryRun {
+			found = true
+			if !s.Active {
+				t.Errorf("expected dry-run seat-1 to remain active after a real disbanded event, got inactive: %+v", s)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected dry-run seat-1 present in roster, got %+v", roster)
+	}
+}
+
+func TestRoster_DryRunStoppedDoesNotDeactivateRealSeatWithSameID(t *testing.T) {
+	events := []ManifestEvent{
+		{TS: "2026-08-01T00:00:00Z", OrgID: "org-a", SeatID: "seat-1", Event: EventSpawned},
+		{TS: "2026-08-01T00:00:01Z", OrgID: "org-a", SeatID: "seat-1", Event: EventStopped, DryRun: true},
+	}
+
+	roster := Roster(events, RosterOptions{IncludeDryRun: true})
+	var real, dryRun *SeatStatus
+	for i := range roster {
+		s := &roster[i]
+		if s.SeatID != "seat-1" {
+			continue
+		}
+		if s.DryRun {
+			dryRun = s
+		} else {
+			real = s
+		}
+	}
+	if real == nil {
+		t.Fatalf("expected a real seat-1 entry in the roster, got %+v", roster)
+	}
+	if !real.Active || real.Event != EventSpawned {
+		t.Errorf("expected the real seat-1 to remain active with event %q untouched by a dry-run stopped event, got %+v", EventSpawned, real)
+	}
+	if dryRun == nil {
+		t.Fatalf("expected a distinct dry-run seat-1 entry in the roster, got %+v", roster)
+	}
+	if dryRun.Active || dryRun.Event != EventStopped {
+		t.Errorf("expected the dry-run seat-1 entry to be inactive with event %q, got %+v", EventStopped, dryRun)
+	}
+}
+
 func TestManifestStore_ConcurrentAppendsAllLinesIntact(t *testing.T) {
 	store := newTestManifestStore(t)
 

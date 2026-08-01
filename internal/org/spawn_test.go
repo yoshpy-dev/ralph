@@ -23,7 +23,9 @@ type fakeHerdr struct {
 	workspaceID string
 	paneID      string
 
-	sendKeysCalls []string // paneIDs PaneSendKeys was invoked with, in order
+	sendKeysCalls    []string // paneIDs PaneSendKeys was invoked with, in order
+	agentStartNames  []string // agent names AgentStart was invoked with, in order
+	agentWaitTargets []string // targets AgentWait was invoked with, in order
 }
 
 func (f *fakeHerdr) WorkspaceCreate(_ context.Context, _, _ string) (string, error) {
@@ -48,16 +50,18 @@ func (f *fakeHerdr) TabCreate(_ context.Context, _, _, _ string) (string, error)
 	return f.paneID, nil
 }
 
-func (f *fakeHerdr) AgentStart(_ context.Context, _, _, _ string, _ int, _ []string) (string, error) {
+func (f *fakeHerdr) AgentStart(_ context.Context, name, _, _ string, _ int, _ []string) (string, error) {
 	f.calls = append(f.calls, "agent_start")
+	f.agentStartNames = append(f.agentStartNames, name)
 	if f.agentStartErr != nil {
 		return "", f.agentStartErr
 	}
 	return "agent-1", nil
 }
 
-func (f *fakeHerdr) AgentWait(_ context.Context, _ string, _ []string, _ int) (string, error) {
+func (f *fakeHerdr) AgentWait(_ context.Context, target string, _ []string, _ int) (string, error) {
 	f.calls = append(f.calls, "agent_wait")
+	f.agentWaitTargets = append(f.agentWaitTargets, target)
 	return "idle", nil
 }
 
@@ -174,6 +178,41 @@ func TestOrgSpawn_HappyPath_EventSequenceAndReceipt(t *testing.T) {
 	}
 	if rr.Receipts[0].CommandedModel != "sonnet" {
 		t.Errorf("expected commanded_model=sonnet, got %q", rr.Receipts[0].CommandedModel)
+	}
+}
+
+func TestOrgSpawn_HerdrAgentNameNamespacedByOrgID(t *testing.T) {
+	// Two different orgs spawning a seat with the same seat_id must not
+	// collide in herdr's global agent namespace: AgentStart's agent name
+	// must differ per org_id even though SeatID is identical.
+	o, h, _ := testOrg(t)
+
+	if r := o.Spawn(mustSpawnParams("org-a", "reviewer")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("org-a reviewer spawn failed: %+v", r)
+	}
+	if r := o.Spawn(mustSpawnParams("org-b", "reviewer")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("org-b reviewer spawn failed: %+v", r)
+	}
+
+	if len(h.agentStartNames) != 2 {
+		t.Fatalf("expected 2 AgentStart calls, got %d: %v", len(h.agentStartNames), h.agentStartNames)
+	}
+	nameA, nameB := h.agentStartNames[0], h.agentStartNames[1]
+	if nameA == nameB {
+		t.Fatalf("expected distinct herdr agent names for the same seat_id in different org_ids, got %q for both", nameA)
+	}
+	wantA, wantB := herdrAgentName("org-a", "reviewer"), herdrAgentName("org-b", "reviewer")
+	if nameA != wantA || nameB != wantB {
+		t.Fatalf("expected agent names %q and %q, got %q and %q", wantA, wantB, nameA, nameB)
+	}
+}
+
+func TestHerdrAgentName_NamespacesBySeatAndOrg(t *testing.T) {
+	if got := herdrAgentName("org-a", "reviewer"); got != "org-a-reviewer" {
+		t.Fatalf("herdrAgentName(org-a, reviewer) = %q, want org-a-reviewer", got)
+	}
+	if herdrAgentName("org-a", "reviewer") == herdrAgentName("org-b", "reviewer") {
+		t.Fatalf("expected herdrAgentName to differ across org_ids for the same seat_id")
 	}
 }
 
