@@ -227,7 +227,7 @@ func appendJSONLine(path string, v any) error {
 	if err != nil {
 		return fmt.Errorf("org: open %s: %w", path, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	line, err := json.Marshal(v)
 	if err != nil {
@@ -254,7 +254,7 @@ func readJSONLines(path string, unmarshal func(line []byte) error) (corrupt int,
 		}
 		return 0, fmt.Errorf("org: open %s: %w", path, openErr)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)

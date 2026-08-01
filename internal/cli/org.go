@@ -165,15 +165,15 @@ func printSpawnResult(cmd *cobra.Command, r org.SpawnResult) {
 	out := cmd.OutOrStdout()
 	switch r.Outcome {
 	case org.SpawnOutcomeRejected:
-		fmt.Fprintf(out, "rejected: %v\n", r.Err)
+		_, _ = fmt.Fprintf(out, "rejected: %v\n", r.Err)
 	case org.SpawnOutcomeIdempotent:
-		fmt.Fprintf(out, "seat %q already spawned (org_id=%s driver=%s model=%s pane_id=%s)\n",
+		_, _ = fmt.Fprintf(out, "seat %q already spawned (org_id=%s driver=%s model=%s pane_id=%s)\n",
 			r.Seat.SeatID, r.Seat.OrgID, r.Seat.Driver, r.Seat.Model, r.Seat.PaneID)
 	case org.SpawnOutcomeSpawned:
-		fmt.Fprintf(out, "spawned seat %q (org_id=%s driver=%s model=%s pane_id=%s dry_run=%t)\n",
+		_, _ = fmt.Fprintf(out, "spawned seat %q (org_id=%s driver=%s model=%s pane_id=%s dry_run=%t)\n",
 			r.Seat.SeatID, r.Seat.OrgID, r.Seat.Driver, r.Seat.Model, r.Seat.PaneID, r.Seat.DryRun)
 	case org.SpawnOutcomeFailed:
-		fmt.Fprintf(out, "spawn failed: %v\n", r.Err)
+		_, _ = fmt.Fprintf(out, "spawn failed: %v\n", r.Err)
 	}
 }
 
@@ -202,7 +202,7 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if result.Err != nil {
 				return fmt.Errorf("org: send: %w", result.Err)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "sent message to seat %q\n", to)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "sent message to seat %q\n", to)
 			return nil
 		},
 	}
@@ -238,7 +238,7 @@ func newOrgWaitCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			}
 			result := rt.Wait(org.WaitParams{Seat: seat, Until: splitCommaList(until), TimeoutMS: timeoutMS})
 			if result.Output != "" {
-				fmt.Fprintln(cmd.OutOrStdout(), result.Output)
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), result.Output)
 			}
 			if result.Err != nil {
 				return fmt.Errorf("org: wait: %w", result.Err)
@@ -276,7 +276,7 @@ func newOrgReadCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			}
 			result := rt.Read(org.ReadParams{OrgID: *orgID, Seat: seat, Lines: lines})
 			if result.Output != "" {
-				fmt.Fprintln(cmd.OutOrStdout(), result.Output)
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), result.Output)
 			}
 			if result.Err != nil {
 				return fmt.Errorf("org: read: %w", result.Err)
@@ -315,7 +315,7 @@ func newOrgStopCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if result.Err != nil {
 				return fmt.Errorf("org: stop: %w", result.Err)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "stopped seat %q\n", seat)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "stopped seat %q\n", seat)
 			return nil
 		},
 	}
@@ -402,9 +402,9 @@ func printStatusJSON(cmd *cobra.Command, result org.StatusResult) error {
 func printStatusTable(cmd *cobra.Command, result org.StatusResult) {
 	out := cmd.OutOrStdout()
 	if len(result.Seats) == 0 {
-		fmt.Fprintln(out, "no seats")
+		_, _ = fmt.Fprintln(out, "no seats")
 	} else {
-		fmt.Fprintln(out, "SEAT_ID\tROLE\tDRIVER\tMODEL\tSTATE\tPANE_ID")
+		_, _ = fmt.Fprintln(out, "SEAT_ID\tROLE\tDRIVER\tMODEL\tSTATE\tPANE_ID")
 		for _, s := range result.Seats {
 			state := s.Event
 			if s.Active {
@@ -413,11 +413,11 @@ func printStatusTable(cmd *cobra.Command, result org.StatusResult) {
 			if s.DryRun {
 				state += " [dry-run]"
 			}
-			fmt.Fprintf(out, "%s\t%s\t%s\t%s\t%s\t%s\n", s.SeatID, s.Role, s.Driver, s.Model, state, s.PaneID)
+			_, _ = fmt.Fprintf(out, "%s\t%s\t%s\t%s\t%s\t%s\n", s.SeatID, s.Role, s.Driver, s.Model, state, s.PaneID)
 		}
 	}
 	if result.CorruptLines > 0 {
-		fmt.Fprintf(out, "warning: %d corrupt manifest line(s) skipped\n", result.CorruptLines)
+		_, _ = fmt.Fprintf(out, "warning: %d corrupt manifest line(s) skipped\n", result.CorruptLines)
 	}
 }
 
@@ -437,9 +437,9 @@ func newOrgDisbandCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			}
 			result := rt.Disband(org.DisbandParams{OrgID: *orgID, DryRun: dryRun})
 			for _, seat := range result.StoppedSeats {
-				fmt.Fprintf(cmd.OutOrStdout(), "stopped seat %q\n", seat)
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "stopped seat %q\n", seat)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "disbanded org %q\n", *orgID)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "disbanded org %q\n", *orgID)
 			if len(result.Errs) > 0 {
 				return fmt.Errorf("org: disband encountered %d error(s), first: %w", len(result.Errs), result.Errs[0])
 			}
