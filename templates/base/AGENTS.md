@@ -58,6 +58,7 @@ task worktree and local branch while leaving the remote PR branch intact.
 - `internal/upgrade/` — hash-based diff engine, conflict resolution (auto-update, conflict, add, remove)
 - `internal/config/` — ralph.toml parser with defaults
 - `internal/state/` — pipeline state reader (checkpoint, orchestrator, manifest parsing)
+- `internal/org/` — org runtime mechanism layer: envelope validation, seat saga manifest, receipts, herdr/agmsg driver adapters (spec: docs/specs/2026-08-01-org-runtime.md)
 - `internal/insights/` — insight event/receipt readers, aggregation, and report backfill for `ralph insights`
 - `internal/watcher/` — fsnotify-based file watcher with polling fallback
 - `internal/ui/` — Bubble Tea model, layout, panes, keybindings, styles

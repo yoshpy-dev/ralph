@@ -62,6 +62,22 @@ RALPH_PROBE_MODEL="${RALPH_PROBE_MODEL:-haiku}"
 # the implement phase runs on this model instead of RALPH_IMPLEMENT_MODEL.
 RALPH_ESCALATION_MODEL="${RALPH_ESCALATION_MODEL:-opus}"
 
+# ═══════════════════════════════════════════════════════════════════
+# [org] envelope defaults — mirror internal/config/config.go OrgConfig
+# and templates/base/ralph.toml [org]. Must change in lock-step (see
+# .claude/rules/model-routing.md and defaults_sync_test.go). Config-only
+# in PR① of the org-runtime-mechanism plan — no `ralph org` verbs read
+# these shell vars yet; they exist here so the three surfaces agree.
+# ═══════════════════════════════════════════════════════════════════
+
+RALPH_ORG_DRIVER_POOL="${RALPH_ORG_DRIVER_POOL:-claude,codex}"
+RALPH_ORG_MODEL_POOL="${RALPH_ORG_MODEL_POOL:-claude:opus,claude:sonnet,claude:haiku}"
+RALPH_ORG_MAX_SEATS="${RALPH_ORG_MAX_SEATS:-5}"
+RALPH_ORG_SEAT_BUDGET_MINUTES="${RALPH_ORG_SEAT_BUDGET_MINUTES:-30}"
+RALPH_ORG_TOTAL_BUDGET_MINUTES="${RALPH_ORG_TOTAL_BUDGET_MINUTES:-120}"
+RALPH_ORG_MAX_FIX_ROUNDS="${RALPH_ORG_MAX_FIX_ROUNDS:-2}"
+RALPH_ORG_DEADMAN_MINUTES="${RALPH_ORG_DEADMAN_MINUTES:-10}"
+
 # Export so values reach grandchild processes (e.g. ralph-pipeline.sh
 # spawned from ralph-orchestrator.sh, or codex/claude invoked via xargs).
 # Without `export`, shell-local defaults set above would be invisible to
@@ -70,6 +86,9 @@ export RALPH_LOOP_DRIVER RALPH_CODEX_SANDBOX RALPH_CODEX_APPROVAL_POLICY RALPH_C
 export RALPH_FORCE_MODEL RALPH_IMPLEMENT_MODEL RALPH_SELF_REVIEW_MODEL
 export RALPH_VERIFY_MODEL RALPH_TEST_MODEL RALPH_SYNC_DOCS_MODEL RALPH_PR_MODEL
 export RALPH_PROBE_MODEL RALPH_ESCALATION_MODEL
+export RALPH_ORG_DRIVER_POOL RALPH_ORG_MODEL_POOL RALPH_ORG_MAX_SEATS
+export RALPH_ORG_SEAT_BUDGET_MINUTES RALPH_ORG_TOTAL_BUDGET_MINUTES
+export RALPH_ORG_MAX_FIX_ROUNDS RALPH_ORG_DEADMAN_MINUTES
 
 # ═══════════════════════════════════════════════════════════════════
 # Validation helpers
