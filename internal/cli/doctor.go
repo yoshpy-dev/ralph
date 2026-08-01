@@ -170,7 +170,7 @@ func probeBinary(bin string) (version string, err error) {
 	if runErr != nil {
 		return "", fmt.Errorf("%s --version failed: %w", bin, runErr)
 	}
-	for _, line := range strings.Split(string(out), "\n") {
+	for line := range strings.SplitSeq(string(out), "\n") {
 		if trimmed := strings.TrimSpace(line); trimmed != "" {
 			return trimmed, nil
 		}
