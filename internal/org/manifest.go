@@ -139,6 +139,14 @@ func Roster(events []ManifestEvent, opts RosterOptions) []SeatStatus {
 			}
 			continue
 		}
+		// Only STATE events drive seat status derivation (see seat.go
+		// stateEvents). A non-state event (e.g. `sent`) must never
+		// overwrite or clear a seat's latest derived status -- it is
+		// still fully readable via ManifestStore.Read for history, just
+		// not a candidate for "latest applicable event" here.
+		if !isStateEvent(ev.Event) {
+			continue
+		}
 		latest[seatKey{OrgID: ev.OrgID, SeatID: ev.SeatID}] = seatEntry{ev: ev, idx: i}
 	}
 

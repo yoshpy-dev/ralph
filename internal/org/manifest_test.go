@@ -149,17 +149,40 @@ func TestRoster_SpawnStartedAloneCountsAsActive(t *testing.T) {
 	}
 }
 
-func TestRoster_UnknownEventTypeTolerated(t *testing.T) {
+func TestRoster_UnknownEventTypeIgnoredForActivity(t *testing.T) {
+	// A non-state event (unknown, or a known-but-non-state type such as
+	// `sent`) must not overwrite or clear a seat's derived status -- only
+	// STATE events (see seat.go stateEvents) participate in "latest
+	// applicable event" derivation. Here the seat's real state is `spawned`
+	// (active); a later unknown event must leave that untouched.
 	events := []ManifestEvent{
-		{TS: "2026-08-01T00:00:00Z", OrgID: "org-a", SeatID: "seat-1", Event: "some_future_event_v2"},
+		{TS: "2026-08-01T00:00:00Z", OrgID: "org-a", SeatID: "seat-1", Event: EventSpawned},
+		{TS: "2026-08-01T00:00:01Z", OrgID: "org-a", SeatID: "seat-1", Event: "some_future_event_v2"},
 	}
 
 	roster := Roster(events, RosterOptions{})
 	if len(roster) != 1 {
 		t.Fatalf("expected roster derivation to tolerate unknown event type, got %d seats", len(roster))
 	}
-	if roster[0].Active {
-		t.Fatalf("expected unknown event type to be treated as inactive (not in activeEvents), got active")
+	if !roster[0].Active {
+		t.Fatalf("expected seat activity to remain unaffected by a non-state event, got inactive")
+	}
+	if roster[0].Event != EventSpawned {
+		t.Fatalf("expected latest STATE event to remain %q, got %q", EventSpawned, roster[0].Event)
+	}
+}
+
+func TestRoster_UnknownEventTypeAloneProducesNoSeat(t *testing.T) {
+	// If a seat has never had a STATE event, a non-state event alone must
+	// not create a roster entry for it -- ignored for activity means
+	// ignored entirely from the "latest applicable event" pointer.
+	events := []ManifestEvent{
+		{TS: "2026-08-01T00:00:00Z", OrgID: "org-a", SeatID: "seat-1", Event: "some_future_event_v2"},
+	}
+
+	roster := Roster(events, RosterOptions{})
+	if len(roster) != 0 {
+		t.Fatalf("expected no roster entry for a seat with only non-state events, got %d", len(roster))
 	}
 }
 
