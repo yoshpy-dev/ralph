@@ -185,7 +185,7 @@ func TestManifestStore_ConcurrentAppendsAllLinesIntact(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(n)
 	errCh := make(chan error, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		go func(i int) {
 			defer wg.Done()
 			ev := ManifestEvent{

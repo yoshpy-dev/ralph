@@ -2,6 +2,7 @@ package org
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/yoshpy-dev/ralph/internal/config"
 )
@@ -42,12 +43,7 @@ func ValidateSpawn(cfg config.OrgConfig, req SpawnRequest, activeSeats int) erro
 }
 
 func driverInPool(cfg config.OrgConfig, driver string) bool {
-	for _, d := range cfg.DriverPool {
-		if d == driver {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(cfg.DriverPool, driver)
 }
 
 func modelInPool(cfg config.OrgConfig, driver, model string) bool {
@@ -72,10 +68,5 @@ func modelAllowedForRole(cfg config.OrgConfig, role, model string) bool {
 	if !ok || len(allowed) == 0 {
 		return true
 	}
-	for _, m := range allowed {
-		if m == model {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(allowed, model)
 }

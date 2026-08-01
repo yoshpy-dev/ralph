@@ -211,7 +211,7 @@ func (s *ManifestStore) ActiveSeatCount(orgID string, opts RosterOptions) (int, 
 
 // appendJSONLine appends v as a single JSON line to the file at path,
 // creating parent directories and the file as needed.
-func appendJSONLine(path string, v interface{}) error {
+func appendJSONLine(path string, v any) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("org: create dir for %s: %w", path, err)
 	}
