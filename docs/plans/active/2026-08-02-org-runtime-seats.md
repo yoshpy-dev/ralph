@@ -116,10 +116,12 @@ org runtime PR②: 座席を実際に動かせるようにする。agmsg アダ�
 
 ## Open questions
 
-- 座席の delivery mode を spawn 時に明示設定するか(`delivery.sh set`)— 実機スモークで既定挙動を観察して判断し、plan に追記。
-- protocol バリデータの本文サイズ上限の初期値(仮: 2,000 文字。EVIDENCE はポインタ原則のため十分)— 実機スモークで調整。
+(いずれも解決済み・または PR③ 送り)
 
-(解決済み: lead identity 登録は Codex 所見 1 により `ensureLeadJoined` として saga に組み込み。lead の agmsg type は `claude-code`、project_path はリポジトリルート。)
+- ~~座席の delivery mode の明示設定~~ → 実機スモークでは agmsg 既定(claude-code=monitor)で問題なし。明示設定は不要と判断、`DeliverySet` はアダプタに実装済みで将来必要時に配線。
+- ~~protocol 本文サイズ上限~~ → 2,000 文字で確定(スモークで支障なし)。
+- ~~lead identity 登録~~ → `ensureLeadJoined` として saga に組み込み(Codex 所見 1)。
+- **PR③ への送り(実機スモークの発見)**: 座席は初回ツール使用時に権限確認ダイアログで blocked になる(スモークで実測: reviewer 座席が `git diff` 実行時に確認待ち)。座席起動時の permission-mode / allowlist をエンベロープから設定できる仕組みが PR③(Lead 編成)で必要。herdr の blocked 検知はこの状態を正しく捕捉することも同時に確認済み。
 
 ## Implementation notes (deviations)
 
@@ -133,9 +135,11 @@ org runtime PR②: 座席を実際に動かせるようにする。agmsg アダ�
 
 ## Progress checklist
 
-- [ ] Plan reviewed
+- [x] Plan reviewed
 - [x] Branch created (feat/org-runtime-seats)
-- [ ] Implementation started
+- [x] Implementation started
+- [x] Implementation complete (Slice 1: 67220ef / Slice 2: 80e8f19+71511ea / Slice 3: 4ca8d48+fca45be / Slice 4: 8e9f4fe / Slice 5 実機スモーク起因の fix 群: 376a9ca, e043fde, 1d1825b+c5b8d6c, cd1452d)
+- [x] AC-8 実機スモーク完了(attempt 5 で全ライフサイクル成功。証拠: docs/evidence/org-seats-smoke-2026-08-02.txt)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
