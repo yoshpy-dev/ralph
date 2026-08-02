@@ -74,11 +74,11 @@ func runStatus(cmd *cobra.Command, stateDir, filterOrgID string, jsonOut bool) e
 	groups := groupSeatsByOrg(seats)
 
 	if len(groups) == 0 {
-		return printStatusEmpty(cmd, stateDir, filterOrgID, jsonOut)
+		return printStatusEmpty(cmd, stateDir, filterOrgID, jsonOut, rr.CorruptLines)
 	}
 
 	if jsonOut {
-		return printStatusJSONAllOrgs(cmd, stateDir, groups, rr.CorruptLines)
+		return printStatusJSONAllOrgs(cmd, stateDir, filterOrgID, groups, rr.CorruptLines)
 	}
 	printStatusTableAllOrgs(cmd, stateDir, groups, rr.CorruptLines)
 	return nil
@@ -128,22 +128,27 @@ func readOrgWatchHeartbeat(stateDir, orgID string) (heartbeat orgWatchHeartbeat,
 	return heartbeat, true
 }
 
-func printStatusEmpty(cmd *cobra.Command, stateDir, filterOrgID string, jsonOut bool) error {
+func printStatusEmpty(cmd *cobra.Command, stateDir, filterOrgID string, jsonOut bool, corruptLines int) error {
 	out := cmd.OutOrStdout()
 	if jsonOut {
-		payload := struct {
-			StateDir string `json:"state_dir"`
-			OrgID    string `json:"org_id,omitempty"`
-			Orgs     []any  `json:"orgs"`
-		}{StateDir: stateDir, OrgID: filterOrgID, Orgs: []any{}}
+		payload := statusJSON{StateDir: stateDir, OrgID: filterOrgID, Orgs: []statusOrgJSON{}, CorruptLines: corruptLines}
 		enc := json.NewEncoder(out)
 		enc.SetIndent("", "  ")
 		return enc.Encode(payload)
 	}
+	// An empty roster does not mean "nothing to report": a manifest whose
+	// every line failed to parse also yields zero groups, and that is a
+	// data-integrity signal the operator needs, not silence (see
+	// printStatusTableAllOrgs's identical warning for the non-empty path,
+	// and `ralph org status`'s corrupt-count warning in org.go, which is
+	// likewise unconditional on seat count).
 	if filterOrgID != "" {
-		_, _ = fmt.Fprintf(out, "org runtime state が見つかりません(org-id=%s, state-dir=%s)。ralph org spawn で開始してください。\n", filterOrgID, stateDir)
+		_, _ = fmt.Fprintf(out, "no org runtime state found (org-id=%s, state-dir=%s) — run `ralph org spawn` to start one.\n", filterOrgID, stateDir)
 	} else {
-		_, _ = fmt.Fprintf(out, "org runtime state が見つかりません(state-dir=%s)。ralph org spawn で開始してください。\n", stateDir)
+		_, _ = fmt.Fprintf(out, "no org runtime state found (state-dir=%s) — run `ralph org spawn` to start one.\n", stateDir)
+	}
+	if corruptLines > 0 {
+		_, _ = fmt.Fprintf(out, "warning: %d corrupt manifest line(s) skipped\n", corruptLines)
 	}
 	_, _ = fmt.Fprintln(out, "Run `ralph doctor` to check environment readiness.")
 	return nil
@@ -181,16 +186,26 @@ type statusOrgJSON struct {
 	Watch       *statusWatchJSON `json:"watch,omitempty"`
 }
 
-func printStatusJSONAllOrgs(cmd *cobra.Command, stateDir string, groups []orgGroup, corruptLines int) error {
+// statusJSON is the single `ralph status --json` wire shape, used by both
+// the empty-roster path (printStatusEmpty) and the populated path
+// (printStatusJSONAllOrgs). Keeping one struct for both means a machine
+// consumer never has to branch on which shape it received: `org_id` is only
+// present when --org-id filtered the roster, `corrupt_lines` only when the
+// manifest actually had corrupt lines, and `orgs` is always an array (empty
+// or populated).
+type statusJSON struct {
+	StateDir     string          `json:"state_dir"`
+	OrgID        string          `json:"org_id,omitempty"`
+	Orgs         []statusOrgJSON `json:"orgs"`
+	CorruptLines int             `json:"corrupt_lines,omitempty"`
+}
+
+func printStatusJSONAllOrgs(cmd *cobra.Command, stateDir, filterOrgID string, groups []orgGroup, corruptLines int) error {
 	orgsJSON := make([]statusOrgJSON, 0, len(groups))
 	for _, g := range groups {
 		orgsJSON = append(orgsJSON, buildStatusOrgJSON(stateDir, g))
 	}
-	payload := struct {
-		StateDir     string          `json:"state_dir"`
-		Orgs         []statusOrgJSON `json:"orgs"`
-		CorruptLines int             `json:"corrupt_lines,omitempty"`
-	}{StateDir: stateDir, Orgs: orgsJSON, CorruptLines: corruptLines}
+	payload := statusJSON{StateDir: stateDir, OrgID: filterOrgID, Orgs: orgsJSON, CorruptLines: corruptLines}
 	enc := json.NewEncoder(cmd.OutOrStdout())
 	enc.SetIndent("", "  ")
 	return enc.Encode(payload)

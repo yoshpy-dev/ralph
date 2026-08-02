@@ -91,7 +91,5 @@ selection rules.
 ## Where the values live
 
 - `.claude/agents/*.md` — pipeline subagent tiers (frontmatter `model:`)
-- `scripts/ralph-config.sh` — effective Ralph defaults (`RALPH_MODEL`,
-  `RALPH_EFFORT`, `RALPH_CLAUDE_REVIEWER_MODEL`, `RALPH_STANDARD_MAX_PIPELINE_CYCLES`);
-  shell wrappers do not read `ralph.toml`, so keep both in sync when changing defaults
-- `ralph.toml` — declarative mirror of the same values for the ralph CLI
+- `scripts/ralph-config.sh` — effective Ralph defaults (`RALPH_CLAUDE_REVIEWER_MODEL`,
+  `RALPH_STANDARD_MAX_PIPELINE_CYCLES`)

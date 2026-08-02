@@ -93,14 +93,94 @@ func TestStatusCmd_EmptyStateDirShowsFriendlyNoteAndDoctorHint(t *testing.T) {
 		t.Fatalf("status: %v (output: %s)", err, out)
 	}
 
-	if !strings.Contains(out, "org runtime state が見つかりません") {
-		t.Errorf("expected empty-state Japanese note, got:\n%s", out)
+	if !strings.Contains(out, "no org runtime state found") {
+		t.Errorf("expected empty-state note in English (matching the rest of the CLI's output), got:\n%s", out)
 	}
 	if !strings.Contains(out, "ralph org spawn") {
 		t.Errorf("expected a hint to run `ralph org spawn`, got:\n%s", out)
 	}
 	if !strings.Contains(out, "ralph doctor") {
 		t.Errorf("expected a doctor hint, got:\n%s", out)
+	}
+}
+
+// TestStatusCmd_EmptyRosterFromFullyCorruptManifestStillWarns seeds a
+// manifest containing only corrupt lines (so Roster derives zero seats,
+// exercising the same len(groups)==0 path as the "nothing has ever run"
+// case) and asserts the corrupt-line warning still surfaces -- a
+// fully-corrupt manifest is a data-integrity signal, not "nothing here yet"
+// (M5: printStatusEmpty must not silently discard rr.CorruptLines).
+func TestStatusCmd_EmptyRosterFromFullyCorruptManifestStillWarns(t *testing.T) {
+	dir := t.TempDir()
+	store := org.NewManifestStore(dir)
+	if err := os.MkdirAll(filepath.Dir(store.Path()), 0o755); err != nil {
+		t.Fatalf("mkdir manifest dir: %v", err)
+	}
+	if err := os.WriteFile(store.Path(), []byte("{not valid json\nalso not valid\n"), 0o644); err != nil {
+		t.Fatalf("seed fully-corrupt manifest: %v", err)
+	}
+
+	out, err := runStatusCmd(t, "--state-dir", dir)
+	if err != nil {
+		t.Fatalf("status: %v (output: %s)", err, out)
+	}
+
+	if !strings.Contains(out, "no org runtime state found") {
+		t.Errorf("expected the empty-state note, got:\n%s", out)
+	}
+	if !strings.Contains(out, "2 corrupt manifest line") {
+		t.Errorf("expected a corrupt-line warning even with zero roster seats, got:\n%s", out)
+	}
+}
+
+// TestStatusCmd_JSONSchemaIsIdenticalEmptyVsPopulated asserts `ralph status
+// --json` never requires a consumer to branch on which shape it received:
+// the empty-roster path must carry the same `orgs` (empty array, not
+// omitted) and `corrupt_lines` (present when nonzero) fields the populated
+// path does (M6: unify the --json schema across both paths).
+func TestStatusCmd_JSONSchemaIsIdenticalEmptyVsPopulated(t *testing.T) {
+	type payload struct {
+		StateDir     string `json:"state_dir"`
+		OrgID        string `json:"org_id,omitempty"`
+		Orgs         []any  `json:"orgs"`
+		CorruptLines int    `json:"corrupt_lines,omitempty"`
+	}
+
+	emptyDir := t.TempDir()
+	emptyOut, err := runStatusCmd(t, "--state-dir", emptyDir, "--json")
+	if err != nil {
+		t.Fatalf("status (empty): %v (output: %s)", err, emptyOut)
+	}
+	var emptyPayload payload
+	if err := json.Unmarshal([]byte(emptyOut), &emptyPayload); err != nil {
+		t.Fatalf("json.Unmarshal (empty): %v\noutput:\n%s", err, emptyOut)
+	}
+	if emptyPayload.Orgs == nil {
+		t.Errorf("empty-path JSON must carry `orgs: []`, not an omitted/null field:\n%s", emptyOut)
+	}
+
+	populatedDir := t.TempDir()
+	seedTwoOrgManifest(t, populatedDir)
+	populatedOut, err := runStatusCmd(t, "--state-dir", populatedDir, "--json")
+	if err != nil {
+		t.Fatalf("status (populated): %v (output: %s)", err, populatedOut)
+	}
+	var populatedPayload payload
+	if err := json.Unmarshal([]byte(populatedOut), &populatedPayload); err != nil {
+		t.Fatalf("json.Unmarshal (populated): %v\noutput:\n%s", err, populatedOut)
+	}
+	if len(populatedPayload.Orgs) != 2 {
+		t.Fatalf("populated-path orgs = %d, want 2:\n%s", len(populatedPayload.Orgs), populatedOut)
+	}
+
+	// Both payloads decode into the same schema with no divergent fields
+	// (verified above by sharing the `payload` struct for both Unmarshal
+	// calls); additionally confirm state_dir is present in both.
+	if emptyPayload.StateDir == "" {
+		t.Errorf("empty-path JSON missing state_dir:\n%s", emptyOut)
+	}
+	if populatedPayload.StateDir == "" {
+		t.Errorf("populated-path JSON missing state_dir:\n%s", populatedOut)
 	}
 }
 

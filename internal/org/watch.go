@@ -1021,8 +1021,9 @@ func filterLeadHistoryLines(raw string) string {
 // The probe-based sources (#2 leadProbeSnapshot, #3 historyLeadLineCount)
 // only count as activity when the ALERT-time baseline itself was a valid,
 // comparable snapshot -- not the "probe was unavailable" sentinel
-// (LeadAgentGet == "" / HistoryLeadLines == -1, per each field's own doc
-// comment). Without that guard, an alert recorded while a probe was down
+// (LeadAgentGet == "" / HistoryLeadLines == -1, per leadProbeSnapshot's and
+// historyLeadLineCount's own doc comments, the producers of these values).
+// Without that guard, an alert recorded while a probe was down
 // (baseline collapses to the sentinel) would false-clear the moment the
 // probe merely recovers on a later cycle: cur != "" is trivially true
 // against a "" baseline even though nothing about lead's behavior actually

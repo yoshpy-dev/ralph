@@ -8,8 +8,10 @@
 # RALPH_*_MODEL, RALPH_MAX_* iteration caps) went with it. The two survivors
 # below still have a live consumer:
 # /cross-review (.claude/skills/cross-review/SKILL.md), which sources this
-# file (or reads the exported env) for the standard-flow pipeline cycle cap
-# and the claude-as-reviewer model fallback.
+# file for the standard-flow pipeline cycle cap (RALPH_STANDARD_MAX_PIPELINE_CYCLES
+# is deliberately not exported below -- only sourcing this file picks it up)
+# and reads the claude-as-reviewer model fallback either way (RALPH_CLAUDE_REVIEWER_MODEL
+# is exported, so setting it directly in the environment also works).
 #
 # Priority: environment variable > default value
 #

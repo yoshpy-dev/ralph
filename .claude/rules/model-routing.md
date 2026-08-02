@@ -92,8 +92,6 @@ selection rules.
 ## Where the values live
 
 - `.claude/agents/*.md` — pipeline subagent tiers (frontmatter `model:`)
-- `scripts/ralph-config.sh` — effective Ralph defaults (`RALPH_MODEL`,
-  `RALPH_EFFORT`, `RALPH_CLAUDE_REVIEWER_MODEL`, `RALPH_STANDARD_MAX_PIPELINE_CYCLES`)
-- `ralph.toml` / `templates/base/ralph.toml` — declarative mirror of `RALPH_MODEL`/`RALPH_EFFORT`
-- `internal/config/config.go` `Default()` — Go CLI defaults (this repo only; not scaffolded downstream)
-- `internal/config/defaults_sync_test.go` — tripwire that fails if the three surfaces above drift; also asserts the cross-review SKILL.md reviewer-model fallback matches `RALPH_CLAUDE_REVIEWER_MODEL` in ralph-config.sh
+- `scripts/ralph-config.sh` — effective Ralph defaults (`RALPH_CLAUDE_REVIEWER_MODEL`,
+  `RALPH_STANDARD_MAX_PIPELINE_CYCLES`)
+- `internal/config/defaults_sync_test.go` — asserts the cross-review SKILL.md reviewer-model fallback matches `RALPH_CLAUDE_REVIEWER_MODEL` in ralph-config.sh

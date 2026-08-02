@@ -113,8 +113,7 @@ type WatcherVerdict struct {
 }
 
 // claudeEnvelope is the `claude -p --output-format json` sidecar shape
-// documented in scripts/ralph-cli-driver.sh ({"result": "...", "session_id":
-// "..."}). Model is populated only if the installed claude version happens
+// ({"result": "...", "session_id": "..."}). Model is populated only if the installed claude version happens
 // to report it -- not a documented contract this repo depends on anywhere
 // else -- so RunWatcher treats its presence defensively: an empty Model is
 // HonoredUnknown (no observation at all), a Model equal to cfg.WatcherModel
@@ -223,8 +222,8 @@ func watcherPrompt(p WatcherParams, paneTail string, events []ManifestEvent) str
 }
 
 // realClaudeInvoke runs `claude -p --model <model> --output-format json`
-// with prompt piped to stdin (mirroring scripts/ralph-cli-driver.sh's
-// _run_agent_claude), returning trimmed stdout. This shells out directly
+// with prompt piped to stdin (the same invocation style the retired Ralph
+// Loop pipeline used), returning trimmed stdout. This shells out directly
 // (exec.CommandContext) rather than through an injectable interface field --
 // RunWatcher's signature is fixed by the plan with no runner parameter --
 // following the same established in-package pattern as watch.go's
