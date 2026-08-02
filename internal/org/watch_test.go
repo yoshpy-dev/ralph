@@ -429,6 +429,79 @@ func TestWatch_TotalBudgetCutoff_CutsAllActiveSeats_OneOrgLevelAlert(t *testing.
 	}
 }
 
+// TestWatch_TotalBudgetCutoff_NoActiveSeats_NoAlertNoEscalation_ThenCutsNewSeat
+// pins the cross-review AR-2 fix: an org that has already aged past its
+// total wall-clock budget but currently has zero active seats (e.g. every
+// seat was already stopped, by a prior cutoff or normal completion) must
+// produce no total-budget ALERT and register no AC-5 pending-alert deadman
+// record -- there is nothing to cut off, so an ALERT would be a false
+// positive, repeating every cycle forever. Once a new seat becomes active in
+// that same, still-over-budget org, total-budget enforcement resumes
+// normally.
+func TestWatch_TotalBudgetCutoff_NoActiveSeats_NoAlertNoEscalation_ThenCutsNewSeat(t *testing.T) {
+	o, _, a, clk := testWatchOrg(t)
+	o.Config.Budget.TotalWallClockMinutes = 5
+	o.Config.Budget.SeatWallClockMinutes = 1000 // avoid seat-level cutoff firing first
+	o.Config.DeadmanMinutes = 5
+
+	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn seat-1 failed: %+v", r)
+	}
+	if r := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-1", Reason: "test setup: leave the org with zero active seats"}); r.Err != nil {
+		t.Fatalf("stop seat-1: %v", r.Err)
+	}
+
+	run, statusPath, escalationsPath := newTestWatchRun(o, nil, nil, &bytes.Buffer{})
+	status, err := loadWatchStatus(statusPath, "org-a")
+	if err != nil {
+		t.Fatalf("loadWatchStatus: %v", err)
+	}
+
+	// org_start (seat-1's spawn) + ~10m > 5m total budget, but zero active
+	// seats -- must not ALERT.
+	clk.Advance(10 * time.Minute)
+	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		t.Fatalf("cycle 1: %v", err)
+	}
+	if n := len(watchdogAlerts(a)); n != 0 {
+		t.Fatalf("expected no total-budget ALERT for an org with zero active seats, got %d: %+v", n, watchdogAlerts(a))
+	}
+	if len(status.PendingAlerts) != 0 {
+		t.Errorf("expected no pending deadman record for an org with zero active seats, got %+v", status.PendingAlerts)
+	}
+
+	// A second cycle, past DeadmanMinutes too (proving no pending alert was
+	// ever registered to escalate): still no ALERT, no escalation.
+	clk.Advance(6 * time.Minute)
+	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		t.Fatalf("cycle 2: %v", err)
+	}
+	if n := len(watchdogAlerts(a)); n != 0 {
+		t.Fatalf("expected still no ALERT after a second cycle with zero active seats, got %d", n)
+	}
+	assertNoEscalations(t, escalationsPath)
+
+	// A new active seat appears in the same, still-over-budget org: the
+	// zero-active-seats guard must not silently disable enforcement once a
+	// seat becomes active again -- the org is cut.
+	if r := o.Spawn(watchSpawnParams("org-a", "seat-2", "worker")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn seat-2 failed: %+v", r)
+	}
+	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		t.Fatalf("cycle 3 (seat-2 active): %v", err)
+	}
+	st, err := o.Status("org-a", false)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if findSeatStatus(t, st.Seats, "seat-2").Active {
+		t.Fatalf("expected seat-2 to be cut off by the still-exceeded total budget once it is the org's only active seat")
+	}
+	if n := len(watchdogAlerts(a)); n != 1 {
+		t.Fatalf("expected exactly 1 total-budget ALERT once an active seat exists, got %d: %+v", n, watchdogAlerts(a))
+	}
+}
+
 // --- AC-4: heartbeat stall (ALERT, no cutoff, recovers, re-fires) ----------
 
 func TestWatch_Stall_AlertsNoCutoff_RecoversAndRefires(t *testing.T) {
@@ -959,6 +1032,63 @@ func TestWatch_Deadman_WatchdogsOwnCutoffEvent_DoesNotClearPendingAlert(t *testi
 	lines := readJSONLFile(t, escalationsPath)
 	if len(lines) != 1 {
 		t.Fatalf("expected the pending alert to still escalate (the watchdog's own cutoff of seat-2 must not count as lead activity), got %d escalation(s): %v", len(lines), lines)
+	}
+}
+
+// TestWatch_Deadman_CrossOrgActivity_DoesNotClearPendingAlert pins the
+// cross-review AR-1 fix: leadActivityEventCount must be scoped to the
+// watched org. A shared manifest store (RunWatch's normal shape: one
+// manifest.jsonl for every org in the harness) means an unrelated org's own
+// genuine activity must never clear a different, stalled org's pending
+// deadman alert -- only activity recorded under the watched org's own OrgID
+// may do so.
+func TestWatch_Deadman_CrossOrgActivity_DoesNotClearPendingAlert(t *testing.T) {
+	o, h, _, clk := testWatchOrg(t)
+	o.Config.DeadmanMinutes = 5
+	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn seat-1 failed: %+v", r)
+	}
+	target := herdrAgentName("org-a", "seat-1")
+	h.AgentGetErrSeq[target] = []error{errors.New("herdr: agent not found")} // sticky liveness ALERT for org-a/seat-1
+
+	run, statusPath, escalationsPath := newTestWatchRun(o, nil, nil, &bytes.Buffer{})
+	status, err := loadWatchStatus(statusPath, "org-a")
+	if err != nil {
+		t.Fatalf("loadWatchStatus: %v", err)
+	}
+
+	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		t.Fatalf("cycle 1 (raises org-a's liveness ALERT): %v", err)
+	}
+	if len(status.PendingAlerts) != 1 {
+		t.Fatalf("expected exactly 1 pending alert after cycle 1, got %+v", status.PendingAlerts)
+	}
+
+	// A new event in a DIFFERENT org, sharing the same manifest store, must
+	// not count as activity for org-a's pending alert.
+	if err := o.Manifest.Append(ManifestEvent{TS: clk.Now().UTC().Format(time.RFC3339), OrgID: "org-b", SeatID: "seat-9", Event: EventSent, Details: "org-b genuine activity"}); err != nil {
+		t.Fatalf("append org-b activity event: %v", err)
+	}
+	clk.Advance(1 * time.Minute) // still within DeadmanMinutes
+	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		t.Fatalf("cycle 2 (org-b activity must not clear org-a's pending alert): %v", err)
+	}
+	if len(status.PendingAlerts) != 1 {
+		t.Fatalf("expected org-a's pending alert to remain after unrelated org-b activity, got %+v", status.PendingAlerts)
+	}
+	assertNoEscalations(t, escalationsPath)
+
+	// A lead-authored event recorded IN org-a itself DOES clear it.
+	if err := o.Manifest.Append(ManifestEvent{TS: clk.Now().UTC().Format(time.RFC3339), OrgID: "org-a", SeatID: LeadIdentity, Event: EventSent, Details: "lead activity"}); err != nil {
+		t.Fatalf("append org-a lead-activity event: %v", err)
+	}
+	clk.Advance(1 * time.Minute)
+	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		t.Fatalf("cycle 3 (org-a's own lead activity clears the pending alert): %v", err)
+	}
+	assertNoEscalations(t, escalationsPath)
+	if len(status.PendingAlerts) != 0 {
+		t.Errorf("expected the pending alert to clear after org-a's own lead activity, got %+v", status.PendingAlerts)
 	}
 }
 

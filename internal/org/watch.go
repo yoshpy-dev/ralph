@@ -521,6 +521,15 @@ func (w *watchRun) evaluateTotalBudget(ctx context.Context, status *watchStatusF
 	if status.OrgStartTS == "" || w.cfg.Budget.TotalWallClockMinutes <= 0 {
 		return
 	}
+	if len(activeSeats) == 0 {
+		// Cross-review AR-2: no active seats means nothing to cut off. Without
+		// this guard, a re-watched org whose seats were all already stopped
+		// (e.g. by a prior cutoff, or normal completion) would still send a
+		// spurious total-budget ALERT and register an AC-5 pending-alert
+		// deadman record every cycle, since observed > budget stays true
+		// forever once the org has aged past it.
+		return
+	}
 	start, err := time.Parse(time.RFC3339, status.OrgStartTS)
 	if err != nil {
 		return
@@ -761,24 +770,30 @@ func (w *watchRun) sendAlert(ctx context.Context, status *watchStatusFile, orgID
 		AlertID:      alertID,
 		TS:           now.UTC().Format(time.RFC3339),
 		Subject:      seatID,
-		ManifestLen:  leadActivityEventCount(rr.Events),
+		ManifestLen:  leadActivityEventCount(rr.Events, orgID),
 		LeadAgentGet: w.leadProbeSnapshot(ctx, orgID),
 		History:      w.historySnapshot(ctx, orgID),
 	}
 }
 
-// leadActivityEventCount counts manifest events that are not the watchdog's
-// own cutoff writes (self-review M-4 fix): every `stopped` event a budget
-// cutoff produces carries "reason=watchdog_..." in its Details (see
-// evaluateTotalBudget/evaluateSeatBudget's Reason format), so without this
-// filter the deadman's "has anything happened since the ALERT" manifest-
-// growth source counted the watchdog's own later cutoff of an unrelated
-// seat (or, before the H-1 fix, another org's activity in a shared manifest)
-// as if it were genuine lead/seat activity -- clearing a pending alert that
-// nothing had actually responded to.
-func leadActivityEventCount(events []ManifestEvent) int {
+// leadActivityEventCount counts manifest events for orgID that are not the
+// watchdog's own cutoff writes (self-review M-4 fix, org-scoped per
+// cross-review AR-1): every `stopped` event a budget cutoff produces carries
+// "reason=watchdog_..." in its Details (see evaluateTotalBudget/
+// evaluateSeatBudget's Reason format), so without the watchdog-event filter
+// the deadman's "has anything happened since the ALERT" manifest-growth
+// source counted the watchdog's own later cutoff of an unrelated seat as if
+// it were genuine lead/seat activity -- clearing a pending alert that
+// nothing had actually responded to. The orgID filter additionally excludes
+// another org's activity in the same shared manifest: without it, a new
+// event in a different, active org would clear a stalled org's pending
+// deadman alert even though nothing happened in the stalled org itself.
+func leadActivityEventCount(events []ManifestEvent, orgID string) int {
 	n := 0
 	for _, ev := range events {
+		if ev.OrgID != orgID {
+			continue
+		}
 		if strings.Contains(ev.Details, "reason=watchdog_") {
 			continue
 		}
@@ -831,7 +846,7 @@ func (w *watchRun) checkDeadman(ctx context.Context, status *watchStatusFile, rr
 			continue
 		}
 
-		activity := leadActivityEventCount(rr.Events) > pending.ManifestLen
+		activity := leadActivityEventCount(rr.Events, status.OrgID) > pending.ManifestLen
 		if !activity {
 			if cur := w.leadProbeSnapshot(ctx, status.OrgID); cur != "" && cur != pending.LeadAgentGet {
 				activity = true
