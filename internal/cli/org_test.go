@@ -67,6 +67,37 @@ echo ""
 exit 0
 `
 
+// agmsgJoinStub is the fake `scripts/join.sh` -- driver.Agmsg shells out to
+// `bash <home>/scripts/join.sh TEAM AGENT_ID TYPE PROJECT_PATH`. Honors
+// ORG_STUB_FAIL=agmsg:join so tests can inject a failure at either the
+// ensureLeadJoined (agent_id "lead") or seat Join call.
+const agmsgJoinStub = `#!/bin/sh
+if [ -n "$ORG_AGMSG_LOG" ]; then
+  echo "$@" >> "$ORG_AGMSG_LOG"
+fi
+if [ "$ORG_STUB_FAIL" = "agmsg:join" ]; then
+  echo "stub failure: agmsg join" >&2
+  exit 1
+fi
+echo ""
+exit 0
+`
+
+// agmsgDespawnStub is the fake `scripts/despawn.sh` -- driver.Agmsg shells
+// out to `bash <home>/scripts/despawn.sh TEAM FROM NAME`. Honors
+// ORG_STUB_FAIL=agmsg:despawn.
+const agmsgDespawnStub = `#!/bin/sh
+if [ -n "$ORG_AGMSG_LOG" ]; then
+  echo "$@" >> "$ORG_AGMSG_LOG"
+fi
+if [ "$ORG_STUB_FAIL" = "agmsg:despawn" ]; then
+  echo "stub failure: agmsg despawn" >&2
+  exit 1
+fi
+echo ""
+exit 0
+`
+
 // agmsgVersionStub is the plain-text VERSION marker AgmsgAvailable/
 // AgmsgVersion read from an agmsg home directory.
 const agmsgVersionStub = "1.1.13\n"
@@ -91,6 +122,8 @@ func setupOrgStubPATH(t *testing.T) (herdrLog, agmsgLog string) {
 		t.Fatalf("mkdir agmsg scripts dir: %v", err)
 	}
 	writeStubScript(t, filepath.Join(agmsgHome, "scripts", "send.sh"), agmsgSendStub)
+	writeStubScript(t, filepath.Join(agmsgHome, "scripts", "join.sh"), agmsgJoinStub)
+	writeStubScript(t, filepath.Join(agmsgHome, "scripts", "despawn.sh"), agmsgDespawnStub)
 	if err := os.WriteFile(filepath.Join(agmsgHome, "VERSION"), []byte(agmsgVersionStub), 0o644); err != nil {
 		t.Fatalf("write agmsg VERSION: %v", err)
 	}
@@ -214,7 +247,9 @@ func TestOrgSpawn_HappyPath_EventSequenceReceiptAndWorkspaceReuse(t *testing.T) 
 
 	manifestPath := filepath.Join(stateDir, "manifest.jsonl")
 	events := readManifestEvents(t, manifestPath)
-	want := []string{"spawn_started", "org_workspace_created", "spawn_step", "spawn_step", "spawn_step", "spawned"}
+	// spawn_step x5: tab_created, agent_started, agmsg_lead_joined,
+	// agmsg_joined, agmsg_announced.
+	want := []string{"spawn_started", "org_workspace_created", "spawn_step", "spawn_step", "spawn_step", "spawn_step", "spawn_step", "spawned"}
 	if got := eventTypes(events); !equalStrings(got, want) {
 		t.Fatalf("expected event sequence %v, got %v", want, got)
 	}
@@ -251,10 +286,12 @@ func TestOrgSpawn_HappyPath_EventSequenceReceiptAndWorkspaceReuse(t *testing.T) 
 	// Each agmsg invocation's HELLO message body itself contains newlines,
 	// so raw line count isn't the invocation count -- count by the
 	// "ralph-<org_id>" team-name prefix (agmsgTeam's convention) that
-	// starts every send.sh call's argv instead.
+	// starts every join.sh/send.sh call's argv instead. Per seat spawn: one
+	// ensureLeadJoined join.sh call, one seat join.sh call, one send.sh
+	// HELLO call -- 3 invocations x 2 seats = 6.
 	agmsgLines := readLogLines(t, agmsgLog)
-	if n := countLinesWithPrefix(agmsgLines, "ralph-org-a"); n != 2 {
-		t.Fatalf("expected 2 agmsg invocations (one HELLO per seat), got %d (log: %v)", n, agmsgLines)
+	if n := countLinesWithPrefix(agmsgLines, "ralph-org-a"); n != 6 {
+		t.Fatalf("expected 6 agmsg invocations (join lead + join seat + send HELLO, per seat), got %d (log: %v)", n, agmsgLines)
 	}
 }
 
@@ -351,6 +388,43 @@ func TestOrgSpawn_FailureInjection_AgmsgSend_CompensatesPane(t *testing.T) {
 	herdrLines := readLogLines(t, herdrLog)
 	if n := countLinesWithPrefix(herdrLines, "pane send-keys"); n != 1 {
 		t.Fatalf("expected exactly 1 compensation send-keys call, got %d (log: %v)", n, herdrLines)
+	}
+}
+
+func TestOrgSpawn_FailureInjection_AgmsgJoin_CompensatesPane(t *testing.T) {
+	herdrLog, agmsgLog := setupOrgStubPATH(t)
+	t.Setenv("ORG_STUB_FAIL", "agmsg:join")
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	out, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--state-dir", stateDir,
+	)
+	if err == nil {
+		t.Fatalf("expected non-zero exit on agmsg join failure, output: %s", out)
+	}
+
+	events := readManifestEvents(t, filepath.Join(stateDir, "manifest.jsonl"))
+	last := events[len(events)-1]
+	if last.Event != "spawn_failed" {
+		t.Fatalf("expected last event spawn_failed, got %q", last.Event)
+	}
+	// ensureLeadJoined's join.sh call also fails (same stub, best-effort --
+	// swallowed) before the hard-failing seat Join call, so the terminal
+	// spawn_failed step is agmsg_join, not agmsg_lead_joined.
+	if !strings.Contains(last.Details, "step=agmsg_join") {
+		t.Errorf("expected Details to mention step=agmsg_join, got %q", last.Details)
+	}
+
+	herdrLines := readLogLines(t, herdrLog)
+	if n := countLinesWithPrefix(herdrLines, "pane send-keys"); n != 1 {
+		t.Fatalf("expected exactly 1 compensation send-keys call, got %d (log: %v)", n, herdrLines)
+	}
+
+	agmsgLines := readLogLines(t, agmsgLog)
+	if n := countLinesWithPrefix(agmsgLines, "ralph-org-a"); n != 2 {
+		t.Fatalf("expected exactly 2 agmsg join.sh invocations (lead then seat, both failing -- no send.sh reached), got %d (log: %v)", n, agmsgLines)
 	}
 }
 
@@ -550,7 +624,7 @@ func TestOrgCmd_RequiresOrgID(t *testing.T) {
 }
 
 func TestOrgDisband_StopsActiveSeatsAndDisbandsOrg(t *testing.T) {
-	herdrLog, _ := setupOrgStubPATH(t)
+	herdrLog, agmsgLog := setupOrgStubPATH(t)
 	stateDir := filepath.Join(t.TempDir(), "state")
 
 	if _, err := runOrgCmd(t,
@@ -574,6 +648,14 @@ func TestOrgDisband_StopsActiveSeatsAndDisbandsOrg(t *testing.T) {
 		t.Error("expected disband to send a stop signal to the active seat")
 	}
 
+	// AC-5: disband's per-seat Stop must also best-effort despawn.sh the
+	// seat -- despawn.sh's argv is "TEAM FROM NAME", so the seat_id
+	// (seat-1) shows up as the last logged token.
+	agmsgLines := readLogLines(t, agmsgLog)
+	if !containsLine(agmsgLines, "ralph-org-a lead seat-1") {
+		t.Errorf("expected a despawn.sh invocation with argv 'ralph-org-a lead seat-1', got agmsg log: %v", agmsgLines)
+	}
+
 	statusOut, err := runOrgCmd(t, "status", "--org-id", "org-a", "--state-dir", stateDir)
 	if err != nil {
 		t.Fatalf("status after disband failed: %v", err)
@@ -584,6 +666,63 @@ func TestOrgDisband_StopsActiveSeatsAndDisbandsOrg(t *testing.T) {
 	if strings.Contains(statusOut, "(active)") {
 		t.Errorf("expected no seat to remain marked active after disband, got: %s", statusOut)
 	}
+}
+
+func TestOrgStop_UnknownSeat_NonZeroExit(t *testing.T) {
+	setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	out, err := runOrgCmd(t, "stop", "--org-id", "org-a", "--seat", "never-spawned", "--state-dir", stateDir)
+	if err == nil {
+		t.Fatalf("expected non-zero exit stopping an unknown seat, output: %s", out)
+	}
+
+	events := readManifestEvents(t, filepath.Join(stateDir, "manifest.jsonl"))
+	if len(events) != 0 {
+		t.Fatalf("expected no manifest event appended for an unknown-seat stop, got %v", events)
+	}
+}
+
+func TestOrgStop_ExistingSeat_DespawnsAndRecordsOutcome(t *testing.T) {
+	_, agmsgLog := setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	if _, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--state-dir", stateDir,
+	); err != nil {
+		t.Fatalf("spawn failed: %v", err)
+	}
+
+	out, err := runOrgCmd(t, "stop", "--org-id", "org-a", "--seat", "seat-1", "--state-dir", stateDir)
+	if err != nil {
+		t.Fatalf("stop failed: %v (output: %s)", err, out)
+	}
+
+	agmsgLines := readLogLines(t, agmsgLog)
+	if !containsLine(agmsgLines, "ralph-org-a lead seat-1") {
+		t.Errorf("expected a despawn.sh invocation with argv 'ralph-org-a lead seat-1' in the agmsg log, got: %v", agmsgLines)
+	}
+
+	events := readManifestEvents(t, filepath.Join(stateDir, "manifest.jsonl"))
+	last := events[len(events)-1]
+	if last.Event != "stopped" {
+		t.Fatalf("expected last event stopped, got %q", last.Event)
+	}
+	if !strings.Contains(last.Details, "despawn=ok") {
+		t.Errorf("expected Details to record a successful despawn, got %q", last.Details)
+	}
+}
+
+// containsLine reports whether any line in lines equals want exactly.
+func containsLine(lines []string, want string) bool {
+	for _, l := range lines {
+		if l == want {
+			return true
+		}
+	}
+	return false
 }
 
 func equalStrings(a, b []string) bool {

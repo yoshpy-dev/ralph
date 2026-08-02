@@ -37,10 +37,37 @@ type HerdrClient interface {
 }
 
 // AgmsgClient is the subset of driver.Agmsg's methods the spawn saga and the
-// send verb need. See HerdrClient's doc comment for the interface-placement
-// rationale.
+// send/stop/disband verbs need. See HerdrClient's doc comment for the
+// interface-placement rationale.
 type AgmsgClient interface {
 	Send(ctx context.Context, team, from, to, message string) error
+	// Join registers agentID (agmsg-native agmsgType, e.g. "claude-code" or
+	// "codex") on team's roster at projectPath. The spawn saga calls this
+	// twice per seat: once for the org's "lead" identity (idempotent,
+	// best-effort -- see ensureLeadJoined in Spawn) and once for the seat
+	// itself (hard failure gate).
+	Join(ctx context.Context, team, agentID, agmsgType, projectPath string) error
+	// Despawn removes name from team's roster, sent as from. Stop/Disband
+	// call this best-effort: a Despawn failure is recorded in the stopped
+	// event's Details but never fails the verb outright.
+	Despawn(ctx context.Context, team, from, name string) error
+}
+
+// agmsgTypeForDriver maps a ralph driver name to the agmsg-native agent type
+// string expected by join.sh's TYPE positional argument. Unknown drivers are
+// passed through unchanged -- envelope validation (ValidateSpawnEnvelope)
+// already gates driver names against [org].driver_pool before Spawn ever
+// reaches this function, so "unknown" here means "a pool member this
+// function hasn't been taught about yet", not "unvalidated input".
+func agmsgTypeForDriver(driver string) string {
+	switch driver {
+	case "claude":
+		return "claude-code"
+	case "codex":
+		return "codex"
+	default:
+		return driver
+	}
 }
 
 // Clock abstracts time.Now so spawn/verb tests can inject deterministic
@@ -244,9 +271,44 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	}
 
 	team := agmsgTeam(p.OrgID)
+
+	// ensureLeadJoined: best-effort join.sh <team> lead claude-code <cwd>. A
+	// clean agmsg team has no "lead" identity registered yet, and agmsg's
+	// roster-based send validation rejects HELLO messages whose from/to
+	// identity was never join.sh'd (agmsg #355) -- so the saga must attempt
+	// to register "lead" before the seat's own Join+Send below. join.sh is
+	// treated as idempotent (re-joining an existing member is a documented
+	// no-op/soft-fail in agmsg), so a lead-join error here does *not* fail
+	// the saga on its own: the definitive, single-authoritative-failure-point
+	// gate is the seat Join immediately below and, ultimately, the HELLO
+	// Send -- if the roster is genuinely missing "lead", Send fails and the
+	// lead-join error recorded here is carried into that failure's Details
+	// for diagnosis (see the failStepWithNote call below).
+	leadJoinErr := o.Agmsg.Join(ctx, team, "lead", agmsgTypeForDriver("claude"), p.Cwd)
+	leadJoinNote := "ok"
+	if leadJoinErr != nil {
+		leadJoinNote = fmt.Sprintf("error=%v", leadJoinErr)
+	}
+	if err := o.appendEvent(ManifestEvent{
+		TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnStep,
+		PaneID: paneID, AgmsgTeam: team, Details: fmt.Sprintf("agmsg_lead_joined %s", leadJoinNote),
+	}); err != nil {
+		return SpawnResult{Outcome: SpawnOutcomeFailed, Err: err}
+	}
+
+	if err := o.Agmsg.Join(ctx, team, p.SeatID, agmsgTypeForDriver(p.Driver), p.Cwd); err != nil {
+		return o.failStep(p, "agmsg_join", err, paneID)
+	}
+	if err := o.appendEvent(ManifestEvent{
+		TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnStep,
+		PaneID: paneID, AgmsgTeam: team, Details: "agmsg_joined",
+	}); err != nil {
+		return SpawnResult{Outcome: SpawnOutcomeFailed, Err: err}
+	}
+
 	msg := fmt.Sprintf("TYPE: HELLO\nSEAT: %s\nROLE: %s", p.SeatID, p.Role)
 	if err := o.Agmsg.Send(ctx, team, p.SeatID, "lead", msg); err != nil {
-		return o.failStep(p, "agmsg_announce", err, paneID)
+		return o.failStepWithNote(p, "agmsg_announce", err, paneID, fmt.Sprintf("lead_join=%s", leadJoinNote))
 	}
 	if err := o.appendEvent(ManifestEvent{
 		TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnStep,
@@ -321,7 +383,7 @@ func (o *Org) dryRunSpawn(p SpawnParams) SpawnResult {
 	team := agmsgTeam(p.OrgID)
 	base := ManifestEvent{OrgID: p.OrgID, SeatID: p.SeatID, Role: p.Role, Driver: p.Driver, Model: p.Model, Worktree: p.Cwd, DryRun: true}
 
-	steps := make([]ManifestEvent, 0, 5)
+	steps := make([]ManifestEvent, 0, 7)
 	step := base
 	step.Event = EventSpawnStarted
 	steps = append(steps, step)
@@ -334,6 +396,18 @@ func (o *Org) dryRunSpawn(p SpawnParams) SpawnResult {
 	step = base
 	step.Event = EventSpawnStep
 	step.Details = "agent_started"
+	steps = append(steps, step)
+
+	step = base
+	step.Event = EventSpawnStep
+	step.AgmsgTeam = team
+	step.Details = "agmsg_lead_joined ok"
+	steps = append(steps, step)
+
+	step = base
+	step.Event = EventSpawnStep
+	step.AgmsgTeam = team
+	step.Details = "agmsg_joined"
 	steps = append(steps, step)
 
 	step = base
@@ -399,8 +473,21 @@ func (o *Org) resolveWorkspace(ctx context.Context, p SpawnParams, events []Mani
 // preserved on the event so an orphaned external resource stays traceable
 // from the manifest alone (AC-10).
 func (o *Org) failStep(p SpawnParams, step string, cause error, paneID string) SpawnResult {
+	return o.failStepWithNote(p, step, cause, paneID, "")
+}
+
+// failStepWithNote is failStep plus an extra free-text note appended to
+// Details. Used by the agmsg_announce failure path to carry the
+// ensureLeadJoined outcome forward: when HELLO Send fails, whether the
+// preceding best-effort lead-join succeeded or errored is essential
+// diagnostic context (a missing "lead" roster entry is the most likely root
+// cause of a Send rejection), so it must not be lost.
+func (o *Org) failStepWithNote(p SpawnParams, step string, cause error, paneID, note string) SpawnResult {
 	compensation := compensatePane(o.Herdr, paneID)
 	details := fmt.Sprintf("step=%s error=%v compensation=%s", step, cause, compensation)
+	if note != "" {
+		details += " " + note
+	}
 	_ = o.appendEvent(ManifestEvent{
 		TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnFailed,
 		Role: p.Role, Driver: p.Driver, Model: p.Model, Worktree: p.Cwd,
