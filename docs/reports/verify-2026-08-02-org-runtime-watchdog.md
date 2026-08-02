@@ -81,3 +81,59 @@ Note on numbering: the self-review report's own table numbers these H-1/H-2/M-1.
 - New drift flagged (not previously called out in plan deviations): FR-8 spec's "既定 60 秒" vs. shipped 30s default — add to the same `/sync-docs` pass already planned for the resident/on-demand FR-8 wording fix.
 
 Recommend: proceed to `/test`; carry the AC-5/M-4 partial-fix and AC-10 state-dir-smoke gap forward as named follow-ups (tech-debt row or fix-and-revalidate, per `/test`'s and the human operator's judgment) rather than blocking on them here, since neither is a regression from pre-PR behavior and both are narrowly scoped.
+
+## Cycle 2 (fix-and-revalidate)
+
+- Date: 2026-08-03
+- Verifier: `verifier` subagent (spec compliance + static analysis, no tests)
+- Scope: delta since cycle-1 baseline `af7c5f6` (this report's own initial commit) through HEAD `ccf506e` on `feat/org-runtime-watchdog` (merge-base `e7a32b9`): `6a09e64` (state-dir cross-cwd smoke addendum), `255e79e`/`52ecacb` (test report + sync-docs, including the FR-8 spec revision and two new tech-debt rows), `674581e` (cross-review triage, 2 ACTION_REQUIRED), `19c7630` (fix: cross-review AR-1 org-scope + AR-2 inactive-org guard), `6836efe` (cycle-2 self-review report), `ccf506e` (fix: M2-1 seat-attribution completion + M2-2 SIGINT context threading + M2-3 comment rewrite).
+
+### Deterministic checks run (re-confirmed at HEAD)
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `RALPH_VERIFY_SCOPE=full ./scripts/run-static-verify.sh` | PASS (exit 0) | Settings/hooks/mirror gates OK; Codex hook/PR-provenance guards OK; `scripts/check-sync.sh` → 179 IDENTICAL / 0 DRIFTED / 3 KNOWN_DIFF / 10 TEMPLATE_ONLY, "PASS: all files in sync."; `scripts/check-pipeline-sync.sh` → all 8 canonical-order references OK; `scripts/check-skill-sync.sh` → "14 skill(s) in lock-step"; Go verifier (full scope, `golang` pack): `gofmt: ok`, `go vet ./...` silent (pass), `golangci-lint run ./...` → `0 issues.`, `staticcheck ./...` silent (pass; binary present at `~/go/bin/staticcheck`). Re-run independently a second time for this cycle-2 pass with the same result. Evidence: `docs/evidence/verify-2026-08-02-170429.log` (gitignored per `docs/evidence/*.log`, not committed). |
+| `go build ./...` | Clean (exit 0) | Direct re-confirmation beyond the pack script. |
+| `go vet ./internal/org/... ./internal/cli/...` | Silent (exit 0) | Scoped re-confirmation on the two packages the delta touches. |
+| `git status --porcelain` | Empty | Working tree clean at HEAD `ccf506e`; no uncommitted drift. |
+
+### Cross-review AR-1/AR-2 and cycle-2 self-review M2-1/M2-2/M2-3
+
+| Item | Status | Evidence |
+| --- | --- | --- |
+| AR-1 (deadman "lead activity" not org-scoped) | Fixed in `19c7630`, completed in `ccf506e` | `19c7630` added the `orgID` parameter to `leadActivityEventCount` and filtered `ev.OrgID != orgID`; `ccf506e` added the seat-attribution half `ev.SeatID == LeadIdentity \|\| (Event == Stopped\|\|Disbanded && !watchdog-cutoff)`, closing the self-review M-4/M2-1 gap the cycle-1 verify report flagged as a caveat. Regression tests: `TestWatch_Deadman_CrossOrgActivity_DoesNotClearPendingAlert` (`19c7630`), `TestWatch_Deadman_UnrelatedSeatEvent_DoesNotClearPendingAlert`, `TestWatch_Deadman_LeadSpawnedEvent_ClearsPendingAlert`, `TestWatch_Deadman_ManualStopOfOtherSeat_ClearsPendingAlert` (`ccf506e`), all present in `internal/org/watch_test.go`. |
+| AR-2 (inactive-org total-budget guard) | Fixed in `19c7630` | `evaluateTotalBudget` returns early when `len(activeSeats) == 0`, before the `allStopped`/ratchet logic can vacuously set `Cutoff: true` off an empty seat list. Regression test: `TestWatch_TotalBudgetCutoff_NoActiveSeats_NoAlertNoEscalation_ThenCutsNewSeat` (`internal/org/watch_test.go:432`), whose third phase specifically asserts enforcement resumes once a new seat spawns into the previously all-stopped org — the exact "silently disabled forever" failure mode the guard prevents. |
+| M2-1 (tech-debt row overclaimed "fully closes this row" while the seat half was still open) | Fixed | `docs/tech-debt/README.md`'s `leadActivityEventCount` row now reads "Both halves of the original M-4 recommendation are now implemented; this row is fully closed", citing both `19c7630` (org-scope) and the `ccf506e` fix commit (seat-scope) by name — this claim is now true against the shipped code (see AR-1 row above), closing the accuracy gap the cycle-2 self-review caught. |
+| M2-2 (`--once`'s `WaitGroup.Wait()` fix regressed long-running SIGINT responsiveness by threading `context.Background()` into the tracked goroutine instead of `cmd.Context()`) | Fixed | `internal/cli/org.go`'s `newWatchdogHooks` now takes `ctx context.Context` as its first parameter (was implicit `context.Background()` internally); `newOrgWatchCmd`'s `RunE` passes `cmd.Context()` at the call site; both the `RunWatcher` and `SendWatchdogAlert` calls inside the tracked goroutine use `ctx`, not `context.Background()`. Regression test: `TestNewWatchdogHooks_CtxCancelled_RunWatcherReturnsQuickly` (`internal/cli/org_test.go`). The stale doc comment claiming "Bounded by RunWatcher's own watcherInvokeTimeout, so this can never hang the command" was also corrected to describe the SIGINT-cancellation path instead. |
+| M2-3 (AR-2 guard's comment asserted a mechanism the code doesn't have — "spurious ALERT every cycle" instead of "one spurious ALERT, then permanently disabled") | Fixed | The guard's comment in `evaluateTotalBudget` (`internal/org/watch.go`) was rewritten to describe the actual ratchet consequence — the vacuous `Cutoff: true` write permanently disabling enforcement for any seat spawned into the org afterward — and points at `TestWatch_TotalBudgetCutoff_NoActiveSeats_NoAlertNoEscalation_ThenCutsNewSeat`'s third phase as the regression this prevents, dropping the incorrect "every cycle" claim. |
+
+Cycle-1's other follow-up item (AC-10/AC-7 state-dir cross-cwd live-smoke line) was already closed within the cycle-1 baseline window by `6a09e64` (2 minutes after the cycle-1 verify report commit `af7c5f6`), which added a `--- state-dir cross-cwd confirmation (AC-7/AC-10) ---` block to `docs/evidence/org-watchdog-smoke-2026-08-02.txt` (`grep -n -i cwd` confirms the block exists). Re-confirmed present at HEAD; no further action needed for this item in cycle 2.
+
+### Spec FR-8 vs. shipped behavior
+
+**In sync.** `docs/specs/2026-08-01-org-runtime.md` FR-8 (line 36) now reads "パルス層(決定論タイマー、既定 30 秒: …)" and "ウォッチャー層(パルス層トリガーのオンデマンド LLM 判定: … `claude -p` を非同期 single-flight で 1 回起動 …)", matching the shipped `internal/config/config.go` `Default()` (`IntervalSeconds: 30`) and the on-demand `newWatchdogHooks`/`RunWatcher` design. Both mismatches the cycle-1 verify report flagged (resident-seat wording, 60s-vs-30s default) were corrected in `52ecacb` and are confirmed resolved by direct read of the current spec file — no residual "常駐座席" or "60 秒" language remains in the FR-8 paragraph.
+
+### check-sync / check-skill-sync
+
+Both green at HEAD, re-confirmed above under Deterministic checks: `check-sync.sh` reports 0 DRIFTED (179 IDENTICAL, 3 KNOWN_DIFF, 10 TEMPLATE_ONLY — all pre-existing, unrelated to this branch), `check-skill-sync.sh` reports 14 skills in lock-step (this branch touches no `.claude/skills/` or `.agents/skills/` content in the cycle-2 delta).
+
+### Documentation drift (cycle 2)
+
+No new drift found. The two tech-debt rows `52ecacb` added for the cycle-1 verify/test follow-ups (deadman activity scoping, 3 remaining deferred LOWs) are current: the deadman-scoping row is now fully resolved per M2-1 above (text accurately says so); the 3-remaining-LOW row is unchanged and still accurately describes open, non-blocking items (`source`-return discard, oversized scope-change ALERT truncation, unreachable `Escalated` guard) that neither cross-review nor cycle-2 self-review flagged as requiring a fix this cycle.
+
+### Coverage gaps (cycle 2)
+
+- `go test ./...` / `-race` execution: not run here (belongs to `/test`, which has not yet produced a cycle-2 report as of this verify pass — the committed `test-2026-08-02-org-runtime-watchdog.md` is the cycle-1 report and predates `19c7630`/`ccf506e`). Recommend `/test` re-run to add coverage evidence for the 7 new/changed test names cited above (`TestWatch_TotalBudgetCutoff_NoActiveSeats_...`, `TestWatch_Deadman_CrossOrgActivity_...`, `TestWatch_Deadman_UnrelatedSeatEvent_...`, `TestWatch_Deadman_LeadSpawnedEvent_...`, `TestWatch_Deadman_ManualStopOfOtherSeat_...`, `TestNewWatchdogHooks_CtxCancelled_RunWatcherReturnsQuickly`) before `/pr`.
+- The 3 remaining deferred LOW findings (tech-debt row, unchanged) remain unfixed by design — batchable, non-blocking, next-touch trigger already recorded.
+
+### Verdict (cycle 2)
+
+**PASS**, no fail-blocking findings, no open follow-up items from cycle 1 remain:
+
+- Verified: full-scope `run-static-verify.sh` (gofmt/go vet/golangci-lint/staticcheck all green), `check-sync.sh` (0 DRIFTED), `check-skill-sync.sh` (14 in lock-step), `go build`/`go vet` direct re-confirmation, clean working tree.
+- Verified: cross-review AR-1 (org-scope) and AR-2 (inactive-org guard) both fixed with regression tests; cycle-2 self-review M2-1 (seat-attribution completion), M2-2 (SIGINT context threading), M2-3 (comment accuracy) all fixed with regression tests or direct code confirmation; tech-debt row's "fully closed" claim is now accurate.
+- Verified: spec FR-8 matches shipped behavior (on-demand watcher, 30s default interval), both cycle-1-flagged mismatches corrected.
+- Not verified (out of scope for `/verify`): behavioral correctness of the 6 new/changed test names above — hand off to `/test` for a cycle-2 test pass before `/pr`.
+- Carried forward, non-blocking: the 3 deferred LOW findings tech-debt row (unchanged, next-touch trigger already recorded).
+
+Recommend: proceed to `/test` (cycle-2 re-run) to close the coverage-evidence gap noted above, then continue the pipeline toward `/pr`.
