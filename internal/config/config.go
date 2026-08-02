@@ -14,6 +14,7 @@ type Config struct {
 	Pipeline PipelineConfig `toml:"pipeline"`
 	Loop     LoopConfig     `toml:"loop"`
 	Doctor   DoctorConfig   `toml:"doctor"`
+	Org      OrgConfig      `toml:"org"`
 }
 
 // LoopConfig holds Ralph Loop driver settings — which driver runs the
@@ -90,6 +91,49 @@ type DoctorConfig struct {
 	RequireGo        bool `toml:"require_go"`
 }
 
+// OrgConfig holds the `[org]` envelope settings consumed by the `ralph org`
+// verb set (spawn/send/wait/read/stop/status/disband, internal/org) and by
+// `ralph doctor`. The fields are validated and stored here so later PRs
+// (seat-ification, Lead autonomy, Watchdog) build on a stable, lock-stepped
+// foundation.
+//
+// See docs/plans/active/2026-08-01-org-runtime-mechanism.md (or its archived
+// counterpart once the plan lands) for the full design.
+type OrgConfig struct {
+	// ModelPool is the allowlist of driver/model pairs `ralph org spawn` may
+	// launch. Model is a CLI-native model name or alias (e.g. "opus"),
+	// passed verbatim to `claude --model` / `codex --model` — aliases are
+	// valid CLI values and do not go stale like full model IDs would.
+	ModelPool []OrgModelPoolEntry `toml:"model_pool"`
+	// DriverPool is the allowlist of driver CLIs org seats may use.
+	DriverPool []string `toml:"driver_pool"`
+	// Roles maps a role name to the subset of model_pool model names that
+	// role is allowed to run under. An absent or empty roles map means "no
+	// role restrictions" — the full model_pool is allowed for every role.
+	Roles map[string][]string `toml:"roles"`
+	// MaxSeats caps concurrently spawned seats per org_id namespace.
+	MaxSeats int `toml:"max_seats"`
+	// Budget holds wall-clock and fix-round ceilings for org seats. PR①
+	// records these values only; enforcement (Watchdog) lands in PR④.
+	Budget OrgBudgetConfig `toml:"budget"`
+	// DeadmanMinutes is a reserved field for the PR④ Watchdog deadman timer.
+	// PR① only stores and round-trips this value; nothing consumes it yet.
+	DeadmanMinutes int `toml:"deadman_minutes"`
+}
+
+// OrgModelPoolEntry pairs a driver CLI with a CLI-native model name or alias.
+type OrgModelPoolEntry struct {
+	Driver string `toml:"driver"`
+	Model  string `toml:"model"`
+}
+
+// OrgBudgetConfig holds wall-clock and fix-round ceilings for org seats.
+type OrgBudgetConfig struct {
+	SeatWallClockMinutes  int `toml:"seat_wall_clock_minutes"`
+	TotalWallClockMinutes int `toml:"total_wall_clock_minutes"`
+	MaxFixRounds          int `toml:"max_fix_rounds"`
+}
+
 // Default returns a Config with sensible defaults.
 func Default() Config {
 	return Config{
@@ -125,6 +169,22 @@ func Default() Config {
 			RequireClaudeCLI: true,
 			RequireCodexCLI:  false,
 			RequireGo:        false,
+		},
+		Org: OrgConfig{
+			DriverPool: []string{"claude", "codex"},
+			ModelPool: []OrgModelPoolEntry{
+				{Driver: "claude", Model: "opus"},
+				{Driver: "claude", Model: "sonnet"},
+				{Driver: "claude", Model: "haiku"},
+			},
+			Roles:    map[string][]string{},
+			MaxSeats: 5,
+			Budget: OrgBudgetConfig{
+				SeatWallClockMinutes:  30,
+				TotalWallClockMinutes: 120,
+				MaxFixRounds:          2,
+			},
+			DeadmanMinutes: 10,
 		},
 	}
 }
@@ -237,6 +297,55 @@ func Load(path string) (Config, error) {
 	}
 	if !codexApprovalAllowed[cfg.Loop.CodexApprovalPolicy] {
 		return cfg, fmt.Errorf("invalid [loop].codex_approval_policy %q (must be untrusted, on-failure, on-request, or never)", cfg.Loop.CodexApprovalPolicy)
+	}
+
+	// [org] validation.
+	//
+	// Unlike PipelineConfig's ints (which silently backfill on zero), Org's
+	// fields are validated strictly: toml.Unmarshal only overwrites fields
+	// present in the source document (cfg already carries Default()'s Org
+	// values before Unmarshal runs), so an absent [org] section — or an
+	// absent individual key within a present [org] section — never reaches
+	// these checks with a zero/invalid value. Only an *explicit* invalid
+	// value (e.g. `max_seats = 0`) can trigger a validation error here.
+	if len(cfg.Org.ModelPool) == 0 {
+		return cfg, fmt.Errorf("[org].model_pool must not be empty")
+	}
+	orgDriverSet := make(map[string]bool, len(cfg.Org.DriverPool))
+	for _, d := range cfg.Org.DriverPool {
+		orgDriverSet[d] = true
+	}
+	seenModelPoolEntries := make(map[string]bool, len(cfg.Org.ModelPool))
+	validOrgModels := make(map[string]bool, len(cfg.Org.ModelPool))
+	for _, entry := range cfg.Org.ModelPool {
+		if !orgDriverSet[entry.Driver] {
+			return cfg, fmt.Errorf("[org].model_pool entry driver %q not present in [org].driver_pool %v", entry.Driver, cfg.Org.DriverPool)
+		}
+		key := entry.Driver + ":" + entry.Model
+		if seenModelPoolEntries[key] {
+			return cfg, fmt.Errorf("[org].model_pool duplicate entry %q", key)
+		}
+		seenModelPoolEntries[key] = true
+		validOrgModels[entry.Model] = true
+	}
+	for role, models := range cfg.Org.Roles {
+		for _, m := range models {
+			if !validOrgModels[m] {
+				return cfg, fmt.Errorf("[org.roles].%s references model %q not present in [org].model_pool", role, m)
+			}
+		}
+	}
+	if cfg.Org.MaxSeats < 1 {
+		return cfg, fmt.Errorf("[org].max_seats must be >= 1, got %d", cfg.Org.MaxSeats)
+	}
+	if cfg.Org.Budget.SeatWallClockMinutes < 1 {
+		return cfg, fmt.Errorf("[org.budget].seat_wall_clock_minutes must be >= 1, got %d", cfg.Org.Budget.SeatWallClockMinutes)
+	}
+	if cfg.Org.Budget.TotalWallClockMinutes < 1 {
+		return cfg, fmt.Errorf("[org.budget].total_wall_clock_minutes must be >= 1, got %d", cfg.Org.Budget.TotalWallClockMinutes)
+	}
+	if cfg.Org.Budget.MaxFixRounds < 1 {
+		return cfg, fmt.Errorf("[org.budget].max_fix_rounds must be >= 1, got %d", cfg.Org.Budget.MaxFixRounds)
 	}
 
 	return cfg, nil

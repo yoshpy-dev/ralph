@@ -58,3 +58,35 @@ require_claude_cli = true
 # only when `codex trust .` has been run for this project; see .codex/README.md.
 require_codex_cli = false
 require_go = false
+
+# [org] — envelope config for the `ralph org` verb set (spawn / send / wait /
+# read / stop / status / disband) and for `ralph doctor`'s org checks. The
+# fields are validated so downstream PRs (seat-ification, Lead autonomy,
+# Watchdog) build on a stable foundation. Absent [org] is fully compatible —
+# Load() backfills these exact defaults with no warnings.
+[org]
+driver_pool = ["claude", "codex"]
+# model_pool entries are CLI-native model names/aliases, passed verbatim to
+# `claude --model` / `codex --model` (aliases don't go stale like full model
+# IDs would). Each entry's driver must be present in driver_pool above.
+model_pool = [
+  { driver = "claude", model = "opus" },
+  { driver = "claude", model = "sonnet" },
+  { driver = "claude", model = "haiku" },
+]
+# max_seats caps concurrently spawned seats per org_id namespace.
+max_seats = 5
+# deadman_minutes is reserved for the PR④ Watchdog deadman timer; PR① only
+# stores and round-trips this value.
+deadman_minutes = 10
+
+# [org.roles] restricts which model_pool model names a role may run under.
+# Absent or empty means "no restriction" — the full model_pool is allowed.
+# Example:
+# [org.roles]
+# reviewer = ["opus"]
+
+[org.budget]
+seat_wall_clock_minutes = 30
+total_wall_clock_minutes = 120
+max_fix_rounds = 2

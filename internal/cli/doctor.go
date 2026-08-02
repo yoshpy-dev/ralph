@@ -16,26 +16,43 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/yoshpy-dev/ralph/internal/config"
+	"github.com/yoshpy-dev/ralph/internal/org/driver"
 	"github.com/yoshpy-dev/ralph/internal/scaffold"
 )
 
 func newDoctorCmd() *cobra.Command {
-	return &cobra.Command{
+	var probeModels bool
+	cmd := &cobra.Command{
 		Use:   "doctor",
 		Short: "Check environment and project setup",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDoctor(".")
+			return runDoctorOpts(".", probeModels)
 		},
 	}
+	cmd.Flags().BoolVar(&probeModels, "probe-models", false,
+		"probe every [org].model_pool entry by launching a minimal CLI invocation per model (slower; requires claude/codex on PATH)")
+	return cmd
 }
 
 type checkResult struct {
 	Name   string `json:"name"`
-	Status string `json:"status"` // pass, warn, fail
+	Status string `json:"status"` // pass, info, warn, fail
 	Detail string `json:"detail,omitempty"`
 }
 
+// runDoctor is the pre-org-runtime entry point, preserved so existing
+// callers/tests that don't know about --probe-models keep working unchanged.
+// It never runs model-pool probes (equivalent to --probe-models=false).
 func runDoctor(targetDir string) error {
+	return runDoctorOpts(targetDir, false)
+}
+
+// runDoctorOpts is runDoctor plus the --probe-models opt-in: when true, every
+// [org].model_pool entry is probed via internal/org/driver.ProbeModel (Check
+// 13). Model probes are the only check in this function that spawn CLI
+// subprocesses beyond the pre-existing --version probes, so they stay
+// opt-in and off by default.
+func runDoctorOpts(targetDir string, probeModels bool) error {
 	cfg, cfgErr := config.Load(filepath.Join(targetDir, "ralph.toml"))
 	var results []checkResult
 
@@ -74,6 +91,20 @@ func runDoctor(targetDir string) error {
 	// Check 9: Stale orchestrator state.
 	results = append(results, checkStaleOrchestratorState(targetDir))
 
+	// Check 10: herdr availability (org runtime driver adapter).
+	results = append(results, checkHerdrAvailable())
+
+	// Check 11: agmsg availability (org runtime driver adapter).
+	results = append(results, checkAgmsgAvailable())
+
+	// Check 12: [org] envelope summary (pool size / max_seats).
+	results = append(results, checkOrgEnvelope(cfg))
+
+	// Check 13: optional model-pool probes (--probe-models).
+	if probeModels {
+		results = append(results, checkOrgModelProbes(cfg, driver.ExecRunner{})...)
+	}
+
 	// Print results.
 	fmt.Println("ralph doctor")
 	fmt.Println()
@@ -82,6 +113,8 @@ func runDoctor(targetDir string) error {
 	for _, r := range results {
 		icon := "✓"
 		switch r.Status {
+		case "info":
+			icon = "ℹ"
 		case "warn":
 			icon = "⚠"
 		case "fail":
@@ -137,7 +170,7 @@ func probeBinary(bin string) (version string, err error) {
 	if runErr != nil {
 		return "", fmt.Errorf("%s --version failed: %w", bin, runErr)
 	}
-	for _, line := range strings.Split(string(out), "\n") {
+	for line := range strings.SplitSeq(string(out), "\n") {
 		if trimmed := strings.TrimSpace(line); trimmed != "" {
 			return trimmed, nil
 		}
@@ -238,7 +271,7 @@ func checkCodexEffectiveConfig(targetDir string) checkResult {
 			r.Status = "fail"
 			r.Detail = "both .codex/config.toml [hooks] and .codex/hooks.json exist; remove hooks.json because this project uses config.toml as the Codex hook source of truth"
 			return r
-		} else if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		} else if !errors.Is(err, fs.ErrNotExist) {
 			r.Status = "warn"
 			r.Detail = fmt.Sprintf("could not inspect .codex/hooks.json: %v", err)
 			return r
@@ -555,5 +588,105 @@ func checkGo(cfg config.Config) checkResult {
 	} else {
 		r.Status = "pass"
 	}
+	return r
+}
+
+// checkHerdrAvailable reports whether the herdr CLI (org runtime seat driver)
+// is on PATH. Org runtime is purely additive (AC-9): a project that never
+// runs `ralph org` has no reason to install herdr, so absence is reported as
+// "info", not "warn"/"fail" — it must never change runDoctorOpts' exit code.
+func checkHerdrAvailable() checkResult {
+	r := checkResult{Name: "herdr"}
+	if err := driver.HerdrAvailable(); err != nil {
+		r.Status = "info"
+		r.Detail = "herdr not installed — org runtime seats unavailable (solo execution unaffected)"
+		return r
+	}
+	r.Status = "pass"
+	r.Detail = "available"
+	return r
+}
+
+// checkAgmsgAvailable is checkHerdrAvailable's counterpart for the agmsg CLI.
+func checkAgmsgAvailable() checkResult {
+	r := checkResult{Name: "agmsg"}
+	if err := driver.AgmsgAvailable(); err != nil {
+		r.Status = "info"
+		r.Detail = "agmsg not installed — org runtime seats unavailable (solo execution unaffected)"
+		return r
+	}
+	r.Status = "pass"
+	r.Detail = "available"
+	return r
+}
+
+// checkOrgEnvelope summarizes the loaded [org] envelope (model_pool size,
+// max_seats) as an informational line. It never re-loads config — the caller
+// already resolved cfg via config.Load, and a load/parse failure is already
+// surfaced by the pre-existing "ralph.toml" check in runDoctorOpts, so this
+// check does not duplicate that reporting.
+func checkOrgEnvelope(cfg config.Config) checkResult {
+	return checkResult{
+		Name:   "Org envelope",
+		Status: "info",
+		Detail: fmt.Sprintf("model_pool: %d entries, max_seats: %d", len(cfg.Org.ModelPool), cfg.Org.MaxSeats),
+	}
+}
+
+// checkOrgModelProbes runs driver.ProbeModel for every [org].model_pool
+// entry, grouped by driver so a single missing CLI produces one skip line
+// instead of one per model. Each probe is bounded by a 30s context so a hung
+// CLI cannot wedge `ralph doctor --probe-models`.
+//
+// codex `--model` support on `codex exec` is best-effort upstream (see
+// driver.ProbeModel), so a codex probe failure is reported as "warn" with an
+// explicit "advisory" label rather than being treated as a hard rejection.
+func checkOrgModelProbes(cfg config.Config, runner driver.Runner) []checkResult {
+	var results []checkResult
+
+	byDriver := make(map[string][]string, len(cfg.Org.DriverPool))
+	var driverOrder []string
+	for _, entry := range cfg.Org.ModelPool {
+		if _, seen := byDriver[entry.Driver]; !seen {
+			driverOrder = append(driverOrder, entry.Driver)
+		}
+		byDriver[entry.Driver] = append(byDriver[entry.Driver], entry.Model)
+	}
+
+	for _, drv := range driverOrder {
+		models := byDriver[drv]
+		if _, err := exec.LookPath(drv); err != nil {
+			results = append(results, checkResult{
+				Name:   fmt.Sprintf("Org model probe (%s)", drv),
+				Status: "info",
+				Detail: fmt.Sprintf("%s not installed — skipping %d model probe(s)", drv, len(models)),
+			})
+			continue
+		}
+		for _, model := range models {
+			results = append(results, probeOrgModel(runner, drv, model))
+		}
+	}
+	return results
+}
+
+// probeOrgModel runs a single ProbeModel call under a bounded timeout and
+// translates the result into a checkResult.
+func probeOrgModel(runner driver.Runner, drv, model string) checkResult {
+	r := checkResult{Name: fmt.Sprintf("Org model probe (%s/%s)", drv, model)}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := driver.ProbeModel(ctx, runner, drv, model); err != nil {
+		r.Status = "warn"
+		if drv == "codex" {
+			r.Detail = fmt.Sprintf("advisory: codex --model support on exec is best-effort upstream; probe failed: %v", err)
+		} else {
+			r.Detail = fmt.Sprintf("probe failed: %v", err)
+		}
+		return r
+	}
+	r.Status = "pass"
 	return r
 }

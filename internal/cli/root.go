@@ -33,6 +33,7 @@ manages template updates, and runs autonomous development pipelines.`,
 		newPackCmd(),
 		newVersionCmd(),
 		newStatusCmd(),
+		newOrgCmd(),
 	)
 
 	return root
