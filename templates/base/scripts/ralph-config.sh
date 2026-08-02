@@ -88,6 +88,26 @@ RALPH_ORG_AGMSG_HOME="${RALPH_ORG_AGMSG_HOME:-~/.agents/skills/agmsg}"
 # the three lock-step surfaces agree on the default string; no `ralph org`
 # verb reads it from the environment.
 RALPH_ORG_PERMISSION_DEFAULT="${RALPH_ORG_PERMISSION_DEFAULT:-autonomous}"
+# RALPH_ORG_PERMISSIONS_CODEX_VERIFIED mirrors
+# [org.permissions].codex_verified (PR④ AC-8): false keeps codex seats
+# fail-closed to guarded until an operator has live-verified their installed
+# codex CLI's interactive sandbox/approval flags. Kept unexported for the
+# same reason as RALPH_ORG_PERMISSION_DEFAULT above: nothing in this file's
+# export block should risk shadowing a value the Go config
+# (internal/config) is the sole runtime source for. This var exists only so
+# the three lock-step surfaces agree on the default value; no `ralph org`
+# verb reads it from the environment.
+RALPH_ORG_PERMISSIONS_CODEX_VERIFIED="${RALPH_ORG_PERMISSIONS_CODEX_VERIFIED:-false}"
+# RALPH_ORG_WATCHDOG_* mirror [org.watchdog] (interval_seconds/stall_minutes/
+# watcher_enabled/watcher_model). Kept unexported for the same reason as
+# RALPH_ORG_AGMSG_HOME above: nothing in this file's export block should risk
+# shadowing a value the Go config (internal/config) is the sole runtime
+# source for. These vars exist only so the three lock-step surfaces agree on
+# the default values; no `ralph org` verb reads them from the environment.
+RALPH_ORG_WATCHDOG_INTERVAL_SECONDS="${RALPH_ORG_WATCHDOG_INTERVAL_SECONDS:-30}"
+RALPH_ORG_WATCHDOG_STALL_MINUTES="${RALPH_ORG_WATCHDOG_STALL_MINUTES:-15}"
+RALPH_ORG_WATCHDOG_WATCHER_ENABLED="${RALPH_ORG_WATCHDOG_WATCHER_ENABLED:-true}"
+RALPH_ORG_WATCHDOG_WATCHER_MODEL="${RALPH_ORG_WATCHDOG_WATCHER_MODEL:-haiku}"
 
 # Export so values reach grandchild processes (e.g. ralph-pipeline.sh
 # spawned from ralph-orchestrator.sh, or codex/claude invoked via xargs).

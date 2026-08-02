@@ -58,7 +58,7 @@ func TestPermissionArgsForDriver_Claude(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.mode, func(t *testing.T) {
-			got, err := permissionArgsForDriver("claude", tc.mode)
+			got, err := permissionArgsForDriver(config.OrgConfig{}, "claude", tc.mode)
 			if err != nil {
 				t.Fatalf("permissionArgsForDriver(claude, %q): unexpected error %v", tc.mode, err)
 			}
@@ -76,7 +76,7 @@ func TestPermissionArgsForDriver_Claude(t *testing.T) {
 
 func TestPermissionArgsForDriver_Codex_FailClosed(t *testing.T) {
 	t.Run("guarded is allowed with no flags", func(t *testing.T) {
-		got, err := permissionArgsForDriver("codex", "guarded")
+		got, err := permissionArgsForDriver(config.OrgConfig{}, "codex", "guarded")
 		if err != nil {
 			t.Fatalf("permissionArgsForDriver(codex, guarded): unexpected error %v", err)
 		}
@@ -86,8 +86,8 @@ func TestPermissionArgsForDriver_Codex_FailClosed(t *testing.T) {
 	})
 
 	for _, mode := range []string{"autonomous", "edits"} {
-		t.Run(mode+" is rejected fail-closed", func(t *testing.T) {
-			_, err := permissionArgsForDriver("codex", mode)
+		t.Run(mode+" is rejected fail-closed when codex_verified is false", func(t *testing.T) {
+			_, err := permissionArgsForDriver(config.OrgConfig{}, "codex", mode)
 			if err == nil {
 				t.Fatalf("permissionArgsForDriver(codex, %q): expected fail-closed error, got nil", mode)
 			}
@@ -96,4 +96,72 @@ func TestPermissionArgsForDriver_Codex_FailClosed(t *testing.T) {
 			}
 		})
 	}
+
+	// TestPermissionArgsForDriver_Codex_UnknownMode_DistinctError pins the
+	// self-review LOW fix: an unrecognized mode string must be reported as
+	// "unknown permission mode" (the same wording the claude branch's own
+	// default case uses), not folded into the "not yet live-verified"
+	// fail-closed message a genuinely known-but-unverified mode gets.
+	t.Run("an unknown mode is reported distinctly from the fail-closed case", func(t *testing.T) {
+		_, err := permissionArgsForDriver(config.OrgConfig{}, "codex", "not-a-real-mode")
+		if err == nil {
+			t.Fatalf("permissionArgsForDriver(codex, not-a-real-mode): expected an error, got nil")
+		}
+		if !strings.Contains(err.Error(), "unknown permission mode") {
+			t.Errorf("expected an 'unknown permission mode' error, got %v", err)
+		}
+		if strings.Contains(err.Error(), "not yet live-verified") {
+			t.Errorf("did not expect the fail-closed wording for a genuinely unknown mode, got %v", err)
+		}
+	})
+}
+
+// TestPermissionArgsForDriver_Codex_VerifiedUnlocksMapping pins AC-8: once
+// [org.permissions].codex_verified is true, codex's autonomous/edits modes
+// resolve to the live-verified CLI flags instead of erroring; guarded is
+// unaffected either way.
+func TestPermissionArgsForDriver_Codex_VerifiedUnlocksMapping(t *testing.T) {
+	verifiedCfg := config.OrgConfig{Permissions: config.OrgPermissionsConfig{CodexVerified: true}}
+
+	t.Run("autonomous", func(t *testing.T) {
+		got, err := permissionArgsForDriver(verifiedCfg, "codex", "autonomous")
+		if err != nil {
+			t.Fatalf("permissionArgsForDriver(codex, autonomous) with codex_verified=true: unexpected error %v", err)
+		}
+		want := []string{"--sandbox", "workspace-write", "--ask-for-approval", "never"}
+		if len(got) != len(want) {
+			t.Fatalf("permissionArgsForDriver(codex, autonomous) = %v, want %v", got, want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("permissionArgsForDriver(codex, autonomous) = %v, want %v", got, want)
+			}
+		}
+	})
+
+	t.Run("edits", func(t *testing.T) {
+		got, err := permissionArgsForDriver(verifiedCfg, "codex", "edits")
+		if err != nil {
+			t.Fatalf("permissionArgsForDriver(codex, edits) with codex_verified=true: unexpected error %v", err)
+		}
+		want := []string{"--sandbox", "workspace-write"}
+		if len(got) != len(want) {
+			t.Fatalf("permissionArgsForDriver(codex, edits) = %v, want %v", got, want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("permissionArgsForDriver(codex, edits) = %v, want %v", got, want)
+			}
+		}
+	})
+
+	t.Run("guarded still needs no flags", func(t *testing.T) {
+		got, err := permissionArgsForDriver(verifiedCfg, "codex", "guarded")
+		if err != nil {
+			t.Fatalf("permissionArgsForDriver(codex, guarded) with codex_verified=true: unexpected error %v", err)
+		}
+		if len(got) != 0 {
+			t.Fatalf("permissionArgsForDriver(codex, guarded) = %v, want no flags", got)
+		}
+	})
 }

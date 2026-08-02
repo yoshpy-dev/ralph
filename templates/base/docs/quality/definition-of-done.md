@@ -71,3 +71,5 @@ Add:
 - [ ] Source of truth is aligned
 - [ ] No commands or workflows became stale
 - [ ] Any changed process still matches scripts and rules
+
+- Evidence files committed under `docs/evidence/` must redact the local home directory (`$HOME` → `~`) before commit; session UUIDs and other machine-local identifiers should be trimmed when they carry no evidentiary value.

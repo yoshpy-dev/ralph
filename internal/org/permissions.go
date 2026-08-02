@@ -51,11 +51,28 @@ func ResolvePermissionMode(cfg config.OrgConfig, role string) string {
 	return defaultPermissionMode
 }
 
+// codexAutonomousArgs/codexEditsArgs are the codex-native CLI flags applied
+// once cfg.Permissions.CodexVerified is true (AC-8): autonomous runs with no
+// interactive approval prompt at all (`--ask-for-approval never`, mirroring
+// claude's bypassPermissions), edits keeps the default approval policy but
+// still grants workspace-write so file edits do not need per-tool-call
+// confirmation. These flag shapes are the plan's own stated assumption
+// (docs/plans/active/2026-08-02-org-runtime-watchdog.md, "codex 権限
+// fail-closed の実機検証") -- Slice 5's live smoke is what actually confirms
+// them against a real codex seat; CodexVerified is the operator's explicit
+// acknowledgement that they have done that confirmation for their installed
+// codex version.
+var (
+	codexAutonomousArgs = []string{"--sandbox", "workspace-write", "--ask-for-approval", "never"}
+	codexEditsArgs      = []string{"--sandbox", "workspace-write"}
+)
+
 // permissionArgsForDriver maps driver + a resolved permission mode to the
 // driver-native CLI flags Spawn prepends to AgentStart's agentArgs (before
 // the "--model" flags -- see Spawn's agentArgs construction). A nil, nil
 // return means "no flag needed" (the driver CLI's own interactive default
-// already matches the requested mode).
+// already matches the requested mode). cfg gates the codex fail-closed
+// restriction below via cfg.Permissions.CodexVerified (AC-8).
 //
 // claude accepts --permission-mode directly: autonomous maps to
 // bypassPermissions (no interactive permission dialog at all -- this is the
@@ -64,16 +81,17 @@ func ResolvePermissionMode(cfg config.OrgConfig, role string) string {
 // prompts for other tool calls), guarded needs no flag (claude's own
 // interactive default already behaves like "guarded").
 //
-// codex is fail-closed (Codex advisory 2, plan Design decisions
+// codex is fail-closed by default (Codex advisory 2, plan Design decisions
 // "codex は fail-closed"): codex's interactive-mode permission/sandbox
-// flags have not been live-verified against a real codex seat, so anything
-// other than guarded (no flag -- codex's own CLI default) is rejected
-// outright. The alternative -- silently emitting a stub argv that looks
-// like it applied autonomous/edits but doesn't -- is worse than a loud
-// error: a fail-closed codex seat is at least honest about running
-// guarded. See docs/tech-debt/README.md for the live-verification
-// follow-up that lifts this restriction.
-func permissionArgsForDriver(driver, mode string) ([]string, error) {
+// flags have not been live-verified against a real codex seat by this PR,
+// so anything other than guarded (no flag -- codex's own CLI default) is
+// rejected outright unless cfg.Permissions.CodexVerified is true. The
+// alternative -- silently emitting a stub argv that looks like it applied
+// autonomous/edits but doesn't -- is worse than a loud error: a fail-closed
+// codex seat is at least honest about running guarded. See
+// docs/tech-debt/README.md for the live-verification follow-up
+// CodexVerified closes out once an operator has actually confirmed it.
+func permissionArgsForDriver(cfg config.OrgConfig, driver, mode string) ([]string, error) {
 	switch driver {
 	case "claude":
 		switch mode {
@@ -87,10 +105,22 @@ func permissionArgsForDriver(driver, mode string) ([]string, error) {
 			return nil, fmt.Errorf("org: unknown permission mode %q for driver %q", mode, driver)
 		}
 	case "codex":
-		if mode == PermissionModeGuarded {
+		switch mode {
+		case PermissionModeGuarded:
 			return nil, nil
+		case PermissionModeAutonomous:
+			if cfg.Permissions.CodexVerified {
+				return codexAutonomousArgs, nil
+			}
+			return nil, fmt.Errorf("org: codex seat permission mode %q not yet live-verified; only guarded is allowed (fail-closed; set [org.permissions].codex_verified=true after live-verifying your codex CLI's flags)", mode)
+		case PermissionModeEdits:
+			if cfg.Permissions.CodexVerified {
+				return codexEditsArgs, nil
+			}
+			return nil, fmt.Errorf("org: codex seat permission mode %q not yet live-verified; only guarded is allowed (fail-closed; set [org.permissions].codex_verified=true after live-verifying your codex CLI's flags)", mode)
+		default:
+			return nil, fmt.Errorf("org: unknown permission mode %q for driver %q", mode, driver)
 		}
-		return nil, fmt.Errorf("org: codex seat permission mode %q not yet live-verified; only guarded is allowed (fail-closed)", mode)
 	default:
 		return nil, fmt.Errorf("org: unknown driver %q for permission mode mapping", driver)
 	}

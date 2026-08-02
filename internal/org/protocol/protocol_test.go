@@ -11,7 +11,7 @@ func TestParse_EveryEnumType_HeaderOnly(t *testing.T) {
 	// requirement is Validate's concern, not Parse's).
 	for _, typ := range []string{
 		TypeTask, TypeResult, TypeQuestion, TypeReview, TypeDecision,
-		TypeBlocked, TypeContract, TypeHeartbeat, TypeStop, TypeHello,
+		TypeBlocked, TypeContract, TypeHeartbeat, TypeStop, TypeHello, TypeAlert,
 	} {
 		t.Run(typ, func(t *testing.T) {
 			m, err := Parse("TYPE: " + typ)
@@ -99,6 +99,11 @@ func TestValidate_UnknownType(t *testing.T) {
 	if !errors.Is(err, ErrUnknownType) {
 		t.Fatalf("expected ErrUnknownType, got %v", err)
 	}
+	// sortedTypeNames must list every enum member, including ALERT, in the
+	// error message so an unknown-TYPE error is self-documenting.
+	if !strings.Contains(err.Error(), TypeAlert) {
+		t.Fatalf("expected error message to list %s among valid types, got %v", TypeAlert, err)
+	}
 }
 
 func TestValidate_MissingTypeString(t *testing.T) {
@@ -123,6 +128,7 @@ func TestValidate_TaskIDRequiredMatrix(t *testing.T) {
 		{TypeHeartbeat, false},
 		{TypeStop, false},
 		{TypeHello, false},
+		{TypeAlert, false},
 	}
 	for _, c := range cases {
 		t.Run(c.typ+"_without_task_id", func(t *testing.T) {

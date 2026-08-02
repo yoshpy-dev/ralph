@@ -1,0 +1,36 @@
+=== org-watchdog live smoke 2026-08-02/03 (redacted: $HOME -> ~) ===
+--- codex interactive permission flags probe (AC-8) ---
+  -s, --sandbox <SANDBOX_MODE>
+  -a, --ask-for-approval <APPROVAL_POLICY>
+  -> -s/--sandbox and -a/--ask-for-approval exist; codex_verified stays false by default (operator unlocks after own live run)
+
+--- attempt 1 (found 2 bugs) ---
+[cutoff]
+reason=watchdog_budget_cutoff seat_wall_clock=1m observed=1m0s
+[escalations]
+{"ts":"2026-08-02T15:14:49Z","org_id":"wdsmoke","alert_id":"wdsmoke/sleeper/seat_budget@1785683627524710000","subject":"sleeper","reason":"deadman_timeout"}
+{"ts":"2026-08-02T15:14:49Z","org_id":"wdsmoke","alert_id":"wdsmoke/sleeper/stall@1785683627524710000","subject":"sleeper","reason":"deadman_timeout"}
+{"ts":"2026-08-02T15:23:50Z","org_id":"wdsmoke","alert_id":"wdsmoke//total_budget@1785684169971982000","reason":"deadman_timeout"}
+[watcher: 10s timeout too short -> watcher_error]
+{"ts":"2026-08-02T15:13:58Z","org_id":"wdsmoke","seat_id":"sleeper","role":"watchdog","driver":"claude","commanded_model":"haiku","honored":"unknown","reason":"watcher_error"}
+[BUG: ALERT count in agmsg history = 0 (seat-verb Send needs a lead SEAT)]
+
+--- attempt 2 (after fix 7101351) ---
+[ALERTs delivered watchdog->lead]
+  ● [2026-08-02T15:34:03Z] watchdog → lead: TYPE: ALERT\nORG_ID: wdsmoke2\nSEAT: sleeper\nCONDITION: stall\n\nseat sleeper heartbeat stalled for over 1m
+  ● [2026-08-02T15:34:03Z] watchdog → lead: TYPE: ALERT\nORG_ID: wdsmoke2\nSEAT: sleeper\nCONDITION: seat_budget\n\nwatchdog_budget_cutoff seat_wall_clock=1m observed=1m0s
+[watcher verdict with fixed 60s timeout]
+{"ts":"2026-08-02T15:34:22Z","org_id":"wdsmoke2","seat_id":"sleeper","role":"watchdog","driver":"claude","commanded_model":"haiku","honored":"unknown","reason":"verdict=normal"}
+[cutoff]
+reason=watchdog_budget_cutoff seat_wall_clock=1m observed=1m0s
+[escalations]
+{"ts":"2026-08-02T15:35:03Z","org_id":"wdsmoke2","alert_id":"wdsmoke2/sleeper/stall@1785684842103256000","subject":"sleeper","reason":"deadman_timeout"}
+[watch-status heartbeat]
+"cycles": 8
+
+--- state-dir cross-cwd confirmation (AC-7/AC-10) ---
+[spawn dry-run from worktree ROOT, no --state-dir]
+spawned seat "probe" (org_id=sdircheck driver=claude model=haiku pane_id= dry_run=true)
+[status from docs/ SUBDIR, no --state-dir -> same git-toplevel state]
+SEAT_ID	ROLE	DRIVER	MODEL	STATE	PANE_ID
+probe	qa	claude	haiku	spawned (active) [dry-run]	

@@ -1,11 +1,16 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -34,7 +39,7 @@ func newOrgCmd() *cobra.Command {
 	}
 
 	cmd.PersistentFlags().StringVar(&orgID, "org-id", "", "org execution namespace (required)")
-	cmd.PersistentFlags().StringVar(&stateDir, "state-dir", ".harness/state/org", "org manifest/receipts state directory")
+	cmd.PersistentFlags().StringVar(&stateDir, "state-dir", "", "org manifest/receipts state directory (default: resolved by org.ResolveOrgStateDir -- env RALPH_ORG_STATE_DIR, else the enclosing git repo's toplevel .harness/state/org, else cwd's .harness/state/org)")
 	cmd.PersistentFlags().StringVar(&configPath, "config", "", "path to ralph.toml (default: ./ralph.toml if present, else built-in defaults)")
 
 	cmd.AddCommand(
@@ -47,6 +52,7 @@ func newOrgCmd() *cobra.Command {
 		newOrgStatusCmd(&orgID, &stateDir, &configPath),
 		newOrgDisbandCmd(&orgID, &stateDir, &configPath),
 		newOrgReportCmd(&orgID, &stateDir, &configPath),
+		newOrgWatchCmd(&orgID, &stateDir, &configPath),
 	)
 
 	return cmd
@@ -82,25 +88,42 @@ func requireSeatIdentifier(flag, value string) error {
 
 // newOrgRuntime constructs an org.Org wired to real driver adapters
 // (driver.ExecRunner, which shells out to the herdr/agmsg binaries on PATH)
-// and manifest/receipt stores rooted at stateDir. It also returns the
-// resolved config.OrgConfig it built the Org from, so a caller that needs
-// the config for its own purposes beyond wiring (e.g. newOrgStartCmd's
-// --model default resolution via org.DefaultModelForDriver) does not have
-// to call resolveOrgConfig a second time and risk two ralph.toml reads
-// diverging.
-func newOrgRuntime(stateDir, configPath string) (*org.Org, config.OrgConfig, error) {
+// and manifest/receipt stores rooted at the resolved state directory. cmd is
+// used only to detect whether --state-dir was explicitly passed
+// (cmd.Flags().Changed("state-dir")) for org.ResolveOrgStateDir's flag >
+// env > git-toplevel > cwd precedence -- see that function's doc comment
+// for the full rationale (fixes the lead/operator cwd-split, tech-debt
+// "state-dir の cwd 相対解決"). A caller that also needs the resolved
+// config.OrgConfig for its own purposes beyond wiring (e.g.
+// newOrgStartCmd's --model default resolution via
+// org.DefaultModelForDriver) reads it back off the returned *org.Org's
+// exported Config field rather than newOrgRuntime returning a second
+// value.
+func newOrgRuntime(cmd *cobra.Command, stateDir, configPath string) (*org.Org, error) {
+	resolvedStateDir, _ := org.ResolveOrgStateDir(stateDir, cmd.Flags().Changed("state-dir"))
+	return newOrgRuntimeAt(resolvedStateDir, configPath)
+}
+
+// newOrgRuntimeAt is newOrgRuntime's shared implementation, taking an
+// already-resolved state directory instead of resolving it itself. A caller
+// that also needs the resolved directory for its own purposes beyond wiring
+// (today, only newOrgWatchCmd's banner + WatchParams.StatusDir) resolves it
+// once via org.ResolveOrgStateDir and calls this directly, instead of
+// resolving twice (self-review LOW fix -- each resolution shells out to `git
+// rev-parse --show-toplevel`).
+func newOrgRuntimeAt(resolvedStateDir, configPath string) (*org.Org, error) {
 	orgCfg, err := resolveOrgConfig(configPath)
 	if err != nil {
-		return nil, config.OrgConfig{}, fmt.Errorf("org: load config: %w", err)
+		return nil, fmt.Errorf("org: load config: %w", err)
 	}
 	runner := driver.ExecRunner{}
 	return &org.Org{
 		Config:   orgCfg,
-		Manifest: org.NewManifestStoreAtPath(filepath.Join(stateDir, "manifest.jsonl")),
-		Receipts: org.NewReceiptStoreAtPath(filepath.Join(stateDir, "model-receipts.jsonl")),
+		Manifest: org.NewManifestStoreAtPath(filepath.Join(resolvedStateDir, "manifest.jsonl")),
+		Receipts: org.NewReceiptStoreAtPath(filepath.Join(resolvedStateDir, "model-receipts.jsonl")),
 		Herdr:    driver.Herdr{R: runner},
 		Agmsg:    driver.Agmsg{R: runner, Home: driver.ResolveAgmsgHome(orgCfg.AgmsgHome)},
-	}, orgCfg, nil
+	}, nil
 }
 
 // resolveOrgConfig loads the [org] envelope from configPath, falling back
@@ -163,7 +186,7 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 				}
 			}
 
-			rt, _, err := newOrgRuntime(*stateDir, *configPath)
+			rt, err := newOrgRuntime(cmd, *stateDir, *configPath)
 			if err != nil {
 				return err
 			}
@@ -251,13 +274,13 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 				return fmt.Errorf("org: --cwd is required")
 			}
 
-			rt, orgCfg, err := newOrgRuntime(*stateDir, *configPath)
+			rt, err := newOrgRuntime(cmd, *stateDir, *configPath)
 			if err != nil {
 				return err
 			}
 			resolvedModel := model
 			if strings.TrimSpace(resolvedModel) == "" {
-				resolvedModel, err = org.DefaultModelForDriver(orgCfg, driverName)
+				resolvedModel, err = org.DefaultModelForDriver(rt.Config, driverName)
 				if err != nil {
 					return err
 				}
@@ -310,7 +333,7 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err := requireSeatIdentifier("--to", to); err != nil {
 				return err
 			}
-			rt, _, err := newOrgRuntime(*stateDir, *configPath)
+			rt, err := newOrgRuntime(cmd, *stateDir, *configPath)
 			if err != nil {
 				return err
 			}
@@ -357,7 +380,7 @@ func newOrgWaitCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err := requireSeatIdentifier("--seat", seat); err != nil {
 				return err
 			}
-			rt, _, err := newOrgRuntime(*stateDir, *configPath)
+			rt, err := newOrgRuntime(cmd, *stateDir, *configPath)
 			if err != nil {
 				return err
 			}
@@ -395,7 +418,7 @@ func newOrgReadCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err := requireSeatIdentifier("--seat", seat); err != nil {
 				return err
 			}
-			rt, _, err := newOrgRuntime(*stateDir, *configPath)
+			rt, err := newOrgRuntime(cmd, *stateDir, *configPath)
 			if err != nil {
 				return err
 			}
@@ -432,7 +455,7 @@ func newOrgStopCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err := requireSeatIdentifier("--seat", seat); err != nil {
 				return err
 			}
-			rt, _, err := newOrgRuntime(*stateDir, *configPath)
+			rt, err := newOrgRuntime(cmd, *stateDir, *configPath)
 			if err != nil {
 				return err
 			}
@@ -461,7 +484,7 @@ func newOrgStatusCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err := requireOrgID(*orgID); err != nil {
 				return err
 			}
-			rt, _, err := newOrgRuntime(*stateDir, *configPath)
+			rt, err := newOrgRuntime(cmd, *stateDir, *configPath)
 			if err != nil {
 				return err
 			}
@@ -556,7 +579,7 @@ func newOrgDisbandCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err := requireOrgID(*orgID); err != nil {
 				return err
 			}
-			rt, _, err := newOrgRuntime(*stateDir, *configPath)
+			rt, err := newOrgRuntime(cmd, *stateDir, *configPath)
 			if err != nil {
 				return err
 			}
@@ -597,7 +620,7 @@ func newOrgReportCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err := requireOrgID(*orgID); err != nil {
 				return err
 			}
-			rt, _, err := newOrgRuntime(*stateDir, *configPath)
+			rt, err := newOrgRuntime(cmd, *stateDir, *configPath)
 			if err != nil {
 				return err
 			}
@@ -613,4 +636,165 @@ func newOrgReportCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	cmd.Flags().StringVar(&outDir, "out", "", "output directory for the report (default: docs/reports)")
 
 	return cmd
+}
+
+// newOrgWatchCmd wires `ralph org watch` (PR④ pulse layer, AC-3/3b/3c/4/5):
+// a deterministic, interval-driven condition loop over (*org.Org).RunWatch.
+// All condition evaluation, budget-cutoff, ALERT dedupe, and deadman
+// escalation logic lives in internal/org/watch.go -- this command resolves
+// the state directory (the same one manifest/receipts already live in, via
+// org.ResolveOrgStateDir) and wires flags through to org.WatchParams.
+func newOrgWatchCmd(orgID, stateDir, configPath *string) *cobra.Command {
+	var (
+		intervalSeconds int
+		once            bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "watch",
+		Short: "Run the deterministic pulse-layer watchdog for an org",
+		Long: "ralph org watch evaluates watch conditions every --interval-seconds\n" +
+			"(default: [org.watchdog].interval_seconds) for --org-id: seat/org\n" +
+			"wall-clock budget cutoff (auto Stop, the same verb `ralph org stop`\n" +
+			"uses -- StopParams.Reason records the condition/threshold/observed\n" +
+			"value), heartbeat-stall / process-liveness / worktree-scope-change\n" +
+			"ALERTs sent to the lead seat, and a deadman escalation\n" +
+			"(<state-dir>/escalations.jsonl + stderr banner + best-effort darwin\n" +
+			"notification) when the lead does not respond within\n" +
+			"[org].deadman_minutes. Pass --once to run exactly one cycle and exit\n" +
+			"(useful for cron/smoke); the default loops until the command's\n" +
+			"context is done (e.g. SIGINT).",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireOrgID(*orgID); err != nil {
+				return err
+			}
+			// Resolved exactly once (self-review LOW fix) and passed through
+			// to newOrgRuntimeAt instead of also re-resolving inside a second
+			// newOrgRuntime call.
+			resolvedStateDir, _ := org.ResolveOrgStateDir(*stateDir, cmd.Flags().Changed("state-dir"))
+			rt, err := newOrgRuntimeAt(resolvedStateDir, *configPath)
+			if err != nil {
+				return err
+			}
+			cycles := 0
+			if once {
+				cycles = 1
+			}
+			// Effective interval (self-review LOW fix): the raw
+			// --interval-seconds flag value is 0 by default, so the banner
+			// used to print a cadence that was never actually running --
+			// ResolveWatchInterval mirrors RunWatch's own fallback chain so
+			// the banner reports what will really execute.
+			effectiveInterval := org.ResolveWatchInterval(time.Duration(intervalSeconds)*time.Second, rt.Config.Watchdog)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "watching org %q (interval=%s once=%t state-dir=%s)\n",
+				*orgID, effectiveInterval, once, resolvedStateDir)
+			hooks, watcherWG := newWatchdogHooks(cmd.Context(), rt, cmd.ErrOrStderr())
+			err = rt.RunWatch(cmd.Context(), org.WatchParams{
+				OrgID:     *orgID,
+				Interval:  effectiveInterval,
+				Cycles:    cycles,
+				StatusDir: resolvedStateDir,
+			}, hooks)
+			// Wait for any still-in-flight on-demand watcher goroutine
+			// before returning (self-review M-5 fix): without this, `--once`
+			// returned as soon as cycle 1's synchronous pulse evaluation
+			// finished, killing the process before an OnSemanticTrigger
+			// goroutine it had just started could ever produce a watcher
+			// receipt or ALERT. Bounded by RunWatcher's own
+			// watcherInvokeTimeout, and -- for the long-running (non-`--once`)
+			// mode -- by cmd.Context() itself: newWatchdogHooks threads
+			// cmd.Context() into the tracked goroutine's RunWatcher call
+			// (self-review cycle-2 M2-2 fix), so a SIGINT-cancelled context
+			// unwinds an in-flight judgment call immediately instead of
+			// running out the full 60s bound.
+			watcherWG.Wait()
+			return err
+		},
+	}
+
+	cmd.Flags().IntVar(&intervalSeconds, "interval-seconds", 0, "pulse cycle interval in seconds (default: [org.watchdog].interval_seconds)")
+	cmd.Flags().BoolVar(&once, "once", false, "run exactly one cycle and exit")
+
+	return cmd
+}
+
+// newWatchdogHooks builds the org.WatchHooks `ralph org watch` wires into
+// RunWatch (PR④ Slice 4, AC-6): when rt.Config.Watchdog.WatcherEnabled is
+// false, OnSemanticTrigger is left nil (WatchHooks' documented no-op
+// default) -- the pulse layer never invokes an LLM on its own. When true,
+// OnSemanticTrigger runs (*org.Org).RunWatcher in its own goroutine so a
+// hang or slow judgment call can never delay the pulse loop that triggered
+// it (Codex advisory 3) -- RunWatch's own cycle already returned by the
+// time the goroutine even starts running.
+//
+// A single-flight guard (busy) keeps at most one on-demand judgment in
+// flight at a time: the atomic compare-and-swap happens synchronously in
+// OnSemanticTrigger itself (before the goroutine is even spawned), so two
+// triggers arriving from the same synchronous evaluateCycle pass (e.g. two
+// seats both flagged in one cycle) are ordered deterministically -- the
+// first wins the flag and starts its goroutine, the second sees busy
+// already set and is skipped (recorded to stderr, never queued or run
+// concurrently).
+//
+// An abnormal verdict (anything but org.WatcherVerdictNormal) is sent to
+// lead as an ALERT via rt.SendWatchdogAlert (identity-level Agmsg.Send, not
+// the seat-steering Send verb -- see that method's doc comment for why:
+// Send's findSeat lookup fails, silently dropping the message, in the
+// normal "session-promoted lead" org shape where no lead SEAT was ever
+// spawned), in the same message shape watch.go's own (unexported) sendAlert
+// already uses for pulse-layer ALERTs, so ALERT traffic stays uniform
+// regardless of which layer produced it.
+//
+// The returned *sync.WaitGroup (self-review M-5 fix) tracks every
+// OnSemanticTrigger goroutine this closure starts; newOrgWatchCmd's RunE
+// waits on it after RunWatch returns, so `--once` (Cycles: 1, RunWatch
+// returns as soon as cycle 1 finishes) cannot exit the process out from
+// under an in-flight on-demand judgment call before it produces a watcher
+// receipt or ALERT. When WatcherEnabled is false the returned WaitGroup has
+// nothing ever added to it, so Wait() returns immediately.
+//
+// ctx is the command's own context (cmd.Context() at the newOrgWatchCmd call
+// site), not context.Background() (self-review cycle-2 M2-2 fix): the
+// tracked goroutine's RunWatcher/SendWatchdogAlert calls are threaded through
+// it so a SIGINT-cancelled ctx unwinds an in-flight judgment call right away
+// instead of running out RunWatcher's own watcherInvokeTimeout (a fixed 60s
+// bound) first -- that gap regressed the long-running (non-`--once`) `ralph
+// org watch` mode's Ctrl-C responsiveness when the M-5 fix above first added
+// this WaitGroup.
+func newWatchdogHooks(ctx context.Context, rt *org.Org, stderr io.Writer) (org.WatchHooks, *sync.WaitGroup) {
+	var wg sync.WaitGroup
+	if !rt.Config.Watchdog.WatcherEnabled {
+		return org.WatchHooks{}, &wg
+	}
+
+	var busy int32
+	return org.WatchHooks{
+		OnSemanticTrigger: func(orgID, seatID, conditionType, evidence string) {
+			if !atomic.CompareAndSwapInt32(&busy, 0, 1) {
+				_, _ = fmt.Fprintf(stderr, "watchdog: watcher already in flight, skipping semantic trigger for org %q seat %q condition %q\n",
+					orgID, seatID, conditionType)
+				return
+			}
+			wg.Go(func() {
+				defer atomic.StoreInt32(&busy, 0)
+				verdict, err := rt.RunWatcher(ctx, rt.Config.Watchdog, org.WatcherParams{
+					OrgID: orgID, SeatID: seatID, ConditionType: conditionType, Evidence: evidence,
+				})
+				if err != nil {
+					_, _ = fmt.Fprintf(stderr, "watchdog: watcher error for org %q seat %q condition %q: %v\n",
+						orgID, seatID, conditionType, err)
+					return
+				}
+				if verdict.Verdict == org.WatcherVerdictNormal {
+					return
+				}
+				msg := fmt.Sprintf("TYPE: ALERT\nORG_ID: %s\nSEAT: %s\nCONDITION: watcher_%s\n\nwatcher verdict=%s reason=%s",
+					orgID, seatID, conditionType, verdict.Verdict, verdict.Reason)
+				if err := rt.SendWatchdogAlert(ctx, orgID, msg); err != nil {
+					_, _ = fmt.Fprintf(stderr, "watchdog: failed to ALERT lead for org %q seat %q verdict %q: %v\n",
+						orgID, seatID, verdict.Verdict, err)
+				}
+			})
+		},
+	}, &wg
 }
