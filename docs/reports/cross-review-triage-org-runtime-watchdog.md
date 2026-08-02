@@ -39,3 +39,23 @@ Cycle 1/2(cap 未到達)。ユーザーの継続自律指示に基づき Fix →
 ## Decision(cap-reached Option 1)
 
 安全網(デッドマン)の取り逃がしという P1 の性質から、ユーザーの継続自律指示のもと **cap を一時的に 3 に引き上げて修正**を選択(`RALPH_STANDARD_MAX_PIPELINE_CYCLES=3` 相当。post-implementation-pipeline.md の cap-reached Option 1)。修正後にフルパイプライン cycle 3 を実施する。
+
+---
+
+# Cycle 3 (2026-08-03)
+
+- Cycle: 3/3(引き上げ後 cap 到達)
+- HEAD: 1b48b04
+- Total reviewer findings: 2
+- After triage: ACTION_REQUIRED=0, WORTH_CONSIDERING=2, DISMISSED=0
+
+cycle-2 の #3(P1 デッドマン取り逃がし)/#4 は修正済みで再指摘なし。新規 2 件はいずれも狭いエッジケースの堅牢化(P2)であり、コア経路(遮断・ALERT 配送・デッドマン・watcher)は実機スモークとテスト 406 件で証明済み。
+
+| # | Reviewer finding | Triage rationale |
+|---|---|---|
+| 5 | [P2] プローブ不可時(`LeadAgentGet==""` / `HistoryLeadLines==-1`)に記録された alert が、プローブ復旧だけで lead 無応答でも解消される | 真正だが「プローブ全滅中に alert 発生 → 復旧」の限定窓。可用性状態の明示保持で対応可能。WORTH_CONSIDERING → tech-debt 登録し PR body Known gaps に記載。 |
+| 6 | [P2] 初回 ALERT 時に `Agmsg.Join` が一時失敗すると `WatchdogJoined` が true で永続化され、以後 rejoin されず配送が失敗し続ける | 真正だが transient-join 限定。join 成功時のみフラグ設定の 1 行修正で対応可能。同上。 |
+
+## Decision(cap-reached Option 2)
+
+引き上げ後の cap(3)にも到達。サイクルごとに新規 P2 が発見される逓減局面であり、両件とも限定的エッジケースのため「記録して PR」を選択。tech-debt 2 行を追加し、PR body の Known gaps に記載する。
