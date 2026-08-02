@@ -137,3 +137,74 @@ No new drift found. The two tech-debt rows `52ecacb` added for the cycle-1 verif
 - Carried forward, non-blocking: the 3 deferred LOW findings tech-debt row (unchanged, next-touch trigger already recorded).
 
 Recommend: proceed to `/test` (cycle-2 re-run) to close the coverage-evidence gap noted above, then continue the pipeline toward `/pr`.
+
+## Cycle 3 (fix-and-revalidate, cap raised to 3)
+
+- Date: 2026-08-03
+- Verifier: `verifier` subagent (spec compliance + static analysis, no tests)
+- Scope: delta since cycle-2 verify baseline `b7110c6`, through HEAD `8bbd55e` on `feat/org-runtime-watchdog` (merge-base `e7a32b9`): `cca5201`/`d6ddf61` (cycle-2 test + sync-docs reports), `764b01f` (fix: cross-review cycle-2 #3/#4 — lead-only history filter + same-cycle cut-seat skip), `d6e557a` (refactor: `strings.Cut`/`SplitSeq` lint cleanup), `ae6d852` (docs: cycle-3 self-review section, findings H3-1/M3-1/M3-2/L3-1..3), `8bbd55e` (fix: corrected lead-activity model — `sent` events are lead-authored by construction; widened lead-driven lifecycle set for M3-1; count-based history comparison for M3-2; tech-debt row rewrite).
+- Cap note: pipeline cycle cap was raised to 3 for this fix per `docs/reports/cross-review-triage-org-runtime-watchdog.md` ("Decision (cap-reached Option 1)").
+
+### Deterministic checks run (re-confirmed at HEAD)
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `RALPH_VERIFY_SCOPE=full ./scripts/run-static-verify.sh` | PASS (exit 0) | Settings/hooks/mirror gates OK; Codex hook/PR-provenance guards OK; `scripts/check-sync.sh` → 179 IDENTICAL / 0 DRIFTED / 3 KNOWN_DIFF / 10 TEMPLATE_ONLY (unchanged from cycle 2, all pre-existing), "PASS: all files in sync."; `scripts/check-pipeline-sync.sh` → all 8 canonical-order references OK; `scripts/check-skill-sync.sh` → "14 skill(s) in lock-step" (this delta touches no `.claude/skills/`/`.agents/skills/` content). Go verifier (full scope): `gofmt: ok`, `golangci-lint run` → `0 issues.`; `go vet`/`staticcheck` silent (pass; `staticcheck` binary present at `~/go/bin/staticcheck`). Evidence: `docs/evidence/verify-2026-08-02-175415.log` (gitignored per `docs/evidence/*.log`, not committed). |
+| `go build ./...` | Clean (exit 0) | Direct re-confirmation. |
+| `go vet ./...` | Silent (exit 0) | Full-package re-confirmation (also compiles all `_test.go` files, catching any compile-time regression from the `watch_test.go` rewrite without running behavioral tests). |
+| `git status --porcelain` | Empty | Working tree clean at HEAD `8bbd55e`. |
+
+### Cross-review cycle-2 #3/#4 (764b01f)
+
+| Item | Status | Evidence |
+| --- | --- | --- |
+| #3 (P1: deadman's 3rd activity source — agmsg history — cleared pending alerts on ANY team traffic, not just lead's) | Fixed | `filterLeadHistoryLines`/`leadHistoryFromField` (introduced in `764b01f`, present in current `watch.go:930-982`) parse each history line's `from` field and keep only `LeadIdentity`-authored lines before comparison. Confirmed present and unregressed at HEAD (refined further by `8bbd55e`, see M3-2 below). |
+| #4 (P2: total-budget cutoff re-evaluated a just-cut seat later in the same cycle against a stale pre-cutoff snapshot, producing a spurious ALERT/deadman record) | Fixed, not regressed | `evaluateTotalBudget` (`watch.go:489-601`) returns a `cutSeats map[string]bool`; the per-seat loop's caller at `watch.go:489-491` skips any seat present in `cutSeats` for the rest of the cycle. Confirmed present at HEAD, untouched by `8bbd55e` (which only edited the deadman/history functions). |
+
+### Self-review cycle-3 findings (H3-1, M3-1, M3-2, L3-1..3) — fix-commit cross-check (`8bbd55e`)
+
+| Finding | Status | Where |
+| --- | --- | --- |
+| H3-1 (HIGH: `leadActivityEventCount`'s `ev.SeatID == LeadIdentity` branch was inverted — `Send` writes `SeatID: p.To`, the *recipient*, not the author, so seat→lead `sent` traffic still cleared pending alerts while lead→seat sends did not) | Fixed | `leadActivityEventCount` (`watch.go:876-895`) now counts every `EventSent` unconditionally: `if ev.Event == EventSent { n++; continue }`. Verified independently against the codebase (not just the fix commit's own comment): `internal/org/verbs.go:83-136` `Send` records `SeatID: p.To` on both the dry-run and real paths, and `internal/cli/org.go:340` is the only call site for `Org.Send`, wired to the CLI verb `ralph org send --to <seat>`. Grepping `internal/org/prompts/{reviewer,qa}.md` (the seat role-prompt templates) for `"org send"`/`"agmsg"` returns no hits — seats are never instructed to invoke this verb; only `internal/org/prompts/lead.md` documents it ("`ralph org send --to <seat_id>` で個別に typed message を送ってください"). This independently confirms the doc comment's "only lead/the operator drives that verb" claim rather than just trusting it. Regression tests: `TestWatch_Deadman_SeatSentEvent_ClearsPendingAlert_WatchdogCutoffDoesNot` (replaces the inverted `TestWatch_Deadman_UnrelatedSeatEvent_DoesNotClearPendingAlert`, which is fully removed — no duplicate/dead test left behind), `TestWatch_Deadman_LeadSpawnsReplacementSeat_ClearsPendingAlert`. |
+| M3-1 (MEDIUM: lead spawning a *replacement* seat in response to a stall ALERT produced a `spawned` event that counted as nothing, since only `stopped`/`disbanded` were treated as lead-driven-lifecycle evidence) | Fixed | The non-`EventSent` branch (`watch.go:896-903`) widened from `{EventStopped, EventDisbanded}` to `{EventSpawned, EventSpawnStarted, EventStopped, EventDisbanded, EventRejected}` (all 5 confirmed to exist as named constants in `internal/org/seat.go:32-38`), still gated on `!strings.Contains(ev.Details, "reason=watchdog_")` to exclude the watchdog's own cutoffs. Regression test: `TestWatch_Deadman_LeadSpawnsReplacementSeat_ClearsPendingAlert` spawns a second seat between cycles and asserts the pending alert clears with no escalation. |
+| M3-2 (MEDIUM: the history source's exact-string comparison could read pure window-eviction — as other seats chat, older lead lines fall out of the underlying last-20-of-everyone window — as "activity" and wrongly clear a pending alert) | Fixed | `historySnapshot`/`filterLeadHistoryLines` (text) replaced as the deadman comparison basis by `historyLeadLineCount` (`watch.go:918-949`, returns `int`, `-1` sentinel for probe-unavailable) and `leadHistoryLines` (returns `[]string`, shared by both the new count path and the old text path, kept as `filterLeadHistoryLines`'s thin wrapper so `TestFilterLeadHistoryLines` still pins the parsing contract as a string). `checkDeadman` (`watch.go:1030-1041`) now compares `cur > pending.HistoryLeadLines` (strict growth) instead of `cur != "" && cur != pending.History` (any change) — eviction can only decrease a count, never manufacture an increase, closing the false-activity path. `watchPendingAlert.History string` → `HistoryLeadLines int` in the persisted JSON schema (`json:"history_lead_lines"`), a breaking field rename with no migration path for any in-flight `watch-status-<org_id>.json` from a prior binary version — acceptable per the plan's Non-goals/Rollout notes (watch is not yet in production use; state resets cleanly on next `ralph org watch` invocation) but worth a one-line callout since it is a schema change, not purely additive. Regression test: `TestWatch_Deadman_HistoryWindowEviction_DoesNotFalselyClearPendingAlert` (3 lead lines shrink to 1 via eviction; pending alert must remain). |
+| L3-1 (LOW: `leadHistoryFromField`'s doc cited `.agents/skills/agmsg/scripts/history.sh` as if repo-relative, but this repo's `.agents/skills/` tree has no `agmsg` entry) | Fixed | Doc comment (`watch.go:952-956`) now reads "the agmsg skill's `scripts/history.sh`, a user-global install under `~/.agents/skills/agmsg/`, not vendored in this repo". Independently confirmed: `ls .agents/skills/` at HEAD lists 14 skills (matches `check-skill-sync.sh`'s count), no `agmsg` directory. |
+| L3-2 (LOW: the first-`"] "`-occurrence parse anchor had no documented justification for why it's safe against a body containing a literal `"] "`) | Fixed | Doc comment (`watch.go:958-967`) now explains `history.sh`'s own `replace(replace(body, char(10), '\n'), char(9), '\t')` escaping guarantees each history record is exactly one physical line, so the first `"] "` is always the timestamp's, not a false split inside an escaped body. |
+| L3-3 (LOW: `docs/tech-debt/README.md:70`'s "fully closed" claim overclaimed correctness for the second consecutive cycle, since H3-1's predicate was backwards) | Fixed | Tech-debt row rewritten (see below) to describe the corrected model and cite the H3-1/M3-1 fix commit and both new regression tests by name, rather than re-asserting "fully closed" without the underlying fix. |
+
+### Regression check against cycle-1/cycle-2 fixes (independent re-confirmation, not just trusting the cycle-3 self-review's own table)
+
+| Prior finding | Status at HEAD | Evidence |
+| --- | --- | --- |
+| H-1 (per-org `watch-status-<org_id>.json`) | Not regressed | `WatchStatusFileName(orgID)` unchanged; `8bbd55e` only touched `leadActivityEventCount`/`historySnapshot`→`historyLeadLineCount`/`checkDeadman`. |
+| H-2 (cutoff ratchet only on successful `Stop`) | Not regressed | `watch.go:595` `Cutoff: allStopped`, `watch.go:737` `Cutoff: stopErr == nil` — both grep-confirmed present, untouched by the cycle-3 delta. |
+| AR-1 (deadman activity `orgID`-scoped) | Not regressed | `watch.go:872` `if ev.OrgID != orgID { continue }` still the first gate inside `leadActivityEventCount`. |
+| AR-2 / zero-active-seats guard | Not regressed | `watch.go:553` `if len(activeSeats) == 0 {` early-return still precedes the ratchet loop. |
+| M-5 (`--once` joins the watcher goroutine) | Not regressed | `internal/cli/org.go:710` `watcherWG.Wait()` still present. |
+| M2-2 (SIGINT-cancellable context threaded into the tracked goroutine) | Not regressed | `internal/cli/org.go:764` `newWatchdogHooks(ctx context.Context, ...)` signature unchanged by this delta. |
+
+No cycle-1 or cycle-2 fix regressed by the cycle-3 delta.
+
+### Spec / documentation drift (cycle 3)
+
+- **Tech-debt row (`docs/tech-debt/README.md:70`)**: rewritten in `8bbd55e` to accurately describe the corrected `sent`-is-lead-by-construction model, the widened lifecycle set, and cites both new regression tests by name. Independently re-read against current `watch.go` — the row's claim now matches the code. The deferred-LOW row directly below it was also expanded from 3 to 4 items, folding in self-review cycle-2's L2-6 (zero-active-seats guard leaves `Active` uncleared) per the cycle-3 self-review's own recommendation — this is documentation catching up with a previously-untracked deferral, not new drift.
+- **Plan (`docs/plans/active/2026-08-02-org-runtime-watchdog.md`) AC-5 evidence text (line 73) and "Implementation notes" deviations section**: **not updated in this delta** (`git show --stat` on all 4 delta commits shows no touch to the plan file). AC-5's "既知の残課題" (known residual) prose still describes the pre-cycle-3 state (`leadActivityEventCount` only excludes watchdog's own events, not scoped to seat/org) even though cross-review AR-1 and self-review cycle-2/3 have since layered org-scope, seat-scope (later corrected), and the H3-1 model-correction + M3-1 lifecycle widening on top of it; the "Implementation notes" section's last dated entry is still "Cycle 2". This is doc drift consistent with the known pattern of AC-checkbox/deviation-note text lagging fix commits — non-blocking (the plan's `[x]` checkboxes and evidence pointers to the verify/test/self-review reports remain directionally correct, just stale in the caveat wording), but should be swept in the same `/sync-docs` pass that will also need to add a cycle-3 test report section.
+- No other drift found: `.claude/rules/agent-messaging.md`, `/org` skill mirrors, `definition-of-done.md`, spec FR-8 — none reference the deadman activity-counting internals this delta touches, so none are affected.
+
+### Coverage gaps (cycle 3)
+
+- `go test ./...` / `-race` execution: not run here (belongs to `/test`). The committed `docs/reports/test-2026-08-02-org-runtime-watchdog.md` has only Cycle 1 and Cycle 2 sections — no cycle-3 pass exists yet for the 5 new/changed test names introduced by `764b01f` and `8bbd55e` (`TestWatch_Deadman_SeatSentEvent_ClearsPendingAlert_WatchdogCutoffDoesNot`, `TestWatch_Deadman_LeadSpawnsReplacementSeat_ClearsPendingAlert`, `TestWatch_Deadman_HistoryWindowEviction_DoesNotFalselyClearPendingAlert`, plus the `764b01f`-added history-filter and same-cycle-skip tests). `go vet ./...` confirms these compile; behavioral correctness is unverified here by design.
+- Plan's AC-5 evidence text and Implementation notes section lag the cycle-3 fixes (see drift note above) — recommend `/sync-docs` sweep alongside the cycle-3 test report addition.
+- `watchPendingAlert`'s `History string` → `HistoryLeadLines int` JSON field rename (M3-2) has no migration path for pre-existing `watch-status-<org_id>.json` files from an older binary; acceptable given watch has not shipped to production use yet, but not called out anywhere in the plan's Rollout notes.
+
+### Verdict (cycle 3)
+
+**PASS**, no fail-blocking findings:
+
+- Verified: full-scope `run-static-verify.sh` (gofmt/golangci-lint/go vet/staticcheck all green), `check-sync.sh` (0 DRIFTED, 3 KNOWN_DIFF unchanged, 179 IDENTICAL), `check-skill-sync.sh` (14 in lock-step), `check-pipeline-sync.sh` (all 8 references OK), `go build`/`go vet ./...` direct re-confirmation, clean working tree at HEAD `8bbd55e`.
+- Verified: cross-review cycle-2 #3 (lead-only history filter) and #4 (same-cycle cut-seat skip) both fixed and unregressed; self-review cycle-3 H3-1 (corrected lead-activity model, independently cross-checked against `verbs.go`/role-prompt templates, not just the fix commit's own comment), M3-1 (widened lead-driven lifecycle set), M3-2 (count-based history comparison), L3-1/L3-2/L3-3 (doc-comment accuracy + tech-debt row rewrite) all fixed with regression tests or direct code confirmation.
+- Verified: no regression to the H-1/H-2/AR-1/AR-2/M-5/M2-2 fix stack from cycles 1–2.
+- Not verified (out of scope for `/verify`): behavioral correctness of the cycle-3 test names — hand off to `/test` for a cycle-3 pass.
+- New drift flagged (non-blocking): plan's AC-5 evidence prose and Implementation notes section have not been updated to reflect the cycle-3 fixes; the `HistoryLeadLines` JSON field rename is an undocumented (if low-risk) schema change.
+
+Recommend: proceed to `/test` (cycle-3 re-run) to add coverage evidence for the new test names above, then `/sync-docs` to sweep the plan's stale AC-5/Implementation-notes text and add a cycle-3 test-report section, then continue toward `/pr`.
