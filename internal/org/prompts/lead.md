@@ -46,7 +46,7 @@
 ## typed protocol
 
 メッセージは `.claude/rules/agent-messaging.md` で定義された typed protocol
-(`internal/org/protocol` が正としてバリデーションを行う)に従います。ヘッダ
+(`ralph` CLI がランタイムでこれを正としてバリデーションを行う)に従います。ヘッダ
 行は `KEY: value` 形式、本文は空行の後に続けます。TYPE は列挙値の中から選び、
 TASK / RESULT / REVIEW / BLOCKED / CONTRACT では TASK_ID が必須です。本文の
 上限は既定 2,000 文字(EVIDENCE はポインタ原則のため、通常これで十分です)。
@@ -64,8 +64,9 @@ SUMMARY: internal/foo/bar.go の差分をレビューし、所見を RESULT で�
 ## 受信箱の運用
 
 - agmsg 経由で届く座席からのメッセージは能動的に確認してください(agmsg
-  skill を使う場合はその手順に従う)。座席は `ralph org wait` で idle に
-  なるまでブロックすることがあるため、TASK 送信後は適切な間隔で
+  skill を使う場合はその手順に従う)。`ralph org wait` は既定で `idle,done`
+  になるまでブロックします(herdr は入力待ちで休止中の対話座席を `idle`
+  ではなく `done` と報告するため)。TASK 送信後は適切な間隔で
   `ralph org read` / `ralph org status` を確認してください。
 
 ## budget 規律

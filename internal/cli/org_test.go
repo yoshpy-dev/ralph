@@ -1035,9 +1035,58 @@ func TestOrgWait_UnknownSeat_StillSucceeds_PassthroughToHerdr(t *testing.T) {
 		t.Fatalf("expected wait on an unrecorded seat to still succeed (pure herdr passthrough), got %v (output: %s)", err, out)
 	}
 
+	// --timeout-ms is left at its bounded default (60000) here, so the
+	// expected argv includes it -- see TestOrgWait_DefaultUntilAndTimeout_AreBoundedAndDone
+	// for the defaults themselves.
 	herdrLines := readLogLines(t, herdrLog)
-	if !containsLine(herdrLines, "agent wait org-a_never-spawned --until idle") {
+	if !containsLine(herdrLines, "agent wait org-a_never-spawned --until idle --timeout 60000") {
 		t.Errorf("expected the herdr log to show a wait call for the namespaced agent name, got: %v", herdrLines)
+	}
+}
+
+// TestOrgWait_DefaultUntilAndTimeout_AreBoundedAndDone covers the self-review
+// HIGH-1 fix: `ralph org wait`'s defaults changed from `--until idle` /
+// `--timeout-ms 0` (unbounded) to `--until idle,done` / `--timeout-ms 60000`
+// (bounded) -- a headless lead following its own default wait must not be
+// able to block forever against a perfectly receptive seat (herdr reports an
+// interactive agent resting at its input prompt as "done", not "idle"; see
+// internal/org/verbs.go's Send, which already waits on both).
+func TestOrgWait_DefaultUntilAndTimeout_AreBoundedAndDone(t *testing.T) {
+	herdrLog, _ := setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	out, err := runOrgCmd(t, "wait", "--org-id", "org-a", "--seat", "seat-1", "--state-dir", stateDir)
+	if err != nil {
+		t.Fatalf("wait with default flags failed: %v (output: %s)", err, out)
+	}
+
+	herdrLines := readLogLines(t, herdrLog)
+	if !containsLine(herdrLines, "agent wait org-a_seat-1 --until idle --until done --timeout 60000") {
+		t.Errorf("expected the default --until/--timeout-ms to produce a bounded idle+done wait, got: %v", herdrLines)
+	}
+}
+
+// TestOrgWait_ExplicitZeroTimeout_StaysUnbounded verifies --timeout-ms 0
+// still opts out of the bounded default explicitly (herdr's own `--timeout`
+// flag is omitted entirely), matching driver.Herdr.AgentWait's documented
+// "timeoutMS <= 0 omits --timeout" contract.
+func TestOrgWait_ExplicitZeroTimeout_StaysUnbounded(t *testing.T) {
+	herdrLog, _ := setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	out, err := runOrgCmd(t, "wait", "--org-id", "org-a", "--seat", "seat-1", "--timeout-ms", "0", "--state-dir", stateDir)
+	if err != nil {
+		t.Fatalf("wait with --timeout-ms 0 failed: %v (output: %s)", err, out)
+	}
+
+	herdrLines := readLogLines(t, herdrLog)
+	if !containsLine(herdrLines, "agent wait org-a_seat-1 --until idle --until done") {
+		t.Errorf("expected --timeout-ms 0 to omit --timeout entirely, got: %v", herdrLines)
+	}
+	for _, line := range herdrLines {
+		if strings.Contains(line, "--timeout ") {
+			t.Errorf("expected no --timeout flag when --timeout-ms is explicitly 0, got: %v", herdrLines)
+		}
 	}
 }
 
@@ -1150,7 +1199,10 @@ func TestOrgSend_TraversalTo_NonZeroExit(t *testing.T) {
 // TestOrgSpawn_MissingScope_NonZeroExit_NoAllowUnscoped is the CLI-level
 // counterpart of AC-2b's minimum control gate: omitting both --scope and
 // --allow-unscoped under the default (autonomous) config exits non-zero and
-// mentions both flags.
+// mentions both flags. The gate now routes through reject() (self-review LOW
+// finding), so it leaves exactly one `rejected` manifest event behind -- but
+// still zero herdr calls and no spawn_started, since reject() never appends
+// one.
 func TestOrgSpawn_MissingScope_NonZeroExit_NoAllowUnscoped(t *testing.T) {
 	herdrLog, _ := setupOrgStubPATH(t)
 	stateDir := filepath.Join(t.TempDir(), "state")
@@ -1171,8 +1223,8 @@ func TestOrgSpawn_MissingScope_NonZeroExit_NoAllowUnscoped(t *testing.T) {
 		t.Errorf("expected zero herdr calls for the gate rejection, got: %v", herdrLines)
 	}
 	events := readManifestEvents(t, filepath.Join(stateDir, "manifest.jsonl"))
-	if len(events) != 0 {
-		t.Errorf("expected zero manifest events for the gate rejection, got: %v", events)
+	if len(events) != 1 || events[0].Event != "rejected" {
+		t.Errorf("expected exactly one rejected manifest event for the gate rejection, got: %v", events)
 	}
 }
 

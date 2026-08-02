@@ -82,11 +82,16 @@ func requireSeatIdentifier(flag, value string) error {
 
 // newOrgRuntime constructs an org.Org wired to real driver adapters
 // (driver.ExecRunner, which shells out to the herdr/agmsg binaries on PATH)
-// and manifest/receipt stores rooted at stateDir.
-func newOrgRuntime(stateDir, configPath string) (*org.Org, error) {
+// and manifest/receipt stores rooted at stateDir. It also returns the
+// resolved config.OrgConfig it built the Org from, so a caller that needs
+// the config for its own purposes beyond wiring (e.g. newOrgStartCmd's
+// --model default resolution via org.DefaultModelForDriver) does not have
+// to call resolveOrgConfig a second time and risk two ralph.toml reads
+// diverging.
+func newOrgRuntime(stateDir, configPath string) (*org.Org, config.OrgConfig, error) {
 	orgCfg, err := resolveOrgConfig(configPath)
 	if err != nil {
-		return nil, fmt.Errorf("org: load config: %w", err)
+		return nil, config.OrgConfig{}, fmt.Errorf("org: load config: %w", err)
 	}
 	runner := driver.ExecRunner{}
 	return &org.Org{
@@ -95,7 +100,7 @@ func newOrgRuntime(stateDir, configPath string) (*org.Org, error) {
 		Receipts: org.NewReceiptStoreAtPath(filepath.Join(stateDir, "model-receipts.jsonl")),
 		Herdr:    driver.Herdr{R: runner},
 		Agmsg:    driver.Agmsg{R: runner, Home: driver.ResolveAgmsgHome(orgCfg.AgmsgHome)},
-	}, nil
+	}, orgCfg, nil
 }
 
 // resolveOrgConfig loads the [org] envelope from configPath, falling back
@@ -158,7 +163,7 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 				}
 			}
 
-			rt, err := newOrgRuntime(*stateDir, *configPath)
+			rt, _, err := newOrgRuntime(*stateDir, *configPath)
 			if err != nil {
 				return err
 			}
@@ -246,9 +251,9 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 				return fmt.Errorf("org: --cwd is required")
 			}
 
-			orgCfg, err := resolveOrgConfig(*configPath)
+			rt, orgCfg, err := newOrgRuntime(*stateDir, *configPath)
 			if err != nil {
-				return fmt.Errorf("org: load config: %w", err)
+				return err
 			}
 			resolvedModel := model
 			if strings.TrimSpace(resolvedModel) == "" {
@@ -258,10 +263,6 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 				}
 			}
 
-			rt, err := newOrgRuntime(*stateDir, *configPath)
-			if err != nil {
-				return err
-			}
 			result := rt.Spawn(org.SpawnParams{
 				OrgID: *orgID, SeatID: org.LeadIdentity, Role: org.LeadIdentity,
 				Driver: driverName, Model: resolvedModel, Cwd: cwd, Task: task,
@@ -309,7 +310,7 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err := requireSeatIdentifier("--to", to); err != nil {
 				return err
 			}
-			rt, err := newOrgRuntime(*stateDir, *configPath)
+			rt, _, err := newOrgRuntime(*stateDir, *configPath)
 			if err != nil {
 				return err
 			}
@@ -341,6 +342,14 @@ func newOrgWaitCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "wait",
 		Short: "Wait for a seat to reach one of the given states",
+		Long: "ralph org wait defaults --until to \"idle,done\": live-probed herdr\n" +
+			"(v0.7.5) reports an interactive agent resting at its input prompt as\n" +
+			"\"done\" (turn finished), not \"idle\" -- waiting on \"idle\" alone times\n" +
+			"out against a perfectly receptive seat (same finding that fixed `ralph\n" +
+			"org send`'s own wait, internal/org/verbs.go's Send). --timeout-ms\n" +
+			"defaults to a bounded 60000ms so a headless lead following this\n" +
+			"command's own default cannot block forever; pass --timeout-ms 0 to\n" +
+			"explicitly opt into an unbounded wait.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireOrgID(*orgID); err != nil {
 				return err
@@ -348,7 +357,7 @@ func newOrgWaitCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err := requireSeatIdentifier("--seat", seat); err != nil {
 				return err
 			}
-			rt, err := newOrgRuntime(*stateDir, *configPath)
+			rt, _, err := newOrgRuntime(*stateDir, *configPath)
 			if err != nil {
 				return err
 			}
@@ -364,8 +373,8 @@ func newOrgWaitCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&seat, "seat", "", "seat id to wait on (required)")
-	cmd.Flags().StringVar(&until, "until", "idle", "comma-separated states to wait for (idle,done,blocked)")
-	cmd.Flags().IntVar(&timeoutMS, "timeout-ms", 0, "wait timeout in milliseconds (0 = no timeout)")
+	cmd.Flags().StringVar(&until, "until", "idle,done", "comma-separated states to wait for (idle,done,blocked)")
+	cmd.Flags().IntVar(&timeoutMS, "timeout-ms", 60000, "wait timeout in milliseconds, bounded by default (pass 0 to explicitly wait unbounded)")
 
 	return cmd
 }
@@ -386,7 +395,7 @@ func newOrgReadCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err := requireSeatIdentifier("--seat", seat); err != nil {
 				return err
 			}
-			rt, err := newOrgRuntime(*stateDir, *configPath)
+			rt, _, err := newOrgRuntime(*stateDir, *configPath)
 			if err != nil {
 				return err
 			}
@@ -423,7 +432,7 @@ func newOrgStopCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err := requireSeatIdentifier("--seat", seat); err != nil {
 				return err
 			}
-			rt, err := newOrgRuntime(*stateDir, *configPath)
+			rt, _, err := newOrgRuntime(*stateDir, *configPath)
 			if err != nil {
 				return err
 			}
@@ -452,7 +461,7 @@ func newOrgStatusCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err := requireOrgID(*orgID); err != nil {
 				return err
 			}
-			rt, err := newOrgRuntime(*stateDir, *configPath)
+			rt, _, err := newOrgRuntime(*stateDir, *configPath)
 			if err != nil {
 				return err
 			}
@@ -547,7 +556,7 @@ func newOrgDisbandCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err := requireOrgID(*orgID); err != nil {
 				return err
 			}
-			rt, err := newOrgRuntime(*stateDir, *configPath)
+			rt, _, err := newOrgRuntime(*stateDir, *configPath)
 			if err != nil {
 				return err
 			}
@@ -588,7 +597,7 @@ func newOrgReportCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err := requireOrgID(*orgID); err != nil {
 				return err
 			}
-			rt, err := newOrgRuntime(*stateDir, *configPath)
+			rt, _, err := newOrgRuntime(*stateDir, *configPath)
 			if err != nil {
 				return err
 			}

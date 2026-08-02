@@ -222,7 +222,14 @@ func Default() Config {
 }
 
 // orgPermissionModeAllowed is the enum [org.permissions].default and every
-// [org.permissions.roles] value must belong to.
+// [org.permissions.roles] value must belong to. The canonical, grep-able
+// definition of this same three-value enum is
+// internal/org.PermissionModeAutonomous/Edits/Guarded (self-review
+// MEDIUM-4) -- this package cannot import internal/org to reuse it directly
+// (internal/org already imports internal/config, so the reverse would be an
+// import cycle), hence the literal re-spelling here. Keep these three
+// string values in sync with internal/org/permissions.go's constants by
+// hand if the enum ever changes.
 var orgPermissionModeAllowed = map[string]bool{
 	"autonomous": true,
 	"edits":      true,

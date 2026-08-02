@@ -4,9 +4,10 @@ description: org runtime の Lead 操作マニュアル。組織(座席)の編�
 ---
 `ralph org` は herdr/agmsg を土台にした座席(seat)機構です。この skill は
 Lead(座席の編成・統括を行う識別子)がその機構をどう操作するかの正準マニュ
-アルです。`internal/org/prompts/lead.md`(headless lead の起動プロンプト)は
-この skill を「動詞の詳しい使い方・編成パターン・budget 作法」の参照先とし
-て指します。
+アルです。headless lead の起動プロンプト(`ralph` バイナリに埋め込まれた
+役割プロンプト雛形の一つ。実体は `ralph` CLI 自身のリポジトリにあり、
+`ralph init` でスキャフォールドされる対象には含まれない)は、この skill を
+「動詞の詳しい使い方・編成パターン・budget 作法」の参照先として指します。
 
 ## Goals
 
@@ -40,13 +41,13 @@ Lead(座席の編成・統括を行う識別子)がその機構をどう操作�
 |---|---|---|
 | `spawn` | 座席を起動。`--role`(役割別プロンプト雛形を自動展開)、`--scope`(担当範囲の説明。autonomous では必須)、`--driver`(claude\|codex)、`--model`、`--dry-run`(実起動せず検証・記録のみ)、`--allow-unscoped`(--scope 省略を明示的に許可。使用は manifest に記録される)、`--lead-driver`(lead 識別子の agmsg type 導出元)。autonomous モードの座席は `--scope` 必須、省略時は fail-closed。 | `ralph org spawn --org-id X --id reviewer-1 --role reviewer --scope "internal/org/**" --driver claude --model sonnet --cwd .` |
 | `send` | 座席へ typed protocol メッセージを送る。既定で `.claude/rules/agent-messaging.md` のプロトコルを検証(TYPE 列挙・TASK_ID 必須チェック・本文 2,000 文字上限)。`--raw` で検証をバイパス(bypass は manifest に `raw=true` で記録される。デバッグ用途以外は使わない)。 | `ralph org send --org-id X --to reviewer-1 --text "$(cat task.txt)"` |
-| `wait` | 座席が指定状態(idle/done/blocked など)になるまでブロックして待つ。 | `ralph org wait --org-id X --seat reviewer-1 --until idle` |
+| `wait` | 座席が指定状態(idle/done/blocked など)になるまでブロックして待つ。`--until` 既定は `idle,done`(herdr は入力待ちで休止中の対話エージェントを `idle` ではなく `done` と報告するため、両方を既定で待つ)。`--timeout-ms` 既定は 60000(有界)。無期限待機したい場合のみ明示的に `--timeout-ms 0` を渡す。 | `ralph org wait --org-id X --seat reviewer-1` |
 | `read` | 座席の直近 pane 出力を読む。 | `ralph org read --org-id X --seat reviewer-1 --lines 100` |
 | `status` | 座席台帳(roster)を表示。`--all` で dry-run 座席も含める。 | `ralph org status --org-id X --all` |
 | `stop` | 座席を停止。 | `ralph org stop --org-id X --seat reviewer-1` |
 | `disband` | org の全座席を停止し組織を解散。 | `ralph org disband --org-id X` |
 | `report` | manifest + receipts から編成履歴を `docs/reports/org-manifest-<org_id>-<date>.md` に書き出す。 | `ralph org report --org-id X` |
-| `start` | headless lead 座席を spawn する糖衣(`spawn --role lead` 相当。`lead.md` 雛形にタスクを展開)。 | `ralph org start --org-id X --cwd . "<task>"` |
+| `start` | headless lead 座席を spawn する糖衣(`spawn --role lead` 相当。`lead.md` 雛形にタスクを展開)。lead も他の座席と同じ AC-2b ゲートの対象(autonomous 既定では `--scope` 必須)。 | `ralph org start --org-id X --cwd . --scope "org-a 全体の編成・統括" "<task>"` |
 
 ## 編成パターン
 
@@ -65,7 +66,7 @@ Lead(座席の編成・統括を行う識別子)がその機構をどう操作�
 
 ## 役割
 
-`--role` に渡すと `internal/org/prompts/` の雛形が自動展開される:
+`--role` に渡すと、`ralph` バイナリに埋め込まれた役割プロンプト雛形が自動展開される:
 
 - **lead**: 組織の座標役。`ralph org start` の既定役割。実装は座席へ委譲し、
   自身は火消し(座席が詰まった・編成そのものの調整)に限定する。
@@ -83,11 +84,13 @@ receipts / 役割雛形)を使うため、手順は共通。
 - **(A) 現セッション昇格(主経路)**: 対話セッションがそのまま Lead になり、
   この skill の動詞リファレンスに従って `ralph org` を実行し座席を編成する。
   ユーザーとの対話を続けながら編成できるため、通常はこちらを使う。
-- **(B) headless**: `ralph org start --org-id X --cwd . "<task>"` で lead
-  座席を herdr pane 内の常駐セッションとして起動する。`internal/org/prompts/
-  lead.md` 雛形にタスクとエンベロープ要約が展開され、起動した lead が以後
-  この skill の手順に従って自律編成する。人間が張り付けない・複数タスクを
-  並行で走らせたい場合に使う。
+- **(B) headless**: `ralph org start --org-id X --cwd . --scope "<担当範囲>"
+  "<task>"` で lead 座席を herdr pane 内の常駐セッションとして起動する
+  (`--scope` は他の座席と同じ AC-2b ゲートの対象。省略したい場合のみ
+  `--allow-unscoped` を明示する)。`ralph` バイナリに埋め込まれた lead 用の
+  役割プロンプト雛形にタスクとエンベロープ要約が展開され、起動した lead が
+  以後この skill の手順に従って自律編成する。人間が張り付けない・複数タスク
+  を並行で走らせたい場合に使う。
 
 いずれの経路でも、Lead は以下のサイクルで座席を統括する:
 

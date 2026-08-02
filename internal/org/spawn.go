@@ -270,18 +270,25 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	// (permissionArgsForDriver's bypassPermissions) -- --scope is the only
 	// thing left standing between "autonomous" and "unrestricted". A
 	// scope-less autonomous spawn is fail-closed right here, before any
-	// manifest read or write, unless the caller explicitly opts out via
-	// AllowUnscoped (recorded on the spawned event's Details below so its
-	// use stays auditable). This is a plain rejection -- no `rejected`
-	// manifest event, mirroring the identifier-shape checks above: the
-	// request never reached a state worth recording as an attempted (and
-	// envelope-valid) spawn. It runs before the `if p.DryRun` branch below
-	// so dry-run spawns are gated identically to real ones.
+	// manifest read or write beyond reject()'s own append, unless the caller
+	// explicitly opts out via AllowUnscoped (recorded on the spawned event's
+	// Details below so its use stays auditable). It runs before the `if
+	// p.DryRun` branch below so dry-run spawns are gated identically to real
+	// ones.
+	//
+	// Routed through reject() (self-review LOW finding), same as every other
+	// envelope-validation rejection: a `rejected` manifest event plus an
+	// honored=false receipt are appended, so an autonomous lead that
+	// retry-loops unscoped spawns leaves a visible trace in `ralph org
+	// report`'s timeline instead of none. No spawn_started is ever written
+	// for this path (reject() never appends one), so a rejected attempt
+	// still cannot count toward [org].max_seats or leave a stale saga
+	// behind -- only the audit trail changed, not the fail-closed semantics.
 	resolvedPermMode := ResolvePermissionMode(o.Config, p.Role)
-	if resolvedPermMode == "autonomous" && p.Scope == "" && !p.AllowUnscoped {
-		return SpawnResult{Outcome: SpawnOutcomeRejected, Err: fmt.Errorf(
+	if resolvedPermMode == PermissionModeAutonomous && p.Scope == "" && !p.AllowUnscoped {
+		return o.reject(p, fmt.Errorf(
 			"org: autonomous permission mode requires --scope (or --allow-unscoped to explicitly bypass)",
-		)}
+		))
 	}
 
 	if p.TimeoutMS <= 0 {
@@ -321,22 +328,37 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(p.TimeoutMS)*time.Millisecond)
 	defer cancel()
 
-	// The idempotent/stale-in-flight/envelope/capacity checks and the
-	// spawn_started append below run inside withManifestLock: this is the
-	// exact "read manifest -> ActiveSeatCount -> ValidateSpawn ->
-	// appendEvent" window docs/tech-debt/README.md flagged as an unlocked
-	// TOCTOU race ("max_seats is enforced across an unlocked read-then-
-	// append window"). Two concurrent Spawn calls used to be able to both
-	// observe the same activeSeats snapshot and both pass
+	// The idempotent/stale-in-flight-detection/envelope/permission checks,
+	// the capacity check, and the spawn_started append all run inside
+	// withManifestLock: this is the exact "read manifest -> ActiveSeatCount
+	// -> ValidateSpawn -> appendEvent" window docs/tech-debt/README.md
+	// flagged as an unlocked TOCTOU race ("max_seats is enforced across an
+	// unlocked read-then-append window"). Two concurrent Spawn calls used to
+	// be able to both observe the same activeSeats snapshot and both pass
 	// ValidateSpawnCapacity, exceeding [org].max_seats; the flock in
 	// withManifestLock (lockfile.go) now serializes this section across
 	// goroutines and processes on the same host.
 	//
-	// The lock is scoped to this section only (not the workspace/agent/
-	// agmsg side effects that follow) -- per the plan's rollout note, a
-	// long-running herdr/agmsg round trip (bounded by p.TimeoutMS, up to
-	// defaultSpawnTimeoutMS) must not serialize every concurrent spawn
-	// behind it.
+	// Final locking shape (fixed self-review MEDIUM-3: the lock used to also
+	// wrap compensateStale's herdr PaneSendKeys round trip, contradicting
+	// this very comment and risking a concurrent spawn timing out on
+	// manifestLockTimeout -- 5s -- behind a compensation call bounded by the
+	// much longer p.TimeoutMS): when a stale in-flight seat is detected, the
+	// lock below stops at that detection (no compensation, no capacity
+	// check, no append) and releases; compensateStale's driver round trip
+	// runs lock-free immediately after; a *second* withManifestLock call
+	// then re-reads the manifest and runs the capacity check + spawn_started
+	// append against that fresh, lock-held snapshot (checkCapacityAndStart).
+	// A fresh read is required rather than reusing the first lock's snapshot
+	// because compensateStale's own manifest write happened without the
+	// lock held -- another concurrent spawn could have raced in during that
+	// window, so the capacity decision must be made against a snapshot taken
+	// while the (re-acquired) lock is held, preserving the same TOCTOU
+	// guarantee as the non-stale path below. The lock is never scoped over
+	// the workspace/agent/agmsg side effects that follow Spawn's own locked
+	// section(s) -- per the plan's rollout note, a long-running herdr/agmsg
+	// round trip (bounded by p.TimeoutMS, up to defaultSpawnTimeoutMS) must
+	// not serialize every concurrent spawn behind it.
 	var existing *SeatStatus
 	var early *SpawnResult
 	// permArgs is set inside the locked closure below (permissionArgsForDriver's
@@ -345,7 +367,38 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	// respawn, envelope/permission rejection) -- those paths never reach the
 	// AgentStart call that would read it.
 	var permArgs []string
+	// staleExisting is set inside Phase 1's locked closure when the target
+	// seat has a stale in-flight saga (a prior spawn_started/spawn_step that
+	// never resolved) -- compensation is deferred to after Phase 1's lock
+	// releases (see the doc comment above).
+	var staleExisting *SeatStatus
 	req := SpawnRequest{OrgID: p.OrgID, SeatID: p.SeatID, Role: p.Role, Driver: p.Driver, Model: p.Model}
+
+	// checkCapacityAndStart runs the capacity check + spawn_started append
+	// against the events snapshot most recently assigned to the enclosing
+	// events variable. It is called from inside a locked closure only (both
+	// the no-stale-seat path in Phase 1 and Phase 2's post-compensation
+	// re-check below), and always sets early on any non-nil-worthy path so
+	// its caller's closure can simply `return nil` right after it.
+	checkCapacityAndStart := func() {
+		activeSeats := ActiveSeatCount(events, p.OrgID, RosterOptions{})
+		if err := ValidateSpawnCapacity(o.Config, req, activeSeats); err != nil {
+			r := o.reject(p, err)
+			early = &r
+			return
+		}
+		if err := o.appendEvent(ManifestEvent{
+			TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnStarted,
+			Role: p.Role, Driver: p.Driver, Model: p.Model, Worktree: p.Cwd,
+		}); err != nil {
+			r := SpawnResult{Outcome: SpawnOutcomeFailed, Err: err}
+			early = &r
+		}
+	}
+
+	// Phase 1 (locked): fresh read, idempotent/envelope/permission checks,
+	// and stale-in-flight *detection*. No herdr/agmsg call happens while
+	// this lock is held.
 	lockErr := withManifestLock(filepath.Dir(o.Manifest.Path()), func() error {
 		// Fresh read while holding the lock: the outer `events`/`rr` read
 		// above (taken before lock acquisition, and shared with the DryRun
@@ -409,32 +462,16 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 
 		if existing != nil && (existing.Event == EventSpawnStarted || existing.Event == EventSpawnStep) {
 			// Stale in-flight saga from a prior crashed/interrupted spawn:
-			// best-effort compensate and mark it spawn_failed, then re-read
-			// the manifest so the now-terminal stale seat no longer counts
-			// toward activeSeats for the capacity check below.
-			o.compensateStale(ctx, p, *existing)
-			rr2, err := o.Manifest.Read()
-			if err != nil {
-				return fmt.Errorf("org: read manifest: %w", err)
-			}
-			events = rr2.Events
-		}
-
-		activeSeats := ActiveSeatCount(events, p.OrgID, RosterOptions{})
-		if err := ValidateSpawnCapacity(o.Config, req, activeSeats); err != nil {
-			r := o.reject(p, err)
-			early = &r
+			// record it for lock-free compensation right after this closure
+			// returns, then let Phase 2 (below) re-acquire the lock for a
+			// fresh capacity check + append -- see the doc comment above
+			// Phase 1 for why compensation itself must not run in here.
+			e := *existing
+			staleExisting = &e
 			return nil
 		}
 
-		if err := o.appendEvent(ManifestEvent{
-			TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnStarted,
-			Role: p.Role, Driver: p.Driver, Model: p.Model, Worktree: p.Cwd,
-		}); err != nil {
-			r := SpawnResult{Outcome: SpawnOutcomeFailed, Err: err}
-			early = &r
-			return nil
-		}
+		checkCapacityAndStart()
 		return nil
 	})
 	if lockErr != nil {
@@ -442,6 +479,33 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	}
 	if early != nil {
 		return *early
+	}
+
+	if staleExisting != nil {
+		// Lock-free: best-effort compensate the stale seat (a herdr
+		// PaneSendKeys round trip) and mark it spawn_failed, exactly as
+		// Phase 1 used to do while still holding the lock.
+		o.compensateStale(ctx, p, *staleExisting)
+
+		// Phase 2 (locked): re-read post-compensation -- the now-terminal
+		// stale seat no longer counts toward activeSeats -- and run the same
+		// capacity check + spawn_started append Phase 1 would have run had
+		// no stale seat been in the way.
+		lockErr = withManifestLock(filepath.Dir(o.Manifest.Path()), func() error {
+			rr2, err := o.Manifest.Read()
+			if err != nil {
+				return fmt.Errorf("org: read manifest: %w", err)
+			}
+			events = rr2.Events
+			checkCapacityAndStart()
+			return nil
+		})
+		if lockErr != nil {
+			return SpawnResult{Outcome: SpawnOutcomeFailed, Err: fmt.Errorf("org: manifest lock: %w", lockErr)}
+		}
+		if early != nil {
+			return *early
+		}
 	}
 
 	workspaceID, err := o.resolveWorkspace(ctx, p, events)

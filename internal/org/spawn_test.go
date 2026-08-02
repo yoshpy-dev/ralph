@@ -1703,11 +1703,15 @@ func TestOrgSpawn_PermissionMode_Claude_ArgvMapping(t *testing.T) {
 	}
 }
 
-// TestOrgSpawn_MinimumControlGate_Autonomous_EmptyScope_RejectedNoEvents
+// TestOrgSpawn_MinimumControlGate_Autonomous_EmptyScope_RejectedWithEvent
 // covers AC-2b: an autonomous-mode spawn with an empty Scope and no
-// AllowUnscoped is rejected before any manifest event is written (a plain
-// rejection, unlike ValidateSpawnEnvelope failures which record `rejected`).
-func TestOrgSpawn_MinimumControlGate_Autonomous_EmptyScope_RejectedNoEvents(t *testing.T) {
+// AllowUnscoped is rejected through the same reject() path as every other
+// envelope-validation rejection (self-review LOW finding) -- a `rejected`
+// manifest event plus an honored=false receipt, but still zero driver calls
+// and no spawn_started (reject() never appends one), so the gate's
+// fail-closed/no-saga-side-effects guarantee is unchanged; only the audit
+// trail is no longer silent.
+func TestOrgSpawn_MinimumControlGate_Autonomous_EmptyScope_RejectedWithEvent(t *testing.T) {
 	o, h, a := testOrg(t)
 
 	p := mustSpawnParams("org-a", "seat-1")
@@ -1724,8 +1728,8 @@ func TestOrgSpawn_MinimumControlGate_Autonomous_EmptyScope_RejectedNoEvents(t *t
 	if err != nil {
 		t.Fatalf("read manifest: %v", err)
 	}
-	if len(rr.Events) != 0 {
-		t.Fatalf("expected zero manifest events for the gate rejection, got %+v", rr.Events)
+	if len(rr.Events) != 1 || rr.Events[0].Event != EventRejected {
+		t.Fatalf("expected exactly one rejected manifest event for the gate rejection, got %+v", rr.Events)
 	}
 	if len(h.calls) != 0 || len(a.calls) != 0 {
 		t.Fatalf("expected zero driver calls for the gate rejection, got herdr=%v agmsg=%v", h.calls, a.calls)
@@ -1735,8 +1739,8 @@ func TestOrgSpawn_MinimumControlGate_Autonomous_EmptyScope_RejectedNoEvents(t *t
 	if err != nil {
 		t.Fatalf("read receipts: %v", err)
 	}
-	if len(receiptRR.Receipts) != 0 {
-		t.Fatalf("expected zero receipts for the gate rejection, got %+v", receiptRR.Receipts)
+	if len(receiptRR.Receipts) != 1 || receiptRR.Receipts[0].Honored != HonoredFalse {
+		t.Fatalf("expected exactly one honored=false receipt for the gate rejection, got %+v", receiptRR.Receipts)
 	}
 }
 
@@ -1761,7 +1765,9 @@ func TestOrgSpawn_MinimumControlGate_EditsAndGuarded_EmptyScope_Proceeds(t *test
 
 // TestOrgSpawn_MinimumControlGate_DryRun_AppliesSameGate verifies the
 // validate-then-record contract: a dry-run autonomous spawn with an empty
-// Scope is rejected the same way a real spawn would be.
+// Scope is rejected the same way a real spawn would be, recording a
+// DryRun:true rejected event via reject() (self-review LOW finding) so it
+// stays excluded from ActiveSeatCount/roster like every other dry-run event.
 func TestOrgSpawn_MinimumControlGate_DryRun_AppliesSameGate(t *testing.T) {
 	o, _, _ := testOrg(t)
 
@@ -1777,8 +1783,8 @@ func TestOrgSpawn_MinimumControlGate_DryRun_AppliesSameGate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read manifest: %v", err)
 	}
-	if len(rr.Events) != 0 {
-		t.Fatalf("expected zero manifest events for the dry-run gate rejection, got %+v", rr.Events)
+	if len(rr.Events) != 1 || rr.Events[0].Event != EventRejected || !rr.Events[0].DryRun {
+		t.Fatalf("expected exactly one dry-run rejected manifest event for the dry-run gate rejection, got %+v", rr.Events)
 	}
 }
 

@@ -6,6 +6,24 @@ import (
 	"github.com/yoshpy-dev/ralph/internal/config"
 )
 
+// Permission-mode enum constants (self-review MEDIUM-4): the single,
+// grep-able definition of the three permission-mode values, mirroring how
+// LeadIdentity (spawn.go) is the one place the "lead" identity literal is
+// spelled. Every internal/org call site that names a permission-mode value
+// (ResolvePermissionMode's fallback, permissionArgsForDriver's switch,
+// Spawn's AC-2b gate check) must use these constants, not a bare string.
+//
+// internal/config cannot import internal/org (internal/org already imports
+// internal/config -- see this file's own import -- so the reverse would be
+// a cycle), so config.go's orgPermissionModeAllowed set necessarily keeps
+// its own string literals; a comment there points back at these constants
+// as the canonical enum definition.
+const (
+	PermissionModeAutonomous = "autonomous"
+	PermissionModeEdits      = "edits"
+	PermissionModeGuarded    = "guarded"
+)
+
 // defaultPermissionMode is ResolvePermissionMode's fallback when neither a
 // role override nor cfg.Permissions.Default is set. config.Load() already
 // backfills an absent [org.permissions].default to "autonomous", so this
@@ -13,7 +31,7 @@ import (
 // testOrgConfig() literal most internal/org tests use) rather than through
 // Load() -- it mirrors [org.permissions].default's own documented default
 // (see config.Default()) so both paths agree.
-const defaultPermissionMode = "autonomous"
+const defaultPermissionMode = PermissionModeAutonomous
 
 // ResolvePermissionMode returns the driver-independent permission-mode enum
 // value (autonomous|edits|guarded) that applies to role: a role-specific
@@ -59,17 +77,17 @@ func permissionArgsForDriver(driver, mode string) ([]string, error) {
 	switch driver {
 	case "claude":
 		switch mode {
-		case "autonomous":
+		case PermissionModeAutonomous:
 			return []string{"--permission-mode", "bypassPermissions"}, nil
-		case "edits":
+		case PermissionModeEdits:
 			return []string{"--permission-mode", "acceptEdits"}, nil
-		case "guarded":
+		case PermissionModeGuarded:
 			return nil, nil
 		default:
 			return nil, fmt.Errorf("org: unknown permission mode %q for driver %q", mode, driver)
 		}
 	case "codex":
-		if mode == "guarded" {
+		if mode == PermissionModeGuarded {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("org: codex seat permission mode %q not yet live-verified; only guarded is allowed (fail-closed)", mode)
