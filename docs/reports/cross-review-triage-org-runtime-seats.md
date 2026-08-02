@@ -36,3 +36,20 @@
 | 2 | [P2] プロンプトファイル名の衝突(所見2 単体として) | 所見1 と同一根本原因・同一修正のため ACTION_REQUIRED #1 に統合(独立の欠陥としては重複) | already-addressed |
 
 Categories: false-positive, already-addressed, style-preference, out-of-scope, context-aware-safe
+
+---
+
+# Cycle 2 (2026-08-02)
+
+- Cycle: 2/2 (cap reached)
+- HEAD: 4f18823
+- Total reviewer findings: 1
+- After triage: ACTION_REQUIRED=1, WORTH_CONSIDERING=0, DISMISSED=0
+
+Cycle-1 ACTION_REQUIRED #1(ハイフン連結の曖昧性)は f0cbf11(`_` セパレータ予約+charset 制限+結合長検証)で解消し、Codex の再レビューでも再指摘なし。
+
+## ACTION_REQUIRED (cycle 2)
+
+| # | Reviewer finding | Triage rationale | Affected file(s) |
+|---|-------------------|------------------|-------------------|
+| 2 | [P2] agmsg_announce(HELLO send)失敗時の補償パスが herdr pane の C-c のみで、直前の `Join` で登録済みの座席 roster エントリを `Leave` しない。`spawn_failed` 座席は stop/disband の対象外のため、agmsg team に stale エントリが残留する。 | 真正(saga 補償原則 AC-10 の適用漏れ — Join は外部リソース)。影響は失敗パス限定の残留 roster 行で、`leave.sh` による手動回復可・team 削除で自然消滅するため重大度は中弱。修正は announce 失敗パスに best-effort `Leave` を足すのみで安価だが、cap(2/2)到達のため自動再サイクルはしない。 | internal/org/spawn.go(agmsg_announce 失敗パス) |
