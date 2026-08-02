@@ -127,6 +127,8 @@ org runtime PR②: 座席を実際に動かせるようにする。agmsg アダ�
 
 - **実機スモーク第2の検出**(同日): herdr `agent start` は複数行・特殊文字を含む agent 引数を拒否する(`invalid_agent_argument: agent arguments cannot be encoded safely for the target shell`)。複数行の役割プロンプトを argv で渡す設計は実機で不成立。修正: 初期プロンプトが複数行または長文の場合、`<state-dir>/prompts/<org_id>-<seat_id>.md` に書き出し、agent 引数には「このファイルを読んで従え」という 1 行ポインタのみを渡す(短い単一行プロンプトは従来どおり直渡し)。プロンプトファイルパスは manifest の spawn_step Details に記録。
 
+- **実機スモーク第3の検出**(同日): tab 作成直後の pane はシェル初期化中で `agent start` が `agent_pane_busy: not an available shell` を返す(プローブで確認: 即時→busy、3秒後→受理)。修正: spawn saga の AgentStart を `agent_pane_busy` 検出時のみ有界リトライ(500ms 間隔、ctx デッドライン内)にする。
+
 ## Progress checklist
 
 - [ ] Plan reviewed
