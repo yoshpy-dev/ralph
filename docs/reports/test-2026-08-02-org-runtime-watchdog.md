@@ -148,3 +148,77 @@ All 6 new/changed regression tests exist, run, and pass. Each is traced to its o
 - **Carried-forward gaps (not blocking):** `realEscalate`/`loadWatchStatus`/`detailsSuffix` unit-coverage blind spots and AC-10's live-evidence scope, all unchanged from cycle 1 and unrelated to this delta.
 
 **Recommendation: proceed to `/sync-docs` → `/cross-review` → `/pr`.** Tests pass on cycle 2; both cross-review AR findings and both cycle-2 self-review M2 findings are now regression-tested.
+
+## Cycle 3
+
+- Date: 2026-08-03
+- Tester: `tester` subagent (behavioral tests only, no static analysis)
+- Scope: delta since cycle-2 test baseline `cca5201` on `feat/org-runtime-watchdog` (HEAD `dccd9c2`): `764b01f` (fix: cross-review cycle-2 #3/#4 — lead-only history filter + same-cycle cut-seat skip, 5 new tests per handoff, 6 counted directly against the diff), `d6e557a` (refactor: `strings.Cut`/`SplitSeq` lint cleanup, no test change), `8bbd55e` (fix: corrected lead-activity model — `sent` events are lead-authored by construction, count-based history comparison — 3 new/replaced tests). Handed off after `docs/reports/verify-2026-08-02-org-runtime-watchdog.md`'s cycle-3 section (PASS).
+- Evidence: `docs/evidence/test-2026-08-03-org-runtime-watchdog-cycle3.log` (`./scripts/run-test.sh`), `docs/evidence/test-2026-08-03-org-runtime-watchdog-targeted.log` (targeted `-race -v` run) — both gitignored per `docs/evidence/*.log`, not committed.
+
+### Test execution
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `./scripts/run-test.sh` (37 shell suites, `tests/*.sh`) | all suites report `OK` / summary lines `0 failed` | all | 0 | 0 | ~2 min |
+| `./scripts/run-test.sh` → Go verifier, `go test ./...` (full-scope fallback, 13 packages) | 13 packages | 13 (all `ok`) | 0 | 0 | mixed cached/fresh |
+| `go test ./internal/org/... ./internal/cli/... ./internal/config/... -race -count=1 -v` | 406 `--- PASS` lines (subtests + top-level), 5 packages | 406 | 0 | 0 | ~40s |
+
+`./scripts/run-test.sh` again fell back to full language scope (same "unclassified" `scripts/ralph-config.sh` classification noted in cycles 1–2) — not an override. No failures, no skips, no flakes across either run (shell suite run and standalone `-race` run).
+
+The shell-suite count grew from 33 (cycle 2) to 37 — 4 new suites unrelated to this plan's delta (Terraform gitignore/pack-verify/rule-frontmatter growth and xreview-gate-regression additions tracked separately in tester memory); none of the 4 touch `internal/org`/`internal/cli`/`internal/config`.
+
+### New-test confirmation (cross-review cycle-2 #3/#4, self-review cycle-3 H3-1/M3-1/M3-2)
+
+| Finding | Test | File | Package | Result |
+| --- | --- | --- | --- | --- |
+| Cross-review #3 (P1): deadman's agmsg-history activity source cleared pending alerts on ANY team traffic, not just lead's | `TestFilterLeadHistoryLines` (parsing contract), `TestWatch_Deadman_WatchdogAlertHistoryLine_DoesNotClearPendingAlert` (negative), `TestWatch_Deadman_LeadHistoryLine_ClearsPendingAlert` (positive) | `internal/org/watch_test.go` | `internal/org` | PASS (3/3) |
+| Cross-review #4 (P2): total-budget cutoff re-probed a just-cut seat later in the same cycle against a stale snapshot | `TestWatch_TotalBudgetCutoff_SkipsCutSeatsForRestOfSameCycle`, `TestWatch_SeatBudgetCutoff_SkipsFurtherProbesForCutSeatSameCycle` | `internal/org/watch_test.go` | `internal/org` | PASS (2/2) |
+| Self-review M3-2 (MEDIUM): history-window eviction (last-20-of-everyone) could shrink the visible lead-line set with no new lead activity, and the old exact-string comparison read that shrinkage as "activity" | `TestWatch_Deadman_HistoryWindowEviction_DoesNotFalselyClearPendingAlert` | `internal/org/watch_test.go` | `internal/org` | PASS |
+| Self-review H3-1 (HIGH): `leadActivityEventCount`'s `ev.SeatID == LeadIdentity` branch was inverted — `Send` writes `SeatID: p.To` (the recipient), so seat→lead `sent` traffic still cleared alerts while lead→seat sends did not; corrected to count every `EventSent` unconditionally | `TestWatch_Deadman_SeatSentEvent_ClearsPendingAlert_WatchdogCutoffDoesNot` (replaces the inverted `TestWatch_Deadman_UnrelatedSeatEvent_DoesNotClearPendingAlert`, confirmed fully removed by `git diff`/grep — no dead duplicate left behind) | `internal/org/watch_test.go` | `internal/org` | PASS |
+| Self-review M3-1 (MEDIUM): lead spawning a *replacement* seat in response to a stall ALERT produced a `spawned` event that counted as nothing (only `stopped`/`disbanded` were treated as lead-driven-lifecycle evidence) | `TestWatch_Deadman_LeadSpawnsReplacementSeat_ClearsPendingAlert` | `internal/org/watch_test.go` | `internal/org` | PASS |
+
+All 8 tests named above (6 from `764b01f`, 2 from `8bbd55e`) exist, run, and pass. Each is traced to its originating finding by the comment header directly above its `func` in the source, cross-checked against the verify report's cycle-3 finding table (not just the test name).
+
+Grep-confirmed removal: `TestWatch_Deadman_UnrelatedSeatEvent_DoesNotClearPendingAlert` no longer exists as a `func` in `internal/org/watch_test.go` — only referenced in the replacement test's doc comment explaining why it was inverted and removed.
+
+### Coverage delta
+
+- `internal/org`: 88.3% (up from 88.1% in cycle 2) — the new history-filter parsing path (`filterLeadHistoryLines`/`leadHistoryFromField`) and the same-cycle cut-seat-skip guard add newly-exercised branches, moving the aggregate slightly.
+- `internal/org/driver`: 92.0% (unchanged), `internal/org/protocol`: 97.9% (unchanged) — untouched by this delta.
+- `internal/cli`: 67.3% (unchanged) — untouched by this delta.
+- `internal/config`: 77.1% (unchanged) — untouched by this delta.
+- No coverage regressions introduced by the delta.
+
+### Regression checks (cycle 3)
+
+| Previously broken behavior | Status | Evidence |
+| --- | --- | --- |
+| Cross-review #3: agmsg-history activity source not lead-scoped | Fixed, regression-tested | `TestFilterLeadHistoryLines`, `TestWatch_Deadman_WatchdogAlertHistoryLine_DoesNotClearPendingAlert`, `TestWatch_Deadman_LeadHistoryLine_ClearsPendingAlert` all pass |
+| Cross-review #4: same-cycle stale-snapshot re-probe of a just-cut seat | Fixed, regression-tested | `TestWatch_TotalBudgetCutoff_SkipsCutSeatsForRestOfSameCycle`, `TestWatch_SeatBudgetCutoff_SkipsFurtherProbesForCutSeatSameCycle` both pass |
+| M3-2: history-window eviction misread as activity | Fixed, regression-tested | `TestWatch_Deadman_HistoryWindowEviction_DoesNotFalselyClearPendingAlert` passes |
+| H3-1: inverted `sent`-event attribution | Fixed, regression-tested | `TestWatch_Deadman_SeatSentEvent_ClearsPendingAlert_WatchdogCutoffDoesNot` passes; old inverted test confirmed removed |
+| M3-1: lead-spawned replacement seat not counted as lead activity | Fixed, regression-tested | `TestWatch_Deadman_LeadSpawnsReplacementSeat_ClearsPendingAlert` passes |
+| Full regression suite (all cycle-1/cycle-2 tests, H-1, H-2, AR-1, AR-2, M2-1, M2-2, M-5, M-6) | Green | 406/406 targeted subtests pass (up from cycle 2's 399, +7 net: 8 new/replaced minus 1 removed); 37/37 shell suites report `OK`; all 13 Go packages `ok` |
+
+### Failure analysis
+
+| Test | Error | Root cause | Proposed fix |
+| --- | --- | --- | --- |
+| — | — | No failures observed | — |
+
+### Test gaps (cycle 3)
+
+- Cycle-1/cycle-2's named gaps (`realEscalate` 0% unit coverage, `loadWatchStatus` 44.4% branch coverage, `detailsSuffix` 0% coverage, `internal/cli` 67.3% module-wide vs watchdog-scoped) are unchanged by this delta and remain open at the same scope described in prior cycles — none of them are touched by `764b01f`/`d6e557a`/`8bbd55e`.
+- Per the verify report's cycle-3 drift note: the plan's AC-5 evidence prose and "Implementation notes" section still describe a pre-cycle-3 state of `leadActivityEventCount`; this is a doc-drift item for `/sync-docs`, not a test gap, but is flagged here so it isn't dropped in the handoff.
+- The `watchPendingAlert.History string` → `HistoryLeadLines int` JSON field rename (M3-2) has no migration test for a pre-existing `watch-status-<org_id>.json` from an older binary — acceptable per the plan's rollout notes (watch has not shipped to production use), but worth naming as an explicit, accepted gap rather than a silent one.
+- AC-10 live-smoke state-dir cross-cwd confirmation remains out of `/test`'s scope (live-evidence artifact, not a `go test` target), unchanged from cycle 1.
+
+### Verdict (cycle 3)
+
+- **Pass**: All 37 shell test suites (`./scripts/run-test.sh`) and all 13 Go packages (`go test ./...` full scope, plus the explicit `go test ./internal/org/... ./internal/cli/... ./internal/config/... -race -count=1` targeted run, 406 passing subtests) are green. Zero failures, zero skips, no flakes. All 8 new/replaced regression tests for cross-review #3/#4 and self-review H3-1/M3-1/M3-2 exist and pass, each confirmed against its source comment and cross-checked against the verify report's cycle-3 finding table.
+- **Fail**: None.
+- **Blocked**: None.
+- **Carried-forward gaps (not blocking):** `realEscalate`/`loadWatchStatus`/`detailsSuffix` unit-coverage blind spots and AC-10's live-evidence scope, unchanged from cycles 1–2. New this cycle: plan doc-drift (AC-5 evidence prose, Implementation notes) flagged by verify for `/sync-docs`, and the unmigrated `HistoryLeadLines` JSON field rename (both non-blocking, both explicitly named).
+
+**Recommendation: proceed to `/sync-docs` → `/cross-review` → `/pr`.** Tests pass on cycle 3; cross-review #3/#4 and self-review H3-1/M3-1/M3-2 are all now regression-tested and confirmed unregressed against the cycle-1/cycle-2 fix stack.
