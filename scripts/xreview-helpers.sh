@@ -54,12 +54,18 @@ detect_base_branch() {
 # /cross-review always uses a different model than the one doing the
 # implementation work. Prints "codex" or "claude" on stdout.
 #
-# Args: $1 (optional) = driver ("claude"|"codex"). When omitted, falls back
-# to $RALPH_PRIMARY_CLI, then to "claude" if that is also unset — matching
-# the /cross-review auto-detect default (see .claude/skills/cross-review/SKILL.md
-# Step 2).
+# Args: $1 (optional) = driver ("claude"|"codex", case-insensitive). When
+# omitted, falls back to $RALPH_PRIMARY_CLI, then to "claude" if that is also
+# unset — matching the /cross-review auto-detect default (see
+# .claude/skills/cross-review/SKILL.md Step 2, which documents
+# RALPH_PRIMARY_CLI as case-insensitive). The driver value is normalized to
+# lowercase before the case branch so "CODEX"/"Claude"/etc. resolve to the
+# same reviewer as their lowercase form (AR-2 fix,
+# docs/reports/cross-review-triage-org-runtime-retire-loop.md) instead of
+# silently falling through to the "unrecognized driver" default.
 pick_reviewer() {
   _pr_driver="${1:-${RALPH_PRIMARY_CLI:-claude}}"
+  _pr_driver="$(printf '%s' "$_pr_driver" | tr '[:upper:]' '[:lower:]')"
   case "$_pr_driver" in
     claude) printf 'codex\n'  ;;
     codex)  printf 'claude\n' ;;

@@ -54,13 +54,23 @@ type orgGroup struct {
 }
 
 func runStatus(cmd *cobra.Command, stateDir, filterOrgID string, jsonOut bool) error {
-	store := org.NewManifestStore(stateDir)
+	store := org.NewManifestStoreAtPath(orgManifestPath(stateDir))
 	rr, err := store.Read()
 	if err != nil {
 		return fmt.Errorf("status: read manifest: %w", err)
 	}
 
-	seats := org.Roster(rr.Events, org.RosterOptions{})
+	// IncludeDryRun: true -- unlike `ralph org status` (which gates dry-run
+	// visibility behind its own --all flag, see newOrgStatusCmd), this
+	// top-level summary command has no --all flag and is documented as
+	// showing "every org found in the manifest": printStatusTableAllOrgs/
+	// buildStatusOrgJSON already render a "[dry-run]" marker per seat, which
+	// would otherwise be unreachable dead code. Discovered alongside the
+	// AR-1 state-dir double-join fix (docs/reports/cross-review-triage-
+	// org-runtime-retire-loop.md) while confirming the live repro
+	// (`ralph org spawn --dry-run` then `ralph status`) actually surfaces
+	// the spawned seat.
+	seats := org.Roster(rr.Events, org.RosterOptions{IncludeDryRun: true})
 	if filterOrgID != "" {
 		filtered := make([]org.SeatStatus, 0, len(seats))
 		for _, s := range seats {

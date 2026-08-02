@@ -30,7 +30,12 @@ func runStatusCmd(t *testing.T, args ...string) (string, error) {
 // org-b has one seat (qa active).
 func seedTwoOrgManifest(t *testing.T, stateDir string) {
 	t.Helper()
-	store := org.NewManifestStore(stateDir)
+	// stateDir here plays the role of an already-resolved org state
+	// directory (what org.ResolveOrgStateDir returns and runStatus
+	// receives), so the fixture is written to the same path runStatus
+	// itself reads (orgManifestPath, internal/cli/org.go) -- not the
+	// root-relative path org.NewManifestStore would derive.
+	store := org.NewManifestStoreAtPath(orgManifestPath(stateDir))
 	events := []org.ManifestEvent{
 		{TS: "2026-08-01T00:00:00Z", OrgID: "org-a", SeatID: "lead", Event: org.EventSpawned, Role: "lead", Driver: "claude", Model: "opus", Worktree: "/tmp/org-a-lead"},
 		{TS: "2026-08-01T00:01:00Z", OrgID: "org-a", SeatID: "reviewer", Event: org.EventSpawned, Role: "reviewer", Driver: "codex", Model: "sonnet", Worktree: "/tmp/org-a-reviewer"},
@@ -85,6 +90,52 @@ func TestStatusCmd_OrgIDFilterShowsOnlyThatOrg(t *testing.T) {
 	}
 }
 
+// TestStatusCmd_SeesSeatWrittenByRealOrgSpawn pins live-write/status-read
+// agreement end to end: a real `ralph org spawn --dry-run` (the write path,
+// newOrgRuntimeAt -> orgManifestPath) followed by a real top-level `ralph
+// status` (the read path, runStatus -> orgManifestPath) against the same
+// --state-dir. This is the AR-1 regression case
+// (docs/reports/cross-review-triage-org-runtime-retire-loop.md): before the
+// fix, `ralph status` called org.NewManifestStore(stateDir), which
+// re-appended org.ManifestRelPath onto an already-resolved directory and
+// always reported "no org runtime state found" for a manifest a real spawn
+// had just written. Deliberately does not touch orgManifestPath's fixture
+// helper directly (unlike seedTwoOrgManifest) so a future refactor that
+// makes only one of the two call sites use the shared helper is caught by
+// this test even if a hand-seeded fixture would not catch it.
+//
+// Uses --dry-run (no herdr/agmsg on PATH needed) and asserts the seat shows
+// up in the top-level `ralph status` output with no --all flag: unlike
+// `ralph org status` (which gates dry-run visibility behind --all), this
+// command has no --all flag and always includes dry-run seats (see
+// runStatus's RosterOptions{IncludeDryRun: true}, status.go) -- a second,
+// related gap found while confirming this exact repro against the AR-1 fix.
+func TestStatusCmd_SeesSeatWrittenByRealOrgSpawn(t *testing.T) {
+	t.Setenv("PATH", "") // dry-run spawn needs no herdr/agmsg on PATH
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	spawnOut, err := runOrgCmd(t,
+		"spawn", "--org-id", "demo", "--id", "lead", "--role", "lead",
+		"--driver", "claude", "--model", "opus", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
+		"--state-dir", stateDir, "--dry-run",
+	)
+	if err != nil {
+		t.Fatalf("org spawn --dry-run: %v (output: %s)", err, spawnOut)
+	}
+
+	out, err := runStatusCmd(t, "--state-dir", stateDir)
+	if err != nil {
+		t.Fatalf("status: %v (output: %s)", err, out)
+	}
+	if strings.Contains(out, "no org runtime state found") {
+		t.Fatalf("ralph status did not see the seat written by a real `ralph org spawn` at the same --state-dir:\n%s", out)
+	}
+	if !strings.Contains(out, "org_id: demo") || !strings.Contains(out, "lead") {
+		t.Errorf("expected demo org's lead seat in status output, got:\n%s", out)
+	}
+}
+
 func TestStatusCmd_EmptyStateDirShowsFriendlyNoteAndDoctorHint(t *testing.T) {
 	dir := t.TempDir() // no manifest ever written here
 
@@ -112,7 +163,7 @@ func TestStatusCmd_EmptyStateDirShowsFriendlyNoteAndDoctorHint(t *testing.T) {
 // (M5: printStatusEmpty must not silently discard rr.CorruptLines).
 func TestStatusCmd_EmptyRosterFromFullyCorruptManifestStillWarns(t *testing.T) {
 	dir := t.TempDir()
-	store := org.NewManifestStore(dir)
+	store := org.NewManifestStoreAtPath(orgManifestPath(dir))
 	if err := os.MkdirAll(filepath.Dir(store.Path()), 0o755); err != nil {
 		t.Fatalf("mkdir manifest dir: %v", err)
 	}

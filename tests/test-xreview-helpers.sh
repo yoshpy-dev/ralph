@@ -59,6 +59,20 @@ check "1e. no arg, no env -> reviewer=codex (safe default) (got '$got')" test "$
 got="$(RALPH_PRIMARY_CLI=codex pick_reviewer claude)"
 check "1f. explicit arg wins over env (got '$got')" test "$got" = "codex"
 
+# 1g-1i: driver value is case-insensitive (AR-2 fix, cross-review-triage-
+# org-runtime-retire-loop.md) -- SKILL.md documents RALPH_PRIMARY_CLI as
+# case-insensitive, so an uppercase/mixed-case value must still map to the
+# correct opposite reviewer, not fall through to the "unrecognized driver"
+# default.
+got="$(pick_reviewer CODEX)"
+check "1g. arg=CODEX (uppercase) -> reviewer=claude (got '$got')" test "$got" = "claude"
+
+got="$(pick_reviewer Claude)"
+check "1h. arg=Claude (mixed case) -> reviewer=codex (got '$got')" test "$got" = "codex"
+
+got="$(RALPH_PRIMARY_CLI=CODEX pick_reviewer)"
+check "1i. env RALPH_PRIMARY_CLI=CODEX (uppercase) -> reviewer=claude (got '$got')" test "$got" = "claude"
+
 # ── Test 2: count_triage_findings parser ─────────────────────────────────
 echo
 echo "── Test 2: count_triage_findings respects table rows, not headings"
