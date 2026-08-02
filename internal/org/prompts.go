@@ -39,6 +39,16 @@ type RolePromptVars struct {
 	// is kept so PR③ (Lead 自律編成) can wire a `--plan` flag through to a
 	// template substitution without another RolePromptVars schema change.
 	PlanPath string
+	// Task is the task text substituted for {{TASK}} -- currently only
+	// prompts/lead.md references it. `ralph org start`'s positional task
+	// argument (internal/cli/org.go's newOrgStartCmd) flows through
+	// SpawnParams.Task (spawn.go) into this field. Every other embedded role
+	// template ignores it.
+	Task string
+	// Envelope is a one-line summary of the org's [org] envelope
+	// (EnvelopeSummary, envelope_summary.go) substituted for {{ENVELOPE}} --
+	// currently only prompts/lead.md references it.
+	Envelope string
 }
 
 // RenderRolePrompt returns the rendered template for role with vars
@@ -70,6 +80,8 @@ func RenderRolePrompt(role string, vars RolePromptVars) (string, bool, error) {
 		// replacer entry stays so a template that re-adds {{PLAN_PATH}} can
 		// never ship the literal placeholder to a seat.
 		"{{PLAN_PATH}}", vars.PlanPath,
+		"{{TASK}}", vars.Task,
+		"{{ENVELOPE}}", vars.Envelope,
 	)
 	return replacer.Replace(text), true, nil
 }

@@ -39,12 +39,14 @@ func newOrgCmd() *cobra.Command {
 
 	cmd.AddCommand(
 		newOrgSpawnCmd(&orgID, &stateDir, &configPath),
+		newOrgStartCmd(&orgID, &stateDir, &configPath),
 		newOrgSendCmd(&orgID, &stateDir, &configPath),
 		newOrgWaitCmd(&orgID, &stateDir, &configPath),
 		newOrgReadCmd(&orgID, &stateDir, &configPath),
 		newOrgStopCmd(&orgID, &stateDir, &configPath),
 		newOrgStatusCmd(&orgID, &stateDir, &configPath),
 		newOrgDisbandCmd(&orgID, &stateDir, &configPath),
+		newOrgReportCmd(&orgID, &stateDir, &configPath),
 	)
 
 	return cmd
@@ -199,6 +201,89 @@ func printSpawnResult(cmd *cobra.Command, r org.SpawnResult) {
 	case org.SpawnOutcomeFailed:
 		_, _ = fmt.Fprintf(out, "spawn failed: %v\n", r.Err)
 	}
+}
+
+// newOrgStartCmd wires `ralph org start` -- headless-lead spawn sugar over
+// (*org.Org).Spawn, per the plan's design decision ("`org start` = lead 座席
+// の spawn 糖衣", docs/plans/active/2026-08-02-org-runtime-lead.md). It
+// always spawns SeatID == Role == org.LeadIdentity ("lead"): the org's
+// coordinating agmsg identity and the lead seat are, by design, the same
+// seat -- see the leadSelfSpawn branch in internal/org/spawn.go's Spawn.
+// Every other concern (envelope validation, the permission-mode gate,
+// manifest/receipt bookkeeping) flows through the same saga every other
+// `ralph org spawn` call uses; this command does not special-case the lead
+// runtime object in any way beyond picking its SeatID/Role and required
+// positional task argument.
+func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
+	var (
+		driverName, model, cwd, scope string
+		timeoutMS                     int
+		allowUnscoped                 bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "start <task>",
+		Short: "Spawn a headless lead seat (sugar over `ralph org spawn --role lead`)",
+		Long: "ralph org start is a thin wrapper over the same Spawn saga every other\n" +
+			"`ralph org spawn` call uses: it always spawns the org's coordinating\n" +
+			"\"lead\" identity itself (seat id \"lead\", role \"lead\"), expands\n" +
+			"internal/org/prompts/lead.md with the task argument substituted for\n" +
+			"{{TASK}} and a one-line [org] envelope summary substituted for\n" +
+			"{{ENVELOPE}}. Envelope validation, the permission-mode gate, and\n" +
+			"manifest/receipt bookkeeping all flow through Spawn exactly as they\n" +
+			"would for any other seat. See .claude/skills/org/SKILL.md for the\n" +
+			"lead's full operating manual.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireOrgID(*orgID); err != nil {
+				return err
+			}
+			task := strings.TrimSpace(args[0])
+			if task == "" {
+				return fmt.Errorf("org: start: task must not be blank")
+			}
+			if strings.TrimSpace(cwd) == "" {
+				return fmt.Errorf("org: --cwd is required")
+			}
+
+			orgCfg, err := resolveOrgConfig(*configPath)
+			if err != nil {
+				return fmt.Errorf("org: load config: %w", err)
+			}
+			resolvedModel := model
+			if strings.TrimSpace(resolvedModel) == "" {
+				resolvedModel, err = org.DefaultModelForDriver(orgCfg, driverName)
+				if err != nil {
+					return err
+				}
+			}
+
+			rt, err := newOrgRuntime(*stateDir, *configPath)
+			if err != nil {
+				return err
+			}
+			result := rt.Spawn(org.SpawnParams{
+				OrgID: *orgID, SeatID: org.LeadIdentity, Role: org.LeadIdentity,
+				Driver: driverName, Model: resolvedModel, Cwd: cwd, Task: task,
+				Scope: scope, TimeoutMS: timeoutMS, AllowUnscoped: allowUnscoped,
+			})
+			printSpawnResult(cmd, result)
+			if result.Err == nil {
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(),
+					"hint: ralph org status --org-id %s ; attach with herdr to observe the lead pane\n", *orgID)
+			}
+			return result.Err
+		},
+	}
+
+	cmd.Flags().StringVar(&driverName, "driver", "claude", "driver CLI the lead seat runs as: claude|codex")
+	cmd.Flags().StringVar(&model, "model", "", "model name or alias (default: first [org].model_pool entry for --driver)")
+	cmd.Flags().StringVar(&cwd, "cwd", "", "working directory for the lead seat (required)")
+	cmd.Flags().StringVar(&scope, "scope", "", "optional scope description (see `ralph org spawn --scope`)")
+	cmd.Flags().IntVar(&timeoutMS, "timeout-ms", 60000, "per-step herdr timeout in milliseconds")
+	cmd.Flags().BoolVar(&allowUnscoped, "allow-unscoped", false, "explicitly bypass the autonomous-mode --scope requirement")
+
+	return cmd
 }
 
 func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
@@ -479,6 +564,44 @@ func newOrgDisbandCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	}
 
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "record without stopping real seats")
+
+	return cmd
+}
+
+// newOrgReportCmd wires `ralph org report` (AC-4, FR-9 後半): reads the
+// manifest + model receipts for --org-id and writes an org-manifest report
+// to docs/reports/ via (*org.Org).Report -- see internal/org/report.go's
+// BuildOrgReport for the report's sections (roster, event timeline, model
+// receipts, known residuals).
+func newOrgReportCmd(orgID, stateDir, configPath *string) *cobra.Command {
+	var outDir string
+
+	cmd := &cobra.Command{
+		Use:   "report",
+		Short: "Write an org-manifest report (roster, event timeline, model receipts) to docs/reports/",
+		Long: "ralph org report reads the manifest and model receipts for --org-id and\n" +
+			"writes docs/reports/org-manifest-<org_id>-<date>.md: a roster summary,\n" +
+			"the full event timeline, the model-receipts table, and known residuals\n" +
+			"(active seat count, corrupt manifest line count). An org with no\n" +
+			"recorded events still produces a report, noting that explicitly.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireOrgID(*orgID); err != nil {
+				return err
+			}
+			rt, err := newOrgRuntime(*stateDir, *configPath)
+			if err != nil {
+				return err
+			}
+			result := rt.Report(org.ReportParams{OrgID: *orgID, OutDir: outDir})
+			if result.Err != nil {
+				return fmt.Errorf("org: report: %w", result.Err)
+			}
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "wrote %s\n", result.Path)
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&outDir, "out", "", "output directory for the report (default: docs/reports)")
 
 	return cmd
 }

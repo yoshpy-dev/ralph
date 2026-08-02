@@ -1217,3 +1217,311 @@ func equalStrings(a, b []string) bool {
 	}
 	return true
 }
+
+// --- ralph org start (AC-3: headless-lead spawn sugar) ----------------------
+
+func TestOrgStart_HappyPath_SpawnsLeadSeat_SingleAgmsgJoin_NoHello(t *testing.T) {
+	_, agmsgLog := setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	out, err := runOrgCmd(t,
+		"start", "--org-id", "org-a", "--driver", "claude", "--model", "sonnet",
+		"--cwd", t.TempDir(), "--scope", "org-wide",
+		"--state-dir", stateDir,
+		"dry-run 座席を1つ spawn し、typed message を送り、status を確認して disband せよ",
+	)
+	if err != nil {
+		t.Fatalf("start failed: %v (output: %s)", err, out)
+	}
+	if !strings.Contains(out, `spawned seat "lead"`) {
+		t.Errorf("expected spawned confirmation naming the lead seat, got: %s", out)
+	}
+	if !strings.Contains(out, "ralph org status --org-id org-a") {
+		t.Errorf("expected a status hint in the output, got: %s", out)
+	}
+
+	events := readManifestEvents(t, filepath.Join(stateDir, "manifest.jsonl"))
+	last := events[len(events)-1]
+	if last.Event != "spawned" || last.SeatID != "lead" || last.Role != "lead" {
+		t.Fatalf("expected last event spawned for seat_id=role=lead, got %+v", last)
+	}
+
+	// leadSelfSpawn (internal/org/spawn.go's Spawn): exactly one agmsg
+	// invocation (the seat's own Join, which IS the lead-identity join) --
+	// no separate ensureLeadJoined call, no HELLO send.
+	agmsgLines := readLogLines(t, agmsgLog)
+	if n := countLinesWithPrefix(agmsgLines, "ralph-org-a"); n != 1 {
+		t.Fatalf("expected exactly 1 agmsg invocation for a lead-self spawn, got %d (log: %v)", n, agmsgLines)
+	}
+	if !strings.Contains(agmsgLines[0], "ralph-org-a lead claude-code") {
+		t.Fatalf("expected the single agmsg call to be lead's own Join, got %v", agmsgLines)
+	}
+}
+
+func TestOrgStart_TaskAndEnvelopeLandInPromptFile(t *testing.T) {
+	herdrLog, _ := setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+	task := "dry-run 座席を1つ spawn し、typed message を送り、status を確認して disband せよ"
+
+	out, err := runOrgCmd(t,
+		"start", "--org-id", "org-a", "--driver", "claude", "--model", "sonnet",
+		"--cwd", t.TempDir(), "--scope", "org-wide",
+		"--state-dir", stateDir,
+		task,
+	)
+	if err != nil {
+		t.Fatalf("start failed: %v (output: %s)", err, out)
+	}
+
+	data, rerr := os.ReadFile(herdrLog)
+	if rerr != nil {
+		t.Fatalf("read herdr log: %v", rerr)
+	}
+	if !strings.Contains(string(data), "役割指示を読み込んで従ってください: ") {
+		t.Fatalf("expected AgentStart argv to carry the prompt-file pointer, got:\n%s", string(data))
+	}
+
+	promptPath := filepath.Join(stateDir, "prompts", "org-a_lead.md")
+	promptData, perr := os.ReadFile(promptPath)
+	if perr != nil {
+		t.Fatalf("expected prompt file at %q: %v", promptPath, perr)
+	}
+	promptText := string(promptData)
+	for _, want := range []string{task, "model_pool:", "max_seats:", "permission default:", "org-a"} {
+		if !strings.Contains(promptText, want) {
+			t.Errorf("expected lead prompt file to contain %q, got:\n%s", want, promptText)
+		}
+	}
+}
+
+func TestOrgStart_ModelFlagOmitted_DefaultsToFirstMatchingPoolEntry(t *testing.T) {
+	setupOrgStubPATH(t)
+	dir := t.TempDir()
+	stateDir := filepath.Join(dir, "state")
+	configPath := filepath.Join(dir, "ralph.toml")
+	content := "[org]\n" +
+		"max_seats = 5\n" +
+		"driver_pool = [\"claude\", \"codex\"]\n\n" +
+		"[[org.model_pool]]\n" +
+		"driver = \"codex\"\n" +
+		"model = \"gpt-5-codex\"\n\n" +
+		"[[org.model_pool]]\n" +
+		"driver = \"claude\"\n" +
+		"model = \"opus\"\n\n" +
+		"[[org.model_pool]]\n" +
+		"driver = \"claude\"\n" +
+		"model = \"sonnet\"\n"
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	out, err := runOrgCmd(t,
+		"start", "--org-id", "org-a", "--driver", "claude",
+		"--cwd", t.TempDir(), "--scope", "org-wide",
+		"--state-dir", stateDir, "--config", configPath,
+		"task text",
+	)
+	if err != nil {
+		t.Fatalf("start failed: %v (output: %s)", err, out)
+	}
+
+	events := readManifestEvents(t, filepath.Join(stateDir, "manifest.jsonl"))
+	last := events[len(events)-1]
+	// The first claude entry in declared model_pool order is "opus" (codex's
+	// entry precedes it but does not match --driver claude).
+	if last.Model != "opus" {
+		t.Fatalf("expected default --model resolution to pick the first matching pool entry (opus), got %q", last.Model)
+	}
+}
+
+func TestOrgStart_ModelFlagExplicit_OverridesDefault(t *testing.T) {
+	setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	out, err := runOrgCmd(t,
+		"start", "--org-id", "org-a", "--driver", "claude", "--model", "haiku",
+		"--cwd", t.TempDir(), "--scope", "org-wide",
+		"--state-dir", stateDir,
+		"task text",
+	)
+	if err != nil {
+		t.Fatalf("start failed: %v (output: %s)", err, out)
+	}
+
+	events := readManifestEvents(t, filepath.Join(stateDir, "manifest.jsonl"))
+	last := events[len(events)-1]
+	if last.Model != "haiku" {
+		t.Fatalf("expected explicit --model to win over the default, got %q", last.Model)
+	}
+}
+
+func TestOrgStart_NoMatchingModelPoolEntryForDriver_NonZeroExit(t *testing.T) {
+	setupOrgStubPATH(t)
+	dir := t.TempDir()
+	stateDir := filepath.Join(dir, "state")
+	// writeOrgConfig's model_pool only contains a claude/sonnet entry -- no
+	// codex entry exists for --driver codex to match.
+	configPath := writeOrgConfig(t, dir, 5)
+
+	out, err := runOrgCmd(t,
+		"start", "--org-id", "org-a", "--driver", "codex",
+		"--cwd", t.TempDir(), "--scope", "org-wide",
+		"--state-dir", stateDir, "--config", configPath,
+		"task text",
+	)
+	if err == nil {
+		t.Fatalf("expected non-zero exit when no [org].model_pool entry matches --driver, output: %s", out)
+	}
+	if !strings.Contains(err.Error(), `driver "codex"`) {
+		t.Errorf("expected error to name the unmatched driver, got: %v", err)
+	}
+}
+
+func TestOrgStart_MissingScope_AutonomousDefault_RejectedUnlessAllowUnscoped(t *testing.T) {
+	setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	out, err := runOrgCmd(t,
+		"start", "--org-id", "org-a", "--driver", "claude", "--model", "sonnet",
+		"--cwd", t.TempDir(),
+		"--state-dir", stateDir,
+		"task text",
+	)
+	if err == nil {
+		t.Fatalf("expected non-zero exit for a missing --scope under the default autonomous permission mode, output: %s", out)
+	}
+	if !strings.Contains(err.Error(), "--scope") || !strings.Contains(err.Error(), "--allow-unscoped") {
+		t.Errorf("expected error to mention --scope and --allow-unscoped, got: %v", err)
+	}
+
+	out2, err2 := runOrgCmd(t,
+		"start", "--org-id", "org-a", "--driver", "claude", "--model", "sonnet",
+		"--cwd", t.TempDir(), "--allow-unscoped",
+		"--state-dir", stateDir,
+		"task text",
+	)
+	if err2 != nil {
+		t.Fatalf("expected --allow-unscoped to bypass the gate, got %v (output: %s)", err2, out2)
+	}
+}
+
+func TestOrgStart_BlankTaskArg_NonZeroExit(t *testing.T) {
+	setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	out, err := runOrgCmd(t,
+		"start", "--org-id", "org-a", "--driver", "claude", "--model", "sonnet",
+		"--cwd", t.TempDir(), "--scope", "org-wide",
+		"--state-dir", stateDir,
+		"   ",
+	)
+	if err == nil {
+		t.Fatalf("expected non-zero exit for a blank task argument, output: %s", out)
+	}
+}
+
+func TestOrgStart_RequiresCwd(t *testing.T) {
+	setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	out, err := runOrgCmd(t,
+		"start", "--org-id", "org-a", "--driver", "claude", "--model", "sonnet",
+		"--scope", "org-wide",
+		"--state-dir", stateDir,
+		"task text",
+	)
+	if err == nil {
+		t.Fatalf("expected non-zero exit for a missing --cwd, output: %s", out)
+	}
+	if !strings.Contains(err.Error(), "--cwd") {
+		t.Errorf("expected error to mention --cwd, got: %v", err)
+	}
+}
+
+func TestOrgStart_RequiresOrgID(t *testing.T) {
+	out, err := runOrgCmd(t, "start", "--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(), "task text")
+	if err == nil {
+		t.Fatalf("expected non-zero exit for a missing --org-id, output: %s", out)
+	}
+}
+
+// --- ralph org report (AC-4) -------------------------------------------
+
+func TestOrgReport_CLI_WritesFileWithRosterTimelineAndReceipts(t *testing.T) {
+	setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	if _, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
+		"--state-dir", stateDir,
+	); err != nil {
+		t.Fatalf("spawn failed: %v", err)
+	}
+
+	outDir := filepath.Join(t.TempDir(), "reports")
+	out, err := runOrgCmd(t, "report", "--org-id", "org-a", "--state-dir", stateDir, "--out", outDir)
+	if err != nil {
+		t.Fatalf("report failed: %v (output: %s)", err, out)
+	}
+	if !strings.Contains(out, "wrote ") {
+		t.Errorf("expected output to confirm the written path, got: %s", out)
+	}
+
+	entries, rerr := os.ReadDir(outDir)
+	if rerr != nil {
+		t.Fatalf("read out dir: %v", rerr)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected exactly 1 report file, got %v", entries)
+	}
+	if !strings.HasPrefix(entries[0].Name(), "org-manifest-org-a-") {
+		t.Errorf("expected report filename to start with org-manifest-org-a-, got %q", entries[0].Name())
+	}
+	data, derr := os.ReadFile(filepath.Join(outDir, entries[0].Name()))
+	if derr != nil {
+		t.Fatalf("read report file: %v", derr)
+	}
+	content := string(data)
+	for _, want := range []string{
+		"# org report: org-a", "## Roster", "seat-1", "## Event timeline",
+		"spawn_started", "## Model receipts", "## Known residuals", "active seats: 1",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("expected report content to contain %q, got:\n%s", want, content)
+		}
+	}
+}
+
+func TestOrgReport_CLI_EmptyOrg_StillWritesReport(t *testing.T) {
+	stateDir := filepath.Join(t.TempDir(), "state")
+	outDir := filepath.Join(t.TempDir(), "reports")
+
+	out, err := runOrgCmd(t, "report", "--org-id", "org-empty", "--state-dir", stateDir, "--out", outDir)
+	if err != nil {
+		t.Fatalf("report failed for an org with zero events: %v (output: %s)", err, out)
+	}
+
+	entries, rerr := os.ReadDir(outDir)
+	if rerr != nil {
+		t.Fatalf("read out dir: %v", rerr)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected exactly 1 report file even for an empty org, got %v", entries)
+	}
+	data, derr := os.ReadFile(filepath.Join(outDir, entries[0].Name()))
+	if derr != nil {
+		t.Fatalf("read report file: %v", derr)
+	}
+	if !strings.Contains(string(data), "no events recorded for this org") {
+		t.Errorf("expected the empty-org report to contain the no-events note, got:\n%s", string(data))
+	}
+}
+
+func TestOrgReport_CLI_RequiresOrgID(t *testing.T) {
+	out, err := runOrgCmd(t, "report", "--out", filepath.Join(t.TempDir(), "reports"))
+	if err == nil {
+		t.Fatalf("expected non-zero exit for a missing --org-id, output: %s", out)
+	}
+}

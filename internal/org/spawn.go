@@ -36,12 +36,17 @@ const maxAgentStartAttempts = 20
 // already treats herdr/agmsg errors -- see the HerdrClient doc comment.
 const agentPaneBusyMarker = "agent_pane_busy"
 
-// leadIdentity is the single, grep-able definition of the org's coordinating
+// LeadIdentity is the single, grep-able definition of the org's coordinating
 // "lead" agmsg identity name (see .claude/rules/agent-messaging.md's "star
 // topology" section). Every production call site that names or targets the
 // lead identity (ensureLeadJoined's Join, Spawn's HELLO Send TO field) must
-// use this constant rather than a bare "lead" literal.
-const leadIdentity = "lead"
+// use this constant rather than a bare "lead" literal. Exported so
+// internal/cli/org.go's newOrgStartCmd (`ralph org start`) can spawn the
+// lead seat itself under SeatID == LeadIdentity, Role == LeadIdentity
+// (design decision: "org start" = the lead-seat spawn sugar, see
+// docs/plans/active/2026-08-02-org-runtime-lead.md) without a duplicate
+// "lead" literal in that package.
+const LeadIdentity = "lead"
 
 // defaultLeadDriver is the driver ensureLeadJoined uses to derive the lead
 // identity's agmsg type (agmsgTypeForDriver) when SpawnParams.LeadDriver is
@@ -182,6 +187,14 @@ type SpawnParams struct {
 	// identity on the team roster. Empty defaults to defaultLeadDriver
 	// ("claude"), matching the CLI flag's default.
 	LeadDriver string
+	// Task is substituted into the seat's role prompt template as {{TASK}}
+	// (RolePromptVars.Task, prompts.go). Only prompts/lead.md references
+	// {{TASK}} today -- `ralph org start` (internal/cli/org.go's
+	// newOrgStartCmd) is the only production caller that sets this field,
+	// passing its required positional task argument straight through. Every
+	// other --role spawn leaves it empty (harmless: an unreferenced
+	// substitution is simply never used, same as Envelope below).
+	Task string
 }
 
 // SpawnOutcome classifies how a Spawn call concluded, so the CLI layer can
@@ -454,12 +467,15 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	team := agmsgTeam(p.OrgID)
 
 	// AC-4: a known --role expands the embedded template (reviewer.md /
-	// qa.md) into the initial prompt; --prompt, if also given, is appended
-	// after it. An unknown role leaves initialPrompt as plain --prompt
-	// (possibly empty) -- no error, no fallback template.
+	// qa.md / lead.md) into the initial prompt; --prompt, if also given, is
+	// appended after it. An unknown role leaves initialPrompt as plain
+	// --prompt (possibly empty) -- no error, no fallback template. Task and
+	// Envelope are only referenced by prompts/lead.md today; every other
+	// template ignores them.
 	initialPrompt := p.Prompt
 	rendered, ok, err := RenderRolePrompt(p.Role, RolePromptVars{
 		OrgID: p.OrgID, SeatID: p.SeatID, Team: team, Role: p.Role, Scope: p.Scope,
+		Task: p.Task, Envelope: EnvelopeSummary(o.Config),
 	})
 	if err != nil {
 		return o.failStep(p, "agent_start", err, paneID)
@@ -521,40 +537,66 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 		return SpawnResult{Outcome: SpawnOutcomeFailed, Err: err}
 	}
 
-	leadJoinNote, err := o.ensureLeadJoined(ctx, p, team, paneID)
-	if err != nil {
-		return SpawnResult{Outcome: SpawnOutcomeFailed, Err: err}
+	// leadSelfSpawn is true exactly when this Spawn call's own SeatID is the
+	// lead identity itself: `ralph org start` (internal/cli/org.go's
+	// newOrgStartCmd) spawns SeatID == LeadIdentity, Role == LeadIdentity by
+	// design ("org start" = the lead-seat spawn sugar, see
+	// docs/plans/active/2026-08-02-org-runtime-lead.md, "Design decisions").
+	// In that one case, the seat Join call just below IS the lead-identity
+	// join -- there is no separate coordinating identity to announce to --
+	// so a preceding ensureLeadJoined call would just re-join the exact same
+	// identity a moment later, and a HELLO from lead announcing itself to
+	// lead would violate the star topology's single-coordinator premise
+	// (.claude/rules/agent-messaging.md: every non-lead seat addresses
+	// TO: lead; lead has no "TO: lead" of its own). Both steps are skipped
+	// only for this case; every other --role spawn still gets both,
+	// unchanged.
+	leadSelfSpawn := p.SeatID == LeadIdentity
+
+	var leadJoinNote string
+	if !leadSelfSpawn {
+		note, err := o.ensureLeadJoined(ctx, p, team, paneID)
+		if err != nil {
+			return SpawnResult{Outcome: SpawnOutcomeFailed, Err: err}
+		}
+		leadJoinNote = note
 	}
 
 	if err := o.Agmsg.Join(ctx, team, p.SeatID, agmsgTypeForDriver(p.Driver), p.Cwd); err != nil {
 		return o.failStep(p, "agmsg_join", err, paneID)
 	}
+	joinedDetails := "agmsg_joined"
+	if leadSelfSpawn {
+		joinedDetails = "agmsg_joined lead_self=true"
+	}
 	if err := o.appendEvent(ManifestEvent{
 		TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnStep,
-		PaneID: paneID, AgmsgTeam: team, Details: "agmsg_joined",
+		PaneID: paneID, AgmsgTeam: team, Details: joinedDetails,
 	}); err != nil {
 		return SpawnResult{Outcome: SpawnOutcomeFailed, Err: err}
 	}
 
-	// AC-11: the HELLO body must itself be protocol.ValidateText-conformant
-	// (see TestSpawn_HelloMessage_IsProtocolConformant) -- HELLO does not
-	// require TASK_ID, so a TYPE header plus these fields alone is valid.
-	msg := fmt.Sprintf("TYPE: HELLO\nSEAT: %s\nROLE: %s\nORG_ID: %s", p.SeatID, p.Role, p.OrgID)
-	if err := o.Agmsg.Send(ctx, team, p.SeatID, leadIdentity, msg); err != nil {
-		// tech-debt (docs/tech-debt/README.md, "spawn の agmsg_announce(HELLO
-		// send)失敗パスの補償..."): the seat's own Join already succeeded by
-		// this point, so a failed HELLO announce must not leave a stale
-		// roster entry behind -- best-effort Leave it back out, and record
-		// the outcome in spawn_failed's Details alongside the lead-join note
-		// so both compensation steps stay auditable from the manifest alone.
-		leaveNote := compensateLeave(o.Agmsg, team, p.SeatID)
-		return o.failStepWithNote(p, "agmsg_announce", err, paneID, fmt.Sprintf("lead_join=%s leave=%s", leadJoinNote, leaveNote))
-	}
-	if err := o.appendEvent(ManifestEvent{
-		TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnStep,
-		PaneID: paneID, AgmsgTeam: team, Details: "agmsg_announced",
-	}); err != nil {
-		return SpawnResult{Outcome: SpawnOutcomeFailed, Err: err}
+	if !leadSelfSpawn {
+		// AC-11: the HELLO body must itself be protocol.ValidateText-conformant
+		// (see TestSpawn_HelloMessage_IsProtocolConformant) -- HELLO does not
+		// require TASK_ID, so a TYPE header plus these fields alone is valid.
+		msg := fmt.Sprintf("TYPE: HELLO\nSEAT: %s\nROLE: %s\nORG_ID: %s", p.SeatID, p.Role, p.OrgID)
+		if err := o.Agmsg.Send(ctx, team, p.SeatID, LeadIdentity, msg); err != nil {
+			// tech-debt (docs/tech-debt/README.md, "spawn の agmsg_announce(HELLO
+			// send)失敗パスの補償..."): the seat's own Join already succeeded by
+			// this point, so a failed HELLO announce must not leave a stale
+			// roster entry behind -- best-effort Leave it back out, and record
+			// the outcome in spawn_failed's Details alongside the lead-join note
+			// so both compensation steps stay auditable from the manifest alone.
+			leaveNote := compensateLeave(o.Agmsg, team, p.SeatID)
+			return o.failStepWithNote(p, "agmsg_announce", err, paneID, fmt.Sprintf("lead_join=%s leave=%s", leadJoinNote, leaveNote))
+		}
+		if err := o.appendEvent(ManifestEvent{
+			TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnStep,
+			PaneID: paneID, AgmsgTeam: team, Details: "agmsg_announced",
+		}); err != nil {
+			return SpawnResult{Outcome: SpawnOutcomeFailed, Err: err}
+		}
 	}
 
 	// Scope/AllowUnscoped/permission_mode have no dedicated ManifestEvent
@@ -621,13 +663,13 @@ func spawnedEventDetails(p SpawnParams, mode string) string {
 // clean agmsg team has no "lead" identity registered yet, and agmsg's
 // roster-based send validation rejects HELLO messages whose from/to
 // identity was never join.sh'd (agmsg #355) -- so the saga must attempt to
-// register leadIdentity before the seat's own Join+Send that follows it in
+// register LeadIdentity before the seat's own Join+Send that follows it in
 // Spawn. join.sh is treated as idempotent (re-joining an existing member is
 // a documented no-op/soft-fail in agmsg), so a lead-join error here does
 // *not* fail the saga on its own: the definitive, single-authoritative-
 // failure-point gate is the seat Join immediately after this call and,
 // ultimately, the HELLO Send -- if the roster is genuinely missing
-// leadIdentity, Send fails and the lead-join error recorded here is carried
+// LeadIdentity, Send fails and the lead-join error recorded here is carried
 // into that failure's Details for diagnosis (see failStepWithNote's doc
 // comment).
 //
@@ -643,7 +685,7 @@ func (o *Org) ensureLeadJoined(ctx context.Context, p SpawnParams, team, paneID 
 	if leadDriver == "" {
 		leadDriver = defaultLeadDriver
 	}
-	leadJoinErr := o.Agmsg.Join(ctx, team, leadIdentity, agmsgTypeForDriver(leadDriver), p.Cwd)
+	leadJoinErr := o.Agmsg.Join(ctx, team, LeadIdentity, agmsgTypeForDriver(leadDriver), p.Cwd)
 	leadJoinNote := "ok"
 	if leadJoinErr != nil {
 		leadJoinNote = fmt.Sprintf("error=%v", leadJoinErr)
@@ -879,6 +921,7 @@ func (o *Org) dryRunSpawn(p SpawnParams, mode string) SpawnResult {
 	initialPrompt := p.Prompt
 	rendered, ok, err := RenderRolePrompt(p.Role, RolePromptVars{
 		OrgID: p.OrgID, SeatID: p.SeatID, Team: team, Role: p.Role, Scope: p.Scope,
+		Task: p.Task, Envelope: EnvelopeSummary(o.Config),
 	})
 	if err != nil {
 		return o.failStep(p, "agent_start", err, "")
@@ -903,23 +946,37 @@ func (o *Org) dryRunSpawn(p SpawnParams, mode string) SpawnResult {
 	step.Details = agentStartedDetails
 	steps = append(steps, step)
 
-	step = base
-	step.Event = EventSpawnStep
-	step.AgmsgTeam = team
-	step.Details = "agmsg_lead_joined ok"
-	steps = append(steps, step)
+	// leadSelfSpawn mirrors the same branch in Spawn (see its doc comment):
+	// a dry run of `ralph org start` must simulate the same skipped
+	// agmsg_lead_joined/agmsg_announced steps a real spawn would skip, so the
+	// dry-run trail stays a faithful preview of what a real spawn records.
+	leadSelfSpawn := p.SeatID == LeadIdentity
+
+	if !leadSelfSpawn {
+		step = base
+		step.Event = EventSpawnStep
+		step.AgmsgTeam = team
+		step.Details = "agmsg_lead_joined ok"
+		steps = append(steps, step)
+	}
 
 	step = base
 	step.Event = EventSpawnStep
 	step.AgmsgTeam = team
-	step.Details = "agmsg_joined"
+	if leadSelfSpawn {
+		step.Details = "agmsg_joined lead_self=true"
+	} else {
+		step.Details = "agmsg_joined"
+	}
 	steps = append(steps, step)
 
-	step = base
-	step.Event = EventSpawnStep
-	step.AgmsgTeam = team
-	step.Details = "agmsg_announced"
-	steps = append(steps, step)
+	if !leadSelfSpawn {
+		step = base
+		step.Event = EventSpawnStep
+		step.AgmsgTeam = team
+		step.Details = "agmsg_announced"
+		steps = append(steps, step)
+	}
 
 	step = base
 	step.Event = EventSpawned

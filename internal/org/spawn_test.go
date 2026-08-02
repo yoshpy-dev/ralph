@@ -1343,11 +1343,11 @@ func TestOrgSpawn_FailureInjection_AgmsgSend_LeaveFailure_RecordedInDetails(t *t
 	assertDetailsContains(t, last.Details, "step=agmsg_announce", "leave=failed:", "stub failure: agmsg leave")
 }
 
-// --- AC-7: leadIdentity const + lead agmsg type from LeadDriver -------------
+// --- AC-7: LeadIdentity const + lead agmsg type from LeadDriver -------------
 
 func TestLeadIdentity_ConstantValue(t *testing.T) {
-	if leadIdentity != "lead" {
-		t.Fatalf("leadIdentity = %q, want %q", leadIdentity, "lead")
+	if LeadIdentity != "lead" {
+		t.Fatalf("LeadIdentity = %q, want %q", LeadIdentity, "lead")
 	}
 }
 
@@ -1364,8 +1364,8 @@ func TestOrgSpawn_EnsureLeadJoined_DefaultLeadDriver_ClaudeCodeType(t *testing.T
 		t.Fatalf("expected at least 1 Join call, got %+v", a.joinCalls)
 	}
 	leadJoin := a.joinCalls[0]
-	if leadJoin.agentID != leadIdentity || leadJoin.agmsgType != "claude-code" {
-		t.Fatalf("expected lead Join(%s, claude-code, ...) by default, got %+v", leadIdentity, leadJoin)
+	if leadJoin.agentID != LeadIdentity || leadJoin.agmsgType != "claude-code" {
+		t.Fatalf("expected lead Join(%s, claude-code, ...) by default, got %+v", LeadIdentity, leadJoin)
 	}
 }
 
@@ -1386,11 +1386,122 @@ func TestOrgSpawn_EnsureLeadJoined_LeadDriverCodex_UsesCodexAgmsgType(t *testing
 		t.Fatalf("expected 2 Join calls (lead then seat), got %+v", a.joinCalls)
 	}
 	leadJoin, seatJoin := a.joinCalls[0], a.joinCalls[1]
-	if leadJoin.agentID != leadIdentity || leadJoin.agmsgType != "codex" {
-		t.Fatalf("expected lead Join(%s, codex, ...) for LeadDriver=codex, got %+v", leadIdentity, leadJoin)
+	if leadJoin.agentID != LeadIdentity || leadJoin.agmsgType != "codex" {
+		t.Fatalf("expected lead Join(%s, codex, ...) for LeadDriver=codex, got %+v", LeadIdentity, leadJoin)
 	}
 	if seatJoin.agentID != "seat-1" || seatJoin.agmsgType != "claude-code" {
 		t.Fatalf("expected the seat's own Join to still use its own Driver (claude -> claude-code), got %+v", seatJoin)
+	}
+}
+
+// --- AC-3: `ralph org start` = lead-seat spawn sugar (SeatID == LeadIdentity) ---
+
+func TestOrgSpawn_LeadSelfSpawn_SingleAgmsgJoin_NoHelloSend(t *testing.T) {
+	// SeatID == LeadIdentity ("ralph org start") must not double-join or
+	// HELLO-announce: the seat's own Join call IS the lead-identity join, and
+	// a HELLO from lead to lead would violate the star topology's
+	// single-coordinator premise (see the leadSelfSpawn doc comment in
+	// spawn.go's Spawn).
+	o, _, a := testOrg(t)
+
+	p := mustSpawnParams("org-a", LeadIdentity)
+	p.Role = LeadIdentity
+	p.Task = "dry-run 座席を spawn し、送信・確認・disband まで行え"
+	result := o.Spawn(p)
+	if result.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("expected SpawnOutcomeSpawned, got %v (err=%v)", result.Outcome, result.Err)
+	}
+
+	if len(a.joinCalls) != 1 {
+		t.Fatalf("expected exactly 1 agmsg Join call for a lead-self spawn (no separate ensureLeadJoined), got %+v", a.joinCalls)
+	}
+	if a.joinCalls[0].agentID != LeadIdentity {
+		t.Fatalf("expected the single Join call to register %q, got %+v", LeadIdentity, a.joinCalls[0])
+	}
+	for _, c := range a.calls {
+		if c == "send" {
+			t.Fatalf("expected no agmsg Send (HELLO) call for a lead-self spawn, got calls=%v", a.calls)
+		}
+	}
+
+	rr, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	var joinedStep *ManifestEvent
+	for i := range rr.Events {
+		if strings.HasPrefix(rr.Events[i].Details, "agmsg_joined") {
+			joinedStep = &rr.Events[i]
+			break
+		}
+	}
+	if joinedStep == nil {
+		t.Fatalf("expected an agmsg_joined spawn_step event, got events %+v", rr.Events)
+	}
+	assertDetailsContains(t, joinedStep.Details, "lead_self=true")
+	for _, ev := range rr.Events {
+		if strings.HasPrefix(ev.Details, "agmsg_lead_joined") || ev.Details == "agmsg_announced" {
+			t.Fatalf("expected no agmsg_lead_joined/agmsg_announced step for a lead-self spawn, got %+v", ev)
+		}
+	}
+}
+
+func TestOrgSpawn_LeadSelfSpawn_DryRun_MirrorsSameSkip(t *testing.T) {
+	o, _, _ := testOrg(t)
+
+	p := mustSpawnParams("org-a", LeadIdentity)
+	p.Role = LeadIdentity
+	p.DryRun = true
+	result := o.Spawn(p)
+	if result.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("expected SpawnOutcomeSpawned for a valid dry-run, got %v (err=%v)", result.Outcome, result.Err)
+	}
+
+	rr, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	sawJoinedLeadSelf := false
+	for _, ev := range rr.Events {
+		if strings.HasPrefix(ev.Details, "agmsg_lead_joined") || ev.Details == "agmsg_announced" {
+			t.Fatalf("expected no agmsg_lead_joined/agmsg_announced step in the dry-run trail for a lead-self spawn, got %+v", ev)
+		}
+		if ev.Details == "agmsg_joined lead_self=true" {
+			sawJoinedLeadSelf = true
+		}
+	}
+	if !sawJoinedLeadSelf {
+		t.Fatalf("expected an 'agmsg_joined lead_self=true' step in the dry-run trail, got events %+v", rr.Events)
+	}
+}
+
+func TestOrgSpawn_LeadRole_TaskAndEnvelopeSubstitutedIntoPromptFile(t *testing.T) {
+	// `ralph org start`'s Task and the org's EnvelopeSummary must both land
+	// in the lead seat's rendered prompt file (the lead.md template is long
+	// enough to always need the prompt-file path, same as reviewer/qa).
+	o, h, _ := testOrg(t)
+
+	p := mustSpawnParams("org-a", LeadIdentity)
+	p.Role = LeadIdentity
+	p.Task = "dry-run 座席を1つ spawn し、typed message を送り、status を確認して disband せよ"
+	if r := o.Spawn(p); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", r)
+	}
+
+	if len(h.agentStartArgs) != 1 {
+		t.Fatalf("expected exactly 1 AgentStart call, got %d", len(h.agentStartArgs))
+	}
+	promptArg := h.agentStartArgs[0][len(h.agentStartArgs[0])-1]
+	promptPath := strings.TrimPrefix(promptArg, "役割指示を読み込んで従ってください: ")
+	data, err := os.ReadFile(promptPath)
+	if err != nil {
+		t.Fatalf("expected the prompt file to exist at %q: %v", promptPath, err)
+	}
+	fileContent := string(data)
+	for _, want := range []string{p.Task, "model_pool:", "max_seats:", "permission default:"} {
+		if !strings.Contains(fileContent, want) {
+			t.Errorf("expected the lead prompt file content to contain %q, got:\n%s", want, fileContent)
+		}
 	}
 }
 
