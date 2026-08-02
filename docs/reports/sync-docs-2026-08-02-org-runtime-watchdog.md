@@ -180,3 +180,91 @@ static/mirror gates and the affected Go packages remain green after the
 comment-only fix. Carry the 2 new tech-debt rows forward as named follow-ups
 (not blocking `/pr`), consistent with the verify and test reports'
 recommendation.
+
+## Cycle 2
+
+- Date: 2026-08-03
+- Commit under review: `cca5201` (docs: append cycle-2 test section for
+  org-runtime-watchdog)
+- Prior cycle-2 commits covered: `674581e` (cross-review triage), `19c7630`
+  (fix: cross-review AR-1/AR-2), `6836efe` (docs: cycle-2 self-review
+  section), `ccf506e` (fix: cycle-2 self-review M2-1/M2-2), `b7110c6` (docs:
+  cycle-2 verify section)
+
+### Plan Implementation notes — stale (cycle-2 fixes undocumented)
+
+**Drift detected. Resolved.**
+
+The plan's "Implementation notes (deviations)" section ended at the
+`2026-08-02` AC-10 smoke bullet with no record of the cycle-2 fixes. Appended
+a new bullet summarizing: (1) cross-review AR-1/AR-2 (`19c7630`) —
+`leadActivityEventCount` `orgID` filter, and the total-budget zero-active-seat
+guard; (2) self-review cycle-2 M2-1/M2-2 (`ccf506e`) — completing the
+seat-attribution half of `leadActivityEventCount` (AR-1's closure note had
+overclaimed full closure) and threading `cmd.Context()` instead of
+`context.Background()` into `newWatchdogHooks`'s tracked goroutine.
+
+### `docs/tech-debt/README.md` `leadActivityEventCount` row — confirmed accurate, no change needed
+
+**No drift.** The row (line 70) was already updated in-commit by `19c7630`
+and `ccf506e` themselves (not left for sync-docs to catch): it now reads
+"RESOLVED 2026-08-03 in feat/org-runtime-watchdog" with both the AR-1
+(org-scope) and M2-1 (seat-scope) halves named, cites
+`docs/reports/cross-review-triage-org-runtime-watchdog.md` (AR-1) alongside
+the existing self-review/verify/test report pointers, and is struck through
+consistently (debt item, closing parenthetical, and trigger column all
+marked resolved). Confirmed no duplicate row exists for this finding.
+The "3 deferred LOW findings" row (line 71, `ResolveOrgStateDir` source
+discard / oversized scope-change ALERT / unreachable `Escalated` guard)
+remains correctly open — none of the 3 were in scope for the cycle-2 fixes.
+
+### Stale-semantics sweep — no drift found
+
+Checked for two specific stale-doc risks named in this cycle's brief:
+
+1. **Old org-agnostic deadman semantics.** Grepped
+   `docs/specs/2026-08-01-org-runtime.md` (FR-8/FR-9), `.claude/skills/org/SKILL.md`
+   + 3 mirrors, `AGENTS.md`, and `README.md` for deadman/watchdog wording.
+   None describe the manifest-growth "lead activity" check at an
+   implementation-detail level (org/seat scoping is internal to
+   `leadActivityEventCount`, not a documented contract) — spec/skill prose
+   already only promises "Lead notified, N-minute no-response escalates",
+   which remains true after the fix. No stale claim found; no edit needed.
+2. **`context.Background()` watcher wiring.** Grepped all `context.Background()`
+   call sites under `internal/org/` and `internal/cli/org.go`. The one this
+   cycle's fix replaced (`newWatchdogHooks`'s tracked-goroutine `RunWatcher`/
+   `SendWatchdogAlert` calls) is gone, replaced by the threaded `ctx`
+   parameter. Every remaining `context.Background()` use
+   (`lockfile.go:61`, `spawn.go:340,1269,1304`, `verbs.go:118,186,225,277,286`,
+   plus test files) is an unrelated, correctly-scoped one-shot call
+   (compensation cleanup deliberately outlives the saga's own deadline, or a
+   test harness with no caller context to thread) — not a leftover doc/code
+   mismatch. No stale doc references the old `context.Background()` wiring.
+
+### No other drift found
+
+- `./scripts/check-sync.sh` — PASS (0 DRIFTED, 179 IDENTICAL, 3 KNOWN_DIFF),
+  re-confirmed at `cca5201`.
+- `./scripts/check-skill-sync.sh` — PASS (14 skills in lock-step),
+  re-confirmed at `cca5201`.
+- Verify report cycle-2 section and test report cycle-2 section both already
+  cover the M2-1/M2-2 fixes with their own findings tables and regression
+  test names; no further doc backfill needed there.
+
+## Verification (Cycle 2)
+
+- `./scripts/check-sync.sh` — PASS.
+- `./scripts/check-skill-sync.sh` — PASS.
+
+## Files changed in this pass (Cycle 2)
+
+- `docs/plans/active/2026-08-02-org-runtime-watchdog.md` — new "Cycle 2"
+  bullet in Implementation notes (deviations).
+- `docs/reports/sync-docs-2026-08-02-org-runtime-watchdog.md` — this Cycle 2
+  section.
+
+## Recommendation (Cycle 2)
+
+**Proceed to `/cross-review`.** No documentation drift found beyond the plan
+notes gap closed in this pass; tech-debt rows remain accurate; no stale
+semantics claims found in the sweep.
