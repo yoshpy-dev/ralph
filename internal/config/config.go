@@ -130,6 +130,9 @@ type OrgConfig struct {
 	// this at spawn time to pick the driver-native permission flag). See
 	// OrgPermissionsConfig's doc comment.
 	Permissions OrgPermissionsConfig `toml:"permissions"`
+	// Watchdog holds the pulse-layer/watcher-layer settings for `ralph org
+	// watch` (PR④). See OrgWatchdogConfig's doc comment.
+	Watchdog OrgWatchdogConfig `toml:"watchdog"`
 }
 
 // OrgPermissionsConfig is the `[org.permissions]` envelope: a driver-
@@ -159,6 +162,29 @@ type OrgBudgetConfig struct {
 	SeatWallClockMinutes  int `toml:"seat_wall_clock_minutes"`
 	TotalWallClockMinutes int `toml:"total_wall_clock_minutes"`
 	MaxFixRounds          int `toml:"max_fix_rounds"`
+}
+
+// OrgWatchdogConfig holds the `[org.watchdog]` settings for `ralph org
+// watch`'s two layers: a deterministic pulse-layer timer (IntervalSeconds,
+// StallMinutes) and an on-demand semantic-judgment watcher layer
+// (WatcherEnabled, WatcherModel). See
+// docs/plans/active/2026-08-02-org-runtime-watchdog.md for the full design.
+type OrgWatchdogConfig struct {
+	// IntervalSeconds is how often the pulse layer evaluates watch
+	// conditions (heartbeat stall, process liveness, budget, scope change).
+	IntervalSeconds int `toml:"interval_seconds"`
+	// StallMinutes is the heartbeat-stall threshold: how long a seat's last
+	// manifest event time and herdr state_change_seq may both stay unchanged
+	// before the pulse layer treats it as stalled.
+	StallMinutes int `toml:"stall_minutes"`
+	// WatcherEnabled toggles the on-demand `claude -p` semantic-judgment
+	// watcher layer. When false, the pulse layer still runs (budget cutoff,
+	// ALERT notifications) but never triggers the watcher.
+	WatcherEnabled bool `toml:"watcher_enabled"`
+	// WatcherModel is the model alias passed to the on-demand watcher
+	// invocation (e.g. "haiku"). Required (non-empty) when WatcherEnabled is
+	// true.
+	WatcherModel string `toml:"watcher_model"`
 }
 
 // Default returns a Config with sensible defaults.
@@ -216,6 +242,12 @@ func Default() Config {
 			Permissions: OrgPermissionsConfig{
 				Default: "autonomous",
 				Roles:   map[string]string{},
+			},
+			Watchdog: OrgWatchdogConfig{
+				IntervalSeconds: 30,
+				StallMinutes:    15,
+				WatcherEnabled:  true,
+				WatcherModel:    "haiku",
 			},
 		},
 	}
@@ -419,6 +451,20 @@ func Load(path string) (Config, error) {
 		if !orgPermissionModeAllowed[mode] {
 			return cfg, fmt.Errorf("[org.permissions.roles].%s %q must be one of autonomous, edits, or guarded", role, mode)
 		}
+	}
+
+	// [org.watchdog] validation. Same strict pattern as [org.budget]: cfg
+	// already carries Default()'s Watchdog values before Unmarshal runs, so
+	// an absent [org.watchdog] section (or an absent key within a present
+	// one) never reaches these checks with a zero/invalid value.
+	if cfg.Org.Watchdog.IntervalSeconds < 1 {
+		return cfg, fmt.Errorf("[org.watchdog].interval_seconds must be >= 1, got %d", cfg.Org.Watchdog.IntervalSeconds)
+	}
+	if cfg.Org.Watchdog.StallMinutes < 1 {
+		return cfg, fmt.Errorf("[org.watchdog].stall_minutes must be >= 1, got %d", cfg.Org.Watchdog.StallMinutes)
+	}
+	if cfg.Org.Watchdog.WatcherEnabled && cfg.Org.Watchdog.WatcherModel == "" {
+		return cfg, fmt.Errorf("[org.watchdog].watcher_model must be non-empty when watcher_enabled is true")
 	}
 
 	return cfg, nil

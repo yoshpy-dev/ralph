@@ -187,6 +187,14 @@ func TestDefaultsLockStep(t *testing.T) {
 		tomlCfg.Org.AgmsgHome, goCfg.Org.AgmsgHome)
 	check("org.permissions.default", "RALPH_ORG_PERMISSION_DEFAULT",
 		tomlCfg.Org.Permissions.Default, goCfg.Org.Permissions.Default)
+	check("org.watchdog.interval_seconds", "RALPH_ORG_WATCHDOG_INTERVAL_SECONDS",
+		strconv.Itoa(tomlCfg.Org.Watchdog.IntervalSeconds), strconv.Itoa(goCfg.Org.Watchdog.IntervalSeconds))
+	check("org.watchdog.stall_minutes", "RALPH_ORG_WATCHDOG_STALL_MINUTES",
+		strconv.Itoa(tomlCfg.Org.Watchdog.StallMinutes), strconv.Itoa(goCfg.Org.Watchdog.StallMinutes))
+	check("org.watchdog.watcher_enabled", "RALPH_ORG_WATCHDOG_WATCHER_ENABLED",
+		strconv.FormatBool(tomlCfg.Org.Watchdog.WatcherEnabled), strconv.FormatBool(goCfg.Org.Watchdog.WatcherEnabled))
+	check("org.watchdog.watcher_model", "RALPH_ORG_WATCHDOG_WATCHER_MODEL",
+		tomlCfg.Org.Watchdog.WatcherModel, goCfg.Org.Watchdog.WatcherModel)
 
 	// ── loop.claude_reviewer_model ────────────────────────────────────────────
 	// Shell var: RALPH_CLAUDE_REVIEWER_MODEL; toml: [loop].claude_reviewer_model;

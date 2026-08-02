@@ -833,3 +833,149 @@ max_seats = 1
 		}
 	})
 }
+
+// TestDefault_OrgWatchdog verifies the [org.watchdog] envelope defaults:
+// interval_seconds, stall_minutes, watcher_enabled, watcher_model.
+func TestDefault_OrgWatchdog(t *testing.T) {
+	w := Default().Org.Watchdog
+	if w.IntervalSeconds != 30 {
+		t.Errorf("watchdog.interval_seconds = %d, want 30", w.IntervalSeconds)
+	}
+	if w.StallMinutes != 15 {
+		t.Errorf("watchdog.stall_minutes = %d, want 15", w.StallMinutes)
+	}
+	if !w.WatcherEnabled {
+		t.Error("watchdog.watcher_enabled = false, want true")
+	}
+	if w.WatcherModel != "haiku" {
+		t.Errorf("watchdog.watcher_model = %q, want haiku", w.WatcherModel)
+	}
+}
+
+// TestLoad_OrgWatchdogMissingSectionBackfillsDefault verifies a ralph.toml
+// without [org.watchdog] at all loads unchanged with the full Watchdog
+// defaults and no error.
+func TestLoad_OrgWatchdogMissingSectionBackfillsDefault(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ralph.toml")
+	content := `[pipeline]
+model = "opus"
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Org.Watchdog != Default().Org.Watchdog {
+		t.Errorf("watchdog = %+v, want %+v", cfg.Org.Watchdog, Default().Org.Watchdog)
+	}
+}
+
+// TestLoad_OrgWatchdogRoundTrip verifies a fully specified [org.watchdog]
+// section round-trips through Load() unchanged.
+func TestLoad_OrgWatchdogRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ralph.toml")
+	content := `[org.watchdog]
+interval_seconds = 45
+stall_minutes = 20
+watcher_enabled = false
+watcher_model = "sonnet"
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Org.Watchdog.IntervalSeconds != 45 {
+		t.Errorf("watchdog.interval_seconds = %d, want 45", cfg.Org.Watchdog.IntervalSeconds)
+	}
+	if cfg.Org.Watchdog.StallMinutes != 20 {
+		t.Errorf("watchdog.stall_minutes = %d, want 20", cfg.Org.Watchdog.StallMinutes)
+	}
+	if cfg.Org.Watchdog.WatcherEnabled {
+		t.Error("watchdog.watcher_enabled = true, want false (explicit override)")
+	}
+	if cfg.Org.Watchdog.WatcherModel != "sonnet" {
+		t.Errorf("watchdog.watcher_model = %q, want sonnet", cfg.Org.Watchdog.WatcherModel)
+	}
+}
+
+// TestLoad_OrgWatchdogRejects is a table-driven check of every
+// [org.watchdog] validation rejection: interval_seconds/stall_minutes below
+// 1, and an empty watcher_model while watcher_enabled is true.
+func TestLoad_OrgWatchdogRejects(t *testing.T) {
+	cases := []struct {
+		name    string
+		body    string
+		wantSub string
+	}{
+		{
+			name: "interval_seconds below 1",
+			body: `[org.watchdog]
+interval_seconds = 0
+`,
+			wantSub: "interval_seconds",
+		},
+		{
+			name: "stall_minutes below 1",
+			body: `[org.watchdog]
+stall_minutes = 0
+`,
+			wantSub: "stall_minutes",
+		},
+		{
+			name: "watcher_model empty while watcher_enabled true",
+			body: `[org.watchdog]
+watcher_enabled = true
+watcher_model = ""
+`,
+			wantSub: "watcher_model",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "ralph.toml")
+			if err := os.WriteFile(path, []byte(tc.body), 0644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Load(path)
+			if err == nil {
+				t.Fatalf("Load: expected error for %s, got nil", tc.name)
+			}
+			if !contains(err.Error(), tc.wantSub) {
+				t.Errorf("error %q does not mention %q", err.Error(), tc.wantSub)
+			}
+		})
+	}
+}
+
+// TestLoad_OrgWatchdogWatcherDisabledAllowsEmptyModel verifies that
+// watcher_model may be empty when watcher_enabled is explicitly false (the
+// non-empty requirement only applies when the watcher layer is active).
+func TestLoad_OrgWatchdogWatcherDisabledAllowsEmptyModel(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ralph.toml")
+	content := `[org.watchdog]
+watcher_enabled = false
+watcher_model = ""
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: unexpected error: %v", err)
+	}
+	if cfg.Org.Watchdog.WatcherEnabled {
+		t.Error("watchdog.watcher_enabled = true, want false")
+	}
+	if cfg.Org.Watchdog.WatcherModel != "" {
+		t.Errorf("watchdog.watcher_model = %q, want empty", cfg.Org.Watchdog.WatcherModel)
+	}
+}

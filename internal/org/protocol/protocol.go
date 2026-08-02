@@ -33,6 +33,7 @@ const (
 	TypeHeartbeat = "HEARTBEAT"
 	TypeStop      = "STOP"
 	TypeHello     = "HELLO"
+	TypeAlert     = "ALERT"
 )
 
 // DefaultMaxBodyChars is the body size cap applied when a caller passes
@@ -46,10 +47,11 @@ var validTypes = map[string]bool{
 	TypeTask: true, TypeResult: true, TypeQuestion: true, TypeReview: true,
 	TypeDecision: true, TypeBlocked: true, TypeContract: true,
 	TypeHeartbeat: true, TypeStop: true, TypeHello: true,
+	TypeAlert: true,
 }
 
 // taskIDRequiredTypes is the subset of the TYPE enum that must carry a
-// non-blank TASK_ID header. QUESTION/DECISION/HEARTBEAT/STOP/HELLO are
+// non-blank TASK_ID header. QUESTION/DECISION/HEARTBEAT/STOP/HELLO/ALERT are
 // exempt: they are not necessarily scoped to a single task.
 var taskIDRequiredTypes = map[string]bool{
 	TypeTask: true, TypeResult: true, TypeReview: true,

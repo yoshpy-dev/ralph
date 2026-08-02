@@ -111,3 +111,13 @@ default = "autonomous"
 seat_wall_clock_minutes = 30
 total_wall_clock_minutes = 120
 max_fix_rounds = 2
+
+# [org.watchdog] configures `ralph org watch`'s two layers: a deterministic
+# pulse-layer timer (interval_seconds, stall_minutes) and an on-demand
+# semantic-judgment watcher layer (watcher_enabled, watcher_model). Absent
+# [org.watchdog] is fully compatible -- Load() backfills these exact defaults.
+[org.watchdog]
+interval_seconds = 30
+stall_minutes = 15
+watcher_enabled = true
+watcher_model = "haiku"
