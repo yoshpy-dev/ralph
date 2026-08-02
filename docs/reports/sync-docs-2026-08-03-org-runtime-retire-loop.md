@@ -126,3 +126,71 @@ plan's own implementation slices already fixed.
 ## Next step
 
 Proceed to `/cross-review` (optional) then `/pr`.
+
+## Cycle 2
+
+- Date: 2026-08-03
+- Scope: doc-impact check for the two cross-review fix commits made after
+  cycle-1 sync-docs (`a868fca`): `fea2ee6` (status manifest path double-join
+  fix via `orgManifestPath`; `pick_reviewer` case-insensitive normalization)
+  and `47e2eee` (excludes dry-run seats from `ralph status`'s active/total
+  counts; refreshes `IncludeDryRun` doc comments in `status.go` /
+  `manifest.go`). No new commits authored this pass.
+
+### Checked, no drift found
+
+- **`ralph status` dry-run semantics** — grepped `README.md`, `AGENTS.md`,
+  `CLAUDE.md`, `.claude/rules/*.md`, `docs/quality/*.md`,
+  `docs/architecture/repo-map.md`, `docs/recipes/*.md`, and
+  `.claude/skills/org/SKILL.md` for any claim about whether dry-run seats
+  count toward `ralph status`'s active/total numbers. None of them assert
+  anything about it either way (README's one-line command table entry and
+  `status.go`'s own `Long` cobra help text describe roster display and
+  active counts in general terms, not the dry-run-inclusion rule), so
+  `47e2eee`'s behavior change (dry-run seats now render as rows via
+  `IncludeDryRun: true` but are excluded from `ActiveCount`/`TotalCount` via
+  the new `buildRealSeatCounts`) has no doc surface to contradict. Confirmed
+  `ralph org status --all`'s own dry-run-inclusion behavior
+  (`newOrgStatusCmd` in `internal/cli/org.go`) is a separate code path
+  untouched by either fix commit, so `.claude/skills/org/SKILL.md`'s
+  "`--all` で dry-run 座席も含める" line (line 47) still describes the right
+  command correctly.
+- **Cross-review SKILL.md accuracy re: case-insensitive `RALPH_PRIMARY_CLI` +
+  `pick_reviewer`** — `.claude/skills/cross-review/SKILL.md` (and its
+  `.agents/skills/` mirror) already stated, before `fea2ee6`, that
+  `RALPH_PRIMARY_CLI` "Accepts `claude` or `codex` (case-insensitive)"
+  (line 38) and that Step 2.b calls `pick_reviewer` with that driver value
+  (line 44). `fea2ee6` was a code fix bringing `pick_reviewer`'s
+  implementation in line with prose the skill already documented (per the
+  cycle-2 verify report's AR-2 entry) — not a doc change, and no stale text
+  remains: both mirrors still read exactly as they did in cycle 1, and
+  `diff` between the two confirms they stay byte-identical.
+- **`docs/recipes/`** — re-grepped `worktrees.md`, `agent-teams.md`,
+  `codex-setup.md`, `adding-a-language-pack.md` for `status`/`dry-run`/
+  `manifest` mentions; none reference the two fixed code paths.
+- **Org docs** (`docs/specs/2026-08-01-org-runtime.md`,
+  `.claude/rules/agent-messaging.md`, `docs/quality/quality-gates.md`,
+  `.claude/rules/git-commit-strategy.md`) — all reference
+  `.harness/state/org/manifest.jsonl` generically (audit trail, saga
+  record); none describe the manifest *path construction* that
+  `orgManifestPath` fixed, so no drift.
+
+### Drift checks
+
+- `./scripts/check-sync.sh` → `IDENTICAL: 143, DRIFTED: 0` (unchanged from
+  cycle 1) — no doc mirrors touched this pass.
+- `sh tests/test-no-loop-references.sh` → PASS, unaffected (no loop
+  references introduced or removed by the two fix commits).
+
+### Drift clean
+
+Yes. Both fix commits (`fea2ee6`, `47e2eee`) are internal implementation
+corrections that bring code behavior in line with what the docs already
+described (case-insensitive `RALPH_PRIMARY_CLI`) or fix a bug in an
+undocumented-either-way area (`ralph status` dry-run row-vs-count split, and
+the manifest path double-join). No committed doc, rule, skill, or recipe
+made a claim these commits contradict. No file changes required this cycle.
+
+### Next step
+
+Proceed to `/cross-review` (optional) then `/pr`.
