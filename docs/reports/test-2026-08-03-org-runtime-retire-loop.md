@@ -108,3 +108,117 @@ No failures. Table intentionally empty.
 - Blocked: none.
 
 **Proceed to `/sync-docs` → `/cross-review` → `/pr`.**
+
+---
+
+## Cycle 2 (re-run after cross-review fix)
+
+- Date: 2026-08-03
+- Trigger: cross-review ACTION_REQUIRED fix-and-revalidate cycle. Two fix
+  commits landed on top of the cycle-1 HEAD: `fea2ee6` (status manifest
+  path double-join + `pick_reviewer` case normalization) and `47e2eee`
+  (exclude dry-run seats from status active counts).
+- Worktree: `.claude/worktrees/org-runtime-retire-loop`, branch
+  `refactor/org-runtime-retire-loop`, HEAD `510849f`.
+- Scope: full (`RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh`), same
+  rationale as cycle 1 — this plan touches scripts, Go packages, skills,
+  and config broadly. Also re-ran `go test ./... -count=1` (fresh,
+  uncached) as an independent pass.
+- Evidence: `docs/evidence/test-2026-08-03-org-runtime-retire-loop-cycle2.log`
+
+### Test execution
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Delta vs cycle 1 |
+| --- | --- | --- | --- | --- | --- |
+| `tests/test-agent-phase-boundaries.sh` | 44 | 44 | 0 | 0 | unchanged |
+| `tests/test-branch-name.sh` | 26 | 26 | 0 | 0 | unchanged |
+| `tests/test-check-mojibake.sh` | 11 | 11 | 0 | 0 | unchanged |
+| `tests/test-check-skill-sync.sh` | 13 | 13 | 0 | 0 | unchanged |
+| `tests/test-detect-changed-languages.sh` | 23 | 23 | 0 | 0 | unchanged |
+| `tests/test-detect-languages-terraform.sh` | 8 | 8 | 0 | 0 | unchanged |
+| `tests/test-ensure-pr-ready.sh` | 7 | 7 | 0 | 0 | unchanged |
+| `tests/test-ensure-pr-title-prefix.sh` | 13 | 13 | 0 | 0 | unchanged |
+| `tests/test-gc-artifacts.sh` | 11 | 11 | 0 | 0 | unchanged |
+| `tests/test-insights-append.sh` | 39 | 39 | 0 | 0 | unchanged |
+| `tests/test-language-pack-monorepo-roots.sh` | 29 | 29 | 0 | 0 | unchanged |
+| `tests/test-no-loop-references.sh` | 1 | 1 | 0 | 0 | unchanged |
+| `tests/test-ralph-config.sh` | 15 | 15 | 0 | 0 | unchanged |
+| `tests/test-ralph-worktree.sh` | 29 | 29 | 0 | 0 | unchanged |
+| `tests/test-run-verify-scope.sh` | 12 | 12 | 0 | 0 | unchanged |
+| `tests/test-secret-scan.sh` | 6 | 6 | 0 | 0 | unchanged |
+| `tests/test-self-review-scope.sh` | 64 | 64 | 0 | 0 | unchanged |
+| `tests/test-sync-skills.sh` | 22 | 22 | 0 | 0 | unchanged |
+| `tests/test-terraform-gitignore.sh` | 47 | 47 | 0 | 0 | unchanged |
+| `tests/test-terraform-pack-verify.sh` | 36 | 36 | 0 | 0 | unchanged |
+| `tests/test-terraform-rule-frontmatter.sh` | 11 | 11 | 0 | 0 | unchanged |
+| `tests/test-verify-mode-split.sh` | 59 | 59 | 0 | 0 | unchanged |
+| `tests/test-xreview-helpers.sh` | **29** | 29 | 0 | 0 | **+3 vs cycle 1's 26** — `fea2ee6` added cases covering the manifest path double-join and case-insensitive `pick_reviewer` normalization |
+| **Shell subtotal** | **555** | **555** | **0** | **0** | +3 net |
+| `go test ./... -count=1` (fresh, uncached) | 8 packages | 8 ok | 0 | 0 | unchanged package set |
+
+`ls tests/*.sh \| wc -l` = 23 (same file count as cycle 1; the +3 assertions
+came from growing `test-xreview-helpers.sh`, not a new file).
+
+### New/changed tests targeted by this cycle
+
+| Test | Result | Note |
+| --- | --- | --- |
+| `TestStatusCmd_SeesSeatWrittenByRealOrgSpawn` (`internal/cli/status_test.go`, added in `47e2eee`) | PASS | Verifies `ralph status` picks up a seat row written by a real `ralph org spawn` manifest entry |
+| `TestStatusCmd_DryRunSeatIsARowButNotCountedInAggregates` (`internal/cli/status_test.go`, added in `47e2eee`) | PASS | Confirms the dry-run-seat aggregate-count exclusion fix: seat appears in the row listing but is excluded from active-seat counts |
+| `tests/test-xreview-helpers.sh` new cases (3× manifest-path/case-normalization assertions from `fea2ee6`) | PASS (29/29) | See per-test-name breakdown in the isolated run below |
+
+Isolated re-run of the two new `internal/cli` tests (`-run
+'TestStatusCmd_SeesSeatWrittenByRealOrgSpawn|TestStatusCmd_DryRunSeatIsARowButNotCountedInAggregates'
+-v -count=1`): both PASS.
+
+### Flaky-test re-verification (per task instructions)
+
+- `TestRunDoctorOpts_ProbeModelsFalse_NoSubprocess`: isolated `-count=3`
+  re-run → 3/3 PASS.
+- `TestRunWatcher_TimeoutIndependentOfSmallInterval`: isolated `-count=5`
+  re-run → 5/5 PASS.
+- One data point worth recording: running the doctor test immediately
+  before the watcher test in the same shell invocation (doctor test made
+  live `claude`/`codex`/`agmsg` probe subprocess calls, ~9s) produced 2/3
+  watcher-test timeouts in a follow-up `-count=3` batch, because the
+  watcher test's assertion is wall-clock-timeout-based and sensitive to
+  real subprocess contention on the machine. Re-isolating each test alone
+  (no adjacent subprocess-heavy test) was fully stable across 3 and 5
+  reps respectively. This matches the existing "flaky under contention,
+  not a reliable repro" classification from the cycle-1 report and prior
+  tester memory — no code fix indicated, this is a test-environment
+  contention artifact, not a regression.
+
+### Failure analysis
+
+No failures. Table intentionally empty.
+
+### Regression checks (cycle 2 additions only — see cycle 1 for the full list)
+
+| Previously broken behavior | Status | Evidence |
+| --- | --- | --- |
+| Status manifest path double-join (cross-review finding, fixed in `fea2ee6`) | Fixed, tested | `tests/test-xreview-helpers.sh` new cases + `internal/cli/status_test.go` additions in `fea2ee6`, all passing |
+| `pick_reviewer` case normalization (cross-review finding, fixed in `fea2ee6`) | Fixed, tested | `tests/test-xreview-helpers.sh` cases 1g/1h/1i (uppercase/mixed-case arg and env), all passing |
+| Dry-run seats inflating status active counts (cross-review finding, fixed in `47e2eee`) | Fixed, tested | `TestStatusCmd_DryRunSeatIsARowButNotCountedInAggregates` passing |
+| Real-spawn seat visibility in `ralph status` (fixed in `47e2eee`) | Covered | `TestStatusCmd_SeesSeatWrittenByRealOrgSpawn` passing |
+
+### Test gaps
+
+Same as cycle 1 — no new gaps introduced by the two fix commits. The fix
+commits added targeted tests for exactly the behavior they changed
+(manifest path resolution, reviewer case-folding, dry-run count exclusion);
+no additional blind spots identified.
+
+### Verdict (Cycle 2)
+
+- Pass: yes — 555/555 shell tests (+3 net vs cycle 1, all in
+  `test-xreview-helpers.sh`), 8/8 Go packages, both cross-review fix
+  commits (`fea2ee6`, `47e2eee`) covered by passing tests including the two
+  new `internal/cli/status_test.go` cases named in the task. Both
+  previously-flagged flaky tests reconfirmed stable in isolation (3/3 and
+  5/5); the one contention data point observed is consistent with the
+  known timing-sensitivity note, not a new regression.
+- Fail: none.
+- Blocked: none.
+
+**Proceed to `/sync-docs` → `/cross-review` → `/pr`.**
