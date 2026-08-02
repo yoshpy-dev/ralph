@@ -125,6 +125,27 @@ type OrgConfig struct {
 	// driver.ResolveAgmsgHome(cfg.Org.AgmsgHome), which lets env
 	// RALPH_ORG_AGMSG_HOME override this config value.
 	AgmsgHome string `toml:"agmsg_home"`
+	// Permissions holds the role-scoped seat permission-mode envelope
+	// (internal/org's ResolvePermissionMode/permissionArgsForDriver consume
+	// this at spawn time to pick the driver-native permission flag). See
+	// OrgPermissionsConfig's doc comment.
+	Permissions OrgPermissionsConfig `toml:"permissions"`
+}
+
+// OrgPermissionsConfig is the `[org.permissions]` envelope: a driver-
+// independent permission-mode enum (autonomous|edits|guarded), applied
+// per-role. Default applies to every role without an explicit entry in
+// Roles. internal/org maps the resolved mode to driver-native CLI flags
+// (e.g. claude: --permission-mode bypassPermissions); codex seats only
+// accept guarded until codex's own interactive permission flags are
+// live-verified (fail-closed -- see docs/tech-debt/README.md).
+type OrgPermissionsConfig struct {
+	// Default is the permission mode every role uses unless overridden in
+	// Roles. One of "autonomous" | "edits" | "guarded".
+	Default string `toml:"default"`
+	// Roles maps a role name to a permission-mode override. A role absent
+	// from this map uses Default.
+	Roles map[string]string `toml:"roles"`
 }
 
 // OrgModelPoolEntry pairs a driver CLI with a CLI-native model name or alias.
@@ -192,8 +213,20 @@ func Default() Config {
 			},
 			DeadmanMinutes: 10,
 			AgmsgHome:      "~/.agents/skills/agmsg",
+			Permissions: OrgPermissionsConfig{
+				Default: "autonomous",
+				Roles:   map[string]string{},
+			},
 		},
 	}
+}
+
+// orgPermissionModeAllowed is the enum [org.permissions].default and every
+// [org.permissions.roles] value must belong to.
+var orgPermissionModeAllowed = map[string]bool{
+	"autonomous": true,
+	"edits":      true,
+	"guarded":    true,
 }
 
 // Allowed driver values for [loop].driver.
@@ -361,6 +394,24 @@ func Load(path string) (Config, error) {
 	// error.
 	if cfg.Org.AgmsgHome == "" {
 		cfg.Org.AgmsgHome = Default().Org.AgmsgHome
+	}
+
+	// [org.permissions] validation. Default follows AgmsgHome's zero-value
+	// backfill pattern (an absent or explicitly empty `default` falls back
+	// rather than erroring), but once a value is present -- backfilled or
+	// explicit -- it must belong to orgPermissionModeAllowed. Roles entries
+	// are never backfilled (an absent role means "use Default"); each
+	// present entry is validated the same way.
+	if cfg.Org.Permissions.Default == "" {
+		cfg.Org.Permissions.Default = Default().Org.Permissions.Default
+	}
+	if !orgPermissionModeAllowed[cfg.Org.Permissions.Default] {
+		return cfg, fmt.Errorf("[org.permissions].default %q must be one of autonomous, edits, or guarded", cfg.Org.Permissions.Default)
+	}
+	for role, mode := range cfg.Org.Permissions.Roles {
+		if !orgPermissionModeAllowed[mode] {
+			return cfg, fmt.Errorf("[org.permissions.roles].%s %q must be one of autonomous, edits, or guarded", role, mode)
+		}
 	}
 
 	return cfg, nil

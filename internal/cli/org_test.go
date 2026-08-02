@@ -237,6 +237,7 @@ func TestOrgSpawn_HappyPath_EventSequenceReceiptAndWorkspaceReuse(t *testing.T) 
 	out, err := runOrgCmd(t,
 		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
 		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
 		"--state-dir", stateDir,
 	)
 	if err != nil {
@@ -270,6 +271,7 @@ func TestOrgSpawn_HappyPath_EventSequenceReceiptAndWorkspaceReuse(t *testing.T) 
 	out2, err2 := runOrgCmd(t,
 		"spawn", "--org-id", "org-a", "--id", "seat-2", "--role", "worker",
 		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
 		"--state-dir", stateDir,
 	)
 	if err2 != nil {
@@ -306,6 +308,7 @@ func TestOrgSpawn_LeadDriverFlag_DefaultsToClaudeCode(t *testing.T) {
 	out, err := runOrgCmd(t,
 		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
 		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
 		"--state-dir", stateDir,
 	)
 	if err != nil {
@@ -331,6 +334,7 @@ func TestOrgSpawn_LeadDriverFlag_Codex_RegistersLeadAsCodexType(t *testing.T) {
 	out, err := runOrgCmd(t,
 		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
 		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
 		"--state-dir", stateDir, "--lead-driver", "codex",
 	)
 	if err != nil {
@@ -356,6 +360,7 @@ func TestOrgSpawn_FailureInjection_TabCreate_NoCompensation(t *testing.T) {
 	out, err := runOrgCmd(t,
 		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
 		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
 		"--state-dir", stateDir,
 	)
 	if err == nil {
@@ -388,6 +393,7 @@ func TestOrgSpawn_FailureInjection_AgentStart_CompensatesPane(t *testing.T) {
 	out, err := runOrgCmd(t,
 		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
 		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
 		"--state-dir", stateDir,
 	)
 	if err == nil {
@@ -423,6 +429,7 @@ func TestOrgSpawn_FailureInjection_AgmsgSend_CompensatesPane(t *testing.T) {
 	out, err := runOrgCmd(t,
 		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
 		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
 		"--state-dir", stateDir,
 	)
 	if err == nil {
@@ -457,6 +464,7 @@ func TestOrgSpawn_FailureInjection_AgmsgJoin_CompensatesPane(t *testing.T) {
 	out, err := runOrgCmd(t,
 		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
 		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
 		"--state-dir", stateDir,
 	)
 	if err == nil {
@@ -496,6 +504,7 @@ func TestOrgSpawn_Rejection_ModelOutOfPoolAndMaxSeatsWithOrgIsolation(t *testing
 	out, err := runOrgCmd(t,
 		"spawn", "--org-id", "org-a", "--id", "seat-bad-model", "--role", "worker",
 		"--driver", "claude", "--model", "not-a-real-model", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
 		"--state-dir", stateDir, "--config", configPath,
 	)
 	if err == nil {
@@ -518,6 +527,7 @@ func TestOrgSpawn_Rejection_ModelOutOfPoolAndMaxSeatsWithOrgIsolation(t *testing
 	if _, err := runOrgCmd(t,
 		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
 		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
 		"--state-dir", stateDir, "--config", configPath,
 	); err != nil {
 		t.Fatalf("expected first org-a spawn to succeed under max_seats=1: %v", err)
@@ -526,6 +536,7 @@ func TestOrgSpawn_Rejection_ModelOutOfPoolAndMaxSeatsWithOrgIsolation(t *testing
 	out3, err3 := runOrgCmd(t,
 		"spawn", "--org-id", "org-a", "--id", "seat-2", "--role", "worker",
 		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
 		"--state-dir", stateDir, "--config", configPath,
 	)
 	if err3 == nil {
@@ -536,6 +547,7 @@ func TestOrgSpawn_Rejection_ModelOutOfPoolAndMaxSeatsWithOrgIsolation(t *testing
 	if _, errB := runOrgCmd(t,
 		"spawn", "--org-id", "org-b", "--id", "seat-1", "--role", "worker",
 		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
 		"--state-dir", stateDir, "--config", configPath,
 	); errB != nil {
 		t.Fatalf("expected org-b's first seat to spawn despite org-a being at max_seats: %v", errB)
@@ -549,6 +561,7 @@ func TestOrgSpawn_IdempotentRespawn_ExitZeroNoNewDriverCalls(t *testing.T) {
 	args := []string{
 		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
 		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
 		"--state-dir", stateDir,
 	}
 	if _, err := runOrgCmd(t, args...); err != nil {
@@ -580,6 +593,7 @@ func TestOrgSpawn_DryRun_NoPATHNeeded_StatusExclusionAndAll(t *testing.T) {
 	out, err := runOrgCmd(t,
 		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
 		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
 		"--state-dir", stateDir, "--dry-run",
 	)
 	if err != nil {
@@ -688,6 +702,7 @@ func TestOrgDisband_StopsActiveSeatsAndDisbandsOrg(t *testing.T) {
 	if _, err := runOrgCmd(t,
 		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
 		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
 		"--state-dir", stateDir,
 	); err != nil {
 		t.Fatalf("spawn failed: %v", err)
@@ -753,6 +768,7 @@ func TestOrgStop_ExistingSeat_LeavesAndRecordsOutcome(t *testing.T) {
 	if _, err := runOrgCmd(t,
 		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
 		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
 		"--state-dir", stateDir,
 	); err != nil {
 		t.Fatalf("spawn failed: %v", err)
@@ -861,6 +877,7 @@ func TestOrgSpawn_UnknownRole_NoTemplateApplied(t *testing.T) {
 	out, err := runOrgCmd(t,
 		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "not-a-known-role",
 		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
 		"--prompt", "verbatim prompt",
 		"--state-dir", stateDir,
 	)
@@ -891,6 +908,7 @@ func TestOrgSend_MalformedMessage_NonZeroExitAndNoManifestEvent(t *testing.T) {
 	if _, err := runOrgCmd(t,
 		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
 		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
 		"--state-dir", stateDir,
 	); err != nil {
 		t.Fatalf("spawn failed: %v", err)
@@ -926,6 +944,7 @@ func TestOrgSend_RawFlag_BypassesValidation(t *testing.T) {
 	if _, err := runOrgCmd(t,
 		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
 		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
 		"--state-dir", stateDir,
 	); err != nil {
 		t.Fatalf("spawn failed: %v", err)
@@ -955,6 +974,7 @@ func TestOrgSend_ValidTypedMessage_Succeeds(t *testing.T) {
 	if _, err := runOrgCmd(t,
 		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
 		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
 		"--state-dir", stateDir,
 	); err != nil {
 		t.Fatalf("spawn failed: %v", err)
@@ -980,6 +1000,7 @@ func TestOrgWait_HappyPath_Succeeds(t *testing.T) {
 	if _, err := runOrgCmd(t,
 		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
 		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
 		"--state-dir", stateDir,
 	); err != nil {
 		t.Fatalf("spawn failed: %v", err)
@@ -1029,6 +1050,7 @@ func TestOrgRead_HappyPath_Succeeds(t *testing.T) {
 	if _, err := runOrgCmd(t,
 		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
 		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
 		"--state-dir", stateDir,
 	); err != nil {
 		t.Fatalf("spawn failed: %v", err)
@@ -1122,6 +1144,65 @@ func TestOrgSend_TraversalTo_NonZeroExit(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "seat_id") {
 		t.Errorf("expected error to mention seat_id, got: %v", err)
+	}
+}
+
+// TestOrgSpawn_MissingScope_NonZeroExit_NoAllowUnscoped is the CLI-level
+// counterpart of AC-2b's minimum control gate: omitting both --scope and
+// --allow-unscoped under the default (autonomous) config exits non-zero and
+// mentions both flags.
+func TestOrgSpawn_MissingScope_NonZeroExit_NoAllowUnscoped(t *testing.T) {
+	herdrLog, _ := setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	out, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--state-dir", stateDir,
+	)
+	if err == nil {
+		t.Fatalf("expected non-zero exit for a missing --scope under autonomous mode, output: %s", out)
+	}
+	if !strings.Contains(err.Error(), "--scope") || !strings.Contains(err.Error(), "--allow-unscoped") {
+		t.Errorf("expected error to mention --scope and --allow-unscoped, got: %v", err)
+	}
+
+	if herdrLines := readLogLines(t, herdrLog); len(herdrLines) != 0 {
+		t.Errorf("expected zero herdr calls for the gate rejection, got: %v", herdrLines)
+	}
+	events := readManifestEvents(t, filepath.Join(stateDir, "manifest.jsonl"))
+	if len(events) != 0 {
+		t.Errorf("expected zero manifest events for the gate rejection, got: %v", events)
+	}
+}
+
+// TestOrgSpawn_AllowUnscopedFlag_BypassesGateAndIsRecorded is the CLI-level
+// counterpart of the AllowUnscoped bypass: the flag reaches SpawnParams and
+// its use is recorded on the spawned event's Details.
+func TestOrgSpawn_AllowUnscopedFlag_BypassesGateAndIsRecorded(t *testing.T) {
+	setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	out, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--allow-unscoped",
+		"--state-dir", stateDir,
+	)
+	if err != nil {
+		t.Fatalf("expected --allow-unscoped to bypass the gate, got %v (output: %s)", err, out)
+	}
+
+	events := readManifestEvents(t, filepath.Join(stateDir, "manifest.jsonl"))
+	last := events[len(events)-1]
+	if last.Event != "spawned" {
+		t.Fatalf("expected last event spawned, got %q", last.Event)
+	}
+	if !strings.Contains(last.Details, "allow_unscoped=true") {
+		t.Errorf("expected spawned event Details to record allow_unscoped=true, got %q", last.Details)
+	}
+	if !strings.Contains(last.Details, "permission_mode=autonomous") {
+		t.Errorf("expected spawned event Details to record permission_mode=autonomous, got %q", last.Details)
 	}
 }
 

@@ -137,7 +137,7 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	var (
 		seatID, role, driverName, model, cwd, prompt, scope, leadDriver string
 		timeoutMS                                                       int
-		dryRun                                                          bool
+		dryRun, allowUnscoped                                           bool
 	)
 
 	cmd := &cobra.Command{
@@ -163,7 +163,7 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			result := rt.Spawn(org.SpawnParams{
 				OrgID: *orgID, SeatID: seatID, Role: role, Driver: driverName, Model: model,
 				Cwd: cwd, Prompt: prompt, Scope: scope, TimeoutMS: timeoutMS, DryRun: dryRun,
-				LeadDriver: leadDriver,
+				LeadDriver: leadDriver, AllowUnscoped: allowUnscoped,
 			})
 			printSpawnResult(cmd, result)
 			return result.Err
@@ -180,6 +180,7 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	cmd.Flags().StringVar(&leadDriver, "lead-driver", "claude", "driver (claude|codex) the org's coordinating lead identity runs as, for the agmsg type registered on ensureLeadJoined")
 	cmd.Flags().IntVar(&timeoutMS, "timeout-ms", 60000, "per-step herdr timeout in milliseconds")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "validate and record without starting a real seat")
+	cmd.Flags().BoolVar(&allowUnscoped, "allow-unscoped", false, "explicitly bypass the autonomous-mode --scope requirement (recorded on the spawned event)")
 
 	return cmd
 }

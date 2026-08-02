@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yoshpy-dev/ralph/internal/config"
 	"github.com/yoshpy-dev/ralph/internal/org/protocol"
 )
 
@@ -200,6 +201,12 @@ func mustSpawnParams(orgID, seatID string) SpawnParams {
 	return SpawnParams{
 		OrgID: orgID, SeatID: seatID, Role: "worker", Driver: "claude", Model: "sonnet",
 		Cwd: "/tmp/seat", TimeoutMS: 5000,
+		// Scope is set by default so every test that doesn't care about the
+		// AC-2b minimum control gate (--scope required for autonomous mode,
+		// the config default -- see testOrgConfig()/config.Default()) still
+		// clears it; tests that specifically exercise Scope/the gate itself
+		// override this field explicitly.
+		Scope: "test-scope",
 	}
 }
 
@@ -896,10 +903,12 @@ func TestOrgSpawn_RoleTemplate_ExpandsIntoInitialPrompt(t *testing.T) {
 		t.Fatalf("expected exactly 1 AgentStart call, got %d", len(h.agentStartArgs))
 	}
 	args := h.agentStartArgs[0]
-	if len(args) != 3 || args[0] != "--model" {
-		t.Fatalf("expected AgentStart args [--model <model> <pointer>], got %v", args)
+	// AC-2: permission-mode args (default config -> autonomous ->
+	// bypassPermissions) come first, then --model, then the prompt pointer.
+	if len(args) != 5 || args[0] != "--permission-mode" || args[1] != "bypassPermissions" || args[2] != "--model" {
+		t.Fatalf("expected AgentStart args [--permission-mode bypassPermissions --model <model> <pointer>], got %v", args)
 	}
-	promptArg := args[2]
+	promptArg := args[4]
 	if strings.Contains(promptArg, "\n") {
 		t.Fatalf("expected the AgentStart prompt arg to be a single line, got:\n%s", promptArg)
 	}
@@ -933,7 +942,8 @@ func TestOrgSpawn_RoleTemplate_PromptFlagAppendedAfterTemplate(t *testing.T) {
 		t.Fatalf("spawn failed: %+v", r)
 	}
 
-	promptArg := h.agentStartArgs[0][2]
+	// index 4: [--permission-mode bypassPermissions --model <model> <pointer>].
+	promptArg := h.agentStartArgs[0][4]
 	promptPath := strings.TrimPrefix(promptArg, "役割指示を読み込んで従ってください: ")
 	data, err := os.ReadFile(promptPath)
 	if err != nil {
@@ -1097,8 +1107,9 @@ func TestOrgSpawn_UnknownRole_PromptFlagOnly_NoTemplateNoError(t *testing.T) {
 	}
 
 	args := h.agentStartArgs[0]
-	if len(args) != 3 || args[2] != "verbatim prompt" {
-		t.Fatalf("expected AgentStart args [--model <model> verbatim prompt], got %v", args)
+	// [--permission-mode bypassPermissions --model <model> verbatim prompt].
+	if len(args) != 5 || args[4] != "verbatim prompt" {
+		t.Fatalf("expected AgentStart args [--permission-mode bypassPermissions --model <model> verbatim prompt], got %v", args)
 	}
 }
 
@@ -1115,8 +1126,9 @@ func TestOrgSpawn_UnknownRole_NoPromptFlag_NoPromptArgAtAll(t *testing.T) {
 	}
 
 	args := h.agentStartArgs[0]
-	if len(args) != 2 {
-		t.Fatalf("expected AgentStart args [--model <model>] with no prompt element, got %v", args)
+	// [--permission-mode bypassPermissions --model <model>] with no prompt element.
+	if len(args) != 4 {
+		t.Fatalf("expected AgentStart args [--permission-mode bypassPermissions --model <model>] with no prompt element, got %v", args)
 	}
 }
 
@@ -1140,12 +1152,19 @@ func TestOrgSpawn_ScopeRecordedOnSpawnedEventDetails(t *testing.T) {
 	assertDetailsContains(t, last.Details, "scope=internal/org/**")
 }
 
-func TestOrgSpawn_NoScope_SpawnedEventDetailsEmpty(t *testing.T) {
-	// Unchanged-behavior guard: a spawn with no Scope leaves Details empty
-	// on the spawned event, exactly as before Scope existed.
+func TestOrgSpawn_NoScope_SpawnedEventDetailsOmitsScopeFragment(t *testing.T) {
+	// Behavior guard: a spawn with no Scope leaves no "scope=" fragment in
+	// Details. Unlike Scope, permission_mode is unconditionally recorded on
+	// every spawned event (AC-2b audit requirement), so Details is no
+	// longer empty by default -- an autonomous-mode spawn with no Scope
+	// must also set AllowUnscoped to get past the minimum control gate
+	// (AC-2b), and that bypass itself is recorded too.
 	o, _, _ := testOrg(t)
 
-	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+	p := mustSpawnParams("org-a", "seat-1")
+	p.Scope = ""
+	p.AllowUnscoped = true
+	if r := o.Spawn(p); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("spawn failed: %+v", r)
 	}
 
@@ -1154,9 +1173,10 @@ func TestOrgSpawn_NoScope_SpawnedEventDetailsEmpty(t *testing.T) {
 		t.Fatalf("read manifest: %v", err)
 	}
 	last := rr.Events[len(rr.Events)-1]
-	if last.Details != "" {
-		t.Fatalf("expected empty Details on the spawned event with no Scope, got %q", last.Details)
+	if strings.Contains(last.Details, "scope=") {
+		t.Fatalf("expected no scope= fragment in Details with no Scope, got %q", last.Details)
 	}
+	assertDetailsContains(t, last.Details, "permission_mode=autonomous", "allow_unscoped=true")
 }
 
 // agentPaneBusyErr builds a fake AgentStart error carrying the literal
@@ -1520,5 +1540,198 @@ func TestOrgSpawn_DryRun_PromptFilePathError_NoManifestEventForRealSeat(t *testi
 	}
 	if roster := Roster(rr.Events, RosterOptions{}); len(roster) != 0 {
 		t.Fatalf("expected the dry-run failure to be excluded from the default (real-seat) roster, got %+v", roster)
+	}
+}
+
+// --- AC-2/AC-2b: permission-mode envelope -----------------------------------
+
+// TestOrgSpawn_PermissionMode_Claude_ArgvMapping pins AC-2's argv contract
+// for all three modes: permission args are prepended to AgentStart's
+// agentArgs, before --model.
+func TestOrgSpawn_PermissionMode_Claude_ArgvMapping(t *testing.T) {
+	cases := []struct {
+		mode     string
+		wantArgs []string // nil for guarded (no flag)
+	}{
+		{"autonomous", []string{"--permission-mode", "bypassPermissions"}},
+		{"edits", []string{"--permission-mode", "acceptEdits"}},
+		{"guarded", nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.mode, func(t *testing.T) {
+			o, h, _ := testOrg(t)
+			o.Config.Permissions = config.OrgPermissionsConfig{Default: tc.mode}
+
+			p := mustSpawnParams("org-a", "seat-1")
+			result := o.Spawn(p)
+			if result.Outcome != SpawnOutcomeSpawned {
+				t.Fatalf("expected spawn to succeed under mode %q, got %+v", tc.mode, result)
+			}
+
+			args := h.agentStartArgs[0]
+			wantLen := len(tc.wantArgs) + 2 // + "--model" <model>
+			if len(args) != wantLen {
+				t.Fatalf("mode %q: expected %d AgentStart args, got %d (%v)", tc.mode, wantLen, len(args), args)
+			}
+			for i, want := range tc.wantArgs {
+				if args[i] != want {
+					t.Fatalf("mode %q: args[%d] = %q, want %q (full args: %v)", tc.mode, i, args[i], want, args)
+				}
+			}
+			if args[len(tc.wantArgs)] != "--model" {
+				t.Fatalf("mode %q: expected --model to immediately follow permission args, got %v", tc.mode, args)
+			}
+
+			rr, err := o.Manifest.Read()
+			if err != nil {
+				t.Fatalf("read manifest: %v", err)
+			}
+			last := rr.Events[len(rr.Events)-1]
+			assertDetailsContains(t, last.Details, "permission_mode="+tc.mode)
+		})
+	}
+}
+
+// TestOrgSpawn_MinimumControlGate_Autonomous_EmptyScope_RejectedNoEvents
+// covers AC-2b: an autonomous-mode spawn with an empty Scope and no
+// AllowUnscoped is rejected before any manifest event is written (a plain
+// rejection, unlike ValidateSpawnEnvelope failures which record `rejected`).
+func TestOrgSpawn_MinimumControlGate_Autonomous_EmptyScope_RejectedNoEvents(t *testing.T) {
+	o, h, a := testOrg(t)
+
+	p := mustSpawnParams("org-a", "seat-1")
+	p.Scope = ""
+	result := o.Spawn(p)
+	if result.Outcome != SpawnOutcomeRejected {
+		t.Fatalf("expected SpawnOutcomeRejected, got %+v", result)
+	}
+	if result.Err == nil || !strings.Contains(result.Err.Error(), "--scope") || !strings.Contains(result.Err.Error(), "--allow-unscoped") {
+		t.Fatalf("expected error naming --scope and --allow-unscoped, got %v", result.Err)
+	}
+
+	rr, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	if len(rr.Events) != 0 {
+		t.Fatalf("expected zero manifest events for the gate rejection, got %+v", rr.Events)
+	}
+	if len(h.calls) != 0 || len(a.calls) != 0 {
+		t.Fatalf("expected zero driver calls for the gate rejection, got herdr=%v agmsg=%v", h.calls, a.calls)
+	}
+
+	receiptRR, err := o.Receipts.Read()
+	if err != nil {
+		t.Fatalf("read receipts: %v", err)
+	}
+	if len(receiptRR.Receipts) != 0 {
+		t.Fatalf("expected zero receipts for the gate rejection, got %+v", receiptRR.Receipts)
+	}
+}
+
+// TestOrgSpawn_MinimumControlGate_EditsAndGuarded_EmptyScope_Proceeds
+// verifies the gate only applies to autonomous mode: edits/guarded seats
+// with an empty Scope spawn normally.
+func TestOrgSpawn_MinimumControlGate_EditsAndGuarded_EmptyScope_Proceeds(t *testing.T) {
+	for _, mode := range []string{"edits", "guarded"} {
+		t.Run(mode, func(t *testing.T) {
+			o, _, _ := testOrg(t)
+			o.Config.Permissions = config.OrgPermissionsConfig{Default: mode}
+
+			p := mustSpawnParams("org-a", "seat-1")
+			p.Scope = ""
+			result := o.Spawn(p)
+			if result.Outcome != SpawnOutcomeSpawned {
+				t.Fatalf("expected spawn to succeed under mode %q with empty scope, got %+v", mode, result)
+			}
+		})
+	}
+}
+
+// TestOrgSpawn_MinimumControlGate_DryRun_AppliesSameGate verifies the
+// validate-then-record contract: a dry-run autonomous spawn with an empty
+// Scope is rejected the same way a real spawn would be.
+func TestOrgSpawn_MinimumControlGate_DryRun_AppliesSameGate(t *testing.T) {
+	o, _, _ := testOrg(t)
+
+	p := mustSpawnParams("org-a", "seat-1")
+	p.Scope = ""
+	p.DryRun = true
+	result := o.Spawn(p)
+	if result.Outcome != SpawnOutcomeRejected {
+		t.Fatalf("expected SpawnOutcomeRejected for a dry-run gate violation, got %+v", result)
+	}
+
+	rr, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	if len(rr.Events) != 0 {
+		t.Fatalf("expected zero manifest events for the dry-run gate rejection, got %+v", rr.Events)
+	}
+}
+
+// TestOrgSpawn_Codex_AutonomousDefault_RejectedFailClosed_WithReceipt is the
+// AC-2 fail-closed end-to-end test: a codex seat under the default
+// (autonomous) config is rejected with a `rejected` manifest event and an
+// honored=false receipt -- unlike the AC-2b gate rejection above, this is a
+// permissionArgsForDriver error, reached only after the gate itself passes
+// (mustSpawnParams sets a non-empty Scope by default).
+func TestOrgSpawn_Codex_AutonomousDefault_RejectedFailClosed_WithReceipt(t *testing.T) {
+	o, h, a := testOrg(t)
+
+	p := mustSpawnParams("org-a", "seat-1")
+	p.Driver = "codex"
+	p.Model = "gpt-5-codex"
+	result := o.Spawn(p)
+	if result.Outcome != SpawnOutcomeRejected {
+		t.Fatalf("expected SpawnOutcomeRejected, got %+v", result)
+	}
+	if result.Err == nil || !strings.Contains(result.Err.Error(), "codex seat permission mode") {
+		t.Fatalf("expected fail-closed codex error, got %v", result.Err)
+	}
+	if len(h.calls) != 0 || len(a.calls) != 0 {
+		t.Fatalf("expected zero driver calls for the fail-closed rejection, got herdr=%v agmsg=%v", h.calls, a.calls)
+	}
+
+	rr, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	last := rr.Events[len(rr.Events)-1]
+	if last.Event != EventRejected {
+		t.Fatalf("expected last event rejected, got %q", last.Event)
+	}
+
+	receiptRR, err := o.Receipts.Read()
+	if err != nil {
+		t.Fatalf("read receipts: %v", err)
+	}
+	if len(receiptRR.Receipts) != 1 || receiptRR.Receipts[0].Honored != HonoredFalse {
+		t.Fatalf("expected 1 receipt honored=false, got %+v", receiptRR.Receipts)
+	}
+}
+
+// TestOrgSpawn_Codex_GuardedRoleOverride_Spawns is the positive fail-closed
+// counterpart: a codex seat whose role is explicitly overridden to guarded
+// spawns normally, with no permission flags in AgentStart's argv.
+func TestOrgSpawn_Codex_GuardedRoleOverride_Spawns(t *testing.T) {
+	o, h, _ := testOrg(t)
+	o.Config.Permissions = config.OrgPermissionsConfig{
+		Default: "autonomous",
+		Roles:   map[string]string{"worker": "guarded"},
+	}
+
+	p := mustSpawnParams("org-a", "seat-1") // Role: "worker" (see mustSpawnParams)
+	p.Driver = "codex"
+	p.Model = "gpt-5-codex"
+	result := o.Spawn(p)
+	if result.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("expected spawn to succeed for a guarded codex seat, got %+v", result)
+	}
+
+	args := h.agentStartArgs[0]
+	if len(args) != 2 || args[0] != "--model" {
+		t.Fatalf("expected no permission flags for guarded mode, got %v", args)
 	}
 }

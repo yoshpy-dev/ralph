@@ -169,6 +169,12 @@ type SpawnParams struct {
 	Scope     string
 	TimeoutMS int
 	DryRun    bool
+	// AllowUnscoped bypasses the minimum control gate (AC-2b) that would
+	// otherwise fail-closed an autonomous-mode spawn with an empty Scope --
+	// see the gate check near the top of Spawn for the full rationale. Its
+	// use is recorded on the spawned event's Details ("allow_unscoped=true")
+	// so an unscoped autonomous seat stays auditable after the fact.
+	AllowUnscoped bool
 	// LeadDriver is the driver (claude|codex) the org's coordinating "lead"
 	// identity itself runs as -- independent of Driver, which names this
 	// seat's own driver. It is only consulted by ensureLeadJoined to pick
@@ -246,6 +252,25 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 		)}
 	}
 
+	// AC-2b minimum control gate (Codex advisory 1): an autonomous-mode seat
+	// runs its driver with no interactive permission dialog at all
+	// (permissionArgsForDriver's bypassPermissions) -- --scope is the only
+	// thing left standing between "autonomous" and "unrestricted". A
+	// scope-less autonomous spawn is fail-closed right here, before any
+	// manifest read or write, unless the caller explicitly opts out via
+	// AllowUnscoped (recorded on the spawned event's Details below so its
+	// use stays auditable). This is a plain rejection -- no `rejected`
+	// manifest event, mirroring the identifier-shape checks above: the
+	// request never reached a state worth recording as an attempted (and
+	// envelope-valid) spawn. It runs before the `if p.DryRun` branch below
+	// so dry-run spawns are gated identically to real ones.
+	resolvedPermMode := ResolvePermissionMode(o.Config, p.Role)
+	if resolvedPermMode == "autonomous" && p.Scope == "" && !p.AllowUnscoped {
+		return SpawnResult{Outcome: SpawnOutcomeRejected, Err: fmt.Errorf(
+			"org: autonomous permission mode requires --scope (or --allow-unscoped to explicitly bypass)",
+		)}
+	}
+
 	if p.TimeoutMS <= 0 {
 		p.TimeoutMS = defaultSpawnTimeoutMS
 	}
@@ -269,7 +294,15 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 		if err := ValidateSpawn(o.Config, req, activeSeats); err != nil {
 			return o.reject(p, err)
 		}
-		return o.dryRunSpawn(p)
+		// Permission-mode mapping validation (AC-2, codex fail-closed) runs
+		// in dry-run too -- validate-then-record contract, same as the
+		// envelope check just above. dryRunSpawn never calls AgentStart, so
+		// the resolved args themselves are discarded; only the possible
+		// error matters here.
+		if _, err := permissionArgsForDriver(p.Driver, resolvedPermMode); err != nil {
+			return o.reject(p, err)
+		}
+		return o.dryRunSpawn(p, resolvedPermMode)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(p.TimeoutMS)*time.Millisecond)
@@ -293,6 +326,12 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	// behind it.
 	var existing *SeatStatus
 	var early *SpawnResult
+	// permArgs is set inside the locked closure below (permissionArgsForDriver's
+	// success value) and consumed after the lock releases, when Spawn builds
+	// AgentStart's agentArgs. It stays nil on any early-return path (idempotent
+	// respawn, envelope/permission rejection) -- those paths never reach the
+	// AgentStart call that would read it.
+	var permArgs []string
 	req := SpawnRequest{OrgID: p.OrgID, SeatID: p.SeatID, Role: p.Role, Driver: p.Driver, Model: p.Model}
 	lockErr := withManifestLock(filepath.Dir(o.Manifest.Path()), func() error {
 		// Fresh read while holding the lock: the outer `events`/`rr` read
@@ -339,6 +378,21 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 			early = &r
 			return nil
 		}
+
+		// Permission-mode mapping validation (AC-2, codex fail-closed) is
+		// also a pure function of cfg+req (driver + the already-resolved
+		// mode), so it runs alongside the envelope check above -- before any
+		// external side effect, including the stale-seat compensation below.
+		// permArgs (captured in the enclosing function scope) survives past
+		// this closure for the AgentStart argv construction further down in
+		// Spawn.
+		args, permErr := permissionArgsForDriver(p.Driver, resolvedPermMode)
+		if permErr != nil {
+			r := o.reject(p, permErr)
+			early = &r
+			return nil
+		}
+		permArgs = args
 
 		if existing != nil && (existing.Event == EventSpawnStarted || existing.Event == EventSpawnStep) {
 			// Stale in-flight saga from a prior crashed/interrupted spawn:
@@ -425,7 +479,14 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	// <state-dir>/prompts/<org_id>_<seat_id>.md and only a short one-line
 	// pointer is passed as the agent arg. The write happens here, strictly
 	// before AgentStart, so a write failure never reaches the driver at all.
-	agentArgs := []string{"--model", p.Model}
+	//
+	// AC-2: permArgs (resolved+validated above, inside the locked closure)
+	// come first, then --model, then the prompt (if any) -- a deterministic
+	// order the argv tests assert on exactly. A guarded-mode seat has
+	// permArgs == nil, so agentArgs starts out identical to pre-permission-
+	// mode behavior.
+	agentArgs := append([]string{}, permArgs...)
+	agentArgs = append(agentArgs, "--model", p.Model)
 	agentStartedDetails := "agent_started"
 	if initialPrompt != "" {
 		if needsPromptFile(initialPrompt) {
@@ -496,14 +557,12 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 		return SpawnResult{Outcome: SpawnOutcomeFailed, Err: err}
 	}
 
-	// Scope has no dedicated ManifestEvent field (see the SpawnParams.Scope
-	// doc comment): it is recorded as "scope=<value>" in Details so it
-	// stays auditable without a manifest schema change. Empty Scope leaves
-	// Details empty, matching pre-Scope behavior exactly.
-	spawnedDetails := ""
-	if p.Scope != "" {
-		spawnedDetails = fmt.Sprintf("scope=%s", p.Scope)
-	}
+	// Scope/AllowUnscoped/permission_mode have no dedicated ManifestEvent
+	// field: they are recorded as free-text fragments in Details (see
+	// spawnedEventDetails) so they stay auditable without a manifest schema
+	// change. permission_mode is always present (AC-2b); scope/
+	// allow_unscoped are present only when the corresponding param was set.
+	spawnedDetails := spawnedEventDetails(p, resolvedPermMode)
 	// herdr_agent_name is persisted here (tech-debt, docs/tech-debt/
 	// README.md, "The herdr agent name is derived at every call site...
 	// instead of being persisted"): PaneID already gets this treatment
@@ -532,6 +591,24 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 		Worktree: p.Cwd, PaneID: paneID, AgmsgTeam: team, HerdrAgentName: agentName,
 		Event: EventSpawned, Active: true,
 	}}
+}
+
+// spawnedEventDetails builds the `spawned` manifest event's free-text
+// Details field for both the real Spawn path and dryRunSpawn's simulated
+// trail: "scope=<v>" when Scope is set, "allow_unscoped=true" when
+// AllowUnscoped was passed, and always "permission_mode=<mode>" (AC-2b --
+// the resolved mode is recorded for every seat, not only autonomous ones,
+// so `ralph org report` can show every seat's effective mode uniformly).
+func spawnedEventDetails(p SpawnParams, mode string) string {
+	parts := make([]string, 0, 3)
+	if p.Scope != "" {
+		parts = append(parts, fmt.Sprintf("scope=%s", p.Scope))
+	}
+	if p.AllowUnscoped {
+		parts = append(parts, "allow_unscoped=true")
+	}
+	parts = append(parts, fmt.Sprintf("permission_mode=%s", mode))
+	return strings.Join(parts, " ")
 }
 
 // ensureLeadJoined best-effort join.sh's <team> lead <type> <cwd>, where
@@ -765,8 +842,11 @@ func (o *Org) reject(p SpawnParams, cause error) SpawnResult {
 // dryRunSpawn simulates the full saga's manifest trail with DryRun: true on
 // every event, without ever calling Herdr or Agmsg (AC-8). Dry-run events are
 // excluded from the default roster/status view and from ActiveSeatCount, so
-// they carry no real side effects and no [org].max_seats pressure.
-func (o *Org) dryRunSpawn(p SpawnParams) SpawnResult {
+// they carry no real side effects and no [org].max_seats pressure. mode is
+// the permission mode already resolved (and validated via
+// permissionArgsForDriver) by the caller, recorded on the trail's final
+// EventSpawned step the same way the real Spawn path records it.
+func (o *Org) dryRunSpawn(p SpawnParams, mode string) SpawnResult {
 	team := agmsgTeam(p.OrgID)
 	base := ManifestEvent{OrgID: p.OrgID, SeatID: p.SeatID, Role: p.Role, Driver: p.Driver, Model: p.Model, Worktree: p.Cwd, DryRun: true}
 
@@ -844,6 +924,7 @@ func (o *Org) dryRunSpawn(p SpawnParams) SpawnResult {
 	step = base
 	step.Event = EventSpawned
 	step.AgmsgTeam = team
+	step.Details = spawnedEventDetails(p, mode)
 	steps = append(steps, step)
 
 	for i := range steps {
