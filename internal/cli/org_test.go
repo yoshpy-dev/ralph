@@ -1618,7 +1618,7 @@ func TestNewWatchdogHooks_WatcherDisabled_NoOp(t *testing.T) {
 	if hooks.OnSemanticTrigger != nil {
 		t.Fatal("expected nil OnSemanticTrigger when watcher_enabled is false")
 	}
-	// The returned WaitGroup (self-review M-7) must still be usable (never
+	// The returned WaitGroup (self-review M-5) must still be usable (never
 	// nil) and immediately satisfied when the watcher is disabled -- nothing
 	// is ever added to it, so Wait() must return without blocking.
 	wg.Wait()
@@ -1647,7 +1647,7 @@ func TestNewWatchdogHooks_Dispatch_NeverBlocksCaller(t *testing.T) {
 		t.Fatalf("expected no receipt yet immediately after dispatch (goroutine still mid-sleep), got %d", n)
 	}
 
-	// wg.Wait() (self-review M-7 fix -- the same WaitGroup newOrgWatchCmd's
+	// wg.Wait() (self-review M-5 fix -- the same WaitGroup newOrgWatchCmd's
 	// RunE waits on before `--once` returns) blocks until the background
 	// goroutine has actually finished, including its own hung claude
 	// invocation, proving the WaitGroup is a reliable completion signal
@@ -1725,7 +1725,7 @@ func TestNewWatchdogHooks_AbnormalVerdict_SendsAlertToLead(t *testing.T) {
 	// wg.Wait() blocks until the ALERT's own Send call has reached the
 	// agmsg stub (not just RunWatcher's earlier receipt append) -- Send
 	// runs after RunWatcher returns, inside the same background goroutine
-	// this WaitGroup tracks (self-review M-7).
+	// this WaitGroup tracks (self-review M-5).
 	wg.Wait()
 
 	data, err := os.ReadFile(agmsgLog)

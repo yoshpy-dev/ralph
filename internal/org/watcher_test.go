@@ -103,7 +103,7 @@ func TestRunWatcher_ValidJSON_CircularVerdict(t *testing.T) {
 }
 
 // TestRunWatcher_ReportedModel_HonoredTrue pins the defensive "model" field
-// handling (self-review M-5 fix): when the installed claude version's JSON
+// handling (self-review M-3 fix): when the installed claude version's JSON
 // envelope reports a model that matches cfg.WatcherModel exactly, RunWatcher
 // records it as ReportedEffectiveModel and Honored=true -- the one case with
 // a verifiable, matching observation.
@@ -130,7 +130,7 @@ func TestRunWatcher_ReportedModel_HonoredTrue(t *testing.T) {
 }
 
 // TestRunWatcher_ReportedModel_MismatchHonoredFalse pins the other half of
-// the M-5 fix: a verifiable observation that *disagrees* with the commanded
+// the M-3 fix: a verifiable observation that *disagrees* with the commanded
 // model (cfg.WatcherModel) is Honored=false, not true -- the one case the
 // tri-state exists to catch (receipts.go's doc comment).
 func TestRunWatcher_ReportedModel_MismatchHonoredFalse(t *testing.T) {

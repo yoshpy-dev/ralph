@@ -289,7 +289,7 @@ func earliestSpawnTS(events []ManifestEvent, orgID string) string {
 // (stateEvents, seat.go) and so stays pinned at a seat's `spawned` TS for as
 // long as it remains active with no further state transition -- this
 // reflects genuine seat activity of any kind, which is what the stall
-// condition's time term needs (self-review M-8 fix; see evaluateSeat's call
+// condition's time term needs (self-review M-6 fix; see evaluateSeat's call
 // site).
 func latestSeatEventTS(events []ManifestEvent, orgID, seatID string) string {
 	var latest string
@@ -572,7 +572,7 @@ func conditionFirstTS(rec *watchConditionRecord, now time.Time) string {
 // evaluateSeat runs every per-seat pulse condition for s: (a) seat wall-
 // clock budget cutoff, (c) heartbeat stall, (d) process liveness, (e)
 // worktree scope change. events is the cycle's manifest snapshot (see
-// evaluateCycle), needed by the stall condition's M-8 fix below.
+// evaluateCycle), needed by the stall condition's M-6 fix below.
 func (w *watchRun) evaluateSeat(ctx context.Context, status *watchStatusFile, orgID string, s SeatStatus, now time.Time, events []ManifestEvent) {
 	w.evaluateSeatBudget(ctx, status, orgID, s, now)
 
@@ -598,7 +598,7 @@ func (w *watchRun) evaluateSeat(ctx context.Context, status *watchStatusFile, or
 
 		// (c) heartbeat stall: last manifest event time AND herdr raw probe
 		// text both unchanged since the previous cycle. lastEventTS (self-
-		// review M-8 fix) is the seat's latest event of ANY type, not s.TS --
+		// review M-6 fix) is the seat's latest event of ANY type, not s.TS --
 		// Roster's SeatStatus.TS only advances on *state* events
 		// (stateEvents, seat.go, deliberately excludes e.g. `sent`), so for a
 		// healthy active seat s.TS stays frozen at its `spawned` TS and
@@ -768,7 +768,7 @@ func (w *watchRun) sendAlert(ctx context.Context, status *watchStatusFile, orgID
 }
 
 // leadActivityEventCount counts manifest events that are not the watchdog's
-// own cutoff writes (self-review M-6 fix): every `stopped` event a budget
+// own cutoff writes (self-review M-4 fix): every `stopped` event a budget
 // cutoff produces carries "reason=watchdog_..." in its Details (see
 // evaluateTotalBudget/evaluateSeatBudget's Reason format), so without this
 // filter the deadman's "has anything happened since the ALERT" manifest-

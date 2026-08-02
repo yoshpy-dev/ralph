@@ -913,7 +913,7 @@ func TestWatch_SeatBudgetCutoff_StopFails_RetriesThenSucceeds(t *testing.T) {
 }
 
 // TestWatch_Deadman_WatchdogsOwnCutoffEvent_DoesNotClearPendingAlert pins
-// the self-review M-6 fix: the deadman's manifest-growth "has anything
+// the self-review M-4 fix: the deadman's manifest-growth "has anything
 // happened since the ALERT" activity source must not count the watchdog's
 // own cutoff of an unrelated seat as if it were genuine lead/seat activity.
 func TestWatch_Deadman_WatchdogsOwnCutoffEvent_DoesNotClearPendingAlert(t *testing.T) {
@@ -943,7 +943,7 @@ func TestWatch_Deadman_WatchdogsOwnCutoffEvent_DoesNotClearPendingAlert(t *testi
 
 	// Simulate the watchdog cutting off a DIFFERENT seat (seat-2) between
 	// cycles, via the same Details shape evaluateSeatBudget/
-	// evaluateTotalBudget produce ("reason=watchdog_..."). Before the M-6
+	// evaluateTotalBudget produce ("reason=watchdog_..."). Before the M-4
 	// fix, this alone grows the manifest enough to satisfy the deadman's
 	// unfiltered len(rr.Events) > ManifestLen check and wrongly clears
 	// seat-1's still-unanswered pending alert.
@@ -963,7 +963,7 @@ func TestWatch_Deadman_WatchdogsOwnCutoffEvent_DoesNotClearPendingAlert(t *testi
 }
 
 // TestWatch_Stall_UsesLatestEventOfAnyType_NotOnlyStateEvents pins the
-// self-review M-8 fix: the stall condition's time term must track the
+// self-review M-6 fix: the stall condition's time term must track the
 // seat's latest manifest event of ANY type, not Roster's SeatStatus.TS
 // (which only advances on *state* events and so stays pinned at a healthy
 // active seat's own `spawned` TS forever).
@@ -993,7 +993,7 @@ func TestWatch_Stall_UsesLatestEventOfAnyType_NotOnlyStateEvents(t *testing.T) {
 	// Advance well past stall_minutes, but record a fresh non-state `sent`
 	// event for the seat in between cycles. Roster's SeatStatus.TS (a
 	// spawned-and-still-active seat's last *state* event) never moves for
-	// this -- the pre-M-8 stall check (isStallByTime(s.TS, ...)) would still
+	// this -- the pre-M-6 stall check (isStallByTime(s.TS, ...)) would still
 	// fire on the seat's now-stale spawn TS; the fixed check
 	// (latestSeatEventTS, any event type) must see this recent event and
 	// not treat the seat as stalled.

@@ -696,7 +696,7 @@ func newOrgWatchCmd(orgID, stateDir, configPath *string) *cobra.Command {
 				StatusDir: resolvedStateDir,
 			}, hooks)
 			// Wait for any still-in-flight on-demand watcher goroutine
-			// before returning (self-review M-7 fix): without this, `--once`
+			// before returning (self-review M-5 fix): without this, `--once`
 			// returned as soon as cycle 1's synchronous pulse evaluation
 			// finished, killing the process before an OnSemanticTrigger
 			// goroutine it had just started could ever produce a watcher
@@ -740,7 +740,7 @@ func newOrgWatchCmd(orgID, stateDir, configPath *string) *cobra.Command {
 // already uses for pulse-layer ALERTs, so ALERT traffic stays uniform
 // regardless of which layer produced it.
 //
-// The returned *sync.WaitGroup (self-review M-7 fix) tracks every
+// The returned *sync.WaitGroup (self-review M-5 fix) tracks every
 // OnSemanticTrigger goroutine this closure starts; newOrgWatchCmd's RunE
 // waits on it after RunWatch returns, so `--once` (Cycles: 1, RunWatch
 // returns as soon as cycle 1 finishes) cannot exit the process out from

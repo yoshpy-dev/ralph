@@ -64,19 +64,19 @@ org runtime PR④: Watchdog 二層を実装する。パルス層(決定論タイ
 
 ## Acceptance criteria
 
-- [ ] AC-1: `[org.watchdog]` が 3 面ロックステップで追加され defaults_sync_test が drift を検出する。
-- [ ] AC-2: protocol に `ALERT`(TASK_ID 不要)が追加され、rule doc の表+ミラーが同期(check-sync 系 green)。
-- [ ] AC-3: `ralph org watch` が interval ごとに条件評価し、budget 超過座席を Stop 経由で自動遮断(`StopParams.Reason` で条件種別・閾値・観測値を Details に永続化)、Lead へ ALERT を送る(スタブで検証)。
-- [ ] AC-3b(total budget): org_start(最初の非 dry-run `spawned`)から `total_wall_clock_minutes` 超過で全 active 座席を遮断し、org レベルの記録を残す(複数座席テスト)。
-- [ ] AC-3c(冪等性): 同一条件は回復まで 1 遮断/1 ALERT/1 エスカレーションに dedupe される(handled 状態を watch-status.json に永続化。2 interval 以上のテストで検証)。
-- [ ] AC-4: heartbeat 停滞・pane 消失・スコープ変更が ALERT として Lead に通知される(遮断はされない)(スタブ)。
-- [ ] AC-5: デッドマン: ALERT 後 `deadman_minutes` 無応答(3 情報源 OR)または Lead 自身の異常で `escalations.jsonl` 追記+stderr(+darwin 通知 best-effort)(短縮値でテスト)。
-- [ ] AC-6: ウォッチャーがトリガー時のみ 1 回起動し(タイムアウト < interval・非同期でパルスを塞がない)、判定 JSON を解釈、異常時のみ ALERT、receipts に watchdog phase で記録。ハング/不正 JSON は `watcher_error` receipt となり、**ウォッチャーがハングしても budget 遮断は発火する**(ハングスタブテスト)。
-- [ ] AC-7: state-dir 既定が flag(`Flags().Changed` で明示検出・空既定)> env > git toplevel > cwd で解決され(resolver は解決元も返す)、リポジトリ内の異なる cwd から同一 manifest を読める(明示相対 flag / env / git サブディレクトリ / git ルート / 非 git の 5 ケーステスト+スモーク)。tech-debt 行クローズ。
-- [ ] AC-8: codex 対話フラグの実機プローブ結果が記録され、検証できた場合のみ autonomous マッピング解除(できなければ fail-closed 維持を明記)。
-- [ ] AC-9: 赤入れ規約が definition-of-done に追記され、本 PR の evidence に適用。batchable LOW 群クローズ(signature 2 件+description 英語化)。
-- [ ] AC-10(実機スモーク): 短縮 budget での自動遮断+ALERT 受信、短縮 deadman でのエスカレーション発火、ウォッチャー実判定 1 回、state-dir 解決の実機確認。証拠 `docs/evidence/org-watchdog-smoke-*.txt`。
-- [ ] AC-11: `go test ./...` / `./scripts/run-verify.sh` green。既存フロー非干渉。
+- [x] AC-1: `[org.watchdog]` が 3 面ロックステップで追加され defaults_sync_test が drift を検出する。Evidence: `internal/config/config.go`(`OrgWatchdogConfig`/`Default()`/`Load()`)、`templates/base/ralph.toml:122-126`、`scripts/ralph-config.sh:101-110`+テンプレミラー、`internal/config/defaults_sync_test.go`; verify report AC-1 (Met).
+- [x] AC-2: protocol に `ALERT`(TASK_ID 不要)が追加され、rule doc の表+ミラーが同期(check-sync 系 green)。Evidence: `internal/org/protocol/protocol.go`(`TypeAlert`)、`.claude/rules/agent-messaging.md`+3 ミラー(`cmp` byte-identical); verify report AC-2 (Met).
+- [x] AC-3: `ralph org watch` が interval ごとに条件評価し、budget 超過座席を Stop 経由で自動遮断(`StopParams.Reason` で条件種別・閾値・観測値を Details に永続化)、Lead へ ALERT を送る(スタブで検証)。Evidence: `internal/org/watch.go`(`evaluateSeatBudget`); test: `TestWatch_SeatBudgetCutoff_AtBoundary_NotBeforeThenCutoffThenDeduped`, `TestWatch_SeatBudgetCutoff_StopFails_RetriesThenSucceeds`.
+- [x] AC-3b(total budget): org_start(最初の非 dry-run `spawned`)から `total_wall_clock_minutes` 超過で全 active 座席を遮断し、org レベルの記録を残す(複数座席テスト)。Evidence: `evaluateTotalBudget`; test: `TestWatch_TotalBudgetCutoff_CutsAllActiveSeats_OneOrgLevelAlert`.
+- [x] AC-3c(冪等性): 同一条件は回復まで 1 遮断/1 ALERT/1 エスカレーションに dedupe される(handled 状態を watch-status.json に永続化。2 interval 以上のテストで検証)。Evidence: `watchConditionRecord.Cutoff`/`Active`; test: boundary test above + `TestWatch_Stall_AlertsNoCutoff_RecoversAndRefires`.
+- [x] AC-4: heartbeat 停滞・pane 消失・スコープ変更が ALERT として Lead に通知される(遮断はされない)(スタブ)。Evidence: `evaluateSeat` (c)/(d)/(e); test: `TestWatch_Stall_*`, `TestWatch_Liveness_AlertOnAgentGetError`, `TestWatch_ScopeChange_AlertCarriesScopeText_NoCutoff`, `TestWatch_Stall_UsesLatestEventOfAnyType_NotOnlyStateEvents`.
+- [x] AC-5: デッドマン: ALERT 後 `deadman_minutes` 無応答(3 情報源 OR)または Lead 自身の異常で `escalations.jsonl` 追記+stderr(+darwin 通知 best-effort)(短縮値でテスト)。Evidence: `checkDeadman`, `realEscalate`(`osascript`, `%q` 引用); test: `TestWatch_Deadman_NoActivity_EscalatesOnceAfterTimeout`, `TestWatch_Deadman_LeadActivity_PreventsEscalation`, `TestWatch_Deadman_LeadIsAnomalySubject_EscalatesImmediately`. **既知の残課題**: `leadActivityEventCount` は watchdog 自身のイベントのみ除外し、org/seat スコープには絞っていない(verify report AC-5 caveat、test report Test gaps)。tech-debt に記録(下記)。
+- [x] AC-6: ウォッチャーがトリガー時のみ 1 回起動し(タイムアウト < interval・非同期でパルスを塞がない)、判定 JSON を解釈、異常時のみ ALERT、receipts に watchdog phase で記録。ハング/不正 JSON は `watcher_error` receipt となり、**ウォッチャーがハングしても budget 遮断は発火する**(ハングスタブテスト)。Evidence: `internal/org/watcher.go`(`newWatchdogHooks`、`watcherInvokeTimeout` 固定 60 秒); test: `TestRunWatcher_Timeout_BoundedAndWatcherErrorReceipt`, `TestRunWatcher_TimeoutIndependentOfSmallInterval`, `TestNewWatchdogHooks_Dispatch_NeverBlocksCaller`, `TestNewWatchdogHooks_SingleFlight_SecondTriggerSkippedWhileBusy`.
+- [x] AC-7: state-dir 既定が flag(`Flags().Changed` で明示検出・空既定)> env > git toplevel > cwd で解決され(resolver は解決元も返す)、リポジトリ内の異なる cwd から同一 manifest を読める(明示相対 flag / env / git サブディレクトリ / git ルート / 非 git の 5 ケーステスト+スモーク)。tech-debt 行クローズ。Evidence: `internal/org/statedir.go`(`ResolveOrgStateDir`); test: `TestResolveOrgStateDir_ExplicitFlagWins`, `_EnvWinsOverGitAndCwd`, `_GitSubdirResolvesToToplevel`, `_GitRoot`, `_NonGitCwdFallsBackToCwd`; tech-debt row struck through (`docs/tech-debt/README.md` line 64-65, `RESOLVED 2026-08-02`). スモーク上のクロス cwd 実機確認は `docs/evidence/org-watchdog-smoke-2026-08-02.txt` の cross-cwd addendum(commit `6a09e64`)で補完。
+- [x] AC-8: codex 対話フラグの実機プローブ結果が記録され、検証できた場合のみ autonomous マッピング解除(できなければ fail-closed 維持を明記)。Evidence: `docs/evidence/org-watchdog-smoke-2026-08-02.txt`(`-s/--sandbox`・`-a/--ask-for-approval` 確認)、`internal/org/permissions.go`(`codex_verified` gate, 既定 false); test: `TestPermissionArgsForDriver_Codex_FailClosed`, `_VerifiedUnlocksMapping`, `TestPermissionArgsForDriver_Codex_UnknownMode_DistinctError`.
+- [x] AC-9: 赤入れ規約が definition-of-done に追記され、本 PR の evidence に適用。batchable LOW 群クローズ(signature 2 件+description 英語化)。Evidence: `docs/quality/definition-of-done.md`(`$HOME → ~` 行)、`docs/evidence/org-watchdog-smoke-2026-08-02.txt`(redaction header)、`checkCapacityAndStart`/`newOrgRuntime` シグネチャ整理(`internal/org/spawn.go`/`internal/cli/org.go`)、`/org` skill description 英語化(4 ミラー、`check-skill-sync.sh` green); tech-debt row struck through(`docs/tech-debt/README.md` line 66-69)。
+- [x] AC-10(実機スモーク): 短縮 budget での自動遮断+ALERT 受信、短縮 deadman でのエスカレーション発火、ウォッチャー実判定 1 回、state-dir 解決の実機確認。証拠 `docs/evidence/org-watchdog-smoke-2026-08-02.txt`(cross-cwd addendum commit `6a09e64` を含む)。全 4 項目が同ファイルで実機確認済み。
+- [x] AC-11: `go test ./...` / `./scripts/run-verify.sh` green。既存フロー非干渉。Evidence: verify report(`./scripts/run-static-verify.sh` PASS)、test report(`./scripts/run-test.sh` 30 shell suites + `go test ./...` 13 packages + `-race` targeted run, 全 green)。
 
 ## Implementation outline
 
@@ -132,9 +132,9 @@ org runtime PR④: Watchdog 二層を実装する。パルス層(決定論タイ
 - [x] Branch created (feat/org-runtime-watchdog)
 - [x] Implementation started
 - [x] Implementation complete (Slices 1-5: f938413 / 274ca41 / ea75adc+611b14e / 63313a5+00378d1 / 7101351+smoke)
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [x] Test artifact created
+- [x] Review artifact created (`docs/reports/self-review-2026-08-02-org-runtime-watchdog.md`; H-1/H-2/M-1/M-2 fixed same cycle, M-3/M-5/M-6/L-7 fixed, M-4/L-2/L-5/L-6 deferred to tech-debt)
+- [x] Verification artifact created (`docs/reports/verify-2026-08-02-org-runtime-watchdog.md`; PASS with two follow-up items — AC-5/M-4 partial fix, AC-10 state-dir smoke line, both closed by the cross-cwd addendum + tech-debt row below)
+- [x] Test artifact created (`docs/reports/test-2026-08-02-org-runtime-watchdog.md`; Pass, 0 failures)
 - [ ] PR created
 
 ## Readiness checklist

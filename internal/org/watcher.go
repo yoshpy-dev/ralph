@@ -315,7 +315,7 @@ func (o *Org) RunWatcher(ctx context.Context, cfg config.OrgWatchdogConfig, p Wa
 		return WatcherVerdict{}, fmt.Errorf("org: watcher: malformed verdict JSON: %q", envelope.Result)
 	}
 
-	// Honored tri-state (self-review M-5): HonoredUnknown when the driver
+	// Honored tri-state (self-review M-3): HonoredUnknown when the driver
 	// reported no model at all, HonoredTrue only when the reported model
 	// matches what was commanded, HonoredFalse for a verifiable mismatch --
 	// see claudeEnvelope's doc comment for the full rationale.
