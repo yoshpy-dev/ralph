@@ -2,11 +2,11 @@
 # ralph-config.sh — shared configuration for the standard-flow development
 # harness's cross-review gate and the [org] envelope lock-step surfaces.
 #
-# The Ralph Loop execution system (scripts/ralph-orchestrator.sh,
-# scripts/ralph-pipeline.sh, scripts/ralph-cli-driver.sh, and the legacy
-# scripts/ralph shell CLI) was removed; this file's [loop]/[pipeline]
-# defaults (RALPH_LOOP_*, per-phase RALPH_*_MODEL, RALPH_MAX_* iteration
-# caps) went with it. The two survivors below still have a live consumer:
+# The Ralph Loop autonomous execution system (its batch orchestrator/pipeline
+# scripts, the per-phase CLI driver, and the legacy shell CLI) was removed;
+# this file's [loop]/[pipeline] defaults (RALPH_LOOP_*, per-phase
+# RALPH_*_MODEL, RALPH_MAX_* iteration caps) went with it. The two survivors
+# below still have a live consumer:
 # /cross-review (.claude/skills/cross-review/SKILL.md), which sources this
 # file (or reads the exported env) for the standard-flow pipeline cycle cap
 # and the claude-as-reviewer model fallback.

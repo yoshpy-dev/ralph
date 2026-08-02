@@ -64,15 +64,15 @@ org runtime PR⑤(最終段): Ralph Loop 自律実行系(orchestrator / pipeline
 
 ## Acceptance criteria
 
-- [ ] AC-1: 削除対象スクリプト・Go パッケージ・skill・テンプレートが本体/templates 両面から消え、`go build ./...` green。
-- [ ] AC-2: `ralph status` が org manifest ベースで動作(org 一覧+ロースター+watch-status。`--org-id` 絞り込み。manifest なし環境では案内表示)。
-- [ ] AC-3: `[loop]`/`[pipeline]` 設定と対応 env が 3 面から消え、`defaults_sync_test` green。存続 env(`RALPH_STANDARD_MAX_PIPELINE_CYCLES`/`RALPH_CLAUDE_REVIEWER_MODEL`)は動作不変。
-- [ ] AC-4: `/cross-review` が移設ヘルパーで従来通り機能(detect_base_branch / pick_reviewer / count_triage_findings のテスト移設)。
-- [ ] AC-5: 参照ゼロ grep(履歴文書除外)が pass し、CI の全 sync ゲート(check-sync / check-skill-sync / check-pipeline-sync)green。
-- [ ] AC-6: AGENTS.md / CLAUDE.md / README / rules / definition-of-done / spec が新構成(標準フロー=開発ハーネス、org runtime=自律実行面)で整合。**spec FR-11 は「撤去対象は Ralph Loop 系のみ・開発ハーネス skill 群は存続」と明文化**し、旧「/work 等も削除」の記述が残っていないことを spec への grep で確認(Codex 所見 3)。`/work` skill に `/loop` への誘導が残っていないことも grep で確認。
-- [ ] AC-6b(insights 履歴互換): 歴史イベント(`flow=loop`/`source=pipeline`)を含む fixture が `ralph insights` で従来通り読める回帰テストが存在する。AC-5 の参照ゼロ grep は insights の履歴語彙(スキーマ値)を除外対象として明記。
-- [ ] AC-7: PR④ known gaps #5/#6 がテスト付きで修正され、tech-debt 行クローズ(旧 shell CLI row 含む)。
-- [ ] AC-8: `go test ./...` / `./scripts/run-verify.sh` green。`ralph init` のスキャフォールドから loop 系が消えることをスモーク確認。
+- [x] AC-1: 削除対象スクリプト・Go パッケージ・skill・テンプレートが本体/templates 両面から消え、`go build ./...` green。
+- [x] AC-2: `ralph status` が org manifest ベースで動作(org 一覧+ロースター+watch-status。`--org-id` 絞り込み。manifest なし環境では案内表示)。
+- [x] AC-3: `[loop]`/`[pipeline]` 設定と対応 env が 3 面から消え、`defaults_sync_test` green。存続 env(`RALPH_STANDARD_MAX_PIPELINE_CYCLES`/`RALPH_CLAUDE_REVIEWER_MODEL`)は動作不変。
+- [x] AC-4: `/cross-review` が移設ヘルパーで従来通り機能(detect_base_branch / pick_reviewer / count_triage_findings のテスト移設)。
+- [x] AC-5: 参照ゼロ grep(履歴文書除外)が pass し、CI の全 sync ゲート(check-sync / check-skill-sync / check-pipeline-sync)green。Slice 5 で `tests/test-no-loop-references.sh` を新設し CI に固定化。
+- [x] AC-6: AGENTS.md / CLAUDE.md / README / rules / definition-of-done / spec が新構成(標準フロー=開発ハーネス、org runtime=自律実行面)で整合。**spec FR-11 は「撤去対象は Ralph Loop 系のみ・開発ハーネス skill 群は存続」と明文化**し、旧「/work 等も削除」の記述が残っていないことを spec への grep で確認(Codex 所見 3)。`/work` skill に `/loop` への誘導が残っていないことも grep で確認。Slice 5 で spec Summary(旧「標準フロー(/work)と Ralph Loop(/loop)を廃止し」)と FR-6(旧「/plan スキルは廃止し」)を確定決定に合わせ改稿。
+- [x] AC-6b(insights 履歴互換): 歴史イベント(`flow=loop`/`source=pipeline`)を含む fixture が `ralph insights` で従来通り読める回帰テストが存在する(`TestInsightsCmd_HistoricalLoopFlowEventStillReadable`, internal/cli/insights_test.go)。AC-5 の参照ゼロ grep(`tests/test-no-loop-references.sh`)は insights の履歴語彙(スキーマ値、`internal/insights/` 一式)を除外対象として明記。
+- [x] AC-7: PR④ known gaps #5/#6 がテスト付きで修正され、tech-debt 行クローズ(旧 shell CLI row 含む)。
+- [x] AC-8: `go test ./...` / `./scripts/run-verify.sh` green。`ralph init` のスキャフォールドから loop 系が消えることをスモーク確認(`docs/evidence/org-retire-loop-smoke-2026-08-03.txt`)。
 
 ## Implementation outline
 
@@ -112,11 +112,43 @@ org runtime PR⑤(最終段): Ralph Loop 自律実行系(orchestrator / pipeline
 
 - `ralph insights` の pipeline receipts 依存の有無(Slice 3 で確認、依存があれば読み口のみ残す)。
 
+## Implementation notes
+
+- Slice 5 closed 3 leftovers flagged by the Slice 4 report: (a) spec
+  `docs/specs/2026-08-01-org-runtime.md` FR-6 and Summary still described
+  `/plan` (and, in the Summary, `/work`) as abolished; both now state that
+  the development-harness skills persist alongside org runtime, with Lead
+  handling its own task decomposition for org-run tasks. (b)
+  `.claude/rules/git-commit-strategy.md` (+ `templates/base` mirror) still
+  had a "Ralph Loop Commits" section; replaced with a short "Org Runtime
+  Commits" section pointing at the saga manifest instead of `progress.log`.
+  (c) `docs/quality/quality-gates.md` (+ mirror) still had the full
+  "Pipeline mode gates (`ralph-pipeline.sh`)" Inner/Outer Loop tables;
+  replaced with a compact "Org runtime gates" table.
+- Slice 5's mandated AC-5 zero-reference sweep (`--include="*.md"` in
+  addition to `*.sh`/`*.go`/`*.toml`) also caught `docs/architecture/repo-map.md`
+  (stale scripts/skills/runtime-state inventory, not touched by Slice 4) and
+  two historical-context comments (`scripts/ralph-config.sh` + its template
+  mirror) that named the deleted scripts literally; all fixed.
+- New guard test `tests/test-no-loop-references.sh` encodes the sweep grep
+  permanently, with exclusions for genuinely historical content:
+  `docs/plans/archive/`, this plan's own active file (it must document what
+  it removed), `docs/specs/`, `docs/reports/`, `docs/insights/` (+ template
+  mirror), `docs/tech-debt/README.md`, and `internal/insights/` +
+  `internal/cli/insights_test.go` (AC-6b's historical-schema-vocabulary
+  read-compat surface, which legitimately contains the literal strings as
+  data/comments, not live code paths).
+- AC-8 scaffold smoke: built `cmd/ralph`, ran `ralph init --yes` into a
+  fresh temp dir, and confirmed by grep/ls that no loop skill/scripts/config
+  sections exist while `.claude/skills/org`, `.claude/rules/agent-messaging.md`,
+  and `ralph.toml`'s `[org]` section are present. Evidence saved to
+  `docs/evidence/org-retire-loop-smoke-2026-08-03.txt` (`$HOME` redacted).
+
 ## Progress checklist
 
 - [ ] Plan reviewed
 - [x] Branch created (refactor/org-runtime-retire-loop)
-- [ ] Implementation started
+- [x] Implementation started
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created

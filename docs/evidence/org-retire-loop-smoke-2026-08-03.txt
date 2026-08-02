@@ -1,0 +1,68 @@
+# org-runtime-retire-loop scaffold smoke evidence
+
+Date: 2026-08-03
+Command: ralph init --yes (built from cmd/ralph at branch refactor/org-runtime-retire-loop, HEAD 303380d)
+Target: fresh temp dir (git-initialized empty repo), $HOME-relative paths redacted below
+
+## 2. Skills scaffolded (.claude/skills/)
+```
+drwxr-xr-x@ - hiroki.yoshioka  3 Aug 05:03 .
+drwxr-xr-x@ - hiroki.yoshioka  3 Aug 05:03 ..
+drwxr-xr-x@ - hiroki.yoshioka  3 Aug 05:03 anti-bottleneck
+drwxr-xr-x@ - hiroki.yoshioka  3 Aug 05:03 audit-harness
+drwxr-xr-x@ - hiroki.yoshioka  3 Aug 05:03 cross-review
+drwxr-xr-x@ - hiroki.yoshioka  3 Aug 05:03 org
+drwxr-xr-x@ - hiroki.yoshioka  3 Aug 05:03 plan
+drwxr-xr-x@ - hiroki.yoshioka  3 Aug 05:03 pr
+drwxr-xr-x@ - hiroki.yoshioka  3 Aug 05:03 self-review
+drwxr-xr-x@ - hiroki.yoshioka  3 Aug 05:03 spec
+drwxr-xr-x@ - hiroki.yoshioka  3 Aug 05:03 sync-docs
+drwxr-xr-x@ - hiroki.yoshioka  3 Aug 05:03 test
+drwxr-xr-x@ - hiroki.yoshioka  3 Aug 05:03 verify
+drwxr-xr-x@ - hiroki.yoshioka  3 Aug 05:03 work
+```
+
+## 3. Loop artifact search (expect: none)
+```
+$ find . -iname "*ralph-loop*" -o -iname "*ralph-orchestrator*" -o -iname "*ralph-pipeline*"
+(no matches)
+
+$ grep -n "^\[loop\]\|^\[pipeline\]" ralph.toml
+(no matches)
+```
+
+### Note on incidental historical mentions of "Ralph Loop" (intentional, not artifacts)
+
+The following files legitimately mention "Ralph Loop" in prose as historical
+context (why a feature no longer exists, or historical schema vocabulary the
+insights reader keeps read-compat for per AC-6b) -- none of these are functional
+loop artifacts (scripts, skill directories, or config sections):
+```
+.agents/skills/work/SKILL.md
+.claude/skills/work/SKILL.md
+docs/insights/README.md
+.ralph/baseline/.agents/skills/work/SKILL.md
+.ralph/baseline/.claude/skills/work/SKILL.md
+.ralph/baseline/docs/insights/README.md
+.ralph/baseline/scripts/xreview-helpers.sh
+.ralph/baseline/scripts/ralph-config.sh
+scripts/xreview-helpers.sh
+scripts/ralph-config.sh
+```
+
+## 4. Org runtime artifact presence (expect: present)
+```
+$ ls -d .claude/skills/org
+drwxr-xr-x@ - hiroki.yoshioka  3 Aug 05:03 .claude/skills/org
+$ ls .claude/rules/agent-messaging.md
+.rw-r--r--@ 5.1k hiroki.yoshioka  3 Aug 05:03 .claude/rules/agent-messaging.md
+$ grep -n "^\[org\]" ralph.toml
+16:[org]
+```
+
+## Verdict
+
+PASS: scaffold contains no live Ralph Loop execution artifacts (no loop skill,
+no ralph-loop/ralph-orchestrator/ralph-pipeline scripts, no [loop]/[pipeline]
+ralph.toml sections) and does contain the org runtime surface (`.claude/skills/org`,
+`.claude/rules/agent-messaging.md`, `[org]` in ralph.toml).
