@@ -244,11 +244,19 @@ type SpawnResult struct {
 //
 // Only then does the saga proceed to (unless DryRun) the workspace/tab/
 // agent/agmsg side effects with a spawn_started -> spawn_step* ->
-// spawned|spawn_failed manifest trail and a tri-state model receipt. The
-// DryRun path is unchanged: validate the full envelope (ValidateSpawn) up
-// front, then the AC-2b gate, then simulate the trail -- dry-run has no
-// idempotency concept, so "gate before record" is the only ordering
-// question there and it stays exactly as it was.
+// spawned|spawn_failed manifest trail and a tri-state model receipt.
+//
+// The DryRun path (self-review Cycle-2 M-1 fix) runs steps 2, 3, and 5 in
+// the exact same order as the real path above: ValidateSpawnEnvelope, then
+// permissionArgsForDriver, then the AC-2b gate, then ValidateSpawnCapacity.
+// Steps 1 and 4 have no dry-run analogue -- dry-run events are excluded
+// from ActiveSeatCount/roster entirely, so there is no idempotent-respawn
+// case to short-circuit and no stale-in-flight saga to detect or
+// compensate. Because the two paths now check the same conditions in the
+// same order, a request that fails more than one check (e.g. an
+// out-of-pool model *and* a scope-less autonomous spawn) is rejected for
+// the same first cause in both modes, so `--dry-run`'s predicted rejection
+// always matches what a real spawn of the same request would record.
 func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	// Identifier shape validation runs first, before any manifest read or
 	// write and before any path is derived from p.OrgID/p.SeatID (see
@@ -296,21 +304,19 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	events := rr.Events
 
 	if p.DryRun {
-		// Dry-run path is unchanged: gate-before-record, then validate the
-		// envelope, then simulate the saga trail without ever consulting
-		// existing roster state (dry-run events are excluded from
-		// ActiveSeatCount/roster entirely, so there is no idempotency/
-		// stale-in-flight concept to apply here -- unlike the real-spawn
-		// path below, there is no idempotent-retry case for this gate to be
-		// ordered after). No manifest lock is needed here either -- dry-run
-		// events never count toward [org].max_seats, so two concurrent
-		// dry-runs cannot race on capacity.
-		if err := autonomousScopeGateErr(p, resolvedPermMode); err != nil {
-			return o.reject(p, err)
-		}
-		activeSeats := ActiveSeatCount(events, p.OrgID, RosterOptions{})
+		// Dry-run mirrors the real path's ordering exactly (self-review
+		// Cycle-2 M-1 fix): ValidateSpawnEnvelope, then
+		// permissionArgsForDriver, then the AC-2b gate, then
+		// ValidateSpawnCapacity -- the same first-cause-wins order the real
+		// path's locked closure uses below, minus the two steps that have
+		// no dry-run analogue (the idempotent early return and stale-
+		// in-flight compensation; dry-run events are excluded from
+		// ActiveSeatCount/roster entirely, so neither concept applies here).
+		// No manifest lock is needed either -- dry-run events never count
+		// toward [org].max_seats, so two concurrent dry-runs cannot race on
+		// capacity.
 		req := SpawnRequest{OrgID: p.OrgID, SeatID: p.SeatID, Role: p.Role, Driver: p.Driver, Model: p.Model}
-		if err := ValidateSpawn(o.Config, req, activeSeats); err != nil {
+		if err := ValidateSpawnEnvelope(o.Config, req); err != nil {
 			return o.reject(p, err)
 		}
 		// Permission-mode mapping validation (AC-2, codex fail-closed) runs
@@ -319,6 +325,13 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 		// the resolved args themselves are discarded; only the possible
 		// error matters here.
 		if _, err := permissionArgsForDriver(p.Driver, resolvedPermMode); err != nil {
+			return o.reject(p, err)
+		}
+		if err := autonomousScopeGateErr(p, resolvedPermMode); err != nil {
+			return o.reject(p, err)
+		}
+		activeSeats := ActiveSeatCount(events, p.OrgID, RosterOptions{})
+		if err := ValidateSpawnCapacity(o.Config, req, activeSeats); err != nil {
 			return o.reject(p, err)
 		}
 		return o.dryRunSpawn(p, resolvedPermMode)
@@ -362,9 +375,13 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	var early *SpawnResult
 	// permArgs is set inside the locked closure below (permissionArgsForDriver's
 	// success value) and consumed after the lock releases, when Spawn builds
-	// AgentStart's agentArgs. It stays nil on any early-return path (idempotent
-	// respawn, envelope/permission rejection) -- those paths never reach the
-	// AgentStart call that would read it.
+	// AgentStart's agentArgs. It stays nil on any early-return path that
+	// precedes its own assignment (idempotent respawn, envelope/permission
+	// rejection) -- none of those paths ever reach the AgentStart call that
+	// would read it. The one early-return path that runs *after* the
+	// assignment -- the AC-2b scope-gate rejection just below it -- also
+	// never reaches AgentStart, so a non-nil permArgs on that path is
+	// harmless: nothing reads it once Spawn has already returned.
 	var permArgs []string
 	// staleExisting is set inside Phase 1's locked closure when the target
 	// seat has a stale in-flight saga (a prior spawn_started/spawn_step that
@@ -523,17 +540,59 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 		// PaneSendKeys round trip) and mark it spawn_failed, exactly as
 		// Phase 1 used to do while still holding the lock.
 		o.compensateStale(ctx, p, *staleExisting)
+		afterStaleCompensation()
 
-		// Phase 2 (locked): re-read post-compensation -- the now-terminal
-		// stale seat no longer counts toward activeSeats -- and run the same
-		// capacity check + spawn_started append Phase 1 would have run had
-		// no stale seat been in the way.
+		// Phase 2 (locked): re-read post-compensation and re-run BOTH checks
+		// that could have gone stale during the lock-free compensate window
+		// above (self-review Cycle-2 M-2 fix):
+		//   - idempotency: a concurrent racer's Spawn call for this exact
+		//     seat could have completed a full saga while our lock was
+		//     released for compensateStale's herdr round trip. Phase 1's
+		//     EventSpawned early return only guards against a racer that
+		//     was already spawned *before* our own Phase 1 read -- it says
+		//     nothing about a racer finishing in the window between our
+		//     Phase 1 release and this re-acquire. Re-scanning the fresh
+		//     roster here for that same EventSpawned terminus and returning
+		//     Idempotent, instead of falling through to
+		//     checkCapacityAndStart, is what stops this call from
+		//     appending a second spawn_started on top of an already-
+		//     spawned seat.
+		//   - capacity: unchanged from before -- the now-terminal stale
+		//     seat no longer counts toward activeSeats, so
+		//     checkCapacityAndStart runs the same capacity check +
+		//     spawn_started append Phase 1 would have run had no stale seat
+		//     been in the way.
+		// A racer whose own saga is still in-flight (spawn_started/
+		// spawn_step) needs no extra handling here: ActiveSeatCount already
+		// counts that roster entry as active, so checkCapacityAndStart's
+		// capacity check already treats it correctly, exactly as it would
+		// for any other in-flight seat. And if the fresh read instead shows
+		// our target seat is no longer stale because a racer's own
+		// compensateStale already resolved it (event == spawn_failed), no
+		// duplicate spawn_failed is at risk from this closure: it never
+		// appends one -- only the idempotent check above and
+		// checkCapacityAndStart's reject()/spawn_started path below do --
+		// so re-validating "still stale" here requires no action beyond the
+		// idempotent check itself.
 		lockErr = withManifestLock(filepath.Dir(o.Manifest.Path()), func() error {
 			rr2, err := o.Manifest.Read()
 			if err != nil {
 				return fmt.Errorf("org: read manifest: %w", err)
 			}
 			events = rr2.Events
+
+			roster := Roster(events, RosterOptions{})
+			for i := range roster {
+				if roster[i].OrgID == p.OrgID && roster[i].SeatID == p.SeatID {
+					if roster[i].Event == EventSpawned {
+						r := SpawnResult{Outcome: SpawnOutcomeIdempotent, Seat: roster[i]}
+						early = &r
+						return nil
+					}
+					break
+				}
+			}
+
 			checkCapacityAndStart()
 			return nil
 		})
@@ -1222,6 +1281,16 @@ func (o *Org) compensateStale(ctx context.Context, p SpawnParams, existing SeatS
 		PaneID: existing.PaneID, AgmsgTeam: existing.AgmsgTeam, Details: details,
 	})
 }
+
+// afterStaleCompensation is a no-op by default; tests reassign it (mirroring
+// absPath's "package-level var, test reassigns" seam above) to inject a
+// manifest mutation in the lock-free window between compensateStale's own
+// write (the line just above this call site in Spawn) and Phase 2's
+// re-acquire -- simulating a concurrent racer's Spawn call for the same
+// seat landing in that exact window, so Phase 2's idempotent re-check
+// (self-review Cycle-2 M-2 fix) is deterministically testable without a
+// real goroutine race.
+var afterStaleCompensation = func() {}
 
 // compensatePane is the failStep-path compensation helper: it always uses a
 // fresh background context so a best-effort cleanup call is never itself cut

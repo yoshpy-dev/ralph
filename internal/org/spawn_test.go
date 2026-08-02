@@ -668,6 +668,135 @@ func TestOrgSpawn_StaleInFlight_CompensatesThenRespawnsFresh(t *testing.T) {
 	}
 }
 
+// TestOrgSpawn_StaleInFlight_RacerCompletesDuringCompensationWindow_Phase2ReturnsIdempotent
+// is a regression for self-review Cycle-2 M-2: Phase 2 re-reads the manifest
+// under a re-acquired lock but, before this fix, only re-ran the capacity
+// check against that fresh snapshot -- not the idempotent check. A
+// concurrent racer's Spawn call for this exact seat can complete a full
+// saga during the lock-free window between Phase 1's release (right after
+// staleExisting is detected) and Phase 2's re-acquire, since compensateStale's
+// only driver call (PaneSendKeys) runs in that window. Phase 2 must notice
+// the fresh EventSpawned terminus and return SpawnOutcomeIdempotent instead
+// of appending a second spawn_started on top of an already-spawned seat.
+func TestOrgSpawn_StaleInFlight_RacerCompletesDuringCompensationWindow_Phase2ReturnsIdempotent(t *testing.T) {
+	o, h, _ := testOrg(t)
+
+	if err := o.Manifest.Append(ManifestEvent{
+		TS: "2026-08-01T00:00:00Z", OrgID: "org-a", SeatID: "seat-a", Event: EventSpawnStarted,
+		Role: "worker", Driver: "claude", Model: "sonnet", PaneID: "stale-pane-1",
+	}); err != nil {
+		t.Fatalf("seed stale spawn_started: %v", err)
+	}
+
+	// Fires right after compensateStale's own spawn_failed write -- i.e. in
+	// the lock-free window between Phase 1's release and Phase 2's
+	// re-acquire -- to simulate a concurrent racer's Spawn call completing a
+	// full saga for the same seat before this call's Phase 2 re-reads the
+	// manifest. This is the seam spawn.go documents at afterStaleCompensation's
+	// declaration.
+	orig := afterStaleCompensation
+	afterStaleCompensation = func() {
+		if err := o.Manifest.Append(ManifestEvent{
+			TS: "2026-08-01T00:00:05Z", OrgID: "org-a", SeatID: "seat-a", Event: EventSpawned,
+			Role: "worker", Driver: "claude", Model: "sonnet", PaneID: "racer-pane-1", AgmsgTeam: "team-racer",
+		}); err != nil {
+			t.Fatalf("seed racer spawned event: %v", err)
+		}
+	}
+	defer func() { afterStaleCompensation = orig }()
+
+	result := o.Spawn(mustSpawnParams("org-a", "seat-a"))
+	if result.Outcome != SpawnOutcomeIdempotent {
+		t.Fatalf("expected SpawnOutcomeIdempotent once Phase 2's fresh read shows the seat already spawned by a racer, got %+v", result)
+	}
+	if result.Seat.PaneID != "racer-pane-1" {
+		t.Fatalf("expected the idempotent result to reflect the racer's spawned seat (pane racer-pane-1), got %+v", result.Seat)
+	}
+
+	// The only driver call is the compensation C-c: no second saga's worth
+	// of workspace/tab/agent/agmsg calls were attempted on top of the
+	// racer's already-spawned seat.
+	if len(h.calls) != 1 || h.calls[0] != "pane_send_keys" {
+		t.Fatalf("expected exactly one driver call (the compensation C-c), got %v", h.calls)
+	}
+
+	got := eventNames(t, o)
+	// stale spawn_started (seeded) -> spawn_failed (compensation) -> racer's spawned -- no second spawn_started.
+	want := []string{EventSpawnStarted, EventSpawnFailed, EventSpawned}
+	if len(got) != len(want) {
+		t.Fatalf("expected event sequence %v (no duplicate spawn_started appended over the racer's spawned seat), got %v", want, got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("event[%d]: want %q, got %q (full: %v)", i, want[i], got[i], got)
+		}
+	}
+}
+
+// TestOrgSpawn_DryRun_And_Real_AgreeOnRejectionCause_EnvelopeBeforeScopeGate
+// is a regression for self-review Cycle-2 M-1: dry-run and the real spawn
+// path used to check the AC-2b scope gate and the envelope validation in
+// opposite orders, so a request that violated both an out-of-pool model
+// (ValidateSpawnEnvelope) and the unscoped-autonomous gate (AC-2b) was
+// rejected for a different cause depending on --dry-run alone -- even
+// though dry-run's whole purpose is to predict the real path's rejection.
+// Both paths must now report the same first cause: the envelope's
+// out-of-pool-model error wins in both modes.
+func TestOrgSpawn_DryRun_And_Real_AgreeOnRejectionCause_EnvelopeBeforeScopeGate(t *testing.T) {
+	newParams := func(dryRun bool) SpawnParams {
+		p := mustSpawnParams("org-a", "seat-1")
+		p.Model = "not-a-real-model" // out-of-pool -> ValidateSpawnEnvelope error
+		p.Scope = ""                 // unscoped autonomous -> AC-2b gate error
+		p.DryRun = dryRun
+		return p
+	}
+
+	realOrg, _, _ := testOrg(t)
+	realResult := realOrg.Spawn(newParams(false))
+	if realResult.Outcome != SpawnOutcomeRejected || realResult.Err == nil {
+		t.Fatalf("expected real spawn to reject, got %+v", realResult)
+	}
+	if !strings.Contains(realResult.Err.Error(), "not in [org].model_pool") {
+		t.Fatalf("expected real spawn to reject for the envelope (out-of-pool model) cause, got %v", realResult.Err)
+	}
+	if strings.Contains(realResult.Err.Error(), "--scope") {
+		t.Fatalf("expected real spawn's rejection to NOT mention --scope (envelope check must win first), got %v", realResult.Err)
+	}
+
+	dryOrg, _, _ := testOrg(t)
+	dryResult := dryOrg.Spawn(newParams(true))
+	if dryResult.Outcome != SpawnOutcomeRejected || dryResult.Err == nil {
+		t.Fatalf("expected dry-run spawn to reject, got %+v", dryResult)
+	}
+	if !strings.Contains(dryResult.Err.Error(), "not in [org].model_pool") {
+		t.Fatalf("expected dry-run spawn to reject for the envelope (out-of-pool model) cause, got %v", dryResult.Err)
+	}
+	if strings.Contains(dryResult.Err.Error(), "--scope") {
+		t.Fatalf("expected dry-run spawn's rejection to NOT mention --scope (envelope check must win first), got %v", dryResult.Err)
+	}
+
+	if realResult.Err.Error() != dryResult.Err.Error() {
+		t.Fatalf("expected dry-run and real spawn to record the SAME rejection cause, got real=%q dry=%q", realResult.Err.Error(), dryResult.Err.Error())
+	}
+
+	// Both paths route rejection through reject(), so both must record the
+	// same Details string on the resulting rejected manifest event.
+	realRR, err := realOrg.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read real manifest: %v", err)
+	}
+	dryRR, err := dryOrg.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read dry-run manifest: %v", err)
+	}
+	if len(realRR.Events) != 1 || len(dryRR.Events) != 1 {
+		t.Fatalf("expected exactly one rejected event each, got real=%+v dry=%+v", realRR.Events, dryRR.Events)
+	}
+	if realRR.Events[0].Details != dryRR.Events[0].Details {
+		t.Fatalf("expected the rejected event's Details to match between dry-run and real spawn, got real=%q dry=%q", realRR.Events[0].Details, dryRR.Events[0].Details)
+	}
+}
+
 func TestOrgSpawn_FailureInjection_WorkspaceCreate_NoCompensationAttempted(t *testing.T) {
 	o, h, _ := testOrg(t)
 	h.workspaceCreateErr = errors.New("stub failure: workspace create")
