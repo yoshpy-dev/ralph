@@ -792,13 +792,24 @@ func (o *Org) SendWatchdogAlert(ctx context.Context, orgID, message string) erro
 // RunWatch's persisted status -- mirrors ensureLeadJoined's idempotent,
 // best-effort Join semantics in spawn.go, but for the watchdog identity
 // instead of lead.
+//
+// WatchdogJoined is set only after Join actually succeeds (PR④ known gap
+// #6, docs/reports/cross-review-triage-org-runtime-watchdog.md Cycle 3 #6):
+// setting it unconditionally would persist a false "already joined" record
+// across a transient Join failure (e.g. agmsg momentarily unreachable),
+// permanently skipping every future retry for that org -- and, since
+// SendWatchdogAlert has no membership dependency of its own that would
+// otherwise surface the gap, ALERT delivery would keep failing silently
+// forever after just one bad cycle. Leaving the flag false on error lets
+// the very next cycle retry Join.
 func (w *watchRun) ensureWatchdogJoined(ctx context.Context, status *watchStatusFile, orgID string) {
 	if status.WatchdogJoined {
 		return
 	}
 	cwd, _ := os.Getwd()
-	_ = w.org.Agmsg.Join(ctx, agmsgTeam(orgID), watchdogIdentity, "claude-code", cwd)
-	status.WatchdogJoined = true
+	if err := w.org.Agmsg.Join(ctx, agmsgTeam(orgID), watchdogIdentity, "claude-code", cwd); err == nil {
+		status.WatchdogJoined = true
+	}
 }
 
 // sendAlert validates and sends one ALERT to lead via the watchdog identity
@@ -1006,6 +1017,20 @@ func filterLeadHistoryLines(raw string) string {
 // with no activity, OR the anomaly subject is lead itself -- escalates
 // without waiting for the timeout, since lead cannot be expected to
 // self-report while it is the thing that is anomalous).
+//
+// The probe-based sources (#2 leadProbeSnapshot, #3 historyLeadLineCount)
+// only count as activity when the ALERT-time baseline itself was a valid,
+// comparable snapshot -- not the "probe was unavailable" sentinel
+// (LeadAgentGet == "" / HistoryLeadLines == -1, per each field's own doc
+// comment). Without that guard, an alert recorded while a probe was down
+// (baseline collapses to the sentinel) would false-clear the moment the
+// probe merely recovers on a later cycle: cur != "" is trivially true
+// against a "" baseline even though nothing about lead's behavior actually
+// changed, only the probe's own availability did (PR④ known gap #5,
+// docs/reports/cross-review-triage-org-runtime-watchdog.md Cycle 3 #5). A
+// pending alert whose probe baseline was unavailable can still clear via
+// the other, unaffected sources (manifest events, or a probe/history source
+// that had a valid baseline).
 func (w *watchRun) checkDeadman(ctx context.Context, status *watchStatusFile, rr ManifestReadResult, now time.Time) {
 	for alertID, pending := range status.PendingAlerts {
 		if status.Escalated[alertID] {
@@ -1014,12 +1039,12 @@ func (w *watchRun) checkDeadman(ctx context.Context, status *watchStatusFile, rr
 		}
 
 		activity := leadActivityEventCount(rr.Events, status.OrgID) > pending.ManifestLen
-		if !activity {
+		if !activity && pending.LeadAgentGet != "" {
 			if cur := w.leadProbeSnapshot(ctx, status.OrgID); cur != "" && cur != pending.LeadAgentGet {
 				activity = true
 			}
 		}
-		if !activity {
+		if !activity && pending.HistoryLeadLines >= 0 {
 			if cur := w.historyLeadLineCount(ctx, status.OrgID); cur >= 0 && cur > pending.HistoryLeadLines {
 				activity = true
 			}
