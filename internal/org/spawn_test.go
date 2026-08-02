@@ -327,6 +327,106 @@ func TestOrgSpawn_Idempotent_AlreadySpawned_NoNewDriverCalls(t *testing.T) {
 	}
 }
 
+func TestOrgSpawn_Idempotent_AtMaxSeats_RespawnSucceedsInsteadOfRejected(t *testing.T) {
+	// Regression for cross-review-triage-org-runtime-mechanism.md ACTION_REQUIRED #1:
+	// with max_seats=1, respawning the org's only (already-spawned) seat must
+	// return idempotently -- envelope validation (including max_seats) must
+	// never even run for an already-spawned seat, so an at-cap org cannot
+	// turn a legitimate respawn retry into a rejection.
+	o, h, a := testOrg(t)
+	o.Config.MaxSeats = 1
+
+	if r := o.Spawn(mustSpawnParams("org-a", "seat-a")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("initial spawn failed: %+v", r)
+	}
+
+	rrBefore, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	eventsBefore := len(rrBefore.Events)
+	callsBefore := len(h.calls)
+	sendsBefore := len(a.calls)
+
+	result := o.Spawn(mustSpawnParams("org-a", "seat-a"))
+	if result.Outcome != SpawnOutcomeIdempotent {
+		t.Fatalf("expected SpawnOutcomeIdempotent for respawn of the org's only seat at max_seats=1, got %v (err=%v)", result.Outcome, result.Err)
+	}
+	if result.Err != nil {
+		t.Fatalf("expected nil Err for idempotent respawn, got %v", result.Err)
+	}
+
+	rrAfter, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	if len(rrAfter.Events) != eventsBefore {
+		t.Fatalf("expected no new manifest events on idempotent respawn at max_seats, %d -> %d (events=%v)", eventsBefore, len(rrAfter.Events), rrAfter.Events)
+	}
+	if len(h.calls) != callsBefore || len(a.calls) != sendsBefore {
+		t.Fatalf("expected no driver calls on idempotent respawn at max_seats, herdr %d->%d agmsg %d->%d", callsBefore, len(h.calls), sendsBefore, len(a.calls))
+	}
+}
+
+func TestOrgSpawn_Rejected_AtMaxSeats_NewSeatStillRejected(t *testing.T) {
+	// Unchanged-behavior guard alongside the fix above: a *new* seat_id at
+	// max_seats=1 must still be rejected, not treated as idempotent.
+	o, h, a := testOrg(t)
+	o.Config.MaxSeats = 1
+
+	if r := o.Spawn(mustSpawnParams("org-a", "seat-a")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("initial spawn failed: %+v", r)
+	}
+	callsBefore := len(h.calls)
+	sendsBefore := len(a.calls)
+
+	result := o.Spawn(mustSpawnParams("org-a", "seat-b"))
+	if result.Outcome != SpawnOutcomeRejected {
+		t.Fatalf("expected SpawnOutcomeRejected for a new seat at max_seats=1, got %v", result.Outcome)
+	}
+	if result.Err == nil {
+		t.Fatal("expected non-nil Err for a rejection (CLI must exit non-zero)")
+	}
+	if len(h.calls) != callsBefore || len(a.calls) != sendsBefore {
+		t.Fatalf("expected no driver calls on rejection, herdr %d->%d agmsg %d->%d", callsBefore, len(h.calls), sendsBefore, len(a.calls))
+	}
+}
+
+func TestOrgSpawn_StaleInFlight_AtMaxSeats_CompensationFreesCapForFreshSaga(t *testing.T) {
+	// Regression companion: a stale in-flight seat at max_seats=1 must be
+	// compensated (spawn_failed) *before* ValidateSpawn runs, so the stale
+	// seat no longer counts toward activeSeats and the fresh saga succeeds
+	// instead of being rejected for being "at cap".
+	o, h, _ := testOrg(t)
+	o.Config.MaxSeats = 1
+
+	if err := o.Manifest.Append(ManifestEvent{
+		TS: "2026-08-01T00:00:00Z", OrgID: "org-a", SeatID: "seat-a", Event: EventSpawnStarted,
+		Role: "worker", Driver: "claude", Model: "sonnet", PaneID: "stale-pane-1",
+	}); err != nil {
+		t.Fatalf("seed stale spawn_started: %v", err)
+	}
+
+	result := o.Spawn(mustSpawnParams("org-a", "seat-a"))
+	if result.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("expected fresh spawn to succeed at max_seats=1 after compensating the stale seat that no longer counts toward the cap, got %+v", result)
+	}
+	if len(h.sendKeysCalls) == 0 || h.sendKeysCalls[0] != "stale-pane-1" {
+		t.Fatalf("expected compensation C-c sent to the stale pane stale-pane-1, got %v", h.sendKeysCalls)
+	}
+
+	got := eventNames(t, o)
+	want := []string{EventSpawnStarted, EventSpawnFailed, EventSpawnStarted, EventOrgWorkspaceCreated, EventSpawnStep, EventSpawnStep, EventSpawnStep, EventSpawned}
+	if len(got) != len(want) {
+		t.Fatalf("expected event sequence %v, got %v", want, got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("event[%d]: want %q, got %q (full: %v)", i, want[i], got[i], got)
+		}
+	}
+}
+
 func TestOrgSpawn_StaleInFlight_CompensatesThenRespawnsFresh(t *testing.T) {
 	o, h, _ := testOrg(t)
 

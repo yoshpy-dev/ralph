@@ -108,10 +108,16 @@ type SpawnResult struct {
 }
 
 // Spawn runs the full spawn saga described in
-// docs/plans/active/2026-08-01-org-runtime-mechanism.md: envelope
-// validation, idempotency/stale-in-flight handling, then (unless DryRun) the
-// workspace/tab/agent/agmsg side effects with a spawn_started -> spawn_step*
-// -> spawned|spawn_failed manifest trail and a tri-state model receipt.
+// docs/plans/active/2026-08-01-org-runtime-mechanism.md. For a non-dry-run
+// call, idempotency/stale-in-flight handling runs *before* envelope
+// validation: an already-spawned seat returns idempotently with no
+// validation attempted at all (so an at-cap org can never reject a
+// respawn-of-active-seat retry), and a stale in-flight seat is compensated
+// first so it no longer counts toward max_seats before validation runs.
+// Only then does the saga proceed to (unless DryRun) the workspace/tab/
+// agent/agmsg side effects with a spawn_started -> spawn_step* ->
+// spawned|spawn_failed manifest trail and a tri-state model receipt. The
+// DryRun path is unchanged: validate up front, then simulate the trail.
 func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	if p.TimeoutMS <= 0 {
 		p.TimeoutMS = defaultSpawnTimeoutMS
@@ -123,13 +129,17 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	}
 	events := rr.Events
 
-	activeSeats := ActiveSeatCount(events, p.OrgID, RosterOptions{})
-	req := SpawnRequest{OrgID: p.OrgID, SeatID: p.SeatID, Role: p.Role, Driver: p.Driver, Model: p.Model}
-	if err := ValidateSpawn(o.Config, req, activeSeats); err != nil {
-		return o.reject(p, err)
-	}
-
 	if p.DryRun {
+		// Dry-run path is unchanged: validate the envelope up front, then
+		// simulate the saga trail without ever consulting existing roster
+		// state (dry-run events are excluded from ActiveSeatCount/roster
+		// entirely, so there is no idempotency/stale-in-flight concept to
+		// apply here).
+		activeSeats := ActiveSeatCount(events, p.OrgID, RosterOptions{})
+		req := SpawnRequest{OrgID: p.OrgID, SeatID: p.SeatID, Role: p.Role, Driver: p.Driver, Model: p.Model}
+		if err := ValidateSpawn(o.Config, req, activeSeats); err != nil {
+			return o.reject(p, err)
+		}
 		return o.dryRunSpawn(p)
 	}
 
@@ -142,21 +152,36 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 		}
 	}
 
+	if existing != nil && existing.Event == EventSpawned {
+		// AC-3: idempotent respawn of an already-spawned seat returns the
+		// existing seat, exit 0, no new manifest events, no driver calls --
+		// checked and returned *before* envelope validation, so an
+		// already-spawned seat can never be rejected by e.g. max_seats
+		// pressure at the at-cap boundary. An idempotent no-op must not be
+		// able to fail validation.
+		return SpawnResult{Outcome: SpawnOutcomeIdempotent, Seat: *existing}
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(p.TimeoutMS)*time.Millisecond)
 	defer cancel()
 
-	if existing != nil {
-		switch existing.Event {
-		case EventSpawned:
-			// AC-3: idempotent respawn of an already-spawned seat returns
-			// the existing seat, exit 0, no new driver calls.
-			return SpawnResult{Outcome: SpawnOutcomeIdempotent, Seat: *existing}
-		case EventSpawnStarted, EventSpawnStep:
-			// Stale in-flight saga from a prior crashed/interrupted spawn:
-			// best-effort compensate, mark it spawn_failed, then fall
-			// through to a fresh spawn below.
-			o.compensateStale(ctx, p, *existing)
+	if existing != nil && (existing.Event == EventSpawnStarted || existing.Event == EventSpawnStep) {
+		// Stale in-flight saga from a prior crashed/interrupted spawn:
+		// best-effort compensate and mark it spawn_failed, then re-read the
+		// manifest so the now-terminal stale seat no longer counts toward
+		// activeSeats for the envelope validation below.
+		o.compensateStale(ctx, p, *existing)
+		rr, err = o.Manifest.Read()
+		if err != nil {
+			return SpawnResult{Outcome: SpawnOutcomeFailed, Err: fmt.Errorf("org: read manifest: %w", err)}
 		}
+		events = rr.Events
+	}
+
+	activeSeats := ActiveSeatCount(events, p.OrgID, RosterOptions{})
+	req := SpawnRequest{OrgID: p.OrgID, SeatID: p.SeatID, Role: p.Role, Driver: p.Driver, Model: p.Model}
+	if err := ValidateSpawn(o.Config, req, activeSeats); err != nil {
+		return o.reject(p, err)
 	}
 
 	if err := o.appendEvent(ManifestEvent{
