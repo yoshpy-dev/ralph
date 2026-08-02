@@ -109,15 +109,25 @@ type SpawnResult struct {
 
 // Spawn runs the full spawn saga described in
 // docs/plans/active/2026-08-01-org-runtime-mechanism.md. For a non-dry-run
-// call, idempotency/stale-in-flight handling runs *before* envelope
-// validation: an already-spawned seat returns idempotently with no
-// validation attempted at all (so an at-cap org can never reject a
-// respawn-of-active-seat retry), and a stale in-flight seat is compensated
-// first so it no longer counts toward max_seats before validation runs.
+// call, the ordering is, in this order:
+//  1. Idempotent early return: an already-spawned seat returns the existing
+//     seat with no validation attempted at all (so an at-cap org can never
+//     reject a respawn-of-active-seat retry).
+//  2. Stateless envelope validation (ValidateSpawnEnvelope: driver/model
+//     pool membership, role restriction) -- a pure function of cfg+req, run
+//     before any external side effect (including stale-seat compensation)
+//     is attempted, so an envelope-invalid request is always a pure no-op.
+//  3. Stale-in-flight compensation: a stale seat (prior spawn_started/
+//     spawn_step never resolved) is best-effort compensated and the
+//     manifest re-read, so it no longer counts toward max_seats.
+//  4. Capacity validation (ValidateSpawnCapacity) against the recomputed
+//     activeSeats.
+//
 // Only then does the saga proceed to (unless DryRun) the workspace/tab/
 // agent/agmsg side effects with a spawn_started -> spawn_step* ->
 // spawned|spawn_failed manifest trail and a tri-state model receipt. The
-// DryRun path is unchanged: validate up front, then simulate the trail.
+// DryRun path is unchanged: validate the full envelope (ValidateSpawn) up
+// front, then simulate the trail.
 func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	if p.TimeoutMS <= 0 {
 		p.TimeoutMS = defaultSpawnTimeoutMS
@@ -162,6 +172,19 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 		return SpawnResult{Outcome: SpawnOutcomeIdempotent, Seat: *existing}
 	}
 
+	// Stateless envelope checks (driver/model pool membership, role
+	// restriction) run before any external side effect -- including the
+	// best-effort compensation below -- is attempted. Unlike the capacity
+	// check, their outcome is a pure function of cfg+req and cannot change
+	// as a result of compensating a stale seat, so a request that fails
+	// here must be rejected with zero driver calls: reject()'s "no external
+	// side effect was ever attempted" claim only holds if this check runs
+	// first.
+	req := SpawnRequest{OrgID: p.OrgID, SeatID: p.SeatID, Role: p.Role, Driver: p.Driver, Model: p.Model}
+	if err := ValidateSpawnEnvelope(o.Config, req); err != nil {
+		return o.reject(p, err)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(p.TimeoutMS)*time.Millisecond)
 	defer cancel()
 
@@ -169,7 +192,7 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 		// Stale in-flight saga from a prior crashed/interrupted spawn:
 		// best-effort compensate and mark it spawn_failed, then re-read the
 		// manifest so the now-terminal stale seat no longer counts toward
-		// activeSeats for the envelope validation below.
+		// activeSeats for the capacity check below.
 		o.compensateStale(ctx, p, *existing)
 		rr, err = o.Manifest.Read()
 		if err != nil {
@@ -179,8 +202,7 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	}
 
 	activeSeats := ActiveSeatCount(events, p.OrgID, RosterOptions{})
-	req := SpawnRequest{OrgID: p.OrgID, SeatID: p.SeatID, Role: p.Role, Driver: p.Driver, Model: p.Model}
-	if err := ValidateSpawn(o.Config, req, activeSeats); err != nil {
+	if err := ValidateSpawnCapacity(o.Config, req, activeSeats); err != nil {
 		return o.reject(p, err)
 	}
 

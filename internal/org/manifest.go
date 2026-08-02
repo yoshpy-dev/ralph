@@ -13,9 +13,10 @@ import (
 )
 
 // ManifestEvent is a single JSONL record appended to the org manifest. One
-// event = one line. This shape is a contract: later slices (driver
-// adapters, `ralph org` verbs) depend on these exact field names and JSON
-// tags, so changes here must be deliberate and lock-stepped across slices.
+// event = one line. This shape is a contract: the driver adapters
+// (internal/org/driver) and the `ralph org` verbs (verbs.go, spawn.go)
+// depend on these exact field names and JSON tags, so changes here must be
+// deliberate and coordinated across all three.
 type ManifestEvent struct {
 	TS        string `json:"ts"`      // UTC RFC3339
 	OrgID     string `json:"org_id"`  // execution namespace, required

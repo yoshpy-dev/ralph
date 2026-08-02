@@ -13,7 +13,8 @@ import (
 // codex `--model` support on `codex exec` is best-effort (known upstream
 // gap: some codex builds ignore or reject --model on the exec subcommand),
 // so a ProbeModel failure for drv=="codex" is advisory, not fatal -- the
-// caller (ralph doctor, Slice 5) decides how to surface that severity.
+// caller (checkOrgModelProbes in internal/cli/doctor.go, wired into
+// `ralph doctor --probe-models`) decides how to surface that severity.
 func ProbeModel(ctx context.Context, r Runner, drv, model string) error {
 	switch drv {
 	case "claude":

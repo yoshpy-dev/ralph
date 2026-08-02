@@ -24,10 +24,31 @@ type SpawnRequest struct {
 // caller, typically via (*ManifestStore).ActiveSeatCount -- this function
 // performs no I/O so it stays trivially unit-testable).
 //
+// ValidateSpawn is the composition of ValidateSpawnEnvelope (stateless: pure
+// functions of cfg+req) and ValidateSpawnCapacity (depends on activeSeats,
+// which changes as a result of stale-seat compensation). Callers that need
+// to run stale compensation *between* the two -- so a stateless-envelope
+// rejection never triggers a destructive compensation side effect first --
+// should call the two halves directly instead of this composition; see
+// (*Org).Spawn in spawn.go.
+//
 // Each rejection reason returns a distinct, grep-able error so callers can
 // assert on failure mode in tests and pass the message straight through to
 // the manifest `details` field and receipt `reason` field (AC-1/AC-2).
 func ValidateSpawn(cfg config.OrgConfig, req SpawnRequest, activeSeats int) error {
+	if err := ValidateSpawnEnvelope(cfg, req); err != nil {
+		return err
+	}
+	return ValidateSpawnCapacity(cfg, req, activeSeats)
+}
+
+// ValidateSpawnEnvelope checks the stateless part of req against cfg's [org]
+// envelope: driver/model pool membership and role-based model restriction.
+// These are pure functions of cfg+req -- unlike the max_seats capacity
+// check, nothing about stale-seat compensation or manifest state can change
+// their outcome, so they are safe to run before any external side effect is
+// attempted.
+func ValidateSpawnEnvelope(cfg config.OrgConfig, req SpawnRequest) error {
 	if !driverInPool(cfg, req.Driver) {
 		return fmt.Errorf("org: driver %q not in [org].driver_pool %v", req.Driver, cfg.DriverPool)
 	}
@@ -37,6 +58,15 @@ func ValidateSpawn(cfg config.OrgConfig, req SpawnRequest, activeSeats int) erro
 	if !modelAllowedForRole(cfg, req.Role, req.Model) {
 		return fmt.Errorf("org: model %q not permitted for role %q", req.Model, req.Role)
 	}
+	return nil
+}
+
+// ValidateSpawnCapacity checks activeSeats -- the number of seats already
+// active within req.OrgID -- against cfg.MaxSeats. Unlike
+// ValidateSpawnEnvelope, this check's outcome depends on manifest state
+// (activeSeats), so callers that compensate a stale in-flight seat before
+// re-deriving activeSeats must re-run this check with the recomputed count.
+func ValidateSpawnCapacity(cfg config.OrgConfig, req SpawnRequest, activeSeats int) error {
 	if activeSeats >= cfg.MaxSeats {
 		return fmt.Errorf("org: max_seats %d reached for org_id %q", cfg.MaxSeats, req.OrgID)
 	}

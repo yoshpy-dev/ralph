@@ -1,9 +1,10 @@
 // Package driver implements exec.Command-based adapters for the external
 // herdr and agmsg CLIs behind an injectable Runner interface, so callers
-// (the `ralph org` verbs, Slice 4) and tests never need the real binaries
-// on PATH. CI has neither herdr nor agmsg installed; every test in this
-// package uses a fake Runner that records argv and returns canned output --
-// no real herdr/agmsg process is ever spawned by `go test`.
+// (the `ralph org` verbs in internal/org, spawn.go and verbs.go) and tests
+// never need the real binaries on PATH. CI has neither herdr nor agmsg
+// installed; every test in this package uses a fake Runner that records
+// argv and returns canned output -- no real herdr/agmsg process is ever
+// spawned by `go test`.
 package driver
 
 import (

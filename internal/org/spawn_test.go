@@ -427,6 +427,53 @@ func TestOrgSpawn_StaleInFlight_AtMaxSeats_CompensationFreesCapForFreshSaga(t *t
 	}
 }
 
+func TestOrgSpawn_StaleInFlight_StatelessEnvelopeViolation_RejectedBeforeCompensation(t *testing.T) {
+	// Regression for cycle-2 self-review MEDIUM 1
+	// (docs/reports/self-review-2026-08-01-org-runtime-mechanism.md): a
+	// stateless envelope violation (out-of-pool model, here) must be
+	// rejected before any stale-in-flight compensation is attempted, even
+	// when a stale spawn_started event already exists for the same seat.
+	// Compensation is a destructive external side effect (PaneSendKeys
+	// C-c) plus a spawn_failed manifest write -- neither may happen on a
+	// request that was always going to be rejected on stateless grounds.
+	o, h, a := testOrg(t)
+
+	if err := o.Manifest.Append(ManifestEvent{
+		TS: "2026-08-01T00:00:00Z", OrgID: "org-a", SeatID: "seat-a", Event: EventSpawnStarted,
+		Role: "worker", Driver: "claude", Model: "sonnet", PaneID: "stale-pane-1",
+	}); err != nil {
+		t.Fatalf("seed stale spawn_started: %v", err)
+	}
+
+	p := mustSpawnParams("org-a", "seat-a")
+	p.Model = "not-a-real-model"
+	result := o.Spawn(p)
+
+	if result.Outcome != SpawnOutcomeRejected {
+		t.Fatalf("expected SpawnOutcomeRejected for a stateless envelope violation against a stale seat, got %v (err=%v)", result.Outcome, result.Err)
+	}
+	if result.Err == nil {
+		t.Fatal("expected non-nil Err for a rejection (CLI must exit non-zero)")
+	}
+	if len(h.calls) != 0 || len(a.calls) != 0 {
+		t.Fatalf("expected zero driver calls (no C-c compensation, no saga steps), got herdr=%v agmsg=%v", h.calls, a.calls)
+	}
+	if len(h.sendKeysCalls) != 0 {
+		t.Fatalf("expected no PaneSendKeys compensation calls, got %v", h.sendKeysCalls)
+	}
+
+	got := eventNames(t, o)
+	want := []string{EventSpawnStarted, EventRejected}
+	if len(got) != len(want) {
+		t.Fatalf("expected event sequence %v (the seeded spawn_started plus one rejected -- no spawn_failed), got %v", want, got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("event[%d]: want %q, got %q (full: %v)", i, want[i], got[i], got)
+		}
+	}
+}
+
 func TestOrgSpawn_StaleInFlight_CompensatesThenRespawnsFresh(t *testing.T) {
 	o, h, _ := testOrg(t)
 

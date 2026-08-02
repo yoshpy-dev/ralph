@@ -6,10 +6,11 @@ import (
 )
 
 // Herdr adapts the herdr CLI (herdr.dev/docs/cli-reference) via a Runner, so
-// the org verb layer (Slice 4) never shells out directly. Argv shapes below
-// mirror the confirmed CLI reference 1:1, one method per subcommand -- do
-// not invent subcommands beyond what herdr documents. Seat termination
-// strategy (send-keys based) is a Slice 4 concern, not this adapter's.
+// the org verb layer (internal/org) never shells out directly. Argv shapes
+// below mirror the confirmed CLI reference 1:1, one method per subcommand --
+// do not invent subcommands beyond what herdr documents. Seat termination
+// (send-keys based) is implemented by the caller, not this adapter: see
+// (*Org).Stop in internal/org/verbs.go, which calls PaneSendKeys.
 type Herdr struct {
 	R Runner
 }
