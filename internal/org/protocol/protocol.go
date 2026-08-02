@@ -131,15 +131,15 @@ func Parse(text string) (Message, error) {
 // header: a non-blank key (no leading/trailing whitespace once trimmed,
 // and no internal whitespace) followed by a colon.
 func splitHeaderLine(line string) (key, val string, ok bool) {
-	idx := strings.Index(line, ":")
-	if idx < 0 {
+	before, after, found := strings.Cut(line, ":")
+	if !found {
 		return "", "", false
 	}
-	key = strings.TrimSpace(line[:idx])
+	key = strings.TrimSpace(before)
 	if key == "" || strings.ContainsAny(key, " \t") {
 		return "", "", false
 	}
-	val = strings.TrimSpace(line[idx+1:])
+	val = strings.TrimSpace(after)
 	return key, val, true
 }
 
