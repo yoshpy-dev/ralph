@@ -28,10 +28,11 @@ Lead(座席の編成・統括を行う識別子)がその機構をどう操作�
   表示する。最初の autonomous 座席を spawn したら herdr で pane を開いて
   一度だけ承諾すること(以後の座席はスキップされる)。ralph はこの同意を
   自動化しない。
-- **lead と operator は同一ディレクトリで実行**: org の状態(manifest /
-  receipts)は実行 cwd の `.harness/state/org/` に紐づく。lead 座席と
-  operator が異なる cwd で `ralph org` を実行すると状態が分裂するため、
-  必ず同じディレクトリ(通常はリポジトリルート)で実行する。
+- **lead と operator は同一リポジトリ内で実行**: org の状態(manifest /
+  receipts)の既定は `--state-dir` フラグ > `RALPH_ORG_STATE_DIR` > **git
+  リポジトリルートの `.harness/state/org/`** > cwd の順で解決される。同一
+  リポジトリ内なら cwd が異なっても状態は分裂しない。リポジトリ外で運用する
+  場合のみ `--state-dir` を明示的に揃えること。
 - `--org-id` は組織の実行名前空間。同一 `--org-id` の座席は同一 manifest /
   receipts に記録される。
 
@@ -47,6 +48,7 @@ Lead(座席の編成・統括を行う識別子)がその機構をどう操作�
 | `stop` | 座席を停止。 | `ralph org stop --org-id X --seat reviewer-1` |
 | `disband` | org の全座席を停止し組織を解散。 | `ralph org disband --org-id X` |
 | `report` | manifest + receipts から編成履歴を `docs/reports/org-manifest-<org_id>-<date>.md` に書き出す。 | `ralph org report --org-id X` |
+| `watch` | パルス層 Watchdog を起動(決定論監視: budget 自動遮断・stall/生存/スコープ変更の ALERT・デッドマン人間エスカレーション。`--once` で 1 サイクル)。意味判定はトリガー時のみオンデマンド LLM(watcher_model)。 | `ralph org watch --org-id X` |
 | `start` | headless lead 座席を spawn する糖衣(`spawn --role lead` 相当。`lead.md` 雛形にタスクを展開)。lead も他の座席と同じ AC-2b ゲートの対象(autonomous 既定では `--scope` 必須)。 | `ralph org start --org-id X --cwd . --scope "org-a 全体の編成・統括" "<task>"` |
 
 ## 編成パターン
@@ -139,6 +141,9 @@ EVIDENCE: docs/reports/self-review-foo.md
   出力に記録され、事後に監査できる。
 - 座席には有界タイムアウト(`--timeout-ms`)を必ず設定する(既定値あり)。
   無期限待機は避ける。
+- 長時間運用では `ralph org watch --org-id <id>` を並走させる(budget の
+  自動遮断・停滞/生存/スコープ変更の ALERT・デッドマン時の人間エスカレー
+  ション)。watch の通知は typed `ALERT` として lead に届く。
 - タスク終了時は必ず: 各座席を `stop` → 組織を `disband` →
   `ralph org report --org-id <id>` で成果物化 → herdr workspace / agmsg
   team に残留がないか確認、の順で締める。座席を spawn したまま放置しない。

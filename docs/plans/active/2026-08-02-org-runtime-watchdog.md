@@ -119,11 +119,19 @@ org runtime PR④: Watchdog 二層を実装する。パルス層(決定論タイ
 - watcher 判定 JSON のスキーマ詳細(実装時に確定、protocol とは独立)。
 - 遮断猶予(1 interval)の要否 — 実装時判断。
 
+## Implementation notes (deviations)
+
+- **実機スモーク発見 #1(ALERT 未配送)**: sendAlert が座席操作用 `Send` 動詞を使っており、lead が座席でない org(現セッション昇格型)では ALERT がサイレントに落ちていた(attempt 1 で agmsg 履歴 0 件)。identity レベルの `Agmsg.Send`(`SendWatchdogAlert` に集約)へ修正(7101351)。attempt 2 で watchdog→lead の ALERT 2 件配送を実機確認。
+- **実機スモーク発見 #2(watcher タイムアウト不足)**: interval 由来の 10 秒では実 `claude -p` が完走しない。watcher は非同期 single-flight でパルスは構造的に保護済みのため、interval 非依存の固定 60 秒(テスト用 seam 変数)に変更(7101351)。attempt 2 で haiku が `verdict=normal` を実判定。
+- **codex 権限プローブ(AC-8)**: 対話モードに `-s/--sandbox <MODE>` と `-a/--ask-for-approval <POLICY>` の存在を実機確認。マッピングは `[org.permissions] codex_verified = true` の明示解除に限り有効(既定 fail-closed 維持)。ライブ座席での最終検証は運用者の初回 codex 運用時。
+- **スモーク成立(AC-10)**: 1 分 budget 座席が `observed=1m0s` ちょうどで自動遮断(Reason 完全監査)、stall→watcher 実判定、デッドマン発火(escalations.jsonl+stderr)、alert_id での dedupe、watch-status heartbeat、いずれも実機確認。証拠 docs/evidence/org-watchdog-smoke-2026-08-02.txt($HOME 赤入れ適用)。
+
 ## Progress checklist
 
-- [ ] Plan reviewed
+- [x] Plan reviewed
 - [x] Branch created (feat/org-runtime-watchdog)
-- [ ] Implementation started
+- [x] Implementation started
+- [x] Implementation complete (Slices 1-5: f938413 / 274ca41 / ea75adc+611b14e / 63313a5+00378d1 / 7101351+smoke)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created

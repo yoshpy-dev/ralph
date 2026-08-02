@@ -635,7 +635,7 @@ func (w *watchRun) sendAlert(ctx context.Context, status *watchStatusFile, orgID
 	}
 	w.ensureWatchdogJoined(ctx, status, orgID)
 	if err := w.org.SendWatchdogAlert(ctx, orgID, message); err != nil {
-		fmt.Fprintf(w.stderr, "watchdog: failed to ALERT lead for org %q condition %q: %v\n", orgID, condType, err)
+		_, _ = fmt.Fprintf(w.stderr, "watchdog: failed to ALERT lead for org %q condition %q: %v\n", orgID, condType, err)
 	}
 
 	rr, _ := w.org.Manifest.Read()
