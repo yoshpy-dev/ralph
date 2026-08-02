@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -1494,6 +1495,60 @@ func TestOrgStart_RequiresOrgID(t *testing.T) {
 	out, err := runOrgCmd(t, "start", "--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(), "task text")
 	if err == nil {
 		t.Fatalf("expected non-zero exit for a missing --org-id, output: %s", out)
+	}
+}
+
+// TestOrgWatch_RequiresOrgID pins the same --org-id persistent-flag gate
+// (requireOrgID) applying to the new `watch` subcommand.
+func TestOrgWatch_RequiresOrgID(t *testing.T) {
+	out, err := runOrgCmd(t, "watch", "--once")
+	if err == nil {
+		t.Fatalf("expected non-zero exit for a missing --org-id, output: %s", out)
+	}
+	if !strings.Contains(err.Error(), "--org-id") {
+		t.Errorf("expected error to mention --org-id, got: %v", err)
+	}
+}
+
+// TestOrgWatch_Once_RunsExactlyOneCycleAndWritesStatus is the AC-3/--once
+// CLI smoke: one pulse cycle runs against a real (stub) herdr/agmsg PATH and
+// exits zero, having written watch-status.json (cycles=1) to the resolved
+// state directory alongside manifest.jsonl.
+func TestOrgWatch_Once_RunsExactlyOneCycleAndWritesStatus(t *testing.T) {
+	setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	if _, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
+		"--state-dir", stateDir,
+	); err != nil {
+		t.Fatalf("spawn failed: %v", err)
+	}
+
+	out, err := runOrgCmd(t, "watch", "--org-id", "org-a", "--once", "--state-dir", stateDir)
+	if err != nil {
+		t.Fatalf("watch --once failed: %v (output: %s)", err, out)
+	}
+	if !strings.Contains(out, "watching org \"org-a\"") {
+		t.Errorf("expected watch banner in output, got: %s", out)
+	}
+
+	statusPath := filepath.Join(stateDir, "watch-status.json")
+	data, err := os.ReadFile(statusPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", statusPath, err)
+	}
+	var status struct {
+		OrgID  string `json:"org_id"`
+		Cycles int    `json:"cycles"`
+	}
+	if err := json.Unmarshal(data, &status); err != nil {
+		t.Fatalf("parse %s: %v", statusPath, err)
+	}
+	if status.OrgID != "org-a" || status.Cycles != 1 {
+		t.Fatalf("expected org_id=org-a cycles=1 after --once, got %+v (raw: %s)", status, data)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -47,6 +48,7 @@ func newOrgCmd() *cobra.Command {
 		newOrgStatusCmd(&orgID, &stateDir, &configPath),
 		newOrgDisbandCmd(&orgID, &stateDir, &configPath),
 		newOrgReportCmd(&orgID, &stateDir, &configPath),
+		newOrgWatchCmd(&orgID, &stateDir, &configPath),
 	)
 
 	return cmd
@@ -617,6 +619,62 @@ func newOrgReportCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&outDir, "out", "", "output directory for the report (default: docs/reports)")
+
+	return cmd
+}
+
+// newOrgWatchCmd wires `ralph org watch` (PR④ pulse layer, AC-3/3b/3c/4/5):
+// a deterministic, interval-driven condition loop over (*org.Org).RunWatch.
+// All condition evaluation, budget-cutoff, ALERT dedupe, and deadman
+// escalation logic lives in internal/org/watch.go -- this command resolves
+// the state directory (the same one manifest/receipts already live in, via
+// org.ResolveOrgStateDir) and wires flags through to org.WatchParams.
+func newOrgWatchCmd(orgID, stateDir, configPath *string) *cobra.Command {
+	var (
+		intervalSeconds int
+		once            bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "watch",
+		Short: "Run the deterministic pulse-layer watchdog for an org",
+		Long: "ralph org watch evaluates watch conditions every --interval-seconds\n" +
+			"(default: [org.watchdog].interval_seconds) for --org-id: seat/org\n" +
+			"wall-clock budget cutoff (auto Stop, the same verb `ralph org stop`\n" +
+			"uses -- StopParams.Reason records the condition/threshold/observed\n" +
+			"value), heartbeat-stall / process-liveness / worktree-scope-change\n" +
+			"ALERTs sent to the lead seat, and a deadman escalation\n" +
+			"(<state-dir>/escalations.jsonl + stderr banner + best-effort darwin\n" +
+			"notification) when the lead does not respond within\n" +
+			"[org].deadman_minutes. Pass --once to run exactly one cycle and exit\n" +
+			"(useful for cron/smoke); the default loops until the command's\n" +
+			"context is done (e.g. SIGINT).",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireOrgID(*orgID); err != nil {
+				return err
+			}
+			rt, err := newOrgRuntime(cmd, *stateDir, *configPath)
+			if err != nil {
+				return err
+			}
+			resolvedStateDir, _ := org.ResolveOrgStateDir(*stateDir, cmd.Flags().Changed("state-dir"))
+			cycles := 0
+			if once {
+				cycles = 1
+			}
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "watching org %q (interval-seconds=%d once=%t state-dir=%s)\n",
+				*orgID, intervalSeconds, once, resolvedStateDir)
+			return rt.RunWatch(cmd.Context(), org.WatchParams{
+				OrgID:     *orgID,
+				Interval:  time.Duration(intervalSeconds) * time.Second,
+				Cycles:    cycles,
+				StatusDir: resolvedStateDir,
+			}, org.WatchHooks{})
+		},
+	}
+
+	cmd.Flags().IntVar(&intervalSeconds, "interval-seconds", 0, "pulse cycle interval in seconds (default: [org.watchdog].interval_seconds)")
+	cmd.Flags().BoolVar(&once, "once", false, "run exactly one cycle and exit")
 
 	return cmd
 }
