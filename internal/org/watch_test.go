@@ -127,6 +127,8 @@ type fakeWatchAgmsg struct {
 	HistorySeq map[string][]string
 
 	joinCalls []watchJoinCall
+	sendCalls []watchSendCall
+	sendErr   error
 	leaveErr  error
 }
 
@@ -134,7 +136,22 @@ type watchJoinCall struct {
 	team, agentID, agmsgType, projectPath string
 }
 
-func (f *fakeWatchAgmsg) Send(_ context.Context, _, _, _, _ string) error { return nil }
+// watchSendCall records one identity-level Agmsg.Send call -- this is what
+// every ALERT-delivery assertion in this file now inspects (Bug 1 fix: the
+// pulse layer and the on-demand watcher both send ALERTs via Agmsg.Send from
+// the "watchdog" identity to "lead", not via the seat-steering Send verb's
+// PaneSendText, since verb-Send silently drops the message when no lead SEAT
+// was ever spawned -- the normal session-promoted-lead org shape).
+type watchSendCall struct {
+	team, from, to, message string
+}
+
+func (f *fakeWatchAgmsg) Send(_ context.Context, team, from, to, message string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.sendCalls = append(f.sendCalls, watchSendCall{team: team, from: from, to: to, message: message})
+	return f.sendErr
+}
 
 func (f *fakeWatchAgmsg) Join(_ context.Context, team, agentID, agmsgType, projectPath string) error {
 	f.mu.Lock()
@@ -145,6 +162,22 @@ func (f *fakeWatchAgmsg) Join(_ context.Context, team, agentID, agmsgType, proje
 
 func (f *fakeWatchAgmsg) Leave(_ context.Context, _, _ string) error {
 	return f.leaveErr
+}
+
+// watchdogAlerts filters a.sendCalls down to messages sent from the
+// watchdog identity -- Spawn's own HELLO Send (Agmsg.Send from the spawning
+// SeatID to lead) shares the same fake/log, so ALERT-count assertions must
+// not conflate the two.
+func watchdogAlerts(a *fakeWatchAgmsg) []watchSendCall {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	var out []watchSendCall
+	for _, c := range a.sendCalls {
+		if c.from == watchdogIdentity {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 func (f *fakeWatchAgmsg) History(_ context.Context, team, _ string, _ int) (string, error) {
@@ -222,39 +255,6 @@ func watchSpawnParams(orgID, seatID, role string) SpawnParams {
 	}
 }
 
-// spawnLead spawns the org's lead seat (SeatID/Role == LeadIdentity) so
-// (*Org).Send -- and therefore sendAlert -- can find a real seat with a
-// pane_id to target: Send resolves its "To" argument via the manifest
-// roster and types into that seat's herdr pane, so any ALERT-generating
-// test that wants to observe the actual PaneSendText call (rather than only
-// the dedupe bookkeeping) needs a lead seat on record first.
-//
-// spawnLead immediately Stops the lead seat again: Stop carries the seat's
-// pane_id forward onto the `stopped` event (findSeat/Send do not require
-// Active), so Send still resolves it, but an inactive lead never enters
-// evaluateCycle's activeSeats loop -- keeping every per-seat pulse
-// condition test focused on the seat(s) actually under test, rather than
-// also having to account for the lead seat's own budget/stall/liveness/
-// scope-change conditions tripping independently.
-func spawnLead(t *testing.T, o *Org, orgID string) {
-	t.Helper()
-	if r := o.Spawn(watchSpawnParams(orgID, LeadIdentity, LeadIdentity)); r.Outcome != SpawnOutcomeSpawned {
-		t.Fatalf("spawn lead failed: %+v", r)
-	}
-	if r := o.Stop(StopParams{OrgID: orgID, Seat: LeadIdentity}); r.Err != nil {
-		t.Fatalf("stop lead (to keep it inactive but addressable) failed: %v", r.Err)
-	}
-	// This fixture-setup Stop call itself records a "C-c" PaneSendKeys call
-	// -- reset the fake's call log so it doesn't inflate the actual test's
-	// own Stop/Send-count assertions below.
-	if h, ok := o.Herdr.(*fakeWatchHerdr); ok {
-		h.mu.Lock()
-		h.sendKeysCalls = nil
-		h.paneSendTextCall = nil
-		h.mu.Unlock()
-	}
-}
-
 // newTestWatchRun builds a watchRun wired to o/gitStatus/escalateFn, with
 // its own scratch StatusDir -- the test drives evaluateCycle directly
 // (rather than going through RunWatch's real select/sleep loop) so a
@@ -282,9 +282,10 @@ func newTestWatchRun(o *Org, gitStatus GitStatusFunc, escalateFn EscalateFunc, s
 // --- AC-3: seat wall-clock budget cutoff ------------------------------------
 
 func TestWatch_SeatBudgetCutoff_AtBoundary_NotBeforeThenCutoffThenDeduped(t *testing.T) {
-	o, h, _, clk := testWatchOrg(t)
+	o, h, a, clk := testWatchOrg(t)
 	o.Config.Watchdog.StallMinutes = 10000 // keep the stall condition out of the picture
-	spawnLead(t, o, "org-a")
+	// Deliberately no lead seat spawned -- ALERT delivery must not depend on
+	// one (Bug 1 regression; see the ALERT assertions below via watchdogAlerts(a)).
 	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("spawn failed: %+v", r)
 	}
@@ -333,14 +334,18 @@ func TestWatch_SeatBudgetCutoff_AtBoundary_NotBeforeThenCutoffThenDeduped(t *tes
 	if n := h.countKeys("C-c"); n != 1 {
 		t.Fatalf("expected exactly 1 Stop attempt (C-c), got %d", n)
 	}
-	if n := len(h.paneSendTextCall); n != 1 {
-		t.Fatalf("expected exactly 1 ALERT sent, got %d: %+v", n, h.paneSendTextCall)
+	alerts := watchdogAlerts(a)
+	if n := len(alerts); n != 1 {
+		t.Fatalf("expected exactly 1 ALERT sent, got %d: %+v", n, alerts)
 	}
-	if err := protocol.ValidateText(h.paneSendTextCall[0].text, 0); err != nil {
-		t.Errorf("expected the generated ALERT to be protocol-conformant, got %v (text=%q)", err, h.paneSendTextCall[0].text)
+	if alerts[0].from != watchdogIdentity || alerts[0].to != LeadIdentity {
+		t.Errorf("expected the ALERT to be sent from %q to %q, got from=%q to=%q", watchdogIdentity, LeadIdentity, alerts[0].from, alerts[0].to)
 	}
-	if !strings.Contains(h.paneSendTextCall[0].text, "TYPE: ALERT") || !strings.Contains(h.paneSendTextCall[0].text, "watchdog_budget_cutoff") {
-		t.Errorf("expected ALERT body to carry TYPE: ALERT and the cutoff reason, got %q", h.paneSendTextCall[0].text)
+	if err := protocol.ValidateText(alerts[0].message, 0); err != nil {
+		t.Errorf("expected the generated ALERT to be protocol-conformant, got %v (text=%q)", err, alerts[0].message)
+	}
+	if !strings.Contains(alerts[0].message, "TYPE: ALERT") || !strings.Contains(alerts[0].message, "watchdog_budget_cutoff") {
+		t.Errorf("expected ALERT body to carry TYPE: ALERT and the cutoff reason, got %q", alerts[0].message)
 	}
 
 	// Cycle 4 and 5 (3 total cycles past the cutoff): dedupe -- no second
@@ -354,7 +359,7 @@ func TestWatch_SeatBudgetCutoff_AtBoundary_NotBeforeThenCutoffThenDeduped(t *tes
 	if n := h.countKeys("C-c"); n != 1 {
 		t.Fatalf("expected still exactly 1 Stop attempt after 2 more cycles (dedupe), got %d", n)
 	}
-	if n := len(h.paneSendTextCall); n != 1 {
+	if n := len(watchdogAlerts(a)); n != 1 {
 		t.Fatalf("expected still exactly 1 ALERT after 2 more cycles (dedupe), got %d", n)
 	}
 }
@@ -362,10 +367,11 @@ func TestWatch_SeatBudgetCutoff_AtBoundary_NotBeforeThenCutoffThenDeduped(t *tes
 // --- AC-3b: org total wall-clock budget cutoff ------------------------------
 
 func TestWatch_TotalBudgetCutoff_CutsAllActiveSeats_OneOrgLevelAlert(t *testing.T) {
-	o, h, _, clk := testWatchOrg(t)
+	o, h, a, clk := testWatchOrg(t)
 	o.Config.Budget.TotalWallClockMinutes = 5
 	o.Config.Budget.SeatWallClockMinutes = 1000 // avoid seat-level cutoff firing first
-	spawnLead(t, o, "org-a")
+	// Deliberately no lead seat spawned -- ALERT delivery must not depend on
+	// one (Bug 1 regression).
 
 	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("spawn seat-1 failed: %+v", r)
@@ -402,11 +408,11 @@ func TestWatch_TotalBudgetCutoff_CutsAllActiveSeats_OneOrgLevelAlert(t *testing.
 	if n := h.countKeys("C-c"); n != 2 {
 		t.Fatalf("expected exactly 2 Stop attempts (one per seat), got %d", n)
 	}
-	if n := len(h.paneSendTextCall); n != 1 {
-		t.Fatalf("expected exactly 1 org-level ALERT, got %d: %+v", n, h.paneSendTextCall)
+	if n := len(watchdogAlerts(a)); n != 1 {
+		t.Fatalf("expected exactly 1 org-level ALERT, got %d: %+v", n, watchdogAlerts(a))
 	}
-	if !strings.Contains(h.paneSendTextCall[0].text, "CONDITION: total_budget") {
-		t.Errorf("expected the org-level ALERT to carry CONDITION: total_budget, got %q", h.paneSendTextCall[0].text)
+	if !strings.Contains(watchdogAlerts(a)[0].message, "CONDITION: total_budget") {
+		t.Errorf("expected the org-level ALERT to carry CONDITION: total_budget, got %q", watchdogAlerts(a)[0].message)
 	}
 
 	// A further cycle must not re-cut or re-alert (AC-3c, cutoff never
@@ -418,7 +424,7 @@ func TestWatch_TotalBudgetCutoff_CutsAllActiveSeats_OneOrgLevelAlert(t *testing.
 	if n := h.countKeys("C-c"); n != 2 {
 		t.Fatalf("expected still exactly 2 Stop attempts after a further cycle, got %d", n)
 	}
-	if n := len(h.paneSendTextCall); n != 1 {
+	if n := len(watchdogAlerts(a)); n != 1 {
 		t.Fatalf("expected still exactly 1 org-level ALERT after a further cycle, got %d", n)
 	}
 }
@@ -426,10 +432,11 @@ func TestWatch_TotalBudgetCutoff_CutsAllActiveSeats_OneOrgLevelAlert(t *testing.
 // --- AC-4: heartbeat stall (ALERT, no cutoff, recovers, re-fires) ----------
 
 func TestWatch_Stall_AlertsNoCutoff_RecoversAndRefires(t *testing.T) {
-	o, h, _, clk := testWatchOrg(t)
+	o, h, a, clk := testWatchOrg(t)
 	o.Config.Budget.SeatWallClockMinutes = 1000 // keep budget out of the picture
 	o.Config.Watchdog.StallMinutes = 5
-	spawnLead(t, o, "org-a")
+	// Deliberately no lead seat spawned -- ALERT delivery must not depend on
+	// one (Bug 1 regression).
 
 	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("spawn failed: %+v", r)
@@ -447,7 +454,7 @@ func TestWatch_Stall_AlertsNoCutoff_RecoversAndRefires(t *testing.T) {
 	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
 		t.Fatalf("cycle 1: %v", err)
 	}
-	if n := len(h.paneSendTextCall); n != 0 {
+	if n := len(watchdogAlerts(a)); n != 0 {
 		t.Fatalf("expected no ALERT on the baseline cycle, got %d", n)
 	}
 
@@ -457,11 +464,11 @@ func TestWatch_Stall_AlertsNoCutoff_RecoversAndRefires(t *testing.T) {
 	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
 		t.Fatalf("cycle 2: %v", err)
 	}
-	if n := len(h.paneSendTextCall); n != 1 {
-		t.Fatalf("expected exactly 1 stall ALERT after cycle 2, got %d: %+v", n, h.paneSendTextCall)
+	if n := len(watchdogAlerts(a)); n != 1 {
+		t.Fatalf("expected exactly 1 stall ALERT after cycle 2, got %d: %+v", n, watchdogAlerts(a))
 	}
-	if !strings.Contains(h.paneSendTextCall[0].text, "CONDITION: stall") {
-		t.Errorf("expected CONDITION: stall in ALERT body, got %q", h.paneSendTextCall[0].text)
+	if !strings.Contains(watchdogAlerts(a)[0].message, "CONDITION: stall") {
+		t.Errorf("expected CONDITION: stall in ALERT body, got %q", watchdogAlerts(a)[0].message)
 	}
 	if n := h.countKeys("C-c"); n != 0 {
 		t.Errorf("stall must never cut off the seat, got %d Stop attempts", n)
@@ -472,7 +479,7 @@ func TestWatch_Stall_AlertsNoCutoff_RecoversAndRefires(t *testing.T) {
 	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
 		t.Fatalf("cycle 3: %v", err)
 	}
-	if n := len(h.paneSendTextCall); n != 1 {
+	if n := len(watchdogAlerts(a)); n != 1 {
 		t.Fatalf("expected still exactly 1 ALERT (dedupe) after cycle 3, got %d", n)
 	}
 
@@ -481,7 +488,7 @@ func TestWatch_Stall_AlertsNoCutoff_RecoversAndRefires(t *testing.T) {
 	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
 		t.Fatalf("cycle 4: %v", err)
 	}
-	if n := len(h.paneSendTextCall); n != 1 {
+	if n := len(watchdogAlerts(a)); n != 1 {
 		t.Fatalf("expected still exactly 1 ALERT after the recovery cycle, got %d", n)
 	}
 
@@ -497,16 +504,17 @@ func TestWatch_Stall_AlertsNoCutoff_RecoversAndRefires(t *testing.T) {
 	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
 		t.Fatalf("cycle 6: %v", err)
 	}
-	if n := len(h.paneSendTextCall); n != 2 {
-		t.Fatalf("expected a second ALERT after re-stalling, got %d: %+v", n, h.paneSendTextCall)
+	if n := len(watchdogAlerts(a)); n != 2 {
+		t.Fatalf("expected a second ALERT after re-stalling, got %d: %+v", n, watchdogAlerts(a))
 	}
 }
 
 // --- AC-4: process liveness --------------------------------------------------
 
 func TestWatch_Liveness_AlertOnAgentGetError(t *testing.T) {
-	o, h, _, _ := testWatchOrg(t)
-	spawnLead(t, o, "org-a")
+	o, h, a, _ := testWatchOrg(t)
+	// Deliberately no lead seat spawned -- ALERT delivery must not depend on
+	// one (Bug 1 regression).
 	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("spawn failed: %+v", r)
 	}
@@ -522,11 +530,11 @@ func TestWatch_Liveness_AlertOnAgentGetError(t *testing.T) {
 	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
 		t.Fatalf("evaluateCycle: %v", err)
 	}
-	if n := len(h.paneSendTextCall); n != 1 {
-		t.Fatalf("expected exactly 1 liveness ALERT, got %d: %+v", n, h.paneSendTextCall)
+	if n := len(watchdogAlerts(a)); n != 1 {
+		t.Fatalf("expected exactly 1 liveness ALERT, got %d: %+v", n, watchdogAlerts(a))
 	}
-	if !strings.Contains(h.paneSendTextCall[0].text, "CONDITION: liveness") {
-		t.Errorf("expected CONDITION: liveness in ALERT body, got %q", h.paneSendTextCall[0].text)
+	if !strings.Contains(watchdogAlerts(a)[0].message, "CONDITION: liveness") {
+		t.Errorf("expected CONDITION: liveness in ALERT body, got %q", watchdogAlerts(a)[0].message)
 	}
 	if n := h.countKeys("C-c"); n != 0 {
 		t.Errorf("liveness must never cut off the seat, got %d Stop attempts", n)
@@ -536,16 +544,16 @@ func TestWatch_Liveness_AlertOnAgentGetError(t *testing.T) {
 // --- AC-4: scope change ------------------------------------------------------
 
 func TestWatch_ScopeChange_AlertCarriesScopeText_NoCutoff(t *testing.T) {
-	o, h, _, _ := testWatchOrg(t)
-	spawnLead(t, o, "org-a")
+	o, h, a, _ := testWatchOrg(t)
+	// Deliberately no lead seat spawned -- ALERT delivery must not depend on
+	// one (Bug 1 regression).
 	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("spawn failed: %+v", r)
 	}
 
-	// Keyed by cwd (not a shared counter) so the lead seat's own worktree
-	// (evaluated every cycle alongside seat-1's) never independently reports
-	// a scope change -- only seat-1's cwd flips from clean to dirty on its
-	// second probe.
+	// Keyed by cwd (not a shared counter), matching the other per-seat pulse
+	// condition tests' convention -- only seat-1's cwd flips from clean to
+	// dirty on its second probe.
 	seat1Cwd := watchSpawnParams("org-a", "seat-1", "worker").Cwd
 	calls := map[string]int{}
 	gitStatus := func(cwd string) (string, error) {
@@ -565,17 +573,17 @@ func TestWatch_ScopeChange_AlertCarriesScopeText_NoCutoff(t *testing.T) {
 	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
 		t.Fatalf("cycle 1 (baseline): %v", err)
 	}
-	if n := len(h.paneSendTextCall); n != 0 {
+	if n := len(watchdogAlerts(a)); n != 0 {
 		t.Fatalf("expected no ALERT on the baseline cycle, got %d", n)
 	}
 
 	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
 		t.Fatalf("cycle 2 (scope changed): %v", err)
 	}
-	if n := len(h.paneSendTextCall); n != 1 {
-		t.Fatalf("expected exactly 1 scope-change ALERT, got %d: %+v", n, h.paneSendTextCall)
+	if n := len(watchdogAlerts(a)); n != 1 {
+		t.Fatalf("expected exactly 1 scope-change ALERT, got %d: %+v", n, watchdogAlerts(a))
 	}
-	body := h.paneSendTextCall[0].text
+	body := watchdogAlerts(a)[0].message
 	if !strings.Contains(body, "CONDITION: scope_change") {
 		t.Errorf("expected CONDITION: scope_change in ALERT body, got %q", body)
 	}

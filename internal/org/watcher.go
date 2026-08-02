@@ -21,9 +21,16 @@ import (
 // wiring that seam (internal/cli/org.go's `ralph org watch` command) is
 // responsible for running RunWatcher in its own goroutine and for treating
 // an abnormal verdict as an ALERT-worthy finding; RunWatcher itself never
-// sends a message and never blocks the pulse loop by design (its own ctx
-// timeout, watcherTimeout, is always kept strictly below one pulse
-// interval).
+// sends a message and never blocks the pulse loop by design. Its own ctx
+// timeout (watcherInvokeTimeout, a fixed bound) does not need to stay below
+// one pulse interval: newWatchdogHooks always runs RunWatcher in its own
+// goroutine behind a single-flight guard (internal/cli/org.go), so a slow
+// judgment call can never delay or overlap the pulse loop that triggered it
+// regardless of how long it takes relative to the interval -- the interval-
+// derived timeout this constant replaced was an obsolete constraint from
+// before that async/single-flight structure existed, and was too short for
+// a real `claude -p` invocation in practice (live smoke: a 10s timeout at a
+// 15s interval produced "watcher_error: timed out" on every real call).
 
 // Watcher verdict enum values (AC-6). An abnormal verdict (anything other
 // than WatcherVerdictNormal) is the caller's cue to ALERT lead -- RunWatcher
@@ -57,27 +64,20 @@ const watcherPaneTailLines = 40
 // already returns events in file/chronological order).
 const watcherManifestEventLimit = 10
 
-// watcherMaxTimeout is the absolute ceiling on the on-demand claude -p
-// invocation's context timeout, independent of how large cfg.IntervalSeconds
-// is (Codex advisory 3 -- the watcher must never run so long it starves the
-// pulse loop's own cadence, even if an operator sets a very long interval).
-const watcherMaxTimeout = 60 * time.Second
-
-// watcherTimeoutSafetyMargin is subtracted from cfg.IntervalSeconds so the
-// watcher's own timeout always falls strictly inside one pulse interval
-// (Codex advisory 3: "timeout < interval").
-const watcherTimeoutSafetyMargin = 5 * time.Second
+// watcherInvokeTimeout is the fixed context timeout for one on-demand
+// claude -p invocation (RunWatcher), independent of cfg.IntervalSeconds --
+// see RunWatcher's package note for why interval-independence is safe here
+// (async + single-flight at the caller). A package-level var, not a const,
+// so tests can shrink it (the absPath/afterStaleCompensation seam
+// precedent, spawn.go) to keep a hanging-invocation test fast without
+// waiting out the real 60s bound.
+var watcherInvokeTimeout = 60 * time.Second
 
 // watcherWaitDelay bounds how long realClaudeInvoke's cmd.Run() will wait
 // for stdout/stderr pipe-copying to finish after ctx has already killed the
 // process -- see realClaudeInvoke's doc comment for the grandchild-pipe
 // hang this closes off.
 const watcherWaitDelay = 1 * time.Second
-
-// watcherFallbackIntervalSeconds mirrors RunWatch's own 30s fallback
-// (watch.go's RunWatch) for the rare case RunWatcher is invoked with a
-// zero-value cfg.IntervalSeconds.
-const watcherFallbackIntervalSeconds = 30
 
 // watcherReceiptRole tags every Receipt this file appends (o.recordWatcherReceipt),
 // so a receipts reader (e.g. `ralph insights`) can separate on-demand
@@ -121,29 +121,6 @@ type WatcherVerdict struct {
 type claudeEnvelope struct {
 	Result string `json:"result"`
 	Model  string `json:"model,omitempty"`
-}
-
-// watcherTimeout returns the context timeout for one RunWatcher invocation:
-// min(cfg.IntervalSeconds-watcherTimeoutSafetyMargin, watcherMaxTimeout),
-// floored to a small positive duration so a very short interval still
-// yields a usable (if tight) bound rather than a non-positive timeout.
-func watcherTimeout(cfg config.OrgWatchdogConfig) time.Duration {
-	intervalSeconds := cfg.IntervalSeconds
-	if intervalSeconds <= 0 {
-		intervalSeconds = watcherFallbackIntervalSeconds
-	}
-	d := min(time.Duration(intervalSeconds)*time.Second-watcherTimeoutSafetyMargin, watcherMaxTimeout)
-	if d <= 0 {
-		// intervalSeconds is too small for the safety margin to leave any
-		// headroom (e.g. a 1s interval) -- fall back to half the interval so
-		// the timeout still stays strictly below it, rather than clamping to
-		// a fixed floor that could equal or exceed a very small interval.
-		d = time.Duration(intervalSeconds) * time.Second / 2
-	}
-	if d <= 0 {
-		d = 100 * time.Millisecond
-	}
-	return d
 }
 
 // fencedJSONPattern matches a fenced code block (```json ... ``` or
@@ -294,7 +271,7 @@ func realClaudeInvoke(ctx context.Context, model, prompt string) (string, error)
 // verdict to act on" -- never as itself evidence of an abnormal seat; a
 // broken judge is not evidence of a broken seat.
 func (o *Org) RunWatcher(ctx context.Context, cfg config.OrgWatchdogConfig, p WatcherParams) (WatcherVerdict, error) {
-	ctx, cancel := context.WithTimeout(ctx, watcherTimeout(cfg))
+	ctx, cancel := context.WithTimeout(ctx, watcherInvokeTimeout)
 	defer cancel()
 
 	var paneTail string

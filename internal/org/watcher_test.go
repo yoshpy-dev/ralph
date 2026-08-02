@@ -221,16 +221,19 @@ func TestRunWatcher_UnknownVerdictValue_TreatedAsMalformed(t *testing.T) {
 }
 
 // TestRunWatcher_Timeout_BoundedAndWatcherErrorReceipt pins Codex advisory
-// finding 3: a hanging claude invocation is bounded by watcherTimeout (never
-// waits the full pulse interval), yields an error, and records a
-// watcher_error receipt.
+// finding 3: a hanging claude invocation is bounded by watcherInvokeTimeout,
+// yields an error, and records a watcher_error receipt. watcherInvokeTimeout
+// is shrunk for the duration of this test (the absPath/afterStaleCompensation
+// seam precedent, spawn.go) so the test doesn't wait out the real 60s bound.
 func TestRunWatcher_Timeout_BoundedAndWatcherErrorReceipt(t *testing.T) {
 	writeClaudeStub(t, "#!/bin/sh\nsleep 5\n")
 
+	orig := watcherInvokeTimeout
+	watcherInvokeTimeout = 1 * time.Second
+	t.Cleanup(func() { watcherInvokeTimeout = orig })
+
 	o, _, _, _ := testWatchOrg(t)
-	// IntervalSeconds=6 -> watcherTimeout = 6s-5s = 1s, comfortably below
-	// both the stub's 5s sleep and this test's own patience.
-	cfg := config.OrgWatchdogConfig{IntervalSeconds: 6, WatcherModel: "haiku", WatcherEnabled: true}
+	cfg := watcherTestCfg()
 
 	start := time.Now()
 	_, err := o.RunWatcher(context.Background(), cfg, WatcherParams{
@@ -248,6 +251,39 @@ func TestRunWatcher_Timeout_BoundedAndWatcherErrorReceipt(t *testing.T) {
 	rec := lastReceipt(t, o)
 	if rec.Reason != watcherErrorReason {
 		t.Errorf("receipt.Reason = %q, want %q", rec.Reason, watcherErrorReason)
+	}
+}
+
+// TestRunWatcher_TimeoutIndependentOfSmallInterval is the Bug 2 regression:
+// with the interval-derived timeout, a small cfg.IntervalSeconds (e.g. 1, as
+// live smoke used a 15s interval against a 10s derived timeout and still
+// failed real claude -p calls) would starve RunWatcher's own context well
+// below what a real invocation needs. watcherInvokeTimeout is now a fixed
+// bound independent of IntervalSeconds (safe because the caller runs
+// RunWatcher async + single-flight -- see the package note), so a claude
+// stub that takes longer than a tiny interval still succeeds.
+func TestRunWatcher_TimeoutIndependentOfSmallInterval(t *testing.T) {
+	writeClaudeStub(t, "#!/bin/sh\n"+
+		"sleep 1\n"+
+		"cat <<'EOF'\n"+
+		`{"result":"{\"verdict\":\"normal\",\"reason\":\"ok\"}"}`+"\n"+
+		"EOF\n")
+
+	orig := watcherInvokeTimeout
+	watcherInvokeTimeout = 5 * time.Second
+	t.Cleanup(func() { watcherInvokeTimeout = orig })
+
+	o, _, _, _ := testWatchOrg(t)
+	cfg := config.OrgWatchdogConfig{IntervalSeconds: 1, WatcherModel: "haiku", WatcherEnabled: true}
+
+	verdict, err := o.RunWatcher(context.Background(), cfg, WatcherParams{
+		OrgID: "org-a", SeatID: "seat-1", ConditionType: "stall", Evidence: "e",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error (interval should no longer bound the timeout): %v", err)
+	}
+	if verdict.Verdict != WatcherVerdictNormal {
+		t.Errorf("verdict = %q, want %q", verdict.Verdict, WatcherVerdictNormal)
 	}
 }
 
@@ -273,28 +309,12 @@ func TestRunWatcher_UnknownSeat_StillProceeds(t *testing.T) {
 	}
 }
 
-func TestWatcherTimeout_NeverExceedsInterval(t *testing.T) {
-	cases := []config.OrgWatchdogConfig{
-		{IntervalSeconds: 30},
-		{IntervalSeconds: 6},
-		{IntervalSeconds: 1},
-		{IntervalSeconds: 0}, // falls back to watcherFallbackIntervalSeconds
-		{IntervalSeconds: 300},
-	}
-	for _, cfg := range cases {
-		d := watcherTimeout(cfg)
-		if d <= 0 {
-			t.Errorf("watcherTimeout(%+v) = %v, want > 0", cfg, d)
-		}
-		if d > watcherMaxTimeout {
-			t.Errorf("watcherTimeout(%+v) = %v, want <= %v", cfg, d, watcherMaxTimeout)
-		}
-		intervalSeconds := cfg.IntervalSeconds
-		if intervalSeconds <= 0 {
-			intervalSeconds = watcherFallbackIntervalSeconds
-		}
-		if d >= time.Duration(intervalSeconds)*time.Second {
-			t.Errorf("watcherTimeout(%+v) = %v, want strictly less than the %ds interval", cfg, d, intervalSeconds)
-		}
+// TestWatcherInvokeTimeout_DefaultIsSixtySeconds pins the fixed bound itself
+// (distinct from the two RunWatcher behavioral tests above, which shrink it
+// via the test seam) so a future accidental edit to the default is caught
+// even by a test that never calls RunWatcher.
+func TestWatcherInvokeTimeout_DefaultIsSixtySeconds(t *testing.T) {
+	if watcherInvokeTimeout != 60*time.Second {
+		t.Errorf("watcherInvokeTimeout = %v, want 60s", watcherInvokeTimeout)
 	}
 }

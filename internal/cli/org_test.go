@@ -1577,9 +1577,11 @@ func writeClaudeStub(t *testing.T, script string) {
 // newWatchdogTestOrg builds an *org.Org wired the same way newOrgRuntime
 // does (real driver.ExecRunner adapters) but without needing a *cobra.Command
 // -- for tests exercising newWatchdogHooks directly, bypassing the full
-// `ralph org watch` command. The watcher layer is enabled with a short
-// IntervalSeconds so watcherTimeout (internal/org/watcher.go) stays small
-// and bounded for tests that deliberately hang the claude stub.
+// `ralph org watch` command. IntervalSeconds is set but no longer bounds
+// RunWatcher's own timeout (org.watcherInvokeTimeout, a fixed 60s var
+// independent of the interval -- see internal/org/watcher.go's package
+// note); tests that deliberately hang the claude stub shrink
+// org.watcherInvokeTimeout directly instead (internal/org/watcher_test.go).
 func newWatchdogTestOrg(t *testing.T, stateDir string) *org.Org {
 	t.Helper()
 	runner := driver.ExecRunner{}
@@ -1698,51 +1700,51 @@ func TestNewWatchdogHooks_SingleFlight_SecondTriggerSkippedWhileBusy(t *testing.
 
 // TestNewWatchdogHooks_AbnormalVerdict_SendsAlertToLead pins that an
 // abnormal verdict (anything but normal) is delivered to lead as a typed
-// ALERT via rt.Send -- observed here through the herdr stub's argv log,
-// since Send resolves the lead seat's pane and types the message into it.
+// ALERT via rt.SendWatchdogAlert -- identity-level Agmsg.Send from the
+// watchdog identity to lead, observed here through the agmsg send.sh stub's
+// argv log. Bug 1 regression: no lead SEAT is spawned at all (the normal
+// session-promoted-lead org shape -- only the lead agmsg identity itself
+// exists, registered via ensureLeadJoined at org-start time, never a spawned
+// SEAT). The old seat-steering Send verb resolved its To target via
+// findSeat, which fails for a non-existent "lead" seat and silently drops
+// the ALERT (live smoke: agmsg history had zero ALERTs while escalations
+// fired); identity-level Agmsg.Send bypasses that seat lookup entirely, so
+// the ALERT must still land here.
 func TestNewWatchdogHooks_AbnormalVerdict_SendsAlertToLead(t *testing.T) {
-	herdrLog, _ := setupOrgStubPATH(t)
+	_, agmsgLog := setupOrgStubPATH(t)
 	writeClaudeStub(t, "#!/bin/sh\n"+
 		"cat <<'EOF'\n"+
 		`{"result":"{\"verdict\":\"circular\",\"reason\":\"seat repeating the same edit\"}"}`+"\n"+
 		"EOF\n")
 
 	stateDir := t.TempDir()
-	if _, err := runOrgCmd(t,
-		"spawn", "--org-id", "org-a", "--id", org.LeadIdentity, "--role", org.LeadIdentity,
-		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
-		"--scope", "test-scope", "--state-dir", stateDir,
-	); err != nil {
-		t.Fatalf("spawn lead failed: %v", err)
-	}
-
 	rt := newWatchdogTestOrg(t, stateDir)
 	var stderr bytes.Buffer
 	hooks := newWatchdogHooks(rt, &stderr)
 
 	hooks.OnSemanticTrigger("org-a", "seat-1", "scope_change", "seat worktree changed")
 
-	// Wait for the ALERT's own Send call to reach the herdr stub (not just
+	// Wait for the ALERT's own Send call to reach the agmsg stub (not just
 	// RunWatcher's earlier receipt append) -- Send runs after RunWatcher
 	// returns, inside the same background goroutine.
 	waitForCondition(t, 4*time.Second, func() bool {
-		data, err := os.ReadFile(herdrLog)
+		data, err := os.ReadFile(agmsgLog)
 		return err == nil && strings.Contains(string(data), "TYPE: ALERT")
 	})
 
-	data, err := os.ReadFile(herdrLog)
+	data, err := os.ReadFile(agmsgLog)
 	if err != nil {
-		t.Fatalf("read herdr log: %v", err)
+		t.Fatalf("read agmsg log: %v", err)
 	}
 	log := string(data)
-	if !strings.Contains(log, "TYPE: ALERT") {
-		t.Errorf("expected an ALERT to be sent to lead, herdr log: %s", log)
+	if !strings.Contains(log, "watchdog lead TYPE: ALERT") {
+		t.Errorf("expected an ALERT sent from the watchdog identity to lead, agmsg log: %s", log)
 	}
 	if !strings.Contains(log, "CONDITION: watcher_scope_change") {
-		t.Errorf("expected the ALERT to record the watcher condition, herdr log: %s", log)
+		t.Errorf("expected the ALERT to record the watcher condition, agmsg log: %s", log)
 	}
 	if !strings.Contains(log, "verdict=circular") {
-		t.Errorf("expected the ALERT body to include the watcher's verdict, herdr log: %s", log)
+		t.Errorf("expected the ALERT body to include the watcher's verdict, agmsg log: %s", log)
 	}
 	if strings.Contains(stderr.String(), "watchdog:") {
 		t.Errorf("expected no watchdog error/skip messages on the happy path, got: %s", stderr.String())

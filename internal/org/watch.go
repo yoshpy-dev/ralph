@@ -590,6 +590,23 @@ func (w *watchRun) raiseOrClear(ctx context.Context, status *watchStatusFile, or
 	}
 }
 
+// SendWatchdogAlert sends message from the watchdogIdentity mechanism
+// identity to LeadIdentity over orgID's agmsg team, using Agmsg.Send
+// directly rather than the seat-steering Send verb (verbs.go). Send resolves
+// its To target as a spawned SEAT via findSeat, which fails -- silently
+// dropping the message -- in the normal "session-promoted lead" org shape
+// where no lead SEAT was ever spawned (only the lead identity itself,
+// registered via ensureLeadJoined/ensureWatchdogJoined's Join calls). Live
+// smoke (docs/plans/active/2026-08-02-org-runtime-watchdog.md) found zero
+// ALERTs reaching agmsg history under exactly that shape while escalations
+// still fired. Both this package's own pulse-layer sendAlert and
+// internal/cli/org.go's on-demand watcher-verdict ALERT path
+// (newWatchdogHooks) call this so ALERT delivery is identical regardless of
+// which layer produced the finding.
+func (o *Org) SendWatchdogAlert(ctx context.Context, orgID, message string) error {
+	return o.Agmsg.Send(ctx, agmsgTeam(orgID), watchdogIdentity, LeadIdentity, message)
+}
+
 // ensureWatchdogJoined best-effort-joins the "watchdog" mechanism identity
 // (see the const's doc comment) onto the org's agmsg team exactly once per
 // RunWatch's persisted status -- mirrors ensureLeadJoined's idempotent,
@@ -604,18 +621,22 @@ func (w *watchRun) ensureWatchdogJoined(ctx context.Context, status *watchStatus
 	status.WatchdogJoined = true
 }
 
-// sendAlert validates and sends one ALERT to lead (best-effort -- a Send
-// failure, e.g. the lead seat is not currently reachable, never aborts the
-// pulse cycle), then registers an AC-5 pending-alert deadman record
-// regardless of whether Send itself succeeded: the whole point of the
-// deadman clause is to catch the case where lead cannot be reached at all.
+// sendAlert validates and sends one ALERT to lead via the watchdog identity
+// (SendWatchdogAlert, not the seat-steering Send verb -- see that method's
+// doc comment for why) best-effort -- a Send failure, e.g. agmsg itself is
+// unreachable, never aborts the pulse cycle but is logged to w.stderr -- then
+// registers an AC-5 pending-alert deadman record regardless of whether Send
+// itself succeeded: the whole point of the deadman clause is to catch the
+// case where lead cannot be reached at all.
 func (w *watchRun) sendAlert(ctx context.Context, status *watchStatusFile, orgID, seatID, condType, message string, now time.Time) {
 	if err := protocol.ValidateText(message, protocol.DefaultMaxBodyChars); err != nil {
 		message = fmt.Sprintf("TYPE: ALERT\nORG_ID: %s\nCONDITION: %s\n\nwatchdog: message failed protocol validation: %v",
 			orgID, condType, err)
 	}
 	w.ensureWatchdogJoined(ctx, status, orgID)
-	_ = w.org.Send(SendParams{OrgID: orgID, To: LeadIdentity, Text: message})
+	if err := w.org.SendWatchdogAlert(ctx, orgID, message); err != nil {
+		fmt.Fprintf(w.stderr, "watchdog: failed to ALERT lead for org %q condition %q: %v\n", orgID, condType, err)
+	}
 
 	rr, _ := w.org.Manifest.Read()
 	alertID := fmt.Sprintf("%s@%d", conditionKey(orgID, seatID, condType), now.UnixNano())

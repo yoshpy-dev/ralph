@@ -701,9 +701,13 @@ func newOrgWatchCmd(orgID, stateDir, configPath *string) *cobra.Command {
 // concurrently).
 //
 // An abnormal verdict (anything but org.WatcherVerdictNormal) is sent to
-// lead as an ALERT via rt.Send, in the same message shape watch.go's own
-// (unexported) sendAlert already uses for pulse-layer ALERTs, so ALERT
-// traffic stays uniform regardless of which layer produced it.
+// lead as an ALERT via rt.SendWatchdogAlert (identity-level Agmsg.Send, not
+// the seat-steering Send verb -- see that method's doc comment for why:
+// Send's findSeat lookup fails, silently dropping the message, in the
+// normal "session-promoted lead" org shape where no lead SEAT was ever
+// spawned), in the same message shape watch.go's own (unexported) sendAlert
+// already uses for pulse-layer ALERTs, so ALERT traffic stays uniform
+// regardless of which layer produced it.
 func newWatchdogHooks(rt *org.Org, stderr io.Writer) org.WatchHooks {
 	if !rt.Config.Watchdog.WatcherEnabled {
 		return org.WatchHooks{}
@@ -732,9 +736,9 @@ func newWatchdogHooks(rt *org.Org, stderr io.Writer) org.WatchHooks {
 				}
 				msg := fmt.Sprintf("TYPE: ALERT\nORG_ID: %s\nSEAT: %s\nCONDITION: watcher_%s\n\nwatcher verdict=%s reason=%s",
 					orgID, seatID, conditionType, verdict.Verdict, verdict.Reason)
-				if res := rt.Send(org.SendParams{OrgID: orgID, To: org.LeadIdentity, Text: msg}); res.Err != nil {
+				if err := rt.SendWatchdogAlert(context.Background(), orgID, msg); err != nil {
 					_, _ = fmt.Fprintf(stderr, "watchdog: failed to ALERT lead for org %q seat %q verdict %q: %v\n",
-						orgID, seatID, verdict.Verdict, res.Err)
+						orgID, seatID, verdict.Verdict, err)
 				}
 			}()
 		},
