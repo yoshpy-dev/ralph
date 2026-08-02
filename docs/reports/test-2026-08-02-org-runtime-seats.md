@@ -90,3 +90,68 @@ Go packages (`go test ./...`, full scope): `internal/action`, `internal/cli`, `i
 | AC-11 (protocol validator + `--raw` bypass) | `internal/org/protocol/protocol_test.go` (13 `func Test*`, incl. `TestValidate_BodySizeCap_CountsRunesNotBytes`); `internal/cli/org_test.go`: `TestOrgSend_RawFlag_BypassesValidation` | PASS |
 
 (Path-traversal MEDIUM-2 fix, verified alongside AC-3/AC-11 scope: `internal/org/identifier_test.go`: `TestValidateIdentifier`, `TestOrgSpawn_TraversalSeatID_RejectedBeforeAnyFilesystemOrManifestWrite`, `TestOrgSpawn_InvalidOrgID_RejectedBeforeAnyManifestWrite`, `TestOrgSpawn_ValidIdentifiers_PassValidationAndSpawn`; `internal/cli/org_test.go`: `TestOrgSpawn_TraversalSeatID_NonZeroExit_NoDriverCalls`, `TestOrgSpawn_InvalidOrgID_NonZeroExit`, `TestOrgSend_TraversalTo_NonZeroExit` — all PASS.)
+
+## Cycle 2
+
+- Date: 2026-08-02
+- Pipeline cycle: 2/2 (`RALPH_STANDARD_MAX_PIPELINE_CYCLES` default cap)
+- Tester: `tester` subagent (Claude Code, `/test`)
+- Scope: behavioral tests only; re-run after fix-and-revalidate for cross-review triage `ACTION_REQUIRED #1` (`docs/reports/cross-review-triage-org-runtime-seats.md`).
+- Delta since Cycle 1 (HEAD `d0e0a55`):
+  - `f0cbf11` — fix: reserve underscore as org/seat namespace separator (addresses ACTION_REQUIRED #1: hyphen-joined `<org_id>-<seat_id>` was not unique — `a-b`+`c` and `a`+`b-c` both collapsed to `a-b-c`). Also tightens `identifierPattern` to lowercase-only (matches herdr's own `^[a-z][a-z0-9_-]{0,31}$` agent-name pattern) and adds a combined-length guard against herdr's 32-char agent-name limit.
+  - `011a0a7` — fix: address cycle-2 self-review LOW findings (comments, template examples, `PLAN_PATH` replacer restoration). No test-visible behavior change; not re-verified separately beyond the full suite run below (no LOW finding named a test gap).
+
+### Test execution (Cycle 2)
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `./scripts/run-test.sh` — shell suites (all `tests/*.sh`, full scope) | Every suite reports `FAIL: 0` or `N passed, 0 failed` | All | 0 | 0 | ~90s |
+| `./scripts/run-test.sh` — golang verifier (`go test ./...`, full scope) | 13 packages with test files | 13 | 0 | 0 | cached/fast |
+| `go test ./internal/org/... ./internal/cli/... ./internal/config/... -race -count=1` (plan-specified) | 5 packages | 5 | 0 | 0 | ~26s, 0 races |
+| Targeted `-run` re-execution of the 5 new/changed `f0cbf11` regression tests, `-v -count=1` | 5 named tests | 5 | 0 | 0 | <1s |
+
+`run-test.sh` resolved `changed` scope to the `golang` full fallback again (`scripts/ralph-config.sh` is still an unclassified path under `detect-languages.sh`), so the same full shell-suite + full-Go-package run executed as in Cycle 1. Evidence: `docs/evidence/test-2026-08-02-org-runtime-seats-cycle2.log` (combined `run-test.sh` output + the explicit `-race` command output, 1396 lines).
+
+### f0cbf11 regression tests — confirmed present and passing
+
+Mapped to cross-review `ACTION_REQUIRED #1` (`docs/reports/cross-review-triage-org-runtime-seats.md` line 25: hyphen-join collision between herdr agent names and prompt file paths):
+
+| Test | File | Purpose | Result |
+| --- | --- | --- | --- |
+| `TestHerdrAgentNameAndPromptFilePath_UnambiguousAcrossSplit` | `internal/org/identifier_test.go` | New. Proves `herdrAgentName("a-b","c")` ≠ `herdrAgentName("a","b-c")` and the equivalent `promptFilePath` pair, under the `_`-join fix (`a-b_c` vs `a_b-c`) — the exact collision case the reviewer named. | PASS |
+| `TestOrgSpawn_CombinedIdentifierLength_RejectedBeforeAnyManifestWrite` | `internal/org/identifier_test.go` | New. Two individually-valid (≤30 char) ids whose `_`-joined herdr name exceeds herdr's 32-char limit must be rejected before any driver call or manifest write. | PASS |
+| `TestOrgSpawn_CombinedIdentifierLength_ExactlyAtLimit_Spawns` | `internal/org/identifier_test.go` | New. Boundary case: combined length exactly 32 chars spawns successfully (no off-by-one over-rejection). | PASS |
+| `TestValidateIdentifier_LengthBoundary` | `internal/org/identifier_test.go` | New. Pins the 30-char single-identifier cutoff (30 valid / 31 rejected) introduced alongside the lowercase-only charset tightening. | PASS |
+| `TestValidateIdentifier` (updated cases) | `internal/org/identifier_test.go` | Updated. Adds `has_underscore` and mixed/upper-case identifiers to the invalid set — underscore is now reserved as the join separator and must never be legal inside a single id; charset is now lowercase-only to match herdr's own pattern. | PASS |
+
+Also re-verified as part of the same commit (existing tests whose expected literals changed from `-` to `_` joins, not new regression coverage but confirmed non-regressed): `TestHerdrAgentName_NamespacesBySeatAndOrg` (`internal/org/spawn_test.go`), `TestOrgSpawn_RoleAndScopeFlags_ExpandTemplateAndRecordScope` and `TestOrgWait_UnknownSeat_StillSucceeds_PassthroughToHerdr` (`internal/cli/org_test.go`) — all PASS, individually re-run with `-v`.
+
+All five new/changed tests were also confirmed present via `git show --stat f0cbf11` (touches `internal/cli/org_test.go`, `internal/org/identifier.go`, `internal/org/identifier_test.go`, `internal/org/spawn.go`, `internal/org/spawn_test.go`) and via a direct `grep` for `TestHerdrAgentNameAndPromptFilePath_UnambiguousAcrossSplit` confirming it exists in `internal/org/identifier_test.go:150`.
+
+### Failure analysis (Cycle 2)
+
+| Test | Error | Root cause | Proposed fix |
+| --- | --- | --- | --- |
+| — | — | No failures observed across any suite or package. | — |
+
+### Regression checks (Cycle 2)
+
+| Previously broken behavior | Status | Evidence |
+| --- | --- | --- |
+| Cycle 1 PASS baseline (346+ shell assertions, 13 Go packages, `internal/org` 86.7% coverage) | Still green | Full `run-test.sh` re-run, identical suite list, all `FAIL: 0` |
+| Hyphen-join collision (`a-b`+`c` vs `a`+`b-c`) — cross-review `ACTION_REQUIRED #1` | Fixed and regression-covered | `TestHerdrAgentNameAndPromptFilePath_UnambiguousAcrossSplit` PASS |
+| Combined-length overflow against herdr's 32-char agent-name cap | New guard, regression-covered | `TestOrgSpawn_CombinedIdentifierLength_RejectedBeforeAnyManifestWrite` / `_ExactlyAtLimit_Spawns` PASS |
+| `011a0a7` LOW fixes (comments, template examples, `PLAN_PATH` replacer restoration) | No test-visible regression | Full suite green; no LOW finding named a specific test case |
+
+### Test gaps (Cycle 2)
+
+- No new test gaps introduced by `f0cbf11` or `011a0a7`. The Cycle 1 gaps (AC-8 live smoke, `truncateForDetails`/`Disband` coverage, no Go branch-coverage tooling) are unchanged and still apply.
+- The `_`-join fix is now the single source of truth for herdr agent naming and prompt file paths; no other call site in the diff still builds a `-`-joined name (confirmed by the full `internal/org` and `internal/cli` package runs passing with the updated literals).
+
+### Verdict (Cycle 2)
+
+- Pass: full shell suite (all `FAIL: 0`), 13 Go packages via full-scope `go test ./...`, 5 packages under `-race -count=1` (0 races), 5 new/changed `f0cbf11` regression tests individually re-run and confirmed present + passing.
+- Fail: none.
+- Blocked: none.
+
+**Overall: PASS.** Cross-review `ACTION_REQUIRED #1` is confirmed fixed with dedicated regression coverage (`TestHerdrAgentNameAndPromptFilePath_UnambiguousAcrossSplit` plus the combined-length boundary tests). Combined with the unchanged Cycle 1 PASS verdict on all other ACs, the pipeline is clear to proceed to `/sync-docs` (already run, `docs/reports/sync-docs-2026-08-02-org-runtime-seats.md`) and `/cross-review` re-run.
