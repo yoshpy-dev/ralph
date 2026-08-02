@@ -282,3 +282,267 @@ func mustReadEvents(t *testing.T, o *Org) []ManifestEvent {
 	}
 	return rr.Events
 }
+
+// TestOrgSend_DryRun_ValidMessage_AppendsEventWithoutDriverCalls is the
+// positive counterpart of TestOrgSend_DryRun_Malformed...: a well-formed
+// typed message with DryRun set still runs protocol validation (and
+// passes), appends the (dry_run: true) `sent` event, and never reaches any
+// real driver call (AgentWait/PaneSendText/PaneSendKeys).
+func TestOrgSend_DryRun_ValidMessage_AppendsEventWithoutDriverCalls(t *testing.T) {
+	o, h, a := testOrg(t)
+
+	msg := "TYPE: TASK\nTASK_ID: t-1\n\ndo the thing"
+	result := o.Send(SendParams{OrgID: "org-a", To: "seat-1", Text: msg, DryRun: true})
+	if result.Err != nil {
+		t.Fatalf("expected a well-formed dry-run message to pass, got %v", result.Err)
+	}
+	if len(h.calls) != 0 || len(a.calls) != 0 {
+		t.Fatalf("expected no driver calls for a dry-run send, got herdr=%v agmsg=%v", h.calls, a.calls)
+	}
+
+	events := mustReadEvents(t, o)
+	last := events[len(events)-1]
+	if last.Event != EventSent || !last.DryRun {
+		t.Fatalf("expected a dry-run sent event, got %+v", last)
+	}
+}
+
+// TestOrgSend_UnknownSeat_ErrorsWithoutDriverCall covers Send's seat-lookup
+// gate: a target seat that never appears in the manifest roster is
+// rejected before any driver call, distinct from the protocol-validation
+// rejection tests above.
+func TestOrgSend_UnknownSeat_ErrorsWithoutDriverCall(t *testing.T) {
+	o, h, a := testOrg(t)
+
+	msg := "TYPE: TASK\nTASK_ID: t-1\n\ndo the thing"
+	result := o.Send(SendParams{OrgID: "org-a", To: "never-spawned", Text: msg})
+	if result.Err == nil {
+		t.Fatal("expected a non-nil Err sending to an unknown seat")
+	}
+	if len(h.calls) != 0 || len(a.calls) != 0 {
+		t.Fatalf("expected no driver calls sending to an unknown seat, got herdr=%v agmsg=%v", h.calls, a.calls)
+	}
+	if len(mustReadEvents(t, o)) != 0 {
+		t.Fatalf("expected no manifest event sending to an unknown seat, got %v", mustReadEvents(t, o))
+	}
+}
+
+// TestOrgSend_SeatWithoutPaneID_Errors covers the "seat exists in the
+// manifest but has no pane_id recorded" branch. Constructed directly via
+// appendEvent (a state event with PaneID left blank) rather than through
+// Spawn, which always records a pane_id by the time it reaches the spawned
+// state -- this is the same seeding technique TestOrgRead_SeatWithoutPaneID_Errors
+// uses below.
+func TestOrgSend_SeatWithoutPaneID_Errors(t *testing.T) {
+	o, h, a := testOrg(t)
+	if err := o.appendEvent(ManifestEvent{
+		TS: o.now(), OrgID: "org-a", SeatID: "seat-nopane", Event: EventSpawned,
+	}); err != nil {
+		t.Fatalf("seed manifest event: %v", err)
+	}
+
+	msg := "TYPE: TASK\nTASK_ID: t-1\n\ndo the thing"
+	result := o.Send(SendParams{OrgID: "org-a", To: "seat-nopane", Text: msg})
+	if result.Err == nil {
+		t.Fatal("expected a non-nil Err sending to a seat with no pane_id recorded")
+	}
+	if !strings.Contains(result.Err.Error(), "no pane_id recorded") {
+		t.Errorf("expected the error to mention no pane_id recorded, got %v", result.Err)
+	}
+	if len(h.calls) != 0 || len(a.calls) != 0 {
+		t.Fatalf("expected no driver calls for a paneless seat, got herdr=%v agmsg=%v", h.calls, a.calls)
+	}
+}
+
+// TestOrgStop_DryRun_ExistingSeat_RecordsDryRunDetails covers the
+// DryRun-on-an-existing-seat branch of Stop, distinct from the
+// DryRun-on-an-unknown-seat tests above: with a real, spawned seat on
+// record, --dry-run must still skip both driver calls (pane C-c and agmsg
+// Despawn) and record the dry-run marker in Details.
+func TestOrgStop_DryRun_ExistingSeat_RecordsDryRunDetails(t *testing.T) {
+	o, h, a := testOrg(t)
+	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", r)
+	}
+	sendKeysBefore := len(h.sendKeysCalls)
+	despawnBefore := len(a.despawnCalls)
+
+	result := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-1", DryRun: true})
+	if result.Err != nil {
+		t.Fatalf("expected nil Err for a dry-run stop on an existing seat, got %v", result.Err)
+	}
+	if len(h.sendKeysCalls) != sendKeysBefore || len(a.despawnCalls) != despawnBefore {
+		t.Fatalf("expected no driver calls for a dry-run stop, herdr sendKeys %d->%d agmsg despawn %d->%d",
+			sendKeysBefore, len(h.sendKeysCalls), despawnBefore, len(a.despawnCalls))
+	}
+
+	events := mustReadEvents(t, o)
+	last := events[len(events)-1]
+	if last.Event != EventStopped || !last.DryRun {
+		t.Fatalf("expected a dry-run stopped event, got %+v", last)
+	}
+	if last.Details != "dry-run: no driver call" {
+		t.Errorf("expected the dry-run details marker, got %q", last.Details)
+	}
+}
+
+// TestOrgStop_ExistingSeat_NoPaneOrAgmsgTeam_RecordsSkippedNotes covers the
+// paneID=="" and agmsgTeam=="" branches of Stop's non-dry-run path -- a
+// seat recorded without either external id (seeded directly via
+// appendEvent, since Spawn always records both once it reaches spawned)
+// must record "skipped" notes for both instead of attempting a driver call
+// for either.
+func TestOrgStop_ExistingSeat_NoPaneOrAgmsgTeam_RecordsSkippedNotes(t *testing.T) {
+	o, h, a := testOrg(t)
+	if err := o.appendEvent(ManifestEvent{
+		TS: o.now(), OrgID: "org-a", SeatID: "seat-bare", Event: EventSpawned,
+	}); err != nil {
+		t.Fatalf("seed manifest event: %v", err)
+	}
+
+	result := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-bare"})
+	if result.Err != nil {
+		t.Fatalf("expected nil Err, got %v", result.Err)
+	}
+	if len(h.sendKeysCalls) != 0 || len(a.despawnCalls) != 0 {
+		t.Fatalf("expected no driver calls for a seat with no pane_id/agmsg_team, got herdr=%v agmsg=%v", h.sendKeysCalls, a.despawnCalls)
+	}
+
+	events := mustReadEvents(t, o)
+	last := events[len(events)-1]
+	assertDetailsContains(t, last.Details, "pane=no pane_id on record", "despawn=skipped: no agmsg_team on record")
+}
+
+// TestOrgWait_HappyPath_ReturnsHerdrOutputAndTargetsNamespacedAgent covers
+// the happy path for Wait: it targets the org_id-namespaced herdr agent
+// name (herdrAgentName), returns herdr's raw output verbatim, and never
+// writes a manifest event -- Wait is a pure passthrough to
+// Herdr.AgentWait, per its doc comment.
+func TestOrgWait_HappyPath_ReturnsHerdrOutputAndTargetsNamespacedAgent(t *testing.T) {
+	o, h, _ := testOrg(t)
+	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", r)
+	}
+	eventsBefore := len(mustReadEvents(t, o))
+
+	result := o.Wait(WaitParams{OrgID: "org-a", Seat: "seat-1", Until: []string{"idle"}})
+	if result.Err != nil {
+		t.Fatalf("expected nil Err, got %v", result.Err)
+	}
+	if result.Output != "idle" {
+		t.Fatalf("expected herdr's raw output %q, got %q", "idle", result.Output)
+	}
+	if len(h.agentWaitTargets) != 1 || h.agentWaitTargets[0] != herdrAgentName("org-a", "seat-1") {
+		t.Fatalf("expected AgentWait to target the namespaced agent name, got %v", h.agentWaitTargets)
+	}
+	if got := len(mustReadEvents(t, o)); got != eventsBefore {
+		t.Fatalf("expected Wait to never write a manifest event, %d -> %d", eventsBefore, got)
+	}
+}
+
+// TestOrgWait_WithTimeoutMS_UsesTimeoutContext exercises the p.TimeoutMS >
+// 0 branch (context.WithTimeout), distinct from the zero-timeout branch
+// exercised above.
+func TestOrgWait_WithTimeoutMS_UsesTimeoutContext(t *testing.T) {
+	o, h, _ := testOrg(t)
+
+	result := o.Wait(WaitParams{OrgID: "org-a", Seat: "seat-1", Until: []string{"idle"}, TimeoutMS: 5000})
+	if result.Err != nil {
+		t.Fatalf("expected nil Err, got %v", result.Err)
+	}
+	if len(h.agentWaitTargets) != 1 {
+		t.Fatalf("expected exactly one AgentWait call, got %v", h.agentWaitTargets)
+	}
+}
+
+// TestOrgWait_UnknownSeat_StillDrivesHerdr_NoManifestCheck documents the
+// deliberate design captured in Wait's doc comment: Wait never touches the
+// manifest, so it does not distinguish an unrecorded seat from a known one
+// -- it just asks herdr directly for the namespaced agent name. This is
+// not a defect: Send/Read (which act on manifest-recorded pane state) are
+// the verbs that reject unknown seats; Wait intentionally does not.
+func TestOrgWait_UnknownSeat_StillDrivesHerdr_NoManifestCheck(t *testing.T) {
+	o, h, _ := testOrg(t)
+
+	result := o.Wait(WaitParams{OrgID: "org-a", Seat: "never-spawned", Until: []string{"idle"}})
+	if result.Err != nil {
+		t.Fatalf("expected Wait to pass through to herdr even for an unrecorded seat, got %v", result.Err)
+	}
+	if len(h.agentWaitTargets) != 1 || h.agentWaitTargets[0] != herdrAgentName("org-a", "never-spawned") {
+		t.Fatalf("expected AgentWait called with the namespaced agent name regardless of manifest state, got %v", h.agentWaitTargets)
+	}
+}
+
+// TestOrgRead_HappyPath_ReturnsHerdrPaneOutput covers Read's happy path:
+// resolve the seat's pane_id from the manifest, then return herdr's raw
+// PaneRead output verbatim.
+func TestOrgRead_HappyPath_ReturnsHerdrPaneOutput(t *testing.T) {
+	o, h, _ := testOrg(t)
+	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", r)
+	}
+
+	result := o.Read(ReadParams{OrgID: "org-a", Seat: "seat-1"})
+	if result.Err != nil {
+		t.Fatalf("expected nil Err, got %v", result.Err)
+	}
+	if result.Output != "pane output" {
+		t.Fatalf("expected herdr's raw pane output, got %q", result.Output)
+	}
+	if len(h.calls) == 0 || h.calls[len(h.calls)-1] != "pane_read" {
+		t.Fatalf("expected the last herdr call to be pane_read, got %v", h.calls)
+	}
+}
+
+// TestOrgRead_DefaultLines_UsesDefaultReadLinesWhenUnset covers the
+// lines<=0 branch, which substitutes defaultReadLines.
+func TestOrgRead_DefaultLines_UsesDefaultReadLinesWhenUnset(t *testing.T) {
+	o, _, _ := testOrg(t)
+	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", r)
+	}
+
+	result := o.Read(ReadParams{OrgID: "org-a", Seat: "seat-1", Lines: 0})
+	if result.Err != nil {
+		t.Fatalf("expected nil Err for the default-lines branch, got %v", result.Err)
+	}
+}
+
+// TestOrgRead_UnknownSeat_ErrorsWithoutDriverCall covers Read's seat-lookup
+// gate: a seat that never appears in the manifest roster is rejected
+// before any herdr call.
+func TestOrgRead_UnknownSeat_ErrorsWithoutDriverCall(t *testing.T) {
+	o, h, _ := testOrg(t)
+
+	result := o.Read(ReadParams{OrgID: "org-a", Seat: "never-spawned"})
+	if result.Err == nil {
+		t.Fatal("expected a non-nil Err reading an unknown seat")
+	}
+	if len(h.calls) != 0 {
+		t.Fatalf("expected no herdr calls for an unknown seat, got %v", h.calls)
+	}
+}
+
+// TestOrgRead_SeatWithoutPaneID_Errors covers the "seat exists in the
+// manifest but has no pane_id recorded" branch -- constructed directly via
+// appendEvent (a state event with PaneID left blank) rather than through
+// Spawn, which always records a pane_id once it reaches the spawned state.
+func TestOrgRead_SeatWithoutPaneID_Errors(t *testing.T) {
+	o, h, _ := testOrg(t)
+	if err := o.appendEvent(ManifestEvent{
+		TS: o.now(), OrgID: "org-a", SeatID: "seat-nopane", Event: EventSpawned,
+	}); err != nil {
+		t.Fatalf("seed manifest event: %v", err)
+	}
+
+	result := o.Read(ReadParams{OrgID: "org-a", Seat: "seat-nopane"})
+	if result.Err == nil {
+		t.Fatal("expected a non-nil Err for a seat with no pane_id recorded")
+	}
+	if !strings.Contains(result.Err.Error(), "no pane_id recorded") {
+		t.Errorf("expected the error to mention no pane_id recorded, got %v", result.Err)
+	}
+	if len(h.calls) != 0 {
+		t.Fatalf("expected no herdr calls for a paneless seat, got %v", h.calls)
+	}
+}

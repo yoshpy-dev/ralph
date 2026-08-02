@@ -882,6 +882,103 @@ func TestOrgSend_ValidTypedMessage_Succeeds(t *testing.T) {
 	}
 }
 
+// TestOrgWait_HappyPath_Succeeds covers `ralph org wait` end to end through
+// the real driver.ExecRunner -> exec.Command path: the herdr stub answers
+// "agent wait" with "idle", and Wait prints herdr's raw output.
+func TestOrgWait_HappyPath_Succeeds(t *testing.T) {
+	herdrLog, _ := setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	if _, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--state-dir", stateDir,
+	); err != nil {
+		t.Fatalf("spawn failed: %v", err)
+	}
+
+	out, err := runOrgCmd(t, "wait", "--org-id", "org-a", "--seat", "seat-1", "--until", "idle", "--state-dir", stateDir)
+	if err != nil {
+		t.Fatalf("wait failed: %v (output: %s)", err, out)
+	}
+	if !strings.Contains(out, "idle") {
+		t.Errorf("expected herdr's raw output 'idle' in output, got: %s", out)
+	}
+
+	herdrLines := readLogLines(t, herdrLog)
+	if countLinesWithPrefix(herdrLines, "agent wait") == 0 {
+		t.Errorf("expected an 'agent wait' invocation in the herdr log, got: %v", herdrLines)
+	}
+}
+
+// TestOrgWait_UnknownSeat_StillSucceeds_PassthroughToHerdr documents the
+// CLI-level counterpart of TestOrgWait_UnknownSeat_StillDrivesHerdr_NoManifestCheck
+// (internal/org/verbs_test.go): `ralph org wait` never checks the manifest
+// for the seat's existence, so waiting on a seat id that was never spawned
+// still drives the (namespaced) herdr call rather than failing fast the way
+// `read`/`stop`/`send` do.
+func TestOrgWait_UnknownSeat_StillSucceeds_PassthroughToHerdr(t *testing.T) {
+	herdrLog, _ := setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	out, err := runOrgCmd(t, "wait", "--org-id", "org-a", "--seat", "never-spawned", "--until", "idle", "--state-dir", stateDir)
+	if err != nil {
+		t.Fatalf("expected wait on an unrecorded seat to still succeed (pure herdr passthrough), got %v (output: %s)", err, out)
+	}
+
+	herdrLines := readLogLines(t, herdrLog)
+	if !containsLine(herdrLines, "agent wait org-a-never-spawned --until idle") {
+		t.Errorf("expected the herdr log to show a wait call for the namespaced agent name, got: %v", herdrLines)
+	}
+}
+
+// TestOrgRead_HappyPath_Succeeds covers `ralph org read` end to end: the
+// herdr stub answers "pane read" with "pane output".
+func TestOrgRead_HappyPath_Succeeds(t *testing.T) {
+	herdrLog, _ := setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	if _, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--state-dir", stateDir,
+	); err != nil {
+		t.Fatalf("spawn failed: %v", err)
+	}
+
+	out, err := runOrgCmd(t, "read", "--org-id", "org-a", "--seat", "seat-1", "--lines", "10", "--state-dir", stateDir)
+	if err != nil {
+		t.Fatalf("read failed: %v (output: %s)", err, out)
+	}
+	if !strings.Contains(out, "pane output") {
+		t.Errorf("expected herdr's raw pane output in output, got: %s", out)
+	}
+
+	herdrLines := readLogLines(t, herdrLog)
+	if countLinesWithPrefix(herdrLines, "pane read") == 0 {
+		t.Errorf("expected a 'pane read' invocation in the herdr log, got: %v", herdrLines)
+	}
+}
+
+// TestOrgRead_UnknownSeat_NonZeroExit covers Read's seat-lookup gate at the
+// CLI layer: unlike `wait`, `read` resolves the seat's pane_id from the
+// manifest first, so an unrecorded seat id must fail before any herdr call
+// is attempted.
+func TestOrgRead_UnknownSeat_NonZeroExit(t *testing.T) {
+	herdrLog, _ := setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	out, err := runOrgCmd(t, "read", "--org-id", "org-a", "--seat", "never-spawned", "--state-dir", stateDir)
+	if err == nil {
+		t.Fatalf("expected non-zero exit reading an unknown seat, output: %s", out)
+	}
+
+	herdrLines := readLogLines(t, herdrLog)
+	if countLinesWithPrefix(herdrLines, "pane read") != 0 {
+		t.Errorf("expected no 'pane read' call for an unknown seat, got: %v", herdrLines)
+	}
+}
+
 func equalStrings(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
