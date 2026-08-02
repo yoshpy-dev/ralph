@@ -59,17 +59,20 @@ org runtime PR④: Watchdog 二層を実装する。パルス層(決定論タイ
 - **ウォッチャーはオンデマンド `claude -p`**(ユーザー確定、spec FR-8 の「常駐」から意図的逸脱 — /sync-docs で spec 追従): 常駐コストゼロ・判定器ハングは次回起動で回復・「発火時のみ LLM 補助」の元設計と整合。
 - **遮断は既存 Stop 経由**: 新しい kill 経路を作らない(元設計の「PAUSE は既存 abort 経路」原則)。
 - **デッドマンは 3 情報源の OR**: herdr 表示・manifest・agmsg の合議(単一ソース誤判定の回避)。
+- **Codex advisory 反映(5 件)**: ① watch の冪等性(条件ごとの dedupe キーを watch-status.json に永続化し、同一条件は回復まで 1 遮断/1 ALERT/1 エスカレーション。複数 interval のテスト必須)、② total budget の AC 化(org_start = 最初の非 dry-run `spawned`。超過時は全 active 座席を遮断し org レベルの記録)、③ ウォッチャーはパルスを塞がない(タイムアウト < interval・非同期起動・ハング/不正 JSON は `watcher_error` receipt。ハング時でも budget 遮断が発火するテスト)、④ `StopParams` に `Reason` を追加し watchdog 起因(条件種別・閾値・観測値)を stopped の Details に永続化、⑤ state-dir 解決は `Flags().Changed` +空既定+解決元を返す resolver で実装(flag 明示/env/git サブディレクトリ/git ルート/非 git の 5 ケーステスト)。
 - Critical forks: フロー・ウォッチャー形態の 2 点を解決済み。
 
 ## Acceptance criteria
 
 - [ ] AC-1: `[org.watchdog]` が 3 面ロックステップで追加され defaults_sync_test が drift を検出する。
 - [ ] AC-2: protocol に `ALERT`(TASK_ID 不要)が追加され、rule doc の表+ミラーが同期(check-sync 系 green)。
-- [ ] AC-3: `ralph org watch` が interval ごとに条件評価し、budget 超過座席を Stop 経由で自動遮断(Details に watchdog 起因を記録)、Lead へ ALERT を送る(スタブで検証)。
+- [ ] AC-3: `ralph org watch` が interval ごとに条件評価し、budget 超過座席を Stop 経由で自動遮断(`StopParams.Reason` で条件種別・閾値・観測値を Details に永続化)、Lead へ ALERT を送る(スタブで検証)。
+- [ ] AC-3b(total budget): org_start(最初の非 dry-run `spawned`)から `total_wall_clock_minutes` 超過で全 active 座席を遮断し、org レベルの記録を残す(複数座席テスト)。
+- [ ] AC-3c(冪等性): 同一条件は回復まで 1 遮断/1 ALERT/1 エスカレーションに dedupe される(handled 状態を watch-status.json に永続化。2 interval 以上のテストで検証)。
 - [ ] AC-4: heartbeat 停滞・pane 消失・スコープ変更が ALERT として Lead に通知される(遮断はされない)(スタブ)。
 - [ ] AC-5: デッドマン: ALERT 後 `deadman_minutes` 無応答(3 情報源 OR)または Lead 自身の異常で `escalations.jsonl` 追記+stderr(+darwin 通知 best-effort)(短縮値でテスト)。
-- [ ] AC-6: ウォッチャーがトリガー時のみ 1 回起動し、判定 JSON を解釈、異常時のみ ALERT、receipts に watchdog phase で記録(claude -p はテストでは PATH スタブ)。
-- [ ] AC-7: state-dir 既定が flag > env > git toplevel > cwd で解決され、リポジトリ内の異なる cwd から同一 manifest を読める(テスト+スモーク)。tech-debt 行クローズ。
+- [ ] AC-6: ウォッチャーがトリガー時のみ 1 回起動し(タイムアウト < interval・非同期でパルスを塞がない)、判定 JSON を解釈、異常時のみ ALERT、receipts に watchdog phase で記録。ハング/不正 JSON は `watcher_error` receipt となり、**ウォッチャーがハングしても budget 遮断は発火する**(ハングスタブテスト)。
+- [ ] AC-7: state-dir 既定が flag(`Flags().Changed` で明示検出・空既定)> env > git toplevel > cwd で解決され(resolver は解決元も返す)、リポジトリ内の異なる cwd から同一 manifest を読める(明示相対 flag / env / git サブディレクトリ / git ルート / 非 git の 5 ケーステスト+スモーク)。tech-debt 行クローズ。
 - [ ] AC-8: codex 対話フラグの実機プローブ結果が記録され、検証できた場合のみ autonomous マッピング解除(できなければ fail-closed 維持を明記)。
 - [ ] AC-9: 赤入れ規約が definition-of-done に追記され、本 PR の evidence に適用。batchable LOW 群クローズ(signature 2 件+description 英語化)。
 - [ ] AC-10(実機スモーク): 短縮 budget での自動遮断+ALERT 受信、短縮 deadman でのエスカレーション発火、ウォッチャー実判定 1 回、state-dir 解決の実機確認。証拠 `docs/evidence/org-watchdog-smoke-*.txt`。
