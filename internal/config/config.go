@@ -149,6 +149,18 @@ type OrgPermissionsConfig struct {
 	// Roles maps a role name to a permission-mode override. A role absent
 	// from this map uses Default.
 	Roles map[string]string `toml:"roles"`
+	// CodexVerified gates whether internal/org's permissionArgsForDriver
+	// maps codex's autonomous/edits modes to real CLI flags (`--sandbox
+	// workspace-write --ask-for-approval never` / `--sandbox
+	// workspace-write`) instead of fail-closed-rejecting them (PR④ AC-8,
+	// docs/plans/active/2026-08-02-org-runtime-watchdog.md). codex's
+	// interactive sandbox/approval flags have not been live-verified against
+	// a real codex seat as of this field's introduction -- only Slice 5's
+	// live smoke does that. Default false keeps codex fail-closed (guarded
+	// only) until an operator who has live-verified their installed codex
+	// version's flags flips this on explicitly; see docs/tech-debt/README.md
+	// for the verification follow-up this flag exists to close out.
+	CodexVerified bool `toml:"codex_verified"`
 }
 
 // OrgModelPoolEntry pairs a driver CLI with a CLI-native model name or alias.
@@ -240,8 +252,9 @@ func Default() Config {
 			DeadmanMinutes: 10,
 			AgmsgHome:      "~/.agents/skills/agmsg",
 			Permissions: OrgPermissionsConfig{
-				Default: "autonomous",
-				Roles:   map[string]string{},
+				Default:       "autonomous",
+				Roles:         map[string]string{},
+				CodexVerified: false,
 			},
 			Watchdog: OrgWatchdogConfig{
 				IntervalSeconds: 30,

@@ -100,6 +100,13 @@ agmsg_home = "~/.agents/skills/agmsg"
 # (see docs/tech-debt/README.md).
 [org.permissions]
 default = "autonomous"
+# codex_verified gates codex seats' autonomous/edits permission modes:
+# false (default) keeps codex fail-closed to guarded until an operator has
+# live-verified their installed codex CLI's interactive sandbox/approval
+# flags (see docs/tech-debt/README.md); flip to true only after that
+# verification, which unlocks the autonomous -> `--sandbox workspace-write
+# --ask-for-approval never` / edits -> `--sandbox workspace-write` mapping.
+codex_verified = false
 
 # [org.permissions.roles] overrides the default mode per role. A role
 # absent from this table uses [org.permissions].default.

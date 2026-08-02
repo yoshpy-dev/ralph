@@ -351,7 +351,7 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 		// envelope check just above. dryRunSpawn never calls AgentStart, so
 		// the resolved args themselves are discarded; only the possible
 		// error matters here.
-		if _, err := permissionArgsForDriver(p.Driver, resolvedPermMode); err != nil {
+		if _, err := permissionArgsForDriver(o.Config, p.Driver, resolvedPermMode); err != nil {
 			return o.reject(p, err)
 		}
 		if err := autonomousScopeGateErr(p, resolvedPermMode); err != nil {
@@ -473,7 +473,7 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 		// permArgs (captured in the enclosing function scope) survives past
 		// this closure for the AgentStart argv construction further down in
 		// Spawn.
-		args, permErr := permissionArgsForDriver(p.Driver, resolvedPermMode)
+		args, permErr := permissionArgsForDriver(o.Config, p.Driver, resolvedPermMode)
 		if permErr != nil {
 			r := o.reject(p, permErr)
 			early = &r

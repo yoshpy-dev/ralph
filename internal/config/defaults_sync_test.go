@@ -187,6 +187,8 @@ func TestDefaultsLockStep(t *testing.T) {
 		tomlCfg.Org.AgmsgHome, goCfg.Org.AgmsgHome)
 	check("org.permissions.default", "RALPH_ORG_PERMISSION_DEFAULT",
 		tomlCfg.Org.Permissions.Default, goCfg.Org.Permissions.Default)
+	check("org.permissions.codex_verified", "RALPH_ORG_PERMISSIONS_CODEX_VERIFIED",
+		strconv.FormatBool(tomlCfg.Org.Permissions.CodexVerified), strconv.FormatBool(goCfg.Org.Permissions.CodexVerified))
 	check("org.watchdog.interval_seconds", "RALPH_ORG_WATCHDOG_INTERVAL_SECONDS",
 		strconv.Itoa(tomlCfg.Org.Watchdog.IntervalSeconds), strconv.Itoa(goCfg.Org.Watchdog.IntervalSeconds))
 	check("org.watchdog.stall_minutes", "RALPH_ORG_WATCHDOG_STALL_MINUTES",

@@ -703,6 +703,9 @@ func TestDefault_OrgPermissions(t *testing.T) {
 	if len(p.Roles) != 0 {
 		t.Errorf("permissions.roles = %v, want empty", p.Roles)
 	}
+	if p.CodexVerified {
+		t.Errorf("permissions.codex_verified = %v, want false (fail-closed default)", p.CodexVerified)
+	}
 }
 
 // TestLoad_OrgPermissionsRoleOverrideRoundTrip verifies an explicit
@@ -754,6 +757,30 @@ model = "opus"
 	}
 	if cfg.Org.Permissions.Default != "autonomous" {
 		t.Errorf("permissions.default = %q, want autonomous", cfg.Org.Permissions.Default)
+	}
+	if cfg.Org.Permissions.CodexVerified {
+		t.Errorf("permissions.codex_verified = %v, want false", cfg.Org.Permissions.CodexVerified)
+	}
+}
+
+// TestLoad_OrgPermissionsCodexVerifiedRoundTrip verifies AC-8's config gate:
+// an explicit [org.permissions].codex_verified = true round-trips through
+// Load() unchanged, and an absent key keeps the fail-closed false default.
+func TestLoad_OrgPermissionsCodexVerifiedRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ralph.toml")
+	content := `[org.permissions]
+codex_verified = true
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.Org.Permissions.CodexVerified {
+		t.Errorf("permissions.codex_verified = %v, want true", cfg.Org.Permissions.CodexVerified)
 	}
 }
 

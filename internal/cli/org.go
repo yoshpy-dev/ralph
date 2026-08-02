@@ -1,11 +1,14 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -669,7 +672,7 @@ func newOrgWatchCmd(orgID, stateDir, configPath *string) *cobra.Command {
 				Interval:  time.Duration(intervalSeconds) * time.Second,
 				Cycles:    cycles,
 				StatusDir: resolvedStateDir,
-			}, org.WatchHooks{})
+			}, newWatchdogHooks(rt, cmd.ErrOrStderr()))
 		},
 	}
 
@@ -677,4 +680,63 @@ func newOrgWatchCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	cmd.Flags().BoolVar(&once, "once", false, "run exactly one cycle and exit")
 
 	return cmd
+}
+
+// newWatchdogHooks builds the org.WatchHooks `ralph org watch` wires into
+// RunWatch (PR④ Slice 4, AC-6): when rt.Config.Watchdog.WatcherEnabled is
+// false, OnSemanticTrigger is left nil (WatchHooks' documented no-op
+// default) -- the pulse layer never invokes an LLM on its own. When true,
+// OnSemanticTrigger runs (*org.Org).RunWatcher in its own goroutine so a
+// hang or slow judgment call can never delay the pulse loop that triggered
+// it (Codex advisory 3) -- RunWatch's own cycle already returned by the
+// time the goroutine even starts running.
+//
+// A single-flight guard (busy) keeps at most one on-demand judgment in
+// flight at a time: the atomic compare-and-swap happens synchronously in
+// OnSemanticTrigger itself (before the goroutine is even spawned), so two
+// triggers arriving from the same synchronous evaluateCycle pass (e.g. two
+// seats both flagged in one cycle) are ordered deterministically -- the
+// first wins the flag and starts its goroutine, the second sees busy
+// already set and is skipped (recorded to stderr, never queued or run
+// concurrently).
+//
+// An abnormal verdict (anything but org.WatcherVerdictNormal) is sent to
+// lead as an ALERT via rt.Send, in the same message shape watch.go's own
+// (unexported) sendAlert already uses for pulse-layer ALERTs, so ALERT
+// traffic stays uniform regardless of which layer produced it.
+func newWatchdogHooks(rt *org.Org, stderr io.Writer) org.WatchHooks {
+	if !rt.Config.Watchdog.WatcherEnabled {
+		return org.WatchHooks{}
+	}
+
+	var busy int32
+	return org.WatchHooks{
+		OnSemanticTrigger: func(orgID, seatID, conditionType, evidence string) {
+			if !atomic.CompareAndSwapInt32(&busy, 0, 1) {
+				_, _ = fmt.Fprintf(stderr, "watchdog: watcher already in flight, skipping semantic trigger for org %q seat %q condition %q\n",
+					orgID, seatID, conditionType)
+				return
+			}
+			go func() {
+				defer atomic.StoreInt32(&busy, 0)
+				verdict, err := rt.RunWatcher(context.Background(), rt.Config.Watchdog, org.WatcherParams{
+					OrgID: orgID, SeatID: seatID, ConditionType: conditionType, Evidence: evidence,
+				})
+				if err != nil {
+					_, _ = fmt.Fprintf(stderr, "watchdog: watcher error for org %q seat %q condition %q: %v\n",
+						orgID, seatID, conditionType, err)
+					return
+				}
+				if verdict.Verdict == org.WatcherVerdictNormal {
+					return
+				}
+				msg := fmt.Sprintf("TYPE: ALERT\nORG_ID: %s\nSEAT: %s\nCONDITION: watcher_%s\n\nwatcher verdict=%s reason=%s",
+					orgID, seatID, conditionType, verdict.Verdict, verdict.Reason)
+				if res := rt.Send(org.SendParams{OrgID: orgID, To: org.LeadIdentity, Text: msg}); res.Err != nil {
+					_, _ = fmt.Fprintf(stderr, "watchdog: failed to ALERT lead for org %q seat %q verdict %q: %v\n",
+						orgID, seatID, verdict.Verdict, res.Err)
+				}
+			}()
+		},
+	}
 }

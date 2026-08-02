@@ -3,13 +3,17 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/yoshpy-dev/ralph/internal/config"
 	"github.com/yoshpy-dev/ralph/internal/org"
+	"github.com/yoshpy-dev/ralph/internal/org/driver"
 )
 
 // runOrgCmd runs `ralph org <args...>` in-process and returns combined
@@ -1549,6 +1553,199 @@ func TestOrgWatch_Once_RunsExactlyOneCycleAndWritesStatus(t *testing.T) {
 	}
 	if status.OrgID != "org-a" || status.Cycles != 1 {
 		t.Fatalf("expected org_id=org-a cycles=1 after --once, got %+v (raw: %s)", status, data)
+	}
+}
+
+// --- newWatchdogHooks (PR④ Slice 4, AC-6 wiring) -----------------------
+
+// writeClaudeStub writes a fake `claude` executable to a fresh temp dir and
+// prepends it to PATH -- the same PATH-stubbed convention
+// internal/org/driver/driver_test.go already uses for herdr/agmsg
+// availability probes (and internal/org/watcher_test.go's own copy of this
+// helper for RunWatcher's tests: each package that needs to stub an
+// external CLI on PATH keeps its own small helper rather than sharing one
+// across package boundaries).
+func writeClaudeStub(t *testing.T, script string) {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "claude"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write claude stub: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// newWatchdogTestOrg builds an *org.Org wired the same way newOrgRuntime
+// does (real driver.ExecRunner adapters) but without needing a *cobra.Command
+// -- for tests exercising newWatchdogHooks directly, bypassing the full
+// `ralph org watch` command. The watcher layer is enabled with a short
+// IntervalSeconds so watcherTimeout (internal/org/watcher.go) stays small
+// and bounded for tests that deliberately hang the claude stub.
+func newWatchdogTestOrg(t *testing.T, stateDir string) *org.Org {
+	t.Helper()
+	runner := driver.ExecRunner{}
+	cfg := config.Default().Org
+	cfg.Watchdog.WatcherEnabled = true
+	cfg.Watchdog.WatcherModel = "haiku"
+	cfg.Watchdog.IntervalSeconds = 2
+	return &org.Org{
+		Config:   cfg,
+		Manifest: org.NewManifestStoreAtPath(filepath.Join(stateDir, "manifest.jsonl")),
+		Receipts: org.NewReceiptStoreAtPath(filepath.Join(stateDir, "model-receipts.jsonl")),
+		Herdr:    driver.Herdr{R: runner},
+		Agmsg:    driver.Agmsg{R: runner, Home: driver.ResolveAgmsgHome(cfg.AgmsgHome)},
+	}
+}
+
+// waitForCondition polls cond every 10ms until it returns true or timeout
+// elapses, failing the test in the latter case. Used below to deterministically
+// wait for newWatchdogHooks' background goroutine to finish (observed via its
+// own side effect -- a receipt append) rather than sleeping a fixed duration
+// or reaching into the hook's private single-flight state.
+func waitForCondition(t *testing.T, timeout time.Duration, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("condition not met within %v", timeout)
+}
+
+func receiptCount(t *testing.T, rt *org.Org) int {
+	t.Helper()
+	rr, err := rt.Receipts.Read()
+	if err != nil {
+		t.Fatalf("read receipts: %v", err)
+	}
+	return len(rr.Receipts)
+}
+
+// TestNewWatchdogHooks_WatcherDisabled_NoOp pins that OnSemanticTrigger is
+// left nil entirely when [org.watchdog].watcher_enabled is false -- the
+// pulse layer must never invoke an LLM on its own.
+func TestNewWatchdogHooks_WatcherDisabled_NoOp(t *testing.T) {
+	rt := newWatchdogTestOrg(t, t.TempDir())
+	rt.Config.Watchdog.WatcherEnabled = false
+
+	hooks := newWatchdogHooks(rt, io.Discard)
+	if hooks.OnSemanticTrigger != nil {
+		t.Fatal("expected nil OnSemanticTrigger when watcher_enabled is false")
+	}
+}
+
+// TestNewWatchdogHooks_Dispatch_NeverBlocksCaller pins Codex advisory
+// finding 3 at the CLI wiring level: OnSemanticTrigger returns near-
+// instantly even though the underlying claude invocation it kicks off hangs
+// well past that -- the pulse loop that calls this hook is never delayed by
+// a slow/hung watcher.
+func TestNewWatchdogHooks_Dispatch_NeverBlocksCaller(t *testing.T) {
+	writeClaudeStub(t, "#!/bin/sh\nsleep 3\n")
+	rt := newWatchdogTestOrg(t, t.TempDir())
+
+	var stderr bytes.Buffer
+	hooks := newWatchdogHooks(rt, &stderr)
+
+	start := time.Now()
+	hooks.OnSemanticTrigger("org-a", "seat-1", "stall", "seat stalled 20m")
+	elapsed := time.Since(start)
+
+	if elapsed > 200*time.Millisecond {
+		t.Fatalf("OnSemanticTrigger blocked its caller for %v (want near-instant dispatch)", elapsed)
+	}
+
+	// Drain the background goroutine before the test returns (avoids a
+	// leaked goroutine/process outliving the test) -- its own watcher_error
+	// receipt is the deterministic completion signal.
+	waitForCondition(t, 4*time.Second, func() bool { return receiptCount(t, rt) >= 1 })
+}
+
+// TestNewWatchdogHooks_SingleFlight_SecondTriggerSkippedWhileBusy pins the
+// "at most one in flight" requirement: a second semantic trigger arriving
+// while the first is still in flight is skipped (recorded to stderr), never
+// queued or run concurrently. The single-flight compare-and-swap happens
+// synchronously in OnSemanticTrigger itself (before any goroutine is
+// spawned), so this is deterministic regardless of how fast the first
+// call's underlying watcher invocation actually completes.
+func TestNewWatchdogHooks_SingleFlight_SecondTriggerSkippedWhileBusy(t *testing.T) {
+	writeClaudeStub(t, "#!/bin/sh\n"+
+		"cat <<'EOF'\n"+
+		`{"result":"{\"verdict\":\"normal\",\"reason\":\"ok\"}"}`+"\n"+
+		"EOF\n")
+	rt := newWatchdogTestOrg(t, t.TempDir())
+
+	var stderr bytes.Buffer
+	hooks := newWatchdogHooks(rt, &stderr)
+
+	hooks.OnSemanticTrigger("org-a", "seat-1", "stall", "evidence-1")
+	hooks.OnSemanticTrigger("org-a", "seat-2", "stall", "evidence-2")
+
+	got := stderr.String()
+	if n := strings.Count(got, "already in flight"); n != 1 {
+		t.Fatalf("expected exactly one single-flight skip message, got %d in: %s", n, got)
+	}
+	if !strings.Contains(got, "seat-2") {
+		t.Errorf("expected the skip message to name the skipped seat (seat-2), got: %s", got)
+	}
+	if strings.Contains(got, `seat "seat-1"`) {
+		t.Errorf("did not expect the first (accepted) trigger to be recorded as skipped: %s", got)
+	}
+
+	// Drain the accepted (seat-1) goroutine before the test returns.
+	waitForCondition(t, 4*time.Second, func() bool { return receiptCount(t, rt) >= 1 })
+}
+
+// TestNewWatchdogHooks_AbnormalVerdict_SendsAlertToLead pins that an
+// abnormal verdict (anything but normal) is delivered to lead as a typed
+// ALERT via rt.Send -- observed here through the herdr stub's argv log,
+// since Send resolves the lead seat's pane and types the message into it.
+func TestNewWatchdogHooks_AbnormalVerdict_SendsAlertToLead(t *testing.T) {
+	herdrLog, _ := setupOrgStubPATH(t)
+	writeClaudeStub(t, "#!/bin/sh\n"+
+		"cat <<'EOF'\n"+
+		`{"result":"{\"verdict\":\"circular\",\"reason\":\"seat repeating the same edit\"}"}`+"\n"+
+		"EOF\n")
+
+	stateDir := t.TempDir()
+	if _, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", org.LeadIdentity, "--role", org.LeadIdentity,
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope", "--state-dir", stateDir,
+	); err != nil {
+		t.Fatalf("spawn lead failed: %v", err)
+	}
+
+	rt := newWatchdogTestOrg(t, stateDir)
+	var stderr bytes.Buffer
+	hooks := newWatchdogHooks(rt, &stderr)
+
+	hooks.OnSemanticTrigger("org-a", "seat-1", "scope_change", "seat worktree changed")
+
+	// Wait for the ALERT's own Send call to reach the herdr stub (not just
+	// RunWatcher's earlier receipt append) -- Send runs after RunWatcher
+	// returns, inside the same background goroutine.
+	waitForCondition(t, 4*time.Second, func() bool {
+		data, err := os.ReadFile(herdrLog)
+		return err == nil && strings.Contains(string(data), "TYPE: ALERT")
+	})
+
+	data, err := os.ReadFile(herdrLog)
+	if err != nil {
+		t.Fatalf("read herdr log: %v", err)
+	}
+	log := string(data)
+	if !strings.Contains(log, "TYPE: ALERT") {
+		t.Errorf("expected an ALERT to be sent to lead, herdr log: %s", log)
+	}
+	if !strings.Contains(log, "CONDITION: watcher_scope_change") {
+		t.Errorf("expected the ALERT to record the watcher condition, herdr log: %s", log)
+	}
+	if !strings.Contains(log, "verdict=circular") {
+		t.Errorf("expected the ALERT body to include the watcher's verdict, herdr log: %s", log)
+	}
+	if strings.Contains(stderr.String(), "watchdog:") {
+		t.Errorf("expected no watchdog error/skip messages on the happy path, got: %s", stderr.String())
 	}
 }
 
