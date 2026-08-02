@@ -284,8 +284,8 @@ func TestOrgSpawn_HerdrAgentNameNamespacedByOrgID(t *testing.T) {
 }
 
 func TestHerdrAgentName_NamespacesBySeatAndOrg(t *testing.T) {
-	if got := herdrAgentName("org-a", "reviewer"); got != "org-a-reviewer" {
-		t.Fatalf("herdrAgentName(org-a, reviewer) = %q, want org-a-reviewer", got)
+	if got := herdrAgentName("org-a", "reviewer"); got != "org-a_reviewer" {
+		t.Fatalf("herdrAgentName(org-a, reviewer) = %q, want org-a_reviewer", got)
 	}
 	if herdrAgentName("org-a", "reviewer") == herdrAgentName("org-b", "reviewer") {
 		t.Fatalf("expected herdrAgentName to differ across org_ids for the same seat_id")

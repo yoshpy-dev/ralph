@@ -772,7 +772,7 @@ func TestOrgSpawn_RoleAndScopeFlags_ExpandTemplateAndRecordScope(t *testing.T) {
 		t.Errorf("expected the rendered template body NOT to appear inline in argv (it must go through the prompt file), got:\n%s", logText)
 	}
 
-	promptPath := filepath.Join(stateDir, "prompts", "org-a-reviewer-1.md")
+	promptPath := filepath.Join(stateDir, "prompts", "org-a_reviewer-1.md")
 	promptData, perr := os.ReadFile(promptPath)
 	if perr != nil {
 		t.Fatalf("expected prompt file at %q: %v", promptPath, perr)
@@ -958,7 +958,7 @@ func TestOrgWait_UnknownSeat_StillSucceeds_PassthroughToHerdr(t *testing.T) {
 	}
 
 	herdrLines := readLogLines(t, herdrLog)
-	if !containsLine(herdrLines, "agent wait org-a-never-spawned --until idle") {
+	if !containsLine(herdrLines, "agent wait org-a_never-spawned --until idle") {
 		t.Errorf("expected the herdr log to show a wait call for the namespaced agent name, got: %v", herdrLines)
 	}
 }

@@ -7,13 +7,30 @@ import (
 
 // identifierPattern is the allowed shape for any user-supplied identifier
 // that org turns into a filesystem path component (OrgID, SeatID):
-// alphanumeric-first, then up to 63 more alphanumeric/underscore/hyphen
-// characters. This blocks path separators (`/`, `\`) and traversal
-// sequences (`..`) before an identifier is ever used to build a path -- see
-// promptFilePath's doc comment in spawn.go for the concrete path-traversal
-// case this closes (--id '../../../../tmp/pwn' normalizing out of the
-// state dir).
-var identifierPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
+// lowercase-letter-first, then up to 29 more lowercase letters, digits, or
+// hyphens (30 chars total). This blocks path separators (`/`, `\`) and
+// traversal sequences (`..`) before an identifier is ever used to build a
+// path -- see promptFilePath's doc comment in spawn.go for the concrete
+// path-traversal case this closes (--id '../../../../tmp/pwn' normalizing
+// out of the state dir).
+//
+// The charset is deliberately narrower than "anything path-safe": it is
+// scoped to what herdr's own agent-name validation accepts, confirmed by a
+// live probe against herdr v0.7.5 (`^[a-z][a-z0-9_-]{0,31}$` -- lowercase
+// start, lowercase letters/digits/hyphen/underscore, max 32 chars). ralph
+// derives herdr agent names and prompt file names by joining OrgID and
+// SeatID (see herdrAgentName/promptFilePath in spawn.go), so both IDs must
+// already be herdr-legal on their own before the join even happens.
+//
+// Underscore is intentionally excluded from *this* pattern (even though
+// herdr itself allows it) and reserved as the join separator: since no
+// valid OrgID or SeatID can ever contain `_`, `<org>_<seat>` is guaranteed
+// to split back into exactly one (org, seat) pair, closing the ambiguity a
+// hyphen join has (`a-b`+`c` and `a`+`b-c` both joining to `a-b-c`). See the
+// cross-review cycle-2 fix note in
+// docs/plans/active/2026-08-02-org-runtime-seats.md, "Implementation notes
+// (deviations)".
+var identifierPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,29}$`)
 
 // ValidateIdentifier rejects a value that is not shaped like a safe org/seat
 // id. kind is used only in the returned error message (e.g. "org_id",

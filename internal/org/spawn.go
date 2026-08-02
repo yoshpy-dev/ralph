@@ -213,6 +213,18 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	if err := ValidateIdentifier("seat_id", p.SeatID); err != nil {
 		return SpawnResult{Outcome: SpawnOutcomeRejected, Err: err}
 	}
+	// herdrAgentName joins org_id and seat_id with a single `_` separator
+	// (len(org)+1+len(seat)); herdr's live-probed agent-name limit is 32
+	// characters, so a combination that individually passes
+	// identifierPattern (max 30 chars each) can still overflow herdr's
+	// limit once joined. Reject that combination here, before any manifest
+	// write, the same way an individually-invalid id is rejected above.
+	if n := len(p.OrgID) + 1 + len(p.SeatID); n > maxHerdrAgentNameLen {
+		return SpawnResult{Outcome: SpawnOutcomeRejected, Err: fmt.Errorf(
+			"org: combined org_id+seat_id length %d exceeds herdr's %d-character agent-name limit (org_id=%q seat_id=%q)",
+			n, maxHerdrAgentNameLen, p.OrgID, p.SeatID,
+		)}
+	}
 
 	if p.TimeoutMS <= 0 {
 		p.TimeoutMS = defaultSpawnTimeoutMS
@@ -343,7 +355,7 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	// bullet): real herdr (v0.7.5) rejects any agent argument containing a
 	// newline, and long single-line arguments are also unsafe to assume safe
 	// -- so a prompt that trips needsPromptFile is written to
-	// <state-dir>/prompts/<org_id>-<seat_id>.md and only a short one-line
+	// <state-dir>/prompts/<org_id>_<seat_id>.md and only a short one-line
 	// pointer is passed as the agent arg. The write happens here, strictly
 	// before AgentStart, so a write failure never reaches the driver at all.
 	agentArgs := []string{"--model", p.Model}
@@ -546,9 +558,26 @@ func (o *Org) agentStartWithRetry(ctx context.Context, name, kind, paneID string
 // Namespacing by org_id here mirrors the agmsgTeam convention above and
 // keeps the external-resource boundary isolated the same way manifest
 // accounting already is.
+//
+// The join uses `_`, not `-`: identifierPattern (identifier.go) forbids `_`
+// in either orgID or seatID, so `_` is guaranteed to be a byte that appears
+// nowhere else in either half. That makes the join unambiguous -- unlike a
+// `-` join, where org_id="a-b"/seat_id="c" and org_id="a"/seat_id="b-c"
+// would both produce "a-b-c" and collide in herdr's global agent namespace
+// (the exact bug this fixes; see the cross-review cycle-2 fix note in
+// docs/plans/active/2026-08-02-org-runtime-seats.md, "Implementation notes
+// (deviations)"). `_` is also herdr-legal on its own, per the same live
+// probe referenced in identifier.go.
 func herdrAgentName(orgID, seatID string) string {
-	return fmt.Sprintf("%s-%s", orgID, seatID)
+	return fmt.Sprintf("%s_%s", orgID, seatID)
 }
+
+// maxHerdrAgentNameLen is herdr's live-probed agent-name length limit
+// (`^[a-z][a-z0-9_-]{0,31}$`, v0.7.5 -- see identifierPattern's doc comment
+// in identifier.go). Spawn checks the joined `<org>_<seat>` length against
+// this before any manifest write, since identifierPattern alone (max 30
+// chars per half) does not prevent the sum from exceeding it.
+const maxHerdrAgentNameLen = 32
 
 // maxInlinePromptRunes is the longest initial prompt herdr's real
 // `agent start` argv encoding is trusted to accept inline. Real herdr
@@ -571,19 +600,27 @@ func needsPromptFile(prompt string) bool {
 
 // promptFilePath returns the absolute path a spawn's initial prompt is
 // written to when needsPromptFile is true:
-// <state-dir>/prompts/<org_id>-<seat_id>.md. state-dir is derived from the
+// <state-dir>/prompts/<org_id>_<seat_id>.md. state-dir is derived from the
 // manifest store's own directory (filepath.Dir(o.Manifest.Path())) rather
 // than a separate config field, since the manifest store is already the
 // single source of truth for where this Org's on-disk state lives. The path
 // is namespaced by both org_id and seat_id so a respawn of the same seat
 // overwrites its own prompt file (intentional -- see writePromptFile) while
 // two different seats never collide.
+//
+// The join uses `_`, the same reserved separator as herdrAgentName (see its
+// doc comment) and for the same reason: identifierPattern forbids `_` in
+// either half, so the join is unambiguous. Before this fix both this
+// function and herdrAgentName joined with `-`, which meant org_id="a-b"/
+// seat_id="c" and org_id="a"/seat_id="b-c" both wrote to the same prompt
+// file path -- a later spawn's role prompt silently overwriting an earlier
+// seat's.
 func (o *Org) promptFilePath(orgID, seatID string) (string, error) {
 	stateDir, err := filepath.Abs(filepath.Dir(o.Manifest.Path()))
 	if err != nil {
 		return "", fmt.Errorf("resolve state dir for prompt file: %w", err)
 	}
-	return filepath.Join(stateDir, "prompts", fmt.Sprintf("%s-%s.md", orgID, seatID)), nil
+	return filepath.Join(stateDir, "prompts", fmt.Sprintf("%s_%s.md", orgID, seatID)), nil
 }
 
 // writePromptFile writes content to path with 0644 permissions, creating
