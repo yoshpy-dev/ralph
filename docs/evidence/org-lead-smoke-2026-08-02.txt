@@ -1,0 +1,159 @@
+=== org-lead live smoke 2026-08-02 ===
+--- Smoke A: autonomous seat runs bash without permission dialog (PR2 blocked-fix) ---
+spawned seat "reviewer" (org_id=leadsmoke-a driver=claude model=haiku pane_id=w2:p2 dry_run=false)
+--- wait for seat to work (bypassPermissions active) ---
+{"id":"cli:agent:get","result":{"agent":{"agent":"claude","agent_status":"idle","cwd":"/Users/hiroki.yoshioka/MyDev/github.com/yoshpy-dev/ralph","focused":false,"foreground_cwd":"/Users/hiroki.yoshioka/MyDev/github.com/yoshpy-dev/ralph","interactive_ready":true,"name":"leadsmoke-a_reviewer","pane_id":"w2:p2","revision":2,"state_change_seq":1,"tab_id":"w2:t2","terminal_id":"term_6580f3c33f4793","te
+--- pane tail (expect executed commands, NO permission dialog) ---
+Permissions mode
+
+  In Bypass Permissions mode, Claude Code will not
+  ask for your approval before running potentially
+  dangerous commands.
+  This mode should only be used in a sandboxed
+  container/VM that has restricted internet access
+  and can easily be restored if damaged.
+
+  By proceeding, you accept all responsibility for
+  actions taken while running in Bypass Permissions
+  mode.
+
+  https://code.claude.com/docs/en/security
+
+  ❯ 1. No, exit
+    2. Yes, I accept
+
+  Enter to confirm · Esc to cancel
+--- accepted one-time bypass dialog (operator action, persisted per-machine) ---
+--- pane tail after acceptance ---
+- スコープ規律: scope 外ファイルは変更しない
+  - 成果物: docs/reports/ に最終レポート残し、lead
+  へは RESULT メッセージで返信（レポートパスと
+  severity 別件数をポインタとして）
+
+  ご指示をお待ちしています。
+
+✻ Crunched for 19s
+
+─────────────────────────────────────────────────────
+❯
+─────────────────────────────────────────────────────
+  ⚠ Transcript saving is off — inherited CLAUDE_CODE…
+  [main] Haiku 4.5 ███░░░░░░░ 33% 21:07
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+--- herdr state ---
+{"id":"cli:agent:get","result":{"agent":{"agent":"claude","agent_session":{"agent":"claude","kind":"id","source":"herdr:claude","value":"b7d1261f-188b-4cfa-97a6-38f66fe56a20"},"agent_status":"done","cwd":"/Users/hiroki.yoshioka/MyDev/github.com/yoshpy-dev/ralph","focused":false,"foreground_cwd":"/Us
+--- send typed TASK (protocol-validated) ---
+org: send: org: send: wait for seat "reviewer" idle: herdr: timed out: context deadline exceeded
+--- pane tail (expect git command executed, no dialog) ---
+- typed protocol 準拠: TYPE /
+  TASK_ID（必要な場合）/
+  本文（最大2,000文字、EVIDENCE はポインタ原則）
+  - スコープ規律: scope 外ファイルは変更しない
+  - 成果物: docs/reports/ に最終レポート残し、lead
+  へは RESULT メッセージで返信（レポートパスと
+  severity 別件数をポインタとして）
+
+  ご指示をお待ちしています。
+
+✻ Crunched for 19s
+
+─────────────────────────────────────────────────────
+❯
+─────────────────────────────────────────────────────
+  ⚠ Transcript saving is off — inherited CLAUDE_CODE…
+  [main] Haiku 4.5 ███░░░░░░░ 33% 21:07
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+--- retry send after idle/done fix (commit d35f157) ---
+sent message to seat "reviewer"
+--- pane tail ---
+⏺ TYPE: RESULT
+  TASK_ID: smoke-a-1
+
+  d35f157 fix: accept herdr done state when waiting
+  to send to a seat
+
+✻ Worked for 10s
+
+─────────────────────────────────────────────────────
+❯
+─────────────────────────────────────────────────────
+  ⚠ Transcript saving is off — inherited CLAUDE_CODE…
+  [main] Haiku 4.5 ███░░░░░░░ 36% 21:10
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+--- Smoke A cleanup ---
+stopped seat "reviewer"
+--- Smoke B: headless lead E2E (ralph org start) ---
+spawned seat "lead" (org_id=leadsmoke-b driver=claude model=sonnet pane_id=w3:p2 dry_run=false)
+hint: ralph org status --org-id leadsmoke-b ; attach with herdr to observe the lead pane
+--- lead E2E transcript (tail) + steering: operator typed cleanup instruction, submitted ---
+⏺ (3) 座席状態を確認しました(sample: qa / claude /
+  haiku / spawned (active) [dry-run])。続けて(4)
+  report を生成します。
+
+  Ran 1 shell command
+
+⏺ (4) レポート生成完了: docs/reports/org-manifest-lea
+  dsmoke-b-2026-08-02.md。続けて(5) disband --dry-run
+  を実行します。
+
+  Ran 1 shell command
+
+⏺ SMOKE-B-DONE
+
+✻ Cooked for 59s
+
+─────────────────────────────────────────────────────
+❯ 座席を stop して org を disband して
+─────────────────────────────────────────────────────
+  ⚠ Transcript saving is off — inherited CLAUDE_CODE…
+  [main ?] Sonnet 5 █░░░░░░░░░ 11% 21:12
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+--- status after lead cleanup ---
+SEAT_ID	ROLE	DRIVER	MODEL	STATE	PANE_ID
+lead	lead	claude	sonnet	spawned (active)	w3:p2
+--- generated report head ---
+head: docs/reports/org-manifest-leadsmoke-b-2026-08-02.md: No such file or directory
+--- generated report (full, from lead cwd = main repo) ---
+# org report: leadsmoke-b
+
+- generated: 2026-08-02
+- org_id: leadsmoke-b
+
+## Roster
+
+| seat_id | role | driver | model | state | permission | herdr_agent |
+|---|---|---|---|---|---|---|
+| sample | qa | claude | haiku | spawned (active) [dry-run] | autonomous | - |
+
+## Event timeline
+
+| ts | seat_id | event | details |
+|---|---|---|---|
+| 2026-08-02T12:11:41Z | sample | spawn_started | - |
+| 2026-08-02T12:11:41Z | sample | spawn_step | tab_created |
+| 2026-08-02T12:11:41Z | sample | spawn_step | agent_started prompt_file=/Users/hiroki.yoshioka/MyDev/github.com/yoshpy-dev/ralph/.harness/state/org/prompts/leadsmoke-b_sample.md |
+| 2026-08-02T12:11:41Z | sample | spawn_step | agmsg_lead_joined ok |
+| 2026-08-02T12:11:41Z | sample | spawn_step | agmsg_joined |
+| 2026-08-02T12:11:41Z | sample | spawn_step | agmsg_announced |
+| 2026-08-02T12:11:41Z | sample | spawned | scope=読み取りのみ permission_mode=autonomous |
+
+## Model receipts
+
+| seat_id | role | driver | commanded_model | effective_model | honored |
+|---|---|---|---|---|---|
+| sample | qa | claude | haiku | - | unknown |
+
+## Known residuals
+
+- active seats: 0
+- corrupt manifest lines: 0
+--- cleanup: stop lead, remove smoke residue from main repo ---
+stopped seat "lead"
+Left team ralph-leadsmoke-a (team removed — no members left)
+Team not found: ralph-leadsmoke-a
+Team not found: ralph-leadsmoke-b
+Team not found: ralph-leadsmoke-b
+teams cleaned
+workspaces closed
+--- post: main repo git status ---
+(end)

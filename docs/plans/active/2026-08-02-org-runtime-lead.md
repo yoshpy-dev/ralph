@@ -122,6 +122,13 @@ org runtime PR③: Lead が組織を自律編成できるようにする。`/org
 - codex 対話モードの権限フラグの正確な形状(実装時にスタブで固定、実機確認は claude 優先)。
 - `org report` の出力に receipts の honored 集計を含めるか(実装時判断、最小は roster+イベント履歴)。
 
+## Implementation notes (deviations)
+
+- **実機発見 #1(bypass 承諾ダイアログ)**: claude の `--permission-mode bypassPermissions` はマシンごと初回 1 回、対話での承諾ダイアログを表示する(承諾は永続化)。機構による自動承諾は行わない(人間の同意画面のため)。運用前提として /org skill に明記。初回承諾はオペレータが herdr pane で 1 回行う。
+- **実機発見 #2(herdr の done 状態)**: 入力待ちの対話エージェントを herdr は `idle` ではなく `done` と報告する。`send` の事前待機を `idle|done` 受理に修正(commit d35f157)。
+- **実機発見 #3(state-dir は cwd 相対)**: lead(座席)と operator が異なる cwd で `ralph org` を実行すると manifest が分裂する(スモークで実測: lead の spawn/report は lead の cwd 側 `.harness` に記録)。運用規約「lead と operator は同一ディレクトリ(通常リポジトリルート)で実行」を /org skill に明記。恒久対応(state-dir の org_id 単位の共有解決)は PR④ 以降の検討として tech-debt 化。
+- **Smoke A/B 成功**: autonomous 座席が typed TASK の bash をダイアログなしで実行し protocol 準拠 RESULT を返却。headless lead(sonnet)が 50 秒で E2E(dry-run spawn → send 試行 → status → report 生成 → disband)を完遂。stop 時の best-effort Leave が agmsg team を自動清掃。
+
 ## Progress checklist
 
 - [ ] Plan reviewed

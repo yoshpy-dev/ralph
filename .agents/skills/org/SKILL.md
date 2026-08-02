@@ -22,6 +22,15 @@ Lead(座席の編成・統括を行う識別子)がその機構をどう操作�
 - `ralph.toml` の `[org]` エンベロープ(`model_pool` / `max_seats` /
   `permissions`)が意図通り設定されていること。未設定の場合は既定値
   (`permissions.default = "autonomous"`)で動作する。
+- **bypass 初回承諾(マシンごと 1 回)**: claude の autonomous モード
+  (`--permission-mode bypassPermissions`)は初回起動時に承諾ダイアログを
+  表示する。最初の autonomous 座席を spawn したら herdr で pane を開いて
+  一度だけ承諾すること(以後の座席はスキップされる)。ralph はこの同意を
+  自動化しない。
+- **lead と operator は同一ディレクトリで実行**: org の状態(manifest /
+  receipts)は実行 cwd の `.harness/state/org/` に紐づく。lead 座席と
+  operator が異なる cwd で `ralph org` を実行すると状態が分裂するため、
+  必ず同じディレクトリ(通常はリポジトリルート)で実行する。
 - `--org-id` は組織の実行名前空間。同一 `--org-id` の座席は同一 manifest /
   receipts に記録される。
 
