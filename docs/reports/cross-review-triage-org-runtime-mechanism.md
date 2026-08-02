@@ -36,3 +36,20 @@
 |---|-------------------|------------------|----------|
 
 Categories: false-positive, already-addressed, style-preference, out-of-scope, context-aware-safe
+
+---
+
+# Cycle 2 (2026-08-02)
+
+- Cycle: 2/2 (cap reached)
+- HEAD: 7eeeb81
+- Total reviewer findings: 1
+- After triage: ACTION_REQUIRED=0, WORTH_CONSIDERING=1, DISMISSED=0
+
+Cycle-1 ACTION_REQUIRED #1(冪等チェック順序)は 4dcfc03 で修正され、その修正が生んだ副作用順序退行(cycle-2 self-review MEDIUM 1)も e6a162c で修正済み。Codex の cycle-2 レビューは両修正後の spawn を再確認し、新規指摘なし。
+
+## WORTH_CONSIDERING (cycle 2)
+
+| # | Reviewer finding | Triage rationale | Affected file(s) |
+|---|-------------------|------------------|-------------------|
+| 2' | [P2] read→validate→append 非原子性により並行 spawn で max_seats 超過・同一 seat_id 二重 saga が可能(cycle 1 #2 と同一指摘、修正後の行番号で再報告) | cycle 1 #2 と同一。docs/tech-debt/README.md に登録済みの意図的繰延(単一 Lead の逐次呼び出しが PR① の利用形態。flock 等のプロセス間直列化は Lead が並行 spawn する PR③ までに実装)。PR body の Known gaps に記載する。 | internal/org/spawn.go:204-210 |
