@@ -24,7 +24,7 @@ org runtime PR⑤(最終段): Ralph Loop 自律実行系(orchestrator / pipeline
 - `templates/base/` の上記全ミラー、`docs/plans/templates/ralph-loop-*`、`docs/recipes/ralph-loop*`
 
 ### 削除・改稿(スキル/ルール/ドキュメント)
-- `/loop` skill 削除(4 面ミラー)。`/plan` からフロー選択(標準 vs Ralph Loop)を削除し、常に標準フロー+必要に応じ org runtime(/org)を案内する記述へ
+- `/loop` skill 削除(4 面ミラー)。`/plan` からフロー選択(標準 vs Ralph Loop)を削除し、常に標準フロー+必要に応じ org runtime(/org)を案内する記述へ。**`/work` skill(4 面ミラー)も改稿**: ディレクトリプランを `/loop` へ誘導する分岐を削除し、単一ファイルプラン専用として旧ディレクトリプラン検出時は案内エラーに(Codex 所見 1)
 - `.claude/rules/`: `post-implementation-pipeline.md`(Ralph Loop 節・integration pipeline 節を削除、標準フロー正準順序は存続)、`subagent-policy.md`(/loop 節削除)、`model-routing.md`(Ralph Loop per-phase routing 節削除、receipts 記述は org 側へ言及変更)
 - AGENTS.md(Primary loop を「標準フロー(開発ハーネス)+ org runtime(自律実行面)」の 2 面構成に改稿、repo map 追従)、CLAUDE.md(loop 記述削除、org 追記)、README(Quick start / Operating loop 改稿)、`docs/quality/definition-of-done.md`(Loop 節削除)
 - spec FR-11 の適用範囲注記(開発ハーネス存続の決定)
@@ -33,6 +33,7 @@ org runtime PR⑤(最終段): Ralph Loop 自律実行系(orchestrator / pipeline
 ### 修正(コード、小)
 - **PR④ known gap #5**: デッドマンのプローブ復旧誤クリア — pending record にプローブ可用性を明示保持し、不可用時ベースラインとの比較を activity 扱いしない
 - **PR④ known gap #6**: `WatchdogJoined` を join 成功時のみ true に
+- **insights の履歴互換**(Codex 所見 2): `ralph insights` は既存の歴史イベント(`flow=loop` / `source=pipeline`)の**読み取り互換を保持**する(スキーマ語彙は履歴データの一部)。削除するのは能動的な pipeline 参照(コメント・ドキュメント・`insights-append.sh` の loop 専用経路があれば)のみ。歴史 fixture の読み取り回帰テストを追加
 
 ### AC 検証(spec FR-11)
 - `grep -rE "ralph-orchestrator|ralph-pipeline|RALPH_LOOP_DRIVER" --include="*.sh" --include="*.go" --include="*.toml"` が参照ゼロ(docs/plans/archive・docs/specs・docs/reports・docs/insights の履歴文書は除外)
@@ -68,7 +69,8 @@ org runtime PR⑤(最終段): Ralph Loop 自律実行系(orchestrator / pipeline
 - [ ] AC-3: `[loop]`/`[pipeline]` 設定と対応 env が 3 面から消え、`defaults_sync_test` green。存続 env(`RALPH_STANDARD_MAX_PIPELINE_CYCLES`/`RALPH_CLAUDE_REVIEWER_MODEL`)は動作不変。
 - [ ] AC-4: `/cross-review` が移設ヘルパーで従来通り機能(detect_base_branch / pick_reviewer / count_triage_findings のテスト移設)。
 - [ ] AC-5: 参照ゼロ grep(履歴文書除外)が pass し、CI の全 sync ゲート(check-sync / check-skill-sync / check-pipeline-sync)green。
-- [ ] AC-6: AGENTS.md / CLAUDE.md / README / rules / definition-of-done / spec が新構成(標準フロー=開発ハーネス、org runtime=自律実行面)で整合。
+- [ ] AC-6: AGENTS.md / CLAUDE.md / README / rules / definition-of-done / spec が新構成(標準フロー=開発ハーネス、org runtime=自律実行面)で整合。**spec FR-11 は「撤去対象は Ralph Loop 系のみ・開発ハーネス skill 群は存続」と明文化**し、旧「/work 等も削除」の記述が残っていないことを spec への grep で確認(Codex 所見 3)。`/work` skill に `/loop` への誘導が残っていないことも grep で確認。
+- [ ] AC-6b(insights 履歴互換): 歴史イベント(`flow=loop`/`source=pipeline`)を含む fixture が `ralph insights` で従来通り読める回帰テストが存在する。AC-5 の参照ゼロ grep は insights の履歴語彙(スキーマ値)を除外対象として明記。
 - [ ] AC-7: PR④ known gaps #5/#6 がテスト付きで修正され、tech-debt 行クローズ(旧 shell CLI row 含む)。
 - [ ] AC-8: `go test ./...` / `./scripts/run-verify.sh` green。`ralph init` のスキャフォールドから loop 系が消えることをスモーク確認。
 
