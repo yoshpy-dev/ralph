@@ -65,9 +65,12 @@ RALPH_ESCALATION_MODEL="${RALPH_ESCALATION_MODEL:-opus}"
 # ═══════════════════════════════════════════════════════════════════
 # [org] envelope defaults — mirror internal/config/config.go OrgConfig
 # and templates/base/ralph.toml [org]. Must change in lock-step (see
-# .claude/rules/model-routing.md and defaults_sync_test.go). No `ralph
-# org` verb reads these shell vars — the Go config (internal/config) is
-# the runtime source; these exist only so the three surfaces agree.
+# .claude/rules/model-routing.md and defaults_sync_test.go). Except for
+# RALPH_ORG_AGMSG_HOME below (which the Go binary's
+# driver.ResolveAgmsgHome DOES read directly, as the runtime override for
+# [org].agmsg_home), no `ralph org` verb reads these shell vars — the Go
+# config (internal/config) is the runtime source; the rest exist only so
+# the three surfaces agree.
 # ═══════════════════════════════════════════════════════════════════
 
 RALPH_ORG_DRIVER_POOL="${RALPH_ORG_DRIVER_POOL:-claude,codex}"
@@ -77,6 +80,7 @@ RALPH_ORG_SEAT_BUDGET_MINUTES="${RALPH_ORG_SEAT_BUDGET_MINUTES:-30}"
 RALPH_ORG_TOTAL_BUDGET_MINUTES="${RALPH_ORG_TOTAL_BUDGET_MINUTES:-120}"
 RALPH_ORG_MAX_FIX_ROUNDS="${RALPH_ORG_MAX_FIX_ROUNDS:-2}"
 RALPH_ORG_DEADMAN_MINUTES="${RALPH_ORG_DEADMAN_MINUTES:-10}"
+RALPH_ORG_AGMSG_HOME="${RALPH_ORG_AGMSG_HOME:-~/.agents/skills/agmsg}"
 
 # Export so values reach grandchild processes (e.g. ralph-pipeline.sh
 # spawned from ralph-orchestrator.sh, or codex/claude invoked via xargs).
@@ -88,7 +92,7 @@ export RALPH_VERIFY_MODEL RALPH_TEST_MODEL RALPH_SYNC_DOCS_MODEL RALPH_PR_MODEL
 export RALPH_PROBE_MODEL RALPH_ESCALATION_MODEL
 export RALPH_ORG_DRIVER_POOL RALPH_ORG_MODEL_POOL RALPH_ORG_MAX_SEATS
 export RALPH_ORG_SEAT_BUDGET_MINUTES RALPH_ORG_TOTAL_BUDGET_MINUTES
-export RALPH_ORG_MAX_FIX_ROUNDS RALPH_ORG_DEADMAN_MINUTES
+export RALPH_ORG_MAX_FIX_ROUNDS RALPH_ORG_DEADMAN_MINUTES RALPH_ORG_AGMSG_HOME
 
 # ═══════════════════════════════════════════════════════════════════
 # Validation helpers

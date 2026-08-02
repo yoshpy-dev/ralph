@@ -183,6 +183,8 @@ func TestDefaultsLockStep(t *testing.T) {
 		strconv.Itoa(tomlCfg.Org.Budget.MaxFixRounds), strconv.Itoa(goCfg.Org.Budget.MaxFixRounds))
 	check("org.deadman_minutes", "RALPH_ORG_DEADMAN_MINUTES",
 		strconv.Itoa(tomlCfg.Org.DeadmanMinutes), strconv.Itoa(goCfg.Org.DeadmanMinutes))
+	check("org.agmsg_home", "RALPH_ORG_AGMSG_HOME",
+		tomlCfg.Org.AgmsgHome, goCfg.Org.AgmsgHome)
 
 	// ── loop.claude_reviewer_model ────────────────────────────────────────────
 	// Shell var: RALPH_CLAUDE_REVIEWER_MODEL; toml: [loop].claude_reviewer_model;

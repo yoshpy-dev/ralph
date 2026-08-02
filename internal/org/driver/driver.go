@@ -12,7 +12,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -65,10 +67,24 @@ func HerdrAvailable() error {
 	return checkAvailable("herdr")
 }
 
-// AgmsgAvailable reports whether the agmsg binary is discoverable on PATH.
-// A non-nil error wraps ErrNotInstalled (errors.Is-compatible).
-func AgmsgAvailable() error {
-	return checkAvailable("agmsg")
+// agmsgSendScript is the file AgmsgAvailable stats to decide whether home
+// looks like a usable agmsg installation. send.sh is the most fundamental
+// script in the collection (every seat sends at least one HELLO), so its
+// presence is a reasonable proxy for "agmsg is installed here".
+const agmsgSendScript = "send.sh"
+
+// AgmsgAvailable reports whether home is a usable agmsg installation by
+// checking for <home>/scripts/send.sh. Unlike HerdrAvailable, this does NOT
+// consult PATH: an `agmsg` executable on PATH (e.g. the npm bootstrapper
+// that installs/updates the real script collection) must not be mistaken
+// for the real interface -- only a populated script home counts. A non-nil
+// error wraps ErrNotInstalled (errors.Is-compatible).
+func AgmsgAvailable(home string) error {
+	scriptPath := filepath.Join(home, "scripts", agmsgSendScript)
+	if _, err := os.Stat(scriptPath); err != nil {
+		return fmt.Errorf("agmsg: %w (expected %s)", ErrNotInstalled, scriptPath)
+	}
+	return nil
 }
 
 func checkAvailable(bin string) error {

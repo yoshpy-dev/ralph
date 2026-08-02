@@ -75,7 +75,7 @@ func newOrgRuntime(stateDir, configPath string) (*org.Org, error) {
 		Manifest: org.NewManifestStoreAtPath(filepath.Join(stateDir, "manifest.jsonl")),
 		Receipts: org.NewReceiptStoreAtPath(filepath.Join(stateDir, "model-receipts.jsonl")),
 		Herdr:    driver.Herdr{R: runner},
-		Agmsg:    driver.Agmsg{R: runner},
+		Agmsg:    driver.Agmsg{R: runner, Home: driver.ResolveAgmsgHome(orgCfg.AgmsgHome)},
 	}, nil
 }
 

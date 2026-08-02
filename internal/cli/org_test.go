@@ -24,11 +24,11 @@ func runOrgCmd(t *testing.T, args ...string) (string, error) {
 	return buf.String(), err
 }
 
-// herdrStub and agmsgStub are POSIX-sh fake binaries: they log their argv to
-// a file (path from an env var) and emit canned output, so the org verbs
-// exercise the real driver.ExecRunner -> exec.Command path end to end
-// without needing herdr/agmsg installed (CI has neither). ORG_STUB_FAIL, set
-// per test case, injects a failure at exactly one subcommand boundary.
+// herdrStub is a POSIX-sh fake binary: it logs its argv to a file (path
+// from an env var) and emits canned output, so the org verbs exercise the
+// real driver.ExecRunner -> exec.Command path end to end without needing
+// herdr installed (CI has none). ORG_STUB_FAIL, set per test case, injects
+// a failure at exactly one subcommand boundary.
 const herdrStub = `#!/bin/sh
 if [ -n "$ORG_HERDR_LOG" ]; then
   echo "$@" >> "$ORG_HERDR_LOG"
@@ -48,38 +48,56 @@ esac
 exit 0
 `
 
-const agmsgStub = `#!/bin/sh
+// agmsgSendStub is the fake `scripts/send.sh` that lives under a temp
+// agmsg-home directory (see setupOrgStubPATH). Unlike the old PR① fake
+// (a single `agmsg` binary on PATH parsing --team/--as flags), the real
+// agmsg interface is a script collection: driver.Agmsg shells out to
+// `bash <home>/scripts/send.sh TEAM FROM TO MESSAGE`, so this stub only
+// needs to implement send.sh's own contract (log argv, honor
+// ORG_STUB_FAIL=agmsg:send).
+const agmsgSendStub = `#!/bin/sh
 if [ -n "$ORG_AGMSG_LOG" ]; then
   echo "$@" >> "$ORG_AGMSG_LOG"
 fi
 if [ "$ORG_STUB_FAIL" = "agmsg:send" ]; then
-  for a in "$@"; do
-    if [ "$a" = "send" ]; then
-      echo "stub failure: agmsg send" >&2
-      exit 1
-    fi
-  done
+  echo "stub failure: agmsg send" >&2
+  exit 1
 fi
 echo ""
 exit 0
 `
 
-// setupOrgStubPATH writes stub herdr/agmsg binaries to a fresh temp dir,
-// prepends it to PATH, and points ORG_HERDR_LOG/ORG_AGMSG_LOG at fresh log
-// files. Returns the log file paths so tests can assert on recorded argv.
+// agmsgVersionStub is the plain-text VERSION marker AgmsgAvailable/
+// AgmsgVersion read from an agmsg home directory.
+const agmsgVersionStub = "1.1.13\n"
+
+// setupOrgStubPATH writes a stub herdr binary to a fresh temp dir and
+// prepends it to PATH, and writes a stub agmsg-home directory
+// (scripts/send.sh + VERSION) pointed at via RALPH_ORG_AGMSG_HOME -- the
+// real agmsg interface is a script collection under an "agmsg home", not a
+// PATH-resident binary. Returns the log file paths so tests can assert on
+// recorded argv.
 func setupOrgStubPATH(t *testing.T) (herdrLog, agmsgLog string) {
 	t.Helper()
 	dir := t.TempDir()
 
 	writeStubScript(t, filepath.Join(dir, "herdr"), herdrStub)
-	writeStubScript(t, filepath.Join(dir, "agmsg"), agmsgStub)
-
 	herdrLog = filepath.Join(dir, "herdr.log")
-	agmsgLog = filepath.Join(dir, "agmsg.log")
-
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("ORG_HERDR_LOG", herdrLog)
+
+	agmsgHome := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(agmsgHome, "scripts"), 0o755); err != nil {
+		t.Fatalf("mkdir agmsg scripts dir: %v", err)
+	}
+	writeStubScript(t, filepath.Join(agmsgHome, "scripts", "send.sh"), agmsgSendStub)
+	if err := os.WriteFile(filepath.Join(agmsgHome, "VERSION"), []byte(agmsgVersionStub), 0o644); err != nil {
+		t.Fatalf("write agmsg VERSION: %v", err)
+	}
+	agmsgLog = filepath.Join(dir, "agmsg.log")
+	t.Setenv("RALPH_ORG_AGMSG_HOME", agmsgHome)
 	t.Setenv("ORG_AGMSG_LOG", agmsgLog)
+
 	t.Setenv("ORG_STUB_FAIL", "")
 
 	return herdrLog, agmsgLog
@@ -232,9 +250,10 @@ func TestOrgSpawn_HappyPath_EventSequenceReceiptAndWorkspaceReuse(t *testing.T) 
 
 	// Each agmsg invocation's HELLO message body itself contains newlines,
 	// so raw line count isn't the invocation count -- count by the
-	// "--team" prefix that starts every agmsgArgs call instead.
+	// "ralph-<org_id>" team-name prefix (agmsgTeam's convention) that
+	// starts every send.sh call's argv instead.
 	agmsgLines := readLogLines(t, agmsgLog)
-	if n := countLinesWithPrefix(agmsgLines, "--team"); n != 2 {
+	if n := countLinesWithPrefix(agmsgLines, "ralph-org-a"); n != 2 {
 		t.Fatalf("expected 2 agmsg invocations (one HELLO per seat), got %d (log: %v)", n, agmsgLines)
 	}
 }

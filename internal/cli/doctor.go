@@ -95,7 +95,7 @@ func runDoctorOpts(targetDir string, probeModels bool) error {
 	results = append(results, checkHerdrAvailable())
 
 	// Check 11: agmsg availability (org runtime driver adapter).
-	results = append(results, checkAgmsgAvailable())
+	results = append(results, checkAgmsgAvailable(driver.ResolveAgmsgHome(cfg.Org.AgmsgHome)))
 
 	// Check 12: [org] envelope summary (pool size / max_seats).
 	results = append(results, checkOrgEnvelope(cfg))
@@ -607,16 +607,36 @@ func checkHerdrAvailable() checkResult {
 	return r
 }
 
-// checkAgmsgAvailable is checkHerdrAvailable's counterpart for the agmsg CLI.
-func checkAgmsgAvailable() checkResult {
+// agmsgTestedVersion is the agmsg script interface version this adapter
+// (internal/org/driver/agmsg.go) was verified against. A different VERSION
+// found at runtime is surfaced as an informational note only -- doctor never
+// fails or warns on a version mismatch, since the script interface's actual
+// stability is unknown for versions ralph hasn't been tested against.
+const agmsgTestedVersion = "1.1.13"
+
+// checkAgmsgAvailable is checkHerdrAvailable's counterpart for the agmsg
+// script collection. Unlike herdr, agmsg is NOT a single binary on PATH --
+// home is the resolved agmsg home directory (driver.ResolveAgmsgHome), and
+// availability is decided by the presence of home's scripts/send.sh.
+func checkAgmsgAvailable(home string) checkResult {
 	r := checkResult{Name: "agmsg"}
-	if err := driver.AgmsgAvailable(); err != nil {
+	if err := driver.AgmsgAvailable(home); err != nil {
 		r.Status = "info"
 		r.Detail = "agmsg not installed — org runtime seats unavailable (solo execution unaffected)"
 		return r
 	}
 	r.Status = "pass"
 	r.Detail = "available"
+	version, err := driver.AgmsgVersion(home)
+	if err != nil {
+		return r
+	}
+	r.Detail = fmt.Sprintf("available (version %s)", version)
+	if version != agmsgTestedVersion {
+		r.Status = "info"
+		r.Detail = fmt.Sprintf("available (version %s; tested against %s — behavior differences are possible)",
+			version, agmsgTestedVersion)
+	}
 	return r
 }
 
