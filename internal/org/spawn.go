@@ -469,7 +469,7 @@ func (o *Org) agentStartRetryInterval() time.Duration {
 func (o *Org) agentStartWithRetry(ctx context.Context, name, kind, paneID string, timeoutMS int, agentArgs []string) (int, error) {
 	interval := o.agentStartRetryInterval()
 	var lastErr error
-	for attempt := 0; attempt < maxAgentStartAttempts; attempt++ {
+	for attempt := range maxAgentStartAttempts {
 		_, err := o.Herdr.AgentStart(ctx, name, kind, paneID, timeoutMS, agentArgs)
 		if err == nil {
 			return attempt, nil
