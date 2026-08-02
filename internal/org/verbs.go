@@ -229,7 +229,7 @@ func (o *Org) Stop(p StopParams) StopResult {
 	}
 
 	paneID := seat.PaneID
-	agmsgTeam := seat.AgmsgTeam
+	team := seat.AgmsgTeam
 	var details string
 
 	if p.DryRun {
@@ -245,9 +245,9 @@ func (o *Org) Stop(p StopParams) StopResult {
 		}
 
 		var leaveNote string
-		if agmsgTeam == "" {
+		if team == "" {
 			leaveNote = "leave=skipped: no agmsg_team on record"
-		} else if err := o.Agmsg.Leave(context.Background(), agmsgTeam, p.Seat); err != nil {
+		} else if err := o.Agmsg.Leave(context.Background(), team, p.Seat); err != nil {
 			leaveNote = fmt.Sprintf("leave=failed: %v", err)
 		} else {
 			leaveNote = "leave=ok"
@@ -259,7 +259,7 @@ func (o *Org) Stop(p StopParams) StopResult {
 	err = o.appendEvent(ManifestEvent{
 		TS: o.now(), OrgID: p.OrgID, SeatID: p.Seat, Event: EventStopped,
 		Role: seat.Role, Driver: seat.Driver, Model: seat.Model, Worktree: seat.Worktree,
-		PaneID: paneID, AgmsgTeam: agmsgTeam, DryRun: p.DryRun, Details: details,
+		PaneID: paneID, AgmsgTeam: team, DryRun: p.DryRun, Details: details,
 	})
 	return StopResult{Err: err}
 }

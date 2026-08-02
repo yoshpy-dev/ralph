@@ -86,13 +86,24 @@ RALPH_ORG_AGMSG_HOME="${RALPH_ORG_AGMSG_HOME:-~/.agents/skills/agmsg}"
 # spawned from ralph-orchestrator.sh, or codex/claude invoked via xargs).
 # Without `export`, shell-local defaults set above would be invisible to
 # children that did not source this file directly.
+#
+# RALPH_ORG_AGMSG_HOME is deliberately NOT exported here. The Go binary's
+# driver.ResolveAgmsgHome treats env as the highest-precedence override of
+# `[org].agmsg_home` (env > toml > default). If this default assignment
+# were exported unconditionally, every `ralph org` process launched from a
+# shell that merely sourced this file would see the env var "set" and
+# silently ignore a user-configured `[org].agmsg_home` in ralph.toml — env
+# should only win when the *user* actually set it, not because a pipeline
+# script sourced defaults. The default-assignment line above is kept
+# unexported so `defaults_sync_test.go` (which parses this file's text via
+# regex) still sees the same default value.
 export RALPH_LOOP_DRIVER RALPH_CODEX_SANDBOX RALPH_CODEX_APPROVAL_POLICY RALPH_CLAUDE_REVIEWER_MODEL
 export RALPH_FORCE_MODEL RALPH_IMPLEMENT_MODEL RALPH_SELF_REVIEW_MODEL
 export RALPH_VERIFY_MODEL RALPH_TEST_MODEL RALPH_SYNC_DOCS_MODEL RALPH_PR_MODEL
 export RALPH_PROBE_MODEL RALPH_ESCALATION_MODEL
 export RALPH_ORG_DRIVER_POOL RALPH_ORG_MODEL_POOL RALPH_ORG_MAX_SEATS
 export RALPH_ORG_SEAT_BUDGET_MINUTES RALPH_ORG_TOTAL_BUDGET_MINUTES
-export RALPH_ORG_MAX_FIX_ROUNDS RALPH_ORG_DEADMAN_MINUTES RALPH_ORG_AGMSG_HOME
+export RALPH_ORG_MAX_FIX_ROUNDS RALPH_ORG_DEADMAN_MINUTES
 
 # ═══════════════════════════════════════════════════════════════════
 # Validation helpers

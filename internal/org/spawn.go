@@ -200,6 +200,20 @@ type SpawnResult struct {
 // DryRun path is unchanged: validate the full envelope (ValidateSpawn) up
 // front, then simulate the trail.
 func (o *Org) Spawn(p SpawnParams) SpawnResult {
+	// Identifier shape validation runs first, before any manifest read or
+	// write and before any path is derived from p.OrgID/p.SeatID (see
+	// promptFilePath below). An invalid id is a plain rejection: no
+	// `rejected` manifest event is appended for it (unlike envelope
+	// validation failures further down, via reject()) because a value that
+	// fails this check must never be written into the manifest as if it
+	// were a real seat identifier.
+	if err := ValidateIdentifier("org_id", p.OrgID); err != nil {
+		return SpawnResult{Outcome: SpawnOutcomeRejected, Err: err}
+	}
+	if err := ValidateIdentifier("seat_id", p.SeatID); err != nil {
+		return SpawnResult{Outcome: SpawnOutcomeRejected, Err: err}
+	}
+
 	if p.TimeoutMS <= 0 {
 		p.TimeoutMS = defaultSpawnTimeoutMS
 	}
@@ -351,7 +365,11 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	}
 	retries, err := o.agentStartWithRetry(ctx, herdrAgentName(p.OrgID, p.SeatID), p.Driver, paneID, p.TimeoutMS, agentArgs)
 	if err != nil {
-		return o.failStep(p, "agent_start", err, paneID)
+		// Carry the retry count into the failure's Details too (not just the
+		// success path below) -- agentStartWithRetry already computed it, so
+		// this is a cheap addition that answers "how many attempts were made
+		// before this gave up" for a failed spawn, not only a successful one.
+		return o.failStepWithNote(p, "agent_start", err, paneID, fmt.Sprintf("agent_start_retries=%d", retries))
 	}
 	if retries > 0 {
 		agentStartedDetails = fmt.Sprintf("%s agent_start_retries=%d", agentStartedDetails, retries)
@@ -363,27 +381,8 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 		return SpawnResult{Outcome: SpawnOutcomeFailed, Err: err}
 	}
 
-	// ensureLeadJoined: best-effort join.sh <team> lead claude-code <cwd>. A
-	// clean agmsg team has no "lead" identity registered yet, and agmsg's
-	// roster-based send validation rejects HELLO messages whose from/to
-	// identity was never join.sh'd (agmsg #355) -- so the saga must attempt
-	// to register "lead" before the seat's own Join+Send below. join.sh is
-	// treated as idempotent (re-joining an existing member is a documented
-	// no-op/soft-fail in agmsg), so a lead-join error here does *not* fail
-	// the saga on its own: the definitive, single-authoritative-failure-point
-	// gate is the seat Join immediately below and, ultimately, the HELLO
-	// Send -- if the roster is genuinely missing "lead", Send fails and the
-	// lead-join error recorded here is carried into that failure's Details
-	// for diagnosis (see the failStepWithNote call below).
-	leadJoinErr := o.Agmsg.Join(ctx, team, "lead", agmsgTypeForDriver("claude"), p.Cwd)
-	leadJoinNote := "ok"
-	if leadJoinErr != nil {
-		leadJoinNote = fmt.Sprintf("error=%v", leadJoinErr)
-	}
-	if err := o.appendEvent(ManifestEvent{
-		TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnStep,
-		PaneID: paneID, AgmsgTeam: team, Details: fmt.Sprintf("agmsg_lead_joined %s", leadJoinNote),
-	}); err != nil {
+	leadJoinNote, err := o.ensureLeadJoined(ctx, p, team, paneID)
+	if err != nil {
 		return SpawnResult{Outcome: SpawnOutcomeFailed, Err: err}
 	}
 
@@ -440,6 +439,41 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	}}
 }
 
+// ensureLeadJoined best-effort join.sh's <team> lead claude-code <cwd>. A
+// clean agmsg team has no "lead" identity registered yet, and agmsg's
+// roster-based send validation rejects HELLO messages whose from/to
+// identity was never join.sh'd (agmsg #355) -- so the saga must attempt to
+// register "lead" before the seat's own Join+Send that follows it in Spawn.
+// join.sh is treated as idempotent (re-joining an existing member is a
+// documented no-op/soft-fail in agmsg), so a lead-join error here does *not*
+// fail the saga on its own: the definitive, single-authoritative-failure-
+// point gate is the seat Join immediately after this call and, ultimately,
+// the HELLO Send -- if the roster is genuinely missing "lead", Send fails
+// and the lead-join error recorded here is carried into that failure's
+// Details for diagnosis (see failStepWithNote's doc comment).
+//
+// The returned string is the "agmsg_lead_joined <note>" note recorded on the
+// step's manifest event -- "ok" on success, "error=<err>" otherwise -- so
+// Spawn can also fold it into a later failure's Details. The returned error
+// is only non-nil when appending that manifest event itself fails (a
+// manifest-write failure, not a Join failure); a Join failure is captured in
+// the returned note instead of being treated as fatal, per the doc comment
+// above.
+func (o *Org) ensureLeadJoined(ctx context.Context, p SpawnParams, team, paneID string) (string, error) {
+	leadJoinErr := o.Agmsg.Join(ctx, team, "lead", agmsgTypeForDriver("claude"), p.Cwd)
+	leadJoinNote := "ok"
+	if leadJoinErr != nil {
+		leadJoinNote = fmt.Sprintf("error=%v", leadJoinErr)
+	}
+	if err := o.appendEvent(ManifestEvent{
+		TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnStep,
+		PaneID: paneID, AgmsgTeam: team, Details: fmt.Sprintf("agmsg_lead_joined %s", leadJoinNote),
+	}); err != nil {
+		return leadJoinNote, err
+	}
+	return leadJoinNote, nil
+}
+
 // agmsgTeam is the team name convention used to announce a newly spawned
 // seat to the org's lead (see plan Open questions -- provisional pending
 // PR②'s seat prompt design).
@@ -473,11 +507,18 @@ func (o *Org) agentStartRetryInterval() time.Duration {
 // The returned int is the number of retry attempts made before the call
 // that ultimately returned (0 when the first attempt succeeds or fails with
 // a non-agent_pane_busy error) -- callers use it to annotate the
-// agent_started step's Details for audit purposes.
+// agent_started/agent_start-failure step's Details for audit purposes. On
+// the maxAgentStartAttempts-exhaustion path this is maxAgentStartAttempts-1
+// (the first attempt is attempt 0, not itself a retry, so exhausting all
+// maxAgentStartAttempts calls means exactly maxAgentStartAttempts-1 retries
+// followed it) -- returning maxAgentStartAttempts here would overcount by
+// one retry that was never actually made.
 func (o *Org) agentStartWithRetry(ctx context.Context, name, kind, paneID string, timeoutMS int, agentArgs []string) (int, error) {
 	interval := o.agentStartRetryInterval()
 	var lastErr error
+	var lastAttempt int
 	for attempt := range maxAgentStartAttempts {
+		lastAttempt = attempt
 		_, err := o.Herdr.AgentStart(ctx, name, kind, paneID, timeoutMS, agentArgs)
 		if err == nil {
 			return attempt, nil
@@ -492,7 +533,7 @@ func (o *Org) agentStartWithRetry(ctx context.Context, name, kind, paneID string
 		case <-time.After(interval):
 		}
 	}
-	return maxAgentStartAttempts, lastErr
+	return lastAttempt, lastErr
 }
 
 // herdrAgentName is the single, grep-able definition of the herdr agent-name

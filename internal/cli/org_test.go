@@ -1010,6 +1010,64 @@ func TestOrgRead_UnknownSeat_NonZeroExit(t *testing.T) {
 	}
 }
 
+// TestOrgSpawn_TraversalSeatID_NonZeroExit_NoDriverCalls covers the CLI-layer
+// identifier validation added alongside (*org.Org).Spawn's own check
+// (self-review MEDIUM-2): a shell that reaches `ralph org spawn` with a
+// path-traversal --id must be rejected at flag-parsing time, before
+// newOrgRuntime is even constructed, so zero herdr calls happen.
+func TestOrgSpawn_TraversalSeatID_NonZeroExit_NoDriverCalls(t *testing.T) {
+	herdrLog, _ := setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	out, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "../../../../../../tmp/pwn", "--role", "worker",
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--state-dir", stateDir,
+	)
+	if err == nil {
+		t.Fatalf("expected non-zero exit for a path-traversal --id, output: %s", out)
+	}
+	if !strings.Contains(err.Error(), "seat_id") {
+		t.Errorf("expected error to mention seat_id, got: %v", err)
+	}
+
+	herdrLines := readLogLines(t, herdrLog)
+	if len(herdrLines) != 0 {
+		t.Errorf("expected zero herdr calls for a rejected --id, got: %v", herdrLines)
+	}
+	if _, statErr := os.Stat(stateDir); !os.IsNotExist(statErr) {
+		t.Errorf("expected the state dir to never be created for a rejected --id, stat err=%v", statErr)
+	}
+}
+
+// TestOrgSpawn_InvalidOrgID_NonZeroExit covers the --org-id half of the same
+// CLI-layer gate.
+func TestOrgSpawn_InvalidOrgID_NonZeroExit(t *testing.T) {
+	out, err := runOrgCmd(t,
+		"spawn", "--org-id", "../escape", "--id", "seat-1", "--role", "worker",
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+	)
+	if err == nil {
+		t.Fatalf("expected non-zero exit for a malformed --org-id, output: %s", out)
+	}
+	if !strings.Contains(err.Error(), "org_id") {
+		t.Errorf("expected error to mention org_id, got: %v", err)
+	}
+}
+
+// TestOrgSend_TraversalTo_NonZeroExit covers --to (send), the other
+// user-facing flag that names a target seat id.
+func TestOrgSend_TraversalTo_NonZeroExit(t *testing.T) {
+	stateDir := filepath.Join(t.TempDir(), "state")
+	out, err := runOrgCmd(t, "send", "--org-id", "org-a", "--to", "../escape", "--text", "TYPE: HEARTBEAT", "--state-dir", stateDir)
+	if err == nil {
+		t.Fatalf("expected non-zero exit for a malformed --to, output: %s", out)
+	}
+	if !strings.Contains(err.Error(), "seat_id") {
+		t.Errorf("expected error to mention seat_id, got: %v", err)
+	}
+}
+
 func equalStrings(a, b []string) bool {
 	if len(a) != len(b) {
 		return false

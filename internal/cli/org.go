@@ -50,15 +50,32 @@ func newOrgCmd() *cobra.Command {
 	return cmd
 }
 
-// requireOrgID returns an error unless orgID is non-blank -- the shared
-// --org-id validation every verb needs (global required flag, checked
-// manually rather than via cobra's MarkPersistentFlagRequired so tests and
-// error messages stay simple and uniform).
+// requireOrgID returns an error unless orgID is non-blank and shaped like a
+// safe identifier (org.ValidateIdentifier) -- the shared --org-id validation
+// every verb needs (global required flag, checked manually rather than via
+// cobra's MarkPersistentFlagRequired so tests and error messages stay simple
+// and uniform). Shape validation runs here, before an org.Org is even
+// constructed, as a second gate alongside (*org.Org).Spawn's own check --
+// every CLI entry point that turns an org_id into a path (directly, via
+// spawn, or indirectly, via any state-dir lookup) rejects a malformed value
+// before it reaches that point.
 func requireOrgID(orgID string) error {
 	if strings.TrimSpace(orgID) == "" {
 		return fmt.Errorf("org: --org-id is required")
 	}
-	return nil
+	return org.ValidateIdentifier("org_id", orgID)
+}
+
+// requireSeatIdentifier returns an error unless value is non-blank and
+// shaped like a safe identifier (org.ValidateIdentifier) -- the shared
+// validation for every CLI flag that names a target seat id (spawn's --id,
+// send's --to, wait/read/stop's --seat). flag is used only in the blank-value
+// error message so each call site keeps its own flag name in diagnostics.
+func requireSeatIdentifier(flag, value string) error {
+	if strings.TrimSpace(value) == "" {
+		return fmt.Errorf("org: %s is required", flag)
+	}
+	return org.ValidateIdentifier("seat_id", value)
 }
 
 // newOrgRuntime constructs an org.Org wired to real driver adapters
@@ -130,7 +147,10 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err := requireOrgID(*orgID); err != nil {
 				return err
 			}
-			for flag, val := range map[string]string{"--id": seatID, "--role": role, "--driver": driverName, "--model": model, "--cwd": cwd} {
+			if err := requireSeatIdentifier("--id", seatID); err != nil {
+				return err
+			}
+			for flag, val := range map[string]string{"--role": role, "--driver": driverName, "--model": model, "--cwd": cwd} {
 				if strings.TrimSpace(val) == "" {
 					return fmt.Errorf("org: %s is required", flag)
 				}
@@ -198,8 +218,8 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err := requireOrgID(*orgID); err != nil {
 				return err
 			}
-			if strings.TrimSpace(to) == "" {
-				return fmt.Errorf("org: --to is required")
+			if err := requireSeatIdentifier("--to", to); err != nil {
+				return err
 			}
 			rt, err := newOrgRuntime(*stateDir, *configPath)
 			if err != nil {
@@ -237,8 +257,8 @@ func newOrgWaitCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err := requireOrgID(*orgID); err != nil {
 				return err
 			}
-			if strings.TrimSpace(seat) == "" {
-				return fmt.Errorf("org: --seat is required")
+			if err := requireSeatIdentifier("--seat", seat); err != nil {
+				return err
 			}
 			rt, err := newOrgRuntime(*stateDir, *configPath)
 			if err != nil {
@@ -275,8 +295,8 @@ func newOrgReadCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err := requireOrgID(*orgID); err != nil {
 				return err
 			}
-			if strings.TrimSpace(seat) == "" {
-				return fmt.Errorf("org: --seat is required")
+			if err := requireSeatIdentifier("--seat", seat); err != nil {
+				return err
 			}
 			rt, err := newOrgRuntime(*stateDir, *configPath)
 			if err != nil {
@@ -312,8 +332,8 @@ func newOrgStopCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err := requireOrgID(*orgID); err != nil {
 				return err
 			}
-			if strings.TrimSpace(seat) == "" {
-				return fmt.Errorf("org: --seat is required")
+			if err := requireSeatIdentifier("--seat", seat); err != nil {
+				return err
 			}
 			rt, err := newOrgRuntime(*stateDir, *configPath)
 			if err != nil {

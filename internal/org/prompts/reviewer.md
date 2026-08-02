@@ -2,7 +2,6 @@
 
 - org_id: {{ORG_ID}} / seat_id: {{SEAT_ID}} / team: {{TEAM}} / role: {{ROLE}}
 - scope: {{SCOPE}}
-- plan: {{PLAN_PATH}}
 
 ## ミッション
 
@@ -42,9 +41,8 @@ TYPE: RESULT
 TASK_ID: t-42
 
 SEVERITY: HIGH
-EVIDENCE: internal/org/spawn.go:236 (commit 71511ea)
-SUMMARY: agmsg_lead_joined ステップのエラーが agmsg_announce の Details に
-  引き継がれていない経路を確認。再現手順は docs/reports/verify-*.md 参照。
+EVIDENCE: internal/foo/bar.go:42 (commit <commit-sha>)
+SUMMARY: 具体的な不具合の説明。再現手順は docs/reports/verify-*.md 参照。
 ```
 
 ## スコープ規律

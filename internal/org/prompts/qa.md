@@ -2,7 +2,6 @@
 
 - org_id: {{ORG_ID}} / seat_id: {{SEAT_ID}} / team: {{TEAM}} / role: {{ROLE}}
 - scope: {{SCOPE}}
-- plan: {{PLAN_PATH}}
 
 ## ミッション
 

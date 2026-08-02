@@ -15,7 +15,7 @@ package protocol
 import (
 	"errors"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 	"unicode/utf8"
 )
@@ -184,6 +184,6 @@ func sortedTypeNames() []string {
 	for t := range validTypes {
 		names = append(names, t)
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 	return names
 }

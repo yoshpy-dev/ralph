@@ -20,10 +20,13 @@ func TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted(t *testing.T) {
 	if !ok {
 		t.Fatal("expected ok=true for the built-in reviewer template")
 	}
-	for _, want := range []string{"org-a", "reviewer-1", "ralph-org-a", "reviewer", "internal/org/**", "docs/plans/active/2026-08-02-org-runtime-seats.md"} {
+	for _, want := range []string{"org-a", "reviewer-1", "ralph-org-a", "reviewer", "internal/org/**"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("expected rendered reviewer prompt to contain %q, got:\n%s", want, text)
 		}
+	}
+	if strings.Contains(text, "PlanPath") || strings.Contains(text, "{{PLAN_PATH}}") {
+		t.Errorf("expected no {{PLAN_PATH}} placeholder or leftover text in the rendered reviewer prompt, got:\n%s", text)
 	}
 	if strings.Contains(text, "{{") {
 		t.Errorf("expected no unsubstituted {{...}} placeholders for known vars, got:\n%s", text)
@@ -75,7 +78,7 @@ func TestRenderRolePrompt_UnknownRole_NoTemplate(t *testing.T) {
 
 func TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged(t *testing.T) {
 	// Documents the contract: an unknown {{PLACEHOLDER}} that never appears
-	// in the actual templates would be left as-is (only the 6 known
+	// in the actual templates would be left as-is (only the 5 known
 	// variable names are substituted). We can't inject a fake template
 	// through the embedded FS, so this test asserts the substitution
 	// behavior directly against RenderRolePrompt's replacer semantics by
@@ -96,5 +99,26 @@ func TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged(t *testing.T
 	}
 	if !strings.Contains(text, "{{NOT_A_KNOWN_VAR}}") {
 		t.Errorf("expected a value that itself looks like a placeholder to be inserted verbatim, not recursively substituted, got:\n%s", text)
+	}
+}
+
+func TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText(t *testing.T) {
+	// self-review finding M5: an empty --scope must not render as a bare
+	// "scope: " with nothing after the colon -- RenderRolePrompt substitutes
+	// an explicit "not specified" default instead.
+	vars := testRolePromptVars()
+	vars.Scope = ""
+	text, ok, err := RenderRolePrompt("reviewer", vars)
+	if err != nil {
+		t.Fatalf("RenderRolePrompt: unexpected error: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected ok=true for the built-in reviewer template")
+	}
+	if strings.Contains(text, "scope: \n") || strings.Contains(text, "scope:  ") {
+		t.Errorf("expected no bare empty scope in the rendered prompt, got:\n%s", text)
+	}
+	if !strings.Contains(text, defaultScopeText) {
+		t.Errorf("expected the rendered prompt to contain the default scope text %q, got:\n%s", defaultScopeText, text)
 	}
 }

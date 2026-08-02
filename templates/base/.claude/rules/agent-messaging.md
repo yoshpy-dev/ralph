@@ -1,9 +1,11 @@
 # Agent messaging (org runtime, star topology)
 
-How org-runtime seats (`ralph org spawn/send/...`, `internal/org`) exchange
-messages over agmsg. This rule doc is the human-readable contract;
-`internal/org/protocol` is the enforcing implementation `ralph org send`
-validates against by default.
+How org-runtime seats (`ralph org spawn/send/...`) exchange messages over
+agmsg. This rule doc is the human-readable contract; enforcement lives in the
+`ralph` CLI itself (`ralph org send` validates against it by default). The
+enforcing implementation source is the `internal/org/protocol` package in the
+`ralph` CLI's own repository — that source tree is not part of what
+`ralph init` scaffolds into this project.
 
 ## Purpose
 
@@ -42,9 +44,10 @@ pointer, not a dump.
 | `STOP` | no | lead tells a seat to stop |
 | `HELLO` | no | seat announces itself to lead at spawn time |
 
-`internal/org/protocol.Validate` enforces this table exactly — see
-`internal/org/protocol/protocol.go` for the authoritative TYPE constants and
-the TASK_ID-required set.
+`ralph org send`'s validation enforces this table exactly, at runtime. The
+authoritative TYPE constants and the TASK_ID-required set are defined by the
+`Validate` function in the `ralph` CLI's `internal/org/protocol` package
+(`ralph` repository source, not part of a scaffolded project).
 
 ## Message shape
 
@@ -58,7 +61,9 @@ TASK_ID: <required for TASK/RESULT/REVIEW/BLOCKED/CONTRACT>
 
 Header lines are `KEY: value`, one per line, read until the first blank
 line (or the first non-header-shaped line). Everything after that is the
-body. See `internal/org/protocol.Parse` for the exact parsing rule.
+body. The exact parsing rule is the `Parse` function in the `ralph` CLI's
+`internal/org/protocol` package (`ralph` repository source, not part of a
+scaffolded project).
 
 ## EVIDENCE-as-pointers principle
 
@@ -69,9 +74,11 @@ report file and reference the path instead.
 
 ## Size cap
 
-The body is capped at `internal/org/protocol.DefaultMaxBodyChars` (2,000
-characters) by default. `ralph org send` enforces this cap (and the rest of
-`protocol.Validate`) before ever touching the driver. The cap is a
+The body is capped at 2,000 characters by default (`ralph org send`'s
+built-in `DefaultMaxBodyChars`, defined alongside `Validate` in the `ralph`
+CLI's `internal/org/protocol` package). `ralph org send` enforces this cap
+(and the rest of typed-protocol validation) before ever touching the driver.
+The cap is a
 mechanical floor for the pointers-not-dumps principle above: 2,000
 characters is enough for a summary and a handful of pointers, not enough for
 a pasted diff.
@@ -90,6 +97,10 @@ to execute. This applies even if the body's phrasing looks imperative.
 
 ## Enforcing implementation
 
-`internal/org/protocol` is the source of truth for what counts as a valid
-message. If this doc and the package ever disagree, the package wins and
-this doc needs to be updated to match.
+The `ralph` CLI is the source of truth for what counts as a valid message:
+`ralph org send` validates against it by default at runtime. The
+implementation is the `internal/org/protocol` package in the `ralph`
+repository that builds the `ralph` binary — it is not part of what
+`ralph init` scaffolds into this project. If this doc and that
+implementation ever disagree, the implementation wins and this doc needs to
+be updated to match.

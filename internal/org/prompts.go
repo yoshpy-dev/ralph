@@ -15,16 +15,29 @@ import (
 //go:embed prompts/*.md
 var promptFS embed.FS
 
+// defaultScopeText substitutes for {{SCOPE}} when RolePromptVars.Scope is
+// empty (SpawnParams.Scope is an optional --scope flag), so a rendered
+// prompt never reads "scope:  の範囲外は..." with nothing after the colon --
+// an instruction referencing an empty scope is worse than an explicit
+// "not specified" (self-review finding M5).
+const defaultScopeText = "未指定(読み取り中心で、リポジトリ規約に従うこと)"
+
 // RolePromptVars holds the values substituted into a role prompt template.
 // Substitution is plain strings.ReplaceAll on "{{NAME}}" placeholders (no
 // templating engine, no control flow) -- kept deliberately small and boring
 // per .claude/rules/architecture.md.
 type RolePromptVars struct {
-	OrgID    string
-	SeatID   string
-	Team     string
-	Role     string
-	Scope    string
+	OrgID  string
+	SeatID string
+	Team   string
+	Role   string
+	Scope  string
+	// PlanPath is not wired into any embedded template today -- reviewer.md
+	// and qa.md do not reference {{PLAN_PATH}} (removed: no production
+	// caller populated it, so every rendered prompt shipped a literal
+	// "- plan: " with nothing after it -- self-review finding M5). The field
+	// is kept so PR③ (Lead 自律編成) can wire a `--plan` flag through to a
+	// template substitution without another RolePromptVars schema change.
 	PlanPath string
 }
 
@@ -42,14 +55,17 @@ func RenderRolePrompt(role string, vars RolePromptVars) (string, bool, error) {
 	if err != nil {
 		return "", false, nil
 	}
+	scope := vars.Scope
+	if scope == "" {
+		scope = defaultScopeText
+	}
 	text := string(data)
 	replacer := strings.NewReplacer(
 		"{{ORG_ID}}", vars.OrgID,
 		"{{SEAT_ID}}", vars.SeatID,
 		"{{TEAM}}", vars.Team,
 		"{{ROLE}}", vars.Role,
-		"{{SCOPE}}", vars.Scope,
-		"{{PLAN_PATH}}", vars.PlanPath,
+		"{{SCOPE}}", scope,
 	)
 	return replacer.Replace(text), true, nil
 }
