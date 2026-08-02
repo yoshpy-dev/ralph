@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"os"
@@ -1614,7 +1615,7 @@ func TestNewWatchdogHooks_WatcherDisabled_NoOp(t *testing.T) {
 	rt := newWatchdogTestOrg(t, t.TempDir())
 	rt.Config.Watchdog.WatcherEnabled = false
 
-	hooks, wg := newWatchdogHooks(rt, io.Discard)
+	hooks, wg := newWatchdogHooks(context.Background(), rt, io.Discard)
 	if hooks.OnSemanticTrigger != nil {
 		t.Fatal("expected nil OnSemanticTrigger when watcher_enabled is false")
 	}
@@ -1634,7 +1635,7 @@ func TestNewWatchdogHooks_Dispatch_NeverBlocksCaller(t *testing.T) {
 	rt := newWatchdogTestOrg(t, t.TempDir())
 
 	var stderr bytes.Buffer
-	hooks, wg := newWatchdogHooks(rt, &stderr)
+	hooks, wg := newWatchdogHooks(context.Background(), rt, &stderr)
 
 	start := time.Now()
 	hooks.OnSemanticTrigger("org-a", "seat-1", "stall", "seat stalled 20m")
@@ -1658,6 +1659,38 @@ func TestNewWatchdogHooks_Dispatch_NeverBlocksCaller(t *testing.T) {
 	}
 }
 
+// TestNewWatchdogHooks_CtxCancelled_RunWatcherReturnsQuickly pins the
+// self-review cycle-2 M2-2 fix: newWatchdogHooks must thread its ctx
+// argument (newOrgWatchCmd passes cmd.Context()) into the tracked
+// goroutine's RunWatcher call instead of a fixed context.Background(). A
+// pre-cancelled ctx here simulates SIGINT having already cancelled the
+// command's context before the goroutine's RunWatcher call starts; if the
+// fix regressed to context.Background(), this would ignore the
+// cancellation and only return once the 3s claude stub finishes (bounded by
+// watcherInvokeTimeout, not by ctx).
+func TestNewWatchdogHooks_CtxCancelled_RunWatcherReturnsQuickly(t *testing.T) {
+	writeClaudeStub(t, "#!/bin/sh\nsleep 3\n")
+	rt := newWatchdogTestOrg(t, t.TempDir())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // simulate a SIGINT-cancelled cmd.Context() before dispatch
+
+	var stderr bytes.Buffer
+	hooks, wg := newWatchdogHooks(ctx, rt, &stderr)
+
+	start := time.Now()
+	hooks.OnSemanticTrigger("org-a", "seat-1", "stall", "seat stalled 20m")
+	wg.Wait()
+	elapsed := time.Since(start)
+
+	if elapsed > 1*time.Second {
+		t.Fatalf("RunWatcher did not honor the cancelled command context: took %v (want well under the 3s stub sleep)", elapsed)
+	}
+	if n := receiptCount(t, rt); n < 1 {
+		t.Fatalf("expected a watcher_error receipt for the cancelled-context invocation, got %d", n)
+	}
+}
+
 // TestNewWatchdogHooks_SingleFlight_SecondTriggerSkippedWhileBusy pins the
 // "at most one in flight" requirement: a second semantic trigger arriving
 // while the first is still in flight is skipped (recorded to stderr), never
@@ -1673,7 +1706,7 @@ func TestNewWatchdogHooks_SingleFlight_SecondTriggerSkippedWhileBusy(t *testing.
 	rt := newWatchdogTestOrg(t, t.TempDir())
 
 	var stderr bytes.Buffer
-	hooks, wg := newWatchdogHooks(rt, &stderr)
+	hooks, wg := newWatchdogHooks(context.Background(), rt, &stderr)
 
 	hooks.OnSemanticTrigger("org-a", "seat-1", "stall", "evidence-1")
 	hooks.OnSemanticTrigger("org-a", "seat-2", "stall", "evidence-2")
@@ -1718,7 +1751,7 @@ func TestNewWatchdogHooks_AbnormalVerdict_SendsAlertToLead(t *testing.T) {
 	stateDir := t.TempDir()
 	rt := newWatchdogTestOrg(t, stateDir)
 	var stderr bytes.Buffer
-	hooks, wg := newWatchdogHooks(rt, &stderr)
+	hooks, wg := newWatchdogHooks(context.Background(), rt, &stderr)
 
 	hooks.OnSemanticTrigger("org-a", "seat-1", "scope_change", "seat worktree changed")
 

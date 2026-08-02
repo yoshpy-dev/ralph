@@ -1092,6 +1092,138 @@ func TestWatch_Deadman_CrossOrgActivity_DoesNotClearPendingAlert(t *testing.T) {
 	}
 }
 
+// TestWatch_Deadman_UnrelatedSeatEvent_DoesNotClearPendingAlert pins the
+// self-review cycle-2 M2-1 fix: leadActivityEventCount must be
+// lead-attributable, not merely org-scoped. AR-1 (cycle 1) closed the
+// cross-org gap; this pins the remaining in-org gap it left open -- a
+// `sent` event recorded by a DIFFERENT, unrelated seat in the SAME org must
+// not count as lead activity and clear seat-1's still-unanswered pending
+// alert.
+func TestWatch_Deadman_UnrelatedSeatEvent_DoesNotClearPendingAlert(t *testing.T) {
+	o, h, _, clk := testWatchOrg(t)
+	o.Config.DeadmanMinutes = 5
+	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn seat-1 failed: %+v", r)
+	}
+	if r := o.Spawn(watchSpawnParams("org-a", "seat-2", "worker")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn seat-2 failed: %+v", r)
+	}
+	target := herdrAgentName("org-a", "seat-1")
+	h.AgentGetErrSeq[target] = []error{errors.New("herdr: agent not found")} // sticky liveness ALERT for seat-1
+
+	run, statusPath, escalationsPath := newTestWatchRun(o, nil, nil, &bytes.Buffer{})
+	status, err := loadWatchStatus(statusPath, "org-a")
+	if err != nil {
+		t.Fatalf("loadWatchStatus: %v", err)
+	}
+
+	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		t.Fatalf("cycle 1 (raises seat-1's liveness ALERT): %v", err)
+	}
+	if len(status.PendingAlerts) != 1 {
+		t.Fatalf("expected exactly 1 pending alert after cycle 1, got %+v", status.PendingAlerts)
+	}
+
+	// seat-2's own event -- neither lead-attributed nor a stop/disband --
+	// must not count as "lead activity" for seat-1's pending alert.
+	if err := o.Manifest.Append(ManifestEvent{TS: clk.Now().UTC().Format(time.RFC3339), OrgID: "org-a", SeatID: "seat-2", Event: EventSent, Details: "seat-2's own traffic"}); err != nil {
+		t.Fatalf("append seat-2 event: %v", err)
+	}
+
+	clk.Advance(6 * time.Minute) // past DeadmanMinutes, no genuine lead activity
+	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		t.Fatalf("cycle 2 (deadman sweep): %v", err)
+	}
+	lines := readJSONLFile(t, escalationsPath)
+	if len(lines) != 1 {
+		t.Fatalf("expected seat-1's pending alert to still escalate (seat-2's own sent event must not count as lead activity), got %d escalation(s): %v", len(lines), lines)
+	}
+}
+
+// TestWatch_Deadman_LeadSpawnedEvent_ClearsPendingAlert pins that a manifest
+// event naming lead itself (SeatID == LeadIdentity) counts as lead activity
+// regardless of its Event type -- here the lead's own `spawned` event, the
+// concrete case a session-promoted-lead org produces when lead
+// self-registers via `ralph org spawn --id lead`.
+func TestWatch_Deadman_LeadSpawnedEvent_ClearsPendingAlert(t *testing.T) {
+	o, h, _, clk := testWatchOrg(t)
+	o.Config.DeadmanMinutes = 5
+	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn seat-1 failed: %+v", r)
+	}
+	target := herdrAgentName("org-a", "seat-1")
+	h.AgentGetErrSeq[target] = []error{errors.New("herdr: agent not found")}
+
+	run, statusPath, escalationsPath := newTestWatchRun(o, nil, nil, &bytes.Buffer{})
+	status, err := loadWatchStatus(statusPath, "org-a")
+	if err != nil {
+		t.Fatalf("loadWatchStatus: %v", err)
+	}
+
+	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		t.Fatalf("cycle 1 (raises ALERT): %v", err)
+	}
+
+	// Lead spawns itself between cycles.
+	if r := o.Spawn(watchSpawnParams("org-a", LeadIdentity, LeadIdentity)); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn lead failed: %+v", r)
+	}
+
+	clk.Advance(6 * time.Minute) // past DeadmanMinutes, but lead spawned in between
+	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		t.Fatalf("cycle 2: %v", err)
+	}
+	assertNoEscalations(t, escalationsPath)
+	if len(status.PendingAlerts) != 0 {
+		t.Errorf("expected the pending alert to clear after lead's own spawned event, got %+v", status.PendingAlerts)
+	}
+}
+
+// TestWatch_Deadman_ManualStopOfOtherSeat_ClearsPendingAlert pins that a
+// manual (operator-issued, non-watchdog) `stopped` event for a DIFFERENT
+// seat still counts as lead activity: someone had to run `ralph org stop`
+// for it to exist, and issuing that command is itself a lead-driven action
+// -- unlike the watchdog's own cutoff `stopped` events
+// (reason=watchdog_..., excluded by
+// TestWatch_Deadman_WatchdogsOwnCutoffEvent_DoesNotClearPendingAlert above),
+// which are self-inflicted and prove nothing about lead responsiveness.
+func TestWatch_Deadman_ManualStopOfOtherSeat_ClearsPendingAlert(t *testing.T) {
+	o, h, _, clk := testWatchOrg(t)
+	o.Config.DeadmanMinutes = 5
+	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn seat-1 failed: %+v", r)
+	}
+	if r := o.Spawn(watchSpawnParams("org-a", "seat-2", "worker")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn seat-2 failed: %+v", r)
+	}
+	target := herdrAgentName("org-a", "seat-1")
+	h.AgentGetErrSeq[target] = []error{errors.New("herdr: agent not found")}
+
+	run, statusPath, escalationsPath := newTestWatchRun(o, nil, nil, &bytes.Buffer{})
+	status, err := loadWatchStatus(statusPath, "org-a")
+	if err != nil {
+		t.Fatalf("loadWatchStatus: %v", err)
+	}
+
+	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		t.Fatalf("cycle 1 (raises seat-1's ALERT): %v", err)
+	}
+
+	// A human operator manually stops seat-2 (no watchdog_ reason prefix).
+	if r := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-2", Reason: "operator: no longer needed"}); r.Err != nil {
+		t.Fatalf("stop seat-2: %v", r.Err)
+	}
+
+	clk.Advance(6 * time.Minute)
+	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		t.Fatalf("cycle 2: %v", err)
+	}
+	assertNoEscalations(t, escalationsPath)
+	if len(status.PendingAlerts) != 0 {
+		t.Errorf("expected the pending alert to clear after a manual stop of another seat, got %+v", status.PendingAlerts)
+	}
+}
+
 // TestWatch_Stall_UsesLatestEventOfAnyType_NotOnlyStateEvents pins the
 // self-review M-6 fix: the stall condition's time term must track the
 // seat's latest manifest event of ANY type, not Roster's SeatStatus.TS

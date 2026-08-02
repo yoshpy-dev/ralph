@@ -688,7 +688,7 @@ func newOrgWatchCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			effectiveInterval := org.ResolveWatchInterval(time.Duration(intervalSeconds)*time.Second, rt.Config.Watchdog)
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "watching org %q (interval=%s once=%t state-dir=%s)\n",
 				*orgID, effectiveInterval, once, resolvedStateDir)
-			hooks, watcherWG := newWatchdogHooks(rt, cmd.ErrOrStderr())
+			hooks, watcherWG := newWatchdogHooks(cmd.Context(), rt, cmd.ErrOrStderr())
 			err = rt.RunWatch(cmd.Context(), org.WatchParams{
 				OrgID:     *orgID,
 				Interval:  effectiveInterval,
@@ -701,7 +701,12 @@ func newOrgWatchCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			// finished, killing the process before an OnSemanticTrigger
 			// goroutine it had just started could ever produce a watcher
 			// receipt or ALERT. Bounded by RunWatcher's own
-			// watcherInvokeTimeout, so this can never hang the command.
+			// watcherInvokeTimeout, and -- for the long-running (non-`--once`)
+			// mode -- by cmd.Context() itself: newWatchdogHooks threads
+			// cmd.Context() into the tracked goroutine's RunWatcher call
+			// (self-review cycle-2 M2-2 fix), so a SIGINT-cancelled context
+			// unwinds an in-flight judgment call immediately instead of
+			// running out the full 60s bound.
 			watcherWG.Wait()
 			return err
 		},
@@ -747,7 +752,16 @@ func newOrgWatchCmd(orgID, stateDir, configPath *string) *cobra.Command {
 // under an in-flight on-demand judgment call before it produces a watcher
 // receipt or ALERT. When WatcherEnabled is false the returned WaitGroup has
 // nothing ever added to it, so Wait() returns immediately.
-func newWatchdogHooks(rt *org.Org, stderr io.Writer) (org.WatchHooks, *sync.WaitGroup) {
+//
+// ctx is the command's own context (cmd.Context() at the newOrgWatchCmd call
+// site), not context.Background() (self-review cycle-2 M2-2 fix): the
+// tracked goroutine's RunWatcher/SendWatchdogAlert calls are threaded through
+// it so a SIGINT-cancelled ctx unwinds an in-flight judgment call right away
+// instead of running out RunWatcher's own watcherInvokeTimeout (a fixed 60s
+// bound) first -- that gap regressed the long-running (non-`--once`) `ralph
+// org watch` mode's Ctrl-C responsiveness when the M-5 fix above first added
+// this WaitGroup.
+func newWatchdogHooks(ctx context.Context, rt *org.Org, stderr io.Writer) (org.WatchHooks, *sync.WaitGroup) {
 	var wg sync.WaitGroup
 	if !rt.Config.Watchdog.WatcherEnabled {
 		return org.WatchHooks{}, &wg
@@ -763,7 +777,7 @@ func newWatchdogHooks(rt *org.Org, stderr io.Writer) (org.WatchHooks, *sync.Wait
 			}
 			wg.Go(func() {
 				defer atomic.StoreInt32(&busy, 0)
-				verdict, err := rt.RunWatcher(context.Background(), rt.Config.Watchdog, org.WatcherParams{
+				verdict, err := rt.RunWatcher(ctx, rt.Config.Watchdog, org.WatcherParams{
 					OrgID: orgID, SeatID: seatID, ConditionType: conditionType, Evidence: evidence,
 				})
 				if err != nil {
@@ -776,7 +790,7 @@ func newWatchdogHooks(rt *org.Org, stderr io.Writer) (org.WatchHooks, *sync.Wait
 				}
 				msg := fmt.Sprintf("TYPE: ALERT\nORG_ID: %s\nSEAT: %s\nCONDITION: watcher_%s\n\nwatcher verdict=%s reason=%s",
 					orgID, seatID, conditionType, verdict.Verdict, verdict.Reason)
-				if err := rt.SendWatchdogAlert(context.Background(), orgID, msg); err != nil {
+				if err := rt.SendWatchdogAlert(ctx, orgID, msg); err != nil {
 					_, _ = fmt.Fprintf(stderr, "watchdog: failed to ALERT lead for org %q seat %q verdict %q: %v\n",
 						orgID, seatID, verdict.Verdict, err)
 				}

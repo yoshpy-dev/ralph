@@ -22,8 +22,9 @@ import (
 // evaluates one cycle at a time (evaluateCycle below), never invokes an LLM
 // itself (the on-demand semantic-judgment watcher is a separate Slice 4
 // concern reached only through the WatchHooks.OnSemanticTrigger seam), and
-// persists its own heartbeat/dedupe state to watch-status.json so a restart
-// does not re-fire already-handled conditions.
+// persists its own heartbeat/dedupe state to watch-status-<org_id>.json (see
+// WatchStatusFileName) so a restart does not re-fire already-handled
+// conditions.
 
 // watchdogIdentity is the agmsg identity `ralph org watch` joins/sends
 // under -- distinct from LeadIdentity and every seat id, so ALERT traffic
@@ -129,8 +130,9 @@ type WatchParams struct {
 	// path that needs no real ticker/sleep. Zero (the default for a real
 	// long-running `ralph org watch`) means "run until ctx is done".
 	Cycles int
-	// StatusDir is the directory watch-status.json and escalations.jsonl
-	// live in (typically the resolved org state-dir, the same directory the
+	// StatusDir is the directory watch-status-<org_id>.json (see
+	// WatchStatusFileName) and escalations.jsonl live in (typically the
+	// resolved org state-dir, the same directory the
 	// manifest/receipts stores are rooted at). Required.
 	StatusDir string
 	// GitStatus overrides the scope-change condition's git probe; nil uses
@@ -148,9 +150,12 @@ type WatchParams struct {
 // Active transitions drive the "1 alert/1 cutoff until recovery" rule: a
 // condition already Active is never re-alerted; it clears (Active: false)
 // the first cycle it is no longer observed true, so a later re-occurrence
-// re-alerts. Cutoff is a one-way ratchet -- once true it is never cleared,
-// so a budget cutoff is attempted and ALERTed at most once per key, ever
-// (Codex advisory finding 1).
+// re-alerts. Cutoff is a one-way ratchet -- once true it is never cleared, so
+// a budget cutoff is ALERTed at most once per key, ever, and is retried
+// until one Stop pass succeeds (self-review H-2 fix; see
+// evaluateTotalBudget/evaluateSeatBudget's own doc comments) -- only the
+// ALERT is capped at once per key, not the Stop attempt itself (Codex
+// advisory finding 1).
 type watchConditionRecord struct {
 	Active  bool   `json:"active"`
 	Cutoff  bool   `json:"cutoff"`
@@ -192,7 +197,7 @@ type watchSeatSnapshot struct {
 	GitStatusSeen bool   `json:"git_status_seen,omitempty"`
 }
 
-// watchStatusFile is the JSON shape persisted to WatchStatusRelName.
+// watchStatusFile is the JSON shape persisted to WatchStatusFileName(org_id).
 type watchStatusFile struct {
 	OrgID          string                           `json:"org_id"`
 	LastCycleTS    string                           `json:"last_cycle_ts"`
@@ -346,9 +351,9 @@ func realEscalate(ctx context.Context, message string) error {
 // 30s fallback. Exported so a caller that needs to report the effective
 // cadence before RunWatch itself resolves it internally (e.g. `ralph org
 // watch`'s startup banner, self-review LOW fix: the banner used to print the
-// raw --interval-seconds flag value, which is 0 by default -- the effective
-// interval -- rather than the interval that is actually running) does not
-// have to duplicate this fallback chain.
+// raw --interval-seconds flag value, which is 0 by default, rather than the
+// interval that is actually running) does not have to duplicate this
+// fallback chain.
 func ResolveWatchInterval(requested time.Duration, cfg config.OrgWatchdogConfig) time.Duration {
 	interval := requested
 	if interval <= 0 {
@@ -523,11 +528,15 @@ func (w *watchRun) evaluateTotalBudget(ctx context.Context, status *watchStatusF
 	}
 	if len(activeSeats) == 0 {
 		// Cross-review AR-2: no active seats means nothing to cut off. Without
-		// this guard, a re-watched org whose seats were all already stopped
-		// (e.g. by a prior cutoff, or normal completion) would still send a
-		// spurious total-budget ALERT and register an AC-5 pending-alert
-		// deadman record every cycle, since observed > budget stays true
-		// forever once the org has aged past it.
+		// this guard, the loop below ranges over an empty activeSeats, so
+		// allStopped stays vacuously true and the Cutoff ratchet gets set
+		// (self-review H-2's own "one cutoff per key, ever" rule, watch.go's
+		// rec.Cutoff early return above) even though no seat was ever
+		// actually stopped -- permanently disabling this key's enforcement
+		// for any seat spawned into the org afterward, with only a single
+		// spurious ALERT to show for it (see
+		// TestWatch_TotalBudgetCutoff_NoActiveSeats_NoAlertNoEscalation_ThenCutsNewSeat's
+		// third phase, the concrete regression this guard prevents).
 		return
 	}
 	start, err := time.Parse(time.RFC3339, status.OrgStartTS)
@@ -776,15 +785,21 @@ func (w *watchRun) sendAlert(ctx context.Context, status *watchStatusFile, orgID
 	}
 }
 
-// leadActivityEventCount counts manifest events for orgID that are not the
-// watchdog's own cutoff writes (self-review M-4 fix, org-scoped per
-// cross-review AR-1): every `stopped` event a budget cutoff produces carries
-// "reason=watchdog_..." in its Details (see evaluateTotalBudget/
-// evaluateSeatBudget's Reason format), so without the watchdog-event filter
-// the deadman's "has anything happened since the ALERT" manifest-growth
-// source counted the watchdog's own later cutoff of an unrelated seat as if
-// it were genuine lead/seat activity -- clearing a pending alert that
-// nothing had actually responded to. The orgID filter additionally excludes
+// leadActivityEventCount counts manifest events attributable to lead for
+// orgID (self-review M-4 fix, org-scoped per cross-review AR-1, seat-
+// attributed per self-review cycle-2 M2-1): a genuinely unresponsive lead
+// must not have its deadman escalation silently cleared by an unrelated
+// seat's own manifest traffic (e.g. a `sent` event another seat produces),
+// so an event only counts here when either (a) it names lead itself
+// (ev.SeatID == LeadIdentity -- lead's own spawn event or any message it
+// sends carries this), or (b) it is a `stopped`/`disbanded` event that is
+// not the watchdog's own cutoff write: a manual (non-watchdog) stop or
+// disband of another seat is a lead-driven action lead had to take, so it is
+// still evidence lead is alive and responding, even though the event itself
+// names the stopped seat, not lead. Every `stopped` event a budget cutoff
+// produces carries "reason=watchdog_..." in its Details (see
+// evaluateTotalBudget/evaluateSeatBudget's Reason format), which is what
+// excludes the watchdog's own cutoffs from (b). The orgID filter excludes
 // another org's activity in the same shared manifest: without it, a new
 // event in a different, active org would clear a stalled org's pending
 // deadman alert even though nothing happened in the stalled org itself.
@@ -794,10 +809,13 @@ func leadActivityEventCount(events []ManifestEvent, orgID string) int {
 		if ev.OrgID != orgID {
 			continue
 		}
-		if strings.Contains(ev.Details, "reason=watchdog_") {
+		if ev.SeatID == LeadIdentity {
+			n++
 			continue
 		}
-		n++
+		if (ev.Event == EventStopped || ev.Event == EventDisbanded) && !strings.Contains(ev.Details, "reason=watchdog_") {
+			n++
+		}
 	}
 	return n
 }
