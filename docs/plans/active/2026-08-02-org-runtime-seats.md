@@ -133,6 +133,8 @@ org runtime PR②: 座席を実際に動かせるようにする。agmsg アダ�
 
 - **実機スモーク第4の検出**(同日): `despawn.sh` は agmsg 自身の `spawn.sh` で起動したエージェント専用で、`join.sh` 参加メンバーには placement record がなく実質 no-op(exit 0)。roster からの除去は `leave.sh <team> <agent_id>` が正しい動詞(実機で確認: leave 実行後にメンバー消滅、空チームは自動削除)。修正: アダプタの `Despawn` を `Leave` に置換し、stop/disband の agmsg クリーンアップは Leave を使う。あわせて `stopped` イベントに座席の role/driver/model を引き継ぎ、stop 後の status 表示が空欄にならないようにする(スモークで発見した表示ギャップ)。
 
+- **cross-review 起因の修正(cycle 2)**: `<org_id>-<seat_id>` のハイフン連結は ID がハイフンを含み得るため一意でない(Codex 所見)。実機プローブで herdr のエージェント名制約は `小文字始まり・[a-z0-9_-]のみ・最大32文字`(`.` 不可、大文字不可)と判明。対応: ralph の org/seat ID charset を herdr 互換に絞る(`^[a-z][a-z0-9-]{0,29}$`、アンダースコア禁止)ことで `_` を無曖昧セパレータとして予約し、herdr 名を `<org>_<seat>`、プロンプトファイルを `<org>_<seat>.md` に変更。spawn 時に結合長(`len(org)+1+len(seat) ≤ 32`)も検証。
+
 ## Progress checklist
 
 - [x] Plan reviewed
