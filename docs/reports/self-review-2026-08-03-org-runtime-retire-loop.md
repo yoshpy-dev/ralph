@@ -107,3 +107,110 @@ _(Both rows appended to `docs/tech-debt/README.md`.)_
   drift were deliberately not assessed here and belong to `/verify` and `/test`. In
   particular, whether the `ralph upgrade` remove-path actually retires the deleted
   templates downstream (plan risk row 3) was not exercised.
+
+---
+
+# Cycle 2 — fix-and-revalidate re-review
+
+- Date: 2026-08-03
+- Scope: `git diff 61006d5..fea2ee6` (the delta since the cycle-1 report), i.e.
+  the findings-fix commit `746b35b`, the insight/verify/test report commits
+  (`a046b41`, `ccd03c3`, `e0f4446`, `f41bef5`), the sync-docs commit `a868fca`,
+  the cross-review triage report `7c74dc8`, and the cross-review fix `fea2ee6`.
+  31 files, +793 / −325. The ~30k-line deletion reviewed in cycle 1 was **not**
+  re-reviewed from scratch.
+
+## Cycle-1 findings: disposition
+
+| Cycle-1 finding | Status | Evidence |
+| --- | --- | --- |
+| HIGH — dead `checkStaleOrchestratorState` naming a deleted script | **Closed** | `746b35b` removes the body, the call site, and `doctor_stale_state_test.go`; Check numbering renumbered 6→7→8→9→10→11 including the `runDoctorOpts` doc comment. No orphaned imports (`errors`/`io/fs`/`time`/`encoding/json` all still used at `doctor.go:59,158,221,268,300,344,417,584`). |
+| MEDIUM — guard `PATTERN` narrower than its header | **Partially closed** — see C2-5 | `PATTERN` widened to 11 tokens and all four named leftovers fixed, but the header's "per-phase `RALPH_*_MODEL` knobs" still over-claims by 4 knobs. |
+| MEDIUM — `count_triage_findings`/`pick_reviewer` have no executable consumer | **Closed** | SKILL.md Step 2.b now does `. scripts/xreview-helpers.sh; REVIEWER=$(pick_reviewer "$DRIVER")`; new Step 6 count-verification block calls `count_triage_findings` for all three categories. The grep-able-contract direction `.claude/rules/architecture.md` favours, not the deletion direction. |
+| MEDIUM — `model-routing.md` names `RALPH_MODEL`/`RALPH_EFFORT`/`ralph.toml` mirror | **Closed** | Reduced to the two surviving values + the `defaults_sync_test.go` bullet, in both root and `templates/base/` copies. |
+| MEDIUM — `printStatusEmpty` discards `rr.CorruptLines` | **Closed** | `corruptLines` threaded through; warning emitted on the empty path; regression test `TestStatusCmd_EmptyRosterFromFullyCorruptManifestStillWarns`. |
+| MEDIUM — two `--json` schemas | **Closed** | Single `statusJSON` struct used by both paths (`status.go:199-211`); `TestStatusCmd_JSONSchemaIsIdenticalEmptyVsPopulated` added (but see C2-8 on its comment). |
+| MEDIUM — stale `ralph run` clause in 4 SKILL.md copies | **Closed** | All four mirrors updated; `md5` confirms `.claude`↔`templates/base/.claude` identical and `.agents`↔`templates/base/.agents` identical. |
+| MEDIUM — two tech-debt rows left open | **Closed** | Both struck through with `RESOLVED 2026-08-03` annotations in the established style, each with an HTML-comment rationale. |
+| MEDIUM — `approach-comparison.md` / `.codex/README.md` advertise removed features | **Closed** (differently than recommended) | `.codex/README.md` row replaced with the `[org.permissions]` mapping (+ mirror `cmp`-identical). The research doc got a historical-document banner instead of a per-cell rewrite — a legitimate alternative for a dated research note, but see C2-10. |
+| LOW — Japanese in `ralph status` user-facing output | **Closed** | Both messages converted to English; the test assertion and its failure message were updated with it. |
+| LOW — doctor check numbering 6→8→9 | **Closed** | Renumbered contiguously. |
+| LOW — `checkDeadman` doc points at the wrong place for sentinels | **Closed** | Reworded to name `leadProbeSnapshot`/`historyLeadLineCount` as "the producers of these values". |
+| LOW — `count_triage_findings` bare `_file`/`_category`/`_n` globals | **Not addressed** | Still bare at `scripts/xreview-helpers.sh:86-95`, while the two siblings use `_dbb_*`/`_pr_*`. Carried forward as a nit, not re-raised as a numbered finding. |
+| LOW — README directory-tree column drift | **Not addressed** | Still misaligned. Carried forward as a nit. |
+| LOW — `ralph-config.sh` header over-claims the export list | **Closed** | Header now states explicitly that the cycle cap is not exported and only sourcing picks it up. |
+| LOW — plan-specific clause hardcoded in `EXCLUDE_REGEX` | **Closed** | Replaced with a `docs/plans/active/` wildcard. |
+
+## Cycle-2 findings
+
+| ID | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| C2-1 | MEDIUM | correctness | `fea2ee6`'s `IncludeDryRun: true` flip makes `ralph status`'s **aggregate** counts include dry-run seats. The per-row `[dry-run]` marker is present, but `active %d/%d` in the table header and `active_count`/`total_count` in `--json` carry no such split. The in-repo precedent does exactly the opposite: `internal/org/report.go` lists the roster with `IncludeDryRun: true` (`:136`) and computes "active seats" with `ActiveSeatCount(events, orgID, RosterOptions{})` (`:201`). Capacity enforcement agrees (`internal/org/spawn.go:333,788` — both `RosterOptions{}`). So after one `ralph org spawn --dry-run`, `ralph status` reports `active 3/3` while `max_seats` accounting and `ralph org report` both see 2, with nothing in the aggregate saying why. | `internal/cli/status.go:73` (flip), `:261-267` (table aggregate), `:226-237` (`buildStatusOrgJSON` aggregate); vs `internal/org/report.go:136` and `:201` | Keep the roster listing dry-run-inclusive, but compute the aggregate from real seats only (or emit `dry_run_count` alongside `active_count`) so the summary number matches the number that actually gates spawning. Assert it in `status_test.go`. |
+| C2-2 | MEDIUM | maintainability | The flip's rationale was documented at the new call site but not at the option's definition, so the contract comment is now false. `RosterOptions.IncludeDryRun` still says the dry-run audit trail "stays visible only via `status --all` (AC-8, dry-run audit separation)", and `disbandKey` still says "the moment `IncludeDryRun` is true (`status --all`)". The top-level `ralph status` has no `--all` flag and now sets it unconditionally. | `internal/org/manifest.go:110-118` and `:135-140` (both unchanged in this PR) vs `internal/cli/status.go:63-73` | Update the doc at the definition to name both consumers (`ralph org status --all`, and the top-level `ralph status` unconditionally), since that comment is what a future reader of `RosterOptions` will trust. |
+| C2-3 | MEDIUM | maintainability | The AR-1 fix removed the last caller of `org.NewManifestStore(root)` but left the exported root-relative constructor — and `org.ManifestRelPath` — in the API with zero callers repo-wide (only three doc comments now mention them). That constructor *is* the AR-1 footgun: the next person who reaches for the obvious-looking `NewManifestStore(stateDir)` re-creates the double-join. `org.NewReceiptStore(root)`/`org.ReceiptsRelPath` are in the same zero-caller position. | `grep -rn "NewManifestStore(" --include="*.go" .` → only `internal/org/manifest.go:56` (definition) plus comment mentions at `internal/cli/org.go:137` and `internal/cli/status_test.go:99`; same for `NewReceiptStore` (`internal/org/receipts.go:46`) and `ReceiptsRelPath` (`:37`) | Delete both root-relative constructors and their `*RelPath` constants, or move `orgManifestPath`/`orgReceiptsPath` into `internal/org` so there is exactly one grep-able derivation. Tech-debt row added. |
+| C2-4 | MEDIUM | maintainability | Tech-debt half-closure. The two rows cycle 1 appended were both invalidated by `746b35b` and left open and unannotated, in the same file where that commit struck through two other rows. Row 84 said the helpers have no executable caller — SKILL.md Step 2.b and Step 6 now call both. Row 85 enumerated four live leftovers — all four were fixed and the pattern widened. Two further rows cited `scripts/xreview-helpers.sh:61-68` / `:80-`; after `fea2ee6` added 6 doc lines and the `tr` line, `pick_reviewer` is at `:66` and `count_triage_findings` at `:86`. | `docs/tech-debt/README.md:84,85` before this review; `:30,31` line citations; `.claude/skills/cross-review/SKILL.md:44,105` | **Fixed in this review**: row 84 struck through with a RESOLVED annotation, row 85 rewritten down to its actual residual (C2-5), the two line-number citations refreshed. |
+| C2-5 | MEDIUM | maintainability | The widened guard still under-claims relative to its own header — the same class of gap cycle 1 raised, half-fixed. The header now advertises "the per-phase `RALPH_*_MODEL` knobs"; `PATTERN` covers `FORCE\|IMPLEMENT\|SELF_REVIEW\|PROBE\|ESCALATION` — 5 of the 8 knobs the retired `model-routing.md` table defined. `RALPH_VERIFY_MODEL`, `RALPH_TEST_MODEL`, `RALPH_SYNC_DOCS_MODEL`, `RALPH_PR_MODEL` are unguarded. The fix copied cycle 1's suggested token list verbatim instead of the actual knob set. Verified all four have zero live hits today, so widening is free. Separately, `EXCLUDE_REGEX` now exempts the whole of `scripts/xreview-helpers.sh` (+ mirror) rather than just its past-tense provenance comment. | `tests/test-no-loop-references.sh:1-9` (header), `:29` (`PATTERN`), `:54` (`EXCLUDE_REGEX`); `grep -rEl 'RALPH_(VERIFY\|TEST\|SYNC_DOCS\|PR)_MODEL'` over `*.sh *.go *.toml *.md` minus historical dirs → no matches | Complete the alternation to all 9 tokens (`FORCE\|IMPLEMENT\|SELF_REVIEW\|VERIFY\|TEST\|SYNC_DOCS\|PR\|PROBE\|ESCALATION`) and narrow the `xreview-helpers.sh` exclusion, or narrow the header to what the pattern actually covers. Tech-debt row rewritten to this residual. |
+| C2-6 | MEDIUM | maintainability | Retirement residual the widened guard structurally cannot catch: `ralph insights` still defaults `--receipts` to `.harness/state/pipeline/model-receipts.jsonl`, whose only writer was `write_model_receipt` in the deleted `scripts/ralph-cli-driver.sh`. The org runtime writes to `.harness/state/org/model-receipts.jsonl` with a different schema. Both the flag help and the reader's package doc present the retired path as a live source; the receipt-diagnostics section is now permanently empty on a fresh repo. The guard only matches script/symbol names, never state-dir path strings. | `internal/cli/insights.go:25,39,46`; `internal/insights/receipts.go:9`; vs `internal/org/receipts.go:37` (`ReceiptsRelPath`) | Repoint the default at the org runtime's receipts (needs a schema decision) or mark the flag historical-only in its help text. Tech-debt row added. Also worth adding state-dir path fragments to the guard's pattern vocabulary. |
+| C2-7 | LOW | readability | The `IncludeDryRun` rationale argues backwards: "…already render a `[dry-run]` marker per seat, **which would otherwise be unreachable dead code**" uses marker-deadness to justify a user-visible semantics change. The actual justification (a summary command with no `--all` flag should show the whole manifest) is buried mid-sentence, and the trailing three lines are provenance about how the change was discovered rather than why it is correct. | `internal/cli/status.go:63-72` | Lead with the semantics reason, keep the marker note as a supporting detail, and move the discovery narrative to the commit message. |
+| C2-8 | LOW | comment accuracy | `TestStatusCmd_JSONSchemaIsIdenticalEmptyVsPopulated`'s closing comment claims "Both payloads decode into the same schema with no divergent fields (verified above by sharing the `payload` struct for both `Unmarshal` calls)". `json.Unmarshal` silently ignores unknown fields, so sharing a struct verifies nothing about divergence — an extra field on either path would still pass. The underlying fix (one `statusJSON`) is correct; only the claim is wrong. | `internal/cli/status_test.go` (`TestStatusCmd_JSONSchemaIsIdenticalEmptyVsPopulated`, closing block) | Either drop the claim, or make it real by unmarshalling both into `map[string]any` and comparing key sets. |
+| C2-9 | LOW | readability | The `claudeEnvelope` comment fix removed a line's worth of text without rewrapping, leaving a ~110-char line in a file wrapped at ~72. | `internal/org/watcher.go:116` (`// ({"result": "...", "session_id": "..."}). Model is populated only if the installed claude version happens`) | Rewrap to the surrounding width. |
+| C2-10 | LOW | consistency | The new historical banner on `docs/research/approach-comparison.md` is written in Japanese inside an otherwise entirely English document — in the same commit that converted `ralph status`'s empty-state message *from* Japanese to English for exactly this consistency reason (and updated the test's failure message to say "in English (matching the rest of the CLI's output)"). | `docs/research/approach-comparison.md:3-8` vs `internal/cli/status.go:155-159` and `internal/cli/status_test.go`'s updated assertion message | Pick one language per artifact class. English matches the document it sits on. |
+| C2-11 | LOW | naming | Asymmetric extraction inside the one file the AR-1 fix touched: the manifest path got a named, documented `orgManifestPath` helper while the receipts path two lines above still uses a bare `filepath.Join(resolvedStateDir, "model-receipts.jsonl")` literal that duplicates `org.ReceiptsRelPath`'s basename. The identical double-join trap is one new receipts *reader* away, with no helper and no warning comment to prevent it. | `internal/cli/org.go:122-123` (receipts literal) vs `:128-142` (`orgManifestPath` + its 12-line rationale) | Add `orgReceiptsPath` beside `orgManifestPath` (or handle both in the `internal/org` move proposed in C2-3). |
+| C2-12 | LOW | test hygiene | Three small issues in the new AR-1 regression test. (a) `t.Setenv("PATH", "")` is a blunt instrument — it works today only because `--state-dir` is explicit and `--dry-run` execs nothing; if any code on that path later shells out, the failure surfaces as an opaque `exec: "git": executable file not found in $PATH` rather than as the behavior under test. (b) The comment "Deliberately does not touch `orgManifestPath`'s fixture helper directly (unlike `seedTwoOrgManifest`)" is confusing — `orgManifestPath` is not a fixture helper, and the test seeds no fixture at all; the intended point is "writes via the real spawn path". (c) `strings.Contains(out, "lead")` also matches the ROLE column, so it cannot distinguish seat from role. | `internal/cli/status_test.go` (`TestStatusCmd_SeesSeatWrittenByRealOrgSpawn`) | Drop or narrow the `PATH` override (a comment already explains dry-run needs no binaries), reword the comment to "writes through the real spawn path rather than a hand-seeded fixture", and assert on the rendered row (e.g. `"lead\tlead\tclaude\topus"`) instead of a bare substring. |
+
+## Cycle-2 positive notes
+
+- **The AR-1 fix is the right shape, not just the right patch.** `orgManifestPath`
+  makes the write path (`newOrgRuntimeAt`) and the read path (`runStatus`) share one
+  derivation, and the regression test deliberately drives a *real* `ralph org spawn
+  --dry-run` followed by a *real* `ralph status` against the same `--state-dir` rather
+  than hand-seeding a fixture — so a future refactor that moves only one call site off
+  the helper still fails. That is the failure mode a fixture-based test would miss.
+- **The `pick_reviewer` case fix is portable and fully mirrored.** `printf '%s' | tr`
+  avoids the `echo` portability trap, the doc comment now states the case-insensitivity
+  contract (and it genuinely matches SKILL.md Step 2.a's "Accepts `claude` or `codex`
+  (case-insensitive)"), and three test cases cover the arg path, the mixed-case path,
+  and the `RALPH_PRIMARY_CLI` env path. `cmp` clean against `templates/base/`, both
+  `100755`.
+- **Mirror discipline held across the whole cycle-2 delta.** `cmp`/`md5` identical for
+  `scripts/xreview-helpers.sh`, `scripts/ralph-config.sh`, `.codex/README.md`,
+  `docs/insights/README.md`, `.claude/skills/cross-review/SKILL.md` ↔
+  `templates/base/.claude/...`, and `.agents/...` ↔ `templates/base/.agents/...`.
+- **The `count_triage_findings` wiring chose the harder, better direction.** Rather than
+  deleting the unreferenced helper and its ~110 lines of tests, Step 6 now re-derives the
+  counts from the written report and cross-checks them against the canonical
+  `- After triage: …` line — turning a dead helper into a drift detector for the triage
+  template. Consistent with `.claude/rules/architecture.md`'s grep-able-contract rule.
+- **`docs/insights/README.md` was reworded, not gutted.** Historical `flow: loop` /
+  `source: pipeline` values are documented as read-compat rather than deleted, the
+  example block now shows a live event *and* a historical one side by side, and the
+  "why per-task files" rationale was rewritten from Loop-slice framing to worktree
+  framing without losing the argument.
+- **No secrets, no debug output, no commented-out code, no leftover TODOs** anywhere in
+  the +793 lines. No new error paths are swallowed; `printStatusEmpty`'s change moves in
+  the opposite direction by surfacing a previously discarded signal.
+
+## Cycle-2 recommendation
+
+- **Merge: proceed.** No CRITICAL, no HIGH. Cycle 1's one HIGH is fully closed, and 8 of
+  its 9 MEDIUMs are closed outright (the 9th, guard breadth, is closed enough to pass its
+  own contract and downgraded to the residual in C2-5).
+- **Worth fixing before merge (small, contained):**
+  - **C2-1** — the aggregate `active N/M` / `active_count` now disagrees with the number
+    that gates spawning. It is the only cycle-2 finding that changes what an operator
+    reads off the screen, and `internal/org/report.go:136,201` already shows the intended
+    split two files away.
+  - **C2-2** — one comment at `internal/org/manifest.go:110-118`; leaving it says the
+    opposite of what the code now does.
+- **Follow-ups (tracked in `docs/tech-debt/README.md`):** C2-3 (dead root-relative
+  constructors), C2-5 (4 unguarded model knobs + whole-file guard exclusion), C2-6
+  (`ralph insights --receipts` default has no writer). C2-7…C2-12 are one-line polish
+  items with no behavioral risk.
+- **Register hygiene performed during this review:** cycle-1 row 84 struck through as
+  RESOLVED, row 85 rewritten to its true residual, two stale line-number citations
+  refreshed, and three new rows added (C2-3, C2-6, and the C2-5 residual).
+- **Known gaps in this review:** delta-scoped by instruction — the ~30k-line deletion
+  reviewed in cycle 1 was not re-read, and spec compliance, test adequacy, and
+  documentation drift remain `/verify` and `/test` territory. No tests, linters, or
+  static analysis were run; `tests/test-no-loop-references.sh`'s outcome was established
+  by replicating its `grep` manually, not by executing it.
