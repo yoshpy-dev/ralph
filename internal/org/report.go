@@ -99,7 +99,7 @@ func filterReceiptsByOrg(receipts []Receipt, orgID string) []Receipt {
 // `rejected`/`spawn_failed` event, or a `spawned` event recorded before
 // AC-2b started stamping permission_mode on every seat).
 func permissionModeFromDetails(details string) string {
-	for _, field := range strings.Fields(details) {
+	for field := range strings.FieldsSeq(details) {
 		if v, ok := strings.CutPrefix(field, "permission_mode="); ok {
 			return v
 		}
