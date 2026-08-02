@@ -784,11 +784,11 @@ func (o *Org) failStep(p SpawnParams, step string, cause error, paneID string) S
 }
 
 // failStepWithNote is failStep plus an extra free-text note appended to
-// Details. Used by the agmsg_announce failure path to carry the
-// ensureLeadJoined outcome forward: when HELLO Send fails, whether the
-// preceding best-effort lead-join succeeded or errored is essential
-// diagnostic context (a missing "lead" roster entry is the most likely root
-// cause of a Send rejection), so it must not be lost.
+// Details. Two callers: the agmsg_announce failure path (carrying the
+// ensureLeadJoined outcome forward — a missing "lead" roster entry is the
+// most likely root cause of a Send rejection) and the agent_start failure
+// path (carrying `agent_start_retries=N` so exhausted pane-busy retries stay
+// auditable).
 func (o *Org) failStepWithNote(p SpawnParams, step string, cause error, paneID, note string) SpawnResult {
 	compensation := compensatePane(o.Herdr, paneID)
 	details := fmt.Sprintf("step=%s error=%v compensation=%s", step, cause, compensation)

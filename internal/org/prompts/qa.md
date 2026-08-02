@@ -38,7 +38,7 @@ TYPE: RESULT
 TASK_ID: t-42
 
 STATUS: fail
-EVIDENCE: docs/reports/verify-2026-08-02-org-runtime-seats.md
+EVIDENCE: docs/reports/<report-file>.md
 SUMMARY: go vet で internal/org/spawn.go に 1 件の warning。詳細は上記
   レポート参照。
 ```

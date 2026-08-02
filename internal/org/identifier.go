@@ -30,6 +30,11 @@ import (
 // cross-review cycle-2 fix note in
 // docs/plans/active/2026-08-02-org-runtime-seats.md, "Implementation notes
 // (deviations)".
+//
+// The per-identifier cap is 30 (not herdr's 32) because the herdr agent name
+// is `<org>_<seat>`: 32 minus the separator minus at least one character for
+// the other identifier. The combined-length check in Spawn enforces the
+// exact `len(org)+1+len(seat) <= 32` budget.
 var identifierPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,29}$`)
 
 // ValidateIdentifier rejects a value that is not shaped like a safe org/seat

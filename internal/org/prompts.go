@@ -66,6 +66,10 @@ func RenderRolePrompt(role string, vars RolePromptVars) (string, bool, error) {
 		"{{TEAM}}", vars.Team,
 		"{{ROLE}}", vars.Role,
 		"{{SCOPE}}", scope,
+		// PLAN_PATH is reserved for PR③ (no template uses it today). The
+		// replacer entry stays so a template that re-adds {{PLAN_PATH}} can
+		// never ship the literal placeholder to a seat.
+		"{{PLAN_PATH}}", vars.PlanPath,
 	)
 	return replacer.Replace(text), true, nil
 }
