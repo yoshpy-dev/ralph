@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -112,11 +113,8 @@ func (f *fakeWatchHerdr) countKeys(want string) int {
 	defer f.mu.Unlock()
 	n := 0
 	for _, c := range f.sendKeysCalls {
-		for _, k := range c.keys {
-			if k == want {
-				n++
-				break
-			}
+		if slices.Contains(c.keys, want) {
+			n++
 		}
 	}
 	return n
@@ -347,7 +345,7 @@ func TestWatch_SeatBudgetCutoff_AtBoundary_NotBeforeThenCutoffThenDeduped(t *tes
 
 	// Cycle 4 and 5 (3 total cycles past the cutoff): dedupe -- no second
 	// Stop attempt, no second ALERT.
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		clk.Advance(1 * time.Minute)
 		if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
 			t.Fatalf("dedupe cycle: %v", err)
@@ -714,7 +712,7 @@ func TestWatch_StatusFile_HeartbeatWrittenEveryCycle(t *testing.T) {
 		t.Fatalf("loadWatchStatus: %v", err)
 	}
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		clk.Advance(time.Minute)
 		if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
 			t.Fatalf("cycle %d: %v", i+1, err)
@@ -810,7 +808,7 @@ func readJSONLFile(t *testing.T, path string) []string {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	var lines []string
-	for _, l := range strings.Split(strings.TrimRight(string(data), "\n"), "\n") {
+	for l := range strings.SplitSeq(strings.TrimRight(string(data), "\n"), "\n") {
 		if strings.TrimSpace(l) != "" {
 			lines = append(lines, l)
 		}
