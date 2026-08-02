@@ -3,9 +3,12 @@ package org
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/yoshpy-dev/ralph/internal/org/protocol"
 )
 
 // fakeHerdr is a call-recording, in-memory HerdrClient used by every spawn
@@ -23,9 +26,10 @@ type fakeHerdr struct {
 	workspaceID string
 	paneID      string
 
-	sendKeysCalls    []string // paneIDs PaneSendKeys was invoked with, in order
-	agentStartNames  []string // agent names AgentStart was invoked with, in order
-	agentWaitTargets []string // targets AgentWait was invoked with, in order
+	sendKeysCalls    []string   // paneIDs PaneSendKeys was invoked with, in order
+	agentStartNames  []string   // agent names AgentStart was invoked with, in order
+	agentStartArgs   [][]string // agentArgs AgentStart was invoked with, in order (AC-4 argv assertions)
+	agentWaitTargets []string   // targets AgentWait was invoked with, in order
 }
 
 func (f *fakeHerdr) WorkspaceCreate(_ context.Context, _, _ string) (string, error) {
@@ -50,9 +54,10 @@ func (f *fakeHerdr) TabCreate(_ context.Context, _, _, _ string) (string, error)
 	return f.paneID, nil
 }
 
-func (f *fakeHerdr) AgentStart(_ context.Context, name, _, _ string, _ int, _ []string) (string, error) {
+func (f *fakeHerdr) AgentStart(_ context.Context, name, _, _ string, _ int, agentArgs []string) (string, error) {
 	f.calls = append(f.calls, "agent_start")
 	f.agentStartNames = append(f.agentStartNames, name)
+	f.agentStartArgs = append(f.agentStartArgs, agentArgs)
 	if f.agentStartErr != nil {
 		return "", f.agentStartErr
 	}
@@ -813,5 +818,139 @@ func assertDetailsContains(t *testing.T, details string, want ...string) {
 		if !strings.Contains(details, w) {
 			t.Errorf("expected details %q to contain %q", details, w)
 		}
+	}
+}
+
+func TestOrgSpawn_HelloMessage_IsProtocolConformant(t *testing.T) {
+	// Regression for AC-11: the exact HELLO body the saga sends must itself
+	// pass protocol.ValidateText -- the org's own messages must obey the
+	// protocol it enforces on `ralph org send`.
+	msg := fmt.Sprintf("TYPE: HELLO\nSEAT: %s\nROLE: %s\nORG_ID: %s", "seat-1", "worker", "org-a")
+	if err := protocol.ValidateText(msg, 0); err != nil {
+		t.Fatalf("expected the saga's HELLO message to be protocol-conformant, got %v (message=%q)", err, msg)
+	}
+}
+
+func TestOrgSpawn_RoleTemplate_ExpandsIntoInitialPrompt(t *testing.T) {
+	// AC-4: --role reviewer expands the embedded reviewer template into the
+	// AgentStart argv (the initial prompt), substituted with the spawn's
+	// own org_id/seat_id/role/scope.
+	o, h, _ := testOrg(t)
+
+	p := mustSpawnParams("org-a", "seat-1")
+	p.Role = "reviewer"
+	p.Scope = "internal/org/**"
+	if r := o.Spawn(p); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", r)
+	}
+
+	if len(h.agentStartArgs) != 1 {
+		t.Fatalf("expected exactly 1 AgentStart call, got %d", len(h.agentStartArgs))
+	}
+	args := h.agentStartArgs[0]
+	if len(args) != 3 || args[0] != "--model" {
+		t.Fatalf("expected AgentStart args [--model <model> <prompt>], got %v", args)
+	}
+	promptArg := args[2]
+	for _, want := range []string{"org-a", "seat-1", "reviewer", "internal/org/**", ".claude/rules/agent-messaging.md"} {
+		if !strings.Contains(promptArg, want) {
+			t.Errorf("expected the initial prompt to contain %q, got:\n%s", want, promptArg)
+		}
+	}
+}
+
+func TestOrgSpawn_RoleTemplate_PromptFlagAppendedAfterTemplate(t *testing.T) {
+	// When --role has a template AND --prompt is also given, the template
+	// comes first and --prompt is appended after a blank line.
+	o, h, _ := testOrg(t)
+
+	p := mustSpawnParams("org-a", "seat-1")
+	p.Role = "qa"
+	p.Prompt = "focus on the protocol package first"
+	if r := o.Spawn(p); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", r)
+	}
+
+	promptArg := h.agentStartArgs[0][2]
+	if !strings.Contains(promptArg, "run-static-verify.sh") {
+		t.Fatalf("expected the qa template body in the initial prompt, got:\n%s", promptArg)
+	}
+	if !strings.HasSuffix(promptArg, p.Prompt) {
+		t.Fatalf("expected --prompt appended at the end of the initial prompt, got:\n%s", promptArg)
+	}
+}
+
+func TestOrgSpawn_UnknownRole_PromptFlagOnly_NoTemplateNoError(t *testing.T) {
+	// AC-4: an unknown role has no embedded template -- the saga must
+	// proceed with --prompt verbatim (or empty), never erroring.
+	o, h, _ := testOrg(t)
+
+	p := mustSpawnParams("org-a", "seat-1")
+	p.Role = "not-a-known-role"
+	p.Prompt = "verbatim prompt"
+	if r := o.Spawn(p); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("expected spawn to succeed for an unknown role, got %+v", r)
+	}
+
+	args := h.agentStartArgs[0]
+	if len(args) != 3 || args[2] != "verbatim prompt" {
+		t.Fatalf("expected AgentStart args [--model <model> verbatim prompt], got %v", args)
+	}
+}
+
+func TestOrgSpawn_UnknownRole_NoPromptFlag_NoPromptArgAtAll(t *testing.T) {
+	// Unchanged-behavior guard: an unknown role with no --prompt at all
+	// must still omit the trailing agentArgs element entirely (matching
+	// pre-role-template behavior), not pass an empty string argument.
+	o, h, _ := testOrg(t)
+
+	p := mustSpawnParams("org-a", "seat-1")
+	p.Role = "not-a-known-role"
+	if r := o.Spawn(p); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("expected spawn to succeed, got %+v", r)
+	}
+
+	args := h.agentStartArgs[0]
+	if len(args) != 2 {
+		t.Fatalf("expected AgentStart args [--model <model>] with no prompt element, got %v", args)
+	}
+}
+
+func TestOrgSpawn_ScopeRecordedOnSpawnedEventDetails(t *testing.T) {
+	o, _, _ := testOrg(t)
+
+	p := mustSpawnParams("org-a", "seat-1")
+	p.Scope = "internal/org/**"
+	if r := o.Spawn(p); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", r)
+	}
+
+	rr, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	last := rr.Events[len(rr.Events)-1]
+	if last.Event != EventSpawned {
+		t.Fatalf("expected last event spawned, got %q", last.Event)
+	}
+	assertDetailsContains(t, last.Details, "scope=internal/org/**")
+}
+
+func TestOrgSpawn_NoScope_SpawnedEventDetailsEmpty(t *testing.T) {
+	// Unchanged-behavior guard: a spawn with no Scope leaves Details empty
+	// on the spawned event, exactly as before Scope existed.
+	o, _, _ := testOrg(t)
+
+	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", r)
+	}
+
+	rr, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	last := rr.Events[len(rr.Events)-1]
+	if last.Details != "" {
+		t.Fatalf("expected empty Details on the spawned event with no Scope, got %q", last.Details)
 	}
 }

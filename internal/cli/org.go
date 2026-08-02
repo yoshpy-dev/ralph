@@ -118,9 +118,9 @@ func splitCommaList(s string) []string {
 
 func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	var (
-		seatID, role, driverName, model, cwd, prompt string
-		timeoutMS                                    int
-		dryRun                                       bool
+		seatID, role, driverName, model, cwd, prompt, scope string
+		timeoutMS                                           int
+		dryRun                                              bool
 	)
 
 	cmd := &cobra.Command{
@@ -142,7 +142,7 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			}
 			result := rt.Spawn(org.SpawnParams{
 				OrgID: *orgID, SeatID: seatID, Role: role, Driver: driverName, Model: model,
-				Cwd: cwd, Prompt: prompt, TimeoutMS: timeoutMS, DryRun: dryRun,
+				Cwd: cwd, Prompt: prompt, Scope: scope, TimeoutMS: timeoutMS, DryRun: dryRun,
 			})
 			printSpawnResult(cmd, result)
 			return result.Err
@@ -155,6 +155,7 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	cmd.Flags().StringVar(&model, "model", "", "model name or alias (required)")
 	cmd.Flags().StringVar(&cwd, "cwd", "", "working directory for the new seat (required)")
 	cmd.Flags().StringVar(&prompt, "prompt", "", "optional initial prompt passed to the agent")
+	cmd.Flags().StringVar(&scope, "scope", "", "optional scope description (recorded on the spawned event; substituted into --role templates as {{SCOPE}})")
 	cmd.Flags().IntVar(&timeoutMS, "timeout-ms", 60000, "per-step herdr timeout in milliseconds")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "validate and record without starting a real seat")
 
@@ -182,11 +183,17 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 		to, text  string
 		timeoutMS int
 		dryRun    bool
+		raw       bool
 	)
 
 	cmd := &cobra.Command{
 		Use:   "send",
 		Short: "Send a message to a seat",
+		Long: "ralph org send validates --text against the typed message protocol\n" +
+			"(internal/org/protocol, see .claude/rules/agent-messaging.md) before\n" +
+			"sending: TYPE must be a known value, TASK_ID is required for\n" +
+			"TASK/RESULT/REVIEW/BLOCKED/CONTRACT, and the body must not exceed the\n" +
+			"size cap. Pass --raw to bypass validation entirely for free-form text.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireOrgID(*orgID); err != nil {
 				return err
@@ -198,7 +205,7 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			result := rt.Send(org.SendParams{OrgID: *orgID, To: to, Text: text, TimeoutMS: timeoutMS, DryRun: dryRun})
+			result := rt.Send(org.SendParams{OrgID: *orgID, To: to, Text: text, TimeoutMS: timeoutMS, DryRun: dryRun, Raw: raw})
 			if result.Err != nil {
 				return fmt.Errorf("org: send: %w", result.Err)
 			}
@@ -211,6 +218,7 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	cmd.Flags().StringVar(&text, "text", "", "message text")
 	cmd.Flags().IntVar(&timeoutMS, "timeout-ms", 30000, "idle-wait timeout in milliseconds before sending")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "record without sending a real message")
+	cmd.Flags().BoolVar(&raw, "raw", false, "bypass typed message protocol validation")
 
 	return cmd
 }

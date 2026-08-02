@@ -721,6 +721,167 @@ func containsLine(lines []string, want string) bool {
 	return slices.Contains(lines, want)
 }
 
+// TestOrgSpawn_RoleAndScopeFlags_ExpandTemplateAndRecordScope covers AC-4
+// and the scope half of AC-7/design: `--role reviewer --scope ...` expands
+// the embedded reviewer template (with org_id/seat_id/scope substituted)
+// into the AgentStart argv the herdr stub receives, and the spawned event's
+// Details records "scope=<value>". The herdr log is read as raw file
+// content (not line-split) because the rendered prompt itself contains
+// newlines.
+func TestOrgSpawn_RoleAndScopeFlags_ExpandTemplateAndRecordScope(t *testing.T) {
+	herdrLog, _ := setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	out, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "reviewer-1", "--role", "reviewer",
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "internal/org/**",
+		"--state-dir", stateDir,
+	)
+	if err != nil {
+		t.Fatalf("spawn failed: %v (output: %s)", err, out)
+	}
+
+	data, rerr := os.ReadFile(herdrLog)
+	if rerr != nil {
+		t.Fatalf("read herdr log: %v", rerr)
+	}
+	logText := string(data)
+	for _, want := range []string{"org-a", "reviewer-1", "internal/org/**", ".claude/rules/agent-messaging.md"} {
+		if !strings.Contains(logText, want) {
+			t.Errorf("expected AgentStart argv logged to contain %q, got:\n%s", want, logText)
+		}
+	}
+
+	events := readManifestEvents(t, filepath.Join(stateDir, "manifest.jsonl"))
+	last := events[len(events)-1]
+	if last.Event != "spawned" {
+		t.Fatalf("expected last event spawned, got %q", last.Event)
+	}
+	if !strings.Contains(last.Details, "scope=internal/org/**") {
+		t.Fatalf("expected spawned event Details to record scope, got %q", last.Details)
+	}
+}
+
+// TestOrgSpawn_UnknownRole_NoTemplateApplied is the CLI-level counterpart of
+// the org-package unit test: an unknown --role must not fail spawn, and the
+// herdr log must not contain the reviewer/qa template markers.
+func TestOrgSpawn_UnknownRole_NoTemplateApplied(t *testing.T) {
+	herdrLog, _ := setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	out, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "not-a-known-role",
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--prompt", "verbatim prompt",
+		"--state-dir", stateDir,
+	)
+	if err != nil {
+		t.Fatalf("spawn with an unknown role should not error, got %v (output: %s)", err, out)
+	}
+
+	data, rerr := os.ReadFile(herdrLog)
+	if rerr != nil {
+		t.Fatalf("read herdr log: %v", rerr)
+	}
+	logText := string(data)
+	if !strings.Contains(logText, "verbatim prompt") {
+		t.Errorf("expected the verbatim --prompt in the AgentStart argv, got:\n%s", logText)
+	}
+	if strings.Contains(logText, ".claude/rules/agent-messaging.md") {
+		t.Errorf("expected no role-template markers for an unknown role, got:\n%s", logText)
+	}
+}
+
+// TestOrgSend_MalformedMessage_NonZeroExitAndNoManifestEvent is the AC-11
+// CLI rejection test: `ralph org send` with a malformed --text exits
+// non-zero and appends no manifest event.
+func TestOrgSend_MalformedMessage_NonZeroExitAndNoManifestEvent(t *testing.T) {
+	herdrLog, _ := setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	if _, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--state-dir", stateDir,
+	); err != nil {
+		t.Fatalf("spawn failed: %v", err)
+	}
+	eventsBefore := readManifestEvents(t, filepath.Join(stateDir, "manifest.jsonl"))
+
+	out, err := runOrgCmd(t, "send", "--org-id", "org-a", "--to", "seat-1", "--text", "not a valid protocol message", "--state-dir", stateDir)
+	if err == nil {
+		t.Fatalf("expected non-zero exit for a malformed --text, output: %s", out)
+	}
+
+	eventsAfter := readManifestEvents(t, filepath.Join(stateDir, "manifest.jsonl"))
+	if len(eventsAfter) != len(eventsBefore) {
+		t.Fatalf("expected no new manifest event for a rejected send, %d -> %d", len(eventsBefore), len(eventsAfter))
+	}
+
+	// Sanity: no pane-send-text call should have reached the herdr stub for
+	// the rejected message.
+	herdrLines := readLogLines(t, herdrLog)
+	if countLinesWithPrefix(herdrLines, "pane send-text") != 0 {
+		t.Errorf("expected no 'pane send-text' call for a rejected send, got: %v", herdrLines)
+	}
+}
+
+// TestOrgSend_RawFlag_BypassesValidation covers the --raw escape hatch at
+// the CLI layer: the same malformed --text that TestOrgSend_MalformedMessage
+// rejects must succeed with --raw, and the recorded `sent` event's Details
+// must note raw=true.
+func TestOrgSend_RawFlag_BypassesValidation(t *testing.T) {
+	setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	if _, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--state-dir", stateDir,
+	); err != nil {
+		t.Fatalf("spawn failed: %v", err)
+	}
+
+	out, err := runOrgCmd(t, "send", "--org-id", "org-a", "--to", "seat-1", "--text", "not a valid protocol message", "--raw", "--state-dir", stateDir)
+	if err != nil {
+		t.Fatalf("expected --raw to bypass protocol validation, got %v (output: %s)", err, out)
+	}
+
+	events := readManifestEvents(t, filepath.Join(stateDir, "manifest.jsonl"))
+	last := events[len(events)-1]
+	if last.Event != "sent" {
+		t.Fatalf("expected last event sent, got %q", last.Event)
+	}
+	if !strings.Contains(last.Details, "raw=true") {
+		t.Errorf("expected the sent event's Details to record raw=true, got %q", last.Details)
+	}
+}
+
+// TestOrgSend_ValidTypedMessage_Succeeds is the positive counterpart: a
+// well-formed typed message is accepted without --raw.
+func TestOrgSend_ValidTypedMessage_Succeeds(t *testing.T) {
+	setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	if _, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--state-dir", stateDir,
+	); err != nil {
+		t.Fatalf("spawn failed: %v", err)
+	}
+
+	out, err := runOrgCmd(t, "send", "--org-id", "org-a", "--to", "seat-1",
+		"--text", "TYPE: TASK\nTASK_ID: t-1\n\ndo the thing", "--state-dir", stateDir)
+	if err != nil {
+		t.Fatalf("expected a well-formed typed message to be accepted, got %v (output: %s)", err, out)
+	}
+	if !strings.Contains(out, "sent message to seat \"seat-1\"") {
+		t.Errorf("expected sent confirmation in output, got: %s", out)
+	}
+}
+
 func equalStrings(a, b []string) bool {
 	if len(a) != len(b) {
 		return false

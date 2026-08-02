@@ -103,13 +103,21 @@ func (o *Org) appendEvent(ev ManifestEvent) error {
 
 // SpawnParams describes one `ralph org spawn` invocation.
 type SpawnParams struct {
-	OrgID     string
-	SeatID    string
-	Role      string
-	Driver    string
-	Model     string
-	Cwd       string
-	Prompt    string
+	OrgID  string
+	SeatID string
+	Role   string
+	Driver string
+	Model  string
+	Cwd    string
+	Prompt string
+	// Scope is a free-text description of what this seat is allowed to
+	// touch (e.g. a glob or a short prose description). It is not enforced
+	// deterministically in this PR (see plan Non-goals -- that lands with
+	// the PR④ Watchdog pulse layer); here it is (1) substituted into the
+	// seat's role prompt template as {{SCOPE}} and (2) recorded on the
+	// `spawned` manifest event's Details as "scope=<value>" so it is at
+	// least auditable after the fact.
+	Scope     string
 	TimeoutMS int
 	DryRun    bool
 }
@@ -256,9 +264,34 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 		return SpawnResult{Outcome: SpawnOutcomeFailed, Err: err}
 	}
 
+	// team is computed here (rather than after AgentStart, as PR① had it)
+	// because RenderRolePrompt needs it for the {{TEAM}} substitution below
+	// -- agmsgTeam is a pure function of OrgID, so moving it earlier has no
+	// observable effect on the agmsg steps further down.
+	team := agmsgTeam(p.OrgID)
+
+	// AC-4: a known --role expands the embedded template (reviewer.md /
+	// qa.md) into the initial prompt; --prompt, if also given, is appended
+	// after it. An unknown role leaves initialPrompt as plain --prompt
+	// (possibly empty) -- no error, no fallback template.
+	initialPrompt := p.Prompt
+	rendered, ok, err := RenderRolePrompt(p.Role, RolePromptVars{
+		OrgID: p.OrgID, SeatID: p.SeatID, Team: team, Role: p.Role, Scope: p.Scope,
+	})
+	if err != nil {
+		return o.failStep(p, "agent_start", err, paneID)
+	}
+	if ok {
+		if p.Prompt != "" {
+			initialPrompt = rendered + "\n\n" + p.Prompt
+		} else {
+			initialPrompt = rendered
+		}
+	}
+
 	agentArgs := []string{"--model", p.Model}
-	if p.Prompt != "" {
-		agentArgs = append(agentArgs, p.Prompt)
+	if initialPrompt != "" {
+		agentArgs = append(agentArgs, initialPrompt)
 	}
 	if _, err := o.Herdr.AgentStart(ctx, herdrAgentName(p.OrgID, p.SeatID), p.Driver, paneID, p.TimeoutMS, agentArgs); err != nil {
 		return o.failStep(p, "agent_start", err, paneID)
@@ -269,8 +302,6 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	}); err != nil {
 		return SpawnResult{Outcome: SpawnOutcomeFailed, Err: err}
 	}
-
-	team := agmsgTeam(p.OrgID)
 
 	// ensureLeadJoined: best-effort join.sh <team> lead claude-code <cwd>. A
 	// clean agmsg team has no "lead" identity registered yet, and agmsg's
@@ -306,7 +337,10 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 		return SpawnResult{Outcome: SpawnOutcomeFailed, Err: err}
 	}
 
-	msg := fmt.Sprintf("TYPE: HELLO\nSEAT: %s\nROLE: %s", p.SeatID, p.Role)
+	// AC-11: the HELLO body must itself be protocol.ValidateText-conformant
+	// (see TestSpawn_HelloMessage_IsProtocolConformant) -- HELLO does not
+	// require TASK_ID, so a TYPE header plus these fields alone is valid.
+	msg := fmt.Sprintf("TYPE: HELLO\nSEAT: %s\nROLE: %s\nORG_ID: %s", p.SeatID, p.Role, p.OrgID)
 	if err := o.Agmsg.Send(ctx, team, p.SeatID, "lead", msg); err != nil {
 		return o.failStepWithNote(p, "agmsg_announce", err, paneID, fmt.Sprintf("lead_join=%s", leadJoinNote))
 	}
@@ -317,10 +351,18 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 		return SpawnResult{Outcome: SpawnOutcomeFailed, Err: err}
 	}
 
+	// Scope has no dedicated ManifestEvent field (see the SpawnParams.Scope
+	// doc comment): it is recorded as "scope=<value>" in Details so it
+	// stays auditable without a manifest schema change. Empty Scope leaves
+	// Details empty, matching pre-Scope behavior exactly.
+	spawnedDetails := ""
+	if p.Scope != "" {
+		spawnedDetails = fmt.Sprintf("scope=%s", p.Scope)
+	}
 	if err := o.appendEvent(ManifestEvent{
 		TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawned,
 		Role: p.Role, Driver: p.Driver, Model: p.Model, Worktree: p.Cwd,
-		PaneID: paneID, AgmsgTeam: team,
+		PaneID: paneID, AgmsgTeam: team, Details: spawnedDetails,
 	}); err != nil {
 		return SpawnResult{Outcome: SpawnOutcomeFailed, Err: err}
 	}

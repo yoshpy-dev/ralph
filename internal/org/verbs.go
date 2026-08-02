@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/yoshpy-dev/ralph/internal/org/protocol"
 )
 
 // EventSent is a non-state event (see seat.go stateEvents) recorded by the
@@ -40,6 +42,13 @@ type SendParams struct {
 	Text      string
 	TimeoutMS int
 	DryRun    bool
+	// Raw bypasses AC-11 typed-protocol validation entirely, for the rare
+	// case that genuinely needs to send free-form text. See
+	// .claude/rules/agent-messaging.md's "Size cap" section for the
+	// intended use (e.g. relaying an external tool's raw output). A
+	// bypassed send still records raw=true on the `sent` event's Details,
+	// so it stays traceable after the fact.
+	Raw bool
 }
 
 // SendResult is Send's return value.
@@ -47,12 +56,27 @@ type SendResult struct {
 	Err error
 }
 
-// Send waits for the target seat to go idle, then types Text into its pane
-// and presses Enter. A non-state `sent` event is appended for history.
-// DryRun skips the seat lookup and driver calls entirely and only appends
-// the (dry_run: true) history event.
+// Send validates Text against the typed message protocol (unless Raw),
+// waits for the target seat to go idle, then types Text into its pane and
+// presses Enter. A non-state `sent` event is appended for history. DryRun
+// skips the seat lookup and driver calls entirely and only appends the
+// (dry_run: true) history event -- but protocol validation still runs
+// first for DryRun too, since it is a pure, side-effect-free check.
+//
+// AC-11: an invalid message (unless Raw) is rejected before any manifest
+// event is appended and before any driver call is attempted -- Send fails
+// closed, not open.
 func (o *Org) Send(p SendParams) SendResult {
+	if !p.Raw {
+		if err := protocol.ValidateText(p.Text, protocol.DefaultMaxBodyChars); err != nil {
+			return SendResult{Err: fmt.Errorf("org: send: message rejected by protocol validation (use --raw to bypass): %w", err)}
+		}
+	}
+
 	details := truncateForDetails(p.Text)
+	if p.Raw {
+		details = "raw=true " + details
+	}
 
 	if p.DryRun {
 		err := o.appendEvent(ManifestEvent{

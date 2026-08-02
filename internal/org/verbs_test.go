@@ -2,6 +2,7 @@ package org
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -171,4 +172,113 @@ func TestOrgDisband_EmptyOrg_StillAppendsDisbandedEvent(t *testing.T) {
 	if len(rr.Events) != 1 || rr.Events[0].Event != EventDisbanded {
 		t.Fatalf("expected exactly one disbanded event, got %v", rr.Events)
 	}
+}
+
+// TestOrgSend_Malformed_RejectedNoManifestEventNoDriverCall covers AC-11:
+// a message that fails protocol.ValidateText is rejected before any
+// manifest event is appended and before any driver call (AgentWait/
+// PaneSendText/PaneSendKeys) is attempted.
+func TestOrgSend_Malformed_RejectedNoManifestEventNoDriverCall(t *testing.T) {
+	o, h, a := testOrg(t)
+	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", r)
+	}
+	eventsBefore := len(mustReadEvents(t, o))
+	herdrCallsBefore := len(h.calls)
+	agmsgCallsBefore := len(a.calls)
+
+	result := o.Send(SendParams{OrgID: "org-a", To: "seat-1", Text: "not a valid protocol message"})
+	if result.Err == nil {
+		t.Fatal("expected a non-nil Err for a malformed message (CLI must exit non-zero)")
+	}
+
+	if got := len(mustReadEvents(t, o)); got != eventsBefore {
+		t.Fatalf("expected no new manifest event for a rejected send, %d -> %d", eventsBefore, got)
+	}
+	if len(h.calls) != herdrCallsBefore || len(a.calls) != agmsgCallsBefore {
+		t.Fatalf("expected no new driver calls for a rejected send, herdr %d->%d agmsg %d->%d",
+			herdrCallsBefore, len(h.calls), agmsgCallsBefore, len(a.calls))
+	}
+}
+
+// TestOrgSend_DryRun_Malformed_AlsoRejectedBeforeManifestEvent asserts
+// protocol validation runs for --dry-run sends too (it is a pure,
+// side-effect-free check that should not be skipped just because no real
+// driver call would happen anyway).
+func TestOrgSend_DryRun_Malformed_AlsoRejectedBeforeManifestEvent(t *testing.T) {
+	o, _, _ := testOrg(t)
+
+	result := o.Send(SendParams{OrgID: "org-a", To: "seat-1", Text: "not a valid protocol message", DryRun: true})
+	if result.Err == nil {
+		t.Fatal("expected a non-nil Err for a malformed dry-run message")
+	}
+	if len(mustReadEvents(t, o)) != 0 {
+		t.Fatalf("expected no manifest event for a rejected dry-run send, got %v", mustReadEvents(t, o))
+	}
+}
+
+// TestOrgSend_ValidTypedMessage_PassesAndDrivesRealCalls asserts a
+// well-formed typed message is accepted: Send proceeds to the real
+// AgentWait/PaneSendText/PaneSendKeys sequence and appends a `sent` event.
+func TestOrgSend_ValidTypedMessage_PassesAndDrivesRealCalls(t *testing.T) {
+	o, h, _ := testOrg(t)
+	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", r)
+	}
+
+	msg := "TYPE: TASK\nTASK_ID: t-1\n\ndo the thing"
+	result := o.Send(SendParams{OrgID: "org-a", To: "seat-1", Text: msg})
+	if result.Err != nil {
+		t.Fatalf("expected a well-formed typed message to pass, got %v", result.Err)
+	}
+
+	if len(h.agentWaitTargets) != 1 || h.agentWaitTargets[0] != herdrAgentName("org-a", "seat-1") {
+		t.Fatalf("expected exactly one AgentWait call for the target seat, got %v", h.agentWaitTargets)
+	}
+
+	events := mustReadEvents(t, o)
+	last := events[len(events)-1]
+	if last.Event != EventSent {
+		t.Fatalf("expected last event sent, got %q", last.Event)
+	}
+	if strings.HasPrefix(last.Details, "raw=true") {
+		t.Fatalf("expected a non-raw send to not carry the raw=true marker, got %q", last.Details)
+	}
+}
+
+// TestOrgSend_Raw_BypassesValidation_RecordsRawInDetails covers the --raw
+// escape hatch: an otherwise-malformed message is accepted, and the `sent`
+// event's Details records that the bypass was used.
+func TestOrgSend_Raw_BypassesValidation_RecordsRawInDetails(t *testing.T) {
+	o, h, _ := testOrg(t)
+	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", r)
+	}
+
+	result := o.Send(SendParams{OrgID: "org-a", To: "seat-1", Text: "not a valid protocol message", Raw: true})
+	if result.Err != nil {
+		t.Fatalf("expected --raw to bypass validation, got %v", result.Err)
+	}
+	if len(h.agentWaitTargets) != 1 {
+		t.Fatalf("expected the raw send to still drive the real AgentWait call, got %v", h.agentWaitTargets)
+	}
+
+	events := mustReadEvents(t, o)
+	last := events[len(events)-1]
+	if last.Event != EventSent {
+		t.Fatalf("expected last event sent, got %q", last.Event)
+	}
+	assertDetailsContains(t, last.Details, "raw=true")
+}
+
+// mustReadEvents is a small helper shared by the Send tests above (distinct
+// from eventNames in spawn_test.go, which returns only event type names --
+// these tests need the full events for Details assertions in some cases).
+func mustReadEvents(t *testing.T, o *Org) []ManifestEvent {
+	t.Helper()
+	rr, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	return rr.Events
 }
