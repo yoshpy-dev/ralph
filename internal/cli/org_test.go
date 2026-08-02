@@ -39,8 +39,8 @@ if [ -n "$ORG_STUB_FAIL" ] && [ "$1:$2" = "$ORG_STUB_FAIL" ]; then
   exit 1
 fi
 case "$1 $2" in
-  "workspace create") echo "ws-stub-1" ;;
-  "tab create") echo "pane-stub-1" ;;
+  "workspace create") echo '{"id":"cli:workspace:create","result":{"root_pane":{"pane_id":"ws-stub-1:p1","tab_id":"ws-stub-1:t1","workspace_id":"ws-stub-1"},"tab":{"tab_id":"ws-stub-1:t1"},"type":"workspace_created","workspace":{"active_tab_id":"ws-stub-1:t1","workspace_id":"ws-stub-1"}}}' ;;
+  "tab create") echo '{"id":"cli:tab:create","result":{"root_pane":{"pane_id":"pane-stub-1","tab_id":"ws-stub-1:t2","workspace_id":"ws-stub-1"},"tab":{"tab_id":"ws-stub-1:t2"},"type":"tab_created"}}' ;;
   "agent start") echo "agent-stub-1" ;;
   "agent wait") echo "idle" ;;
   "pane read") echo "pane output" ;;
