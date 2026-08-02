@@ -132,10 +132,7 @@ func watcherTimeout(cfg config.OrgWatchdogConfig) time.Duration {
 	if intervalSeconds <= 0 {
 		intervalSeconds = watcherFallbackIntervalSeconds
 	}
-	d := time.Duration(intervalSeconds)*time.Second - watcherTimeoutSafetyMargin
-	if d > watcherMaxTimeout {
-		d = watcherMaxTimeout
-	}
+	d := min(time.Duration(intervalSeconds)*time.Second-watcherTimeoutSafetyMargin, watcherMaxTimeout)
 	if d <= 0 {
 		// intervalSeconds is too small for the safety margin to leave any
 		// headroom (e.g. a 1s interval) -- fall back to half the interval so
