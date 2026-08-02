@@ -27,3 +27,10 @@ reason=watchdog_budget_cutoff seat_wall_clock=1m observed=1m0s
 {"ts":"2026-08-02T15:35:03Z","org_id":"wdsmoke2","alert_id":"wdsmoke2/sleeper/stall@1785684842103256000","subject":"sleeper","reason":"deadman_timeout"}
 [watch-status heartbeat]
 "cycles": 8
+
+--- state-dir cross-cwd confirmation (AC-7/AC-10) ---
+[spawn dry-run from worktree ROOT, no --state-dir]
+spawned seat "probe" (org_id=sdircheck driver=claude model=haiku pane_id= dry_run=true)
+[status from docs/ SUBDIR, no --state-dir -> same git-toplevel state]
+SEAT_ID	ROLE	DRIVER	MODEL	STATE	PANE_ID
+probe	qa	claude	haiku	spawned (active) [dry-run]	
