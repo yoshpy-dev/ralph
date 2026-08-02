@@ -1275,6 +1275,236 @@ func TestWatch_Stall_UsesLatestEventOfAnyType_NotOnlyStateEvents(t *testing.T) {
 	}
 }
 
+// --- cross-review-triage cycle-2 #3: deadman history source is lead-only ---
+
+// TestFilterLeadHistoryLines pins leadHistoryFromField/filterLeadHistoryLines'
+// parsing contract directly: only lines whose "from" field (the segment
+// between "] " and " → ") is exactly LeadIdentity survive; anything that
+// does not parse into that shape is excluded, not conservatively kept.
+func TestFilterLeadHistoryLines(t *testing.T) {
+	raw := strings.Join([]string{
+		"  ● [2026-01-01T00:00:00Z] lead → seat-1: kickoff task",
+		"  ○ [2026-01-01T00:01:00Z] seat-1 → lead: ack",
+		"  ● [2026-01-01T00:02:00Z] watchdog → lead: TYPE: ALERT",
+		"garbled line with no timestamp or arrow at all",
+		"  ● [2026-01-01T00:03:00Z] lead with no arrow marker here",
+		"  ● [2026-01-01T00:04:00Z] lead → seat-2: another lead message",
+	}, "\n")
+
+	got := filterLeadHistoryLines(raw)
+	want := strings.Join([]string{
+		"  ● [2026-01-01T00:00:00Z] lead → seat-1: kickoff task",
+		"  ● [2026-01-01T00:04:00Z] lead → seat-2: another lead message",
+	}, "\n")
+	if got != want {
+		t.Errorf("filterLeadHistoryLines:\n got:  %q\n want: %q", got, want)
+	}
+}
+
+// TestWatch_Deadman_WatchdogAlertHistoryLine_DoesNotClearPendingAlert pins
+// cross-review-triage cycle-2 #3: a new agmsg history line produced by the
+// watchdog's OWN alert traffic (watchdog -> lead) must not count as lead
+// activity and clear a pending deadman alert -- only lead-authored lines may.
+func TestWatch_Deadman_WatchdogAlertHistoryLine_DoesNotClearPendingAlert(t *testing.T) {
+	o, h, a, clk := testWatchOrg(t)
+	o.Config.DeadmanMinutes = 100 // keep the timeout out of the picture
+	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", r)
+	}
+	target := herdrAgentName("org-a", "seat-1")
+	h.AgentGetErrSeq[target] = []error{errors.New("herdr: agent not found")} // sticky liveness ALERT
+
+	team := agmsgTeam("org-a")
+	leadLine := "  ● [2026-01-01T00:00:00Z] lead → seat-1: kickoff task"
+	base := leadLine
+	withWatchdogAlert := leadLine + "\n  ● [2026-01-01T00:05:00Z] watchdog → lead: TYPE: ALERT\nCONDITION: liveness"
+	// call 1: sendAlert's own historySnapshot capture (cycle 1); call 2:
+	// checkDeadman's comparison in that same cycle 1; call 3: checkDeadman's
+	// comparison in cycle 2, where a new non-lead line has been appended.
+	a.HistorySeq[team] = []string{base, base, withWatchdogAlert}
+
+	run, statusPath, escalationsPath := newTestWatchRun(o, nil, nil, &bytes.Buffer{})
+	status, err := loadWatchStatus(statusPath, "org-a")
+	if err != nil {
+		t.Fatalf("loadWatchStatus: %v", err)
+	}
+
+	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		t.Fatalf("cycle 1: %v", err)
+	}
+	if len(status.PendingAlerts) != 1 {
+		t.Fatalf("expected 1 pending alert after cycle 1, got %d: %+v", len(status.PendingAlerts), status.PendingAlerts)
+	}
+
+	clk.Advance(1 * time.Minute)
+	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		t.Fatalf("cycle 2: %v", err)
+	}
+	if len(status.PendingAlerts) != 1 {
+		t.Errorf("expected the pending alert to remain: a new watchdog->lead history line must not count as lead activity, got %d pending: %+v",
+			len(status.PendingAlerts), status.PendingAlerts)
+	}
+	assertNoEscalations(t, escalationsPath)
+}
+
+// TestWatch_Deadman_LeadHistoryLine_ClearsPendingAlert is the positive
+// counterpart: a new agmsg history line genuinely authored BY lead (lead ->
+// seat) must still clear a pending deadman alert, same as before this fix.
+func TestWatch_Deadman_LeadHistoryLine_ClearsPendingAlert(t *testing.T) {
+	o, h, a, clk := testWatchOrg(t)
+	o.Config.DeadmanMinutes = 100 // keep the timeout out of the picture
+	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", r)
+	}
+	target := herdrAgentName("org-a", "seat-1")
+	h.AgentGetErrSeq[target] = []error{errors.New("herdr: agent not found")} // sticky liveness ALERT
+
+	team := agmsgTeam("org-a")
+	// A malformed line is deliberately mixed in alongside the genuine lead
+	// line -- it must not itself be mistaken for lead activity (it is simply
+	// excluded), the real lead -> seat line is what clears the alert.
+	withLeadLine := "garbled line with no timestamp or arrow\n" +
+		"  ● [2026-01-01T00:05:00Z] lead → seat-1: are you there?"
+	a.HistorySeq[team] = []string{"", "", withLeadLine}
+
+	run, statusPath, _ := newTestWatchRun(o, nil, nil, &bytes.Buffer{})
+	status, err := loadWatchStatus(statusPath, "org-a")
+	if err != nil {
+		t.Fatalf("loadWatchStatus: %v", err)
+	}
+
+	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		t.Fatalf("cycle 1: %v", err)
+	}
+	if len(status.PendingAlerts) != 1 {
+		t.Fatalf("expected 1 pending alert after cycle 1, got %d: %+v", len(status.PendingAlerts), status.PendingAlerts)
+	}
+
+	clk.Advance(1 * time.Minute)
+	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		t.Fatalf("cycle 2: %v", err)
+	}
+	if len(status.PendingAlerts) != 0 {
+		t.Errorf("expected the pending alert to clear: a new lead->seat history line is genuine lead activity, got %d pending: %+v",
+			len(status.PendingAlerts), status.PendingAlerts)
+	}
+}
+
+// --- cross-review-triage cycle-2 #4: skip just-cut seats within the cycle --
+
+// TestWatch_TotalBudgetCutoff_SkipsCutSeatsForRestOfSameCycle pins the fix:
+// once evaluateTotalBudget stops every active seat in a cycle, that same
+// cycle's per-seat loop must not still probe those seats for
+// stall/liveness/scope-change -- doing so would call herdr AgentGet against a
+// seat that was just stopped and could raise a spurious ALERT (and deadman
+// pending-alert record) purely because activeSeats was snapshotted before
+// the cutoff ran.
+func TestWatch_TotalBudgetCutoff_SkipsCutSeatsForRestOfSameCycle(t *testing.T) {
+	o, h, a, clk := testWatchOrg(t)
+	o.Config.Budget.TotalWallClockMinutes = 5
+	o.Config.Budget.SeatWallClockMinutes = 1000 // avoid seat-level cutoff firing first
+
+	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn seat-1 failed: %+v", r)
+	}
+	if r := o.Spawn(watchSpawnParams("org-a", "seat-2", "worker")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn seat-2 failed: %+v", r)
+	}
+
+	target1 := herdrAgentName("org-a", "seat-1")
+	target2 := herdrAgentName("org-a", "seat-2")
+	// Sticky liveness failure for both seats -- if evaluateSeat's liveness
+	// probe still ran against a just-cut seat this cycle, it would both call
+	// AgentGet against its target and raise a spurious liveness ALERT.
+	h.AgentGetErrSeq[target1] = []error{errors.New("herdr: agent not found")}
+	h.AgentGetErrSeq[target2] = []error{errors.New("herdr: agent not found")}
+
+	run, statusPath, _ := newTestWatchRun(o, nil, nil, &bytes.Buffer{})
+	status, err := loadWatchStatus(statusPath, "org-a")
+	if err != nil {
+		t.Fatalf("loadWatchStatus: %v", err)
+	}
+
+	clk.Advance(10 * time.Minute) // past total budget
+	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		t.Fatalf("evaluateCycle: %v", err)
+	}
+
+	st, err := o.Status("org-a", false)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	for _, seatID := range []string{"seat-1", "seat-2"} {
+		if findSeatStatus(t, st.Seats, seatID).Active {
+			t.Fatalf("expected seat %q cut off by total-budget", seatID)
+		}
+	}
+
+	for _, c := range h.agentGetCalls {
+		if c == target1 || c == target2 {
+			t.Errorf("expected no AgentGet probe for just-cut seat target %q in the cutoff cycle, but one was made (calls: %v)", c, h.agentGetCalls)
+		}
+	}
+
+	alerts := watchdogAlerts(a)
+	if len(alerts) != 1 {
+		t.Fatalf("expected exactly 1 ALERT (org-level total-budget only, no per-seat liveness ALERTs), got %d: %+v", len(alerts), alerts)
+	}
+	if !strings.Contains(alerts[0].message, "CONDITION: total_budget") {
+		t.Errorf("expected the sole ALERT to be total_budget, got %q", alerts[0].message)
+	}
+}
+
+// TestWatch_SeatBudgetCutoff_SkipsFurtherProbesForCutSeatSameCycle is the
+// single-seat analogue: once evaluateSeatBudget stops a seat, evaluateSeat
+// must return before its stall/liveness/scope-change checks run against that
+// same, now-stale seat this cycle.
+func TestWatch_SeatBudgetCutoff_SkipsFurtherProbesForCutSeatSameCycle(t *testing.T) {
+	o, h, a, clk := testWatchOrg(t)
+	o.Config.Budget.SeatWallClockMinutes = 5
+	o.Config.Budget.TotalWallClockMinutes = 1000 // avoid total-budget firing first
+
+	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn seat-1 failed: %+v", r)
+	}
+
+	target := herdrAgentName("org-a", "seat-1")
+	h.AgentGetErrSeq[target] = []error{errors.New("herdr: agent not found")}
+
+	run, statusPath, _ := newTestWatchRun(o, nil, nil, &bytes.Buffer{})
+	status, err := loadWatchStatus(statusPath, "org-a")
+	if err != nil {
+		t.Fatalf("loadWatchStatus: %v", err)
+	}
+
+	clk.Advance(10 * time.Minute) // past seat budget
+	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		t.Fatalf("evaluateCycle: %v", err)
+	}
+
+	st, err := o.Status("org-a", false)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if findSeatStatus(t, st.Seats, "seat-1").Active {
+		t.Fatalf("expected seat-1 cut off by seat-budget")
+	}
+
+	for _, c := range h.agentGetCalls {
+		if c == target {
+			t.Errorf("expected no AgentGet probe for the just-cut seat in the cutoff cycle, but one was made (calls: %v)", h.agentGetCalls)
+		}
+	}
+
+	alerts := watchdogAlerts(a)
+	if len(alerts) != 1 {
+		t.Fatalf("expected exactly 1 ALERT (seat_budget only, no liveness ALERT), got %d: %+v", len(alerts), alerts)
+	}
+	if !strings.Contains(alerts[0].message, "CONDITION: seat_budget") {
+		t.Errorf("expected the sole ALERT to be seat_budget, got %q", alerts[0].message)
+	}
+}
+
 // --- helpers -----------------------------------------------------------------
 
 func findSeatStatus(t *testing.T, seats []SeatStatus, seatID string) SeatStatus {

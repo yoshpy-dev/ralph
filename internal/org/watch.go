@@ -481,8 +481,17 @@ func (w *watchRun) evaluateCycle(ctx context.Context, orgID string, status *watc
 		}
 	}
 
-	w.evaluateTotalBudget(ctx, status, orgID, activeSeats, now)
+	cutSeats := w.evaluateTotalBudget(ctx, status, orgID, activeSeats, now)
 	for _, s := range activeSeats {
+		if cutSeats[s.SeatID] {
+			// Cross-review triage cycle-2 #4: a seat evaluateTotalBudget just
+			// stopped this cycle must not also run through evaluateSeat's
+			// stall/liveness/scope-change checks against its now-stale
+			// SeatStatus snapshot -- that would ALERT (and record a deadman
+			// pending-alert) against a seat that is no longer active, purely
+			// because activeSeats was computed before this cycle's cutoff ran.
+			continue
+		}
 		w.evaluateSeat(ctx, status, orgID, s, now, rr.Events)
 	}
 
@@ -522,9 +531,19 @@ func (w *watchRun) evaluateCycle(ctx context.Context, orgID string, status *watc
 // raiseOrClear uses for non-cutoff conditions), regardless of whether the
 // Stop attempt(s) succeeded, so lead is never left uninformed of a
 // still-in-progress cutoff.
-func (w *watchRun) evaluateTotalBudget(ctx context.Context, status *watchStatusFile, orgID string, activeSeats []SeatStatus, now time.Time) {
+//
+// The returned set (seat_id -> true) names every seat this call itself
+// successfully stopped, so evaluateCycle's per-seat loop can skip them for
+// the remainder of THIS cycle (cross-review-triage cycle-2 #4): activeSeats
+// is a snapshot taken before this call runs, so without that skip the
+// caller's subsequent evaluateSeat pass would still probe a just-cut seat's
+// now-stale SeatStatus and could raise a spurious stall/liveness/scope-change
+// ALERT (and deadman pending-alert record) against a seat that is no longer
+// active.
+func (w *watchRun) evaluateTotalBudget(ctx context.Context, status *watchStatusFile, orgID string, activeSeats []SeatStatus, now time.Time) map[string]bool {
+	cutSeats := map[string]bool{}
 	if status.OrgStartTS == "" || w.cfg.Budget.TotalWallClockMinutes <= 0 {
-		return
+		return cutSeats
 	}
 	if len(activeSeats) == 0 {
 		// Cross-review AR-2: no active seats means nothing to cut off. Without
@@ -537,21 +556,21 @@ func (w *watchRun) evaluateTotalBudget(ctx context.Context, status *watchStatusF
 		// spurious ALERT to show for it (see
 		// TestWatch_TotalBudgetCutoff_NoActiveSeats_NoAlertNoEscalation_ThenCutsNewSeat's
 		// third phase, the concrete regression this guard prevents).
-		return
+		return cutSeats
 	}
 	start, err := time.Parse(time.RFC3339, status.OrgStartTS)
 	if err != nil {
-		return
+		return cutSeats
 	}
 	observed := now.Sub(start)
 	if observed <= time.Duration(w.cfg.Budget.TotalWallClockMinutes)*time.Minute {
-		return
+		return cutSeats
 	}
 
 	key := conditionKey(orgID, "", condTotalBudget)
 	rec := status.Conditions[key]
 	if rec != nil && rec.Cutoff {
-		return // AC-3c: one cutoff per key, ever
+		return cutSeats // AC-3c: one cutoff per key, ever
 	}
 
 	details := fmt.Sprintf("watchdog_total_budget_cutoff total_wall_clock=%dm observed=%s",
@@ -562,6 +581,8 @@ func (w *watchRun) evaluateTotalBudget(ctx context.Context, status *watchStatusF
 			allStopped = false
 			_, _ = fmt.Fprintf(w.stderr, "watchdog: total-budget cutoff Stop failed for org %q seat %q: %v -- will retry next cycle\n",
 				orgID, s.SeatID, stopErr)
+		} else {
+			cutSeats[s.SeatID] = true
 		}
 	}
 
@@ -572,6 +593,7 @@ func (w *watchRun) evaluateTotalBudget(ctx context.Context, status *watchStatusF
 		msg := fmt.Sprintf("TYPE: ALERT\nORG_ID: %s\nCONDITION: %s\n\n%s", orgID, condTotalBudget, details)
 		w.sendAlert(ctx, status, orgID, "", condTotalBudget, msg, now)
 	}
+	return cutSeats
 }
 
 // conditionFirstTS preserves rec's original FirstTS across a retried cutoff
@@ -591,8 +613,19 @@ func conditionFirstTS(rec *watchConditionRecord, now time.Time) string {
 // clock budget cutoff, (c) heartbeat stall, (d) process liveness, (e)
 // worktree scope change. events is the cycle's manifest snapshot (see
 // evaluateCycle), needed by the stall condition's M-6 fix below.
+//
+// A successful (a) cutoff this cycle returns early before (c)/(d)/(e) run
+// (cross-review-triage cycle-2 #4): s is a snapshot taken before the cutoff,
+// so probing it further this cycle would raise a spurious stall/liveness/
+// scope-change ALERT (and deadman pending-alert record) against a seat that
+// evaluateSeatBudget, moments earlier in this same call, already stopped. A
+// failed Stop attempt (evaluateSeatBudget returns false) still falls through
+// to the rest of this cycle's checks, unchanged from before this fix -- the
+// seat is still genuinely active, so there is nothing to skip.
 func (w *watchRun) evaluateSeat(ctx context.Context, status *watchStatusFile, orgID string, s SeatStatus, now time.Time, events []ManifestEvent) {
-	w.evaluateSeatBudget(ctx, status, orgID, s, now)
+	if w.evaluateSeatBudget(ctx, status, orgID, s, now) {
+		return
+	}
 
 	snap := status.SeatSnapshots[s.SeatID]
 	if snap == nil {
@@ -662,23 +695,29 @@ func (w *watchRun) evaluateSeat(ctx context.Context, status *watchStatusFile, or
 // w.stderr and the condition is left un-ratcheted so the next cycle retries,
 // while the ALERT is still sent exactly once per key regardless of the Stop
 // outcome.
-func (w *watchRun) evaluateSeatBudget(ctx context.Context, status *watchStatusFile, orgID string, s SeatStatus, now time.Time) {
+//
+// The returned bool is true exactly when this call itself successfully
+// stopped s this cycle, so evaluateSeat can skip its remaining per-cycle
+// checks for s (cross-review-triage cycle-2 #4). It is false both when no
+// cutoff condition applied at all and when a cutoff was attempted but Stop
+// failed (s is still genuinely active in the latter case).
+func (w *watchRun) evaluateSeatBudget(ctx context.Context, status *watchStatusFile, orgID string, s SeatStatus, now time.Time) bool {
 	if w.cfg.Budget.SeatWallClockMinutes <= 0 || s.TS == "" {
-		return
+		return false
 	}
 	spawned, err := time.Parse(time.RFC3339, s.TS)
 	if err != nil {
-		return
+		return false
 	}
 	observed := now.Sub(spawned)
 	if observed <= time.Duration(w.cfg.Budget.SeatWallClockMinutes)*time.Minute {
-		return
+		return false
 	}
 
 	key := conditionKey(orgID, s.SeatID, condSeatBudget)
 	rec := status.Conditions[key]
 	if rec != nil && rec.Cutoff {
-		return // AC-3c: one cutoff per key, ever
+		return false // AC-3c: one cutoff per key, ever -- already cut off in a prior cycle
 	}
 
 	details := fmt.Sprintf("watchdog_budget_cutoff seat_wall_clock=%dm observed=%s",
@@ -696,6 +735,7 @@ func (w *watchRun) evaluateSeatBudget(ctx context.Context, status *watchStatusFi
 		msg := fmt.Sprintf("TYPE: ALERT\nORG_ID: %s\nSEAT: %s\nCONDITION: %s\n\n%s", orgID, s.SeatID, condSeatBudget, details)
 		w.sendAlert(ctx, status, orgID, s.SeatID, condSeatBudget, msg, now)
 	}
+	return stopErr == nil
 }
 
 // raiseOrClear implements the AC-3c idempotent ALERT dedupe for a
@@ -835,9 +875,18 @@ func (w *watchRun) leadProbeSnapshot(ctx context.Context, orgID string) string {
 	return out
 }
 
-// historySnapshot returns the org's agmsg team history raw text, or "" if
-// the probe is unavailable/errors (best-effort deadman information source
-// #3).
+// historySnapshot returns the org's agmsg team history raw text, filtered
+// down to LEAD-authored lines only (filterLeadHistoryLines), or "" if the
+// probe is unavailable/errors (best-effort deadman information source #3).
+//
+// Filtering to lead-only traffic matters because agmsg history mixes every
+// identity's messages on the shared team, including the watchdog's own
+// ALERT-to-lead traffic and other seats' chatter: comparing the raw,
+// unfiltered history string would let a subsequent watchdog ALERT (or any
+// other non-lead line) look like "something happened" and wrongly clear a
+// pending deadman record for a lead that never actually responded (cross-
+// review-triage cycle-2 #3; the history-source analogue of the manifest-
+// source fix in leadActivityEventCount above).
 func (w *watchRun) historySnapshot(ctx context.Context, orgID string) string {
 	probe, ok := w.org.Agmsg.(watchAgmsgHistory)
 	if !ok {
@@ -847,7 +896,47 @@ func (w *watchRun) historySnapshot(ctx context.Context, orgID string) string {
 	if err != nil {
 		return ""
 	}
-	return out
+	return filterLeadHistoryLines(out)
+}
+
+// leadHistoryFromField parses one agmsg history line -- the real shape is
+// "  <status> [<ts>] <from> → <to>: <body>" (see
+// .agents/skills/agmsg/scripts/history.sh's `echo "  $status [$ts] $from
+// → $to: $body"`) -- and returns its from field. ok is false whenever
+// the line does not contain both the "] " and " → " markers this parse
+// depends on; a caller must then exclude the line entirely rather than
+// guess, since an unparseable line could just as easily be lead- as
+// non-lead-authored (defensive: exclude on parse failure, per cross-review-
+// triage cycle-2 #3's "parse defensively" instruction).
+func leadHistoryFromField(line string) (string, bool) {
+	afterTS := strings.Index(line, "] ")
+	if afterTS == -1 {
+		return "", false
+	}
+	rest := line[afterTS+len("] "):]
+	arrow := strings.Index(rest, " → ")
+	if arrow == -1 {
+		return "", false
+	}
+	from := strings.TrimSpace(rest[:arrow])
+	if from == "" {
+		return "", false
+	}
+	return from, true
+}
+
+// filterLeadHistoryLines returns only raw's lines whose parsed from field
+// (leadHistoryFromField) is exactly LeadIdentity, joined back with "\n".
+// Lines that fail to parse are excluded, not conservatively kept -- see
+// leadHistoryFromField's doc comment.
+func filterLeadHistoryLines(raw string) string {
+	var kept []string
+	for _, line := range strings.Split(raw, "\n") {
+		if from, ok := leadHistoryFromField(line); ok && from == LeadIdentity {
+			kept = append(kept, line)
+		}
+	}
+	return strings.Join(kept, "\n")
 }
 
 // checkDeadman implements AC-5: for every still-pending ALERT, look for
