@@ -168,13 +168,18 @@ type watchConditionRecord struct {
 // is the seat_id the ALERT concerned (empty for the org-level total-budget
 // ALERT); Subject == LeadIdentity is the "anomaly subject is Lead itself"
 // AC-5 branch that escalates without waiting for the deadman timeout.
+//
+// HistoryLeadLines is a COUNT of lead-authored agmsg history lines, not the
+// filtered text itself (self-review cycle-3 M3-2 fix): see
+// historyLeadLineCount's doc comment for why a count-based "did it grow"
+// comparison is required instead of exact string equality.
 type watchPendingAlert struct {
-	AlertID      string `json:"alert_id"`
-	TS           string `json:"ts"`
-	Subject      string `json:"subject"`
-	ManifestLen  int    `json:"manifest_len"`
-	LeadAgentGet string `json:"lead_agent_get"`
-	History      string `json:"history"`
+	AlertID          string `json:"alert_id"`
+	TS               string `json:"ts"`
+	Subject          string `json:"subject"`
+	ManifestLen      int    `json:"manifest_len"`
+	LeadAgentGet     string `json:"lead_agent_get"`
+	HistoryLeadLines int    `json:"history_lead_lines"`
 }
 
 // watchSeatSnapshot holds the previous cycle's raw comparison values for a
@@ -816,45 +821,66 @@ func (w *watchRun) sendAlert(ctx context.Context, status *watchStatusFile, orgID
 	rr, _ := w.org.Manifest.Read()
 	alertID := fmt.Sprintf("%s@%d", conditionKey(orgID, seatID, condType), now.UnixNano())
 	status.PendingAlerts[alertID] = &watchPendingAlert{
-		AlertID:      alertID,
-		TS:           now.UTC().Format(time.RFC3339),
-		Subject:      seatID,
-		ManifestLen:  leadActivityEventCount(rr.Events, orgID),
-		LeadAgentGet: w.leadProbeSnapshot(ctx, orgID),
-		History:      w.historySnapshot(ctx, orgID),
+		AlertID:          alertID,
+		TS:               now.UTC().Format(time.RFC3339),
+		Subject:          seatID,
+		ManifestLen:      leadActivityEventCount(rr.Events, orgID),
+		LeadAgentGet:     w.leadProbeSnapshot(ctx, orgID),
+		HistoryLeadLines: w.historyLeadLineCount(ctx, orgID),
 	}
 }
 
 // leadActivityEventCount counts manifest events attributable to lead for
-// orgID (self-review M-4 fix, org-scoped per cross-review AR-1, seat-
-// attributed per self-review cycle-2 M2-1): a genuinely unresponsive lead
-// must not have its deadman escalation silently cleared by an unrelated
-// seat's own manifest traffic (e.g. a `sent` event another seat produces),
-// so an event only counts here when either (a) it names lead itself
-// (ev.SeatID == LeadIdentity -- lead's own spawn event or any message it
-// sends carries this), or (b) it is a `stopped`/`disbanded` event that is
-// not the watchdog's own cutoff write: a manual (non-watchdog) stop or
-// disband of another seat is a lead-driven action lead had to take, so it is
-// still evidence lead is alive and responding, even though the event itself
-// names the stopped seat, not lead. Every `stopped` event a budget cutoff
-// produces carries "reason=watchdog_..." in its Details (see
-// evaluateTotalBudget/evaluateSeatBudget's Reason format), which is what
-// excludes the watchdog's own cutoffs from (b). The orgID filter excludes
-// another org's activity in the same shared manifest: without it, a new
-// event in a different, active org would clear a stalled org's pending
-// deadman alert even though nothing happened in the stalled org itself.
+// orgID (self-review M-4 fix, org-scoped per cross-review AR-1; the seat-
+// attribution model itself was corrected by self-review cycle-3 H3-1 --
+// see below): a genuinely unresponsive lead must not have its deadman
+// escalation silently cleared by an unrelated seat's own manifest traffic,
+// so an event only counts here when either (a) or (b) holds:
+//
+//	(a) ev.Event == EventSent. A `sent` event is lead-authored BY
+//	    CONSTRUCTION, regardless of ev.SeatID: ev.SeatID on a `sent` event
+//	    is the *recipient* (Send writes SeatID: p.To -- see verbs.go), not
+//	    the author, and `ralph org send` is the only verb that ever appends
+//	    one. In the star topology (.claude/rules/agent-messaging.md), only
+//	    lead/the operator drives that verb -- a seat's reply travels over
+//	    the agmsg skill, which never touches this manifest at all -- so
+//	    every `sent` event in orgID's manifest was written by lead sending
+//	    to someone, never by a seat sending to lead. (Cycle-2's fix used
+//	    `ev.SeatID == LeadIdentity` here, which is backwards: it excluded
+//	    the star topology's mandated seat->lead `sent` traffic while
+//	    treating lead->seat sends as nothing. See
+//	    TestWatch_Deadman_SeatSentEvent_ClearsPendingAlert_WatchdogCutoffDoesNot.)
+//	(b) it is a non-watchdog event from the lead-driven lifecycle set
+//	    (spawned, spawn_started, stopped, disbanded, rejected) that is not
+//	    the watchdog's own cutoff write. Each of these is only producible by
+//	    a `ralph org` verb that lead/the operator runs (spawn/stop/disband),
+//	    so it is evidence lead is alive and acting, even when the event
+//	    itself names a seat, not lead (e.g. lead spawning a replacement seat
+//	    in response to a stall ALERT, self-review cycle-3 M3-1). Every
+//	    `stopped` event a budget cutoff produces carries
+//	    "reason=watchdog_..." in its Details (see
+//	    evaluateTotalBudget/evaluateSeatBudget's Reason format), which is
+//	    what excludes the watchdog's own cutoffs from (b).
+//
+// The orgID filter excludes another org's activity in the same shared
+// manifest: without it, a new event in a different, active org would clear
+// a stalled org's pending deadman alert even though nothing happened in the
+// stalled org itself.
 func leadActivityEventCount(events []ManifestEvent, orgID string) int {
 	n := 0
 	for _, ev := range events {
 		if ev.OrgID != orgID {
 			continue
 		}
-		if ev.SeatID == LeadIdentity {
+		if ev.Event == EventSent {
 			n++
 			continue
 		}
-		if (ev.Event == EventStopped || ev.Event == EventDisbanded) && !strings.Contains(ev.Details, "reason=watchdog_") {
-			n++
+		switch ev.Event {
+		case EventSpawned, EventSpawnStarted, EventStopped, EventDisbanded, EventRejected:
+			if !strings.Contains(ev.Details, "reason=watchdog_") {
+				n++
+			}
 		}
 	}
 	return n
@@ -875,39 +901,64 @@ func (w *watchRun) leadProbeSnapshot(ctx context.Context, orgID string) string {
 	return out
 }
 
-// historySnapshot returns the org's agmsg team history raw text, filtered
-// down to LEAD-authored lines only (filterLeadHistoryLines), or "" if the
-// probe is unavailable/errors (best-effort deadman information source #3).
+// historyLeadLineCount returns the COUNT of the org's agmsg team history
+// lines that are LEAD-authored (leadHistoryLines), or -1 if the probe is
+// unavailable/errors (best-effort deadman information source #3; -1, not 0,
+// so an unavailable probe is distinguishable from "lead has genuinely never
+// sent anything yet").
 //
-// Filtering to lead-only traffic matters because agmsg history mixes every
-// identity's messages on the shared team, including the watchdog's own
-// ALERT-to-lead traffic and other seats' chatter: comparing the raw,
-// unfiltered history string would let a subsequent watchdog ALERT (or any
-// other non-lead line) look like "something happened" and wrongly clear a
-// pending deadman record for a lead that never actually responded (cross-
-// review-triage cycle-2 #3; the history-source analogue of the manifest-
-// source fix in leadActivityEventCount above).
-func (w *watchRun) historySnapshot(ctx context.Context, orgID string) string {
+// Counting rather than comparing the filtered text (self-review cycle-3
+// M3-2 fix) matters because the window this reads is NOT scoped to lead's
+// own traffic: agentID is passed as "" below, which -- per the driver's own
+// doc comment on History -- makes it drop its LIMIT argument entirely and
+// fall through to the agmsg skill's history.sh script's own default
+// (LIMIT=20, see ~/.agents/skills/agmsg/scripts/history.sh -- confirmed by
+// reading that script directly; it is a user-global skill install, not
+// vendored into this repo, so `.agents/skills/` here has no `agmsg/`
+// subdirectory to find it in), applied to the WHOLE team's traffic, not
+// just lead's. As other seats chat, older lead lines get evicted from that
+// last-20-of-everyone window and the filtered text can shrink even though
+// lead did nothing new -- comparing exact strings would read a pure
+// eviction as "activity" and wrongly clear a pending alert (the bug this
+// fix closes). A count comparison that only treats growth (cur > baseline,
+// see checkDeadman) as activity does not have that failure mode: eviction
+// can only ever decrease the count, never manufacture an increase. Passing
+// LeadIdentity as agentID to scope the query itself would be a more
+// complete fix (and would make the `20` argument here non-dead) but is
+// deferred -- the count comparison alone is sufficient to close the false-
+// activity bug the cycle-3 finding described.
+func (w *watchRun) historyLeadLineCount(ctx context.Context, orgID string) int {
 	probe, ok := w.org.Agmsg.(watchAgmsgHistory)
 	if !ok {
-		return ""
+		return -1
 	}
 	out, err := probe.History(ctx, agmsgTeam(orgID), "", 20)
 	if err != nil {
-		return ""
+		return -1
 	}
-	return filterLeadHistoryLines(out)
+	return len(leadHistoryLines(out))
 }
 
 // leadHistoryFromField parses one agmsg history line -- the real shape is
-// "  <status> [<ts>] <from> → <to>: <body>" (see
-// .agents/skills/agmsg/scripts/history.sh's `echo "  $status [$ts] $from
-// → $to: $body"`) -- and returns its from field. ok is false whenever
-// the line does not contain both the "] " and " → " markers this parse
-// depends on; a caller must then exclude the line entirely rather than
-// guess, since an unparseable line could just as easily be lead- as
-// non-lead-authored (defensive: exclude on parse failure, per cross-review-
-// triage cycle-2 #3's "parse defensively" instruction).
+// "  <status> [<ts>] <from> → <to>: <body>" (see the agmsg skill's
+// `scripts/history.sh`, a user-global install under
+// `~/.agents/skills/agmsg/`, not vendored in this repo -- its `echo "
+// $status [$ts] $from → $to: $body"` line) -- and returns its from field.
+// ok is false whenever the line does not contain both the "] " and " → "
+// markers this parse depends on; a caller must then exclude the line
+// entirely rather than guess, since an unparseable line could just as
+// easily be lead- as non-lead-authored (defensive: exclude on parse
+// failure, per cross-review-triage cycle-2 #3's "parse defensively"
+// instruction).
+//
+// Anchoring on the FIRST "] " in the line is safe because history.sh's own
+// SQL formats the body with
+// `replace(replace(body, char(10), '\n'), char(9), '\t')` before emitting
+// it -- every literal newline/tab inside a message body is escaped to a
+// two-character sequence before the line is printed, so each history
+// record is always exactly one physical line and status+timestamp always
+// come first; a body containing a literal "] " cannot introduce a second
+// line break for this parse to trip over.
 func leadHistoryFromField(line string) (string, bool) {
 	_, rest, found := strings.Cut(line, "] ")
 	if !found {
@@ -924,18 +975,28 @@ func leadHistoryFromField(line string) (string, bool) {
 	return from, true
 }
 
-// filterLeadHistoryLines returns only raw's lines whose parsed from field
-// (leadHistoryFromField) is exactly LeadIdentity, joined back with "\n".
-// Lines that fail to parse are excluded, not conservatively kept -- see
-// leadHistoryFromField's doc comment.
-func filterLeadHistoryLines(raw string) string {
+// leadHistoryLines returns only raw's lines whose parsed from field
+// (leadHistoryFromField) is exactly LeadIdentity. Lines that fail to parse
+// are excluded, not conservatively kept -- see leadHistoryFromField's doc
+// comment. Shared by filterLeadHistoryLines (text, used by tests to pin the
+// parsing contract directly) and historyLeadLineCount (count, used by the
+// production deadman check) so the two never drift on what counts as a
+// lead line.
+func leadHistoryLines(raw string) []string {
 	var kept []string
 	for line := range strings.SplitSeq(raw, "\n") {
 		if from, ok := leadHistoryFromField(line); ok && from == LeadIdentity {
 			kept = append(kept, line)
 		}
 	}
-	return strings.Join(kept, "\n")
+	return kept
+}
+
+// filterLeadHistoryLines returns leadHistoryLines(raw) joined back with
+// "\n" -- kept as a thin wrapper so TestFilterLeadHistoryLines can keep
+// pinning the parsing contract as a single string comparison.
+func filterLeadHistoryLines(raw string) string {
+	return strings.Join(leadHistoryLines(raw), "\n")
 }
 
 // checkDeadman implements AC-5: for every still-pending ALERT, look for
@@ -959,7 +1020,7 @@ func (w *watchRun) checkDeadman(ctx context.Context, status *watchStatusFile, rr
 			}
 		}
 		if !activity {
-			if cur := w.historySnapshot(ctx, status.OrgID); cur != "" && cur != pending.History {
+			if cur := w.historyLeadLineCount(ctx, status.OrgID); cur >= 0 && cur > pending.HistoryLeadLines {
 				activity = true
 			}
 		}
