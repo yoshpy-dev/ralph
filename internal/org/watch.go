@@ -909,16 +909,15 @@ func (w *watchRun) historySnapshot(ctx context.Context, orgID string) string {
 // non-lead-authored (defensive: exclude on parse failure, per cross-review-
 // triage cycle-2 #3's "parse defensively" instruction).
 func leadHistoryFromField(line string) (string, bool) {
-	afterTS := strings.Index(line, "] ")
-	if afterTS == -1 {
+	_, rest, found := strings.Cut(line, "] ")
+	if !found {
 		return "", false
 	}
-	rest := line[afterTS+len("] "):]
-	arrow := strings.Index(rest, " → ")
-	if arrow == -1 {
+	fromPart, _, found := strings.Cut(rest, " → ")
+	if !found {
 		return "", false
 	}
-	from := strings.TrimSpace(rest[:arrow])
+	from := strings.TrimSpace(fromPart)
 	if from == "" {
 		return "", false
 	}
@@ -931,7 +930,7 @@ func leadHistoryFromField(line string) (string, bool) {
 // leadHistoryFromField's doc comment.
 func filterLeadHistoryLines(raw string) string {
 	var kept []string
-	for _, line := range strings.Split(raw, "\n") {
+	for line := range strings.SplitSeq(raw, "\n") {
 		if from, ok := leadHistoryFromField(line); ok && from == LeadIdentity {
 			kept = append(kept, line)
 		}
