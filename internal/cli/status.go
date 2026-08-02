@@ -9,26 +9,24 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/yoshpy-dev/ralph/internal/action"
-	"github.com/yoshpy-dev/ralph/internal/config"
 	"github.com/yoshpy-dev/ralph/internal/state"
 	"github.com/yoshpy-dev/ralph/internal/ui"
 	"github.com/yoshpy-dev/ralph/internal/ui/panes"
 	"github.com/yoshpy-dev/ralph/internal/watcher"
 )
 
-// resolveLoopDriver returns the effective driver and source ("env" / "toml" /
-// "default"), reusing the same priority that runDoctor and runPipeline honour.
-// Lives here so `ralph status` can show what the next /loop run will use
-// (AC-6 of issue #44).
+// resolveLoopDriver returns the effective driver and source ("env" /
+// "default"). The [loop] ralph.toml section it used to read from was removed
+// along with the rest of the Ralph Loop execution system; this whole
+// TUI-based `ralph status` command (and this helper) is scheduled for full
+// removal/rewrite to an org-manifest-based status in the Go-side deletion
+// slice of the same plan. Kept as a literal-default stub in the meantime so
+// `go build`/`go vet` stay green.
 func resolveLoopDriver() (driver, source string) {
 	if v := os.Getenv("RALPH_LOOP_DRIVER"); v != "" {
 		return v, "env"
 	}
-	cfg, _ := config.Load("ralph.toml")
-	if cfg.Loop.Driver != "" {
-		return cfg.Loop.Driver, "toml"
-	}
-	return config.Default().Loop.Driver, "default"
+	return "claude", "default"
 }
 
 func newStatusCmd() *cobra.Command {

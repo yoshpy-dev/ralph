@@ -10,7 +10,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/yoshpy-dev/ralph/internal/action"
-	"github.com/yoshpy-dev/ralph/internal/config"
 )
 
 const activePlansDir = "docs/plans/active"
@@ -48,66 +47,68 @@ func newRunCmd() *cobra.Command {
 	return cmd
 }
 
+// runDefaults holds the literal fallback values `ralph run` used to read
+// from ralph.toml's now-removed [pipeline]/[loop] sections. The Ralph Loop
+// execution system these fed (scripts/ralph-orchestrator.sh,
+// scripts/ralph-pipeline.sh, and friends) was removed along with those config
+// sections; `ralph run`/`retry`/`abort` themselves are scheduled for full
+// removal in the Go-side deletion slice of the same plan. Until then, these
+// literals keep `go build`/`go vet` green by matching the config defaults
+// that used to live in config.Default().Pipeline / config.Default().Loop.
+var runDefaults = struct {
+	model, effort, permissionMode                                 string
+	maxIterations, maxParallel                                    int
+	codexSandbox, codexApprovalPolicy, claudeReviewerModel        string
+	implement, selfReview, verify, test, syncDocs, pr, probe, esc string
+}{
+	model: "opus", effort: "high", permissionMode: "bypassPermissions",
+	maxIterations: 20, maxParallel: 4,
+	codexSandbox: "workspace-write", codexApprovalPolicy: "on-failure", claudeReviewerModel: "opus",
+	implement: "sonnet", selfReview: "opus", verify: "sonnet", test: "sonnet",
+	syncDocs: "sonnet", pr: "sonnet", probe: "haiku", esc: "opus",
+}
+
 func runPipeline(planPath string, maxIter, maxPar int, preflight, resume, dryRun, unifiedPR bool, maxIterChanged, maxParChanged bool) error {
-	// Load config for defaults.
-	cfg, err := config.Load("ralph.toml")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: ralph.toml parse error: %v — using defaults\n", err)
-	}
+	var err error
 
-	// Build environment with env > TOML > default priority.
+	// Build environment with env > default priority.
 	// RALPH_MODEL, RALPH_EFFORT, RALPH_PERMISSION_MODE have no CLI flags;
-	// use appendEnvIfMissing so a pre-set env var wins over the TOML value.
+	// use appendEnvIfMissing so a pre-set env var wins over the literal default.
 	env := os.Environ()
-	env = appendEnvIfMissing(env, "RALPH_MODEL", cfg.Pipeline.Model)
-	env = appendEnvIfMissing(env, "RALPH_EFFORT", cfg.Pipeline.Effort)
-	env = appendEnvIfMissing(env, "RALPH_PERMISSION_MODE", cfg.Pipeline.PermissionMode)
+	env = appendEnvIfMissing(env, "RALPH_MODEL", runDefaults.model)
+	env = appendEnvIfMissing(env, "RALPH_EFFORT", runDefaults.effort)
+	env = appendEnvIfMissing(env, "RALPH_PERMISSION_MODE", runDefaults.permissionMode)
 
-	// RALPH_MAX_ITERATIONS and RALPH_MAX_PARALLEL honour CLI > env > TOML.
+	// RALPH_MAX_ITERATIONS and RALPH_MAX_PARALLEL honour CLI > env > default.
 	// Use Flags().Changed() (Cobra flag-presence) — NOT the != 0 heuristic —
 	// to detect whether the flag was explicitly set. When the flag was set,
 	// export the CLI value unconditionally (it wins over any env var). When
-	// absent, fall back to the env-or-TOML value via appendEnvIfMissing.
+	// absent, fall back to the env-or-default value via appendEnvIfMissing.
 	if maxIterChanged {
 		env = append(env, fmt.Sprintf("RALPH_MAX_ITERATIONS=%d", maxIter))
 	} else {
-		env = appendEnvIfMissing(env, "RALPH_MAX_ITERATIONS", fmt.Sprintf("%d", cfg.Pipeline.MaxIterations))
+		env = appendEnvIfMissing(env, "RALPH_MAX_ITERATIONS", fmt.Sprintf("%d", runDefaults.maxIterations))
 	}
 	if maxParChanged {
 		env = append(env, fmt.Sprintf("RALPH_MAX_PARALLEL=%d", maxPar))
 	} else {
-		env = appendEnvIfMissing(env, "RALPH_MAX_PARALLEL", fmt.Sprintf("%d", cfg.Pipeline.MaxParallel))
+		env = appendEnvIfMissing(env, "RALPH_MAX_PARALLEL", fmt.Sprintf("%d", runDefaults.maxParallel))
 	}
 
-	// Phase 2 (issue #44) — propagate [loop] settings only when the user has
-	// not already set the env var. This makes `[loop] driver = "codex"` in
-	// ralph.toml runtime-effective for `ralph run`, while preserving the
-	// documented priority "env > TOML > default".
-	env = appendEnvIfMissing(env, "RALPH_LOOP_DRIVER", cfg.Loop.Driver)
-	env = appendEnvIfMissing(env, "RALPH_CODEX_SANDBOX", cfg.Loop.CodexSandbox)
-	env = appendEnvIfMissing(env, "RALPH_CODEX_APPROVAL_POLICY", cfg.Loop.CodexApprovalPolicy)
-	env = appendEnvIfMissing(env, "RALPH_CLAUDE_REVIEWER_MODEL", cfg.Loop.ClaudeReviewerModel)
+	env = appendEnvIfMissing(env, "RALPH_CODEX_SANDBOX", runDefaults.codexSandbox)
+	env = appendEnvIfMissing(env, "RALPH_CODEX_APPROVAL_POLICY", runDefaults.codexApprovalPolicy)
+	env = appendEnvIfMissing(env, "RALPH_CLAUDE_REVIEWER_MODEL", runDefaults.claudeReviewerModel)
 
-	// Per-phase model routing — propagate [pipeline.phases] values only when
-	// the user has not already set the corresponding env var (env > TOML > default).
-	// RALPH_FORCE_MODEL is only exported when the toml value is non-empty.
-	// appendEnvIfMissing skips adding when the key is already present in env
-	// (i.e. when the user exported it), so an empty cfg.Pipeline.Phases.Force
-	// would append "RALPH_FORCE_MODEL=" which would then mask any user-set env
-	// var on subsequent reads (the loop finds "RALPH_FORCE_MODEL=" and returns
-	// early). To avoid that, we guard with an explicit non-empty check so that
-	// an absent/empty [pipeline.phases] force never writes a blank override.
-	env = appendEnvIfMissing(env, "RALPH_IMPLEMENT_MODEL", cfg.Pipeline.Phases.Implement)
-	env = appendEnvIfMissing(env, "RALPH_SELF_REVIEW_MODEL", cfg.Pipeline.Phases.SelfReview)
-	env = appendEnvIfMissing(env, "RALPH_VERIFY_MODEL", cfg.Pipeline.Phases.Verify)
-	env = appendEnvIfMissing(env, "RALPH_TEST_MODEL", cfg.Pipeline.Phases.Test)
-	env = appendEnvIfMissing(env, "RALPH_SYNC_DOCS_MODEL", cfg.Pipeline.Phases.SyncDocs)
-	env = appendEnvIfMissing(env, "RALPH_PR_MODEL", cfg.Pipeline.Phases.PR)
-	env = appendEnvIfMissing(env, "RALPH_PROBE_MODEL", cfg.Pipeline.Phases.Probe)
-	env = appendEnvIfMissing(env, "RALPH_ESCALATION_MODEL", cfg.Pipeline.Phases.Escalation)
-	if cfg.Pipeline.Phases.Force != "" {
-		env = appendEnvIfMissing(env, "RALPH_FORCE_MODEL", cfg.Pipeline.Phases.Force)
-	}
+	// Per-phase model routing — propagate literal defaults only when the user
+	// has not already set the corresponding env var (env > default).
+	env = appendEnvIfMissing(env, "RALPH_IMPLEMENT_MODEL", runDefaults.implement)
+	env = appendEnvIfMissing(env, "RALPH_SELF_REVIEW_MODEL", runDefaults.selfReview)
+	env = appendEnvIfMissing(env, "RALPH_VERIFY_MODEL", runDefaults.verify)
+	env = appendEnvIfMissing(env, "RALPH_TEST_MODEL", runDefaults.test)
+	env = appendEnvIfMissing(env, "RALPH_SYNC_DOCS_MODEL", runDefaults.syncDocs)
+	env = appendEnvIfMissing(env, "RALPH_PR_MODEL", runDefaults.pr)
+	env = appendEnvIfMissing(env, "RALPH_PROBE_MODEL", runDefaults.probe)
+	env = appendEnvIfMissing(env, "RALPH_ESCALATION_MODEL", runDefaults.esc)
 
 	if planPath == "" {
 		planPath, err = detectLatestPlanDir(activePlansDir)
@@ -154,7 +155,7 @@ func detectLatestPlanDir(activeDir string) (string, error) {
 	entries, err := os.ReadDir(activeDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", fmt.Errorf("no directory-based plan found. Create one with './scripts/new-ralph-plan.sh --type <type> <slug>' or specify --plan <directory>")
+			return "", fmt.Errorf("no directory-based plan found. Specify --plan <directory>")
 		}
 		return "", fmt.Errorf("read active plans: %w", err)
 	}
@@ -174,7 +175,7 @@ func detectLatestPlanDir(activeDir string) (string, error) {
 	}
 
 	if len(plans) == 0 {
-		return "", fmt.Errorf("no directory-based plan found. Create one with './scripts/new-ralph-plan.sh --type <type> <slug>' or specify --plan <directory>")
+		return "", fmt.Errorf("no directory-based plan found. Specify --plan <directory>")
 	}
 
 	sort.Sort(sort.Reverse(sort.StringSlice(plans)))

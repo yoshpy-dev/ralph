@@ -122,26 +122,18 @@ _project="$_tmp/project"
 mkdir -p "$_project/scripts" "$_project/docs/plans/templates" "$_project/docs/plans/active"
 cp "$PROJECT_ROOT/scripts/branch-name.sh" "$_project/scripts/branch-name.sh"
 cp "$PROJECT_ROOT/scripts/new-feature-plan.sh" "$_project/scripts/new-feature-plan.sh"
-cp "$PROJECT_ROOT/scripts/new-ralph-plan.sh" "$_project/scripts/new-ralph-plan.sh"
 cp "$PROJECT_ROOT/docs/plans/templates/feature-plan.md" "$_project/docs/plans/templates/feature-plan.md"
-cp "$PROJECT_ROOT/docs/plans/templates/ralph-loop-manifest.md" "$_project/docs/plans/templates/ralph-loop-manifest.md"
-cp "$PROJECT_ROOT/docs/plans/templates/ralph-loop-slice.md" "$_project/docs/plans/templates/ralph-loop-slice.md"
 chmod +x "$_project/scripts/"*.sh
 
 _today="$(date '+%Y-%m-%d')"
 (
   cd "$_project"
   ./scripts/new-feature-plan.sh --type docs typed-feature 77 >/dev/null
-  ./scripts/new-ralph-plan.sh --type chore typed-loop N/A 1 >/dev/null
 )
 _feature_plan="$_project/docs/plans/active/${_today}-typed-feature.md"
-_loop_plan="$_project/docs/plans/active/${_today}-typed-loop/_manifest.md"
 assert_eq "new-feature-plan writes Type" "docs" "$(awk '/^- Type:/ { print $3; exit }' "$_feature_plan")"
 assert_eq "new-feature-plan branch output" "docs/77/typed-feature" "$("$BRANCH_NAME" from-plan "$_feature_plan")"
-assert_eq "new-ralph-plan writes Type" "chore" "$(awk '/^- Type:/ { print $3; exit }' "$_loop_plan")"
-assert_eq "new-ralph-plan branch output" "chore/typed-loop" "$("$BRANCH_NAME" from-plan "$_loop_plan")"
 assert_exit "new-feature-plan missing --type value fails" 1 sh -c 'cd "$1" && ./scripts/new-feature-plan.sh --type' sh "$_project"
-assert_exit "new-ralph-plan missing --type value fails" 1 sh -c 'cd "$1" && ./scripts/new-ralph-plan.sh --type' sh "$_project"
 
 printf '\nbranch-name tests: %s passed, %s failed, %s total\n' "$_pass" "$_fail" "$_total"
 [ "$_fail" -eq 0 ]

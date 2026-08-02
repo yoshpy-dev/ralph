@@ -82,8 +82,8 @@ func runDoctorOpts(targetDir string, probeModels bool) error {
 	// Check 6: Language pack verify.sh (checks project's installed packs via manifest).
 	results = append(results, checkInstalledPacks(targetDir)...)
 
-	// Check 7: Loop driver effective value (env > TOML > default).
-	results = append(results, checkLoopDriver(cfg, os.Getenv))
+	// Check 7: Loop driver effective value (env > default).
+	results = append(results, checkLoopDriver(os.Getenv))
 
 	// Check 8: Go availability.
 	results = append(results, checkGo(cfg))
@@ -460,39 +460,34 @@ func checkEmbeddedPacks() []checkResult {
 }
 
 // checkLoopDriver reports the effective Ralph Loop driver — the value
-// ralph-pipeline.sh will actually see — and which source it came from
-// (env > TOML > default). Implements AC-6 of issue #44. The lookup function
-// is injected so the test can supply a deterministic env without
-// monkey-patching os.Getenv.
+// scripts/ralph-cli-driver.sh used to see — and which source it came from
+// (env > default). The lookup function is injected so the test can supply a
+// deterministic env without monkey-patching os.Getenv.
 //
-// Issue #44 cycle-3 cross-review hardenings:
-//   - When driver=codex is effective but the codex binary is absent, return
-//     fail. Otherwise doctor reports pass while the next `ralph run`
-//     preflight blocks immediately on the missing required CLI.
-//   - Sandbox / approval / reviewer-model values are resolved through the
-//     same env > TOML > default priority before display, so an operator
-//     who exports RALPH_CODEX_SANDBOX=danger-full-access does not see
-//     `sandbox: workspace-write` in doctor and assume the safer default.
-func checkLoopDriver(cfg config.Config, getenv func(string) string) checkResult {
+// The [loop] ralph.toml section this used to read (env > TOML > default) was
+// removed along with the rest of the Ralph Loop execution system; this check
+// (and the `ralph run`/`retry`/`abort` commands it diagnoses) is scheduled
+// for full removal in the Go-side deletion slice of the same plan. Kept as a
+// literal-default stub in the meantime so `go build`/`go vet` stay green.
+//
+// Cross-review hardening retained from the original Phase 2 implementation:
+// when driver=codex is effective but the codex binary is absent, return
+// fail — otherwise doctor reports pass while the next `ralph run` preflight
+// blocks immediately on the missing required CLI.
+func checkLoopDriver(getenv func(string) string) checkResult {
 	r := checkResult{Name: "Loop driver"}
 
-	defaults := config.Default().Loop
-	pick := func(envKey, tomlVal, defaultVal string) (string, string) {
+	pick := func(envKey, defaultVal string) (string, string) {
 		if v := getenv(envKey); v != "" {
 			return v, "env"
-		}
-		if tomlVal != "" {
-			// TOML matching default still reports toml as the source so users
-			// who explicitly write `driver = "claude"` see their choice acknowledged.
-			return tomlVal, "toml"
 		}
 		return defaultVal, "default"
 	}
 
-	effective, source := pick("RALPH_LOOP_DRIVER", cfg.Loop.Driver, defaults.Driver)
-	sandbox, _ := pick("RALPH_CODEX_SANDBOX", cfg.Loop.CodexSandbox, defaults.CodexSandbox)
-	approval, _ := pick("RALPH_CODEX_APPROVAL_POLICY", cfg.Loop.CodexApprovalPolicy, defaults.CodexApprovalPolicy)
-	reviewer, _ := pick("RALPH_CLAUDE_REVIEWER_MODEL", cfg.Loop.ClaudeReviewerModel, defaults.ClaudeReviewerModel)
+	effective, source := pick("RALPH_LOOP_DRIVER", "claude")
+	sandbox, _ := pick("RALPH_CODEX_SANDBOX", "workspace-write")
+	approval, _ := pick("RALPH_CODEX_APPROVAL_POLICY", "on-failure")
+	reviewer, _ := pick("RALPH_CLAUDE_REVIEWER_MODEL", "opus")
 
 	if effective == "codex" {
 		if _, err := exec.LookPath("codex"); err != nil {

@@ -48,7 +48,7 @@ Provide a cross-model second opinion on the current diff before PR creation.
    - reviewer = `claude`: run `command -v claude` via Bash. If not found: note "Claude CLI not available — skipping to /pr" and invoke /pr.
 
 4. **Invoke reviewer**:
-   - Determine base branch via Bash: `. scripts/ralph-cli-driver.sh; BASE=$(detect_base_branch)` — resolution order: (1) `$RALPH_XREVIEW_BASE` if set and non-empty (explicit override or Loop orchestrator export); (2) `git symbolic-ref --quiet --short refs/remotes/origin/HEAD` with leading `origin/` stripped (repo default branch); (3) `main` if `refs/heads/main` exists, else `master`.
+   - Determine base branch via Bash: `. scripts/xreview-helpers.sh; BASE=$(detect_base_branch)` — resolution order: (1) `$RALPH_XREVIEW_BASE` if set and non-empty (explicit override or Loop orchestrator export); (2) `git symbolic-ref --quiet --short refs/remotes/origin/HEAD` with leading `origin/` stripped (repo default branch); (3) `main` if `refs/heads/main` exists, else `master`.
    - Check the diff is non-empty: `git diff "$BASE"...HEAD --quiet` — if exit 0 (no diff), skip with a note and proceed to /pr.
    - **reviewer = `codex`**: `codex exec review --base "$BASE"`
      The native reviewer analyzes the full diff and returns structured findings with severity, affected files, and recommendations.
@@ -156,38 +156,7 @@ Provide a cross-model second opinion on the current diff before PR creation.
 | Triage execution | inline (main context) | inline — chained within a single agent |
 | Output file | `docs/reports/cross-review-triage-<slug>.md` | Same |
 
-Driver / reviewer detection reuses the Step 2 logic. Exporting `RALPH_PRIMARY_CLI` makes the choice unambiguous.
-
-### Reviewer inversion inside Ralph Loop (Phase 2 / issue #44)
-
-Ralph Loop (`/loop` → `ralph-pipeline.sh`) follows the same "reviewer is the
-driver's opposite" contract. The only difference is that the decision reads
-**`RALPH_LOOP_DRIVER`** instead of `RALPH_PRIMARY_CLI`, and the
-`pick_reviewer` helper in `scripts/ralph-cli-driver.sh` returns the result.
-
-| Loop driver | Reviewer launch | Prompt |
-|-------------|-----------------|--------|
-| `claude` | `codex exec review --base "$base"` | (Codex built-in `review` subcommand) |
-| `codex`  | `claude -p --permission-mode auto --output-format text` | `.claude/skills/cross-review/prompts/adversarial-claude.md` |
-
-Both driver and reviewer are recorded in the triage report (`Driver:` /
-`Reviewer:`) and in the `report_event "cross-review"` JSONL fields
-(`driver` / `reviewer`), so downstream consumers can confirm which pair
-actually ran. The fake-CLI regression coverage lives in
-`tests/test-ralph-cli-driver.sh` Test 5 / Test 6.
-
-**Prompt rendering contract (claude reviewer path).** The
-`adversarial-claude.md` prompt contains `${BASE_BRANCH}` and
-`${REPORTS_DIR}` placeholders. `ralph-pipeline.sh` pre-renders these
-into a per-cycle copy under `${PIPELINE_DIR}/outer-N-adversarial-claude.md`
-using awk `index()`/`substr()` (literal replacement — safe against
-git refs containing `#`, `&`, `\`, `/`). An allowlist guard fails the
-cross-review gate closed if any unsupported `${...}` placeholder remains
-in the rendered prompt. Adding a new placeholder therefore requires
-updating both the prompt and the renderer; the gate will not silently
-pass on partial substitution (regression: issue #50). Regression coverage
-lives in `tests/test-xreview-prompt-render.sh` and
-`tests/test-xreview-gate-regression.sh`.
+Driver / reviewer detection reuses the Step 2 logic. Exporting `RALPH_PRIMARY_CLI` makes the choice unambiguous. The `pick_reviewer` helper in `scripts/xreview-helpers.sh` implements the "reviewer is the driver's opposite" contract in isolation (fake-CLI-free regression coverage lives in `tests/test-xreview-helpers.sh`).
 
 ## Insight event (best-effort)
 

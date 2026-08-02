@@ -129,32 +129,6 @@ func TestDefaultsLockStep(t *testing.T) {
 		}
 	}
 
-	// ── pipeline.model ────────────────────────────────────────────────────────
-	check("pipeline.model", "RALPH_MODEL", tomlCfg.Pipeline.Model, goCfg.Pipeline.Model)
-
-	// ── pipeline.effort ───────────────────────────────────────────────────────
-	check("pipeline.effort", "RALPH_EFFORT", tomlCfg.Pipeline.Effort, goCfg.Pipeline.Effort)
-
-	// ── per-phase models ──────────────────────────────────────────────────────
-	phaseChecks := []struct {
-		label    string
-		shellVar string
-		tomlVal  string
-		goVal    string
-	}{
-		{"phases.implement", "RALPH_IMPLEMENT_MODEL", tomlCfg.Pipeline.Phases.Implement, goCfg.Pipeline.Phases.Implement},
-		{"phases.self_review", "RALPH_SELF_REVIEW_MODEL", tomlCfg.Pipeline.Phases.SelfReview, goCfg.Pipeline.Phases.SelfReview},
-		{"phases.verify", "RALPH_VERIFY_MODEL", tomlCfg.Pipeline.Phases.Verify, goCfg.Pipeline.Phases.Verify},
-		{"phases.test", "RALPH_TEST_MODEL", tomlCfg.Pipeline.Phases.Test, goCfg.Pipeline.Phases.Test},
-		{"phases.sync_docs", "RALPH_SYNC_DOCS_MODEL", tomlCfg.Pipeline.Phases.SyncDocs, goCfg.Pipeline.Phases.SyncDocs},
-		{"phases.pr", "RALPH_PR_MODEL", tomlCfg.Pipeline.Phases.PR, goCfg.Pipeline.Phases.PR},
-		{"phases.probe", "RALPH_PROBE_MODEL", tomlCfg.Pipeline.Phases.Probe, goCfg.Pipeline.Phases.Probe},
-		{"phases.escalation", "RALPH_ESCALATION_MODEL", tomlCfg.Pipeline.Phases.Escalation, goCfg.Pipeline.Phases.Escalation},
-	}
-	for _, pc := range phaseChecks {
-		check(pc.label, pc.shellVar, pc.tomlVal, pc.goVal)
-	}
-
 	// ── [org] envelope defaults ────────────────────────────────────────────────
 	// Shell vars are comma-joined strings (RALPH_ORG_DRIVER_POOL,
 	// RALPH_ORG_MODEL_POOL as "driver:model,driver:model,...") since shell has
@@ -197,23 +171,6 @@ func TestDefaultsLockStep(t *testing.T) {
 		strconv.FormatBool(tomlCfg.Org.Watchdog.WatcherEnabled), strconv.FormatBool(goCfg.Org.Watchdog.WatcherEnabled))
 	check("org.watchdog.watcher_model", "RALPH_ORG_WATCHDOG_WATCHER_MODEL",
 		tomlCfg.Org.Watchdog.WatcherModel, goCfg.Org.Watchdog.WatcherModel)
-
-	// ── loop.claude_reviewer_model ────────────────────────────────────────────
-	// Shell var: RALPH_CLAUDE_REVIEWER_MODEL; toml: [loop].claude_reviewer_model;
-	// Go: Loop.ClaudeReviewerModel
-	{
-		shellVal := mustShell(t, shell, "RALPH_CLAUDE_REVIEWER_MODEL")
-		tomlVal := tomlCfg.Loop.ClaudeReviewerModel
-		goVal := goCfg.Loop.ClaudeReviewerModel
-		if shellVal != goVal {
-			t.Errorf("lock-step mismatch for loop.claude_reviewer_model:\n  scripts/ralph-config.sh RALPH_CLAUDE_REVIEWER_MODEL = %q\n  config.Default() Loop.ClaudeReviewerModel = %q",
-				shellVal, goVal)
-		}
-		if tomlVal != goVal {
-			t.Errorf("lock-step mismatch for loop.claude_reviewer_model:\n  templates/base/ralph.toml = %q\n  config.Default() Loop.ClaudeReviewerModel = %q",
-				tomlVal, goVal)
-		}
-	}
 
 	// ── cross-review SKILL.md fallback matches shell ──────────────────────────
 	// The SKILL.md documents: ${RALPH_CLAUDE_REVIEWER_MODEL:-opus}

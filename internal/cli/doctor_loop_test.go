@@ -5,57 +5,45 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/yoshpy-dev/ralph/internal/config"
 )
 
-// TestCheckLoopDriver_PriorityAndSource verifies the env > TOML > default
-// priority documented in AGENTS.md and the plan's Design decisions, and
-// confirms the doctor result names the source so users can see which knob
-// is actually in effect.
+// TestCheckLoopDriver_PriorityAndSource verifies the env > default priority
+// and confirms the doctor result names the source so users can see which
+// knob is actually in effect. The [loop] ralph.toml section this used to also
+// read from was removed along with the rest of the Ralph Loop execution
+// system (checkLoopDriver itself is a stub pending full removal — see its
+// doc comment in doctor.go).
 func TestCheckLoopDriver_PriorityAndSource(t *testing.T) {
 	cases := []struct {
 		name        string
 		env         map[string]string
-		toml        config.LoopConfig
 		wantValue   string
 		wantSource  string
 		wantSandbox string // checked only when wantValue == "codex"
 	}{
 		{
-			name:       "default when nothing set (TOML defaults match)",
+			name:       "default when nothing set",
 			env:        nil,
-			toml:       config.Default().Loop,
 			wantValue:  "claude",
-			wantSource: "toml", // TOML loaded from Default() produces "claude" — still toml-sourced
+			wantSource: "default",
 		},
 		{
-			name:       "env wins over TOML",
+			name:       "env wins over default",
 			env:        map[string]string{"RALPH_LOOP_DRIVER": "codex"},
-			toml:       config.LoopConfig{Driver: "claude", CodexSandbox: "workspace-write", CodexApprovalPolicy: "on-failure"},
 			wantValue:  "codex",
 			wantSource: "env",
 		},
 		{
-			name:        "TOML alone selects codex",
-			env:         nil,
-			toml:        config.LoopConfig{Driver: "codex", CodexSandbox: "read-only", CodexApprovalPolicy: "on-failure", ClaudeReviewerModel: "opus"},
+			name:        "env selects codex with an env-overridden sandbox",
+			env:         map[string]string{"RALPH_LOOP_DRIVER": "codex", "RALPH_CODEX_SANDBOX": "read-only"},
 			wantValue:   "codex",
-			wantSource:  "toml",
+			wantSource:  "env",
 			wantSandbox: "read-only",
-		},
-		{
-			name:       "totally empty TOML falls back to default",
-			env:        nil,
-			toml:       config.LoopConfig{},
-			wantValue:  "claude",
-			wantSource: "default",
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg := config.Config{Loop: tc.toml}
 			getenv := func(k string) string {
 				if tc.env == nil {
 					return ""
@@ -73,7 +61,7 @@ func TestCheckLoopDriver_PriorityAndSource(t *testing.T) {
 				}
 				t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 			}
-			r := checkLoopDriver(cfg, getenv)
+			r := checkLoopDriver(getenv)
 			if r.Status != "pass" {
 				t.Errorf("status = %q, want pass (detail=%q)", r.Status, r.Detail)
 			}
@@ -98,10 +86,14 @@ func TestCheckLoopDriver_FailsWhenCodexMissing(t *testing.T) {
 	// Empty PATH directory → no codex binary discoverable.
 	t.Setenv("PATH", t.TempDir())
 
-	cfg := config.Config{Loop: config.LoopConfig{Driver: "codex", CodexSandbox: "workspace-write", CodexApprovalPolicy: "on-failure", ClaudeReviewerModel: "opus"}}
-	getenv := func(string) string { return "" }
+	getenv := func(k string) string {
+		if k == "RALPH_LOOP_DRIVER" {
+			return "codex"
+		}
+		return ""
+	}
 
-	r := checkLoopDriver(cfg, getenv)
+	r := checkLoopDriver(getenv)
 	if r.Status != "fail" {
 		t.Errorf("status = %q, want fail (codex absent + driver=codex)", r.Status)
 	}
@@ -111,9 +103,8 @@ func TestCheckLoopDriver_FailsWhenCodexMissing(t *testing.T) {
 }
 
 // TestCheckLoopDriver_EnvOverridesShownInDetail covers cycle-3 cross-review
-// finding #3: when RALPH_CODEX_SANDBOX or RALPH_CODEX_APPROVAL_POLICY is
-// set in the environment, doctor's detail line must reflect the env value
-// instead of silently showing the TOML/default.
+// finding #3: when RALPH_CODEX_SANDBOX or RALPH_CODEX_APPROVAL_POLICY is set
+// in the environment, doctor's detail line must reflect the env value.
 func TestCheckLoopDriver_EnvOverridesShownInDetail(t *testing.T) {
 	// Sham codex on PATH so the function does not short-circuit to fail.
 	dir := t.TempDir()
@@ -123,19 +114,14 @@ func TestCheckLoopDriver_EnvOverridesShownInDetail(t *testing.T) {
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	cfg := config.Config{Loop: config.LoopConfig{
-		Driver:              "codex",
-		CodexSandbox:        "workspace-write",
-		CodexApprovalPolicy: "on-failure",
-		ClaudeReviewerModel: "opus",
-	}}
 	env := map[string]string{
+		"RALPH_LOOP_DRIVER":           "codex",
 		"RALPH_CODEX_SANDBOX":         "danger-full-access",
 		"RALPH_CODEX_APPROVAL_POLICY": "never",
 	}
 	getenv := func(k string) string { return env[k] }
 
-	r := checkLoopDriver(cfg, getenv)
+	r := checkLoopDriver(getenv)
 	if r.Status != "pass" {
 		t.Fatalf("status = %q, want pass (detail=%q)", r.Status, r.Detail)
 	}
