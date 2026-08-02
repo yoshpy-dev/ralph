@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/yoshpy-dev/ralph/internal/org/protocol"
 )
 
 // EventSent is a non-state event (see seat.go stateEvents) recorded by the
@@ -40,6 +42,13 @@ type SendParams struct {
 	Text      string
 	TimeoutMS int
 	DryRun    bool
+	// Raw bypasses AC-11 typed-protocol validation entirely, for the rare
+	// case that genuinely needs to send free-form text. See
+	// .claude/rules/agent-messaging.md's "Size cap" section for the
+	// intended use (e.g. relaying an external tool's raw output). A
+	// bypassed send still records raw=true on the `sent` event's Details,
+	// so it stays traceable after the fact.
+	Raw bool
 }
 
 // SendResult is Send's return value.
@@ -47,12 +56,27 @@ type SendResult struct {
 	Err error
 }
 
-// Send waits for the target seat to go idle, then types Text into its pane
-// and presses Enter. A non-state `sent` event is appended for history.
-// DryRun skips the seat lookup and driver calls entirely and only appends
-// the (dry_run: true) history event.
+// Send validates Text against the typed message protocol (unless Raw),
+// waits for the target seat to go idle, then types Text into its pane and
+// presses Enter. A non-state `sent` event is appended for history. DryRun
+// skips the seat lookup and driver calls entirely and only appends the
+// (dry_run: true) history event -- but protocol validation still runs
+// first for DryRun too, since it is a pure, side-effect-free check.
+//
+// AC-11: an invalid message (unless Raw) is rejected before any manifest
+// event is appended and before any driver call is attempted -- Send fails
+// closed, not open.
 func (o *Org) Send(p SendParams) SendResult {
+	if !p.Raw {
+		if err := protocol.ValidateText(p.Text, protocol.DefaultMaxBodyChars); err != nil {
+			return SendResult{Err: fmt.Errorf("org: send: message rejected by protocol validation (use --raw to bypass): %w", err)}
+		}
+	}
+
 	details := truncateForDetails(p.Text)
+	if p.Raw {
+		details = "raw=true " + details
+	}
 
 	if p.DryRun {
 		err := o.appendEvent(ManifestEvent{
@@ -184,34 +208,58 @@ type StopResult struct {
 	Err error
 }
 
-// Stop sends a best-effort C-c to Seat's pane (real invocations only), then
-// appends a `stopped` state event recording the method used and any error.
-// DryRun appends the event without attempting a real stop signal.
+// Stop sends a best-effort C-c to Seat's pane and a best-effort agmsg
+// Leave (real invocations only), then appends a `stopped` state event
+// recording both outcomes. DryRun appends the event without attempting
+// either real driver call.
+//
+// AC-10 (existing-seat precondition): Stop resolves Seat from the manifest
+// roster *first*, for both real and dry-run invocations. A seat that was
+// never spawned (never appears in the roster at all) returns an error and
+// appends NO manifest event -- this is what prevents `stop --seat <unknown>`
+// from fabricating a phantom `stopped` state event for a seat that never
+// existed.
 func (o *Org) Stop(p StopParams) StopResult {
-	var paneID, details string
+	seat, ok, err := o.findSeat(p.OrgID, p.Seat)
+	if err != nil {
+		return StopResult{Err: fmt.Errorf("org: stop: read manifest: %w", err)}
+	}
+	if !ok {
+		return StopResult{Err: fmt.Errorf("org: stop: seat %q not found in org_id %q", p.Seat, p.OrgID)}
+	}
+
+	paneID := seat.PaneID
+	team := seat.AgmsgTeam
+	var details string
 
 	if p.DryRun {
 		details = "dry-run: no driver call"
 	} else {
-		seat, ok, err := o.findSeat(p.OrgID, p.Seat)
-		if err != nil {
-			return StopResult{Err: fmt.Errorf("org: stop: read manifest: %w", err)}
-		}
-		if ok {
-			paneID = seat.PaneID
-		}
+		var paneNote string
 		if paneID == "" {
-			details = "method=C-c no pane_id on record"
+			paneNote = "pane=no pane_id on record"
 		} else if err := o.Herdr.PaneSendKeys(context.Background(), paneID, "C-c"); err != nil {
-			details = fmt.Sprintf("method=C-c error=%v", err)
+			paneNote = fmt.Sprintf("pane=failed: %v", err)
 		} else {
-			details = "method=C-c"
+			paneNote = "pane=ok"
 		}
+
+		var leaveNote string
+		if team == "" {
+			leaveNote = "leave=skipped: no agmsg_team on record"
+		} else if err := o.Agmsg.Leave(context.Background(), team, p.Seat); err != nil {
+			leaveNote = fmt.Sprintf("leave=failed: %v", err)
+		} else {
+			leaveNote = "leave=ok"
+		}
+
+		details = paneNote + " " + leaveNote
 	}
 
-	err := o.appendEvent(ManifestEvent{
+	err = o.appendEvent(ManifestEvent{
 		TS: o.now(), OrgID: p.OrgID, SeatID: p.Seat, Event: EventStopped,
-		PaneID: paneID, DryRun: p.DryRun, Details: details,
+		Role: seat.Role, Driver: seat.Driver, Model: seat.Model, Worktree: seat.Worktree,
+		PaneID: paneID, AgmsgTeam: team, DryRun: p.DryRun, Details: details,
 	})
 	return StopResult{Err: err}
 }
@@ -257,10 +305,16 @@ type DisbandResult struct {
 	Errs         []error
 }
 
-// Disband best-effort-stops every currently active seat in OrgID, then
-// appends an org-level `disbanded` event (SeatID empty) that marks every
-// seat in that org_id inactive from that point forward (see Roster). DryRun
-// skips stopping real seats and only appends the disbanded event.
+// Disband best-effort-stops every currently active seat in OrgID (each via
+// Stop, so pane C-c and agmsg Leave are both attempted per seat -- AC-5),
+// then appends an org-level `disbanded` event (SeatID empty) that marks
+// every seat in that org_id inactive from that point forward (see Roster).
+// DryRun skips stopping real seats and only appends the disbanded event.
+//
+// AC-10: the seats iterated here come from Roster, which by construction
+// only contains seats that actually have a recorded state event -- so
+// Disband inherently only ever processes existing (never phantom/unknown)
+// active seats.
 func (o *Org) Disband(p DisbandParams) DisbandResult {
 	var result DisbandResult
 

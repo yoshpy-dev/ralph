@@ -39,9 +39,28 @@ func writeFailingStubBin(t *testing.T, dir, bin, stderrMsg string) {
 	}
 }
 
-// TestCheckHerdrAgmsgAvailable_AbsentIsInfo pins AC-9: with herdr/agmsg
-// absent from PATH, both checks must report "info" (not "warn"/"fail") so
-// runDoctorOpts' exit code stays unaffected.
+// writeAgmsgHome creates dir/scripts/send.sh (executable) so dir counts as a
+// usable agmsg home per driver.AgmsgAvailable. When version is non-empty, it
+// also writes dir/VERSION with that content.
+func writeAgmsgHome(t *testing.T, dir, version string) {
+	t.Helper()
+	scriptsDir := filepath.Join(dir, "scripts")
+	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(scriptsDir, "send.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if version != "" {
+		if err := os.WriteFile(filepath.Join(dir, "VERSION"), []byte(version+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// TestCheckHerdrAgmsgAvailable_AbsentIsInfo pins AC-9: with herdr absent from
+// PATH and agmsg's home missing scripts/send.sh, both checks must report
+// "info" (not "warn"/"fail") so runDoctorOpts' exit code stays unaffected.
 func TestCheckHerdrAgmsgAvailable_AbsentIsInfo(t *testing.T) {
 	t.Setenv("PATH", t.TempDir()) // empty PATH — nothing resolvable.
 
@@ -53,7 +72,7 @@ func TestCheckHerdrAgmsgAvailable_AbsentIsInfo(t *testing.T) {
 		t.Errorf("herdr detail = %q, want mention of 'herdr not installed'", hr.Detail)
 	}
 
-	ar := checkAgmsgAvailable()
+	ar := checkAgmsgAvailable(filepath.Join(t.TempDir(), "no-such-agmsg-home"))
 	if ar.Status != "info" {
 		t.Errorf("agmsg status = %q, want info", ar.Status)
 	}
@@ -62,19 +81,68 @@ func TestCheckHerdrAgmsgAvailable_AbsentIsInfo(t *testing.T) {
 	}
 }
 
-// TestCheckHerdrAgmsgAvailable_PresentIsPass covers the counterpart: stub
-// binaries on PATH must be reported as available (pass).
+// TestCheckHerdrAgmsgAvailable_PresentIsPass covers the counterpart: a stub
+// herdr binary on PATH and an agmsg home with scripts/send.sh must both be
+// reported as available (pass).
 func TestCheckHerdrAgmsgAvailable_PresentIsPass(t *testing.T) {
 	dir := t.TempDir()
 	writeStubBin(t, dir, "herdr", "")
-	writeStubBin(t, dir, "agmsg", "")
 	t.Setenv("PATH", dir)
+
+	agmsgHome := t.TempDir()
+	writeAgmsgHome(t, agmsgHome, "")
 
 	if r := checkHerdrAvailable(); r.Status != "pass" {
 		t.Errorf("herdr status = %q, want pass (detail=%q)", r.Status, r.Detail)
 	}
-	if r := checkAgmsgAvailable(); r.Status != "pass" {
+	if r := checkAgmsgAvailable(agmsgHome); r.Status != "pass" {
 		t.Errorf("agmsg status = %q, want pass (detail=%q)", r.Status, r.Detail)
+	}
+}
+
+// TestCheckAgmsgAvailable_PathBootstrapperNotHome pins AC-1's explicit
+// requirement at the doctor layer: an `agmsg` executable on PATH (the npm
+// bootstrapper) must not be mistaken for a real agmsg home. Only a home
+// directory with scripts/send.sh counts.
+func TestCheckAgmsgAvailable_PathBootstrapperNotHome(t *testing.T) {
+	dir := t.TempDir()
+	writeStubBin(t, dir, "agmsg", "") // npm-bootstrapper-shaped binary on PATH.
+	t.Setenv("PATH", dir)
+
+	emptyHome := t.TempDir() // no scripts/send.sh.
+	if r := checkAgmsgAvailable(emptyHome); r.Status != "info" {
+		t.Errorf("agmsg status = %q, want info despite agmsg on PATH (detail=%q)", r.Status, r.Detail)
+	}
+}
+
+// TestCheckAgmsgAvailable_VersionShown confirms an available home's VERSION
+// file content is surfaced in the check detail.
+func TestCheckAgmsgAvailable_VersionShown(t *testing.T) {
+	agmsgHome := t.TempDir()
+	writeAgmsgHome(t, agmsgHome, agmsgTestedVersion)
+
+	r := checkAgmsgAvailable(agmsgHome)
+	if r.Status != "pass" {
+		t.Errorf("status = %q, want pass (detail=%q)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, agmsgTestedVersion) {
+		t.Errorf("detail %q should mention version %s", r.Detail, agmsgTestedVersion)
+	}
+}
+
+// TestCheckAgmsgAvailable_VersionMismatchIsInfo confirms a VERSION differing
+// from agmsgTestedVersion is surfaced as an informational note, never a
+// warn/fail (doctor's exit code must stay unaffected by version drift).
+func TestCheckAgmsgAvailable_VersionMismatchIsInfo(t *testing.T) {
+	agmsgHome := t.TempDir()
+	writeAgmsgHome(t, agmsgHome, "9.9.9")
+
+	r := checkAgmsgAvailable(agmsgHome)
+	if r.Status != "info" {
+		t.Errorf("status = %q, want info for version mismatch (detail=%q)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "9.9.9") || !strings.Contains(r.Detail, agmsgTestedVersion) {
+		t.Errorf("detail %q should mention both the found version and the tested version %s", r.Detail, agmsgTestedVersion)
 	}
 }
 
@@ -121,6 +189,10 @@ func TestRunDoctorOpts_HerdrAgmsgAbsent_ExitCodeUnaffected(t *testing.T) {
 		writeStubBin(t, binDir, bin, "")
 	}
 	t.Setenv("PATH", binDir)
+	// Pin agmsg home to a guaranteed-empty directory so this test is
+	// deterministic regardless of whether the machine running it happens to
+	// have a real agmsg install at the default ~/.agents/skills/agmsg.
+	t.Setenv("RALPH_ORG_AGMSG_HOME", filepath.Join(dir, "no-such-agmsg-home"))
 
 	origStdout := os.Stdout
 	r, w, _ := os.Pipe()

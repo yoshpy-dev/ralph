@@ -3,7 +3,9 @@ package driver
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -105,12 +107,38 @@ func TestHerdrAvailable_NotInstalled(t *testing.T) {
 	}
 }
 
-func TestAgmsgAvailable_NotInstalled(t *testing.T) {
+func TestHerdrAvailable_Installed(t *testing.T) {
 	orig := lookPath
-	lookPath = func(string) (string, error) { return "", exec.ErrNotFound }
+	lookPath = func(string) (string, error) { return "/usr/bin/herdr", nil }
 	defer func() { lookPath = orig }()
 
-	err := AgmsgAvailable()
+	if err := HerdrAvailable(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// TestAgmsgAvailable_HomeWithSendScript_NoError pins AC-1: a home directory
+// with scripts/send.sh present is reported as available.
+func TestAgmsgAvailable_HomeWithSendScript_NoError(t *testing.T) {
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, "scripts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "scripts", "send.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := AgmsgAvailable(home); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// TestAgmsgAvailable_HomeWithoutSendScript_ErrNotInstalled pins AC-1: a home
+// directory that does not contain scripts/send.sh is unavailable.
+func TestAgmsgAvailable_HomeWithoutSendScript_ErrNotInstalled(t *testing.T) {
+	home := t.TempDir() // empty -- no scripts/ subdir at all.
+
+	err := AgmsgAvailable(home)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -122,22 +150,25 @@ func TestAgmsgAvailable_NotInstalled(t *testing.T) {
 	}
 }
 
-func TestHerdrAvailable_Installed(t *testing.T) {
-	orig := lookPath
-	lookPath = func(string) (string, error) { return "/usr/bin/herdr", nil }
-	defer func() { lookPath = orig }()
-
-	if err := HerdrAvailable(); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+// TestAgmsgAvailable_PathBootstrapperIgnored pins AC-1's explicit
+// requirement: an `agmsg` executable on PATH (e.g. the npm bootstrapper that
+// installs/updates the real script collection) must NOT count as available
+// when the home directory itself has no scripts/send.sh. AgmsgAvailable
+// never consults PATH, so this is really just confirming that fact end to
+// end via a PATH environment that *would* fool a LookPath-based check.
+func TestAgmsgAvailable_PathBootstrapperIgnored(t *testing.T) {
+	binDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(binDir, "agmsg"), []byte("#!/bin/sh\necho bootstrapper\n"), 0o755); err != nil {
+		t.Fatal(err)
 	}
-}
+	t.Setenv("PATH", binDir)
 
-func TestAgmsgAvailable_Installed(t *testing.T) {
-	orig := lookPath
-	lookPath = func(string) (string, error) { return "/usr/bin/agmsg", nil }
-	defer func() { lookPath = orig }()
-
-	if err := AgmsgAvailable(); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	home := t.TempDir() // no scripts/send.sh here.
+	err := AgmsgAvailable(home)
+	if err == nil {
+		t.Fatal("expected error despite agmsg bootstrapper on PATH, got nil")
+	}
+	if !errors.Is(err, ErrNotInstalled) {
+		t.Fatalf("expected errors.Is(err, ErrNotInstalled), got: %v", err)
 	}
 }

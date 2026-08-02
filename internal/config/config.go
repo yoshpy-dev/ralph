@@ -119,6 +119,12 @@ type OrgConfig struct {
 	// DeadmanMinutes is a reserved field for the PR④ Watchdog deadman timer.
 	// PR① only stores and round-trips this value; nothing consumes it yet.
 	DeadmanMinutes int `toml:"deadman_minutes"`
+	// AgmsgHome is the agmsg installation directory (a collection of
+	// scripts, not a single binary -- see internal/org/driver/agmsg.go).
+	// The runtime-effective value is resolved by
+	// driver.ResolveAgmsgHome(cfg.Org.AgmsgHome), which lets env
+	// RALPH_ORG_AGMSG_HOME override this config value.
+	AgmsgHome string `toml:"agmsg_home"`
 }
 
 // OrgModelPoolEntry pairs a driver CLI with a CLI-native model name or alias.
@@ -185,6 +191,7 @@ func Default() Config {
 				MaxFixRounds:          2,
 			},
 			DeadmanMinutes: 10,
+			AgmsgHome:      "~/.agents/skills/agmsg",
 		},
 	}
 }
@@ -346,6 +353,14 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.Org.Budget.MaxFixRounds < 1 {
 		return cfg, fmt.Errorf("[org.budget].max_fix_rounds must be >= 1, got %d", cfg.Org.Budget.MaxFixRounds)
+	}
+	// AgmsgHome is a string default, so (unlike the strict-validation fields
+	// above) it follows the same explicit zero-value backfill pattern as
+	// PipelineConfig: an explicit `agmsg_home = ""` in the source document
+	// falls back to the default rather than being treated as a validation
+	// error.
+	if cfg.Org.AgmsgHome == "" {
+		cfg.Org.AgmsgHome = Default().Org.AgmsgHome
 	}
 
 	return cfg, nil

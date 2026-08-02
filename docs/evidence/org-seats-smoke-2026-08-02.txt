@@ -1,0 +1,100 @@
+=== org-seats live smoke 2026-08-02 ===
+--- pre: git status (main repo) ---
+(end pre-status)
+spawn failed: org: spawn step tab_create failed: herdr: exit status 1: {"error":{"code":"workspace_not_found","message":"workspace {\"id\":\"cli:workspace:create\",\"result\":{\"root_pane\":{\"agent_status\":\"unknown\",\"cwd\":\"/Users/hiroki.yoshioka/MyDev/github.com/yoshpy-dev/ralph\",\"focused\":false,\"foreground_cwd\":\"/Users/hiroki.yoshioka/MyDev/github.com/yoshpy-dev/ralph\",\"pane_id\":\"w2:p1\",\"revision\":0,\"scroll\":{\"max_offset_from_bottom\":0,\"offset_from_bottom\":0,\"viewport_rows\":23},\"tab_id\":\"w2:t1\",\"terminal_id\":\"term_6580bea36b0772\",\"workspace_id\":\"w2\"},\"tab\":{\"agent_status\":\"unknown\",\"focused\":false,\"label\":\"1\",\"number\":1,\"pane_count\":1,\"tab_id\":\"w2:t1\",\"workspace_id\":\"w2\"},\"type\":\"workspace_created\",\"workspace\":{\"active_tab_id\":\"w2:t1\",\"agent_status\":\"unknown\",\"focused\":false,\"label\":\"smoke-0802\",\"number\":2,\"pane_count\":1,\"tab_count\":1,\"workspace_id\":\"w2\"}}} not found"},"id":"cli:tab:create"}
+org: spawn step tab_create failed: herdr: exit status 1: {"error":{"code":"workspace_not_found","message":"workspace {\"id\":\"cli:workspace:create\",\"result\":{\"root_pane\":{\"agent_status\":\"unknown\",\"cwd\":\"/Users/hiroki.yoshioka/MyDev/github.com/yoshpy-dev/ralph\",\"focused\":false,\"foreground_cwd\":\"/Users/hiroki.yoshioka/MyDev/github.com/yoshpy-dev/ralph\",\"pane_id\":\"w2:p1\",\"revision\":0,\"scroll\":{\"max_offset_from_bottom\":0,\"offset_from_bottom\":0,\"viewport_rows\":23},\"tab_id\":\"w2:t1\",\"terminal_id\":\"term_6580bea36b0772\",\"workspace_id\":\"w2\"},\"tab\":{\"agent_status\":\"unknown\",\"focused\":false,\"label\":\"1\",\"number\":1,\"pane_count\":1,\"tab_id\":\"w2:t1\",\"workspace_id\":\"w2\"},\"type\":\"workspace_created\",\"workspace\":{\"active_tab_id\":\"w2:t1\",\"agent_status\":\"unknown\",\"focused\":false,\"label\":\"smoke-0802\",\"number\":2,\"pane_count\":1,\"tab_count\":1,\"workspace_id\":\"w2\"}}} not found"},"id":"cli:tab:create"}
+
+--- attempt 2 (after herdr JSON envelope fix, commit 376a9ca) ---
+spawn failed: org: spawn step agent_start failed: herdr: exit status 1: {"error":{"code":"invalid_agent_argument","message":"agent arguments cannot be encoded safely for the target shell"},"id":"cli:agent:start"} (herdr: invalid_agent_argument: agent arguments cannot be encoded safely for the target shell)
+org: spawn step agent_start failed: herdr: exit status 1: {"error":{"code":"invalid_agent_argument","message":"agent arguments cannot be encoded safely for the target shell"},"id":"cli:agent:start"} (herdr: invalid_agent_argument: agent arguments cannot be encoded safely for the target shell)
+
+--- attempt 3 (after prompt-file fix, commit e043fde) ---
+spawn failed: org: spawn step agent_start failed: herdr: exit status 1: {"error":{"code":"agent_pane_busy","message":"agent target pane w5:p2 is not an available shell"},"id":"cli:agent:start"} (herdr: agent_pane_busy: agent target pane w5:p2 is not an available shell)
+org: spawn step agent_start failed: herdr: exit status 1: {"error":{"code":"agent_pane_busy","message":"agent target pane w5:p2 is not an available shell"},"id":"cli:agent:start"} (herdr: agent_pane_busy: agent target pane w5:p2 is not an available shell)
+
+--- attempt 4 (after agent-start retry fix, commit 1d1825b) ---
+spawned seat "reviewer" (org_id=smoke-0802d driver=claude model=haiku pane_id=w6:p2 dry_run=false)
+
+--- herdr agent list ---
+{"id":"cli:agent:list","result":{"agents":[{"agent":"claude","agent_session":{"agent":"claude","kind":"id","source":"herdr:claude","value":"b982c05c-5ca4-417b-b287-bf105cf4e87e"},"agent_status":"working","cwd":"/Users/hiroki.yoshioka/MyDev/github.com/yoshpy-dev/ralph","focused":false,"foreground_cwd":"/Users/hiroki.yoshioka/MyDev/github.com/yoshpy-dev/ralph","interactive_ready":true,"name":"smoke-0802d-reviewer","pane_id":"w6:p2","revision":4,"state_change_seq":4,"tab_id":"w6:t2","terminal_id":"term_6580c3d79ee23b","terminal_title":"⠐ Smoke test reviewer role setup","terminal_title_stripped":"Smoke test reviewer role setup","workspace_id":"w6"}],"type":"agent_list"}}
+
+--- ralph org status ---
+SEAT_ID	ROLE	DRIVER	MODEL	STATE	PANE_ID
+reviewer	reviewer	claude	haiku	spawned (active)	w6:p2
+
+--- agmsg team members (ralph-smoke-0802d) ---
+Team: ralph-smoke-0802d
+
+  lead (claude-code) — /Users/hiroki.yoshioka/MyDev/github.com/yoshpy-dev/ralph
+  reviewer (claude-code) — /Users/hiroki.yoshioka/MyDev/github.com/yoshpy-dev/ralph
+
+2 member(s)
+
+--- ralph org wait (until idle) ---
+org: wait: herdr: timed out: context deadline exceeded
+
+--- ralph org read (last 15 lines) ---
+cd
+   /Users/hiroki.yoshioka/MyDev/github.com/yoshpy-
+   dev/ralph/.claude/worktrees/org-runtime-seats
+   && git diff --stat HEAD
+   Run shell command
+
+ This command changes directory before running git,
+ which can execute untrusted hooks from the target
+ directory. Approve only if you trust it.
+
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. No
+
+ Esc to cancel · Tab to amend · ctrl+e to explain
+
+--- herdr agent get (blocked-on-permission observation) ---
+{"id":"cli:agent:get","result":{"agent":{"agent":"claude","agent_session":{"agent":"claude","kind":"id","source":"herdr:claude","value":"b982c05c-5ca4-417b-b287-bf105cf4e87e"},"agent_status":"blocked","cwd":"/Users/hiroki.yoshioka/MyDev/github.com/yoshpy-dev/ralph","focused":false,"foreground_cwd":"/Users/hiroki.yoshioka/MyDev/github.com/yoshpy-dev/ralph","interactive_ready":true,"name":"smoke-0802d-reviewer","pane_id":"w6:p2","revision":4,"state_change_seq":5,"tab_id":"w6:t2","terminal_id":"term_6580c3d79ee23b","terminal_title":"✳ Smoke test reviewer role setup","terminal_title_stripped":"Smoke test reviewer role setup","workspace_id":"w6"},"type":"agent_info"}}
+
+--- ralph org stop ---
+stopped seat "reviewer"
+
+--- status after stop ---
+SEAT_ID	ROLE	DRIVER	MODEL	STATE	PANE_ID
+reviewer				stopped	w6:p2
+
+--- agmsg team after despawn ---
+Team: ralph-smoke-0802d
+
+  lead (claude-code) — /Users/hiroki.yoshioka/MyDev/github.com/yoshpy-dev/ralph
+  reviewer (claude-code) — /Users/hiroki.yoshioka/MyDev/github.com/yoshpy-dev/ralph
+
+2 member(s)
+
+--- post: git status (main repo) ---
+(end post-status)
+
+--- attempt 5: FINAL full lifecycle (after leave fix, commit cd1452d) ---
+[pre] git status:
+(clean)
+spawned seat "reviewer" (org_id=smoke-0802e driver=claude model=haiku pane_id=w7:p2 dry_run=false)
+[team after spawn]
+Team: ralph-smoke-0802e
+
+  lead (claude-code) — /Users/hiroki.yoshioka/MyDev/github.com/yoshpy-dev/ralph
+  reviewer (claude-code) — /Users/hiroki.yoshioka/MyDev/github.com/yoshpy-dev/ralph
+
+2 member(s)
+[status]
+SEAT_ID	ROLE	DRIVER	MODEL	STATE	PANE_ID
+reviewer	reviewer	claude	haiku	spawned (active)	w7:p2
+[stop]
+stopped seat "reviewer"
+[status after stop]
+SEAT_ID	ROLE	DRIVER	MODEL	STATE	PANE_ID
+reviewer	reviewer	claude	haiku	stopped	w7:p2
+[team after leave]
+Team: ralph-smoke-0802e
+
+  lead (claude-code) — /Users/hiroki.yoshioka/MyDev/github.com/yoshpy-dev/ralph
+
+1 member(s)
+[post] git status:
+(end)

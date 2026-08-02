@@ -50,15 +50,32 @@ func newOrgCmd() *cobra.Command {
 	return cmd
 }
 
-// requireOrgID returns an error unless orgID is non-blank -- the shared
-// --org-id validation every verb needs (global required flag, checked
-// manually rather than via cobra's MarkPersistentFlagRequired so tests and
-// error messages stay simple and uniform).
+// requireOrgID returns an error unless orgID is non-blank and shaped like a
+// safe identifier (org.ValidateIdentifier) -- the shared --org-id validation
+// every verb needs (global required flag, checked manually rather than via
+// cobra's MarkPersistentFlagRequired so tests and error messages stay simple
+// and uniform). Shape validation runs here, before an org.Org is even
+// constructed, as a second gate alongside (*org.Org).Spawn's own check --
+// every CLI entry point that turns an org_id into a path (directly, via
+// spawn, or indirectly, via any state-dir lookup) rejects a malformed value
+// before it reaches that point.
 func requireOrgID(orgID string) error {
 	if strings.TrimSpace(orgID) == "" {
 		return fmt.Errorf("org: --org-id is required")
 	}
-	return nil
+	return org.ValidateIdentifier("org_id", orgID)
+}
+
+// requireSeatIdentifier returns an error unless value is non-blank and
+// shaped like a safe identifier (org.ValidateIdentifier) -- the shared
+// validation for every CLI flag that names a target seat id (spawn's --id,
+// send's --to, wait/read/stop's --seat). flag is used only in the blank-value
+// error message so each call site keeps its own flag name in diagnostics.
+func requireSeatIdentifier(flag, value string) error {
+	if strings.TrimSpace(value) == "" {
+		return fmt.Errorf("org: %s is required", flag)
+	}
+	return org.ValidateIdentifier("seat_id", value)
 }
 
 // newOrgRuntime constructs an org.Org wired to real driver adapters
@@ -75,7 +92,7 @@ func newOrgRuntime(stateDir, configPath string) (*org.Org, error) {
 		Manifest: org.NewManifestStoreAtPath(filepath.Join(stateDir, "manifest.jsonl")),
 		Receipts: org.NewReceiptStoreAtPath(filepath.Join(stateDir, "model-receipts.jsonl")),
 		Herdr:    driver.Herdr{R: runner},
-		Agmsg:    driver.Agmsg{R: runner},
+		Agmsg:    driver.Agmsg{R: runner, Home: driver.ResolveAgmsgHome(orgCfg.AgmsgHome)},
 	}, nil
 }
 
@@ -118,9 +135,9 @@ func splitCommaList(s string) []string {
 
 func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	var (
-		seatID, role, driverName, model, cwd, prompt string
-		timeoutMS                                    int
-		dryRun                                       bool
+		seatID, role, driverName, model, cwd, prompt, scope string
+		timeoutMS                                           int
+		dryRun                                              bool
 	)
 
 	cmd := &cobra.Command{
@@ -130,7 +147,10 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err := requireOrgID(*orgID); err != nil {
 				return err
 			}
-			for flag, val := range map[string]string{"--id": seatID, "--role": role, "--driver": driverName, "--model": model, "--cwd": cwd} {
+			if err := requireSeatIdentifier("--id", seatID); err != nil {
+				return err
+			}
+			for flag, val := range map[string]string{"--role": role, "--driver": driverName, "--model": model, "--cwd": cwd} {
 				if strings.TrimSpace(val) == "" {
 					return fmt.Errorf("org: %s is required", flag)
 				}
@@ -142,7 +162,7 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			}
 			result := rt.Spawn(org.SpawnParams{
 				OrgID: *orgID, SeatID: seatID, Role: role, Driver: driverName, Model: model,
-				Cwd: cwd, Prompt: prompt, TimeoutMS: timeoutMS, DryRun: dryRun,
+				Cwd: cwd, Prompt: prompt, Scope: scope, TimeoutMS: timeoutMS, DryRun: dryRun,
 			})
 			printSpawnResult(cmd, result)
 			return result.Err
@@ -155,6 +175,7 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	cmd.Flags().StringVar(&model, "model", "", "model name or alias (required)")
 	cmd.Flags().StringVar(&cwd, "cwd", "", "working directory for the new seat (required)")
 	cmd.Flags().StringVar(&prompt, "prompt", "", "optional initial prompt passed to the agent")
+	cmd.Flags().StringVar(&scope, "scope", "", "optional scope description (recorded on the spawned event; substituted into --role templates as {{SCOPE}})")
 	cmd.Flags().IntVar(&timeoutMS, "timeout-ms", 60000, "per-step herdr timeout in milliseconds")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "validate and record without starting a real seat")
 
@@ -182,23 +203,29 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 		to, text  string
 		timeoutMS int
 		dryRun    bool
+		raw       bool
 	)
 
 	cmd := &cobra.Command{
 		Use:   "send",
 		Short: "Send a message to a seat",
+		Long: "ralph org send validates --text against the typed message protocol\n" +
+			"(internal/org/protocol, see .claude/rules/agent-messaging.md) before\n" +
+			"sending: TYPE must be a known value, TASK_ID is required for\n" +
+			"TASK/RESULT/REVIEW/BLOCKED/CONTRACT, and the body must not exceed the\n" +
+			"size cap. Pass --raw to bypass validation entirely for free-form text.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireOrgID(*orgID); err != nil {
 				return err
 			}
-			if strings.TrimSpace(to) == "" {
-				return fmt.Errorf("org: --to is required")
+			if err := requireSeatIdentifier("--to", to); err != nil {
+				return err
 			}
 			rt, err := newOrgRuntime(*stateDir, *configPath)
 			if err != nil {
 				return err
 			}
-			result := rt.Send(org.SendParams{OrgID: *orgID, To: to, Text: text, TimeoutMS: timeoutMS, DryRun: dryRun})
+			result := rt.Send(org.SendParams{OrgID: *orgID, To: to, Text: text, TimeoutMS: timeoutMS, DryRun: dryRun, Raw: raw})
 			if result.Err != nil {
 				return fmt.Errorf("org: send: %w", result.Err)
 			}
@@ -211,6 +238,7 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	cmd.Flags().StringVar(&text, "text", "", "message text")
 	cmd.Flags().IntVar(&timeoutMS, "timeout-ms", 30000, "idle-wait timeout in milliseconds before sending")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "record without sending a real message")
+	cmd.Flags().BoolVar(&raw, "raw", false, "bypass typed message protocol validation")
 
 	return cmd
 }
@@ -229,8 +257,8 @@ func newOrgWaitCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err := requireOrgID(*orgID); err != nil {
 				return err
 			}
-			if strings.TrimSpace(seat) == "" {
-				return fmt.Errorf("org: --seat is required")
+			if err := requireSeatIdentifier("--seat", seat); err != nil {
+				return err
 			}
 			rt, err := newOrgRuntime(*stateDir, *configPath)
 			if err != nil {
@@ -267,8 +295,8 @@ func newOrgReadCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err := requireOrgID(*orgID); err != nil {
 				return err
 			}
-			if strings.TrimSpace(seat) == "" {
-				return fmt.Errorf("org: --seat is required")
+			if err := requireSeatIdentifier("--seat", seat); err != nil {
+				return err
 			}
 			rt, err := newOrgRuntime(*stateDir, *configPath)
 			if err != nil {
@@ -304,8 +332,8 @@ func newOrgStopCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err := requireOrgID(*orgID); err != nil {
 				return err
 			}
-			if strings.TrimSpace(seat) == "" {
-				return fmt.Errorf("org: --seat is required")
+			if err := requireSeatIdentifier("--seat", seat); err != nil {
+				return err
 			}
 			rt, err := newOrgRuntime(*stateDir, *configPath)
 			if err != nil {

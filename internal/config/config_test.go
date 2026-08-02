@@ -449,6 +449,9 @@ func TestDefault_Org(t *testing.T) {
 	if o.DeadmanMinutes != 10 {
 		t.Errorf("deadman_minutes = %d, want 10", o.DeadmanMinutes)
 	}
+	if o.AgmsgHome != "~/.agents/skills/agmsg" {
+		t.Errorf("agmsg_home = %q, want %q", o.AgmsgHome, "~/.agents/skills/agmsg")
+	}
 }
 
 // TestLoad_OrgMissingSection verifies AC-9 compatibility: a ralph.toml
@@ -493,6 +496,9 @@ model = "opus"
 	if cfg.Org.DeadmanMinutes != want.DeadmanMinutes {
 		t.Errorf("deadman_minutes = %d, want %d", cfg.Org.DeadmanMinutes, want.DeadmanMinutes)
 	}
+	if cfg.Org.AgmsgHome != want.AgmsgHome {
+		t.Errorf("agmsg_home = %q, want %q", cfg.Org.AgmsgHome, want.AgmsgHome)
+	}
 }
 
 // TestLoad_OrgRolesEmpty verifies an explicit, empty [org.roles] table is
@@ -533,6 +539,7 @@ model_pool = [
 ]
 max_seats = 3
 deadman_minutes = 15
+agmsg_home = "~/custom/agmsg-home"
 
 [org.roles]
 reviewer = ["opus"]
@@ -572,6 +579,32 @@ max_fix_rounds = 1
 	}
 	if cfg.Org.Budget.MaxFixRounds != 1 {
 		t.Errorf("budget.max_fix_rounds = %d, want 1", cfg.Org.Budget.MaxFixRounds)
+	}
+	if cfg.Org.AgmsgHome != "~/custom/agmsg-home" {
+		t.Errorf("agmsg_home = %q, want %q", cfg.Org.AgmsgHome, "~/custom/agmsg-home")
+	}
+}
+
+// TestLoad_OrgAgmsgHomeExplicitEmptyBackfillsDefault verifies that an
+// explicit `agmsg_home = ""` in the source document falls back to the
+// default rather than being treated as a validation error -- AgmsgHome
+// follows PipelineConfig's zero-value backfill pattern, not the strict
+// "[org] fields must be explicitly valid" pattern used by max_seats etc.
+func TestLoad_OrgAgmsgHomeExplicitEmptyBackfillsDefault(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ralph.toml")
+	content := `[org]
+agmsg_home = ""
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Org.AgmsgHome != Default().Org.AgmsgHome {
+		t.Errorf("agmsg_home = %q, want default %q", cfg.Org.AgmsgHome, Default().Org.AgmsgHome)
 	}
 }
 

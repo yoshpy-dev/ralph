@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -24,11 +25,11 @@ func runOrgCmd(t *testing.T, args ...string) (string, error) {
 	return buf.String(), err
 }
 
-// herdrStub and agmsgStub are POSIX-sh fake binaries: they log their argv to
-// a file (path from an env var) and emit canned output, so the org verbs
-// exercise the real driver.ExecRunner -> exec.Command path end to end
-// without needing herdr/agmsg installed (CI has neither). ORG_STUB_FAIL, set
-// per test case, injects a failure at exactly one subcommand boundary.
+// herdrStub is a POSIX-sh fake binary: it logs its argv to a file (path
+// from an env var) and emits canned output, so the org verbs exercise the
+// real driver.ExecRunner -> exec.Command path end to end without needing
+// herdr installed (CI has none). ORG_STUB_FAIL, set per test case, injects
+// a failure at exactly one subcommand boundary.
 const herdrStub = `#!/bin/sh
 if [ -n "$ORG_HERDR_LOG" ]; then
   echo "$@" >> "$ORG_HERDR_LOG"
@@ -38,8 +39,8 @@ if [ -n "$ORG_STUB_FAIL" ] && [ "$1:$2" = "$ORG_STUB_FAIL" ]; then
   exit 1
 fi
 case "$1 $2" in
-  "workspace create") echo "ws-stub-1" ;;
-  "tab create") echo "pane-stub-1" ;;
+  "workspace create") echo '{"id":"cli:workspace:create","result":{"root_pane":{"pane_id":"ws-stub-1:p1","tab_id":"ws-stub-1:t1","workspace_id":"ws-stub-1"},"tab":{"tab_id":"ws-stub-1:t1"},"type":"workspace_created","workspace":{"active_tab_id":"ws-stub-1:t1","workspace_id":"ws-stub-1"}}}' ;;
+  "tab create") echo '{"id":"cli:tab:create","result":{"root_pane":{"pane_id":"pane-stub-1","tab_id":"ws-stub-1:t2","workspace_id":"ws-stub-1"},"tab":{"tab_id":"ws-stub-1:t2"},"type":"tab_created"}}' ;;
   "agent start") echo "agent-stub-1" ;;
   "agent wait") echo "idle" ;;
   "pane read") echo "pane output" ;;
@@ -48,38 +49,89 @@ esac
 exit 0
 `
 
-const agmsgStub = `#!/bin/sh
+// agmsgSendStub is the fake `scripts/send.sh` that lives under a temp
+// agmsg-home directory (see setupOrgStubPATH). Unlike the old PR① fake
+// (a single `agmsg` binary on PATH parsing --team/--as flags), the real
+// agmsg interface is a script collection: driver.Agmsg shells out to
+// `bash <home>/scripts/send.sh TEAM FROM TO MESSAGE`, so this stub only
+// needs to implement send.sh's own contract (log argv, honor
+// ORG_STUB_FAIL=agmsg:send).
+const agmsgSendStub = `#!/bin/sh
 if [ -n "$ORG_AGMSG_LOG" ]; then
   echo "$@" >> "$ORG_AGMSG_LOG"
 fi
 if [ "$ORG_STUB_FAIL" = "agmsg:send" ]; then
-  for a in "$@"; do
-    if [ "$a" = "send" ]; then
-      echo "stub failure: agmsg send" >&2
-      exit 1
-    fi
-  done
+  echo "stub failure: agmsg send" >&2
+  exit 1
 fi
 echo ""
 exit 0
 `
 
-// setupOrgStubPATH writes stub herdr/agmsg binaries to a fresh temp dir,
-// prepends it to PATH, and points ORG_HERDR_LOG/ORG_AGMSG_LOG at fresh log
-// files. Returns the log file paths so tests can assert on recorded argv.
+// agmsgJoinStub is the fake `scripts/join.sh` -- driver.Agmsg shells out to
+// `bash <home>/scripts/join.sh TEAM AGENT_ID TYPE PROJECT_PATH`. Honors
+// ORG_STUB_FAIL=agmsg:join so tests can inject a failure at either the
+// ensureLeadJoined (agent_id "lead") or seat Join call.
+const agmsgJoinStub = `#!/bin/sh
+if [ -n "$ORG_AGMSG_LOG" ]; then
+  echo "$@" >> "$ORG_AGMSG_LOG"
+fi
+if [ "$ORG_STUB_FAIL" = "agmsg:join" ]; then
+  echo "stub failure: agmsg join" >&2
+  exit 1
+fi
+echo ""
+exit 0
+`
+
+// agmsgLeaveStub is the fake `scripts/leave.sh` -- driver.Agmsg shells
+// out to `bash <home>/scripts/leave.sh TEAM AGENT_ID`. Honors
+// ORG_STUB_FAIL=agmsg:leave.
+const agmsgLeaveStub = `#!/bin/sh
+if [ -n "$ORG_AGMSG_LOG" ]; then
+  echo "$@" >> "$ORG_AGMSG_LOG"
+fi
+if [ "$ORG_STUB_FAIL" = "agmsg:leave" ]; then
+  echo "stub failure: agmsg leave" >&2
+  exit 1
+fi
+echo ""
+exit 0
+`
+
+// agmsgVersionStub is the plain-text VERSION marker AgmsgAvailable/
+// AgmsgVersion read from an agmsg home directory.
+const agmsgVersionStub = "1.1.13\n"
+
+// setupOrgStubPATH writes a stub herdr binary to a fresh temp dir and
+// prepends it to PATH, and writes a stub agmsg-home directory
+// (scripts/send.sh + VERSION) pointed at via RALPH_ORG_AGMSG_HOME -- the
+// real agmsg interface is a script collection under an "agmsg home", not a
+// PATH-resident binary. Returns the log file paths so tests can assert on
+// recorded argv.
 func setupOrgStubPATH(t *testing.T) (herdrLog, agmsgLog string) {
 	t.Helper()
 	dir := t.TempDir()
 
 	writeStubScript(t, filepath.Join(dir, "herdr"), herdrStub)
-	writeStubScript(t, filepath.Join(dir, "agmsg"), agmsgStub)
-
 	herdrLog = filepath.Join(dir, "herdr.log")
-	agmsgLog = filepath.Join(dir, "agmsg.log")
-
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("ORG_HERDR_LOG", herdrLog)
+
+	agmsgHome := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(agmsgHome, "scripts"), 0o755); err != nil {
+		t.Fatalf("mkdir agmsg scripts dir: %v", err)
+	}
+	writeStubScript(t, filepath.Join(agmsgHome, "scripts", "send.sh"), agmsgSendStub)
+	writeStubScript(t, filepath.Join(agmsgHome, "scripts", "join.sh"), agmsgJoinStub)
+	writeStubScript(t, filepath.Join(agmsgHome, "scripts", "leave.sh"), agmsgLeaveStub)
+	if err := os.WriteFile(filepath.Join(agmsgHome, "VERSION"), []byte(agmsgVersionStub), 0o644); err != nil {
+		t.Fatalf("write agmsg VERSION: %v", err)
+	}
+	agmsgLog = filepath.Join(dir, "agmsg.log")
+	t.Setenv("RALPH_ORG_AGMSG_HOME", agmsgHome)
 	t.Setenv("ORG_AGMSG_LOG", agmsgLog)
+
 	t.Setenv("ORG_STUB_FAIL", "")
 
 	return herdrLog, agmsgLog
@@ -196,7 +248,9 @@ func TestOrgSpawn_HappyPath_EventSequenceReceiptAndWorkspaceReuse(t *testing.T) 
 
 	manifestPath := filepath.Join(stateDir, "manifest.jsonl")
 	events := readManifestEvents(t, manifestPath)
-	want := []string{"spawn_started", "org_workspace_created", "spawn_step", "spawn_step", "spawn_step", "spawned"}
+	// spawn_step x5: tab_created, agent_started, agmsg_lead_joined,
+	// agmsg_joined, agmsg_announced.
+	want := []string{"spawn_started", "org_workspace_created", "spawn_step", "spawn_step", "spawn_step", "spawn_step", "spawn_step", "spawned"}
 	if got := eventTypes(events); !equalStrings(got, want) {
 		t.Fatalf("expected event sequence %v, got %v", want, got)
 	}
@@ -232,10 +286,13 @@ func TestOrgSpawn_HappyPath_EventSequenceReceiptAndWorkspaceReuse(t *testing.T) 
 
 	// Each agmsg invocation's HELLO message body itself contains newlines,
 	// so raw line count isn't the invocation count -- count by the
-	// "--team" prefix that starts every agmsgArgs call instead.
+	// "ralph-<org_id>" team-name prefix (agmsgTeam's convention) that
+	// starts every join.sh/send.sh call's argv instead. Per seat spawn: one
+	// ensureLeadJoined join.sh call, one seat join.sh call, one send.sh
+	// HELLO call -- 3 invocations x 2 seats = 6.
 	agmsgLines := readLogLines(t, agmsgLog)
-	if n := countLinesWithPrefix(agmsgLines, "--team"); n != 2 {
-		t.Fatalf("expected 2 agmsg invocations (one HELLO per seat), got %d (log: %v)", n, agmsgLines)
+	if n := countLinesWithPrefix(agmsgLines, "ralph-org-a"); n != 6 {
+		t.Fatalf("expected 6 agmsg invocations (join lead + join seat + send HELLO, per seat), got %d (log: %v)", n, agmsgLines)
 	}
 }
 
@@ -332,6 +389,43 @@ func TestOrgSpawn_FailureInjection_AgmsgSend_CompensatesPane(t *testing.T) {
 	herdrLines := readLogLines(t, herdrLog)
 	if n := countLinesWithPrefix(herdrLines, "pane send-keys"); n != 1 {
 		t.Fatalf("expected exactly 1 compensation send-keys call, got %d (log: %v)", n, herdrLines)
+	}
+}
+
+func TestOrgSpawn_FailureInjection_AgmsgJoin_CompensatesPane(t *testing.T) {
+	herdrLog, agmsgLog := setupOrgStubPATH(t)
+	t.Setenv("ORG_STUB_FAIL", "agmsg:join")
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	out, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--state-dir", stateDir,
+	)
+	if err == nil {
+		t.Fatalf("expected non-zero exit on agmsg join failure, output: %s", out)
+	}
+
+	events := readManifestEvents(t, filepath.Join(stateDir, "manifest.jsonl"))
+	last := events[len(events)-1]
+	if last.Event != "spawn_failed" {
+		t.Fatalf("expected last event spawn_failed, got %q", last.Event)
+	}
+	// ensureLeadJoined's join.sh call also fails (same stub, best-effort --
+	// swallowed) before the hard-failing seat Join call, so the terminal
+	// spawn_failed step is agmsg_join, not agmsg_lead_joined.
+	if !strings.Contains(last.Details, "step=agmsg_join") {
+		t.Errorf("expected Details to mention step=agmsg_join, got %q", last.Details)
+	}
+
+	herdrLines := readLogLines(t, herdrLog)
+	if n := countLinesWithPrefix(herdrLines, "pane send-keys"); n != 1 {
+		t.Fatalf("expected exactly 1 compensation send-keys call, got %d (log: %v)", n, herdrLines)
+	}
+
+	agmsgLines := readLogLines(t, agmsgLog)
+	if n := countLinesWithPrefix(agmsgLines, "ralph-org-a"); n != 2 {
+		t.Fatalf("expected exactly 2 agmsg join.sh invocations (lead then seat, both failing -- no send.sh reached), got %d (log: %v)", n, agmsgLines)
 	}
 }
 
@@ -531,7 +625,7 @@ func TestOrgCmd_RequiresOrgID(t *testing.T) {
 }
 
 func TestOrgDisband_StopsActiveSeatsAndDisbandsOrg(t *testing.T) {
-	herdrLog, _ := setupOrgStubPATH(t)
+	herdrLog, agmsgLog := setupOrgStubPATH(t)
 	stateDir := filepath.Join(t.TempDir(), "state")
 
 	if _, err := runOrgCmd(t,
@@ -555,6 +649,14 @@ func TestOrgDisband_StopsActiveSeatsAndDisbandsOrg(t *testing.T) {
 		t.Error("expected disband to send a stop signal to the active seat")
 	}
 
+	// AC-5: disband's per-seat Stop must also best-effort leave.sh the
+	// seat -- leave.sh's argv is "TEAM AGENT_ID", so the seat_id (seat-1)
+	// shows up as the last logged token.
+	agmsgLines := readLogLines(t, agmsgLog)
+	if !containsLine(agmsgLines, "ralph-org-a seat-1") {
+		t.Errorf("expected a leave.sh invocation with argv 'ralph-org-a seat-1', got agmsg log: %v", agmsgLines)
+	}
+
 	statusOut, err := runOrgCmd(t, "status", "--org-id", "org-a", "--state-dir", stateDir)
 	if err != nil {
 		t.Fatalf("status after disband failed: %v", err)
@@ -564,6 +666,405 @@ func TestOrgDisband_StopsActiveSeatsAndDisbandsOrg(t *testing.T) {
 	}
 	if strings.Contains(statusOut, "(active)") {
 		t.Errorf("expected no seat to remain marked active after disband, got: %s", statusOut)
+	}
+	// Live-smoke follow-up: the stopped event must carry seat.Role/Driver/
+	// Model forward so status after stop doesn't show blank columns.
+	if !strings.Contains(statusOut, "worker") || !strings.Contains(statusOut, "claude") || !strings.Contains(statusOut, "sonnet") {
+		t.Errorf("expected status after disband to still show seat role/driver/model, got: %s", statusOut)
+	}
+}
+
+func TestOrgStop_UnknownSeat_NonZeroExit(t *testing.T) {
+	setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	out, err := runOrgCmd(t, "stop", "--org-id", "org-a", "--seat", "never-spawned", "--state-dir", stateDir)
+	if err == nil {
+		t.Fatalf("expected non-zero exit stopping an unknown seat, output: %s", out)
+	}
+
+	events := readManifestEvents(t, filepath.Join(stateDir, "manifest.jsonl"))
+	if len(events) != 0 {
+		t.Fatalf("expected no manifest event appended for an unknown-seat stop, got %v", events)
+	}
+}
+
+func TestOrgStop_ExistingSeat_LeavesAndRecordsOutcome(t *testing.T) {
+	_, agmsgLog := setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	if _, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--state-dir", stateDir,
+	); err != nil {
+		t.Fatalf("spawn failed: %v", err)
+	}
+
+	out, err := runOrgCmd(t, "stop", "--org-id", "org-a", "--seat", "seat-1", "--state-dir", stateDir)
+	if err != nil {
+		t.Fatalf("stop failed: %v (output: %s)", err, out)
+	}
+
+	agmsgLines := readLogLines(t, agmsgLog)
+	if !containsLine(agmsgLines, "ralph-org-a seat-1") {
+		t.Errorf("expected a leave.sh invocation with argv 'ralph-org-a seat-1' in the agmsg log, got: %v", agmsgLines)
+	}
+
+	events := readManifestEvents(t, filepath.Join(stateDir, "manifest.jsonl"))
+	last := events[len(events)-1]
+	if last.Event != "stopped" {
+		t.Fatalf("expected last event stopped, got %q", last.Event)
+	}
+	if !strings.Contains(last.Details, "leave=ok") {
+		t.Errorf("expected Details to record a successful leave, got %q", last.Details)
+	}
+	if last.Role != "worker" || last.Driver != "claude" || last.Model != "sonnet" {
+		t.Errorf("expected stopped event to carry seat role/driver/model, got role=%q driver=%q model=%q", last.Role, last.Driver, last.Model)
+	}
+
+	statusOut, err := runOrgCmd(t, "status", "--org-id", "org-a", "--state-dir", stateDir)
+	if err != nil {
+		t.Fatalf("status after stop failed: %v", err)
+	}
+	if !strings.Contains(statusOut, "worker") || !strings.Contains(statusOut, "claude") || !strings.Contains(statusOut, "sonnet") {
+		t.Errorf("expected status after stop to still show seat role/driver/model, got: %s", statusOut)
+	}
+}
+
+// containsLine reports whether any line in lines equals want exactly.
+func containsLine(lines []string, want string) bool {
+	return slices.Contains(lines, want)
+}
+
+// TestOrgSpawn_RoleAndScopeFlags_ExpandTemplateAndRecordScope covers AC-4
+// and the scope half of AC-7/design: `--role reviewer --scope ...` expands
+// the embedded reviewer template (with org_id/seat_id/scope substituted).
+// Real herdr rejects multi-line agent args (see spawn.go's
+// needsPromptFile), so the rendered template is written to a prompt file
+// under state-dir and the AgentStart argv the herdr stub receives carries
+// only a one-line pointer to it; this test asserts the pointer via the
+// herdr log and the full rendered content via the prompt file. It also
+// checks the spawned event's Details records "scope=<value>".
+func TestOrgSpawn_RoleAndScopeFlags_ExpandTemplateAndRecordScope(t *testing.T) {
+	herdrLog, _ := setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	out, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "reviewer-1", "--role", "reviewer",
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "internal/org/**",
+		"--state-dir", stateDir,
+	)
+	if err != nil {
+		t.Fatalf("spawn failed: %v (output: %s)", err, out)
+	}
+
+	data, rerr := os.ReadFile(herdrLog)
+	if rerr != nil {
+		t.Fatalf("read herdr log: %v", rerr)
+	}
+	logText := string(data)
+	if !strings.Contains(logText, "役割指示を読み込んで従ってください: ") {
+		t.Fatalf("expected AgentStart argv logged to contain the prompt-file pointer, got:\n%s", logText)
+	}
+	if strings.Contains(logText, ".claude/rules/agent-messaging.md") {
+		t.Errorf("expected the rendered template body NOT to appear inline in argv (it must go through the prompt file), got:\n%s", logText)
+	}
+
+	promptPath := filepath.Join(stateDir, "prompts", "org-a_reviewer-1.md")
+	promptData, perr := os.ReadFile(promptPath)
+	if perr != nil {
+		t.Fatalf("expected prompt file at %q: %v", promptPath, perr)
+	}
+	promptText := string(promptData)
+	for _, want := range []string{"org-a", "reviewer-1", "internal/org/**", ".claude/rules/agent-messaging.md"} {
+		if !strings.Contains(promptText, want) {
+			t.Errorf("expected prompt file content to contain %q, got:\n%s", want, promptText)
+		}
+	}
+
+	events := readManifestEvents(t, filepath.Join(stateDir, "manifest.jsonl"))
+	last := events[len(events)-1]
+	if last.Event != "spawned" {
+		t.Fatalf("expected last event spawned, got %q", last.Event)
+	}
+	if !strings.Contains(last.Details, "scope=internal/org/**") {
+		t.Fatalf("expected spawned event Details to record scope, got %q", last.Details)
+	}
+}
+
+// TestOrgSpawn_UnknownRole_NoTemplateApplied is the CLI-level counterpart of
+// the org-package unit test: an unknown --role must not fail spawn, and the
+// herdr log must not contain the reviewer/qa template markers.
+func TestOrgSpawn_UnknownRole_NoTemplateApplied(t *testing.T) {
+	herdrLog, _ := setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	out, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "not-a-known-role",
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--prompt", "verbatim prompt",
+		"--state-dir", stateDir,
+	)
+	if err != nil {
+		t.Fatalf("spawn with an unknown role should not error, got %v (output: %s)", err, out)
+	}
+
+	data, rerr := os.ReadFile(herdrLog)
+	if rerr != nil {
+		t.Fatalf("read herdr log: %v", rerr)
+	}
+	logText := string(data)
+	if !strings.Contains(logText, "verbatim prompt") {
+		t.Errorf("expected the verbatim --prompt in the AgentStart argv, got:\n%s", logText)
+	}
+	if strings.Contains(logText, ".claude/rules/agent-messaging.md") {
+		t.Errorf("expected no role-template markers for an unknown role, got:\n%s", logText)
+	}
+}
+
+// TestOrgSend_MalformedMessage_NonZeroExitAndNoManifestEvent is the AC-11
+// CLI rejection test: `ralph org send` with a malformed --text exits
+// non-zero and appends no manifest event.
+func TestOrgSend_MalformedMessage_NonZeroExitAndNoManifestEvent(t *testing.T) {
+	herdrLog, _ := setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	if _, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--state-dir", stateDir,
+	); err != nil {
+		t.Fatalf("spawn failed: %v", err)
+	}
+	eventsBefore := readManifestEvents(t, filepath.Join(stateDir, "manifest.jsonl"))
+
+	out, err := runOrgCmd(t, "send", "--org-id", "org-a", "--to", "seat-1", "--text", "not a valid protocol message", "--state-dir", stateDir)
+	if err == nil {
+		t.Fatalf("expected non-zero exit for a malformed --text, output: %s", out)
+	}
+
+	eventsAfter := readManifestEvents(t, filepath.Join(stateDir, "manifest.jsonl"))
+	if len(eventsAfter) != len(eventsBefore) {
+		t.Fatalf("expected no new manifest event for a rejected send, %d -> %d", len(eventsBefore), len(eventsAfter))
+	}
+
+	// Sanity: no pane-send-text call should have reached the herdr stub for
+	// the rejected message.
+	herdrLines := readLogLines(t, herdrLog)
+	if countLinesWithPrefix(herdrLines, "pane send-text") != 0 {
+		t.Errorf("expected no 'pane send-text' call for a rejected send, got: %v", herdrLines)
+	}
+}
+
+// TestOrgSend_RawFlag_BypassesValidation covers the --raw escape hatch at
+// the CLI layer: the same malformed --text that TestOrgSend_MalformedMessage
+// rejects must succeed with --raw, and the recorded `sent` event's Details
+// must note raw=true.
+func TestOrgSend_RawFlag_BypassesValidation(t *testing.T) {
+	setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	if _, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--state-dir", stateDir,
+	); err != nil {
+		t.Fatalf("spawn failed: %v", err)
+	}
+
+	out, err := runOrgCmd(t, "send", "--org-id", "org-a", "--to", "seat-1", "--text", "not a valid protocol message", "--raw", "--state-dir", stateDir)
+	if err != nil {
+		t.Fatalf("expected --raw to bypass protocol validation, got %v (output: %s)", err, out)
+	}
+
+	events := readManifestEvents(t, filepath.Join(stateDir, "manifest.jsonl"))
+	last := events[len(events)-1]
+	if last.Event != "sent" {
+		t.Fatalf("expected last event sent, got %q", last.Event)
+	}
+	if !strings.Contains(last.Details, "raw=true") {
+		t.Errorf("expected the sent event's Details to record raw=true, got %q", last.Details)
+	}
+}
+
+// TestOrgSend_ValidTypedMessage_Succeeds is the positive counterpart: a
+// well-formed typed message is accepted without --raw.
+func TestOrgSend_ValidTypedMessage_Succeeds(t *testing.T) {
+	setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	if _, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--state-dir", stateDir,
+	); err != nil {
+		t.Fatalf("spawn failed: %v", err)
+	}
+
+	out, err := runOrgCmd(t, "send", "--org-id", "org-a", "--to", "seat-1",
+		"--text", "TYPE: TASK\nTASK_ID: t-1\n\ndo the thing", "--state-dir", stateDir)
+	if err != nil {
+		t.Fatalf("expected a well-formed typed message to be accepted, got %v (output: %s)", err, out)
+	}
+	if !strings.Contains(out, "sent message to seat \"seat-1\"") {
+		t.Errorf("expected sent confirmation in output, got: %s", out)
+	}
+}
+
+// TestOrgWait_HappyPath_Succeeds covers `ralph org wait` end to end through
+// the real driver.ExecRunner -> exec.Command path: the herdr stub answers
+// "agent wait" with "idle", and Wait prints herdr's raw output.
+func TestOrgWait_HappyPath_Succeeds(t *testing.T) {
+	herdrLog, _ := setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	if _, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--state-dir", stateDir,
+	); err != nil {
+		t.Fatalf("spawn failed: %v", err)
+	}
+
+	out, err := runOrgCmd(t, "wait", "--org-id", "org-a", "--seat", "seat-1", "--until", "idle", "--state-dir", stateDir)
+	if err != nil {
+		t.Fatalf("wait failed: %v (output: %s)", err, out)
+	}
+	if !strings.Contains(out, "idle") {
+		t.Errorf("expected herdr's raw output 'idle' in output, got: %s", out)
+	}
+
+	herdrLines := readLogLines(t, herdrLog)
+	if countLinesWithPrefix(herdrLines, "agent wait") == 0 {
+		t.Errorf("expected an 'agent wait' invocation in the herdr log, got: %v", herdrLines)
+	}
+}
+
+// TestOrgWait_UnknownSeat_StillSucceeds_PassthroughToHerdr documents the
+// CLI-level counterpart of TestOrgWait_UnknownSeat_StillDrivesHerdr_NoManifestCheck
+// (internal/org/verbs_test.go): `ralph org wait` never checks the manifest
+// for the seat's existence, so waiting on a seat id that was never spawned
+// still drives the (namespaced) herdr call rather than failing fast the way
+// `read`/`stop`/`send` do.
+func TestOrgWait_UnknownSeat_StillSucceeds_PassthroughToHerdr(t *testing.T) {
+	herdrLog, _ := setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	out, err := runOrgCmd(t, "wait", "--org-id", "org-a", "--seat", "never-spawned", "--until", "idle", "--state-dir", stateDir)
+	if err != nil {
+		t.Fatalf("expected wait on an unrecorded seat to still succeed (pure herdr passthrough), got %v (output: %s)", err, out)
+	}
+
+	herdrLines := readLogLines(t, herdrLog)
+	if !containsLine(herdrLines, "agent wait org-a_never-spawned --until idle") {
+		t.Errorf("expected the herdr log to show a wait call for the namespaced agent name, got: %v", herdrLines)
+	}
+}
+
+// TestOrgRead_HappyPath_Succeeds covers `ralph org read` end to end: the
+// herdr stub answers "pane read" with "pane output".
+func TestOrgRead_HappyPath_Succeeds(t *testing.T) {
+	herdrLog, _ := setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	if _, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--state-dir", stateDir,
+	); err != nil {
+		t.Fatalf("spawn failed: %v", err)
+	}
+
+	out, err := runOrgCmd(t, "read", "--org-id", "org-a", "--seat", "seat-1", "--lines", "10", "--state-dir", stateDir)
+	if err != nil {
+		t.Fatalf("read failed: %v (output: %s)", err, out)
+	}
+	if !strings.Contains(out, "pane output") {
+		t.Errorf("expected herdr's raw pane output in output, got: %s", out)
+	}
+
+	herdrLines := readLogLines(t, herdrLog)
+	if countLinesWithPrefix(herdrLines, "pane read") == 0 {
+		t.Errorf("expected a 'pane read' invocation in the herdr log, got: %v", herdrLines)
+	}
+}
+
+// TestOrgRead_UnknownSeat_NonZeroExit covers Read's seat-lookup gate at the
+// CLI layer: unlike `wait`, `read` resolves the seat's pane_id from the
+// manifest first, so an unrecorded seat id must fail before any herdr call
+// is attempted.
+func TestOrgRead_UnknownSeat_NonZeroExit(t *testing.T) {
+	herdrLog, _ := setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	out, err := runOrgCmd(t, "read", "--org-id", "org-a", "--seat", "never-spawned", "--state-dir", stateDir)
+	if err == nil {
+		t.Fatalf("expected non-zero exit reading an unknown seat, output: %s", out)
+	}
+
+	herdrLines := readLogLines(t, herdrLog)
+	if countLinesWithPrefix(herdrLines, "pane read") != 0 {
+		t.Errorf("expected no 'pane read' call for an unknown seat, got: %v", herdrLines)
+	}
+}
+
+// TestOrgSpawn_TraversalSeatID_NonZeroExit_NoDriverCalls covers the CLI-layer
+// identifier validation added alongside (*org.Org).Spawn's own check
+// (self-review MEDIUM-2): a shell that reaches `ralph org spawn` with a
+// path-traversal --id must be rejected at flag-parsing time, before
+// newOrgRuntime is even constructed, so zero herdr calls happen.
+func TestOrgSpawn_TraversalSeatID_NonZeroExit_NoDriverCalls(t *testing.T) {
+	herdrLog, _ := setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	out, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "../../../../../../tmp/pwn", "--role", "worker",
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--state-dir", stateDir,
+	)
+	if err == nil {
+		t.Fatalf("expected non-zero exit for a path-traversal --id, output: %s", out)
+	}
+	if !strings.Contains(err.Error(), "seat_id") {
+		t.Errorf("expected error to mention seat_id, got: %v", err)
+	}
+
+	herdrLines := readLogLines(t, herdrLog)
+	if len(herdrLines) != 0 {
+		t.Errorf("expected zero herdr calls for a rejected --id, got: %v", herdrLines)
+	}
+	if _, statErr := os.Stat(stateDir); !os.IsNotExist(statErr) {
+		t.Errorf("expected the state dir to never be created for a rejected --id, stat err=%v", statErr)
+	}
+}
+
+// TestOrgSpawn_InvalidOrgID_NonZeroExit covers the --org-id half of the same
+// CLI-layer gate.
+func TestOrgSpawn_InvalidOrgID_NonZeroExit(t *testing.T) {
+	out, err := runOrgCmd(t,
+		"spawn", "--org-id", "../escape", "--id", "seat-1", "--role", "worker",
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+	)
+	if err == nil {
+		t.Fatalf("expected non-zero exit for a malformed --org-id, output: %s", out)
+	}
+	if !strings.Contains(err.Error(), "org_id") {
+		t.Errorf("expected error to mention org_id, got: %v", err)
+	}
+}
+
+// TestOrgSend_TraversalTo_NonZeroExit covers --to (send), the other
+// user-facing flag that names a target seat id.
+func TestOrgSend_TraversalTo_NonZeroExit(t *testing.T) {
+	stateDir := filepath.Join(t.TempDir(), "state")
+	out, err := runOrgCmd(t, "send", "--org-id", "org-a", "--to", "../escape", "--text", "TYPE: HEARTBEAT", "--state-dir", stateDir)
+	if err == nil {
+		t.Fatalf("expected non-zero exit for a malformed --to, output: %s", out)
+	}
+	if !strings.Contains(err.Error(), "seat_id") {
+		t.Errorf("expected error to mention seat_id, got: %v", err)
 	}
 }
 
