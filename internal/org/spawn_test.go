@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/yoshpy-dev/ralph/internal/org/protocol"
 )
@@ -22,7 +23,14 @@ type fakeHerdr struct {
 	workspaceCreateErr error
 	tabCreateErr       error
 	agentStartErr      error
-	paneSendKeysErr    error
+	// agentStartErrs, when non-empty, is dequeued one entry per AgentStart
+	// call (nil entries count as a successful call) and takes priority over
+	// agentStartErr -- lets a test script a specific sequence of outcomes
+	// (e.g. busy, busy, success) for the agentStartWithRetry retry-path
+	// tests, while every other test keeps using the simpler single-error
+	// agentStartErr field unmodified.
+	agentStartErrs  []error
+	paneSendKeysErr error
 
 	workspaceID string
 	paneID      string
@@ -59,6 +67,14 @@ func (f *fakeHerdr) AgentStart(_ context.Context, name, _, _ string, _ int, agen
 	f.calls = append(f.calls, "agent_start")
 	f.agentStartNames = append(f.agentStartNames, name)
 	f.agentStartArgs = append(f.agentStartArgs, agentArgs)
+	if len(f.agentStartErrs) > 0 {
+		err := f.agentStartErrs[0]
+		f.agentStartErrs = f.agentStartErrs[1:]
+		if err != nil {
+			return "", err
+		}
+		return "agent-1", nil
+	}
 	if f.agentStartErr != nil {
 		return "", f.agentStartErr
 	}
@@ -1113,5 +1129,110 @@ func TestOrgSpawn_NoScope_SpawnedEventDetailsEmpty(t *testing.T) {
 	last := rr.Events[len(rr.Events)-1]
 	if last.Details != "" {
 		t.Fatalf("expected empty Details on the spawned event with no Scope, got %q", last.Details)
+	}
+}
+
+// agentPaneBusyErr builds a fake AgentStart error carrying the literal
+// "agent_pane_busy" marker agentStartWithRetry matches on, shaped like the
+// real herdr adapter's error text (see docs/evidence/
+// org-seats-smoke-2026-08-02.log).
+func agentPaneBusyErr() error {
+	return errors.New(`herdr: exit status 1: {"error":{"code":"agent_pane_busy","message":"agent target pane w5:p2 is not an available shell"}} (herdr: agent_pane_busy: agent target pane w5:p2 is not an available shell)`)
+}
+
+func TestOrgSpawn_AgentStart_RetriesOnAgentPaneBusyThenSucceeds(t *testing.T) {
+	// Third real-herdr smoke deviation (see plan
+	// docs/plans/active/2026-08-02-org-runtime-seats.md, "Implementation
+	// notes (deviations)"): a freshly created tab's pane rejects `agent
+	// start` with agent_pane_busy for ~1-3s while its shell initializes.
+	// agentStartWithRetry must retry only on that specific error and
+	// eventually succeed once the fake reports the pane ready.
+	o, h, _ := testOrg(t)
+	o.AgentStartRetryInterval = time.Millisecond // keep the test fast
+	h.agentStartErrs = []error{agentPaneBusyErr(), agentPaneBusyErr(), nil}
+
+	result := o.Spawn(mustSpawnParams("org-a", "seat-1"))
+	if result.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("expected SpawnOutcomeSpawned after busy retries resolve, got %v (err=%v)", result.Outcome, result.Err)
+	}
+	if len(h.agentStartNames) != 3 {
+		t.Fatalf("expected exactly 3 AgentStart calls (2 busy + 1 success), got %d: %v", len(h.agentStartNames), h.agentStartNames)
+	}
+
+	rr, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	var agentStartedDetails string
+	for _, ev := range rr.Events {
+		if ev.Event == EventSpawnStep && strings.HasPrefix(ev.Details, "agent_started") {
+			agentStartedDetails = ev.Details
+		}
+	}
+	assertDetailsContains(t, agentStartedDetails, "agent_start_retries=2")
+}
+
+func TestOrgSpawn_AgentStart_NonBusyError_FailsImmediatelyWithoutRetry(t *testing.T) {
+	// Any AgentStart error other than agent_pane_busy must fail the saga on
+	// the first attempt, exactly as before this retry was added -- the
+	// retry is scoped narrowly to the one known-transient herdr error.
+	o, h, _ := testOrg(t)
+	o.AgentStartRetryInterval = time.Millisecond
+	h.agentStartErr = errors.New("stub failure: agent start rejected for an unrelated reason")
+
+	result := o.Spawn(mustSpawnParams("org-a", "seat-1"))
+	if result.Outcome != SpawnOutcomeFailed {
+		t.Fatalf("expected SpawnOutcomeFailed, got %v", result.Outcome)
+	}
+	if len(h.agentStartNames) != 1 {
+		t.Fatalf("expected exactly 1 AgentStart call (no retry on non-busy error), got %d: %v", len(h.agentStartNames), h.agentStartNames)
+	}
+
+	rr, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	last := rr.Events[len(rr.Events)-1]
+	assertDetailsContains(t, last.Details, "step=agent_start")
+}
+
+func TestOrgSpawn_AgentStart_AlwaysBusy_BoundedByCtxDeadline(t *testing.T) {
+	// AC guard: if the pane never becomes ready, the retry loop must not
+	// hang -- it is bounded by the saga's own ctx deadline (SpawnParams.
+	// TimeoutMS), so the saga always terminates and reports agent_start as
+	// the failing step.
+	o, h, _ := testOrg(t)
+	o.AgentStartRetryInterval = 5 * time.Millisecond
+	h.agentStartErr = agentPaneBusyErr()
+
+	p := mustSpawnParams("org-a", "seat-1")
+	p.TimeoutMS = 30 // short deadline so the retry loop's ctx.Done() fires quickly
+
+	done := make(chan SpawnResult, 1)
+	go func() { done <- o.Spawn(p) }()
+
+	select {
+	case result := <-done:
+		if result.Outcome != SpawnOutcomeFailed {
+			t.Fatalf("expected SpawnOutcomeFailed once the ctx deadline is exceeded, got %v", result.Outcome)
+		}
+		if len(h.agentStartNames) == 0 {
+			t.Fatalf("expected at least one AgentStart attempt before the ctx deadline")
+		}
+		if len(h.agentStartNames) >= maxAgentStartAttempts {
+			t.Fatalf("expected the ctx deadline to cut the retry loop short, well under maxAgentStartAttempts=%d, got %d", maxAgentStartAttempts, len(h.agentStartNames))
+		}
+
+		rr, err := o.Manifest.Read()
+		if err != nil {
+			t.Fatalf("read manifest: %v", err)
+		}
+		last := rr.Events[len(rr.Events)-1]
+		if last.Event != EventSpawnFailed {
+			t.Fatalf("expected last event to be spawn_failed, got %q", last.Event)
+		}
+		assertDetailsContains(t, last.Details, "step=agent_start")
+	case <-time.After(5 * time.Second):
+		t.Fatal("Spawn did not return within 5s -- agentStartWithRetry is not bounded by ctx deadline")
 	}
 }

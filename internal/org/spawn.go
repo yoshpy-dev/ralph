@@ -17,6 +17,25 @@ import (
 // default is somehow bypassed.
 const defaultSpawnTimeoutMS = 60000
 
+// defaultAgentStartRetryInterval is the wait between AgentStart retry
+// attempts when Org.AgentStartRetryInterval is unset (zero value). See
+// agentStartWithRetry's doc comment for why this retry exists.
+const defaultAgentStartRetryInterval = 500 * time.Millisecond
+
+// maxAgentStartAttempts bounds agentStartWithRetry's total AgentStart call
+// count (including the first, non-retry attempt) so a herdr pane that never
+// becomes ready cannot retry forever independent of the saga's own ctx
+// deadline -- ctx cancellation/deadline is still the primary bound; this cap
+// is a hard backstop under it.
+const maxAgentStartAttempts = 20
+
+// agentPaneBusyMarker is the literal substring the herdr adapter's error
+// text carries when `agent start` is rejected because the target pane's
+// shell is not ready yet (herdr code "agent_pane_busy"). Matching on this
+// literal (rather than a typed sentinel) mirrors how the rest of this saga
+// already treats herdr/agmsg errors -- see the HerdrClient doc comment.
+const agentPaneBusyMarker = "agent_pane_busy"
+
 // EventOrgWorkspaceCreated is an org-level event (SeatID empty) recorded the
 // first time a herdr workspace is created for an org_id. Later spawns within
 // the same org_id reuse the recorded PaneID (the workspace id) instead of
@@ -91,6 +110,11 @@ type Org struct {
 	Herdr    HerdrClient
 	Agmsg    AgmsgClient
 	Now      Clock
+	// AgentStartRetryInterval overrides the wait between agent_pane_busy
+	// retries in agentStartWithRetry. Zero (the field's default) means "use
+	// defaultAgentStartRetryInterval" -- tests set this to a tiny value so
+	// the retry-path tests run fast without an accompanying fake Clock.
+	AgentStartRetryInterval time.Duration
 }
 
 func (o *Org) now() string {
@@ -317,8 +341,12 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 			agentArgs = append(agentArgs, initialPrompt)
 		}
 	}
-	if _, err := o.Herdr.AgentStart(ctx, herdrAgentName(p.OrgID, p.SeatID), p.Driver, paneID, p.TimeoutMS, agentArgs); err != nil {
+	retries, err := o.agentStartWithRetry(ctx, herdrAgentName(p.OrgID, p.SeatID), p.Driver, paneID, p.TimeoutMS, agentArgs)
+	if err != nil {
 		return o.failStep(p, "agent_start", err, paneID)
+	}
+	if retries > 0 {
+		agentStartedDetails = fmt.Sprintf("%s agent_start_retries=%d", agentStartedDetails, retries)
 	}
 	if err := o.appendEvent(ManifestEvent{
 		TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnStep,
@@ -409,6 +437,54 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 // PR②'s seat prompt design).
 func agmsgTeam(orgID string) string {
 	return fmt.Sprintf("ralph-%s", orgID)
+}
+
+// agentStartRetryInterval returns o.AgentStartRetryInterval, falling back to
+// defaultAgentStartRetryInterval when unset (the Org zero value).
+func (o *Org) agentStartRetryInterval() time.Duration {
+	if o.AgentStartRetryInterval > 0 {
+		return o.AgentStartRetryInterval
+	}
+	return defaultAgentStartRetryInterval
+}
+
+// agentStartWithRetry calls Herdr.AgentStart, retrying with a bounded
+// interval when the herdr adapter reports agent_pane_busy: a freshly created
+// tab's pane is still initializing its shell for ~1-3s and rejects
+// `agent start` with agent_pane_busy until it is ready (real-herdr smoke
+// probe: immediate call -> busy, ~3s later -> accepted -- see plan
+// docs/plans/active/2026-08-02-org-runtime-seats.md, "Implementation notes
+// (deviations)", third bullet). Any other error is returned immediately,
+// exactly as a bare AgentStart call would today -- this function changes
+// AgentStart's retry behavior, not its error semantics.
+//
+// The retry loop is bounded two ways: ctx (the saga's own spawn deadline,
+// honored via ctx.Done() during the inter-attempt wait) and
+// maxAgentStartAttempts (a hard backstop independent of ctx, so a caller
+// that passes a very long or no-deadline ctx still cannot retry forever).
+// The returned int is the number of retry attempts made before the call
+// that ultimately returned (0 when the first attempt succeeds or fails with
+// a non-agent_pane_busy error) -- callers use it to annotate the
+// agent_started step's Details for audit purposes.
+func (o *Org) agentStartWithRetry(ctx context.Context, name, kind, paneID string, timeoutMS int, agentArgs []string) (int, error) {
+	interval := o.agentStartRetryInterval()
+	var lastErr error
+	for attempt := 0; attempt < maxAgentStartAttempts; attempt++ {
+		_, err := o.Herdr.AgentStart(ctx, name, kind, paneID, timeoutMS, agentArgs)
+		if err == nil {
+			return attempt, nil
+		}
+		if !strings.Contains(err.Error(), agentPaneBusyMarker) {
+			return attempt, err
+		}
+		lastErr = err
+		select {
+		case <-ctx.Done():
+			return attempt, lastErr
+		case <-time.After(interval):
+		}
+	}
+	return maxAgentStartAttempts, lastErr
 }
 
 // herdrAgentName is the single, grep-able definition of the herdr agent-name
