@@ -296,6 +296,58 @@ func TestOrgSpawn_HappyPath_EventSequenceReceiptAndWorkspaceReuse(t *testing.T) 
 	}
 }
 
+// TestOrgSpawn_LeadDriverFlag_DefaultsToClaudeCode pins AC-7's CLI wiring:
+// omitting --lead-driver registers the lead identity with agmsg type
+// "claude-code" (the flag's own default, "claude").
+func TestOrgSpawn_LeadDriverFlag_DefaultsToClaudeCode(t *testing.T) {
+	_, agmsgLog := setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	out, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--state-dir", stateDir,
+	)
+	if err != nil {
+		t.Fatalf("spawn failed: %v (output: %s)", err, out)
+	}
+
+	agmsgLines := readLogLines(t, agmsgLog)
+	// join.sh argv: TEAM AGENT_ID TYPE PROJECT_PATH -- the lead Join is the
+	// first agmsg invocation and must carry "claude-code" (the
+	// --lead-driver flag's own default, "claude").
+	if len(agmsgLines) == 0 || !strings.Contains(agmsgLines[0], "ralph-org-a lead claude-code") {
+		t.Fatalf("expected the first agmsg call to be lead Join with type claude-code, got %v", agmsgLines)
+	}
+}
+
+// TestOrgSpawn_LeadDriverFlag_Codex_RegistersLeadAsCodexType covers the
+// explicit --lead-driver=codex case: the lead identity's agmsg type must
+// follow --lead-driver, independent of the seat's own --driver.
+func TestOrgSpawn_LeadDriverFlag_Codex_RegistersLeadAsCodexType(t *testing.T) {
+	_, agmsgLog := setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	out, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--state-dir", stateDir, "--lead-driver", "codex",
+	)
+	if err != nil {
+		t.Fatalf("spawn failed: %v (output: %s)", err, out)
+	}
+
+	agmsgLines := readLogLines(t, agmsgLog)
+	if len(agmsgLines) == 0 || !strings.Contains(agmsgLines[0], "ralph-org-a lead codex") {
+		t.Fatalf("expected the first agmsg call to be lead Join with type codex, got %v", agmsgLines)
+	}
+	// The seat's own Join (second call) must still use its own --driver
+	// (claude -> claude-code), unaffected by --lead-driver.
+	if len(agmsgLines) < 2 || !strings.Contains(agmsgLines[1], "ralph-org-a seat-1 claude-code") {
+		t.Fatalf("expected the second agmsg call to be the seat's own Join with type claude-code, got %v", agmsgLines)
+	}
+}
+
 func TestOrgSpawn_FailureInjection_TabCreate_NoCompensation(t *testing.T) {
 	herdrLog, _ := setupOrgStubPATH(t)
 	t.Setenv("ORG_STUB_FAIL", "tab:create")
@@ -384,6 +436,11 @@ func TestOrgSpawn_FailureInjection_AgmsgSend_CompensatesPane(t *testing.T) {
 	}
 	if !strings.Contains(last.Details, "step=agmsg_announce") {
 		t.Errorf("expected Details to mention step=agmsg_announce, got %q", last.Details)
+	}
+	// AC-6 tech-debt fix: a failed HELLO announce must best-effort Leave the
+	// seat's own (already-succeeded) Join back out, and record the outcome.
+	if !strings.Contains(last.Details, "leave=ok") {
+		t.Errorf("expected Details to record leave=ok, got %q", last.Details)
 	}
 
 	herdrLines := readLogLines(t, herdrLog)

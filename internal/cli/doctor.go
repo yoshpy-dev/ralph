@@ -618,24 +618,31 @@ const agmsgTestedVersion = "1.1.13"
 // script collection. Unlike herdr, agmsg is NOT a single binary on PATH --
 // home is the resolved agmsg home directory (driver.ResolveAgmsgHome), and
 // availability is decided by the presence of home's scripts/send.sh.
+// checkAgmsgAvailable's Detail always names home explicitly (both the
+// not-installed and available branches) -- tech-debt fix: this check used
+// to discard driver.AgmsgAvailable's resolved home in favor of a fixed
+// string, so a misconfigured 3-surface `agmsg_home` (env/config/default)
+// gave no clue which directory doctor actually checked
+// (docs/tech-debt/README.md, "checkAgmsgAvailable discards the resolved
+// agmsg home from driver.AgmsgAvailable's error").
 func checkAgmsgAvailable(home string) checkResult {
 	r := checkResult{Name: "agmsg"}
 	if err := driver.AgmsgAvailable(home); err != nil {
 		r.Status = "info"
-		r.Detail = "agmsg not installed — org runtime seats unavailable (solo execution unaffected)"
+		r.Detail = fmt.Sprintf("agmsg not installed at %s — org runtime seats unavailable (solo execution unaffected)", home)
 		return r
 	}
 	r.Status = "pass"
-	r.Detail = "available"
+	r.Detail = fmt.Sprintf("available at %s", home)
 	version, err := driver.AgmsgVersion(home)
 	if err != nil {
 		return r
 	}
-	r.Detail = fmt.Sprintf("available (version %s)", version)
+	r.Detail = fmt.Sprintf("available at %s (version %s)", home, version)
 	if version != agmsgTestedVersion {
 		r.Status = "info"
-		r.Detail = fmt.Sprintf("available (version %s; tested against %s — behavior differences are possible)",
-			version, agmsgTestedVersion)
+		r.Detail = fmt.Sprintf("available at %s (version %s; tested against %s — behavior differences are possible)",
+			home, version, agmsgTestedVersion)
 	}
 	return r
 }

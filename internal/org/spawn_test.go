@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,8 +17,12 @@ import (
 // fakeHerdr is a call-recording, in-memory HerdrClient used by every spawn
 // saga unit test in this file -- no exec.Command, no PATH, no real herdr
 // binary needed. Per-method Err fields let a test inject a failure at
-// exactly one saga boundary.
+// exactly one saga boundary. mu guards every field below so fakeHerdr is
+// safe to share across goroutines (TestOrgSpawn_ConcurrentSpawns_MaxSeatsNeverExceeded,
+// AC-9) -- every other test in this file drives fakeHerdr from a single
+// goroutine, where an uncontended mutex is a no-op cost.
 type fakeHerdr struct {
+	mu    sync.Mutex
 	calls []string
 
 	workspaceCreateErr error
@@ -42,6 +47,8 @@ type fakeHerdr struct {
 }
 
 func (f *fakeHerdr) WorkspaceCreate(_ context.Context, _, _ string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls = append(f.calls, "workspace_create")
 	if f.workspaceCreateErr != nil {
 		return "", f.workspaceCreateErr
@@ -53,6 +60,8 @@ func (f *fakeHerdr) WorkspaceCreate(_ context.Context, _, _ string) (string, err
 }
 
 func (f *fakeHerdr) TabCreate(_ context.Context, _, _, _ string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls = append(f.calls, "tab_create")
 	if f.tabCreateErr != nil {
 		return "", f.tabCreateErr
@@ -64,6 +73,8 @@ func (f *fakeHerdr) TabCreate(_ context.Context, _, _, _ string) (string, error)
 }
 
 func (f *fakeHerdr) AgentStart(_ context.Context, name, _, _ string, _ int, agentArgs []string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls = append(f.calls, "agent_start")
 	f.agentStartNames = append(f.agentStartNames, name)
 	f.agentStartArgs = append(f.agentStartArgs, agentArgs)
@@ -82,22 +93,30 @@ func (f *fakeHerdr) AgentStart(_ context.Context, name, _, _ string, _ int, agen
 }
 
 func (f *fakeHerdr) AgentWait(_ context.Context, target string, _ []string, _ int) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls = append(f.calls, "agent_wait")
 	f.agentWaitTargets = append(f.agentWaitTargets, target)
 	return "idle", nil
 }
 
 func (f *fakeHerdr) PaneRead(_ context.Context, _ string, _ int) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls = append(f.calls, "pane_read")
 	return "pane output", nil
 }
 
 func (f *fakeHerdr) PaneSendText(_ context.Context, _, _ string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls = append(f.calls, "pane_send_text")
 	return nil
 }
 
 func (f *fakeHerdr) PaneSendKeys(_ context.Context, paneID string, _ ...string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls = append(f.calls, "pane_send_keys")
 	f.sendKeysCalls = append(f.sendKeysCalls, paneID)
 	if f.paneSendKeysErr != nil {
@@ -110,8 +129,10 @@ func (f *fakeHerdr) PaneSendKeys(_ context.Context, paneID string, _ ...string) 
 // agentID (e.g. "lead" or a seat id), lets a test inject a Join failure at
 // exactly one identity while leaving the other Join call (lead vs seat)
 // unaffected -- needed to test ensureLeadJoined's best-effort semantics
-// independently of the seat Join's hard-failure gate.
+// independently of the seat Join's hard-failure gate. mu guards every field
+// below -- see fakeHerdr's doc comment for why.
 type fakeAgmsg struct {
+	mu      sync.Mutex
 	calls   []string
 	sendErr error
 
@@ -130,11 +151,15 @@ type leaveCall struct {
 }
 
 func (f *fakeAgmsg) Send(_ context.Context, _, _, _, _ string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls = append(f.calls, "send")
 	return f.sendErr
 }
 
 func (f *fakeAgmsg) Join(_ context.Context, team, agentID, agmsgType, projectPath string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls = append(f.calls, "join:"+agentID)
 	f.joinCalls = append(f.joinCalls, joinCall{team: team, agentID: agentID, agmsgType: agmsgType, projectPath: projectPath})
 	if f.joinErrs != nil {
@@ -146,6 +171,8 @@ func (f *fakeAgmsg) Join(_ context.Context, team, agentID, agmsgType, projectPat
 }
 
 func (f *fakeAgmsg) Leave(_ context.Context, team, agentID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls = append(f.calls, "leave")
 	f.leaveCalls = append(f.leaveCalls, leaveCall{team: team, agentID: agentID})
 	return f.leaveErr
@@ -1234,5 +1261,264 @@ func TestOrgSpawn_AgentStart_AlwaysBusy_BoundedByCtxDeadline(t *testing.T) {
 		assertDetailsContains(t, last.Details, "step=agent_start")
 	case <-time.After(5 * time.Second):
 		t.Fatal("Spawn did not return within 5s -- agentStartWithRetry is not bounded by ctx deadline")
+	}
+}
+
+// --- AC-6: announce (HELLO Send) failure Leave compensation -----------------
+
+func TestOrgSpawn_FailureInjection_AgmsgSend_LeavesJoinedSeat(t *testing.T) {
+	// tech-debt fix (docs/tech-debt/README.md, "spawn の agmsg_announce
+	// (HELLO send)失敗パスの補償..."): by the time HELLO Send fails, the
+	// seat's own Join already succeeded, so the failure path must
+	// best-effort Leave the seat back out of the roster and record the
+	// outcome in Details.
+	o, _, a := testOrg(t)
+	a.sendErr = errors.New("stub failure: agmsg send")
+
+	result := o.Spawn(mustSpawnParams("org-a", "seat-1"))
+	if result.Outcome != SpawnOutcomeFailed {
+		t.Fatalf("expected SpawnOutcomeFailed, got %v", result.Outcome)
+	}
+
+	if len(a.leaveCalls) != 1 {
+		t.Fatalf("expected exactly 1 Leave call, got %+v", a.leaveCalls)
+	}
+	wantTeam := agmsgTeam("org-a")
+	if a.leaveCalls[0].team != wantTeam || a.leaveCalls[0].agentID != "seat-1" {
+		t.Fatalf("expected Leave(%q, seat-1), got %+v", wantTeam, a.leaveCalls[0])
+	}
+
+	rr, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	last := rr.Events[len(rr.Events)-1]
+	if last.Event != EventSpawnFailed {
+		t.Fatalf("expected last event to be spawn_failed, got %q", last.Event)
+	}
+	assertDetailsContains(t, last.Details, "step=agmsg_announce", "leave=ok")
+}
+
+func TestOrgSpawn_FailureInjection_AgmsgSend_LeaveFailure_RecordedInDetails(t *testing.T) {
+	// The Leave compensation is itself best-effort: a Leave failure must be
+	// recorded in Details, not propagated as a second saga failure or
+	// silently dropped.
+	o, _, a := testOrg(t)
+	a.sendErr = errors.New("stub failure: agmsg send")
+	a.leaveErr = errors.New("stub failure: agmsg leave")
+
+	result := o.Spawn(mustSpawnParams("org-a", "seat-1"))
+	if result.Outcome != SpawnOutcomeFailed {
+		t.Fatalf("expected SpawnOutcomeFailed, got %v", result.Outcome)
+	}
+	if len(a.leaveCalls) != 1 {
+		t.Fatalf("expected the Leave call to still be attempted despite it failing, got %+v", a.leaveCalls)
+	}
+
+	rr, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	last := rr.Events[len(rr.Events)-1]
+	assertDetailsContains(t, last.Details, "step=agmsg_announce", "leave=failed:", "stub failure: agmsg leave")
+}
+
+// --- AC-7: leadIdentity const + lead agmsg type from LeadDriver -------------
+
+func TestLeadIdentity_ConstantValue(t *testing.T) {
+	if leadIdentity != "lead" {
+		t.Fatalf("leadIdentity = %q, want %q", leadIdentity, "lead")
+	}
+}
+
+func TestOrgSpawn_EnsureLeadJoined_DefaultLeadDriver_ClaudeCodeType(t *testing.T) {
+	o, _, a := testOrg(t)
+
+	p := mustSpawnParams("org-a", "seat-1")
+	// LeadDriver left unset -- must default to "claude" -> "claude-code".
+	result := o.Spawn(p)
+	if result.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("expected SpawnOutcomeSpawned, got %v (err=%v)", result.Outcome, result.Err)
+	}
+	if len(a.joinCalls) < 1 {
+		t.Fatalf("expected at least 1 Join call, got %+v", a.joinCalls)
+	}
+	leadJoin := a.joinCalls[0]
+	if leadJoin.agentID != leadIdentity || leadJoin.agmsgType != "claude-code" {
+		t.Fatalf("expected lead Join(%s, claude-code, ...) by default, got %+v", leadIdentity, leadJoin)
+	}
+}
+
+func TestOrgSpawn_EnsureLeadJoined_LeadDriverCodex_UsesCodexAgmsgType(t *testing.T) {
+	// The lead identity's own driver (LeadDriver) is independent of the
+	// seat's Driver: a claude-driven seat spawned under a codex-coordinated
+	// org must still register "lead" with agmsg type "codex", not
+	// "claude-code".
+	o, _, a := testOrg(t)
+
+	p := mustSpawnParams("org-a", "seat-1")
+	p.LeadDriver = "codex"
+	result := o.Spawn(p)
+	if result.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("expected SpawnOutcomeSpawned, got %v (err=%v)", result.Outcome, result.Err)
+	}
+	if len(a.joinCalls) != 2 {
+		t.Fatalf("expected 2 Join calls (lead then seat), got %+v", a.joinCalls)
+	}
+	leadJoin, seatJoin := a.joinCalls[0], a.joinCalls[1]
+	if leadJoin.agentID != leadIdentity || leadJoin.agmsgType != "codex" {
+		t.Fatalf("expected lead Join(%s, codex, ...) for LeadDriver=codex, got %+v", leadIdentity, leadJoin)
+	}
+	if seatJoin.agentID != "seat-1" || seatJoin.agmsgType != "claude-code" {
+		t.Fatalf("expected the seat's own Join to still use its own Driver (claude -> claude-code), got %+v", seatJoin)
+	}
+}
+
+// --- AC-9: concurrent spawn TOCTOU (manifest flock) -------------------------
+
+func TestOrgSpawn_ConcurrentSpawns_MaxSeatsNeverExceeded(t *testing.T) {
+	// Regression for the tech-debt TOCTOU race (docs/tech-debt/README.md,
+	// "max_seats is enforced across an unlocked read-then-append window"):
+	// N goroutines spawn N distinct seats against the same org concurrently.
+	// testOrgConfig's MaxSeats=3 must never be exceeded, even though every
+	// goroutine races to read-validate-append on the same manifest file.
+	o, _, _ := testOrg(t)
+	const n = 10
+
+	var wg sync.WaitGroup
+	wg.Add(n)
+	results := make([]SpawnResult, n)
+	for i := range n {
+		go func(i int) {
+			defer wg.Done()
+			results[i] = o.Spawn(mustSpawnParams("org-a", fmt.Sprintf("seat-%d", i)))
+		}(i)
+	}
+	wg.Wait()
+
+	spawned := 0
+	for _, r := range results {
+		if r.Outcome == SpawnOutcomeSpawned {
+			spawned++
+		} else if r.Outcome != SpawnOutcomeRejected {
+			t.Errorf("unexpected outcome %v (err=%v)", r.Outcome, r.Err)
+		}
+	}
+	if spawned != testOrgConfig().MaxSeats {
+		t.Fatalf("expected exactly max_seats=%d successful spawns out of %d concurrent attempts, got %d",
+			testOrgConfig().MaxSeats, n, spawned)
+	}
+
+	active, err := o.Manifest.ActiveSeatCount("org-a", RosterOptions{})
+	if err != nil {
+		t.Fatalf("ActiveSeatCount: %v", err)
+	}
+	if active > testOrgConfig().MaxSeats {
+		t.Fatalf("manifest reports %d active seats, exceeding max_seats=%d", active, testOrgConfig().MaxSeats)
+	}
+}
+
+func TestWithManifestLock_SerializesConcurrentCallers(t *testing.T) {
+	// Unit-level pin for lockfile.go's own contract, independent of Spawn:
+	// two withManifestLock calls racing on the same dir must never run fn
+	// concurrently.
+	dir := t.TempDir()
+	const n = 20
+	var (
+		mu        sync.Mutex
+		inside    int
+		maxInside int
+	)
+
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for range n {
+		go func() {
+			defer wg.Done()
+			err := withManifestLock(dir, func() error {
+				mu.Lock()
+				inside++
+				if inside > maxInside {
+					maxInside = inside
+				}
+				mu.Unlock()
+
+				time.Sleep(time.Millisecond)
+
+				mu.Lock()
+				inside--
+				mu.Unlock()
+				return nil
+			})
+			if err != nil {
+				t.Errorf("withManifestLock: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if maxInside != 1 {
+		t.Fatalf("expected at most 1 concurrent holder of the manifest lock, observed max concurrency %d", maxInside)
+	}
+}
+
+// --- AC-10b: dryRunSpawn error propagation ----------------------------------
+
+func TestOrgSpawn_DryRun_PromptFilePathError_FailsStep(t *testing.T) {
+	// tech-debt fix (docs/tech-debt/README.md, "dryRunSpawn silently
+	// swallows RenderRolePrompt's and promptFilePath's errors"): a
+	// promptFilePath failure must fail the dry run the same way it would
+	// fail a real spawn at the "prompt_file" step, not silently report
+	// success.
+	o, _, _ := testOrg(t)
+	orig := absPath
+	absPath = func(string) (string, error) { return "", errors.New("stub: abs failed") }
+	defer func() { absPath = orig }()
+
+	p := mustSpawnParams("org-a", "seat-1")
+	p.Role = "reviewer" // reviewer.md is multi-line, so needsPromptFile triggers.
+	p.DryRun = true
+	result := o.Spawn(p)
+	if result.Outcome != SpawnOutcomeFailed {
+		t.Fatalf("expected dry-run spawn to fail when promptFilePath errors, got %+v", result)
+	}
+
+	rr, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	last := rr.Events[len(rr.Events)-1]
+	if last.Event != EventSpawnFailed {
+		t.Fatalf("expected last event to be spawn_failed, got %q", last.Event)
+	}
+	if !last.DryRun {
+		t.Fatalf("expected the dry-run failure event to carry dry_run: true, got %+v", last)
+	}
+	assertDetailsContains(t, last.Details, "step=prompt_file", "stub: abs failed")
+}
+
+func TestOrgSpawn_DryRun_PromptFilePathError_NoManifestEventForRealSeat(t *testing.T) {
+	// The dry-run failure event must be excluded from real-seat accounting
+	// (Roster with the default RosterOptions{}), exactly like every other
+	// dry-run event -- confirms DryRun: true actually took effect, not just
+	// that the field was set on the struct literal.
+	o, _, _ := testOrg(t)
+	orig := absPath
+	absPath = func(string) (string, error) { return "", errors.New("stub: abs failed") }
+	defer func() { absPath = orig }()
+
+	p := mustSpawnParams("org-a", "seat-1")
+	p.Role = "reviewer"
+	p.DryRun = true
+	if result := o.Spawn(p); result.Outcome != SpawnOutcomeFailed {
+		t.Fatalf("expected SpawnOutcomeFailed, got %+v", result)
+	}
+
+	rr, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	if roster := Roster(rr.Events, RosterOptions{}); len(roster) != 0 {
+		t.Fatalf("expected the dry-run failure to be excluded from the default (real-seat) roster, got %+v", roster)
 	}
 }

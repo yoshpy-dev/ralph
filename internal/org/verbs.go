@@ -35,6 +35,20 @@ func (o *Org) findSeat(orgID, seatID string) (SeatStatus, bool, error) {
 	return SeatStatus{}, false, nil
 }
 
+// resolvedHerdrAgentName returns seat's persisted HerdrAgentName (recorded
+// on the `spawned` event since the AC-8 tech-debt fix) if present, falling
+// back to the derived name via herdrAgentName for legacy manifest events
+// recorded before that field existed -- so a seat spawned by an older
+// `ralph` build stays reachable by name-based verbs (compat). Every verb
+// that already resolves a seat from the manifest before targeting a herdr
+// agent (Send today) should call this instead of herdrAgentName directly.
+func resolvedHerdrAgentName(seat SeatStatus) string {
+	if seat.HerdrAgentName != "" {
+		return seat.HerdrAgentName
+	}
+	return herdrAgentName(seat.OrgID, seat.SeatID)
+}
+
 // SendParams describes one `ralph org send` invocation.
 type SendParams struct {
 	OrgID     string
@@ -104,7 +118,7 @@ func (o *Org) Send(p SendParams) SendResult {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutMS)*time.Millisecond)
 	defer cancel()
 
-	if _, err := o.Herdr.AgentWait(ctx, herdrAgentName(p.OrgID, p.To), []string{"idle"}, timeoutMS); err != nil {
+	if _, err := o.Herdr.AgentWait(ctx, resolvedHerdrAgentName(seat), []string{"idle"}, timeoutMS); err != nil {
 		return SendResult{Err: fmt.Errorf("org: send: wait for seat %q idle: %w", p.To, err)}
 	}
 	if err := o.Herdr.PaneSendText(ctx, seat.PaneID, p.Text); err != nil {
@@ -133,10 +147,22 @@ func truncateForDetails(text string) string {
 }
 
 // WaitParams describes one `ralph org wait` invocation. Wait is a pure
-// passthrough to Herdr.AgentWait -- it never touches the manifest. OrgID is
-// required: it namespaces the herdr agent name (see herdrAgentName) so wait
-// targets the seat spawned within this org_id, not any same-named seat in a
-// different org_id.
+// passthrough to Herdr.AgentWait -- it never touches the manifest (see
+// TestOrgWait_UnknownSeat_StillDrivesHerdr_NoManifestCheck, which pins this
+// as deliberate). OrgID is required: it namespaces the herdr agent name (see
+// herdrAgentName) so wait targets the seat spawned within this org_id, not
+// any same-named seat in a different org_id.
+//
+// Deliberate scope note (AC-8/herdr_agent_name persistence, see
+// resolvedHerdrAgentName): unlike Send, Wait always derives the herdr agent
+// name via herdrAgentName rather than preferring a seat's persisted
+// HerdrAgentName -- doing the latter would require a manifest read Wait's
+// own contract explicitly forbids. herdrAgentName's naming convention has
+// not changed since HerdrAgentName started being persisted (both use the
+// same `<org_id>_<seat_id>` join), so this is not currently a live gap; it
+// becomes one only if that convention changes again, at which point Wait
+// would need to either gain a manifest lookup (breaking its no-manifest-
+// touch contract) or accept staleness for respawned/renamed seats.
 type WaitParams struct {
 	OrgID     string
 	Seat      string

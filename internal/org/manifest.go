@@ -28,8 +28,18 @@ type ManifestEvent struct {
 	Worktree  string `json:"worktree,omitempty"`
 	PaneID    string `json:"pane_id,omitempty"` // herdr external id, persisted as soon as known
 	AgmsgTeam string `json:"agmsg_team,omitempty"`
-	DryRun    bool   `json:"dry_run,omitempty"`
-	Details   string `json:"details,omitempty"` // free text: rejection reason, compensation result, etc.
+	// HerdrAgentName is the herdr agent name this seat was started under
+	// (herdrAgentName's convention, spawn.go), persisted on the `spawned`
+	// event -- additive (omitempty), so pre-existing events without it
+	// decode as "" and readers fall back to re-deriving the name (see
+	// verbs.go's resolvedHerdrAgentName). Persisting it here mirrors PaneID:
+	// a future change to herdrAgentName's naming convention must not orphan
+	// a seat recorded under the old convention (tech-debt,
+	// docs/tech-debt/README.md, "The herdr agent name is derived at every
+	// call site ... instead of being persisted").
+	HerdrAgentName string `json:"herdr_agent_name,omitempty"`
+	DryRun         bool   `json:"dry_run,omitempty"`
+	Details        string `json:"details,omitempty"` // free text: rejection reason, compensation result, etc.
 }
 
 // ManifestRelPath is the default state-root-relative path for the org
@@ -180,19 +190,20 @@ func Roster(events []ManifestEvent, opts RosterOptions) []SeatStatus {
 			active = false
 		}
 		result = append(result, SeatStatus{
-			OrgID:     entry.ev.OrgID,
-			SeatID:    entry.ev.SeatID,
-			Role:      entry.ev.Role,
-			Driver:    entry.ev.Driver,
-			Model:     entry.ev.Model,
-			Worktree:  entry.ev.Worktree,
-			PaneID:    entry.ev.PaneID,
-			AgmsgTeam: entry.ev.AgmsgTeam,
-			Event:     entry.ev.Event,
-			Active:    active,
-			DryRun:    entry.ev.DryRun,
-			Details:   entry.ev.Details,
-			TS:        entry.ev.TS,
+			OrgID:          entry.ev.OrgID,
+			SeatID:         entry.ev.SeatID,
+			Role:           entry.ev.Role,
+			Driver:         entry.ev.Driver,
+			Model:          entry.ev.Model,
+			Worktree:       entry.ev.Worktree,
+			PaneID:         entry.ev.PaneID,
+			AgmsgTeam:      entry.ev.AgmsgTeam,
+			HerdrAgentName: entry.ev.HerdrAgentName,
+			Event:          entry.ev.Event,
+			Active:         active,
+			DryRun:         entry.ev.DryRun,
+			Details:        entry.ev.Details,
+			TS:             entry.ev.TS,
 		})
 	}
 

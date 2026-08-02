@@ -36,6 +36,19 @@ const maxAgentStartAttempts = 20
 // already treats herdr/agmsg errors -- see the HerdrClient doc comment.
 const agentPaneBusyMarker = "agent_pane_busy"
 
+// leadIdentity is the single, grep-able definition of the org's coordinating
+// "lead" agmsg identity name (see .claude/rules/agent-messaging.md's "star
+// topology" section). Every production call site that names or targets the
+// lead identity (ensureLeadJoined's Join, Spawn's HELLO Send TO field) must
+// use this constant rather than a bare "lead" literal.
+const leadIdentity = "lead"
+
+// defaultLeadDriver is the driver ensureLeadJoined uses to derive the lead
+// identity's agmsg type (agmsgTypeForDriver) when SpawnParams.LeadDriver is
+// left unset -- matches the `ralph org spawn --lead-driver` flag's own
+// default.
+const defaultLeadDriver = "claude"
+
 // EventOrgWorkspaceCreated is an org-level event (SeatID empty) recorded the
 // first time a herdr workspace is created for an org_id. Later spawns within
 // the same org_id reuse the recorded PaneID (the workspace id) instead of
@@ -156,6 +169,13 @@ type SpawnParams struct {
 	Scope     string
 	TimeoutMS int
 	DryRun    bool
+	// LeadDriver is the driver (claude|codex) the org's coordinating "lead"
+	// identity itself runs as -- independent of Driver, which names this
+	// seat's own driver. It is only consulted by ensureLeadJoined to pick
+	// the agmsg type ("claude-code"/"codex") registered for the lead
+	// identity on the team roster. Empty defaults to defaultLeadDriver
+	// ("claude"), matching the CLI flag's default.
+	LeadDriver string
 }
 
 // SpawnOutcome classifies how a Spawn call concluded, so the CLI layer can
@@ -241,7 +261,9 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 		// simulate the saga trail without ever consulting existing roster
 		// state (dry-run events are excluded from ActiveSeatCount/roster
 		// entirely, so there is no idempotency/stale-in-flight concept to
-		// apply here).
+		// apply here). No manifest lock is needed here either -- dry-run
+		// events never count toward [org].max_seats, so two concurrent
+		// dry-runs cannot race on capacity.
 		activeSeats := ActiveSeatCount(events, p.OrgID, RosterOptions{})
 		req := SpawnRequest{OrgID: p.OrgID, SeatID: p.SeatID, Role: p.Role, Driver: p.Driver, Model: p.Model}
 		if err := ValidateSpawn(o.Config, req, activeSeats); err != nil {
@@ -250,64 +272,109 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 		return o.dryRunSpawn(p)
 	}
 
-	roster := Roster(events, RosterOptions{})
-	var existing *SeatStatus
-	for i := range roster {
-		if roster[i].OrgID == p.OrgID && roster[i].SeatID == p.SeatID {
-			existing = &roster[i]
-			break
-		}
-	}
-
-	if existing != nil && existing.Event == EventSpawned {
-		// AC-3: idempotent respawn of an already-spawned seat returns the
-		// existing seat, exit 0, no new manifest events, no driver calls --
-		// checked and returned *before* envelope validation, so an
-		// already-spawned seat can never be rejected by e.g. max_seats
-		// pressure at the at-cap boundary. An idempotent no-op must not be
-		// able to fail validation.
-		return SpawnResult{Outcome: SpawnOutcomeIdempotent, Seat: *existing}
-	}
-
-	// Stateless envelope checks (driver/model pool membership, role
-	// restriction) run before any external side effect -- including the
-	// best-effort compensation below -- is attempted. Unlike the capacity
-	// check, their outcome is a pure function of cfg+req and cannot change
-	// as a result of compensating a stale seat, so a request that fails
-	// here must be rejected with zero driver calls: reject()'s "no external
-	// side effect was ever attempted" claim only holds if this check runs
-	// first.
-	req := SpawnRequest{OrgID: p.OrgID, SeatID: p.SeatID, Role: p.Role, Driver: p.Driver, Model: p.Model}
-	if err := ValidateSpawnEnvelope(o.Config, req); err != nil {
-		return o.reject(p, err)
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(p.TimeoutMS)*time.Millisecond)
 	defer cancel()
 
-	if existing != nil && (existing.Event == EventSpawnStarted || existing.Event == EventSpawnStep) {
-		// Stale in-flight saga from a prior crashed/interrupted spawn:
-		// best-effort compensate and mark it spawn_failed, then re-read the
-		// manifest so the now-terminal stale seat no longer counts toward
-		// activeSeats for the capacity check below.
-		o.compensateStale(ctx, p, *existing)
-		rr, err = o.Manifest.Read()
+	// The idempotent/stale-in-flight/envelope/capacity checks and the
+	// spawn_started append below run inside withManifestLock: this is the
+	// exact "read manifest -> ActiveSeatCount -> ValidateSpawn ->
+	// appendEvent" window docs/tech-debt/README.md flagged as an unlocked
+	// TOCTOU race ("max_seats is enforced across an unlocked read-then-
+	// append window"). Two concurrent Spawn calls used to be able to both
+	// observe the same activeSeats snapshot and both pass
+	// ValidateSpawnCapacity, exceeding [org].max_seats; the flock in
+	// withManifestLock (lockfile.go) now serializes this section across
+	// goroutines and processes on the same host.
+	//
+	// The lock is scoped to this section only (not the workspace/agent/
+	// agmsg side effects that follow) -- per the plan's rollout note, a
+	// long-running herdr/agmsg round trip (bounded by p.TimeoutMS, up to
+	// defaultSpawnTimeoutMS) must not serialize every concurrent spawn
+	// behind it.
+	var existing *SeatStatus
+	var early *SpawnResult
+	req := SpawnRequest{OrgID: p.OrgID, SeatID: p.SeatID, Role: p.Role, Driver: p.Driver, Model: p.Model}
+	lockErr := withManifestLock(filepath.Dir(o.Manifest.Path()), func() error {
+		// Fresh read while holding the lock: the outer `events`/`rr` read
+		// above (taken before lock acquisition, and shared with the DryRun
+		// branch) is not trustworthy for the capacity decision under
+		// concurrency -- only a read taken while the lock is held is.
+		rr, err := o.Manifest.Read()
 		if err != nil {
-			return SpawnResult{Outcome: SpawnOutcomeFailed, Err: fmt.Errorf("org: read manifest: %w", err)}
+			return fmt.Errorf("org: read manifest: %w", err)
 		}
 		events = rr.Events
-	}
 
-	activeSeats := ActiveSeatCount(events, p.OrgID, RosterOptions{})
-	if err := ValidateSpawnCapacity(o.Config, req, activeSeats); err != nil {
-		return o.reject(p, err)
-	}
+		roster := Roster(events, RosterOptions{})
+		for i := range roster {
+			if roster[i].OrgID == p.OrgID && roster[i].SeatID == p.SeatID {
+				e := roster[i]
+				existing = &e
+				break
+			}
+		}
 
-	if err := o.appendEvent(ManifestEvent{
-		TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnStarted,
-		Role: p.Role, Driver: p.Driver, Model: p.Model, Worktree: p.Cwd,
-	}); err != nil {
-		return SpawnResult{Outcome: SpawnOutcomeFailed, Err: err}
+		if existing != nil && existing.Event == EventSpawned {
+			// AC-3: idempotent respawn of an already-spawned seat returns
+			// the existing seat, exit 0, no new manifest events, no driver
+			// calls -- checked and returned *before* envelope validation,
+			// so an already-spawned seat can never be rejected by e.g.
+			// max_seats pressure at the at-cap boundary. An idempotent
+			// no-op must not be able to fail validation.
+			r := SpawnResult{Outcome: SpawnOutcomeIdempotent, Seat: *existing}
+			early = &r
+			return nil
+		}
+
+		// Stateless envelope checks (driver/model pool membership, role
+		// restriction) run before any external side effect -- including the
+		// best-effort compensation below -- is attempted. Unlike the
+		// capacity check, their outcome is a pure function of cfg+req and
+		// cannot change as a result of compensating a stale seat, so a
+		// request that fails here must be rejected with zero driver calls:
+		// reject()'s "no external side effect was ever attempted" claim
+		// only holds if this check runs first.
+		if err := ValidateSpawnEnvelope(o.Config, req); err != nil {
+			r := o.reject(p, err)
+			early = &r
+			return nil
+		}
+
+		if existing != nil && (existing.Event == EventSpawnStarted || existing.Event == EventSpawnStep) {
+			// Stale in-flight saga from a prior crashed/interrupted spawn:
+			// best-effort compensate and mark it spawn_failed, then re-read
+			// the manifest so the now-terminal stale seat no longer counts
+			// toward activeSeats for the capacity check below.
+			o.compensateStale(ctx, p, *existing)
+			rr2, err := o.Manifest.Read()
+			if err != nil {
+				return fmt.Errorf("org: read manifest: %w", err)
+			}
+			events = rr2.Events
+		}
+
+		activeSeats := ActiveSeatCount(events, p.OrgID, RosterOptions{})
+		if err := ValidateSpawnCapacity(o.Config, req, activeSeats); err != nil {
+			r := o.reject(p, err)
+			early = &r
+			return nil
+		}
+
+		if err := o.appendEvent(ManifestEvent{
+			TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnStarted,
+			Role: p.Role, Driver: p.Driver, Model: p.Model, Worktree: p.Cwd,
+		}); err != nil {
+			r := SpawnResult{Outcome: SpawnOutcomeFailed, Err: err}
+			early = &r
+			return nil
+		}
+		return nil
+	})
+	if lockErr != nil {
+		return SpawnResult{Outcome: SpawnOutcomeFailed, Err: fmt.Errorf("org: manifest lock: %w", lockErr)}
+	}
+	if early != nil {
+		return *early
 	}
 
 	workspaceID, err := o.resolveWorkspace(ctx, p, events)
@@ -412,8 +479,15 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	// (see TestSpawn_HelloMessage_IsProtocolConformant) -- HELLO does not
 	// require TASK_ID, so a TYPE header plus these fields alone is valid.
 	msg := fmt.Sprintf("TYPE: HELLO\nSEAT: %s\nROLE: %s\nORG_ID: %s", p.SeatID, p.Role, p.OrgID)
-	if err := o.Agmsg.Send(ctx, team, p.SeatID, "lead", msg); err != nil {
-		return o.failStepWithNote(p, "agmsg_announce", err, paneID, fmt.Sprintf("lead_join=%s", leadJoinNote))
+	if err := o.Agmsg.Send(ctx, team, p.SeatID, leadIdentity, msg); err != nil {
+		// tech-debt (docs/tech-debt/README.md, "spawn の agmsg_announce(HELLO
+		// send)失敗パスの補償..."): the seat's own Join already succeeded by
+		// this point, so a failed HELLO announce must not leave a stale
+		// roster entry behind -- best-effort Leave it back out, and record
+		// the outcome in spawn_failed's Details alongside the lead-join note
+		// so both compensation steps stay auditable from the manifest alone.
+		leaveNote := compensateLeave(o.Agmsg, team, p.SeatID)
+		return o.failStepWithNote(p, "agmsg_announce", err, paneID, fmt.Sprintf("lead_join=%s leave=%s", leadJoinNote, leaveNote))
 	}
 	if err := o.appendEvent(ManifestEvent{
 		TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnStep,
@@ -430,10 +504,18 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	if p.Scope != "" {
 		spawnedDetails = fmt.Sprintf("scope=%s", p.Scope)
 	}
+	// herdr_agent_name is persisted here (tech-debt, docs/tech-debt/
+	// README.md, "The herdr agent name is derived at every call site...
+	// instead of being persisted"): PaneID already gets this treatment
+	// ("herdr external id, persisted as soon as known" -- manifest.go). A
+	// future change to herdrAgentName's naming convention now orphans no
+	// existing seat: verbs.go's Send prefers this recorded value and only
+	// falls back to re-deriving it for pre-existing (legacy) events.
+	agentName := herdrAgentName(p.OrgID, p.SeatID)
 	if err := o.appendEvent(ManifestEvent{
 		TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawned,
 		Role: p.Role, Driver: p.Driver, Model: p.Model, Worktree: p.Cwd,
-		PaneID: paneID, AgmsgTeam: team, Details: spawnedDetails,
+		PaneID: paneID, AgmsgTeam: team, HerdrAgentName: agentName, Details: spawnedDetails,
 	}); err != nil {
 		return SpawnResult{Outcome: SpawnOutcomeFailed, Err: err}
 	}
@@ -447,22 +529,30 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 
 	return SpawnResult{Outcome: SpawnOutcomeSpawned, Seat: SeatStatus{
 		OrgID: p.OrgID, SeatID: p.SeatID, Role: p.Role, Driver: p.Driver, Model: p.Model,
-		Worktree: p.Cwd, PaneID: paneID, AgmsgTeam: team, Event: EventSpawned, Active: true,
+		Worktree: p.Cwd, PaneID: paneID, AgmsgTeam: team, HerdrAgentName: agentName,
+		Event: EventSpawned, Active: true,
 	}}
 }
 
-// ensureLeadJoined best-effort join.sh's <team> lead claude-code <cwd>. A
+// ensureLeadJoined best-effort join.sh's <team> lead <type> <cwd>, where
+// <type> is agmsgTypeForDriver(p.LeadDriver) (defaultLeadDriver ("claude")
+// when p.LeadDriver is unset) -- the lead identity's own driver is
+// independent of this seat's Driver, so a Codex-coordinated org must not
+// register "lead" under a hardcoded claude-code type (tech-debt,
+// docs/tech-debt/README.md, "lead identity is a bare 'lead' string literal
+// ... and its agmsg type is hardcoded agmsgTypeForDriver('claude')"). A
 // clean agmsg team has no "lead" identity registered yet, and agmsg's
 // roster-based send validation rejects HELLO messages whose from/to
 // identity was never join.sh'd (agmsg #355) -- so the saga must attempt to
-// register "lead" before the seat's own Join+Send that follows it in Spawn.
-// join.sh is treated as idempotent (re-joining an existing member is a
-// documented no-op/soft-fail in agmsg), so a lead-join error here does *not*
-// fail the saga on its own: the definitive, single-authoritative-failure-
-// point gate is the seat Join immediately after this call and, ultimately,
-// the HELLO Send -- if the roster is genuinely missing "lead", Send fails
-// and the lead-join error recorded here is carried into that failure's
-// Details for diagnosis (see failStepWithNote's doc comment).
+// register leadIdentity before the seat's own Join+Send that follows it in
+// Spawn. join.sh is treated as idempotent (re-joining an existing member is
+// a documented no-op/soft-fail in agmsg), so a lead-join error here does
+// *not* fail the saga on its own: the definitive, single-authoritative-
+// failure-point gate is the seat Join immediately after this call and,
+// ultimately, the HELLO Send -- if the roster is genuinely missing
+// leadIdentity, Send fails and the lead-join error recorded here is carried
+// into that failure's Details for diagnosis (see failStepWithNote's doc
+// comment).
 //
 // The returned string is the "agmsg_lead_joined <note>" note recorded on the
 // step's manifest event -- "ok" on success, "error=<err>" otherwise -- so
@@ -472,7 +562,11 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 // the returned note instead of being treated as fatal, per the doc comment
 // above.
 func (o *Org) ensureLeadJoined(ctx context.Context, p SpawnParams, team, paneID string) (string, error) {
-	leadJoinErr := o.Agmsg.Join(ctx, team, "lead", agmsgTypeForDriver("claude"), p.Cwd)
+	leadDriver := p.LeadDriver
+	if leadDriver == "" {
+		leadDriver = defaultLeadDriver
+	}
+	leadJoinErr := o.Agmsg.Join(ctx, team, leadIdentity, agmsgTypeForDriver(leadDriver), p.Cwd)
 	leadJoinNote := "ok"
 	if leadJoinErr != nil {
 		leadJoinNote = fmt.Sprintf("error=%v", leadJoinErr)
@@ -616,12 +710,19 @@ func needsPromptFile(prompt string) bool {
 // file path -- a later spawn's role prompt silently overwriting an earlier
 // seat's.
 func (o *Org) promptFilePath(orgID, seatID string) (string, error) {
-	stateDir, err := filepath.Abs(filepath.Dir(o.Manifest.Path()))
+	stateDir, err := absPath(filepath.Dir(o.Manifest.Path()))
 	if err != nil {
 		return "", fmt.Errorf("resolve state dir for prompt file: %w", err)
 	}
 	return filepath.Join(stateDir, "prompts", fmt.Sprintf("%s_%s.md", orgID, seatID)), nil
 }
+
+// absPath is filepath.Abs by default; tests reassign it to inject a
+// resolution failure (mirroring driver.go's lookPath seam) so
+// promptFilePath's error path -- otherwise only reachable via a broken
+// process cwd -- is deterministically testable (AC-10b: dryRunSpawn must
+// propagate this failure instead of silently swallowing it).
+var absPath = filepath.Abs
 
 // writePromptFile writes content to path with 0644 permissions, creating
 // any missing parent directories first. It always overwrites an existing
@@ -683,11 +784,26 @@ func (o *Org) dryRunSpawn(p SpawnParams) SpawnResult {
 	// simulate the same prompt-file-vs-inline decision, without ever writing
 	// the file or calling Herdr, so the trail a dry-run produces matches what
 	// a real spawn's agent_started step Details would say.
+	//
+	// AC-10b (tech-debt: docs/tech-debt/README.md, "dryRunSpawn silently
+	// swallows RenderRolePrompt's and promptFilePath's errors"): both errors
+	// used to be discarded via `err == nil && ok` / `perr == nil` guards, so
+	// a dry run could report SpawnOutcomeSpawned for a spawn the real path
+	// would fail at "agent_start"/"prompt_file". Both are now propagated as
+	// a failed result the same way failStep would in the real path -- paneID
+	// is "" since a dry run never creates a real pane (compensatePane then
+	// records "no pane to compensate", matching dry-run's zero-side-effect
+	// contract), and DryRun: p.DryRun on the resulting spawn_failed event
+	// (see failStepWithNote) keeps it excluded from real-seat accounting.
 	agentStartedDetails := "agent_started"
 	initialPrompt := p.Prompt
-	if rendered, ok, err := RenderRolePrompt(p.Role, RolePromptVars{
+	rendered, ok, err := RenderRolePrompt(p.Role, RolePromptVars{
 		OrgID: p.OrgID, SeatID: p.SeatID, Team: team, Role: p.Role, Scope: p.Scope,
-	}); err == nil && ok {
+	})
+	if err != nil {
+		return o.failStep(p, "agent_start", err, "")
+	}
+	if ok {
 		if p.Prompt != "" {
 			initialPrompt = rendered + "\n\n" + p.Prompt
 		} else {
@@ -695,9 +811,11 @@ func (o *Org) dryRunSpawn(p SpawnParams) SpawnResult {
 		}
 	}
 	if initialPrompt != "" && needsPromptFile(initialPrompt) {
-		if promptPath, perr := o.promptFilePath(p.OrgID, p.SeatID); perr == nil {
-			agentStartedDetails = fmt.Sprintf("agent_started prompt_file=%s", promptPath)
+		promptPath, perr := o.promptFilePath(p.OrgID, p.SeatID)
+		if perr != nil {
+			return o.failStep(p, "prompt_file", perr, "")
 		}
+		agentStartedDetails = fmt.Sprintf("agent_started prompt_file=%s", promptPath)
 	}
 
 	step = base
@@ -784,11 +902,24 @@ func (o *Org) failStep(p SpawnParams, step string, cause error, paneID string) S
 }
 
 // failStepWithNote is failStep plus an extra free-text note appended to
-// Details. Two callers: the agmsg_announce failure path (carrying the
-// ensureLeadJoined outcome forward — a missing "lead" roster entry is the
-// most likely root cause of a Send rejection) and the agent_start failure
-// path (carrying `agent_start_retries=N` so exhausted pane-busy retries stay
-// auditable).
+// Details. Two note-carrying callers: the agmsg_announce failure path
+// (carrying the ensureLeadJoined outcome and the agmsg_announce Leave
+// compensation forward — a missing "lead" roster entry is the most likely
+// root cause of a Send rejection) and the agent_start failure path
+// (carrying `agent_start_retries=N` so exhausted pane-busy retries stay
+// auditable). failStep (no note) additionally covers dryRunSpawn's
+// RenderRolePrompt/promptFilePath error paths (AC-10b) -- paneID is always
+// "" there since a dry run never creates a real pane, so compensatePane
+// records "no pane to compensate" for those calls, matching dry-run's
+// zero-side-effect contract.
+//
+// DryRun: p.DryRun on the appended event mirrors p.DryRun exactly: it is
+// always false for every real-Spawn caller (failStep/failStepWithNote are
+// only reachable from the non-dry-run branch of Spawn itself, after the
+// `if p.DryRun { ... }` early return) and true for dryRunSpawn's callers --
+// so a dry-run failure is correctly excluded from ActiveSeatCount/roster
+// like every other dry-run event, instead of fabricating a real seat's
+// spawn_failed state.
 func (o *Org) failStepWithNote(p SpawnParams, step string, cause error, paneID, note string) SpawnResult {
 	compensation := compensatePane(o.Herdr, paneID)
 	details := fmt.Sprintf("step=%s error=%v compensation=%s", step, cause, compensation)
@@ -798,9 +929,26 @@ func (o *Org) failStepWithNote(p SpawnParams, step string, cause error, paneID, 
 	_ = o.appendEvent(ManifestEvent{
 		TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnFailed,
 		Role: p.Role, Driver: p.Driver, Model: p.Model, Worktree: p.Cwd,
-		PaneID: paneID, Details: details,
+		PaneID: paneID, DryRun: p.DryRun, Details: details,
 	})
 	return SpawnResult{Outcome: SpawnOutcomeFailed, Err: fmt.Errorf("org: spawn step %s failed: %w", step, cause)}
+}
+
+// compensateLeave sends a best-effort agmsg Leave for agentID from team,
+// used by the agmsg_announce failure path (AC-6/tech-debt: "spawn の
+// agmsg_announce(HELLO send)失敗パスの補償が...Leave しない"): by the time
+// HELLO Send fails, the seat's own Join has already succeeded, so without
+// this call a failed spawn leaves a stale roster entry behind. Errors are
+// recorded in the returned string, not propagated -- like compensatePane,
+// this is inherently best-effort and must never itself fail the saga.
+func compensateLeave(a AgmsgClient, team, agentID string) string {
+	if team == "" || agentID == "" {
+		return "skipped: no team/agent to leave"
+	}
+	if err := a.Leave(context.Background(), team, agentID); err != nil {
+		return fmt.Sprintf("failed: %v", err)
+	}
+	return "ok"
 }
 
 // compensateStale best-effort-compensates a stale in-flight saga (a prior

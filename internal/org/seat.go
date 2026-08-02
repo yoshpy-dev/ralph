@@ -84,9 +84,15 @@ type SeatStatus struct {
 	Worktree  string
 	PaneID    string
 	AgmsgTeam string
-	Event     string // latest event name that produced this status
-	Active    bool
-	DryRun    bool
-	Details   string
-	TS        string
+	// HerdrAgentName is the persisted herdr agent name from the `spawned`
+	// event's ManifestEvent.HerdrAgentName (see its doc comment). Empty for
+	// seats spawned before this field existed -- callers must fall back to
+	// re-deriving the name via herdrAgentName(OrgID, SeatID) in that case
+	// (see verbs.go's resolvedHerdrAgentName).
+	HerdrAgentName string
+	Event          string // latest event name that produced this status
+	Active         bool
+	DryRun         bool
+	Details        string
+	TS             string
 }

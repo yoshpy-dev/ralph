@@ -135,9 +135,9 @@ func splitCommaList(s string) []string {
 
 func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	var (
-		seatID, role, driverName, model, cwd, prompt, scope string
-		timeoutMS                                           int
-		dryRun                                              bool
+		seatID, role, driverName, model, cwd, prompt, scope, leadDriver string
+		timeoutMS                                                       int
+		dryRun                                                          bool
 	)
 
 	cmd := &cobra.Command{
@@ -163,6 +163,7 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			result := rt.Spawn(org.SpawnParams{
 				OrgID: *orgID, SeatID: seatID, Role: role, Driver: driverName, Model: model,
 				Cwd: cwd, Prompt: prompt, Scope: scope, TimeoutMS: timeoutMS, DryRun: dryRun,
+				LeadDriver: leadDriver,
 			})
 			printSpawnResult(cmd, result)
 			return result.Err
@@ -176,6 +177,7 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	cmd.Flags().StringVar(&cwd, "cwd", "", "working directory for the new seat (required)")
 	cmd.Flags().StringVar(&prompt, "prompt", "", "optional initial prompt passed to the agent")
 	cmd.Flags().StringVar(&scope, "scope", "", "optional scope description (recorded on the spawned event; substituted into --role templates as {{SCOPE}})")
+	cmd.Flags().StringVar(&leadDriver, "lead-driver", "claude", "driver (claude|codex) the org's coordinating lead identity runs as, for the agmsg type registered on ensureLeadJoined")
 	cmd.Flags().IntVar(&timeoutMS, "timeout-ms", 60000, "per-step herdr timeout in milliseconds")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "validate and record without starting a real seat")
 
