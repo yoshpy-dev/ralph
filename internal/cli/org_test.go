@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -717,12 +718,7 @@ func TestOrgStop_ExistingSeat_DespawnsAndRecordsOutcome(t *testing.T) {
 
 // containsLine reports whether any line in lines equals want exactly.
 func containsLine(lines []string, want string) bool {
-	for _, l := range lines {
-		if l == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(lines, want)
 }
 
 func equalStrings(a, b []string) bool {
