@@ -58,3 +58,74 @@ No new deferred work is proposed by this review. Every finding above is a fix wi
 - Fix in this cycle: H-1, H-2, M-1 (stale `watcherTimeout` comment), M-2 (orphaned `Spawn` doc comment).
 - Fix or explicitly accept with a comment: M-3 (`Honored` semantics), M-4 (deadman activity source), M-5 (`--once` goroutine), M-6 (inert stall time term).
 - Follow-ups (batchable, no urgency): all seven LOW findings; L-1/L-2 pair naturally (resolve once, surface `source` in the banner).
+
+---
+
+## Cycle 2 (fix-and-revalidate)
+
+- Date: 2026-08-03
+- Reviewer: `reviewer` subagent (self-review, diff quality only)
+- Scope: delta `git diff e601fdf...HEAD` on `feat/org-runtime-watchdog` (HEAD `19c7630`), code files only — `internal/cli/org.go`, `internal/cli/org_test.go`, `internal/org/{permissions,spawn,watch,watcher}.go` + their tests, plus `docs/tech-debt/README.md`. Delta commits: `79d9f40` (cycle-1 finding fixes), `0ac03b6` (switch/WaitGroup modernization), `19c7630` (cross-review AR-1/AR-2). Diff quality only — no tests run, no static analysis, no spec-compliance or doc-drift judgment.
+
+### Cycle-1 regression status
+
+Every cycle-1 finding was re-checked at the paths the original finding cited.
+
+| Cycle-1 finding | Status | Evidence in current tree |
+| --- | --- | --- |
+| H-1 shared `watch-status.json` | Fixed, no regression | `WatchStatusFileName(orgID)` (`internal/org/watch.go:54-56`) → `watch-status-<org_id>.json`; `RunWatch` uses it at `watch.go:394`. Per-file namespacing subsumes the `SeatSnapshots`/`WatchdogJoined` asymmetry the finding named. |
+| H-2 `Cutoff` ratchet set on a failed `Stop` | Fixed at both sites, no regression | `watch.go:550-560` (`allStopped`) and `watch.go:677-684` (`stopErr == nil`); both now log to `w.stderr`; `conditionFirstTS` (`watch.go:574`) preserves `FirstTS` across retries. |
+| M-1 stale `watcherTimeout` doc | Fixed | `internal/org/watcher.go:267-268` now names `watcherInvokeTimeout, a fixed 60s bound`; `grep -rn watcherTimeout internal/` → no hits. |
+| M-2 orphaned `Spawn` doc comment | Fixed | `checkCapacityAndStart` moved below `Spawn` (`internal/org/spawn.go:776`); the saga doc at `spawn.go:250-259` again terminates at `func (o *Org) Spawn` (`spawn.go:260`). |
+| M-3 `Honored` optimistic | Fixed | `internal/org/watcher.go:318-330` compares `envelope.Model` against `cfg.WatcherModel`; `HonoredFalse` is now reachable and pinned by `watcher_test.go`. |
+| M-4 deadman activity source | **Half-fixed** | Watchdog-event filter + `orgID` filter added (`watch.go:791-802`); the seat-attribution half of the original recommendation is still open — see M2-1 below. |
+| M-5 `--once` goroutine not joined | Fixed, but see M2-2 | `newWatchdogHooks` returns a `*sync.WaitGroup` (`internal/cli/org.go:751`); `RunE` calls `watcherWG.Wait()` (`org.go:705`). |
+| M-6 inert stall time term | Fixed | `latestSeatEventTS` (`watch.go:294-305`) replaces `s.TS` in `isStallByTime`; regression-pinned at `watch_test.go:1096`. |
+| L-1 double state-dir resolve | Fixed | `newOrgRuntimeAt` (`internal/cli/org.go:114`); one `ResolveOrgStateDir` call in `newOrgWatchCmd`. |
+| L-2 `source` return discarded | Deferred, tracked | `docs/tech-debt/README.md:71` item (1). |
+| L-3 banner prints raw flag | Fixed | `ResolveWatchInterval` (`watch.go:352`), banner at `org.go:689-690`. |
+| L-4 `%w` with a nil error | Fixed | `internal/org/watcher.go:302-309` splits unmarshal failure from empty `result`. |
+| L-5 unreachable `Escalated` guard + unbounded growth | Deferred, tracked | `docs/tech-debt/README.md:71` item (3). |
+| L-6 oversized scope-change ALERT | Deferred, tracked | `docs/tech-debt/README.md:71` item (2). |
+| L-7 codex unknown-mode default | Fixed | `internal/org/permissions.go:121-122` `default:` case; pinned by `permissions_test.go:101`. |
+
+No cycle-1 fix regressed, and no cycle-1 deferral is untracked — with the single exception recorded as M2-1.
+
+### Findings
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| MEDIUM | maintainability | The `leadActivityEventCount` tech-debt row was struck through as RESOLVED, but only half of the defect its own text describes was fixed. The row says the function "is not scoped to `org_id` **or to lead-attributable seats** (`ev.SeatID == LeadIdentity`)" and that "**any unrelated seat's own event** — or, in a shared state dir, a different org's event — still counts as 'lead activity'". AR-1 closed the org half; the seat half is unchanged. The closure note nevertheless claims "cross-org filtering **fully closes this row**", so the still-live behavior (a busy seat's own `sent` event in the same org clearing a *different* seat's pending deadman alert, or the org-level total-budget alert's) is now tracked in no register row at all. The row's own impact sentence — "A genuinely unresponsive Lead ... could have its deadman escalation silently cleared by unrelated seat ... manifest growth" — still reads true against the shipped code. | `docs/tech-debt/README.md:70` (strikethrough + "fully closes this row"); `internal/org/watch.go:791-802` filters on `ev.OrgID != orgID` and `reason=watchdog_` only, never on `ev.SeatID`; `checkDeadman` at `watch.go:851`. The cycle-1 recommendation was `ev.OrgID == status.OrgID && (ev.SeatID == LeadIdentity \|\| ev.SeatID == "")`. | Either un-strike the row and narrow its text to the remaining seat-attribution gap (keeping a concrete trigger), or add the `SeatID` filter so the closure claim becomes true. Do not leave a struck-through row describing live behavior — the register's value is that a strikethrough means "nothing here is still true". |
+| MEDIUM | maintainability | The M-5 `--once` fix makes `ralph org watch`'s **long-running** mode hang for up to ~60s after SIGINT. `RunWatch` returns as soon as `ctx` is done, then `watcherWG.Wait()` blocks — but the tracked goroutine runs `RunWatcher(context.Background(), ...)`, so the command's own cancelled context does not reach it; it runs out the full `watcherInvokeTimeout` (60s) plus `watcherWaitDelay`. Before this fix, Ctrl-C exited immediately. The fix's own comment asserts the opposite: "Bounded by RunWatcher's own watcherInvokeTimeout, so this **can never hang the command**". | `internal/cli/org.go:698-705` (comment + `watcherWG.Wait()`); `internal/cli/org.go:766` passes `context.Background()`; `internal/org/watcher.go:74` `watcherInvokeTimeout = 60 * time.Second`; `internal/org/watcher.go:277` `context.WithTimeout(ctx, watcherInvokeTimeout)`. The `--once` help text ("useful for cron/smoke") is the mode the fix targeted; the loop mode is the one that regressed. | Pass `cmd.Context()` (not `context.Background()`) into `RunWatcher` so SIGINT cancels the in-flight judgment, or bound the join (`Wait` on a channel with a short timeout) and print a one-line "waiting for in-flight watcher" notice. Either way, correct the "can never hang the command" clause. |
+| MEDIUM | readability | The AR-2 guard's comment states a mechanism the code does not have. It claims that without the guard an over-budget org with zero active seats "would still send a spurious total-budget ALERT and register an AC-5 pending-alert deadman record **every cycle**". It would not: with zero seats the H-2 `allStopped` loop is vacuously true, so the record is written `Cutoff: true` and the next cycle returns at the `rec.Cutoff` gate — exactly one spurious ALERT, not one per cycle. The consequence the guard actually prevents — the vacuous ratchet permanently disabling total-budget enforcement for any seat spawned into that org later — is what the accompanying test's third phase asserts, and is nowhere in the comment. | `internal/org/watch.go:524-533` (the guard + comment); `watch.go:550-557` (`allStopped := true` over an empty slice); `watch.go:544-546` (`rec.Cutoff` early return); `internal/org/watch_test.go:432-501` — the test's cycle-3 phase ("must not silently disable enforcement once a seat becomes active again") is the real rationale. | Rewrite the comment around the ratchet consequence the test pins, and drop "every cycle". |
+| LOW | readability | `watchStatusFile`'s doc comment names `WatchStatusRelName`, a constant the H-1 fix deleted. `grep -rn WatchStatusRelName` finds this comment and nothing else, which is precisely the grep-ability failure `.claude/rules/architecture.md` ("prefer grep-able names", "make public contracts obvious") is about. | `internal/org/watch.go:195`; the replacing symbol is `WatchStatusFileName(orgID)` at `watch.go:54`. | `// watchStatusFile is the JSON shape persisted to WatchStatusFileName(org_id).` |
+| LOW | readability | Two more doc sites still describe the pre-H-1 fixed file name: the package note ("persists its own heartbeat/dedupe state to `watch-status.json`") and `WatchParams.StatusDir` ("the directory `watch-status.json` and `escalations.jsonl` live in"). A reader looking for `watch-status.json` on disk will not find it. | `internal/org/watch.go:25` and `internal/org/watch.go:132`. | Say `watch-status-<org_id>.json` at both sites, matching `verify-2026-08-02-org-runtime-watchdog.md`'s own wording. |
+| LOW | naming | `leadActivityEventCount` counts *every* non-watchdog event in the org, not lead-attributable activity — its own doc comment admits this ("genuine lead/seat activity"). The name asserts a scope the body does not implement, which is what made the half-closure in M2-1 easy to miss. | `internal/org/watch.go:779-802`; call sites `watch.go:773` and `watch.go:851`. | If the seat filter is not added, rename to `orgActivityEventCount` (and update `watchPendingAlert.ManifestLen`'s "3 lead-activity information sources" doc at `watch.go:160-166`) so the name and the semantics agree. |
+| LOW | readability | `watchConditionRecord`'s doc still says a budget cutoff "is **attempted** and ALERTed at most once per key, ever" — the H-2 fix deliberately made the *attempt* retriable across cycles (only the ALERT stayed once-per-key). The struct comment now contradicts `evaluateTotalBudget`/`evaluateSeatBudget`'s own new doc blocks two hundred lines below. | `internal/org/watch.go:151-153` vs `watch.go:504-519` and `watch.go:650-656`. | "…so a budget cutoff is ALERTed at most once per key, ever, and is retried until one `Stop` pass succeeds (see `evaluateTotalBudget`)." |
+| LOW | typo | `ResolveWatchInterval`'s doc has a garbled em-dash clause: "the banner used to print the raw `--interval-seconds` flag value, which is 0 by default -- the effective interval -- rather than the interval that is actually running". The middle clause appears to be a half-deleted edit; as written the sentence says the flag default *is* the effective interval. | `internal/org/watch.go:344-351` (doc block above `func ResolveWatchInterval` at `watch.go:352`). | Drop `-- the effective interval --`. |
+| LOW | maintainability | AR-2 plus the never-cleared `Active` flag means a later-spawned seat can be cut off **silently**. Sequence: cycle N alerts + cuts (record `Active: true`); all seats end (guard now returns early, record untouched); a new seat spawns; the next cycle cuts it, but `alreadyAlerted` is true so no ALERT is sent. The new test does not cover this ordering (it starts from a cycle that never alerted). | `internal/org/watch.go:524-533` (early return leaves the record as-is), `watch.go:559-565` (`alreadyAlerted` gate). | Either clear `Active` when the guard fires (so a resumed org re-alerts), or state in the guard's comment that a resumed cutoff is intentionally silent because the org-level condition never "recovers". |
+
+### Positive notes (cycle 2)
+
+- The H-2 fix is complete at both cutoff sites, not one — `evaluateTotalBudget` and `evaluateSeatBudget` each got the conditional ratchet, a stderr line, and `conditionFirstTS`. The multi-site half-fix shape that usually shows up in cycle 2 did not occur here.
+- Both AR fixes shipped with regression tests whose doc comments state the *invariant*, not the mechanics (`TestWatch_Deadman_CrossOrgActivity_DoesNotClearPendingAlert`, `TestWatch_TotalBudgetCutoff_NoActiveSeats_NoAlertNoEscalation_ThenCutsNewSeat`), and the latter asserts a positive control (enforcement resumes) rather than only the absence of an alert.
+- `TestNewWatchdogHooks_*` were rewritten to join on the real `sync.WaitGroup` instead of polling a side effect, and the now-unused `waitForCondition` helper was deleted in the same commit — the producer went with the consumer.
+- The three deferred cycle-1 LOWs reached `docs/tech-debt/README.md:71` as one row with a concrete per-item fix shape and trigger.
+- Finding-ID cross-references in code comments were renumbered consistently in `0ac03b6`/`19c7630` (M-3 = Honored, M-4 = deadman, M-5 = `--once`, M-6 = stall) and now match this report's Recommendation section at all 12 sites.
+- `wg.Go` (Go 1.25) is valid against `go.mod`'s `go 1.25.8`; the `switch envelope.Model { case "": … case cfg.WatcherModel: … }` rewrite is behavior-identical to the boolean switch it replaced, including when `cfg.WatcherModel` is empty (first case wins → `HonoredUnknown`).
+- No secrets, debug prints, commented-out code, or `TODO`/`FIXME` markers in the delta. No mirror-managed files (`.claude/`, `templates/base/`, `.agents/`) were touched, so mirror parity is unchanged from cycle 1.
+
+### Tech debt identified (cycle 2)
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| — | — | — | — | — |
+
+No new deferred work. M2-1 is a *correction* to an existing register row (`docs/tech-debt/README.md:70`), not a new row: that row should be reopened and narrowed rather than duplicated.
+
+### Recommendation (cycle 2)
+
+- Merge: **merge with follow-ups** — 0 CRITICAL, 0 HIGH. The two HIGH findings that blocked cycle 1 are fixed and regression-tested, and both cross-review ACTION_REQUIRED items landed.
+- Fix before PR (cheap, and both are correctness-of-record issues): M2-1 (un-strike / narrow the tech-debt row) and M2-2 (SIGINT hang + the comment that denies it).
+- Fix or explicitly accept: M2-3 (AR-2 comment rationale).
+- Follow-ups (batchable): L2-1 … L2-6; L2-1/L2-2/L2-4/L2-5 are all one-line comment corrections in `internal/org/watch.go` and pair naturally into a single pass.
