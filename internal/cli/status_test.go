@@ -90,6 +90,94 @@ func TestStatusCmd_OrgIDFilterShowsOnlyThatOrg(t *testing.T) {
 	}
 }
 
+// seedOrgWithDryRunSeat appends one real active seat ("lead") and one
+// dry-run active seat ("shadow") to the same org_id, directly to the
+// manifest (no herdr/agmsg involved). Used to assert that a dry-run seat
+// shows up as a roster row (IncludeDryRun: true, internal/cli/status.go)
+// while never inflating the active/total aggregates that gate `ralph org
+// spawn`'s max_seats check (C2-1: those aggregates must derive from
+// org.RosterOptions{}, not from counting the dry-run-inclusive rows).
+func seedOrgWithDryRunSeat(t *testing.T, stateDir string) {
+	t.Helper()
+	store := org.NewManifestStoreAtPath(orgManifestPath(stateDir))
+	events := []org.ManifestEvent{
+		{TS: "2026-08-01T00:00:00Z", OrgID: "org-c", SeatID: "lead", Event: org.EventSpawned, Role: "lead", Driver: "claude", Model: "opus", Worktree: "/tmp/org-c-lead"},
+		{TS: "2026-08-01T00:01:00Z", OrgID: "org-c", SeatID: "shadow", Event: org.EventSpawned, Role: "qa", Driver: "codex", Model: "sonnet", Worktree: "/tmp/org-c-shadow", DryRun: true},
+	}
+	for _, ev := range events {
+		if err := store.Append(ev); err != nil {
+			t.Fatalf("seed manifest event: %v", err)
+		}
+	}
+}
+
+// TestStatusCmd_DryRunSeatIsARowButNotCountedInAggregates is the C2-1
+// regression: a dry-run seat must render as a roster row (with its
+// "[dry-run]" marker) but must not move the table's "active N/M" or the
+// --json path's active_count/total_count, since those numbers must match
+// what org.ActiveSeatCount (RosterOptions{}) reports -- the same
+// derivation the max_seats spawn gate uses (internal/org/spawn.go:333,788,
+// internal/org/report.go:201).
+func TestStatusCmd_DryRunSeatIsARowButNotCountedInAggregates(t *testing.T) {
+	dir := t.TempDir()
+	seedOrgWithDryRunSeat(t, dir)
+
+	out, err := runStatusCmd(t, "--state-dir", dir)
+	if err != nil {
+		t.Fatalf("status: %v (output: %s)", err, out)
+	}
+	if !strings.Contains(out, "active 1/1") {
+		t.Errorf("expected the dry-run seat excluded from the aggregate (want \"active 1/1\"), got:\n%s", out)
+	}
+	if strings.Contains(out, "active 2/2") {
+		t.Errorf("dry-run seat leaked into the aggregate count:\n%s", out)
+	}
+	if !strings.Contains(out, "shadow") || !strings.Contains(out, "[dry-run]") {
+		t.Errorf("expected the dry-run seat to still render as a row with its [dry-run] marker:\n%s", out)
+	}
+
+	jsonOut, err := runStatusCmd(t, "--state-dir", dir, "--json")
+	if err != nil {
+		t.Fatalf("status --json: %v (output: %s)", err, jsonOut)
+	}
+	var payload struct {
+		Orgs []struct {
+			OrgID       string `json:"org_id"`
+			ActiveCount int    `json:"active_count"`
+			TotalCount  int    `json:"total_count"`
+			Seats       []struct {
+				SeatID string `json:"seat_id"`
+				DryRun bool   `json:"dry_run"`
+			} `json:"seats"`
+		} `json:"orgs"`
+	}
+	if err := json.Unmarshal([]byte(jsonOut), &payload); err != nil {
+		t.Fatalf("json.Unmarshal: %v\noutput:\n%s", err, jsonOut)
+	}
+	if len(payload.Orgs) != 1 {
+		t.Fatalf("orgs = %d, want 1\noutput:\n%s", len(payload.Orgs), jsonOut)
+	}
+	orgC := payload.Orgs[0]
+	if orgC.ActiveCount != 1 {
+		t.Errorf("org-c active_count = %d, want 1 (dry-run seat must not count)", orgC.ActiveCount)
+	}
+	if orgC.TotalCount != 1 {
+		t.Errorf("org-c total_count = %d, want 1 (dry-run seat must not count)", orgC.TotalCount)
+	}
+	if len(orgC.Seats) != 2 {
+		t.Fatalf("org-c seats = %d, want 2 (both real and dry-run rows must still render)", len(orgC.Seats))
+	}
+	var sawDryRun bool
+	for _, s := range orgC.Seats {
+		if s.SeatID == "shadow" && s.DryRun {
+			sawDryRun = true
+		}
+	}
+	if !sawDryRun {
+		t.Errorf("expected the shadow seat to render with dry_run=true, got: %+v", orgC.Seats)
+	}
+}
+
 // TestStatusCmd_SeesSeatWrittenByRealOrgSpawn pins live-write/status-read
 // agreement end to end: a real `ralph org spawn --dry-run` (the write path,
 // newOrgRuntimeAt -> orgManifestPath) followed by a real top-level `ralph

@@ -60,16 +60,16 @@ func runStatus(cmd *cobra.Command, stateDir, filterOrgID string, jsonOut bool) e
 		return fmt.Errorf("status: read manifest: %w", err)
 	}
 
-	// IncludeDryRun: true -- unlike `ralph org status` (which gates dry-run
-	// visibility behind its own --all flag, see newOrgStatusCmd), this
-	// top-level summary command has no --all flag and is documented as
-	// showing "every org found in the manifest": printStatusTableAllOrgs/
-	// buildStatusOrgJSON already render a "[dry-run]" marker per seat, which
-	// would otherwise be unreachable dead code. Discovered alongside the
-	// AR-1 state-dir double-join fix (docs/reports/cross-review-triage-
-	// org-runtime-retire-loop.md) while confirming the live repro
-	// (`ralph org spawn --dry-run` then `ralph status`) actually surfaces
-	// the spawned seat.
+	// IncludeDryRun: true -- this top-level summary command has no --all
+	// flag (unlike `ralph org status`, which gates dry-run visibility
+	// behind one, see newOrgStatusCmd) and is documented as showing "every
+	// org found in the manifest", so it always includes dry-run seats as
+	// rows. As a side benefit, this also makes the "[dry-run]" marker
+	// printStatusTableAllOrgs/buildStatusOrgJSON already render per seat
+	// reachable. This flip only widens the per-row listing -- the
+	// aggregate active/total counts below are computed separately from a
+	// real-seats-only roster (see buildRealSeatCounts) so a dry-run seat
+	// showing up as a row never inflates the numbers that gate spawning.
 	seats := org.Roster(rr.Events, org.RosterOptions{IncludeDryRun: true})
 	if filterOrgID != "" {
 		filtered := make([]org.SeatStatus, 0, len(seats))
@@ -82,16 +82,51 @@ func runStatus(cmd *cobra.Command, stateDir, filterOrgID string, jsonOut bool) e
 	}
 
 	groups := groupSeatsByOrg(seats)
+	realCounts := buildRealSeatCounts(rr.Events, groups)
 
 	if len(groups) == 0 {
 		return printStatusEmpty(cmd, stateDir, filterOrgID, jsonOut, rr.CorruptLines)
 	}
 
 	if jsonOut {
-		return printStatusJSONAllOrgs(cmd, stateDir, filterOrgID, groups, rr.CorruptLines)
+		return printStatusJSONAllOrgs(cmd, stateDir, filterOrgID, groups, realCounts, rr.CorruptLines)
 	}
-	printStatusTableAllOrgs(cmd, stateDir, groups, rr.CorruptLines)
+	printStatusTableAllOrgs(cmd, stateDir, groups, realCounts, rr.CorruptLines)
 	return nil
+}
+
+// realSeatCount holds one org_id's active/total seat counts derived from
+// the real (non-dry-run) roster only. This is the number that actually
+// gates `ralph org spawn`'s max_seats check (org.ActiveSeatCount /
+// RosterOptions{}, the same convention internal/org/report.go:201 and
+// internal/org/spawn.go:333,788 use) -- distinct from the dry-run-inclusive
+// rows this command renders per seat.
+type realSeatCount struct {
+	Active int
+	Total  int
+}
+
+// buildRealSeatCounts derives the real (non-dry-run) active/total seat
+// counts for every org_id present in groups. It re-derives the roster from
+// events with RosterOptions{} (IncludeDryRun defaults to false), so a
+// dry-run seat contributes a display row (via the IncludeDryRun: true
+// roster built in runStatus) but never moves either count here. groups is
+// only consulted to enumerate which org_ids need a count entry.
+func buildRealSeatCounts(events []org.ManifestEvent, groups []orgGroup) map[string]realSeatCount {
+	real := org.Roster(events, org.RosterOptions{})
+	totals := make(map[string]int, len(groups))
+	actives := make(map[string]int, len(groups))
+	for _, s := range real {
+		totals[s.OrgID]++
+		if s.Active {
+			actives[s.OrgID]++
+		}
+	}
+	counts := make(map[string]realSeatCount, len(groups))
+	for _, g := range groups {
+		counts[g.OrgID] = realSeatCount{Active: actives[g.OrgID], Total: totals[g.OrgID]}
+	}
+	return counts
 }
 
 // groupSeatsByOrg splits Roster's flat, OrgID-sorted seat slice into
@@ -188,6 +223,14 @@ type statusWatchJSON struct {
 	PendingAlerts int    `json:"pending_alerts"`
 }
 
+// statusOrgJSON is one org's rendered roster plus its aggregate counts.
+// Seats can include dry-run rows (see runStatus's IncludeDryRun: true
+// roster); ActiveCount and TotalCount deliberately do not derive from
+// len(Seats) or count Seats' Active field -- they are real-seat-only
+// (RosterOptions{}), matching org.ActiveSeatCount's own convention
+// (internal/org/report.go:201, internal/org/spawn.go:333,788) so a
+// dry-run seat appearing in Seats never changes what these two numbers
+// report.
 type statusOrgJSON struct {
 	OrgID       string           `json:"org_id"`
 	Seats       []statusSeatJSON `json:"seats"`
@@ -210,10 +253,10 @@ type statusJSON struct {
 	CorruptLines int             `json:"corrupt_lines,omitempty"`
 }
 
-func printStatusJSONAllOrgs(cmd *cobra.Command, stateDir, filterOrgID string, groups []orgGroup, corruptLines int) error {
+func printStatusJSONAllOrgs(cmd *cobra.Command, stateDir, filterOrgID string, groups []orgGroup, realCounts map[string]realSeatCount, corruptLines int) error {
 	orgsJSON := make([]statusOrgJSON, 0, len(groups))
 	for _, g := range groups {
-		orgsJSON = append(orgsJSON, buildStatusOrgJSON(stateDir, g))
+		orgsJSON = append(orgsJSON, buildStatusOrgJSON(stateDir, g, realCounts[g.OrgID]))
 	}
 	payload := statusJSON{StateDir: stateDir, OrgID: filterOrgID, Orgs: orgsJSON, CorruptLines: corruptLines}
 	enc := json.NewEncoder(cmd.OutOrStdout())
@@ -221,20 +264,21 @@ func printStatusJSONAllOrgs(cmd *cobra.Command, stateDir, filterOrgID string, gr
 	return enc.Encode(payload)
 }
 
-func buildStatusOrgJSON(stateDir string, g orgGroup) statusOrgJSON {
+// buildStatusOrgJSON renders one org's seats (dry-run-inclusive, per g.Seats)
+// alongside the org's real-seat-only active/total counts (realCount --
+// see buildRealSeatCounts). ActiveCount/TotalCount deliberately do not
+// count g.Seats directly: that slice can include dry-run rows, and the
+// aggregate must match the number that gates `ralph org spawn`.
+func buildStatusOrgJSON(stateDir string, g orgGroup, realCount realSeatCount) statusOrgJSON {
 	seatsJSON := make([]statusSeatJSON, len(g.Seats))
-	active := 0
 	for i, s := range g.Seats {
-		if s.Active {
-			active++
-		}
 		seatsJSON[i] = statusSeatJSON{
 			SeatID: s.SeatID, Role: s.Role, Driver: s.Driver, Model: s.Model,
 			Worktree: s.Worktree, PaneID: s.PaneID, AgmsgTeam: s.AgmsgTeam, Event: s.Event,
 			Active: s.Active, DryRun: s.DryRun, Details: s.Details, TS: s.TS,
 		}
 	}
-	result := statusOrgJSON{OrgID: g.OrgID, Seats: seatsJSON, ActiveCount: active, TotalCount: len(g.Seats)}
+	result := statusOrgJSON{OrgID: g.OrgID, Seats: seatsJSON, ActiveCount: realCount.Active, TotalCount: realCount.Total}
 	if hb, ok := readOrgWatchHeartbeat(stateDir, g.OrgID); ok {
 		result.Watch = &statusWatchJSON{
 			LastCycleTS:   hb.LastCycleTS,
@@ -245,7 +289,7 @@ func buildStatusOrgJSON(stateDir string, g orgGroup) statusOrgJSON {
 	return result
 }
 
-func printStatusTableAllOrgs(cmd *cobra.Command, stateDir string, groups []orgGroup, corruptLines int) {
+func printStatusTableAllOrgs(cmd *cobra.Command, stateDir string, groups []orgGroup, realCounts map[string]realSeatCount, corruptLines int) {
 	out := cmd.OutOrStdout()
 
 	// Deterministic org order for readability, matching Roster's own
@@ -258,13 +302,12 @@ func printStatusTableAllOrgs(cmd *cobra.Command, stateDir string, groups []orgGr
 		if i > 0 {
 			_, _ = fmt.Fprintln(out)
 		}
-		active := 0
-		for _, s := range g.Seats {
-			if s.Active {
-				active++
-			}
-		}
-		_, _ = fmt.Fprintf(out, "org_id: %s (active %d/%d)\n", g.OrgID, active, len(g.Seats))
+		// active/total here are real-seat-only (realCounts, from
+		// buildRealSeatCounts) -- not a count over g.Seats, which can
+		// include dry-run rows. See statusOrgJSON's doc comment for the
+		// same convention on the --json path.
+		rc := realCounts[g.OrgID]
+		_, _ = fmt.Fprintf(out, "org_id: %s (active %d/%d)\n", g.OrgID, rc.Active, rc.Total)
 		_, _ = fmt.Fprintln(out, "  SEAT_ID\tROLE\tDRIVER\tMODEL\tSTATE\tPANE_ID")
 		for _, s := range g.Seats {
 			state := s.Event
