@@ -21,3 +21,21 @@
 ## Decision
 
 Cycle 1/2(cap 未到達)。ユーザーの継続自律指示に基づき Fix → フルパイプライン再実行(cycle 2)を選択。
+
+---
+
+# Cycle 2 (2026-08-03)
+
+- Cycle: 2/2 (cap 到達)
+- HEAD: d6ddf61
+- Total reviewer findings: 2
+- After triage: ACTION_REQUIRED=2, WORTH_CONSIDERING=0, DISMISSED=0
+
+| # | Reviewer finding | Triage rationale |
+|---|---|---|
+| 3 | [P1] デッドマンの第 3 活動源(agmsg history)が lead 発信以外の全トラフィック(watchdog 自身の後続 ALERT 含む)で pending を解消し、エスカレーションを取り逃がす | 真正かつ最重要(デッドマンは人間への最後の安全網)。manifest 側で 2 回修正した同型バグの history 版。修正は history 行を lead 発信のみにフィルタするだけで安価。 |
+| 4 | [P2] total-budget 遮断直後の同一サイクルで stale スナップショットの座席を再評価し、遮断済み座席へ誤 ALERT/deadman 記録 | 真正(誤報ノイズ)。遮断後は当該サイクルの後続評価から除外する早期 continue で安価に修正可能。 |
+
+## Decision(cap-reached Option 1)
+
+安全網(デッドマン)の取り逃がしという P1 の性質から、ユーザーの継続自律指示のもと **cap を一時的に 3 に引き上げて修正**を選択(`RALPH_STANDARD_MAX_PIPELINE_CYCLES=3` 相当。post-implementation-pipeline.md の cap-reached Option 1)。修正後にフルパイプライン cycle 3 を実施する。
