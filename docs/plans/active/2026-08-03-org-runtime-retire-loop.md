@@ -149,9 +149,9 @@ org runtime PR⑤(最終段): Ralph Loop 自律実行系(orchestrator / pipeline
 - [ ] Plan reviewed
 - [x] Branch created (refactor/org-runtime-retire-loop)
 - [x] Implementation started
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Review artifact created
+- [x] Verification artifact created
+- [x] Test artifact created
 - [ ] PR created
 
 ## Readiness checklist
