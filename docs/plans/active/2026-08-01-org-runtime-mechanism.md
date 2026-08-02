@@ -126,6 +126,7 @@ org runtime の機構層(PR①)を実装する: `ralph org` 動詞セット(spaw
 - doctor は新設の `info` ステータス(exit code 非影響)で org 依存を報告。`--probe-models` の codex 失敗は advisory 文言付き warn。
 - errcheck 対応(`_, _ = fmt.Fprint*` / `defer func() { _ = f.Close() }()`)と modernize lint(SplitSeq / slices.Contains / range int)は既存流儀に追従。
 - templates/base ミラー(AGENTS.md / ralph-config.sh)は check-sync 検出に基づき同期済み。
+- **Cycle 2 fix commits(cross-review ACTION_REQUIRED 対応)**: `4dcfc03`(fix: return idempotent spawn before envelope validation)で冪等チェックを `ValidateSpawn` より前に移動(cross-review 所見1: at-cap 境界での冪等リトライが `rejected` になる正当性バグを修正)。続く `e6a162c`(fix: reject stateless envelope violations before stale compensation)で `ValidateSpawn` を `ValidateSpawnEnvelope`(ステートレス: driver/model プール所属・role 制約)と `ValidateSpawnCapacity`(`activeSeats` 依存)に分割し、stale-in-flight 補償の前後に振り分け直した(cycle-2 self-review MEDIUM: エンベロープ無効な respawn が stale seat に対して補償を先に実行してしまう副作用バグを修正)+ 関連コメント一式のスイープ。**最終的な spawn 分岐順序**: 冪等早期リターン → ステートレス・エンベロープ検証(`ValidateSpawnEnvelope`)→ stale-in-flight 補償(`compensateStale`)→ 座席上限検証(`ValidateSpawnCapacity`)→ saga 副作用。dry-run 経路は従来どおり合成済み `ValidateSpawn`(Envelope+Capacity)を変更なく使用。詳細は `docs/reports/verify-2026-08-01-org-runtime-mechanism.md` Cycle 2 セクションおよび `docs/reports/cross-review-triage-org-runtime-mechanism.md` の ACTION_REQUIRED #1 を参照。
 
 ## Progress checklist
 

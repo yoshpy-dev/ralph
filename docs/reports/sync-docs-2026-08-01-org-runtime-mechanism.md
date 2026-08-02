@@ -150,3 +150,105 @@ Documentation is in sync for PR①'s scope. No blocking drift. The full
 architecture-doc overhaul (AGENTS.md/CLAUDE.md/README/.claude/rules rewrite
 for the org-runtime replacement of the pipeline flow) is correctly deferred
 to PR⑤ per the plan's own scope and non-goals. Proceed to `/cross-review`.
+
+---
+
+## Cycle 2 (fix-and-revalidate re-run)
+
+- Date: 2026-08-02
+- Agent: `doc-maintainer` subagent (Claude Code, `/sync-docs`), pipeline cycle 2 of 2
+- Scope: the delta since the cycle-1 reviewed state — two fix commits landed in response to the cross-review ACTION_REQUIRED finding (`docs/reports/cross-review-triage-org-runtime-mechanism.md` #1): `4dcfc03` (fix: return idempotent spawn before envelope validation) and `e6a162c` (fix: reject stateless envelope violations before stale compensation), plus their cycle-2 self-review/verify/test report addenda.
+- Worktree: `docs/spec-org-runtime`, HEAD `9f68587`
+
+### Drift check results
+
+#### docs/plans/active/2026-08-01-org-runtime-mechanism.md — Implementation notes section (stale)
+
+**Drift detected, flagged by the cycle-2 verify report. Resolved.**
+
+The "Implementation notes (deviations from initial outline)" section did not
+mention either cycle-2 fix commit or the resulting spawn branch ordering.
+Per `.claude/rules/planning.md` ("record meaningful deviations from the
+original plan instead of silently drifting"), added one entry naming both
+commits, summarizing what each fixed (cross-review ACTION_REQUIRED #1 —
+at-cap idempotent retry incorrectly rejected; cycle-2 self-review MEDIUM —
+envelope-invalid respawn triggered destructive compensation before
+rejection), and stating the final 4-step ordering confirmed by the verify
+report's Cycle 2 section: idempotent early return → stateless envelope
+validation (`ValidateSpawnEnvelope`) → stale-in-flight compensation
+(`compensateStale`) → capacity validation (`ValidateSpawnCapacity`) → saga
+side effects. Cross-referenced the verify report Cycle 2 section and the
+cross-review triage report for evidence pointers rather than re-deriving
+line numbers here.
+
+#### docs/tech-debt/README.md — TOCTOU and verb-coverage-gap rows
+
+**No drift. Confirmed still accurate.**
+
+Re-checked both rows against the cycle-2 delta (`git diff --stat
+9bfe07e...HEAD -- internal/ scripts/ templates/` — only
+`internal/org/{driver/driver,driver/herdr,driver/probe,envelope,manifest,spawn,spawn_test}.go`
+touched):
+
+- `max_seats` read-then-append race row (line 51): the two fix commits
+  reorder *which* validations run before/after stale-in-flight compensation;
+  neither adds locking around the `Read → ActiveSeatCount → validate →
+  appendEvent` window. The row's description and its deferred-to-PR③
+  resolution plan remain accurate — left unchanged.
+- `Verbs.Send`/`Wait`/`Read` 0% coverage row (line 53): neither fix commit
+  touches `internal/org/verbs.go` or `internal/cli/org.go` (confirmed by the
+  `git diff --stat` above — only `spawn.go`/`spawn_test.go` and the
+  driver/envelope/manifest files changed). The coverage gap is unaffected —
+  left unchanged.
+
+#### Consistency sweep — old validation ordering references
+
+**No drift found.**
+
+`grep -rn "ValidateSpawn\|idempotent.*envelope\|envelope.*idempotent" docs/
+AGENTS.md CLAUDE.md .claude/rules/` — the only hits outside the
+already-current verify/self-review/test reports are:
+
+- `docs/reports/cross-review-triage-org-runtime-mechanism.md` — describes the
+  *pre-fix* bug as the original reviewer finding (ACTION_REQUIRED #1). This
+  is a point-in-time triage artifact (same class as verify/self-review/test
+  reports before their own Cycle 2 addenda), not a description of current
+  behavior; left unchanged, consistent with how cycle-1 triage findings are
+  never rewritten after the fix lands.
+- `docs/specs/2026-08-01-org-runtime.md` FR-1 — describes the verb-level
+  contract ("herdr pane 作成 → worktree 用意 → agmsg チーム参加 → 役割プロン
+  プト投入 → エンベロープ検証", spawn's external step sequence), not the
+  internal idempotent/capacity split. The cycle-2 verify report already
+  confirmed neither fix commit touches spawn's external contract (CLI flags,
+  manifest field names, exit codes) — only internal validation ordering — so
+  no spec update is implied. No other doc references the old ordering.
+
+#### AGENTS.md, CLAUDE.md, README.md, .claude/rules/
+
+**No drift.** Same conclusion as cycle 1 — this delta is confined to
+`internal/org/` internals; no behavior, contract, or workflow described by
+these files changed.
+
+### Files changed (Cycle 2)
+
+| File | Change |
+|------|--------|
+| `docs/plans/active/2026-08-01-org-runtime-mechanism.md` | Added cycle-2 fix commits (`4dcfc03`, `e6a162c`) and the final 4-step spawn ordering to "Implementation notes (deviations from initial outline)" |
+| `docs/reports/sync-docs-2026-08-01-org-runtime-mechanism.md` | This Cycle 2 section |
+
+### Files with no change needed (Cycle 2)
+
+| File | Reason |
+|------|--------|
+| `docs/tech-debt/README.md` | TOCTOU row (max_seats race) and verb-coverage-gap row (send/wait/read) both re-checked against the cycle-2 diff and remain accurate — neither fix commit touches the code paths they describe |
+| `docs/reports/cross-review-triage-org-runtime-mechanism.md` | Point-in-time triage artifact describing the pre-fix finding; not rewritten after the fix lands, same convention as other pipeline reports |
+| `docs/specs/2026-08-01-org-runtime.md` | FR-1's external verb contract is unchanged by this delta; internal validation-ordering refactor doesn't rise to a spec-level change |
+| `AGENTS.md`, `CLAUDE.md`, `README.md`, `.claude/rules/*.md` | No references to spawn's internal validation ordering; no workflow/contract changed |
+
+### Verdict — Cycle 2
+
+Documentation is in sync for the cycle-2 delta. One drift item closed (plan's
+Implementation notes section now records both fix commits and the final
+spawn ordering, per the cycle-2 verify report's flag). Tech-debt rows and
+consistency sweep confirmed clean — no other doc references the superseded
+validation ordering. Proceed to `/cross-review`.
