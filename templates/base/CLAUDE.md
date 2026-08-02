@@ -9,7 +9,7 @@ guidance lives in `.codex/AGENTS.override.md` and `.codex/README.md`.
 ## Default behavior
 
 - All skills (`/spec`, `/plan`, `/work`, `/loop`, `/self-review`, `/verify`,
-  `/test`, `/sync-docs`, `/cross-review`, `/pr`, `/audit-harness`) are
+  `/test`, `/sync-docs`, `/cross-review`, `/pr`, `/audit-harness`, `/org`) are
   auto-invoked. The scaffold ships no manual-trigger skill.
 - Use `/spec` when the request is too vague for `/plan`. `/spec` refines
   abstract ideas through decision-tree questioning with recommended answers,

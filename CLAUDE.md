@@ -6,7 +6,7 @@ Use this file only for Claude-specific guidance that must be always-on.
 
 ## Default behavior
 
-- Manual-trigger skills (`disable-model-invocation: true`): `/release` only (cut a Homebrew release tag for the `ralph` CLI — repo-maintainer only, not included in `ralph init`). All others (spec, plan, work, loop, self-review, verify, test, cross-review, pr, sync-docs, audit-harness) are auto-invoked. `anti-bottleneck` is a model-internal support skill (`user-invocable: false`) and belongs to neither list.
+- Manual-trigger skills (`disable-model-invocation: true`): `/release` only (cut a Homebrew release tag for the `ralph` CLI — repo-maintainer only, not included in `ralph init`). All others (spec, plan, work, loop, self-review, verify, test, cross-review, pr, sync-docs, audit-harness, org) are auto-invoked. `anti-bottleneck` is a model-internal support skill (`user-invocable: false`) and belongs to neither list.
 - Use `/spec` when the request is too vague for `/plan`. `/spec` refines abstract ideas through decision-tree questioning with recommended answers, codebase exploration, web research, and interactive clarification. Issue-only specs use a temporary clean-base worktree and cleanup; saved specs either create a docs/spec PR or hand off to `/plan` in the same task worktree.
 - Use `/plan` before risky, ambiguous, or multi-file work. `/plan` ensures a clean-base task worktree before writing plan artifacts.
 - `/plan` asks at minimum one decision — 標準フロー (/work) or Ralph Loop (/loop) — and, when critical forks are detected during drafting (two+ approaches with materially different risk/cost that cannot be resolved from repo context), asks targeted AskUserQuestion follow-ups before finalizing.
