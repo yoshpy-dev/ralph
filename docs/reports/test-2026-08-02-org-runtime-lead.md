@@ -74,3 +74,66 @@ No `--- FAIL`, no `DATA RACE` in the `-race` run. All 5 packages reported `PASS`
 - AC-12's test half is now confirmed green, completing the AC (static half already green per `docs/reports/verify-2026-08-02-org-runtime-lead.md`).
 - AC-11 / AC-11b remain live-evidence-only per plan design — not re-verifiable by an automated behavioral test suite in this pass; unchanged from the verify report's own framing.
 - Proceed to `/sync-docs` — tests pass, no blocking failures.
+
+## Cycle 2
+
+- Date: 2026-08-02
+- Tester: `tester` subagent (`/test`, pipeline cycle 2)
+- Trigger: cross-review AR#1 fix (spawn ordering) + cycle-2 self-review M1/M2 fixes, landed as commits `de4de50` (fix: return idempotent spawn before autonomous scope gate) and `69be944` (fix: align dry-run gate ordering and recheck idempotency under phase-2 lock). Both commits add net-new regression tests to `internal/org/spawn_test.go` (no other test files touched in this delta).
+- Scope: same as cycle 1 — `./scripts/run-test.sh` (changed-language scope; escalates to golang full-package fallback since `scripts/ralph-config.sh` is unclassified by language detection) + targeted `go test ./internal/org/... ./internal/cli/... ./internal/config/... -race -count=1`.
+- Evidence: `docs/evidence/test-2026-08-02-org-runtime-lead-cycle2.log` (`run-test.sh` full shell+go output), `docs/evidence/test-2026-08-02-org-runtime-lead-cycle2-race.log` (targeted `-race -count=1 -v` run), `docs/evidence/verify-2026-08-02-132746.log` (`run-test.sh`'s own auto-log)
+
+### New regression tests (mapped to AR#1 / M1 / M2)
+
+| Test | File | Maps to | What it locks down |
+| --- | --- | --- | --- |
+| `TestOrgSpawn_Idempotent_NoScopeRetry_ReturnsExistingSeat` | `internal/org/spawn_test.go:450` | cross-review AR#1 | A retried spawn for an already-`spawned` seat returns the existing seat idempotently even when called without `--scope`, instead of being rejected by the autonomous-mode scope gate — proves the idempotency check now runs *before* the scope gate. |
+| `TestOrgSpawn_DryRun_And_Real_AgreeOnRejectionCause_EnvelopeBeforeScopeGate` | `internal/org/spawn_test.go:745` | cycle-2 self-review M1 | Dry-run and real spawn paths agree on rejection cause when both the envelope check and the scope gate could fire — envelope validation is asserted to short-circuit ahead of the scope gate in both paths, so dry-run planning doesn't diverge from what a real spawn would reject on. |
+| `TestOrgSpawn_StaleInFlight_RacerCompletesDuringCompensationWindow_Phase2ReturnsIdempotent` | `internal/org/spawn_test.go:681` | cycle-2 self-review M2 | If a racing spawn attempt completes (writes its `spawned` event) during another caller's phase-2 compensation window for a stale in-flight seat, the second caller's phase-2 re-check under the manifest lock now correctly observes the completed seat and returns idempotent, instead of proceeding to double-spawn or clobbering the completed seat's state. |
+
+All three: confirmed present via `grep -n` against `internal/org/spawn_test.go` before running tests, and confirmed passing individually via `--- PASS:` lines in `docs/evidence/test-2026-08-02-org-runtime-lead-cycle2-race.log:150,161-164`.
+
+### Test execution
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `./scripts/run-test.sh` — 37 shell suites (`tests/test-*.sh`) | 978 assertions (aggregated `PASS`/`FAIL:` lines) | 978 | 0 | 0 | ~ (see log) |
+| `./scripts/run-test.sh` — golang verifier (`go test ./...`, all 13 test-bearing packages) | 13 packages | 13 ok | 0 | 0 (2 known pre-existing scaffold skips, unrelated) | see log |
+| `go test ./internal/org/... ./internal/cli/... ./internal/config/... -race -count=1 -v` | 459 `=== RUN` entries (incl. subtests) | 348 top-level `--- PASS` | 0 | 0 | `internal/org` 2.351s, `internal/org/driver` 1.880s, `internal/org/protocol` 2.117s, `internal/cli` 20.396s, `internal/config` 3.091s |
+
+No `--- FAIL`, no `DATA RACE` in the `-race` run. All 5 packages reported `PASS` / `ok`. Shell-suite assertion count (978) and package count (13 ok / 0 FAIL) are unchanged from cycle 1; the `-race` run's top-level test count rose from 345 to 348 (the 3 new regression tests), consistent with the delta.
+
+### Coverage delta
+
+- `internal/org`: 90.3% combined-package statement coverage this cycle (`go tool cover -func` on a fresh `-coverprofile` covering `internal/org`, `internal/org/driver`, `internal/org/protocol` together) vs. 90.0% (`internal/org` alone) reported in cycle 1. Effectively flat — the two fix commits added ~250 lines to `spawn.go` (idempotency-before-scope-gate reordering, dry-run/real rejection-cause alignment, phase-2 re-check under lock) fully exercised by the 3 new tests plus existing coverage; no net coverage regression.
+- `internal/org/driver` (92.0%) and `internal/org/protocol` (97.9%): unchanged from cycle 1 and PR② baseline — not touched by this delta.
+- Lowest-covered functions remain the same pre-existing gaps noted in cycle 1 (`truncateForDetails` 66.7%, `Disband` 78.6%, plus zero-covered simple constructors `NewManifestStore`/`NewReceiptStore`/`Roster`/`Path` that are exercised indirectly through other test files not included in this narrower coverage run) — none touched by this branch's ACs or by AR#1/M1/M2.
+
+### Failure analysis
+
+| Test | Error | Root cause | Proposed fix |
+| --- | --- | --- | --- |
+| — | — | No failures observed in this run. | — |
+
+### Regression checks
+
+| Previously broken behavior | Status | Evidence |
+| --- | --- | --- |
+| Cycle 1 full suite (978 shell assertions, 13 Go packages, 345 targeted tests) | Still green after the 2 new fix commits | `docs/evidence/test-2026-08-02-org-runtime-lead-cycle2.log` shows identical 978/978 shell assertions and 13/13 `ok` packages |
+| Pre-fix spawn ordering bug (AR#1: scope gate ran before idempotency check) | Fixed and now regression-tested | `TestOrgSpawn_Idempotent_NoScopeRetry_ReturnsExistingSeat` |
+| Pre-fix dry-run/real rejection-cause divergence (M1) | Fixed and now regression-tested | `TestOrgSpawn_DryRun_And_Real_AgreeOnRejectionCause_EnvelopeBeforeScopeGate` |
+| Pre-fix stale in-flight race window (M2) | Fixed and now regression-tested | `TestOrgSpawn_StaleInFlight_RacerCompletesDuringCompensationWindow_Phase2ReturnsIdempotent` |
+
+### Test gaps (unchanged from cycle 1)
+
+- AC-11 / AC-11b remain live-evidence-only (unchanged).
+- `truncateForDetails` / `Disband` remain the lowest-covered pre-existing functions (unchanged).
+- The combined AC-2b + AC-9 concurrent-spawn-with-escape-hatch edge case remains untested in combination (unchanged, low risk per cycle 1's assessment).
+
+### Verdict (Cycle 2)
+
+- **Pass** — all 3 regression tests mapped to cross-review AR#1 and cycle-2 self-review M1/M2 exist, run, and pass. Full `./scripts/run-test.sh` (978 shell assertions, 13/13 Go packages) and the targeted `-race -count=1` run (348 top-level tests across 5 packages) report 0 failures, 0 skips beyond the 2 known pre-existing scaffold skips, 0 data races.
+- Fail: none.
+- Blocked: none.
+- Coverage is flat (90.3% vs 90.0% baseline for `internal/org`), no regression.
+- Proceed to `/sync-docs` — tests pass, no blocking failures.
