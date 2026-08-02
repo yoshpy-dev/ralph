@@ -84,15 +84,15 @@ echo ""
 exit 0
 `
 
-// agmsgDespawnStub is the fake `scripts/despawn.sh` -- driver.Agmsg shells
-// out to `bash <home>/scripts/despawn.sh TEAM FROM NAME`. Honors
-// ORG_STUB_FAIL=agmsg:despawn.
-const agmsgDespawnStub = `#!/bin/sh
+// agmsgLeaveStub is the fake `scripts/leave.sh` -- driver.Agmsg shells
+// out to `bash <home>/scripts/leave.sh TEAM AGENT_ID`. Honors
+// ORG_STUB_FAIL=agmsg:leave.
+const agmsgLeaveStub = `#!/bin/sh
 if [ -n "$ORG_AGMSG_LOG" ]; then
   echo "$@" >> "$ORG_AGMSG_LOG"
 fi
-if [ "$ORG_STUB_FAIL" = "agmsg:despawn" ]; then
-  echo "stub failure: agmsg despawn" >&2
+if [ "$ORG_STUB_FAIL" = "agmsg:leave" ]; then
+  echo "stub failure: agmsg leave" >&2
   exit 1
 fi
 echo ""
@@ -124,7 +124,7 @@ func setupOrgStubPATH(t *testing.T) (herdrLog, agmsgLog string) {
 	}
 	writeStubScript(t, filepath.Join(agmsgHome, "scripts", "send.sh"), agmsgSendStub)
 	writeStubScript(t, filepath.Join(agmsgHome, "scripts", "join.sh"), agmsgJoinStub)
-	writeStubScript(t, filepath.Join(agmsgHome, "scripts", "despawn.sh"), agmsgDespawnStub)
+	writeStubScript(t, filepath.Join(agmsgHome, "scripts", "leave.sh"), agmsgLeaveStub)
 	if err := os.WriteFile(filepath.Join(agmsgHome, "VERSION"), []byte(agmsgVersionStub), 0o644); err != nil {
 		t.Fatalf("write agmsg VERSION: %v", err)
 	}
@@ -649,12 +649,12 @@ func TestOrgDisband_StopsActiveSeatsAndDisbandsOrg(t *testing.T) {
 		t.Error("expected disband to send a stop signal to the active seat")
 	}
 
-	// AC-5: disband's per-seat Stop must also best-effort despawn.sh the
-	// seat -- despawn.sh's argv is "TEAM FROM NAME", so the seat_id
-	// (seat-1) shows up as the last logged token.
+	// AC-5: disband's per-seat Stop must also best-effort leave.sh the
+	// seat -- leave.sh's argv is "TEAM AGENT_ID", so the seat_id (seat-1)
+	// shows up as the last logged token.
 	agmsgLines := readLogLines(t, agmsgLog)
-	if !containsLine(agmsgLines, "ralph-org-a lead seat-1") {
-		t.Errorf("expected a despawn.sh invocation with argv 'ralph-org-a lead seat-1', got agmsg log: %v", agmsgLines)
+	if !containsLine(agmsgLines, "ralph-org-a seat-1") {
+		t.Errorf("expected a leave.sh invocation with argv 'ralph-org-a seat-1', got agmsg log: %v", agmsgLines)
 	}
 
 	statusOut, err := runOrgCmd(t, "status", "--org-id", "org-a", "--state-dir", stateDir)
@@ -666,6 +666,11 @@ func TestOrgDisband_StopsActiveSeatsAndDisbandsOrg(t *testing.T) {
 	}
 	if strings.Contains(statusOut, "(active)") {
 		t.Errorf("expected no seat to remain marked active after disband, got: %s", statusOut)
+	}
+	// Live-smoke follow-up: the stopped event must carry seat.Role/Driver/
+	// Model forward so status after stop doesn't show blank columns.
+	if !strings.Contains(statusOut, "worker") || !strings.Contains(statusOut, "claude") || !strings.Contains(statusOut, "sonnet") {
+		t.Errorf("expected status after disband to still show seat role/driver/model, got: %s", statusOut)
 	}
 }
 
@@ -684,7 +689,7 @@ func TestOrgStop_UnknownSeat_NonZeroExit(t *testing.T) {
 	}
 }
 
-func TestOrgStop_ExistingSeat_DespawnsAndRecordsOutcome(t *testing.T) {
+func TestOrgStop_ExistingSeat_LeavesAndRecordsOutcome(t *testing.T) {
 	_, agmsgLog := setupOrgStubPATH(t)
 	stateDir := filepath.Join(t.TempDir(), "state")
 
@@ -702,8 +707,8 @@ func TestOrgStop_ExistingSeat_DespawnsAndRecordsOutcome(t *testing.T) {
 	}
 
 	agmsgLines := readLogLines(t, agmsgLog)
-	if !containsLine(agmsgLines, "ralph-org-a lead seat-1") {
-		t.Errorf("expected a despawn.sh invocation with argv 'ralph-org-a lead seat-1' in the agmsg log, got: %v", agmsgLines)
+	if !containsLine(agmsgLines, "ralph-org-a seat-1") {
+		t.Errorf("expected a leave.sh invocation with argv 'ralph-org-a seat-1' in the agmsg log, got: %v", agmsgLines)
 	}
 
 	events := readManifestEvents(t, filepath.Join(stateDir, "manifest.jsonl"))
@@ -711,8 +716,19 @@ func TestOrgStop_ExistingSeat_DespawnsAndRecordsOutcome(t *testing.T) {
 	if last.Event != "stopped" {
 		t.Fatalf("expected last event stopped, got %q", last.Event)
 	}
-	if !strings.Contains(last.Details, "despawn=ok") {
-		t.Errorf("expected Details to record a successful despawn, got %q", last.Details)
+	if !strings.Contains(last.Details, "leave=ok") {
+		t.Errorf("expected Details to record a successful leave, got %q", last.Details)
+	}
+	if last.Role != "worker" || last.Driver != "claude" || last.Model != "sonnet" {
+		t.Errorf("expected stopped event to carry seat role/driver/model, got role=%q driver=%q model=%q", last.Role, last.Driver, last.Model)
+	}
+
+	statusOut, err := runOrgCmd(t, "status", "--org-id", "org-a", "--state-dir", stateDir)
+	if err != nil {
+		t.Fatalf("status after stop failed: %v", err)
+	}
+	if !strings.Contains(statusOut, "worker") || !strings.Contains(statusOut, "claude") || !strings.Contains(statusOut, "sonnet") {
+		t.Errorf("expected status after stop to still show seat role/driver/model, got: %s", statusOut)
 	}
 }
 

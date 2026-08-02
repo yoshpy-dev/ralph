@@ -109,14 +109,14 @@ func TestAgmsg_History(t *testing.T) {
 	}
 }
 
-func TestAgmsg_Despawn(t *testing.T) {
+func TestAgmsg_Leave(t *testing.T) {
 	f := &fakeRunner{}
 	a := Agmsg{R: f, Home: "/home/agmsg"}
 
-	if err := a.Despawn(context.Background(), "ralph-org-1", "lead", "worker-1"); err != nil {
+	if err := a.Leave(context.Background(), "ralph-org-1", "worker-1"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := append(bashScript("/home/agmsg", "despawn.sh"), "ralph-org-1", "lead", "worker-1")
+	want := append(bashScript("/home/agmsg", "leave.sh"), "ralph-org-1", "worker-1")
 	if c := f.lastCall(); !reflect.DeepEqual(c.args, want) {
 		t.Fatalf("argv mismatch: got %v, want %v", c.args, want)
 	}

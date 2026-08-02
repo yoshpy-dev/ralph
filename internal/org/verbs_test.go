@@ -58,14 +58,16 @@ func TestOrgStop_UnknownSeat_DryRun_AlsoErrorsWithoutAppendingEvent(t *testing.T
 	}
 }
 
-// TestOrgStop_ExistingSeat_RecordsPaneAndDespawnOutcomes covers AC-5: Stop on
+// TestOrgStop_ExistingSeat_RecordsPaneAndLeaveOutcomes covers AC-5: Stop on
 // a real, existing seat best-effort-calls both PaneSendKeys(C-c) and
-// Agmsg.Despawn, and records both outcomes in the stopped event's Details --
-// including when Despawn itself fails, so status stays truthful without the
-// verb itself failing.
-func TestOrgStop_ExistingSeat_RecordsPaneAndDespawnOutcomes(t *testing.T) {
+// Agmsg.Leave, and records both outcomes in the stopped event's Details --
+// including when Leave itself fails, so status stays truthful without the
+// verb itself failing. It also covers the live-smoke follow-up fix: the
+// stopped event must carry the seat's Role/Driver/Model forward so `status`
+// after stop does not show blank columns for a stopped seat.
+func TestOrgStop_ExistingSeat_RecordsPaneAndLeaveOutcomes(t *testing.T) {
 	o, _, a := testOrg(t)
-	a.despawnErr = errors.New("stub failure: despawn")
+	a.leaveErr = errors.New("stub failure: leave")
 
 	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("spawn failed: %+v", r)
@@ -73,14 +75,14 @@ func TestOrgStop_ExistingSeat_RecordsPaneAndDespawnOutcomes(t *testing.T) {
 
 	result := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-1"})
 	if result.Err != nil {
-		t.Fatalf("expected nil Err: despawn failure is best-effort and must not fail Stop, got %v", result.Err)
+		t.Fatalf("expected nil Err: leave failure is best-effort and must not fail Stop, got %v", result.Err)
 	}
 
-	if len(a.despawnCalls) != 1 {
-		t.Fatalf("expected exactly one Despawn call, got %+v", a.despawnCalls)
+	if len(a.leaveCalls) != 1 {
+		t.Fatalf("expected exactly one Leave call, got %+v", a.leaveCalls)
 	}
-	if a.despawnCalls[0].name != "seat-1" || a.despawnCalls[0].from != "lead" {
-		t.Errorf("expected Despawn(team, lead, seat-1), got %+v", a.despawnCalls[0])
+	if a.leaveCalls[0].agentID != "seat-1" {
+		t.Errorf("expected Leave(team, seat-1), got %+v", a.leaveCalls[0])
 	}
 
 	rr, err := o.Manifest.Read()
@@ -91,14 +93,20 @@ func TestOrgStop_ExistingSeat_RecordsPaneAndDespawnOutcomes(t *testing.T) {
 	if last.Event != EventStopped {
 		t.Fatalf("expected last event stopped, got %q", last.Event)
 	}
-	assertDetailsContains(t, last.Details, "pane=ok", "despawn=failed", "stub failure: despawn")
+	assertDetailsContains(t, last.Details, "pane=ok", "leave=failed", "stub failure: leave")
+	if last.Role != "worker" || last.Driver != "claude" || last.Model != "sonnet" {
+		t.Errorf("expected stopped event to carry seat role/driver/model, got role=%q driver=%q model=%q", last.Role, last.Driver, last.Model)
+	}
 
 	statusResult, err := o.Status("org-a", false)
 	if err != nil {
 		t.Fatalf("Status: %v", err)
 	}
 	if len(statusResult.Seats) != 1 || statusResult.Seats[0].Active {
-		t.Fatalf("expected seat-1 inactive after stop despite despawn failure, got %+v", statusResult.Seats)
+		t.Fatalf("expected seat-1 inactive after stop despite leave failure, got %+v", statusResult.Seats)
+	}
+	if got := statusResult.Seats[0]; got.Role != "worker" || got.Driver != "claude" || got.Model != "sonnet" {
+		t.Errorf("expected status to still show seat role/driver/model after stop, got %+v", got)
 	}
 }
 
@@ -123,7 +131,7 @@ func TestOrgDisband_OnlyStopsExistingActiveSeats_UnknownNeverAppears(t *testing.
 	}
 
 	sendKeysBefore := len(h.sendKeysCalls)
-	despawnBefore := len(a.despawnCalls)
+	leaveBefore := len(a.leaveCalls)
 
 	result := o.Disband(DisbandParams{OrgID: "org-a"})
 	if len(result.Errs) != 0 {
@@ -135,8 +143,8 @@ func TestOrgDisband_OnlyStopsExistingActiveSeats_UnknownNeverAppears(t *testing.
 	if got := len(h.sendKeysCalls) - sendKeysBefore; got != 1 {
 		t.Fatalf("expected exactly 1 new PaneSendKeys call (only seat-1 was active), got %d", got)
 	}
-	if got := len(a.despawnCalls) - despawnBefore; got != 1 {
-		t.Fatalf("expected exactly 1 new Despawn call (only seat-1 was active), got %d", got)
+	if got := len(a.leaveCalls) - leaveBefore; got != 1 {
+		t.Fatalf("expected exactly 1 new Leave call (only seat-1 was active), got %d", got)
 	}
 
 	statusResult, err := o.Status("org-a", false)
@@ -358,22 +366,22 @@ func TestOrgSend_SeatWithoutPaneID_Errors(t *testing.T) {
 // DryRun-on-an-existing-seat branch of Stop, distinct from the
 // DryRun-on-an-unknown-seat tests above: with a real, spawned seat on
 // record, --dry-run must still skip both driver calls (pane C-c and agmsg
-// Despawn) and record the dry-run marker in Details.
+// Leave) and record the dry-run marker in Details.
 func TestOrgStop_DryRun_ExistingSeat_RecordsDryRunDetails(t *testing.T) {
 	o, h, a := testOrg(t)
 	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("spawn failed: %+v", r)
 	}
 	sendKeysBefore := len(h.sendKeysCalls)
-	despawnBefore := len(a.despawnCalls)
+	leaveBefore := len(a.leaveCalls)
 
 	result := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-1", DryRun: true})
 	if result.Err != nil {
 		t.Fatalf("expected nil Err for a dry-run stop on an existing seat, got %v", result.Err)
 	}
-	if len(h.sendKeysCalls) != sendKeysBefore || len(a.despawnCalls) != despawnBefore {
-		t.Fatalf("expected no driver calls for a dry-run stop, herdr sendKeys %d->%d agmsg despawn %d->%d",
-			sendKeysBefore, len(h.sendKeysCalls), despawnBefore, len(a.despawnCalls))
+	if len(h.sendKeysCalls) != sendKeysBefore || len(a.leaveCalls) != leaveBefore {
+		t.Fatalf("expected no driver calls for a dry-run stop, herdr sendKeys %d->%d agmsg leave %d->%d",
+			sendKeysBefore, len(h.sendKeysCalls), leaveBefore, len(a.leaveCalls))
 	}
 
 	events := mustReadEvents(t, o)
@@ -404,13 +412,13 @@ func TestOrgStop_ExistingSeat_NoPaneOrAgmsgTeam_RecordsSkippedNotes(t *testing.T
 	if result.Err != nil {
 		t.Fatalf("expected nil Err, got %v", result.Err)
 	}
-	if len(h.sendKeysCalls) != 0 || len(a.despawnCalls) != 0 {
-		t.Fatalf("expected no driver calls for a seat with no pane_id/agmsg_team, got herdr=%v agmsg=%v", h.sendKeysCalls, a.despawnCalls)
+	if len(h.sendKeysCalls) != 0 || len(a.leaveCalls) != 0 {
+		t.Fatalf("expected no driver calls for a seat with no pane_id/agmsg_team, got herdr=%v agmsg=%v", h.sendKeysCalls, a.leaveCalls)
 	}
 
 	events := mustReadEvents(t, o)
 	last := events[len(events)-1]
-	assertDetailsContains(t, last.Details, "pane=no pane_id on record", "despawn=skipped: no agmsg_team on record")
+	assertDetailsContains(t, last.Details, "pane=no pane_id on record", "leave=skipped: no agmsg_team on record")
 }
 
 // TestOrgWait_HappyPath_ReturnsHerdrOutputAndTargetsNamespacedAgent covers

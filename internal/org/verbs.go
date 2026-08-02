@@ -209,7 +209,7 @@ type StopResult struct {
 }
 
 // Stop sends a best-effort C-c to Seat's pane and a best-effort agmsg
-// Despawn (real invocations only), then appends a `stopped` state event
+// Leave (real invocations only), then appends a `stopped` state event
 // recording both outcomes. DryRun appends the event without attempting
 // either real driver call.
 //
@@ -244,20 +244,21 @@ func (o *Org) Stop(p StopParams) StopResult {
 			paneNote = "pane=ok"
 		}
 
-		var despawnNote string
+		var leaveNote string
 		if agmsgTeam == "" {
-			despawnNote = "despawn=skipped: no agmsg_team on record"
-		} else if err := o.Agmsg.Despawn(context.Background(), agmsgTeam, "lead", p.Seat); err != nil {
-			despawnNote = fmt.Sprintf("despawn=failed: %v", err)
+			leaveNote = "leave=skipped: no agmsg_team on record"
+		} else if err := o.Agmsg.Leave(context.Background(), agmsgTeam, p.Seat); err != nil {
+			leaveNote = fmt.Sprintf("leave=failed: %v", err)
 		} else {
-			despawnNote = "despawn=ok"
+			leaveNote = "leave=ok"
 		}
 
-		details = paneNote + " " + despawnNote
+		details = paneNote + " " + leaveNote
 	}
 
 	err = o.appendEvent(ManifestEvent{
 		TS: o.now(), OrgID: p.OrgID, SeatID: p.Seat, Event: EventStopped,
+		Role: seat.Role, Driver: seat.Driver, Model: seat.Model, Worktree: seat.Worktree,
 		PaneID: paneID, AgmsgTeam: agmsgTeam, DryRun: p.DryRun, Details: details,
 	})
 	return StopResult{Err: err}
@@ -305,7 +306,7 @@ type DisbandResult struct {
 }
 
 // Disband best-effort-stops every currently active seat in OrgID (each via
-// Stop, so pane C-c and agmsg Despawn are both attempted per seat -- AC-5),
+// Stop, so pane C-c and agmsg Leave are both attempted per seat -- AC-5),
 // then appends an org-level `disbanded` event (SeatID empty) that marks
 // every seat in that org_id inactive from that point forward (see Roster).
 // DryRun skips stopping real seats and only appends the disbanded event.

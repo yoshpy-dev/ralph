@@ -115,18 +115,18 @@ type fakeAgmsg struct {
 	calls   []string
 	sendErr error
 
-	joinErrs     map[string]error
-	joinCalls    []joinCall
-	despawnErr   error
-	despawnCalls []despawnCall
+	joinErrs   map[string]error
+	joinCalls  []joinCall
+	leaveErr   error
+	leaveCalls []leaveCall
 }
 
 type joinCall struct {
 	team, agentID, agmsgType, projectPath string
 }
 
-type despawnCall struct {
-	team, from, name string
+type leaveCall struct {
+	team, agentID string
 }
 
 func (f *fakeAgmsg) Send(_ context.Context, _, _, _, _ string) error {
@@ -145,10 +145,10 @@ func (f *fakeAgmsg) Join(_ context.Context, team, agentID, agmsgType, projectPat
 	return nil
 }
 
-func (f *fakeAgmsg) Despawn(_ context.Context, team, from, name string) error {
-	f.calls = append(f.calls, "despawn")
-	f.despawnCalls = append(f.despawnCalls, despawnCall{team: team, from: from, name: name})
-	return f.despawnErr
+func (f *fakeAgmsg) Leave(_ context.Context, team, agentID string) error {
+	f.calls = append(f.calls, "leave")
+	f.leaveCalls = append(f.leaveCalls, leaveCall{team: team, agentID: agentID})
+	return f.leaveErr
 }
 
 // testOrg builds an Org backed by temp-file manifest/receipt stores and

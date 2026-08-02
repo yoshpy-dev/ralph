@@ -70,10 +70,18 @@ type AgmsgClient interface {
 	// best-effort -- see ensureLeadJoined in Spawn) and once for the seat
 	// itself (hard failure gate).
 	Join(ctx context.Context, team, agentID, agmsgType, projectPath string) error
-	// Despawn removes name from team's roster, sent as from. Stop/Disband
-	// call this best-effort: a Despawn failure is recorded in the stopped
-	// event's Details but never fails the verb outright.
-	Despawn(ctx context.Context, team, from, name string) error
+	// Leave removes agentID from team's roster (agmsg's `leave.sh TEAM
+	// AGENT_ID`). Stop/Disband call this best-effort: a Leave failure is
+	// recorded in the stopped event's Details but never fails the verb
+	// outright. Leave -- not Despawn -- is the correct roster-removal verb
+	// for a seat that joined via Join: despawn.sh only targets processes
+	// agmsg itself spawned (it tracks a placement record Join never
+	// creates), so it is a silent no-op for every seat this saga ever
+	// registers (live-smoke-verified: leave.sh removes the member and
+	// auto-deletes an emptied team; despawn.sh exits 0 without touching the
+	// roster at all -- see plan "Implementation notes (deviations)", fourth
+	// bullet).
+	Leave(ctx context.Context, team, agentID string) error
 }
 
 // agmsgTypeForDriver maps a ralph driver name to the agmsg-native agent type

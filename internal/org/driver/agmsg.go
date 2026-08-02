@@ -69,9 +69,13 @@ func (a Agmsg) History(ctx context.Context, team, agentID string, limit int) (st
 	return a.run(ctx, "history.sh", args...)
 }
 
-// Despawn runs `bash <home>/scripts/despawn.sh TEAM FROM NAME`.
-func (a Agmsg) Despawn(ctx context.Context, team, from, name string) error {
-	_, err := a.run(ctx, "despawn.sh", team, from, name)
+// Leave runs `bash <home>/scripts/leave.sh TEAM AGENT_ID`. This is the
+// correct roster-removal verb for a member that joined via join.sh (see the
+// doc comment on AgmsgClient.Leave in spawn.go for why despawn.sh does not
+// work here: it only targets agmsg-spawned processes with placement
+// records, which join.sh'd members never have).
+func (a Agmsg) Leave(ctx context.Context, team, agentID string) error {
+	_, err := a.run(ctx, "leave.sh", team, agentID)
 	return err
 }
 
