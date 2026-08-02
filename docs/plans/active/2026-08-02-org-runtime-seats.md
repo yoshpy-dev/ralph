@@ -125,6 +125,8 @@ org runtime PR②: 座席を実際に動かせるようにする。agmsg アダ�
 
 - **実機スモークが herdr アダプタの統合バグを検出**(Slice 5、2026-08-02): 実 herdr CLI(v0.7.5)は全コマンドで JSON エンベロープ(`{"id":...,"result":{...}}` / `{"error":{...}}`)を返すが、PR① アダプタは「trimmed stdout = ID」と仮定していたため、`WorkspaceCreate` の戻り値(JSON 全文)を `tab create --workspace` に渡して `workspace_not_found` で spawn が失敗した。修正: herdr アダプタに JSON エンベロープ解析を追加(`workspace create` → `result.workspace.workspace_id`、`tab create` → `result.root_pane.pane_id`、非 JSON 出力は従来どおり trimmed raw にフォールバック)。`pane read` はプレーンテキストで従来どおり。CLI スタブは実キャプチャ JSON を出力するよう更新し、パーサを実形状でテストする。
 
+- **実機スモーク第2の検出**(同日): herdr `agent start` は複数行・特殊文字を含む agent 引数を拒否する(`invalid_agent_argument: agent arguments cannot be encoded safely for the target shell`)。複数行の役割プロンプトを argv で渡す設計は実機で不成立。修正: 初期プロンプトが複数行または長文の場合、`<state-dir>/prompts/<org_id>-<seat_id>.md` に書き出し、agent 引数には「このファイルを読んで従え」という 1 行ポインタのみを渡す(短い単一行プロンプトは従来どおり直渡し)。プロンプトファイルパスは manifest の spawn_step Details に記録。
+
 ## Progress checklist
 
 - [ ] Plan reviewed
