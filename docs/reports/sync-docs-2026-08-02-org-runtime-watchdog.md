@@ -268,3 +268,129 @@ Checked for two specific stale-doc risks named in this cycle's brief:
 **Proceed to `/cross-review`.** No documentation drift found beyond the plan
 notes gap closed in this pass; tech-debt rows remain accurate; no stale
 semantics claims found in the sweep.
+
+## Cycle 3 (fix-and-revalidate, cap raised to 3)
+
+- Date: 2026-08-03
+- Agent: `doc-maintainer` subagent (Claude Code, `/sync-docs`)
+- Scope: delta since cycle-2 sync-docs baseline `d6ddf61` on
+  `feat/org-runtime-watchdog`, through HEAD `5d00888`: `764b01f` (fix:
+  cross-review cycle-2 #3/#4 — lead-only history filter + same-cycle
+  cut-seat skip), `d6e557a` (refactor: `strings.Cut`/`SplitSeq` lint
+  cleanup, no behavior change), `8bbd55e` (fix: corrected lead-activity
+  model — `sent` events are lead-authored by construction, count-based
+  history comparison, M3-1 lifecycle-set widening, tech-debt row rewrite),
+  `ae6d852`/`dccd9c2`/`5d00888` (docs: cycle-3 self-review/verify/test
+  report sections). Handed off after `docs/reports/test-2026-08-02-org-runtime-watchdog.md`'s
+  cycle-3 section (Pass, 406/406 targeted subtests green).
+
+### Plan doc-drift flagged by verify/test cycle-3 sections — resolved
+
+**Drift detected. Resolved.**
+
+Both the cycle-3 verify report ("Spec / documentation drift (cycle 3)") and
+test report ("Test gaps (cycle 3)") independently flagged that
+`docs/plans/active/2026-08-02-org-runtime-watchdog.md` had not been updated
+since cycle 2, even though `764b01f`/`8bbd55e` layered a model correction on
+top of the cycle-2 fixes the plan's Implementation notes already described:
+
+1. **AC-5 evidence prose (line 73)**: still described the pre-cycle-3 state
+   (`leadActivityEventCount` excludes only watchdog's own events, not scoped
+   to org/seat) even though AR-1 (org-scope), self-review cycle-2 M2-1
+   (seat-scope, later found inverted), and cycle-3 H3-1/M3-1 (corrected
+   `sent`-is-lead-by-construction model + widened lifecycle set) had all
+   since landed. Rewrote the "既知の残課題" caveat into a "manifest 情報源
+   (最終モデル、cycle 3 で確定)" paragraph describing the corrected model
+   (org-scope + unconditional `sent` count + widened lifecycle allow-list +
+   count-based history comparison), stated the tech-debt row (line 70) is
+   now fully closed with no known residual, and extended the AC-5 test list
+   with the 6 cycle-3 regression test names
+   (`TestFilterLeadHistoryLines`,
+   `TestWatch_Deadman_LeadHistoryLine_ClearsPendingAlert`,
+   `TestWatch_Deadman_WatchdogAlertHistoryLine_DoesNotClearPendingAlert`,
+   `TestWatch_Deadman_SeatSentEvent_ClearsPendingAlert_WatchdogCutoffDoesNot`,
+   `TestWatch_Deadman_LeadSpawnsReplacementSeat_ClearsPendingAlert`,
+   `TestWatch_Deadman_HistoryWindowEviction_DoesNotFalselyClearPendingAlert`).
+2. **Implementation notes (deviations)**: last dated entry was still "Cycle
+   2". Added a new "Cycle 3" bullet naming `764b01f`/`d6e557a`/`8bbd55e`,
+   summarizing the cross-review #3/#4 fixes, the H3-1 inverted-predicate
+   correction, the M3-1 lifecycle-set widening, the M3-2 count-based history
+   comparison, and calling out the `watchPendingAlert.History string` →
+   `HistoryLeadLines int` JSON field rename explicitly as a breaking-but-safe
+   schema change: `watch-status-<org_id>.json` is runtime-local state (not
+   yet in production use per the plan's Non-goals/Rollout notes), so there is
+   no migration path and none is needed — the file rebuilds cleanly on the
+   next `ralph org watch` invocation.
+
+### Tech-debt row consistency — confirmed accurate, no edit needed
+
+Independently re-read `docs/tech-debt/README.md` lines 70-71 against current
+`internal/org/watch.go` (not just trusting the cycle-3 verify report's own
+claim that the rewrite is accurate):
+
+- **Line 70** (`leadActivityEventCount` row): the rewritten "RESOLVED
+  2026-08-03" text names the `orgID` filter (AR-1), the inverted
+  `SeatID==LeadIdentity` predicate found by H3-1, the corrected
+  unconditional-`sent`-count model, and the M3-1 lifecycle-set widening —
+  all confirmed present in `watch.go` (`leadActivityEventCount`,
+  `watch.go:876-903`) and cited by exact test names that exist and pass per
+  the test report. No inaccuracy found.
+- **Line 71** (4-item deferred-LOW row): confirmed it now reads "4 deferred
+  LOW findings" (not 3) with item (4) — the zero-active-seats guard leaving
+  `watchConditionRecord.Active` uncleared (self-review cycle-2 L2-6) —
+  folded in per the cycle-3 self-review's own recommendation. All 4 items
+  independently re-checked as still open in `watch.go` (no fix commit in
+  this cycle's delta touches `evaluateTotalBudget`'s zero-active-seats guard,
+  `ResolveOrgStateDir`'s discarded `source`, the oversized scope-change
+  ALERT body, or the unreachable `Escalated` guard). No edit needed.
+
+### Stale-semantics sweep (cycle 3) — no drift found
+
+Re-ran the same sweep as cycle 2's "Old org-agnostic deadman semantics"
+check, scoped to whether any doc still describes the *pre-correction*
+model (inverted `SeatID` predicate, text-based history comparison, narrow
+`stopped`/`disbanded`-only lifecycle set) as current behavior:
+
+- Grepped `docs/specs/2026-08-01-org-runtime.md` (FR-8/FR-9),
+  `.claude/rules/agent-messaging.md`, `.claude/skills/org/SKILL.md` + 3
+  mirrors, `AGENTS.md`, `README.md`, `docs/quality/definition-of-done.md` for
+  `leadActivityEventCount`/`deadman`/`Deadman`/`HistoryLeadLines`/
+  `history_lead_lines` — zero hits outside `docs/reports/`,
+  `docs/plans/active/2026-08-02-org-runtime-watchdog.md`, and
+  `docs/tech-debt/README.md` (all three already reviewed above). Spec FR-8's
+  prose only promises "Lead 宛通知 + N 分無応答でエスカレーション" at the
+  contract level, not the manifest-growth implementation detail this cycle's
+  fix touches — that promise remains true after the correction, so no spec
+  edit is needed.
+- No other doc claims the old deadman semantics.
+
+### No other drift found
+
+- `./scripts/check-sync.sh` — PASS (0 DRIFTED, 179 IDENTICAL, 3 KNOWN_DIFF),
+  re-confirmed at HEAD `5d00888`.
+- `./scripts/check-skill-sync.sh` — PASS (14 skills in lock-step),
+  re-confirmed at HEAD `5d00888`.
+- This cycle's delta touches only `internal/org/watch.go`/`watch_test.go`
+  and the tech-debt row — no skills, hooks, rules, scripts, or language
+  packs changed, so the harness-internal sync checklist
+  (`.claude/skills/sync-docs/SKILL.md`) does not apply this cycle.
+
+## Verification (Cycle 3)
+
+- `./scripts/check-sync.sh` — PASS.
+- `./scripts/check-skill-sync.sh` — PASS.
+
+## Files changed in this pass (Cycle 3)
+
+- `docs/plans/active/2026-08-02-org-runtime-watchdog.md` — rewrote the AC-5
+  evidence/caveat prose to the final corrected model and added a new "Cycle
+  3" bullet to Implementation notes (deviations).
+- `docs/reports/sync-docs-2026-08-02-org-runtime-watchdog.md` — this Cycle 3
+  section.
+
+## Recommendation (Cycle 3)
+
+**Proceed to `/cross-review`.** No documentation drift remains beyond the
+plan notes gap closed in this pass; tech-debt rows 70-71 remain accurate;
+no stale deadman-semantics claims found anywhere outside the
+plan/tech-debt/reports triad already reviewed.
