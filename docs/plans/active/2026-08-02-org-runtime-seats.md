@@ -121,6 +121,10 @@ org runtime PR②: 座席を実際に動かせるようにする。agmsg アダ�
 
 (解決済み: lead identity 登録は Codex 所見 1 により `ensureLeadJoined` として saga に組み込み。lead の agmsg type は `claude-code`、project_path はリポジトリルート。)
 
+## Implementation notes (deviations)
+
+- **実機スモークが herdr アダプタの統合バグを検出**(Slice 5、2026-08-02): 実 herdr CLI(v0.7.5)は全コマンドで JSON エンベロープ(`{"id":...,"result":{...}}` / `{"error":{...}}`)を返すが、PR① アダプタは「trimmed stdout = ID」と仮定していたため、`WorkspaceCreate` の戻り値(JSON 全文)を `tab create --workspace` に渡して `workspace_not_found` で spawn が失敗した。修正: herdr アダプタに JSON エンベロープ解析を追加(`workspace create` → `result.workspace.workspace_id`、`tab create` → `result.root_pane.pane_id`、非 JSON 出力は従来どおり trimmed raw にフォールバック)。`pane read` はプレーンテキストで従来どおり。CLI スタブは実キャプチャ JSON を出力するよう更新し、パーサを実形状でテストする。
+
 ## Progress checklist
 
 - [ ] Plan reviewed
