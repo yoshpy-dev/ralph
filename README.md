@@ -4,7 +4,7 @@
 
 **Claude Code + Codex harness engineering.**
 
-Scaffold, upgrade, and run opinionated agent harnesses that work with both Claude Code and OpenAI Codex from the same project — small always-on maps, on-demand skills, deterministic hooks, evidence-backed reviews, and optional autonomous parallel execution (Ralph Loop).
+Scaffold, upgrade, and run opinionated agent harnesses that work with both Claude Code and OpenAI Codex from the same project — small always-on maps, on-demand skills, deterministic hooks, evidence-backed reviews, and an optional autonomous multi-seat execution surface (org runtime).
 
 [![verify](https://github.com/yoshpy-dev/ralph/actions/workflows/verify.yml/badge.svg)](https://github.com/yoshpy-dev/ralph/actions/workflows/verify.yml)
 [![latest release](https://img.shields.io/github/v/release/yoshpy-dev/ralph?sort=semver)](https://github.com/yoshpy-dev/ralph/releases/latest)
@@ -13,7 +13,7 @@ Scaffold, upgrade, and run opinionated agent harnesses that work with both Claud
 [![Homebrew](https://img.shields.io/badge/homebrew-yoshpy--dev%2Ftap%2Fralph-orange)](#install)
 [![downloads](https://img.shields.io/github/downloads/yoshpy-dev/ralph/total)](https://github.com/yoshpy-dev/ralph/releases)
 
-[Why ralph?](#why-ralph) &middot; [Install](#install) &middot; [Quick start](#quick-start) &middot; [Features](#features) &middot; [Commands](#commands) &middot; [Operating loop](#operating-loop) &middot; [Ralph Loop](#ralph-loop-autonomous-parallel-execution) &middot; [Language packs](#language-packs) &middot; [Portability](#portability)
+[Why ralph?](#why-ralph) &middot; [Install](#install) &middot; [Quick start](#quick-start) &middot; [Features](#features) &middot; [Commands](#commands) &middot; [Operating loop](#operating-loop) &middot; [Org runtime](#org-runtime-autonomous-multi-seat-execution) &middot; [Language packs](#language-packs) &middot; [Portability](#portability)
 
 </div>
 
@@ -26,11 +26,11 @@ Claude Code gives you a powerful agent, but the default setup is a blank slate. 
 | | Bare Claude Code | `ralph init` |
 |---|:---:|:---:|
 | Always-on map (`AGENTS.md` / `CLAUDE.md`) | — | ✓ |
-| On-demand skills (plan, work, verify, loop, ...) | manual | 10+ bundled |
+| On-demand skills (spec, plan, work, verify, ...) | manual | 10+ bundled |
 | Deterministic hooks (mojibake guard, commit-msg, bash guard, ...) | manual | pre-wired |
 | Evidence-backed pipeline (self-review → verify → test → sync-docs → cross-review) | ad hoc | canonical order, enforced |
 | Isolated task execution | ad hoc branches | clean-base task worktrees |
-| Autonomous parallel execution | — | Ralph Loop (multi-worktree) |
+| Autonomous multi-seat execution | — | org runtime (`ralph org`) |
 | Language packs (TS, Python, Rust, Go, Dart, Terraform) | — | opt-in |
 | Drift management between projects | manual copy | `ralph upgrade` |
 | Cross-agent portability | — | portable `AGENTS.md` + scripts |
@@ -71,14 +71,13 @@ because they create clean-base task worktrees before writing plan artifacts:
 /plan
 ```
 
-The lower-level `./scripts/new-feature-plan.sh` and
-`./scripts/new-ralph-plan.sh` helpers remain available inside an already
-resolved task worktree.
+The lower-level `./scripts/new-feature-plan.sh` helper remains available
+inside an already resolved task worktree.
 
 In Claude Code, follow the loop with slash commands:
 
 ```
-/spec (optional) → /plan → /work (or /loop)
+/spec (optional) → /plan → /work
 → /self-review → /verify → /test → /sync-docs
 → /cross-review (optional) → /pr
 ```
@@ -87,10 +86,13 @@ In Codex, the same flow runs via skill mention syntax (`/spec` collides with
 Codex built-in slash commands — use `$skill-name` or the `/skills` menu):
 
 ```
-$spec (optional) → $plan → $work (or $loop)
+$spec (optional) → $plan → $work
 → $self-review → $verify → $test → $sync-docs
 → $cross-review (optional) → $pr
 ```
+
+For autonomous multi-seat execution outside this interactive loop, see
+[Org runtime](#org-runtime-autonomous-multi-seat-execution).
 
 Before claiming a task is done:
 
@@ -102,9 +104,9 @@ Before claiming a task is done:
 
 | | |
 |:---|:---|
-| **Maps, not manuals**<br/>Short `AGENTS.md` / `CLAUDE.md`; push detail into rules and skills, promote repeats into hooks. | **Canonical pipeline**<br/>`self-review → verify → test → sync-docs → cross-review → pr` enforced in standard flow and Ralph Loop. |
+| **Maps, not manuals**<br/>Short `AGENTS.md` / `CLAUDE.md`; push detail into rules and skills, promote repeats into hooks. | **Canonical pipeline**<br/>`self-review → verify → test → sync-docs → cross-review → pr` enforced in the standard flow. |
 | **Deterministic hooks**<br/>Mojibake guard, commit-msg secret scan, Bash guardrails, verification reminders — pre-wired in `settings.json`. | **Worktree-first flow**<br/>Spec, plan, work, and PR artifacts are produced from clean-base task worktrees, with local cleanup after hand-off. |
-| **Ralph Loop**<br/>Multi-worktree autonomous parallel slices, integration branch, grouped PRs by default — orchestrated by `ralph run`. | **Language packs**<br/>TypeScript, Python, Rust, Go, Dart, and Terraform starters (opt-in) with per-language `verify.sh` and path-scoped rules. |
+| **Org runtime**<br/>Autonomous multi-seat execution (`ralph org spawn/send/wait/...`) with a typed messaging protocol and pulse-layer watchdog — see [Org runtime](#org-runtime-autonomous-multi-seat-execution). | **Language packs**<br/>TypeScript, Python, Rust, Go, Dart, and Terraform starters (opt-in) with per-language `verify.sh` and path-scoped rules. |
 | **Drift-proof upgrades**<br/>Hash-based `ralph upgrade` with per-file conflict resolution — keeps N projects aligned as the scaffold evolves. | **Evidence over prose**<br/>Every self-review, verify, test, sync-docs, and cross-review triage pass produces a dated artifact in `docs/reports/`. |
 | **Cross-agent portable**<br/>`AGENTS.md` + `scripts/` + `packs/` stay neutral; `.claude/` and `.codex/` are agent-specific layers you can stack others beside. | **Local state, not repo churn**<br/>Worktree lifecycle records live under `git-common-dir`, outside tracked files and branch checkouts. |
 
@@ -112,12 +114,10 @@ Before claiming a task is done:
 
 | Command | Purpose |
 |---------|---------|
-| `ralph init [name]` | Scaffold a new project (interactive: language packs, Ralph Loop, TUI). |
+| `ralph init [name]` | Scaffold a new project (interactive: language packs). |
 | `ralph upgrade` | Pull template updates with per-file conflict resolution. |
-| `ralph run` | Execute a Ralph Loop pipeline (orchestrator + per-slice pipelines). |
-| `ralph status` | Launch TUI (Lazygit-style 4-pane) or fall back to table/JSON output. |
-| `ralph retry <slice>` | Retry a failed or stuck slice. |
-| `ralph abort [--slice <name>]` | Abort a single slice or all slices. |
+| `ralph org spawn/send/wait/read/stop/status/disband` | Manage org-runtime seats for autonomous multi-seat execution. |
+| `ralph status [--org-id <id>]` | Show org roster status and watch-status summary (table or `--json`). |
 | `ralph pack add <lang>` | Install a language pack. |
 | `ralph doctor` | Check Claude Code, Codex, hooks, manifest drift, language packs. |
 | `ralph insights [--json]` | Aggregate pipeline insight events into a routing/pipeline summary. |
@@ -180,9 +180,7 @@ The philosophy: **a map, not a manual**. Keep `AGENTS.md` small, push detail int
 flowchart LR
     A["/spec<br/>(optional)"] --> B["/plan"]
     B --> C["/work"]
-    B --> D["/loop"]
     C --> E["/self-review"]
-    D --> E
     E --> F["/verify"]
     F --> G["/test"]
     G --> H["/sync-docs"]
@@ -194,8 +192,8 @@ flowchart LR
 Every step in the loop, including `/spec`, is auto-invoked. `/release` is the only manual-trigger skill and lives outside the loop (repo maintainer use).
 
 1. **Spec** (auto, optional — `/spec`) — refine vague requests through decision-tree questioning with recommended answers, codebase exploration, and interactive clarification. Issue-only specs use a temporary clean-base worktree and cleanup; saved specs create a docs/spec PR or hand off to `/plan`.
-2. **Plan** (auto — `/plan`) — ensures a clean-base task worktree, then writes a file-backed plan in `docs/plans/active/` with acceptance criteria, verify plan, test plan, risks. Selects flow: `/work` or `/loop`.
-3. **Work** (auto — `/work`) **or Loop** (auto — `/loop`) — `/work` resumes the task worktree and implements interactively; `/loop` runs autonomous parallel slices from the task worktree.
+2. **Plan** (auto — `/plan`) — ensures a clean-base task worktree, then writes a file-backed plan in `docs/plans/active/` with acceptance criteria, verify plan, test plan, risks.
+3. **Work** (auto — `/work`) — resumes the task worktree and implements interactively, delegating slices to the `implementer` subagent.
 4. **Self-review** (auto — `/self-review`) — diff quality artifact.
 5. **Verify** (auto — `/verify`) — spec compliance + static analysis.
 6. **Test** (auto — `/test`) — behavioral tests must pass before PR.
@@ -206,35 +204,22 @@ Every step in the loop, including `/spec`, is auto-invoked. `/release` is the on
 
 See `.claude/rules/post-implementation-pipeline.md` for the canonical pipeline order.
 
-## Ralph Loop (autonomous parallel execution)
+## Org runtime (autonomous multi-seat execution)
 
-For large tasks that can be split into independent slices, Ralph Loop runs parallel pipelines across multiple Git worktrees. Each slice handles its own lifecycle autonomously (implement → self-review → verify → test → sync-docs → cross-review). Completed slices are sequentially merged into a typed integration branch generated from the plan metadata, then submitted using the manifest PR strategy: grouped PRs by default, with unified or stacked PRs only when explicitly selected.
+For autonomous execution outside the interactive `/work` loop, `ralph org` spawns and coordinates multiple agent seats (a `lead` plus roles like `reviewer`, `qa`) over a typed messaging protocol (star topology — every seat addresses `TO: lead` only), with a two-layer watchdog (pulse watch + on-demand watcher) and an append-only manifest so `ralph status` works even if the underlying driver is stopped.
 
 ```sh
-./scripts/new-ralph-plan.sh --type feat my-feature N/A 3
-./scripts/ralph run --plan docs/plans/active/2026-01-01-my-feature/
-./scripts/ralph run --plan docs/plans/active/2026-01-01-my-feature/ --pr-strategy unified  # fallback single PR
-./scripts/ralph status                  # launches TUI if available
-./scripts/ralph status --no-tui         # table output
-./scripts/ralph status --json           # JSON output
-./scripts/ralph retry <slice-name>
-./scripts/ralph abort --slice <slice-name>
-./scripts/ralph abort                   # abort all
-./scripts/build-tui.sh                  # requires Go 1.22+
+ralph org spawn --org-id my-task --id lead --role lead
+ralph org send --org-id my-task --to lead --text "TYPE: TASK
+TASK_ID: 1
+
+..."
+ralph status --org-id my-task
+ralph org report --org-id my-task
+ralph org disband --org-id my-task
 ```
 
-Or use the `/loop` skill inside Claude Code for interactive setup.
-
-The Loop driver is selectable via `RALPH_LOOP_DRIVER=claude|codex` (or
-`[loop] driver = "..."` in `ralph.toml`). With `driver=codex`, per-slice
-agent calls go through `codex exec` and the cross-review reviewer is
-inverted to `claude -p` so the cross-model gate is preserved. See
-[Ralph Loop recipe](docs/recipes/ralph-loop.md#running-loop-under-the-codex-driver)
-for the full Codex driver workflow.
-
-Safety rails: iteration limits, stuck detection (3 consecutive no-change iterations), Inner/Outer Loop architecture with repair caps, slice timeout detection, signal handlers, hook parity checks. Configure via env vars in `scripts/ralph-config.sh`.
-
-See `docs/recipes/ralph-loop.md` for the full guide.
+See `docs/specs/2026-08-01-org-runtime.md` for the full protocol and `.claude/rules/agent-messaging.md` for the message-shape contract.
 
 ## Hooks
 
@@ -275,7 +260,7 @@ on drift so the two agent surfaces cannot quietly diverge.
 | Subagents in `/work` post-impl | `Task(subagent_type=...)` calls | `.codex/agents/` custom agents with the same phase roles |
 | Structured prompts | `AskUserQuestion` | numbered stdin prompt |
 | Cross-model reviewer | calls `codex exec review` | calls `claude -p` with adversarial reviewer prompt |
-| Permission policy | `permission_mode = "bypassPermissions"` (default; for conservative mode set env `RALPH_PERMISSION_MODE=auto` — works from every entry point — or `ralph.toml` `[pipeline] permission_mode = "auto"`, honored only via the Go `ralph run` binary; shell wrappers do not read TOML) | `sandbox_mode = "workspace-write"` + `approval_policy = "on-request"` |
+| Org seat permission policy | `ralph.toml` `[org.permissions] default = "autonomous"` (or `"edits"` / `"guarded"`; per-role overrides supported) | same enum, mapped to Codex's own sandbox/approval flags |
 | Config trust | always loads `.claude/settings.json` | only loads `.codex/config.toml` after `codex trust .` AND `[features] hooks = true` |
 
 ## Adoption order
@@ -306,18 +291,14 @@ See `docs/roadmap/harness-maturity-model.md`. Short version:
 ```text
 .
 ├── cmd/
-│   ├── ralph/                # CLI entrypoint (cobra + go:embed)
-│   └── ralph-tui/            # Legacy TUI entrypoint
+│   └── ralph/                # CLI entrypoint (cobra + go:embed)
 ├── internal/
 │   ├── cli/                  # Subcommands
 │   ├── scaffold/             # Template embedding + manifest
 │   ├── upgrade/              # Diff engine + conflict resolution
-│   ├── config/               # ralph.toml parser
-│   ├── state/                # Pipeline state reader
-│   ├── insights/             # Insight event aggregation + backfill
-│   ├── watcher/              # fsnotify + polling fallback
-│   ├── ui/                   # Bubble Tea TUI
-│   └── action/               # CLI action executor
+│   ├── config/                # ralph.toml parser
+│   ├── org/                  # Org runtime mechanism layer (seats, protocol, watchdog)
+│   └── insights/              # Insight event aggregation + backfill
 ├── templates/                # go:embed source (distributed by `ralph init`)
 │   ├── base/
 │   └── packs/

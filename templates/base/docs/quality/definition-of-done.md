@@ -29,35 +29,18 @@ The full pipeline must run in this order — no steps may be skipped:
 
 If `/cross-review` finds ACTION_REQUIRED issues and the user chooses to fix them, the **full pipeline** re-runs from `/self-review` through `/cross-review` again. `/sync-docs` must not be skipped in the re-run.
 
-The pipeline is capped at **2 total runs by default** (initial + 1 re-run). Standard flow uses `RALPH_STANDARD_MAX_PIPELINE_CYCLES` (default `2`), Ralph Loop uses `RALPH_MAX_OUTER_CYCLES` (default `2`). See `.claude/rules/post-implementation-pipeline.md` for cap semantics and state files.
+The pipeline is capped at **2 total runs by default** (initial + 1 re-run), controlled by `RALPH_STANDARD_MAX_PIPELINE_CYCLES` (default `2`). See `.claude/rules/post-implementation-pipeline.md` for cap semantics and state files.
 
 Phase boundaries are part of the definition of done. A passing pipeline that
 runs tests during `/verify`, static analysis during `/test`, or broad
 verification work during `/self-review` is not valid.
 
-## For Ralph Loop (/loop)
+## For org runtime tasks (`ralph org`)
 
-- [ ] Directory-based plan exists under `docs/plans/active/<date>-<slug>/`
-- [ ] `_manifest.md` has shared-file locklist and dependency graph
-- [ ] `_manifest.md` records the PR strategy decision: AI recommendation, rationale, and human approval state
-- [ ] Each `slice-*.md` has self-contained AC, affected files, and verify/test plan
-- [ ] All slice pipelines completed (`ralph status` shows all slices `complete`)
-- [ ] Sequential merge to typed integration branch passed without conflicts
-- [ ] Integration pipeline passed on merged branch (`--skip-pr --fix-all`)
-- [ ] Grouped PRs created from manifest `pr_groups`, or unified PR created only when explicitly selected
-- [ ] Each created PR title starts with the branch type prefix (`<type>: ...`)
-- [ ] Temporary integration branch cleanup completed on success, or diagnostic branches retained with cleanup instructions on failure
-- [ ] Plan directory archived from `docs/plans/active/` to `docs/plans/archive/`
-
-Ralph Loop handles the full lifecycle autonomously per slice (implement → self-review → verify → test → sync-docs → cross-review), then merges slices into the typed integration branch generated from plan metadata and runs a full-scope integration pipeline (`--skip-pr --fix-all`) to catch cross-module issues. The default PR strategy is `grouped`: related slices are submitted as reviewable PR groups from `pr_groups`. `unified` remains an explicit fallback for small or atomic changes, and `stacked` is available when group order is a real dependency chain. The AI recommends the PR strategy in the manifest, including rationale; human approval at plan approval time makes that strategy final.
-
-**Driver selection (Phase 2 / issue #44):** Loop runs under whichever driver is
-selected by `RALPH_LOOP_DRIVER` (env > `[loop] driver` in `ralph.toml` >
-default `claude`). The cross-review reviewer is always the opposite agent,
-so the cross-model gate holds regardless of driver. `ralph doctor` prints
-the effective driver and source.
-
-**Pipeline report output:** Each pipeline agent (self-review, verify, test) writes reports to both `.harness/state/pipeline/` (for orchestrator consumption) and `docs/reports/` (for PR pre-checks and human review). This dual-write ensures pipeline artifacts are available for the same quality checks as the standard flow.
+Autonomous multi-seat execution is a separate surface from the standard
+`/work` flow above; see `docs/specs/2026-08-01-org-runtime.md` and
+`.claude/rules/agent-messaging.md` for its own definition of done (roster
+status, manifest events, watchdog alerts).
 
 ## For risky or broad changes
 

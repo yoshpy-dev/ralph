@@ -50,8 +50,10 @@ hatch.
 - Saved specs that hand off to `/plan` keep using the same task worktree until
   the implementation PR succeeds.
 
-## Ralph Loop
+## Org runtime
 
-Ralph Loop still creates per-slice worktrees for parallel execution. The task
-worktree is the control worktree that owns the plan and orchestrator state; the
-slice worktrees remain managed by `ralph run`, `ralph retry`, and `ralph abort`.
+`ralph org spawn` records each seat's worktree path in the org manifest
+(`.harness/state/org/manifest.jsonl`, `worktree` field). The pulse-layer
+watchdog compares a seat's live `git status --porcelain` against its
+recorded worktree to detect out-of-scope changes (see
+`.claude/rules/agent-messaging.md` and `docs/specs/2026-08-01-org-runtime.md`).

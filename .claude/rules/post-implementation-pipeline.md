@@ -1,6 +1,6 @@
 # Post-implementation pipeline order
 
-Single source of truth for the post-implementation pipeline. All flows (standard /work, Ralph Loop) must follow this order.
+Single source of truth for the post-implementation pipeline (standard flow, `/work`).
 
 ## Canonical order
 
@@ -9,8 +9,6 @@ Single source of truth for the post-implementation pipeline. All flows (standard
 ```
 
 No step may be skipped. If any step triggers a fix-and-revalidate cycle (e.g., cross-review ACTION_REQUIRED), the **full pipeline** re-runs from `/self-review` onwards.
-
-**Pipeline parity:** In Ralph Loop (`ralph-pipeline.sh`), each post-implementation step runs as a dedicated `claude -p` agent with a single-responsibility prompt (not shell-direct execution). This ensures the same depth of analysis as standard-flow subagents: structured reports with findings tables, root cause analysis, spec compliance checks, and documentation drift detection. Reports are dual-written to both `.harness/state/pipeline/` and `docs/reports/`.
 
 ### CLI execution mode
 
@@ -55,22 +53,9 @@ Not just `/self-review → /verify → /test → /cross-review`. The `/sync-docs
 
 The post-implementation pipeline is capped at **2 total runs by default**: the initial run plus at most one fix-and-revalidate re-run. After the second run, the pipeline does not automatically regress even if cross-review still reports ACTION_REQUIRED.
 
-- **Standard flow (`/work`)**: controlled by `RALPH_STANDARD_MAX_PIPELINE_CYCLES` (default `2`). The counter is persisted to `.harness/state/standard-pipeline/cycle-count.json`, keyed by the pinned plan path and task worktree state in `.harness/state/standard-pipeline/active-plan.json`. When the cap is reached, `/cross-review` drops the "fix" option from Case A/B and offers: (1) raise the cap and re-run, (2) proceed to `/pr` and record remaining findings as known gaps, (3) abort.
-- **Ralph Loop (`/loop`)**: controlled by `RALPH_MAX_OUTER_CYCLES` (default `2`). When exceeded, `ralph-pipeline.sh` calls `_finalize "max_outer_cycles"` and stops autonomously.
+Controlled by `RALPH_STANDARD_MAX_PIPELINE_CYCLES` (default `2`). The counter is persisted to `.harness/state/standard-pipeline/cycle-count.json`, keyed by the pinned plan path and task worktree state in `.harness/state/standard-pipeline/active-plan.json`. When the cap is reached, `/cross-review` drops the "fix" option from Case A/B and offers: (1) raise the cap and re-run, (2) proceed to `/pr` and record remaining findings as known gaps, (3) abort.
 
-Both variables accept environment-variable overrides. Raise them only when you consciously accept additional churn; the default is a deliberate "fail fast, hand back to the operator" stance.
-
-## Integration pipeline (Ralph Loop only)
-
-After all slices are merged into the typed integration branch generated from the plan metadata, `ralph-orchestrator.sh` runs `ralph-pipeline.sh --skip-pr --fix-all` as a full integration quality gate. This follows the same canonical order above but with stricter thresholds:
-
-- `--skip-pr`: PR creation is handled by the orchestrator, not the pipeline
-- `--fix-all`: ALL self-review findings (CRITICAL+HIGH+MEDIUM+LOW > 0) override COMPLETE; WORTH_CONSIDERING cross-review findings trigger Inner Loop regression (same as ACTION_REQUIRED)
-- Integration runs set `RALPH_VERIFY_SCOPE=full` unless explicitly overridden, so verify/test cover every detected language on the merged branch.
-- The default PR strategy is `grouped`; `unified` is an explicit fallback. In grouped/stacked mode, integration fixes must be applied back to submitted group branches before PRs are marked ready.
-- The Ralph Loop manifest records the PR strategy decision. AI recommends the strategy and rationale; human approval at plan approval time makes the decision final. Runtime overrides must be visible warnings, not silent changes.
-
-**Intentional deviation in Ralph Loop:** Per-slice pipelines (`ralph-pipeline.sh`) do NOT stop on CRITICAL self-review findings — they log them and let verify/test catch real issues. This differs from the standard `/work` flow where CRITICAL findings block the pipeline. The rationale is that autonomous pipelines benefit from letting downstream gates (verify, test) confirm whether the finding is a true positive before halting. This deviation is tracked in `docs/tech-debt/README.md`.
+Raise the cap only when you consciously accept additional churn; the default is a deliberate "fail fast, hand back to the operator" stance.
 
 See `.claude/rules/subagent-policy.md` for execution model details.
 
@@ -78,7 +63,6 @@ See `.claude/rules/subagent-policy.md` for execution model details.
 
 If you update this order, update all of these locations:
 - `.claude/skills/work/SKILL.md` (Step 13)
-- `.claude/skills/loop/SKILL.md` (After the loop section)
 - `.claude/skills/cross-review/SKILL.md` (Case A and Case B re-run)
 - `.claude/rules/subagent-policy.md` (Post-implementation pipeline table)
 - `CLAUDE.md` (Default behavior)

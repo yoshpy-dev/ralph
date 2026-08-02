@@ -70,17 +70,10 @@ func TestTemplateBaseScriptsExist(t *testing.T) {
 		"ensure-pr-ready.sh",
 		"ensure-pr-title-prefix.sh",
 		"new-feature-plan.sh",
-		"new-ralph-plan.sh",
 		"codex-check.sh",
-		"ralph-loop-init.sh",
-		"ralph-loop.sh",
-		"ralph",
-		"ralph-cli-driver.sh",
 		"ralph-config.sh",
-		"ralph-orchestrator.sh",
-		"ralph-pipeline.sh",
-		"ralph-status-helpers.sh",
 		"ralph-worktree.sh",
+		"xreview-helpers.sh",
 		"secret-scan.sh",
 		"pre-commit-secret-guard.sh",
 		"commit-msg-guard.sh",
@@ -138,10 +131,11 @@ func TestTemplateBaseCodexAssetsExist(t *testing.T) {
 	}
 }
 
-// TestTemplateBaseRalphTomlHasLoopSection enforces that scaffolded projects
-// receive the Phase 2 [loop] driver settings out of the box. Without this,
-// `ralph init` users couldn't switch to the Codex driver via TOML alone.
-func TestTemplateBaseRalphTomlHasLoopSection(t *testing.T) {
+// TestTemplateBaseRalphTomlHasOrgSection enforces that scaffolded projects
+// receive the [org] envelope config out of the box. The [loop]/[pipeline]
+// sections this test used to also check were removed along with the Ralph
+// Loop execution system.
+func TestTemplateBaseRalphTomlHasOrgSection(t *testing.T) {
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("cannot determine test file location")
@@ -155,11 +149,8 @@ func TestTemplateBaseRalphTomlHasLoopSection(t *testing.T) {
 	}
 	body := string(data)
 	for _, want := range []string{
-		"[loop]",
-		`driver = "claude"`,
-		`codex_sandbox = "workspace-write"`,
-		`codex_approval_policy = "on-failure"`,
-		`claude_reviewer_model = "opus"`,
+		"[org]",
+		`driver_pool = ["claude", "codex"]`,
 	} {
 		if !contains(body, want) {
 			t.Errorf("templates/base/ralph.toml missing %q", want)

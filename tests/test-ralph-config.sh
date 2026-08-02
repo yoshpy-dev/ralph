@@ -2,7 +2,14 @@
 # shellcheck disable=SC1090  # the whole point is sourcing $CONFIG dynamically
 set -eu
 
-# test-ralph-config.sh — tests for ralph-config.sh shared configuration module
+# test-ralph-config.sh — tests for ralph-config.sh shared configuration module.
+#
+# ralph-config.sh's [loop]/[pipeline] defaults (RALPH_LOOP_*, per-phase
+# RALPH_*_MODEL, RALPH_MAX_* iteration caps) were removed along with the
+# Ralph Loop execution system. The surviving surface is the standard-flow
+# pipeline cycle cap (RALPH_STANDARD_MAX_PIPELINE_CYCLES), the
+# claude-as-reviewer model fallback (RALPH_CLAUDE_REVIEWER_MODEL), and the
+# [org] envelope lock-step vars.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -51,95 +58,11 @@ test_defaults() {
   echo "=== Default value tests ==="
 
   # Source in a subshell to avoid polluting this shell
-  _model="$(unset RALPH_MODEL; . "$CONFIG"; echo "$RALPH_MODEL")"
-  assert_eq "default RALPH_MODEL" "opus" "$_model"
-
-  _effort="$(unset RALPH_EFFORT; . "$CONFIG"; echo "$RALPH_EFFORT")"
-  assert_eq "default RALPH_EFFORT" "high" "$_effort"
-
-  _perm="$(unset RALPH_PERMISSION_MODE; . "$CONFIG"; echo "$RALPH_PERMISSION_MODE")"
-  assert_eq "default RALPH_PERMISSION_MODE" "bypassPermissions" "$_perm"
-
-  _max_iter="$(unset RALPH_MAX_ITERATIONS; . "$CONFIG"; echo "$RALPH_MAX_ITERATIONS")"
-  assert_eq "default RALPH_MAX_ITERATIONS" "20" "$_max_iter"
-
-  _max_inner="$(unset RALPH_MAX_INNER_CYCLES; . "$CONFIG"; echo "$RALPH_MAX_INNER_CYCLES")"
-  assert_eq "default RALPH_MAX_INNER_CYCLES" "10" "$_max_inner"
-
-  _max_outer="$(unset RALPH_MAX_OUTER_CYCLES; . "$CONFIG"; echo "$RALPH_MAX_OUTER_CYCLES")"
-  assert_eq "default RALPH_MAX_OUTER_CYCLES" "2" "$_max_outer"
-
-  _max_repair="$(unset RALPH_MAX_REPAIR_ATTEMPTS; . "$CONFIG"; echo "$RALPH_MAX_REPAIR_ATTEMPTS")"
-  assert_eq "default RALPH_MAX_REPAIR_ATTEMPTS" "5" "$_max_repair"
-
-  _max_par="$(unset RALPH_MAX_PARALLEL; . "$CONFIG"; echo "$RALPH_MAX_PARALLEL")"
-  assert_eq "default RALPH_MAX_PARALLEL" "4" "$_max_par"
-
-  _timeout="$(unset RALPH_SLICE_TIMEOUT; . "$CONFIG"; echo "$RALPH_SLICE_TIMEOUT")"
-  assert_eq "default RALPH_SLICE_TIMEOUT" "1800" "$_timeout"
-
   _standard_cycles="$(unset RALPH_STANDARD_MAX_PIPELINE_CYCLES; . "$CONFIG"; echo "$RALPH_STANDARD_MAX_PIPELINE_CYCLES")"
   assert_eq "default RALPH_STANDARD_MAX_PIPELINE_CYCLES" "2" "$_standard_cycles"
-}
 
-# ═══════════════════════════════════════════════════════════════════
-# Per-phase model variable defaults
-# ═══════════════════════════════════════════════════════════════════
-
-test_phase_model_defaults() {
-  echo ""
-  echo "=== Per-phase model variable default tests ==="
-
-  _force="$(unset RALPH_FORCE_MODEL; . "$CONFIG"; echo "${RALPH_FORCE_MODEL:-}")"
-  assert_eq "default RALPH_FORCE_MODEL is empty" "" "$_force"
-
-  _impl="$(unset RALPH_IMPLEMENT_MODEL; . "$CONFIG"; echo "$RALPH_IMPLEMENT_MODEL")"
-  assert_eq "default RALPH_IMPLEMENT_MODEL" "sonnet" "$_impl"
-
-  _sr="$(unset RALPH_SELF_REVIEW_MODEL; . "$CONFIG"; echo "$RALPH_SELF_REVIEW_MODEL")"
-  assert_eq "default RALPH_SELF_REVIEW_MODEL" "opus" "$_sr"
-
-  _verify="$(unset RALPH_VERIFY_MODEL; . "$CONFIG"; echo "$RALPH_VERIFY_MODEL")"
-  assert_eq "default RALPH_VERIFY_MODEL" "sonnet" "$_verify"
-
-  _test="$(unset RALPH_TEST_MODEL; . "$CONFIG"; echo "$RALPH_TEST_MODEL")"
-  assert_eq "default RALPH_TEST_MODEL" "sonnet" "$_test"
-
-  _sync="$(unset RALPH_SYNC_DOCS_MODEL; . "$CONFIG"; echo "$RALPH_SYNC_DOCS_MODEL")"
-  assert_eq "default RALPH_SYNC_DOCS_MODEL" "sonnet" "$_sync"
-
-  _pr="$(unset RALPH_PR_MODEL; . "$CONFIG"; echo "$RALPH_PR_MODEL")"
-  assert_eq "default RALPH_PR_MODEL" "sonnet" "$_pr"
-
-  _probe="$(unset RALPH_PROBE_MODEL; . "$CONFIG"; echo "$RALPH_PROBE_MODEL")"
-  assert_eq "default RALPH_PROBE_MODEL" "haiku" "$_probe"
-
-  _esc="$(unset RALPH_ESCALATION_MODEL; . "$CONFIG"; echo "$RALPH_ESCALATION_MODEL")"
-  assert_eq "default RALPH_ESCALATION_MODEL" "opus" "$_esc"
-}
-
-# ═══════════════════════════════════════════════════════════════════
-# Per-phase model variable env overrides
-# ═══════════════════════════════════════════════════════════════════
-
-test_phase_model_overrides() {
-  echo ""
-  echo "=== Per-phase model variable env override tests ==="
-
-  _impl="$(RALPH_IMPLEMENT_MODEL=opus; . "$CONFIG"; echo "$RALPH_IMPLEMENT_MODEL")"
-  assert_eq "override RALPH_IMPLEMENT_MODEL=opus" "opus" "$_impl"
-
-  _sr="$(RALPH_SELF_REVIEW_MODEL=sonnet; . "$CONFIG"; echo "$RALPH_SELF_REVIEW_MODEL")"
-  assert_eq "override RALPH_SELF_REVIEW_MODEL=sonnet" "sonnet" "$_sr"
-
-  _probe="$(RALPH_PROBE_MODEL=sonnet; . "$CONFIG"; echo "$RALPH_PROBE_MODEL")"
-  assert_eq "override RALPH_PROBE_MODEL=sonnet" "sonnet" "$_probe"
-
-  _force="$(RALPH_FORCE_MODEL=haiku; . "$CONFIG"; echo "$RALPH_FORCE_MODEL")"
-  assert_eq "override RALPH_FORCE_MODEL=haiku" "haiku" "$_force"
-
-  _esc="$(RALPH_ESCALATION_MODEL=sonnet; . "$CONFIG"; echo "$RALPH_ESCALATION_MODEL")"
-  assert_eq "override RALPH_ESCALATION_MODEL=sonnet" "sonnet" "$_esc"
+  _reviewer="$(unset RALPH_CLAUDE_REVIEWER_MODEL; . "$CONFIG"; echo "$RALPH_CLAUDE_REVIEWER_MODEL")"
+  assert_eq "default RALPH_CLAUDE_REVIEWER_MODEL" "opus" "$_reviewer"
 }
 
 # ═══════════════════════════════════════════════════════════════════
@@ -152,43 +75,11 @@ test_env_override() {
 
   # Use separate assignment statements (not inline VAR=value . cmd) for portability
   # In bash with set -u, inline assignments may not persist after special builtins
-  _model="$(RALPH_MODEL=sonnet; . "$CONFIG"; echo "$RALPH_MODEL")"
-  assert_eq "override RALPH_MODEL=sonnet" "sonnet" "$_model"
-
-  _effort="$(RALPH_EFFORT=low; . "$CONFIG"; echo "$RALPH_EFFORT")"
-  assert_eq "override RALPH_EFFORT=low" "low" "$_effort"
-
-  _max_iter="$(RALPH_MAX_ITERATIONS=50; . "$CONFIG"; echo "$RALPH_MAX_ITERATIONS")"
-  assert_eq "override RALPH_MAX_ITERATIONS=50" "50" "$_max_iter"
-
-  _timeout="$(RALPH_SLICE_TIMEOUT=3600; . "$CONFIG"; echo "$RALPH_SLICE_TIMEOUT")"
-  assert_eq "override RALPH_SLICE_TIMEOUT=3600" "3600" "$_timeout"
-
   _standard_cycles="$(RALPH_STANDARD_MAX_PIPELINE_CYCLES=5; . "$CONFIG"; echo "$RALPH_STANDARD_MAX_PIPELINE_CYCLES")"
   assert_eq "override RALPH_STANDARD_MAX_PIPELINE_CYCLES=5" "5" "$_standard_cycles"
-}
 
-# ═══════════════════════════════════════════════════════════════════
-# Empty-env edge cases
-# Tests the "non-empty env wins; empty env falls back to shell default"
-# contract described in the plan's Env-priority contract note.
-# When RALPH_PERMISSION_MODE is present-but-empty the shell layer's
-# ${RALPH_PERMISSION_MODE:-bypassPermissions} resolves to bypassPermissions.
-# ═══════════════════════════════════════════════════════════════════
-
-test_empty_env() {
-  echo ""
-  echo "=== Empty-env edge-case tests ==="
-
-  # RALPH_PERMISSION_MODE="" — empty value must fall back to bypassPermissions
-  # via the ${VAR:-default} expansion in ralph-config.sh, not be passed through
-  # as an empty string to claude -p.
-  _perm="$(RALPH_PERMISSION_MODE=''; . "$CONFIG"; echo "$RALPH_PERMISSION_MODE")"
-  assert_eq "empty RALPH_PERMISSION_MODE falls back to bypassPermissions" "bypassPermissions" "$_perm"
-
-  # Sanity-check: a non-empty value still wins.
-  _perm_auto="$(RALPH_PERMISSION_MODE='auto'; . "$CONFIG"; echo "$RALPH_PERMISSION_MODE")"
-  assert_eq "non-empty RALPH_PERMISSION_MODE=auto is preserved" "auto" "$_perm_auto"
+  _reviewer="$(RALPH_CLAUDE_REVIEWER_MODEL=sonnet; . "$CONFIG"; echo "$RALPH_CLAUDE_REVIEWER_MODEL")"
+  assert_eq "override RALPH_CLAUDE_REVIEWER_MODEL=sonnet" "sonnet" "$_reviewer"
 }
 
 # ═══════════════════════════════════════════════════════════════════
@@ -244,9 +135,6 @@ test_validate_all() {
     printf '  FAIL: validate_all_numeric failed with defaults\n'
   fi
 
-  assert_exits_nonzero "validate_all_numeric rejects bad RALPH_MAX_ITERATIONS" \
-    sh -c "RALPH_MAX_ITERATIONS=abc . '$CONFIG'; validate_all_numeric"
-
   assert_exits_nonzero "validate_all_numeric rejects bad RALPH_STANDARD_MAX_PIPELINE_CYCLES" \
     sh -c "RALPH_STANDARD_MAX_PIPELINE_CYCLES=abc . '$CONFIG'; validate_all_numeric"
 
@@ -262,10 +150,7 @@ main() {
   echo "=== ralph-config.sh tests ==="
 
   test_defaults
-  test_phase_model_defaults
   test_env_override
-  test_empty_env
-  test_phase_model_overrides
   test_validate_numeric
   test_validate_all
 

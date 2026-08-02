@@ -110,8 +110,10 @@ type RosterOptions struct {
 	// IncludeDryRun, when true, includes seats whose latest applicable
 	// event was recorded during a --dry-run invocation. The default
 	// (false) excludes dry-run events from both the roster and
-	// max_seats/ActiveSeatCount accounting -- dry-run audit trail stays
-	// visible only via `status --all` (AC-8, dry-run audit separation).
+	// max_seats/ActiveSeatCount accounting -- the dry-run audit trail is
+	// visible in `ralph org status --all` and unconditionally as rows in
+	// the top-level `ralph status` (internal/cli/status.go), but is always
+	// excluded from active-count gating (AC-8, dry-run audit separation).
 	// A dry-run seat is always a distinct entry from a real seat sharing
 	// the same seat_id -- it never overrides a real seat's derived latest
 	// state or its org-level disbanded flag (see seatKey/disbandKey).
@@ -137,7 +139,8 @@ type seatKey struct {
 // dry-run seat entries derived under RosterOptions{IncludeDryRun: true}; a
 // real `disband` must only deactivate real seats. Without this split, a
 // dry-run disbanded event would otherwise mark every *real* seat in the org
-// inactive the moment IncludeDryRun is true (`status --all`).
+// inactive whenever IncludeDryRun is true -- which `ralph org status --all`
+// and the top-level `ralph status` (internal/cli/status.go) both request.
 type disbandKey struct {
 	OrgID  string
 	DryRun bool

@@ -1,5 +1,11 @@
 # Existing harness engineering approaches: comparison and synthesis
 
+> **歴史的文書**: Ralph Loop は `refactor/org-runtime-retire-loop`（2026-08-03）で退役しました。
+> 以下の「Ralph Loop」「`ralph-loop.sh`」等への言及は、その退役以前の状態を記録した
+> 研究ノートとしてそのまま残しています。現在の自律実行の仕組みは org runtime
+> （`ralph org spawn/send/wait/...`）です。詳細は `docs/specs/2026-08-01-org-runtime.md`
+> を参照してください。
+
 This document distills the main approach families that informed `ralph` and the harness it ships.
 
 ## Executive summary

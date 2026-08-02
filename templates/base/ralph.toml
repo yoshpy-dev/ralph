@@ -1,56 +1,5 @@
 # ralph.toml — project-level configuration for the ralph CLI.
 
-[pipeline]
-model = "opus"
-effort = "high"
-max_iterations = 20
-max_parallel = 4
-slice_timeout = "30m"
-permission_mode = "bypassPermissions"
-# Unattended `claude -p` Loop runs cannot answer permission prompts; the
-# pipeline uses bypassPermissions by default.  Guardrails for bypassed headless
-# turns are: task-worktree isolation, post-hoc pipeline checks (commit-message
-# secret scan, uncommitted-change detection), verify/test gates, and human PR
-# review.  Note: interactive hooks do NOT fire under `claude -p` (see
-# docs/recipes/ralph-loop.md), so they are not part of the safety story here.
-# To run conservatively, set RALPH_PERMISSION_MODE=auto in the environment
-# (works from every entry point: shell scripts and `ralph run`) or set this
-# value to "auto" (honoured only when launching via the Go `ralph run` binary;
-# shell wrappers do not parse ralph.toml).
-
-[pipeline.prompts]
-# The pipeline currently reads its prompts from `.claude/skills/loop/prompts/`; this key is reserved for future prompt-dir override support.
-dir = ".ralph/prompts"
-
-# Per-phase model routing (plan-big-execute-small).
-# These mirror the RALPH_<PHASE>_MODEL shell defaults in scripts/ralph-config.sh.
-# Precedence: env RALPH_<PHASE>_MODEL > this section > built-in default.
-# Escalation applies to the implement seat when the Outer Loop enters a
-# fix-and-revalidate cycle (outer cycle >= 2).
-# To run everything on a single model (e.g. for rollback), set force:
-#   force = "opus"   # overrides all phase models; leave commented out normally
-[pipeline.phases]
-implement   = "sonnet"
-self_review = "opus"
-verify      = "sonnet"
-test        = "sonnet"
-sync_docs   = "sonnet"
-pr          = "sonnet"
-probe       = "haiku"
-escalation  = "opus"
-# force = "opus"
-
-# Ralph Loop driver — which driver runs `ralph-pipeline.sh` per slice.
-# Set driver = "codex" to run /loop under Codex; the env var
-# RALPH_LOOP_DRIVER overrides this value at runtime.
-# When driver = "codex", the cross-review reviewer is inverted (claude -p).
-# claude_reviewer_model picks the Claude model used in that inverted path.
-[loop]
-driver = "claude"
-codex_sandbox = "workspace-write"
-codex_approval_policy = "on-failure"
-claude_reviewer_model = "opus"
-
 [doctor]
 require_claude_cli = true
 # Codex is optional by default — set to true to fail `ralph doctor` when

@@ -1,430 +1,331 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
 
-	"github.com/yoshpy-dev/ralph/internal/action"
-	"github.com/yoshpy-dev/ralph/internal/config"
-	"github.com/yoshpy-dev/ralph/internal/state"
-	"github.com/yoshpy-dev/ralph/internal/ui"
-	"github.com/yoshpy-dev/ralph/internal/ui/panes"
-	"github.com/yoshpy-dev/ralph/internal/watcher"
+	"github.com/yoshpy-dev/ralph/internal/org"
 )
 
-// resolveLoopDriver returns the effective driver and source ("env" / "toml" /
-// "default"), reusing the same priority that runDoctor and runPipeline honour.
-// Lives here so `ralph status` can show what the next /loop run will use
-// (AC-6 of issue #44).
-func resolveLoopDriver() (driver, source string) {
-	if v := os.Getenv("RALPH_LOOP_DRIVER"); v != "" {
-		return v, "env"
-	}
-	cfg, _ := config.Load("ralph.toml")
-	if cfg.Loop.Driver != "" {
-		return cfg.Loop.Driver, "toml"
-	}
-	return config.Default().Loop.Driver, "default"
-}
-
+// newStatusCmd wires the top-level `ralph status` command. Unlike `ralph org
+// status` (which requires --org-id and shows one org's roster), this command
+// summarizes every org found in the manifest at the resolved state
+// directory (or a single org via --org-id), plus the latest `ralph org
+// watch` heartbeat and pending-alert count for each org when available. It
+// reads org.ManifestStore/org.Roster directly (read-only, no herdr/agmsg
+// process required) -- the same derivation `ralph org status` uses, just
+// grouped across every org_id instead of filtered to exactly one.
 func newStatusCmd() *cobra.Command {
 	var (
-		orchDir      string
-		worktreeBase string
-		planDir      string
-		jsonMode     bool
-		noTUI        bool
+		stateDir string
+		orgID    string
+		jsonOut  bool
 	)
 
 	cmd := &cobra.Command{
 		Use:   "status",
-		Short: "Show pipeline/orchestrator progress",
-		Long:  "Display the current pipeline status. Launches TUI when available, otherwise falls back to table or JSON output.",
+		Short: "Show org runtime roster status",
+		Long: "Displays the org runtime roster across every org_id found in the manifest\n" +
+			"(or a single org via --org-id): seats with role/driver/model/state, active\n" +
+			"seat counts, and -- when `ralph org watch` has run for that org -- the last\n" +
+			"watch heartbeat and pending alert count.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if orchDir == "" {
-				orchDir = ".harness/state/orchestrator"
-			}
-			if worktreeBase == "" {
-				worktreeBase = ".claude/worktrees"
-			}
-
-			if jsonMode {
-				return runStatusJSON(orchDir, worktreeBase, planDir)
-			}
-
-			if noTUI || !isTTY() {
-				return runStatusTable(orchDir, worktreeBase, planDir)
-			}
-
-			return runStatusTUI(orchDir, worktreeBase, planDir)
+			resolvedStateDir, _ := org.ResolveOrgStateDir(stateDir, cmd.Flags().Changed("state-dir"))
+			return runStatus(cmd, resolvedStateDir, orgID, jsonOut)
 		},
 	}
 
-	cmd.Flags().StringVar(&orchDir, "orch-dir", "", "path to orchestrator state directory (default: .harness/state/orchestrator)")
-	cmd.Flags().StringVar(&worktreeBase, "worktree-base", "", "path to worktree base directory (default: .claude/worktrees)")
-	cmd.Flags().StringVar(&planDir, "plan-dir", "", "path to plan directory (for dependency graph)")
-	cmd.Flags().BoolVar(&jsonMode, "json", false, "output machine-readable JSON")
-	cmd.Flags().BoolVar(&noTUI, "no-tui", false, "force table output (skip TUI)")
+	cmd.Flags().StringVar(&stateDir, "state-dir", "", "org manifest/receipts state directory (default: resolved by org.ResolveOrgStateDir -- env RALPH_ORG_STATE_DIR, else the enclosing git repo's toplevel .harness/state/org, else cwd's .harness/state/org)")
+	cmd.Flags().StringVar(&orgID, "org-id", "", "filter roster to a single org_id (default: every org found in the manifest)")
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "machine-readable JSON output")
 
 	return cmd
 }
 
-func isTTY() bool {
-	fi, err := os.Stdout.Stat()
-	if err != nil {
-		return false
-	}
-	return fi.Mode()&os.ModeCharDevice != 0
+// orgGroup is one org_id's derived roster, grouped for display.
+type orgGroup struct {
+	OrgID string
+	Seats []org.SeatStatus
 }
 
-func runStatusJSON(orchDir, worktreeBase, planDir string) error {
-	absOrchDir, err := filepath.Abs(orchDir)
+func runStatus(cmd *cobra.Command, stateDir, filterOrgID string, jsonOut bool) error {
+	store := org.NewManifestStoreAtPath(orgManifestPath(stateDir))
+	rr, err := store.Read()
 	if err != nil {
-		return fmt.Errorf("resolving orch-dir: %w", err)
+		return fmt.Errorf("status: read manifest: %w", err)
 	}
-	absWorktreeBase, err := filepath.Abs(worktreeBase)
-	if err != nil {
-		return fmt.Errorf("resolving worktree-base: %w", err)
-	}
-	absPlanDir := ""
-	if planDir != "" {
-		absPlanDir, err = filepath.Abs(planDir)
-		if err != nil {
-			return fmt.Errorf("resolving plan-dir: %w", err)
+
+	// IncludeDryRun: true -- this top-level summary command has no --all
+	// flag (unlike `ralph org status`, which gates dry-run visibility
+	// behind one, see newOrgStatusCmd) and is documented as showing "every
+	// org found in the manifest", so it always includes dry-run seats as
+	// rows. As a side benefit, this also makes the "[dry-run]" marker
+	// printStatusTableAllOrgs/buildStatusOrgJSON already render per seat
+	// reachable. This flip only widens the per-row listing -- the
+	// aggregate active/total counts below are computed separately from a
+	// real-seats-only roster (see buildRealSeatCounts) so a dry-run seat
+	// showing up as a row never inflates the numbers that gate spawning.
+	seats := org.Roster(rr.Events, org.RosterOptions{IncludeDryRun: true})
+	if filterOrgID != "" {
+		filtered := make([]org.SeatStatus, 0, len(seats))
+		for _, s := range seats {
+			if s.OrgID == filterOrgID {
+				filtered = append(filtered, s)
+			}
 		}
+		seats = filtered
 	}
 
-	status, err := state.ReadFullStatus(absOrchDir, absWorktreeBase, absPlanDir)
-	if err != nil {
-		return fmt.Errorf("reading state: %w", err)
+	groups := groupSeatsByOrg(seats)
+	realCounts := buildRealSeatCounts(rr.Events, groups)
+
+	if len(groups) == 0 {
+		return printStatusEmpty(cmd, stateDir, filterOrgID, jsonOut, rr.CorruptLines)
 	}
 
-	driver, source := resolveLoopDriver()
-	fmt.Printf("Loop driver: %s (source: %s)\n", driver, source)
-
-	// Simple JSON-like output for now; will be replaced with proper JSON marshaling.
-	fmt.Printf("Slices: %d\n", len(status.Slices))
-	for _, s := range status.Slices {
-		fmt.Printf("  %s: %s\n", s.Name, s.Status)
+	if jsonOut {
+		return printStatusJSONAllOrgs(cmd, stateDir, filterOrgID, groups, realCounts, rr.CorruptLines)
 	}
+	printStatusTableAllOrgs(cmd, stateDir, groups, realCounts, rr.CorruptLines)
 	return nil
 }
 
-func runStatusTable(orchDir, worktreeBase, planDir string) error {
-	// TODO: implement proper table rendering. Currently uses the same
-	// simple output as JSON mode. This will be replaced in Phase 6b.
-	return runStatusJSON(orchDir, worktreeBase, planDir)
+// realSeatCount holds one org_id's active/total seat counts derived from
+// the real (non-dry-run) roster only. This is the number that actually
+// gates `ralph org spawn`'s max_seats check (org.ActiveSeatCount /
+// RosterOptions{}, the same convention internal/org/report.go:201 and
+// internal/org/spawn.go:333,788 use) -- distinct from the dry-run-inclusive
+// rows this command renders per seat.
+type realSeatCount struct {
+	Active int
+	Total  int
 }
 
-func runStatusTUI(orchDir, worktreeBase, planDir string) error {
-	absOrchDir, err := filepath.Abs(orchDir)
+// buildRealSeatCounts derives the real (non-dry-run) active/total seat
+// counts for every org_id present in groups. It re-derives the roster from
+// events with RosterOptions{} (IncludeDryRun defaults to false), so a
+// dry-run seat contributes a display row (via the IncludeDryRun: true
+// roster built in runStatus) but never moves either count here. groups is
+// only consulted to enumerate which org_ids need a count entry.
+func buildRealSeatCounts(events []org.ManifestEvent, groups []orgGroup) map[string]realSeatCount {
+	real := org.Roster(events, org.RosterOptions{})
+	totals := make(map[string]int, len(groups))
+	actives := make(map[string]int, len(groups))
+	for _, s := range real {
+		totals[s.OrgID]++
+		if s.Active {
+			actives[s.OrgID]++
+		}
+	}
+	counts := make(map[string]realSeatCount, len(groups))
+	for _, g := range groups {
+		counts[g.OrgID] = realSeatCount{Active: actives[g.OrgID], Total: totals[g.OrgID]}
+	}
+	return counts
+}
+
+// groupSeatsByOrg splits Roster's flat, OrgID-sorted seat slice into
+// per-org groups, preserving Roster's existing sort order (org.Roster
+// already sorts by OrgID then SeatID -- see manifest.go).
+func groupSeatsByOrg(seats []org.SeatStatus) []orgGroup {
+	var groups []orgGroup
+	var current *orgGroup
+	for _, s := range seats {
+		if current == nil || current.OrgID != s.OrgID {
+			groups = append(groups, orgGroup{OrgID: s.OrgID})
+			current = &groups[len(groups)-1]
+		}
+		current.Seats = append(current.Seats, s)
+	}
+	return groups
+}
+
+// orgWatchHeartbeat mirrors the small subset of fields this command needs
+// from the JSON shape `ralph org watch` persists to
+// org.WatchStatusFileName(org_id) (internal/org/watch.go's unexported
+// watchStatusFile). That type stays unexported by design -- internal/org
+// keeps its watch-status JSON shape private -- so this command declares its
+// own read-only mirror struct instead of reaching into internal/org
+// internals, and reads the file directly via os.ReadFile.
+type orgWatchHeartbeat struct {
+	LastCycleTS   string                     `json:"last_cycle_ts"`
+	Cycles        int                        `json:"cycles"`
+	PendingAlerts map[string]json.RawMessage `json:"pending_alerts"`
+}
+
+// readOrgWatchHeartbeat returns the watch heartbeat for orgID, or ok=false
+// when no watch-status file exists yet (i.e. `ralph org watch` has never
+// run for this org) or it cannot be parsed.
+func readOrgWatchHeartbeat(stateDir, orgID string) (heartbeat orgWatchHeartbeat, ok bool) {
+	path := filepath.Join(stateDir, org.WatchStatusFileName(orgID))
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("resolving orch-dir: %w", err)
+		return orgWatchHeartbeat{}, false
 	}
-	absWorktreeBase, err := filepath.Abs(worktreeBase)
-	if err != nil {
-		return fmt.Errorf("resolving worktree-base: %w", err)
+	if err := json.Unmarshal(data, &heartbeat); err != nil {
+		return orgWatchHeartbeat{}, false
 	}
-	absPlanDir := ""
-	if planDir != "" {
-		absPlanDir, err = filepath.Abs(planDir)
-		if err != nil {
-			return fmt.Errorf("resolving plan-dir: %w", err)
-		}
-	}
-
-	status, err := state.ReadFullStatus(absOrchDir, absWorktreeBase, absPlanDir)
-	if err != nil {
-		return fmt.Errorf("reading initial state: %w", err)
-	}
-
-	w, err := watcher.New(absOrchDir, absWorktreeBase)
-	if err != nil {
-		return fmt.Errorf("creating watcher: %w", err)
-	}
-	defer func() { _ = w.Stop() }()
-
-	repoRoot := resolveRepoRoot(absOrchDir)
-	var executor *action.Executor
-	if exec, err := action.NewExecutor(repoRoot); err == nil {
-		executor = exec
-	}
-
-	model := newAppModel(status, w, executor, absOrchDir, absWorktreeBase, absPlanDir)
-
-	p := tea.NewProgram(model)
-	if _, err := p.Run(); err != nil {
-		return fmt.Errorf("TUI error: %w", err)
-	}
-	return nil
+	return heartbeat, true
 }
 
-// resolveRepoRoot walks up from orchDir to find the repo root.
-func resolveRepoRoot(orchDir string) string {
-	dir := orchDir
-	for range 10 {
-		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
-			return dir
-		}
-		if _, err := os.Stat(filepath.Join(dir, "scripts", "ralph")); err == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
+func printStatusEmpty(cmd *cobra.Command, stateDir, filterOrgID string, jsonOut bool, corruptLines int) error {
+	out := cmd.OutOrStdout()
+	if jsonOut {
+		payload := statusJSON{StateDir: stateDir, OrgID: filterOrgID, Orgs: []statusOrgJSON{}, CorruptLines: corruptLines}
+		enc := json.NewEncoder(out)
+		enc.SetIndent("", "  ")
+		return enc.Encode(payload)
 	}
-	return filepath.Join(orchDir, "..", "..", "..")
-}
-
-// appModel wraps the ui.Model with sub-model composition, watcher integration,
-// and state refresh logic. This bridges ui and ui/panes to avoid import cycles.
-type appModel struct {
-	ui       ui.Model
-	watcher  *watcher.Watcher
-	executor *action.Executor
-	orchDir  string
-	wtBase   string
-	planDir  string
-	tailer   *watcher.Tailer
-
-	sliceList panes.SliceListModel
-	detail    panes.DetailModel
-	deps      panes.DepsModel
-	actions   panes.ActionsModel
-	logView   panes.LogViewModel
-	progress  panes.ProgressModel
-}
-
-func newAppModel(status *state.FullStatus, w *watcher.Watcher, exec *action.Executor, orchDir, wtBase, planDir string) *appModel {
-	m := &appModel{
-		ui:       ui.New(),
-		watcher:  w,
-		executor: exec,
-		orchDir:  orchDir,
-		wtBase:   wtBase,
-		planDir:  planDir,
-
-		sliceList: panes.NewSliceList(status.Slices, 0, 0),
-		detail:    panes.NewDetail(0, 0),
-		deps:      panes.NewDeps(status.Dependencies, status.Slices, 0, 0),
-		actions:   panes.NewActionsModel(exec),
-		logView:   panes.NewLogView(0, 0),
-		progress:  panes.NewProgress(status.Slices, 0),
-	}
-
-	m.sliceList.SetFocused(true)
-	if s, ok := m.sliceList.SelectedSlice(); ok {
-		m.detail.SetSlice(&s)
-		m.deps.SetSelected(s.Name)
-	}
-	m.syncPaneContents()
-	return m
-}
-
-func (m *appModel) Init() tea.Cmd {
-	cmds := []tea.Cmd{m.watcher.Watch()}
-	if s, ok := m.sliceList.SelectedSlice(); ok && s.LogPath != "" {
-		if t, err := watcher.NewTailer(s.Name, s.LogPath); err == nil {
-			m.tailer = t
-			cmds = append(cmds, t.Tail())
-		}
+	// An empty roster does not mean "nothing to report": a manifest whose
+	// every line failed to parse also yields zero groups, and that is a
+	// data-integrity signal the operator needs, not silence (see
+	// printStatusTableAllOrgs's identical warning for the non-empty path,
+	// and `ralph org status`'s corrupt-count warning in org.go, which is
+	// likewise unconditional on seat count).
+	if filterOrgID != "" {
+		_, _ = fmt.Fprintf(out, "no org runtime state found (org-id=%s, state-dir=%s) — run `ralph org spawn` to start one.\n", filterOrgID, stateDir)
 	} else {
-		if t, err := watcher.NewTailer("", os.DevNull); err == nil {
-			m.tailer = t
-		}
+		_, _ = fmt.Fprintf(out, "no org runtime state found (state-dir=%s) — run `ralph org spawn` to start one.\n", stateDir)
 	}
-	return tea.Batch(cmds...)
+	if corruptLines > 0 {
+		_, _ = fmt.Fprintf(out, "warning: %d corrupt manifest line(s) skipped\n", corruptLines)
+	}
+	_, _ = fmt.Fprintln(out, "Run `ralph doctor` to check environment readiness.")
+	return nil
 }
 
-func (m *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmds []tea.Cmd
-
-	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		innerModel, cmd := m.ui.Update(msg)
-		m.ui = innerModel.(ui.Model)
-		if cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-		m.resizePanes()
-		m.syncPaneContents()
-		return m, tea.Batch(cmds...)
-
-	case watcher.StateChangedMsg:
-		if status, err := state.ReadFullStatus(m.orchDir, m.wtBase, m.planDir); err == nil {
-			m.sliceList.SetSlices(status.Slices)
-			m.deps.SetDeps(status.Dependencies, status.Slices)
-			m.progress.SetSlices(status.Slices)
-			if s, ok := m.sliceList.SelectedSlice(); ok {
-				m.detail.SetSlice(&s)
-				m.deps.SetSelected(s.Name)
-			}
-			m.syncPaneContents()
-		}
-		cmds = append(cmds, m.watcher.Watch())
-		return m, tea.Batch(cmds...)
-
-	case watcher.LogLineMsg:
-		m.logView.AppendLine(msg.Line)
-		m.syncPaneContents()
-		if m.tailer != nil {
-			cmds = append(cmds, m.tailer.Tail())
-		}
-		return m, tea.Batch(cmds...)
-
-	case watcher.WatcherErrorMsg:
-		return m, nil
-
-	case ui.ConfirmYesMsg:
-		cmd := m.actions.ExecuteConfirmed(msg.Tag)
-		if cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-		return m, tea.Batch(cmds...)
-
-	case ui.ConfirmNoMsg:
-		return m, nil
-
-	case ui.SliceSelectedMsg:
-		s := msg.Slice
-		m.detail.SetSlice(&s)
-		m.deps.SetSelected(s.Name)
-		m.actions, _ = m.actions.Update(msg)
-		if s.LogPath != "" && m.tailer != nil {
-			_ = m.tailer.SwitchFile(s.Name, s.LogPath)
-		}
-		m.syncPaneContents()
-		return m, nil
-	}
-
-	switch msg.(type) {
-	case action.RetryResultMsg, action.AbortResultMsg, action.ExternalDoneMsg:
-		var cmd tea.Cmd
-		m.actions, cmd = m.actions.Update(msg)
-		if cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-		m.syncPaneContents()
-		return m, tea.Batch(cmds...)
-	}
-
-	if kmsg, ok := msg.(tea.KeyPressMsg); ok {
-		if m.ui.Confirm.Visible {
-			innerModel, cmd := m.ui.Update(kmsg)
-			m.ui = innerModel.(ui.Model)
-			if cmd != nil {
-				cmds = append(cmds, cmd)
-			}
-			return m, tea.Batch(cmds...)
-		}
-
-		switch m.ui.Focused {
-		case ui.PaneSlices:
-			var cmd tea.Cmd
-			m.sliceList, cmd = m.sliceList.Update(kmsg)
-			if cmd != nil {
-				cmds = append(cmds, cmd)
-			}
-		case ui.PaneLogs:
-			var cmd tea.Cmd
-			m.logView, cmd = m.logView.Update(kmsg)
-			if cmd != nil {
-				cmds = append(cmds, cmd)
-			}
-		case ui.PaneActions:
-			cmd, confirmReq, consumed := m.actions.HandleKey(kmsg)
-			if confirmReq != nil {
-				m.ui.ShowConfirm(confirmReq.Message, confirmReq.Tag)
-				m.syncPaneContents()
-				return m, nil
-			}
-			if cmd != nil {
-				cmds = append(cmds, cmd)
-			}
-			_ = consumed
-		}
-
-		prevFocused := m.ui.Focused
-		innerModel, cmd := m.ui.Update(kmsg)
-		m.ui = innerModel.(ui.Model)
-		if cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-		if m.ui.Focused != prevFocused {
-			m.syncFocus()
-		}
-		m.syncPaneContents()
-
-		if m.ui.Quitting {
-			return m, tea.Quit
-		}
-		return m, tea.Batch(cmds...)
-	}
-
-	innerModel, cmd := m.ui.Update(msg)
-	m.ui = innerModel.(ui.Model)
-	if cmd != nil {
-		cmds = append(cmds, cmd)
-	}
-	if m.ui.Quitting {
-		return m, tea.Quit
-	}
-	return m, tea.Batch(cmds...)
+// statusSeatJSON is the --json wire shape for one seat, mirroring
+// orgSeatJSON in org.go (internal/org's SeatStatus carries no json tags on
+// purpose -- output-format concerns stay in the cli package).
+type statusSeatJSON struct {
+	SeatID    string `json:"seat_id"`
+	Role      string `json:"role,omitempty"`
+	Driver    string `json:"driver,omitempty"`
+	Model     string `json:"model,omitempty"`
+	Worktree  string `json:"worktree,omitempty"`
+	PaneID    string `json:"pane_id,omitempty"`
+	AgmsgTeam string `json:"agmsg_team,omitempty"`
+	Event     string `json:"event"`
+	Active    bool   `json:"active"`
+	DryRun    bool   `json:"dry_run,omitempty"`
+	Details   string `json:"details,omitempty"`
+	TS        string `json:"ts,omitempty"`
 }
 
-func (m *appModel) View() tea.View {
-	m.syncPaneContents()
-	v := m.ui.View()
-	v.AltScreen = true
-	return v
+type statusWatchJSON struct {
+	LastCycleTS   string `json:"last_cycle_ts"`
+	Cycles        int    `json:"cycles"`
+	PendingAlerts int    `json:"pending_alerts"`
 }
 
-func (m *appModel) syncPaneContents() {
-	m.ui.Panes = ui.PaneContents{
-		Slices:   m.sliceList.View(),
-		Detail:   m.detail.View(),
-		Deps:     m.deps.View(),
-		Actions:  m.actions.View(),
-		Logs:     m.logView.View(),
-		Progress: m.progress.View(),
+// statusOrgJSON is one org's rendered roster plus its aggregate counts.
+// Seats can include dry-run rows (see runStatus's IncludeDryRun: true
+// roster); ActiveCount and TotalCount deliberately do not derive from
+// len(Seats) or count Seats' Active field -- they are real-seat-only
+// (RosterOptions{}), matching org.ActiveSeatCount's own convention
+// (internal/org/report.go:201, internal/org/spawn.go:333,788) so a
+// dry-run seat appearing in Seats never changes what these two numbers
+// report.
+type statusOrgJSON struct {
+	OrgID       string           `json:"org_id"`
+	Seats       []statusSeatJSON `json:"seats"`
+	ActiveCount int              `json:"active_count"`
+	TotalCount  int              `json:"total_count"`
+	Watch       *statusWatchJSON `json:"watch,omitempty"`
+}
+
+// statusJSON is the single `ralph status --json` wire shape, used by both
+// the empty-roster path (printStatusEmpty) and the populated path
+// (printStatusJSONAllOrgs). Keeping one struct for both means a machine
+// consumer never has to branch on which shape it received: `org_id` is only
+// present when --org-id filtered the roster, `corrupt_lines` only when the
+// manifest actually had corrupt lines, and `orgs` is always an array (empty
+// or populated).
+type statusJSON struct {
+	StateDir     string          `json:"state_dir"`
+	OrgID        string          `json:"org_id,omitempty"`
+	Orgs         []statusOrgJSON `json:"orgs"`
+	CorruptLines int             `json:"corrupt_lines,omitempty"`
+}
+
+func printStatusJSONAllOrgs(cmd *cobra.Command, stateDir, filterOrgID string, groups []orgGroup, realCounts map[string]realSeatCount, corruptLines int) error {
+	orgsJSON := make([]statusOrgJSON, 0, len(groups))
+	for _, g := range groups {
+		orgsJSON = append(orgsJSON, buildStatusOrgJSON(stateDir, g, realCounts[g.OrgID]))
 	}
+	payload := statusJSON{StateDir: stateDir, OrgID: filterOrgID, Orgs: orgsJSON, CorruptLines: corruptLines}
+	enc := json.NewEncoder(cmd.OutOrStdout())
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
 }
 
-func (m *appModel) syncFocus() {
-	m.sliceList.SetFocused(m.ui.Focused == ui.PaneSlices)
-	m.detail.SetFocused(m.ui.Focused == ui.PaneDetail)
-	m.deps.SetFocused(m.ui.Focused == ui.PaneDeps)
-	m.logView.SetFocused(m.ui.Focused == ui.PaneLogs)
-	m.actions = m.actions.SetFocused(m.ui.Focused == ui.PaneActions)
+// buildStatusOrgJSON renders one org's seats (dry-run-inclusive, per g.Seats)
+// alongside the org's real-seat-only active/total counts (realCount --
+// see buildRealSeatCounts). ActiveCount/TotalCount deliberately do not
+// count g.Seats directly: that slice can include dry-run rows, and the
+// aggregate must match the number that gates `ralph org spawn`.
+func buildStatusOrgJSON(stateDir string, g orgGroup, realCount realSeatCount) statusOrgJSON {
+	seatsJSON := make([]statusSeatJSON, len(g.Seats))
+	for i, s := range g.Seats {
+		seatsJSON[i] = statusSeatJSON{
+			SeatID: s.SeatID, Role: s.Role, Driver: s.Driver, Model: s.Model,
+			Worktree: s.Worktree, PaneID: s.PaneID, AgmsgTeam: s.AgmsgTeam, Event: s.Event,
+			Active: s.Active, DryRun: s.DryRun, Details: s.Details, TS: s.TS,
+		}
+	}
+	result := statusOrgJSON{OrgID: g.OrgID, Seats: seatsJSON, ActiveCount: realCount.Active, TotalCount: realCount.Total}
+	if hb, ok := readOrgWatchHeartbeat(stateDir, g.OrgID); ok {
+		result.Watch = &statusWatchJSON{
+			LastCycleTS:   hb.LastCycleTS,
+			Cycles:        hb.Cycles,
+			PendingAlerts: len(hb.PendingAlerts),
+		}
+	}
+	return result
 }
 
-func (m *appModel) resizePanes() {
-	w, h := m.ui.Width, m.ui.Height
-	if w == 0 || h == 0 {
-		return
+func printStatusTableAllOrgs(cmd *cobra.Command, stateDir string, groups []orgGroup, realCounts map[string]realSeatCount, corruptLines int) {
+	out := cmd.OutOrStdout()
+
+	// Deterministic org order for readability, matching Roster's own
+	// OrgID-then-SeatID sort (groupSeatsByOrg preserves it already, but
+	// sort explicitly here so this stays correct even if Roster's own
+	// ordering guarantee ever changes upstream).
+	sort.Slice(groups, func(i, j int) bool { return groups[i].OrgID < groups[j].OrgID })
+
+	for i, g := range groups {
+		if i > 0 {
+			_, _ = fmt.Fprintln(out)
+		}
+		// active/total here are real-seat-only (realCounts, from
+		// buildRealSeatCounts) -- not a count over g.Seats, which can
+		// include dry-run rows. See statusOrgJSON's doc comment for the
+		// same convention on the --json path.
+		rc := realCounts[g.OrgID]
+		_, _ = fmt.Fprintf(out, "org_id: %s (active %d/%d)\n", g.OrgID, rc.Active, rc.Total)
+		_, _ = fmt.Fprintln(out, "  SEAT_ID\tROLE\tDRIVER\tMODEL\tSTATE\tPANE_ID")
+		for _, s := range g.Seats {
+			state := s.Event
+			if s.Active {
+				state += " (active)"
+			}
+			if s.DryRun {
+				state += " [dry-run]"
+			}
+			_, _ = fmt.Fprintf(out, "  %s\t%s\t%s\t%s\t%s\t%s\n", s.SeatID, s.Role, s.Driver, s.Model, state, s.PaneID)
+		}
+		if hb, ok := readOrgWatchHeartbeat(stateDir, g.OrgID); ok {
+			_, _ = fmt.Fprintf(out, "  watch: last heartbeat %s (cycle %d), pending alerts: %d\n",
+				hb.LastCycleTS, hb.Cycles, len(hb.PendingAlerts))
+		}
 	}
 
-	contentHeight := max(h-1, 6)
-	upperHeight := contentHeight * 60 / 100
-	lowerHeight := contentHeight - upperHeight
-
-	slicesW := w * 30 / 100
-	detailW := w * 35 / 100
-	depsW := w - slicesW - detailW
-
-	actionsW := w * 30 / 100
-	logsW := w - actionsW
-
-	m.sliceList.SetSize(slicesW-2, upperHeight-2)
-	m.detail.SetSize(detailW-2, upperHeight-2)
-	m.deps.SetSize(depsW-2, upperHeight-2)
-	m.actions = m.actions.SetSize(actionsW-2, lowerHeight-2)
-	m.logView.SetSize(logsW-2, lowerHeight-2)
-	m.progress.SetWidth(w)
+	if corruptLines > 0 {
+		_, _ = fmt.Fprintf(out, "\nwarning: %d corrupt manifest line(s) skipped\n", corruptLines)
+	}
 }

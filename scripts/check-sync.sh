@@ -27,7 +27,6 @@ ROOT_ONLY_EXCLUSIONS=(
   "Makefile"
   # Build and install scripts (repo-specific)
   "scripts/bootstrap.sh"
-  "scripts/build-tui.sh"
   "scripts/install.sh"
   "scripts/init-project.sh"
   "scripts/new-language-pack.sh"

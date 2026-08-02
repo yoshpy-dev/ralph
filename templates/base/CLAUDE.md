@@ -8,7 +8,7 @@ guidance lives in `.codex/AGENTS.override.md` and `.codex/README.md`.
 
 ## Default behavior
 
-- All skills (`/spec`, `/plan`, `/work`, `/loop`, `/self-review`, `/verify`,
+- All skills (`/spec`, `/plan`, `/work`, `/self-review`, `/verify`,
   `/test`, `/sync-docs`, `/cross-review`, `/pr`, `/audit-harness`, `/org`) are
   auto-invoked. The scaffold ships no manual-trigger skill.
 - Use `/spec` when the request is too vague for `/plan`. `/spec` refines
@@ -20,9 +20,9 @@ guidance lives in `.codex/AGENTS.override.md` and `.codex/README.md`.
   clean-base task worktree before writing plan artifacts.
 - `/work` resumes the task worktree and starts interactive implementation.
   Post-impl pipeline runs via subagents.
-- `/loop` uses a directory-based plan and runs `ralph-orchestrator.sh` for
-  autonomous parallel-slice execution. Use `./scripts/ralph run` or
-  `./scripts/ralph status` to operate.
+- Autonomous multi-seat execution outside this interactive flow is the org
+  runtime's job (`ralph org spawn/send/wait/...`). See the org runtime spec
+  shipped with your project and `.claude/rules/agent-messaging.md`.
 - After `/work`, the post-implementation pipeline runs via subagents
   (`/self-review` → `/verify` → `/test` → `/sync-docs`), then `/cross-review`
   (optional, inline), then `/pr`.
@@ -37,9 +37,7 @@ guidance lives in `.codex/AGENTS.override.md` and `.codex/README.md`.
   PR is created and cleanup has either succeeded or reported recoverable state.
 - Subagent execution model: in `/work`, the post-impl pipeline runs via
   `Task(subagent_type=...)` calls (`reviewer`, `verifier`, `tester`,
-  `doc-maintainer`). In Ralph Loop, the same pipeline runs internally via
-  dedicated `claude -p` prompts per slice. See
-  `.claude/rules/subagent-policy.md`.
+  `doc-maintainer`). See `.claude/rules/subagent-policy.md`.
 - Run `./scripts/run-verify.sh` or an equivalent deterministic check before
   claiming success.
 - If context is getting crowded, checkpoint progress in the active plan before

@@ -19,17 +19,13 @@ one-commit-per-slice boundary, but the implementer runs the verification and
 owns the commit; the orchestrator adjudicates the returned report instead of
 re-staging or re-committing (see `.claude/skills/work/SKILL.md` step 7).
 
-## Ralph Loop Commits
+## Org Runtime Commits
 
-Each iteration must commit its changes before finishing:
-
-1. Implement the iteration's step
-2. Verify the change (static analysis, tests)
-3. Commit with conventional format: `<type>: <description>`
-4. Append summary to `progress.log`
-5. Do NOT leave uncommitted changes between iterations
-
-In Ralph Loop (`ralph-pipeline.sh` per slice), the implementation agent (Inner Loop) is responsible for committing each step. The pipeline detects uncommitted changes via `git diff-index --quiet HEAD` after each iteration and warns if any remain. Documentation changes from the Outer Loop (sync-docs) are committed by the pipeline-outer agent before PR creation.
+Org runtime seats commit the same way as the standard flow above: implement,
+verify, commit with conventional format, and do not leave uncommitted changes
+between steps. There is no separate iteration-commit mechanism — a seat's
+work is recorded in the org saga manifest (`.harness/state/org/manifest.jsonl`)
+and receipts alongside its git commits, not in a `progress.log`.
 
 ## End-of-Session / Pre-Compaction WIP Commits
 

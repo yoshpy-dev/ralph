@@ -19,10 +19,16 @@ Build coding-agent workflows that are:
 
 ## Primary loop
 
+This repo ships two independent execution surfaces:
+
+- **開発ハーネス (development harness)** — the interactive standard flow below, used for all spec/plan/work/review changes.
+- **org runtime** — autonomous multi-seat execution (`ralph org spawn/send/wait/...`) for tasks that need a coordinating `lead` plus role seats running outside a single interactive session. See `internal/org/`, `docs/specs/2026-08-01-org-runtime.md`, and `.claude/rules/agent-messaging.md`.
+
+The development harness:
+
 1. Spec (auto, optional — invoked when the request is too vague for planning; refines vague ideas into detailed specifications via decision-tree questioning with recommended answers, codebase exploration, web research, and user clarification; issue-only specs use a temporary worktree and cleanup, saved specs create a docs/spec PR or hand off to planning)
-2. Plan (auto — ensures a clean-base task worktree, creates plan, selects flow) [+ optional Codex plan advisory]
-3. **標準フロー**: Work (auto — resumes task worktree, interactive implementation)
-   **Ralph Loop**: Loop (auto — directory-based plan → `ralph-orchestrator.sh` → multi-worktree parallel → integration branch → integration pipeline → grouped PRs by default; unified PR as explicit fallback)
+2. Plan (auto — ensures a clean-base task worktree, creates plan) [+ optional Codex plan advisory]
+3. Work (auto — resumes task worktree, interactive implementation)
 4. Self-review (auto — via `reviewer` subagent, or pipeline-internal)
 5. Verify (auto — via `verifier` subagent, or pipeline-internal)
 6. Test (auto — via `tester` subagent, or pipeline-internal)
@@ -31,11 +37,8 @@ Build coding-agent workflows that are:
 9. PR (auto — includes hand-off)
 10. CI verify + human merge
 
-Steps 4–7 run through phase-specific subagents in 標準フロー for both
-Claude Code and Codex; `/cross-review` and `/pr` remain inline. In Ralph Loop,
-steps 4–9 are handled internally by the pipeline scripts.
-
-Ralph Loop runs under whichever driver is selected by `RALPH_LOOP_DRIVER` (or `[loop] driver` in `ralph.toml`); the cross-review reviewer is always the opposite agent. `ralph status` and `ralph doctor` print the effective driver and source.
+Steps 4–7 run through phase-specific subagents for both Claude Code and
+Codex; `/cross-review` and `/pr` remain inline.
 
 All repo writes in spec/plan/work flows must happen inside a task worktree
 created from a clean default branch. Local task state lives under
@@ -52,22 +55,17 @@ task worktree and local branch while leaving the remote PR branch intact.
 ## Repo map
 
 - `cmd/ralph/` — Go entrypoint for the ralph CLI (cobra root, ldflags injection, go:embed wiring)
-- `cmd/ralph-tui/` — Legacy TUI entrypoint (to be removed in Phase 9)
-- `internal/cli/` — cobra subcommands (init, upgrade, run, status, retry, abort, doctor, pack, insights, version)
+- `internal/cli/` — cobra subcommands (init, upgrade, status, doctor, pack, insights, org, version)
 - `internal/scaffold/` — go:embed template system, manifest TOML, file render with SHA256 hashes
 - `internal/upgrade/` — hash-based diff engine, conflict resolution (auto-update, conflict, add, remove)
 - `internal/config/` — ralph.toml parser with defaults
-- `internal/state/` — pipeline state reader (checkpoint, orchestrator, manifest parsing)
 - `internal/org/` — org runtime mechanism layer: envelope validation, seat saga manifest (flock-serialized), receipts, permission-mode envelopes, herdr/agmsg driver adapters, role prompt templates (go:embed), typed message protocol, org report generation, two-layer watchdog (pulse watch + on-demand watcher) (spec: docs/specs/2026-08-01-org-runtime.md; protocol rule: .claude/rules/agent-messaging.md)
 - `internal/insights/` — insight event/receipt readers, aggregation, and report backfill for `ralph insights`
-- `internal/watcher/` — fsnotify-based file watcher with polling fallback
-- `internal/ui/` — Bubble Tea model, layout, panes, keybindings, styles
-- `internal/action/` — CLI action executor (retry, abort)
 - `templates/` — go:embed source: base scaffold, language packs
 - `docs/specs/` — spec files produced by `/spec` (`<date>-<slug>.md`)
-- `docs/plans/active/` — current plans (single files for standard flow; `<date>-<slug>/` directories with `_manifest.md` + `slice-*.md` for Ralph Loop)
+- `docs/plans/active/` — current plans (`<date>-<slug>.md` single files)
 - `docs/plans/archive/` — completed plans
-- `docs/plans/templates/` — plan templates (`feature-plan.md`, `ralph-loop-manifest.md`, `ralph-loop-slice.md`)
+- `docs/plans/templates/` — plan templates (`feature-plan.md`)
 - `docs/reports/` — self-review, verify, test, sync-docs, cross-review triage, walkthrough artifacts
 - `docs/insights/` — committed insight events (`events/<date>-<slug>.jsonl`); schema in `docs/insights/README.md`; consumed by `ralph insights`
 - `docs/quality/` — definition of done and quality gates
@@ -80,8 +78,8 @@ task worktree and local branch while leaving the remote PR branch intact.
 - `.codex/` — Codex project config for this meta-repo (`config.toml`, `agents/`, `hooks/`, `AGENTS.override.md`, `README.md`); `agents/` contains Codex custom agent definitions; same shape as `templates/base/.codex/` so ralph dogfoods the parity it ships
 - `templates/base/.codex/` — `ralph init` source for the same surface; root `.codex/` and template `.codex/` are kept identical via `scripts/check-sync.sh` (no KNOWN_DIFFS today)
 - `packs/languages/` — language-specific depth (also copied to `templates/packs/` for embedding)
-- `scripts/` — reusable verification and bootstrap scripts (includes `ralph-common.sh` (shared shell helpers: ts/log/default_branch/detect_active_plan_dir); legacy `ralph` shell CLI (prints deprecation notice when Go `ralph` binary is on PATH; retirement tracked in docs/tech-debt/README.md), `ralph-config.sh`, `ralph-worktree.sh`, `ralph-pipeline.sh`, `ralph-orchestrator.sh`, `ralph-cli-driver.sh` (driver dispatcher: `run_agent` / `pick_reviewer` / `detect_base_branch` / `count_triage_findings` / `resolve_phase_model` / `write_model_receipt`), `install.sh`, skills-mirror generator `sync-skills.sh`, drift gate `check-skill-sync.sh`, artifact retention GC `gc-artifacts.sh`, insight-event appender `insights-append.sh`, Codex availability probe `codex-check.sh`)
-- `docs/recipes/` — hands-on recipes (Codex setup, Ralph Loop, language packs, worktrees)
+- `scripts/` — reusable verification and bootstrap scripts (includes `ralph-common.sh` (shared shell helpers: ts/log/default_branch/detect_active_plan_dir); `ralph-config.sh`, `ralph-worktree.sh`, `xreview-helpers.sh` (cross-review driver helpers: `detect_base_branch` / `pick_reviewer` / `count_triage_findings`), `install.sh`, skills-mirror generator `sync-skills.sh`, drift gate `check-skill-sync.sh`, artifact retention GC `gc-artifacts.sh`, insight-event appender `insights-append.sh`, Codex availability probe `codex-check.sh`)
+- `docs/recipes/` — hands-on recipes (Codex setup, language packs, worktrees)
 - `.harness/state/` — runtime state, not canonical truth
 
 ## Planning contract

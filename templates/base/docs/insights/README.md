@@ -1,7 +1,14 @@
-# docs/insights — Ralph Pipeline Insight Events
+# docs/insights — Post-Implementation Insight Events
 
-This directory stores structured pipeline event data emitted by `ralph-pipeline.sh`
-and post-implementation skills. The events are the primary source for `ralph insights`.
+This directory stores structured insight event data emitted by post-implementation
+skills (`/self-review`, `/verify`, `/test`, `/cross-review`) via
+`scripts/insights-append.sh`, and derived by `ralph insights backfill` from existing
+Markdown reports. The events are the primary source for `ralph insights`.
+
+Historical events also include those written by the now-retired Ralph Loop
+autonomous pipeline (`flow: loop`, `source: pipeline`). `ralph insights` continues
+to read these for backward compatibility, but no live writer emits them anymore —
+every currently-written event uses `flow: standard`.
 
 ## Schema v1
 
@@ -13,19 +20,19 @@ Each event is one JSON line appended to a per-task file under `events/`.
 |-------|------|----------|----------------|
 | `schema` | integer | yes | Always `1` for schema v1. Bumps on breaking change. |
 | `ts` | string | yes | ISO8601 UTC timestamp (e.g. `2026-07-13T01:23:45Z`). |
-| `run_id` | string | required for `source:pipeline`; optional for `source:skill\|backfill` | Per-pipeline-invocation identifier (`<ts>-<pid>`). Constant across all events in one `ralph-pipeline.sh` run. Omitted when written by a skill agent or by `ralph insights backfill` (no single run context). |
+| `run_id` | string | historical for `source:pipeline`; optional for `source:skill\|backfill` | Per-pipeline-invocation identifier (`<ts>-<pid>`). Historically constant across all events in one `ralph-pipeline.sh` run (that writer is retired). Omitted when written by a skill agent or by `ralph insights backfill` (no single run context). |
 | `slug` | string | yes | Task slug (matches plan file basename, e.g. `ralph-insights`). |
-| `flow` | string | yes | `standard` or `loop`. Pipeline-emitted events are always `loop`. Skill-emitted events use `standard`. |
+| `flow` | string | yes | `standard` or `loop`. `loop` is historical only (written by the retired Ralph Loop pipeline). All current skill-emitted events use `standard`. |
 | `phase` | string | yes | Phase name: `implement`, `self_review`, `verify`, `test`, `sync_docs`, `cross_review`, `pr`. |
 | `cycle` | integer | yes | 1-based outer cycle number. Default: `1` when `--cycle` is omitted from `insights-append.sh`. |
 | `verdict` | string | yes | `pass`, `fail`, `complete`, `action_required`, or `n/a`. |
 | `findings` | object | yes | `{"critical": N, "high": N, "medium": N, "low": N}`. Use `0` for phases where findings are not applicable. |
 | `triage` | object | yes | `{"action_required": N, "worth_considering": N, "dismissed": N}`. Use `0` for non-cross-review phases. |
-| `driver` | string | required for `source:pipeline`; optional for `source:skill\|backfill` | `claude` or `codex`. |
-| `requested_model` | string | required for `source:pipeline`; optional for `source:skill\|backfill` | Model requested for this phase (e.g. `sonnet`, `opus`). |
-| `effective_model` | string | required for `source:pipeline`; optional for `source:skill\|backfill` | Model actually used. Equals `requested_model` for the Claude driver; `codex-default` for the Codex driver. |
-| `honored` | boolean | required for `source:pipeline`; optional for `source:skill\|backfill` | `true` if `effective_model == requested_model`. `false` for Codex driver (known gap). |
-| `source` | string | yes | `pipeline` (written by `ralph-pipeline.sh`), `skill` (written by a post-implementation skill agent), or `backfill` (written by `ralph insights backfill`). |
+| `driver` | string | historical for `source:pipeline`; optional for `source:skill\|backfill` | `claude` or `codex`. Only ever emitted by the retired pipeline writer; current skill-emitted events omit it. |
+| `requested_model` | string | historical for `source:pipeline`; optional for `source:skill\|backfill` | Model requested for this phase (e.g. `sonnet`, `opus`). Historical field, see `driver`. |
+| `effective_model` | string | historical for `source:pipeline`; optional for `source:skill\|backfill` | Model actually used. Equals `requested_model` for the Claude driver; `codex-default` for the Codex driver. Historical field, see `driver`. |
+| `honored` | boolean | historical for `source:pipeline`; optional for `source:skill\|backfill` | `true` if `effective_model == requested_model`. `false` for Codex driver (known gap). Historical field, see `driver`. |
+| `source` | string | yes | `pipeline` (historical only — written by the now-retired `ralph-pipeline.sh`), `skill` (written by a post-implementation skill agent — the only live writer today), or `backfill` (written by `ralph insights backfill`). |
 
 ### Optional fields
 
@@ -48,6 +55,14 @@ Cross-review triage reports may contain multiple pipeline cycles (each introduce
 
 ### Example line
 
+Current live event (written by the `/self-review` skill):
+
+```json
+{"schema":1,"ts":"2026-08-03T01:23:45Z","slug":"ralph-insights","flow":"standard","phase":"self_review","cycle":1,"verdict":"pass","findings":{"critical":0,"high":0,"medium":0,"low":0},"triage":{"action_required":0,"worth_considering":0,"dismissed":0},"source":"skill"}
+```
+
+Historical event (written by the now-retired `ralph-pipeline.sh`; still readable):
+
 ```json
 {"schema":1,"ts":"2026-07-13T01:23:45Z","run_id":"20260713T012345Z-12345","slug":"ralph-insights","flow":"loop","phase":"self_review","cycle":1,"verdict":"pass","findings":{"critical":0,"high":0,"medium":0,"low":0},"triage":{"action_required":0,"worth_considering":0,"dismissed":0},"driver":"claude","requested_model":"opus","effective_model":"opus","honored":true,"source":"pipeline"}
 ```
@@ -64,11 +79,11 @@ Example: `docs/insights/events/2026-07-13-ralph-insights.jsonl`
 
 ### Why per-task files?
 
-Ralph Loop slices commit on separate branches and merge sequentially.
-If all events were appended to a single global JSONL file, every parallel
-slice would produce a conflicting append on merge. Per-task files make
-merges trivially clean: each task owns exactly one file, and no two branches
-touch the same file.
+Each task (standard `/work` flow or an org-runtime seat) typically runs from
+its own worktree and branch. If all events were appended to a single global
+JSONL file, concurrent tasks would produce conflicting appends on merge.
+Per-task files make merges trivially clean: each task owns exactly one file,
+and no two branches touch the same file.
 
 ## Retention
 
@@ -99,22 +114,20 @@ do not carry routing fields.
 
 ## Appending events
 
-Events are written by `scripts/insights-append.sh`. The pipeline writes events
-automatically. Post-implementation skills may call the script directly.
+Events are written by `scripts/insights-append.sh`, called directly by the
+post-implementation skills (`/self-review`, `/verify`, `/test`,
+`/cross-review`) after each writes its report. `ralph insights backfill`
+derives events from existing Markdown reports when live events are missing.
 
 ```sh
 scripts/insights-append.sh \
   --slug my-task \
-  --flow loop \
+  --flow standard \
   --phase self_review \
   --verdict pass \
-  --source pipeline \
+  --source skill \
   --cycle 1 \
-  --critical 0 --high 0 --medium 0 --low 0 \
-  --driver claude \
-  --requested-model opus \
-  --effective-model opus \
-  --honored true
+  --critical 0 --high 0 --medium 0 --low 0
 ```
 
 Required flags: `--slug`, `--flow`, `--phase`, `--verdict`, `--source`.

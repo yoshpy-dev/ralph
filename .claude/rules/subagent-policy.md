@@ -71,7 +71,7 @@ whether slices were delegated or implemented inline.
 
 ## Planning — always inline
 
-`/plan` runs in the main context because it relies heavily on `AskUserQuestion` for user interaction (task type selection, objective confirmation, flow selection, critical-fork resolution during drafting, Codex advisory response). Subagent execution would add indirection without benefit. No agent definition exists for this skill.
+`/plan` runs in the main context because it relies heavily on `AskUserQuestion` for user interaction (task type selection, objective confirmation, critical-fork resolution during drafting, Codex advisory response). Subagent execution would add indirection without benefit. No agent definition exists for this skill.
 
 ## Cross-review triage — always inline
 
@@ -95,17 +95,3 @@ report. Do not silently skip the phase.
 
 Cap protection: the same `RALPH_STANDARD_MAX_PIPELINE_CYCLES` ceiling applies,
 so a runaway inline pipeline cannot loop more than `cap` total runs.
-
-## Post-implementation pipeline for /loop — orchestrator-internal
-
-Ralph Loop uses `ralph-pipeline.sh` per slice (not subagents). Same pipeline order as `/work` (see `post-implementation-pipeline.md`), but executed via the driver-aware `run_agent` wrapper (`scripts/ralph-cli-driver.sh`) — `claude -p` when `RALPH_LOOP_DRIVER=claude` (default) and `codex exec` when `RALPH_LOOP_DRIVER=codex`. Per-slice pipeline phases run on per-phase models resolved by `resolve_phase_model` (implement/verify/test/sync-docs/pr on procedural seats, self-review on the judgment seat, escalation to `RALPH_ESCALATION_MODEL` on outer cycle ≥ 2) with an auditable receipt trail in `.harness/state/pipeline/model-receipts.jsonl`; see `model-routing.md` for the full per-phase table and precedence rules. The cross-review dispatcher inverts the reviewer to the *opposite* CLI so the cross-model gate holds in either direction. `RALPH_LOOP_DRIVER` is the Loop-side analogue of `RALPH_PRIMARY_CLI` and resolves env > `[loop] driver` in `ralph.toml` > default.
-
-After all slices are merged into the typed integration branch generated from the plan metadata, `ralph-orchestrator.sh` runs `ralph-pipeline.sh --skip-pr --fix-all` on that branch as a full integration quality gate. This catches cross-module issues and fixes ALL findings (including MEDIUM/LOW and WORTH_CONSIDERING). The default PR strategy is grouped PRs from manifest `pr_groups`; unified PR creation is an explicit fallback. The manifest also records the PR strategy decision contract: AI recommends, humans approve at plan approval time, and runtime overrides are warning-worthy escape hatches.
-That integration run uses full language scope by default; per-slice pipeline
-runs use changed-language scope for faster feedback.
-
-Execution model difference:
-- `/work`: phase-specific subagent calls in both Claude Code and Codex
-- `/loop`: `claude -p` invocations orchestrated by `ralph-pipeline.sh`
-
-When a user returns after a Ralph Loop run, check `./scripts/ralph status` for the final outcome rather than running the subagent chain.

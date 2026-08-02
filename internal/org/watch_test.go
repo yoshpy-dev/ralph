@@ -125,6 +125,15 @@ type fakeWatchAgmsg struct {
 	mu sync.Mutex
 
 	HistorySeq map[string][]string
+	// JoinErrSeq scripts a per-agentID sequence of Join outcomes, keyed by
+	// agentID (same pop-front-then-stick-on-last-entry convention as
+	// fakeWatchHerdr.AgentGetErrSeq): a nil entry means Join succeeds that
+	// call. Once exhausted, the last queued entry repeats. Keyed by agentID
+	// (not a flat sequence) because Spawn's own lead/seat Join calls and
+	// ensureWatchdogJoined's watchdog-identity Join call all share this one
+	// fake method -- a flat sequence would let an unrelated identity's Join
+	// consume entries meant for "watchdog".
+	JoinErrSeq map[string][]error
 
 	joinCalls []watchJoinCall
 	sendCalls []watchSendCall
@@ -157,6 +166,13 @@ func (f *fakeWatchAgmsg) Join(_ context.Context, team, agentID, agmsgType, proje
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.joinCalls = append(f.joinCalls, watchJoinCall{team: team, agentID: agentID, agmsgType: agmsgType, projectPath: projectPath})
+	if errs := f.JoinErrSeq[agentID]; len(errs) > 0 {
+		err := errs[0]
+		if len(errs) > 1 {
+			f.JoinErrSeq[agentID] = errs[1:]
+		}
+		return err
+	}
 	return nil
 }
 
@@ -174,6 +190,21 @@ func watchdogAlerts(a *fakeWatchAgmsg) []watchSendCall {
 	var out []watchSendCall
 	for _, c := range a.sendCalls {
 		if c.from == watchdogIdentity {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// watchdogJoinCalls filters a.joinCalls down to the watchdog identity's own
+// Join attempts -- Spawn's own lead/seat Join calls share the same fake/log,
+// so ensureWatchdogJoined retry-count assertions must not conflate the two.
+func watchdogJoinCalls(a *fakeWatchAgmsg) []watchJoinCall {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	var out []watchJoinCall
+	for _, c := range a.joinCalls {
+		if c.agentID == watchdogIdentity {
 			out = append(out, c)
 		}
 	}
@@ -235,7 +266,7 @@ func testWatchOrg(t *testing.T) (*Org, *fakeWatchHerdr, *fakeWatchAgmsg, *fakeCl
 	t.Helper()
 	dir := t.TempDir()
 	h := &fakeWatchHerdr{AgentGetSeq: map[string][]string{}, AgentGetErrSeq: map[string][]error{}}
-	a := &fakeWatchAgmsg{HistorySeq: map[string][]string{}}
+	a := &fakeWatchAgmsg{HistorySeq: map[string][]string{}, JoinErrSeq: map[string][]error{}}
 	clk := newFakeClock()
 	o := &Org{
 		Config:   watchTestConfig(),
@@ -1629,6 +1660,212 @@ func TestWatch_SeatBudgetCutoff_SkipsFurtherProbesForCutSeatSameCycle(t *testing
 	}
 	if !strings.Contains(alerts[0].message, "CONDITION: seat_budget") {
 		t.Errorf("expected the sole ALERT to be seat_budget, got %q", alerts[0].message)
+	}
+}
+
+// --- PR④ known gap #5: deadman probe-recovery false-clear -------------------
+
+// TestWatch_Deadman_ProbeOutageRecoveryAlone_DoesNotClearPendingAlert pins the
+// checkDeadman fix for cross-review-triage cycle-3 #5: an ALERT recorded
+// while the lead herdr probe (leadProbeSnapshot) was unavailable persists
+// LeadAgentGet == "" as its baseline. A later cycle where the probe merely
+// recovers -- with no other genuine lead activity -- must NOT by itself
+// clear the pending alert: pre-fix, `cur != "" && cur != pending.LeadAgentGet`
+// is trivially satisfied by any recovered value compared against a ""
+// baseline, treating "the probe came back" as if it were "lead did
+// something new".
+func TestWatch_Deadman_ProbeOutageRecoveryAlone_DoesNotClearPendingAlert(t *testing.T) {
+	o, h, _, clk := testWatchOrg(t)
+	o.Config.DeadmanMinutes = 100 // keep the timeout out of the picture
+	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", r)
+	}
+	// seat-1's own probe fails throughout -- the sticky liveness ALERT this
+	// test exercises the deadman bookkeeping for.
+	seatTarget := herdrAgentName("org-a", "seat-1")
+	h.AgentGetErrSeq[seatTarget] = []error{errors.New("herdr: agent not found")}
+
+	// The lead's own probe (checkDeadman's source #2) is down for exactly the
+	// 2 calls made during cycle 1 (sendAlert's baseline capture, then
+	// checkDeadman's own same-cycle comparison), then recovers from cycle 2
+	// onward.
+	leadTarget := herdrAgentName("org-a", LeadIdentity)
+	h.AgentGetErrSeq[leadTarget] = []error{
+		errors.New("herdr: unreachable"),
+		errors.New("herdr: unreachable"),
+		nil, // recovered: falls through to the default "ok" AgentGet response
+	}
+
+	run, statusPath, escalationsPath := newTestWatchRun(o, nil, nil, &bytes.Buffer{})
+	status, err := loadWatchStatus(statusPath, "org-a")
+	if err != nil {
+		t.Fatalf("loadWatchStatus: %v", err)
+	}
+
+	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		t.Fatalf("cycle 1 (raises ALERT, probe baseline unavailable): %v", err)
+	}
+	if len(status.PendingAlerts) != 1 {
+		t.Fatalf("expected 1 pending alert after cycle 1, got %d: %+v", len(status.PendingAlerts), status.PendingAlerts)
+	}
+	for _, pending := range status.PendingAlerts {
+		if pending.LeadAgentGet != "" {
+			t.Fatalf("expected the pending alert's probe baseline to be the unavailable sentinel (\"\"), got %q", pending.LeadAgentGet)
+		}
+	}
+
+	clk.Advance(1 * time.Minute) // well under DeadmanMinutes
+	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		t.Fatalf("cycle 2 (probe recovers, no other activity): %v", err)
+	}
+	if len(status.PendingAlerts) != 1 {
+		t.Errorf("expected the pending alert to remain: probe recovery alone (unavailable baseline) must not count as lead activity, got %d pending: %+v",
+			len(status.PendingAlerts), status.PendingAlerts)
+	}
+	assertNoEscalations(t, escalationsPath)
+}
+
+// TestWatch_Deadman_ProbeOutageThenGenuineManifestActivity_ClearsPendingAlert
+// is the positive counterpart: once a pending alert's probe baseline is the
+// unavailable sentinel, that source can never independently clear it (its
+// baseline is frozen at ALERT time), but genuine lead activity via a
+// different, unaffected source -- a new lead-attributable manifest event --
+// must still clear it, exactly as before this fix.
+func TestWatch_Deadman_ProbeOutageThenGenuineManifestActivity_ClearsPendingAlert(t *testing.T) {
+	o, h, _, clk := testWatchOrg(t)
+	o.Config.DeadmanMinutes = 100 // keep the timeout out of the picture
+	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", r)
+	}
+	seatTarget := herdrAgentName("org-a", "seat-1")
+	h.AgentGetErrSeq[seatTarget] = []error{errors.New("herdr: agent not found")}
+
+	leadTarget := herdrAgentName("org-a", LeadIdentity)
+	h.AgentGetErrSeq[leadTarget] = []error{
+		errors.New("herdr: unreachable"),
+		errors.New("herdr: unreachable"),
+		nil, // recovered from cycle 2 onward, same as the negative test above
+	}
+
+	run, statusPath, escalationsPath := newTestWatchRun(o, nil, nil, &bytes.Buffer{})
+	status, err := loadWatchStatus(statusPath, "org-a")
+	if err != nil {
+		t.Fatalf("loadWatchStatus: %v", err)
+	}
+
+	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		t.Fatalf("cycle 1 (raises ALERT, probe baseline unavailable): %v", err)
+	}
+	if len(status.PendingAlerts) != 1 {
+		t.Fatalf("expected 1 pending alert after cycle 1, got %d: %+v", len(status.PendingAlerts), status.PendingAlerts)
+	}
+
+	clk.Advance(1 * time.Minute)
+	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		t.Fatalf("cycle 2 (probe recovers, no other activity): %v", err)
+	}
+	if len(status.PendingAlerts) != 1 {
+		t.Fatalf("expected the pending alert to remain after probe recovery alone, got %d pending: %+v", len(status.PendingAlerts), status.PendingAlerts)
+	}
+
+	// Genuine lead activity: a real `sent` event, lead-authored by
+	// construction (see leadActivityEventCount's doc comment).
+	if err := o.Manifest.Append(ManifestEvent{TS: clk.Now().UTC().Format(time.RFC3339), OrgID: "org-a", SeatID: "seat-1", Event: EventSent, Details: "lead activity"}); err != nil {
+		t.Fatalf("append lead-activity event: %v", err)
+	}
+
+	clk.Advance(1 * time.Minute)
+	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		t.Fatalf("cycle 3 (genuine manifest activity): %v", err)
+	}
+	if len(status.PendingAlerts) != 0 {
+		t.Errorf("expected the pending alert to clear: a genuine manifest sent event is lead activity via an unaffected source, got %d pending: %+v",
+			len(status.PendingAlerts), status.PendingAlerts)
+	}
+	assertNoEscalations(t, escalationsPath)
+}
+
+// --- PR④ known gap #6: WatchdogJoined only set on successful Join -----------
+
+// TestWatch_EnsureWatchdogJoined_TransientFailure_RetriesUntilSuccess pins
+// the ensureWatchdogJoined fix for cross-review-triage cycle-3 #6: a
+// transient Join failure must NOT persist WatchdogJoined = true (which would
+// permanently skip every future Join retry for the org, per the const's own
+// doc comment), so the next cycle retries and, once Join actually succeeds,
+// status.WatchdogJoined is finally set and ALERT delivery is unaffected
+// (best-effort Send is independent of Join's own outcome).
+func TestWatch_EnsureWatchdogJoined_TransientFailure_RetriesUntilSuccess(t *testing.T) {
+	o, h, a, clk := testWatchOrg(t)
+	o.Config.DeadmanMinutes = 100          // keep the deadman sweep out of the picture
+	o.Config.Watchdog.StallMinutes = 10000 // keep the stall condition out of the picture
+
+	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", r)
+	}
+	// sendAlert (and therefore ensureWatchdogJoined) only runs on an Active
+	// *transition* (raiseOrClear dedupes a still-Active condition, see its
+	// own doc comment) -- so this test's liveness condition must clear and
+	// re-raise across 3 cycles to call ensureWatchdogJoined twice: cycle 1
+	// fails (raises), cycle 2 recovers (clears, no ALERT), cycle 3 fails
+	// again (re-raises, calling ensureWatchdogJoined a second time).
+	seatTarget := herdrAgentName("org-a", "seat-1")
+	h.AgentGetErrSeq[seatTarget] = []error{
+		errors.New("herdr: agent not found"), // cycle 1: fails
+		nil,                                  // cycle 2: recovers
+		errors.New("herdr: agent not found"), // cycle 3: fails again
+	}
+
+	// cycle 1's Join attempt fails; cycle 3's Join attempt (the only other
+	// one -- cycle 2 raises no ALERT) succeeds. Keyed by watchdogIdentity so
+	// Spawn's own lead/seat Join calls (made before evaluateCycle even runs)
+	// do not consume these entries.
+	a.JoinErrSeq[watchdogIdentity] = []error{errors.New("agmsg: team unreachable"), nil}
+
+	run, statusPath, _ := newTestWatchRun(o, nil, nil, &bytes.Buffer{})
+	status, err := loadWatchStatus(statusPath, "org-a")
+	if err != nil {
+		t.Fatalf("loadWatchStatus: %v", err)
+	}
+
+	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		t.Fatalf("cycle 1 (raises ALERT, Join fails): %v", err)
+	}
+	if status.WatchdogJoined {
+		t.Fatalf("expected WatchdogJoined to remain false after a failed Join")
+	}
+	if calls := watchdogJoinCalls(a); len(calls) != 1 {
+		t.Fatalf("expected exactly 1 watchdog Join attempt after cycle 1, got %d: %+v", len(calls), calls)
+	}
+
+	clk.Advance(1 * time.Minute)
+	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		t.Fatalf("cycle 2 (recovers, no ALERT): %v", err)
+	}
+	if status.WatchdogJoined {
+		t.Fatalf("expected WatchdogJoined to still be false: no ALERT was raised in cycle 2, so Join is not retried")
+	}
+	if calls := watchdogJoinCalls(a); len(calls) != 1 {
+		t.Fatalf("expected still exactly 1 watchdog Join attempt after cycle 2 (no ALERT raised), got %d: %+v", len(calls), calls)
+	}
+
+	clk.Advance(1 * time.Minute)
+	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		t.Fatalf("cycle 3 (re-raises ALERT, Join retried and succeeds): %v", err)
+	}
+	if !status.WatchdogJoined {
+		t.Fatalf("expected WatchdogJoined to be true after cycle 3's successful Join retry")
+	}
+	if calls := watchdogJoinCalls(a); len(calls) != 2 {
+		t.Fatalf("expected cycle 3 to retry the watchdog Join (2 total attempts), got %d: %+v", len(calls), calls)
+	}
+
+	// ALERT delivery itself is best-effort and independent of Join's outcome
+	// (SendWatchdogAlert's own doc comment) -- both the cycle-1 and cycle-3
+	// liveness ALERTs must still have been sent despite the cycle-1 Join
+	// failure.
+	alerts := watchdogAlerts(a)
+	if len(alerts) != 2 {
+		t.Fatalf("expected 2 ALERTs sent (cycle 1 and cycle 3) despite the cycle-1 Join failure, got %d: %+v", len(alerts), alerts)
 	}
 }
 

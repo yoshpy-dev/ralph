@@ -58,38 +58,20 @@ The following are aspirational gates listed for future adoption:
 - dependency vulnerability scans and broader security scans beyond secret leak detection
 - org or repo-specific policy checks
 
-## Pipeline mode gates (`ralph-pipeline.sh`)
+## Org runtime gates
 
-When running in pipeline mode, the orchestrator enforces its own gates autonomously:
-
-### Inner Loop gates (per cycle)
-
-| Gate | Mechanism | On failure |
-|------|-----------|------------|
-| Preflight probe | `--preflight` checks claude CLI, jq, CLAUDE.md, git | Pipeline blocked |
-| Hook parity check | `run_hook_parity()` emulates hook safety checks | Warning logged |
-| Stuck detection | HEAD commit hash comparison (3 consecutive no-change) | Pipeline aborted |
-| Self-review | `claude -p` with `pipeline-self-review.md` (diff quality only; no tests, static analysis, spec verification, doc drift, or broad repo audit) | CRITICAL findings logged |
-| Verify | `claude -p` with `pipeline-verify.md` (spec compliance + static analysis + documentation drift; runs `run-static-verify.sh` internally with changed-language scope unless the pipeline exports full scope) | Verdict logged |
-| Test | `claude -p` with `pipeline-test.md` (behavioral tests only; runs `run-test.sh` internally with changed-language scope unless the pipeline exports full scope + root cause analysis) | Retry Inner Loop |
-| COMPLETE gating | Tests pass + COMPLETE signal required to advance; tests pass without COMPLETE → continue Inner Loop (return 6) | Inner Loop continues |
-| Repair attempt limit | `MAX_REPAIR_ATTEMPTS` (default 5) | Escalate to human |
-
-Each agent writes reports to both `.harness/state/pipeline/` (orchestrator) and `docs/reports/` (PR pre-checks), plus a sidecar signal file for machine-readable pass/fail detection.
-
-### Outer Loop gates
+Autonomous multi-seat execution (org runtime, `ralph org` verbs) enforces its
+own gates deterministically, independent of any LLM judgment:
 
 | Gate | Mechanism | On failure |
 |------|-----------|------------|
-| Cross-review ACTION_REQUIRED | Cross-review triage finds actionable issues | Regress to Inner Loop |
-| Iteration limit | `MAX_ITERATIONS` (default 20) | Pipeline stopped |
-| Inner cycle limit | `MAX_INNER_CYCLES` (default 10) | Move to Outer Loop |
+| Envelope validation | model pool / role pool / `max_seats` checked by `ralph org spawn` | Spawn rejected, recorded in manifest |
+| Budget enforcement | wall-clock and fix-round ceilings enforced by the watchdog pulse layer | Seat cut off without LLM judgment, manifest event + lead notification |
+| Quality pipeline gate | impl exit checks → QA (`run-static-verify.sh` / `run-test.sh`) → reviewer → lead arbitration | QA fail routes back to impl before reviewer sees it |
+| Fix-round cap | envelope-enforced ceiling on reviewer↔impl rounds | Cap reached routes to lead arbitration instead of auto-continuing |
 
-### Pipeline state
-
-- Checkpoint: `.harness/state/pipeline/checkpoint.json`
-- Reports: `.harness/state/pipeline/inner-*-*.log`
-- Use `./scripts/ralph status` to inspect
+See `.claude/rules/agent-messaging.md` for the org runtime protocol and
+`.harness/state/org/manifest.jsonl` for the append-only audit trail.
 
 ## Important
 

@@ -49,7 +49,7 @@ func runDoctor(targetDir string) error {
 
 // runDoctorOpts is runDoctor plus the --probe-models opt-in: when true, every
 // [org].model_pool entry is probed via internal/org/driver.ProbeModel (Check
-// 13). Model probes are the only check in this function that spawn CLI
+// 11). Model probes are the only check in this function that spawn CLI
 // subprocesses beyond the pre-existing --version probes, so they stay
 // opt-in and off by default.
 func runDoctorOpts(targetDir string, probeModels bool) error {
@@ -82,25 +82,19 @@ func runDoctorOpts(targetDir string, probeModels bool) error {
 	// Check 6: Language pack verify.sh (checks project's installed packs via manifest).
 	results = append(results, checkInstalledPacks(targetDir)...)
 
-	// Check 7: Loop driver effective value (env > TOML > default).
-	results = append(results, checkLoopDriver(cfg, os.Getenv))
-
-	// Check 8: Go availability.
+	// Check 7: Go availability.
 	results = append(results, checkGo(cfg))
 
-	// Check 9: Stale orchestrator state.
-	results = append(results, checkStaleOrchestratorState(targetDir))
-
-	// Check 10: herdr availability (org runtime driver adapter).
+	// Check 8: herdr availability (org runtime driver adapter).
 	results = append(results, checkHerdrAvailable())
 
-	// Check 11: agmsg availability (org runtime driver adapter).
+	// Check 9: agmsg availability (org runtime driver adapter).
 	results = append(results, checkAgmsgAvailable(driver.ResolveAgmsgHome(cfg.Org.AgmsgHome)))
 
-	// Check 12: [org] envelope summary (pool size / max_seats).
+	// Check 10: [org] envelope summary (pool size / max_seats).
 	results = append(results, checkOrgEnvelope(cfg))
 
-	// Check 13: optional model-pool probes (--probe-models).
+	// Check 11: optional model-pool probes (--probe-models).
 	if probeModels {
 		results = append(results, checkOrgModelProbes(cfg, driver.ExecRunner{})...)
 	}
@@ -457,121 +451,6 @@ func checkEmbeddedPacks() []checkResult {
 		results = append(results, r)
 	}
 	return results
-}
-
-// checkLoopDriver reports the effective Ralph Loop driver — the value
-// ralph-pipeline.sh will actually see — and which source it came from
-// (env > TOML > default). Implements AC-6 of issue #44. The lookup function
-// is injected so the test can supply a deterministic env without
-// monkey-patching os.Getenv.
-//
-// Issue #44 cycle-3 cross-review hardenings:
-//   - When driver=codex is effective but the codex binary is absent, return
-//     fail. Otherwise doctor reports pass while the next `ralph run`
-//     preflight blocks immediately on the missing required CLI.
-//   - Sandbox / approval / reviewer-model values are resolved through the
-//     same env > TOML > default priority before display, so an operator
-//     who exports RALPH_CODEX_SANDBOX=danger-full-access does not see
-//     `sandbox: workspace-write` in doctor and assume the safer default.
-func checkLoopDriver(cfg config.Config, getenv func(string) string) checkResult {
-	r := checkResult{Name: "Loop driver"}
-
-	defaults := config.Default().Loop
-	pick := func(envKey, tomlVal, defaultVal string) (string, string) {
-		if v := getenv(envKey); v != "" {
-			return v, "env"
-		}
-		if tomlVal != "" {
-			// TOML matching default still reports toml as the source so users
-			// who explicitly write `driver = "claude"` see their choice acknowledged.
-			return tomlVal, "toml"
-		}
-		return defaultVal, "default"
-	}
-
-	effective, source := pick("RALPH_LOOP_DRIVER", cfg.Loop.Driver, defaults.Driver)
-	sandbox, _ := pick("RALPH_CODEX_SANDBOX", cfg.Loop.CodexSandbox, defaults.CodexSandbox)
-	approval, _ := pick("RALPH_CODEX_APPROVAL_POLICY", cfg.Loop.CodexApprovalPolicy, defaults.CodexApprovalPolicy)
-	reviewer, _ := pick("RALPH_CLAUDE_REVIEWER_MODEL", cfg.Loop.ClaudeReviewerModel, defaults.ClaudeReviewerModel)
-
-	if effective == "codex" {
-		if _, err := exec.LookPath("codex"); err != nil {
-			r.Status = "fail"
-			r.Detail = fmt.Sprintf("%s (source: %s) — codex binary not found in PATH; `ralph run` preflight will fail", effective, source)
-			return r
-		}
-	}
-
-	r.Status = "pass"
-	if effective == "codex" {
-		r.Detail = fmt.Sprintf("%s (source: %s, sandbox: %s, approval: %s, reviewer: claude/%s)",
-			effective, source, sandbox, approval, reviewer)
-	} else {
-		r.Detail = fmt.Sprintf("%s (source: %s)", effective, source)
-	}
-	return r
-}
-
-// checkStaleOrchestratorState warns when .harness/state/orchestrator/orchestrator.json
-// has status "running" but the file has not been updated in more than 24 hours,
-// indicating a crashed or abandoned run that never cleaned up its state.
-func checkStaleOrchestratorState(targetDir string) checkResult {
-	r := checkResult{Name: "Orchestrator state"}
-
-	orchPath := filepath.Join(targetDir, ".harness", "state", "orchestrator", "orchestrator.json")
-	fi, err := os.Stat(orchPath)
-	if errors.Is(err, fs.ErrNotExist) {
-		// No state file — nothing to warn about.
-		r.Status = "pass"
-		return r
-	}
-	if err != nil {
-		r.Status = "warn"
-		r.Detail = fmt.Sprintf("could not stat orchestrator.json: %v", err)
-		return r
-	}
-
-	data, err := os.ReadFile(orchPath)
-	if err != nil {
-		r.Status = "warn"
-		r.Detail = fmt.Sprintf("could not read orchestrator.json: %v", err)
-		return r
-	}
-
-	var raw struct {
-		Status  string `json:"status"`
-		Started string `json:"started"`
-	}
-	if err := json.Unmarshal(data, &raw); err != nil {
-		// Malformed JSON — not our concern here, pass silently.
-		r.Status = "pass"
-		return r
-	}
-
-	if raw.Status != "running" {
-		r.Status = "pass"
-		return r
-	}
-
-	mtime := fi.ModTime()
-	age := time.Since(mtime)
-	if age <= 24*time.Hour {
-		// File updated recently — running state is likely live.
-		r.Status = "pass"
-		return r
-	}
-
-	// Stale running state: file untouched for >24h.
-	ageH := int(age.Hours())
-	detail := fmt.Sprintf(
-		"stale orchestrator state (running since %s, file untouched for %dh); "+
-			"a crashed run may have left it behind — run './scripts/ralph abort' or "+
-			"delete .harness/state/orchestrator/orchestrator.json",
-		raw.Started, ageH,
-	)
-	r.Status = "warn"
-	r.Detail = detail
-	return r
 }
 
 func checkGo(cfg config.Config) checkResult {

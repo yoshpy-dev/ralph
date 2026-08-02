@@ -2120,7 +2120,7 @@ func TestShouldColorize_HonorsNoColorAndTTY(t *testing.T) {
 
 func TestNewRootCmd_HasAllSubcommands(t *testing.T) {
 	root := NewRootCmd()
-	expected := []string{"init", "upgrade", "run", "retry", "abort", "doctor", "pack", "version", "status"}
+	expected := []string{"init", "upgrade", "doctor", "pack", "version", "status", "org"}
 	for _, name := range expected {
 		found := false
 		for _, cmd := range root.Commands() {

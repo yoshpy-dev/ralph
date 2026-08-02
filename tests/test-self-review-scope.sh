@@ -50,10 +50,6 @@ self_review_files="
 .claude/skills/self-review/SKILL.md
 templates/base/.agents/skills/self-review/SKILL.md
 templates/base/.claude/skills/self-review/SKILL.md
-.agents/skills/loop/prompts/pipeline-self-review.md
-.claude/skills/loop/prompts/pipeline-self-review.md
-templates/base/.agents/skills/loop/prompts/pipeline-self-review.md
-templates/base/.claude/skills/loop/prompts/pipeline-self-review.md
 .claude/agents/reviewer.md
 templates/base/.claude/agents/reviewer.md
 .codex/agents/reviewer.toml
