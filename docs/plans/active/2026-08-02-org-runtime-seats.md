@@ -65,17 +65,17 @@ org runtime PR②: 座席を実際に動かせるようにする。agmsg アダ�
 
 ## Acceptance criteria
 
-- [ ] AC-1: Agmsg アダプタが実スクリプトを正しい argv で呼ぶ(`bash <home>/scripts/send.sh team from to msg` 等、全メソッドのスタブ argv 検証)。`AgmsgAvailable` は `<agmsg_home>/scripts/send.sh` 存在で判定し、npm ブートストラッパーのみの環境では不可用と報告する。
-- [ ] AC-2: `[org] agmsg_home` が 3 面ロックステップ(config.go / templates/base/ralph.toml / ralph-config.sh)で追加され、`defaults_sync_test.go` が drift を検出する。
-- [ ] AC-3: spawn saga の agmsg ステップが `join.sh <team> <seat_id> <type> <cwd>`(driver→type マッピング込み)+ HELLO send になり、join / send いずれの失敗注入でも `spawn_failed`+補償記録(PR① AC-10 系)が成立する。
-- [ ] AC-4: `ralph org spawn --role reviewer|qa` で埋め込み雛形が初期プロンプトに展開される(変数置換のユニットテスト+スタブ AgentStart argv でプロンプト内容確認)。未知 role は雛形なし(--prompt のみ)で動作。
-- [ ] AC-5: `stop` / `disband` が `despawn.sh` を best-effort 呼び出しし、失敗しても state event が記録される。
-- [ ] AC-6: `Verbs.Send / Wait / Read` と CLI 配線のテストが追加され、カバレッジ 0% が解消(tech-debt 行クローズ)。
-- [ ] AC-7: `.claude/rules/agent-messaging.md` が存在し、templates/base ミラーと同期(check-sync green)。役割雛形の本文がプロトコルを参照する。
-- [ ] AC-8(実機スモーク・手動): **クリーンな agmsg team から手動 lead 登録なしに** reviewer 座席を実 spawn し、(1) herdr pane 起動と agent 状態遷移、(2) `team.sh` で lead+座席の参加確認、(3) `ralph org status` の spawned 表示、(4) `stop` + despawn、(5) スモーク前後の `git status --porcelain` 比較で宣言スコープ外の変更なし、の一連の証拠を `docs/evidence/org-seats-smoke-*.log` に保存する。
-- [ ] AC-9: `go test ./...` / `./scripts/run-verify.sh` green。既存フロー非干渉の維持。
-- [ ] AC-10(実在座席前提条件): 未知座席への `stop` は非ゼロ終了し state イベントを追記しない。`disband` は実在 active 座席のみ処理する。despawn 失敗時も `stopped` の Details に cleanup 結果が記録され status が真実を保つ。
-- [ ] AC-11(protocol バリデータ): `internal/org/protocol` が TYPE 列挙・TASK_ID・本文サイズ上限を検証し、`ralph org send` が不正形式を既定拒否(`--raw` でバイパス可)する。パーサ/バリデータのユニットテストと CLI 拒否テストが存在する。
+- [x] AC-1: Agmsg アダプタが実スクリプトを正しい argv で呼ぶ(`bash <home>/scripts/send.sh team from to msg` 等、全メソッドのスタブ argv 検証)。`AgmsgAvailable` は `<agmsg_home>/scripts/send.sh` 存在で判定し、npm ブートストラッパーのみの環境では不可用と報告する。Evidence: `docs/reports/verify-2026-08-02-org-runtime-seats.md` AC-1 行 + `docs/reports/test-2026-08-02-org-runtime-seats.md` AC→test mapping AC-1(`internal/org/driver/agmsg_test.go`, `driver_test.go` — PASS)。
+- [x] AC-2: `[org] agmsg_home` が 3 面ロックステップ(config.go / templates/base/ralph.toml / ralph-config.sh)で追加され、`defaults_sync_test.go` が drift を検出する。Evidence: verify report AC-2 行(`config.go:122-127,194,357-363`、`templates/base/ralph.toml:82-85`、`ralph-config.sh:83`、`defaults_sync_test.go:186-187`)+ test report Regression checks(`internal/config` package `ok`)。
+- [x] AC-3: spawn saga の agmsg ステップが `join.sh <team> <seat_id> <type> <cwd>`(driver→type マッピング込み)+ HELLO send になり、join / send いずれの失敗注入でも `spawn_failed`+補償記録(PR① AC-10 系)が成立する。Evidence: verify report AC-3 行 + test report AC→test mapping AC-3(3 件の failure-injection テスト — PASS)。
+- [x] AC-4: `ralph org spawn --role reviewer|qa` で埋め込み雛形が初期プロンプトに展開される(変数置換のユニットテスト+スタブ AgentStart argv でプロンプト内容確認)。未知 role は雛形なし(--prompt のみ)で動作。Evidence: verify report AC-4 行 + test report AC→test mapping AC-4(`TestRenderRolePrompt_*`、`TestOrgSpawn_UnknownRole_NoTemplateApplied` — PASS)。
+- [x] AC-5: `stop` / `disband` が `Leave`(agmsg `leave.sh`。実機スモークで `despawn.sh` は join.sh 参加メンバーに no-op と判明したため置換 — Implementation notes 参照)を best-effort 呼び出しし、失敗しても state event が記録される。Evidence: verify report AC-5 行 + test report AC→test mapping AC-5(`TestOrgStop_ExistingSeat_RecordsPaneAndLeaveOutcomes` — PASS)。
+- [x] AC-6: `Verbs.Send / Wait / Read` と CLI 配線のテストが追加され、カバレッジ 0% が解消(tech-debt 行クローズ)。Evidence: verify report AC-6 行 + test report Coverage(Send 83.3%/Wait 100.0%/Read 91.7%/Stop 92.0%)+ `docs/tech-debt/README.md` RESOLVED 行(2026-08-02, Slice 4)。
+- [x] AC-7: `.claude/rules/agent-messaging.md` が存在し、templates/base ミラーと同期(check-sync green)。役割雛形の本文がプロトコルを参照する。Evidence: verify report AC-7 行(`cmp` 一致、`check-sync.sh` DRIFTED: 0)。
+- [x] AC-8(実機スモーク・手動): **クリーンな agmsg team から手動 lead 登録なしに** reviewer 座席を実 spawn し、(1) herdr pane 起動と agent 状態遷移、(2) `team.sh` で lead+座席の参加確認、(3) `ralph org status` の spawned 表示、(4) `stop` + despawn、(5) スモーク前後の `git status --porcelain` 比較で宣言スコープ外の変更なし、の一連の証拠を `docs/evidence/org-seats-smoke-*.txt` に保存する(`docs/evidence/*.log` は gitignore 対象のため、恒久化する証跡は `.txt` 拡張子で保存する)。Evidence: `docs/evidence/org-seats-smoke-2026-08-02.txt`(attempt 5 で全ライフサイクル成功)、6 サブ項目の行番号根拠は verify report AC-8 行に記載。
+- [x] AC-9: `go test ./...` / `./scripts/run-verify.sh` green。既存フロー非干渉の維持。Evidence: verify report 静的解析セクション(全 green)+ test report Verdict(13 Go パッケージ全 `ok`、-race 込み、346+ shell assertions 全 PASS)。
+- [x] AC-10(実在座席前提条件): 未知座席への `stop` は非ゼロ終了し state イベントを追記しない。`disband` は実在 active 座席のみ処理する。despawn 失敗時も `stopped` の Details に cleanup 結果が記録され status が真実を保つ。Evidence: verify report AC-10 行 + test report AC→test mapping AC-10(`TestOrgStop_UnknownSeat_*`、`TestOrgDisband_OnlyStopsExistingActiveSeats_*` — PASS)。
+- [x] AC-11(protocol バリデータ): `internal/org/protocol` が TYPE 列挙・TASK_ID・本文サイズ上限を検証し、`ralph org send` が不正形式を既定拒否(`--raw` でバイパス可)する。パーサ/バリデータのユニットテストと CLI 拒否テストが存在する。Evidence: verify report AC-11 行 + test report AC→test mapping AC-11(`protocol_test.go` 13 テスト、`TestOrgSend_RawFlag_BypassesValidation` — PASS)。
 
 ## Implementation outline
 
@@ -140,9 +140,9 @@ org runtime PR②: 座席を実際に動かせるようにする。agmsg アダ�
 - [x] Implementation started
 - [x] Implementation complete (Slice 1: 67220ef / Slice 2: 80e8f19+71511ea / Slice 3: 4ca8d48+fca45be / Slice 4: 8e9f4fe / Slice 5 実機スモーク起因の fix 群: 376a9ca, e043fde, 1d1825b+c5b8d6c, cd1452d)
 - [x] AC-8 実機スモーク完了(attempt 5 で全ライフサイクル成功。証拠: docs/evidence/org-seats-smoke-2026-08-02.txt)
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Review artifact created (`docs/reports/self-review-2026-08-02-org-runtime-seats.md`)
+- [x] Verification artifact created (`docs/reports/verify-2026-08-02-org-runtime-seats.md`)
+- [x] Test artifact created (`docs/reports/test-2026-08-02-org-runtime-seats.md`)
 - [ ] PR created
 
 ## Readiness checklist
