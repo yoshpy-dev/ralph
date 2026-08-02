@@ -134,7 +134,7 @@ org runtime PR④: Watchdog 二層を実装する。パルス層(決定論タイ
 - [x] Implementation complete (Slices 1-5: f938413 / 274ca41 / ea75adc+611b14e / 63313a5+00378d1 / 7101351+smoke)
 - [ ] Review artifact created
 - [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Test artifact created
 - [ ] PR created
 
 ## Readiness checklist
