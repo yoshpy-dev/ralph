@@ -723,11 +723,13 @@ func containsLine(lines []string, want string) bool {
 
 // TestOrgSpawn_RoleAndScopeFlags_ExpandTemplateAndRecordScope covers AC-4
 // and the scope half of AC-7/design: `--role reviewer --scope ...` expands
-// the embedded reviewer template (with org_id/seat_id/scope substituted)
-// into the AgentStart argv the herdr stub receives, and the spawned event's
-// Details records "scope=<value>". The herdr log is read as raw file
-// content (not line-split) because the rendered prompt itself contains
-// newlines.
+// the embedded reviewer template (with org_id/seat_id/scope substituted).
+// Real herdr rejects multi-line agent args (see spawn.go's
+// needsPromptFile), so the rendered template is written to a prompt file
+// under state-dir and the AgentStart argv the herdr stub receives carries
+// only a one-line pointer to it; this test asserts the pointer via the
+// herdr log and the full rendered content via the prompt file. It also
+// checks the spawned event's Details records "scope=<value>".
 func TestOrgSpawn_RoleAndScopeFlags_ExpandTemplateAndRecordScope(t *testing.T) {
 	herdrLog, _ := setupOrgStubPATH(t)
 	stateDir := filepath.Join(t.TempDir(), "state")
@@ -747,9 +749,22 @@ func TestOrgSpawn_RoleAndScopeFlags_ExpandTemplateAndRecordScope(t *testing.T) {
 		t.Fatalf("read herdr log: %v", rerr)
 	}
 	logText := string(data)
+	if !strings.Contains(logText, "役割指示を読み込んで従ってください: ") {
+		t.Fatalf("expected AgentStart argv logged to contain the prompt-file pointer, got:\n%s", logText)
+	}
+	if strings.Contains(logText, ".claude/rules/agent-messaging.md") {
+		t.Errorf("expected the rendered template body NOT to appear inline in argv (it must go through the prompt file), got:\n%s", logText)
+	}
+
+	promptPath := filepath.Join(stateDir, "prompts", "org-a-reviewer-1.md")
+	promptData, perr := os.ReadFile(promptPath)
+	if perr != nil {
+		t.Fatalf("expected prompt file at %q: %v", promptPath, perr)
+	}
+	promptText := string(promptData)
 	for _, want := range []string{"org-a", "reviewer-1", "internal/org/**", ".claude/rules/agent-messaging.md"} {
-		if !strings.Contains(logText, want) {
-			t.Errorf("expected AgentStart argv logged to contain %q, got:\n%s", want, logText)
+		if !strings.Contains(promptText, want) {
+			t.Errorf("expected prompt file content to contain %q, got:\n%s", want, promptText)
 		}
 	}
 

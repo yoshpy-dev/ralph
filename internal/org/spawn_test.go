@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -832,9 +833,13 @@ func TestOrgSpawn_HelloMessage_IsProtocolConformant(t *testing.T) {
 }
 
 func TestOrgSpawn_RoleTemplate_ExpandsIntoInitialPrompt(t *testing.T) {
-	// AC-4: --role reviewer expands the embedded reviewer template into the
-	// AgentStart argv (the initial prompt), substituted with the spawn's
-	// own org_id/seat_id/role/scope.
+	// AC-4: --role reviewer expands the embedded reviewer template,
+	// substituted with the spawn's own org_id/seat_id/role/scope. Real herdr
+	// rejects multi-line agent args (see the maxInlinePromptRunes/
+	// needsPromptFile doc comments in spawn.go), so the rendered template is
+	// written to a prompt file and the AgentStart argv carries only a
+	// one-line pointer to it -- assert the pointer (no newline) via argv and
+	// the full rendered content via the file.
 	o, h, _ := testOrg(t)
 
 	p := mustSpawnParams("org-a", "seat-1")
@@ -849,19 +854,33 @@ func TestOrgSpawn_RoleTemplate_ExpandsIntoInitialPrompt(t *testing.T) {
 	}
 	args := h.agentStartArgs[0]
 	if len(args) != 3 || args[0] != "--model" {
-		t.Fatalf("expected AgentStart args [--model <model> <prompt>], got %v", args)
+		t.Fatalf("expected AgentStart args [--model <model> <pointer>], got %v", args)
 	}
 	promptArg := args[2]
+	if strings.Contains(promptArg, "\n") {
+		t.Fatalf("expected the AgentStart prompt arg to be a single line, got:\n%s", promptArg)
+	}
+	if !strings.HasPrefix(promptArg, "役割指示を読み込んで従ってください: ") {
+		t.Fatalf("expected the AgentStart prompt arg to be the file pointer, got %q", promptArg)
+	}
+	promptPath := strings.TrimPrefix(promptArg, "役割指示を読み込んで従ってください: ")
+
+	data, err := os.ReadFile(promptPath)
+	if err != nil {
+		t.Fatalf("expected the prompt file to exist at %q: %v", promptPath, err)
+	}
+	fileContent := string(data)
 	for _, want := range []string{"org-a", "seat-1", "reviewer", "internal/org/**", ".claude/rules/agent-messaging.md"} {
-		if !strings.Contains(promptArg, want) {
-			t.Errorf("expected the initial prompt to contain %q, got:\n%s", want, promptArg)
+		if !strings.Contains(fileContent, want) {
+			t.Errorf("expected the prompt file content to contain %q, got:\n%s", want, fileContent)
 		}
 	}
 }
 
 func TestOrgSpawn_RoleTemplate_PromptFlagAppendedAfterTemplate(t *testing.T) {
 	// When --role has a template AND --prompt is also given, the template
-	// comes first and --prompt is appended after a blank line.
+	// comes first and --prompt is appended after a blank line -- in the
+	// prompt file's content, since the combined prompt is multi-line.
 	o, h, _ := testOrg(t)
 
 	p := mustSpawnParams("org-a", "seat-1")
@@ -872,11 +891,153 @@ func TestOrgSpawn_RoleTemplate_PromptFlagAppendedAfterTemplate(t *testing.T) {
 	}
 
 	promptArg := h.agentStartArgs[0][2]
-	if !strings.Contains(promptArg, "run-static-verify.sh") {
-		t.Fatalf("expected the qa template body in the initial prompt, got:\n%s", promptArg)
+	promptPath := strings.TrimPrefix(promptArg, "役割指示を読み込んで従ってください: ")
+	data, err := os.ReadFile(promptPath)
+	if err != nil {
+		t.Fatalf("expected the prompt file to exist at %q: %v", promptPath, err)
 	}
-	if !strings.HasSuffix(promptArg, p.Prompt) {
-		t.Fatalf("expected --prompt appended at the end of the initial prompt, got:\n%s", promptArg)
+	fileContent := string(data)
+	if !strings.Contains(fileContent, "run-static-verify.sh") {
+		t.Fatalf("expected the qa template body in the prompt file, got:\n%s", fileContent)
+	}
+	if !strings.HasSuffix(fileContent, p.Prompt) {
+		t.Fatalf("expected --prompt appended at the end of the prompt file, got:\n%s", fileContent)
+	}
+}
+
+func TestOrgSpawn_Respawn_OverwritesPromptFile(t *testing.T) {
+	// A respawn of the same org_id/seat_id after a prior terminal (failed)
+	// attempt must overwrite the existing prompt file with the new render,
+	// not fail because the file already exists and not leave the previous
+	// attempt's content lingering behind.
+	o, _, a := testOrg(t)
+
+	// First attempt: reaches agent_start (which writes the prompt file)
+	// but then fails at the agmsg_join step -- a terminal spawn_failed, not
+	// a stale in-flight saga, so the next Spawn call runs a full fresh
+	// attempt rather than compensate-and-retry.
+	a.joinErrs = map[string]error{"seat-1": errors.New("stub failure: agmsg join")}
+	p1 := mustSpawnParams("org-a", "seat-1")
+	p1.Role = "reviewer"
+	p1.Scope = "internal/org/**"
+	if r := o.Spawn(p1); r.Outcome != SpawnOutcomeFailed {
+		t.Fatalf("expected first attempt to fail at agmsg_join, got %+v", r)
+	}
+
+	promptPath, perr := o.promptFilePath("org-a", "seat-1")
+	if perr != nil {
+		t.Fatalf("promptFilePath: %v", perr)
+	}
+	firstContent, rerr := os.ReadFile(promptPath)
+	if rerr != nil {
+		t.Fatalf("expected prompt file written by the first attempt: %v", rerr)
+	}
+	if !strings.Contains(string(firstContent), "internal/org/**") {
+		t.Fatalf("expected the first attempt's scope in the prompt file, got:\n%s", firstContent)
+	}
+
+	// Respawn: same org_id/seat_id, different scope, no injected failure.
+	a.joinErrs = nil
+	p2 := mustSpawnParams("org-a", "seat-1")
+	p2.Role = "reviewer"
+	p2.Scope = "internal/cli/**"
+	if r := o.Spawn(p2); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("expected the respawn to succeed, got %+v", r)
+	}
+
+	secondContent, rerr := os.ReadFile(promptPath)
+	if rerr != nil {
+		t.Fatalf("expected the prompt file to still exist after the respawn: %v", rerr)
+	}
+	if strings.Contains(string(secondContent), "internal/org/**") {
+		t.Fatalf("expected the respawn to overwrite the previous attempt's content, still found the stale scope:\n%s", secondContent)
+	}
+	if !strings.Contains(string(secondContent), "internal/cli/**") {
+		t.Fatalf("expected the respawn's own scope in the overwritten prompt file, got:\n%s", secondContent)
+	}
+}
+
+func TestOrgSpawn_PromptFileWriteFailure_FailsStepPromptFile(t *testing.T) {
+	// AC-4 deviation: a write failure for the prompt file must fail the
+	// saga at a dedicated "prompt_file" step, before AgentStart is ever
+	// called, with the same best-effort pane compensation as any other
+	// post-tab_create failure step.
+	o, h, _ := testOrg(t)
+	stateDir := filepath.Dir(o.Manifest.Path())
+
+	// Make the prompts directory unusable: a regular file sits at the exact
+	// path writePromptFile needs to mkdir -p, so os.MkdirAll fails.
+	if err := os.WriteFile(filepath.Join(stateDir, "prompts"), []byte("not a directory"), 0o644); err != nil {
+		t.Fatalf("seed prompts-as-file: %v", err)
+	}
+
+	p := mustSpawnParams("org-a", "seat-1")
+	p.Role = "reviewer"
+	result := o.Spawn(p)
+	if result.Outcome != SpawnOutcomeFailed {
+		t.Fatalf("expected SpawnOutcomeFailed when the prompt file cannot be written, got %+v", result)
+	}
+	if len(h.agentStartArgs) != 0 {
+		t.Fatalf("expected AgentStart never called when the prompt file write fails first, got %v", h.agentStartArgs)
+	}
+	if len(h.sendKeysCalls) != 1 || h.sendKeysCalls[0] != "pane-1" {
+		t.Fatalf("expected a compensation C-c to the already-created pane, got %v", h.sendKeysCalls)
+	}
+
+	rr, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	last := rr.Events[len(rr.Events)-1]
+	if last.Event != EventSpawnFailed {
+		t.Fatalf("expected last event to be spawn_failed, got %q", last.Event)
+	}
+	assertDetailsContains(t, last.Details, "step=prompt_file")
+}
+
+func TestOrgSpawn_DryRun_RoleTemplate_RecordsPromptFilePathWithoutWriting(t *testing.T) {
+	// AC-4 deviation: dry-run must record the would-be prompt file path on
+	// the agent_started step's Details, matching what a real spawn would
+	// produce for the same params, but must never actually write the file
+	// (AC-8: dry-run has zero side effects).
+	o, h, a := testOrg(t)
+
+	p := mustSpawnParams("org-a", "seat-1")
+	p.Role = "reviewer"
+	p.Scope = "internal/org/**"
+	p.DryRun = true
+	result := o.Spawn(p)
+	if result.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("expected dry-run spawn to succeed, got %+v", result)
+	}
+	if len(h.calls) != 0 || len(a.calls) != 0 {
+		t.Fatalf("expected zero driver calls for --dry-run, got herdr=%v agmsg=%v", h.calls, a.calls)
+	}
+
+	promptPath, perr := o.promptFilePath("org-a", "seat-1")
+	if perr != nil {
+		t.Fatalf("promptFilePath: %v", perr)
+	}
+	if _, err := os.Stat(promptPath); !os.IsNotExist(err) {
+		t.Fatalf("expected dry-run to NOT write the prompt file, got stat err=%v", err)
+	}
+
+	rr, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	var agentStartedEvent *ManifestEvent
+	for i := range rr.Events {
+		if rr.Events[i].Event == EventSpawnStep && strings.HasPrefix(rr.Events[i].Details, "agent_started") {
+			agentStartedEvent = &rr.Events[i]
+			break
+		}
+	}
+	if agentStartedEvent == nil {
+		t.Fatalf("expected an agent_started spawn_step event in the dry-run trail, got %+v", rr.Events)
+	}
+	if !strings.Contains(agentStartedEvent.Details, "prompt_file="+promptPath) {
+		t.Fatalf("expected the dry-run agent_started step to record the would-be prompt_file path, got %q", agentStartedEvent.Details)
 	}
 }
 

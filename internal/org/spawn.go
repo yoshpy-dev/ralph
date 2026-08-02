@@ -3,7 +3,11 @@ package org
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/yoshpy-dev/ralph/internal/config"
 )
@@ -289,16 +293,36 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 		}
 	}
 
+	// AC-4 deviation (see plan "Implementation notes (deviations)", second
+	// bullet): real herdr (v0.7.5) rejects any agent argument containing a
+	// newline, and long single-line arguments are also unsafe to assume safe
+	// -- so a prompt that trips needsPromptFile is written to
+	// <state-dir>/prompts/<org_id>-<seat_id>.md and only a short one-line
+	// pointer is passed as the agent arg. The write happens here, strictly
+	// before AgentStart, so a write failure never reaches the driver at all.
 	agentArgs := []string{"--model", p.Model}
+	agentStartedDetails := "agent_started"
 	if initialPrompt != "" {
-		agentArgs = append(agentArgs, initialPrompt)
+		if needsPromptFile(initialPrompt) {
+			promptPath, perr := o.promptFilePath(p.OrgID, p.SeatID)
+			if perr != nil {
+				return o.failStep(p, "prompt_file", perr, paneID)
+			}
+			if err := writePromptFile(promptPath, initialPrompt); err != nil {
+				return o.failStep(p, "prompt_file", err, paneID)
+			}
+			agentArgs = append(agentArgs, promptFilePointer(promptPath))
+			agentStartedDetails = fmt.Sprintf("agent_started prompt_file=%s", promptPath)
+		} else {
+			agentArgs = append(agentArgs, initialPrompt)
+		}
 	}
 	if _, err := o.Herdr.AgentStart(ctx, herdrAgentName(p.OrgID, p.SeatID), p.Driver, paneID, p.TimeoutMS, agentArgs); err != nil {
 		return o.failStep(p, "agent_start", err, paneID)
 	}
 	if err := o.appendEvent(ManifestEvent{
 		TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnStep,
-		PaneID: paneID, Details: "agent_started",
+		PaneID: paneID, Details: agentStartedDetails,
 	}); err != nil {
 		return SpawnResult{Outcome: SpawnOutcomeFailed, Err: err}
 	}
@@ -401,6 +425,64 @@ func herdrAgentName(orgID, seatID string) string {
 	return fmt.Sprintf("%s-%s", orgID, seatID)
 }
 
+// maxInlinePromptRunes is the longest initial prompt herdr's real
+// `agent start` argv encoding is trusted to accept inline. Real herdr
+// (v0.7.5) outright rejects any agent argument containing a newline
+// (invalid_agent_argument: "agent arguments cannot be encoded safely for
+// the target shell") -- see plan
+// docs/plans/active/2026-08-02-org-runtime-seats.md, "Implementation notes
+// (deviations)". A long single-line prompt is treated the same way out of
+// caution, even though only the newline case has been observed to fail
+// against the real CLI.
+const maxInlinePromptRunes = 200
+
+// needsPromptFile reports whether prompt is too unsafe to pass directly as
+// a herdr agent argument and must instead be written to a prompt file with
+// only a one-line pointer passed inline (see promptFilePath/writePromptFile/
+// promptFilePointer below).
+func needsPromptFile(prompt string) bool {
+	return strings.Contains(prompt, "\n") || utf8.RuneCountInString(prompt) > maxInlinePromptRunes
+}
+
+// promptFilePath returns the absolute path a spawn's initial prompt is
+// written to when needsPromptFile is true:
+// <state-dir>/prompts/<org_id>-<seat_id>.md. state-dir is derived from the
+// manifest store's own directory (filepath.Dir(o.Manifest.Path())) rather
+// than a separate config field, since the manifest store is already the
+// single source of truth for where this Org's on-disk state lives. The path
+// is namespaced by both org_id and seat_id so a respawn of the same seat
+// overwrites its own prompt file (intentional -- see writePromptFile) while
+// two different seats never collide.
+func (o *Org) promptFilePath(orgID, seatID string) (string, error) {
+	stateDir, err := filepath.Abs(filepath.Dir(o.Manifest.Path()))
+	if err != nil {
+		return "", fmt.Errorf("resolve state dir for prompt file: %w", err)
+	}
+	return filepath.Join(stateDir, "prompts", fmt.Sprintf("%s-%s.md", orgID, seatID)), nil
+}
+
+// writePromptFile writes content to path with 0644 permissions, creating
+// any missing parent directories first. It always overwrites an existing
+// file at path (os.WriteFile truncates) -- a respawn of the same org_id/
+// seat_id must replace the previous prompt file's content, not append to it
+// or fail because it already exists.
+func writePromptFile(path, content string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create prompt file directory: %w", err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return fmt.Errorf("write prompt file: %w", err)
+	}
+	return nil
+}
+
+// promptFilePointer is the single-line agent argument passed in place of
+// the full prompt once it has been written to path: a short instruction
+// telling the agent to read and follow that file instead.
+func promptFilePointer(path string) string {
+	return "役割指示を読み込んで従ってください: " + path
+}
+
 // reject records an envelope-validation rejection: a `rejected` manifest
 // event plus an honored=false receipt, per AC-1/AC-2. No spawn_started is
 // written since no external side effect was ever attempted.
@@ -435,9 +517,30 @@ func (o *Org) dryRunSpawn(p SpawnParams) SpawnResult {
 	step.Details = "tab_created"
 	steps = append(steps, step)
 
+	// AC-4 deviation (see the matching comment in Spawn): dry-run must
+	// simulate the same prompt-file-vs-inline decision, without ever writing
+	// the file or calling Herdr, so the trail a dry-run produces matches what
+	// a real spawn's agent_started step Details would say.
+	agentStartedDetails := "agent_started"
+	initialPrompt := p.Prompt
+	if rendered, ok, err := RenderRolePrompt(p.Role, RolePromptVars{
+		OrgID: p.OrgID, SeatID: p.SeatID, Team: team, Role: p.Role, Scope: p.Scope,
+	}); err == nil && ok {
+		if p.Prompt != "" {
+			initialPrompt = rendered + "\n\n" + p.Prompt
+		} else {
+			initialPrompt = rendered
+		}
+	}
+	if initialPrompt != "" && needsPromptFile(initialPrompt) {
+		if promptPath, perr := o.promptFilePath(p.OrgID, p.SeatID); perr == nil {
+			agentStartedDetails = fmt.Sprintf("agent_started prompt_file=%s", promptPath)
+		}
+	}
+
 	step = base
 	step.Event = EventSpawnStep
-	step.Details = "agent_started"
+	step.Details = agentStartedDetails
 	steps = append(steps, step)
 
 	step = base
