@@ -152,6 +152,7 @@ org runtime PR⑤(最終段): Ralph Loop 自律実行系(orchestrator / pipeline
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
+- [x] Sync-docs artifact created (residual sweep: `docs/insights/README.md` + `templates/base/` mirror rewritten to describe the current skill-driven writer instead of the retired `ralph-pipeline.sh`; recipes/skills/quality docs checked, no other drift found)
 - [ ] PR created
 
 ## Readiness checklist
