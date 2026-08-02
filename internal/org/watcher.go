@@ -116,8 +116,12 @@ type WatcherVerdict struct {
 // documented in scripts/ralph-cli-driver.sh ({"result": "...", "session_id":
 // "..."}). Model is populated only if the installed claude version happens
 // to report it -- not a documented contract this repo depends on anywhere
-// else -- so RunWatcher treats its presence defensively (see the
-// Honored-tri-state decision at the bottom of RunWatcher).
+// else -- so RunWatcher treats its presence defensively: an empty Model is
+// HonoredUnknown (no observation at all), a Model equal to cfg.WatcherModel
+// is HonoredTrue (the one case with a verifiable, matching observation), and
+// any other non-empty Model is HonoredFalse (a verifiable observation that
+// disagrees with what was commanded) -- see RunWatcher's honored assignment
+// right before recordWatcherReceipt.
 type claudeEnvelope struct {
 	Result string `json:"result"`
 	Model  string `json:"model,omitempty"`
@@ -260,8 +264,8 @@ func realClaudeInvoke(ctx context.Context, model, prompt string) (string, error)
 // Called from WatchHooks.OnSemanticTrigger's seam (watch.go), always inside
 // a caller-owned goroutine so a hang or slow judgment never blocks the
 // pulse loop (Codex advisory 3) -- RunWatcher additionally enforces its own
-// ctx timeout (watcherTimeout(cfg), always strictly below one pulse
-// interval) so it bounds itself even if the caller's ctx were unbounded.
+// ctx timeout (watcherInvokeTimeout, a fixed 60s bound) so it bounds itself
+// even if the caller's ctx were unbounded.
 //
 // Any failure -- invocation error, timeout, a malformed claude envelope, or
 // a malformed/unknown verdict JSON -- all fold to the same outcome: a
@@ -295,9 +299,13 @@ func (o *Org) RunWatcher(ctx context.Context, cfg config.OrgWatchdogConfig, p Wa
 	}
 
 	var envelope claudeEnvelope
-	if err := json.Unmarshal([]byte(raw), &envelope); err != nil || strings.TrimSpace(envelope.Result) == "" {
+	if err := json.Unmarshal([]byte(raw), &envelope); err != nil {
 		o.recordWatcherReceipt(p, cfg.WatcherModel, "", HonoredUnknown, watcherErrorReason)
 		return WatcherVerdict{}, fmt.Errorf("org: watcher: malformed claude envelope: %w", err)
+	}
+	if strings.TrimSpace(envelope.Result) == "" {
+		o.recordWatcherReceipt(p, cfg.WatcherModel, "", HonoredUnknown, watcherErrorReason)
+		return WatcherVerdict{}, fmt.Errorf("org: watcher: malformed claude envelope: empty result field")
 	}
 
 	var verdict WatcherVerdict
@@ -307,9 +315,18 @@ func (o *Org) RunWatcher(ctx context.Context, cfg config.OrgWatchdogConfig, p Wa
 		return WatcherVerdict{}, fmt.Errorf("org: watcher: malformed verdict JSON: %q", envelope.Result)
 	}
 
+	// Honored tri-state (self-review M-5): HonoredUnknown when the driver
+	// reported no model at all, HonoredTrue only when the reported model
+	// matches what was commanded, HonoredFalse for a verifiable mismatch --
+	// see claudeEnvelope's doc comment for the full rationale.
 	honored := HonoredUnknown
-	if envelope.Model != "" {
+	switch {
+	case envelope.Model == "":
+		honored = HonoredUnknown
+	case envelope.Model == cfg.WatcherModel:
 		honored = HonoredTrue
+	default:
+		honored = HonoredFalse
 	}
 	o.recordWatcherReceipt(p, cfg.WatcherModel, envelope.Model, honored, "verdict="+verdict.Verdict)
 

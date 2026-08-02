@@ -264,7 +264,7 @@ func newTestWatchRun(o *Org, gitStatus GitStatusFunc, escalateFn EscalateFunc, s
 	if err != nil {
 		panic(err)
 	}
-	statusPath := filepath.Join(dir, WatchStatusRelName)
+	statusPath := filepath.Join(dir, WatchStatusFileName("org-a"))
 	escalationsPath := filepath.Join(dir, EscalationsRelName)
 	if gitStatus == nil {
 		gitStatus = func(string) (string, error) { return "", nil }
@@ -763,7 +763,7 @@ func TestRunWatch_Cycles_RunsExactlyNThenReturns(t *testing.T) {
 		t.Fatalf("expected exactly 2 cycles, got %d", onCycleCount)
 	}
 
-	data, err := os.ReadFile(filepath.Join(dir, WatchStatusRelName))
+	data, err := os.ReadFile(filepath.Join(dir, WatchStatusFileName("org-a")))
 	if err != nil {
 		t.Fatalf("read status file: %v", err)
 	}
@@ -783,6 +783,233 @@ func TestRunWatch_RequiresOrgIDAndStatusDir(t *testing.T) {
 	}
 	if err := o.RunWatch(context.Background(), WatchParams{OrgID: "org-a"}, WatchHooks{}); err == nil {
 		t.Fatal("expected an error for a blank StatusDir")
+	}
+}
+
+// TestRunWatch_MultipleOrgs_SeparateStatusFiles pins the self-review H-1 fix:
+// two orgs watched from the same repository (one shared StatusDir, exactly
+// as manifest.jsonl/model-receipts.jsonl are already shared there) must get
+// distinct watch-status files, not silently clobber each other's
+// OrgID/Cycles/WatchdogJoined/SeatSnapshots state via one fixed file name.
+func TestRunWatch_MultipleOrgs_SeparateStatusFiles(t *testing.T) {
+	o, _, _, _ := testWatchOrg(t)
+	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn org-a failed: %+v", r)
+	}
+	if r := o.Spawn(watchSpawnParams("org-b", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn org-b failed: %+v", r)
+	}
+
+	dir := t.TempDir()
+	if err := o.RunWatch(context.Background(), WatchParams{OrgID: "org-a", Interval: time.Millisecond, Cycles: 1, StatusDir: dir}, WatchHooks{}); err != nil {
+		t.Fatalf("RunWatch org-a: %v", err)
+	}
+	if err := o.RunWatch(context.Background(), WatchParams{OrgID: "org-b", Interval: time.Millisecond, Cycles: 1, StatusDir: dir}, WatchHooks{}); err != nil {
+		t.Fatalf("RunWatch org-b: %v", err)
+	}
+
+	pathA := filepath.Join(dir, WatchStatusFileName("org-a"))
+	pathB := filepath.Join(dir, WatchStatusFileName("org-b"))
+	if pathA == pathB {
+		t.Fatalf("expected distinct status file names for org-a/org-b, got %q for both", pathA)
+	}
+	for orgID, path := range map[string]string{"org-a": pathA, "org-b": pathB} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		var status watchStatusFile
+		if err := json.Unmarshal(data, &status); err != nil {
+			t.Fatalf("parse %s: %v", path, err)
+		}
+		if status.OrgID != orgID {
+			t.Errorf("expected org_id=%q recorded in %s, got %+v", orgID, path, status)
+		}
+		if status.Cycles != 1 {
+			t.Errorf("expected cycles=1 recorded in %s (not clobbered by the other org's run), got %+v", path, status)
+		}
+	}
+}
+
+// TestWatch_SeatBudgetCutoff_StopFails_RetriesThenSucceeds pins the
+// self-review H-2 fix: a Stop call whose `stopped` manifest write fails must
+// not set the Cutoff ratchet -- the failure is logged to stderr and the next
+// cycle retries Stop for the still-active seat, only ratcheting Cutoff once
+// a retry actually succeeds. The ALERT is still sent exactly once regardless
+// of the Stop outcome.
+func TestWatch_SeatBudgetCutoff_StopFails_RetriesThenSucceeds(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: a read-only manifest file is still writable, so this permission-based failure injection does not apply")
+	}
+	o, h, a, clk := testWatchOrg(t)
+	o.Config.Watchdog.StallMinutes = 10000 // keep the stall condition out of the picture
+	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", r)
+	}
+
+	var stderr bytes.Buffer
+	run, statusPath, _ := newTestWatchRun(o, nil, nil, &stderr)
+	status, err := loadWatchStatus(statusPath, "org-a")
+	if err != nil {
+		t.Fatalf("loadWatchStatus: %v", err)
+	}
+
+	clk.Advance(31 * time.Minute) // past the 30m seat budget
+
+	// Make the manifest file unwritable so Stop's appendEvent (the `stopped`
+	// event write) fails deterministically -- Stop's own PaneSendKeys/Leave
+	// failures are captured as best-effort Details notes, never as
+	// StopResult.Err (see verbs.go's Stop doc comment); only findSeat's read
+	// or appendEvent's write can produce a non-nil Stop error.
+	manifestPath := o.Manifest.Path()
+	if err := os.Chmod(manifestPath, 0o444); err != nil {
+		t.Fatalf("chmod manifest read-only: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(manifestPath, 0o644) })
+
+	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		t.Fatalf("cycle 1 (Stop's manifest write fails): %v", err)
+	}
+	if !strings.Contains(stderr.String(), "budget cutoff Stop failed") {
+		t.Fatalf("expected a stderr line reporting the failed cutoff Stop, got %q", stderr.String())
+	}
+	key := conditionKey("org-a", "seat-1", condSeatBudget)
+	if rec := status.Conditions[key]; rec == nil || rec.Cutoff {
+		t.Fatalf("expected Cutoff to remain false after a failed Stop, got %+v", rec)
+	}
+	if n := len(watchdogAlerts(a)); n != 1 {
+		t.Fatalf("expected exactly 1 ALERT even though Stop's manifest write failed, got %d", n)
+	}
+	if st, serr := o.Status("org-a", false); serr != nil || !findSeatStatus(t, st.Seats, "seat-1").Active {
+		t.Fatalf("expected seat-1 to remain active after the failed Stop (status err=%v)", serr)
+	}
+
+	// Restore write permission -- the next cycle must retry Stop (the seat
+	// is still active per the roster) and this time set Cutoff, without a
+	// second ALERT.
+	if err := os.Chmod(manifestPath, 0o644); err != nil {
+		t.Fatalf("chmod manifest writable: %v", err)
+	}
+	clk.Advance(time.Minute)
+	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		t.Fatalf("cycle 2 (Stop retries and succeeds): %v", err)
+	}
+	if rec := status.Conditions[key]; rec == nil || !rec.Cutoff {
+		t.Fatalf("expected Cutoff to be set true after the retried Stop succeeds, got %+v", rec)
+	}
+	if n := len(watchdogAlerts(a)); n != 1 {
+		t.Fatalf("expected still exactly 1 ALERT after the retry succeeds (deduped), got %d", n)
+	}
+	st, err := o.Status("org-a", false)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if findSeatStatus(t, st.Seats, "seat-1").Active {
+		t.Fatalf("expected seat-1 to be stopped once the retried Stop succeeds")
+	}
+	if n := h.countKeys("C-c"); n != 2 {
+		t.Fatalf("expected 2 Stop attempts (1 failed manifest write + 1 successful retry), got %d", n)
+	}
+}
+
+// TestWatch_Deadman_WatchdogsOwnCutoffEvent_DoesNotClearPendingAlert pins
+// the self-review M-6 fix: the deadman's manifest-growth "has anything
+// happened since the ALERT" activity source must not count the watchdog's
+// own cutoff of an unrelated seat as if it were genuine lead/seat activity.
+func TestWatch_Deadman_WatchdogsOwnCutoffEvent_DoesNotClearPendingAlert(t *testing.T) {
+	o, h, _, clk := testWatchOrg(t)
+	o.Config.DeadmanMinutes = 5
+	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn seat-1 failed: %+v", r)
+	}
+	if r := o.Spawn(watchSpawnParams("org-a", "seat-2", "worker")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn seat-2 failed: %+v", r)
+	}
+	target := herdrAgentName("org-a", "seat-1")
+	h.AgentGetErrSeq[target] = []error{errors.New("herdr: agent not found")} // sticky liveness ALERT for seat-1
+
+	run, statusPath, escalationsPath := newTestWatchRun(o, nil, nil, &bytes.Buffer{})
+	status, err := loadWatchStatus(statusPath, "org-a")
+	if err != nil {
+		t.Fatalf("loadWatchStatus: %v", err)
+	}
+
+	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		t.Fatalf("cycle 1 (raises seat-1's liveness ALERT): %v", err)
+	}
+	if len(status.PendingAlerts) != 1 {
+		t.Fatalf("expected exactly 1 pending alert after cycle 1, got %+v", status.PendingAlerts)
+	}
+
+	// Simulate the watchdog cutting off a DIFFERENT seat (seat-2) between
+	// cycles, via the same Details shape evaluateSeatBudget/
+	// evaluateTotalBudget produce ("reason=watchdog_..."). Before the M-6
+	// fix, this alone grows the manifest enough to satisfy the deadman's
+	// unfiltered len(rr.Events) > ManifestLen check and wrongly clears
+	// seat-1's still-unanswered pending alert.
+	if r := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-2", Reason: "watchdog_budget_cutoff seat_wall_clock=30m observed=31m0s"}); r.Err != nil {
+		t.Fatalf("stop seat-2: %v", r.Err)
+	}
+
+	clk.Advance(6 * time.Minute) // past DeadmanMinutes, no genuine lead/seat activity
+	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		t.Fatalf("cycle 2 (deadman sweep): %v", err)
+	}
+
+	lines := readJSONLFile(t, escalationsPath)
+	if len(lines) != 1 {
+		t.Fatalf("expected the pending alert to still escalate (the watchdog's own cutoff of seat-2 must not count as lead activity), got %d escalation(s): %v", len(lines), lines)
+	}
+}
+
+// TestWatch_Stall_UsesLatestEventOfAnyType_NotOnlyStateEvents pins the
+// self-review M-8 fix: the stall condition's time term must track the
+// seat's latest manifest event of ANY type, not Roster's SeatStatus.TS
+// (which only advances on *state* events and so stays pinned at a healthy
+// active seat's own `spawned` TS forever).
+func TestWatch_Stall_UsesLatestEventOfAnyType_NotOnlyStateEvents(t *testing.T) {
+	o, h, a, clk := testWatchOrg(t)
+	o.Config.Budget.SeatWallClockMinutes = 1000 // keep budget out of the picture
+	o.Config.Watchdog.StallMinutes = 10
+
+	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", r)
+	}
+	target := herdrAgentName("org-a", "seat-1")
+	h.AgentGetSeq[target] = []string{"same", "same", "same"}
+
+	run, statusPath, _ := newTestWatchRun(o, nil, nil, &bytes.Buffer{})
+	status, err := loadWatchStatus(statusPath, "org-a")
+	if err != nil {
+		t.Fatalf("loadWatchStatus: %v", err)
+	}
+
+	// Cycle 1: baseline snapshot only (no previous herdr value to compare
+	// against yet).
+	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		t.Fatalf("cycle 1: %v", err)
+	}
+
+	// Advance well past stall_minutes, but record a fresh non-state `sent`
+	// event for the seat in between cycles. Roster's SeatStatus.TS (a
+	// spawned-and-still-active seat's last *state* event) never moves for
+	// this -- the pre-M-8 stall check (isStallByTime(s.TS, ...)) would still
+	// fire on the seat's now-stale spawn TS; the fixed check
+	// (latestSeatEventTS, any event type) must see this recent event and
+	// not treat the seat as stalled.
+	clk.Advance(11 * time.Minute)
+	if err := o.Manifest.Append(ManifestEvent{
+		TS: clk.Now().UTC().Format(time.RFC3339), OrgID: "org-a", SeatID: "seat-1",
+		Event: EventSent, Details: "genuine seat activity",
+	}); err != nil {
+		t.Fatalf("append sent event: %v", err)
+	}
+
+	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		t.Fatalf("cycle 2: %v", err)
+	}
+	if n := len(watchdogAlerts(a)); n != 0 {
+		t.Fatalf("expected no stall ALERT: the seat's own latest event (any type) is recent, got %d: %+v", n, watchdogAlerts(a))
 	}
 }
 

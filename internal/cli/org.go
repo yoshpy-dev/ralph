@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -100,6 +101,17 @@ func requireSeatIdentifier(flag, value string) error {
 // value.
 func newOrgRuntime(cmd *cobra.Command, stateDir, configPath string) (*org.Org, error) {
 	resolvedStateDir, _ := org.ResolveOrgStateDir(stateDir, cmd.Flags().Changed("state-dir"))
+	return newOrgRuntimeAt(resolvedStateDir, configPath)
+}
+
+// newOrgRuntimeAt is newOrgRuntime's shared implementation, taking an
+// already-resolved state directory instead of resolving it itself. A caller
+// that also needs the resolved directory for its own purposes beyond wiring
+// (today, only newOrgWatchCmd's banner + WatchParams.StatusDir) resolves it
+// once via org.ResolveOrgStateDir and calls this directly, instead of
+// resolving twice (self-review LOW fix -- each resolution shells out to `git
+// rev-parse --show-toplevel`).
+func newOrgRuntimeAt(resolvedStateDir, configPath string) (*org.Org, error) {
 	orgCfg, err := resolveOrgConfig(configPath)
 	if err != nil {
 		return nil, fmt.Errorf("org: load config: %w", err)
@@ -656,23 +668,42 @@ func newOrgWatchCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err := requireOrgID(*orgID); err != nil {
 				return err
 			}
-			rt, err := newOrgRuntime(cmd, *stateDir, *configPath)
+			// Resolved exactly once (self-review LOW fix) and passed through
+			// to newOrgRuntimeAt instead of also re-resolving inside a second
+			// newOrgRuntime call.
+			resolvedStateDir, _ := org.ResolveOrgStateDir(*stateDir, cmd.Flags().Changed("state-dir"))
+			rt, err := newOrgRuntimeAt(resolvedStateDir, *configPath)
 			if err != nil {
 				return err
 			}
-			resolvedStateDir, _ := org.ResolveOrgStateDir(*stateDir, cmd.Flags().Changed("state-dir"))
 			cycles := 0
 			if once {
 				cycles = 1
 			}
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "watching org %q (interval-seconds=%d once=%t state-dir=%s)\n",
-				*orgID, intervalSeconds, once, resolvedStateDir)
-			return rt.RunWatch(cmd.Context(), org.WatchParams{
+			// Effective interval (self-review LOW fix): the raw
+			// --interval-seconds flag value is 0 by default, so the banner
+			// used to print a cadence that was never actually running --
+			// ResolveWatchInterval mirrors RunWatch's own fallback chain so
+			// the banner reports what will really execute.
+			effectiveInterval := org.ResolveWatchInterval(time.Duration(intervalSeconds)*time.Second, rt.Config.Watchdog)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "watching org %q (interval=%s once=%t state-dir=%s)\n",
+				*orgID, effectiveInterval, once, resolvedStateDir)
+			hooks, watcherWG := newWatchdogHooks(rt, cmd.ErrOrStderr())
+			err = rt.RunWatch(cmd.Context(), org.WatchParams{
 				OrgID:     *orgID,
-				Interval:  time.Duration(intervalSeconds) * time.Second,
+				Interval:  effectiveInterval,
 				Cycles:    cycles,
 				StatusDir: resolvedStateDir,
-			}, newWatchdogHooks(rt, cmd.ErrOrStderr()))
+			}, hooks)
+			// Wait for any still-in-flight on-demand watcher goroutine
+			// before returning (self-review M-7 fix): without this, `--once`
+			// returned as soon as cycle 1's synchronous pulse evaluation
+			// finished, killing the process before an OnSemanticTrigger
+			// goroutine it had just started could ever produce a watcher
+			// receipt or ALERT. Bounded by RunWatcher's own
+			// watcherInvokeTimeout, so this can never hang the command.
+			watcherWG.Wait()
+			return err
 		},
 	}
 
@@ -708,9 +739,18 @@ func newOrgWatchCmd(orgID, stateDir, configPath *string) *cobra.Command {
 // spawned), in the same message shape watch.go's own (unexported) sendAlert
 // already uses for pulse-layer ALERTs, so ALERT traffic stays uniform
 // regardless of which layer produced it.
-func newWatchdogHooks(rt *org.Org, stderr io.Writer) org.WatchHooks {
+//
+// The returned *sync.WaitGroup (self-review M-7 fix) tracks every
+// OnSemanticTrigger goroutine this closure starts; newOrgWatchCmd's RunE
+// waits on it after RunWatch returns, so `--once` (Cycles: 1, RunWatch
+// returns as soon as cycle 1 finishes) cannot exit the process out from
+// under an in-flight on-demand judgment call before it produces a watcher
+// receipt or ALERT. When WatcherEnabled is false the returned WaitGroup has
+// nothing ever added to it, so Wait() returns immediately.
+func newWatchdogHooks(rt *org.Org, stderr io.Writer) (org.WatchHooks, *sync.WaitGroup) {
+	var wg sync.WaitGroup
 	if !rt.Config.Watchdog.WatcherEnabled {
-		return org.WatchHooks{}
+		return org.WatchHooks{}, &wg
 	}
 
 	var busy int32
@@ -721,7 +761,9 @@ func newWatchdogHooks(rt *org.Org, stderr io.Writer) org.WatchHooks {
 					orgID, seatID, conditionType)
 				return
 			}
+			wg.Add(1)
 			go func() {
+				defer wg.Done()
 				defer atomic.StoreInt32(&busy, 0)
 				verdict, err := rt.RunWatcher(context.Background(), rt.Config.Watchdog, org.WatcherParams{
 					OrgID: orgID, SeatID: seatID, ConditionType: conditionType, Evidence: evidence,
@@ -742,5 +784,5 @@ func newWatchdogHooks(rt *org.Org, stderr io.Writer) org.WatchHooks {
 				}
 			}()
 		},
-	}
+	}, &wg
 }

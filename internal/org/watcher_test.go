@@ -103,9 +103,37 @@ func TestRunWatcher_ValidJSON_CircularVerdict(t *testing.T) {
 }
 
 // TestRunWatcher_ReportedModel_HonoredTrue pins the defensive "model" field
-// handling: when the installed claude version's JSON envelope does report a
-// model, RunWatcher records it as ReportedEffectiveModel and Honored=true.
+// handling (self-review M-5 fix): when the installed claude version's JSON
+// envelope reports a model that matches cfg.WatcherModel exactly, RunWatcher
+// records it as ReportedEffectiveModel and Honored=true -- the one case with
+// a verifiable, matching observation.
 func TestRunWatcher_ReportedModel_HonoredTrue(t *testing.T) {
+	writeClaudeStub(t, "#!/bin/sh\n"+
+		"cat <<'EOF'\n"+
+		`{"result":"{\"verdict\":\"normal\",\"reason\":\"ok\"}","model":"haiku"}`+"\n"+
+		"EOF\n")
+
+	o, _, _, _ := testWatchOrg(t)
+	_, err := o.RunWatcher(context.Background(), watcherTestCfg(), WatcherParams{
+		OrgID: "org-a", SeatID: "seat-1", ConditionType: "stall", Evidence: "e",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	rec := lastReceipt(t, o)
+	if rec.Honored != HonoredTrue {
+		t.Errorf("receipt.Honored = %q, want %q", rec.Honored, HonoredTrue)
+	}
+	if rec.ReportedEffectiveModel != "haiku" {
+		t.Errorf("receipt.ReportedEffectiveModel = %q, want haiku", rec.ReportedEffectiveModel)
+	}
+}
+
+// TestRunWatcher_ReportedModel_MismatchHonoredFalse pins the other half of
+// the M-5 fix: a verifiable observation that *disagrees* with the commanded
+// model (cfg.WatcherModel) is Honored=false, not true -- the one case the
+// tri-state exists to catch (receipts.go's doc comment).
+func TestRunWatcher_ReportedModel_MismatchHonoredFalse(t *testing.T) {
 	writeClaudeStub(t, "#!/bin/sh\n"+
 		"cat <<'EOF'\n"+
 		`{"result":"{\"verdict\":\"normal\",\"reason\":\"ok\"}","model":"claude-haiku-4"}`+"\n"+
@@ -119,8 +147,8 @@ func TestRunWatcher_ReportedModel_HonoredTrue(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	rec := lastReceipt(t, o)
-	if rec.Honored != HonoredTrue {
-		t.Errorf("receipt.Honored = %q, want %q", rec.Honored, HonoredTrue)
+	if rec.Honored != HonoredFalse {
+		t.Errorf("receipt.Honored = %q, want %q", rec.Honored, HonoredFalse)
 	}
 	if rec.ReportedEffectiveModel != "claude-haiku-4" {
 		t.Errorf("receipt.ReportedEffectiveModel = %q, want claude-haiku-4", rec.ReportedEffectiveModel)

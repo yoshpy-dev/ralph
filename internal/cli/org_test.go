@@ -1539,7 +1539,7 @@ func TestOrgWatch_Once_RunsExactlyOneCycleAndWritesStatus(t *testing.T) {
 		t.Errorf("expected watch banner in output, got: %s", out)
 	}
 
-	statusPath := filepath.Join(stateDir, "watch-status.json")
+	statusPath := filepath.Join(stateDir, "watch-status-org-a.json")
 	data, err := os.ReadFile(statusPath)
 	if err != nil {
 		t.Fatalf("read %s: %v", statusPath, err)
@@ -1598,23 +1598,6 @@ func newWatchdogTestOrg(t *testing.T, stateDir string) *org.Org {
 	}
 }
 
-// waitForCondition polls cond every 10ms until it returns true or timeout
-// elapses, failing the test in the latter case. Used below to deterministically
-// wait for newWatchdogHooks' background goroutine to finish (observed via its
-// own side effect -- a receipt append) rather than sleeping a fixed duration
-// or reaching into the hook's private single-flight state.
-func waitForCondition(t *testing.T, timeout time.Duration, cond func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if cond() {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("condition not met within %v", timeout)
-}
-
 func receiptCount(t *testing.T, rt *org.Org) int {
 	t.Helper()
 	rr, err := rt.Receipts.Read()
@@ -1631,10 +1614,14 @@ func TestNewWatchdogHooks_WatcherDisabled_NoOp(t *testing.T) {
 	rt := newWatchdogTestOrg(t, t.TempDir())
 	rt.Config.Watchdog.WatcherEnabled = false
 
-	hooks := newWatchdogHooks(rt, io.Discard)
+	hooks, wg := newWatchdogHooks(rt, io.Discard)
 	if hooks.OnSemanticTrigger != nil {
 		t.Fatal("expected nil OnSemanticTrigger when watcher_enabled is false")
 	}
+	// The returned WaitGroup (self-review M-7) must still be usable (never
+	// nil) and immediately satisfied when the watcher is disabled -- nothing
+	// is ever added to it, so Wait() must return without blocking.
+	wg.Wait()
 }
 
 // TestNewWatchdogHooks_Dispatch_NeverBlocksCaller pins Codex advisory
@@ -1647,7 +1634,7 @@ func TestNewWatchdogHooks_Dispatch_NeverBlocksCaller(t *testing.T) {
 	rt := newWatchdogTestOrg(t, t.TempDir())
 
 	var stderr bytes.Buffer
-	hooks := newWatchdogHooks(rt, &stderr)
+	hooks, wg := newWatchdogHooks(rt, &stderr)
 
 	start := time.Now()
 	hooks.OnSemanticTrigger("org-a", "seat-1", "stall", "seat stalled 20m")
@@ -1656,11 +1643,19 @@ func TestNewWatchdogHooks_Dispatch_NeverBlocksCaller(t *testing.T) {
 	if elapsed > 200*time.Millisecond {
 		t.Fatalf("OnSemanticTrigger blocked its caller for %v (want near-instant dispatch)", elapsed)
 	}
+	if n := receiptCount(t, rt); n != 0 {
+		t.Fatalf("expected no receipt yet immediately after dispatch (goroutine still mid-sleep), got %d", n)
+	}
 
-	// Drain the background goroutine before the test returns (avoids a
-	// leaked goroutine/process outliving the test) -- its own watcher_error
-	// receipt is the deterministic completion signal.
-	waitForCondition(t, 4*time.Second, func() bool { return receiptCount(t, rt) >= 1 })
+	// wg.Wait() (self-review M-7 fix -- the same WaitGroup newOrgWatchCmd's
+	// RunE waits on before `--once` returns) blocks until the background
+	// goroutine has actually finished, including its own hung claude
+	// invocation, proving the WaitGroup is a reliable completion signal
+	// rather than the test polling for a side effect.
+	wg.Wait()
+	if n := receiptCount(t, rt); n < 1 {
+		t.Fatalf("expected the goroutine to have appended a watcher_error receipt by the time wg.Wait() returns, got %d", n)
+	}
 }
 
 // TestNewWatchdogHooks_SingleFlight_SecondTriggerSkippedWhileBusy pins the
@@ -1678,7 +1673,7 @@ func TestNewWatchdogHooks_SingleFlight_SecondTriggerSkippedWhileBusy(t *testing.
 	rt := newWatchdogTestOrg(t, t.TempDir())
 
 	var stderr bytes.Buffer
-	hooks := newWatchdogHooks(rt, &stderr)
+	hooks, wg := newWatchdogHooks(rt, &stderr)
 
 	hooks.OnSemanticTrigger("org-a", "seat-1", "stall", "evidence-1")
 	hooks.OnSemanticTrigger("org-a", "seat-2", "stall", "evidence-2")
@@ -1695,7 +1690,10 @@ func TestNewWatchdogHooks_SingleFlight_SecondTriggerSkippedWhileBusy(t *testing.
 	}
 
 	// Drain the accepted (seat-1) goroutine before the test returns.
-	waitForCondition(t, 4*time.Second, func() bool { return receiptCount(t, rt) >= 1 })
+	wg.Wait()
+	if n := receiptCount(t, rt); n < 1 {
+		t.Fatalf("expected the accepted goroutine to have appended a receipt, got %d", n)
+	}
 }
 
 // TestNewWatchdogHooks_AbnormalVerdict_SendsAlertToLead pins that an
@@ -1720,17 +1718,15 @@ func TestNewWatchdogHooks_AbnormalVerdict_SendsAlertToLead(t *testing.T) {
 	stateDir := t.TempDir()
 	rt := newWatchdogTestOrg(t, stateDir)
 	var stderr bytes.Buffer
-	hooks := newWatchdogHooks(rt, &stderr)
+	hooks, wg := newWatchdogHooks(rt, &stderr)
 
 	hooks.OnSemanticTrigger("org-a", "seat-1", "scope_change", "seat worktree changed")
 
-	// Wait for the ALERT's own Send call to reach the agmsg stub (not just
-	// RunWatcher's earlier receipt append) -- Send runs after RunWatcher
-	// returns, inside the same background goroutine.
-	waitForCondition(t, 4*time.Second, func() bool {
-		data, err := os.ReadFile(agmsgLog)
-		return err == nil && strings.Contains(string(data), "TYPE: ALERT")
-	})
+	// wg.Wait() blocks until the ALERT's own Send call has reached the
+	// agmsg stub (not just RunWatcher's earlier receipt append) -- Send
+	// runs after RunWatcher returns, inside the same background goroutine
+	// this WaitGroup tracks (self-review M-7).
+	wg.Wait()
 
 	data, err := os.ReadFile(agmsgLog)
 	if err != nil {

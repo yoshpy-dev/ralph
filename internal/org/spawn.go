@@ -257,33 +257,6 @@ type SpawnResult struct {
 // out-of-pool model *and* a scope-less autonomous spawn) is rejected for
 // the same first cause in both modes, so `--dry-run`'s predicted rejection
 // always matches what a real spawn of the same request would record.
-// checkCapacityAndStart runs the capacity check + spawn_started append
-// against the given events snapshot for org o, the in-flight spawn params p,
-// and the already-built SpawnRequest req. It takes its dependencies as
-// explicit parameters (rather than as a closure capturing enclosing-scope
-// variables) so it reads and tests the same whether it is called from Phase 1
-// (no-stale-seat path) or Phase 2 (post-compensation re-check) below -- both
-// call sites must be inside a locked closure, since neither the capacity
-// check nor the spawn_started append is safe unlocked. The returned
-// *SpawnResult is non-nil only on a capacity rejection or an append failure;
-// callers should assign it to their enclosing `early` var and `return nil`
-// right after, exactly as the closure this replaced did.
-func checkCapacityAndStart(o *Org, p SpawnParams, req SpawnRequest, events []ManifestEvent) *SpawnResult {
-	activeSeats := ActiveSeatCount(events, p.OrgID, RosterOptions{})
-	if err := ValidateSpawnCapacity(o.Config, req, activeSeats); err != nil {
-		r := o.reject(p, err)
-		return &r
-	}
-	if err := o.appendEvent(ManifestEvent{
-		TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnStarted,
-		Role: p.Role, Driver: p.Driver, Model: p.Model, Worktree: p.Cwd,
-	}); err != nil {
-		r := SpawnResult{Outcome: SpawnOutcomeFailed, Err: err}
-		return &r
-	}
-	return nil
-}
-
 func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	// Identifier shape validation runs first, before any manifest read or
 	// write and before any path is derived from p.OrgID/p.SeatID (see
@@ -798,6 +771,33 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 		Worktree: p.Cwd, PaneID: paneID, AgmsgTeam: team, HerdrAgentName: agentName,
 		Event: EventSpawned, Active: true,
 	}}
+}
+
+// checkCapacityAndStart runs the capacity check + spawn_started append
+// against the given events snapshot for org o, the in-flight spawn params p,
+// and the already-built SpawnRequest req. It takes its dependencies as
+// explicit parameters (rather than as a closure capturing enclosing-scope
+// variables) so it reads and tests the same whether it is called from Phase 1
+// (no-stale-seat path) or Phase 2 (post-compensation re-check) in Spawn --
+// both call sites must be inside a locked closure, since neither the capacity
+// check nor the spawn_started append is safe unlocked. The returned
+// *SpawnResult is non-nil only on a capacity rejection or an append failure;
+// callers should assign it to their enclosing `early` var and `return nil`
+// right after, exactly as the closure this replaced did.
+func checkCapacityAndStart(o *Org, p SpawnParams, req SpawnRequest, events []ManifestEvent) *SpawnResult {
+	activeSeats := ActiveSeatCount(events, p.OrgID, RosterOptions{})
+	if err := ValidateSpawnCapacity(o.Config, req, activeSeats); err != nil {
+		r := o.reject(p, err)
+		return &r
+	}
+	if err := o.appendEvent(ManifestEvent{
+		TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnStarted,
+		Role: p.Role, Driver: p.Driver, Model: p.Model, Worktree: p.Cwd,
+	}); err != nil {
+		r := SpawnResult{Outcome: SpawnOutcomeFailed, Err: err}
+		return &r
+	}
+	return nil
 }
 
 // autonomousScopeGateErr reports the AC-2b minimum control gate's error when

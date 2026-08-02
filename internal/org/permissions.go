@@ -112,12 +112,15 @@ func permissionArgsForDriver(cfg config.OrgConfig, driver, mode string) ([]strin
 			if cfg.Permissions.CodexVerified {
 				return codexAutonomousArgs, nil
 			}
+			return nil, fmt.Errorf("org: codex seat permission mode %q not yet live-verified; only guarded is allowed (fail-closed; set [org.permissions].codex_verified=true after live-verifying your codex CLI's flags)", mode)
 		case PermissionModeEdits:
 			if cfg.Permissions.CodexVerified {
 				return codexEditsArgs, nil
 			}
+			return nil, fmt.Errorf("org: codex seat permission mode %q not yet live-verified; only guarded is allowed (fail-closed; set [org.permissions].codex_verified=true after live-verifying your codex CLI's flags)", mode)
+		default:
+			return nil, fmt.Errorf("org: unknown permission mode %q for driver %q", mode, driver)
 		}
-		return nil, fmt.Errorf("org: codex seat permission mode %q not yet live-verified; only guarded is allowed (fail-closed; set [org.permissions].codex_verified=true after live-verifying your codex CLI's flags)", mode)
 	default:
 		return nil, fmt.Errorf("org: unknown driver %q for permission mode mapping", driver)
 	}

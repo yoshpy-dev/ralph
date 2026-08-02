@@ -32,12 +32,28 @@ import (
 // a spawned seat").
 const watchdogIdentity = "watchdog"
 
-// WatchStatusRelName is the file name (within the caller-resolved org state
-// directory, typically ResolveOrgStateDir's result) RunWatch reads and
-// rewrites every cycle: heartbeat (last_cycle_ts/cycles) plus the AC-3c
-// condition-dedupe and AC-5 deadman state. `ralph org status` never reads
-// this file -- it is watch's own observability record, not seat roster.
-const WatchStatusRelName = "watch-status.json"
+// WatchStatusFileName returns the file name (within the caller-resolved org
+// state directory, typically ResolveOrgStateDir's result) RunWatch reads and
+// rewrites every cycle for orgID: heartbeat (last_cycle_ts/cycles) plus the
+// AC-3c condition-dedupe and AC-5 deadman state. `ralph org status` never
+// reads this file -- it is watch's own observability record, not seat
+// roster.
+//
+// The name is namespaced per org_id (self-review H-1 fix): a single fixed,
+// org-agnostic file name meant two orgs watched from the same repository
+// (one state directory, since manifest.jsonl/model-receipts.jsonl are also
+// shared there) silently clobbered each other's org-scoped fields --
+// OrgID/OrgStartTS/Cycles/LastCycleTS/WatchdogJoined and SeatSnapshots (keyed
+// by bare SeatID) all overwrote across orgs, while Conditions/PendingAlerts/
+// Escalated happened to be safe only because conditionKey already namespaces
+// them by org_id. orgID is guaranteed path-safe here: RunWatch's own
+// strings.TrimSpace(p.OrgID) == "" gate plus every production caller's
+// upstream requireOrgID/ValidateIdentifier check (identifierPattern,
+// identifier.go: ^[a-z][a-z0-9-]{0,29}$) both run before this is ever
+// reached.
+func WatchStatusFileName(orgID string) string {
+	return fmt.Sprintf("watch-status-%s.json", orgID)
+}
 
 // EscalationsRelName is the file name (within the same state directory)
 // AC-5 deadman escalations are appended to, one JSON line per escalation.
@@ -267,6 +283,27 @@ func earliestSpawnTS(events []ManifestEvent, orgID string) string {
 	return earliest
 }
 
+// latestSeatEventTS returns the latest TS across every manifest event of any
+// type recorded for orgID/seatID, or "" if none exist. Unlike
+// Roster-derived SeatStatus.TS -- which only advances on *state* events
+// (stateEvents, seat.go) and so stays pinned at a seat's `spawned` TS for as
+// long as it remains active with no further state transition -- this
+// reflects genuine seat activity of any kind, which is what the stall
+// condition's time term needs (self-review M-8 fix; see evaluateSeat's call
+// site).
+func latestSeatEventTS(events []ManifestEvent, orgID, seatID string) string {
+	var latest string
+	for _, ev := range events {
+		if ev.OrgID != orgID || ev.SeatID != seatID {
+			continue
+		}
+		if ev.TS > latest {
+			latest = ev.TS
+		}
+	}
+	return latest
+}
+
 // isStallByTime reports whether seatTS (a seat's latest manifest event
 // time) is older than stallMinutes relative to now.
 func isStallByTime(seatTS string, now time.Time, stallMinutes int) bool {
@@ -304,12 +341,31 @@ func realEscalate(ctx context.Context, message string) error {
 	return exec.CommandContext(ctx, "osascript", "-e", script).Run()
 }
 
+// ResolveWatchInterval returns the effective pulse-cycle interval RunWatch
+// will use: requested if positive, else cfg.IntervalSeconds, else a fixed
+// 30s fallback. Exported so a caller that needs to report the effective
+// cadence before RunWatch itself resolves it internally (e.g. `ralph org
+// watch`'s startup banner, self-review LOW fix: the banner used to print the
+// raw --interval-seconds flag value, which is 0 by default -- the effective
+// interval -- rather than the interval that is actually running) does not
+// have to duplicate this fallback chain.
+func ResolveWatchInterval(requested time.Duration, cfg config.OrgWatchdogConfig) time.Duration {
+	interval := requested
+	if interval <= 0 {
+		interval = time.Duration(cfg.IntervalSeconds) * time.Second
+	}
+	if interval <= 0 {
+		interval = 30 * time.Second
+	}
+	return interval
+}
+
 // RunWatch runs the pulse layer for p.OrgID: one evaluateCycle call per
 // interval, until p.Cycles is reached (p.Cycles > 0) or ctx is done
 // (p.Cycles == 0, the default long-running mode). Every cycle rewrites
-// WatchStatusRelName inside p.StatusDir with its heartbeat and dedupe
-// state; a returned error means a cycle itself failed unrecoverably (e.g.
-// manifest read/status write failure) -- individual condition
+// WatchStatusFileName(p.OrgID) inside p.StatusDir with its heartbeat and
+// dedupe state; a returned error means a cycle itself failed unrecoverably
+// (e.g. manifest read/status write failure) -- individual condition
 // evaluation/ALERT/escalation problems are handled best-effort inside a
 // cycle and never abort the loop.
 func (o *Org) RunWatch(ctx context.Context, p WatchParams, hooks WatchHooks) error {
@@ -320,13 +376,7 @@ func (o *Org) RunWatch(ctx context.Context, p WatchParams, hooks WatchHooks) err
 		return fmt.Errorf("org: watch: state dir is required")
 	}
 
-	interval := p.Interval
-	if interval <= 0 {
-		interval = time.Duration(o.Config.Watchdog.IntervalSeconds) * time.Second
-	}
-	if interval <= 0 {
-		interval = 30 * time.Second
-	}
+	interval := ResolveWatchInterval(p.Interval, o.Config.Watchdog)
 
 	gitStatus := p.GitStatus
 	if gitStatus == nil {
@@ -341,7 +391,7 @@ func (o *Org) RunWatch(ctx context.Context, p WatchParams, hooks WatchHooks) err
 		stderr = os.Stderr
 	}
 
-	statusPath := filepath.Join(p.StatusDir, WatchStatusRelName)
+	statusPath := filepath.Join(p.StatusDir, WatchStatusFileName(p.OrgID))
 	escalationsPath := filepath.Join(p.StatusDir, EscalationsRelName)
 
 	status, err := loadWatchStatus(statusPath, p.OrgID)
@@ -428,7 +478,7 @@ func (w *watchRun) evaluateCycle(ctx context.Context, orgID string, status *watc
 
 	w.evaluateTotalBudget(ctx, status, orgID, activeSeats, now)
 	for _, s := range activeSeats {
-		w.evaluateSeat(ctx, status, orgID, s, now)
+		w.evaluateSeat(ctx, status, orgID, s, now, rr.Events)
 	}
 
 	rr2, err := w.org.Manifest.Read()
@@ -450,6 +500,23 @@ func (w *watchRun) evaluateCycle(ctx context.Context, orgID string, status *watc
 // off (each Stop call carries its own Reason) and a single org-level ALERT
 // is sent -- deduped by the org-level conditionKey (seatID "") exactly like
 // any other cutoff condition (Codex advisory findings 1+2).
+//
+// The Cutoff ratchet (self-review H-2 fix) is only set once every Stop call
+// in this pass returned no error: Stop's error is non-nil exactly when
+// findSeat's manifest read or the `stopped` event's own appendEvent write
+// failed (Stop's PaneSendKeys/Leave failures are best-effort and only ever
+// recorded in the stopped event's Details, never returned as an error -- see
+// verbs.go's Stop). Setting Cutoff on a failed Stop would permanently
+// disable the org's only enforcement action for that key with no path to
+// retry and no log line; instead, a failed Stop is logged to w.stderr and
+// the condition is left un-ratcheted, so the next cycle re-evaluates (and
+// retries Stop only for seats that are still active -- a seat this pass did
+// successfully stop no longer appears in activeSeats on the next call,
+// since Roster no longer reports it Active). The ALERT itself is still sent
+// exactly once per key (guarded by the same Conditions[key].Active flag
+// raiseOrClear uses for non-cutoff conditions), regardless of whether the
+// Stop attempt(s) succeeded, so lead is never left uninformed of a
+// still-in-progress cutoff.
 func (w *watchRun) evaluateTotalBudget(ctx context.Context, status *watchStatusFile, orgID string, activeSeats []SeatStatus, now time.Time) {
 	if status.OrgStartTS == "" || w.cfg.Budget.TotalWallClockMinutes <= 0 {
 		return
@@ -464,25 +531,49 @@ func (w *watchRun) evaluateTotalBudget(ctx context.Context, status *watchStatusF
 	}
 
 	key := conditionKey(orgID, "", condTotalBudget)
-	if rec := status.Conditions[key]; rec != nil && rec.Cutoff {
+	rec := status.Conditions[key]
+	if rec != nil && rec.Cutoff {
 		return // AC-3c: one cutoff per key, ever
 	}
 
 	details := fmt.Sprintf("watchdog_total_budget_cutoff total_wall_clock=%dm observed=%s",
 		w.cfg.Budget.TotalWallClockMinutes, observed.Round(time.Minute))
+	allStopped := true
 	for _, s := range activeSeats {
-		_ = w.org.Stop(StopParams{OrgID: orgID, Seat: s.SeatID, Reason: details})
+		if stopErr := w.org.Stop(StopParams{OrgID: orgID, Seat: s.SeatID, Reason: details}).Err; stopErr != nil {
+			allStopped = false
+			_, _ = fmt.Fprintf(w.stderr, "watchdog: total-budget cutoff Stop failed for org %q seat %q: %v -- will retry next cycle\n",
+				orgID, s.SeatID, stopErr)
+		}
 	}
-	status.Conditions[key] = &watchConditionRecord{Active: true, Cutoff: true, FirstTS: now.UTC().Format(time.RFC3339)}
 
-	msg := fmt.Sprintf("TYPE: ALERT\nORG_ID: %s\nCONDITION: %s\n\n%s", orgID, condTotalBudget, details)
-	w.sendAlert(ctx, status, orgID, "", condTotalBudget, msg, now)
+	alreadyAlerted := rec != nil && rec.Active
+	status.Conditions[key] = &watchConditionRecord{Active: true, Cutoff: allStopped, FirstTS: conditionFirstTS(rec, now)}
+
+	if !alreadyAlerted {
+		msg := fmt.Sprintf("TYPE: ALERT\nORG_ID: %s\nCONDITION: %s\n\n%s", orgID, condTotalBudget, details)
+		w.sendAlert(ctx, status, orgID, "", condTotalBudget, msg, now)
+	}
+}
+
+// conditionFirstTS preserves rec's original FirstTS across a retried cutoff
+// attempt (self-review H-2 fix): a failed Stop leaves rec.Cutoff false but
+// must not reset FirstTS to the retry cycle's own now, or a condition that
+// takes several cycles to successfully cut off would misreport when it
+// first became active. rec is nil on the first-ever observation of the key,
+// in which case now is the correct FirstTS.
+func conditionFirstTS(rec *watchConditionRecord, now time.Time) string {
+	if rec != nil && rec.FirstTS != "" {
+		return rec.FirstTS
+	}
+	return now.UTC().Format(time.RFC3339)
 }
 
 // evaluateSeat runs every per-seat pulse condition for s: (a) seat wall-
 // clock budget cutoff, (c) heartbeat stall, (d) process liveness, (e)
-// worktree scope change.
-func (w *watchRun) evaluateSeat(ctx context.Context, status *watchStatusFile, orgID string, s SeatStatus, now time.Time) {
+// worktree scope change. events is the cycle's manifest snapshot (see
+// evaluateCycle), needed by the stall condition's M-8 fix below.
+func (w *watchRun) evaluateSeat(ctx context.Context, status *watchStatusFile, orgID string, s SeatStatus, now time.Time, events []ManifestEvent) {
 	w.evaluateSeatBudget(ctx, status, orgID, s, now)
 
 	snap := status.SeatSnapshots[s.SeatID]
@@ -506,8 +597,18 @@ func (w *watchRun) evaluateSeat(ctx context.Context, status *watchStatusFile, or
 		w.raiseOrClear(ctx, status, orgID, s.SeatID, condLiveness, false, now, "", false)
 
 		// (c) heartbeat stall: last manifest event time AND herdr raw probe
-		// text both unchanged since the previous cycle.
-		stalled := snap.AgentGetSeen && snap.AgentGet == agentGetOut && isStallByTime(s.TS, now, w.cfg.Watchdog.StallMinutes)
+		// text both unchanged since the previous cycle. lastEventTS (self-
+		// review M-8 fix) is the seat's latest event of ANY type, not s.TS --
+		// Roster's SeatStatus.TS only advances on *state* events
+		// (stateEvents, seat.go, deliberately excludes e.g. `sent`), so for a
+		// healthy active seat s.TS stays frozen at its `spawned` TS and
+		// isStallByTime(s.TS, ...) would be permanently true for any seat
+		// older than stall_minutes -- the only real discriminator left would
+		// be the single-interval herdr raw-text comparison above, contrary to
+		// [org.watchdog].stall_minutes' documented "how long ... may both
+		// stay unchanged" semantics (config.go).
+		lastEventTS := latestSeatEventTS(events, orgID, s.SeatID)
+		stalled := snap.AgentGetSeen && snap.AgentGet == agentGetOut && isStallByTime(lastEventTS, now, w.cfg.Watchdog.StallMinutes)
 		w.raiseOrClear(ctx, status, orgID, s.SeatID, condStall, stalled, now,
 			fmt.Sprintf("TYPE: ALERT\nORG_ID: %s\nSEAT: %s\nCONDITION: %s\n\nseat %s heartbeat stalled for over %dm",
 				orgID, s.SeatID, condStall, s.SeatID, w.cfg.Watchdog.StallMinutes), true)
@@ -536,6 +637,13 @@ func (w *watchRun) evaluateSeat(ctx context.Context, status *watchStatusFile, or
 // seat is the `spawned` event's own TS (no further state event has
 // superseded it) -- exactly the "spawned.ts" the plan's Reason format
 // references.
+//
+// The Cutoff ratchet (self-review H-2 fix) is only set once Stop returns no
+// error -- see evaluateTotalBudget's doc comment for the full rationale
+// (identical for the single-seat case here): a failed Stop is logged to
+// w.stderr and the condition is left un-ratcheted so the next cycle retries,
+// while the ALERT is still sent exactly once per key regardless of the Stop
+// outcome.
 func (w *watchRun) evaluateSeatBudget(ctx context.Context, status *watchStatusFile, orgID string, s SeatStatus, now time.Time) {
 	if w.cfg.Budget.SeatWallClockMinutes <= 0 || s.TS == "" {
 		return
@@ -550,17 +658,26 @@ func (w *watchRun) evaluateSeatBudget(ctx context.Context, status *watchStatusFi
 	}
 
 	key := conditionKey(orgID, s.SeatID, condSeatBudget)
-	if rec := status.Conditions[key]; rec != nil && rec.Cutoff {
+	rec := status.Conditions[key]
+	if rec != nil && rec.Cutoff {
 		return // AC-3c: one cutoff per key, ever
 	}
 
 	details := fmt.Sprintf("watchdog_budget_cutoff seat_wall_clock=%dm observed=%s",
 		w.cfg.Budget.SeatWallClockMinutes, observed.Round(time.Minute))
-	_ = w.org.Stop(StopParams{OrgID: orgID, Seat: s.SeatID, Reason: details})
-	status.Conditions[key] = &watchConditionRecord{Active: true, Cutoff: true, FirstTS: now.UTC().Format(time.RFC3339)}
+	stopErr := w.org.Stop(StopParams{OrgID: orgID, Seat: s.SeatID, Reason: details}).Err
+	if stopErr != nil {
+		_, _ = fmt.Fprintf(w.stderr, "watchdog: seat-budget cutoff Stop failed for org %q seat %q: %v -- will retry next cycle\n",
+			orgID, s.SeatID, stopErr)
+	}
 
-	msg := fmt.Sprintf("TYPE: ALERT\nORG_ID: %s\nSEAT: %s\nCONDITION: %s\n\n%s", orgID, s.SeatID, condSeatBudget, details)
-	w.sendAlert(ctx, status, orgID, s.SeatID, condSeatBudget, msg, now)
+	alreadyAlerted := rec != nil && rec.Active
+	status.Conditions[key] = &watchConditionRecord{Active: true, Cutoff: stopErr == nil, FirstTS: conditionFirstTS(rec, now)}
+
+	if !alreadyAlerted {
+		msg := fmt.Sprintf("TYPE: ALERT\nORG_ID: %s\nSEAT: %s\nCONDITION: %s\n\n%s", orgID, s.SeatID, condSeatBudget, details)
+		w.sendAlert(ctx, status, orgID, s.SeatID, condSeatBudget, msg, now)
+	}
 }
 
 // raiseOrClear implements the AC-3c idempotent ALERT dedupe for a
@@ -644,10 +761,30 @@ func (w *watchRun) sendAlert(ctx context.Context, status *watchStatusFile, orgID
 		AlertID:      alertID,
 		TS:           now.UTC().Format(time.RFC3339),
 		Subject:      seatID,
-		ManifestLen:  len(rr.Events),
+		ManifestLen:  leadActivityEventCount(rr.Events),
 		LeadAgentGet: w.leadProbeSnapshot(ctx, orgID),
 		History:      w.historySnapshot(ctx, orgID),
 	}
+}
+
+// leadActivityEventCount counts manifest events that are not the watchdog's
+// own cutoff writes (self-review M-6 fix): every `stopped` event a budget
+// cutoff produces carries "reason=watchdog_..." in its Details (see
+// evaluateTotalBudget/evaluateSeatBudget's Reason format), so without this
+// filter the deadman's "has anything happened since the ALERT" manifest-
+// growth source counted the watchdog's own later cutoff of an unrelated
+// seat (or, before the H-1 fix, another org's activity in a shared manifest)
+// as if it were genuine lead/seat activity -- clearing a pending alert that
+// nothing had actually responded to.
+func leadActivityEventCount(events []ManifestEvent) int {
+	n := 0
+	for _, ev := range events {
+		if strings.Contains(ev.Details, "reason=watchdog_") {
+			continue
+		}
+		n++
+	}
+	return n
 }
 
 // leadProbeSnapshot returns the lead seat's current herdr `agent get` raw
@@ -694,7 +831,7 @@ func (w *watchRun) checkDeadman(ctx context.Context, status *watchStatusFile, rr
 			continue
 		}
 
-		activity := len(rr.Events) > pending.ManifestLen
+		activity := leadActivityEventCount(rr.Events) > pending.ManifestLen
 		if !activity {
 			if cur := w.leadProbeSnapshot(ctx, status.OrgID); cur != "" && cur != pending.LeadAgentGet {
 				activity = true

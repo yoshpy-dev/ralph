@@ -96,6 +96,24 @@ func TestPermissionArgsForDriver_Codex_FailClosed(t *testing.T) {
 			}
 		})
 	}
+
+	// TestPermissionArgsForDriver_Codex_UnknownMode_DistinctError pins the
+	// self-review LOW fix: an unrecognized mode string must be reported as
+	// "unknown permission mode" (the same wording the claude branch's own
+	// default case uses), not folded into the "not yet live-verified"
+	// fail-closed message a genuinely known-but-unverified mode gets.
+	t.Run("an unknown mode is reported distinctly from the fail-closed case", func(t *testing.T) {
+		_, err := permissionArgsForDriver(config.OrgConfig{}, "codex", "not-a-real-mode")
+		if err == nil {
+			t.Fatalf("permissionArgsForDriver(codex, not-a-real-mode): expected an error, got nil")
+		}
+		if !strings.Contains(err.Error(), "unknown permission mode") {
+			t.Errorf("expected an 'unknown permission mode' error, got %v", err)
+		}
+		if strings.Contains(err.Error(), "not yet live-verified") {
+			t.Errorf("did not expect the fail-closed wording for a genuinely unknown mode, got %v", err)
+		}
+	})
 }
 
 // TestPermissionArgsForDriver_Codex_VerifiedUnlocksMapping pins AC-8: once
