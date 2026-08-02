@@ -437,6 +437,56 @@ func TestOrgSpawn_Idempotent_AlreadySpawned_NoNewDriverCalls(t *testing.T) {
 	}
 }
 
+// TestOrgSpawn_Idempotent_NoScopeRetry_ReturnsExistingSeat is the regression
+// test for cross-review-triage-org-runtime-lead.md ACTION_REQUIRED #1: under
+// the default (autonomous) permission mode, retrying `spawn` for an
+// already-spawned seat *without* --scope must return the existing seat
+// idempotently, not be rejected by the AC-2b minimum control gate. The gate
+// only exists to fail-close a *new* unscoped autonomous seat; a no-op retry
+// of an existing active seat creates no new seat at all, so it must never
+// reach the gate -- exactly the same idempotent-vs-validation ordering
+// TestOrgSpawn_Idempotent_AtMaxSeats_RespawnSucceedsInsteadOfRejected already
+// covers for envelope/capacity validation.
+func TestOrgSpawn_Idempotent_NoScopeRetry_ReturnsExistingSeat(t *testing.T) {
+	o, h, a := testOrg(t)
+	// testOrgConfig() leaves Permissions unset, which resolves to the
+	// default autonomous mode (ResolvePermissionMode) -- exactly the
+	// condition the AC-2b gate targets.
+
+	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("initial spawn failed: %+v", r)
+	}
+
+	rrBefore, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	eventsBefore := len(rrBefore.Events)
+	callsBefore := len(h.calls)
+	sendsBefore := len(a.calls)
+
+	p := mustSpawnParams("org-a", "seat-1")
+	p.Scope = ""
+	result := o.Spawn(p)
+	if result.Outcome != SpawnOutcomeIdempotent {
+		t.Fatalf("expected SpawnOutcomeIdempotent for a scope-less retry of an already-spawned seat under autonomous default, got %v (err=%v)", result.Outcome, result.Err)
+	}
+	if result.Err != nil {
+		t.Fatalf("expected nil Err for idempotent respawn (CLI must exit 0), got %v", result.Err)
+	}
+
+	rrAfter, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	if len(rrAfter.Events) != eventsBefore {
+		t.Fatalf("expected no new manifest events on idempotent no-scope retry, before=%d after=%d (events=%+v)", eventsBefore, len(rrAfter.Events), rrAfter.Events)
+	}
+	if len(h.calls) != callsBefore || len(a.calls) != sendsBefore {
+		t.Fatalf("expected no new driver calls on idempotent no-scope retry, herdr %d->%d agmsg %d->%d", callsBefore, len(h.calls), sendsBefore, len(a.calls))
+	}
+}
+
 func TestOrgSpawn_Idempotent_AtMaxSeats_RespawnSucceedsInsteadOfRejected(t *testing.T) {
 	// Regression for cross-review-triage-org-runtime-mechanism.md ACTION_REQUIRED #1:
 	// with max_seats=1, respawning the org's only (already-spawned) seat must

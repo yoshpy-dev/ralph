@@ -222,22 +222,33 @@ type SpawnResult struct {
 // call, the ordering is, in this order:
 //  1. Idempotent early return: an already-spawned seat returns the existing
 //     seat with no validation attempted at all (so an at-cap org can never
-//     reject a respawn-of-active-seat retry).
+//     reject a respawn-of-active-seat retry, and a no-op retry under the
+//     default autonomous mode can never be rejected by the AC-2b scope gate
+//     below either -- see that gate's doc comment for the fix this
+//     encodes).
 //  2. Stateless envelope validation (ValidateSpawnEnvelope: driver/model
-//     pool membership, role restriction) -- a pure function of cfg+req, run
-//     before any external side effect (including stale-seat compensation)
-//     is attempted, so an envelope-invalid request is always a pure no-op.
-//  3. Stale-in-flight compensation: a stale seat (prior spawn_started/
+//     pool membership, role restriction; and permissionArgsForDriver:
+//     driver + resolved permission mode) -- both are pure functions of
+//     cfg+req, run before any external side effect (including stale-seat
+//     compensation) is attempted, so an envelope-invalid request is always
+//     a pure no-op.
+//  3. AC-2b minimum control gate (the autonomous-mode --scope requirement)
+//     -- also stateless, but checked after the idempotent return and the
+//     envelope/permission checks above so it only ever applies to a
+//     genuinely new spawn attempt.
+//  4. Stale-in-flight compensation: a stale seat (prior spawn_started/
 //     spawn_step never resolved) is best-effort compensated and the
 //     manifest re-read, so it no longer counts toward max_seats.
-//  4. Capacity validation (ValidateSpawnCapacity) against the recomputed
+//  5. Capacity validation (ValidateSpawnCapacity) against the recomputed
 //     activeSeats.
 //
 // Only then does the saga proceed to (unless DryRun) the workspace/tab/
 // agent/agmsg side effects with a spawn_started -> spawn_step* ->
 // spawned|spawn_failed manifest trail and a tri-state model receipt. The
 // DryRun path is unchanged: validate the full envelope (ValidateSpawn) up
-// front, then simulate the trail.
+// front, then the AC-2b gate, then simulate the trail -- dry-run has no
+// idempotency concept, so "gate before record" is the only ordering
+// question there and it stays exactly as it was.
 func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	// Identifier shape validation runs first, before any manifest read or
 	// write and before any path is derived from p.OrgID/p.SeatID (see
@@ -265,31 +276,14 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 		)}
 	}
 
-	// AC-2b minimum control gate (Codex advisory 1): an autonomous-mode seat
-	// runs its driver with no interactive permission dialog at all
-	// (permissionArgsForDriver's bypassPermissions) -- --scope is the only
-	// thing left standing between "autonomous" and "unrestricted". A
-	// scope-less autonomous spawn is fail-closed right here, before any
-	// manifest read or write beyond reject()'s own append, unless the caller
-	// explicitly opts out via AllowUnscoped (recorded on the spawned event's
-	// Details below so its use stays auditable). It runs before the `if
-	// p.DryRun` branch below so dry-run spawns are gated identically to real
-	// ones.
-	//
-	// Routed through reject() (self-review LOW finding), same as every other
-	// envelope-validation rejection: a `rejected` manifest event plus an
-	// honored=false receipt are appended, so an autonomous lead that
-	// retry-loops unscoped spawns leaves a visible trace in `ralph org
-	// report`'s timeline instead of none. No spawn_started is ever written
-	// for this path (reject() never appends one), so a rejected attempt
-	// still cannot count toward [org].max_seats or leave a stale saga
-	// behind -- only the audit trail changed, not the fail-closed semantics.
+	// resolvedPermMode is a pure function of cfg+role, computed once here so
+	// every later consumer (the AC-2b gate, permissionArgsForDriver, the
+	// spawned event's Details, dryRunSpawn) sees the same value. Computing it
+	// does not itself decide anything -- the AC-2b gate check that used to
+	// sit right here has moved: see autonomousScopeGateErr's doc comment for
+	// why (PR① precedent: an idempotent early return must precede any
+	// validation a no-op retry doesn't need).
 	resolvedPermMode := ResolvePermissionMode(o.Config, p.Role)
-	if resolvedPermMode == PermissionModeAutonomous && p.Scope == "" && !p.AllowUnscoped {
-		return o.reject(p, fmt.Errorf(
-			"org: autonomous permission mode requires --scope (or --allow-unscoped to explicitly bypass)",
-		))
-	}
 
 	if p.TimeoutMS <= 0 {
 		p.TimeoutMS = defaultSpawnTimeoutMS
@@ -302,13 +296,18 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	events := rr.Events
 
 	if p.DryRun {
-		// Dry-run path is unchanged: validate the envelope up front, then
-		// simulate the saga trail without ever consulting existing roster
-		// state (dry-run events are excluded from ActiveSeatCount/roster
-		// entirely, so there is no idempotency/stale-in-flight concept to
-		// apply here). No manifest lock is needed here either -- dry-run
+		// Dry-run path is unchanged: gate-before-record, then validate the
+		// envelope, then simulate the saga trail without ever consulting
+		// existing roster state (dry-run events are excluded from
+		// ActiveSeatCount/roster entirely, so there is no idempotency/
+		// stale-in-flight concept to apply here -- unlike the real-spawn
+		// path below, there is no idempotent-retry case for this gate to be
+		// ordered after). No manifest lock is needed here either -- dry-run
 		// events never count toward [org].max_seats, so two concurrent
 		// dry-runs cannot race on capacity.
+		if err := autonomousScopeGateErr(p, resolvedPermMode); err != nil {
+			return o.reject(p, err)
+		}
 		activeSeats := ActiveSeatCount(events, p.OrgID, RosterOptions{})
 		req := SpawnRequest{OrgID: p.OrgID, SeatID: p.SeatID, Role: p.Role, Driver: p.Driver, Model: p.Model}
 		if err := ValidateSpawn(o.Config, req, activeSeats); err != nil {
@@ -459,6 +458,44 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 			return nil
 		}
 		permArgs = args
+
+		// AC-2b minimum control gate (Codex advisory 1): an autonomous-mode
+		// seat runs its driver with no interactive permission dialog at all
+		// (permissionArgsForDriver's bypassPermissions) -- --scope is the
+		// only thing left standing between "autonomous" and "unrestricted".
+		// A scope-less autonomous spawn is fail-closed here, unless the
+		// caller explicitly opts out via AllowUnscoped (recorded on the
+		// spawned event's Details below so its use stays auditable).
+		//
+		// This check runs *after* the idempotent early return and the
+		// envelope/permission checks above, but *before* stale-in-flight
+		// detection and the capacity check below -- cross-review triage
+		// fix (docs/reports/cross-review-triage-org-runtime-lead.md,
+		// ACTION_REQUIRED #1): this gate used to sit before Spawn's manifest
+		// read entirely, ahead of the idempotent check further up in this
+		// closure, so a bare retry of `spawn` for an already-spawned seat
+		// (no new autonomous seat being created at all) was rejected by this
+		// gate before it ever reached the idempotent return above -- the
+		// exact same idempotent-vs-validation ordering bug PR① fixed for
+		// envelope validation (see this func's own doc comment, item 1).
+		// A no-op respawn of an existing active seat needs no --scope, so
+		// the gate must never be reachable before the idempotent return has
+		// had a chance to fire.
+		//
+		// Routed through reject() (self-review LOW finding), same as every
+		// other envelope-validation rejection: a `rejected` manifest event
+		// plus an honored=false receipt are appended, so an autonomous lead
+		// that retry-loops unscoped spawns for a genuinely new seat leaves a
+		// visible trace in `ralph org report`'s timeline instead of none.
+		// No spawn_started is ever written for this path (reject() never
+		// appends one), so a rejected attempt still cannot count toward
+		// [org].max_seats or leave a stale saga behind -- only the audit
+		// trail changed, not the fail-closed semantics.
+		if err := autonomousScopeGateErr(p, resolvedPermMode); err != nil {
+			r := o.reject(p, err)
+			early = &r
+			return nil
+		}
 
 		if existing != nil && (existing.Event == EventSpawnStarted || existing.Event == EventSpawnStep) {
 			// Stale in-flight saga from a prior crashed/interrupted spawn:
@@ -697,6 +734,24 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 		Worktree: p.Cwd, PaneID: paneID, AgmsgTeam: team, HerdrAgentName: agentName,
 		Event: EventSpawned, Active: true,
 	}}
+}
+
+// autonomousScopeGateErr reports the AC-2b minimum control gate's error when
+// mode (the already-resolved ResolvePermissionMode(o.Config, p.Role) value)
+// is autonomous, p.Scope is empty, and the caller has not explicitly opted
+// out via p.AllowUnscoped -- nil otherwise. Extracted to a pure function so
+// both call sites (dryRunSpawn's gate-before-record check inside Spawn's
+// `if p.DryRun` branch, and the real-spawn path's post-idempotent,
+// post-envelope-validation check inside Spawn's locked closure) share the
+// exact same rejection condition and error text; see those two call sites'
+// doc comments for why each is ordered where it is.
+func autonomousScopeGateErr(p SpawnParams, mode string) error {
+	if mode == PermissionModeAutonomous && p.Scope == "" && !p.AllowUnscoped {
+		return fmt.Errorf(
+			"org: autonomous permission mode requires --scope (or --allow-unscoped to explicitly bypass)",
+		)
+	}
+	return nil
 }
 
 // spawnedEventDetails builds the `spawned` manifest event's free-text
