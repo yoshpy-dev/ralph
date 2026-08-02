@@ -34,7 +34,7 @@ func newOrgCmd() *cobra.Command {
 	}
 
 	cmd.PersistentFlags().StringVar(&orgID, "org-id", "", "org execution namespace (required)")
-	cmd.PersistentFlags().StringVar(&stateDir, "state-dir", ".harness/state/org", "org manifest/receipts state directory")
+	cmd.PersistentFlags().StringVar(&stateDir, "state-dir", "", "org manifest/receipts state directory (default: resolved by org.ResolveOrgStateDir -- env RALPH_ORG_STATE_DIR, else the enclosing git repo's toplevel .harness/state/org, else cwd's .harness/state/org)")
 	cmd.PersistentFlags().StringVar(&configPath, "config", "", "path to ralph.toml (default: ./ralph.toml if present, else built-in defaults)")
 
 	cmd.AddCommand(
@@ -82,25 +82,31 @@ func requireSeatIdentifier(flag, value string) error {
 
 // newOrgRuntime constructs an org.Org wired to real driver adapters
 // (driver.ExecRunner, which shells out to the herdr/agmsg binaries on PATH)
-// and manifest/receipt stores rooted at stateDir. It also returns the
-// resolved config.OrgConfig it built the Org from, so a caller that needs
-// the config for its own purposes beyond wiring (e.g. newOrgStartCmd's
-// --model default resolution via org.DefaultModelForDriver) does not have
-// to call resolveOrgConfig a second time and risk two ralph.toml reads
-// diverging.
-func newOrgRuntime(stateDir, configPath string) (*org.Org, config.OrgConfig, error) {
+// and manifest/receipt stores rooted at the resolved state directory. cmd is
+// used only to detect whether --state-dir was explicitly passed
+// (cmd.Flags().Changed("state-dir")) for org.ResolveOrgStateDir's flag >
+// env > git-toplevel > cwd precedence -- see that function's doc comment
+// for the full rationale (fixes the lead/operator cwd-split, tech-debt
+// "state-dir の cwd 相対解決"). A caller that also needs the resolved
+// config.OrgConfig for its own purposes beyond wiring (e.g.
+// newOrgStartCmd's --model default resolution via
+// org.DefaultModelForDriver) reads it back off the returned *org.Org's
+// exported Config field rather than newOrgRuntime returning a second
+// value.
+func newOrgRuntime(cmd *cobra.Command, stateDir, configPath string) (*org.Org, error) {
+	resolvedStateDir, _ := org.ResolveOrgStateDir(stateDir, cmd.Flags().Changed("state-dir"))
 	orgCfg, err := resolveOrgConfig(configPath)
 	if err != nil {
-		return nil, config.OrgConfig{}, fmt.Errorf("org: load config: %w", err)
+		return nil, fmt.Errorf("org: load config: %w", err)
 	}
 	runner := driver.ExecRunner{}
 	return &org.Org{
 		Config:   orgCfg,
-		Manifest: org.NewManifestStoreAtPath(filepath.Join(stateDir, "manifest.jsonl")),
-		Receipts: org.NewReceiptStoreAtPath(filepath.Join(stateDir, "model-receipts.jsonl")),
+		Manifest: org.NewManifestStoreAtPath(filepath.Join(resolvedStateDir, "manifest.jsonl")),
+		Receipts: org.NewReceiptStoreAtPath(filepath.Join(resolvedStateDir, "model-receipts.jsonl")),
 		Herdr:    driver.Herdr{R: runner},
 		Agmsg:    driver.Agmsg{R: runner, Home: driver.ResolveAgmsgHome(orgCfg.AgmsgHome)},
-	}, orgCfg, nil
+	}, nil
 }
 
 // resolveOrgConfig loads the [org] envelope from configPath, falling back
@@ -163,7 +169,7 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 				}
 			}
 
-			rt, _, err := newOrgRuntime(*stateDir, *configPath)
+			rt, err := newOrgRuntime(cmd, *stateDir, *configPath)
 			if err != nil {
 				return err
 			}
@@ -251,13 +257,13 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 				return fmt.Errorf("org: --cwd is required")
 			}
 
-			rt, orgCfg, err := newOrgRuntime(*stateDir, *configPath)
+			rt, err := newOrgRuntime(cmd, *stateDir, *configPath)
 			if err != nil {
 				return err
 			}
 			resolvedModel := model
 			if strings.TrimSpace(resolvedModel) == "" {
-				resolvedModel, err = org.DefaultModelForDriver(orgCfg, driverName)
+				resolvedModel, err = org.DefaultModelForDriver(rt.Config, driverName)
 				if err != nil {
 					return err
 				}
@@ -310,7 +316,7 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err := requireSeatIdentifier("--to", to); err != nil {
 				return err
 			}
-			rt, _, err := newOrgRuntime(*stateDir, *configPath)
+			rt, err := newOrgRuntime(cmd, *stateDir, *configPath)
 			if err != nil {
 				return err
 			}
@@ -357,7 +363,7 @@ func newOrgWaitCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err := requireSeatIdentifier("--seat", seat); err != nil {
 				return err
 			}
-			rt, _, err := newOrgRuntime(*stateDir, *configPath)
+			rt, err := newOrgRuntime(cmd, *stateDir, *configPath)
 			if err != nil {
 				return err
 			}
@@ -395,7 +401,7 @@ func newOrgReadCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err := requireSeatIdentifier("--seat", seat); err != nil {
 				return err
 			}
-			rt, _, err := newOrgRuntime(*stateDir, *configPath)
+			rt, err := newOrgRuntime(cmd, *stateDir, *configPath)
 			if err != nil {
 				return err
 			}
@@ -432,7 +438,7 @@ func newOrgStopCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err := requireSeatIdentifier("--seat", seat); err != nil {
 				return err
 			}
-			rt, _, err := newOrgRuntime(*stateDir, *configPath)
+			rt, err := newOrgRuntime(cmd, *stateDir, *configPath)
 			if err != nil {
 				return err
 			}
@@ -461,7 +467,7 @@ func newOrgStatusCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err := requireOrgID(*orgID); err != nil {
 				return err
 			}
-			rt, _, err := newOrgRuntime(*stateDir, *configPath)
+			rt, err := newOrgRuntime(cmd, *stateDir, *configPath)
 			if err != nil {
 				return err
 			}
@@ -556,7 +562,7 @@ func newOrgDisbandCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err := requireOrgID(*orgID); err != nil {
 				return err
 			}
-			rt, _, err := newOrgRuntime(*stateDir, *configPath)
+			rt, err := newOrgRuntime(cmd, *stateDir, *configPath)
 			if err != nil {
 				return err
 			}
@@ -597,7 +603,7 @@ func newOrgReportCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err := requireOrgID(*orgID); err != nil {
 				return err
 			}
-			rt, _, err := newOrgRuntime(*stateDir, *configPath)
+			rt, err := newOrgRuntime(cmd, *stateDir, *configPath)
 			if err != nil {
 				return err
 			}

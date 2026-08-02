@@ -1,6 +1,6 @@
 ---
 name: org
-description: org runtime の Lead 操作マニュアル。組織(座席)の編成・統括・解散を行うときに使う。現セッションを Lead に昇格して座席を編成する場合、または headless lead(`ralph org start`)の運用手順が必要な場合に自動起動。
+description: Lead's operating manual for the org runtime. Use it to organize, oversee, and disband an org (its seats). Auto-invoked when promoting the current session to Lead to organize seats, or when the headless lead (`ralph org start`) needs its operating procedure.
 ---
 `ralph org` は herdr/agmsg を土台にした座席(seat)機構です。この skill は
 Lead(座席の編成・統括を行う識別子)がその機構をどう操作するかの正準マニュ
