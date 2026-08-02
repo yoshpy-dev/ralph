@@ -75,3 +75,62 @@ All named tests cited by the verify report were confirmed to exist (`grep -rn "f
 ## Notes
 
 - `run-test.sh` reported `Language scope: full fallback (unclassified:scripts/ralph-config.sh)` rather than the requested changed-language (`golang`) scope — same fallback behavior the verify report observed on the same diff (an unclassified shell diff in `scripts/ralph-config.sh` forces full-language scope in the language detector). This is expected/known behavior, not a test-runner defect, and it means the *entire* shell test suite ran (not just Go), which is a superset of the requested scope — strictly more coverage, not less.
+
+## Cycle 2 (pipeline re-run after cross-review + cycle-2 self-review fixes)
+
+- Date: 2026-08-02
+- Tester: `tester` subagent (Claude Code, `/test`)
+- Scope: behavioral tests via `./scripts/run-test.sh` (`HARNESS_VERIFY_MODE=test`; resolver again fell back to **full** language scope for the same reason as cycle 1 — `scripts/ralph-config.sh` diff is unclassified) on branch `docs/spec-org-runtime`, HEAD `d8e9a8c`. No static analysis (delegated to `/verify`, already passed cycle 2 — see `docs/reports/verify-2026-08-01-org-runtime-mechanism.md` Cycle 2 section).
+- Evidence: `docs/evidence/test-2026-08-02-org-runtime-mechanism-cycle2.log` (full `run-test.sh` output), `docs/evidence/test-2026-08-02-org-runtime-mechanism-cycle2-race.log` (explicit `-race -v` run of `internal/org`, `internal/org/driver`, `internal/cli`, `internal/config`).
+
+### What changed since cycle 1
+
+Two code fixes landed after the cycle-1 test report was written:
+
+| Commit | Fix | New tests |
+| --- | --- | --- |
+| `4dcfc03` | `fix: return idempotent spawn before envelope validation` | +3 tests in `internal/org/spawn_test.go` |
+| `e6a162c` | `fix: reject stateless envelope violations before stale compensation` | +1 test in `internal/org/spawn_test.go` |
+
+### Test execution
+
+| Suite / Command | Tests (top-level incl. subtests) | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `./scripts/run-test.sh` — full shell suite (all `tests/*.sh` scripts under the local verifier) | all suites | all | 0 | 0 | ~2 min |
+| `go test ./...` (12 Go packages, run inside `run-test.sh`) | all packages | all (`internal/org` 0.786s, `internal/org/driver` 1.155s, `internal/cli` 13.565s) | 0 | 0 | included above |
+| `go test ./internal/org/... ./internal/cli/... ./internal/config/... -race -count=1 -v` (explicit request) | 222 `=== RUN` entries incl. subtests (was 218 in cycle 1, +4 matching the 4 new regression tests) | all | 0 | 0 | ~19s (org 1.481s, org/driver 1.887s, cli 14.823s, config 2.753s) |
+
+`grep -c "^--- FAIL" docs/evidence/test-2026-08-02-org-runtime-mechanism-cycle2-race.log` = 0. `grep -c "DATA RACE"` = 0. `grep -c "^--- SKIP"` = 0. Shell log: every suite's `FAIL:` summary counter is `0` (17 occurrences, one per suite section — all zero); no `not ok` lines.
+
+### New regression tests (cross-review finding #1 / cycle-2 self-review MEDIUM 1)
+
+| Test | Location | Maps to | Result |
+| --- | --- | --- | --- |
+| `TestOrgSpawn_Idempotent_AtMaxSeats_RespawnSucceedsInsteadOfRejected` | `internal/org/spawn_test.go:330` | cross-review-triage ACTION_REQUIRED #1 — respawn of an already-spawned seat at `max_seats` cap must return idempotent, not rejected; envelope validation (incl. `max_seats` check) must never run for an already-spawned seat | PASS |
+| `TestOrgSpawn_Rejected_AtMaxSeats_NewSeatStillRejected` | `internal/org/spawn_test.go:371` | Unchanged-behavior guard alongside the fix above — a genuinely *new* seat_id at `max_seats` cap must still be rejected (regression guard against overcorrecting the idempotency fix) | PASS |
+| `TestOrgSpawn_StaleInFlight_AtMaxSeats_CompensationFreesCapForFreshSaga` | `internal/org/spawn_test.go:395` | Regression companion to #1 — a stale in-flight seat at `max_seats` cap must be compensated (`spawn_failed`) before `ValidateSpawn` runs, freeing the cap so the fresh saga succeeds instead of being rejected | PASS |
+| `TestOrgSpawn_StaleInFlight_StatelessEnvelopeViolation_RejectedBeforeCompensation` | `internal/org/spawn_test.go:430` | cycle-2 self-review MEDIUM 1 (`docs/reports/self-review-2026-08-01-org-runtime-mechanism.md`) — a stateless envelope violation (out-of-pool model) must be rejected *before* any stale-in-flight compensation is attempted, even when a stale `spawn_started` event exists for the same seat; compensation is a destructive external side effect (`PaneSendKeys` C-c) plus a `spawn_failed` write, neither of which may fire on a request that was always going to be rejected on stateless grounds | PASS |
+
+All 4 tests confirmed present via `grep -rn "func Test..." internal/org/` before execution, and all pass both in the default `run-test.sh` run and under `-race -v`.
+
+### Regression checks (cycle 1 fixes, re-confirmed)
+
+| Previously broken behavior | Status | Evidence |
+| --- | --- | --- |
+| Self-review fix: herdr agent name not `org_id`-namespaced (commit `9bfe07e`) | Still fixed | `TestOrgSpawn_HerdrAgentNameNamespacedByOrgID`, `TestHerdrAgentName_NamespacesBySeatAndOrg` — pass under `-race`. |
+| Self-review fix: dry-run events could override real seat state in `status --all` | Still fixed | `TestRoster_DryRunDisbandLeavesRealSeatsActive`, `TestRoster_RealDisbandLeavesDryRunSeatsUntouched`, `TestRoster_DryRunStoppedDoesNotDeactivateRealSeatWithSameID` — pass. |
+| Cycle-1 idempotent-respawn baseline (`TestOrgSpawn_Idempotent_AlreadySpawned_NoNewDriverCalls`) | Still passes with the new before-validation ordering | `internal/org/spawn_test.go:309` — PASS under `-race`. |
+
+### Failure analysis
+
+| Test | Error | Root cause | Proposed fix |
+| --- | --- | --- | --- |
+| — | — | No failures observed | — |
+
+### Test gaps (unchanged from cycle 1)
+
+Same gaps as the cycle-1 report stand: `Verbs.Send`/`Verbs.Wait`/`Verbs.Read` (and their CLI wiring) remain 0% covered — out of scope for this PR's AC set, tracked for the PR② seat-activation work. No new gaps introduced by the two cycle-2 fixes; both fixes are fully covered by the 4 new regression tests above plus the existing idempotency/compensation suite.
+
+### Cycle 2 verdict
+
+**PASS.** Both cycle-2 fixes (`4dcfc03`, `e6a162c`) are covered by 4 new regression tests, all named and confirmed to exist before execution, all passing under both the default and `-race` runs. Full `run-test.sh` (all shell suites + `go test ./...` across all 12 Go packages) passes with 0 failures, 0 skips. The explicit `-race -v` run of `internal/org`, `internal/org/driver`, `internal/cli`, `internal/config` shows 222 top-level test entries (incl. subtests, +4 from cycle 1's 218), 0 failures, 0 data races. Cleared to proceed to `/sync-docs` → `/cross-review` → `/pr`.
