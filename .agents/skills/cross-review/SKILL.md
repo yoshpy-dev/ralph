@@ -47,7 +47,7 @@ Provide a cross-model second opinion on the current diff before PR creation.
    - reviewer = `claude`: run `command -v claude` via Bash. If not found: note "Claude CLI not available — skipping to /pr" and invoke /pr.
 
 4. **Invoke reviewer**:
-   - Determine base branch via Bash: `. scripts/xreview-helpers.sh; BASE=$(detect_base_branch)` — resolution order: (1) `$RALPH_XREVIEW_BASE` if set and non-empty (explicit override or Loop orchestrator export); (2) `git symbolic-ref --quiet --short refs/remotes/origin/HEAD` with leading `origin/` stripped (repo default branch); (3) `main` if `refs/heads/main` exists, else `master`.
+   - Determine base branch via Bash: `. scripts/xreview-helpers.sh; BASE=$(detect_base_branch)` — resolution order: (1) `$RALPH_XREVIEW_BASE` if set and non-empty (explicit override); (2) `git symbolic-ref --quiet --short refs/remotes/origin/HEAD` with leading `origin/` stripped (repo default branch); (3) `main` if `refs/heads/main` exists, else `master`.
    - Check the diff is non-empty: `git diff "$BASE"...HEAD --quiet` — if exit 0 (no diff), skip with a note and proceed to /pr.
    - **reviewer = `codex`**: `codex exec review --base "$BASE"`
      The native reviewer analyzes the full diff and returns structured findings with severity, affected files, and recommendations.

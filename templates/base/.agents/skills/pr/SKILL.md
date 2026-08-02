@@ -22,7 +22,7 @@ If any pre-check fails, stop and explain what is missing.
 ## Steps
 
 1. **Resolve pinned plan identity** (standard flow):
-   Read `.harness/state/standard-pipeline/active-plan.json` to obtain the exact plan path and task worktree metadata persisted by `/work`. Use this path for archival in Step 6 instead of rescanning `docs/plans/active/`. If the file is absent (e.g. Ralph Loop or legacy session), fall back to the single file under `docs/plans/active/` or ask the user which plan to archive.
+   Read `.harness/state/standard-pipeline/active-plan.json` to obtain the exact plan path and task worktree metadata persisted by `/work`. Use this path for archival in Step 6 instead of rescanning `docs/plans/active/`. If the file is absent (e.g. legacy session), fall back to the single file under `docs/plans/active/` or ask the user which plan to archive.
 2. Check for uncommitted changes with `git status --porcelain`.
    - **If uncommitted changes exist**: Stage with `git add` (prefer specific files over `-A`) and create a conventional commit: `<type>: <description>`. If a GitHub issue is linked, append `Refs #<number>` to the commit body.
    - **If working tree is clean** (intermediate commits already exist): Skip staging and committing — proceed directly to push.

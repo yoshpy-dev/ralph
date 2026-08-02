@@ -26,7 +26,6 @@ ok "Canonical source valid"
 # 2. Check each referenced file
 REFS="
 .claude/skills/work/SKILL.md
-.claude/skills/loop/SKILL.md
 .claude/skills/cross-review/SKILL.md
 .claude/rules/subagent-policy.md
 CLAUDE.md

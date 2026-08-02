@@ -7,8 +7,8 @@ Work from the active plan, not from memory alone.
 ## Steps
 
 1. **Resolve the target plan path** (must run before any branch or plan-file operations):
-   - `/work` is the standard-flow skill — it only operates on single-file plans (`docs/plans/active/<date>-<slug>.md`). Ralph Loop directory plans (`docs/plans/active/<date>-<slug>/`) must be handled by `/loop` instead.
-   - Enumerate candidates: `.md` files directly under `docs/plans/active/` (excluding `.gitkeep`). **Ignore directories** — if a directory is the only entry, stop and ask the user to run `/loop` (Ralph Loop).
+   - `/work` operates on single-file plans (`docs/plans/active/<date>-<slug>.md`) only.
+   - Enumerate candidates: `.md` files directly under `docs/plans/active/` (excluding `.gitkeep`). **Ignore directories** — if a directory is the only entry, stop and report: this looks like a Ralph Loop directory plan (`_manifest.md` + `slice-*.md`); Ralph Loop's autonomous execution system was retired (see git history for the removed orchestration scripts, and `internal/org` for the current autonomous execution surface, `/org`). Convert the plan to a single-file plan via `/plan` and re-run `/work`, or use `/org` for autonomous multi-seat execution.
    - If exactly one candidate file exists, use it.
    - If multiple candidate files exist, ask via AskUserQuestion which plan this `/work` run targets, and use the selected path.
    - If none exist, stop and ask the user to run `/plan` first.
