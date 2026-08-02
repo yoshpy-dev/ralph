@@ -65,20 +65,20 @@ org runtime PR③: Lead が組織を自律編成できるようにする。`/org
 
 ## Acceptance criteria
 
-- [ ] AC-1: `[org.permissions]` が 3 面ロックステップで追加され(既定: `default = "autonomous"`)、役割別上書きが機能し、defaults_sync_test が drift を検出する。
-- [ ] AC-2: spawn の AgentStart argv に mode 対応の driver ネイティブフラグが載る(claude: `--permission-mode bypassPermissions` 等。スタブ argv テストで claude × 3 mode を検証)。**codex 座席は guarded 以外を明確なエラーで拒否**し receipt に記録する(fail-closed テスト)。
-- [ ] AC-2b(最小制御ゲート): mode=autonomous の spawn は `--scope` なしで fail-closed(`--allow-unscoped` でのみ解除・使用が manifest に記録される)。適用 permission mode が `spawned` イベントに記録される。
-- [ ] AC-3: `ralph org start --org-id X "<task>"` が role=lead の座席を spawn し、lead.md 雛形に task / envelope 要約が展開される(スタブテスト+実機)。
-- [ ] AC-4: `ralph org report` が manifest+receipts から編成履歴レポートを `docs/reports/` に生成する(スタブデータのユニットテスト)。
-- [ ] AC-5: `/org` skill が存在し、`.agents/skills/` ミラーと `templates/base/` 同梱が check-skill-sync / check-sync green。CLAUDE.md の一覧に追記済み(ミラー同期)。
-- [ ] AC-6(tech-debt #1): announce 失敗時に join 済み座席へ best-effort `Leave` が走り、結果が spawn_failed の Details に記録される(失敗注入テスト)。
-- [ ] AC-7(tech-debt #2): `leadIdentity` 定数が唯一の "lead" 出所となり、lead の agmsg type が lead driver から導出される。
-- [ ] AC-8(tech-debt #3): `spawned` イベントに `herdr_agent_name` が記録され、send/wait/stop が記録値を優先し導出をフォールバックにする(旧形式イベントとの互換テスト)。
-- [ ] AC-9(tech-debt #4): 並行 spawn がファイルロックで直列化され、同時 spawn で max_seats 超過が起きない(並行テスト)。
-- [ ] AC-10(tech-debt #5/#6): doctor が解決済み agmsg home を表示し、dry-run が RenderRolePrompt / promptFilePath のエラーを実行パスと同様に失敗として返す。
-- [ ] AC-11(実機スモーク): autonomous 座席が bash 読み取りコマンドを権限ダイアログなしで実行(PR② blocked の解消)、`ralph org start` の headless lead が稼働。証拠 `docs/evidence/org-lead-smoke-*.txt`。
-- [ ] AC-11b(Lead 最小 E2E): headless lead がタスク指示に従い、dry-run 座席の spawn → typed message send → status 確認 → disband を実機で完遂する(lead prompt + /org skill + 動詞の合成が機能する証明)。スモーク後に herdr workspace / agmsg team の残留がないこと。
-- [ ] AC-12: `go test ./...` / `./scripts/run-verify.sh` green。既存フロー非干渉。tech-debt 6 行が RESOLVED 化。
+- [x] AC-1: `[org.permissions]` が 3 面ロックステップで追加され(既定: `default = "autonomous"`)、役割別上書きが機能し、defaults_sync_test が drift を検出する。Evidence: `docs/reports/verify-2026-08-02-org-runtime-lead.md` (Spec compliance, AC-1), `docs/reports/test-2026-08-02-org-runtime-lead.md` (AC → behavioral test mapping, AC-1).
+- [x] AC-2: spawn の AgentStart argv に mode 対応の driver ネイティブフラグが載る(claude: `--permission-mode bypassPermissions` 等。スタブ argv テストで claude × 3 mode を検証)。**codex 座席は guarded 以外を明確なエラーで拒否**し receipt に記録する(fail-closed テスト)。Evidence: `docs/reports/verify-2026-08-02-org-runtime-lead.md` (AC-2), `docs/reports/test-2026-08-02-org-runtime-lead.md` (AC-2).
+- [x] AC-2b(最小制御ゲート、実装時に監査経路を改善): mode=autonomous の spawn は `--scope` なしで fail-closed(`--allow-unscoped` でのみ解除・使用が manifest に記録される)。自己レビュー修正(commit `9a22942`)により、拒否パスは `reject()` を経由するようになり、fail-closed の判定自体は変えずに `rejected` manifest イベント + `honored=false` receipt を追加で記録する(拒否の監査性が向上)。適用 permission mode は `spawned` イベントに記録される。Evidence: `docs/reports/verify-2026-08-02-org-runtime-lead.md` (AC-2b row and "Self-review fix-commit crosscheck" LOW row), `docs/reports/test-2026-08-02-org-runtime-lead.md` (AC-2b).
+- [x] AC-3: `ralph org start --org-id X "<task>"` が role=lead の座席を spawn し、lead.md 雛形に task / envelope 要約が展開される(スタブテスト+実機)。Evidence: `docs/reports/verify-2026-08-02-org-runtime-lead.md` (AC-3), `docs/reports/test-2026-08-02-org-runtime-lead.md` (AC-3), `docs/evidence/org-lead-smoke-2026-08-02.txt` (Smoke B).
+- [x] AC-4: `ralph org report` が manifest+receipts から編成履歴レポートを `docs/reports/` に生成する(スタブデータのユニットテスト)。Evidence: `docs/reports/verify-2026-08-02-org-runtime-lead.md` (AC-4), `docs/reports/test-2026-08-02-org-runtime-lead.md` (AC-4).
+- [x] AC-5: `/org` skill が存在し、`.agents/skills/` ミラーと `templates/base/` 同梱が check-skill-sync / check-sync green。CLAUDE.md の一覧に追記済み(ミラー同期)。Evidence: `docs/reports/verify-2026-08-02-org-runtime-lead.md` (AC-5, Static analysis: check-sync/check-skill-sync both PASS).
+- [x] AC-6(tech-debt #1): announce 失敗時に join 済み座席へ best-effort `Leave` が走り、結果が spawn_failed の Details に記録される(失敗注入テスト)。Evidence: `docs/reports/verify-2026-08-02-org-runtime-lead.md` (AC-6), `docs/reports/test-2026-08-02-org-runtime-lead.md` (AC-6), `docs/tech-debt/README.md` (row RESOLVED).
+- [x] AC-7(tech-debt #2): `leadIdentity` 定数が唯一の "lead" 出所となり、lead の agmsg type が lead driver から導出される。Evidence: `docs/reports/verify-2026-08-02-org-runtime-lead.md` (AC-7), `docs/reports/test-2026-08-02-org-runtime-lead.md` (AC-7), `docs/tech-debt/README.md` (row RESOLVED).
+- [x] AC-8(tech-debt #3): `spawned` イベントに `herdr_agent_name` が記録され、send/wait/stop が記録値を優先し導出をフォールバックにする(旧形式イベントとの互換テスト)。Evidence: `docs/reports/verify-2026-08-02-org-runtime-lead.md` (AC-8), `docs/reports/test-2026-08-02-org-runtime-lead.md` (AC-8), `docs/tech-debt/README.md` (row RESOLVED).
+- [x] AC-9(tech-debt #4): 並行 spawn がファイルロックで直列化され、同時 spawn で max_seats 超過が起きない(並行テスト)。Evidence: `docs/reports/verify-2026-08-02-org-runtime-lead.md` (AC-9), `docs/reports/test-2026-08-02-org-runtime-lead.md` (AC-9), `docs/tech-debt/README.md` (row RESOLVED).
+- [x] AC-10(tech-debt #5/#6): doctor が解決済み agmsg home を表示し、dry-run が RenderRolePrompt / promptFilePath のエラーを実行パスと同様に失敗として返す。Evidence: `docs/reports/verify-2026-08-02-org-runtime-lead.md` (AC-10), `docs/reports/test-2026-08-02-org-runtime-lead.md` (AC-10), `docs/tech-debt/README.md` (row RESOLVED).
+- [x] AC-11(実機スモーク): autonomous 座席が bash 読み取りコマンドを権限ダイアログなしで実行(PR② blocked の解消)、`ralph org start` の headless lead が稼働。証拠 `docs/evidence/org-lead-smoke-2026-08-02.txt`(Smoke A/B)。Evidence: `docs/reports/verify-2026-08-02-org-runtime-lead.md` (AC-11, "Met (evidenced)"; Coverage gaps notes single-run, not independently re-executed).
+- [x] AC-11b(Lead 最小 E2E): headless lead がタスク指示に従い、dry-run 座席の spawn → typed message send → status 確認 → disband を実機で完遂する(lead prompt + /org skill + 動詞の合成が機能する証明)。スモーク後に herdr workspace / agmsg team の残留がないこと。Evidence: `docs/evidence/org-lead-smoke-2026-08-02.txt` (lines 88-159), `docs/reports/verify-2026-08-02-org-runtime-lead.md` (AC-11b, "Met (evidenced)").
+- [x] AC-12: `go test ./...` / `./scripts/run-verify.sh` green。既存フロー非干渉。tech-debt 6 行が RESOLVED 化。Evidence: `docs/reports/verify-2026-08-02-org-runtime-lead.md` (static half PASS), `docs/reports/test-2026-08-02-org-runtime-lead.md` (test half PASS — 978 shell assertions + 13/13 go packages + targeted `-race` run, 0 failures), `docs/tech-debt/README.md` (6 rows struck through, RESOLVED 2026-08-02 in feat/org-runtime-lead).
 
 ## Implementation outline
 
@@ -133,10 +133,10 @@ org runtime PR③: Lead が組織を自律編成できるようにする。`/org
 
 - [ ] Plan reviewed
 - [x] Branch created (feat/org-runtime-lead)
-- [ ] Implementation started
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Implementation started — Slices 1-5 complete (commits `c04186e`, `9fe2af1`, `4b7a2e6`+`7be4993`, `039b18e`, smoke fixes `d35f157`+`428177b`, self-review fix `9a22942`)
+- [x] Review artifact created (`docs/reports/self-review-2026-08-02-org-runtime-lead.md`)
+- [x] Verification artifact created (`docs/reports/verify-2026-08-02-org-runtime-lead.md`)
+- [x] Test artifact created (`docs/reports/test-2026-08-02-org-runtime-lead.md`)
 - [ ] PR created
 
 ## Readiness checklist
