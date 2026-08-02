@@ -319,11 +319,11 @@ func (o *Org) RunWatcher(ctx context.Context, cfg config.OrgWatchdogConfig, p Wa
 	// reported no model at all, HonoredTrue only when the reported model
 	// matches what was commanded, HonoredFalse for a verifiable mismatch --
 	// see claudeEnvelope's doc comment for the full rationale.
-	honored := HonoredUnknown
-	switch {
-	case envelope.Model == "":
+	var honored string
+	switch envelope.Model {
+	case "":
 		honored = HonoredUnknown
-	case envelope.Model == cfg.WatcherModel:
+	case cfg.WatcherModel:
 		honored = HonoredTrue
 	default:
 		honored = HonoredFalse

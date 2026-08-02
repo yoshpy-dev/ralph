@@ -761,9 +761,7 @@ func newWatchdogHooks(rt *org.Org, stderr io.Writer) (org.WatchHooks, *sync.Wait
 					orgID, seatID, conditionType)
 				return
 			}
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				defer atomic.StoreInt32(&busy, 0)
 				verdict, err := rt.RunWatcher(context.Background(), rt.Config.Watchdog, org.WatcherParams{
 					OrgID: orgID, SeatID: seatID, ConditionType: conditionType, Evidence: evidence,
@@ -782,7 +780,7 @@ func newWatchdogHooks(rt *org.Org, stderr io.Writer) (org.WatchHooks, *sync.Wait
 					_, _ = fmt.Fprintf(stderr, "watchdog: failed to ALERT lead for org %q seat %q verdict %q: %v\n",
 						orgID, seatID, verdict.Verdict, err)
 				}
-			}()
+			})
 		},
 	}, &wg
 }
