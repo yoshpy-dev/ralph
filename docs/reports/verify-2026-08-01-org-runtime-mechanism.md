@@ -76,3 +76,64 @@ Not asked to fix in this pass (self-review MEDIUM/LOW follow-ups, confirmed stil
 - Not verified (by design, `/verify` does not run tests): behavioral correctness of every test listed under "delegated to `/test`" above.
 - Drift found: `docs/tech-debt/README.md`'s herdr-namespace row is now stale (describes a bug that commit `9bfe07e` already fixed) and should be marked resolved.
 - Smallest next check that would most increase confidence: run `go test ./internal/org/... ./internal/cli/... ./internal/config/...` (this is `/test`'s job) — that closes the AC-7/AC-1..AC-10 behavioral gap directly.
+
+---
+
+## Cycle 2 (fix-and-revalidate re-run)
+
+- Date: 2026-08-02
+- Verifier: `verifier` subagent (Claude Code, `/verify`), pipeline cycle 2 of 2 (`RALPH_STANDARD_MAX_PIPELINE_CYCLES` default)
+- Scope: the delta since the cycle-1 reviewed state (`git diff 9bfe07e...HEAD`). Cycle-1 content above is left intact. Code delta is exactly two fix commits — `4dcfc03` (fix: return idempotent spawn before envelope validation) and `e6a162c` (fix: reject stateless envelope violations before stale compensation) — the four intervening commits (`4820cd5`, `365f1ff`, `2e0364c`, `a7f36db`, `9d02dbc`, `6980dd7`, `b6fd875`) are report/insight/docs artifacts only, confirmed by `git diff --stat 9bfe07e...HEAD -- internal/ scripts/ templates/` (7 files: `internal/org/{driver/driver,driver/herdr,driver/probe,envelope,manifest,spawn,spawn_test}.go`).
+- Evidence: `docs/evidence/verify-2026-08-02-053222.log`
+
+### AC-3 re-verified against the new spawn ordering
+
+`e6a162c` reorders `(*Org).Spawn` (`internal/org/spawn.go:110-207`) to, in order: (1) idempotent early return, (2) stateless envelope validation (`ValidateSpawnEnvelope` — driver/model pool membership, role restriction; a pure function of `cfg`+`req`), (3) stale-in-flight compensation, (4) capacity validation (`ValidateSpawnCapacity`, depends on the recomputed `activeSeats`), then the saga side effects. `ValidateSpawn` is preserved unchanged as `ValidateSpawnEnvelope` + `ValidateSpawnCapacity` composed (`internal/org/envelope.go:30-72`) and is still the sole path used by the dry-run branch (`spawn.go:133-137`, unchanged).
+
+- **AC-3 (idempotent respawn) still holds**: the idempotent check (`spawn.go:172-181`, "an already-spawned seat returns the existing seat with no validation attempted at all") runs first, before either envelope or capacity checks — unchanged from cycle 1. The stale-in-flight branch (`spawn.go:194-203`) now runs after the stateless envelope check but still before the capacity check, matching the plan's stated intent that compensation must happen before `activeSeats` is recomputed. Confirmed no new driver calls are made on the idempotent path (unchanged code) and confirmed by reading `TestOrgSpawn_Idempotent_AlreadySpawned_NoNewDriverCalls` / `TestOrgSpawn_StaleInFlight_CompensatesThenRespawnsFresh` (unmodified in this delta — `git diff` shows only additions to `spawn_test.go`, no edits to the existing tests).
+- **New ordering guarantee added by this fix**: a stateless-envelope-invalid request (bad driver/model/role) against a seat with a *stale* in-flight record is now rejected with **zero driver calls** — no `C-c` compensation, no `spawn_failed` write — instead of the pre-fix behavior where `4dcfc03` had moved the *entire* `ValidateSpawn` (including the stateless checks) after compensation, so an envelope-invalid respawn attempt would trigger a destructive compensation side effect on an already-doomed request. New regression test `TestOrgSpawn_StaleInFlight_StatelessEnvelopeViolation_RejectedBeforeCompensation` (`spawn_test.go`, added in `e6a162c`) asserts exactly this: `SpawnOutcomeRejected`, zero herdr/agmsg calls, zero `PaneSendKeys` calls, and the event sequence is `[spawn_started (seeded), rejected]` — no `spawn_failed` interposed. Ran this test directly as a targeted compile+behavioral sanity spot check (not a substitute for `/test`'s full run): `go test ./internal/org/... -run TestOrgSpawn_StaleInFlight_StatelessEnvelopeViolation_RejectedBeforeCompensation -v` → PASS.
+- **`reject()`'s doc comment is now accurate on this path**: cycle-2 self-review's MEDIUM finding was that `reject()`'s claim "no external side effect was ever attempted" was false when an envelope-invalid request hit a stale seat (because the entire `ValidateSpawn` — capacity included — ran after compensation). With the split, only `ValidateSpawnCapacity` runs after compensation; `ValidateSpawnEnvelope` runs before any side effect, so a stateless rejection is once again a guaranteed no-op. Verified by code reading (`spawn.go:181-191`, comment naming this exact invariant) plus the new regression test above.
+
+### Other ACs re-checked for regressions from the two fix commits
+
+| AC | Still holds? | Evidence |
+| --- | --- | --- |
+| AC-1 (reject → non-zero exit, manifest + receipt with `honored: false`) | Yes, unaffected | `reject()` (`spawn.go:303-314`) is unchanged by either fix commit — both the envelope-check call site and the capacity-check call site route through the same unmodified `o.reject(p, err)`. `git diff 9bfe07e...HEAD -- internal/org/spawn.go` shows `reject`'s body untouched. |
+| AC-2 (`max_seats` org-isolated) | Yes, unaffected | `ValidateSpawnCapacity` (`envelope.go:63-72`) is a verbatim extraction of the pre-fix `max_seats` check from `ValidateSpawn` — same comparison (`activeSeats >= cfg.MaxSeats`), same error message, still called with `activeSeats := ActiveSeatCount(events, p.OrgID, RosterOptions{})` scoped to `p.OrgID` (`spawn.go:205-207`, unchanged). |
+| AC-10 (saga failure injection → `spawn_failed` + compensation recorded) | Yes, unaffected | `failStep`/`compensateStale` bodies are untouched by this delta (only a one-word comment edit in `compensateStale`'s call site, `spawn.go:197`: "envelope validation below" → "capacity check below"). The saga side-effect sequence (workspace → tab → agent → agmsg, each wrapped in `failStep` on error) starts only after both `ValidateSpawnEnvelope` and `ValidateSpawnCapacity` pass — same as cycle-1's verified saga entry point, just reached via two checks instead of one. |
+| AC-8 (`--dry-run`, no real process start) | Yes, unaffected | Dry-run branch (`spawn.go:133-137`) still calls the composed `ValidateSpawn(o.Config, req, activeSeats)` unchanged, then `o.dryRunSpawn(p)` — neither touched by this delta. |
+| AC-9 (compat: missing `[org]` section, doctor exit code) | Yes, unaffected | Neither fix commit touches `internal/config/` or `internal/cli/doctor.go`; `git diff --stat 9bfe07e...HEAD` confirms zero changes outside `internal/org/`. |
+
+### Cycle-2 self-review MEDIUM fix verification
+
+| Finding (severity, from self-review Cycle 2 addendum) | Fixed? | Evidence |
+| --- | --- | --- |
+| MEDIUM — `4dcfc03` moved *all* of `ValidateSpawn` (not just the capacity check) after stale-in-flight compensation, so an envelope-invalid respawn against a stale seat triggered destructive compensation before rejection | Yes | `e6a162c` splits `ValidateSpawn` into `ValidateSpawnEnvelope` (stateless, run before compensation) and `ValidateSpawnCapacity` (stated-dependent, run after) — see AC-3 section above. New regression test asserts zero driver calls on this path. |
+| MEDIUM — 5 remaining stale phase-reference comments (`manifest.go:16`, `driver/driver.go:3`, `driver/herdr.go:9,12`, `driver/probe.go:16`) still described shipped functionality as deferred to a future slice | Yes, all 5 fixed | Diff-verified each site rewords to the shipped end-state (e.g. `driver.go`: "the `ralph org` verbs, Slice 4" → "the `ralph org` verbs in internal/org, spawn.go and verbs.go"; `herdr.go`: "Seat termination strategy (send-keys based) is a Slice 4 concern" → names the actual caller `(*Org).Stop` in `verbs.go`). Repo-wide grep `grep -rn -E "PR.?①|later slice|Slice [0-9]|config-only" internal/ scripts/ralph-config.sh templates/base/` now returns only the two accurate PR①/PR④ budget-field notes in `config.go:116,120` and `templates/base/ralph.toml:79` that both the cycle-1 and cycle-2 self-review explicitly identified as correct-as-is (nothing reads those two fields beyond `Load()` validation). No remaining stale references. |
+
+### Static analysis (full scope re-run)
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `RALPH_VERIFY_SCOPE=full ./scripts/run-static-verify.sh` | Pass (exit 0) | gofmt clean, `go vet ./...` clean (silent success — binary present, no "skipping" line emitted), `golangci-lint run ./...` → `0 issues.`, `staticcheck ./...` clean (silent success — `command -v staticcheck` confirms the binary is present so the script's own `command -v` guard did not skip it), `jq -e` on both `settings.json` mirrors, Codex hook guards, `check-sync.sh` (`DRIFTED: 0`, `ROOT_ONLY: 0`), `check-pipeline-sync.sh`, `check-skill-sync.sh` (13 skills in lock-step) all OK. Full output: `docs/evidence/verify-2026-08-02-053222.log`. |
+| `go build ./...` | Pass | Compiles cleanly, exit 0. |
+| `git diff main...HEAD --name-only` vs. plan's "触らない" list | Pass | Still zero touches to `scripts/ralph-orchestrator.sh`, `scripts/ralph-pipeline.sh`, `internal/ui/`, `internal/state/`, `internal/action/`, `.claude/skills/` — unchanged from cycle 1; the cycle-2 delta only adds files under `internal/org/`. |
+
+### Documentation drift (cycle-2 delta)
+
+| Doc / contract | In sync? | Notes |
+| --- | --- | --- |
+| `docs/tech-debt/README.md` herdr-namespace row | Yes, already resolved | The stale-row drift flagged in the cycle-1 verdict was fixed in commit `4820cd5` (`docs: sync-docs for org-runtime-mechanism`, predates this cycle-2 delta) — the row now carries a `RESOLVED 2026-08-01 in commit 9bfe07e` HTML comment and `~~strikethrough~~` per the repo's established convention. No action needed here. |
+| Plan `docs/plans/active/2026-08-01-org-runtime-mechanism.md` — "Implementation notes (deviations from initial outline)" | **Drifted (minor, non-blocking)** | The section does not mention either cycle-2 fix commit (`4dcfc03`, `e6a162c`) or the resulting 4-step spawn ordering (idempotent → stateless envelope → compensation → capacity). Per `.claude/rules/planning.md` ("record meaningful deviations from the original plan instead of silently drifting"), this ordering refinement is exactly the kind of deviation the section exists to capture. Not a `/verify` blocker (this is `/sync-docs` or plan-owner territory), but flagging so it isn't missed before archive. |
+| Plan AC-1..AC-10 / Progress checklist checkboxes | Stale but expected (same as cycle 1) | Still unticked; per established project convention this lags implementation and is not treated as a `/verify` failure. |
+| `docs/specs/2026-08-01-org-runtime.md` | No changes expected, none found | Neither fix commit touches spawn's external contract (CLI flags, manifest field names, exit codes) — only internal validation ordering — so no spec update is implied. |
+
+### Verdict — Cycle 2
+
+**Pass.**
+
+- Verified: AC-3 re-confirmed against the new 4-step spawn ordering (idempotent → stateless envelope → stale compensation → capacity), with the specific regression the reorder was designed to prevent (destructive compensation on an envelope-invalid stale respawn) covered by a new, passing regression test. AC-1, AC-2, AC-8, AC-9, AC-10 re-checked for collateral regressions from the two fix commits — none found; all four go through code paths this delta did not touch or extracted verbatim. Both cycle-2 self-review MEDIUMs (validation-ordering split, 5 remaining stale comments) confirmed fixed by diff reading and repo-wide grep. Static analysis at full scope (`run-static-verify.sh`, `check-sync.sh`, `check-skill-sync.sh`, `go build ./...`) all green.
+- Partially verified: same AC-7 caveat as cycle 1 — full `go test ./...` execution remains `/test`'s scope; this report ran exactly one targeted existing test (`TestOrgSpawn_StaleInFlight_StatelessEnvelopeViolation_RejectedBeforeCompensation`) as a spot check, not as a substitute for the tester's full behavioral pass.
+- Not verified (by design): behavioral correctness of the full suite, including the three paired tests self-review cited for `4dcfc03` (`..._AtMaxSeats_RespawnSucceedsInsteadOfRejected`, `..._NewSeatStillRejected`, and the companion stale-seat case).
+- Drift found: one minor, non-blocking item — the plan's "Implementation notes" section doesn't yet record the cycle-2 ordering fix as a deviation. Suggest `/sync-docs` (or the plan owner, before archive) add one line.
+- Smallest next check that would most increase confidence: run `go test ./internal/org/... ./internal/cli/... ./internal/config/...` (full suite, `/test`'s job) to close the same AC-1..AC-10 behavioral gap noted in cycle 1, now including the two new regression tests from this delta.
