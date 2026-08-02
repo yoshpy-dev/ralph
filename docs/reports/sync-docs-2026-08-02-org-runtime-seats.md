@@ -149,3 +149,122 @@ gates anyway as a final check:
 
 Documentation is in sync with implementation. No CRITICAL or blocking drift
 remains. Ready to proceed to `/cross-review`.
+
+# Cycle 2 (fix-and-revalidate re-run)
+
+- Date: 2026-08-02
+- Agent: `doc-maintainer` subagent (Claude Code, `/sync-docs`), pipeline cycle 2 of 2
+- Delta reviewed: `f0cbf11` (cross-review ACTION_REQUIRED #1 fix — reserve `_`
+  as the org/seat namespace separator, tighten `identifierPattern` to
+  `^[a-z][a-z0-9-]{0,29}$`, add the `len(org)+1+len(seat) ≤ 32` combined-length
+  guard) and `011a0a7` (cycle-2 self-review LOW fixes: `failStepWithNote` doc
+  comment now names both callers, the 30-vs-32 length rationale moved from a
+  test comment into `identifierPattern`'s own doc comment, `qa.md`'s
+  branch-specific `EVIDENCE` example replaced with a synthetic placeholder,
+  `{{PLAN_PATH}}` restored to the prompt replacer), plus the cycle-2
+  self-review/verify/test report addenda (`63c7a62`, `d0e0a55`, `35af821`).
+- Scope: confirm no drift remains after the charset/separator change and the
+  comment-only follow-up fixes; nothing in this delta changes CLI surface,
+  skills, hooks, or scripts.
+
+## Drift check results (cycle 2)
+
+### Item 1 — old identifier charset / hyphen-join wording in shipped docs
+
+**Checked. No drift found; already closed by the code-fix commits.**
+
+`.claude/rules/agent-messaging.md` never documented the identifier charset or
+join rule in the first place (it defines the message *protocol*, not
+org/seat id shape), so there was nothing to correct there. The role-prompt
+templates (`internal/org/prompts/reviewer.md`, `qa.md`) contain no id-shape
+examples or hyphen-join illustrations — grepped both for
+`0,63`/`A-Za-z0-9_-`/hyphen-join patterns, no hits. The only place the old
+charset (`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`) and the old `-` join still
+appear is inside historical narration that is correctly framed as
+historical: the plan's "Implementation notes (deviations)" cross-review
+bullet ("ハイフン連結は...一意でない"), the cross-review triage report, and
+the self-review/verify/test report prose describing what the fix changed
+*from*. None of these state the old shape as current behavior. Re-confirmed
+mirror byte-identity: `cmp .claude/rules/agent-messaging.md
+templates/base/.claude/rules/agent-messaging.md` → identical.
+
+### Item 2 — plan deviations section / Open questions
+
+**Checked. No drift found.**
+
+The plan's "Implementation notes (deviations)" already carries the cycle-2
+cross-review fix bullet ("cross-review 起因の修正(cycle 2)"), added by the
+`f0cbf11` unit of work itself, and it accurately states the current charset,
+the reserved `_` separator, and the combined-length check. "Open questions"
+has no stale references to the old `-` join — its remaining entries (PR③
+permission-mode follow-up) are unrelated to the identifier change. No edit
+needed.
+
+### Item 3 — tech-debt row consistency
+
+**Checked. No drift found; rows are consistent, no duplicates.**
+
+`docs/tech-debt/README.md` carries exactly one row for the cycle-2
+self-review's "derived, not persisted" herdr-name finding (added by `63c7a62`
+ahead of this sync-docs pass) and exactly one consolidated row for the four
+deferred LOW findings (added in the cycle-1 sync-docs pass, cross-checked
+against the self-review's cycle-2 regression table — all four are still
+correctly marked "Deferred, now tracked" and none were silently re-opened or
+duplicated by the cycle-2 fixes). The TOCTOU `max_seats` race row from PR①
+is untouched by this delta and remains a single row. No contradictions
+between rows.
+
+### Cycle-2 self-review deferred findings (L4, L6/L7, INFO) — confirmed not silently dropped
+
+The cycle-2 self-review explicitly batched/deferred three LOW-severity
+findings not named in this task's known items (`lastAttempt` redundant
+variable, role-neutral `defaultScopeText` wording, package-level verb
+gating for PR③). The verify report's cycle-2 section already confirmed these
+are consistent with the self-review's own "batch or defer" call and not
+silent gaps requiring a tech-debt row (they are code-quality nits below the
+tech-debt-worthy bar, not deferred correctness risk). No action taken —
+consistent with the verify report's own conclusion.
+
+## Confirmed clean (no change needed, cycle 2)
+
+- `.claude/rules/agent-messaging.md` — no identifier-shape content, nothing
+  to update; mirror re-confirmed identical.
+- `internal/org/prompts/reviewer.md`, `qa.md` — no stale id-shape examples.
+- `AGENTS.md`, `CLAUDE.md`, `README.md`, `docs/quality/definition-of-done.md`
+  — unaffected by a Go-internal charset/separator change; cycle-1's
+  "confirmed clean" verdicts still hold (delta touches no skill, hook,
+  script, or CLI-surface file).
+- `docs/tech-debt/README.md` — one row per finding, no duplicates, no
+  contradictions (verified above).
+
+## Harness-internal sync (cycle 2)
+
+No skills, hooks, scripts, or language packs changed in the `f0cbf11`/
+`011a0a7` delta (confirmed by `git diff a550e17..HEAD --stat`: only
+`internal/org/`, `internal/cli/org_test.go`, and `docs/`). Ran the mechanical
+gates anyway:
+
+- `./scripts/check-sync.sh` → `DRIFTED: 0`, `PASS: all files in sync.`
+- `./scripts/check-skill-sync.sh` → `13 skill(s) in lock-step`
+
+## Verification (cycle 2)
+
+- `git status` in the worktree — clean before this pass began; no doc edits
+  were needed, so no working-tree changes from this pass beyond this report.
+- Grepped for stale charset/hyphen-join wording across
+  `.claude/rules/agent-messaging.md`, `internal/org/prompts/*.md`, and the
+  plan body — no hits outside correctly-historical narration.
+- Re-read `docs/tech-debt/README.md` rows 55–57 in full to confirm no
+  duplicate or contradictory entries.
+- `cmp .claude/rules/agent-messaging.md
+  templates/base/.claude/rules/agent-messaging.md` → identical.
+- `./scripts/check-sync.sh` and `./scripts/check-skill-sync.sh` → both green.
+
+## Outcome (cycle 2)
+
+No documentation drift found in the `f0cbf11`/`011a0a7` delta. All three
+known items from the task are confirmed already closed — the separator/
+charset fix and its cycle-2 self-review follow-ups carried their own doc
+updates (tech-debt row, plan deviations bullet) in the same commits that
+introduced the behavior change, and no shipped doc referenced the old shape
+as current. Ready to proceed to `/cross-review`.
