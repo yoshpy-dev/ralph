@@ -184,6 +184,46 @@ func TestInsightsCmd_EscalationShown(t *testing.T) {
 	}
 }
 
+// TestInsightsCmd_HistoricalLoopFlowEventStillReadable is a read-compat
+// regression test for org-runtime-retire-loop plan AC-6b: `ralph insights`
+// must keep aggregating historical committed events recorded before Ralph
+// Loop's execution scripts (scripts/ralph-orchestrator.sh,
+// scripts/ralph-pipeline.sh) were retired -- flow="loop"/source="pipeline"
+// is historical schema vocabulary, not an active code path. internal/insights
+// has no import of any package deleted in this plan (internal/state,
+// internal/action, internal/watcher, internal/ui, cmd/ralph-tui); this test
+// pins that the deletion did not also break reading their historical output.
+func TestInsightsCmd_HistoricalLoopFlowEventStillReadable(t *testing.T) {
+	dir := t.TempDir()
+	eventsDir := filepath.Join(dir, "events")
+
+	// Shaped exactly as ralph-pipeline.sh's claude -p agents used to emit
+	// it pre-retirement.
+	line := `{"schema":1,"ts":"2026-06-01T00:00:00Z","run_id":"legacy-1","slug":"legacy-loop-task","flow":"loop","phase":"verify","cycle":1,"verdict":"pass","findings":{"critical":0,"high":0,"medium":0,"low":0},"triage":{"action_required":0,"worth_considering":0,"dismissed":0},"driver":"claude","requested_model":"sonnet","effective_model":"sonnet","honored":true,"source":"pipeline"}`
+	writeTestEvent(t, eventsDir, "2026-06-01-legacy-loop-task.jsonl", line)
+
+	out := runInsightsCmd(t,
+		"--events-dir", eventsDir,
+		"--receipts", filepath.Join(dir, "nonexistent-receipts.jsonl"),
+		"--json",
+	)
+
+	var agg insights.AggregateResult
+	if err := json.Unmarshal([]byte(out), &agg); err != nil {
+		t.Fatalf("json.Unmarshal: %v\noutput:\n%s", err, out)
+	}
+	if agg.TotalEvents != 1 {
+		t.Errorf("TotalEvents = %d, want 1 (historical flow=loop event should still be read)", agg.TotalEvents)
+	}
+	verify := agg.PerPhase["verify"]
+	if verify == nil {
+		t.Fatal("PerPhase[verify] = nil; historical loop-flow event was not aggregated")
+	}
+	if verify.Verdicts.Pass != 1 {
+		t.Errorf("verify.pass = %d, want 1", verify.Verdicts.Pass)
+	}
+}
+
 // runBackfillCmd runs "ralph insights backfill" with the given args and returns stdout.
 func runBackfillCmd(t *testing.T, args ...string) string {
 	t.Helper()

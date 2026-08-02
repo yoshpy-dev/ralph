@@ -82,9 +82,6 @@ func runDoctorOpts(targetDir string, probeModels bool) error {
 	// Check 6: Language pack verify.sh (checks project's installed packs via manifest).
 	results = append(results, checkInstalledPacks(targetDir)...)
 
-	// Check 7: Loop driver effective value (env > default).
-	results = append(results, checkLoopDriver(os.Getenv))
-
 	// Check 8: Go availability.
 	results = append(results, checkGo(cfg))
 
@@ -457,54 +454,6 @@ func checkEmbeddedPacks() []checkResult {
 		results = append(results, r)
 	}
 	return results
-}
-
-// checkLoopDriver reports the effective Ralph Loop driver — the value
-// scripts/ralph-cli-driver.sh used to see — and which source it came from
-// (env > default). The lookup function is injected so the test can supply a
-// deterministic env without monkey-patching os.Getenv.
-//
-// The [loop] ralph.toml section this used to read (env > TOML > default) was
-// removed along with the rest of the Ralph Loop execution system; this check
-// (and the `ralph run`/`retry`/`abort` commands it diagnoses) is scheduled
-// for full removal in the Go-side deletion slice of the same plan. Kept as a
-// literal-default stub in the meantime so `go build`/`go vet` stay green.
-//
-// Cross-review hardening retained from the original Phase 2 implementation:
-// when driver=codex is effective but the codex binary is absent, return
-// fail — otherwise doctor reports pass while the next `ralph run` preflight
-// blocks immediately on the missing required CLI.
-func checkLoopDriver(getenv func(string) string) checkResult {
-	r := checkResult{Name: "Loop driver"}
-
-	pick := func(envKey, defaultVal string) (string, string) {
-		if v := getenv(envKey); v != "" {
-			return v, "env"
-		}
-		return defaultVal, "default"
-	}
-
-	effective, source := pick("RALPH_LOOP_DRIVER", "claude")
-	sandbox, _ := pick("RALPH_CODEX_SANDBOX", "workspace-write")
-	approval, _ := pick("RALPH_CODEX_APPROVAL_POLICY", "on-failure")
-	reviewer, _ := pick("RALPH_CLAUDE_REVIEWER_MODEL", "opus")
-
-	if effective == "codex" {
-		if _, err := exec.LookPath("codex"); err != nil {
-			r.Status = "fail"
-			r.Detail = fmt.Sprintf("%s (source: %s) — codex binary not found in PATH; `ralph run` preflight will fail", effective, source)
-			return r
-		}
-	}
-
-	r.Status = "pass"
-	if effective == "codex" {
-		r.Detail = fmt.Sprintf("%s (source: %s, sandbox: %s, approval: %s, reviewer: claude/%s)",
-			effective, source, sandbox, approval, reviewer)
-	} else {
-		r.Detail = fmt.Sprintf("%s (source: %s)", effective, source)
-	}
-	return r
 }
 
 // checkStaleOrchestratorState warns when .harness/state/orchestrator/orchestrator.json
