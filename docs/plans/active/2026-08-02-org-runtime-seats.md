@@ -129,6 +129,8 @@ org runtime PR②: 座席を実際に動かせるようにする。agmsg アダ�
 
 - **実機スモーク第3の検出**(同日): tab 作成直後の pane はシェル初期化中で `agent start` が `agent_pane_busy: not an available shell` を返す(プローブで確認: 即時→busy、3秒後→受理)。修正: spawn saga の AgentStart を `agent_pane_busy` 検出時のみ有界リトライ(500ms 間隔、ctx デッドライン内)にする。
 
+- **実機スモーク第4の検出**(同日): `despawn.sh` は agmsg 自身の `spawn.sh` で起動したエージェント専用で、`join.sh` 参加メンバーには placement record がなく実質 no-op(exit 0)。roster からの除去は `leave.sh <team> <agent_id>` が正しい動詞(実機で確認: leave 実行後にメンバー消滅、空チームは自動削除)。修正: アダプタの `Despawn` を `Leave` に置換し、stop/disband の agmsg クリーンアップは Leave を使う。あわせて `stopped` イベントに座席の role/driver/model を引き継ぎ、stop 後の status 表示が空欄にならないようにする(スモークで発見した表示ギャップ)。
+
 ## Progress checklist
 
 - [ ] Plan reviewed
