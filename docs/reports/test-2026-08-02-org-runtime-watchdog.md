@@ -82,3 +82,69 @@ No test failures, no skips, no flakes observed across two independent runs (once
 - **Carried-forward gaps (not blocking, per verify report's own recommendation):** AC-5/M-4's narrower-than-recommended fix (no regression test for the broader cross-org/cross-seat false-positive case) and AC-10's state-dir live-evidence line remain open follow-ups — consistent with the verify report's "PASS with two follow-up items" verdict. Recommend tracking both as a tech-debt row or a fix-and-revalidate pass at the human operator's discretion; neither blocks proceeding to `/sync-docs`.
 
 **Recommendation: proceed to `/sync-docs`.** Tests pass; safe to continue the pipeline toward `/cross-review` and `/pr`.
+
+## Cycle 2
+
+- Date: 2026-08-03
+- Tester: `tester` subagent (behavioral tests only, no static analysis)
+- Scope: delta `19c7630` + `ccf506e` on `feat/org-runtime-watchdog` (HEAD `b7110c6`), handed off after `docs/reports/verify-2026-08-02-org-runtime-watchdog.md`'s cycle-2 section (PASS). This delta closes cross-review AR-1/AR-2 and cycle-2 self-review M2-1/M2-2, all four of which cycle 1 above flagged as carried-forward gaps.
+- Evidence: `docs/evidence/test-2026-08-03-org-runtime-watchdog-cycle2.log` (`./scripts/run-test.sh`), `docs/evidence/test-2026-08-03-org-runtime-watchdog-targeted.log` (targeted `-race` run) — both gitignored per `docs/evidence/*.log`, not committed.
+
+### Test execution
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `./scripts/run-test.sh` (33 shell suites, `tests/*.sh`) | all suites report `OK` | all | 0 | 0 | ~2 min |
+| `./scripts/run-test.sh` → Go verifier, `go test ./...` (full-scope fallback, 13 packages) | 13 packages | 13 (all `ok`) | 0 | 0 | mixed cached/fresh |
+| `go test ./internal/org/... ./internal/cli/... ./internal/config/... -race -count=1 -v` | 399 subtests, 5 packages (up from cycle 1's 393 — exactly the 6 new tests) | 399 | 0 | 0 | ~30s |
+
+`./scripts/run-test.sh` again fell back to full language scope (same "unclassified" `scripts/ralph-config.sh` classification noted in cycle 1) — not an override. No failures, no skips, no flakes across either run.
+
+### New-test confirmation (AR-1 / AR-2 / M2-1 / M2-2)
+
+| Finding | Test | File | Package | Result |
+| --- | --- | --- | --- | --- |
+| AR-1 (cross-review): `leadActivityEventCount` not scoped to the watched org — an unrelated org sharing the same manifest could clear a different org's pending deadman alert | `TestWatch_Deadman_CrossOrgActivity_DoesNotClearPendingAlert` | `internal/org/watch_test.go` | `internal/org` | PASS |
+| AR-2 (cross-review): total-budget cutoff false-positive-ALERTs an org with zero active seats, repeating every cycle forever | `TestWatch_TotalBudgetCutoff_NoActiveSeats_NoAlertNoEscalation_ThenCutsNewSeat` | `internal/org/watch_test.go` | `internal/org` | PASS |
+| M2-1 (cycle-2 self-review): lead activity must be lead-*attributable*, not merely org-scoped — an unrelated seat's own event in the same org must not clear another seat's pending alert; lead's own `spawned` event and a manual (non-watchdog) stop of another seat must still clear it | `TestWatch_Deadman_UnrelatedSeatEvent_DoesNotClearPendingAlert`, `TestWatch_Deadman_LeadSpawnedEvent_ClearsPendingAlert`, `TestWatch_Deadman_ManualStopOfOtherSeat_ClearsPendingAlert` | `internal/org/watch_test.go` | `internal/org` | PASS (3/3) |
+| M2-2 (cycle-2 self-review): `newWatchdogHooks` must thread the caller's `ctx` (`cmd.Context()`) into the tracked goroutine's `RunWatcher` call instead of a fixed `context.Background()`, so a cancelled command context (e.g. SIGINT) returns quickly instead of waiting out the full watcher timeout | `TestNewWatchdogHooks_CtxCancelled_RunWatcherReturnsQuickly` | `internal/cli/org_test.go` | `internal/cli` | PASS |
+
+All 6 new/changed regression tests exist, run, and pass. Each is traced to its originating finding by comment header in the source (verified by reading the diff, not just the test name).
+
+### Coverage delta
+
+- `internal/org`: 88.1% (unchanged from cycle 1) — the 5 new `internal/org` tests exercise already-instrumented lines in `watch.go` (lead-activity scoping, total-budget zero-active-seat guard), not new lines, so the aggregate percentage does not move.
+- `internal/cli`: 67.3% (unchanged from cycle 1) — the 1 new test exercises the existing `newWatchdogHooks`/`RunWatcher` goroutine path with a pre-cancelled context, again not new lines.
+- No coverage regressions introduced by the delta.
+
+### Regression checks (cycle 2)
+
+| Previously broken behavior | Status | Evidence |
+| --- | --- | --- |
+| AR-1: cross-org lead-activity leak (cross-review finding) | Fixed, regression-tested | `TestWatch_Deadman_CrossOrgActivity_DoesNotClearPendingAlert` passes |
+| AR-2: zero-active-seat total-budget false ALERT loop (cross-review finding) | Fixed, regression-tested | `TestWatch_TotalBudgetCutoff_NoActiveSeats_NoAlertNoEscalation_ThenCutsNewSeat` passes |
+| M2-1: lead-activity not attribution-scoped (cycle-2 self-review finding) | Fixed, regression-tested | `TestWatch_Deadman_UnrelatedSeatEvent_DoesNotClearPendingAlert`, `TestWatch_Deadman_LeadSpawnedEvent_ClearsPendingAlert`, `TestWatch_Deadman_ManualStopOfOtherSeat_ClearsPendingAlert` all pass |
+| M2-2: watcher goroutine ignored caller's cancelled context (cycle-2 self-review finding) | Fixed, regression-tested | `TestNewWatchdogHooks_CtxCancelled_RunWatcherReturnsQuickly` passes |
+| Cycle-1 carried-forward AC-5/M-4 gap | Superseded — the broader cross-org/cross-seat false-positive case cycle 1 flagged as untested is now exactly what AR-1's and M2-1's new tests cover | See rows above |
+| Full regression suite (all cycle-1 tests + PR①–③ org runtime, lockstep, check-sync) | Green | 399/399 targeted subtests pass; 33/33 shell suites report `OK`; all 13 Go packages `ok` |
+
+### Failure analysis
+
+| Test | Error | Root cause | Proposed fix |
+| --- | --- | --- | --- |
+| — | — | No failures observed | — |
+
+### Test gaps (cycle 2)
+
+- The cycle-1 AC-5/M-4 gap ("no test drives `leadActivityEventCount` with a multi-org or multi-seat manifest to prove/disprove the false-positive path") is now closed by AR-1's and M2-1's tests — removed from the open-gaps list.
+- Cycle-1's other named gaps (`realEscalate` 0% unit coverage, `loadWatchStatus` 44.4% branch coverage, `detailsSuffix` 0% coverage, `internal/cli` 67.3% module-wide vs watchdog-scoped) are unchanged by this delta and remain open at the same scope described in cycle 1 — none of them are touched by `19c7630`/`ccf506e`.
+- AC-10 live-smoke state-dir cross-cwd confirmation remains out of `/test`'s scope (live-evidence artifact, not a `go test` target), unchanged from cycle 1.
+
+### Verdict (cycle 2)
+
+- **Pass**: All 33 shell test suites (`./scripts/run-test.sh`) and all 13 Go packages (`go test ./...` full scope, plus the explicit `go test ./internal/org/... ./internal/cli/... ./internal/config/... -race -count=1` targeted run, 399 subtests) are green. Zero failures, zero skips, no flakes. All 6 new regression tests for AR-1, AR-2, M2-1 (×3), and M2-2 exist and pass, confirmed against their source comments.
+- **Fail**: None.
+- **Blocked**: None.
+- **Carried-forward gaps (not blocking):** `realEscalate`/`loadWatchStatus`/`detailsSuffix` unit-coverage blind spots and AC-10's live-evidence scope, all unchanged from cycle 1 and unrelated to this delta.
+
+**Recommendation: proceed to `/sync-docs` → `/cross-review` → `/pr`.** Tests pass on cycle 2; both cross-review AR findings and both cycle-2 self-review M2 findings are now regression-tested.
