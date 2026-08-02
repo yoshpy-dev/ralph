@@ -63,6 +63,56 @@ func TestRenderRolePrompt_QA_AllKnownVarsSubstituted(t *testing.T) {
 	}
 }
 
+func TestRenderRolePrompt_Lead_AllKnownVarsSubstituted(t *testing.T) {
+	vars := testRolePromptVars()
+	vars.Role = "lead"
+	vars.SeatID = "lead"
+	vars.Task = "dry-run 座席を1つ spawn し、typed message を送り、status を確認して disband せよ"
+	vars.Envelope = "model_pool: claude/opus, claude/sonnet, claude/haiku | max_seats: 5 | permission default: autonomous"
+	text, ok, err := RenderRolePrompt("lead", vars)
+	if err != nil {
+		t.Fatalf("RenderRolePrompt: unexpected error: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected ok=true for the built-in lead template")
+	}
+	for _, want := range []string{"org-a", "lead", "ralph-org-a", vars.Task, vars.Envelope} {
+		if !strings.Contains(text, want) {
+			t.Errorf("expected rendered lead prompt to contain %q, got:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "{{") {
+		t.Errorf("expected no unsubstituted {{...}} placeholders for known vars, got:\n%s", text)
+	}
+	if !strings.Contains(text, ".claude/rules/agent-messaging.md") {
+		t.Errorf("expected lead template to reference the protocol rule doc, got:\n%s", text)
+	}
+	if !strings.Contains(text, "/org") {
+		t.Errorf("expected lead template to reference the /org skill (its full operating manual), got:\n%s", text)
+	}
+	if !strings.Contains(text, "ralph org report") {
+		t.Errorf("expected lead template to instruct the lead to run `ralph org report` before finishing, got:\n%s", text)
+	}
+}
+
+func TestRenderRolePrompt_Lead_EmptyTaskAndEnvelope_NoLeftoverPlaceholders(t *testing.T) {
+	vars := testRolePromptVars()
+	vars.Role = "lead"
+	vars.SeatID = "lead"
+	vars.Task = ""
+	vars.Envelope = ""
+	text, ok, err := RenderRolePrompt("lead", vars)
+	if err != nil {
+		t.Fatalf("RenderRolePrompt: unexpected error: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected ok=true for the built-in lead template")
+	}
+	if strings.Contains(text, "{{TASK}}") || strings.Contains(text, "{{ENVELOPE}}") {
+		t.Errorf("expected no leftover {{TASK}}/{{ENVELOPE}} placeholders even when both vars are empty, got:\n%s", text)
+	}
+}
+
 func TestRenderRolePrompt_UnknownRole_NoTemplate(t *testing.T) {
 	text, ok, err := RenderRolePrompt("unknown-role", testRolePromptVars())
 	if err != nil {

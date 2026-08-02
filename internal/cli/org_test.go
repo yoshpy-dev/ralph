@@ -237,6 +237,7 @@ func TestOrgSpawn_HappyPath_EventSequenceReceiptAndWorkspaceReuse(t *testing.T) 
 	out, err := runOrgCmd(t,
 		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
 		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
 		"--state-dir", stateDir,
 	)
 	if err != nil {
@@ -270,6 +271,7 @@ func TestOrgSpawn_HappyPath_EventSequenceReceiptAndWorkspaceReuse(t *testing.T) 
 	out2, err2 := runOrgCmd(t,
 		"spawn", "--org-id", "org-a", "--id", "seat-2", "--role", "worker",
 		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
 		"--state-dir", stateDir,
 	)
 	if err2 != nil {
@@ -296,6 +298,60 @@ func TestOrgSpawn_HappyPath_EventSequenceReceiptAndWorkspaceReuse(t *testing.T) 
 	}
 }
 
+// TestOrgSpawn_LeadDriverFlag_DefaultsToClaudeCode pins AC-7's CLI wiring:
+// omitting --lead-driver registers the lead identity with agmsg type
+// "claude-code" (the flag's own default, "claude").
+func TestOrgSpawn_LeadDriverFlag_DefaultsToClaudeCode(t *testing.T) {
+	_, agmsgLog := setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	out, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
+		"--state-dir", stateDir,
+	)
+	if err != nil {
+		t.Fatalf("spawn failed: %v (output: %s)", err, out)
+	}
+
+	agmsgLines := readLogLines(t, agmsgLog)
+	// join.sh argv: TEAM AGENT_ID TYPE PROJECT_PATH -- the lead Join is the
+	// first agmsg invocation and must carry "claude-code" (the
+	// --lead-driver flag's own default, "claude").
+	if len(agmsgLines) == 0 || !strings.Contains(agmsgLines[0], "ralph-org-a lead claude-code") {
+		t.Fatalf("expected the first agmsg call to be lead Join with type claude-code, got %v", agmsgLines)
+	}
+}
+
+// TestOrgSpawn_LeadDriverFlag_Codex_RegistersLeadAsCodexType covers the
+// explicit --lead-driver=codex case: the lead identity's agmsg type must
+// follow --lead-driver, independent of the seat's own --driver.
+func TestOrgSpawn_LeadDriverFlag_Codex_RegistersLeadAsCodexType(t *testing.T) {
+	_, agmsgLog := setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	out, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
+		"--state-dir", stateDir, "--lead-driver", "codex",
+	)
+	if err != nil {
+		t.Fatalf("spawn failed: %v (output: %s)", err, out)
+	}
+
+	agmsgLines := readLogLines(t, agmsgLog)
+	if len(agmsgLines) == 0 || !strings.Contains(agmsgLines[0], "ralph-org-a lead codex") {
+		t.Fatalf("expected the first agmsg call to be lead Join with type codex, got %v", agmsgLines)
+	}
+	// The seat's own Join (second call) must still use its own --driver
+	// (claude -> claude-code), unaffected by --lead-driver.
+	if len(agmsgLines) < 2 || !strings.Contains(agmsgLines[1], "ralph-org-a seat-1 claude-code") {
+		t.Fatalf("expected the second agmsg call to be the seat's own Join with type claude-code, got %v", agmsgLines)
+	}
+}
+
 func TestOrgSpawn_FailureInjection_TabCreate_NoCompensation(t *testing.T) {
 	herdrLog, _ := setupOrgStubPATH(t)
 	t.Setenv("ORG_STUB_FAIL", "tab:create")
@@ -304,6 +360,7 @@ func TestOrgSpawn_FailureInjection_TabCreate_NoCompensation(t *testing.T) {
 	out, err := runOrgCmd(t,
 		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
 		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
 		"--state-dir", stateDir,
 	)
 	if err == nil {
@@ -336,6 +393,7 @@ func TestOrgSpawn_FailureInjection_AgentStart_CompensatesPane(t *testing.T) {
 	out, err := runOrgCmd(t,
 		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
 		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
 		"--state-dir", stateDir,
 	)
 	if err == nil {
@@ -371,6 +429,7 @@ func TestOrgSpawn_FailureInjection_AgmsgSend_CompensatesPane(t *testing.T) {
 	out, err := runOrgCmd(t,
 		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
 		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
 		"--state-dir", stateDir,
 	)
 	if err == nil {
@@ -384,6 +443,11 @@ func TestOrgSpawn_FailureInjection_AgmsgSend_CompensatesPane(t *testing.T) {
 	}
 	if !strings.Contains(last.Details, "step=agmsg_announce") {
 		t.Errorf("expected Details to mention step=agmsg_announce, got %q", last.Details)
+	}
+	// AC-6 tech-debt fix: a failed HELLO announce must best-effort Leave the
+	// seat's own (already-succeeded) Join back out, and record the outcome.
+	if !strings.Contains(last.Details, "leave=ok") {
+		t.Errorf("expected Details to record leave=ok, got %q", last.Details)
 	}
 
 	herdrLines := readLogLines(t, herdrLog)
@@ -400,6 +464,7 @@ func TestOrgSpawn_FailureInjection_AgmsgJoin_CompensatesPane(t *testing.T) {
 	out, err := runOrgCmd(t,
 		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
 		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
 		"--state-dir", stateDir,
 	)
 	if err == nil {
@@ -439,6 +504,7 @@ func TestOrgSpawn_Rejection_ModelOutOfPoolAndMaxSeatsWithOrgIsolation(t *testing
 	out, err := runOrgCmd(t,
 		"spawn", "--org-id", "org-a", "--id", "seat-bad-model", "--role", "worker",
 		"--driver", "claude", "--model", "not-a-real-model", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
 		"--state-dir", stateDir, "--config", configPath,
 	)
 	if err == nil {
@@ -461,6 +527,7 @@ func TestOrgSpawn_Rejection_ModelOutOfPoolAndMaxSeatsWithOrgIsolation(t *testing
 	if _, err := runOrgCmd(t,
 		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
 		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
 		"--state-dir", stateDir, "--config", configPath,
 	); err != nil {
 		t.Fatalf("expected first org-a spawn to succeed under max_seats=1: %v", err)
@@ -469,6 +536,7 @@ func TestOrgSpawn_Rejection_ModelOutOfPoolAndMaxSeatsWithOrgIsolation(t *testing
 	out3, err3 := runOrgCmd(t,
 		"spawn", "--org-id", "org-a", "--id", "seat-2", "--role", "worker",
 		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
 		"--state-dir", stateDir, "--config", configPath,
 	)
 	if err3 == nil {
@@ -479,6 +547,7 @@ func TestOrgSpawn_Rejection_ModelOutOfPoolAndMaxSeatsWithOrgIsolation(t *testing
 	if _, errB := runOrgCmd(t,
 		"spawn", "--org-id", "org-b", "--id", "seat-1", "--role", "worker",
 		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
 		"--state-dir", stateDir, "--config", configPath,
 	); errB != nil {
 		t.Fatalf("expected org-b's first seat to spawn despite org-a being at max_seats: %v", errB)
@@ -492,6 +561,7 @@ func TestOrgSpawn_IdempotentRespawn_ExitZeroNoNewDriverCalls(t *testing.T) {
 	args := []string{
 		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
 		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
 		"--state-dir", stateDir,
 	}
 	if _, err := runOrgCmd(t, args...); err != nil {
@@ -523,6 +593,7 @@ func TestOrgSpawn_DryRun_NoPATHNeeded_StatusExclusionAndAll(t *testing.T) {
 	out, err := runOrgCmd(t,
 		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
 		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
 		"--state-dir", stateDir, "--dry-run",
 	)
 	if err != nil {
@@ -631,6 +702,7 @@ func TestOrgDisband_StopsActiveSeatsAndDisbandsOrg(t *testing.T) {
 	if _, err := runOrgCmd(t,
 		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
 		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
 		"--state-dir", stateDir,
 	); err != nil {
 		t.Fatalf("spawn failed: %v", err)
@@ -696,6 +768,7 @@ func TestOrgStop_ExistingSeat_LeavesAndRecordsOutcome(t *testing.T) {
 	if _, err := runOrgCmd(t,
 		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
 		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
 		"--state-dir", stateDir,
 	); err != nil {
 		t.Fatalf("spawn failed: %v", err)
@@ -804,6 +877,7 @@ func TestOrgSpawn_UnknownRole_NoTemplateApplied(t *testing.T) {
 	out, err := runOrgCmd(t,
 		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "not-a-known-role",
 		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
 		"--prompt", "verbatim prompt",
 		"--state-dir", stateDir,
 	)
@@ -834,6 +908,7 @@ func TestOrgSend_MalformedMessage_NonZeroExitAndNoManifestEvent(t *testing.T) {
 	if _, err := runOrgCmd(t,
 		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
 		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
 		"--state-dir", stateDir,
 	); err != nil {
 		t.Fatalf("spawn failed: %v", err)
@@ -869,6 +944,7 @@ func TestOrgSend_RawFlag_BypassesValidation(t *testing.T) {
 	if _, err := runOrgCmd(t,
 		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
 		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
 		"--state-dir", stateDir,
 	); err != nil {
 		t.Fatalf("spawn failed: %v", err)
@@ -898,6 +974,7 @@ func TestOrgSend_ValidTypedMessage_Succeeds(t *testing.T) {
 	if _, err := runOrgCmd(t,
 		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
 		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
 		"--state-dir", stateDir,
 	); err != nil {
 		t.Fatalf("spawn failed: %v", err)
@@ -923,6 +1000,7 @@ func TestOrgWait_HappyPath_Succeeds(t *testing.T) {
 	if _, err := runOrgCmd(t,
 		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
 		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
 		"--state-dir", stateDir,
 	); err != nil {
 		t.Fatalf("spawn failed: %v", err)
@@ -957,9 +1035,58 @@ func TestOrgWait_UnknownSeat_StillSucceeds_PassthroughToHerdr(t *testing.T) {
 		t.Fatalf("expected wait on an unrecorded seat to still succeed (pure herdr passthrough), got %v (output: %s)", err, out)
 	}
 
+	// --timeout-ms is left at its bounded default (60000) here, so the
+	// expected argv includes it -- see TestOrgWait_DefaultUntilAndTimeout_AreBoundedAndDone
+	// for the defaults themselves.
 	herdrLines := readLogLines(t, herdrLog)
-	if !containsLine(herdrLines, "agent wait org-a_never-spawned --until idle") {
+	if !containsLine(herdrLines, "agent wait org-a_never-spawned --until idle --timeout 60000") {
 		t.Errorf("expected the herdr log to show a wait call for the namespaced agent name, got: %v", herdrLines)
+	}
+}
+
+// TestOrgWait_DefaultUntilAndTimeout_AreBoundedAndDone covers the self-review
+// HIGH-1 fix: `ralph org wait`'s defaults changed from `--until idle` /
+// `--timeout-ms 0` (unbounded) to `--until idle,done` / `--timeout-ms 60000`
+// (bounded) -- a headless lead following its own default wait must not be
+// able to block forever against a perfectly receptive seat (herdr reports an
+// interactive agent resting at its input prompt as "done", not "idle"; see
+// internal/org/verbs.go's Send, which already waits on both).
+func TestOrgWait_DefaultUntilAndTimeout_AreBoundedAndDone(t *testing.T) {
+	herdrLog, _ := setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	out, err := runOrgCmd(t, "wait", "--org-id", "org-a", "--seat", "seat-1", "--state-dir", stateDir)
+	if err != nil {
+		t.Fatalf("wait with default flags failed: %v (output: %s)", err, out)
+	}
+
+	herdrLines := readLogLines(t, herdrLog)
+	if !containsLine(herdrLines, "agent wait org-a_seat-1 --until idle --until done --timeout 60000") {
+		t.Errorf("expected the default --until/--timeout-ms to produce a bounded idle+done wait, got: %v", herdrLines)
+	}
+}
+
+// TestOrgWait_ExplicitZeroTimeout_StaysUnbounded verifies --timeout-ms 0
+// still opts out of the bounded default explicitly (herdr's own `--timeout`
+// flag is omitted entirely), matching driver.Herdr.AgentWait's documented
+// "timeoutMS <= 0 omits --timeout" contract.
+func TestOrgWait_ExplicitZeroTimeout_StaysUnbounded(t *testing.T) {
+	herdrLog, _ := setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	out, err := runOrgCmd(t, "wait", "--org-id", "org-a", "--seat", "seat-1", "--timeout-ms", "0", "--state-dir", stateDir)
+	if err != nil {
+		t.Fatalf("wait with --timeout-ms 0 failed: %v (output: %s)", err, out)
+	}
+
+	herdrLines := readLogLines(t, herdrLog)
+	if !containsLine(herdrLines, "agent wait org-a_seat-1 --until idle --until done") {
+		t.Errorf("expected --timeout-ms 0 to omit --timeout entirely, got: %v", herdrLines)
+	}
+	for _, line := range herdrLines {
+		if strings.Contains(line, "--timeout ") {
+			t.Errorf("expected no --timeout flag when --timeout-ms is explicitly 0, got: %v", herdrLines)
+		}
 	}
 }
 
@@ -972,6 +1099,7 @@ func TestOrgRead_HappyPath_Succeeds(t *testing.T) {
 	if _, err := runOrgCmd(t,
 		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
 		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
 		"--state-dir", stateDir,
 	); err != nil {
 		t.Fatalf("spawn failed: %v", err)
@@ -1068,6 +1196,68 @@ func TestOrgSend_TraversalTo_NonZeroExit(t *testing.T) {
 	}
 }
 
+// TestOrgSpawn_MissingScope_NonZeroExit_NoAllowUnscoped is the CLI-level
+// counterpart of AC-2b's minimum control gate: omitting both --scope and
+// --allow-unscoped under the default (autonomous) config exits non-zero and
+// mentions both flags. The gate now routes through reject() (self-review LOW
+// finding), so it leaves exactly one `rejected` manifest event behind -- but
+// still zero herdr calls and no spawn_started, since reject() never appends
+// one.
+func TestOrgSpawn_MissingScope_NonZeroExit_NoAllowUnscoped(t *testing.T) {
+	herdrLog, _ := setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	out, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--state-dir", stateDir,
+	)
+	if err == nil {
+		t.Fatalf("expected non-zero exit for a missing --scope under autonomous mode, output: %s", out)
+	}
+	if !strings.Contains(err.Error(), "--scope") || !strings.Contains(err.Error(), "--allow-unscoped") {
+		t.Errorf("expected error to mention --scope and --allow-unscoped, got: %v", err)
+	}
+
+	if herdrLines := readLogLines(t, herdrLog); len(herdrLines) != 0 {
+		t.Errorf("expected zero herdr calls for the gate rejection, got: %v", herdrLines)
+	}
+	events := readManifestEvents(t, filepath.Join(stateDir, "manifest.jsonl"))
+	if len(events) != 1 || events[0].Event != "rejected" {
+		t.Errorf("expected exactly one rejected manifest event for the gate rejection, got: %v", events)
+	}
+}
+
+// TestOrgSpawn_AllowUnscopedFlag_BypassesGateAndIsRecorded is the CLI-level
+// counterpart of the AllowUnscoped bypass: the flag reaches SpawnParams and
+// its use is recorded on the spawned event's Details.
+func TestOrgSpawn_AllowUnscopedFlag_BypassesGateAndIsRecorded(t *testing.T) {
+	setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	out, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--allow-unscoped",
+		"--state-dir", stateDir,
+	)
+	if err != nil {
+		t.Fatalf("expected --allow-unscoped to bypass the gate, got %v (output: %s)", err, out)
+	}
+
+	events := readManifestEvents(t, filepath.Join(stateDir, "manifest.jsonl"))
+	last := events[len(events)-1]
+	if last.Event != "spawned" {
+		t.Fatalf("expected last event spawned, got %q", last.Event)
+	}
+	if !strings.Contains(last.Details, "allow_unscoped=true") {
+		t.Errorf("expected spawned event Details to record allow_unscoped=true, got %q", last.Details)
+	}
+	if !strings.Contains(last.Details, "permission_mode=autonomous") {
+		t.Errorf("expected spawned event Details to record permission_mode=autonomous, got %q", last.Details)
+	}
+}
+
 func equalStrings(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
@@ -1078,4 +1268,312 @@ func equalStrings(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// --- ralph org start (AC-3: headless-lead spawn sugar) ----------------------
+
+func TestOrgStart_HappyPath_SpawnsLeadSeat_SingleAgmsgJoin_NoHello(t *testing.T) {
+	_, agmsgLog := setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	out, err := runOrgCmd(t,
+		"start", "--org-id", "org-a", "--driver", "claude", "--model", "sonnet",
+		"--cwd", t.TempDir(), "--scope", "org-wide",
+		"--state-dir", stateDir,
+		"dry-run 座席を1つ spawn し、typed message を送り、status を確認して disband せよ",
+	)
+	if err != nil {
+		t.Fatalf("start failed: %v (output: %s)", err, out)
+	}
+	if !strings.Contains(out, `spawned seat "lead"`) {
+		t.Errorf("expected spawned confirmation naming the lead seat, got: %s", out)
+	}
+	if !strings.Contains(out, "ralph org status --org-id org-a") {
+		t.Errorf("expected a status hint in the output, got: %s", out)
+	}
+
+	events := readManifestEvents(t, filepath.Join(stateDir, "manifest.jsonl"))
+	last := events[len(events)-1]
+	if last.Event != "spawned" || last.SeatID != "lead" || last.Role != "lead" {
+		t.Fatalf("expected last event spawned for seat_id=role=lead, got %+v", last)
+	}
+
+	// leadSelfSpawn (internal/org/spawn.go's Spawn): exactly one agmsg
+	// invocation (the seat's own Join, which IS the lead-identity join) --
+	// no separate ensureLeadJoined call, no HELLO send.
+	agmsgLines := readLogLines(t, agmsgLog)
+	if n := countLinesWithPrefix(agmsgLines, "ralph-org-a"); n != 1 {
+		t.Fatalf("expected exactly 1 agmsg invocation for a lead-self spawn, got %d (log: %v)", n, agmsgLines)
+	}
+	if !strings.Contains(agmsgLines[0], "ralph-org-a lead claude-code") {
+		t.Fatalf("expected the single agmsg call to be lead's own Join, got %v", agmsgLines)
+	}
+}
+
+func TestOrgStart_TaskAndEnvelopeLandInPromptFile(t *testing.T) {
+	herdrLog, _ := setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+	task := "dry-run 座席を1つ spawn し、typed message を送り、status を確認して disband せよ"
+
+	out, err := runOrgCmd(t,
+		"start", "--org-id", "org-a", "--driver", "claude", "--model", "sonnet",
+		"--cwd", t.TempDir(), "--scope", "org-wide",
+		"--state-dir", stateDir,
+		task,
+	)
+	if err != nil {
+		t.Fatalf("start failed: %v (output: %s)", err, out)
+	}
+
+	data, rerr := os.ReadFile(herdrLog)
+	if rerr != nil {
+		t.Fatalf("read herdr log: %v", rerr)
+	}
+	if !strings.Contains(string(data), "役割指示を読み込んで従ってください: ") {
+		t.Fatalf("expected AgentStart argv to carry the prompt-file pointer, got:\n%s", string(data))
+	}
+
+	promptPath := filepath.Join(stateDir, "prompts", "org-a_lead.md")
+	promptData, perr := os.ReadFile(promptPath)
+	if perr != nil {
+		t.Fatalf("expected prompt file at %q: %v", promptPath, perr)
+	}
+	promptText := string(promptData)
+	for _, want := range []string{task, "model_pool:", "max_seats:", "permission default:", "org-a"} {
+		if !strings.Contains(promptText, want) {
+			t.Errorf("expected lead prompt file to contain %q, got:\n%s", want, promptText)
+		}
+	}
+}
+
+func TestOrgStart_ModelFlagOmitted_DefaultsToFirstMatchingPoolEntry(t *testing.T) {
+	setupOrgStubPATH(t)
+	dir := t.TempDir()
+	stateDir := filepath.Join(dir, "state")
+	configPath := filepath.Join(dir, "ralph.toml")
+	content := "[org]\n" +
+		"max_seats = 5\n" +
+		"driver_pool = [\"claude\", \"codex\"]\n\n" +
+		"[[org.model_pool]]\n" +
+		"driver = \"codex\"\n" +
+		"model = \"gpt-5-codex\"\n\n" +
+		"[[org.model_pool]]\n" +
+		"driver = \"claude\"\n" +
+		"model = \"opus\"\n\n" +
+		"[[org.model_pool]]\n" +
+		"driver = \"claude\"\n" +
+		"model = \"sonnet\"\n"
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	out, err := runOrgCmd(t,
+		"start", "--org-id", "org-a", "--driver", "claude",
+		"--cwd", t.TempDir(), "--scope", "org-wide",
+		"--state-dir", stateDir, "--config", configPath,
+		"task text",
+	)
+	if err != nil {
+		t.Fatalf("start failed: %v (output: %s)", err, out)
+	}
+
+	events := readManifestEvents(t, filepath.Join(stateDir, "manifest.jsonl"))
+	last := events[len(events)-1]
+	// The first claude entry in declared model_pool order is "opus" (codex's
+	// entry precedes it but does not match --driver claude).
+	if last.Model != "opus" {
+		t.Fatalf("expected default --model resolution to pick the first matching pool entry (opus), got %q", last.Model)
+	}
+}
+
+func TestOrgStart_ModelFlagExplicit_OverridesDefault(t *testing.T) {
+	setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	out, err := runOrgCmd(t,
+		"start", "--org-id", "org-a", "--driver", "claude", "--model", "haiku",
+		"--cwd", t.TempDir(), "--scope", "org-wide",
+		"--state-dir", stateDir,
+		"task text",
+	)
+	if err != nil {
+		t.Fatalf("start failed: %v (output: %s)", err, out)
+	}
+
+	events := readManifestEvents(t, filepath.Join(stateDir, "manifest.jsonl"))
+	last := events[len(events)-1]
+	if last.Model != "haiku" {
+		t.Fatalf("expected explicit --model to win over the default, got %q", last.Model)
+	}
+}
+
+func TestOrgStart_NoMatchingModelPoolEntryForDriver_NonZeroExit(t *testing.T) {
+	setupOrgStubPATH(t)
+	dir := t.TempDir()
+	stateDir := filepath.Join(dir, "state")
+	// writeOrgConfig's model_pool only contains a claude/sonnet entry -- no
+	// codex entry exists for --driver codex to match.
+	configPath := writeOrgConfig(t, dir, 5)
+
+	out, err := runOrgCmd(t,
+		"start", "--org-id", "org-a", "--driver", "codex",
+		"--cwd", t.TempDir(), "--scope", "org-wide",
+		"--state-dir", stateDir, "--config", configPath,
+		"task text",
+	)
+	if err == nil {
+		t.Fatalf("expected non-zero exit when no [org].model_pool entry matches --driver, output: %s", out)
+	}
+	if !strings.Contains(err.Error(), `driver "codex"`) {
+		t.Errorf("expected error to name the unmatched driver, got: %v", err)
+	}
+}
+
+func TestOrgStart_MissingScope_AutonomousDefault_RejectedUnlessAllowUnscoped(t *testing.T) {
+	setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	out, err := runOrgCmd(t,
+		"start", "--org-id", "org-a", "--driver", "claude", "--model", "sonnet",
+		"--cwd", t.TempDir(),
+		"--state-dir", stateDir,
+		"task text",
+	)
+	if err == nil {
+		t.Fatalf("expected non-zero exit for a missing --scope under the default autonomous permission mode, output: %s", out)
+	}
+	if !strings.Contains(err.Error(), "--scope") || !strings.Contains(err.Error(), "--allow-unscoped") {
+		t.Errorf("expected error to mention --scope and --allow-unscoped, got: %v", err)
+	}
+
+	out2, err2 := runOrgCmd(t,
+		"start", "--org-id", "org-a", "--driver", "claude", "--model", "sonnet",
+		"--cwd", t.TempDir(), "--allow-unscoped",
+		"--state-dir", stateDir,
+		"task text",
+	)
+	if err2 != nil {
+		t.Fatalf("expected --allow-unscoped to bypass the gate, got %v (output: %s)", err2, out2)
+	}
+}
+
+func TestOrgStart_BlankTaskArg_NonZeroExit(t *testing.T) {
+	setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	out, err := runOrgCmd(t,
+		"start", "--org-id", "org-a", "--driver", "claude", "--model", "sonnet",
+		"--cwd", t.TempDir(), "--scope", "org-wide",
+		"--state-dir", stateDir,
+		"   ",
+	)
+	if err == nil {
+		t.Fatalf("expected non-zero exit for a blank task argument, output: %s", out)
+	}
+}
+
+func TestOrgStart_RequiresCwd(t *testing.T) {
+	setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	out, err := runOrgCmd(t,
+		"start", "--org-id", "org-a", "--driver", "claude", "--model", "sonnet",
+		"--scope", "org-wide",
+		"--state-dir", stateDir,
+		"task text",
+	)
+	if err == nil {
+		t.Fatalf("expected non-zero exit for a missing --cwd, output: %s", out)
+	}
+	if !strings.Contains(err.Error(), "--cwd") {
+		t.Errorf("expected error to mention --cwd, got: %v", err)
+	}
+}
+
+func TestOrgStart_RequiresOrgID(t *testing.T) {
+	out, err := runOrgCmd(t, "start", "--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(), "task text")
+	if err == nil {
+		t.Fatalf("expected non-zero exit for a missing --org-id, output: %s", out)
+	}
+}
+
+// --- ralph org report (AC-4) -------------------------------------------
+
+func TestOrgReport_CLI_WritesFileWithRosterTimelineAndReceipts(t *testing.T) {
+	setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	if _, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
+		"--state-dir", stateDir,
+	); err != nil {
+		t.Fatalf("spawn failed: %v", err)
+	}
+
+	outDir := filepath.Join(t.TempDir(), "reports")
+	out, err := runOrgCmd(t, "report", "--org-id", "org-a", "--state-dir", stateDir, "--out", outDir)
+	if err != nil {
+		t.Fatalf("report failed: %v (output: %s)", err, out)
+	}
+	if !strings.Contains(out, "wrote ") {
+		t.Errorf("expected output to confirm the written path, got: %s", out)
+	}
+
+	entries, rerr := os.ReadDir(outDir)
+	if rerr != nil {
+		t.Fatalf("read out dir: %v", rerr)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected exactly 1 report file, got %v", entries)
+	}
+	if !strings.HasPrefix(entries[0].Name(), "org-manifest-org-a-") {
+		t.Errorf("expected report filename to start with org-manifest-org-a-, got %q", entries[0].Name())
+	}
+	data, derr := os.ReadFile(filepath.Join(outDir, entries[0].Name()))
+	if derr != nil {
+		t.Fatalf("read report file: %v", derr)
+	}
+	content := string(data)
+	for _, want := range []string{
+		"# org report: org-a", "## Roster", "seat-1", "## Event timeline",
+		"spawn_started", "## Model receipts", "## Known residuals", "active seats: 1",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("expected report content to contain %q, got:\n%s", want, content)
+		}
+	}
+}
+
+func TestOrgReport_CLI_EmptyOrg_StillWritesReport(t *testing.T) {
+	stateDir := filepath.Join(t.TempDir(), "state")
+	outDir := filepath.Join(t.TempDir(), "reports")
+
+	out, err := runOrgCmd(t, "report", "--org-id", "org-empty", "--state-dir", stateDir, "--out", outDir)
+	if err != nil {
+		t.Fatalf("report failed for an org with zero events: %v (output: %s)", err, out)
+	}
+
+	entries, rerr := os.ReadDir(outDir)
+	if rerr != nil {
+		t.Fatalf("read out dir: %v", rerr)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected exactly 1 report file even for an empty org, got %v", entries)
+	}
+	data, derr := os.ReadFile(filepath.Join(outDir, entries[0].Name()))
+	if derr != nil {
+		t.Fatalf("read report file: %v", derr)
+	}
+	if !strings.Contains(string(data), "no events recorded for this org") {
+		t.Errorf("expected the empty-org report to contain the no-events note, got:\n%s", string(data))
+	}
+}
+
+func TestOrgReport_CLI_RequiresOrgID(t *testing.T) {
+	out, err := runOrgCmd(t, "report", "--out", filepath.Join(t.TempDir(), "reports"))
+	if err == nil {
+		t.Fatalf("expected non-zero exit for a missing --org-id, output: %s", out)
+	}
 }

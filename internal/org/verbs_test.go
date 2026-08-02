@@ -362,6 +362,110 @@ func TestOrgSend_SeatWithoutPaneID_Errors(t *testing.T) {
 	}
 }
 
+// TestOrgSend_PrefersRecordedHerdrAgentName_OverDerivedConvention pins AC-8:
+// Send must target the seat's persisted HerdrAgentName (from the `spawned`
+// event) rather than re-deriving it via herdrAgentName, so a future change
+// to herdrAgentName's own naming convention cannot orphan an already-spawned
+// seat. Seeded with a deliberately different recorded name than
+// herdrAgentName("org-a", "seat-1") would produce, so the assertion cannot
+// pass by coincidence.
+func TestOrgSend_PrefersRecordedHerdrAgentName_OverDerivedConvention(t *testing.T) {
+	o, h, _ := testOrg(t)
+	const recordedName = "org-a--seat-1-under-a-hypothetical-future-convention"
+	if recordedName == herdrAgentName("org-a", "seat-1") {
+		t.Fatal("test fixture bug: recordedName must differ from the derived convention")
+	}
+	if err := o.appendEvent(ManifestEvent{
+		TS: o.now(), OrgID: "org-a", SeatID: "seat-1", Event: EventSpawned,
+		PaneID: "pane-1", HerdrAgentName: recordedName,
+	}); err != nil {
+		t.Fatalf("seed manifest event: %v", err)
+	}
+
+	msg := "TYPE: TASK\nTASK_ID: t-1\n\ndo the thing"
+	result := o.Send(SendParams{OrgID: "org-a", To: "seat-1", Text: msg})
+	if result.Err != nil {
+		t.Fatalf("expected Send to succeed, got %v", result.Err)
+	}
+	if len(h.agentWaitTargets) != 1 || h.agentWaitTargets[0] != recordedName {
+		t.Fatalf("expected AgentWait to target the recorded herdr_agent_name %q, got %v", recordedName, h.agentWaitTargets)
+	}
+}
+
+// TestOrgSend_LegacySpawnedEvent_FallsBackToDerivedHerdrAgentName is the
+// compat counterpart: a `spawned` event recorded before HerdrAgentName
+// existed (the JSON field simply absent, decoding to "") must still resolve
+// via the herdrAgentName derivation, exactly as it did before this field was
+// added.
+func TestOrgSend_LegacySpawnedEvent_FallsBackToDerivedHerdrAgentName(t *testing.T) {
+	o, h, _ := testOrg(t)
+	// No HerdrAgentName field set -- simulates an event written by a
+	// pre-AC-8 build (the JSON key is simply absent on disk; Go's zero
+	// value for an unset string field already models this).
+	if err := o.appendEvent(ManifestEvent{
+		TS: o.now(), OrgID: "org-a", SeatID: "seat-1", Event: EventSpawned,
+		PaneID: "pane-1",
+	}); err != nil {
+		t.Fatalf("seed legacy manifest event: %v", err)
+	}
+
+	msg := "TYPE: TASK\nTASK_ID: t-1\n\ndo the thing"
+	result := o.Send(SendParams{OrgID: "org-a", To: "seat-1", Text: msg})
+	if result.Err != nil {
+		t.Fatalf("expected Send to succeed against a legacy event, got %v", result.Err)
+	}
+	want := herdrAgentName("org-a", "seat-1")
+	if len(h.agentWaitTargets) != 1 || h.agentWaitTargets[0] != want {
+		t.Fatalf("expected AgentWait to fall back to the derived name %q for a legacy event, got %v", want, h.agentWaitTargets)
+	}
+}
+
+// TestResolvedHerdrAgentName_EmptyVsSet is a direct unit pin for the helper
+// itself, independent of Send's plumbing.
+func TestResolvedHerdrAgentName_EmptyVsSet(t *testing.T) {
+	recorded := SeatStatus{OrgID: "org-a", SeatID: "seat-1", HerdrAgentName: "explicit-name"}
+	if got := resolvedHerdrAgentName(recorded); got != "explicit-name" {
+		t.Errorf("resolvedHerdrAgentName with HerdrAgentName set = %q, want %q", got, "explicit-name")
+	}
+
+	legacy := SeatStatus{OrgID: "org-a", SeatID: "seat-1"}
+	if got, want := resolvedHerdrAgentName(legacy), herdrAgentName("org-a", "seat-1"); got != want {
+		t.Errorf("resolvedHerdrAgentName with HerdrAgentName unset = %q, want derived %q", got, want)
+	}
+}
+
+// TestOrgSpawn_SpawnedEventRecordsHerdrAgentName pins the write side of
+// AC-8: a real Spawn's `spawned` event must persist HerdrAgentName, matching
+// herdrAgentName's derivation.
+func TestOrgSpawn_SpawnedEventRecordsHerdrAgentName(t *testing.T) {
+	o, _, _ := testOrg(t)
+	result := o.Spawn(mustSpawnParams("org-a", "seat-1"))
+	if result.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("expected SpawnOutcomeSpawned, got %+v", result)
+	}
+	want := herdrAgentName("org-a", "seat-1")
+	if result.Seat.HerdrAgentName != want {
+		t.Errorf("SpawnResult.Seat.HerdrAgentName = %q, want %q", result.Seat.HerdrAgentName, want)
+	}
+
+	rr, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	var spawnedEvent *ManifestEvent
+	for i := range rr.Events {
+		if rr.Events[i].Event == EventSpawned {
+			spawnedEvent = &rr.Events[i]
+		}
+	}
+	if spawnedEvent == nil {
+		t.Fatalf("expected a spawned event, got %+v", rr.Events)
+	}
+	if spawnedEvent.HerdrAgentName != want {
+		t.Errorf("spawned event HerdrAgentName = %q, want %q", spawnedEvent.HerdrAgentName, want)
+	}
+}
+
 // TestOrgStop_DryRun_ExistingSeat_RecordsDryRunDetails covers the
 // DryRun-on-an-existing-seat branch of Stop, distinct from the
 // DryRun-on-an-unknown-seat tests above: with a real, spawned seat on

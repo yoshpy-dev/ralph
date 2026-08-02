@@ -7,17 +7,23 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/yoshpy-dev/ralph/internal/config"
 	"github.com/yoshpy-dev/ralph/internal/org/protocol"
 )
 
 // fakeHerdr is a call-recording, in-memory HerdrClient used by every spawn
 // saga unit test in this file -- no exec.Command, no PATH, no real herdr
 // binary needed. Per-method Err fields let a test inject a failure at
-// exactly one saga boundary.
+// exactly one saga boundary. mu guards every field below so fakeHerdr is
+// safe to share across goroutines (TestOrgSpawn_ConcurrentSpawns_MaxSeatsNeverExceeded,
+// AC-9) -- every other test in this file drives fakeHerdr from a single
+// goroutine, where an uncontended mutex is a no-op cost.
 type fakeHerdr struct {
+	mu    sync.Mutex
 	calls []string
 
 	workspaceCreateErr error
@@ -42,6 +48,8 @@ type fakeHerdr struct {
 }
 
 func (f *fakeHerdr) WorkspaceCreate(_ context.Context, _, _ string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls = append(f.calls, "workspace_create")
 	if f.workspaceCreateErr != nil {
 		return "", f.workspaceCreateErr
@@ -53,6 +61,8 @@ func (f *fakeHerdr) WorkspaceCreate(_ context.Context, _, _ string) (string, err
 }
 
 func (f *fakeHerdr) TabCreate(_ context.Context, _, _, _ string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls = append(f.calls, "tab_create")
 	if f.tabCreateErr != nil {
 		return "", f.tabCreateErr
@@ -64,6 +74,8 @@ func (f *fakeHerdr) TabCreate(_ context.Context, _, _, _ string) (string, error)
 }
 
 func (f *fakeHerdr) AgentStart(_ context.Context, name, _, _ string, _ int, agentArgs []string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls = append(f.calls, "agent_start")
 	f.agentStartNames = append(f.agentStartNames, name)
 	f.agentStartArgs = append(f.agentStartArgs, agentArgs)
@@ -82,22 +94,30 @@ func (f *fakeHerdr) AgentStart(_ context.Context, name, _, _ string, _ int, agen
 }
 
 func (f *fakeHerdr) AgentWait(_ context.Context, target string, _ []string, _ int) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls = append(f.calls, "agent_wait")
 	f.agentWaitTargets = append(f.agentWaitTargets, target)
 	return "idle", nil
 }
 
 func (f *fakeHerdr) PaneRead(_ context.Context, _ string, _ int) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls = append(f.calls, "pane_read")
 	return "pane output", nil
 }
 
 func (f *fakeHerdr) PaneSendText(_ context.Context, _, _ string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls = append(f.calls, "pane_send_text")
 	return nil
 }
 
 func (f *fakeHerdr) PaneSendKeys(_ context.Context, paneID string, _ ...string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls = append(f.calls, "pane_send_keys")
 	f.sendKeysCalls = append(f.sendKeysCalls, paneID)
 	if f.paneSendKeysErr != nil {
@@ -110,8 +130,10 @@ func (f *fakeHerdr) PaneSendKeys(_ context.Context, paneID string, _ ...string) 
 // agentID (e.g. "lead" or a seat id), lets a test inject a Join failure at
 // exactly one identity while leaving the other Join call (lead vs seat)
 // unaffected -- needed to test ensureLeadJoined's best-effort semantics
-// independently of the seat Join's hard-failure gate.
+// independently of the seat Join's hard-failure gate. mu guards every field
+// below -- see fakeHerdr's doc comment for why.
 type fakeAgmsg struct {
+	mu      sync.Mutex
 	calls   []string
 	sendErr error
 
@@ -130,11 +152,15 @@ type leaveCall struct {
 }
 
 func (f *fakeAgmsg) Send(_ context.Context, _, _, _, _ string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls = append(f.calls, "send")
 	return f.sendErr
 }
 
 func (f *fakeAgmsg) Join(_ context.Context, team, agentID, agmsgType, projectPath string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls = append(f.calls, "join:"+agentID)
 	f.joinCalls = append(f.joinCalls, joinCall{team: team, agentID: agentID, agmsgType: agmsgType, projectPath: projectPath})
 	if f.joinErrs != nil {
@@ -146,6 +172,8 @@ func (f *fakeAgmsg) Join(_ context.Context, team, agentID, agmsgType, projectPat
 }
 
 func (f *fakeAgmsg) Leave(_ context.Context, team, agentID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls = append(f.calls, "leave")
 	f.leaveCalls = append(f.leaveCalls, leaveCall{team: team, agentID: agentID})
 	return f.leaveErr
@@ -173,6 +201,12 @@ func mustSpawnParams(orgID, seatID string) SpawnParams {
 	return SpawnParams{
 		OrgID: orgID, SeatID: seatID, Role: "worker", Driver: "claude", Model: "sonnet",
 		Cwd: "/tmp/seat", TimeoutMS: 5000,
+		// Scope is set by default so every test that doesn't care about the
+		// AC-2b minimum control gate (--scope required for autonomous mode,
+		// the config default -- see testOrgConfig()/config.Default()) still
+		// clears it; tests that specifically exercise Scope/the gate itself
+		// override this field explicitly.
+		Scope: "test-scope",
 	}
 }
 
@@ -403,6 +437,56 @@ func TestOrgSpawn_Idempotent_AlreadySpawned_NoNewDriverCalls(t *testing.T) {
 	}
 }
 
+// TestOrgSpawn_Idempotent_NoScopeRetry_ReturnsExistingSeat is the regression
+// test for cross-review-triage-org-runtime-lead.md ACTION_REQUIRED #1: under
+// the default (autonomous) permission mode, retrying `spawn` for an
+// already-spawned seat *without* --scope must return the existing seat
+// idempotently, not be rejected by the AC-2b minimum control gate. The gate
+// only exists to fail-close a *new* unscoped autonomous seat; a no-op retry
+// of an existing active seat creates no new seat at all, so it must never
+// reach the gate -- exactly the same idempotent-vs-validation ordering
+// TestOrgSpawn_Idempotent_AtMaxSeats_RespawnSucceedsInsteadOfRejected already
+// covers for envelope/capacity validation.
+func TestOrgSpawn_Idempotent_NoScopeRetry_ReturnsExistingSeat(t *testing.T) {
+	o, h, a := testOrg(t)
+	// testOrgConfig() leaves Permissions unset, which resolves to the
+	// default autonomous mode (ResolvePermissionMode) -- exactly the
+	// condition the AC-2b gate targets.
+
+	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("initial spawn failed: %+v", r)
+	}
+
+	rrBefore, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	eventsBefore := len(rrBefore.Events)
+	callsBefore := len(h.calls)
+	sendsBefore := len(a.calls)
+
+	p := mustSpawnParams("org-a", "seat-1")
+	p.Scope = ""
+	result := o.Spawn(p)
+	if result.Outcome != SpawnOutcomeIdempotent {
+		t.Fatalf("expected SpawnOutcomeIdempotent for a scope-less retry of an already-spawned seat under autonomous default, got %v (err=%v)", result.Outcome, result.Err)
+	}
+	if result.Err != nil {
+		t.Fatalf("expected nil Err for idempotent respawn (CLI must exit 0), got %v", result.Err)
+	}
+
+	rrAfter, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	if len(rrAfter.Events) != eventsBefore {
+		t.Fatalf("expected no new manifest events on idempotent no-scope retry, before=%d after=%d (events=%+v)", eventsBefore, len(rrAfter.Events), rrAfter.Events)
+	}
+	if len(h.calls) != callsBefore || len(a.calls) != sendsBefore {
+		t.Fatalf("expected no new driver calls on idempotent no-scope retry, herdr %d->%d agmsg %d->%d", callsBefore, len(h.calls), sendsBefore, len(a.calls))
+	}
+}
+
 func TestOrgSpawn_Idempotent_AtMaxSeats_RespawnSucceedsInsteadOfRejected(t *testing.T) {
 	// Regression for cross-review-triage-org-runtime-mechanism.md ACTION_REQUIRED #1:
 	// with max_seats=1, respawning the org's only (already-spawned) seat must
@@ -581,6 +665,135 @@ func TestOrgSpawn_StaleInFlight_CompensatesThenRespawnsFresh(t *testing.T) {
 		if got[i] != want[i] {
 			t.Errorf("event[%d]: want %q, got %q (full: %v)", i, want[i], got[i], got)
 		}
+	}
+}
+
+// TestOrgSpawn_StaleInFlight_RacerCompletesDuringCompensationWindow_Phase2ReturnsIdempotent
+// is a regression for self-review Cycle-2 M-2: Phase 2 re-reads the manifest
+// under a re-acquired lock but, before this fix, only re-ran the capacity
+// check against that fresh snapshot -- not the idempotent check. A
+// concurrent racer's Spawn call for this exact seat can complete a full
+// saga during the lock-free window between Phase 1's release (right after
+// staleExisting is detected) and Phase 2's re-acquire, since compensateStale's
+// only driver call (PaneSendKeys) runs in that window. Phase 2 must notice
+// the fresh EventSpawned terminus and return SpawnOutcomeIdempotent instead
+// of appending a second spawn_started on top of an already-spawned seat.
+func TestOrgSpawn_StaleInFlight_RacerCompletesDuringCompensationWindow_Phase2ReturnsIdempotent(t *testing.T) {
+	o, h, _ := testOrg(t)
+
+	if err := o.Manifest.Append(ManifestEvent{
+		TS: "2026-08-01T00:00:00Z", OrgID: "org-a", SeatID: "seat-a", Event: EventSpawnStarted,
+		Role: "worker", Driver: "claude", Model: "sonnet", PaneID: "stale-pane-1",
+	}); err != nil {
+		t.Fatalf("seed stale spawn_started: %v", err)
+	}
+
+	// Fires right after compensateStale's own spawn_failed write -- i.e. in
+	// the lock-free window between Phase 1's release and Phase 2's
+	// re-acquire -- to simulate a concurrent racer's Spawn call completing a
+	// full saga for the same seat before this call's Phase 2 re-reads the
+	// manifest. This is the seam spawn.go documents at afterStaleCompensation's
+	// declaration.
+	orig := afterStaleCompensation
+	afterStaleCompensation = func() {
+		if err := o.Manifest.Append(ManifestEvent{
+			TS: "2026-08-01T00:00:05Z", OrgID: "org-a", SeatID: "seat-a", Event: EventSpawned,
+			Role: "worker", Driver: "claude", Model: "sonnet", PaneID: "racer-pane-1", AgmsgTeam: "team-racer",
+		}); err != nil {
+			t.Fatalf("seed racer spawned event: %v", err)
+		}
+	}
+	defer func() { afterStaleCompensation = orig }()
+
+	result := o.Spawn(mustSpawnParams("org-a", "seat-a"))
+	if result.Outcome != SpawnOutcomeIdempotent {
+		t.Fatalf("expected SpawnOutcomeIdempotent once Phase 2's fresh read shows the seat already spawned by a racer, got %+v", result)
+	}
+	if result.Seat.PaneID != "racer-pane-1" {
+		t.Fatalf("expected the idempotent result to reflect the racer's spawned seat (pane racer-pane-1), got %+v", result.Seat)
+	}
+
+	// The only driver call is the compensation C-c: no second saga's worth
+	// of workspace/tab/agent/agmsg calls were attempted on top of the
+	// racer's already-spawned seat.
+	if len(h.calls) != 1 || h.calls[0] != "pane_send_keys" {
+		t.Fatalf("expected exactly one driver call (the compensation C-c), got %v", h.calls)
+	}
+
+	got := eventNames(t, o)
+	// stale spawn_started (seeded) -> spawn_failed (compensation) -> racer's spawned -- no second spawn_started.
+	want := []string{EventSpawnStarted, EventSpawnFailed, EventSpawned}
+	if len(got) != len(want) {
+		t.Fatalf("expected event sequence %v (no duplicate spawn_started appended over the racer's spawned seat), got %v", want, got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("event[%d]: want %q, got %q (full: %v)", i, want[i], got[i], got)
+		}
+	}
+}
+
+// TestOrgSpawn_DryRun_And_Real_AgreeOnRejectionCause_EnvelopeBeforeScopeGate
+// is a regression for self-review Cycle-2 M-1: dry-run and the real spawn
+// path used to check the AC-2b scope gate and the envelope validation in
+// opposite orders, so a request that violated both an out-of-pool model
+// (ValidateSpawnEnvelope) and the unscoped-autonomous gate (AC-2b) was
+// rejected for a different cause depending on --dry-run alone -- even
+// though dry-run's whole purpose is to predict the real path's rejection.
+// Both paths must now report the same first cause: the envelope's
+// out-of-pool-model error wins in both modes.
+func TestOrgSpawn_DryRun_And_Real_AgreeOnRejectionCause_EnvelopeBeforeScopeGate(t *testing.T) {
+	newParams := func(dryRun bool) SpawnParams {
+		p := mustSpawnParams("org-a", "seat-1")
+		p.Model = "not-a-real-model" // out-of-pool -> ValidateSpawnEnvelope error
+		p.Scope = ""                 // unscoped autonomous -> AC-2b gate error
+		p.DryRun = dryRun
+		return p
+	}
+
+	realOrg, _, _ := testOrg(t)
+	realResult := realOrg.Spawn(newParams(false))
+	if realResult.Outcome != SpawnOutcomeRejected || realResult.Err == nil {
+		t.Fatalf("expected real spawn to reject, got %+v", realResult)
+	}
+	if !strings.Contains(realResult.Err.Error(), "not in [org].model_pool") {
+		t.Fatalf("expected real spawn to reject for the envelope (out-of-pool model) cause, got %v", realResult.Err)
+	}
+	if strings.Contains(realResult.Err.Error(), "--scope") {
+		t.Fatalf("expected real spawn's rejection to NOT mention --scope (envelope check must win first), got %v", realResult.Err)
+	}
+
+	dryOrg, _, _ := testOrg(t)
+	dryResult := dryOrg.Spawn(newParams(true))
+	if dryResult.Outcome != SpawnOutcomeRejected || dryResult.Err == nil {
+		t.Fatalf("expected dry-run spawn to reject, got %+v", dryResult)
+	}
+	if !strings.Contains(dryResult.Err.Error(), "not in [org].model_pool") {
+		t.Fatalf("expected dry-run spawn to reject for the envelope (out-of-pool model) cause, got %v", dryResult.Err)
+	}
+	if strings.Contains(dryResult.Err.Error(), "--scope") {
+		t.Fatalf("expected dry-run spawn's rejection to NOT mention --scope (envelope check must win first), got %v", dryResult.Err)
+	}
+
+	if realResult.Err.Error() != dryResult.Err.Error() {
+		t.Fatalf("expected dry-run and real spawn to record the SAME rejection cause, got real=%q dry=%q", realResult.Err.Error(), dryResult.Err.Error())
+	}
+
+	// Both paths route rejection through reject(), so both must record the
+	// same Details string on the resulting rejected manifest event.
+	realRR, err := realOrg.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read real manifest: %v", err)
+	}
+	dryRR, err := dryOrg.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read dry-run manifest: %v", err)
+	}
+	if len(realRR.Events) != 1 || len(dryRR.Events) != 1 {
+		t.Fatalf("expected exactly one rejected event each, got real=%+v dry=%+v", realRR.Events, dryRR.Events)
+	}
+	if realRR.Events[0].Details != dryRR.Events[0].Details {
+		t.Fatalf("expected the rejected event's Details to match between dry-run and real spawn, got real=%q dry=%q", realRR.Events[0].Details, dryRR.Events[0].Details)
 	}
 }
 
@@ -869,10 +1082,12 @@ func TestOrgSpawn_RoleTemplate_ExpandsIntoInitialPrompt(t *testing.T) {
 		t.Fatalf("expected exactly 1 AgentStart call, got %d", len(h.agentStartArgs))
 	}
 	args := h.agentStartArgs[0]
-	if len(args) != 3 || args[0] != "--model" {
-		t.Fatalf("expected AgentStart args [--model <model> <pointer>], got %v", args)
+	// AC-2: permission-mode args (default config -> autonomous ->
+	// bypassPermissions) come first, then --model, then the prompt pointer.
+	if len(args) != 5 || args[0] != "--permission-mode" || args[1] != "bypassPermissions" || args[2] != "--model" {
+		t.Fatalf("expected AgentStart args [--permission-mode bypassPermissions --model <model> <pointer>], got %v", args)
 	}
-	promptArg := args[2]
+	promptArg := args[4]
 	if strings.Contains(promptArg, "\n") {
 		t.Fatalf("expected the AgentStart prompt arg to be a single line, got:\n%s", promptArg)
 	}
@@ -906,7 +1121,8 @@ func TestOrgSpawn_RoleTemplate_PromptFlagAppendedAfterTemplate(t *testing.T) {
 		t.Fatalf("spawn failed: %+v", r)
 	}
 
-	promptArg := h.agentStartArgs[0][2]
+	// index 4: [--permission-mode bypassPermissions --model <model> <pointer>].
+	promptArg := h.agentStartArgs[0][4]
 	promptPath := strings.TrimPrefix(promptArg, "役割指示を読み込んで従ってください: ")
 	data, err := os.ReadFile(promptPath)
 	if err != nil {
@@ -1070,8 +1286,9 @@ func TestOrgSpawn_UnknownRole_PromptFlagOnly_NoTemplateNoError(t *testing.T) {
 	}
 
 	args := h.agentStartArgs[0]
-	if len(args) != 3 || args[2] != "verbatim prompt" {
-		t.Fatalf("expected AgentStart args [--model <model> verbatim prompt], got %v", args)
+	// [--permission-mode bypassPermissions --model <model> verbatim prompt].
+	if len(args) != 5 || args[4] != "verbatim prompt" {
+		t.Fatalf("expected AgentStart args [--permission-mode bypassPermissions --model <model> verbatim prompt], got %v", args)
 	}
 }
 
@@ -1088,8 +1305,9 @@ func TestOrgSpawn_UnknownRole_NoPromptFlag_NoPromptArgAtAll(t *testing.T) {
 	}
 
 	args := h.agentStartArgs[0]
-	if len(args) != 2 {
-		t.Fatalf("expected AgentStart args [--model <model>] with no prompt element, got %v", args)
+	// [--permission-mode bypassPermissions --model <model>] with no prompt element.
+	if len(args) != 4 {
+		t.Fatalf("expected AgentStart args [--permission-mode bypassPermissions --model <model>] with no prompt element, got %v", args)
 	}
 }
 
@@ -1113,12 +1331,19 @@ func TestOrgSpawn_ScopeRecordedOnSpawnedEventDetails(t *testing.T) {
 	assertDetailsContains(t, last.Details, "scope=internal/org/**")
 }
 
-func TestOrgSpawn_NoScope_SpawnedEventDetailsEmpty(t *testing.T) {
-	// Unchanged-behavior guard: a spawn with no Scope leaves Details empty
-	// on the spawned event, exactly as before Scope existed.
+func TestOrgSpawn_NoScope_SpawnedEventDetailsOmitsScopeFragment(t *testing.T) {
+	// Behavior guard: a spawn with no Scope leaves no "scope=" fragment in
+	// Details. Unlike Scope, permission_mode is unconditionally recorded on
+	// every spawned event (AC-2b audit requirement), so Details is no
+	// longer empty by default -- an autonomous-mode spawn with no Scope
+	// must also set AllowUnscoped to get past the minimum control gate
+	// (AC-2b), and that bypass itself is recorded too.
 	o, _, _ := testOrg(t)
 
-	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+	p := mustSpawnParams("org-a", "seat-1")
+	p.Scope = ""
+	p.AllowUnscoped = true
+	if r := o.Spawn(p); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("spawn failed: %+v", r)
 	}
 
@@ -1127,9 +1352,10 @@ func TestOrgSpawn_NoScope_SpawnedEventDetailsEmpty(t *testing.T) {
 		t.Fatalf("read manifest: %v", err)
 	}
 	last := rr.Events[len(rr.Events)-1]
-	if last.Details != "" {
-		t.Fatalf("expected empty Details on the spawned event with no Scope, got %q", last.Details)
+	if strings.Contains(last.Details, "scope=") {
+		t.Fatalf("expected no scope= fragment in Details with no Scope, got %q", last.Details)
 	}
+	assertDetailsContains(t, last.Details, "permission_mode=autonomous", "allow_unscoped=true")
 }
 
 // agentPaneBusyErr builds a fake AgentStart error carrying the literal
@@ -1234,5 +1460,574 @@ func TestOrgSpawn_AgentStart_AlwaysBusy_BoundedByCtxDeadline(t *testing.T) {
 		assertDetailsContains(t, last.Details, "step=agent_start")
 	case <-time.After(5 * time.Second):
 		t.Fatal("Spawn did not return within 5s -- agentStartWithRetry is not bounded by ctx deadline")
+	}
+}
+
+// --- AC-6: announce (HELLO Send) failure Leave compensation -----------------
+
+func TestOrgSpawn_FailureInjection_AgmsgSend_LeavesJoinedSeat(t *testing.T) {
+	// tech-debt fix (docs/tech-debt/README.md, "spawn の agmsg_announce
+	// (HELLO send)失敗パスの補償..."): by the time HELLO Send fails, the
+	// seat's own Join already succeeded, so the failure path must
+	// best-effort Leave the seat back out of the roster and record the
+	// outcome in Details.
+	o, _, a := testOrg(t)
+	a.sendErr = errors.New("stub failure: agmsg send")
+
+	result := o.Spawn(mustSpawnParams("org-a", "seat-1"))
+	if result.Outcome != SpawnOutcomeFailed {
+		t.Fatalf("expected SpawnOutcomeFailed, got %v", result.Outcome)
+	}
+
+	if len(a.leaveCalls) != 1 {
+		t.Fatalf("expected exactly 1 Leave call, got %+v", a.leaveCalls)
+	}
+	wantTeam := agmsgTeam("org-a")
+	if a.leaveCalls[0].team != wantTeam || a.leaveCalls[0].agentID != "seat-1" {
+		t.Fatalf("expected Leave(%q, seat-1), got %+v", wantTeam, a.leaveCalls[0])
+	}
+
+	rr, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	last := rr.Events[len(rr.Events)-1]
+	if last.Event != EventSpawnFailed {
+		t.Fatalf("expected last event to be spawn_failed, got %q", last.Event)
+	}
+	assertDetailsContains(t, last.Details, "step=agmsg_announce", "leave=ok")
+}
+
+func TestOrgSpawn_FailureInjection_AgmsgSend_LeaveFailure_RecordedInDetails(t *testing.T) {
+	// The Leave compensation is itself best-effort: a Leave failure must be
+	// recorded in Details, not propagated as a second saga failure or
+	// silently dropped.
+	o, _, a := testOrg(t)
+	a.sendErr = errors.New("stub failure: agmsg send")
+	a.leaveErr = errors.New("stub failure: agmsg leave")
+
+	result := o.Spawn(mustSpawnParams("org-a", "seat-1"))
+	if result.Outcome != SpawnOutcomeFailed {
+		t.Fatalf("expected SpawnOutcomeFailed, got %v", result.Outcome)
+	}
+	if len(a.leaveCalls) != 1 {
+		t.Fatalf("expected the Leave call to still be attempted despite it failing, got %+v", a.leaveCalls)
+	}
+
+	rr, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	last := rr.Events[len(rr.Events)-1]
+	assertDetailsContains(t, last.Details, "step=agmsg_announce", "leave=failed:", "stub failure: agmsg leave")
+}
+
+// --- AC-7: LeadIdentity const + lead agmsg type from LeadDriver -------------
+
+func TestLeadIdentity_ConstantValue(t *testing.T) {
+	if LeadIdentity != "lead" {
+		t.Fatalf("LeadIdentity = %q, want %q", LeadIdentity, "lead")
+	}
+}
+
+func TestOrgSpawn_EnsureLeadJoined_DefaultLeadDriver_ClaudeCodeType(t *testing.T) {
+	o, _, a := testOrg(t)
+
+	p := mustSpawnParams("org-a", "seat-1")
+	// LeadDriver left unset -- must default to "claude" -> "claude-code".
+	result := o.Spawn(p)
+	if result.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("expected SpawnOutcomeSpawned, got %v (err=%v)", result.Outcome, result.Err)
+	}
+	if len(a.joinCalls) < 1 {
+		t.Fatalf("expected at least 1 Join call, got %+v", a.joinCalls)
+	}
+	leadJoin := a.joinCalls[0]
+	if leadJoin.agentID != LeadIdentity || leadJoin.agmsgType != "claude-code" {
+		t.Fatalf("expected lead Join(%s, claude-code, ...) by default, got %+v", LeadIdentity, leadJoin)
+	}
+}
+
+func TestOrgSpawn_EnsureLeadJoined_LeadDriverCodex_UsesCodexAgmsgType(t *testing.T) {
+	// The lead identity's own driver (LeadDriver) is independent of the
+	// seat's Driver: a claude-driven seat spawned under a codex-coordinated
+	// org must still register "lead" with agmsg type "codex", not
+	// "claude-code".
+	o, _, a := testOrg(t)
+
+	p := mustSpawnParams("org-a", "seat-1")
+	p.LeadDriver = "codex"
+	result := o.Spawn(p)
+	if result.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("expected SpawnOutcomeSpawned, got %v (err=%v)", result.Outcome, result.Err)
+	}
+	if len(a.joinCalls) != 2 {
+		t.Fatalf("expected 2 Join calls (lead then seat), got %+v", a.joinCalls)
+	}
+	leadJoin, seatJoin := a.joinCalls[0], a.joinCalls[1]
+	if leadJoin.agentID != LeadIdentity || leadJoin.agmsgType != "codex" {
+		t.Fatalf("expected lead Join(%s, codex, ...) for LeadDriver=codex, got %+v", LeadIdentity, leadJoin)
+	}
+	if seatJoin.agentID != "seat-1" || seatJoin.agmsgType != "claude-code" {
+		t.Fatalf("expected the seat's own Join to still use its own Driver (claude -> claude-code), got %+v", seatJoin)
+	}
+}
+
+// --- AC-3: `ralph org start` = lead-seat spawn sugar (SeatID == LeadIdentity) ---
+
+func TestOrgSpawn_LeadSelfSpawn_SingleAgmsgJoin_NoHelloSend(t *testing.T) {
+	// SeatID == LeadIdentity ("ralph org start") must not double-join or
+	// HELLO-announce: the seat's own Join call IS the lead-identity join, and
+	// a HELLO from lead to lead would violate the star topology's
+	// single-coordinator premise (see the leadSelfSpawn doc comment in
+	// spawn.go's Spawn).
+	o, _, a := testOrg(t)
+
+	p := mustSpawnParams("org-a", LeadIdentity)
+	p.Role = LeadIdentity
+	p.Task = "dry-run 座席を spawn し、送信・確認・disband まで行え"
+	result := o.Spawn(p)
+	if result.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("expected SpawnOutcomeSpawned, got %v (err=%v)", result.Outcome, result.Err)
+	}
+
+	if len(a.joinCalls) != 1 {
+		t.Fatalf("expected exactly 1 agmsg Join call for a lead-self spawn (no separate ensureLeadJoined), got %+v", a.joinCalls)
+	}
+	if a.joinCalls[0].agentID != LeadIdentity {
+		t.Fatalf("expected the single Join call to register %q, got %+v", LeadIdentity, a.joinCalls[0])
+	}
+	for _, c := range a.calls {
+		if c == "send" {
+			t.Fatalf("expected no agmsg Send (HELLO) call for a lead-self spawn, got calls=%v", a.calls)
+		}
+	}
+
+	rr, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	var joinedStep *ManifestEvent
+	for i := range rr.Events {
+		if strings.HasPrefix(rr.Events[i].Details, "agmsg_joined") {
+			joinedStep = &rr.Events[i]
+			break
+		}
+	}
+	if joinedStep == nil {
+		t.Fatalf("expected an agmsg_joined spawn_step event, got events %+v", rr.Events)
+	}
+	assertDetailsContains(t, joinedStep.Details, "lead_self=true")
+	for _, ev := range rr.Events {
+		if strings.HasPrefix(ev.Details, "agmsg_lead_joined") || ev.Details == "agmsg_announced" {
+			t.Fatalf("expected no agmsg_lead_joined/agmsg_announced step for a lead-self spawn, got %+v", ev)
+		}
+	}
+}
+
+func TestOrgSpawn_LeadSelfSpawn_DryRun_MirrorsSameSkip(t *testing.T) {
+	o, _, _ := testOrg(t)
+
+	p := mustSpawnParams("org-a", LeadIdentity)
+	p.Role = LeadIdentity
+	p.DryRun = true
+	result := o.Spawn(p)
+	if result.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("expected SpawnOutcomeSpawned for a valid dry-run, got %v (err=%v)", result.Outcome, result.Err)
+	}
+
+	rr, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	sawJoinedLeadSelf := false
+	for _, ev := range rr.Events {
+		if strings.HasPrefix(ev.Details, "agmsg_lead_joined") || ev.Details == "agmsg_announced" {
+			t.Fatalf("expected no agmsg_lead_joined/agmsg_announced step in the dry-run trail for a lead-self spawn, got %+v", ev)
+		}
+		if ev.Details == "agmsg_joined lead_self=true" {
+			sawJoinedLeadSelf = true
+		}
+	}
+	if !sawJoinedLeadSelf {
+		t.Fatalf("expected an 'agmsg_joined lead_self=true' step in the dry-run trail, got events %+v", rr.Events)
+	}
+}
+
+func TestOrgSpawn_LeadRole_TaskAndEnvelopeSubstitutedIntoPromptFile(t *testing.T) {
+	// `ralph org start`'s Task and the org's EnvelopeSummary must both land
+	// in the lead seat's rendered prompt file (the lead.md template is long
+	// enough to always need the prompt-file path, same as reviewer/qa).
+	o, h, _ := testOrg(t)
+
+	p := mustSpawnParams("org-a", LeadIdentity)
+	p.Role = LeadIdentity
+	p.Task = "dry-run 座席を1つ spawn し、typed message を送り、status を確認して disband せよ"
+	if r := o.Spawn(p); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", r)
+	}
+
+	if len(h.agentStartArgs) != 1 {
+		t.Fatalf("expected exactly 1 AgentStart call, got %d", len(h.agentStartArgs))
+	}
+	promptArg := h.agentStartArgs[0][len(h.agentStartArgs[0])-1]
+	promptPath := strings.TrimPrefix(promptArg, "役割指示を読み込んで従ってください: ")
+	data, err := os.ReadFile(promptPath)
+	if err != nil {
+		t.Fatalf("expected the prompt file to exist at %q: %v", promptPath, err)
+	}
+	fileContent := string(data)
+	for _, want := range []string{p.Task, "model_pool:", "max_seats:", "permission default:"} {
+		if !strings.Contains(fileContent, want) {
+			t.Errorf("expected the lead prompt file content to contain %q, got:\n%s", want, fileContent)
+		}
+	}
+}
+
+// --- AC-9: concurrent spawn TOCTOU (manifest flock) -------------------------
+
+func TestOrgSpawn_ConcurrentSpawns_MaxSeatsNeverExceeded(t *testing.T) {
+	// Regression for the tech-debt TOCTOU race (docs/tech-debt/README.md,
+	// "max_seats is enforced across an unlocked read-then-append window"):
+	// N goroutines spawn N distinct seats against the same org concurrently.
+	// testOrgConfig's MaxSeats=3 must never be exceeded, even though every
+	// goroutine races to read-validate-append on the same manifest file.
+	o, _, _ := testOrg(t)
+	const n = 10
+
+	var wg sync.WaitGroup
+	wg.Add(n)
+	results := make([]SpawnResult, n)
+	for i := range n {
+		go func(i int) {
+			defer wg.Done()
+			results[i] = o.Spawn(mustSpawnParams("org-a", fmt.Sprintf("seat-%d", i)))
+		}(i)
+	}
+	wg.Wait()
+
+	spawned := 0
+	for _, r := range results {
+		if r.Outcome == SpawnOutcomeSpawned {
+			spawned++
+		} else if r.Outcome != SpawnOutcomeRejected {
+			t.Errorf("unexpected outcome %v (err=%v)", r.Outcome, r.Err)
+		}
+	}
+	if spawned != testOrgConfig().MaxSeats {
+		t.Fatalf("expected exactly max_seats=%d successful spawns out of %d concurrent attempts, got %d",
+			testOrgConfig().MaxSeats, n, spawned)
+	}
+
+	active, err := o.Manifest.ActiveSeatCount("org-a", RosterOptions{})
+	if err != nil {
+		t.Fatalf("ActiveSeatCount: %v", err)
+	}
+	if active > testOrgConfig().MaxSeats {
+		t.Fatalf("manifest reports %d active seats, exceeding max_seats=%d", active, testOrgConfig().MaxSeats)
+	}
+}
+
+func TestWithManifestLock_SerializesConcurrentCallers(t *testing.T) {
+	// Unit-level pin for lockfile.go's own contract, independent of Spawn:
+	// two withManifestLock calls racing on the same dir must never run fn
+	// concurrently.
+	dir := t.TempDir()
+	const n = 20
+	var (
+		mu        sync.Mutex
+		inside    int
+		maxInside int
+	)
+
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for range n {
+		go func() {
+			defer wg.Done()
+			err := withManifestLock(dir, func() error {
+				mu.Lock()
+				inside++
+				if inside > maxInside {
+					maxInside = inside
+				}
+				mu.Unlock()
+
+				time.Sleep(time.Millisecond)
+
+				mu.Lock()
+				inside--
+				mu.Unlock()
+				return nil
+			})
+			if err != nil {
+				t.Errorf("withManifestLock: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if maxInside != 1 {
+		t.Fatalf("expected at most 1 concurrent holder of the manifest lock, observed max concurrency %d", maxInside)
+	}
+}
+
+// --- AC-10b: dryRunSpawn error propagation ----------------------------------
+
+func TestOrgSpawn_DryRun_PromptFilePathError_FailsStep(t *testing.T) {
+	// tech-debt fix (docs/tech-debt/README.md, "dryRunSpawn silently
+	// swallows RenderRolePrompt's and promptFilePath's errors"): a
+	// promptFilePath failure must fail the dry run the same way it would
+	// fail a real spawn at the "prompt_file" step, not silently report
+	// success.
+	o, _, _ := testOrg(t)
+	orig := absPath
+	absPath = func(string) (string, error) { return "", errors.New("stub: abs failed") }
+	defer func() { absPath = orig }()
+
+	p := mustSpawnParams("org-a", "seat-1")
+	p.Role = "reviewer" // reviewer.md is multi-line, so needsPromptFile triggers.
+	p.DryRun = true
+	result := o.Spawn(p)
+	if result.Outcome != SpawnOutcomeFailed {
+		t.Fatalf("expected dry-run spawn to fail when promptFilePath errors, got %+v", result)
+	}
+
+	rr, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	last := rr.Events[len(rr.Events)-1]
+	if last.Event != EventSpawnFailed {
+		t.Fatalf("expected last event to be spawn_failed, got %q", last.Event)
+	}
+	if !last.DryRun {
+		t.Fatalf("expected the dry-run failure event to carry dry_run: true, got %+v", last)
+	}
+	assertDetailsContains(t, last.Details, "step=prompt_file", "stub: abs failed")
+}
+
+func TestOrgSpawn_DryRun_PromptFilePathError_NoManifestEventForRealSeat(t *testing.T) {
+	// The dry-run failure event must be excluded from real-seat accounting
+	// (Roster with the default RosterOptions{}), exactly like every other
+	// dry-run event -- confirms DryRun: true actually took effect, not just
+	// that the field was set on the struct literal.
+	o, _, _ := testOrg(t)
+	orig := absPath
+	absPath = func(string) (string, error) { return "", errors.New("stub: abs failed") }
+	defer func() { absPath = orig }()
+
+	p := mustSpawnParams("org-a", "seat-1")
+	p.Role = "reviewer"
+	p.DryRun = true
+	if result := o.Spawn(p); result.Outcome != SpawnOutcomeFailed {
+		t.Fatalf("expected SpawnOutcomeFailed, got %+v", result)
+	}
+
+	rr, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	if roster := Roster(rr.Events, RosterOptions{}); len(roster) != 0 {
+		t.Fatalf("expected the dry-run failure to be excluded from the default (real-seat) roster, got %+v", roster)
+	}
+}
+
+// --- AC-2/AC-2b: permission-mode envelope -----------------------------------
+
+// TestOrgSpawn_PermissionMode_Claude_ArgvMapping pins AC-2's argv contract
+// for all three modes: permission args are prepended to AgentStart's
+// agentArgs, before --model.
+func TestOrgSpawn_PermissionMode_Claude_ArgvMapping(t *testing.T) {
+	cases := []struct {
+		mode     string
+		wantArgs []string // nil for guarded (no flag)
+	}{
+		{"autonomous", []string{"--permission-mode", "bypassPermissions"}},
+		{"edits", []string{"--permission-mode", "acceptEdits"}},
+		{"guarded", nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.mode, func(t *testing.T) {
+			o, h, _ := testOrg(t)
+			o.Config.Permissions = config.OrgPermissionsConfig{Default: tc.mode}
+
+			p := mustSpawnParams("org-a", "seat-1")
+			result := o.Spawn(p)
+			if result.Outcome != SpawnOutcomeSpawned {
+				t.Fatalf("expected spawn to succeed under mode %q, got %+v", tc.mode, result)
+			}
+
+			args := h.agentStartArgs[0]
+			wantLen := len(tc.wantArgs) + 2 // + "--model" <model>
+			if len(args) != wantLen {
+				t.Fatalf("mode %q: expected %d AgentStart args, got %d (%v)", tc.mode, wantLen, len(args), args)
+			}
+			for i, want := range tc.wantArgs {
+				if args[i] != want {
+					t.Fatalf("mode %q: args[%d] = %q, want %q (full args: %v)", tc.mode, i, args[i], want, args)
+				}
+			}
+			if args[len(tc.wantArgs)] != "--model" {
+				t.Fatalf("mode %q: expected --model to immediately follow permission args, got %v", tc.mode, args)
+			}
+
+			rr, err := o.Manifest.Read()
+			if err != nil {
+				t.Fatalf("read manifest: %v", err)
+			}
+			last := rr.Events[len(rr.Events)-1]
+			assertDetailsContains(t, last.Details, "permission_mode="+tc.mode)
+		})
+	}
+}
+
+// TestOrgSpawn_MinimumControlGate_Autonomous_EmptyScope_RejectedWithEvent
+// covers AC-2b: an autonomous-mode spawn with an empty Scope and no
+// AllowUnscoped is rejected through the same reject() path as every other
+// envelope-validation rejection (self-review LOW finding) -- a `rejected`
+// manifest event plus an honored=false receipt, but still zero driver calls
+// and no spawn_started (reject() never appends one), so the gate's
+// fail-closed/no-saga-side-effects guarantee is unchanged; only the audit
+// trail is no longer silent.
+func TestOrgSpawn_MinimumControlGate_Autonomous_EmptyScope_RejectedWithEvent(t *testing.T) {
+	o, h, a := testOrg(t)
+
+	p := mustSpawnParams("org-a", "seat-1")
+	p.Scope = ""
+	result := o.Spawn(p)
+	if result.Outcome != SpawnOutcomeRejected {
+		t.Fatalf("expected SpawnOutcomeRejected, got %+v", result)
+	}
+	if result.Err == nil || !strings.Contains(result.Err.Error(), "--scope") || !strings.Contains(result.Err.Error(), "--allow-unscoped") {
+		t.Fatalf("expected error naming --scope and --allow-unscoped, got %v", result.Err)
+	}
+
+	rr, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	if len(rr.Events) != 1 || rr.Events[0].Event != EventRejected {
+		t.Fatalf("expected exactly one rejected manifest event for the gate rejection, got %+v", rr.Events)
+	}
+	if len(h.calls) != 0 || len(a.calls) != 0 {
+		t.Fatalf("expected zero driver calls for the gate rejection, got herdr=%v agmsg=%v", h.calls, a.calls)
+	}
+
+	receiptRR, err := o.Receipts.Read()
+	if err != nil {
+		t.Fatalf("read receipts: %v", err)
+	}
+	if len(receiptRR.Receipts) != 1 || receiptRR.Receipts[0].Honored != HonoredFalse {
+		t.Fatalf("expected exactly one honored=false receipt for the gate rejection, got %+v", receiptRR.Receipts)
+	}
+}
+
+// TestOrgSpawn_MinimumControlGate_EditsAndGuarded_EmptyScope_Proceeds
+// verifies the gate only applies to autonomous mode: edits/guarded seats
+// with an empty Scope spawn normally.
+func TestOrgSpawn_MinimumControlGate_EditsAndGuarded_EmptyScope_Proceeds(t *testing.T) {
+	for _, mode := range []string{"edits", "guarded"} {
+		t.Run(mode, func(t *testing.T) {
+			o, _, _ := testOrg(t)
+			o.Config.Permissions = config.OrgPermissionsConfig{Default: mode}
+
+			p := mustSpawnParams("org-a", "seat-1")
+			p.Scope = ""
+			result := o.Spawn(p)
+			if result.Outcome != SpawnOutcomeSpawned {
+				t.Fatalf("expected spawn to succeed under mode %q with empty scope, got %+v", mode, result)
+			}
+		})
+	}
+}
+
+// TestOrgSpawn_MinimumControlGate_DryRun_AppliesSameGate verifies the
+// validate-then-record contract: a dry-run autonomous spawn with an empty
+// Scope is rejected the same way a real spawn would be, recording a
+// DryRun:true rejected event via reject() (self-review LOW finding) so it
+// stays excluded from ActiveSeatCount/roster like every other dry-run event.
+func TestOrgSpawn_MinimumControlGate_DryRun_AppliesSameGate(t *testing.T) {
+	o, _, _ := testOrg(t)
+
+	p := mustSpawnParams("org-a", "seat-1")
+	p.Scope = ""
+	p.DryRun = true
+	result := o.Spawn(p)
+	if result.Outcome != SpawnOutcomeRejected {
+		t.Fatalf("expected SpawnOutcomeRejected for a dry-run gate violation, got %+v", result)
+	}
+
+	rr, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	if len(rr.Events) != 1 || rr.Events[0].Event != EventRejected || !rr.Events[0].DryRun {
+		t.Fatalf("expected exactly one dry-run rejected manifest event for the dry-run gate rejection, got %+v", rr.Events)
+	}
+}
+
+// TestOrgSpawn_Codex_AutonomousDefault_RejectedFailClosed_WithReceipt is the
+// AC-2 fail-closed end-to-end test: a codex seat under the default
+// (autonomous) config is rejected with a `rejected` manifest event and an
+// honored=false receipt -- unlike the AC-2b gate rejection above, this is a
+// permissionArgsForDriver error, reached only after the gate itself passes
+// (mustSpawnParams sets a non-empty Scope by default).
+func TestOrgSpawn_Codex_AutonomousDefault_RejectedFailClosed_WithReceipt(t *testing.T) {
+	o, h, a := testOrg(t)
+
+	p := mustSpawnParams("org-a", "seat-1")
+	p.Driver = "codex"
+	p.Model = "gpt-5-codex"
+	result := o.Spawn(p)
+	if result.Outcome != SpawnOutcomeRejected {
+		t.Fatalf("expected SpawnOutcomeRejected, got %+v", result)
+	}
+	if result.Err == nil || !strings.Contains(result.Err.Error(), "codex seat permission mode") {
+		t.Fatalf("expected fail-closed codex error, got %v", result.Err)
+	}
+	if len(h.calls) != 0 || len(a.calls) != 0 {
+		t.Fatalf("expected zero driver calls for the fail-closed rejection, got herdr=%v agmsg=%v", h.calls, a.calls)
+	}
+
+	rr, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	last := rr.Events[len(rr.Events)-1]
+	if last.Event != EventRejected {
+		t.Fatalf("expected last event rejected, got %q", last.Event)
+	}
+
+	receiptRR, err := o.Receipts.Read()
+	if err != nil {
+		t.Fatalf("read receipts: %v", err)
+	}
+	if len(receiptRR.Receipts) != 1 || receiptRR.Receipts[0].Honored != HonoredFalse {
+		t.Fatalf("expected 1 receipt honored=false, got %+v", receiptRR.Receipts)
+	}
+}
+
+// TestOrgSpawn_Codex_GuardedRoleOverride_Spawns is the positive fail-closed
+// counterpart: a codex seat whose role is explicitly overridden to guarded
+// spawns normally, with no permission flags in AgentStart's argv.
+func TestOrgSpawn_Codex_GuardedRoleOverride_Spawns(t *testing.T) {
+	o, h, _ := testOrg(t)
+	o.Config.Permissions = config.OrgPermissionsConfig{
+		Default: "autonomous",
+		Roles:   map[string]string{"worker": "guarded"},
+	}
+
+	p := mustSpawnParams("org-a", "seat-1") // Role: "worker" (see mustSpawnParams)
+	p.Driver = "codex"
+	p.Model = "gpt-5-codex"
+	result := o.Spawn(p)
+	if result.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("expected spawn to succeed for a guarded codex seat, got %+v", result)
+	}
+
+	args := h.agentStartArgs[0]
+	if len(args) != 2 || args[0] != "--model" {
+		t.Fatalf("expected no permission flags for guarded mode, got %v", args)
 	}
 }

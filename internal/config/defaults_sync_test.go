@@ -185,6 +185,8 @@ func TestDefaultsLockStep(t *testing.T) {
 		strconv.Itoa(tomlCfg.Org.DeadmanMinutes), strconv.Itoa(goCfg.Org.DeadmanMinutes))
 	check("org.agmsg_home", "RALPH_ORG_AGMSG_HOME",
 		tomlCfg.Org.AgmsgHome, goCfg.Org.AgmsgHome)
+	check("org.permissions.default", "RALPH_ORG_PERMISSION_DEFAULT",
+		tomlCfg.Org.Permissions.Default, goCfg.Org.Permissions.Default)
 
 	// ── loop.claude_reviewer_model ────────────────────────────────────────────
 	// Shell var: RALPH_CLAUDE_REVIEWER_MODEL; toml: [loop].claude_reviewer_model;

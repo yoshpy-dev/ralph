@@ -39,12 +39,14 @@ func newOrgCmd() *cobra.Command {
 
 	cmd.AddCommand(
 		newOrgSpawnCmd(&orgID, &stateDir, &configPath),
+		newOrgStartCmd(&orgID, &stateDir, &configPath),
 		newOrgSendCmd(&orgID, &stateDir, &configPath),
 		newOrgWaitCmd(&orgID, &stateDir, &configPath),
 		newOrgReadCmd(&orgID, &stateDir, &configPath),
 		newOrgStopCmd(&orgID, &stateDir, &configPath),
 		newOrgStatusCmd(&orgID, &stateDir, &configPath),
 		newOrgDisbandCmd(&orgID, &stateDir, &configPath),
+		newOrgReportCmd(&orgID, &stateDir, &configPath),
 	)
 
 	return cmd
@@ -80,11 +82,16 @@ func requireSeatIdentifier(flag, value string) error {
 
 // newOrgRuntime constructs an org.Org wired to real driver adapters
 // (driver.ExecRunner, which shells out to the herdr/agmsg binaries on PATH)
-// and manifest/receipt stores rooted at stateDir.
-func newOrgRuntime(stateDir, configPath string) (*org.Org, error) {
+// and manifest/receipt stores rooted at stateDir. It also returns the
+// resolved config.OrgConfig it built the Org from, so a caller that needs
+// the config for its own purposes beyond wiring (e.g. newOrgStartCmd's
+// --model default resolution via org.DefaultModelForDriver) does not have
+// to call resolveOrgConfig a second time and risk two ralph.toml reads
+// diverging.
+func newOrgRuntime(stateDir, configPath string) (*org.Org, config.OrgConfig, error) {
 	orgCfg, err := resolveOrgConfig(configPath)
 	if err != nil {
-		return nil, fmt.Errorf("org: load config: %w", err)
+		return nil, config.OrgConfig{}, fmt.Errorf("org: load config: %w", err)
 	}
 	runner := driver.ExecRunner{}
 	return &org.Org{
@@ -93,7 +100,7 @@ func newOrgRuntime(stateDir, configPath string) (*org.Org, error) {
 		Receipts: org.NewReceiptStoreAtPath(filepath.Join(stateDir, "model-receipts.jsonl")),
 		Herdr:    driver.Herdr{R: runner},
 		Agmsg:    driver.Agmsg{R: runner, Home: driver.ResolveAgmsgHome(orgCfg.AgmsgHome)},
-	}, nil
+	}, orgCfg, nil
 }
 
 // resolveOrgConfig loads the [org] envelope from configPath, falling back
@@ -135,9 +142,9 @@ func splitCommaList(s string) []string {
 
 func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	var (
-		seatID, role, driverName, model, cwd, prompt, scope string
-		timeoutMS                                           int
-		dryRun                                              bool
+		seatID, role, driverName, model, cwd, prompt, scope, leadDriver string
+		timeoutMS                                                       int
+		dryRun, allowUnscoped                                           bool
 	)
 
 	cmd := &cobra.Command{
@@ -156,13 +163,14 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 				}
 			}
 
-			rt, err := newOrgRuntime(*stateDir, *configPath)
+			rt, _, err := newOrgRuntime(*stateDir, *configPath)
 			if err != nil {
 				return err
 			}
 			result := rt.Spawn(org.SpawnParams{
 				OrgID: *orgID, SeatID: seatID, Role: role, Driver: driverName, Model: model,
 				Cwd: cwd, Prompt: prompt, Scope: scope, TimeoutMS: timeoutMS, DryRun: dryRun,
+				LeadDriver: leadDriver, AllowUnscoped: allowUnscoped,
 			})
 			printSpawnResult(cmd, result)
 			return result.Err
@@ -176,8 +184,10 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	cmd.Flags().StringVar(&cwd, "cwd", "", "working directory for the new seat (required)")
 	cmd.Flags().StringVar(&prompt, "prompt", "", "optional initial prompt passed to the agent")
 	cmd.Flags().StringVar(&scope, "scope", "", "optional scope description (recorded on the spawned event; substituted into --role templates as {{SCOPE}})")
+	cmd.Flags().StringVar(&leadDriver, "lead-driver", "claude", "driver (claude|codex) the org's coordinating lead identity runs as, for the agmsg type registered on ensureLeadJoined")
 	cmd.Flags().IntVar(&timeoutMS, "timeout-ms", 60000, "per-step herdr timeout in milliseconds")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "validate and record without starting a real seat")
+	cmd.Flags().BoolVar(&allowUnscoped, "allow-unscoped", false, "explicitly bypass the autonomous-mode --scope requirement (recorded on the spawned event)")
 
 	return cmd
 }
@@ -196,6 +206,85 @@ func printSpawnResult(cmd *cobra.Command, r org.SpawnResult) {
 	case org.SpawnOutcomeFailed:
 		_, _ = fmt.Fprintf(out, "spawn failed: %v\n", r.Err)
 	}
+}
+
+// newOrgStartCmd wires `ralph org start` -- headless-lead spawn sugar over
+// (*org.Org).Spawn, per the plan's design decision ("`org start` = lead 座席
+// の spawn 糖衣", docs/plans/active/2026-08-02-org-runtime-lead.md). It
+// always spawns SeatID == Role == org.LeadIdentity ("lead"): the org's
+// coordinating agmsg identity and the lead seat are, by design, the same
+// seat -- see the leadSelfSpawn branch in internal/org/spawn.go's Spawn.
+// Every other concern (envelope validation, the permission-mode gate,
+// manifest/receipt bookkeeping) flows through the same saga every other
+// `ralph org spawn` call uses; this command does not special-case the lead
+// runtime object in any way beyond picking its SeatID/Role and required
+// positional task argument.
+func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
+	var (
+		driverName, model, cwd, scope string
+		timeoutMS                     int
+		allowUnscoped                 bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "start <task>",
+		Short: "Spawn a headless lead seat (sugar over `ralph org spawn --role lead`)",
+		Long: "ralph org start is a thin wrapper over the same Spawn saga every other\n" +
+			"`ralph org spawn` call uses: it always spawns the org's coordinating\n" +
+			"\"lead\" identity itself (seat id \"lead\", role \"lead\"), expands\n" +
+			"internal/org/prompts/lead.md with the task argument substituted for\n" +
+			"{{TASK}} and a one-line [org] envelope summary substituted for\n" +
+			"{{ENVELOPE}}. Envelope validation, the permission-mode gate, and\n" +
+			"manifest/receipt bookkeeping all flow through Spawn exactly as they\n" +
+			"would for any other seat. See .claude/skills/org/SKILL.md for the\n" +
+			"lead's full operating manual.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireOrgID(*orgID); err != nil {
+				return err
+			}
+			task := strings.TrimSpace(args[0])
+			if task == "" {
+				return fmt.Errorf("org: start: task must not be blank")
+			}
+			if strings.TrimSpace(cwd) == "" {
+				return fmt.Errorf("org: --cwd is required")
+			}
+
+			rt, orgCfg, err := newOrgRuntime(*stateDir, *configPath)
+			if err != nil {
+				return err
+			}
+			resolvedModel := model
+			if strings.TrimSpace(resolvedModel) == "" {
+				resolvedModel, err = org.DefaultModelForDriver(orgCfg, driverName)
+				if err != nil {
+					return err
+				}
+			}
+
+			result := rt.Spawn(org.SpawnParams{
+				OrgID: *orgID, SeatID: org.LeadIdentity, Role: org.LeadIdentity,
+				Driver: driverName, Model: resolvedModel, Cwd: cwd, Task: task,
+				Scope: scope, TimeoutMS: timeoutMS, AllowUnscoped: allowUnscoped,
+			})
+			printSpawnResult(cmd, result)
+			if result.Err == nil {
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(),
+					"hint: ralph org status --org-id %s ; attach with herdr to observe the lead pane\n", *orgID)
+			}
+			return result.Err
+		},
+	}
+
+	cmd.Flags().StringVar(&driverName, "driver", "claude", "driver CLI the lead seat runs as: claude|codex")
+	cmd.Flags().StringVar(&model, "model", "", "model name or alias (default: first [org].model_pool entry for --driver)")
+	cmd.Flags().StringVar(&cwd, "cwd", "", "working directory for the lead seat (required)")
+	cmd.Flags().StringVar(&scope, "scope", "", "optional scope description (see `ralph org spawn --scope`)")
+	cmd.Flags().IntVar(&timeoutMS, "timeout-ms", 60000, "per-step herdr timeout in milliseconds")
+	cmd.Flags().BoolVar(&allowUnscoped, "allow-unscoped", false, "explicitly bypass the autonomous-mode --scope requirement")
+
+	return cmd
 }
 
 func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
@@ -221,7 +310,7 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err := requireSeatIdentifier("--to", to); err != nil {
 				return err
 			}
-			rt, err := newOrgRuntime(*stateDir, *configPath)
+			rt, _, err := newOrgRuntime(*stateDir, *configPath)
 			if err != nil {
 				return err
 			}
@@ -253,6 +342,14 @@ func newOrgWaitCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "wait",
 		Short: "Wait for a seat to reach one of the given states",
+		Long: "ralph org wait defaults --until to \"idle,done\": live-probed herdr\n" +
+			"(v0.7.5) reports an interactive agent resting at its input prompt as\n" +
+			"\"done\" (turn finished), not \"idle\" -- waiting on \"idle\" alone times\n" +
+			"out against a perfectly receptive seat (same finding that fixed `ralph\n" +
+			"org send`'s own wait, internal/org/verbs.go's Send). --timeout-ms\n" +
+			"defaults to a bounded 60000ms so a headless lead following this\n" +
+			"command's own default cannot block forever; pass --timeout-ms 0 to\n" +
+			"explicitly opt into an unbounded wait.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireOrgID(*orgID); err != nil {
 				return err
@@ -260,7 +357,7 @@ func newOrgWaitCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err := requireSeatIdentifier("--seat", seat); err != nil {
 				return err
 			}
-			rt, err := newOrgRuntime(*stateDir, *configPath)
+			rt, _, err := newOrgRuntime(*stateDir, *configPath)
 			if err != nil {
 				return err
 			}
@@ -276,8 +373,8 @@ func newOrgWaitCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&seat, "seat", "", "seat id to wait on (required)")
-	cmd.Flags().StringVar(&until, "until", "idle", "comma-separated states to wait for (idle,done,blocked)")
-	cmd.Flags().IntVar(&timeoutMS, "timeout-ms", 0, "wait timeout in milliseconds (0 = no timeout)")
+	cmd.Flags().StringVar(&until, "until", "idle,done", "comma-separated states to wait for (idle,done,blocked)")
+	cmd.Flags().IntVar(&timeoutMS, "timeout-ms", 60000, "wait timeout in milliseconds, bounded by default (pass 0 to explicitly wait unbounded)")
 
 	return cmd
 }
@@ -298,7 +395,7 @@ func newOrgReadCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err := requireSeatIdentifier("--seat", seat); err != nil {
 				return err
 			}
-			rt, err := newOrgRuntime(*stateDir, *configPath)
+			rt, _, err := newOrgRuntime(*stateDir, *configPath)
 			if err != nil {
 				return err
 			}
@@ -335,7 +432,7 @@ func newOrgStopCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err := requireSeatIdentifier("--seat", seat); err != nil {
 				return err
 			}
-			rt, err := newOrgRuntime(*stateDir, *configPath)
+			rt, _, err := newOrgRuntime(*stateDir, *configPath)
 			if err != nil {
 				return err
 			}
@@ -364,7 +461,7 @@ func newOrgStatusCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err := requireOrgID(*orgID); err != nil {
 				return err
 			}
-			rt, err := newOrgRuntime(*stateDir, *configPath)
+			rt, _, err := newOrgRuntime(*stateDir, *configPath)
 			if err != nil {
 				return err
 			}
@@ -459,7 +556,7 @@ func newOrgDisbandCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err := requireOrgID(*orgID); err != nil {
 				return err
 			}
-			rt, err := newOrgRuntime(*stateDir, *configPath)
+			rt, _, err := newOrgRuntime(*stateDir, *configPath)
 			if err != nil {
 				return err
 			}
@@ -476,6 +573,44 @@ func newOrgDisbandCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	}
 
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "record without stopping real seats")
+
+	return cmd
+}
+
+// newOrgReportCmd wires `ralph org report` (AC-4, FR-9 後半): reads the
+// manifest + model receipts for --org-id and writes an org-manifest report
+// to docs/reports/ via (*org.Org).Report -- see internal/org/report.go's
+// BuildOrgReport for the report's sections (roster, event timeline, model
+// receipts, known residuals).
+func newOrgReportCmd(orgID, stateDir, configPath *string) *cobra.Command {
+	var outDir string
+
+	cmd := &cobra.Command{
+		Use:   "report",
+		Short: "Write an org-manifest report (roster, event timeline, model receipts) to docs/reports/",
+		Long: "ralph org report reads the manifest and model receipts for --org-id and\n" +
+			"writes docs/reports/org-manifest-<org_id>-<date>.md: a roster summary,\n" +
+			"the full event timeline, the model-receipts table, and known residuals\n" +
+			"(active seat count, corrupt manifest line count). An org with no\n" +
+			"recorded events still produces a report, noting that explicitly.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireOrgID(*orgID); err != nil {
+				return err
+			}
+			rt, _, err := newOrgRuntime(*stateDir, *configPath)
+			if err != nil {
+				return err
+			}
+			result := rt.Report(org.ReportParams{OrgID: *orgID, OutDir: outDir})
+			if result.Err != nil {
+				return fmt.Errorf("org: report: %w", result.Err)
+			}
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "wrote %s\n", result.Path)
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&outDir, "out", "", "output directory for the report (default: docs/reports)")
 
 	return cmd
 }

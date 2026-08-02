@@ -3,6 +3,7 @@ package org
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -327,4 +328,64 @@ func repeatDigit(i int) string {
 		out[j] = d
 	}
 	return string(out)
+}
+
+// TestManifestEvent_HerdrAgentName_JSONRoundTrip pins the wire shape (AC-8):
+// the field must serialize under the "herdr_agent_name" JSON key when set,
+// and be entirely absent from the JSON line when empty (omitempty) -- the
+// latter is what makes a pre-AC-8 manifest line decode with an empty
+// HerdrAgentName instead of an unmarshal error.
+func TestManifestEvent_HerdrAgentName_JSONRoundTrip(t *testing.T) {
+	store := newTestManifestStore(t)
+
+	withName := ManifestEvent{TS: "2026-08-02T00:00:00Z", OrgID: "org-a", SeatID: "seat-1", Event: EventSpawned, HerdrAgentName: "org-a_seat-1"}
+	withoutName := ManifestEvent{TS: "2026-08-02T00:00:01Z", OrgID: "org-a", SeatID: "seat-2", Event: EventSpawned}
+	for _, ev := range []ManifestEvent{withName, withoutName} {
+		if err := store.Append(ev); err != nil {
+			t.Fatalf("append: %v", err)
+		}
+	}
+
+	raw, err := os.ReadFile(store.Path())
+	if err != nil {
+		t.Fatalf("read raw manifest: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 raw JSONL lines, got %d:\n%s", len(lines), raw)
+	}
+	if !strings.Contains(lines[0], `"herdr_agent_name":"org-a_seat-1"`) {
+		t.Errorf("expected the first event's raw JSON line to contain the herdr_agent_name key, got:\n%s", lines[0])
+	}
+	if strings.Contains(lines[1], "herdr_agent_name") {
+		t.Errorf("expected the second (unset) event's raw JSON line to omit herdr_agent_name entirely, got:\n%s", lines[1])
+	}
+
+	result, err := store.Read()
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if len(result.Events) != 2 {
+		t.Fatalf("expected 2 events, got %d", len(result.Events))
+	}
+	if result.Events[0].HerdrAgentName != "org-a_seat-1" {
+		t.Errorf("expected the first event's HerdrAgentName to round-trip, got %q", result.Events[0].HerdrAgentName)
+	}
+	if result.Events[1].HerdrAgentName != "" {
+		t.Errorf("expected the second event's HerdrAgentName to decode as empty, got %q", result.Events[1].HerdrAgentName)
+	}
+
+	roster := Roster(result.Events, RosterOptions{})
+	if len(roster) != 2 {
+		t.Fatalf("expected 2 roster entries, got %+v", roster)
+	}
+	for _, s := range roster {
+		want := ""
+		if s.SeatID == "seat-1" {
+			want = "org-a_seat-1"
+		}
+		if s.HerdrAgentName != want {
+			t.Errorf("roster entry %s: HerdrAgentName = %q, want %q", s.SeatID, s.HerdrAgentName, want)
+		}
+	}
 }

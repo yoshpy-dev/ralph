@@ -693,6 +693,108 @@ max_fix_rounds = 0
 	}
 }
 
+// TestDefault_OrgPermissions verifies [org.permissions] defaults: every
+// role uses "autonomous" and no per-role override exists out of the box.
+func TestDefault_OrgPermissions(t *testing.T) {
+	p := Default().Org.Permissions
+	if p.Default != "autonomous" {
+		t.Errorf("permissions.default = %q, want autonomous", p.Default)
+	}
+	if len(p.Roles) != 0 {
+		t.Errorf("permissions.roles = %v, want empty", p.Roles)
+	}
+}
+
+// TestLoad_OrgPermissionsRoleOverrideRoundTrip verifies an explicit
+// [org.permissions] section (default override plus a per-role override)
+// round-trips through Load() unchanged.
+func TestLoad_OrgPermissionsRoleOverrideRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ralph.toml")
+	content := `[org.permissions]
+default = "edits"
+
+[org.permissions.roles]
+reviewer = "guarded"
+lead = "autonomous"
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Org.Permissions.Default != "edits" {
+		t.Errorf("permissions.default = %q, want edits", cfg.Org.Permissions.Default)
+	}
+	if cfg.Org.Permissions.Roles["reviewer"] != "guarded" {
+		t.Errorf("permissions.roles[reviewer] = %q, want guarded", cfg.Org.Permissions.Roles["reviewer"])
+	}
+	if cfg.Org.Permissions.Roles["lead"] != "autonomous" {
+		t.Errorf("permissions.roles[lead] = %q, want autonomous", cfg.Org.Permissions.Roles["lead"])
+	}
+}
+
+// TestLoad_OrgPermissionsMissingSectionBackfillsDefault verifies AC-1
+// compatibility: a ralph.toml without [org.permissions] at all loads with
+// the "autonomous" default and no error.
+func TestLoad_OrgPermissionsMissingSectionBackfillsDefault(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ralph.toml")
+	content := `[pipeline]
+model = "opus"
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Org.Permissions.Default != "autonomous" {
+		t.Errorf("permissions.default = %q, want autonomous", cfg.Org.Permissions.Default)
+	}
+}
+
+// TestLoad_OrgPermissionsRejectsInvalidMode is a table-driven check that an
+// invalid mode is rejected both on [org.permissions].default and on a
+// [org.permissions.roles] entry.
+func TestLoad_OrgPermissionsRejectsInvalidMode(t *testing.T) {
+	cases := []struct {
+		name    string
+		body    string
+		wantSub string
+	}{
+		{
+			name:    "invalid default",
+			body:    "[org.permissions]\ndefault = \"yolo\"\n",
+			wantSub: "[org.permissions].default",
+		},
+		{
+			name:    "invalid role override",
+			body:    "[org.permissions.roles]\nreviewer = \"yolo\"\n",
+			wantSub: "[org.permissions.roles].reviewer",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "ralph.toml")
+			if err := os.WriteFile(path, []byte(tc.body), 0644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Load(path)
+			if err == nil {
+				t.Fatalf("Load: expected error for %s, got nil", tc.name)
+			}
+			if !contains(err.Error(), tc.wantSub) {
+				t.Errorf("error %q does not mention %q", err.Error(), tc.wantSub)
+			}
+		})
+	}
+}
+
 // TestLoad_OrgMaxSeatsBoundary verifies the max_seats >= 1 boundary: 0 is
 // rejected, 1 is accepted.
 func TestLoad_OrgMaxSeatsBoundary(t *testing.T) {

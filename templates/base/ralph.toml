@@ -90,6 +90,23 @@ agmsg_home = "~/.agents/skills/agmsg"
 # [org.roles]
 # reviewer = ["opus"]
 
+# [org.permissions] controls the seat permission-mode envelope: how much
+# autonomy a spawned seat's driver runs with, translated to driver-native
+# flags at spawn time (claude: --permission-mode bypassPermissions|
+# acceptEdits|<none>). Modes: autonomous (no interactive prompts) | edits
+# (auto-accept file edits, still prompts otherwise) | guarded (the driver
+# CLI's own interactive default). codex seats only accept guarded today --
+# codex's interactive permission flags are fail-closed until live-verified
+# (see docs/tech-debt/README.md).
+[org.permissions]
+default = "autonomous"
+
+# [org.permissions.roles] overrides the default mode per role. A role
+# absent from this table uses [org.permissions].default.
+# Example:
+# [org.permissions.roles]
+# reviewer = "guarded"
+
 [org.budget]
 seat_wall_clock_minutes = 30
 total_wall_clock_minutes = 120

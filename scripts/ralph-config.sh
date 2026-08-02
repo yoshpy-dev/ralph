@@ -81,6 +81,13 @@ RALPH_ORG_TOTAL_BUDGET_MINUTES="${RALPH_ORG_TOTAL_BUDGET_MINUTES:-120}"
 RALPH_ORG_MAX_FIX_ROUNDS="${RALPH_ORG_MAX_FIX_ROUNDS:-2}"
 RALPH_ORG_DEADMAN_MINUTES="${RALPH_ORG_DEADMAN_MINUTES:-10}"
 RALPH_ORG_AGMSG_HOME="${RALPH_ORG_AGMSG_HOME:-~/.agents/skills/agmsg}"
+# RALPH_ORG_PERMISSION_DEFAULT mirrors [org.permissions].default. Kept
+# unexported for the same reason as RALPH_ORG_AGMSG_HOME above: nothing in
+# this file's export block should risk shadowing a value the Go config
+# (internal/config) is the sole runtime source for. This var exists only so
+# the three lock-step surfaces agree on the default string; no `ralph org`
+# verb reads it from the environment.
+RALPH_ORG_PERMISSION_DEFAULT="${RALPH_ORG_PERMISSION_DEFAULT:-autonomous}"
 
 # Export so values reach grandchild processes (e.g. ralph-pipeline.sh
 # spawned from ralph-orchestrator.sh, or codex/claude invoked via xargs).

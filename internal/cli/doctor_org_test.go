@@ -72,12 +72,19 @@ func TestCheckHerdrAgmsgAvailable_AbsentIsInfo(t *testing.T) {
 		t.Errorf("herdr detail = %q, want mention of 'herdr not installed'", hr.Detail)
 	}
 
-	ar := checkAgmsgAvailable(filepath.Join(t.TempDir(), "no-such-agmsg-home"))
+	noSuchHome := filepath.Join(t.TempDir(), "no-such-agmsg-home")
+	ar := checkAgmsgAvailable(noSuchHome)
 	if ar.Status != "info" {
 		t.Errorf("agmsg status = %q, want info", ar.Status)
 	}
 	if !strings.Contains(ar.Detail, "agmsg not installed") {
 		t.Errorf("agmsg detail = %q, want mention of 'agmsg not installed'", ar.Detail)
+	}
+	// AC-10a (tech-debt fix): the not-installed detail must also name the
+	// resolved home directory doctor actually checked, so a misconfigured
+	// agmsg_home is diagnosable from the doctor output alone.
+	if !strings.Contains(ar.Detail, noSuchHome) {
+		t.Errorf("agmsg detail = %q, want it to mention the resolved home %q", ar.Detail, noSuchHome)
 	}
 }
 
@@ -97,6 +104,11 @@ func TestCheckHerdrAgmsgAvailable_PresentIsPass(t *testing.T) {
 	}
 	if r := checkAgmsgAvailable(agmsgHome); r.Status != "pass" {
 		t.Errorf("agmsg status = %q, want pass (detail=%q)", r.Status, r.Detail)
+	}
+	// AC-10a: the "available" detail must also name the resolved home, not
+	// just report the pass/fail status.
+	if r := checkAgmsgAvailable(agmsgHome); !strings.Contains(r.Detail, agmsgHome) {
+		t.Errorf("agmsg detail = %q, want it to mention the resolved home %q", r.Detail, agmsgHome)
 	}
 }
 
