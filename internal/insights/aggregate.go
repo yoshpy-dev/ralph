@@ -1,6 +1,7 @@
 package insights
 
 import (
+	"maps"
 	"sort"
 
 	"github.com/yoshpy-dev/ralph/internal/org"
@@ -317,8 +318,6 @@ func copyVerdictMap(m map[string]string) map[string]string {
 		return nil
 	}
 	out := make(map[string]string, len(m))
-	for k, v := range m {
-		out[k] = v
-	}
+	maps.Copy(out, m)
 	return out
 }
