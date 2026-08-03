@@ -1,0 +1,155 @@
+org-debt-batch (2026-08-03) — Slice 5 evidence
+Plan: docs/plans/active/2026-08-03-org-debt-batch.md
+Redaction convention: absolute paths under the developer home directory are
+written as `~/...` below (per docs/evidence/ redaction convention).
+
+=====================================================================
+1. AC-1 grep (footgun API removal, zero non-test hits)
+=====================================================================
+
+Command:
+  grep -rn 'NewManifestStore\b|ManifestRelPath|NewReceiptStore\b|ReceiptsRelPath' --include='*.go' .
+
+Output: (no output — zero hits, exit 1)
+
+Interpretation: `org.NewManifestStore`/`ManifestRelPath` and
+`org.NewReceiptStore`/`ReceiptsRelPath` are fully removed (Slice 1). Only the
+`...AtPath` constructors and the new `ManifestPathIn`/`ReceiptsPathIn`
+helpers remain, all derived from a single point in `internal/org`.
+
+=====================================================================
+2. `ralph insights` receipts-section render (org receipts, text mode)
+=====================================================================
+
+Setup: a temp org receipts JSONL file (tri-state `honored`) was hand-built
+at `~/tmp-scratch/demo-receipts.jsonl` with 6 lines for org "demo", seat
+"lead": 3 `honored=true`, 1 `honored=false`, 2 `honored=unknown` (one entry
+also carries a `reported_effective_model` drift to exercise the false case).
+
+Command:
+  go run ./cmd/ralph insights --receipts ~/tmp-scratch/demo-receipts.jsonl
+
+Output:
+
+=== Events (57 total, 0 lines skipped) ===
+
+Phase          Events   Pass   Fail     AR     NA    C   H   M   L   AR  WC   D
+---               ---    ---    ---    ---    ---  --- --- --- ---  --- --- ---
+self_review        13     13      0      0      0    0   6  44  69    0   0   0
+verify             15     15      0      0      0    0   0   0   0    0   0   0
+test               15     15      0      0      0    0   0   0   0    0   0   0
+cross_review       14      6      0      8      0    0   0   0   0   13   5   1
+
+=== Routing (honored-rate per phase from events) ===
+
+  (no events with routing fields)
+
+=== Escalation (slugs with cycle >= 2) ===
+
+  ralph-insights (max cycle: 2)
+    verify         cycle1=pass             final=pass
+    test           cycle1=pass             final=pass
+    cross_review   cycle1=action_required  final=-
+  org-runtime-retire-loop (max cycle: 2)
+    self_review    cycle1=pass             final=pass
+    verify         cycle1=pass             final=pass
+    test           cycle1=pass             final=pass
+    cross_review   cycle1=pass             final=-
+
+=== Receipts (org runtime model-receipts: ~/tmp-scratch/demo-receipts.jsonl) ===
+
+  ORG demo  SEAT lead  commanded=opus  honored: true=3 false=1 unknown=2  rate=75% (unknown 2 excluded)
+
+Interpretation: matches AC-3's contract exactly — `ORG <id>  SEAT <id>
+commanded=<model>  honored: true=N false=N unknown=N  rate=NN%
+(unknown N excluded)`, honored-rate computed as true/(true+false) = 3/4 =
+75%, with the 2 unknown lines excluded from the denominator and reported
+separately. The Events/Routing/Escalation sections above are read from the
+real committed `docs/insights/events/` (unchanged from before this slice) —
+included to show the receipts section rendering alongside the rest of the
+command's real output, not in isolation.
+
+=====================================================================
+3. Upgrade removal path smoke test (AC-5)
+=====================================================================
+
+Test: TestRunUpgrade_RemovesRetiredLoopArtifactsFromManifest
+Location: internal/cli/upgrade_retired_loop_artifacts_test.go (a dedicated,
+single-purpose file — see below for why it is not folded into cli_test.go)
+
+Approach chosen: a Go test using the REAL embedded templates
+(`github.com/yoshpy-dev/ralph`'s go:embed `TemplatesFS`, the same value
+`cmd/ralph/main.go` injects at runtime) rather than the fstest.MapFS mock
+used by the rest of internal/cli's tests. `executeInit` scaffolds a fresh
+project against the actual current template set, then the test hand-adds
+three manifest entries + matching on-disk files simulating artifacts a
+pre-retirement `ralph` would have tracked (`scripts/ralph-orchestrator.sh`,
+`scripts/ralph-pipeline.sh`, `.claude/skills/loop/SKILL.md` — all three
+verified absent from the current `templates/base/` tree). Running the
+current `ralph upgrade` (`runUpgradeIO`) against that manifest is asserted
+to report all three as removed-from-template and drop their entries from
+`.ralph/manifest.toml`.
+
+This proves the removal path for real (against the actual shipped
+templates, not a synthetic fixture), not just against a hand-picked mock.
+
+IMPORTANT scope finding #1: `ralph upgrade`'s ActionRemove handling
+(internal/cli/upgrade.go, `case upgrade.ActionRemove`) is notify-only by
+design — it prints "review and delete manually" and drops the manifest
+entry; it does NOT delete the file from disk. The test asserts this
+explicitly (the three loop-artifact files are asserted to still exist on
+disk after upgrade). This is a deliberate correction to this slice's
+handoff wording ("prove upgrade removes retired loop artifacts from disk"):
+the actual, current contract is manifest-level retirement + a user-facing
+notice, not silent disk deletion — a safety property, not a gap. The test
+name and doc comment reflect the real contract rather than the handoff's
+more aggressive phrasing.
+
+IMPORTANT scope finding #2: the test necessarily names the retired
+artifacts' historical filenames ("ralph-orchestrator", "ralph-pipeline") as
+literal fixture strings, which trips `tests/test-no-loop-references.sh`'s
+guard (AC-2, closed by Slice 2 of this same plan) — that guard greps for
+those exact substrings anywhere in `.go` files. Rather than touch Slice 2's
+already-closed PATTERN/EXCLUDE_REGEX widening work, the new test was placed
+in its own dedicated file (not folded into the much larger cli_test.go) and
+that one file was added to EXCLUDE_REGEX, mirroring the exact precedent
+already set for internal/cli/insights_test.go (a test that also legitimately
+names retired vocabulary as proof of retirement, not as a live reference).
+This keeps the exclusion's blast radius to one small, single-purpose file
+instead of exempting all of cli_test.go's ~2300 unrelated lines from the
+guard. `./scripts/run-verify.sh` passes with this change; `tests/test-
+no-loop-references.sh` run standalone also passes.
+
+Command:
+  go test ./internal/cli/... -run TestRunUpgrade_RemovesRetiredLoopArtifactsFromManifest -v -count=1
+
+Output (trimmed):
+
+=== RUN   TestRunUpgrade_RemovesRetiredLoopArtifactsFromManifest
+
+Scaffolding "test" into ~/tmp-testdir/TestRunUpgrade_RemovesRetiredLoopArtifactsFromManifest809477748/001 ...
+
+  v base (129 files: 129 created, 0 updated, 0 skipped)
+  v .ralph/manifest.toml
+  v git init
+  v pre-commit hook installed
+  v commit-msg hook installed
+  v prepare-commit-msg hook installed
+  v pre-merge-commit hook installed
+
+Done. Next steps:
+  cd ~/tmp-testdir/TestRunUpgrade_RemovesRetiredLoopArtifactsFromManifest809477748/001
+  Edit AGENTS.md to describe your project
+  ralph doctor to verify setup
+--- PASS: TestRunUpgrade_RemovesRetiredLoopArtifactsFromManifest (0.19s)
+PASS
+ok  	github.com/yoshpy-dev/ralph/internal/cli	0.473s
+
+Full-package regression (same run):
+  go test ./internal/upgrade/... ./internal/cli/... ./internal/scaffold/... -count=1
+  ok  	github.com/yoshpy-dev/ralph/internal/upgrade	0.719s
+  ok  	github.com/yoshpy-dev/ralph/internal/cli	18.434s
+  ok  	github.com/yoshpy-dev/ralph/internal/scaffold	0.625s
+
+tests/test-no-loop-references.sh (standalone):
+  PASS: no live references to the retired Ralph Loop execution system outside historical documents

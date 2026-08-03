@@ -44,10 +44,16 @@ PATTERN='ralph-orchestrator|ralph-pipeline|RALPH_LOOP_DRIVER|ralph-cli-driver|ra
 #     read-compat for the same historical schema vocabulary (AC-6b)
 #   - internal/cli/insights_test.go : regression test pinning that
 #     historical-vocab read-compat
+#   - internal/cli/upgrade_retired_loop_artifacts_test.go : regression test
+#     proving `ralph upgrade`'s remove-path retires these exact historical
+#     filenames from a pre-retirement project's manifest (org-debt-batch
+#     Slice 5, AC-5) -- it names them as proof of retirement, not a live
+#     reference, same rationale as insights_test.go above. Kept in its own
+#     single-purpose file so this exclusion stays narrow.
 #   - templates/base/docs/insights/ : template mirror of the above
 #   - this script itself           : it necessarily names the pattern it checks
 #   - .git/
-EXCLUDE_REGEX='^(\./)?(templates/base/)?(docs/plans/archive/|docs/plans/active/|docs/specs/|docs/reports/|docs/insights/|docs/tech-debt/README\.md$|docs/research/approach-comparison\.md$|internal/insights/|internal/cli/insights_test\.go$)|^(\./)?\.git/|^(\./)?tests/test-no-loop-references\.sh$'
+EXCLUDE_REGEX='^(\./)?(templates/base/)?(docs/plans/archive/|docs/plans/active/|docs/specs/|docs/reports/|docs/insights/|docs/tech-debt/README\.md$|docs/research/approach-comparison\.md$|internal/insights/|internal/cli/insights_test\.go$|internal/cli/upgrade_retired_loop_artifacts_test\.go$)|^(\./)?\.git/|^(\./)?tests/test-no-loop-references\.sh$'
 
 matches="$(grep -rEl "$PATTERN" --include="*.sh" --include="*.go" --include="*.toml" --include="*.md" . 2>/dev/null | grep -vE "$EXCLUDE_REGEX" || true)"
 
