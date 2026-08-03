@@ -72,6 +72,8 @@ PR⑤(#140)完了時点で tech-debt に登録した org runtime 系の残債 5 
 
 - **C2-6 のスキーマ方針(critical fork、2026-08-03 ユーザー決定)**: **org receipts に再指向**。既定パスを org state-dir の `model-receipts.jsonl` に変更し、tri-state `honored`(true/false/unknown)を読む reader を追加。旧 pipeline スキーマ reader は削除(writer 退役済みのため後方互換不要)。理由: insights を生きた診断コマンドに戻す。却下案: historical 格下げ(org receipts の集計手段が無いまま)、セクション削除(受領証確認の CLI 手段が消える)。
 - Critical forks(その他): None — watchdog の prune 方式(上限 100)や truncate 行数(20)は可逆なデフォルト採用。
+- **逸脱ノート(2026-08-03, Slice 5)**: `ralph upgrade` の remove 経路は「通知+manifest エントリ削除」であり、ディスク上のファイル削除は意図的に行わない(安全設計)。スモークテストはこの実契約(retired loop 成果物が removed-from-template として報告され manifest から消える+ディスクのファイルは残る)を固定した。プラン記載の「削除することをアサート」はこの契約に読み替える。
+- **逸脱ノート(2026-08-03, Slice 4 の観察)**: total-budget の Cutoff ラチェットが org レベルである件は新規 tech-debt row として登録(スコープ外)。
 
 ## Verify plan
 
