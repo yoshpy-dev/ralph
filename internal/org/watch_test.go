@@ -2167,6 +2167,10 @@ func TestWatch_TotalBudgetCutoff_ResumeAfterAllSeatsStop_ReAlertsOnNewCutoff(t *
 	if rec := status.Conditions[key]; rec == nil || !rec.Active || rec.Cutoff {
 		t.Fatalf("expected Active=true, Cutoff=false after cycle 1 (Stop failed), got %+v", rec)
 	}
+	preResumeFirstTS := status.Conditions[key].FirstTS
+	if preResumeFirstTS == "" {
+		t.Fatalf("expected a non-empty FirstTS to be recorded by cycle 1")
+	}
 	st, err := o.Status("org-a", false)
 	if err != nil {
 		t.Fatalf("status: %v", err)
@@ -2198,6 +2202,9 @@ func TestWatch_TotalBudgetCutoff_ResumeAfterAllSeatsStop_ReAlertsOnNewCutoff(t *
 	if rec := status.Conditions[key]; rec != nil && rec.Cutoff {
 		t.Fatalf("expected Cutoff to remain untouched (still false) by the zero-active-seats guard, got %+v", rec)
 	}
+	if rec := status.Conditions[key]; rec != nil && rec.FirstTS != "" {
+		t.Fatalf("expected FirstTS cleared alongside Active by the zero-active-seats guard (self-review M3), got %q", rec.FirstTS)
+	}
 
 	// A new seat spawns into the same, still-over-budget org: this is the
 	// resume case. Before this fix, the never-cleared Active flag from
@@ -2215,6 +2222,16 @@ func TestWatch_TotalBudgetCutoff_ResumeAfterAllSeatsStop_ReAlertsOnNewCutoff(t *
 	}
 	if st, serr := o.Status("org-a", false); serr != nil || findSeatStatus(t, st.Seats, "seat-2").Active {
 		t.Fatalf("expected seat-2 to be cut off by the resumed total-budget cutoff (status err=%v)", serr)
+	}
+	// self-review M3: the re-raised condition's FirstTS must be fresh (the
+	// resumed occurrence's own timestamp), not inherited from the
+	// pre-resume occurrence -- conditionFirstTS only preserves a non-empty
+	// FirstTS across a retry, so clearing it in cycle 2 is what forces this.
+	if rec := status.Conditions[key]; rec == nil || rec.FirstTS == "" {
+		t.Fatalf("expected a fresh, non-empty FirstTS on the resumed cutoff, got %+v", rec)
+	} else if rec.FirstTS == preResumeFirstTS {
+		t.Fatalf("expected the resumed cutoff's FirstTS (%q) to differ from the pre-resume occurrence's FirstTS (%q), got the stale pre-resume value",
+			rec.FirstTS, preResumeFirstTS)
 	}
 }
 

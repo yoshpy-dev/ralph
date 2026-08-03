@@ -631,12 +631,21 @@ func (w *watchRun) evaluateTotalBudget(ctx context.Context, status *watchStatusF
 		// evaluateTotalBudget's `alreadyAlerted := rec != nil && rec.Active`
 		// check below would see the never-cleared true from before every
 		// seat stopped and skip the ALERT, even though nothing was ever
-		// actually sent to lead about *this* occurrence. This only clears
-		// Active, not rec.Cutoff -- the separate "one cutoff per key, ever"
-		// ratchet above is unaffected, so a prior successful cutoff still
-		// permanently disables Stop for this key regardless.
+		// actually sent to lead about *this* occurrence. FirstTS is cleared
+		// alongside Active for the same reason: conditionFirstTS preserves a
+		// non-empty FirstTS across retries (self-review H-2's "retried
+		// cutoff attempt" rule), so leaving it set here would make the next
+		// re-raise inherit the pre-resume occurrence's timestamp instead of
+		// getting a fresh one -- the resumed occurrence is a new
+		// observation, not a retry of the old one, matching raiseOrClear's
+		// own re-raise path (watch.go:838), which always writes a fresh
+		// FirstTS. This only clears Active/FirstTS, not rec.Cutoff -- the
+		// separate "one cutoff per key, ever" ratchet above is unaffected,
+		// so a prior successful cutoff still permanently disables Stop for
+		// this key regardless.
 		if rec := status.Conditions[conditionKey(orgID, "", condTotalBudget)]; rec != nil {
 			rec.Active = false
+			rec.FirstTS = ""
 		}
 		return cutSeats
 	}
@@ -1160,7 +1169,12 @@ func (w *watchRun) checkDeadman(ctx context.Context, status *watchStatusFile, rr
 
 // escalateAlert appends one line to escalations.jsonl, writes the stderr
 // banner, and best-effort-fires EscalateFunc -- deduped by alertID (AC-5:
-// "one escalation per alert, ever") via status.Escalated.
+// "one escalation per alert, ever") via the delete(status.PendingAlerts,
+// alertID) below, which removes alertID from the set checkDeadman ranges
+// over so this same alert can never be escalated a second time.
+// status.Escalated is written here too, but only as a bounded historical
+// audit trail (see checkDeadman's own comment) -- it has no remaining
+// reader that dedupe depends on.
 func (w *watchRun) escalateAlert(ctx context.Context, status *watchStatusFile, alertID string, pending *watchPendingAlert, now time.Time) {
 	reason := "deadman_timeout"
 	if pending.Subject == LeadIdentity {
