@@ -32,19 +32,25 @@ type Receipt struct {
 	Reason                 string `json:"reason,omitempty"`
 }
 
-// ReceiptsRelPath is the default state-root-relative path for the org model
-// receipts JSONL store, kept alongside ManifestRelPath's directory.
-const ReceiptsRelPath = ".harness/state/org/model-receipts.jsonl"
-
 // ReceiptStore appends to and reads the org model receipts JSONL file.
 type ReceiptStore struct {
 	path string
 }
 
-// NewReceiptStore returns a ReceiptStore rooted at root (typically the
-// worktree/state root), using the default ReceiptsRelPath fragment.
-func NewReceiptStore(root string) *ReceiptStore {
-	return &ReceiptStore{path: filepath.Join(root, ReceiptsRelPath)}
+// ReceiptsPathIn returns the model-receipts.jsonl path within an
+// already-resolved org state directory, mirroring ManifestPathIn. This is
+// THE single derivation of a receipts path from a resolved state dir --
+// every caller (internal/cli/org.go's write path and tests) must go through
+// this function instead of re-deriving the join themselves. The
+// root-relative constructor this package used to export (NewReceiptStore
+// (root), joining root against a package-level ReceiptsRelPath constant) was
+// removed for the same reason NewManifestStore/ManifestRelPath was: passing
+// an already-resolved state dir into a root-relative constructor
+// double-joins the relative fragment, the exact class of bug behind AR-1
+// (docs/reports/cross-review-triage-org-runtime-retire-loop.md, manifest
+// side). Centralizing the join here removes the ambiguity for receipts too.
+func ReceiptsPathIn(stateDir string) string {
+	return filepath.Join(stateDir, "model-receipts.jsonl")
 }
 
 // NewReceiptStoreAtPath returns a ReceiptStore backed by an explicit file

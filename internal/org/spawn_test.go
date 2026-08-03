@@ -189,7 +189,7 @@ func testOrg(t *testing.T) (*Org, *fakeHerdr, *fakeAgmsg) {
 	a := &fakeAgmsg{}
 	o := &Org{
 		Config:   testOrgConfig(),
-		Manifest: NewManifestStoreAtPath(filepath.Join(dir, "manifest.jsonl")),
+		Manifest: NewManifestStoreAtPath(ManifestPathIn(dir)),
 		Receipts: NewReceiptStoreAtPath(filepath.Join(dir, "receipts.jsonl")),
 		Herdr:    h,
 		Agmsg:    a,

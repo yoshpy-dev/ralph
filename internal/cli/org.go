@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -119,27 +118,11 @@ func newOrgRuntimeAt(resolvedStateDir, configPath string) (*org.Org, error) {
 	runner := driver.ExecRunner{}
 	return &org.Org{
 		Config:   orgCfg,
-		Manifest: org.NewManifestStoreAtPath(orgManifestPath(resolvedStateDir)),
-		Receipts: org.NewReceiptStoreAtPath(filepath.Join(resolvedStateDir, "model-receipts.jsonl")),
+		Manifest: org.NewManifestStoreAtPath(org.ManifestPathIn(resolvedStateDir)),
+		Receipts: org.NewReceiptStoreAtPath(org.ReceiptsPathIn(resolvedStateDir)),
 		Herdr:    driver.Herdr{R: runner},
 		Agmsg:    driver.Agmsg{R: runner, Home: driver.ResolveAgmsgHome(orgCfg.AgmsgHome)},
 	}, nil
-}
-
-// orgManifestPath returns the manifest.jsonl path within an already-resolved
-// org state directory (i.e. a directory produced by org.ResolveOrgStateDir,
-// not a "root" meant for org.NewManifestStore's own root-relative
-// ManifestRelPath join). Shared by newOrgRuntimeAt (the write path used by
-// every `ralph org <verb>`) and runStatus (status.go's read path) so the two
-// cannot independently drift on how a resolved state dir turns into a
-// manifest path -- that drift is exactly what caused AR-1
-// (docs/reports/cross-review-triage-org-runtime-retire-loop.md): status.go
-// used to call org.NewManifestStore(stateDir), which re-appended
-// org.ManifestRelPath onto an already-resolved directory, doubling the path
-// and making `ralph status` blind to every manifest a real `ralph org spawn`
-// had written.
-func orgManifestPath(stateDir string) string {
-	return filepath.Join(stateDir, "manifest.jsonl")
 }
 
 // resolveOrgConfig loads the [org] envelope from configPath, falling back

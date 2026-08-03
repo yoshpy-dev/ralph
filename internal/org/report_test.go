@@ -133,7 +133,7 @@ func TestPermissionModeFromDetails_ExtractsFragmentOrEmpty(t *testing.T) {
 func TestOrgReport_WritesFileFilteredByOrgAndUsesInjectedClock(t *testing.T) {
 	dir := t.TempDir()
 	o := &Org{
-		Manifest: NewManifestStoreAtPath(filepath.Join(dir, "manifest.jsonl")),
+		Manifest: NewManifestStoreAtPath(ManifestPathIn(dir)),
 		Receipts: NewReceiptStoreAtPath(filepath.Join(dir, "receipts.jsonl")),
 		Now:      fixedClock(t, "2026-08-02T12:00:00Z"),
 	}
@@ -212,7 +212,7 @@ func TestOrgReport_DefaultOutDir_WritesUnderDocsReports(t *testing.T) {
 func TestOrgReport_EmptyOrg_StillWritesReportWithNoEventsNote(t *testing.T) {
 	dir := t.TempDir()
 	o := &Org{
-		Manifest: NewManifestStoreAtPath(filepath.Join(dir, "manifest.jsonl")),
+		Manifest: NewManifestStoreAtPath(ManifestPathIn(dir)),
 		Receipts: NewReceiptStoreAtPath(filepath.Join(dir, "receipts.jsonl")),
 		Now:      fixedClock(t, "2026-08-02T00:00:00Z"),
 	}

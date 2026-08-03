@@ -270,7 +270,7 @@ func testWatchOrg(t *testing.T) (*Org, *fakeWatchHerdr, *fakeWatchAgmsg, *fakeCl
 	clk := newFakeClock()
 	o := &Org{
 		Config:   watchTestConfig(),
-		Manifest: NewManifestStoreAtPath(filepath.Join(dir, "manifest.jsonl")),
+		Manifest: NewManifestStoreAtPath(ManifestPathIn(dir)),
 		Receipts: NewReceiptStoreAtPath(filepath.Join(dir, "receipts.jsonl")),
 		Herdr:    h,
 		Agmsg:    a,

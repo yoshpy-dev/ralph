@@ -33,9 +33,8 @@ func seedTwoOrgManifest(t *testing.T, stateDir string) {
 	// stateDir here plays the role of an already-resolved org state
 	// directory (what org.ResolveOrgStateDir returns and runStatus
 	// receives), so the fixture is written to the same path runStatus
-	// itself reads (orgManifestPath, internal/cli/org.go) -- not the
-	// root-relative path org.NewManifestStore would derive.
-	store := org.NewManifestStoreAtPath(orgManifestPath(stateDir))
+	// itself reads (org.ManifestPathIn) -- not a root-relative derivation.
+	store := org.NewManifestStoreAtPath(org.ManifestPathIn(stateDir))
 	events := []org.ManifestEvent{
 		{TS: "2026-08-01T00:00:00Z", OrgID: "org-a", SeatID: "lead", Event: org.EventSpawned, Role: "lead", Driver: "claude", Model: "opus", Worktree: "/tmp/org-a-lead"},
 		{TS: "2026-08-01T00:01:00Z", OrgID: "org-a", SeatID: "reviewer", Event: org.EventSpawned, Role: "reviewer", Driver: "codex", Model: "sonnet", Worktree: "/tmp/org-a-reviewer"},
@@ -99,7 +98,7 @@ func TestStatusCmd_OrgIDFilterShowsOnlyThatOrg(t *testing.T) {
 // org.RosterOptions{}, not from counting the dry-run-inclusive rows).
 func seedOrgWithDryRunSeat(t *testing.T, stateDir string) {
 	t.Helper()
-	store := org.NewManifestStoreAtPath(orgManifestPath(stateDir))
+	store := org.NewManifestStoreAtPath(org.ManifestPathIn(stateDir))
 	events := []org.ManifestEvent{
 		{TS: "2026-08-01T00:00:00Z", OrgID: "org-c", SeatID: "lead", Event: org.EventSpawned, Role: "lead", Driver: "claude", Model: "opus", Worktree: "/tmp/org-c-lead"},
 		{TS: "2026-08-01T00:01:00Z", OrgID: "org-c", SeatID: "shadow", Event: org.EventSpawned, Role: "qa", Driver: "codex", Model: "sonnet", Worktree: "/tmp/org-c-shadow", DryRun: true},
@@ -180,17 +179,20 @@ func TestStatusCmd_DryRunSeatIsARowButNotCountedInAggregates(t *testing.T) {
 
 // TestStatusCmd_SeesSeatWrittenByRealOrgSpawn pins live-write/status-read
 // agreement end to end: a real `ralph org spawn --dry-run` (the write path,
-// newOrgRuntimeAt -> orgManifestPath) followed by a real top-level `ralph
-// status` (the read path, runStatus -> orgManifestPath) against the same
+// newOrgRuntimeAt -> org.ManifestPathIn) followed by a real top-level `ralph
+// status` (the read path, runStatus -> org.ManifestPathIn) against the same
 // --state-dir. This is the AR-1 regression case
 // (docs/reports/cross-review-triage-org-runtime-retire-loop.md): before the
 // fix, `ralph status` called org.NewManifestStore(stateDir), which
-// re-appended org.ManifestRelPath onto an already-resolved directory and
-// always reported "no org runtime state found" for a manifest a real spawn
-// had just written. Deliberately does not touch orgManifestPath's fixture
-// helper directly (unlike seedTwoOrgManifest) so a future refactor that
-// makes only one of the two call sites use the shared helper is caught by
-// this test even if a hand-seeded fixture would not catch it.
+// re-appended a package-level root-relative fragment onto an
+// already-resolved directory and always reported "no org runtime state
+// found" for a manifest a real spawn had just written. That root-relative
+// constructor and its relative-path constant were later removed entirely
+// (C2-3, docs/tech-debt/README.md) in favor of org.ManifestPathIn as the
+// single derivation. Deliberately does not touch a shared fixture helper
+// directly (unlike seedTwoOrgManifest) so a future refactor that makes only
+// one of the two call sites use org.ManifestPathIn is caught by this test
+// even if a hand-seeded fixture would not catch it.
 //
 // Uses --dry-run (no herdr/agmsg on PATH needed) and asserts the seat shows
 // up in the top-level `ralph status` output with no --all flag: unlike
@@ -251,7 +253,7 @@ func TestStatusCmd_EmptyStateDirShowsFriendlyNoteAndDoctorHint(t *testing.T) {
 // (M5: printStatusEmpty must not silently discard rr.CorruptLines).
 func TestStatusCmd_EmptyRosterFromFullyCorruptManifestStillWarns(t *testing.T) {
 	dir := t.TempDir()
-	store := org.NewManifestStoreAtPath(orgManifestPath(dir))
+	store := org.NewManifestStoreAtPath(org.ManifestPathIn(dir))
 	if err := os.MkdirAll(filepath.Dir(store.Path()), 0o755); err != nil {
 		t.Fatalf("mkdir manifest dir: %v", err)
 	}

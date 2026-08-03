@@ -54,7 +54,7 @@ type orgGroup struct {
 }
 
 func runStatus(cmd *cobra.Command, stateDir, filterOrgID string, jsonOut bool) error {
-	store := org.NewManifestStoreAtPath(orgManifestPath(stateDir))
+	store := org.NewManifestStoreAtPath(org.ManifestPathIn(stateDir))
 	rr, err := store.Read()
 	if err != nil {
 		return fmt.Errorf("status: read manifest: %w", err)

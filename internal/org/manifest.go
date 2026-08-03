@@ -42,19 +42,30 @@ type ManifestEvent struct {
 	Details        string `json:"details,omitempty"` // free text: rejection reason, compensation result, etc.
 }
 
-// ManifestRelPath is the default state-root-relative path for the org
-// manifest JSONL store.
-const ManifestRelPath = ".harness/state/org/manifest.jsonl"
-
 // ManifestStore appends to and reads the org manifest JSONL file.
 type ManifestStore struct {
 	path string
 }
 
-// NewManifestStore returns a ManifestStore rooted at root (typically the
-// worktree/state root), using the default ManifestRelPath fragment.
-func NewManifestStore(root string) *ManifestStore {
-	return &ManifestStore{path: filepath.Join(root, ManifestRelPath)}
+// ManifestPathIn returns the manifest.jsonl path within an already-resolved
+// org state directory (i.e. a directory produced by org.ResolveOrgStateDir,
+// not a caller-supplied "root" to be joined against a fixed relative
+// fragment). This is THE single derivation of a manifest path from a
+// resolved state dir -- every caller (internal/cli/org.go's write path,
+// status.go's read path, and tests) must go through this function instead
+// of re-deriving the join themselves. The root-relative constructor this
+// package used to export (NewManifestStore(root), joining root against a
+// package-level ManifestRelPath constant) was removed because a caller could
+// pass an already-resolved state dir into it by mistake, silently
+// double-joining the relative fragment onto a directory that already ended
+// in it -- exactly the bug behind AR-1
+// (docs/reports/cross-review-triage-org-runtime-retire-loop.md), where
+// `ralph status` read from the wrong path and stayed blind to every manifest
+// a real `ralph org spawn` had written. Centralizing the join here removes
+// the ambiguity: there is only one function that turns a resolved state dir
+// into a manifest path.
+func ManifestPathIn(stateDir string) string {
+	return filepath.Join(stateDir, "manifest.jsonl")
 }
 
 // NewManifestStoreAtPath returns a ManifestStore backed by an explicit file
