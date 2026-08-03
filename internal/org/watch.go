@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -97,6 +99,62 @@ type watchAgmsgHistory interface {
 // itself never calls exec.Command directly for this and so tests can drive
 // scope changes deterministically without a real git worktree.
 type GitStatusFunc func(cwd string) (string, error)
+
+// maxScopeChangeLines bounds how many `git status --porcelain` lines the
+// scope-change ALERT body interpolates before summarizing the rest as
+// "... N more lines" (tech-debt: "watchdog deferred LOW (2)"). A busy seat's
+// worktree can have hundreds of dirty files; interpolating all of them
+// whole made the eventual sendAlert message exceed
+// protocol.DefaultMaxBodyChars and silently degrade to the content-free
+// protocol-validation-failure fallback below, so Lead saw nothing about
+// what actually changed.
+const maxScopeChangeLines = 20
+
+// scopeChangeBodyBudget is a hard byte/char cap on the (possibly
+// line-truncated) porcelain text truncateScopeOutput returns, applied on top
+// of maxScopeChangeLines: porcelain paths have no length limit, so 20 lines
+// alone is not itself a size guarantee (e.g. 20 lines of long generated-file
+// paths can still exceed protocol.DefaultMaxBodyChars once the message's own
+// "TYPE/ORG_ID/SEAT/CONDITION" header and "seat %s worktree scope
+// changed:" prose are added). Chosen with headroom under
+// protocol.DefaultMaxBodyChars (2000) for that surrounding text -- the
+// scope-change message shape in evaluateSeat is small and fixed, so 1600
+// leaves well over 100 chars of margin for org_id/seat_id (each capped at 30
+// chars, see identifier.go) plus the fixed prose around it.
+const scopeChangeBodyBudget = 1600
+
+// truncateScopeOutput bounds git status --porcelain output (out) before it
+// is interpolated into a scope-change ALERT body: first by line count
+// (maxScopeChangeLines), then -- because that alone is not a byte-size
+// guarantee -- by repeatedly dropping trailing lines until the result (plus
+// the "... N more lines" summary line, when anything was dropped) fits
+// within byteBudget. This keeps the eventual sendAlert message reliably
+// under protocol.DefaultMaxBodyChars instead of relying on sendAlert's own
+// oversized-body fallback (which drops the scope text entirely) to catch
+// what this function should have bounded in the first place.
+func truncateScopeOutput(out string, byteBudget int) string {
+	trimmed := strings.TrimRight(out, "\n")
+	if trimmed == "" {
+		return trimmed
+	}
+	lines := strings.Split(trimmed, "\n")
+	total := len(lines)
+	kept := lines
+	if len(kept) > maxScopeChangeLines {
+		kept = kept[:maxScopeChangeLines]
+	}
+	for {
+		hidden := total - len(kept)
+		body := strings.Join(kept, "\n")
+		if hidden > 0 {
+			body = fmt.Sprintf("%s\n… %d more lines", body, hidden)
+		}
+		if len(body) <= byteBudget || len(kept) == 0 {
+			return body
+		}
+		kept = kept[:len(kept)-1]
+	}
+}
 
 // EscalateFunc performs the AC-5 best-effort platform notification beyond
 // the escalations.jsonl record and stderr banner (both of which RunWatch
@@ -561,6 +619,25 @@ func (w *watchRun) evaluateTotalBudget(ctx context.Context, status *watchStatusF
 		// spurious ALERT to show for it (see
 		// TestWatch_TotalBudgetCutoff_NoActiveSeats_NoAlertNoEscalation_ThenCutsNewSeat's
 		// third phase, the concrete regression this guard prevents).
+		//
+		// Recovered semantics (tech-debt: "watchdog deferred LOW (4)"): if
+		// this key already has an Active condition record -- i.e. an ALERT
+		// for this exact org-level condition fired in a prior cycle, while
+		// seats were still active -- clear its Active flag here, mirroring
+		// raiseOrClear's own "recovered: clears, a future re-occurrence
+		// re-alerts" rule for non-cutoff conditions. Without this, a
+		// resumed org (every seat stopped, then a new seat spawned into the
+		// still-over-budget org) would have its next cutoff gated silently:
+		// evaluateTotalBudget's `alreadyAlerted := rec != nil && rec.Active`
+		// check below would see the never-cleared true from before every
+		// seat stopped and skip the ALERT, even though nothing was ever
+		// actually sent to lead about *this* occurrence. This only clears
+		// Active, not rec.Cutoff -- the separate "one cutoff per key, ever"
+		// ratchet above is unaffected, so a prior successful cutoff still
+		// permanently disables Stop for this key regardless.
+		if rec := status.Conditions[conditionKey(orgID, "", condTotalBudget)]; rec != nil {
+			rec.Active = false
+		}
 		return cutSeats
 	}
 	start, err := time.Parse(time.RFC3339, status.OrgStartTS)
@@ -681,7 +758,7 @@ func (w *watchRun) evaluateSeat(ctx context.Context, status *watchStatusFile, or
 			changed := snap.GitStatusSeen && snap.GitStatus != out
 			w.raiseOrClear(ctx, status, orgID, s.SeatID, condScopeChange, changed, now,
 				fmt.Sprintf("TYPE: ALERT\nORG_ID: %s\nSEAT: %s\nCONDITION: %s\n\nseat %s worktree scope changed:\n%s",
-					orgID, s.SeatID, condScopeChange, s.SeatID, out), true)
+					orgID, s.SeatID, condScopeChange, s.SeatID, truncateScopeOutput(out, scopeChangeBodyBudget)), true)
 			snap.GitStatus = out
 			snap.GitStatusSeen = true
 		}
@@ -821,8 +898,15 @@ func (w *watchRun) ensureWatchdogJoined(ctx context.Context, status *watchStatus
 // case where lead cannot be reached at all.
 func (w *watchRun) sendAlert(ctx context.Context, status *watchStatusFile, orgID, seatID, condType, message string, now time.Time) {
 	if err := protocol.ValidateText(message, protocol.DefaultMaxBodyChars); err != nil {
-		message = fmt.Sprintf("TYPE: ALERT\nORG_ID: %s\nCONDITION: %s\n\nwatchdog: message failed protocol validation: %v",
-			orgID, condType, err)
+		// SEAT is always included here (tech-debt: "watchdog deferred LOW
+		// (2)"), even when seatID is "" (an org-level condition like
+		// condTotalBudget): before this fix, a busy seat whose original
+		// message failed validation degraded to a fallback with no subject
+		// at all, so Lead saw only "message failed protocol validation" with
+		// no way to tell which seat (or that it was org-level) the finding
+		// was about.
+		message = fmt.Sprintf("TYPE: ALERT\nORG_ID: %s\nSEAT: %s\nCONDITION: %s\n\nwatchdog: message failed protocol validation: %v",
+			orgID, seatID, condType, err)
 	}
 	w.ensureWatchdogJoined(ctx, status, orgID)
 	if err := w.org.SendWatchdogAlert(ctx, orgID, message); err != nil {
@@ -1033,12 +1117,17 @@ func filterLeadHistoryLines(raw string) string {
 // the other, unaffected sources (manifest events, or a probe/history source
 // that had a valid baseline).
 func (w *watchRun) checkDeadman(ctx context.Context, status *watchStatusFile, rr ManifestReadResult, now time.Time) {
+	// No `if status.Escalated[alertID] { ... }` guard here (removed,
+	// tech-debt: "watchdog deferred LOW (3)"): it was unreachable dead code.
+	// escalateAlert both sets status.Escalated[alertID] = true AND deletes
+	// alertID from status.PendingAlerts in the same call (below), and every
+	// alertID is generated fresh per sendAlert call embedding a nanosecond
+	// timestamp (`"%s@%d"`, sendAlert), so no alertID this loop's `range
+	// status.PendingAlerts` ever visits can already be a key in
+	// status.Escalated -- by the time it were, it would already be gone from
+	// PendingAlerts too. status.Escalated's only remaining purpose is the
+	// historical audit trail pruneEscalated bounds (see escalateAlert).
 	for alertID, pending := range status.PendingAlerts {
-		if status.Escalated[alertID] {
-			delete(status.PendingAlerts, alertID)
-			continue
-		}
-
 		activity := leadActivityEventCount(rr.Events, status.OrgID) > pending.ManifestLen
 		if !activity && pending.LeadAgentGet != "" {
 			if cur := w.leadProbeSnapshot(ctx, status.OrgID); cur != "" && cur != pending.LeadAgentGet {
@@ -1090,5 +1179,56 @@ func (w *watchRun) escalateAlert(ctx context.Context, status *watchStatusFile, a
 	_ = w.escalateFn(ctx, fmt.Sprintf("ralph org watch: escalation for org %s (%s)", status.OrgID, reason))
 
 	status.Escalated[alertID] = true
+	pruneEscalated(status.Escalated)
 	delete(status.PendingAlerts, alertID)
+}
+
+// maxEscalatedEntries caps status.Escalated (tech-debt: "watchdog deferred
+// LOW (3)") so a long-running `ralph org watch` process does not grow
+// watch-status-<org_id>.json without bound: every alertID this org ever
+// escalated was persisted here forever, with the now-removed unreachable
+// guard in checkDeadman the only place that ever consulted it (see that
+// function's own comment for why status.Escalated no longer needs to gate
+// anything -- it survives purely as a bounded audit trail).
+const maxEscalatedEntries = 100
+
+// pruneEscalated drops the oldest entries from escalated once it exceeds
+// maxEscalatedEntries, keeping status.Escalated's growth bounded. A Go map
+// has no insertion order to prune by, so "oldest" is derived deterministically
+// from the nanosecond Unix timestamp each alertID already embeds as its
+// "<conditionKey>@<unixnano>" suffix (sendAlert's `"%s@%d"` format) -- a
+// sort, not a second insertion-order data structure (e.g. a ring buffer)
+// kept in parallel with the map.
+func pruneEscalated(escalated map[string]bool) {
+	if len(escalated) <= maxEscalatedEntries {
+		return
+	}
+	ids := make([]string, 0, len(escalated))
+	for id := range escalated {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool {
+		return escalatedTimestamp(ids[i]) < escalatedTimestamp(ids[j])
+	})
+	drop := len(ids) - maxEscalatedEntries
+	for _, id := range ids[:drop] {
+		delete(escalated, id)
+	}
+}
+
+// escalatedTimestamp extracts the nanosecond Unix timestamp embedded in
+// alertID's "<conditionKey>@<unixnano>" suffix (sendAlert's format), or 0 if
+// the suffix is missing or unparseable -- an unparseable id then sorts first
+// (oldest), the safe direction for a best-effort prune: worst case it drops
+// a malformed id before a genuinely old one, never the reverse.
+func escalatedTimestamp(alertID string) int64 {
+	idx := strings.LastIndex(alertID, "@")
+	if idx < 0 {
+		return 0
+	}
+	n, err := strconv.ParseInt(alertID[idx+1:], 10, 64)
+	if err != nil {
+		return 0
+	}
+	return n
 }

@@ -1557,6 +1557,35 @@ func TestOrgWatch_Once_RunsExactlyOneCycleAndWritesStatus(t *testing.T) {
 	}
 }
 
+// TestOrgWatch_Once_BannerShowsStateDirSource pins the tech-debt
+// "watchdog deferred LOW (1)" fix: org.ResolveOrgStateDir's second return
+// value (the resolved precedence tier) used to be discarded (`_`) at this
+// call site, so the startup banner never told an operator which of
+// flag/env/git-toplevel/cwd actually produced state-dir. --state-dir is
+// passed explicitly here, so the expected source is "flag" (see
+// ResolveOrgStateDir's own doc comment for the precedence order).
+func TestOrgWatch_Once_BannerShowsStateDirSource(t *testing.T) {
+	setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	if _, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
+		"--state-dir", stateDir,
+	); err != nil {
+		t.Fatalf("spawn failed: %v", err)
+	}
+
+	out, err := runOrgCmd(t, "watch", "--org-id", "org-a", "--once", "--state-dir", stateDir)
+	if err != nil {
+		t.Fatalf("watch --once failed: %v (output: %s)", err, out)
+	}
+	if !strings.Contains(out, "(source: flag)") {
+		t.Errorf("expected the watch banner to name the state-dir source (\"(source: flag)\" for an explicit --state-dir), got: %s", out)
+	}
+}
+
 // --- newWatchdogHooks (PR④ Slice 4, AC-6 wiring) -----------------------
 
 // writeClaudeStub writes a fake `claude` executable to a fresh temp dir and

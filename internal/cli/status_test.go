@@ -227,6 +227,69 @@ func TestStatusCmd_SeesSeatWrittenByRealOrgSpawn(t *testing.T) {
 	}
 }
 
+// TestStatusCmd_ShowsStateDirSource pins the tech-debt "watchdog deferred
+// LOW (1)" fix on the `ralph status` side: org.ResolveOrgStateDir's second
+// return value used to be discarded (`_`) at this call site too. Both the
+// text table header (populated roster) and the --json state_dir_source
+// field must carry the resolved precedence tier -- "flag" here, since
+// --state-dir is passed explicitly.
+func TestStatusCmd_ShowsStateDirSource(t *testing.T) {
+	dir := t.TempDir()
+	seedTwoOrgManifest(t, dir)
+
+	out, err := runStatusCmd(t, "--state-dir", dir)
+	if err != nil {
+		t.Fatalf("status: %v (output: %s)", err, out)
+	}
+	if !strings.Contains(out, "(source: flag)") {
+		t.Errorf("expected the text table to show the state-dir source, got:\n%s", out)
+	}
+
+	jsonOut, err := runStatusCmd(t, "--state-dir", dir, "--json")
+	if err != nil {
+		t.Fatalf("status --json: %v (output: %s)", err, jsonOut)
+	}
+	var payload struct {
+		StateDirSource string `json:"state_dir_source"`
+	}
+	if err := json.Unmarshal([]byte(jsonOut), &payload); err != nil {
+		t.Fatalf("json.Unmarshal: %v\noutput:\n%s", err, jsonOut)
+	}
+	if payload.StateDirSource != "flag" {
+		t.Errorf("expected state_dir_source=%q, got %q\noutput:\n%s", "flag", payload.StateDirSource, jsonOut)
+	}
+}
+
+// TestStatusCmd_EmptyStateDirShowsSourceToo is the same state_dir_source
+// assertion against the empty-roster path (printStatusEmpty), which folds
+// the annotation into its existing message rather than a separate header
+// line (see printStatusEmpty's doc comment).
+func TestStatusCmd_EmptyStateDirShowsSourceToo(t *testing.T) {
+	dir := t.TempDir()
+
+	out, err := runStatusCmd(t, "--state-dir", dir)
+	if err != nil {
+		t.Fatalf("status: %v (output: %s)", err, out)
+	}
+	if !strings.Contains(out, "(source: flag)") {
+		t.Errorf("expected the empty-roster message to show the state-dir source, got:\n%s", out)
+	}
+
+	jsonOut, err := runStatusCmd(t, "--state-dir", dir, "--json")
+	if err != nil {
+		t.Fatalf("status --json: %v (output: %s)", err, jsonOut)
+	}
+	var payload struct {
+		StateDirSource string `json:"state_dir_source"`
+	}
+	if err := json.Unmarshal([]byte(jsonOut), &payload); err != nil {
+		t.Fatalf("json.Unmarshal: %v\noutput:\n%s", err, jsonOut)
+	}
+	if payload.StateDirSource != "flag" {
+		t.Errorf("expected state_dir_source=%q on the empty-roster JSON path too, got %q\noutput:\n%s", "flag", payload.StateDirSource, jsonOut)
+	}
+}
+
 func TestStatusCmd_EmptyStateDirShowsFriendlyNoteAndDoctorHint(t *testing.T) {
 	dir := t.TempDir() // no manifest ever written here
 

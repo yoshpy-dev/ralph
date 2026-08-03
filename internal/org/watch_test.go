@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -12,6 +13,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/yoshpy-dev/ralph/internal/config"
 	"github.com/yoshpy-dev/ralph/internal/org/protocol"
@@ -469,6 +471,17 @@ func TestWatch_TotalBudgetCutoff_CutsAllActiveSeats_OneOrgLevelAlert(t *testing.
 // positive, repeating every cycle forever. Once a new seat becomes active in
 // that same, still-over-budget org, total-budget enforcement resumes
 // normally.
+//
+// Expectations here are unchanged by the tech-debt "watchdog deferred LOW
+// (4)" fix (clearing Conditions[key].Active when the zero-active-seats guard
+// fires): this test's zero-active-seats window begins *before* any
+// total-budget ALERT was ever sent for org-a (seat-1 is stopped by test
+// setup, pre-cycle), so Conditions[key] is nil the whole way through and the
+// new clear-on-empty branch is a no-op here. The scenario that branch
+// actually fixes -- an ALERT already fired (Conditions[key].Active == true)
+// before every seat stopped -- is
+// TestWatch_TotalBudgetCutoff_ResumeAfterAllSeatsStop_ReAlertsOnNewCutoff,
+// below.
 func TestWatch_TotalBudgetCutoff_NoActiveSeats_NoAlertNoEscalation_ThenCutsNewSeat(t *testing.T) {
 	o, _, a, clk := testWatchOrg(t)
 	o.Config.Budget.TotalWallClockMinutes = 5
@@ -696,6 +709,147 @@ func TestWatch_ScopeChange_AlertCarriesScopeText_NoCutoff(t *testing.T) {
 	}
 	if n := h.countKeys("C-c"); n != 0 {
 		t.Errorf("scope change must never cut off the seat, got %d Stop attempts", n)
+	}
+}
+
+// TestWatch_ScopeChange_TruncatesOversizedPorcelainOutput pins the
+// tech-debt "watchdog deferred LOW (2)" fix: a busy seat's `git status
+// --porcelain` output used to be interpolated whole into the scope-change
+// ALERT body, which could push the overall message past
+// protocol.DefaultMaxBodyChars and silently degrade to the content-free
+// protocol-validation-failure fallback (asserted separately by
+// TestSendAlert_ProtocolValidationFailureFallback_IncludesSeatHeader).
+// 30 dirty files, each with a long generated-file-style path, both exceeds
+// maxScopeChangeLines (20) and -- even after that line-count truncation --
+// would still overflow DefaultMaxBodyChars without the byte-budget second
+// pass in truncateScopeOutput.
+func TestWatch_ScopeChange_TruncatesOversizedPorcelainOutput(t *testing.T) {
+	o, _, a, _ := testWatchOrg(t)
+	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", r)
+	}
+
+	seat1Cwd := watchSpawnParams("org-a", "seat-1", "worker").Cwd
+	var dirtyLines []string
+	for i := range 30 {
+		dirtyLines = append(dirtyLines, fmt.Sprintf(" M internal/some/deeply/nested/generated/package/directory/file_number_%03d_with_a_long_name.go", i))
+	}
+	oversized := strings.Join(dirtyLines, "\n")
+	calls := 0
+	gitStatus := func(cwd string) (string, error) {
+		calls++
+		if cwd != seat1Cwd || calls == 1 {
+			return "", nil // baseline: clean worktree
+		}
+		return oversized, nil
+	}
+
+	run, statusPath, _ := newTestWatchRun(o, gitStatus, nil, &bytes.Buffer{})
+	status, err := loadWatchStatus(statusPath, "org-a")
+	if err != nil {
+		t.Fatalf("loadWatchStatus: %v", err)
+	}
+
+	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		t.Fatalf("cycle 1 (baseline): %v", err)
+	}
+	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		t.Fatalf("cycle 2 (scope changed): %v", err)
+	}
+
+	alerts := watchdogAlerts(a)
+	if n := len(alerts); n != 1 {
+		t.Fatalf("expected exactly 1 scope-change ALERT, got %d: %+v", n, alerts)
+	}
+	body := alerts[0].message
+	if n := utf8.RuneCountInString(body); n > protocol.DefaultMaxBodyChars {
+		t.Errorf("expected the ALERT message to stay within DefaultMaxBodyChars (%d), got %d chars:\n%s",
+			protocol.DefaultMaxBodyChars, n, body)
+	}
+	if !strings.Contains(body, "more lines") {
+		t.Errorf("expected a \"... N more lines\" truncation summary in the ALERT body, got:\n%s", body)
+	}
+	if strings.Contains(body, "file_number_029") {
+		t.Errorf("expected the 30th dirty-file line to be truncated out of the ALERT body, got:\n%s", body)
+	}
+	if !strings.Contains(body, "file_number_000") {
+		t.Errorf("expected the first dirty-file line to still be present in the ALERT body, got:\n%s", body)
+	}
+}
+
+// TestTruncateScopeOutput_LineCountThenByteBudget unit-tests
+// truncateScopeOutput directly: a two-pass truncation (line count, then a
+// hard byte budget) rather than either bound alone.
+func TestTruncateScopeOutput_LineCountThenByteBudget(t *testing.T) {
+	t.Run("within both bounds returns unchanged", func(t *testing.T) {
+		in := " M a.go\n?? b.go"
+		if got := truncateScopeOutput(in, scopeChangeBodyBudget); got != in {
+			t.Errorf("expected unchanged output for small input, got %q", got)
+		}
+	})
+
+	t.Run("over line count but under byte budget truncates by line only", func(t *testing.T) {
+		var lines []string
+		for i := range 25 {
+			lines = append(lines, fmt.Sprintf(" M f%d.go", i))
+		}
+		in := strings.Join(lines, "\n")
+		got := truncateScopeOutput(in, scopeChangeBodyBudget)
+		if !strings.Contains(got, "… 5 more lines") {
+			t.Errorf("expected exactly 5 hidden lines (25 - maxScopeChangeLines=20), got:\n%s", got)
+		}
+		if strings.Contains(got, "f24.go") {
+			t.Errorf("expected the 25th line truncated out, got:\n%s", got)
+		}
+	})
+
+	t.Run("under line count but over byte budget truncates by size", func(t *testing.T) {
+		in := strings.Repeat("x", 500) // one line, well under maxScopeChangeLines
+		got := truncateScopeOutput(in, 100)
+		if utf8.RuneCountInString(got) > 100 {
+			t.Errorf("expected output bounded to the byte budget, got %d chars: %q", len(got), got)
+		}
+		if !strings.Contains(got, "more lines") {
+			t.Errorf("expected a truncation summary once even a single line is dropped for size, got %q", got)
+		}
+	})
+}
+
+// TestSendAlert_ProtocolValidationFailureFallback_IncludesSeatHeader pins
+// the second half of the tech-debt "watchdog deferred LOW (2)" fix: the
+// protocol-validation-failure fallback message itself must still carry a
+// `SEAT: <seat_id>` header so Lead can identify the subject seat, instead of
+// only "message failed protocol validation" with no indication of who it
+// was about. Constructs an oversized body directly (rather than relying on
+// scope-change's own truncation, which is designed to prevent this path
+// from being reached in practice) so this fallback is exercised even if
+// truncateScopeOutput's budget is later tuned.
+func TestSendAlert_ProtocolValidationFailureFallback_IncludesSeatHeader(t *testing.T) {
+	o, _, a, clk := testWatchOrg(t)
+	run, statusPath, _ := newTestWatchRun(o, nil, nil, &bytes.Buffer{})
+	status, err := loadWatchStatus(statusPath, "org-a")
+	if err != nil {
+		t.Fatalf("loadWatchStatus: %v", err)
+	}
+	// sendAlert is normally only reached through evaluateCycle, which
+	// lazy-inits these maps first; called directly here, so mirror that
+	// same lazy-init.
+	status.PendingAlerts = map[string]*watchPendingAlert{}
+
+	oversizedBody := strings.Repeat("x", protocol.DefaultMaxBodyChars+500)
+	msg := fmt.Sprintf("TYPE: ALERT\nORG_ID: org-a\nSEAT: seat-1\nCONDITION: scope_change\n\n%s", oversizedBody)
+	run.sendAlert(context.Background(), status, "org-a", "seat-1", "scope_change", msg, clk.Now())
+
+	alerts := watchdogAlerts(a)
+	if n := len(alerts); n != 1 {
+		t.Fatalf("expected exactly 1 ALERT send, got %d: %+v", n, alerts)
+	}
+	body := alerts[0].message
+	if !strings.Contains(body, "SEAT: seat-1") {
+		t.Errorf("expected the fallback message to carry a SEAT header for the subject seat, got:\n%s", body)
+	}
+	if !strings.Contains(body, "message failed protocol validation") {
+		t.Errorf("expected the fallback message text, got:\n%s", body)
 	}
 }
 
@@ -1866,6 +2020,201 @@ func TestWatch_EnsureWatchdogJoined_TransientFailure_RetriesUntilSuccess(t *test
 	alerts := watchdogAlerts(a)
 	if len(alerts) != 2 {
 		t.Fatalf("expected 2 ALERTs sent (cycle 1 and cycle 3) despite the cycle-1 Join failure, got %d: %+v", len(alerts), alerts)
+	}
+}
+
+// --- AC-5: status.Escalated bookkeeping (tech-debt: "watchdog deferred LOW
+// (3)": unreachable checkDeadman guard removed, pruning added) -------------
+
+// TestPruneEscalated_CapsAtMaxEntries_DropsOldestByEmbeddedTimestamp is a
+// direct unit test of pruneEscalated's deterministic-survivor contract: 101
+// entries whose alertIDs embed strictly increasing nanosecond timestamps
+// (0..100, sendAlert's "<conditionKey>@<unixnano>" format) prune down to
+// exactly maxEscalatedEntries (100), dropping the single oldest (timestamp
+// 0) and keeping every other entry -- not an arbitrary/random map-iteration
+// eviction.
+func TestPruneEscalated_CapsAtMaxEntries_DropsOldestByEmbeddedTimestamp(t *testing.T) {
+	escalated := map[string]bool{}
+	for i := 0; i <= maxEscalatedEntries; i++ { // 101 entries: timestamps 0..100
+		escalated[fmt.Sprintf("org-a//deadman@%d", i)] = true
+	}
+	if len(escalated) != maxEscalatedEntries+1 {
+		t.Fatalf("setup: expected %d entries, got %d", maxEscalatedEntries+1, len(escalated))
+	}
+
+	pruneEscalated(escalated)
+
+	if len(escalated) != maxEscalatedEntries {
+		t.Fatalf("expected pruneEscalated to cap at %d entries, got %d", maxEscalatedEntries, len(escalated))
+	}
+	if escalated["org-a//deadman@0"] {
+		t.Errorf("expected the oldest entry (embedded timestamp 0) to be pruned, but it survived")
+	}
+	for i := 1; i <= maxEscalatedEntries; i++ {
+		id := fmt.Sprintf("org-a//deadman@%d", i)
+		if !escalated[id] {
+			t.Errorf("expected entry %q to survive pruning (deterministic survivor set), but it was dropped", id)
+		}
+	}
+}
+
+// TestPruneEscalated_AtExactlyMaxEntries_NoPruning confirms the cap is
+// "prune once *over* maxEscalatedEntries", not "keep strictly fewer than"
+// -- exactly maxEscalatedEntries entries must be left untouched.
+func TestPruneEscalated_AtExactlyMaxEntries_NoPruning(t *testing.T) {
+	escalated := map[string]bool{}
+	for i := range maxEscalatedEntries {
+		escalated[fmt.Sprintf("org-a//deadman@%d", i)] = true
+	}
+	pruneEscalated(escalated)
+	if len(escalated) != maxEscalatedEntries {
+		t.Errorf("expected no pruning at exactly maxEscalatedEntries entries, got %d", len(escalated))
+	}
+}
+
+// TestWatch_EscalateAlert_PrunesAt101stEscalation is the integration-level
+// regression: escalateAlert itself (not just the pruneEscalated helper in
+// isolation) must keep status.Escalated bounded as a long-running `ralph org
+// watch` process accumulates escalations across many cycles, and the
+// oldest-first eviction must hold end to end.
+func TestWatch_EscalateAlert_PrunesAt101stEscalation(t *testing.T) {
+	o, _, _, clk := testWatchOrg(t)
+	run, statusPath, _ := newTestWatchRun(o, nil, nil, &bytes.Buffer{})
+	status, err := loadWatchStatus(statusPath, "org-a")
+	if err != nil {
+		t.Fatalf("loadWatchStatus: %v", err)
+	}
+	status.Escalated = map[string]bool{}
+
+	for i := 0; i <= maxEscalatedEntries; i++ { // 101 escalations
+		alertID := fmt.Sprintf("org-a/seat-x/deadman@%d", i)
+		pending := &watchPendingAlert{AlertID: alertID, Subject: "seat-x", TS: clk.Now().UTC().Format(time.RFC3339)}
+		run.escalateAlert(context.Background(), status, alertID, pending, clk.Now())
+	}
+
+	if len(status.Escalated) != maxEscalatedEntries {
+		t.Fatalf("expected status.Escalated capped at %d entries after %d escalations, got %d",
+			maxEscalatedEntries, maxEscalatedEntries+1, len(status.Escalated))
+	}
+	if status.Escalated["org-a/seat-x/deadman@0"] {
+		t.Errorf("expected the oldest escalation (timestamp 0) to be pruned from status.Escalated")
+	}
+	newest := fmt.Sprintf("org-a/seat-x/deadman@%d", maxEscalatedEntries)
+	if !status.Escalated[newest] {
+		t.Errorf("expected the newest escalation %q to survive pruning", newest)
+	}
+}
+
+// --- AC-3b: total-budget zero-active-seats guard resume semantics
+// (tech-debt: "watchdog deferred LOW (4)") ----------------------------------
+
+// TestWatch_TotalBudgetCutoff_ResumeAfterAllSeatsStop_ReAlertsOnNewCutoff is
+// the scenario TestWatch_TotalBudgetCutoff_NoActiveSeats_NoAlertNoEscalation_ThenCutsNewSeat
+// does not cover: that test's zero-active-seats window begins *before* any
+// total-budget ALERT was ever sent (the only seat was stopped by test setup
+// pre-cycle, so Conditions[key] is nil throughout). This test instead gets
+// Conditions[key].Active to true (an ALERT already fired) *while leaving
+// Cutoff false* -- otherwise the separate "one cutoff per key, ever" ratchet
+// (rec.Cutoff, evaluateTotalBudget's own early return) would permanently
+// block this key regardless of the Active-clearing fix under test, making
+// the two mechanisms indistinguishable. That combination is reached by
+// making the watchdog's own Stop attempt fail (chmod trick, same technique
+// as TestWatch_SeatBudgetCutoff_StopFails_RetriesThenSucceeds) so cycle 1
+// ALERTs (Active=true) without ever ratcheting Cutoff, then an out-of-band
+// `o.Stop` (simulating an operator manually stopping the stuck seat, not
+// the watchdog's own cutoff) empties the roster without touching rec at
+// all. Only then does a replacement seat spawn into the still-over-budget
+// org -- before this fix, the never-cleared Active flag silently gated that
+// occurrence's ALERT (Cutoff stays false throughout, so the ratchet itself
+// never fires and cannot explain a missing ALERT).
+func TestWatch_TotalBudgetCutoff_ResumeAfterAllSeatsStop_ReAlertsOnNewCutoff(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: a read-only manifest file is still writable, so this permission-based failure injection does not apply")
+	}
+	o, _, a, clk := testWatchOrg(t)
+	o.Config.Budget.TotalWallClockMinutes = 5
+	o.Config.Budget.SeatWallClockMinutes = 1000 // avoid seat-level cutoff firing first
+	o.Config.DeadmanMinutes = 5
+
+	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn seat-1 failed: %+v", r)
+	}
+
+	run, statusPath, _ := newTestWatchRun(o, nil, nil, &bytes.Buffer{})
+	status, err := loadWatchStatus(statusPath, "org-a")
+	if err != nil {
+		t.Fatalf("loadWatchStatus: %v", err)
+	}
+
+	// Cycle 1: seat-1 is active and the org is over budget. Manifest is
+	// read-only, so the watchdog's own Stop attempt fails: Active becomes
+	// true (the ALERT still sends) but Cutoff stays false.
+	manifestPath := o.Manifest.Path()
+	if err := os.Chmod(manifestPath, 0o444); err != nil {
+		t.Fatalf("chmod manifest read-only: %v", err)
+	}
+	clk.Advance(10 * time.Minute)
+	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		t.Fatalf("cycle 1 (ALERTs, Stop fails): %v", err)
+	}
+	if err := os.Chmod(manifestPath, 0o644); err != nil {
+		t.Fatalf("chmod manifest writable: %v", err)
+	}
+	if n := len(watchdogAlerts(a)); n != 1 {
+		t.Fatalf("expected exactly 1 total-budget ALERT from cycle 1, got %d: %+v", n, watchdogAlerts(a))
+	}
+	key := conditionKey("org-a", "", condTotalBudget)
+	if rec := status.Conditions[key]; rec == nil || !rec.Active || rec.Cutoff {
+		t.Fatalf("expected Active=true, Cutoff=false after cycle 1 (Stop failed), got %+v", rec)
+	}
+	st, err := o.Status("org-a", false)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if !findSeatStatus(t, st.Seats, "seat-1").Active {
+		t.Fatalf("expected seat-1 to remain active after the failed Stop")
+	}
+
+	// An operator manually stops the stuck seat out-of-band (not through
+	// the watchdog's own cutoff attempt) -- this is what actually empties
+	// the roster, distinct from evaluateTotalBudget ever succeeding at it.
+	if r := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-1", Reason: "operator manual stop"}); r.Err != nil {
+		t.Fatalf("manual stop seat-1: %v", r.Err)
+	}
+
+	// Cycle 2: zero active seats -- the AR-2 guard fires. Must not
+	// spuriously re-ALERT, and (the fix under test) must clear Active so a
+	// later occurrence is not silently gated.
+	clk.Advance(1 * time.Minute)
+	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		t.Fatalf("cycle 2 (zero active seats): %v", err)
+	}
+	if n := len(watchdogAlerts(a)); n != 1 {
+		t.Fatalf("expected still exactly 1 ALERT while zero seats are active, got %d: %+v", n, watchdogAlerts(a))
+	}
+	if rec := status.Conditions[key]; rec == nil || rec.Active {
+		t.Fatalf("expected Active cleared (recovered semantics) once the zero-active-seats guard fires, got %+v", rec)
+	}
+	if rec := status.Conditions[key]; rec != nil && rec.Cutoff {
+		t.Fatalf("expected Cutoff to remain untouched (still false) by the zero-active-seats guard, got %+v", rec)
+	}
+
+	// A new seat spawns into the same, still-over-budget org: this is the
+	// resume case. Before this fix, the never-cleared Active flag from
+	// cycle 1 would silently gate this occurrence's ALERT even though
+	// Cutoff (false) never blocks the ratchet from trying again.
+	if r := o.Spawn(watchSpawnParams("org-a", "seat-2", "worker")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn seat-2 failed: %+v", r)
+	}
+	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		t.Fatalf("cycle 3 (seat-2 active, resumed cutoff): %v", err)
+	}
+	if n := len(watchdogAlerts(a)); n != 2 {
+		t.Fatalf("expected a second total-budget ALERT once a new seat resumes the still-over-budget org (silent-resume regression), got %d: %+v",
+			n, watchdogAlerts(a))
+	}
+	if st, serr := o.Status("org-a", false); serr != nil || findSeatStatus(t, st.Seats, "seat-2").Active {
+		t.Fatalf("expected seat-2 to be cut off by the resumed total-budget cutoff (status err=%v)", serr)
 	}
 }
 

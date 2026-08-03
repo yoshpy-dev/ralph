@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -35,8 +36,8 @@ func newStatusCmd() *cobra.Command {
 			"seat counts, and -- when `ralph org watch` has run for that org -- the last\n" +
 			"watch heartbeat and pending alert count.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			resolvedStateDir, _ := org.ResolveOrgStateDir(stateDir, cmd.Flags().Changed("state-dir"))
-			return runStatus(cmd, resolvedStateDir, orgID, jsonOut)
+			resolvedStateDir, stateDirSource := org.ResolveOrgStateDir(stateDir, cmd.Flags().Changed("state-dir"))
+			return runStatus(cmd, resolvedStateDir, stateDirSource, orgID, jsonOut)
 		},
 	}
 
@@ -53,7 +54,7 @@ type orgGroup struct {
 	Seats []org.SeatStatus
 }
 
-func runStatus(cmd *cobra.Command, stateDir, filterOrgID string, jsonOut bool) error {
+func runStatus(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID string, jsonOut bool) error {
 	store := org.NewManifestStoreAtPath(org.ManifestPathIn(stateDir))
 	rr, err := store.Read()
 	if err != nil {
@@ -85,13 +86,13 @@ func runStatus(cmd *cobra.Command, stateDir, filterOrgID string, jsonOut bool) e
 	realCounts := buildRealSeatCounts(rr.Events, groups)
 
 	if len(groups) == 0 {
-		return printStatusEmpty(cmd, stateDir, filterOrgID, jsonOut, rr.CorruptLines)
+		return printStatusEmpty(cmd, stateDir, stateDirSource, filterOrgID, jsonOut, rr.CorruptLines)
 	}
 
 	if jsonOut {
-		return printStatusJSONAllOrgs(cmd, stateDir, filterOrgID, groups, realCounts, rr.CorruptLines)
+		return printStatusJSONAllOrgs(cmd, stateDir, stateDirSource, filterOrgID, groups, realCounts, rr.CorruptLines)
 	}
-	printStatusTableAllOrgs(cmd, stateDir, groups, realCounts, rr.CorruptLines)
+	printStatusTableAllOrgs(cmd, stateDir, stateDirSource, groups, realCounts, rr.CorruptLines)
 	return nil
 }
 
@@ -173,10 +174,21 @@ func readOrgWatchHeartbeat(stateDir, orgID string) (heartbeat orgWatchHeartbeat,
 	return heartbeat, true
 }
 
-func printStatusEmpty(cmd *cobra.Command, stateDir, filterOrgID string, jsonOut bool, corruptLines int) error {
+// printStateDirLine prints the resolved org state directory alongside the
+// org.ResolveOrgStateDir precedence tier that produced it (flag/env/
+// git-toplevel/cwd) -- tech-debt "watchdog deferred LOW (1)": the source was
+// being resolved everywhere but discarded (`_`) at every production call
+// site, so an operator debugging "why did `ralph status` read from an
+// unexpected directory" had no way to see which tier won without re-deriving
+// ResolveOrgStateDir's precedence by hand.
+func printStateDirLine(out io.Writer, stateDir, stateDirSource string) {
+	_, _ = fmt.Fprintf(out, "state-dir: %s (source: %s)\n", stateDir, stateDirSource)
+}
+
+func printStatusEmpty(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID string, jsonOut bool, corruptLines int) error {
 	out := cmd.OutOrStdout()
 	if jsonOut {
-		payload := statusJSON{StateDir: stateDir, OrgID: filterOrgID, Orgs: []statusOrgJSON{}, CorruptLines: corruptLines}
+		payload := statusJSON{StateDir: stateDir, StateDirSource: stateDirSource, OrgID: filterOrgID, Orgs: []statusOrgJSON{}, CorruptLines: corruptLines}
 		enc := json.NewEncoder(out)
 		enc.SetIndent("", "  ")
 		return enc.Encode(payload)
@@ -188,9 +200,9 @@ func printStatusEmpty(cmd *cobra.Command, stateDir, filterOrgID string, jsonOut 
 	// and `ralph org status`'s corrupt-count warning in org.go, which is
 	// likewise unconditional on seat count).
 	if filterOrgID != "" {
-		_, _ = fmt.Fprintf(out, "no org runtime state found (org-id=%s, state-dir=%s) — run `ralph org spawn` to start one.\n", filterOrgID, stateDir)
+		_, _ = fmt.Fprintf(out, "no org runtime state found (org-id=%s, state-dir=%s (source: %s)) — run `ralph org spawn` to start one.\n", filterOrgID, stateDir, stateDirSource)
 	} else {
-		_, _ = fmt.Fprintf(out, "no org runtime state found (state-dir=%s) — run `ralph org spawn` to start one.\n", stateDir)
+		_, _ = fmt.Fprintf(out, "no org runtime state found (state-dir=%s (source: %s)) — run `ralph org spawn` to start one.\n", stateDir, stateDirSource)
 	}
 	if corruptLines > 0 {
 		_, _ = fmt.Fprintf(out, "warning: %d corrupt manifest line(s) skipped\n", corruptLines)
@@ -247,18 +259,19 @@ type statusOrgJSON struct {
 // manifest actually had corrupt lines, and `orgs` is always an array (empty
 // or populated).
 type statusJSON struct {
-	StateDir     string          `json:"state_dir"`
-	OrgID        string          `json:"org_id,omitempty"`
-	Orgs         []statusOrgJSON `json:"orgs"`
-	CorruptLines int             `json:"corrupt_lines,omitempty"`
+	StateDir       string          `json:"state_dir"`
+	StateDirSource string          `json:"state_dir_source,omitempty"`
+	OrgID          string          `json:"org_id,omitempty"`
+	Orgs           []statusOrgJSON `json:"orgs"`
+	CorruptLines   int             `json:"corrupt_lines,omitempty"`
 }
 
-func printStatusJSONAllOrgs(cmd *cobra.Command, stateDir, filterOrgID string, groups []orgGroup, realCounts map[string]realSeatCount, corruptLines int) error {
+func printStatusJSONAllOrgs(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID string, groups []orgGroup, realCounts map[string]realSeatCount, corruptLines int) error {
 	orgsJSON := make([]statusOrgJSON, 0, len(groups))
 	for _, g := range groups {
 		orgsJSON = append(orgsJSON, buildStatusOrgJSON(stateDir, g, realCounts[g.OrgID]))
 	}
-	payload := statusJSON{StateDir: stateDir, OrgID: filterOrgID, Orgs: orgsJSON, CorruptLines: corruptLines}
+	payload := statusJSON{StateDir: stateDir, StateDirSource: stateDirSource, OrgID: filterOrgID, Orgs: orgsJSON, CorruptLines: corruptLines}
 	enc := json.NewEncoder(cmd.OutOrStdout())
 	enc.SetIndent("", "  ")
 	return enc.Encode(payload)
@@ -289,8 +302,15 @@ func buildStatusOrgJSON(stateDir string, g orgGroup, realCount realSeatCount) st
 	return result
 }
 
-func printStatusTableAllOrgs(cmd *cobra.Command, stateDir string, groups []orgGroup, realCounts map[string]realSeatCount, corruptLines int) {
+func printStatusTableAllOrgs(cmd *cobra.Command, stateDir, stateDirSource string, groups []orgGroup, realCounts map[string]realSeatCount, corruptLines int) {
 	out := cmd.OutOrStdout()
+
+	// Surfaced once at the top of the populated-roster table (tech-debt:
+	// "watchdog deferred LOW (1)") -- the empty-roster path
+	// (printStatusEmpty) folds the same "(source: ...)" annotation into its
+	// existing state-dir=... message instead of a separate line, since that
+	// path has no table to put a header line above.
+	printStateDirLine(out, stateDir, stateDirSource)
 
 	// Deterministic org order for readability, matching Roster's own
 	// OrgID-then-SeatID sort (groupSeatsByOrg preserves it already, but
