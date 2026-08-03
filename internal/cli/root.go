@@ -14,10 +14,11 @@ var (
 func NewRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "ralph",
-		Short: "Harness engineering scaffold and autonomous pipeline CLI",
+		Short: "Harness engineering scaffold and org-runtime CLI",
 		Long: `ralph is a CLI tool for harness engineering.
 It scaffolds projects with best-practice Claude Code configurations,
-manages template updates, and runs autonomous development pipelines.`,
+manages template updates, and coordinates autonomous multi-seat
+org-runtime execution (ralph org).`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}

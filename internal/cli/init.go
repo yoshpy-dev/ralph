@@ -24,7 +24,7 @@ func newInitCmd() *cobra.Command {
 		Use:   "init [directory]",
 		Short: "Initialize a new project with harness engineering scaffold",
 		Long: `Scaffolds a project with Claude Code configurations, hooks, skills,
-agents, rules, and pipeline settings. Supports both new and existing projects.`,
+agents, rules, and org-runtime config. Supports both new and existing projects.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			targetDir := "."
