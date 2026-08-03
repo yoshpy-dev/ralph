@@ -1,14 +1,13 @@
 package org
 
 import (
-	"path/filepath"
 	"testing"
 )
 
 func newTestReceiptStore(t *testing.T) *ReceiptStore {
 	t.Helper()
 	dir := t.TempDir()
-	return NewReceiptStoreAtPath(filepath.Join(dir, "model-receipts.jsonl"))
+	return NewReceiptStoreAtPath(ReceiptsPathIn(dir))
 }
 
 func TestReceiptStore_AppendReadRoundTrip(t *testing.T) {

@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # test-xreview-helpers.sh — behavioural tests for scripts/xreview-helpers.sh,
-# the /cross-review-only helpers extracted from the retired
-# scripts/ralph-cli-driver.sh (Ralph Loop execution system removal).
+# the /cross-review-only helpers extracted from the retired driver
+# dispatcher script (Ralph Loop execution system removal).
 #
 # Covers the three surviving functions: pick_reviewer, count_triage_findings,
 # detect_base_branch. These test cases are carried over unchanged in intent
-# from tests/test-ralph-cli-driver.sh Test 5 / Test 7 / Test 14 (renumbered
-# here); the loop-only functions (run_agent, resolve_phase_model,
+# from that dispatcher script's own test suite, Test 5 / Test 7 / Test 14
+# (renumbered here); the loop-only functions (run_agent, resolve_phase_model,
 # write_model_receipt) and their tests were deleted along with the rest of
-# the Ralph Loop execution system (per-slice pipeline + multi-worktree
-# orchestrator scripts).
+# the Ralph Loop execution system (per-slice + multi-worktree driver
+# scripts).
 
 set -uo pipefail
 

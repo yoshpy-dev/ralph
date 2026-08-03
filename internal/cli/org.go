@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -119,27 +118,11 @@ func newOrgRuntimeAt(resolvedStateDir, configPath string) (*org.Org, error) {
 	runner := driver.ExecRunner{}
 	return &org.Org{
 		Config:   orgCfg,
-		Manifest: org.NewManifestStoreAtPath(orgManifestPath(resolvedStateDir)),
-		Receipts: org.NewReceiptStoreAtPath(filepath.Join(resolvedStateDir, "model-receipts.jsonl")),
+		Manifest: org.NewManifestStoreAtPath(org.ManifestPathIn(resolvedStateDir)),
+		Receipts: org.NewReceiptStoreAtPath(org.ReceiptsPathIn(resolvedStateDir)),
 		Herdr:    driver.Herdr{R: runner},
 		Agmsg:    driver.Agmsg{R: runner, Home: driver.ResolveAgmsgHome(orgCfg.AgmsgHome)},
 	}, nil
-}
-
-// orgManifestPath returns the manifest.jsonl path within an already-resolved
-// org state directory (i.e. a directory produced by org.ResolveOrgStateDir,
-// not a "root" meant for org.NewManifestStore's own root-relative
-// ManifestRelPath join). Shared by newOrgRuntimeAt (the write path used by
-// every `ralph org <verb>`) and runStatus (status.go's read path) so the two
-// cannot independently drift on how a resolved state dir turns into a
-// manifest path -- that drift is exactly what caused AR-1
-// (docs/reports/cross-review-triage-org-runtime-retire-loop.md): status.go
-// used to call org.NewManifestStore(stateDir), which re-appended
-// org.ManifestRelPath onto an already-resolved directory, doubling the path
-// and making `ralph status` blind to every manifest a real `ralph org spawn`
-// had written.
-func orgManifestPath(stateDir string) string {
-	return filepath.Join(stateDir, "manifest.jsonl")
 }
 
 // resolveOrgConfig loads the [org] envelope from configPath, falling back
@@ -686,8 +669,12 @@ func newOrgWatchCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			}
 			// Resolved exactly once (self-review LOW fix) and passed through
 			// to newOrgRuntimeAt instead of also re-resolving inside a second
-			// newOrgRuntime call.
-			resolvedStateDir, _ := org.ResolveOrgStateDir(*stateDir, cmd.Flags().Changed("state-dir"))
+			// newOrgRuntime call. stateDirSource (tech-debt: "watchdog
+			// deferred LOW (1)") is surfaced in the startup banner below so
+			// an operator can tell which precedence tier (flag/env/
+			// git-toplevel/cwd) produced resolvedStateDir without re-deriving
+			// ResolveOrgStateDir's logic by hand.
+			resolvedStateDir, stateDirSource := org.ResolveOrgStateDir(*stateDir, cmd.Flags().Changed("state-dir"))
 			rt, err := newOrgRuntimeAt(resolvedStateDir, *configPath)
 			if err != nil {
 				return err
@@ -702,8 +689,8 @@ func newOrgWatchCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			// ResolveWatchInterval mirrors RunWatch's own fallback chain so
 			// the banner reports what will really execute.
 			effectiveInterval := org.ResolveWatchInterval(time.Duration(intervalSeconds)*time.Second, rt.Config.Watchdog)
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "watching org %q (interval=%s once=%t state-dir=%s)\n",
-				*orgID, effectiveInterval, once, resolvedStateDir)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "watching org %q (interval=%s once=%t state-dir=%s (source: %s))\n",
+				*orgID, effectiveInterval, once, resolvedStateDir, stateDirSource)
 			hooks, watcherWG := newWatchdogHooks(cmd.Context(), rt, cmd.ErrOrStderr())
 			err = rt.RunWatch(cmd.Context(), org.WatchParams{
 				OrgID:     *orgID,

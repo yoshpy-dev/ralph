@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/yoshpy-dev/ralph/internal/insights"
+	"github.com/yoshpy-dev/ralph/internal/org"
 )
 
 func newInsightsCmd() *cobra.Command {
@@ -21,14 +23,21 @@ func newInsightsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "insights",
 		Short: "Show aggregated pipeline insights",
-		Long: `Aggregate insight events from docs/insights/events/ and model receipts
-from .harness/state/pipeline/model-receipts.jsonl into a pipeline summary.
+		Long: `Aggregate insight events from docs/insights/events/ and org runtime model
+receipts (<org-state-dir>/model-receipts.jsonl) into a pipeline summary.
+
+The org state dir is resolved with the same precedence "ralph org" verbs
+use (env RALPH_ORG_STATE_DIR, git toplevel, then cwd) -- see
+internal/org/statedir.go's ResolveOrgStateDir. Pass --receipts to point at
+an explicit file instead.
 
 Sections:
   Events     — per-phase table: phase / events / verdicts / findings / triage
   Escalation — slugs that reached cycle >= 2 with cycle-1 vs final outcomes
   Routing    — honored-rate per phase (from event routing fields)
-  Local receipts — supplementary machine-local diagnostics (not joined to events)
+  Receipts   — org runtime model-commanding receipts grouped by org_id x
+               seat_id, tri-state honored (true/false/unknown); rate is
+               true/(true+false) with unknown excluded from the denominator
 
 Use --json for machine-readable output of the full aggregate.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -36,14 +45,15 @@ Use --json for machine-readable output of the full aggregate.`,
 				eventsDir = "docs/insights/events"
 			}
 			if receiptsPath == "" {
-				receiptsPath = ".harness/state/pipeline/model-receipts.jsonl"
+				stateDir, _ := org.ResolveOrgStateDir("", false)
+				receiptsPath = org.ReceiptsPathIn(stateDir)
 			}
 			return runInsights(eventsDir, receiptsPath, jsonMode, cmd)
 		},
 	}
 
 	cmd.Flags().StringVar(&eventsDir, "events-dir", "", "directory containing insight event JSONL files (default: docs/insights/events)")
-	cmd.Flags().StringVar(&receiptsPath, "receipts", "", "path to model-receipts.jsonl (default: .harness/state/pipeline/model-receipts.jsonl)")
+	cmd.Flags().StringVar(&receiptsPath, "receipts", "", "path to the org runtime's model-receipts.jsonl (default: resolved via the org state-dir precedence -- env RALPH_ORG_STATE_DIR, git toplevel, or cwd)")
 	cmd.Flags().BoolVar(&jsonMode, "json", false, "emit the aggregate as JSON")
 
 	cmd.AddCommand(newInsightsBackfillCmd())
@@ -59,14 +69,16 @@ func runInsights(eventsDir, receiptsPath string, jsonMode bool, cmd *cobra.Comma
 
 	agg := insights.Aggregate(events, stats)
 
-	// Attach receipt diagnostics (supplementary; absent receipts → Present=false).
+	// Attach org runtime receipt diagnostics (supplementary; grouped by
+	// org_id x seat_id). AggregateReceipts always returns a valid,
+	// non-nil-Orgs summary regardless of presence, so the JSON shape stays
+	// identical whether or not the receipts file exists or has any lines.
 	receipts, rStats, err := insights.ReadReceipts(receiptsPath)
 	if err != nil {
 		return fmt.Errorf("reading receipts: %w", err)
 	}
-	if len(receipts) > 0 || rStats.LinesRead > 0 {
-		insights.AggregateWithReceipts(agg, receipts, rStats)
-	}
+	receiptsPresent := len(receipts) > 0 || rStats.LinesRead > 0
+	agg.Receipts = insights.AggregateReceipts(receipts, rStats, receiptsPath)
 
 	if jsonMode {
 		// JSON mode always emits valid JSON — zero data is represented as an
@@ -77,7 +89,7 @@ func runInsights(eventsDir, receiptsPath string, jsonMode bool, cmd *cobra.Comma
 	}
 
 	// Zero-data early return — human mode only.
-	if agg.TotalEvents == 0 && !agg.Receipts.Present {
+	if agg.TotalEvents == 0 && !receiptsPresent {
 		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "No insight data yet.")
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Expected events:   %s\n", eventsDir)
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Expected receipts: %s\n", receiptsPath)
@@ -196,37 +208,27 @@ func printInsightsHuman(agg *insights.AggregateResult, cmd *cobra.Command) error
 		}
 	}
 
-	// Local receipts section (supplementary / machine-local).
-	_, _ = fmt.Fprintf(out, "\n=== Local receipts (machine-local supplementary diagnostics) ===\n\n")
-	diag := agg.Receipts
-	if !diag.Present {
-		_, _ = fmt.Fprintln(out, "  not present — run a ralph pipeline loop to generate receipts")
-		_, _ = fmt.Fprintln(out, "  (receipts are machine-local state, not committed to the repo)")
+	// Receipts section (org runtime model-commanding receipts, grouped by
+	// org_id x seat_id; supplementary machine-local diagnostics, never
+	// joined against events).
+	_, _ = fmt.Fprintf(out, "\n=== Receipts (org runtime model-receipts: %s) ===\n\n", agg.Receipts.Path)
+	if len(agg.Receipts.Orgs) == 0 {
+		_, _ = fmt.Fprintf(out, "  no org receipts found (%s)\n", agg.Receipts.Path)
 	} else {
-		_, _ = fmt.Fprintf(out, "  total: %d  skipped: %d  honored-rate: %.0f%%\n",
-			diag.TotalCount, diag.SkippedLines, diag.HonoredRate*100)
-		if len(diag.PerPhase) > 0 {
-			_, _ = fmt.Fprintln(out, "  per phase:")
-			phaseOrder := []string{"implement", "self_review", "verify", "test", "sync_docs", "cross_review", "pr"}
-			seen := make(map[string]bool)
-			for _, p := range phaseOrder {
-				seen[p] = true
-			}
-			var extras []string
-			for p := range diag.PerPhase {
-				if !seen[p] {
-					extras = append(extras, p)
+		for _, o := range agg.Receipts.Orgs {
+			for _, s := range o.Seats {
+				commanded := strings.Join(s.CommandedModels, ",")
+				rateStr := "n/a"
+				if rate, ok := s.HonoredRate(); ok {
+					rateStr = fmt.Sprintf("%.0f%%", rate*100)
 				}
-			}
-			sort.Strings(extras)
-			for _, phase := range append(phaseOrder, extras...) {
-				rate, ok := diag.PerPhase[phase]
-				if !ok {
-					continue
-				}
-				_, _ = fmt.Fprintf(out, "    %-14s %.0f%%\n", phase, rate*100)
+				_, _ = fmt.Fprintf(out, "  ORG %s  SEAT %s  commanded=%s  honored: true=%d false=%d unknown=%d  rate=%s (unknown %d excluded)\n",
+					o.OrgID, s.SeatID, commanded, s.HonoredTrue, s.HonoredFalse, s.HonoredUnknown, rateStr, s.HonoredUnknown)
 			}
 		}
+	}
+	if agg.Receipts.SkippedLines > 0 {
+		_, _ = fmt.Fprintf(out, "  (%d corrupt line(s) skipped)\n", agg.Receipts.SkippedLines)
 	}
 	_, _ = fmt.Fprintln(out)
 	return nil

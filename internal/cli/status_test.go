@@ -33,9 +33,8 @@ func seedTwoOrgManifest(t *testing.T, stateDir string) {
 	// stateDir here plays the role of an already-resolved org state
 	// directory (what org.ResolveOrgStateDir returns and runStatus
 	// receives), so the fixture is written to the same path runStatus
-	// itself reads (orgManifestPath, internal/cli/org.go) -- not the
-	// root-relative path org.NewManifestStore would derive.
-	store := org.NewManifestStoreAtPath(orgManifestPath(stateDir))
+	// itself reads (org.ManifestPathIn) -- not a root-relative derivation.
+	store := org.NewManifestStoreAtPath(org.ManifestPathIn(stateDir))
 	events := []org.ManifestEvent{
 		{TS: "2026-08-01T00:00:00Z", OrgID: "org-a", SeatID: "lead", Event: org.EventSpawned, Role: "lead", Driver: "claude", Model: "opus", Worktree: "/tmp/org-a-lead"},
 		{TS: "2026-08-01T00:01:00Z", OrgID: "org-a", SeatID: "reviewer", Event: org.EventSpawned, Role: "reviewer", Driver: "codex", Model: "sonnet", Worktree: "/tmp/org-a-reviewer"},
@@ -99,7 +98,7 @@ func TestStatusCmd_OrgIDFilterShowsOnlyThatOrg(t *testing.T) {
 // org.RosterOptions{}, not from counting the dry-run-inclusive rows).
 func seedOrgWithDryRunSeat(t *testing.T, stateDir string) {
 	t.Helper()
-	store := org.NewManifestStoreAtPath(orgManifestPath(stateDir))
+	store := org.NewManifestStoreAtPath(org.ManifestPathIn(stateDir))
 	events := []org.ManifestEvent{
 		{TS: "2026-08-01T00:00:00Z", OrgID: "org-c", SeatID: "lead", Event: org.EventSpawned, Role: "lead", Driver: "claude", Model: "opus", Worktree: "/tmp/org-c-lead"},
 		{TS: "2026-08-01T00:01:00Z", OrgID: "org-c", SeatID: "shadow", Event: org.EventSpawned, Role: "qa", Driver: "codex", Model: "sonnet", Worktree: "/tmp/org-c-shadow", DryRun: true},
@@ -180,17 +179,21 @@ func TestStatusCmd_DryRunSeatIsARowButNotCountedInAggregates(t *testing.T) {
 
 // TestStatusCmd_SeesSeatWrittenByRealOrgSpawn pins live-write/status-read
 // agreement end to end: a real `ralph org spawn --dry-run` (the write path,
-// newOrgRuntimeAt -> orgManifestPath) followed by a real top-level `ralph
-// status` (the read path, runStatus -> orgManifestPath) against the same
+// newOrgRuntimeAt -> org.ManifestPathIn) followed by a real top-level `ralph
+// status` (the read path, runStatus -> org.ManifestPathIn) against the same
 // --state-dir. This is the AR-1 regression case
 // (docs/reports/cross-review-triage-org-runtime-retire-loop.md): before the
-// fix, `ralph status` called org.NewManifestStore(stateDir), which
-// re-appended org.ManifestRelPath onto an already-resolved directory and
-// always reported "no org runtime state found" for a manifest a real spawn
-// had just written. Deliberately does not touch orgManifestPath's fixture
-// helper directly (unlike seedTwoOrgManifest) so a future refactor that
-// makes only one of the two call sites use the shared helper is caught by
-// this test even if a hand-seeded fixture would not catch it.
+// fix, `ralph status` used the package's then-exported root-relative
+// constructor, which
+// re-appended a package-level root-relative fragment onto an
+// already-resolved directory and always reported "no org runtime state
+// found" for a manifest a real spawn had just written. That root-relative
+// constructor and its relative-path constant were later removed entirely
+// (C2-3, docs/tech-debt/README.md) in favor of org.ManifestPathIn as the
+// single derivation. Deliberately does not touch a shared fixture helper
+// directly (unlike seedTwoOrgManifest) so a future refactor that makes only
+// one of the two call sites use org.ManifestPathIn is caught by this test
+// even if a hand-seeded fixture would not catch it.
 //
 // Uses --dry-run (no herdr/agmsg on PATH needed) and asserts the seat shows
 // up in the top-level `ralph status` output with no --all flag: unlike
@@ -224,6 +227,69 @@ func TestStatusCmd_SeesSeatWrittenByRealOrgSpawn(t *testing.T) {
 	}
 }
 
+// TestStatusCmd_ShowsStateDirSource pins the tech-debt "watchdog deferred
+// LOW (1)" fix on the `ralph status` side: org.ResolveOrgStateDir's second
+// return value used to be discarded (`_`) at this call site too. Both the
+// text table header (populated roster) and the --json state_dir_source
+// field must carry the resolved precedence tier -- "flag" here, since
+// --state-dir is passed explicitly.
+func TestStatusCmd_ShowsStateDirSource(t *testing.T) {
+	dir := t.TempDir()
+	seedTwoOrgManifest(t, dir)
+
+	out, err := runStatusCmd(t, "--state-dir", dir)
+	if err != nil {
+		t.Fatalf("status: %v (output: %s)", err, out)
+	}
+	if !strings.Contains(out, "(source: flag)") {
+		t.Errorf("expected the text table to show the state-dir source, got:\n%s", out)
+	}
+
+	jsonOut, err := runStatusCmd(t, "--state-dir", dir, "--json")
+	if err != nil {
+		t.Fatalf("status --json: %v (output: %s)", err, jsonOut)
+	}
+	var payload struct {
+		StateDirSource string `json:"state_dir_source"`
+	}
+	if err := json.Unmarshal([]byte(jsonOut), &payload); err != nil {
+		t.Fatalf("json.Unmarshal: %v\noutput:\n%s", err, jsonOut)
+	}
+	if payload.StateDirSource != "flag" {
+		t.Errorf("expected state_dir_source=%q, got %q\noutput:\n%s", "flag", payload.StateDirSource, jsonOut)
+	}
+}
+
+// TestStatusCmd_EmptyStateDirShowsSourceToo is the same state_dir_source
+// assertion against the empty-roster path (printStatusEmpty), which folds
+// the annotation into its existing message rather than a separate header
+// line (see printStatusEmpty's doc comment).
+func TestStatusCmd_EmptyStateDirShowsSourceToo(t *testing.T) {
+	dir := t.TempDir()
+
+	out, err := runStatusCmd(t, "--state-dir", dir)
+	if err != nil {
+		t.Fatalf("status: %v (output: %s)", err, out)
+	}
+	if !strings.Contains(out, "(source: flag)") {
+		t.Errorf("expected the empty-roster message to show the state-dir source, got:\n%s", out)
+	}
+
+	jsonOut, err := runStatusCmd(t, "--state-dir", dir, "--json")
+	if err != nil {
+		t.Fatalf("status --json: %v (output: %s)", err, jsonOut)
+	}
+	var payload struct {
+		StateDirSource string `json:"state_dir_source"`
+	}
+	if err := json.Unmarshal([]byte(jsonOut), &payload); err != nil {
+		t.Fatalf("json.Unmarshal: %v\noutput:\n%s", err, jsonOut)
+	}
+	if payload.StateDirSource != "flag" {
+		t.Errorf("expected state_dir_source=%q on the empty-roster JSON path too, got %q\noutput:\n%s", "flag", payload.StateDirSource, jsonOut)
+	}
+}
+
 func TestStatusCmd_EmptyStateDirShowsFriendlyNoteAndDoctorHint(t *testing.T) {
 	dir := t.TempDir() // no manifest ever written here
 
@@ -251,7 +317,7 @@ func TestStatusCmd_EmptyStateDirShowsFriendlyNoteAndDoctorHint(t *testing.T) {
 // (M5: printStatusEmpty must not silently discard rr.CorruptLines).
 func TestStatusCmd_EmptyRosterFromFullyCorruptManifestStillWarns(t *testing.T) {
 	dir := t.TempDir()
-	store := org.NewManifestStoreAtPath(orgManifestPath(dir))
+	store := org.NewManifestStoreAtPath(org.ManifestPathIn(dir))
 	if err := os.MkdirAll(filepath.Dir(store.Path()), 0o755); err != nil {
 		t.Fatalf("mkdir manifest dir: %v", err)
 	}

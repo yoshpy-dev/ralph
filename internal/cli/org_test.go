@@ -253,7 +253,7 @@ func TestOrgSpawn_HappyPath_EventSequenceReceiptAndWorkspaceReuse(t *testing.T) 
 		t.Errorf("expected spawned confirmation in output, got: %s", out)
 	}
 
-	manifestPath := filepath.Join(stateDir, "manifest.jsonl")
+	manifestPath := org.ManifestPathIn(stateDir)
 	events := readManifestEvents(t, manifestPath)
 	// spawn_step x5: tab_created, agent_started, agmsg_lead_joined,
 	// agmsg_joined, agmsg_announced.
@@ -262,7 +262,7 @@ func TestOrgSpawn_HappyPath_EventSequenceReceiptAndWorkspaceReuse(t *testing.T) 
 		t.Fatalf("expected event sequence %v, got %v", want, got)
 	}
 
-	receiptsPath := filepath.Join(stateDir, "model-receipts.jsonl")
+	receiptsPath := org.ReceiptsPathIn(stateDir)
 	receiptStore := org.NewReceiptStoreAtPath(receiptsPath)
 	rr, err := receiptStore.Read()
 	if err != nil {
@@ -373,7 +373,7 @@ func TestOrgSpawn_FailureInjection_TabCreate_NoCompensation(t *testing.T) {
 		t.Fatalf("expected non-zero exit on tab_create failure, output: %s", out)
 	}
 
-	events := readManifestEvents(t, filepath.Join(stateDir, "manifest.jsonl"))
+	events := readManifestEvents(t, org.ManifestPathIn(stateDir))
 	last := events[len(events)-1]
 	if last.Event != "spawn_failed" {
 		t.Fatalf("expected last event spawn_failed, got %q", last.Event)
@@ -406,7 +406,7 @@ func TestOrgSpawn_FailureInjection_AgentStart_CompensatesPane(t *testing.T) {
 		t.Fatalf("expected non-zero exit on agent_start failure, output: %s", out)
 	}
 
-	events := readManifestEvents(t, filepath.Join(stateDir, "manifest.jsonl"))
+	events := readManifestEvents(t, org.ManifestPathIn(stateDir))
 	last := events[len(events)-1]
 	if last.Event != "spawn_failed" {
 		t.Fatalf("expected last event spawn_failed, got %q", last.Event)
@@ -442,7 +442,7 @@ func TestOrgSpawn_FailureInjection_AgmsgSend_CompensatesPane(t *testing.T) {
 		t.Fatalf("expected non-zero exit on agmsg send failure, output: %s", out)
 	}
 
-	events := readManifestEvents(t, filepath.Join(stateDir, "manifest.jsonl"))
+	events := readManifestEvents(t, org.ManifestPathIn(stateDir))
 	last := events[len(events)-1]
 	if last.Event != "spawn_failed" {
 		t.Fatalf("expected last event spawn_failed, got %q", last.Event)
@@ -477,7 +477,7 @@ func TestOrgSpawn_FailureInjection_AgmsgJoin_CompensatesPane(t *testing.T) {
 		t.Fatalf("expected non-zero exit on agmsg join failure, output: %s", out)
 	}
 
-	events := readManifestEvents(t, filepath.Join(stateDir, "manifest.jsonl"))
+	events := readManifestEvents(t, org.ManifestPathIn(stateDir))
 	last := events[len(events)-1]
 	if last.Event != "spawn_failed" {
 		t.Fatalf("expected last event spawn_failed, got %q", last.Event)
@@ -520,7 +520,7 @@ func TestOrgSpawn_Rejection_ModelOutOfPoolAndMaxSeatsWithOrgIsolation(t *testing
 		t.Errorf("expected 'rejected' in output, got: %s", out)
 	}
 
-	receiptsPath := filepath.Join(stateDir, "model-receipts.jsonl")
+	receiptsPath := org.ReceiptsPathIn(stateDir)
 	rr, err := org.NewReceiptStoreAtPath(receiptsPath).Read()
 	if err != nil {
 		t.Fatalf("read receipts: %v", err)
@@ -609,7 +609,7 @@ func TestOrgSpawn_DryRun_NoPATHNeeded_StatusExclusionAndAll(t *testing.T) {
 		t.Errorf("expected dry_run=true in spawn output, got: %s", out)
 	}
 
-	events := readManifestEvents(t, filepath.Join(stateDir, "manifest.jsonl"))
+	events := readManifestEvents(t, org.ManifestPathIn(stateDir))
 	for _, ev := range events {
 		if !ev.DryRun {
 			t.Errorf("expected every dry-run saga event to carry dry_run=true, got %+v", ev)
@@ -636,7 +636,7 @@ func TestOrgSpawn_DryRun_NoPATHNeeded_StatusExclusionAndAll(t *testing.T) {
 func TestOrgStatus_EmptyPATH_FullRosterFromManifestWithCorruptCount(t *testing.T) {
 	t.Setenv("PATH", "")
 	stateDir := t.TempDir()
-	manifestPath := filepath.Join(stateDir, "manifest.jsonl")
+	manifestPath := org.ManifestPathIn(stateDir)
 
 	store := org.NewManifestStoreAtPath(manifestPath)
 	if err := store.Append(org.ManifestEvent{TS: "2026-08-01T00:00:00Z", OrgID: "org-a", SeatID: "seat-1", Event: "spawn_started", Driver: "claude", Model: "sonnet"}); err != nil {
@@ -676,7 +676,7 @@ func TestOrgStatus_EmptyPATH_FullRosterFromManifestWithCorruptCount(t *testing.T
 func TestOrgStatus_JSON(t *testing.T) {
 	t.Setenv("PATH", "")
 	stateDir := t.TempDir()
-	manifestPath := filepath.Join(stateDir, "manifest.jsonl")
+	manifestPath := org.ManifestPathIn(stateDir)
 	store := org.NewManifestStoreAtPath(manifestPath)
 	if err := store.Append(org.ManifestEvent{TS: "2026-08-01T00:00:00Z", OrgID: "org-a", SeatID: "seat-1", Event: "spawned", Driver: "claude", Model: "sonnet", PaneID: "pane-1"}); err != nil {
 		t.Fatalf("seed manifest: %v", err)
@@ -761,7 +761,7 @@ func TestOrgStop_UnknownSeat_NonZeroExit(t *testing.T) {
 		t.Fatalf("expected non-zero exit stopping an unknown seat, output: %s", out)
 	}
 
-	events := readManifestEvents(t, filepath.Join(stateDir, "manifest.jsonl"))
+	events := readManifestEvents(t, org.ManifestPathIn(stateDir))
 	if len(events) != 0 {
 		t.Fatalf("expected no manifest event appended for an unknown-seat stop, got %v", events)
 	}
@@ -790,7 +790,7 @@ func TestOrgStop_ExistingSeat_LeavesAndRecordsOutcome(t *testing.T) {
 		t.Errorf("expected a leave.sh invocation with argv 'ralph-org-a seat-1' in the agmsg log, got: %v", agmsgLines)
 	}
 
-	events := readManifestEvents(t, filepath.Join(stateDir, "manifest.jsonl"))
+	events := readManifestEvents(t, org.ManifestPathIn(stateDir))
 	last := events[len(events)-1]
 	if last.Event != "stopped" {
 		t.Fatalf("expected last event stopped, got %q", last.Event)
@@ -863,7 +863,7 @@ func TestOrgSpawn_RoleAndScopeFlags_ExpandTemplateAndRecordScope(t *testing.T) {
 		}
 	}
 
-	events := readManifestEvents(t, filepath.Join(stateDir, "manifest.jsonl"))
+	events := readManifestEvents(t, org.ManifestPathIn(stateDir))
 	last := events[len(events)-1]
 	if last.Event != "spawned" {
 		t.Fatalf("expected last event spawned, got %q", last.Event)
@@ -919,14 +919,14 @@ func TestOrgSend_MalformedMessage_NonZeroExitAndNoManifestEvent(t *testing.T) {
 	); err != nil {
 		t.Fatalf("spawn failed: %v", err)
 	}
-	eventsBefore := readManifestEvents(t, filepath.Join(stateDir, "manifest.jsonl"))
+	eventsBefore := readManifestEvents(t, org.ManifestPathIn(stateDir))
 
 	out, err := runOrgCmd(t, "send", "--org-id", "org-a", "--to", "seat-1", "--text", "not a valid protocol message", "--state-dir", stateDir)
 	if err == nil {
 		t.Fatalf("expected non-zero exit for a malformed --text, output: %s", out)
 	}
 
-	eventsAfter := readManifestEvents(t, filepath.Join(stateDir, "manifest.jsonl"))
+	eventsAfter := readManifestEvents(t, org.ManifestPathIn(stateDir))
 	if len(eventsAfter) != len(eventsBefore) {
 		t.Fatalf("expected no new manifest event for a rejected send, %d -> %d", len(eventsBefore), len(eventsAfter))
 	}
@@ -961,7 +961,7 @@ func TestOrgSend_RawFlag_BypassesValidation(t *testing.T) {
 		t.Fatalf("expected --raw to bypass protocol validation, got %v (output: %s)", err, out)
 	}
 
-	events := readManifestEvents(t, filepath.Join(stateDir, "manifest.jsonl"))
+	events := readManifestEvents(t, org.ManifestPathIn(stateDir))
 	last := events[len(events)-1]
 	if last.Event != "sent" {
 		t.Fatalf("expected last event sent, got %q", last.Event)
@@ -1228,7 +1228,7 @@ func TestOrgSpawn_MissingScope_NonZeroExit_NoAllowUnscoped(t *testing.T) {
 	if herdrLines := readLogLines(t, herdrLog); len(herdrLines) != 0 {
 		t.Errorf("expected zero herdr calls for the gate rejection, got: %v", herdrLines)
 	}
-	events := readManifestEvents(t, filepath.Join(stateDir, "manifest.jsonl"))
+	events := readManifestEvents(t, org.ManifestPathIn(stateDir))
 	if len(events) != 1 || events[0].Event != "rejected" {
 		t.Errorf("expected exactly one rejected manifest event for the gate rejection, got: %v", events)
 	}
@@ -1251,7 +1251,7 @@ func TestOrgSpawn_AllowUnscopedFlag_BypassesGateAndIsRecorded(t *testing.T) {
 		t.Fatalf("expected --allow-unscoped to bypass the gate, got %v (output: %s)", err, out)
 	}
 
-	events := readManifestEvents(t, filepath.Join(stateDir, "manifest.jsonl"))
+	events := readManifestEvents(t, org.ManifestPathIn(stateDir))
 	last := events[len(events)-1]
 	if last.Event != "spawned" {
 		t.Fatalf("expected last event spawned, got %q", last.Event)
@@ -1298,7 +1298,7 @@ func TestOrgStart_HappyPath_SpawnsLeadSeat_SingleAgmsgJoin_NoHello(t *testing.T)
 		t.Errorf("expected a status hint in the output, got: %s", out)
 	}
 
-	events := readManifestEvents(t, filepath.Join(stateDir, "manifest.jsonl"))
+	events := readManifestEvents(t, org.ManifestPathIn(stateDir))
 	last := events[len(events)-1]
 	if last.Event != "spawned" || last.SeatID != "lead" || last.Role != "lead" {
 		t.Fatalf("expected last event spawned for seat_id=role=lead, got %+v", last)
@@ -1383,7 +1383,7 @@ func TestOrgStart_ModelFlagOmitted_DefaultsToFirstMatchingPoolEntry(t *testing.T
 		t.Fatalf("start failed: %v (output: %s)", err, out)
 	}
 
-	events := readManifestEvents(t, filepath.Join(stateDir, "manifest.jsonl"))
+	events := readManifestEvents(t, org.ManifestPathIn(stateDir))
 	last := events[len(events)-1]
 	// The first claude entry in declared model_pool order is "opus" (codex's
 	// entry precedes it but does not match --driver claude).
@@ -1406,7 +1406,7 @@ func TestOrgStart_ModelFlagExplicit_OverridesDefault(t *testing.T) {
 		t.Fatalf("start failed: %v (output: %s)", err, out)
 	}
 
-	events := readManifestEvents(t, filepath.Join(stateDir, "manifest.jsonl"))
+	events := readManifestEvents(t, org.ManifestPathIn(stateDir))
 	last := events[len(events)-1]
 	if last.Model != "haiku" {
 		t.Fatalf("expected explicit --model to win over the default, got %q", last.Model)
@@ -1557,6 +1557,35 @@ func TestOrgWatch_Once_RunsExactlyOneCycleAndWritesStatus(t *testing.T) {
 	}
 }
 
+// TestOrgWatch_Once_BannerShowsStateDirSource pins the tech-debt
+// "watchdog deferred LOW (1)" fix: org.ResolveOrgStateDir's second return
+// value (the resolved precedence tier) used to be discarded (`_`) at this
+// call site, so the startup banner never told an operator which of
+// flag/env/git-toplevel/cwd actually produced state-dir. --state-dir is
+// passed explicitly here, so the expected source is "flag" (see
+// ResolveOrgStateDir's own doc comment for the precedence order).
+func TestOrgWatch_Once_BannerShowsStateDirSource(t *testing.T) {
+	setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	if _, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
+		"--state-dir", stateDir,
+	); err != nil {
+		t.Fatalf("spawn failed: %v", err)
+	}
+
+	out, err := runOrgCmd(t, "watch", "--org-id", "org-a", "--once", "--state-dir", stateDir)
+	if err != nil {
+		t.Fatalf("watch --once failed: %v (output: %s)", err, out)
+	}
+	if !strings.Contains(out, "(source: flag)") {
+		t.Errorf("expected the watch banner to name the state-dir source (\"(source: flag)\" for an explicit --state-dir), got: %s", out)
+	}
+}
+
 // --- newWatchdogHooks (PR④ Slice 4, AC-6 wiring) -----------------------
 
 // writeClaudeStub writes a fake `claude` executable to a fresh temp dir and
@@ -1592,8 +1621,8 @@ func newWatchdogTestOrg(t *testing.T, stateDir string) *org.Org {
 	cfg.Watchdog.IntervalSeconds = 2
 	return &org.Org{
 		Config:   cfg,
-		Manifest: org.NewManifestStoreAtPath(filepath.Join(stateDir, "manifest.jsonl")),
-		Receipts: org.NewReceiptStoreAtPath(filepath.Join(stateDir, "model-receipts.jsonl")),
+		Manifest: org.NewManifestStoreAtPath(org.ManifestPathIn(stateDir)),
+		Receipts: org.NewReceiptStoreAtPath(org.ReceiptsPathIn(stateDir)),
 		Herdr:    driver.Herdr{R: runner},
 		Agmsg:    driver.Agmsg{R: runner, Home: driver.ResolveAgmsgHome(cfg.AgmsgHome)},
 	}

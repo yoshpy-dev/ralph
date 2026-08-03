@@ -2,7 +2,6 @@ package org
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -11,7 +10,7 @@ import (
 func newTestManifestStore(t *testing.T) *ManifestStore {
 	t.Helper()
 	dir := t.TempDir()
-	return NewManifestStoreAtPath(filepath.Join(dir, "manifest.jsonl"))
+	return NewManifestStoreAtPath(ManifestPathIn(dir))
 }
 
 func TestManifestStore_AppendReadRoundTrip(t *testing.T) {

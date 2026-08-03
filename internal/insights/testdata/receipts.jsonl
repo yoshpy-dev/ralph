@@ -1,5 +1,9 @@
-{"ts":"2026-07-13T01:00:00Z","phase":"self_review","cycle":1,"driver":"claude","requested_model":"opus","effective_model":"opus","honored":true,"effort":"high","reason":"judgment seat"}
-{"ts":"2026-07-13T01:01:00Z","phase":"verify","cycle":1,"driver":"claude","requested_model":"sonnet","effective_model":"sonnet","honored":true,"effort":"high","reason":"procedural seat"}
-{"ts":"2026-07-13T01:02:00Z","phase":"test","cycle":1,"driver":"codex","requested_model":"sonnet","effective_model":"codex-default","honored":false,"effort":"high","reason":"codex driver known gap"}
+{"ts":"2026-08-03T01:00:00Z","org_id":"demo","seat_id":"lead","role":"lead","driver":"claude","commanded_model":"opus","reported_effective_model":"opus","honored":"true","reason":"driver-confirmed"}
+{"ts":"2026-08-03T01:01:00Z","org_id":"demo","seat_id":"lead","role":"lead","driver":"claude","commanded_model":"opus","reported_effective_model":"opus","honored":"true","reason":"driver-confirmed"}
+{"ts":"2026-08-03T01:02:00Z","org_id":"demo","seat_id":"lead","role":"lead","driver":"claude","commanded_model":"opus","reported_effective_model":"opus","honored":"true","reason":"driver-confirmed"}
+{"ts":"2026-08-03T01:03:00Z","org_id":"demo","seat_id":"lead","role":"lead","driver":"claude","commanded_model":"opus","reported_effective_model":"sonnet","honored":"false","reason":"mismatch"}
+{"ts":"2026-08-03T01:04:00Z","org_id":"demo","seat_id":"lead","role":"lead","driver":"claude","commanded_model":"opus","honored":"unknown","reason":"no observation available"}
+{"ts":"2026-08-03T01:05:00Z","org_id":"demo","seat_id":"lead","role":"lead","driver":"claude","commanded_model":"opus","honored":"unknown","reason":"no observation available"}
 not valid json
-{"ts":"2026-07-13T01:03:00Z","phase":"sync_docs","cycle":1,"driver":"claude","requested_model":"sonnet","effective_model":"sonnet","honored":true,"effort":"high","reason":"procedural seat"}
+{"ts":"2026-08-03T01:06:00Z","org_id":"demo","seat_id":"reviewer","role":"reviewer","driver":"codex","commanded_model":"sonnet","reported_effective_model":"sonnet","honored":"true","reason":"driver-confirmed"}
+{"ts":"2026-08-03T01:07:00Z","org_id":"acme","seat_id":"lead","role":"lead","driver":"claude","commanded_model":"opus","honored":"unknown","reason":"no observation available"}

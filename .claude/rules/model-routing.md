@@ -87,7 +87,10 @@ via the tier table above. Each spawn appends a JSON line to
 reported_effective_model / honored / reason`. This is a separate mechanism
 from the `/work` subagent tiers documented above — see
 `docs/specs/2026-08-01-org-runtime.md` for the org runtime's own model
-selection rules.
+selection rules. `ralph insights` reads this file by default (resolved via
+the same org state-dir precedence as `ralph org` verbs) and aggregates it
+by `org_id` x `seat_id` with tri-state `honored` (true/false/unknown) in
+its Receipts section.
 
 ## Where the values live
 

@@ -1,5 +1,12 @@
 package insights
 
+import (
+	"maps"
+	"sort"
+
+	"github.com/yoshpy-dev/ralph/internal/org"
+)
+
 // PhaseStats holds aggregated metrics for one pipeline phase.
 type PhaseStats struct {
 	Phase    string        `json:"phase"`
@@ -49,16 +56,51 @@ type EscalationOutcome struct {
 	MaxCycle int `json:"max_cycle"`
 }
 
-// ReceiptDiagnostics summarises the local model-receipts.jsonl file.
-// This is supplementary local state and is never joined against events.
-type ReceiptDiagnostics struct {
-	// Present is false when the receipts file was absent.
-	Present      bool    `json:"present"`
-	TotalCount   int     `json:"total_count"`
-	SkippedLines int     `json:"skipped_lines"`
-	HonoredRate  float64 `json:"honored_rate"`
-	// PerPhase maps phase name to honored-rate for that phase.
-	PerPhase map[string]float64 `json:"per_phase"`
+// ReceiptSeatStats aggregates tri-state honored counts for one seat within
+// one org, plus the distinct set of commanded models observed for that
+// seat. honored-rate is computed by HonoredRate: true/(true+false), with
+// unknown excluded from the denominator (AC-3 output contract).
+type ReceiptSeatStats struct {
+	SeatID string `json:"seat_id"`
+	// CommandedModels is the sorted, de-duplicated set of commanded_model
+	// values seen for this seat.
+	CommandedModels []string `json:"commanded_models"`
+	HonoredTrue     int      `json:"honored_true"`
+	HonoredFalse    int      `json:"honored_false"`
+	HonoredUnknown  int      `json:"honored_unknown"`
+}
+
+// HonoredRate returns true/(true+false); unknown is excluded from the
+// denominator. ok is false when there is no true/false data to rate (every
+// receipt for this seat was unknown), in which case rate should be
+// displayed as "n/a" rather than a misleading 0%.
+func (s ReceiptSeatStats) HonoredRate() (rate float64, ok bool) {
+	denom := s.HonoredTrue + s.HonoredFalse
+	if denom == 0 {
+		return 0, false
+	}
+	return float64(s.HonoredTrue) / float64(denom), true
+}
+
+// ReceiptOrgStats groups ReceiptSeatStats under one org_id. Seats is sorted
+// by seat_id for deterministic output.
+type ReceiptOrgStats struct {
+	OrgID string             `json:"org_id"`
+	Seats []ReceiptSeatStats `json:"seats"`
+}
+
+// ReceiptsSummary is the org-runtime receipts section of AggregateResult:
+// receipts grouped by org_id x seat_id (Orgs sorted by org_id). This is
+// supplementary machine-local diagnostics and is never joined against
+// events. Orgs is always a non-nil (possibly empty) slice so the JSON shape
+// is identical whether or not any receipts were found (status --json
+// convention).
+type ReceiptsSummary struct {
+	// Path is the receipts file that was read, echoed back so a consumer
+	// can tell an empty result from a genuinely different source.
+	Path         string            `json:"path"`
+	Orgs         []ReceiptOrgStats `json:"orgs"`
+	SkippedLines int               `json:"skipped_lines"`
 }
 
 // AggregateResult holds all aggregated metrics derived from insight events.
@@ -71,8 +113,9 @@ type AggregateResult struct {
 	PerPhase map[string]*PhaseStats `json:"per_phase"`
 	// Escalations holds slugs that had events at cycle >= 2.
 	Escalations []EscalationOutcome `json:"escalations"`
-	// Receipts holds supplementary local-diagnostics (machine-local, not joined).
-	Receipts ReceiptDiagnostics `json:"receipts"`
+	// Receipts holds org runtime model receipts grouped by org_id x seat_id
+	// (machine-local supplementary diagnostics, not joined against events).
+	Receipts ReceiptsSummary `json:"receipts"`
 }
 
 // Aggregate computes an AggregateResult from a slice of events.
@@ -182,47 +225,92 @@ func Aggregate(events []Event, stats ReadStats) *AggregateResult {
 	return agg
 }
 
-// AggregateWithReceipts attaches receipt diagnostics to an existing AggregateResult.
-// receipts and rStats come from ReadReceipts; this is always a supplementary
-// local-diagnostics section and never joined against events.
-func AggregateWithReceipts(agg *AggregateResult, receipts []Receipt, rStats ReceiptStats) {
-	diag := ReceiptDiagnostics{
-		Present:      true,
-		TotalCount:   len(receipts),
-		SkippedLines: rStats.SkippedLines,
-		PerPhase:     make(map[string]float64),
+// AggregateReceipts groups receipts by org_id x seat_id (Orgs sorted by
+// org_id, Seats within an org sorted by seat_id -- deterministic output).
+// path is echoed onto the result so callers building the human/JSON
+// receipts section never need to thread it separately. This always
+// produces a non-nil (possibly empty) Orgs slice, matching Read-Receipts'
+// "missing file -> empty, not error" contract and keeping the JSON shape
+// identical whether or not any receipts were found.
+func AggregateReceipts(receipts []Receipt, stats ReceiptStats, path string) ReceiptsSummary {
+	summary := ReceiptsSummary{
+		Path:         path,
+		Orgs:         []ReceiptOrgStats{},
+		SkippedLines: stats.SkippedLines,
 	}
 
-	type ra struct{ total, honored int }
-	byPhase := make(map[string]*ra)
+	type seatKey struct{ orgID, seatID string }
+	type seatAccum struct {
+		commandedModels map[string]bool
+		trueCount       int
+		falseCount      int
+		unknownCount    int
+	}
 
-	var totalHonored int
+	bySeat := make(map[seatKey]*seatAccum)
+	seenOrg := make(map[string]bool)
+	var orgIDs []string
+	seenSeatByOrg := make(map[string]map[string]bool)
+
 	for _, r := range receipts {
-		if r.Honored {
-			totalHonored++
+		key := seatKey{orgID: r.OrgID, seatID: r.SeatID}
+		acc, ok := bySeat[key]
+		if !ok {
+			acc = &seatAccum{commandedModels: make(map[string]bool)}
+			bySeat[key] = acc
 		}
-		if r.Phase == "" {
-			continue
+		if r.CommandedModel != "" {
+			acc.commandedModels[r.CommandedModel] = true
 		}
-		if byPhase[r.Phase] == nil {
-			byPhase[r.Phase] = &ra{}
+		switch r.Honored {
+		case org.HonoredTrue:
+			acc.trueCount++
+		case org.HonoredFalse:
+			acc.falseCount++
+		default:
+			// org.HonoredUnknown and any unrecognised value both count as
+			// unknown -- tri-state display never silently drops a receipt.
+			acc.unknownCount++
 		}
-		byPhase[r.Phase].total++
-		if r.Honored {
-			byPhase[r.Phase].honored++
+
+		if !seenOrg[r.OrgID] {
+			seenOrg[r.OrgID] = true
+			orgIDs = append(orgIDs, r.OrgID)
 		}
+		if seenSeatByOrg[r.OrgID] == nil {
+			seenSeatByOrg[r.OrgID] = make(map[string]bool)
+		}
+		seenSeatByOrg[r.OrgID][r.SeatID] = true
 	}
 
-	if len(receipts) > 0 {
-		diag.HonoredRate = float64(totalHonored) / float64(len(receipts))
-	}
-	for phase, a := range byPhase {
-		if a.total > 0 {
-			diag.PerPhase[phase] = float64(a.honored) / float64(a.total)
+	sort.Strings(orgIDs)
+	for _, orgID := range orgIDs {
+		seatIDs := make([]string, 0, len(seenSeatByOrg[orgID]))
+		for seatID := range seenSeatByOrg[orgID] {
+			seatIDs = append(seatIDs, seatID)
 		}
+		sort.Strings(seatIDs)
+
+		seats := make([]ReceiptSeatStats, 0, len(seatIDs))
+		for _, seatID := range seatIDs {
+			acc := bySeat[seatKey{orgID: orgID, seatID: seatID}]
+			models := make([]string, 0, len(acc.commandedModels))
+			for m := range acc.commandedModels {
+				models = append(models, m)
+			}
+			sort.Strings(models)
+			seats = append(seats, ReceiptSeatStats{
+				SeatID:          seatID,
+				CommandedModels: models,
+				HonoredTrue:     acc.trueCount,
+				HonoredFalse:    acc.falseCount,
+				HonoredUnknown:  acc.unknownCount,
+			})
+		}
+		summary.Orgs = append(summary.Orgs, ReceiptOrgStats{OrgID: orgID, Seats: seats})
 	}
 
-	agg.Receipts = diag
+	return summary
 }
 
 func copyVerdictMap(m map[string]string) map[string]string {
@@ -230,8 +318,6 @@ func copyVerdictMap(m map[string]string) map[string]string {
 		return nil
 	}
 	out := make(map[string]string, len(m))
-	for k, v := range m {
-		out[k] = v
-	}
+	maps.Copy(out, m)
 	return out
 }
