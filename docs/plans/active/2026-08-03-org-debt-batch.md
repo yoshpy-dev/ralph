@@ -106,10 +106,10 @@ PR⑤(#140)完了時点で tech-debt に登録した org runtime 系の残債 5 
 
 ## Progress checklist
 
-- [ ] Slice 1 — C2-3 API 一元化
-- [ ] Slice 2 — C2-5 ガード完全化
-- [ ] Slice 3 — C2-6 insights 再指向
-- [ ] Slice 4 — watchdog 4 件
+- [x] Slice 1 — C2-3 API 一元化(3b91875 + 0e510a7)
+- [x] Slice 2 — C2-5 ガード完全化(57effc3)
+- [x] Slice 3 — C2-6 insights 再指向(e00e301 + 4ddd8e7)
+- [x] Slice 4 — watchdog 4 件(ab4e9da)
 - [ ] Slice 5 — upgrade スモーク + tech-debt RESOLVED + doc 追従
 - [ ] Self-review artifact created
 - [ ] Verify artifact created
