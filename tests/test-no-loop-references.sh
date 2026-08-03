@@ -55,7 +55,10 @@ PATTERN='ralph-orchestrator|ralph-pipeline|RALPH_LOOP_DRIVER|ralph-cli-driver|ra
 #   - .git/
 EXCLUDE_REGEX='^(\./)?(templates/base/)?(docs/plans/archive/|docs/plans/active/|docs/specs/|docs/reports/|docs/insights/|docs/tech-debt/README\.md$|docs/research/approach-comparison\.md$|internal/insights/|internal/cli/insights_test\.go$|internal/cli/upgrade_retired_loop_artifacts_test\.go$)|^(\./)?\.git/|^(\./)?tests/test-no-loop-references\.sh$'
 
-matches="$(grep -rEl "$PATTERN" --include="*.sh" --include="*.go" --include="*.toml" --include="*.md" . 2>/dev/null | grep -vE "$EXCLUDE_REGEX" || true)"
+# git grep scans tracked files only, so gitignored local state (e.g.
+# .claude/agent-memory/, scratch files) cannot produce false FAILs that CI
+# would never see.
+matches="$(git grep -IlE "$PATTERN" -- '*.sh' '*.go' '*.toml' '*.md' 2>/dev/null | grep -vE "$EXCLUDE_REGEX" || true)"
 
 if [ -n "$matches" ]; then
   echo "FAIL: live references to retired Ralph Loop execution system found:" >&2

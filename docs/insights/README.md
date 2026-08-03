@@ -134,3 +134,13 @@ Required flags: `--slug`, `--flow`, `--phase`, `--verdict`, `--source`.
 All others are optional (defaults to 0 for counts, omitted for routing fields).
 
 See `scripts/insights-append.sh --help` for the full interface.
+
+## Org runtime receipts(参照)
+
+`ralph insights` はイベント集計に加えて、org runtime のモデル受領証
+(`<state-dir>/model-receipts.jsonl`)を既定で読み、`org_id` × `seat_id` で
+tri-state `honored`(true/false/unknown)を集計する Receipts セクションを表示
+する。受領証のスキーマと集計契約の正本は `ralph insights --help` と
+`.claude/rules/model-routing.md` の「Org runtime model receipts」節を参照。
+このファイルが定義するのはイベント(`events/*.jsonl`)スキーマのみで、受領証
+はコミットされないローカル診断データである点に注意。
