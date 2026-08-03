@@ -6,14 +6,14 @@
 #   pick_reviewer [driver]
 #   count_triage_findings <triage_report_path> <category>
 #
-# Extracted from the retired scripts/ralph-cli-driver.sh (Ralph Loop
+# Extracted from the retired driver dispatcher script (Ralph Loop
 # execution system) when Ralph Loop was removed: /cross-review is the only
 # consumer of these three functions and it survives as part of the standard
-# development harness. The loop-only pieces of ralph-cli-driver.sh
+# development harness. The loop-only pieces of that dispatcher script
 # (run_agent, resolve_phase_model, write_model_receipt, the codex/claude
 # dispatch wrappers) were deleted along with the rest of the Ralph Loop
 # execution system — they had no remaining consumer once the Loop's
-# per-slice pipeline driver script was removed.
+# per-slice driver script was removed.
 
 # detect_base_branch — print the repo's true merge-target branch name.
 #

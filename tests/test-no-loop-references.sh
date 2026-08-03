@@ -13,12 +13,11 @@
 # dated research note in docs/research/) and the insights package's
 # historical-schema-vocabulary compat surface (AC-6b: `flow=loop` /
 # `source=pipeline` are historical schema values `ralph insights` must keep
-# reading, not an active code path) are excluded below. The
-# `scripts/xreview-helpers.sh` extraction (and its behavioural test) are also
-# excluded: their header comments intentionally record, in the past tense,
-# that they were extracted from the now-deleted `ralph-cli-driver.sh` — a
-# provenance note, not a live reference implying the deleted script still
-# exists.
+# reading, not an active code path) are excluded below. `scripts/xreview-
+# helpers.sh` (+ template mirror) and its behavioural test are NOT excluded:
+# their provenance comments are worded to name no guarded token, so they
+# pass the live pattern on their own merits rather than through an
+# exclusion.
 
 set -eu
 
@@ -26,7 +25,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$PROJECT_ROOT"
 
-PATTERN='ralph-orchestrator|ralph-pipeline|RALPH_LOOP_DRIVER|ralph-cli-driver|ralph-loop\.sh|ralph-status-helpers|new-ralph-plan|build-tui|ralph-tui|RALPH_(FORCE|IMPLEMENT|SELF_REVIEW|PROBE|ESCALATION)_MODEL|checkStaleOrchestratorState'
+PATTERN='ralph-orchestrator|ralph-pipeline|RALPH_LOOP_DRIVER|ralph-cli-driver|ralph-loop\.sh|ralph-status-helpers|new-ralph-plan|build-tui|ralph-tui|RALPH_(FORCE|IMPLEMENT|SELF_REVIEW|VERIFY|TEST|SYNC_DOCS|PR|PROBE|ESCALATION)_MODEL|checkStaleOrchestratorState'
 
 # Directories/files excluded as historical documentation, not live code:
 #   - docs/plans/archive/    : completed plans (historical record)
@@ -46,12 +45,9 @@ PATTERN='ralph-orchestrator|ralph-pipeline|RALPH_LOOP_DRIVER|ralph-cli-driver|ra
 #   - internal/cli/insights_test.go : regression test pinning that
 #     historical-vocab read-compat
 #   - templates/base/docs/insights/ : template mirror of the above
-#   - scripts/xreview-helpers.sh (+ template mirror) and
-#     tests/test-xreview-helpers.sh : past-tense extraction provenance
-#     comments only, no live reference to the deleted script
 #   - this script itself           : it necessarily names the pattern it checks
 #   - .git/
-EXCLUDE_REGEX='^(\./)?(templates/base/)?(docs/plans/archive/|docs/plans/active/|docs/specs/|docs/reports/|docs/insights/|docs/tech-debt/README\.md$|docs/research/approach-comparison\.md$|internal/insights/|internal/cli/insights_test\.go$|scripts/xreview-helpers\.sh$)|^(\./)?\.git/|^(\./)?tests/(test-no-loop-references|test-xreview-helpers)\.sh$'
+EXCLUDE_REGEX='^(\./)?(templates/base/)?(docs/plans/archive/|docs/plans/active/|docs/specs/|docs/reports/|docs/insights/|docs/tech-debt/README\.md$|docs/research/approach-comparison\.md$|internal/insights/|internal/cli/insights_test\.go$)|^(\./)?\.git/|^(\./)?tests/test-no-loop-references\.sh$'
 
 matches="$(grep -rEl "$PATTERN" --include="*.sh" --include="*.go" --include="*.toml" --include="*.md" . 2>/dev/null | grep -vE "$EXCLUDE_REGEX" || true)"
 
