@@ -55,7 +55,7 @@ PR⑤(#140)完了時点で tech-debt に登録した org runtime 系の残債 5 
   - **JSON**: `receipts` セクションを `{"path": ..., "orgs": [{"org_id": ..., "seats": [{"seat_id", "commanded_models", "honored_true", "honored_false", "honored_unknown"}]}], "skipped_lines": N}` とし、空でも同一スキーマ(status --json と同じ規約)。旧 per-phase honored-rate 表示(Routing セクション)はイベント由来のまま無変更。
 - AC-4: watchdog 4 件それぞれに回帰テストがあり green(a: banner/status に source 文字列、b: truncate と fallback SEAT ヘッダ、c: Escalated prune、d: resume 後再アラート)。
 - AC-5: upgrade 削除経路の**自動テストが green であることが tech-debt row RESOLVED の必須条件**。自動化が過大と判明した場合は row を RESOLVED にせず「手動確認済み・自動化未了(日付+evidence パス)」へ更新し、手動 evidence を `docs/evidence/` に残す($HOME→~ 赤入れ規約適用)。この場合 AC-5 は「row を正直な状態に更新した」ことで満たす。
-- AC-6: 対象 tech-debt 5 row が RESOLVED(取り消し線+日付+PR 参照)。
+- AC-6: 対象 tech-debt 5 row が RESOLVED(取り消し線+日付+PR 参照)。**verify 時点の訂正(2026-08-03)**: 実際には 4 row が RESOLVED、残る 1 件(upgrade 削除経路スモーク)は事前登録 row が存在しなかったため AC-5 の代替経路(自動テスト green を新規追加)で満たした。「5 row」という表現は「4 row の RESOLVED 化 + 未登録だった 1 件への新規自動回帰テスト追加」と読み替える。
 - AC-7: 最終ゲートは `RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh`(static+test を包含)green + `go test ./... -count=1` green。`run-static-verify.sh` 単体は /verify フェーズの部分ゲートであり AC の対象外。
 
 ## Implementation outline
@@ -116,7 +116,7 @@ PR⑤(#140)完了時点で tech-debt に登録した org runtime 系の残債 5 
 - [ ] Self-review artifact created
 - [ ] Verify artifact created
 - [x] Test artifact created
-- [ ] Sync-docs artifact created
+- [x] Sync-docs artifact created
 
 ## Readiness checklist
 
