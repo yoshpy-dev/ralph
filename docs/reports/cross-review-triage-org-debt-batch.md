@@ -26,3 +26,22 @@
 ## 判断
 
 Cycle 1/2(cap 未到達)。ユーザーの常任指示に基づき **Fix を選択**。修正後、フルパイプライン(/self-review → /verify → /test → /sync-docs → /cross-review)を cycle 2 として再実行する(修正は doc 1 行のため、各フェーズは差分フォーカスで実行)。
+
+---
+
+# Cycle 2(再レビュー)
+
+- Date: 2026-08-03
+- Driver: claude  Reviewer: codex
+- HEAD: dd9e7e2(AR-1 fix 53145ea + cycle-2 self-review doc fixes を含む)
+- Cycle: 2/2(cap 到達)
+- After triage: ACTION_REQUIRED 0 / WORTH_CONSIDERING 1 / DISMISSED 0
+
+## WORTH_CONSIDERING(cap 到達につき Known gap として記録)
+
+### WC-1 (Codex P2) 成功遮断後の resume では total-budget 条件が完全無音
+
+- 対象: `internal/org/watch.go` `evaluateTotalBudget`(Cutoff early-return)
+- 指摘: 先行遮断が**成功**していた場合(`Cutoff=true`)、`if rec != nil && rec.Cutoff { return }` が ALERT 経路より先に効くため、resume 後の over-budget 新座席には ALERT も Stop も発生しない。Slice 4 の re-alert fix が効くのは先行遮断が失敗していた場合(`Cutoff=false`)のみ。
+- トリアージ: 事実として正確(実コードで確認)。ただし Cutoff ラチェットのセマンティクス変更は本プランが Design decisions / 逸脱ノートで明示的にスコープ外とし、専用の設計判断を要する事項として tech-debt 登録済み(Slice 5 の新規 row)。cap 到達(2/2)でもあるため、**修正はせず**: (1) tech-debt row の事実誤認(「re-alert は継続する」)を本コミットで訂正、(2) PR body の Known gaps に記録。Real issue = Yes / Worth fixing now = No(設計パス要 + cap)→ WORTH_CONSIDERING。
+- フォローアップ: tech-debt row のトリガー(evaluateTotalBudget を次に触るとき、または実運用で resume 後の再遮断が必要になったとき)で Cutoff の clear or resume-epoch スコープ化を設計する。
