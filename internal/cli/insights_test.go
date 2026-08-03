@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/yoshpy-dev/ralph/internal/insights"
+	"github.com/yoshpy-dev/ralph/internal/org"
 )
 
 // writeTestEvent writes one JSON event line to a file in dir.
@@ -221,6 +222,168 @@ func TestInsightsCmd_HistoricalLoopFlowEventStillReadable(t *testing.T) {
 	}
 	if verify.Verdicts.Pass != 1 {
 		t.Errorf("verify.pass = %d, want 1", verify.Verdicts.Pass)
+	}
+}
+
+// --- Receipts (org runtime) tests: AC-3 output contract ---
+
+// TestInsightsCmd_ReceiptsDefaultPathFromOrgStateDir pins that omitting
+// --receipts resolves the same way "ralph org" verbs resolve their state
+// dir (env RALPH_ORG_STATE_DIR here), landing on
+// org.ReceiptsPathIn(stateDir) -- not the retired
+// .harness/state/pipeline/model-receipts.jsonl path.
+func TestInsightsCmd_ReceiptsDefaultPathFromOrgStateDir(t *testing.T) {
+	stateDir := t.TempDir()
+	t.Setenv(org.EnvOrgStateDir, stateDir)
+
+	receiptsPath := org.ReceiptsPathIn(stateDir)
+	store := org.NewReceiptStoreAtPath(receiptsPath)
+	if err := store.Append(org.Receipt{
+		TS:             "2026-08-03T01:00:00Z",
+		OrgID:          "demo",
+		SeatID:         "lead",
+		Driver:         "claude",
+		CommandedModel: "opus",
+		Honored:        org.HonoredTrue,
+	}); err != nil {
+		t.Fatalf("append receipt: %v", err)
+	}
+
+	dir := t.TempDir()
+	eventsDir := filepath.Join(dir, "events")
+
+	out := runInsightsCmd(t, "--events-dir", eventsDir)
+
+	if !strings.Contains(out, "ORG demo") || !strings.Contains(out, "SEAT lead") {
+		t.Errorf("expected default-path receipts (resolved via RALPH_ORG_STATE_DIR) to be read, got:\n%s", out)
+	}
+	if !strings.Contains(out, receiptsPath) {
+		t.Errorf("expected resolved receipts path %q in output, got:\n%s", receiptsPath, out)
+	}
+}
+
+// TestInsightsCmd_ReceiptsExplicitFlagOverridesDefault pins that an explicit
+// --receipts always wins over the org-state-dir default, even when
+// RALPH_ORG_STATE_DIR is set to a different (receipts-less) directory.
+func TestInsightsCmd_ReceiptsExplicitFlagOverridesDefault(t *testing.T) {
+	emptyStateDir := t.TempDir()
+	t.Setenv(org.EnvOrgStateDir, emptyStateDir)
+
+	dir := t.TempDir()
+	explicitPath := filepath.Join(dir, "explicit-receipts.jsonl")
+	store := org.NewReceiptStoreAtPath(explicitPath)
+	if err := store.Append(org.Receipt{
+		TS:             "2026-08-03T02:00:00Z",
+		OrgID:          "acme",
+		SeatID:         "reviewer",
+		Driver:         "codex",
+		CommandedModel: "sonnet",
+		Honored:        org.HonoredFalse,
+	}); err != nil {
+		t.Fatalf("append receipt: %v", err)
+	}
+
+	eventsDir := filepath.Join(dir, "events")
+	out := runInsightsCmd(t, "--events-dir", eventsDir, "--receipts", explicitPath)
+
+	if !strings.Contains(out, "ORG acme") || !strings.Contains(out, "SEAT reviewer") {
+		t.Errorf("expected explicit --receipts file to be read, got:\n%s", out)
+	}
+	defaultPath := org.ReceiptsPathIn(emptyStateDir)
+	if strings.Contains(out, defaultPath) {
+		t.Errorf("expected env-default path %q to be ignored when --receipts is explicit, got:\n%s", defaultPath, out)
+	}
+}
+
+// TestInsightsCmd_ReceiptsTextContractExample pins the exact text-output
+// contract from the plan (AC-3): "ORG demo  SEAT lead  commanded=opus
+// honored: true=3 false=1 unknown=2  rate=75% (unknown 2 excluded)".
+func TestInsightsCmd_ReceiptsTextContractExample(t *testing.T) {
+	dir := t.TempDir()
+	receiptsPath := filepath.Join(dir, "model-receipts.jsonl")
+	store := org.NewReceiptStoreAtPath(receiptsPath)
+
+	ts := []string{
+		"2026-08-03T01:00:00Z", "2026-08-03T01:01:00Z", "2026-08-03T01:02:00Z",
+		"2026-08-03T01:03:00Z", "2026-08-03T01:04:00Z", "2026-08-03T01:05:00Z",
+	}
+	honored := []string{org.HonoredTrue, org.HonoredTrue, org.HonoredTrue, org.HonoredFalse, org.HonoredUnknown, org.HonoredUnknown}
+	for i := range ts {
+		if err := store.Append(org.Receipt{
+			TS:             ts[i],
+			OrgID:          "demo",
+			SeatID:         "lead",
+			Driver:         "claude",
+			CommandedModel: "opus",
+			Honored:        honored[i],
+		}); err != nil {
+			t.Fatalf("append receipt %d: %v", i, err)
+		}
+	}
+
+	eventsDir := filepath.Join(dir, "events")
+	out := runInsightsCmd(t, "--events-dir", eventsDir, "--receipts", receiptsPath)
+
+	want := "ORG demo  SEAT lead  commanded=opus  honored: true=3 false=1 unknown=2  rate=75% (unknown 2 excluded)"
+	if !strings.Contains(out, want) {
+		t.Errorf("expected AC-3 contract line:\n  %s\ngot:\n%s", want, out)
+	}
+}
+
+// TestInsightsCmd_ReceiptsZeroMessage pins the "no org receipts found
+// (path)" single-line message for a receipts file with zero lines.
+func TestInsightsCmd_ReceiptsZeroMessage(t *testing.T) {
+	dir := t.TempDir()
+	eventsDir := filepath.Join(dir, "events")
+	// At least one event so the top-level "No insight data yet" early
+	// return does not mask the receipts-section message under test.
+	writeTestEvent(t, eventsDir, "2026-08-03-task.jsonl",
+		`{"schema":1,"ts":"2026-08-03T00:00:00Z","run_id":"r1","slug":"task","flow":"loop","phase":"verify","cycle":1,"verdict":"pass","findings":{"critical":0,"high":0,"medium":0,"low":0},"triage":{"action_required":0,"worth_considering":0,"dismissed":0},"driver":"claude","requested_model":"sonnet","effective_model":"sonnet","honored":true,"source":"pipeline"}`)
+
+	receiptsPath := filepath.Join(dir, "missing-receipts.jsonl")
+	out := runInsightsCmd(t, "--events-dir", eventsDir, "--receipts", receiptsPath)
+
+	wantMsg := "no org receipts found (" + receiptsPath + ")"
+	if !strings.Contains(out, wantMsg) {
+		t.Errorf("expected %q, got:\n%s", wantMsg, out)
+	}
+}
+
+// TestInsightsCmd_ReceiptsJSONSchema pins the AC-3 JSON schema for the
+// receipts section: {"path":...,"orgs":[...],"skipped_lines":N}, identical
+// shape whether or not any receipts were found.
+func TestInsightsCmd_ReceiptsJSONSchema(t *testing.T) {
+	dir := t.TempDir()
+	eventsDir := filepath.Join(dir, "events")
+	receiptsPath := filepath.Join(dir, "missing-receipts.jsonl")
+
+	out := runInsightsCmd(t, "--events-dir", eventsDir, "--receipts", receiptsPath, "--json")
+
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+		t.Fatalf("json.Unmarshal: %v\noutput:\n%s", err, out)
+	}
+	var receiptsSection map[string]json.RawMessage
+	if err := json.Unmarshal(payload["receipts"], &receiptsSection); err != nil {
+		t.Fatalf("json.Unmarshal receipts section: %v\nreceipts: %s", err, payload["receipts"])
+	}
+	for _, key := range []string{"path", "orgs", "skipped_lines"} {
+		if _, ok := receiptsSection[key]; !ok {
+			t.Errorf("receipts JSON missing key %q, got: %s", key, payload["receipts"])
+		}
+	}
+	// Orgs must be an empty array, not null -- pretty-printed output
+	// (enc.SetIndent) inserts whitespace, so parse rather than substring-match.
+	rawOrgs := strings.TrimSpace(string(receiptsSection["orgs"]))
+	if rawOrgs == "null" {
+		t.Errorf("expected empty orgs array (not null), got: %s", payload["receipts"])
+	}
+	var orgs []json.RawMessage
+	if err := json.Unmarshal(receiptsSection["orgs"], &orgs); err != nil {
+		t.Fatalf("json.Unmarshal orgs: %v", err)
+	}
+	if len(orgs) != 0 {
+		t.Errorf("orgs = %d entries, want 0", len(orgs))
 	}
 }
 
