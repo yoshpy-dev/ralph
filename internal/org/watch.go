@@ -638,8 +638,7 @@ func (w *watchRun) evaluateTotalBudget(ctx context.Context, status *watchStatusF
 		// re-raise inherit the pre-resume occurrence's timestamp instead of
 		// getting a fresh one -- the resumed occurrence is a new
 		// observation, not a retry of the old one, matching raiseOrClear's
-		// own re-raise path (watch.go:838), which always writes a fresh
-		// FirstTS. This only clears Active/FirstTS, not rec.Cutoff -- the
+		// own re-raise path, which always writes a fresh FirstTS. This only clears Active/FirstTS, not rec.Cutoff -- the
 		// separate "one cutoff per key, ever" ratchet above is unaffected,
 		// so a prior successful cutoff still permanently disables Stop for
 		// this key regardless.

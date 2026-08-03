@@ -113,8 +113,8 @@ PR⑤(#140)完了時点で tech-debt に登録した org runtime 系の残債 5 
 - [x] Slice 3 — C2-6 insights 再指向(e00e301 + 4ddd8e7)
 - [x] Slice 4 — watchdog 4 件(ab4e9da)
 - [x] Slice 5 — upgrade スモーク + tech-debt RESOLVED + doc 追従
-- [ ] Self-review artifact created
-- [ ] Verify artifact created
+- [x] Self-review artifact created
+- [x] Verify artifact created
 - [x] Test artifact created
 - [x] Sync-docs artifact created
 
