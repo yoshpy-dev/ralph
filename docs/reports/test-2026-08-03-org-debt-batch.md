@@ -95,3 +95,57 @@ No failures observed across any suite, in either the cached full-scope run-test.
 - Pass: 23 shell suites (555 assertions) + 8 Go packages (fresh `-count=1` and cached full-scope run), including all plan-specified focus tests (AC-3 insights output contract, AC-4 all four watchdog regressions with FirstTS assertion, AC-5 upgrade-removal test, AC-2 guard suites at their expected counts)
 - Fail: 0
 - Blocked: none
+
+## Cycle 2 (delta re-test)
+
+- Date: 2026-08-03
+- Worktree: `/Users/hiroki.yoshioka/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-debt-batch`, branch `chore/org-debt-batch`, HEAD `bc058a1`
+- Trigger: full behavioral re-run requested to confirm no regression after cycle-1's cross-review/self-review doc-fix commits (`bf37b24`..`bc058a1`), which touched `docs/plans/active/2026-08-03-org-debt-batch.md`, `docs/tech-debt/README.md`, `docs/reports/verify-2026-08-03-org-debt-batch.md`, `docs/insights/events/2026-08-03-org-debt-batch.jsonl`, and one comment-only edit in `internal/org/watch.go` (`git show 2b71fd1 -- internal/org/watch.go`: a stale line-number self-reference in a comment removed, no logic change).
+- Scope: `RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh` (shell + golang, full language scope) + `go test ./... -count=1` (fresh, no cache) + `go test ./... -count=1 -cover` + targeted isolate-reruns of the two known-flaky-under-contention tests
+- Evidence: `docs/evidence/test-2026-08-03-org-debt-batch-cycle2.log`
+
+### Cycle 2 test execution
+
+| Suite / Command | Tests | Passed | Failed | Skipped |
+| --- | --- | --- | --- | --- |
+| `RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh` — all 23 shell suites | 555 | 555 | 0 | 0 |
+| `RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh` — golang verifier (`go test ./...`, cached) | 8 pkgs | 8 | 0 | 0 |
+| `go test ./... -count=1` (fresh, no cache) | 8 pkgs | 8 | 0 | 0 |
+| `go test ./... -count=1 -cover` | 8 pkgs | 8 | 0 | 0 |
+| Isolate-rerun `TestRunDoctorOpts_ProbeModelsFalse_NoSubprocess` (x3) | 3 | 3 | 0 | 0 |
+| Isolate-rerun `TestRunWatcher_TimeoutIndependentOfSmallInterval` (x3) | 3 | 3 | 0 | 0 |
+
+Per-suite shell counts (44, 26, 11, 13, 23, 8, 7, 13, 11, 39, 29, 1, 15, 29, 12, 6, 64, 22, 47, 36, 11, 59, 29 — sum 555) are byte-for-byte identical to the Cycle 1 table above; no suite gained, lost, or changed an assertion count. `run-test.sh` exited 0.
+
+### Cycle 2 coverage
+
+Identical to Cycle 1 (expected: the only code-level delta in this range is a comment edit, no executable line changed):
+
+- `internal/cli`: 77.5%
+- `internal/config`: 94.2%
+- `internal/insights`: 86.1%
+- `internal/org`: 89.1%
+- `internal/org/driver`: 92.0%
+- `internal/org/protocol`: 97.9%
+- `internal/scaffold`: 67.2%
+- `internal/upgrade`: 90.9%
+- `cmd/ralph`: 0.0% (pre-existing, out of scope)
+
+### Cycle 2 failure analysis
+
+| Test | Error | Root cause | Proposed fix |
+| --- | --- | --- | --- |
+| (none) | — | — | — |
+
+No failures in any suite, in `run-test.sh`'s cached full-scope pass, the fresh `-count=1` rerun, or the `-cover` run.
+
+### Cycle 2 flaky-test check
+
+Per tester memory, `TestRunDoctorOpts_ProbeModelsFalse_NoSubprocess` (internal/cli) and `TestRunWatcher_TimeoutIndependentOfSmallInterval` (internal/org) are known flaky under adjacent-subprocess-contention batching. Both isolate-reran 3x each (`go test <pkg> -run <name> -v -count=1`, run standalone, not back-to-back with other subprocess-heavy tests): all 6 runs PASS, no flake observed.
+
+### Cycle 2 verdict
+
+- Pass: 555/555 shell assertions across 23 files + 8/8 Go packages (cached full-scope, fresh `-count=1`, and `-cover` runs all green) + 6/6 isolate-reruns of the two known-flaky tests
+- Fail: 0
+- Blocked: none
+- **No regression from Cycle 1.** The doc-only + comment-only delta since the Cycle 1 report produced byte-identical suite/assertion counts and coverage percentages.
