@@ -115,7 +115,7 @@ PR⑤(#140)完了時点で tech-debt に登録した org runtime 系の残債 5 
 - [x] Slice 5 — upgrade スモーク + tech-debt RESOLVED + doc 追従
 - [ ] Self-review artifact created
 - [ ] Verify artifact created
-- [ ] Test artifact created
+- [x] Test artifact created
 - [ ] Sync-docs artifact created
 
 ## Readiness checklist
