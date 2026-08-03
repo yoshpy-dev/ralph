@@ -54,8 +54,8 @@ type ManifestStore struct {
 // resolved state dir -- every caller (internal/cli/org.go's write path,
 // status.go's read path, and tests) must go through this function instead
 // of re-deriving the join themselves. The root-relative constructor this
-// package used to export (NewManifestStore(root), joining root against a
-// package-level ManifestRelPath constant) was removed because a caller could
+// package used to export (joining a caller-supplied root against a
+// package-level relative-path constant) was removed because a caller could
 // pass an already-resolved state dir into it by mistake, silently
 // double-joining the relative fragment onto a directory that already ended
 // in it -- exactly the bug behind AR-1

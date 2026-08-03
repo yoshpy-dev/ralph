@@ -183,7 +183,8 @@ func TestStatusCmd_DryRunSeatIsARowButNotCountedInAggregates(t *testing.T) {
 // status` (the read path, runStatus -> org.ManifestPathIn) against the same
 // --state-dir. This is the AR-1 regression case
 // (docs/reports/cross-review-triage-org-runtime-retire-loop.md): before the
-// fix, `ralph status` called org.NewManifestStore(stateDir), which
+// fix, `ralph status` used the package's then-exported root-relative
+// constructor, which
 // re-appended a package-level root-relative fragment onto an
 // already-resolved directory and always reported "no org runtime state
 // found" for a manifest a real spawn had just written. That root-relative

@@ -42,9 +42,9 @@ type ReceiptStore struct {
 // THE single derivation of a receipts path from a resolved state dir --
 // every caller (internal/cli/org.go's write path and tests) must go through
 // this function instead of re-deriving the join themselves. The
-// root-relative constructor this package used to export (NewReceiptStore
-// (root), joining root against a package-level ReceiptsRelPath constant) was
-// removed for the same reason NewManifestStore/ManifestRelPath was: passing
+// root-relative constructor this package used to export (joining a
+// caller-supplied root against a package-level relative-path constant) was
+// removed for the same reason as the manifest-side one: passing
 // an already-resolved state dir into a root-relative constructor
 // double-joins the relative fragment, the exact class of bug behind AR-1
 // (docs/reports/cross-review-triage-org-runtime-retire-loop.md, manifest
