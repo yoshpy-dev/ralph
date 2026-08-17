@@ -68,10 +68,29 @@ fi
 stdin_buf=""
 out_tmp=""
 merged_tmp=""
+first_output=""
 cleanup() {
-  rm -f "$stdin_buf" "$out_tmp" "$merged_tmp" "$out_tmp.first"
+  # Guard every removal so a signal that fires before a variable is
+  # assigned can't reconstruct a relative path (e.g. an empty out_tmp
+  # would otherwise make "$out_tmp.first" evaluate to the bare ".first",
+  # a cwd-relative path outside this script's temp namespace). Each
+  # branch is an "if", not "[ -n ... ] && rm -f ...", so a false guard
+  # still returns 0 — chaining "&&" would make cleanup's own exit status
+  # the false test's status (1), and the EXIT trap uses that in place of
+  # the real exit code that triggered it.
+  if [ -n "$stdin_buf" ]; then rm -f "$stdin_buf"; fi
+  if [ -n "$out_tmp" ]; then rm -f "$out_tmp"; fi
+  if [ -n "$merged_tmp" ]; then rm -f "$merged_tmp"; fi
+  if [ -n "$first_output" ]; then rm -f "$first_output"; fi
 }
-trap cleanup EXIT INT TERM HUP
+# The EXIT trap alone does not run when a fatal signal kills the process
+# under POSIX sh; each signal trap below must clean up and then terminate
+# explicitly (a bare "trap cleanup INT TERM HUP" would resume the script
+# after the trap action instead of exiting it).
+trap cleanup EXIT
+trap 'cleanup; exit 130' INT
+trap 'cleanup; exit 143' TERM
+trap 'cleanup; exit 129' HUP
 
 stdin_buf="$(mktemp "${TMPDIR:-/tmp}/ralph-dispatch-stdin.XXXXXX")"
 cat > "$stdin_buf"
@@ -81,7 +100,6 @@ merged_tmp="$(mktemp "${TMPDIR:-/tmp}/ralph-dispatch-merged.XXXXXX")"
 
 : > "$merged_tmp"
 output_count=0
-first_output=""
 
 # Directories are searched in this fixed order; scripts run in
 # lexicographic order within each directory.

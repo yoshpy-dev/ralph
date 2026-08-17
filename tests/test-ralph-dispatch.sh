@@ -311,6 +311,33 @@ else
 fi
 rm -f "$verify_fixture/.ralph/local/verify.d/20-fail.sh"
 
+# ── Case I: SIGTERM mid-run terminates (does not resume) and leaves no
+#           stray temp/".first" files in the fixture's cwd ─────────────
+rm -rf "$fixture/.claude/hooks/PreCompact.d"
+started_marker="$workdir/case-i-started"
+rm -f "$started_marker" "$fixture/.first"
+write_script "$fixture/.claude/hooks/PreCompact.d/10-slow.sh" <<EOF
+#!/usr/bin/env sh
+cat >/dev/null
+touch "$started_marker"
+sleep 5
+EOF
+( cd "$fixture" && printf '{}' | ./.claude/hooks/ralph-dispatch.sh PreCompact >/dev/null 2>&1 ) &
+i_pid=$!
+for _ in $(seq 1 50); do
+  [ -f "$started_marker" ] && break
+  sleep 0.1
+done
+kill -TERM "$i_pid" 2>/dev/null
+i_rc=0
+wait "$i_pid" 2>/dev/null || i_rc=$?
+assert_exit "I. SIGTERM mid-run terminates with non-zero exit (not resumed)" 143 "$i_rc"
+if [ -f "$fixture/.first" ]; then
+  record_fail "I. SIGTERM mid-run left a stray .first file in fixture cwd"
+else
+  record_pass "I. SIGTERM mid-run left no stray .first file in fixture cwd"
+fi
+
 # ── Summary ───────────────────────────────────────────────────────────
 echo
 echo "=== ralph-dispatch.sh test results ==="

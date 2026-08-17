@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -110,8 +111,14 @@ func packRelDir(pack string) string {
 	return filepath.Join("packs", "languages", pack)
 }
 
+// packRuleRelPath returns the manifest key / render path for a pack's
+// rule.md control file. It uses path.Join, not filepath.Join, because the
+// result feeds manifest keys — which init.go's ownerForScaffoldPath docs as
+// "always fs.FS slash paths" — not a raw OS filesystem call; filepath.Join
+// would emit "\"-separated keys on Windows and silently diverge from
+// ralph init's slash-keyed manifest entries for the same logical path.
 func packRuleRelPath(pack string) string {
-	return filepath.Join(".claude", "rules", "ralph", pack+".md")
+	return path.Join(".claude", "rules", "ralph", pack+".md")
 }
 
 func packRuleContent(src fs.FS) ([]byte, bool, error) {

@@ -62,3 +62,5 @@ Key rule: never say "done" without saying what was verified and what remains unv
 Detailed topic guidance lives in `.claude/rules/ralph/`; step-by-step
 workflows live in `.claude/skills/`.
 <!-- END RALPH MANAGED -->
+
+<!-- Project-specific notes go below this line. -->
