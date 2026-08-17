@@ -134,6 +134,10 @@
 - リリースタグは切らない(系列完了まで)。main 上の過渡状態は下流に届かない
 - スライス単位 revert 可能。root 移行(スライス 5)は単独 revert でメタリポジトリのみ旧レイアウトへ戻せる(テンプレートとの乖離は KNOWN_DIFFS 一時追加で吸収可能)
 
+## Deviations
+
+- 【着手時に発見】`.gitignore` は HTML コメントを許容しないため、managed block マーカーはファイル種別ごとのコメント形式が必要: Markdown 面は `<!-- BEGIN RALPH MANAGED (ralph:<surface>) -->`(Phase 1 実装どおり)、`.gitignore` は `# BEGIN RALPH MANAGED (ralph:gitignore)` / `# END RALPH MANAGED`。Phase 1 の block エンジンにマーカー形式のパラメータ化(surface → marker style)を追加する(スライス 3 で実装、スペック FR-5 の形式定義に `#` 形式を追補)
+
 ## Open questions
 
 - AGENTS.md managed block に入れる「最低限の要点」の分量(スペック Open questions 引き継ぎ)— スライス 1 のドラフトを cross-review で判定
