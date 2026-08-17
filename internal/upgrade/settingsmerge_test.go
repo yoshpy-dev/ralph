@@ -307,10 +307,12 @@ func TestMergeOwnedSettings_NonObjectRootRejected(t *testing.T) {
 	}
 }
 
-// TestOwnedSettingsPaths_AnchorsMergeBehavior keeps the exported
-// OwnedSettingsPaths contract honest against the merge implementation: the
-// declared path set must not drift, and a top-level key that a template
-// ships OUTSIDE the owned paths must never be introduced into the result.
+// TestOwnedSettingsPaths_AnchorsMergeBehavior is a deliberate change-detector
+// on the declared OwnedSettingsPaths list (edit the merge handlers and this
+// test's `want` literal together) plus a separate regression test that an
+// un-owned top-level key a template ships outside the owned paths is never
+// introduced into the merged result. It does not verify that each handler
+// implements its corresponding owned path.
 func TestOwnedSettingsPaths_AnchorsMergeBehavior(t *testing.T) {
 	want := []string{"env", "permissions.allow", "permissions.deny", "hooks"}
 	if got := OwnedSettingsPaths[:]; !slices.Equal(got, want) {

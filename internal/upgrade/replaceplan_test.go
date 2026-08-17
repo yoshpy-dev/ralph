@@ -607,7 +607,19 @@ func TestApplyOps_PartialFailureStopsSubsequentOps(t *testing.T) {
 // as drift, and without the manifest having advanced (the test manifest is
 // reused unmodified across both planning calls, simulating "caller never
 // reached the commit barrier").
+//
+// The failure is injected via chmod 0o444 rather than the directory-in-the-way
+// technique used by TestApplyOps_PartialFailureStopsSubsequentOps: this test
+// needs beta.md to plan as an OpUpdate (a regular file readable by
+// PlanCoreReplace) both before and after the injected failure, and a
+// directory at that path would make PlanCoreReplace itself error out on the
+// unreadable path instead of reaching the two-op plan this test depends on.
+// chmod is root-defeated (root can write a 0o444 file), so this test skips
+// under root instead of hard-failing there.
 func TestPlanCoreReplace_ReplanAfterPartialFailureIsStable(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("chmod 0o444 does not deny writes to root; this failure-injection technique cannot run as root")
+	}
 	dir := t.TempDir()
 	writeDiskFile(t, dir, "alpha.md", "alpha old")
 	writeDiskFile(t, dir, "beta.md", "beta old")

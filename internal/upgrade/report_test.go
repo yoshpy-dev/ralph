@@ -185,3 +185,19 @@ func TestWriteUpgradeReport_RejectsPathOutsideReportsDir(t *testing.T) {
 		t.Errorf("AGENTS.md should not have been written: stat err = %v", statErr)
 	}
 }
+
+// TestWriteUpgradeReport_RejectsReportsDirItself proves the guard has no
+// exception for the reports directory path with no filename: relPath ==
+// "docs/reports" must be rejected, not accepted as if it named the
+// directory. Accepting it would let os.WriteFile create a *file* named
+// docs/reports, permanently blocking every later report write in that tree.
+func TestWriteUpgradeReport_RejectsReportsDirItself(t *testing.T) {
+	dir := t.TempDir()
+	err := WriteUpgradeReport(dir, "docs/reports", []byte("x"))
+	if err == nil {
+		t.Fatalf("expected an error for relPath == \"docs/reports\" (no filename)")
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "docs", "reports")); !os.IsNotExist(statErr) {
+		t.Errorf("docs/reports should not have been written as a file: stat err = %v", statErr)
+	}
+}

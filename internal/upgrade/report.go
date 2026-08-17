@@ -181,9 +181,14 @@ func sortedCopy(paths []string) []string {
 	return sorted
 }
 
-// versionSanitizeRe matches characters not allowed in an upgrade report
+// reportNameSanitizeRe matches characters not allowed in an upgrade report
 // filename's version or date component.
-var versionSanitizeRe = regexp.MustCompile(`[^A-Za-z0-9._-]`)
+var reportNameSanitizeRe = regexp.MustCompile(`[^A-Za-z0-9._-]`)
+
+// upgradeReportDir is the single source of truth for the upgrade report
+// directory: UpgradeReportRelPath builds its output path under this
+// directory, and WriteUpgradeReport requires relPath to resolve under it.
+const upgradeReportDir = "docs/reports"
 
 // UpgradeReportRelPath returns the manifest-relative path an upgrade report
 // for the given template version and date should be written to:
@@ -191,27 +196,24 @@ var versionSanitizeRe = regexp.MustCompile(`[^A-Za-z0-9._-]`)
 // sanitized by stripping any character outside [A-Za-z0-9._-] so path
 // separators or spaces in either value cannot escape the reports directory.
 func UpgradeReportRelPath(version, date string) string {
-	safeVersion := versionSanitizeRe.ReplaceAllString(version, "")
-	safeDate := versionSanitizeRe.ReplaceAllString(date, "")
-	return filepath.ToSlash(filepath.Join("docs", "reports", fmt.Sprintf("upgrade-%s-%s.md", safeVersion, safeDate)))
+	safeVersion := reportNameSanitizeRe.ReplaceAllString(version, "")
+	safeDate := reportNameSanitizeRe.ReplaceAllString(date, "")
+	return filepath.ToSlash(filepath.Join(upgradeReportDir, fmt.Sprintf("upgrade-%s-%s.md", safeVersion, safeDate)))
 }
-
-// upgradeReportDir is the required prefix for any path WriteUpgradeReport
-// accepts, matching UpgradeReportRelPath's own output.
-const upgradeReportDir = "docs/reports/"
 
 // WriteUpgradeReport validates relPath (via scaffold.CleanLocalRelPath) and
 // writes content to targetDir/relPath, creating parent directories as
 // needed. relPath must resolve under docs/reports/ — WriteUpgradeReport
-// rejects any cleaned path outside that prefix, even if it is otherwise a
-// valid local-relative path.
+// rejects any cleaned path outside that prefix (including the directory
+// path itself, with no filename), even if it is otherwise a valid
+// local-relative path.
 func WriteUpgradeReport(targetDir string, relPath string, content []byte) error {
 	clean, err := cleanPathKey(relPath)
 	if err != nil {
 		return fmt.Errorf("upgrade report path %q: %w", relPath, err)
 	}
-	if clean != strings.TrimSuffix(upgradeReportDir, "/") && !strings.HasPrefix(clean, upgradeReportDir) {
-		return fmt.Errorf("upgrade report path %q: must be under %s", relPath, upgradeReportDir)
+	if !strings.HasPrefix(clean, upgradeReportDir+"/") {
+		return fmt.Errorf("upgrade report path %q: must be under %s/", relPath, upgradeReportDir)
 	}
 
 	full := filepath.Join(targetDir, filepath.FromSlash(clean))

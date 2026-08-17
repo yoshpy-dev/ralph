@@ -75,11 +75,12 @@ type DriftEntry struct {
 }
 
 // AdvisoryEntry records a path that PlanCoreReplace intentionally leaves
-// untouched but surfaces to the operator: every fork path (its diff against
-// the new template may be empty, in which case rendering skips it), and
-// seed paths whose template side changed since last applied. This only
-// carries the path and hashes; rendering the actual diff is advisory.go's
-// job.
+// untouched but surfaces to the operator: every fork path produces an
+// advisory entry, even when its content is byte-identical to the new
+// template — that case renders in the report as a "_No differences._"
+// section, not a hidden or omitted one — plus seed paths whose template
+// side changed since last applied. This only carries the path and hashes;
+// rendering the actual diff is advisory.go's job.
 type AdvisoryEntry struct {
 	Path     string
 	Owner    string
@@ -367,8 +368,10 @@ func classifyUntracked(
 //
 // ApplyOps never reads or writes the manifest — that is the commit barrier:
 // callers must only advance manifest state (recorded hashes for creates,
-// updates, and ReplacePlan.ManifestRefresh entries) after ApplyOps returns a
-// nil error. A non-nil error means the on-disk tree may be partially
+// updates, and ReplacePlan.ManifestRefresh entries, plus dropping the
+// entries listed in ReplacePlan.ManifestRemove — the one entry in this list
+// that removes rather than advances a manifest hash) after ApplyOps returns
+// a nil error. A non-nil error means the on-disk tree may be partially
 // updated but the manifest must not be advanced; re-planning over that tree
 // with PlanCoreReplace produces a plan that completes the remaining work
 // without misclassifying the already-applied paths as drift.

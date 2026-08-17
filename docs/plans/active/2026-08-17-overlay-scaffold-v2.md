@@ -120,6 +120,8 @@ layout v2 系列(全 5 段)の 1 本目として、スペック文書と、後�
 
 - Slice 4 コミット後、orchestrator が staticcheck QF1002(replaceplan.go の tagged switch 化)をインライン修正(`refactor: use tagged switch in replace planner classification`)。挙動変更なし
 - 完了ゲートの `run-verify.sh` で既存の日付依存テスト failure を発見(`tests/test-gc-artifacts.sh` の recent フィクスチャが固定日付 `2026-07-12` で、`--days 30` の窓を 2026-08-17 時点で外れた。main でも再現、本タスクと無関係)。verify exit 0 と PR CI を塞ぐため、最小修正としてフィクスチャ日付を実行日相対に変更(`fix: make gc-artifacts recent fixture date dynamic`)。スコープ外の発見への対処として本 plan に記録
+- sync-docs ステップ(cycle 1)で `AGENTS.md` リポマップ更新に合わせ `scripts/check-sync.sh` の `KNOWN_DIFFS` に `AGENTS.md` を追加(whole-file suppression)。cycle-2 self-review C2-3 で影響範囲を指摘され、`docs/tech-debt/README.md` に解消トリガー(Phase 2 のテンプレート側ロールアウト時に削除)を記録する形で対処
+- cycle-2 self-review(`docs/reports/self-review-2026-08-17-overlay-scaffold-v2.md` Cycle 2 節)の C2-1/C2-2/C2-3/C2-4/C2-5/C2-6/C2-7/C2-8 を `refactor: address cycle-2 self-review findings` でクリーンアップ。ドキュメント修正(AdvisoryEntry/ApplyOps/LegacySkipped 隣接コメント、テストのdoc comment)、`docs/tech-debt/README.md` への2行追加、`versionSanitizeRe`→`reportNameSanitizeRe` リネームと `WriteUpgradeReport` ガードの単一情報源化、cycle-1 LOW-7(root 実行時に無力化される chmod 0444)の root-skip ガード追加、欠落していた verify/sync_docs insight イベントの追記。挙動変更は `WriteUpgradeReport` のガード強化(`relPath == "docs/reports"` を拒否)のみ
 
 ## Open questions
 
