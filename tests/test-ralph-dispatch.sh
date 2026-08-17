@@ -12,6 +12,8 @@
 #   e. stdin (the hook payload) reaches every script.
 #   f. A local drop-in under .ralph/local/hooks/<event>.d/ runs after core
 #      .claude/hooks/<event>.d/ drop-ins.
+#   f2. All three layers (core .d -> .ralph/local/hooks/<event>.d ->
+#       .claude/hooks/local/<event>.d) execute in that order in one fixture.
 #   g. A missing event directory produces exit 0 and empty output.
 #   h. run-verify.sh / run-static-verify.sh / run-test.sh execute the
 #      .ralph/local/verify.d|test.d drop-ins after core verification, with
@@ -226,6 +228,24 @@ dispatch "SessionEnd" '{}'
 actual_order="$(cat "$order_log" 2>/dev/null | tr '\n' ',')"
 assert_eq "F. core .d runs before .ralph/local/hooks .d" "core,local," "$actual_order"
 
+# ── Case F2: all 3 layers run core → .ralph/local → .claude/hooks/local ─
+rm -rf "$fixture/.claude/hooks/SessionEnd.d" "$fixture/.ralph" "$fixture/.claude/hooks/local"
+o2="$workdir/order2.log"; rm -f "$o2"
+write_script "$fixture/.claude/hooks/SessionEnd.d/10-core.sh" <<EOF
+#!/usr/bin/env sh
+cat >/dev/null; echo core >> "$o2"
+EOF
+write_script "$fixture/.ralph/local/hooks/SessionEnd.d/10-local.sh" <<EOF
+#!/usr/bin/env sh
+cat >/dev/null; echo local >> "$o2"
+EOF
+write_script "$fixture/.claude/hooks/local/SessionEnd.d/10-gi.sh" <<EOF
+#!/usr/bin/env sh
+cat >/dev/null; echo gitignored >> "$o2"
+EOF
+dispatch "SessionEnd" '{}'
+assert_eq "F2. three-layer order core,local,gitignored" "core,local,gitignored," "$(cat "$o2" 2>/dev/null | tr '\n' ',')"
+
 # ── Case G: missing event dir → exit 0, empty output ────────────────────
 dispatch "NoSuchEventAtAll" '{}'
 assert_exit "G. missing event dir exits 0" 0 "$DISPATCH_RC"
@@ -267,8 +287,12 @@ h2_actual="$(cat "$vd_log" 2>/dev/null | tr '\n' ',')"
 assert_eq "H2. run-test.sh runs only test.d" "test.d," "$h2_actual"
 
 # H3: direct run-verify.sh (mode=all default) runs both verify.d and test.d.
+# HARNESS_VERIFY_MODE is explicitly unset here (rather than left to default)
+# so this case stays hermetic when the outer test run itself was launched
+# via run-test.sh, which exports HARNESS_VERIFY_MODE=test into this very
+# process tree and would otherwise leak into the fixture invocation below.
 rm -f "$vd_log"
-(cd "$verify_fixture" && RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh >/dev/null 2>&1)
+(cd "$verify_fixture" && unset HARNESS_VERIFY_MODE; RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh >/dev/null 2>&1)
 h3_actual="$(cat "$vd_log" 2>/dev/null | sort | tr '\n' ',')"
 assert_eq "H3. run-verify.sh (mode=all) runs both verify.d and test.d" "test.d,verify.d," "$h3_actual"
 
