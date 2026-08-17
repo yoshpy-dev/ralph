@@ -182,26 +182,36 @@ func sortedCopy(paths []string) []string {
 }
 
 // versionSanitizeRe matches characters not allowed in an upgrade report
-// filename's version component.
+// filename's version or date component.
 var versionSanitizeRe = regexp.MustCompile(`[^A-Za-z0-9._-]`)
 
 // UpgradeReportRelPath returns the manifest-relative path an upgrade report
 // for the given template version and date should be written to:
-// docs/reports/upgrade-<version>-<date>.md. version is sanitized by
-// stripping any character outside [A-Za-z0-9._-] so path separators or
-// spaces in a version string cannot escape the reports directory.
+// docs/reports/upgrade-<version>-<date>.md. Both version and date are
+// sanitized by stripping any character outside [A-Za-z0-9._-] so path
+// separators or spaces in either value cannot escape the reports directory.
 func UpgradeReportRelPath(version, date string) string {
 	safeVersion := versionSanitizeRe.ReplaceAllString(version, "")
-	return filepath.ToSlash(filepath.Join("docs", "reports", fmt.Sprintf("upgrade-%s-%s.md", safeVersion, date)))
+	safeDate := versionSanitizeRe.ReplaceAllString(date, "")
+	return filepath.ToSlash(filepath.Join("docs", "reports", fmt.Sprintf("upgrade-%s-%s.md", safeVersion, safeDate)))
 }
+
+// upgradeReportDir is the required prefix for any path WriteUpgradeReport
+// accepts, matching UpgradeReportRelPath's own output.
+const upgradeReportDir = "docs/reports/"
 
 // WriteUpgradeReport validates relPath (via scaffold.CleanLocalRelPath) and
 // writes content to targetDir/relPath, creating parent directories as
-// needed.
+// needed. relPath must resolve under docs/reports/ — WriteUpgradeReport
+// rejects any cleaned path outside that prefix, even if it is otherwise a
+// valid local-relative path.
 func WriteUpgradeReport(targetDir string, relPath string, content []byte) error {
 	clean, err := cleanPathKey(relPath)
 	if err != nil {
 		return fmt.Errorf("upgrade report path %q: %w", relPath, err)
+	}
+	if clean != strings.TrimSuffix(upgradeReportDir, "/") && !strings.HasPrefix(clean, upgradeReportDir) {
+		return fmt.Errorf("upgrade report path %q: must be under %s", relPath, upgradeReportDir)
 	}
 
 	full := filepath.Join(targetDir, filepath.FromSlash(clean))

@@ -213,6 +213,35 @@ func TestPlanCoreReplace_CoreDeleteWhenTemplateRemovesFileAndDiskUnmodified(t *t
 	if len(plan.Drift) != 0 {
 		t.Errorf("unexpected drift: %+v", plan.Drift)
 	}
+	if len(plan.ManifestRemove) != 1 || plan.ManifestRemove[0] != "old-file.md" {
+		t.Errorf("ManifestRemove = %+v, want [old-file.md] alongside the OpDelete", plan.ManifestRemove)
+	}
+}
+
+// TestPlanCoreReplace_CoreManifestRemoveWhenDiskAlreadyAbsent proves the
+// second template-removed-core case: disk already lacks the file (nothing to
+// delete), but the manifest entry is still stale and must be signaled for
+// removal so a caller doesn't accumulate manifest entries for paths that
+// exist nowhere.
+func TestPlanCoreReplace_CoreManifestRemoveWhenDiskAlreadyAbsent(t *testing.T) {
+	dir := t.TempDir()
+	tmpl := mapFS(map[string]string{}) // template no longer ships old-file.md
+	m := scaffold.NewManifest("0.1.0")
+	if err := m.SetFileOwned("old-file.md", scaffold.OwnerCore, hashOf("gone content"), hashOf("gone content")); err != nil {
+		t.Fatalf("SetFileOwned: %v", err)
+	}
+
+	plan, err := PlanCoreReplace(m, dir, tmpl)
+	if err != nil {
+		t.Fatalf("PlanCoreReplace: %v", err)
+	}
+	assertNoOpFor(t, plan, "old-file.md")
+	if len(plan.Drift) != 0 {
+		t.Errorf("unexpected drift: %+v", plan.Drift)
+	}
+	if len(plan.ManifestRemove) != 1 || plan.ManifestRemove[0] != "old-file.md" {
+		t.Errorf("ManifestRemove = %+v, want [old-file.md] even with no op (disk already absent)", plan.ManifestRemove)
+	}
 }
 
 func TestPlanCoreReplace_CoreTemplateRemovalOfModifiedFileIsDriftNotDelete(t *testing.T) {
@@ -235,6 +264,9 @@ func TestPlanCoreReplace_CoreTemplateRemovalOfModifiedFileIsDriftNotDelete(t *te
 	d := plan.Drift[0]
 	if d.Path != "old-file.md" || d.NewHash != "" {
 		t.Errorf("drift entry = %+v, want empty NewHash (template no longer has file)", d)
+	}
+	if len(plan.ManifestRemove) != 0 {
+		t.Errorf("ManifestRemove = %+v, want none for a drifted path (manifest must not be advanced)", plan.ManifestRemove)
 	}
 }
 
@@ -659,5 +691,36 @@ func TestPlanCoreReplace_ReplanAfterPartialFailureIsStable(t *testing.T) {
 	betaOp := findOp(t, replan, "beta.md")
 	if betaOp.Kind != OpUpdate {
 		t.Errorf("beta.md op = %+v, want OpUpdate (remaining work must still be planned)", betaOp)
+	}
+}
+
+// TestApplyOps_RejectsInvalidOpPathBeforeWritingAnything proves ApplyOps
+// self-validates every op path before performing any filesystem operation:
+// a hand-built plan (bypassing PlanCoreReplace) with a path that escapes
+// targetDir must fail closed, writing nothing at all — not even the ops
+// that would have succeeded and come before the invalid one in the list.
+func TestApplyOps_RejectsInvalidOpPathBeforeWritingAnything(t *testing.T) {
+	dir := t.TempDir()
+
+	plan := ReplacePlan{
+		Ops: []FileOp{
+			{Kind: OpCreate, Path: "first.md", Content: []byte("should not be written")},
+			{Kind: OpCreate, Path: "../outside/escape.md", Content: []byte("should not escape")},
+		},
+	}
+
+	err := ApplyOps(dir, plan)
+	if err == nil {
+		t.Fatal("expected ApplyOps to reject a plan containing an invalid op path")
+	}
+	if !strings.Contains(err.Error(), "../outside/escape.md") {
+		t.Errorf("error %q does not name the invalid path", err.Error())
+	}
+
+	if _, statErr := os.Stat(filepath.Join(dir, "first.md")); !os.IsNotExist(statErr) {
+		t.Errorf("first.md should not have been written (validate-all-upfront): stat err = %v", statErr)
+	}
+	if _, statErr := os.Stat(filepath.Join(filepath.Dir(dir), "outside", "escape.md")); !os.IsNotExist(statErr) {
+		t.Errorf("escape.md should not exist outside targetDir: stat err = %v", statErr)
 	}
 }

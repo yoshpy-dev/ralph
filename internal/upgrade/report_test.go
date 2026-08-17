@@ -129,6 +129,20 @@ func TestUpgradeReportRelPath_SanitizesSlashesAndSpaces(t *testing.T) {
 	}
 }
 
+func TestUpgradeReportRelPath_SanitizesDateParentEscape(t *testing.T) {
+	got := UpgradeReportRelPath("v2.0.0", "x/../../../AGENTS")
+	if !strings.HasPrefix(got, "docs/reports/upgrade-v2.0.0-") {
+		t.Fatalf("expected sanitized date to still fit the upgrade-<version>-<date>.md shape, got %q", got)
+	}
+	dateComponent := strings.TrimSuffix(strings.TrimPrefix(got, "docs/reports/upgrade-v2.0.0-"), ".md")
+	if strings.ContainsAny(dateComponent, "/\\") {
+		t.Errorf("expected date component to contain no path separators, got %q (full path %q)", dateComponent, got)
+	}
+	if !strings.HasPrefix(got, "docs/reports/") {
+		t.Errorf("expected path to stay inside docs/reports/, got %q", got)
+	}
+}
+
 func TestWriteUpgradeReport_HappyPath(t *testing.T) {
 	dir := t.TempDir()
 	relPath := UpgradeReportRelPath("v2.0.0", "2026-08-17")
@@ -153,5 +167,21 @@ func TestWriteUpgradeReport_RejectsParentEscape(t *testing.T) {
 	err := WriteUpgradeReport(dir, "../escape.md", []byte("x"))
 	if err == nil {
 		t.Fatalf("expected an error for a path escaping the local tree")
+	}
+}
+
+// TestWriteUpgradeReport_RejectsPathOutsideReportsDir proves the stricter
+// prefix check: a path that is a perfectly valid local-relative path (no
+// "..", not absolute) but does not resolve under docs/reports/ must still
+// be rejected, since WriteUpgradeReport's whole contract is writing upgrade
+// reports to that directory.
+func TestWriteUpgradeReport_RejectsPathOutsideReportsDir(t *testing.T) {
+	dir := t.TempDir()
+	err := WriteUpgradeReport(dir, "AGENTS.md", []byte("x"))
+	if err == nil {
+		t.Fatalf("expected an error for a path outside docs/reports/")
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "AGENTS.md")); !os.IsNotExist(statErr) {
+		t.Errorf("AGENTS.md should not have been written: stat err = %v", statErr)
 	}
 }

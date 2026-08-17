@@ -99,6 +99,16 @@ type ReplacePlan struct {
 	// legacy (unattributed, ManifestFile.IsLegacyOwner()) entry. These are
 	// left entirely alone; classification is a later phase's responsibility.
 	LegacySkipped []string
+	// ManifestRemove lists, in sorted order, the paths whose manifest entry
+	// the caller must drop once ApplyOps has returned a nil error (i.e.
+	// after the commit barrier — see ApplyOps' doc comment). This covers
+	// every owner=core path the template no longer ships: both the path
+	// paired with an OpDelete op (disk still had the unmodified file) and
+	// the path with no op at all (disk was already absent, so there is
+	// nothing to delete but the stale manifest entry still needs to go).
+	// Without this signal a caller has no way to notice the second case and
+	// the manifest accumulates entries for paths that exist nowhere.
+	ManifestRemove []string
 }
 
 // PlanCoreReplace computes an ordered file-operation plan over the union of
@@ -251,11 +261,15 @@ func classifyCore(
 	// Template no longer has this path: a candidate for deletion, but never
 	// destroy a modified file.
 	if !hasDisk {
-		return // already gone; nothing to do.
+		// Already gone from disk; nothing to delete, but the manifest entry
+		// is now stale and must still be dropped by the caller.
+		plan.ManifestRemove = append(plan.ManifestRemove, path)
+		return
 	}
 	diskHash := scaffold.HashBytes(diskContent)
 	if diskHash == recordedHash {
 		*deletes = append(*deletes, FileOp{Kind: OpDelete, Path: path})
+		plan.ManifestRemove = append(plan.ManifestRemove, path)
 		return
 	}
 	plan.Drift = append(plan.Drift, DriftEntry{Path: path, RecordedHash: recordedHash, DiskHash: diskHash, NewHash: ""})
@@ -344,6 +358,13 @@ func classifyUntracked(
 // creates, then updates, each sorted by path), stopping at the first
 // failure. Ops after a failure are not attempted.
 //
+// Before executing any op, ApplyOps validates every op's Path with
+// cleanPathKey; on the first invalid path it returns an error naming that
+// path and performs no filesystem operations at all (validate-all-upfront,
+// so a plan that fails validation never leaves partial-failure semantics to
+// reason about). This guards against a hand-built ReplacePlan carrying a
+// path that would resolve outside targetDir.
+//
 // ApplyOps never reads or writes the manifest — that is the commit barrier:
 // callers must only advance manifest state (recorded hashes for creates,
 // updates, and ReplacePlan.ManifestRefresh entries) after ApplyOps returns a
@@ -352,6 +373,12 @@ func classifyUntracked(
 // with PlanCoreReplace produces a plan that completes the remaining work
 // without misclassifying the already-applied paths as drift.
 func ApplyOps(targetDir string, plan ReplacePlan) error {
+	for _, op := range plan.Ops {
+		if _, cerr := cleanPathKey(op.Path); cerr != nil {
+			return fmt.Errorf("%s %s: invalid path: %w", op.Kind, op.Path, cerr)
+		}
+	}
+
 	for _, op := range plan.Ops {
 		full := filepath.Join(targetDir, filepath.FromSlash(op.Path))
 		switch op.Kind {
