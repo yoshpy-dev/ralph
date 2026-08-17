@@ -341,7 +341,15 @@ func checkHooks(targetDir string) checkResult {
 				if !ok {
 					continue
 				}
-				if _, err := os.Stat(filepath.Join(targetDir, cmd)); errors.Is(err, fs.ErrNotExist) {
+				// The command may carry arguments (e.g. "./path/to/script.sh
+				// EventName"); only the first whitespace-separated token is
+				// the executable, so stat that instead of the full string.
+				fields := strings.Fields(cmd)
+				if len(fields) == 0 {
+					continue
+				}
+				exe := fields[0]
+				if _, err := os.Stat(filepath.Join(targetDir, exe)); errors.Is(err, fs.ErrNotExist) {
 					missing++
 				}
 			}

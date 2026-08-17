@@ -362,6 +362,24 @@ func reconcileBlockSurfaces(targetDir string, baseFS fs.FS, skipped []string, w 
 		}
 
 		diskPath := filepath.Join(targetDir, bs.path)
+
+		// Refuse to follow symlinks (or operate on any other non-regular
+		// file): writing through a symlinked block surface could land
+		// outside targetDir. Treat it the same as a malformed block — leave
+		// it untouched and warn, rather than error.
+		info, err := os.Lstat(diskPath)
+		if err != nil {
+			return nil, fmt.Errorf("reading existing %s: %w", bs.path, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			writef(w, "  ⚠ %s: is a symlink; left untouched\n", bs.path)
+			continue
+		}
+		if !info.Mode().IsRegular() {
+			writef(w, "  ⚠ %s: is not a regular file; left untouched\n", bs.path)
+			continue
+		}
+
 		current, err := os.ReadFile(diskPath)
 		if err != nil {
 			return nil, fmt.Errorf("reading existing %s: %w", bs.path, err)
