@@ -116,6 +116,11 @@ layout v2 系列(全 5 段)の 1 本目として、スペック文書と、後�
 - 本 PR は動作変更ゼロのため revert 安全
 - リリースタグは系列完了(Phase 5 + メタリポジトリ自己移行の検証)まで切らない
 
+## Deviations
+
+- Slice 4 コミット後、orchestrator が staticcheck QF1002(replaceplan.go の tagged switch 化)をインライン修正(`refactor: use tagged switch in replace planner classification`)。挙動変更なし
+- 完了ゲートの `run-verify.sh` で既存の日付依存テスト failure を発見(`tests/test-gc-artifacts.sh` の recent フィクスチャが固定日付 `2026-07-12` で、`--days 30` の窓を 2026-08-17 時点で外れた。main でも再現、本タスクと無関係)。verify exit 0 と PR CI を塞ぐため、最小修正としてフィクスチャ日付を実行日相対に変更(`fix: make gc-artifacts recent fixture date dynamic`)。スコープ外の発見への対処として本 plan に記録
+
 ## Open questions
 
 - upgrade レポートの exit code 設計(未解決 drift 時の 0/非 0)— Phase 3 で確定(スペック Open questions 引き継ぎ)
@@ -123,9 +128,9 @@ layout v2 系列(全 5 段)の 1 本目として、スペック文書と、後�
 
 ## Progress checklist
 
-- [ ] Plan reviewed
+- [x] Plan reviewed
 - [x] Branch created(docs/spec-overlay-scaffold-v2、spec コミット済み)
-- [ ] Implementation started
+- [x] Implementation started(slice 1: 75de545 / slice 2: 73ad8a7 / slice 3: b317869 / slice 4: a32810a / slice 5: 10c6e2a + 追補 1e38046, 7dca14e)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
