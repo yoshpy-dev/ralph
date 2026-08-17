@@ -92,3 +92,74 @@ Phase 1's own plan-level Verify plan asked to confirm foundational alignment wit
 - Full behavioral test suite execution (`go test ./...` pass/fail, coverage) — `/test`'s responsibility, not run here by design.
 - `AGENTS.md` repo map sync — `/sync-docs`'s responsibility; flagged above as known drift, not blocking.
 - Runtime behavior of the wired flow (FR-1 full 8-step upgrade, migration, eject/adopt, doctor --strict) — no runtime to exercise yet; these primitives are deliberately unwired in Phase 1 and will be verified against the CLI in Phase 3–5.
+
+## Cycle 2 (re-run after cross-review fixes + cycle-2 self-review cleanup)
+
+- Date: 2026-08-17
+- Pipeline cycle: 2/2 (`RALPH_STANDARD_MAX_PIPELINE_CYCLES` default cap; no automatic third cycle)
+- Scope: delta `6564230..HEAD` — `4c38cf1` (AGENTS.md repo-map sync + `check-sync.sh` `KNOWN_DIFFS`), `ba2384f` (cross-review triage report), `1ef5be7` (cross-review fixes: `ManifestRemove` signal, `ApplyOps` validate-all-upfront, report-path prefix hardening), `c81eee2` (cycle-2 self-review report), `3b32c50` (cycle-2 self-review fixes)
+- Worktree state at this verify: `git status` clean, `HEAD = 3b32c50`
+
+### Verdict: PASS
+
+No blocking gaps. Static analysis clean. The two ACTION_REQUIRED cross-review findings and the one WORTH_CONSIDERING finding were closed exactly as triaged. All eight cycle-2 self-review findings (C2-1..C2-8) were addressed — six documentation/naming fixes plus two tech-debt register entries — with no regression to AC-2, AC-6, AC-8, or AC-9.
+
+### Static analysis (re-run)
+
+`./scripts/run-static-verify.sh` (default changed-language scope, resolved to `golang` via full-fallback because `scripts/check-sync.sh` is unclassified; evidence at `docs/evidence/verify-2026-08-17-074703.log`):
+
+- `scripts/check-sync.sh` — PASS, `DRIFTED: 0`, 4 `KNOWN_DIFF` (one more than cycle 1: `AGENTS.md`, added in `4c38cf1` and accounted for in the cycle-2 self-review's C2-3/C2-4 tech-debt rows — see Documentation drift below), 0 `ROOT_ONLY`.
+- `scripts/check-pipeline-sync.sh` — PASS, all references in sync.
+- `scripts/check-skill-sync.sh` — PASS, 13 skills in lock-step.
+- Go verifier: `gofmt -l .` → `gofmt: ok`; `golangci-lint run ./...` → `0 issues.`
+- Independently re-ran outside the wrapper: `go build ./...` clean, `go vet ./...` clean, `staticcheck ./internal/upgrade/... ./internal/scaffold/...` silent (pass).
+
+No findings from static analysis. Same clean result as cycle 1, now covering the cycle-2 delta.
+
+### Cross-review fix verification (`1ef5be7` against `docs/reports/cross-review-triage-overlay-scaffold-v2.md`)
+
+| Triage item | Fix | Verified as |
+| --- | --- | --- |
+| ACTION_REQUIRED #1 — planner emits no removal signal when a template-deleted core path is already absent from disk | `ReplacePlan.ManifestRemove` (new field, `replaceplan.go:102-111`) | Fixed and covers both cases named in the triage: disk-present-unmodified (`OpDelete` + `ManifestRemove`, existing test extended) and disk-already-absent (`ManifestRemove` only, new `TestPlanCoreReplace_CoreManifestRemoveWhenDiskAlreadyAbsent`). Negative check confirmed: the drifted case (modified core file) explicitly asserts `len(plan.ManifestRemove) == 0`, so the non-destructive default is not weakened. |
+| ACTION_REQUIRED #2 — `ApplyOps` does not re-validate op paths, so a hand-built `ReplacePlan` could write/delete outside `targetDir` | Upfront validation loop over `plan.Ops` via `cleanPathKey` before any op executes (`replaceplan.go:376-381`) | Fixed. `TestApplyOps_RejectsInvalidOpPathBeforeWritingAnything` proves both properties the triage asked for: the invalid path is rejected (error names the path) and the *valid* op preceding it in the list is never written — genuine validate-all-upfront, not per-op validation with partial writes. |
+| WORTH_CONSIDERING #3 — `UpgradeReportRelPath` does not sanitize `date`, allowing `docs/reports/...` escape via a crafted date string | `date` now sanitized through the same regex as `version`; `WriteUpgradeReport` gained a prefix check requiring the cleaned path to resolve under `docs/reports/` | Fixed, and hardened further in cycle 2 (see C2-7 below). `TestUpgradeReportRelPath_SanitizesDateParentEscape` and `TestWriteUpgradeReport_RejectsPathOutsideReportsDir` both pass and assert the file was never written on rejection. |
+
+### Cycle-2 self-review fix verification (`3b32c50` against `docs/reports/self-review-2026-08-17-overlay-scaffold-v2.md` Cycle 2 section)
+
+| Finding | Fix | Verified as |
+| --- | --- | --- |
+| C2-1 (MEDIUM) — `AdvisoryEntry` doc's second attempt still misdescribed rendering ("skips it" for empty-diff fork advisories, when the renderer emits a `_No differences._` section) | Doc comment rewritten at `replaceplan.go:77-83` | Fixed. Cross-checked against the actual renderer: `renderAdvisoriesSection` (`report.go:131-149`) emits `_No differences._` for `Diff == ""` and non-`Skipped`, distinct from the `Skipped` branch's `_Skipped: %s._`. The new doc text ("renders in the report as a '_No differences._' section, not a hidden or omitted one") now matches code exactly, and no longer overloads "skip" for two different behaviors. |
+| C2-2 (MEDIUM) — `TestOwnedSettingsPaths_AnchorsMergeBehavior`'s doc comment overclaimed anchoring against the merge implementation when it only compares two literals | Doc comment reworded, no behavior change | Fixed as a documentation correction (the self-review offered "reword or strengthen"; the weaker option was taken). New comment accurately states it is "a deliberate change-detector on the declared list ... plus a separate regression test" and explicitly disclaims verifying each handler. Test logic itself (`settingsmerge_test.go:311-320`) is unchanged — still a `slices.Equal` literal comparison plus the `env`/`outputStyle` behavioral check, exactly as before. |
+| C2-3 (MEDIUM) — `AGENTS.md` `KNOWN_DIFFS` whole-file suppression untracked in tech-debt register or plan Deviations | New `docs/tech-debt/README.md` row + plan Deviations entry (`3b32c50`) | Fixed. Tech-debt row names the exact trigger ("Remove the `AGENTS.md` entry ... when Phase 2 lands the template-facing rollout") and cross-references the self-review, `check-sync.sh`, and the plan. Plan `docs/plans/active/2026-08-17-overlay-scaffold-v2.md:123` now records the `check-sync.sh` edit alongside the two other out-of-band fixes. |
+| C2-4 (MEDIUM) — 6 of 8 cycle-1 LOWs unfixed and absent from any register | Batched tech-debt row (5 items) + LOW-7 fixed outright (see below) | Fixed. Batched row lists all 5 remaining items (fork `DiskHash` fallback, `LegacySkipped` doc, `WriteUpgradeReport` perm literals, `getObjPath`/`getArrayPath` shape, unset-map-key test) individually — spot-checked each against current code, all 5 confirmed still present exactly as described (none silently regressed or double-counted). LOW-7 (`chmod 0444` root-defeat) was fixed via a root-skip guard (`os.Geteuid() == 0` → `t.Skip`) rather than the self-review's suggested uid-independent technique; a code comment explains why the directory-collision technique doesn't fit this test's OpUpdate-shape requirement. This is a documented, reasoned deviation from the recommendation, not a gap — it resolves the actual failure mode (hard-fail under root CI) the finding named. |
+| C2-5 (LOW) — `ManifestRemove` absent from `ApplyOps`' manifest-state enumeration despite `ManifestRemove`'s own doc pointing there | `ApplyOps` doc comment extended (`replaceplan.go:369-374`) | Fixed. Enumeration now names `ManifestRemove` explicitly as "the one entry in this list that removes rather than advances a manifest hash." |
+| C2-6 (LOW) — `versionSanitizeRe` name no longer matches its scope (applies to `date` too) | Renamed to `reportNameSanitizeRe` (both declaration and both call sites) | Fixed. Repo-wide grep for `versionSanitizeRe` returns zero hits; `reportNameSanitizeRe` used consistently at declaration and both `UpgradeReportRelPath` call sites. |
+| C2-7 (LOW) — `WriteUpgradeReport`'s prefix guard carried an unexplained, untestable exception (`relPath == "docs/reports"` admitted) and duplicated the reports-dir literal | Guard simplified to a plain `strings.HasPrefix(clean, upgradeReportDir+"/")`; `upgradeReportDir` const (now `"docs/reports"`, no trailing slash) is the single source both `UpgradeReportRelPath` and `WriteUpgradeReport` build from | Fixed. New `TestWriteUpgradeReport_RejectsReportsDirItself` proves the directory-only path is now rejected and confirms no file is created at `docs/reports`. `UpgradeReportRelPath` now calls `filepath.Join(upgradeReportDir, ...)` instead of the literal `filepath.Join("docs", "reports", ...)` — verified via `git show 3b32c50 -- internal/upgrade/report.go`, one source of truth as claimed. |
+| C2-8 (LOW) — insight events file under-reports the pipeline (missing `verify`/`sync_docs` phases) | Two events appended to `docs/insights/events/2026-08-17-overlay-scaffold-v2.jsonl` | Fixed. File now has 5 lines (self_review, test, cross_review, verify, sync_docs), matching the 5 report files under `docs/reports/`. Both new lines use `"cycle":1` (correct per project memory: insight cycle tracks Ralph Loop outer-cycle, not the pipeline cycle cap — cycle-2 pipeline events would still record `cycle:1` unless a new outer Ralph Loop cycle started, which it did not here). |
+
+### Plan AC re-check (no regression)
+
+- AC-2 (replace planner ordering/drift/manifest-barrier semantics) — extended, not weakened: `ManifestRemove` only fires for the two non-destructive template-removal cases (unmodified-disk-delete, already-absent), and the drifted case explicitly asserts zero `ManifestRemove` entries. `ApplyOps`' pre-existing failure semantics (stop-at-first-failure, no manifest advance) are unchanged; the new upfront path validation runs *before* the existing op loop and returns before any write, so it composes with — doesn't replace — the partial-failure contract cycle 1 verified. AC-2: **holds**.
+- AC-6 (no `internal/cli` behavior change) — `git diff main...HEAD -- internal/cli/` is still empty at `HEAD = 3b32c50`. AC-6: **holds**.
+- AC-8 (v3 opt-in isolation) — no touch to `manifest.go`'s v3 write paths or `TestExistingConstructorsWriteNoV3Fields` in this cycle's delta. AC-8: **holds**.
+- AC-9 (shared path validator) — strengthened: `ApplyOps` now also runs `cleanPathKey` on every op path before executing any op, closing the one gap the cross-review found (a hand-built `ReplacePlan` bypassing `PlanCoreReplace`'s own validation). `WriteUpgradeReport`'s guard is stricter than cycle 1 (prefix match, no directory-itself exception). AC-9: **holds, strengthened**.
+
+### Documentation drift (cycle 2)
+
+- The cycle-1 verify report's flagged `AGENTS.md` repo-map drift was closed by `4c38cf1` (`internal/upgrade/` line now describes the Phase-1 primitives). That fix introduced a new, smaller drift-adjacent item: `AGENTS.md` added to `check-sync.sh`'s `KNOWN_DIFFS` as a whole-file suppression. This is not a doc-drift *failure* — it's an intentional, now-tracked scope trade-off (Phase 1 cannot touch `templates/base/AGENTS.md` per plan scope) with a concrete removal trigger recorded in both `docs/tech-debt/README.md` and the plan's Deviations section (C2-3 fix, verified above). Flagged here for visibility, not blocking.
+- No other new documentation drift found in the cycle-2 delta.
+
+### Evidence (cycle 2)
+
+- Static analysis log: `docs/evidence/verify-2026-08-17-074703.log`
+- Independent build/vet/staticcheck confirmation: run directly in the worktree, 2026-08-17, all clean
+- Fix-commit review: `git show 1ef5be7`, `git show 3b32c50` (full diffs inspected, including test files)
+- Triage cross-reference: `docs/reports/cross-review-triage-overlay-scaffold-v2.md`
+- Self-review cross-reference: `docs/reports/self-review-2026-08-17-overlay-scaffold-v2.md` (Cycle 2 section, C2-1..C2-8)
+- Sanity test run (supplementary; full-suite pass/fail remains `/test`'s responsibility): `go test ./internal/upgrade/... ./internal/scaffold/...` — both packages pass
+
+### What remains unverified (cycle 2)
+
+- Full behavioral test suite re-execution for this delta — `/test`'s responsibility; not re-run here beyond the two-package sanity check above.
+- The 5 cycle-1 LOWs now recorded in the batched tech-debt row remain unfixed by design (pipeline cap reached); they are follow-ups, not blockers, and are honestly tracked.
+- Runtime behavior of the wired flow — unchanged from cycle 1, still Phase 3+ scope.
