@@ -59,3 +59,15 @@ No template-side edits were required: `README.md`, `docs/architecture/repo-map.m
 ## Known gaps
 
 - None identified in this step beyond the tech-debt row recorded above, which is a test-coverage gap (already tracked), not a documentation gap.
+
+## Cycle 2 (pipeline cycle 2/2)
+
+- Date: 2026-08-17
+- Scope: `5283ee0..d21273b` — cross-review triage (`6e915f5`), cross-review AR fixes (`f80e60f`), cycle-2 self-review (`98d184f`), cycle-2 self-review fixes (`bd2d867`), cycle-2 verify/test artifacts (`54f97ac`, `d21273b`).
+- Checked for residual drift:
+  1. **C2-2 Codex-qualification wording** — `bd2d867` added the "Claude Code today; Codex's `.codex/config.toml` still calls hook scripts directly — Phase 3 tech debt" qualification to `AGENTS.md:106`, `docs/architecture/repo-map.md:20`, and `README.md:229`. Compared all three: `AGENTS.md` and `repo-map.md` use identical wording; `README.md`'s Hooks section uses a slightly longer variant ("...so `.ralph/local/hooks/<event>.d/` drop-ins do not run under Codex yet — Phase 3 tech debt") that says the same thing in prose-appropriate form for that section. No inconsistency — different sentence shapes for a repo-map bullet vs. a prose paragraph, same claim. No changes needed.
+  2. **Tech-debt README rows** — verified the `.gitignore` row now reads `~~...~~ (RESOLVED 2026-08-17 in c2d501e)` with strikethrough on both the finding and its old owner note, and the new batched row (dispatcher `awk` duplication + `check-sync.sh` `ROOT_ONLY` label/counter) is present with full 6-column shape. Row count and pipe-count per data row confirmed consistent (`awk` column-count check: 6 fields per row across all data rows). No changes needed.
+  3. **Stale references from the delta** — grepped for old symbol/path names touched by `f80e60f`/`bd2d867` (`ownerForScaffoldPath`, `OwnerCore`, `packRuleRelPath`, `filepath.Join` in dispatcher context) across `docs/`, `AGENTS.md`, `README.md`, `docs/architecture/repo-map.md`: no hits outside unrelated archived-plan history. No stale references introduced.
+  4. **Spec FR-5 `#`-marker sentence** — re-read `docs/specs/2026-08-17-overlay-scaffold-v2.md` FR-5 against current `.gitignore` / `templates/base/.gitignore`: both still use `# BEGIN RALPH MANAGED (ralph:gitignore)` / `# END RALPH MANAGED` exactly as FR-5 describes. The C2-1 dispatcher signal-handling fix and the C2-3 free-area line addition (`# Project-specific ignores go below this line.`, appended *after* `# END RALPH MANAGED`) don't touch the marker format. Confirmed accurate, no change.
+- Verification re-run: `./scripts/check-sync.sh` → `PASS: all files in sync.` (IDENTICAL 158, DRIFTED 0, KNOWN_DIFF 3); `./scripts/check-skill-sync.sh` → `[ok] check-skill-sync: 13 skill(s) in lock-step`.
+- **Verdict: no drift.** No files changed in this cycle.
