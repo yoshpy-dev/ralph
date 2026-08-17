@@ -262,3 +262,146 @@ Run `/test` (behavioral) against HEAD `bd2d867` to confirm
 `TestAddPack_LegacyManifest_StaysOwnerless`) actually pass, not just parse —
 static analysis (`sh -n`, shellcheck, `go vet`/`gofmt`/`golangci-lint`)
 cannot execute a signal-handling probe or a Go test body.
+
+---
+
+## Cycle 3
+
+- Date: 2026-08-17
+- Scope: delta since this cycle-2 verify (`54f97ac..HEAD`): cycle-2 test +
+  sync-docs artifacts (`d21273b`, `0be339a`), cycle-2 cross-review triage
+  (`d5b478e`), cycle-2 cross-review ACTION_REQUIRED fixes (`c289875` —
+  `doctor` `checkHooks` command-token split, `init` symlinked-block-surface
+  refusal), cycle-3 self-review (`3580c23`), cycle-3 self-review fixes
+  (`2b1a855`, current HEAD)
+- Pipeline cycle: 3/3 (cap raised from the default 2 to 3 for this PR)
+
+### Verdict: PASS
+
+No new spec-compliance gaps and no new static-analysis failures. Both
+cycle-2 cross-review ACTION_REQUIRED fixes match the triage contract, and
+the cycle-3 self-review's two "strongly recommended before /pr" findings
+(C3-1, C3-2) are genuinely fixed with regression tests, not just patched
+around. The remaining cycle-3 LOW findings are either fixed outright or
+correctly batched into one new tech-debt row — this is the last pipeline
+cycle, so nothing here was left silently unrecorded.
+
+### Cross-review ACTION_REQUIRED fix crosscheck (`c289875`)
+
+| # | Triage contract | Delivered | Evidence |
+| --- | --- | --- | --- |
+| AR#1 | `ralph doctor`'s hooks-integrity check must stat only the executable token of a `command = "./path/to/script.sh EventName"` string, not the whole string, so a v2 scaffold's argument-carrying dispatcher command does not false-fail | Yes | `internal/cli/doctor.go:341-352` (`checkHooks`): `strings.Fields(cmd)` splits on whitespace, `exe := fields[0]` is stat'd instead of `cmd`; empty-fields guarded with `continue`. `internal/cli/doctor_hooks_test.go` adds `TestCheckHooks_DispatcherCommandWithArgs_ScriptPresentReportsPass` (present script → pass) plus a missing-script → fail case and an arg-less command → pass case (per the self-review's cycle-3 positive notes), so both directions of the regression are pinned, not just the reviewer's original repro |
+| AR#2 | `init`'s block-append path (non-`--force`) must refuse to write through a symlinked pre-existing `AGENTS.md`/`.gitignore`, leaving it untouched with a warning (same non-destructive posture as the malformed-block case) | Yes | `internal/cli/init.go:365-380` (`reconcileBlockSurfaces`): `os.Lstat(diskPath)` before the existing `os.ReadFile`; a symlink mode bit warns `"is a symlink; left untouched"` and `continue`s, a non-regular mode warns `"is not a regular file; left untouched"` and `continue`s. `internal/cli/init_v2_test.go`'s `TestExecuteInit_V2_SymlinkedBlockSurface_LeftUntouchedWithWarning` (pre-existing in this commit's parent per the self-review's C3-1 evidence trail) asserts the link survives untouched and the external target's bytes are unchanged |
+
+Both fixes are exactly the "small fix + test" shape the triage report asked
+for. Neither widened scope beyond the two named files (`doctor.go`,
+`init.go`) plus their test files.
+
+### Cycle-3 self-review finding crosscheck (`2b1a855`)
+
+| # | Self-review finding | Fixed? | Evidence |
+| --- | --- | --- | --- |
+| C3-1 (MEDIUM, "strongly recommended before /pr") | The AR#2 symlink guard only covers `reconcileBlockSurfaces` (paths `RenderFS` already classified as `Skipped`); `RenderFS`'s own existence check uses `os.Stat`, which follows symlinks, so a **dangling** symlink at a scaffold path stats as absent, gets classified `Created`, and `os.WriteFile` writes scaffold content through the link to wherever it resolves — outside `TargetDir`. Applies to every rendered path, not just block surfaces. | Yes | `internal/scaffold/render.go:74-85`: `os.Stat(target)` replaced with `os.Lstat(target)`, with a doc comment explaining the Stat-follows-symlinks containment gap and why `--force` is treated as explicit user consent to follow a link. Two new regression tests: `internal/scaffold/render_test.go:TestRenderFS_DanglingSymlink_NonForce_SkippedNotFollowed` (asserts the dangling link is `Skipped` not `Created`, the link itself is untouched, and nothing is written at the external target) and `internal/cli/init_v2_test.go:TestExecuteInit_V2_DanglingSymlinkBlockSurface_LeftUntouchedWithWarning` (same assertion at the `executeInit` integration level, confirming the AR#2 warning path and the render-layer fix compose correctly for a block surface specifically). Both `Lstat` guards (render-layer for dangling links, `reconcileBlockSurfaces`-layer for resolvable links reaching the skipped/append path) are now in place, closing the gap the self-review identified as "the fix commit adopted the threat model and left the sibling gate open" |
+| C3-2 (MEDIUM, "strongly recommended before /pr") | Case I's SIGTERM regression test (added for cycle-2's C2-1 trap fix) backgrounds a wrapping subshell (`( cd ... \| dispatcher ) &`) and signals `$!` — the subshell's PID, not the dispatcher's. The subshell dies from the default TERM action, the dispatcher is never signaled and keeps running to completion reparented to PID 1, so the test measures POSIX subshell-kill semantics, not the trap the fix added; a trap-free dispatcher passes unchanged. | Yes | `tests/test-ralph-dispatch.sh:333-364`: the wrapping subshell is replaced with a backgrounded `( cd "$fixture" \|\| exit 1; exec ./.claude/hooks/ralph-dispatch.sh PreCompact < "$i_stdin" > "$i_out" 2>&1 ) &`, with a comment explaining that `exec` after `cd` replaces the backgrounded subshell's own process image with the dispatcher, so `$!` is the dispatcher's real PID — matching the self-review's own recommended fix shape exactly (`sh -c` whose `exec` replaces the shell). The test also now snapshots `$TMPDIR`'s `ralph-dispatch-*` entries before and after via `find`+`comm -13`, asserting no leaked temp file rather than only the `.first` check, and reaps the orphaned `10-slow.sh` sleep with `pkill` so it does not outlive the test run |
+
+Both fixes match their finding's recommended shape verbatim, not just the
+letter of "make the assertion pass" — C3-1's fix is layered (render.go
+*and* the existing `reconcileBlockSurfaces` guard both hold), and C3-2's
+fix targets the actual process the trap protects, with an independent
+temp-file-leak check added on top of what the finding asked for.
+
+### Cycle-3 LOW findings disposition
+
+| # | Finding | Status | Evidence |
+| --- | --- | --- | --- |
+| C3-3 | `tests/test-ralph-dispatch.sh`'s header case list (`a.`–`h.`) is one entry short of the body (Case I exists, not listed) | Fixed | `tests/test-ralph-dispatch.sh:19-25`: an `i.` entry describing the reworked Case I was added to the header enumeration in the same commit |
+| C3-4 | Two insight events in `docs/insights/events/2026-08-17-overlay-scaffold-v2-p2.jsonl` are mis-stamped `cycle:1` although appended by cycle-2 fix commits; cycle 2 has no `self_review` event | Registered as tech debt, not fixed | `docs/tech-debt/README.md`'s new batched row (below) names both mis-stamped events and the missing `self_review` event, with the correction path spelled out (`scripts/insights-append.sh`) |
+| C3-5 | `cli_test.go:2416`'s `t.Fatalf("precondition failed: ...")` misattributes the `addPack`-must-not-upgrade-`Meta.Layout` regression as a broken fixture; the triage report's re-resolved `init.go:373` pointer lands on a closing brace, not `reconcileBlockSurfaces` itself | Registered as tech debt, not fixed | Same batched row names both the `Fatalf` wording and the stale triage pointer/header |
+
+This matches the self-review's own contingency exactly: it named C3-1 and
+C3-2 as the two items worth a fix in this cycle, and said C3-3 through C3-5
+"need one batched `docs/tech-debt/README.md` row" if deferred. C3-3 was
+fixed instead of deferred (cheaper than expected); C3-4 and C3-5 landed in
+one new row:
+
+`docs/tech-debt/README.md` (new row, appended in `2b1a855`): "Two cycle-3
+self-review findings for overlay-scaffold-v2 Phase 2 were left unfixed at
+the pipeline cap (3/3, cap raised from 2)" — names both mis-stamped insight
+events plus the missing `self_review` event (C3-4) and both the `Fatalf`
+wording and the stale triage-report pointer/header (C3-5), with trigger and
+evidence-path columns filled in per the existing register format. No LOW
+finding from this cycle vanished untracked at the pipeline's last cycle.
+
+### Static analysis (re-run, HEAD `2b1a855`)
+
+`RALPH_VERIFY_SCOPE=full ./scripts/run-static-verify.sh` from inside the
+worktree: exit 0. Covers shellcheck + `sh -n` across every hook and verify
+script (including the reworked `tests/test-ralph-dispatch.sh` Case I),
+`jq -e .` on both `settings.json` files, the three Codex hook guards,
+`check-sync.sh` (`DRIFTED: 0`, `KNOWN_DIFF: 3` —
+`.claude/rules/ralph/model-routing.md`, `.github/workflows/verify.yml`,
+`CLAUDE.md`; `AGENTS.md` still correctly absent, `PASS: all files in
+sync.`), `check-pipeline-sync.sh` (all 6 references OK),
+`check-skill-sync.sh` (13 skills in lock-step), and the Go verifier
+(`gofmt: ok`, `go vet` silent, `golangci-lint` `0 issues.`). No FAIL lines.
+Evidence: `docs/evidence/verify-2026-08-17-143744.log`.
+
+### AC re-check (delta-relevant only)
+
+- **AC-1 / AC-3** (fresh-init v2 layout generation; existing-file init
+  behavior for regular files) still hold: both `c289875`'s and `2b1a855`'s
+  `Lstat`/mode-bit guards only add new `continue` branches for symlink /
+  non-regular targets — for a regular file, `info.Mode().IsRegular()` is
+  true and both functions fall through to the pre-existing code path
+  unchanged (`reconcileBlockSurfaces`'s `os.ReadFile` call, `RenderFS`'s
+  existing `Skipped`/`Created` branching). No behavior change for the
+  regular-file case AC-1/AC-3 actually test.
+- **AC-8/AC-9** (hook-command executability smoke test; existing suite
+  green): `checkHooks`'s fix directly targets the AC-8 smoke-test claim —
+  before this cycle, `ralph doctor` on any fresh v2-layout project would
+  have falsely reported the dispatcher's hook scripts as missing, which is
+  the exact failure mode AC-8's "移設後のパス欠損検出" (post-move path-loss
+  detection) clause exists to catch, now inverted into a false positive it
+  did not anticipate. The fix restores the intended semantics: only the
+  executable token is checked, so a present dispatcher script reports
+  green and a genuinely absent one still reports missing (both directions
+  pinned by `doctor_hooks_test.go`). AC-9's "existing suite passes" and the
+  new tests' actual pass/fail outcome for this exact HEAD is `/test`'s
+  scope, not re-run here beyond the static analysis above.
+- **AC-2/AC-6/AC-7/AC-10/AC-11** are untouched by the cycle-3 delta (no
+  files in their evidence paths changed between `bd2d867` and `HEAD` except
+  where already covered above).
+- Plan AC checkboxes (`docs/plans/active/2026-08-17-overlay-scaffold-v2-p2.md:86-96`)
+  remain unticked even though `- [x] Plan reviewed` was ticked in cycle 2 —
+  pre-existing doc-drift noted in the cycle-1 and cycle-2 sections above,
+  unchanged by cycle 3, and separately named as a process gap in the
+  cycle-2 self-review section (not re-litigated here).
+
+### What remains unverified (cycle 3 delta)
+
+- Real Claude Code / Codex runtime execution of `checkHooks`'s new token-split
+  parsing against a live `ralph doctor` invocation — the regression tests
+  exercise the function directly with a fixture `settings.json`, which is
+  the correct unit-level check, but an end-to-end `ralph init --yes && ralph
+  doctor` was not separately reproduced here (the self-review's own C3-crosscheck
+  section above notes this was the reviewer's original live repro, not
+  re-run by this verify pass).
+- The two new Go tests (`TestCheckHooks_DispatcherCommandWithArgs_...`,
+  `TestRenderFS_DanglingSymlink_NonForce_SkippedNotFollowed`,
+  `TestExecuteInit_V2_DanglingSymlinkBlockSurface_LeftUntouchedWithWarning`)
+  and the reworked `tests/test-ralph-dispatch.sh` Case I were read and
+  reasoned about, not executed — confirming they actually pass (not just
+  compile/parse) is `/test`'s scope for this cycle.
+- The third dispatcher layer's execution order
+  (`.claude/hooks/local/<event>.d/`) remains untested for ordering,
+  unchanged from cycles 1 and 2.
+
+### Minimal next check for highest confidence gain (cycle 3)
+
+Run `/test` (behavioral) against HEAD `2b1a855` to confirm the three new Go
+tests and the reworked `tests/test-ralph-dispatch.sh` Case I actually pass —
+in particular Case I's own correctness now depends on `exec` replacing the
+backgrounded subshell's process image as documented; a shell that does not
+support that construct as expected would silently fall back to signaling
+the wrong process again, which only a real `sh` execution (not static
+`sh -n`/shellcheck) can catch.
