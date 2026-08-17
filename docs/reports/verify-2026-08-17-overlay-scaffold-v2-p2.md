@@ -149,3 +149,116 @@ Add a Case F2 to `tests/test-ralph-dispatch.sh` exercising all three layers
 in one fixture, asserting the full three-part order string. This is the one
 gap in the self-review's own acknowledged list that is cheap to close and
 would remove the last "wired but unordered-tested" caveat in AC-4.
+
+---
+
+## Cycle 2
+
+- Date: 2026-08-17
+- Scope: delta since this cycle-1 verify (`4d4bdfc..bd2d867`): test report +
+  dispatcher 3-layer order test + hermeticity fix (`0132d9f`), sync-docs
+  (`5283ee0`), cross-review triage cycle 1 (`6e915f5`), cross-review
+  ACTION_REQUIRED fixes (`f80e60f`), cycle-2 self-review (`98d184f`),
+  cycle-2 self-review fixes (`bd2d867`, current HEAD)
+- Pipeline cycle: 2/2 (cap `RALPH_STANDARD_MAX_PIPELINE_CYCLES`, default 2)
+
+### Verdict: PASS
+
+No new spec-compliance gaps and no new static-analysis failures. Both
+cross-review ACTION_REQUIRED fixes match the triage contract; all cycle-2
+self-review findings that were flagged "fix before merge" are fixed, and the
+two flagged "cheap and worth doing" bookkeeping items are done. Deferred
+items are correctly recorded, not silently dropped.
+
+### Cross-review ACTION_REQUIRED fix crosscheck (`f80e60f`)
+
+| # | Triage contract | Delivered | Evidence |
+| --- | --- | --- | --- |
+| AR#1 | `.ralph/local/**` must classify as owner=seed (L3 overlay, create-once/advisory, not core-replaceable) | Yes | `internal/cli/init.go`: `ownerForScaffoldPath` gained `if strings.HasPrefix(relPath, ".ralph/local/") { return scaffold.OwnerSeed }`, ordered before the catch-all `return scaffold.OwnerCore`; doc comment explains the Phase-3-replace-planner risk it closes. `init_v2_test.go`'s `TestExecuteInit_V2_FreshInit_LayoutAndOwners` gained a `.ralph/local/verify.d/.gitkeep` → `OwnerSeed` assertion (fixture embed FS updated to match) |
+| AR#2 | `ralph pack add` on a v2 manifest must assign owner=core to every entry it writes (pack payload + `.claude/rules/ralph/<lang>.md`) so Phase 3's planner doesn't treat them as legacy-skipped/ownerless | Yes | `internal/cli/pack.go`: `addPack` now loops `pr.hashes` and calls `manifest.SetOwner(path, ...)` for every entry when `manifest.Meta.Layout == scaffold.LayoutV2`; legacy (no layout) manifests are left ownerless. Two new tests: `TestAddPack_V2Manifest_AssignsOwnerCore` (asserts owner=core on pack verify.sh/README.md/rule.md) and `TestAddPack_LegacyManifest_StaysOwnerless` (asserts no owner written and `Meta.Layout` isn't silently upgraded to v2) |
+
+`f80e60f`'s pack.go fix originally hardcoded `scaffold.OwnerCore` (a correct
+but duplicated classification); cycle-2 self-review (C2-5) flagged the
+duplication as a latent-divergence risk, and `bd2d867` replaced it with a
+direct call to `ownerForScaffoldPath(path)` — confirmed at
+`internal/cli/pack.go:84-95`, same package, no import needed. The two entry
+points (`ralph init`, `ralph pack add`) now share one classifier and cannot
+diverge on a future pack path (e.g. under `docs/` or `.ralph/local/`).
+
+### Cycle-2 self-review (C2-1..C2-5) fix crosscheck (`bd2d867`)
+
+| # | Self-review finding | Fixed? | Evidence |
+| --- | --- | --- | --- |
+| C2-1 (MEDIUM, "fix before merge") | `trap cleanup INT TERM HUP` had no `exit`, so POSIX `sh` **resumes** after a fatal signal instead of terminating; `cleanup`'s unconditional `rm -f "$out_tmp.first"` could also expand to a bare, cwd-relative `.first` if the trap fired before `out_tmp` was assigned | Yes | `.claude/hooks/ralph-dispatch.sh` (byte-identical `templates/base/` mirror, `diff` confirms): `cleanup()` now guards every removal with `if [ -n "$var" ]; then rm -f "$var"; fi` instead of an unconditional `rm -f`; `trap cleanup EXIT` stays bare, but `trap 'cleanup; exit 130' INT`, `'cleanup; exit 143' TERM`, `'cleanup; exit 129' HUP` were added — matching the self-review's own recommended fix verbatim. `tests/test-ralph-dispatch.sh` gained Case I: starts a slow hook, sends `SIGTERM` mid-run, asserts exit 143 (not resumed) and no stray `.first` left in the fixture cwd |
+| C2-2 (MEDIUM) | "Hooks dispatcher" claims in `AGENTS.md`, `docs/architecture/repo-map.md`, and `README.md` were unqualified — Codex still calls hooks directly, so `.ralph/local/hooks/<event>.d/` drop-ins silently don't run under Codex | Yes | All three sites now carry "(Claude Code today; Codex wiring is Phase 3)" or equivalent wording (verified via grep — `AGENTS.md:106`, `docs/architecture/repo-map.md:20`, `README.md:229`) |
+| C2-3 (MEDIUM, "cheap, worth doing") | `.gitignore` tech-debt row asserted "no free area below the block", which `c2d501e` (two commits earlier, same PR) had already fixed by appending a signpost line | Yes | `docs/tech-debt/README.md` row struck through with `~~...~~ (RESOLVED 2026-08-17 in c2d501e)`, recommendation line struck through and replaced with a pointer to the fix commit. `tail -1` of both `.gitignore` and `templates/base/.gitignore` confirms the "Project-specific ignores go below this line." signpost is present and byte-identical between root and template |
+| C2-4 (MEDIUM, "cheap, worth doing") | Four cycle-1 LOW items (dispatcher `awk` duplication, `check-sync.sh` `ROOT_ONLY` mislabel, `identical` double-count, `packRuleRelPath` OS-separator manifest keys) were about to vanish untracked at the pipeline cap | Yes | One new batched tech-debt row covers the three still-open items (`awk` duplication, `ROOT_ONLY` label, `identical` counter) and explicitly notes the fourth (`packRuleRelPath`) was actually fixed in this same cleanup slice rather than deferred — confirmed: `internal/cli/language_pack.go:121` now reads `path.Join(".claude", "rules", "ralph", pack+".md")` (was `filepath.Join`), with a doc comment explaining the slash-safe-manifest-key rationale |
+| C2-5 (MEDIUM) | `pack.go`'s `f80e60f` fix hardcoded `scaffold.OwnerCore` instead of calling the classifier it named in its own comment (`ownerForScaffoldPath`) — same-package, one-line fix | Yes | `internal/cli/pack.go:91`: `manifest.SetOwner(path, ownerForScaffoldPath(path))`, comment rewritten to say classification is "shared... rather than mirrored" (see above) |
+
+Also delivered in the same commit and consistent with the report's "LOW
+quick wins" / "Process gaps" sections: `templates/base/AGENTS.md` gained a
+`<!-- Project-specific notes go below this line. -->` signpost after its
+managed block (mirroring the `.gitignore` convention; AC-11 grep for
+`internal/`, `cmd/ralph`, "Repo map" in `templates/base/AGENTS.md` still
+returns nothing — no meta-repo leakage introduced); README scaffold-tree
+comment column realignment (cosmetic, not spot-checked byte-for-byte); the
+plan's "Plan reviewed" checkbox is now ticked; and a cycle-1 `phase:verify`
+insight event was appended to
+`docs/insights/events/2026-08-17-overlay-scaffold-v2-p2.jsonl` (was missing
+— confirmed present, `ts: 2026-08-17T13:32:51Z`, `verdict: pass`).
+
+Deferred-and-correctly-recorded (not "fix before merge" per the report's own
+recommendation): C2-2's follow-up scope (only the wording was in scope for
+this cycle, not the actual Codex dispatcher migration — that's Phase 3), and
+the LOW list (`C2-6`/awk/`ROOT_ONLY`/`identical`, all captured in the C2-4
+batched row).
+
+### Static analysis (re-run, HEAD `bd2d867`)
+
+`RALPH_VERIFY_SCOPE=full ./scripts/run-static-verify.sh` from inside the
+worktree: exit 0. `sh -n` on both `ralph-dispatch.sh` mirrors and
+`tests/test-ralph-dispatch.sh` — all OK. shellcheck across every hook +
+verify script — OK. `check-sync.sh` — `DRIFTED: 0`, `KNOWN_DIFF: 3`
+(`.claude/rules/ralph/model-routing.md`, `.github/workflows/verify.yml`,
+`CLAUDE.md`; `AGENTS.md` still correctly absent), `PASS: all files in
+sync.`. `check-pipeline-sync.sh` — all 6 references OK. `check-skill-sync.sh`
+— 13 skills in lock-step. Go verifier — `gofmt: ok`, `go vet` silent,
+`golangci-lint` `0 issues.`, `staticcheck` present on `PATH` (silent on
+success, consistent with a clean pass). No FAIL lines. Evidence:
+`docs/evidence/verify-2026-08-17-133840.log`.
+
+### AC re-check (delta-relevant only)
+
+AC-2/AC-6 (owner attribution) and AC-7 (`check-sync.sh` block-aware,
+`AGENTS.md` out of `KNOWN_DIFFS`, `DRIFTED=0`) were re-confirmed above and
+still hold after the cycle-2 fixes; AC-1/AC-3/AC-4/AC-5/AC-8/AC-9/AC-10/AC-11
+are untouched by the cycle-2 delta (no files in their evidence paths changed
+between `4d4bdfc` and `HEAD` except the dispatcher script covered under
+AC-4/AC-8, whose behavior for the already-tested cases is unchanged — only
+the signal-handling path, newly covered by Case I, changed). Plan AC
+checkboxes (`docs/plans/active/2026-08-17-overlay-scaffold-v2-p2.md`) remain
+unticked — pre-existing doc-drift noted in the cycle-1 section above, not
+introduced or worsened by cycle 2.
+
+### What remains unverified (cycle 2 delta)
+
+- Real Claude Code / Codex runtime execution of the reworked signal traps —
+  `tests/test-ralph-dispatch.sh` Case I exercises the POSIX `sh` semantics
+  directly (background process + `kill -TERM` + `wait`), which is the
+  correct level for this claim, but a live agent-triggered hook timeout was
+  not separately reproduced.
+- The third dispatcher layer's execution *order* (`.claude/hooks/local/<event>.d/`)
+  is still untested for ordering, per the cycle-1 section — unchanged by this
+  delta and not part of what cycle 2 targeted.
+- Behavioral coverage percentage and the actual `go test ./...` / shell-suite
+  pass/fail outcome for this exact HEAD — that is `/test`'s scope for cycle
+  2; this report only re-ran static analysis.
+
+### Minimal next check for highest confidence gain (cycle 2)
+
+Run `/test` (behavioral) against HEAD `bd2d867` to confirm
+`tests/test-ralph-dispatch.sh` Case I and the two new Go ownership tests
+(`TestAddPack_V2Manifest_AssignsOwnerCore`,
+`TestAddPack_LegacyManifest_StaysOwnerless`) actually pass, not just parse —
+static analysis (`sh -n`, shellcheck, `go vet`/`gofmt`/`golangci-lint`)
+cannot execute a signal-handling probe or a Go test body.
