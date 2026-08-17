@@ -200,3 +200,106 @@ percentage shift. Other packages reconfirmed stable: `internal/config`
   individually re-confirmed at runtime
 - Fail: none outstanding
 - Blocked: none
+
+## Cycle 3 (2026-08-17, final — re-run after cross-review c2/c3 fixes, cap raised 2 → 3)
+
+- Delta since cycle 2 (`d21273b..a7c857b`): cross-review cycle-2 fixes
+  `c289875` (doctor now parses dispatcher hook commands with arguments
+  instead of comparing the whole command string, closing a false-negative
+  where `./.claude/hooks/ralph-dispatch.sh <event>` always failed the
+  executability check; scaffold refuses to write into a symlinked block
+  surface and warns instead of following it; 4 new Go tests — 3 in
+  `internal/cli/doctor_hooks_test.go`,
+  `TestExecuteInit_V2_FreshInit_DoctorHooksIntegrityPasses` and
+  `TestExecuteInit_V2_SymlinkedBlockSurface_LeftUntouchedWithWarning` in
+  `internal/cli/init_v2_test.go`), cycle-3 self-review fixes `2b1a855`
+  (`internal/scaffold/render.go` now `Lstat`s before following a symlink so
+  a *dangling* symlinked block surface is also left untouched with a
+  warning rather than erroring or silently overwriting the link target;
+  2 new tests — `TestRenderFS_DanglingSymlink_NonForce_SkippedNotFollowed`
+  in `internal/scaffold/render_test.go`,
+  `TestExecuteInit_V2_DanglingSymlinkBlockSurface_LeftUntouchedWithWarning`
+  in `internal/cli/init_v2_test.go` — plus a reworked, previously-vacuous
+  Case I in `tests/test-ralph-dispatch.sh`: the old version asserted only
+  that a background dispatcher process could be killed, not that the
+  SIGTERM path itself ran; it now asserts `exit 143`, no leaked `.first`
+  fixture-cwd file, and no leaked `ralph-dispatch-*` temp file, exercising
+  the `trap cleanup EXIT INT TERM HUP` handler added in cycle 2), and a new
+  tech-debt row for two cosmetic cycle-3 self-review findings deferred at
+  the raised cap (insight-event `cycle` mis-stamping, one `t.Fatalf`
+  precondition-style test message).
+- Evidence: `docs/evidence/test-2026-08-17-overlay-scaffold-v2-p2-cycle3.log`
+  (full `RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh` output, this cycle)
+
+### Verdict: PASS
+
+596/596 shell test cases across the same 25 files (up from 595 — the only
+count change is `tests/test-ralph-dispatch.sh` 22 → 23, the reworked Case I
+now carries 3 assertions instead of 1), 8/8 Go packages `ok` on a fresh
+`go test ./... -count=1 -cover` run (not cached), zero failures.
+
+### New tests confirmed passing at runtime
+
+| Test | Command | Result |
+| --- | --- | --- |
+| `TestExecuteInit_V2_FreshInit_DoctorHooksIntegrityPasses` (`internal/cli`) | `go test ./internal/cli/... -run 'TestExecuteInit_V2_FreshInit_DoctorHooksIntegrityPasses' -v -count=1` | PASS |
+| `TestCheckHooks_DispatcherCommandWithArgs_ScriptPresentReportsPass` (`internal/cli`, `doctor_hooks_test.go`) | `go test ./internal/cli/... -run 'TestCheckHooks_DispatcherCommandWithArgs_ScriptPresentReportsPass' -v -count=1` | PASS |
+| `TestCheckHooks_DispatcherCommandWithArgs_ScriptMissingReportsFail` (`internal/cli`, `doctor_hooks_test.go`) | same command, `-run 'TestCheckHooks_DispatcherCommandWithArgs_ScriptMissingReportsFail'` | PASS |
+| `TestCheckHooks_ArgLessCommand_ScriptPresentReportsPass` (`internal/cli`, `doctor_hooks_test.go`) | same command, `-run 'TestCheckHooks_ArgLessCommand_ScriptPresentReportsPass'` | PASS |
+| `TestExecuteInit_V2_SymlinkedBlockSurface_LeftUntouchedWithWarning` (`internal/cli`) | `go test ./internal/cli/... -run 'TestExecuteInit_V2_SymlinkedBlockSurface_LeftUntouchedWithWarning' -v -count=1` | PASS |
+| `TestRenderFS_DanglingSymlink_NonForce_SkippedNotFollowed` (`internal/scaffold`) | `go test ./internal/scaffold/... -run 'TestRenderFS_DanglingSymlink_NonForce_SkippedNotFollowed' -v -count=1` | PASS |
+| `TestExecuteInit_V2_DanglingSymlinkBlockSurface_LeftUntouchedWithWarning` (`internal/cli`) | `go test ./internal/cli/... -run 'TestExecuteInit_V2_DanglingSymlinkBlockSurface_LeftUntouchedWithWarning' -v -count=1` | PASS |
+| Reworked `tests/test-ralph-dispatch.sh` Case I (SIGTERM → exit 143, no leaked `.first`/`ralph-dispatch-*` temp files) | `./tests/test-ralph-dispatch.sh`, run 3x in isolation | PASS all 3 runs, identical `exit 143` and zero-leak results each time |
+
+### Test execution
+
+| Suite / Command | Tests | Passed | Failed | Skipped |
+| --- | --- | --- | --- | --- |
+| `RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh` — 25 shell files | 596 | 596 | 0 | 0 |
+| `go test ./... -count=1 -cover` — 8 packages with tests | 8 pkgs | 8 | 0 | 0 |
+
+### Coverage (fresh, non-cached, cycle 3)
+
+`internal/cli` 78.9% (up from 77.6% in cycle 2 — the doctor-hooks parsing
+fix and the two new symlink-guard code paths in `init.go`/`doctor.go` are
+now exercised), `internal/scaffold` 78.9% (unchanged — the new
+`Lstat`-before-follow branch in `render.go` sits inside an already-covered
+function so the statement percentage doesn't move even though a new
+branch is now covered), `internal/upgrade` 90.0% (unchanged). Other
+packages reconfirmed stable: `internal/config` 94.2%, `internal/insights`
+86.1%, `internal/org` 89.1%, `internal/org/driver` 92.0%,
+`internal/org/protocol` 97.9%.
+
+### Regression checks
+
+| Previously broken behavior | Status | Evidence |
+| --- | --- | --- |
+| Dispatcher deny-decision short-circuit, `additionalContext` aggregation, non-zero exit propagation (Cases A/B/D) | Still correct | 23/23 `test-ralph-dispatch.sh`, this cycle |
+| H3 `HARNESS_VERIFY_MODE` hermeticity fix (cycle 1) | Not re-broken | full-suite run (ambient `HARNESS_VERIFY_MODE=test` present) still shows H3 PASS |
+| Cycle-2 dispatcher `trap cleanup EXIT INT TERM HUP` widening | Now directly exercised, not just non-regression | Reworked Case I asserts SIGTERM (`exit 143`) and zero temp-file leakage in 3/3 isolated runs — cycle 2's version of Case I only asserted the process could be killed, not that the trap ran |
+| `addPack` owner assignment (`TestAddPack_V2Manifest_AssignsOwnerCore`, `TestAddPack_LegacyManifest_StaysOwnerless`, cycle 2) | Not re-broken | Part of the fresh `go test ./internal/cli/...` full-package run above, still PASS |
+
+### Test gaps (updated from cycle 2)
+
+- `scripts/check-sync.sh`'s block-aware `AGENTS.md` `DRIFTED` code path
+  still has no isolated fixture test (only the happy path is exercised
+  against the real repo tree). Unchanged from cycle 1/2.
+- `runInitNonInteractive` (`internal/cli/init.go:107`) remains 0% covered;
+  pre-existing gap, not introduced by this plan or this cycle's changes.
+- **New, cosmetic, deferred to tech debt (not a test gap in the strict
+  sense but flagged here for traceability):** two entries in
+  `docs/insights/events/2026-08-17-overlay-scaffold-v2-p2.jsonl` are
+  stamped `cycle:1` for events actually appended by cycle-2 fix commits,
+  and cycle 2 has no `self_review` event recorded at all — `ralph insights`
+  will under/mis-report this slug's pipeline cadence until corrected. See
+  `docs/tech-debt/README.md`'s newest row for the fix pointer.
+
+### Cycle 3 verdict
+
+- Pass: yes — 596/596 shell cases, 8/8 Go packages, all new/changed tests
+  individually re-confirmed at runtime, reworked Case I stable across 3
+  isolated flake-check runs
+- Fail: none outstanding
+- Blocked: none
+- This is the final pipeline cycle for overlay-scaffold-v2 Phase 2 (cap
+  raised 2 → 3); ready for `/pr`
