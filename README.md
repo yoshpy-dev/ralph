@@ -143,22 +143,25 @@ The philosophy: **a map, not a manual**. Keep `AGENTS.md` small, push detail int
 
 ```text
 .
-├── AGENTS.md                 # vendor-neutral map shared by Claude and Codex
-├── CLAUDE.md                 # Claude Code specific guidance (imports AGENTS.md)
+├── AGENTS.md                 # vendor-neutral map; user-owned skeleton + a managed block (source: .ralph/core/AGENTS.core.md)
+├── CLAUDE.md                 # minimal seed (imports AGENTS.md); ralph guidance auto-loads from .claude/rules/ralph/
 ├── .claude/
-│   ├── settings.json         # hooks, permissions, env
-│   ├── hooks/                # deterministic runtime guardrails
-│   ├── skills/               # on-demand workflows (plan, work, verify, ...)
-│   ├── agents/               # Claude Code subagent definitions
-│   └── rules/                # conditional, path-scoped guidance (read by both agents)
+│   ├── settings.json         # each event points at ./.claude/hooks/ralph-dispatch.sh <event>
+│   ├── hooks/                # hook implementations + <event>.d/ dispatch entries (core -> .ralph/local -> .claude/hooks/local)
+│   ├── skills/                # on-demand workflows (plan, work, verify, ...)
+│   ├── agents/                # Claude Code subagent definitions
+│   └── rules/ralph/          # shipped ralph guidance (path-scoped, read by both agents); language pack rules render here too
 ├── .codex/
 │   ├── config.toml           # model, sandbox, approval, hooks (loads after `codex trust .`)
-│   ├── agents/               # Codex role definitions for review/verify/test/docs
+│   ├── agents/                # Codex role definitions for review/verify/test/docs
 │   ├── hooks/                # Codex hook scripts
 │   ├── AGENTS.override.md    # Codex-only execution rules
-│   └── README.md             # Codex setup and operator guide
+│   └── README.md              # Codex setup and operator guide
 ├── .agents/
-│   └── skills/               # Codex-side skill bodies (mirrors .claude/skills/)
+│   └── skills/                # Codex-side skill bodies (mirrors .claude/skills/)
+├── .ralph/
+│   ├── core/                  # generation sources ralph init/upgrade consume (e.g. AGENTS.core.md)
+│   └── local/                 # downstream extension points: hooks/<event>.d/, verify.d/, test.d/
 ├── docs/
 │   ├── specs/                # refined specifications from /spec
 │   ├── plans/active/         # plans in flight
@@ -223,7 +226,7 @@ See `docs/specs/2026-08-01-org-runtime.md` for the full protocol and `.claude/ru
 
 ## Hooks
 
-`.claude/settings.json` ships with hooks pre-configured: session start context, prompt-level reminders, Bash guardrails, edit/write verification reminders, tool failure feedback, compaction checkpoints, session end summary. Customize `.claude/settings.json` directly; use `.claude/settings.local.json` for personal overrides (gitignored).
+`.claude/settings.json` points each event at a single dispatcher entry, `./.claude/hooks/ralph-dispatch.sh <event>`, which fans out in order through `.claude/hooks/<event>.d/` (core), `.ralph/local/hooks/<event>.d/` (downstream local, committed), then `.claude/hooks/local/<event>.d/` (downstream local, gitignored). The core `.d/` entries ship pre-configured: session start context, prompt-level reminders, Bash guardrails, edit/write verification reminders, tool failure feedback, compaction checkpoints, session end summary. Add your own hook by dropping a script into `.ralph/local/hooks/<event>.d/` — no `settings.json` edits needed. Customize `.claude/settings.json` directly; use `.claude/settings.local.json` for personal overrides (gitignored).
 
 ## Language packs
 

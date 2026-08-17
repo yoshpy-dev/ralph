@@ -153,4 +153,5 @@
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
+- [x] Sync-docs artifact created
 - [ ] PR created
