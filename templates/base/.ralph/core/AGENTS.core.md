@@ -1,10 +1,3 @@
-# AGENTS.md
-
-Project-specific agent guidance — this file is yours; ralph owns only the managed block below.
-
-## Project notes
-
-<!-- BEGIN RALPH MANAGED (ralph:agents-md) -->
 ## Mission
 
 Build coding-agent workflows that are:
@@ -61,4 +54,3 @@ Key rule: never say "done" without saying what was verified and what remains unv
 
 Detailed topic guidance lives in `.claude/rules/ralph/`; step-by-step
 workflows live in `.claude/skills/`.
-<!-- END RALPH MANAGED -->
