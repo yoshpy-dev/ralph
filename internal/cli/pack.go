@@ -52,7 +52,7 @@ func newPackListCmd() *cobra.Command {
 
 // addPack adds a language pack to an existing project rooted at targetDir.
 // Pack payload files are written to packs/languages/<lang>/ and the rule.md
-// control file is mapped to .claude/rules/<lang>.md (matching init.go's layout).
+// control file is mapped to .claude/rules/ralph/<lang>.md (matching init.go's layout).
 // The shared renderPackInto helper (language_pack.go) is used here so this
 // path cannot diverge from ralph init's pack rendering.
 func addPack(targetDir string, lang string) error {

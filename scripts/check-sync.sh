@@ -126,7 +126,7 @@ pack_rule_source() {
   local path lang candidate
   path="$1"
   case "$path" in
-    .claude/rules/*.md)
+    .claude/rules/ralph/*.md)
       lang="$(basename "$path" .md)"
       candidate="packs/languages/${lang}/rule.md"
       if [ -f "$candidate" ]; then

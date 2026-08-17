@@ -60,6 +60,7 @@ func TestRunUpgrade_RemovesRetiredLoopArtifactsFromManifest(t *testing.T) {
 	if err := executeInit(dir, cfg, false); err != nil {
 		t.Fatalf("executeInit (real templates): %v", err)
 	}
+	clearManifestLayoutV2(t, dir)
 
 	manifestPath := filepath.Join(dir, ".ralph", "manifest.toml")
 	m, err := scaffold.ReadManifest(manifestPath)

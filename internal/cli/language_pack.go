@@ -28,7 +28,7 @@ type packRenderResult struct {
 
 // renderPackInto renders a language pack into its canonical subdirectory
 // (packs/languages/<lang>/) inside targetDir, handles the rule.md control
-// file (→ .claude/rules/<lang>.md), and writes baselines so the upgrade
+// file (→ .claude/rules/ralph/<lang>.md), and writes baselines so the upgrade
 // engine can diff pack files later.
 //
 // The returned packRenderResult contains all namespaced hashes and baseline
@@ -74,7 +74,7 @@ func renderPackInto(targetDir, lang string, force bool) (*packRenderResult, erro
 		out.baselinePaths[k] = v
 	}
 
-	// Handle the rule.md control file: it renders to .claude/rules/<lang>.md
+	// Handle the rule.md control file: it renders to .claude/rules/ralph/<lang>.md
 	// instead of packs/languages/<lang>/rule.md.
 	ruleContent, ok, err := packRuleContent(packFS)
 	if err != nil {
@@ -111,7 +111,7 @@ func packRelDir(pack string) string {
 }
 
 func packRuleRelPath(pack string) string {
-	return filepath.Join(".claude", "rules", pack+".md")
+	return filepath.Join(".claude", "rules", "ralph", pack+".md")
 }
 
 func packRuleContent(src fs.FS) ([]byte, bool, error) {

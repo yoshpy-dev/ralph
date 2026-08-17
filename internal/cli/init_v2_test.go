@@ -1,8 +1,12 @@
 package cli
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -225,4 +229,138 @@ func hasPrefixBytes(b, prefix []byte) bool {
 		return false
 	}
 	return string(b[:len(prefix)]) == string(prefix)
+}
+
+// TestExecuteInit_V2_LanguagePack_RuleUnderRalphSubdir verifies that a
+// language pack's rule.md control file renders under .claude/rules/ralph/
+// (not directly under .claude/rules/), is tracked in the manifest with
+// owner=core (via ownerForScaffoldPath's catch-all), and that doctor's
+// installed-pack check still passes against the rendered layout. See
+// docs/specs 2026-08-17-overlay-scaffold-v2.md, AC-6.
+func TestExecuteInit_V2_LanguagePack_RuleUnderRalphSubdir(t *testing.T) {
+	setupTestEmbedFS(t)
+	Version = "0.5.0-test"
+
+	dir := t.TempDir()
+	target := filepath.Join(dir, "project")
+	cfg := initConfig{ProjectName: "project", Packs: []string{"golang"}}
+
+	if err := executeInit(target, cfg, false); err != nil {
+		t.Fatalf("executeInit: %v", err)
+	}
+
+	rulePath := filepath.Join(".claude", "rules", "ralph", "golang.md")
+	if _, err := os.Stat(filepath.Join(target, rulePath)); err != nil {
+		t.Fatalf("expected pack rule to exist at %s: %v", rulePath, err)
+	}
+	if _, err := os.Stat(filepath.Join(target, ".claude", "rules", "golang.md")); !os.IsNotExist(err) {
+		t.Errorf("pack rule must not render directly under .claude/rules/; stat err = %v", err)
+	}
+
+	m, err := scaffold.ReadManifest(filepath.Join(target, ".ralph", "manifest.toml"))
+	if err != nil {
+		t.Fatalf("ReadManifest: %v", err)
+	}
+	entry, ok := m.Files[rulePath]
+	if !ok {
+		t.Fatalf("manifest missing pack rule entry for %s", rulePath)
+	}
+	if entry.Owner != scaffold.OwnerCore {
+		t.Errorf("pack rule owner[%s] = %q, want %q", rulePath, entry.Owner, scaffold.OwnerCore)
+	}
+
+	for _, r := range checkInstalledPacks(target) {
+		if r.Status == "fail" {
+			t.Errorf("doctor pack check failed after moving rule under rules/ralph: %+v", r)
+		}
+	}
+}
+
+// snapshotDirHashes returns a sorted "relpath:sha256" list for every regular
+// file under dir. Used to assert that a fail-closed guard produced zero
+// writes to the project tree.
+func snapshotDirHashes(t *testing.T, dir string) []string {
+	t.Helper()
+	var entries []string
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if info.IsDir() {
+			return nil
+		}
+		rel, relErr := filepath.Rel(dir, path)
+		if relErr != nil {
+			return relErr
+		}
+		hash, hashErr := scaffold.HashFile(path)
+		if hashErr != nil {
+			return hashErr
+		}
+		entries = append(entries, rel+":"+hash)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("snapshotDirHashes(%s): %v", dir, err)
+	}
+	sort.Strings(entries)
+	return entries
+}
+
+// TestRunUpgradeIO_V2Layout_FailsClosedWithoutWrites verifies AC-10: the
+// legacy upgrade engine refuses to run against a manifest whose
+// meta.layout is "v2", writes zero files, and names the v2/Phase-3 reason
+// in its error. Exercised for both the interactive/apply path (force=true)
+// and --dry-run, since the guard must short-circuit before either branch
+// touches the diff engine.
+func TestRunUpgradeIO_V2Layout_FailsClosedWithoutWrites(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		opts upgradeOptions
+	}{
+		{name: "force", opts: upgradeOptions{Force: true, Pager: pagerNever}},
+		{name: "dry-run", opts: upgradeOptions{DryRun: true, Pager: pagerNever}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setupTestEmbedFS(t)
+			Version = "2.0.0-test"
+
+			dir := t.TempDir()
+			agentsContent := []byte("# AGENTS\n")
+			if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), agentsContent, 0644); err != nil {
+				t.Fatalf("write AGENTS.md: %v", err)
+			}
+			if err := os.MkdirAll(filepath.Join(dir, ".ralph"), 0755); err != nil {
+				t.Fatalf("MkdirAll .ralph: %v", err)
+			}
+			m := scaffold.NewManifest("1.0.0-test")
+			m.SetLayoutV2()
+			if setErr := m.SetFileOwned("AGENTS.md", scaffold.OwnerBlock, scaffold.HashBytes(agentsContent), scaffold.HashBytes(agentsContent)); setErr != nil {
+				t.Fatalf("SetFileOwned: %v", setErr)
+			}
+			manifestPath := filepath.Join(dir, ".ralph", "manifest.toml")
+			if err := m.Write(manifestPath); err != nil {
+				t.Fatalf("write manifest: %v", err)
+			}
+
+			before := snapshotDirHashes(t, dir)
+
+			var out, errOut bytes.Buffer
+			err := runUpgradeIOWithOptions(dir, tc.opts, strings.NewReader(""), &out, &errOut, false)
+			if err == nil {
+				t.Fatal("expected an error for a v2-layout manifest, got nil")
+			}
+			if !strings.Contains(err.Error(), "v2") {
+				t.Errorf("error = %q, want it to mention the v2 layout", err.Error())
+			}
+			if !strings.Contains(err.Error(), "Phase 3") {
+				t.Errorf("error = %q, want it to mention Phase 3", err.Error())
+			}
+
+			after := snapshotDirHashes(t, dir)
+			if !slices.Equal(before, after) {
+				t.Errorf("guard must write zero files; before=%v after=%v", before, after)
+			}
+		})
+	}
 }

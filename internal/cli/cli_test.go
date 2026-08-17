@@ -69,6 +69,27 @@ func setupTestEmbedFSWithAgentsAndCommitGuard(t *testing.T, agents, commitMsgGua
 	}
 }
 
+// clearManifestLayoutV2 rewrites the project manifest at dir/.ralph/manifest.toml
+// with an empty Meta.Layout, simulating a genuine pre-v2 (legacy) project.
+// executeInit unconditionally writes Meta.Layout = scaffold.LayoutV2 (see
+// docs/specs 2026-08-17-overlay-scaffold-v2.md, AC-10), so tests that exercise
+// the legacy upgrade engine's diff/migration behavior must downgrade the
+// fixture back to a layout the legacy engine is still allowed to run against
+// — otherwise they only exercise the new fail-closed guard, not the migration
+// logic under test.
+func clearManifestLayoutV2(t *testing.T, dir string) {
+	t.Helper()
+	manifestPath := filepath.Join(dir, ".ralph", "manifest.toml")
+	m, err := scaffold.ReadManifest(manifestPath)
+	if err != nil {
+		t.Fatalf("clearManifestLayoutV2: ReadManifest: %v", err)
+	}
+	m.Meta.Layout = ""
+	if err := m.Write(manifestPath); err != nil {
+		t.Fatalf("clearManifestLayoutV2: Write: %v", err)
+	}
+}
+
 func isolateGitConfig(t *testing.T) {
 	t.Helper()
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
@@ -92,7 +113,7 @@ func TestExecuteInit_NewProject(t *testing.T) {
 	}
 
 	// Check files created.
-	for _, f := range []string{"AGENTS.md", "CLAUDE.md", "ralph.toml", ".ralph/manifest.toml", "packs/languages/golang/verify.sh", ".claude/rules/golang.md"} {
+	for _, f := range []string{"AGENTS.md", "CLAUDE.md", "ralph.toml", ".ralph/manifest.toml", "packs/languages/golang/verify.sh", ".claude/rules/ralph/golang.md"} {
 		if _, err := os.Stat(filepath.Join(target, f)); err != nil {
 			t.Errorf("expected %s to exist: %v", f, err)
 		}
@@ -100,7 +121,7 @@ func TestExecuteInit_NewProject(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(target, "packs", "languages", "golang", "rule.md")); !os.IsNotExist(err) {
 		t.Errorf("pack control rule.md should not render under packs/languages/golang; stat err = %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(target, ".claude", "rules", "typescript.md")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(target, ".claude", "rules", "ralph", "typescript.md")); !os.IsNotExist(err) {
 		t.Errorf("unselected typescript rule should not be rendered; stat err = %v", err)
 	}
 
@@ -117,8 +138,8 @@ func TestExecuteInit_NewProject(t *testing.T) {
 	if _, ok := m.Files["AGENTS.md"]; !ok {
 		t.Error("manifest missing AGENTS.md")
 	}
-	if _, ok := m.Files[filepath.Join(".claude", "rules", "golang.md")]; !ok {
-		t.Error("manifest missing selected pack rule .claude/rules/golang.md")
+	if _, ok := m.Files[filepath.Join(".claude", "rules", "ralph", "golang.md")]; !ok {
+		t.Error("manifest missing selected pack rule .claude/rules/ralph/golang.md")
 	}
 	if _, ok := m.Files[filepath.Join("packs", "languages", "golang", "rule.md")]; ok {
 		t.Error("manifest should not track packs/languages/golang/rule.md")
@@ -330,6 +351,7 @@ func TestRunUpgrade_AutoUpdate(t *testing.T) {
 	if err := executeInit(dir, cfg, false); err != nil {
 		t.Fatalf("init: %v", err)
 	}
+	clearManifestLayoutV2(t, dir)
 
 	// Bump version and run upgrade.
 	Version = "0.2.0-test"
@@ -359,6 +381,7 @@ func TestRunUpgrade_UpdatesManagedCommitMsgHook(t *testing.T) {
 	if err := executeInit(dir, cfg, false); err != nil {
 		t.Fatalf("init: %v", err)
 	}
+	clearManifestLayoutV2(t, dir)
 
 	setupTestEmbedFSWithCommitGuard(t, []byte(v2))
 	Version = "2.0.0-test"
@@ -386,6 +409,7 @@ func TestRunUpgrade_ChainsUserCommitMsgHook(t *testing.T) {
 	if err := executeInit(dir, cfg, false); err != nil {
 		t.Fatalf("init: %v", err)
 	}
+	clearManifestLayoutV2(t, dir)
 
 	hookPath := filepath.Join(dir, ".git", "hooks", "commit-msg")
 	customHook := "#!/usr/bin/env sh\n# custom hook\nexit 0\n"
@@ -437,6 +461,7 @@ func TestRunUpgrade_ChainsUserPreCommitHook(t *testing.T) {
 	if err := executeInit(dir, cfg, false); err != nil {
 		t.Fatalf("init: %v", err)
 	}
+	clearManifestLayoutV2(t, dir)
 
 	hookPath := filepath.Join(dir, ".git", "hooks", "pre-commit")
 	customHook := "#!/usr/bin/env sh\n# custom pre-commit\nexit 0\n"
@@ -487,6 +512,7 @@ func TestRunUpgrade_SameVersionIsIdempotent(t *testing.T) {
 	if err := executeInit(dir, cfg, false); err != nil {
 		t.Fatalf("init: %v", err)
 	}
+	clearManifestLayoutV2(t, dir)
 
 	// Same-version upgrade twice.
 	if err := runUpgrade(dir, false); err != nil {
@@ -527,6 +553,7 @@ func TestRunUpgrade_HealsCorruptedManifest(t *testing.T) {
 	if err := executeInit(dir, cfg, false); err != nil {
 		t.Fatalf("init: %v", err)
 	}
+	clearManifestLayoutV2(t, dir)
 
 	// Corrupt the manifest: wipe all base-file hashes.
 	manifestPath := filepath.Join(dir, ".ralph", "manifest.toml")
@@ -570,6 +597,7 @@ func TestRunUpgrade_DryRunDiff_DoesNotMutateFilesOrManifest(t *testing.T) {
 	if err := executeInit(dir, cfg, false); err != nil {
 		t.Fatalf("init: %v", err)
 	}
+	clearManifestLayoutV2(t, dir)
 
 	agents := filepath.Join(dir, "AGENTS.md")
 	local := []byte("# local edit\n")
@@ -623,6 +651,7 @@ func TestRunUpgrade_DryRunDiff_HonorsPagerAlwaysFallback(t *testing.T) {
 	if err := executeInit(dir, cfg, false); err != nil {
 		t.Fatalf("init: %v", err)
 	}
+	clearManifestLayoutV2(t, dir)
 	if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte("# local edit\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -655,14 +684,15 @@ func TestRunUpgrade_DoesNotAddUnselectedPackRules(t *testing.T) {
 	if err := executeInit(dir, cfg, false); err != nil {
 		t.Fatalf("init: %v", err)
 	}
+	clearManifestLayoutV2(t, dir)
 
 	if err := runUpgrade(dir, false); err != nil {
 		t.Fatalf("upgrade: %v", err)
 	}
 
 	for _, path := range []string{
-		filepath.Join(".claude", "rules", "golang.md"),
-		filepath.Join(".claude", "rules", "typescript.md"),
+		filepath.Join(".claude", "rules", "ralph", "golang.md"),
+		filepath.Join(".claude", "rules", "ralph", "typescript.md"),
 	} {
 		if _, err := os.Stat(filepath.Join(dir, path)); !os.IsNotExist(err) {
 			t.Errorf("unselected pack rule %s should not be rendered; stat err = %v", path, err)
@@ -674,8 +704,8 @@ func TestRunUpgrade_DoesNotAddUnselectedPackRules(t *testing.T) {
 		t.Fatalf("ReadManifest: %v", err)
 	}
 	for _, path := range []string{
-		filepath.Join(".claude", "rules", "golang.md"),
-		filepath.Join(".claude", "rules", "typescript.md"),
+		filepath.Join(".claude", "rules", "ralph", "golang.md"),
+		filepath.Join(".claude", "rules", "ralph", "typescript.md"),
 	} {
 		if _, ok := m.Files[path]; ok {
 			t.Errorf("manifest should not track unselected pack rule %s", path)
@@ -683,7 +713,17 @@ func TestRunUpgrade_DoesNotAddUnselectedPackRules(t *testing.T) {
 	}
 }
 
-func TestRunUpgrade_MigratesInstalledPackRuleFromBaseManifest(t *testing.T) {
+// TestRunUpgrade_RelocatesInstalledPackRuleFromLegacyBasePath exercises the
+// legacy upgrade engine's behavior when a pack's rule.md control file used
+// to live directly at .claude/rules/<lang>.md (base-template-owned, no
+// rule.md in the pack itself yet) and a later template gains a real pack
+// rule at the new .claude/rules/ralph/<lang>.md location. Because the two
+// keys differ, the diff engine has no rename detection: it flags the old
+// base-level file "removed from template" and adds the new pack-namespaced
+// rule fresh. This is expected, not a regression — see docs/specs
+// 2026-08-17-overlay-scaffold-v2.md's "旧レイアウト下流の移行ロジック
+// (Phase 4)" non-goal for where smarter relocation logic belongs.
+func TestRunUpgrade_RelocatesInstalledPackRuleFromLegacyBasePath(t *testing.T) {
 	setupTestEmbedFS(t)
 	Version = "1.0.0-test"
 
@@ -705,33 +745,37 @@ func TestRunUpgrade_MigratesInstalledPackRuleFromBaseManifest(t *testing.T) {
 	if err := executeInit(dir, cfg, false); err != nil {
 		t.Fatalf("legacy init: %v", err)
 	}
+	clearManifestLayoutV2(t, dir)
 
 	setupTestEmbedFS(t)
 	var out, errOut bytes.Buffer
 	if err := runUpgradeIO(dir, false, strings.NewReader(""), &out, &errOut, false); err != nil {
 		t.Fatalf("upgrade: %v", err)
 	}
-	if strings.Contains(out.String(), ".claude/rules/golang.md") && strings.Contains(out.String(), "removed from template") {
-		t.Errorf("installed pack rule should migrate, not be reported removed; out:\n%s", out.String())
+	if !strings.Contains(out.String(), ".claude/rules/golang.md") || !strings.Contains(out.String(), "removed from template") {
+		t.Errorf("stale legacy base rule should be reported removed; out:\n%s", out.String())
 	}
 
-	got, err := os.ReadFile(filepath.Join(dir, ".claude", "rules", "golang.md"))
+	got, err := os.ReadFile(filepath.Join(dir, ".claude", "rules", "ralph", "golang.md"))
 	if err != nil {
-		t.Fatalf("read migrated rule: %v", err)
+		t.Fatalf("read relocated rule: %v", err)
 	}
 	if string(got) != testGoRule {
-		t.Errorf("migrated golang rule = %q, want pack rule", got)
+		t.Errorf("relocated golang rule = %q, want pack rule", got)
 	}
 	m, err := scaffold.ReadManifest(filepath.Join(dir, ".ralph", "manifest.toml"))
 	if err != nil {
 		t.Fatalf("ReadManifest: %v", err)
 	}
-	rulePath := filepath.Join(".claude", "rules", "golang.md")
-	if _, ok := m.Files[rulePath]; !ok {
-		t.Fatalf("manifest missing migrated rule %s", rulePath)
+	newRulePath := filepath.Join(".claude", "rules", "ralph", "golang.md")
+	if _, ok := m.Files[newRulePath]; !ok {
+		t.Fatalf("manifest missing relocated rule %s", newRulePath)
+	}
+	if _, ok := m.Files[filepath.Join(".claude", "rules", "golang.md")]; ok {
+		t.Fatal("manifest should not keep tracking the stale legacy base rule path")
 	}
 	if _, ok := m.Files[filepath.Join("packs", "languages", "golang", "rule.md")]; ok {
-		t.Fatal("manifest should not track packs/languages/golang/rule.md after migration")
+		t.Fatal("manifest should not track packs/languages/golang/rule.md after relocation")
 	}
 }
 
@@ -754,6 +798,7 @@ func TestRunUpgrade_DropsLegacyUninstalledBaseRule(t *testing.T) {
 	if err := executeInit(dir, cfg, false); err != nil {
 		t.Fatalf("legacy init: %v", err)
 	}
+	clearManifestLayoutV2(t, dir)
 
 	setupTestEmbedFS(t)
 	var out, errOut bytes.Buffer
@@ -786,6 +831,7 @@ func TestRunUpgrade_DropsPacksRemovedFromTemplates(t *testing.T) {
 	if err := executeInit(dir, cfg, false); err != nil {
 		t.Fatalf("init: %v", err)
 	}
+	clearManifestLayoutV2(t, dir)
 
 	// Inject a pack that was once installed but no longer exists in templates.
 	manifestPath := filepath.Join(dir, ".ralph", "manifest.toml")
@@ -846,6 +892,7 @@ func TestRunUpgrade_ReportsDeletedPackFileOnceThenDrops(t *testing.T) {
 	if err := executeInit(dir, cfg, false); err != nil {
 		t.Fatalf("init: %v", err)
 	}
+	clearManifestLayoutV2(t, dir)
 
 	manifestPath := filepath.Join(dir, ".ralph", "manifest.toml")
 	m, err := scaffold.ReadManifest(manifestPath)
@@ -909,6 +956,7 @@ func TestRunUpgrade_SurvivesAvailablePacksFailure(t *testing.T) {
 	if err := executeInit(dir, cfg, false); err != nil {
 		t.Fatalf("init: %v", err)
 	}
+	clearManifestLayoutV2(t, dir)
 
 	// Swap embedded FS to one that has no templates/packs directory at all —
 	// AvailablePacks() will error on ReadDir.
@@ -956,6 +1004,7 @@ func TestRunUpgrade_ForceOverwritesLocalEdit(t *testing.T) {
 	if err := executeInit(dir, cfg, false); err != nil {
 		t.Fatalf("init: %v", err)
 	}
+	clearManifestLayoutV2(t, dir)
 
 	// User edits a managed file.
 	agents := filepath.Join(dir, "AGENTS.md")
@@ -995,6 +1044,7 @@ func TestRunUpgrade_InteractiveOverwrite_WritesManaged(t *testing.T) {
 	if err := executeInit(dir, cfg, false); err != nil {
 		t.Fatalf("init: %v", err)
 	}
+	clearManifestLayoutV2(t, dir)
 
 	agents := filepath.Join(dir, "AGENTS.md")
 	if err := os.WriteFile(agents, []byte("# local edit\n"), 0644); err != nil {
@@ -1041,6 +1091,7 @@ func TestRunUpgrade_InteractiveKeep_RecordsPartialManaged(t *testing.T) {
 	if err := executeInit(dir, cfg, false); err != nil {
 		t.Fatalf("init: %v", err)
 	}
+	clearManifestLayoutV2(t, dir)
 
 	agents := filepath.Join(dir, "AGENTS.md")
 	local := []byte("# local edit\n")
@@ -1092,6 +1143,7 @@ func TestRunUpgrade_InteractiveDiff_ShowsUnifiedDiff(t *testing.T) {
 	if err := executeInit(dir, cfg, false); err != nil {
 		t.Fatalf("init: %v", err)
 	}
+	clearManifestLayoutV2(t, dir)
 
 	agents := filepath.Join(dir, "AGENTS.md")
 	if err := os.WriteFile(agents, []byte("# my agents\n"), 0644); err != nil {
@@ -1145,6 +1197,7 @@ func TestRunUpgrade_InteractiveDiff_ColorizesWhenEnabled(t *testing.T) {
 	if err := executeInit(dir, cfg, false); err != nil {
 		t.Fatalf("init: %v", err)
 	}
+	clearManifestLayoutV2(t, dir)
 
 	agents := filepath.Join(dir, "AGENTS.md")
 	if err := os.WriteFile(agents, []byte("# my agents\n"), 0644); err != nil {
@@ -1180,6 +1233,7 @@ func TestRunUpgrade_InteractiveDiff_IgnoresPagerAlways(t *testing.T) {
 	if err := executeInit(dir, cfg, false); err != nil {
 		t.Fatalf("init: %v", err)
 	}
+	clearManifestLayoutV2(t, dir)
 
 	agents := filepath.Join(dir, "AGENTS.md")
 	if err := os.WriteFile(agents, []byte("# pager should not run\n"), 0644); err != nil {
@@ -1213,6 +1267,7 @@ func TestRunUpgrade_V1ManifestConflict_UsesLegacyPrompt(t *testing.T) {
 	if err := executeInit(dir, cfg, false); err != nil {
 		t.Fatalf("init: %v", err)
 	}
+	clearManifestLayoutV2(t, dir)
 
 	manifestPath := filepath.Join(dir, ".ralph", "manifest.toml")
 	m, err := scaffold.ReadManifest(manifestPath)
@@ -1263,6 +1318,7 @@ func TestRunUpgrade_InteractiveDiff_RepromptsOnInvalid(t *testing.T) {
 	if err := executeInit(dir, cfg, false); err != nil {
 		t.Fatalf("init: %v", err)
 	}
+	clearManifestLayoutV2(t, dir)
 
 	agents := filepath.Join(dir, "AGENTS.md")
 	if err := os.WriteFile(agents, []byte("# drift\n"), 0644); err != nil {
@@ -1300,6 +1356,7 @@ func TestRunUpgrade_FileApply_WritesTemplateManaged(t *testing.T) {
 	if err := executeInit(dir, cfg, false); err != nil {
 		t.Fatalf("init: %v", err)
 	}
+	clearManifestLayoutV2(t, dir)
 
 	agents := filepath.Join(dir, "AGENTS.md")
 	if err := os.WriteFile(agents, local, 0644); err != nil {
@@ -1386,6 +1443,7 @@ func TestRunUpgrade_FileSummaryNo_DoesNotWrite(t *testing.T) {
 	if err := executeInit(dir, cfg, false); err != nil {
 		t.Fatalf("init: %v", err)
 	}
+	clearManifestLayoutV2(t, dir)
 
 	manifestPath := filepath.Join(dir, ".ralph", "manifest.toml")
 	beforeManifest, err := os.ReadFile(manifestPath)
@@ -1458,6 +1516,7 @@ func TestRunUpgrade_FileEdit_UsesEditor(t *testing.T) {
 	if err := executeInit(dir, cfg, false); err != nil {
 		t.Fatalf("init: %v", err)
 	}
+	clearManifestLayoutV2(t, dir)
 
 	agents := filepath.Join(dir, "AGENTS.md")
 	if err := os.WriteFile(agents, local, 0644); err != nil {
@@ -1514,6 +1573,7 @@ func TestRunUpgrade_FileEdit_SeedsConflictMarkersWhenLocalSideEmpty(t *testing.T
 	if err := executeInit(dir, cfg, false); err != nil {
 		t.Fatalf("init: %v", err)
 	}
+	clearManifestLayoutV2(t, dir)
 
 	agents := filepath.Join(dir, "AGENTS.md")
 	if err := os.WriteFile(agents, local, 0644); err != nil {
@@ -1571,6 +1631,7 @@ func TestRunUpgrade_FileEdit_RejectsUnresolvedConflictMarkers(t *testing.T) {
 	if err := executeInit(dir, cfg, false); err != nil {
 		t.Fatalf("init: %v", err)
 	}
+	clearManifestLayoutV2(t, dir)
 
 	agents := filepath.Join(dir, "AGENTS.md")
 	if err := os.WriteFile(agents, local, 0644); err != nil {
@@ -1623,6 +1684,7 @@ func TestRunUpgrade_ForceReadoptsUnmanaged(t *testing.T) {
 	if err := executeInit(dir, cfg, false); err != nil {
 		t.Fatalf("init: %v", err)
 	}
+	clearManifestLayoutV2(t, dir)
 
 	agents := filepath.Join(dir, "AGENTS.md")
 	if err := os.WriteFile(agents, []byte("# local edit\n"), 0644); err != nil {
@@ -1681,6 +1743,7 @@ func TestRunUpgrade_UnmanagedSurvivesTemplateRemovalAcrossRuns(t *testing.T) {
 	if err := executeInit(dir, cfg, false); err != nil {
 		t.Fatalf("init: %v", err)
 	}
+	clearManifestLayoutV2(t, dir)
 
 	agents := filepath.Join(dir, "AGENTS.md")
 	if err := os.WriteFile(agents, []byte("# my variant\n"), 0644); err != nil {
@@ -1747,6 +1810,7 @@ func TestRunUpgrade_NextRunAfterKeep_IsSilent(t *testing.T) {
 	if err := executeInit(dir, cfg, false); err != nil {
 		t.Fatalf("init: %v", err)
 	}
+	clearManifestLayoutV2(t, dir)
 
 	agents := filepath.Join(dir, "AGENTS.md")
 	if err := os.WriteFile(agents, []byte("# local edit\n"), 0644); err != nil {
@@ -1787,6 +1851,7 @@ func TestRunUpgrade_DiskReadFailure_FallsBackToWarning(t *testing.T) {
 	if err := executeInit(dir, cfg, false); err != nil {
 		t.Fatalf("init: %v", err)
 	}
+	clearManifestLayoutV2(t, dir)
 
 	agents := filepath.Join(dir, "AGENTS.md")
 	if err := os.WriteFile(agents, []byte("# will be removed mid-run\n"), 0644); err != nil {
@@ -2137,7 +2202,7 @@ func TestNewRootCmd_HasAllSubcommands(t *testing.T) {
 
 // TestAddPack_RendersIntoPackSubdir verifies AC1 and AC2 of the fix-known-breakage
 // plan: ralph pack add <lang> must write files under packs/languages/<lang>/,
-// never at the project root, map rule.md to .claude/rules/<lang>.md, and
+// never at the project root, map rule.md to .claude/rules/ralph/<lang>.md, and
 // record namespaced manifest keys with Meta.Packs updated.
 func TestAddPack_RendersIntoPackSubdir(t *testing.T) {
 	setupTestEmbedFS(t)
@@ -2169,10 +2234,10 @@ func TestAddPack_RendersIntoPackSubdir(t *testing.T) {
 		t.Errorf("verify.sh was written at project root — pack dir layout is wrong")
 	}
 
-	// AC1c: rule.md control file must render to .claude/rules/<lang>.md.
-	ruleFile := filepath.Join(dir, ".claude", "rules", lang+".md")
+	// AC1c: rule.md control file must render to .claude/rules/ralph/<lang>.md.
+	ruleFile := filepath.Join(dir, ".claude", "rules", "ralph", lang+".md")
 	if _, err := os.Stat(ruleFile); err != nil {
-		t.Errorf(".claude/rules/%s.md missing: %v", lang, err)
+		t.Errorf(".claude/rules/ralph/%s.md missing: %v", lang, err)
 	}
 
 	// AC1d: rule.md must NOT appear as packs/languages/<lang>/rule.md.
@@ -2194,8 +2259,8 @@ func TestAddPack_RendersIntoPackSubdir(t *testing.T) {
 	if _, ok := m.Files["verify.sh"]; ok {
 		t.Error("manifest has un-namespaced key 'verify.sh' (pack namespace leak)")
 	}
-	// rule.md must be tracked under .claude/rules/<lang>.md (not the pack dir).
-	ruleKey := filepath.Join(".claude", "rules", lang+".md")
+	// rule.md must be tracked under .claude/rules/ralph/<lang>.md (not the pack dir).
+	ruleKey := filepath.Join(".claude", "rules", "ralph", lang+".md")
 	if _, ok := m.Files[ruleKey]; !ok {
 		t.Errorf("manifest missing rule key %q", ruleKey)
 	}

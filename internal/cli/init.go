@@ -65,8 +65,7 @@ func runInitInteractive(targetDir string, force bool) error {
 	// non-interactive callers.
 	manifestPath := filepath.Join(targetDir, ".ralph", "manifest.toml")
 	if _, err := os.Stat(manifestPath); err == nil {
-		fmt.Printf("\nExisting project detected. Running upgrade instead...\n\n")
-		return runUpgrade(targetDir, false)
+		return handleExistingProjectInit(targetDir, manifestPath)
 	}
 
 	defaultName := filepath.Base(targetDir)
@@ -120,6 +119,28 @@ func runInitNonInteractive(targetDir string, force bool) error {
 	return executeInit(targetDir, cfg, force)
 }
 
+// handleExistingProjectInit is invoked whenever `ralph init` targets a
+// directory that already has a .ralph/manifest.toml. Legacy (pre-v2)
+// projects keep the prior behavior of delegating to the legacy upgrade
+// engine. Projects already on the overlay (v2) layout cannot use that
+// engine — upgrade.go's fail-closed guard (AC-10, docs/specs
+// 2026-08-17-overlay-scaffold-v2.md) refuses to run against a
+// meta.layout = "v2" manifest — so re-running init against them is a no-op
+// today; the non-interactive v2 upgrade path lands in a later ralph
+// release (Phase 3).
+func handleExistingProjectInit(targetDir, manifestPath string) error {
+	m, err := scaffold.ReadManifest(manifestPath)
+	if err != nil {
+		return fmt.Errorf("reading manifest: %w", err)
+	}
+	if m.Meta.Layout == scaffold.LayoutV2 {
+		fmt.Printf("\nExisting v2-layout project detected. Nothing to do — the non-interactive v2 upgrade path lands in a later ralph release (Phase 3).\n\n")
+		return nil
+	}
+	fmt.Printf("\nExisting project detected. Running upgrade instead...\n\n")
+	return runUpgrade(targetDir, false)
+}
+
 func executeInit(targetDir string, cfg initConfig, force bool) error {
 	// Ensure target directory exists.
 	if err := os.MkdirAll(targetDir, 0755); err != nil {
@@ -130,8 +151,7 @@ func executeInit(targetDir string, cfg initConfig, force bool) error {
 	// Delegate to upgrade logic to preserve user-edited files.
 	manifestPath := filepath.Join(targetDir, ".ralph", "manifest.toml")
 	if _, err := os.Stat(manifestPath); err == nil {
-		fmt.Printf("\nExisting project detected. Running upgrade instead...\n\n")
-		return runUpgrade(targetDir, false)
+		return handleExistingProjectInit(targetDir, manifestPath)
 	}
 
 	fmt.Printf("\nScaffolding %q into %s ...\n\n", cfg.ProjectName, targetDir)
@@ -167,7 +187,7 @@ func executeInit(targetDir string, cfg initConfig, force bool) error {
 
 	// Step 2: Render selected language packs into packs/languages/<lang>/.
 	// Pack rule.md files are control files: they render to
-	// .claude/rules/<lang>.md instead of packs/languages/<lang>/rule.md.
+	// .claude/rules/ralph/<lang>.md instead of packs/languages/<lang>/rule.md.
 	// renderPackInto (language_pack.go) is the shared helper used here and by
 	// addPack (pack.go) so the two code paths cannot diverge.
 	for _, pack := range cfg.Packs {
