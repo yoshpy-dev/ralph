@@ -255,6 +255,65 @@ func TestExistingConstructorsWriteNoV3Fields(t *testing.T) {
 	}
 }
 
+func TestSetOwner_SetsOnExistingEntry(t *testing.T) {
+	m := NewManifest("0.4.0")
+	m.SetFileWithBaseline("AGENTS.md", "sha256:tmpl", ".ralph/baseline/AGENTS.md")
+
+	if err := m.SetOwner("AGENTS.md", OwnerBlock); err != nil {
+		t.Fatalf("SetOwner: %v", err)
+	}
+
+	entry := m.Files["AGENTS.md"]
+	if entry.Owner != OwnerBlock {
+		t.Errorf("Owner = %q, want %q", entry.Owner, OwnerBlock)
+	}
+	// Other v1/v2 fields must be untouched.
+	if entry.Hash != "sha256:tmpl" || entry.TemplateHash != "sha256:tmpl" {
+		t.Errorf("Hash/TemplateHash changed unexpectedly: %+v", entry)
+	}
+	if !entry.Managed || entry.State != FileStateManaged {
+		t.Errorf("Managed/State changed unexpectedly: %+v", entry)
+	}
+	if entry.BaselineStatus != BaselineStatusAvailable || entry.BaselinePath != ".ralph/baseline/AGENTS.md" {
+		t.Errorf("baseline fields changed unexpectedly: %+v", entry)
+	}
+}
+
+func TestSetOwner_RejectsFork(t *testing.T) {
+	m := NewManifest("0.4.0")
+	m.SetFile("x.md", "sha256:a")
+
+	if err := m.SetOwner("x.md", OwnerFork); err == nil {
+		t.Fatal("SetOwner accepted OwnerFork; forks must go through SetFileFork")
+	}
+	if got := m.Files["x.md"].Owner; got != "" {
+		t.Errorf("Owner = %q after rejected SetOwner, want unchanged empty", got)
+	}
+}
+
+func TestSetOwner_RejectsUnknownOwner(t *testing.T) {
+	m := NewManifest("0.4.0")
+	m.SetFile("x.md", "sha256:a")
+
+	if err := m.SetOwner("x.md", "not-a-real-owner"); err == nil {
+		t.Fatal("SetOwner accepted unknown owner")
+	}
+	if got := m.Files["x.md"].Owner; got != "" {
+		t.Errorf("Owner = %q after rejected SetOwner, want unchanged empty", got)
+	}
+}
+
+func TestSetOwner_RejectsMissingEntry(t *testing.T) {
+	m := NewManifest("0.4.0")
+
+	if err := m.SetOwner("missing.md", OwnerCore); err == nil {
+		t.Fatal("SetOwner accepted a path with no existing manifest entry")
+	}
+	if _, ok := m.Files["missing.md"]; ok {
+		t.Error("SetOwner must not create a new entry for a missing path")
+	}
+}
+
 func TestReadManifestNotFound(t *testing.T) {
 	_, err := ReadManifest("/nonexistent/manifest.toml")
 	if err == nil {
