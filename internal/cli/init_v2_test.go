@@ -375,6 +375,74 @@ func TestExecuteInit_V2_SymlinkedBlockSurface_LeftUntouchedWithWarning(t *testin
 	}
 }
 
+// TestExecuteInit_V2_DanglingSymlinkBlockSurface_LeftUntouchedWithWarning
+// pins the C3-1 self-review fix: RenderFS's existence check must use Lstat,
+// not Stat, so a *dangling* symlinked block surface (the symlink's target
+// does not exist anywhere) is classified as "exists" (skipped) rather than
+// "absent" (created) and never gets written through by os.WriteFile. Before
+// the fix, os.Stat on a dangling symlink returns ErrNotExist, RenderFS
+// treated AGENTS.md as a create, and the scaffold content landed at the
+// symlink's external target -- outside targetDir entirely.
+func TestExecuteInit_V2_DanglingSymlinkBlockSurface_LeftUntouchedWithWarning(t *testing.T) {
+	setupTestEmbedFSV2(t)
+	Version = "0.5.0-test"
+
+	dir := t.TempDir()
+	target := filepath.Join(dir, "project")
+	if err := os.MkdirAll(target, 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	// The symlink target does not exist anywhere -- a dangling symlink.
+	externalPath := filepath.Join(dir, "external-AGENTS.md")
+
+	linkPath := filepath.Join(target, "AGENTS.md")
+	if err := os.Symlink(externalPath, linkPath); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+
+	origStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	cfg := initConfig{ProjectName: "project", Packs: nil}
+	err := executeInit(target, cfg, false)
+
+	_ = w.Close()
+	os.Stdout = origStdout
+	out, _ := io.ReadAll(r)
+
+	if err != nil {
+		t.Fatalf("executeInit must still succeed when a block surface is a dangling symlink: %v", err)
+	}
+	if !strings.Contains(string(out), "AGENTS.md: is a symlink; left untouched") {
+		t.Errorf("expected symlink warning in output:\n%s", out)
+	}
+
+	// The symlink itself must be untouched: still a symlink, still pointing
+	// at the same (nonexistent) external target.
+	info, err := os.Lstat(linkPath)
+	if err != nil {
+		t.Fatalf("Lstat AGENTS.md: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("AGENTS.md must remain a symlink, got mode %v", info.Mode())
+	}
+	resolved, err := os.Readlink(linkPath)
+	if err != nil {
+		t.Fatalf("Readlink AGENTS.md: %v", err)
+	}
+	if resolved != externalPath {
+		t.Errorf("AGENTS.md symlink target = %q, want %q", resolved, externalPath)
+	}
+
+	// Nothing must have been created at the external (dangling) target --
+	// this is the containment failure the fix closes.
+	if _, err := os.Stat(externalPath); !os.IsNotExist(err) {
+		t.Errorf("scaffold content must not be written through a dangling symlink; stat err = %v", err)
+	}
+}
+
 func hasPrefixBytes(b, prefix []byte) bool {
 	if len(b) < len(prefix) {
 		return false

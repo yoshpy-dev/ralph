@@ -19,6 +19,10 @@
 #      .ralph/local/verify.d|test.d drop-ins after core verification, with
 #      mode selecting which local dir(s) run and a failing drop-in failing
 #      the run (AC-5).
+#   i. SIGTERM sent directly to the dispatcher process (not a wrapping
+#      subshell) mid-run terminates it (does not resume) with exit 143, and
+#      its cleanup trap leaves no stray temp files in $TMPDIR or a
+#      cwd-relative ".first" in the fixture.
 
 set -u
 
@@ -311,18 +315,41 @@ else
 fi
 rm -f "$verify_fixture/.ralph/local/verify.d/20-fail.sh"
 
-# ── Case I: SIGTERM mid-run terminates (does not resume) and leaves no
-#           stray temp/".first" files in the fixture's cwd ─────────────
+# ── Case I: SIGTERM to the dispatcher itself (not a wrapping subshell)
+#           terminates it (does not resume) and its cleanup trap removes
+#           every mktemp'd temp file, leaving nothing stray in $TMPDIR or a
+#           cwd-relative ".first" in the fixture ───────────────────────
 rm -rf "$fixture/.claude/hooks/PreCompact.d"
 started_marker="$workdir/case-i-started"
-rm -f "$started_marker" "$fixture/.first"
+i_stdin="$workdir/case-i-stdin.json"
+i_out="$workdir/case-i-out.log"
+rm -f "$started_marker" "$fixture/.first" "$i_stdin" "$i_out"
+printf '{}' > "$i_stdin"
 write_script "$fixture/.claude/hooks/PreCompact.d/10-slow.sh" <<EOF
 #!/usr/bin/env sh
 cat >/dev/null
 touch "$started_marker"
 sleep 5
 EOF
-( cd "$fixture" && printf '{}' | ./.claude/hooks/ralph-dispatch.sh PreCompact >/dev/null 2>&1 ) &
+
+# Snapshot the dispatcher's own temp-file namespace in $TMPDIR before the
+# run, so cleanup is asserted as a set difference rather than assuming an
+# empty directory (other processes may share $TMPDIR).
+i_tmpdir_base="${TMPDIR:-/tmp}"
+i_tmp_before="$workdir/case-i-tmp-before.txt"
+i_tmp_after="$workdir/case-i-tmp-after.txt"
+find "$i_tmpdir_base" -maxdepth 1 -name 'ralph-dispatch-*' 2>/dev/null | sort > "$i_tmp_before"
+
+# Background the dispatcher process itself, not a wrapping subshell: `exec`
+# after `cd` replaces the backgrounded subshell's own process image with
+# the dispatcher, so the PID captured in $! is the dispatcher's PID and
+# `kill -TERM` below signals it directly (a plain
+# `( cd ... && ... ) &` would instead signal the shell that ran `cd`,
+# leaving the dispatcher itself, forked deeper, untouched).
+(
+  cd "$fixture" || exit 1
+  exec ./.claude/hooks/ralph-dispatch.sh PreCompact < "$i_stdin" > "$i_out" 2>&1
+) &
 i_pid=$!
 for _ in $(seq 1 50); do
   [ -f "$started_marker" ] && break
@@ -331,12 +358,26 @@ done
 kill -TERM "$i_pid" 2>/dev/null
 i_rc=0
 wait "$i_pid" 2>/dev/null || i_rc=$?
-assert_exit "I. SIGTERM mid-run terminates with non-zero exit (not resumed)" 143 "$i_rc"
+assert_exit "I. SIGTERM to the dispatcher terminates it with non-zero exit (not resumed)" 143 "$i_rc"
+
 if [ -f "$fixture/.first" ]; then
-  record_fail "I. SIGTERM mid-run left a stray .first file in fixture cwd"
+  record_fail "I. SIGTERM cleanup left a stray .first file in fixture cwd"
 else
-  record_pass "I. SIGTERM mid-run left no stray .first file in fixture cwd"
+  record_pass "I. SIGTERM cleanup left no stray .first file in fixture cwd"
 fi
+
+find "$i_tmpdir_base" -maxdepth 1 -name 'ralph-dispatch-*' 2>/dev/null | sort > "$i_tmp_after"
+i_leaked_tmp="$(comm -13 "$i_tmp_before" "$i_tmp_after" 2>/dev/null || true)"
+if [ -n "$i_leaked_tmp" ]; then
+  record_fail "I. SIGTERM cleanup left stray ralph-dispatch-* temp files: $i_leaked_tmp"
+  rm -f $i_leaked_tmp
+else
+  record_pass "I. SIGTERM cleanup left no stray ralph-dispatch-* temp files in \$TMPDIR"
+fi
+
+# Reap the orphaned drop-in (still sleeping past its parent's death) so it
+# does not outlive this test run.
+pkill -f "PreCompact.d/10-slow.sh" >/dev/null 2>&1 || true
 
 # ── Summary ───────────────────────────────────────────────────────────
 echo
