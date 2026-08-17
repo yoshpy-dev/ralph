@@ -119,14 +119,19 @@ make_recent_report() {
 
 printf '==> gc-artifacts: dry-run mode\n'
 
+# The "recent" fixture must stay inside the --days 30 window on every run
+# date, so its date is computed relative to today (BSD date first, GNU
+# fallback). A hardcoded date here silently expires and breaks the test.
+recent_date="$(date -v-5d +%Y-%m-%d 2>/dev/null || date -d '5 days ago' +%Y-%m-%d)"
+
 make_old_report "self-review-2026-05-01-old-slug.md"
-make_recent_report "self-review-2026-07-12-recent-slug.md"
+make_recent_report "self-review-${recent_date}-recent-slug.md"
 
 # Dry-run should not delete anything
 (cd "$_tmp" && ./scripts/gc-artifacts.sh --days 30)
 
 assert_file_exists "dry-run: old report still present" "$_tmp/docs/reports/self-review-2026-05-01-old-slug.md"
-assert_file_exists "dry-run: recent report still present" "$_tmp/docs/reports/self-review-2026-07-12-recent-slug.md"
+assert_file_exists "dry-run: recent report still present" "$_tmp/docs/reports/self-review-${recent_date}-recent-slug.md"
 
 # ─── Test 2: --apply deletes old reports, keeps recent ────────────────────────
 
@@ -135,7 +140,7 @@ printf '==> gc-artifacts: --apply with date-based reports\n'
 (cd "$_tmp" && ./scripts/gc-artifacts.sh --days 30 --apply)
 
 assert_file_absent "--apply: old report deleted" "$_tmp/docs/reports/self-review-2026-05-01-old-slug.md"
-assert_file_exists "--apply: recent report kept" "$_tmp/docs/reports/self-review-2026-07-12-recent-slug.md"
+assert_file_exists "--apply: recent report kept" "$_tmp/docs/reports/self-review-${recent_date}-recent-slug.md"
 
 # ─── Test 3: README.md is never deleted ───────────────────────────────────────
 

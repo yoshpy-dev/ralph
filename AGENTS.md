@@ -56,8 +56,8 @@ task worktree and local branch while leaving the remote PR branch intact.
 
 - `cmd/ralph/` — Go entrypoint for the ralph CLI (cobra root, ldflags injection, go:embed wiring)
 - `internal/cli/` — cobra subcommands (init, upgrade, status, doctor, pack, insights, org, version)
-- `internal/scaffold/` — go:embed template system, manifest TOML, file render with SHA256 hashes
-- `internal/upgrade/` — hash-based diff engine, conflict resolution (auto-update, conflict, add, remove)
+- `internal/scaffold/` — go:embed template system, manifest TOML (v3 ownership fields: `layout`/`owner` core|fork|seed|block/`forked_from_version`, opt-in write API, legacy read compat), file render with SHA256 hashes
+- `internal/upgrade/` — hash-based diff engine, conflict resolution (auto-update, conflict, add, remove); Phase-1 overlay primitives, unwired (core replace planner with ordered ops + commit barrier, managed block engine, settings.json 3-way merge, advisory diff, upgrade report writer; spec: docs/specs/2026-08-17-overlay-scaffold-v2.md)
 - `internal/config/` — ralph.toml parser with defaults
 - `internal/org/` — org runtime mechanism layer: envelope validation, seat saga manifest (flock-serialized), receipts, permission-mode envelopes, herdr/agmsg driver adapters, role prompt templates (go:embed), typed message protocol, org report generation, two-layer watchdog (pulse watch + on-demand watcher) (spec: docs/specs/2026-08-01-org-runtime.md; protocol rule: .claude/rules/agent-messaging.md)
 - `internal/insights/` — insight event/receipt readers, aggregation, and report backfill for `ralph insights`
