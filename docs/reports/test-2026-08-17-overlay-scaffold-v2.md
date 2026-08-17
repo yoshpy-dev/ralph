@@ -71,3 +71,54 @@ None. No test failures in shell suites or Go packages.
 - Pass: Yes — all 555 shell assertions across 23 files and all 8 Go packages (`go test ./...`) pass with zero failures. Proceed to `/sync-docs`.
 - Fail: None.
 - Blocked: None.
+
+## Cycle 2 (re-run after cross-review fixes + cycle-2 self-review cleanup)
+
+- Date: 2026-08-17
+- Pipeline cycle: 2/2 (`RALPH_STANDARD_MAX_PIPELINE_CYCLES` default cap; no automatic third cycle)
+- Tester: `tester` subagent (`/test`)
+- Scope: `./scripts/run-test.sh` (changed-language scope; again resolved to `golang` after a full shell-suite fallback triggered by the unclassified `scripts/check-sync.sh` edit in `3b32c50` — same fallback trigger as cycle 1, now via a different file). Delta since the cycle-1 test report (`6564230..HEAD`): `4c38cf1` (AGENTS.md repo-map sync + `check-sync.sh` `KNOWN_DIFFS`), `ba2384f` (cross-review triage report), `1ef5be7` (cross-review fixes — `ManifestRemove` signal, `ApplyOps` validate-all-upfront, report-path prefix hardening), `c81eee2` (cycle-2 self-review report), `3b32c50` (cycle-2 self-review fixes).
+- Evidence: `docs/evidence/verify-2026-08-17-074947.log`
+
+### Test execution (full re-run)
+
+Same 23 shell suites and same 8 Go packages as cycle 1 ran again in full (fallback scope, not delta-only). Every suite's pass/fail count is unchanged from the cycle-1 table above — `tests/test-branch-name.sh` is unchanged at 26 (the cycle-1 report row and this cycle's evidence log both show 26/26; no shell test file was touched by the cycle-2 delta) — with one exception:
+
+| Suite / Command | Cycle 1 | Cycle 2 | Delta |
+| --- | --- | --- | --- |
+| `go test ./internal/upgrade/...` | passing, no `ManifestRemove`/`ApplyOps`-upfront/report-path-prefix tests | passing, **+5 new tests** | `TestPlanCoreReplace_CoreManifestRemoveWhenDiskAlreadyAbsent`, `TestApplyOps_RejectsInvalidOpPathBeforeWritingAnything`, `TestUpgradeReportRelPath_SanitizesDateParentEscape`, `TestWriteUpgradeReport_RejectsPathOutsideReportsDir`, `TestWriteUpgradeReport_RejectsReportsDirItself` |
+| All other 22 shell files + 7 other Go packages | pass | pass | No change (no source touched by the cycle-2 delta) |
+
+All 5 new tests independently re-run in isolation (`go test ./internal/upgrade/... -run '<names>' -v`): 5/5 `PASS`. Full suite: shell 555/555 assertions across 23 files, Go 8/8 packages `ok`. Combined verdict: **0 failures**.
+
+Note on `settingsmerge_test.go`: `3b32c50` also touched this file, but only a doc-comment rewrite on `TestOwnedSettingsPaths_AnchorsMergeBehavior` (C2-2 self-review fix) — no assertion logic changed, confirmed via `git diff 6564230..HEAD -- internal/upgrade/settingsmerge_test.go`. Not counted as a new test.
+
+### Coverage (cycle 2)
+
+- `internal/scaffold`: 77.7% statements — **unchanged** from cycle 1 (no `internal/scaffold` file touched by the cycle-2 delta; confirmed via `git diff 6564230..HEAD --stat -- internal/scaffold` = empty).
+- `internal/upgrade`: 89.9% statements — **+0.2pp** from cycle 1's 89.7%. The 5 new tests each cover a previously-untested branch: `ManifestRemove` on the already-absent-on-disk path (`replaceplan.go`), the upfront-validation loop in `ApplyOps` before any op executes, `date`-string sanitization in `UpgradeReportRelPath`, and the two `WriteUpgradeReport` rejection paths (outside-`docs/reports`, and `docs/reports` itself).
+- No new 0%-coverage functions introduced. The cycle-1 report's named gaps (`diff.go`'s `ComputeDiffsNoRemovals`/`ComputeFileDiff`, `merge.go`'s `JoinLines`, `internal/scaffold/embed.go`'s go:embed accessors) are unchanged — none of those files were touched by the cycle-2 delta (`git diff 6564230..HEAD --stat` confirms).
+
+### Failure analysis (cycle 2)
+
+None. No test failures in shell suites or Go packages, including the 5 new tests and the reworded (not logic-changed) `settingsmerge_test.go` case.
+
+### Regression checks (cycle 2)
+
+| Behavior at risk | Status | Evidence |
+| --- | --- | --- |
+| `ApplyOps`'s pre-existing stop-at-first-failure / no-manifest-advance contract, now composed with the new upfront path-validation loop | Unchanged | `TestApplyOps_RejectsInvalidOpPathBeforeWritingAnything` asserts the valid op preceding the invalid one is never written — the new validation runs *before*, not instead of, the existing op loop |
+| `ManifestRemove`'s non-destructive default (drifted/modified-core-file case must NOT emit a removal signal) | Unchanged | Existing drifted-case test (extended in `1ef5be7`) explicitly asserts `len(plan.ManifestRemove) == 0`; not weakened by the new already-absent-case test |
+| AC-8 (v3 opt-in isolation) — `manifest.go` v3 write paths | Unchanged | No `manifest.go` change in the cycle-2 delta; `TestExistingConstructorsWriteNoV3Fields` untouched and still passing |
+| AC-6 (no `internal/cli` behavior change) | Unchanged | `git diff main...HEAD -- internal/cli/` empty at `HEAD = 3b32c50` (cross-checked against the cycle-2 verify report's own AC-6 re-check) |
+
+### Test gaps (cycle 2)
+
+- Unchanged from cycle 1: full behavioral coverage of the wired `ralph upgrade`/`eject`/`adopt`/`doctor --strict` flow remains out of scope by design (Phases 2–5); `diff.go`/`merge.go` legacy machinery and `embed.go`'s go:embed accessors remain at 0%, both pre-existing and untouched by this cycle's delta.
+- The 5 cycle-1 LOW findings the verify report batched into the tech-debt register (`docs/tech-debt/README.md`) as unfixed-by-cap remain untested by definition — they describe code paths the fixes did not touch. Not a cycle-2 regression; tracked for a future cycle.
+
+### Verdict (cycle 2)
+
+- Pass: Yes — all 555 shell assertions across 23 files and all 8 Go packages (`go test ./...`) pass with zero failures, including the 5 new `internal/upgrade` tests added in this cycle's fix commits. `internal/upgrade` coverage rose 89.7% → 89.9%; `internal/scaffold` unchanged at 77.7%. No regression in AC-2, AC-6, AC-8, or AC-9 behavior. Proceed to `/sync-docs` → `/cross-review` → `/pr`.
+- Fail: None.
+- Blocked: None.
