@@ -7,7 +7,7 @@ A task is done only when all applicable items are satisfied.
 - [ ] Active plan exists or was explicitly deemed unnecessary
 - [ ] Repo writes happened inside a clean-base task worktree, not the default checkout
 - [ ] Acceptance criteria were addressed
-- [ ] Each implementation slice is individually committed (see `.claude/rules/git-commit-strategy.md`)
+- [ ] Each implementation slice is individually committed (see `.claude/rules/ralph/git-commit-strategy.md`)
 - [ ] Self-review artifact exists in `docs/reports/` (diff quality only; no test/static/spec/doc-drift execution)
 - [ ] Verification was run and recorded in `docs/reports/` (spec compliance + static analysis via `./scripts/run-static-verify.sh`; changed-language scope by default; no tests)
 - [ ] Test artifact exists in `docs/reports/` (behavioral tests via `./scripts/run-test.sh`; changed-language scope by default; no static analysis)
@@ -29,7 +29,7 @@ The full pipeline must run in this order — no steps may be skipped:
 
 If `/cross-review` finds ACTION_REQUIRED issues and the user chooses to fix them, the **full pipeline** re-runs from `/self-review` through `/cross-review` again. `/sync-docs` must not be skipped in the re-run.
 
-The pipeline is capped at **2 total runs by default** (initial + 1 re-run), controlled by `RALPH_STANDARD_MAX_PIPELINE_CYCLES` (default `2`). See `.claude/rules/post-implementation-pipeline.md` for cap semantics and state files.
+The pipeline is capped at **2 total runs by default** (initial + 1 re-run), controlled by `RALPH_STANDARD_MAX_PIPELINE_CYCLES` (default `2`). See `.claude/rules/ralph/post-implementation-pipeline.md` for cap semantics and state files.
 
 Phase boundaries are part of the definition of done. A passing pipeline that
 runs tests during `/verify`, static analysis during `/test`, or broad
@@ -39,7 +39,7 @@ verification work during `/self-review` is not valid.
 
 Autonomous multi-seat execution is a separate surface from the standard
 `/work` flow above; see `docs/specs/2026-08-01-org-runtime.md` and
-`.claude/rules/agent-messaging.md` for its own definition of done (roster
+`.claude/rules/ralph/agent-messaging.md` for its own definition of done (roster
 status, manifest events, watchdog alerts).
 
 ## For risky or broad changes

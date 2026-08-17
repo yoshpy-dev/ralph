@@ -1,5 +1,5 @@
 // Package protocol implements the typed inter-seat message protocol
-// described in .claude/rules/agent-messaging.md: a small header block
+// described in .claude/rules/ralph/agent-messaging.md: a small header block
 // ("KEY: value" lines) followed by an optional blank-line-separated body,
 // with a required TYPE enum and a per-TYPE TASK_ID requirement. This
 // package is the enforcing implementation the rule doc refers to -- keep

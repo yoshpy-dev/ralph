@@ -31,7 +31,7 @@ func TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted(t *testing.T) {
 	if strings.Contains(text, "{{") {
 		t.Errorf("expected no unsubstituted {{...}} placeholders for known vars, got:\n%s", text)
 	}
-	if !strings.Contains(text, ".claude/rules/agent-messaging.md") {
+	if !strings.Contains(text, ".claude/rules/ralph/agent-messaging.md") {
 		t.Errorf("expected reviewer template to reference the protocol rule doc, got:\n%s", text)
 	}
 }
@@ -55,7 +55,7 @@ func TestRenderRolePrompt_QA_AllKnownVarsSubstituted(t *testing.T) {
 	if strings.Contains(text, "{{") {
 		t.Errorf("expected no unsubstituted {{...}} placeholders for known vars, got:\n%s", text)
 	}
-	if !strings.Contains(text, ".claude/rules/agent-messaging.md") {
+	if !strings.Contains(text, ".claude/rules/ralph/agent-messaging.md") {
 		t.Errorf("expected qa template to reference the protocol rule doc, got:\n%s", text)
 	}
 	if !strings.Contains(text, "run-static-verify.sh") || !strings.Contains(text, "run-test.sh") {
@@ -84,7 +84,7 @@ func TestRenderRolePrompt_Lead_AllKnownVarsSubstituted(t *testing.T) {
 	if strings.Contains(text, "{{") {
 		t.Errorf("expected no unsubstituted {{...}} placeholders for known vars, got:\n%s", text)
 	}
-	if !strings.Contains(text, ".claude/rules/agent-messaging.md") {
+	if !strings.Contains(text, ".claude/rules/ralph/agent-messaging.md") {
 		t.Errorf("expected lead template to reference the protocol rule doc, got:\n%s", text)
 	}
 	if !strings.Contains(text, "/org") {

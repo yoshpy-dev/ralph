@@ -31,7 +31,7 @@ import (
 // watchdogIdentity is the agmsg identity `ralph org watch` joins/sends
 // under -- distinct from LeadIdentity and every seat id, so ALERT traffic
 // is attributable to the pulse layer itself in agmsg history (see
-// .claude/rules/agent-messaging.md's "watchdog is a mechanism identity, not
+// .claude/rules/ralph/agent-messaging.md's "watchdog is a mechanism identity, not
 // a spawned seat").
 const watchdogIdentity = "watchdog"
 
@@ -944,7 +944,7 @@ func (w *watchRun) sendAlert(ctx context.Context, status *watchStatusFile, orgID
 //	    CONSTRUCTION, regardless of ev.SeatID: ev.SeatID on a `sent` event
 //	    is the *recipient* (Send writes SeatID: p.To -- see verbs.go), not
 //	    the author, and `ralph org send` is the only verb that ever appends
-//	    one. In the star topology (.claude/rules/agent-messaging.md), only
+//	    one. In the star topology (.claude/rules/ralph/agent-messaging.md), only
 //	    lead/the operator drives that verb -- a seat's reply travels over
 //	    the agmsg skill, which never touches this manifest at all -- so
 //	    every `sent` event in orgID's manifest was written by lead sending

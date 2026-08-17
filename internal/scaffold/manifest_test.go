@@ -15,7 +15,7 @@ func TestManifestRoundTrip(t *testing.T) {
 
 	m := NewManifest("0.1.0")
 	m.SetFile("AGENTS.md", "sha256:abc123")
-	m.SetFile(".claude/rules/testing.md", "sha256:def456")
+	m.SetFile(".claude/rules/ralph/testing.md", "sha256:def456")
 
 	if err := m.Write(path); err != nil {
 		t.Fatalf("Write: %v", err)
@@ -35,8 +35,8 @@ func TestManifestRoundTrip(t *testing.T) {
 	if f, ok := got.Files["AGENTS.md"]; !ok || f.Hash != "sha256:abc123" {
 		t.Errorf("AGENTS.md file = %+v, want hash sha256:abc123", f)
 	}
-	if f, ok := got.Files[".claude/rules/testing.md"]; !ok || !f.Managed {
-		t.Errorf(".claude/rules/testing.md managed = %v, want true", f.Managed)
+	if f, ok := got.Files[".claude/rules/ralph/testing.md"]; !ok || !f.Managed {
+		t.Errorf(".claude/rules/ralph/testing.md managed = %v, want true", f.Managed)
 	}
 }
 

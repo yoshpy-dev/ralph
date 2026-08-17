@@ -25,7 +25,7 @@ reviewer 座席に転記する際は、生の出力全文ではなく要約と�
 
 ## typed protocol
 
-メッセージは `.claude/rules/agent-messaging.md` で定義された typed protocol
+メッセージは `.claude/rules/ralph/agent-messaging.md` で定義された typed protocol
 (`internal/org/protocol` が正としてバリデーションを行う)に従います。ヘッダ行
 は `KEY: value` 形式、本文は空行の後に続けます。TYPE は列挙値の中から選び、
 TASK / RESULT / REVIEW / BLOCKED / CONTRACT では TASK_ID が必須です。本文の

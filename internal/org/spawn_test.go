@@ -1101,7 +1101,7 @@ func TestOrgSpawn_RoleTemplate_ExpandsIntoInitialPrompt(t *testing.T) {
 		t.Fatalf("expected the prompt file to exist at %q: %v", promptPath, err)
 	}
 	fileContent := string(data)
-	for _, want := range []string{"org-a", "seat-1", "reviewer", "internal/org/**", ".claude/rules/agent-messaging.md"} {
+	for _, want := range []string{"org-a", "seat-1", "reviewer", "internal/org/**", ".claude/rules/ralph/agent-messaging.md"} {
 		if !strings.Contains(fileContent, want) {
 			t.Errorf("expected the prompt file content to contain %q, got:\n%s", want, fileContent)
 		}

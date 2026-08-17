@@ -8,7 +8,7 @@ func TestCleanLocalRelPath_Accepts(t *testing.T) {
 		want string
 	}{
 		{"AGENTS.md", "AGENTS.md"},
-		{".claude/rules/testing.md", ".claude/rules/testing.md"},
+		{".claude/rules/ralph/testing.md", ".claude/rules/ralph/testing.md"},
 		{"a/./b", "a/b"},
 	}
 	for _, c := range cases {

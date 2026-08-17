@@ -38,4 +38,4 @@ EOF
 chmod +x "$dir/verify.sh"
 
 echo "Created $dir"
-echo "Remember to add or update a matching .claude/rules/$lang.md file."
+echo "Remember to add or update a matching .claude/rules/ralph/$lang.md file."

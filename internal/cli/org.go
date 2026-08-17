@@ -321,7 +321,7 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 		Use:   "send",
 		Short: "Send a message to a seat",
 		Long: "ralph org send validates --text against the typed message protocol\n" +
-			"(internal/org/protocol, see .claude/rules/agent-messaging.md) before\n" +
+			"(internal/org/protocol, see .claude/rules/ralph/agent-messaging.md) before\n" +
 			"sending: TYPE must be a known value, TASK_ID is required for\n" +
 			"TASK/RESULT/REVIEW/BLOCKED/CONTRACT, and the body must not exceed the\n" +
 			"size cap. Pass --raw to bypass validation entirely for free-form text.",

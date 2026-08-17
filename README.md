@@ -202,7 +202,7 @@ Every step in the loop, including `/spec`, is auto-invoked. `/release` is the on
 9. **PR** (auto — `/pr`) — structured PR, plan archival, hand-off, and task worktree/local branch cleanup.
 10. **CI + human merge**.
 
-See `.claude/rules/post-implementation-pipeline.md` for the canonical pipeline order.
+See `.claude/rules/ralph/post-implementation-pipeline.md` for the canonical pipeline order.
 
 ## Org runtime (autonomous multi-seat execution)
 
@@ -219,7 +219,7 @@ ralph org report --org-id my-task
 ralph org disband --org-id my-task
 ```
 
-See `docs/specs/2026-08-01-org-runtime.md` for the full protocol and `.claude/rules/agent-messaging.md` for the message-shape contract.
+See `docs/specs/2026-08-01-org-runtime.md` for the full protocol and `.claude/rules/ralph/agent-messaging.md` for the message-shape contract.
 
 ## Hooks
 
@@ -237,7 +237,7 @@ ralph pack add golang
 ./scripts/new-language-pack.sh golang
 ```
 
-Wire it into `packs/languages/<name>/verify.sh`, `.claude/rules/<name>.md`, and project build/test tooling.
+Wire it into `packs/languages/<name>/verify.sh`, `.claude/rules/ralph/<name>.md`, and project build/test tooling.
 
 ## Portability
 

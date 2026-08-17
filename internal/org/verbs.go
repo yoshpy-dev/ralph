@@ -58,7 +58,7 @@ type SendParams struct {
 	DryRun    bool
 	// Raw bypasses AC-11 typed-protocol validation entirely, for the rare
 	// case that genuinely needs to send free-form text. See
-	// .claude/rules/agent-messaging.md's "Size cap" section for the
+	// .claude/rules/ralph/agent-messaging.md's "Size cap" section for the
 	// intended use (e.g. relaying an external tool's raw output). A
 	// bypassed send still records raw=true on the `sent` event's Details,
 	// so it stays traceable after the fact.

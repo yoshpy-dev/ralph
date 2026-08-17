@@ -141,6 +141,6 @@ See `scripts/insights-append.sh --help` for the full interface.
 (`<state-dir>/model-receipts.jsonl`)を既定で読み、`org_id` × `seat_id` で
 tri-state `honored`(true/false/unknown)を集計する Receipts セクションを表示
 する。受領証のスキーマと集計契約の正本は `ralph insights --help` と
-`.claude/rules/model-routing.md` の「Org runtime model receipts」節を参照。
+`.claude/rules/ralph/model-routing.md` の「Org runtime model receipts」節を参照。
 このファイルが定義するのはイベント(`events/*.jsonl`)スキーマのみで、受領証
 はコミットされないローカル診断データである点に注意。

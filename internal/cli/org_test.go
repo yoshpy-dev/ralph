@@ -857,7 +857,7 @@ func TestOrgSpawn_RoleAndScopeFlags_ExpandTemplateAndRecordScope(t *testing.T) {
 		t.Fatalf("expected prompt file at %q: %v", promptPath, perr)
 	}
 	promptText := string(promptData)
-	for _, want := range []string{"org-a", "reviewer-1", "internal/org/**", ".claude/rules/agent-messaging.md"} {
+	for _, want := range []string{"org-a", "reviewer-1", "internal/org/**", ".claude/rules/ralph/agent-messaging.md"} {
 		if !strings.Contains(promptText, want) {
 			t.Errorf("expected prompt file content to contain %q, got:\n%s", want, promptText)
 		}

@@ -1285,7 +1285,7 @@ func TestWatch_Deadman_CrossOrgActivity_DoesNotClearPendingAlert(t *testing.T) {
 // the *recipient* (Send writes SeatID: p.To -- verbs.go), not the author, and
 // `ralph org send` -- the only verb that appends a `sent` event -- is only
 // ever driven by lead/the operator (star topology,
-// .claude/rules/agent-messaging.md: a seat only ever addresses TO: lead, and
+// .claude/rules/ralph/agent-messaging.md: a seat only ever addresses TO: lead, and
 // its replies travel over the agmsg skill, never through this manifest). So
 // a `sent` event naming seat-2 as SeatID IS lead activity (lead sending to
 // seat-2), and must clear seat-1's pending alert. The genuinely non-clearing

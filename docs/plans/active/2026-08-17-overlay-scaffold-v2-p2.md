@@ -137,6 +137,8 @@
 ## Deviations
 
 - 【着手時に発見】`.gitignore` は HTML コメントを許容しないため、managed block マーカーはファイル種別ごとのコメント形式が必要: Markdown 面は `<!-- BEGIN RALPH MANAGED (ralph:<surface>) -->`(Phase 1 実装どおり)、`.gitignore` は `# BEGIN RALPH MANAGED (ralph:gitignore)` / `# END RALPH MANAGED`。Phase 1 の block エンジンにマーカー形式のパラメータ化(surface → marker style)を追加する(スライス 3 で実装、スペック FR-5 の形式定義に `#` 形式を追補)
+- 【スライス 6 で記録】commit `8c47467`(`fix: use writef for init block-surface progress output`)は共有 worktree の index 状態により、スライス 5 のステージ済みファイル 19 件を意図せず同梱した。内容面への影響はなく(スライス 5 の変更そのものは正当かつ別コミット `7ab1d36` で正しく記録済み)、コミット境界の帰属(attribution)のみのずれ。実害なしと判断し、当該コミットの revert・squash は行わない
+- 【スライス 6 で記録】`tests/test-terraform-rule-frontmatter.sh` と `scripts/check-pipeline-sync.sh` の更新は、当初のスライス割り当て(スライス 4: pack rule パス移設)には明記されていなかったが、pack rule パスが `.claude/rules/<lang>.md` → `.claude/rules/ralph/<lang>.md` へ移設されたことに伴う直接的な追従として、スライス 5 の実装中に同梱・文書化された(スライス 5 の逸脱記録を参照)
 
 ## Open questions
 
@@ -147,7 +149,7 @@
 
 - [ ] Plan reviewed
 - [x] Branch created(feat/overlay-scaffold-v2-p2)
-- [ ] Implementation started
+- [x] Implementation started(slice SHAs: 5388a10, 24a611a, 87c31f5, 27c5714, 7ab1d36 + 8c47467)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created

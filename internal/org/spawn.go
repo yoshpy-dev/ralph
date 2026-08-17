@@ -37,7 +37,7 @@ const maxAgentStartAttempts = 20
 const agentPaneBusyMarker = "agent_pane_busy"
 
 // LeadIdentity is the single, grep-able definition of the org's coordinating
-// "lead" agmsg identity name (see .claude/rules/agent-messaging.md's "star
+// "lead" agmsg identity name (see .claude/rules/ralph/agent-messaging.md's "star
 // topology" section). Every production call site that names or targets the
 // lead identity (ensureLeadJoined's Join, Spawn's HELLO Send TO field) must
 // use this constant rather than a bare "lead" literal. Exported so
@@ -63,7 +63,7 @@ const EventOrgWorkspaceCreated = "org_workspace_created"
 
 // HerdrClient is the subset of driver.Herdr's methods the spawn saga and the
 // send/wait/read/stop verbs need. Defined here (consumption side, per
-// .claude/rules/architecture.md) rather than in internal/org/driver, so
+// .claude/rules/ralph/architecture.md) rather than in internal/org/driver, so
 // internal/org stays free of any exec.Command dependency -- driver.Herdr
 // satisfies this interface structurally. Wiring lives in internal/cli/org.go:
 // driver.Herdr{R: driver.ExecRunner{}} is assigned directly to Org.Herdr.
@@ -685,7 +685,7 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	// so a preceding ensureLeadJoined call would just re-join the exact same
 	// identity a moment later, and a HELLO from lead announcing itself to
 	// lead would violate the star topology's single-coordinator premise
-	// (.claude/rules/agent-messaging.md: every non-lead seat addresses
+	// (.claude/rules/ralph/agent-messaging.md: every non-lead seat addresses
 	// TO: lead; lead has no "TO: lead" of its own). Both steps are skipped
 	// only for this case; every other --role spawn still gets both,
 	// unchanged.

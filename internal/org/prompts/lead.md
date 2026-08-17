@@ -33,7 +33,7 @@
 
 ## スター型トポロジのルール
 
-- あなたは `.claude/rules/agent-messaging.md` で定義されたスター型
+- あなたは `.claude/rules/ralph/agent-messaging.md` で定義されたスター型
   トポロジの唯一の座標役(coordinating identity)です。すべての座席は
   あなた宛て(TO: lead)にのみメッセージを送ります。あなたから他の座席へは
   `ralph org send --to <seat_id>` で個別に typed message を送ってください。
@@ -45,7 +45,7 @@
 
 ## typed protocol
 
-メッセージは `.claude/rules/agent-messaging.md` で定義された typed protocol
+メッセージは `.claude/rules/ralph/agent-messaging.md` で定義された typed protocol
 (`ralph` CLI がランタイムでこれを正としてバリデーションを行う)に従います。ヘッダ
 行は `KEY: value` 形式、本文は空行の後に続けます。TYPE は列挙値の中から選び、
 TASK / RESULT / REVIEW / BLOCKED / CONTRACT では TASK_ID が必須です。本文の
