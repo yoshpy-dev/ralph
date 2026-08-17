@@ -32,7 +32,7 @@ RALPH_CLAUDE_REVIEWER_MODEL="${RALPH_CLAUDE_REVIEWER_MODEL:-opus}"
 # ═══════════════════════════════════════════════════════════════════
 # [org] envelope defaults — mirror internal/config/config.go OrgConfig
 # and templates/base/ralph.toml [org]. Must change in lock-step (see
-# .claude/rules/model-routing.md and defaults_sync_test.go). Except for
+# .claude/rules/ralph/model-routing.md and defaults_sync_test.go). Except for
 # RALPH_ORG_AGMSG_HOME below (which the Go binary's
 # driver.ResolveAgmsgHome DOES read directly, as the runtime override for
 # [org].agmsg_home), no `ralph org` verb reads these shell vars — the Go

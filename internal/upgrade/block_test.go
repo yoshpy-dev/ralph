@@ -255,3 +255,108 @@ func TestBeginMarker(t *testing.T) {
 		t.Fatalf("BeginMarker(%q) = %q, want %q", "agents-md", got, want)
 	}
 }
+
+func TestBeginMarkerStyled_Hash(t *testing.T) {
+	got := BeginMarkerStyled("gitignore", BlockMarkerHash)
+	want := "# BEGIN RALPH MANAGED (ralph:gitignore)"
+	if got != want {
+		t.Fatalf("BeginMarkerStyled(gitignore, hash) = %q, want %q", got, want)
+	}
+}
+
+func TestEndMarkerStyled_Hash(t *testing.T) {
+	got := EndMarkerStyled(BlockMarkerHash)
+	want := "# END RALPH MANAGED"
+	if got != want {
+		t.Fatalf("EndMarkerStyled(hash) = %q, want %q", got, want)
+	}
+}
+
+func TestUpdateManagedBlockStyled_Hash_Update(t *testing.T) {
+	current := []byte("node_modules/\n" +
+		BeginMarkerStyled("gitignore", BlockMarkerHash) + "\n" +
+		"old-entry/\n" +
+		EndMarkerStyled(BlockMarkerHash) + "\n" +
+		"*.local\n")
+	want := []byte("node_modules/\n" +
+		BeginMarkerStyled("gitignore", BlockMarkerHash) + "\n" +
+		"new-entry/\n" +
+		EndMarkerStyled(BlockMarkerHash) + "\n" +
+		"*.local\n")
+
+	got := UpdateManagedBlockStyled(current, "gitignore", []byte("new-entry/\n"), BlockMarkerHash)
+	if got.Outcome != BlockUpdated {
+		t.Fatalf("Outcome = %v, want BlockUpdated (reason=%q)", got.Outcome, got.Reason)
+	}
+	if !bytes.Equal(got.Content, want) {
+		t.Fatalf("Content = %q, want %q", got.Content, want)
+	}
+}
+
+func TestUpdateManagedBlockStyled_Hash_Append(t *testing.T) {
+	current := []byte("*.local\n")
+	got := UpdateManagedBlockStyled(current, "gitignore", []byte(".ralph/local/\n"), BlockMarkerHash)
+	if got.Outcome != BlockAppended {
+		t.Fatalf("Outcome = %v, want BlockAppended (reason=%q)", got.Outcome, got.Reason)
+	}
+	want := []byte("*.local\n" +
+		"\n" +
+		BeginMarkerStyled("gitignore", BlockMarkerHash) + "\n" +
+		".ralph/local/\n" +
+		EndMarkerStyled(BlockMarkerHash) + "\n")
+	if !bytes.Equal(got.Content, want) {
+		t.Fatalf("Content = %q, want %q", got.Content, want)
+	}
+}
+
+func TestUpdateManagedBlockStyled_Hash_Malformed(t *testing.T) {
+	tests := []struct {
+		name    string
+		current []byte
+	}{
+		{
+			name:    "begin only",
+			current: []byte("x\n" + BeginMarkerStyled("gitignore", BlockMarkerHash) + "\n" + "content\n"),
+		},
+		{
+			name:    "end only",
+			current: []byte("x\n" + EndMarkerStyled(BlockMarkerHash) + "\n" + "y\n"),
+		},
+		{
+			name: "surface mismatch",
+			current: []byte(BeginMarkerStyled("agents-md", BlockMarkerHash) + "\n" +
+				"a\n" +
+				EndMarkerStyled(BlockMarkerHash) + "\n"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := UpdateManagedBlockStyled(tt.current, "gitignore", []byte("new\n"), BlockMarkerHash)
+			if got.Outcome != BlockMalformed {
+				t.Fatalf("Outcome = %v, want BlockMalformed", got.Outcome)
+			}
+			if got.Content != nil {
+				t.Fatalf("Content = %q, want nil for malformed result", got.Content)
+			}
+			if got.Reason == "" {
+				t.Fatalf("Reason is empty, want a non-empty explanation")
+			}
+		})
+	}
+}
+
+// TestUpdateManagedBlockStyled_Hash_DoesNotMatchHTMLMarkers ensures the two
+// marker styles are fully independent: an HTML-style block in the file must
+// not be mistaken for a hash-style block (and vice versa), so a hash-style
+// call against HTML-marked content treats it as if no block exists at all.
+func TestUpdateManagedBlockStyled_Hash_DoesNotMatchHTMLMarkers(t *testing.T) {
+	current := []byte(BeginMarker("gitignore") + "\n" +
+		"old\n" +
+		EndMarker + "\n")
+
+	got := UpdateManagedBlockStyled(current, "gitignore", []byte("new\n"), BlockMarkerHash)
+	if got.Outcome != BlockAppended {
+		t.Fatalf("Outcome = %v, want BlockAppended (reason=%q)", got.Outcome, got.Reason)
+	}
+}

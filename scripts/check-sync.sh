@@ -91,16 +91,13 @@ KNOWN_DIFFS=(
   ".github/workflows/verify.yml"
   # model-routing.md: root documents the Go-layer default (internal/config)
   # which does not exist in scaffolded projects
-  ".claude/rules/model-routing.md"
-  # AGENTS.md: root's internal/upgrade/ and internal/scaffold/ repo-map
-  # lines describe overlay-scaffold-v2 Phase 1 primitives (manifest v3
-  # ownership fields, unwired replace planner/block engine/settings
-  # merge/advisory diff/report writer) that only exist in this repo's own
-  # internal/ tree. Template rollout for downstream projects lands in
-  # Phase 2/3 (see docs/specs/2026-08-17-overlay-scaffold-v2.md); until
-  # then this file is expected to differ from templates/base/AGENTS.md.
-  "AGENTS.md"
+  ".claude/rules/ralph/model-routing.md"
 )
+
+# AGENTS.md is block-aware, not whole-file compared (see check_agents_md_block
+# below): both root and templates/base/AGENTS.md are free to differ outside
+# their managed block, so AGENTS.md is intentionally absent from KNOWN_DIFFS
+# and from the generic whole-file diff in section 1.
 
 # ─── Helpers ──────────────────────────────────────────────────────────
 
@@ -126,7 +123,7 @@ pack_rule_source() {
   local path lang candidate
   path="$1"
   case "$path" in
-    .claude/rules/*.md)
+    .claude/rules/ralph/*.md)
       lang="$(basename "$path" .md)"
       candidate="packs/languages/${lang}/rule.md"
       if [ -f "$candidate" ]; then
@@ -136,6 +133,12 @@ pack_rule_source() {
       ;;
   esac
   return 1
+}
+
+# extract_agents_md_block <file> — prints the content between the
+# ralph:agents-md managed-block markers (exclusive of the marker lines).
+extract_agents_md_block() {
+  awk '/<!-- BEGIN RALPH MANAGED \(ralph:agents-md\) -->/{flag=1; next} /<!-- END RALPH MANAGED -->/{flag=0} flag' "$1"
 }
 
 # ─── Counters ─────────────────────────────────────────────────────────
@@ -152,6 +155,13 @@ errors=()
 echo "=== Checking templates/base/ <-> root ==="
 while IFS= read -r tpl_file; do
   rel="${tpl_file#templates/base/}"
+
+  # AGENTS.md is block-aware (see section 1b below), not whole-file
+  # compared: root and templates/base/AGENTS.md are free to differ
+  # outside their managed block.
+  if [ "$rel" = "AGENTS.md" ]; then
+    continue
+  fi
 
   if [ ! -f "$rel" ]; then
     template_only=$((template_only + 1))
@@ -172,6 +182,44 @@ while IFS= read -r tpl_file; do
     fi
   fi
 done < <(find templates/base -type f | sort)
+
+# ─── 1b. Check AGENTS.md managed block (block-aware, not whole-file) ──
+#
+# Root AGENTS.md and templates/base/AGENTS.md are each free to carry
+# owner-specific content outside the ralph:agents-md managed block (root:
+# meta-repo Repo map/Planning/Review/escalation sections; template:
+# downstream skeleton framing). What must stay in sync is the block
+# interior itself, which must match the generation source,
+# templates/base/.ralph/core/AGENTS.core.md, in both files.
+
+echo ""
+echo "=== Checking AGENTS.md managed block ==="
+
+agents_core_src="templates/base/.ralph/core/AGENTS.core.md"
+if [ ! -f "$agents_core_src" ]; then
+  drifted=$((drifted + 1))
+  echo "  DRIFTED        AGENTS.md (missing block source $agents_core_src)"
+  errors+=("DRIFTED: AGENTS.md (missing block source $agents_core_src)")
+else
+  for agents_file in "AGENTS.md" "templates/base/AGENTS.md"; do
+    if [ ! -f "$agents_file" ]; then
+      root_only=$((root_only + 1))
+      echo "  ROOT_ONLY      $agents_file (file missing)"
+      errors+=("ROOT_ONLY: $agents_file (missing)")
+      continue
+    fi
+    agents_block_tmp="$(mktemp)"
+    extract_agents_md_block "$agents_file" > "$agents_block_tmp"
+    if diff -q "$agents_block_tmp" "$agents_core_src" >/dev/null 2>&1; then
+      identical=$((identical + 1))
+    else
+      drifted=$((drifted + 1))
+      echo "  DRIFTED        $agents_file (managed block != $agents_core_src)"
+      errors+=("DRIFTED: $agents_file (managed block content differs from $agents_core_src)")
+    fi
+    rm -f "$agents_block_tmp"
+  done
+fi
 
 # ─── 2. Check templates/packs/ against packs/languages/ ──────────────
 

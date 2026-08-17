@@ -71,8 +71,19 @@ func RenderFS(src fs.FS, opts RenderOptions) (*RenderResult, map[string]string, 
 		hash := HashBytes(content)
 		hashes[path] = hash
 
-		// Check if target already exists.
-		if _, statErr := os.Stat(target); statErr == nil {
+		// Check if target already exists. Lstat (not Stat) is used
+		// deliberately: Stat follows symlinks, so a *dangling* symlink at a
+		// template path would stat as absent, get classified as a create
+		// below, and the os.WriteFile call would then write straight through
+		// the link to wherever it resolves -- outside TargetDir, defeating
+		// the boundary check above. Lstat inspects the directory entry
+		// itself, so any existing entry (regular file, valid symlink, or
+		// dangling symlink) counts as "exists" and is skipped here in
+		// non-force mode. --force still overwrites whatever the path
+		// resolves to (including following a symlink): that is explicit user
+		// consent to follow the link, not the containment gap this guards
+		// against.
+		if _, statErr := os.Lstat(target); statErr == nil {
 			if !opts.Overwrite {
 				result.Skipped = append(result.Skipped, path)
 				return nil

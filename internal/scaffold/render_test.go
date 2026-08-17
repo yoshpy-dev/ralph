@@ -131,6 +131,63 @@ func TestRenderFS_OverwritesExisting(t *testing.T) {
 	}
 }
 
+// TestRenderFS_DanglingSymlink_NonForce_SkippedNotFollowed pins the C3-1
+// self-review fix: a *dangling* symlink at a rendered path (target does not
+// exist) must be classified as "exists" (skipped) rather than "absent"
+// (created). Before the fix, os.Stat on a dangling symlink returns
+// ErrNotExist, RenderFS treated the path as a create, and os.WriteFile wrote
+// the scaffold content straight through the link to wherever it resolved --
+// landing outside TargetDir regardless of the boundary check above.
+func TestRenderFS_DanglingSymlink_NonForce_SkippedNotFollowed(t *testing.T) {
+	src := fstest.MapFS{
+		"AGENTS.md": {Data: []byte("scaffold content")},
+	}
+
+	dir := t.TempDir()
+	outsideDir := t.TempDir()
+	externalTarget := filepath.Join(outsideDir, "OUTSIDE.md")
+
+	linkPath := filepath.Join(dir, "AGENTS.md")
+	if err := os.Symlink(externalTarget, linkPath); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+
+	result, _, err := RenderFS(src, RenderOptions{TargetDir: dir, Overwrite: false})
+	if err != nil {
+		t.Fatalf("RenderFS: %v", err)
+	}
+
+	if len(result.Skipped) != 1 || result.Skipped[0] != "AGENTS.md" {
+		t.Errorf("skipped = %v, want [AGENTS.md]", result.Skipped)
+	}
+	if len(result.Created) != 0 {
+		t.Errorf("created = %v, want none (dangling symlink must not be followed)", result.Created)
+	}
+
+	// The symlink itself must be untouched: still a symlink, still pointing
+	// at the same (nonexistent) external target.
+	info, err := os.Lstat(linkPath)
+	if err != nil {
+		t.Fatalf("Lstat: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("AGENTS.md must remain a symlink, got mode %v", info.Mode())
+	}
+	resolved, err := os.Readlink(linkPath)
+	if err != nil {
+		t.Fatalf("Readlink: %v", err)
+	}
+	if resolved != externalTarget {
+		t.Errorf("symlink target = %q, want %q", resolved, externalTarget)
+	}
+
+	// Nothing must have been written at the external (dangling) link target
+	// -- this is the containment failure the fix closes.
+	if _, err := os.Stat(externalTarget); !os.IsNotExist(err) {
+		t.Errorf("dangling symlink target must not be created; stat err = %v", err)
+	}
+}
+
 func TestHashBytes(t *testing.T) {
 	hash := HashBytes([]byte("hello"))
 	if hash[:7] != "sha256:" {

@@ -56,4 +56,4 @@ hatch.
 (`.harness/state/org/manifest.jsonl`, `worktree` field). The pulse-layer
 watchdog compares a seat's live `git status --porcelain` against its
 recorded worktree to detect out-of-scope changes (see
-`.claude/rules/agent-messaging.md` and `docs/specs/2026-08-01-org-runtime.md`).
+`.claude/rules/ralph/agent-messaging.md` and `docs/specs/2026-08-01-org-runtime.md`).

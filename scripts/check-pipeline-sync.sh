@@ -3,9 +3,9 @@ set -eu
 
 # Pipeline order sync checker
 # Canonical: /self-review -> /verify -> /test -> /sync-docs -> /cross-review -> /pr
-# Source of truth: .claude/rules/post-implementation-pipeline.md
+# Source of truth: .claude/rules/ralph/post-implementation-pipeline.md
 
-CANONICAL=".claude/rules/post-implementation-pipeline.md"
+CANONICAL=".claude/rules/ralph/post-implementation-pipeline.md"
 status=0
 
 fail() { echo "FAIL: $1"; status=1; }
@@ -23,12 +23,13 @@ if ! grep -q 'self-review.*verify.*test.*sync-docs.*cross-review' "$CANONICAL"; 
 fi
 ok "Canonical source valid"
 
-# 2. Check each referenced file
+# 2. Check each referenced file (mirrors the "Where this order is
+# referenced" list in $CANONICAL itself; CLAUDE.md carries no pipeline
+# detail post overlay-scaffold-v2 — see .claude/rules/ralph/ralph-workflow.md)
 REFS="
 .claude/skills/work/SKILL.md
 .claude/skills/cross-review/SKILL.md
-.claude/rules/subagent-policy.md
-CLAUDE.md
+.claude/rules/ralph/subagent-policy.md
 docs/quality/definition-of-done.md
 README.md
 AGENTS.md

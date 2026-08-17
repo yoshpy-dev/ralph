@@ -1,3 +1,6 @@
+# Project ignores — add yours outside the managed block;
+# ralph maintains the block content below.
+# BEGIN RALPH MANAGED (ralph:gitignore)
 .DS_Store
 .idea/
 .vscode/
@@ -57,3 +60,6 @@ docs/evidence/*.json
 
 # Auto-generated pipeline execution logs
 docs/reports/pipeline-execution-*.json
+# END RALPH MANAGED
+
+# Project-specific ignores go below this line.

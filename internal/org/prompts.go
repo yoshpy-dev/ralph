@@ -25,7 +25,7 @@ const defaultScopeText = "未指定(読み取り中心で、リポジトリ規�
 // RolePromptVars holds the values substituted into a role prompt template.
 // Substitution is plain strings.ReplaceAll on "{{NAME}}" placeholders (no
 // templating engine, no control flow) -- kept deliberately small and boring
-// per .claude/rules/architecture.md.
+// per .claude/rules/ralph/architecture.md.
 type RolePromptVars struct {
 	OrgID  string
 	SeatID string

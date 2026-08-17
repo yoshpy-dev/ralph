@@ -70,7 +70,7 @@ own gates deterministically, independent of any LLM judgment:
 | Quality pipeline gate | impl exit checks → QA (`run-static-verify.sh` / `run-test.sh`) → reviewer → lead arbitration | QA fail routes back to impl before reviewer sees it |
 | Fix-round cap | envelope-enforced ceiling on reviewer↔impl rounds | Cap reached routes to lead arbitration instead of auto-continuing |
 
-See `.claude/rules/agent-messaging.md` for the org runtime protocol and
+See `.claude/rules/ralph/agent-messaging.md` for the org runtime protocol and
 `.harness/state/org/manifest.jsonl` for the append-only audit trail.
 
 ## Important

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -28,7 +29,7 @@ type packRenderResult struct {
 
 // renderPackInto renders a language pack into its canonical subdirectory
 // (packs/languages/<lang>/) inside targetDir, handles the rule.md control
-// file (→ .claude/rules/<lang>.md), and writes baselines so the upgrade
+// file (→ .claude/rules/ralph/<lang>.md), and writes baselines so the upgrade
 // engine can diff pack files later.
 //
 // The returned packRenderResult contains all namespaced hashes and baseline
@@ -74,7 +75,7 @@ func renderPackInto(targetDir, lang string, force bool) (*packRenderResult, erro
 		out.baselinePaths[k] = v
 	}
 
-	// Handle the rule.md control file: it renders to .claude/rules/<lang>.md
+	// Handle the rule.md control file: it renders to .claude/rules/ralph/<lang>.md
 	// instead of packs/languages/<lang>/rule.md.
 	ruleContent, ok, err := packRuleContent(packFS)
 	if err != nil {
@@ -110,8 +111,14 @@ func packRelDir(pack string) string {
 	return filepath.Join("packs", "languages", pack)
 }
 
+// packRuleRelPath returns the manifest key / render path for a pack's
+// rule.md control file. It uses path.Join, not filepath.Join, because the
+// result feeds manifest keys — which init.go's ownerForScaffoldPath docs as
+// "always fs.FS slash paths" — not a raw OS filesystem call; filepath.Join
+// would emit "\"-separated keys on Windows and silently diverge from
+// ralph init's slash-keyed manifest entries for the same logical path.
 func packRuleRelPath(pack string) string {
-	return filepath.Join(".claude", "rules", pack+".md")
+	return path.Join(".claude", "rules", "ralph", pack+".md")
 }
 
 func packRuleContent(src fs.FS) ([]byte, bool, error) {
@@ -141,7 +148,15 @@ func renderMappedFile(targetDir, relPath string, content []byte, overwrite bool)
 		return nil, "", fmt.Errorf("template path %q escapes target directory", relPath)
 	}
 
-	if _, statErr := os.Stat(target); statErr == nil {
+	// Lstat (not Stat) is used deliberately, mirroring scaffold.RenderFS: Stat
+	// follows symlinks, so a *dangling* symlink at relPath would stat as
+	// absent, get classified as a create below, and os.WriteFile would then
+	// write straight through the link to wherever it resolves -- outside
+	// targetDir, defeating the boundary check above. Lstat inspects the
+	// directory entry itself, so any existing entry (regular file, valid
+	// symlink, or dangling symlink) counts as "exists" and is skipped here in
+	// non-force mode.
+	if _, statErr := os.Lstat(target); statErr == nil {
 		if !overwrite {
 			result.Skipped = append(result.Skipped, relPath)
 			return result, hash, nil

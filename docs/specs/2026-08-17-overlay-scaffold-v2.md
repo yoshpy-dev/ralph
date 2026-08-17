@@ -56,7 +56,7 @@ ralph の配布物を所有権ベースの 5 層オーバーレイ構造に再�
 - [ ] FR-2 `ralph eject <path>`: core ファイルを fork(ユーザ所有)へ移す。manifest に fork 記録(`forked_from_version` を含む)を書き、以後の upgrade は当該パスを置換せず、新 core との diff を advisory としてレポートする
 - [ ] FR-3 `ralph adopt <path>|--all`: fork を core 所有へ戻す(ディスクを現行テンプレート内容で置換し fork 記録を削除)。現行 `--force` フラグは廃止し、これが唯一の再採用経路となる
 - [ ] FR-4 予期しない core 改変(fork 記録なしのハッシュ不一致)の扱い: upgrade は当該ファイルを**上書きせず**「未解決 drift」としてレポートに記録し、exit code で警告する。`eject`(改変維持)または `adopt`(改変破棄)で解消するまで、当該パスは据え置き
-- [ ] FR-5 managed block 仕様: 一意マーカー(`<!-- BEGIN RALPH MANAGED (ralph:<surface>) -->` / `<!-- END RALPH MANAGED -->`)、1 ファイル 1 ブロック。マーカー欠落時はファイル末尾に追記して報告。マーカー破損(片側欠落・重複)時は当該ファイルを据え置き、doctor が fail
+- [ ] FR-5 managed block 仕様: 一意マーカー(`<!-- BEGIN RALPH MANAGED (ralph:<surface>) -->` / `<!-- END RALPH MANAGED -->`)、1 ファイル 1 ブロック。マーカー欠落時はファイル末尾に追記して報告。マーカー破損(片側欠落・重複)時は当該ファイルを据え置き、doctor が fail。HTML コメントを許容しないファイル種別(`.gitignore` 等)では、同じ surface キーを保ったまま行コメント形式のマーカー(`# BEGIN RALPH MANAGED (ralph:<surface>)` / `# END RALPH MANAGED`)を用いる
 - [ ] FR-6 旧レイアウト移行: `ralph upgrade` が旧レイアウト(manifest v1/v2、`meta.layout` なし)を検出したら、移行計画(パスごとの分類: 置換 / 移設 / fork 保全 / 削除)をプレビュー表示し、明示確認後に実行する。git 作業ツリーがクリーンであることを前提条件とし、汚れていれば中断する。移行結果は `docs/reports/ralph-migration-<date>.md` に出力する
 - [ ] FR-7 移行時の分類規則: 旧 manifest のハッシュ判定で未改変と分かったファイルは新レイアウトへ置換・移設(旧パスが廃止された場合は削除)。改変済みファイルは自動 fork 保全(対話なし)し、新 core との diff をレポートへ。unmanaged(旧 skip 記録)ファイルは fork として引き継ぐ
 - [ ] FR-8 移行時の CLAUDE.md / AGENTS.md: CLAUDE.md が旧テンプレート未改変なら最小シードへ置換、改変済みなら一切触らない(ralph ガイダンスは `.claude/rules/ralph/` から供給されるため、どちらでも機能は成立)。AGENTS.md は旧テンプレート由来の未改変内容を managed block に置換し、ユーザ追記は block 外に保全する

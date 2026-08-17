@@ -2,17 +2,22 @@
 
 ## Core files
 
-- `AGENTS.md`: vendor-neutral map
-- `CLAUDE.md`: Claude-specific always-on additions
+- `AGENTS.md`: vendor-neutral map; user-owned skeleton + a managed block whose content is sourced from `.ralph/core/AGENTS.core.md`
+- `CLAUDE.md`: minimal seed (imports `AGENTS.md`); ralph's always-on guidance auto-loads as a project rule from `.claude/rules/ralph/ralph-workflow.md`
 - `README.md`: human entry point
 
 ## Claude control plane
 
-- `.claude/rules/`: path-scoped or topic-scoped guidance (read by both agents)
+- `.claude/rules/ralph/`: shipped ralph guidance, path-scoped or topic-scoped (read by both agents); language pack rules also render here as `<lang>.md`
 - `.claude/skills/`: Claude-side skill bodies (mirrored to `.agents/skills/`)
 - `.claude/agents/`: Claude Code subagent definitions
-- `.claude/hooks/`: deterministic hook scripts
+- `.claude/hooks/`: hook implementations plus `<event>.d/` dispatch entries; `.claude/settings.json` points every event at the single `ralph-dispatch.sh <event>` entry point, which fans out in order through `.claude/hooks/<event>.d/` (core) → `.ralph/local/hooks/<event>.d/` (downstream local, committed) → `.claude/hooks/local/<event>.d/` (downstream local, gitignored)
 - `.claude/settings.json`: hook and permission configuration
+
+## Overlay layout (`.ralph/`)
+
+- `.ralph/core/`: generation sources `ralph init` consumes (e.g. `AGENTS.core.md`, the managed-block content for `AGENTS.md`)
+- `.ralph/local/`: downstream extension points (`hooks/<event>.d/`, `verify.d/`, `test.d/`) that the hooks dispatcher and `scripts/run-verify.sh` execute after core processing (`hooks/<event>.d/` wiring is Claude Code today; Codex's `.codex/config.toml` still calls hook scripts directly — Phase 3 tech debt)
 
 ## Codex control plane
 

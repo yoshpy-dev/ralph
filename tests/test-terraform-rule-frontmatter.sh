@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 # test-terraform-rule-frontmatter.sh —
-# pins the .claude/rules/terraform.md frontmatter contract.
+# pins the .claude/rules/ralph/terraform.md frontmatter contract.
 #
 # The plan's acceptance criterion requires the `paths:` array to scope
 # **/*.tf, **/*.tofu, **/*.tftest.hcl, and **/.terraform.lock.hcl. The
@@ -15,7 +15,7 @@ set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-RULE="$PROJECT_ROOT/.claude/rules/terraform.md"
+RULE="$PROJECT_ROOT/.claude/rules/ralph/terraform.md"
 PACK_RULE="$PROJECT_ROOT/packs/languages/terraform/rule.md"
 TEMPLATE_PACK_RULE="$PROJECT_ROOT/templates/packs/terraform/rule.md"
 
@@ -52,7 +52,7 @@ assert_grep() {
   fi
 }
 
-assert_file "rule file exists at .claude/rules/terraform.md" "$RULE"
+assert_file "rule file exists at .claude/rules/ralph/terraform.md" "$RULE"
 assert_file "pack rule exists at packs/languages/terraform/rule.md" "$PACK_RULE"
 assert_file "template pack rule exists at templates/packs/terraform/rule.md" "$TEMPLATE_PACK_RULE"
 

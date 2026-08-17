@@ -204,6 +204,25 @@ func (m *Manifest) SetFileFork(relPath, diskHash, forkedFromVersion string) {
 	}
 }
 
+// SetOwner mutates an existing manifest entry's Owner attribute in place.
+// Only core/seed/block are accepted here — a fork must be recorded via
+// SetFileFork, since a fork additionally needs ForkedFromVersion and
+// Managed=false semantics that SetOwner does not touch. All other fields on
+// the existing entry (Hash, Managed, State, TemplateHash, DiskHash,
+// BaselineStatus, BaselinePath) are left untouched.
+func (m *Manifest) SetOwner(relPath, owner string) error {
+	if err := validateManagedOwner(owner); err != nil {
+		return err
+	}
+	entry, ok := m.Files[relPath]
+	if !ok {
+		return fmt.Errorf("no manifest entry for %q", relPath)
+	}
+	entry.Owner = owner
+	m.Files[relPath] = entry
+	return nil
+}
+
 func validateManagedOwner(owner string) error {
 	switch owner {
 	case OwnerCore, OwnerSeed, OwnerBlock:

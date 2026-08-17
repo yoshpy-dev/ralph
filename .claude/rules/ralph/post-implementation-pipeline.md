@@ -57,15 +57,14 @@ Controlled by `RALPH_STANDARD_MAX_PIPELINE_CYCLES` (default `2`). The counter is
 
 Raise the cap only when you consciously accept additional churn; the default is a deliberate "fail fast, hand back to the operator" stance.
 
-See `.claude/rules/subagent-policy.md` for execution model details.
+See `.claude/rules/ralph/subagent-policy.md` for execution model details.
 
 ## Where this order is referenced
 
 If you update this order, update all of these locations:
 - `.claude/skills/work/SKILL.md` (Step 13)
 - `.claude/skills/cross-review/SKILL.md` (Case A and Case B re-run)
-- `.claude/rules/subagent-policy.md` (Post-implementation pipeline table)
-- `CLAUDE.md` (Default behavior)
+- `.claude/rules/ralph/subagent-policy.md` (Post-implementation pipeline table)
 - `docs/quality/definition-of-done.md` (Pipeline order)
 - `README.md` (Quick start and Operating loop sections)
 - `AGENTS.md` (Primary loop section)

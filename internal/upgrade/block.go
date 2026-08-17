@@ -33,38 +33,93 @@ type BlockResult struct {
 	Reason string
 }
 
-// EndMarker is the exact line that closes a ralph managed block.
-const EndMarker = "<!-- END RALPH MANAGED -->"
+// BlockMarkerStyle selects the comment syntax used for a managed block's
+// BEGIN/END marker lines. Different file types require different comment
+// styles: Markdown-ish files support HTML comments, but files like
+// .gitignore only support "#" line comments.
+type BlockMarkerStyle int
 
 const (
-	beginMarkerPrefix = "<!-- BEGIN RALPH MANAGED (ralph:"
-	beginMarkerSuffix = ") -->"
+	// BlockMarkerHTML is the original marker style:
+	// "<!-- BEGIN RALPH MANAGED (ralph:<surface>) -->" /
+	// "<!-- END RALPH MANAGED -->".
+	BlockMarkerHTML BlockMarkerStyle = iota
+	// BlockMarkerHash is the "#"-comment marker style, for files that do not
+	// support HTML comments (e.g. .gitignore):
+	// "# BEGIN RALPH MANAGED (ralph:<surface>)" / "# END RALPH MANAGED".
+	BlockMarkerHash
 )
 
+const (
+	beginMarkerHTMLPrefix = "<!-- BEGIN RALPH MANAGED (ralph:"
+	beginMarkerHTMLSuffix = ") -->"
+	endMarkerHTML         = "<!-- END RALPH MANAGED -->"
+
+	beginMarkerHashPrefix = "# BEGIN RALPH MANAGED (ralph:"
+	beginMarkerHashSuffix = ")"
+	endMarkerHash         = "# END RALPH MANAGED"
+)
+
+// EndMarker is the exact line that closes a ralph managed block in the
+// default (HTML-comment) style.
+const EndMarker = endMarkerHTML
+
+// markerAffixes returns the BEGIN-marker prefix/suffix and the exact END
+// marker line for the given style.
+func markerAffixes(style BlockMarkerStyle) (prefix, suffix, end string) {
+	if style == BlockMarkerHash {
+		return beginMarkerHashPrefix, beginMarkerHashSuffix, endMarkerHash
+	}
+	return beginMarkerHTMLPrefix, beginMarkerHTMLSuffix, endMarkerHTML
+}
+
+// BeginMarkerStyled returns the exact BEGIN marker line for a given surface
+// token (e.g. "agents-md", "gitignore") in the requested marker style.
+func BeginMarkerStyled(surface string, style BlockMarkerStyle) string {
+	prefix, suffix, _ := markerAffixes(style)
+	return prefix + surface + suffix
+}
+
+// EndMarkerStyled returns the exact END marker line for the requested
+// marker style.
+func EndMarkerStyled(style BlockMarkerStyle) string {
+	_, _, end := markerAffixes(style)
+	return end
+}
+
 // BeginMarker returns the exact BEGIN marker line for a given surface token
-// (e.g. "agents-md", "gitignore").
+// (e.g. "agents-md", "gitignore") in the default HTML-comment style.
 func BeginMarker(surface string) string {
-	return beginMarkerPrefix + surface + beginMarkerSuffix
+	return BeginMarkerStyled(surface, BlockMarkerHTML)
 }
 
 // UpdateManagedBlock updates the ralph-owned block delimited by BeginMarker /
-// EndMarker inside current, replacing only the interior with managed.
+// EndMarker inside current, replacing only the interior with managed. It is
+// the HTML-comment-style equivalent of UpdateManagedBlockStyled.
 //
 // It is pure bytes-in/bytes-out: it never touches the filesystem. Every byte
 // outside the marker pair — including the markers themselves — is preserved
 // exactly. Callers own file I/O and must not write Content when Outcome is
 // BlockMalformed.
 func UpdateManagedBlock(current []byte, surface string, managed []byte) BlockResult {
+	return UpdateManagedBlockStyled(current, surface, managed, BlockMarkerHTML)
+}
+
+// UpdateManagedBlockStyled is UpdateManagedBlock parameterized by marker
+// style, so callers can target file types that cannot use HTML comments
+// (e.g. .gitignore uses BlockMarkerHash).
+func UpdateManagedBlockStyled(current []byte, surface string, managed []byte, style BlockMarkerStyle) BlockResult {
+	endMarker := EndMarkerStyled(style)
 	lines := splitRawLines(current)
 
 	var beginIdxs, endIdxs []int
 	var beginSurfaces []string
 	for i, l := range lines {
-		if s, ok := isRalphBeginMarker(l.text); ok {
+		if s, ok := isRalphBeginMarkerStyled(l.text, style); ok {
 			beginIdxs = append(beginIdxs, i)
 			beginSurfaces = append(beginSurfaces, s)
 		}
-		if l.text == EndMarker {
+		if l.text == endMarker {
 			endIdxs = append(endIdxs, i)
 		}
 	}
@@ -78,7 +133,7 @@ func UpdateManagedBlock(current []byte, surface string, managed []byte) BlockRes
 	interior := managedInteriorLines(managed, dominantTerm)
 
 	if len(beginIdxs) == 0 && len(endIdxs) == 0 {
-		newLines := appendBlockLines(lines, surface, interior, dominantTerm)
+		newLines := appendBlockLinesStyled(lines, surface, interior, dominantTerm, style)
 		content := joinRawLines(newLines)
 		return BlockResult{Outcome: BlockAppended, Content: content}
 	}
@@ -121,13 +176,15 @@ func classifyMarkers(beginIdxs, endIdxs []int, beginSurfaces []string, wantSurfa
 	}
 }
 
-// isRalphBeginMarker reports whether line is a well-formed ralph BEGIN
-// marker for any surface, returning the surface token it names.
-func isRalphBeginMarker(line string) (surface string, ok bool) {
-	if !strings.HasPrefix(line, beginMarkerPrefix) || !strings.HasSuffix(line, beginMarkerSuffix) {
+// isRalphBeginMarkerStyled reports whether line is a well-formed ralph
+// BEGIN marker for any surface in the given style, returning the surface
+// token it names.
+func isRalphBeginMarkerStyled(line string, style BlockMarkerStyle) (surface string, ok bool) {
+	prefix, suffix, _ := markerAffixes(style)
+	if !strings.HasPrefix(line, prefix) || !strings.HasSuffix(line, suffix) {
 		return "", false
 	}
-	surface = strings.TrimSuffix(strings.TrimPrefix(line, beginMarkerPrefix), beginMarkerSuffix)
+	surface = strings.TrimSuffix(strings.TrimPrefix(line, prefix), suffix)
 	if surface == "" {
 		return "", false
 	}
@@ -215,10 +272,11 @@ func managedInteriorLines(managed []byte, term string) []rawLine {
 	return lines
 }
 
-// appendBlockLines returns current plus a newly appended managed block,
-// separated from existing content by exactly one blank line (unless current
-// is empty, or already ends with a blank line).
-func appendBlockLines(current []rawLine, surface string, interior []rawLine, term string) []rawLine {
+// appendBlockLinesStyled returns current plus a newly appended managed
+// block in the given marker style, separated from existing content by
+// exactly one blank line (unless current is empty, or already ends with a
+// blank line).
+func appendBlockLinesStyled(current []rawLine, surface string, interior []rawLine, term string, style BlockMarkerStyle) []rawLine {
 	lines := make([]rawLine, len(current))
 	copy(lines, current)
 
@@ -232,8 +290,8 @@ func appendBlockLines(current []rawLine, surface string, interior []rawLine, ter
 		}
 	}
 
-	lines = append(lines, rawLine{text: BeginMarker(surface), term: term})
+	lines = append(lines, rawLine{text: BeginMarkerStyled(surface, style), term: term})
 	lines = append(lines, interior...)
-	lines = append(lines, rawLine{text: EndMarker, term: term})
+	lines = append(lines, rawLine{text: EndMarkerStyled(style), term: term})
 	return lines
 }

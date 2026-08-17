@@ -175,6 +175,17 @@ func runUpgradeIOWithOptions(targetDir string, opts upgradeOptions, in io.Reader
 		return fmt.Errorf("reading manifest: %w", err)
 	}
 
+	// Fail-closed guard: the legacy upgrade engine (v1 diff/conflict flow)
+	// must never run against a project already scaffolded with the overlay
+	// (v2) layout. It has no notion of the v3 ownership attributes (core/
+	// seed/block) and would happily overwrite seed/block surfaces wholesale
+	// under --force. The non-interactive v2 upgrade path lands in a later
+	// ralph release (Phase 3). This check runs before any diff computation
+	// or write, and applies identically to --force and --dry-run.
+	if oldManifest.Meta.Layout == scaffold.LayoutV2 {
+		return fmt.Errorf("this project uses the overlay (v2) scaffold layout; the legacy 'ralph upgrade' engine cannot operate on it — a non-interactive v2 upgrade path is planned for a later ralph release (Phase 3)")
+	}
+
 	writef(out, "Checking for updates...\n")
 	writef(out, "  Current: %s → Available: %s\n\n", oldManifest.Meta.Version, Version)
 

@@ -52,7 +52,7 @@ func newPackListCmd() *cobra.Command {
 
 // addPack adds a language pack to an existing project rooted at targetDir.
 // Pack payload files are written to packs/languages/<lang>/ and the rule.md
-// control file is mapped to .claude/rules/<lang>.md (matching init.go's layout).
+// control file is mapped to .claude/rules/ralph/<lang>.md (matching init.go's layout).
 // The shared renderPackInto helper (language_pack.go) is used here so this
 // path cannot diverge from ralph init's pack rendering.
 func addPack(targetDir string, lang string) error {
@@ -79,6 +79,25 @@ func addPack(targetDir string, lang string) error {
 				manifest.SetFileWithBaseline(path, hash, baselinePath)
 			} else {
 				manifest.SetFile(path, hash)
+			}
+		}
+		// v2-layout manifests track ownership per entry; classification is
+		// shared with ralph init via ownerForScaffoldPath (init.go) rather
+		// than mirrored, so the two entry points cannot diverge on a future
+		// pack payload path (e.g. under docs/ or .ralph/local/). Legacy
+		// (pre-v2) manifests have no ownership model, so entries stay
+		// ownerless as before.
+		if manifest.Meta.Layout == scaffold.LayoutV2 {
+			for path := range pr.hashes {
+				if err := manifest.SetOwner(path, ownerForScaffoldPath(path)); err != nil {
+					// SetOwner only fails for an invalid owner (impossible —
+					// ownerForScaffoldPath always returns a valid constant)
+					// or a manifest entry missing for path (impossible here
+					// — the loop just called SetFile/SetFileWithBaseline for
+					// every key in pr.hashes). Kept as a defensive guard,
+					// matching the surrounding ReadManifest/Write style.
+					fmt.Printf("⚠ Could not set owner for %s: %v\n", path, err)
+				}
 			}
 		}
 		// Record the pack in Meta.Packs if not already present.
