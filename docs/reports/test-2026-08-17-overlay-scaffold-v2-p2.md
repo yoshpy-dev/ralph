@@ -303,3 +303,91 @@ packages reconfirmed stable: `internal/config` 94.2%, `internal/insights`
 - Blocked: none
 - This is the final pipeline cycle for overlay-scaffold-v2 Phase 2 (cap
   raised 2 → 3); ready for `/pr`
+
+## Cycle 4 (2026-08-17, final — re-run after post-cycle-3 dispatcher child-kill fix)
+
+- Delta since cycle 3 (`bb22a24..34120b3`): `28842a0` (dispatcher now kills
+  the in-flight hook script's child process on INT/TERM/HUP instead of only
+  killing itself and leaving the child to finish detached — a background
+  `"$script" ... & child=$!; wait "$child"` plus a `kill_child` helper
+  invoked before `cleanup` in each fatal-signal trap; `renderMappedFile`
+  switched `os.Stat` → `os.Lstat` before the exists-check so a *dangling*
+  symlink at a pack rule's target path is skipped rather than followed and
+  written through — mirrors the `scaffold.RenderFS` fix from cycle 3, closing
+  the same containment gap at the `internal/cli/language_pack.go` mapped-file
+  path; one new Go test,
+  `TestRenderMappedFile_DanglingSymlink_NonForce_SkippedNotFollowed`; Case I
+  in `tests/test-ralph-dispatch.sh` extended with three new assertions —
+  prompt-interruption timing (`<=3s`, not deferred until the 5s hook script
+  finishes on its own), a `finished_marker` check proving the hook child was
+  actually killed rather than merely orphaned, and a defense-in-depth `pgrep`
+  check for no surviving process), plus five docs/bookkeeping-only commits
+  (`88ba334`, `1e03cd5`, `ef9e8e2`, `756aac8`, `c5771af`, `34120b3` — insight
+  event cycle-stamp correction, tech-debt row refresh, cycle-4 self-review
+  and verify report additions). No other production code changed.
+- Evidence: `docs/evidence/test-2026-08-17-overlay-scaffold-v2-p2-cycle4.log`
+  (full `RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh` output, this cycle;
+  copy of `docs/evidence/verify-2026-08-17-160754.log`, the raw run behind
+  this cycle's green result)
+
+### Verdict: PASS
+
+599/599 shell test cases across the same 25 files (up from 596 — the only
+count change is `tests/test-ralph-dispatch.sh` 23 → 26, the three new Case I
+assertions), 8/8 Go packages `ok` on a fresh `go test ./... -count=1 -cover`
+run (not cached), zero failures.
+
+### New tests confirmed passing at runtime
+
+| Test | Command | Result |
+| --- | --- | --- |
+| `TestRenderMappedFile_DanglingSymlink_NonForce_SkippedNotFollowed` (`internal/cli`) | `go test ./internal/cli/... -run 'TestRenderMappedFile_DanglingSymlink_NonForce_SkippedNotFollowed' -v -count=1` | PASS — asserts a dangling symlink at a pack rule's `.claude/rules/ralph/<lang>.md` target is left untouched (still a symlink, listed in `Skipped` not `Created`) and nothing is written at the external dangling-link target |
+| Extended `tests/test-ralph-dispatch.sh` Case I (prompt-interruption timing, `finished_marker` absence, `pgrep` no-survivor check) | `RALPH_VERIFY_SCOPE=full bash tests/test-ralph-dispatch.sh`, run 3x in isolation | PASS all 3 runs — SIGTERM interrupted the dispatcher in ~0s (well under the 3s bound), `finished_marker` absent every run (the hook child's 5s `sleep` never ran to completion), no `PreCompact.d/10-slow.sh` process survived per `pgrep` |
+
+### Test execution
+
+| Suite / Command | Tests | Passed | Failed | Skipped |
+| --- | --- | --- | --- | --- |
+| `RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh` — 25 shell files | 599 | 599 | 0 | 0 |
+| `go test ./... -count=1 -cover` — 8 packages with tests | 8 pkgs | 8 | 0 | 0 |
+
+### Coverage (fresh, non-cached, cycle 4)
+
+`internal/cli` 79.0% (up from 78.9% in cycle 3 — the new
+`TestRenderMappedFile_DanglingSymlink_NonForce_SkippedNotFollowed` test
+exercises the new `os.Lstat` branch in `renderMappedFile`),
+`internal/scaffold` 78.9% (unchanged), `internal/upgrade` 90.0% (unchanged).
+Other packages reconfirmed stable: `internal/config` 94.2%, `internal/insights`
+86.1%, `internal/org` 89.1%, `internal/org/driver` 92.0%,
+`internal/org/protocol` 97.9%.
+
+### Regression checks
+
+| Previously broken behavior | Status | Evidence |
+| --- | --- | --- |
+| Dispatcher deny-decision short-circuit, `additionalContext` aggregation, non-zero exit propagation (Cases A/B/D) | Still correct | 26/26 `test-ralph-dispatch.sh`, this cycle |
+| H3 `HARNESS_VERIFY_MODE` hermeticity fix (cycle 1) | Not re-broken | full-suite run (ambient `HARNESS_VERIFY_MODE=test` present) still shows H3 PASS |
+| Cycle-2 dispatcher `trap cleanup EXIT INT TERM HUP` widening, cycle-3 reworked Case I (SIGTERM → exit 143, no leaked temp files) | Not re-broken, and now covers the previously-unverified "child process is actually killed" gap | Extended Case I passes 3/3 isolated runs this cycle; cycle-3's version only proved the dispatcher process itself died, not that the hook script running underneath it was also terminated |
+| `scaffold.RenderFS` dangling-symlink guard (cycle 3, `TestRenderFS_DanglingSymlink_NonForce_SkippedNotFollowed`) | Not re-broken | Part of the fresh `go test ./internal/scaffold/...` full-package run above, still PASS |
+| `addPack` owner assignment (cycle 2), doctor hook-arg parsing + scaffold symlink guards (cycle 3) | Not re-broken | Part of the fresh `go test ./internal/cli/...` full-package run above, still PASS |
+
+### Test gaps (unchanged from cycle 3)
+
+- `scripts/check-sync.sh`'s block-aware `AGENTS.md` `DRIFTED` code path
+  still has no isolated fixture test (only the happy path is exercised
+  against the real repo tree). Unchanged from cycle 1/2/3.
+- `runInitNonInteractive` (`internal/cli/init.go:107`) remains 0% covered;
+  pre-existing gap, not introduced by this plan or this cycle's changes.
+- The tech-debt row from cycle 3 (insight-event `cycle` mis-stamping) was
+  corrected in this cycle's delta (`88ba334`); no longer an open gap.
+
+### Cycle 4 verdict
+
+- Pass: yes — 599/599 shell cases, 8/8 Go packages, both new/changed tests
+  (the Go dangling-symlink test and the three extended Case I assertions)
+  individually re-confirmed at runtime, extended Case I stable across 3
+  isolated flake-check runs
+- Fail: none outstanding
+- Blocked: none
+- This is pipeline cycle 4/4 (cap raised 2 → 3 → 4) for overlay-scaffold-v2
+  Phase 2; ready for `/pr`

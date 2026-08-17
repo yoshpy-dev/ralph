@@ -83,17 +83,17 @@
 
 ## Acceptance criteria
 
-- [ ] AC-1 新規ディレクトリでの `ralph init` が v2 レイアウトを生成する: `.claude/rules/ralph/`、dispatcher 化 settings.json、`.claude/hooks/<event>.d/`、`.ralph/core/AGENTS.core.md`、`.ralph/local/` 骨格、最小 CLAUDE.md、managed block 付き AGENTS.md・.gitignore
-- [ ] AC-2 生成された manifest が v3 である: `meta.layout = "v2"`、全エントリに owner(AGENTS.md/.gitignore = block、CLAUDE.md/ralph.toml/docs/workflows = seed、他 = core)
-- [ ] AC-3 既存 CLAUDE.md/AGENTS.md/.gitignore があるディレクトリへの init: CLAUDE.md は不変(seed-once)、AGENTS.md/.gitignore は block のみ追記され block 外バイトが保全される
-- [ ] AC-4 dispatcher: イベント発火で core `.d` → `.ralph/local` → `.claude/hooks/local` の順に実行され、stdin が各スクリプトへ渡り、非ゼロ exit が伝播する。**JSON マージ意味論**が実ペイロードでテストされる: PreToolUse の `permissionDecision`(deny が単一の有効 JSON として保たれる)、PostToolUse の `additionalContext` 集約、UserPromptSubmit / SessionStart の context 出力 — いずれも出力が単一の有効な hook 応答であること
-- [ ] AC-5 `run-verify.sh` / `run-test.sh` が `.ralph/local/verify.d|test.d` の drop-in を core 処理後に実行する(fixture テスト)
-- [ ] AC-6 言語パック: pack rule が `.claude/rules/ralph/<lang>.md` に描画され、manifest で owner=core として追跡される。`check-sync.sh` の pack_rule_source が新パスで機能する
-- [ ] AC-7 root 同時移行後、block-aware 化した `./scripts/check-sync.sh` が KNOWN_DIFFS から `AGENTS.md` を外した状態で DRIFTED=0 になる(AGENTS.md は managed block 内容 = `.ralph/core/AGENTS.core.md` の一致で判定)
-- [ ] AC-8 メタリポジトリのハーネスが v2 で動作する: `./scripts/run-verify.sh` exit 0(drop-in 拡張点含む)+ **設定済みの全 Claude / Codex hook コマンドが実行可能である**ことのスモークテスト(移設後のパス欠損検出)
-- [ ] AC-9 既存テストスイート(shell + Go)が全パスし、`ralph upgrade` の挙動配線変更が「pack rule パス定数の追従 + v2 fail-closed ガード」に限られる
-- [ ] AC-10 旧 upgrade ガード: `meta.layout = "v2"` の manifest に対して `ralph upgrade`(旧エンジン)が書き込みゼロで fail-closed し、Phase 3 を案内するエラーを返す(テストで保証)
-- [ ] AC-11 メタリポジトリ固有内容(Repo map の internal/ 記述等)が `templates/base/AGENTS.md` に混入していない(block 外領域の分離をテスト or grep ゲートで確認)
+- [x] AC-1 新規ディレクトリでの `ralph init` が v2 レイアウトを生成する: `.claude/rules/ralph/`、dispatcher 化 settings.json、`.claude/hooks/<event>.d/`、`.ralph/core/AGENTS.core.md`、`.ralph/local/` 骨格、最小 CLAUDE.md、managed block 付き AGENTS.md・.gitignore
+- [x] AC-2 生成された manifest が v3 である: `meta.layout = "v2"`、全エントリに owner(AGENTS.md/.gitignore = block、CLAUDE.md/ralph.toml/docs/workflows = seed、他 = core)
+- [x] AC-3 既存 CLAUDE.md/AGENTS.md/.gitignore があるディレクトリへの init: CLAUDE.md は不変(seed-once)、AGENTS.md/.gitignore は block のみ追記され block 外バイトが保全される
+- [x] AC-4 dispatcher: イベント発火で core `.d` → `.ralph/local` → `.claude/hooks/local` の順に実行され、stdin が各スクリプトへ渡り、非ゼロ exit が伝播する。**JSON マージ意味論**が実ペイロードでテストされる: PreToolUse の `permissionDecision`(deny が単一の有効 JSON として保たれる)、PostToolUse の `additionalContext` 集約、UserPromptSubmit / SessionStart の context 出力 — いずれも出力が単一の有効な hook 応答であること
+- [x] AC-5 `run-verify.sh` / `run-test.sh` が `.ralph/local/verify.d|test.d` の drop-in を core 処理後に実行する(fixture テスト)
+- [x] AC-6 言語パック: pack rule が `.claude/rules/ralph/<lang>.md` に描画され、manifest で owner=core として追跡される。`check-sync.sh` の pack_rule_source が新パスで機能する
+- [x] AC-7 root 同時移行後、block-aware 化した `./scripts/check-sync.sh` が KNOWN_DIFFS から `AGENTS.md` を外した状態で DRIFTED=0 になる(AGENTS.md は managed block 内容 = `.ralph/core/AGENTS.core.md` の一致で判定)
+- [x] AC-8 メタリポジトリのハーネスが v2 で動作する: `./scripts/run-verify.sh` exit 0(drop-in 拡張点含む)+ **設定済みの全 Claude / Codex hook コマンドが実行可能である**ことのスモークテスト(移設後のパス欠損検出)
+- [x] AC-9 既存テストスイート(shell + Go)が全パスし、`ralph upgrade` の挙動配線変更が「pack rule パス定数の追従 + v2 fail-closed ガード」に限られる
+- [x] AC-10 旧 upgrade ガード: `meta.layout = "v2"` の manifest に対して `ralph upgrade`(旧エンジン)が書き込みゼロで fail-closed し、Phase 3 を案内するエラーを返す(テストで保証)
+- [x] AC-11 メタリポジトリ固有内容(Repo map の internal/ 記述等)が `templates/base/AGENTS.md` に混入していない(block 外領域の分離をテスト or grep ゲートで確認)
 
 ## Implementation outline
 
