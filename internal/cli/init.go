@@ -358,9 +358,9 @@ func reconcileBlockSurfaces(targetDir string, baseFS fs.FS, skipped []string, w 
 				return nil, fmt.Errorf("writing %s: %w", bs.path, err)
 			}
 			diskHashes[bs.path] = scaffold.HashBytes(result.Content)
-			fmt.Fprintf(w, "  ✓ %s (appended ralph managed block)\n", bs.path)
+			writef(w, "  ✓ %s (appended ralph managed block)\n", bs.path)
 		case upgrade.BlockMalformed:
-			fmt.Fprintf(w, "  ⚠ %s: existing ralph managed block is malformed (%s); left untouched\n", bs.path, result.Reason)
+			writef(w, "  ⚠ %s: existing ralph managed block is malformed (%s); left untouched\n", bs.path, result.Reason)
 		default:
 			// BlockUpdated / BlockUnchanged: a well-formed block already
 			// exists on disk. Init only appends when a block is absent.
