@@ -154,6 +154,29 @@ scope_file=".harness/state/verify-scope"
     fi
   done
 
+  # .ralph/local/ drop-in extension points, run after core verification.
+  # HARNESS_VERIFY_MODE selects which local dir(s) apply: static ->
+  # verify.d, test -> test.d, all (the run-verify.sh default) -> both.
+  case "$HARNESS_VERIFY_MODE" in
+    static) local_drop_in_dirs=".ralph/local/verify.d" ;;
+    test) local_drop_in_dirs=".ralph/local/test.d" ;;
+    *) local_drop_in_dirs=".ralph/local/verify.d .ralph/local/test.d" ;;
+  esac
+
+  for local_drop_in_dir in $local_drop_in_dirs; do
+    if [ -d "$local_drop_in_dir" ]; then
+      for local_drop_in in "$local_drop_in_dir"/*.sh; do
+        [ -e "$local_drop_in" ] || continue
+        [ -x "$local_drop_in" ] || continue
+        echo "==> Running local drop-in: $local_drop_in"
+        ran_any=1
+        if ! "$local_drop_in"; then
+          status=1
+        fi
+      done
+    fi
+  done
+
   changed_files=""
   if command -v git >/dev/null 2>&1; then
     changed_files="$( (git diff --name-only 2>/dev/null; git diff --name-only --cached 2>/dev/null) | sort -u )"
