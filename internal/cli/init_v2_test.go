@@ -48,6 +48,7 @@ func setupTestEmbedFSV2(t *testing.T) {
 		"templates/base/.claude/skills/work/SKILL.md":       {Data: []byte("---\nname: work\ndescription: work\n---\nbody\n")},
 		"templates/base/.claude/settings.json":              {Data: []byte("{}\n")},
 		"templates/base/scripts/run-verify.sh":              {Data: []byte("#!/bin/sh\necho ok\n")},
+		"templates/base/.ralph/local/verify.d/.gitkeep":     {Data: []byte("")},
 	}
 }
 
@@ -81,6 +82,7 @@ func TestExecuteInit_V2_FreshInit_LayoutAndOwners(t *testing.T) {
 		filepath.Join(".github", "workflows", "verify.yml"):       scaffold.OwnerSeed,
 		filepath.Join(".claude", "skills", "work", "SKILL.md"):    scaffold.OwnerCore,
 		filepath.Join("scripts", "run-verify.sh"):                 scaffold.OwnerCore,
+		filepath.Join(".ralph", "local", "verify.d", ".gitkeep"):  scaffold.OwnerSeed,
 	}
 	for path, wantOwner := range wantOwners {
 		entry, ok := m.Files[path]

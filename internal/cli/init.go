@@ -281,6 +281,13 @@ func executeInit(targetDir string, cfg initConfig, force bool) error {
 // as the key of the hashes map built during rendering). See docs/specs
 // 2026-08-17-overlay-scaffold-v2.md, section "層モデル".
 //
+// .ralph/local/** is classified as seed, not core, even though the
+// catch-all below would otherwise mark it core: per the spec's layer model
+// it is the L3 overlay, a user drop-in area that is 不可侵 (create-once,
+// then advisory-only) once it exists. Filing it under core would let the
+// Phase 3 replace planner treat it as a full-replace target and overwrite
+// user content living there.
+//
 // Manifest keys are always fs.FS slash paths (from fs.WalkDir in
 // render.go), regardless of host OS, so relPath is normalized with
 // filepath.ToSlash before comparison to keep classification slash-stable
@@ -294,6 +301,9 @@ func ownerForScaffoldPath(relPath string) string {
 		return scaffold.OwnerSeed
 	}
 	if strings.HasPrefix(relPath, "docs/") {
+		return scaffold.OwnerSeed
+	}
+	if strings.HasPrefix(relPath, ".ralph/local/") {
 		return scaffold.OwnerSeed
 	}
 	return scaffold.OwnerCore

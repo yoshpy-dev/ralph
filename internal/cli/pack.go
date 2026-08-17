@@ -81,6 +81,18 @@ func addPack(targetDir string, lang string) error {
 				manifest.SetFile(path, hash)
 			}
 		}
+		// v2-layout manifests track ownership per entry; pack payload files
+		// and the rule.md mapping are all core-owned (same classification
+		// ralph init gives every non-seed/non-block path — see
+		// ownerForScaffoldPath in init.go). Legacy (pre-v2) manifests have no
+		// ownership model, so entries stay ownerless as before.
+		if manifest.Meta.Layout == scaffold.LayoutV2 {
+			for path := range pr.hashes {
+				if err := manifest.SetOwner(path, scaffold.OwnerCore); err != nil {
+					fmt.Printf("⚠ Could not set owner for %s: %v\n", path, err)
+				}
+			}
+		}
 		// Record the pack in Meta.Packs if not already present.
 		alreadyListed := false
 		for _, p := range manifest.Meta.Packs {

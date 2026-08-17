@@ -2333,3 +2333,99 @@ func TestAddPack_UnknownLangErrors(t *testing.T) {
 		t.Fatal("addPack with unknown lang: expected error, got nil")
 	}
 }
+
+// TestAddPack_V2Manifest_AssignsOwnerCore verifies that on a v2-layout
+// project (Meta.Layout == scaffold.LayoutV2, the case executeInit always
+// produces), addPack assigns owner=core to every manifest entry it adds:
+// the pack payload files and the rule.md → .claude/rules/ralph/<lang>.md
+// mapping. Without this, the Phase 3 replace planner would treat pack-added
+// paths as legacy-skipped (ownerless) instead of core-managed.
+func TestAddPack_V2Manifest_AssignsOwnerCore(t *testing.T) {
+	setupTestEmbedFS(t)
+	Version = "0.1.0-test"
+
+	dir := t.TempDir()
+	cfg := initConfig{ProjectName: "test", Packs: nil}
+	if err := executeInit(dir, cfg, false); err != nil {
+		t.Fatalf("executeInit: %v", err)
+	}
+
+	m, err := scaffold.ReadManifest(filepath.Join(dir, ".ralph", "manifest.toml"))
+	if err != nil {
+		t.Fatalf("ReadManifest before addPack: %v", err)
+	}
+	if m.Meta.Layout != scaffold.LayoutV2 {
+		t.Fatalf("precondition failed: Meta.Layout = %q, want %q", m.Meta.Layout, scaffold.LayoutV2)
+	}
+
+	lang := "golang"
+	if err := addPack(dir, lang); err != nil {
+		t.Fatalf("addPack(%q): %v", lang, err)
+	}
+
+	m, err = scaffold.ReadManifest(filepath.Join(dir, ".ralph", "manifest.toml"))
+	if err != nil {
+		t.Fatalf("ReadManifest after addPack: %v", err)
+	}
+
+	packVerifyKey := filepath.Join("packs", "languages", lang, "verify.sh")
+	packReadmeKey := filepath.Join("packs", "languages", lang, "README.md")
+	ruleKey := filepath.Join(".claude", "rules", "ralph", lang+".md")
+	for _, key := range []string{packVerifyKey, packReadmeKey, ruleKey} {
+		entry, ok := m.Files[key]
+		if !ok {
+			t.Errorf("manifest missing entry for %s", key)
+			continue
+		}
+		if entry.Owner != scaffold.OwnerCore {
+			t.Errorf("owner[%s] = %q, want %q", key, entry.Owner, scaffold.OwnerCore)
+		}
+	}
+}
+
+// TestAddPack_LegacyManifest_StaysOwnerless verifies that on a legacy
+// (pre-v2) manifest — Meta.Layout unset — addPack does not write ownership
+// metadata: legacy manifests have no ownership model, so entries added by
+// addPack must stay ownerless, matching the entries already present from
+// before the v2 layout existed.
+func TestAddPack_LegacyManifest_StaysOwnerless(t *testing.T) {
+	setupTestEmbedFS(t)
+	Version = "0.1.0-test"
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".ralph"), 0755); err != nil {
+		t.Fatalf("MkdirAll .ralph: %v", err)
+	}
+	legacy := scaffold.NewManifest(Version)
+	legacy.SetFile("AGENTS.md", "sha256:legacy")
+	manifestPath := filepath.Join(dir, ".ralph", "manifest.toml")
+	if err := legacy.Write(manifestPath); err != nil {
+		t.Fatalf("writing legacy manifest: %v", err)
+	}
+
+	lang := "golang"
+	if err := addPack(dir, lang); err != nil {
+		t.Fatalf("addPack(%q): %v", lang, err)
+	}
+
+	m, err := scaffold.ReadManifest(manifestPath)
+	if err != nil {
+		t.Fatalf("ReadManifest after addPack: %v", err)
+	}
+	if m.Meta.Layout == scaffold.LayoutV2 {
+		t.Fatalf("precondition failed: addPack must not upgrade Meta.Layout to v2 on its own")
+	}
+
+	packVerifyKey := filepath.Join("packs", "languages", lang, "verify.sh")
+	ruleKey := filepath.Join(".claude", "rules", "ralph", lang+".md")
+	for _, key := range []string{packVerifyKey, ruleKey} {
+		entry, ok := m.Files[key]
+		if !ok {
+			t.Errorf("manifest missing entry for %s", key)
+			continue
+		}
+		if entry.Owner != "" {
+			t.Errorf("owner[%s] = %q, want empty (legacy manifest must stay ownerless)", key, entry.Owner)
+		}
+	}
+}
