@@ -405,3 +405,141 @@ backgrounded subshell's process image as documented; a shell that does not
 support that construct as expected would silently fall back to signaling
 the wrong process again, which only a real `sh` execution (not static
 `sh -n`/shellcheck) can catch.
+
+---
+
+## Cycle 4
+
+- Date: 2026-08-18
+- Scope: delta since this cycle-3 verify (`a7c857b..HEAD`, HEAD `1e03cd5`):
+  cycle-3 test + sync-docs artifacts (`bb22a24`, `c5771af`), cycle-3
+  cross-review triage (`756aac8`), cycle-3 cross-review ACTION_REQUIRED
+  fixes (`28842a0` — dispatcher child-kill on signal +
+  `renderMappedFile` Lstat guard, plus an insight-event correction bundled
+  in the same commit), a follow-up insight cycle-stamp fix (`88ba334`),
+  cycle-4 self-review (`ef9e8e2`), and a tech-debt row refresh (`1e03cd5`)
+- Pipeline cycle: 4/4 (final — this is the last cycle regardless of
+  outcome per the standing pipeline-cap convention for this series)
+
+### Verdict: PASS
+
+No new spec-compliance gaps and no new static-analysis failures. Both
+cycle-3 cross-review ACTION_REQUIRED fixes in `28842a0` match the triage
+contract exactly, and the cycle-4 self-review's single MEDIUM finding
+(C4-1, a tech-debt row asserting states this PR itself had already
+superseded) is fixed as recommended, with no code change required.
+
+### Cross-review ACTION_REQUIRED fix crosscheck (`28842a0`)
+
+| # | Triage contract | Delivered | Evidence |
+| --- | --- | --- | --- |
+| AR#1 | Dispatcher signal traps (TERM/INT/HUP) must propagate to the currently-running hook child, not just kill the dispatcher itself, so a signalled dispatcher does not leave an in-flight hook script running detached and free to keep mutating the repo | Yes | `.claude/hooks/ralph-dispatch.sh:72-101` (and the byte-identical `templates/base/` mirror): `child=""` tracked alongside the existing cleanup vars; the hook invocation backgrounds itself (`"$script" < "$stdin_buf" > "$out_tmp" & child=$!; wait "$child"; rc=$?; ... child=""`) instead of running as a foreground command; a new `kill_child()` sends `TERM` to `$child` and `wait`s it, called first in each of the three signal traps (`trap 'kill_child; cleanup; exit N' INT/TERM/HUP`) before the pre-existing `cleanup`. `rc`/first-failure semantics are preserved — the backgrounding only wraps the same `"$script" ... ; rc=$?` sequence in `wait`, it does not change what `rc` captures. `tests/test-ralph-dispatch.sh` Case I is extended (not replaced) with a `finished_marker` that only appears if the 5s hook script ran to completion (the assertion that actually falsifies an unfixed dispatcher, per the comment at its declaration — POSIX `sh` defers a trapped signal until the current foreground command returns, so an unfixed dispatcher's `wait` doesn't unblock until the child exits on its own, at which point a bare `pgrep` check would find nothing to fail on either way) plus a `<=3s` elapsed-time bound and a `pgrep`-based defense-in-depth check |
+| AR#2 | `renderMappedFile` (the pack-rule `.claude/rules/ralph/<lang>.md` write path) must apply the same `Lstat`-not-`Stat` guard C3-1 added to `scaffold.RenderFS`, closing the same dangling-symlink containment gap on the sibling write path the cycle-3 self-review named as still open | Yes | `internal/cli/language_pack.go:151` (`renderMappedFile`): `os.Stat(target)` replaced with `os.Lstat(target)`, with a doc comment explicitly citing `scaffold.RenderFS` as the pattern being mirrored and restating why `Stat` following a dangling symlink would defeat the `isInsideDir` boundary check above it. New regression test `internal/cli/cli_test.go` `TestRenderMappedFile_DanglingSymlink_NonForce_SkippedNotFollowed` (added in the same commit) asserts the rule path is `Skipped` not `Created`, the symlink itself survives untouched, and nothing is written at the external dangling target — the same three-part assertion shape as C3-1's own `RenderFS` regression test |
+
+Both fixes land exactly where the triage named them (`ralph-dispatch.sh` +
+its template mirror, `language_pack.go`), each with its own regression
+test, and neither widens scope beyond the two named files plus their test
+files. `diff .claude/hooks/ralph-dispatch.sh templates/base/.claude/hooks/ralph-dispatch.sh`
+is clean — mirror discipline held.
+
+`28842a0` also bundles the cycle-3 triage's WORTH_CONSIDERING #3 fix: the
+two cycle-2 events mis-stamped `cycle:1` (`verify` at `13:42:10Z`,
+`cross_review` at `14:02:20Z`) are corrected to `cycle:2`, and the missing
+cycle-2 `self_review` event (`13:38:47Z`) is inserted in timestamp order —
+confirmed by re-diffing `docs/insights/events/2026-08-17-overlay-scaffold-v2-p2.jsonl`
+at `28842a0` directly, not just trusting the self-review's own account.
+`88ba334` is a second, separate correction the first commit missed: the
+cycle-3 `cross_review` event itself (`15:05:50Z`) was still stamped
+`cycle:1`; `88ba334` corrects it to `cycle:3` (confirmed present at `:16`
+in the current file). Both corrections are consistent with the same
+underlying WORTH_CONSIDERING #3 intent (fix insight-event cadence data
+this PR generated, inside the same PR) even though `88ba334` landed as a
+follow-up rather than in the same commit.
+
+### Cycle-4 self-review finding crosscheck (`1e03cd5`)
+
+| # | Self-review finding | Fixed? | Evidence |
+| --- | --- | --- | --- |
+| C4-1 (MEDIUM) | The batched cycle-3 tech-debt row (written by `2b1a855`) asserted three things that were each true only at the moment it was written and false two commits later: (a) `docs/reports/cross-review-triage-overlay-scaffold-v2-p2.md`'s `internal/cli/init.go:373` pointer "lands on a closing brace" — that whole triage report was rewritten wholesale by `756aac8` and no longer references `init.go` at all; (b) the same report's header "still reads `Cycle: 2/2 (cap reached)`" — `756aac8`'s rewritten header reads `Cycle: 3/3`; (c) `internal/cli/cli_test.go:2416` names the misworded `Fatalf` — `28842a0` inserted 65 lines above that point, shifting the real `Fatalf` to `:2481` and leaving `:2416` pointing at an unrelated, correctly-worded `Fatalf` | Yes | `docs/tech-debt/README.md` (row diff in `1e03cd5`): clauses (a)/(b) replaced with a single strikethrough-annotated `(3) stale triage-report pointer/header~~ (RESOLVED 2026-08-18: 756aac8 rewrote the triage report; its header now reads Cycle: 3/3 and the decayed init.go:373 pointer no longer exists)`, consistent with how the same row already marks its other now-resolved clause (the mis-stamped insight events); the Impact cell's matching "stale triage pointer and header decay further" clause is removed; the Files cell drops `docs/reports/cross-review-triage-overlay-scaffold-v2-p2.md` and replaces the decaying `internal/cli/cli_test.go:2416` line-number pointer with the test name `internal/cli/cli_test.go` (`TestAddPack_LegacyManifest_StaysOwnerless`), which resolves to `:2456` today (confirmed via `grep -n`) and does not decay under future unrelated insertions to the same file the way a bare line number does |
+
+The row edit matches C4-1's recommendation exactly ("one row edit, no code
+change... replace `internal/cli/cli_test.go:2416` with the test name...
+so the pointer stops decaying"), using the row's own established
+strikethrough-plus-RESOLVED-annotation convention (already used for the
+`.gitignore` clause and the insight-event clause in the same row) rather
+than silently deleting the stale clauses — a reasonable, precedent-consistent
+choice, not a deviation.
+
+### Static analysis (re-run, HEAD `1e03cd5`)
+
+`RALPH_VERIFY_SCOPE=full ./scripts/run-static-verify.sh` from inside the
+worktree: exit 0. Covers shellcheck + `sh -n` across every hook and verify
+script (including the reworked `ralph-dispatch.sh` signal-trap/child-kill
+logic in both the root and `templates/base/` mirrors), `jq -e .` on both
+`settings.json` files, the three Codex hook guards, `check-sync.sh`
+(`DRIFTED: 0`, `KNOWN_DIFF: 3` — `.claude/rules/ralph/model-routing.md`,
+`.github/workflows/verify.yml`, `CLAUDE.md`; `AGENTS.md` still correctly
+absent, `PASS: all files in sync.`), `check-pipeline-sync.sh` (all 6
+references OK), `check-skill-sync.sh` (13 skills in lock-step), and the Go
+verifier (`gofmt: ok`, `go vet` silent, `golangci-lint` `0 issues.`;
+`staticcheck` present on `PATH`, silent on success — consistent with a
+clean pass, not a skip). No FAIL lines. Evidence:
+`docs/evidence/verify-2026-08-17-160407.log`. `git status --porcelain` is
+clean at `1e03cd5` (no uncommitted changes).
+
+### AC re-check (delta-relevant only)
+
+- **AC-4 / AC-8** (dispatcher event fan-out; hook-command executability):
+  the child-kill change only adds signal-path behavior (backgrounding the
+  hook script and killing it on TERM/INT/HUP) — the non-signalled
+  execution path (`"$script" < "$stdin_buf" > "$out_tmp" & child=$!; wait
+  "$child"; rc=$?`) still captures the same `rc` the prior foreground call
+  captured, and the existing non-signal test cases (a.–h.) are unchanged
+  by this delta, only Case I is extended. No regression to AC-4's
+  documented JSON-merge-semantics cases or AC-8's smoke-test claim.
+- **AC-6** (pack rule rendering to `.claude/rules/ralph/<lang>.md`,
+  tracked with owner=core): `renderMappedFile`'s `Lstat` swap only adds a
+  new `continue`-equivalent (`Skipped`) branch for symlink/dangling
+  targets; for the regular-file case AC-6 actually exercises,
+  `info.Mode().IsRegular()` (implicit in the existing `statErr == nil`
+  branch) is unchanged, so the happy path AC-6 tests is unaffected.
+- **AC-1/AC-2/AC-3/AC-5/AC-7/AC-9/AC-10/AC-11** are untouched by the
+  cycle-4 delta — no files in their evidence paths changed between
+  `2b1a855` and `HEAD` except where already covered above (dispatcher +
+  `language_pack.go`) or the tech-debt/insight doc-only commits, which
+  carry no code-behavior claim.
+- Plan AC checkboxes (`docs/plans/active/2026-08-17-overlay-scaffold-v2-p2.md:86-96`)
+  remain unticked — pre-existing doc-drift noted in every prior cycle
+  section above, unchanged by cycle 4.
+
+### What remains unverified (cycle 4 delta)
+
+- The two new Go regression tests
+  (`TestRenderMappedFile_DanglingSymlink_NonForce_SkippedNotFollowed`) and
+  the extended `tests/test-ralph-dispatch.sh` Case I (`finished_marker`,
+  the `<=3s` elapsed bound, and the `pgrep` defense-in-depth check) were
+  read and reasoned about, not executed — confirming they actually pass
+  (not just compile/parse), and confirming the child-kill fix actually
+  prevents the hook child from outliving the dispatcher on a live signal,
+  is `/test`'s scope for this cycle.
+- The "Accepted residue" items the cycle-4 self-review recorded (partial
+  process-group kill coverage — `kill_child` signals only the direct
+  child, not grandchildren spawned by the hook script itself; a possible
+  `set -e`/`child=""` assignment race on a signal landing mid-statement;
+  non-fixture-scoped `pgrep`/`pkill` patterns in Case I) are deliberate,
+  documented deferrals, not verified-safe by this pass — they were not
+  independently re-derived here, only cross-checked against the
+  self-review's own reasoning for internal consistency.
+- The third dispatcher layer's execution order
+  (`.claude/hooks/local/<event>.d/`) remains untested for ordering,
+  unchanged from cycles 1–3.
+
+### Minimal next check for highest confidence gain (cycle 4)
+
+Run `/test` (behavioral) against HEAD `1e03cd5` to confirm
+`TestRenderMappedFile_DanglingSymlink_NonForce_SkippedNotFollowed` and the
+extended Case I actually pass — in particular that `finished_marker`
+genuinely stays absent under a live `kill -TERM` against the real
+dispatcher (not just that the test's own logic is sound on paper), since
+that is the assertion this cycle's fix depends on to prove the child-kill
+behavior works, not merely that the dispatcher itself terminates.
