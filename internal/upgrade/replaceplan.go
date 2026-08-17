@@ -231,14 +231,13 @@ func classifyCore(
 		case !hasDisk:
 			*creates = append(*creates, FileOp{Kind: OpCreate, Path: path, Content: tmplContent, NewHash: templateHash})
 		default:
-			diskHash := scaffold.HashBytes(diskContent)
-			switch {
-			case diskHash == templateHash:
+			switch diskHash := scaffold.HashBytes(diskContent); diskHash {
+			case templateHash:
 				if recordedHash != templateHash {
 					plan.ManifestRefresh = append(plan.ManifestRefresh, ManifestRefreshEntry{Path: path, Hash: templateHash})
 				}
 				// else: fully settled, true no-op.
-			case diskHash == recordedHash:
+			case recordedHash:
 				*updates = append(*updates, FileOp{Kind: OpUpdate, Path: path, Content: tmplContent, NewHash: templateHash})
 			default:
 				plan.Drift = append(plan.Drift, DriftEntry{Path: path, RecordedHash: recordedHash, DiskHash: diskHash, NewHash: templateHash})
