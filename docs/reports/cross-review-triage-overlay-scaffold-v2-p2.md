@@ -1,29 +1,33 @@
 # Cross-review triage report: overlay-scaffold-v2-p2 (Phase 2)
 
-- Date: 2026-08-17
+- Date: 2026-08-17(cycle 2 で更新)
 - Plan: docs/plans/active/2026-08-17-overlay-scaffold-v2-p2.md
 - Base branch: main
 - Driver: claude
 - Reviewer: codex
 - Triager: Claude Code (main context)
 - Self-review cross-ref: yes
-- Cycle: 1/2
-- Total reviewer findings: 2
+- Cycle: 2/2 (cap reached)
+- Total reviewer findings: 2(cycle 2。cycle 1 の 2 件は f80e60f で解消・再指摘なし)
 - After triage: ACTION_REQUIRED=2, WORTH_CONSIDERING=0, DISMISSED=0
 
 ## Triage context
 
 - Active plan: docs/plans/active/2026-08-17-overlay-scaffold-v2-p2.md
-- Self-review report: docs/reports/self-review-2026-08-17-overlay-scaffold-v2-p2.md
-- Verify report: docs/reports/verify-2026-08-17-overlay-scaffold-v2-p2.md
-- Implementation context summary: 2 件とも manifest v3 の所有メタデータが Phase 3 の置換プランナの前提と食い違う箇所で、Phase 2 が所有記録の唯一の生成者である以上、今修正しないと Phase 3 が誤った入力を継承する。self-review / verify は所有マップの「値」までは検証していなかった(AC-2 のスポットチェックは AGENTS.md/.gitignore/CLAUDE.md 等が対象で、`.ralph/local/**` と pack add 経路は未カバー)。
+- Self-review report: docs/reports/self-review-2026-08-17-overlay-scaffold-v2-p2.md(Cycle 2 節あり)
+- Verify report: docs/reports/verify-2026-08-17-overlay-scaffold-v2-p2.md(Cycle 2 節あり)
+- Implementation context summary: cycle 1 の 2 件(.ralph/local 所有・pack add 所有)は f80e60f で解消済み。cycle 2 の新規 2 件はどちらも本 PR が導入した退行で、reviewer が再現手順付きで確認している。(1) は v2 scaffold 全プロジェクトで `ralph doctor` が偽 fail する correctness 退行、(2) は既存ファイル skip だった init が symlink 越しに target 外へ書き得る path-containment 退行。cap 到達だが、既知ギャップとして出荷するには重い。
+
+## Cycle 1 findings resolution
+
+cycle 1 の ACTION_REQUIRED #1(`.ralph/local/**` の owner=core 誤分類 → seed へ)・#2(`ralph pack add` の owner 欠落 → v2 時 SetOwner)は f80e60f で修正済み。verify Cycle 2 節がトリアージ契約との一致を確認済み。
 
 ## ACTION_REQUIRED
 
 | # | Reviewer finding | Triage rationale | Affected file(s) |
 |---|-------------------|------------------|-------------------|
-| 1 | [P2] `ownerForScaffoldPath` の catch-all が `.ralph/local/**`(.gitkeep 骨格)を owner=core として記録する。スペックの層モデルでは `.ralph/local/` は L3 overlay(不可侵)であり、Phase 3 プランナが core として全置換対象に含めると、ユーザ drop-in 領域にテンプレート操作が計画され得る | 実問題。所有分類テーブルの漏れで、修正は 1 分岐追加(`.ralph/local/` → seed: 欠落時のみ生成・以後不可侵、advisory 対象は .gitkeep のみで無害)+ テスト。スペック L3 との整合を回復する | internal/cli/init.go:296-299 |
-| 2 | [P2] `ralph pack add`(pack.go)が v2 manifest に対して owner なしのエントリ(pack payload + `.claude/rules/ralph/<lang>.md`)を書き、プランナに legacy-skipped 扱いされる。AC-6 の「pack rule は owner=core で追跡」に反する | 実問題。init 経路のみ owner を付け、pack add 経路が漏れた。layout=v2 のとき追加パスに SetOwner(core) を呼ぶ + テストで塞がる | internal/cli/pack.go:55 |
+| 1 | [P2] `ralph doctor` の hooks integrity チェックが dispatcher コマンド文字列(`./.claude/hooks/ralph-dispatch.sh SessionStart`)全体を stat し、v2 scaffold の全プロジェクトで「7 hook script(s) missing」の偽 fail になる(reviewer が fresh init + doctor で再現) | 実退行。settings.json の hooks が「コマンド + 引数」形式になったのは本 PR が初。doctor 側でコマンド文字列の実行ファイルトークンを分離して stat する小修正 + v2 init 後 doctor green のテストで塞がる | internal/cli/doctor.go(checkHooks)、templates/base/.claude/settings.json:76 |
+| 2 | [P2] init の block-append(非 --force)が pre-existing `AGENTS.md`/`.gitignore` の symlink を追跡して os.WriteFile し、target 外への書き込みになり得る(従来は既存ファイル skip で発生しなかった) | 実退行(path containment)。Lstat で regular file を要求し、symlink は warn + 据え置き(malformed block と同じ非破壊姿勢)にする小修正 + テストで塞がる | internal/cli/init.go:373(reconcileBlockSurfaces) |
 
 ## WORTH_CONSIDERING
 
