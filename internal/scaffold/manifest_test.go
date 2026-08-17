@@ -3,7 +3,10 @@ package scaffold
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	toml "github.com/pelletier/go-toml/v2"
 )
 
 func TestManifestRoundTrip(t *testing.T) {
@@ -118,6 +121,127 @@ managed = true
 	}
 	if entry.IsBaselineAvailable() {
 		t.Fatal("v1 manifest entry must not be baseline-available")
+	}
+}
+
+func TestManifestRoundTripV3OwnershipFields(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "manifest.toml")
+
+	m := NewManifest("0.4.0")
+	m.SetLayoutV2()
+	if err := m.SetFileOwned("AGENTS.md", OwnerCore, "sha256:core", "sha256:coredisk"); err != nil {
+		t.Fatalf("SetFileOwned(core): %v", err)
+	}
+	if err := m.SetFileOwned("ralph.toml", OwnerSeed, "sha256:seed", "sha256:seeddisk"); err != nil {
+		t.Fatalf("SetFileOwned(seed): %v", err)
+	}
+	if err := m.SetFileOwned("AGENTS.md.block", OwnerBlock, "sha256:block", "sha256:blockdisk"); err != nil {
+		t.Fatalf("SetFileOwned(block): %v", err)
+	}
+	m.SetFileFork(".claude/skills/custom/SKILL.md", "sha256:forkdisk", "0.3.0")
+
+	if err := m.Write(path); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	got, err := ReadManifest(path)
+	if err != nil {
+		t.Fatalf("ReadManifest: %v", err)
+	}
+
+	if got.Meta.Layout != LayoutV2 {
+		t.Errorf("Meta.Layout = %q, want %q", got.Meta.Layout, LayoutV2)
+	}
+
+	core := got.Files["AGENTS.md"]
+	if core.Owner != OwnerCore || !core.Managed || core.IsLegacyOwner() {
+		t.Errorf("core entry = %+v, want owner=core managed=true", core)
+	}
+
+	seed := got.Files["ralph.toml"]
+	if seed.Owner != OwnerSeed || !seed.Managed {
+		t.Errorf("seed entry = %+v, want owner=seed managed=true", seed)
+	}
+
+	block := got.Files["AGENTS.md.block"]
+	if block.Owner != OwnerBlock || !block.Managed {
+		t.Errorf("block entry = %+v, want owner=block managed=true", block)
+	}
+
+	fork := got.Files[".claude/skills/custom/SKILL.md"]
+	if fork.Owner != OwnerFork || fork.Managed || fork.ForkedFromVersion != "0.3.0" {
+		t.Errorf("fork entry = %+v, want owner=fork managed=false forked_from_version=0.3.0", fork)
+	}
+	if fork.IsLegacyOwner() {
+		t.Error("fork entry must not report IsLegacyOwner")
+	}
+}
+
+func TestSetFileOwned_RejectsUnknownOwner(t *testing.T) {
+	m := NewManifest("0.4.0")
+	if err := m.SetFileOwned("x.md", "not-a-real-owner", "sha256:a", "sha256:b"); err == nil {
+		t.Fatal("SetFileOwned accepted unknown owner")
+	}
+	if _, ok := m.Files["x.md"]; ok {
+		t.Error("SetFileOwned must not record an entry when owner is invalid")
+	}
+}
+
+func TestReadManifestV1V2_OwnerStaysLegacy(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "manifest.toml")
+	data := []byte(`[meta]
+version = "0.2.0"
+created = "2026-05-18T00:00:00Z"
+updated = "2026-05-18T00:00:00Z"
+
+[files."AGENTS.md"]
+hash = "sha256:abc123"
+managed = true
+state = "managed"
+template_hash = "sha256:abc123"
+`)
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	got, err := ReadManifest(path)
+	if err != nil {
+		t.Fatalf("ReadManifest: %v", err)
+	}
+	if got.Meta.Layout != "" {
+		t.Errorf("Meta.Layout = %q, want empty for legacy manifest", got.Meta.Layout)
+	}
+	entry := got.Files["AGENTS.md"]
+	if !entry.IsLegacyOwner() {
+		t.Fatal("v1/v2 manifest entry must be legacy owner (unset)")
+	}
+	if entry.Owner != "" || entry.ForkedFromVersion != "" {
+		t.Fatalf("reading must not assign ownership: %+v", entry)
+	}
+}
+
+// TestExistingConstructorsWriteNoV3Fields is AC-8: manifests written through
+// the existing (non-opt-in) constructors/setters must contain no v3 fields
+// (layout, owner, forked_from_version) in the marshaled TOML bytes.
+func TestExistingConstructorsWriteNoV3Fields(t *testing.T) {
+	m := NewManifest("0.3.0")
+	m.SetFile("AGENTS.md", "sha256:a")
+	m.SetFileWithBaseline("CLAUDE.md", "sha256:b", ".ralph/baseline/CLAUDE.md")
+	m.SetFileResolvedWithBaseline("partial.md", "sha256:c", "sha256:d", FileStatePartial, ".ralph/baseline/partial.md")
+	m.SetFileUnmanaged("local.md", "sha256:e")
+	m.Files["with-hash.md"] = m.Files["with-hash.md"].WithTemplateHash("sha256:f")
+
+	data, err := toml.Marshal(m)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	s := string(data)
+	for _, forbidden := range []string{"layout", "owner", "forked_from_version"} {
+		if strings.Contains(s, forbidden) {
+			t.Errorf("marshaled manifest from legacy setters contains v3 field %q:\n%s", forbidden, s)
+		}
 	}
 }
 

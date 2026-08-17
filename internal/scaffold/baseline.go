@@ -12,7 +12,7 @@ const baselineRoot = ".ralph/baseline"
 // BaselinePath returns the manifest-relative baseline cache path for a
 // template-managed relative path.
 func BaselinePath(relPath string) (string, error) {
-	clean, err := cleanTemplateRelPath(relPath)
+	clean, err := CleanLocalRelPath(relPath)
 	if err != nil {
 		return "", err
 	}
@@ -42,7 +42,7 @@ func ReadBaseline(targetDir string, entry ManifestFile) ([]byte, error) {
 	if !entry.IsBaselineAvailable() {
 		return nil, fmt.Errorf("baseline unavailable")
 	}
-	clean, err := cleanTemplateRelPath(entry.BaselinePath)
+	clean, err := CleanLocalRelPath(entry.BaselinePath)
 	if err != nil {
 		return nil, err
 	}
@@ -52,19 +52,4 @@ func ReadBaseline(targetDir string, entry ManifestFile) ([]byte, error) {
 	}
 	path := filepath.Join(targetDir, filepath.FromSlash(entry.BaselinePath))
 	return os.ReadFile(path)
-}
-
-func cleanTemplateRelPath(relPath string) (string, error) {
-	if relPath == "" {
-		return "", fmt.Errorf("empty relative path")
-	}
-	fromSlash := filepath.FromSlash(relPath)
-	if !filepath.IsLocal(fromSlash) {
-		return "", fmt.Errorf("path %q is not local", relPath)
-	}
-	clean := filepath.Clean(fromSlash)
-	if clean == "." {
-		return "", fmt.Errorf("path %q is not a file path", relPath)
-	}
-	return clean, nil
 }
