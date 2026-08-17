@@ -169,7 +169,7 @@ ralph の配布物を所有権ベースの 5 層オーバーレイ構造に再�
 
 ## Security considerations
 
-- managed block 更新・settings ディープマージは既存ファイルへの書き込みであり、パストラバーサル防御(`filepath.IsLocal` 相当)を現行 `cleanTemplateRelPath` と同水準で維持する
+- managed block 更新・settings ディープマージは既存ファイルへの書き込みであり、パストラバーサル防御(`filepath.IsLocal` 相当)を共有バリデータ `scaffold.CleanLocalRelPath` で維持する
 - settings.json ディープマージは ralph 所有キー集合外に書き込まないことをテストで保証する(permissions の意図しない拡大を防ぐ)
 - dispatcher が実行する drop-in はリポジトリ内パスに限定する(`.ralph/local/` / `.claude/hooks/`)。リポジトリ外パスの実行は行わない
 - 移行はクリーンな git 状態を前提とするため、全変更が git で監査・復元可能
