@@ -73,7 +73,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "./.claude/hooks/session_start_context.sh"
+            "command": "./.claude/hooks/ralph-dispatch.sh SessionStart"
           }
         ]
       }
@@ -83,7 +83,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "./.claude/hooks/prompt_gate.sh"
+            "command": "./.claude/hooks/ralph-dispatch.sh UserPromptSubmit"
           }
         ]
       }
@@ -94,7 +94,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "./.claude/hooks/pre_bash_guard.sh"
+            "command": "./.claude/hooks/ralph-dispatch.sh PreToolUse"
           }
         ]
       }
@@ -105,11 +105,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "./.claude/hooks/post_edit_verify.sh"
-          },
-          {
-            "type": "command",
-            "command": "./.claude/hooks/check_mojibake.sh"
+            "command": "./.claude/hooks/ralph-dispatch.sh PostToolUse"
           }
         ]
       }
@@ -120,7 +116,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "./.claude/hooks/post_tool_failure_feedback.sh"
+            "command": "./.claude/hooks/ralph-dispatch.sh PostToolUseFailure"
           }
         ]
       }
@@ -131,7 +127,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "./.claude/hooks/precompact_checkpoint.sh"
+            "command": "./.claude/hooks/ralph-dispatch.sh PreCompact"
           }
         ]
       }
@@ -141,7 +137,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "./.claude/hooks/session_end_summary.sh"
+            "command": "./.claude/hooks/ralph-dispatch.sh SessionEnd"
           }
         ]
       }
