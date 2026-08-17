@@ -92,6 +92,14 @@ KNOWN_DIFFS=(
   # model-routing.md: root documents the Go-layer default (internal/config)
   # which does not exist in scaffolded projects
   ".claude/rules/model-routing.md"
+  # AGENTS.md: root's internal/upgrade/ and internal/scaffold/ repo-map
+  # lines describe overlay-scaffold-v2 Phase 1 primitives (manifest v3
+  # ownership fields, unwired replace planner/block engine/settings
+  # merge/advisory diff/report writer) that only exist in this repo's own
+  # internal/ tree. Template rollout for downstream projects lands in
+  # Phase 2/3 (see docs/specs/2026-08-17-overlay-scaffold-v2.md); until
+  # then this file is expected to differ from templates/base/AGENTS.md.
+  "AGENTS.md"
 )
 
 # ─── Helpers ──────────────────────────────────────────────────────────

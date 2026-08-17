@@ -131,7 +131,7 @@ layout v2 系列(全 5 段)の 1 本目として、スペック文書と、後�
 - [x] Plan reviewed
 - [x] Branch created(docs/spec-overlay-scaffold-v2、spec コミット済み)
 - [x] Implementation started(slice 1: 75de545 / slice 2: 73ad8a7 / slice 3: b317869 / slice 4: a32810a / slice 5: 10c6e2a + 追補 1e38046, 7dca14e)
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Review artifact created(docs/reports/self-review-2026-08-17-overlay-scaffold-v2.md)
+- [x] Verification artifact created(docs/reports/verify-2026-08-17-overlay-scaffold-v2.md)
+- [x] Test artifact created(docs/reports/test-2026-08-17-overlay-scaffold-v2.md)
 - [ ] PR created
