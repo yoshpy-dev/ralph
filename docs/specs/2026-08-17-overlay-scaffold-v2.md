@@ -48,6 +48,7 @@ ralph の配布物を所有権ベースの 5 層オーバーレイ構造に再�
 
 - `.claude/settings.json`: JSON でコメント構文がなく managed block が成立しないため、**ralph 所有キー集合のディープマージ**とする。ユーザ追加の permissions エントリは保全し、ralph 所有キーのみ更新する。hooks はイベントごとに単一の dispatcher(`.claude/hooks/ralph-dispatch.sh <event>`)を指し、dispatcher が `.claude/hooks/<event>.d/`(core)→ `.ralph/local/hooks/<event>.d/`(ユーザ)→ `.claude/hooks/local/<event>.d/`(ローカル)の順で実行する。settings.json の hooks レイヤリングが「同名イベント上書き」である問題をディレクトリ側で解決する
 - `scripts/run-verify.sh` / `run-static-verify.sh` / `run-test.sh`: core 実装の実行後に対応する `.ralph/local/*.d/` の drop-in を実行する拡張点を持つ
+- advisory diff の定義: すべての advisory diff は「ディスク実体 vs 新テンプレート内容」の unified diff とする。「テンプレート側が変わった」ことの検出は、manifest に記録された適用時テンプレートハッシュと新テンプレートハッシュの比較で行う。baseline 廃止後も旧テンプレート内容の復元を必要としない、常に計算可能な定義である(fork の advisory も同様に「fork 実体 vs 新 core」)
 
 ### Functional requirements
 
