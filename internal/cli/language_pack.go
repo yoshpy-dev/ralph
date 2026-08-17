@@ -148,7 +148,15 @@ func renderMappedFile(targetDir, relPath string, content []byte, overwrite bool)
 		return nil, "", fmt.Errorf("template path %q escapes target directory", relPath)
 	}
 
-	if _, statErr := os.Stat(target); statErr == nil {
+	// Lstat (not Stat) is used deliberately, mirroring scaffold.RenderFS: Stat
+	// follows symlinks, so a *dangling* symlink at relPath would stat as
+	// absent, get classified as a create below, and os.WriteFile would then
+	// write straight through the link to wherever it resolves -- outside
+	// targetDir, defeating the boundary check above. Lstat inspects the
+	// directory entry itself, so any existing entry (regular file, valid
+	// symlink, or dangling symlink) counts as "exists" and is skipped here in
+	// non-force mode.
+	if _, statErr := os.Lstat(target); statErr == nil {
 		if !overwrite {
 			result.Skipped = append(result.Skipped, relPath)
 			return result, hash, nil

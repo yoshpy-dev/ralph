@@ -20,9 +20,14 @@
 #      mode selecting which local dir(s) run and a failing drop-in failing
 #      the run (AC-5).
 #   i. SIGTERM sent directly to the dispatcher process (not a wrapping
-#      subshell) mid-run terminates it (does not resume) with exit 143, and
-#      its cleanup trap leaves no stray temp files in $TMPDIR or a
-#      cwd-relative ".first" in the fixture.
+#      subshell) mid-run terminates it promptly (does not resume, is not
+#      merely deferred until the running hook script finishes on its own)
+#      with exit 143, and its cleanup trap leaves no stray temp files in
+#      $TMPDIR or a cwd-relative ".first" in the fixture. The same SIGTERM
+#      also kills the hook script that was actively running underneath the
+#      dispatcher, verified two ways: it never reaches the marker it would
+#      only write on natural completion, and (defense in depth) no matching
+#      process remains alive per pgrep.
 
 set -u
 
@@ -321,15 +326,28 @@ rm -f "$verify_fixture/.ralph/local/verify.d/20-fail.sh"
 #           cwd-relative ".first" in the fixture ───────────────────────
 rm -rf "$fixture/.claude/hooks/PreCompact.d"
 started_marker="$workdir/case-i-started"
+finished_marker="$workdir/case-i-finished"
 i_stdin="$workdir/case-i-stdin.json"
 i_out="$workdir/case-i-out.log"
-rm -f "$started_marker" "$fixture/.first" "$i_stdin" "$i_out"
+rm -f "$started_marker" "$finished_marker" "$fixture/.first" "$i_stdin" "$i_out"
 printf '{}' > "$i_stdin"
+# finished_marker is only written once "sleep 5" runs to completion. This is
+# the assertion that actually distinguishes fixed from unfixed dispatcher
+# behavior: POSIX shells defer a trapped signal's action until the current
+# *foreground external command* returns, so sending TERM to a dispatcher
+# blocked on "$script" < ... > ... (no backgrounding) does not interrupt
+# that wait -- it silently queues, and the trap (and this script's "wait
+# $i_pid" below) only unblocks once the child finishes on its own 5s later,
+# by which point finished_marker already exists and a same-tick pgrep-based
+# check would find nothing to fail on. Checking finished_marker immediately
+# after "wait $i_pid" returns catches this regardless of how quickly (or
+# slowly) that wait unblocks.
 write_script "$fixture/.claude/hooks/PreCompact.d/10-slow.sh" <<EOF
 #!/usr/bin/env sh
 cat >/dev/null
 touch "$started_marker"
 sleep 5
+touch "$finished_marker"
 EOF
 
 # Snapshot the dispatcher's own temp-file namespace in $TMPDIR before the
@@ -355,10 +373,28 @@ for _ in $(seq 1 50); do
   [ -f "$started_marker" ] && break
   sleep 0.1
 done
+i_term_start="$(date +%s)"
 kill -TERM "$i_pid" 2>/dev/null
 i_rc=0
 wait "$i_pid" 2>/dev/null || i_rc=$?
+i_term_elapsed=$(( $(date +%s) - i_term_start ))
 assert_exit "I. SIGTERM to the dispatcher terminates it with non-zero exit (not resumed)" 143 "$i_rc"
+
+# The dispatcher must be interrupted promptly, not just eventually: sending
+# TERM must not merely queue behind the 5s hook script the dispatcher is
+# running. 3s leaves generous margin over typical prompt-interruption
+# latency while still being well under the fixture's 5s sleep.
+if [ "$i_term_elapsed" -le 3 ]; then
+  record_pass "I. SIGTERM interrupted the dispatcher promptly (${i_term_elapsed}s, not deferred until the hook child finished on its own)"
+else
+  record_fail "I. SIGTERM took ${i_term_elapsed}s to terminate the dispatcher (want <=3s; suggests the trap was deferred until the hook child finished on its own)"
+fi
+
+if [ -f "$finished_marker" ]; then
+  record_fail "I. SIGTERM did not stop the running hook script child -- it ran to completion (finished_marker exists)"
+else
+  record_pass "I. SIGTERM stopped the running hook script child before it completed (finished_marker absent)"
+fi
 
 if [ -f "$fixture/.first" ]; then
   record_fail "I. SIGTERM cleanup left a stray .first file in fixture cwd"
@@ -375,8 +411,21 @@ else
   record_pass "I. SIGTERM cleanup left no stray ralph-dispatch-* temp files in \$TMPDIR"
 fi
 
+# I (child-kill, defense in depth): no process matching the hook script's
+# own path should remain alive after the dispatcher has exited. This is a
+# secondary check -- finished_marker above is the one that reliably catches
+# a reverted fix, since (per the comment at its declaration) an unfixed
+# dispatcher's "wait $i_pid" does not return until the child has already
+# exited on its own, so pgrep alone would find nothing to fail on either way.
+if pgrep -f "PreCompact.d/10-slow.sh" >/dev/null 2>&1; then
+  record_fail "I. SIGTERM left the running hook script child alive (dispatcher did not kill it)"
+else
+  record_pass "I. SIGTERM killed the running hook script child (no longer alive after dispatcher exit)"
+fi
+
 # Reap the orphaned drop-in (still sleeping past its parent's death) so it
-# does not outlive this test run.
+# does not outlive this test run — a no-op once the child-kill assertion
+# above passes; kept as a safety net if it does not.
 pkill -f "PreCompact.d/10-slow.sh" >/dev/null 2>&1 || true
 
 # ── Summary ───────────────────────────────────────────────────────────

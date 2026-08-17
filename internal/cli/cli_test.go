@@ -2281,6 +2281,71 @@ func TestAddPack_RendersIntoPackSubdir(t *testing.T) {
 	}
 }
 
+// TestRenderMappedFile_DanglingSymlink_NonForce_SkippedNotFollowed pins the
+// cycle-3 cross-review fix: renderMappedFile (the pack rule.md ->
+// .claude/rules/ralph/<lang>.md control-file path) must apply the same
+// Lstat-not-Stat guard as scaffold.RenderFS (see
+// TestRenderFS_DanglingSymlink_NonForce_SkippedNotFollowed). Before the fix,
+// os.Stat on a dangling symlink at the rule path returns ErrNotExist,
+// renderPackInto classifies it as a create, and os.WriteFile writes the pack
+// rule content straight through the link to wherever it resolves --
+// escaping targetDir even though the earlier isInsideDir boundary check on
+// the symlink's own (in-bounds) path passed.
+func TestRenderMappedFile_DanglingSymlink_NonForce_SkippedNotFollowed(t *testing.T) {
+	setupTestEmbedFS(t)
+	Version = "0.1.0-test"
+
+	dir := t.TempDir()
+	outsideDir := t.TempDir()
+	externalTarget := filepath.Join(outsideDir, "OUTSIDE.md")
+
+	lang := "golang"
+	rulePath := filepath.Join(dir, ".claude", "rules", "ralph", lang+".md")
+	if err := os.MkdirAll(filepath.Dir(rulePath), 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.Symlink(externalTarget, rulePath); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+
+	pr, err := renderPackInto(dir, lang, false /* non-force */)
+	if err != nil {
+		t.Fatalf("renderPackInto: %v", err)
+	}
+
+	ruleKey := filepath.Join(".claude", "rules", "ralph", lang+".md")
+	found := false
+	for _, skipped := range pr.result.Skipped {
+		if skipped == ruleKey {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("result.Skipped = %v, want %q present", pr.result.Skipped, ruleKey)
+	}
+	for _, created := range pr.result.Created {
+		if created == ruleKey {
+			t.Errorf("result.Created contains %q, want it skipped (dangling symlink must not be followed)", ruleKey)
+		}
+	}
+
+	// The symlink itself must be untouched.
+	info, err := os.Lstat(rulePath)
+	if err != nil {
+		t.Fatalf("Lstat: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("%s must remain a symlink, got mode %v", ruleKey, info.Mode())
+	}
+
+	// Nothing must have been written at the external (dangling) link target
+	// -- this is the containment failure the fix closes.
+	if _, err := os.Stat(externalTarget); !os.IsNotExist(err) {
+		t.Errorf("dangling symlink target must not be created; stat err = %v", err)
+	}
+}
+
 // TestAddPack_MetaPacksNotDuplicated verifies that running addPack twice on
 // the same lang does not duplicate the entry in Meta.Packs.
 func TestAddPack_MetaPacksNotDuplicated(t *testing.T) {

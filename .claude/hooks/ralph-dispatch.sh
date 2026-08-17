@@ -69,6 +69,7 @@ stdin_buf=""
 out_tmp=""
 merged_tmp=""
 first_output=""
+child=""
 cleanup() {
   # Guard every removal so a signal that fires before a variable is
   # assigned can't reconstruct a relative path (e.g. an empty out_tmp
@@ -83,14 +84,26 @@ cleanup() {
   if [ -n "$merged_tmp" ]; then rm -f "$merged_tmp"; fi
   if [ -n "$first_output" ]; then rm -f "$first_output"; fi
 }
+# kill_child terminates the currently-running hook script's child process (if
+# any) before the signal handlers below hand off to cleanup+exit. Without
+# this, a TERM/INT/HUP delivered to the dispatcher kills the dispatcher but
+# leaves an in-flight hook script running detached, free to keep mutating the
+# repository after the dispatcher itself has reported termination.
+kill_child() {
+  if [ -n "$child" ]; then
+    kill -TERM "$child" 2>/dev/null
+    wait "$child" 2>/dev/null
+  fi
+}
 # The EXIT trap alone does not run when a fatal signal kills the process
 # under POSIX sh; each signal trap below must clean up and then terminate
 # explicitly (a bare "trap cleanup INT TERM HUP" would resume the script
-# after the trap action instead of exiting it).
+# after the trap action instead of exiting it). kill_child runs first so the
+# in-flight hook script (if any) is terminated before temp files are removed.
 trap cleanup EXIT
-trap 'cleanup; exit 130' INT
-trap 'cleanup; exit 143' TERM
-trap 'cleanup; exit 129' HUP
+trap 'kill_child; cleanup; exit 130' INT
+trap 'kill_child; cleanup; exit 143' TERM
+trap 'kill_child; cleanup; exit 129' HUP
 
 stdin_buf="$(mktemp "${TMPDIR:-/tmp}/ralph-dispatch-stdin.XXXXXX")"
 cat > "$stdin_buf"
@@ -113,9 +126,12 @@ for d in $dirs; do
 
     : > "$out_tmp"
     set +e
-    "$script" < "$stdin_buf" > "$out_tmp"
+    "$script" < "$stdin_buf" > "$out_tmp" &
+    child=$!
+    wait "$child"
     rc=$?
     set -e
+    child=""
 
     if [ "$rc" -ne 0 ]; then
       cat "$out_tmp"
