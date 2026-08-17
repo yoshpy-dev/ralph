@@ -6,7 +6,7 @@
 - Related request: docs/specs/2026-08-17-overlay-scaffold-v2.md(オーバーレイ型スキャフォールド配布と非対話 upgrade)
 - Related issue: N/A
 - Type: feat
-- Branch: docs/spec-overlay-scaffold-v2(/spec ハンドオフ worktree を採用。PR タイトルは feat 接頭辞)
+- Branch: feat/overlay-scaffold-v2(/spec ハンドオフ worktree を採用。PR ゲートの title-prefix 整合のため /pr 時に docs/spec-overlay-scaffold-v2 から rename)
 
 ## Objective
 
