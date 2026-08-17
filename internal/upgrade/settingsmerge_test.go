@@ -2,6 +2,8 @@ package upgrade
 
 import (
 	"bytes"
+	"encoding/json"
+	"slices"
 	"testing"
 )
 
@@ -302,5 +304,36 @@ func TestMergeOwnedSettings_NonObjectRootRejected(t *testing.T) {
 	_, err := MergeOwnedSettings([]byte(`[1,2,3]`), []byte(`{}`), []byte(`{}`))
 	if err == nil {
 		t.Fatalf("expected error for non-object root, got nil")
+	}
+}
+
+// TestOwnedSettingsPaths_AnchorsMergeBehavior keeps the exported
+// OwnedSettingsPaths contract honest against the merge implementation: the
+// declared path set must not drift, and a top-level key that a template
+// ships OUTSIDE the owned paths must never be introduced into the result.
+func TestOwnedSettingsPaths_AnchorsMergeBehavior(t *testing.T) {
+	want := []string{"env", "permissions.allow", "permissions.deny", "hooks"}
+	if got := OwnedSettingsPaths[:]; !slices.Equal(got, want) {
+		t.Fatalf("OwnedSettingsPaths = %v, want %v (update the merge handlers and this test together)", got, want)
+	}
+
+	current := []byte(`{"model": "user-choice"}`)
+	newOwned := []byte(`{"model": "template-choice", "outputStyle": "x", "env": {"A": "1"}}`)
+	res, err := MergeOwnedSettings(current, []byte(`{}`), newOwned)
+	if err != nil {
+		t.Fatalf("MergeOwnedSettings: %v", err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(res.Content, &out); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if out["model"] != "user-choice" {
+		t.Errorf("un-owned key 'model' = %v, want user's value preserved", out["model"])
+	}
+	if _, ok := out["outputStyle"]; ok {
+		t.Error("un-owned template key 'outputStyle' must not be introduced by the merge")
+	}
+	if _, ok := out["env"]; !ok {
+		t.Error("owned path 'env' from the template must be merged in")
 	}
 }

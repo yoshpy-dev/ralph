@@ -75,9 +75,11 @@ type DriftEntry struct {
 }
 
 // AdvisoryEntry records a path that PlanCoreReplace intentionally leaves
-// untouched (fork or seed layers) but where disk content differs from the
-// new template, worth surfacing to the operator. Rendering the actual diff
-// is a later phase's API; this only carries the path and hashes.
+// untouched but surfaces to the operator: every fork path (its diff against
+// the new template may be empty, in which case rendering skips it), and
+// seed paths whose template side changed since last applied. This only
+// carries the path and hashes; rendering the actual diff is advisory.go's
+// job.
 type AdvisoryEntry struct {
 	Path     string
 	Owner    string

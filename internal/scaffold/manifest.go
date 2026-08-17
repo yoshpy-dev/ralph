@@ -170,17 +170,16 @@ func (m *Manifest) SetLayoutV2() {
 }
 
 // SetFileOwned records a manifest v3 entry with an explicit ownership
-// attribute (core/fork/seed/block). It validates owner against the known
-// constants and fills the v1-compat Hash/Managed fields consistently:
-// Managed is true for core/seed/block and false for fork.
+// attribute (core/seed/block). Fork entries are rejected: SetFileFork is
+// the single way to record a fork, because a fork additionally needs
+// ForkedFromVersion and Managed=false semantics.
 func (m *Manifest) SetFileOwned(relPath, owner, templateHash, diskHash string) error {
-	managed, err := managedForOwner(owner)
-	if err != nil {
+	if err := validateManagedOwner(owner); err != nil {
 		return err
 	}
 	m.Files[relPath] = ManifestFile{
 		Hash:           templateHash,
-		Managed:        managed,
+		Managed:        true,
 		State:          FileStateManaged,
 		TemplateHash:   templateHash,
 		DiskHash:       diskHash,
@@ -205,14 +204,14 @@ func (m *Manifest) SetFileFork(relPath, diskHash, forkedFromVersion string) {
 	}
 }
 
-func managedForOwner(owner string) (bool, error) {
+func validateManagedOwner(owner string) error {
 	switch owner {
 	case OwnerCore, OwnerSeed, OwnerBlock:
-		return true, nil
+		return nil
 	case OwnerFork:
-		return false, nil
+		return fmt.Errorf("owner %q must be recorded via SetFileFork", owner)
 	default:
-		return false, fmt.Errorf("unknown owner %q", owner)
+		return fmt.Errorf("unknown owner %q", owner)
 	}
 }
 

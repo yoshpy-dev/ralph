@@ -188,6 +188,16 @@ func TestSetFileOwned_RejectsUnknownOwner(t *testing.T) {
 	}
 }
 
+func TestSetFileOwned_RejectsFork(t *testing.T) {
+	m := NewManifest("0.4.0")
+	if err := m.SetFileOwned("x.md", OwnerFork, "sha256:a", "sha256:b"); err == nil {
+		t.Fatal("SetFileOwned accepted OwnerFork; forks must go through SetFileFork")
+	}
+	if _, ok := m.Files["x.md"]; ok {
+		t.Error("SetFileOwned must not record an entry for OwnerFork")
+	}
+}
+
 func TestReadManifestV1V2_OwnerStaysLegacy(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "manifest.toml")
