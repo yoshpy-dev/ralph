@@ -847,7 +847,7 @@ func TestOrgSpawn_RoleAndScopeFlags_ExpandTemplateAndRecordScope(t *testing.T) {
 	if !strings.Contains(logText, "役割指示を読み込んで従ってください: ") {
 		t.Fatalf("expected AgentStart argv logged to contain the prompt-file pointer, got:\n%s", logText)
 	}
-	if strings.Contains(logText, ".claude/rules/agent-messaging.md") {
+	if strings.Contains(logText, ".claude/rules/ralph/agent-messaging.md") {
 		t.Errorf("expected the rendered template body NOT to appear inline in argv (it must go through the prompt file), got:\n%s", logText)
 	}
 
@@ -899,7 +899,7 @@ func TestOrgSpawn_UnknownRole_NoTemplateApplied(t *testing.T) {
 	if !strings.Contains(logText, "verbatim prompt") {
 		t.Errorf("expected the verbatim --prompt in the AgentStart argv, got:\n%s", logText)
 	}
-	if strings.Contains(logText, ".claude/rules/agent-messaging.md") {
+	if strings.Contains(logText, ".claude/rules/ralph/agent-messaging.md") {
 		t.Errorf("expected no role-template markers for an unknown role, got:\n%s", logText)
 	}
 }

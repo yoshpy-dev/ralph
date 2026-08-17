@@ -67,13 +67,14 @@ Detailed topic guidance lives in `.claude/rules/ralph/`; step-by-step
 workflows live in `.claude/skills/`.
 <!-- END RALPH MANAGED -->
 
-### Org runtime pointers (meta-repo specific)
+## Org runtime pointers (meta-repo specific)
 
-Steps 4–7 above run through phase-specific subagents for both Claude Code
-and Codex; `/cross-review` and `/pr` remain inline. Local task state for
-spec/plan/work lives under `$(git rev-parse --git-common-dir)/ralph/worktrees/`;
-PR success cleans up the task worktree and local branch while leaving the
-remote PR branch intact.
+The self-review, verify, test, and sync-docs steps run through
+phase-specific subagents for both Claude Code and Codex; `/cross-review`
+and `/pr` remain inline. Local task state for spec/plan/work lives under
+`$(git rev-parse --git-common-dir)/ralph/worktrees/`; PR success cleans up
+the task worktree and local branch while leaving the remote PR branch
+intact.
 
 See `internal/org/`, `docs/specs/2026-08-01-org-runtime.md`, and
 `.claude/rules/ralph/agent-messaging.md` for the org runtime's implementation

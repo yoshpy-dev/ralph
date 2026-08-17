@@ -65,7 +65,6 @@ If you update this order, update all of these locations:
 - `.claude/skills/work/SKILL.md` (Step 13)
 - `.claude/skills/cross-review/SKILL.md` (Case A and Case B re-run)
 - `.claude/rules/ralph/subagent-policy.md` (Post-implementation pipeline table)
-- `CLAUDE.md` (Default behavior)
 - `docs/quality/definition-of-done.md` (Pipeline order)
 - `README.md` (Quick start and Operating loop sections)
 - `AGENTS.md` (Primary loop section)

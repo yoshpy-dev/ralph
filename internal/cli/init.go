@@ -280,14 +280,20 @@ func executeInit(targetDir string, cfg initConfig, force bool) error {
 // scaffolded file, keyed by its manifest-relative path (the same path used
 // as the key of the hashes map built during rendering). See docs/specs
 // 2026-08-17-overlay-scaffold-v2.md, section "層モデル".
+//
+// Manifest keys are always fs.FS slash paths (from fs.WalkDir in
+// render.go), regardless of host OS, so relPath is normalized with
+// filepath.ToSlash before comparison to keep classification slash-stable
+// on Windows.
 func ownerForScaffoldPath(relPath string) string {
+	relPath = filepath.ToSlash(relPath)
 	switch relPath {
 	case "AGENTS.md", ".gitignore":
 		return scaffold.OwnerBlock
-	case "CLAUDE.md", "ralph.toml", filepath.Join(".github", "workflows", "verify.yml"):
+	case "CLAUDE.md", "ralph.toml", ".github/workflows/verify.yml":
 		return scaffold.OwnerSeed
 	}
-	if strings.HasPrefix(relPath, "docs"+string(filepath.Separator)) {
+	if strings.HasPrefix(relPath, "docs/") {
 		return scaffold.OwnerSeed
 	}
 	return scaffold.OwnerCore

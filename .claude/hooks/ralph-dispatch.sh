@@ -44,34 +44,40 @@
 #      (scripts' raw stdout joined with a blank line) instead of building
 #      a JSON envelope. Install jq to restore full JSON-aware merging.
 #
-# lib_json.sh is reused for jq-availability detection.
+# jq availability is detected directly below via `command -v jq`.
 
 set -eu
-
-HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
-# shellcheck source=lib_json.sh
-. "$HOOK_DIR/lib_json.sh"
 
 event="${1:-}"
 if [ -z "$event" ]; then
   echo "ralph-dispatch.sh: missing <event> argument" >&2
   exit 2
 fi
+case "$event" in
+  *[!A-Za-z]*)
+    echo "ralph-dispatch.sh: invalid <event> argument: $event" >&2
+    exit 2
+    ;;
+esac
 
 have_jq=0
 if command -v jq >/dev/null 2>&1; then
   have_jq=1
 fi
 
-stdin_buf="$(mktemp "${TMPDIR:-/tmp}/ralph-dispatch-stdin.XXXXXX")"
-cat > "$stdin_buf"
-
+stdin_buf=""
+out_tmp=""
+merged_tmp=""
 cleanup() {
   rm -f "$stdin_buf" "$out_tmp" "$merged_tmp" "$out_tmp.first"
 }
+trap cleanup EXIT INT TERM HUP
+
+stdin_buf="$(mktemp "${TMPDIR:-/tmp}/ralph-dispatch-stdin.XXXXXX")"
+cat > "$stdin_buf"
+
 out_tmp="$(mktemp "${TMPDIR:-/tmp}/ralph-dispatch-out.XXXXXX")"
 merged_tmp="$(mktemp "${TMPDIR:-/tmp}/ralph-dispatch-merged.XXXXXX")"
-trap cleanup EXIT
 
 : > "$merged_tmp"
 output_count=0
@@ -114,6 +120,7 @@ for d in $dirs; do
     if [ "$output_count" -eq 1 ]; then
       first_output="$out_tmp.first"
       cp "$out_tmp" "$first_output"
+      chmod 600 "$first_output"
     fi
 
     if [ "$have_jq" -eq 1 ]; then

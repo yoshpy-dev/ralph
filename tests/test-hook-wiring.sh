@@ -95,10 +95,11 @@ check_codex_config_toml() {
     return
   fi
 
-  # Match `command = [ "..." , "..." ]` (possibly multi-element) TOML array
-  # entries and pull out each double-quoted string on the command line(s).
+  # Restrict to `command = [ "..." , "..." ]` (possibly multi-element) TOML
+  # array entries: first select lines that assign the `command` key, then
+  # pull out each double-quoted `./`-prefixed string from those lines only.
   local commands
-  commands="$(grep -oE '"\./[^"]+"' "$config" | tr -d '"' || true)"
+  commands="$(grep -E '^[[:space:]]*command[[:space:]]*=' "$config" | grep -oE '"\./[^"]+"' | tr -d '"' || true)"
 
   if [ -z "$commands" ]; then
     record_fail "$label: .codex/config.toml has no [[hooks.*]] command entries (expected at least one)"

@@ -61,3 +61,5 @@ docs/evidence/*.json
 # Auto-generated pipeline execution logs
 docs/reports/pipeline-execution-*.json
 # END RALPH MANAGED
+
+# Project-specific ignores go below this line.
