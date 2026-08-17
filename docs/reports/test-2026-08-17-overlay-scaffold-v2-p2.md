@@ -130,3 +130,73 @@ No unresolved failures remain.
 - Pass: yes — 593/593 shell cases, 8/8 Go packages, all green after the F2 addition and the H3 hermeticity fix
 - Fail: none outstanding
 - Blocked: none
+
+## Cycle 2 (2026-08-17, re-run after cross-review fixes + cycle-2 self-review/verify)
+
+- Delta since cycle 1 (`0132d9f..54f97ac`): cross-review fixes `f80e60f`
+  (owner=seed for `.ralph/local/**` and pack-add-created manifest entries,
+  plus 2 new Go tests — `TestAddPack_V2Manifest_AssignsOwnerCore`,
+  `TestAddPack_LegacyManifest_StaysOwnerless`), cycle-2 self-review cleanup
+  `bd2d867` (dispatcher signal-trap rework — `trap cleanup EXIT INT TERM HUP`
+  installed before the first `mktemp` so an early kill can't leak the temp
+  payload, plus new Case I in `tests/test-ralph-dispatch.sh`; `packRuleRelPath`
+  switched to `path.Join`; `pack.go`'s `ownerForScaffoldPath` call site), and
+  cycle-2 verify artifact `54f97ac`.
+- Evidence: `docs/evidence/test-2026-08-17-overlay-scaffold-v2-p2-cycle2.log`
+  (full `RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh` output, this cycle)
+
+### Verdict: PASS
+
+595/595 shell test cases across the same 25 files (up from 593 — the only
+count change is `tests/test-ralph-dispatch.sh` 20 → 22, both new cases from
+Case I), 8/8 Go packages `ok` on a fresh `go test ./... -count=1 -cover` run
+(not cached), zero failures.
+
+### New tests confirmed passing at runtime
+
+| Test | Command | Result |
+| --- | --- | --- |
+| `tests/test-ralph-dispatch.sh` Case I (SIGTERM mid-run terminates, not resumed; no stray `.first` file) | `RALPH_VERIFY_SCOPE=full bash tests/test-ralph-dispatch.sh`, run 3x in isolation | PASS all 3 runs, `exit 143` (SIGTERM) each time, no leaked temp file |
+| `TestAddPack_V2Manifest_AssignsOwnerCore` (`internal/cli`) | `go test ./internal/cli/... -run 'TestAddPack_V2Manifest_AssignsOwnerCore' -v -count=1` | PASS — asserts `addPack` on a v2-layout project sets owner=core on `packs/languages/<lang>/verify.sh`, `packs/languages/<lang>/README.md`, and `.claude/rules/ralph/<lang>.md` |
+| `TestAddPack_LegacyManifest_StaysOwnerless` (`internal/cli`) | same command, `-run 'TestAddPack_LegacyManifest_StaysOwnerless'` | PASS — asserts `addPack` on a legacy (pre-v2, `Meta.Layout` unset) manifest does not backfill ownership metadata on newly-added entries and does not silently upgrade the manifest to v2 |
+| `.ralph/local/**` owner=seed spot-check | inspected `internal/cli/init.go:295-310` (`ownerForScaffoldPath`) directly, cross-checked against `TestExecuteInit_V2_FreshInit_LayoutAndOwners`'s `wantOwners[".ralph/local/verify.d/.gitkeep"] = scaffold.OwnerSeed` assertion (already part of the full green run above) | Confirmed: `.ralph/local/` is special-cased to `OwnerSeed` ahead of the catch-all `OwnerCore`, with an inline comment explaining why (L3 overlay, 不可侵, would otherwise be treated as a full-replace target by the Phase 3 replace planner) |
+
+### Test execution
+
+| Suite / Command | Tests | Passed | Failed | Skipped |
+| --- | --- | --- | --- | --- |
+| `RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh` — 25 shell files | 595 | 595 | 0 | 0 |
+| `go test ./... -count=1 -cover` — 8 packages with tests | 8 pkgs | 8 | 0 | 0 |
+
+### Coverage (fresh, non-cached, cycle 2)
+
+`internal/cli` 77.6%, `internal/scaffold` 78.9%, `internal/upgrade` 90.0% —
+byte-identical to cycle 1 despite the 2 new `internal/cli` tests and the
+`ownerForScaffoldPath`/`packRuleRelPath` edits; the new tests exercise
+already-covered code paths (ownership assignment, pack-add flow), so no
+percentage shift. Other packages reconfirmed stable: `internal/config`
+94.2%, `internal/insights` 86.1%, `internal/org` 89.1%, `internal/org/driver`
+92.0%, `internal/org/protocol` 97.9%.
+
+### Regression checks
+
+| Previously broken behavior | Status | Evidence |
+| --- | --- | --- |
+| Dispatcher deny-decision short-circuit, `additionalContext` aggregation, non-zero exit propagation (Cases A/B/D) | Still correct | 22/22 `test-ralph-dispatch.sh`, this cycle |
+| H3 `HARNESS_VERIFY_MODE` hermeticity fix (cycle 1) | Not re-broken | `RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh` full-suite run (ambient `HARNESS_VERIFY_MODE=test` present) still shows H3 PASS |
+| Cycle-1 dispatcher `trap cleanup EXIT` (single-signal) | Superseded, not regressed | Cycle-2 self-review flagged it as leaking on signal kill; `bd2d867` widened it to `EXIT INT TERM HUP`, and Case I now exercises the SIGTERM path directly (new coverage, not just non-regression) |
+
+### Test gaps (unchanged from cycle 1, reconfirmed still open)
+
+- `scripts/check-sync.sh`'s block-aware `AGENTS.md` `DRIFTED` code path
+  still has no isolated fixture test (only the happy path is exercised
+  against the real repo tree).
+- `runInitNonInteractive` (`internal/cli/init.go:107`) remains 0% covered;
+  pre-existing gap, not introduced by this plan or this cycle's changes.
+
+### Cycle 2 verdict
+
+- Pass: yes — 595/595 shell cases, 8/8 Go packages, all new/changed tests
+  individually re-confirmed at runtime
+- Fail: none outstanding
+- Blocked: none
