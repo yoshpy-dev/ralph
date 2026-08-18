@@ -317,6 +317,11 @@ each test proves what the delta claims:
   the upgrade report mentions the pending advisory, and that the manifest's
   `TemplateHash` advances to clear it — then a regression check that the
   *next* run at the same version is a true no-op.
+
+  **Cycle 4 correction:** this table entry described the cycle-3 version of
+  the test. `7f1c531` reworked it (see the Cycle 4 section below) to pin the
+  version deliberately at `"1.0.0-test"` instead of letting it bump, so the
+  seed-advisory veto is exercised in isolation from the version-bump veto.
 - `TestRunUpgradeV2_ConvergedButVersionBumped_NotANoOp` (`internal/cli/upgrade_v2_test.go:853-883`):
   templates are byte-for-byte identical to the prior run (no drift, no
   block/seed changes) but `Version` advances; asserts the run does not
@@ -362,3 +367,131 @@ are confined to `internal/cli/upgrade_v2.go` and its test file, not
 - This is pipeline cycle 3 (final; the default
   `RALPH_STANDARD_MAX_PIPELINE_CYCLES` cap of 2 was consciously raised per
   the assignment to re-validate AR#2 fixes) for overlay-scaffold-v2 Phase 3.
+
+## Cycle 4 (final — pipeline cycle 4/4)
+
+- Date: 2026-08-18
+- HEAD: `4aba6f3` (branch `feat/overlay-scaffold-v2-p3`)
+- Delta since cycle 3 test (`f45463a..4aba6f3`): `07239cf` (sync-docs c3:
+  fix stale ralph-upgrade report/dry-run description), `1f594c7`/`ae295f8`
+  (cycle-3 cross-review triage), `b3c6307` (fix: classify `.codex/`
+  `AGENTS.override.md` as seed per the L3 overlay contract — was
+  misclassified core by `ownerForScaffoldPath`'s catch-all, which would have
+  made a user-edited override permanently show as unresolved drift; adds 2
+  new e2e tests), `d3a9fa6` (cycle-4 self-review section), `7f1c531` (fix:
+  address cycle-4 self-review findings, including reworking
+  `TestRunUpgradeV2_SeedAdvisoryOnly_NotANoOp` to pin the version at
+  `"1.0.0-test"` so the seed-advisory veto is exercised independently of the
+  version-bump veto — C4-1), `4aba6f3` (verify c4).
+- Evidence: `docs/evidence/verify-2026-08-18-065930.log` (raw
+  `RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh` output from the run below,
+  exit 0)
+
+### Verdict: PASS
+
+25/25 shell test files clean (25 `==> tests/test-*.sh` headers, 25 matching
+trailing `OK` markers; the 17 suites that print a numeric summary all report
+`FAIL: 0`, the remaining 8 print a plain `OK`/`PASS: N` marker with zero
+failed cases inline — same split documented in prior cycles). `./scripts/run-test.sh`
+exit code `0`. Fresh (`-count=1`, no cache, `go clean -testcache` run first)
+`go test ./... -count=1 -cover`: 8/8 packages `ok`, zero failures. Working
+tree confirmed clean (`git status --porcelain`) before and after this run.
+
+All 3 tests named in the assignment individually re-confirmed with
+`go test ./internal/cli/... -run '<name>$' -v -count=1` — `SeedAdvisoryOnly`
+run 3x for stability per the assignment, the other two 1x each alongside it
+(all 3 in the same `-run` invocation each time, so each run already
+exercises all three together):
+
+| Test | Run 1 | Run 2 | Run 3 |
+| --- | --- | --- | --- |
+| `TestRunUpgradeV2_CodexAgentsOverride_UserEdited_SeedNeverReplaced` | PASS (0.10s) | PASS (0.11s) | PASS (0.12s) |
+| `TestRunUpgradeV2_CodexAgentsOverride_Unedited_TemplateChangeIsAdvisoryOnly` | PASS (0.10s) | PASS (0.11s) | PASS (0.12s) |
+| `TestRunUpgradeV2_SeedAdvisoryOnly_NotANoOp` (reworked) | PASS (0.10s) | PASS (0.11s) | PASS (0.13s) |
+
+No flakes across 3 runs. Read the assertion bodies directly
+(`internal/cli/upgrade_v2_test.go:805-943`), not just the pass/fail line:
+
+- `TestRunUpgradeV2_SeedAdvisoryOnly_NotANoOp` (`:805-854`): the C4-1 rework
+  pins `Version = "1.0.0-test"` unchanged (no version bump) so that with the
+  version conjunct of `isFullyConvergedV2`'s no-op gate already satisfied,
+  the only thing that can still stop the short-circuit is the seed-advisory
+  veto (C3-1) — the docstring at `:811-815` states this is a deliberate
+  regression pin: with a bumped version, the version-bump veto (C4-1's
+  sibling, `TestRunUpgradeV2_ConvergedButVersionBumped_NotANoOp`) would
+  short-circuit first and the advisory veto would go untested. Asserts
+  `"no-op"` absent from stdout, `docs/notes.md` untouched on disk (seed,
+  user-owned once created), the upgrade report mentions the pending
+  advisory, the manifest's `TemplateHash` advances to the new template hash
+  while `DiskHash` stays at the old content — then a second run at the same
+  version is confirmed a true no-op now that the advisory cleared.
+- `TestRunUpgradeV2_CodexAgentsOverride_UserEdited_SeedNeverReplaced`
+  (`:865-904`): pins the `b3c6307` fix. Writes a user-edited
+  `.codex/AGENTS.override.md`, bumps the embedded template content and the
+  binary `Version`, and asserts the user's edit survives byte-for-byte on
+  disk, the upgrade report surfaces the pending template change as an
+  advisory (not silently swallowed), and the manifest records
+  `Owner=OwnerSeed` with `TemplateHash` advanced to the new template while
+  `DiskHash` reflects the user's edit. Before the fix, the catch-all in
+  `ownerForScaffoldPath` classified this path core, which would have flagged
+  it as unresolved drift (exit 3) forever on any upstream template change,
+  since a core-owned file with a user edit is drift by definition.
+- `TestRunUpgradeV2_CodexAgentsOverride_Unedited_TemplateChangeIsAdvisoryOnly`
+  (`:913-943`): the control case for the same fix — an *unedited* copy must
+  also survive a template change untouched. Same fixture minus the
+  user-edit step; asserts the on-disk content stays exactly the v1 template
+  (not silently overwritten with v2), the report surfaces the advisory, and
+  the manifest shows `Owner=OwnerSeed`, `TemplateHash` at the new template
+  hash, `DiskHash` at the unchanged v1 content. Before the fix, a core
+  classification would have let the replace planner silently overwrite this
+  file with the new template instead of leaving it as an advisory-only seed.
+
+No test weakening found. No test-isolation issues found running any of the
+3 individually vs. in the batch vs. as part of the full 8-package run.
+
+### Self-review C4-4 correction (stale line pointer)
+
+The cycle-3 test report's marquee-test table cited
+`TestRunUpgradeV2_ConvergedButVersionBumped_NotANoOp` at
+`internal/cli/upgrade_v2_test.go:853-883`. `b3c6307` inserted 97 lines of new
+tests ahead of it (the two `CodexAgentsOverride` tests above), shifting the
+function to `:955-978` at this cycle's HEAD (confirmed via
+`grep -n '^func TestRunUpgradeV2_ConvergedButVersionBumped'` →
+`upgrade_v2_test.go:955`). The Cycle 3 section above (line ~320) is left
+as-is for historical accuracy (it was correct at cycle-3 HEAD); this note
+records the corrected pointer for anyone using it going forward:
+`TestRunUpgradeV2_ConvergedButVersionBumped_NotANoOp` is at
+`internal/cli/upgrade_v2_test.go:955-978` as of `4aba6f3`.
+
+### Coverage deltas vs. cycle 3
+
+Fresh (`-count=1`, no cache) per-package coverage:
+
+| Package | Cycle 3 | Cycle 4 (this run) | Delta |
+| --- | --- | --- | --- |
+| `internal/cli` | 76.4% | 76.4% | 0.0pp |
+| `internal/scaffold` | 75.7% | 75.7% | 0.0pp |
+| `internal/upgrade` | 91.1% | 91.1% | 0.0pp |
+
+Matches the assignment's stated expectation (cli 76.4/scaffold 75.7/upgrade
+91.1) exactly. Flat coverage despite `b3c6307` adding ~130 lines of new
+production logic (the `.codex/` seed-classification fix in
+`ownerForScaffoldPath`) and 2 new e2e tests, plus `7f1c531`'s
+`SeedAdvisoryOnly` rework, is consistent with the delta's shape: the new
+classification branch and its 2 new tests land net-neutral on the package
+percentage (small numerator and denominator increase in proportion), and
+the `SeedAdvisoryOnly` rework changes which veto path is exercised without
+changing line count meaningfully. `internal/scaffold` and `internal/upgrade`
+are untouched by this delta (0.0pp expected — no changes in scope this
+cycle; `b3c6307`/`7f1c531` are confined to `internal/cli/upgrade_v2.go` and
+its test file).
+
+### Cycle 4 verdict
+
+- Pass: yes — 25/25 shell files clean, 8/8 Go packages `ok`, all 3 named
+  tests individually re-confirmed 3x each with assertion-level review,
+  working tree clean before and after
+- Fail: none
+- Blocked: none
+- This is pipeline cycle 4 (final, per the assignment) for
+  overlay-scaffold-v2 Phase 3. Tests pass; proceed to `/pr`.
