@@ -333,3 +333,136 @@ The plan's AC-5 (see above) was brought into line with this same wording by the 
   the pipeline cap per `.claude/rules/ralph/post-implementation-pipeline.md`'s
   cap-reached branching (raise cap / proceed to `/pr` with known gaps /
   abort).
+
+## Cycle 4 (final cycle, 4/4 — after second cap raise)
+
+- Date: 2026-08-18
+- Scope: delta since cycle-3 (`4df2ce9..HEAD`, HEAD `7f1c531`, working tree
+  clean). Commits reviewed: `739c9c1` (plan AC-4b/AC-9 qualified to
+  "cycle-1 cross-review AR#1/AR#2" — closes this report's own cycle-3 C3-5
+  LOW finding), `f45463a`/`07239cf` (cycle-3 test/sync-docs artifacts),
+  `1f594c7`/`ae295f8` (cycle-3 `/cross-review` triage: 1 ACTION_REQUIRED —
+  `.codex/AGENTS.override.md` misclassified core, spec L3 violation),
+  `b3c6307` (AR#1 fix: `ownerForScaffoldPath` reclassifies
+  `.codex/AGENTS.override.md` as seed, + 2 new e2e tests), `d3a9fa6`
+  (cycle-4 self-review: 1 MEDIUM C4-1 + 4 LOW C4-2..C4-5), `7f1c531`
+  (cycle-4 fixes: C4-1 test-fixture correction, C4-2 insight-cycle stamp,
+  C4-5 comment re-wrap, + one batched tech-debt row for C4-1's
+  legacy-manifest residue).
+- Verdict: **PASS**. No CRITICAL/HIGH/MEDIUM/LOW findings against this
+  delta. No static-analysis regressions.
+
+### This report's own cycle-3 finding — resolution confirmed
+
+This report's cycle-3 LOW finding ("C3-5's plan-side half" — `AC-4b`/`AC-9`
+still cited bare `AR#1`/`AR#2` against a triage report whose rows had been
+overwritten in cycle 2) is fixed by `739c9c1`:
+`docs/plans/active/2026-08-18-overlay-scaffold-v2-p3.md:87,93` now read
+"cycle-1 cross-review AR#1 の fix、`fc8e9a9`" and "cycle-1 cross-review AR#2
+の fix、`fc8e9a9`" respectively (`git show 739c9c1` — only those two lines
+changed). Re-read against the current triage report
+(`docs/reports/cross-review-triage-overlay-scaffold-v2-p3.md`, whose rows 1–2
+now hold the cycle-3 AR#1 finding): the plan's citation is unambiguous again.
+Closed.
+
+### Cycle-3 cross-review AR#1 fix crosscheck (`b3c6307` vs. triage table)
+
+| # | Triage finding | Fixed? | Evidence |
+| --- | --- | --- | --- |
+| AR#1 (cycle 3) | `.codex/AGENTS.override.md` falls through `ownerForScaffoldPath`'s catch-all to `owner=core`, so a downstream user edit becomes permanent unresolved drift (exit 3 forever) and an unedited copy is silently overwritten on template changes — spec L3 (不可侵) violation | Yes | `internal/cli/init.go:293` adds `.codex/AGENTS.override.md` to the same `case` arm as `CLAUDE.md`/`ralph.toml`/`.github/workflows/verify.yml` → `scaffold.OwnerSeed`, with a doc-comment paragraph explaining the L3 rationale and citing the triage report by path (re-wrapped onto one line by `7f1c531`, closing C4-5). Two new tests: `TestRunUpgradeV2_CodexAgentsOverride_UserEdited_SeedNeverReplaced` (a hand-edited override survives a template change byte-for-byte, report names it as a pending advisory, manifest records `owner=seed`/`TemplateHash`=new/`DiskHash`=user's) and `_Unedited_TemplateChangeIsAdvisoryOnly` (the control case: an *unedited* copy also survives, rather than being silently replaced). Both bump `Version` to `"1.1.0-test"`, which is fine here — they assert *classification* (owner, disk-content preservation), not convergence, so C4-1's caveat about the version conjunct pre-empting `isFullyConvergedV2` does not apply to these two tests. |
+
+Matches the triage rationale exactly (`docs/reports/cross-review-triage-overlay-scaffold-v2-p3.md`, ACTION_REQUIRED #1: "`ownerForScaffoldPath` に `.codex/AGENTS.override.md` → seed の分岐を追加すれば...").
+
+### Spec L3 contract — independent spot-check
+
+Spot-checked the self-review's cycle-4 positive-note claim that no L3-listed
+path remains under the core catch-all, by enumerating what `templates/base/`
+actually ships against spec `docs/specs/2026-08-17-overlay-scaffold-v2.md`
+line 43's L3 row (`.claude/rules/` outside `ralph/`, non-core-set user
+skills, `.ralph/local/`, `.claude/hooks/local/`,
+`.claude/settings.local.json`, `.codex/AGENTS.override.md`):
+
+- `find templates/base/.claude/rules -maxdepth 1 -type d` → only `ralph/`
+  exists; no non-`ralph/` rules subtree is shipped.
+- `find templates/base/.claude/skills -maxdepth 1 -type d` → 13 skills, all
+  core-set (`self-review`, `test`, `verify`, `org`, `plan`, `spec`, `pr`,
+  `sync-docs`, `cross-review`, `audit-harness`, `work`,
+  `anti-bottleneck`, plus one) — no non-core-set user skill is shipped.
+- `find templates/base -type f | grep -E
+  "settings\.local\.json|hooks/local|\.codex/AGENTS\.override"` → only
+  `templates/base/.codex/AGENTS.override.md` matches; ralph ships neither
+  `.claude/settings.local.json` nor `.claude/hooks/local/`.
+
+So the only L3 paths ralph actually ships are `.ralph/local/**` (seed via
+the existing prefix rule) and `.codex/AGENTS.override.md` (seed as of
+`b3c6307`). `ownerForScaffoldPath`'s catch-all (`return scaffold.OwnerCore`)
+is therefore never reached by an L3 path at HEAD. Confirmed independently,
+not just taken from the self-review's enumeration.
+
+### Cycle-4 self-review fix crosscheck (`7f1c531` vs. C4-1..C4-5)
+
+| ID | Finding | Fixed? | Evidence |
+| --- | --- | --- | --- |
+| C4-1 (MEDIUM) | `TestRunUpgradeV2_SeedAdvisoryOnly_NotANoOp` (the C3-1 regression test) bumps `Version` to `"1.1.0-test"`, so the C3-2 version conjunct short-circuits the gate before `isFullyConvergedV2`'s seed-advisory loop is ever consulted — the test passes even if that loop is deleted | Yes | `internal/cli/upgrade_v2_test.go:811` now sets `Version = "1.0.0-test"` (same as `initV2Project`'s recorded `meta.version`), with a comment stating the rationale ("with the version conjunct satisfied, only isFullyConvergedV2's seed-advisory veto (C3-1) can stop the no-op short-circuit"). Re-derived the mutation-testing claim myself: with the advisory loop in `isFullyConvergedV2` deleted, `oldManifest.Meta.Version == Version` is now the *only* remaining conjunct, it evaluates true, `finishNoOpUpgradeV2` fires, and the test's assertions (stdout must not say "no-op"; report must exist and name `docs/notes.md`; `TemplateHash` must advance) all fail — the test is falsifiable against exactly the term it's named for. |
+| C4-2 (LOW) | Cycle-3 `/cross-review`'s insight event (`06:33:54Z`, subject line "for cycle 3") recorded `"cycle":1` | Yes | `docs/insights/events/2026-08-18-overlay-scaffold-v2-p3.jsonl` line for `ts":"2026-08-18T06:33:54Z"` now reads `"cycle":3`. Replayed the full per-phase cycle sequence at this HEAD: `self_review` 1→2→3→4, `verify` 1→2→3(→4, this pass), `test` 1→2→3, `sync_docs` 1→2→3, `cross_review` 1→2→3 — all monotonic, no other mis-stamp found. |
+| C4-3 (LOW) | This report's own cycle-3 section still asserted the C3-5 plan-reference gap as open, though `739c9c1` (the very next commit after this report's cycle-3 HEAD) had already closed it | Confirmed via this report's own new section above ("This report's own cycle-3 finding — resolution confirmed"). Per the self-review's own disposition, this belongs to `/verify`'s cycle-4 pass, not to a code commit — `7f1c531` correctly left the cycle-3 section's historical text untouched (re-pointing history to describe a state it didn't observe would misrepresent when the reading was taken, same convention the self-review itself follows for its own historical sections) and did not attempt to patch it. |
+| C4-4 (LOW) | Cycle-3 test report's line-number pointer for `TestRunUpgradeV2_ConvergedButVersionBumped_NotANoOp` decayed after `b3c6307` inserted 97 lines ahead of it | N/A to this report | Belongs to `/test`'s own report (`docs/reports/test-2026-08-18-overlay-scaffold-v2-p3.md`), not this one. Not re-verified here — flagged for the tester's cycle-4 pass, consistent with the self-review's own routing. |
+| C4-5 (LOW) | `b3c6307`'s new `init.go` doc-comment line-wrapped the triage report path mid-token, breaking grep-ability | Yes | `internal/cli/init.go:283-284` now keeps the full path
+`docs/reports/cross-review-triage-overlay-scaffold-v2-p3.md` on one comment
+line. `grep -c 'docs/reports/cross-review-triage-overlay-scaffold-v2-p3.md' internal/cli/init.go` → `1` (was `0`); same grep against `upgrade_v2.go` still returns its prior count, so all citations of this path in the package are now grep-able as single tokens. |
+
+4 of the 5 cycle-4 findings are code-side fixes, confirmed closed. C4-3 is
+this report's own finding — resolved by this cycle-4 section itself, not by
+a code commit (correctly so). C4-4 is out of this report's scope (belongs to
+`/test`).
+
+### Static analysis (re-run at cycle-4 HEAD)
+
+`./scripts/run-static-verify.sh` (`RALPH_VERIFY_SCOPE=full`; log:
+`docs/evidence/verify-2026-08-18-065658.log`):
+
+- `scripts/check-sync.sh`: PASS — IDENTICAL 158, DRIFTED 0, ROOT_ONLY 0,
+  TEMPLATE_ONLY 11, KNOWN_DIFF 3 (identical counts to cycles 1–3, no
+  regression)
+- `scripts/check-pipeline-sync.sh`: PASS — all 6 referencing docs in sync
+- `scripts/check-skill-sync.sh`: PASS — 13 skills in lock-step
+- Codex hook guards (single-source, inline-hook-detector smoke test, PR
+  provenance policy guard): all PASS
+- Go verifier (scope: `full`): `gofmt -l .` → "gofmt: ok"; `golangci-lint
+  run ./...` → "0 issues."
+- Overall: `All verifiers passed.`
+- Cross-checked independently outside the wrapper: `go build ./...` and
+  `go vet ./...` both exit clean (no output) at HEAD `7f1c531`.
+
+### Plan coherence (cycle 4)
+
+- Progress checklist, Objective, Scope, Non-goals, Design decisions, and
+  Risks sections re-read at this HEAD: internally consistent with the
+  shipped code. The new "判断" bullet `b3c6307` added (legacy-manifest
+  `.codex/AGENTS.override.md` reclassification deferred to Phase 4) matches
+  the tech-debt row `7f1c531` appended — same wording, same trigger
+  (Phase 4's migration classifier), no drift between the two artifacts.
+- The batched tech-debt row `7f1c531` appended
+  (`docs/tech-debt/README.md`, last row) accurately describes present-tense
+  reality: it names `b3c6307` as the commit that reclassified
+  `.codex/AGENTS.override.md`, states the blast radius is zero because no
+  released binary ever produced a v2 manifest (`git tag --contains` on the
+  first `LayoutV2` commit returns no tags — re-confirmed independently),
+  and routes the residual pre-`b3c6307` test-fixture-manifest case to Phase
+  4. No self-resolving or stale-on-arrival row.
+
+### Known gaps (cycle 4)
+
+- No behavioral test execution was performed here (by design — `/test`'s
+  job); C4-4 (the test report's decayed line-number pointer) is `/test`'s
+  own fix to make, not re-verified here.
+- Cycle-4 `/cross-review` has not yet run against this delta. This is the
+  final cycle at the current cap (`RALPH_STANDARD_MAX_PIPELINE_CYCLES`
+  raised twice, now 4); per
+  `.claude/rules/ralph/post-implementation-pipeline.md`'s cap-reached
+  branching, a fresh ACTION_REQUIRED finding here would go to the operator
+  as a raise/proceed/abort decision rather than triggering another
+  fix-and-revalidate cycle.
+- This pass did not re-run `go test ./...` (that is `/test`'s job by
+  contract); `go build`/`go vet` were run as a static, non-behavioral
+  compile/vet cross-check only.
