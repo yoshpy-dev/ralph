@@ -88,3 +88,52 @@ $ ./scripts/check-skill-sync.sh
 ### Known gaps (cycle 2)
 
 None. No living-doc edits were needed; the delta's doc-facing changes (tech-debt row updates, plan AC/checklist ticks, code doc-comment reword) were already made by the fix and verify commits themselves and are confirmed consistent above.
+
+---
+
+## Cycle 3 (final cycle, 3/3, after cap raise)
+
+- Date: 2026-08-18
+- Scope: delta since cycle-2 sync-docs (`b80b5f9..HEAD`, HEAD `f45463a`). Commits reviewed: `1bb8367` (cycle-2 cross-review triage rewrite), `41ad745` (dry-run exception-face preview + no-op short-circuit + spec NFR-1 amendment), `a0b9363` (cycle-3 self-review, one HIGH: C3-1), `6533227` (fix: veto no-op short-circuit on seed advisories and version change — closes C3-1/C3-2/C3-3/C3-4), `739c9c1` (docs: qualify cycle-1 AR references in the plan — closes C3-5), `4df2ce9` (cycle-3 verify, one LOW carried over from before `739c9c1` landed), `f45463a` (cycle-3 test artifact).
+- Verdict: **Drift found and fixed.** README's `ralph upgrade` section had gone stale against `41ad745`'s behavior change (see below). Everything else in the assignment's residual checklist was already consistent.
+
+### What was checked
+
+1. **README's `ralph upgrade` section vs. the no-op/dry-run behavior change in `41ad745`/`6533227`** (residual check item 1) — `41ad745` made a fully-converged rerun write **zero files, including the dated report** (`finishNoOpUpgradeV2` only writes to stdout), and made `--dry-run` additionally preview the four "exception faces" (`AGENTS.md`, `.gitignore`, `.claude/settings.json`, the settings snapshot) that the core replace plan never covers. README.md:137 still claimed unconditionally "A dated report is written to `docs/reports/upgrade-<version>-<date>.md` summarizing every action" and README.md:141's exit-3 sentence still claimed unresolved-drift paths are "listed in the report and on stderr" — both false on a converged no-op rerun with residual drift (`finishNoOpUpgradeV2` explicitly skips the report and only writes to stderr in that case; see the self-review's C3-1/C3-2 analysis and `docs/specs/2026-08-17-overlay-scaffold-v2.md` NFR-1 as amended by `41ad745`). Fixed both sentences (see below) and added one clause to the `--dry-run` flag description noting it also previews the exception faces, so the flag docs match `renderUpgradeV2ExceptionFacePreview`'s actual scope. This is the drift the team lead's hand-off specifically flagged as a residual risk.
+2. **Spec NFR-1 amendment (`41ad745`) reads coherently in context** — re-read NFR-1 alongside NFR-2 through NFR-5 and the plan's Design decisions section. The amended wording ("標準出力に no-op を明記。収束済みの再実行では日付付きレポートファイル自体を書かない — レポートは新たな適用結果があった実行でのみ生成される") is self-contained, matches the plan's AC-5 wording (itself brought into line by `6533227`/`739c9c1`), and matches `finishNoOpUpgradeV2`'s actual behavior confirmed in the cycle-3 verify report's "AC-5 / AC-10 under the new no-op semantics" section. No incoherence found.
+3. **Tech-debt rows** — grepped `docs/tech-debt/README.md` for any row this delta's commits should have touched. None of the seven delta commits (`1bb8367`, `41ad745`, `a0b9363`, `6533227`, `739c9c1`, `4df2ce9`, `f45463a`) modify `docs/tech-debt/README.md`, and none needed to: C3-1/C3-2 (the no-op-swallows-advisories/version bugs) were genuinely **fixed** by `6533227`, not deferred, so no new row was warranted — consistent with the self-review's cycle-3 recommendation ("if the operator instead chooses to ship as-is, C3-1 and C3-2 must go to tech-debt" — they didn't ship as-is; they were fixed). Rows already reconciled in cycle 2 (`3d8461d`/`6b617dc` fixes, confirmed in this report's cycle-1/cycle-2 sections above) remain untouched and still accurate.
+4. **Plan coherence (AC-5 reworded, AR refs qualified)** — `docs/plans/active/2026-08-18-overlay-scaffold-v2-p3.md`: AC-5 now reads "同一バイナリでの再実行が書き込みゼロの no-op(標準出力に no-op 明記、レポートファイルは書かない)" (`6533227`), verbatim-consistent with the amended NFR-1 and with README.md's now-corrected report-writing bullet. AC-4b and AC-9 now both read "cycle-1 cross-review AR#1/AR#2" (`739c9c1`), resolving the C3-5 finding (bare `AR#1`/`AR#2` was ambiguous once `1bb8367` overwrote the triage report's rows with cycle-2 findings using the same numbering). All twelve AC checkboxes remain ticked and match the artifacts under `docs/reports/`. Progress checklist rows (Review/Verification/Test/Sync-docs artifact created) are all ticked; "Plan reviewed" and "PR created" remain correctly unticked. No further plan edits needed.
+5. **Spot-checked `docs/reports/cross-review-triage-overlay-scaffold-v2-p3.md`** (touched by `1bb8367` in this delta) for internal consistency with its own commit message ("update ... for cycle 2") — the report's own header and rows describe cycle-2 findings; the C3-4 finding (insight-event `cycle:1` mislabel on the line `1bb8367` appended) was independently caught by the self-review and fixed in `6533227`(confirmed above in "What was checked" item 3 of this report's earlier cycle-1 section — grepped `docs/insights/events/2026-08-18-overlay-scaffold-v2-p3.jsonl`, the `cross_review` line now reads `"cycle":2`). No remaining mismatch.
+
+### Fixed in this pass
+
+- **README.md** (`## \`ralph upgrade\``) — three edits:
+  - The "dated report" bullet now states the report is skipped on a true no-op rerun, with the exact stdout message it prints instead.
+  - The `--dry-run` flag description now names the four exception faces it previews (previously described only as "the plan").
+  - The exit-3 sentence now says unresolved-drift paths are listed on stderr always, but in the report only on runs that write one (previously implied the report always exists).
+
+### Verification after doc edits
+
+```
+$ ./scripts/check-sync.sh
+=== Sync Summary ===
+  IDENTICAL:      158
+  DRIFTED:        0
+  ROOT_ONLY:      0
+  TEMPLATE_ONLY:  11
+  KNOWN_DIFF:     3
+PASS: all files in sync.
+
+$ ./scripts/check-skill-sync.sh
+[ok] check-skill-sync: 13 skill(s) in lock-step
+```
+
+### Files changed (cycle 3)
+
+- `README.md` (`ralph upgrade` section: no-op report semantics, dry-run exception-face preview, exit-3 report caveat)
+- `docs/reports/sync-docs-2026-08-18-overlay-scaffold-v2-p3.md` (this Cycle 3 section)
+- `docs/insights/events/2026-08-18-overlay-scaffold-v2-p3.jsonl` (appended `sync_docs` cycle-3 event)
+
+### Known gaps (cycle 3)
+
+None. The README fix closes the one drift this cycle introduced; everything else in the residual checklist (spec NFR-1 coherence, tech-debt rows, plan coherence) was already consistent by the time this pass ran, because the fix commits (`6533227`, `739c9c1`) and the cycle-3 verify pass (`4df2ce9`) had already reconciled the non-README artifacts.

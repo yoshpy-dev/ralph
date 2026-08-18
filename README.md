@@ -134,11 +134,11 @@ Run `ralph help <command>` for flags.
 - Managed blocks (`AGENTS.md`, `.gitignore`) are updated in place; content outside the block markers is preserved byte-for-byte.
 - `.claude/settings.json` is 3-way merged against the `.ralph/core/settings.ralph.json` snapshot — user-added permissions are kept, ralph-owned keys are updated, and stale ralph-owned entries are removed.
 - Template-side changes to drifted, forked, or seed-already-present paths are recorded as advisory diffs rather than applied.
-- A dated report is written to `docs/reports/upgrade-<version>-<date>.md` summarizing every action, including any advisory diffs and unresolved drift.
+- A dated report is written to `docs/reports/upgrade-<version>-<date>.md` summarizing every action, including any advisory diffs and unresolved drift — unless the run was a true no-op (tree already fully converged with the embedded templates), in which case nothing is written and standard output states `Upgrade no-op: ... (already up to date, zero writes)`.
 
-Flags: `--dry-run` previews the plan without writing anything; `--diff` implies `--dry-run` and additionally prints the full advisory diff output (reusing the same colorized, pager-aware rendering as before — `--pager auto|always|never`, `NO_COLOR=1` to suppress ANSI escapes).
+Flags: `--dry-run` previews the plan without writing anything, including the pending outcome of `AGENTS.md`, `.gitignore`, `.claude/settings.json`, and the settings snapshot; `--diff` implies `--dry-run` and additionally prints the full advisory diff output (reusing the same colorized, pager-aware rendering as before — `--pager auto|always|never`, `NO_COLOR=1` to suppress ANSI escapes).
 
-Exit codes: `0` success, `1` execution error, `3` completed with unresolved drift remaining (paths are listed in the report and on stderr). There is no `--force` flag — re-adopting a forked or drifted path is a manual step (make the file match the new template content, then let the next upgrade converge it) until the `adopt` command ships in a later phase.
+Exit codes: `0` success, `1` execution error, `3` completed with unresolved drift remaining (paths are listed on stderr, and in the report on runs that write one). There is no `--force` flag — re-adopting a forked or drifted path is a manual step (make the file match the new template content, then let the next upgrade converge it) until the `adopt` command ships in a later phase.
 
 ## What `ralph init` scaffolds
 
