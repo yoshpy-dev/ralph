@@ -573,11 +573,11 @@ func TestRunUpgradeV2_SettingsWriteFailure_SnapshotNotAdvanced(t *testing.T) {
 // each one refuses to write through a symlinked target instead of silently
 // writing through it to a location outside targetDir.
 
-// TestRunUpgradeV2_SymlinkedSettingsJSON_RejectedZeroWrites pins the cycle-1
+// TestRunUpgradeV2_SymlinkedSettingsJSON_RejectedNoEscape pins the cycle-1
 // cross-review fix (AR#2): a symlinked .claude/settings.json target must
 // make the settings merge write fail with an error, leaving the symlink and
 // its external target completely untouched.
-func TestRunUpgradeV2_SymlinkedSettingsJSON_RejectedZeroWrites(t *testing.T) {
+func TestRunUpgradeV2_SymlinkedSettingsJSON_RejectedNoEscape(t *testing.T) {
 	target := initV2Project(t, gen1(), "1.0.0-test")
 
 	settingsPath := filepath.Join(target, ".claude", "settings.json")
@@ -673,12 +673,12 @@ func TestRunUpgradeV2_SymlinkedSettingsSnapshot_RejectedAfterSettingsJSONWritten
 	}
 }
 
-// TestRunUpgradeV2_SymlinkedReportsDir_RejectedZeroWrites pins the same fix
+// TestRunUpgradeV2_SymlinkedReportsDir_RejectedNoEscape pins the same fix
 // applied to the upgrade report write (internal/upgrade.WriteUpgradeReport):
 // a symlinked docs/reports directory must make the report write fail with
 // an error rather than writing the report through the symlink to a location
 // outside targetDir.
-func TestRunUpgradeV2_SymlinkedReportsDir_RejectedZeroWrites(t *testing.T) {
+func TestRunUpgradeV2_SymlinkedReportsDir_RejectedNoEscape(t *testing.T) {
 	target := initV2Project(t, gen1(), "1.0.0-test")
 
 	externalDir := t.TempDir()

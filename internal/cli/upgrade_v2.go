@@ -560,9 +560,12 @@ func readFinalDiskContent(targetDir, relPath string) ([]byte, error) {
 // directories as needed, using the same permission heuristic as the rest of
 // the scaffold/upgrade write paths.
 //
-// This is the write path for both v2 exception-face writes that bypass
-// ApplyOps (the settings.json 3-way merge and the settings.ralph.json
-// snapshot — see v2SkipPaths' doc comment). Because those two writes never
+// This is the write path for two of the four v2 exception faces that
+// bypass ApplyOps: the settings.json 3-way merge and the settings.ralph.json
+// snapshot (see v2SkipPaths' doc comment for the full set — the two block
+// surfaces, AGENTS.md and .gitignore, write via updateOneBlockV2 instead,
+// which carries its own leaf Lstat guard and whose root-level targets have
+// no parent chain to validate). Because these two writes never
 // go through ApplyOps' preflight, writeFileV2 applies the same containment
 // checks itself: upgrade.ValidateRealParentChain against every existing
 // parent path component, plus an Lstat of the leaf that rejects anything
