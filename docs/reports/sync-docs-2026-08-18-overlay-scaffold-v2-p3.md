@@ -137,3 +137,43 @@ $ ./scripts/check-skill-sync.sh
 ### Known gaps (cycle 3)
 
 None. The README fix closes the one drift this cycle introduced; everything else in the residual checklist (spec NFR-1 coherence, tech-debt rows, plan coherence) was already consistent by the time this pass ran, because the fix commits (`6533227`, `739c9c1`) and the cycle-3 verify pass (`4df2ce9`) had already reconciled the non-README artifacts.
+
+---
+
+## Cycle 4 (final cycle, 4/4)
+
+- Date: 2026-08-18
+- Scope: delta since cycle-3 sync-docs (`07239cf..HEAD`, HEAD `e2aca9a`). Commits reviewed: `1f594c7` (cycle-3 cross-review triage update), `ae295f8` (triage summary-count correction), `b3c6307` (fix: classify `.codex/AGENTS.override.md` as seed per L3 overlay contract — cycle-3 cross-review AR#1), `d3a9fa6` (cycle-4 self-review artifact), `7f1c531` (fix: address phase-3 cycle-4 self-review findings — tech-debt row + doc-comment line-length fix + insight-event cycle mislabel fix + test-version-pin comment), `4aba6f3` (cycle-4 verify artifact), `e2aca9a` (cycle-4 test artifact).
+- Verdict: **No drift found.**
+
+### What was checked
+
+1. **`.codex/AGENTS.override.md` ownership classification (`b3c6307`) vs. living docs describing `.codex/` or the L1/L3 ownership split** — `b3c6307` moves `.codex/AGENTS.override.md` from the `ownerForScaffoldPath` catch-all (core) to an explicit `OwnerSeed` case, matching the spec's classification. Confirmed against `docs/specs/2026-08-17-overlay-scaffold-v2.md` lines 41/43: the L1 core row already lists `.codex/`(`AGENTS.override.md` 除く)`(".codex/" excluding AGENTS.override.md)` and the L3 overlay row already lists `.codex/AGENTS.override.md` explicitly — the spec had this file classified as L3/seed from the start; `b3c6307` brings the code into alignment with a spec that was already correct, not the other way around. Also checked `AGENTS.md`'s repo map line 108 (`.codex/` bullet: lists `config.toml`, `agents/`, `hooks/`, `AGENTS.override.md`, `README.md` and notes root/`templates/base/.codex/` parity via `check-sync.sh`) — this line describes directory contents and the sync gate, not per-file owner classification, so `b3c6307`'s owner change doesn't touch anything this bullet claims. No doc edit needed.
+2. **Tech-debt row added by `7f1c531`** (`docs/tech-debt/README.md`, new last row) — cross-checked its four claims against the repo: (a) "pre-b3c6307 commits... record `.codex/AGENTS.override.md` with owner=core" — matches `b3c6307`'s diff (the field only exists after that commit); (b) "`git tag --contains` on the first LayoutV2 commit returns no tags" — identified the manifest v3 ownership schema's introducing commit via `git log --all --oneline -S "LayoutV2" -- internal/scaffold/` (`75de545`, "feat: add manifest v3 ownership schema and shared path validator") and confirmed `git tag --contains 75de545` returns empty; the repo does carry 35 pre-existing release tags (`v1.0.0`..`v3.3.3`) for unrelated prior work, none of which contain this commit — so the tech-debt row's "no released binary ever produced a v2 manifest" claim holds; (c) the "Owner re-attribution... is the migration classifier's job (spec Phase 4)" pointer matches the plan's own Deviations entry (same commit, `docs/plans/active/2026-08-18-overlay-scaffold-v2-p3.md`: "レガシー(旧分類)manifest の再分類は Phase 4 の移行分類器のスコープ") and the plan's Non-goals ("旧レイアウト→v2 の移行ロジック(Phase 4)") — internally consistent, not a new or dangling forward reference; (d) evidence column paths (`docs/reports/cross-review-triage-overlay-scaffold-v2-p3.md`, `docs/reports/self-review-2026-08-18-overlay-scaffold-v2-p3.md`, `internal/cli/init.go`) all exist and contain the referenced content (triage cycle-3 AR#1, self-review Cycle 4, `ownerForScaffoldPath`). No correction needed.
+3. **Plan Deviations section coherence** — the plan already carries its own note on the same `b3c6307` finding (added by that same commit, not this pass): "cycle-3 cross-review AR#1 の fix で発見: ...レガシー(旧分類)manifest の再分類は Phase 4 の移行分類器のスコープとし、本フェーズでは追わない". This note and the new tech-debt row (`7f1c531`) describe the same fact from two angles (plan-local deviation log vs. cross-plan tech-debt register) and do not contradict each other. Progress checklist: all rows through "Sync-docs artifact created" remain ticked; "Plan reviewed" and "PR created" remain correctly unticked.
+4. **`7f1c531`'s other three changes** — (a) the `init.go` doc-comment line-wrap fix (splitting a URL-adjacent path reference across two lines) is a formatting-only change with no content delta, confirmed byte-for-byte content match aside from the line break; (b) the insight-event `cross_review` line's `cycle` field correction (`1` → `3`, self-review C4 finding) matches the actual pipeline history (this is cycle-3's cross-review, not cycle-1's — corroborated by the surrounding self_review/verify/test lines all stamped `cycle:3` in the same file); (c) the `TestRunUpgradeV2_SeedAdvisoryOnly_NotANoOp` comment/version-pin change is a test-only edit (`internal/cli/upgrade_v2_test.go`), out of doc-sync scope. None require a living-doc update.
+
+### Verification after this pass
+
+```
+$ ./scripts/check-sync.sh
+=== Sync Summary ===
+  IDENTICAL:      158
+  DRIFTED:        0
+  ROOT_ONLY:      0
+  TEMPLATE_ONLY:  11
+  KNOWN_DIFF:     3
+PASS: all files in sync.
+
+$ ./scripts/check-skill-sync.sh
+[ok] check-skill-sync: 13 skill(s) in lock-step
+```
+
+### Files changed (cycle 4)
+
+- `docs/reports/sync-docs-2026-08-18-overlay-scaffold-v2-p3.md` (this Cycle 4 section)
+- `docs/insights/events/2026-08-18-overlay-scaffold-v2-p3.jsonl` (appended `sync_docs` cycle-4 event)
+
+### Known gaps (cycle 4)
+
+None. This was a residual/confirmatory pass on a small delta (one classification fix, one self-review fix-slice, two triage/report-only commits); no living-doc edit was needed because the spec already classified `.codex/AGENTS.override.md` as L3/seed before `b3c6307` landed, and the new tech-debt row is internally consistent with the plan's own Deviations note on the same finding.
