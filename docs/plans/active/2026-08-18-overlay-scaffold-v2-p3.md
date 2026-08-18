@@ -135,7 +135,7 @@ v2 manifest(`meta.layout = "v2"`)に対する `ralph upgrade` は次を非対話
 
 ## Open questions
 
-- desired-state マップ入力の具体 API 形状(fs.FS アダプタ vs map 直接)— スライス 1 で確定し plan に追記
+- ~~desired-state マップ入力の具体 API 形状~~ → スライス 1 で確定: `PlanCoreReplaceDesired(m, targetDir, desired map[string][]byte, opts ReplaceOptions)` が主入口、`PlanCoreReplace`(fs.FS)は薄いアダプタ。`ReplaceOptions{SkipPaths, PreservePrefixes}`、preserve は「テンプレート完全不在の名前空間のみ保護、desired に内容があれば通常分類」の意味論
 - report の `--diff` 表示と docs/reports への full-diff 記録の分担 — スライス 2 で確定
 
 ## Progress checklist
