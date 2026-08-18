@@ -17,6 +17,7 @@ import (
 
 const testAgentsCoreManaged = "## Mission\n\nManaged agents guidance.\n"
 const testGitignoreManaged = ".ralph/local/\nnode_modules/\n"
+const testSettingsSnapshotContent = "{\n  \"env\": {}\n}\n"
 
 func testAgentsMDContent() []byte {
 	return []byte("# AGENTS.md\n\nProject notes go here.\n\n" +
@@ -50,6 +51,7 @@ func setupTestEmbedFSV2(t *testing.T) {
 		"templates/base/.claude/settings.json":              {Data: []byte("{}\n")},
 		"templates/base/scripts/run-verify.sh":              {Data: []byte("#!/bin/sh\necho ok\n")},
 		"templates/base/.ralph/local/verify.d/.gitkeep":     {Data: []byte("")},
+		"templates/base/.ralph/core/settings.ralph.json":    {Data: []byte(testSettingsSnapshotContent)},
 	}
 }
 
@@ -84,6 +86,7 @@ func TestExecuteInit_V2_FreshInit_LayoutAndOwners(t *testing.T) {
 		filepath.Join(".claude", "skills", "work", "SKILL.md"):    scaffold.OwnerCore,
 		filepath.Join("scripts", "run-verify.sh"):                 scaffold.OwnerCore,
 		filepath.Join(".ralph", "local", "verify.d", ".gitkeep"):  scaffold.OwnerSeed,
+		filepath.Join(".ralph", "core", "settings.ralph.json"):    scaffold.OwnerCore,
 	}
 	for path, wantOwner := range wantOwners {
 		entry, ok := m.Files[path]
@@ -106,6 +109,20 @@ func TestExecuteInit_V2_FreshInit_LayoutAndOwners(t *testing.T) {
 	result := upgrade.UpdateManagedBlock(agentsOnDisk, "agents-md", []byte(testAgentsCoreManaged))
 	if result.Outcome != upgrade.BlockUnchanged {
 		t.Fatalf("AGENTS.md block interior mismatch or malformed: outcome=%v reason=%q", result.Outcome, result.Reason)
+	}
+
+	// The settings.json snapshot renders via the normal owner=core catch-all
+	// (no init-specific special-casing needed) and LoadSettingsSnapshot must
+	// find it immediately after a fresh init.
+	snapshotOnDisk, found, err := upgrade.LoadSettingsSnapshot(target)
+	if err != nil {
+		t.Fatalf("LoadSettingsSnapshot: %v", err)
+	}
+	if !found {
+		t.Fatal("LoadSettingsSnapshot found = false after fresh v2 init, want true")
+	}
+	if string(snapshotOnDisk) != testSettingsSnapshotContent {
+		t.Errorf("settings.ralph.json on disk = %q, want %q", snapshotOnDisk, testSettingsSnapshotContent)
 	}
 }
 

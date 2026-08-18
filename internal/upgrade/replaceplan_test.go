@@ -3,6 +3,7 @@ package upgrade
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -564,21 +565,33 @@ func TestApplyOps_WritesCreateAndUpdateAndDelete(t *testing.T) {
 }
 
 // TestApplyOps_PartialFailureStopsSubsequentOps proves the commit-barrier
-// contract: when an op mid-plan fails (here, the create target path is
-// already occupied by a directory), ApplyOps returns an error identifying
+// contract: when an op mid-plan fails, ApplyOps returns an error identifying
 // the failed op and does not attempt ops that come after it.
+//
+// The failure is injected via chmod 0o444 on an existing regular file
+// rather than a directory-in-the-way: since ApplyOps now Lstat-preflights
+// every op target (a directory target fails preflight before any op
+// executes, see TestApplyOps_LstatPreflightRejectsDirectoryTarget), a
+// directory-collision failure would no longer land mid-plan and this test
+// would no longer exercise the "ops before the failure already landed"
+// case. chmod is root-defeated (root can write a 0o444 file), so this test
+// skips under root instead of hard-failing there.
 func TestApplyOps_PartialFailureStopsSubsequentOps(t *testing.T) {
-	dir := t.TempDir()
-	// "blocked.md" already exists as a directory, so writing a file there
-	// fails.
-	if err := os.MkdirAll(filepath.Join(dir, "blocked.md"), 0755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
+	if os.Geteuid() == 0 {
+		t.Skip("chmod 0o444 does not deny writes to root; this failure-injection technique cannot run as root")
 	}
+	dir := t.TempDir()
+	writeDiskFile(t, dir, "blocked.md", "old")
+	blockedPath := filepath.Join(dir, "blocked.md")
+	if err := os.Chmod(blockedPath, 0o444); err != nil {
+		t.Fatalf("chmod blocked.md read-only: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(blockedPath, 0o644) })
 
 	plan := ReplacePlan{
 		Ops: []FileOp{
 			{Kind: OpCreate, Path: "first.md", Content: []byte("first")},
-			{Kind: OpCreate, Path: "blocked.md", Content: []byte("should fail")},
+			{Kind: OpUpdate, Path: "blocked.md", Content: []byte("should fail")},
 			{Kind: OpCreate, Path: "third.md", Content: []byte("never written")},
 		},
 	}
@@ -587,7 +600,7 @@ func TestApplyOps_PartialFailureStopsSubsequentOps(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected ApplyOps to return an error")
 	}
-	if !strings.Contains(err.Error(), "create") || !strings.Contains(err.Error(), "blocked.md") {
+	if !strings.Contains(err.Error(), "update") || !strings.Contains(err.Error(), "blocked.md") {
 		t.Errorf("error %q does not identify the failed op", err.Error())
 	}
 
@@ -734,5 +747,323 @@ func TestApplyOps_RejectsInvalidOpPathBeforeWritingAnything(t *testing.T) {
 	}
 	if _, statErr := os.Stat(filepath.Join(filepath.Dir(dir), "outside", "escape.md")); !os.IsNotExist(statErr) {
 		t.Errorf("escape.md should not exist outside targetDir: stat err = %v", statErr)
+	}
+}
+
+// --- desired-state map input (PlanCoreReplaceDesired) ---
+
+// TestPlanCoreReplaceDesired_EquivalentToFSAdapter proves PlanCoreReplace is
+// a thin adapter: walking the same content through an fs.FS and through a
+// direct path→content map must produce byte-for-byte identical plans.
+func TestPlanCoreReplaceDesired_EquivalentToFSAdapter(t *testing.T) {
+	dir := t.TempDir()
+	writeDiskFile(t, dir, "existing.md", "old content")
+
+	files := map[string]string{
+		"existing.md":  "new content",
+		"brand-new.md": "brand new content",
+	}
+	tmpl := mapFS(files)
+	desired := make(map[string][]byte, len(files))
+	for path, content := range files {
+		desired[path] = []byte(content)
+	}
+
+	m := scaffold.NewManifest("0.1.0")
+	if err := m.SetFileOwned("existing.md", scaffold.OwnerCore, hashOf("old content"), hashOf("old content")); err != nil {
+		t.Fatalf("SetFileOwned: %v", err)
+	}
+
+	fsPlan, err := PlanCoreReplace(m, dir, tmpl)
+	if err != nil {
+		t.Fatalf("PlanCoreReplace: %v", err)
+	}
+	mapPlan, err := PlanCoreReplaceDesired(m, dir, desired, ReplaceOptions{})
+	if err != nil {
+		t.Fatalf("PlanCoreReplaceDesired: %v", err)
+	}
+	if !reflect.DeepEqual(fsPlan, mapPlan) {
+		t.Errorf("desired-map plan differs from fs.FS adapter plan:\nfs:  %+v\nmap: %+v", fsPlan, mapPlan)
+	}
+}
+
+// TestPlanCoreReplaceDesired_SkipPaths_ExcludedFromEveryList proves a path
+// listed in ReplaceOptions.SkipPaths never appears in any output list (Ops,
+// ManifestRefresh, Drift, Advisories, LegacySkipped, ManifestRemove,
+// Preserved), even when template, manifest, and disk are all present and
+// would otherwise classify normally (here: disk content differs from both
+// the recorded and template hashes, which would ordinarily be Drift).
+func TestPlanCoreReplaceDesired_SkipPaths_ExcludedFromEveryList(t *testing.T) {
+	dir := t.TempDir()
+	writeDiskFile(t, dir, ".claude/settings.json", "disk content")
+
+	desired := map[string][]byte{".claude/settings.json": []byte("template content")}
+	m := scaffold.NewManifest("0.1.0")
+	if err := m.SetFileOwned(".claude/settings.json", scaffold.OwnerCore, hashOf("recorded content"), hashOf("recorded content")); err != nil {
+		t.Fatalf("SetFileOwned: %v", err)
+	}
+
+	plan, err := PlanCoreReplaceDesired(m, dir, desired, ReplaceOptions{
+		SkipPaths: map[string]bool{".claude/settings.json": true},
+	})
+	if err != nil {
+		t.Fatalf("PlanCoreReplaceDesired: %v", err)
+	}
+
+	assertNoOpFor(t, plan, ".claude/settings.json")
+	for _, r := range plan.ManifestRefresh {
+		if r.Path == ".claude/settings.json" {
+			t.Errorf("skipped path must not appear in ManifestRefresh: %+v", r)
+		}
+	}
+	for _, d := range plan.Drift {
+		if d.Path == ".claude/settings.json" {
+			t.Errorf("skipped path must not appear in Drift: %+v", d)
+		}
+	}
+	for _, a := range plan.Advisories {
+		if a.Path == ".claude/settings.json" {
+			t.Errorf("skipped path must not appear in Advisories: %+v", a)
+		}
+	}
+	for _, p := range plan.LegacySkipped {
+		if p == ".claude/settings.json" {
+			t.Error("skipped path must not appear in LegacySkipped")
+		}
+	}
+	for _, p := range plan.ManifestRemove {
+		if p == ".claude/settings.json" {
+			t.Error("skipped path must not appear in ManifestRemove")
+		}
+	}
+	for _, p := range plan.Preserved {
+		if p == ".claude/settings.json" {
+			t.Error("skipped path must not appear in Preserved")
+		}
+	}
+}
+
+// TestPlanCoreReplaceDesired_PreservePrefixes_ManifestEntryWithNoTemplate
+// proves a manifest-tracked owner=core path under a preserve prefix whose
+// desired-state map has no content for it (e.g. an uninstalled language
+// pack) produces no delete op, no ManifestRemove entry, and no Drift entry.
+// The path is reported in ReplacePlan.Preserved instead, and ApplyOps
+// leaves its disk content untouched (AC-9).
+func TestPlanCoreReplaceDesired_PreservePrefixes_ManifestEntryWithNoTemplate(t *testing.T) {
+	dir := t.TempDir()
+	writeDiskFile(t, dir, "packs/languages/golang/rule.md", "golang rule content")
+
+	m := scaffold.NewManifest("0.1.0")
+	if err := m.SetFileOwned("packs/languages/golang/rule.md", scaffold.OwnerCore, hashOf("golang rule content"), hashOf("golang rule content")); err != nil {
+		t.Fatalf("SetFileOwned: %v", err)
+	}
+
+	plan, err := PlanCoreReplaceDesired(m, dir, map[string][]byte{}, ReplaceOptions{
+		PreservePrefixes: []string{"packs/languages/golang/"},
+	})
+	if err != nil {
+		t.Fatalf("PlanCoreReplaceDesired: %v", err)
+	}
+
+	assertNoOpFor(t, plan, "packs/languages/golang/rule.md")
+	for _, d := range plan.Drift {
+		if d.Path == "packs/languages/golang/rule.md" {
+			t.Errorf("preserved path must not be classified as drift: %+v", d)
+		}
+	}
+	for _, p := range plan.ManifestRemove {
+		if p == "packs/languages/golang/rule.md" {
+			t.Error("preserved path must not appear in ManifestRemove")
+		}
+	}
+	if len(plan.Preserved) != 1 || plan.Preserved[0] != "packs/languages/golang/rule.md" {
+		t.Errorf("Preserved = %+v, want [packs/languages/golang/rule.md]", plan.Preserved)
+	}
+
+	if err := ApplyOps(dir, plan); err != nil {
+		t.Fatalf("ApplyOps: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "packs", "languages", "golang", "rule.md"))
+	if err != nil || string(got) != "golang rule content" {
+		t.Errorf("preserved file must be untouched by ApplyOps: got %q, err %v", got, err)
+	}
+}
+
+// TestPlanCoreReplaceDesired_PreservePrefixes_TemplatePresentClassifiesNormally
+// proves the preserve mechanism only suppresses the "template absent"
+// outcome: a path under a preserve prefix that DOES have desired-state
+// content (the pack is still installed) classifies exactly as it would
+// without the prefix.
+func TestPlanCoreReplaceDesired_PreservePrefixes_TemplatePresentClassifiesNormally(t *testing.T) {
+	dir := t.TempDir()
+	writeDiskFile(t, dir, "packs/languages/golang/rule.md", "old content")
+
+	m := scaffold.NewManifest("0.1.0")
+	if err := m.SetFileOwned("packs/languages/golang/rule.md", scaffold.OwnerCore, hashOf("old content"), hashOf("old content")); err != nil {
+		t.Fatalf("SetFileOwned: %v", err)
+	}
+
+	desired := map[string][]byte{"packs/languages/golang/rule.md": []byte("new content")}
+	plan, err := PlanCoreReplaceDesired(m, dir, desired, ReplaceOptions{
+		PreservePrefixes: []string{"packs/languages/golang/"},
+	})
+	if err != nil {
+		t.Fatalf("PlanCoreReplaceDesired: %v", err)
+	}
+
+	op := findOp(t, plan, "packs/languages/golang/rule.md")
+	if op.Kind != OpUpdate {
+		t.Errorf("Kind = %v, want OpUpdate (an actively desired path under a preserve prefix must classify normally)", op.Kind)
+	}
+	if len(plan.Preserved) != 0 {
+		t.Errorf("Preserved = %+v, want empty (path had desired-state content)", plan.Preserved)
+	}
+}
+
+// --- ApplyOps Lstat preflight (AC-4b) ---
+
+// TestApplyOps_LstatPreflightRejectsSymlinkTarget_ZeroWrites proves the
+// Lstat preflight runs before any op executes: a symlinked op target
+// anywhere in the plan makes ApplyOps fail with zero filesystem changes,
+// including ops ordered before it that would otherwise have succeeded.
+func TestApplyOps_LstatPreflightRejectsSymlinkTarget_ZeroWrites(t *testing.T) {
+	dir := t.TempDir()
+	writeDiskFile(t, dir, "external.md", "outside content")
+	symlinkPath := filepath.Join(dir, "linked.md")
+	if err := os.Symlink(filepath.Join(dir, "external.md"), symlinkPath); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+
+	plan := ReplacePlan{
+		Ops: []FileOp{
+			{Kind: OpCreate, Path: "first.md", Content: []byte("would succeed")},
+			{Kind: OpUpdate, Path: "linked.md", Content: []byte("should not be written")},
+		},
+	}
+
+	err := ApplyOps(dir, plan)
+	if err == nil {
+		t.Fatal("expected ApplyOps to reject a symlinked op target")
+	}
+	if !strings.Contains(err.Error(), "linked.md") {
+		t.Errorf("error %q does not name the symlinked path", err.Error())
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "first.md")); !os.IsNotExist(statErr) {
+		t.Errorf("first.md should not have been written (preflight runs before any op executes): stat err = %v", statErr)
+	}
+	linkInfo, lerr := os.Lstat(symlinkPath)
+	if lerr != nil {
+		t.Fatalf("Lstat(linked.md): %v", lerr)
+	}
+	if linkInfo.Mode()&os.ModeSymlink == 0 {
+		t.Error("linked.md should still be a symlink")
+	}
+	got, rerr := os.ReadFile(filepath.Join(dir, "external.md"))
+	if rerr != nil || string(got) != "outside content" {
+		t.Errorf("external.md = %q, err %v, want unchanged %q", got, rerr, "outside content")
+	}
+}
+
+// TestApplyOps_LstatPreflightRejectsSymlinkDeleteTarget proves an OpDelete
+// targeting a symlink is also rejected by the preflight rather than being
+// followed or unlinked.
+func TestApplyOps_LstatPreflightRejectsSymlinkDeleteTarget(t *testing.T) {
+	dir := t.TempDir()
+	writeDiskFile(t, dir, "external.md", "outside content")
+	symlinkPath := filepath.Join(dir, "linked.md")
+	if err := os.Symlink(filepath.Join(dir, "external.md"), symlinkPath); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+
+	plan := ReplacePlan{
+		Ops: []FileOp{
+			{Kind: OpDelete, Path: "linked.md"},
+		},
+	}
+
+	err := ApplyOps(dir, plan)
+	if err == nil {
+		t.Fatal("expected ApplyOps to reject a symlinked delete target")
+	}
+	if _, lerr := os.Lstat(symlinkPath); lerr != nil {
+		t.Errorf("linked.md should still exist as a symlink: %v", lerr)
+	}
+}
+
+// TestApplyOps_LstatPreflightRejectsDirectoryTarget proves a directory
+// occupying an op's target path is rejected by the preflight before any
+// write is attempted.
+func TestApplyOps_LstatPreflightRejectsDirectoryTarget(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "blocked.md"), 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	plan := ReplacePlan{
+		Ops: []FileOp{
+			{Kind: OpCreate, Path: "blocked.md", Content: []byte("should not be written")},
+		},
+	}
+
+	err := ApplyOps(dir, plan)
+	if err == nil {
+		t.Fatal("expected ApplyOps to reject a directory op target")
+	}
+	if !strings.Contains(err.Error(), "blocked.md") {
+		t.Errorf("error %q does not name the directory path", err.Error())
+	}
+	info, statErr := os.Stat(filepath.Join(dir, "blocked.md"))
+	if statErr != nil || !info.IsDir() {
+		t.Errorf("blocked.md should still be a directory: info=%+v err=%v", info, statErr)
+	}
+}
+
+// TestApplyOps_LstatPreflightRejectsDanglingSymlinkCreateTarget proves a
+// dangling symlink at a create target is rejected: os.Lstat succeeds on a
+// dangling symlink (it reports the symlink's own mode without following
+// it), so the preflight must not mistake it for "missing" and proceed to
+// overwrite through the link.
+func TestApplyOps_LstatPreflightRejectsDanglingSymlinkCreateTarget(t *testing.T) {
+	dir := t.TempDir()
+	symlinkPath := filepath.Join(dir, "dangling.md")
+	if err := os.Symlink(filepath.Join(dir, "does-not-exist.md"), symlinkPath); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+
+	plan := ReplacePlan{
+		Ops: []FileOp{
+			{Kind: OpCreate, Path: "dangling.md", Content: []byte("should not be written")},
+		},
+	}
+
+	err := ApplyOps(dir, plan)
+	if err == nil {
+		t.Fatal("expected ApplyOps to reject a dangling-symlink create target")
+	}
+	linkInfo, lerr := os.Lstat(symlinkPath)
+	if lerr != nil {
+		t.Fatalf("Lstat(dangling.md): %v", lerr)
+	}
+	if linkInfo.Mode()&os.ModeSymlink == 0 {
+		t.Error("dangling.md should still be a symlink")
+	}
+}
+
+// TestApplyOps_LstatPreflightAllowsMissingCreateTarget proves the ordinary
+// create case (no entry at the target path at all) still succeeds: the
+// preflight must treat os.ErrNotExist as "fine", not as a rejection.
+func TestApplyOps_LstatPreflightAllowsMissingCreateTarget(t *testing.T) {
+	dir := t.TempDir()
+	plan := ReplacePlan{
+		Ops: []FileOp{
+			{Kind: OpCreate, Path: "new.md", Content: []byte("fresh")},
+		},
+	}
+	if err := ApplyOps(dir, plan); err != nil {
+		t.Fatalf("ApplyOps: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "new.md"))
+	if err != nil || string(got) != "fresh" {
+		t.Errorf("new.md = %q, err %v, want %q", got, err, "fresh")
 	}
 }
