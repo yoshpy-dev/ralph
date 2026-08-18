@@ -180,9 +180,13 @@ const (
 	// OpForkInPlace records modified (or unmanaged) content as a fork at
 	// its existing path; the file itself is never written.
 	OpForkInPlace
-	// OpReplaceWithTemplate replaces an unmodified special-face path
-	// (CLAUDE.md, AGENTS.md, .gitignore, settings.json) with the v2
-	// template content.
+	// OpReplaceWithTemplate replaces an unmodified path with the v2
+	// template content: the special faces (CLAUDE.md, AGENTS.md,
+	// .gitignore, settings.json), and any unmodified, non-relocated
+	// owner=seed path — the chained v2 upgrade's classifySeed never
+	// rewrites an existing seed file, so migration must do the FR-7
+	// replacement itself (AR#1, cycle 2,
+	// docs/reports/cross-review-triage-overlay-scaffold-v2-p4.md).
 	OpReplaceWithTemplate
 	// OpUntouched leaves a path completely alone: a modified special
 	// face (CLAUDE.md, AGENTS.md, .gitignore), the always-untouched
@@ -299,8 +303,9 @@ type MigrationPlan struct {
 //
 // preservePrefixes mirrors buildDesiredStateV2's own return value (an
 // installed pack unavailable in this binary): any legacy manifest path under
-// one of these prefixes is classified as OpUntouched (Preserved=true)
-// unconditionally, before relocation or modification-state classification
+// one of these prefixes — provided it is absent from desired, which is by
+// construction for an unavailable pack — is classified as OpUntouched
+// (Preserved=true) before relocation or modification-state classification
 // runs, the same way internal/upgrade.PlanCoreReplaceDesired's own
 // hasPreservePrefix check pre-empts its owner-based classification — the
 // path is template-absent by construction (the unavailable pack's content
@@ -1505,13 +1510,15 @@ func sortedStringSet(set map[string]bool) []string {
 // path a fresh v2 project would ship), not by plan.Entries directly, because
 // the chained v2 upgrade (runUpgradeV2) that runs immediately afterward
 // rebuilds every desired-state path's manifest entry from scratch anyway
-// (rebuildManifestV2) except for the two categories this function must get
+// (rebuildManifestV2) except for the three categories this function must get
 // right on the first pass: fork entries (carried forward verbatim by
-// rebuildManifestV2's owner=fork sweep, so they must already be forks here)
-// and OpKeepInPlace entries (must carry the *old* recorded hash forward
+// rebuildManifestV2's owner=fork sweep, so they must already be forks here),
+// OpKeepInPlace entries (must carry the *old* recorded hash forward
 // unchanged, not a hash of the new template, so the chained call's core
 // replace planner recognizes "unmodified since last recorded state, new
-// template differs" and emits a real update instead of a false no-op).
+// template differs" and emits a real update instead of a false no-op), and
+// Preserved entries (absent from desired by construction, so they need the
+// explicit carry-forward loop at the end of this function).
 //
 // v2SettingsPath and upgrade.SettingsSnapshotRelPath are deliberately
 // excluded: the chained v2 upgrade's rebuildManifestV2 always overwrites
@@ -1669,9 +1676,14 @@ func buildMigratedManifest(version string, oldManifest *scaffold.Manifest, absDi
 			continue
 		}
 		if old, ok := oldManifest.Files[pe.OldPath]; ok {
+			// Normalize legacy baseline bookkeeping the same way the
+			// keepByPath carry-forward above does — a carried BaselinePath
+			// can point into .ralph/baseline/, which this same migration
+			// deletes (self-review C3-4, cycle 3, mirroring cycle-1 LOW-2).
+			old.BaselineStatus = scaffold.BaselineStatusMissing
+			old.BaselinePath = ""
 			nm.Files[path] = old
 		}
-		handled[path] = true
 	}
 
 	return nm, nil

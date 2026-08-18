@@ -361,8 +361,39 @@ func TestClassifyMigration_UnavailablePackPrefix_Preserved(t *testing.T) {
 	if !e.Preserved {
 		t.Error("Preserved = false, want true")
 	}
-	if e.Kind == OpDeleteOldPath {
-		t.Error("an unavailable-pack path must never classify as OpDeleteOldPath")
+}
+
+// TestClassifyMigration_UnavailablePackLegacyRulePath_Preserved covers
+// self-review C3-1 (cycle 3): a legacy manifest records an unavailable
+// pack's rule at the pre-.claude/rules/ralph/ location
+// (.claude/rules/<pack>.md). That path is neither under the pack payload
+// prefix nor equal to the v2 rule path, so without legacyPackRuleRelPath in
+// the preserve list it falls through to "unmodified and retired" and gets
+// deleted — while the same run retains the pack in Meta.Packs.
+func TestClassifyMigration_UnavailablePackLegacyRulePath_Preserved(t *testing.T) {
+	dir := t.TempDir()
+	writeMigrationDiskFile(t, dir, ".claude/rules/golang.md", "go rule content")
+
+	m := scaffold.NewManifest("0.9.0")
+	m.Meta.Packs = []string{"golang"}
+	m.SetFile(".claude/rules/golang.md", migrateHash("go rule content"))
+
+	// No golang pack content in desired: the pack is unavailable, so the
+	// preserve list carries all three locations, including the legacy one.
+	desired := map[string][]byte{}
+	preservePrefixes := []string{packPrefixFor("golang"), packRuleRelPath("golang"), legacyPackRuleRelPath("golang")}
+
+	plan, err := ClassifyMigration(m, dir, desired, preservePrefixes)
+	if err != nil {
+		t.Fatalf("ClassifyMigration: %v", err)
+	}
+
+	e := findMigrationEntry(t, plan, ".claude/rules/golang.md")
+	if e.Kind != OpUntouched {
+		t.Errorf("Kind = %v, want OpUntouched", e.Kind)
+	}
+	if !e.Preserved {
+		t.Error("Preserved = false, want true")
 	}
 }
 
@@ -2734,11 +2765,14 @@ func TestRunMigrateLegacy_UnavailablePack_FilesPreservedNotDeleted(t *testing.T)
 	}
 
 	const golangVerifyContent = "#!/bin/sh\necho golang-legacy\n"
+	const golangRuleContent = "# Go rules (legacy location)\n"
 	writeMigrationDiskFile(t, target, "packs/languages/golang/verify.sh", golangVerifyContent)
+	writeMigrationDiskFile(t, target, ".claude/rules/golang.md", golangRuleContent)
 
 	m := scaffold.NewManifest("0.9.0-test")
 	m.Meta.Packs = []string{"golang"}
 	m.SetFile("packs/languages/golang/verify.sh", migrateHash(golangVerifyContent))
+	m.SetFile(".claude/rules/golang.md", migrateHash(golangRuleContent))
 	manifestPath := filepath.Join(target, ".ralph", "manifest.toml")
 	if err := m.Write(manifestPath); err != nil {
 		t.Fatalf("writing legacy manifest: %v", err)
@@ -2760,9 +2794,20 @@ func TestRunMigrateLegacy_UnavailablePack_FilesPreservedNotDeleted(t *testing.T)
 		t.Errorf("packs/languages/golang/verify.sh = %q, want untouched legacy content %q", got, golangVerifyContent)
 	}
 
+	// The legacy-location rule file must survive too (self-review C3-1,
+	// cycle 3): no available binary can regenerate it, so deleting it
+	// while retaining the pack in Meta.Packs would strand the project.
+	gotRule := mustReadFile(t, filepath.Join(target, ".claude", "rules", "golang.md"))
+	if string(gotRule) != golangRuleContent {
+		t.Errorf(".claude/rules/golang.md = %q, want untouched legacy content %q", gotRule, golangRuleContent)
+	}
+
 	m2 := readManifestV2(t, target)
 	if _, ok := m2.Files["packs/languages/golang/verify.sh"]; !ok {
 		t.Fatal("packs/languages/golang/verify.sh must still be tracked in the v3 manifest after migration")
+	}
+	if _, ok := m2.Files[".claude/rules/golang.md"]; !ok {
+		t.Fatal(".claude/rules/golang.md must still be tracked in the v3 manifest after migration")
 	}
 	if !slicesEqualStrings(m2.Meta.Packs, []string{"golang"}) {
 		t.Errorf("Meta.Packs = %v, want [\"golang\"] retained", m2.Meta.Packs)

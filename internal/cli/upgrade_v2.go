@@ -373,7 +373,7 @@ func buildDesiredStateV2(baseFS fs.FS, oldManifest *scaffold.Manifest, errOut io
 		msg := fmt.Sprintf("pack %q: %s — preserving its disk/manifest entries untouched", pack, reason)
 		writef(errOut, "Warning: %s\n", msg)
 		notes = append(notes, msg)
-		preservePrefixes = append(preservePrefixes, packPrefixFor(pack), packRuleRelPath(pack))
+		preservePrefixes = append(preservePrefixes, packPrefixFor(pack), packRuleRelPath(pack), legacyPackRuleRelPath(pack))
 		retainedPacks = append(retainedPacks, pack)
 	}
 
