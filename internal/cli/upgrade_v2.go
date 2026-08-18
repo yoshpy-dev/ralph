@@ -154,7 +154,15 @@ func runUpgradeV2(absDir, manifestPath string, oldManifest *scaffold.Manifest, o
 	// snapshot writes only fire when their own outcome changed), so the only
 	// remaining unconditional writes are the report, the manifest commit
 	// barrier, and installManagedGitHooks — gated below.
-	if isFullyConvergedV2(plan, blockOutcomes, mergeResult, snapshotNeedsWrite) {
+	//
+	// The oldManifest.Meta.Version == Version check is C3-2 (cycle 3,
+	// docs/reports/self-review-2026-08-18-overlay-scaffold-v2-p3.md): NFR-1
+	// promises a no-op only for a re-run on the *same binary*. Without this
+	// guard, a Go-only release whose templates are byte-identical to the
+	// last one would converge on Ops/blocks/settings/snapshot yet skip the
+	// manifest rebuild that would otherwise advance meta.version, leaving
+	// doctor's version check permanently unsatisfiable.
+	if oldManifest.Meta.Version == Version && isFullyConvergedV2(plan, blockOutcomes, mergeResult, snapshotNeedsWrite) {
 		return finishNoOpUpgradeV2(absDir, Version, plan, out, errOut)
 	}
 
@@ -201,7 +209,7 @@ func runUpgradeV2(absDir, manifestPath string, oldManifest *scaffold.Manifest, o
 	// writeWrappedGitHook rewrites its guard/wrapper files on every call
 	// even when their content is already identical, so calling it
 	// unconditionally would itself violate a converged tree's zero-writes
-	// contract (AR#2).
+	// contract (AR#2, cycle 2).
 	installManagedGitHooks(absDir, out, errOut)
 
 	if err := removeLegacyBaselineIfPresent(absDir); err != nil {
@@ -231,14 +239,28 @@ func runUpgradeV2(absDir, manifestPath string, oldManifest *scaffold.Manifest, o
 // both managed-block surfaces, the settings.json 3-way merge, and the
 // settings snapshot.
 //
-// Unresolved drift, legacy-skipped paths, fork entries, and preserved-pack
+// Unresolved drift, legacy-skipped paths, fork advisories, and preserved-pack
 // namespaces are deliberately excluded from this check: those categories are
 // permanently left untouched by design (see ReplacePlan's doc comments), so
 // their continued presence on a re-run never implies a pending write — see
-// AR#2 in docs/reports/cross-review-triage-overlay-scaffold-v2-p3.md.
+// AR#2 (cycle 2) in docs/reports/cross-review-triage-overlay-scaffold-v2-p3.md.
+// Fork advisories specifically can never clear (classifyFork appends one for
+// every fork entry unconditionally, and rebuildManifestV2 carries fork
+// entries over verbatim), so excluding them here is not an oversight.
+//
+// A pending seed advisory, by contrast, is not excluded: it is one-shot
+// precisely because the manifest rebuild it would otherwise trigger advances
+// TemplateHash and clears it (see SetFileOwned). Skipping that rebuild here
+// would make the advisory permanent and invisible — see C3-1 (cycle 3) in
+// docs/reports/self-review-2026-08-18-overlay-scaffold-v2-p3.md.
 func isFullyConvergedV2(plan upgrade.ReplacePlan, blockOutcomes map[string]blockUpdateOutcome, mergeResult upgrade.SettingsMergeResult, snapshotNeedsWrite bool) bool {
 	if len(plan.Ops) != 0 || len(plan.ManifestRefresh) != 0 || len(plan.ManifestRemove) != 0 {
 		return false
+	}
+	for _, a := range plan.Advisories {
+		if a.Owner == scaffold.OwnerSeed {
+			return false
+		}
 	}
 	for _, bs := range blockSurfaces {
 		oc, ok := blockOutcomes[bs.path]
@@ -440,7 +462,7 @@ type blockUpdateOutcome struct {
 //
 // write controls whether a computed update is actually persisted to disk.
 // The real upgrade path calls this with write=true; the --dry-run preview
-// (renderUpgradeV2Preview, AR#1 in docs/reports/cross-review-triage-overlay-scaffold-v2-p3.md)
+// (renderUpgradeV2Preview, AR#1, cycle 2, in docs/reports/cross-review-triage-overlay-scaffold-v2-p3.md)
 // calls it with write=false to compute the same outcomes purely in memory,
 // against the current on-disk content, so the preview can name pending
 // block updates without ever touching the tree.
@@ -808,8 +830,8 @@ func renderUpgradeV2Preview(plan upgrade.ReplacePlan, desired map[string][]byte,
 // outcome of all four v2 exception faces (AGENTS.md, .gitignore,
 // settings.json, the settings snapshot) without writing anything to disk.
 // applyBlockUpdatesV2 is called with write=false, and MergeOwnedSettings is
-// a pure function — neither touches targetDir. See AR#1's fix note on
-// renderUpgradeV2Preview.
+// a pure function — neither touches targetDir. See AR#1's (cycle 2) fix note
+// on renderUpgradeV2Preview.
 func renderUpgradeV2ExceptionFacePreview(desired map[string][]byte, absDir string, oldOwned, oldOwnedSnapshot []byte, snapshotFound bool, out, errOut io.Writer) error {
 	blockOutcomes, _, err := applyBlockUpdatesV2(absDir, desired, errOut, false)
 	if err != nil {

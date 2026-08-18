@@ -783,6 +783,105 @@ func TestRunUpgradeV2_Idempotent_SecondRunIsNoOp(t *testing.T) {
 	}
 }
 
+// TestRunUpgradeV2_SeedAdvisoryOnly_NotANoOp is C3-1 (cycle 3,
+// docs/reports/self-review-2026-08-18-overlay-scaffold-v2-p3.md): a release
+// that changes only seed-owned template content (docs/notes.md here, with
+// every other core/block/settings/snapshot input held identical to gen1)
+// must not be treated as a converged no-op. Before the fix,
+// isFullyConvergedV2 never consulted plan.Advisories, so this run's pending
+// seed advisory was silently and permanently swallowed: no report was
+// written, and skipping the manifest rebuild meant TemplateHash never
+// advanced, so the same advisory would keep re-firing, unseen, forever. The
+// second run below is the regression check that the advisory does clear
+// once it is surfaced through a real (non-no-op) run.
+func TestRunUpgradeV2_SeedAdvisoryOnly_NotANoOp(t *testing.T) {
+	target := initV2Project(t, gen1(), "1.0.0-test")
+
+	seedOnly := gen1()
+	seedOnly.docsNotes = []byte(v2DocsNotes)
+	scaffold.EmbeddedFS = seedOnly.build()
+	Version = "1.1.0-test"
+
+	var out, errOut bytes.Buffer
+	if err := runUpgradeIOWithOptions(target, upgradeOptions{Pager: pagerNever}, strings.NewReader(""), &out, &errOut, false); err != nil {
+		t.Fatalf("seed-advisory-only run: %v\nstderr:\n%s", err, errOut.String())
+	}
+	if strings.Contains(out.String(), "no-op") {
+		t.Errorf("a run with a pending seed advisory must not be reported as a no-op:\n%s", out.String())
+	}
+
+	// -- seed: disk stays untouched (seed content is user-owned once created) --
+	gotNotes := mustReadFile(t, filepath.Join(target, "docs", "notes.md"))
+	if string(gotNotes) != v1DocsNotes {
+		t.Errorf("docs/notes.md (seed) must stay untouched on disk: got %q, want %q", gotNotes, v1DocsNotes)
+	}
+
+	// -- report written and mentions the advisory --
+	reportPath := upgrade.UpgradeReportRelPath(Version, time.Now().UTC().Format("2006-01-02"))
+	reportContent := mustReadFile(t, filepath.Join(target, reportPath))
+	if !strings.Contains(string(reportContent), "docs/notes.md") {
+		t.Errorf("upgrade report must mention the pending seed advisory docs/notes.md:\n%s", reportContent)
+	}
+
+	// -- manifest rebuilt: TemplateHash advances to clear the advisory --
+	m := readManifestV2(t, target)
+	if entry, ok := m.Files["docs/notes.md"]; !ok || entry.Owner != scaffold.OwnerSeed || entry.TemplateHash != scaffold.HashBytes([]byte(v2DocsNotes)) || entry.DiskHash != scaffold.HashBytes([]byte(v1DocsNotes)) {
+		t.Errorf("docs/notes.md manifest entry = %+v, want owner=seed, TemplateHash=hash(v2 template) (rebuild must advance TemplateHash to clear the advisory), DiskHash=hash(v1, unchanged)", entry)
+	}
+
+	// -- regression check: the advisory clears, so a second run at the same
+	// templates/version is now a true no-op. --
+	var out2, errOut2 bytes.Buffer
+	if err := runUpgradeIOWithOptions(target, upgradeOptions{Pager: pagerNever}, strings.NewReader(""), &out2, &errOut2, false); err != nil {
+		t.Fatalf("second run: %v\nstderr:\n%s", err, errOut2.String())
+	}
+	if !strings.Contains(out2.String(), "no-op") {
+		t.Errorf("second run's stdout must announce a no-op now that the seed advisory has cleared:\n%s", out2.String())
+	}
+}
+
+// TestRunUpgradeV2_ConvergedButVersionBumped_NotANoOp is C3-2 (cycle 3,
+// docs/reports/self-review-2026-08-18-overlay-scaffold-v2-p3.md): NFR-1
+// promises a no-op only for a re-run on the same binary. A converged tree
+// (templates byte-for-byte identical to what's on disk — the Go-only bugfix
+// case, no template touches a version placeholder) whose recorded
+// meta.version does not match the running binary's Version must still
+// rewrite the manifest, so meta.version catches up. Before the fix,
+// isFullyConvergedV2 ignored the version entirely, so meta.version could be
+// stuck behind the binary forever, and `ralph doctor`'s remediation advice
+// ("run 'ralph upgrade'") could never be satisfied.
+func TestRunUpgradeV2_ConvergedButVersionBumped_NotANoOp(t *testing.T) {
+	target := initV2Project(t, gen1(), "1.0.0-test")
+
+	// Templates are byte-for-byte identical to gen1 (a Go-only release with
+	// no template changes), but Version advances.
+	scaffold.EmbeddedFS = gen1().build()
+	Version = "1.0.1-test"
+
+	var out, errOut bytes.Buffer
+	if err := runUpgradeIOWithOptions(target, upgradeOptions{Pager: pagerNever}, strings.NewReader(""), &out, &errOut, false); err != nil {
+		t.Fatalf("version-bump run: %v\nstderr:\n%s", err, errOut.String())
+	}
+	if strings.Contains(out.String(), "no-op") {
+		t.Errorf("a converged tree with an unrecorded version bump must not be reported as a no-op:\n%s", out.String())
+	}
+
+	m := readManifestV2(t, target)
+	if m.Meta.Version != "1.0.1-test" {
+		t.Errorf("Meta.Version = %q, want %q (manifest must be rewritten to record the new version)", m.Meta.Version, "1.0.1-test")
+	}
+
+	// -- regression check: with meta.version now caught up, a second run at
+	// the same version/templates is a true no-op. --
+	var out2, errOut2 bytes.Buffer
+	if err := runUpgradeIOWithOptions(target, upgradeOptions{Pager: pagerNever}, strings.NewReader(""), &out2, &errOut2, false); err != nil {
+		t.Fatalf("second run: %v\nstderr:\n%s", err, errOut2.String())
+	}
+	if !strings.Contains(out2.String(), "no-op") {
+		t.Errorf("second run's stdout must announce a no-op now that meta.version matches Version:\n%s", out2.String())
+	}
+}
+
 // TestRunUpgradeV2_UnavailablePack_FullyPreserved covers AC-9: a pack that
 // was installed but is no longer available in the embedded templates is
 // left completely untouched on disk and in the manifest (no delete, no

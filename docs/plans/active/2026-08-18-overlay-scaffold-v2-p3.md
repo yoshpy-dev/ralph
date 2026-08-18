@@ -86,7 +86,7 @@ v2 manifest(`meta.layout = "v2"`)に対する `ralph upgrade` は次を非対話
 - [x] AC-4 未解決 drift のパスは 1 バイトも変更されず、レポートと stderr に列挙され、exit 3(専用コード。drift なし成功は exit 0)
 - [x] AC-4b `ApplyOps` は write/delete 対象に symlink・非 regular ファイルが含まれる場合、書き込みゼロでエラーになる(テストで保証)。cycle 2 で `ValidateRealParentChain` を追加し、親ディレクトリが symlink の場合(葉ノードのみの Lstat では検知不能なケース)も同じく書き込みゼロでエラーになることをテストで保証(cross-review AR#1 の fix、`fc8e9a9`)
 - [x] AC-4c settings スナップショットの 2 段階更新: スナップショット書き込み後〜settings 書き込み前の失敗を注入しても、再実行で stale 所有エントリ削除が正しく機能する(oldOwned 喪失なし)。qualification: `TestRunUpgradeV2_SettingsWriteFailure_SnapshotNotAdvanced` は root 実行の CI では自己スキップする既知の制約(このフェーズの回帰ではない)
-- [x] AC-5 冪等性: 同一バージョンでの再実行が書き込みゼロの no-op(レポートに no-op 明記)
+- [x] AC-5 冪等性: 同一バイナリでの再実行が書き込みゼロの no-op(標準出力に no-op 明記、レポートファイルは書かない)
 - [x] AC-6 部分失敗: 途中失敗で manifest 不変、再実行で残工程が完走(分類の安定性含む)
 - [x] AC-7 レガシー manifest への upgrade は書き込みゼロで fail-closed し、Phase 4 の移行を案内する
 - [x] AC-8 対話エンジン・baseline の完全撤去: `resolveConflict` / `PlanMerge` / `ComputeDiffs` / `baseline` 書き込みへの参照がゼロ。成功した v2 upgrade が旧 `.ralph/baseline/` を削除する
