@@ -754,7 +754,11 @@ func relocationOutcome(sourceHash string, sourceUnmodified bool, destContent []b
 // mechanically covers both shipped core rules and pack rules without a
 // second, separate "is this an installed pack name" lookup — anything the
 // migrated project should still have under .claude/rules/ralph/ after
-// migration is, by construction, already a key in desired.
+// migration is, by construction, already a key in desired. The one
+// exception is an unavailable pack's rule: it is absent from desired, so
+// this check reports no relocation and the path instead survives at its
+// legacy location via the preserve list (legacyPackRuleRelPath — see
+// self-review C3-1, cycle 3).
 func relocatedRulePath(oldPath string, desired map[string][]byte) (string, bool) {
 	if path.Dir(oldPath) != ".claude/rules" {
 		return "", false
