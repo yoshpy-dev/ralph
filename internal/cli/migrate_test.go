@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1396,5 +1397,577 @@ func TestRunMigrateLegacy_PartialFailure_ManifestNotAdvanced_ResumeCompletes(t *
 	m := readManifestV2(t, target)
 	if m.Meta.Layout != scaffold.LayoutV2 {
 		t.Errorf("Meta.Layout after retry = %q, want %q", m.Meta.Layout, scaffold.LayoutV2)
+	}
+}
+
+// ===================================================================
+// Slice 4: remaining edges (docs/plans/active/2026-08-18-overlay-scaffold-v2-p4.md,
+// Implementation outline step 4). Slice 3 already covered the happy path,
+// confirm UX, dirty git, collision case (c), a symlinked destination
+// parent, and partial-failure/rerun. This section covers what is left:
+// an all-modified fixture, unmanaged carry-over, legacy manifest oddities
+// (empty hash, state=partial, missing-from-disk), collision cases (a)/(b)
+// end to end, --yes never touching stdin, and a post-migration invariants
+// sweep including no-churn stability across repeated `ralph upgrade` runs.
+// ===================================================================
+
+// legacyAllModifiedStaleHash is an intentionally mismatched recorded hash.
+// Every SetFile call in buildAllModifiedLegacyProject uses it instead of the
+// file's real content hash, so every managed entry classifies as
+// LegacyModified (see classifyLegacyEntryState) regardless of what content
+// it actually holds — letting buildAllModifiedLegacyProject reuse
+// buildLegacyProject's own disk fixtures verbatim for the "every tracked
+// file is user-modified" edge, which slice 3's mixed fixture did not
+// exercise on its own.
+const legacyAllModifiedStaleHash = "sha256:all-modified-stale-marker"
+
+// buildAllModifiedLegacyProject mirrors buildLegacyProject (same disk
+// content, same paths, same installed pack), but every managed manifest
+// entry is recorded with legacyAllModifiedStaleHash instead of its real
+// content hash, so every single one classifies as LegacyModified: relocated
+// rules and the same-path core file all become forks instead of
+// deletes/keeps, and the special faces all take their "modified" branch
+// instead of their "unmodified" one.
+func buildAllModifiedLegacyProject(t *testing.T) string {
+	t.Helper()
+	isolateGitConfig(t)
+
+	dir := t.TempDir()
+	target := filepath.Join(dir, "project")
+	if err := os.MkdirAll(filepath.Join(target, ".ralph"), 0755); err != nil {
+		t.Fatalf("MkdirAll .ralph: %v", err)
+	}
+
+	writeMigrationDiskFile(t, target, "CLAUDE.md", legacyOldClaudeMD)
+	writeMigrationDiskFile(t, target, "AGENTS.md", legacyOldAgentsMD)
+	writeMigrationDiskFile(t, target, ".gitignore", legacyOldGitignore)
+	writeMigrationDiskFile(t, target, pathSettings, legacyOldSettingsJSON)
+	writeMigrationDiskFile(t, target, ".claude/rules/architecture.md", legacyOldArchitectureRule)
+	writeMigrationDiskFile(t, target, ".claude/rules/testing.md", legacyOldTestingRuleEdited)
+	writeMigrationDiskFile(t, target, ".claude/rules/golang.md", legacyOldGolangRule)
+	writeMigrationDiskFile(t, target, "scripts/run-verify.sh", legacyOldRunVerify)
+	writeMigrationDiskFile(t, target, "docs/notes.md", legacyUserNotes)
+	writeMigrationDiskFile(t, target, pathCodexOverride, legacyOldCodexOverride)
+	if err := os.MkdirAll(filepath.Join(target, ".ralph", "baseline"), 0755); err != nil {
+		t.Fatalf("MkdirAll .ralph/baseline: %v", err)
+	}
+	writeMigrationDiskFile(t, target, ".ralph/baseline/AGENTS.md", "cached template")
+
+	m := scaffold.NewManifest("0.9.0-test")
+	m.Meta.Packs = []string{"golang"}
+	m.SetFile("CLAUDE.md", legacyAllModifiedStaleHash)
+	m.SetFile("AGENTS.md", legacyAllModifiedStaleHash)
+	m.SetFile(".gitignore", legacyAllModifiedStaleHash)
+	m.SetFile(pathSettings, legacyAllModifiedStaleHash)
+	m.SetFile(".claude/rules/architecture.md", legacyAllModifiedStaleHash)
+	m.SetFile(".claude/rules/testing.md", legacyAllModifiedStaleHash)
+	m.SetFile(".claude/rules/golang.md", legacyAllModifiedStaleHash)
+	m.SetFile("scripts/run-verify.sh", legacyAllModifiedStaleHash)
+	m.Files["docs/notes.md"] = scaffold.ManifestFile{
+		Managed: false, State: scaffold.FileStateUnmanaged,
+		Hash: migrateHash(legacyUserNotes), DiskHash: migrateHash(legacyUserNotes),
+	} // legacy skip -> always a fork, regardless of hash
+	m.SetFile(pathCodexOverride, legacyAllModifiedStaleHash)
+
+	manifestPath := filepath.Join(target, ".ralph", "manifest.toml")
+	if err := m.Write(manifestPath); err != nil {
+		t.Fatalf("writing legacy manifest: %v", err)
+	}
+
+	runMigrationTestGit(t, target, "init")
+	runMigrationTestGit(t, target, "add", "-A")
+	runMigrationTestGit(t, target, "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "all-modified legacy project")
+
+	return target
+}
+
+// TestRunMigrateLegacy_AllModifiedFixture_EveryTrackedFileForked is slice 4
+// work item 1 (every tracked file is user-modified) plus work item 6 (the
+// post-migration invariants sweep, run against this same fixture).
+func TestRunMigrateLegacy_AllModifiedFixture_EveryTrackedFileForked(t *testing.T) {
+	target := buildAllModifiedLegacyProject(t)
+	scaffold.EmbeddedFS = legacyFixtureNewTemplateFS()
+	Version = "2.0.0-test"
+
+	var out, errOut bytes.Buffer
+	err := runUpgradeIOWithOptions(target, upgradeOptions{Yes: true, Pager: pagerNever}, strings.NewReader(""), &out, &errOut, false)
+	if err != nil {
+		t.Fatalf("runUpgradeIOWithOptions (all-modified migration): %v\nstdout:\n%s\nstderr:\n%s", err, out.String(), errOut.String())
+	}
+
+	// -- every relocatable rule fork-relocated, byte-preserved, old path gone --
+	for _, tc := range []struct{ name, want string }{
+		{"architecture.md", legacyOldArchitectureRule},
+		{"testing.md", legacyOldTestingRuleEdited},
+		{"golang.md", legacyOldGolangRule},
+	} {
+		oldPath := filepath.Join(target, ".claude", "rules", tc.name)
+		if _, statErr := os.Stat(oldPath); !os.IsNotExist(statErr) {
+			t.Errorf(".claude/rules/%s must be deleted after fork-relocation; stat err = %v", tc.name, statErr)
+		}
+		got := mustReadFile(t, filepath.Join(target, ".claude", "rules", "ralph", tc.name))
+		if string(got) != tc.want {
+			t.Errorf(".claude/rules/ralph/%s = %q, want preserved user content %q", tc.name, got, tc.want)
+		}
+	}
+
+	// -- same-path core file forked in place, byte-preserved --
+	gotRunVerify := mustReadFile(t, filepath.Join(target, "scripts", "run-verify.sh"))
+	if string(gotRunVerify) != legacyOldRunVerify {
+		t.Errorf("scripts/run-verify.sh = %q, want preserved user content %q (fork in place)", gotRunVerify, legacyOldRunVerify)
+	}
+
+	// -- special face: modified CLAUDE.md byte-untouched (FR-8) --
+	gotClaude := mustReadFile(t, filepath.Join(target, "CLAUDE.md"))
+	if string(gotClaude) != legacyOldClaudeMD {
+		t.Errorf("CLAUDE.md = %q, want byte-untouched legacy content %q", gotClaude, legacyOldClaudeMD)
+	}
+
+	// -- special faces: modified AGENTS.md/.gitignore left in place, chained
+	// upgrade's block engine appends its managed block, original content
+	// preserved outside the block --
+	gotAgents := string(mustReadFile(t, filepath.Join(target, "AGENTS.md")))
+	if !strings.Contains(gotAgents, legacyOldAgentsMD) {
+		t.Errorf("AGENTS.md must preserve original legacy content outside the block:\n%s", gotAgents)
+	}
+	if !strings.Contains(gotAgents, legacyNewMissionManaged) {
+		t.Errorf("AGENTS.md must have the new managed block appended:\n%s", gotAgents)
+	}
+	gotGitignore := string(mustReadFile(t, filepath.Join(target, ".gitignore")))
+	if !strings.Contains(gotGitignore, legacyOldGitignore) {
+		t.Errorf(".gitignore must preserve original legacy content outside the block:\n%s", gotGitignore)
+	}
+	if !strings.Contains(gotGitignore, legacyNewGitignoreManaged) {
+		t.Errorf(".gitignore must have the new managed block appended:\n%s", gotGitignore)
+	}
+
+	// -- special face: modified settings.json pruned of known legacy hooks,
+	// chained 3-way merge adds the dispatcher entry, user content preserved --
+	gotSettings := string(mustReadFile(t, filepath.Join(target, ".claude", "settings.json")))
+	if strings.Contains(gotSettings, "pre_bash_guard.sh") || strings.Contains(gotSettings, "session_start_context.sh") {
+		t.Errorf("settings.json must not retain any pruned legacy hook command:\n%s", gotSettings)
+	}
+	if !strings.Contains(gotSettings, "ralph-dispatch.sh") {
+		t.Errorf("settings.json must gain the new dispatcher hook command:\n%s", gotSettings)
+	}
+	if !strings.Contains(gotSettings, "user-added") || !strings.Contains(gotSettings, "customUserSetting") {
+		t.Errorf("settings.json must preserve user-added content:\n%s", gotSettings)
+	}
+
+	// -- special face: codex override always byte-untouched, owner=seed --
+	gotCodex := mustReadFile(t, filepath.Join(target, ".codex", "AGENTS.override.md"))
+	if string(gotCodex) != legacyOldCodexOverride {
+		t.Errorf(".codex/AGENTS.override.md = %q, want byte-untouched legacy content %q", gotCodex, legacyOldCodexOverride)
+	}
+
+	// -- report lists every fork with diffs --
+	reportPaths, globErr := filepath.Glob(filepath.Join(target, "docs", "reports", "ralph-migration-*.md"))
+	if globErr != nil || len(reportPaths) != 1 {
+		t.Fatalf("expected exactly one ralph-migration-*.md report, got %v (err=%v)", reportPaths, globErr)
+	}
+	report := string(mustReadFile(t, reportPaths[0]))
+	for _, want := range []string{
+		".claude/rules/ralph/architecture.md",
+		".claude/rules/ralph/testing.md",
+		".claude/rules/ralph/golang.md",
+		"scripts/run-verify.sh",
+	} {
+		if !strings.Contains(report, want) {
+			t.Errorf("report must list the forked path %q:\n%s", want, report)
+		}
+	}
+
+	// -- work item 6: post-migration invariants sweep --
+
+	if _, statErr := os.Stat(filepath.Join(target, ".ralph", "baseline")); !os.IsNotExist(statErr) {
+		t.Errorf(".ralph/baseline must be absent after migration; stat err = %v", statErr)
+	}
+
+	m := readManifestV2(t, target)
+	if m.Meta.Layout != scaffold.LayoutV2 {
+		t.Errorf("Meta.Layout = %q, want %q", m.Meta.Layout, scaffold.LayoutV2)
+	}
+	if !reflect.DeepEqual(m.Meta.Packs, []string{"golang"}) {
+		t.Errorf("Meta.Packs = %v, want [golang]", m.Meta.Packs)
+	}
+	if len(m.Files) == 0 {
+		t.Fatal("manifest has no files after migration")
+	}
+	for path, entry := range m.Files {
+		if entry.Owner == "" {
+			t.Errorf("manifest entry %q has no Owner attribute; every v3 entry must be owned after migration", path)
+		}
+	}
+
+	for _, name := range []string{"architecture.md", "testing.md", "golang.md"} {
+		legacyPath := filepath.Join(target, ".claude", "rules", name)
+		if _, statErr := os.Stat(legacyPath); !os.IsNotExist(statErr) {
+			t.Errorf("legacy shipped-rule path %q must not remain on disk after migration; stat err = %v", legacyPath, statErr)
+		}
+	}
+
+	// Second and third `ralph upgrade` runs (fresh calls, not the chained
+	// call inside the migration itself) must be exit-behavior-stable and
+	// write nothing: the tree already converged during the migration's own
+	// chained v2 upgrade.
+	before2 := snapshotTreeHashesExcluding(t, target)
+	var out2, errOut2 bytes.Buffer
+	err2 := runUpgradeIOWithOptions(target, upgradeOptions{Yes: true, Pager: pagerNever}, strings.NewReader(""), &out2, &errOut2, false)
+	after2 := snapshotTreeHashesExcluding(t, target)
+	if !slicesEqualStrings(before2, after2) {
+		t.Errorf("second post-migration `ralph upgrade` must write nothing (already converged); before=%v after=%v", before2, after2)
+	}
+
+	before3 := snapshotTreeHashesExcluding(t, target)
+	var out3, errOut3 bytes.Buffer
+	err3 := runUpgradeIOWithOptions(target, upgradeOptions{Yes: true, Pager: pagerNever}, strings.NewReader(""), &out3, &errOut3, false)
+	after3 := snapshotTreeHashesExcluding(t, target)
+	if !slicesEqualStrings(before3, after3) {
+		t.Errorf("third post-migration `ralph upgrade` must write nothing (already converged); before=%v after=%v", before3, after3)
+	}
+	if !slicesEqualStrings(after2, after3) {
+		t.Errorf("repeated post-migration `ralph upgrade` runs must leave an identical tree; run2=%v run3=%v", after2, after3)
+	}
+	if (err2 == nil) != (err3 == nil) {
+		t.Errorf("repeated post-migration `ralph upgrade` runs must be exit-behavior-stable: err2=%v err3=%v", err2, err3)
+	}
+	if err2 != nil && !errors.Is(err2, ErrUpgradeDriftRemaining) {
+		t.Errorf("if a post-migration `ralph upgrade` run errors, it must only be the drift sentinel: err2=%v", err2)
+	}
+	if err3 != nil && !errors.Is(err3, ErrUpgradeDriftRemaining) {
+		t.Errorf("if a post-migration `ralph upgrade` run errors, it must only be the drift sentinel: err3=%v", err3)
+	}
+}
+
+// TestRunMigrateLegacy_UnmanagedCarryOver_BothRelocatableAndSamePath is slice
+// 4 work item 2: a legacy manifest whose only entries are managed=false
+// ("skip") records, one at a relocatable seed path and one at a same-path
+// (non-relocatable) location. Both must become forks, and both files must
+// be byte-preserved, untouched by the migration itself.
+func TestRunMigrateLegacy_UnmanagedCarryOver_BothRelocatableAndSamePath(t *testing.T) {
+	isolateGitConfig(t)
+	dir := t.TempDir()
+	target := filepath.Join(dir, "project")
+	if err := os.MkdirAll(filepath.Join(target, ".ralph"), 0755); err != nil {
+		t.Fatalf("MkdirAll .ralph: %v", err)
+	}
+
+	const unmanagedRelocatableContent = "# custom architecture note (never ralph's, legacy skip)\n\nuser wrote this.\n"
+	const unmanagedSamePathContent = "totally unmanaged notes, never templated, legacy skip.\n"
+
+	// .claude/rules/architecture.md is a relocatable path (its basename
+	// matches a rule the new template ships under .claude/rules/ralph/);
+	// docs/legacy-skip.md is not under .claude/rules/ at all, so it can
+	// never relocate regardless of desired's contents.
+	writeMigrationDiskFile(t, target, ".claude/rules/architecture.md", unmanagedRelocatableContent)
+	writeMigrationDiskFile(t, target, "docs/legacy-skip.md", unmanagedSamePathContent)
+
+	m := scaffold.NewManifest("0.9.0-test")
+	m.Files[".claude/rules/architecture.md"] = scaffold.ManifestFile{
+		Managed: false, State: scaffold.FileStateUnmanaged,
+		Hash: migrateHash(unmanagedRelocatableContent), DiskHash: migrateHash(unmanagedRelocatableContent),
+	}
+	m.Files["docs/legacy-skip.md"] = scaffold.ManifestFile{
+		Managed: false, State: scaffold.FileStateUnmanaged,
+		Hash: migrateHash(unmanagedSamePathContent), DiskHash: migrateHash(unmanagedSamePathContent),
+	}
+	manifestPath := filepath.Join(target, ".ralph", "manifest.toml")
+	if err := m.Write(manifestPath); err != nil {
+		t.Fatalf("writing legacy manifest: %v", err)
+	}
+	runMigrationTestGit(t, target, "init")
+	runMigrationTestGit(t, target, "add", "-A")
+	runMigrationTestGit(t, target, "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "unmanaged carry-over fixture")
+
+	scaffold.EmbeddedFS = legacyFixtureNewTemplateFS()
+	Version = "2.0.0-test"
+
+	var out, errOut bytes.Buffer
+	err := runUpgradeIOWithOptions(target, upgradeOptions{Yes: true, Pager: pagerNever}, strings.NewReader(""), &out, &errOut, false)
+	if err != nil {
+		t.Fatalf("runUpgradeIOWithOptions (unmanaged carry-over): %v\nstdout:\n%s\nstderr:\n%s", err, out.String(), errOut.String())
+	}
+
+	// -- relocatable unmanaged entry: relocated to the new path,
+	// byte-preserved, old path gone --
+	if _, statErr := os.Stat(filepath.Join(target, ".claude", "rules", "architecture.md")); !os.IsNotExist(statErr) {
+		t.Errorf(".claude/rules/architecture.md must be deleted after fork-relocation; stat err = %v", statErr)
+	}
+	gotArch := mustReadFile(t, filepath.Join(target, ".claude", "rules", "ralph", "architecture.md"))
+	if string(gotArch) != unmanagedRelocatableContent {
+		t.Errorf(".claude/rules/ralph/architecture.md = %q, want preserved unmanaged content %q", gotArch, unmanagedRelocatableContent)
+	}
+
+	// -- same-path unmanaged entry: forked in place, byte-preserved --
+	gotSkip := mustReadFile(t, filepath.Join(target, "docs", "legacy-skip.md"))
+	if string(gotSkip) != unmanagedSamePathContent {
+		t.Errorf("docs/legacy-skip.md = %q, want preserved unmanaged content %q", gotSkip, unmanagedSamePathContent)
+	}
+
+	m2 := readManifestV2(t, target)
+	archEntry, ok := m2.Files[".claude/rules/ralph/architecture.md"]
+	if !ok || archEntry.Owner != scaffold.OwnerFork {
+		t.Errorf("manifest entry for .claude/rules/ralph/architecture.md = %+v, want Owner=fork", archEntry)
+	}
+	skipEntry, ok := m2.Files["docs/legacy-skip.md"]
+	if !ok || skipEntry.Owner != scaffold.OwnerFork {
+		t.Errorf("manifest entry for docs/legacy-skip.md = %+v, want Owner=fork", skipEntry)
+	}
+}
+
+// --- Slice 4 work item 3: legacy manifest oddities (empty hash "heal"
+// targets, state=partial, and entries whose file is missing from disk).
+// These exercise ClassifyMigration end to end (not just
+// classifyLegacyEntryState in isolation), confirming the resulting
+// MigrationEntry.Kind, not only the intermediate LegacyEntryState.
+
+func TestClassifyMigration_EmptyHashHealTarget_RelocatablePath_ForksNeverDeleted(t *testing.T) {
+	dir := t.TempDir()
+	content := "content the v1 heal mechanism never recorded a hash for"
+	writeMigrationDiskFile(t, dir, ".claude/rules/architecture.md", content)
+
+	m := scaffold.NewManifest("0.9.0")
+	m.Files[".claude/rules/architecture.md"] = scaffold.ManifestFile{Managed: true, State: scaffold.FileStateManaged}
+	desired := map[string][]byte{".claude/rules/ralph/architecture.md": []byte("new core content")}
+
+	plan, err := ClassifyMigration(m, dir, desired)
+	if err != nil {
+		t.Fatalf("ClassifyMigration: %v", err)
+	}
+	e := findMigrationEntry(t, plan, ".claude/rules/architecture.md")
+	if e.Kind != OpForkRelocate {
+		t.Errorf("Kind = %v, want OpForkRelocate (an empty recorded hash must never be treated as unmodified, so it is never deleted)", e.Kind)
+	}
+	if e.State != LegacyModified {
+		t.Errorf("State = %v, want LegacyModified", e.State)
+	}
+}
+
+func TestClassifyMigration_EmptyHashHealTarget_SamePath_ForksNeverDeleted(t *testing.T) {
+	dir := t.TempDir()
+	content := "unhashed content, same path"
+	writeMigrationDiskFile(t, dir, "scripts/run-verify.sh", content)
+
+	m := scaffold.NewManifest("0.9.0")
+	m.Files["scripts/run-verify.sh"] = scaffold.ManifestFile{Managed: true, State: scaffold.FileStateManaged}
+	desired := map[string][]byte{"scripts/run-verify.sh": []byte("new template content")}
+
+	plan, err := ClassifyMigration(m, dir, desired)
+	if err != nil {
+		t.Fatalf("ClassifyMigration: %v", err)
+	}
+	e := findMigrationEntry(t, plan, "scripts/run-verify.sh")
+	if e.Kind != OpForkInPlace {
+		t.Errorf("Kind = %v, want OpForkInPlace (an empty recorded hash must never be treated as unmodified, so it is never deleted)", e.Kind)
+	}
+}
+
+func TestClassifyMigration_PartialState_RelocatablePath_Forks(t *testing.T) {
+	dir := t.TempDir()
+	content := "content the user chose to keep during a v1-era interactive conflict resolution"
+	writeMigrationDiskFile(t, dir, ".claude/rules/architecture.md", content)
+
+	m := scaffold.NewManifest("0.9.0")
+	m.Files[".claude/rules/architecture.md"] = scaffold.ManifestFile{
+		Managed: true, State: legacyStatePartial,
+		// Hash/DiskHash deliberately match disk: state=partial must force
+		// LegacyModified regardless, per the LegacyEntryState contract.
+		Hash: migrateHash(content), DiskHash: migrateHash(content),
+	}
+	desired := map[string][]byte{".claude/rules/ralph/architecture.md": []byte("new core content")}
+
+	plan, err := ClassifyMigration(m, dir, desired)
+	if err != nil {
+		t.Fatalf("ClassifyMigration: %v", err)
+	}
+	e := findMigrationEntry(t, plan, ".claude/rules/architecture.md")
+	if e.Kind != OpForkRelocate {
+		t.Errorf("Kind = %v, want OpForkRelocate (state=partial must always fork, even with a matching hash)", e.Kind)
+	}
+}
+
+// TestClassifyMigration_MissingFromDisk_NoPhantomOps covers a manifest entry
+// whose file is missing from disk at both a relocatable and a
+// non-relocatable path. These hit two different short-circuits:
+// ClassifyMigration's own rerun-stability check (relocatable — the path is
+// treated as already migrated, no entry at all) and
+// classifyForkCandidate's own !hasDisk branch (non-relocatable — an
+// OpUntouched no-op entry). Both must produce no error and no collision.
+func TestClassifyMigration_MissingFromDisk_NoPhantomOps(t *testing.T) {
+	t.Run("relocatable path missing from disk: rerun-stability short-circuit, no entry at all", func(t *testing.T) {
+		dir := t.TempDir()
+		m := scaffold.NewManifest("0.9.0")
+		m.SetFile(".claude/rules/architecture.md", migrateHash("content that was never written to this fixture's disk"))
+		desired := map[string][]byte{".claude/rules/ralph/architecture.md": []byte("new core content")}
+
+		plan, err := ClassifyMigration(m, dir, desired)
+		if err != nil {
+			t.Fatalf("ClassifyMigration: %v", err)
+		}
+		assertNoMigrationEntry(t, plan, ".claude/rules/architecture.md")
+		if len(plan.Collisions) != 0 {
+			t.Errorf("Collisions = %+v, want none", plan.Collisions)
+		}
+	})
+
+	t.Run("non-relocatable path missing from disk: classifyForkCandidate short-circuit, untouched no-op entry", func(t *testing.T) {
+		dir := t.TempDir()
+		m := scaffold.NewManifest("0.9.0")
+		m.SetFile("docs/gone.md", migrateHash("content that was never written to this fixture's disk"))
+		desired := map[string][]byte{"docs/gone.md": []byte("new template content")}
+
+		plan, err := ClassifyMigration(m, dir, desired)
+		if err != nil {
+			t.Fatalf("ClassifyMigration: %v", err)
+		}
+		e := findMigrationEntry(t, plan, "docs/gone.md")
+		if e.Kind != OpUntouched {
+			t.Errorf("Kind = %v, want OpUntouched", e.Kind)
+		}
+		if e.NewPath != e.OldPath {
+			t.Errorf("NewPath = %q, want it left at OldPath %q (no relocation is ever attempted for a missing file)", e.NewPath, e.OldPath)
+		}
+		if len(plan.Collisions) != 0 {
+			t.Errorf("Collisions = %+v, want none", plan.Collisions)
+		}
+	})
+}
+
+// TestRunMigrateLegacy_CollisionMatrixA_HalfMigrated_RerunDeletesOldOnly is
+// slice 4 work item 4, collision-matrix case (a): the relocation
+// destination already holds content identical to the source (as if a prior
+// migration run relocated the file but was interrupted before deleting the
+// old path). A rerun must complete with a delete-old-only operation: no
+// collision, and no duplicate write to the destination.
+func TestRunMigrateLegacy_CollisionMatrixA_HalfMigrated_RerunDeletesOldOnly(t *testing.T) {
+	isolateGitConfig(t)
+	dir := t.TempDir()
+	target := filepath.Join(dir, "project")
+	if err := os.MkdirAll(filepath.Join(target, ".ralph"), 0755); err != nil {
+		t.Fatalf("MkdirAll .ralph: %v", err)
+	}
+
+	forkedContent := legacyOldTestingRuleEdited
+	writeMigrationDiskFile(t, target, ".claude/rules/testing.md", forkedContent)
+	writeMigrationDiskFile(t, target, ".claude/rules/ralph/testing.md", forkedContent)
+
+	m := scaffold.NewManifest("0.9.0-test")
+	m.SetFile(".claude/rules/testing.md", migrateHash("stale-hash-forces-modified"))
+	manifestPath := filepath.Join(target, ".ralph", "manifest.toml")
+	if err := m.Write(manifestPath); err != nil {
+		t.Fatalf("writing legacy manifest: %v", err)
+	}
+	runMigrationTestGit(t, target, "init")
+	runMigrationTestGit(t, target, "add", "-A")
+	runMigrationTestGit(t, target, "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "collision-a fixture")
+
+	scaffold.EmbeddedFS = legacyFixtureNewTemplateFS()
+	Version = "2.0.0-test"
+
+	var out, errOut bytes.Buffer
+	err := runUpgradeIOWithOptions(target, upgradeOptions{Yes: true, Pager: pagerNever}, strings.NewReader(""), &out, &errOut, false)
+	if err != nil {
+		t.Fatalf("runUpgradeIOWithOptions (collision case a): %v\nstdout:\n%s\nstderr:\n%s", err, out.String(), errOut.String())
+	}
+	if strings.Contains(out.String(), "Collisions (1)") {
+		t.Errorf("preview must report zero collisions for case (a):\n%s", out.String())
+	}
+
+	if _, statErr := os.Stat(filepath.Join(target, ".claude", "rules", "testing.md")); !os.IsNotExist(statErr) {
+		t.Errorf(".claude/rules/testing.md must be deleted; stat err = %v", statErr)
+	}
+
+	destPath := filepath.Join(target, ".claude", "rules", "ralph", "testing.md")
+	gotDest := mustReadFile(t, destPath)
+	if string(gotDest) != forkedContent {
+		t.Errorf("relocation destination content changed unexpectedly: got %q, want unchanged %q", gotDest, forkedContent)
+	}
+
+	// Case (a) resolves as "already relocated", not a live fork: the
+	// destination is adopted as an ordinary core-owned path going forward,
+	// not recorded with Owner=fork.
+	m2 := readManifestV2(t, target)
+	entry, ok := m2.Files[".claude/rules/ralph/testing.md"]
+	if !ok || entry.Owner != scaffold.OwnerCore {
+		t.Errorf("manifest entry for .claude/rules/ralph/testing.md = %+v, want Owner=core (already-resolved relocation, not a live fork)", entry)
+	}
+}
+
+// TestRunMigrateLegacy_CollisionMatrixB_DestMatchesTemplate_CoreAdopted is
+// slice 4 work item 4, collision-matrix case (b): the source is unmodified,
+// and the relocation destination already holds exactly the new template's
+// content (rather than the source's own content). The old path is deleted,
+// the destination is adopted as core, and no collision is reported.
+func TestRunMigrateLegacy_CollisionMatrixB_DestMatchesTemplate_CoreAdopted(t *testing.T) {
+	isolateGitConfig(t)
+	dir := t.TempDir()
+	target := filepath.Join(dir, "project")
+	if err := os.MkdirAll(filepath.Join(target, ".ralph"), 0755); err != nil {
+		t.Fatalf("MkdirAll .ralph: %v", err)
+	}
+
+	writeMigrationDiskFile(t, target, ".claude/rules/architecture.md", legacyOldArchitectureRule)
+	writeMigrationDiskFile(t, target, ".claude/rules/ralph/architecture.md", legacyNewArchitectureRule)
+
+	m := scaffold.NewManifest("0.9.0-test")
+	m.SetFile(".claude/rules/architecture.md", migrateHash(legacyOldArchitectureRule)) // unmodified
+	manifestPath := filepath.Join(target, ".ralph", "manifest.toml")
+	if err := m.Write(manifestPath); err != nil {
+		t.Fatalf("writing legacy manifest: %v", err)
+	}
+	runMigrationTestGit(t, target, "init")
+	runMigrationTestGit(t, target, "add", "-A")
+	runMigrationTestGit(t, target, "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "collision-b fixture")
+
+	scaffold.EmbeddedFS = legacyFixtureNewTemplateFS()
+	Version = "2.0.0-test"
+
+	var out, errOut bytes.Buffer
+	err := runUpgradeIOWithOptions(target, upgradeOptions{Yes: true, Pager: pagerNever}, strings.NewReader(""), &out, &errOut, false)
+	if err != nil {
+		t.Fatalf("runUpgradeIOWithOptions (collision case b): %v\nstdout:\n%s\nstderr:\n%s", err, out.String(), errOut.String())
+	}
+	if strings.Contains(out.String(), "Collisions (1)") {
+		t.Errorf("preview must report zero collisions for case (b):\n%s", out.String())
+	}
+
+	if _, statErr := os.Stat(filepath.Join(target, ".claude", "rules", "architecture.md")); !os.IsNotExist(statErr) {
+		t.Errorf(".claude/rules/architecture.md must be deleted; stat err = %v", statErr)
+	}
+	gotDest := mustReadFile(t, filepath.Join(target, ".claude", "rules", "ralph", "architecture.md"))
+	if string(gotDest) != legacyNewArchitectureRule {
+		t.Errorf(".claude/rules/ralph/architecture.md = %q, want the new core content it already held %q", gotDest, legacyNewArchitectureRule)
+	}
+
+	m2 := readManifestV2(t, target)
+	entry, ok := m2.Files[".claude/rules/ralph/architecture.md"]
+	if !ok || entry.Owner != scaffold.OwnerCore {
+		t.Errorf("manifest entry for .claude/rules/ralph/architecture.md = %+v, want Owner=core (adopted as core, not left a fork)", entry)
+	}
+}
+
+// poisonedReader panics if ever read from. Used by
+// TestRunMigrateLegacy_YesFlag_NeverReadsStdin to prove --yes
+// (opts.Yes=true) skips the confirmation prompt without touching stdin at
+// all, rather than merely reading an empty/EOF line.
+type poisonedReader struct{}
+
+func (poisonedReader) Read([]byte) (int, error) {
+	panic("stdin must not be read when --yes (opts.Yes) is set")
+}
+
+// TestRunMigrateLegacy_YesFlag_NeverReadsStdin is slice 4 work item 5.
+func TestRunMigrateLegacy_YesFlag_NeverReadsStdin(t *testing.T) {
+	target := buildLegacyProject(t)
+	scaffold.EmbeddedFS = legacyFixtureNewTemplateFS()
+	Version = "2.0.0-test"
+
+	var out, errOut bytes.Buffer
+	err := runUpgradeIOWithOptions(target, upgradeOptions{Yes: true, Pager: pagerNever}, poisonedReader{}, &out, &errOut, false)
+	if err != nil {
+		t.Fatalf("runUpgradeIOWithOptions (--yes): %v\nstdout:\n%s\nstderr:\n%s", err, out.String(), errOut.String())
+	}
+	if !strings.Contains(out.String(), "Migration complete") {
+		t.Errorf("stdout must announce migration completion:\n%s", out.String())
 	}
 }
