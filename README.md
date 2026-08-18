@@ -128,7 +128,7 @@ Run `ralph help <command>` for flags.
 
 ### `ralph upgrade`
 
-`ralph upgrade` works on v2-layout projects (`.ralph/manifest.toml` with `meta.layout = "v2"`) directly. On a legacy (pre-v2 or manifest-less) project it first runs a one-time, confirmed migration to v2 (see [Migrating from a legacy layout](#migrating-from-a-legacy-layout) below), then chains straight into the v2 upgrade below. Aside from that one-time migration confirmation, every run is fully non-interactive — no prompts, no stdin reads:
+`ralph upgrade` works on v2-layout projects (`.ralph/manifest.toml` with `meta.layout = "v2"`) directly. On a legacy (pre-v2) project it first runs a one-time, confirmed migration to v2 (see [Migrating from a legacy layout](#migrating-from-a-legacy-layout) below), then chains straight into the v2 upgrade below. Aside from that one-time migration confirmation, every run is fully non-interactive — no prompts, no stdin reads:
 
 - Core files are replaced from the embedded templates (including installed language packs); paths with local drift are left untouched.
 - Managed blocks (`AGENTS.md`, `.gitignore`) are updated in place; content outside the block markers is preserved byte-for-byte.
@@ -142,7 +142,7 @@ Exit codes: `0` success, `1` execution error, `3` completed with unresolved drif
 
 #### Migrating from a legacy layout
 
-Legacy (pre-v2 or manifest-less) layouts are detected automatically by `ralph upgrade` — no separate migration command. Before touching anything, it requires a clean git work tree (git is the only rollback mechanism; migration keeps no backups) and aborts with zero writes if the tree is not a git repo or has uncommitted changes.
+Legacy (pre-v2) layouts are detected automatically by `ralph upgrade` — no separate migration command. Before touching anything, it requires a clean git work tree (git is the only rollback mechanism; migration keeps no backups) and aborts with zero writes if the tree is not a git repo or has uncommitted changes.
 
 It then prints a preview of the migration classification (path-by-path: replace, relocate, fork, or delete) and asks for confirmation (`y`/`N`); pass `--yes` to skip the prompt, or `--dry-run` to print the preview and stop without writing or prompting. Unmodified files (per the legacy manifest's recorded hash) are replaced or relocated to their new v2 path; modified files are kept as forks at their new path so they keep surfacing an advisory diff against the current core template instead of being silently overwritten. If a relocation destination already has diverging content (neither matching the source nor the new template), migration stops with zero writes and reports the collision for manual resolution before a re-run.
 

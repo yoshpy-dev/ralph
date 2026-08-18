@@ -615,7 +615,7 @@ func TestClassifyMigration_CollisionMatrix(t *testing.T) {
 		}
 	})
 
-	t.Run("(a) modified fork-relocate, dest matches source content -> delete-old only, no fork", func(t *testing.T) {
+	t.Run("(a) modified fork-relocate, dest matches source content -> delete-old, dest adopted as fork", func(t *testing.T) {
 		dir := t.TempDir()
 		writeMigrationDiskFile(t, dir, ".claude/rules/architecture.md", "already forked content")
 		writeMigrationDiskFile(t, dir, ".claude/rules/ralph/architecture.md", "already forked content")
@@ -632,11 +632,17 @@ func TestClassifyMigration_CollisionMatrix(t *testing.T) {
 			t.Fatalf("Collisions = %+v, want none", plan.Collisions)
 		}
 		e := findMigrationEntry(t, plan, ".claude/rules/architecture.md")
-		if e.Kind != OpDeleteOldPath {
-			t.Errorf("Kind = %v, want OpDeleteOldPath", e.Kind)
+		if e.Kind != OpDeleteOldPathAdoptFork {
+			t.Errorf("Kind = %v, want OpDeleteOldPathAdoptFork", e.Kind)
 		}
-		if e.Owner == scaffold.OwnerFork {
-			t.Errorf("Owner should not be fork once the relocation already resolved")
+		// Fork attribution must survive an already-resolved relocation of
+		// modified content: silently falling through to owner=core would
+		// permanently lose it (self-review HIGH-1).
+		if e.Owner != scaffold.OwnerFork {
+			t.Errorf("Owner = %q, want fork", e.Owner)
+		}
+		if e.ForkedFromVersion != "0.9.0" {
+			t.Errorf("ForkedFromVersion = %q, want %q", e.ForkedFromVersion, "0.9.0")
 		}
 	})
 
@@ -1883,13 +1889,20 @@ func TestRunMigrateLegacy_CollisionMatrixA_HalfMigrated_RerunDeletesOldOnly(t *t
 		t.Errorf("relocation destination content changed unexpectedly: got %q, want unchanged %q", gotDest, forkedContent)
 	}
 
-	// Case (a) resolves as "already relocated", not a live fork: the
-	// destination is adopted as an ordinary core-owned path going forward,
-	// not recorded with Owner=fork.
+	// Case (a) resolves as "already relocated" for the delete, but the
+	// content itself is modified (an unmanaged, user-supplied fixture): the
+	// destination must be recorded as a fork (Owner=fork), not silently
+	// adopted as owner=core, which would permanently lose the fork
+	// attribution and leave the path in unresolved drift on the very next
+	// upgrade (self-review HIGH-1,
+	// docs/reports/self-review-2026-08-18-overlay-scaffold-v2-p4.md).
 	m2 := readManifestV2(t, target)
 	entry, ok := m2.Files[".claude/rules/ralph/testing.md"]
-	if !ok || entry.Owner != scaffold.OwnerCore {
-		t.Errorf("manifest entry for .claude/rules/ralph/testing.md = %+v, want Owner=core (already-resolved relocation, not a live fork)", entry)
+	if !ok || entry.Owner != scaffold.OwnerFork {
+		t.Fatalf("manifest entry for .claude/rules/ralph/testing.md = %+v, want Owner=fork (already-resolved relocation of modified content must keep its fork attribution)", entry)
+	}
+	if entry.ForkedFromVersion != "0.9.0-test" {
+		t.Errorf("ForkedFromVersion = %q, want %q", entry.ForkedFromVersion, "0.9.0-test")
 	}
 }
 
@@ -1969,5 +1982,296 @@ func TestRunMigrateLegacy_YesFlag_NeverReadsStdin(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "Migration complete") {
 		t.Errorf("stdout must announce migration completion:\n%s", out.String())
+	}
+}
+
+// ===================================================================
+// Self-review fixes (docs/reports/self-review-2026-08-18-overlay-scaffold-v2-p4.md).
+// ===================================================================
+
+// TestRunMigrateLegacy_RerunAfterPartialRelocation_ModifiedSource_DestAdoptsFork
+// covers self-review HIGH-1 item (1): a prior interrupted migration run
+// already fully relocated a MODIFIED source (relocateMigrationFile's
+// write-then-delete completed for this entry) before a later entry's write
+// failed and aborted the overall migration before the manifest barrier. On
+// rerun, the legacy manifest still records the old (pre-relocation) entry,
+// but the old path is now gone from disk while the relocation destination
+// already holds the user's forked content. ClassifyMigration must recognize
+// this and record the destination as owner=fork -- not silently adopt it as
+// owner=core, which would leave it permanently drifted on the very next
+// upgrade.
+func TestRunMigrateLegacy_RerunAfterPartialRelocation_ModifiedSource_DestAdoptsFork(t *testing.T) {
+	isolateGitConfig(t)
+	dir := t.TempDir()
+	target := filepath.Join(dir, "project")
+	if err := os.MkdirAll(filepath.Join(target, ".ralph"), 0755); err != nil {
+		t.Fatalf("MkdirAll .ralph: %v", err)
+	}
+
+	// Old path already gone; the relocation destination already holds the
+	// user's forked content (as if a prior interrupted run already wrote
+	// the destination and deleted the source, per relocateMigrationFile's
+	// write-then-delete ordering).
+	forkedContent := legacyOldTestingRuleEdited
+	writeMigrationDiskFile(t, target, ".claude/rules/ralph/testing.md", forkedContent)
+
+	m := scaffold.NewManifest("0.9.0-test")
+	m.SetFile(".claude/rules/testing.md", migrateHash("stale-hash-forces-modified"))
+	manifestPath := filepath.Join(target, ".ralph", "manifest.toml")
+	if err := m.Write(manifestPath); err != nil {
+		t.Fatalf("writing legacy manifest: %v", err)
+	}
+	runMigrationTestGit(t, target, "init")
+	runMigrationTestGit(t, target, "add", "-A")
+	runMigrationTestGit(t, target, "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "rerun-after-partial-relocation fixture")
+
+	scaffold.EmbeddedFS = legacyFixtureNewTemplateFS()
+	Version = "2.0.0-test"
+
+	var out, errOut bytes.Buffer
+	err := runUpgradeIOWithOptions(target, upgradeOptions{Yes: true, Pager: pagerNever}, strings.NewReader(""), &out, &errOut, false)
+	if err != nil {
+		t.Fatalf("runUpgradeIOWithOptions (rerun after partial relocation): %v\nstdout:\n%s\nstderr:\n%s", err, out.String(), errOut.String())
+	}
+
+	destPath := filepath.Join(target, ".claude", "rules", "ralph", "testing.md")
+	gotDest := mustReadFile(t, destPath)
+	if string(gotDest) != forkedContent {
+		t.Errorf("relocation destination content changed unexpectedly: got %q, want unchanged %q", gotDest, forkedContent)
+	}
+
+	m2 := readManifestV2(t, target)
+	entry, ok := m2.Files[".claude/rules/ralph/testing.md"]
+	if !ok || entry.Owner != scaffold.OwnerFork {
+		t.Fatalf("manifest entry for .claude/rules/ralph/testing.md = %+v, want Owner=fork (fork attribution must survive a rerun after partial relocation)", entry)
+	}
+	if entry.ForkedFromVersion != "0.9.0-test" {
+		t.Errorf("ForkedFromVersion = %q, want %q", entry.ForkedFromVersion, "0.9.0-test")
+	}
+
+	// No drift on a subsequent upgrade: a forked path is never core-checked
+	// against the template, so a second run must succeed cleanly.
+	var out2, errOut2 bytes.Buffer
+	if err := runUpgradeIOWithOptions(target, upgradeOptions{Yes: true, Pager: pagerNever}, strings.NewReader(""), &out2, &errOut2, false); err != nil {
+		t.Fatalf("second runUpgradeIOWithOptions (drift check): %v\nstdout:\n%s\nstderr:\n%s", err, out2.String(), errOut2.String())
+	}
+}
+
+// TestRunMigrateLegacy_ChainedDriftSentinel_SurvivesAsExitSentinel covers
+// self-review MEDIUM-1: the chained v2 upgrade's ErrUpgradeDriftRemaining
+// sentinel must propagate out of runMigrateLegacy rather than being
+// swallowed as a warning, since cmd/ralph/main.go maps it to a dedicated
+// exit code (3) distinct from a genuine execution error.
+//
+// scripts/run-verify.sh is a core-owned template path the legacy manifest
+// never tracks at all, with disk content that diverges from the new
+// template: buildMigratedManifest's generic desired-state sweep
+// optimistically records DiskHash=templateHash for it (untracked paths are
+// never disk-compared for owner=core -- see that function's own doc
+// comment), so the chained v2 upgrade's classifyCore has no way to tell
+// this apart from genuine drift and correctly reports it as such.
+func TestRunMigrateLegacy_ChainedDriftSentinel_SurvivesAsExitSentinel(t *testing.T) {
+	isolateGitConfig(t)
+	dir := t.TempDir()
+	target := filepath.Join(dir, "project")
+	if err := os.MkdirAll(filepath.Join(target, ".ralph"), 0755); err != nil {
+		t.Fatalf("MkdirAll .ralph: %v", err)
+	}
+
+	writeMigrationDiskFile(t, target, "scripts/run-verify.sh", "#!/bin/sh\necho pre-existing-divergent-content\n")
+	writeMigrationDiskFile(t, target, ".claude/rules/testing.md", "unmodified testing rule")
+
+	m := scaffold.NewManifest("0.9.0-test")
+	m.SetFile(".claude/rules/testing.md", migrateHash("unmodified testing rule"))
+	manifestPath := filepath.Join(target, ".ralph", "manifest.toml")
+	if err := m.Write(manifestPath); err != nil {
+		t.Fatalf("writing legacy manifest: %v", err)
+	}
+	runMigrationTestGit(t, target, "init")
+	runMigrationTestGit(t, target, "add", "-A")
+	runMigrationTestGit(t, target, "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "drift-sentinel fixture")
+
+	scaffold.EmbeddedFS = legacyFixtureNewTemplateFS()
+	Version = "2.0.0-test"
+
+	var out, errOut bytes.Buffer
+	err := runUpgradeIOWithOptions(target, upgradeOptions{Yes: true, Pager: pagerNever}, strings.NewReader(""), &out, &errOut, false)
+	if err == nil {
+		t.Fatal("expected ErrUpgradeDriftRemaining to survive the chained v2 upgrade, got nil")
+	}
+	if !errors.Is(err, ErrUpgradeDriftRemaining) {
+		t.Errorf("err = %v, want errors.Is(err, ErrUpgradeDriftRemaining)", err)
+	}
+	if strings.Contains(errOut.String(), "Warning: migration completed, but the chained v2 upgrade reported an issue") {
+		t.Errorf("drift must not be reported through the generic warning path:\n%s", errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "Unresolved drift") {
+		t.Errorf("stderr must report the unresolved drift path:\n%s", errOut.String())
+	}
+
+	// The migration barrier itself must still have committed: it succeeded
+	// before the chained call ran, so the drift sentinel from that later,
+	// independent step must not roll it back.
+	m2 := readManifestV2(t, target)
+	if m2.Meta.Layout != scaffold.LayoutV2 {
+		t.Errorf("Meta.Layout after migration = %q, want %q (the migration barrier must commit even though the chained upgrade reports drift)", m2.Meta.Layout, scaffold.LayoutV2)
+	}
+}
+
+// TestRunMigrateLegacy_SymlinkedDeleteParent_ZeroWrites covers self-review
+// MEDIUM-2: a delete-kind migration op (OpDeleteOldPath) must validate its
+// own parent chain before any write, the same as a relocation's write
+// target already does (see TestRunMigrateLegacy_SymlinkedRelocationDestParent_ZeroWrites).
+func TestRunMigrateLegacy_SymlinkedDeleteParent_ZeroWrites(t *testing.T) {
+	isolateGitConfig(t)
+	dir := t.TempDir()
+	target := filepath.Join(dir, "project")
+	if err := os.MkdirAll(filepath.Join(target, ".ralph"), 0755); err != nil {
+		t.Fatalf("MkdirAll .ralph: %v", err)
+	}
+
+	// legacy/retired.md is unmodified and absent from the new template set,
+	// so ClassifyMigration marks it OpDeleteOldPath. Its parent directory
+	// is a symlink pointing outside target: the delete's own parent-chain
+	// must be refused before any write.
+	external := t.TempDir()
+	if err := os.Symlink(external, filepath.Join(target, "legacy")); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(external, "retired.md"), []byte("retired content"), 0644); err != nil {
+		t.Fatalf("WriteFile through symlink for fixture setup: %v", err)
+	}
+
+	m := scaffold.NewManifest("0.9.0-test")
+	m.SetFile("legacy/retired.md", migrateHash("retired content"))
+	manifestPath := filepath.Join(target, ".ralph", "manifest.toml")
+	if err := m.Write(manifestPath); err != nil {
+		t.Fatalf("writing legacy manifest: %v", err)
+	}
+	runMigrationTestGit(t, target, "init")
+	runMigrationTestGit(t, target, "add", "-A")
+	runMigrationTestGit(t, target, "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "symlinked-delete-parent fixture")
+
+	scaffold.EmbeddedFS = legacyFixtureNewTemplateFS()
+	Version = "2.0.0-test"
+
+	manifestBefore := mustReadFile(t, manifestPath)
+
+	var out, errOut bytes.Buffer
+	err := runUpgradeIOWithOptions(target, upgradeOptions{Yes: true, Pager: pagerNever}, strings.NewReader(""), &out, &errOut, false)
+	if err == nil {
+		t.Fatal("migration deleting a path through a symlinked parent: expected an error, got nil")
+	}
+	if !strings.Contains(err.Error(), "preflight") {
+		t.Errorf("err = %v, want a preflight-check error naming the unsafe path", err)
+	}
+
+	manifestAfter := mustReadFile(t, manifestPath)
+	if !bytes.Equal(manifestBefore, manifestAfter) {
+		t.Errorf("a preflight refusal must not touch the legacy manifest:\nbefore: %s\nafter:  %s", manifestBefore, manifestAfter)
+	}
+	info, lerr := os.Lstat(filepath.Join(target, "legacy"))
+	if lerr != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("legacy must remain the untouched symlink: info=%+v err=%v", info, lerr)
+	}
+	externalEntries, rerr := os.ReadDir(external)
+	if rerr != nil {
+		t.Fatalf("reading external dir: %v", rerr)
+	}
+	if len(externalEntries) != 1 {
+		t.Errorf("a preflight refusal must not delete through the symlink into the external dir; entries=%v", externalEntries)
+	}
+}
+
+// TestPruneLegacySettingsHooks_ArgumentVariant_LeftInPlaceAsNearMiss covers
+// self-review MEDIUM-4: an argument-carrying variant of a known legacy hook
+// command (e.g. "--verbose") must survive pruning (exact match only, per
+// design decision -- argument-modified commands are treated as a deliberate
+// user customization) and must be reported as a near-miss, not silently
+// counted among the removed commands.
+func TestPruneLegacySettingsHooks_ArgumentVariant_LeftInPlaceAsNearMiss(t *testing.T) {
+	content := []byte(`{
+  "hooks": {
+    "PreToolUse": [
+      {"matcher": "Bash", "hooks": [
+        {"type": "command", "command": "./.claude/hooks/pre_bash_guard.sh --verbose"},
+        {"type": "command", "command": "./.claude/hooks/session_start_context.sh"}
+      ]}
+    ]
+  }
+}
+`)
+	candidates := prunedLegacyHookCommands(content)
+
+	pruned, removed, nearMisses, err := pruneLegacySettingsHooks(content, candidates)
+	if err != nil {
+		t.Fatalf("pruneLegacySettingsHooks: %v", err)
+	}
+
+	if len(removed) != 1 || removed[0] != "./.claude/hooks/session_start_context.sh" {
+		t.Errorf("removed = %v, want exactly [\"./.claude/hooks/session_start_context.sh\"]", removed)
+	}
+	if len(nearMisses) != 1 || nearMisses[0] != "./.claude/hooks/pre_bash_guard.sh --verbose" {
+		t.Errorf("nearMisses = %v, want exactly the argument-carrying variant", nearMisses)
+	}
+	if !bytes.Contains(pruned, []byte("./.claude/hooks/pre_bash_guard.sh --verbose")) {
+		t.Errorf("pruned settings.json must still contain the argument-carrying variant untouched:\n%s", pruned)
+	}
+	if bytes.Contains(pruned, []byte("./.claude/hooks/session_start_context.sh\"")) {
+		t.Errorf("pruned settings.json must not still contain the exact-match command:\n%s", pruned)
+	}
+}
+
+// TestRunMigrateLegacy_SettingsPruneReport_NearMissNotClaimedAsRemoved is the
+// end-to-end counterpart of the unit test above: the migration report must
+// not claim an argument-carrying variant was removed when it was actually
+// left in place (self-review MEDIUM-4's core complaint -- the report and
+// the actual pruning behavior must agree).
+func TestRunMigrateLegacy_SettingsPruneReport_NearMissNotClaimedAsRemoved(t *testing.T) {
+	isolateGitConfig(t)
+	dir := t.TempDir()
+	target := filepath.Join(dir, "project")
+	if err := os.MkdirAll(filepath.Join(target, ".ralph"), 0755); err != nil {
+		t.Fatalf("MkdirAll .ralph: %v", err)
+	}
+
+	settingsWithVariant := `{
+  "hooks": {
+    "PreToolUse": [
+      {"matcher": "Bash", "hooks": [{"type": "command", "command": "./.claude/hooks/pre_bash_guard.sh --verbose"}]}
+    ]
+  }
+}
+`
+	writeMigrationDiskFile(t, target, pathSettings, settingsWithVariant)
+
+	m := scaffold.NewManifest("0.9.0-test")
+	m.SetFile(pathSettings, migrateHash("stale-settings-hash"))
+	manifestPath := filepath.Join(target, ".ralph", "manifest.toml")
+	if err := m.Write(manifestPath); err != nil {
+		t.Fatalf("writing legacy manifest: %v", err)
+	}
+	runMigrationTestGit(t, target, "init")
+	runMigrationTestGit(t, target, "add", "-A")
+	runMigrationTestGit(t, target, "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "settings near-miss fixture")
+
+	scaffold.EmbeddedFS = legacyFixtureNewTemplateFS()
+	Version = "2.0.0-test"
+
+	var out, errOut bytes.Buffer
+	if err := runUpgradeIOWithOptions(target, upgradeOptions{Yes: true, Pager: pagerNever}, strings.NewReader(""), &out, &errOut, false); err != nil {
+		t.Fatalf("runUpgradeIOWithOptions: %v\nstdout:\n%s\nstderr:\n%s", err, out.String(), errOut.String())
+	}
+
+	reportPaths, globErr := filepath.Glob(filepath.Join(target, "docs", "reports", "ralph-migration-*.md"))
+	if globErr != nil || len(reportPaths) != 1 {
+		t.Fatalf("expected exactly one ralph-migration-*.md report, got %v (err=%v)", reportPaths, globErr)
+	}
+	report := string(mustReadFile(t, reportPaths[0]))
+	if !strings.Contains(report, "No known legacy direct-invocation hook commands were removed") {
+		t.Errorf("migration report must not claim any commands were removed (the only settings.json entry is an argument-carrying variant, never an exact match):\n%s", report)
+	}
+	if !strings.Contains(report, "left in place because their arguments differ") || !strings.Contains(report, "./.claude/hooks/pre_bash_guard.sh --verbose") {
+		t.Errorf("migration report must surface the near-miss so an operator does not mistake its survival for an oversight:\n%s", report)
 	}
 }

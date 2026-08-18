@@ -153,10 +153,23 @@ type MigrationOpKind int
 const (
 	// OpDeleteOldPath deletes the old path outright: either it was
 	// unmodified and relocated (the chained v2 upgrade creates the new
-	// path), unmodified and retired from the template set, or a
-	// relocation whose destination already resolved the move (rerun
-	// stability / collision-matrix case (a)/(b)).
+	// path), unmodified and retired from the template set, or an
+	// unmodified relocation whose destination already resolved the move
+	// (rerun stability / collision-matrix case (a)/(b)).
 	OpDeleteOldPath MigrationOpKind = iota
+	// OpDeleteOldPathAdoptFork deletes the old path (a no-op when it is
+	// already gone) and records the relocation destination as a fork
+	// (Owner=scaffold.OwnerFork + ForkedFromVersion): a modified or
+	// unmanaged source whose relocation destination already holds that
+	// same content -- either because the live collision-matrix check
+	// found the destination already resolved (case (a) with a modified
+	// source), or because a rerun's pre-check found the old path already
+	// gone and the destination diverging from the current template.
+	// Distinct from OpDeleteOldPath, which never carries Owner/
+	// ForkedFromVersion, so the two stay easy to tell apart by kind
+	// alone (self-review HIGH-1,
+	// docs/reports/self-review-2026-08-18-overlay-scaffold-v2-p4.md).
+	OpDeleteOldPathAdoptFork
 	// OpKeepInPlace leaves an unmodified, non-relocated path untouched;
 	// the chained v2 upgrade converges its content in the ordinary way.
 	OpKeepInPlace
@@ -207,11 +220,26 @@ type MigrationEntry struct {
 	// (OpForkRelocate, OpForkInPlace): the legacy manifest's recorded
 	// template version, carried into the v3 fork record.
 	ForkedFromVersion string
-	// PrunedHookCommands is populated only for OpSettingsPrune: the
-	// subset of legacyRalphHookCommands actually found referenced in the
-	// current settings.json content, sorted (legacyRalphHookCommands is
-	// itself sorted, so this stays sorted by construction).
+	// PrunedHookCommands is populated only for OpSettingsPrune. Before
+	// execution (classification time) it holds the candidate list --
+	// every legacyRalphHookCommands entry found as a substring of the
+	// current settings.json content -- used to seed the exact-match
+	// removal set executeMigrationEntries applies. executeMigrationEntries
+	// overwrites it in place with the commands actually removed (an
+	// exact-match subset of the candidates: an argument-carrying variant
+	// like "./.claude/hooks/pre_bash_guard.sh --verbose" is a candidate
+	// but is never actually removed -- see PrunedHookNearMisses), so by
+	// the time renderMigrationReport reads plan.Entries the report
+	// reflects reality rather than the looser candidate list (self-review
+	// MEDIUM-4).
 	PrunedHookCommands []string
+	// PrunedHookNearMisses is populated only for OpSettingsPrune, by
+	// executeMigrationEntries: legacy hook commands left in place because
+	// they reference a known script but do not match it exactly (an
+	// argument-carrying variant). These are deliberately treated as user
+	// customizations, not pruned; renderMigrationReport surfaces them so
+	// an operator does not mistake survival for an oversight.
+	PrunedHookNearMisses []string
 	// SnapshotCreate is set on the settings.json OpReplaceWithTemplate
 	// entry: besides replacing the file, a fresh settings snapshot
 	// (.ralph/core/settings.ralph.json) must be (re)created so the
@@ -291,10 +319,20 @@ func ClassifyMigration(legacyManifest *scaffold.Manifest, targetDir string, desi
 		if relocated && !hasDisk {
 			// Rerun stability: a prior interrupted migration already
 			// finished moving this path (or the operator/tooling did),
-			// so the old path is gone. Nothing remains to plan for it —
-			// see classifyLegacyEntryState's doc for why this check must
-			// happen before hash-based state classification, not inside
-			// it.
+			// so the old path is gone. Classify the relocation
+			// destination from the legacy entry's recorded state rather
+			// than dropping the entry outright -- see
+			// classifyRerunRelocatedDestination's doc for why a plain
+			// "nothing left to plan" skip loses fork attribution for a
+			// modified source (self-review HIGH-1,
+			// docs/reports/self-review-2026-08-18-overlay-scaffold-v2-p4.md).
+			me, err := classifyRerunRelocatedDestination(entry, cleanOld, newPath, targetDir, legacyManifest.Meta.Version, desired)
+			if err != nil {
+				return MigrationPlan{}, fmt.Errorf("classifying rerun-relocated %s: %w", cleanOld, err)
+			}
+			if me != nil {
+				plan.Entries = append(plan.Entries, *me)
+			}
 			continue
 		}
 
@@ -337,6 +375,53 @@ func ClassifyMigration(legacyManifest *scaffold.Manifest, targetDir string, desi
 	sort.Slice(plan.Collisions, func(i, j int) bool { return plan.Collisions[i].OldPath < plan.Collisions[j].OldPath })
 
 	return plan, nil
+}
+
+// classifyRerunRelocatedDestination handles ClassifyMigration's
+// rerun-stability pre-check for a relocatable path whose old location is
+// already gone from disk. Two legitimate causes reach here: (1) a normal
+// unmodified relocation whose old path migration already deleted, but the
+// chained v2 upgrade that creates the new path has not run yet this pass
+// (destination absent); (2) a prior migration/upgrade run relocated a
+// modified source (write destination, then delete old path -- see
+// relocateMigrationFile) but a later entry's write failed before the
+// manifest barrier committed, so a rerun sees the old path already gone
+// and the destination already holding the (possibly forked) content.
+//
+// Returns nil, nil when there is nothing to record: either the destination
+// does not exist yet (case 1 -- the chained v2 upgrade has not created it,
+// so there is nothing pending for this path), or the destination already
+// holds exactly the current template's content (an ordinary converged
+// relocation -- buildMigratedManifest's generic desired-state sweep
+// already records this correctly as owner=core without any entry here).
+//
+// Otherwise the destination's content diverges from the template, so --
+// per the LegacyEntryState contract's "a mis-fork is recoverable, a
+// mis-delete is not" philosophy (see classifyLegacyEntryState's doc) -- it
+// is classified from the legacy entry's recorded state (via
+// classifyLegacyEntryState with hasDisk=false, which always yields
+// LegacyUnmanaged or LegacyModified, never LegacyUnmodified) rather than
+// silently falling through to owner=core with a phantom disk hash. This
+// closes self-review HIGH-1 item (1)
+// (docs/reports/self-review-2026-08-18-overlay-scaffold-v2-p4.md).
+func classifyRerunRelocatedDestination(entry scaffold.ManifestFile, oldPath, newPath, targetDir, legacyVersion string, desired map[string][]byte) (*MigrationEntry, error) {
+	destContent, destExists, err := readDiskFileForMigration(targetDir, newPath)
+	if err != nil {
+		return nil, err
+	}
+	if !destExists {
+		return nil, nil
+	}
+	if templateContent, ok := desired[newPath]; ok && scaffold.HashBytes(destContent) == scaffold.HashBytes(templateContent) {
+		return nil, nil
+	}
+	return &MigrationEntry{
+		OldPath: oldPath, NewPath: newPath,
+		Kind:  OpDeleteOldPathAdoptFork,
+		State: classifyLegacyEntryState(entry, "", false),
+		Owner: scaffold.OwnerFork, ForkedFromVersion: legacyVersion,
+		Reason: "rerun: old path already gone and relocation destination " + newPath + " diverges from the current template; destination adopted as a fork from the legacy entry's recorded state",
+	}, nil
 }
 
 // legacyClassifyInput bundles a single legacy path's classification inputs.
@@ -468,7 +553,7 @@ func classifyUnmodifiedGeneric(in legacyClassifyInput) (MigrationEntry, *Migrati
 				OldPath: in.oldPath, NewPath: in.oldPath,
 				Kind: OpKeepInPlace, State: LegacyUnmodified,
 				Owner:  ownerForScaffoldPath(in.oldPath),
-				Reason: "unmodified and path unchanged; content converges via the chained v2 upgrade",
+				Reason: "unmodified and path unchanged; left in place, the chained v2 upgrade converges it per its ownership attribute",
 			}, nil, nil
 		}
 		return MigrationEntry{
@@ -535,11 +620,22 @@ func classifyForkCandidate(in legacyClassifyInput) (MigrationEntry, *MigrationCo
 	}
 
 	entry := MigrationEntry{OldPath: in.oldPath, NewPath: in.newPath, Kind: kind, State: in.state}
-	if kind == OpForkRelocate {
+	switch kind {
+	case OpForkRelocate:
 		entry.Owner = scaffold.OwnerFork
 		entry.ForkedFromVersion = in.legacyVersion
 		entry.Reason = "modified content relocated to " + in.newPath + " as a fork"
-	} else {
+	case OpDeleteOldPathAdoptFork:
+		// Collision-matrix case (a) with a modified/unmanaged source: the
+		// destination already holds this content (a prior interrupted
+		// migration run, or otherwise). Record it as a fork rather than
+		// letting it fall through to owner=core — see
+		// docs/reports/self-review-2026-08-18-overlay-scaffold-v2-p4.md
+		// HIGH-1.
+		entry.Owner = scaffold.OwnerFork
+		entry.ForkedFromVersion = in.legacyVersion
+		entry.Reason = "already relocated: destination content matches the modified source; destination adopted as a fork, old path deleted"
+	default:
 		entry.Reason = "already relocated: destination content matches the source; only the old path is deleted"
 	}
 	return entry, nil, nil
@@ -553,7 +649,14 @@ func classifyForkCandidate(in legacyClassifyInput) (MigrationEntry, *MigrationCo
 //     chained v2 upgrade creates newPath); modified/unmanaged sources fork-
 //     relocate.
 //   - (a) dest exists, content == source: already relocated (by a prior
-//     interrupted migration run, or otherwise) — delete the old path only.
+//     interrupted migration run, or otherwise). An unmodified source's old
+//     path is simply deleted (the destination already holds exactly what
+//     the chained v2 upgrade would have produced). A modified/unmanaged
+//     source's destination is additionally adopted as a fork (Owner=fork,
+//     OpDeleteOldPathAdoptFork): letting it fall through to owner=core
+//     instead would permanently lose the fork attribution and turn the
+//     user's content into unresolved drift on the very next upgrade — see
+//     docs/reports/self-review-2026-08-18-overlay-scaffold-v2-p4.md HIGH-1.
 //   - (b) dest exists, content == the new template, AND the source is
 //     unmodified: the destination already holds exactly what a fresh v2
 //     upgrade would have written there anyway — delete the old path only.
@@ -572,7 +675,10 @@ func relocationOutcome(sourceHash string, sourceUnmodified bool, destContent []b
 	}
 	destHash := scaffold.HashBytes(destContent)
 	if destHash == sourceHash {
-		return OpDeleteOldPath, ""
+		if sourceUnmodified {
+			return OpDeleteOldPath, ""
+		}
+		return OpDeleteOldPathAdoptFork, ""
 	}
 	if sourceUnmodified {
 		if templateContent, ok := desired[newPath]; ok && destHash == scaffold.HashBytes(templateContent) {
@@ -618,6 +724,7 @@ func RenderMigrationPreview(plan MigrationPlan) string {
 		kind  MigrationOpKind
 	}{
 		{"Delete (relocated/retired)", OpDeleteOldPath},
+		{"Delete (relocated, fork adopted)", OpDeleteOldPathAdoptFork},
 		{"Keep in place", OpKeepInPlace},
 		{"Fork - relocate", OpForkRelocate},
 		{"Fork - in place", OpForkInPlace},
@@ -791,8 +898,18 @@ func runMigrateLegacy(absDir, manifestPath string, oldManifest *scaffold.Manifes
 	// failure here is a warning, not fatal: the migration itself already
 	// committed (the manifest barrier above succeeded), and a subsequent
 	// `ralph upgrade` re-run converges the rest through the ordinary v2
-	// path.
+	// path. ErrUpgradeDriftRemaining is the one exception: it is not a
+	// genuine execution error but the chained engine's ordinary "completed,
+	// but N paths are left in unresolved drift" outcome, which
+	// cmd/ralph/main.go maps to exit code 3 (spec FR-4). Swallowing it here
+	// as a warning would make the migration run -- the run most likely to
+	// surface drift -- exit 0 anyway, hiding the machine-detectable signal
+	// for exactly one run (self-review MEDIUM-1,
+	// docs/reports/self-review-2026-08-18-overlay-scaffold-v2-p4.md).
 	if err := runUpgradeV2(absDir, manifestPath, newManifest, opts, out, errOut, colorize, now); err != nil {
+		if errors.Is(err, ErrUpgradeDriftRemaining) {
+			return err
+		}
 		writef(errOut, "Warning: migration completed, but the chained v2 upgrade reported an issue: %v\n", err)
 		writef(errOut, "  re-run `ralph upgrade` to complete convergence via the v2 engine.\n")
 	}
@@ -817,8 +934,13 @@ func checkGitCleanForMigration(absDir string) error {
 	}
 
 	statusCmd := exec.Command(gitBin, "-C", absDir, "status", "--porcelain")
+	var statusErr bytes.Buffer
+	statusCmd.Stderr = &statusErr
 	statusOut, err := statusCmd.Output()
 	if err != nil {
+		if msg := strings.TrimSpace(statusErr.String()); msg != "" {
+			return fmt.Errorf("checking git status before migration: %w: %s", err, msg)
+		}
 		return fmt.Errorf("checking git status before migration: %w", err)
 	}
 	if strings.TrimSpace(string(statusOut)) != "" {
@@ -849,9 +971,28 @@ func confirmMigration(in io.Reader, out io.Writer, autoYes bool) (bool, error) {
 // is a regular file or absent) before any migration write happens. Called
 // once per plan.Entries item, in a batch pass that must fully complete
 // before executeMigrationEntries writes anything.
+//
+// The real-parent-chain check (upgrade.ValidateRealParentChain) is hoisted
+// here, ahead of the per-kind dispatch, for every kind that names a path via
+// OldPath: this covers delete kinds (OpDeleteOldPath,
+// OpDeleteOldPathAdoptFork, via validateMigrationLeaf) and the baseline
+// directory removal (OpDeleteDir, via validateMigrationDirOp), neither of
+// which validated it on their own before -- a symlinked intermediate
+// directory could route os.Remove/os.RemoveAll through the link and delete
+// outside absDir (self-review MEDIUM-2,
+// docs/reports/self-review-2026-08-18-overlay-scaffold-v2-p4.md). Write-target
+// kinds (OpForkRelocate's NewPath, OpReplaceWithTemplate, OpSettingsPrune)
+// already validate their own chain via validateMigrationWriteTarget; the
+// hoisted call here additionally covers OpForkRelocate's OldPath (the
+// relocation source), which validateMigrationWriteTarget never saw. Placing
+// the check at this single dispatch point, ahead of the switch, means no
+// future MigrationOpKind can be added without it.
 func validateMigrationOp(absDir string, e MigrationEntry) error {
+	if err := upgrade.ValidateRealParentChain(absDir, e.OldPath); err != nil {
+		return err
+	}
 	switch e.Kind {
-	case OpDeleteOldPath:
+	case OpDeleteOldPath, OpDeleteOldPathAdoptFork:
 		return validateMigrationLeaf(absDir, e.OldPath, false /* mustExist */)
 	case OpForkRelocate:
 		if err := validateMigrationLeaf(absDir, e.OldPath, true /* mustExist */); err != nil {
@@ -944,16 +1085,25 @@ func validateMigrationDirOp(absDir, relPath string) error {
 // executeMigrationEntries applies every plan.Entries write in order: fork
 // relocations (read source, write destination, delete source), template
 // replacements (special faces, plus a fresh settings snapshot when
-// SnapshotCreate is set), settings pruning, plain deletes, and the
+// SnapshotCreate is set), settings pruning, plain deletes (including
+// OpDeleteOldPathAdoptFork, whose delete is identical to OpDeleteOldPath's --
+// removeMigrationPath already tolerates an already-absent old path, which is
+// exactly the state a rerun-detected adopt-fork entry is in), and the
 // .ralph/baseline/ directory removal. OpKeepInPlace, OpForkInPlace, and
 // OpUntouched entries never write — their content converges via the chained
 // v2 upgrade (KeepInPlace) or is deliberately left alone (ForkInPlace,
 // Untouched). Callers must run validateMigrationOp over every entry first
 // (runMigrateLegacy does); this function does not re-validate.
+//
+// entries is indexed (not ranged by value) so the OpSettingsPrune case can
+// write the actually-removed commands and near-misses back into the
+// caller's plan.Entries slice (same backing array) for renderMigrationReport
+// to read afterward — see MigrationEntry.PrunedHookCommands' doc.
 func executeMigrationEntries(absDir string, desired map[string][]byte, entries []MigrationEntry) error {
-	for _, e := range entries {
+	for i := range entries {
+		e := entries[i]
 		switch e.Kind {
-		case OpDeleteOldPath:
+		case OpDeleteOldPath, OpDeleteOldPathAdoptFork:
 			if err := removeMigrationPath(absDir, e.OldPath); err != nil {
 				return fmt.Errorf("deleting %s: %w", e.OldPath, err)
 			}
@@ -975,6 +1125,14 @@ func executeMigrationEntries(absDir string, desired map[string][]byte, entries [
 				}
 			}
 		case OpSettingsPrune:
+			if len(e.PrunedHookCommands) == 0 {
+				// Nothing classification found as even a candidate: skip
+				// the read/parse/rewrite entirely rather than
+				// unconditionally re-marshaling (and losing key order /
+				// HTML-escaping) a settings.json that would come out
+				// byte-identical in content anyway.
+				continue
+			}
 			current, hasDisk, err := readDiskFileForMigration(absDir, e.OldPath)
 			if err != nil {
 				return fmt.Errorf("reading %s: %w", e.OldPath, err)
@@ -982,13 +1140,15 @@ func executeMigrationEntries(absDir string, desired map[string][]byte, entries [
 			if !hasDisk {
 				continue
 			}
-			pruned, err := pruneLegacySettingsHooks(current, e.PrunedHookCommands)
+			pruned, removed, nearMisses, err := pruneLegacySettingsHooks(current, e.PrunedHookCommands)
 			if err != nil {
 				return fmt.Errorf("pruning legacy hooks from %s: %w", e.OldPath, err)
 			}
 			if err := writeMigrationFile(absDir, e.OldPath, pruned); err != nil {
 				return fmt.Errorf("writing pruned %s: %w", e.OldPath, err)
 			}
+			entries[i].PrunedHookCommands = removed
+			entries[i].PrunedHookNearMisses = nearMisses
 		case OpDeleteDir:
 			if err := removeMigrationDir(absDir, e.OldPath); err != nil {
 				return fmt.Errorf("removing %s: %w", e.OldPath, err)
@@ -1063,38 +1223,57 @@ func removeMigrationDir(absDir, relPath string) error {
 // "command" field exactly matches one of commands from content's "hooks"
 // object, dropping now-empty matcher entries and now-empty event arrays
 // along with them. Everything else in content (env, permissions, user hook
-// entries, unrelated top-level keys) is preserved.
+// entries, unrelated top-level keys) is preserved. Matching is exact-string
+// only, deliberately: an argument-carrying variant of a known command (e.g.
+// "./.claude/hooks/pre_bash_guard.sh --verbose") is treated as a user
+// customization and left in place rather than pruned — reported back via
+// nearMisses so an operator does not mistake its survival for an oversight
+// (self-review MEDIUM-4).
+//
+// Returns the pruned content, the subset of commands actually removed
+// (sorted, for deterministic reporting — a strict subset of the commands
+// argument whenever an argument-carrying variant is present in content but
+// not an exact match), and any near-miss commands left in place for that
+// reason.
 //
 // The result is re-marshaled as 2-space-indented JSON. Key order is not
 // preserved (unlike internal/upgrade's settings merge, which keeps an
 // order-preserving JSON model for exactly this reason) because this output
-// is a transient step: the chained v2 upgrade's own 3-way settings merge
-// (internal/upgrade.MergeOwnedSettings) always re-canonicalizes the result
-// immediately afterward in the same runMigrateLegacy call.
-func pruneLegacySettingsHooks(content []byte, commands []string) ([]byte, error) {
+// is a transient step: whenever the chained v2 upgrade's own 3-way settings
+// merge (internal/upgrade.MergeOwnedSettings) actually changes something —
+// which it does on an ordinary legacy migration, since the dispatcher
+// command itself is new — it re-canonicalizes the result immediately
+// afterward in the same runMigrateLegacy call. That re-canonicalization is
+// conditional on mergeResult.Changed (see runUpgradeV2), not unconditional;
+// executeMigrationEntries skips calling this function at all when there is
+// nothing to prune (see its OpSettingsPrune case), so the transient,
+// non-order-preserving output only exists when there is content to remove.
+func pruneLegacySettingsHooks(content []byte, commands []string) (pruned []byte, removed []string, nearMisses []string, err error) {
 	trimmed := bytes.TrimSpace(content)
 	if len(trimmed) == 0 {
-		return content, nil
+		return content, nil, nil, nil
 	}
 
 	var doc map[string]any
 	if err := json.Unmarshal(trimmed, &doc); err != nil {
-		return nil, fmt.Errorf("parsing settings.json: %w", err)
+		return nil, nil, nil, fmt.Errorf("parsing settings.json: %w", err)
 	}
 
 	hooksRaw, ok := doc["hooks"]
 	if !ok {
-		return content, nil
+		return content, nil, nil, nil
 	}
 	hooksObj, ok := hooksRaw.(map[string]any)
 	if !ok {
-		return content, nil
+		return content, nil, nil, nil
 	}
 
 	cmdSet := make(map[string]bool, len(commands))
 	for _, c := range commands {
 		cmdSet[c] = true
 	}
+	removedSet := make(map[string]bool)
+	nearMissSet := make(map[string]bool)
 
 	for event, entriesRaw := range hooksObj {
 		entries, ok := entriesRaw.([]any)
@@ -1122,7 +1301,11 @@ func pruneLegacySettingsHooks(content []byte, commands []string) ([]byte, error)
 				}
 				cmd, _ := innerEntry["command"].(string)
 				if cmdSet[cmd] {
+					removedSet[cmd] = true
 					continue
+				}
+				if legacyHookNearMiss(cmd) {
+					nearMissSet[cmd] = true
 				}
 				keptInner = append(keptInner, innerRawEntry)
 			}
@@ -1147,9 +1330,39 @@ func pruneLegacySettingsHooks(content []byte, commands []string) ([]byte, error)
 
 	out, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
-		return nil, fmt.Errorf("marshaling pruned settings.json: %w", err)
+		return nil, nil, nil, fmt.Errorf("marshaling pruned settings.json: %w", err)
 	}
-	return append(out, '\n'), nil
+	return append(out, '\n'), sortedStringSet(removedSet), sortedStringSet(nearMissSet), nil
+}
+
+// legacyHookNearMiss reports whether cmd is an argument-carrying variant of
+// a known legacy direct-invocation hook command: it contains one of
+// legacyRalphHookCommands as a substring but is not an exact match for it,
+// so pruneLegacySettingsHooks's exact-match removal deliberately leaves it
+// in place.
+func legacyHookNearMiss(cmd string) bool {
+	for _, known := range legacyRalphHookCommands {
+		if cmd != known && strings.Contains(cmd, known) {
+			return true
+		}
+	}
+	return false
+}
+
+// sortedStringSet returns set's keys as a sorted slice, or nil when set is
+// empty (keeps MigrationEntry.PrunedHookCommands/PrunedHookNearMisses zero
+// on the common no-match case, matching legacyRalphHookCommands' own
+// already-sorted convention).
+func sortedStringSet(set map[string]bool) []string {
+	if len(set) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(set))
+	for k := range set {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // buildMigratedManifest builds the v3 manifest a successful migration
@@ -1170,6 +1383,19 @@ func pruneLegacySettingsHooks(content []byte, commands []string) ([]byte, error)
 // both unconditionally (its switch-case branches for these two paths do not
 // gate on "already handled"), so whatever this function might record for
 // them would just be discarded a moment later.
+//
+// For every other path this function does not otherwise handle (the generic
+// desired-state sweep below), DiskHash is optimistically recorded as
+// templateHash even though the file may not exist on disk yet — the chained
+// v2 upgrade (runUpgradeV2) is what creates it. This is safe only because
+// that chained call is expected to run in the same pass and correct the
+// manifest to match reality (rebuildManifestV2 makes the same assertion, but
+// after ApplyOps has already made it true). Since a chained-call failure is
+// warning-only for a genuine execution error (see runMigrateLegacy), a
+// failed chain can leave this optimistic hash committed until the next
+// `ralph upgrade` re-run converges it — see
+// docs/reports/self-review-2026-08-18-overlay-scaffold-v2-p4.md LOW (DiskHash
+// optimism).
 func buildMigratedManifest(version string, oldManifest *scaffold.Manifest, absDir string, desired map[string][]byte, plan MigrationPlan) (*scaffold.Manifest, error) {
 	nm := scaffold.NewManifest(version)
 	nm.SetLayoutV2()
@@ -1179,7 +1405,7 @@ func buildMigratedManifest(version string, oldManifest *scaffold.Manifest, absDi
 	keepByPath := make(map[string]MigrationEntry)
 	for _, e := range plan.Entries {
 		switch e.Kind {
-		case OpForkRelocate, OpForkInPlace:
+		case OpForkRelocate, OpForkInPlace, OpDeleteOldPathAdoptFork:
 			forkByPath[e.NewPath] = e
 		case OpKeepInPlace:
 			keepByPath[e.NewPath] = e
@@ -1212,6 +1438,17 @@ func buildMigratedManifest(version string, oldManifest *scaffold.Manifest, absDi
 		if ke, ok := keepByPath[path]; ok {
 			if old, ok := oldManifest.Files[ke.OldPath]; ok {
 				old.Owner = ke.Owner
+				// The legacy baseline mechanism (and its
+				// BaselineStatus/BaselinePath bookkeeping) was removed in
+				// Phase 3; a carried-forward BaselinePath can point into
+				// .ralph/baseline/, the directory this same migration
+				// deletes (OpDeleteDir). Every other v3 write path
+				// (SetFileOwned/SetFileFork) already normalizes these
+				// away, so this hand-rolled carry-forward must too — see
+				// docs/reports/self-review-2026-08-18-overlay-scaffold-v2-p4.md
+				// LOW (dangling baseline pointer).
+				old.BaselineStatus = scaffold.BaselineStatusMissing
+				old.BaselinePath = ""
 				nm.Files[path] = old
 			} else {
 				// Defensive fallback: OpKeepInPlace is only ever produced
@@ -1316,10 +1553,17 @@ func renderMigrationReport(plan MigrationPlan, desired map[string][]byte, absDir
 		e := pruneEntries[0]
 		b.WriteString("## Settings prune\n\n")
 		if len(e.PrunedHookCommands) == 0 {
-			b.WriteString("No known legacy direct-invocation hook commands were found in `.claude/settings.json`.\n\n")
+			b.WriteString("No known legacy direct-invocation hook commands were removed from `.claude/settings.json`.\n\n")
 		} else {
 			b.WriteString("The following legacy direct-invocation hook commands were removed from `.claude/settings.json` before handing off to the v2 settings merge, so they do not double-fire alongside the dispatcher:\n\n")
 			for _, c := range e.PrunedHookCommands {
+				fmt.Fprintf(&b, "- `%s`\n", c)
+			}
+			b.WriteString("\n")
+		}
+		if len(e.PrunedHookNearMisses) > 0 {
+			b.WriteString("The following commands reference a known legacy hook script but were left in place because their arguments differ from the plain invocation; they are treated as a deliberate user customization, not pruned, and may still double-fire alongside the dispatcher — review manually:\n\n")
+			for _, c := range e.PrunedHookNearMisses {
 				fmt.Fprintf(&b, "- `%s`\n", c)
 			}
 			b.WriteString("\n")
@@ -1328,7 +1572,7 @@ func renderMigrationReport(plan MigrationPlan, desired map[string][]byte, absDir
 
 	if untouched := blockFaceUntouchedEntries(plan.Entries); len(untouched) > 0 {
 		b.WriteString("## Block face duplicate-content guidance\n\n")
-		b.WriteString("The following files were modified before migration and were left in place; the chained v2 upgrade's block engine appended the ralph-managed block without touching existing content. Legacy-template-derived content outside the block may now be duplicated with the new block's content — review and consolidate manually:\n\n")
+		b.WriteString("The following files were modified before migration and were left in place; the chained v2 upgrade's block engine will append the ralph-managed block onto them later in this same run, without touching existing content. Legacy-template-derived content outside the block may end up duplicated with the new block's content — review and consolidate manually:\n\n")
 		for _, e := range untouched {
 			fmt.Fprintf(&b, "- `%s`\n", e.OldPath)
 		}
