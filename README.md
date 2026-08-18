@@ -115,7 +115,7 @@ Before claiming a task is done:
 | Command | Purpose |
 |---------|---------|
 | `ralph init [name]` | Scaffold a new project (interactive: language packs). |
-| `ralph upgrade` | Non-interactively pull template updates (v2-layout projects only; see [`ralph upgrade`](#ralph-upgrade)). |
+| `ralph upgrade` | Non-interactively pull template updates; auto-migrates legacy (pre-v2) layouts first (see [`ralph upgrade`](#ralph-upgrade)). |
 | `ralph org spawn/send/wait/read/stop/status/disband` | Manage org-runtime seats for autonomous multi-seat execution. |
 | `ralph status [--org-id <id>]` | Show org roster status and watch-status summary (table or `--json`). |
 | `ralph pack add <lang>` | Install a language pack. |
@@ -128,7 +128,7 @@ Run `ralph help <command>` for flags.
 
 ### `ralph upgrade`
 
-`ralph upgrade` requires a v2-layout project (`.ralph/manifest.toml` with `meta.layout = "v2"`); legacy (pre-v2) manifests are rejected with zero writes until the automated migration ships in a later release. Every run is fully non-interactive — no prompts, no stdin reads:
+`ralph upgrade` works on v2-layout projects (`.ralph/manifest.toml` with `meta.layout = "v2"`) directly. On a legacy (pre-v2 or manifest-less) project it first runs a one-time, confirmed migration to v2 (see [Migrating from a legacy layout](#migrating-from-a-legacy-layout) below), then chains straight into the v2 upgrade below. Aside from that one-time migration confirmation, every run is fully non-interactive — no prompts, no stdin reads:
 
 - Core files are replaced from the embedded templates (including installed language packs); paths with local drift are left untouched.
 - Managed blocks (`AGENTS.md`, `.gitignore`) are updated in place; content outside the block markers is preserved byte-for-byte.
@@ -139,6 +139,14 @@ Run `ralph help <command>` for flags.
 Flags: `--dry-run` previews the plan without writing anything, including the pending outcome of `AGENTS.md`, `.gitignore`, `.claude/settings.json`, and the settings snapshot; `--diff` implies `--dry-run` and additionally prints the full advisory diff output (reusing the same colorized, pager-aware rendering as before — `--pager auto|always|never`, `NO_COLOR=1` to suppress ANSI escapes).
 
 Exit codes: `0` success, `1` execution error, `3` completed with unresolved drift remaining (paths are listed on stderr, and in the report on runs that write one). There is no `--force` flag — re-adopting a forked or drifted path is a manual step (make the file match the new template content, then let the next upgrade converge it) until the `adopt` command ships in a later phase.
+
+#### Migrating from a legacy layout
+
+Legacy (pre-v2 or manifest-less) layouts are detected automatically by `ralph upgrade` — no separate migration command. Before touching anything, it requires a clean git work tree (git is the only rollback mechanism; migration keeps no backups) and aborts with zero writes if the tree is not a git repo or has uncommitted changes.
+
+It then prints a preview of the migration classification (path-by-path: replace, relocate, fork, or delete) and asks for confirmation (`y`/`N`); pass `--yes` to skip the prompt, or `--dry-run` to print the preview and stop without writing or prompting. Unmodified files (per the legacy manifest's recorded hash) are replaced or relocated to their new v2 path; modified files are kept as forks at their new path so they keep surfacing an advisory diff against the current core template instead of being silently overwritten. If a relocation destination already has diverging content (neither matching the source nor the new template), migration stops with zero writes and reports the collision for manual resolution before a re-run.
+
+On success, migration writes a v3 manifest and chains directly into the v2 upgrade above in the same run (dispatcher, `.ralph/core`, and any new-file convergence happen immediately). A dated report is written to `docs/reports/ralph-migration-<date>.md`, listing the full classification, diffs for every forked file, and guidance for any block-owning face (e.g. `AGENTS.md`, `.gitignore`) that was left in place with modified content — the chained v2 upgrade appends its managed block onto it, but pre-existing legacy-template-derived duplicate content outside the block is not removed automatically and may need manual cleanup per the report.
 
 ## What `ralph init` scaffolds
 
