@@ -86,6 +86,7 @@ func runUpgradeV2(absDir, manifestPath string, oldManifest *scaffold.Manifest, o
 	planOpts := upgrade.ReplaceOptions{
 		SkipPaths:        v2SkipPaths(),
 		PreservePrefixes: preservePrefixes,
+		OwnerForPath:     ownerForScaffoldPath,
 	}
 	plan, err := upgrade.PlanCoreReplaceDesired(oldManifest, absDir, desired, planOpts)
 	if err != nil {

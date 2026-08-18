@@ -141,6 +141,17 @@ type ReplaceOptions struct {
 	// an uninstalled language pack), not to opt a still-active namespace
 	// out of upgrades.
 	PreservePrefixes []string
+	// OwnerForPath resolves the ownership attribute (scaffold.OwnerCore/
+	// Fork/Seed/Block) a path would be assigned if ralph adopted it right
+	// now. It is only consulted for untracked paths (no manifest entry)
+	// that are also present in the desired state — see classifyUntracked.
+	// A nil OwnerForPath (the zero value) preserves the pre-existing
+	// behavior: such a path always classifies as drift when disk content
+	// diverges from the template. This is a callback rather than a direct
+	// dependency because the planner (internal/upgrade) cannot import the
+	// CLI layer's path->owner mapping (internal/cli's ownerForScaffoldPath)
+	// without inverting that package boundary.
+	OwnerForPath func(relPath string) string
 }
 
 // hasPreservePrefix reports whether path matches one of prefixes.
@@ -246,7 +257,7 @@ func PlanCoreReplaceDesired(m *scaffold.Manifest, targetDir string, desired map[
 			return ReplacePlan{}, fmt.Errorf("reading disk file %q: %w", path, derr)
 		}
 
-		classifyPath(&plan, &deletes, &creates, &updates, path, entry, hasEntry, tmplContent, hasTemplate, diskContent, hasDisk)
+		classifyPath(&plan, &deletes, &creates, &updates, path, entry, hasEntry, tmplContent, hasTemplate, diskContent, hasDisk, opts.OwnerForPath)
 	}
 
 	plan.Ops = make([]FileOp, 0, len(deletes)+len(creates)+len(updates))
@@ -271,9 +282,10 @@ func classifyPath(
 	hasTemplate bool,
 	diskContent []byte,
 	hasDisk bool,
+	ownerForPath func(string) string,
 ) {
 	if !hasEntry {
-		classifyUntracked(plan, creates, path, tmplContent, hasTemplate, diskContent, hasDisk)
+		classifyUntracked(plan, creates, path, tmplContent, hasTemplate, diskContent, hasDisk, ownerForPath)
 		return
 	}
 
@@ -409,6 +421,21 @@ func classifySeed(
 
 // classifyUntracked handles paths with no manifest entry at all: template
 // files ralph has never recorded ownership for yet.
+//
+// When ownerForPath is non-nil and resolves path to scaffold.OwnerSeed, a
+// pre-existing disk file whose content diverges from the template is
+// adopted as seed content instead of being classified as drift: no op is
+// planned (the file is left untouched, matching seed's create-once/
+// 不可侵 contract), and the divergence is surfaced as a seed AdvisoryEntry
+// instead of a DriftEntry. This closes the "new seed path collides with an
+// untracked local file" gap — see docs/tech-debt/README.md. The caller
+// (rebuildManifestV2 in internal/cli/upgrade_v2.go) picks this path up
+// through its normal desired-state sweep: since the path is neither an Op
+// nor a Drift/LegacySkipped/Preserved entry, it falls through to that
+// sweep's default per-path classification, which already resolves owner=
+// seed and records DiskHash from the current (untouched) disk content.
+// Non-seed owners (including a nil ownerForPath) keep the pre-existing
+// equal->refresh / differ->drift behavior.
 func classifyUntracked(
 	plan *ReplacePlan,
 	creates *[]FileOp,
@@ -417,6 +444,7 @@ func classifyUntracked(
 	hasTemplate bool,
 	diskContent []byte,
 	hasDisk bool,
+	ownerForPath func(string) string,
 ) {
 	if !hasTemplate {
 		// Should not happen (path came from the template-or-manifest union
@@ -431,6 +459,10 @@ func classifyUntracked(
 	diskHash := scaffold.HashBytes(diskContent)
 	if diskHash == templateHash {
 		plan.ManifestRefresh = append(plan.ManifestRefresh, ManifestRefreshEntry{Path: path, Hash: templateHash})
+		return
+	}
+	if ownerForPath != nil && ownerForPath(path) == scaffold.OwnerSeed {
+		plan.Advisories = append(plan.Advisories, AdvisoryEntry{Path: path, Owner: scaffold.OwnerSeed, DiskHash: diskHash, NewHash: templateHash})
 		return
 	}
 	plan.Drift = append(plan.Drift, DriftEntry{Path: path, RecordedHash: "", DiskHash: diskHash, NewHash: templateHash})
