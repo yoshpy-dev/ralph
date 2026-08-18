@@ -186,6 +186,13 @@ func runUpgradeV2(absDir, manifestPath string, oldManifest *scaffold.Manifest, o
 		return fmt.Errorf("writing manifest: %w", err)
 	}
 
+	// Reinstall/refresh managed git hooks now that every file write and the
+	// manifest barrier have succeeded — same placement semantics as the
+	// legacy engine (immediately after manifest.Write, before the summary)
+	// and as init.go's own call. installManagedGitHooks is idempotent and
+	// best-effort: failures are reported on errOut, never fail the upgrade.
+	installManagedGitHooks(absDir, out, errOut)
+
 	cleanBaseline, err := scaffold.CleanLocalRelPath(".ralph/baseline")
 	if err != nil {
 		return err

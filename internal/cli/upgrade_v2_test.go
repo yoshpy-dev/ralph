@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -49,23 +50,29 @@ type v2FixtureGen struct {
 	oldToolSh        []byte // included only when non-nil; absence across generations exercises core removal
 	docsNotes        []byte // included only when non-nil
 	docsNewNote      []byte // included only when non-nil; new-in-this-generation seed file
+	docsGuide        []byte // included only when non-nil; identical across gen1/gen2 by default (v2DocsGuide) — a stable seed used to exercise "seed missing, recreated" without also triggering a template-changed advisory
 	includeGolang    bool
 	golangVerifySh   []byte
 	golangReadme     []byte
 	golangRuleMd     []byte
+	preCommitGuardSh []byte // rendered to scripts/pre-commit-secret-guard.sh; the only one of the four managed git-hook guard scripts that varies across gen1/gen2 in these fixtures
 }
 
 func (g v2FixtureGen) build() fstest.MapFS {
 	m := fstest.MapFS{
-		"templates/base/AGENTS.md":                       {Data: v2AgentsMD(g.agentsManaged)},
-		"templates/base/.gitignore":                      {Data: v2Gitignore(g.gitignoreManaged)},
-		"templates/base/CLAUDE.md":                       {Data: []byte("@AGENTS.md\n\n# Claude Code\n")},
-		"templates/base/ralph.toml":                      {Data: []byte("[pipeline]\nmodel = \"test\"\n[doctor]\nrequire_codex_cli = false\n")},
-		"templates/base/.claude/settings.json":           {Data: g.settingsJSON},
-		"templates/base/.ralph/core/settings.ralph.json": {Data: g.settingsJSON},
-		"templates/base/.ralph/core/AGENTS.core.md":      {Data: g.agentsManaged},
-		"templates/base/scripts/run-verify.sh":           {Data: g.runVerifySh},
-		"templates/base/.ralph/local/verify.d/.gitkeep":  {Data: []byte("")},
+		"templates/base/AGENTS.md":                                  {Data: v2AgentsMD(g.agentsManaged)},
+		"templates/base/.gitignore":                                 {Data: v2Gitignore(g.gitignoreManaged)},
+		"templates/base/CLAUDE.md":                                  {Data: []byte("@AGENTS.md\n\n# Claude Code\n")},
+		"templates/base/ralph.toml":                                 {Data: []byte("[pipeline]\nmodel = \"test\"\n[doctor]\nrequire_codex_cli = false\n")},
+		"templates/base/.claude/settings.json":                      {Data: g.settingsJSON},
+		"templates/base/.ralph/core/settings.ralph.json":            {Data: g.settingsJSON},
+		"templates/base/.ralph/core/AGENTS.core.md":                 {Data: g.agentsManaged},
+		"templates/base/scripts/run-verify.sh":                      {Data: g.runVerifySh},
+		"templates/base/.ralph/local/verify.d/.gitkeep":             {Data: []byte("")},
+		"templates/base/scripts/pre-commit-secret-guard.sh":         {Data: g.preCommitGuardSh},
+		"templates/base/scripts/commit-msg-guard.sh":                {Data: []byte(testCommitMsgGuard)},
+		"templates/base/scripts/prepare-commit-msg-secret-guard.sh": {Data: []byte(testPrepareCommitMsgGuard)},
+		"templates/base/scripts/pre-merge-commit-secret-guard.sh":   {Data: []byte(testPreMergeCommitGuard)},
 	}
 	if g.oldToolSh != nil {
 		m["templates/base/scripts/old-tool.sh"] = &fstest.MapFile{Data: g.oldToolSh}
@@ -75,6 +82,9 @@ func (g v2FixtureGen) build() fstest.MapFS {
 	}
 	if g.docsNewNote != nil {
 		m["templates/base/docs/newnote.md"] = &fstest.MapFile{Data: g.docsNewNote}
+	}
+	if g.docsGuide != nil {
+		m["templates/base/docs/guide.md"] = &fstest.MapFile{Data: g.docsGuide}
 	}
 	if g.includeGolang {
 		m["templates/packs/golang/verify.sh"] = &fstest.MapFile{Data: g.golangVerifySh}
@@ -101,6 +111,9 @@ const (
 	v2GolangReadme     = "# Go v2\n"
 	v1GolangRule       = "---\npaths:\n  - \"**/*.go\"\n---\n# Go rules v1\n"
 	v2GolangRule       = "---\npaths:\n  - \"**/*.go\"\n---\n# Go rules v2\n"
+	v1PreCommitGuard   = testPreCommitGuard
+	v2PreCommitGuard   = "#!/usr/bin/env sh\n# pre-commit-secret-guard v2\nexit 0\n"
+	v2DocsGuide        = "# Guide\n\nStable guide content, unchanged across upgrades.\n"
 )
 
 func v1Settings() []byte {
@@ -143,10 +156,12 @@ func gen1() v2FixtureGen {
 		runVerifySh:      []byte(v1RunVerify),
 		oldToolSh:        []byte(v1OldTool),
 		docsNotes:        []byte(v1DocsNotes),
+		docsGuide:        []byte(v2DocsGuide),
 		includeGolang:    true,
 		golangVerifySh:   []byte(v1GolangVerify),
 		golangReadme:     []byte(v1GolangReadme),
 		golangRuleMd:     []byte(v1GolangRule),
+		preCommitGuardSh: []byte(v1PreCommitGuard),
 	}
 }
 
@@ -157,12 +172,14 @@ func gen2() v2FixtureGen {
 		settingsJSON:     v2Settings(),
 		runVerifySh:      []byte(v2RunVerify),
 		// oldToolSh omitted: removed upstream between gen1 and gen2.
-		docsNotes:      []byte(v2DocsNotes),
-		docsNewNote:    []byte(v2DocsNewNote),
-		includeGolang:  true,
-		golangVerifySh: []byte(v2GolangVerify),
-		golangReadme:   []byte(v2GolangReadme),
-		golangRuleMd:   []byte(v2GolangRule),
+		docsNotes:        []byte(v2DocsNotes),
+		docsNewNote:      []byte(v2DocsNewNote),
+		docsGuide:        []byte(v2DocsGuide), // identical to gen1: a stable seed
+		includeGolang:    true,
+		golangVerifySh:   []byte(v2GolangVerify),
+		golangReadme:     []byte(v2GolangReadme),
+		golangRuleMd:     []byte(v2GolangRule),
+		preCommitGuardSh: []byte(v2PreCommitGuard),
 	}
 }
 
@@ -733,6 +750,484 @@ func TestRunUpgradeV2_RemovesLegacyBaselineDirectory(t *testing.T) {
 
 	if _, statErr := os.Stat(baselineDir); !os.IsNotExist(statErr) {
 		t.Errorf(".ralph/baseline must be removed after a successful v2 upgrade; stat err = %v", statErr)
+	}
+}
+
+// TestRunUpgradeV2_ReinstallsGitHooks covers the git-hooks gap recorded in
+// the plan's Deviations section: slice 3's rewrite of the v2 flow dropped
+// the installManagedGitHooks call the legacy engine used to make. A v2
+// upgrade must (a) refresh an already-installed managed hook whose
+// underlying guard script changed upstream, and (b) reinstall a hook that
+// is missing entirely (e.g. deleted by hand, or a fresh clone that never
+// ran `ralph init` with the current guard scripts).
+func TestRunUpgradeV2_ReinstallsGitHooks(t *testing.T) {
+	target := initV2Project(t, gen1(), "1.0.0-test")
+
+	preCommitHook := filepath.Join(target, ".git", "hooks", "pre-commit")
+	before := mustReadFile(t, preCommitHook)
+	if string(before) != v1PreCommitGuard {
+		t.Fatalf("pre-commit hook content after init = %q, want %q", before, v1PreCommitGuard)
+	}
+
+	commitMsgHook := filepath.Join(target, ".git", "hooks", "commit-msg")
+	if err := os.Remove(commitMsgHook); err != nil {
+		t.Fatalf("removing commit-msg hook to simulate a missing hook: %v", err)
+	}
+
+	scaffold.EmbeddedFS = gen2().build()
+	Version = "1.1.0-test"
+
+	var out, errOut bytes.Buffer
+	if err := runUpgradeIOWithOptions(target, upgradeOptions{Pager: pagerNever}, strings.NewReader(""), &out, &errOut, false); err != nil {
+		t.Fatalf("runUpgradeIOWithOptions: %v\nstderr:\n%s", err, errOut.String())
+	}
+
+	// -- refreshed: the pre-commit hook's content tracks the new upstream
+	// guard script, not the one recorded at init time.
+	afterPreCommit := mustReadFile(t, preCommitHook)
+	if string(afterPreCommit) != v2PreCommitGuard {
+		t.Errorf("pre-commit hook content after upgrade = %q, want refreshed %q", afterPreCommit, v2PreCommitGuard)
+	}
+
+	// -- reinstalled: a hook removed out-of-band is put back, executable.
+	afterCommitMsg := mustReadFile(t, commitMsgHook)
+	if string(afterCommitMsg) != testCommitMsgGuard {
+		t.Errorf("commit-msg hook content = %q, want %q", afterCommitMsg, testCommitMsgGuard)
+	}
+	info, err := os.Stat(commitMsgHook)
+	if err != nil {
+		t.Fatalf("stat commit-msg hook: %v", err)
+	}
+	if info.Mode().Perm()&0100 == 0 {
+		t.Errorf("commit-msg hook is not executable: mode %v", info.Mode().Perm())
+	}
+}
+
+// TestRunUpgradeV2_PartialFailure_ManifestNotAdvanced_ResumeCompletes covers
+// AC-6: a failure injected mid-ApplyOps (chmod 0o444 on one of several core
+// files scheduled for update, the same technique as
+// TestApplyOps_PartialFailureStopsSubsequentOps in
+// internal/upgrade/replaceplan_test.go) must leave the manifest byte-for-byte
+// unadvanced and must not reach the settings merge or settings-snapshot
+// write (both happen after ApplyOps in runUpgradeV2) — proving the 2-phase
+// settings-snapshot guarantee end to end, not just at the settings-write
+// boundary already covered by
+// TestRunUpgradeV2_SettingsWriteFailure_SnapshotNotAdvanced. Ops before the
+// failed path may have already landed; ops after it must not have been
+// attempted. Restoring write access and re-running must then complete fully
+// with a stable classification (no drift misclassification of the
+// already-applied ops) and advance the manifest and settings snapshot.
+func TestRunUpgradeV2_PartialFailure_ManifestNotAdvanced_ResumeCompletes(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("chmod 0o444 does not deny writes to root; this failure-injection technique cannot run as root")
+	}
+
+	target := initV2Project(t, gen1(), "1.0.0-test")
+	manifestPath := filepath.Join(target, ".ralph", "manifest.toml")
+	manifestBefore := mustReadFile(t, manifestPath)
+	settingsSnapshotPath := filepath.Join(target, ".ralph", "core", "settings.ralph.json")
+	snapshotBefore := mustReadFile(t, settingsSnapshotPath)
+	settingsPath := filepath.Join(target, ".claude", "settings.json")
+	settingsBefore := mustReadFile(t, settingsPath)
+
+	// packs/languages/golang/verify.sh sorts between two other update ops
+	// this generation bump produces (.ralph/core/AGENTS.core.md and
+	// packs/languages/golang/README.md sort before it; scripts/run-verify.sh
+	// sorts after it — see PlanCoreReplaceDesired's per-op-kind, sorted-path
+	// ordering), so blocking it here exercises both "already landed" and
+	// "never attempted" update ops in the same run.
+	blockedPath := filepath.Join(target, "packs", "languages", "golang", "verify.sh")
+	if err := os.Chmod(blockedPath, 0o444); err != nil {
+		t.Fatalf("chmod blocked file read-only: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(blockedPath, 0o644) })
+
+	scaffold.EmbeddedFS = gen2().build()
+	Version = "1.1.0-test"
+
+	var out, errOut bytes.Buffer
+	err := runUpgradeIOWithOptions(target, upgradeOptions{Pager: pagerNever}, strings.NewReader(""), &out, &errOut, false)
+	if err == nil {
+		t.Fatal("expected the injected mid-ApplyOps failure to surface as an error")
+	}
+
+	// -- manifest unchanged: the commit barrier was never reached --
+	manifestAfterFailure := mustReadFile(t, manifestPath)
+	if !bytes.Equal(manifestBefore, manifestAfterFailure) {
+		t.Errorf("manifest must not advance on a partial ApplyOps failure:\nbefore: %s\nafter:  %s", manifestBefore, manifestAfterFailure)
+	}
+
+	// -- settings merge and snapshot write never reached (both run after
+	// ApplyOps in runUpgradeV2) --
+	settingsAfterFailure := mustReadFile(t, settingsPath)
+	if !bytes.Equal(settingsBefore, settingsAfterFailure) {
+		t.Errorf("settings.json must be untouched when ApplyOps fails before the settings merge step:\nbefore: %s\nafter:  %s", settingsBefore, settingsAfterFailure)
+	}
+	snapshotAfterFailure := mustReadFile(t, settingsSnapshotPath)
+	if !bytes.Equal(snapshotBefore, snapshotAfterFailure) {
+		t.Errorf("settings snapshot must be untouched when ApplyOps fails before the settings-merge/snapshot steps:\nbefore: %s\nafter:  %s", snapshotBefore, snapshotAfterFailure)
+	}
+
+	// -- earlier ops (sorted before the blocked path) landed --
+	gotAgentsCore := mustReadFile(t, filepath.Join(target, ".ralph", "core", "AGENTS.core.md"))
+	if string(gotAgentsCore) != v2AgentsManaged {
+		t.Errorf(".ralph/core/AGENTS.core.md = %q, want landed v2 content %q (this op sorts before the blocked path)", gotAgentsCore, v2AgentsManaged)
+	}
+	gotGoReadme := mustReadFile(t, filepath.Join(target, "packs", "languages", "golang", "README.md"))
+	if string(gotGoReadme) != v2GolangReadme {
+		t.Errorf("packs/languages/golang/README.md = %q, want landed v2 content %q (this op sorts before the blocked path)", gotGoReadme, v2GolangReadme)
+	}
+
+	// -- the blocked op itself did not land --
+	gotBlocked := mustReadFile(t, blockedPath)
+	if string(gotBlocked) != v1GolangVerify {
+		t.Errorf("packs/languages/golang/verify.sh must still hold its pre-upgrade (v1) content: got %q", gotBlocked)
+	}
+
+	// -- later ops (sorted after the blocked path) were never attempted --
+	gotRunVerify := mustReadFile(t, filepath.Join(target, "scripts", "run-verify.sh"))
+	if string(gotRunVerify) != v1RunVerify {
+		t.Errorf("scripts/run-verify.sh must not have been touched (sorts after the blocked path): got %q, want v1 %q", gotRunVerify, v1RunVerify)
+	}
+
+	// -- restore write access and re-run: must now fully succeed --
+	if err := os.Chmod(blockedPath, 0o644); err != nil {
+		t.Fatalf("chmod blocked file writable: %v", err)
+	}
+
+	var out2, errOut2 bytes.Buffer
+	if err := runUpgradeIOWithOptions(target, upgradeOptions{Pager: pagerNever}, strings.NewReader(""), &out2, &errOut2, false); err != nil {
+		t.Fatalf("retry after restoring permissions must succeed: %v\nstderr:\n%s", err, errOut2.String())
+	}
+
+	m := readManifestV2(t, target)
+	if entry, ok := m.Files["packs/languages/golang/verify.sh"]; !ok || entry.DiskHash != scaffold.HashBytes([]byte(v2GolangVerify)) {
+		t.Errorf("packs/languages/golang/verify.sh manifest entry after retry = %+v, want DiskHash=hash(v2 content)", entry)
+	}
+	gotRunVerifyAfterRetry := mustReadFile(t, filepath.Join(target, "scripts", "run-verify.sh"))
+	if string(gotRunVerifyAfterRetry) != v2RunVerify {
+		t.Errorf("scripts/run-verify.sh after retry = %q, want v2 %q", gotRunVerifyAfterRetry, v2RunVerify)
+	}
+	snapshotAfterRetry := mustReadFile(t, settingsSnapshotPath)
+	if string(snapshotAfterRetry) != string(v2Settings()) {
+		t.Errorf("settings snapshot after successful retry = %q, want v2 %q", snapshotAfterRetry, v2Settings())
+	}
+
+	// -- final tree matches a clean (non-failure-injected) run byte for
+	// byte, aside from bookkeeping paths that always change (manifest.toml's
+	// Updated timestamp, the dated report file, and .git/ — a second,
+	// independently git-inited comparison tree is not byte-comparable there).
+	clean := initV2Project(t, gen1(), "1.0.0-test")
+	scaffold.EmbeddedFS = gen2().build()
+	Version = "1.1.0-test"
+	var outClean, errOutClean bytes.Buffer
+	if err := runUpgradeIOWithOptions(clean, upgradeOptions{Pager: pagerNever}, strings.NewReader(""), &outClean, &errOutClean, false); err != nil {
+		t.Fatalf("clean-run comparison upgrade: %v\nstderr:\n%s", err, errOutClean.String())
+	}
+	resumed := snapshotTreeHashesExcluding(t, target, ".ralph/manifest.toml", "docs/reports/", ".git/")
+	cleanTree := snapshotTreeHashesExcluding(t, clean, ".ralph/manifest.toml", "docs/reports/", ".git/")
+	if !slicesEqualStrings(resumed, cleanTree) {
+		t.Errorf("resumed tree must match a clean run byte for byte; resumed=%v clean=%v", resumed, cleanTree)
+	}
+}
+
+// setupMixedScenarioProject builds a v2 project on gen1, mutates disk and
+// manifest to exercise every op/advisory class the v2 engine supports in a
+// single tree, and swaps the embedded FS to gen2 (Version bumped) without
+// running the upgrade. Shared by TestRunUpgradeV2_MixedScenario_* and
+// TestRunUpgradeV2_DryRunPreview_MatchesMixedScenarioCounts so a real run
+// and its --dry-run preview can never drift out of sync with each other.
+//
+// Classes exercised (expected plan shape on the gen1→gen2 upgrade this
+// produces): 1 delete (scripts/old-tool.sh, ManifestRemove), 2 creates
+// (docs/newnote.md — new upstream seed; docs/guide.md — existing seed
+// missing from disk, recreated), 4 updates (.ralph/core/AGENTS.core.md,
+// scripts/run-verify.sh, packs/languages/golang/verify.sh,
+// .claude/rules/ralph/golang.md), 1 manifest refresh
+// (scripts/pre-commit-secret-guard.sh — disk already matches the new
+// template, only the recorded hash is stale), 1 drift
+// (packs/languages/golang/README.md — disk matches neither the recorded nor
+// the new template hash), 2 advisories (docs/notes.md — seed, user-edited
+// disk + template changed upstream; scripts/my-fork.sh — fork entry, no
+// template at all), 1 legacy-skipped (legacy-notes.txt — no ownership
+// attribute recorded), 0 preserved packs (golang stays available in gen2).
+// Plus the two block surfaces (AGENTS.md user content outside the block,
+// .gitignore) and a settings.json 3-way merge with a user-added permission
+// and a brand new top-level key.
+func setupMixedScenarioProject(t *testing.T) string {
+	t.Helper()
+	target := initV2Project(t, gen1(), "1.0.0-test")
+
+	// -- user content outside AGENTS.md's managed block --
+	agentsBefore := mustReadFile(t, filepath.Join(target, "AGENTS.md"))
+	agentsWithUserSection := bytes.Replace(
+		agentsBefore,
+		[]byte("Project notes go here.\n\n"),
+		[]byte("Project notes go here.\n\n## My section\n\nHand-written, keep me.\n\n"),
+		1,
+	)
+	if bytes.Equal(agentsWithUserSection, agentsBefore) {
+		t.Fatal("test setup: AGENTS.md user-edit replacement did not match")
+	}
+	if err := os.WriteFile(filepath.Join(target, "AGENTS.md"), agentsWithUserSection, 0644); err != nil {
+		t.Fatalf("write AGENTS.md: %v", err)
+	}
+
+	// -- user edits to settings.json: a never-owned appended permission plus
+	// a brand new top-level key ralph has never shipped --
+	userSettings := []byte(`{
+  "customUserSetting": true,
+  "extraUserKey": "please keep me",
+  "env": {
+    "FOO": "v1"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(git status:*)",
+      "Bash(old-owned:*)",
+      "Bash(user-added:*)"
+    ]
+  }
+}
+`)
+	if err := os.WriteFile(filepath.Join(target, ".claude", "settings.json"), userSettings, 0644); err != nil {
+		t.Fatalf("write settings.json: %v", err)
+	}
+
+	m := readManifestV2(t, target)
+
+	// -- fork entry: untouched on disk, surfaced only as a (skipped) advisory --
+	forkContent := []byte("#!/bin/sh\necho fork, hand-maintained\n")
+	if err := os.WriteFile(filepath.Join(target, "scripts", "my-fork.sh"), forkContent, 0755); err != nil {
+		t.Fatalf("write fork file: %v", err)
+	}
+	m.SetFileFork("scripts/my-fork.sh", scaffold.HashBytes(forkContent), "1.0.0-test")
+
+	// -- legacy (no ownership attribute) entry: left completely alone --
+	legacyContent := []byte("pre-v3 manifest entry, never attributed\n")
+	if err := os.WriteFile(filepath.Join(target, "legacy-notes.txt"), legacyContent, 0644); err != nil {
+		t.Fatalf("write legacy file: %v", err)
+	}
+	m.SetFile("legacy-notes.txt", scaffold.HashBytes(legacyContent))
+
+	// -- seed missing: user (or tooling) deleted docs/guide.md; template
+	// still ships it, so it must be recreated --
+	if err := os.Remove(filepath.Join(target, "docs", "guide.md")); err != nil {
+		t.Fatalf("removing docs/guide.md to simulate a missing seed: %v", err)
+	}
+
+	// -- seed modified-by-user + template-changed: user hand-edits
+	// docs/notes.md; upstream also changes it between gen1 and gen2 — must
+	// surface as an advisory only, disk stays exactly as the user left it --
+	userNotes := []byte("# Notes\n\nHand-edited by the user, keep me exactly as-is.\n")
+	if err := os.WriteFile(filepath.Join(target, "docs", "notes.md"), userNotes, 0644); err != nil {
+		t.Fatalf("write user-edited docs/notes.md: %v", err)
+	}
+
+	// -- drift: a core file whose disk content matches neither the recorded
+	// hash nor the new template hash --
+	driftedReadme := []byte("# totally unexpected drifted content\n")
+	if err := os.WriteFile(filepath.Join(target, "packs", "languages", "golang", "README.md"), driftedReadme, 0644); err != nil {
+		t.Fatalf("write drifted golang README: %v", err)
+	}
+
+	// -- manifest refresh: disk already matches the *new* (gen2) template
+	// content (as if the user hand-synced it ahead of time), but the
+	// recorded hash still reflects gen1 — a hash-only bookkeeping update,
+	// no file write --
+	if err := os.WriteFile(filepath.Join(target, "scripts", "pre-commit-secret-guard.sh"), []byte(v2PreCommitGuard), 0644); err != nil {
+		t.Fatalf("write pre-synced pre-commit guard: %v", err)
+	}
+
+	if err := m.Write(filepath.Join(target, ".ralph", "manifest.toml")); err != nil {
+		t.Fatalf("writing mutated manifest: %v", err)
+	}
+
+	scaffold.EmbeddedFS = gen2().build()
+	Version = "1.1.0-test"
+
+	return target
+}
+
+// TestRunUpgradeV2_MixedScenario_AllClassesLandCorrectly runs a single
+// upgrade over setupMixedScenarioProject's fixture and asserts every op and
+// advisory class lands correctly in the same run (a v2 upgrade is one plan,
+// one commit barrier — these classes are never mutually exclusive in
+// practice), then re-runs and confirms convergence: the drift path persists
+// (exit sentinel stays ErrUpgradeDriftRemaining) but the run produces zero
+// further writes.
+func TestRunUpgradeV2_MixedScenario_AllClassesLandCorrectly(t *testing.T) {
+	target := setupMixedScenarioProject(t)
+
+	var out, errOut bytes.Buffer
+	err := runUpgradeIOWithOptions(target, upgradeOptions{Pager: pagerNever}, strings.NewReader(""), &out, &errOut, false)
+	if !errors.Is(err, ErrUpgradeDriftRemaining) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrUpgradeDriftRemaining) (the drift path must not block the rest of the plan)", err)
+	}
+
+	// -- core update --
+	if got := string(mustReadFile(t, filepath.Join(target, "scripts", "run-verify.sh"))); got != v2RunVerify {
+		t.Errorf("scripts/run-verify.sh = %q, want %q", got, v2RunVerify)
+	}
+	if got := string(mustReadFile(t, filepath.Join(target, "packs", "languages", "golang", "verify.sh"))); got != v2GolangVerify {
+		t.Errorf("pack verify.sh = %q, want %q", got, v2GolangVerify)
+	}
+	if got := string(mustReadFile(t, filepath.Join(target, ".claude", "rules", "ralph", "golang.md"))); got != v2GolangRule {
+		t.Errorf("pack rule.md = %q, want %q", got, v2GolangRule)
+	}
+
+	// -- core removal (ManifestRemove) --
+	if _, err := os.Stat(filepath.Join(target, "scripts", "old-tool.sh")); !os.IsNotExist(err) {
+		t.Errorf("scripts/old-tool.sh must be deleted; stat err = %v", err)
+	}
+
+	// -- fork entry: untouched + advisory --
+	forkPath := filepath.Join(target, "scripts", "my-fork.sh")
+	forkContentAfter := mustReadFile(t, forkPath)
+	if string(forkContentAfter) != "#!/bin/sh\necho fork, hand-maintained\n" {
+		t.Errorf("fork file must be byte-for-byte untouched, got %q", forkContentAfter)
+	}
+
+	// -- seed missing, recreated --
+	if got := string(mustReadFile(t, filepath.Join(target, "docs", "guide.md"))); got != v2DocsGuide {
+		t.Errorf("docs/guide.md must be recreated from the template, got %q, want %q", got, v2DocsGuide)
+	}
+
+	// -- seed modified-by-user + template-changed: advisory only, disk
+	// stays exactly as the user left it --
+	wantUserNotes := "# Notes\n\nHand-edited by the user, keep me exactly as-is.\n"
+	if got := string(mustReadFile(t, filepath.Join(target, "docs", "notes.md"))); got != wantUserNotes {
+		t.Errorf("docs/notes.md must stay exactly as the user left it, got %q, want %q", got, wantUserNotes)
+	}
+
+	// -- user content outside AGENTS.md block, and the block itself updated --
+	gotAgents := mustReadFile(t, filepath.Join(target, "AGENTS.md"))
+	if !bytes.Contains(gotAgents, []byte("## My section\n\nHand-written, keep me.\n")) {
+		t.Errorf("AGENTS.md must preserve the user's out-of-block section:\n%s", gotAgents)
+	}
+	if !bytes.Contains(gotAgents, []byte(v2AgentsManaged)) {
+		t.Errorf("AGENTS.md must contain the new managed block interior:\n%s", gotAgents)
+	}
+
+	// -- user permission in settings: preserved, plus stale pruning + new entry --
+	gotSettings := string(mustReadFile(t, filepath.Join(target, ".claude", "settings.json")))
+	for _, want := range []string{`"extraUserKey": "please keep me"`, `"Bash(user-added:*)"`, `"Bash(new-owned:*)"`} {
+		if !strings.Contains(gotSettings, want) {
+			t.Errorf("merged settings.json missing %q:\n%s", want, gotSettings)
+		}
+	}
+	if strings.Contains(gotSettings, `"Bash(old-owned:*)"`) {
+		t.Errorf("merged settings.json must have pruned the stale ralph-owned entry:\n%s", gotSettings)
+	}
+
+	// -- drift path: untouched, listed on stderr --
+	driftPath := filepath.Join(target, "packs", "languages", "golang", "README.md")
+	wantDrift := "# totally unexpected drifted content\n"
+	if got := string(mustReadFile(t, driftPath)); got != wantDrift {
+		t.Errorf("drifted packs/languages/golang/README.md must be untouched, got %q, want %q", got, wantDrift)
+	}
+	if !strings.Contains(errOut.String(), "packs/languages/golang/README.md") {
+		t.Errorf("stderr must list the drifted path:\n%s", errOut.String())
+	}
+
+	// -- manifest: legacy entry preserved unchanged, fork entry preserved
+	// unchanged, drift path unchanged, manifest-refresh path advanced --
+	m := readManifestV2(t, target)
+	legacyEntry, ok := m.Files["legacy-notes.txt"]
+	if !ok || !legacyEntry.IsLegacyOwner() {
+		t.Errorf("legacy-notes.txt manifest entry = %+v, want a preserved legacy (unattributed-owner) entry", legacyEntry)
+	}
+	forkEntry, ok := m.Files["scripts/my-fork.sh"]
+	if !ok || forkEntry.Owner != scaffold.OwnerFork {
+		t.Errorf("scripts/my-fork.sh manifest entry = %+v, want owner=fork, preserved", forkEntry)
+	}
+	if entry, ok := m.Files["scripts/pre-commit-secret-guard.sh"]; !ok || entry.DiskHash != scaffold.HashBytes([]byte(v2PreCommitGuard)) {
+		t.Errorf("scripts/pre-commit-secret-guard.sh manifest entry = %+v, want DiskHash=hash(v2 content) (manifest-refresh, no file write)", entry)
+	}
+	if entry, ok := m.Files["docs/notes.md"]; !ok || entry.TemplateHash != scaffold.HashBytes([]byte(v2DocsNotes)) || entry.DiskHash != scaffold.HashBytes([]byte(wantUserNotes)) {
+		t.Errorf("docs/notes.md manifest entry = %+v, want TemplateHash=hash(v2 template), DiskHash=hash(user content)", entry)
+	}
+
+	// -- report contains every relevant section --
+	reportPath := upgrade.UpgradeReportRelPath(Version, time.Now().UTC().Format("2006-01-02"))
+	reportContent := string(mustReadFile(t, filepath.Join(target, reportPath)))
+	for _, want := range []string{
+		"## Summary",
+		"## Applied",
+		"### Deleted",
+		"### Created",
+		"### Updated",
+		"## Manifest refresh",
+		"## Unresolved drift",
+		"## Advisories",
+		"## Legacy skipped",
+		"scripts/old-tool.sh",
+		"docs/newnote.md",
+		"docs/guide.md",
+		"scripts/run-verify.sh",
+		"scripts/pre-commit-secret-guard.sh",
+		"packs/languages/golang/README.md",
+		"docs/notes.md",
+		"scripts/my-fork.sh",
+		"legacy-notes.txt",
+	} {
+		if !strings.Contains(reportContent, want) {
+			t.Errorf("upgrade report must contain %q:\n%s", want, reportContent)
+		}
+	}
+
+	// -- second run: drift persists (still exit sentinel), zero new writes --
+	before := snapshotTreeHashesExcluding(t, target, ".ralph/manifest.toml", "docs/reports/")
+
+	var out2, errOut2 bytes.Buffer
+	err2 := runUpgradeIOWithOptions(target, upgradeOptions{Pager: pagerNever}, strings.NewReader(""), &out2, &errOut2, false)
+	if !errors.Is(err2, ErrUpgradeDriftRemaining) {
+		t.Errorf("second run err = %v, want errors.Is(err, ErrUpgradeDriftRemaining) (drift path was never fixed)", err2)
+	}
+
+	after := snapshotTreeHashesExcluding(t, target, ".ralph/manifest.toml", "docs/reports/")
+	if !slicesEqualStrings(before, after) {
+		t.Errorf("second run must produce zero further scaffold-content writes; before=%v after=%v", before, after)
+	}
+}
+
+// TestRunUpgradeV2_DryRunPreview_MatchesMixedScenarioCounts covers "Dry-run
+// completeness": --dry-run over setupMixedScenarioProject's fixture (the
+// same shared setup TestRunUpgradeV2_MixedScenario_AllClassesLandCorrectly
+// uses for a real run) must report the same op/advisory/preserved counts a
+// real run would produce, and must write zero bytes to the tree.
+func TestRunUpgradeV2_DryRunPreview_MatchesMixedScenarioCounts(t *testing.T) {
+	target := setupMixedScenarioProject(t)
+
+	before := snapshotTreeHashesExcluding(t, target)
+
+	var out, errOut bytes.Buffer
+	err := runUpgradeIOWithOptions(target, upgradeOptions{DryRun: true, Pager: pagerNever}, strings.NewReader(""), &out, &errOut, false)
+	if err != nil {
+		t.Fatalf("--dry-run must not itself error on a plan containing drift (drift is only reported, not fatal, in preview mode): %v\nstderr:\n%s", err, errOut.String())
+	}
+
+	after := snapshotTreeHashesExcluding(t, target)
+	if !slicesEqualStrings(before, after) {
+		t.Errorf("--dry-run must write zero files; before=%v after=%v", before, after)
+	}
+
+	preview := out.String()
+	for _, want := range []string{
+		fmt.Sprintf("  delete:            %d files\n", 1),
+		fmt.Sprintf("  create:            %d files\n", 2),
+		fmt.Sprintf("  update:            %d files\n", 4),
+		fmt.Sprintf("  manifest refresh:  %d files\n", 1),
+		fmt.Sprintf("  drift (untouched): %d files\n", 1),
+		fmt.Sprintf("  advisories:        %d files\n", 2),
+		fmt.Sprintf("  preserved packs:   %d files\n", 0),
+	} {
+		if !strings.Contains(preview, want) {
+			t.Errorf("dry-run preview missing %q; full preview:\n%s", want, preview)
+		}
+	}
+	if !strings.Contains(errOut.String(), "packs/languages/golang/README.md") {
+		t.Errorf("dry-run preview stderr must list the drifted path:\n%s", errOut.String())
 	}
 }
 
