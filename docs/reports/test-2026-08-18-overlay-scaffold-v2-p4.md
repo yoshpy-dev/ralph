@@ -216,3 +216,121 @@ in `migrate_test.go` / `replaceplan_test.go`.
   (`docs/reports/verify-2026-08-18-overlay-scaffold-v2-p4.md`).
 - Documentation sync — `/sync-docs`'s job, not yet run for this plan.
 - Cross-model second opinion — `/cross-review`'s job, not yet run.
+
+## Cycle 2
+
+- Date: 2026-08-18
+- Tester: `tester` subagent (Claude Code, Sonnet 5)
+- Scope: behavioral tests via `./scripts/run-test.sh` (default changed-language
+  scope — the cycle-2 delta touches only `internal/cli/*.go` and
+  `internal/upgrade/*.go`, plus docs), on `feat/overlay-scaffold-v2-p4`, HEAD
+  `0cc50e5`. This is pipeline cycle 2/2 per
+  `RALPH_STANDARD_MAX_PIPELINE_CYCLES` (default 2); cycle-1 test already
+  passed at `b1babe7` (599/599 shell + full `go test`, recorded above). No
+  static analysis re-run — that is `/verify`'s job, already PASS in
+  `docs/reports/verify-2026-08-18-overlay-scaffold-v2-p4.md`.
+- Delta since cycle-1 test: `c51497e` (cross-review AR#1/AR#2/AR#3 fixes, +3
+  new tests), `aabca2d` (self-review C2-1..C2-4 fixes; behavioral change —
+  `settings.json` is no longer rewritten when a prune removes nothing; +1 new
+  test), plus report-only commits `13adf85` / `0cc50e5`.
+
+### Verdict: PASS
+
+599/599 shell tests across 25 files (byte-identical to cycle 1 — the delta
+touches no shell test file), 8/8 Go packages `ok` (fresh, `-count=1
+-cover`, no cache), zero failures anywhere. All four regression tests named
+in the assignment exist, ran, and passed 3/3 each in isolation with zero
+flakes. No test weakening found.
+
+### Test execution
+
+| Suite / Command | Scope | Passed | Failed | Duration |
+| --- | --- | --- | --- | --- |
+| `./scripts/run-test.sh` (default changed-language scope) | 25 shell test files + golang pack | 599 shell + 8/8 Go pkgs (cached) | 0 | ~40s |
+| `go test ./... -count=1 -cover` (fresh, no cache) | 8 Go packages with tests | 8 | 0 | ~65s |
+
+`./scripts/run-test.sh` exit code: `0` (captured directly via
+`>file 2>&1; echo $?`, not piped through `tee`, per
+[[feedback_tee_masks_exit]]). `run-test.sh` selected `golang` as the sole
+changed language pack (`==> Language packs selected: golang`), and still ran
+the full 25-file shell suite ahead of the language-scoped dispatch, matching
+cycle 1's file/test counts exactly (`grep -c '^==> tests/'` = 25; no `FAIL`
+line found anywhere in the log).
+
+Fresh `go test ./... -count=1 -cover` (bypassing the `run-test.sh` build
+cache to rule out stale results from before the cycle-2 commits):
+
+| Package | Result | Coverage |
+| --- | --- | --- |
+| `internal/cli` | ok | 78.6% |
+| `internal/config` | ok | 94.2% |
+| `internal/insights` | ok | 86.1% |
+| `internal/org` | ok | 89.1% |
+| `internal/org/driver` | ok | 92.0% |
+| `internal/org/protocol` | ok | 97.9% |
+| `internal/scaffold` | ok | 75.7% |
+| `internal/upgrade` | ok | 91.2% |
+
+`internal/cli` coverage rose from cycle 1's 78.5% to 78.6% (the four new
+tests added their own well-covered lines). All other packages are
+byte-identical to cycle 1's coverage baseline, as expected — this cycle's
+delta touches only `internal/cli` and `internal/upgrade` source, and
+`internal/upgrade` itself is unchanged at 91.2%.
+
+`internal/cli` package total: 195 test functions, 0 `FAIL` (`go test
+./internal/cli/... -v -count=1 | grep -c '^--- PASS'` = 195, `grep -c
+'^--- FAIL'` = 0).
+
+### Named regression tests (per assignment)
+
+Ran with `go test ./internal/cli/... -run '^(<names>)$' -count=3 -v` to rule
+out any batch-ordering or shared-state masking, isolated from the rest of
+the suite:
+
+| Test | Covers | Result (3 runs) |
+| --- | --- | --- |
+| `TestRunMigrateLegacy_SymlinkedAdoptForkDestParent_ZeroWrites` | AR#1 — symlinked adopt-fork destination parent validation | 3/3 PASS |
+| `TestRunMigrateLegacy_UntrackedSeedCollision_AdvisorySurvivesChainedUpgrade` | AR#2 — seed-advisory bypass survives a chained `upgrade` after `migrate` | 3/3 PASS |
+| `TestRunMigrateLegacy_AdoptedForkDiff_IncludedInReport` | AR#3 — adopted-fork diff included in the migration report | 3/3 PASS |
+| `TestExecuteMigrationEntries_NearMissOnlyPrune_SettingsFileUntouched` | C2-2 — `settings.json` left byte-identical when a prune removes nothing | 3/3 PASS |
+
+12/12 invocations pass (4 tests × 3 runs), 0 failures, 0 flakes.
+
+### C2-2 behavioral-change verification
+
+`aabca2d` changes production behavior: `executeMigrationEntries` now skips
+rewriting `.claude/settings.json` when `pruneLegacySettingsHooks` reports it
+removed nothing (a near-miss-only prune), leaving the user's file bytes
+untouched instead of rewriting it to an equivalent-but-not-identical form.
+`TestExecuteMigrationEntries_NearMissOnlyPrune_SettingsFileUntouched`
+directly pins this by asserting byte-for-byte file identity (not just JSON
+equivalence) before/after migration when only a near-miss is present — this
+is the correct assertion shape for the claimed behavior and it passed 3/3.
+
+### Known-flaky tests re-checked in isolation
+
+Per tester agent memory, `TestRunDoctorOpts_ProbeModelsFalse_NoSubprocess`
+(`internal/cli`) and `TestRunWatcher_TimeoutIndependentOfSmallInterval`
+(`internal/org`) have a documented history of transient subprocess-contention
+flakiness. Neither is in this cycle's delta, but both were re-run 3x in
+isolation as a sanity check: 3/3 PASS each, no flakes observed.
+
+### Test inventory staleness (verifier cycle-1 note) — resolved
+
+The cycle-1 verify report flagged that the test inventory grew by three
+tests since the cycle-1 test report's count. This section's counts (599
+shell / 25 files, 8/8 Go packages, 195 `internal/cli` test functions, four
+new regression tests individually confirmed) are the current, up-to-date
+counts as of `0cc50e5` and supersede the cycle-1 numbers for anything
+downstream (`/sync-docs`, `/cross-review`, `/pr`) that needs a live count.
+
+### What remains unverified (cycle 2)
+
+- Static analysis and spec compliance — `/verify`'s job, already PASS for
+  cycle 2 (`docs/reports/verify-2026-08-18-overlay-scaffold-v2-p4.md`,
+  "Verify cycle 2" section).
+- Documentation sync for the cycle-2 delta — `/sync-docs`'s job, not yet run.
+- Cross-model second opinion on the cycle-2 delta — `/cross-review`'s job,
+  not yet run (this delta was produced *by* the cycle-1 cross-review triage
+  plus self-review fixes; a fresh cross-review pass on the fix commits
+  themselves has not happened).
