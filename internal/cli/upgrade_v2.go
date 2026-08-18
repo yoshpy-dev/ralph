@@ -86,6 +86,7 @@ func runUpgradeV2(absDir, manifestPath string, oldManifest *scaffold.Manifest, o
 	planOpts := upgrade.ReplaceOptions{
 		SkipPaths:        v2SkipPaths(),
 		PreservePrefixes: preservePrefixes,
+		OwnerForPath:     ownerForScaffoldPath,
 	}
 	plan, err := upgrade.PlanCoreReplaceDesired(oldManifest, absDir, desired, planOpts)
 	if err != nil {
@@ -372,7 +373,7 @@ func buildDesiredStateV2(baseFS fs.FS, oldManifest *scaffold.Manifest, errOut io
 		msg := fmt.Sprintf("pack %q: %s — preserving its disk/manifest entries untouched", pack, reason)
 		writef(errOut, "Warning: %s\n", msg)
 		notes = append(notes, msg)
-		preservePrefixes = append(preservePrefixes, packPrefixFor(pack), packRuleRelPath(pack))
+		preservePrefixes = append(preservePrefixes, packPrefixFor(pack), packRuleRelPath(pack), legacyPackRuleRelPath(pack))
 		retainedPacks = append(retainedPacks, pack)
 	}
 

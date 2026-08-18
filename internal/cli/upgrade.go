@@ -22,6 +22,7 @@ func newUpgradeCmd() *cobra.Command {
 		dryRun      bool
 		diffPreview bool
 		pager       string
+		yes         bool
 	)
 
 	cmd := &cobra.Command{
@@ -32,10 +33,13 @@ applies a fully non-interactive upgrade: core files are replaced, managed
 blocks (AGENTS.md, .gitignore) and .claude/settings.json are merged in
 place, and drift or fork paths are left untouched.
 
-Requires a v2-layout (overlay scaffold) project (.ralph/manifest.toml with
-meta.layout = "v2"). Legacy (pre-v2) manifests are rejected with zero
-writes — the automated migration to the v2 layout arrives in a later ralph
-release (Phase 4).
+A v2-layout (overlay scaffold) project (.ralph/manifest.toml with
+meta.layout = "v2") upgrades via this non-interactive engine directly. A
+legacy (pre-v2) manifest is migrated to the v2 layout first: a git-clean
+work tree is required (git is the migration's rollback mechanism), a
+preview is shown, and — unless --yes or --dry-run is given — a y/N
+confirmation is required before any file is written. The migration then
+chains directly into the same non-interactive v2 upgrade.
 
 Exit codes: 0 success, 1 execution error, 3 completed with unresolved drift
 remaining (see the upgrade report and stderr for the affected paths).`,
@@ -47,6 +51,7 @@ remaining (see the upgrade report and stderr for the affected paths).`,
 				DryRun:      dryRun,
 				DiffPreview: diffPreview,
 				Pager:       pager,
+				Yes:         yes,
 			})
 		},
 	}
@@ -54,6 +59,7 @@ remaining (see the upgrade report and stderr for the affected paths).`,
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "preview upgrade actions without writing files")
 	cmd.Flags().BoolVar(&diffPreview, "diff", false, "show advisory diffs without writing files (implies --dry-run)")
 	cmd.Flags().StringVar(&pager, "pager", pagerAuto, "dry-run diff pager mode: auto, always, or never")
+	cmd.Flags().BoolVar(&yes, "yes", false, "skip the legacy migration confirmation prompt (no effect on a v2-layout project)")
 
 	return cmd
 }
@@ -68,21 +74,25 @@ type upgradeOptions struct {
 	DryRun      bool
 	DiffPreview bool
 	Pager       string
+	// Yes skips the legacy-migration y/N confirmation prompt
+	// (runMigrateLegacy, migrate.go). It has no effect on a v2-layout
+	// project, which never prompts.
+	Yes bool
 }
 
-// legacyLayoutFailClosedMsg is returned whenever a ralph write operation
-// (upgrade, pack add, re-init) targets a manifest that predates the overlay
-// (v2) layout. The legacy interactive upgrade engine and the baseline
-// mechanism it depended on were removed in Phase 3 (docs/plans/active
-// /2026-08-18-overlay-scaffold-v2-p3.md, FR-13); the only remaining path for
-// a legacy manifest is a clean, zero-write refusal until Phase 4 ships the
-// automated legacy → v2 migration.
-const legacyLayoutFailClosedMsg = "this project uses the legacy scaffold layout; the automated migration to the overlay (v2) layout arrives in a later ralph release (Phase 4); no files were changed"
+// legacyLayoutFailClosedMsg is returned by `ralph init` (re-init) and
+// `ralph pack add` whenever they target a manifest that predates the
+// overlay (v2) layout: neither command performs the migration itself —
+// `ralph upgrade` does (runMigrateLegacy, migrate.go) — so both remain a
+// clean, zero-write refusal that points the operator at it.
+const legacyLayoutFailClosedMsg = "this project uses the legacy scaffold layout; run `ralph upgrade` to migrate it to the overlay (v2) layout (a clean git work tree is required); no files were changed"
 
 // errLegacyLayoutFailClosed is the sentinel returned as-is (never wrapped)
-// by every legacy-manifest refusal (upgrade.go, internal/cli/init.go,
-// internal/cli/pack.go), so callers (and tests) can match on it directly
-// with errors.Is or ==.
+// by every legacy-manifest refusal outside `ralph upgrade` itself
+// (internal/cli/init.go, internal/cli/pack.go), so callers (and tests) can
+// match on it directly with errors.Is or ==. `ralph upgrade` no longer
+// returns this sentinel: it migrates a legacy manifest instead of refusing
+// it (see runUpgradeIOWithOptions below).
 var errLegacyLayoutFailClosed = errors.New(legacyLayoutFailClosedMsg)
 
 func runUpgradeWithOptions(targetDir string, opts upgradeOptions) error {
@@ -107,18 +117,14 @@ func shouldColorize(out *os.File) bool {
 // command and every test in this package. There are exactly two outcomes:
 //
 //   - meta.layout == "v2": dispatch to the non-interactive v2 upgrade engine
-//     (runUpgradeV2, internal/cli/upgrade_v2.go) — the sole upgrade engine
-//     left after Phase 3 removed the legacy interactive conflict-resolution
-//     engine and the baseline mechanism it depended on.
+//     (runUpgradeV2, internal/cli/upgrade_v2.go) — no prompts, no stdin
+//     reads, on this branch.
 //   - anything else (legacy manifest, or a manifest with no layout at all):
-//     fail closed with legacyLayoutFailClosedMsg. No template diffing, no
-//     writes — see errLegacyLayoutFailClosed's doc comment for why.
-//
-// `in` is accepted for signature stability across the package's existing
-// call sites even though the v2 engine never reads from it (AC-2: no
-// prompts, no stdin reads, on any branch).
+//     dispatch to the legacy-to-v2 migration flow (runMigrateLegacy,
+//     internal/cli/migrate.go), which reads a y/N confirmation from `in`
+//     (unless opts.Yes or opts.DryRun) before writing anything, then chains
+//     into the same v2 upgrade engine.
 func runUpgradeIOWithOptions(targetDir string, opts upgradeOptions, in io.Reader, out, errOut io.Writer, colorize bool) error {
-	_ = in
 	if opts.Pager == "" {
 		opts.Pager = pagerAuto
 	}
@@ -145,7 +151,7 @@ func runUpgradeIOWithOptions(targetDir string, opts upgradeOptions, in io.Reader
 	}
 
 	if oldManifest.Meta.Layout != scaffold.LayoutV2 {
-		return errLegacyLayoutFailClosed
+		return runMigrateLegacy(absDir, manifestPath, oldManifest, opts, in, out, errOut, colorize, time.Now().UTC())
 	}
 
 	return runUpgradeV2(absDir, manifestPath, oldManifest, opts, out, errOut, colorize, time.Now().UTC())

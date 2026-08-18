@@ -26,10 +26,14 @@ Worked example: adding a Terraform / OpenTofu pack (`packs/languages/terraform/`
    only when that pack is selected. Keep the root dogfood copy
    (`.claude/rules/ralph/terraform.md`) byte-identical with
    `packs/languages/terraform/rule.md`; `scripts/check-sync.sh` verifies this
-   mapping. Both `ralph pack add <lang>` and `ralph upgrade` run non-interactively
-   and require a v2-layout project (`.ralph/manifest.toml` with `meta.layout =
-   "v2"`); a legacy (pre-v2) manifest is rejected fail-closed with zero writes
-   until the automated migration to v2 ships in a later release.
+   mapping. Both `ralph pack add <lang>` and `ralph upgrade` run non-interactively.
+   `ralph pack add` requires a v2-layout project (`.ralph/manifest.toml` with
+   `meta.layout = "v2"`) and rejects a legacy (pre-v2) manifest fail-closed
+   with zero writes, pointing the operator at `ralph upgrade` first. `ralph
+   upgrade` accepts a legacy layout directly: it runs a one-time, confirmed
+   migration to v2 (preview, git-clean precondition, `y`/`N` confirmation —
+   `--yes`/`--dry-run` available) before continuing into the ordinary v2
+   upgrade — see `ralph help upgrade`.
 
 5. Teach `scripts/detect-languages.sh` to emit the new pack name and
    `scripts/detect-changed-languages.sh` to map changed files to it. Edit both

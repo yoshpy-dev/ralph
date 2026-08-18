@@ -109,6 +109,16 @@ func packRuleRelPath(pack string) string {
 	return path.Join(".claude", "rules", "ralph", pack+".md")
 }
 
+// legacyPackRuleRelPath returns the pre-.claude/rules/ralph/ location a
+// legacy (v1-layout) manifest records a pack's rule file under. Migration
+// must preserve this path too when the pack is unavailable in the current
+// binary — the v2 locations alone miss it and the rule would be deleted as
+// "retired" (self-review C3-1, cycle 3,
+// docs/reports/self-review-2026-08-18-overlay-scaffold-v2-p4.md).
+func legacyPackRuleRelPath(pack string) string {
+	return path.Join(".claude", "rules", pack+".md")
+}
+
 func packRuleContent(src fs.FS) ([]byte, bool, error) {
 	content, err := fs.ReadFile(src, packRuleSourcePath)
 	if errors.Is(err, fs.ErrNotExist) {

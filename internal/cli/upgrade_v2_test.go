@@ -853,6 +853,93 @@ func TestRunUpgradeV2_SeedAdvisoryOnly_NotANoOp(t *testing.T) {
 	}
 }
 
+// TestRunUpgradeV2_UntrackedSeedPathCollision_AdoptedNotDrift reproduces and
+// pins the fix for the Phase 3 Known gap (docs/tech-debt/README.md,
+// "PlanCoreReplaceDesired の untracked パス分類...owner 非考慮"): a new
+// release introduces a seed-owned path (docs/newnote.md) the manifest has
+// never tracked, and the target already has a local, untracked file at that
+// exact path with content that diverges from the new template. Before the
+// fix this was misclassified as unresolved drift (permanent exit 3, no
+// manifest entry ever recorded, so every future run re-fired the same
+// drift). After the fix the path is adopted as seed: exit 0, disk left
+// byte-identical to the user's pre-existing content, the divergence
+// surfaces only as a report advisory, and the manifest records owner=seed
+// with DiskHash matching the user's content. A second run at the same
+// templates/version is then a true no-op, since the manifest rebuild from
+// run 1 already advanced TemplateHash to clear the pending seed advisory.
+func TestRunUpgradeV2_UntrackedSeedPathCollision_AdoptedNotDrift(t *testing.T) {
+	target := initV2Project(t, gen1(), "1.0.0-test") // gen1 has no docs/newnote.md
+
+	if _, err := os.Stat(filepath.Join(target, "docs", "newnote.md")); !os.IsNotExist(err) {
+		t.Fatalf("test setup: docs/newnote.md must not exist after a gen1 init, stat err = %v", err)
+	}
+
+	localContent := "# My own note\n\nI wrote this before docs/newnote.md ever became a ralph seed path.\n"
+	if err := os.WriteFile(filepath.Join(target, "docs", "newnote.md"), []byte(localContent), 0644); err != nil {
+		t.Fatalf("write pre-existing local docs/newnote.md: %v", err)
+	}
+	if localContent == v2DocsNewNote {
+		t.Fatal("test setup: localContent must diverge from the gen2 template content")
+	}
+
+	scaffold.EmbeddedFS = gen2().build() // gen2 introduces docs/newnote.md as a seed path
+	Version = "1.1.0-test"
+
+	var out, errOut bytes.Buffer
+	err := runUpgradeIOWithOptions(target, upgradeOptions{Pager: pagerNever}, strings.NewReader(""), &out, &errOut, false)
+	if errors.Is(err, ErrUpgradeDriftRemaining) {
+		t.Fatalf("the seed-path collision must never surface as unresolved drift: %v", err)
+	}
+	if err != nil {
+		t.Fatalf("runUpgradeIOWithOptions: %v\nstderr:\n%s", err, errOut.String())
+	}
+
+	// -- disk untouched (adopted as seed, not overwritten or flagged) --
+	gotNewNote := mustReadFile(t, filepath.Join(target, "docs", "newnote.md"))
+	if string(gotNewNote) != localContent {
+		t.Errorf("docs/newnote.md must stay byte-identical to the pre-existing local content: got %q, want %q", gotNewNote, localContent)
+	}
+
+	// -- report surfaces the divergence as an advisory --
+	reportPath := upgrade.UpgradeReportRelPath(Version, time.Now().UTC().Format("2006-01-02"))
+	reportContent := mustReadFile(t, filepath.Join(target, reportPath))
+	if !strings.Contains(string(reportContent), "docs/newnote.md") {
+		t.Errorf("upgrade report must mention the adopted seed collision docs/newnote.md:\n%s", reportContent)
+	}
+
+	// -- manifest records owner=seed adoption with the user's content hash --
+	m := readManifestV2(t, target)
+	entry, ok := m.Files["docs/newnote.md"]
+	if !ok {
+		t.Fatal("manifest must carry an entry for docs/newnote.md")
+	}
+	if entry.Owner != scaffold.OwnerSeed {
+		t.Errorf("docs/newnote.md manifest entry Owner = %q, want seed", entry.Owner)
+	}
+	if entry.TemplateHash != scaffold.HashBytes([]byte(v2DocsNewNote)) {
+		t.Errorf("docs/newnote.md manifest entry TemplateHash = %q, want hash(v2 template)", entry.TemplateHash)
+	}
+	if entry.DiskHash != scaffold.HashBytes([]byte(localContent)) {
+		t.Errorf("docs/newnote.md manifest entry DiskHash = %q, want hash(pre-existing local content)", entry.DiskHash)
+	}
+
+	// -- regression check: run 1's manifest rebuild already advanced
+	// TemplateHash to match the current template, clearing the pending seed
+	// advisory, so a second run at the same templates/version is a true
+	// no-op. --
+	var out2, errOut2 bytes.Buffer
+	if err := runUpgradeIOWithOptions(target, upgradeOptions{Pager: pagerNever}, strings.NewReader(""), &out2, &errOut2, false); err != nil {
+		t.Fatalf("second run: %v\nstderr:\n%s", err, errOut2.String())
+	}
+	if !strings.Contains(out2.String(), "no-op") {
+		t.Errorf("second run's stdout must announce a no-op now that the seed advisory has cleared:\n%s", out2.String())
+	}
+	gotNewNoteAfter := mustReadFile(t, filepath.Join(target, "docs", "newnote.md"))
+	if string(gotNewNoteAfter) != localContent {
+		t.Errorf("docs/newnote.md must still be untouched after the no-op second run: got %q, want %q", gotNewNoteAfter, localContent)
+	}
+}
+
 // TestRunUpgradeV2_CodexAgentsOverride_UserEdited_SeedNeverReplaced pins the
 // cycle-3 cross-review fix (AR#1,
 // docs/reports/cross-review-triage-overlay-scaffold-v2-p3.md):
@@ -1163,13 +1250,16 @@ func TestRunUpgradeV2_MissingAgentsCoreTemplate_LeavesAgentsMdUntouchedWithNote(
 	}
 }
 
-// TestRunUpgradeIOWithOptions_LegacyManifest_FailsClosedZeroWrites is AC-7
-// coverage for `ralph upgrade`: a manifest with no meta.layout (a genuine
-// pre-v2 project) is rejected fail-closed with zero writes to the tree. The
-// legacy interactive upgrade engine was removed in Phase 3 (docs/plans
-// /active/2026-08-18-overlay-scaffold-v2-p3.md, FR-13); the automated
-// migration to v2 arrives in a later ralph release (Phase 4).
-func TestRunUpgradeIOWithOptions_LegacyManifest_FailsClosedZeroWrites(t *testing.T) {
+// TestRunUpgradeIOWithOptions_LegacyManifest_NonGitDir_FailsClosedZeroWrites
+// is AC-3 coverage for `ralph upgrade`: a manifest with no meta.layout (a
+// genuine pre-v2 project) is migrated (runMigrateLegacy, migrate.go)
+// instead of refused outright — but the migration's git preflight still
+// rejects a target that is not inside a git work tree, with zero writes to
+// the tree, since git is the migration's only rollback mechanism. (Prior to
+// Phase 4, this same scenario was rejected with the static
+// errLegacyLayoutFailClosed sentinel; see internal/cli/migrate_test.go for
+// the full legacy-migration e2e coverage this phase added.)
+func TestRunUpgradeIOWithOptions_LegacyManifest_NonGitDir_FailsClosedZeroWrites(t *testing.T) {
 	setupTestEmbedFS(t)
 	Version = "2.0.0-test"
 
@@ -1192,10 +1282,10 @@ func TestRunUpgradeIOWithOptions_LegacyManifest_FailsClosedZeroWrites(t *testing
 	var out, errOut bytes.Buffer
 	err := runUpgradeIOWithOptions(dir, upgradeOptions{Pager: pagerNever}, strings.NewReader(""), &out, &errOut, false)
 	if err == nil {
-		t.Fatal("upgrade on a legacy manifest: expected an error, got nil")
+		t.Fatal("upgrade on a legacy manifest outside a git work tree: expected an error, got nil")
 	}
-	if !errors.Is(err, errLegacyLayoutFailClosed) {
-		t.Errorf("err = %v, want errors.Is(err, errLegacyLayoutFailClosed)", err)
+	if !strings.Contains(err.Error(), "git work tree") {
+		t.Errorf("err = %v, want a git-work-tree preflight error", err)
 	}
 
 	after := snapshotDirHashes(t, dir)

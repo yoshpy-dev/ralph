@@ -448,6 +448,126 @@ func TestPlanCoreReplace_UntrackedTemplateFile(t *testing.T) {
 	}
 }
 
+// --- owner-aware untracked classification (ReplaceOptions.OwnerForPath) ---
+
+// TestPlanCoreReplaceDesired_UntrackedOwnerForPathNil_DifferDriftUnchanged is
+// an explicit control pinning AC-2's backward-compat contract: a nil
+// OwnerForPath (the zero value, same as every pre-existing caller) must keep
+// classifying a diverging untracked path as drift, even when called through
+// PlanCoreReplaceDesired directly with an otherwise-empty ReplaceOptions.
+func TestPlanCoreReplaceDesired_UntrackedOwnerForPathNil_DifferDriftUnchanged(t *testing.T) {
+	dir := t.TempDir()
+	writeDiskFile(t, dir, "docs/newnote.md", "pre-existing local content")
+	desired := map[string][]byte{"docs/newnote.md": []byte("new template content")}
+	m := scaffold.NewManifest("0.1.0") // untracked
+
+	plan, err := PlanCoreReplaceDesired(m, dir, desired, ReplaceOptions{})
+	if err != nil {
+		t.Fatalf("PlanCoreReplaceDesired: %v", err)
+	}
+	assertNoOpFor(t, plan, "docs/newnote.md")
+	if len(plan.Advisories) != 0 {
+		t.Errorf("nil OwnerForPath must never produce a seed advisory: %+v", plan.Advisories)
+	}
+	if len(plan.Drift) != 1 || plan.Drift[0].Path != "docs/newnote.md" {
+		t.Fatalf("Drift = %+v, want a single entry for docs/newnote.md", plan.Drift)
+	}
+}
+
+// TestPlanCoreReplaceDesired_UntrackedSeedOwner_DiskDiffers_AdoptedNotDrift
+// is the Known-gap fix (docs/tech-debt/README.md): a seed-owned path newly
+// added to the template, colliding with a pre-existing local file whose
+// content diverges from the template, is adopted as seed content — no op
+// (disk untouched), no Drift entry, and a seed AdvisoryEntry surfacing the
+// divergence instead.
+func TestPlanCoreReplaceDesired_UntrackedSeedOwner_DiskDiffers_AdoptedNotDrift(t *testing.T) {
+	dir := t.TempDir()
+	writeDiskFile(t, dir, "docs/newnote.md", "pre-existing local content")
+	desired := map[string][]byte{"docs/newnote.md": []byte("new template content")}
+	m := scaffold.NewManifest("0.1.0") // untracked
+
+	plan, err := PlanCoreReplaceDesired(m, dir, desired, ReplaceOptions{
+		OwnerForPath: func(string) string { return scaffold.OwnerSeed },
+	})
+	if err != nil {
+		t.Fatalf("PlanCoreReplaceDesired: %v", err)
+	}
+	assertNoOpFor(t, plan, "docs/newnote.md")
+	if len(plan.Drift) != 0 {
+		t.Errorf("adopted seed path must not be classified as drift: %+v", plan.Drift)
+	}
+	if len(plan.Advisories) != 1 {
+		t.Fatalf("Advisories = %+v, want a single entry for docs/newnote.md", plan.Advisories)
+	}
+	adv := plan.Advisories[0]
+	if adv.Path != "docs/newnote.md" || adv.Owner != scaffold.OwnerSeed {
+		t.Errorf("advisory = %+v, want Path=docs/newnote.md Owner=seed", adv)
+	}
+	if adv.DiskHash != hashOf("pre-existing local content") || adv.NewHash != hashOf("new template content") {
+		t.Errorf("advisory hashes = %+v", adv)
+	}
+
+	if err := ApplyOps(dir, plan); err != nil {
+		t.Fatalf("ApplyOps: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "docs", "newnote.md"))
+	if err != nil || string(got) != "pre-existing local content" {
+		t.Errorf("adopted seed file must be left untouched: got %q, err %v", got, err)
+	}
+}
+
+// TestPlanCoreReplaceDesired_UntrackedSeedOwner_DiskMatches_ManifestRefresh
+// proves the seed-aware branch only fires when disk content diverges from
+// the template: a byte-identical pre-existing file still classifies as a
+// plain ManifestRefresh (matching the pre-existing owner-agnostic equal
+// path), not an advisory.
+func TestPlanCoreReplaceDesired_UntrackedSeedOwner_DiskMatches_ManifestRefresh(t *testing.T) {
+	dir := t.TempDir()
+	writeDiskFile(t, dir, "docs/newnote.md", "same content")
+	desired := map[string][]byte{"docs/newnote.md": []byte("same content")}
+	m := scaffold.NewManifest("0.1.0")
+
+	plan, err := PlanCoreReplaceDesired(m, dir, desired, ReplaceOptions{
+		OwnerForPath: func(string) string { return scaffold.OwnerSeed },
+	})
+	if err != nil {
+		t.Fatalf("PlanCoreReplaceDesired: %v", err)
+	}
+	assertNoOpFor(t, plan, "docs/newnote.md")
+	if len(plan.Advisories) != 0 {
+		t.Errorf("unexpected advisories for a disk/template match: %+v", plan.Advisories)
+	}
+	if len(plan.ManifestRefresh) != 1 || plan.ManifestRefresh[0].Path != "docs/newnote.md" || plan.ManifestRefresh[0].Hash != hashOf("same content") {
+		t.Fatalf("ManifestRefresh = %+v, want single entry for docs/newnote.md", plan.ManifestRefresh)
+	}
+}
+
+// TestPlanCoreReplaceDesired_UntrackedCoreOwner_DiskDiffers_StillDrift proves
+// OwnerForPath only changes the outcome for a seed-resolved path: a
+// diverging untracked path resolved to owner=core (the catch-all in
+// internal/cli's ownerForScaffoldPath) keeps the pre-existing drift
+// classification.
+func TestPlanCoreReplaceDesired_UntrackedCoreOwner_DiskDiffers_StillDrift(t *testing.T) {
+	dir := t.TempDir()
+	writeDiskFile(t, dir, "scripts/new-tool.sh", "pre-existing local content")
+	desired := map[string][]byte{"scripts/new-tool.sh": []byte("new template content")}
+	m := scaffold.NewManifest("0.1.0")
+
+	plan, err := PlanCoreReplaceDesired(m, dir, desired, ReplaceOptions{
+		OwnerForPath: func(string) string { return scaffold.OwnerCore },
+	})
+	if err != nil {
+		t.Fatalf("PlanCoreReplaceDesired: %v", err)
+	}
+	assertNoOpFor(t, plan, "scripts/new-tool.sh")
+	if len(plan.Advisories) != 0 {
+		t.Errorf("owner=core must never produce a seed advisory: %+v", plan.Advisories)
+	}
+	if len(plan.Drift) != 1 || plan.Drift[0].Path != "scripts/new-tool.sh" {
+		t.Fatalf("Drift = %+v, want a single entry for scripts/new-tool.sh", plan.Drift)
+	}
+}
+
 // --- path validation (AC-9) ---
 
 func TestPlanCoreReplace_RejectsNonLocalManifestPath(t *testing.T) {

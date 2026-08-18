@@ -57,9 +57,10 @@ func newPackListCmd() *cobra.Command {
 // path cannot diverge from ralph init's pack rendering.
 //
 // A legacy (pre-v2) manifest is rejected fail-closed (zero writes) — see
-// legacyLayoutFailClosedMsg (upgrade.go). The legacy manifest's ownership
-// model was removed alongside the legacy upgrade engine in Phase 3; the
-// automated migration to v2 arrives in a later ralph release (Phase 4).
+// legacyLayoutFailClosedMsg (upgrade.go). `ralph pack add` does not perform
+// the legacy-to-v2 migration itself — `ralph upgrade` does
+// (runMigrateLegacy, internal/cli/migrate.go) — so this points the operator
+// there instead.
 func addPack(targetDir string, lang string) error {
 	absDir, err := filepath.Abs(targetDir)
 	if err != nil {

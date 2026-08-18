@@ -124,10 +124,9 @@ func runInitNonInteractive(targetDir string, force bool) error {
 // overlay (v2) layout have nothing to do: re-running init on top of an
 // existing v2 project is a no-op — reconciling further template changes is
 // `ralph upgrade`'s job. Legacy (pre-v2) projects are rejected fail-closed
-// (zero writes): the legacy interactive upgrade engine this used to delegate
-// to was removed in Phase 3 (docs/plans/active
-// /2026-08-18-overlay-scaffold-v2-p3.md, FR-13); the automated migration to
-// v2 arrives in a later ralph release (Phase 4).
+// (zero writes): `ralph init` does not perform the legacy-to-v2 migration
+// itself — `ralph upgrade` does (runMigrateLegacy, internal/cli/migrate.go)
+// — so this points the operator there instead.
 func handleExistingProjectInit(manifestPath string) error {
 	m, err := scaffold.ReadManifest(manifestPath)
 	if err != nil {
