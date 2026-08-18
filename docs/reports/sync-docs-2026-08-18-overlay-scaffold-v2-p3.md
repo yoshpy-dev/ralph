@@ -49,3 +49,42 @@ $ ./scripts/check-skill-sync.sh
 ## Known gaps
 
 None. This was a residual/confirmatory pass; slice 5's doc sweep already covered the substantive drift from Phase 3's behavior changes.
+
+---
+
+## Cycle 2 (final cycle, 2/2)
+
+- Date: 2026-08-18
+- Scope: delta since cycle-1 (`7602317..HEAD`, HEAD `e21b1b1`). Commits reviewed: `df1a529` (cross-review triage), `fc8e9a9` (containment fixes: `ValidateRealParentChain` + exception-face/report write guards), `cee54b2` (cycle-2 self-review), `78d9039`/`4b53880` (cycle-2 LOW fixes, incl. `writeFileV2` doc-comment reword and a tech-debt row addition), `aa7fb9c` (verify cycle-2, ticked AC-1..AC-12), `e21b1b1` (test cycle-2 artifact).
+- Verdict: **No drift found.**
+
+### What was checked
+
+1. **Write-containment model depth vs. living docs** — `fc8e9a9` adds `ValidateRealParentChain` (symlink-parent-chain validation) to `ApplyOps`, `writeFileV2`, and `WriteUpgradeReport`, extending the containment guard beyond the leaf-only `Lstat` check that already existed pre-cycle-2. Grepped `containment`, `symlink`, `ApplyOps`, `Lstat`, `ValidateRealParentChain` across `README.md`, `AGENTS.md`, `docs/specs/2026-08-17-overlay-scaffold-v2.md`, `docs/quality/`, `docs/recipes/`, `.claude/rules/`. No living doc describes the write-containment mechanism at implementation depth (leaf checks, parent-chain checks, or `ApplyOps` internals) — the one hit is the spec's `.claude/skills/` symlink-handling design note (line 179), which is about a different, unrelated symlink concern (Claude Code's own directory-discovery symlink support), not this write path. The spec's "Security considerations" section (line 172) states the path-traversal defense at design level ("shared validator `scaffold.CleanLocalRelPath`") without enumerating individual containment mechanisms — consistent with how it already omitted the pre-existing leaf-`Lstat`/`ApplyOps`-preflight checks from Phase 1/3 cycle 1. No living doc needs an update to reflect `ValidateRealParentChain`; the implementation-level explanation lives correctly in the code's own doc comments (`replaceplan.go`, `upgrade_v2.go`, `report.go`) and in the self-review/verify reports.
+2. **`docs/tech-debt/README.md` row consistency after C2-1/C2-4** — verified both edits landed and cross-reference correctly: the rename/move-detection row's evidence column now reads `(M4, row reconciliation)` (`78d9039`, fixing the C2-1 finding that it pointed at the wrong ID), and the 5-LOW register row gained a 6th item naming the unused `in io.Reader` parameter with its file and ~25 call sites (`4b53880`, resolving C2-4's untracked-deferral gap). No other row was touched in this delta; the six rows fc8e9a9/cee54b2/78d9039/4b53880 did not need to touch (the git-hook-chaining/pager/`apErr` coverage-loss row from `6b617dc`, and the other rows edited in `3d8461d` at cycle 1) remain as they were and are unaffected by this delta.
+3. **Plan Deviations/checklist coherence** — `docs/plans/active/2026-08-18-overlay-scaffold-v2-p3.md`: all twelve AC checkboxes (`AC-1`..`AC-12`) are ticked, with `aa7fb9c` adding inline cycle-2 strengthening notes on AC-4b and AC-9 (both now cite the `fc8e9a9` containment fixes) and a qualification note on AC-4c. The Progress checklist's "Review/Verification/Test/Sync-docs artifact created" rows are all ticked and match the existing artifacts under `docs/reports/`; "Plan reviewed" and "PR created" remain unticked, correctly outside this delta's scope. The Deviations section (slice-3/slice-4 git-hook-reinstall finding, slice-3 code-movement notes) is unchanged in this delta and still accurately describes the only mid-plan deviations — nothing in cycle 2 introduced a new deviation from the plan's scope.
+
+### Verification after this pass
+
+```
+$ ./scripts/check-sync.sh
+=== Sync Summary ===
+  IDENTICAL:      158
+  DRIFTED:        0
+  ROOT_ONLY:      0
+  TEMPLATE_ONLY:  11
+  KNOWN_DIFF:     3
+PASS: all files in sync.
+
+$ ./scripts/check-skill-sync.sh
+[ok] check-skill-sync: 13 skill(s) in lock-step
+```
+
+### Files changed (cycle 2)
+
+- `docs/reports/sync-docs-2026-08-18-overlay-scaffold-v2-p3.md` (this Cycle 2 section)
+- `docs/insights/events/2026-08-18-overlay-scaffold-v2-p3.jsonl` (appended `sync_docs` cycle-2 event)
+
+### Known gaps (cycle 2)
+
+None. No living-doc edits were needed; the delta's doc-facing changes (tech-debt row updates, plan AC/checklist ticks, code doc-comment reword) were already made by the fix and verify commits themselves and are confirmed consistent above.
