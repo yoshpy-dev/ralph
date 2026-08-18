@@ -182,3 +182,77 @@ exists to deliver.
 - Fail: none
 - Blocked: none
 - This is pipeline cycle 1 for overlay-scaffold-v2 Phase 3.
+
+## Cycle 2 (final — pipeline cycle 2/2)
+
+- Date: 2026-08-18
+- HEAD: `aa7fb9c` (branch `feat/overlay-scaffold-v2-p3`)
+- Delta since cycle 1 (`62631aa..aa7fb9c`): `fc8e9a9` (cross-review
+  containment fixes: symlinked-parent preflight in
+  `internal/upgrade/replaceplan.go`'s `applyOps`, plus symlink-escape
+  guards for `.claude/settings.json`, its snapshot, and the reports dir in
+  `internal/cli/upgrade_v2.go` — 7 new tests), `78d9039`/`4b53880`
+  (cycle-2 self-review LOW fixes, including 2 test renames), plus a verify
+  cycle-2 artifact commit.
+- Evidence: `docs/evidence/verify-2026-08-18-052329.log` (raw
+  `RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh` output from the run
+  below, exit 0)
+
+### Verdict: PASS
+
+25/25 shell test files, all `FAIL: 0` (17 numeric-summary suites all
+report `FAIL: 0`, the remaining suites report a plain `OK`/`PASS: N`
+marker with zero failed cases inline; every one of the 25
+`==> tests/test-*.sh` headers has a matching clean finish). 8/8 Go
+packages `ok` on a fresh `go test ./... -count=1 -cover` run (no cache).
+All 7 new containment tests from `fc8e9a9` individually re-confirmed with
+`-run '<name>$' -v -count=1` (not just batch-passed):
+
+| Test | Package | Result | Duration |
+| --- | --- | --- | --- |
+| `TestApplyOps_ParentChainPreflightRejectsSymlinkedParent_ZeroWrites` | `internal/upgrade` | PASS | 0.00s |
+| `TestApplyOps_ParentChainPreflightRejectsDeeplyNestedSymlinkedParent` | `internal/upgrade` | PASS | 0.00s |
+| `TestApplyOps_ParentChainPreflightAllowsRealNestedDirectories` | `internal/upgrade` | PASS | 0.00s |
+| `TestApplyOps_ParentChainPreflightAllowsMissingIntermediateDirectories` | `internal/upgrade` | PASS | 0.00s |
+| `TestRunUpgradeV2_SymlinkedSettingsJSON_RejectedNoEscape` | `internal/cli` | PASS | 0.10s |
+| `TestRunUpgradeV2_SymlinkedSettingsSnapshot_RejectedAfterSettingsJSONWritten` | `internal/cli` | PASS | 0.07s |
+| `TestRunUpgradeV2_SymlinkedReportsDir_RejectedNoEscape` | `internal/cli` | PASS | 0.07s |
+
+No test weakening; no test-isolation issues found running these
+individually vs. in the batch.
+
+### Coverage deltas vs. cycle 1
+
+Fresh (`-count=1`, no cache) per-package coverage:
+
+| Package | Cycle 1 | Cycle 2 (this run) | Delta |
+| --- | --- | --- | --- |
+| `internal/cli` | 75.8% | 75.9% | +0.1pp |
+| `internal/scaffold` | 75.7% | 75.7% | 0.0pp |
+| `internal/upgrade` | 91.5% | 91.1% | -0.4pp |
+
+`internal/upgrade`'s small drop despite adding 4 new tests
+(`replaceplan_test.go` +125 lines) is consistent with the new production
+code outpacing the lines it exercises in this delta:
+`internal/upgrade/replaceplan.go`'s `applyOps` gained 72 lines of
+parent-chain-walk preflight logic (multiple symlink/dangling/depth branch
+permutations — the 4 new tests cover the reject/reject-deep/allow-real/
+allow-missing primary paths, not every intermediate-depth permutation),
+and `internal/upgrade/report.go` gained 20 lines for the new rejection
+reporting path. `internal/cli`'s small rise reflects the 3 new symlink
+guard tests in `upgrade_v2_test.go` (+151 lines) landing net-positive
+against the 23 new guard-check lines in `upgrade_v2.go`. Neither delta
+indicates an untested containment gap: all 7 new tests directly exercise
+the fix's reject/allow boundary conditions (see table above), and the
+pre-existing gap classes documented in the Cycle 1 report (pager I/O
+helpers, `--dry-run` preview formatting, cobra command wiring) are
+unchanged this cycle.
+
+### Cycle 2 verdict
+
+- Pass: yes — 25/25 shell files clean, 8/8 Go packages `ok`, all 7 new
+  containment tests individually re-confirmed
+- Fail: none
+- Blocked: none
+- This is pipeline cycle 2 (final, per `RALPH_STANDARD_MAX_PIPELINE_CYCLES`
+  default cap of 2) for overlay-scaffold-v2 Phase 3.
