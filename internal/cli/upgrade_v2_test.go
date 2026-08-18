@@ -808,7 +808,12 @@ func TestRunUpgradeV2_SeedAdvisoryOnly_NotANoOp(t *testing.T) {
 	seedOnly := gen1()
 	seedOnly.docsNotes = []byte(v2DocsNotes)
 	scaffold.EmbeddedFS = seedOnly.build()
-	Version = "1.1.0-test"
+	// Version deliberately stays at "1.0.0-test": with the version conjunct
+	// satisfied, only isFullyConvergedV2's seed-advisory veto (C3-1) can stop
+	// the no-op short-circuit — this test is the regression pin for exactly
+	// that term (C4-1: with a bumped version the version conjunct would
+	// short-circuit first and the advisory veto would be untested).
+	Version = "1.0.0-test"
 
 	var out, errOut bytes.Buffer
 	if err := runUpgradeIOWithOptions(target, upgradeOptions{Pager: pagerNever}, strings.NewReader(""), &out, &errOut, false); err != nil {

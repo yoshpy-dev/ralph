@@ -280,8 +280,8 @@ func executeInit(targetDir string, cfg initConfig, force bool) error {
 // advisory-only on template changes), not a core-replaceable file. Filing
 // it under the catch-all's core classification would let the replace
 // planner flag any user edit as unresolved drift and silently overwrite an
-// unedited copy on template changes (cross-review cycle-3 AR#1, docs/reports
-// /cross-review-triage-overlay-scaffold-v2-p3.md).
+// unedited copy on template changes (cross-review cycle-3 AR#1,
+// docs/reports/cross-review-triage-overlay-scaffold-v2-p3.md).
 //
 // Manifest keys are always fs.FS slash paths (from fs.WalkDir in
 // render.go), regardless of host OS, so relPath is normalized with
