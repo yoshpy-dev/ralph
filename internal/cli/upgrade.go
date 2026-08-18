@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
@@ -31,7 +32,16 @@ func newUpgradeCmd() *cobra.Command {
 		Use:   "upgrade",
 		Short: "Update scaffold files to the latest template version",
 		Long: `Compares the current project files against the embedded templates,
-auto-updates unchanged files, and prompts for conflict resolution on edited files.`,
+auto-updates unchanged files, and prompts for conflict resolution on edited files.
+
+On v2-layout (overlay scaffold) projects, upgrade runs fully non-interactively:
+core files are replaced, managed blocks (AGENTS.md, .gitignore) and
+.claude/settings.json are merged in place, and drift or fork paths are left
+untouched. --force is not supported on v2 layouts.
+
+Exit codes: 0 success, 1 execution error, 3 completed with unresolved drift
+remaining (v2 layouts only — see the upgrade report and stderr for the
+affected paths).`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if diffPreview {
 				dryRun = true
@@ -175,15 +185,17 @@ func runUpgradeIOWithOptions(targetDir string, opts upgradeOptions, in io.Reader
 		return fmt.Errorf("reading manifest: %w", err)
 	}
 
-	// Fail-closed guard: the legacy upgrade engine (v1 diff/conflict flow)
-	// must never run against a project already scaffolded with the overlay
-	// (v2) layout. It has no notion of the v3 ownership attributes (core/
-	// seed/block) and would happily overwrite seed/block surfaces wholesale
-	// under --force. The non-interactive v2 upgrade path lands in a later
-	// ralph release (Phase 3). This check runs before any diff computation
-	// or write, and applies identically to --force and --dry-run.
+	// v2 dispatch: the legacy upgrade engine (v1 diff/conflict flow) must
+	// never run against a project already scaffolded with the overlay (v2)
+	// layout — it has no notion of the v3 ownership attributes (core/seed/
+	// block) and would happily overwrite seed/block surfaces wholesale
+	// under --force. v2-layout projects instead run the fully non-interactive
+	// v2 upgrade flow (internal/cli/upgrade_v2.go), which is the sole engine
+	// wired to the Phase 1 overlay primitives. This check runs before any
+	// legacy diff computation or write, and applies identically to
+	// --force and --dry-run — runUpgradeV2 itself rejects --force outright.
 	if oldManifest.Meta.Layout == scaffold.LayoutV2 {
-		return fmt.Errorf("this project uses the overlay (v2) scaffold layout; the legacy 'ralph upgrade' engine cannot operate on it — a non-interactive v2 upgrade path is planned for a later ralph release (Phase 3)")
+		return runUpgradeV2(absDir, manifestPath, oldManifest, opts, out, errOut, colorize, time.Now().UTC())
 	}
 
 	writef(out, "Checking for updates...\n")

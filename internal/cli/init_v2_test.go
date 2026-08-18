@@ -543,60 +543,96 @@ func snapshotDirHashes(t *testing.T, dir string) []string {
 	return entries
 }
 
-// TestRunUpgradeIO_V2Layout_FailsClosedWithoutWrites verifies AC-10: the
-// legacy upgrade engine refuses to run against a manifest whose
-// meta.layout is "v2", writes zero files, and names the v2/Phase-3 reason
-// in its error. Exercised for both the interactive/apply path (force=true)
-// and --dry-run, since the guard must short-circuit before either branch
-// touches the diff engine.
-func TestRunUpgradeIO_V2Layout_FailsClosedWithoutWrites(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		opts upgradeOptions
-	}{
-		{name: "force", opts: upgradeOptions{Force: true, Pager: pagerNever}},
-		{name: "dry-run", opts: upgradeOptions{DryRun: true, Pager: pagerNever}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			setupTestEmbedFS(t)
-			Version = "2.0.0-test"
-
-			dir := t.TempDir()
-			agentsContent := []byte("# AGENTS\n")
-			if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), agentsContent, 0644); err != nil {
-				t.Fatalf("write AGENTS.md: %v", err)
-			}
-			if err := os.MkdirAll(filepath.Join(dir, ".ralph"), 0755); err != nil {
-				t.Fatalf("MkdirAll .ralph: %v", err)
-			}
-			m := scaffold.NewManifest("1.0.0-test")
-			m.SetLayoutV2()
-			if setErr := m.SetFileOwned("AGENTS.md", scaffold.OwnerBlock, scaffold.HashBytes(agentsContent), scaffold.HashBytes(agentsContent)); setErr != nil {
-				t.Fatalf("SetFileOwned: %v", setErr)
-			}
-			manifestPath := filepath.Join(dir, ".ralph", "manifest.toml")
-			if err := m.Write(manifestPath); err != nil {
-				t.Fatalf("write manifest: %v", err)
-			}
-
-			before := snapshotDirHashes(t, dir)
-
-			var out, errOut bytes.Buffer
-			err := runUpgradeIOWithOptions(dir, tc.opts, strings.NewReader(""), &out, &errOut, false)
-			if err == nil {
-				t.Fatal("expected an error for a v2-layout manifest, got nil")
-			}
-			if !strings.Contains(err.Error(), "v2") {
-				t.Errorf("error = %q, want it to mention the v2 layout", err.Error())
-			}
-			if !strings.Contains(err.Error(), "Phase 3") {
-				t.Errorf("error = %q, want it to mention Phase 3", err.Error())
-			}
-
-			after := snapshotDirHashes(t, dir)
-			if !slices.Equal(before, after) {
-				t.Errorf("guard must write zero files; before=%v after=%v", before, after)
-			}
-		})
+// TestRunUpgradeIO_V2Layout_DispatchesToV2Engine pins the Phase 3 slice-2
+// replacement of the Phase 2 fail-closed guard: a manifest whose
+// meta.layout is "v2" no longer refuses to run at all — it dispatches to
+// the non-interactive v2 upgrade flow (internal/cli/upgrade_v2.go) instead
+// of the legacy diff/conflict engine. --force remains rejected outright on
+// v2 layouts (zero writes, error names "--force" and "v2"; fork
+// re-adoption is Phase 5's `ralph adopt`, not this flag). --dry-run now
+// succeeds (it runs the v2 preview path) with zero writes, since dry-run
+// must never touch disk regardless of engine.
+func TestRunUpgradeIO_V2Layout_DispatchesToV2Engine(t *testing.T) {
+	setupTestEmbed := func(t *testing.T) {
+		t.Helper()
+		setupTestEmbedFS(t)
 	}
+
+	t.Run("force_rejected_zero_writes", func(t *testing.T) {
+		setupTestEmbed(t)
+		Version = "2.0.0-test"
+
+		dir := t.TempDir()
+		agentsContent := []byte("# AGENTS\n")
+		if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), agentsContent, 0644); err != nil {
+			t.Fatalf("write AGENTS.md: %v", err)
+		}
+		if err := os.MkdirAll(filepath.Join(dir, ".ralph"), 0755); err != nil {
+			t.Fatalf("MkdirAll .ralph: %v", err)
+		}
+		m := scaffold.NewManifest("1.0.0-test")
+		m.SetLayoutV2()
+		if setErr := m.SetFileOwned("AGENTS.md", scaffold.OwnerBlock, scaffold.HashBytes(agentsContent), scaffold.HashBytes(agentsContent)); setErr != nil {
+			t.Fatalf("SetFileOwned: %v", setErr)
+		}
+		manifestPath := filepath.Join(dir, ".ralph", "manifest.toml")
+		if err := m.Write(manifestPath); err != nil {
+			t.Fatalf("write manifest: %v", err)
+		}
+
+		before := snapshotDirHashes(t, dir)
+
+		var out, errOut bytes.Buffer
+		err := runUpgradeIOWithOptions(dir, upgradeOptions{Force: true, Pager: pagerNever}, strings.NewReader(""), &out, &errOut, false)
+		if err == nil {
+			t.Fatal("expected an error for --force on a v2-layout manifest, got nil")
+		}
+		if !strings.Contains(err.Error(), "--force") {
+			t.Errorf("error = %q, want it to mention --force", err.Error())
+		}
+		if !strings.Contains(err.Error(), "v2") {
+			t.Errorf("error = %q, want it to mention the v2 layout", err.Error())
+		}
+
+		after := snapshotDirHashes(t, dir)
+		if !slices.Equal(before, after) {
+			t.Errorf("--force rejection must write zero files; before=%v after=%v", before, after)
+		}
+	})
+
+	t.Run("dry_run_succeeds_zero_writes", func(t *testing.T) {
+		setupTestEmbed(t)
+		Version = "2.0.0-test"
+
+		dir := t.TempDir()
+		agentsContent := []byte("# AGENTS\n")
+		if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), agentsContent, 0644); err != nil {
+			t.Fatalf("write AGENTS.md: %v", err)
+		}
+		if err := os.MkdirAll(filepath.Join(dir, ".ralph"), 0755); err != nil {
+			t.Fatalf("MkdirAll .ralph: %v", err)
+		}
+		m := scaffold.NewManifest("1.0.0-test")
+		m.SetLayoutV2()
+		if setErr := m.SetFileOwned("AGENTS.md", scaffold.OwnerBlock, scaffold.HashBytes(agentsContent), scaffold.HashBytes(agentsContent)); setErr != nil {
+			t.Fatalf("SetFileOwned: %v", setErr)
+		}
+		manifestPath := filepath.Join(dir, ".ralph", "manifest.toml")
+		if err := m.Write(manifestPath); err != nil {
+			t.Fatalf("write manifest: %v", err)
+		}
+
+		before := snapshotDirHashes(t, dir)
+
+		var out, errOut bytes.Buffer
+		err := runUpgradeIOWithOptions(dir, upgradeOptions{DryRun: true, Pager: pagerNever}, strings.NewReader(""), &out, &errOut, false)
+		if err != nil {
+			t.Fatalf("--dry-run on a v2-layout manifest must succeed (previews the v2 plan): %v", err)
+		}
+
+		after := snapshotDirHashes(t, dir)
+		if !slices.Equal(before, after) {
+			t.Errorf("--dry-run must write zero files; before=%v after=%v", before, after)
+		}
+	})
 }
