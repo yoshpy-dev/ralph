@@ -275,6 +275,14 @@ func executeInit(targetDir string, cfg initConfig, force bool) error {
 // Phase 3 replace planner treat it as a full-replace target and overwrite
 // user content living there.
 //
+// .codex/AGENTS.override.md is classified as seed for the same L3 reason:
+// it is a user-owned Codex customization point (create-once, then
+// advisory-only on template changes), not a core-replaceable file. Filing
+// it under the catch-all's core classification would let the replace
+// planner flag any user edit as unresolved drift and silently overwrite an
+// unedited copy on template changes (cross-review cycle-3 AR#1, docs/reports
+// /cross-review-triage-overlay-scaffold-v2-p3.md).
+//
 // Manifest keys are always fs.FS slash paths (from fs.WalkDir in
 // render.go), regardless of host OS, so relPath is normalized with
 // filepath.ToSlash before comparison to keep classification slash-stable
@@ -284,7 +292,7 @@ func ownerForScaffoldPath(relPath string) string {
 	switch relPath {
 	case "AGENTS.md", ".gitignore":
 		return scaffold.OwnerBlock
-	case "CLAUDE.md", "ralph.toml", ".github/workflows/verify.yml":
+	case "CLAUDE.md", "ralph.toml", ".github/workflows/verify.yml", ".codex/AGENTS.override.md":
 		return scaffold.OwnerSeed
 	}
 	if strings.HasPrefix(relPath, "docs/") {

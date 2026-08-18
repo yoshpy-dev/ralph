@@ -19,6 +19,7 @@ import (
 const testAgentsCoreManaged = "## Mission\n\nManaged agents guidance.\n"
 const testGitignoreManaged = ".ralph/local/\nnode_modules/\n"
 const testSettingsSnapshotContent = "{\n  \"env\": {}\n}\n"
+const testCodexOverrideContent = "# Codex agent overrides\n\nDefault content.\n"
 
 func testAgentsMDContent() []byte {
 	return []byte("# AGENTS.md\n\nProject notes go here.\n\n" +
@@ -53,6 +54,7 @@ func setupTestEmbedFSV2(t *testing.T) {
 		"templates/base/scripts/run-verify.sh":              {Data: []byte("#!/bin/sh\necho ok\n")},
 		"templates/base/.ralph/local/verify.d/.gitkeep":     {Data: []byte("")},
 		"templates/base/.ralph/core/settings.ralph.json":    {Data: []byte(testSettingsSnapshotContent)},
+		"templates/base/.codex/AGENTS.override.md":          {Data: []byte(testCodexOverrideContent)},
 	}
 }
 
@@ -88,6 +90,7 @@ func TestExecuteInit_V2_FreshInit_LayoutAndOwners(t *testing.T) {
 		filepath.Join("scripts", "run-verify.sh"):                 scaffold.OwnerCore,
 		filepath.Join(".ralph", "local", "verify.d", ".gitkeep"):  scaffold.OwnerSeed,
 		filepath.Join(".ralph", "core", "settings.ralph.json"):    scaffold.OwnerCore,
+		filepath.Join(".codex", "AGENTS.override.md"):             scaffold.OwnerSeed,
 	}
 	for path, wantOwner := range wantOwners {
 		entry, ok := m.Files[path]

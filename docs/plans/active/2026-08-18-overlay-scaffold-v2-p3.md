@@ -137,6 +137,7 @@ v2 manifest(`meta.layout = "v2"`)に対する `ralph upgrade` は次を非対話
 
 - スライス 3 で発見: v2 upgrade フローが `installManagedGitHooks` を呼ばず、テンプレート変更時に git hooks が再インストールされない(レガシーエンジンは呼んでいた)。スライス 4 でクローズ済み: v2 成功パスに `installManagedGitHooks` 呼び出しを追加し、部分失敗カバレッジも強化(コミット 5b1b675)
 - スライス 3 の判断: `packPrefixFor` 等は language_pack.go へ移設、`runUpgrade`/`runUpgradeIO` ラッパは呼び出し元消滅により削除、`addPack` の冗長 manifest 二重読みを簡約
+- cycle-3 cross-review AR#1 の fix で発見: このブランチの以前のコミット群でテストが生成した manifest は `.codex/AGENTS.override.md` を owner=core のまま記録している(本 fix 以前の分類)。ダウンストリームへのリリース未到達のため実害はなく、レガシー(旧分類)manifest の再分類は Phase 4 の移行分類器のスコープとし、本フェーズでは追わない
 
 ## Open questions
 

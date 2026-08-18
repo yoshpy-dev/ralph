@@ -57,6 +57,7 @@ type v2FixtureGen struct {
 	golangRuleMd     []byte
 	preCommitGuardSh []byte // rendered to scripts/pre-commit-secret-guard.sh; the only one of the four managed git-hook guard scripts that varies across gen1/gen2 in these fixtures
 	omitAgentsCore   bool   // when true, build() omits templates/base/.ralph/core/AGENTS.core.md entirely — simulates a desired-state map missing the AGENTS.md managed-block source
+	codexOverride    []byte // included only when non-nil; identical across gen1/gen2 by default (v1CodexOverride) — a stable seed, mirroring docsGuide, so shared gen1->gen2 tests are not perturbed. Tests exercising a template change clone gen1() and override this field directly (see TestRunUpgradeV2_CodexAgentsOverride*).
 }
 
 func (g v2FixtureGen) build() fstest.MapFS {
@@ -89,6 +90,9 @@ func (g v2FixtureGen) build() fstest.MapFS {
 	if g.docsGuide != nil {
 		m["templates/base/docs/guide.md"] = &fstest.MapFile{Data: g.docsGuide}
 	}
+	if g.codexOverride != nil {
+		m["templates/base/.codex/AGENTS.override.md"] = &fstest.MapFile{Data: g.codexOverride}
+	}
 	if g.includeGolang {
 		m["templates/packs/golang/verify.sh"] = &fstest.MapFile{Data: g.golangVerifySh}
 		m["templates/packs/golang/README.md"] = &fstest.MapFile{Data: g.golangReadme}
@@ -117,6 +121,8 @@ const (
 	v1PreCommitGuard   = testPreCommitGuard
 	v2PreCommitGuard   = "#!/usr/bin/env sh\n# pre-commit-secret-guard v2\nexit 0\n"
 	v2DocsGuide        = "# Guide\n\nStable guide content, unchanged across upgrades.\n"
+	v1CodexOverride    = "# Codex agent overrides\n\nv1 override content.\n"
+	v2CodexOverride    = "# Codex agent overrides\n\nv2 override content (changed upstream).\n"
 )
 
 func v1Settings() []byte {
@@ -165,6 +171,7 @@ func gen1() v2FixtureGen {
 		golangReadme:     []byte(v1GolangReadme),
 		golangRuleMd:     []byte(v1GolangRule),
 		preCommitGuardSh: []byte(v1PreCommitGuard),
+		codexOverride:    []byte(v1CodexOverride),
 	}
 }
 
@@ -183,6 +190,7 @@ func gen2() v2FixtureGen {
 		golangReadme:     []byte(v2GolangReadme),
 		golangRuleMd:     []byte(v2GolangRule),
 		preCommitGuardSh: []byte(v2PreCommitGuard),
+		codexOverride:    []byte(v1CodexOverride), // identical to gen1: a stable seed, see codexOverride field doc
 	}
 }
 
@@ -837,6 +845,95 @@ func TestRunUpgradeV2_SeedAdvisoryOnly_NotANoOp(t *testing.T) {
 	}
 	if !strings.Contains(out2.String(), "no-op") {
 		t.Errorf("second run's stdout must announce a no-op now that the seed advisory has cleared:\n%s", out2.String())
+	}
+}
+
+// TestRunUpgradeV2_CodexAgentsOverride_UserEdited_SeedNeverReplaced pins the
+// cycle-3 cross-review fix (AR#1,
+// docs/reports/cross-review-triage-overlay-scaffold-v2-p3.md):
+// .codex/AGENTS.override.md is spec-L3 (create-once, then user-owned/不可侵).
+// Before the fix, ownerForScaffoldPath's catch-all classified it core, so a
+// user-edited copy would have been flagged as unresolved drift (exit 3)
+// forever on any upstream template change. After the fix it behaves like any
+// other seed file: a user edit survives a template change untouched, exit 0,
+// and the pending template change surfaces only as a report advisory.
+func TestRunUpgradeV2_CodexAgentsOverride_UserEdited_SeedNeverReplaced(t *testing.T) {
+	target := initV2Project(t, gen1(), "1.0.0-test")
+
+	userOverride := []byte("# Codex agent overrides\n\nProject-specific, hand-edited by the user.\n")
+	overridePath := filepath.Join(target, ".codex", "AGENTS.override.md")
+	if err := os.WriteFile(overridePath, userOverride, 0644); err != nil {
+		t.Fatalf("write user-edited .codex/AGENTS.override.md: %v", err)
+	}
+
+	changed := gen1()
+	changed.codexOverride = []byte(v2CodexOverride)
+	scaffold.EmbeddedFS = changed.build()
+	Version = "1.1.0-test"
+
+	var out, errOut bytes.Buffer
+	if err := runUpgradeIOWithOptions(target, upgradeOptions{Pager: pagerNever}, strings.NewReader(""), &out, &errOut, false); err != nil {
+		t.Fatalf("runUpgradeIOWithOptions: %v\nstderr:\n%s", err, errOut.String())
+	}
+
+	// -- disk untouched: the user's edit must survive the template change --
+	gotOverride := mustReadFile(t, overridePath)
+	if string(gotOverride) != string(userOverride) {
+		t.Errorf(".codex/AGENTS.override.md must stay exactly as the user left it: got %q, want %q", gotOverride, userOverride)
+	}
+
+	// -- report mentions the pending advisory, not silently swallowed --
+	reportPath := upgrade.UpgradeReportRelPath(Version, time.Now().UTC().Format("2006-01-02"))
+	reportContent := mustReadFile(t, filepath.Join(target, reportPath))
+	if !strings.Contains(string(reportContent), ".codex/AGENTS.override.md") {
+		t.Errorf("upgrade report must mention the pending .codex/AGENTS.override.md advisory:\n%s", reportContent)
+	}
+
+	// -- manifest: owner=seed, TemplateHash advances to the new template,
+	// DiskHash reflects the user's edit (never overwritten) --
+	m := readManifestV2(t, target)
+	if entry, ok := m.Files[".codex/AGENTS.override.md"]; !ok || entry.Owner != scaffold.OwnerSeed ||
+		entry.TemplateHash != scaffold.HashBytes([]byte(v2CodexOverride)) || entry.DiskHash != scaffold.HashBytes(userOverride) {
+		t.Errorf(".codex/AGENTS.override.md manifest entry = %+v, want owner=seed, TemplateHash=hash(v2 template), DiskHash=hash(user edit)", entry)
+	}
+}
+
+// TestRunUpgradeV2_CodexAgentsOverride_Unedited_TemplateChangeIsAdvisoryOnly
+// is the control case for the same fix: an *unedited* copy of
+// .codex/AGENTS.override.md must also survive a template change untouched —
+// seed semantics apply regardless of whether the user ever edited it. Before
+// the fix, the core catch-all would have let the replace planner silently
+// overwrite an unedited copy with the new template content instead of
+// leaving it as an advisory-only seed.
+func TestRunUpgradeV2_CodexAgentsOverride_Unedited_TemplateChangeIsAdvisoryOnly(t *testing.T) {
+	target := initV2Project(t, gen1(), "1.0.0-test")
+
+	changed := gen1()
+	changed.codexOverride = []byte(v2CodexOverride)
+	scaffold.EmbeddedFS = changed.build()
+	Version = "1.1.0-test"
+
+	var out, errOut bytes.Buffer
+	if err := runUpgradeIOWithOptions(target, upgradeOptions{Pager: pagerNever}, strings.NewReader(""), &out, &errOut, false); err != nil {
+		t.Fatalf("runUpgradeIOWithOptions: %v\nstderr:\n%s", err, errOut.String())
+	}
+
+	overridePath := filepath.Join(target, ".codex", "AGENTS.override.md")
+	gotOverride := mustReadFile(t, overridePath)
+	if string(gotOverride) != v1CodexOverride {
+		t.Errorf(".codex/AGENTS.override.md (unedited seed) must stay untouched on disk: got %q, want %q", gotOverride, v1CodexOverride)
+	}
+
+	reportPath := upgrade.UpgradeReportRelPath(Version, time.Now().UTC().Format("2006-01-02"))
+	reportContent := mustReadFile(t, filepath.Join(target, reportPath))
+	if !strings.Contains(string(reportContent), ".codex/AGENTS.override.md") {
+		t.Errorf("upgrade report must mention the pending .codex/AGENTS.override.md advisory:\n%s", reportContent)
+	}
+
+	m := readManifestV2(t, target)
+	if entry, ok := m.Files[".codex/AGENTS.override.md"]; !ok || entry.Owner != scaffold.OwnerSeed ||
+		entry.TemplateHash != scaffold.HashBytes([]byte(v2CodexOverride)) || entry.DiskHash != scaffold.HashBytes([]byte(v1CodexOverride)) {
+		t.Errorf(".codex/AGENTS.override.md manifest entry = %+v, want owner=seed, TemplateHash=hash(v2 template), DiskHash=hash(v1, unchanged)", entry)
 	}
 }
 
