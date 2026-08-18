@@ -66,3 +66,56 @@ Plan checkboxes for AC-1..AC-16 are all still `[ ]` in `docs/plans/active/2026-0
 ## Minimal additional check for highest confidence gain
 
 Run `/test` against this plan with focus on the collision-matrix and rerun-stability test files (`internal/cli/migrate_test.go`), since those are exactly the tests rewritten or added to pin the HIGH-1/MEDIUM-2 fixes — a green run there is the strongest behavioral confirmation that the self-review's own "test that pins the defect" concern is fully closed.
+
+---
+
+# Cycle 2 (final, 2/2)
+
+- Date: 2026-08-18
+- Verifier: `verifier` subagent (Claude Code, `/verify`)
+- Scope: **delta only** — `b1babe7..HEAD`. Delta commits: `c51497e` (fixes for cross-review cycle-1 AR#1/AR#2/AR#3), `13adf85` (self-review cycle-2 section, pass, 1 MEDIUM + 3 LOW), `aabca2d` (fixes for self-review C2-1..C2-4). HEAD is `aabca2d`, working tree clean (`git status --porcelain` empty).
+- Correction to cycle-1: this report's own Evidence section (line 24, cycle-1) claimed self-review LOW-6 and LOW-7 "both now carry an explanatory doc comment" at `b1babe7`. That was wrong for LOW-6: `b1babe7` only fixed LOW-7 (`buildMigratedManifest`'s optimistic `DiskHash` comment); LOW-6 (`buildDesiredStateV2` called twice, duplicate pack warning) had no comment at `b1babe7` and was correctly flagged as unaddressed by the cycle-2 self-review (its own finding C2-3). LOW-6's doc comment was only added in `aabca2d`, at the `buildDesiredStateV2` call inside `runMigrateLegacy` (`internal/cli/migrate.go:838-840`, in `buildMigratedManifest`'s call chain). Do not repeat the stale cycle-1 sentence going forward.
+
+## Verdict: PASS
+
+`./scripts/run-static-verify.sh` (changed-language scope, Go) passes clean at `aabca2d`: `gofmt: ok`, golangci-lint `0 issues.`, plus repo-wide `check-sync.sh` / `check-pipeline-sync.sh` / `check-skill-sync.sh` / Codex hook guards all `OK`. `go build ./...` and `go vet ./...` both pass with no output. All three cross-review AR fixes (`c51497e`) and all four self-review C2 fixes (`aabca2d`) were cross-checked line-by-line against their respective triage/review contracts, not just "a fix landed." AC-1..AC-16 still hold; no AC's contract was invalidated by the delta.
+
+## Evidence
+
+- `RALPH_VERIFY_SCOPE=changed ./scripts/run-static-verify.sh` → exit 0, evidence log `docs/evidence/verify-2026-08-18-132705.log`.
+- `go build ./...` → clean. `go vet ./...` → clean.
+- `git status --porcelain` → empty (nothing uncommitted).
+- Cross-review AR fix crosscheck (`c51497e` diff read in full for `internal/cli/migrate.go`), against `docs/reports/cross-review-triage-overlay-scaffold-v2-p4.md`'s ACTION_REQUIRED table:
+  - **AR#1** (`OpDeleteOldPathAdoptFork` validated `OldPath` only, not `NewPath`) — `validateMigrationOp`'s `OpDeleteOldPath, OpDeleteOldPathAdoptFork` case now additionally calls the new `validateMigrationForkAdoptionTarget(absDir, e.NewPath)` for the adopt-fork kind, after the existing `OldPath` leaf check. The new function applies `scaffold.CleanLocalRelPath` + `upgrade.ValidateRealParentChain` + `validateMigrationLeaf(..., mustExist=true)` — the same chain `validateMigrationWriteTarget` uses for write targets, with `mustExist=true` because this kind reads-and-trusts `NewPath` rather than writing it (doc comment states this explicitly and correctly). Matches the triage's prescribed fix exactly (`internal/cli/migrate.go:990-1009` doc, `:1010-1019` dispatch, `:1075-1093` new function).
+  - **AR#2** (generic desired-sweep recorded `TemplateHash=current` for untracked seed collisions, making the chained upgrade's `classifyUntracked` see a "tracked" seed and swallowing the AC-1 advisory) — `buildMigratedManifest` now checks, for `owner == OwnerSeed` paths with existing diverging disk content and no legacy manifest entry (`!trackedInLegacy`), `continue`s before calling `SetFileOwned`, omitting the path from the v3 manifest entirely. Traced against `internal/upgrade/replaceplan.go:438-469`'s `classifyUntracked`: it fires only for paths with "no manifest entry at all," so omission is exactly what makes the chained call's `classifyUntracked` (not `classifyCore`/`classifySeed`, which require a manifest entry) see the path and route it to the seed-advisory branch instead of drift. This is the implementation choice the triage explicitly left to the implementer ("実装は連鎖側分類と整合する形を実装者が選択"), and it is the one shape that satisfies AC-1 through the migration path (`internal/cli/migrate.go:1505-1524`).
+  - **AR#3** (migration report's fork-diff section omitted `OpDeleteOldPathAdoptFork` diffs, violating AC-8) — `renderMigrationReport`'s `forkEntries` now appends `entriesForKind(plan.Entries, OpDeleteOldPathAdoptFork)` alongside the existing `OpForkRelocate`/`OpForkInPlace` entries, before the `len(forkEntries) > 0` report-section gate. One-line fix, matches the triage recommendation (`internal/cli/migrate.go:1573-1581`).
+- Self-review C2 fix crosscheck (`aabca2d` diff read in full), against `docs/reports/self-review-2026-08-18-overlay-scaffold-v2-p4.md`'s cycle-2 findings table:
+  - **C2-1** (8 bare `AR#1`/`AR#2`/`AR#3` citations would go stale once `/cross-review` rewrites the triage report this cycle) — all 8 sites now read `AR#1, cycle 1, ...` / `AR#2, cycle 1, ...` / `AR#3, cycle 1, ...`. Grepped `AR#1\|AR#2\|AR#3` across `internal/cli/migrate.go` and `internal/cli/migrate_test.go`: 8 hits, all cycle-qualified, matching the `upgrade_v2.go` convention the finding cited. No bare citation remains.
+  - **C2-2** (settings-prune rewrite guard checked candidate count, not actual-removal count, so a near-miss-only prune still rewrote and re-marshaled the file) — `executeMigrationEntries`'s `OpSettingsPrune` case now wraps the `writeMigrationFile` call in `if len(removed) > 0`, where `removed` is `pruneLegacySettingsHooks`'s actual-removal return value (distinct from the pre-existing `len(e.PrunedHookCommands) == 0` outer guard, which only skips when there were zero *candidates*). Confirmed this is the narrower, correct guard: a near-miss-only run now produces zero writes, matching the finding's "leaving the file byte-identical is strictly the safer outcome" recommendation exactly (`internal/cli/migrate.go:1171-1202`).
+  - **C2-3** (cycle-1 LOW-6, duplicate `buildDesiredStateV2` pack warning, was unfixed and undocumented at `b1babe7` despite the cycle-1 verify report claiming otherwise) — a new comment now precedes the `buildDesiredStateV2` call in `runMigrateLegacy`: "buildDesiredStateV2 also runs inside the chained runUpgradeV2, so any pack-availability warning prints twice per migration (self-review cycle-1 LOW-6; accepted duplication, not worth threading state)." This is the fix; see the correction note above the verdict for the cycle-1 report's own stale claim.
+  - **C2-4** (3 doc comments left stale by the new `OpDeleteOldPathAdoptFork` kind) — all three updated: `MigrationEntry.ForkedFromVersion`'s doc now lists `OpDeleteOldPathAdoptFork` as a third producer; `MigrationEntry.NewPath`'s doc now describes the adopt-fork destination role; `classifyLegacyEntryState`'s doc no longer claims the top-level caller never consults it for the already-relocated case — it now correctly says `classifyRerunRelocatedDestination` deliberately calls it with `hasDisk=false` for that case. Verified the third one against the actual function body (`internal/cli/migrate.go:411-427`): `classifyLegacyEntryState(entry, "", false)` is called exactly as the updated doc describes. The lower-priority sibling item (`validateMigrationOp`'s doc not mentioning it also runs for no-write kinds) was fixed too, though the finding only flagged it as optional.
+- AC re-confirmation for the delta: AR#1/AR#3 touch AC-16 (path safety) and AC-8 (migration report fork diffs) respectively — both still hold, now with a previously-missing case closed rather than newly broken. AR#2 touches AC-1 (owner-aware untracked classification) specifically through the migration path — AC-1's original evidence (cycle-1, `internal/upgrade/replaceplan.go`'s `classifyUntracked` for the direct-`upgrade` path) is unchanged; AR#2 additionally closes the migration-path route to the same AC, which cycle-1's AC-1 evidence did not yet cover. No other AC's evidence changed shape.
+- `docs/plans/active/2026-08-18-overlay-scaffold-v2-p4.md`: all 16 AC checkboxes are now `[x]` (16 of 16 `- [x] AC-` lines counted) — the doc-lag flagged in cycle-1 is resolved as of this delta.
+
+## Acceptance criteria (delta-relevant)
+
+| AC | Status | Delta effect |
+| --- | --- | --- |
+| AC-1 | Holds | AR#2 additionally closes the migration-path route to the seed-collision advisory (cycle-1 evidence covered the direct-`upgrade` path only) |
+| AC-8 | Holds | AR#3 closes a report-completeness gap (adopt-fork diffs were missing from "Fork diffs") |
+| AC-14 | Holds | Preflight validation now also covers `OpDeleteOldPathAdoptFork`'s `NewPath` (AR#1); rerun-stability path unaffected by this delta beyond the AR#1 fix already covered by cycle-1's HIGH-1 |
+| AC-16 | Holds, strengthened | AR#1 adds `NewPath` validation for the adopt-fork kind, closing the one op-kind gap the cycle-1 self-review's own HIGH-1 fix left open |
+| AC-2..AC-7, AC-9..AC-13, AC-15 | Holds, unchanged | Not touched by this delta's commits (verified via `git diff b1babe7..HEAD --stat`: only `internal/cli/migrate.go`, `internal/cli/migrate_test.go`, plan, and report files changed) |
+
+## Documentation drift
+
+- None found in the delta beyond the correction noted above (this report's own cycle-1 line 24). `README.md`, `docs/tech-debt/README.md`, and the spec were not touched by `c51497e`/`13adf85`/`aabca2d` and remain in sync as established in cycle 1.
+
+## What remains unverified
+
+- Behavioral correctness of the AR#1/AR#2/AR#3 and C2-1..C2-4 fixes (test execution) — out of scope for `/verify`, belongs to `/test`. The delta adds tests directly exercising each (`internal/cli/migrate_test.go` +554 lines across the three delta commits, per self-review cycle-2's own evidence), but this pass did not execute `go test ./...`.
+- Runtime confirmation of AR#2's "the chained upgrade's own report/no-op behavior is genuinely restored" claim — covered by a dedicated end-to-end test per the self-review's positive notes, not independently re-executed by hand here.
+
+## Minimal additional check for highest confidence gain
+
+Run `/test` focused on the four new/changed test names covering AR#1 (`TestRunMigrateLegacy_SymlinkedAdoptForkDestParent_ZeroWrites`), AR#2 (the end-to-end seed-advisory-through-migration test near `internal/cli/migrate_test.go:2405`), AR#3 (`TestRunMigrateLegacy_AdoptedForkDiff_IncludedInReport`), and C2-2 (the near-miss-only byte-identity regression test) — these four are the exact behavioral claims this verify pass could only confirm structurally, not by execution.
