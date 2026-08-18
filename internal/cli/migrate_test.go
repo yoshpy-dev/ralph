@@ -142,7 +142,7 @@ func TestClassifyMigration_UnmodifiedRelocatedRule_DeletesOldPath(t *testing.T) 
 		".claude/rules/ralph/architecture.md": []byte("new core content"),
 	}
 
-	plan, err := ClassifyMigration(m, dir, desired)
+	plan, err := ClassifyMigration(m, dir, desired, nil)
 	if err != nil {
 		t.Fatalf("ClassifyMigration: %v", err)
 	}
@@ -170,7 +170,7 @@ func TestClassifyMigration_ModifiedRelocatedRule_ForkRelocates(t *testing.T) {
 		".claude/rules/ralph/architecture.md": []byte("new core content"),
 	}
 
-	plan, err := ClassifyMigration(m, dir, desired)
+	plan, err := ClassifyMigration(m, dir, desired, nil)
 	if err != nil {
 		t.Fatalf("ClassifyMigration: %v", err)
 	}
@@ -199,7 +199,7 @@ func TestClassifyMigration_UnmodifiedRetiredPath_Deletes(t *testing.T) {
 
 	desired := map[string][]byte{} // path no longer shipped at all
 
-	plan, err := ClassifyMigration(m, dir, desired)
+	plan, err := ClassifyMigration(m, dir, desired, nil)
 	if err != nil {
 		t.Fatalf("ClassifyMigration: %v", err)
 	}
@@ -224,7 +224,7 @@ func TestClassifyMigration_SamePathUnmodified_KeepsInPlace(t *testing.T) {
 		"scripts/run-verify.sh": []byte("new template content"),
 	}
 
-	plan, err := ClassifyMigration(m, dir, desired)
+	plan, err := ClassifyMigration(m, dir, desired, nil)
 	if err != nil {
 		t.Fatalf("ClassifyMigration: %v", err)
 	}
@@ -249,7 +249,7 @@ func TestClassifyMigration_SamePathModified_ForksInPlace(t *testing.T) {
 		"scripts/run-verify.sh": []byte("new template content"),
 	}
 
-	plan, err := ClassifyMigration(m, dir, desired)
+	plan, err := ClassifyMigration(m, dir, desired, nil)
 	if err != nil {
 		t.Fatalf("ClassifyMigration: %v", err)
 	}
@@ -266,6 +266,106 @@ func TestClassifyMigration_SamePathModified_ForksInPlace(t *testing.T) {
 	}
 }
 
+// TestClassifyMigration_UnmodifiedSeedSamePath_ReplacesWithTemplate covers
+// AR#1 (cycle 2, docs/reports/cross-review-triage-overlay-scaffold-v2-p4.md):
+// an unmodified, non-relocated owner=seed path must be replaced with the
+// current template content, not left in place -- the chained v2 upgrade's
+// classifySeed (internal/upgrade/replaceplan.go) never writes a seed path
+// that already exists on disk, so OpKeepInPlace would leave the old template
+// content adopted permanently.
+func TestClassifyMigration_UnmodifiedSeedSamePath_ReplacesWithTemplate(t *testing.T) {
+	dir := t.TempDir()
+	writeMigrationDiskFile(t, dir, "ralph.toml", "content")
+
+	m := scaffold.NewManifest("0.9.0")
+	m.SetFile("ralph.toml", migrateHash("content"))
+
+	desired := map[string][]byte{
+		"ralph.toml": []byte("new template content"),
+	}
+
+	plan, err := ClassifyMigration(m, dir, desired, nil)
+	if err != nil {
+		t.Fatalf("ClassifyMigration: %v", err)
+	}
+
+	e := findMigrationEntry(t, plan, "ralph.toml")
+	if e.Kind != OpReplaceWithTemplate {
+		t.Errorf("Kind = %v, want OpReplaceWithTemplate", e.Kind)
+	}
+	if e.NewPath != "ralph.toml" {
+		t.Errorf("NewPath = %q, want same path", e.NewPath)
+	}
+	if e.Owner != scaffold.OwnerSeed {
+		t.Errorf("Owner = %q, want seed", e.Owner)
+	}
+}
+
+// TestClassifyMigration_ModifiedSeedSamePath_StillForksInPlace confirms
+// AR#1's fix only changes the unmodified case: a modified owner=seed path
+// must still fork in place, exactly as before.
+func TestClassifyMigration_ModifiedSeedSamePath_StillForksInPlace(t *testing.T) {
+	dir := t.TempDir()
+	writeMigrationDiskFile(t, dir, "ralph.toml", "user edited")
+
+	m := scaffold.NewManifest("0.9.0")
+	m.SetFile("ralph.toml", migrateHash("original"))
+
+	desired := map[string][]byte{
+		"ralph.toml": []byte("new template content"),
+	}
+
+	plan, err := ClassifyMigration(m, dir, desired, nil)
+	if err != nil {
+		t.Fatalf("ClassifyMigration: %v", err)
+	}
+
+	e := findMigrationEntry(t, plan, "ralph.toml")
+	if e.Kind != OpForkInPlace {
+		t.Errorf("Kind = %v, want OpForkInPlace", e.Kind)
+	}
+	if e.NewPath != "ralph.toml" {
+		t.Errorf("NewPath = %q, want same path", e.NewPath)
+	}
+	if e.Owner != scaffold.OwnerFork {
+		t.Errorf("Owner = %q, want fork", e.Owner)
+	}
+}
+
+// TestClassifyMigration_UnavailablePackPrefix_Preserved covers AR#2 (cycle
+// 2, docs/reports/cross-review-triage-overlay-scaffold-v2-p4.md) at the
+// classifier level: a legacy path under a preservePrefixes entry (an
+// installed pack this binary can no longer load) must classify as
+// OpUntouched/Preserved, never OpDeleteOldPath, even though it is template-
+// absent (desired has no content for it at all).
+func TestClassifyMigration_UnavailablePackPrefix_Preserved(t *testing.T) {
+	dir := t.TempDir()
+	writeMigrationDiskFile(t, dir, "packs/languages/golang/verify.sh", "content")
+
+	m := scaffold.NewManifest("0.9.0")
+	m.Meta.Packs = []string{"golang"}
+	m.SetFile("packs/languages/golang/verify.sh", migrateHash("content"))
+
+	desired := map[string][]byte{} // pack unavailable: nothing shipped for it
+	preservePrefixes := []string{"packs/languages/golang/", ".claude/rules/ralph/golang.md"}
+
+	plan, err := ClassifyMigration(m, dir, desired, preservePrefixes)
+	if err != nil {
+		t.Fatalf("ClassifyMigration: %v", err)
+	}
+
+	e := findMigrationEntry(t, plan, "packs/languages/golang/verify.sh")
+	if e.Kind != OpUntouched {
+		t.Errorf("Kind = %v, want OpUntouched", e.Kind)
+	}
+	if !e.Preserved {
+		t.Error("Preserved = false, want true")
+	}
+	if e.Kind == OpDeleteOldPath {
+		t.Error("an unavailable-pack path must never classify as OpDeleteOldPath")
+	}
+}
+
 func TestClassifyMigration_UnmanagedSamePath_ForksInPlace(t *testing.T) {
 	dir := t.TempDir()
 	writeMigrationDiskFile(t, dir, "docs/notes.md", "user content")
@@ -277,7 +377,7 @@ func TestClassifyMigration_UnmanagedSamePath_ForksInPlace(t *testing.T) {
 		"docs/notes.md": []byte("template content"),
 	}
 
-	plan, err := ClassifyMigration(m, dir, desired)
+	plan, err := ClassifyMigration(m, dir, desired, nil)
 	if err != nil {
 		t.Fatalf("ClassifyMigration: %v", err)
 	}
@@ -305,7 +405,7 @@ func TestClassifyMigration_UnmanagedRelocated_ForkRelocates(t *testing.T) {
 		".claude/rules/ralph/custom.md": []byte("template content"),
 	}
 
-	plan, err := ClassifyMigration(m, dir, desired)
+	plan, err := ClassifyMigration(m, dir, desired, nil)
 	if err != nil {
 		t.Fatalf("ClassifyMigration: %v", err)
 	}
@@ -333,7 +433,7 @@ func TestClassifyMigration_PackRuleWithInstalledPack(t *testing.T) {
 		".claude/rules/ralph/golang.md": []byte("new pack rule content"),
 	}
 
-	plan, err := ClassifyMigration(m, dir, desired)
+	plan, err := ClassifyMigration(m, dir, desired, nil)
 	if err != nil {
 		t.Fatalf("ClassifyMigration: %v", err)
 	}
@@ -362,7 +462,7 @@ func TestClassifyMigration_PackRuleModified_ForkRelocates(t *testing.T) {
 		".claude/rules/ralph/golang.md": []byte("new pack rule content"),
 	}
 
-	plan, err := ClassifyMigration(m, dir, desired)
+	plan, err := ClassifyMigration(m, dir, desired, nil)
 	if err != nil {
 		t.Fatalf("ClassifyMigration: %v", err)
 	}
@@ -383,7 +483,7 @@ func TestClassifyMigration_SpecialFaces(t *testing.T) {
 		m.SetFile("CLAUDE.md", migrateHash("old seed"))
 		desired := map[string][]byte{"CLAUDE.md": []byte("new seed")}
 
-		plan, err := ClassifyMigration(m, dir, desired)
+		plan, err := ClassifyMigration(m, dir, desired, nil)
 		if err != nil {
 			t.Fatalf("ClassifyMigration: %v", err)
 		}
@@ -403,7 +503,7 @@ func TestClassifyMigration_SpecialFaces(t *testing.T) {
 		m.SetFile("CLAUDE.md", migrateHash("old seed"))
 		desired := map[string][]byte{"CLAUDE.md": []byte("new seed")}
 
-		plan, err := ClassifyMigration(m, dir, desired)
+		plan, err := ClassifyMigration(m, dir, desired, nil)
 		if err != nil {
 			t.Fatalf("ClassifyMigration: %v", err)
 		}
@@ -421,7 +521,7 @@ func TestClassifyMigration_SpecialFaces(t *testing.T) {
 			m.SetFile(p, migrateHash("old content"))
 			desired := map[string][]byte{p: []byte("new block content")}
 
-			plan, err := ClassifyMigration(m, dir, desired)
+			plan, err := ClassifyMigration(m, dir, desired, nil)
 			if err != nil {
 				t.Fatalf("ClassifyMigration: %v", err)
 			}
@@ -441,7 +541,7 @@ func TestClassifyMigration_SpecialFaces(t *testing.T) {
 			m.SetFile(p, migrateHash("old content"))
 			desired := map[string][]byte{p: []byte("new block content")}
 
-			plan, err := ClassifyMigration(m, dir, desired)
+			plan, err := ClassifyMigration(m, dir, desired, nil)
 			if err != nil {
 				t.Fatalf("ClassifyMigration: %v", err)
 			}
@@ -459,7 +559,7 @@ func TestClassifyMigration_SpecialFaces(t *testing.T) {
 		m.SetFile(pathSettings, migrateHash("old settings"))
 		desired := map[string][]byte{pathSettings: []byte("new settings")}
 
-		plan, err := ClassifyMigration(m, dir, desired)
+		plan, err := ClassifyMigration(m, dir, desired, nil)
 		if err != nil {
 			t.Fatalf("ClassifyMigration: %v", err)
 		}
@@ -486,7 +586,7 @@ func TestClassifyMigration_SpecialFaces(t *testing.T) {
 		m.SetFile(pathSettings, migrateHash("original template settings"))
 		desired := map[string][]byte{pathSettings: []byte("new settings")}
 
-		plan, err := ClassifyMigration(m, dir, desired)
+		plan, err := ClassifyMigration(m, dir, desired, nil)
 		if err != nil {
 			t.Fatalf("ClassifyMigration: %v", err)
 		}
@@ -507,7 +607,7 @@ func TestClassifyMigration_SpecialFaces(t *testing.T) {
 		m.SetFile(pathSettings, migrateHash("original template settings"))
 		desired := map[string][]byte{pathSettings: []byte("new settings")}
 
-		plan, err := ClassifyMigration(m, dir, desired)
+		plan, err := ClassifyMigration(m, dir, desired, nil)
 		if err != nil {
 			t.Fatalf("ClassifyMigration: %v", err)
 		}
@@ -524,7 +624,7 @@ func TestClassifyMigration_SpecialFaces(t *testing.T) {
 		m.SetFile(pathCodexOverride, migrateHash("original"))
 		desired := map[string][]byte{pathCodexOverride: []byte("template")}
 
-		plan, err := ClassifyMigration(m, dir, desired)
+		plan, err := ClassifyMigration(m, dir, desired, nil)
 		if err != nil {
 			t.Fatalf("ClassifyMigration: %v", err)
 		}
@@ -544,7 +644,7 @@ func TestClassifyMigration_SpecialFaces(t *testing.T) {
 		m.SetFile(pathCodexOverride, migrateHash("original"))
 		desired := map[string][]byte{pathCodexOverride: []byte("template")}
 
-		plan, err := ClassifyMigration(m, dir, desired)
+		plan, err := ClassifyMigration(m, dir, desired, nil)
 		if err != nil {
 			t.Fatalf("ClassifyMigration: %v", err)
 		}
@@ -569,7 +669,7 @@ func TestClassifyMigration_BaselineDirMarker(t *testing.T) {
 
 	m := scaffold.NewManifest("0.9.0")
 
-	plan, err := ClassifyMigration(m, dir, map[string][]byte{})
+	plan, err := ClassifyMigration(m, dir, map[string][]byte{}, nil)
 	if err != nil {
 		t.Fatalf("ClassifyMigration: %v", err)
 	}
@@ -583,7 +683,7 @@ func TestClassifyMigration_NoBaselineDir_NoMarker(t *testing.T) {
 	dir := t.TempDir()
 	m := scaffold.NewManifest("0.9.0")
 
-	plan, err := ClassifyMigration(m, dir, map[string][]byte{})
+	plan, err := ClassifyMigration(m, dir, map[string][]byte{}, nil)
 	if err != nil {
 		t.Fatalf("ClassifyMigration: %v", err)
 	}
@@ -602,7 +702,7 @@ func TestClassifyMigration_CollisionMatrix(t *testing.T) {
 		m.SetFile(".claude/rules/architecture.md", migrateHash("same content"))
 		desired := map[string][]byte{".claude/rules/ralph/architecture.md": []byte("new core content")}
 
-		plan, err := ClassifyMigration(m, dir, desired)
+		plan, err := ClassifyMigration(m, dir, desired, nil)
 		if err != nil {
 			t.Fatalf("ClassifyMigration: %v", err)
 		}
@@ -624,7 +724,7 @@ func TestClassifyMigration_CollisionMatrix(t *testing.T) {
 		m.SetFile(".claude/rules/architecture.md", migrateHash("original template"))
 		desired := map[string][]byte{".claude/rules/ralph/architecture.md": []byte("new core content")}
 
-		plan, err := ClassifyMigration(m, dir, desired)
+		plan, err := ClassifyMigration(m, dir, desired, nil)
 		if err != nil {
 			t.Fatalf("ClassifyMigration: %v", err)
 		}
@@ -655,7 +755,7 @@ func TestClassifyMigration_CollisionMatrix(t *testing.T) {
 		m.SetFile(".claude/rules/architecture.md", migrateHash("unmodified original"))
 		desired := map[string][]byte{".claude/rules/ralph/architecture.md": []byte("the new template content")}
 
-		plan, err := ClassifyMigration(m, dir, desired)
+		plan, err := ClassifyMigration(m, dir, desired, nil)
 		if err != nil {
 			t.Fatalf("ClassifyMigration: %v", err)
 		}
@@ -677,7 +777,7 @@ func TestClassifyMigration_CollisionMatrix(t *testing.T) {
 		m.SetFile(".claude/rules/architecture.md", migrateHash("original template"))
 		desired := map[string][]byte{".claude/rules/ralph/architecture.md": []byte("the new template content")}
 
-		plan, err := ClassifyMigration(m, dir, desired)
+		plan, err := ClassifyMigration(m, dir, desired, nil)
 		if err != nil {
 			t.Fatalf("ClassifyMigration: %v", err)
 		}
@@ -696,7 +796,7 @@ func TestClassifyMigration_CollisionMatrix(t *testing.T) {
 		m.SetFile(".claude/rules/architecture.md", migrateHash("original template"))
 		desired := map[string][]byte{".claude/rules/ralph/architecture.md": []byte("the new template content")}
 
-		plan, err := ClassifyMigration(m, dir, desired)
+		plan, err := ClassifyMigration(m, dir, desired, nil)
 		if err != nil {
 			t.Fatalf("ClassifyMigration: %v", err)
 		}
@@ -723,7 +823,7 @@ func TestClassifyMigration_RerunStability_AlreadyRelocatedOldPathAbsent(t *testi
 	m.SetFile(".claude/rules/architecture.md", migrateHash("original template"))
 	desired := map[string][]byte{".claude/rules/ralph/architecture.md": []byte("new core content")}
 
-	plan, err := ClassifyMigration(m, dir, desired)
+	plan, err := ClassifyMigration(m, dir, desired, nil)
 	if err != nil {
 		t.Fatalf("ClassifyMigration: %v", err)
 	}
@@ -749,7 +849,7 @@ func TestClassifyMigration_RerunStability_PartiallyMigratedTreeCompletesRemainin
 		".claude/rules/ralph/testing.md":      []byte("new testing content"),
 	}
 
-	plan, err := ClassifyMigration(m, dir, desired)
+	plan, err := ClassifyMigration(m, dir, desired, nil)
 	if err != nil {
 		t.Fatalf("ClassifyMigration: %v", err)
 	}
@@ -765,7 +865,7 @@ func TestClassifyMigration_RerunStability_PartiallyMigratedTreeCompletesRemainin
 // --- Packs / nil manifest / preview rendering ---
 
 func TestClassifyMigration_NilManifest(t *testing.T) {
-	if _, err := ClassifyMigration(nil, t.TempDir(), map[string][]byte{}); err == nil {
+	if _, err := ClassifyMigration(nil, t.TempDir(), map[string][]byte{}, nil); err == nil {
 		t.Fatal("expected error for nil manifest")
 	}
 }
@@ -775,7 +875,7 @@ func TestClassifyMigration_PacksSortedAndCarried(t *testing.T) {
 	m := scaffold.NewManifest("0.9.0")
 	m.Meta.Packs = []string{"typescript", "golang"}
 
-	plan, err := ClassifyMigration(m, dir, map[string][]byte{})
+	plan, err := ClassifyMigration(m, dir, map[string][]byte{}, nil)
 	if err != nil {
 		t.Fatalf("ClassifyMigration: %v", err)
 	}
@@ -804,7 +904,7 @@ func TestRenderMigrationPreview_CountsMatchAndDeterministic(t *testing.T) {
 		"CLAUDE.md":                           []byte("new seed"),
 	}
 
-	plan, err := ClassifyMigration(m, dir, desired)
+	plan, err := ClassifyMigration(m, dir, desired, nil)
 	if err != nil {
 		t.Fatalf("ClassifyMigration: %v", err)
 	}
@@ -1736,7 +1836,7 @@ func TestClassifyMigration_EmptyHashHealTarget_RelocatablePath_ForksNeverDeleted
 	m.Files[".claude/rules/architecture.md"] = scaffold.ManifestFile{Managed: true, State: scaffold.FileStateManaged}
 	desired := map[string][]byte{".claude/rules/ralph/architecture.md": []byte("new core content")}
 
-	plan, err := ClassifyMigration(m, dir, desired)
+	plan, err := ClassifyMigration(m, dir, desired, nil)
 	if err != nil {
 		t.Fatalf("ClassifyMigration: %v", err)
 	}
@@ -1758,7 +1858,7 @@ func TestClassifyMigration_EmptyHashHealTarget_SamePath_ForksNeverDeleted(t *tes
 	m.Files["scripts/run-verify.sh"] = scaffold.ManifestFile{Managed: true, State: scaffold.FileStateManaged}
 	desired := map[string][]byte{"scripts/run-verify.sh": []byte("new template content")}
 
-	plan, err := ClassifyMigration(m, dir, desired)
+	plan, err := ClassifyMigration(m, dir, desired, nil)
 	if err != nil {
 		t.Fatalf("ClassifyMigration: %v", err)
 	}
@@ -1782,7 +1882,7 @@ func TestClassifyMigration_PartialState_RelocatablePath_Forks(t *testing.T) {
 	}
 	desired := map[string][]byte{".claude/rules/ralph/architecture.md": []byte("new core content")}
 
-	plan, err := ClassifyMigration(m, dir, desired)
+	plan, err := ClassifyMigration(m, dir, desired, nil)
 	if err != nil {
 		t.Fatalf("ClassifyMigration: %v", err)
 	}
@@ -1806,7 +1906,7 @@ func TestClassifyMigration_MissingFromDisk_NoPhantomOps(t *testing.T) {
 		m.SetFile(".claude/rules/architecture.md", migrateHash("content that was never written to this fixture's disk"))
 		desired := map[string][]byte{".claude/rules/ralph/architecture.md": []byte("new core content")}
 
-		plan, err := ClassifyMigration(m, dir, desired)
+		plan, err := ClassifyMigration(m, dir, desired, nil)
 		if err != nil {
 			t.Fatalf("ClassifyMigration: %v", err)
 		}
@@ -1822,7 +1922,7 @@ func TestClassifyMigration_MissingFromDisk_NoPhantomOps(t *testing.T) {
 		m.SetFile("docs/gone.md", migrateHash("content that was never written to this fixture's disk"))
 		desired := map[string][]byte{"docs/gone.md": []byte("new template content")}
 
-		plan, err := ClassifyMigration(m, dir, desired)
+		plan, err := ClassifyMigration(m, dir, desired, nil)
 		if err != nil {
 			t.Fatalf("ClassifyMigration: %v", err)
 		}
@@ -2546,5 +2646,199 @@ func TestRunMigrateLegacy_AdoptedForkDiff_IncludedInReport(t *testing.T) {
 	}
 	if strings.Contains(report, "### `.claude/rules/ralph/architecture.md`\n\n_No differences") {
 		t.Errorf("the adopted fork diverges from the new core content; report must show a diff, not \"no differences\":\n%s", report)
+	}
+}
+
+// TestRunMigrateLegacy_UnmodifiedSeedSamePath_ReplacedOnDisk covers AR#1
+// (cycle 2, docs/reports/cross-review-triage-overlay-scaffold-v2-p4.md) end
+// to end: an unmodified, non-relocated seed file (ralph.toml) must actually
+// be replaced with the current template content on disk, not left holding
+// the old template forever -- the chained v2 upgrade's classifySeed never
+// writes a seed path that already exists.
+func TestRunMigrateLegacy_UnmodifiedSeedSamePath_ReplacedOnDisk(t *testing.T) {
+	isolateGitConfig(t)
+	dir := t.TempDir()
+	target := filepath.Join(dir, "project")
+	if err := os.MkdirAll(filepath.Join(target, ".ralph"), 0755); err != nil {
+		t.Fatalf("MkdirAll .ralph: %v", err)
+	}
+
+	const legacyOldRalphToml = "[pipeline]\nmodel = \"legacy-default\"\n"
+	writeMigrationDiskFile(t, target, "ralph.toml", legacyOldRalphToml)
+
+	m := scaffold.NewManifest("0.9.0-test")
+	m.SetFile("ralph.toml", migrateHash(legacyOldRalphToml)) // unmodified, same path -> OpReplaceWithTemplate
+	manifestPath := filepath.Join(target, ".ralph", "manifest.toml")
+	if err := m.Write(manifestPath); err != nil {
+		t.Fatalf("writing legacy manifest: %v", err)
+	}
+	runMigrationTestGit(t, target, "init")
+	runMigrationTestGit(t, target, "add", "-A")
+	runMigrationTestGit(t, target, "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "unmodified seed fixture")
+
+	scaffold.EmbeddedFS = legacyFixtureNewTemplateFS()
+	Version = "2.0.0-test"
+
+	var out, errOut bytes.Buffer
+	if err := runUpgradeIOWithOptions(target, upgradeOptions{Yes: true, Pager: pagerNever}, strings.NewReader(""), &out, &errOut, false); err != nil {
+		t.Fatalf("runUpgradeIOWithOptions: %v\nstdout:\n%s\nstderr:\n%s", err, out.String(), errOut.String())
+	}
+
+	const wantNewRalphToml = "[pipeline]\nmodel = \"test\"\n[doctor]\nrequire_codex_cli = false\n"
+	gotRalphToml := mustReadFile(t, filepath.Join(target, "ralph.toml"))
+	if string(gotRalphToml) != wantNewRalphToml {
+		t.Errorf("ralph.toml = %q, want the new template content %q", gotRalphToml, wantNewRalphToml)
+	}
+
+	m2 := readManifestV2(t, target)
+	entry, ok := m2.Files["ralph.toml"]
+	if !ok {
+		t.Fatalf("ralph.toml must be tracked in the v3 manifest, got no entry")
+	}
+	if entry.Owner != scaffold.OwnerSeed {
+		t.Errorf("ralph.toml Owner = %q, want %q", entry.Owner, scaffold.OwnerSeed)
+	}
+	if entry.DiskHash != migrateHash(wantNewRalphToml) {
+		t.Errorf("ralph.toml DiskHash = %q, want the new template content's hash %q", entry.DiskHash, migrateHash(wantNewRalphToml))
+	}
+}
+
+// legacyFixtureNewTemplateFSNoGolangPack returns the same fixture as
+// legacyFixtureNewTemplateFS, minus every templates/packs/golang/* entry, so
+// scaffold.AvailablePacks() no longer lists "golang" -- simulating a binary
+// that no longer ships a pack the legacy project had installed (AR#2, cycle
+// 2, docs/reports/cross-review-triage-overlay-scaffold-v2-p4.md).
+func legacyFixtureNewTemplateFSNoGolangPack() fstest.MapFS {
+	fsys := legacyFixtureNewTemplateFS()
+	for p := range fsys {
+		if strings.HasPrefix(p, "templates/packs/golang/") {
+			delete(fsys, p)
+		}
+	}
+	return fsys
+}
+
+// TestRunMigrateLegacy_UnavailablePack_FilesPreservedNotDeleted covers AR#2
+// (cycle 2, docs/reports/cross-review-triage-overlay-scaffold-v2-p4.md) end
+// to end: a legacy manifest that tracks an installed pack's files must
+// preserve them -- not delete them -- when the binary running the migration
+// no longer ships that pack, and the v3 manifest plus Meta.Packs must still
+// carry the pack forward for the chained v2 upgrade's own preserve logic to
+// pick up on the next run.
+func TestRunMigrateLegacy_UnavailablePack_FilesPreservedNotDeleted(t *testing.T) {
+	isolateGitConfig(t)
+	dir := t.TempDir()
+	target := filepath.Join(dir, "project")
+	if err := os.MkdirAll(filepath.Join(target, ".ralph"), 0755); err != nil {
+		t.Fatalf("MkdirAll .ralph: %v", err)
+	}
+
+	const golangVerifyContent = "#!/bin/sh\necho golang-legacy\n"
+	writeMigrationDiskFile(t, target, "packs/languages/golang/verify.sh", golangVerifyContent)
+
+	m := scaffold.NewManifest("0.9.0-test")
+	m.Meta.Packs = []string{"golang"}
+	m.SetFile("packs/languages/golang/verify.sh", migrateHash(golangVerifyContent))
+	manifestPath := filepath.Join(target, ".ralph", "manifest.toml")
+	if err := m.Write(manifestPath); err != nil {
+		t.Fatalf("writing legacy manifest: %v", err)
+	}
+	runMigrationTestGit(t, target, "init")
+	runMigrationTestGit(t, target, "add", "-A")
+	runMigrationTestGit(t, target, "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "unavailable pack fixture")
+
+	scaffold.EmbeddedFS = legacyFixtureNewTemplateFSNoGolangPack()
+	Version = "2.0.0-test"
+
+	var out, errOut bytes.Buffer
+	if err := runUpgradeIOWithOptions(target, upgradeOptions{Yes: true, Pager: pagerNever}, strings.NewReader(""), &out, &errOut, false); err != nil {
+		t.Fatalf("runUpgradeIOWithOptions: %v\nstdout:\n%s\nstderr:\n%s", err, out.String(), errOut.String())
+	}
+
+	got := mustReadFile(t, filepath.Join(target, "packs", "languages", "golang", "verify.sh"))
+	if string(got) != golangVerifyContent {
+		t.Errorf("packs/languages/golang/verify.sh = %q, want untouched legacy content %q", got, golangVerifyContent)
+	}
+
+	m2 := readManifestV2(t, target)
+	if _, ok := m2.Files["packs/languages/golang/verify.sh"]; !ok {
+		t.Fatal("packs/languages/golang/verify.sh must still be tracked in the v3 manifest after migration")
+	}
+	if !slicesEqualStrings(m2.Meta.Packs, []string{"golang"}) {
+		t.Errorf("Meta.Packs = %v, want [\"golang\"] retained", m2.Meta.Packs)
+	}
+}
+
+// TestRunMigrateLegacy_SymlinkedRelocationDestParent_PlainDelete_ZeroWrites
+// covers AR#3 (cycle 2, docs/reports/cross-review-triage-overlay-scaffold-v2-p4.md):
+// a plain OpDeleteOldPath entry with a non-empty NewPath (an unmodified
+// relocated rule whose destination the chained v2 upgrade creates later in
+// the same run) must validate NewPath's parent chain before deleting
+// OldPath. The cycle-1 fix
+// (TestRunMigrateLegacy_SymlinkedAdoptForkDestParent_ZeroWrites) only
+// covered OpDeleteOldPathAdoptFork; this mirrors it for the plain-delete
+// relocation path, which was still unguarded.
+func TestRunMigrateLegacy_SymlinkedRelocationDestParent_PlainDelete_ZeroWrites(t *testing.T) {
+	isolateGitConfig(t)
+	dir := t.TempDir()
+	target := filepath.Join(dir, "project")
+	if err := os.MkdirAll(filepath.Join(target, ".ralph"), 0755); err != nil {
+		t.Fatalf("MkdirAll .ralph: %v", err)
+	}
+
+	writeMigrationDiskFile(t, target, ".claude/rules/architecture.md", legacyOldArchitectureRule)
+
+	// .claude/rules/ralph is a symlink pointing outside target, and empty --
+	// so the relocation destination reads as absent (not diverging content),
+	// which is exactly what makes this the plain OpDeleteOldPath path rather
+	// than a collision or fork-relocate.
+	external := t.TempDir()
+	if err := os.Symlink(external, filepath.Join(target, ".claude", "rules", "ralph")); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+
+	m := scaffold.NewManifest("0.9.0-test")
+	m.SetFile(".claude/rules/architecture.md", migrateHash(legacyOldArchitectureRule)) // unmodified -> OpDeleteOldPath, NewPath set
+	manifestPath := filepath.Join(target, ".ralph", "manifest.toml")
+	if err := m.Write(manifestPath); err != nil {
+		t.Fatalf("writing legacy manifest: %v", err)
+	}
+	runMigrationTestGit(t, target, "init")
+	runMigrationTestGit(t, target, "add", "-A")
+	runMigrationTestGit(t, target, "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "symlinked plain-delete relocation dest fixture")
+
+	scaffold.EmbeddedFS = legacyFixtureNewTemplateFS()
+	Version = "2.0.0-test"
+
+	manifestBefore := mustReadFile(t, manifestPath)
+
+	var out, errOut bytes.Buffer
+	err := runUpgradeIOWithOptions(target, upgradeOptions{Yes: true, Pager: pagerNever}, strings.NewReader(""), &out, &errOut, false)
+	if err == nil {
+		t.Fatal("migration relocating through a symlinked destination parent: expected an error, got nil")
+	}
+	if !strings.Contains(err.Error(), "preflight") {
+		t.Errorf("err = %v, want a preflight-check error naming the unsafe path", err)
+	}
+
+	manifestAfter := mustReadFile(t, manifestPath)
+	if !bytes.Equal(manifestBefore, manifestAfter) {
+		t.Errorf("a preflight refusal must not touch the legacy manifest:\nbefore: %s\nafter:  %s", manifestBefore, manifestAfter)
+	}
+
+	gotOld := mustReadFile(t, filepath.Join(target, ".claude", "rules", "architecture.md"))
+	if string(gotOld) != legacyOldArchitectureRule {
+		t.Errorf("a preflight refusal must leave OldPath surviving with its original content: got %q, want %q", gotOld, legacyOldArchitectureRule)
+	}
+	info, lerr := os.Lstat(filepath.Join(target, ".claude", "rules", "ralph"))
+	if lerr != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Errorf(".claude/rules/ralph must remain the untouched symlink: info=%+v err=%v", info, lerr)
+	}
+	externalEntries, rerr := os.ReadDir(external)
+	if rerr != nil {
+		t.Fatalf("reading external dir: %v", rerr)
+	}
+	if len(externalEntries) != 0 {
+		t.Errorf("a preflight refusal must not write through the symlink into the external dir; entries=%v", externalEntries)
 	}
 }

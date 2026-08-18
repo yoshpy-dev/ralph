@@ -249,6 +249,13 @@ type MigrationEntry struct {
 	// (.ralph/core/settings.ralph.json) must be (re)created so the
 	// result matches a clean v2 init.
 	SnapshotCreate bool
+	// Preserved marks an OpUntouched entry whose OldPath falls under one of
+	// ClassifyMigration's preservePrefixes (an installed pack unavailable in
+	// this binary): the path is deliberately excluded from desired, so it
+	// never appears in buildMigratedManifest's normal desired-state sweep
+	// and needs its own explicit carry-forward from the legacy manifest
+	// (AR#2, cycle 2, docs/reports/cross-review-triage-overlay-scaffold-v2-p4.md).
+	Preserved bool
 	// Reason is a short human-readable explanation, surfaced in the
 	// migration preview and report.
 	Reason string
@@ -289,7 +296,18 @@ type MigrationPlan struct {
 // manifest entry — see internal/cli/upgrade_v2.go's
 // removeLegacyBaselineIfPresent) is detected separately and always marked
 // for removal when present.
-func ClassifyMigration(legacyManifest *scaffold.Manifest, targetDir string, desired map[string][]byte) (MigrationPlan, error) {
+//
+// preservePrefixes mirrors buildDesiredStateV2's own return value (an
+// installed pack unavailable in this binary): any legacy manifest path under
+// one of these prefixes is classified as OpUntouched (Preserved=true)
+// unconditionally, before relocation or modification-state classification
+// runs, the same way internal/upgrade.PlanCoreReplaceDesired's own
+// hasPreservePrefix check pre-empts its owner-based classification — the
+// path is template-absent by construction (the unavailable pack's content
+// was never added to desired), so without this check every one of its
+// legacy entries reads as "retired from the template set" and gets deleted
+// (AR#2, cycle 2, docs/reports/cross-review-triage-overlay-scaffold-v2-p4.md).
+func ClassifyMigration(legacyManifest *scaffold.Manifest, targetDir string, desired map[string][]byte, preservePrefixes []string) (MigrationPlan, error) {
 	if legacyManifest == nil {
 		return MigrationPlan{}, errors.New("nil legacy manifest")
 	}
@@ -312,6 +330,17 @@ func ClassifyMigration(legacyManifest *scaffold.Manifest, targetDir string, desi
 		cleanOld, err := cleanMigrationPath(oldPath)
 		if err != nil {
 			return MigrationPlan{}, fmt.Errorf("legacy manifest path %q: %w", oldPath, err)
+		}
+
+		if _, hasTemplate := desired[cleanOld]; !hasTemplate && hasPreservePrefixForMigration(cleanOld, preservePrefixes) {
+			plan.Entries = append(plan.Entries, MigrationEntry{
+				OldPath: cleanOld, NewPath: cleanOld,
+				Kind:      OpUntouched,
+				Owner:     entry.Owner,
+				Preserved: true,
+				Reason:    "installed pack unavailable in this binary; preserved",
+			})
+			continue
 		}
 
 		diskContent, hasDisk, err := readDiskFileForMigration(targetDir, cleanOld)
@@ -548,15 +577,32 @@ func prunedLegacyHookCommands(diskContent []byte) []string {
 }
 
 // classifyUnmodifiedGeneric handles a non-special-face path whose
-// LegacyEntryState is LegacyUnmodified: relocate-and-delete, retire, or keep
-// in place, per FR-7.
+// LegacyEntryState is LegacyUnmodified: relocate-and-delete, retire, replace
+// (unmodified seed content), or keep in place, per FR-7.
 func classifyUnmodifiedGeneric(in legacyClassifyInput) (MigrationEntry, *MigrationCollision, error) {
 	if !in.relocated {
 		if _, ok := in.desired[in.oldPath]; ok {
+			owner := ownerForScaffoldPath(in.oldPath)
+			if owner == scaffold.OwnerSeed {
+				// The chained v2 upgrade's classifySeed
+				// (internal/upgrade/replaceplan.go) never writes a seed
+				// path that already exists on disk -- it only raises an
+				// advisory. Since this content is unmodified (the user
+				// never touched it), replacing it now is safe and is the
+				// only point in the pipeline that actually converges an
+				// unmodified seed file to the new template (FR-7; AR#1,
+				// cycle 2, docs/reports/cross-review-triage-overlay-scaffold-v2-p4.md).
+				return MigrationEntry{
+					OldPath: in.oldPath, NewPath: in.oldPath,
+					Kind: OpReplaceWithTemplate, State: LegacyUnmodified,
+					Owner:  owner,
+					Reason: "unmodified seed file replaced with the current template content; the chained v2 upgrade never rewrites a seed path that already exists on disk",
+				}, nil, nil
+			}
 			return MigrationEntry{
 				OldPath: in.oldPath, NewPath: in.oldPath,
 				Kind: OpKeepInPlace, State: LegacyUnmodified,
-				Owner:  ownerForScaffoldPath(in.oldPath),
+				Owner:  owner,
 				Reason: "unmodified and path unchanged; left in place, the chained v2 upgrade converges it per its ownership attribute",
 			}, nil, nil
 		}
@@ -715,6 +761,19 @@ func relocatedRulePath(oldPath string, desired map[string][]byte) (string, bool)
 	return "", false
 }
 
+// hasPreservePrefixForMigration reports whether path matches one of prefixes,
+// mirroring internal/upgrade's own unexported hasPreservePrefix (this
+// package needs its own copy for the same cross-package-boundary reason
+// cleanMigrationPath does).
+func hasPreservePrefixForMigration(path string, prefixes []string) bool {
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(path, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 // RenderMigrationPreview renders plan as a deterministic, grouped preview:
 // one section per MigrationOpKind (path counts + old->new listings), then
 // collisions. Used by `ralph upgrade`'s pre-migration confirmation prompt
@@ -838,12 +897,16 @@ func runMigrateLegacy(absDir, manifestPath string, oldManifest *scaffold.Manifes
 	// buildDesiredStateV2 also runs inside the chained runUpgradeV2, so any
 	// pack-availability warning prints twice per migration (self-review
 	// cycle-1 LOW-6; accepted duplication, not worth threading state).
-	desired, _, _, _, err := buildDesiredStateV2(baseFS, oldManifest, errOut)
+	// preservePrefixes must reach ClassifyMigration too: an installed pack
+	// this binary can no longer load is otherwise indistinguishable from a
+	// retired template path (AR#2, cycle 2,
+	// docs/reports/cross-review-triage-overlay-scaffold-v2-p4.md).
+	desired, preservePrefixes, _, _, err := buildDesiredStateV2(baseFS, oldManifest, errOut)
 	if err != nil {
 		return fmt.Errorf("building desired state: %w", err)
 	}
 
-	plan, err := ClassifyMigration(oldManifest, absDir, desired)
+	plan, err := ClassifyMigration(oldManifest, absDir, desired, preservePrefixes)
 	if err != nil {
 		return fmt.Errorf("classifying migration: %w", err)
 	}
@@ -1005,6 +1068,15 @@ func confirmMigration(in io.Reader, out io.Writer, autoYes bool) (bool, error) {
 // NewPath parent or a non-regular NewPath leaf must be refused before
 // OldPath is deleted, the same way a write target is refused (AR#1, cycle 1,
 // docs/reports/cross-review-triage-overlay-scaffold-v2-p4.md).
+//
+// A plain OpDeleteOldPath with a non-empty NewPath (an unmodified relocated
+// path whose destination the chained v2 upgrade will create later in the
+// same run) also validates NewPath, via validateMigrationWriteTarget
+// (mustExist=false: the destination legitimately does not exist yet). This
+// closes the same symlinked-destination-parent gap the cycle-1 fix closed
+// for OpDeleteOldPathAdoptFork, but for the plain-delete relocation path
+// that fix did not cover (AR#3, cycle 2,
+// docs/reports/cross-review-triage-overlay-scaffold-v2-p4.md).
 func validateMigrationOp(absDir string, e MigrationEntry) error {
 	if err := upgrade.ValidateRealParentChain(absDir, e.OldPath); err != nil {
 		return err
@@ -1016,6 +1088,18 @@ func validateMigrationOp(absDir string, e MigrationEntry) error {
 		}
 		if e.Kind == OpDeleteOldPathAdoptFork {
 			return validateMigrationForkAdoptionTarget(absDir, e.NewPath)
+		}
+		if e.NewPath != "" {
+			// An unmodified relocated path: the chained v2 upgrade creates
+			// NewPath after this delete runs, so it may legitimately be
+			// absent right now (mustExist=false semantics) -- but its
+			// parent chain must still be validated before OldPath is
+			// deleted, or a symlinked destination parent lets the chained
+			// upgrade's own containment guard reject NewPath's creation
+			// after the source is already gone, silently dropping the
+			// migrated content (AR#3, cycle 2,
+			// docs/reports/cross-review-triage-overlay-scaffold-v2-p4.md).
+			return validateMigrationWriteTarget(absDir, e.NewPath)
 		}
 		return nil
 	case OpForkRelocate:
@@ -1454,7 +1538,12 @@ func buildMigratedManifest(version string, oldManifest *scaffold.Manifest, absDi
 
 	forkByPath := make(map[string]MigrationEntry)
 	keepByPath := make(map[string]MigrationEntry)
+	preservedByPath := make(map[string]MigrationEntry)
 	for _, e := range plan.Entries {
+		if e.Preserved {
+			preservedByPath[e.OldPath] = e
+			continue
+		}
 		switch e.Kind {
 		case OpForkRelocate, OpForkInPlace, OpDeleteOldPathAdoptFork:
 			forkByPath[e.NewPath] = e
@@ -1563,6 +1652,26 @@ func buildMigratedManifest(version string, oldManifest *scaffold.Manifest, absDi
 			return nil, err
 		}
 		nm.SetFileFork(path, scaffold.HashBytes(diskContent), fe.ForkedFromVersion)
+	}
+
+	// Preserved entries (an installed pack unavailable in this binary): by
+	// construction these paths are absent from desired, so the sweep above
+	// never visits them. Carry the legacy manifest entry forward unchanged,
+	// mirroring the chained v2 upgrade's own Preserved carry-forward
+	// (internal/cli/upgrade_v2.go's rebuildManifestV2, carryOverIfTracked)
+	// so the same path survives both hops: this migrated v3 manifest still
+	// tracks it, PlanCoreReplaceDesired's own hasPreservePrefix check (which
+	// only requires the path to be manifest-tracked, regardless of owner)
+	// preserves it again on the chained run (AR#2, cycle 2,
+	// docs/reports/cross-review-triage-overlay-scaffold-v2-p4.md).
+	for path, pe := range preservedByPath {
+		if handled[path] {
+			continue
+		}
+		if old, ok := oldManifest.Files[pe.OldPath]; ok {
+			nm.Files[path] = old
+		}
+		handled[path] = true
 	}
 
 	return nm, nil
