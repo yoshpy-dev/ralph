@@ -135,7 +135,7 @@ v2 manifest(`meta.layout = "v2"`)に対する `ralph upgrade` は次を非対話
 
 ## Deviations
 
-- スライス 3 で発見: v2 upgrade フローが `installManagedGitHooks` を呼ばず、テンプレート変更時に git hooks が再インストールされない(レガシーエンジンは呼んでいた)。スライス 4 で v2 成功パスに追加する
+- スライス 3 で発見: v2 upgrade フローが `installManagedGitHooks` を呼ばず、テンプレート変更時に git hooks が再インストールされない(レガシーエンジンは呼んでいた)。スライス 4 でクローズ済み: v2 成功パスに `installManagedGitHooks` 呼び出しを追加し、部分失敗カバレッジも強化(コミット 5b1b675)
 - スライス 3 の判断: `packPrefixFor` 等は language_pack.go へ移設、`runUpgrade`/`runUpgradeIO` ラッパは呼び出し元消滅により削除、`addPack` の冗長 manifest 二重読みを簡約
 
 ## Open questions
@@ -147,7 +147,7 @@ v2 manifest(`meta.layout = "v2"`)に対する `ralph upgrade` は次を非対話
 
 - [ ] Plan reviewed
 - [x] Branch created(feat/overlay-scaffold-v2-p3)
-- [ ] Implementation started
+- [x] Implementation started(スライス 1〜5: 104cc7b / e08ebe7 / c834f44 / 5b1b675 + 本スライス)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created

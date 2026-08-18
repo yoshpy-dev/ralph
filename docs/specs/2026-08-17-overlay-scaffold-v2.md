@@ -178,7 +178,7 @@ ralph の配布物を所有権ベースの 5 層オーバーレイ構造に再�
 
 - `.claude/skills/` のシンボリックリンク対応は公式未確認のため、設計は実ファイル再生成方式に固定(symlink 非依存)。将来公式サポートが確認できれば `.ralph/core/` への一本化を再検討できる
 - Codex が `.claude/rules/` を読むのは機構ではなく運用規約であるため、AGENTS.md managed block に残す「最低限の要点」の分量は実装時に調整する(block 肥大と規約依存のバランス)
-- upgrade レポートの exit code 設計(未解決 drift 時に 0 / 非 0 のどちらを返すか)は CI 運用への影響を見て実装計画で確定する
+- ~~upgrade レポートの exit code 設計(未解決 drift 時に 0 / 非 0 のどちらを返すか)は CI 運用への影響を見て実装計画で確定する~~ → Phase 3 で確定: 成功 = 0 / 実行エラー = 1 / 未解決 drift 残存で完走 = 3(専用コード)。FR-4 の「exit code で警告」に準拠し、`doctor --strict`(Phase 5)到着前も機械検知可能にする。詳細は docs/plans/active/2026-08-18-overlay-scaffold-v2-p3.md の Design decisions を参照
 
 ## References
 
