@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -17,6 +18,8 @@ import (
 
 const testAgentsCoreManaged = "## Mission\n\nManaged agents guidance.\n"
 const testGitignoreManaged = ".ralph/local/\nnode_modules/\n"
+const testSettingsSnapshotContent = "{\n  \"env\": {}\n}\n"
+const testCodexOverrideContent = "# Codex agent overrides\n\nDefault content.\n"
 
 func testAgentsMDContent() []byte {
 	return []byte("# AGENTS.md\n\nProject notes go here.\n\n" +
@@ -50,6 +53,8 @@ func setupTestEmbedFSV2(t *testing.T) {
 		"templates/base/.claude/settings.json":              {Data: []byte("{}\n")},
 		"templates/base/scripts/run-verify.sh":              {Data: []byte("#!/bin/sh\necho ok\n")},
 		"templates/base/.ralph/local/verify.d/.gitkeep":     {Data: []byte("")},
+		"templates/base/.ralph/core/settings.ralph.json":    {Data: []byte(testSettingsSnapshotContent)},
+		"templates/base/.codex/AGENTS.override.md":          {Data: []byte(testCodexOverrideContent)},
 	}
 }
 
@@ -84,6 +89,8 @@ func TestExecuteInit_V2_FreshInit_LayoutAndOwners(t *testing.T) {
 		filepath.Join(".claude", "skills", "work", "SKILL.md"):    scaffold.OwnerCore,
 		filepath.Join("scripts", "run-verify.sh"):                 scaffold.OwnerCore,
 		filepath.Join(".ralph", "local", "verify.d", ".gitkeep"):  scaffold.OwnerSeed,
+		filepath.Join(".ralph", "core", "settings.ralph.json"):    scaffold.OwnerCore,
+		filepath.Join(".codex", "AGENTS.override.md"):             scaffold.OwnerSeed,
 	}
 	for path, wantOwner := range wantOwners {
 		entry, ok := m.Files[path]
@@ -106,6 +113,20 @@ func TestExecuteInit_V2_FreshInit_LayoutAndOwners(t *testing.T) {
 	result := upgrade.UpdateManagedBlock(agentsOnDisk, "agents-md", []byte(testAgentsCoreManaged))
 	if result.Outcome != upgrade.BlockUnchanged {
 		t.Fatalf("AGENTS.md block interior mismatch or malformed: outcome=%v reason=%q", result.Outcome, result.Reason)
+	}
+
+	// The settings.json snapshot renders via the normal owner=core catch-all
+	// (no init-specific special-casing needed) and LoadSettingsSnapshot must
+	// find it immediately after a fresh init.
+	snapshotOnDisk, found, err := upgrade.LoadSettingsSnapshot(target)
+	if err != nil {
+		t.Fatalf("LoadSettingsSnapshot: %v", err)
+	}
+	if !found {
+		t.Fatal("LoadSettingsSnapshot found = false after fresh v2 init, want true")
+	}
+	if string(snapshotOnDisk) != testSettingsSnapshotContent {
+		t.Errorf("settings.ralph.json on disk = %q, want %q", snapshotOnDisk, testSettingsSnapshotContent)
 	}
 }
 
@@ -526,60 +547,96 @@ func snapshotDirHashes(t *testing.T, dir string) []string {
 	return entries
 }
 
-// TestRunUpgradeIO_V2Layout_FailsClosedWithoutWrites verifies AC-10: the
-// legacy upgrade engine refuses to run against a manifest whose
-// meta.layout is "v2", writes zero files, and names the v2/Phase-3 reason
-// in its error. Exercised for both the interactive/apply path (force=true)
-// and --dry-run, since the guard must short-circuit before either branch
-// touches the diff engine.
-func TestRunUpgradeIO_V2Layout_FailsClosedWithoutWrites(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		opts upgradeOptions
-	}{
-		{name: "force", opts: upgradeOptions{Force: true, Pager: pagerNever}},
-		{name: "dry-run", opts: upgradeOptions{DryRun: true, Pager: pagerNever}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			setupTestEmbedFS(t)
-			Version = "2.0.0-test"
+// TestRunUpgradeIO_V2Layout_DispatchesToV2Engine pins the Phase 3 dispatch
+// contract: a manifest whose meta.layout is "v2" dispatches to the
+// non-interactive v2 upgrade flow (internal/cli/upgrade_v2.go) — the sole
+// upgrade engine after the legacy interactive diff/conflict engine was
+// removed. `--force` no longer exists as a flag at all (AC-10; fork
+// re-adoption is Phase 5's `ralph adopt`), so there is nothing to reject at
+// the upgradeOptions level anymore — cobra rejects the unknown flag before
+// this function is ever reached. --dry-run succeeds (it runs the v2 preview
+// path) with zero writes, since dry-run must never touch disk.
+func TestRunUpgradeIO_V2Layout_DispatchesToV2Engine(t *testing.T) {
+	setupTestEmbed := func(t *testing.T) {
+		t.Helper()
+		setupTestEmbedFS(t)
+	}
 
-			dir := t.TempDir()
-			agentsContent := []byte("# AGENTS\n")
-			if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), agentsContent, 0644); err != nil {
-				t.Fatalf("write AGENTS.md: %v", err)
-			}
-			if err := os.MkdirAll(filepath.Join(dir, ".ralph"), 0755); err != nil {
-				t.Fatalf("MkdirAll .ralph: %v", err)
-			}
-			m := scaffold.NewManifest("1.0.0-test")
-			m.SetLayoutV2()
-			if setErr := m.SetFileOwned("AGENTS.md", scaffold.OwnerBlock, scaffold.HashBytes(agentsContent), scaffold.HashBytes(agentsContent)); setErr != nil {
-				t.Fatalf("SetFileOwned: %v", setErr)
-			}
-			manifestPath := filepath.Join(dir, ".ralph", "manifest.toml")
-			if err := m.Write(manifestPath); err != nil {
-				t.Fatalf("write manifest: %v", err)
-			}
+	t.Run("dry_run_succeeds_zero_writes", func(t *testing.T) {
+		setupTestEmbed(t)
+		Version = "2.0.0-test"
 
-			before := snapshotDirHashes(t, dir)
+		dir := t.TempDir()
+		agentsContent := []byte("# AGENTS\n")
+		if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), agentsContent, 0644); err != nil {
+			t.Fatalf("write AGENTS.md: %v", err)
+		}
+		if err := os.MkdirAll(filepath.Join(dir, ".ralph"), 0755); err != nil {
+			t.Fatalf("MkdirAll .ralph: %v", err)
+		}
+		m := scaffold.NewManifest("1.0.0-test")
+		m.SetLayoutV2()
+		if setErr := m.SetFileOwned("AGENTS.md", scaffold.OwnerBlock, scaffold.HashBytes(agentsContent), scaffold.HashBytes(agentsContent)); setErr != nil {
+			t.Fatalf("SetFileOwned: %v", setErr)
+		}
+		manifestPath := filepath.Join(dir, ".ralph", "manifest.toml")
+		if err := m.Write(manifestPath); err != nil {
+			t.Fatalf("write manifest: %v", err)
+		}
 
-			var out, errOut bytes.Buffer
-			err := runUpgradeIOWithOptions(dir, tc.opts, strings.NewReader(""), &out, &errOut, false)
-			if err == nil {
-				t.Fatal("expected an error for a v2-layout manifest, got nil")
-			}
-			if !strings.Contains(err.Error(), "v2") {
-				t.Errorf("error = %q, want it to mention the v2 layout", err.Error())
-			}
-			if !strings.Contains(err.Error(), "Phase 3") {
-				t.Errorf("error = %q, want it to mention Phase 3", err.Error())
-			}
+		before := snapshotDirHashes(t, dir)
 
-			after := snapshotDirHashes(t, dir)
-			if !slices.Equal(before, after) {
-				t.Errorf("guard must write zero files; before=%v after=%v", before, after)
-			}
-		})
+		var out, errOut bytes.Buffer
+		err := runUpgradeIOWithOptions(dir, upgradeOptions{DryRun: true, Pager: pagerNever}, strings.NewReader(""), &out, &errOut, false)
+		if err != nil {
+			t.Fatalf("--dry-run on a v2-layout manifest must succeed (previews the v2 plan): %v", err)
+		}
+
+		after := snapshotDirHashes(t, dir)
+		if !slices.Equal(before, after) {
+			t.Errorf("--dry-run must write zero files; before=%v after=%v", before, after)
+		}
+	})
+}
+
+// TestExecuteInit_LegacyManifest_ReInit_FailsClosedZeroWrites is AC-7
+// coverage for `ralph init` on an existing project: a manifest with no
+// meta.layout (a genuine pre-v2 project) must be rejected fail-closed with
+// zero writes to the tree. The legacy upgrade engine this used to delegate
+// to (`runUpgrade`) was removed in Phase 3 (docs/plans/active
+// /2026-08-18-overlay-scaffold-v2-p3.md, FR-13); the automated migration to
+// v2 arrives in a later ralph release (Phase 4).
+func TestExecuteInit_LegacyManifest_ReInit_FailsClosedZeroWrites(t *testing.T) {
+	setupTestEmbedFSV2(t)
+	Version = "0.5.0-test"
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".ralph"), 0755); err != nil {
+		t.Fatalf("MkdirAll .ralph: %v", err)
+	}
+	legacy := scaffold.NewManifest("0.1.0-test")
+	legacy.SetFile("AGENTS.md", "sha256:legacy")
+	manifestPath := filepath.Join(dir, ".ralph", "manifest.toml")
+	if err := legacy.Write(manifestPath); err != nil {
+		t.Fatalf("writing legacy manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte("# legacy AGENTS\n"), 0644); err != nil {
+		t.Fatalf("write AGENTS.md: %v", err)
+	}
+
+	before := snapshotDirHashes(t, dir)
+
+	cfg := initConfig{ProjectName: "test", Packs: nil}
+	err := executeInit(dir, cfg, false)
+	if err == nil {
+		t.Fatal("executeInit re-init on a legacy manifest: expected an error, got nil")
+	}
+	if !errors.Is(err, errLegacyLayoutFailClosed) {
+		t.Errorf("err = %v, want errors.Is(err, errLegacyLayoutFailClosed)", err)
+	}
+
+	after := snapshotDirHashes(t, dir)
+	if !slices.Equal(before, after) {
+		t.Errorf("legacy-manifest re-init must write zero files; before=%v after=%v", before, after)
 	}
 }

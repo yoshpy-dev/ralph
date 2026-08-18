@@ -65,7 +65,7 @@ func runInitInteractive(targetDir string, force bool) error {
 	// non-interactive callers.
 	manifestPath := filepath.Join(targetDir, ".ralph", "manifest.toml")
 	if _, err := os.Stat(manifestPath); err == nil {
-		return handleExistingProjectInit(targetDir, manifestPath)
+		return handleExistingProjectInit(manifestPath)
 	}
 
 	defaultName := filepath.Base(targetDir)
@@ -120,25 +120,24 @@ func runInitNonInteractive(targetDir string, force bool) error {
 }
 
 // handleExistingProjectInit is invoked whenever `ralph init` targets a
-// directory that already has a .ralph/manifest.toml. Legacy (pre-v2)
-// projects keep the prior behavior of delegating to the legacy upgrade
-// engine. Projects already on the overlay (v2) layout cannot use that
-// engine — upgrade.go's fail-closed guard (AC-10, docs/specs
-// 2026-08-17-overlay-scaffold-v2.md) refuses to run against a
-// meta.layout = "v2" manifest — so re-running init against them is a no-op
-// today; the non-interactive v2 upgrade path lands in a later ralph
-// release (Phase 3).
-func handleExistingProjectInit(targetDir, manifestPath string) error {
+// directory that already has a .ralph/manifest.toml. Projects already on the
+// overlay (v2) layout have nothing to do: re-running init on top of an
+// existing v2 project is a no-op — reconciling further template changes is
+// `ralph upgrade`'s job. Legacy (pre-v2) projects are rejected fail-closed
+// (zero writes): the legacy interactive upgrade engine this used to delegate
+// to was removed in Phase 3 (docs/plans/active
+// /2026-08-18-overlay-scaffold-v2-p3.md, FR-13); the automated migration to
+// v2 arrives in a later ralph release (Phase 4).
+func handleExistingProjectInit(manifestPath string) error {
 	m, err := scaffold.ReadManifest(manifestPath)
 	if err != nil {
 		return fmt.Errorf("reading manifest: %w", err)
 	}
 	if m.Meta.Layout == scaffold.LayoutV2 {
-		fmt.Printf("\nExisting v2-layout project detected. Nothing to do — the non-interactive v2 upgrade path lands in a later ralph release (Phase 3).\n\n")
+		fmt.Printf("\nExisting v2-layout project detected. Nothing to do — run `ralph upgrade` to reconcile template changes.\n\n")
 		return nil
 	}
-	fmt.Printf("\nExisting project detected. Running upgrade instead...\n\n")
-	return runUpgrade(targetDir, false)
+	return errLegacyLayoutFailClosed
 }
 
 func executeInit(targetDir string, cfg initConfig, force bool) error {
@@ -151,7 +150,7 @@ func executeInit(targetDir string, cfg initConfig, force bool) error {
 	// Delegate to upgrade logic to preserve user-edited files.
 	manifestPath := filepath.Join(targetDir, ".ralph", "manifest.toml")
 	if _, err := os.Stat(manifestPath); err == nil {
-		return handleExistingProjectInit(targetDir, manifestPath)
+		return handleExistingProjectInit(manifestPath)
 	}
 
 	fmt.Printf("\nScaffolding %q into %s ...\n\n", cfg.ProjectName, targetDir)
@@ -168,10 +167,6 @@ func executeInit(targetDir string, cfg initConfig, force bool) error {
 	})
 	if err != nil {
 		return fmt.Errorf("rendering base templates: %w", err)
-	}
-	baselinePaths, err := writeRenderedBaselines(targetDir, baseFS, "", result)
-	if err != nil {
-		return err
 	}
 	printRenderSummary("base", result)
 
@@ -199,9 +194,6 @@ func executeInit(targetDir string, cfg initConfig, force bool) error {
 		for k, v := range pr.hashes {
 			hashes[k] = v
 		}
-		for k, v := range pr.baselinePaths {
-			baselinePaths[k] = v
-		}
 		printRenderSummary("pack/"+pack, pr.result)
 	}
 
@@ -209,18 +201,13 @@ func executeInit(targetDir string, cfg initConfig, force bool) error {
 	manifest := scaffold.NewManifest(Version)
 	manifest.Meta.Packs = cfg.Packs
 	for path, hash := range hashes {
-		if baselinePath, ok := baselinePaths[path]; ok {
-			manifest.SetFileWithBaseline(path, hash, baselinePath)
-			continue
-		}
 		manifest.SetFile(path, hash)
 	}
 
 	// Step 3b: mark the manifest as v2 layout and assign every entry an
 	// ownership attribute (core/seed/block). SetOwner mutates only the
-	// Owner field, leaving baseline metadata set above untouched. Block
-	// surfaces that were actually rewritten in step 1b additionally get
-	// their DiskHash recorded via SetFileOwned.
+	// Owner field. Block surfaces that were actually rewritten in step 1b
+	// additionally get their DiskHash recorded via SetFileOwned.
 	manifest.SetLayoutV2()
 	for path, templateHash := range hashes {
 		owner := ownerForScaffoldPath(path)
@@ -288,6 +275,14 @@ func executeInit(targetDir string, cfg initConfig, force bool) error {
 // Phase 3 replace planner treat it as a full-replace target and overwrite
 // user content living there.
 //
+// .codex/AGENTS.override.md is classified as seed for the same L3 reason:
+// it is a user-owned Codex customization point (create-once, then
+// advisory-only on template changes), not a core-replaceable file. Filing
+// it under the catch-all's core classification would let the replace
+// planner flag any user edit as unresolved drift and silently overwrite an
+// unedited copy on template changes (cross-review cycle-3 AR#1,
+// docs/reports/cross-review-triage-overlay-scaffold-v2-p3.md).
+//
 // Manifest keys are always fs.FS slash paths (from fs.WalkDir in
 // render.go), regardless of host OS, so relPath is normalized with
 // filepath.ToSlash before comparison to keep classification slash-stable
@@ -297,7 +292,7 @@ func ownerForScaffoldPath(relPath string) string {
 	switch relPath {
 	case "AGENTS.md", ".gitignore":
 		return scaffold.OwnerBlock
-	case "CLAUDE.md", "ralph.toml", ".github/workflows/verify.yml":
+	case "CLAUDE.md", "ralph.toml", ".github/workflows/verify.yml", ".codex/AGENTS.override.md":
 		return scaffold.OwnerSeed
 	}
 	if strings.HasPrefix(relPath, "docs/") {
@@ -431,30 +426,6 @@ func extractBlockInterior(templateContent []byte, surface string, style upgrade.
 		return nil, nil
 	}
 	return []byte(strings.Join(interior, "\n") + "\n"), nil
-}
-
-func writeRenderedBaselines(targetDir string, src fs.FS, prefix string, result *scaffold.RenderResult) (map[string]string, error) {
-	out := make(map[string]string)
-	written := make(map[string]bool, len(result.Created)+len(result.Overwritten))
-	for _, path := range result.Created {
-		written[path] = true
-	}
-	for _, path := range result.Overwritten {
-		written[path] = true
-	}
-	for path := range written {
-		content, err := fs.ReadFile(src, path)
-		if err != nil {
-			return nil, fmt.Errorf("reading baseline source %s: %w", path, err)
-		}
-		manifestPath := filepath.Join(prefix, path)
-		baselinePath, err := scaffold.WriteBaseline(targetDir, manifestPath, content)
-		if err != nil {
-			return nil, err
-		}
-		out[manifestPath] = baselinePath
-	}
-	return out, nil
 }
 
 func printRenderSummary(label string, result *scaffold.RenderResult) {

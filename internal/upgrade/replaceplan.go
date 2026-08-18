@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/yoshpy-dev/ralph/internal/scaffold"
 )
@@ -110,28 +111,96 @@ type ReplacePlan struct {
 	// Without this signal a caller has no way to notice the second case and
 	// the manifest accumulates entries for paths that exist nowhere.
 	ManifestRemove []string
+	// Preserved lists, in sorted order, manifest-tracked paths that matched
+	// a ReplaceOptions.PreservePrefixes entry and had no corresponding
+	// desired-state content. These paths are left completely untouched: no
+	// op, no ManifestRemove entry, no Drift entry. See ReplaceOptions'
+	// PreservePrefixes doc comment.
+	Preserved []string
+}
+
+// ReplaceOptions controls how PlanCoreReplaceDesired treats specific paths
+// before the normal ownership-based classification rules run.
+type ReplaceOptions struct {
+	// SkipPaths excludes matching paths from classification entirely: the
+	// planner never emits an op, refresh, drift, or advisory entry for
+	// them, and they never appear in Preserved either. Callers use this for
+	// paths handled by a dedicated mechanism outside the replace planner
+	// (e.g. the settings.json 3-way merge, or managed-block surfaces).
+	SkipPaths map[string]bool
+	// PreservePrefixes lists slash-separated path prefixes (e.g.
+	// "packs/languages/golang/") for which template absence must not
+	// produce a delete op, a ManifestRemove entry, or a Drift entry. A
+	// manifest-tracked path under one of these prefixes that has no
+	// desired-state content is left on disk and in the manifest untouched,
+	// and is recorded in ReplacePlan.Preserved instead. This only
+	// suppresses the "template no longer has this path" outcome: a path
+	// under a preserve prefix that does have desired-state content is
+	// classified normally (creates/updates/no-op still apply), since the
+	// prefix exists to protect namespaces that have gone fully absent (e.g.
+	// an uninstalled language pack), not to opt a still-active namespace
+	// out of upgrades.
+	PreservePrefixes []string
+}
+
+// hasPreservePrefix reports whether path matches one of prefixes.
+func hasPreservePrefix(path string, prefixes []string) bool {
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(path, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // PlanCoreReplace computes an ordered file-operation plan over the union of
 // template paths (walked from templateFS) and manifest-tracked paths in m.
 //
-// PlanCoreReplace only reads disk (to hash existing content); it never
-// writes. Every path — manifest keys and template walk results alike — is
-// validated with scaffold.CleanLocalRelPath before use; an invalid path
+// This is a thin adapter over PlanCoreReplaceDesired: it walks templateFS
+// into a path→content map and delegates with a zero-value ReplaceOptions
+// (no skip paths, no preserve prefixes). Callers that need to compose
+// desired state from more than one fs.FS (e.g. base templates plus
+// installed language packs), or that need SkipPaths/PreservePrefixes,
+// should build the map themselves and call PlanCoreReplaceDesired directly.
+func PlanCoreReplace(m *scaffold.Manifest, targetDir string, templateFS fs.FS) (ReplacePlan, error) {
+	tmplFiles, err := collectTemplateFiles(templateFS)
+	if err != nil {
+		return ReplacePlan{}, err
+	}
+	return PlanCoreReplaceDesired(m, targetDir, tmplFiles, ReplaceOptions{})
+}
+
+// PlanCoreReplaceDesired computes an ordered file-operation plan over the
+// union of desired-state paths (template-relative path → content) and
+// manifest-tracked paths in m.
+//
+// PlanCoreReplaceDesired only reads disk (to hash existing content); it
+// never writes. Every path — manifest keys and desired-state keys alike —
+// is validated with scaffold.CleanLocalRelPath before use; an invalid path
 // aborts planning with an error (spec AC-9).
+//
+// opts.SkipPaths excludes matching paths from all classification before the
+// per-owner rules run. opts.PreservePrefixes exempts matching
+// manifest-tracked, template-absent paths from delete/ManifestRemove/drift,
+// collecting them into ReplacePlan.Preserved instead. See ReplaceOptions'
+// field docs.
 //
 // Classification is driven by each path's manifest ownership attribute
 // (core/fork/seed/block) plus the legacy case (no ownership recorded). See
 // docs/specs/2026-08-17-overlay-scaffold-v2.md, section "層モデル", and the
 // Phase 1 plan's slice-4 handoff for the exact per-owner rules.
-func PlanCoreReplace(m *scaffold.Manifest, targetDir string, templateFS fs.FS) (ReplacePlan, error) {
+func PlanCoreReplaceDesired(m *scaffold.Manifest, targetDir string, desired map[string][]byte, opts ReplaceOptions) (ReplacePlan, error) {
 	if m == nil {
 		return ReplacePlan{}, errors.New("nil manifest")
 	}
 
-	tmplFiles, err := collectTemplateFiles(templateFS)
-	if err != nil {
-		return ReplacePlan{}, err
+	tmplFiles := make(map[string][]byte, len(desired))
+	for rawPath, content := range desired {
+		cleanPath, cerr := cleanPathKey(rawPath)
+		if cerr != nil {
+			return ReplacePlan{}, fmt.Errorf("desired path %q: %w", rawPath, cerr)
+		}
+		tmplFiles[cleanPath] = content
 	}
 
 	manifestFiles := make(map[string]scaffold.ManifestFile, len(m.Files))
@@ -160,8 +229,18 @@ func PlanCoreReplace(m *scaffold.Manifest, targetDir string, templateFS fs.FS) (
 	var deletes, creates, updates []FileOp
 
 	for _, path := range sortedPaths {
+		if opts.SkipPaths[path] {
+			continue
+		}
+
 		tmplContent, hasTemplate := tmplFiles[path]
 		entry, hasEntry := manifestFiles[path]
+
+		if !hasTemplate && hasEntry && hasPreservePrefix(path, opts.PreservePrefixes) {
+			plan.Preserved = append(plan.Preserved, path)
+			continue
+		}
+
 		diskContent, hasDisk, derr := readDiskFile(targetDir, path)
 		if derr != nil {
 			return ReplacePlan{}, fmt.Errorf("reading disk file %q: %w", path, derr)
@@ -174,6 +253,8 @@ func PlanCoreReplace(m *scaffold.Manifest, targetDir string, templateFS fs.FS) (
 	plan.Ops = append(plan.Ops, deletes...)
 	plan.Ops = append(plan.Ops, creates...)
 	plan.Ops = append(plan.Ops, updates...)
+
+	sort.Strings(plan.Preserved)
 
 	return plan, nil
 }
@@ -366,6 +447,24 @@ func classifyUntracked(
 // reason about). This guards against a hand-built ReplacePlan carrying a
 // path that would resolve outside targetDir.
 //
+// In that same validate-all-upfront pass, ApplyOps also validates every op's
+// parent directory chain with ValidateRealParentChain: if any existing path
+// component between targetDir and the op's parent directory is not a real
+// directory (e.g. a symlink), ApplyOps returns an error naming that
+// component and performs no filesystem operations at all. A leaf-only Lstat
+// check (below) cannot catch this — a missing leaf under a symlinked parent
+// still reports os.ErrNotExist, so without this chain check MkdirAll/
+// WriteFile would silently create/write through the symlink to a target
+// outside targetDir.
+//
+// ApplyOps also os.Lstat's every op's target path itself (update and delete
+// targets, and create targets in case a path collides with something
+// already there): if the entry exists and is not a regular file — a symlink
+// (including a dangling one, since Lstat reports the symlink's own mode
+// without following it) or a directory — ApplyOps returns an error naming
+// the path and performs no filesystem operations at all. A missing entry
+// (os.ErrNotExist) is fine; that is the ordinary create case.
+//
 // ApplyOps never reads or writes the manifest — that is the commit barrier:
 // callers must only advance manifest state (recorded hashes for creates,
 // updates, and ReplacePlan.ManifestRefresh entries, plus dropping the
@@ -379,6 +478,26 @@ func ApplyOps(targetDir string, plan ReplacePlan) error {
 	for _, op := range plan.Ops {
 		if _, cerr := cleanPathKey(op.Path); cerr != nil {
 			return fmt.Errorf("%s %s: invalid path: %w", op.Kind, op.Path, cerr)
+		}
+	}
+
+	for _, op := range plan.Ops {
+		if err := ValidateRealParentChain(targetDir, op.Path); err != nil {
+			return fmt.Errorf("%s %s: %w", op.Kind, op.Path, err)
+		}
+	}
+
+	for _, op := range plan.Ops {
+		full := filepath.Join(targetDir, filepath.FromSlash(op.Path))
+		fi, err := os.Lstat(full)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return fmt.Errorf("%s %s: lstat: %w", op.Kind, op.Path, err)
+		}
+		if !fi.Mode().IsRegular() {
+			return fmt.Errorf("%s %s: refusing to operate on non-regular file (mode %s)", op.Kind, op.Path, fi.Mode())
 		}
 	}
 
@@ -440,6 +559,47 @@ func cleanPathKey(raw string) (string, error) {
 		return "", err
 	}
 	return filepath.ToSlash(clean), nil
+}
+
+// ValidateRealParentChain walks every path component of relPath (a
+// slash-separated relative path, already validated e.g. via cleanPathKey)
+// from targetDir down to relPath's parent directory, and verifies each
+// existing component is a real directory — never a symlink or any other
+// non-directory entry. A missing component is fine (a later os.MkdirAll
+// creates real directories for it).
+//
+// This closes a gap a leaf-only Lstat check leaves open: if some parent
+// directory in relPath's chain is a symlink (e.g. "sub" -> /tmp/outside)
+// and the leaf itself does not exist yet, Lstat-ing the leaf alone reports
+// os.ErrNotExist — indistinguishable from the ordinary "nothing here yet"
+// case — even though the leaf's real location, once created, resolves
+// outside targetDir through the symlink. Callers that write through
+// os.MkdirAll/os.WriteFile (ApplyOps, and the exception-face writes in
+// internal/cli/upgrade_v2.go that bypass ApplyOps) must call this before
+// writing.
+func ValidateRealParentChain(targetDir, relPath string) error {
+	dir := filepath.ToSlash(filepath.Dir(filepath.ToSlash(relPath)))
+	if dir == "." || dir == "/" || dir == "" {
+		return nil
+	}
+
+	current := targetDir
+	for _, seg := range strings.Split(dir, "/") {
+		current = filepath.Join(current, seg)
+		fi, err := os.Lstat(current)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				// Missing component: fine, a later MkdirAll creates a real
+				// directory here.
+				continue
+			}
+			return fmt.Errorf("lstat %s: %w", current, err)
+		}
+		if !fi.IsDir() {
+			return fmt.Errorf("refusing to write through non-directory path component %s (mode %s)", current, fi.Mode())
+		}
+	}
+	return nil
 }
 
 // readDiskFile reads targetDir/path, reporting hasDisk=false (with no error)

@@ -107,7 +107,7 @@ Before claiming a task is done:
 | **Maps, not manuals**<br/>Short `AGENTS.md` / `CLAUDE.md`; push detail into rules and skills, promote repeats into hooks. | **Canonical pipeline**<br/>`self-review → verify → test → sync-docs → cross-review → pr` enforced in the standard flow. |
 | **Deterministic hooks**<br/>Mojibake guard, commit-msg secret scan, Bash guardrails, verification reminders — pre-wired in `settings.json`. | **Worktree-first flow**<br/>Spec, plan, work, and PR artifacts are produced from clean-base task worktrees, with local cleanup after hand-off. |
 | **Org runtime**<br/>Autonomous multi-seat execution (`ralph org spawn/send/wait/...`) with a typed messaging protocol and pulse-layer watchdog — see [Org runtime](#org-runtime-autonomous-multi-seat-execution). | **Language packs**<br/>TypeScript, Python, Rust, Go, Dart, and Terraform starters (opt-in) with per-language `verify.sh` and path-scoped rules. |
-| **Drift-proof upgrades**<br/>Hash-based `ralph upgrade` with per-file conflict resolution — keeps N projects aligned as the scaffold evolves. | **Evidence over prose**<br/>Every self-review, verify, test, sync-docs, and cross-review triage pass produces a dated artifact in `docs/reports/`. |
+| **Drift-proof upgrades**<br/>Fully non-interactive `ralph upgrade` — core replace, managed-block update, and settings 3-way merge, with an upgrade report and a dedicated exit code for unresolved drift. | **Evidence over prose**<br/>Every self-review, verify, test, sync-docs, and cross-review triage pass produces a dated artifact in `docs/reports/`. |
 | **Cross-agent portable**<br/>`AGENTS.md` + `scripts/` + `packs/` stay neutral; `.claude/` and `.codex/` are agent-specific layers you can stack others beside. | **Local state, not repo churn**<br/>Worktree lifecycle records live under `git-common-dir`, outside tracked files and branch checkouts. |
 
 ## Commands
@@ -115,7 +115,7 @@ Before claiming a task is done:
 | Command | Purpose |
 |---------|---------|
 | `ralph init [name]` | Scaffold a new project (interactive: language packs). |
-| `ralph upgrade` | Pull template updates with per-file conflict resolution. |
+| `ralph upgrade` | Non-interactively pull template updates (v2-layout projects only; see [`ralph upgrade`](#ralph-upgrade)). |
 | `ralph org spawn/send/wait/read/stop/status/disband` | Manage org-runtime seats for autonomous multi-seat execution. |
 | `ralph status [--org-id <id>]` | Show org roster status and watch-status summary (table or `--json`). |
 | `ralph pack add <lang>` | Install a language pack. |
@@ -126,13 +126,19 @@ Before claiming a task is done:
 
 Run `ralph help <command>` for flags.
 
-### `ralph upgrade` interactive diff
+### `ralph upgrade`
 
-When `ralph upgrade` detects local edits and a template baseline is available, it shows a line-numbered local-vs-template diff and prompts `[a]pply template file / [k]eep local file / [e]dit file ?`. `apply` accepts the template for the whole file; `keep` preserves the current local file as the resolved managed content; `edit` opens the whole file with Git-style conflict marker blocks (`<<<<<<< local`, `=======`, `>>>>>>> template (...)`) around conflicting regions and requires the markers to be removed before the edit is accepted.
+`ralph upgrade` requires a v2-layout project (`.ralph/manifest.toml` with `meta.layout = "v2"`); legacy (pre-v2) manifests are rejected with zero writes until the automated migration ships in a later release. Every run is fully non-interactive — no prompts, no stdin reads:
 
-Before file choices are written, `ralph upgrade` prints an apply summary and asks `Apply these changes? [y/N]`. Answering no or reaching EOF writes nothing to the target file, baseline cache, or manifest. Normal interactive diff output is rendered inline with the prompt, omits range headers and template/local hash summaries, and does not open a pager. When baseline metadata is missing, v1-style projects fall back to `[o]verwrite / [s]kip / [d]iff ?` with the diff shown before the choices.
+- Core files are replaced from the embedded templates (including installed language packs); paths with local drift are left untouched.
+- Managed blocks (`AGENTS.md`, `.gitignore`) are updated in place; content outside the block markers is preserved byte-for-byte.
+- `.claude/settings.json` is 3-way merged against the `.ralph/core/settings.ralph.json` snapshot — user-added permissions are kept, ralph-owned keys are updated, and stale ralph-owned entries are removed.
+- Template-side changes to drifted, forked, or seed-already-present paths are recorded as advisory diffs rather than applied.
+- A dated report is written to `docs/reports/upgrade-<version>-<date>.md` summarizing every action, including any advisory diffs and unresolved drift — unless the run was a true no-op (tree already fully converged with the embedded templates), in which case nothing is written and standard output states `Upgrade no-op: ... (already up to date, zero writes)`.
 
-Diff lines carry a right-aligned `<old> <new> │ <prefix><content>` gutter, and `-` / `+` are colorized (red / green; `---` / `+++` bold) when stdout is a terminal. Set `NO_COLOR=1` (or any non-empty value, per [no-color.org](https://no-color.org)) to suppress ANSI escapes; piping or redirecting also disables them automatically. `--pager` applies to `ralph upgrade --diff` dry-run previews, not to interactive conflict prompts.
+Flags: `--dry-run` previews the plan without writing anything, including the pending outcome of `AGENTS.md`, `.gitignore`, `.claude/settings.json`, and the settings snapshot; `--diff` implies `--dry-run` and additionally prints the full advisory diff output (reusing the same colorized, pager-aware rendering as before — `--pager auto|always|never`, `NO_COLOR=1` to suppress ANSI escapes).
+
+Exit codes: `0` success, `1` execution error, `3` completed with unresolved drift remaining (paths are listed on stderr, and in the report on runs that write one). There is no `--force` flag — re-adopting a forked or drifted path is a manual step (make the file match the new template content, then let the next upgrade converge it) until the `adopt` command ships in a later phase.
 
 ## What `ralph init` scaffolds
 
@@ -160,7 +166,7 @@ The philosophy: **a map, not a manual**. Keep `AGENTS.md` small, push detail int
 ├── .agents/
 │   └── skills/               # Codex-side skill bodies (mirrors .claude/skills/)
 ├── .ralph/
-│   ├── core/                 # generation sources ralph init/upgrade consume (e.g. AGENTS.core.md)
+│   ├── core/                 # generation sources ralph init/upgrade consume (e.g. AGENTS.core.md, settings.ralph.json)
 │   └── local/                # downstream extension points: hooks/<event>.d/, verify.d/, test.d/
 ├── docs/
 │   ├── specs/                # refined specifications from /spec
@@ -298,7 +304,7 @@ See `docs/roadmap/harness-maturity-model.md`. Short version:
 ├── internal/
 │   ├── cli/                  # Subcommands
 │   ├── scaffold/             # Template embedding + manifest
-│   ├── upgrade/              # Diff engine + conflict resolution
+│   ├── upgrade/              # Overlay engine: replace planner, block merge, settings 3-way merge, advisory diff, report
 │   ├── config/                # ralph.toml parser
 │   ├── org/                  # Org runtime mechanism layer (seats, protocol, watchdog)
 │   └── insights/              # Insight event aggregation + backfill
