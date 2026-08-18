@@ -138,3 +138,86 @@ LOW doc-completeness gap in a MEDIUM finding's fix, not a fresh defect.
 - The tech-debt register gap noted above (3 rows from self-review's own
   table not yet appended) is tracked as a LOW finding, not re-verified
   against a follow-up commit since none exists yet at HEAD `3d8461d`.
+
+## Cycle 2 (final cycle, 2/2)
+
+- Date: 2026-08-18
+- Scope: delta since cycle-1 (`c785300..HEAD`, HEAD `4b53880`, working tree
+  clean). Commits reviewed: `6b617dc` (tech-debt row for the cycle-1 LOW
+  finding), `62631aa`/`7602317` (test/sync-docs artifacts), `df1a529`
+  (cross-review triage, 2 ACTION_REQUIRED), `fc8e9a9` (AR fixes:
+  `ValidateRealParentChain` + exception-face/report write guards + 7 new
+  tests), `cee54b2` (cycle-2 self-review, 4 new LOW findings C2-1..C2-4),
+  `78d9039`/`4b53880` (C2-1..C2-4 fixes).
+- Verdict: **PASS**. No CRITICAL/HIGH/MEDIUM findings. No static-analysis
+  regressions. The one cycle-1 LOW gap (tech-debt register missing 3 rows)
+  is now closed.
+
+### Cycle-1 LOW gap resolution
+
+`6b617dc` (committed before the AR fixes, in the same delta) appends the row
+the cycle-1 verify finding asked for, naming all three items from the
+self-review's "Tech debt identified" table verbatim: `installGitHook`'s
+untested user-hook-chaining branch, the untested `--pager` flag, and
+`buildDesiredStateV2`'s untested `apErr` branch
+(`docs/tech-debt/README.md`, last row). `grep -n
+"installGitHook\|pager\|apErr" docs/tech-debt/README.md` now matches. This
+closes the cycle-1 verify finding.
+
+### Cross-review AR fix crosscheck (`fc8e9a9` vs. triage table)
+
+| # | Triage finding | Fixed? | Evidence |
+| --- | --- | --- | --- |
+| AR#1 | `ApplyOps`'s Lstat preflight is leaf-only; a symlinked parent directory with a missing leaf reports `os.ErrNotExist` and MkdirAll/WriteFile writes through the symlink outside `targetDir` | Yes | `internal/upgrade/replaceplan.go`: new `ValidateRealParentChain(targetDir, relPath)` walks every existing path component from `targetDir` to the op's parent, rejecting any non-directory component; called for every op in `ApplyOps`'s validate-all-upfront pass (`replaceplan.go:481-486`), before the existing leaf-Lstat pass. Doc comment above `ApplyOps` rewritten to explain why the leaf check alone is insufficient. Tests: `TestApplyOps_ParentChainPreflightRejectsSymlinkedParent_ZeroWrites`, `TestApplyOps_ParentChainPreflightRejectsDeeplyNestedSymlinkedParent`, plus two positive controls (`_AllowsRealNestedDirectories`, `_AllowsMissingIntermediateDirectories`) that prove the guard doesn't over-reject. |
+| AR#2 | `.claude/settings.json` / `.ralph/core/settings.ralph.json` exception-face writes bypass `ApplyOps` via direct `os.WriteFile`, so a symlinked target can write outside `targetDir` | Yes | `internal/cli/upgrade_v2.go`'s `writeFileV2` now calls `upgrade.ValidateRealParentChain` plus an `os.Lstat`-based leaf check (rejects symlink/non-regular, allows absent) before every write — applied to both exception-face writes it serves. Same containment pair was also added to `internal/upgrade/report.go`'s `WriteUpgradeReport` (upgrade report write, which also bypasses `ApplyOps` and was not named in the triage but shares the same gap shape — a reasonable scope extension, not an unrequested change). Tests: `TestRunUpgradeV2_SymlinkedSettingsJSON_RejectedNoEscape`, `TestRunUpgradeV2_SymlinkedSettingsSnapshot_RejectedAfterSettingsJSONWritten`, `TestRunUpgradeV2_SymlinkedReportsDir_RejectedNoEscape`. |
+
+All 7 new tests claimed by the commit message (`internal/upgrade/replaceplan_test.go`
++4, `internal/cli/upgrade_v2_test.go` +3) were confirmed present by name via
+`grep -n "^func Test"`.
+
+### Cycle-2 self-review fix crosscheck (`78d9039`/`4b53880` vs. C2-1..C2-4)
+
+| ID | Finding | Fixed? | Evidence |
+| --- | --- | --- | --- |
+| C2-1 | Tech-debt row's `(M3, row reconciliation)` pointer resolves to the wrong finding ID (should be `M4`) | Yes | `docs/tech-debt/README.md:102` now reads `(M4, row reconciliation)` (`78d9039`). |
+| C2-2 | `writeFileV2`'s doc comment said "both" exception-face writes when `v2SkipPaths` names four | Yes | Doc comment reworded to "two of the four v2 exception faces," names the other two (AGENTS.md/.gitignore via `updateOneBlockV2`), and explains why they don't need `ValidateRealParentChain` (root-level targets, own leaf guard) (`78d9039`, `internal/cli/upgrade_v2.go:562-568`). |
+| C2-3 | Two new tests named `_RejectedZeroWrites` for runs that are not zero-write | Yes | Both renamed to `_RejectedNoEscape` (`78d9039`, `internal/cli/upgrade_v2_test.go`). Confirmed old names are gone (`grep -n "SymlinkedSettingsJSON_RejectedZeroWrites\|SymlinkedReportsDir_RejectedZeroWrites"` → no matches) and new names present. |
+| C2-4 | Cycle-1 `L1` (`_ = in`, unused `io.Reader` param) reached neither a fix nor the tech-debt register | Yes | `4b53880` appends a 6th item to the existing 5-LOW register row, naming the parameter, its file, and its ~25 call sites; matches the self-review's "add one line to the existing row" disposition exactly. |
+
+### Static analysis (re-run at cycle-2 HEAD)
+
+`./scripts/run-static-verify.sh` (log: `docs/evidence/verify-2026-08-18-051933.log`):
+
+- `scripts/check-sync.sh`: PASS — IDENTICAL 158, DRIFTED 0, ROOT_ONLY 0,
+  TEMPLATE_ONLY 11, KNOWN_DIFF 3 (same counts as cycle 1, no regression)
+- `scripts/check-pipeline-sync.sh`: PASS — all 6 referencing docs in sync
+- `scripts/check-skill-sync.sh`: PASS — 13 skills in lock-step
+- Codex hook guards: all PASS
+- Go verifier (scope fell back to `full`, same unclassified-file reason as
+  cycle 1): `gofmt: ok`; `go vet` silent (pass); `golangci-lint run` → "0
+  issues."; `staticcheck` silent (pass)
+- Overall: `All verifiers passed.`
+
+### Plan acceptance criteria — checkbox adjudication
+
+All 12 plan ACs (`AC-1`..`AC-12`) were adjudicated "Met" (or "Met, with a
+documented caveat" for AC-4c) in the cycle-1 FR/NFR and AC-mapping tables
+above, and nothing in the cycle-2 delta regresses any of them — the AR fixes
+strengthen AC-4b (parent-chain containment, beyond the plan's original
+leaf-only wording) and AC-9 (extends the same containment guarantee to the
+settings/snapshot/report exception-face writes) without changing their
+pass/fail status. Ticked all 12 checkboxes in
+`docs/plans/active/2026-08-18-overlay-scaffold-v2-p3.md`, adding inline notes
+on AC-4b and AC-9 for the cycle-2 strengthening and on AC-4c for its
+pre-existing root-CI self-skip caveat (this is a verifier judgment call per
+the standing instruction to adjudicate and tick ACs that hold — the "Plan
+reviewed" and "PR created" progress-checklist items are left untouched, as
+they are outside verify's scope).
+
+### Known gaps (cycle 2)
+
+- No behavioral test execution was performed here (by design — `/test`'s
+  job); `/test` already produced `docs/reports/test-2026-08-18-overlay-scaffold-v2-p3.md`
+  at cycle 1 but has not re-run against the cycle-2 delta as of this verify
+  pass.
+- No new tech-debt or doc-drift gaps were found in the cycle-2 delta.

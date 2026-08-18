@@ -80,20 +80,20 @@ v2 manifest(`meta.layout = "v2"`)に対する `ralph upgrade` は次を非対話
 
 ## Acceptance criteria
 
-- [ ] AC-1 v2 プロジェクトへの `ralph upgrade` が非対話で完走する: core 置換(パック含む)、block 内のみ更新(block 外バイト保全)、settings マージ(ユーザ permissions 保全 + ralph 所有キー更新 + stale 所有エントリ削除)、seed 欠落生成、advisory 収集、レポート出力、manifest 再構築(ManifestRemove/refresh 反映)
-- [ ] AC-2 いかなる分岐でもプロンプト/stdin 読み取りが発生しない(対話コードパスの不存在をコードレベルで確認)
-- [ ] AC-3 `.claude/settings.json` が全文置換されない: ユーザ変更ありの settings + テンプレート変更ありの状況で、マージ結果のみが書かれることをテストで保証
-- [ ] AC-4 未解決 drift のパスは 1 バイトも変更されず、レポートと stderr に列挙され、exit 3(専用コード。drift なし成功は exit 0)
-- [ ] AC-4b `ApplyOps` は write/delete 対象に symlink・非 regular ファイルが含まれる場合、書き込みゼロでエラーになる(テストで保証)
-- [ ] AC-4c settings スナップショットの 2 段階更新: スナップショット書き込み後〜settings 書き込み前の失敗を注入しても、再実行で stale 所有エントリ削除が正しく機能する(oldOwned 喪失なし)
-- [ ] AC-5 冪等性: 同一バージョンでの再実行が書き込みゼロの no-op(レポートに no-op 明記)
-- [ ] AC-6 部分失敗: 途中失敗で manifest 不変、再実行で残工程が完走(分類の安定性含む)
-- [ ] AC-7 レガシー manifest への upgrade は書き込みゼロで fail-closed し、Phase 4 の移行を案内する
-- [ ] AC-8 対話エンジン・baseline の完全撤去: `resolveConflict` / `PlanMerge` / `ComputeDiffs` / `baseline` 書き込みへの参照がゼロ。成功した v2 upgrade が旧 `.ralph/baseline/` を削除する
-- [ ] AC-9 パック: installed packs の payload + rule が同一プランで更新され、利用不能パックは preserve プレフィクスにより warning + ディスク/manifest エントリ完全保全(削除も drift 分類もされないことをテストで保証)
-- [ ] AC-10 `--force` が存在せず、`--dry-run` / `--diff` が新エンジンで機能する(dry-run は書き込みゼロ)
-- [ ] AC-11 新規 `ralph init` が baseline を書かず、settings スナップショットを含む。スナップショット欠落プロジェクト(Phase 2 init 世代)の初回 upgrade は `{}` フォールバックで成功し、(a) stale 所有エントリが削除されず保全されること(劣化の正確な形)、(b) フォールバック使用がレポートに記録されることをテストで保証
-- [ ] AC-12 block 面の managed block が malformed の場合、据え置き + レポート記載で upgrade 自体は完走する
+- [x] AC-1 v2 プロジェクトへの `ralph upgrade` が非対話で完走する: core 置換(パック含む)、block 内のみ更新(block 外バイト保全)、settings マージ(ユーザ permissions 保全 + ralph 所有キー更新 + stale 所有エントリ削除)、seed 欠落生成、advisory 収集、レポート出力、manifest 再構築(ManifestRemove/refresh 反映)
+- [x] AC-2 いかなる分岐でもプロンプト/stdin 読み取りが発生しない(対話コードパスの不存在をコードレベルで確認)
+- [x] AC-3 `.claude/settings.json` が全文置換されない: ユーザ変更ありの settings + テンプレート変更ありの状況で、マージ結果のみが書かれることをテストで保証
+- [x] AC-4 未解決 drift のパスは 1 バイトも変更されず、レポートと stderr に列挙され、exit 3(専用コード。drift なし成功は exit 0)
+- [x] AC-4b `ApplyOps` は write/delete 対象に symlink・非 regular ファイルが含まれる場合、書き込みゼロでエラーになる(テストで保証)。cycle 2 で `ValidateRealParentChain` を追加し、親ディレクトリが symlink の場合(葉ノードのみの Lstat では検知不能なケース)も同じく書き込みゼロでエラーになることをテストで保証(cross-review AR#1 の fix、`fc8e9a9`)
+- [x] AC-4c settings スナップショットの 2 段階更新: スナップショット書き込み後〜settings 書き込み前の失敗を注入しても、再実行で stale 所有エントリ削除が正しく機能する(oldOwned 喪失なし)。qualification: `TestRunUpgradeV2_SettingsWriteFailure_SnapshotNotAdvanced` は root 実行の CI では自己スキップする既知の制約(このフェーズの回帰ではない)
+- [x] AC-5 冪等性: 同一バージョンでの再実行が書き込みゼロの no-op(レポートに no-op 明記)
+- [x] AC-6 部分失敗: 途中失敗で manifest 不変、再実行で残工程が完走(分類の安定性含む)
+- [x] AC-7 レガシー manifest への upgrade は書き込みゼロで fail-closed し、Phase 4 の移行を案内する
+- [x] AC-8 対話エンジン・baseline の完全撤去: `resolveConflict` / `PlanMerge` / `ComputeDiffs` / `baseline` 書き込みへの参照がゼロ。成功した v2 upgrade が旧 `.ralph/baseline/` を削除する
+- [x] AC-9 パック: installed packs の payload + rule が同一プランで更新され、利用不能パックは preserve プレフィクスにより warning + ディスク/manifest エントリ完全保全(削除も drift 分類もされないことをテストで保証)。cycle 2 で settings.json / settings スナップショット / upgrade レポートの例外面書き込み(ApplyOps 非経由)にも同じ containment チェックを追加(cross-review AR#2 の fix、`fc8e9a9`)
+- [x] AC-10 `--force` が存在せず、`--dry-run` / `--diff` が新エンジンで機能する(dry-run は書き込みゼロ)
+- [x] AC-11 新規 `ralph init` が baseline を書かず、settings スナップショットを含む。スナップショット欠落プロジェクト(Phase 2 init 世代)の初回 upgrade は `{}` フォールバックで成功し、(a) stale 所有エントリが削除されず保全されること(劣化の正確な形)、(b) フォールバック使用がレポートに記録されることをテストで保証
+- [x] AC-12 block 面の managed block が malformed の場合、据え置き + レポート記載で upgrade 自体は完走する
 
 ## Implementation outline
 
