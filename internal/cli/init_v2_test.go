@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -543,62 +544,20 @@ func snapshotDirHashes(t *testing.T, dir string) []string {
 	return entries
 }
 
-// TestRunUpgradeIO_V2Layout_DispatchesToV2Engine pins the Phase 3 slice-2
-// replacement of the Phase 2 fail-closed guard: a manifest whose
-// meta.layout is "v2" no longer refuses to run at all — it dispatches to
-// the non-interactive v2 upgrade flow (internal/cli/upgrade_v2.go) instead
-// of the legacy diff/conflict engine. --force remains rejected outright on
-// v2 layouts (zero writes, error names "--force" and "v2"; fork
-// re-adoption is Phase 5's `ralph adopt`, not this flag). --dry-run now
-// succeeds (it runs the v2 preview path) with zero writes, since dry-run
-// must never touch disk regardless of engine.
+// TestRunUpgradeIO_V2Layout_DispatchesToV2Engine pins the Phase 3 dispatch
+// contract: a manifest whose meta.layout is "v2" dispatches to the
+// non-interactive v2 upgrade flow (internal/cli/upgrade_v2.go) — the sole
+// upgrade engine after the legacy interactive diff/conflict engine was
+// removed. `--force` no longer exists as a flag at all (AC-10; fork
+// re-adoption is Phase 5's `ralph adopt`), so there is nothing to reject at
+// the upgradeOptions level anymore — cobra rejects the unknown flag before
+// this function is ever reached. --dry-run succeeds (it runs the v2 preview
+// path) with zero writes, since dry-run must never touch disk.
 func TestRunUpgradeIO_V2Layout_DispatchesToV2Engine(t *testing.T) {
 	setupTestEmbed := func(t *testing.T) {
 		t.Helper()
 		setupTestEmbedFS(t)
 	}
-
-	t.Run("force_rejected_zero_writes", func(t *testing.T) {
-		setupTestEmbed(t)
-		Version = "2.0.0-test"
-
-		dir := t.TempDir()
-		agentsContent := []byte("# AGENTS\n")
-		if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), agentsContent, 0644); err != nil {
-			t.Fatalf("write AGENTS.md: %v", err)
-		}
-		if err := os.MkdirAll(filepath.Join(dir, ".ralph"), 0755); err != nil {
-			t.Fatalf("MkdirAll .ralph: %v", err)
-		}
-		m := scaffold.NewManifest("1.0.0-test")
-		m.SetLayoutV2()
-		if setErr := m.SetFileOwned("AGENTS.md", scaffold.OwnerBlock, scaffold.HashBytes(agentsContent), scaffold.HashBytes(agentsContent)); setErr != nil {
-			t.Fatalf("SetFileOwned: %v", setErr)
-		}
-		manifestPath := filepath.Join(dir, ".ralph", "manifest.toml")
-		if err := m.Write(manifestPath); err != nil {
-			t.Fatalf("write manifest: %v", err)
-		}
-
-		before := snapshotDirHashes(t, dir)
-
-		var out, errOut bytes.Buffer
-		err := runUpgradeIOWithOptions(dir, upgradeOptions{Force: true, Pager: pagerNever}, strings.NewReader(""), &out, &errOut, false)
-		if err == nil {
-			t.Fatal("expected an error for --force on a v2-layout manifest, got nil")
-		}
-		if !strings.Contains(err.Error(), "--force") {
-			t.Errorf("error = %q, want it to mention --force", err.Error())
-		}
-		if !strings.Contains(err.Error(), "v2") {
-			t.Errorf("error = %q, want it to mention the v2 layout", err.Error())
-		}
-
-		after := snapshotDirHashes(t, dir)
-		if !slices.Equal(before, after) {
-			t.Errorf("--force rejection must write zero files; before=%v after=%v", before, after)
-		}
-	})
 
 	t.Run("dry_run_succeeds_zero_writes", func(t *testing.T) {
 		setupTestEmbed(t)
@@ -635,4 +594,46 @@ func TestRunUpgradeIO_V2Layout_DispatchesToV2Engine(t *testing.T) {
 			t.Errorf("--dry-run must write zero files; before=%v after=%v", before, after)
 		}
 	})
+}
+
+// TestExecuteInit_LegacyManifest_ReInit_FailsClosedZeroWrites is AC-7
+// coverage for `ralph init` on an existing project: a manifest with no
+// meta.layout (a genuine pre-v2 project) must be rejected fail-closed with
+// zero writes to the tree. The legacy upgrade engine this used to delegate
+// to (`runUpgrade`) was removed in Phase 3 (docs/plans/active
+// /2026-08-18-overlay-scaffold-v2-p3.md, FR-13); the automated migration to
+// v2 arrives in a later ralph release (Phase 4).
+func TestExecuteInit_LegacyManifest_ReInit_FailsClosedZeroWrites(t *testing.T) {
+	setupTestEmbedFSV2(t)
+	Version = "0.5.0-test"
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".ralph"), 0755); err != nil {
+		t.Fatalf("MkdirAll .ralph: %v", err)
+	}
+	legacy := scaffold.NewManifest("0.1.0-test")
+	legacy.SetFile("AGENTS.md", "sha256:legacy")
+	manifestPath := filepath.Join(dir, ".ralph", "manifest.toml")
+	if err := legacy.Write(manifestPath); err != nil {
+		t.Fatalf("writing legacy manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte("# legacy AGENTS\n"), 0644); err != nil {
+		t.Fatalf("write AGENTS.md: %v", err)
+	}
+
+	before := snapshotDirHashes(t, dir)
+
+	cfg := initConfig{ProjectName: "test", Packs: nil}
+	err := executeInit(dir, cfg, false)
+	if err == nil {
+		t.Fatal("executeInit re-init on a legacy manifest: expected an error, got nil")
+	}
+	if !errors.Is(err, errLegacyLayoutFailClosed) {
+		t.Errorf("err = %v, want errors.Is(err, errLegacyLayoutFailClosed)", err)
+	}
+
+	after := snapshotDirHashes(t, dir)
+	if !slices.Equal(before, after) {
+		t.Errorf("legacy-manifest re-init must write zero files; before=%v after=%v", before, after)
+	}
 }

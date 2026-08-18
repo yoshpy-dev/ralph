@@ -22,18 +22,14 @@ type packRenderResult struct {
 	// hashes maps manifest keys (namespaced with packRelDir(lang)) to SHA256
 	// hashes for all written files (payload + rule).
 	hashes map[string]string
-	// baselinePaths maps manifest keys to on-disk baseline cache paths for
-	// files whose baselines were written.
-	baselinePaths map[string]string
 }
 
 // renderPackInto renders a language pack into its canonical subdirectory
-// (packs/languages/<lang>/) inside targetDir, handles the rule.md control
-// file (→ .claude/rules/ralph/<lang>.md), and writes baselines so the upgrade
-// engine can diff pack files later.
+// (packs/languages/<lang>/) inside targetDir and handles the rule.md control
+// file (→ .claude/rules/ralph/<lang>.md).
 //
-// The returned packRenderResult contains all namespaced hashes and baseline
-// paths ready to be merged into the project manifest.
+// The returned packRenderResult contains all namespaced hashes ready to be
+// merged into the project manifest.
 //
 // This helper is shared by executeInit (init.go) and addPack (pack.go) so the
 // two code paths cannot diverge.
@@ -54,25 +50,14 @@ func renderPackInto(targetDir, lang string, force bool) (*packRenderResult, erro
 	}
 
 	out := &packRenderResult{
-		result:        packResult,
-		hashes:        make(map[string]string),
-		baselinePaths: make(map[string]string),
+		result: packResult,
+		hashes: make(map[string]string),
 	}
 
 	// Namespace hashes with the pack subdirectory prefix.
 	packPrefix := packRelDir(lang)
 	for k, v := range packHashes {
 		out.hashes[filepath.Join(packPrefix, k)] = v
-	}
-
-	// Write baselines for pack payload files so the upgrade engine can diff
-	// them later.
-	bls, err := writeRenderedBaselines(targetDir, packFS, packPrefix, packResult)
-	if err != nil {
-		return nil, err
-	}
-	for k, v := range bls {
-		out.baselinePaths[k] = v
 	}
 
 	// Handle the rule.md control file: it renders to .claude/rules/ralph/<lang>.md
@@ -88,13 +73,6 @@ func renderPackInto(targetDir, lang string, force bool) (*packRenderResult, erro
 			return nil, fmt.Errorf("rendering pack %s rule: %w", lang, err)
 		}
 		out.hashes[rulePath] = ruleHash
-		if len(ruleResult.Created)+len(ruleResult.Overwritten) > 0 {
-			baselinePath, err := scaffold.WriteBaseline(targetDir, rulePath, ruleContent)
-			if err != nil {
-				return nil, err
-			}
-			out.baselinePaths[rulePath] = baselinePath
-		}
 		mergeRenderResult(packResult, ruleResult)
 	}
 
@@ -109,6 +87,16 @@ var packRenderSkipPaths = map[string]bool{
 
 func packRelDir(pack string) string {
 	return filepath.Join("packs", "languages", pack)
+}
+
+// packNamespacePrefix is the root namespace for all language pack entries in
+// the manifest. Keys under this prefix are pack-scoped.
+const packNamespacePrefix = "packs/languages/"
+
+// packPrefixFor returns the namespace prefix used for a specific pack's files
+// in the project manifest (e.g. "packs/languages/golang/").
+func packPrefixFor(pack string) string {
+	return packNamespacePrefix + pack + "/"
 }
 
 // packRuleRelPath returns the manifest key / render path for a pack's

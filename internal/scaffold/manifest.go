@@ -35,9 +35,16 @@ type ManifestFile struct {
 
 	// v2 metadata. These fields are additive and must not be required when
 	// reading existing manifests.
-	State          string `toml:"state,omitempty"`
-	TemplateHash   string `toml:"template_hash,omitempty"`
-	DiskHash       string `toml:"disk_hash,omitempty"`
+	State        string `toml:"state,omitempty"`
+	TemplateHash string `toml:"template_hash,omitempty"`
+	DiskHash     string `toml:"disk_hash,omitempty"`
+
+	// BaselineStatus and BaselinePath are legacy-read-only: the baseline
+	// mechanism (internal/scaffold/baseline.go) was removed in Phase 3
+	// (docs/plans/active/2026-08-18-overlay-scaffold-v2-p3.md, FR-13). These
+	// fields are kept solely so manifests written by pre-Phase-3 `ralph`
+	// versions still parse without error; nothing in the current codebase
+	// writes BaselineStatusAvailable or a non-empty BaselinePath anymore.
 	BaselineStatus string `toml:"baseline_status,omitempty"`
 	BaselinePath   string `toml:"baseline_path,omitempty"`
 
@@ -116,35 +123,6 @@ func (m *Manifest) SetFile(relPath, hash string) {
 		State:          FileStateManaged,
 		TemplateHash:   hash,
 		BaselineStatus: BaselineStatusMissing,
-	}
-}
-
-// SetFileWithBaseline records a managed file whose template content is
-// available in the local baseline cache. The legacy Hash field remains the
-// template hash so v1 readers continue to compare the same value.
-func (m *Manifest) SetFileWithBaseline(relPath, hash, baselinePath string) {
-	m.Files[relPath] = ManifestFile{
-		Hash:           hash,
-		Managed:        true,
-		State:          FileStateManaged,
-		TemplateHash:   hash,
-		BaselineStatus: BaselineStatusAvailable,
-		BaselinePath:   baselinePath,
-	}
-}
-
-// SetFileResolvedWithBaseline records a managed file resolved from template
-// metadata and local choices. Hash remains the template hash for v1-compatible
-// upgrade comparisons; DiskHash records the actual resolved content.
-func (m *Manifest) SetFileResolvedWithBaseline(relPath, templateHash, diskHash, state, baselinePath string) {
-	m.Files[relPath] = ManifestFile{
-		Hash:           templateHash,
-		Managed:        true,
-		State:          state,
-		TemplateHash:   templateHash,
-		DiskHash:       diskHash,
-		BaselineStatus: BaselineStatusAvailable,
-		BaselinePath:   baselinePath,
 	}
 }
 
@@ -232,12 +210,6 @@ func validateManagedOwner(owner string) error {
 	default:
 		return fmt.Errorf("unknown owner %q", owner)
 	}
-}
-
-// IsBaselineAvailable reports whether the manifest entry has usable baseline
-// metadata. Callers must still verify that BaselinePath exists before using it.
-func (f ManifestFile) IsBaselineAvailable() bool {
-	return f.BaselineStatus == BaselineStatusAvailable && f.BaselinePath != ""
 }
 
 // IsLegacyOwner reports whether the entry predates manifest v3 ownership

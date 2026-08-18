@@ -65,10 +65,6 @@ const settingsSnapshotRelPathForSkip = ".ralph/core/settings.ralph.json"
 // templates. now is passed in by the caller (rather than calling time.Now()
 // here) so report timestamps are reproducible in tests.
 func runUpgradeV2(absDir, manifestPath string, oldManifest *scaffold.Manifest, opts upgradeOptions, out, errOut io.Writer, colorize bool, now time.Time) error {
-	if opts.Force {
-		return fmt.Errorf("--force is not supported on v2 layouts; fork re-adoption arrives with `ralph adopt`")
-	}
-
 	// Step 0: read+cache the settings snapshot before any writes happen, so
 	// a partial failure later can never lose the oldOwned side of the 3-way
 	// merge. A missing snapshot (Phase 2 init generation) falls back to "{}"

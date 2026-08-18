@@ -40,13 +40,36 @@ func TestManifestRoundTrip(t *testing.T) {
 	}
 }
 
-func TestManifestRoundTripV2BaselineFields(t *testing.T) {
+// TestManifestRoundTripLegacyBaselineFields pins read compatibility for the
+// baseline_status/baseline_path TOML fields written by pre-Phase-3 `ralph`
+// versions (internal/scaffold/baseline.go, removed in Phase 3 — see
+// docs/plans/active/2026-08-18-overlay-scaffold-v2-p3.md). The current
+// codebase never writes these fields (no setter constructs them anymore), so
+// the entries below are built directly rather than through a setter, purely
+// to prove ReadManifest/Write still round-trip a manifest a legacy `ralph`
+// left behind.
+func TestManifestRoundTripLegacyBaselineFields(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "manifest.toml")
 
 	m := NewManifest("0.3.0")
-	m.SetFileWithBaseline("AGENTS.md", "sha256:abc123", ".ralph/baseline/AGENTS.md")
-	m.SetFileResolvedWithBaseline("partial.md", "sha256:template", "sha256:disk", FileStatePartial, ".ralph/baseline/partial.md")
+	m.Files["AGENTS.md"] = ManifestFile{
+		Hash:           "sha256:abc123",
+		Managed:        true,
+		State:          FileStateManaged,
+		TemplateHash:   "sha256:abc123",
+		BaselineStatus: BaselineStatusAvailable,
+		BaselinePath:   ".ralph/baseline/AGENTS.md",
+	}
+	m.Files["partial.md"] = ManifestFile{
+		Hash:           "sha256:template",
+		Managed:        true,
+		State:          FileStatePartial,
+		TemplateHash:   "sha256:template",
+		DiskHash:       "sha256:disk",
+		BaselineStatus: BaselineStatusAvailable,
+		BaselinePath:   ".ralph/baseline/partial.md",
+	}
 	m.SetFileUnmanaged("CLAUDE.md", "sha256:local")
 
 	if err := m.Write(path); err != nil {
@@ -118,9 +141,6 @@ managed = true
 	}
 	if entry.BaselineStatus != "" || entry.BaselinePath != "" {
 		t.Fatalf("v1 manifest should not gain baseline metadata on read: %+v", entry)
-	}
-	if entry.IsBaselineAvailable() {
-		t.Fatal("v1 manifest entry must not be baseline-available")
 	}
 }
 
@@ -238,8 +258,23 @@ template_hash = "sha256:abc123"
 func TestExistingConstructorsWriteNoV3Fields(t *testing.T) {
 	m := NewManifest("0.3.0")
 	m.SetFile("AGENTS.md", "sha256:a")
-	m.SetFileWithBaseline("CLAUDE.md", "sha256:b", ".ralph/baseline/CLAUDE.md")
-	m.SetFileResolvedWithBaseline("partial.md", "sha256:c", "sha256:d", FileStatePartial, ".ralph/baseline/partial.md")
+	m.Files["CLAUDE.md"] = ManifestFile{
+		Hash:           "sha256:b",
+		Managed:        true,
+		State:          FileStateManaged,
+		TemplateHash:   "sha256:b",
+		BaselineStatus: BaselineStatusAvailable,
+		BaselinePath:   ".ralph/baseline/CLAUDE.md",
+	}
+	m.Files["partial.md"] = ManifestFile{
+		Hash:           "sha256:c",
+		Managed:        true,
+		State:          FileStatePartial,
+		TemplateHash:   "sha256:c",
+		DiskHash:       "sha256:d",
+		BaselineStatus: BaselineStatusAvailable,
+		BaselinePath:   ".ralph/baseline/partial.md",
+	}
 	m.SetFileUnmanaged("local.md", "sha256:e")
 	m.Files["with-hash.md"] = m.Files["with-hash.md"].WithTemplateHash("sha256:f")
 
@@ -257,7 +292,14 @@ func TestExistingConstructorsWriteNoV3Fields(t *testing.T) {
 
 func TestSetOwner_SetsOnExistingEntry(t *testing.T) {
 	m := NewManifest("0.4.0")
-	m.SetFileWithBaseline("AGENTS.md", "sha256:tmpl", ".ralph/baseline/AGENTS.md")
+	m.Files["AGENTS.md"] = ManifestFile{
+		Hash:           "sha256:tmpl",
+		Managed:        true,
+		State:          FileStateManaged,
+		TemplateHash:   "sha256:tmpl",
+		BaselineStatus: BaselineStatusAvailable,
+		BaselinePath:   ".ralph/baseline/AGENTS.md",
+	}
 
 	if err := m.SetOwner("AGENTS.md", OwnerBlock); err != nil {
 		t.Fatalf("SetOwner: %v", err)

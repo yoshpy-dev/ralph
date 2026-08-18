@@ -664,6 +664,78 @@ func TestRunUpgradeV2_MalformedBlock_CompletesWithReport(t *testing.T) {
 	}
 }
 
+// TestRunUpgradeIOWithOptions_LegacyManifest_FailsClosedZeroWrites is AC-7
+// coverage for `ralph upgrade`: a manifest with no meta.layout (a genuine
+// pre-v2 project) is rejected fail-closed with zero writes to the tree. The
+// legacy interactive upgrade engine was removed in Phase 3 (docs/plans
+// /active/2026-08-18-overlay-scaffold-v2-p3.md, FR-13); the automated
+// migration to v2 arrives in a later ralph release (Phase 4).
+func TestRunUpgradeIOWithOptions_LegacyManifest_FailsClosedZeroWrites(t *testing.T) {
+	setupTestEmbedFS(t)
+	Version = "2.0.0-test"
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".ralph"), 0755); err != nil {
+		t.Fatalf("MkdirAll .ralph: %v", err)
+	}
+	legacy := scaffold.NewManifest("1.0.0-test")
+	legacy.SetFile("AGENTS.md", "sha256:legacy")
+	manifestPath := filepath.Join(dir, ".ralph", "manifest.toml")
+	if err := legacy.Write(manifestPath); err != nil {
+		t.Fatalf("writing legacy manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte("# legacy AGENTS\n"), 0644); err != nil {
+		t.Fatalf("write AGENTS.md: %v", err)
+	}
+
+	before := snapshotDirHashes(t, dir)
+
+	var out, errOut bytes.Buffer
+	err := runUpgradeIOWithOptions(dir, upgradeOptions{Pager: pagerNever}, strings.NewReader(""), &out, &errOut, false)
+	if err == nil {
+		t.Fatal("upgrade on a legacy manifest: expected an error, got nil")
+	}
+	if !errors.Is(err, errLegacyLayoutFailClosed) {
+		t.Errorf("err = %v, want errors.Is(err, errLegacyLayoutFailClosed)", err)
+	}
+
+	after := snapshotDirHashes(t, dir)
+	if !slicesEqualStrings(before, after) {
+		t.Errorf("legacy-manifest upgrade must write zero files; before=%v after=%v", before, after)
+	}
+}
+
+// TestRunUpgradeV2_RemovesLegacyBaselineDirectory is AC-8 coverage: a
+// successful v2 upgrade deletes a leftover .ralph/baseline/ directory from a
+// project that predates Phase 3's baseline-mechanism removal (docs/plans
+// /active/2026-08-18-overlay-scaffold-v2-p3.md). The directory is simulated
+// directly (rather than produced by a real legacy write path, since that
+// path no longer exists in this codebase) — see the `## 後始末` step of the
+// plan's Scope section.
+func TestRunUpgradeV2_RemovesLegacyBaselineDirectory(t *testing.T) {
+	target := initV2Project(t, gen1(), "1.0.0-test")
+
+	baselineDir := filepath.Join(target, ".ralph", "baseline")
+	if err := os.MkdirAll(baselineDir, 0755); err != nil {
+		t.Fatalf("MkdirAll .ralph/baseline: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(baselineDir, "AGENTS.md"), []byte("stale baseline\n"), 0644); err != nil {
+		t.Fatalf("seed stale baseline file: %v", err)
+	}
+
+	scaffold.EmbeddedFS = gen2().build()
+	Version = "1.1.0-test"
+
+	var out, errOut bytes.Buffer
+	if err := runUpgradeIOWithOptions(target, upgradeOptions{Pager: pagerNever}, strings.NewReader(""), &out, &errOut, false); err != nil {
+		t.Fatalf("runUpgradeIOWithOptions: %v\nstderr:\n%s", err, errOut.String())
+	}
+
+	if _, statErr := os.Stat(baselineDir); !os.IsNotExist(statErr) {
+		t.Errorf(".ralph/baseline must be removed after a successful v2 upgrade; stat err = %v", statErr)
+	}
+}
+
 func slicesEqualStrings(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
