@@ -987,13 +987,28 @@ func confirmMigration(in io.Reader, out io.Writer, autoYes bool) (bool, error) {
 // relocation source), which validateMigrationWriteTarget never saw. Placing
 // the check at this single dispatch point, ahead of the switch, means no
 // future MigrationOpKind can be added without it.
+//
+// OpDeleteOldPathAdoptFork additionally validates NewPath via
+// validateMigrationForkAdoptionTarget: executeMigrationEntries never writes
+// NewPath for this kind (only OldPath is deleted), so NewPath's existing
+// disk content is trusted as-is and recorded into the v3 manifest as the
+// adopted fork (buildMigratedManifest's forkByPath handling) -- a symlinked
+// NewPath parent or a non-regular NewPath leaf must be refused before
+// OldPath is deleted, the same way a write target is refused (AR#1,
+// docs/reports/cross-review-triage-overlay-scaffold-v2-p4.md).
 func validateMigrationOp(absDir string, e MigrationEntry) error {
 	if err := upgrade.ValidateRealParentChain(absDir, e.OldPath); err != nil {
 		return err
 	}
 	switch e.Kind {
 	case OpDeleteOldPath, OpDeleteOldPathAdoptFork:
-		return validateMigrationLeaf(absDir, e.OldPath, false /* mustExist */)
+		if err := validateMigrationLeaf(absDir, e.OldPath, false /* mustExist */); err != nil {
+			return err
+		}
+		if e.Kind == OpDeleteOldPathAdoptFork {
+			return validateMigrationForkAdoptionTarget(absDir, e.NewPath)
+		}
+		return nil
 	case OpForkRelocate:
 		if err := validateMigrationLeaf(absDir, e.OldPath, true /* mustExist */); err != nil {
 			return err
@@ -1055,6 +1070,26 @@ func validateMigrationWriteTarget(absDir, relPath string) error {
 		return fmt.Errorf("%s: %w", relPath, err)
 	}
 	return validateMigrationLeaf(absDir, relPath, false /* mustExist */)
+}
+
+// validateMigrationForkAdoptionTarget validates NewPath for an
+// OpDeleteOldPathAdoptFork entry: the path itself must be clean/local, every
+// existing parent path component must be a real directory (never a symlink
+// -- the same chain validateMigrationWriteTarget applies to write targets),
+// and the leaf must already exist as a regular file. mustExist is true here
+// (unlike validateMigrationWriteTarget): this kind never writes NewPath
+// (executeMigrationEntries only deletes OldPath for it), so its content is
+// read as-is and trusted as the adopted fork -- an absent or non-regular
+// leaf means there is nothing safe to adopt (AR#1,
+// docs/reports/cross-review-triage-overlay-scaffold-v2-p4.md).
+func validateMigrationForkAdoptionTarget(absDir, relPath string) error {
+	if _, err := scaffold.CleanLocalRelPath(relPath); err != nil {
+		return fmt.Errorf("%s: %w", relPath, err)
+	}
+	if err := upgrade.ValidateRealParentChain(absDir, relPath); err != nil {
+		return fmt.Errorf("%s: %w", relPath, err)
+	}
+	return validateMigrationLeaf(absDir, relPath, true /* mustExist */)
 }
 
 // validateMigrationDirOp validates a directory migration is about to
@@ -1467,13 +1502,31 @@ func buildMigratedManifest(version string, oldManifest *scaffold.Manifest, absDi
 		templateHash := scaffold.HashBytes(desired[path])
 		owner := ownerForScaffoldPath(path)
 		diskHash := templateHash
+		diskExists := false
 		if owner == scaffold.OwnerSeed || owner == scaffold.OwnerBlock {
 			diskContent, hasDisk, err := readDiskFileForMigration(absDir, path)
 			if err != nil {
 				return nil, err
 			}
+			diskExists = hasDisk
 			if hasDisk {
 				diskHash = scaffold.HashBytes(diskContent)
+			}
+		}
+		if owner == scaffold.OwnerSeed && diskExists && diskHash != templateHash {
+			if _, trackedInLegacy := oldManifest.Files[path]; !trackedInLegacy {
+				// Untracked-in-legacy-manifest seed path whose pre-existing
+				// disk content diverges from the new template: leave it out
+				// of the v3 manifest entirely instead of recording
+				// SetFileOwned here. The chained v2 upgrade's
+				// classifyUntracked (internal/upgrade/replaceplan.go) is what
+				// raises the seed advisory for exactly this shape, but only
+				// when the path has no manifest entry at all -- recording
+				// TemplateHash=current here would make the chained call's
+				// classifySeed see "template unchanged since last recorded
+				// application" and silently no-op, swallowing the advisory
+				// (AR#2, docs/reports/cross-review-triage-overlay-scaffold-v2-p4.md).
+				continue
 			}
 		}
 		if err := nm.SetFileOwned(path, owner, templateHash, diskHash); err != nil {
@@ -1520,6 +1573,13 @@ func renderMigrationReport(plan MigrationPlan, desired map[string][]byte, absDir
 
 	forkEntries := entriesForKind(plan.Entries, OpForkRelocate)
 	forkEntries = append(forkEntries, entriesForKind(plan.Entries, OpForkInPlace)...)
+	// OpDeleteOldPathAdoptFork's NewPath is also a fork -- an already-
+	// relocated modified/unmanaged source whose destination was adopted as
+	// the fork record (see relocationOutcome) -- and its content is never
+	// read anywhere else in this report, so omitting it here silently drops
+	// the one diff an operator most needs to review (AR#3,
+	// docs/reports/cross-review-triage-overlay-scaffold-v2-p4.md).
+	forkEntries = append(forkEntries, entriesForKind(plan.Entries, OpDeleteOldPathAdoptFork)...)
 	if len(forkEntries) > 0 {
 		sort.Slice(forkEntries, func(i, j int) bool { return forkEntries[i].NewPath < forkEntries[j].NewPath })
 		b.WriteString("## Fork diffs\n\n")

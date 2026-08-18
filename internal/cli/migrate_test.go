@@ -2275,3 +2275,233 @@ func TestRunMigrateLegacy_SettingsPruneReport_NearMissNotClaimedAsRemoved(t *tes
 		t.Errorf("migration report must surface the near-miss so an operator does not mistake its survival for an oversight:\n%s", report)
 	}
 }
+
+// TestRunMigrateLegacy_SymlinkedAdoptForkDestParent_ZeroWrites covers AR#1
+// (docs/reports/cross-review-triage-overlay-scaffold-v2-p4.md): an
+// OpDeleteOldPathAdoptFork entry's NewPath (the relocation destination whose
+// content is trusted and adopted as the fork record — see
+// buildMigratedManifest's forkByPath handling) must be preflight-validated
+// the same way a write target is, even though executeMigrationEntries never
+// actually writes to it. Collision-matrix case (a) with a modified source
+// (see TestClassifyMigration_CollisionMatrix) puts NewPath's content on disk
+// through a symlinked parent directory; validateMigrationOp must refuse this
+// before OldPath is deleted.
+func TestRunMigrateLegacy_SymlinkedAdoptForkDestParent_ZeroWrites(t *testing.T) {
+	isolateGitConfig(t)
+	dir := t.TempDir()
+	target := filepath.Join(dir, "project")
+	if err := os.MkdirAll(filepath.Join(target, ".ralph"), 0755); err != nil {
+		t.Fatalf("MkdirAll .ralph: %v", err)
+	}
+
+	const forkedContent = "# Architecture (user edited)\n\nadopted fork content.\n"
+
+	// Old path still holds the modified content on disk (must survive a
+	// preflight refusal). The relocation destination's directory
+	// (.claude/rules/ralph) is a symlink pointing outside target, holding
+	// content matching the source — collision-matrix case (a) — so
+	// ClassifyMigration plans OpDeleteOldPathAdoptFork without the AR#1 fix
+	// ever inspecting NewPath's parent chain.
+	writeMigrationDiskFile(t, target, ".claude/rules/architecture.md", forkedContent)
+
+	external := t.TempDir()
+	if err := os.Symlink(external, filepath.Join(target, ".claude", "rules", "ralph")); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(external, "architecture.md"), []byte(forkedContent), 0644); err != nil {
+		t.Fatalf("WriteFile through symlink for fixture setup: %v", err)
+	}
+
+	m := scaffold.NewManifest("0.9.0-test")
+	m.SetFile(".claude/rules/architecture.md", migrateHash("stale-hash-forces-modified"))
+	manifestPath := filepath.Join(target, ".ralph", "manifest.toml")
+	if err := m.Write(manifestPath); err != nil {
+		t.Fatalf("writing legacy manifest: %v", err)
+	}
+	runMigrationTestGit(t, target, "init")
+	runMigrationTestGit(t, target, "add", "-A")
+	runMigrationTestGit(t, target, "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "symlinked adopt-fork dest fixture")
+
+	scaffold.EmbeddedFS = legacyFixtureNewTemplateFS()
+	Version = "2.0.0-test"
+
+	manifestBefore := mustReadFile(t, manifestPath)
+
+	var out, errOut bytes.Buffer
+	err := runUpgradeIOWithOptions(target, upgradeOptions{Yes: true, Pager: pagerNever}, strings.NewReader(""), &out, &errOut, false)
+	if err == nil {
+		t.Fatal("migration adopting a fork through a symlinked destination parent: expected an error, got nil")
+	}
+	if !strings.Contains(err.Error(), "preflight") {
+		t.Errorf("err = %v, want a preflight-check error naming the unsafe path", err)
+	}
+
+	manifestAfter := mustReadFile(t, manifestPath)
+	if !bytes.Equal(manifestBefore, manifestAfter) {
+		t.Errorf("a preflight refusal must not touch the legacy manifest:\nbefore: %s\nafter:  %s", manifestBefore, manifestAfter)
+	}
+
+	gotOld := mustReadFile(t, filepath.Join(target, ".claude", "rules", "architecture.md"))
+	if string(gotOld) != forkedContent {
+		t.Errorf("a preflight refusal must leave OldPath surviving with its original content: got %q, want %q", gotOld, forkedContent)
+	}
+	info, lerr := os.Lstat(filepath.Join(target, ".claude", "rules", "ralph"))
+	if lerr != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Errorf(".claude/rules/ralph must remain the untouched symlink: info=%+v err=%v", info, lerr)
+	}
+	externalEntries, rerr := os.ReadDir(external)
+	if rerr != nil {
+		t.Fatalf("reading external dir: %v", rerr)
+	}
+	if len(externalEntries) != 1 {
+		t.Errorf("a preflight refusal must not write through the symlink into the external dir; entries=%v", externalEntries)
+	}
+}
+
+// TestRunMigrateLegacy_UntrackedSeedCollision_AdvisorySurvivesChainedUpgrade
+// covers AR#2 (docs/reports/cross-review-triage-overlay-scaffold-v2-p4.md):
+// a path with no legacy manifest entry at all ("untracked"), whose resolved
+// v3 owner is seed, and whose pre-existing disk content diverges from the
+// new template, must not be recorded into the migrated v3 manifest with
+// TemplateHash=current. Doing so would make the chained v2 upgrade's
+// classifySeed see "template unchanged since last recorded application" and
+// silently no-op, swallowing the seed advisory that
+// internal/upgrade/replaceplan.go's classifyUntracked would otherwise raise
+// for exactly this shape.
+func TestRunMigrateLegacy_UntrackedSeedCollision_AdvisorySurvivesChainedUpgrade(t *testing.T) {
+	isolateGitConfig(t)
+	dir := t.TempDir()
+	target := filepath.Join(dir, "project")
+	if err := os.MkdirAll(filepath.Join(target, ".ralph"), 0755); err != nil {
+		t.Fatalf("MkdirAll .ralph: %v", err)
+	}
+
+	const localRalphToml = "[pipeline]\nmodel = \"pre-existing-local-choice\"\n"
+	writeMigrationDiskFile(t, target, "ralph.toml", localRalphToml)
+
+	// A minimal legacy manifest that never tracked ralph.toml at all (an old
+	// enough legacy version, or a file the user created by hand before the
+	// v2 template started shipping a seed there).
+	m := scaffold.NewManifest("0.9.0-test")
+	m.SetFile(".claude/rules/testing.md", migrateHash("unmodified testing rule"))
+	writeMigrationDiskFile(t, target, ".claude/rules/testing.md", "unmodified testing rule")
+	manifestPath := filepath.Join(target, ".ralph", "manifest.toml")
+	if err := m.Write(manifestPath); err != nil {
+		t.Fatalf("writing legacy manifest: %v", err)
+	}
+	runMigrationTestGit(t, target, "init")
+	runMigrationTestGit(t, target, "add", "-A")
+	runMigrationTestGit(t, target, "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "untracked seed collision fixture")
+
+	scaffold.EmbeddedFS = legacyFixtureNewTemplateFS()
+	Version = "2.0.0-test"
+
+	var out, errOut bytes.Buffer
+	if err := runUpgradeIOWithOptions(target, upgradeOptions{Yes: true, Pager: pagerNever}, strings.NewReader(""), &out, &errOut, false); err != nil {
+		t.Fatalf("runUpgradeIOWithOptions: %v\nstdout:\n%s\nstderr:\n%s", err, out.String(), errOut.String())
+	}
+
+	// -- the pre-existing local file is left untouched --
+	gotRalphToml := mustReadFile(t, filepath.Join(target, "ralph.toml"))
+	if string(gotRalphToml) != localRalphToml {
+		t.Errorf("ralph.toml = %q, want untouched local content %q", gotRalphToml, localRalphToml)
+	}
+
+	// -- the v3 manifest records owner=seed with DiskHash matching the local
+	// content, not the template --
+	m2 := readManifestV2(t, target)
+	entry, ok := m2.Files["ralph.toml"]
+	if !ok {
+		t.Fatalf("ralph.toml must be tracked in the v3 manifest after the chained upgrade, got no entry")
+	}
+	if entry.Owner != scaffold.OwnerSeed {
+		t.Errorf("ralph.toml Owner = %q, want %q", entry.Owner, scaffold.OwnerSeed)
+	}
+	if entry.DiskHash != migrateHash(localRalphToml) {
+		t.Errorf("ralph.toml DiskHash = %q, want the local content's hash %q", entry.DiskHash, migrateHash(localRalphToml))
+	}
+
+	// -- the advisory is present in the chained upgrade's own report --
+	upgradeReportPaths, globErr := filepath.Glob(filepath.Join(target, "docs", "reports", "upgrade-*.md"))
+	if globErr != nil || len(upgradeReportPaths) != 1 {
+		t.Fatalf("expected exactly one upgrade-*.md report, got %v (err=%v)", upgradeReportPaths, globErr)
+	}
+	upgradeReport := string(mustReadFile(t, upgradeReportPaths[0]))
+	if !strings.Contains(upgradeReport, "## Advisories") {
+		t.Errorf("upgrade report must contain an Advisories section:\n%s", upgradeReport)
+	}
+	if !strings.Contains(upgradeReport, "`ralph.toml` (owner: seed)") {
+		t.Errorf("upgrade report must surface the ralph.toml seed advisory:\n%s", upgradeReport)
+	}
+
+	// -- a subsequent run is a no-op: the advisory is one-shot, cleared by
+	// the manifest rebuild that just ran --
+	before := snapshotTreeHashesExcluding(t, target)
+	var out2, errOut2 bytes.Buffer
+	err2 := runUpgradeIOWithOptions(target, upgradeOptions{Yes: true, Pager: pagerNever}, strings.NewReader(""), &out2, &errOut2, false)
+	after := snapshotTreeHashesExcluding(t, target)
+	if err2 != nil {
+		t.Errorf("subsequent run must succeed as a no-op: %v\nstdout:\n%s\nstderr:\n%s", err2, out2.String(), errOut2.String())
+	}
+	if !slicesEqualStrings(before, after) {
+		t.Errorf("subsequent run must write nothing (advisory already cleared); before=%v after=%v", before, after)
+	}
+}
+
+// TestRunMigrateLegacy_AdoptedForkDiff_IncludedInReport covers AR#3
+// (docs/reports/cross-review-triage-overlay-scaffold-v2-p4.md): the
+// migration report's fork-diff section must include OpDeleteOldPathAdoptFork
+// entries, not just OpForkRelocate/OpForkInPlace — collision-matrix case (a)
+// with a modified source (see TestClassifyMigration_CollisionMatrix)
+// produces exactly this kind, and its adopted content is otherwise never
+// surfaced anywhere in the report.
+func TestRunMigrateLegacy_AdoptedForkDiff_IncludedInReport(t *testing.T) {
+	isolateGitConfig(t)
+	dir := t.TempDir()
+	target := filepath.Join(dir, "project")
+	if err := os.MkdirAll(filepath.Join(target, ".ralph"), 0755); err != nil {
+		t.Fatalf("MkdirAll .ralph: %v", err)
+	}
+
+	const adoptedContent = "# Architecture (user edited)\n\nadopted fork content.\n"
+
+	// Old path and the relocation destination already hold identical
+	// modified content — collision-matrix case (a) — so ClassifyMigration
+	// adopts the destination as a fork (OpDeleteOldPathAdoptFork) rather
+	// than treating it as a plain relocation.
+	writeMigrationDiskFile(t, target, ".claude/rules/architecture.md", adoptedContent)
+	writeMigrationDiskFile(t, target, ".claude/rules/ralph/architecture.md", adoptedContent)
+
+	m := scaffold.NewManifest("0.9.0-test")
+	m.SetFile(".claude/rules/architecture.md", migrateHash("stale-hash-forces-modified"))
+	manifestPath := filepath.Join(target, ".ralph", "manifest.toml")
+	if err := m.Write(manifestPath); err != nil {
+		t.Fatalf("writing legacy manifest: %v", err)
+	}
+	runMigrationTestGit(t, target, "init")
+	runMigrationTestGit(t, target, "add", "-A")
+	runMigrationTestGit(t, target, "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "adopt-fork report fixture")
+
+	scaffold.EmbeddedFS = legacyFixtureNewTemplateFS()
+	Version = "2.0.0-test"
+
+	var out, errOut bytes.Buffer
+	if err := runUpgradeIOWithOptions(target, upgradeOptions{Yes: true, Pager: pagerNever}, strings.NewReader(""), &out, &errOut, false); err != nil {
+		t.Fatalf("runUpgradeIOWithOptions: %v\nstdout:\n%s\nstderr:\n%s", err, out.String(), errOut.String())
+	}
+
+	reportPaths, globErr := filepath.Glob(filepath.Join(target, "docs", "reports", "ralph-migration-*.md"))
+	if globErr != nil || len(reportPaths) != 1 {
+		t.Fatalf("expected exactly one ralph-migration-*.md report, got %v (err=%v)", reportPaths, globErr)
+	}
+	report := string(mustReadFile(t, reportPaths[0]))
+	if !strings.Contains(report, "## Fork diffs") {
+		t.Errorf("report must contain a Fork diffs section:\n%s", report)
+	}
+	if !strings.Contains(report, "### `.claude/rules/ralph/architecture.md`") {
+		t.Errorf("report must include the adopted fork's path:\n%s", report)
+	}
+	if strings.Contains(report, "### `.claude/rules/ralph/architecture.md`\n\n_No differences") {
+		t.Errorf("the adopted fork diverges from the new core content; report must show a diff, not \"no differences\":\n%s", report)
+	}
+}
