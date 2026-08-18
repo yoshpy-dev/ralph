@@ -25,7 +25,7 @@
 
 **B. 移行分類器(pure、`internal/cli/migrate.go` または `internal/upgrade`)**
 
-旧 manifest(v1/v2)+ ディスク + 新テンプレート(desired state)から `MigrationPlan` を構築:
+旧 manifest(v1/v2)+ ディスク + 新テンプレート(desired state)から `MigrationPlan` を構築。改変判定の基準は **`LegacyEntryState` 契約**として明文化する(Codex 所見 4): 比較基準は `disk_hash` があれば disk_hash、なければ `hash`(旧 v1 互換)/ `state=partial`(旧対話解消でユーザが編集採用したもの)は常に「改変済み」扱い / `managed=false`(旧 skip)は fork / 空 hash(旧 heal 対象)は「改変済み」扱いに倒す(誤削除より誤 fork が安全)— 表駆動テストで固定:
 
 - 旧エントリごとに旧記録ハッシュで改変判定:
   - **未改変 + 新レイアウトで再配置されたパス**(shipped rules / pack rules → `.claude/rules/ralph/`): 旧パス削除(新パスは移行後の v2 upgrade が生成)
@@ -36,7 +36,7 @@
 - 特別面(FR-8):
   - CLAUDE.md: 未改変 → 最小シードへ置換 / 改変済み → 完全不可侵(ralph ガイダンスは rules/ralph から供給されるためどちらでも機能)
   - AGENTS.md / .gitignore: 未改変 → 新テンプレート(block 入り)へ置換 / 改変済み → 据え置き(移行後の v2 upgrade の block エンジンが block を追記し、既存内容は block 外に保全)。改変済みの場合は旧テンプレート由来内容の重複が残り得ることをレポートで案内(FR-8 の「未改変内容の block 置換」は未改変ケースで完全充足。改変ケースの内容手術は行わない — Design decisions に記録し、スペックに一文追補)
-  - settings.json: 移行では触らず、移行後の v2 upgrade の 3-way マージ({} フォールバック)に委ねる
+  - settings.json(移行専用ステップ — Codex 所見 1): 未改変(旧記録ハッシュ一致)→ 新テンプレート settings へ丸ごと置換 + スナップショット生成(fresh v2 init と同一状態)。改変済み → 旧テンプレート世代が出荷していた既知のレガシー ralph hook コマンド(`./.claude/hooks/<name>.sh` 直接参照の 8 スクリプト)に一致する hooks エントリを剪定してから v2 の 3-way マージへ委ね、剪定内容をレポートに記録(ユーザ追加 hooks は保全)。これを怠ると旧 direct-hook が「ユーザ所有」として dispatcher と恒久二重実行になる
   - `.codex/AGENTS.override.md`: owner=seed で再帰属(Phase 3 tech-debt 行の解消)
 - `.ralph/baseline/` は削除対象
 - プレビュー描画: パスごとの処置(relocate / fork 移設 / delete / keep / seed 置換)を表形式で表示
@@ -44,7 +44,8 @@
 **C. 移行実行 + CLI 配線**
 
 - `ralph upgrade` のレガシー検出(現行 fail-closed)を移行フローに置換: (1) **git 前提チェック**(git リポジトリであること + 作業ツリークリーン。非 git または dirty → 中断) → (2) 移行プレビュー表示 → (3) **明示確認**(対話 y/N。`--yes` でスキップ — init と同じ規約。`--dry-run` はプレビューのみで終了)→ (4) 移行実行(移設/fork/削除 → v3 manifest 書き込み(owner 付与、fork 記録、Packs 継承))→ (5) **そのまま既存の v2 upgrade エンジンへ連鎖**(dispatcher・`.ralph/core`・新規ファイル等の生成は v2 エンジンが収束)→ (6) 移行レポート `docs/reports/ralph-migration-<date>.md`(分類一覧、fork 化された改変ファイルの diff、案内)
-- 途中失敗: v3 manifest 書き込みは移行ファイル操作の成功後(バリア)。失敗時は git で復元可能(クリーン前提)である旨をエラーに明記
+- **プリフライト + 再実行安定性(Codex 所見 2)**: 全ファイル操作(移設/削除/置換)を実行前に一括検証(存在・衝突・パス安全)し、検証失敗は書き込みゼロで中断。分類は再実行安定にする — 部分適用後の再実行でも「移設済み(移設先が期待内容と一致 + 旧パス不在)= 完了扱い」等で残作業のみが計画される。v3 manifest 書き込みはファイル操作成功後のバリア。manifest 書き込み後のレポート/連鎖 upgrade の失敗は警告に留め(移行自体は完了、再実行は v2 経路で収束)、失敗時エラーは git 復元手順を案内
+- **移設先衝突マトリクス(Codex 所見 3)**: fork 移設先に既存ファイルがある場合 — (a) 内容が移設元と一致 → 移設済みとして旧パス削除のみ、(b) 内容が新テンプレートと一致 + 移設元が未改変 → 旧パス削除 + core 採用、(c) それ以外(発散)→ 書き込みゼロで中断し衝突レポート(ユーザが手動解決後に再実行)
 - `ralph init` の再 init・`ralph pack add` のレガシー fail-closed メッセージを「`ralph upgrade` で移行可能」に更新
 
 **D. ドキュメント同期**
@@ -79,6 +80,7 @@
 - 【確認 UX】対話 y/N + `--yes`(init の既存規約)。`--dry-run` はプレビューのみ。Phase 3 の「非対話」原則は v2 レイアウトの upgrade に対するもので、一回限りの移行の明示確認はスペック FR-6 の要求
 - 【非 git ターゲットは移行拒否】git が唯一のロールバック手段(バックアップを作らない設計)のため
 - 【untracked 分類の owner 解決は callback 注入】planner(internal/upgrade)は CLI 層の `ownerForScaffoldPath` に依存できないため、`ReplaceOptions` に関数を渡す。nil のとき現行挙動(後方互換)
+- 【Codex アドバイザリ反映(5 件)】(1) settings は移行専用ステップ(未改変=丸置換 / 改変=既知レガシー hook 剪定)で hooks 二重実行を防止 (2) プリフライト一括検証 + 再実行安定分類で「git 復元頼み」を脱却 (3) 移設先衝突マトリクスを AC 化 (4) LegacyEntryState 契約(partial/空 hash は改変扱いに倒す) (5) 移行操作にも既存のパス/symlink 安全契約を明示適用
 - Critical forks: なし(いずれもスペック既定・Phase 2 の承認済み方針(upgrade 統合)・技術的一意性から決定)
 
 ## Acceptance criteria
@@ -95,6 +97,10 @@
 - [ ] AC-10 fail-closed メッセージ更新: `ralph init`(再 init)・`ralph pack add` のレガシー検出が「`ralph upgrade` で移行」を案内する(pack add は移行自体は行わない)
 - [ ] AC-11 パック: 旧パス pack rule(`.claude/rules/<lang>.md`)が未改変なら削除 + 新パスへ(連鎖 upgrade)、改変済みなら新パスへ fork 移設。`Meta.Packs` が v3 manifest に継承される
 - [ ] AC-12 tech-debt 2 行(seed 衝突誤 drift / codex override 再帰属)が RESOLVED 化される
+- [ ] AC-13 settings 移行: 未改変 settings は新テンプレート + スナップショットへ置換され fresh init と同一状態になる。改変済み settings は既知レガシー ralph hook エントリが剪定され(剪定はレポート記録)、ユーザ追加 hooks/permissions が保全され、dispatcher hook との二重実行が発生しない(テストで保証)
+- [ ] AC-14 プリフライトと再実行安定: 移行のファイル操作は実行前に一括検証され、検証失敗は書き込みゼロ。部分適用後の再実行が残作業のみを計画して完走する(失敗注入テストで保証)
+- [ ] AC-15 衝突マトリクス: 移設先既存の 3 ケース((a) 一致 → 完了扱い / (b) テンプレ一致 + 未改変 → core 採用 / (c) 発散 → 書き込みゼロ中断 + 衝突レポート)がテストで保証される
+- [ ] AC-16 パス安全: 全移行操作(移設元/先・削除対象)が `scaffold.CleanLocalRelPath` + `upgrade.ValidateRealParentChain` + 葉 Lstat で検証され、symlink 親・非 regular・トラバーサルは書き込みゼロで拒否される(テストで保証)
 
 ## Implementation outline
 
