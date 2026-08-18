@@ -1,6 +1,7 @@
 package upgrade
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -207,6 +208,13 @@ func UpgradeReportRelPath(version, date string) string {
 // rejects any cleaned path outside that prefix (including the directory
 // path itself, with no filename), even if it is otherwise a valid
 // local-relative path.
+//
+// This write also bypasses ApplyOps (it runs after the core replace plan
+// has already been applied), so it applies the same containment checks
+// ApplyOps and the v2 exception-face writes use: ValidateRealParentChain
+// against every existing parent path component (guards against e.g. a
+// symlinked docs/ or docs/reports/ directory), plus an Lstat of the leaf
+// that rejects anything other than a regular file or an absent entry.
 func WriteUpgradeReport(targetDir string, relPath string, content []byte) error {
 	clean, err := cleanPathKey(relPath)
 	if err != nil {
@@ -216,7 +224,19 @@ func WriteUpgradeReport(targetDir string, relPath string, content []byte) error 
 		return fmt.Errorf("upgrade report path %q: must be under %s/", relPath, upgradeReportDir)
 	}
 
+	if err := ValidateRealParentChain(targetDir, clean); err != nil {
+		return fmt.Errorf("upgrade report path %q: %w", relPath, err)
+	}
+
 	full := filepath.Join(targetDir, filepath.FromSlash(clean))
+	if fi, err := os.Lstat(full); err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("upgrade report path %q: lstat: %w", relPath, err)
+		}
+	} else if !fi.Mode().IsRegular() {
+		return fmt.Errorf("upgrade report path %q: refusing to operate on non-regular file (mode %s)", relPath, fi.Mode())
+	}
+
 	if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
 		return fmt.Errorf("creating upgrade report dir for %q: %w", clean, err)
 	}

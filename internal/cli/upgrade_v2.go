@@ -559,8 +559,31 @@ func readFinalDiskContent(targetDir, relPath string) ([]byte, error) {
 // writeFileV2 writes content to targetDir/relPath, creating parent
 // directories as needed, using the same permission heuristic as the rest of
 // the scaffold/upgrade write paths.
+//
+// This is the write path for both v2 exception-face writes that bypass
+// ApplyOps (the settings.json 3-way merge and the settings.ralph.json
+// snapshot — see v2SkipPaths' doc comment). Because those two writes never
+// go through ApplyOps' preflight, writeFileV2 applies the same containment
+// checks itself: upgrade.ValidateRealParentChain against every existing
+// parent path component, plus an Lstat of the leaf that rejects anything
+// other than a regular file or an absent entry (a symlink or other
+// non-regular file at the target is refused, mirroring ApplyOps' leaf
+// check). Both checks run, and any write, only after they both pass.
 func writeFileV2(targetDir, relPath string, content []byte) error {
+	if err := upgrade.ValidateRealParentChain(targetDir, relPath); err != nil {
+		return fmt.Errorf("write %s: %w", relPath, err)
+	}
+
 	full := filepath.Join(targetDir, filepath.FromSlash(relPath))
+	fi, err := os.Lstat(full)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("write %s: lstat: %w", relPath, err)
+		}
+	} else if !fi.Mode().IsRegular() {
+		return fmt.Errorf("write %s: refusing to operate on non-regular file (mode %s)", relPath, fi.Mode())
+	}
+
 	if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
 		return err
 	}

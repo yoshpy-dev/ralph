@@ -1067,3 +1067,128 @@ func TestApplyOps_LstatPreflightAllowsMissingCreateTarget(t *testing.T) {
 		t.Errorf("new.md = %q, err %v, want %q", got, err, "fresh")
 	}
 }
+
+// --- ApplyOps parent-chain preflight (symlinked-parent containment) ---
+//
+// The Lstat preflight above only inspects an op's leaf path. These tests
+// cover the companion check (ValidateRealParentChain): a symlinked
+// *directory* somewhere in an op's parent chain, with a leaf path that does
+// not exist yet, must also be rejected — a leaf-only Lstat reports
+// os.ErrNotExist for that case (indistinguishable from the ordinary "create"
+// case), which would otherwise let MkdirAll/WriteFile silently write through
+// the symlink to a target outside targetDir.
+
+// TestApplyOps_ParentChainPreflightRejectsSymlinkedParent_ZeroWrites proves
+// a first-level symlinked parent directory ("sub" -> an external directory)
+// is rejected before any op executes, including an op ordered before it that
+// would otherwise have succeeded, and that nothing lands at the external
+// target through the symlink.
+func TestApplyOps_ParentChainPreflightRejectsSymlinkedParent_ZeroWrites(t *testing.T) {
+	dir := t.TempDir()
+	outside := t.TempDir()
+
+	if err := os.Symlink(outside, filepath.Join(dir, "sub")); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+
+	plan := ReplacePlan{
+		Ops: []FileOp{
+			{Kind: OpCreate, Path: "first.md", Content: []byte("would succeed")},
+			{Kind: OpCreate, Path: "sub/file.md", Content: []byte("should not escape targetDir")},
+		},
+	}
+
+	err := ApplyOps(dir, plan)
+	if err == nil {
+		t.Fatal("expected ApplyOps to reject a symlinked parent directory")
+	}
+	if !strings.Contains(err.Error(), "sub") {
+		t.Errorf("error %q does not name the symlinked parent component", err.Error())
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "first.md")); !os.IsNotExist(statErr) {
+		t.Errorf("first.md should not have been written (preflight runs before any op executes): stat err = %v", statErr)
+	}
+	if _, statErr := os.Stat(filepath.Join(outside, "file.md")); !os.IsNotExist(statErr) {
+		t.Errorf("nothing should have been written through the symlink at the external target: stat err = %v", statErr)
+	}
+	linkInfo, lerr := os.Lstat(filepath.Join(dir, "sub"))
+	if lerr != nil {
+		t.Fatalf("Lstat(sub): %v", lerr)
+	}
+	if linkInfo.Mode()&os.ModeSymlink == 0 {
+		t.Error("sub should still be a symlink")
+	}
+}
+
+// TestApplyOps_ParentChainPreflightRejectsDeeplyNestedSymlinkedParent proves
+// the check walks the full parent chain, not just the immediate parent: a
+// real "a" directory containing a symlinked "b" directory ("a/b" -> an
+// external directory) is still rejected for an op targeting "a/b/file.md".
+func TestApplyOps_ParentChainPreflightRejectsDeeplyNestedSymlinkedParent(t *testing.T) {
+	dir := t.TempDir()
+	outside := t.TempDir()
+
+	if err := os.MkdirAll(filepath.Join(dir, "a"), 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.Symlink(outside, filepath.Join(dir, "a", "b")); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+
+	plan := ReplacePlan{
+		Ops: []FileOp{
+			{Kind: OpCreate, Path: "a/b/file.md", Content: []byte("should not escape targetDir")},
+		},
+	}
+
+	err := ApplyOps(dir, plan)
+	if err == nil {
+		t.Fatal("expected ApplyOps to reject a deeply-nested symlinked parent directory")
+	}
+	if _, statErr := os.Stat(filepath.Join(outside, "file.md")); !os.IsNotExist(statErr) {
+		t.Errorf("nothing should have been written through the symlink at the external target: stat err = %v", statErr)
+	}
+}
+
+// TestApplyOps_ParentChainPreflightAllowsRealNestedDirectories is the
+// control case for the symlinked-parent tests above: an op targeting a path
+// under real, pre-existing nested directories must still succeed.
+func TestApplyOps_ParentChainPreflightAllowsRealNestedDirectories(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "a", "b"), 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	plan := ReplacePlan{
+		Ops: []FileOp{
+			{Kind: OpCreate, Path: "a/b/file.md", Content: []byte("fine")},
+		},
+	}
+	if err := ApplyOps(dir, plan); err != nil {
+		t.Fatalf("ApplyOps: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "a", "b", "file.md"))
+	if err != nil || string(got) != "fine" {
+		t.Errorf("a/b/file.md = %q, err %v, want %q", got, err, "fine")
+	}
+}
+
+// TestApplyOps_ParentChainPreflightAllowsMissingIntermediateDirectories is
+// the other control case: an op targeting a path under directories that do
+// not exist yet at all must still succeed (the ordinary MkdirAll case, not
+// to be confused with a symlinked-parent rejection).
+func TestApplyOps_ParentChainPreflightAllowsMissingIntermediateDirectories(t *testing.T) {
+	dir := t.TempDir()
+	plan := ReplacePlan{
+		Ops: []FileOp{
+			{Kind: OpCreate, Path: "a/b/c/file.md", Content: []byte("fine")},
+		},
+	}
+	if err := ApplyOps(dir, plan); err != nil {
+		t.Fatalf("ApplyOps: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "a", "b", "c", "file.md"))
+	if err != nil || string(got) != "fine" {
+		t.Errorf("a/b/c/file.md = %q, err %v, want %q", got, err, "fine")
+	}
+}

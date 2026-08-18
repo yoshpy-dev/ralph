@@ -447,14 +447,23 @@ func classifyUntracked(
 // reason about). This guards against a hand-built ReplacePlan carrying a
 // path that would resolve outside targetDir.
 //
-// In that same validate-all-upfront pass, ApplyOps also os.Lstat's every
-// op's target path (update and delete targets, and create targets in case a
-// path collides with something already there): if the entry exists and is
-// not a regular file — a symlink (including a dangling one, since Lstat
-// reports the symlink's own mode without following it) or a directory —
-// ApplyOps returns an error naming the path and performs no filesystem
-// operations at all. A missing entry (os.ErrNotExist) is fine; that is the
-// ordinary create case.
+// In that same validate-all-upfront pass, ApplyOps also validates every op's
+// parent directory chain with ValidateRealParentChain: if any existing path
+// component between targetDir and the op's parent directory is not a real
+// directory (e.g. a symlink), ApplyOps returns an error naming that
+// component and performs no filesystem operations at all. A leaf-only Lstat
+// check (below) cannot catch this — a missing leaf under a symlinked parent
+// still reports os.ErrNotExist, so without this chain check MkdirAll/
+// WriteFile would silently create/write through the symlink to a target
+// outside targetDir.
+//
+// ApplyOps also os.Lstat's every op's target path itself (update and delete
+// targets, and create targets in case a path collides with something
+// already there): if the entry exists and is not a regular file — a symlink
+// (including a dangling one, since Lstat reports the symlink's own mode
+// without following it) or a directory — ApplyOps returns an error naming
+// the path and performs no filesystem operations at all. A missing entry
+// (os.ErrNotExist) is fine; that is the ordinary create case.
 //
 // ApplyOps never reads or writes the manifest — that is the commit barrier:
 // callers must only advance manifest state (recorded hashes for creates,
@@ -469,6 +478,12 @@ func ApplyOps(targetDir string, plan ReplacePlan) error {
 	for _, op := range plan.Ops {
 		if _, cerr := cleanPathKey(op.Path); cerr != nil {
 			return fmt.Errorf("%s %s: invalid path: %w", op.Kind, op.Path, cerr)
+		}
+	}
+
+	for _, op := range plan.Ops {
+		if err := ValidateRealParentChain(targetDir, op.Path); err != nil {
+			return fmt.Errorf("%s %s: %w", op.Kind, op.Path, err)
 		}
 	}
 
@@ -544,6 +559,47 @@ func cleanPathKey(raw string) (string, error) {
 		return "", err
 	}
 	return filepath.ToSlash(clean), nil
+}
+
+// ValidateRealParentChain walks every path component of relPath (a
+// slash-separated relative path, already validated e.g. via cleanPathKey)
+// from targetDir down to relPath's parent directory, and verifies each
+// existing component is a real directory — never a symlink or any other
+// non-directory entry. A missing component is fine (a later os.MkdirAll
+// creates real directories for it).
+//
+// This closes a gap a leaf-only Lstat check leaves open: if some parent
+// directory in relPath's chain is a symlink (e.g. "sub" -> /tmp/outside)
+// and the leaf itself does not exist yet, Lstat-ing the leaf alone reports
+// os.ErrNotExist — indistinguishable from the ordinary "nothing here yet"
+// case — even though the leaf's real location, once created, resolves
+// outside targetDir through the symlink. Callers that write through
+// os.MkdirAll/os.WriteFile (ApplyOps, and the exception-face writes in
+// internal/cli/upgrade_v2.go that bypass ApplyOps) must call this before
+// writing.
+func ValidateRealParentChain(targetDir, relPath string) error {
+	dir := filepath.ToSlash(filepath.Dir(filepath.ToSlash(relPath)))
+	if dir == "." || dir == "/" || dir == "" {
+		return nil
+	}
+
+	current := targetDir
+	for _, seg := range strings.Split(dir, "/") {
+		current = filepath.Join(current, seg)
+		fi, err := os.Lstat(current)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				// Missing component: fine, a later MkdirAll creates a real
+				// directory here.
+				continue
+			}
+			return fmt.Errorf("lstat %s: %w", current, err)
+		}
+		if !fi.IsDir() {
+			return fmt.Errorf("refusing to write through non-directory path component %s (mode %s)", current, fi.Mode())
+		}
+	}
+	return nil
 }
 
 // readDiskFile reads targetDir/path, reporting hasDisk=false (with no error)

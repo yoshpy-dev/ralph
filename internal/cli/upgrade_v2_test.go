@@ -565,6 +565,157 @@ func TestRunUpgradeV2_SettingsWriteFailure_SnapshotNotAdvanced(t *testing.T) {
 	}
 }
 
+// --- exception-face write containment (symlinked-target rejection) ---
+//
+// The settings.json merge write, the settings.ralph.json snapshot write,
+// and the upgrade report write all bypass ApplyOps (they run as their own
+// explicit steps, not through the core replace plan). These tests prove
+// each one refuses to write through a symlinked target instead of silently
+// writing through it to a location outside targetDir.
+
+// TestRunUpgradeV2_SymlinkedSettingsJSON_RejectedZeroWrites pins the cycle-1
+// cross-review fix (AR#2): a symlinked .claude/settings.json target must
+// make the settings merge write fail with an error, leaving the symlink and
+// its external target completely untouched.
+func TestRunUpgradeV2_SymlinkedSettingsJSON_RejectedZeroWrites(t *testing.T) {
+	target := initV2Project(t, gen1(), "1.0.0-test")
+
+	settingsPath := filepath.Join(target, ".claude", "settings.json")
+	if err := os.Remove(settingsPath); err != nil {
+		t.Fatalf("removing settings.json to replace with a symlink: %v", err)
+	}
+	externalPath := filepath.Join(filepath.Dir(target), "external-settings.json")
+	externalContent := []byte(`{"external": true}`)
+	if err := os.WriteFile(externalPath, externalContent, 0644); err != nil {
+		t.Fatalf("write external settings target: %v", err)
+	}
+	if err := os.Symlink(externalPath, settingsPath); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+
+	scaffold.EmbeddedFS = gen2().build()
+	Version = "1.1.0-test"
+
+	var out, errOut bytes.Buffer
+	err := runUpgradeIOWithOptions(target, upgradeOptions{Pager: pagerNever}, strings.NewReader(""), &out, &errOut, false)
+	if err == nil {
+		t.Fatal("expected runUpgradeIOWithOptions to reject a symlinked settings.json target")
+	}
+	if !strings.Contains(err.Error(), "settings.json") {
+		t.Errorf("error %q does not name settings.json", err.Error())
+	}
+
+	info, lerr := os.Lstat(settingsPath)
+	if lerr != nil {
+		t.Fatalf("Lstat settings.json: %v", lerr)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("settings.json must remain a symlink, got mode %v", info.Mode())
+	}
+	gotExternal, rerr := os.ReadFile(externalPath)
+	if rerr != nil || string(gotExternal) != string(externalContent) {
+		t.Errorf("external settings target must be left untouched: got %q, err %v, want %q", gotExternal, rerr, externalContent)
+	}
+}
+
+// TestRunUpgradeV2_SymlinkedSettingsSnapshot_RejectedAfterSettingsJSONWritten
+// pins the same fix (AR#2) for the second exception-face write: a symlinked
+// .ralph/core/settings.ralph.json target must make the snapshot write fail
+// with an error, leaving the symlink and its external target untouched, even
+// though the earlier (real-path) settings.json write in the same run already
+// succeeded.
+func TestRunUpgradeV2_SymlinkedSettingsSnapshot_RejectedAfterSettingsJSONWritten(t *testing.T) {
+	target := initV2Project(t, gen1(), "1.0.0-test")
+
+	snapshotPath := filepath.Join(target, ".ralph", "core", "settings.ralph.json")
+	if err := os.Remove(snapshotPath); err != nil {
+		t.Fatalf("removing settings.ralph.json to replace with a symlink: %v", err)
+	}
+	externalPath := filepath.Join(filepath.Dir(target), "external-settings-snapshot.json")
+	externalContent := []byte(`{"external": true}`)
+	if err := os.WriteFile(externalPath, externalContent, 0644); err != nil {
+		t.Fatalf("write external snapshot target: %v", err)
+	}
+	if err := os.Symlink(externalPath, snapshotPath); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+
+	scaffold.EmbeddedFS = gen2().build()
+	Version = "1.1.0-test"
+
+	var out, errOut bytes.Buffer
+	err := runUpgradeIOWithOptions(target, upgradeOptions{Pager: pagerNever}, strings.NewReader(""), &out, &errOut, false)
+	if err == nil {
+		t.Fatal("expected runUpgradeIOWithOptions to reject a symlinked settings.ralph.json target")
+	}
+	if !strings.Contains(err.Error(), "settings.ralph.json") && !strings.Contains(err.Error(), "settings snapshot") {
+		t.Errorf("error %q does not name the settings snapshot", err.Error())
+	}
+
+	info, lerr := os.Lstat(snapshotPath)
+	if lerr != nil {
+		t.Fatalf("Lstat settings.ralph.json: %v", lerr)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("settings.ralph.json must remain a symlink, got mode %v", info.Mode())
+	}
+	gotExternal, rerr := os.ReadFile(externalPath)
+	if rerr != nil || string(gotExternal) != string(externalContent) {
+		t.Errorf("external snapshot target must be left untouched: got %q, err %v, want %q", gotExternal, rerr, externalContent)
+	}
+
+	// The real (non-symlinked) settings.json write earlier in the same run
+	// must still have succeeded, proving the snapshot rejection is specific
+	// to the symlinked target rather than a whole-run short-circuit.
+	gotSettings := string(mustReadFile(t, settingsPathFor(target)))
+	if !strings.Contains(gotSettings, `"Bash(new-owned:*)"`) {
+		t.Errorf("settings.json must still have been merged before the snapshot write failed:\n%s", gotSettings)
+	}
+}
+
+// TestRunUpgradeV2_SymlinkedReportsDir_RejectedZeroWrites pins the same fix
+// applied to the upgrade report write (internal/upgrade.WriteUpgradeReport):
+// a symlinked docs/reports directory must make the report write fail with
+// an error rather than writing the report through the symlink to a location
+// outside targetDir.
+func TestRunUpgradeV2_SymlinkedReportsDir_RejectedZeroWrites(t *testing.T) {
+	target := initV2Project(t, gen1(), "1.0.0-test")
+
+	externalDir := t.TempDir()
+	reportsPath := filepath.Join(target, "docs", "reports")
+	if err := os.Symlink(externalDir, reportsPath); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+
+	scaffold.EmbeddedFS = gen2().build()
+	Version = "1.1.0-test"
+
+	var out, errOut bytes.Buffer
+	err := runUpgradeIOWithOptions(target, upgradeOptions{Pager: pagerNever}, strings.NewReader(""), &out, &errOut, false)
+	if err == nil {
+		t.Fatal("expected runUpgradeIOWithOptions to reject a symlinked docs/reports directory")
+	}
+
+	info, lerr := os.Lstat(reportsPath)
+	if lerr != nil {
+		t.Fatalf("Lstat docs/reports: %v", lerr)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("docs/reports must remain a symlink, got mode %v", info.Mode())
+	}
+	entries, rerr := os.ReadDir(externalDir)
+	if rerr != nil {
+		t.Fatalf("ReadDir externalDir: %v", rerr)
+	}
+	if len(entries) != 0 {
+		t.Errorf("nothing should have been written through the symlinked docs/reports dir, found: %v", entries)
+	}
+}
+
+func settingsPathFor(target string) string {
+	return filepath.Join(target, ".claude", "settings.json")
+}
+
 // TestRunUpgradeV2_Idempotent_SecondRunIsNoOp covers AC-5: running the same
 // target version twice in a row produces zero further scaffold-content
 // writes on the second run (manifest.toml's Updated timestamp and the dated
