@@ -139,6 +139,12 @@
 - リリースタグは Phase 5 まで発行しない。移行コードは下流未到達のまま Phase 5 の系列リリースに同梱される
 - スライス単位 revert 可能
 
+## Deviations
+
+- cycle-2 cross-review(cap 2/2 到達)で 3 件 ACTION_REQUIRED(AR#1: 未改変・同一パス seed の OpKeepInPlace 誤分類、AR#2: 利用不能パックの preservePrefixes 破棄による誤削除、AR#3: 移設対象 OpDeleteOldPath の NewPath 未検証)。操作者判断で cap を 3 に引き上げ、`215c676` で 3 件とも修正
+- cycle-3 self-review で C3-1(HIGH、データ損失系)を検出: `215c676` の AR#2 修正は利用不能パックの payload(`packs/languages/<pack>/`)のみ preserve し、レガシー配置のルールファイル(`.claude/rules/<pack>.md` — v2 移設前のパス)を対象外のままにしていたため、未改変ケースで `OpDeleteOldPath`(「v2 テンプレート集合から廃止」)に誤分類され削除される経路が残っていた。`Meta.Packs` にはそのパックを維持したまま該当ルールだけ消える不整合。`9ac24de` で `legacyPackRuleRelPath` を preserve 対象に追加して修正(回帰テスト付き)。C3-2〜C3-7(MEDIUM/LOW、doc comment の陳腐化・冗長コード)も同コミットで併修
+- `803d6ff` で `relocatedRulePath` の doc comment(利用不能パックの例外を記述していなかった)を追補修正
+
 ## Open questions
 
 - ~~移行分類器の配置(internal/cli vs internal/upgrade)— スライス 2 で確定(所有マップへの依存方向で決める)~~ **解決(スライス 2)**: `internal/cli/migrate.go` に配置。分類器は `ownerForScaffoldPath`(CLI 層、`internal/cli/init.go`)と `scaffold`/`upgrade` 両方に依存する必要があり、`internal/upgrade` は CLI 層の所有マップに依存できない(パッケージ境界が逆転する — `internal/upgrade/replaceplan.go` の `ReplaceOptions.OwnerForPath` のドキュメント参照)。再配置判定(`.claude/rules/<name>.md` → `.claude/rules/ralph/<name>.md`)は、呼び出し側が組み立てる desired state(インストール済みパックを含む)への単一のメンバーシップ確認(`relocatedRulePath`)で機械的に行い、別途「インストール済みパック名一致」チェックは不要(desired 側にパックのルールファイルが既に含まれる設計のため)。

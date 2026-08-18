@@ -97,3 +97,55 @@ Corroborated by `docs/reports/verify-2026-08-18-overlay-scaffold-v2-p4.md`'s own
 ### Known gaps
 
 None. This is the final pipeline cycle (2/2); no documentation surface needed a change for the cycle-2 delta.
+
+## Cycle 3
+
+- Date: 2026-08-19
+- Doc maintainer: `doc-maintainer` subagent (Claude Code, `/sync-docs`)
+- Scope: **delta only** — cap raised from 2 to 3 after cycle-2 cross-review reported 3 ACTION_REQUIRED findings (AR#1/AR#2/AR#3, all in the migration classifier). Commits since cycle-2's `d686226`: `e88b616` (cross-review cycle-2 triage), `215c676` (AR#1/AR#2/AR#3 fixes: unmodified, non-relocated seed paths now classify `OpReplaceWithTemplate` instead of `OpKeepInPlace`; `ClassifyMigration` gained a `preservePrefixes` parameter so an unavailable pack's legacy-manifest paths classify `OpUntouched`/Preserved instead of `OpDeleteOldPath`, and `buildMigratedManifest` carries those entries into the v3 manifest; `validateMigrationOp` now validates `NewPath`'s parent chain for a plain `OpDeleteOldPath` with a relocation destination), `cd125b7`/`5b88bae`/`20cc352` (self-review/verify/test cycle-3 report sections), `9ac24de` (self-review C3-1..C3-7 fixes — C3-1 HIGH: an unavailable pack's *legacy* rule location, `.claude/rules/<pack>.md`, was still falling through to `OpDeleteOldPath` because the AR#2 fix's `preservePrefixes` only covered the pack's payload and its **v2** rule path, not the pre-relocation legacy path; fixed by adding `legacyPackRuleRelPath` to the preserve list, with C3-2..C3-7 as accompanying doc-comment/dead-code cleanup), `803d6ff` (doc: correct `relocatedRulePath`'s doc comment, which C3-1 had left stale — it claimed every v2-rules-relocated path is by construction a key in `desired`, which the unavailable-pack exception falsifies). HEAD is `803d6ff`, working tree clean.
+
+### Verdict
+
+**No drift found in versioned docs; one plan-hygiene gap fixed.** All three cycle-3 delta commits are behavior fixes to the migration classifier (`internal/cli/migrate.go`) plus internal Go doc-comment corrections. Both behavior changes tighten an already-published guarantee rather than introducing a new one, so no README/spec/recipe text needed editing. The plan itself lacked any record of the cap raise or the C3-1 fix — added a `## Deviations` section (the plan template has no such heading; Phase 3's plan set the precedent of adding one ad hoc for exactly this kind of mid-flight cross-review finding).
+
+### What was checked
+
+1. **AR#1 / `215c676`'s seed-replacement fix (unmodified, non-relocated seed paths now `OpReplaceWithTemplate`)** — checked README's "Migrating from a legacy layout" section (`README.md:145`): "Unmodified files (per the legacy manifest's recorded hash) are replaced or relocated to their new v2 path..." This sentence already covered both the relocated and non-relocated (in-place) cases and predates `215c676` (written in slice-5's `c8b47bd`, before cycle-2 cross-review even found the bug the fix closes). The docs described the FR-7-mandated end state from the start; `215c676` makes the code match text that was already correct, not the other way around. Confirmed against `git log -p -L` on the section: unchanged since `b1babe7` (cycle-1). No edit needed.
+2. **AR#2 / pack preservation (`ClassifyMigration`'s new `preservePrefixes` parameter, `OpUntouched`/Preserved classification)** — checked `docs/recipes/adding-a-language-pack.md` (root + `templates/base/` twin) and README for any claim about how migration handles an unavailable pack. Neither mentions migration-time pack handling at all — both stay at "install/add a pack" scope, correctly deferring the unavailable-pack edge case to the generated migration report (same documentation-granularity decision cycle 1 made for other migration internals, e.g. settings.json hook pruning). No edit needed.
+3. **AR#3 / `NewPath` validation on plain `OpDeleteOldPath`** — an internal correctness fix (closes the same symlinked-destination-parent gap the cycle-1 fix closed only for `OpDeleteOldPathAdoptFork`), invisible at the documented classification granularity (README describes outcomes — "replace, relocate, fork, or delete" — not the validation mechanics behind them). No edit needed.
+4. **C3-1 (HIGH) / `9ac24de`'s `legacyPackRuleRelPath` preserve fix** — checked whether README, `docs/recipes/adding-a-language-pack.md`, or the spec's FR-7/FR-11 text make any claim about pack *rule file* survival at the legacy path specifically. None do (same as #2 — pack migration mechanics are report-scoped, not README-scoped). This is a pure classifier-internals fix; the only doc surface it touches is the plan (added to Deviations, see above) and the Go doc comment `803d6ff` already corrected. No README/spec edit needed.
+5. **`803d6ff`'s `relocatedRulePath` doc-comment fix** — a Go source comment correction (the comment now states the unavailable-pack exception explicitly, citing self-review C3-1). Confirmed this was the *only* stale doc comment C3-1 flagged (self-review's own "Secondary casualty" note); no other doc comment or versioned doc repeats the now-corrected claim ("anything under `.claude/rules/ralph/` after migration is, by construction, already a key in `desired`"). Grepped for that phrase's substring across `internal/cli/migrate.go`, `docs/`, README: only the one now-fixed occurrence. No further edit needed.
+6. **`docs/tech-debt/README.md` register** — grepped for any new row this cycle's findings might warrant: none needed, since all three cycle-2 AR items and all seven cycle-3 self-review items (including C3-1) were fixed within the pipeline cycle rather than deferred (self-review's own report confirms "Merge: not yet" until C3-1 was fixed, and it was). No RESOLVED-row bookkeeping applies to fixes that never became tech-debt rows in the first place.
+7. **Spec FR-7/FR-8 text vs. this cycle's fixes** — re-read both addendum paragraphs; neither describes pack-file handling or the seed-replacement-vs-keep-in-place distinction at a level of detail this cycle's fixes would falsify or need to extend. Unchanged since cycle-1 slice-5.
+8. **Plan progress checklist and Deviations** — "Fixed in this pass" below.
+
+### Fixed in this pass
+
+- **Plan Deviations section** (`docs/plans/active/2026-08-18-overlay-scaffold-v2-p4.md`) — the plan had no record of the cycle-2 cap raise (2 → 3) or its cause (3 ACTION_REQUIRED findings at cap), nor of the cycle-3 C3-1 HIGH fix. Added a `## Deviations` section (between "Rollout or rollback notes" and "Open questions", matching the placement Phase 3's plan used for the same purpose) summarizing the cap raise, `215c676`'s three AR fixes, `9ac24de`'s C3-1 fix (with the C3-2..C3-7 batch noted), and `803d6ff`'s follow-up doc-comment correction.
+- Progress checklist: no change needed — all lines through "Sync-docs artifact created" were already `[x]` from cycle 1; only "PR created" remains open, correctly.
+
+### Verification after this pass
+
+```
+$ ./scripts/check-sync.sh
+=== Sync Summary ===
+  IDENTICAL:      158
+  DRIFTED:        0
+  ROOT_ONLY:      0
+  TEMPLATE_ONLY:  11
+  KNOWN_DIFF:     3
+PASS: all files in sync.
+
+$ ./scripts/check-skill-sync.sh
+[ok] check-skill-sync: 13 skill(s) in lock-step
+```
+
+### Files changed
+
+- `docs/plans/active/2026-08-18-overlay-scaffold-v2-p4.md` (added `## Deviations` section)
+- `docs/reports/sync-docs-2026-08-18-overlay-scaffold-v2-p4.md` (this section)
+- `docs/insights/events/2026-08-18-overlay-scaffold-v2-p4.jsonl` (appended `sync_docs` event, cycle 3)
+
+### Known gaps
+
+None. Both behavior changes this cycle fixed classifier internals a level below what README/spec/recipes document; the one gap found (an undocumented cap raise and fix in the plan) was closed in this pass.
