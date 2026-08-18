@@ -45,17 +45,9 @@ func v2SkipPaths() map[string]bool {
 	for _, bs := range blockSurfaces {
 		skip[bs.path] = true
 	}
-	skip[settingsSnapshotRelPathForSkip] = true
+	skip[upgrade.SettingsSnapshotRelPath] = true
 	return skip
 }
-
-// settingsSnapshotRelPathForSkip mirrors internal/upgrade's unexported
-// settingsSnapshotRelPath constant. It is not exported by that package, so
-// it is repeated here; internal/upgrade/snapshot_test.go pins the template
-// source (templates/base/.ralph/core/settings.ralph.json) to stay
-// byte-identical to templates/base/.claude/settings.json, which keeps this
-// path meaningful without needing a second source of truth.
-const settingsSnapshotRelPathForSkip = ".ralph/core/settings.ralph.json"
 
 // runUpgradeV2 is the non-interactive upgrade flow for v2-layout (overlay
 // scaffold) projects: it wires the Phase 1 engine primitives (core replace
@@ -146,7 +138,7 @@ func runUpgradeV2(absDir, manifestPath string, oldManifest *scaffold.Manifest, o
 		notes = append(notes, "settings snapshot (.ralph/core/settings.ralph.json) was missing (pre-Phase-3 init); used \"{}\" as the oldOwned fallback, so stale ralph-owned settings entries were not pruned this run")
 	}
 	if snapshotNeedsWrite {
-		if err := writeFileV2(absDir, settingsSnapshotRelPathForSkip, newOwnedSettings); err != nil {
+		if err := writeFileV2(absDir, upgrade.SettingsSnapshotRelPath, newOwnedSettings); err != nil {
 			return fmt.Errorf("writing settings snapshot: %w", err)
 		}
 		finalSnapshotContent = newOwnedSettings
@@ -195,7 +187,7 @@ func runUpgradeV2(absDir, manifestPath string, oldManifest *scaffold.Manifest, o
 
 	cleanBaseline, err := scaffold.CleanLocalRelPath(".ralph/baseline")
 	if err != nil {
-		return err
+		return fmt.Errorf("resolving .ralph/baseline path: %w", err)
 	}
 	if err := os.RemoveAll(filepath.Join(absDir, cleanBaseline)); err != nil {
 		return fmt.Errorf("removing .ralph/baseline: %w", err)
@@ -278,6 +270,15 @@ func buildDesiredStateV2(baseFS fs.FS, oldManifest *scaffold.Manifest, errOut io
 			continue
 		}
 
+		// Load this pack's entries into a local map first, rather than
+		// straight into desired: PreservePrefixes only suppresses the
+		// template-absent outcome for paths that were never added to
+		// desired in the first place (see ReplaceOptions.PreservePrefixes'
+		// doc comment). If a load step below fails, packEntries is
+		// discarded entirely and preserve() is called instead — so a
+		// mid-load failure genuinely leaves every one of the pack's
+		// disk/manifest entries alone, matching the warning it prints.
+		packEntries := make(map[string][]byte)
 		packPrefix := packPrefixFor(pack)
 		walkErr := fs.WalkDir(packFS, ".", func(p string, d fs.DirEntry, dwErr error) error {
 			if dwErr != nil {
@@ -290,7 +291,7 @@ func buildDesiredStateV2(baseFS fs.FS, oldManifest *scaffold.Manifest, errOut io
 			if rerr != nil {
 				return fmt.Errorf("reading pack %s file %q: %w", pack, p, rerr)
 			}
-			desired[filepath.ToSlash(filepath.Join(packPrefix, p))] = content
+			packEntries[filepath.ToSlash(filepath.Join(packPrefix, p))] = content
 			return nil
 		})
 		if walkErr != nil {
@@ -304,9 +305,12 @@ func buildDesiredStateV2(baseFS fs.FS, oldManifest *scaffold.Manifest, errOut io
 			continue
 		}
 		if ok {
-			desired[packRuleRelPath(pack)] = ruleContent
+			packEntries[packRuleRelPath(pack)] = ruleContent
 		}
 
+		for path, content := range packEntries {
+			desired[path] = content
+		}
 		retainedPacks = append(retainedPacks, pack)
 	}
 
@@ -337,13 +341,25 @@ func applyBlockUpdatesV2(absDir string, desired map[string][]byte, errOut io.Wri
 	outcomes := make(map[string]blockUpdateOutcome, len(blockSurfaces))
 	var notes []string
 
-	agentsManaged := desired[".ralph/core/AGENTS.core.md"]
+	agentsManaged, hasAgentsTemplate := desired[".ralph/core/AGENTS.core.md"]
 	gitignoreTemplate, hasGitignoreTemplate := desired[".gitignore"]
 
 	for _, bs := range blockSurfaces {
 		var managed []byte
 		switch bs.path {
 		case "AGENTS.md":
+			// Mirrors the .gitignore guard below and init.go's
+			// reconcileBlockSurfaces stance (a missing managed-block source
+			// means nothing to reconcile): a missing or empty
+			// .ralph/core/AGENTS.core.md must never be treated as "empty
+			// interior" and written, which would silently blank the user's
+			// AGENTS.md managed block.
+			if !hasAgentsTemplate || len(agentsManaged) == 0 {
+				msg := fmt.Sprintf("%s: managed block source (.ralph/core/AGENTS.core.md) is missing from the desired state; left untouched", bs.path)
+				writef(errOut, "Warning: %s\n", msg)
+				notes = append(notes, msg)
+				continue
+			}
 			managed = agentsManaged
 		case ".gitignore":
 			if !hasGitignoreTemplate {
@@ -484,7 +500,7 @@ func rebuildManifestV2(
 			if err := newManifest.SetFileOwned(path, scaffold.OwnerCore, templateHash, scaffold.HashBytes(finalSettingsContent)); err != nil {
 				return err
 			}
-		case settingsSnapshotRelPathForSkip:
+		case upgrade.SettingsSnapshotRelPath:
 			if err := newManifest.SetFileOwned(path, scaffold.OwnerCore, templateHash, scaffold.HashBytes(finalSnapshotContent)); err != nil {
 				return err
 			}

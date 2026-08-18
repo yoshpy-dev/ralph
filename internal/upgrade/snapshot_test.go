@@ -56,7 +56,7 @@ func TestLoadSettingsSnapshot(t *testing.T) {
 	t.Run("found", func(t *testing.T) {
 		dir := t.TempDir()
 		want := []byte(`{"env":{"FOO":"bar"}}` + "\n")
-		writeDiskFile(t, dir, settingsSnapshotRelPath, string(want))
+		writeDiskFile(t, dir, SettingsSnapshotRelPath, string(want))
 
 		got, found, err := LoadSettingsSnapshot(dir)
 		if err != nil {

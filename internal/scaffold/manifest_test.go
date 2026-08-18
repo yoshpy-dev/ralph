@@ -58,19 +58,25 @@ func TestManifestRoundTripLegacyBaselineFields(t *testing.T) {
 		Managed:        true,
 		State:          FileStateManaged,
 		TemplateHash:   "sha256:abc123",
-		BaselineStatus: BaselineStatusAvailable,
+		BaselineStatus: "available",
 		BaselinePath:   ".ralph/baseline/AGENTS.md",
 	}
 	m.Files["partial.md"] = ManifestFile{
 		Hash:           "sha256:template",
 		Managed:        true,
-		State:          FileStatePartial,
+		State:          "partial", // legacy pre-Phase-3 State value; no constant, see manifest.go
 		TemplateHash:   "sha256:template",
 		DiskHash:       "sha256:disk",
-		BaselineStatus: BaselineStatusAvailable,
+		BaselineStatus: "available",
 		BaselinePath:   ".ralph/baseline/partial.md",
 	}
-	m.SetFileUnmanaged("CLAUDE.md", "sha256:local")
+	m.Files["CLAUDE.md"] = ManifestFile{
+		Hash:           "sha256:local",
+		Managed:        false,
+		State:          FileStateUnmanaged,
+		DiskHash:       "sha256:local",
+		BaselineStatus: BaselineStatusMissing,
+	}
 
 	if err := m.Write(path); err != nil {
 		t.Fatalf("Write: %v", err)
@@ -88,7 +94,7 @@ func TestManifestRoundTripLegacyBaselineFields(t *testing.T) {
 	if agents.TemplateHash != "sha256:abc123" {
 		t.Errorf("TemplateHash = %q, want sha256:abc123", agents.TemplateHash)
 	}
-	if agents.BaselineStatus != BaselineStatusAvailable {
+	if agents.BaselineStatus != "available" {
 		t.Errorf("BaselineStatus = %q, want available", agents.BaselineStatus)
 	}
 	if agents.BaselinePath != ".ralph/baseline/AGENTS.md" {
@@ -96,7 +102,7 @@ func TestManifestRoundTripLegacyBaselineFields(t *testing.T) {
 	}
 
 	partial := got.Files["partial.md"]
-	if !partial.Managed || partial.State != FileStatePartial {
+	if !partial.Managed || partial.State != "partial" {
 		t.Fatalf("partial.md state = managed:%v state:%q, want partial managed", partial.Managed, partial.State)
 	}
 	if partial.Hash != "sha256:template" || partial.TemplateHash != "sha256:template" {
@@ -263,20 +269,25 @@ func TestExistingConstructorsWriteNoV3Fields(t *testing.T) {
 		Managed:        true,
 		State:          FileStateManaged,
 		TemplateHash:   "sha256:b",
-		BaselineStatus: BaselineStatusAvailable,
+		BaselineStatus: "available",
 		BaselinePath:   ".ralph/baseline/CLAUDE.md",
 	}
 	m.Files["partial.md"] = ManifestFile{
 		Hash:           "sha256:c",
 		Managed:        true,
-		State:          FileStatePartial,
+		State:          "partial",
 		TemplateHash:   "sha256:c",
 		DiskHash:       "sha256:d",
-		BaselineStatus: BaselineStatusAvailable,
+		BaselineStatus: "available",
 		BaselinePath:   ".ralph/baseline/partial.md",
 	}
-	m.SetFileUnmanaged("local.md", "sha256:e")
-	m.Files["with-hash.md"] = m.Files["with-hash.md"].WithTemplateHash("sha256:f")
+	m.Files["local.md"] = ManifestFile{
+		Hash:           "sha256:e",
+		Managed:        false,
+		State:          FileStateUnmanaged,
+		DiskHash:       "sha256:e",
+		BaselineStatus: BaselineStatusMissing,
+	}
 
 	data, err := toml.Marshal(m)
 	if err != nil {
@@ -297,7 +308,7 @@ func TestSetOwner_SetsOnExistingEntry(t *testing.T) {
 		Managed:        true,
 		State:          FileStateManaged,
 		TemplateHash:   "sha256:tmpl",
-		BaselineStatus: BaselineStatusAvailable,
+		BaselineStatus: "available",
 		BaselinePath:   ".ralph/baseline/AGENTS.md",
 	}
 
@@ -316,7 +327,7 @@ func TestSetOwner_SetsOnExistingEntry(t *testing.T) {
 	if !entry.Managed || entry.State != FileStateManaged {
 		t.Errorf("Managed/State changed unexpectedly: %+v", entry)
 	}
-	if entry.BaselineStatus != BaselineStatusAvailable || entry.BaselinePath != ".ralph/baseline/AGENTS.md" {
+	if entry.BaselineStatus != "available" || entry.BaselinePath != ".ralph/baseline/AGENTS.md" {
 		t.Errorf("baseline fields changed unexpectedly: %+v", entry)
 	}
 }

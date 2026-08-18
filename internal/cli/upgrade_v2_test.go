@@ -56,6 +56,7 @@ type v2FixtureGen struct {
 	golangReadme     []byte
 	golangRuleMd     []byte
 	preCommitGuardSh []byte // rendered to scripts/pre-commit-secret-guard.sh; the only one of the four managed git-hook guard scripts that varies across gen1/gen2 in these fixtures
+	omitAgentsCore   bool   // when true, build() omits templates/base/.ralph/core/AGENTS.core.md entirely — simulates a desired-state map missing the AGENTS.md managed-block source
 }
 
 func (g v2FixtureGen) build() fstest.MapFS {
@@ -66,13 +67,15 @@ func (g v2FixtureGen) build() fstest.MapFS {
 		"templates/base/ralph.toml":                                 {Data: []byte("[pipeline]\nmodel = \"test\"\n[doctor]\nrequire_codex_cli = false\n")},
 		"templates/base/.claude/settings.json":                      {Data: g.settingsJSON},
 		"templates/base/.ralph/core/settings.ralph.json":            {Data: g.settingsJSON},
-		"templates/base/.ralph/core/AGENTS.core.md":                 {Data: g.agentsManaged},
 		"templates/base/scripts/run-verify.sh":                      {Data: g.runVerifySh},
 		"templates/base/.ralph/local/verify.d/.gitkeep":             {Data: []byte("")},
 		"templates/base/scripts/pre-commit-secret-guard.sh":         {Data: g.preCommitGuardSh},
 		"templates/base/scripts/commit-msg-guard.sh":                {Data: []byte(testCommitMsgGuard)},
 		"templates/base/scripts/prepare-commit-msg-secret-guard.sh": {Data: []byte(testPrepareCommitMsgGuard)},
 		"templates/base/scripts/pre-merge-commit-secret-guard.sh":   {Data: []byte(testPreMergeCommitGuard)},
+	}
+	if !g.omitAgentsCore {
+		m["templates/base/.ralph/core/AGENTS.core.md"] = &fstest.MapFile{Data: g.agentsManaged}
 	}
 	if g.oldToolSh != nil {
 		m["templates/base/scripts/old-tool.sh"] = &fstest.MapFile{Data: g.oldToolSh}
@@ -646,6 +649,63 @@ func TestRunUpgradeV2_UnavailablePack_FullyPreserved(t *testing.T) {
 	}
 }
 
+// TestRunUpgradeV2_PackRuleReadFailure_FullyPreserved is self-review MEDIUM
+// #2 coverage: buildDesiredStateV2's preserve() must genuinely leave a
+// pack's payload files alone when a later load step for the same pack fails
+// (here, packRuleContent's read of rule.md), not just the paths that were
+// never reached. Before the fix, the pack's payload files (walked
+// successfully before the rule-read failure) were already written into
+// desired and so were still updated to gen2 content despite the "preserving
+// its disk/manifest entries untouched" warning; this test would have failed
+// on that behavior (payload files changing) before the fix.
+func TestRunUpgradeV2_PackRuleReadFailure_FullyPreserved(t *testing.T) {
+	target := initV2Project(t, gen1(), "1.0.0-test")
+
+	before := snapshotTreeHashesExcluding(t, target)
+	beforeManifest := readManifestV2(t, target)
+
+	g2 := gen2()
+	m := g2.build()
+	// Corrupt rule.md into a directory so packRuleContent's fs.ReadFile
+	// fails with something other than fs.ErrNotExist, after the payload
+	// walk (verify.sh, README.md) has already succeeded and would have
+	// populated desired under the pre-fix behavior.
+	delete(m, "templates/packs/golang/rule.md")
+	m["templates/packs/golang/rule.md/broken"] = &fstest.MapFile{Data: []byte("not a file")}
+	scaffold.EmbeddedFS = m
+	Version = "1.1.0-test"
+
+	var out, errOut bytes.Buffer
+	if err := runUpgradeIOWithOptions(target, upgradeOptions{Pager: pagerNever}, strings.NewReader(""), &out, &errOut, false); err != nil {
+		t.Fatalf("a pack rule-read failure must not fail the whole upgrade: %v\nstderr:\n%s", err, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "golang") || !strings.Contains(errOut.String(), "rule read failed") {
+		t.Errorf("stderr must warn about the golang pack's rule read failure:\n%s", errOut.String())
+	}
+
+	after := snapshotTreeHashesExcluding(t, target, ".ralph/manifest.toml", "docs/reports/", "scripts/run-verify.sh", "docs/notes.md", "docs/newnote.md", "AGENTS.md", ".gitignore", ".claude/settings.json", ".ralph/core/settings.ralph.json", "scripts/old-tool.sh")
+	before = filterPrefixed(before, "packs/languages/golang/", ".claude/rules/ralph/golang.md")
+	after = filterPrefixed(after, "packs/languages/golang/", ".claude/rules/ralph/golang.md")
+	if !slicesEqualStrings(before, after) {
+		t.Errorf("golang pack files must be byte-for-byte untouched after a rule-read failure; before=%v after=%v", before, after)
+	}
+
+	afterManifest := readManifestV2(t, target)
+	for path, beforeEntry := range beforeManifest.Files {
+		if !strings.HasPrefix(path, "packs/languages/golang/") && path != ".claude/rules/ralph/golang.md" {
+			continue
+		}
+		afterEntry, ok := afterManifest.Files[path]
+		if !ok {
+			t.Errorf("manifest entry for %s must be preserved, but is missing", path)
+			continue
+		}
+		if afterEntry != beforeEntry {
+			t.Errorf("manifest entry for %s changed: before=%+v after=%+v", path, beforeEntry, afterEntry)
+		}
+	}
+}
+
 // TestRunUpgradeV2_MalformedBlock_CompletesWithReport covers AC-12: a
 // managed block that has been hand-edited into a malformed shape (missing
 // END marker) is left byte-for-byte untouched, a warning is recorded, and
@@ -678,6 +738,44 @@ func TestRunUpgradeV2_MalformedBlock_CompletesWithReport(t *testing.T) {
 	reportContent := string(mustReadFile(t, filepath.Join(target, reportPath)))
 	if !strings.Contains(reportContent, "malformed") {
 		t.Errorf("report must record the malformed block:\n%s", reportContent)
+	}
+}
+
+// TestRunUpgradeV2_MissingAgentsCoreTemplate_LeavesAgentsMdUntouchedWithNote
+// is self-review MEDIUM #1 coverage: when the desired-state map has no entry
+// for .ralph/core/AGENTS.core.md (e.g. an embedded-templates generation that
+// omits it), applyBlockUpdatesV2 must not treat the missing managed-block
+// source as an "empty interior" and write it — that would silently blank
+// the user's AGENTS.md managed block. Instead the AGENTS.md surface must be
+// left byte-for-byte untouched, with a warning on stderr and a note in the
+// upgrade report.
+func TestRunUpgradeV2_MissingAgentsCoreTemplate_LeavesAgentsMdUntouchedWithNote(t *testing.T) {
+	target := initV2Project(t, gen1(), "1.0.0-test")
+
+	before := mustReadFile(t, filepath.Join(target, "AGENTS.md"))
+
+	g2 := gen2()
+	g2.omitAgentsCore = true
+	scaffold.EmbeddedFS = g2.build()
+	Version = "1.1.0-test"
+
+	var out, errOut bytes.Buffer
+	if err := runUpgradeIOWithOptions(target, upgradeOptions{Pager: pagerNever}, strings.NewReader(""), &out, &errOut, false); err != nil {
+		t.Fatalf("a missing AGENTS.core.md template must not fail the whole upgrade: %v\nstderr:\n%s", err, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "AGENTS.core.md") {
+		t.Errorf("stderr must warn about the missing managed-block source:\n%s", errOut.String())
+	}
+
+	got := mustReadFile(t, filepath.Join(target, "AGENTS.md"))
+	if !bytes.Equal(got, before) {
+		t.Errorf("AGENTS.md must be left byte-for-byte untouched when its managed-block source is missing:\ngot  %q\nwant %q", got, before)
+	}
+
+	reportPath := upgrade.UpgradeReportRelPath(Version, time.Now().UTC().Format("2006-01-02"))
+	reportContent := string(mustReadFile(t, filepath.Join(target, reportPath)))
+	if !strings.Contains(reportContent, "AGENTS.core.md") {
+		t.Errorf("report must record the missing managed-block source:\n%s", reportContent)
 	}
 }
 

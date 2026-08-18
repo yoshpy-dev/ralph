@@ -8,12 +8,15 @@ import (
 	"github.com/yoshpy-dev/ralph/internal/scaffold"
 )
 
-// settingsSnapshotRelPath is the manifest-relative (and on-disk-relative)
+// SettingsSnapshotRelPath is the manifest-relative (and on-disk-relative)
 // path of the settings.json snapshot ralph writes on every successful
 // upgrade. It records the ralph-owned template content last applied, so a
 // later upgrade's 3-way settings merge has an oldOwned side to diff against
 // without needing network access or a second embedded template generation.
-const settingsSnapshotRelPath = ".ralph/core/settings.ralph.json"
+// Exported so callers outside this package (internal/cli's v2 skip-path set
+// and manifest rebuild) reference the single source of truth instead of
+// repeating the literal.
+const SettingsSnapshotRelPath = ".ralph/core/settings.ralph.json"
 
 // LoadSettingsSnapshot reads the settings.json snapshot from targetDir. A
 // missing snapshot (found=false, err=nil) is the expected state for
@@ -22,7 +25,7 @@ const settingsSnapshotRelPath = ".ralph/core/settings.ralph.json"
 // The snapshot path is validated with scaffold.CleanLocalRelPath before use,
 // consistent with every other path this package reads.
 func LoadSettingsSnapshot(targetDir string) (content []byte, found bool, err error) {
-	clean, cerr := scaffold.CleanLocalRelPath(settingsSnapshotRelPath)
+	clean, cerr := scaffold.CleanLocalRelPath(SettingsSnapshotRelPath)
 	if cerr != nil {
 		return nil, false, cerr
 	}

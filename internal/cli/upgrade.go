@@ -52,7 +52,7 @@ remaining (see the upgrade report and stderr for the affected paths).`,
 	}
 
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "preview upgrade actions without writing files")
-	cmd.Flags().BoolVar(&diffPreview, "diff", false, "show conflict diffs without writing files (implies --dry-run)")
+	cmd.Flags().BoolVar(&diffPreview, "diff", false, "show advisory diffs without writing files (implies --dry-run)")
 	cmd.Flags().StringVar(&pager, "pager", pagerAuto, "dry-run diff pager mode: auto, always, or never")
 
 	return cmd
@@ -79,9 +79,10 @@ type upgradeOptions struct {
 // automated legacy → v2 migration.
 const legacyLayoutFailClosedMsg = "this project uses the legacy scaffold layout; the automated migration to the overlay (v2) layout arrives in a later ralph release (Phase 4); no files were changed"
 
-// errLegacyLayoutFailClosed is the sentinel wrapped by every legacy-manifest
-// refusal, so callers (and tests) can match on it with errors.Is instead of
-// string-matching legacyLayoutFailClosedMsg.
+// errLegacyLayoutFailClosed is the sentinel returned as-is (never wrapped)
+// by every legacy-manifest refusal (upgrade.go, internal/cli/init.go,
+// internal/cli/pack.go), so callers (and tests) can match on it directly
+// with errors.Is or ==.
 var errLegacyLayoutFailClosed = errors.New(legacyLayoutFailClosedMsg)
 
 func runUpgradeWithOptions(targetDir string, opts upgradeOptions) error {

@@ -43,8 +43,9 @@ type ManifestFile struct {
 	// mechanism (internal/scaffold/baseline.go) was removed in Phase 3
 	// (docs/plans/active/2026-08-18-overlay-scaffold-v2-p3.md, FR-13). These
 	// fields are kept solely so manifests written by pre-Phase-3 `ralph`
-	// versions still parse without error; nothing in the current codebase
-	// writes BaselineStatusAvailable or a non-empty BaselinePath anymore.
+	// versions (State may be "partial", BaselineStatus may be "available")
+	// still parse without error; nothing in the current codebase writes
+	// those values anymore, so no named constant exists for them.
 	BaselineStatus string `toml:"baseline_status,omitempty"`
 	BaselinePath   string `toml:"baseline_path,omitempty"`
 
@@ -58,10 +59,8 @@ type ManifestFile struct {
 const (
 	FileStateManaged   = "managed"
 	FileStateUnmanaged = "unmanaged"
-	FileStatePartial   = "partial"
 
-	BaselineStatusMissing   = "missing"
-	BaselineStatusAvailable = "available"
+	BaselineStatusMissing = "missing"
 
 	// LayoutV2 identifies the overlay-scaffold layout (manifest v3, ownership
 	// attributes). Set only through the opt-in SetLayoutV2 API.
@@ -122,21 +121,6 @@ func (m *Manifest) SetFile(relPath, hash string) {
 		Managed:        true,
 		State:          FileStateManaged,
 		TemplateHash:   hash,
-		BaselineStatus: BaselineStatusMissing,
-	}
-}
-
-// SetFileUnmanaged records a file in the manifest as user-owned. The ralph
-// upgrade flow uses this when the user chooses to keep a local variant over
-// the template: the entry is preserved (so the path is not mistaken for a
-// "new file" on later upgrades) but marked so future runs skip it silently
-// instead of re-prompting.
-func (m *Manifest) SetFileUnmanaged(relPath, hash string) {
-	m.Files[relPath] = ManifestFile{
-		Hash:           hash,
-		Managed:        false,
-		State:          FileStateUnmanaged,
-		DiskHash:       hash,
 		BaselineStatus: BaselineStatusMissing,
 	}
 }
@@ -217,21 +201,4 @@ func validateManagedOwner(owner string) error {
 // Owner, so this is the correct way to detect "no ownership decided yet".
 func (f ManifestFile) IsLegacyOwner() bool {
 	return f.Owner == ""
-}
-
-// WithTemplateHash returns a copy with v2 template metadata filled in while
-// preserving any existing baseline metadata.
-func (f ManifestFile) WithTemplateHash(hash string) ManifestFile {
-	f.Hash = hash
-	f.Managed = true
-	if f.State == "" {
-		f.State = FileStateManaged
-	}
-	if f.TemplateHash == "" {
-		f.TemplateHash = hash
-	}
-	if f.BaselineStatus == "" {
-		f.BaselineStatus = BaselineStatusMissing
-	}
-	return f
 }
