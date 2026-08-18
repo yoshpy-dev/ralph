@@ -150,5 +150,5 @@ v2 manifest(`meta.layout = "v2"`)に対する `ralph upgrade` は次を非対話
 - [x] Implementation started(スライス 1〜5: 104cc7b / e08ebe7 / c834f44 / 5b1b675 + 本スライス)
 - [ ] Review artifact created
 - [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Test artifact created
 - [ ] PR created
