@@ -221,3 +221,115 @@ they are outside verify's scope).
   at cycle 1 but has not re-run against the cycle-2 delta as of this verify
   pass.
 - No new tech-debt or doc-drift gaps were found in the cycle-2 delta.
+
+## Cycle 3 (final cycle, 3/3 — after cap raise)
+
+- Date: 2026-08-18
+- Scope: delta since cycle-2 (`aa7fb9c..HEAD`, HEAD `6533227`, working tree
+  clean). Commits reviewed: `e21b1b1`/`b80b5f9` (cycle-2 test/sync-docs
+  artifacts), `1bb8367` (cycle-2 cross-review triage, 2 ACTION_REQUIRED),
+  `41ad745` (AR fixes: dry-run exception-face preview + no-op short-circuit
+  + spec NFR-1 amendment), `a0b9363` (cycle-3 self-review, 1 HIGH + 1 MEDIUM
+  + 3 LOW: C3-1..C3-5), `6533227` (C3 fixes: seed-advisory/version vetoes on
+  the no-op short-circuit + LOW cleanups).
+- Verdict: **PASS**. No CRITICAL/HIGH/MEDIUM findings against this delta. No
+  static-analysis regressions. One new LOW doc-completeness gap (below),
+  non-blocking.
+
+### Cross-review AR fix crosscheck (`41ad745` vs. cycle-2 triage table)
+
+| # | Triage finding | Fixed? | Evidence |
+| --- | --- | --- | --- |
+| AR#1 (cycle 2) | `--dry-run` doesn't preview pending block/settings ("exception face") changes — a run that would rewrite AGENTS.md/.gitignore/settings.json on a real execution can show "no changes" under `--dry-run` | Yes | `renderUpgradeV2Preview` now calls new `renderUpgradeV2ExceptionFacePreview` (`internal/cli/upgrade_v2.go:767-770`), which computes the same block/settings outcomes purely in memory (`applyBlockUpdatesV2(..., write=false)`, `MergeOwnedSettings` is pure) without ever touching disk. `applyBlockUpdatesV2`/`updateOneBlockV2` gained a `write bool` parameter threaded through every call site. |
+| AR#2 (cycle 2) | A converged re-run at the same version still writes a dated report + rewrites the manifest, violating NFR-1's "no-op re-run = zero writes" | Yes | New `isFullyConvergedV2` gate (`upgrade_v2.go:157` at the time, now `oldManifest.Meta.Version == Version && isFullyConvergedV2(...)` after the C3-2 fix) short-circuits to `finishNoOpUpgradeV2`, which skips the report, the manifest rebuild, and `installManagedGitHooks`, printing `"Upgrade no-op: ... (already up to date, zero writes)"` instead. Spec `docs/specs/2026-08-17-overlay-scaffold-v2.md` NFR-1 amended in the same commit to state the no-op is announced on stdout and that a converged re-run does not write a dated report file at all — resolving the triage's noted tension between "no-op" and "record it in the report" by choosing stdout as the recording surface. |
+
+Both fixes are exactly what the triage rationale (`docs/reports/cross-review-triage-overlay-scaffold-v2-p3.md`, ACTION_REQUIRED #1/#2) asked for, including the file:line pointers named there (`internal/cli/upgrade_v2.go:95-96` → dry-run path; `:172-177` → no-op-skip path — both areas are inside the functions touched by this commit).
+
+### Cycle-3 self-review fix crosscheck (`6533227` vs. C3-1..C3-5)
+
+`a0b9363` (cycle-3 self-review) found that `41ad745`'s own no-op short-circuit gated more than it should have: `isFullyConvergedV2` never consulted `plan.Advisories`, so a run that only had a pending **seed** advisory (no core ops, no block/settings changes) was misclassified as a full no-op — silently and permanently swallowing the advisory (a seed advisory only clears via the manifest rebuild the no-op path skips) and, separately, never advancing `meta.version` on a Go-only release with byte-identical templates.
+
+| ID | Finding | Fixed? | Evidence |
+| --- | --- | --- | --- |
+| C3-1 (HIGH) | `isFullyConvergedV2` ignores `plan.Advisories`; a pending seed advisory gets silently and permanently swallowed by the no-op short-circuit (report never written, `TemplateHash` never advanced) | Yes | `isFullyConvergedV2` now loops `plan.Advisories` and returns `false` on any `scaffold.OwnerSeed` entry (`internal/cli/upgrade_v2.go`, +4 lines); doc comment extended to explain fork advisories are correctly excluded (they never clear) while seed advisories must not be. New test `TestRunUpgradeV2_SeedAdvisoryOnly_NotANoOp`: asserts stdout does not say "no-op", the report is written and names `docs/notes.md`, the manifest's `TemplateHash` advances to clear the advisory, and a follow-up run at the same state is a genuine no-op. Confirmed by reading the assertions against the pre-fix predicate: without the `plan.Advisories` loop, `isFullyConvergedV2` would still return `true` for this scenario (zero `Ops`/`ManifestRefresh`/`ManifestRemove`, unchanged blocks/settings), so the test would fail on every assertion against the pre-fix code — i.e. the test is falsifiable against the bug it names, not tautological. |
+| C3-2 (MEDIUM) | `meta.version` never advances on a converged run because the short-circuit also skips `scaffold.NewManifest(version)`, permanently desyncing `ralph doctor`'s version check from a no-op-reporting `ralph upgrade` | Yes | Gate changed to `oldManifest.Meta.Version == Version && isFullyConvergedV2(...)` (`internal/cli/upgrade_v2.go:157`). New test `TestRunUpgradeV2_ConvergedButVersionBumped_NotANoOp`: templates held byte-identical to gen1, `Version` bumped; asserts stdout does not say "no-op" and the manifest's `Meta.Version` is rewritten to the new value, then a follow-up run at the caught-up version is a genuine no-op. Same falsifiability check: without the `Meta.Version ==` conjunct, the pre-fix predicate returns `true` here too, so the test's first two assertions fail against the unfixed gate. |
+| C3-3 (LOW) | Plan's AC-5 parenthetical ("レポートに no-op 明記") still contradicted the spec's NFR-1 as amended by `41ad745` ("標準出力に no-op を明記... レポートファイル自体を書かない") | Yes | `docs/plans/active/2026-08-18-overlay-scaffold-v2-p3.md` AC-5 now reads "同一バイナリでの再実行が書き込みゼロの no-op(標準出力に no-op 明記、レポートファイルは書かない)" — verbatim-consistent with the spec's amended NFR-1 wording (`docs/specs/2026-08-17-overlay-scaffold-v2.md:71`). |
+| C3-4 (LOW) | Insight event appended by `1bb8367` (subject line says "for cycle 2") recorded `"cycle":1` for the `cross_review` phase | Yes | `docs/insights/events/2026-08-18-overlay-scaffold-v2-p3.jsonl` line for `ts":"2026-08-18T05:41:33Z"` now reads `"cycle":2`. Replayed the full event sequence: `self_review` c1→c2→c3, `verify` c1→c2, `test` c1→c2, `sync_docs` c1→c2, `cross_review` c1→c2 — all monotonic per phase, no other mis-stamps found in this delta. |
+| C3-5 (LOW) | `AR#1`/`AR#2` now label two different pairs of findings against the same cited triage report across cycles; plan's AC-4b/AC-9 notes (cycle-1 fixes, `fc8e9a9`) and the code comments touched by `41ad745`/`6533227` (cycle-2 fixes) both say bare "AR#1"/"AR#2" | **Partially.** The code comments in `internal/cli/upgrade_v2.go` were qualified (`"AR#2"` → `"AR#2, cycle 2"`, `"AR#1"` → `"AR#1 (cycle 2)"` at 5 sites — confirmed via `git show 6533227 -- internal/cli/upgrade_v2.go`). The plan's own AC-4b/AC-9 notes, however, were **not** touched by `6533227` and still read bare `cross-review AR#1 の fix、fc8e9a9` / `cross-review AR#2 の fix、fc8e9a9` (`docs/plans/active/2026-08-18-overlay-scaffold-v2-p3.md:87,93`) — the recommendation's first clause ("qualify the plan's two references as 'cycle-1 cross-review AR#1/AR#2'") was not applied. See Findings below. |
+
+4 of 5 cycle-3 findings (including the HIGH and the MEDIUM) are fully closed with falsifiable regression tests. The one gap (C3-5's plan-side half) is a LOW doc-precision miss, not a fresh defect — flagged below.
+
+### Findings (cycle 3)
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| LOW | doc drift | C3-5's recommendation had two clauses: (a) qualify the plan's AC-4b/AC-9 `AR#1`/`AR#2` references as "cycle-1 cross-review", and (b) have the next `/cross-review` pass label its own triage rows explicitly. `6533227` implements neither (b), which is expected — cycle-3 `/cross-review` has not run yet at this HEAD — nor (a), which was actionable now and wasn't done. `docs/plans/active/2026-08-18-overlay-scaffold-v2-p3.md:87,93` still cite bare `AR#1`/`AR#2` against a triage report (`docs/reports/cross-review-triage-overlay-scaffold-v2-p3.md`) whose rows were overwritten in cycle 2, so a reader resolving the plan's citation today lands on the wrong (cycle-2) findings. | `docs/plans/active/2026-08-18-overlay-scaffold-v2-p3.md:87,93`; `docs/reports/self-review-2026-08-18-overlay-scaffold-v2-p3.md` C3-5 recommendation; `git show 6533227 -- docs/plans/active/2026-08-18-overlay-scaffold-v2-p3.md` (only the AC-5 line changed) | One-line edit to each of AC-4b and AC-9: prefix with "cycle-1 cross-review AR#1/AR#2" (or equivalent). Small enough to fold into a `/pr` hand-off note or a trivial follow-up commit; not worth another fix-and-revalidate cycle at the cap. |
+
+No CRITICAL, HIGH, or MEDIUM findings from this cycle-3 verify pass.
+
+### AC-5 / AC-10 under the new no-op semantics
+
+- **AC-5** (idempotency): plan text now reads "同一バイナリでの再実行が書き込みゼロの no-op(標準出力に no-op 明記、レポートファイルは書かない)" — matches the shipped behavior exactly: `finishNoOpUpgradeV2` writes to `out` only (`"Upgrade no-op: %s (already up to date, zero writes)\n"`), never calls `WriteUpgradeReport`, and the C3-1/C3-2 vetoes ensure the short-circuit only fires when there is truly nothing pending (no ops, no advisories of the kind that would otherwise clear, same binary version). `TestRunUpgradeV2_Idempotent_SecondRunIsNoOp` (unchanged since cycle 1) plus the two new cycle-3 tests jointly cover the no-op path's positive and negative cases.
+- **AC-10** (no `--force`; `--dry-run`/`--diff` work, dry-run is zero-write): `grep -n force internal/cli/upgrade.go internal/cli/upgrade_v2.go` still returns no matches (unchanged from cycle 1). `--dry-run` now additionally previews the four exception faces via `renderUpgradeV2ExceptionFacePreview`, which is explicitly documented as never writing to `targetDir` (`applyBlockUpdatesV2` called with `write=false`, `MergeOwnedSettings` is pure) — the dry-run-is-zero-write half of AC-10 holds under the widened preview, not just the original core-plan-only preview.
+
+Both ACs hold under the cycle-3 semantics change; no regression against their cycle-1/cycle-2 adjudication.
+
+### Spec NFR-1 amendment consistency
+
+`41ad745` amended `docs/specs/2026-08-17-overlay-scaffold-v2.md` NFR-1 from "書き込みゼロ、レポートに no-op 明記" to "書き込みゼロ、標準出力に no-op を明記。収束済みの再実行では日付付きレポートファイル自体を書かない — レポートは新たな適用結果があった実行でのみ生成される". Cross-checked against the implementation:
+
+- "標準出力に no-op を明記" → `finishNoOpUpgradeV2`'s `writef(out, "Upgrade no-op: %s (already up to date, zero writes)\n", version)`. Confirmed.
+- "収束済みの再実行では日付付きレポートファイル自体を書かない" → `finishNoOpUpgradeV2` returns before reaching `upgrade.WriteUpgradeReport` (that call only exists on the non-no-op path in `runUpgradeV2`). Confirmed.
+- "レポートは新たな適用結果があった実行でのみ生成される" → the only `WriteUpgradeReport` call site in `runUpgradeV2` is reached exclusively past the `isFullyConvergedV2` gate. Confirmed.
+
+The plan's AC-5 (see above) was brought into line with this same wording by the cycle-3 fix commit. Spec and implementation agree; no drift.
+
+### Static analysis (re-run at cycle-3 HEAD)
+
+`./scripts/run-static-verify.sh` (log: `docs/evidence/verify-2026-08-18-061413.log`):
+
+- `scripts/check-sync.sh`: PASS — IDENTICAL 158, DRIFTED 0, ROOT_ONLY 0,
+  TEMPLATE_ONLY 11, KNOWN_DIFF 3 (same counts as cycles 1 and 2, no
+  regression)
+- `scripts/check-pipeline-sync.sh`: PASS — all 6 referencing docs in sync
+- `scripts/check-skill-sync.sh`: PASS — 13 skills in lock-step
+- Codex hook guards (single-source, inline-hook-detector smoke test, PR
+  provenance policy guard): all PASS
+- Go verifier (scope fell back to `full`, same unclassified-file reason as
+  cycles 1 and 2 — `templates/base/.ralph/core/settings.ralph.json`):
+  `gofmt -l .` → "gofmt: ok"; `go vet ./...` → silent (pass); `golangci-lint
+  run ./...` → "0 issues."; `staticcheck` → silent (pass, binary present)
+- Overall: `All verifiers passed.`
+
+### Plan coherence
+
+- Objective, Scope, Non-goals, Design decisions, and Risks sections are
+  unchanged from cycle 1/2 and remain internally consistent with the
+  shipped code (re-read in full at this HEAD).
+- Progress checklist: `Plan reviewed` and `PR created` remain unchecked as
+  expected pre-`/pr` state (outside verify's scope, per the standing
+  cycle-2 convention). All artifact-creation checkboxes (`Review`,
+  `Verification`, `Test`, `Sync-docs`) are checked and match the actual
+  reports present under `docs/reports/`.
+- Deviations section still accurately describes the one implementation
+  deviation (missing `installManagedGitHooks` call, closed in slice 4); no
+  new deviation was introduced by the cycle-2/cycle-3 fix commits that
+  warrants a Deviations-section entry (the AR/self-review fixes are
+  documented in-place via AC notes and code comments instead, consistent
+  with how cycle-2's fixes were recorded).
+
+### Known gaps (cycle 3)
+
+- No behavioral test execution was performed here (by design — `/test`'s
+  job); `/test` has not yet re-run against the cycle-3 delta as of this
+  verify pass.
+- The C3-5 plan-reference gap (above) is tracked as a LOW verify finding
+  here rather than fixed, since the pipeline cycle cap (raised to 3) means
+  this is the final scheduled verify pass; recommend closing it as a
+  trivial follow-up rather than triggering another fix-and-revalidate
+  cycle.
+- Cycle-3 `/cross-review` has not yet run against this delta; its own
+  triage — if it produces new ACTION_REQUIRED findings — would fall outside
+  the pipeline cap per `.claude/rules/ralph/post-implementation-pipeline.md`'s
+  cap-reached branching (raise cap / proceed to `/pr` with known gaps /
+  abort).
