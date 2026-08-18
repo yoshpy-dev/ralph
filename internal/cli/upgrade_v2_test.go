@@ -716,11 +716,12 @@ func settingsPathFor(target string) string {
 	return filepath.Join(target, ".claude", "settings.json")
 }
 
-// TestRunUpgradeV2_Idempotent_SecondRunIsNoOp covers AC-5: running the same
-// target version twice in a row produces zero further scaffold-content
-// writes on the second run (manifest.toml's Updated timestamp and the dated
-// report file are bookkeeping and expected to change every run, so they are
-// excluded from the comparison).
+// TestRunUpgradeV2_Idempotent_SecondRunIsNoOp covers AC-5 and AR#2 (cycle-2
+// cross-review, docs/reports/cross-review-triage-overlay-scaffold-v2-p3.md):
+// running the same target version twice in a row must make the second run a
+// true, byte-for-byte no-op — including manifest.toml (no Updated-timestamp
+// rewrite, bytes and mtime both unchanged) and docs/reports/ (no new dated
+// report file), not just the scaffold-content paths.
 func TestRunUpgradeV2_Idempotent_SecondRunIsNoOp(t *testing.T) {
 	target := initV2Project(t, gen1(), "1.0.0-test")
 
@@ -732,22 +733,53 @@ func TestRunUpgradeV2_Idempotent_SecondRunIsNoOp(t *testing.T) {
 		t.Fatalf("first upgrade run: %v\nstderr:\n%s", err, errOut1.String())
 	}
 
-	before := snapshotTreeHashesExcluding(t, target, ".ralph/manifest.toml", "docs/reports/")
+	manifestPath := filepath.Join(target, ".ralph", "manifest.toml")
+	manifestBefore := mustReadFile(t, manifestPath)
+	manifestInfoBefore, err := os.Stat(manifestPath)
+	if err != nil {
+		t.Fatalf("stat manifest.toml after first run: %v", err)
+	}
+	reportsDir := filepath.Join(target, "docs", "reports")
+	reportEntriesBefore, err := os.ReadDir(reportsDir)
+	if err != nil {
+		t.Fatalf("ReadDir docs/reports after first run: %v", err)
+	}
+
+	before := snapshotTreeHashesExcluding(t, target)
 
 	var out2, errOut2 bytes.Buffer
 	if err := runUpgradeIOWithOptions(target, upgradeOptions{Pager: pagerNever}, strings.NewReader(""), &out2, &errOut2, false); err != nil {
 		t.Fatalf("second upgrade run: %v\nstderr:\n%s", err, errOut2.String())
 	}
-
-	after := snapshotTreeHashesExcluding(t, target, ".ralph/manifest.toml", "docs/reports/")
-	if !slicesEqualStrings(before, after) {
-		t.Errorf("second run must be a no-op on scaffold content; before=%v after=%v", before, after)
+	if !strings.Contains(out2.String(), "no-op") {
+		t.Errorf("second run's stdout must announce a no-op:\n%s", out2.String())
 	}
 
-	reportPath := upgrade.UpgradeReportRelPath(Version, time.Now().UTC().Format("2006-01-02"))
-	reportContent := string(mustReadFile(t, filepath.Join(target, reportPath)))
-	if !strings.Contains(reportContent, "| Deleted | 0 |") || !strings.Contains(reportContent, "| Created | 0 |") || !strings.Contains(reportContent, "| Updated | 0 |") {
-		t.Errorf("second run's report must record zero ops:\n%s", reportContent)
+	// -- byte-zero writes anywhere in the tree, manifest.toml and
+	// docs/reports/ included (no exclusions — the whole point of AR#2). --
+	after := snapshotTreeHashesExcluding(t, target)
+	if !slicesEqualStrings(before, after) {
+		t.Errorf("second run must be a true no-op (zero writes anywhere); before=%v after=%v", before, after)
+	}
+
+	manifestAfter := mustReadFile(t, manifestPath)
+	if !bytes.Equal(manifestBefore, manifestAfter) {
+		t.Errorf("manifest.toml must be byte-for-byte unchanged on a no-op second run:\nbefore: %s\nafter:  %s", manifestBefore, manifestAfter)
+	}
+	manifestInfoAfter, err := os.Stat(manifestPath)
+	if err != nil {
+		t.Fatalf("stat manifest.toml after second run: %v", err)
+	}
+	if !manifestInfoAfter.ModTime().Equal(manifestInfoBefore.ModTime()) {
+		t.Errorf("manifest.toml's mtime must not change on a no-op second run (no rewrite, not even an identical one): before=%v after=%v", manifestInfoBefore.ModTime(), manifestInfoAfter.ModTime())
+	}
+
+	reportEntriesAfter, err := os.ReadDir(reportsDir)
+	if err != nil {
+		t.Fatalf("ReadDir docs/reports after second run: %v", err)
+	}
+	if len(reportEntriesAfter) != len(reportEntriesBefore) {
+		t.Errorf("second run must not write a new report file: before=%d entries, after=%d entries", len(reportEntriesBefore), len(reportEntriesAfter))
 	}
 }
 
@@ -1425,18 +1457,45 @@ func TestRunUpgradeV2_MixedScenario_AllClassesLandCorrectly(t *testing.T) {
 		}
 	}
 
-	// -- second run: drift persists (still exit sentinel), zero new writes --
-	before := snapshotTreeHashesExcluding(t, target, ".ralph/manifest.toml", "docs/reports/")
+	// -- second run: drift persists forever (ApplyOps never touches a
+	// drifted path), but every other mechanism has converged, so this run
+	// must hit the true no-op path (AR#2): still the drift exit sentinel,
+	// but zero writes anywhere — manifest.toml and docs/reports/ included,
+	// unlike a plain "no further scaffold-content writes" check. --
+	manifestPath := filepath.Join(target, ".ralph", "manifest.toml")
+	manifestBefore := mustReadFile(t, manifestPath)
+	reportsDir := filepath.Join(target, "docs", "reports")
+	reportEntriesBefore, err := os.ReadDir(reportsDir)
+	if err != nil {
+		t.Fatalf("ReadDir docs/reports after first run: %v", err)
+	}
+
+	before := snapshotTreeHashesExcluding(t, target)
 
 	var out2, errOut2 bytes.Buffer
 	err2 := runUpgradeIOWithOptions(target, upgradeOptions{Pager: pagerNever}, strings.NewReader(""), &out2, &errOut2, false)
 	if !errors.Is(err2, ErrUpgradeDriftRemaining) {
 		t.Errorf("second run err = %v, want errors.Is(err, ErrUpgradeDriftRemaining) (drift path was never fixed)", err2)
 	}
+	if !strings.Contains(out2.String(), "no-op") {
+		t.Errorf("second run's stdout must announce a no-op even though drift persists:\n%s", out2.String())
+	}
 
-	after := snapshotTreeHashesExcluding(t, target, ".ralph/manifest.toml", "docs/reports/")
+	after := snapshotTreeHashesExcluding(t, target)
 	if !slicesEqualStrings(before, after) {
-		t.Errorf("second run must produce zero further scaffold-content writes; before=%v after=%v", before, after)
+		t.Errorf("second run must be a true no-op (drift persisting must not itself force a report/manifest rewrite); before=%v after=%v", before, after)
+	}
+
+	manifestAfter := mustReadFile(t, manifestPath)
+	if !bytes.Equal(manifestBefore, manifestAfter) {
+		t.Errorf("manifest.toml must be byte-for-byte unchanged on a no-op second run even with persisting drift:\nbefore: %s\nafter:  %s", manifestBefore, manifestAfter)
+	}
+	reportEntriesAfter, err := os.ReadDir(reportsDir)
+	if err != nil {
+		t.Fatalf("ReadDir docs/reports after second run: %v", err)
+	}
+	if len(reportEntriesAfter) != len(reportEntriesBefore) {
+		t.Errorf("second run must not write a new report file even with persisting drift: before=%d entries, after=%d entries", len(reportEntriesBefore), len(reportEntriesAfter))
 	}
 }
 
@@ -1477,6 +1536,79 @@ func TestRunUpgradeV2_DryRunPreview_MatchesMixedScenarioCounts(t *testing.T) {
 	}
 	if !strings.Contains(errOut.String(), "packs/languages/golang/README.md") {
 		t.Errorf("dry-run preview stderr must list the drifted path:\n%s", errOut.String())
+	}
+}
+
+// TestRunUpgradeV2_DryRunPreview_NamesExceptionFaceChanges covers AR#1
+// (cycle-2 cross-review, docs/reports/cross-review-triage-overlay-scaffold-v2-p3.md):
+// a --dry-run preview must name a pending block-interior update and a
+// pending settings.json merge even when the core replace plan itself is
+// empty ("No core changes."). The fixture here diverges only the AGENTS.md
+// managed-block interior and the settings.json owned "FOO" env value on
+// disk — no embedded-templates generation bump at all — so the only reason
+// either exception face would change is the pure in-memory computation this
+// test exists to pin, not a template-side change the old (Ops-only) preview
+// would have already reported.
+func TestRunUpgradeV2_DryRunPreview_NamesExceptionFaceChanges(t *testing.T) {
+	target := initV2Project(t, gen1(), "1.0.0-test")
+
+	agentsBefore := mustReadFile(t, filepath.Join(target, "AGENTS.md"))
+	agentsDiverged := bytes.Replace(agentsBefore, []byte(v1AgentsManaged), []byte("## Mission\n\nManually reverted mission text.\n"), 1)
+	if bytes.Equal(agentsDiverged, agentsBefore) {
+		t.Fatal("test setup: AGENTS.md block-interior replacement did not match")
+	}
+	if err := os.WriteFile(filepath.Join(target, "AGENTS.md"), agentsDiverged, 0644); err != nil {
+		t.Fatalf("write diverged AGENTS.md: %v", err)
+	}
+
+	settingsBefore := mustReadFile(t, filepath.Join(target, ".claude", "settings.json"))
+	settingsDiverged := bytes.Replace(settingsBefore, []byte(`"FOO": "v1"`), []byte(`"FOO": "manually-edited"`), 1)
+	if bytes.Equal(settingsDiverged, settingsBefore) {
+		t.Fatal("test setup: settings.json owned-value replacement did not match")
+	}
+	if err := os.WriteFile(filepath.Join(target, ".claude", "settings.json"), settingsDiverged, 0644); err != nil {
+		t.Fatalf("write diverged settings.json: %v", err)
+	}
+
+	// scaffold.EmbeddedFS and Version are left exactly as initV2Project set
+	// them (gen1, "1.0.0-test") — this is not an upgrade to a new template
+	// generation, only a re-run against a locally diverged exception face.
+
+	before := snapshotTreeHashesExcluding(t, target)
+
+	var out, errOut bytes.Buffer
+	err := runUpgradeIOWithOptions(target, upgradeOptions{DryRun: true, Pager: pagerNever}, strings.NewReader(""), &out, &errOut, false)
+	if err != nil {
+		t.Fatalf("--dry-run must not error: %v\nstderr:\n%s", err, errOut.String())
+	}
+
+	after := snapshotTreeHashesExcluding(t, target)
+	if !slicesEqualStrings(before, after) {
+		t.Errorf("--dry-run must write zero files even when only exception faces have pending changes; before=%v after=%v", before, after)
+	}
+
+	preview := out.String()
+	if !strings.Contains(preview, "No core changes.") {
+		t.Errorf("this fixture must produce an empty core replace plan (only exception faces diverged):\n%s", preview)
+	}
+	if !strings.Contains(preview, "block AGENTS.md:") {
+		t.Errorf("dry-run preview must name the AGENTS.md exception face:\n%s", preview)
+	}
+	if !strings.Contains(preview, ".claude/settings.json:") {
+		t.Errorf("dry-run preview must name the settings.json exception face:\n%s", preview)
+	}
+	if !strings.Contains(preview, "merge pending") {
+		t.Errorf("dry-run preview must report the settings.json merge as pending:\n%s", preview)
+	}
+	if !strings.Contains(preview, ".gitignore:") {
+		t.Errorf("dry-run preview must still name the unaffected .gitignore exception face:\n%s", preview)
+	}
+
+	// -- both exception-face lines must report "update pending"/"merge
+	// pending", not silently fall back to "unchanged" --
+	agentsLineIdx := strings.Index(preview, "block AGENTS.md:")
+	if agentsLineIdx == -1 || !strings.Contains(preview[agentsLineIdx:agentsLineIdx+60], "update pending") {
+		t.Errorf("AGENTS.md preview line must report \"update pending\":\n%s", preview)
 	}
 }
 

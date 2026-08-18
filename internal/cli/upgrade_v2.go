@@ -93,14 +93,14 @@ func runUpgradeV2(absDir, manifestPath string, oldManifest *scaffold.Manifest, o
 	}
 
 	if opts.DryRun {
-		return renderUpgradeV2Preview(plan, desired, absDir, Version, out, errOut, colorize, opts)
+		return renderUpgradeV2Preview(plan, desired, absDir, Version, out, errOut, colorize, opts, oldOwned, oldOwnedSnapshot, snapshotFound)
 	}
 
 	if err := upgrade.ApplyOps(absDir, plan); err != nil {
 		return fmt.Errorf("applying upgrade: %w", err)
 	}
 
-	blockOutcomes, blockNotes, err := applyBlockUpdatesV2(absDir, desired, errOut)
+	blockOutcomes, blockNotes, err := applyBlockUpdatesV2(absDir, desired, errOut, true)
 	if err != nil {
 		return fmt.Errorf("updating managed blocks: %w", err)
 	}
@@ -144,6 +144,20 @@ func runUpgradeV2(absDir, manifestPath string, oldManifest *scaffold.Manifest, o
 		finalSnapshotContent = newOwnedSettings
 	}
 
+	// AR#2 (cycle-2 cross-review, docs/reports/cross-review-triage-overlay-scaffold-v2-p3.md):
+	// a converged tree (nothing left for the core replace plan, both block
+	// surfaces already match, the settings merge is a no-op, and the
+	// snapshot already reflects the current owned settings) must produce a
+	// byte-for-byte no-op re-run — no dated report, no manifest rewrite, no
+	// git-hook reinstall attempt. Every write above this point is already
+	// individually conditional (ApplyOps has nothing to do; block/settings/
+	// snapshot writes only fire when their own outcome changed), so the only
+	// remaining unconditional writes are the report, the manifest commit
+	// barrier, and installManagedGitHooks — gated below.
+	if isFullyConvergedV2(plan, blockOutcomes, mergeResult, snapshotNeedsWrite) {
+		return finishNoOpUpgradeV2(absDir, Version, plan, out, errOut)
+	}
+
 	advisories, err := upgrade.RenderAdvisoryDiffs(absDir, desiredFS(desired), Version, plan.Advisories)
 	if err != nil {
 		return fmt.Errorf("rendering advisory diffs: %w", err)
@@ -183,14 +197,15 @@ func runUpgradeV2(absDir, manifestPath string, oldManifest *scaffold.Manifest, o
 	// legacy engine (immediately after manifest.Write, before the summary)
 	// and as init.go's own call. installManagedGitHooks is idempotent and
 	// best-effort: failures are reported on errOut, never fail the upgrade.
+	// Only reached on the non-no-op path (see isFullyConvergedV2 above) —
+	// writeWrappedGitHook rewrites its guard/wrapper files on every call
+	// even when their content is already identical, so calling it
+	// unconditionally would itself violate a converged tree's zero-writes
+	// contract (AR#2).
 	installManagedGitHooks(absDir, out, errOut)
 
-	cleanBaseline, err := scaffold.CleanLocalRelPath(".ralph/baseline")
-	if err != nil {
-		return fmt.Errorf("resolving .ralph/baseline path: %w", err)
-	}
-	if err := os.RemoveAll(filepath.Join(absDir, cleanBaseline)); err != nil {
-		return fmt.Errorf("removing .ralph/baseline: %w", err)
+	if err := removeLegacyBaselineIfPresent(absDir); err != nil {
+		return err
 	}
 
 	writef(out, "Upgrade complete: %s\n", Version)
@@ -205,6 +220,91 @@ func runUpgradeV2(absDir, manifestPath string, oldManifest *scaffold.Manifest, o
 		return fmt.Errorf("%w (%d path(s)); see %s", ErrUpgradeDriftRemaining, len(plan.Drift), reportRelPath)
 	}
 
+	return nil
+}
+
+// isFullyConvergedV2 reports whether this run produced zero content changes
+// across every mechanism the v2 upgrade flow drives: the core replace plan
+// (creates/updates/deletes, hash-only manifest refreshes, and stale-manifest
+// removals — new seed files are always represented as OpCreate entries in
+// plan.Ops, so "no seeds to create" is already covered by the Ops check),
+// both managed-block surfaces, the settings.json 3-way merge, and the
+// settings snapshot.
+//
+// Unresolved drift, legacy-skipped paths, fork entries, and preserved-pack
+// namespaces are deliberately excluded from this check: those categories are
+// permanently left untouched by design (see ReplacePlan's doc comments), so
+// their continued presence on a re-run never implies a pending write — see
+// AR#2 in docs/reports/cross-review-triage-overlay-scaffold-v2-p3.md.
+func isFullyConvergedV2(plan upgrade.ReplacePlan, blockOutcomes map[string]blockUpdateOutcome, mergeResult upgrade.SettingsMergeResult, snapshotNeedsWrite bool) bool {
+	if len(plan.Ops) != 0 || len(plan.ManifestRefresh) != 0 || len(plan.ManifestRemove) != 0 {
+		return false
+	}
+	for _, bs := range blockSurfaces {
+		oc, ok := blockOutcomes[bs.path]
+		if !ok || oc.outcome != upgrade.BlockUnchanged {
+			return false
+		}
+	}
+	if mergeResult.Changed {
+		return false
+	}
+	return !snapshotNeedsWrite
+}
+
+// finishNoOpUpgradeV2 is the true-no-op tail of runUpgradeV2, reached only
+// when isFullyConvergedV2 holds: every file-content write already happened
+// conditionally above (and fired zero times), so the only remaining steps
+// are the ones this function deliberately skips — no dated report, no
+// manifest rewrite (the on-disk manifest already matches; rebuildManifestV2
+// would only advance Meta.Updated), and no installManagedGitHooks call
+// (whose guard/wrapper writes are unconditional even when content is
+// unchanged). A leftover .ralph/baseline directory, if present, is still
+// removed — its presence is independent of plan convergence and removal
+// itself is idempotent and stat-gated (removeLegacyBaselineIfPresent).
+//
+// Unresolved drift can persist forever in an otherwise-converged tree (drift
+// paths are permanently left untouched), so a no-op run still returns the
+// ErrUpgradeDriftRemaining sentinel when drift remains — but without a
+// report-path reference, since no report was written this run.
+func finishNoOpUpgradeV2(absDir, version string, plan upgrade.ReplacePlan, out, errOut io.Writer) error {
+	if err := removeLegacyBaselineIfPresent(absDir); err != nil {
+		return err
+	}
+
+	writef(out, "Upgrade no-op: %s (already up to date, zero writes)\n", version)
+	if len(plan.Drift) == 0 {
+		return nil
+	}
+
+	writef(out, "  drift (untouched): %d files\n", len(plan.Drift))
+	writef(errOut, "\nUnresolved drift (left untouched; no report written this run — tree already converged):\n")
+	for _, d := range sortedDriftV2(plan.Drift) {
+		writef(errOut, "  ⚠ %s\n", d.Path)
+	}
+	return fmt.Errorf("%w (%d path(s))", ErrUpgradeDriftRemaining, len(plan.Drift))
+}
+
+// removeLegacyBaselineIfPresent removes a leftover .ralph/baseline directory
+// (Phase 3 removed the baseline mechanism entirely — see the plan's 後始末
+// step) without attempting any write when the directory is already absent:
+// callers, including the true-no-op path (finishNoOpUpgradeV2), must not
+// perform an unconditional RemoveAll on every run.
+func removeLegacyBaselineIfPresent(absDir string) error {
+	cleanBaseline, err := scaffold.CleanLocalRelPath(".ralph/baseline")
+	if err != nil {
+		return fmt.Errorf("resolving .ralph/baseline path: %w", err)
+	}
+	full := filepath.Join(absDir, cleanBaseline)
+	if _, statErr := os.Stat(full); statErr != nil {
+		if errors.Is(statErr, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("checking .ralph/baseline: %w", statErr)
+	}
+	if err := os.RemoveAll(full); err != nil {
+		return fmt.Errorf("removing .ralph/baseline: %w", err)
+	}
 	return nil
 }
 
@@ -337,7 +437,14 @@ type blockUpdateOutcome struct {
 // init.go's reconcileBlockSurfaces). A malformed existing block, or a
 // symlinked/non-regular/missing surface, is left untouched with a warning
 // (AC-12) rather than aborting the upgrade.
-func applyBlockUpdatesV2(absDir string, desired map[string][]byte, errOut io.Writer) (map[string]blockUpdateOutcome, []string, error) {
+//
+// write controls whether a computed update is actually persisted to disk.
+// The real upgrade path calls this with write=true; the --dry-run preview
+// (renderUpgradeV2Preview, AR#1 in docs/reports/cross-review-triage-overlay-scaffold-v2-p3.md)
+// calls it with write=false to compute the same outcomes purely in memory,
+// against the current on-disk content, so the preview can name pending
+// block updates without ever touching the tree.
+func applyBlockUpdatesV2(absDir string, desired map[string][]byte, errOut io.Writer, write bool) (map[string]blockUpdateOutcome, []string, error) {
 	outcomes := make(map[string]blockUpdateOutcome, len(blockSurfaces))
 	var notes []string
 
@@ -374,7 +481,7 @@ func applyBlockUpdatesV2(absDir string, desired map[string][]byte, errOut io.Wri
 			continue
 		}
 
-		oc, note, err := updateOneBlockV2(absDir, bs.path, bs.surface, bs.style, managed, errOut)
+		oc, note, err := updateOneBlockV2(absDir, bs.path, bs.surface, bs.style, managed, write, errOut)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -391,8 +498,10 @@ func applyBlockUpdatesV2(absDir string, desired map[string][]byte, errOut io.Wri
 // refuses to follow symlinks or operate on non-regular files (mirroring
 // init.go's reconcileBlockSurfaces containment guard) and leaves a malformed
 // existing block untouched, reporting both cases via a warning and a report
-// note instead of failing the upgrade.
-func updateOneBlockV2(absDir, relPath, surface string, style upgrade.BlockMarkerStyle, managed []byte, errOut io.Writer) (blockUpdateOutcome, string, error) {
+// note instead of failing the upgrade. write=false computes the same
+// outcome against current on-disk content without ever calling
+// os.WriteFile — see applyBlockUpdatesV2's doc comment.
+func updateOneBlockV2(absDir, relPath, surface string, style upgrade.BlockMarkerStyle, managed []byte, write bool, errOut io.Writer) (blockUpdateOutcome, string, error) {
 	full := filepath.Join(absDir, relPath)
 	info, err := os.Lstat(full)
 	if err != nil {
@@ -420,8 +529,10 @@ func updateOneBlockV2(absDir, relPath, surface string, style upgrade.BlockMarker
 	result := upgrade.UpdateManagedBlockStyled(current, surface, managed, style)
 	switch result.Outcome {
 	case upgrade.BlockUpdated, upgrade.BlockAppended:
-		if err := os.WriteFile(full, result.Content, scaffold.FilePerm(relPath)); err != nil {
-			return blockUpdateOutcome{}, "", fmt.Errorf("writing %s: %w", relPath, err)
+		if write {
+			if err := os.WriteFile(full, result.Content, scaffold.FilePerm(relPath)); err != nil {
+				return blockUpdateOutcome{}, "", fmt.Errorf("writing %s: %w", relPath, err)
+			}
 		}
 		return blockUpdateOutcome{outcome: result.Outcome, content: result.Content, ok: true}, "", nil
 	case upgrade.BlockMalformed:
@@ -615,7 +726,7 @@ func sortedDriftV2(entries []upgrade.DriftEntry) []upgrade.DriftEntry {
 // upgrade: op counts, per-op paths, drift, and preserved-pack namespaces.
 // --diff additionally renders the full advisory diffs (fork/seed paths whose
 // template side changed). Never writes to targetDir.
-func renderUpgradeV2Preview(plan upgrade.ReplacePlan, desired map[string][]byte, absDir, version string, out, errOut io.Writer, colorize bool, opts upgradeOptions) error {
+func renderUpgradeV2Preview(plan upgrade.ReplacePlan, desired map[string][]byte, absDir, version string, out, errOut io.Writer, colorize bool, opts upgradeOptions, oldOwned, oldOwnedSnapshot []byte, snapshotFound bool) error {
 	var deletes, creates, updates int
 	for _, op := range plan.Ops {
 		switch op.Kind {
@@ -653,6 +764,19 @@ func renderUpgradeV2Preview(plan upgrade.ReplacePlan, desired map[string][]byte,
 		}
 	}
 
+	// AR#1 (cycle-2 cross-review, docs/reports/cross-review-triage-overlay-scaffold-v2-p3.md):
+	// the core replace plan above never covers the four v2 "exception
+	// faces" (they are excluded via v2SkipPaths and handled by their own
+	// mechanisms), so a preview that only reported plan.Ops could show "No
+	// core changes" while a real run would still rewrite AGENTS.md,
+	// .gitignore, settings.json, or the settings snapshot. Compute each
+	// exception face's pending outcome purely in memory — write=false below
+	// means applyBlockUpdatesV2 and MergeOwnedSettings never touch disk —
+	// and name it here so --dry-run stays a complete preview.
+	if err := renderUpgradeV2ExceptionFacePreview(desired, absDir, oldOwned, oldOwnedSnapshot, snapshotFound, out, errOut); err != nil {
+		return err
+	}
+
 	if !opts.DiffPreview {
 		return nil
 	}
@@ -678,6 +802,65 @@ func renderUpgradeV2Preview(plan upgrade.ReplacePlan, desired map[string][]byte,
 		writeDiffOutput(diffText, out, errOut, opts.Pager)
 	}
 	return nil
+}
+
+// renderUpgradeV2ExceptionFacePreview computes and prints the pending
+// outcome of all four v2 exception faces (AGENTS.md, .gitignore,
+// settings.json, the settings snapshot) without writing anything to disk.
+// applyBlockUpdatesV2 is called with write=false, and MergeOwnedSettings is
+// a pure function — neither touches targetDir. See AR#1's fix note on
+// renderUpgradeV2Preview.
+func renderUpgradeV2ExceptionFacePreview(desired map[string][]byte, absDir string, oldOwned, oldOwnedSnapshot []byte, snapshotFound bool, out, errOut io.Writer) error {
+	blockOutcomes, _, err := applyBlockUpdatesV2(absDir, desired, errOut, false)
+	if err != nil {
+		return fmt.Errorf("computing managed block preview: %w", err)
+	}
+
+	currentSettings, err := readFinalDiskContent(absDir, v2SettingsPath)
+	if err != nil {
+		return fmt.Errorf("reading %s: %w", v2SettingsPath, err)
+	}
+	newOwnedSettings := desired[v2SettingsPath]
+	mergeResult, err := upgrade.MergeOwnedSettings(currentSettings, oldOwned, newOwnedSettings)
+	if err != nil {
+		return fmt.Errorf("merging %s: %w", v2SettingsPath, err)
+	}
+	snapshotWouldChange := !snapshotFound || !bytes.Equal(oldOwnedSnapshot, newOwnedSettings)
+
+	writef(out, "\nException faces (block/settings, not counted above):\n")
+	for _, bs := range blockSurfaces {
+		writef(out, "  block %-14s %s\n", bs.path+":", blockPreviewLabel(blockOutcomes[bs.path]))
+	}
+	settingsLabel := "unchanged"
+	if mergeResult.Changed {
+		settingsLabel = "merge pending"
+	}
+	writef(out, "  %-19s %s\n", v2SettingsPath+":", settingsLabel)
+	snapshotLabel := "unchanged"
+	if snapshotWouldChange {
+		snapshotLabel = "update pending"
+		if !snapshotFound {
+			snapshotLabel = "update pending (no existing snapshot; will be created)"
+		}
+	}
+	writef(out, "  %-19s %s\n", "settings snapshot:", snapshotLabel)
+
+	return nil
+}
+
+// blockPreviewLabel summarizes a computed block-update outcome for the
+// --dry-run preview. A malformed existing block is reported distinctly from
+// "unchanged" since it is a warning condition, even though neither state
+// would trigger a write.
+func blockPreviewLabel(oc blockUpdateOutcome) string {
+	switch {
+	case oc.ok && (oc.outcome == upgrade.BlockUpdated || oc.outcome == upgrade.BlockAppended):
+		return "update pending"
+	case oc.outcome == upgrade.BlockMalformed:
+		return "left untouched (malformed)"
+	default:
+		return "unchanged"
+	}
 }
 
 // desiredFS adapts a desired-state path→content map into an fs.FS, so it can

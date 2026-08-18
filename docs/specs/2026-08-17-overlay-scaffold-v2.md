@@ -68,7 +68,7 @@ ralph の配布物を所有権ベースの 5 層オーバーレイ構造に再�
 
 ### Non-functional requirements
 
-- [ ] NFR-1 冪等性: 同一バイナリでの `ralph upgrade` 再実行は no-op(書き込みゼロ、レポートに no-op 明記)
+- [ ] NFR-1 冪等性: 同一バイナリでの `ralph upgrade` 再実行は no-op(書き込みゼロ、標準出力に no-op を明記。収束済みの再実行では日付付きレポートファイル自体を書かない — レポートは新たな適用結果があった実行でのみ生成される)
 - [ ] NFR-2 非破壊性: upgrade / 移行のいかなる経路でも、fork・L2 block 外・L3・L5 既存ファイルの内容が失われない。移行前に git クリーン状態を強制することで全変更が git で復元可能
 - [ ] NFR-3 worktree 互換: L1 はコミット対象であり、新規 worktree / クローン直後でもハーネスが完全動作する(husky の gitignore 起因の hook 消失事故の回避)
 - [ ] NFR-4 ネットワーク非依存: upgrade・移行はバイナリ埋め込みテンプレートのみで完結する
