@@ -1250,13 +1250,16 @@ func TestRunUpgradeV2_MissingAgentsCoreTemplate_LeavesAgentsMdUntouchedWithNote(
 	}
 }
 
-// TestRunUpgradeIOWithOptions_LegacyManifest_FailsClosedZeroWrites is AC-7
-// coverage for `ralph upgrade`: a manifest with no meta.layout (a genuine
-// pre-v2 project) is rejected fail-closed with zero writes to the tree. The
-// legacy interactive upgrade engine was removed in Phase 3 (docs/plans
-// /active/2026-08-18-overlay-scaffold-v2-p3.md, FR-13); the automated
-// migration to v2 arrives in a later ralph release (Phase 4).
-func TestRunUpgradeIOWithOptions_LegacyManifest_FailsClosedZeroWrites(t *testing.T) {
+// TestRunUpgradeIOWithOptions_LegacyManifest_NonGitDir_FailsClosedZeroWrites
+// is AC-3 coverage for `ralph upgrade`: a manifest with no meta.layout (a
+// genuine pre-v2 project) is migrated (runMigrateLegacy, migrate.go)
+// instead of refused outright — but the migration's git preflight still
+// rejects a target that is not inside a git work tree, with zero writes to
+// the tree, since git is the migration's only rollback mechanism. (Prior to
+// Phase 4, this same scenario was rejected with the static
+// errLegacyLayoutFailClosed sentinel; see internal/cli/migrate_test.go for
+// the full legacy-migration e2e coverage this phase added.)
+func TestRunUpgradeIOWithOptions_LegacyManifest_NonGitDir_FailsClosedZeroWrites(t *testing.T) {
 	setupTestEmbedFS(t)
 	Version = "2.0.0-test"
 
@@ -1279,10 +1282,10 @@ func TestRunUpgradeIOWithOptions_LegacyManifest_FailsClosedZeroWrites(t *testing
 	var out, errOut bytes.Buffer
 	err := runUpgradeIOWithOptions(dir, upgradeOptions{Pager: pagerNever}, strings.NewReader(""), &out, &errOut, false)
 	if err == nil {
-		t.Fatal("upgrade on a legacy manifest: expected an error, got nil")
+		t.Fatal("upgrade on a legacy manifest outside a git work tree: expected an error, got nil")
 	}
-	if !errors.Is(err, errLegacyLayoutFailClosed) {
-		t.Errorf("err = %v, want errors.Is(err, errLegacyLayoutFailClosed)", err)
+	if !strings.Contains(err.Error(), "git work tree") {
+		t.Errorf("err = %v, want a git-work-tree preflight error", err)
 	}
 
 	after := snapshotDirHashes(t, dir)

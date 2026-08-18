@@ -1,16 +1,22 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/yoshpy-dev/ralph/internal/scaffold"
+	"github.com/yoshpy-dev/ralph/internal/upgrade"
 )
 
 // This file resolves the plan's Open question ("移行分類器の配置" —
@@ -684,4 +690,672 @@ func readDiskFileForMigration(targetDir, relPath string) (content []byte, hasDis
 func hasBaselineDir(targetDir string) bool {
 	fi, err := os.Stat(filepath.Join(targetDir, filepath.FromSlash(pathBaselineDir)))
 	return err == nil && fi.IsDir()
+}
+
+// ---------------------------------------------------------------------
+// Migration execution (plan Scope C, slice 3).
+//
+// runMigrateLegacy is the entry point `runUpgradeIOWithOptions` (upgrade.go)
+// calls for any manifest whose meta.layout is not v2: git preflight ->
+// preview -> confirm -> preflight-validated execution -> v3 manifest (commit
+// barrier) -> chained v2 upgrade -> migration report. Every step before the
+// commit barrier only reads; the barrier is the single point after which the
+// legacy manifest is considered migrated.
+// ---------------------------------------------------------------------
+
+// migrationReportDir mirrors internal/upgrade's own report directory
+// constant (unexported there): every migration report is written under
+// docs/reports/, validated by the same upgrade.WriteUpgradeReport
+// containment checks the v2 upgrade report uses.
+const migrationReportDir = "docs/reports"
+
+// runMigrateLegacy migrates a legacy (v1/v2, non-overlay) manifest to the v2
+// overlay layout, then chains into the ordinary v2 upgrade engine
+// (runUpgradeV2) so dispatcher/.ralph/core/new-file convergence happens in
+// the same run. now is threaded through (rather than calling time.Now here)
+// so report timestamps stay reproducible in tests, matching runUpgradeV2's
+// own convention.
+func runMigrateLegacy(absDir, manifestPath string, oldManifest *scaffold.Manifest, opts upgradeOptions, in io.Reader, out, errOut io.Writer, colorize bool, now time.Time) error {
+	if err := checkGitCleanForMigration(absDir); err != nil {
+		return err
+	}
+
+	baseFS, err := scaffold.BaseFS()
+	if err != nil {
+		return fmt.Errorf("loading templates: %w", err)
+	}
+	desired, _, _, _, err := buildDesiredStateV2(baseFS, oldManifest, errOut)
+	if err != nil {
+		return fmt.Errorf("building desired state: %w", err)
+	}
+
+	plan, err := ClassifyMigration(oldManifest, absDir, desired)
+	if err != nil {
+		return fmt.Errorf("classifying migration: %w", err)
+	}
+
+	writef(out, "%s\n", RenderMigrationPreview(plan))
+
+	if len(plan.Collisions) > 0 {
+		writef(errOut, "Migration blocked: %d relocation destination(s) diverge from both the source and the new template; resolve manually (see the collisions listed above) and re-run.\n", len(plan.Collisions))
+		return fmt.Errorf("migration blocked by %d collision(s); no files were changed", len(plan.Collisions))
+	}
+
+	if opts.DryRun {
+		writef(out, "\n--dry-run: preview only, no files were changed.\n")
+		return nil
+	}
+
+	confirmed, err := confirmMigration(in, out, opts.Yes)
+	if err != nil {
+		return fmt.Errorf("reading migration confirmation: %w", err)
+	}
+	if !confirmed {
+		writef(out, "\nMigration aborted; no files were changed.\n")
+		return nil
+	}
+
+	for _, e := range plan.Entries {
+		if err := validateMigrationOp(absDir, e); err != nil {
+			return fmt.Errorf("migration preflight check failed for %s: %w; no files were changed — fix the underlying issue and re-run", e.OldPath, err)
+		}
+	}
+
+	if err := executeMigrationEntries(absDir, desired, plan.Entries); err != nil {
+		return fmt.Errorf("migration failed partway through: %w; the legacy manifest was not advanced (the commit barrier), so the tree is only partially updated — inspect `git status`/`git diff` (git is the migration's rollback mechanism; no backups are made) to restore or fix forward, then re-run `ralph upgrade` to complete the remaining work", err)
+	}
+
+	newManifest, err := buildMigratedManifest(Version, oldManifest, absDir, desired, plan)
+	if err != nil {
+		return fmt.Errorf("building v3 manifest after migration: %w", err)
+	}
+	if err := newManifest.Write(manifestPath); err != nil {
+		return fmt.Errorf("writing v3 manifest: %w", err)
+	}
+
+	writef(out, "Migration complete: legacy layout -> v2 overlay layout (%s)\n", Version)
+
+	if reportContent, rerr := renderMigrationReport(plan, desired, absDir, now); rerr != nil {
+		writef(errOut, "Warning: could not render migration report: %v\n", rerr)
+	} else {
+		reportRelPath := migrationReportRelPath(now)
+		if werr := upgrade.WriteUpgradeReport(absDir, reportRelPath, reportContent); werr != nil {
+			writef(errOut, "Warning: could not write migration report: %v\n", werr)
+		} else {
+			writef(out, "  report: %s\n", reportRelPath)
+		}
+	}
+
+	// Chain into the v2 upgrade engine so dispatcher/.ralph/core/new-file
+	// convergence happens in the same run. Per the plan's design decision, a
+	// failure here is a warning, not fatal: the migration itself already
+	// committed (the manifest barrier above succeeded), and a subsequent
+	// `ralph upgrade` re-run converges the rest through the ordinary v2
+	// path.
+	if err := runUpgradeV2(absDir, manifestPath, newManifest, opts, out, errOut, colorize, now); err != nil {
+		writef(errOut, "Warning: migration completed, but the chained v2 upgrade reported an issue: %v\n", err)
+		writef(errOut, "  re-run `ralph upgrade` to complete convergence via the v2 engine.\n")
+	}
+
+	return nil
+}
+
+// checkGitCleanForMigration enforces the plan's "非 git ターゲットは移行拒否"
+// design decision: git is the migration's only rollback mechanism (no
+// backup directory is made), so absDir must be a git work tree with no
+// uncommitted changes before any migration write happens.
+func checkGitCleanForMigration(absDir string) error {
+	gitBin, err := exec.LookPath("git")
+	if err != nil {
+		return fmt.Errorf("migration requires git (it is the migration's rollback mechanism; no backups are made): git was not found in PATH; no files were changed")
+	}
+
+	treeCmd := exec.Command(gitBin, "-C", absDir, "rev-parse", "--is-inside-work-tree")
+	treeOut, err := treeCmd.Output()
+	if err != nil || strings.TrimSpace(string(treeOut)) != "true" {
+		return fmt.Errorf("migration requires a git work tree (git is the migration's rollback mechanism; no backups are made): %s is not inside a git work tree; no files were changed", absDir)
+	}
+
+	statusCmd := exec.Command(gitBin, "-C", absDir, "status", "--porcelain")
+	statusOut, err := statusCmd.Output()
+	if err != nil {
+		return fmt.Errorf("checking git status before migration: %w", err)
+	}
+	if strings.TrimSpace(string(statusOut)) != "" {
+		return fmt.Errorf("migration requires a clean git work tree (git is the migration's rollback mechanism; no backups are made): %s has uncommitted changes; commit or stash them first; no files were changed", absDir)
+	}
+	return nil
+}
+
+// confirmMigration implements the plan's confirm UX: autoYes (--yes) skips
+// the prompt; otherwise a y/N prompt is read from in. A non-interactive EOF
+// (no input available) reads as an empty line, which is treated as "no" —
+// aborting safely rather than blocking or erroring.
+func confirmMigration(in io.Reader, out io.Writer, autoYes bool) (bool, error) {
+	if autoYes {
+		return true, nil
+	}
+	writef(out, "Proceed with migration? [y/N] ")
+	line, err := bufio.NewReader(in).ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return false, err
+	}
+	line = strings.TrimSpace(strings.ToLower(line))
+	return line == "y" || line == "yes", nil
+}
+
+// validateMigrationOp implements the plan's AC-14/AC-16 preflight: every
+// planned file operation is validated (clean path, real parent chain, leaf
+// is a regular file or absent) before any migration write happens. Called
+// once per plan.Entries item, in a batch pass that must fully complete
+// before executeMigrationEntries writes anything.
+func validateMigrationOp(absDir string, e MigrationEntry) error {
+	switch e.Kind {
+	case OpDeleteOldPath:
+		return validateMigrationLeaf(absDir, e.OldPath, false /* mustExist */)
+	case OpForkRelocate:
+		if err := validateMigrationLeaf(absDir, e.OldPath, true /* mustExist */); err != nil {
+			return err
+		}
+		return validateMigrationWriteTarget(absDir, e.NewPath)
+	case OpReplaceWithTemplate:
+		if err := validateMigrationWriteTarget(absDir, e.NewPath); err != nil {
+			return err
+		}
+		if e.SnapshotCreate {
+			return validateMigrationWriteTarget(absDir, upgrade.SettingsSnapshotRelPath)
+		}
+		return nil
+	case OpSettingsPrune:
+		return validateMigrationWriteTarget(absDir, e.OldPath)
+	case OpDeleteDir:
+		return validateMigrationDirOp(absDir, e.OldPath)
+	default: // OpKeepInPlace, OpForkInPlace, OpUntouched: no write.
+		return nil
+	}
+}
+
+// validateMigrationLeaf validates relPath's own Lstat state: regular file or
+// absent is always accepted; anything else (symlink, directory, other
+// non-regular entry) is refused. mustExist additionally refuses an absent
+// leaf.
+func validateMigrationLeaf(absDir, relPath string, mustExist bool) error {
+	clean, err := scaffold.CleanLocalRelPath(relPath)
+	if err != nil {
+		return fmt.Errorf("%s: %w", relPath, err)
+	}
+	full := filepath.Join(absDir, clean)
+	fi, err := os.Lstat(full)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			if mustExist {
+				return fmt.Errorf("%s: expected to exist but is missing", relPath)
+			}
+			return nil
+		}
+		return fmt.Errorf("%s: lstat: %w", relPath, err)
+	}
+	if !fi.Mode().IsRegular() {
+		return fmt.Errorf("%s: refusing to operate on a non-regular file (mode %s)", relPath, fi.Mode())
+	}
+	return nil
+}
+
+// validateMigrationWriteTarget validates a path migration is about to write
+// to: the path itself must be clean/local, every existing parent path
+// component must be a real directory (never a symlink — closes the same gap
+// upgrade.ValidateRealParentChain's doc comment describes for ApplyOps), and
+// the leaf itself must be a regular file or absent.
+func validateMigrationWriteTarget(absDir, relPath string) error {
+	if _, err := scaffold.CleanLocalRelPath(relPath); err != nil {
+		return fmt.Errorf("%s: %w", relPath, err)
+	}
+	if err := upgrade.ValidateRealParentChain(absDir, relPath); err != nil {
+		return fmt.Errorf("%s: %w", relPath, err)
+	}
+	return validateMigrationLeaf(absDir, relPath, false /* mustExist */)
+}
+
+// validateMigrationDirOp validates a directory migration is about to
+// os.RemoveAll (only .ralph/baseline/ today): absent is fine (nothing to
+// do); present must be a real directory, never a symlink.
+func validateMigrationDirOp(absDir, relPath string) error {
+	clean, err := scaffold.CleanLocalRelPath(relPath)
+	if err != nil {
+		return fmt.Errorf("%s: %w", relPath, err)
+	}
+	full := filepath.Join(absDir, clean)
+	fi, err := os.Lstat(full)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("%s: lstat: %w", relPath, err)
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("%s: refusing to remove a symlink", relPath)
+	}
+	if !fi.IsDir() {
+		return fmt.Errorf("%s: expected a directory", relPath)
+	}
+	return nil
+}
+
+// executeMigrationEntries applies every plan.Entries write in order: fork
+// relocations (read source, write destination, delete source), template
+// replacements (special faces, plus a fresh settings snapshot when
+// SnapshotCreate is set), settings pruning, plain deletes, and the
+// .ralph/baseline/ directory removal. OpKeepInPlace, OpForkInPlace, and
+// OpUntouched entries never write — their content converges via the chained
+// v2 upgrade (KeepInPlace) or is deliberately left alone (ForkInPlace,
+// Untouched). Callers must run validateMigrationOp over every entry first
+// (runMigrateLegacy does); this function does not re-validate.
+func executeMigrationEntries(absDir string, desired map[string][]byte, entries []MigrationEntry) error {
+	for _, e := range entries {
+		switch e.Kind {
+		case OpDeleteOldPath:
+			if err := removeMigrationPath(absDir, e.OldPath); err != nil {
+				return fmt.Errorf("deleting %s: %w", e.OldPath, err)
+			}
+		case OpForkRelocate:
+			if err := relocateMigrationFile(absDir, e.OldPath, e.NewPath); err != nil {
+				return fmt.Errorf("relocating %s -> %s: %w", e.OldPath, e.NewPath, err)
+			}
+		case OpReplaceWithTemplate:
+			content, ok := desired[e.NewPath]
+			if !ok {
+				return fmt.Errorf("replacing %s: no desired-state content for this path", e.NewPath)
+			}
+			if err := writeMigrationFile(absDir, e.NewPath, content); err != nil {
+				return fmt.Errorf("replacing %s: %w", e.NewPath, err)
+			}
+			if e.SnapshotCreate {
+				if err := writeMigrationFile(absDir, upgrade.SettingsSnapshotRelPath, content); err != nil {
+					return fmt.Errorf("writing settings snapshot: %w", err)
+				}
+			}
+		case OpSettingsPrune:
+			current, hasDisk, err := readDiskFileForMigration(absDir, e.OldPath)
+			if err != nil {
+				return fmt.Errorf("reading %s: %w", e.OldPath, err)
+			}
+			if !hasDisk {
+				continue
+			}
+			pruned, err := pruneLegacySettingsHooks(current, e.PrunedHookCommands)
+			if err != nil {
+				return fmt.Errorf("pruning legacy hooks from %s: %w", e.OldPath, err)
+			}
+			if err := writeMigrationFile(absDir, e.OldPath, pruned); err != nil {
+				return fmt.Errorf("writing pruned %s: %w", e.OldPath, err)
+			}
+		case OpDeleteDir:
+			if err := removeMigrationDir(absDir, e.OldPath); err != nil {
+				return fmt.Errorf("removing %s: %w", e.OldPath, err)
+			}
+		case OpKeepInPlace, OpForkInPlace, OpUntouched:
+			// No write: content converges via the chained v2 upgrade
+			// (KeepInPlace) or is deliberately left alone.
+		}
+	}
+	return nil
+}
+
+// writeMigrationFile writes content to absDir/relPath, creating parent
+// directories as needed. Callers must have already validated relPath via
+// validateMigrationWriteTarget.
+func writeMigrationFile(absDir, relPath string, content []byte) error {
+	clean, err := scaffold.CleanLocalRelPath(relPath)
+	if err != nil {
+		return err
+	}
+	full := filepath.Join(absDir, clean)
+	if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(full, content, scaffold.FilePerm(relPath))
+}
+
+// removeMigrationPath removes absDir/relPath. Absent is not an error
+// (matches upgrade.ApplyOps' OpDelete semantics: a path already gone —
+// e.g. from a prior interrupted migration run — is simply settled).
+func removeMigrationPath(absDir, relPath string) error {
+	clean, err := scaffold.CleanLocalRelPath(relPath)
+	if err != nil {
+		return err
+	}
+	full := filepath.Join(absDir, clean)
+	if err := os.Remove(full); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+// relocateMigrationFile reads oldPath's content, writes it to newPath, then
+// removes oldPath — in that order, so a failure between the write and the
+// delete leaves both paths present rather than losing content.
+func relocateMigrationFile(absDir, oldPath, newPath string) error {
+	content, hasDisk, err := readDiskFileForMigration(absDir, oldPath)
+	if err != nil {
+		return err
+	}
+	if !hasDisk {
+		return fmt.Errorf("source is missing at execution time (changed since the migration plan was built)")
+	}
+	if err := writeMigrationFile(absDir, newPath, content); err != nil {
+		return err
+	}
+	return removeMigrationPath(absDir, oldPath)
+}
+
+// removeMigrationDir removes absDir/relPath recursively (only
+// .ralph/baseline/ today). Callers must have already validated relPath via
+// validateMigrationDirOp.
+func removeMigrationDir(absDir, relPath string) error {
+	clean, err := scaffold.CleanLocalRelPath(relPath)
+	if err != nil {
+		return err
+	}
+	return os.RemoveAll(filepath.Join(absDir, clean))
+}
+
+// pruneLegacySettingsHooks removes every hooks.<Event>[].hooks[] entry whose
+// "command" field exactly matches one of commands from content's "hooks"
+// object, dropping now-empty matcher entries and now-empty event arrays
+// along with them. Everything else in content (env, permissions, user hook
+// entries, unrelated top-level keys) is preserved.
+//
+// The result is re-marshaled as 2-space-indented JSON. Key order is not
+// preserved (unlike internal/upgrade's settings merge, which keeps an
+// order-preserving JSON model for exactly this reason) because this output
+// is a transient step: the chained v2 upgrade's own 3-way settings merge
+// (internal/upgrade.MergeOwnedSettings) always re-canonicalizes the result
+// immediately afterward in the same runMigrateLegacy call.
+func pruneLegacySettingsHooks(content []byte, commands []string) ([]byte, error) {
+	trimmed := bytes.TrimSpace(content)
+	if len(trimmed) == 0 {
+		return content, nil
+	}
+
+	var doc map[string]any
+	if err := json.Unmarshal(trimmed, &doc); err != nil {
+		return nil, fmt.Errorf("parsing settings.json: %w", err)
+	}
+
+	hooksRaw, ok := doc["hooks"]
+	if !ok {
+		return content, nil
+	}
+	hooksObj, ok := hooksRaw.(map[string]any)
+	if !ok {
+		return content, nil
+	}
+
+	cmdSet := make(map[string]bool, len(commands))
+	for _, c := range commands {
+		cmdSet[c] = true
+	}
+
+	for event, entriesRaw := range hooksObj {
+		entries, ok := entriesRaw.([]any)
+		if !ok {
+			continue
+		}
+		var keptEntries []any
+		for _, entryRaw := range entries {
+			entry, ok := entryRaw.(map[string]any)
+			if !ok {
+				keptEntries = append(keptEntries, entryRaw)
+				continue
+			}
+			innerRaw, ok := entry["hooks"].([]any)
+			if !ok {
+				keptEntries = append(keptEntries, entryRaw)
+				continue
+			}
+			var keptInner []any
+			for _, innerRawEntry := range innerRaw {
+				innerEntry, ok := innerRawEntry.(map[string]any)
+				if !ok {
+					keptInner = append(keptInner, innerRawEntry)
+					continue
+				}
+				cmd, _ := innerEntry["command"].(string)
+				if cmdSet[cmd] {
+					continue
+				}
+				keptInner = append(keptInner, innerRawEntry)
+			}
+			if len(keptInner) == 0 {
+				continue
+			}
+			entry["hooks"] = keptInner
+			keptEntries = append(keptEntries, entry)
+		}
+		if len(keptEntries) == 0 {
+			delete(hooksObj, event)
+		} else {
+			hooksObj[event] = keptEntries
+		}
+	}
+
+	if len(hooksObj) == 0 {
+		delete(doc, "hooks")
+	} else {
+		doc["hooks"] = hooksObj
+	}
+
+	out, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("marshaling pruned settings.json: %w", err)
+	}
+	return append(out, '\n'), nil
+}
+
+// buildMigratedManifest builds the v3 manifest a successful migration
+// writes as its commit barrier. It is driven primarily by desired (every
+// path a fresh v2 project would ship), not by plan.Entries directly, because
+// the chained v2 upgrade (runUpgradeV2) that runs immediately afterward
+// rebuilds every desired-state path's manifest entry from scratch anyway
+// (rebuildManifestV2) except for the two categories this function must get
+// right on the first pass: fork entries (carried forward verbatim by
+// rebuildManifestV2's owner=fork sweep, so they must already be forks here)
+// and OpKeepInPlace entries (must carry the *old* recorded hash forward
+// unchanged, not a hash of the new template, so the chained call's core
+// replace planner recognizes "unmodified since last recorded state, new
+// template differs" and emits a real update instead of a false no-op).
+//
+// v2SettingsPath and upgrade.SettingsSnapshotRelPath are deliberately
+// excluded: the chained v2 upgrade's rebuildManifestV2 always overwrites
+// both unconditionally (its switch-case branches for these two paths do not
+// gate on "already handled"), so whatever this function might record for
+// them would just be discarded a moment later.
+func buildMigratedManifest(version string, oldManifest *scaffold.Manifest, absDir string, desired map[string][]byte, plan MigrationPlan) (*scaffold.Manifest, error) {
+	nm := scaffold.NewManifest(version)
+	nm.SetLayoutV2()
+	nm.Meta.Packs = plan.Packs
+
+	forkByPath := make(map[string]MigrationEntry)
+	keepByPath := make(map[string]MigrationEntry)
+	for _, e := range plan.Entries {
+		switch e.Kind {
+		case OpForkRelocate, OpForkInPlace:
+			forkByPath[e.NewPath] = e
+		case OpKeepInPlace:
+			keepByPath[e.NewPath] = e
+		}
+	}
+
+	sortedPaths := make([]string, 0, len(desired))
+	for p := range desired {
+		sortedPaths = append(sortedPaths, p)
+	}
+	sort.Strings(sortedPaths)
+
+	handled := make(map[string]bool, len(desired))
+
+	for _, path := range sortedPaths {
+		if path == v2SettingsPath || path == upgrade.SettingsSnapshotRelPath {
+			continue
+		}
+
+		if fe, ok := forkByPath[path]; ok {
+			diskContent, _, err := readDiskFileForMigration(absDir, path)
+			if err != nil {
+				return nil, err
+			}
+			nm.SetFileFork(path, scaffold.HashBytes(diskContent), fe.ForkedFromVersion)
+			handled[path] = true
+			continue
+		}
+
+		if ke, ok := keepByPath[path]; ok {
+			if old, ok := oldManifest.Files[ke.OldPath]; ok {
+				old.Owner = ke.Owner
+				nm.Files[path] = old
+			} else {
+				// Defensive fallback: OpKeepInPlace is only ever produced
+				// from an actual legacy manifest entry, so this should not
+				// happen. Degrade to a fresh owned entry rather than
+				// silently dropping the path.
+				templateHash := scaffold.HashBytes(desired[path])
+				if err := nm.SetFileOwned(path, ke.Owner, templateHash, templateHash); err != nil {
+					return nil, err
+				}
+			}
+			handled[path] = true
+			continue
+		}
+
+		templateHash := scaffold.HashBytes(desired[path])
+		owner := ownerForScaffoldPath(path)
+		diskHash := templateHash
+		if owner == scaffold.OwnerSeed || owner == scaffold.OwnerBlock {
+			diskContent, hasDisk, err := readDiskFileForMigration(absDir, path)
+			if err != nil {
+				return nil, err
+			}
+			if hasDisk {
+				diskHash = scaffold.HashBytes(diskContent)
+			}
+		}
+		if err := nm.SetFileOwned(path, owner, templateHash, diskHash); err != nil {
+			return nil, fmt.Errorf("setting owner for %s: %w", path, err)
+		}
+		handled[path] = true
+	}
+
+	// Fork entries with no template counterpart at all: a retired path the
+	// user had modified, so classifyForkCandidate forked it in place rather
+	// than deleting it.
+	for path, fe := range forkByPath {
+		if handled[path] {
+			continue
+		}
+		diskContent, _, err := readDiskFileForMigration(absDir, path)
+		if err != nil {
+			return nil, err
+		}
+		nm.SetFileFork(path, scaffold.HashBytes(diskContent), fe.ForkedFromVersion)
+	}
+
+	return nm, nil
+}
+
+// migrationReportRelPath returns the manifest-relative path a migration
+// report for the given timestamp should be written to:
+// docs/reports/ralph-migration-<date>.md.
+func migrationReportRelPath(now time.Time) string {
+	return path.Join(migrationReportDir, fmt.Sprintf("ralph-migration-%s.md", now.Format("2006-01-02")))
+}
+
+// renderMigrationReport renders the migration report: the classification
+// listing (RenderMigrationPreview), unified diffs for every forked file
+// against its new core counterpart, the settings-prune listing, guidance for
+// modified block faces left for the chained upgrade's block engine to
+// append onto, and a short next-steps note.
+func renderMigrationReport(plan MigrationPlan, desired map[string][]byte, absDir string, now time.Time) ([]byte, error) {
+	var b strings.Builder
+	fmt.Fprintf(&b, "# Legacy -> v2 Migration Report\n\n")
+	fmt.Fprintf(&b, "Generated: %s\n\n", now.Format(time.RFC3339))
+	b.WriteString(RenderMigrationPreview(plan))
+	b.WriteString("\n")
+
+	forkEntries := entriesForKind(plan.Entries, OpForkRelocate)
+	forkEntries = append(forkEntries, entriesForKind(plan.Entries, OpForkInPlace)...)
+	if len(forkEntries) > 0 {
+		sort.Slice(forkEntries, func(i, j int) bool { return forkEntries[i].NewPath < forkEntries[j].NewPath })
+		b.WriteString("## Fork diffs\n\n")
+		b.WriteString("Forked files are never auto-updated by future `ralph upgrade` runs; they continue to surface an advisory diff against the current core template each time it changes.\n\n")
+		for _, e := range forkEntries {
+			diskContent, _, err := readDiskFileForMigration(absDir, e.NewPath)
+			if err != nil {
+				return nil, err
+			}
+			fmt.Fprintf(&b, "### `%s`\n\n", e.NewPath)
+			newTemplate, ok := desired[e.NewPath]
+			if !ok {
+				b.WriteString("_No corresponding path in the new template set; content preserved as-is._\n\n")
+				continue
+			}
+			diff := upgrade.UnifiedDiff(newTemplate, diskContent, "new core (template)", "fork (your content)")
+			if diff == "" {
+				b.WriteString("_No differences from the new core template._\n\n")
+				continue
+			}
+			b.WriteString("```diff\n")
+			b.WriteString(diff)
+			if !strings.HasSuffix(diff, "\n") {
+				b.WriteString("\n")
+			}
+			b.WriteString("```\n\n")
+		}
+	}
+
+	if pruneEntries := entriesForKind(plan.Entries, OpSettingsPrune); len(pruneEntries) > 0 {
+		e := pruneEntries[0]
+		b.WriteString("## Settings prune\n\n")
+		if len(e.PrunedHookCommands) == 0 {
+			b.WriteString("No known legacy direct-invocation hook commands were found in `.claude/settings.json`.\n\n")
+		} else {
+			b.WriteString("The following legacy direct-invocation hook commands were removed from `.claude/settings.json` before handing off to the v2 settings merge, so they do not double-fire alongside the dispatcher:\n\n")
+			for _, c := range e.PrunedHookCommands {
+				fmt.Fprintf(&b, "- `%s`\n", c)
+			}
+			b.WriteString("\n")
+		}
+	}
+
+	if untouched := blockFaceUntouchedEntries(plan.Entries); len(untouched) > 0 {
+		b.WriteString("## Block face duplicate-content guidance\n\n")
+		b.WriteString("The following files were modified before migration and were left in place; the chained v2 upgrade's block engine appended the ralph-managed block without touching existing content. Legacy-template-derived content outside the block may now be duplicated with the new block's content — review and consolidate manually:\n\n")
+		for _, e := range untouched {
+			fmt.Fprintf(&b, "- `%s`\n", e.OldPath)
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString("## Next steps\n\n")
+	b.WriteString("- Review the fork diffs above; forked files are never auto-updated by future `ralph upgrade` runs.\n")
+	b.WriteString("- Commit this migration — git was the mechanism used to make it safely reversible.\n")
+	b.WriteString("- Re-run `ralph upgrade` any time to converge further template changes.\n")
+
+	return []byte(b.String()), nil
+}
+
+// blockFaceUntouchedEntries filters plan.Entries for the modified-block-face
+// case (AGENTS.md/.gitignore, OpUntouched): renderMigrationReport surfaces
+// these separately since they carry duplicate-content risk once the chained
+// upgrade's block engine appends onto them.
+func blockFaceUntouchedEntries(entries []MigrationEntry) []MigrationEntry {
+	var out []MigrationEntry
+	for _, e := range entries {
+		if e.Kind != OpUntouched {
+			continue
+		}
+		if e.OldPath == pathAgentsMD || e.OldPath == pathGitignore {
+			out = append(out, e)
+		}
+	}
+	return out
 }
