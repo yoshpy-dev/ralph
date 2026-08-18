@@ -148,7 +148,8 @@ v2 manifest(`meta.layout = "v2"`)に対する `ralph upgrade` は次を非対話
 - [ ] Plan reviewed
 - [x] Branch created(feat/overlay-scaffold-v2-p3)
 - [x] Implementation started(スライス 1〜5: 104cc7b / e08ebe7 / c834f44 / 5b1b675 + 本スライス)
-- [ ] Review artifact created
-- [ ] Verification artifact created
+- [x] Review artifact created
+- [x] Verification artifact created
 - [x] Test artifact created
+- [x] Sync-docs artifact created
 - [ ] PR created
