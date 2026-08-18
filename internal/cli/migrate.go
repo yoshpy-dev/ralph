@@ -120,10 +120,11 @@ const (
 //   - disk file absent -> LegacyModified, for the same reason: there is
 //     nothing to compare against, so treat it like an edit rather than
 //     silently dropping the path's migration record. (Top-level caller
-//     ClassifyMigration handles the one case where "absent" instead
-//     means "a prior interrupted migration already relocated this path"
-//     — see its rerun-stability pre-check — before this function is
-//     ever consulted for that path.)
+//     ClassifyMigration's rerun-stability pre-check,
+//     classifyRerunRelocatedDestination, deliberately calls this
+//     function with hasDisk=false for the "absent means a prior
+//     interrupted migration already relocated this path" case, relying
+//     on exactly this branch.)
 //   - hashes equal -> LegacyUnmodified.
 //   - hashes differ -> LegacyModified.
 func classifyLegacyEntryState(entry scaffold.ManifestFile, diskHash string, hasDisk bool) LegacyEntryState {
@@ -206,8 +207,10 @@ type MigrationEntry struct {
 	// equal to OldPath for same-path outcomes (KeepInPlace,
 	// ForkInPlace, ReplaceWithTemplate, Untouched special faces), the
 	// relocation target for ForkRelocate and a relocated DeleteOldPath,
-	// and empty for a retired DeleteOldPath / OpDeleteDir (nothing left
-	// to point at).
+	// the adopted destination for DeleteOldPathAdoptFork (both the
+	// preflight adoption target and buildMigratedManifest's forkByPath
+	// key), and empty for a retired DeleteOldPath / OpDeleteDir
+	// (nothing left to point at).
 	NewPath string
 	Kind    MigrationOpKind
 	State   LegacyEntryState
@@ -217,8 +220,9 @@ type MigrationEntry struct {
 	// (OpDeleteOldPath, OpDeleteDir) — there is nothing left to own.
 	Owner string
 	// ForkedFromVersion is set alongside Owner=scaffold.OwnerFork
-	// (OpForkRelocate, OpForkInPlace): the legacy manifest's recorded
-	// template version, carried into the v3 fork record.
+	// (OpForkRelocate, OpForkInPlace, OpDeleteOldPathAdoptFork): the
+	// legacy manifest's recorded template version, carried into the v3
+	// fork record.
 	ForkedFromVersion string
 	// PrunedHookCommands is populated only for OpSettingsPrune. Before
 	// execution (classification time) it holds the candidate list --
@@ -831,6 +835,9 @@ func runMigrateLegacy(absDir, manifestPath string, oldManifest *scaffold.Manifes
 	if err != nil {
 		return fmt.Errorf("loading templates: %w", err)
 	}
+	// buildDesiredStateV2 also runs inside the chained runUpgradeV2, so any
+	// pack-availability warning prints twice per migration (self-review
+	// cycle-1 LOW-6; accepted duplication, not worth threading state).
 	desired, _, _, _, err := buildDesiredStateV2(baseFS, oldManifest, errOut)
 	if err != nil {
 		return fmt.Errorf("building desired state: %w", err)
@@ -984,9 +991,11 @@ func confirmMigration(in io.Reader, out io.Writer, autoYes bool) (bool, error) {
 // kinds (OpForkRelocate's NewPath, OpReplaceWithTemplate, OpSettingsPrune)
 // already validate their own chain via validateMigrationWriteTarget; the
 // hoisted call here additionally covers OpForkRelocate's OldPath (the
-// relocation source), which validateMigrationWriteTarget never saw. Placing
-// the check at this single dispatch point, ahead of the switch, means no
-// future MigrationOpKind can be added without it.
+// relocation source), which validateMigrationWriteTarget never saw. It also
+// runs for the no-write kinds (OpKeepInPlace, OpForkInPlace, OpUntouched) —
+// redundant but fail-closed. Placing the check at this single dispatch
+// point, ahead of the switch, means no future MigrationOpKind can be added
+// without it.
 //
 // OpDeleteOldPathAdoptFork additionally validates NewPath via
 // validateMigrationForkAdoptionTarget: executeMigrationEntries never writes
@@ -994,7 +1003,7 @@ func confirmMigration(in io.Reader, out io.Writer, autoYes bool) (bool, error) {
 // disk content is trusted as-is and recorded into the v3 manifest as the
 // adopted fork (buildMigratedManifest's forkByPath handling) -- a symlinked
 // NewPath parent or a non-regular NewPath leaf must be refused before
-// OldPath is deleted, the same way a write target is refused (AR#1,
+// OldPath is deleted, the same way a write target is refused (AR#1, cycle 1,
 // docs/reports/cross-review-triage-overlay-scaffold-v2-p4.md).
 func validateMigrationOp(absDir string, e MigrationEntry) error {
 	if err := upgrade.ValidateRealParentChain(absDir, e.OldPath); err != nil {
@@ -1080,7 +1089,7 @@ func validateMigrationWriteTarget(absDir, relPath string) error {
 // (unlike validateMigrationWriteTarget): this kind never writes NewPath
 // (executeMigrationEntries only deletes OldPath for it), so its content is
 // read as-is and trusted as the adopted fork -- an absent or non-regular
-// leaf means there is nothing safe to adopt (AR#1,
+// leaf means there is nothing safe to adopt (AR#1, cycle 1,
 // docs/reports/cross-review-triage-overlay-scaffold-v2-p4.md).
 func validateMigrationForkAdoptionTarget(absDir, relPath string) error {
 	if _, err := scaffold.CleanLocalRelPath(relPath); err != nil {
@@ -1179,8 +1188,15 @@ func executeMigrationEntries(absDir string, desired map[string][]byte, entries [
 			if err != nil {
 				return fmt.Errorf("pruning legacy hooks from %s: %w", e.OldPath, err)
 			}
-			if err := writeMigrationFile(absDir, e.OldPath, pruned); err != nil {
-				return fmt.Errorf("writing pruned %s: %w", e.OldPath, err)
+			// Write only when something was actually removed. Candidates
+			// that all turn out to be near-misses would produce a
+			// re-marshaled (key-reordered, HTML-escaped) file that is
+			// semantically identical — leaving the user's bytes untouched
+			// is strictly safer (self-review C2-2, cycle 2).
+			if len(removed) > 0 {
+				if err := writeMigrationFile(absDir, e.OldPath, pruned); err != nil {
+					return fmt.Errorf("writing pruned %s: %w", e.OldPath, err)
+				}
 			}
 			entries[i].PrunedHookCommands = removed
 			entries[i].PrunedHookNearMisses = nearMisses
@@ -1525,7 +1541,7 @@ func buildMigratedManifest(version string, oldManifest *scaffold.Manifest, absDi
 				// TemplateHash=current here would make the chained call's
 				// classifySeed see "template unchanged since last recorded
 				// application" and silently no-op, swallowing the advisory
-				// (AR#2, docs/reports/cross-review-triage-overlay-scaffold-v2-p4.md).
+				// (AR#2, cycle 1, docs/reports/cross-review-triage-overlay-scaffold-v2-p4.md).
 				continue
 			}
 		}
@@ -1577,7 +1593,7 @@ func renderMigrationReport(plan MigrationPlan, desired map[string][]byte, absDir
 	// relocated modified/unmanaged source whose destination was adopted as
 	// the fork record (see relocationOutcome) -- and its content is never
 	// read anywhere else in this report, so omitting it here silently drops
-	// the one diff an operator most needs to review (AR#3,
+	// the one diff an operator most needs to review (AR#3, cycle 1,
 	// docs/reports/cross-review-triage-overlay-scaffold-v2-p4.md).
 	forkEntries = append(forkEntries, entriesForKind(plan.Entries, OpDeleteOldPathAdoptFork)...)
 	if len(forkEntries) > 0 {

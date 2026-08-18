@@ -2222,6 +2222,49 @@ func TestPruneLegacySettingsHooks_ArgumentVariant_LeftInPlaceAsNearMiss(t *testi
 	}
 }
 
+// TestExecuteMigrationEntries_NearMissOnlyPrune_SettingsFileUntouched covers
+// self-review C2-2 (cycle 2): when every prune candidate turns out to be a
+// near-miss (nothing exactly matched, so nothing was removed), the
+// settings.json on disk must stay byte-identical -- re-marshaling would
+// reorder keys and HTML-escape <, >, & for a prune that changed nothing.
+func TestExecuteMigrationEntries_NearMissOnlyPrune_SettingsFileUntouched(t *testing.T) {
+	dir := t.TempDir()
+
+	// Deliberately uses an "unusual" key order and an & character so a
+	// re-marshal would visibly change the bytes.
+	original := `{
+  "zeta": "a & b",
+  "hooks": {
+    "PreToolUse": [
+      {"matcher": "Bash", "hooks": [{"type": "command", "command": "./.claude/hooks/pre_bash_guard.sh --verbose"}]}
+    ]
+  }
+}
+`
+	writeMigrationDiskFile(t, dir, pathSettings, original)
+
+	entries := []MigrationEntry{{
+		OldPath:            pathSettings,
+		NewPath:            pathSettings,
+		Kind:               OpSettingsPrune,
+		PrunedHookCommands: []string{"./.claude/hooks/pre_bash_guard.sh"},
+	}}
+	if err := executeMigrationEntries(dir, nil, entries); err != nil {
+		t.Fatalf("executeMigrationEntries: %v", err)
+	}
+
+	got := mustReadFile(t, filepath.Join(dir, pathSettings))
+	if string(got) != original {
+		t.Errorf("settings.json was rewritten by a prune that removed nothing:\ngot:\n%s\nwant:\n%s", got, original)
+	}
+	if len(entries[0].PrunedHookCommands) != 0 {
+		t.Errorf("PrunedHookCommands after execution = %v, want empty (nothing was removed)", entries[0].PrunedHookCommands)
+	}
+	if len(entries[0].PrunedHookNearMisses) != 1 || entries[0].PrunedHookNearMisses[0] != "./.claude/hooks/pre_bash_guard.sh --verbose" {
+		t.Errorf("PrunedHookNearMisses = %v, want exactly the argument-carrying variant", entries[0].PrunedHookNearMisses)
+	}
+}
+
 // TestRunMigrateLegacy_SettingsPruneReport_NearMissNotClaimedAsRemoved is the
 // end-to-end counterpart of the unit test above: the migration report must
 // not claim an argument-carrying variant was removed when it was actually
@@ -2276,7 +2319,7 @@ func TestRunMigrateLegacy_SettingsPruneReport_NearMissNotClaimedAsRemoved(t *tes
 	}
 }
 
-// TestRunMigrateLegacy_SymlinkedAdoptForkDestParent_ZeroWrites covers AR#1
+// TestRunMigrateLegacy_SymlinkedAdoptForkDestParent_ZeroWrites covers AR#1 (cycle 1)
 // (docs/reports/cross-review-triage-overlay-scaffold-v2-p4.md): an
 // OpDeleteOldPathAdoptFork entry's NewPath (the relocation destination whose
 // content is trusted and adopted as the fork record — see
@@ -2300,7 +2343,7 @@ func TestRunMigrateLegacy_SymlinkedAdoptForkDestParent_ZeroWrites(t *testing.T) 
 	// preflight refusal). The relocation destination's directory
 	// (.claude/rules/ralph) is a symlink pointing outside target, holding
 	// content matching the source — collision-matrix case (a) — so
-	// ClassifyMigration plans OpDeleteOldPathAdoptFork without the AR#1 fix
+	// ClassifyMigration plans OpDeleteOldPathAdoptFork without the AR#1 (cycle 1) fix
 	// ever inspecting NewPath's parent chain.
 	writeMigrationDiskFile(t, target, ".claude/rules/architecture.md", forkedContent)
 
@@ -2359,7 +2402,7 @@ func TestRunMigrateLegacy_SymlinkedAdoptForkDestParent_ZeroWrites(t *testing.T) 
 }
 
 // TestRunMigrateLegacy_UntrackedSeedCollision_AdvisorySurvivesChainedUpgrade
-// covers AR#2 (docs/reports/cross-review-triage-overlay-scaffold-v2-p4.md):
+// covers AR#2 (cycle 1, docs/reports/cross-review-triage-overlay-scaffold-v2-p4.md):
 // a path with no legacy manifest entry at all ("untracked"), whose resolved
 // v3 owner is seed, and whose pre-existing disk content diverges from the
 // new template, must not be recorded into the migrated v3 manifest with
@@ -2448,7 +2491,7 @@ func TestRunMigrateLegacy_UntrackedSeedCollision_AdvisorySurvivesChainedUpgrade(
 	}
 }
 
-// TestRunMigrateLegacy_AdoptedForkDiff_IncludedInReport covers AR#3
+// TestRunMigrateLegacy_AdoptedForkDiff_IncludedInReport covers AR#3 (cycle 1)
 // (docs/reports/cross-review-triage-overlay-scaffold-v2-p4.md): the
 // migration report's fork-diff section must include OpDeleteOldPathAdoptFork
 // entries, not just OpForkRelocate/OpForkInPlace — collision-matrix case (a)
