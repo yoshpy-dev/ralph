@@ -141,7 +141,7 @@
 
 ## Open questions
 
-- 移行分類器の配置(internal/cli vs internal/upgrade)— スライス 2 で確定(所有マップへの依存方向で決める)
+- ~~移行分類器の配置(internal/cli vs internal/upgrade)— スライス 2 で確定(所有マップへの依存方向で決める)~~ **解決(スライス 2)**: `internal/cli/migrate.go` に配置。分類器は `ownerForScaffoldPath`(CLI 層、`internal/cli/init.go`)と `scaffold`/`upgrade` 両方に依存する必要があり、`internal/upgrade` は CLI 層の所有マップに依存できない(パッケージ境界が逆転する — `internal/upgrade/replaceplan.go` の `ReplaceOptions.OwnerForPath` のドキュメント参照)。再配置判定(`.claude/rules/<name>.md` → `.claude/rules/ralph/<name>.md`)は、呼び出し側が組み立てる desired state(インストール済みパックを含む)への単一のメンバーシップ確認(`relocatedRulePath`)で機械的に行い、別途「インストール済みパック名一致」チェックは不要(desired 側にパックのルールファイルが既に含まれる設計のため)。
 
 ## Progress checklist
 
