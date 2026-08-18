@@ -9,7 +9,7 @@
 - Self-review cross-ref: yes
 - Cycle: 3/3 (cap reached — cap は 2→3→4 と引き上げ承認済み)
 - Total reviewer findings: 1(cycle 3。cycle 1 の 2 件は fc8e9a9、cycle 2 の 2 件は 41ad745 + 6533227 で解消・再指摘なし)
-- After triage: ACTION_REQUIRED=2, WORTH_CONSIDERING=0, DISMISSED=0
+- After triage: ACTION_REQUIRED=1, WORTH_CONSIDERING=0, DISMISSED=0
 
 ## Triage context
 
