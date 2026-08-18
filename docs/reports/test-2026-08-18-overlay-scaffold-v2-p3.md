@@ -256,3 +256,109 @@ unchanged this cycle.
 - Blocked: none
 - This is pipeline cycle 2 (final, per `RALPH_STANDARD_MAX_PIPELINE_CYCLES`
   default cap of 2) for overlay-scaffold-v2 Phase 3.
+
+## Cycle 3 (final — pipeline cycle 3/3, cap raised)
+
+- Date: 2026-08-18
+- HEAD: `739c9c1` (branch `feat/overlay-scaffold-v2-p3`)
+- Delta since cycle 2 test (`e21b1b1..739c9c1`): `41ad745` (dry-run exception
+  preview + no-op short-circuit made write-free, plus 2 test rewrites —
+  `TestRunUpgradeV2_DryRunPreview_NamesExceptionFaceChanges` and a rewritten
+  `TestRunUpgradeV2_Idempotent_SecondRunIsNoOp`), `6533227` (veto the no-op
+  short-circuit on pending seed advisories and version-only bumps, plus 2 new
+  tests — `TestRunUpgradeV2_SeedAdvisoryOnly_NotANoOp` and
+  `TestRunUpgradeV2_ConvergedButVersionBumped_NotANoOp`), plus doc/bookkeeping
+  commits (`a0b9363`, `4df2ce9`, `1bb8367`, `b80b5f9`).
+- Evidence: `docs/evidence/verify-2026-08-18-061741.log` (raw
+  `RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh` output from the run below,
+  exit 0, produced by `run-verify.sh` itself)
+
+### Verdict: PASS
+
+25/25 shell test files clean (25 `==> tests/test-*.sh` headers, 25 matching
+trailing `OK` markers, zero `FAIL` lines anywhere in the log other than
+`FAIL: 0`). `./scripts/run-test.sh` exit code `0`. Fresh (`-count=1`, no
+cache) `go test ./... -count=1 -cover`: 8/8 packages `ok`, zero failures.
+Working tree confirmed clean (`git status --porcelain`) before and after
+this run — no stray artifacts left behind by the individually re-run tests.
+
+All 5 tests named in the assignment individually re-confirmed with
+`go test ./internal/cli/... -run '<name>$' -v -count=1` (not just
+batch-passed):
+
+| Test | Result | Duration |
+| --- | --- | --- |
+| `TestRunUpgradeV2_DryRunPreview_NamesExceptionFaceChanges` | PASS | 0.08s |
+| `TestRunUpgradeV2_Idempotent_SecondRunIsNoOp` (rewritten) | PASS | 0.12s |
+| `TestRunUpgradeV2_MixedScenario_AllClassesLandCorrectly` (strengthened) | PASS | 0.13s |
+| `TestRunUpgradeV2_SeedAdvisoryOnly_NotANoOp` | PASS | 0.12s |
+| `TestRunUpgradeV2_ConvergedButVersionBumped_NotANoOp` | PASS | 0.13s |
+
+Read the assertion bodies directly (not just the pass/fail line) to confirm
+each test proves what the delta claims:
+
+- `TestRunUpgradeV2_Idempotent_SecondRunIsNoOp` (`internal/cli/upgrade_v2_test.go:725-784`):
+  snapshots the **whole target tree** before/after the second run via
+  `snapshotTreeHashesExcluding` with no path exclusions (manifest.toml and
+  `docs/reports/` included), asserts byte-for-byte manifest equality, and
+  asserts the manifest's `ModTime` is unchanged (not just content-equal —
+  rules out an identical rewrite). This is the "no exclusions" full-tree
+  zero-write check the delta describes.
+- `TestRunUpgradeV2_MixedScenario_AllClassesLandCorrectly`'s second-run
+  section (`internal/cli/upgrade_v2_test.go:1503-1600`): confirms drift
+  persists forever (the drifted path is never touched by `ApplyOps`) while
+  every other class converges, and the second run still returns
+  `ErrUpgradeDriftRemaining` (exit 3) *and* announces `"no-op"` in stdout,
+  with the same full-tree zero-write and manifest-mtime-unchanged assertions
+  as above. This is the "drift + no-op → exit 3, zero writes" case.
+- `TestRunUpgradeV2_SeedAdvisoryOnly_NotANoOp` (`internal/cli/upgrade_v2_test.go:797-...`):
+  asserts a run with a pending seed advisory does **not** announce `"no-op"`,
+  that seed content is left untouched on disk (user-owned once created), that
+  the upgrade report mentions the pending advisory, and that the manifest's
+  `TemplateHash` advances to clear it — then a regression check that the
+  *next* run at the same version is a true no-op.
+- `TestRunUpgradeV2_ConvergedButVersionBumped_NotANoOp` (`internal/cli/upgrade_v2_test.go:853-883`):
+  templates are byte-for-byte identical to the prior run (no drift, no
+  block/seed changes) but `Version` advances; asserts the run does not
+  announce `"no-op"` and that the manifest's `Meta.Version` is rewritten to
+  the new version, then a regression check that a second run at the now-caught-up
+  version is a true no-op.
+
+No test weakening found. No test-isolation issues found running any of the
+5 individually vs. in the batch.
+
+### Coverage deltas vs. cycle 2
+
+Fresh (`-count=1`, no cache) per-package coverage:
+
+| Package | Cycle 2 | Cycle 3 (this run) | Delta |
+| --- | --- | --- | --- |
+| `internal/cli` | 75.9% | 76.4% | +0.5pp |
+| `internal/scaffold` | 75.7% | 75.7% | 0.0pp |
+| `internal/upgrade` | 91.1% | 91.1% | 0.0pp |
+
+(The assignment's stated expectation was cli 75.9/scaffold 75.7/upgrade
+91.1 — `internal/cli` actually came in 0.5pp higher than that reference
+point, the other two matched exactly.) The `internal/cli` rise is
+consistent with the delta's shape: `41ad745` and `6533227` together add 4
+new tests exercising previously-thin branches of `runUpgradeV2`'s no-op
+short-circuit and dry-run preview path (`renderUpgradeV2Preview`,
+`buildDesiredStateV2`'s advisory/version-veto logic) without adding a
+proportionally larger amount of new production branching — the opposite
+shape of Phase 3's Cycle 1 land, where a large batch of new production code
+landed with only its primary paths covered. `internal/scaffold` is
+untouched by this delta (0.0pp, expected — no changes in scope this
+cycle). `internal/upgrade` is also untouched (0.0pp) — the delta's changes
+are confined to `internal/cli/upgrade_v2.go` and its test file, not
+`internal/upgrade`.
+
+### Cycle 3 verdict
+
+- Pass: yes — 25/25 shell files clean, 8/8 Go packages `ok`, all 5 named
+  tests individually re-confirmed with assertion-level review, working tree
+  clean
+- Fail: none
+- Blocked: none
+- This is pipeline cycle 3 (final; the default
+  `RALPH_STANDARD_MAX_PIPELINE_CYCLES` cap of 2 was consciously raised per
+  the assignment to re-validate AR#2 fixes) for overlay-scaffold-v2 Phase 3.
