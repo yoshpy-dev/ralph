@@ -133,6 +133,11 @@ v2 manifest(`meta.layout = "v2"`)に対する `ralph upgrade` は次を非対話
 - リリースタグは切らない。main 上の過渡状態(レガシー fail-closed)は下流未到達
 - スライス 3(削除)は単独 revert で旧エンジン復元可能(スライス 2 までは並存構造)
 
+## Deviations
+
+- スライス 3 で発見: v2 upgrade フローが `installManagedGitHooks` を呼ばず、テンプレート変更時に git hooks が再インストールされない(レガシーエンジンは呼んでいた)。スライス 4 で v2 成功パスに追加する
+- スライス 3 の判断: `packPrefixFor` 等は language_pack.go へ移設、`runUpgrade`/`runUpgradeIO` ラッパは呼び出し元消滅により削除、`addPack` の冗長 manifest 二重読みを簡約
+
 ## Open questions
 
 - ~~desired-state マップ入力の具体 API 形状~~ → スライス 1 で確定: `PlanCoreReplaceDesired(m, targetDir, desired map[string][]byte, opts ReplaceOptions)` が主入口、`PlanCoreReplace`(fs.FS)は薄いアダプタ。`ReplaceOptions{SkipPaths, PreservePrefixes}`、preserve は「テンプレート完全不在の名前空間のみ保護、desired に内容があれば通常分類」の意味論
