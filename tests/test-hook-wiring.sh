@@ -130,10 +130,61 @@ EOF
   fi
 }
 
+# check_codex_no_direct_hook_scripts <label> <surface_root> — every
+# .codex/config.toml [[hooks.*]] command must route through
+# ralph-dispatch.sh (or a documented adapter shim), not call a hook script
+# directly. This is the overlay-scaffold-v2 Phase 5 dispatcher-parity
+# regression guard: it fails closed the moment a future edit reintroduces
+# the legacy direct-call form (e.g. `command = ["./.claude/hooks/foo.sh"]`)
+# that tech-debt row 103 originally described for check_mojibake.sh.
+ALLOWED_CODEX_HOOK_EXECUTABLES=(
+  ".claude/hooks/ralph-dispatch.sh"
+)
+
+check_codex_no_direct_hook_scripts() {
+  local label="$1" surface_root="$2"
+  local config="$surface_root/.codex/config.toml"
+
+  [ -f "$config" ] || return
+
+  local commands
+  commands="$(grep -E '^[[:space:]]*command[[:space:]]*=' "$config" | grep -oE '"\./[^"]+"' | tr -d '"' || true)"
+
+  [ -z "$commands" ] && return
+
+  local count=0
+  while IFS= read -r exe; do
+    [ -z "$exe" ] && continue
+    count=$((count + 1))
+    local rel_path="${exe#./}"
+    local allowed=0
+    local candidate
+    for candidate in "${ALLOWED_CODEX_HOOK_EXECUTABLES[@]}"; do
+      if [ "$rel_path" = "$candidate" ]; then
+        allowed=1
+        break
+      fi
+    done
+    if [ "$allowed" -eq 1 ]; then
+      record_pass "$label: config.toml command '$exe' routes through the dispatcher (not a direct hook-script call)"
+    else
+      record_fail "$label: config.toml command '$exe' is a direct hook-script invocation — route through ./.claude/hooks/ralph-dispatch.sh <event> instead"
+    fi
+  done <<EOF
+$commands
+EOF
+
+  if [ "$count" -eq 0 ]; then
+    record_fail "$label: .codex/config.toml parsed zero hook commands for the direct-invocation check"
+  fi
+}
+
 check_settings_json "root" "$REPO_ROOT"
 check_codex_config_toml "root" "$REPO_ROOT"
+check_codex_no_direct_hook_scripts "root" "$REPO_ROOT"
 check_settings_json "templates/base" "$REPO_ROOT/templates/base"
 check_codex_config_toml "templates/base" "$REPO_ROOT/templates/base"
+check_codex_no_direct_hook_scripts "templates/base" "$REPO_ROOT/templates/base"
 
 echo
 echo "=== test-hook-wiring.sh results ==="

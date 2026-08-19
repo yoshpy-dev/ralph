@@ -5,7 +5,15 @@ HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$HOOK_DIR/lib_json.sh"
 
 payload="$(cat | tr '\n' ' ')"
-command="$(extract_json_field "$payload" "command")"
+# Real Claude Code PreToolUse payloads nest the Bash tool's argument under
+# .tool_input.command, not a top-level .command. On the jq path,
+# extract_json_field's dotted-path support (lib_json.sh) resolves this
+# directly. The sed fallback (jq absent) matches the leaf key name
+# ("command") anywhere in the payload regardless of nesting, so it already
+# handled both shapes and needs no change — this fix only affects the jq
+# path, which previously read the top-level (nonexistent) key and always
+# got empty, silently disabling every deny/ask rule below.
+command="$(extract_json_field "$payload" "tool_input.command")"
 
 emit_decision() {
   decision="$1"

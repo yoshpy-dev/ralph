@@ -32,6 +32,9 @@ ROOT_ONLY_EXCLUSIONS=(
   "scripts/new-language-pack.sh"
   # Sync check (only meaningful in the scaffold repo, not in scaffolded projects)
   "scripts/check-sync.sh"
+  # Template purity check (checks this repo's own templates/ tree; a
+  # scaffolded project has no nested templates/ dir to check)
+  "scripts/check-template-purity.sh"
   # Repo-local static/test runner (scaffolded projects write their own)
   "scripts/verify.local.sh"
   # Hook smoke tests (repo-specific; not part of scaffolded baseline)

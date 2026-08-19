@@ -66,18 +66,44 @@ approval_policy = "never"
 # Add or extend entries to mirror .claude/hooks/ behaviour.
 # ---------------------------------------------------------------------------
 
-# Default-on: detect U+FFFD mojibake injection after Edit/Write tool calls.
-# Reuses the same script the Claude-side hook calls (.claude/hooks/check_mojibake.sh)
-# so behaviour stays identical across agents. Path is a real file shipped by
-# `ralph init` — these entries satisfy `checkCodexEffectiveConfig`'s "at least
-# one [hooks.*] entry" requirement out of the box.
+# Default-on: fan out to the same layered .d dispatcher Claude Code uses
+# (./.claude/hooks/ralph-dispatch.sh), so the 3-layer extension contract
+# (.claude/hooks/<event>.d/ -> .ralph/local/hooks/<event>.d/ ->
+# .claude/hooks/local/<event>.d/) works under Codex too, not just Claude
+# Code. Today PostToolUse.d/ runs check_mojibake.sh (U+FFFD mojibake
+# detection) via its 20-check-mojibake.sh wrapper, plus any other .d
+# drop-in.
+#
+# Protocol note: ralph-dispatch.sh does not parse or depend on the shape of
+# the hook payload it receives on stdin — it buffers stdin verbatim to a
+# temp file and replays those exact bytes to every .d script's stdin
+# unchanged (see ralph-dispatch.sh's own header comment). It only inspects
+# each *script's own stdout* for decision-JSON fields, never the input.
+# Routing Codex's PostToolUse call through the dispatcher therefore cannot
+# change what check_mojibake.sh receives on stdin versus the direct-call
+# form above — no adapter/shim is needed regardless of any difference
+# between Codex's and Claude Code's PostToolUse payload shape. (Live
+# verification of Codex's exact payload shape was attempted during Phase 5
+# Slice 4 and was inconclusive within the session's time budget — project-
+# scoped [[hooks.*]] entries did not fire in a scratch repo even with
+# `--dangerously-bypass-hook-trust`, likely because Codex's project hook
+# trust gate needs the interactive `codex trust` grant recorded in
+# `~/.codex/config.toml`'s project trust table, which has no scriptable
+# equivalent in codex-cli 0.147.0. The dispatcher's stdin-passthrough
+# design makes that gap immaterial to correctness here.)
+#
+# Two entries are kept (Edit, Write) to mirror Codex's own tool-scoped
+# `match` shape; Claude Code's single settings.json entry uses one
+# `Edit|Write|MultiEdit` regex matcher instead because that's the shape its
+# own hooks schema supports. Both event names are "PostToolUse", so both
+# route into the same .claude/hooks/PostToolUse.d/ directory.
 [[hooks.PostToolUse]]
 match = { tool = "Edit" }
-command = ["./.claude/hooks/check_mojibake.sh"]
+command = ["./.claude/hooks/ralph-dispatch.sh", "PostToolUse"]
 
 [[hooks.PostToolUse]]
 match = { tool = "Write" }
-command = ["./.claude/hooks/check_mojibake.sh"]
+command = ["./.claude/hooks/ralph-dispatch.sh", "PostToolUse"]
 
 # Note: the scripts/*secret-guard.sh files are real git hooks, NOT Codex
 # PostToolUse hooks. `ralph init` / `ralph upgrade` install them into Git's hook
