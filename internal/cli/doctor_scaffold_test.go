@@ -311,6 +311,35 @@ func TestCheckScaffoldIntegrity_UnreadableTrackedFile_StrictFails(t *testing.T) 
 	}
 }
 
+// TestCheckScaffoldIntegrity_UnreadableSkipPathFace_ConflictScanBranchFires
+// pins the conflict-marker scan's own unreadable-file branch specifically
+// (self-review C3-M1, cycle 3): the ownership planner never reads the v2
+// exception faces (v2SkipPaths), so an unreadable AGENTS.md reaches
+// checkConflictMarkers' os.ReadFile error path directly — the gate-level
+// test above cannot distinguish this branch from the planner's own error,
+// but this one fails if the branch's `continue`-silently behavior returns.
+func TestCheckScaffoldIntegrity_UnreadableSkipPathFace_ConflictScanBranchFires(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("running as root: chmod 0000 does not make files unreadable")
+	}
+	target := initV2Project(t, gen1(), "1.0.0-test")
+
+	agentsPath := filepath.Join(target, "AGENTS.md")
+	if err := os.Chmod(agentsPath, 0000); err != nil {
+		t.Fatalf("chmod AGENTS.md: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(agentsPath, 0644) })
+
+	results := checkScaffoldIntegrity(target, true)
+	r := findScaffoldResult(t, results, "Scaffold: conflict markers")
+	if r.Status != "fail" {
+		t.Errorf("strict Status = %q, want \"fail\" (Detail: %s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "AGENTS.md") {
+		t.Errorf("Detail must name AGENTS.md: %s", r.Detail)
+	}
+}
+
 // TestCheckScaffoldIntegrity_ManifestTrackedFileDeleted_Fails is AC-8
 // handoff test 9: a manifest-tracked path (docs/notes.md, owner=seed) that
 // is deleted from disk must fail FR-9(e).

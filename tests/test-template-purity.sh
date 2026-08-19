@@ -19,9 +19,6 @@
 #      docs/reports/cross-review-triage-overlay-scaffold-v2-p5.md)
 #      regression guard: content scanning alone cannot see a maintainer-only
 #      surface shipped with wholly ordinary text.
-#   H. Current real templates/ tree still passes with the path-scan
-#      dimension active (explicit companion to A, called out separately per
-#      the AR#4 handoff)
 
 set -eu
 
@@ -88,6 +85,10 @@ cleanup() {
 trap cleanup EXIT
 
 # ── A. real templates/ tree passes ──────────────────────────────────────
+# Runs with all three scan dimensions active (content fixed/regex + path),
+# so this single case also pins that the PATH_PATTERNS dimension introduces
+# no false positive against the actual shipped tree (formerly a duplicate
+# case H — self-review C3-L6, cycle 3).
 # Must use the relative default ("templates"), not an absolute path: the
 # script always cd's to its own REPO_ROOT before resolving SCAN_ROOT, and
 # ALLOWLIST entries (empty today, but exact-path-scoped whenever one is
@@ -213,11 +214,27 @@ run_case_expect_output "G. .claude/skills/release/ path fails with innocuous con
   "$G_DIR" "base/.claude/skills/release/SKILL.md"
 rm -rf "$G_DIR"
 
-# ── H. current real templates/ tree still passes with path scan active ──
-# Explicit companion to A (which already covers this): pins that adding the
-# PATH_PATTERNS dimension introduces no false positive against the actual
-# shipped tree.
-run_case "H. real templates/ tree passes with path-scan dimension active" 0 "templates"
+# ── I. allowlist suppresses a PATH_PATTERNS hit too ─────────────────────
+# The three scan dimensions share is_allowlisted; case C proved it for a
+# content pattern, this proves it for a path pattern (self-review C3-L2,
+# cycle 3). Same patched-copy technique as case C.
+I_DIR="$(mktemp -d)"
+mkdir -p "$I_DIR/scripts" "$I_DIR/templates/base/.claude/skills/release"
+sed -e 's/^ALLOWLIST_PATHS=()$/ALLOWLIST_PATHS=("templates\/base\/.claude\/skills\/release\/SKILL.md")/' \
+    -e 's/^ALLOWLIST_PATTERNS=()$/ALLOWLIST_PATTERNS=("\/.claude\/skills\/release\/")/' \
+  "$SCRIPT" > "$I_DIR/scripts/check-template-purity.sh"
+chmod +x "$I_DIR/scripts/check-template-purity.sh"
+printf '# Some skill\n' > "$I_DIR/templates/base/.claude/skills/release/SKILL.md"
+if I_OUT="$("$I_DIR/scripts/check-template-purity.sh" 2>&1)"; then
+  echo "  PASS  I. allowlisted path-pattern hit passes"
+  pass=$((pass + 1))
+else
+  echo "  FAIL  I. expected allowlisted path-pattern hit to pass"
+  echo "$I_OUT" | sed 's/^/      /'
+  fail=$((fail + 1))
+fi
+rm -rf "$I_DIR"
+
 
 echo ""
 echo "  PASS: $pass"

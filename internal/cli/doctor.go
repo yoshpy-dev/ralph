@@ -961,7 +961,7 @@ func checkConflictMarkers(absDir string, manifest *scaffold.Manifest, strict boo
 		full := filepath.Join(absDir, filepath.FromSlash(p))
 		data, err := os.ReadFile(full)
 		if err != nil {
-			if os.IsNotExist(err) {
+			if errors.Is(err, fs.ErrNotExist) {
 				// FR-9(e)'s (checkManifestConsistency) finding, not ours.
 				continue
 			}
@@ -981,9 +981,16 @@ func checkConflictMarkers(absDir string, manifest *scaffold.Manifest, strict boo
 			offenders = append(offenders, p)
 		}
 	}
+	// Both fragments are reported together (no early return): an operator
+	// with one unreadable file and one real conflict marker should learn
+	// about both in a single run (self-review C3-L5, cycle 3).
 	if len(unreadable) > 0 {
 		r.Status = scaffoldViolationStatus(true, strict)
-		r.Detail = fmt.Sprintf("cannot scan tracked file(s) for conflict markers: %s", strings.Join(unreadable, "; "))
+		detail := fmt.Sprintf("cannot scan tracked file(s) for conflict markers: %s", strings.Join(unreadable, "; "))
+		if len(offenders) > 0 {
+			detail += fmt.Sprintf("; conflict markers found in: %s", strings.Join(offenders, ", "))
+		}
+		r.Detail = detail
 		return r
 	}
 
@@ -997,7 +1004,7 @@ func checkConflictMarkers(absDir string, manifest *scaffold.Manifest, strict boo
 }
 
 // checkManifestConsistency is FR-9(e): every manifest-tracked path must
-// still exist on disk. Two of v2SkipPaths()'s four exception faces are
+// still exist on disk. Three of v2SkipPaths()'s four exception faces are
 // excluded here — settings.json (v2SettingsPath) and the two managed-block
 // surfaces (AGENTS.md, .gitignore) — because their presence/health is
 // FR-9(b)/(c)'s job (checkManagedBlocks, checkSettingsOwnedKeys), and both

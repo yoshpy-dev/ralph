@@ -18,7 +18,7 @@ set -euo pipefail
 #     project, e.g. .claude/skills/release/) is still caught — content
 #     scanning alone cannot see this (AR#4, cycle 2,
 #     docs/reports/cross-review-triage-overlay-scaffold-v2-p5.md).
-# A hit in either dimension is reported unless it is listed in ALLOWLIST for
+# A hit in any dimension is reported unless the ALLOWLIST_PATHS/ALLOWLIST_PATTERNS parallel arrays list
 # that exact (path, pattern) pair. ALLOWLIST is empty today (every leak
 # found when this guard was introduced was fixed, not deferred — see
 # ALLOWLIST's own comment below); the mechanism exists for a future
@@ -108,8 +108,9 @@ PATH_REASONS=(
 # for the same reason: a "path|pattern|reason" packed string cannot carry a
 # regex pattern that itself contains `|` — self-review C2-M2, cycle 2).
 # ALLOWLIST_PATHS entries are repo-relative (as printed by grep from
-# REPO_ROOT); ALLOWLIST_PATTERNS is the exact FIXED_PATTERNS/REGEX_PATTERNS
-# entry each applies to. Empty by design: every pre-existing leak found when
+# REPO_ROOT); ALLOWLIST_PATTERNS is the exact FIXED_PATTERNS/REGEX_PATTERNS/
+# PATH_PATTERNS entry each applies to (all three dimensions share this one
+# mechanism). Empty by design: every pre-existing leak found when
 # this guard was introduced (Slice 4 of the overlay-scaffold-v2-p5 plan) was
 # fixed in Slice 5 of the same plan rather than allowlisted. Add entries
 # only for a genuinely intentional occurrence, with the reason as a trailing
@@ -159,8 +160,9 @@ grep_scan_or_fail() {
     1) return 1 ;;
     *)
       echo "" >&2
+      # grep's own diagnostics already went to this script's stderr
+      # (stderr is deliberately not captured — self-review C2-L2/C3-L3).
       echo "FAIL: grep $mode failed (exit $status) while scanning pattern: $pattern" >&2
-      echo "$_scan_output" >&2
       exit 1
       ;;
   esac
@@ -220,8 +222,8 @@ scan_path() {
     1) return ;;
     *)
       echo "" >&2
+      # diagnostics already on stderr (see grep_scan_or_fail's note).
       echo "FAIL: path pattern scan failed (exit $status) while scanning pattern: $pattern" >&2
-      echo "$_scan_output" >&2
       exit 1
       ;;
   esac
