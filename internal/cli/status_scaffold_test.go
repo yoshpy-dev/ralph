@@ -361,3 +361,57 @@ func TestStatusCmd_ScaffoldSection_OrgAndScaffoldCombined_FlagsScopedToOrgOnly(t
 		t.Errorf("expected org-b present in the unfiltered run:\n%s", outAll)
 	}
 }
+
+// TestStatusCmd_ScaffoldSection_CorruptManifest_ShowsUnavailable is the AR#3
+// (cycle 2, docs/reports/cross-review-triage-overlay-scaffold-v2-p5.md)
+// regression guard: a `.ralph/manifest.toml` that exists but fails to parse
+// (corrupt TOML) must NOT be treated the same as "no manifest at all" --
+// before the fix, buildScaffoldStatus folded every ReadManifest error into
+// the same nil-error branch, which made a corrupted project look identical
+// to a directory that was never a ralph project (the scaffold section
+// disappeared from both text and --json output). The fix distinguishes
+// fs.ErrNotExist (still "not a ralph project", nil/nil) from every other
+// read/parse error (now surfaced via the same M7 Err-shape
+// TestStatusCmd_ScaffoldSection_ComputationError_DegradesGracefully already
+// pins for a plan-computation failure): the text output must show
+// "Scaffold ownership: unavailable (...)" naming the error, --json must
+// carry a non-nil "scaffold" key with an "error" field, the org section
+// must render unaffected, and the command must still exit 0.
+func TestStatusCmd_ScaffoldSection_CorruptManifest_ShowsUnavailable(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".ralph"), 0o755); err != nil {
+		t.Fatalf("MkdirAll .ralph: %v", err)
+	}
+	corrupt := []byte("this is not valid TOML: [[[\n")
+	if err := os.WriteFile(filepath.Join(dir, ".ralph", "manifest.toml"), corrupt, 0o644); err != nil {
+		t.Fatalf("writing corrupt manifest.toml: %v", err)
+	}
+
+	t.Chdir(dir)
+	orgStateDir := t.TempDir()
+	seedTwoOrgManifest(t, orgStateDir)
+
+	out, err := runStatusCmd(t, "--state-dir", orgStateDir)
+	if err != nil {
+		t.Fatalf("status: %v (output: %s)", err, out)
+	}
+	if !strings.Contains(out, "Scaffold ownership: unavailable (") {
+		t.Errorf("expected the degraded scaffold section naming the parse error, got:\n%s", out)
+	}
+	// Org output must be completely unaffected by the scaffold failure.
+	if !strings.Contains(out, "org_id: org-a") || !strings.Contains(out, "org_id: org-b") {
+		t.Errorf("expected unaffected org output, got:\n%s", out)
+	}
+
+	jsonOut, err := runStatusCmd(t, "--state-dir", orgStateDir, "--json")
+	if err != nil {
+		t.Fatalf("status --json: %v (output: %s)", err, jsonOut)
+	}
+	payload := decodeStatusScaffoldPayload(t, jsonOut)
+	if payload.Scaffold == nil {
+		t.Fatalf("expected a non-nil scaffold key even on a corrupt manifest, got none:\n%s", jsonOut)
+	}
+	if !strings.Contains(jsonOut, `"error"`) {
+		t.Errorf("expected the scaffold.error key in --json output, got:\n%s", jsonOut)
+	}
+}

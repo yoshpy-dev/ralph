@@ -14,6 +14,14 @@
 #      unbalanced parentheses and was silently swallowed by "|| true", so
 #      the regex branch never actually flagged anything.
 #   F. Same as E, for the docs/plans/<date>-<slug> half of the alternation
+#   G. Fixture with a file placed at .claude/skills/release/ (innocuous
+#      content) fails via the PATH_PATTERNS branch — AR#4 (cycle 2,
+#      docs/reports/cross-review-triage-overlay-scaffold-v2-p5.md)
+#      regression guard: content scanning alone cannot see a maintainer-only
+#      surface shipped with wholly ordinary text.
+#   H. Current real templates/ tree still passes with the path-scan
+#      dimension active (explicit companion to A, called out separately per
+#      the AR#4 handoff)
 
 set -eu
 
@@ -192,6 +200,24 @@ printf 'See docs/plans/active/2026-01-02-example.md for background.\n' > "$F_DIR
 run_case_expect_output "F. dated docs/plans/<date>-<slug> path fails (regex branch)" \
   "$F_DIR" "base/docs/NOTES.md"
 rm -rf "$F_DIR"
+
+# ── G. maintainer-only path with innocuous content fails (path branch) ──
+# AR#4 regression guard: a file living at .claude/skills/release/ must fail
+# regardless of what it says — content scanning (cases B/D above) has
+# nothing to find here, only the path itself is the leak.
+G_DIR="$(mktemp -d)"
+mkdir -p "$G_DIR/base/.claude/skills/release"
+printf '# Some skill\n\nNothing meta-repo-specific in this text at all.\n' \
+  > "$G_DIR/base/.claude/skills/release/SKILL.md"
+run_case_expect_output "G. .claude/skills/release/ path fails with innocuous content (path branch)" \
+  "$G_DIR" "base/.claude/skills/release/SKILL.md"
+rm -rf "$G_DIR"
+
+# ── H. current real templates/ tree still passes with path scan active ──
+# Explicit companion to A (which already covers this): pins that adding the
+# PATH_PATTERNS dimension introduces no false positive against the actual
+# shipped tree.
+run_case "H. real templates/ tree passes with path-scan dimension active" 0 "templates"
 
 echo ""
 echo "  PASS: $pass"

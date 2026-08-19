@@ -8,13 +8,21 @@ set -euo pipefail
 # citations of meta-repo-only tooling/CI/plan artifacts that do not exist
 # in a scaffolded project.
 #
-# Detection is a declarative pattern list (fixed-string + regex), scanned
-# against every file under templates/. A hit is reported unless it is
-# listed in ALLOWLIST for that exact (path, pattern) pair. ALLOWLIST is
-# empty today (every leak found when this guard was introduced was fixed,
-# not deferred — see ALLOWLIST's own comment below); the mechanism exists
-# for a future genuinely intentional occurrence, with a reason recorded at
-# the entry.
+# Detection has two independent dimensions, both scanned against every file
+# under templates/:
+#   - content (FIXED_PATTERNS / REGEX_PATTERNS below): grep across file
+#     bytes.
+#   - path (PATH_PATTERNS below): the repo-relative path list itself, so a
+#     maintainer-only surface that ships with wholly innocuous content (a
+#     file merely placed at a path that must never exist in a scaffolded
+#     project, e.g. .claude/skills/release/) is still caught — content
+#     scanning alone cannot see this (AR#4, cycle 2,
+#     docs/reports/cross-review-triage-overlay-scaffold-v2-p5.md).
+# A hit in either dimension is reported unless it is listed in ALLOWLIST for
+# that exact (path, pattern) pair. ALLOWLIST is empty today (every leak
+# found when this guard was introduced was fixed, not deferred — see
+# ALLOWLIST's own comment below); the mechanism exists for a future
+# genuinely intentional occurrence, with a reason recorded at the entry.
 #
 # Exit code: 0 if clean (after allowlisting), 1 if any unallowlisted hit
 # is found.
@@ -65,6 +73,34 @@ REGEX_PATTERNS=(
 )
 REGEX_REASONS=(
   "literal dated meta-repo report/plan filename (as opposed to a <date>-<slug> placeholder) baked into shipped template content"
+)
+
+# ─── Path patterns ──────────────────────────────────────────────────────
+# Two parallel arrays (PATH_PATTERNS / PATH_REASONS — not "pattern|reason"
+# packed strings, same rationale as REGEX_PATTERNS/REGEX_REASONS above:
+# a path pattern is a literal repo-relative substring, matched with `grep
+# -F` against the file-path list itself rather than file contents). Every
+# entry here is a maintainer-only or meta-repo-only surface that must never
+# ship at that PATH regardless of what its content says — this is the
+# dimension content scanning above cannot cover (AR#4, cycle 2,
+# docs/reports/cross-review-triage-overlay-scaffold-v2-p5.md). Seeded from
+# scripts/check-sync.sh's own ROOT_ONLY_EXCLUSIONS list (the authoritative
+# "meta-repo-only, not part of the scaffolded baseline" set), narrowed to
+# the entries that are plausible to accidentally land under templates/ as
+# shipped project content.
+PATH_PATTERNS=(
+  "/.claude/skills/release/"
+  "/.github/workflows/check-template.yml"
+  "/.github/workflows/release.yml"
+  "/scripts/check-sync.sh"
+  "/scripts/check-template-purity.sh"
+)
+PATH_REASONS=(
+  "the /release skill is repo-maintainer-only (see .claude/skills/release/SKILL.md frontmatter: 'Manual trigger only. Repo-specific — not distributed via template.') and must never be scaffolded"
+  ".github/workflows/check-template.yml is meta-repo-only (scripts/check-sync.sh ROOT_ONLY_EXCLUSIONS); a scaffolded project must never receive this workflow file"
+  ".github/workflows/release.yml is meta-repo-only (scripts/check-sync.sh ROOT_ONLY_EXCLUSIONS); a scaffolded project must never receive this workflow file"
+  "scripts/check-sync.sh (templates/root parity checker) is meta-repo-only per CLAUDE.md and scripts/check-sync.sh's own ROOT_ONLY_EXCLUSIONS; a scaffolded project has no templates/ tree to check against, so this script must never ship as project content"
+  "scripts/check-template-purity.sh (this script) checks this repo's own nested templates/ tree; a scaffolded project has no such tree, so this script must never ship as project content"
 )
 
 # ─── Allowlist ──────────────────────────────────────────────────────────
@@ -162,6 +198,43 @@ scan_regex() {
   done <<< "$_scan_output"
 }
 
+# scan_path <pattern> <reason> — the path-dimension counterpart of
+# scan_fixed/scan_regex above: matches pattern (a literal substring, via
+# grep -F) against ALL_PATHS (every file under $SCAN_ROOT, one per line, as
+# printed by `find "$SCAN_ROOT" -type f` -- same "$SCAN_ROOT/..." repo-
+# relative form the content scanners above report, so ALLOWLIST_PATHS stays
+# one shape for both dimensions) instead of against file contents. Reuses
+# grep_scan_or_fail's fail-hard-on-real-error contract (H1's lesson: a
+# swallowed grep error must never look like "no hits").
+scan_path() {
+  local pattern="$1" reason="$2" line status
+  if [ -z "$ALL_PATHS" ]; then
+    return
+  fi
+  set +e
+  _scan_output="$(printf '%s' "$ALL_PATHS" | grep -F -- "$pattern")"
+  status=$?
+  set -e
+  case "$status" in
+    0) : ;;
+    1) return ;;
+    *)
+      echo "" >&2
+      echo "FAIL: path pattern scan failed (exit $status) while scanning pattern: $pattern" >&2
+      echo "$_scan_output" >&2
+      exit 1
+      ;;
+  esac
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    if is_allowlisted "$line" "$pattern"; then
+      continue
+    fi
+    hits=$((hits + 1))
+    hit_lines+=("$line  [pattern: $pattern — $reason]")
+  done <<< "$_scan_output"
+}
+
 echo "=== Checking $SCAN_ROOT for meta-repo-specific references ==="
 
 for entry in "${FIXED_PATTERNS[@]}"; do
@@ -174,6 +247,21 @@ for i in "${!REGEX_PATTERNS[@]}"; do
   scan_regex "${REGEX_PATTERNS[$i]}" "${REGEX_REASONS[$i]}"
 done
 
+# ALL_PATHS is computed once, up front, for every PATH_PATTERNS entry to
+# scan against -- `find` (not `grep -rl`) because a path-only leak has no
+# content signature to search for; some entries above (a maintainer-only
+# skill shipped with innocuous content) exist exactly to catch what content
+# scanning cannot see. 2>/dev/null so a permission-denied subdirectory
+# degrades to "fewer paths found" rather than aborting the whole guard --
+# unlike grep_scan_or_fail's content scan, a partial file list here is a
+# safe-direction degradation (fewer hits possible, never more), whereas a
+# swallowed grep content-scan error could hide an actual leak.
+ALL_PATHS="$(find "$SCAN_ROOT" -type f 2>/dev/null)"
+
+for i in "${!PATH_PATTERNS[@]}"; do
+  scan_path "${PATH_PATTERNS[$i]}" "${PATH_REASONS[$i]}"
+done
+
 if [ "$hits" -gt 0 ]; then
   echo ""
   echo "=== Leaks found ==="
@@ -184,7 +272,8 @@ if [ "$hits" -gt 0 ]; then
   echo "FAIL: $hits meta-repo-specific reference(s) found in $SCAN_ROOT."
   echo ""
   echo "To fix:"
-  echo "  - Remove/generalize the reference in the template file, or"
+  echo "  - Remove/generalize the reference in the template file (content patterns), or"
+  echo "  - Delete/relocate the offending file so its path no longer matches (path patterns), or"
   echo "  - If genuinely intentional, add matching ALLOWLIST_PATHS /"
   echo "    ALLOWLIST_PATTERNS entries in this script with a reason comment."
   exit 1

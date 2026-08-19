@@ -2,8 +2,10 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -482,11 +484,25 @@ type scaffoldStatus struct {
 // Layout-only result, mirroring checkScaffoldIntegrity's identical
 // distinction (doctor.go) between "not a ralph project" and "not upgraded
 // yet".
+//
+// A manifest that exists but fails to parse (corrupt TOML, truncated
+// write) is neither of the above: it is a genuine computation failure,
+// returned as (nil, err) like every other error below, so the caller's M7
+// degrade-and-render-"unavailable" handling (runStatus) picks it up. Before
+// this fix, ReadManifest's error was folded into the same nil-error branch
+// as "no manifest at all" regardless of cause, which made a corrupted
+// manifest disappear from `ralph status` exactly like a directory that was
+// never a ralph project -- hiding the one case this command exists to
+// surface (AR#3, cycle 2,
+// docs/reports/cross-review-triage-overlay-scaffold-v2-p5.md).
 func buildScaffoldStatus(targetDir string) (*scaffoldStatus, error) {
 	manifestPath := filepath.Join(targetDir, ".ralph", "manifest.toml")
 	manifest, err := scaffold.ReadManifest(manifestPath)
 	if err != nil {
-		return nil, nil
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("reading manifest: %w", err)
 	}
 	if manifest.Meta.Layout != scaffold.LayoutV2 {
 		return &scaffoldStatus{Layout: "legacy"}, nil

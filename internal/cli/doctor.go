@@ -38,8 +38,9 @@ func newDoctorCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&strict, "strict", false,
 		"fail (exit 1) on FR-9 scaffold-integrity violations (core file hashes, managed block health, "+
 			"settings.json owned keys, conflict markers, manifest/disk consistency — plus the meta-failures "+
-			"that make those checks impossible to run: an unparseable manifest or an ownership-planning error "+
-			"such as an unreadable tracked file); without --strict the "+
+			"that make any of those checks impossible to run: an unparseable manifest, an ownership-planning "+
+			"error such as an unreadable tracked file, or a per-check computation error (e.g. an unreadable "+
+			"block surface, an invalid-JSON settings.json)); without --strict the "+
 			"same findings are printed as warnings and doctor's exit code is unaffected. --strict only elevates "+
 			"these scaffold checks — every other doctor check (e.g. missing claude/codex CLI) keeps its "+
 			"existing pass/warn/fail semantics. Note: (b) managed blocks and (c) settings.json owned keys "+
@@ -712,9 +713,19 @@ func checkScaffoldIntegrity(targetDir string, strict bool) []checkResult {
 		}}
 	}
 
+	// A filepath.Abs failure (only possible when os.Getwd itself fails) is
+	// the same class of meta-failure as the corrupt-manifest and
+	// ownership-planning-error cases above: every one of FR-9's five
+	// sub-checks needs absDir, so this is verification-impossible, not a
+	// reason to fail open (class-closing audit, cycle 2,
+	// docs/reports/cross-review-triage-overlay-scaffold-v2-p5.md).
 	absDir, err := filepath.Abs(targetDir)
 	if err != nil {
-		return []checkResult{{Name: "Scaffold integrity", Status: "warn", Detail: fmt.Sprintf("resolving target dir: %v", err)}}
+		return []checkResult{{
+			Name:   "Scaffold integrity",
+			Status: scaffoldViolationStatus(true, strict),
+			Detail: fmt.Sprintf("resolving target dir: %v", err),
+		}}
 	}
 
 	// resolveOwnershipPlan (adopt.go) runs the exact same read-only
@@ -805,11 +816,20 @@ func checkScaffoldCoreHashes(plan upgrade.ReplacePlan, strict bool) checkResult 
 // checkScaffoldCoreHashes's doc comment) — run `ralph upgrade` before
 // `doctor --strict` right after upgrading the ralph binary itself, so a
 // version-skew pending update does not read as scaffold damage.
+//
+// An applyBlockUpdatesV2 error itself (e.g. os.Lstat failing on a block
+// surface with something other than ErrNotExist — a permission error, a
+// non-directory path component) is a strict-eligible violation in its own
+// right, not a warn-and-move-on: FR-9(b) cannot be verified at all when the
+// block-outcome computation itself fails, which is the same
+// verification-impossible class as the corrupt-manifest and
+// ownership-planning-error meta-failures above (AR#2, cycle 2,
+// docs/reports/cross-review-triage-overlay-scaffold-v2-p5.md).
 func checkManagedBlocks(absDir string, desired map[string][]byte, strict bool) checkResult {
 	r := checkResult{Name: "Scaffold: managed blocks"}
 	outcomes, notes, err := applyBlockUpdatesV2(absDir, desired, io.Discard, false)
 	if err != nil {
-		r.Status = "warn"
+		r.Status = scaffoldViolationStatus(true, strict)
 		r.Detail = fmt.Sprintf("computing managed block outcomes: %v", err)
 		return r
 	}
@@ -858,12 +878,23 @@ func checkManagedBlocks(absDir string, desired map[string][]byte, strict bool) c
 // template with no pending-update tolerance — the same intentional
 // asymmetry documented on checkManagedBlocks and in the --strict flag
 // help.
+//
+// Every error path below (snapshot read, missing desired-state template,
+// disk read, or the merge itself) is a strict-eligible violation, not a
+// warn-and-move-on: each one means FR-9(c) cannot be verified at all, the
+// same verification-impossible class as checkManagedBlocks' computation
+// error and the corrupt-manifest/ownership-planning-error meta-failures in
+// checkScaffoldIntegrity above (AR#1 + class-closing audit, cycle 2,
+// docs/reports/cross-review-triage-overlay-scaffold-v2-p5.md). Before this
+// fix, an invalid-JSON settings.json made MergeOwnedSettings fail, and
+// --strict reported a hardcoded "warn" that never flipped doctor's exit
+// code — the gate failed open on the exact input FR-9(c) exists to catch.
 func checkSettingsOwnedKeys(absDir string, desired map[string][]byte, strict bool) checkResult {
 	r := checkResult{Name: "Scaffold: settings.json owned keys"}
 
 	oldOwnedSnapshot, found, err := upgrade.LoadSettingsSnapshot(absDir)
 	if err != nil {
-		r.Status = "warn"
+		r.Status = scaffoldViolationStatus(true, strict)
 		r.Detail = fmt.Sprintf("reading settings snapshot: %v", err)
 		return r
 	}
@@ -874,21 +905,21 @@ func checkSettingsOwnedKeys(absDir string, desired map[string][]byte, strict boo
 
 	newOwned, ok := desired[v2SettingsPath]
 	if !ok {
-		r.Status = "warn"
+		r.Status = scaffoldViolationStatus(true, strict)
 		r.Detail = fmt.Sprintf("current templates do not ship %s; cannot verify owned keys", v2SettingsPath)
 		return r
 	}
 
 	current, err := readFinalDiskContent(absDir, v2SettingsPath)
 	if err != nil {
-		r.Status = "warn"
+		r.Status = scaffoldViolationStatus(true, strict)
 		r.Detail = fmt.Sprintf("reading %s: %v", v2SettingsPath, err)
 		return r
 	}
 
 	mergeResult, err := upgrade.MergeOwnedSettings(current, oldOwned, newOwned)
 	if err != nil {
-		r.Status = "warn"
+		r.Status = scaffoldViolationStatus(true, strict)
 		r.Detail = fmt.Sprintf("merging %s: %v", v2SettingsPath, err)
 		return r
 	}

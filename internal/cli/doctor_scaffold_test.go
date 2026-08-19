@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/yoshpy-dev/ralph/internal/scaffold"
 )
@@ -542,6 +543,224 @@ func TestCheckScaffoldIntegrity_AgentsMdDeleted_ManagedBlocksCatchesIt(t *testin
 	consistency := findScaffoldResult(t, results, "Scaffold: manifest/disk consistency")
 	if consistency.Status != "pass" {
 		t.Errorf("Scaffold: manifest/disk consistency: Status = %q, want \"pass\" (AGENTS.md stays excluded from FR-9(e); FR-9(b) already caught it) (Detail: %s)", consistency.Status, consistency.Detail)
+	}
+}
+
+// TestCheckScaffoldIntegrity_SettingsJSONInvalidJSON_StrictFails is the AR#1
+// (cycle 2, docs/reports/cross-review-triage-overlay-scaffold-v2-p5.md)
+// regression guard: an unparseable .claude/settings.json makes
+// upgrade.MergeOwnedSettings itself fail (parseSettingsDoc rejects invalid
+// JSON), and that failure must be a strict-eligible violation, not the
+// pre-fix hardcoded "warn" that let --strict exit 0 while FR-9(c) could not
+// even be evaluated.
+func TestCheckScaffoldIntegrity_SettingsJSONInvalidJSON_StrictFails(t *testing.T) {
+	target := initV2Project(t, gen1(), "1.0.0-test")
+
+	settingsPath := filepath.Join(target, ".claude", "settings.json")
+	if err := os.WriteFile(settingsPath, []byte("this is not valid JSON: [[[\n"), 0o644); err != nil {
+		t.Fatalf("writing invalid settings.json: %v", err)
+	}
+
+	strictResults := checkScaffoldIntegrity(target, true)
+	r := findScaffoldResult(t, strictResults, "Scaffold: settings.json owned keys")
+	if r.Status != "fail" {
+		t.Errorf("strict: Status = %q, want \"fail\" (Detail: %s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, v2SettingsPath) {
+		t.Errorf("Detail must name %s: %s", v2SettingsPath, r.Detail)
+	}
+
+	nonStrictResults := checkScaffoldIntegrity(target, false)
+	r = findScaffoldResult(t, nonStrictResults, "Scaffold: settings.json owned keys")
+	if r.Status != "warn" {
+		t.Errorf("non-strict: Status = %q, want \"warn\" (Detail: %s)", r.Status, r.Detail)
+	}
+
+	// No runDoctorFull integration pin here (unlike the sibling AR fixes
+	// above): checkHooks (doctor.go, an unrelated pre-existing check) also
+	// reads .claude/settings.json via encoding/json and reports a hardcoded
+	// "fail" -- not gated by --strict at all -- for ANY invalid JSON there,
+	// so doctor's overall exit code would already be non-zero without
+	// --strict regardless of this fix, confounding what a pin would prove.
+	// TestCheckScaffoldIntegrity_SettingsSnapshotCorrupt_StrictFails below
+	// exercises the identical MergeOwnedSettings error branch via the
+	// settings *snapshot* instead, which checkHooks never reads, and carries
+	// the doctor-level integration pin instead.
+}
+
+// TestCheckScaffoldIntegrity_SettingsSnapshotCorrupt_StrictFails is AR#1's
+// doctor-level integration pin, isolated from checkHooks' unrelated
+// unconditional-fail-on-invalid-JSON behavior (see the comment on
+// TestCheckScaffoldIntegrity_SettingsJSONInvalidJSON_StrictFails above):
+// corrupting the settings *snapshot* (oldOwned) drives MergeOwnedSettings
+// into the exact same error branch as a corrupt settings.json (current)
+// would, without checkHooks ever touching that file.
+func TestCheckScaffoldIntegrity_SettingsSnapshotCorrupt_StrictFails(t *testing.T) {
+	target := initV2Project(t, gen1(), "1.0.0-test")
+
+	snapshotPath := filepath.Join(target, ".ralph", "core", "settings.ralph.json")
+	if err := os.WriteFile(snapshotPath, []byte("this is not valid JSON: [[[\n"), 0o644); err != nil {
+		t.Fatalf("writing invalid settings snapshot: %v", err)
+	}
+
+	strictResults := checkScaffoldIntegrity(target, true)
+	r := findScaffoldResult(t, strictResults, "Scaffold: settings.json owned keys")
+	if r.Status != "fail" {
+		t.Errorf("strict: Status = %q, want \"fail\" (Detail: %s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "merging "+v2SettingsPath) {
+		t.Errorf("Detail must name the merge failure: %s", r.Detail)
+	}
+
+	nonStrictResults := checkScaffoldIntegrity(target, false)
+	r = findScaffoldResult(t, nonStrictResults, "Scaffold: settings.json owned keys")
+	if r.Status != "warn" {
+		t.Errorf("non-strict: Status = %q, want \"warn\" (Detail: %s)", r.Status, r.Detail)
+	}
+
+	// Integration pin, mirroring TestCheckScaffoldIntegrity_CorruptManifest_StrictFails.
+	binDir := filepath.Join(target, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, bin := range []string{"claude", "codex", "go"} {
+		writeStubBin(t, binDir, bin, "")
+	}
+	t.Setenv("PATH", binDir)
+	t.Setenv("RALPH_ORG_AGMSG_HOME", filepath.Join(target, "no-such-agmsg-home"))
+
+	nonStrictErr := captureStdout(t, func() error { return runDoctorFull(target, false, false) })
+	if nonStrictErr != nil {
+		t.Errorf("non-strict: err = %v, want nil (a corrupt settings snapshot is a warning without --strict)", nonStrictErr)
+	}
+	strictErr := captureStdout(t, func() error { return runDoctorFull(target, false, true) })
+	if strictErr == nil {
+		t.Fatal("strict: err = nil, want non-nil (a corrupt settings snapshot must fail --strict)")
+	}
+}
+
+// TestCheckScaffoldIntegrity_GitignoreTemplateMarkersBroken_ManagedBlocksStrictFails
+// is the AR#2 (cycle 2,
+// docs/reports/cross-review-triage-overlay-scaffold-v2-p5.md) regression
+// guard: applyBlockUpdatesV2 itself returning a genuine error (as opposed to
+// a malformed/missing-surface outcome, which is already covered by
+// TestCheckScaffoldIntegrity_AgentsMdDeleted_ManagedBlocksCatchesIt and the
+// pre-existing "!oc.ok" offender logic) must be a strict-eligible violation.
+// The current embedded .gitignore template is swapped for one missing its
+// managed-block BEGIN/END markers entirely, which makes
+// extractBlockInterior fail inside applyBlockUpdatesV2's .gitignore branch
+// -- a genuine err != nil return, not an outcome.
+func TestCheckScaffoldIntegrity_GitignoreTemplateMarkersBroken_ManagedBlocksStrictFails(t *testing.T) {
+	target := initV2Project(t, gen1(), "1.0.0-test")
+
+	broken := gen1().build()
+	broken["templates/base/.gitignore"] = &fstest.MapFile{Data: []byte("# no managed block markers at all\n")}
+	scaffold.EmbeddedFS = broken
+
+	strictResults := checkScaffoldIntegrity(target, true)
+	r := findScaffoldResult(t, strictResults, "Scaffold: managed blocks")
+	if r.Status != "fail" {
+		t.Errorf("strict: Status = %q, want \"fail\" (Detail: %s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "computing managed block outcomes") {
+		t.Errorf("Detail must name the computation failure: %s", r.Detail)
+	}
+
+	nonStrictResults := checkScaffoldIntegrity(target, false)
+	r = findScaffoldResult(t, nonStrictResults, "Scaffold: managed blocks")
+	if r.Status != "warn" {
+		t.Errorf("non-strict: Status = %q, want \"warn\" (Detail: %s)", r.Status, r.Detail)
+	}
+
+	// Integration pin, mirroring TestCheckScaffoldIntegrity_CorruptManifest_StrictFails.
+	binDir := filepath.Join(target, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, bin := range []string{"claude", "codex", "go"} {
+		writeStubBin(t, binDir, bin, "")
+	}
+	t.Setenv("PATH", binDir)
+	t.Setenv("RALPH_ORG_AGMSG_HOME", filepath.Join(target, "no-such-agmsg-home"))
+
+	nonStrictErr := captureStdout(t, func() error { return runDoctorFull(target, false, false) })
+	if nonStrictErr != nil {
+		t.Errorf("non-strict: err = %v, want nil (a block-computation error is a warning without --strict)", nonStrictErr)
+	}
+	strictErr := captureStdout(t, func() error { return runDoctorFull(target, false, true) })
+	if strictErr == nil {
+		t.Fatal("strict: err = nil, want non-nil (a block-computation error must fail --strict)")
+	}
+}
+
+// TestCheckScaffoldIntegrity_SettingsSnapshotUnreadable_OwnedKeysStrictFails
+// is the class-closing audit (cycle 2,
+// docs/reports/cross-review-triage-overlay-scaffold-v2-p5.md) regression
+// guard for checkSettingsOwnedKeys' first error path: a settings snapshot
+// (.ralph/core/settings.ralph.json) that exists but cannot be read as a
+// file at all (here, replaced by a directory, so os.ReadFile fails with
+// something other than ErrNotExist) is distinct from
+// TestCheckScaffoldIntegrity_SettingsSnapshotDeleted_StrictFails' missing-
+// snapshot case (which legitimately falls back to "{}" oldOwned) -- an
+// unreadable snapshot must fail FR-9(c) itself, not silently degrade.
+func TestCheckScaffoldIntegrity_SettingsSnapshotUnreadable_OwnedKeysStrictFails(t *testing.T) {
+	target := initV2Project(t, gen1(), "1.0.0-test")
+
+	snapshotPath := filepath.Join(target, ".ralph", "core", "settings.ralph.json")
+	if err := os.Remove(snapshotPath); err != nil {
+		t.Fatalf("removing settings snapshot: %v", err)
+	}
+	if err := os.Mkdir(snapshotPath, 0o755); err != nil {
+		t.Fatalf("replacing settings snapshot with a directory: %v", err)
+	}
+
+	strictResults := checkScaffoldIntegrity(target, true)
+	r := findScaffoldResult(t, strictResults, "Scaffold: settings.json owned keys")
+	if r.Status != "fail" {
+		t.Errorf("strict: Status = %q, want \"fail\" (Detail: %s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "reading settings snapshot") {
+		t.Errorf("Detail must name the snapshot read failure: %s", r.Detail)
+	}
+
+	nonStrictResults := checkScaffoldIntegrity(target, false)
+	r = findScaffoldResult(t, nonStrictResults, "Scaffold: settings.json owned keys")
+	if r.Status != "warn" {
+		t.Errorf("non-strict: Status = %q, want \"warn\" (Detail: %s)", r.Status, r.Detail)
+	}
+}
+
+// TestCheckScaffoldIntegrity_SettingsJSONReplacedByDirectory_OwnedKeysStrictFails
+// is the class-closing audit counterpart for checkSettingsOwnedKeys'
+// readFinalDiskContent error path: .claude/settings.json replaced by a
+// directory makes os.ReadFile fail with something other than ErrNotExist,
+// distinct from TestCheckScaffoldIntegrity_SettingsJSONDeleted_OwnedKeysCatchesIt's
+// missing-file case (which readFinalDiskContent treats as legitimate
+// absence, "") -- an unreadable settings.json must fail FR-9(c) itself.
+func TestCheckScaffoldIntegrity_SettingsJSONReplacedByDirectory_OwnedKeysStrictFails(t *testing.T) {
+	target := initV2Project(t, gen1(), "1.0.0-test")
+
+	settingsPath := filepath.Join(target, ".claude", "settings.json")
+	if err := os.Remove(settingsPath); err != nil {
+		t.Fatalf("removing settings.json: %v", err)
+	}
+	if err := os.Mkdir(settingsPath, 0o755); err != nil {
+		t.Fatalf("replacing settings.json with a directory: %v", err)
+	}
+
+	strictResults := checkScaffoldIntegrity(target, true)
+	r := findScaffoldResult(t, strictResults, "Scaffold: settings.json owned keys")
+	if r.Status != "fail" {
+		t.Errorf("strict: Status = %q, want \"fail\" (Detail: %s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "reading "+v2SettingsPath) {
+		t.Errorf("Detail must name the settings.json read failure: %s", r.Detail)
+	}
+
+	nonStrictResults := checkScaffoldIntegrity(target, false)
+	r = findScaffoldResult(t, nonStrictResults, "Scaffold: settings.json owned keys")
+	if r.Status != "warn" {
+		t.Errorf("non-strict: Status = %q, want \"warn\" (Detail: %s)", r.Status, r.Detail)
 	}
 }
 
