@@ -216,3 +216,106 @@ Exit code: 0 (confirmed separately via `echo $?` after a clean run, not just tai
 - Behavioral test execution (including whether `assertAllScaffoldChecksPass`, `TestCheckScaffoldIntegrity_OwnershipPlanningError_StrictFails`, and `TestCheckScaffoldIntegrity_SettingsSnapshotDeleted_StrictFails` actually pass when run) is tester's responsibility for this cycle — not executed here.
 - The stale `ALLOWLIST` reference in `check-template-purity.sh`'s FAIL-path message (section 2, new observation) is cosmetic and not filed as a new tech-debt row given the pipeline is at cap 2/2; flagging here for the orchestrator's disposition (PR known-gaps note, or a trivial one-line fix before `/pr` if churn is acceptable).
 - Codex project-scoped `[[hooks.*]]` live-firing verification remains open from cycle 1 (unchanged this cycle, tracked in `docs/tech-debt/README.md`).
+
+# Cycle 3
+
+- Date: 2026-08-19
+- Cycle: 3 (cap raised from 2 to 3 by the operator after cycle-2 `/cross-review` reported 4 ACTION_REQUIRED)
+- Scope: cycle-3 delta since the cycle-2 verify (`c805cf5`) — `5312a55`/`7e6ddcb`/`dfbc061` (cycle-2 test/sync-docs/insight artifacts), `3836a7e` (cycle-2 cross-review triage, 4 AR), `25b4f79` (AR#1–#4 fixes + class-closing warn-path audit), `fd136ae` (conflict-scan unreadable-file defense in depth), `e5329f4` (self-review cycle-3: 1 MEDIUM + 7 LOW), `6353a07` (C3-M1/L1–L6/L7(c) fixes)
+- Verdict: **pass**
+
+## 1. Cycle-2 AR#1–#4 fixes vs. triage contract
+
+Read `25b4f79`'s diff against `docs/reports/cross-review-triage-overlay-scaffold-v2-p5.md`'s ACTION_REQUIRED table row by row.
+
+- **AR#1** (`checkSettingsOwnedKeys`, FR-9(c)): every error return in the function — settings-snapshot read (`upgrade.LoadSettingsSnapshot`), missing desired-state template entry, `readFinalDiskContent` disk read, and `upgrade.MergeOwnedSettings` itself — changed from a hardcoded `r.Status = "warn"` to `r.Status = scaffoldViolationStatus(true, strict)`. This is the exact remediation the triage named ("不正 JSON だと … warn 固定"), and it is broader than the single reviewer-cited line: all four error paths in the function were swept, not only the `MergeOwnedSettings` one. Confirmed by reading `internal/cli/doctor.go:895-928` at HEAD — no `"warn"` literal remains in the function body (`awk '/^func checkSettingsOwnedKeys/,/^}/' internal/cli/doctor.go | grep warn` returns nothing).
+- **AR#2** (`checkManagedBlocks`, FR-9(b)): `applyBlockUpdatesV2`'s error path changed from `r.Status = "warn"` to `r.Status = scaffoldViolationStatus(true, strict)`, matching the triage's "block 面が … 読めない場合 … warn 固定" finding exactly. Confirmed no `"warn"` literal remains in the function body.
+- **AR#3** (`buildScaffoldStatus`, `status.go`): the manifest-read error branch now distinguishes `errors.Is(err, fs.ErrNotExist)` (still `nil, nil` — genuinely "not a ralph project") from every other `ReadManifest` error (corrupt/unreadable manifest.toml), which now returns `nil, fmt.Errorf("reading manifest: %w", err)`. Read the caller (`runStatus`, `internal/cli/status.go:87-90`): a non-nil `scaffoldErr` is wrapped into `&scaffoldStatus{Err: scaffoldErr.Error()}`, and `printScaffoldSection` renders `"Scaffold ownership: unavailable (%s)"` for that case (`internal/cli/status.go:567-570`) — the corrupt-manifest case no longer disappears like a non-ralph directory, matching the triage's remediation ("fs.ErrNotExist のみ nil、それ以外は scaffoldStatus.Err で unavailable 表示") word for word.
+- **AR#4** (purity guard path dimension): `scripts/check-template-purity.sh` gained `PATH_PATTERNS`/`PATH_REASONS` (5 entries, seeded from `check-sync.sh`'s `ROOT_ONLY_EXCLUSIONS`) and a `scan_path` function that greps the `find`-derived path list with `grep -F`, reusing `is_allowlisted` and the same fail-hard-on-real-grep-error contract as the content scanners. `tests/test-template-purity.sh` case G (`.claude/skills/release/SKILL.md` with innocuous content) is the regression guard the triage asked for — reads as a real fixture (`printf '# Some skill\n...'`, no meta-repo string), and case I (added in `6353a07`) proves the allowlist mechanism covers a `PATH_PATTERNS` hit too. Ran `bash tests/test-template-purity.sh` — wait, this is a behavioral run and out of scope for `/verify`; deferred to static analysis section below (`run-static-verify.sh` invokes the guard itself, which is the static-analysis-relevant proof).
+
+All four AR fixes match their triage remediations exactly, and the commit's own "class-closing audit" claim (no unaudited `warn` path remains in the FR-9 surface at the time of `25b4f79`) is independently reproducible: `awk` over each of `checkScaffoldIntegrity`/`checkScaffoldCoreHashes`/`checkManagedBlocks`/`checkSettingsOwnedKeys`/`checkConflictMarkers`/`checkManifestConsistency` at HEAD returns zero `r.Status = "warn"`/`Status: "warn"` assignments (see section 3 below for the full independent sweep, which re-confirms this post-`fd136ae`/`6353a07` too).
+
+## 2. C3 fixes vs. self-review cycle-3 recommendations
+
+Checked each finding in `docs/reports/self-review-2026-08-19-overlay-scaffold-v2-p5.md` Cycle 3 against `6353a07`'s diff.
+
+- **C3-M1** (conflict-scan unreadable branch unreached by any test): fixed with a new test, `TestCheckScaffoldIntegrity_UnreadableSkipPathFace_ConflictScanBranchFires` (`internal/cli/doctor_scaffold_test.go`). Confirmed the test genuinely reaches `checkConflictMarkers`' own unreadable-file branch rather than being shadowed by the earlier ownership-planning-error return, by reading `resolveOwnershipPlan` (`internal/cli/adopt.go`) and `PlanCoreReplaceDesired` (`internal/upgrade/replaceplan.go`) directly rather than trusting the test's own doc comment:
+  - `resolveOwnershipPlan` builds `upgrade.ReplaceOptions{SkipPaths: v2SkipPaths(), PreservePrefixes: ...}` and calls `upgrade.PlanCoreReplaceDesired(opts)`.
+  - `v2SkipPaths()` (`internal/cli/upgrade_v2.go`) returns exactly `{v2SettingsPath, upgrade.SettingsSnapshotRelPath, blockSurfaces[0]=AGENTS.md, blockSurfaces[1]=.gitignore}` — four paths, `AGENTS.md` among them.
+  - `PlanCoreReplaceDesired`'s per-path loop (`internal/upgrade/replaceplan.go`) checks `if opts.SkipPaths[path] { continue }` **before** any `readDiskFile`/hash-comparison call for that path — confirmed by reading the loop body, the skip check is the first statement inside the per-path branch, ahead of the disk read.
+  - Therefore an unreadable `AGENTS.md` is never read by the planner at all; `resolveOwnershipPlan` returns cleanly, `checkScaffoldIntegrity` proceeds to its five sub-checks, and `checkConflictMarkers`'s own `os.ReadFile(full)` on `AGENTS.md` (which scans **all** `manifest.Files` paths with no skip set — confirmed by reading `checkConflictMarkers`'s path-collection loop, `internal/cli/doctor.go:952-956`) is the first and only place that fails on the chmod'd file. This is the branch the test targets, not a shadowed duplicate of the existing `docs/notes.md` test's failure mode.
+  - The test asserts on the specific result name (`findScaffoldResult(t, results, "Scaffold: conflict markers")`), not just gate-level "some fail", which is a stronger pin than the existing `TestCheckScaffoldIntegrity_UnreadableTrackedFile_StrictFails` (gate-level) and correctly discriminates: reverting `fd136ae`'s `unreadable` branch (i.e., silently `continue`-ing past `os.ReadFile` errors) would make this specific result `"pass"` instead of `"fail"`, since `AGENTS.md` is never touched by any other check in the current call graph.
+- **C3-L1** (README `--strict` row narrower than the flag help): fixed — `README.md`'s `ralph doctor [--strict]` row now reads "the meta-failures that make **any** of those checks impossible … (unparseable manifest, unreadable tracked file, unreadable block surface, invalid-JSON settings.json)", matching the flag help's four-item enumeration from `25b4f79` (`internal/cli/doctor.go:38-47`). Confirmed both texts now name the same four failure classes.
+- **C3-L2** (allowlist docs not updated for rename/third dimension): fixed — the header comment's "A hit in either dimension is reported unless it is listed in ALLOWLIST" became "A hit in **any** dimension is reported unless the ALLOWLIST_PATHS/ALLOWLIST_PATTERNS parallel arrays list", and the allowlist's own comment now says "ALLOWLIST_PATTERNS is the exact FIXED_PATTERNS/REGEX_PATTERNS/**PATH_PATTERNS** entry each applies to (all three dimensions share this one mechanism)". New test case I (`tests/test-template-purity.sh`) patches `ALLOWLIST_PATHS`/`ALLOWLIST_PATTERNS` with a path-pattern pair and asserts the resulting run passes — closing the "no fixture allowlists a path pattern" gap the finding named.
+- **C3-L3** (`echo "$_scan_output" >&2` prints hits, not the grep error, on the exit>1 branch): fixed in both `grep_scan_or_fail` and `scan_path` — the line is removed and replaced with a comment explaining grep's own stderr already reached the script's stderr unmerged. Confirmed both `*)` branches now only `echo "FAIL: ... failed (exit $status) ..."` with no `_scan_output` dump.
+- **C3-L4** (`checkManifestConsistency` doc header says "two" while enumerating three, and the code excludes three): fixed — "Two of `v2SkipPaths()`'s four exception faces" became "Three of `v2SkipPaths()`'s four exception faces", matching both the enumeration below it and `v2SkipPaths()`'s actual four-entry return.
+- **C3-L5(a)** (`os.IsNotExist` vs. `errors.Is(err, fs.ErrNotExist)` idiom drift): fixed — `checkConflictMarkers` now uses `errors.Is(err, fs.ErrNotExist)`, matching `checkScaffoldIntegrity`/`checkManifestConsistency` in the same file.
+- **C3-L5(b)** (early return discards `offenders` when `unreadable` is non-empty): fixed — the `unreadable`-non-empty branch now appends `"; conflict markers found in: %s"` (joined `offenders`) to the detail string when `offenders` is also non-empty, so a run with both an unreadable file and a real conflict marker reports both fragments in one pass instead of requiring two round-trips.
+- **C3-L6** (purity test case H duplicates case A): fixed — case H is removed; case A's comment now states it "runs with all three scan dimensions active … so this single case also pins that the PATH_PATTERNS dimension introduces no false positive against the actual shipped tree (formerly a duplicate case H)". Confirmed the header case-list in `tests/test-template-purity.sh` no longer lists case H separately.
+- **C3-L7(c)** (tech-debt row / plan deviation justify C2-L4/L5 deferral with a "cap 2/2" premise the raise falsified): fixed — both `docs/tech-debt/README.md`'s last row and the plan's Deviations section were reworded to say the deferral judgment was made "当時 cap 2/2 到達と判断した時点で" / "記録当時は cap 2/2" and explicitly note the cap was later raised to 3 while the deferral itself still holds on its own merits (churn-vs-value), rather than restating "cap 2/2" as the current state.
+- **C3-L7(a)/(b)** (cross-review triage's `file:line` pointers and the cycle-2 verify report's closing "stale ALLOWLIST reference" note went stale, both within this delta): confirmed **not** edited — see point 5 below. This matches the self-review's own stated recommendation ("historical artifact… does not re-edit merged reports") and the agreed disposition communicated in this task's assignment.
+
+All eight in-cycle fixes (C3-M1, C3-L1 through C3-L6, C3-L7(c)) match their self-review recommendations. C3-L7(a)/(b) were deliberately left as historical-artifact non-edits, consistent with the self-review's own framing of the finding.
+
+## 3. Fail-open class: independent sweep (third consecutive cycle)
+
+Ran an independent sweep of `doctor.go`'s six FR-9 scaffold-check functions and `status.go`'s `buildScaffoldStatus`, without relying on the commit messages' own "class-closing" claims.
+
+- `awk '/^func checkScaffoldIntegrity/,/^}/' internal/cli/doctor.go | grep -n warn` → no hit (every branch uses `scaffoldViolationStatus` or `"info"` for the legacy-layout case, which is intentionally not a violation).
+- `awk '/^func checkScaffoldCoreHashes/,/^}/' internal/cli/doctor.go | grep -n warn` → no hit. This function takes an already-computed `upgrade.ReplacePlan` as input (no I/O of its own); any error in producing that plan is caught upstream by `checkScaffoldIntegrity`'s `resolveOwnershipPlan` error branch before this function is ever called.
+- `awk '/^func checkManagedBlocks/,/^}/' internal/cli/doctor.go | grep -n warn` → no hit.
+- `awk '/^func checkSettingsOwnedKeys/,/^}/' internal/cli/doctor.go | grep -n warn` → no hit.
+- `awk '/^func checkConflictMarkers/,/^}/' internal/cli/doctor.go | grep -n warn` → one hit, in a comment ("cycle-3 warn-path audit alongside AR#1/AR#2"), not a status assignment.
+- `awk '/^func checkManifestConsistency/,/^}/' internal/cli/doctor.go | grep -n warn` → no hit.
+- `buildScaffoldStatus` (`internal/cli/status.go:498-550`): every error path returns `(nil, err)` except the single `errors.Is(err, fs.ErrNotExist)` case (genuinely "not a ralph project", unchanged since Phase 4). The caller (`runStatus`, `:87-90`) converts any non-nil error into `&scaffoldStatus{Err: ...}`, which `printScaffoldSection` renders as `"Scaffold ownership: unavailable (%s)"` rather than dropping the section. No silent `nil, nil` swallow remains outside the one legitimate case.
+
+One nuance worth recording rather than treating as a residual gap: `checkManifestConsistency`'s FR-9(e) existence sweep uses `os.Stat` and only counts a path as "missing" when `errors.Is(statErr, fs.ErrNotExist)`; a different `os.Stat` failure (e.g. a parent directory lacking traverse permission, giving `EACCES` instead of `ENOENT`) would not be counted as "missing" by that specific sub-check. This is not a gate-level gap, though: `checkConflictMarkers` scans **every** `manifest.Files` path with no skip set (confirmed in section 2 above) and calls `os.ReadFile`, which requires the same directory-traversal permission `os.Stat` does — the identical `EACCES` would surface there as an "unreadable" violation via `fd136ae`'s branch. This is exactly the same "gate-level guarantee, not per-check" property the self-review's own C3-M1 test documents and asserts by design (`TestCheckScaffoldIntegrity_UnreadableTrackedFile_StrictFails` asserts on "some fail naming the path", not a specific check name).
+
+**Exhaustion statement**: across three consecutive cycles (cycle-1 triage AR#1/AR#2 → `e01939e`; cycle-2 triage AR#1–#4 → `25b4f79`; cycle-3 self-review C3-M1 → `fd136ae`/`6353a07`), every `r.Status = "warn"` literal inside the six FR-9 scaffold-check functions and every silent error-swallow inside `buildScaffoldStatus` has been converted to a strict-eligible violation or an explicit `unavailable` render. This cycle's independent sweep (not simply re-reading the fix commits' own claims) found zero remaining instances of the fail-open pattern in either file. The class is exhausted for the surface this plan's Affected areas cover (`doctor.go`'s FR-9 checks, `status.go`'s FR-12 scaffold section); it is not a claim about `doctor.go`'s non-scaffold checks (CLI/hooks/pack probes), which intentionally keep `"warn"` semantics unrelated to `--strict` (see the flag help: "`--strict` only elevates these scaffold checks").
+
+## 4. AC-8/AC-9 and AC-11
+
+- **AC-8/AC-9**: `TestCheckScaffoldIntegrity_FreshInit_AllPass` and `TestCheckScaffoldIntegrity_ConvergedUpgrade_AllPass` (`internal/cli/doctor_scaffold_test.go:60-81`) are unmodified since cycle 1 (`git log --oneline -- internal/cli/doctor_scaffold_test.go` shows only additions in `25b4f79`/`fd136ae`/`6353a07`, no edits to these two functions). Cycle 3's changes only add new branches reachable by explicit `os.Chmod(path, 0000)` fixtures (`fd136ae`'s `docs/notes.md`, `6353a07`'s `AGENTS.md`) that neither fresh-init nor converged-upgrade fixtures perform — no new false-positive surface for AC-9's two green fixtures.
+- **AC-11**: confirmed the path dimension is in place and exercised — `PATH_PATTERNS`/`PATH_REASONS` (5 entries) plus `scan_path` in `scripts/check-template-purity.sh`, case G (path leak with innocuous content, fails) and case I (allowlisted path-pattern hit, passes) in `tests/test-template-purity.sh`. `run-static-verify.sh`'s `check-template-purity.sh` invocation (below) is green against current `templates/`.
+
+## 5. C3-L7(a)/(b): historical-artifact disposition confirmed
+
+`git log --oneline -- docs/reports/cross-review-triage-overlay-scaffold-v2-p5.md docs/reports/verify-2026-08-19-overlay-scaffold-v2-p5.md` shows the triage report was last written at `3836a7e` (cycle-2 triage) and this verify report's cycle-2 section at `c805cf5` — neither file has any commit after those from the cycle-3 delta (`25b4f79`, `fd136ae`, `e5329f4`, `6353a07`). The triage's `doctor.go:889-892`/`:810-813`/`status.go:487-489` pointers and this report's cycle-2 closing note about the "stale `ALLOWLIST` reference" are therefore exactly as written when each was current — both are now superseded by this Cycle 3 section (for the AR#1–#4 fix confirmation) and by `6353a07`'s C3-L2 fix (for the `ALLOWLIST` naming, which is resolved at HEAD per section 2 above). Per this task's assignment, these two report sections are not edited in place; this note records the disposition.
+
+## 6. Static analysis
+
+```
+$ ./scripts/run-static-verify.sh
+...
+==> scripts/check-template-purity.sh
+=== Checking templates for meta-repo-specific references ===
+
+PASS: no meta-repo-specific references found in templates.
+    OK
+==> scripts/check-sync.sh
+  IDENTICAL:      156
+  DRIFTED:        0
+  ROOT_ONLY:      0
+  TEMPLATE_ONLY:  11
+  KNOWN_DIFF:     5
+PASS: all files in sync.
+==> scripts/check-pipeline-sync.sh
+[ok] Canonical source valid (6 reference files all pipeline-step-consistent)
+==> scripts/check-skill-sync.sh
+[ok] check-skill-sync: 13 skill(s) in lock-step
+==> Language scope: full fallback (unclassified:.claude/hooks/pre_bash_guard.sh)
+==> Language packs selected: golang
+gofmt: ok
+0 issues.
+
+==> All verifiers passed.
+Evidence saved to: docs/evidence/verify-2026-08-19-062808.log
+```
+
+Exit code confirmed `0` via a separate run capturing `$?` directly (not just tail inspection of the log).
+
+## Cycle 3 known gaps
+
+- Behavioral test execution (including whether `TestCheckScaffoldIntegrity_UnreadableSkipPathFace_ConflictScanBranchFires` and the new `test-template-purity.sh` case I actually pass when run) is tester's responsibility for this cycle — not executed here.
+- Codex project-scoped `[[hooks.*]]` live-firing verification remains open from cycle 1 (unchanged this cycle, tracked in `docs/tech-debt/README.md`).
+- The nuance noted in section 3 (`checkManifestConsistency`'s `os.Stat`-based FR-9(e) sub-check does not itself distinguish `EACCES` from "present") is informational, not a gap: the gate-level guarantee holds via `checkConflictMarkers`'s unconditional full-manifest sweep. Recorded here so a future reader does not need to re-derive it.
