@@ -7,28 +7,27 @@
 - Reviewer: codex
 - Triager: Claude Code (main context)
 - Self-review cross-ref: yes
-- Cycle: 3/3 (cap reached)
-- Total reviewer findings: 2
-- After triage: ACTION_REQUIRED=2, WORTH_CONSIDERING=0, DISMISSED=0
+- Cycle: 4/4 (cap reached)
+- Total reviewer findings: 1
+- After triage: ACTION_REQUIRED=0, WORTH_CONSIDERING=1, DISMISSED=0
 
 ## Triage context
 
 - Active plan: docs/plans/active/2026-08-19-overlay-scaffold-v2-p5.md
-- Self-review report: docs/reports/self-review-2026-08-19-overlay-scaffold-v2-p5.md(C3: MEDIUM 1 + LOW 7 → 6353a07 で処理済み)
-- Verify report: docs/reports/verify-2026-08-19-overlay-scaffold-v2-p5.md(Cycle 3: pass、fail-open クラス枯渇と結論)
-- Cycle-2 の AR 4 件は 25b4f79(+fd136ae)で修正済みで、cycle-3 の verify/test が契約一致を確認済み。本サイクルの 2 件は新規クラス: (1) cycle-1 sync-docs が追加した drift 解消案内(b9a956f)の適用範囲漏れ、(2) Slice 4 が config.toml コメントに残したメタリポ履歴の FR-10 リーク。triager が両サイトを直接確認した。
+- Self-review report: docs/reports/self-review-2026-08-19-overlay-scaffold-v2-p5.md(C4: MEDIUM 2 + LOW 7 → 04472d9 で全処理)
+- Verify report: docs/reports/verify-2026-08-19-overlay-scaffold-v2-p5.md(Cycle 4: pass)
+- Cycle-3 の AR 2 件は de36e45 で修正済みで、cycle-4 の verify/test が契約一致を確認済み。本サイクルの所見は 1 件のみで、adopt --all の対象列挙に関する情報提示の欠落。triager が挙動の帰結を検証して分類した。
 
 ## ACTION_REQUIRED
 
 | # | Reviewer finding | Triage rationale | Affected file(s) |
 |---|-------------------|------------------|-------------------|
-| 1 | [P2] 未追跡 drift(新テンプレート core パスと既存未追跡ファイルの衝突 — manifest エントリなしで plan.Drift に載る)に対しても案内文が `ralph eject`/`ralph adopt` を指すが、両コマンドは未追跡パスを拒否する設計(AC-3)のため、ユーザは exit 3 のまま解決経路がない | 実問題(確認済み: eject.go:73 / adopt.go:211-215 が未追跡を拒否、案内は upgrade_v2.go:229 で無条件)。案内文字列に未追跡ケースの分岐を追加する(ローカルファイルを退避または内容を手動統合してから再実行、の案内)。コマンド側の未追跡対応はスコープ拡大になるため文言側で解決 | internal/cli/upgrade_v2.go:229(および同文言の他 3 サイト)、internal/upgrade/report.go |
-| 2 | [P3] `templates/base/.codex/config.toml` のコメントが「Phase 5 Slice 4」等のメタリポ開発履歴を下流に同梱 — FR-10 違反。purity ガードは一般語のため未検出 | 実問題(確認済み: 86-87 行付近)。コメントを一般化(調査結果の技術内容は保持、フェーズ/スライス/セッション参照を除去)し、root コピーと byte-identical 維持。purity ガードに "Slice " 等を足すかは過剰検出リスクがあるため任意 | templates/base/.codex/config.toml + .codex/config.toml |
 
 ## WORTH_CONSIDERING
 
 | # | Reviewer finding | Triage rationale | Affected file(s) |
 |---|-------------------|------------------|-------------------|
+| 1 | [P2] unavailable pack 配下の owner=fork パスは PlanCoreReplaceDesired が plan.Preserved に分類するため(plan.Advisories に載らない)、`adopt --all` の対象列挙から漏れ、「Nothing to adopt」と報告される | 実挙動の帰結を確認: 当該 fork は現バイナリにテンプレートが存在しない(desired 不在)ため、列挙されたとしても retired 扱いで「listed-and-skipped(not adoptable)」になるだけで、最終状態は現状と同一(誤書き込み・データ損失・stuck なし。単一パス adopt は正しく retired 拒否+メッセージを返す)。差分は情報提示のみ(「Nothing to adopt」vs「not-adoptable として一覧」)。到達条件も狭い(pack が利用不能化+その配下に ejected fork+--all 実行の重なり)。Real=debatable / Worth fixing=debatable → WORTH_CONSIDERING。修正するなら manifest の owner=fork 直接列挙+desired フィルタで表示を改善 | internal/cli/adopt.go:274-279 |
 
 ## DISMISSED
 
@@ -39,7 +38,11 @@ Categories: false-positive, already-addressed, style-preference, out-of-scope, c
 
 ## Cap note
 
-cap は cycle-2 後に操作者承認で 2→3 に引き上げ済みで、本サイクル(3/3)で再到達。ACTION_REQUIRED 2 件の扱い(cap 再引き上げ / Known gap 化して PR / 中止)は操作者判断に委ねる。
+cap は操作者承認で 2→3→4 と引き上げ済みで、本サイクル(4/4)で再到達。WORTH_CONSIDERING 1 件の扱い(cap 再引き上げ / Known gap 化して PR / 中止)は操作者判断に委ねる。
+
+## Cycle-3 record (superseded)
+
+Cycle-3 のトリアージ(AR#1: 未追跡 drift への誤誘導案内、AR#2: config.toml のメタリポ履歴同梱 — ACTION_REQUIRED=2)は de36e45 で修正され、cycle-4 の verify(6f5e56b)・test(9416f0c)で契約一致・回帰テスト green を確認済み。
 
 ## Cycle-2 record (superseded)
 
