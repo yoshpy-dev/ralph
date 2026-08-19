@@ -773,7 +773,8 @@ func checkScaffoldIntegrity(targetDir string, strict bool) []checkResult {
 // current template hash with no fork record to explain the divergence; a
 // forked path is classified into plan.Advisories instead (see
 // driftPathSet's doc comment, adopt.go), so fork content is never flagged
-// here — matching FR-9(a)'s "fork 除く".
+// here — matching FR-9(a)'s "fork 除く". plan.Drift also carries untracked
+// collisions (no manifest entry), annotated separately below.
 //
 // A pending-but-expected update (unmodified core file, template changed
 // upstream — plan.Ops OpUpdate) is not a violation: disk still matches its
@@ -787,13 +788,28 @@ func checkScaffoldCoreHashes(plan upgrade.ReplacePlan, strict bool) checkResult 
 		return r
 	}
 	paths := make([]string, 0, len(plan.Drift))
+	hasUntracked := false
 	for _, d := range plan.Drift {
+		// plan.Drift can include genuinely untracked paths (no manifest
+		// entry — classifyUntracked's core branch); eject/adopt reject
+		// those, so the guidance must distinguish them the same way the
+		// upgrade-side writeDriftGuidanceV2 does (C4-M1, self-review
+		// cycle 4, extending AR#1, cycle 3).
+		if d.RecordedHash == "" {
+			hasUntracked = true
+			paths = append(paths, d.Path+" (untracked)")
+			continue
+		}
 		paths = append(paths, d.Path)
 	}
 	sort.Strings(paths)
-	r.Detail = fmt.Sprintf(
+	detail := fmt.Sprintf(
 		"%d core path(s) diverge from both the recorded and current template hash with no fork record (unresolved drift): %s — resolve with `ralph eject` (keep the change) or `ralph adopt` (discard it)",
 		len(paths), strings.Join(paths, ", "))
+	if hasUntracked {
+		detail += "; paths marked (untracked) have no manifest entry — eject/adopt reject them, move the local file aside (or merge manually) and re-run `ralph upgrade` instead"
+	}
+	r.Detail = detail
 	return r
 }
 

@@ -5,7 +5,7 @@
 # Cases:
 #   A. Real templates/ tree passes (AC-11 "green on current tree")
 #   B. Fixture with an injected yoshpy-dev reference fails, path in output
-#   C. ALLOWLIST is empty (no deferred leaks) and the suppression mechanism
+#   C. The allowlist arrays are empty (no deferred leaks) and the suppression
 #      itself still works against an injected fixture
 #   D. Fixture with an unallowlisted occurrence of a leak pattern fails
 #   E. Fixture with an injected dated docs/reports/<date>-<slug> path fails
@@ -19,6 +19,8 @@
 #      docs/reports/cross-review-triage-overlay-scaffold-v2-p5.md)
 #      regression guard: content scanning alone cannot see a maintainer-only
 #      surface shipped with wholly ordinary text.
+#   I. Patched-copy fixture proving an allowlist entry suppresses a
+#      PATH_PATTERNS hit too (all three dimensions share is_allowlisted)
 
 set -eu
 
@@ -91,10 +93,10 @@ trap cleanup EXIT
 # case H — self-review C3-L6, cycle 3).
 # Must use the relative default ("templates"), not an absolute path: the
 # script always cd's to its own REPO_ROOT before resolving SCAN_ROOT, and
-# ALLOWLIST entries (empty today, but exact-path-scoped whenever one is
-# added — see the script's own ALLOWLIST comment) are written as
+# Allowlist entries (empty today, but exact-path-scoped whenever one is
+# added — see the script's own allowlist-array comment) are written as
 # repo-relative paths — an absolute SCAN_ROOT would make grep print
-# absolute hit paths that never match an ALLOWLIST entry, producing false
+# absolute hit paths that never match an allowlist entry, producing false
 # failures the moment a future entry is added.
 run_case "A. real templates/ tree (current repo state)" 0 "templates"
 

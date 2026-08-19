@@ -742,7 +742,7 @@ func sortedDriftV2(entries []upgrade.DriftEntry) []upgrade.DriftEntry {
 // writeDriftGuidanceV2 prints the sorted drift list (annotating untracked
 // entries) followed by the resolution guidance. Single shared body for the
 // three stderr sites (real-run error path, no-op tail, --dry-run preview) so
-// the wording cannot diverge (resolves tech-debt "drift 案内文言の重複"; the
+// the wording cannot diverge (resolves the tech-debt register's C2-L4 drift-guidance duplication item; the
 // markdown report keeps its own formatting in internal/upgrade/report.go).
 //
 // Untracked drift (RecordedHash == "": a new template core path colliding

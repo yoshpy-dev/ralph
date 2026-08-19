@@ -84,8 +84,9 @@ approval_policy = "never"
 # form above — no adapter/shim is needed regardless of any difference
 # between Codex's and Claude Code's PostToolUse payload shape. (Live
 # verification of Codex's exact payload shape has not been confirmed:
-# project-scoped [[hooks.*]] entries do not fire in an untrusted checkout,
-# and Codex's project hook trust gate needs the interactive `codex trust`
+# project-scoped [[hooks.*]] entries did not fire in an untrusted scratch
+# checkout even with `--dangerously-bypass-hook-trust`, likely because
+# Codex's project hook trust gate needs the interactive `codex trust`
 # grant recorded in `~/.codex/config.toml`'s project trust table, which has
 # no scriptable equivalent in codex-cli 0.147.0. The dispatcher's
 # stdin-passthrough design makes that gap immaterial to correctness here.)

@@ -19,9 +19,9 @@ set -euo pipefail
 #     scanning alone cannot see this (AR#4, cycle 2,
 #     docs/reports/cross-review-triage-overlay-scaffold-v2-p5.md).
 # A hit in any dimension is reported unless the ALLOWLIST_PATHS/ALLOWLIST_PATTERNS parallel arrays list
-# that exact (path, pattern) pair. ALLOWLIST is empty today (every leak
+# that exact (path, pattern) pair. The allowlist arrays are empty today (every leak
 # found when this guard was introduced was fixed, not deferred — see
-# ALLOWLIST's own comment below); the mechanism exists for a future
+# the allowlist arrays' own comment below); the mechanism exists for a future
 # genuinely intentional occurrence, with a reason recorded at the entry.
 #
 # Exit code: 0 if clean (after allowlisting), 1 if any unallowlisted hit
