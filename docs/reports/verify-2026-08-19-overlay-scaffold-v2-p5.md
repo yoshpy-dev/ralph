@@ -319,3 +319,99 @@ Exit code confirmed `0` via a separate run capturing `$?` directly (not just tai
 - Behavioral test execution (including whether `TestCheckScaffoldIntegrity_UnreadableSkipPathFace_ConflictScanBranchFires` and the new `test-template-purity.sh` case I actually pass when run) is tester's responsibility for this cycle — not executed here.
 - Codex project-scoped `[[hooks.*]]` live-firing verification remains open from cycle 1 (unchanged this cycle, tracked in `docs/tech-debt/README.md`).
 - The nuance noted in section 3 (`checkManifestConsistency`'s `os.Stat`-based FR-9(e) sub-check does not itself distinguish `EACCES` from "present") is informational, not a gap: the gate-level guarantee holds via `checkConflictMarkers`'s unconditional full-manifest sweep. Recorded here so a future reader does not need to re-derive it.
+
+# Cycle 4
+
+- Date: 2026-08-19
+- Cycle: 4/4 (cap raised 2→3→4 by the operator; this is the final cycle under the current cap)
+- Scope: `git diff 71236d8..HEAD` — `aba2eda`/`22f6212`/`ea00dcd` (cycle-3 test/sync-docs/insight artifacts), `836162b` (cycle-3 triage: 2 AR), `de36e45` (AR#1 untracked-drift guidance via `writeDriftGuidanceV2` + `report.go` sentence + 2 tests; AR#2 codex config comment generalization; C2-L4 tech-debt resolution), `9df79d9` (self-review cycle-4: 2 MEDIUM + 7 LOW), `04472d9` (C4-M1/M2/L1–L7 fixes)
+- Dimension: spec compliance + static analysis. No behavioral test execution (tester's job).
+- Verdict: **pass**
+
+## 1. Cycle-3 AR fixes vs. the triage contract
+
+`docs/reports/cross-review-triage-overlay-scaffold-v2-p5.md`'s cycle-3 table names two ACTION_REQUIRED items. Checked `de36e45` against each row's triage rationale, not just its own commit message:
+
+| # | Triage rationale (what the fix must do) | Verified at HEAD |
+|---|---|---|
+| AR#1 | Add an untracked-drift branch to the guidance so `ralph eject`/`ralph adopt` circularity (both reject untracked paths per AC-3) does not apply to `internal/cli/upgrade_v2.go`'s three stderr sites plus `internal/upgrade/report.go` | `writeDriftGuidanceV2` (`upgrade_v2.go:739`) is now the single body called from all three sites (`runUpgradeV2`'s error path, `finishNoOpUpgradeV2`, `renderUpgradeV2Preview`) — confirmed by grep: zero remaining inline `"\nUnresolved drift ("` literals outside the helper. It branches on `d.RecordedHash == ""` (the exact discriminator `classifyUntracked` uses, `internal/upgrade/replaceplan.go`), annotates `"(untracked)"`, and appends a manual-resolution sentence only when `hasUntracked`. `report.go`'s `renderDriftSection` carries the equivalent sentence in its own markdown form (deliberately not sharing the helper — cross-package, documented in the helper's doc comment). `TestRunUpgradeV2_UntrackedCoreDrift_GuidanceDistinguishesUntracked` constructs the fixture the triage rationale describes (delete the manifest entry, write divergent content) and asserts both the annotation and the manual-resolution sentence; the paired tracked-drift test asserts the annotation is absent there. |
+| AR#2 | Generalize `templates/base/.codex/config.toml`'s comment to drop Phase/Slice/session references (FR-10), keeping both copies byte-identical | `cmp .claude/../.codex/config.toml templates/base/.codex/config.toml` → identical (re-ran below). `grep -niE "phase 5\|slice [0-9]\|this session" .codex/config.toml templates/base/.codex/config.toml` → no hit in either. The self-review's C4-L7 finding (the rewrite over-hardened a hedge and dropped the `--dangerously-bypass-hook-trust` datum) was itself fixed in `04472d9`; re-checked below that the restored wording still carries no phase/slice reference. |
+
+Both fixes match their triage rationale. **C4-M1 extends AR#1's distinction one surface further** than the triage table scoped it to: `internal/cli/doctor.go`'s `checkScaffoldCoreHashes` (FR-9(a)) prints the same eject/adopt guidance from `plan.Drift` but was not one of the three stderr sites or the report the triage named — it is a fourth surface added by this same PR (Slice 2) that the self-review caught independently. Read `04472d9`'s diff to `doctor.go`: it reuses the identical `d.RecordedHash == ""` test, appends `"(untracked)"` to the path, and appends a manual-resolution clause conditionally — the same mechanism as `writeDriftGuidanceV2`, applied at the fourth site. `TestCheckScaffoldCoreHashes_*` (existing tests, unchanged) still pass on the tracked-drift path since the new branch is additive.
+
+## 2. C4-M2: no meta-repo/cross-review-artifact citations in emitted strings
+
+Swept `internal/upgrade/report.go` and all of `internal/cli` for `docs/reports`, `AR#`, and `cross-review` occurrences:
+
+```
+$ grep -rn "docs/reports\|AR#\|cross-review" internal/upgrade internal/cli --include="*.go" | grep -v "_test.go"
+```
+
+Every hit across both packages (`report.go`, `upgrade_v2.go`, `doctor.go`, `status.go`, `migrate.go`, `org.go`, `insights.go`, `init.go`, `language_pack.go`) is a `//`-comment line, not inside a string literal passed to `fmt.Sprintf`/`writef`/`WriteString`/`Fprintf`/a `cobra.Command.Short`/`Long` field. `report.go:125`'s hit is specifically the C4-M2 fix — the citation now sits in the comment immediately above the `b.WriteString(...)` call (confirmed in `04472d9`'s diff), and the emitted sentence itself ends `"...re-run \`ralph upgrade\` instead.\n\n"` with no parenthetical. `org.go`/`insights.go`'s `"docs/reports/"` mentions in `Short`/`Long`/flag-help strings are generic descriptions of the *downstream project's own* reports directory (e.g. `"writes docs/reports/org-manifest-<org_id>-<date>.md"`), not citations of a specific ralph-repo review artifact — out of scope for this finding.
+
+Also swept `templates/` for the same classes plus phase/cycle/slice markers:
+
+```
+$ ./scripts/check-template-purity.sh
+PASS: no meta-repo-specific references found in templates.
+
+$ grep -rniE "\bAR#|cycle[- ][0-9]|phase[- ]?5|slice [0-9]" templates/base
+templates/base/docs/insights/README.md:129:  --cycle 1 \
+templates/base/scripts/insights-append.sh:174:# source:skill events written by post-implementation skills also use cycle 1 for
+```
+
+Both hits are the `insights-append.sh --cycle` flag's own generic documentation (the insight-event schema field, unrelated to this plan's pipeline-cycle numbering) — legitimate downstream-facing content, not a leak. No unallowlisted meta-repo citation found in `templates/`.
+
+## 3. FR-4 guidance coherence across all surfaces (including status.go — judgment)
+
+Re-enumerated every surface that renders drift guidance at HEAD:
+
+| Surface | Distinguishes untracked drift? |
+|---|---|
+| `upgrade_v2.go` — 3 stderr sites (real-run error, no-op tail, `--dry-run` preview) | Yes, via `writeDriftGuidanceV2` (AR#1) |
+| `internal/upgrade/report.go` — `renderDriftSection` (markdown report written into the downstream project) | Yes, own markdown-formatted equivalent (AR#1 + C4-M2 citation fix) |
+| `internal/cli/doctor.go` — `checkScaffoldCoreHashes` (FR-9(a) detail string) | Yes, added in `04472d9` (C4-M1) |
+| `internal/cli/status.go` — `printScaffoldSection`'s "Unresolved drift" list (FR-12) | **No** — `s.Drift` is a flat `[]string` of paths (`buildScaffoldStatus:543-547`), rendered as `"  %s\n"` per path in text output and as a bare `Drift []string` array in `--json` (`statusScaffoldJSON`, `status.go:327`). No `(untracked)` annotation, no separate boolean field. |
+
+**Judgment: this asymmetry does not need a fix.** The reason AR#1 and C4-M1 required the annotation on the other three surfaces is that each of those surfaces *also emits resolution guidance* ("Resolve with `ralph eject <path>` ... or `ralph adopt <path>` ...") — the annotation exists to stop that specific guidance from sending an untracked-drift user in a circle, since eject/adopt both reject untracked paths by design (AC-3). `status.go`'s `printScaffoldSection` (confirmed by reading `internal/cli/status.go:563-604`) never prints that guidance sentence at all — it only lists `Unresolved drift: N path(s)` and the bare paths, full stop. There is no resolution instruction in `status` output for the annotation to correct; the circularity problem AR#1 named structurally cannot occur here. FR-12's spec wording ("パスごとの所有属性…と未解決 drift の一覧を表示する" — display per-path ownership and the unresolved-drift list) requires only the list, which is satisfied. `buildScaffoldStatus`'s own doc comment (line 539-542) already states the drift population is a superset that "can include genuinely untracked paths too," so the mixed population is documented, just not distinguished visually. Adding `(untracked)` to `status`'s list would be a reasonable follow-up for consistency with the other three surfaces, but it is cosmetic, not a correctness or AC-10/AC-12 gap — recording as a non-blocking observation, no fix required this cycle.
+
+## 4. AC-8/AC-9/AC-11 hold at HEAD; spec FR checkboxes accurate
+
+- `docs/plans/active/2026-08-19-overlay-scaffold-v2-p5.md` AC-8, AC-9, AC-11 are still checked (`[x]`) and their wording is unchanged since cycle 3; `04472d9`'s `doctor.go` changes are additive to `checkScaffoldCoreHashes`'s detail string only — no new branch alters `r.Status`, so AC-8's exit-1-on-violation and AC-9's fresh/converged-green contract are untouched.
+- `docs/specs/2026-08-17-overlay-scaffold-v2.md` FR-2/FR-3/FR-9/FR-10/FR-12 checkboxes (`[x]`, lines 60-70) still match their implementations: eject/adopt (unchanged this cycle), FR-9(a)–(e) (checkScaffoldCoreHashes still satisfies (a), the new branch only refines the detail string), FR-10 (purity guard still green, confirmed above), FR-12 (status still shows per-path ownership + drift list, confirmed above).
+
+## 5. Static analysis
+
+```
+$ ./scripts/run-static-verify.sh
+...
+==> Settings hooks JSON valid
+==> Codex hook single-source guard / inline hook detector / PR provenance policy guard
+    OK OK OK
+==> scripts/check-sync.sh
+  IDENTICAL:      156
+  DRIFTED:        0
+  ROOT_ONLY:      0
+  TEMPLATE_ONLY:  11
+  KNOWN_DIFF:     5
+PASS: all files in sync.
+==> scripts/check-pipeline-sync.sh
+[ok] Canonical source valid (6 reference files all pipeline-step-consistent)
+==> scripts/check-skill-sync.sh
+[ok] check-skill-sync: 13 skill(s) in lock-step
+==> scripts/check-template-purity.sh
+PASS: no meta-repo-specific references found in templates.
+==> Language packs selected: golang
+gofmt: ok
+0 issues.
+==> All verifiers passed.
+```
+
+Exit code confirmed `0` via a separate `./scripts/run-static-verify.sh; echo "EXIT=$?"` run (not just tail inspection of the log). `cmp .codex/config.toml templates/base/.codex/config.toml` → identical, confirmed independently of `check-sync.sh`'s own pass.
+
+## Cycle 4 known gaps
+
+- Behavioral test execution — including whether `TestRunUpgradeV2_UntrackedCoreDrift_GuidanceDistinguishesUntracked` and `checkScaffoldCoreHashes`'s new untracked branch actually pass when run — is tester's responsibility for this cycle, not executed here.
+- Codex project-scoped `[[hooks.*]]` live-firing verification remains open from cycle 1 (unchanged this cycle, tracked in `docs/tech-debt/README.md`).
+- Section 3's status.go judgment (no fix required) was reached by reading `printScaffoldSection` and `buildScaffoldStatus`, not by exercising `ralph status` against a live untracked-drift fixture — the structural argument (no resolution guidance is emitted) does not depend on runtime behavior, but a reader wanting an end-to-end confirmation would need to run the CLI, which is tester's territory.
+- This cycle did not re-derive the cycle-1/cycle-2 exhaustion statements (fail-open class closure, section 3 of the Cycle 3 section) — no code in that surface changed since cycle 3 confirmed them.
