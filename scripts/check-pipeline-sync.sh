@@ -25,7 +25,7 @@ ok "Canonical source valid"
 
 # 2. Check each referenced file (mirrors the "Where this order is
 # referenced" list in $CANONICAL itself; CLAUDE.md carries no pipeline
-# detail post overlay-scaffold-v2 — see .claude/rules/ralph/ralph-workflow.md)
+# detail of its own — see .claude/rules/ralph/ralph-workflow.md)
 REFS="
 .claude/skills/work/SKILL.md
 .claude/skills/cross-review/SKILL.md

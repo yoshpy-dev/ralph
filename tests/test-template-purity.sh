@@ -5,7 +5,8 @@
 # Cases:
 #   A. Real templates/ tree passes (AC-11 "green on current tree")
 #   B. Fixture with an injected yoshpy-dev reference fails, path in output
-#   C. Fixture with an allowlisted occurrence passes
+#   C. ALLOWLIST is empty (no deferred leaks) and the suppression mechanism
+#      itself still works against an injected fixture
 #   D. Fixture with an unallowlisted occurrence of a leak pattern fails
 
 set -eu
@@ -87,21 +88,42 @@ run_case_expect_output "B. injected yoshpy-dev reference fails, path in output" 
   "$B_DIR" "base/docs/README.md"
 rm -rf "$B_DIR"
 
-# ── C. allowlisted occurrence passes ────────────────────────────────────
-# check-template-purity.sh's own ALLOWLIST names a specific real repo path
-# (templates/base/scripts/xreview-helpers.sh) for the org-runtime-retire-loop
-# pattern. Verify that scanning the real tree still passes even though that
-# exact known-leak line is present — i.e. the allowlist entry is actually
-# suppressing it, not merely coincidentally absent.
-C_HITS="$(grep -rn --binary-files=without-match -F "org-runtime-retire-loop" \
-  "$REPO_ROOT/templates" 2>/dev/null || true)"
-if [ -z "$C_HITS" ]; then
-  echo "  FAIL  C. precondition: expected the known org-runtime-retire-loop occurrence to exist in templates/ (has it been removed? update this test's precondition)"
-  fail=$((fail + 1))
-else
-  echo "  PASS  C. allowlisted occurrence present in tree and guard still passes (covered by case A)"
+# ── C. allowlist suppression mechanism works ────────────────────────────
+# ALLOWLIST is empty by design (overlay-scaffold-v2-p5 Slice 5 fixed every
+# known leak instead of allowlisting around it) — so there is no longer a
+# real, persistent leak in templates/ to assert against. Instead: (1) assert
+# the invariant that ALLOWLIST is currently empty (proves leaks were fixed,
+# not deferred), and (2) prove the suppression mechanism itself still works
+# by running a patched copy of the script, with one ALLOWLIST entry
+# injected, against a fake repo root containing a matching fixture leak.
+# ALLOWLIST paths are REPO_ROOT-relative (see the script's own SCAN_ROOT
+# comment), and REPO_ROOT is derived from the script's own path
+# ("$(dirname "$0")/.."), so copying the script into a fake root's
+# scripts/ makes that fake root's templates/ the scan target.
+if grep -q '^ALLOWLIST=()$' "$SCRIPT"; then
+  echo "  PASS  C1. ALLOWLIST is currently empty (no known leaks deferred)"
   pass=$((pass + 1))
+else
+  echo "  FAIL  C1. expected ALLOWLIST=() in $SCRIPT — a leak is being allowlisted instead of fixed"
+  fail=$((fail + 1))
 fi
+
+C_DIR="$(mktemp -d)"
+mkdir -p "$C_DIR/scripts" "$C_DIR/templates/base/docs"
+sed 's/^ALLOWLIST=()$/ALLOWLIST=("templates\/base\/docs\/leak.md|yoshpy-dev|test fixture: injected suppression")/' \
+  "$SCRIPT" > "$C_DIR/scripts/check-template-purity.sh"
+chmod +x "$C_DIR/scripts/check-template-purity.sh"
+printf 'This project was scaffolded from yoshpy-dev/ralph.\n' > "$C_DIR/templates/base/docs/leak.md"
+
+if C_OUT="$("$C_DIR/scripts/check-template-purity.sh" 2>&1)"; then
+  echo "  PASS  C2. allowlisted occurrence passes with the leak still present"
+  pass=$((pass + 1))
+else
+  echo "  FAIL  C2. expected allowlisted occurrence to pass"
+  echo "$C_OUT" | sed 's/^/      /'
+  fail=$((fail + 1))
+fi
+rm -rf "$C_DIR"
 
 # ── D. unallowlisted occurrence of a known-leak pattern fails ──────────
 # Same pattern as the real allowlisted leak (check-sync.sh), but at a path

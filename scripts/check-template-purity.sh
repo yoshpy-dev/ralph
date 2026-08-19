@@ -57,21 +57,15 @@ REGEX_PATTERNS=(
 # ─── Allowlist ──────────────────────────────────────────────────────────
 # "path|pattern|reason" — path is repo-relative (as printed by grep from
 # REPO_ROOT), pattern is the exact FIXED_PATTERNS/REGEX_PATTERNS entry it
-# applies to. Entries marked KNOWN LEAK are pre-existing bugs reported to
-# the team but explicitly out of scope to fix in the slice that added this
-# guard (see docs/plans/active/2026-08-19-overlay-scaffold-v2-p5.md Slice 4
-# handoff report) — not intentional design.
-ALLOWLIST=(
-  "templates/base/docs/quality/quality-gates.md|check-sync.sh|KNOWN LEAK: doc cites the meta-repo-only sync checker as if shipped downstream; not fixed here, see Slice 4 report"
-  "templates/base/docs/recipes/adding-a-language-pack.md|check-sync.sh|KNOWN LEAK: doc cites the meta-repo-only sync checker as if shipped downstream; not fixed here, see Slice 4 report"
-  "templates/base/docs/quality/quality-gates.md|check-template.yml|KNOWN LEAK: doc cites the meta-repo-only CI workflow name; not fixed here, see Slice 4 report"
-  "templates/base/scripts/check-pipeline-sync.sh|overlay-scaffold|KNOWN LEAK: comment cites a meta-repo phase name as provenance; not fixed here, see Slice 4 report"
-  "templates/base/scripts/xreview-helpers.sh|org-runtime-retire-loop|KNOWN LEAK: comment cites a meta-repo plan slug as provenance; not fixed here, see Slice 4 report"
-)
+# applies to. Empty by design: every pre-existing leak found when this guard
+# was introduced (Slice 4 of the overlay-scaffold-v2-p5 plan) was fixed in
+# Slice 5 of the same plan rather than allowlisted. Add an entry here only
+# for a genuinely intentional occurrence, with a reason.
+ALLOWLIST=()
 
 is_allowlisted() {
   local path="$1" pattern="$2" entry entry_path entry_pattern
-  for entry in "${ALLOWLIST[@]}"; do
+  for entry in "${ALLOWLIST[@]+"${ALLOWLIST[@]}"}"; do
     entry_path="${entry%%|*}"
     entry_pattern="${entry#*|}"
     entry_pattern="${entry_pattern%%|*}"

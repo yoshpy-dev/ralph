@@ -17,7 +17,7 @@
 ## Overlay layout (`.ralph/`)
 
 - `.ralph/core/`: generation sources `ralph init` consumes (e.g. `AGENTS.core.md`, the managed-block content for `AGENTS.md`)
-- `.ralph/local/`: downstream extension points (`hooks/<event>.d/`, `verify.d/`, `test.d/`) that the hooks dispatcher and `scripts/run-verify.sh` execute after core processing (`hooks/<event>.d/` wiring is Claude Code today; Codex's `.codex/config.toml` still calls hook scripts directly — Phase 3 tech debt)
+- `.ralph/local/`: downstream extension points (`hooks/<event>.d/`, `verify.d/`, `test.d/`) that the hooks dispatcher and `scripts/run-verify.sh` execute after core processing (`hooks/<event>.d/` wiring runs under both Claude Code and Codex — both route through `ralph-dispatch.sh`)
 
 ## Codex control plane
 

@@ -2,6 +2,12 @@
 
 Worked example: adding a Terraform / OpenTofu pack (`packs/languages/terraform/`).
 
+This is a `ralph` CLI contributor workflow, run inside a checkout of the
+`ralph` source repository — a new pack ships to everyone only once it is
+merged upstream and embedded in a released binary. It is not something you
+do inside your own scaffolded project; use `ralph pack add <lang>` there
+instead to install a pack that already ships.
+
 1. Scaffold the pack:
 
    ```sh
@@ -19,14 +25,19 @@ Worked example: adding a Terraform / OpenTofu pack (`packs/languages/terraform/`
    cp -r packs/languages/terraform templates/packs/terraform
    ```
 
-   `scripts/check-sync.sh` enforces byte-identical mirroring.
+   Verify the mirror stayed byte-identical:
+
+   ```sh
+   diff -rq packs/languages/terraform templates/packs/terraform
+   ```
 
 4. Add `rule.md` scoped to the language's file globs. During `ralph init` and
    `ralph upgrade`, the pack renderer writes it to `.claude/rules/ralph/<lang>.md`
    only when that pack is selected. Keep the root dogfood copy
    (`.claude/rules/ralph/terraform.md`) byte-identical with
-   `packs/languages/terraform/rule.md`; `scripts/check-sync.sh` verifies this
-   mapping. Both `ralph pack add <lang>` and `ralph upgrade` run non-interactively.
+   `packs/languages/terraform/rule.md` (`diff -q .claude/rules/ralph/terraform.md
+   packs/languages/terraform/rule.md`). Both `ralph pack add <lang>` and
+   `ralph upgrade` run non-interactively.
    `ralph pack add` requires a v2-layout project (`.ralph/manifest.toml` with
    `meta.layout = "v2"`) and rejects a legacy (pre-v2) manifest fail-closed
    with zero writes, pointing the operator at `ralph upgrade` first. `ralph
@@ -56,9 +67,9 @@ Worked example: adding a Terraform / OpenTofu pack (`packs/languages/terraform/`
 6. Run the gates:
 
    ```sh
-   ./scripts/check-sync.sh        # byte-identical mirroring
-   ./scripts/check-skill-sync.sh  # skill drift (if you touched skills)
-   ./scripts/run-verify.sh        # pack actually runs end-to-end
+   diff -rq packs/languages/terraform templates/packs/terraform  # byte-identical mirroring
+   ./scripts/check-skill-sync.sh                                 # skill drift (if you touched skills)
+   ./scripts/run-verify.sh                                       # pack actually runs end-to-end
    ```
 
 7. Document any required environment or toolchain assumptions in the pack's `README.md`.
@@ -86,4 +97,4 @@ Mirror the block to both root and scaffold:
 
 - `.gitignore` ↔ `templates/base/.gitignore`
 
-Both files are checked for byte-identity by `scripts/check-sync.sh` (they appear in its `SCAN_FILES` list), so a missing mirror fails the static gate. The Terraform pack ships the canonical example (see `.gitignore:15-28`).
+Verify byte-identity manually (`diff .gitignore templates/base/.gitignore`) before committing — a missing mirror is easy to overlook. The Terraform pack ships the canonical example (see `.gitignore:15-28`).
