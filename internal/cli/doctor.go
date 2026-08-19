@@ -956,15 +956,35 @@ func checkConflictMarkers(absDir string, manifest *scaffold.Manifest, strict boo
 	sort.Strings(paths)
 
 	var offenders []string
+	var unreadable []string
 	for _, p := range paths {
 		full := filepath.Join(absDir, filepath.FromSlash(p))
 		data, err := os.ReadFile(full)
 		if err != nil {
+			if os.IsNotExist(err) {
+				// FR-9(e)'s (checkManifestConsistency) finding, not ours.
+				continue
+			}
+			// Exists but cannot be read (e.g. permission denied): the
+			// check is impossible to run for this path. Defense in depth:
+			// in practice checkScaffoldIntegrity's ownership-planning
+			// pass reads most tracked paths first and already fails
+			// strict on such an error, but any path the planner did not
+			// itself read would otherwise be silently skipped here while
+			// FR-9(e)'s os.Stat existence sweep misses it too (fail-open
+			// class; cycle-3 warn-path audit alongside AR#1/AR#2, cycle
+			// 2, docs/reports/cross-review-triage-overlay-scaffold-v2-p5.md).
+			unreadable = append(unreadable, fmt.Sprintf("%s (%v)", p, err))
 			continue
 		}
 		if conflictMarkerRe.Match(data) {
 			offenders = append(offenders, p)
 		}
+	}
+	if len(unreadable) > 0 {
+		r.Status = scaffoldViolationStatus(true, strict)
+		r.Detail = fmt.Sprintf("cannot scan tracked file(s) for conflict markers: %s", strings.Join(unreadable, "; "))
+		return r
 	}
 
 	violated := len(offenders) > 0

@@ -270,6 +270,47 @@ func TestCheckScaffoldIntegrity_ConflictMarkers_Fails(t *testing.T) {
 	}
 }
 
+// TestCheckScaffoldIntegrity_UnreadableTrackedFile_StrictFails pins the
+// gate-level guarantee for a manifest-tracked file that exists but cannot
+// be read (permission denied): SOME strict-eligible check must fail — in
+// the current flow the ownership-planning pass reads the path first and
+// fails there; the conflict-marker scan's own unreadable-file branch is
+// defense in depth behind it (cycle-3 warn-path audit alongside AR#1/AR#2,
+// cycle 2, docs/reports/cross-review-triage-overlay-scaffold-v2-p5.md).
+// Asserting at the gate level (any fail naming the path) rather than on a
+// specific check name keeps the pin valid if the internal check ordering
+// changes.
+func TestCheckScaffoldIntegrity_UnreadableTrackedFile_StrictFails(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("running as root: chmod 0000 does not make files unreadable")
+	}
+	target := initV2Project(t, gen1(), "1.0.0-test")
+
+	notesPath := filepath.Join(target, "docs", "notes.md")
+	if err := os.Chmod(notesPath, 0000); err != nil {
+		t.Fatalf("chmod docs/notes.md: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(notesPath, 0644) })
+
+	strictResults := checkScaffoldIntegrity(target, true)
+	foundFail := false
+	for _, r := range strictResults {
+		if r.Status == "fail" && strings.Contains(r.Detail, "docs/notes.md") {
+			foundFail = true
+		}
+	}
+	if !foundFail {
+		t.Errorf("strict: want at least one fail result naming docs/notes.md, got %+v", strictResults)
+	}
+
+	nonStrict := checkScaffoldIntegrity(target, false)
+	for _, r := range nonStrict {
+		if r.Status == "fail" {
+			t.Errorf("non-strict: no result may be fail, got %+v", r)
+		}
+	}
+}
+
 // TestCheckScaffoldIntegrity_ManifestTrackedFileDeleted_Fails is AC-8
 // handoff test 9: a manifest-tracked path (docs/notes.md, owner=seed) that
 // is deleted from disk must fail FR-9(e).
