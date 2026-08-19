@@ -388,6 +388,163 @@ func TestCheckScaffoldIntegrity_CorruptManifest_StrictFails(t *testing.T) {
 	}
 }
 
+// TestCheckScaffoldIntegrity_OwnershipPlanningError_StrictFails is the AR#1
+// (cycle 1, docs/reports/cross-review-triage-overlay-scaffold-v2-p5.md)
+// regression guard: when resolveOwnershipPlan itself fails (here, a
+// manifest-tracked core path replaced by a directory, so
+// PlanCoreReplaceDesired's disk read errors "is a directory"),
+// checkScaffoldIntegrity must report a strict-eligible violation naming the
+// underlying error, not the pre-fix hardcoded "warn" that let a corrupted
+// scaffold pass --strict silently.
+func TestCheckScaffoldIntegrity_OwnershipPlanningError_StrictFails(t *testing.T) {
+	target := initV2Project(t, gen1(), "1.0.0-test")
+
+	verifyPath := filepath.Join(target, "scripts", "run-verify.sh")
+	if err := os.Remove(verifyPath); err != nil {
+		t.Fatalf("removing scripts/run-verify.sh: %v", err)
+	}
+	if err := os.Mkdir(verifyPath, 0o755); err != nil {
+		t.Fatalf("replacing scripts/run-verify.sh with a directory: %v", err)
+	}
+
+	strictResults := checkScaffoldIntegrity(target, true)
+	if len(strictResults) != 1 {
+		t.Fatalf("strict: got %d results, want 1: %+v", len(strictResults), strictResults)
+	}
+	if strictResults[0].Status != "fail" {
+		t.Errorf("strict: Status = %q, want \"fail\" (Detail: %s)", strictResults[0].Status, strictResults[0].Detail)
+	}
+	if !strings.Contains(strictResults[0].Detail, "scripts/run-verify.sh") {
+		t.Errorf("Detail must name the unreadable path: %s", strictResults[0].Detail)
+	}
+
+	warnResults := checkScaffoldIntegrity(target, false)
+	if len(warnResults) != 1 {
+		t.Fatalf("non-strict: got %d results, want 1: %+v", len(warnResults), warnResults)
+	}
+	if warnResults[0].Status != "warn" {
+		t.Errorf("non-strict: Status = %q, want \"warn\" (Detail: %s)", warnResults[0].Status, warnResults[0].Detail)
+	}
+
+	// Integration pin, mirroring TestCheckScaffoldIntegrity_CorruptManifest_StrictFails.
+	binDir := filepath.Join(target, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, bin := range []string{"claude", "codex", "go"} {
+		writeStubBin(t, binDir, bin, "")
+	}
+	t.Setenv("PATH", binDir)
+	t.Setenv("RALPH_ORG_AGMSG_HOME", filepath.Join(target, "no-such-agmsg-home"))
+
+	nonStrictErr := captureStdout(t, func() error { return runDoctorFull(target, false, false) })
+	if nonStrictErr != nil {
+		t.Errorf("non-strict: err = %v, want nil (a planning error is a warning without --strict)", nonStrictErr)
+	}
+	strictErr := captureStdout(t, func() error { return runDoctorFull(target, false, true) })
+	if strictErr == nil {
+		t.Fatal("strict: err = nil, want non-nil (an ownership-planning error must fail --strict)")
+	}
+}
+
+// TestCheckScaffoldIntegrity_SettingsSnapshotDeleted_StrictFails is the AR#2
+// (cycle 1, docs/reports/cross-review-triage-overlay-scaffold-v2-p5.md)
+// regression guard: deleting the manifest-tracked settings snapshot
+// (.ralph/core/settings.ralph.json) while leaving its manifest entry in
+// place must fail FR-9(e) under --strict. Before the fix, the snapshot was
+// excluded from checkManifestConsistency's existence sweep via the full
+// v2SkipPaths() set, and checkSettingsOwnedKeys treats a missing snapshot as
+// a legitimate "{}" oldOwned fallback rather than a violation — so deleting
+// the snapshot passed both checks and --strict exited 0 on a manifest/disk
+// mismatch.
+func TestCheckScaffoldIntegrity_SettingsSnapshotDeleted_StrictFails(t *testing.T) {
+	target := initV2Project(t, gen1(), "1.0.0-test")
+
+	snapshotPath := filepath.Join(target, ".ralph", "core", "settings.ralph.json")
+	if _, err := os.Stat(snapshotPath); err != nil {
+		t.Fatalf("test setup: settings snapshot not found at %s: %v", snapshotPath, err)
+	}
+	if err := os.Remove(snapshotPath); err != nil {
+		t.Fatalf("removing settings snapshot: %v", err)
+	}
+
+	results := checkScaffoldIntegrity(target, true)
+	r := findScaffoldResult(t, results, "Scaffold: manifest/disk consistency")
+	if r.Status != "fail" {
+		t.Errorf("Status = %q, want \"fail\" (Detail: %s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, ".ralph/core/settings.ralph.json") {
+		t.Errorf("Detail must name the deleted snapshot path: %s", r.Detail)
+	}
+
+	// checkSettingsOwnedKeys's "{}" fallback for a missing snapshot means it
+	// must NOT independently flag the deletion — confirming FR-9(e) is the
+	// check actually carrying this regression, not FR-9(c) by accident.
+	ownedKeys := findScaffoldResult(t, results, "Scaffold: settings.json owned keys")
+	if ownedKeys.Status != "pass" {
+		t.Errorf("Scaffold: settings.json owned keys: Status = %q, want \"pass\" (a missing snapshot falls back to \"{}\" oldOwned, not a violation) (Detail: %s)", ownedKeys.Status, ownedKeys.Detail)
+	}
+
+	nonStrictResults := checkScaffoldIntegrity(target, false)
+	r = findScaffoldResult(t, nonStrictResults, "Scaffold: manifest/disk consistency")
+	if r.Status != "warn" {
+		t.Errorf("non-strict: Status = %q, want \"warn\" (Detail: %s)", r.Status, r.Detail)
+	}
+}
+
+// TestCheckScaffoldIntegrity_SettingsJSONDeleted_OwnedKeysCatchesIt is the
+// exception-face audit behind AR#2's narrowed checkManifestConsistency skip
+// set: settings.json (v2SettingsPath) stays excluded from FR-9(e)'s
+// existence sweep because FR-9(c) (checkSettingsOwnedKeys) already fails
+// when the file is missing entirely — readFinalDiskContent returns nil for
+// an absent file, and MergeOwnedSettings treats that nil as "{}", which
+// diverges from a non-empty owned template (env/permissions/hooks).
+func TestCheckScaffoldIntegrity_SettingsJSONDeleted_OwnedKeysCatchesIt(t *testing.T) {
+	target := initV2Project(t, gen1(), "1.0.0-test")
+
+	settingsPath := filepath.Join(target, ".claude", "settings.json")
+	if err := os.Remove(settingsPath); err != nil {
+		t.Fatalf("removing settings.json: %v", err)
+	}
+
+	results := checkScaffoldIntegrity(target, true)
+	r := findScaffoldResult(t, results, "Scaffold: settings.json owned keys")
+	if r.Status != "fail" {
+		t.Errorf("Status = %q, want \"fail\" (Detail: %s)", r.Status, r.Detail)
+	}
+
+	consistency := findScaffoldResult(t, results, "Scaffold: manifest/disk consistency")
+	if consistency.Status != "pass" {
+		t.Errorf("Scaffold: manifest/disk consistency: Status = %q, want \"pass\" (settings.json stays excluded from FR-9(e); FR-9(c) already caught it) (Detail: %s)", consistency.Status, consistency.Detail)
+	}
+}
+
+// TestCheckScaffoldIntegrity_AgentsMdDeleted_ManagedBlocksCatchesIt is the
+// AGENTS.md counterpart of the settings.json audit above: a missing
+// managed-block surface stays excluded from FR-9(e) because FR-9(b)
+// (checkManagedBlocks) already fails on it — updateOneBlockV2 returns a
+// zero-value, ok=false outcome for a missing surface, which
+// checkManagedBlocks treats as an offender.
+func TestCheckScaffoldIntegrity_AgentsMdDeleted_ManagedBlocksCatchesIt(t *testing.T) {
+	target := initV2Project(t, gen1(), "1.0.0-test")
+
+	agentsPath := filepath.Join(target, "AGENTS.md")
+	if err := os.Remove(agentsPath); err != nil {
+		t.Fatalf("removing AGENTS.md: %v", err)
+	}
+
+	results := checkScaffoldIntegrity(target, true)
+	r := findScaffoldResult(t, results, "Scaffold: managed blocks")
+	if r.Status != "fail" {
+		t.Errorf("Status = %q, want \"fail\" (Detail: %s)", r.Status, r.Detail)
+	}
+
+	consistency := findScaffoldResult(t, results, "Scaffold: manifest/disk consistency")
+	if consistency.Status != "pass" {
+		t.Errorf("Scaffold: manifest/disk consistency: Status = %q, want \"pass\" (AGENTS.md stays excluded from FR-9(e); FR-9(b) already caught it) (Detail: %s)", consistency.Status, consistency.Detail)
+	}
+}
+
 // captureStdout runs fn with os.Stdout redirected to a pipe (discarding the
 // captured output) and returns fn's error, mirroring doctor_org_test.go's
 // stdout-capture pattern for tests that only care about the returned error.

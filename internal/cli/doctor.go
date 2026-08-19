@@ -721,9 +721,26 @@ func checkScaffoldIntegrity(targetDir string, strict bool) []checkResult {
 	// those commands. Warnings buildDesiredStateV2 may emit (e.g. an
 	// unavailable pack) are discarded here — doctor's own checks below
 	// report their own findings at the right granularity instead.
+	// A planning-error here (e.g. a tracked core path replaced by a
+	// directory, so PlanCoreReplaceDesired's disk read fails with "is a
+	// directory") is a strict-eligible violation in its own right, reported
+	// via scaffoldViolationStatus like every other FR-9 sub-check below —
+	// the scaffold cannot even be classified, which is the worst case FR-9
+	// is meant to catch, not a reason to fail open. This mirrors the
+	// corrupt-manifest handling above (M2). Contrast with status.go's own
+	// resolveOwnershipPlan call (buildScaffoldStatus, M7): that caller
+	// degrades gracefully and keeps rendering the rest of `ralph status`
+	// because status is a best-effort report, whereas `doctor --strict` is a
+	// gate — the same failure means two different things depending on which
+	// command hit it (AR#1, cycle 1,
+	// docs/reports/cross-review-triage-overlay-scaffold-v2-p5.md).
 	desired, plan, err := resolveOwnershipPlan(absDir, manifest, io.Discard)
 	if err != nil {
-		return []checkResult{{Name: "Scaffold integrity", Status: "warn", Detail: fmt.Sprintf("computing ownership plan: %v", err)}}
+		return []checkResult{{
+			Name:   "Scaffold integrity",
+			Status: scaffoldViolationStatus(true, strict),
+			Detail: fmt.Sprintf("computing ownership plan: %v", err),
+		}}
 	}
 
 	return []checkResult{
@@ -927,12 +944,33 @@ func checkConflictMarkers(absDir string, manifest *scaffold.Manifest, strict boo
 }
 
 // checkManifestConsistency is FR-9(e): every manifest-tracked path must
-// still exist on disk. v2 exception faces (settings.json, its merge
-// snapshot, and the two managed-block surfaces) are excluded here — their
-// presence/health is FR-9(b)/(c)'s job (checkManagedBlocks,
-// checkSettingsOwnedKeys), which already fail if one of those files is
-// missing or unhealthy; re-checking bare existence for them here would only
-// duplicate those findings under a different check name.
+// still exist on disk. Two of v2SkipPaths()'s four exception faces are
+// excluded here — settings.json (v2SettingsPath) and the two managed-block
+// surfaces (AGENTS.md, .gitignore) — because their presence/health is
+// FR-9(b)/(c)'s job (checkManagedBlocks, checkSettingsOwnedKeys), and both
+// of those checks are verified to already fail on a missing surface:
+// checkManagedBlocks flags it because updateOneBlockV2 returns a zero-value,
+// ok=false outcome for a missing block surface, which checkManagedBlocks
+// treats as an offender; checkSettingsOwnedKeys flags it because
+// readFinalDiskContent returns nil for a missing settings.json,
+// MergeOwnedSettings treats that nil/absent current as "{}", and merging
+// "{}" against a non-empty owned template (env/permissions/hooks) reports
+// Changed=true. Re-checking bare existence for either of these two faces
+// here would only duplicate those findings under a different check name.
+//
+// The settings snapshot (.ralph/core/settings.ralph.json,
+// upgrade.SettingsSnapshotRelPath) is a v2SkipPaths() member too, but it is
+// deliberately NOT excluded here: checkSettingsOwnedKeys's oldOwned falls
+// back to "{}" when upgrade.LoadSettingsSnapshot reports found=false (the
+// same non-destructive fallback runUpgradeV2 itself uses for a
+// pre-Phase-3-init project that never had a snapshot) — that fallback
+// treats a missing snapshot as legitimate "no prior owned state", not a
+// violation, so a snapshot deleted out from under a manifest that still
+// tracks it passes checkSettingsOwnedKeys silently. Nothing else checks the
+// snapshot's existence, so it stays in this sweep (AR#2, cycle 1,
+// docs/reports/cross-review-triage-overlay-scaffold-v2-p5.md). Do not widen
+// this back to the full v2SkipPaths() set without re-verifying that
+// whichever face is added is still guaranteed by its own dedicated check.
 //
 // Existence-only (not a hash comparison) is deliberate: a fork's disk
 // content is expected to diverge from its recorded DiskHash over time as
@@ -941,7 +979,10 @@ func checkConflictMarkers(absDir string, manifest *scaffold.Manifest, strict boo
 // is.
 func checkManifestConsistency(absDir string, manifest *scaffold.Manifest, strict bool) checkResult {
 	r := checkResult{Name: "Scaffold: manifest/disk consistency"}
-	skip := v2SkipPaths()
+	skip := map[string]bool{v2SettingsPath: true}
+	for _, bs := range blockSurfaces {
+		skip[bs.path] = true
+	}
 
 	paths := make([]string, 0, len(manifest.Files))
 	for p := range manifest.Files {
