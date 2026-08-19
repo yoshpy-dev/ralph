@@ -450,3 +450,157 @@ new blind spot.
 
 Tests pass. Cycle 3/3 (pipeline cycle cap reached). Proceed to
 `/sync-docs`.
+
+## Cycle 4
+
+- Date: 2026-08-19
+- Tester: `tester` subagent (Claude Code, Sonnet 5)
+- Scope: behavioral tests via `./scripts/run-test.sh` (default `changed`
+  scope), on `feat/overlay-scaffold-v2-p5`, base `main` `1025d13`, HEAD
+  `6f5e56b`. Pipeline cycle 4/4 (cap raised 3→4 for the cycle-3 cross-review
+  ACTION_REQUIRED findings; see `docs/reports/cross-review-triage-overlay-scaffold-v2-p5.md`).
+  No static analysis — that is `/verify`'s job, already PASS in
+  `docs/reports/verify-2026-08-19-overlay-scaffold-v2-p5.md` (cycle 4
+  section).
+- Evidence: `docs/evidence/verify-2026-08-19-071853.log` (raw
+  `run-test.sh` output from the confirmed exit-0 run below; filename keeps
+  the wrapper's own `verify-` prefix regardless of which script invoked it)
+
+### Verdict: PASS
+
+Cycle-4 delta: `de36e45` (untracked-drift guidance unified into
+`writeDriftGuidanceV2`, resolving cycle-3 AR#1 + the C2-L4 tech-debt row;
+codex config comment history-scrubbing for AR#2, +2 new Go tests) and
+`04472d9` (self-review cycle-4 fixes C4-M1/M2 + C4-L1..L7: doctor's
+`checkScaffoldCoreHashes` gained the same untracked-drift annotation as
+`writeDriftGuidanceV2`, plus doc/comment/README wording fixes — no new
+tests), plus report/insight-event commits.
+
+617/617 shell tests across 27 files (byte-identical count to cycle 3 — no
+shell suite gained or lost a case this cycle), zero `FAIL` lines anywhere in
+the run, `./scripts/run-test.sh` exit code `0`. Fresh `go test ./...
+-count=1 -cover` (no build cache): 8/8 Go packages `ok`, zero failures.
+Both named regression tests, the flake watchlist, and the two named shell
+suites were individually re-run 3x in isolation with zero flakes. No test
+weakening found — the negative assertion added to
+`TestRunUpgradeV2_UnresolvedDrift_ExitSentinelAndStderr` (tracked drift must
+NOT carry the `(untracked)` annotation) strengthens coverage of the new
+branch rather than loosening any existing check.
+
+### Test execution
+
+| Suite / Command | Files/Packages | Passed | Failed |
+| --- | --- | --- | --- |
+| `./scripts/run-test.sh` (default `changed` scope) | 27 shell test files + golang pack | 617 shell + 8/8 Go pkgs | 0 |
+| `go test ./... -count=1 -cover` (fresh, no cache) | 8 Go packages with tests | 8 | 0 |
+
+`./scripts/run-test.sh` selected `golang` as the sole changed-language pack
+(`==> Language scope: full fallback
+(unclassified:.claude/hooks/pre_bash_guard.sh)` → `==> Language packs
+selected: golang`), same full-fallback shell-scope behavior as cycle 3 — the
+wrapper still ran the complete 27-file shell suite (`grep -c '^==> tests/'`
+= 27, `grep -c 'FAIL: \[1-9\]'` = 0 anywhere in the log) ahead of the
+language-scoped Go dispatch.
+
+Per-suite shell total: summed each file's own `PASS: N` (or `PASS: N / N`)
+line — 44+26+11+13+23+8+7+13+11+22+39+29+1+4+15+26+29+12+6+64+22+10+47+36+11+59+29
+= **617**, matching the cycle-3 baseline exactly (`docs/reports/test-2026-08-19-overlay-scaffold-v2-p5.md`,
+Cycle 3 section). No shell file's count moved — expected, since the
+cycle-4 delta touched no shell test files' assertion counts (`04472d9`
+touched `tests/test-template-purity.sh` but only its comment header, per
+cycle-3's C4-L4 note already reflecting case I in the count).
+
+### Go coverage vs. cycle-3 baseline
+
+| Package | Cycle 3 | Cycle 4 | Delta |
+| --- | --- | --- | --- |
+| `internal/cli` | 80.7% | 80.6% | -0.1pp |
+| `internal/config` | 94.2% | 94.2% | — |
+| `internal/insights` | 86.1% | 86.1% | — |
+| `internal/org` | 89.1% | 89.1% | — |
+| `internal/org/driver` | 92.0% | 92.0% | — |
+| `internal/org/protocol` | 97.9% | 97.9% | — |
+| `internal/scaffold` | 75.7% | 75.7% | — |
+| `internal/upgrade` | 91.2% | 91.2% | — |
+
+`internal/cli` is the only package touched by the cycle-4 delta, and it's
+the only one that moved. `de36e45` added 2 new tests
+(`TestRunUpgradeV2_UntrackedCoreDrift_GuidanceDistinguishesUntracked` +
+extending `TestRunUpgradeV2_UnresolvedDrift_ExitSentinelAndStderr` with two
+negative assertions) covering the new `writeDriftGuidanceV2` helper's both
+branches. `04472d9`'s C4-M1 fix then added an equivalent untracked-drift
+branch to `checkScaffoldCoreHashes` in `internal/cli/doctor.go` (the
+`hasUntracked` flag + its `"(untracked)"` / manual-resolution-clause
+formatting, mirroring `writeDriftGuidanceV2`) **without a corresponding new
+test** — confirmed via `grep -rn "checkScaffoldCoreHashes" internal/cli/*_test.go`
+returning nothing. That untested branch is the net -0.1pp: the new
+`de36e45` tests' gain is smaller than the new untested `doctor.go` branch's
+drag, since `checkScaffoldCoreHashes` is a much smaller function than
+`upgrade_v2.go`'s call sites. Flagged below as a coverage gap; not a
+blocker (defensive message-formatting only, no control-flow risk — the
+existing `TestCheckScaffoldIntegrity_*` suite already exercises
+`checkScaffoldCoreHashes`'s core drift-detection path, just not this one
+message-formatting branch).
+
+### Named regression tests (individually re-run 3x in isolation)
+
+| Test | Command | Result (3/3) |
+| --- | --- | --- |
+| `TestRunUpgradeV2_UntrackedCoreDrift_GuidanceDistinguishesUntracked` | `go test ./internal/cli/ -run '^TestRunUpgradeV2_UntrackedCoreDrift_GuidanceDistinguishesUntracked$' -count=3 -v` | PASS x3 |
+| `TestRunUpgradeV2_UnresolvedDrift_ExitSentinelAndStderr` (extended with tracked-drift negative assertions: must carry `ralph eject` guidance, must NOT carry `(untracked)`) | `go test ./internal/cli/ -run '^TestRunUpgradeV2_UnresolvedDrift_ExitSentinelAndStderr$' -count=3 -v` | PASS x3 |
+| `tests/test-template-purity.sh` (10 cases) | `sh tests/test-template-purity.sh` x3 | PASS x3, exit 0 each, 10/10 green every run |
+| `tests/test-hook-wiring.sh` | `sh tests/test-hook-wiring.sh` x3 | PASS x3, exit 0 each, 22/22 green every run |
+
+**No test asserts the OLD single-sentence guidance form that `de36e45`
+replaced.** Confirmed by grepping `internal/cli/upgrade_v2_test.go` for
+`ralph eject`/`ralph adopt`/`Resolve with`: the only hit is the single
+`strings.Contains(errOut.String(), "ralph eject")` assertion at line 452
+(inside `TestRunUpgradeV2_UnresolvedDrift_ExitSentinelAndStderr`), which is
+compatible with both the pre-`de36e45` single-call-site form and the new
+`writeDriftGuidanceV2`-unified form. No test pins the exhaustive stderr
+content in a way that would break on (or mask) the new untracked-annotation
+sentence.
+
+### Known-flaky watchlist (re-checked 3x isolated)
+
+| Test | Command | Result (3/3) |
+| --- | --- | --- |
+| `TestRunDoctorOpts_ProbeModelsFalse_NoSubprocess` | `go test ./internal/cli/ -run '^TestRunDoctorOpts_ProbeModelsFalse_NoSubprocess$' -count=3 -v` | PASS x3, ~0.56-0.58s each |
+| `TestRunWatcher_TimeoutIndependentOfSmallInterval` | `go test ./internal/org/ -run '^TestRunWatcher_TimeoutIndependentOfSmallInterval$' -count=3 -v` | PASS x3, ~1.18-1.20s each |
+
+Both re-confirmed stable in isolation again this cycle, consistent with
+every prior cycle's re-check (tester agent memory,
+[[flaky_test_notes]]). Neither is in this cycle's delta.
+
+### Coverage gaps / blind spots
+
+New this cycle: `internal/cli/doctor.go`'s `checkScaffoldCoreHashes`
+untracked-drift branch (added by `04472d9`, C4-M1) has no dedicated test —
+see the coverage table note above. Recommend a follow-up test
+(`TestCheckScaffoldIntegrity_UntrackedCoreDrift_...` in the style of the
+existing `checkScaffoldIntegrity` suite) exercising `ralph doctor --strict`
+against an untracked-drift fixture and asserting the `"(untracked)"` +
+manual-resolution-clause detail text, mirroring
+`TestRunUpgradeV2_UntrackedCoreDrift_GuidanceDistinguishesUntracked`'s
+upgrade-side coverage. Low severity (message formatting only) and the cap
+is reached this cycle, so this is recorded as a known gap rather than a
+blocker — worth a tech-debt row if not picked up before merge.
+
+No other new gap. `internal/cli` (80.6%) remains the largest package with
+room below other packages' averages, consistent with every prior cycle's
+note that CLI command wiring is inherently harder to drive to high coverage
+than pure logic packages.
+
+### What was NOT run (out of scope for `/test`)
+
+- Static analysis — `/verify`'s job, already PASS in
+  `docs/reports/verify-2026-08-19-overlay-scaffold-v2-p5.md` (cycle 4
+  section).
+- Documentation drift checks — `/sync-docs`'s job.
+- Cross-model second opinion — `/cross-review`'s job.
+
+### Recommendation
+
+Tests pass. Cycle 4/4 (pipeline cycle cap reached). One known gap recorded
+(untested `checkScaffoldCoreHashes` untracked-drift branch, low severity,
+not blocking). Proceed to `/sync-docs`.
