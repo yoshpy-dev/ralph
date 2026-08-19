@@ -183,3 +183,131 @@ cleanly in isolation, consistent with every prior cycle's re-check.
 ## Recommendation
 
 Tests pass. Proceed to `/sync-docs`.
+
+## Cycle 2
+
+- Date: 2026-08-19
+- Tester: `tester` subagent (Claude Code, Sonnet 5)
+- Scope: pipeline cycle 2/2, re-running behavioral tests after the cycle-1
+  fix-and-revalidate delta on top of the cycle-1-passing base `38b7c63`
+  (614 shell + 8/8 Go, `internal/cli` 79.9%): `b9a956f` (drift guidance
+  strings), `e01939e` (AR#1/AR#2 doctor `--strict` fixes, +4 Go tests),
+  `e39d436` (C2 fixes: parallel-array allowlist + shell test case C3, strict
+  help text, skip-set derivation), `1f50407` (stale allowlist name in
+  purity-guard failure message), plus report-only commits (`2bc988f`,
+  `c805cf5`, `348801c`, `7286251`, `74d28ef`). HEAD at test time:
+  `1f50407`.
+- Evidence: `docs/evidence/verify-2026-08-19-045214.log` (raw
+  `run-test.sh` output, exit 0)
+
+### Verdict: PASS
+
+615/615 shell tests across the same 27 files (+1 from cycle 1's 614, exactly
+matching the expected delta: `tests/test-template-purity.sh` grew from 7 to
+8 with the new case C3, `e39d436`'s "allowlist entry is exact-path scoped"
+regression test — every other file's per-file count is byte-identical to
+cycle 1), 8/8 Go packages `ok` (fresh `go test ./... -count=1 -cover`,
+no build cache), zero failures anywhere. All 6 named
+`TestCheckScaffoldIntegrity_*` regression tests plus both flake-watchlist
+tests plus both shell fixture suites individually re-run 3x in isolation
+with zero flakes. No test weakening found.
+
+`./scripts/run-test.sh` again selected `golang` as the sole changed-language
+Go pack via the same full-fallback shell classification as cycle 1
+(`==> Language scope: full fallback (unclassified:.claude/hooks/pre_bash_guard.sh)`),
+but ran the complete 27-file shell suite regardless (27 `==> tests/` blocks,
+zero non-zero `FAIL:` counts anywhere in the log), so shell scope was
+effectively full.
+
+### Test execution
+
+| Suite / Command | Files/Packages | Passed | Failed | Exit |
+| --- | --- | --- | --- | --- |
+| `./scripts/run-test.sh` (default `changed` scope) | 27 shell test files + golang pack | 615 shell + 8/8 Go pkgs | 0 | 0 |
+| `go test ./... -count=1 -cover` (fresh, no cache) | 8 Go packages with tests | 8 | 0 | 0 |
+
+Per-file shell delta from cycle 1 (all other 26 files byte-identical, not
+re-tabulated here — see the Cycle 1 table above):
+
+| File | Cycle 1 | Cycle 2 | Delta |
+| --- | --- | --- | --- |
+| test-template-purity.sh | 7 | 8 | +1 (new case C3) |
+| **Total (27 files)** | **614** | **615** | **+1** |
+
+### Fresh Go coverage vs cycle-1 baseline
+
+| Package | Cycle 1 | Cycle 2 (this run) | Delta |
+| --- | --- | --- | --- |
+| `internal/cli` | 79.9% | 80.0% | +0.1pp |
+| `internal/config` | 94.2% | 94.2% | — |
+| `internal/insights` | 86.1% | 86.1% | — |
+| `internal/org` | 89.1% | 89.1% | — |
+| `internal/org/driver` | 92.0% | 92.0% | — |
+| `internal/org/protocol` | 97.9% | 97.9% | — |
+| `internal/scaffold` | 75.7% | 75.7% | — |
+| `internal/upgrade` | 91.2% | 91.2% | — |
+
+`internal/cli` is the only package touched by the cycle-2 delta
+(`e01939e`'s AR#1/AR#2 doctor `--strict` fixes added 4 new Go test cases:
+`TestCheckScaffoldIntegrity_OwnershipPlanningError_StrictFails`,
+`TestCheckScaffoldIntegrity_SettingsSnapshotDeleted_StrictFails`,
+`TestCheckScaffoldIntegrity_SettingsJSONDeleted_OwnedKeysCatchesIt`,
+`TestCheckScaffoldIntegrity_AgentsMdDeleted_ManagedBlocksCatchesIt`); it
+rose +0.1pp. Every other package is byte-identical to cycle 1, as expected
+— `b9a956f`, `e39d436`, and `1f50407` touch only docs/shell strings, not Go
+source.
+
+### Named regression tests (individually re-run 3x in isolation)
+
+| Test | Command | Result (3/3) |
+| --- | --- | --- |
+| `TestCheckScaffoldIntegrity_OwnershipPlanningError_StrictFails` | `go test ./internal/cli/ -run '^TestCheckScaffoldIntegrity_OwnershipPlanningError_StrictFails$' -count=3 -v` | PASS x3, ~0.6-0.9s each |
+| `TestCheckScaffoldIntegrity_SettingsSnapshotDeleted_StrictFails` | `go test ./internal/cli/ -run '^TestCheckScaffoldIntegrity_SettingsSnapshotDeleted_StrictFails$' -count=3 -v` | PASS x3, ~0.07-0.08s each |
+| `TestCheckScaffoldIntegrity_SettingsJSONDeleted_OwnedKeysCatchesIt` | `go test ./internal/cli/ -run '^TestCheckScaffoldIntegrity_SettingsJSONDeleted_OwnedKeysCatchesIt$' -count=3 -v` | PASS x3, ~0.07s each |
+| `TestCheckScaffoldIntegrity_AgentsMdDeleted_ManagedBlocksCatchesIt` | `go test ./internal/cli/ -run '^TestCheckScaffoldIntegrity_AgentsMdDeleted_ManagedBlocksCatchesIt$' -count=3 -v` | PASS x3, ~0.06-0.07s each |
+| `TestCheckScaffoldIntegrity_FreshInit_AllPass` (strictness-expansion false-positive guard) | `go test ./internal/cli/ -run '^TestCheckScaffoldIntegrity_FreshInit_AllPass$' -count=3 -v` | PASS x3, ~0.07s each |
+| `TestCheckScaffoldIntegrity_ConvergedUpgrade_AllPass` (strictness-expansion false-positive guard) | `go test ./internal/cli/ -run '^TestCheckScaffoldIntegrity_ConvergedUpgrade_AllPass$' -count=3 -v` | PASS x3, ~0.10-0.11s each |
+| `tests/test-template-purity.sh` (8 cases incl. new C3 exact-path-scoping, AC-11) | `sh tests/test-template-purity.sh` x3 (full 8-case file) | PASS x3, exit 0 each, 8/8 green every run |
+| `tests/test-pre-bash-guard.sh` (AC-12b, jq-nested extraction, cases A-D) | `sh tests/test-pre-bash-guard.sh` x3 | PASS x3, exit 0 each, 4/4 green every run |
+
+The two `_StrictFails` tests and `TestCheckScaffoldIntegrity_SettingsJSONDeleted_OwnedKeysCatchesIt`
+/ `TestCheckScaffoldIntegrity_AgentsMdDeleted_ManagedBlocksCatchesIt` are the
+direct behavioral proof of AR#1/AR#2 (`doctor --strict` now fails on an
+ownership-planning error and on a deleted settings snapshot, rather than
+silently passing). The two `_AllPass` tests confirm the strictness expansion
+introduced no false positives against a fresh-init or converged-upgrade
+fixture — required because a strict-mode tightening that also flags healthy
+state is worse than the bug it fixes.
+
+### Known-flaky watchlist (re-checked 3x isolated)
+
+| Test | Command | Result (3/3) |
+| --- | --- | --- |
+| `TestRunDoctorOpts_ProbeModelsFalse_NoSubprocess` | `go test ./internal/cli/ -run '^TestRunDoctorOpts_ProbeModelsFalse_NoSubprocess$' -count=3 -v` | PASS x3, ~0.66-0.71s each |
+| `TestRunWatcher_TimeoutIndependentOfSmallInterval` | `go test ./internal/org/ -run '^TestRunWatcher_TimeoutIndependentOfSmallInterval$' -count=3 -v` | PASS x3, ~1.23-1.35s each |
+
+Both re-confirmed stable in isolation again this cycle, consistent with
+every prior cycle's re-check (tester agent memory, [[flaky_test_notes]]).
+Neither is in this cycle's delta.
+
+### Coverage gaps / blind spots
+
+No new gap introduced this cycle. `internal/cli` (80.0%) remains the
+largest package with room below other packages' averages, consistent with
+cycle 1's note that CLI command wiring is inherently harder to drive to
+high coverage than pure logic packages. The cycle-2 delta's own coverage
+(doctor strict-check paths) is the reason `internal/cli` rose rather than
+stayed flat, so this is progress, not a new blind spot.
+
+### What was NOT run (out of scope for `/test`)
+
+- Static analysis — `/verify`'s job, already PASS in
+  `docs/reports/verify-2026-08-19-overlay-scaffold-v2-p5.md` (cycle 2
+  section).
+- Documentation drift checks — `/sync-docs`'s job.
+- Cross-model second opinion — `/cross-review`'s job.
+
+### Recommendation
+
+Tests pass. Cycle 2/2 (pipeline cycle cap reached). Proceed to
+`/sync-docs`.
