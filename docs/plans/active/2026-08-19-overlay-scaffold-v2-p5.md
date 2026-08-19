@@ -133,8 +133,8 @@ overlay-scaffold-v2 系列の残 FR(FR-2 eject / FR-3 adopt / FR-9 doctor --stri
 
 ## Progress checklist
 
-- [ ] Slice 1: eject + adopt
-- [ ] Slice 2: doctor --strict
+- [x] Slice 1: eject + adopt(9bf09e2)
+- [x] Slice 2: doctor --strict(b884a38)
 - [ ] Slice 3: status 所有表示
 - [ ] Slice 4: purity ガード + Codex dispatcher パリティ
 - [ ] Slice 5: ドキュメント/スペック整合
