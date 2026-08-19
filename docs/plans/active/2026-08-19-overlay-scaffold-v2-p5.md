@@ -51,22 +51,22 @@ overlay-scaffold-v2 系列の残 FR(FR-2 eject / FR-3 adopt / FR-9 doctor --stri
 
 ## Acceptance criteria
 
-- [ ] AC-1 `ralph eject <path>`: 追跡済み owner=core パスを fork 化(owner=fork、forked_from_version=manifest 記録バージョン、hash=ディスク実体)。ディスク書き込みゼロ。
-- [ ] AC-2 eject は未解決 drift 状態(fork 記録なしのハッシュ不一致)の core パスにも適用でき、直後の `ralph upgrade` が当該パスを drift(exit 3)ではなく fork advisory として扱う(FR-4 の解消経路)。
-- [ ] AC-3 eject/adopt のエラー系: 未追跡パス / 既に fork(eject)・既に core(adopt)/ owner=seed・block / **v2 例外面(`.claude/settings.json`、settings スナップショット、AGENTS.md・`.gitignore`)** / レガシー manifest / ディスク欠落(eject)— いずれも明確なメッセージで拒否し、manifest・ディスク無変更。例外面の拒否メッセージは各面の正規カスタマイズ手段(settings はそのまま編集可 / block 外領域 / `.ralph/local/`)へ誘導する。
-- [ ] AC-4 `ralph adopt <path>`: fork 記録パスのディスクを現行テンプレート内容で置換し、owner=core + 現行ハッシュに更新。fork 記録は消える。
-- [ ] AC-5 adopt は fork 記録なしの未解決 drift にも適用できる(FR-4: 改変破棄)。
-- [ ] AC-6 adopt の安全性: git 作業ツリーがクリーンであることを前提条件とし、汚れていれば書き込みゼロで中断(migration と同じ検査。破壊内容の git 復元可能性を保証)。y/N 確認(`--yes` で省略)。現行テンプレートが当該パスを ship しない(retired)fork は明確なメッセージで拒否。書き込み前に全対象をプリフライト(パス封じ込め+symlink 検証+テンプレート存在、Phase 3/4 と同じ `ValidateRealParentChain` 系)し、1 件でも失敗なら書き込みゼロで中断。
-- [ ] AC-7 `ralph adopt --all`: 全 fork + 全 drift を一括 adopt。対象一覧を確認前に表示。対象ゼロなら no-op 明示。**部分失敗テスト**: 書き込み途中/manifest 書き込み失敗を注入し、(a) プリフライトで検出可能な失敗はゼロ書き込み、(b) 実行中失敗は git で全復元可能(クリーン前提の帰結)であることを固定する。
-- [ ] AC-8 `ralph doctor --strict`: FR-9 の (a)〜(e) を検査し、違反 1 件以上で exit 1。`--strict` なしは同内容を警告表示のみ(exit 0、既存挙動維持)。
-- [ ] AC-9 doctor --strict は fresh `ralph init` 直後および upgrade 収束済みプロジェクトで green(false positive ゼロの回帰テスト)。eject 済み fork は (a) の違反にならない。
-- [ ] AC-10 `ralph status`: v2 プロジェクトでパスごとの所有属性と未解決 drift 一覧を表示。出力マトリクスをテキスト/`--json` の両形式で固定する: scaffold(v2 manifest)有無 × org state 有無 × レガシー manifest × `--org-id` / `--state-dir` 指定 — 各組み合わせの挙動を決定的テストで先に定義(`--json` は既存スキーマに additive なキー追加のみ。既存キーの形・意味は不変)。既存 org 表示・org 系テストは無変更 green。
-- [ ] AC-11 `scripts/check-template-purity.sh` が `templates/` のメタリポ固有参照を検出して exit 1。現行 templates/ では green。`run-static-verify.sh` から呼ばれ、CI で実行される。検出の実効性は意図的に汚した fixture で shell テスト化(tech-debt 行 106 の教訓: 検出分岐に fixture を必ず用意)。
-- [ ] AC-12 Codex hooks が dispatcher 経由で `.d` 3 層を実行する(root と templates/base は byte-identical、`scripts/check-sync.sh` green)。`tests/test-hook-wiring.sh` はレガシー直接呼び出し形を検出したら fail する。
-- [ ] AC-12b `pre_bash_guard.sh` の jq 経路が実 PreToolUse ペイロード形(`.tool_input.command` ネスト)からコマンドを抽出し、deny/ask ルールが実際に発火する(root + テンプレート両方)。実ペイロード fixture の jq あり経路テストで固定。tech-debt 行 100 を RESOLVED 化。
-- [ ] AC-13 eject → adopt の往復で manifest とディスクが収束済み状態に戻る(round-trip 統合テスト)。
-- [ ] AC-14 スペックの FR-2/3/9/10/12 チェックボックス更新、tech-debt 行 103 RESOLVED 化、README / AGENTS.md 更新。
-- [ ] AC-15 `./scripts/run-verify.sh` exit 0、shell + Go 全テスト green。
+- [x] AC-1 `ralph eject <path>`: 追跡済み owner=core パスを fork 化(owner=fork、forked_from_version=manifest 記録バージョン、hash=ディスク実体)。ディスク書き込みゼロ。
+- [x] AC-2 eject は未解決 drift 状態(fork 記録なしのハッシュ不一致)の core パスにも適用でき、直後の `ralph upgrade` が当該パスを drift(exit 3)ではなく fork advisory として扱う(FR-4 の解消経路)。
+- [x] AC-3 eject/adopt のエラー系: 未追跡パス / 既に fork(eject)・既に core(adopt)/ owner=seed・block / **v2 例外面(`.claude/settings.json`、settings スナップショット、AGENTS.md・`.gitignore`)** / レガシー manifest / ディスク欠落(eject)— いずれも明確なメッセージで拒否し、manifest・ディスク無変更。例外面の拒否メッセージは各面の正規カスタマイズ手段(settings はそのまま編集可 / block 外領域 / `.ralph/local/`)へ誘導する。
+- [x] AC-4 `ralph adopt <path>`: fork 記録パスのディスクを現行テンプレート内容で置換し、owner=core + 現行ハッシュに更新。fork 記録は消える。
+- [x] AC-5 adopt は fork 記録なしの未解決 drift にも適用できる(FR-4: 改変破棄)。
+- [x] AC-6 adopt の安全性: git 作業ツリーがクリーンであることを前提条件とし、汚れていれば書き込みゼロで中断(migration と同じ検査。破壊内容の git 復元可能性を保証)。y/N 確認(`--yes` で省略)。現行テンプレートが当該パスを ship しない(retired)fork は明確なメッセージで拒否。書き込み前に全対象をプリフライト(パス封じ込め+symlink 検証+テンプレート存在、Phase 3/4 と同じ `ValidateRealParentChain` 系)し、1 件でも失敗なら書き込みゼロで中断。
+- [x] AC-7 `ralph adopt --all`: 全 fork + 全 drift を一括 adopt。対象一覧を確認前に表示。対象ゼロなら no-op 明示。**部分失敗テスト**: 書き込み途中/manifest 書き込み失敗を注入し、(a) プリフライトで検出可能な失敗はゼロ書き込み、(b) 実行中失敗は git で全復元可能(クリーン前提の帰結)であることを固定する。
+- [x] AC-8 `ralph doctor --strict`: FR-9 の (a)〜(e) を検査し、違反 1 件以上で exit 1。`--strict` なしは同内容を警告表示のみ(exit 0、既存挙動維持)。
+- [x] AC-9 doctor --strict は fresh `ralph init` 直後および upgrade 収束済みプロジェクトで green(false positive ゼロの回帰テスト)。eject 済み fork は (a) の違反にならない。
+- [x] AC-10 `ralph status`: v2 プロジェクトでパスごとの所有属性と未解決 drift 一覧を表示。出力マトリクスをテキスト/`--json` の両形式で固定する: scaffold(v2 manifest)有無 × org state 有無 × レガシー manifest × `--org-id` / `--state-dir` 指定 — 各組み合わせの挙動を決定的テストで先に定義(`--json` は既存スキーマに additive なキー追加のみ。既存キーの形・意味は不変)。既存 org 表示・org 系テストは無変更 green。
+- [x] AC-11 `scripts/check-template-purity.sh` が `templates/` のメタリポ固有参照を検出して exit 1。現行 templates/ では green。`run-static-verify.sh` から呼ばれ、CI で実行される。検出の実効性は意図的に汚した fixture で shell テスト化(tech-debt 行 106 の教訓: 検出分岐に fixture を必ず用意)。
+- [x] AC-12 Codex hooks が dispatcher 経由で `.d` 3 層を実行する(root と templates/base は byte-identical、`scripts/check-sync.sh` green)。`tests/test-hook-wiring.sh` はレガシー直接呼び出し形を検出したら fail する。
+- [x] AC-12b `pre_bash_guard.sh` の jq 経路が実 PreToolUse ペイロード形(`.tool_input.command` ネスト)からコマンドを抽出し、deny/ask ルールが実際に発火する(root + テンプレート両方)。実ペイロード fixture の jq あり経路テストで固定。tech-debt 行 100 を RESOLVED 化。
+- [x] AC-13 eject → adopt の往復で manifest とディスクが収束済み状態に戻る(round-trip 統合テスト)。
+- [x] AC-14 スペックの FR-2/3/9/10/12 チェックボックス更新、tech-debt 行 103 RESOLVED 化、README / AGENTS.md 更新。
+- [x] AC-15 `./scripts/run-verify.sh` exit 0、shell + Go 全テスト green。
 
 ## Implementation outline
 
@@ -143,7 +143,7 @@ overlay-scaffold-v2 系列の残 FR(FR-2 eject / FR-3 adopt / FR-9 doctor --stri
 - [x] Slice 2: doctor --strict(b884a38)
 - [x] Slice 3: status 所有表示(a61dbb5)
 - [x] Slice 4: purity ガード + Codex dispatcher パリティ + pre_bash_guard 修正(742260f)
-- [ ] Slice 5: ドキュメント/スペック整合
+- [x] Slice 5: ドキュメント/スペック整合(a164b2c)
 - [ ] Post-implementation pipeline(self-review → verify → test → sync-docs → cross-review)
 - [ ] /pr
 
