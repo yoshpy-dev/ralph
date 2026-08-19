@@ -134,3 +134,85 @@ Additional targeted checks run directly:
 - Behavioral test execution is out of scope for `/verify` (tester's responsibility — `./scripts/run-test.sh`).
 - Codex project-scoped `[[hooks.*]]` live firing under a trusted checkout remains unverified at runtime (pre-existing open item, tracked in `docs/tech-debt/README.md`, referenced by judgment item (a) above for spec AC-10).
 - The two judgment items above are recorded for the orchestrator's disposition; the spec file itself was not modified by this verify pass.
+
+# Cycle 2
+
+- Date: 2026-08-19
+- Cycle: 2 (final under `RALPH_STANDARD_MAX_PIPELINE_CYCLES=2`)
+- Scope: cycle-2 delta since the cycle-1 verify (33c1166) — `b9a956f` (drift guidance → eject/adopt), `348801c` (cross-review c1 triage), `e01939e` (AR#1/AR#2 fixes), `2bc988f` (self-review c2 section), `e39d436` (C2-M1/M2/L1-L3 fixes + C2-L4/L5 tech-debt row), plus report/insight commits.
+- Verdict: **pass**
+
+## 1. AR#1/AR#2 fixes vs. triage contract
+
+Both fixes read from `e01939e`'s diff against the triage's stated remediation, plus their regression tests.
+
+- **AR#1** (`internal/cli/doctor.go:739-746`): `checkScaffoldIntegrity`'s `resolveOwnershipPlan` error path changed from a hardcoded `Status: "warn"` to `Status: scaffoldViolationStatus(true, strict)` — a planning-error scaffold is now a strict-eligible violation, matching the triage's "検査不能=違反として扱うべき" remediation exactly. Pinned by `TestCheckScaffoldIntegrity_OwnershipPlanningError_StrictFails` (`internal/cli/doctor_scaffold_test.go`), which replaces `scripts/run-verify.sh` with a directory (a real `PlanCoreReplaceDesired` disk-read failure, not a synthetic error), and asserts `Status="fail"` under `--strict` / `"warn"` without, plus an integration pin through `runDoctorFull`. The doc comment added alongside contrasts this correctly with `status.go`'s own `resolveOwnershipPlan` caller (M7), which degrades gracefully by design since `status` is best-effort and `doctor --strict` is a gate — read both call sites to confirm the asymmetry is intentional, not a leftover inconsistency.
+- **AR#2** (`internal/cli/doctor.go:982-991`, cycle-2-refined): `checkManifestConsistency`'s skip set no longer excludes the settings snapshot (`.ralph/core/settings.ralph.json`) from FR-9(e)'s existence sweep — only `v2SettingsPath` and the two `blockSurfaces` stay excluded, matching the triage's "(e) の除外集合からスナップショットを外す" remediation. Pinned by `TestCheckScaffoldIntegrity_SettingsSnapshotDeleted_StrictFails`, which deletes the snapshot file while leaving its manifest entry intact and asserts `checkManifestConsistency` fails under `--strict` while `checkSettingsOwnedKeys` (FR-9(c)) stays "pass" (confirming the snapshot's `{}`-fallback tolerance in FR-9(c) is real and this is genuinely FR-9(e)'s regression to own, not a duplicate of an existing check).
+- **Exception-face audit is sound**, not just asserted. Read `checkManagedBlocks` and `checkSettingsOwnedKeys` directly (not just the doctor.go comment) to confirm the claim that the two faces that *stay* excluded (`settings.json`, `AGENTS.md`/`.gitignore`) are independently guaranteed by FR-9(b)/(c): `checkSettingsOwnedKeys` calls `readFinalDiskContent`, which returns `nil` for a missing file, and `MergeOwnedSettings` treats nil as `"{}"`, which diverges from a non-empty owned template — confirmed this reports `Changed=true`/fail, not a silent pass. `checkManagedBlocks`'s `updateOneBlockV2` returns a zero-value `ok=false` for a missing surface, which the caller treats as an offender. Both directions are also pinned by dedicated audit tests (`TestCheckScaffoldIntegrity_SettingsJSONDeleted_OwnedKeysCatchesIt`, `TestCheckScaffoldIntegrity_AgentsMdDeleted_ManagedBlocksCatchesIt`) that pass on both pre- and post-fix code — correctly labelled in their doc comments as audits, not regression guards.
+- **Cycle-2 refinement (C2-L3) verified**: `e39d436` replaced the cycle-1 hand-copied `skip` map literal with `skip := v2SkipPaths(); delete(skip, upgrade.SettingsSnapshotRelPath)`. Read `v2SkipPaths()` (`internal/cli/upgrade_v2.go:43-50`) to confirm it still holds exactly `v2SettingsPath` + the two `blockSurfaces` + the snapshot path — the derived form is behaviorally identical to the cycle-1 literal it replaced, now compile-time linked so a future fifth exception face auto-propagates instead of silently going stale.
+
+## 2. C2 fixes vs. self-review cycle-2 recommendations
+
+Checked each of the five in-cycle findings (C2-M1, C2-M2, C2-L1, C2-L2, C2-L3) against `e39d436`'s diff.
+
+- **C2-M2 (parallel-array allowlist, no delimiter parsing)** — confirmed. `is_allowlisted` (`scripts/check-template-purity.sh:84-96`) now does a plain `[ "$path" = "${ALLOWLIST_PATHS[$i]}" ] && [ "$pattern" = "${ALLOWLIST_PATTERNS[$i]}" ]` index-parallel comparison — no string splitting anywhere in the function, so the fix eliminates the delimiter-collision bug class structurally, independent of whether any given allowlist pattern happens to contain `|`. Ran `grep -n '%%|\*\|#\*|' scripts/check-template-purity.sh` for any surviving delimiter-parsing idiom: one hit remains, at `:167-169`, in the unrelated `FIXED_PATTERNS` loop (`pattern="${entry%%|*}"` / `reason="${entry#*|}"`). This is not the same bug: `FIXED_PATTERNS` entries are `grep -F` literal-substring patterns, all nine of which are plain identifiers/paths (`yoshpy-dev`, `github.com/yoshpy-dev`, `hiroki`, `/Users/`, `skills/release`, `check-sync.sh`, `check-template.yml`, `release.yml`, `overlay-scaffold`, `org-runtime-retire-loop`) — none contain a literal `|`, so splitting them on first `|` cannot truncate a payload the way `REGEX_PATTERNS`/pre-fix-`ALLOWLIST` could. Verified this by reading the full `FIXED_PATTERNS` array (`:39-50`); no entry needs the alternation the bug required. Minor test-coverage note (not a functional gap, since the fix is structural): the commit message describes case C3 as proving scoping "with a live regex-safe entry shape," but C3 (`tests/test-template-purity.sh:118-152`) uses the fixed-string pattern `yoshpy-dev`, not a `REGEX_PATTERNS`-style pattern containing `|` — no test exercises an `ALLOWLIST_PATTERNS` entry that itself contains `|`. Confirmed via code read (not test execution) that this doesn't matter functionally: `is_allowlisted` never splits on any character, so a `|`-containing pattern would compare correctly regardless.
+- **C2-M1 (help text + README meta-failure clause)** — confirmed at both surfaces. `--strict` flag help (`internal/cli/doctor.go:38-47`) now adds "plus the meta-failures that make those checks impossible to run: an unparseable manifest or an ownership-planning error such as an unreadable tracked file" and drops the stale "these five scaffold checks" count claim (now "these scaffold checks"). README's `ralph doctor [--strict]` row gets the matching clause. Both read consistently with AR#1/M2's actual `--strict` behavior.
+- **C2-L1 (case C/D comments)** — confirmed. New case C3 (`tests/test-template-purity.sh:139-152`) adds a second, non-allowlisted occurrence of the same pattern at a different path and asserts the run fails naming only that second path while the allowlisted path stays suppressed — this is what actually demonstrates exact-(path,pattern) scoping, closing the gap the cycle-1 L2 fix left. Case D's comment now points at C3 instead of the non-demonstrating case C.
+- **C2-L2 (grep stderr not merged into parsed hits)** — confirmed. `grep_scan_or_fail` (`scripts/check-template-purity.sh:112-131`) captures via plain `grep ... "$SCAN_ROOT"` (no `2>&1`) on the success path; stderr flows to the script's own stderr instead of `_scan_output`, and the exit->1 branch still surfaces `_scan_output` as diagnostic. Confirmed the parsed-hit loops (`scan_fixed`/`scan_regex`) only ever see stdout now.
+- **C2-L3 (skip-set derivation)** — confirmed, see AR#2 discussion above.
+- **C2-L4/C2-L5** — confirmed deferred as a single batched tech-debt row in `docs/tech-debt/README.md` (new final row, dated 2026-08-19), consistent with the self-review's own recommendation given the pipeline is at cap 2/2. Row content matches both findings accurately: (1) the 4-site drift-guidance string duplication, (2) the line-number pointer drift in the cycle-1 triage/verify reports caused by `e01939e`'s comment insertions — both carry a concrete trigger, not an open-ended "someday."
+- **New observation (not in self-review, informational only)**: `e39d436` renamed `ALLOWLIST` → `ALLOWLIST_PATHS`/`ALLOWLIST_PATTERNS` but left the FAIL-path user guidance text unchanged — `scripts/check-template-purity.sh:188` still reads "add a path+pattern pair to ALLOWLIST in this script with a reason," naming a variable that no longer exists. Cosmetic only (the script's actual behavior is unaffected; a contributor reading this message would still find the right mechanism by reading the script header/comments immediately above the array declarations), but worth a one-line fix on the next touch to this file. Not blocking.
+
+## 3. AC-8/AC-9 after the strictness expansion
+
+Confirmed by reading the changed conditions against the unmodified AC-9 regression tests, not by executing the test suite (tester's responsibility for this cycle).
+
+- `TestCheckScaffoldIntegrity_FreshInit_AllPass` and `TestCheckScaffoldIntegrity_ConvergedUpgrade_AllPass` (`internal/cli/doctor_scaffold_test.go:56-81`) were **not modified** by either `e01939e` or `e39d436` — both still assert `assertAllScaffoldChecksPass`, i.e. exactly the five named FR-9 sub-check results, all `"pass"`, under both `strict=false` and `strict=true`.
+- AR#1's changed code path (the `resolveOwnershipPlan` error early-return) is only reachable when `resolveOwnershipPlan` itself errors. A fresh `ralph init` or a cleanly converged `ralph upgrade` never hits this — `resolveOwnershipPlan` succeeds and `checkScaffoldIntegrity` falls through to the normal 5-result path (`internal/cli/doctor.go:748-754`), which AR#1 did not touch. No new false-positive surface for AC-9's two fixtures.
+- AR#2's narrowed skip set only changes behavior for a manifest that tracks the settings snapshot path while the file is missing from disk. Both `initV2Project` fixtures (used by both AC-9 tests) write the snapshot as part of normal init/upgrade — the snapshot is present and manifest-tracked in the non-corrupted case, so `checkManifestConsistency`'s existence sweep (now including the snapshot) still finds it and stays "pass." No new false-positive surface here either.
+- Net: AC-8/AC-9 continue to hold by construction — the two cycle-1/cycle-2 strictness expansions are additive violation surfaces reachable only by deliberately corrupting a scaffold (as the new regression tests do), not by anything present in a fresh-init or converged state.
+
+## 4. FR-4 drift-guidance alignment (`b9a956f`)
+
+Diffed all four sites directly; the appended guidance line is byte-identical across all of them:
+
+```
+Resolve with `ralph eject <path>` (keep the local change, tracked as a fork) or `ralph adopt <path>` (discard the local change, revert to template).
+```
+
+- `internal/cli/upgrade_v2.go:229` — real-run error path (`runUpgradeV2`)
+- `internal/cli/upgrade_v2.go:309` — no-op tail (`finishNoOpUpgradeV2`)
+- `internal/cli/upgrade_v2.go:790` — `--dry-run` preview
+- `internal/upgrade/report.go:124` — `## Unresolved drift` markdown section (`renderDriftSection`)
+
+Also confirmed (per `b9a956f`'s own sync-docs report) that no existing test asserts an exact/whole message string at any of the four sites — all assertions use `strings.Contains` on substrings that remain unchanged, so the appended line is additive and safe.
+
+## 5. Static analysis
+
+```
+$ ./scripts/run-static-verify.sh
+...
+==> scripts/check-template-purity.sh
+=== Checking templates for meta-repo-specific references ===
+
+PASS: no meta-repo-specific references found in templates.
+    OK
+==> Language scope: full fallback (unclassified:.claude/hooks/pre_bash_guard.sh)
+==> Language packs selected: golang
+==> Running golang verifier
+==> Go project root: .
+gofmt: ok
+0 issues.
+
+==> All verifiers passed.
+
+Evidence saved to: docs/evidence/verify-2026-08-19-044835.log
+```
+
+Exit code: 0 (confirmed separately via `echo $?` after a clean run, not just tail inspection).
+
+## Cycle 2 known gaps
+
+- Behavioral test execution (including whether `assertAllScaffoldChecksPass`, `TestCheckScaffoldIntegrity_OwnershipPlanningError_StrictFails`, and `TestCheckScaffoldIntegrity_SettingsSnapshotDeleted_StrictFails` actually pass when run) is tester's responsibility for this cycle — not executed here.
+- The stale `ALLOWLIST` reference in `check-template-purity.sh`'s FAIL-path message (section 2, new observation) is cosmetic and not filed as a new tech-debt row given the pipeline is at cap 2/2; flagging here for the orchestrator's disposition (PR known-gaps note, or a trivial one-line fix before `/pr` if churn is acceptable).
+- Codex project-scoped `[[hooks.*]]` live-firing verification remains open from cycle 1 (unchanged this cycle, tracked in `docs/tech-debt/README.md`).
