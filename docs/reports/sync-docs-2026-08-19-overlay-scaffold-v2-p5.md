@@ -131,3 +131,76 @@ None identified for this residual-drift pass. Full-repo `go test ./...` and
 `./scripts/run-verify.sh` are the tester/verifier subagents' responsibility
 for this cycle and are not re-run here (doc-maintainer scope is limited to
 the two Go files above, both covered by the package tests run).
+
+## Cycle 2
+
+- HEAD at start: `5312a55` (docs: add phase-5 test cycle-2 section (pass))
+- Scope: residual drift from the cycle-2 behavior changes — `e01939e`
+  (doctor `--strict` now also fails on ownership-planning errors and a
+  deleted settings snapshot), `e39d436` (allowlist parallel arrays; `--strict`
+  help + README meta-failure clause added in the same commit), `1f50407`
+  (stale allowlist name fix in the purity-guard failure message).
+
+### Verdict: no residual drift
+
+### 1. `--strict` described as exactly-five-checks or warn-only for planning errors elsewhere
+
+No drift. `grep -rn -- "--strict" docs/ .claude/rules/ templates/base/` was
+audited in full. README's `ralph doctor [--strict]` row already carries the
+C2-M1 fix (`e39d436`): it names the meta-failure clause ("and on the
+meta-failures that make those checks impossible ... unparseable manifest,
+unreadable tracked file"). No other doc claims an exact five-check
+enumeration or describes planning errors as warn-only under `--strict`:
+`docs/specs/2026-08-17-overlay-scaffold-v2.md` and the archived
+`docs/plans/active/2026-08-19-overlay-scaffold-v2-p5.md` describe FR-9 (a)-(e)
+in the abstract (no "exactly five" closure claim); `docs/reports/*.md` hits
+are historical narrative (self-review/verify/cross-review-triage findings
+and their fix confirmations), not living spec text. `templates/base/` has
+zero `--strict` mentions (doctor.go is Go source, not shipped template
+content — see point 3).
+
+### 2. Tech-debt register table — column count and contradiction check
+
+No drift. `awk -F'|' '/^\|/ {print NR": "NF}' docs/tech-debt/README.md`
+confirms every row from the cycle-2-adjacent additions (line 117, `74d28ef`'s
+quality-gates.md wiring-mismatch row; line 118, `e39d436`'s batched C2-L4/L5
+deferral row) renders at 7 awk fields (5 markdown columns, matching the
+6-column header incl. leading/trailing pipe) — consistent with every other
+row added this series. Pre-existing rows at irregular field counts (8/9/11/19,
+e.g. lines 22/24/32/46/57/79/90) predate this cycle and come from literal `|`
+characters inside code spans (shell `||`, table examples), not something
+`e01939e`/`e39d436` introduced. Content check: the C2-L4/L5 row's claim that
+cycle-1 triage/verify report line-number pointers into `doctor.go` "shifted
+downward" after `e01939e`'s diff is accurate (confirmed the diff inserts code
+above the pointed-at lines) and does not contradict the newly-fixed AR#1/AR#2
+rows recorded in the plan's Deviations (below) — it is a separate, narrower
+claim about historical-report accuracy, not scaffold-integrity behavior.
+
+### 3. `templates/base/` — cycle-2 template-side counterpart check
+
+No drift, none needed. `check-template-purity.sh` is registered in
+`scripts/check-sync.sh`'s `ROOT_ONLY_EXCLUSIONS` (line 37) — it is
+intentionally not shipped to `templates/base/`. `internal/cli/doctor.go` is
+Go binary source consumed by `go build`, not template content rendered by
+`ralph init`; `find templates/base -iname "*doctor*" -o -iname "*purity*"`
+returns no hits, confirming there is no template-side file that could drift
+from the cycle-2 Go-side behavior changes.
+
+### 4. Plan Deviations — cycle-2 note
+
+Real gap, fixed. The plan's `## Deviations` section had three Slice-4/5
+entries but no cycle-2 pipeline note. Added one bullet summarizing: cross-review
+cycle-1 ACTION_REQUIRED (AR#1 doctor `--strict` planning-error fail-open,
+AR#2 settings-snapshot deletion escaping FR-9(e)) fixed in `e01939e`;
+self-review cycle-2's 5 new findings (C2-M1, C2-M2, C2-L1..L3) fixed in
+`e39d436`; remaining C2-L4/C2-L5 deferred to the batched tech-debt row at cap
+2/2.
+
+## Files changed (Cycle 2)
+
+- `docs/plans/active/2026-08-19-overlay-scaffold-v2-p5.md` (Deviations bullet)
+- `docs/reports/sync-docs-2026-08-19-overlay-scaffold-v2-p5.md` (this section)
+
+## Cycle 2 known gaps
+
+None identified.

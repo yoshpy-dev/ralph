@@ -127,6 +127,7 @@ overlay-scaffold-v2 系列の残 FR(FR-2 eject / FR-3 adopt / FR-9 doctor --stri
 - Slice 4(742260f): FR-10 ガード配線先は `run-static-verify.sh`(env ラッパ)ではなく実体の `scripts/verify.local.sh` `run_static_checks()`。`check-template-purity.sh` は downstream に ship しないため `check-sync.sh` の ROOT_ONLY_EXCLUSIONS に追加。
 - Slice 4 の purity スキャンが現行 `templates/` に既存リーク 5 件を検出(KNOWN LEAK として allowlist 化、ガードは green 維持): quality-gates.md の check-sync.sh / check-template.yml 引用、adding-a-language-pack.md の check-sync.sh 引用 ×4 行、check-pipeline-sync.sh / xreview-helpers.sh のコメント内メタリポ slug 引用。→ Slice 5 で修正し allowlist から除去する(スコープ追加)。
 - CLAUDE.md の「check-skill-sync.sh は meta-repo only」記述が stale(templates/base に同スクリプトは ship 済み)→ Slice 5 で修正(スコープ追加)。
+- Pipeline cycle 2/2: cross-review cycle-1 の ACTION_REQUIRED 2 件(AR#1 doctor --strict がプランニングエラーで fail-open、AR#2 settings スナップショット削除が (e) manifest/実体整合をすり抜け)を `e01939e` で修正。同コミットで self-review cycle-1 も再走し、cycle-2 の新規所見 5 件(C2-M1/M2、C2-L1〜L3)を `e39d436` で修正。残り 2 件(C2-L4 drift 案内文言の 4 箇所重複、C2-L5 cycle-1 レポートの行番号ポインタが e01939e の diff で下方シフト)は cap 2/2 到達につき batched tech-debt 行として記録(`docs/tech-debt/README.md`)。
 
 ## Evidence targets
 
