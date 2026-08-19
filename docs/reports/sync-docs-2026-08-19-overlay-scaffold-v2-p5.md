@@ -293,3 +293,80 @@ pass; the cycle-3 edit did not touch or introduce any of them.
 ## Cycle 3 known gaps
 
 None identified.
+
+## Cycle 4
+
+- HEAD at start: `9416f0c` (docs: add phase-5 test cycle-4 section (pass))
+- Pipeline cycle 4/4 (cap raised 3→4 by the operator after cycle-3
+  `/cross-review` reported 2 ACTION_REQUIRED). Scope: residual drift from
+  the cycle-4 delta — `de36e45` (cross-review cycle-3 AR#1: untracked-drift
+  annotation unified into `writeDriftGuidanceV2`, resolving the C2-L4
+  tech-debt row; AR#2: codex config comment history-scrubbing) and `04472d9`
+  (self-review cycle-4 fixes C4-M1/M2 + C4-L1..L7: doctor's
+  `checkScaffoldCoreHashes` gains the same untracked-drift annotation,
+  README/tech-debt/comment wording fixes). Three narrow points per the
+  team-lead's scoping.
+
+### Verdict: no residual drift
+
+### 1. `eject` mentions across `docs/` + `templates/base/docs/` — untracked-case omission check
+
+No drift. `grep -rln "eject" docs/ templates/base/docs/` returns the
+existing report/plan-archive hits (historical narrative, frozen) plus three
+living docs: `docs/specs/2026-08-17-overlay-scaffold-v2.md` (FR-2/FR-4
+abstract wording, no exact-scope claim to falsify), `docs/tech-debt/README.md`
+(the row `04472d9` itself edited — content checked in point 3 below), and
+`docs/recipes/adding-a-language-pack.md` / `templates/base/docs/recipes/adding-a-language-pack.md`
+(the c1-confirmed pack-rule eject step — `.claude/rules/ralph/<lang>.md` is
+always a tracked, manifest-recorded path in a scaffolded project, so the
+untracked exception the cycle-4 delta documents in CLI stderr/doctor output
+does not apply to this recipe's scenario; confirmed unchanged since cycle 1,
+neither file is in `de36e45`'s or `04472d9`'s diff).
+
+Checked whether the untracked-path rejection itself needed a README mention
+newly triggered by this cycle: it doesn't, because that behavior is not new
+— untracked paths were already one of AC-3's original rejection categories
+(plan line "未追跡パス", predating Slice 1). What `de36e45`/`04472d9` changed
+is message wording only (annotating *which* drift entries are untracked and
+why eject/adopt can't resolve them), not the underlying contract. This
+matches the precedent set in cycle 3's point 3 (status.go corrupt-manifest
+handling: CLI message-level detail stays in code/help, not README prose) —
+README's existing eject/adopt exit-code sentence
+(`README.md:143`) stays at the same abstraction level it was already at and
+is not contradicted by the new stderr wording.
+
+### 2. Plan Deviations — cycle-4 note
+
+Real gap, fixed. The plan's `## Deviations` section had a cycle-3 pipeline
+bullet but no cycle-4 one. Added a bullet summarizing: cross-review cycle-3
+ACTION_REQUIRED 2 findings (AR#1 untracked-path drift guidance, AR#2 codex
+config comment history) fixed in `de36e45` (which also resolves the
+previously-batched C2-L4 tech-debt row); self-review cycle-4's 9 new
+findings (C4-M1, C4-M2, C4-L1..L7) fixed in `04472d9`; and tester
+cycle-4's one recorded known gap (`checkScaffoldCoreHashes`'s new untracked
+branch has no dedicated test — message-formatting only, not a control-flow
+risk, deferred as cap 4/4 is reached).
+
+### 3. Tech-debt register — table renders after `04472d9`'s cell edits
+
+No drift. `awk -F'|' '/^\|/ {print NR": "NF}' docs/tech-debt/README.md`
+confirms the row `04472d9` edited (the C2-L4/L5 batched-deferral row, now
+recording that C2-L4 fired and resolved via `writeDriftGuidanceV2` while
+C2-L5 stays deferred) renders at 7 awk fields — matching every other
+regular row in the table (61 of 66 data rows at 7 fields; the remaining 5
+irregular rows at 8/9/11/19 fields predate this cycle, from literal `|`
+characters inside code spans, and were already confirmed unrelated in
+cycle 2's sync-docs pass). The strikethrough (`~~...~~`) markup `04472d9`
+added inside two cells does not introduce a stray `|`, so the field count is
+unaffected.
+
+## Files changed (Cycle 4)
+
+- `docs/plans/active/2026-08-19-overlay-scaffold-v2-p5.md` (Deviations
+  bullet)
+- `docs/reports/sync-docs-2026-08-19-overlay-scaffold-v2-p5.md` (this
+  section)
+
+## Cycle 4 known gaps
+
+None identified for this residual-drift pass.
