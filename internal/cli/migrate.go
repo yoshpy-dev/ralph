@@ -999,17 +999,32 @@ func runMigrateLegacy(absDir, manifestPath string, oldManifest *scaffold.Manifes
 // checkGitCleanForMigration enforces the plan's "非 git ターゲットは移行拒否"
 // design decision: git is the migration's only rollback mechanism (no
 // backup directory is made), so absDir must be a git work tree with no
-// uncommitted changes before any migration write happens.
+// uncommitted changes before any migration write happens. Thin wrapper over
+// checkGitCleanForDestructiveOp so migration's own call sites/tests are
+// unaffected by the eject/adopt (internal/cli/adopt.go) extraction below.
 func checkGitCleanForMigration(absDir string) error {
+	return checkGitCleanForDestructiveOp(absDir, "migration")
+}
+
+// checkGitCleanForDestructiveOp enforces a git-clean-work-tree precondition
+// for any operation whose only rollback mechanism is git (no backups are
+// made): opName is interpolated into the error text (e.g. "migration",
+// "adopt") so each caller's message stays specific about which operation is
+// refusing to proceed. Extracted from the migration-only
+// checkGitCleanForMigration so `ralph adopt` (adopt.go) can reuse the exact
+// same git invocations rather than duplicating them (plan's Codex finding 2:
+// adopt's restore guarantee is "the same git-clean precondition as
+// migration", not a bespoke backup mechanism).
+func checkGitCleanForDestructiveOp(absDir, opName string) error {
 	gitBin, err := exec.LookPath("git")
 	if err != nil {
-		return fmt.Errorf("migration requires git (it is the migration's rollback mechanism; no backups are made): git was not found in PATH; no files were changed")
+		return fmt.Errorf("%s requires git (git is the only rollback mechanism for %s; no backups are made): git was not found in PATH; no files were changed", opName, opName)
 	}
 
 	treeCmd := exec.Command(gitBin, "-C", absDir, "rev-parse", "--is-inside-work-tree")
 	treeOut, err := treeCmd.Output()
 	if err != nil || strings.TrimSpace(string(treeOut)) != "true" {
-		return fmt.Errorf("migration requires a git work tree (git is the migration's rollback mechanism; no backups are made): %s is not inside a git work tree; no files were changed", absDir)
+		return fmt.Errorf("%s requires a git work tree (git is the only rollback mechanism for %s; no backups are made): %s is not inside a git work tree; no files were changed", opName, opName, absDir)
 	}
 
 	statusCmd := exec.Command(gitBin, "-C", absDir, "status", "--porcelain")
@@ -1018,12 +1033,12 @@ func checkGitCleanForMigration(absDir string) error {
 	statusOut, err := statusCmd.Output()
 	if err != nil {
 		if msg := strings.TrimSpace(statusErr.String()); msg != "" {
-			return fmt.Errorf("checking git status before migration: %w: %s", err, msg)
+			return fmt.Errorf("checking git status before %s: %w: %s", opName, err, msg)
 		}
-		return fmt.Errorf("checking git status before migration: %w", err)
+		return fmt.Errorf("checking git status before %s: %w", opName, err)
 	}
 	if strings.TrimSpace(string(statusOut)) != "" {
-		return fmt.Errorf("migration requires a clean git work tree (git is the migration's rollback mechanism; no backups are made): %s has uncommitted changes; commit or stash them first; no files were changed", absDir)
+		return fmt.Errorf("%s requires a clean git work tree (git is the only rollback mechanism for %s; no backups are made): %s has uncommitted changes; commit or stash them first; no files were changed", opName, opName, absDir)
 	}
 	return nil
 }
