@@ -121,7 +121,7 @@ func renderDriftSection(b *strings.Builder, entries []DriftEntry) {
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Path < sorted[j].Path })
 
 	b.WriteString("## Unresolved drift\n\n")
-	b.WriteString("Resolve with `ralph eject <path>` (keep the local change, tracked as a fork) or `ralph adopt <path>` (discard the local change, revert to template).\n\n")
+	b.WriteString("Resolve with `ralph eject <path>` (keep the local change, tracked as a fork) or `ralph adopt <path>` (discard the local change, revert to template). Rows with an empty Recorded column are untracked drift — a new template file colliding with a pre-existing local file that has no manifest entry; eject/adopt reject untracked paths, so move the local file aside (or merge its content manually) and re-run `ralph upgrade` instead (AR#1, cycle 3, docs/reports/cross-review-triage-overlay-scaffold-v2-p5.md).\n\n")
 	b.WriteString("| Path | Recorded | Disk | New |\n")
 	b.WriteString("|---|---|---|---|\n")
 	for _, e := range sorted {

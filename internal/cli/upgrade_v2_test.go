@@ -446,6 +446,15 @@ func TestRunUpgradeV2_UnresolvedDrift_ExitSentinelAndStderr(t *testing.T) {
 	if !strings.Contains(errOut.String(), "scripts/run-verify.sh") {
 		t.Errorf("stderr must list the drifted path:\n%s", errOut.String())
 	}
+	// Tracked drift: eject/adopt guidance applies, the untracked-specific
+	// sentence must NOT appear (AR#1, cycle 3,
+	// docs/reports/cross-review-triage-overlay-scaffold-v2-p5.md).
+	if !strings.Contains(errOut.String(), "ralph eject") {
+		t.Errorf("stderr must carry the eject/adopt guidance:\n%s", errOut.String())
+	}
+	if strings.Contains(errOut.String(), "(untracked)") {
+		t.Errorf("tracked drift must not be annotated (untracked):\n%s", errOut.String())
+	}
 
 	gotContent := mustReadFile(t, filepath.Join(target, "scripts", "run-verify.sh"))
 	if string(gotContent) != driftedContent {
@@ -850,6 +859,49 @@ func TestRunUpgradeV2_SeedAdvisoryOnly_NotANoOp(t *testing.T) {
 	}
 	if !strings.Contains(out2.String(), "no-op") {
 		t.Errorf("second run's stdout must announce a no-op now that the seed advisory has cleared:\n%s", out2.String())
+	}
+}
+
+// TestRunUpgradeV2_UntrackedCoreDrift_GuidanceDistinguishesUntracked covers
+// AR#1 (cycle 3, docs/reports/cross-review-triage-overlay-scaffold-v2-p5.md):
+// untracked drift (a core template path with no manifest entry colliding
+// with a pre-existing local file) cannot be resolved by eject/adopt — both
+// reject untracked paths — so the drift guidance must annotate the path
+// "(untracked)" and point at the manual resolution instead of sending the
+// user in a circle.
+func TestRunUpgradeV2_UntrackedCoreDrift_GuidanceDistinguishesUntracked(t *testing.T) {
+	target := initV2Project(t, gen1(), "1.0.0-test")
+
+	// Make scripts/run-verify.sh untracked (drop its manifest entry) and
+	// divergent from both templates — classifyUntracked's core branch then
+	// records it as drift with RecordedHash == "".
+	manifestPath := filepath.Join(target, ".ralph", "manifest.toml")
+	m, err := scaffold.ReadManifest(manifestPath)
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	delete(m.Files, "scripts/run-verify.sh")
+	if err := m.Write(manifestPath); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "scripts", "run-verify.sh"), []byte("#!/bin/sh\necho local-only\n"), 0755); err != nil {
+		t.Fatalf("write local run-verify.sh: %v", err)
+	}
+
+	scaffold.EmbeddedFS = gen2().build()
+	Version = "1.1.0-test"
+
+	var out, errOut bytes.Buffer
+	err = runUpgradeIOWithOptions(target, upgradeOptions{Pager: pagerNever}, strings.NewReader(""), &out, &errOut, false)
+	if !errors.Is(err, ErrUpgradeDriftRemaining) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrUpgradeDriftRemaining)", err)
+	}
+	stderrStr := errOut.String()
+	if !strings.Contains(stderrStr, "scripts/run-verify.sh (untracked)") {
+		t.Errorf("stderr must annotate the untracked drifted path:\n%s", stderrStr)
+	}
+	if !strings.Contains(stderrStr, "cannot resolve them") {
+		t.Errorf("stderr must carry the untracked-specific manual-resolution guidance:\n%s", stderrStr)
 	}
 }
 

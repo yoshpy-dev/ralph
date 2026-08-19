@@ -83,14 +83,12 @@ approval_policy = "never"
 # change what check_mojibake.sh receives on stdin versus the direct-call
 # form above — no adapter/shim is needed regardless of any difference
 # between Codex's and Claude Code's PostToolUse payload shape. (Live
-# verification of Codex's exact payload shape was attempted during Phase 5
-# Slice 4 and was inconclusive within the session's time budget — project-
-# scoped [[hooks.*]] entries did not fire in a scratch repo even with
-# `--dangerously-bypass-hook-trust`, likely because Codex's project hook
-# trust gate needs the interactive `codex trust` grant recorded in
-# `~/.codex/config.toml`'s project trust table, which has no scriptable
-# equivalent in codex-cli 0.147.0. The dispatcher's stdin-passthrough
-# design makes that gap immaterial to correctness here.)
+# verification of Codex's exact payload shape has not been confirmed:
+# project-scoped [[hooks.*]] entries do not fire in an untrusted checkout,
+# and Codex's project hook trust gate needs the interactive `codex trust`
+# grant recorded in `~/.codex/config.toml`'s project trust table, which has
+# no scriptable equivalent in codex-cli 0.147.0. The dispatcher's
+# stdin-passthrough design makes that gap immaterial to correctness here.)
 #
 # Two entries are kept (Edit, Write) to mirror Codex's own tool-scoped
 # `match` shape; Claude Code's single settings.json entry uses one

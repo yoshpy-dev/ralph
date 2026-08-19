@@ -222,11 +222,7 @@ func runUpgradeV2(absDir, manifestPath string, oldManifest *scaffold.Manifest, o
 	writef(out, "  report: %s\n", reportRelPath)
 
 	if len(plan.Drift) > 0 {
-		writef(errOut, "\nUnresolved drift (left untouched; see report for detail):\n")
-		for _, d := range sortedDriftV2(plan.Drift) {
-			writef(errOut, "  ⚠ %s\n", d.Path)
-		}
-		writef(errOut, "\nResolve with `ralph eject <path>` (keep the local change, tracked as a fork) or `ralph adopt <path>` (discard the local change, revert to template).\n")
+		writeDriftGuidanceV2(errOut, plan.Drift, "left untouched; see report for detail")
 		return fmt.Errorf("%w (%d path(s)); see %s", ErrUpgradeDriftRemaining, len(plan.Drift), reportRelPath)
 	}
 
@@ -302,11 +298,7 @@ func finishNoOpUpgradeV2(absDir, version string, plan upgrade.ReplacePlan, out, 
 	}
 
 	writef(out, "  drift (untouched): %d files\n", len(plan.Drift))
-	writef(errOut, "\nUnresolved drift (left untouched; no report written this run — tree already converged):\n")
-	for _, d := range sortedDriftV2(plan.Drift) {
-		writef(errOut, "  ⚠ %s\n", d.Path)
-	}
-	writef(errOut, "\nResolve with `ralph eject <path>` (keep the local change, tracked as a fork) or `ralph adopt <path>` (discard the local change, revert to template).\n")
+	writeDriftGuidanceV2(errOut, plan.Drift, "left untouched; no report written this run — tree already converged")
 	return fmt.Errorf("%w (%d path(s))", ErrUpgradeDriftRemaining, len(plan.Drift))
 }
 
@@ -747,6 +739,34 @@ func sortedDriftV2(entries []upgrade.DriftEntry) []upgrade.DriftEntry {
 	return sorted
 }
 
+// writeDriftGuidanceV2 prints the sorted drift list (annotating untracked
+// entries) followed by the resolution guidance. Single shared body for the
+// three stderr sites (real-run error path, no-op tail, --dry-run preview) so
+// the wording cannot diverge (resolves tech-debt "drift 案内文言の重複"; the
+// markdown report keeps its own formatting in internal/upgrade/report.go).
+//
+// Untracked drift (RecordedHash == "": a new template core path colliding
+// with a pre-existing local file that has no manifest entry) cannot be
+// resolved by eject/adopt — both reject untracked paths by design (AC-3) —
+// so the guidance must not send those users in a circle (AR#1, cycle 3,
+// docs/reports/cross-review-triage-overlay-scaffold-v2-p5.md).
+func writeDriftGuidanceV2(errOut io.Writer, drift []upgrade.DriftEntry, heading string) {
+	writef(errOut, "\nUnresolved drift (%s):\n", heading)
+	hasUntracked := false
+	for _, d := range sortedDriftV2(drift) {
+		if d.RecordedHash == "" {
+			hasUntracked = true
+			writef(errOut, "  ⚠ %s (untracked)\n", d.Path)
+			continue
+		}
+		writef(errOut, "  ⚠ %s\n", d.Path)
+	}
+	writef(errOut, "\nResolve with `ralph eject <path>` (keep the local change, tracked as a fork) or `ralph adopt <path>` (discard the local change, revert to template).\n")
+	if hasUntracked {
+		writef(errOut, "Paths marked (untracked) are new template files colliding with pre-existing local files that have no manifest entry; `ralph eject`/`ralph adopt` cannot resolve them — move the local file aside (or merge its content manually), then re-run `ralph upgrade`.\n")
+	}
+}
+
 // renderUpgradeV2Preview renders the --dry-run (and --diff) preview for a v2
 // upgrade: op counts, per-op paths, drift, and preserved-pack namespaces.
 // --diff additionally renders the full advisory diffs (fork/seed paths whose
@@ -783,11 +803,7 @@ func renderUpgradeV2Preview(plan upgrade.ReplacePlan, desired map[string][]byte,
 	}
 
 	if len(plan.Drift) > 0 {
-		writef(errOut, "\nUnresolved drift (would be left untouched):\n")
-		for _, d := range sortedDriftV2(plan.Drift) {
-			writef(errOut, "  ⚠ %s\n", d.Path)
-		}
-		writef(errOut, "\nResolve with `ralph eject <path>` (keep the local change, tracked as a fork) or `ralph adopt <path>` (discard the local change, revert to template).\n")
+		writeDriftGuidanceV2(errOut, plan.Drift, "would be left untouched")
 	}
 
 	// AR#1 (cycle-2 cross-review, docs/reports/cross-review-triage-overlay-scaffold-v2-p3.md):
