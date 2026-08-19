@@ -197,6 +197,13 @@ run_static_checks() {
   if [ -x scripts/check-skill-sync.sh ]; then
     run "scripts/check-skill-sync.sh" scripts/check-skill-sync.sh
   fi
+
+  # 8. Template purity: templates/ (the go:embed source tree) must carry no
+  # meta-repo-specific references (org handle, maintainer identifiers,
+  # meta-repo-only tooling/CI/plan citations). FR-10.
+  if [ -x scripts/check-template-purity.sh ]; then
+    run "scripts/check-template-purity.sh" scripts/check-template-purity.sh
+  fi
 }
 
 run_hook_tests() {

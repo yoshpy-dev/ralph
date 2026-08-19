@@ -116,10 +116,12 @@ Before claiming a task is done:
 |---------|---------|
 | `ralph init [name]` | Scaffold a new project (interactive: language packs). |
 | `ralph upgrade` | Non-interactively pull template updates; auto-migrates legacy (pre-v2) layouts first (see [`ralph upgrade`](#ralph-upgrade)). |
+| `ralph eject <path>` | Convert a core-owned scaffold path into a user-owned fork (zero disk writes); upgrade stops replacing it. |
+| `ralph adopt <path>\|--all` | Reset a fork or drifted core path back to `owner=core`, overwriting it with the current embedded template. |
 | `ralph org spawn/send/wait/read/stop/status/disband` | Manage org-runtime seats for autonomous multi-seat execution. |
-| `ralph status [--org-id <id>]` | Show org roster status and watch-status summary (table or `--json`). |
+| `ralph status [--org-id <id>]` | Show scaffold ownership (core/fork/seed/block) and unresolved drift, plus org roster status and watch-status summary (table or `--json`). |
 | `ralph pack add <lang>` | Install a language pack. |
-| `ralph doctor` | Check Claude Code, Codex, hooks, manifest drift, language packs. |
+| `ralph doctor [--strict]` | Check Claude Code, Codex, hooks, manifest drift, language packs; `--strict` exits 1 on any core-hash mismatch, block damage, settings-key drift, conflict marker, or manifest/disk mismatch — and on any meta-failure that makes one of those checks impossible to run (e.g. an unparseable manifest or an unreadable tracked file) — the CI-grade integrity gate. Block/settings-key checks compare against the *current binary's* templates with no pending-update tolerance (unlike the core-hash check, FR-4) — run `ralph upgrade` before `doctor --strict` right after upgrading the `ralph` binary itself, or a version-skew pending update reads as scaffold damage. |
 | `ralph insights [--json]` | Aggregate pipeline insight events into a routing/pipeline summary. |
 | `ralph insights backfill [--apply]` | Derive events from existing Markdown reports (dry-run by default). |
 | `ralph version` | Show semver + commit + build date. |
@@ -138,7 +140,7 @@ Run `ralph help <command>` for flags.
 
 Flags: `--dry-run` previews the plan without writing anything, including the pending outcome of `AGENTS.md`, `.gitignore`, `.claude/settings.json`, and the settings snapshot; `--diff` implies `--dry-run` and additionally prints the full advisory diff output (reusing the same colorized, pager-aware rendering as before — `--pager auto|always|never`, `NO_COLOR=1` to suppress ANSI escapes).
 
-Exit codes: `0` success, `1` execution error, `3` completed with unresolved drift remaining (paths are listed on stderr, and in the report on runs that write one). There is no `--force` flag — re-adopting a forked or drifted path is a manual step (make the file match the new template content, then let the next upgrade converge it) until the `adopt` command ships in a later phase.
+Exit codes: `0` success, `1` execution error, `3` completed with unresolved drift remaining (paths are listed on stderr, and in the report on runs that write one). There is no `--force` flag — re-adopting a forked or drifted path back to core ownership is `ralph adopt <path>|--all` (see [Commands](#commands)); keeping local changes instead is `ralph eject <path>`.
 
 #### Migrating from a legacy layout
 
@@ -240,7 +242,7 @@ See `docs/specs/2026-08-01-org-runtime.md` for the full protocol and `.claude/ru
 
 ## Hooks
 
-`.claude/settings.json` points each event at a single dispatcher entry, `./.claude/hooks/ralph-dispatch.sh <event>`, which fans out in order through `.claude/hooks/<event>.d/` (core), `.ralph/local/hooks/<event>.d/` (downstream local, committed), then `.claude/hooks/local/<event>.d/` (downstream local, gitignored). The core `.d/` entries ship pre-configured: session start context, prompt-level reminders, Bash guardrails, edit/write verification reminders, tool failure feedback, compaction checkpoints, session end summary. Add your own hook by dropping a script into `.ralph/local/hooks/<event>.d/` — no `settings.json` edits needed (Claude Code today; Codex's `.codex/config.toml` still calls hook scripts directly, so `.ralph/local/hooks/<event>.d/` drop-ins do not run under Codex yet — Phase 3 tech debt). Customize `.claude/settings.json` directly; use `.claude/settings.local.json` for personal overrides (gitignored).
+`.claude/settings.json` points each event at a single dispatcher entry, `./.claude/hooks/ralph-dispatch.sh <event>`, which fans out in order through `.claude/hooks/<event>.d/` (core), `.ralph/local/hooks/<event>.d/` (downstream local, committed), then `.claude/hooks/local/<event>.d/` (downstream local, gitignored). The core `.d/` entries ship pre-configured: session start context, prompt-level reminders, Bash guardrails, edit/write verification reminders, tool failure feedback, compaction checkpoints, session end summary. Add your own hook by dropping a script into `.ralph/local/hooks/<event>.d/` — no `settings.json` edits needed; both Claude Code and Codex route through the same dispatcher, though live firing under Codex has not yet been confirmed on a trusted checkout (see `docs/tech-debt/README.md`). Customize `.claude/settings.json` directly; use `.claude/settings.local.json` for personal overrides (gitignored).
 
 ## Language packs
 

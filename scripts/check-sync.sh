@@ -32,6 +32,9 @@ ROOT_ONLY_EXCLUSIONS=(
   "scripts/new-language-pack.sh"
   # Sync check (only meaningful in the scaffold repo, not in scaffolded projects)
   "scripts/check-sync.sh"
+  # Template purity check (checks this repo's own templates/ tree; a
+  # scaffolded project has no nested templates/ dir to check)
+  "scripts/check-template-purity.sh"
   # Repo-local static/test runner (scaffolded projects write their own)
   "scripts/verify.local.sh"
   # Hook smoke tests (repo-specific; not part of scaffolded baseline)
@@ -92,6 +95,15 @@ KNOWN_DIFFS=(
   # model-routing.md: root documents the Go-layer default (internal/config)
   # which does not exist in scaffolded projects
   ".claude/rules/ralph/model-routing.md"
+  # quality-gates.md: root cites check-sync.sh/check-template.yml, real
+  # meta-repo-only tooling and CI; template describes downstream reality
+  # (neither ships downstream — overlay-scaffold-v2-p5 Slice 5)
+  "docs/quality/quality-gates.md"
+  # adding-a-language-pack.md: root describes the ralph-repo contributor
+  # workflow (packs/languages/, templates/packs/, check-sync.sh all exist
+  # only here); template frames the same recipe for a reader without those
+  # paths (overlay-scaffold-v2-p5 Slice 5)
+  "docs/recipes/adding-a-language-pack.md"
 )
 
 # AGENTS.md is block-aware, not whole-file compared (see check_agents_md_block

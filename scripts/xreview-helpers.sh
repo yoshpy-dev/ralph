@@ -60,9 +60,8 @@ detect_base_branch() {
 # .claude/skills/cross-review/SKILL.md Step 2, which documents
 # RALPH_PRIMARY_CLI as case-insensitive). The driver value is normalized to
 # lowercase before the case branch so "CODEX"/"Claude"/etc. resolve to the
-# same reviewer as their lowercase form (AR-2 fix,
-# docs/reports/cross-review-triage-org-runtime-retire-loop.md) instead of
-# silently falling through to the "unrecognized driver" default.
+# same reviewer as their lowercase form (AR-2 fix) instead of silently
+# falling through to the "unrecognized driver" default.
 pick_reviewer() {
   _pr_driver="${1:-${RALPH_PRIMARY_CLI:-claude}}"
   _pr_driver="$(printf '%s' "$_pr_driver" | tr '[:upper:]' '[:lower:]')"

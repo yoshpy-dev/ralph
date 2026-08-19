@@ -1,5 +1,9 @@
 # オーバーレイ型スキャフォールド配布と非対話 upgrade(layout v2)
 
+## Status
+
+Phase 1〜4(#143〜#146)に続き、Phase 5(`feat/overlay-scaffold-v2-p5`)が本系列を完了させる。リリースタグの発行は本 PR マージ後、repo-maintainer が `/release` で手動実施する。
+
 ## Summary
 
 ralph の配布物を所有権ベースの 5 層オーバーレイ構造に再編し、`ralph upgrade` を「機械所有面の全置換 + managed block 更新 + 助言 diff」の非対話操作にする。ハッシュ 3-state ベースの対話型コンフリクト解消は完全廃止し、下流リポジトリのカスタマイズを構造的に upgrade の書き込み対象外へ移す。
@@ -52,42 +56,42 @@ ralph の配布物を所有権ベースの 5 層オーバーレイ構造に再�
 
 ### Functional requirements
 
-- [ ] FR-1 `ralph upgrade` の非対話化: (1) L1 全置換(fork 記録のあるパスは置換抑止)→ (2) `.agents/skills/` ミラー再生成 → (3) settings.json ディープマージ → (4) managed block 更新 → (5) L5 欠落シード補充 → (6) advisory diff 収集 → (7) レポート出力(`docs/reports/upgrade-<version>-<date>.md`)→ (8) manifest 書き込み(バージョン前進は全工程成功時のみ)
-- [ ] FR-2 `ralph eject <path>`: core ファイルを fork(ユーザ所有)へ移す。manifest に fork 記録(`forked_from_version` を含む)を書き、以後の upgrade は当該パスを置換せず、新 core との diff を advisory としてレポートする
-- [ ] FR-3 `ralph adopt <path>|--all`: fork を core 所有へ戻す(ディスクを現行テンプレート内容で置換し fork 記録を削除)。現行 `--force` フラグは廃止し、これが唯一の再採用経路となる
-- [ ] FR-4 予期しない core 改変(fork 記録なしのハッシュ不一致)の扱い: upgrade は当該ファイルを**上書きせず**「未解決 drift」としてレポートに記録し、exit code で警告する。`eject`(改変維持)または `adopt`(改変破棄)で解消するまで、当該パスは据え置き
-- [ ] FR-5 managed block 仕様: 一意マーカー(`<!-- BEGIN RALPH MANAGED (ralph:<surface>) -->` / `<!-- END RALPH MANAGED -->`)、1 ファイル 1 ブロック。マーカー欠落時はファイル末尾に追記して報告。マーカー破損(片側欠落・重複)時は当該ファイルを据え置き、doctor が fail。HTML コメントを許容しないファイル種別(`.gitignore` 等)では、同じ surface キーを保ったまま行コメント形式のマーカー(`# BEGIN RALPH MANAGED (ralph:<surface>)` / `# END RALPH MANAGED`)を用いる
-- [ ] FR-6 旧レイアウト移行: `ralph upgrade` が旧レイアウト(manifest v1/v2、`meta.layout` なし)を検出したら、移行計画(パスごとの分類: 置換 / 移設 / fork 保全 / 削除)をプレビュー表示し、明示確認後に実行する。git 作業ツリーがクリーンであることを前提条件とし、汚れていれば中断する。移行結果は `docs/reports/ralph-migration-<date>.md` に出力する
-- [ ] FR-7 移行時の分類規則: 旧 manifest のハッシュ判定で未改変と分かったファイルは新レイアウトへ置換・移設(旧パスが廃止された場合は削除)。改変済みファイルは自動 fork 保全(対話なし)し、新 core との diff をレポートへ。unmanaged(旧 skip 記録)ファイルは fork として引き継ぐ
-- [ ] FR-8 移行時の CLAUDE.md / AGENTS.md: CLAUDE.md が旧テンプレート未改変なら最小シードへ置換、改変済みなら一切触らない(ralph ガイダンスは `.claude/rules/ralph/` から供給されるため、どちらでも機能は成立)。AGENTS.md は旧テンプレート由来の未改変内容を managed block に置換し、ユーザ追記は block 外に保全する(Phase 4 追補: AGENTS.md / `.gitignore` が**改変済み**の場合、この置換は行わない — ファイルは据え置き、連鎖する v2 upgrade の block エンジンが block 外を保全したまま managed block を追記する。旧テンプレート由来内容が block 外に重複して残り得るため、移行レポートで手動整理を案内する。改変済みファイルの内容手術(テンプレート断片の自動識別・除去)は非決定的なため意図的に行わない — 詳細は `docs/plans/active/2026-08-18-overlay-scaffold-v2-p4.md` Design decisions を参照)
-- [ ] FR-9 `ralph doctor --strict`: (a) core 全ファイルのハッシュが埋め込みテンプレートと一致(fork 記録済みを除く)、(b) managed block の健在(マーカー整合 + block 内容が期待値と一致)、(c) settings.json の ralph 所有キーの健在、(d) 全追跡ファイルにコンフリクトマーカー不在、(e) manifest と実体の整合 — を検査し、違反があれば exit 1。`--strict` なしの doctor は同内容を警告表示に留める
-- [ ] FR-10 上流固有記述の混入ガード: `templates/` 配下にメタリポジトリ固有の参照(リポジトリ名、maintainer 専用要素等)が含まれないことを検査するスクリプトを追加し、メタリポジトリの CI(`run-static-verify.sh` 系列)に組み込む
-- [ ] FR-11 `ralph init`: v2 レイアウトを直接生成する(managed block 付き AGENTS.md、最小 CLAUDE.md シード、dispatcher 化 settings.json、`.ralph/local/` 骨格を含む)。既存ファイルがある場合の挙動は現行踏襲(上書きしない)
-- [ ] FR-12 `ralph status`: パスごとの所有属性(core / fork / seed / block)と未解決 drift の一覧を表示する
-- [ ] FR-13 対話型コンフリクト解消の完全撤去: `resolveConflict` / `resolveConflictWithBaseline` / conflict marker 編集フロー / `--diff` の対話文脈 / `.ralph/baseline/` 書き込みを削除する。`--dry-run` は新動作(置換・block 更新・advisory の予定一覧)のプレビューとして維持する
+- [x] FR-1 `ralph upgrade` の非対話化: (1) L1 全置換(fork 記録のあるパスは置換抑止)→ (2) `.agents/skills/` ミラー再生成 → (3) settings.json ディープマージ → (4) managed block 更新 → (5) L5 欠落シード補充 → (6) advisory diff 収集 → (7) レポート出力(`docs/reports/upgrade-<version>-<date>.md`)→ (8) manifest 書き込み(バージョン前進は全工程成功時のみ)
+- [x] FR-2 `ralph eject <path>`: core ファイルを fork(ユーザ所有)へ移す。manifest に fork 記録(`forked_from_version` を含む)を書き、以後の upgrade は当該パスを置換せず、新 core との diff を advisory としてレポートする
+- [x] FR-3 `ralph adopt <path>|--all`: fork を core 所有へ戻す(ディスクを現行テンプレート内容で置換し fork 記録を削除)。現行 `--force` フラグは廃止し、これが唯一の再採用経路となる
+- [x] FR-4 予期しない core 改変(fork 記録なしのハッシュ不一致)の扱い: upgrade は当該ファイルを**上書きせず**「未解決 drift」としてレポートに記録し、exit code で警告する。`eject`(改変維持)または `adopt`(改変破棄)で解消するまで、当該パスは据え置き
+- [x] FR-5 managed block 仕様: 一意マーカー(`<!-- BEGIN RALPH MANAGED (ralph:<surface>) -->` / `<!-- END RALPH MANAGED -->`)、1 ファイル 1 ブロック。マーカー欠落時はファイル末尾に追記して報告。マーカー破損(片側欠落・重複)時は当該ファイルを据え置き、doctor が fail。HTML コメントを許容しないファイル種別(`.gitignore` 等)では、同じ surface キーを保ったまま行コメント形式のマーカー(`# BEGIN RALPH MANAGED (ralph:<surface>)` / `# END RALPH MANAGED`)を用いる
+- [x] FR-6 旧レイアウト移行: `ralph upgrade` が旧レイアウト(manifest v1/v2、`meta.layout` なし)を検出したら、移行計画(パスごとの分類: 置換 / 移設 / fork 保全 / 削除)をプレビュー表示し、明示確認後に実行する。git 作業ツリーがクリーンであることを前提条件とし、汚れていれば中断する。移行結果は `docs/reports/ralph-migration-<date>.md` に出力する
+- [x] FR-7 移行時の分類規則: 旧 manifest のハッシュ判定で未改変と分かったファイルは新レイアウトへ置換・移設(旧パスが廃止された場合は削除)。改変済みファイルは自動 fork 保全(対話なし)し、新 core との diff をレポートへ。unmanaged(旧 skip 記録)ファイルは fork として引き継ぐ
+- [x] FR-8 移行時の CLAUDE.md / AGENTS.md: CLAUDE.md が旧テンプレート未改変なら最小シードへ置換、改変済みなら一切触らない(ralph ガイダンスは `.claude/rules/ralph/` から供給されるため、どちらでも機能は成立)。AGENTS.md は旧テンプレート由来の未改変内容を managed block に置換し、ユーザ追記は block 外に保全する(Phase 4 追補: AGENTS.md / `.gitignore` が**改変済み**の場合、この置換は行わない — ファイルは据え置き、連鎖する v2 upgrade の block エンジンが block 外を保全したまま managed block を追記する。旧テンプレート由来内容が block 外に重複して残り得るため、移行レポートで手動整理を案内する。改変済みファイルの内容手術(テンプレート断片の自動識別・除去)は非決定的なため意図的に行わない — 詳細は `docs/plans/active/2026-08-18-overlay-scaffold-v2-p4.md` Design decisions を参照)
+- [x] FR-9 `ralph doctor --strict`: (a) core 全ファイルのハッシュが埋め込みテンプレートと一致(fork 記録済みを除く)、(b) managed block の健在(マーカー整合 + block 内容が期待値と一致)、(c) settings.json の ralph 所有キーの健在、(d) 全追跡ファイルにコンフリクトマーカー不在、(e) manifest と実体の整合 — を検査し、違反があれば exit 1。`--strict` なしの doctor は同内容を警告表示に留める
+- [x] FR-10 上流固有記述の混入ガード: `templates/` 配下にメタリポジトリ固有の参照(リポジトリ名、maintainer 専用要素等)が含まれないことを検査するスクリプトを追加し、メタリポジトリの CI(`run-static-verify.sh` 系列)に組み込む
+- [x] FR-11 `ralph init`: v2 レイアウトを直接生成する(managed block 付き AGENTS.md、最小 CLAUDE.md シード、dispatcher 化 settings.json、`.ralph/local/` 骨格を含む)。既存ファイルがある場合の挙動は現行踏襲(上書きしない)
+- [x] FR-12 `ralph status`: パスごとの所有属性(core / fork / seed / block)と未解決 drift の一覧を表示する
+- [x] FR-13 対話型コンフリクト解消の完全撤去: `resolveConflict` / `resolveConflictWithBaseline` / conflict marker 編集フロー / `--diff` の対話文脈 / `.ralph/baseline/` 書き込みを削除する。`--dry-run` は新動作(置換・block 更新・advisory の予定一覧)のプレビューとして維持する
 
 ### Non-functional requirements
 
-- [ ] NFR-1 冪等性: 同一バイナリでの `ralph upgrade` 再実行は no-op(書き込みゼロ、標準出力に no-op を明記。収束済みの再実行では日付付きレポートファイル自体を書かない — レポートは新たな適用結果があった実行でのみ生成される)
-- [ ] NFR-2 非破壊性: upgrade / 移行のいかなる経路でも、fork・L2 block 外・L3・L5 既存ファイルの内容が失われない。移行前に git クリーン状態を強制することで全変更が git で復元可能
-- [ ] NFR-3 worktree 互換: L1 はコミット対象であり、新規 worktree / クローン直後でもハーネスが完全動作する(husky の gitignore 起因の hook 消失事故の回避)
-- [ ] NFR-4 ネットワーク非依存: upgrade・移行はバイナリ埋め込みテンプレートのみで完結する
-- [ ] NFR-5 Codex パリティ: `.codex/` / `.agents/skills/` の機械所有化後も、既存の同期ゲート(`check-sync.sh` / `check-skill-sync.sh`)が成立し続ける
+- [x] NFR-1 冪等性: 同一バイナリでの `ralph upgrade` 再実行は no-op(書き込みゼロ、標準出力に no-op を明記。収束済みの再実行では日付付きレポートファイル自体を書かない — レポートは新たな適用結果があった実行でのみ生成される)
+- [x] NFR-2 非破壊性: upgrade / 移行のいかなる経路でも、fork・L2 block 外・L3・L5 既存ファイルの内容が失われない。移行前に git クリーン状態を強制することで全変更が git で復元可能
+- [x] NFR-3 worktree 互換: L1 はコミット対象であり、新規 worktree / クローン直後でもハーネスが完全動作する(husky の gitignore 起因の hook 消失事故の回避)
+- [x] NFR-4 ネットワーク非依存: upgrade・移行はバイナリ埋め込みテンプレートのみで完結する
+- [x] NFR-5 Codex パリティ: `.codex/` / `.agents/skills/` の機械所有化後も、既存の同期ゲート(`check-sync.sh` / `check-skill-sync.sh`)が成立し続ける
 
 ## Acceptance criteria
 
-- [ ] AC-1 Given v2 レイアウトのリポジトリで L2 block 外・L3・L5 に任意のユーザ編集がある、when `ralph upgrade` を実行する、then プロンプトなしで完了し、機械所有ファイルと managed block 内以外は 1 バイトも変更されない
-- [ ] AC-2 Given AGENTS.md の block 外にユーザ記述がある、when upgrade を実行する、then block 内のみが新テンプレート内容に更新され、block 外は保全される
-- [ ] AC-3 Given settings.json にユーザ追加の permissions エントリがある、when upgrade を実行する、then ユーザエントリが保全され、ralph 所有キーのみ更新される
-- [ ] AC-4 Given core の skill ファイルを fork 記録なしで改変している、when upgrade を実行する、then 当該ファイルは上書きされず「未解決 drift」としてレポートされ、`doctor --strict` が exit 1 になる
-- [ ] AC-5 Given `ralph eject` 済みの core ファイル、when upgrade を実行する、then 当該ファイルは置換されず、新 core との diff が advisory としてレポートに含まれる
-- [ ] AC-6 Given 旧レイアウト(v1/v2 manifest)のリポジトリに改変済み skill と未改変 rule がある、when upgrade で移行を確認・実行する、then 改変済み skill は fork として保全され diff がレポートに出力され、未改変 rule は新配置に置換され、`meta.layout = "v2"` の manifest v3 が書かれる
-- [ ] AC-7 Given 移行またはアップグレードが途中で失敗する、when 再実行する、then manifest のバージョン・layout は前進しておらず、再実行で残工程が完了する
-- [ ] AC-8 Given 同一バージョンで upgrade 済み、when 再度 upgrade を実行する、then 書き込みが発生しない(no-op)
-- [ ] AC-9 Given 新規ディレクトリ、when `ralph init` を実行する、then 生成レイアウトが移行後リポジトリと同一構造になり、`doctor --strict` が exit 0 になる
-- [ ] AC-10 Given `.ralph/local/hooks/PostToolUse.d/` にユーザ drop-in がある、when 対象イベントが発火する、then core hook の後にユーザ drop-in が実行される
-- [ ] AC-11 Given `templates/` にメタリポジトリ固有参照を混入させる、when 混入ガードスクリプトを実行する、then exit 1 で検出される
-- [ ] AC-12 Given 対話解消コードの撤去後、when `internal/upgrade` / `internal/cli` を検索する、then 対話プロンプト・conflict marker 編集・baseline 書き込みの経路が存在しない
+- [x] AC-1 Given v2 レイアウトのリポジトリで L2 block 外・L3・L5 に任意のユーザ編集がある、when `ralph upgrade` を実行する、then プロンプトなしで完了し、機械所有ファイルと managed block 内以外は 1 バイトも変更されない
+- [x] AC-2 Given AGENTS.md の block 外にユーザ記述がある、when upgrade を実行する、then block 内のみが新テンプレート内容に更新され、block 外は保全される
+- [x] AC-3 Given settings.json にユーザ追加の permissions エントリがある、when upgrade を実行する、then ユーザエントリが保全され、ralph 所有キーのみ更新される
+- [x] AC-4 Given core の skill ファイルを fork 記録なしで改変している、when upgrade を実行する、then 当該ファイルは上書きされず「未解決 drift」としてレポートされ、`doctor --strict` が exit 1 になる
+- [x] AC-5 Given `ralph eject` 済みの core ファイル、when upgrade を実行する、then 当該ファイルは置換されず、新 core との diff が advisory としてレポートに含まれる
+- [x] AC-6 Given 旧レイアウト(v1/v2 manifest)のリポジトリに改変済み skill と未改変 rule がある、when upgrade で移行を確認・実行する、then 改変済み skill は fork として保全され diff がレポートに出力され、未改変 rule は新配置に置換され、`meta.layout = "v2"` の manifest v3 が書かれる
+- [x] AC-7 Given 移行またはアップグレードが途中で失敗する、when 再実行する、then manifest のバージョン・layout は前進しておらず、再実行で残工程が完了する
+- [x] AC-8 Given 同一バージョンで upgrade 済み、when 再度 upgrade を実行する、then 書き込みが発生しない(no-op)
+- [x] AC-9 Given 新規ディレクトリ、when `ralph init` を実行する、then 生成レイアウトが移行後リポジトリと同一構造になり、`doctor --strict` が exit 0 になる
+- [x] AC-10 Given `.ralph/local/hooks/PostToolUse.d/` にユーザ drop-in がある、when 対象イベントが発火する、then core hook の後にユーザ drop-in が実行される(Claude Code で検証済み。Codex 側は dispatcher 配線済みだが project-scoped hooks の実発火確認が trust 制約で未了 — docs/tech-debt/README.md の該当行を参照)
+- [x] AC-11 Given `templates/` にメタリポジトリ固有参照を混入させる、when 混入ガードスクリプトを実行する、then exit 1 で検出される
+- [x] AC-12 Given 対話解消コードの撤去後、when `internal/upgrade` / `internal/cli` を検索する、then 対話プロンプト・conflict marker 編集・baseline 書き込みの経路が存在しない
 
 ## User stories
 
