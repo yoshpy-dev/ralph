@@ -120,7 +120,13 @@ overlay-scaffold-v2 系列の残 FR(FR-2 eject / FR-3 adopt / FR-9 doctor --stri
 
 ## Open questions
 
-- Codex hooks の実プロトコル(stdin JSON の形、イベント名)— Slice 4 冒頭で実機調査し、結果をこのプランに追記する
+- ~~Codex hooks の実プロトコル(stdin JSON の形、イベント名)~~ → Slice 4 で解決(742260f): codex-cli 0.147.0 の実機テストでイベント発火(PostToolUse/Stop)は確認。project-scoped `[[hooks.*]]` の発火は scratch リポジトリでは trust 制約により再現できなかったが、`ralph-dispatch.sh` は stdin を無解釈のまま各 `.d` スクリプトへ透過するため、dispatcher 経由化はペイロード形の差異に依存しない(構造的に安全)。シム不要。詳細コメントは `.codex/config.toml` に記載。**残ギャップ**: 信頼済みプロジェクトでの対話的 `codex trust` 経由の実発火確認は未実施(Slice 5 で tech-debt 追記)。
+
+## Deviations
+
+- Slice 4(742260f): FR-10 ガード配線先は `run-static-verify.sh`(env ラッパ)ではなく実体の `scripts/verify.local.sh` `run_static_checks()`。`check-template-purity.sh` は downstream に ship しないため `check-sync.sh` の ROOT_ONLY_EXCLUSIONS に追加。
+- Slice 4 の purity スキャンが現行 `templates/` に既存リーク 5 件を検出(KNOWN LEAK として allowlist 化、ガードは green 維持): quality-gates.md の check-sync.sh / check-template.yml 引用、adding-a-language-pack.md の check-sync.sh 引用 ×4 行、check-pipeline-sync.sh / xreview-helpers.sh のコメント内メタリポ slug 引用。→ Slice 5 で修正し allowlist から除去する(スコープ追加)。
+- CLAUDE.md の「check-skill-sync.sh は meta-repo only」記述が stale(templates/base に同スクリプトは ship 済み)→ Slice 5 で修正(スコープ追加)。
 
 ## Evidence targets
 
@@ -136,7 +142,7 @@ overlay-scaffold-v2 系列の残 FR(FR-2 eject / FR-3 adopt / FR-9 doctor --stri
 - [x] Slice 1: eject + adopt(9bf09e2)
 - [x] Slice 2: doctor --strict(b884a38)
 - [x] Slice 3: status 所有表示(a61dbb5)
-- [ ] Slice 4: purity ガード + Codex dispatcher パリティ
+- [x] Slice 4: purity ガード + Codex dispatcher パリティ + pre_bash_guard 修正(742260f)
 - [ ] Slice 5: ドキュメント/スペック整合
 - [ ] Post-implementation pipeline(self-review → verify → test → sync-docs → cross-review)
 - [ ] /pr
