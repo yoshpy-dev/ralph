@@ -80,18 +80,18 @@ ralph の配布物を所有権ベースの 5 層オーバーレイ構造に再�
 
 ## Acceptance criteria
 
-- [ ] AC-1 Given v2 レイアウトのリポジトリで L2 block 外・L3・L5 に任意のユーザ編集がある、when `ralph upgrade` を実行する、then プロンプトなしで完了し、機械所有ファイルと managed block 内以外は 1 バイトも変更されない
-- [ ] AC-2 Given AGENTS.md の block 外にユーザ記述がある、when upgrade を実行する、then block 内のみが新テンプレート内容に更新され、block 外は保全される
-- [ ] AC-3 Given settings.json にユーザ追加の permissions エントリがある、when upgrade を実行する、then ユーザエントリが保全され、ralph 所有キーのみ更新される
-- [ ] AC-4 Given core の skill ファイルを fork 記録なしで改変している、when upgrade を実行する、then 当該ファイルは上書きされず「未解決 drift」としてレポートされ、`doctor --strict` が exit 1 になる
-- [ ] AC-5 Given `ralph eject` 済みの core ファイル、when upgrade を実行する、then 当該ファイルは置換されず、新 core との diff が advisory としてレポートに含まれる
-- [ ] AC-6 Given 旧レイアウト(v1/v2 manifest)のリポジトリに改変済み skill と未改変 rule がある、when upgrade で移行を確認・実行する、then 改変済み skill は fork として保全され diff がレポートに出力され、未改変 rule は新配置に置換され、`meta.layout = "v2"` の manifest v3 が書かれる
-- [ ] AC-7 Given 移行またはアップグレードが途中で失敗する、when 再実行する、then manifest のバージョン・layout は前進しておらず、再実行で残工程が完了する
-- [ ] AC-8 Given 同一バージョンで upgrade 済み、when 再度 upgrade を実行する、then 書き込みが発生しない(no-op)
-- [ ] AC-9 Given 新規ディレクトリ、when `ralph init` を実行する、then 生成レイアウトが移行後リポジトリと同一構造になり、`doctor --strict` が exit 0 になる
-- [ ] AC-10 Given `.ralph/local/hooks/PostToolUse.d/` にユーザ drop-in がある、when 対象イベントが発火する、then core hook の後にユーザ drop-in が実行される
-- [ ] AC-11 Given `templates/` にメタリポジトリ固有参照を混入させる、when 混入ガードスクリプトを実行する、then exit 1 で検出される
-- [ ] AC-12 Given 対話解消コードの撤去後、when `internal/upgrade` / `internal/cli` を検索する、then 対話プロンプト・conflict marker 編集・baseline 書き込みの経路が存在しない
+- [x] AC-1 Given v2 レイアウトのリポジトリで L2 block 外・L3・L5 に任意のユーザ編集がある、when `ralph upgrade` を実行する、then プロンプトなしで完了し、機械所有ファイルと managed block 内以外は 1 バイトも変更されない
+- [x] AC-2 Given AGENTS.md の block 外にユーザ記述がある、when upgrade を実行する、then block 内のみが新テンプレート内容に更新され、block 外は保全される
+- [x] AC-3 Given settings.json にユーザ追加の permissions エントリがある、when upgrade を実行する、then ユーザエントリが保全され、ralph 所有キーのみ更新される
+- [x] AC-4 Given core の skill ファイルを fork 記録なしで改変している、when upgrade を実行する、then 当該ファイルは上書きされず「未解決 drift」としてレポートされ、`doctor --strict` が exit 1 になる
+- [x] AC-5 Given `ralph eject` 済みの core ファイル、when upgrade を実行する、then 当該ファイルは置換されず、新 core との diff が advisory としてレポートに含まれる
+- [x] AC-6 Given 旧レイアウト(v1/v2 manifest)のリポジトリに改変済み skill と未改変 rule がある、when upgrade で移行を確認・実行する、then 改変済み skill は fork として保全され diff がレポートに出力され、未改変 rule は新配置に置換され、`meta.layout = "v2"` の manifest v3 が書かれる
+- [x] AC-7 Given 移行またはアップグレードが途中で失敗する、when 再実行する、then manifest のバージョン・layout は前進しておらず、再実行で残工程が完了する
+- [x] AC-8 Given 同一バージョンで upgrade 済み、when 再度 upgrade を実行する、then 書き込みが発生しない(no-op)
+- [x] AC-9 Given 新規ディレクトリ、when `ralph init` を実行する、then 生成レイアウトが移行後リポジトリと同一構造になり、`doctor --strict` が exit 0 になる
+- [x] AC-10 Given `.ralph/local/hooks/PostToolUse.d/` にユーザ drop-in がある、when 対象イベントが発火する、then core hook の後にユーザ drop-in が実行される(Claude Code で検証済み。Codex 側は dispatcher 配線済みだが project-scoped hooks の実発火確認が trust 制約で未了 — docs/tech-debt/README.md の該当行を参照)
+- [x] AC-11 Given `templates/` にメタリポジトリ固有参照を混入させる、when 混入ガードスクリプトを実行する、then exit 1 で検出される
+- [x] AC-12 Given 対話解消コードの撤去後、when `internal/upgrade` / `internal/cli` を検索する、then 対話プロンプト・conflict marker 編集・baseline 書き込みの経路が存在しない
 
 ## User stories
 
