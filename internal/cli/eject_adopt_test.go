@@ -385,8 +385,31 @@ func filterOutPath(entries []string, relPath string) []string {
 // target's parent directory is replaced with a symlink between eject and
 // adopt; --all's preflight must reject the whole batch (including the other,
 // otherwise-valid fork) with zero writes.
+//
+// "packs/languages/golang/verify.sh" sorts BEFORE "scripts/run-verify.sh"
+// (--all's targets are processed in path order, see resolveAdoptAllTargets),
+// so this test corrupts the LATER-sorting target (scripts/) and leaves the
+// EARLIER-sorting one (packs/languages/golang) valid — not the reverse. That
+// choice is what actually distinguishes a preflight-everything-before-
+// writing-anything design from a write-as-you-go one: if the corrupted
+// target sorted first, a write-as-you-go implementation would also fail on
+// that same first target before ever reaching the valid one, and the
+// untouched-file assertion below would pass under either design (self-review
+// M3, docs/reports/self-review-2026-08-19-overlay-scaffold-v2-p5.md). With
+// the valid target sorting first instead, only a true preflight-first
+// design leaves it un-overwritten when the batch aborts on the later,
+// corrupted target.
 func TestRunAdoptIO_PreflightFailure_AllBatchZeroWrites(t *testing.T) {
 	target := initV2Project(t, gen1(), "1.0.0-test")
+
+	// Modify packs/languages/golang/verify.sh's content before ejecting it,
+	// so its fork content genuinely diverges from the current template.
+	// Ejecting an UNMODIFIED core path records a fork whose content is
+	// byte-identical to the template, which the byte-equality assertion
+	// below could not tell apart from "adopt overwrote it with the
+	// template" either way — a modified fork is required to make the
+	// write-as-you-go distinction observable at all.
+	writeMigrationDiskFile(t, target, "packs/languages/golang/verify.sh", "#!/bin/sh\necho user-owned-golang-verify\n")
 
 	for _, p := range []string{"scripts/run-verify.sh", "packs/languages/golang/verify.sh"} {
 		var out bytes.Buffer
@@ -396,21 +419,21 @@ func TestRunAdoptIO_PreflightFailure_AllBatchZeroWrites(t *testing.T) {
 	}
 	commitAllForAdoptTest(t, target)
 
-	runVerifyBefore := mustReadFile(t, filepath.Join(target, "scripts", "run-verify.sh"))
+	golangVerifyBefore := mustReadFile(t, filepath.Join(target, "packs", "languages", "golang", "verify.sh"))
 	manifestPath := filepath.Join(target, ".ralph", "manifest.toml")
 
-	// Corrupt packs/languages/golang's parent chain: replace the directory
-	// with a symlink so ValidateRealParentChain refuses it. Re-commit
-	// afterward so the git-clean precondition still passes and the failure
-	// under test is genuinely the preflight (not the unrelated git-dirty
-	// check racing ahead of it).
-	golangDir := filepath.Join(target, "packs", "languages", "golang")
-	if err := os.RemoveAll(golangDir); err != nil {
-		t.Fatalf("removing %s: %v", golangDir, err)
+	// Corrupt scripts/'s parent chain: replace the directory with a symlink
+	// so ValidateRealParentChain refuses it. Re-commit afterward so the
+	// git-clean precondition still passes and the failure under test is
+	// genuinely the preflight (not the unrelated git-dirty check racing
+	// ahead of it).
+	scriptsDir := filepath.Join(target, "scripts")
+	if err := os.RemoveAll(scriptsDir); err != nil {
+		t.Fatalf("removing %s: %v", scriptsDir, err)
 	}
 	elsewhere := t.TempDir()
-	if err := os.Symlink(elsewhere, golangDir); err != nil {
-		t.Fatalf("symlinking %s: %v", golangDir, err)
+	if err := os.Symlink(elsewhere, scriptsDir); err != nil {
+		t.Fatalf("symlinking %s: %v", scriptsDir, err)
 	}
 	commitAllForAdoptTest(t, target)
 
@@ -420,16 +443,16 @@ func TestRunAdoptIO_PreflightFailure_AllBatchZeroWrites(t *testing.T) {
 	if err == nil {
 		t.Fatal("adopt --all with a symlinked target parent: expected an error, got nil")
 	}
-	if !strings.Contains(err.Error(), "packs/languages/golang/verify.sh") {
+	if !strings.Contains(err.Error(), "scripts/run-verify.sh") {
 		t.Errorf("err = %v, want it to name the failing target", err)
 	}
 
-	runVerifyAfter := mustReadFile(t, filepath.Join(target, "scripts", "run-verify.sh"))
-	if !bytes.Equal(runVerifyBefore, runVerifyAfter) {
-		t.Error("a batch preflight failure must leave the other (valid) fork untouched")
+	golangVerifyAfter := mustReadFile(t, filepath.Join(target, "packs", "languages", "golang", "verify.sh"))
+	if !bytes.Equal(golangVerifyBefore, golangVerifyAfter) {
+		t.Error("a batch preflight failure must leave the other (valid, earlier-sorting) fork untouched")
 	}
-	golangVerifyAfterInfo, statErr := os.Lstat(golangDir)
-	if statErr != nil || golangVerifyAfterInfo.Mode()&os.ModeSymlink == 0 {
+	scriptsAfterInfo, statErr := os.Lstat(scriptsDir)
+	if statErr != nil || scriptsAfterInfo.Mode()&os.ModeSymlink == 0 {
 		t.Error("the corrupted target's directory must remain untouched (still a symlink)")
 	}
 	manifestAfter := mustReadFile(t, manifestPath)

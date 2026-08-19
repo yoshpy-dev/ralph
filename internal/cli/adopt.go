@@ -144,7 +144,7 @@ func runAdoptIO(targetDir string, opts adoptOptions, in io.Reader, out, errOut i
 		writef(out, "  %s (%s -> core)\n", t.Path, t.FromState)
 	}
 
-	confirmed, cerr := confirmMigration(in, out, opts.Yes)
+	confirmed, cerr := confirmDestructiveOp(in, out, opts.Yes, "adopt")
 	if cerr != nil {
 		return fmt.Errorf("reading adopt confirmation: %w", cerr)
 	}

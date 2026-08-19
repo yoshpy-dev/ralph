@@ -272,6 +272,57 @@ func TestStatusCmd_ScaffoldSection_EmptyOrgRosterStillRendersScaffold(t *testing
 	}
 }
 
+// TestStatusCmd_ScaffoldSection_ComputationError_DegradesGracefully is the
+// M7 regression guard: a scaffold-ownership computation failure (here, a
+// core-owned path replaced by a directory, so PlanCoreReplaceDesired's
+// readDiskFile hits EISDIR rather than the pre-existing os.ErrNotExist
+// short-circuit) must degrade the scaffold section to "unavailable (<err>)"
+// rather than aborting `ralph status` entirely -- the org roster output
+// must still render, in both text and --json, and the command must still
+// exit 0.
+func TestStatusCmd_ScaffoldSection_ComputationError_DegradesGracefully(t *testing.T) {
+	target := initV2Project(t, gen1(), "1.0.0-test")
+
+	// Replace a core-owned file with a directory: PlanCoreReplaceDesired's
+	// readDiskFile hits EISDIR (not os.ErrNotExist), so resolveOwnershipPlan
+	// returns a genuine error instead of the "no manifest" nil-error path.
+	runVerifyPath := filepath.Join(target, "scripts", "run-verify.sh")
+	if err := os.Remove(runVerifyPath); err != nil {
+		t.Fatalf("removing scripts/run-verify.sh: %v", err)
+	}
+	if err := os.MkdirAll(runVerifyPath, 0o755); err != nil {
+		t.Fatalf("replacing scripts/run-verify.sh with a directory: %v", err)
+	}
+
+	t.Chdir(target)
+	orgStateDir := t.TempDir()
+	seedTwoOrgManifest(t, orgStateDir)
+
+	out, err := runStatusCmd(t, "--state-dir", orgStateDir)
+	if err != nil {
+		t.Fatalf("status: %v (output: %s)", err, out)
+	}
+	if !strings.Contains(out, "Scaffold ownership: unavailable (") {
+		t.Errorf("expected the degraded scaffold section, got:\n%s", out)
+	}
+	// Org output must be completely unaffected by the scaffold failure.
+	if !strings.Contains(out, "org_id: org-a") || !strings.Contains(out, "org_id: org-b") {
+		t.Errorf("expected unaffected org output, got:\n%s", out)
+	}
+
+	jsonOut, err := runStatusCmd(t, "--state-dir", orgStateDir, "--json")
+	if err != nil {
+		t.Fatalf("status --json: %v (output: %s)", err, jsonOut)
+	}
+	payload := decodeStatusScaffoldPayload(t, jsonOut)
+	if payload.Scaffold == nil {
+		t.Fatalf("expected a non-nil scaffold key even on computation failure, got none:\n%s", jsonOut)
+	}
+	if !strings.Contains(jsonOut, `"error"`) {
+		t.Errorf("expected the scaffold.error key in --json output, got:\n%s", jsonOut)
+	}
+}
+
 // TestStatusCmd_ScaffoldSection_OrgAndScaffoldCombined_FlagsScopedToOrgOnly
 // is the AC-10 matrix cell combining real org state with a v2 scaffold
 // project, and pins that --org-id / --state-dir only scope the org portion:

@@ -331,6 +331,63 @@ func TestCheckScaffoldIntegrity_NoManifest_ReturnsNil(t *testing.T) {
 	}
 }
 
+// TestCheckScaffoldIntegrity_CorruptManifest_StrictFails is the M2
+// regression guard: a `.ralph/manifest.toml` that exists but fails to
+// parse (corrupt TOML) must NOT be treated the same as "no manifest at
+// all" -- it is a strict-eligible violation in its own right. Before the
+// fix, checkScaffoldIntegrity returned nil (zero results) for any
+// ReadManifest error, which made --strict exit 0 on a corrupted manifest:
+// the integrity gate failed open exactly when the manifest was least
+// trustworthy.
+func TestCheckScaffoldIntegrity_CorruptManifest_StrictFails(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".ralph"), 0o755); err != nil {
+		t.Fatalf("MkdirAll .ralph: %v", err)
+	}
+	corrupt := []byte("this is not valid TOML: [[[\n")
+	if err := os.WriteFile(filepath.Join(dir, ".ralph", "manifest.toml"), corrupt, 0o644); err != nil {
+		t.Fatalf("writing corrupt manifest.toml: %v", err)
+	}
+
+	strictResults := checkScaffoldIntegrity(dir, true)
+	if len(strictResults) != 1 {
+		t.Fatalf("strict: got %d results, want 1: %+v", len(strictResults), strictResults)
+	}
+	if strictResults[0].Status != "fail" {
+		t.Errorf("strict: Status = %q, want \"fail\" (Detail: %s)", strictResults[0].Status, strictResults[0].Detail)
+	}
+
+	warnResults := checkScaffoldIntegrity(dir, false)
+	if len(warnResults) != 1 {
+		t.Fatalf("non-strict: got %d results, want 1: %+v", len(warnResults), warnResults)
+	}
+	if warnResults[0].Status != "warn" {
+		t.Errorf("non-strict: Status = %q, want \"warn\" (Detail: %s)", warnResults[0].Status, warnResults[0].Detail)
+	}
+
+	// Integration pin: runDoctorFull's exit code must actually flip under
+	// --strict for a corrupt manifest, the same AC-8 shape
+	// TestRunDoctorFull_StrictFlipsExitCode_DriftedCore pins for drift.
+	binDir := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, bin := range []string{"claude", "codex", "go"} {
+		writeStubBin(t, binDir, bin, "")
+	}
+	t.Setenv("PATH", binDir)
+	t.Setenv("RALPH_ORG_AGMSG_HOME", filepath.Join(dir, "no-such-agmsg-home"))
+
+	nonStrictErr := captureStdout(t, func() error { return runDoctorFull(dir, false, false) })
+	if nonStrictErr != nil {
+		t.Errorf("non-strict: err = %v, want nil (a corrupt manifest is a warning without --strict)", nonStrictErr)
+	}
+	strictErr := captureStdout(t, func() error { return runDoctorFull(dir, false, true) })
+	if strictErr == nil {
+		t.Fatal("strict: err = nil, want non-nil (a corrupt manifest must fail --strict)")
+	}
+}
+
 // captureStdout runs fn with os.Stdout redirected to a pipe (discarding the
 // captured output) and returns fn's error, mirroring doctor_org_test.go's
 // stdout-capture pattern for tests that only care about the returned error.

@@ -73,9 +73,18 @@ func runStatus(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID string,
 	// flags scope org-runtime state only (see the command's Long
 	// description). "." mirrors how `ralph doctor` resolves its own
 	// scaffold-integrity checks (checkScaffoldIntegrity, doctor.go).
-	scaffoldStat, err := buildScaffoldStatus(".")
-	if err != nil {
-		return fmt.Errorf("status: %w", err)
+	//
+	// A scaffold-ownership computation error (e.g. a template load failure,
+	// or a disk read PlanCoreReplaceDesired performs) degrades to an
+	// "unavailable" scaffold section rather than aborting the whole
+	// command: before FR-12, `ralph status` was a read-only org report with
+	// no scaffold failure mode at all, and buildScaffoldStatus already
+	// degrades gracefully for the "no manifest" case -- a single unreadable
+	// tracked file taking the entire org roster down with it would be a new
+	// asymmetry within this same function.
+	scaffoldStat, scaffoldErr := buildScaffoldStatus(".")
+	if scaffoldErr != nil {
+		scaffoldStat = &scaffoldStatus{Err: scaffoldErr.Error()}
 	}
 
 	// IncludeDryRun: true -- this top-level summary command has no --all
@@ -305,9 +314,13 @@ type statusScaffoldFileJSON struct {
 // statusScaffoldJSON is the --json wire shape of the FR-12 scaffold-
 // ownership section. Layout is "v2" or "legacy"; Files/Drift are only
 // populated for "v2" (a legacy manifest carries just {"layout":"legacy"} --
-// see buildStatusScaffoldJSON).
+// see buildStatusScaffoldJSON). Error is additive: set only when
+// buildScaffoldStatus's computation itself failed (M7), in which case
+// Layout/Files/Drift are all left zero -- a machine consumer should check
+// Error first before assuming a v2/legacy shape.
 type statusScaffoldJSON struct {
-	Layout string                   `json:"layout"`
+	Error  string                   `json:"error,omitempty"`
+	Layout string                   `json:"layout,omitempty"`
 	Files  []statusScaffoldFileJSON `json:"files,omitempty"`
 	Drift  []string                 `json:"drift,omitempty"`
 }
@@ -316,10 +329,16 @@ type statusScaffoldJSON struct {
 // when s is nil (no manifest at all), which the statusJSON.Scaffold
 // `omitempty` tag then drops from the encoded payload entirely -- the
 // chosen representation for "not a ralph project" (see status.go's package
-// doc / newStatusCmd's Long description).
+// doc / newStatusCmd's Long description). Distinct from s.Err != "" (a
+// manifest exists but the ownership computation failed), which renders
+// {"error": "..."} instead of omitting the key -- the caller still gets a
+// "scaffold" key, just one it must check Error on before reading the rest.
 func buildStatusScaffoldJSON(s *scaffoldStatus) *statusScaffoldJSON {
 	if s == nil {
 		return nil
+	}
+	if s.Err != "" {
+		return &statusScaffoldJSON{Error: s.Err}
 	}
 	if s.Layout != scaffold.LayoutV2 {
 		return &statusScaffoldJSON{Layout: s.Layout}
@@ -433,7 +452,18 @@ type scaffoldOwnershipFile struct {
 // plus which paths are in unresolved drift. Layout is scaffold.LayoutV2
 // ("v2") or "legacy"; Files/Drift are only populated for "v2" (see
 // buildScaffoldStatus).
+//
+// Err is set (Layout/Files/Drift left zero) when buildScaffoldStatus's
+// computation itself failed -- a template load error, or a disk read
+// PlanCoreReplaceDesired performs -- as opposed to the "no manifest at
+// all" case, which callers represent as a nil *scaffoldStatus instead (see
+// buildScaffoldStatus's doc). Both printScaffoldSection and
+// buildStatusScaffoldJSON check Err first and render an "unavailable"
+// section/JSON shape rather than erroring `ralph status` out entirely
+// (M7: a scaffold-ownership computation failure must not take the org
+// roster section down with it).
 type scaffoldStatus struct {
+	Err    string
 	Layout string
 	Files  []scaffoldOwnershipFile
 	Drift  []string
@@ -516,6 +546,11 @@ func buildScaffoldStatus(targetDir string) (*scaffoldStatus, error) {
 // "Unresolved drift" list below already covers), then the drift list.
 func printScaffoldSection(out io.Writer, s *scaffoldStatus) {
 	if s == nil {
+		return
+	}
+	if s.Err != "" {
+		_, _ = fmt.Fprintf(out, "Scaffold ownership: unavailable (%s)\n", s.Err)
+		_, _ = fmt.Fprintln(out)
 		return
 	}
 	if s.Layout != scaffold.LayoutV2 {

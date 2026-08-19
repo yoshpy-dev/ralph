@@ -10,10 +10,11 @@ set -euo pipefail
 #
 # Detection is a declarative pattern list (fixed-string + regex), scanned
 # against every file under templates/. A hit is reported unless it is
-# listed in ALLOWLIST for that exact (path, pattern) pair — the allowlist
-# exists for pre-existing, tracked leaks that are out of scope to fix in
-# the slice that introduced this guard (see each entry's reason) and for
-# genuinely intentional occurrences.
+# listed in ALLOWLIST for that exact (path, pattern) pair. ALLOWLIST is
+# empty today (every leak found when this guard was introduced was fixed,
+# not deferred — see ALLOWLIST's own comment below); the mechanism exists
+# for a future genuinely intentional occurrence, with a reason recorded at
+# the entry.
 #
 # Exit code: 0 if clean (after allowlisting), 1 if any unallowlisted hit
 # is found.
@@ -49,9 +50,21 @@ FIXED_PATTERNS=(
 )
 
 # ─── Regex patterns ─────────────────────────────────────────────────────
-# "regex|reason" — matched with `grep -E`.
+# Two parallel arrays (REGEX_PATTERNS / REGEX_REASONS), matched with
+# `grep -E` — NOT single "pattern|reason" strings like FIXED_PATTERNS
+# above. A regex pattern is free to contain a literal `|` (alternation),
+# so splitting a combined string on the first `|` truncates any regex that
+# uses alternation before its own reason field even begins, silently
+# corrupting the pattern instead of erroring. The pattern below is exactly
+# such a case: its `|` is alternation, not a delimiter — this was the
+# tech-debt row 106 lesson ("a fixed regression testing gap") recurring in
+# a new shape, where the split-on-`|` idiom is only safe for a delimiter
+# character that cannot itself appear in the payload.
 REGEX_PATTERNS=(
-  "docs/(reports|plans)/[a-zA-Z_/-]*[0-9]{4}-[0-9]{2}-[0-9]{2}|literal dated meta-repo report/plan filename (as opposed to a <date>-<slug> placeholder) baked into shipped template content"
+  "docs/(reports|plans)/[a-zA-Z_/-]*[0-9]{4}-[0-9]{2}-[0-9]{2}"
+)
+REGEX_REASONS=(
+  "literal dated meta-repo report/plan filename (as opposed to a <date>-<slug> placeholder) baked into shipped template content"
 )
 
 # ─── Allowlist ──────────────────────────────────────────────────────────
@@ -79,8 +92,40 @@ is_allowlisted() {
 hits=0
 hit_lines=()
 
+# grep_scan_or_fail <-F|-E> <pattern> — runs grep in the given mode against
+# $SCAN_ROOT, capturing matched lines into the global _scan_output. Returns
+# 0 when there were matches (caller should process _scan_output), 1 when
+# there were no matches (nothing to do, same as a plain grep miss), and
+# exits the WHOLE script on any grep-level error (exit >1: bad regex,
+# unreadable file, etc.) instead of the silently swallowed "|| true" this
+# replaces — the exact omission that let H1's dead regex branch
+# (parentheses-unbalanced `grep -E` failure) go unnoticed for so long.
+# Deliberately NOT invoked via process substitution (`< <(...)`) by its
+# callers below: a subshell's `exit` only terminates the subshell, not the
+# script, which would silently defeat this function's entire purpose.
+grep_scan_or_fail() {
+  local mode="$1" pattern="$2" status
+  set +e
+  _scan_output="$(grep -rn --binary-files=without-match "$mode" -- "$pattern" "$SCAN_ROOT" 2>&1)"
+  status=$?
+  set -e
+  case "$status" in
+    0) return 0 ;;
+    1) return 1 ;;
+    *)
+      echo "" >&2
+      echo "FAIL: grep $mode failed (exit $status) while scanning pattern: $pattern" >&2
+      echo "$_scan_output" >&2
+      exit 1
+      ;;
+  esac
+}
+
 scan_fixed() {
   local pattern="$1" reason="$2" line path
+  if ! grep_scan_or_fail -F "$pattern"; then
+    return
+  fi
   while IFS= read -r line; do
     [ -z "$line" ] && continue
     path="${line%%:*}"
@@ -89,11 +134,14 @@ scan_fixed() {
     fi
     hits=$((hits + 1))
     hit_lines+=("$line  [pattern: $pattern — $reason]")
-  done < <(grep -rn --binary-files=without-match -F -- "$pattern" "$SCAN_ROOT" 2>/dev/null || true)
+  done <<< "$_scan_output"
 }
 
 scan_regex() {
   local pattern="$1" reason="$2" line path
+  if ! grep_scan_or_fail -E "$pattern"; then
+    return
+  fi
   while IFS= read -r line; do
     [ -z "$line" ] && continue
     path="${line%%:*}"
@@ -102,7 +150,7 @@ scan_regex() {
     fi
     hits=$((hits + 1))
     hit_lines+=("$line  [pattern: $pattern — $reason]")
-  done < <(grep -rnE --binary-files=without-match -- "$pattern" "$SCAN_ROOT" 2>/dev/null || true)
+  done <<< "$_scan_output"
 }
 
 echo "=== Checking $SCAN_ROOT for meta-repo-specific references ==="
@@ -113,10 +161,8 @@ for entry in "${FIXED_PATTERNS[@]}"; do
   scan_fixed "$pattern" "$reason"
 done
 
-for entry in "${REGEX_PATTERNS[@]}"; do
-  pattern="${entry%%|*}"
-  reason="${entry#*|}"
-  scan_regex "$pattern" "$reason"
+for i in "${!REGEX_PATTERNS[@]}"; do
+  scan_regex "${REGEX_PATTERNS[$i]}" "${REGEX_REASONS[$i]}"
 done
 
 if [ "$hits" -gt 0 ]; then

@@ -1043,15 +1043,31 @@ func checkGitCleanForDestructiveOp(absDir, opName string) error {
 	return nil
 }
 
-// confirmMigration implements the plan's confirm UX: autoYes (--yes) skips
-// the prompt; otherwise a y/N prompt is read from in. A non-interactive EOF
-// (no input available) reads as an empty line, which is treated as "no" —
-// aborting safely rather than blocking or erroring.
+// confirmMigration implements the plan's confirm UX for migration:
+// autoYes (--yes) skips the prompt; otherwise a y/N prompt naming
+// "migration" is read from in. Thin wrapper over confirmDestructiveOp so
+// migration's own call site is unaffected by the eject/adopt
+// (internal/cli/adopt.go) extraction below, the same convention
+// checkGitCleanForMigration uses over checkGitCleanForDestructiveOp.
 func confirmMigration(in io.Reader, out io.Writer, autoYes bool) (bool, error) {
+	return confirmDestructiveOp(in, out, autoYes, "migration")
+}
+
+// confirmDestructiveOp implements the plan's confirm UX: autoYes (--yes)
+// skips the prompt; otherwise a "Proceed with <opName>? [y/N] " prompt is
+// read from in. A non-interactive EOF (no input available) reads as an
+// empty line, which is treated as "no" — aborting safely rather than
+// blocking or erroring. opName is interpolated into the prompt (e.g.
+// "migration", "adopt") so each caller's confirmation reads correctly for
+// the operation it is actually confirming — extracted from the
+// migration-only confirmMigration so `ralph adopt` (adopt.go) does not
+// read "Proceed with migration?" before discarding the user's own edits
+// (self-review M4, docs/reports/self-review-2026-08-19-overlay-scaffold-v2-p5.md).
+func confirmDestructiveOp(in io.Reader, out io.Writer, autoYes bool, opName string) (bool, error) {
 	if autoYes {
 		return true, nil
 	}
-	writef(out, "Proceed with migration? [y/N] ")
+	writef(out, "Proceed with %s? [y/N] ", opName)
 	line, err := bufio.NewReader(in).ReadString('\n')
 	if err != nil && !errors.Is(err, io.EOF) {
 		return false, err

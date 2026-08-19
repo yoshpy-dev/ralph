@@ -121,7 +121,7 @@ Before claiming a task is done:
 | `ralph org spawn/send/wait/read/stop/status/disband` | Manage org-runtime seats for autonomous multi-seat execution. |
 | `ralph status [--org-id <id>]` | Show scaffold ownership (core/fork/seed/block) and unresolved drift, plus org roster status and watch-status summary (table or `--json`). |
 | `ralph pack add <lang>` | Install a language pack. |
-| `ralph doctor [--strict]` | Check Claude Code, Codex, hooks, manifest drift, language packs; `--strict` exits 1 on any core-hash mismatch, block damage, settings-key drift, conflict marker, or manifest/disk mismatch — the CI-grade integrity gate. |
+| `ralph doctor [--strict]` | Check Claude Code, Codex, hooks, manifest drift, language packs; `--strict` exits 1 on any core-hash mismatch, block damage, settings-key drift, conflict marker, or manifest/disk mismatch — the CI-grade integrity gate. Block/settings-key checks compare against the *current binary's* templates with no pending-update tolerance (unlike the core-hash check, FR-4) — run `ralph upgrade` before `doctor --strict` right after upgrading the `ralph` binary itself, or a version-skew pending update reads as scaffold damage. |
 | `ralph insights [--json]` | Aggregate pipeline insight events into a routing/pipeline summary. |
 | `ralph insights backfill [--apply]` | Derive events from existing Markdown reports (dry-run by default). |
 | `ralph version` | Show semver + commit + build date. |
@@ -242,7 +242,7 @@ See `docs/specs/2026-08-01-org-runtime.md` for the full protocol and `.claude/ru
 
 ## Hooks
 
-`.claude/settings.json` points each event at a single dispatcher entry, `./.claude/hooks/ralph-dispatch.sh <event>`, which fans out in order through `.claude/hooks/<event>.d/` (core), `.ralph/local/hooks/<event>.d/` (downstream local, committed), then `.claude/hooks/local/<event>.d/` (downstream local, gitignored). The core `.d/` entries ship pre-configured: session start context, prompt-level reminders, Bash guardrails, edit/write verification reminders, tool failure feedback, compaction checkpoints, session end summary. Add your own hook by dropping a script into `.ralph/local/hooks/<event>.d/` — no `settings.json` edits needed; both Claude Code and Codex route through the same dispatcher, so the drop-in runs under either CLI. Customize `.claude/settings.json` directly; use `.claude/settings.local.json` for personal overrides (gitignored).
+`.claude/settings.json` points each event at a single dispatcher entry, `./.claude/hooks/ralph-dispatch.sh <event>`, which fans out in order through `.claude/hooks/<event>.d/` (core), `.ralph/local/hooks/<event>.d/` (downstream local, committed), then `.claude/hooks/local/<event>.d/` (downstream local, gitignored). The core `.d/` entries ship pre-configured: session start context, prompt-level reminders, Bash guardrails, edit/write verification reminders, tool failure feedback, compaction checkpoints, session end summary. Add your own hook by dropping a script into `.ralph/local/hooks/<event>.d/` — no `settings.json` edits needed; both Claude Code and Codex route through the same dispatcher, though live firing under Codex has not yet been confirmed on a trusted checkout (see `docs/tech-debt/README.md`). Customize `.claude/settings.json` directly; use `.claude/settings.local.json` for personal overrides (gitignored).
 
 ## Language packs
 

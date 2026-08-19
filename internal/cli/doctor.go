@@ -40,7 +40,12 @@ func newDoctorCmd() *cobra.Command {
 			"settings.json owned keys, conflict markers, manifest/disk consistency); without --strict the "+
 			"same findings are printed as warnings and doctor's exit code is unaffected. --strict only elevates "+
 			"these five scaffold checks — every other doctor check (e.g. missing claude/codex CLI) keeps its "+
-			"existing pass/warn/fail semantics")
+			"existing pass/warn/fail semantics. Note: (b) managed blocks and (c) settings.json owned keys "+
+			"compare disk content against the CURRENT BINARY's embedded templates, so after upgrading the "+
+			"ralph binary itself, run `ralph upgrade` first, then `doctor --strict` — otherwise a pending, "+
+			"not-yet-applied template update fails --strict even though nothing is actually broken. (a) core "+
+			"file hashes deliberately tolerates that same pending-update state (FR-4) and does not flag it; "+
+			"this asymmetry between (a) and (b)/(c) is intentional, not a bug")
 	return cmd
 }
 
@@ -664,10 +669,8 @@ func scaffoldViolationStatus(violated, strict bool) string {
 // (e) manifest/disk consistency.
 //
 // Two short-circuits keep this additive over pre-FR-9 doctor behavior:
-//   - No manifest at all (not a ralph project, or an unreadable one — the
-//     latter is already surfaced by the pre-existing "Manifest version"
-//     check) returns nil: zero results, so non-project directories are
-//     unaffected.
+//   - No manifest at all (not a ralph project — os.IsNotExist) returns nil:
+//     zero results, so non-project directories are unaffected.
 //   - A legacy (pre-v2) manifest returns exactly one "info"-status result
 //     advising `ralph upgrade`. This is deliberately never a --strict
 //     failure: a legacy layout is not itself a violation of the v2
@@ -675,11 +678,29 @@ func scaffoldViolationStatus(violated, strict bool) string {
 //     eject/adopt/pack add draw via requireV2ManifestForOwnership's
 //     errLegacyLayoutFailClosed) — it just means FR-9's checks do not apply
 //     yet.
+//
+// A manifest that exists but fails to parse (corrupt TOML, truncated
+// write) is neither of the above: it is a strict-eligible violation in its
+// own right, reported via scaffoldViolationStatus like every other FR-9
+// sub-check below. Folding this case into the "no manifest" nil-return (as
+// an earlier version of this function did, reasoning that the pre-existing
+// "Manifest version" check already surfaces it) made --strict fail open
+// exactly when the manifest is least trustworthy: that check reports
+// "warn" with the misleading detail "no manifest found" and never affects
+// doctor's exit code, so a corrupted manifest silently disabled every one
+// of FR-9's five checks under --strict.
 func checkScaffoldIntegrity(targetDir string, strict bool) []checkResult {
 	manifestPath := filepath.Join(targetDir, ".ralph", "manifest.toml")
 	manifest, err := scaffold.ReadManifest(manifestPath)
 	if err != nil {
-		return nil
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return []checkResult{{
+			Name:   "Scaffold integrity",
+			Status: scaffoldViolationStatus(true, strict),
+			Detail: fmt.Sprintf(".ralph/manifest.toml exists but could not be read: %v", err),
+		}}
 	}
 	if manifest.Meta.Layout != scaffold.LayoutV2 {
 		return []checkResult{{
@@ -756,6 +777,15 @@ func checkScaffoldCoreHashes(plan upgrade.ReplacePlan, strict bool) checkResult 
 // anything else (a pending BlockUpdated/BlockAppended change, a
 // BlockMalformed marker pair, a missing/symlinked/non-regular surface file)
 // is a violation.
+//
+// Unlike checkScaffoldCoreHashes's FR-9(a), which deliberately tolerates a
+// pending-but-not-yet-applied template update, this check has no such
+// tolerance: a pending BlockUpdated/BlockAppended change against the
+// current binary's embedded template IS flagged here. This asymmetry
+// between (a) and (b) is intentional (see the --strict flag help and
+// checkScaffoldCoreHashes's doc comment) — run `ralph upgrade` before
+// `doctor --strict` right after upgrading the ralph binary itself, so a
+// version-skew pending update does not read as scaffold damage.
 func checkManagedBlocks(absDir string, desired map[string][]byte, strict bool) checkResult {
 	r := checkResult{Name: "Scaffold: managed blocks"}
 	outcomes, notes, err := applyBlockUpdatesV2(absDir, desired, io.Discard, false)
@@ -803,6 +833,12 @@ func checkManagedBlocks(absDir string, desired map[string][]byte, strict bool) c
 // out of sync — which is exactly FR-9(c)'s "所有キーの健在" violated. A
 // key present with extra user-added entries is never flagged: those are
 // preserved untouched by the merge (Changed stays false for them).
+//
+// Like checkManagedBlocks (FR-9(b)) and unlike checkScaffoldCoreHashes
+// (FR-9(a)), this check compares against the current binary's embedded
+// template with no pending-update tolerance — the same intentional
+// asymmetry documented on checkManagedBlocks and in the --strict flag
+// help.
 func checkSettingsOwnedKeys(absDir string, desired map[string][]byte, strict bool) checkResult {
 	r := checkResult{Name: "Scaffold: settings.json owned keys"}
 

@@ -97,9 +97,15 @@ check_codex_config_toml() {
 
   # Restrict to `command = [ "..." , "..." ]` (possibly multi-element) TOML
   # array entries: first select lines that assign the `command` key, then
-  # pull out each double-quoted `./`-prefixed string from those lines only.
+  # pull out every double-quoted string ending in `.sh` from those lines,
+  # with or without a leading `./` (normalized away below) — L3 fix: the
+  # prior `"\./[^"]+"` extraction only matched a string that literally
+  # began with `./`, so a reintroduced direct call written without that
+  # prefix (e.g. `command = [".claude/hooks/check_mojibake.sh"]`) was
+  # invisible to both this existence check and the direct-invocation guard
+  # below, silently defeating them.
   local commands
-  commands="$(grep -E '^[[:space:]]*command[[:space:]]*=' "$config" | grep -oE '"\./[^"]+"' | tr -d '"' || true)"
+  commands="$(grep -E '^[[:space:]]*command[[:space:]]*=' "$config" | grep -oE '"[^"]*\.sh"' | tr -d '"' | sed 's#^\./##' || true)"
 
   if [ -z "$commands" ]; then
     record_fail "$label: .codex/config.toml has no [[hooks.*]] command entries (expected at least one)"
@@ -148,7 +154,7 @@ check_codex_no_direct_hook_scripts() {
   [ -f "$config" ] || return
 
   local commands
-  commands="$(grep -E '^[[:space:]]*command[[:space:]]*=' "$config" | grep -oE '"\./[^"]+"' | tr -d '"' || true)"
+  commands="$(grep -E '^[[:space:]]*command[[:space:]]*=' "$config" | grep -oE '"[^"]*\.sh"' | tr -d '"' | sed 's#^\./##' || true)"
 
   [ -z "$commands" ] && return
 

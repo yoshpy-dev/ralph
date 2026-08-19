@@ -1,100 +1,66 @@
 # Adding a language pack
 
-Worked example: adding a Terraform / OpenTofu pack (`packs/languages/terraform/`).
+A language pack is a self-contained set of language-specific depth for
+`ralph`: a `verify.sh` script that runs static analysis and tests for that
+language, activation markers so it only runs when the language is actually
+present, and a `rule.md` that renders into `.claude/rules/ralph/<lang>.md` so
+agents get language-specific guidance without bloating `AGENTS.md`.
 
-This is a `ralph` CLI contributor workflow, run inside a checkout of the
-`ralph` source repository — a new pack ships to everyone only once it is
-merged upstream and embedded in a released binary. It is not something you
-do inside your own scaffolded project; use `ralph pack add <lang>` there
-instead to install a pack that already ships.
+## Enabling a pack in this project
 
-1. Scaffold the pack:
+List what is available, then add the one you need:
 
-   ```sh
-   ./scripts/new-language-pack.sh terraform
-   ```
+```sh
+ralph pack list
+ralph pack add <language>
+```
 
-2. Customize the pack body (`packs/languages/terraform/`):
-   - `README.md` — verification order, activation rules, customization points
-   - `verify.sh` — honor `HARNESS_VERIFY_MODE` (`static` / `test` / `all`); skip when no marker files; fail when markers exist but the required CLI is missing (avoid fail-open)
-   - `rule.md` — the language-scoped `.claude/rules/ralph/<lang>.md` content
+`ralph pack add <language>` writes the pack's files under
+`packs/languages/<language>/` (verification script, README, activation
+markers) and renders its rule content to `.claude/rules/ralph/<language>.md`.
+It also records the pack in `.ralph/manifest.toml` so `ralph doctor` and
+`ralph upgrade` track it going forward.
 
-3. Mirror the pack into the embedded templates (required for `ralph init` / `PackFS`):
+`ralph pack add` requires a v2-layout project (`.ralph/manifest.toml` with
+`meta.layout = "v2"`). If your project predates that layout, run `ralph
+upgrade` first — it performs a one-time, confirmed migration to v2 (preview,
+git-clean precondition, `y`/`N` confirmation — `--yes`/`--dry-run` available)
+before you can add a pack.
 
-   ```sh
-   cp -r packs/languages/terraform templates/packs/terraform
-   ```
+Packs can also be selected up front, at `ralph init` time, if you already
+know which languages the project needs.
 
-   Verify the mirror stayed byte-identical:
+## How the rule content works
 
-   ```sh
-   diff -rq packs/languages/terraform templates/packs/terraform
-   ```
+Every pack's `rule.md` lands at `.claude/rules/ralph/<language>.md` alongside
+the core ralph rules in the same directory — one file per active language,
+scoped to that language's own conventions (verification order, common
+pitfalls, naming/structure conventions). This keeps `AGENTS.md` a short map
+instead of an encyclopedia: language-specific detail lives in its own rule
+file, not folded into the project-wide guidance every agent reads regardless
+of what it is touching.
 
-4. Add `rule.md` scoped to the language's file globs. During `ralph init` and
-   `ralph upgrade`, the pack renderer writes it to `.claude/rules/ralph/<lang>.md`
-   only when that pack is selected. Keep the root dogfood copy
-   (`.claude/rules/ralph/terraform.md`) byte-identical with
-   `packs/languages/terraform/rule.md` (`diff -q .claude/rules/ralph/terraform.md
-   packs/languages/terraform/rule.md`). Both `ralph pack add <lang>` and
-   `ralph upgrade` run non-interactively.
-   `ralph pack add` requires a v2-layout project (`.ralph/manifest.toml` with
-   `meta.layout = "v2"`) and rejects a legacy (pre-v2) manifest fail-closed
-   with zero writes, pointing the operator at `ralph upgrade` first. `ralph
-   upgrade` accepts a legacy layout directly: it runs a one-time, confirmed
-   migration to v2 (preview, git-clean precondition, `y`/`N` confirmation —
-   `--yes`/`--dry-run` available) before continuing into the ordinary v2
-   upgrade — see `ralph help upgrade`.
+`.claude/rules/ralph/<language>.md` is scaffold-owned content — `ralph
+upgrade` keeps it in sync with the pack's current template. If you need to
+diverge from a pack's shipped rule content, `ralph eject
+.claude/rules/ralph/<language>.md` before editing it, so `ralph upgrade`
+stops overwriting your local edits and instead reports it as a fork.
 
-5. Teach `scripts/detect-languages.sh` to emit the new pack name and
-   `scripts/detect-changed-languages.sh` to map changed files to it. Edit both
-   the root and `templates/base/` copies — this is a hand-edit, no scaffolding
-   script handles it for you:
+## Verification
 
-   ```sh
-   # In scripts/detect-languages.sh
-   if [ -f .terraform.lock.hcl ] || find . -type d -name .terraform -prune \
-       -o -type f \( -name '*.tf' -o -name '*.tofu' \) -print 2>/dev/null | grep -q .; then
-     emit terraform
-   fi
+Once a pack is installed, `./scripts/run-verify.sh` picks it up
+automatically: `scripts/detect-languages.sh` (and, for changed-scope runs,
+`scripts/detect-changed-languages.sh`) detect the language from marker files
+already present in your project, then run `packs/languages/<language>/verify.sh`
+as part of the normal verify pipeline. No extra wiring is required after
+`ralph pack add` — verification and the rule content are both active as soon
+as the pack's own marker files exist in your project.
 
-   # In scripts/detect-changed-languages.sh
-   *.tf|*.tofu|*.tftest.hcl|.terraform.lock.hcl)
-     printf 'terraform\n'
-     ;;
-   ```
+## Contributing a new pack
 
-6. Run the gates:
-
-   ```sh
-   diff -rq packs/languages/terraform templates/packs/terraform  # byte-identical mirroring
-   ./scripts/check-skill-sync.sh                                 # skill drift (if you touched skills)
-   ./scripts/run-verify.sh                                       # pack actually runs end-to-end
-   ```
-
-7. Document any required environment or toolchain assumptions in the pack's `README.md`.
-
-Keep the pack focused on:
-- verification
-- common contracts
-- naming and structure conventions
-- language-specific failure modes
-
-## Mirror checklist
-
-A new pack typically touches at least these locations — keep them in lock-step:
-
-- `packs/languages/<lang>/` ↔ `templates/packs/<lang>/`
-- `.claude/rules/ralph/<lang>.md` ↔ `packs/languages/<lang>/rule.md`
-- `scripts/detect-languages.sh` ↔ `templates/base/scripts/detect-languages.sh`
-- `scripts/detect-changed-languages.sh` ↔ `templates/base/scripts/detect-changed-languages.sh`
-
-## Gitignore block (when your pack ships state, cache, or secret-bearing files)
-
-If your pack documents files that "must never be committed" (e.g., `terraform.tfstate`, provider credentials, build caches that may capture environment), ship the matching `.gitignore` block in the same commit. A rule that exists only in prose (`.claude/rules/ralph/<lang>.md`) but is not enforced by `.gitignore` is a recurring leak vector — a routine `git add .` in a scaffolded project will stage exactly the files the rule warns about.
-
-Mirror the block to both root and scaffold:
-
-- `.gitignore` ↔ `templates/base/.gitignore`
-
-Verify byte-identity manually (`diff .gitignore templates/base/.gitignore`) before committing — a missing mirror is easy to overlook. The Terraform pack ships the canonical example (see `.gitignore:15-28`).
+Adding a brand-new language pack (one that is not yet available via `ralph
+pack list`) is a `ralph` CLI contributor workflow, not something you do
+inside your own scaffolded project — a new pack ships to every project only
+once it is merged and embedded in a released `ralph` binary. If your project
+needs a language pack that does not exist yet, contribute it in the upstream
+`ralph` repository.
