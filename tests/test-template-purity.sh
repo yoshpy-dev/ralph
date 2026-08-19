@@ -98,28 +98,31 @@ run_case_expect_output "B. injected yoshpy-dev reference fails, path in output" 
 rm -rf "$B_DIR"
 
 # ── C. allowlist suppression mechanism works ────────────────────────────
-# ALLOWLIST is empty by design (overlay-scaffold-v2-p5 Slice 5 fixed every
-# known leak instead of allowlisting around it) — so there is no longer a
-# real, persistent leak in templates/ to assert against. Instead: (1) assert
-# the invariant that ALLOWLIST is currently empty (proves leaks were fixed,
-# not deferred), and (2) prove the suppression mechanism itself still works
-# by running a patched copy of the script, with one ALLOWLIST entry
-# injected, against a fake repo root containing a matching fixture leak.
-# ALLOWLIST paths are REPO_ROOT-relative (see the script's own SCAN_ROOT
-# comment), and REPO_ROOT is derived from the script's own path
-# ("$(dirname "$0")/.."), so copying the script into a fake root's
-# scripts/ makes that fake root's templates/ the scan target.
-if grep -q '^ALLOWLIST=()$' "$SCRIPT"; then
-  echo "  PASS  C1. ALLOWLIST is currently empty (no known leaks deferred)"
+# The allowlist is empty by design (overlay-scaffold-v2-p5 Slice 5 fixed
+# every known leak instead of allowlisting around it) — so there is no
+# longer a real, persistent leak in templates/ to assert against. Instead:
+# (1) assert the invariant that the parallel allowlist arrays are currently
+# empty (proves leaks were fixed, not deferred), and (2) prove the
+# suppression mechanism still works AND is exact-path scoped by running a
+# patched copy of the script, with one allowlist entry injected, against a
+# fake repo root containing the allowlisted leak plus a second occurrence
+# of the same pattern at a different, non-allowlisted path — the run must
+# fail naming only the second path. Allowlist paths are REPO_ROOT-relative
+# (see the script's own SCAN_ROOT comment), and REPO_ROOT is derived from
+# the script's own path ("$(dirname "$0")/.."), so copying the script into
+# a fake root's scripts/ makes that fake root's templates/ the scan target.
+if grep -q '^ALLOWLIST_PATHS=()$' "$SCRIPT" && grep -q '^ALLOWLIST_PATTERNS=()$' "$SCRIPT"; then
+  echo "  PASS  C1. allowlist arrays are currently empty (no known leaks deferred)"
   pass=$((pass + 1))
 else
-  echo "  FAIL  C1. expected ALLOWLIST=() in $SCRIPT — a leak is being allowlisted instead of fixed"
+  echo "  FAIL  C1. expected ALLOWLIST_PATHS=() and ALLOWLIST_PATTERNS=() in $SCRIPT — a leak is being allowlisted instead of fixed"
   fail=$((fail + 1))
 fi
 
 C_DIR="$(mktemp -d)"
 mkdir -p "$C_DIR/scripts" "$C_DIR/templates/base/docs"
-sed 's/^ALLOWLIST=()$/ALLOWLIST=("templates\/base\/docs\/leak.md|yoshpy-dev|test fixture: injected suppression")/' \
+sed -e 's/^ALLOWLIST_PATHS=()$/ALLOWLIST_PATHS=("templates\/base\/docs\/leak.md")/' \
+    -e 's/^ALLOWLIST_PATTERNS=()$/ALLOWLIST_PATTERNS=("yoshpy-dev")/' \
   "$SCRIPT" > "$C_DIR/scripts/check-template-purity.sh"
 chmod +x "$C_DIR/scripts/check-template-purity.sh"
 printf 'This project was scaffolded from yoshpy-dev/ralph.\n' > "$C_DIR/templates/base/docs/leak.md"
@@ -132,14 +135,33 @@ else
   echo "$C_OUT" | sed 's/^/      /'
   fail=$((fail + 1))
 fi
+
+# Same patched copy, second occurrence at a non-allowlisted path: must fail
+# and name only the second path — this is what actually proves the entry is
+# scoped to its exact (path, pattern) pair rather than blanket-suppressing
+# the pattern (self-review C2-L1, cycle 2).
+printf 'Also mentions yoshpy-dev here.\n' > "$C_DIR/templates/base/docs/second.md"
+if C3_OUT="$("$C_DIR/scripts/check-template-purity.sh" 2>&1)"; then
+  echo "  FAIL  C3. expected the non-allowlisted second occurrence to fail"
+  fail=$((fail + 1))
+else
+  if echo "$C3_OUT" | grep -q 'second.md' && ! echo "$C3_OUT" | grep -q 'leak.md'; then
+    echo "  PASS  C3. allowlist entry is exact-path scoped (second path fails, allowlisted path stays suppressed)"
+    pass=$((pass + 1))
+  else
+    echo "  FAIL  C3. expected hit output to name second.md only"
+    echo "$C3_OUT" | sed 's/^/      /'
+    fail=$((fail + 1))
+  fi
+fi
 rm -rf "$C_DIR"
 
 # ── D. unallowlisted occurrence of a known-leak pattern fails ──────────
 # A check-sync.sh reference (one of FIXED_PATTERNS' entries) at a path NOT
-# in ALLOWLIST — must still fail. Proves detection is unconditional per
-# path (ALLOWLIST is empty today; case C above proves separately that an
-# entry, once added, is scoped to its exact (path, pattern) pair and does
-# not blanket-suppress the pattern everywhere).
+# in the allowlist — must still fail. Proves detection is unconditional per
+# path (the allowlist is empty today; case C3 above proves an entry, once
+# added, is scoped to its exact (path, pattern) pair and does not
+# blanket-suppress the pattern everywhere).
 D_DIR="$(mktemp -d)"
 mkdir -p "$D_DIR/base/docs/other"
 printf 'Run ./scripts/check-sync.sh to verify.\n' > "$D_DIR/base/docs/other/NOTES.md"

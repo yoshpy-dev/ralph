@@ -37,9 +37,11 @@ func newDoctorCmd() *cobra.Command {
 		"probe every [org].model_pool entry by launching a minimal CLI invocation per model (slower; requires claude/codex on PATH)")
 	cmd.Flags().BoolVar(&strict, "strict", false,
 		"fail (exit 1) on FR-9 scaffold-integrity violations (core file hashes, managed block health, "+
-			"settings.json owned keys, conflict markers, manifest/disk consistency); without --strict the "+
+			"settings.json owned keys, conflict markers, manifest/disk consistency — plus the meta-failures "+
+			"that make those checks impossible to run: an unparseable manifest or an ownership-planning error "+
+			"such as an unreadable tracked file); without --strict the "+
 			"same findings are printed as warnings and doctor's exit code is unaffected. --strict only elevates "+
-			"these five scaffold checks — every other doctor check (e.g. missing claude/codex CLI) keeps its "+
+			"these scaffold checks — every other doctor check (e.g. missing claude/codex CLI) keeps its "+
 			"existing pass/warn/fail semantics. Note: (b) managed blocks and (c) settings.json owned keys "+
 			"compare disk content against the CURRENT BINARY's embedded templates, so after upgrading the "+
 			"ralph binary itself, run `ralph upgrade` first, then `doctor --strict` — otherwise a pending, "+
@@ -979,10 +981,14 @@ func checkConflictMarkers(absDir string, manifest *scaffold.Manifest, strict boo
 // is.
 func checkManifestConsistency(absDir string, manifest *scaffold.Manifest, strict bool) checkResult {
 	r := checkResult{Name: "Scaffold: manifest/disk consistency"}
-	skip := map[string]bool{v2SettingsPath: true}
-	for _, bs := range blockSurfaces {
-		skip[bs.path] = true
-	}
+	// Derived from the shared v2 exception-face set minus the settings
+	// snapshot: settings.json's existence is guaranteed by FR-9(c) and the
+	// block faces' by FR-9(b), but nothing else guarantees the snapshot
+	// exists, so it stays in this check's existence sweep (AR#2, cycle 1,
+	// docs/reports/cross-review-triage-overlay-scaffold-v2-p5.md;
+	// derivation form per self-review C2-L3, cycle 2).
+	skip := v2SkipPaths()
+	delete(skip, upgrade.SettingsSnapshotRelPath)
 
 	paths := make([]string, 0, len(manifest.Files))
 	for p := range manifest.Files {

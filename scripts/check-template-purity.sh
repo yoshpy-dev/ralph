@@ -68,23 +68,29 @@ REGEX_REASONS=(
 )
 
 # ─── Allowlist ──────────────────────────────────────────────────────────
-# "path|pattern|reason" — path is repo-relative (as printed by grep from
-# REPO_ROOT), pattern is the exact FIXED_PATTERNS/REGEX_PATTERNS entry it
-# applies to. Empty by design: every pre-existing leak found when this guard
-# was introduced (Slice 4 of the overlay-scaffold-v2-p5 plan) was fixed in
-# Slice 5 of the same plan rather than allowlisted. Add an entry here only
-# for a genuinely intentional occurrence, with a reason.
-ALLOWLIST=()
+# Parallel arrays (same shape as REGEX_PATTERNS/REGEX_REASONS above, and
+# for the same reason: a "path|pattern|reason" packed string cannot carry a
+# regex pattern that itself contains `|` — self-review C2-M2, cycle 2).
+# ALLOWLIST_PATHS entries are repo-relative (as printed by grep from
+# REPO_ROOT); ALLOWLIST_PATTERNS is the exact FIXED_PATTERNS/REGEX_PATTERNS
+# entry each applies to. Empty by design: every pre-existing leak found when
+# this guard was introduced (Slice 4 of the overlay-scaffold-v2-p5 plan) was
+# fixed in Slice 5 of the same plan rather than allowlisted. Add entries
+# only for a genuinely intentional occurrence, with the reason as a trailing
+# comment on the ALLOWLIST_PATHS entry.
+ALLOWLIST_PATHS=()
+ALLOWLIST_PATTERNS=()
 
 is_allowlisted() {
-  local path="$1" pattern="$2" entry entry_path entry_pattern
-  for entry in "${ALLOWLIST[@]+"${ALLOWLIST[@]}"}"; do
-    entry_path="${entry%%|*}"
-    entry_pattern="${entry#*|}"
-    entry_pattern="${entry_pattern%%|*}"
-    if [ "$path" = "$entry_path" ] && [ "$pattern" = "$entry_pattern" ]; then
+  # Length-based loop, not "${!arr[@]}" index expansion: under bash 3.2's
+  # set -u the guarded index expansion yields one spurious empty iteration
+  # on an empty array, while ${#arr[@]} is a plain 0.
+  local path="$1" pattern="$2" i=0 n="${#ALLOWLIST_PATHS[@]}"
+  while [ "$i" -lt "$n" ]; do
+    if [ "$path" = "${ALLOWLIST_PATHS[$i]}" ] && [ "$pattern" = "${ALLOWLIST_PATTERNS[$i]}" ]; then
       return 0
     fi
+    i=$((i + 1))
   done
   return 1
 }
@@ -106,7 +112,10 @@ hit_lines=()
 grep_scan_or_fail() {
   local mode="$1" pattern="$2" status
   set +e
-  _scan_output="$(grep -rn --binary-files=without-match "$mode" -- "$pattern" "$SCAN_ROOT" 2>&1)"
+  # stderr deliberately NOT merged into the captured hit stream (grep
+  # warnings would otherwise be parsed as hits — self-review C2-L2, cycle
+  # 2); it flows to the script's own stderr, and exit >1 still hard-fails.
+  _scan_output="$(grep -rn --binary-files=without-match "$mode" -- "$pattern" "$SCAN_ROOT")"
   status=$?
   set -e
   case "$status" in
