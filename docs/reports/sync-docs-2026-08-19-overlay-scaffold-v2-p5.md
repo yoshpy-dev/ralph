@@ -204,3 +204,92 @@ self-review cycle-2's 5 new findings (C2-M1, C2-M2, C2-L1..L3) fixed in
 ## Cycle 2 known gaps
 
 None identified.
+
+## Cycle 3
+
+- HEAD at start: `aba2eda` (docs: add phase-5 test cycle-3 section (pass))
+- Pipeline cycle 3/3 (cap reached). Scope: residual drift from the cycle-3
+  delta — `25b4f79` (doctor `--strict`/status close remaining fail-open
+  paths across `checkSettingsOwnedKeys`/`checkManagedBlocks`/status's
+  `buildScaffoldStatus`; purity guard gains a path-scan dimension),
+  `fd136ae` (conflict-scan defense-in-depth for unreadable tracked files),
+  `6353a07` (self-review cycle-3 fixes C3-M1, C3-L1..L6, L7(c), including
+  two README/tech-debt doc edits already made in-cycle by the implementer).
+  The four points below were the ones flagged as still needing a
+  doc-maintainer pass; all four came back clean.
+
+### Verdict: no residual drift
+
+### 1. `--strict` surface audit (README already widened twice in-cycle)
+
+No drift. `grep -rn -- "--strict" docs/ .claude/rules/ templates/base/
+AGENTS.md CLAUDE.md` audited in full. `25b4f79` widened
+`internal/cli/doctor.go`'s `--strict` flag help to a four-item
+meta-failure list (unparseable manifest, unreadable tracked file,
+unreadable block surface, invalid-JSON settings.json); `6353a07` (C3-L1)
+then widened README's `ralph doctor [--strict]` row to match, verbatim
+covering the same four items. No third surface describes `--strict` with
+stale (three-item, five-item, or warn-only-on-planning-error) wording:
+`docs/specs/2026-08-17-overlay-scaffold-v2.md` and
+`docs/plans/archive/*.md` describe FR-9 (a)-(e) in the abstract with no
+exact-count claim; `docs/reports/*.md` hits are historical
+narrative (self-review/verify/triage findings and their fix
+confirmations, including the verify report's own point-in-time
+"Exhaustion statement" for the fail-open sweep — correctly scoped as a
+statement about cycle-1..3 fixes, not a living contract);
+`docs/plans/active/2026-08-19-overlay-scaffold-v2-p5.md` describes FR-9 in
+the Scope/AC sections using the same abstract (a)-(e) wording (pre-existing,
+not something this cycle's fixes falsified — it never claimed an exact
+count). `templates/base/` has zero `--strict` mentions (doctor.go is Go
+source, not shipped template content).
+
+### 2. Purity guard's three scan dimensions (fixed/regex/path)
+
+No drift. `grep -n "check-template-purity\|purity guard\|purity ガード"
+README.md AGENTS.md CLAUDE.md .claude/rules/ralph/*.md
+docs/specs/2026-08-17-overlay-scaffold-v2.md` returns no hits — the guard
+is CI-internal tooling (like `check-pipeline-sync.sh` or `gofmt`, both
+wired into `run-static-verify.sh` without their own README bullet), not a
+user-facing `ralph` subcommand, so it was never described as content-only
+anywhere in prose to begin with; there is no stale "content-only" claim to
+fix. The plan's own Scope item 5 uses "検査するスクリプト" (a script that
+checks) with no dimension-count claim either — confirmed historical/current
+text match (no edit needed, per the team-lead's own note that this is
+intentionally left as-is). `docs/quality/quality-gates.md`'s "Must pass in
+CI" list doesn't enumerate `check-template-purity.sh` as a standalone
+bullet, consistent with how every other `run-static-verify.sh`-internal
+check (gofmt, golangci-lint, check-pipeline-sync) is represented only via
+the aggregate `run-static-verify.sh` bullet already on that list — not a
+gap specific to the path-scan dimension `25b4f79` added.
+
+### 3. `ralph status` corrupt-manifest "unavailable" path — doc contradiction check
+
+No drift. `grep -rln "corrupt" docs/specs/ README.md AGENTS.md
+.claude/rules/ralph/*.md docs/quality/*.md` returns zero hits — no doc
+describes `ralph status`'s manifest-read failure handling at all, which is
+consistent with cycle-1's sync-docs decision (recorded above, point 1)
+that status semantics live in code/help only. README's `ralph status`
+row stays generic ("Show scaffold ownership ... and unresolved drift"),
+unchanged since before this cycle, so there is nothing for the
+corrupt-manifest "unavailable" render (`internal/cli/status.go`) to
+contradict.
+
+### 4. Tech-debt register — column count after cycle-3 edits
+
+No drift. `awk -F'|' '/^\|/ {print NR": "NF}' docs/tech-debt/README.md`
+confirms the row `6353a07` edited (C3-L7(c), now at line 118 — the C2-L4/L5
+batched-deferral row, updated to record that the deferral judgment was
+reaffirmed after the cap raise rather than superseded by it) renders at 7
+awk fields, matching every other regular row in the table. Pre-existing
+irregular rows (8/9/11/19 fields at lines 22/24/32/46/57/79/90) predate
+this cycle and were already confirmed unrelated in Cycle 2's sync-docs
+pass; the cycle-3 edit did not touch or introduce any of them.
+
+## Files changed (Cycle 3)
+
+- `docs/reports/sync-docs-2026-08-19-overlay-scaffold-v2-p5.md` (this
+  section)
+
+## Cycle 3 known gaps
+
+None identified.
