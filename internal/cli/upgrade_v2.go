@@ -226,6 +226,7 @@ func runUpgradeV2(absDir, manifestPath string, oldManifest *scaffold.Manifest, o
 		for _, d := range sortedDriftV2(plan.Drift) {
 			writef(errOut, "  ⚠ %s\n", d.Path)
 		}
+		writef(errOut, "\nResolve with `ralph eject <path>` (keep the local change, tracked as a fork) or `ralph adopt <path>` (discard the local change, revert to template).\n")
 		return fmt.Errorf("%w (%d path(s)); see %s", ErrUpgradeDriftRemaining, len(plan.Drift), reportRelPath)
 	}
 
@@ -305,6 +306,7 @@ func finishNoOpUpgradeV2(absDir, version string, plan upgrade.ReplacePlan, out, 
 	for _, d := range sortedDriftV2(plan.Drift) {
 		writef(errOut, "  ⚠ %s\n", d.Path)
 	}
+	writef(errOut, "\nResolve with `ralph eject <path>` (keep the local change, tracked as a fork) or `ralph adopt <path>` (discard the local change, revert to template).\n")
 	return fmt.Errorf("%w (%d path(s))", ErrUpgradeDriftRemaining, len(plan.Drift))
 }
 
@@ -785,6 +787,7 @@ func renderUpgradeV2Preview(plan upgrade.ReplacePlan, desired map[string][]byte,
 		for _, d := range sortedDriftV2(plan.Drift) {
 			writef(errOut, "  ⚠ %s\n", d.Path)
 		}
+		writef(errOut, "\nResolve with `ralph eject <path>` (keep the local change, tracked as a fork) or `ralph adopt <path>` (discard the local change, revert to template).\n")
 	}
 
 	// AR#1 (cycle-2 cross-review, docs/reports/cross-review-triage-overlay-scaffold-v2-p3.md):
