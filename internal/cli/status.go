@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/yoshpy-dev/ralph/internal/org"
+	"github.com/yoshpy-dev/ralph/internal/scaffold"
 )
 
 // newStatusCmd wires the top-level `ralph status` command. Unlike `ralph org
@@ -34,7 +35,13 @@ func newStatusCmd() *cobra.Command {
 		Long: "Displays the org runtime roster across every org_id found in the manifest\n" +
 			"(or a single org via --org-id): seats with role/driver/model/state, active\n" +
 			"seat counts, and -- when `ralph org watch` has run for that org -- the last\n" +
-			"watch heartbeat and pending alert count.",
+			"watch heartbeat and pending alert count.\n\n" +
+			"Also displays a scaffold-ownership section (FR-12): each `.ralph/manifest.toml`-\n" +
+			"tracked path's owner attribute (core/fork/seed/block) and any unresolved drift.\n" +
+			"This section always reads the current working directory's project (the same\n" +
+			"resolution `ralph doctor` uses) regardless of --state-dir/--org-id, which only\n" +
+			"scope the org-runtime portion above. It is omitted entirely when the current\n" +
+			"directory has no `.ralph/manifest.toml` (not a ralph project).",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			resolvedStateDir, stateDirSource := org.ResolveOrgStateDir(stateDir, cmd.Flags().Changed("state-dir"))
 			return runStatus(cmd, resolvedStateDir, stateDirSource, orgID, jsonOut)
@@ -59,6 +66,16 @@ func runStatus(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID string,
 	rr, err := store.Read()
 	if err != nil {
 		return fmt.Errorf("status: read manifest: %w", err)
+	}
+
+	// Scaffold ownership (FR-12) always reads the current working
+	// directory's project, independent of --state-dir/--org-id -- those
+	// flags scope org-runtime state only (see the command's Long
+	// description). "." mirrors how `ralph doctor` resolves its own
+	// scaffold-integrity checks (checkScaffoldIntegrity, doctor.go).
+	scaffoldStat, err := buildScaffoldStatus(".")
+	if err != nil {
+		return fmt.Errorf("status: %w", err)
 	}
 
 	// IncludeDryRun: true -- this top-level summary command has no --all
@@ -86,13 +103,13 @@ func runStatus(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID string,
 	realCounts := buildRealSeatCounts(rr.Events, groups)
 
 	if len(groups) == 0 {
-		return printStatusEmpty(cmd, stateDir, stateDirSource, filterOrgID, jsonOut, rr.CorruptLines)
+		return printStatusEmpty(cmd, stateDir, stateDirSource, filterOrgID, jsonOut, rr.CorruptLines, scaffoldStat)
 	}
 
 	if jsonOut {
-		return printStatusJSONAllOrgs(cmd, stateDir, stateDirSource, filterOrgID, groups, realCounts, rr.CorruptLines)
+		return printStatusJSONAllOrgs(cmd, stateDir, stateDirSource, filterOrgID, groups, realCounts, rr.CorruptLines, scaffoldStat)
 	}
-	printStatusTableAllOrgs(cmd, stateDir, stateDirSource, groups, realCounts, rr.CorruptLines)
+	printStatusTableAllOrgs(cmd, stateDir, stateDirSource, groups, realCounts, rr.CorruptLines, scaffoldStat)
 	return nil
 }
 
@@ -185,14 +202,18 @@ func printStateDirLine(out io.Writer, stateDir, stateDirSource string) {
 	_, _ = fmt.Fprintf(out, "state-dir: %s (source: %s)\n", stateDir, stateDirSource)
 }
 
-func printStatusEmpty(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID string, jsonOut bool, corruptLines int) error {
+func printStatusEmpty(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID string, jsonOut bool, corruptLines int, scaffoldStat *scaffoldStatus) error {
 	out := cmd.OutOrStdout()
 	if jsonOut {
-		payload := statusJSON{StateDir: stateDir, StateDirSource: stateDirSource, OrgID: filterOrgID, Orgs: []statusOrgJSON{}, CorruptLines: corruptLines}
+		payload := statusJSON{StateDir: stateDir, StateDirSource: stateDirSource, OrgID: filterOrgID, Orgs: []statusOrgJSON{}, CorruptLines: corruptLines, Scaffold: buildStatusScaffoldJSON(scaffoldStat)}
 		enc := json.NewEncoder(out)
 		enc.SetIndent("", "  ")
 		return enc.Encode(payload)
 	}
+	// Scaffold ownership renders even when org state is absent -- an
+	// org-less directory can still be a valid ralph project (AC-10's "org
+	// state absent but scaffold present" matrix cell).
+	printScaffoldSection(out, scaffoldStat)
 	// An empty roster does not mean "nothing to report": a manifest whose
 	// every line failed to parse also yields zero groups, and that is a
 	// data-integrity signal the operator needs, not silence (see
@@ -264,14 +285,58 @@ type statusJSON struct {
 	OrgID          string          `json:"org_id,omitempty"`
 	Orgs           []statusOrgJSON `json:"orgs"`
 	CorruptLines   int             `json:"corrupt_lines,omitempty"`
+	// Scaffold is the FR-12 scaffold-ownership section (see
+	// buildStatusScaffoldJSON). Additive to the pre-FR-12 schema above: nil
+	// (omitted) when the current working directory has no
+	// `.ralph/manifest.toml` at all -- every existing key's shape and
+	// meaning is unchanged.
+	Scaffold *statusScaffoldJSON `json:"scaffold,omitempty"`
 }
 
-func printStatusJSONAllOrgs(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID string, groups []orgGroup, realCounts map[string]realSeatCount, corruptLines int) error {
+// statusScaffoldFileJSON is one manifest-tracked path's ownership summary,
+// mirroring scaffoldOwnershipFile's fields for the --json wire shape.
+type statusScaffoldFileJSON struct {
+	Path              string `json:"path"`
+	Owner             string `json:"owner"`
+	ForkedFromVersion string `json:"forked_from_version,omitempty"`
+	Drift             bool   `json:"drift,omitempty"`
+}
+
+// statusScaffoldJSON is the --json wire shape of the FR-12 scaffold-
+// ownership section. Layout is "v2" or "legacy"; Files/Drift are only
+// populated for "v2" (a legacy manifest carries just {"layout":"legacy"} --
+// see buildStatusScaffoldJSON).
+type statusScaffoldJSON struct {
+	Layout string                   `json:"layout"`
+	Files  []statusScaffoldFileJSON `json:"files,omitempty"`
+	Drift  []string                 `json:"drift,omitempty"`
+}
+
+// buildStatusScaffoldJSON renders s into its --json wire shape. Returns nil
+// when s is nil (no manifest at all), which the statusJSON.Scaffold
+// `omitempty` tag then drops from the encoded payload entirely -- the
+// chosen representation for "not a ralph project" (see status.go's package
+// doc / newStatusCmd's Long description).
+func buildStatusScaffoldJSON(s *scaffoldStatus) *statusScaffoldJSON {
+	if s == nil {
+		return nil
+	}
+	if s.Layout != scaffold.LayoutV2 {
+		return &statusScaffoldJSON{Layout: s.Layout}
+	}
+	files := make([]statusScaffoldFileJSON, len(s.Files))
+	for i, f := range s.Files {
+		files[i] = statusScaffoldFileJSON(f)
+	}
+	return &statusScaffoldJSON{Layout: s.Layout, Files: files, Drift: append([]string(nil), s.Drift...)}
+}
+
+func printStatusJSONAllOrgs(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID string, groups []orgGroup, realCounts map[string]realSeatCount, corruptLines int, scaffoldStat *scaffoldStatus) error {
 	orgsJSON := make([]statusOrgJSON, 0, len(groups))
 	for _, g := range groups {
 		orgsJSON = append(orgsJSON, buildStatusOrgJSON(stateDir, g, realCounts[g.OrgID]))
 	}
-	payload := statusJSON{StateDir: stateDir, StateDirSource: stateDirSource, OrgID: filterOrgID, Orgs: orgsJSON, CorruptLines: corruptLines}
+	payload := statusJSON{StateDir: stateDir, StateDirSource: stateDirSource, OrgID: filterOrgID, Orgs: orgsJSON, CorruptLines: corruptLines, Scaffold: buildStatusScaffoldJSON(scaffoldStat)}
 	enc := json.NewEncoder(cmd.OutOrStdout())
 	enc.SetIndent("", "  ")
 	return enc.Encode(payload)
@@ -302,7 +367,7 @@ func buildStatusOrgJSON(stateDir string, g orgGroup, realCount realSeatCount) st
 	return result
 }
 
-func printStatusTableAllOrgs(cmd *cobra.Command, stateDir, stateDirSource string, groups []orgGroup, realCounts map[string]realSeatCount, corruptLines int) {
+func printStatusTableAllOrgs(cmd *cobra.Command, stateDir, stateDirSource string, groups []orgGroup, realCounts map[string]realSeatCount, corruptLines int, scaffoldStat *scaffoldStatus) {
 	out := cmd.OutOrStdout()
 
 	// Surfaced once at the top of the populated-roster table (tech-debt:
@@ -311,6 +376,7 @@ func printStatusTableAllOrgs(cmd *cobra.Command, stateDir, stateDirSource string
 	// existing state-dir=... message instead of a separate line, since that
 	// path has no table to put a header line above.
 	printStateDirLine(out, stateDir, stateDirSource)
+	printScaffoldSection(out, scaffoldStat)
 
 	// Deterministic org order for readability, matching Roster's own
 	// OrgID-then-SeatID sort (groupSeatsByOrg preserves it already, but
@@ -348,4 +414,140 @@ func printStatusTableAllOrgs(cmd *cobra.Command, stateDir, stateDirSource string
 	if corruptLines > 0 {
 		_, _ = fmt.Fprintf(out, "\nwarning: %d corrupt manifest line(s) skipped\n", corruptLines)
 	}
+}
+
+// --- FR-12 scaffold ownership (docs/specs/2026-08-17-overlay-scaffold-v2.md,
+// FR-12; Phase 5 plan Scope item 4) ---
+
+// scaffoldOwnershipFile is one manifest-tracked path's ownership summary for
+// the scaffold-ownership section below.
+type scaffoldOwnershipFile struct {
+	Path              string
+	Owner             string
+	ForkedFromVersion string
+	Drift             bool
+}
+
+// scaffoldStatus is the FR-12 "scaffold ownership" section: which owner
+// attribute (core/fork/seed/block) each v2-manifest-tracked path carries,
+// plus which paths are in unresolved drift. Layout is scaffold.LayoutV2
+// ("v2") or "legacy"; Files/Drift are only populated for "v2" (see
+// buildScaffoldStatus).
+type scaffoldStatus struct {
+	Layout string
+	Files  []scaffoldOwnershipFile
+	Drift  []string
+}
+
+// buildScaffoldStatus reads the ownership manifest at targetDir and
+// classifies every tracked path's ownership plus unresolved drift, reusing
+// the exact same read-only classification eject/adopt/doctor share
+// (resolveOwnershipPlan, adopt.go) so `ralph status`'s notion of
+// "fork"/"drift" can never disagree with those commands.
+//
+// Returns (nil, nil) when targetDir has no `.ralph/manifest.toml` at all --
+// this is deliberately not an error: `ralph status` must keep reporting
+// org-runtime state in a directory that is not (or not yet) a ralph
+// project. A legacy (pre-v2) manifest also short-circuits to a
+// Layout-only result, mirroring checkScaffoldIntegrity's identical
+// distinction (doctor.go) between "not a ralph project" and "not upgraded
+// yet".
+func buildScaffoldStatus(targetDir string) (*scaffoldStatus, error) {
+	manifestPath := filepath.Join(targetDir, ".ralph", "manifest.toml")
+	manifest, err := scaffold.ReadManifest(manifestPath)
+	if err != nil {
+		return nil, nil
+	}
+	if manifest.Meta.Layout != scaffold.LayoutV2 {
+		return &scaffoldStatus{Layout: "legacy"}, nil
+	}
+
+	absDir, err := filepath.Abs(targetDir)
+	if err != nil {
+		return nil, fmt.Errorf("resolving target dir: %w", err)
+	}
+	_, plan, err := resolveOwnershipPlan(absDir, manifest, io.Discard)
+	if err != nil {
+		return nil, fmt.Errorf("computing scaffold ownership plan: %w", err)
+	}
+
+	driftSet := driftPathSet(plan)
+
+	paths := make([]string, 0, len(manifest.Files))
+	for p := range manifest.Files {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+
+	files := make([]scaffoldOwnershipFile, 0, len(paths))
+	for _, p := range paths {
+		entry := manifest.Files[p]
+		files = append(files, scaffoldOwnershipFile{
+			Path:              p,
+			Owner:             entry.Owner,
+			ForkedFromVersion: entry.ForkedFromVersion,
+			Drift:             driftSet[p],
+		})
+	}
+
+	// plan.Drift can include genuinely untracked paths too (classifyUntracked,
+	// internal/upgrade/replaceplan.go) -- listed here in full, matching
+	// doctor's checkScaffoldCoreHashes (FR-9(a)), so status's drift list is
+	// never a strict subset of what `ralph doctor --strict` would flag.
+	driftPaths := make([]string, 0, len(plan.Drift))
+	for _, d := range plan.Drift {
+		driftPaths = append(driftPaths, d.Path)
+	}
+	sort.Strings(driftPaths)
+
+	return &scaffoldStatus{Layout: scaffold.LayoutV2, Files: files, Drift: driftPaths}, nil
+}
+
+// printScaffoldSection renders the FR-12 scaffold-ownership section. s==nil
+// (no manifest at all -- not a ralph project) prints nothing, so a
+// non-scaffold directory's `ralph status` text output is byte-identical to
+// pre-FR-12 behavior. When it does render something, it always ends with a
+// blank separator line so callers never need to track whether this section
+// produced output before printing whatever comes next.
+//
+// Layout: an owner-grouped count line first (core/fork/seed/block
+// totals), then only non-core rows individually (core paths carry no
+// per-file signal worth a line unless they are drifted, which the
+// "Unresolved drift" list below already covers), then the drift list.
+func printScaffoldSection(out io.Writer, s *scaffoldStatus) {
+	if s == nil {
+		return
+	}
+	if s.Layout != scaffold.LayoutV2 {
+		_, _ = fmt.Fprintln(out, "Scaffold ownership: legacy manifest layout -- run `ralph upgrade` to migrate before ownership/drift details are available.")
+		_, _ = fmt.Fprintln(out)
+		return
+	}
+
+	counts := make(map[string]int, 4)
+	for _, f := range s.Files {
+		counts[f.Owner]++
+	}
+	_, _ = fmt.Fprintf(out, "Scaffold ownership: %d path(s) tracked (core: %d, fork: %d, seed: %d, block: %d)\n",
+		len(s.Files), counts[scaffold.OwnerCore], counts[scaffold.OwnerFork], counts[scaffold.OwnerSeed], counts[scaffold.OwnerBlock])
+	for _, f := range s.Files {
+		if f.Owner == scaffold.OwnerCore {
+			continue
+		}
+		if f.Owner == scaffold.OwnerFork && f.ForkedFromVersion != "" {
+			_, _ = fmt.Fprintf(out, "  %s: %s (forked_from_version=%s)\n", f.Path, f.Owner, f.ForkedFromVersion)
+		} else {
+			_, _ = fmt.Fprintf(out, "  %s: %s\n", f.Path, f.Owner)
+		}
+	}
+
+	if len(s.Drift) == 0 {
+		_, _ = fmt.Fprintln(out, "Unresolved drift: none")
+	} else {
+		_, _ = fmt.Fprintf(out, "Unresolved drift: %d path(s)\n", len(s.Drift))
+		for _, p := range s.Drift {
+			_, _ = fmt.Fprintf(out, "  %s\n", p)
+		}
+	}
+	_, _ = fmt.Fprintln(out)
 }
