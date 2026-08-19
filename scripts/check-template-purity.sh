@@ -185,8 +185,8 @@ if [ "$hits" -gt 0 ]; then
   echo ""
   echo "To fix:"
   echo "  - Remove/generalize the reference in the template file, or"
-  echo "  - If genuinely intentional, add a path+pattern pair to ALLOWLIST"
-  echo "    in this script with a reason."
+  echo "  - If genuinely intentional, add matching ALLOWLIST_PATHS /"
+  echo "    ALLOWLIST_PATTERNS entries in this script with a reason comment."
   exit 1
 fi
 
