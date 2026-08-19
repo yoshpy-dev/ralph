@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -18,19 +21,26 @@ import (
 	"github.com/yoshpy-dev/ralph/internal/config"
 	"github.com/yoshpy-dev/ralph/internal/org/driver"
 	"github.com/yoshpy-dev/ralph/internal/scaffold"
+	"github.com/yoshpy-dev/ralph/internal/upgrade"
 )
 
 func newDoctorCmd() *cobra.Command {
-	var probeModels bool
+	var probeModels, strict bool
 	cmd := &cobra.Command{
 		Use:   "doctor",
 		Short: "Check environment and project setup",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDoctorOpts(".", probeModels)
+			return runDoctorFull(".", probeModels, strict)
 		},
 	}
 	cmd.Flags().BoolVar(&probeModels, "probe-models", false,
 		"probe every [org].model_pool entry by launching a minimal CLI invocation per model (slower; requires claude/codex on PATH)")
+	cmd.Flags().BoolVar(&strict, "strict", false,
+		"fail (exit 1) on FR-9 scaffold-integrity violations (core file hashes, managed block health, "+
+			"settings.json owned keys, conflict markers, manifest/disk consistency); without --strict the "+
+			"same findings are printed as warnings and doctor's exit code is unaffected. --strict only elevates "+
+			"these five scaffold checks — every other doctor check (e.g. missing claude/codex CLI) keeps its "+
+			"existing pass/warn/fail semantics")
 	return cmd
 }
 
@@ -52,7 +62,21 @@ func runDoctor(targetDir string) error {
 // 11). Model probes are the only check in this function that spawn CLI
 // subprocesses beyond the pre-existing --version probes, so they stay
 // opt-in and off by default.
+//
+// Signature/behavior preserved exactly (never runs under --strict, always
+// strict=false) so pre-existing callers/tests that predate FR-9 doctor
+// --strict (docs/specs/2026-08-17-overlay-scaffold-v2.md) keep working
+// unchanged, mirroring how runDoctor itself wraps this function.
+// runDoctorFull is the --strict-aware superset newDoctorCmd calls directly.
 func runDoctorOpts(targetDir string, probeModels bool) error {
+	return runDoctorFull(targetDir, probeModels, false)
+}
+
+// runDoctorFull is runDoctorOpts plus the --strict opt-in (FR-9, Phase 5):
+// when true, violations found by checkScaffoldIntegrity's five FR-9
+// sub-checks are reported as "fail" (and therefore flip doctor's exit code)
+// instead of "warn". strict never affects any other check in this function.
+func runDoctorFull(targetDir string, probeModels, strict bool) error {
 	cfg, cfgErr := config.Load(filepath.Join(targetDir, "ralph.toml"))
 	var results []checkResult
 
@@ -98,6 +122,14 @@ func runDoctorOpts(targetDir string, probeModels bool) error {
 	if probeModels {
 		results = append(results, checkOrgModelProbes(cfg, driver.ExecRunner{})...)
 	}
+
+	// Check 12: FR-9 scaffold integrity (core hashes, managed blocks,
+	// settings.json owned keys, conflict markers, manifest/disk
+	// consistency). Always runs (findings are warnings by default); strict
+	// controls only whether a violation is reported as "fail". See
+	// checkScaffoldIntegrity's doc comment for the no-manifest/legacy-manifest
+	// short-circuits.
+	results = append(results, checkScaffoldIntegrity(targetDir, strict)...)
 
 	// Print results.
 	fmt.Println("ralph doctor")
@@ -602,5 +634,301 @@ func probeOrgModel(runner driver.Runner, drv, model string) checkResult {
 		return r
 	}
 	r.Status = "pass"
+	return r
+}
+
+// --- FR-9 scaffold integrity (docs/specs/2026-08-17-overlay-scaffold-v2.md,
+// FR-9; Phase 5 plan Scope item 3) ---
+//
+// scaffoldViolationStatus maps a boolean violation outcome to the checkResult
+// status every FR-9 sub-check below uses: a clean check is always "pass"; a
+// violation is "fail" under --strict (elevates doctor's exit code) and
+// "warn" otherwise (findings still print, exit code untouched) — this is
+// the single place that encodes the --strict elevation boundary so it can
+// never drift between the five sub-checks.
+func scaffoldViolationStatus(violated, strict bool) string {
+	switch {
+	case !violated:
+		return "pass"
+	case strict:
+		return "fail"
+	default:
+		return "warn"
+	}
+}
+
+// checkScaffoldIntegrity runs the FR-9 scaffold-integrity checks: (a) core
+// file hashes vs the embedded templates (fork paths excluded),
+// (b) managed-block marker/content health, (c) settings.json ralph-owned
+// key sync, (d) absence of unresolved conflict markers in tracked files, and
+// (e) manifest/disk consistency.
+//
+// Two short-circuits keep this additive over pre-FR-9 doctor behavior:
+//   - No manifest at all (not a ralph project, or an unreadable one — the
+//     latter is already surfaced by the pre-existing "Manifest version"
+//     check) returns nil: zero results, so non-project directories are
+//     unaffected.
+//   - A legacy (pre-v2) manifest returns exactly one "info"-status result
+//     advising `ralph upgrade`. This is deliberately never a --strict
+//     failure: a legacy layout is not itself a violation of the v2
+//     ownership contracts FR-9 checks against (the same distinction
+//     eject/adopt/pack add draw via requireV2ManifestForOwnership's
+//     errLegacyLayoutFailClosed) — it just means FR-9's checks do not apply
+//     yet.
+func checkScaffoldIntegrity(targetDir string, strict bool) []checkResult {
+	manifestPath := filepath.Join(targetDir, ".ralph", "manifest.toml")
+	manifest, err := scaffold.ReadManifest(manifestPath)
+	if err != nil {
+		return nil
+	}
+	if manifest.Meta.Layout != scaffold.LayoutV2 {
+		return []checkResult{{
+			Name:   "Scaffold integrity",
+			Status: "info",
+			Detail: "legacy (pre-v2) manifest layout; run `ralph upgrade` to migrate before FR-9 scaffold checks apply",
+		}}
+	}
+
+	absDir, err := filepath.Abs(targetDir)
+	if err != nil {
+		return []checkResult{{Name: "Scaffold integrity", Status: "warn", Detail: fmt.Sprintf("resolving target dir: %v", err)}}
+	}
+
+	// resolveOwnershipPlan (adopt.go) runs the exact same read-only
+	// PlanCoreReplaceDesired classification `ralph upgrade`/eject/adopt use,
+	// so FR-9's notion of "drift"/"fork" can never drift out of sync with
+	// those commands. Warnings buildDesiredStateV2 may emit (e.g. an
+	// unavailable pack) are discarded here — doctor's own checks below
+	// report their own findings at the right granularity instead.
+	desired, plan, err := resolveOwnershipPlan(absDir, manifest, io.Discard)
+	if err != nil {
+		return []checkResult{{Name: "Scaffold integrity", Status: "warn", Detail: fmt.Sprintf("computing ownership plan: %v", err)}}
+	}
+
+	return []checkResult{
+		checkScaffoldCoreHashes(plan, strict),
+		checkManagedBlocks(absDir, desired, strict),
+		checkSettingsOwnedKeys(absDir, desired, strict),
+		checkConflictMarkers(absDir, manifest, strict),
+		checkManifestConsistency(absDir, manifest, strict),
+	}
+}
+
+// checkScaffoldCoreHashes is FR-9(a): every core-owned path's disk content
+// must match the embedded template it was generated from, with fork paths
+// excluded. plan.Drift is exactly this population — PlanCoreReplaceDesired
+// (internal/upgrade/replaceplan.go) only ever puts a path in Drift when its
+// disk content diverges from both the manifest-recorded hash and the
+// current template hash with no fork record to explain the divergence; a
+// forked path is classified into plan.Advisories instead (see
+// driftPathSet's doc comment, adopt.go), so fork content is never flagged
+// here — matching FR-9(a)'s "fork 除く".
+//
+// A pending-but-expected update (unmodified core file, template changed
+// upstream — plan.Ops OpUpdate) is not a violation: disk still matches its
+// manifest-recorded hash exactly, so there is nothing unresolved, only a
+// `ralph upgrade` waiting to be run.
+func checkScaffoldCoreHashes(plan upgrade.ReplacePlan, strict bool) checkResult {
+	r := checkResult{Name: "Scaffold: core file hashes"}
+	violated := len(plan.Drift) > 0
+	r.Status = scaffoldViolationStatus(violated, strict)
+	if !violated {
+		return r
+	}
+	paths := make([]string, 0, len(plan.Drift))
+	for _, d := range plan.Drift {
+		paths = append(paths, d.Path)
+	}
+	sort.Strings(paths)
+	r.Detail = fmt.Sprintf(
+		"%d core path(s) diverge from both the recorded and current template hash with no fork record (unresolved drift): %s — resolve with `ralph eject` (keep the change) or `ralph adopt` (discard it)",
+		len(paths), strings.Join(paths, ", "))
+	return r
+}
+
+// checkManagedBlocks is FR-9(b): each managed-block surface (AGENTS.md,
+// .gitignore) must have well-formed BEGIN/END markers whose interior
+// already equals the expected managed content. applyBlockUpdatesV2 (write
+// mode is upgrade's; false here) is the exact same computation `ralph
+// upgrade` and its --dry-run preview use, so "healthy" here means
+// byte-identical to what the block engine would compute — a surface whose
+// current content is up to date is upgrade.BlockUnchanged (blockUpdateOutcome.ok==true);
+// anything else (a pending BlockUpdated/BlockAppended change, a
+// BlockMalformed marker pair, a missing/symlinked/non-regular surface file)
+// is a violation.
+func checkManagedBlocks(absDir string, desired map[string][]byte, strict bool) checkResult {
+	r := checkResult{Name: "Scaffold: managed blocks"}
+	outcomes, notes, err := applyBlockUpdatesV2(absDir, desired, io.Discard, false)
+	if err != nil {
+		r.Status = "warn"
+		r.Detail = fmt.Sprintf("computing managed block outcomes: %v", err)
+		return r
+	}
+
+	var offenders []string
+	for _, bs := range blockSurfaces {
+		oc, ok := outcomes[bs.path]
+		if !ok || !oc.ok || oc.outcome != upgrade.BlockUnchanged {
+			offenders = append(offenders, bs.path)
+		}
+	}
+
+	violated := len(offenders) > 0
+	r.Status = scaffoldViolationStatus(violated, strict)
+	if !violated {
+		return r
+	}
+	detail := fmt.Sprintf("%d block surface(s) unhealthy: %s", len(offenders), strings.Join(offenders, ", "))
+	if len(notes) > 0 {
+		detail += " — " + strings.Join(notes, "; ")
+	}
+	r.Detail = detail
+	return r
+}
+
+// checkSettingsOwnedKeys is FR-9(c): .claude/settings.json's ralph-owned
+// keys (upgrade.OwnedSettingsPaths: env, permissions.allow,
+// permissions.deny, hooks) must be in sync with the current template.
+//
+// Source of truth: the exact 3-way merge `ralph upgrade` performs —
+// upgrade.MergeOwnedSettings(current disk content, oldOwned snapshot,
+// newOwned template) — rather than a second, parallel definition of "owned
+// key present". oldOwned is the settings snapshot
+// (.ralph/core/settings.ralph.json, upgrade.LoadSettingsSnapshot), falling
+// back to "{}" when absent (pre-Phase-3 init, mirroring runUpgradeV2's own
+// fallback); newOwned is desired[v2SettingsPath], the current embedded
+// template. mergeResult.Changed==true means the merge would rewrite
+// settings.json — an owned key is missing, stale (ralph-owned in oldOwned
+// but dropped from newOwned, so it should have been pruned), or otherwise
+// out of sync — which is exactly FR-9(c)'s "所有キーの健在" violated. A
+// key present with extra user-added entries is never flagged: those are
+// preserved untouched by the merge (Changed stays false for them).
+func checkSettingsOwnedKeys(absDir string, desired map[string][]byte, strict bool) checkResult {
+	r := checkResult{Name: "Scaffold: settings.json owned keys"}
+
+	oldOwnedSnapshot, found, err := upgrade.LoadSettingsSnapshot(absDir)
+	if err != nil {
+		r.Status = "warn"
+		r.Detail = fmt.Sprintf("reading settings snapshot: %v", err)
+		return r
+	}
+	oldOwned := oldOwnedSnapshot
+	if !found {
+		oldOwned = []byte("{}")
+	}
+
+	newOwned, ok := desired[v2SettingsPath]
+	if !ok {
+		r.Status = "warn"
+		r.Detail = fmt.Sprintf("current templates do not ship %s; cannot verify owned keys", v2SettingsPath)
+		return r
+	}
+
+	current, err := readFinalDiskContent(absDir, v2SettingsPath)
+	if err != nil {
+		r.Status = "warn"
+		r.Detail = fmt.Sprintf("reading %s: %v", v2SettingsPath, err)
+		return r
+	}
+
+	mergeResult, err := upgrade.MergeOwnedSettings(current, oldOwned, newOwned)
+	if err != nil {
+		r.Status = "warn"
+		r.Detail = fmt.Sprintf("merging %s: %v", v2SettingsPath, err)
+		return r
+	}
+
+	violated := mergeResult.Changed
+	r.Status = scaffoldViolationStatus(violated, strict)
+	if !violated {
+		return r
+	}
+	r.Detail = fmt.Sprintf(
+		"%s: ralph-owned keys (%s) are out of sync with the current template — run `ralph upgrade` to reconcile",
+		v2SettingsPath, strings.Join(upgrade.OwnedSettingsPaths[:], ", "))
+	return r
+}
+
+// conflictMarkerRe matches a git conflict-marker line: exactly seven
+// `<`/`=`/`>` characters, optionally followed by a label (e.g. "<<<<<<<
+// HEAD"), matching the same shape git itself writes on an unresolved merge.
+var conflictMarkerRe = regexp.MustCompile(`(?m)^(<{7}(\s.*)?|={7}|>{7}(\s.*)?)$`)
+
+// checkConflictMarkers is FR-9(d): no manifest-tracked file may contain an
+// unresolved git conflict marker. Every manifest.Files path is scanned
+// (including v2 exception faces — a conflict marker is a violation
+// regardless of which mechanism owns the surrounding content); a path
+// missing from disk is silently skipped here since that is FR-9(e)'s
+// (checkManifestConsistency) finding to report, not this check's.
+func checkConflictMarkers(absDir string, manifest *scaffold.Manifest, strict bool) checkResult {
+	r := checkResult{Name: "Scaffold: conflict markers"}
+
+	paths := make([]string, 0, len(manifest.Files))
+	for p := range manifest.Files {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+
+	var offenders []string
+	for _, p := range paths {
+		full := filepath.Join(absDir, filepath.FromSlash(p))
+		data, err := os.ReadFile(full)
+		if err != nil {
+			continue
+		}
+		if conflictMarkerRe.Match(data) {
+			offenders = append(offenders, p)
+		}
+	}
+
+	violated := len(offenders) > 0
+	r.Status = scaffoldViolationStatus(violated, strict)
+	if !violated {
+		return r
+	}
+	r.Detail = fmt.Sprintf("%d tracked file(s) contain unresolved conflict markers: %s", len(offenders), strings.Join(offenders, ", "))
+	return r
+}
+
+// checkManifestConsistency is FR-9(e): every manifest-tracked path must
+// still exist on disk. v2 exception faces (settings.json, its merge
+// snapshot, and the two managed-block surfaces) are excluded here — their
+// presence/health is FR-9(b)/(c)'s job (checkManagedBlocks,
+// checkSettingsOwnedKeys), which already fail if one of those files is
+// missing or unhealthy; re-checking bare existence for them here would only
+// duplicate those findings under a different check name.
+//
+// Existence-only (not a hash comparison) is deliberate: a fork's disk
+// content is expected to diverge from its recorded DiskHash over time as
+// the user keeps editing it post-eject, and that is not an integrity
+// violation — only a manifest entry with nothing behind it on disk at all
+// is.
+func checkManifestConsistency(absDir string, manifest *scaffold.Manifest, strict bool) checkResult {
+	r := checkResult{Name: "Scaffold: manifest/disk consistency"}
+	skip := v2SkipPaths()
+
+	paths := make([]string, 0, len(manifest.Files))
+	for p := range manifest.Files {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+
+	var missing []string
+	for _, p := range paths {
+		if skip[p] {
+			continue
+		}
+		full := filepath.Join(absDir, filepath.FromSlash(p))
+		if _, statErr := os.Stat(full); errors.Is(statErr, fs.ErrNotExist) {
+			missing = append(missing, p)
+		}
+	}
+
+	violated := len(missing) > 0
+	r.Status = scaffoldViolationStatus(violated, strict)
+	if !violated {
+		return r
+	}
+	r.Detail = fmt.Sprintf("%d manifest-tracked path(s) missing from disk: %s", len(missing), strings.Join(missing, ", "))
 	return r
 }
