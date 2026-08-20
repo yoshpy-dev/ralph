@@ -294,8 +294,21 @@ func checkCodexEffectiveConfig(targetDir string) checkResult {
 	// doctor does not assume either value (leniency decision recorded in
 	// docs/evidence/codex-hooks-livefire-slice1-2026-08-20.md).
 	if features, ok := raw["features"].(map[string]any); ok {
-		if v, ok := features["hooks"].(bool); ok && !v {
-			findings = append(findings, "[features] hooks = false — Codex project hooks are disabled")
+		if hv, present := features["hooks"]; present {
+			switch v := hv.(type) {
+			case bool:
+				if !v {
+					findings = append(findings, "[features] hooks = false — Codex project hooks are disabled")
+				}
+			default:
+				// Present but not a boolean (e.g. hooks = "false" typo):
+				// distinct from the lenient absent-key case — Codex may
+				// not enable hooks with a malformed value, so silently
+				// passing here would misreport enablement (cross-review
+				// AR#1, cycle 1,
+				// docs/reports/cross-review-triage-codex-hooks-json-wiring.md).
+				findings = append(findings, fmt.Sprintf("[features] hooks has a non-boolean value (%T) — use `hooks = true`", hv))
+			}
 		}
 	}
 

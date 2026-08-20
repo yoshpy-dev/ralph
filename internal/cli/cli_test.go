@@ -470,6 +470,30 @@ hooks = false
 	}
 }
 
+// TestCheckCodexEffectiveConfig_HooksFeatureNonBoolean_Warns covers
+// cross-review AR#1 (cycle 1,
+// docs/reports/cross-review-triage-codex-hooks-json-wiring.md): a present
+// but non-boolean [features].hooks value (e.g. the string "false" from a
+// typo) must warn instead of being silently treated like the lenient
+// absent-key case — Codex may not enable hooks with a malformed value.
+func TestCheckCodexEffectiveConfig_HooksFeatureNonBoolean_Warns(t *testing.T) {
+	dir := t.TempDir()
+	writeCodexConfigToml(t, dir, `model = "gpt-5.5"
+
+[features]
+hooks = "false"
+`)
+	writeCodexHooksJSON(t, dir, validHooksJSON)
+
+	r := checkCodexEffectiveConfig(dir)
+	if r.Status != "warn" {
+		t.Errorf("status = %q, want warn", r.Status)
+	}
+	if !strings.Contains(r.Detail, "non-boolean") {
+		t.Errorf("detail = %q, want substring 'non-boolean'", r.Detail)
+	}
+}
+
 // TestCheckCodexEffectiveConfig_DeprecatedFeatureFlagKey_TreatedAsAbsent
 // ensures the old `[features] codex_hooks` flag does not satisfy the real
 // `hooks` key — but because an absent key is lenient (see
