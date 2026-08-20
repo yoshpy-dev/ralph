@@ -60,9 +60,12 @@ cd my-project
 ralph doctor                  # environment check (Claude + Codex)
 ```
 
-Both agent surfaces are wired up automatically. To make Codex's project-level config and
-hooks actually load, run `codex trust .` once after `ralph init`. `ralph doctor`
-flags trust gaps so you do not lose hooks silently.
+Both agent surfaces are wired up automatically. To make Codex's project-level config
+load, run `codex trust .` once after `ralph init`. Hooks additionally need a
+one-time interactive approval — run `codex` interactively at least once so
+you can review and approve the shipped hook (see `.codex/README.md`'s Hooks
+section). `ralph doctor` flags config-trust gaps and `hooks.json` wiring
+problems, but cannot check hook-approval state.
 
 Create your first plan and run the loop inside Claude Code. Prefer the skills
 because they create clean-base task worktrees before writing plan artifacts:
@@ -168,7 +171,8 @@ The philosophy: **a map, not a manual**. Keep `AGENTS.md` small, push detail int
 │   ├── agents/               # Claude Code subagent definitions
 │   └── rules/ralph/          # shipped ralph guidance (path-scoped, read by both agents); language pack rules render here too
 ├── .codex/
-│   ├── config.toml           # model, sandbox, approval, hooks (loads after `codex trust .`)
+│   ├── config.toml           # model, sandbox, approval (loads after `codex trust .`)
+│   ├── hooks.json            # hook wiring: routes PostToolUse through ralph-dispatch.sh (needs interactive hook-trust approval too)
 │   ├── agents/               # Codex role definitions for review/verify/test/docs
 │   ├── hooks/                # Codex hook scripts
 │   ├── AGENTS.override.md    # Codex-only execution rules
@@ -242,7 +246,7 @@ See `docs/specs/2026-08-01-org-runtime.md` for the full protocol and `.claude/ru
 
 ## Hooks
 
-`.claude/settings.json` points each event at a single dispatcher entry, `./.claude/hooks/ralph-dispatch.sh <event>`, which fans out in order through `.claude/hooks/<event>.d/` (core), `.ralph/local/hooks/<event>.d/` (downstream local, committed), then `.claude/hooks/local/<event>.d/` (downstream local, gitignored). The core `.d/` entries ship pre-configured: session start context, prompt-level reminders, Bash guardrails, edit/write verification reminders, tool failure feedback, compaction checkpoints, session end summary. Add your own hook by dropping a script into `.ralph/local/hooks/<event>.d/` — no `settings.json` edits needed; both Claude Code and Codex route through the same dispatcher, though live firing under Codex has not yet been confirmed on a trusted checkout (see `docs/tech-debt/README.md`). Customize `.claude/settings.json` directly; use `.claude/settings.local.json` for personal overrides (gitignored).
+`.claude/settings.json` points each event at a single dispatcher entry, `./.claude/hooks/ralph-dispatch.sh <event>`, which fans out in order through `.claude/hooks/<event>.d/` (core), `.ralph/local/hooks/<event>.d/` (downstream local, committed), then `.claude/hooks/local/<event>.d/` (downstream local, gitignored). The core `.d/` entries ship pre-configured: session start context, prompt-level reminders, Bash guardrails, edit/write verification reminders, tool failure feedback, compaction checkpoints, session end summary. Add your own hook by dropping a script into `.ralph/local/hooks/<event>.d/` — no `settings.json` edits needed; both Claude Code and Codex route through the same dispatcher (Codex via `.codex/hooks.json`), with live firing verified on a trusted checkout. Codex additionally requires a one-time interactive hook-trust approval before `codex exec` will fire hooks (see `.codex/README.md`'s Hooks section). Customize `.claude/settings.json` directly; use `.claude/settings.local.json` for personal overrides (gitignored).
 
 ## Language packs
 

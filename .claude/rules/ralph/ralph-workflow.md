@@ -47,4 +47,4 @@ workflow guidance formerly in CLAUDE.md.
 - `.claude/skills/` — Claude Code skill bodies (mirrored in `.agents/skills/`; regenerate with `scripts/sync-skills.sh`)
 - `.claude/agents/` — Claude Code subagent definitions (Codex custom agents live under `.codex/agents/`)
 - `.claude/hooks/` — Claude Code runtime hooks (Codex equivalents in
-  `.codex/config.toml` `[hooks]`)
+  `.codex/hooks.json`)

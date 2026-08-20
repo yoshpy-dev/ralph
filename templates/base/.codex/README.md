@@ -9,15 +9,17 @@ the same artifacts no matter which agent drove the work.
 
 1. **Install Codex** (>= 0.128.0).
    See [https://developers.openai.com/codex/cli](https://developers.openai.com/codex/cli).
-2. **Trust this project** so Codex loads `.codex/config.toml` and the inline
-   `[[hooks.*]]` entries:
+2. **Trust this project** so Codex loads `.codex/config.toml` (and, in turn,
+   `.codex/hooks.json`):
 
    ```sh
    codex trust .
    ```
 
    Without trust, `model`, `sandbox_mode`, `approval_policy`, and project
-   hooks are silently ignored.
+   hooks are silently ignored. Project trust is necessary but not
+   sufficient for hooks — see "Hooks" below for the separate, per-hook
+   interactive approval Codex also requires.
 3. **Verify the setup**:
 
    ```sh
@@ -25,8 +27,10 @@ the same artifacts no matter which agent drove the work.
    ```
 
    `ralph doctor` checks that the `codex` binary is on `$PATH`, that the project is
-   trusted, that `[features] hooks = true` is set, and that at least one
-   `[hooks]` entry is visible to Codex.
+   trusted, that `[features] hooks = true` is set, and that `.codex/hooks.json`
+   exists, parses, matches the expected schema, and routes at least one event
+   through the dispatcher. It cannot check interactive hook-trust state (see
+   "Hooks" below).
 
 ## Daily usage
 
@@ -83,26 +87,54 @@ hash-based diff engine can be replayed cleanly. Skill renames are surfaced as
 
 ## Hooks
 
-Project-level Codex hooks live in `.codex/config.toml` as inline
-`[[hooks.*]]` entries. They shell out to the same scripts under
-`.claude/hooks/`, so behaviour stays identical across the two agents.
+Project-level Codex hooks live in `.codex/hooks.json`, not in
+`.codex/config.toml`. `.codex/hooks.json` routes `PostToolUse` through
+`./.claude/hooks/ralph-dispatch.sh`, the same layered `.d` dispatcher Claude
+Code uses (`.claude/hooks/<event>.d/` core, then `.ralph/local/hooks/<event>.d/`
+and `.claude/hooks/local/<event>.d/` for downstream drop-ins), so a single
+drop-in script runs under both agents. The shipped hook group resolves the
+dispatcher path from the git root
+(`"$(git rev-parse --show-toplevel)/.claude/hooks/ralph-dispatch.sh" PostToolUse`)
+rather than a bare relative path, and matches `Edit|Write|MultiEdit|apply_patch`
+— Codex reports its file-edit tool as `apply_patch`, so the literal tool name
+has to be in the matcher for the hook to fire. `.codex/config.toml` keeps a
+reference comment pointing at `hooks.json` but no `[[hooks.*]]` table; do not
+reintroduce one there. Codex merges both representations when present and
+emits a startup warning about duplicate hook loading, and `ralph doctor` /
+`tests/test-hook-wiring.sh` both flag the stale dual representation if it
+comes back.
 
-Do not add `.codex/hooks.json` beside inline hooks in `.codex/config.toml`.
-Codex loads hooks per configuration layer, and two hook representations in the
-same `.codex/` layer trigger a startup warning about duplicate hook loading.
-`ralph doctor` and the local verifier check this so the duplicate
-representation does not come back silently.
+### Trust UX
 
-The template ships **default-on** with two `PostToolUse` hooks that point at
-`./.claude/hooks/check_mojibake.sh` (one for `Edit`, one for `Write`). These
-satisfy `ralph doctor`'s "at least one `[hooks]` entry visible" check on a
-fresh `ralph init` and reuse the same script the Claude side calls, so a
-single edit to `check_mojibake.sh` covers both agents.
+Codex hooks only run after a **one-time interactive trust approval**, on top
+of the project config trust from step 2 above:
 
-To extend the hook surface, add new `[[hooks.<event>]]` entries that point at
-real scripts, keep commands relative to the repo, and add the matching
-Claude-side hook in `.claude/settings.json` when behaviour parity matters.
-The secret-guard scripts are intentionally **not** wired as Codex
+1. `codex trust .` makes `.codex/config.toml` and `[features] hooks = true`
+   load at all — but that alone does not approve any hook.
+2. Run `codex` **interactively** at least once in the project. On first use,
+   Codex asks you to review and approve each hook command (use the `/hooks`
+   command inside the session if you need to trigger that review manually).
+   Approval is keyed to a hash of the exact `command` string in
+   `hooks.json`.
+3. **Without that approval, non-interactive `codex exec` silently skips
+   untrusted hooks** — no warning, no error, the hook just does not run. If a
+   hook you expect to fire under `codex exec` (for example in CI) does not,
+   check trust state first.
+4. Because trust is keyed by the command string's hash, editing a hook's
+   `command` in `hooks.json` invalidates the prior approval — run another
+   interactive session and re-approve after any such change.
+
+`ralph doctor` validates `hooks.json` itself (present, valid JSON,
+schema-conformant, routed through the dispatcher) but cannot probe
+interactive trust state, so a clean `ralph doctor` run does not guarantee a
+hook will actually fire under `codex exec` until you have approved it once.
+
+To extend the hook surface, add a new event group to `.codex/hooks.json`
+(top-level `hooks` → event name → matcher-group array → `{type: "command",
+command: <string>}` handlers), keep the command git-root-resolved like the
+shipped entry, and add the matching Claude-side hook in
+`.claude/settings.json` when behaviour parity matters. The secret-guard
+scripts are intentionally **not** wired as Codex
 `PostToolUse` hooks. They are real git hooks:
 `scripts/pre-commit-secret-guard.sh`, `scripts/commit-msg-guard.sh`, and
 `scripts/prepare-commit-msg-secret-guard.sh`, plus
