@@ -88,3 +88,63 @@ Evidence log: `docs/evidence/verify-2026-08-20-063624.log` (411 lines, zero FAIL
 ## Verdict
 
 **PASS.** All 10 acceptance criteria (including AC-2's two-part evidence contract and AC-3b's four negative tests) are met with cited evidence. All 11 self-review findings (H1, M1-M5, L1-L5) are correctly fixed at HEAD with no regressions. The consistency sweep found no remaining stale "config.toml carries hooks" claims outside historical/struck-through text. Root and template copies of both `hooks.json` and `config.toml` are byte-identical. Tech-debt register rows are accurate. Static analysis is fully green at full scope.
+
+# Cycle 2
+
+- Date: 2026-08-20
+- Plan: `docs/plans/active/2026-08-20-codex-hooks-json-wiring.md`
+- Cycle: 2/2 (cap `RALPH_STANDARD_MAX_PIPELINE_CYCLES` = 2 — final cycle)
+- Scope: cycle-2 delta since cycle-1 verify (`10432f6`), `git diff 10432f6..HEAD` — `4cff65f`/`ae5ece5`/`0217f08` (test/sync-docs reports + residual drift), `8aaa27b`/`cb54856` (pre_bash_guard tech-debt row + line-break fix), `cdb0aad` (cross-review triage, 1 AR), `d1df46f` (AR#1 fix), `00ee645` (self-review cycle-2, 2 MEDIUM + 5 LOW), `bced11a` (C2-M1/M2/L1-L5 fixes). HEAD at review time: `bced11a`.
+- Dimension: spec compliance (AC-1..AC-10) + static analysis. No behavioral test execution (tester's job).
+- **Verdict: PASS** (one non-blocking prose defect found and recorded below — recommend fixing before `/pr`, does not gate this verdict).
+
+## Point 1 — AR#1 fix vs. triage contract, and C2-L4's message-rewording
+
+`d1df46f` matches the triage contract in `docs/reports/cross-review-triage-codex-hooks-json-wiring.md` exactly: the triage's single ACTION_REQUIRED item ("`[features].hooks` present but non-boolean silently treated as absent") is fixed at `internal/cli/doctor.go:294-299` (as cited) with a type-switch branch that appends a distinct warn finding, plus `TestCheckCodexEffectiveConfig_HooksFeatureNonBoolean_Warns` (`internal/cli/cli_test.go:473-496`) as the triage recommended. `go test ./internal/cli/... -run TestCheckCodexEffectiveConfig -v` → all 14 subtests PASS, including the new one.
+
+`bced11a` (C2-L4) then dropped the `%T` raw-Go-type leak the self-review flagged, but went further than the recommendation ("reuse the TOML-friendly type naming") — it removed value-rendering from the message entirely rather than adding `array`/`table`/`string` naming, landing on a static string: `"[features] hooks must be a boolean — a quoted or otherwise non-boolean value may leave hooks disabled; use \`hooks = true\`"`. This is a reasonable simplification (doctor.go:295-312 collapsed the three-arm type-switch into a plain `if isBool { ... } else { ... }`), and it still satisfies the finding's core ask (no Go-internals leak). Confirmed the discriminating test still passes post-rewording: the new message retains the literal substring `"non-boolean"` (inside "...or otherwise non-boolean value..."), so `TestCheckCodexEffectiveConfig_HooksFeatureNonBoolean_Warns`'s `strings.Contains(r.Detail, "non-boolean")` assertion still only matches this branch and not the sibling `"[features] hooks = false — Codex project hooks are disabled"` message. Ran the full `TestCheckCodexEffectiveConfig_*` suite (14 subtests) — all PASS at HEAD (`bced11a`).
+
+## Point 2 — C2 fixes vs. self-review cycle-2 recommendations, re-classified at HEAD
+
+| Cycle-2 ID | Status at HEAD | Evidence |
+|-----|-----|-----|
+| C2-M1 (`.codex/hooks/README.md` escape hatch pointed at an unreachable location) | **fixed** | Root + template rewritten to point at `.ralph/local/hooks/<event>.d/` or `.claude/hooks/local/<event>.d/` (both legal dispatcher-routed locations), and states directly referencing a script from `.codex/hooks.json` is flagged by the guard. `check_no_direct_hook_scripts_in_hooks_json`/`_in_config_toml` (`tests/test-hook-wiring.sh:259-297`) are unaffected — the new instruction routes through the dispatcher, so it cannot trip the guard. |
+| C2-M2 (six surfaces claimed doctor warns "only" on explicit `false`, AR#1 added a non-boolean arm outside that closed claim) | **fixed** | `.codex/README.md`, `docs/recipes/codex-setup.md`, `.codex/config.toml` (+ their three `templates/base/` twins, all `cmp`-identical to their root counterparts) now uniformly say "explicitly disabled or malformed (`hooks = false`, or a non-boolean value...)" / "explicitly set to false or carries a non-boolean value" / "explicitly `false` or set to a non-boolean value". Verified via grep across all six files — no residual "only explicit false" phrasing remains, and the wording now matches doctor's actual two-branch (bool-false / non-boolean) behavior at HEAD. |
+| C2-L1 (Check-3 comment enumeration dropped `[features] hooks`) | **fixed** | `internal/cli/doctor.go:105` now reads "Check 3: Codex hook wiring (`[features] hooks`; hooks.json schema + dispatcher routing; stale config.toml `[hooks]` table)." — the three-item list is restored and matches the function body's three concerns. |
+| C2-L2 (permanent spec comment cited an ephemeral `docs/plans/active/...` path) | **fixed** | `docs/specs/2026-08-17-overlay-scaffold-v2.md:92`'s AC-10 bracket now cites only the durable `docs/evidence/codex-hooks-livefire-slice1-2026-08-20.md` path; the plan-path pointer is dropped. (The two pre-existing dead pointers at `:66`/`:185` the self-review also noted are unrelated to this plan's scope and remain unfixed — outside this PR's affected areas.) |
+| C2-L3 (`.codex/config.toml` still named the non-shipping `tests/test-hook-wiring.sh` gate) | **fixed, with a new prose defect** | The clause naming the shell test was removed from both root and template `config.toml`, but the edit left a dangling fragment: line 69-70 (identical in both copies) now reads "...do not reintroduce a `[hooks]` table here — `ralph doctor` and the shell / flags that as a stale duplicate representation." — "and the shell" is an orphaned conjunct with no following noun, a leftover from the pre-fix "`ralph doctor` and the shell hook-wiring test both flag" that only had its back half rewritten. Not a spec-compliance or static-analysis failure (no AC covers this sentence's grammar, and `check-sync.sh`/`check-template-purity.sh` don't parse prose), but it ships into every scaffolded project's `.codex/config.toml` in this form. **Recommend a one-line follow-up fix before `/pr`**: drop "and the shell" so it reads "`ralph doctor` flags that as a stale duplicate representation." (both root and template copies, byte-identical, so a single coordinated edit closes it). |
+| C2-L5 (tech-debt row's parenthetical misattributed the guard mechanism) | **fixed** | The parenthetical was replaced with an accurate account: the row's own first recording used a compound `git commit -m` command whose heredoc body contained the guard's trigger substring, which is what actually blocked it — not a python-only workaround narrative implying the guard blocks file writes. Row still renders as 7 pipe-delimited fields (`awk -F'|' '/^\|/ {print NF}'` confirmed for lines 114-119, 122-123). |
+
+Counts: 2 MEDIUM fixed, 5 LOW fixed (4 clean, 1 — C2-L3 — introduced a new non-blocking prose defect during the fix, documented above).
+
+## Point 3 — AC-1..AC-10 at HEAD (`bced11a`)
+
+Cycle-2 delta touches only: doc/comment wording (6 files + template twins), one tech-debt row parenthetical, one spec AC-10 bracket citation, and `internal/cli/doctor.go`'s non-boolean branch (simplified from a 3-arm type-switch to an `if/else`, same warn semantics). None of these touch the hooks.json routing, matcher, schema validator, dispatcher check, init/manifest wiring, or check-sync/purity mechanics that AC-1/2/3/3b/5/6/7 depend on, so cycle-1's per-AC evidence still holds. Re-confirmed directly rather than assumed:
+
+- AC-1: `.codex/hooks.json` / `templates/base/.codex/hooks.json` unchanged since cycle-1 (`bced11a` didn't touch either); `.codex/config.toml` / template still have zero `[[hooks` tables (`grep -c '^\[\[hooks' .codex/config.toml` → 0) — the C2-L3 fix only edited prose in the existing reference-comment block, not the "do not reintroduce" instruction itself.
+- AC-3b/AC-4/AC-5: `go test ./internal/cli/... -run TestCheckCodexEffectiveConfig -v` → 14/14 PASS at HEAD (listed under Point 1), covering the schema negative tests, the dispatcher-routing check, the dual-representation warn, and both the explicit-false and non-boolean `[features] hooks` branches. `tests/test-hook-wiring.sh`'s guards are unaffected by the doc-only C2 fixes (confirmed by reading the diff — no touches to that file in `bced11a`).
+- AC-6/AC-7: `scripts/check-sync.sh` (full static run below) → `DRIFTED: 0`, `.codex/hooks.json` and `.codex/config.toml` both counted in `IDENTICAL: 157`; `./scripts/check-template-purity.sh` → PASS.
+- AC-9: Both tech-debt rows still parse as 7 pipe-delimited fields after the C2-L5 wording fix (confirmed above); the RESOLVED annotations from cycle 1 are untouched by `bced11a`.
+- AC-2, AC-8, AC-10: no cycle-2 commit touches the live-fire evidence file, `.codex/README.md`'s Trust UX section content (only the doctor-leniency paragraph inside it was reworded per C2-M2, not the trust-UX claims), or test/build mechanics beyond the doctor.go branch already covered above.
+
+## Point 4 — Static analysis
+
+`RALPH_VERIFY_SCOPE=full ./scripts/run-static-verify.sh` at HEAD (`bced11a`) — **all green**, exit 0, no FAIL/ERROR markers (`grep -n "FAIL\|ERROR"` on the evidence log returns nothing):
+- `scripts/check-sync.sh` — `IDENTICAL: 157`, `DRIFTED: 0`, `TEMPLATE_ONLY: 11`, `KNOWN_DIFF: 5` (all pre-existing) — PASS
+- `scripts/check-pipeline-sync.sh` — OK, 6/6 surfaces in sync
+- `scripts/check-skill-sync.sh` — 13 skills in lock-step
+- `scripts/check-template-purity.sh` — PASS
+- Go verifier (`packs/languages/golang/verify.sh`): `gofmt: ok`, `golangci-lint run` → `0 issues.`
+- `go build ./...` and `go vet ./internal/cli/...` — both clean (run separately as a sanity check on the doctor.go rewrite)
+
+Evidence log: `docs/evidence/verify-2026-08-20-112016.log`.
+
+## What remains unverified (tester/doc-maintainer scope)
+
+- Full behavioral test execution (`./scripts/run-test.sh`) — not run here, per the verify/test split; tester's job for this cycle.
+- Doc-drift beyond the specific claim-accuracy items checked in Point 2 — `/sync-docs` scope, already run for cycle 1 (`0217f08`, `ae5ece5`); not re-run for the cycle-2 delta since these are prose fixes inside files `/sync-docs` already covers, not new drift surfaces.
+- The C2-L3 dangling-fragment prose defect noted above is unverified as *fixed* — it is a newly observed gap, not yet remediated.
+
+## Cycle 2 verdict
+
+**PASS.** All three requested checks (AR#1-fix/triage-contract match with a still-discriminating test, C2 self-review-recommendation match with all six doctor-warning surfaces now consistent, AC-1..AC-10 continuity) hold at HEAD (`bced11a`). Static analysis is fully green at full scope. One new, non-blocking issue was found during this cycle: the C2-L3 fix left a grammatically broken sentence ("`ralph doctor` and the shell / flags that...") identically in `.codex/config.toml` and its template twin — cosmetic, not spec- or test-breaking, but shipped to every scaffolded project. Recommend a one-line fix before `/pr` given this is the final pipeline cycle (cap 2/2); does not block this PASS verdict.
