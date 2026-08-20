@@ -113,9 +113,10 @@
 
 ## Open questions
 
-- 相対パス command の可否(Slice 1 で実測)
-- matcher 意味論の一次情報確認(Slice 1)
-- `[features].hooks` 欠落時の Codex 既定値(Slice 1 で一次情報確認)
+すべて Slice 1 で解決(証跡: docs/evidence/codex-hooks-livefire-slice1-2026-08-20.md):
+- ~~相対パス command の可否~~ → 素の相対パスは公式に非推奨(hook cwd はセッション cwd)。**確定形: `"$(git rev-parse --show-toplevel)/.claude/hooks/ralph-dispatch.sh" PostToolUse`**(command 文字列はシェル評価されることを実測確認、git-root 解決で発火実証)
+- ~~matcher 意味論~~ → 一次情報: matcher はツール名への正規表現。ファイル編集の tool_name は `apply_patch`(`Edit`/`Write` はエイリアスとして受理)。**確定 matcher: `Edit|Write|MultiEdit|apply_patch`**(発火実証済み)
+- ~~`[features].hooks` 欠落時の既定~~ → 公式ドキュメントに記載なし。doctor は欠落を許容し、明示 `false` のみ warn とする
 
 ## Evidence targets
 
@@ -128,7 +129,7 @@
 
 ## Progress checklist
 
-- [ ] Slice 1: live-fire 事前検証(相対パス/matcher 確定)
+- [x] Slice 1: live-fire 事前検証(確定形: git-root 解決 command + apply_patch 込み matcher — evidence 参照)
 - [ ] Slice 2: 配線移行+全消費者追随(原子的)
 - [ ] Slice 3: ドキュメント/登記
 - [ ] Post-implementation pipeline
