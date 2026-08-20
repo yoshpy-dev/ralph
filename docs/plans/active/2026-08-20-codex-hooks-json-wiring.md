@@ -57,9 +57,12 @@
 ## Acceptance criteria
 
 - [ ] AC-1 `.codex/hooks.json`(root + template、byte-identical)が PostToolUse を `ralph-dispatch.sh` 経由にルーティングし、`.codex/config.toml` に `[[hooks.*]]` エントリが残っていない(参照コメントは残る)。
-- [ ] AC-2 このメタリポ(信頼済みチェックアウト)での live-fire 実測: 配布と同一形(相対パス command)の hooks.json で、`codex exec --dangerously-bypass-hook-trust` によりファイル編集 → dispatcher → `.claude/hooks/local/PostToolUse.d/` の drop-in 実行まで発火する。証跡(コマンド+プローブ出力)を docs/evidence/ に保存。
+- [ ] AC-2 live-fire 実測(2 系統、証跡を docs/evidence/ に保存):
+  - (a) このメタリポ(信頼済み)で配布と同一形(相対パス command)の hooks.json により、**bypass なしの** `codex exec` でファイル編集 → dispatcher → `.claude/hooks/local/PostToolUse.d/` の drop-in 実行まで発火(trust は 2026-08-20 に承認済みのものを利用。command 文字列が変わる場合は再承認が必要 — その場合は bypass 併記で代替し理由を記録)。
+  - (b) fresh `ralph init` fixture(一時ディレクトリ)で、hooks.json が Codex に発見・ロードされる証跡(exec stderr の hook 関連出力/警告)+`--dangerously-bypass-hook-trust` での発火。**制約の明記**: fresh fixture の非 bypass 発火は project trust+hook trust の対話承認ゲートに阻まれ自動化不能(codex-cli 0.147.0)。bypass は CI 向けサプリメントであり、非 bypass の実証は (a) が担う — この妥協を evidence とレポートに明記する(Codex 所見 2)。
 - [ ] AC-3 matcher の決定が一次情報または実測に基づき記録されている(`apply_patch` を含む/含めない判断と根拠)。
-- [ ] AC-4 `ralph doctor` が hooks.json を source of truth として検査する: hooks.json 欠落/不正 JSON/dispatcher ルーティング欠落で warn(--strict 対象外の環境チェックのまま)、config.toml に hooks 残存で併存警告。既存 doctor テストは新契約に追随して green。
+- [ ] AC-3b `.codex/hooks.json` の**型付きスキーマ検証**: doctor(または専用チェック)が公式スキーマ形(トップレベル `hooks` → イベント名キー → matcher グループ配列 → `{type: "command", command: <string>}` ハンドラ)への適合を検査する。ネガティブテスト必須: 有効な JSON だが不正なスキーマ(トップレベルに直接 `PostToolUse`、`hooks` キー欠落、ハンドラ `type` 欠落、command が配列)をそれぞれ warn として検出する(Codex 所見 1)。
+- [ ] AC-4 `ralph doctor` が hooks.json を source of truth として検査する: hooks.json 欠落/不正 JSON/スキーマ不適合(AC-3b)/dispatcher ルーティング欠落で warn(--strict 対象外の環境チェックのまま)、config.toml に hooks 残存で併存警告、**`[features].hooks = false` の明示無効化も warn**(欠落時は現行 Codex 既定に従う — Slice 1 で既定値を一次情報確認)(Codex 所見 3)。既存 doctor テストは新契約に追随して green。
 - [ ] AC-5 `tests/test-hook-wiring.sh` が hooks.json の dispatcher ルーティングを検査し、レガシー直接呼び出し形(config.toml または hooks.json のどちらに再導入されても)を検出したら fail する。
 - [ ] AC-6 `ralph init` が新規プロジェクトに `.codex/hooks.json` を ship し、manifest に owner=core で記録される(init テストで固定)。
 - [ ] AC-7 `scripts/check-sync.sh` green(hooks.json が root/template 同期対象に入る)。`./scripts/check-template-purity.sh` green。
@@ -70,9 +73,8 @@
 ## Implementation outline
 
 1. **Slice 1: live-fire 事前検証(書き捨て、コミットなし)** — このメタリポで相対パス command と matcher 変種(`apply_patch` 明示含む)の発火を実測し、配布形を確定。結果を docs/evidence/ に保存し、プランの Assumptions を確定値で更新。
-2. **Slice 2: 配線移行 + 同期** — hooks.json 新設(root/template)、config.toml から hooks 撤去+参照コメント、check-sync/purity green 化、`ownerForScaffoldPath` と init 経路の追随+テスト(AC-1/6/7)。
-3. **Slice 3: doctor + shell テスト追随** — `checkCodexEffectiveConfig` 反転+doctor テスト更新、`tests/test-hook-wiring.sh` 置換(AC-4/5)。
-4. **Slice 4: ドキュメント/登記** — trust UX 記載、tech-debt 2 行更新、AGENTS/CLAUDE 整合(AC-8/9)。
+2. **Slice 2: 配線移行+全消費者の追随(原子的 1 スライス = 1 コミット)** — hooks.json 新設(root/template)、config.toml から hooks 撤去+参照コメント、`checkCodexEffectiveConfig` 反転(スキーマ検証 AC-3b・features.hooks=false 検査を含む)+doctor テスト更新、`tests/test-hook-wiring.sh` 置換、check-sync/purity green 化、`ownerForScaffoldPath`/init 経路+テスト。配線と検査の source-of-truth を同一コミットで切り替え、中間状態で doctor/テストが壊れる区間を作らない(Codex 所見 4)(AC-1/3b/4/5/6/7)。
+3. **Slice 3: ドキュメント/登記** — trust UX 記載、tech-debt 2 行更新、AGENTS/CLAUDE 整合(AC-8/9)。
 
 ## Verify plan
 
@@ -100,7 +102,7 @@
 
 ## Rollout or rollback notes
 
-- 加算的+設定移動のみ。ロールバックは hooks.json 削除+config.toml エントリ復元で単純
+- ロールバック手順(Codex 所見 4 を受け具体化): (1) root/template の hooks.json 削除、(2) config.toml の hooks エントリ復元(両コピー)、(3) doctor/`test-hook-wiring.sh` の検査反転を戻す、(4) init/manifest テストの期待値復元、(5) tech-debt/README 記載の巻き戻し — Slice 2 が原子的 1 コミットなので実質 `git revert` 1 発+ドキュメントスライスの revert で完結する
 - マージ後、`/release` で v5.0.0 を発行する(本タスクがリリース前提)
 
 ## Design decisions
@@ -112,7 +114,8 @@
 ## Open questions
 
 - 相対パス command の可否(Slice 1 で実測)
-- matcher 意味論の一次情報确認(Slice 1)
+- matcher 意味論の一次情報確認(Slice 1)
+- `[features].hooks` 欠落時の Codex 既定値(Slice 1 で一次情報確認)
 
 ## Evidence targets
 
@@ -126,9 +129,8 @@
 ## Progress checklist
 
 - [ ] Slice 1: live-fire 事前検証(相対パス/matcher 確定)
-- [ ] Slice 2: 配線移行 + 同期
-- [ ] Slice 3: doctor + shell テスト追随
-- [ ] Slice 4: ドキュメント/登記
+- [ ] Slice 2: 配線移行+全消費者追随(原子的)
+- [ ] Slice 3: ドキュメント/登記
 - [ ] Post-implementation pipeline
 - [ ] /pr
 
