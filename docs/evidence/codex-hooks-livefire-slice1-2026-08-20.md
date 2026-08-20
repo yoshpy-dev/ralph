@@ -33,3 +33,25 @@
   with a warning when both exist — however on codex-cli 0.147.0 project inline TOML
   hooks empirically never execute (2026-08-19 evidence); shipping hooks.json aligns
   with both the docs and observed behavior.
+
+## AC-2(b) fresh-scaffold fixture evidence (2026-08-20, post-Slice-2)
+
+- Fixture: `ralph init --yes <tmpdir>` using the Slice-2 build (ships .codex/hooks.json,
+  manifest-tracked). hooks.json validated as JSON; manifest carries the entry.
+- Invocation: `codex exec --skip-git-repo-check --dangerously-bypass-hook-trust
+  '<file edit prompt>'` run inside the fresh, UNTRUSTED fixture.
+- Result: the SHIPPED hooks.json fired — a probe drop-in at the fixture's
+  .claude/hooks/local/PostToolUse.d/ was executed (marker file created), i.e.
+  project-layer hooks.json is discovered and loaded even in an untrusted project,
+  and the dispatcher fan-out reaches the third layer. "hook: PostToolUse" x16 on stderr.
+- Contrast with the P5-era scratch-repo non-fire: that attempt used the inline TOML
+  representation; with hooks.json the fresh-scaffold path works under bypass.
+- Remaining constraint (unchanged): WITHOUT --dangerously-bypass-hook-trust, untrusted
+  hook commands are silently skipped by codex exec; persisting trust requires one
+  interactive session approval (per-command-hash, ~/.codex/config.toml hooks.state).
+  Downstream users therefore run `codex` interactively once after `ralph init` and
+  approve the hook — documented in .codex/README.md (Slice 3).
+- AC-2(a) note: the earlier non-bypass fire on this machine (2026-08-20) used the
+  then-trusted ABSOLUTE-path command string; the final shipped string (git-root form)
+  has a different hash and would need re-approval, so per the plan the shipped-form
+  proof uses bypass, with this reason recorded.
