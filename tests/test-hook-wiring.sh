@@ -1,15 +1,24 @@
 #!/usr/bin/env bash
 # test-hook-wiring.sh — regression guard for "moved hooks leave dangling
-# references" (overlay-scaffold-v2 Phase 2 plan, Codex advisory #2).
+# references" and for "Codex hooks ship in a form that never fires".
 #
 # For BOTH the meta-repo root and templates/base/, parses every hook
-# command out of .claude/settings.json (jq) and .codex/config.toml (grep
-# the TOML command strings) and asserts the referenced script file exists
-# relative to that surface's root and is executable. This is a durable
-# gate against a future hooks reshuffle (e.g. the ralph-dispatch.sh /
-# <event>.d migration this test was added alongside) silently leaving a
-# settings.json or config.toml entry pointing at a path that no longer
+# command out of .claude/settings.json (jq) and asserts the referenced
+# script file exists relative to that surface's root and is executable.
+# This is a durable gate against a future hooks reshuffle (e.g. the
+# ralph-dispatch.sh / <event>.d migration this test was added alongside)
+# silently leaving a settings.json entry pointing at a path that no longer
 # exists.
+#
+# For Codex, .codex/hooks.json is the source of truth (inline
+# .codex/config.toml `[[hooks.*]]` entries do not fire — see
+# docs/evidence/). This script asserts: hooks.json exists at both surfaces
+# and is byte-identical between them; hooks.json is valid JSON; its
+# PostToolUse entry routes through ralph-dispatch.sh; neither hooks.json
+# nor config.toml references any other hook script directly (guards
+# against the legacy direct-call form being reintroduced in either
+# representation); and config.toml carries no leftover [hooks]/[[hooks.*]]
+# table now that hooks.json is authoritative.
 
 set -eu
 
@@ -86,111 +95,159 @@ EOF
   fi
 }
 
-check_codex_config_toml() {
+check_codex_hooks_json() {
   local label="$1" surface_root="$2"
-  local config="$surface_root/.codex/config.toml"
+  local hooks_json="$surface_root/.codex/hooks.json"
 
-  if [ ! -f "$config" ]; then
-    record_fail "$label: .codex/config.toml not found at $config"
+  if [ ! -f "$hooks_json" ]; then
+    record_fail "$label: .codex/hooks.json not found at $hooks_json"
     return
   fi
 
-  # Restrict to `command = [ "..." , "..." ]` (possibly multi-element) TOML
-  # array entries: first select lines that assign the `command` key, then
-  # pull out every double-quoted string ending in `.sh` from those lines,
-  # with or without a leading `./` (normalized away below) — L3 fix: the
-  # prior `"\./[^"]+"` extraction only matched a string that literally
-  # began with `./`, so a reintroduced direct call written without that
-  # prefix (e.g. `command = [".claude/hooks/check_mojibake.sh"]`) was
-  # invisible to both this existence check and the direct-invocation guard
-  # below, silently defeating them.
-  local commands
-  commands="$(grep -E '^[[:space:]]*command[[:space:]]*=' "$config" | grep -oE '"[^"]*\.sh"' | tr -d '"' | sed 's#^\./##' || true)"
+  if ! jq empty "$hooks_json" >/dev/null 2>&1; then
+    record_fail "$label: .codex/hooks.json is not valid JSON"
+    return
+  fi
+  record_pass "$label: .codex/hooks.json is valid JSON"
 
-  if [ -z "$commands" ]; then
-    record_fail "$label: .codex/config.toml has no [[hooks.*]] command entries (expected at least one)"
+  local post_tool_use_commands
+  post_tool_use_commands="$(jq -r '.hooks.PostToolUse // [] | .[] | (.hooks // [])[] | select(.type == "command") | .command' "$hooks_json" 2>/dev/null || true)"
+
+  if [ -z "$post_tool_use_commands" ]; then
+    record_fail "$label: .codex/hooks.json has no PostToolUse command entries"
     return
   fi
 
-  local count=0
-  while IFS= read -r exe; do
-    [ -z "$exe" ] && continue
-    count=$((count + 1))
-    local rel_path="${exe#./}"
-    local abs_path="$surface_root/$rel_path"
-    if [ ! -f "$abs_path" ]; then
-      record_fail "$label: config.toml command '$exe' -> missing file $abs_path"
-      continue
-    fi
-    if [ ! -x "$abs_path" ]; then
-      record_fail "$label: config.toml command '$exe' -> $abs_path exists but is not executable"
-      continue
-    fi
-    record_pass "$label: config.toml command '$exe' resolves to an executable file"
+  local routed=0 cmd
+  while IFS= read -r cmd; do
+    [ -z "$cmd" ] && continue
+    case "$cmd" in
+      *ralph-dispatch.sh*) routed=1 ;;
+    esac
   done <<EOF
-$commands
+$post_tool_use_commands
 EOF
 
-  if [ "$count" -eq 0 ]; then
-    record_fail "$label: .codex/config.toml parsed zero hook commands"
+  if [ "$routed" -eq 1 ]; then
+    record_pass "$label: hooks.json PostToolUse routes through ralph-dispatch.sh"
+  else
+    record_fail "$label: hooks.json PostToolUse does not route through ralph-dispatch.sh"
   fi
 }
 
-# check_codex_no_direct_hook_scripts <label> <surface_root> — every
-# .codex/config.toml [[hooks.*]] command must route through
-# ralph-dispatch.sh (or a documented adapter shim), not call a hook script
-# directly. This is the overlay-scaffold-v2 Phase 5 dispatcher-parity
-# regression guard: it fails closed the moment a future edit reintroduces
-# the legacy direct-call form (e.g. `command = ["./.claude/hooks/foo.sh"]`)
-# that tech-debt row 103 originally described for check_mojibake.sh.
-ALLOWED_CODEX_HOOK_EXECUTABLES=(
-  ".claude/hooks/ralph-dispatch.sh"
-)
+check_codex_hooks_json_byte_identical() {
+  local root_file="$REPO_ROOT/.codex/hooks.json"
+  local template_file="$REPO_ROOT/templates/base/.codex/hooks.json"
 
-check_codex_no_direct_hook_scripts() {
+  if [ ! -f "$root_file" ] || [ ! -f "$template_file" ]; then
+    record_fail "byte-identity: .codex/hooks.json missing at root or templates/base"
+    return
+  fi
+
+  if diff -q "$root_file" "$template_file" >/dev/null 2>&1; then
+    record_pass "byte-identity: .codex/hooks.json is identical at root and templates/base"
+  else
+    record_fail "byte-identity: .codex/hooks.json differs between root and templates/base"
+  fi
+}
+
+# check_codex_config_toml_no_hooks_tables <label> <surface_root> —
+# .codex/hooks.json is the Codex hook source of truth now (inline TOML
+# [[hooks.*]] entries never fired — see docs/evidence/); a surviving
+# [hooks]/[[hooks.*]] table in config.toml is a stale duplicate
+# representation that must not be reintroduced.
+check_codex_config_toml_no_hooks_tables() {
   local label="$1" surface_root="$2"
   local config="$surface_root/.codex/config.toml"
 
   [ -f "$config" ] || return
 
-  local commands
-  commands="$(grep -E '^[[:space:]]*command[[:space:]]*=' "$config" | grep -oE '"[^"]*\.sh"' | tr -d '"' | sed 's#^\./##' || true)"
-
-  [ -z "$commands" ] && return
-
-  local count=0
-  while IFS= read -r exe; do
-    [ -z "$exe" ] && continue
-    count=$((count + 1))
-    local rel_path="${exe#./}"
-    local allowed=0
-    local candidate
-    for candidate in "${ALLOWED_CODEX_HOOK_EXECUTABLES[@]}"; do
-      if [ "$rel_path" = "$candidate" ]; then
-        allowed=1
-        break
-      fi
-    done
-    if [ "$allowed" -eq 1 ]; then
-      record_pass "$label: config.toml command '$exe' routes through the dispatcher (not a direct hook-script call)"
-    else
-      record_fail "$label: config.toml command '$exe' is a direct hook-script invocation — route through ./.claude/hooks/ralph-dispatch.sh <event> instead"
-    fi
-  done <<EOF
-$commands
-EOF
-
-  if [ "$count" -eq 0 ]; then
-    record_fail "$label: .codex/config.toml parsed zero hook commands for the direct-invocation check"
+  if grep -qE '^[[:space:]]*\[\[?hooks(\.|])' "$config"; then
+    record_fail "$label: .codex/config.toml still has a [hooks]/[[hooks.*]] table — hooks.json is the source of truth, remove it"
+  else
+    record_pass "$label: .codex/config.toml has no [hooks]/[[hooks.*]] table"
   fi
 }
 
+# check_no_direct_hook_scripts_in_hooks_json <label> <surface_root> — every
+# hook script basename (`*.sh`) referenced by an actual "command" value in
+# .codex/hooks.json must be ralph-dispatch.sh, not a direct call to another
+# hook script. This is the dispatcher-parity regression guard: it fails
+# closed the moment a future edit reintroduces the legacy direct-call form.
+# Scoped to jq-extracted command STRINGS (not raw file grep) so prose
+# elsewhere in the file (e.g. a "description" field) can never be
+# misread as a hook command.
+check_no_direct_hook_scripts_in_hooks_json() {
+  local label="$1" surface_root="$2"
+  local hooks_json="$surface_root/.codex/hooks.json"
+
+  [ -f "$hooks_json" ] || return
+
+  local commands
+  commands="$(jq -r '.hooks // {} | to_entries[] | .value[] | (.hooks // [])[] | select(.type == "command") | .command' "$hooks_json" 2>/dev/null || true)"
+
+  [ -z "$commands" ] && return
+
+  local cmd basenames name
+  while IFS= read -r cmd; do
+    [ -z "$cmd" ] && continue
+    basenames="$(printf '%s' "$cmd" | grep -oE '[A-Za-z0-9_.-]+\.sh' | sort -u || true)"
+    [ -z "$basenames" ] && continue
+    while IFS= read -r name; do
+      [ -z "$name" ] && continue
+      if [ "$name" = "ralph-dispatch.sh" ]; then
+        record_pass "$label: hooks.json command references only ralph-dispatch.sh (no direct hook-script call)"
+      else
+        record_fail "$label: hooks.json command '$cmd' references '$name' directly — route through ralph-dispatch.sh instead"
+      fi
+    done <<EOF
+$basenames
+EOF
+  done <<EOF
+$commands
+EOF
+}
+
+# check_no_direct_hook_scripts_in_config_toml <label> <surface_root> — same
+# guard as above, scoped to .codex/config.toml `command = ...` assignment
+# lines only (not arbitrary prose/comments — this file legitimately
+# mentions unrelated *.sh scripts, e.g. the git secret-guard hooks, that
+# are not Codex PostToolUse commands).
+check_no_direct_hook_scripts_in_config_toml() {
+  local label="$1" surface_root="$2"
+  local config="$surface_root/.codex/config.toml"
+
+  [ -f "$config" ] || return
+
+  local basenames
+  basenames="$(grep -E '^[[:space:]]*command[[:space:]]*=' "$config" | grep -oE '[A-Za-z0-9_.-]+\.sh' | sort -u || true)"
+
+  [ -z "$basenames" ] && return
+
+  local name
+  while IFS= read -r name; do
+    [ -z "$name" ] && continue
+    if [ "$name" = "ralph-dispatch.sh" ]; then
+      record_pass "$label: config.toml command references only ralph-dispatch.sh (no direct hook-script call)"
+    else
+      record_fail "$label: config.toml command references '$name' directly — route through ralph-dispatch.sh instead"
+    fi
+  done <<EOF
+$basenames
+EOF
+}
+
 check_settings_json "root" "$REPO_ROOT"
-check_codex_config_toml "root" "$REPO_ROOT"
-check_codex_no_direct_hook_scripts "root" "$REPO_ROOT"
+check_codex_hooks_json "root" "$REPO_ROOT"
+check_codex_config_toml_no_hooks_tables "root" "$REPO_ROOT"
+check_no_direct_hook_scripts_in_hooks_json "root" "$REPO_ROOT"
+check_no_direct_hook_scripts_in_config_toml "root" "$REPO_ROOT"
 check_settings_json "templates/base" "$REPO_ROOT/templates/base"
-check_codex_config_toml "templates/base" "$REPO_ROOT/templates/base"
-check_codex_no_direct_hook_scripts "templates/base" "$REPO_ROOT/templates/base"
+check_codex_hooks_json "templates/base" "$REPO_ROOT/templates/base"
+check_codex_config_toml_no_hooks_tables "templates/base" "$REPO_ROOT/templates/base"
+check_no_direct_hook_scripts_in_hooks_json "templates/base" "$REPO_ROOT/templates/base"
+check_no_direct_hook_scripts_in_config_toml "templates/base" "$REPO_ROOT/templates/base"
+check_codex_hooks_json_byte_identical
 
 echo
 echo "=== test-hook-wiring.sh results ==="

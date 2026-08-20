@@ -29,8 +29,8 @@ approval_policy = "on-request"
 web_search = "cached"
 
 [features]
-# Required: project-level [hooks] are only loaded when hooks is enabled.
-# Without this flag the [hooks] table below is silently ignored.
+# Required: project-level hooks (see .codex/hooks.json below) are only
+# loaded when this flag is enabled. Without it, hooks are silently ignored.
 hooks = true
 
 [tui]
@@ -53,56 +53,28 @@ sandbox_mode = "read-only"
 approval_policy = "never"
 
 # ---------------------------------------------------------------------------
-# Hooks — wired to the same scripts/ used by Claude Code's .claude/hooks/.
+# Hooks — wired via .codex/hooks.json, not the `[[hooks.*]]` tables below.
 #
-# IMPORTANT: hooks ONLY run when the project is trusted AND
-# [features] hooks = true (see above). `ralph doctor` verifies both.
+# hooks.json routes PostToolUse through the same layered .d dispatcher
+# Claude Code uses (./.claude/hooks/ralph-dispatch.sh), so the 3-layer
+# extension contract (.claude/hooks/<event>.d/ -> .ralph/local/hooks/
+# <event>.d/ -> .claude/hooks/local/<event>.d/) works under Codex too.
+# hooks.json is the source of truth here because, on the codex-cli release
+# this was verified against, project-scoped inline `[[hooks.*]]` entries in
+# this file never fired while the equivalent hooks.json entry did; do not
+# reintroduce a `[hooks]` table here — `ralph doctor` and the shell
+# hook-wiring test both flag that as a stale duplicate representation.
 #
-# Keep Codex hooks in this file as inline `[[hooks.*]]` entries. Do not add a
-# sibling `.codex/hooks.json`; Codex warns when both representations exist in
-# the same project layer, and `ralph doctor` / `scripts/verify.local.sh`
-# reject that drift.
+# matcher targets the Codex tool name reported on a file edit
+# (`apply_patch`); `Edit`/`Write`/`MultiEdit` are accepted alongside it for
+# readability and parity with Claude Code's own matcher shape.
 #
-# Add or extend entries to mirror .claude/hooks/ behaviour.
+# IMPORTANT: hooks ONLY run when the project is trusted, [features] hooks
+# = true (see above), AND the hook has been approved via the interactive
+# hook-trust prompt on first invocation — an unapproved hook is skipped
+# without warning. `ralph doctor` verifies the wiring but cannot probe
+# trust state.
 # ---------------------------------------------------------------------------
-
-# Default-on: fan out to the same layered .d dispatcher Claude Code uses
-# (./.claude/hooks/ralph-dispatch.sh), so the 3-layer extension contract
-# (.claude/hooks/<event>.d/ -> .ralph/local/hooks/<event>.d/ ->
-# .claude/hooks/local/<event>.d/) works under Codex too, not just Claude
-# Code. Today PostToolUse.d/ runs check_mojibake.sh (U+FFFD mojibake
-# detection) via its 20-check-mojibake.sh wrapper, plus any other .d
-# drop-in.
-#
-# Protocol note: ralph-dispatch.sh does not parse or depend on the shape of
-# the hook payload it receives on stdin — it buffers stdin verbatim to a
-# temp file and replays those exact bytes to every .d script's stdin
-# unchanged (see ralph-dispatch.sh's own header comment). It only inspects
-# each *script's own stdout* for decision-JSON fields, never the input.
-# Routing Codex's PostToolUse call through the dispatcher therefore cannot
-# change what check_mojibake.sh receives on stdin versus the direct-call
-# form above — no adapter/shim is needed regardless of any difference
-# between Codex's and Claude Code's PostToolUse payload shape. (Live
-# verification of Codex's exact payload shape has not been confirmed:
-# project-scoped [[hooks.*]] entries did not fire in an untrusted scratch
-# checkout even with `--dangerously-bypass-hook-trust`, likely because
-# Codex's project hook trust gate needs the interactive `codex trust`
-# grant recorded in `~/.codex/config.toml`'s project trust table, which has
-# no scriptable equivalent in codex-cli 0.147.0. The dispatcher's
-# stdin-passthrough design makes that gap immaterial to correctness here.)
-#
-# Two entries are kept (Edit, Write) to mirror Codex's own tool-scoped
-# `match` shape; Claude Code's single settings.json entry uses one
-# `Edit|Write|MultiEdit` regex matcher instead because that's the shape its
-# own hooks schema supports. Both event names are "PostToolUse", so both
-# route into the same .claude/hooks/PostToolUse.d/ directory.
-[[hooks.PostToolUse]]
-match = { tool = "Edit" }
-command = ["./.claude/hooks/ralph-dispatch.sh", "PostToolUse"]
-
-[[hooks.PostToolUse]]
-match = { tool = "Write" }
-command = ["./.claude/hooks/ralph-dispatch.sh", "PostToolUse"]
 
 # Note: the scripts/*secret-guard.sh files are real git hooks, NOT Codex
 # PostToolUse hooks. `ralph init` / `ralph upgrade` install them into Git's hook

@@ -377,11 +377,50 @@ func TestProbeBinary_MissingBinary(t *testing.T) {
 	}
 }
 
-// TestCheckCodexEffectiveConfig_MissingFile asserts that we degrade to a
-// warning (not a fail) when the project has no .codex/config.toml — the
-// .codex/ tree is template-driven, so a missing file just means the user has
-// not run `ralph init` or `ralph upgrade` against this revision yet.
-func TestCheckCodexEffectiveConfig_MissingFile(t *testing.T) {
+// validHooksJSON is the shipped-form fixture: a schema-valid hooks.json
+// whose PostToolUse handler routes through ralph-dispatch.sh.
+const validHooksJSON = `{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|apply_patch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$(git rev-parse --show-toplevel)/.claude/hooks/ralph-dispatch.sh\" PostToolUse"
+          }
+        ]
+      }
+    ]
+  }
+}`
+
+func writeCodexConfigToml(t *testing.T, dir, contents string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(dir, ".codex"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".codex", "config.toml"), []byte(contents), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeCodexHooksJSON(t *testing.T, dir, contents string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(dir, ".codex"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".codex", "hooks.json"), []byte(contents), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestCheckCodexEffectiveConfig_MissingConfigToml_Warns asserts that we
+// degrade to a warning (not a fail) when the project has no
+// .codex/config.toml — the .codex/ tree is template-driven, so a missing
+// file just means the user has not run `ralph init` or `ralph upgrade`
+// against this revision yet.
+func TestCheckCodexEffectiveConfig_MissingConfigToml_Warns(t *testing.T) {
 	dir := t.TempDir()
 	r := checkCodexEffectiveConfig(dir)
 	if r.Status != "warn" {
@@ -392,106 +431,98 @@ func TestCheckCodexEffectiveConfig_MissingFile(t *testing.T) {
 	}
 }
 
-// TestCheckCodexEffectiveConfig_MissingFeatureFlag_Warns covers the failure
-// mode Codex documents explicitly: project [hooks] are silently ignored unless
-// `[features] hooks = true` is set. Doctor must surface this as a warn
-// even when [hooks] are otherwise wired up.
-func TestCheckCodexEffectiveConfig_MissingFeatureFlag_Warns(t *testing.T) {
+// TestCheckCodexEffectiveConfig_HooksFeatureAbsent_Lenient covers the Slice 1
+// open-questions resolution: the official hooks doc does not specify a
+// default when `[features] hooks` is omitted, so doctor must not warn about
+// an absent key — only an explicit `false` is a finding.
+func TestCheckCodexEffectiveConfig_HooksFeatureAbsent_Lenient(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, ".codex"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	contents := `model = "gpt-5.5"
+	writeCodexConfigToml(t, dir, `model = "gpt-5.5"
+`)
+	writeCodexHooksJSON(t, dir, validHooksJSON)
 
-[hooks]
-[[hooks.PostToolUse]]
-command = ["./scripts/hello.sh"]
-`
-	if err := os.WriteFile(filepath.Join(dir, ".codex", "config.toml"), []byte(contents), 0644); err != nil {
-		t.Fatal(err)
+	r := checkCodexEffectiveConfig(dir)
+	if r.Status != "pass" {
+		t.Errorf("status = %q, want pass (detail=%q)", r.Status, r.Detail)
 	}
+}
+
+// TestCheckCodexEffectiveConfig_HooksFeatureExplicitFalse_Warns asserts that
+// an explicit `[features] hooks = false` is surfaced as a warn — Codex
+// project hooks are disabled outright in that case.
+func TestCheckCodexEffectiveConfig_HooksFeatureExplicitFalse_Warns(t *testing.T) {
+	dir := t.TempDir()
+	writeCodexConfigToml(t, dir, `model = "gpt-5.5"
+
+[features]
+hooks = false
+`)
+	writeCodexHooksJSON(t, dir, validHooksJSON)
+
 	r := checkCodexEffectiveConfig(dir)
 	if r.Status != "warn" {
 		t.Errorf("status = %q, want warn", r.Status)
 	}
-	if !strings.Contains(r.Detail, "[features] hooks = true") {
-		t.Errorf("detail = %q, want substring '[features] hooks = true'", r.Detail)
+	if !strings.Contains(r.Detail, "hooks = false") {
+		t.Errorf("detail = %q, want substring 'hooks = false'", r.Detail)
 	}
 }
 
-// TestCheckCodexEffectiveConfig_DeprecatedFeatureFlag_Warns ensures the old
-// `[features] codex_hooks` flag does not satisfy the current Codex config
-// contract.
-func TestCheckCodexEffectiveConfig_DeprecatedFeatureFlag_Warns(t *testing.T) {
+// TestCheckCodexEffectiveConfig_DeprecatedFeatureFlagKey_TreatedAsAbsent
+// ensures the old `[features] codex_hooks` flag does not satisfy the real
+// `hooks` key — but because an absent key is lenient (see
+// TestCheckCodexEffectiveConfig_HooksFeatureAbsent_Lenient), this must not
+// produce a warn either; codex_hooks is simply ignored.
+func TestCheckCodexEffectiveConfig_DeprecatedFeatureFlagKey_TreatedAsAbsent(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, ".codex"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	contents := `model = "gpt-5.5"
+	writeCodexConfigToml(t, dir, `model = "gpt-5.5"
 
 [features]
 codex_hooks = true
+`)
+	writeCodexHooksJSON(t, dir, validHooksJSON)
 
-[[hooks.PostToolUse]]
-command = ["./scripts/check_mojibake.sh"]
-`
-	if err := os.WriteFile(filepath.Join(dir, ".codex", "config.toml"), []byte(contents), 0644); err != nil {
-		t.Fatal(err)
+	r := checkCodexEffectiveConfig(dir)
+	if r.Status != "pass" {
+		t.Errorf("status = %q, want pass (detail=%q)", r.Status, r.Detail)
 	}
+}
+
+// TestCheckCodexEffectiveConfig_HooksJSONMissing_Warns ensures a
+// structurally fine config.toml with no .codex/hooks.json is flagged —
+// hooks.json is the source of truth, so its absence means Codex hooks are
+// not wired at all.
+func TestCheckCodexEffectiveConfig_HooksJSONMissing_Warns(t *testing.T) {
+	dir := t.TempDir()
+	writeCodexConfigToml(t, dir, `model = "gpt-5.5"
+
+[features]
+hooks = true
+`)
+
 	r := checkCodexEffectiveConfig(dir)
 	if r.Status != "warn" {
 		t.Errorf("status = %q, want warn", r.Status)
 	}
-	if !strings.Contains(r.Detail, "[features] hooks = true") {
-		t.Errorf("detail = %q, want substring '[features] hooks = true'", r.Detail)
+	if !strings.Contains(r.Detail, "hooks.json") || !strings.Contains(r.Detail, "not found") {
+		t.Errorf("detail = %q, want substrings 'hooks.json' and 'not found'", r.Detail)
 	}
 }
 
-// TestCheckCodexEffectiveConfig_NoHooks_Warns ensures the check distinguishes
-// "feature flag missing" from "no hooks wired" so the operator gets a precise
-// remediation hint.
-func TestCheckCodexEffectiveConfig_NoHooks_Warns(t *testing.T) {
+// TestCheckCodexEffectiveConfig_FullyWired_Pass exercises the success path:
+// a schema-valid hooks.json with a PostToolUse handler routed through
+// ralph-dispatch.sh, and no stale config.toml [hooks] table. The detail
+// must remind the operator that effective loading still requires
+// `codex trust .` because we cannot probe Codex's trust state from Go.
+func TestCheckCodexEffectiveConfig_FullyWired_Pass(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, ".codex"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	contents := `model = "gpt-5.5"
+	writeCodexConfigToml(t, dir, `model = "gpt-5.5"
 
 [features]
 hooks = true
-`
-	if err := os.WriteFile(filepath.Join(dir, ".codex", "config.toml"), []byte(contents), 0644); err != nil {
-		t.Fatal(err)
-	}
-	r := checkCodexEffectiveConfig(dir)
-	if r.Status != "warn" {
-		t.Errorf("status = %q, want warn", r.Status)
-	}
-	if !strings.Contains(r.Detail, "codex trust") {
-		t.Errorf("detail = %q, want substring 'codex trust'", r.Detail)
-	}
-}
+`)
+	writeCodexHooksJSON(t, dir, validHooksJSON)
 
-// TestCheckCodexEffectiveConfig_FullyWired exercises the success path: feature
-// flag on AND at least one hook entry. The detail must remind the operator
-// that effective loading still requires `codex trust .` because we cannot
-// probe Codex's trust state from Go.
-func TestCheckCodexEffectiveConfig_FullyWired(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, ".codex"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	contents := `model = "gpt-5.5"
-
-[features]
-hooks = true
-
-[[hooks.PostToolUse]]
-command = ["./scripts/check_mojibake.sh"]
-`
-	if err := os.WriteFile(filepath.Join(dir, ".codex", "config.toml"), []byte(contents), 0644); err != nil {
-		t.Fatal(err)
-	}
 	r := checkCodexEffectiveConfig(dir)
 	if r.Status != "pass" {
 		t.Errorf("status = %q, want pass (detail=%q)", r.Status, r.Detail)
@@ -501,37 +532,28 @@ command = ["./scripts/check_mojibake.sh"]
 	}
 }
 
-// TestCheckCodexEffectiveConfig_DuplicateHooksJSON_Fails mirrors the Codex
-// startup warning for projects that carry both hook representations in the
-// same .codex layer. ralph standardizes on inline config.toml hooks, so doctor
-// must catch a stray hooks.json before the next Codex launch does.
-func TestCheckCodexEffectiveConfig_DuplicateHooksJSON_Fails(t *testing.T) {
+// TestCheckCodexEffectiveConfig_DualRepresentation_Warns mirrors the Codex
+// startup warning for projects that carry both hook representations at
+// once. hooks.json is the source of truth now, so a surviving config.toml
+// [hooks] table is stale duplication doctor must flag.
+func TestCheckCodexEffectiveConfig_DualRepresentation_Warns(t *testing.T) {
 	dir := t.TempDir()
-	codexDir := filepath.Join(dir, ".codex")
-	if err := os.MkdirAll(codexDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	contents := `model = "gpt-5.5"
+	writeCodexConfigToml(t, dir, `model = "gpt-5.5"
 
 [features]
 hooks = true
 
 [[hooks.PostToolUse]]
 command = ["./scripts/check_mojibake.sh"]
-`
-	if err := os.WriteFile(filepath.Join(codexDir, "config.toml"), []byte(contents), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(codexDir, "hooks.json"), []byte(`{"PostToolUse":[]}`), 0644); err != nil {
-		t.Fatal(err)
-	}
+`)
+	writeCodexHooksJSON(t, dir, validHooksJSON)
 
 	r := checkCodexEffectiveConfig(dir)
-	if r.Status != "fail" {
-		t.Errorf("status = %q, want fail (detail=%q)", r.Status, r.Detail)
+	if r.Status != "warn" {
+		t.Errorf("status = %q, want warn", r.Status)
 	}
-	if !strings.Contains(r.Detail, "hooks.json") {
-		t.Errorf("detail = %q, want substring 'hooks.json'", r.Detail)
+	if !strings.Contains(r.Detail, "hooks.json") || !strings.Contains(r.Detail, "source of truth") {
+		t.Errorf("detail = %q, want substrings 'hooks.json' and 'source of truth'", r.Detail)
 	}
 }
 
@@ -540,15 +562,101 @@ command = ["./scripts/check_mojibake.sh"]
 // hide a configuration error from the operator.
 func TestCheckCodexEffectiveConfig_InvalidTOML_Fails(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, ".codex"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, ".codex", "config.toml"), []byte("not [valid toml=="), 0644); err != nil {
-		t.Fatal(err)
-	}
+	writeCodexConfigToml(t, dir, "not [valid toml==")
+
 	r := checkCodexEffectiveConfig(dir)
 	if r.Status != "fail" {
 		t.Errorf("status = %q, want fail", r.Status)
+	}
+}
+
+// TestCheckCodexEffectiveConfig_HooksJSONTopLevelEventKey_Warns covers AC-3b
+// schema-defect case 1: the file has the event name directly at the top
+// level instead of nested under a "hooks" wrapper key.
+func TestCheckCodexEffectiveConfig_HooksJSONTopLevelEventKey_Warns(t *testing.T) {
+	dir := t.TempDir()
+	writeCodexConfigToml(t, dir, `model = "gpt-5.5"
+`)
+	writeCodexHooksJSON(t, dir, `{"PostToolUse":[{"matcher":"apply_patch","hooks":[{"type":"command","command":"./.claude/hooks/ralph-dispatch.sh PostToolUse"}]}]}`)
+
+	r := checkCodexEffectiveConfig(dir)
+	if r.Status != "warn" {
+		t.Errorf("status = %q, want warn", r.Status)
+	}
+	if !strings.Contains(r.Detail, `"hooks"`) {
+		t.Errorf("detail = %q, want substring about the missing \"hooks\" wrapper key", r.Detail)
+	}
+}
+
+// TestCheckCodexEffectiveConfig_HooksJSONHooksKeyMissing_Warns covers AC-3b
+// schema-defect case 2: valid JSON, but the top-level "hooks" key is simply
+// absent (as opposed to case 1's misplaced sibling key).
+func TestCheckCodexEffectiveConfig_HooksJSONHooksKeyMissing_Warns(t *testing.T) {
+	dir := t.TempDir()
+	writeCodexConfigToml(t, dir, `model = "gpt-5.5"
+`)
+	writeCodexHooksJSON(t, dir, `{"description":"no hooks key here"}`)
+
+	r := checkCodexEffectiveConfig(dir)
+	if r.Status != "warn" {
+		t.Errorf("status = %q, want warn", r.Status)
+	}
+	if !strings.Contains(r.Detail, `"hooks"`) {
+		t.Errorf("detail = %q, want substring about the missing \"hooks\" key", r.Detail)
+	}
+}
+
+// TestCheckCodexEffectiveConfig_HooksJSONHandlerMissingType_Warns covers
+// AC-3b schema-defect case 3: a handler object with no "type" field.
+func TestCheckCodexEffectiveConfig_HooksJSONHandlerMissingType_Warns(t *testing.T) {
+	dir := t.TempDir()
+	writeCodexConfigToml(t, dir, `model = "gpt-5.5"
+`)
+	writeCodexHooksJSON(t, dir, `{"hooks":{"PostToolUse":[{"matcher":"apply_patch","hooks":[{"command":"./.claude/hooks/ralph-dispatch.sh PostToolUse"}]}]}}`)
+
+	r := checkCodexEffectiveConfig(dir)
+	if r.Status != "warn" {
+		t.Errorf("status = %q, want warn", r.Status)
+	}
+	if !strings.Contains(r.Detail, `"type"`) {
+		t.Errorf("detail = %q, want substring about the missing \"type\" field", r.Detail)
+	}
+}
+
+// TestCheckCodexEffectiveConfig_HooksJSONCommandAsArray_Warns covers AC-3b
+// schema-defect case 4: "command" given as an array instead of a single
+// shell-evaluated string.
+func TestCheckCodexEffectiveConfig_HooksJSONCommandAsArray_Warns(t *testing.T) {
+	dir := t.TempDir()
+	writeCodexConfigToml(t, dir, `model = "gpt-5.5"
+`)
+	writeCodexHooksJSON(t, dir, `{"hooks":{"PostToolUse":[{"matcher":"apply_patch","hooks":[{"type":"command","command":["./.claude/hooks/ralph-dispatch.sh","PostToolUse"]}]}]}}`)
+
+	r := checkCodexEffectiveConfig(dir)
+	if r.Status != "warn" {
+		t.Errorf("status = %q, want warn", r.Status)
+	}
+	if !strings.Contains(r.Detail, "command") || !strings.Contains(r.Detail, "array") {
+		t.Errorf("detail = %q, want substrings 'command' and 'array'", r.Detail)
+	}
+}
+
+// TestCheckCodexEffectiveConfig_DispatcherRoutingMissing_Warns proves a
+// schema-valid hooks.json whose PostToolUse handler does NOT route through
+// ralph-dispatch.sh is still flagged — schema validity alone is not enough;
+// the 3-layer .d dispatcher contract requires the dispatcher script itself.
+func TestCheckCodexEffectiveConfig_DispatcherRoutingMissing_Warns(t *testing.T) {
+	dir := t.TempDir()
+	writeCodexConfigToml(t, dir, `model = "gpt-5.5"
+`)
+	writeCodexHooksJSON(t, dir, `{"hooks":{"PostToolUse":[{"matcher":"apply_patch","hooks":[{"type":"command","command":"./scripts/direct-call.sh"}]}]}}`)
+
+	r := checkCodexEffectiveConfig(dir)
+	if r.Status != "warn" {
+		t.Errorf("status = %q, want warn", r.Status)
+	}
+	if !strings.Contains(r.Detail, "ralph-dispatch.sh") {
+		t.Errorf("detail = %q, want substring 'ralph-dispatch.sh'", r.Detail)
 	}
 }
 
