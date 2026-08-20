@@ -111,6 +111,7 @@
 - A follow-up commit `7af720a` updated `.codex/AGENTS.override.md`'s hooks row (root + template) for the hooks.json wiring; this file is outside the plan's `Affected areas` list because it was caught during the self-review fix pass, not planned up front.
 - AC-2(b) live-fire evidence came out stronger than the plan anticipated: the fresh, *untrusted* `ralph init` fixture fired under `--dangerously-bypass-hook-trust`, not just the pre-trusted meta-repo path in AC-2(a). The non-bypass constraint documented in the plan's Assumptions/Risk register held only for the fresh-fixture case, as expected.
 - Cycle 2 (post-cross-review re-run): cross-review AR#1 (`checkCodexEffectiveConfig` silently ignored a non-boolean `[features] hooks` value) was fixed inline in `d1df46f` under the trivial-edit exception rather than a dedicated implementer slice. Self-review cycle 2 then found 7 new findings (0 CRITICAL / 0 HIGH / 2 MEDIUM / 5 LOW: C2-M1, C2-M2, C2-L1–L5), all fixed in a single follow-up commit `bced11a` — touched `.codex/README.md`, `.codex/config.toml`, `.codex/hooks/README.md`, `docs/recipes/codex-setup.md`, `docs/specs/2026-08-17-overlay-scaffold-v2.md`, `docs/tech-debt/README.md`, `internal/cli/doctor.go` (+ template twins). The verifier's cycle-2 pass then caught one residual orphaned sentence fragment in `.codex/config.toml`'s hooks comment ("`ralph doctor` and the shell / flags that...", left dangling by the C2-L3 wording fix in `bced11a`), fixed in `67f56d5`.
+- Pipeline cycle 3(操作者承認で cap 2→3): cross-review cycle-2 の AR 2 件(サブディレクトリ起動での dispatcher 空回り / apply_patch ペイロード不適合)を 4d8220c で修正し、サブディレクトリ起動 live-fire で再実証(docs/evidence/codex-hooks-livefire-cycle3-2026-08-20.md)。self-review cycle-3 が両修正の干渉(C3-H1: envelope パスがセッション cwd 相対のため git-root 実行下で mojibake 存在チェックが外れる)を検出し、payload の cwd フィールドで解決する修正を同 cycle 内で実施。
 
 ## Design decisions
 
@@ -121,7 +122,7 @@
 ## Open questions
 
 すべて Slice 1 で解決(証跡: docs/evidence/codex-hooks-livefire-slice1-2026-08-20.md):
-- ~~相対パス command の可否~~ → 素の相対パスは公式に非推奨(hook cwd はセッション cwd)。**確定形: `"$(git rev-parse --show-toplevel)/.claude/hooks/ralph-dispatch.sh" PostToolUse`**(command 文字列はシェル評価されることを実測確認、git-root 解決で発火実証)
+- ~~相対パス command の可否~~ → 素の相対パスは公式に非推奨(hook cwd はセッション cwd)。**確定形(cycle 3 で更新): `cd "$(git rev parse --show-toplevel 相当)" && ./.claude/hooks/ralph-dispatch.sh PostToolUse` — git root へ cd してから起動する形**(Slice 1 の git-root パス解決形は cycle-2 cross-review AR#1 でサブディレクトリ起動時に dispatcher の cwd 相対 `.d` 解決が空回りすると判明し、cd 前置形へ更新。シェル評価の実測と発火実証は両形で取得済み — evidence 2 通参照)
 - ~~matcher 意味論~~ → 一次情報: matcher はツール名への正規表現。ファイル編集の tool_name は `apply_patch`(`Edit`/`Write` はエイリアスとして受理)。**確定 matcher: `Edit|Write|MultiEdit|apply_patch`**(発火実証済み)
 - ~~`[features].hooks` 欠落時の既定~~ → 公式ドキュメントに記載なし。doctor は欠落を許容し、明示 `false` のみ warn とする
 
