@@ -27,10 +27,11 @@ the same artifacts no matter which agent drove the work.
    ```
 
    `ralph doctor` checks that the `codex` binary is on `$PATH`, that the project is
-   trusted, that `[features] hooks = true` is set, and that `.codex/hooks.json`
-   exists, parses, matches the expected schema, and routes at least one event
-   through the dispatcher. It cannot check interactive hook-trust state (see
-   "Hooks" below).
+   trusted, that `[features] hooks` is not explicitly disabled (`hooks = false`;
+   an absent key is left to Codex's own undocumented default), and that
+   `.codex/hooks.json` exists, parses, matches the expected schema, and routes
+   at least one event through the dispatcher. It cannot check interactive
+   hook-trust state (see "Hooks" below).
 
 ## Daily usage
 
@@ -96,13 +97,13 @@ drop-in script runs under both agents. The shipped hook group resolves the
 dispatcher path from the git root
 (`"$(git rev-parse --show-toplevel)/.claude/hooks/ralph-dispatch.sh" PostToolUse`)
 rather than a bare relative path, and matches `Edit|Write|MultiEdit|apply_patch`
-— Codex reports its file-edit tool as `apply_patch`, so the literal tool name
-has to be in the matcher for the hook to fire. `.codex/config.toml` keeps a
-reference comment pointing at `hooks.json` but no `[[hooks.*]]` table; do not
-reintroduce one there. Codex merges both representations when present and
-emits a startup warning about duplicate hook loading, and `ralph doctor` /
-`tests/test-hook-wiring.sh` both flag the stale dual representation if it
-comes back.
+— the payload reports `tool_name=apply_patch`, so the literal name is
+included as the conservative default; `Edit`/`Write`/`MultiEdit` are kept for
+readability and Claude-side parity and are also accepted. `.codex/config.toml`
+keeps a reference comment pointing at `hooks.json` but no `[[hooks.*]]` table;
+do not reintroduce one there. Codex merges both representations when present
+and emits a startup warning about duplicate hook loading, and `ralph doctor`
+flags the stale dual representation if it comes back.
 
 ### Trust UX
 

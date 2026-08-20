@@ -96,6 +96,14 @@ EOF
 }
 
 check_codex_hooks_json() {
+  # Dispatcher-existence assertion note: check_settings_json above resolves
+  # each Claude-side hook command to a real, executable file. This function
+  # does not repeat that check on the Codex side — hooks.json commands are
+  # shell-evaluated strings (e.g. a `$(git rev-parse --show-toplevel)/...`
+  # prefix), so naive path resolution against surface_root would be wrong.
+  # check_settings_json already resolves the same ralph-dispatch.sh script
+  # via the Claude-side settings.json entry, so dispatcher existence is
+  # covered there.
   local label="$1" surface_root="$2"
   local hooks_json="$surface_root/.codex/hooks.json"
 
@@ -151,6 +159,23 @@ check_codex_hooks_json_byte_identical() {
   fi
 }
 
+# codex_config_toml_has_hooks_table <config_file> — whitespace-tolerant
+# detector for a [hooks] / [[hooks.*]] TOML table: strips whitespace from
+# each `[`-leading line before matching, so a spaced variant like
+# `[[ hooks.PostToolUse ]]` (valid TOML) cannot walk past the guard the way
+# an anchored `\[\[?hooks` regex would. Mirrors
+# scripts/verify.local.sh's codex_config_has_inline_hooks awk approach.
+codex_config_toml_has_hooks_table() {
+  awk '
+    /^[[:space:]]*\[/ {
+      line = $0
+      gsub(/[[:space:]]/, "", line)
+      if (line ~ /^\[\[?hooks(\.|\]\]?)/) { found = 1 }
+    }
+    END { exit found ? 0 : 1 }
+  ' "$1"
+}
+
 # check_codex_config_toml_no_hooks_tables <label> <surface_root> —
 # .codex/hooks.json is the Codex hook source of truth now (inline TOML
 # [[hooks.*]] entries never fired — see docs/evidence/); a surviving
@@ -162,10 +187,72 @@ check_codex_config_toml_no_hooks_tables() {
 
   [ -f "$config" ] || return
 
-  if grep -qE '^[[:space:]]*\[\[?hooks(\.|])' "$config"; then
+  if codex_config_toml_has_hooks_table "$config"; then
     record_fail "$label: .codex/config.toml still has a [hooks]/[[hooks.*]] table — hooks.json is the source of truth, remove it"
   else
     record_pass "$label: .codex/config.toml has no [hooks]/[[hooks.*]] table"
+  fi
+}
+
+# test_codex_config_toml_hooks_table_detector — self-test fixture for
+# codex_config_toml_has_hooks_table: covers the tight form (`[[hooks.X]]`),
+# the spaced form (`[[ hooks.X ]]`), and a clean config with no hooks table,
+# so the whitespace-tolerance fix stays pinned by a regression case.
+test_codex_config_toml_hooks_table_detector() {
+  local tmp_dir tight spaced clean
+  tmp_dir="$(mktemp -d)"
+  trap 'rm -rf "$tmp_dir"' RETURN
+
+  tight="$tmp_dir/tight.toml"
+  spaced="$tmp_dir/spaced.toml"
+  clean="$tmp_dir/clean.toml"
+
+  cat > "$tight" <<'EOF'
+model = "gpt-5.5"
+
+[[hooks.PostToolUse]]
+command = ["./.claude/hooks/check_mojibake.sh"]
+EOF
+
+  cat > "$spaced" <<'EOF'
+model = "gpt-5.5"
+
+[[ hooks.PostToolUse ]]
+command = ["./.claude/hooks/check_mojibake.sh"]
+EOF
+
+  cat > "$clean" <<'EOF'
+model = "gpt-5.5"
+
+[features]
+hooks = true
+EOF
+
+  local ok=0
+
+  if codex_config_toml_has_hooks_table "$tight"; then
+    :
+  else
+    echo "FAIL: codex_config_toml_has_hooks_table missed the tight [[hooks.X]] form" >&2
+    ok=1
+  fi
+
+  if codex_config_toml_has_hooks_table "$spaced"; then
+    :
+  else
+    echo "FAIL: codex_config_toml_has_hooks_table missed the spaced [[ hooks.X ]] form" >&2
+    ok=1
+  fi
+
+  if codex_config_toml_has_hooks_table "$clean"; then
+    echo "FAIL: codex_config_toml_has_hooks_table false-positived on a config with no hooks table" >&2
+    ok=1
+  fi
+
+  if [ "$ok" -eq 0 ]; then
+    record_pass "self-test: codex_config_toml_has_hooks_table detects tight and spaced [[hooks.*]] forms"
+  else
+    record_fail "self-test: codex_config_toml_has_hooks_table regression (see stderr)"
   fi
 }
 
@@ -222,7 +309,10 @@ check_no_direct_hook_scripts_in_config_toml() {
   local basenames
   basenames="$(grep -E '^[[:space:]]*command[[:space:]]*=' "$config" | grep -oE '[A-Za-z0-9_.-]+\.sh' | sort -u || true)"
 
-  [ -z "$basenames" ] && return
+  if [ -z "$basenames" ]; then
+    record_pass "$label: config.toml has no hook command assignments"
+    return
+  fi
 
   local name
   while IFS= read -r name; do
@@ -248,6 +338,7 @@ check_codex_config_toml_no_hooks_tables "templates/base" "$REPO_ROOT/templates/b
 check_no_direct_hook_scripts_in_hooks_json "templates/base" "$REPO_ROOT/templates/base"
 check_no_direct_hook_scripts_in_config_toml "templates/base" "$REPO_ROOT/templates/base"
 check_codex_hooks_json_byte_identical
+test_codex_config_toml_hooks_table_detector
 
 echo
 echo "=== test-hook-wiring.sh results ==="

@@ -66,7 +66,7 @@ check_codex_hook_single_source() {
       printf '%s\n' "Codex hook config: duplicate project-level hook representations detected"
       printf '%s\n' "  - ${config_file} contains inline hooks entries"
       printf '%s\n' "  - ${hooks_json} also exists"
-      printf '%s\n' "Remove one representation; this repo uses .codex/config.toml as the source of truth."
+      printf '%s\n' "Remove one representation; this repo uses .codex/hooks.json as the source of truth — delete the config.toml [hooks]/[[hooks.*]] entries."
       return 1
     fi
   done

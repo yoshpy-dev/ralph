@@ -431,10 +431,12 @@ func TestCheckCodexEffectiveConfig_MissingConfigToml_Warns(t *testing.T) {
 	}
 }
 
-// TestCheckCodexEffectiveConfig_HooksFeatureAbsent_Lenient covers the Slice 1
-// open-questions resolution: the official hooks doc does not specify a
-// default when `[features] hooks` is omitted, so doctor must not warn about
-// an absent key — only an explicit `false` is a finding.
+// TestCheckCodexEffectiveConfig_HooksFeatureAbsent_Lenient covers the
+// leniency decision recorded in
+// docs/evidence/codex-hooks-livefire-slice1-2026-08-20.md: the official
+// hooks doc does not specify a default when `[features] hooks` is omitted,
+// so doctor must not warn about an absent key — only an explicit `false` is
+// a finding.
 func TestCheckCodexEffectiveConfig_HooksFeatureAbsent_Lenient(t *testing.T) {
 	dir := t.TempDir()
 	writeCodexConfigToml(t, dir, `model = "gpt-5.5"
@@ -570,9 +572,11 @@ func TestCheckCodexEffectiveConfig_InvalidTOML_Fails(t *testing.T) {
 	}
 }
 
-// TestCheckCodexEffectiveConfig_HooksJSONTopLevelEventKey_Warns covers AC-3b
-// schema-defect case 1: the file has the event name directly at the top
-// level instead of nested under a "hooks" wrapper key.
+// TestCheckCodexEffectiveConfig_HooksJSONTopLevelEventKey_Warns covers
+// hooks.json schema-defect case 1 (schema documented in
+// docs/evidence/codex-hooks-livefire-slice1-2026-08-20.md): the file has the
+// event name directly at the top level instead of nested under a "hooks"
+// wrapper key.
 func TestCheckCodexEffectiveConfig_HooksJSONTopLevelEventKey_Warns(t *testing.T) {
 	dir := t.TempDir()
 	writeCodexConfigToml(t, dir, `model = "gpt-5.5"
@@ -588,9 +592,11 @@ func TestCheckCodexEffectiveConfig_HooksJSONTopLevelEventKey_Warns(t *testing.T)
 	}
 }
 
-// TestCheckCodexEffectiveConfig_HooksJSONHooksKeyMissing_Warns covers AC-3b
-// schema-defect case 2: valid JSON, but the top-level "hooks" key is simply
-// absent (as opposed to case 1's misplaced sibling key).
+// TestCheckCodexEffectiveConfig_HooksJSONHooksKeyMissing_Warns covers
+// hooks.json schema-defect case 2 (schema documented in
+// docs/evidence/codex-hooks-livefire-slice1-2026-08-20.md): valid JSON, but
+// the top-level "hooks" key is simply absent (as opposed to case 1's
+// misplaced sibling key).
 func TestCheckCodexEffectiveConfig_HooksJSONHooksKeyMissing_Warns(t *testing.T) {
 	dir := t.TempDir()
 	writeCodexConfigToml(t, dir, `model = "gpt-5.5"
@@ -607,7 +613,9 @@ func TestCheckCodexEffectiveConfig_HooksJSONHooksKeyMissing_Warns(t *testing.T) 
 }
 
 // TestCheckCodexEffectiveConfig_HooksJSONHandlerMissingType_Warns covers
-// AC-3b schema-defect case 3: a handler object with no "type" field.
+// hooks.json schema-defect case 3 (schema documented in
+// docs/evidence/codex-hooks-livefire-slice1-2026-08-20.md): a handler
+// object with no "type" field.
 func TestCheckCodexEffectiveConfig_HooksJSONHandlerMissingType_Warns(t *testing.T) {
 	dir := t.TempDir()
 	writeCodexConfigToml(t, dir, `model = "gpt-5.5"
@@ -623,9 +631,10 @@ func TestCheckCodexEffectiveConfig_HooksJSONHandlerMissingType_Warns(t *testing.
 	}
 }
 
-// TestCheckCodexEffectiveConfig_HooksJSONCommandAsArray_Warns covers AC-3b
-// schema-defect case 4: "command" given as an array instead of a single
-// shell-evaluated string.
+// TestCheckCodexEffectiveConfig_HooksJSONCommandAsArray_Warns covers
+// hooks.json schema-defect case 4 (schema documented in
+// docs/evidence/codex-hooks-livefire-slice1-2026-08-20.md): "command" given
+// as an array instead of a single shell-evaluated string.
 func TestCheckCodexEffectiveConfig_HooksJSONCommandAsArray_Warns(t *testing.T) {
 	dir := t.TempDir()
 	writeCodexConfigToml(t, dir, `model = "gpt-5.5"

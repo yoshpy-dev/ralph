@@ -102,7 +102,7 @@ func runDoctorFull(targetDir string, probeModels, strict bool) error {
 	// Check 2: Codex.
 	results = append(results, checkCodexCLI(cfg))
 
-	// Check 3: Codex effective config (project trust + hooks feature + at least one hook).
+	// Check 3: Codex hook wiring (hooks.json schema + dispatcher routing; stale config.toml [hooks] table).
 	results = append(results, checkCodexEffectiveConfig(targetDir))
 
 	// Check 4: Hooks integrity.
@@ -250,17 +250,20 @@ func checkCodexCLI(cfg config.Config) checkResult {
 
 // checkCodexEffectiveConfig confirms that Codex's project-level hook wiring
 // is structurally sound. `.codex/hooks.json` is the source of truth for
-// Codex hooks (Slice 1 live-fire evidence: on the codex-cli release this was
-// verified against, inline `.codex/config.toml` `[[hooks.*]]` entries never
-// fired while the equivalent hooks.json entry did). This check therefore
-// validates hooks.json's schema (AC-3b) and dispatcher routing, and flags a
-// config.toml that still carries `[hooks]`/`[[hooks.*]]` tables as a stale
-// duplicate representation. We cannot probe Codex's trust state from Go, so
-// a structurally sound result still reminds the operator to confirm
-// `codex trust .` via the .codex/README.md guidance.
+// Codex hooks (live-fire evidence:
+// docs/evidence/codex-hooks-livefire-slice1-2026-08-20.md — on the codex-cli
+// release this was verified against, inline `.codex/config.toml`
+// `[[hooks.*]]` entries never fired while the equivalent hooks.json entry
+// did). This check therefore validates hooks.json's schema and dispatcher
+// routing, and flags a config.toml that still carries `[hooks]`/
+// `[[hooks.*]]` tables as a stale duplicate representation. We cannot probe
+// Codex's trust state from Go, so a structurally sound result still reminds
+// the operator to confirm `codex trust .` via the .codex/README.md
+// guidance.
 //
 // This is an environment check (warn-level findings), not part of FR-9
-// scaffold integrity — it never fails under `doctor --strict`.
+// scaffold integrity. `--strict` never escalates these findings; the only
+// `fail` this check produces is an unparseable `config.toml`.
 func checkCodexEffectiveConfig(targetDir string) checkResult {
 	r := checkResult{Name: "Codex effective config"}
 	cfgPath := filepath.Join(targetDir, ".codex", "config.toml")
@@ -288,8 +291,8 @@ func checkCodexEffectiveConfig(targetDir string) checkResult {
 	// [features] hooks: an explicit `false` disables Codex project hooks
 	// outright, worth a warn. An absent key is left lenient — the official
 	// hooks doc does not specify a default when the key is omitted, so
-	// doctor does not assume either value (Slice 1 open-questions
-	// resolution).
+	// doctor does not assume either value (leniency decision recorded in
+	// docs/evidence/codex-hooks-livefire-slice1-2026-08-20.md).
 	if features, ok := raw["features"].(map[string]any); ok {
 		if v, ok := features["hooks"].(bool); ok && !v {
 			findings = append(findings, "[features] hooks = false — Codex project hooks are disabled")

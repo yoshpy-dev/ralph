@@ -29,8 +29,11 @@ approval_policy = "on-request"
 web_search = "cached"
 
 [features]
-# Required: project-level hooks (see .codex/hooks.json below) are only
-# loaded when this flag is enabled. Without it, hooks are silently ignored.
+# Project-level hooks (see .codex/hooks.json below) require this flag not to
+# be explicitly disabled. The official Codex hooks doc does not document a
+# default for an omitted key, so `ralph doctor` is lenient on absence and
+# warns only when this is explicitly set to false. Keep it explicit and
+# true so hook behavior does not depend on Codex's undocumented default.
 hooks = true
 
 [tui]
