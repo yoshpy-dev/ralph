@@ -94,17 +94,25 @@ Project-level Codex hooks live in `.codex/hooks.json`, not in
 `./.claude/hooks/ralph-dispatch.sh`, the same layered `.d` dispatcher Claude
 Code uses (`.claude/hooks/<event>.d/` core, then `.ralph/local/hooks/<event>.d/`
 and `.claude/hooks/local/<event>.d/` for downstream drop-ins), so a single
-drop-in script runs under both agents. The shipped hook group resolves the
-dispatcher path from the git root
-(`"$(git rev-parse --show-toplevel)/.claude/hooks/ralph-dispatch.sh" PostToolUse`)
-rather than a bare relative path, and matches `Edit|Write|MultiEdit|apply_patch`
-— the payload reports `tool_name=apply_patch`, so the literal name is
-included as the conservative default; `Edit`/`Write`/`MultiEdit` are kept for
-readability and Claude-side parity and are also accepted. `.codex/config.toml`
-keeps a reference comment pointing at `hooks.json` but no `[[hooks.*]]` table;
-do not reintroduce one there. Codex merges both representations when present
-and emits a startup warning about duplicate hook loading, and `ralph doctor`
-flags the stale dual representation if it comes back.
+drop-in script runs under both agents. The shipped hook group's command first
+`cd`s to the git root and then invokes the dispatcher by a repo-relative path
+(`cd "$(git rev-parse --show-toplevel)" && ./.claude/hooks/ralph-dispatch.sh
+PostToolUse`). This matters because ralph-dispatch.sh resolves its `.d`
+layers relative to its own cwd: a bare absolute path to the dispatcher (no
+`cd`) would run the dispatcher fine but leave it looking for
+`.claude/hooks/PostToolUse.d/` etc. relative to whatever directory the Codex
+session was launched from, so a session started from a subdirectory would
+fire the hook against an empty layer set and silently run zero scripts. The
+`cd`-first form keeps the dispatcher's cwd-relative contract intact
+regardless of where the session starts. The matcher is
+`Edit|Write|MultiEdit|apply_patch` — the payload reports
+`tool_name=apply_patch`, so the literal name is included as the conservative
+default; `Edit`/`Write`/`MultiEdit` are kept for readability and Claude-side
+parity and are also accepted. `.codex/config.toml` keeps a reference comment
+pointing at `hooks.json` but no `[[hooks.*]]` table; do not reintroduce one
+there. Codex merges both representations when present and emits a startup
+warning about duplicate hook loading, and `ralph doctor` flags the stale dual
+representation if it comes back.
 
 ### Trust UX
 
@@ -133,8 +141,10 @@ hook will actually fire under `codex exec` until you have approved it once.
 
 To extend the hook surface, add a new event group to `.codex/hooks.json`
 (top-level `hooks` → event name → matcher-group array → `{type: "command",
-command: <string>}` handlers), keep the command git-root-resolved like the
-shipped entry, and add the matching Claude-side hook in
+command: <string>}` handlers), keep the command `cd`-to-git-root-first like
+the shipped entry (see above — a bare absolute path to the target script
+runs fine but breaks any cwd-relative lookups inside it), and add the
+matching Claude-side hook in
 `.claude/settings.json` when behaviour parity matters. The secret-guard
 scripts are intentionally **not** wired as Codex
 `PostToolUse` hooks. They are real git hooks:

@@ -387,7 +387,7 @@ const validHooksJSON = `{
         "hooks": [
           {
             "type": "command",
-            "command": "\"$(git rev-parse --show-toplevel)/.claude/hooks/ralph-dispatch.sh\" PostToolUse"
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && ./.claude/hooks/ralph-dispatch.sh PostToolUse"
           }
         ]
       }

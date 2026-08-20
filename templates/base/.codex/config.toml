@@ -69,6 +69,22 @@ approval_policy = "never"
 # reintroduce a `[hooks]` table here — `ralph doctor`
 # flags that as a stale duplicate representation.
 #
+# The shipped command `cd`s to the git root before invoking the dispatcher
+# by a repo-relative path (`cd "$(git rev-parse --show-toplevel)" &&
+# ./.claude/hooks/ralph-dispatch.sh PostToolUse`), not the other way around
+# (an absolute path to the dispatcher, invoked from whatever directory the
+# Codex session happened to be launched in). ralph-dispatch.sh resolves its
+# `.claude/hooks/<event>.d/` / `.ralph/local/hooks/<event>.d/` /
+# `.claude/hooks/local/<event>.d/` layers relative to its own cwd, and that
+# cwd-relative contract is shared with Claude Code's settings.json wiring,
+# which always runs at the project root — so a Codex session started from a
+# subdirectory previously fired the hook against an empty `.d` layer set
+# (silent no-op) even though the dispatcher script itself resolved fine.
+# Fixing this at the command-string level (cd first, then a relative
+# invocation) keeps that shared cwd-relative contract intact instead of
+# making ralph-dispatch.sh self-locating, which would be a larger change
+# than this wiring fix needs.
+#
 # matcher targets the Codex tool name reported on a file edit
 # (`apply_patch`); `Edit`/`Write`/`MultiEdit` are accepted alongside it for
 # readability and parity with Claude Code's own matcher shape.
