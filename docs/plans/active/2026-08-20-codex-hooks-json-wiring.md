@@ -56,19 +56,19 @@
 
 ## Acceptance criteria
 
-- [ ] AC-1 `.codex/hooks.json`(root + template、byte-identical)が PostToolUse を `ralph-dispatch.sh` 経由にルーティングし、`.codex/config.toml` に `[[hooks.*]]` エントリが残っていない(参照コメントは残る)。
-- [ ] AC-2 live-fire 実測(2 系統、証跡を docs/evidence/ に保存):
+- [x] AC-1 `.codex/hooks.json`(root + template、byte-identical)が PostToolUse を `ralph-dispatch.sh` 経由にルーティングし、`.codex/config.toml` に `[[hooks.*]]` エントリが残っていない(参照コメントは残る)。
+- [x] AC-2 live-fire 実測(2 系統、証跡を docs/evidence/ に保存):
   - (a) このメタリポ(信頼済み)で配布と同一形(相対パス command)の hooks.json により、**bypass なしの** `codex exec` でファイル編集 → dispatcher → `.claude/hooks/local/PostToolUse.d/` の drop-in 実行まで発火(trust は 2026-08-20 に承認済みのものを利用。command 文字列が変わる場合は再承認が必要 — その場合は bypass 併記で代替し理由を記録)。
   - (b) fresh `ralph init` fixture(一時ディレクトリ)で、hooks.json が Codex に発見・ロードされる証跡(exec stderr の hook 関連出力/警告)+`--dangerously-bypass-hook-trust` での発火。**制約の明記**: fresh fixture の非 bypass 発火は project trust+hook trust の対話承認ゲートに阻まれ自動化不能(codex-cli 0.147.0)。bypass は CI 向けサプリメントであり、非 bypass の実証は (a) が担う — この妥協を evidence とレポートに明記する(Codex 所見 2)。
-- [ ] AC-3 matcher の決定が一次情報または実測に基づき記録されている(`apply_patch` を含む/含めない判断と根拠)。
-- [ ] AC-3b `.codex/hooks.json` の**型付きスキーマ検証**: doctor(または専用チェック)が公式スキーマ形(トップレベル `hooks` → イベント名キー → matcher グループ配列 → `{type: "command", command: <string>}` ハンドラ)への適合を検査する。ネガティブテスト必須: 有効な JSON だが不正なスキーマ(トップレベルに直接 `PostToolUse`、`hooks` キー欠落、ハンドラ `type` 欠落、command が配列)をそれぞれ warn として検出する(Codex 所見 1)。
-- [ ] AC-4 `ralph doctor` が hooks.json を source of truth として検査する: hooks.json 欠落/不正 JSON/スキーマ不適合(AC-3b)/dispatcher ルーティング欠落で warn(--strict 対象外の環境チェックのまま)、config.toml に hooks 残存で併存警告、**`[features].hooks = false` の明示無効化も warn**(欠落時は現行 Codex 既定に従う — Slice 1 で既定値を一次情報確認)(Codex 所見 3)。既存 doctor テストは新契約に追随して green。
-- [ ] AC-5 `tests/test-hook-wiring.sh` が hooks.json の dispatcher ルーティングを検査し、レガシー直接呼び出し形(config.toml または hooks.json のどちらに再導入されても)を検出したら fail する。
-- [ ] AC-6 `ralph init` が新規プロジェクトに `.codex/hooks.json` を ship し、manifest に owner=core で記録される(init テストで固定)。
-- [ ] AC-7 `scripts/check-sync.sh` green(hooks.json が root/template 同期対象に入る)。`./scripts/check-template-purity.sh` green。
-- [ ] AC-8 trust UX(初回対話承認が必要、未承認 exec は無警告 skip)が `.codex/README.md`(+recipe があれば)に記載されている。
-- [ ] AC-9 tech-debt: 配布配線ギャップ行を RESOLVED 化、行 115 の「trust 承認のみ残」文を実績(2026-08-20 承認済み・bypass なし発火確認済み)に更新。
-- [ ] AC-10 `./scripts/run-verify.sh` exit 0、shell + Go 全テスト green。
+- [x] AC-3 matcher の決定が一次情報または実測に基づき記録されている(`apply_patch` を含む/含めない判断と根拠)。
+- [x] AC-3b `.codex/hooks.json` の**型付きスキーマ検証**: doctor(または専用チェック)が公式スキーマ形(トップレベル `hooks` → イベント名キー → matcher グループ配列 → `{type: "command", command: <string>}` ハンドラ)への適合を検査する。ネガティブテスト必須: 有効な JSON だが不正なスキーマ(トップレベルに直接 `PostToolUse`、`hooks` キー欠落、ハンドラ `type` 欠落、command が配列)をそれぞれ warn として検出する(Codex 所見 1)。
+- [x] AC-4 `ralph doctor` が hooks.json を source of truth として検査する: hooks.json 欠落/不正 JSON/スキーマ不適合(AC-3b)/dispatcher ルーティング欠落で warn(--strict 対象外の環境チェックのまま)、config.toml に hooks 残存で併存警告、**`[features].hooks = false` の明示無効化も warn**(欠落時は現行 Codex 既定に従う — Slice 1 で既定値を一次情報確認)(Codex 所見 3)。既存 doctor テストは新契約に追随して green。
+- [x] AC-5 `tests/test-hook-wiring.sh` が hooks.json の dispatcher ルーティングを検査し、レガシー直接呼び出し形(config.toml または hooks.json のどちらに再導入されても)を検出したら fail する。
+- [x] AC-6 `ralph init` が新規プロジェクトに `.codex/hooks.json` を ship し、manifest に owner=core で記録される(init テストで固定)。
+- [x] AC-7 `scripts/check-sync.sh` green(hooks.json が root/template 同期対象に入る)。`./scripts/check-template-purity.sh` green。
+- [x] AC-8 trust UX(初回対話承認が必要、未承認 exec は無警告 skip)が `.codex/README.md`(+recipe があれば)に記載されている。
+- [x] AC-9 tech-debt: 配布配線ギャップ行を RESOLVED 化、行 115 の「trust 承認のみ残」文を実績(2026-08-20 承認済み・bypass なし発火確認済み)に更新。
+- [x] AC-10 `./scripts/run-verify.sh` exit 0、shell + Go 全テスト green。
 
 ## Implementation outline
 
@@ -130,8 +130,8 @@
 ## Progress checklist
 
 - [x] Slice 1: live-fire 事前検証(確定形: git-root 解決 command + apply_patch 込み matcher — evidence 参照)
-- [ ] Slice 2: 配線移行+全消費者追随(原子的)
-- [ ] Slice 3: ドキュメント/登記
+- [x] Slice 2: 配線移行+全消費者追随(6717ff6)
+- [x] Slice 3: ドキュメント/登記(2bda3a1)
 - [ ] Post-implementation pipeline
 - [ ] /pr
 
