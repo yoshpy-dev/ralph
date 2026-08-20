@@ -32,8 +32,9 @@ web_search = "cached"
 # Project-level hooks (see .codex/hooks.json below) require this flag not to
 # be explicitly disabled. The official Codex hooks doc does not document a
 # default for an omitted key, so `ralph doctor` is lenient on absence and
-# warns only when this is explicitly set to false. Keep it explicit and
-# true so hook behavior does not depend on Codex's undocumented default.
+# warns when this is explicitly set to false or carries a non-boolean
+# value (e.g. a quoted "false"). Keep it explicit and true so hook
+# behavior does not depend on Codex's undocumented default.
 hooks = true
 
 [tui]
@@ -66,7 +67,7 @@ approval_policy = "never"
 # this was verified against, project-scoped inline `[[hooks.*]]` entries in
 # this file never fired while the equivalent hooks.json entry did; do not
 # reintroduce a `[hooks]` table here — `ralph doctor` and the shell
-# hook-wiring test both flag that as a stale duplicate representation.
+# flags that as a stale duplicate representation.
 #
 # matcher targets the Codex tool name reported on a file edit
 # (`apply_patch`); `Edit`/`Write`/`MultiEdit` are accepted alongside it for

@@ -11,8 +11,12 @@ tree** covers both agents.
 This directory is reserved for the case where a Codex-shaped wrapper is
 required — e.g. a hook whose CLI contract differs enough from Claude's
 PreToolUse / PostToolUse JSON-stdin convention that sharing the script is
-not viable. When that day comes, drop the wrapper here and reference it
-from `.codex/hooks.json`.
+not viable. When that day comes, put the adapter where the dispatcher
+already looks — `.ralph/local/hooks/<event>.d/` (committed, project-wide)
+or `.claude/hooks/local/<event>.d/` (machine-local, gitignored) — so it
+runs through `ralph-dispatch.sh` like every other hook; referencing a
+script here directly from `.codex/hooks.json` is flagged by `ralph
+doctor` and the hook-wiring checks as a bypass of the dispatcher.
 
 Until then, the directory exists only to make the convention visible
 alongside the populated `.claude/hooks/` tree.

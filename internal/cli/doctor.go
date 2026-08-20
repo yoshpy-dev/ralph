@@ -102,7 +102,7 @@ func runDoctorFull(targetDir string, probeModels, strict bool) error {
 	// Check 2: Codex.
 	results = append(results, checkCodexCLI(cfg))
 
-	// Check 3: Codex hook wiring (hooks.json schema + dispatcher routing; stale config.toml [hooks] table).
+	// Check 3: Codex hook wiring ([features] hooks; hooks.json schema + dispatcher routing; stale config.toml [hooks] table).
 	results = append(results, checkCodexEffectiveConfig(targetDir))
 
 	// Check 4: Hooks integrity.
@@ -295,19 +295,20 @@ func checkCodexEffectiveConfig(targetDir string) checkResult {
 	// docs/evidence/codex-hooks-livefire-slice1-2026-08-20.md).
 	if features, ok := raw["features"].(map[string]any); ok {
 		if hv, present := features["hooks"]; present {
-			switch v := hv.(type) {
-			case bool:
-				if !v {
+			if b, isBool := hv.(bool); isBool {
+				if !b {
 					findings = append(findings, "[features] hooks = false — Codex project hooks are disabled")
 				}
-			default:
+			} else {
 				// Present but not a boolean (e.g. hooks = "false" typo):
 				// distinct from the lenient absent-key case — Codex may
 				// not enable hooks with a malformed value, so silently
 				// passing here would misreport enablement (cross-review
 				// AR#1, cycle 1,
 				// docs/reports/cross-review-triage-codex-hooks-json-wiring.md).
-				findings = append(findings, fmt.Sprintf("[features] hooks has a non-boolean value (%T) — use `hooks = true`", hv))
+				// No %T in the message: raw Go type names leak internals,
+				// the same readability call validateCodexHooksJSON makes.
+				findings = append(findings, "[features] hooks must be a boolean — a quoted or otherwise non-boolean value may leave hooks disabled; use `hooks = true`")
 			}
 		}
 	}

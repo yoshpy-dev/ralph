@@ -89,7 +89,7 @@ ralph の配布物を所有権ベースの 5 層オーバーレイ構造に再�
 - [x] AC-7 Given 移行またはアップグレードが途中で失敗する、when 再実行する、then manifest のバージョン・layout は前進しておらず、再実行で残工程が完了する
 - [x] AC-8 Given 同一バージョンで upgrade 済み、when 再度 upgrade を実行する、then 書き込みが発生しない(no-op)
 - [x] AC-9 Given 新規ディレクトリ、when `ralph init` を実行する、then 生成レイアウトが移行後リポジトリと同一構造になり、`doctor --strict` が exit 0 になる
-- [x] AC-10 Given `.ralph/local/hooks/PostToolUse.d/` にユーザ drop-in がある、when 対象イベントが発火する、then core hook の後にユーザ drop-in が実行される(Claude Code で検証済み。Codex 側は dispatcher 配線済みだが project-scoped hooks の実発火確認が trust 制約で未了 — docs/tech-debt/README.md の該当行を参照)[2026-08-20 追記: 実発火確認済み。`.codex/hooks.json` への移行後、信頼済みメタリポでの非 bypass 発火と fresh `ralph init` フィクスチャでの bypass 発火を live-fire 検証済み — `docs/plans/active/2026-08-20-codex-hooks-json-wiring.md` AC-2、`docs/evidence/codex-hooks-livefire-slice1-2026-08-20.md` を参照]
+- [x] AC-10 Given `.ralph/local/hooks/PostToolUse.d/` にユーザ drop-in がある、when 対象イベントが発火する、then core hook の後にユーザ drop-in が実行される(Claude Code で検証済み。Codex 側は dispatcher 配線済みだが project-scoped hooks の実発火確認が trust 制約で未了 — docs/tech-debt/README.md の該当行を参照)[2026-08-20 追記: 実発火確認済み。`.codex/hooks.json` への移行後、信頼済みメタリポでの非 bypass 発火と fresh `ralph init` フィクスチャでの bypass 発火を live-fire 検証済み — `docs/evidence/codex-hooks-livefire-slice1-2026-08-20.md` を参照]
 - [x] AC-11 Given `templates/` にメタリポジトリ固有参照を混入させる、when 混入ガードスクリプトを実行する、then exit 1 で検出される
 - [x] AC-12 Given 対話解消コードの撤去後、when `internal/upgrade` / `internal/cli` を検索する、then 対話プロンプト・conflict marker 編集・baseline 書き込みの経路が存在しない
 

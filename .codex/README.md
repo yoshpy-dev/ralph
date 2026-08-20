@@ -27,8 +27,9 @@ the same artifacts no matter which agent drove the work.
    ```
 
    `ralph doctor` checks that the `codex` binary is on `$PATH`, that the project is
-   trusted, that `[features] hooks` is not explicitly disabled (`hooks = false`;
-   an absent key is left to Codex's own undocumented default), and that
+   trusted, that `[features] hooks` is not explicitly disabled or malformed
+   (`hooks = false`, or a non-boolean value such as a quoted "false"; an
+   absent key is left to Codex's own undocumented default), and that
    `.codex/hooks.json` exists, parses, matches the expected schema, and routes
    at least one event through the dispatcher. It cannot check interactive
    hook-trust state (see "Hooks" below).

@@ -22,8 +22,9 @@ ralph doctor                   # confirms Claude Code/Codex presence,
 ```
 
 `ralph doctor` warns if the project is unwritten / untrusted, if
-`[features] hooks = false` is set explicitly (an absent key is left to
-Codex's own undocumented default), or if `.codex/hooks.json` is missing,
+`[features] hooks` is explicitly `false` or set to a non-boolean value
+(an absent key is left to Codex's own undocumented default), or if
+`.codex/hooks.json` is missing,
 invalid, or not routed through the dispatcher. It cannot check interactive
 hook trust, though: Codex hooks separately require a one-time approval
 inside an interactive `codex` session (per-command-hash — `codex exec`
