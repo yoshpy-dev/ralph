@@ -79,3 +79,72 @@ that each edit is a targeted addition (no unrelated rewrites). Did not
 re-run `./scripts/run-verify.sh` (no source files changed) — verifier's
 cycle-1 pass (`10432f6`) already covers static/spec compliance for the code
 changes on this branch.
+
+## Cycle 2
+
+- Verdict: **complete** — 1 residual drift item fixed (plan Deviations gap), 0 remaining
+
+### Scope
+
+Cycle-2 delta since the cycle-1 sync-docs pass: `d1df46f` (doctor warns on a
+non-boolean `[features] hooks` value, cross-review AR#1), `bced11a`
+(self-review cycle-2 fixes C2-M1/C2-M2/C2-L1–L5 — six doc surfaces reworded
+to "false or non-boolean", `.codex/hooks/README.md` escape-hatch rewording,
+the spec AC-10 footnote citation trimmed, a tech-debt row parenthetical
+correction), and `67f56d5` (verifier-found orphaned sentence fragment in
+`.codex/config.toml`'s hooks comment, fixed). Checked three things per the
+lead's handoff: (1) any remaining "explicit false"-only claim about
+`[features] hooks` doctor behavior that the six-surface sweep missed, (2) the
+plan's `## Deviations` section for a cycle-2 bullet, (3) the tech-debt
+register's edited row still renders as a well-formed table row.
+
+### Findings and fixes
+
+1. **Plan's `## Deviations` section** — missing a cycle-2 entry (cycle-1's
+   sync-docs pass added the section but only covered cycle-1 events). Added a
+   fourth bullet recording: cross-review AR#1 fixed inline in `d1df46f` under
+   the trivial-edit exception; self-review cycle-2's 7 findings (2 MEDIUM,
+   5 LOW) fixed in `bced11a`, with the touched-file list; the verifier-found
+   dangling fragment ("`ralph doctor` and the shell / flags that...", left by
+   the C2-L3 wording fix) fixed in `67f56d5`.
+   `docs/plans/active/2026-08-20-codex-hooks-json-wiring.md`.
+
+### Checked, no drift found
+
+- **"Explicit false"-only claim sweep** — `grep -rn` across `*.md`/`*.go`/
+  `*.toml` for `hooks = false`, `[features] hooks`, and related phrasing
+  found all six shipped surfaces (`.codex/README.md`, `.codex/config.toml`,
+  `docs/recipes/codex-setup.md`, + their three `templates/base/` twins,
+  already `cmp`-identical to their root counterparts per verify cycle-2)
+  correctly stating "explicitly disabled or malformed" / "false or a
+  non-boolean value" — no residual closed "only explicit false" phrasing.
+  `.codex/AGENTS.override.md` and `README.md`'s comparison table still say
+  `[features] hooks = true` in a config-trust/example context (not a
+  doctor-behavior claim), which is accurate and out of scope for this sweep.
+- **Tech-debt register row formatting** — the edited pre_bash_guard row
+  (`docs/tech-debt/README.md`) and its neighbors all keep 7 pipe-delimited
+  fields (`awk -F'|' '/^\|/ {print NF}'`, same method the verifier's C2-L5
+  finding used); the RESOLVED hooks row (previously touched in cycle 1) is
+  unaffected by the cycle-2 parenthetical edit to the adjacent row. No
+  glued/broken rows introduced.
+- `.codex/config.toml`'s hooks comment block, post-`67f56d5`, reads cleanly
+  ("...do not reintroduce a `[hooks]` table here — `ralph doctor` flags that
+  as a stale duplicate representation.") — root and template copies
+  confirmed identical (`diff` clean).
+
+### Files changed
+
+- `docs/plans/active/2026-08-20-codex-hooks-json-wiring.md` (Deviations
+  cycle-2 bullet added)
+- `docs/reports/sync-docs-2026-08-20-codex-hooks-json-wiring.md` (this
+  report, Cycle 2 section)
+
+### Verification
+
+Docs-only change (plan + report). No source files touched, so
+`./scripts/run-verify.sh` was not re-run — verifier's and tester's cycle-2
+passes (`1b5cfa2`, `c288a81`) already cover static/spec/behavioral checks for
+the code changes on this branch through `67f56d5`. Spot-checked the
+tech-debt table row count with the same `awk -F'|' '/^\|/ {print NF}'`
+approach the verifier's C2-L5 finding used; confirmed 7 fields on every data
+row in the edited region.
