@@ -269,7 +269,7 @@ core that any future agent surface can reuse:
 
 - **Portable**: `AGENTS.md`, `scripts/`, `.github/workflows/`, `packs/languages/`, `docs/`
 - **Claude-native**: `CLAUDE.md`, `.claude/rules/`, `.claude/skills/`, `.claude/hooks/`, `.claude/agents/`
-- **Codex-native**: `.codex/config.toml`, `.codex/agents/`, `.codex/hooks/`, `.codex/AGENTS.override.md`, `.codex/README.md`, `.agents/skills/`
+- **Codex-native**: `.codex/config.toml`, `.codex/hooks.json`, `.codex/agents/`, `.codex/hooks/`, `.codex/AGENTS.override.md`, `.codex/README.md`, `.agents/skills/`
 
 `scripts/check-skill-sync.sh` keeps `.claude/skills/` and `.agents/skills/` in
 lock-step on body, name, description, and implicit-invocation policy. CI fails

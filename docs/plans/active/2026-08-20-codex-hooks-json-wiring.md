@@ -105,6 +105,12 @@
 - ロールバック手順(Codex 所見 4 を受け具体化): (1) root/template の hooks.json 削除、(2) config.toml の hooks エントリ復元(両コピー)、(3) doctor/`test-hook-wiring.sh` の検査反転を戻す、(4) init/manifest テストの期待値復元、(5) tech-debt/README 記載の巻き戻し — Slice 2 が原子的 1 コミットなので実質 `git revert` 1 発+ドキュメントスライスの revert で完結する
 - マージ後、`/release` で v5.0.0 を発行する(本タスクがリリース前提)
 
+## Deviations
+
+- Self-review (report `docs/reports/self-review-2026-08-20-codex-hooks-json-wiring.md`) found 11 findings (0 CRITICAL / 1 HIGH / 5 MEDIUM / 5 LOW: H1, M1-M5, L1-L5), all fixed in a single follow-up commit `c72e644` rather than a plan-scope change — touched `.codex/README.md`, `.codex/config.toml`, `.codex/hooks/README.md`, `docs/recipes/codex-setup.md`, `internal/cli/doctor.go`, `internal/cli/cli_test.go`, `scripts/verify.local.sh`, `tests/test-hook-wiring.sh` (+ template twins).
+- A follow-up commit `7af720a` updated `.codex/AGENTS.override.md`'s hooks row (root + template) for the hooks.json wiring; this file is outside the plan's `Affected areas` list because it was caught during the self-review fix pass, not planned up front.
+- AC-2(b) live-fire evidence came out stronger than the plan anticipated: the fresh, *untrusted* `ralph init` fixture fired under `--dangerously-bypass-hook-trust`, not just the pre-trusted meta-repo path in AC-2(a). The non-bypass constraint documented in the plan's Assumptions/Risk register held only for the fresh-fixture case, as expected.
+
 ## Design decisions
 
 - **表現の一本化(hooks.json 側)**: 実機で実行される表現が hooks.json のみと実証されたため。両表現併存は警告が出るうえ二重管理になるため、config.toml 側は撤去し参照コメントのみ残す。
