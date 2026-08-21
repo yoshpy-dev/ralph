@@ -102,7 +102,7 @@ func runDoctorFull(targetDir string, probeModels, strict bool) error {
 	// Check 2: Codex.
 	results = append(results, checkCodexCLI(cfg))
 
-	// Check 3: Codex effective config (project trust + hooks feature + at least one hook).
+	// Check 3: Codex hook wiring ([features] hooks; hooks.json schema + dispatcher routing; stale config.toml [hooks] table).
 	results = append(results, checkCodexEffectiveConfig(targetDir))
 
 	// Check 4: Hooks integrity.
@@ -248,12 +248,22 @@ func checkCodexCLI(cfg config.Config) checkResult {
 	return r
 }
 
-// checkCodexEffectiveConfig confirms that .codex/config.toml is present and
-// carries the bits Codex actually loads from a project-level config:
-// `[features] hooks = true` plus at least one [hooks.<event>] entry.
-// We cannot probe Codex's trust state from Go, so the result stays a warning
-// when the file is structurally fine — the user has to confirm trust via
-// `codex trust .` and the .codex/README.md guidance.
+// checkCodexEffectiveConfig confirms that Codex's project-level hook wiring
+// is structurally sound. `.codex/hooks.json` is the source of truth for
+// Codex hooks (live-fire evidence:
+// docs/evidence/codex-hooks-livefire-slice1-2026-08-20.md — on the codex-cli
+// release this was verified against, inline `.codex/config.toml`
+// `[[hooks.*]]` entries never fired while the equivalent hooks.json entry
+// did). This check therefore validates hooks.json's schema and dispatcher
+// routing, and flags a config.toml that still carries `[hooks]`/
+// `[[hooks.*]]` tables as a stale duplicate representation. We cannot probe
+// Codex's trust state from Go, so a structurally sound result still reminds
+// the operator to confirm `codex trust .` via the .codex/README.md
+// guidance.
+//
+// This is an environment check (warn-level findings), not part of FR-9
+// scaffold integrity. `--strict` never escalates these findings; the only
+// `fail` this check produces is an unparseable `config.toml`.
 func checkCodexEffectiveConfig(targetDir string) checkResult {
 	r := checkResult{Name: "Codex effective config"}
 	cfgPath := filepath.Join(targetDir, ".codex", "config.toml")
@@ -276,54 +286,174 @@ func checkCodexEffectiveConfig(targetDir string) checkResult {
 		return r
 	}
 
-	hooksFeatureEnabled := false
+	var findings []string
+
+	// [features] hooks: an explicit `false` disables Codex project hooks
+	// outright, worth a warn. An absent key is left lenient — the official
+	// hooks doc does not specify a default when the key is omitted, so
+	// doctor does not assume either value (leniency decision recorded in
+	// docs/evidence/codex-hooks-livefire-slice1-2026-08-20.md). A present
+	// but non-boolean value (e.g. a quoted "false") is a third, distinct
+	// state — also a warn, since Codex may not enable hooks with a
+	// malformed value and silently passing here would misreport
+	// enablement.
 	if features, ok := raw["features"].(map[string]any); ok {
-		if v, ok := features["hooks"].(bool); ok {
-			hooksFeatureEnabled = v
+		if hv, present := features["hooks"]; present {
+			if b, isBool := hv.(bool); isBool {
+				if !b {
+					findings = append(findings, "[features] hooks = false — Codex project hooks are disabled")
+				}
+			} else {
+				// Present but not a boolean (e.g. hooks = "false" typo):
+				// distinct from the lenient absent-key case — Codex may
+				// not enable hooks with a malformed value, so silently
+				// passing here would misreport enablement (cross-review
+				// AR#1, cycle 1,
+				// docs/reports/cross-review-triage-codex-hooks-json-wiring.md).
+				// No %T in the message: raw Go type names leak internals,
+				// the same readability call validateCodexHooksJSON makes.
+				findings = append(findings, "[features] hooks must be a boolean — a quoted or otherwise non-boolean value may leave hooks disabled; use `hooks = true`")
+			}
 		}
 	}
 
-	hookEntries := 0
-	hasInlineHookRepresentation := false
-	if hooks, ok := raw["hooks"].(map[string]any); ok {
-		hasInlineHookRepresentation = true
-		for _, eventHooks := range hooks {
-			switch v := eventHooks.(type) {
-			case []any:
-				hookEntries += len(v)
-			case map[string]any:
-				if len(v) > 0 {
-					hookEntries++
+	// A surviving config.toml [hooks]/[[hooks.*]] table is a stale
+	// duplicate representation now that hooks.json is the source of truth.
+	if _, ok := raw["hooks"].(map[string]any); ok {
+		findings = append(findings, "both representations exist; hooks.json is the source of truth — remove the config.toml [hooks] entries")
+	}
+
+	hooksJSONPath := filepath.Join(targetDir, ".codex", "hooks.json")
+	hjData, err := os.ReadFile(hooksJSONPath)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		findings = append(findings, ".codex/hooks.json not found — Codex project hooks are not wired")
+	case err != nil:
+		findings = append(findings, fmt.Sprintf("could not read .codex/hooks.json: %v", err))
+	default:
+		findings = append(findings, validateCodexHooksJSON(hjData)...)
+	}
+
+	if len(findings) > 0 {
+		r.Status = "warn"
+		r.Detail = strings.Join(findings, "; ")
+		return r
+	}
+
+	r.Status = "pass"
+	r.Detail = "hooks.json wired; confirm `codex trust .` ran for this project"
+	return r
+}
+
+// hookScriptBasenameRe extracts "*.sh" basenames out of a hooks.json command
+// string, mirroring tests/test-hook-wiring.sh's
+// check_no_direct_hook_scripts_in_hooks_json grep -oE pattern — used by
+// validateCodexHooksJSON to flag a command that bypasses ralph-dispatch.sh
+// by calling another hook script directly (C3-M1, cycle 3,
+// docs/reports/self-review-2026-08-20-codex-hooks-json-wiring.md). Keeping
+// this check in Go (not just the shell test) means a scaffolded project —
+// which does not ship tests/ — still gets it from `ralph doctor`.
+var hookScriptBasenameRe = regexp.MustCompile(`[A-Za-z0-9_.-]+\.sh`)
+
+// validateCodexHooksJSON checks hooksJSONData against the official Codex
+// hooks.json schema (top-level "hooks" -> event-name keys -> matcher-group
+// arrays -> {"type":"command","command":<string>} handlers), confirms at
+// least one PostToolUse handler routes through ralph-dispatch.sh (the
+// layered .d dispatcher Claude Code also uses), and flags any command that
+// references a *.sh script other than ralph-dispatch.sh directly (a
+// dispatcher bypass — C3-M1). Every defect is reported as a distinct
+// finding string; callers treat a non-empty result as a warn, never a fail
+// — this mirrors checkCodexEffectiveConfig's warn-level environment-check
+// contract (not part of FR-9 scaffold integrity, so never --strict-eligible).
+func validateCodexHooksJSON(hooksJSONData []byte) []string {
+	var doc map[string]any
+	if err := json.Unmarshal(hooksJSONData, &doc); err != nil {
+		return []string{fmt.Sprintf("invalid JSON in .codex/hooks.json: %v", err)}
+	}
+
+	hooksRaw, ok := doc["hooks"]
+	if !ok {
+		return []string{`hooks.json is missing the top-level "hooks" key (schema: {"hooks": {"<event>": [...]}})`}
+	}
+	events, ok := hooksRaw.(map[string]any)
+	if !ok {
+		return []string{`hooks.json "hooks" value must be an object keyed by event name`}
+	}
+
+	var findings []string
+	dispatcherRouted := false
+
+	for eventName, groupsRaw := range events {
+		groups, ok := groupsRaw.([]any)
+		if !ok {
+			findings = append(findings, fmt.Sprintf("hooks.json %q must be an array of matcher groups", eventName))
+			continue
+		}
+		for i, groupRaw := range groups {
+			group, ok := groupRaw.(map[string]any)
+			if !ok {
+				findings = append(findings, fmt.Sprintf("hooks.json %s[%d] must be an object with a \"hooks\" array", eventName, i))
+				continue
+			}
+			handlersRaw, ok := group["hooks"]
+			if !ok {
+				findings = append(findings, fmt.Sprintf("hooks.json %s[%d] is missing its \"hooks\" array", eventName, i))
+				continue
+			}
+			handlers, ok := handlersRaw.([]any)
+			if !ok {
+				findings = append(findings, fmt.Sprintf("hooks.json %s[%d].hooks must be an array", eventName, i))
+				continue
+			}
+			for j, handlerRaw := range handlers {
+				handler, ok := handlerRaw.(map[string]any)
+				if !ok {
+					findings = append(findings, fmt.Sprintf("hooks.json %s[%d].hooks[%d] must be an object", eventName, i, j))
+					continue
+				}
+				typeVal, hasType := handler["type"].(string)
+				if !hasType || typeVal != "command" {
+					findings = append(findings, fmt.Sprintf(`hooks.json %s[%d].hooks[%d] is missing "type": "command"`, eventName, i, j))
+					continue
+				}
+				cmdRaw, hasCmd := handler["command"]
+				if !hasCmd {
+					findings = append(findings, fmt.Sprintf(`hooks.json %s[%d].hooks[%d] is missing "command"`, eventName, i, j))
+					continue
+				}
+				cmdVal, isString := cmdRaw.(string)
+				if !isString {
+					kind := fmt.Sprintf("%T", cmdRaw)
+					if _, isArr := cmdRaw.([]any); isArr {
+						kind = "array"
+					}
+					findings = append(findings, fmt.Sprintf(`hooks.json %s[%d].hooks[%d] "command" must be a string (got %s)`, eventName, i, j, kind))
+					continue
+				}
+				if cmdVal == "" {
+					findings = append(findings, fmt.Sprintf(`hooks.json %s[%d].hooks[%d] "command" must not be empty`, eventName, i, j))
+					continue
+				}
+				if eventName == "PostToolUse" && strings.Contains(cmdVal, "ralph-dispatch.sh") {
+					dispatcherRouted = true
+				}
+				for _, name := range hookScriptBasenameRe.FindAllString(cmdVal, -1) {
+					if name == "ralph-dispatch.sh" {
+						continue
+					}
+					findings = append(findings, fmt.Sprintf(
+						"hooks.json %s[%d].hooks[%d] \"command\" references %q directly instead of routing through ralph-dispatch.sh",
+						eventName, i, j, name))
 				}
 			}
 		}
 	}
 
-	hooksJSONPath := filepath.Join(targetDir, ".codex", "hooks.json")
-	if hasInlineHookRepresentation {
-		if _, err := os.Stat(hooksJSONPath); err == nil {
-			r.Status = "fail"
-			r.Detail = "both .codex/config.toml [hooks] and .codex/hooks.json exist; remove hooks.json because this project uses config.toml as the Codex hook source of truth"
-			return r
-		} else if !errors.Is(err, fs.ErrNotExist) {
-			r.Status = "warn"
-			r.Detail = fmt.Sprintf("could not inspect .codex/hooks.json: %v", err)
-			return r
-		}
+	if !dispatcherRouted {
+		findings = append(findings, "hooks.json PostToolUse has no handler routed through ralph-dispatch.sh")
 	}
 
-	switch {
-	case !hooksFeatureEnabled:
-		r.Status = "warn"
-		r.Detail = "[features] hooks = true is not set; project hooks will be ignored"
-	case hookEntries == 0:
-		r.Status = "warn"
-		r.Detail = "no [hooks.*] entries — hooks feature enabled but nothing wired up. Run `codex trust .` once configured"
-	default:
-		r.Status = "pass"
-		r.Detail = fmt.Sprintf("hooks=true, %d hook entry(ies). Confirm `codex trust .` ran for this project", hookEntries)
-	}
-	return r
+	return findings
 }
 
 func checkHooks(targetDir string) checkResult {

@@ -53,7 +53,7 @@ ignores it.
 |---------------|------------------|---------------------------|
 | auto-approve safe writes | `sandbox_mode = "workspace-write"` | enabled |
 | confirm risky tools only | `approval_policy = "on-request"` | enabled |
-| project-level hooks | `[features] hooks = true` + project trust | enabled, requires `codex trust .` |
+| project-level hooks | `.codex/hooks.json` + `[features] hooks = true` + project trust + one-time interactive hook approval | enabled; run `codex trust .` and approve the hook once interactively |
 | autonomous loops | `approval_policy = "never"` | **not** enabled by default |
 
 If `ralph doctor` reports any of these as missing, follow the remediation it

@@ -55,6 +55,7 @@ func setupTestEmbedFSV2(t *testing.T) {
 		"templates/base/.ralph/local/verify.d/.gitkeep":     {Data: []byte("")},
 		"templates/base/.ralph/core/settings.ralph.json":    {Data: []byte(testSettingsSnapshotContent)},
 		"templates/base/.codex/AGENTS.override.md":          {Data: []byte(testCodexOverrideContent)},
+		"templates/base/.codex/hooks.json":                  {Data: []byte(`{"hooks":{"PostToolUse":[]}}` + "\n")},
 	}
 }
 
@@ -91,6 +92,7 @@ func TestExecuteInit_V2_FreshInit_LayoutAndOwners(t *testing.T) {
 		filepath.Join(".ralph", "local", "verify.d", ".gitkeep"):  scaffold.OwnerSeed,
 		filepath.Join(".ralph", "core", "settings.ralph.json"):    scaffold.OwnerCore,
 		filepath.Join(".codex", "AGENTS.override.md"):             scaffold.OwnerSeed,
+		filepath.Join(".codex", "hooks.json"):                     scaffold.OwnerCore,
 	}
 	for path, wantOwner := range wantOwners {
 		entry, ok := m.Files[path]

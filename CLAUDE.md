@@ -15,4 +15,4 @@ Ralph's always-on workflow guidance auto-loads as a project rule from
 ## Claude-specific directories (meta-repo addition)
 
 - `.claude/skills/` drift-checked against `.agents/skills/` by `scripts/check-skill-sync.sh`, which also ships to scaffolded projects (`templates/base/scripts/check-skill-sync.sh`)
-- `.claude/hooks/` Codex equivalents live under `.codex/config.toml` `[hooks]` for the meta-repo and `templates/base/.codex/config.toml` for scaffolded projects; the two are kept byte-identical
+- `.claude/hooks/` Codex equivalents live under `.codex/hooks.json` for the meta-repo and `templates/base/.codex/hooks.json` for scaffolded projects; the two are kept byte-identical

@@ -16,14 +16,21 @@ one you prefer and the standard flow is identical.
 ```sh
 cd <project>
 codex trust .                  # required: only then are .codex/config.toml
-                               # and [hooks] actually loaded
+                               # and .codex/hooks.json actually loaded
 ralph doctor                   # confirms Claude Code/Codex presence,
-                               # hooks=true, hook entries
+                               # hooks=true, hooks.json dispatcher wiring
 ```
 
 `ralph doctor` warns if the project is unwritten / untrusted, if
-`[features] hooks = true` is missing, or if no `[hooks]` entries are
-visible. Resolve every warning before relying on hook-driven safety.
+`[features] hooks` is explicitly `false` or set to a non-boolean value
+(an absent key is left to Codex's own undocumented default), or if
+`.codex/hooks.json` is missing,
+invalid, or not routed through the dispatcher. It cannot check interactive
+hook trust, though: Codex hooks separately require a one-time approval
+inside an interactive `codex` session (per-command-hash — `codex exec`
+silently skips an unapproved hook). See `.codex/README.md`'s Hooks section
+for the full trust UX. Resolve every doctor warning before relying on
+hook-driven safety.
 
 ## Daily flow
 
