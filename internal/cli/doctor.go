@@ -292,7 +292,11 @@ func checkCodexEffectiveConfig(targetDir string) checkResult {
 	// outright, worth a warn. An absent key is left lenient — the official
 	// hooks doc does not specify a default when the key is omitted, so
 	// doctor does not assume either value (leniency decision recorded in
-	// docs/evidence/codex-hooks-livefire-slice1-2026-08-20.md).
+	// docs/evidence/codex-hooks-livefire-slice1-2026-08-20.md). A present
+	// but non-boolean value (e.g. a quoted "false") is a third, distinct
+	// state — also a warn, since Codex may not enable hooks with a
+	// malformed value and silently passing here would misreport
+	// enablement.
 	if features, ok := raw["features"].(map[string]any); ok {
 		if hv, present := features["hooks"]; present {
 			if b, isBool := hv.(bool); isBool {
@@ -341,15 +345,26 @@ func checkCodexEffectiveConfig(targetDir string) checkResult {
 	return r
 }
 
+// hookScriptBasenameRe extracts "*.sh" basenames out of a hooks.json command
+// string, mirroring tests/test-hook-wiring.sh's
+// check_no_direct_hook_scripts_in_hooks_json grep -oE pattern — used by
+// validateCodexHooksJSON to flag a command that bypasses ralph-dispatch.sh
+// by calling another hook script directly (C3-M1, cycle 3,
+// docs/reports/self-review-2026-08-20-codex-hooks-json-wiring.md). Keeping
+// this check in Go (not just the shell test) means a scaffolded project —
+// which does not ship tests/ — still gets it from `ralph doctor`.
+var hookScriptBasenameRe = regexp.MustCompile(`[A-Za-z0-9_.-]+\.sh`)
+
 // validateCodexHooksJSON checks hooksJSONData against the official Codex
 // hooks.json schema (top-level "hooks" -> event-name keys -> matcher-group
-// arrays -> {"type":"command","command":<string>} handlers) and confirms at
+// arrays -> {"type":"command","command":<string>} handlers), confirms at
 // least one PostToolUse handler routes through ralph-dispatch.sh (the
-// layered .d dispatcher Claude Code also uses). Every defect is reported as
-// a distinct finding string; callers treat a non-empty result as a warn,
-// never a fail — this mirrors checkCodexEffectiveConfig's warn-level
-// environment-check contract (not part of FR-9 scaffold integrity, so
-// never --strict-eligible).
+// layered .d dispatcher Claude Code also uses), and flags any command that
+// references a *.sh script other than ralph-dispatch.sh directly (a
+// dispatcher bypass — C3-M1). Every defect is reported as a distinct
+// finding string; callers treat a non-empty result as a warn, never a fail
+// — this mirrors checkCodexEffectiveConfig's warn-level environment-check
+// contract (not part of FR-9 scaffold integrity, so never --strict-eligible).
 func validateCodexHooksJSON(hooksJSONData []byte) []string {
 	var doc map[string]any
 	if err := json.Unmarshal(hooksJSONData, &doc); err != nil {
@@ -421,6 +436,14 @@ func validateCodexHooksJSON(hooksJSONData []byte) []string {
 				}
 				if eventName == "PostToolUse" && strings.Contains(cmdVal, "ralph-dispatch.sh") {
 					dispatcherRouted = true
+				}
+				for _, name := range hookScriptBasenameRe.FindAllString(cmdVal, -1) {
+					if name == "ralph-dispatch.sh" {
+						continue
+					}
+					findings = append(findings, fmt.Sprintf(
+						"hooks.json %s[%d].hooks[%d] \"command\" references %q directly instead of routing through ralph-dispatch.sh",
+						eventName, i, j, name))
 				}
 			}
 		}

@@ -21,6 +21,13 @@
 #     "*** Update File:", and "*** Move to:" envelope lines. "*** Delete
 #     File:" targets are intentionally excluded — the file no longer
 #     exists on disk after the patch, so there is nothing left to scan.
+#   - apply_patch envelope paths are relative to the Codex SESSION's cwd
+#     (the payload's top-level "cwd" field), not to this hook's own cwd
+#     (the git root, since ralph-dispatch.sh's callers cd there first — see
+#     .codex/hooks.json). A relative envelope path is resolved against the
+#     payload's "cwd" before the existence test below; an absolute envelope
+#     path passes through unchanged, and a missing/empty "cwd" falls back
+#     to resolving against this hook's own cwd (the pre-fix behavior).
 #   - Scans every derived path that exists on disk; the first one carrying
 #     an unallowlisted U+FFFD exits 2 (first violation wins, matching the
 #     single-file contract below).
@@ -54,6 +61,7 @@ if ! command -v jq >/dev/null 2>&1; then
 fi
 
 file_path="$(printf '%s' "$payload" | jq -r '.tool_input.file_path // empty' 2>/dev/null || true)"
+session_cwd="$(printf '%s' "$payload" | jq -r '.cwd // empty' 2>/dev/null || true)"
 
 scan_paths=""
 if [ -n "$file_path" ]; then
@@ -108,6 +116,18 @@ is_allowlisted() {
 
 while IFS= read -r fp; do
   [ -z "$fp" ] && continue
+  # Resolve a relative apply_patch envelope path against the session cwd
+  # (see the Contract note above); an absolute path passes through
+  # unchanged, and an empty session_cwd leaves it relative (pre-fix
+  # fallback, evaluated against this hook's own cwd by the [ -f ] below).
+  case "$fp" in
+    /*) : ;;
+    *)
+      if [ -n "$session_cwd" ]; then
+        fp="$session_cwd/$fp"
+      fi
+      ;;
+  esac
   [ -f "$fp" ] || continue
   if is_allowlisted "$fp"; then
     continue

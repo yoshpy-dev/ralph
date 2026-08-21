@@ -98,12 +98,19 @@ EOF
 check_codex_hooks_json() {
   # Dispatcher-existence assertion note: check_settings_json above resolves
   # each Claude-side hook command to a real, executable file. This function
-  # does not repeat that check on the Codex side — hooks.json commands are
-  # shell-evaluated strings (e.g. a `$(git rev-parse --show-toplevel)/...`
-  # prefix), so naive path resolution against surface_root would be wrong.
-  # check_settings_json already resolves the same ralph-dispatch.sh script
-  # via the Claude-side settings.json entry, so dispatcher existence is
-  # covered there.
+  # does not repeat that check on the Codex side. The shipped command form
+  # is `cd "$(git rev-parse --show-toplevel)" && ./.claude/hooks/ralph-dispatch.sh
+  # PostToolUse` (C3-M3 fix) — after the leading `cd`, the dispatcher IS
+  # invoked by a surface_root-relative path, unlike the earlier absolute
+  # `$(git rev-parse --show-toplevel)/...` form this replaced (AR#1). We
+  # still do not resolve it here because the command is a compound shell
+  # expression (a `cd` plus `&&`), not a bare path — splitting the
+  # executable token out of a shell-evaluated string reliably would need a
+  # shell parser, not the `awk '{print $1}'` token grab check_settings_json
+  # uses. Dispatcher existence is covered there via the Claude-side
+  # settings.json entry; the cd-prefix and relative-invocation assertions
+  # below instead pin the load-bearing SHAPE of the Codex command string so
+  # a revert to the old absolute-path form fails.
   local label="$1" surface_root="$2"
   local hooks_json="$surface_root/.codex/hooks.json"
 
@@ -126,12 +133,22 @@ check_codex_hooks_json() {
     return
   fi
 
-  local routed=0 cmd
+  local routed=0 cd_prefix_ok=0 relative_dispatch_ok=0 cmd
   while IFS= read -r cmd; do
     [ -z "$cmd" ] && continue
     case "$cmd" in
       *ralph-dispatch.sh*) routed=1 ;;
     esac
+    # C3-M3 regression guard: pin the two load-bearing pieces of the
+    # cd-first command form so a revert to the pre-AR#1 absolute-path form
+    # (which satisfied *ralph-dispatch.sh* identically) fails here instead
+    # of passing silently.
+    if printf '%s' "$cmd" | grep -qF 'cd "$(git rev-parse --show-toplevel)"'; then
+      cd_prefix_ok=1
+    fi
+    if printf '%s' "$cmd" | grep -qF './.claude/hooks/ralph-dispatch.sh'; then
+      relative_dispatch_ok=1
+    fi
   done <<EOF
 $post_tool_use_commands
 EOF
@@ -140,6 +157,18 @@ EOF
     record_pass "$label: hooks.json PostToolUse routes through ralph-dispatch.sh"
   else
     record_fail "$label: hooks.json PostToolUse does not route through ralph-dispatch.sh"
+  fi
+
+  if [ "$cd_prefix_ok" -eq 1 ]; then
+    record_pass "$label: hooks.json PostToolUse command cd's to the git root before dispatching (AR#1 regression guard)"
+  else
+    record_fail "$label: hooks.json PostToolUse command is missing the git-root cd prefix — a revert to the absolute-path form would silently break subdirectory launches (C3-M3)"
+  fi
+
+  if [ "$relative_dispatch_ok" -eq 1 ]; then
+    record_pass "$label: hooks.json PostToolUse command invokes the dispatcher via a surface_root-relative path"
+  else
+    record_fail "$label: hooks.json PostToolUse command does not invoke ./.claude/hooks/ralph-dispatch.sh (relative form)"
   fi
 }
 

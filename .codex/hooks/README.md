@@ -16,7 +16,7 @@ already looks — `.ralph/local/hooks/<event>.d/` (committed, project-wide)
 or `.claude/hooks/local/<event>.d/` (machine-local, gitignored) — so it
 runs through `ralph-dispatch.sh` like every other hook; referencing a
 script here directly from `.codex/hooks.json` is flagged by `ralph
-doctor` and the hook-wiring checks as a bypass of the dispatcher.
+doctor` as a bypass of the dispatcher.
 
 Until then, the directory exists only to make the convention visible
 alongside the populated `.claude/hooks/` tree.

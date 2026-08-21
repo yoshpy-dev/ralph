@@ -12,6 +12,13 @@
 #      tool_input.command) — derives scan targets from "*** Add/Update
 #      File:" lines: dirty target → exit 2, clean patch → exit 0,
 #      Delete-only patch → exit 0 (no crash, nothing to scan)
+#   G4. apply_patch payload with a top-level "cwd" pointing at a
+#      subdirectory and a RELATIVE envelope path (the actual shape
+#      production sends) → the relative path must resolve against "cwd",
+#      not against this hook's own process cwd (C3-H1: after the AR#1
+#      fix, .codex/hooks.json cd's to the git root before running this
+#      hook, but apply_patch envelope paths remain relative to the
+#      Codex SESSION's cwd, which may be a subdirectory of that root)
 
 set -u
 
@@ -168,6 +175,26 @@ payload="$(make_apply_patch_payload "$patch_body")"
 actual=0
 printf '%s' "$payload" | HOOK_REPO_ROOT="$REPO_ROOT" "$HOOK" >/dev/null 2>/dev/null || actual=$?
 assert_exit "G3. Delete-only apply_patch payload exits 0 (no crash)" 0 "$actual"
+
+# ── Case G4: relative envelope path resolved against payload "cwd" ──
+# Simulates the AR#1/AR#2 interaction: the hook's own process cwd is the
+# git root (proj_root, matching the cd-first .codex/hooks.json command),
+# but the envelope path "dirty.txt" is relative to the Codex SESSION's
+# cwd, a subdirectory of that root (proj_subdir). Pre-fix, [ -f "dirty.txt" ]
+# is evaluated against proj_root, misses the file, and exits 0 (bug: the
+# guard silently stops guarding). Post-fix, "dirty.txt" resolves against
+# the payload's "cwd" field to proj_subdir/dirty.txt, which exists.
+proj_root="$workdir/proj-root"
+proj_subdir="$proj_root/docs"
+mkdir -p "$proj_subdir"
+subdir_dirty="$proj_subdir/dirty.txt"
+printf 'hello \357\277\275 world\n' > "$subdir_dirty"
+patch_body="$(printf '*** Begin Patch\n*** Update File: dirty.txt\n@@\n-old\n+new\n*** End Patch\n')"
+payload="$(jq -n --arg cmd "$patch_body" --arg cwd "$proj_subdir" \
+  '{"session_id":"fixture-session","tool_name":"apply_patch","cwd":$cwd,"tool_input":{"command":$cmd}}')"
+actual=0
+( cd "$proj_root" && printf '%s' "$payload" | HOOK_REPO_ROOT="$proj_root" "$HOOK" >/dev/null 2>/dev/null ) || actual=$?
+assert_exit "G4. relative envelope path resolves against payload cwd (subdir launch) → exit 2" 2 "$actual"
 
 # ── Summary ─────────────────────────────────────────────────────────
 echo

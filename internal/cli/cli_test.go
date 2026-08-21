@@ -693,6 +693,46 @@ func TestCheckCodexEffectiveConfig_DispatcherRoutingMissing_Warns(t *testing.T) 
 	}
 }
 
+// TestCheckCodexEffectiveConfig_DirectHookScriptReference_Warns covers C3-M1
+// (cycle 3, docs/reports/self-review-2026-08-20-codex-hooks-json-wiring.md):
+// a hooks.json PostToolUse group that DOES route through ralph-dispatch.sh
+// (so dispatcherRouted is satisfied) but ALSO carries a second handler
+// calling another *.sh script directly must still warn — that direct call
+// bypasses the layered .d dispatcher, and .codex/hooks/README.md tells
+// operators `ralph doctor` catches this.
+func TestCheckCodexEffectiveConfig_DirectHookScriptReference_Warns(t *testing.T) {
+	dir := t.TempDir()
+	writeCodexConfigToml(t, dir, `model = "gpt-5.5"
+`)
+	writeCodexHooksJSON(t, dir, `{"hooks":{"PostToolUse":[{"matcher":"apply_patch","hooks":[{"type":"command","command":"./.claude/hooks/ralph-dispatch.sh PostToolUse"},{"type":"command","command":"./.codex/hooks/foo.sh"}]}]}}`)
+
+	r := checkCodexEffectiveConfig(dir)
+	if r.Status != "warn" {
+		t.Errorf("status = %q, want warn", r.Status)
+	}
+	if !strings.Contains(r.Detail, "foo.sh") {
+		t.Errorf("detail = %q, want substring 'foo.sh' (direct script reference bypassing the dispatcher)", r.Detail)
+	}
+}
+
+// TestCheckCodexEffectiveConfig_DirectHookScriptReference_IgnoresDispatcher
+// proves the direct-script-reference check does not misfire on the
+// dispatcher itself: a lone ralph-dispatch.sh command must stay clean.
+func TestCheckCodexEffectiveConfig_DirectHookScriptReference_IgnoresDispatcher(t *testing.T) {
+	dir := t.TempDir()
+	writeCodexConfigToml(t, dir, `model = "gpt-5.5"
+
+[features]
+hooks = true
+`)
+	writeCodexHooksJSON(t, dir, validHooksJSON)
+
+	r := checkCodexEffectiveConfig(dir)
+	if r.Status != "pass" {
+		t.Errorf("status = %q, want pass (detail=%q)", r.Status, r.Detail)
+	}
+}
+
 // shouldColorize must respect NO_COLOR (any non-empty value disables) and
 // must return false when out is nil or not a terminal. Pipes / regular files
 // (the typical test path) are not terminals.

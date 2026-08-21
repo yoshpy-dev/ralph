@@ -14,6 +14,14 @@
 #   F. Payload with neither tool_input.file_path nor a patch-shaped
 #      tool_input.command (e.g. a Bash tool call) -> exit 0, needs-verify
 #      still touched, no edited-files.log entries
+#   G. apply_patch payload with a bare root-relative "docs/..." envelope
+#      path (no leading "/" -- the actual shape apply_patch/the log below
+#      produce) -> classified as doc-class on its own (C3-M2 regression:
+#      the doc-class globs previously required a leading "/")
+#   H. apply_patch payload carrying a top-level "cwd" pointing at a
+#      subdirectory and a RELATIVE envelope path -> edited-files.log
+#      carries the path resolved against "cwd", re-relativized to the
+#      hook's own dispatch cwd for readability (C3-H1)
 
 set -u
 
@@ -111,10 +119,10 @@ assert_contains "A. edited-files.log contains the file_path" "$(cat "$workdir/$d
 assert_contains "A. code-class message emitted" "$stdout" "Run ./scripts/run-verify.sh"
 
 # ── Case B: Claude Code Edit payload, doc-class path ─────────────────
-# The doc-class match requires a leading "/" before "docs/" (see the
-# *"/docs/"* case in post_edit_verify.sh), so the path needs a directory
-# component ahead of it -- a bare "docs/..." at the payload root would
-# fall through to the *.md skip-list branch instead.
+# Nested form (a directory component ahead of "docs/", matching the
+# *"/docs/"* glob). Case G below pins the bare root-relative form
+# ("docs/..." with no leading "/") that Codex apply_patch envelope paths
+# actually produce (C3-M2).
 dir="case-b"
 payload='{"session_id":"t","tool_name":"Edit","tool_input":{"file_path":"repo/docs/plans/active/example.md"}}'
 actual=0
@@ -136,8 +144,10 @@ assert_contains "C. edited-files.log contains the Add File path" "$log" "docs/no
 assert_contains "C. edited-files.log contains the Update File path" "$log" "internal/cli/other.go"
 
 # ── Case D: apply_patch mixing doc-class and code-class -> code wins ─
+# Bare root-relative doc path (no "repo/" prefix) -- the actual apply_patch
+# envelope shape (C3-M2 regression pin, alongside Case G below).
 dir="case-d"
-patch_body="$(printf '*** Begin Patch\n*** Update File: repo/docs/plans/active/example.md\n@@\n-old\n+new\n*** Update File: internal/cli/other.go\n@@\n-old\n+new\n*** End Patch\n')"
+patch_body="$(printf '*** Begin Patch\n*** Update File: docs/plans/active/example.md\n@@\n-old\n+new\n*** Update File: internal/cli/other.go\n@@\n-old\n+new\n*** End Patch\n')"
 payload="$(make_apply_patch_payload "$patch_body")"
 actual=0
 stdout="$(run_hook "$dir" "$payload" 2>/dev/null)" || actual=$?
@@ -171,6 +181,29 @@ else
   record_fail "F. needs-verify still touched"
 fi
 assert_not_contains "F. no reminder message emitted" "$stdout" "hookSpecificOutput"
+
+# ── Case G: bare root-relative "docs/..." apply_patch path -> doc-class ──
+dir="case-g"
+patch_body="$(printf '*** Begin Patch\n*** Update File: docs/plans/active/example.md\n@@\n-old\n+new\n*** End Patch\n')"
+payload="$(make_apply_patch_payload "$patch_body")"
+actual=0
+stdout="$(run_hook "$dir" "$payload" 2>/dev/null)" || actual=$?
+assert_exit "G. bare docs/... apply_patch payload exits 0" 0 "$actual"
+assert_contains "G. bare docs/... path classified as doc-class" "$stdout" "Instruction or documentation files changed"
+
+# ── Case H: apply_patch payload with "cwd" -> log carries the path
+# resolved against "cwd" (re-relativized to the hook's own dispatch cwd) ─
+dir="case-h"
+subdir="$workdir/$dir/proj/docs"
+mkdir -p "$subdir"
+patch_body="$(printf '*** Begin Patch\n*** Add File: livefire.txt\n+hello\n*** End Patch\n')"
+payload="$(jq -n --arg cmd "$patch_body" --arg cwd "$subdir" \
+  '{"session_id":"t","tool_name":"apply_patch","cwd":$cwd,"tool_input":{"command":$cmd}}')"
+actual=0
+stdout="$(run_hook "$dir" "$payload" 2>/dev/null)" || actual=$?
+assert_exit "H. apply_patch payload with cwd exits 0" 0 "$actual"
+log="$(cat "$workdir/$dir/.harness/state/edited-files.log" 2>/dev/null)"
+assert_contains "H. edited-files.log carries the cwd-resolved, root-relative path" "$log" "proj/docs/livefire.txt"
 
 # ── Summary ─────────────────────────────────────────────────────────
 echo
