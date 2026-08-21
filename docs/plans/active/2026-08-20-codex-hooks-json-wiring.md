@@ -140,7 +140,7 @@
 - [x] Slice 1: live-fire 事前検証(確定形: git-root 解決 command + apply_patch 込み matcher — evidence 参照)
 - [x] Slice 2: 配線移行+全消費者追随(6717ff6)
 - [x] Slice 3: ドキュメント/登記(2bda3a1)
-- [ ] Post-implementation pipeline
+- [x] Post-implementation pipeline(cycle 3/3 完了 — self-review/verify/test/sync-docs すべて PASS)
 - [ ] /pr
 
 ## Readiness checklist

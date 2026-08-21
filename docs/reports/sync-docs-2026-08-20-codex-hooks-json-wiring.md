@@ -2,6 +2,7 @@
 
 - Plan: `docs/plans/active/2026-08-20-codex-hooks-json-wiring.md`
 - Verdict: **complete** — 3 residual drift items fixed, 0 remaining
+- See also: Cycle 2 and Cycle 3 sections below for later pipeline runs.
 
 ## Scope
 
@@ -148,3 +149,90 @@ the code changes on this branch through `67f56d5`. Spot-checked the
 tech-debt table row count with the same `awk -F'|' '/^\|/ {print NF}'`
 approach the verifier's C2-L5 finding used; confirmed 7 fields on every data
 row in the edited region.
+
+## Cycle 3
+
+- Verdict: **complete** — 0 residual drift items found; 1 bookkeeping fix
+  (plan progress checklist)
+
+### Scope
+
+Cycle-3 delta since the cycle-2 sync-docs pass: `4d8220c` (cd-first
+dispatcher command + `apply_patch` payload path derivation), `3dd3a64`
+(session-cwd resolution in `check_mojibake.sh`/`post_edit_verify.sh`, doctor
+direct-hook-script-reference warn, doc-class bare-relative-path recognition
+in `post_edit_verify.sh`, C3-L1/L3/L4 wording fixes), `4e4e2a6` (plan/spec
+pointer repairs, orchestrator-owned C3-M4/L2), plus the self-review/verify/
+test cycle-3 report additions. Checked four things per the lead's handoff:
+
+1. Whether any doc describes `post_edit_verify.sh`/`check_mojibake.sh`
+   behavior in a now-incomplete way given the new session-cwd resolution
+   logic.
+2. Whether `.codex/README.md` / `docs/recipes/codex-setup.md` describe
+   doctor's hooks.json checks consistently, including the new
+   direct-hook-script-reference warn.
+3. Whether the tech-debt register still renders as a well-formed table after
+   3dd3a64's C3-L4 wording edit.
+4. Plan progress checklist final state.
+
+### Findings and fixes
+
+1. **Plan's `## Progress checklist`** — the "Post-implementation pipeline"
+   box was still unchecked even though self-review/verify/test cycle 3 all
+   report PASS verdicts (`docs/reports/self-review-...md:137`,
+   `docs/reports/verify-...md:220`, `docs/reports/test-...md:267`). Fixed:
+   checked the box with a one-line note that all four pipeline steps
+   (self-review/verify/test/sync-docs) completed for cycle 3/3. `/pr`
+   remains unchecked (correct — this report precedes it).
+
+### Checked, no drift found
+
+- **`check_mojibake.sh`/`post_edit_verify.sh` doc coverage** —
+  `AGENTS.md`'s repo-map bullet ("`check_mojibake.sh` + `mojibake-allowlist`
+  — temporary U+FFFD detection guard...") describes the guard's *purpose*,
+  not its path-resolution mechanics, so the new session-cwd derivation added
+  in `3dd3a64` doesn't make it stale — the bullet was never making a claim at
+  that level of detail. Grepped `mojibake`/`post_edit` across `docs/`,
+  `.codex/`, and `README.md`: only `AGENTS.md`, `.codex/hooks/README.md`,
+  and `docs/tech-debt/README.md` mention it, and none describe the
+  cwd-relative-vs-session-cwd distinction in a way this cycle's fix
+  contradicts.
+- **Doctor hooks.json check enumeration** — `.codex/README.md:137-140` and
+  `docs/recipes/codex-setup.md:24-27` both describe doctor's hooks.json
+  validation as a summary ("present, valid JSON, schema-conformant, routed
+  through the dispatcher" / "missing, invalid, or not routed through the
+  dispatcher"), not an exhaustive enumeration of every sub-check. The new
+  direct-hook-script-reference warn (`validateCodexHooksJSON`,
+  `internal/cli/doctor.go:440-447`) falls under "routed through the
+  dispatcher" at that granularity and is already called out explicitly in
+  `.codex/hooks/README.md:17-19` ("referencing a script here directly from
+  `.codex/hooks.json` is flagged by `ralph doctor` as a bypass of the
+  dispatcher"). No surface enumerates checks exhaustively, so no additive
+  mention is needed.
+- **Tech-debt register rendering** — `3dd3a64`'s C3-L4 edit only changed
+  prose *inside* the pre-existing `<!-- RESOLVED ... -->` HTML comment at
+  line 121 (not a table row — doesn't start with `|`, so it's outside the
+  GFM table's row grammar regardless of embedded `|` characters). Re-ran the
+  verifier's own method (`awk -F'|' '/^\|/ {print NF}'`) across the whole
+  file: every `|`-prefixed data row still has 7 fields except 7 pre-existing
+  rows (lines 22/24/32/46/57/79/90) that predate this task and contain
+  embedded pipe characters inside code spans — none of those are in the
+  cycle-3 diff. Line 122 (the actual struck-through table row this comment
+  documents) is unaffected and has NF=7.
+
+### Files changed
+
+- `docs/plans/active/2026-08-20-codex-hooks-json-wiring.md` (progress
+  checklist: Post-implementation pipeline box checked)
+- `docs/reports/sync-docs-2026-08-20-codex-hooks-json-wiring.md` (this
+  report, Cycle 3 section)
+
+### Verification
+
+Docs-only change (plan + report). No source files touched, so
+`./scripts/run-verify.sh` was not re-run — verifier's and tester's cycle-3
+passes (`2a6b15a`, `6a6cead`) already cover static/spec/behavioral checks for
+the code changes on this branch through `3dd3a64`. Confirmed via `git log`
+that `docs/tech-debt/README.md` was not touched again after `3dd3a64` in
+this cycle's delta, and re-ran the awk field-count spot-check described
+above.
