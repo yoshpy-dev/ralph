@@ -169,3 +169,101 @@ No flakes observed in this cycle.
 ## Verdict
 
 **PASS.** All shell assertions (621/621, byte-identical to cycle 1) and all Go packages (8/8) pass. The AR#1 fix and self-review cycle-2 fixes introduced no regressions: the new `TestCheckCodexEffectiveConfig_HooksFeatureNonBoolean_Warns` test and its sibling pass 3x isolated, `test-hook-wiring.sh` is stable 3x isolated, and both flake-watchlist tests are stable 3x isolated. Tests are green — proceeding past the cycle-2 gate (to `/pr`, per the pipeline cap) is safe from the test gate's perspective.
+
+---
+
+# Test report — codex-hooks-json-wiring (cycle 3)
+
+- Pipeline cycle: 3/3 (cap `RALPH_STANDARD_MAX_PIPELINE_CYCLES=3`)
+- HEAD at test time: `2a6b15a`
+- Delta since cycle 2 (`c288a81`): `4d8220c` (cycle-3 AR fixes — cd-first dispatcher command, `apply_patch` path derivation, new `tests/test-post-edit-verify.sh` suite, `test-check-mojibake.sh` Case G), `3dd3a64` (cycle-3 self-review fixes — session-cwd resolution + fixtures G4/G/H, doctor direct-hook-script-reference warn + 2 new tests, cd-prefix gates added to `test-hook-wiring.sh`), `4e4e2a6` (doc-only), `c6a24c6` (self-review cycle-3 report), `2a6b15a` (verify cycle-3 report)
+- Scope: `./scripts/run-test.sh` (`RALPH_VERIFY_SCOPE=changed`; same full-fallback path as prior cycles — `.claude/hooks/check_mojibake.sh` is unclassified → golang pack selected)
+- Verdict: **PASS**
+
+## Summary
+
+Re-ran the full shell suite (now 28 files — `tests/test-post-edit-verify.sh` is new this cycle) and the golang test pack after the cycle-2→cycle-3 delta. All 653 shell assertions passed (0 failures), up from 621 in cycle 2: +24 from the new `test-post-edit-verify.sh` suite, +4 from `test-check-mojibake.sh`'s new Case G (relative-path handling, including sub-case G4), +4 from `test-hook-wiring.sh`'s new cd-prefix gate assertions (26 → 30). All 8 Go packages passed with a fresh, uncached `go test ./... -count=1 -cover`. `internal/cli` coverage is unchanged at 80.5%.
+
+Evidence log: `docs/evidence/verify-2026-08-21-022703.log`
+
+## Counts
+
+### Shell (28 files, 653/653, 0 failures)
+
+| File | Pass/Total | Δ vs cycle 2 |
+|---|---|---|
+| test-agent-phase-boundaries.sh | 44/44 | — |
+| test-branch-name.sh | 26/26 | — |
+| **test-check-mojibake.sh** | **15/15** | **+4 (new Case G, incl. G4 relative-path)** |
+| test-check-skill-sync.sh | 13/13 | — |
+| test-detect-changed-languages.sh | 23/23 | — |
+| test-detect-languages-terraform.sh | 8/8 | — |
+| test-ensure-pr-ready.sh | 7/7 | — |
+| test-ensure-pr-title-prefix.sh | 13/13 | — |
+| test-gc-artifacts.sh | 11/11 | — |
+| **test-hook-wiring.sh** | **30/30** | **+4 (cd-prefix gates)** |
+| test-insights-append.sh | 39/39 | — |
+| test-language-pack-monorepo-roots.sh | 29/29 | — |
+| test-no-loop-references.sh | 1/1 | — |
+| **test-post-edit-verify.sh** | **24/24** | **new suite** |
+| test-pre-bash-guard.sh | 4/4 | — |
+| test-ralph-config.sh | 15/15 | — |
+| test-ralph-dispatch.sh | 26/26 | — |
+| test-ralph-worktree.sh | 29/29 | — |
+| test-run-verify-scope.sh | 12/12 | — |
+| test-secret-scan.sh | 6/6 | — |
+| test-self-review-scope.sh | 64/64 | — |
+| test-sync-skills.sh | 22/22 | — |
+| test-template-purity.sh | 10/10 | — |
+| test-terraform-gitignore.sh | 47/47 | — |
+| test-terraform-pack-verify.sh | 36/36 | — |
+| test-terraform-rule-frontmatter.sh | 11/11 | — |
+| test-verify-mode-split.sh | 59/59 | — |
+| test-xreview-helpers.sh | 29/29 | — |
+
+Total: 653 (621 cycle-2 baseline + 24 new-suite + 4 mojibake Case G + 4 hook-wiring cd-prefix gates), matching the handoff's expected deltas exactly.
+
+### Go (fresh `go test ./... -count=1 -cover`, uncached)
+
+```
+?    github.com/yoshpy-dev/ralph                          [no test files]
+     github.com/yoshpy-dev/ralph/cmd/ralph                coverage: 0.0% of statements
+ok   github.com/yoshpy-dev/ralph/internal/cli       38.727s coverage: 80.5% of statements
+ok   github.com/yoshpy-dev/ralph/internal/config     0.506s coverage: 94.2% of statements
+ok   github.com/yoshpy-dev/ralph/internal/insights   0.812s coverage: 86.1% of statements
+ok   github.com/yoshpy-dev/ralph/internal/org       11.111s coverage: 89.1% of statements
+ok   github.com/yoshpy-dev/ralph/internal/org/driver 1.240s coverage: 92.0% of statements
+ok   github.com/yoshpy-dev/ralph/internal/org/protocol 2.900s coverage: 97.9% of statements
+ok   github.com/yoshpy-dev/ralph/internal/scaffold   2.554s coverage: 75.7% of statements
+ok   github.com/yoshpy-dev/ralph/internal/upgrade    2.308s coverage: 91.2% of statements
+```
+
+8/8 packages with tests pass, 0 failures, 0 skips. `internal/cli` at 80.5% — identical to cycle 2 (unchanged despite the 2 new `checkCodexEffectiveConfig` direct-hook-script-reference tests, both exercising already-instrumented code paths). All other package coverages are byte-identical to cycle 2 (config 94.2%, insights 86.1%, org 89.1%, org/driver 92.0%, org/protocol 97.9%, scaffold 75.7%, upgrade 91.2%).
+
+## Named checks (per task request)
+
+**`tests/test-check-mojibake.sh` (15 cases incl. G4 relative-path), 3x isolated:** 15/15 pass on every run.
+
+**`tests/test-post-edit-verify.sh` (24 cases, new suite), 3x isolated:** 24/24 pass on every run.
+
+**`tests/test-hook-wiring.sh` (30 cases), 3x isolated:** 30/30 pass on every run.
+
+**New doctor tests, 3x isolated (`go test -run <name> -count=3 -v`):**
+- `TestCheckCodexEffectiveConfig_DirectHookScriptReference_Warns` — PASS, PASS, PASS
+- `TestCheckCodexEffectiveConfig_DirectHookScriptReference_IgnoresDispatcher` — PASS, PASS, PASS
+
+## Flake watchlist (3x isolated each, targeted at the exact package)
+
+- `TestRunDoctorOpts_ProbeModelsFalse_NoSubprocess` (`internal/cli`) — PASS, PASS, PASS (~0.58s each)
+- `TestRunWatcher_TimeoutIndependentOfSmallInterval` (`internal/org`) — PASS, PASS, PASS (~1.18s–1.23s each)
+
+No flakes observed in this cycle.
+
+## Coverage gaps (unchanged from prior cycles)
+
+- `doctor.go`'s `checkScaffoldCoreHashes` untracked-drift branch remains untested (pre-existing gap, not touched by this delta).
+- Shell suites have no instrumented coverage tool; scope is measured by test-case enumeration only.
+
+## Verdict
+
+**PASS.** All shell assertions (653/653, up from 621 with deltas matching the handoff exactly) and all Go packages (8/8) pass. The cycle-3 AR/self-review fixes (`4d8220c`, `3dd3a64`) introduced no regressions: the new `test-post-edit-verify.sh` suite, the expanded `test-check-mojibake.sh` and `test-hook-wiring.sh` cases, and the two new `checkCodexEffectiveConfig` doctor tests all pass 3x isolated, and both flake-watchlist tests remain stable 3x isolated. Tests are green — proceeding to `/pr` is safe from the test gate's perspective.
