@@ -52,3 +52,41 @@ None — no failures observed in any run (primary or corroborating).
 - Blocked: none.
 - The previously-flagged flaky `go test ./internal/cli/...` FAIL did not reproduce in this session (checked via one fresh isolated run plus two cached runs, all green) — not treated as a live regression, but noted above per the task's instruction to report determinism status rather than silently rerun-and-forget.
 - **Cleared to proceed to `/sync-docs` → `/cross-review` → `/pr`.**
+
+## Cycle 2 (2026-08-24, post cross-review fix-and-revalidate)
+
+- Plan: `docs/plans/active/2026-08-24-codex-hooks-multi-event.md`
+- Tester: `tester` subagent (Claude Code)
+- Scope: behavioral tests only. Re-run triggered by two fix commits landed after Cycle 1: `381b938` (doctor now requires the dispatcher-routing check to match the *specific* hook event as an argument, not just "any dispatcher call exists" — 2 new Go tests) and `ed2a2d0` (shell gate unification/hardening in `tests/test-hook-wiring.sh`, from 66 → 68 checks; a doctor finding-message wording change; a quoted-argument regex fix, with matching new tests).
+- Evidence: `docs/evidence/test-2026-08-24-codex-hooks-multi-event-cycle2.log` (primary `./scripts/run-test.sh` run); `docs/evidence/cli-test-cycle2.out` (fresh, uncached `go test ./internal/cli/ -count=1 -v`, saved this cycle unlike Cycle 1); `docs/evidence/run-verify-full-cycle2.log` (full `RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh`, mode=all default, AC-8 literal — confirmed separately with a quiet re-run for exit-code capture: `EXIT=0`).
+
+### Test execution
+
+| Suite / Command | Result | Notes |
+| --- | --- | --- |
+| `./scripts/run-test.sh` (28 shell suites, changed-scope resolved to `golang` full-fallback) | 913 assertions across 27 suites with countable totals + 1 non-numeric summary (`test-no-loop-references.sh`, single-assertion guard) — 0 FAIL anywhere | One more suite header than Cycle 1's 27-file count report text (28 vs 27) is a counting-convention difference, not a new suite — Cycle 1's per-suite list already enumerated `test-branch-name.sh` etc.; this cycle just walked all headers explicitly. `test-hook-wiring.sh` now 68/68 (was 66/66 in Cycle 1), matching the ed2a2d0 gate-unification commit. |
+| `bash tests/test-hook-wiring.sh` (standalone re-run) | 68/68, 0 FAIL | Confirms the 68-count is stable outside the wrapper too. |
+| `go test ./internal/cli/ -count=1 -v` (fresh, uncached) | 262 `--- PASS`, 0 `--- FAIL`, `ok ... 31.397s`/`31.864s` (ran twice, both green) | Includes the 2 new AC-driven doctor tests from `381b938` plus the hardening-round test edits from `ed2a2d0`. No flake reproduced in either fresh run. |
+| `./scripts/run-test.sh`'s in-wrapper `go test ./...` (8 packages) | 8/8 `ok`, 0 failures | `internal/cli` ran uncached this pass (31.791s, not `(cached)`) since source changed since Cycle 1; other 7 packages cached-green. |
+| `RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh` (AC-8 literal, mode defaults to `all`) | Exit 0, gofmt ok, 0 staticcheck issues, all 28 shell suites green, 8/8 Go packages `ok` (cached, unchanged since the wrapper's own `go test ./...` run moments earlier) | This is the full static+test dispatch (mode=all), matching AC-8's literal wording ("`./scripts/run-verify.sh` exit 0, check-sync / purity / 全テスト green"). Ran twice: once with `tee` for a saved log, once quietly to capture `$?` — both exit 0. |
+
+### Regression checks
+
+| Previously flagged item | Status | Evidence |
+| --- | --- | --- |
+| Flaky `go test ./internal/cli/...` (subprocess-contention class, per tester memory) | Not reproduced | Two independent fresh (`-count=1`) full-package runs this cycle, both 262/262 green, ~31-32s each. Consistent with memory: this flake needs adjacent real-subprocess test load to trigger, not mere repetition, and none was observed. |
+| `.codex/hooks.json` PostToolUse trust-hash preservation | Confirmed unchanged | `tests/test-hook-wiring.sh` AR#1 regression-guard assertions, both suite copies (root/templates/base), still PASS after the `ed2a2d0` gate rewrite. |
+| Doctor's existing checks (schema/direct-reference/co-existence/features.hooks) | Unaffected, still green | Full `internal/cli` package pass includes pre-existing doctor suite alongside all new/changed tests from both fix commits; no regressions. |
+
+### Test gaps
+
+- Same as Cycle 1: live-fire runtime behavior (AC-2/3/4) remains evidence-doc-based, not re-executed by `/test`; the Codex `ask`-decision path for `PreToolUse` remains untested by design (tracked as tech-debt); no Go-level negative test for a non-`Bash` `PreToolUse` matcher (shell-suite-only coverage) — unchanged, not required by any AC.
+- New from this cycle: no dedicated regression test asserts the *old, pre-`381b938`* laxer doctor behavior (any-dispatcher-call, event-argument-agnostic) is gone — coverage relies on the new tests asserting the *new* stricter behavior directly (`381b938`'s 2 tests + `ed2a2d0`'s edits), which is sufficient to prove the fix works but doesn't independently document what regressed. Minor, not blocking.
+
+### Verdict (Cycle 2)
+
+- **Pass.** All 913+ shell-suite assertions across 28 files green (0 failures, `test-hook-wiring.sh` now 68/68), all 8 Go packages `ok` in both the wrapper's cached run and two independent fresh (`-count=1`) `internal/cli` runs (262/262 each), `tests/test-hook-wiring.sh` 68/68 in both the wrapper and a standalone re-run, and a full `./scripts/run-verify.sh` (mode=all, scope=full, AC-8 literal) exits 0 on two separate invocations (one logged, one quiet-for-exit-code).
+- Fail: none.
+- Blocked: none.
+- The `go test ./internal/cli/...` flake noted in tester memory did not reproduce in either of this cycle's fresh runs; no failing test name to report.
+- **Cleared to proceed to `/sync-docs` → `/cross-review` → `/pr`.**
