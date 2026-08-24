@@ -132,3 +132,74 @@ actual `validateCodexHooksJSON` semantics added in `381b938`/`ed2a2d0`.
 - `.codex/README.md`
 - `templates/base/.codex/README.md`
 - `docs/reports/sync-docs-2026-08-24-codex-hooks-multi-event.md` (this report)
+
+---
+
+# Cycle 3
+
+- **Date:** 2026-08-24
+- **Trigger:** pipeline cap raised 2→3 (operator approval) after cycle-2
+  cross-review AR#1. Cycle-3 fix commits: `6c41189` (insight jsonl data fix —
+  cycle-2 `sync_docs` event was mis-stamped `cycle:1`; also appended the
+  `cross_review` cycle-2 event and rewrote the triage report), `b7cec3c`
+  (shell hook-wiring gate now accepts double- and single-quoted event
+  arguments, closing the quote-parity asymmetry with `dispatchEventArgRes` in
+  `internal/cli/doctor.go` that cycle-3 self-review flagged as C3-5), `70bae95`
+  (plan AC-5 prose + Deviations section + one new tech-debt row for the
+  insight-cycle-stamping defect class).
+- **Scope:** drift these three commits introduce, per this prompt's checklist
+  and the cycle-3 verify report's "Documentation drift (cycle 3)" table — not
+  a full repo-wide re-sweep.
+
+## What was checked and found already in sync (no change)
+
+- **Shell gate / doctor quoting behavior vs. README twins:** `6c41189` is a
+  pure data fix (one jsonl field + a triage-report rewrite, no code/doc
+  claims) and `b7cec3c` only changes what `tests/test-hook-wiring.sh`'s CI
+  gate *accepts* — it does not change or contradict any documented behavior.
+  `.codex/README.md:167-170` and its `templates/base/` twin already say (from
+  cycle 2) "each shipped event routed through the dispatcher with that
+  event's own name as the dispatcher argument — not just referenced by
+  basename." That sentence describes `doctor`'s check, doesn't claim quoted
+  forms are rejected, and doesn't mention the shell CI gate at all — so
+  `b7cec3c` closing a quote-acceptance gap in the shell gate leaves it
+  accurate. `grep -rln test-hook-wiring --include="*.md" .` confirms no
+  doc site (README twins, `AGENTS.md`, `docs/architecture/repo-map.md`)
+  describes `tests/test-hook-wiring.sh`'s quoting behavior at all — nothing
+  to contradict.
+- **`docs/insights/README.md`:** no change made. Confirmed no schema change
+  — the cycle-2 `sync_docs` cycle-stamp fix in `6c41189` was a one-row data
+  correction in a committed events file, not a schema or cycle-semantics
+  change. `docs/insights/README.md:27` ("Default: `1` when `--cycle` is
+  omitted from `insights-append.sh`") already accurately documents the root
+  cause `70bae95`'s new tech-debt row points at — still true, still correct.
+- **Old 2-cycle-cap references:** `.claude/rules/ralph/post-implementation-pipeline.md`
+  and `docs/quality/definition-of-done.md` describe `RALPH_STANDARD_MAX_PIPELINE_CYCLES`'s
+  **default** (2) as a property of the harness, not of this task. This task's
+  cap raise to 3 is task-local state (`.harness/state/standard-pipeline/cycle-count.json`)
+  and is correctly recorded as task-local in the plan's Deviations section
+  (`70bae95`), not asserted as a global default change. No doc describes "2"
+  as an immutable ceiling — both docs already state it's controlled by the
+  env var and raisable per the cap-reached UX. No drift.
+- **Cross-review triage report header** ("Cycle: 2/2 (cap reached)"): flagged
+  by the cycle-3 verify report as known, non-blocking drift, but explicitly
+  out of `/sync-docs` scope — that file is rewritten by `/cross-review` each
+  cycle and will self-correct when cycle-3 `/cross-review` runs. Not touched
+  here.
+
+## Verification run
+
+- `grep -rln "test-hook-wiring" --include="*.md" .` — no doc site describes
+  the shell gate's quoting behavior; confirmed no contradiction.
+- `grep -n "quote\|quoted\|basename" .codex/README.md .codex/hooks/README.md
+  templates/base/.codex/README.md templates/base/.codex/hooks/README.md
+  docs/architecture/repo-map.md AGENTS.md README.md` — only pre-existing,
+  unrelated hits (`config.toml` quoted-`"false"` example, the
+  basename-vs-event-argument sentence already fixed in cycle 2).
+- `./scripts/check-sync.sh` — PASS (157 identical, 0 drifted, 5 known-diff,
+  11 template-only)
+
+## Files touched by this cycle-3 sync-docs pass
+
+- `docs/reports/sync-docs-2026-08-24-codex-hooks-multi-event.md` (this
+  report only — no other doc required a fix)
