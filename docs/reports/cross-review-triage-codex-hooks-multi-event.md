@@ -22,7 +22,7 @@
 
 | # | Reviewer finding | Triage rationale | Affected file(s) |
 |---|-------------------|------------------|-------------------|
-| 1 | [P2] doctor の per-event dispatcher ルーティング検査が `ralph-dispatch.sh` の basename のみを照合するため、イベント引数の誤り(例: PreToolUse エントリが `ralph-dispatch.sh PostToolUse` を呼ぶコピペ誤配線)を検出できず、誤った `.d` 層が実行される構成を pass させる | 実在の検証ギャップ(Axis 1: Yes)。doctor の存在意義が下流配線ドリフトの検出であり、本 diff が追加した検査自体の穴。修正は per-event フラグ条件を `ralph-dispatch.sh <eventName>` 照合に強めるだけで小さく、negative テスト追加も既存パターンの延長(Axis 2: Yes)。tests/test-hook-wiring.sh は出荷ファイル自体には event 引数照合済みのため、修正対象は doctor 側のみ | internal/cli/doctor.go:450-451、internal/cli/doctor_hooks_test.go |
+| 1 | [P2] doctor の per-event dispatcher ルーティング検査が `ralph-dispatch.sh` の basename のみを照合するため、イベント引数の誤り(例: PreToolUse エントリが `ralph-dispatch.sh PostToolUse` を呼ぶコピペ誤配線)を検出できず、誤った `.d` 層が実行される構成を pass させる | 実在の検証ギャップ(Axis 1: Yes)。doctor の存在意義が下流配線ドリフトの検出であり、本 diff が追加した検査自体の穴。修正は per-event フラグ条件を `ralph-dispatch.sh <eventName>` 照合に強めるだけで小さく、negative テスト追加も既存パターンの延長(Axis 2: Yes)。当初は doctor 側のみを修正対象としたが、cycle-2 self-review C2-1 で tests/test-hook-wiring.sh の PostToolUse アームにも同種の basename-only 照合が残っていると判明し、ed2a2d0 で shell 側ゲートも event 引数+境界照合へ統一した | internal/cli/doctor.go:450-451、internal/cli/doctor_hooks_test.go |
 
 ## WORTH_CONSIDERING
 
