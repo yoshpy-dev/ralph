@@ -125,7 +125,7 @@
 ## Progress checklist
 
 - [x] Slice 1: 実測(発火可否・ペイロード・decision 尊重)— 3 イベント発火+deny 実効性を実証、PreToolUse 出荷確定(2026-08-24)
-- [ ] Slice 2: 配線+消費者追随(原子的)
+- [x] Slice 2: 配線+消費者追随(原子的 1 コミット c8dfdf2)+ AC-3 fixture live-fire 証跡(docs/evidence/codex-hooks-multi-event-fixture-2026-08-24.md)
 - [ ] Post-implementation pipeline
 - [ ] /pr
 
