@@ -172,7 +172,7 @@ The philosophy: **a map, not a manual**. Keep `AGENTS.md` small, push detail int
 │   └── rules/ralph/          # shipped ralph guidance (path-scoped, read by both agents); language pack rules render here too
 ├── .codex/
 │   ├── config.toml           # model, sandbox, approval (loads after `codex trust .`)
-│   ├── hooks.json            # hook wiring: routes PostToolUse through ralph-dispatch.sh (needs interactive hook-trust approval too)
+│   ├── hooks.json            # hook wiring: routes PostToolUse, PreToolUse, SessionStart, UserPromptSubmit through ralph-dispatch.sh (needs interactive hook-trust approval too)
 │   ├── agents/               # Codex role definitions for review/verify/test/docs
 │   ├── hooks/                # Codex hook scripts
 │   ├── AGENTS.override.md    # Codex-only execution rules

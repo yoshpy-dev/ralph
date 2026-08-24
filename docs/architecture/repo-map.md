@@ -22,7 +22,7 @@
 ## Codex control plane
 
 - `.agents/skills/`: Codex-side skill bodies (kept in lock-step with `.claude/skills/` via `scripts/check-skill-sync.sh`)
-- `.codex/`: project-level Codex config for the meta-repo itself (`config.toml`, `hooks.json`, `agents/`, `hooks/`, `AGENTS.override.md`, `README.md`); `hooks.json` is the hooks source of truth (routes `PostToolUse` through `ralph-dispatch.sh`; `config.toml` keeps only a reference comment); `agents/` contains Codex custom agent definitions; same shape as `templates/base/.codex/` so ralph dogfoods the parity it ships
+- `.codex/`: project-level Codex config for the meta-repo itself (`config.toml`, `hooks.json`, `agents/`, `hooks/`, `AGENTS.override.md`, `README.md`); `hooks.json` is the hooks source of truth (routes `PostToolUse`, `PreToolUse`, `SessionStart`, and `UserPromptSubmit` through `ralph-dispatch.sh`; `config.toml` keeps only a reference comment); `agents/` contains Codex custom agent definitions; same shape as `templates/base/.codex/` so ralph dogfoods the parity it ships
 - `templates/base/.codex/`: `ralph init` source for the same surface; root `.codex/` and template `.codex/` are kept byte-identical, validated by `scripts/check-sync.sh` (no KNOWN_DIFFS today)
 
 ## Process artifacts
