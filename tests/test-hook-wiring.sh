@@ -100,8 +100,8 @@ check_codex_hooks_json() {
   # each Claude-side hook command to a real, executable file. This function
   # does not repeat that check on the Codex side. The shipped command form
   # is `cd "$(git rev-parse --show-toplevel)" && ./.claude/hooks/ralph-dispatch.sh
-  # PostToolUse` (C3-M3 fix) — after the leading `cd`, the dispatcher IS
-  # invoked by a surface_root-relative path, unlike the earlier absolute
+  # <event>` (C3-M3 fix) — after the leading `cd`, the dispatcher IS invoked
+  # by a surface_root-relative path, unlike the earlier absolute
   # `$(git rev-parse --show-toplevel)/...` form this replaced (AR#1). We
   # still do not resolve it here because the command is a compound shell
   # expression (a `cd` plus `&&`), not a bare path — splitting the
@@ -125,51 +125,101 @@ check_codex_hooks_json() {
   fi
   record_pass "$label: .codex/hooks.json is valid JSON"
 
-  local post_tool_use_commands
-  post_tool_use_commands="$(jq -r '.hooks.PostToolUse // [] | .[] | (.hooks // [])[] | select(.type == "command") | .command' "$hooks_json" 2>/dev/null || true)"
+  # Multi-event wiring (the codex-hooks-multi-event plan, docs/plans/): every
+  # shipped event (PostToolUse, PreToolUse, SessionStart, UserPromptSubmit)
+  # must have at least one command entry, routed through ralph-dispatch.sh
+  # WITH that event's own name as the dispatcher argument, and carrying the
+  # same cd-to-git-root prefix and surface_root-relative dispatcher path.
+  # A single loop covers all four events (folding in the former
+  # PostToolUse-only block) so the routing check cannot drift out of sync
+  # across events the way it did pre-C2-1: the routing `case` pattern
+  # requires "ralph-dispatch.sh $event" to be followed by either end-of-string
+  # or a non-word character, so a command invoking the dispatcher with a
+  # DIFFERENT event's argument (mirroring `ralph doctor`'s AR#1 fix) or with
+  # an event name that merely has this one as a prefix (e.g.
+  # "PostToolUseExtra") does not falsely count as routed.
+  local event
+  for event in PostToolUse PreToolUse SessionStart UserPromptSubmit; do
+    local event_commands
+    event_commands="$(jq -r --arg event "$event" '.hooks[$event] // [] | .[] | (.hooks // [])[] | select(.type == "command") | .command' "$hooks_json" 2>/dev/null || true)"
 
-  if [ -z "$post_tool_use_commands" ]; then
-    record_fail "$label: .codex/hooks.json has no PostToolUse command entries"
-    return
-  fi
+    if [ -z "$event_commands" ]; then
+      record_fail "$label: .codex/hooks.json has no $event command entries"
+      continue
+    fi
+    record_pass "$label: .codex/hooks.json has at least one $event command entry"
 
-  local routed=0 cd_prefix_ok=0 relative_dispatch_ok=0 cmd
-  while IFS= read -r cmd; do
-    [ -z "$cmd" ] && continue
-    case "$cmd" in
-      *ralph-dispatch.sh*) routed=1 ;;
-    esac
-    # C3-M3 regression guard: pin the two load-bearing pieces of the
-    # cd-first command form so a revert to the pre-AR#1 absolute-path form
-    # (which satisfied *ralph-dispatch.sh* identically) fails here instead
-    # of passing silently.
-    if printf '%s' "$cmd" | grep -qF 'cd "$(git rev-parse --show-toplevel)"'; then
-      cd_prefix_ok=1
-    fi
-    if printf '%s' "$cmd" | grep -qF './.claude/hooks/ralph-dispatch.sh'; then
-      relative_dispatch_ok=1
-    fi
-  done <<EOF
-$post_tool_use_commands
+    local event_routed=0 event_cd_prefix_ok=0 event_dispatch_ok=0 event_cmd
+    while IFS= read -r event_cmd; do
+      [ -z "$event_cmd" ] && continue
+      # Accept the same quoting styles doctor's dispatchEventArgRes accepts
+      # (bare, double-quoted, single-quoted event argument) so a contributor
+      # who follows one gate cannot be rejected by the other (C3-5).
+      case "$event_cmd" in
+        *"ralph-dispatch.sh $event"|*"ralph-dispatch.sh $event"[!A-Za-z0-9_]*) event_routed=1 ;;
+        *"ralph-dispatch.sh \"$event\""*) event_routed=1 ;;
+        *"ralph-dispatch.sh '$event'"*) event_routed=1 ;;
+      esac
+      # C3-M3 / AR#1 regression guard: pin the two load-bearing pieces of the
+      # cd-first command form so a revert to the pre-AR#1 absolute-path form
+      # fails here instead of passing silently.
+      if printf '%s' "$event_cmd" | grep -qF 'cd "$(git rev-parse --show-toplevel)"'; then
+        event_cd_prefix_ok=1
+      fi
+      if printf '%s' "$event_cmd" | grep -qF './.claude/hooks/ralph-dispatch.sh'; then
+        event_dispatch_ok=1
+      fi
+    done <<EOF
+$event_commands
 EOF
 
-  if [ "$routed" -eq 1 ]; then
-    record_pass "$label: hooks.json PostToolUse routes through ralph-dispatch.sh"
+    if [ "$event_routed" -eq 1 ]; then
+      record_pass "$label: hooks.json $event routes through ralph-dispatch.sh $event"
+    else
+      record_fail "$label: hooks.json $event does not route through ralph-dispatch.sh $event"
+    fi
+
+    if [ "$event_cd_prefix_ok" -eq 1 ]; then
+      record_pass "$label: hooks.json $event command cd's to the git root before dispatching (AR#1 regression guard)"
+    else
+      record_fail "$label: hooks.json $event command is missing the git-root cd prefix — a revert to the absolute-path form would silently break subdirectory launches (C3-M3)"
+    fi
+
+    if [ "$event_dispatch_ok" -eq 1 ]; then
+      record_pass "$label: hooks.json $event command invokes the dispatcher via a surface_root-relative path"
+    else
+      record_fail "$label: hooks.json $event command does not invoke ./.claude/hooks/ralph-dispatch.sh (relative form)"
+    fi
+  done
+
+  # PreToolUse matcher must be exactly "Bash" (Slice 1 live-fire confirmed
+  # the real tool name; a looser or missing matcher would fire the guard on
+  # non-Bash tool calls it was never validated against).
+  local pre_tool_use_matchers
+  pre_tool_use_matchers="$(jq -r '.hooks.PreToolUse // [] | .[] | .matcher // ""' "$hooks_json" 2>/dev/null || true)"
+  if [ "$pre_tool_use_matchers" = "Bash" ]; then
+    record_pass "$label: hooks.json PreToolUse matcher is exactly \"Bash\""
   else
-    record_fail "$label: hooks.json PostToolUse does not route through ralph-dispatch.sh"
+    local rendered_matchers
+    if [ -z "$pre_tool_use_matchers" ]; then
+      rendered_matchers="(none)"
+    else
+      rendered_matchers="${pre_tool_use_matchers//$'\n'/,}"
+    fi
+    record_fail "$label: hooks.json PreToolUse matcher is \"$rendered_matchers\", want exactly \"Bash\""
   fi
 
-  if [ "$cd_prefix_ok" -eq 1 ]; then
-    record_pass "$label: hooks.json PostToolUse command cd's to the git root before dispatching (AR#1 regression guard)"
-  else
-    record_fail "$label: hooks.json PostToolUse command is missing the git-root cd prefix — a revert to the absolute-path form would silently break subdirectory launches (C3-M3)"
-  fi
-
-  if [ "$relative_dispatch_ok" -eq 1 ]; then
-    record_pass "$label: hooks.json PostToolUse command invokes the dispatcher via a surface_root-relative path"
-  else
-    record_fail "$label: hooks.json PostToolUse command does not invoke ./.claude/hooks/ralph-dispatch.sh (relative form)"
-  fi
+  # Non-goal guard (plan non-goals, 2026-08-24): SessionEnd / PreCompact
+  # auto-WIP-commit the dirty tree and are deliberately NOT wired in this
+  # rollout — a premature addition must fail this test.
+  local absent_event
+  for absent_event in SessionEnd PreCompact; do
+    if jq -e --arg event "$absent_event" '.hooks | has($event)' "$hooks_json" >/dev/null 2>&1; then
+      record_fail "$label: hooks.json unexpectedly wires $absent_event (deliberately deferred — see plan non-goals)"
+    else
+      record_pass "$label: hooks.json does not wire $absent_event (deliberately deferred)"
+    fi
+  done
 }
 
 check_codex_hooks_json_byte_identical() {

@@ -1,5 +1,5 @@
 {
-  "description": "Codex hook wiring for ralph: routes PostToolUse through ralph-dispatch.sh so the same layered .d dispatcher Claude Code uses also runs under Codex.",
+  "description": "Codex hook wiring for ralph: routes PostToolUse, PreToolUse, SessionStart, and UserPromptSubmit through ralph-dispatch.sh so the same layered .d dispatcher Claude Code uses also runs under Codex.",
   "hooks": {
     "PostToolUse": [
       {
@@ -8,6 +8,37 @@
           {
             "type": "command",
             "command": "cd \"$(git rev-parse --show-toplevel)\" && ./.claude/hooks/ralph-dispatch.sh PostToolUse"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && ./.claude/hooks/ralph-dispatch.sh PreToolUse"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && ./.claude/hooks/ralph-dispatch.sh SessionStart"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && ./.claude/hooks/ralph-dispatch.sh UserPromptSubmit"
           }
         ]
       }

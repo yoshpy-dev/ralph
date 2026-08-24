@@ -2,11 +2,12 @@
 
 ralph does not ship Codex-specific hook scripts here. The default-on Codex
 hooks (`PostToolUse` mojibake guard on `Edit` / `Write` / `MultiEdit` /
-`apply_patch`) are wired in **`.codex/hooks.json`**, not in this directory
-and not in `.codex/config.toml`. `hooks.json` routes `PostToolUse` through
-`./.claude/hooks/ralph-dispatch.sh`, the same layered `.d` dispatcher Claude
-Code uses, so a single drop-in script under the **shared `.claude/hooks/`
-tree** covers both agents.
+`apply_patch`; `PreToolUse` bash guard; `SessionStart` and `UserPromptSubmit`
+additionalContext hooks) are wired in **`.codex/hooks.json`**, not in this
+directory and not in `.codex/config.toml`. `hooks.json` routes all four
+events through `./.claude/hooks/ralph-dispatch.sh`, the same layered `.d`
+dispatcher Claude Code uses, so a single drop-in script under the **shared
+`.claude/hooks/` tree** covers both agents.
 
 This directory is reserved for the case where a Codex-shaped wrapper is
 required — e.g. a hook whose CLI contract differs enough from Claude's
@@ -29,7 +30,8 @@ table to `.codex/config.toml` — `ralph doctor` flags a surviving table as a
 stale duplicate representation.
 
 See also:
-- `.codex/hooks.json` — the wired `PostToolUse` group.
+- `.codex/hooks.json` — the wired `PostToolUse` / `PreToolUse` /
+  `SessionStart` / `UserPromptSubmit` groups.
 - `.codex/README.md` — operator-facing hooks guidance, including the
   interactive hook-trust UX.
 - `.claude/hooks/` — the shared script bodies.

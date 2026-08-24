@@ -90,29 +90,55 @@ hash-based diff engine can be replayed cleanly. Skill renames are surfaced as
 ## Hooks
 
 Project-level Codex hooks live in `.codex/hooks.json`, not in
-`.codex/config.toml`. `.codex/hooks.json` routes `PostToolUse` through
+`.codex/config.toml`. `.codex/hooks.json` routes four events —
+`PostToolUse`, `PreToolUse`, `SessionStart`, and `UserPromptSubmit` — through
 `./.claude/hooks/ralph-dispatch.sh`, the same layered `.d` dispatcher Claude
 Code uses (`.claude/hooks/<event>.d/` core, then `.ralph/local/hooks/<event>.d/`
 and `.claude/hooks/local/<event>.d/` for downstream drop-ins), so a single
-drop-in script runs under both agents. The shipped hook group's command first
-`cd`s to the git root and then invokes the dispatcher by a repo-relative path
-(`cd "$(git rev-parse --show-toplevel)" && ./.claude/hooks/ralph-dispatch.sh
-PostToolUse`). This matters because ralph-dispatch.sh resolves its `.d`
-layers relative to its own cwd: a bare absolute path to the dispatcher (no
-`cd`) would run the dispatcher fine but leave it looking for
-`.claude/hooks/PostToolUse.d/` etc. relative to whatever directory the Codex
-session was launched from, so a session started from a subdirectory would
-fire the hook against an empty layer set and silently run zero scripts. The
-`cd`-first form keeps the dispatcher's cwd-relative contract intact
-regardless of where the session starts. The matcher is
-`Edit|Write|MultiEdit|apply_patch` — the payload reports
-`tool_name=apply_patch`, so the literal name is included as the conservative
-default; `Edit`/`Write`/`MultiEdit` are kept for readability and Claude-side
-parity and are also accepted. `.codex/config.toml` keeps a reference comment
-pointing at `hooks.json` but no `[[hooks.*]]` table; do not reintroduce one
-there. Codex merges both representations when present and emits a startup
-warning about duplicate hook loading, and `ralph doctor` flags the stale dual
-representation if it comes back.
+drop-in script runs under both agents. Every shipped hook group's command
+first `cd`s to the git root and then invokes the dispatcher by a
+repo-relative path (`cd "$(git rev-parse --show-toplevel)" &&
+./.claude/hooks/ralph-dispatch.sh <event>`). This matters because
+ralph-dispatch.sh resolves its `.d` layers relative to its own cwd: a bare
+absolute path to the dispatcher (no `cd`) would run the dispatcher fine but
+leave it looking for `.claude/hooks/<event>.d/` etc. relative to whatever
+directory the Codex session was launched from, so a session started from a
+subdirectory would fire the hook against an empty layer set and silently run
+zero scripts. The `cd`-first form keeps the dispatcher's cwd-relative
+contract intact regardless of where the session starts.
+
+- `PostToolUse` matcher is `Edit|Write|MultiEdit|apply_patch` — the payload
+  reports `tool_name=apply_patch`, so the literal name is included as the
+  conservative default; `Edit`/`Write`/`MultiEdit` are kept for readability
+  and Claude-side parity and are also accepted.
+- `PreToolUse` matcher is `Bash` — live-fire confirmed the real Codex tool
+  name for shell execution is `Bash` and that a `deny` decision from
+  `pre_bash_guard.sh` actually blocks the command (not just a warning), so
+  this is a real enforcement hook, not a cosmetic one.
+- `SessionStart` and `UserPromptSubmit` omit a matcher (all sources /
+  prompts match); both drive additionalContext-emitting hooks
+  (`session_start_context.sh`, `prompt_gate.sh`). `prompt_gate.sh` is
+  output-only. `session_start_context.sh` also performs idempotent
+  harness-state housekeeping on every run: it creates the `.harness/` and
+  `docs/plans/`/`docs/reports/` scaffold directories and resets
+  `.harness/state/tool_failures.count` to `0`. Codex has no
+  `PostToolUseFailure` event, so under Codex that counter is only ever reset,
+  never incremented — the reset is inert for a pure-Codex session but can
+  clear a concurrent Claude Code session's failure counter in the same repo.
+- Codex has **no `PostToolUseFailure` event** — that hook stage is Claude
+  Code-specific. The corresponding `.claude/hooks/PostToolUseFailure.d/`
+  layer simply never runs under Codex; there is nothing to wire here.
+- `SessionEnd` and `PreCompact` are **deliberately not wired**: their
+  Claude-side hooks (`session_end_summary.sh`, `precompact_checkpoint.sh`)
+  auto-commit a dirty working tree as a `wip:` checkpoint, and that side
+  effect needs its own safety acceptance criteria (dirty-tree behavior,
+  rollback) before it ships to Codex sessions.
+
+`.codex/config.toml` keeps a reference comment pointing at `hooks.json` but
+no `[[hooks.*]]` table; do not reintroduce one there. Codex merges both
+representations when present and emits a startup warning about duplicate
+hook loading, and `ralph doctor` flags the stale dual representation if it
+comes back.
 
 ### Trust UX
 
@@ -131,13 +157,19 @@ of the project config trust from step 2 above:
    hook you expect to fire under `codex exec` (for example in CI) does not,
    check trust state first.
 4. Because trust is keyed by the command string's hash, editing a hook's
-   `command` in `hooks.json` invalidates the prior approval — run another
-   interactive session and re-approve after any such change.
+   `command` in `hooks.json` — or adding a brand-new event entry —
+   invalidates the prior approval for that entry: each `command` string
+   carries its own approval hash, so any new or edited event requires a
+   fresh interactive `codex` session (or `--dangerously-bypass-hook-trust`
+   for non-interactive `codex exec` runs, e.g. CI) before it actually fires.
+   Approvals for command strings that did not change survive.
 
 `ralph doctor` validates `hooks.json` itself (present, valid JSON,
-schema-conformant, routed through the dispatcher) but cannot probe
-interactive trust state, so a clean `ralph doctor` run does not guarantee a
-hook will actually fire under `codex exec` until you have approved it once.
+schema-conformant, each shipped event routed through the dispatcher with
+that event's own name as the dispatcher argument — not just referenced by
+basename) but cannot probe interactive trust state, so a clean `ralph
+doctor` run does not guarantee a hook will actually fire under `codex exec`
+until you have approved it once.
 
 To extend the hook surface, add a new event group to `.codex/hooks.json`
 (top-level `hooks` → event name → matcher-group array → `{type: "command",
