@@ -63,7 +63,7 @@
 - [x] AC-2 live-fire(信頼済みメタリポ、bypass 付き): 出荷イベントすべてで dispatcher → 第 3 層 drop-in の実行を実証。証跡を docs/evidence/ に保存。
 - [x] AC-3 fresh `ralph init` fixture でも追加イベントの発火を確認(最低 1 イベント、bypass 付き)。
 - [x] AC-4 **(ハード条件)** PreToolUse を出荷する場合: pre_bash_guard の deny 判定が Codex 側で実際にツール実行を**ブロックする**ことを live-fire で実証(deny 対象コマンドが実行されないことをファイルシステム状態で確認)。ブロックされない場合は PreToolUse を配線せず、事実を evidence・ドキュメント・tech-debt に記録して 2 イベント出荷に縮小。加えて pre_bash_guard が Codex の Bash ペイロードからコマンドを抽出できること(実ペイロード fixture テスト)。
-- [x] AC-5 doctor が配布対象イベント集合の各イベントについて dispatcher ルーティングの存在を検査し、欠落を warn する(negative テスト付き)。既存の検査群(スキーマ/直接参照/併存/features.hooks)は不変 green。
+- [x] AC-5 doctor が配布対象イベント集合の各イベントについて dispatcher ルーティングの存在を検査し、欠落を warn する(negative テスト付き)。既存の検査群(スキーマ/直接参照/併存/features.hooks)は不変 green。**cycle-2 強化**: ルーティング判定は basename 出現ではなく「`ralph-dispatch.sh <当該イベント名>`(引用符許容・語境界付き)」の照合を要求する(cross-review AR#1 対応、shell 側ゲートも同一意味論)。
 - [x] AC-6 `tests/test-hook-wiring.sh` が出荷イベント集合の配線を検査する(集合は AC-4 の結果で確定)。
 - [x] AC-7 ドキュメント更新(イベント一覧、PostToolUseFailure 非対応、trust 再承認の注意)。
 - [x] AC-8 `./scripts/run-verify.sh` exit 0、check-sync / purity / 全テスト green。
@@ -105,6 +105,12 @@
 - **初回イベント集合は副作用の安全な 3 イベント候補に限定**(Codex 所見 1/2 を反映): additionalContext 系(SessionStart / UserPromptSubmit)は無条件、PreToolUse は deny 実効性実証を条件とする。自動コミット副作用を持つ SessionEnd / PreCompact は安全 AC 設計を伴う別タスクに分離(tech-debt 登録)。
 - **command 形は #149 確立形の踏襲**(cd-first)。既存 PostToolUse エントリは 1 文字も変えない(trust ハッシュ維持)。
 - Critical forks: None(未確定点は Slice 1 の実測で決まり、いずれも 1 スライス未満の手戻り)
+
+### Deviations(パイプライン中の逸脱記録)
+
+- cycle 1: self-review M1〜M3+L1 を c86eafb で修正(README twins の誤記述・テンプレート純度・イベント集合同期テスト)。M4(Codex の `ask` 意味論未実証)は tech-debt 化。
+- cycle 2(cap 2 内): cross-review AR#1(doctor のイベント引数照合の穴)を 381b938 で修正。cycle-2 self-review C2-1〜C2-5+cycle-1 L2/L3/L4 を ed2a2d0 で修正(shell ゲートの 4 イベント統一・finding 文言明確化・引用符許容・dead code 除去)。
+- cycle 3(操作者承認で cap 2→3): cycle-2 cross-review AR#1(insight event の cycle 誤スタンプ)を 6c41189 で 1 行訂正。cycle-3 self-review C3-5(ゲート間の引用符非対称)を修正、C3-1(insight cycle スタンプ機構の脆弱性)を tech-debt 化。
 
 ## Open questions
 
