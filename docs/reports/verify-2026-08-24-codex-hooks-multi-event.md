@@ -103,3 +103,57 @@
 - Newly verified this cycle: AC-5 and AC-6 under the strengthened event-argument-matching semantics, with both fixed code paths (Go + shell) read in full and cross-checked against the cycle-2 self-review's own findings table row-by-row.
 - Remaining gaps (both non-blocking, doc-only): the cross-review triage report's stale "doctor-only" rationale sentence, and the plan's AC-5 prose / progress checklist not yet reflecting the cycle-2 strengthening — both are pre-existing report/plan bookkeeping items, not implementation defects, and were already flagged as acceptable deferrals by the cycle-2 self-review itself.
 - Not re-verified (out of scope, unchanged since cycle-1 pass): AC-2/AC-3/AC-4 live-fire evidence — neither fix commit touches `.codex/hooks.json`, the `.claude/hooks/*.d/` shims, or `pre_bash_guard.sh`, so the cycle-1 live-fire evidence remains valid. Behavioral test execution (`go test ./internal/cli/...`, `./tests/test-hook-wiring.sh`, full `run-verify.sh`) remains `/test`'s responsibility for this cycle.
+
+---
+
+# Cycle 3
+
+- Date: 2026-08-24
+- Verifier: `verifier` subagent (Claude Code)
+- Cycle: 3 of 3 (cap raised 2→3 by the operator)
+- Scope: spec compliance only for what moved since cycle-2 verify (AC-5/AC-6 wording, jsonl data integrity, tech-debt row shape), plus a fresh static-analysis run. Behavioral tests remain `/test`'s job.
+- Diff reviewed since cycle-2 verify (`HEAD=9b71163`): `6c41189` (one-field cycle-stamp correction on the `sync_docs` insight event + full triage-file rewrite), `b7cec3c` (shell hook-wiring gate now accepts double- and single-quoted event arguments, closing cycle-3 self-review C3-5), `70bae95` (plan AC-5 wording + Deviations section + one tech-debt row for the insight-cycle-stamping defect class, self-review C3-1/C3-4). Also re-read cycle-3 self-review's own report (uncommitted in the working tree as of this run — see Observational checks) for the findings table this cycle's fixes respond to.
+- Evidence: `./scripts/run-static-verify.sh` (changed-language scope, default) run at `2026-08-24T04:15:56Z`, saved to `docs/evidence/verify-2026-08-24-041556.log`.
+
+## Spec compliance re-check
+
+| Acceptance criterion | Status | Evidence |
+| --- | --- | --- |
+| AC-5 wording now matches the shipped event-argument-matching semantics | **Pass** | `docs/plans/active/2026-08-24-codex-hooks-multi-event.md:66` now reads "…**cycle-2 強化**: ルーティング判定は basename 出現ではなく「`ralph-dispatch.sh <当該イベント名>`(引用符許容・語境界付き)」の照合を要求する(cross-review AR#1 対応、shell 側ゲートも同一意味論)。" This is a literal, accurate description of `dispatchEventArgRes` (`internal/cli/doctor.go:381-386`, optional leading `["']?`, word-boundary trailing class) and, after `b7cec3c`, of the shell gate too (see next row) — the "shell 側ゲートも同一意味論" clause was not true at cycle-2 verify time and is true now. |
+| AC-6 quote parity between doctor and the shell gate | **Pass** | Before `b7cec3c`: doctor accepted `ralph-dispatch.sh "PostToolUse"` / `'PostToolUse'` / bare, while `tests/test-hook-wiring.sh`'s case pattern only matched the bare form — the asymmetry cycle-3 self-review filed as C3-5. `b7cec3c` adds two case arms, `*"ralph-dispatch.sh \"$event\""*` and `*"ralph-dispatch.sh '$event'"*`, alongside the existing bare/boundary arm (`tests/test-hook-wiring.sh:155-159`). Probed under `/bin/sh` with the shipped bare form and both quoted forms: all three now set `event_routed=1` in both gates; `PostToolUseExtra` (prefix collision) still does not match either gate. `sh -n` and `bash -n` both pass; `shellcheck -s bash` reports only the pre-existing informational `SC2016` at line 166 (intentional single-quoted literal, unchanged by this commit — confirmed present before `b7cec3c` too). |
+| jsonl validity + cycle-stamp consistency | **Pass** | `docs/insights/events/2026-08-24-codex-hooks-multi-event.jsonl` has 11 lines (10 committed as of `HEAD`, 1 additional `self_review`/cycle-3 event present only in the working tree — see Observational checks). All 11 parse as JSON with byte-identical key order (`schema, ts, slug, flow, phase, cycle, verdict, findings, triage, source`) across every line. The cycle-2 `sync_docs` record (`ts:2026-08-24T03:38:24Z`) is now `"cycle":2` (was `"cycle":1` before `6c41189`) — `git show 6c41189 -- docs/insights/events/2026-08-24-codex-hooks-multi-event.jsonl` is a single-field diff on that one line plus one appended `cross_review` line; no other record's `cycle`/`verdict`/`ts` field was touched. `ts` values are strictly ascending across all 11 lines. |
+| Tech-debt row shape (new insight-cycle-stamping row) | **Pass** | The new row appended by `70bae95` to `docs/tech-debt/README.md` parses as a 5-cell table row (`awk -F'|'` → `NF-2 == 5`), matching the table's header (`Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report`) and separator row exactly. All 5 cells are non-empty and each of the 4 non-"Debt item" cells contains real content (impact, deferral reason, pay-down trigger, and a pointer to `docs/reports/self-review-…md(C3-1)`), consistent with the EVIDENCE-as-pointer convention used elsewhere in this table. |
+| AC-1 / AC-2 / AC-3 / AC-4 (re-confirm untouched) | **Pass, no regression** | None of the three cycle-3 delta commits touch `.codex/hooks.json`, `templates/base/.codex/hooks.json`, or any `.claude/hooks/*.d/` script; `diff .codex/hooks.json templates/base/.codex/hooks.json` still identical. Cycle-1/cycle-2 live-fire evidence remains the valid basis for AC-2/AC-3/AC-4. |
+
+## Static analysis
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `./scripts/run-static-verify.sh` (changed-language scope, default) | Exit 0 | Full log at `docs/evidence/verify-2026-08-24-041556.log`. `shellcheck`/`sh -n` on all `.claude/hooks/*` scripts OK (both surfaces), `jq -e .` on `.claude/settings.json`/`.codex/hooks.json` OK, Codex single-source guard / inline-hook detector / PR-provenance guard OK, `check-sync.sh` → 0 DRIFTED / 5 KNOWN_DIFF (all pre-existing) / 11 TEMPLATE_ONLY (all `.gitkeep`/scaffold-only, pre-existing), `check-pipeline-sync.sh` OK, `check-skill-sync.sh` → 13 skills in lock-step, `check-template-purity.sh` PASS, golang verifier (`gofmt: ok`, `golangci-lint` → `0 issues.`) OK. |
+| `sh -n tests/test-hook-wiring.sh` + `bash -n` | OK | Manual spot-check — `run-static-verify.sh`'s shell battery does not cover `tests/*.sh` (that surface belongs to `/test`), so this was run directly to confirm `b7cec3c` didn't introduce a syntax defect. |
+| `shellcheck -s bash tests/test-hook-wiring.sh` | 1 pre-existing informational `SC2016` | Same line/finding as cycle-2 verify's read of the file; not introduced by `b7cec3c`. |
+| `awk -F'|'` cell count on the new tech-debt row | 5 cells | Matches header column count. |
+| Python `json.loads` over all 11 jsonl lines | All parse, uniform key order | See Spec compliance table above. |
+
+## Documentation drift (cycle 3)
+
+| Doc / contract | In sync? | Notes |
+| --- | --- | --- |
+| Plan AC-5 wording | **Fixed this cycle** | Was the cycle-2 verify's flagged "minor drift" — now resolved by `70bae95`. See Spec compliance table. |
+| Plan Deviations section | **New, in sync** | `70bae95` adds a 3-line Deviations log (cycle 1/2/3) naming every fix commit and the cap raise; matches `git log` for this branch. |
+| `docs/tech-debt/README.md` | In sync | New row accurately describes the producer-side defect (`.claude/skills/sync-docs/SKILL.md` has no `insights-append.sh` step; other four skill snippets omit `--cycle`) — spot-checked: `grep -i insight .claude/skills/sync-docs/SKILL.md` returns nothing, confirming the row's claim. |
+| `docs/reports/cross-review-triage-codex-hooks-multi-event.md` header | **Known, non-blocking drift** | Still reads "Cycle: 2/2 (cap reached)" at HEAD even though the cap was raised to 3 and cycle 3 is in progress (self-review C3-3). This file is rewritten by `/cross-review` each cycle, so it is expected to self-correct when cycle-3 `/cross-review` runs; flagging so it isn't missed if the pipeline instead jumps straight to `/pr`. Not `/verify`'s file to fix. |
+
+## Observational checks
+
+- `git status` shows two uncommitted files at the time of this run: `docs/insights/events/2026-08-24-codex-hooks-multi-event.jsonl` (the cycle-3 `self_review` event, appended but not yet committed) and `docs/reports/self-review-2026-08-24-codex-hooks-multi-event.md` (the cycle-3 section, same). Both were read directly from the working tree for this verification (not from `HEAD`) since they are the source of the findings the cycle-3 fix commits (`b7cec3c`, `70bae95`) respond to. **Process note, not a spec-compliance defect**: prior cycles committed the self-review report + insight event together with the report commit (e.g. `9b71163`); this cycle's equivalent commit has not yet happened. Recommend committing both before `/test`/`/sync-docs` so the pipeline artifacts and `git log` stay in lockstep, consistent with `.claude/rules/ralph/git-commit-strategy.md`.
+- `git diff main...HEAD --stat` at HEAD (`70bae95`): 23 files changed, +1380/−122 — consistent with the cumulative scope described across all three verify cycles; no file outside the plan's Affected areas appears.
+- Twins re-confirmed byte-identical after the cycle-3 delta: `diff .codex/hooks.json templates/base/.codex/hooks.json`, `diff .codex/README.md templates/base/.codex/README.md`, `diff .codex/hooks/README.md templates/base/.codex/hooks/README.md` — all clean (none of the three cycle-3 commits touch these files anyway).
+
+## Cycle-3 verdict
+
+**Overall: Pass.** All three cycle-3 fix commits do what they claim: `6c41189` is a single-field jsonl correction (no other record altered) plus a triage-file rewrite outside `/verify`'s scope; `b7cec3c` closes the doctor/shell-gate quote-parity gap by adding matching case arms, verified against both gates directly under `/bin/sh`; `70bae95` brings AC-5's prose in line with the cycle-2 implementation and adds a well-formed tech-debt row. `./scripts/run-static-verify.sh` exits 0 with no new findings. No regression to AC-1 through AC-4.
+
+- Newly verified this cycle: jsonl data integrity + cycle-stamp consistency, AC-5/AC-6 wording-vs-implementation match, quote parity between the two hook-wiring gates, tech-debt row well-formedness.
+- Remaining gaps (non-blocking): cross-review triage header still says "2/2 (cap reached)" — `/cross-review`'s file to fix, flagged for visibility. Two pipeline artifacts (cycle-3 self-review report + its insight event) are uncommitted as of this run — process note, not a code defect, but should be closed before the pipeline proceeds further.
+- Not re-verified (unchanged since cycle-1/2, out of scope): AC-2/AC-3/AC-4 live-fire evidence (no touched files this cycle); behavioral test execution remains `/test`'s responsibility.
