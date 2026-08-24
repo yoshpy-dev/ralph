@@ -170,6 +170,80 @@ EOF
   else
     record_fail "$label: hooks.json PostToolUse command does not invoke ./.claude/hooks/ralph-dispatch.sh (relative form)"
   fi
+
+  # Multi-event wiring (docs/plans/active/2026-08-24-codex-hooks-multi-event.md):
+  # PreToolUse / SessionStart / UserPromptSubmit each must have at least one
+  # command entry, routed through ralph-dispatch.sh with the same
+  # cd-to-git-root prefix and surface_root-relative dispatcher path pinned
+  # above for PostToolUse.
+  local event
+  for event in PreToolUse SessionStart UserPromptSubmit; do
+    local event_commands
+    event_commands="$(jq -r --arg event "$event" '.hooks[$event] // [] | .[] | (.hooks // [])[] | select(.type == "command") | .command' "$hooks_json" 2>/dev/null || true)"
+
+    if [ -z "$event_commands" ]; then
+      record_fail "$label: .codex/hooks.json has no $event command entries"
+      continue
+    fi
+    record_pass "$label: .codex/hooks.json has at least one $event command entry"
+
+    local event_routed=0 event_cd_prefix_ok=0 event_dispatch_ok=0 event_cmd
+    while IFS= read -r event_cmd; do
+      [ -z "$event_cmd" ] && continue
+      case "$event_cmd" in
+        *"ralph-dispatch.sh $event"*) event_routed=1 ;;
+      esac
+      if printf '%s' "$event_cmd" | grep -qF 'cd "$(git rev-parse --show-toplevel)"'; then
+        event_cd_prefix_ok=1
+      fi
+      if printf '%s' "$event_cmd" | grep -qF './.claude/hooks/ralph-dispatch.sh'; then
+        event_dispatch_ok=1
+      fi
+    done <<EOF
+$event_commands
+EOF
+
+    if [ "$event_routed" -eq 1 ]; then
+      record_pass "$label: hooks.json $event routes through ralph-dispatch.sh $event"
+    else
+      record_fail "$label: hooks.json $event does not route through ralph-dispatch.sh $event"
+    fi
+
+    if [ "$event_cd_prefix_ok" -eq 1 ]; then
+      record_pass "$label: hooks.json $event command cd's to the git root before dispatching"
+    else
+      record_fail "$label: hooks.json $event command is missing the git-root cd prefix"
+    fi
+
+    if [ "$event_dispatch_ok" -eq 1 ]; then
+      record_pass "$label: hooks.json $event command invokes the dispatcher via a surface_root-relative path"
+    else
+      record_fail "$label: hooks.json $event command does not invoke ./.claude/hooks/ralph-dispatch.sh (relative form)"
+    fi
+  done
+
+  # PreToolUse matcher must be exactly "Bash" (Slice 1 live-fire confirmed
+  # the real tool name; a looser or missing matcher would fire the guard on
+  # non-Bash tool calls it was never validated against).
+  local pre_tool_use_matchers
+  pre_tool_use_matchers="$(jq -r '.hooks.PreToolUse // [] | .[] | .matcher // ""' "$hooks_json" 2>/dev/null || true)"
+  if [ "$pre_tool_use_matchers" = "Bash" ]; then
+    record_pass "$label: hooks.json PreToolUse matcher is exactly \"Bash\""
+  else
+    record_fail "$label: hooks.json PreToolUse matcher is $(printf '%s' "$pre_tool_use_matchers" | tr '\n' ',') , want exactly \"Bash\""
+  fi
+
+  # Non-goal guard (plan non-goals, 2026-08-24): SessionEnd / PreCompact
+  # auto-WIP-commit the dirty tree and are deliberately NOT wired in this
+  # rollout — a premature addition must fail this test.
+  local absent_event
+  for absent_event in SessionEnd PreCompact; do
+    if jq -e --arg event "$absent_event" '.hooks | has($event)' "$hooks_json" >/dev/null 2>&1; then
+      record_fail "$label: hooks.json unexpectedly wires $absent_event (deliberately deferred — see plan non-goals)"
+    else
+      record_pass "$label: hooks.json does not wire $absent_event (deliberately deferred)"
+    fi
+  done
 }
 
 check_codex_hooks_json_byte_identical() {

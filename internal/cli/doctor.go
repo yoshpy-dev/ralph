@@ -355,16 +355,26 @@ func checkCodexEffectiveConfig(targetDir string) checkResult {
 // which does not ship tests/ — still gets it from `ralph doctor`.
 var hookScriptBasenameRe = regexp.MustCompile(`[A-Za-z0-9_.-]+\.sh`)
 
+// codexShippedHookEvents is the set of Codex hooks.json events ralph ships
+// dispatcher routing for (.codex/hooks.json + templates/base/.codex/hooks.json).
+// validateCodexHooksJSON checks that each of these has at least one handler
+// routed through ralph-dispatch.sh. Keep in sync with the shipped hooks.json
+// event set (docs/plans/active/2026-08-24-codex-hooks-multi-event.md) —
+// SessionEnd/PreCompact are deliberately not included (see that plan's
+// non-goals and docs/tech-debt/README.md).
+var codexShippedHookEvents = []string{"PostToolUse", "PreToolUse", "SessionStart", "UserPromptSubmit"}
+
 // validateCodexHooksJSON checks hooksJSONData against the official Codex
 // hooks.json schema (top-level "hooks" -> event-name keys -> matcher-group
-// arrays -> {"type":"command","command":<string>} handlers), confirms at
-// least one PostToolUse handler routes through ralph-dispatch.sh (the
-// layered .d dispatcher Claude Code also uses), and flags any command that
-// references a *.sh script other than ralph-dispatch.sh directly (a
-// dispatcher bypass — C3-M1). Every defect is reported as a distinct
-// finding string; callers treat a non-empty result as a warn, never a fail
-// — this mirrors checkCodexEffectiveConfig's warn-level environment-check
-// contract (not part of FR-9 scaffold integrity, so never --strict-eligible).
+// arrays -> {"type":"command","command":<string>} handlers), confirms that
+// every event in codexShippedHookEvents has at least one handler routed
+// through ralph-dispatch.sh (the layered .d dispatcher Claude Code also
+// uses), and flags any command that references a *.sh script other than
+// ralph-dispatch.sh directly (a dispatcher bypass — C3-M1). Every defect is
+// reported as a distinct finding string; callers treat a non-empty result as
+// a warn, never a fail — this mirrors checkCodexEffectiveConfig's warn-level
+// environment-check contract (not part of FR-9 scaffold integrity, so never
+// --strict-eligible).
 func validateCodexHooksJSON(hooksJSONData []byte) []string {
 	var doc map[string]any
 	if err := json.Unmarshal(hooksJSONData, &doc); err != nil {
@@ -381,7 +391,10 @@ func validateCodexHooksJSON(hooksJSONData []byte) []string {
 	}
 
 	var findings []string
-	dispatcherRouted := false
+	dispatcherRoutedByEvent := make(map[string]bool, len(codexShippedHookEvents))
+	for _, eventName := range codexShippedHookEvents {
+		dispatcherRoutedByEvent[eventName] = false
+	}
 
 	for eventName, groupsRaw := range events {
 		groups, ok := groupsRaw.([]any)
@@ -434,8 +447,8 @@ func validateCodexHooksJSON(hooksJSONData []byte) []string {
 					findings = append(findings, fmt.Sprintf(`hooks.json %s[%d].hooks[%d] "command" must not be empty`, eventName, i, j))
 					continue
 				}
-				if eventName == "PostToolUse" && strings.Contains(cmdVal, "ralph-dispatch.sh") {
-					dispatcherRouted = true
+				if _, shipped := dispatcherRoutedByEvent[eventName]; shipped && strings.Contains(cmdVal, "ralph-dispatch.sh") {
+					dispatcherRoutedByEvent[eventName] = true
 				}
 				for _, name := range hookScriptBasenameRe.FindAllString(cmdVal, -1) {
 					if name == "ralph-dispatch.sh" {
@@ -449,8 +462,10 @@ func validateCodexHooksJSON(hooksJSONData []byte) []string {
 		}
 	}
 
-	if !dispatcherRouted {
-		findings = append(findings, "hooks.json PostToolUse has no handler routed through ralph-dispatch.sh")
+	for _, eventName := range codexShippedHookEvents {
+		if !dispatcherRoutedByEvent[eventName] {
+			findings = append(findings, fmt.Sprintf("hooks.json %s has no handler routed through ralph-dispatch.sh", eventName))
+		}
 	}
 
 	return findings

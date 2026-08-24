@@ -378,7 +378,9 @@ func TestProbeBinary_MissingBinary(t *testing.T) {
 }
 
 // validHooksJSON is the shipped-form fixture: a schema-valid hooks.json
-// whose PostToolUse handler routes through ralph-dispatch.sh.
+// whose PostToolUse, PreToolUse, SessionStart, and UserPromptSubmit handlers
+// all route through ralph-dispatch.sh, mirroring the real tracked
+// .codex/hooks.json (docs/plans/active/2026-08-24-codex-hooks-multi-event.md).
 const validHooksJSON = `{
   "hooks": {
     "PostToolUse": [
@@ -388,6 +390,37 @@ const validHooksJSON = `{
           {
             "type": "command",
             "command": "cd \"$(git rev-parse --show-toplevel)\" && ./.claude/hooks/ralph-dispatch.sh PostToolUse"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && ./.claude/hooks/ralph-dispatch.sh PreToolUse"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && ./.claude/hooks/ralph-dispatch.sh SessionStart"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && ./.claude/hooks/ralph-dispatch.sh UserPromptSubmit"
           }
         ]
       }
