@@ -152,8 +152,13 @@ check_codex_hooks_json() {
     local event_routed=0 event_cd_prefix_ok=0 event_dispatch_ok=0 event_cmd
     while IFS= read -r event_cmd; do
       [ -z "$event_cmd" ] && continue
+      # Accept the same quoting styles doctor's dispatchEventArgRes accepts
+      # (bare, double-quoted, single-quoted event argument) so a contributor
+      # who follows one gate cannot be rejected by the other (C3-5).
       case "$event_cmd" in
         *"ralph-dispatch.sh $event"|*"ralph-dispatch.sh $event"[!A-Za-z0-9_]*) event_routed=1 ;;
+        *"ralph-dispatch.sh \"$event\""*) event_routed=1 ;;
+        *"ralph-dispatch.sh '$event'"*) event_routed=1 ;;
       esac
       # C3-M3 / AR#1 regression guard: pin the two load-bearing pieces of the
       # cd-first command form so a revert to the pre-AR#1 absolute-path form
