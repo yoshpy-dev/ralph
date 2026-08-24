@@ -364,17 +364,35 @@ var hookScriptBasenameRe = regexp.MustCompile(`[A-Za-z0-9_.-]+\.sh`)
 // non-goals and docs/tech-debt/README.md).
 var codexShippedHookEvents = []string{"PostToolUse", "PreToolUse", "SessionStart", "UserPromptSubmit"}
 
+// dispatchEventArgRe holds one compiled regexp per codexShippedHookEvents
+// entry, each requiring "ralph-dispatch.sh <event>" with the event name
+// immediately followed by a word boundary (non-alphanumeric/underscore, or
+// end of string). A per-event "routed" flag must confirm the dispatcher was
+// invoked with the MATCHING event argument, not just referenced by basename
+// — a PreToolUse entry whose command ends in "ralph-dispatch.sh PostToolUse"
+// is a mis-wiring, not valid routing for PreToolUse, and the boundary check
+// keeps "ralph-dispatch.sh PostToolUse" from falsely matching a command that
+// actually invokes "ralph-dispatch.sh PostToolUseExtra".
+var dispatchEventArgRe = func() map[string]*regexp.Regexp {
+	res := make(map[string]*regexp.Regexp, len(codexShippedHookEvents))
+	for _, ev := range codexShippedHookEvents {
+		res[ev] = regexp.MustCompile(`ralph-dispatch\.sh\s+` + regexp.QuoteMeta(ev) + `(?:[^A-Za-z0-9_]|$)`)
+	}
+	return res
+}()
+
 // validateCodexHooksJSON checks hooksJSONData against the official Codex
 // hooks.json schema (top-level "hooks" -> event-name keys -> matcher-group
 // arrays -> {"type":"command","command":<string>} handlers), confirms that
 // every event in codexShippedHookEvents has at least one handler routed
-// through ralph-dispatch.sh (the layered .d dispatcher Claude Code also
-// uses), and flags any command that references a *.sh script other than
-// ralph-dispatch.sh directly (a dispatcher bypass — C3-M1). Every defect is
-// reported as a distinct finding string; callers treat a non-empty result as
-// a warn, never a fail — this mirrors checkCodexEffectiveConfig's warn-level
-// environment-check contract (not part of FR-9 scaffold integrity, so never
-// --strict-eligible).
+// through ralph-dispatch.sh AND invoked with that event's own name as the
+// dispatcher argument (the layered .d dispatcher Claude Code also uses; see
+// dispatchEventArgRe), and flags any command that references a *.sh script
+// other than ralph-dispatch.sh directly (a dispatcher bypass — C3-M1). Every
+// defect is reported as a distinct finding string; callers treat a
+// non-empty result as a warn, never a fail — this mirrors
+// checkCodexEffectiveConfig's warn-level environment-check contract (not
+// part of FR-9 scaffold integrity, so never --strict-eligible).
 func validateCodexHooksJSON(hooksJSONData []byte) []string {
 	var doc map[string]any
 	if err := json.Unmarshal(hooksJSONData, &doc); err != nil {
@@ -447,7 +465,7 @@ func validateCodexHooksJSON(hooksJSONData []byte) []string {
 					findings = append(findings, fmt.Sprintf(`hooks.json %s[%d].hooks[%d] "command" must not be empty`, eventName, i, j))
 					continue
 				}
-				if _, shipped := dispatcherRoutedByEvent[eventName]; shipped && strings.Contains(cmdVal, "ralph-dispatch.sh") {
+				if re, shipped := dispatchEventArgRe[eventName]; shipped && re.MatchString(cmdVal) {
 					dispatcherRoutedByEvent[eventName] = true
 				}
 				for _, name := range hookScriptBasenameRe.FindAllString(cmdVal, -1) {

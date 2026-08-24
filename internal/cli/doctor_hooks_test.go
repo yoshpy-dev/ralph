@@ -168,6 +168,106 @@ func TestValidateCodexHooksJSON_AllFourEventsWired_NoMissingEventFindings(t *tes
 	}
 }
 
+// misroutedPreToolUseHooksJSON wires PostToolUse correctly but gives the
+// PreToolUse entry a command that ends in "ralph-dispatch.sh PostToolUse" —
+// the dispatcher is referenced, but with the wrong event argument. This pins
+// the cross-review AR#1 fix: dispatcherRoutedByEvent must require the
+// MATCHING event argument, not just a bare "ralph-dispatch.sh" substring, or
+// a miswired PreToolUse entry would be silently treated as "routed" because
+// some other event's command happened to mention the dispatcher.
+const misroutedPreToolUseHooksJSON = `{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|apply_patch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && ./.claude/hooks/ralph-dispatch.sh PostToolUse"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && ./.claude/hooks/ralph-dispatch.sh PostToolUse"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && ./.claude/hooks/ralph-dispatch.sh SessionStart"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && ./.claude/hooks/ralph-dispatch.sh UserPromptSubmit"
+          }
+        ]
+      }
+    ]
+  }
+}`
+
+// TestValidateCodexHooksJSON_PreToolUseCallsWrongEvent_FlagsPreToolUseAsUnrouted
+// asserts that a PreToolUse entry whose command invokes the dispatcher with
+// PostToolUse's event argument still produces the "PreToolUse has no handler
+// routed through ralph-dispatch.sh" finding (the dispatcher call does not
+// count for the event it's wired under), while PostToolUse — correctly wired
+// in its own entry — must NOT be flagged.
+func TestValidateCodexHooksJSON_PreToolUseCallsWrongEvent_FlagsPreToolUseAsUnrouted(t *testing.T) {
+	findings := validateCodexHooksJSON([]byte(misroutedPreToolUseHooksJSON))
+
+	want := "hooks.json PreToolUse has no handler routed through ralph-dispatch.sh"
+	found := false
+	for _, f := range findings {
+		if f == want {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("findings = %v, want %q (PreToolUse's command invokes the dispatcher with PostToolUse's event argument, which must not count as routed)", findings, want)
+	}
+
+	for _, f := range findings {
+		if strings.Contains(f, "PostToolUse") && strings.Contains(f, "no handler routed") {
+			t.Errorf("findings = %v, PostToolUse is correctly wired in its own entry and must not be flagged as unrouted", findings)
+		}
+	}
+}
+
+// TestValidateCodexHooksJSON_DispatchEventArgRe_PrefixEventNameDoesNotMatch
+// is a boundary regression guard: a command ending in
+// "ralph-dispatch.sh PostToolUseExtra" must not satisfy the PostToolUse
+// routing check merely because "PostToolUseExtra" has "PostToolUse" as a
+// prefix.
+func TestValidateCodexHooksJSON_DispatchEventArgRe_PrefixEventNameDoesNotMatch(t *testing.T) {
+	re, ok := dispatchEventArgRe["PostToolUse"]
+	if !ok {
+		t.Fatal("dispatchEventArgRe missing an entry for PostToolUse")
+	}
+	if re.MatchString("cd \"$(git rev-parse --show-toplevel)\" && ./.claude/hooks/ralph-dispatch.sh PostToolUseExtra") {
+		t.Error("dispatchEventArgRe[\"PostToolUse\"] matched a command invoking \"ralph-dispatch.sh PostToolUseExtra\" — the event-name boundary check must reject a longer event name that merely has PostToolUse as a prefix")
+	}
+	if !re.MatchString("cd \"$(git rev-parse --show-toplevel)\" && ./.claude/hooks/ralph-dispatch.sh PostToolUse") {
+		t.Error("dispatchEventArgRe[\"PostToolUse\"] failed to match a correctly routed command ending in \"ralph-dispatch.sh PostToolUse\"")
+	}
+}
+
 // TestCodexShippedHookEventsMatchesShippedHooksJSON binds codexShippedHookEvents
 // (the Go list doctor.go enforces in every downstream project) to the actual
 // event keys present in the tracked templates/base/.codex/hooks.json (the
