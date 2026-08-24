@@ -165,9 +165,11 @@ of the project config trust from step 2 above:
    Approvals for command strings that did not change survive.
 
 `ralph doctor` validates `hooks.json` itself (present, valid JSON,
-schema-conformant, routed through the dispatcher) but cannot probe
-interactive trust state, so a clean `ralph doctor` run does not guarantee a
-hook will actually fire under `codex exec` until you have approved it once.
+schema-conformant, each shipped event routed through the dispatcher with
+that event's own name as the dispatcher argument — not just referenced by
+basename) but cannot probe interactive trust state, so a clean `ralph
+doctor` run does not guarantee a hook will actually fire under `codex exec`
+until you have approved it once.
 
 To extend the hook surface, add a new event group to `.codex/hooks.json`
 (top-level `hooks` → event name → matcher-group array → `{type: "command",
