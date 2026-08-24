@@ -380,7 +380,7 @@ func TestProbeBinary_MissingBinary(t *testing.T) {
 // validHooksJSON is the shipped-form fixture: a schema-valid hooks.json
 // whose PostToolUse, PreToolUse, SessionStart, and UserPromptSubmit handlers
 // all route through ralph-dispatch.sh, mirroring the real tracked
-// .codex/hooks.json (docs/plans/active/2026-08-24-codex-hooks-multi-event.md).
+// .codex/hooks.json (the codex-hooks-multi-event plan, docs/plans/).
 const validHooksJSON = `{
   "hooks": {
     "PostToolUse": [
@@ -729,7 +729,7 @@ func TestCheckCodexEffectiveConfig_DispatcherRoutingMissing_Warns(t *testing.T) 
 // TestCheckCodexEffectiveConfig_DirectHookScriptReference_Warns covers C3-M1
 // (cycle 3, docs/reports/self-review-2026-08-20-codex-hooks-json-wiring.md):
 // a hooks.json PostToolUse group that DOES route through ralph-dispatch.sh
-// (so dispatcherRouted is satisfied) but ALSO carries a second handler
+// (so dispatcherRoutedByEvent is satisfied) but ALSO carries a second handler
 // calling another *.sh script directly must still warn — that direct call
 // bypasses the layered .d dispatcher, and .codex/hooks/README.md tells
 // operators `ralph doctor` catches this.

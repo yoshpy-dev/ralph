@@ -108,7 +108,7 @@ func TestCheckHooks_ArgLessCommand_ScriptPresentReportsPass(t *testing.T) {
 
 // postToolUseOnlyHooksJSON is a schema-valid hooks.json whose only wired
 // event is PostToolUse — the pre-multi-event shape ralph shipped before
-// docs/plans/active/2026-08-24-codex-hooks-multi-event.md.
+// the codex-hooks-multi-event plan (docs/plans/).
 const postToolUseOnlyHooksJSON = `{
   "hooks": {
     "PostToolUse": [
@@ -134,7 +134,7 @@ func TestValidateCodexHooksJSON_PostToolUseOnly_FlagsMissingShippedEvents(t *tes
 	findings := validateCodexHooksJSON([]byte(postToolUseOnlyHooksJSON))
 
 	for _, eventName := range []string{"PreToolUse", "SessionStart", "UserPromptSubmit"} {
-		want := "hooks.json " + eventName + " has no handler routed through ralph-dispatch.sh"
+		want := "hooks.json " + eventName + " has no handler routed through ralph-dispatch.sh with the matching event argument"
 		found := false
 		for _, f := range findings {
 			if f == want {
@@ -157,7 +157,8 @@ func TestValidateCodexHooksJSON_PostToolUseOnly_FlagsMissingShippedEvents(t *tes
 // TestValidateCodexHooksJSON_AllFourEventsWired_NoMissingEventFindings
 // asserts that a hooks.json wiring all four shipped events (mirroring the
 // real tracked .codex/hooks.json) produces no "has no handler routed
-// through ralph-dispatch.sh" findings for any of them.
+// through ralph-dispatch.sh with the matching event argument" findings for
+// any of them.
 func TestValidateCodexHooksJSON_AllFourEventsWired_NoMissingEventFindings(t *testing.T) {
 	findings := validateCodexHooksJSON([]byte(validHooksJSON))
 
@@ -174,7 +175,8 @@ func TestValidateCodexHooksJSON_AllFourEventsWired_NoMissingEventFindings(t *tes
 // the cross-review AR#1 fix: dispatcherRoutedByEvent must require the
 // MATCHING event argument, not just a bare "ralph-dispatch.sh" substring, or
 // a miswired PreToolUse entry would be silently treated as "routed" because
-// some other event's command happened to mention the dispatcher.
+// some other event's command happened to mention the dispatcher (cycle 1,
+// docs/reports/cross-review-triage-codex-hooks-multi-event.md).
 const misroutedPreToolUseHooksJSON = `{
   "hooks": {
     "PostToolUse": [
@@ -225,13 +227,13 @@ const misroutedPreToolUseHooksJSON = `{
 // TestValidateCodexHooksJSON_PreToolUseCallsWrongEvent_FlagsPreToolUseAsUnrouted
 // asserts that a PreToolUse entry whose command invokes the dispatcher with
 // PostToolUse's event argument still produces the "PreToolUse has no handler
-// routed through ralph-dispatch.sh" finding (the dispatcher call does not
-// count for the event it's wired under), while PostToolUse — correctly wired
-// in its own entry — must NOT be flagged.
+// routed through ralph-dispatch.sh with the matching event argument" finding
+// (the dispatcher call does not count for the event it's wired under), while
+// PostToolUse — correctly wired in its own entry — must NOT be flagged.
 func TestValidateCodexHooksJSON_PreToolUseCallsWrongEvent_FlagsPreToolUseAsUnrouted(t *testing.T) {
 	findings := validateCodexHooksJSON([]byte(misroutedPreToolUseHooksJSON))
 
-	want := "hooks.json PreToolUse has no handler routed through ralph-dispatch.sh"
+	want := "hooks.json PreToolUse has no handler routed through ralph-dispatch.sh with the matching event argument"
 	found := false
 	for _, f := range findings {
 		if f == want {
@@ -254,17 +256,25 @@ func TestValidateCodexHooksJSON_PreToolUseCallsWrongEvent_FlagsPreToolUseAsUnrou
 // is a boundary regression guard: a command ending in
 // "ralph-dispatch.sh PostToolUseExtra" must not satisfy the PostToolUse
 // routing check merely because "PostToolUseExtra" has "PostToolUse" as a
-// prefix.
+// prefix. It also pins the cycle-2 cross-review C2-3 fix: a double-quoted or
+// single-quoted event argument (legal shell, semantically identical to the
+// unquoted form) must still count as routed.
 func TestValidateCodexHooksJSON_DispatchEventArgRe_PrefixEventNameDoesNotMatch(t *testing.T) {
-	re, ok := dispatchEventArgRe["PostToolUse"]
+	re, ok := dispatchEventArgRes["PostToolUse"]
 	if !ok {
-		t.Fatal("dispatchEventArgRe missing an entry for PostToolUse")
+		t.Fatal("dispatchEventArgRes missing an entry for PostToolUse")
 	}
 	if re.MatchString("cd \"$(git rev-parse --show-toplevel)\" && ./.claude/hooks/ralph-dispatch.sh PostToolUseExtra") {
-		t.Error("dispatchEventArgRe[\"PostToolUse\"] matched a command invoking \"ralph-dispatch.sh PostToolUseExtra\" — the event-name boundary check must reject a longer event name that merely has PostToolUse as a prefix")
+		t.Error("dispatchEventArgRes[\"PostToolUse\"] matched a command invoking \"ralph-dispatch.sh PostToolUseExtra\" — the event-name boundary check must reject a longer event name that merely has PostToolUse as a prefix")
 	}
 	if !re.MatchString("cd \"$(git rev-parse --show-toplevel)\" && ./.claude/hooks/ralph-dispatch.sh PostToolUse") {
-		t.Error("dispatchEventArgRe[\"PostToolUse\"] failed to match a correctly routed command ending in \"ralph-dispatch.sh PostToolUse\"")
+		t.Error("dispatchEventArgRes[\"PostToolUse\"] failed to match a correctly routed command ending in \"ralph-dispatch.sh PostToolUse\"")
+	}
+	if !re.MatchString("cd \"$(git rev-parse --show-toplevel)\" && ./.claude/hooks/ralph-dispatch.sh \"PostToolUse\"") {
+		t.Error("dispatchEventArgRes[\"PostToolUse\"] failed to match a command invoking \"ralph-dispatch.sh \\\"PostToolUse\\\"\" (double-quoted event argument, C2-3)")
+	}
+	if !re.MatchString("cd \"$(git rev-parse --show-toplevel)\" && ./.claude/hooks/ralph-dispatch.sh 'PostToolUse'") {
+		t.Error("dispatchEventArgRes[\"PostToolUse\"] failed to match a command invoking \"ralph-dispatch.sh 'PostToolUse'\" (single-quoted event argument, C2-3)")
 	}
 }
 
