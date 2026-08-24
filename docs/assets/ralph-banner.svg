@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 320" role="img" aria-label="ralph — Claude Code-first CLI for harness engineering">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0D1117"/>
+      <stop offset="100%" stop-color="#161B22"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#39D353"/>
+      <stop offset="100%" stop-color="#58A6FF"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="320" rx="18" fill="url(#bg)"/>
+  <rect x="1" y="1" width="1198" height="318" rx="17" fill="none" stroke="#30363D" stroke-width="1"/>
+
+  <circle cx="40" cy="36" r="7" fill="#FF5F56"/>
+  <circle cx="64" cy="36" r="7" fill="#FFBD2E"/>
+  <circle cx="88" cy="36" r="7" fill="#27C93F"/>
+  <text x="600" y="41" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="13" fill="#6E7681">ralph</text>
+
+  <text x="60" y="170" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="96" font-weight="700">
+    <tspan fill="#39D353">$</tspan><tspan fill="#E6EDF3" dx="20">ralph</tspan><tspan fill="#39D353" dx="12">_</tspan>
+  </text>
+
+  <rect x="60" y="200" width="520" height="3" fill="url(#accent)" rx="2"/>
+
+  <text x="60" y="240" font-family="ui-sans-serif, -apple-system, BlinkMacSystemFont, Segoe UI, Helvetica, Arial, sans-serif" font-size="26" font-weight="500" fill="#E6EDF3">
+    Claude Code-first CLI for harness engineering.
+  </text>
+
+  <text x="60" y="280" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="16" font-weight="400" fill="#8B949E">
+    maps · skills · hooks · evidence-backed reviews · autonomous parallel execution
+  </text>
+</svg>

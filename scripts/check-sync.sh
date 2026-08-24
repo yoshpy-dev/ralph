@@ -61,6 +61,8 @@ ROOT_ONLY_EXCLUSIONS=(
   "docs/references/source-notes.md"
   "docs/research/approach-comparison.md"
   "docs/roadmap/harness-maturity-model.md"
+  # README assets (banner, VHS tapes) — repo-specific, not distributed via `ralph init`
+  "docs/assets/"
   # Evidence and reports are runtime artifacts
   "docs/evidence/"
   # Insight events are per-task runtime artifacts (only .gitkeep is in templates)

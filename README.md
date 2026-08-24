@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/assets/ralph-banner.svg" alt="ralph — Claude Code-first CLI for harness engineering" width="100%">
+
 # ralph
 
 **Claude Code + Codex harness engineering.**
@@ -112,6 +114,20 @@ Before claiming a task is done:
 | **Org runtime**<br/>Autonomous multi-seat execution (`ralph org spawn/send/wait/...`) with a typed messaging protocol and pulse-layer watchdog — see [Org runtime](#org-runtime-autonomous-multi-seat-execution). | **Language packs**<br/>TypeScript, Python, Rust, Go, Dart, and Terraform starters (opt-in) with per-language `verify.sh` and path-scoped rules. |
 | **Drift-proof upgrades**<br/>Fully non-interactive `ralph upgrade` — core replace, managed-block update, and settings 3-way merge, with an upgrade report and a dedicated exit code for unresolved drift. | **Evidence over prose**<br/>Every self-review, verify, test, sync-docs, and cross-review triage pass produces a dated artifact in `docs/reports/`. |
 | **Cross-agent portable**<br/>`AGENTS.md` + `scripts/` + `packs/` stay neutral; `.claude/` and `.codex/` are agent-specific layers you can stack others beside. | **Local state, not repo churn**<br/>Worktree lifecycle records live under `git-common-dir`, outside tracked files and branch checkouts. |
+
+## Demos
+
+Animated walkthroughs are produced by [VHS](https://github.com/charmbracelet/vhs). Tapes live under `docs/assets/vhs/`; see [`docs/assets/vhs/README.md`](docs/assets/vhs/README.md) for prerequisites.
+
+```sh
+# ralph init (scaffold flow)
+vhs docs/assets/vhs/demo-init.tape       # -> docs/assets/demo-init.gif
+
+# ralph status (Lazygit-style TUI)
+vhs docs/assets/vhs/demo-status.tape     # -> docs/assets/demo-status.gif
+```
+
+Once rendered, the GIFs drop into `docs/assets/` and can be embedded directly from GitHub.
 
 ## Commands
 
