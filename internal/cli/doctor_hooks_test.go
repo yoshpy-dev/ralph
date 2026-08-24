@@ -1,8 +1,11 @@
 package cli
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -161,6 +164,59 @@ func TestValidateCodexHooksJSON_AllFourEventsWired_NoMissingEventFindings(t *tes
 	for _, f := range findings {
 		if strings.Contains(f, "has no handler routed through ralph-dispatch.sh") {
 			t.Errorf("findings = %v, want no missing-dispatcher-routing findings when all four shipped events are wired", findings)
+		}
+	}
+}
+
+// TestCodexShippedHookEventsMatchesShippedHooksJSON binds codexShippedHookEvents
+// (the Go list doctor.go enforces in every downstream project) to the actual
+// event keys present in the tracked templates/base/.codex/hooks.json (the
+// hooks.json ralph init scaffolds). Without this test the two lists are only
+// linked by a doc comment ("Keep in sync with the shipped hooks.json event
+// set"), so adding an event to hooks.json without also adding it to
+// codexShippedHookEvents (or vice versa) previously went undetected — see
+// docs/reports/self-review-2026-08-24-codex-hooks-multi-event.md (M2).
+//
+// Paths are resolved relative to this source file via runtime.Caller, the
+// same idiom internal/config/defaults_sync_test.go uses, so the test works
+// regardless of the working directory it is invoked from.
+func TestCodexShippedHookEventsMatchesShippedHooksJSON(t *testing.T) {
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("cannot determine test file location via runtime.Caller")
+	}
+	repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..")
+
+	hooksJSONPath := filepath.Join(repoRoot, "templates", "base", ".codex", "hooks.json")
+	data, err := os.ReadFile(hooksJSONPath)
+	if err != nil {
+		t.Skipf("templates/base/.codex/hooks.json not found (%v) — skipping sync check (vendored repo?)", err)
+	}
+
+	var doc struct {
+		Hooks map[string]json.RawMessage `json:"hooks"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("templates/base/.codex/hooks.json: invalid JSON: %v", err)
+	}
+
+	shipped := append([]string(nil), codexShippedHookEvents...)
+	sort.Strings(shipped)
+
+	var fileEvents []string
+	for eventName := range doc.Hooks {
+		fileEvents = append(fileEvents, eventName)
+	}
+	sort.Strings(fileEvents)
+
+	if len(shipped) != len(fileEvents) {
+		t.Fatalf("codexShippedHookEvents (Go) = %v\ntemplates/base/.codex/hooks.json events = %v\nwant the same event set (doctor.go's codexShippedHookEvents must be kept in sync with the shipped hooks.json)",
+			shipped, fileEvents)
+	}
+	for i := range shipped {
+		if shipped[i] != fileEvents[i] {
+			t.Fatalf("codexShippedHookEvents (Go) = %v\ntemplates/base/.codex/hooks.json events = %v\nwant the same event set (doctor.go's codexShippedHookEvents must be kept in sync with the shipped hooks.json)",
+				shipped, fileEvents)
 		}
 	}
 }

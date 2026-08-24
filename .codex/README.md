@@ -116,16 +116,23 @@ contract intact regardless of where the session starts.
   `pre_bash_guard.sh` actually blocks the command (not just a warning), so
   this is a real enforcement hook, not a cosmetic one.
 - `SessionStart` and `UserPromptSubmit` omit a matcher (all sources /
-  prompts match); both drive additionalContext-only hooks
-  (`session_start_context.sh`, `prompt_gate.sh`) with no write side effects.
+  prompts match); both drive additionalContext-emitting hooks
+  (`session_start_context.sh`, `prompt_gate.sh`). `prompt_gate.sh` is
+  output-only. `session_start_context.sh` also performs idempotent
+  harness-state housekeeping on every run: it creates the `.harness/` and
+  `docs/plans/`/`docs/reports/` scaffold directories and resets
+  `.harness/state/tool_failures.count` to `0`. Codex has no
+  `PostToolUseFailure` event, so under Codex that counter is only ever reset,
+  never incremented — the reset is inert for a pure-Codex session but can
+  clear a concurrent Claude Code session's failure counter in the same repo.
 - Codex has **no `PostToolUseFailure` event** — that hook stage is Claude
   Code-specific. The corresponding `.claude/hooks/PostToolUseFailure.d/`
   layer simply never runs under Codex; there is nothing to wire here.
-- `SessionEnd` and `PreCompact` are **deliberately not wired** in this
-  rollout: their Claude-side hooks (`session_end_summary.sh`,
-  `precompact_checkpoint.sh`) auto-commit a dirty working tree as a `wip:`
-  checkpoint, and that side effect needs its own safety acceptance criteria
-  (dirty-tree behavior, rollback) before it ships to Codex sessions.
+- `SessionEnd` and `PreCompact` are **deliberately not wired**: their
+  Claude-side hooks (`session_end_summary.sh`, `precompact_checkpoint.sh`)
+  auto-commit a dirty working tree as a `wip:` checkpoint, and that side
+  effect needs its own safety acceptance criteria (dirty-tree behavior,
+  rollback) before it ships to Codex sessions.
 
 `.codex/config.toml` keeps a reference comment pointing at `hooks.json` but
 no `[[hooks.*]]` table; do not reintroduce one there. Codex merges both
@@ -150,15 +157,12 @@ of the project config trust from step 2 above:
    hook you expect to fire under `codex exec` (for example in CI) does not,
    check trust state first.
 4. Because trust is keyed by the command string's hash, editing a hook's
-   `command` in `hooks.json` invalidates the prior approval — run another
-   interactive session and re-approve after any such change. **This
-   includes adding a brand-new event entry** (e.g. this rollout's
-   `PreToolUse` / `SessionStart` / `UserPromptSubmit` additions): each new
-   `command` string is its own unapproved hash, so upgrading to this
-   `hooks.json` requires one more interactive `codex` session (or
-   `--dangerously-bypass-hook-trust` for non-interactive `codex exec` runs,
-   e.g. CI) before the new events actually fire — the existing `PostToolUse`
-   entry's command string is unchanged, so its prior approval still holds.
+   `command` in `hooks.json` — or adding a brand-new event entry —
+   invalidates the prior approval for that entry: each `command` string
+   carries its own approval hash, so any new or edited event requires a
+   fresh interactive `codex` session (or `--dangerously-bypass-hook-trust`
+   for non-interactive `codex exec` runs, e.g. CI) before it actually fires.
+   Approvals for command strings that did not change survive.
 
 `ralph doctor` validates `hooks.json` itself (present, valid JSON,
 schema-conformant, routed through the dispatcher) but cannot probe
