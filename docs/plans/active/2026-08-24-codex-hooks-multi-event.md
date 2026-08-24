@@ -59,14 +59,14 @@
 
 ## Acceptance criteria
 
-- [ ] AC-1 `.codex/hooks.json`(両コピー byte-identical)が「PostToolUse + 出荷確定イベント(最大: PreToolUse / SessionStart / UserPromptSubmit)」を dispatcher 経由で配線し、既存 PostToolUse エントリの command 文字列は不変(trust ハッシュ維持)。SessionEnd / PreCompact のエントリが**存在しない**こと。
-- [ ] AC-2 live-fire(信頼済みメタリポ、bypass 付き): 出荷イベントすべてで dispatcher → 第 3 層 drop-in の実行を実証。証跡を docs/evidence/ に保存。
-- [ ] AC-3 fresh `ralph init` fixture でも追加イベントの発火を確認(最低 1 イベント、bypass 付き)。
-- [ ] AC-4 **(ハード条件)** PreToolUse を出荷する場合: pre_bash_guard の deny 判定が Codex 側で実際にツール実行を**ブロックする**ことを live-fire で実証(deny 対象コマンドが実行されないことをファイルシステム状態で確認)。ブロックされない場合は PreToolUse を配線せず、事実を evidence・ドキュメント・tech-debt に記録して 2 イベント出荷に縮小。加えて pre_bash_guard が Codex の Bash ペイロードからコマンドを抽出できること(実ペイロード fixture テスト)。
-- [ ] AC-5 doctor が配布対象イベント集合の各イベントについて dispatcher ルーティングの存在を検査し、欠落を warn する(negative テスト付き)。既存の検査群(スキーマ/直接参照/併存/features.hooks)は不変 green。
-- [ ] AC-6 `tests/test-hook-wiring.sh` が出荷イベント集合の配線を検査する(集合は AC-4 の結果で確定)。
-- [ ] AC-7 ドキュメント更新(イベント一覧、PostToolUseFailure 非対応、trust 再承認の注意)。
-- [ ] AC-8 `./scripts/run-verify.sh` exit 0、check-sync / purity / 全テスト green。
+- [x] AC-1 `.codex/hooks.json`(両コピー byte-identical)が「PostToolUse + 出荷確定イベント(最大: PreToolUse / SessionStart / UserPromptSubmit)」を dispatcher 経由で配線し、既存 PostToolUse エントリの command 文字列は不変(trust ハッシュ維持)。SessionEnd / PreCompact のエントリが**存在しない**こと。
+- [x] AC-2 live-fire(信頼済みメタリポ、bypass 付き): 出荷イベントすべてで dispatcher → 第 3 層 drop-in の実行を実証。証跡を docs/evidence/ に保存。
+- [x] AC-3 fresh `ralph init` fixture でも追加イベントの発火を確認(最低 1 イベント、bypass 付き)。
+- [x] AC-4 **(ハード条件)** PreToolUse を出荷する場合: pre_bash_guard の deny 判定が Codex 側で実際にツール実行を**ブロックする**ことを live-fire で実証(deny 対象コマンドが実行されないことをファイルシステム状態で確認)。ブロックされない場合は PreToolUse を配線せず、事実を evidence・ドキュメント・tech-debt に記録して 2 イベント出荷に縮小。加えて pre_bash_guard が Codex の Bash ペイロードからコマンドを抽出できること(実ペイロード fixture テスト)。
+- [x] AC-5 doctor が配布対象イベント集合の各イベントについて dispatcher ルーティングの存在を検査し、欠落を warn する(negative テスト付き)。既存の検査群(スキーマ/直接参照/併存/features.hooks)は不変 green。
+- [x] AC-6 `tests/test-hook-wiring.sh` が出荷イベント集合の配線を検査する(集合は AC-4 の結果で確定)。
+- [x] AC-7 ドキュメント更新(イベント一覧、PostToolUseFailure 非対応、trust 再承認の注意)。
+- [x] AC-8 `./scripts/run-verify.sh` exit 0、check-sync / purity / 全テスト green。
 
 ## Implementation outline
 
