@@ -90,3 +90,40 @@ None — no failures observed in any run (primary or corroborating).
 - Blocked: none.
 - The `go test ./internal/cli/...` flake noted in tester memory did not reproduce in either of this cycle's fresh runs; no failing test name to report.
 - **Cleared to proceed to `/sync-docs` → `/cross-review` → `/pr`.**
+
+## Cycle 3 (2026-08-24, pipeline cap raised 2 → 3)
+
+- Plan: `docs/plans/active/2026-08-24-codex-hooks-multi-event.md`
+- Tester: `tester` subagent (Claude Code)
+- Scope: behavioral tests only. Re-run triggered by two commits landed after Cycle 2: `b7cec3c` (`tests/test-hook-wiring.sh` shell gate now accepts quoted event arguments, matching the doctor's Go-side parity — no assertion-count change) and `6c41189` (insight jsonl one-line data fix; documentation/insight-event data only, no production code touched).
+- Evidence: `docs/evidence/cli-test-cycle3.out` (fresh, uncached `go test ./internal/cli/ -count=1 -v`, saved this cycle). The `./scripts/run-test.sh` and `RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh` raw logs were captured but not saved as tracked evidence files — both match the existing `docs/evidence/*.log` gitignore pattern (`.gitignore:58`), consistent with how Cycle 1's corroborating runs were handled.
+
+### Test execution
+
+| Suite / Command | Result | Notes |
+| --- | --- | --- |
+| `./scripts/run-test.sh` (28 shell suite headers, changed-scope resolved to `golang` full-fallback via `.codex/hooks.json`) | 0 `FAIL` lines anywhere in the log (grepped for `FAIL` excluding `FAIL: 0` summary lines — none found) | `test-hook-wiring.sh` still 68/68 — the `b7cec3c` quoted-argument fix is a shell-side robustness change, not a new assertion; count unchanged from Cycle 2. `test-xreview-helpers.sh` 29/29, `test-verify-mode-split.sh` 59/59, `test-self-review-scope.sh` 64/64, `test-terraform-gitignore.sh` 47/47, `test-terraform-pack-verify.sh` 36/36 — all suites individually confirmed green in the log, matching Cycle 2's per-suite baseline. |
+| `bash tests/test-hook-wiring.sh` (standalone re-run) | 68/68, `FAIL: 0`, exit 0 | Confirms the quoted-argument fix didn't regress the standalone entrypoint either. |
+| `go test ./internal/cli/ -count=1 -v` (fresh, uncached) | 262 `--- PASS`, 0 `--- FAIL`, 0 `--- SKIP`, `ok ... 33.888s` | Saved to `docs/evidence/cli-test-cycle3.out`. Same 262-test count as Cycle 2 (no Go source changed this cycle — both delta commits were shell/insights-data only). No flake reproduced. |
+| `RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh` (AC-8 literal, mode defaults to `all`) | Exit 0 (captured via `echo "EXIT=$?"` after file redirection, not `tee`-masked per tester memory) | gofmt ok, 0 staticcheck issues, all 28 shell suite headers green, 8/8 Go packages `ok` (cached, matching the wrapper's own `go test ./...` moments earlier). Zero `FAIL` lines in the full log (grepped, excluding `FAIL: 0`). |
+
+### Regression checks
+
+| Previously flagged item | Status | Evidence |
+| --- | --- | --- |
+| Flaky `go test ./internal/cli/...` (subprocess-contention class, per tester memory) | Not reproduced | One fresh (`-count=1`) full-package run this cycle, 262/262 green, 33.888s. Consistent with memory: needs adjacent real-subprocess test load to trigger, none observed here. |
+| Shell gate quoted-argument regression risk (the motivating fix for `b7cec3c`) | Confirmed fixed and non-regressing | `tests/test-hook-wiring.sh` 68/68 in both the wrapper run and a standalone re-run; no new failures introduced by the quoting change. |
+| `.codex/hooks.json` PostToolUse trust-hash preservation (AR#1 regression guard) | Confirmed unchanged | AR#1 assertions still PASS in both `root`/`templates/base` copies. |
+
+### Test gaps
+
+- Same as Cycle 2: live-fire runtime behavior (AC-2/3/4) remains evidence-doc-based, not re-executed by `/test`; the Codex `ask`-decision path for `PreToolUse` remains untested by design (tracked as tech-debt); no Go-level negative test for a non-`Bash` `PreToolUse` matcher (shell-suite-only coverage); no dedicated regression test asserts the old laxer doctor behavior is gone (coverage relies on the new tests proving the new behavior directly) — all unchanged, not required by any AC.
+- New from this cycle: no dedicated unit test isolates the quoted-vs-unquoted event-argument parsing added in `b7cec3c` as its own named case distinct from the existing dispatcher-routing assertions — the fix is covered implicitly (the existing 68 assertions still pass against the now-quoting-tolerant gate), not via a standalone "quoted argument accepted" regression test. Minor, not blocking; worth a follow-up if this class of shell-quoting fix recurs.
+
+### Verdict (Cycle 3)
+
+- **Pass.** Zero `FAIL` lines across the full `./scripts/run-test.sh` run (28 shell suite headers, `test-hook-wiring.sh` steady at 68/68), a standalone `bash tests/test-hook-wiring.sh` re-run also 68/68, a fresh (`-count=1`) `go test ./internal/cli/` run 262/262 with 0 skips (`docs/evidence/cli-test-cycle3.out`), and `RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh` (AC-8 literal) exits 0 with gofmt/staticcheck/all shell suites/all 8 Go packages green.
+- Fail: none.
+- Blocked: none.
+- The `go test ./internal/cli/...` flake noted in tester memory did not reproduce in this cycle's fresh run; no failing test name to report.
+- **Cleared to proceed to `/sync-docs` → `/cross-review` → `/pr`.**
