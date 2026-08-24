@@ -108,8 +108,10 @@
 
 ## Open questions
 
-- Codex の Bash 系ツールの実ツール名と PreToolUse ペイロード形(Slice 1)
-- pre_bash_guard の deny が Codex で実行ブロックとして機能するか(Slice 1 — 出荷可否を決めるハード条件)
+すべて Slice 1 の実測で解消(証跡: `docs/evidence/codex-hooks-multi-event-slice1-2026-08-24.md`):
+
+- ~~Codex の Bash 系ツールの実ツール名と PreToolUse ペイロード形~~ → 実ツール名は逐語的に `Bash`、`tool_input.command` ネスト形で pre_bash_guard の抽出とそのまま互換。matcher `Bash` のまま拡張不要。
+- ~~pre_bash_guard の deny が Codex で実行ブロックとして機能するか~~ → **機能する**(`hook: PreToolUse Blocked`、router がコマンドを不実行、deny 理由がモデルへ提示)。ハード AC-4 の実証条件を満たしたため **PreToolUse を出荷イベントに含める**。出荷集合 = PostToolUse(既存)+ PreToolUse / SessionStart / UserPromptSubmit。
 
 ## Evidence targets
 
@@ -122,7 +124,7 @@
 
 ## Progress checklist
 
-- [ ] Slice 1: 実測(発火可否・ペイロード・decision 尊重)
+- [x] Slice 1: 実測(発火可否・ペイロード・decision 尊重)— 3 イベント発火+deny 実効性を実証、PreToolUse 出荷確定(2026-08-24)
 - [ ] Slice 2: 配線+消費者追随(原子的)
 - [ ] Post-implementation pipeline
 - [ ] /pr
