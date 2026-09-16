@@ -36,6 +36,30 @@ func TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted(t *testing.T) {
 	}
 }
 
+func TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted(t *testing.T) {
+	vars := testRolePromptVars()
+	vars.Role = "implementer"
+	vars.SeatID = "implementer-1"
+	text, ok, err := RenderRolePrompt("implementer", vars)
+	if err != nil {
+		t.Fatalf("RenderRolePrompt: unexpected error: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected ok=true for the built-in implementer template")
+	}
+	for _, want := range []string{"org-a", "implementer-1", "ralph-org-a", "implementer", "internal/org/**"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("expected rendered implementer prompt to contain %q, got:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "{{") {
+		t.Errorf("expected no unsubstituted {{...}} placeholders for known vars, got:\n%s", text)
+	}
+	if !strings.Contains(text, ".claude/rules/ralph/agent-messaging.md") {
+		t.Errorf("expected implementer template to reference the protocol rule doc, got:\n%s", text)
+	}
+}
+
 func TestRenderRolePrompt_QA_AllKnownVarsSubstituted(t *testing.T) {
 	vars := testRolePromptVars()
 	vars.Role = "qa"
@@ -110,6 +134,50 @@ func TestRenderRolePrompt_Lead_EmptyTaskAndEnvelope_NoLeftoverPlaceholders(t *te
 	}
 	if strings.Contains(text, "{{TASK}}") || strings.Contains(text, "{{ENVELOPE}}") {
 		t.Errorf("expected no leftover {{TASK}}/{{ENVELOPE}} placeholders even when both vars are empty, got:\n%s", text)
+	}
+}
+
+func TestRolePrompts_SeatTemplatesContainFanOutSection(t *testing.T) {
+	for _, role := range []string{"implementer", "reviewer", "qa"} {
+		t.Run(role, func(t *testing.T) {
+			vars := testRolePromptVars()
+			vars.Role = role
+			text, ok, err := RenderRolePrompt(role, vars)
+			if err != nil {
+				t.Fatalf("RenderRolePrompt: unexpected error: %v", err)
+			}
+			if !ok {
+				t.Fatalf("expected ok=true for the built-in %s template", role)
+			}
+			if !strings.Contains(text, "## 座席内 fan-out") {
+				t.Errorf("expected %s template to contain a '## 座席内 fan-out' section, got:\n%s", role, text)
+			}
+			if !strings.Contains(text, "max_seats") {
+				t.Errorf("expected %s template's fan-out section to mention max_seats, got:\n%s", role, text)
+			}
+			if !strings.Contains(text, "lead") || !strings.Contains(text, "送ることは絶対に") {
+				t.Errorf("expected %s template's fan-out section to prohibit sub-agents from sending to lead, got:\n%s", role, text)
+			}
+		})
+	}
+}
+
+func TestRenderRolePrompt_Lead_DelegatesToImplementer(t *testing.T) {
+	vars := testRolePromptVars()
+	vars.Role = "lead"
+	vars.SeatID = "lead"
+	text, ok, err := RenderRolePrompt("lead", vars)
+	if err != nil {
+		t.Fatalf("RenderRolePrompt: unexpected error: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected ok=true for the built-in lead template")
+	}
+	if !strings.Contains(text, "implementer") {
+		t.Errorf("expected lead template to delegate implementation to implementer seats, got:\n%s", text)
+	}
+	if strings.Contains(text, "budget") {
+		t.Errorf("expected lead template to no longer reference budget, got:\n%s", text)
 	}
 }
 
