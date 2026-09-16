@@ -94,8 +94,8 @@ func requireSeatIdentifier(flag, value string) error {
 // for the full rationale (fixes the lead/operator cwd-split, tech-debt
 // "state-dir の cwd 相対解決"). A caller that also needs the resolved
 // config.OrgConfig for its own purposes beyond wiring (e.g.
-// newOrgStartCmd's --model default resolution via
-// org.DefaultModelForDriver) reads it back off the returned *org.Org's
+// resolveModelOrWarn's --model default resolution via
+// org.DefaultModelForDriverAndRole) reads it back off the returned *org.Org's
 // exported Config field rather than newOrgRuntime returning a second
 // value.
 func newOrgRuntime(cmd *cobra.Command, stateDir, configPath string) (*org.Org, error) {

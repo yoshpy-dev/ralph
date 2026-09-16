@@ -635,8 +635,8 @@ func TestOrgSpawn_DryRun_NoPATHNeeded_StatusExclusionAndAll(t *testing.T) {
 
 // TestOrgSpawn_ModelFlagOmitted_DefaultsToFirstMatchingPoolEntry covers
 // AC-5: `ralph org spawn` without --model no longer errors -- it resolves
-// org.DefaultModelForDriver for --driver (the first matching
-// [org].model_pool entry) and prints exactly one fallback warning line to
+// org.DefaultModelForDriverAndRole for --driver/--role (the first matching
+// role-permitted [org].model_pool entry) and prints exactly one fallback warning line to
 // stderr. Uses --dry-run (per the plan's "dry-run is fine for spawn") so no
 // herdr/agmsg PATH lookup is needed.
 func TestOrgSpawn_ModelFlagOmitted_DefaultsToFirstMatchingPoolEntry(t *testing.T) {
