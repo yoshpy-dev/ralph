@@ -4,6 +4,13 @@
 
 Ralph Loop(/loop)の自律実行系を撤去し、Lead LLM が herdr(実行・観測)と agmsg(メッセージング)を使って常駐 LLM 座席(scout / impl / reviewer / QA / watchdog)による組織を自律編成する新しい実行面「org runtime」を導入する。標準フロー(開発ハーネス: `/spec` `/plan` `/work` `/self-review` `/verify` `/test` `/sync-docs` `/cross-review` `/pr`)は廃止せず、org runtime と並存する開発ハーネスとして存続する(適用範囲は FR-6・FR-11 参照)。org runtime に関する人間の役割はエンベロープ定義(ralph.toml)・Lead 起動・エスカレーション裁定の3つに縮小し、決定論的スクリプトは機構(`ralph org` 動詞)と保証(品質ゲート・ハードリミット・監査証跡)に退く。
 
+### 2026-09-16 改訂(feat/org-implementer-seat-envelope)
+
+- (a) budget 概念(`[org.budget]`・watchdog の wall-clock 自動遮断・fix ラウンド上限)は撤去。FR-2 の「budget」、FR-7 の「fix ラウンド既定 2、上限はエンベロープが執行」、FR-8 の「budget / ラウンド cap」、NFR「予算執行の決定論性」、AC「wall-clock budget 超過」「fix ラウンドが上限到達」は無効。停滞・生存・スコープ外変更・デッドマンは存続。
+- (b) 役割は lead / implementer / reviewer / qa の 4 種(FR-4 の identity 例 `impl-<slug>` は `implementer-<n>` 等の任意 seat id で運用)。座席内サブエージェント fan-out を雛形で明示許可。
+- (c) model_pool 既定は claude `fable`/`opus`/`sonnet`/`haiku` + codex `gpt-6-astra`/`gpt-5.6-sol`/`gpt-5.6-terra`/`gpt-5.6-luna`/`gpt-5.5`。claude はエイリアス、codex はスラッグ。`ralph doctor` に codex スラッグの軽量 Check を追加(FR-2 末尾の「全プールエントリを起動プローブ」は `--probe-models` のオプトインのまま)。
+- (d) `--model` は運用上必須、省略時はプール先頭へ警告付きフォールバック。
+
 ## Background and problem
 
 ### Current state
@@ -50,11 +57,11 @@ Ralph Loop(/loop)の自律実行系を撤去し、Lead LLM が herdr(実行・�
 
 - [ ] Given エンベロープにないモデル、when Lead が `ralph org spawn` を実行、then 機構がエラーで拒否し、receipts に `honored=false` 相当の拒否記録が残る。
 - [ ] Given `max_seats` に達した状態、when Lead が追加 spawn、then 拒否され manifest に記録される。
-- [ ] Given 座席の wall-clock budget 超過、when パルス層が検知、then LLM の判断を経由せず座席が遮断され、manifest に遮断イベントが記録され、Lead に通知される。
+- [ ] Given 座席の wall-clock budget 超過、when パルス層が検知、then LLM の判断を経由せず座席が遮断され、manifest に遮断イベントが記録され、Lead に通知される。**(2026-09-16 改訂で撤去)**
 - [ ] Given Lead が watchdog 通知に N 分無応答、when デッドマン条項発動、then 人間へ通知が届く。
 - [ ] Given `codex` driver の座席、when spawn 時にプールのモデル名を指定、then `codex --model <名>` で起動され receipts の `effective_model` が一致する(`honored=true`)。
 - [ ] Given impl 座席の RESULT、when QA 座席のゲートが fail、then reviewer 座席にレビューが渡らず impl に差し戻される(lead 経由)。
-- [ ] Given fix ラウンドが上限到達、when reviewer が追加 findings を報告、then 自動再ラウンドは発生せず lead 裁定に移る。
+- [ ] Given fix ラウンドが上限到達、when reviewer が追加 findings を報告、then 自動再ラウンドは発生せず lead 裁定に移る。**(2026-09-16 改訂で撤去)**
 - [ ] Given 全 LLM 停止、when `ralph org status`、then 機構層だけで全座席の状態と証跡が表示される。
 - [ ] Given 最終 PR マージ後、when `grep -r "ralph-orchestrator\|ralph-pipeline\|RALPH_LOOP_DRIVER" --include="*.sh" --include="*.go" --include="*.md"`、then 参照ゼロ(履歴・アーカイブ除く)。
 - [ ] Given `ralph doctor`、when プールに無効なモデル ID がある、then 警告が出る。
@@ -127,7 +134,7 @@ Ralph Loop(/loop)の自律実行系を撤去し、Lead LLM が herdr(実行・�
 | Option | Pros | Cons | Adopted |
 |--------|------|------|---------|
 | 座席 = `claude -p` バッチ(旧設計) | 再現性・再開性が高い | agmsg monitor 無意味・ステアリング不可・herdr の価値半減 | No |
-| 座席 = 常駐対話セッション | ステアリング・介入・座席内 fan-out・`codex --model` 有効 | コンテキスト常時保持コスト → budget で統制 | **Yes** |
+| 座席 = 常駐対話セッション | ステアリング・介入・座席内 fan-out・`codex --model` 有効 | コンテキスト常時保持コスト → budget で統制 **(2026-09-16 改訂で撤去)** | **Yes** |
 | Lead が herdr 生コマンドを直接操作 | 実装最小 | send-text の脆弱性を LLM が毎回再発明 | No |
 | 決定論的動詞セット + LLM 編成判断 | 柔軟性と信頼性の両立 | 動詞セットの実装コスト | **Yes** |
 | reviewer 逆 CLI 固定(現行) | モデル異種性を機械的に保証 | 独立性の本質はコンテキスト分離。プール制で人間が選択可能 | No |
