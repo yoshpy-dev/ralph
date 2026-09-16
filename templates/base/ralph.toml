@@ -16,12 +16,21 @@ require_go = false
 [org]
 driver_pool = ["claude", "codex"]
 # model_pool entries are CLI-native model names/aliases, passed verbatim to
-# `claude --model` / `codex --model` (aliases don't go stale like full model
-# IDs would). Each entry's driver must be present in driver_pool above.
+# `claude --model` / `codex --model`. Claude entries are stable CLI aliases
+# (opus/sonnet/haiku/fable) that don't go stale like full model IDs would.
+# Codex has no aliases, so codex entries are model slugs as listed in
+# codex's own ~/.codex/models_cache.json, and go stale when codex retires a
+# model. Each entry's driver must be present in driver_pool above.
 model_pool = [
+  { driver = "claude", model = "fable" },
   { driver = "claude", model = "opus" },
   { driver = "claude", model = "sonnet" },
   { driver = "claude", model = "haiku" },
+  { driver = "codex", model = "gpt-6-astra" },
+  { driver = "codex", model = "gpt-5.6-sol" },
+  { driver = "codex", model = "gpt-5.6-terra" },
+  { driver = "codex", model = "gpt-5.6-luna" },
+  { driver = "codex", model = "gpt-5.5" },
 ]
 # max_seats caps concurrently spawned seats per org_id namespace.
 max_seats = 5
@@ -37,7 +46,8 @@ agmsg_home = "~/.agents/skills/agmsg"
 # Absent or empty means "no restriction" — the full model_pool is allowed.
 # Example:
 # [org.roles]
-# reviewer = ["opus"]
+# implementer = ["sonnet"]
+# reviewer = ["opus", "gpt-6-astra"]
 
 # [org.permissions] controls the seat permission-mode envelope: how much
 # autonomy a spawned seat's driver runs with, translated to driver-native

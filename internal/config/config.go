@@ -32,9 +32,12 @@ type DoctorConfig struct {
 // counterpart once the plan lands) for the full design.
 type OrgConfig struct {
 	// ModelPool is the allowlist of driver/model pairs `ralph org spawn` may
-	// launch. Model is a CLI-native model name or alias (e.g. "opus"),
-	// passed verbatim to `claude --model` / `codex --model` — aliases are
-	// valid CLI values and do not go stale like full model IDs would.
+	// launch. Model is a CLI-native model name or alias, passed verbatim to
+	// `claude --model` / `codex --model`. Claude entries are stable CLI
+	// aliases (e.g. "opus") that do not go stale like full model IDs would.
+	// Codex has no aliases, so codex entries are model slugs taken from
+	// codex's own models_cache.json and can go stale when codex retires a
+	// model.
 	ModelPool []OrgModelPoolEntry `toml:"model_pool"`
 	// DriverPool is the allowlist of driver CLIs org seats may use.
 	DriverPool []string `toml:"driver_pool"`
@@ -91,7 +94,12 @@ type OrgPermissionsConfig struct {
 	CodexVerified bool `toml:"codex_verified"`
 }
 
-// OrgModelPoolEntry pairs a driver CLI with a CLI-native model name or alias.
+// OrgModelPoolEntry pairs a driver CLI with a CLI-native model name or
+// alias. Claude entries are CLI aliases (stable across model releases,
+// e.g. "opus", "sonnet", "haiku"). Codex has no aliases, so codex entries
+// are model slugs as listed in codex's own models_cache.json and go stale
+// when codex retires a model -- the `ralph doctor` slug check (added in a
+// later slice) warns about that.
 type OrgModelPoolEntry struct {
 	Driver string `toml:"driver"`
 	Model  string `toml:"model"`
@@ -131,9 +139,15 @@ func Default() Config {
 		Org: OrgConfig{
 			DriverPool: []string{"claude", "codex"},
 			ModelPool: []OrgModelPoolEntry{
+				{Driver: "claude", Model: "fable"},
 				{Driver: "claude", Model: "opus"},
 				{Driver: "claude", Model: "sonnet"},
 				{Driver: "claude", Model: "haiku"},
+				{Driver: "codex", Model: "gpt-6-astra"},
+				{Driver: "codex", Model: "gpt-5.6-sol"},
+				{Driver: "codex", Model: "gpt-5.6-terra"},
+				{Driver: "codex", Model: "gpt-5.6-luna"},
+				{Driver: "codex", Model: "gpt-5.5"},
 			},
 			Roles:          map[string][]string{},
 			MaxSeats:       5,

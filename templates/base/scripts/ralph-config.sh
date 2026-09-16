@@ -41,7 +41,7 @@ RALPH_CLAUDE_REVIEWER_MODEL="${RALPH_CLAUDE_REVIEWER_MODEL:-opus}"
 # ═══════════════════════════════════════════════════════════════════
 
 RALPH_ORG_DRIVER_POOL="${RALPH_ORG_DRIVER_POOL:-claude,codex}"
-RALPH_ORG_MODEL_POOL="${RALPH_ORG_MODEL_POOL:-claude:opus,claude:sonnet,claude:haiku}"
+RALPH_ORG_MODEL_POOL="${RALPH_ORG_MODEL_POOL:-claude:fable,claude:opus,claude:sonnet,claude:haiku,codex:gpt-6-astra,codex:gpt-5.6-sol,codex:gpt-5.6-terra,codex:gpt-5.6-luna,codex:gpt-5.5}"
 RALPH_ORG_MAX_SEATS="${RALPH_ORG_MAX_SEATS:-5}"
 RALPH_ORG_DEADMAN_MINUTES="${RALPH_ORG_DEADMAN_MINUTES:-10}"
 RALPH_ORG_AGMSG_HOME="${RALPH_ORG_AGMSG_HOME:-~/.agents/skills/agmsg}"

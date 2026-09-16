@@ -78,3 +78,21 @@ func TestDefaultModelForDriver_EmptyModelPool_ReturnsError(t *testing.T) {
 		t.Fatal("expected an error for an empty model_pool")
 	}
 }
+
+// TestDefaultModelForDriver_DefaultPoolHeads verifies the shipped
+// config.Default().Org.ModelPool's per-driver head entries: claude's first
+// entry is the "fable" alias and codex's first entry is the "gpt-6-astra"
+// slug, per the model_pool refresh (AC-3).
+func TestDefaultModelForDriver_DefaultPoolHeads(t *testing.T) {
+	cfg := config.Default().Org
+	if got, err := DefaultModelForDriver(cfg, "claude"); err != nil {
+		t.Fatalf("DefaultModelForDriver(claude): unexpected error: %v", err)
+	} else if got != "fable" {
+		t.Errorf("DefaultModelForDriver(claude) = %q, want %q", got, "fable")
+	}
+	if got, err := DefaultModelForDriver(cfg, "codex"); err != nil {
+		t.Fatalf("DefaultModelForDriver(codex): unexpected error: %v", err)
+	} else if got != "gpt-6-astra" {
+		t.Errorf("DefaultModelForDriver(codex) = %q, want %q", got, "gpt-6-astra")
+	}
+}

@@ -120,9 +120,15 @@ func TestDefault_Org(t *testing.T) {
 		t.Errorf("driver_pool = %v, want [claude codex]", o.DriverPool)
 	}
 	wantModelPool := []OrgModelPoolEntry{
+		{Driver: "claude", Model: "fable"},
 		{Driver: "claude", Model: "opus"},
 		{Driver: "claude", Model: "sonnet"},
 		{Driver: "claude", Model: "haiku"},
+		{Driver: "codex", Model: "gpt-6-astra"},
+		{Driver: "codex", Model: "gpt-5.6-sol"},
+		{Driver: "codex", Model: "gpt-5.6-terra"},
+		{Driver: "codex", Model: "gpt-5.6-luna"},
+		{Driver: "codex", Model: "gpt-5.5"},
 	}
 	if len(o.ModelPool) != len(wantModelPool) {
 		t.Fatalf("model_pool = %+v, want %+v", o.ModelPool, wantModelPool)
@@ -209,8 +215,8 @@ func TestLoad_OrgRolesEmpty(t *testing.T) {
 		t.Errorf("roles = %v, want empty", cfg.Org.Roles)
 	}
 	// model_pool must still fall back to the default pool.
-	if len(cfg.Org.ModelPool) != 3 {
-		t.Errorf("model_pool = %+v, want 3 default entries", cfg.Org.ModelPool)
+	if len(cfg.Org.ModelPool) != 9 {
+		t.Errorf("model_pool = %+v, want 9 default entries", cfg.Org.ModelPool)
 	}
 }
 
