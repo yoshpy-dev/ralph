@@ -1,6 +1,6 @@
 # org-implementer-seat-envelope
 
-- Status: Draft
+- Status: Implemented (pipeline pending)
 - Owner: Claude Code
 - Date: 2026-09-16
 - Related request: org runtime の役割・model_pool・budget 見直し(2026-09-16 チャットでの 3 点確認と方針確定)
@@ -84,16 +84,16 @@ org runtime の座席機構を次の 3 点で見直す。
 
 ## Acceptance criteria
 
-- [ ] AC-1: `ralph org spawn --role implementer` が埋め込み雛形を展開して起動できる(`RenderRolePrompt("implementer", ...)` が ok=true、全プレースホルダ置換済み)。
-- [ ] AC-2: `implementer.md` / `reviewer.md` / `qa.md` が「座席内 fan-out」節を持ち、子サブエージェントが lead へ直接送信しない旨とスター型不変を明記している(`prompts_test.go` で 3 雛形の文言を回帰チェック)。`lead.md` の委譲先が implementer / reviewer / qa になっている。
-- [ ] AC-3: `config.Default().Org.ModelPool` が D3 の 9 エントリ・並び順で、`templates/base/ralph.toml` と `scripts/ralph-config.sh` 両面と `defaults_sync_test` でロックステップ一致。`DefaultModelForDriver(cfg, "claude")` が `fable`、`"codex"` が `gpt-6-astra` を返す。
-- [ ] AC-4: `ralph doctor` に codex スラッグ Check があり、fixture テストで (a) 全スラッグ一致 → pass、(b) 未知スラッグ → warn に当該スラッグ名、(c) キャッシュ無し → info スキップ、の 3 経路が通る。`--probe-models` の既存挙動は不変。
-- [ ] AC-5: `ralph org spawn` / `start` の両方で `--model` 省略時にエラーにならず、stderr に警告 1 行を出してプール先頭へフォールバックする(`spawn` の required ループから `--model` が外れ、ヘルプ文が更新されている)。CLI テストで spawn / start それぞれの省略経路を確認。`/org` skill に `--model` 明示ルールが記載されている。
-- [ ] AC-6: `[org.budget]` セクション、`OrgBudgetConfig`、`RALPH_ORG_{SEAT,TOTAL}_BUDGET_MINUTES` / `RALPH_ORG_MAX_FIX_ROUNDS` が 3 面から消え、`grep -rn -i 'budget' internal/ scripts/ templates/base/ralph.toml templates/base/scripts .claude/skills/org docs/quality` が identifier.go の「32 文字 budget」と watch.go の `scopeChangeBodyBudget`(いずれも別概念)以外ゼロ。`[org.budget]` を含む旧 ralph.toml を `Load()` すると未知セクションとして無視される(エラーにしない)ことをテストで確認。
-- [ ] AC-7: `ralph org watch` が budget 遮断なしで stall / 生存 / スコープ外変更 / デッドマンを従来通り検知する(`watch_test.go` の非 budget テストが全て pass、`Cutoff` / `OrgStartTS` 参照ゼロ)。
-- [ ] AC-7b: budget 系の `Conditions` / `PendingAlerts` / `Escalated` を含む旧 watch-status fixture を読み込んだ 1 サイクルで、当該エントリが prune され、デッドマン人間エスカレーションが発火しないことを回帰テストで確認。
-- [ ] AC-8: spec / quality-gates / tech-debt / `/org` skill / model-routing の記述が新状態と整合し、`./scripts/check-sync.sh` / `check-skill-sync.sh` / `check-pipeline-sync.sh` / `test-no-loop-references.sh` が green。
-- [ ] AC-9: `go build ./...` / `go vet ./...` / `go test ./...` / `./scripts/run-verify.sh` が green。
+- [x] AC-1: `ralph org spawn --role implementer` が埋め込み雛形を展開して起動できる(`RenderRolePrompt("implementer", ...)` が ok=true、全プレースホルダ置換済み)。
+- [x] AC-2: `implementer.md` / `reviewer.md` / `qa.md` が「座席内 fan-out」節を持ち、子サブエージェントが lead へ直接送信しない旨とスター型不変を明記している(`prompts_test.go` で 3 雛形の文言を回帰チェック)。`lead.md` の委譲先が implementer / reviewer / qa になっている。
+- [x] AC-3: `config.Default().Org.ModelPool` が D3 の 9 エントリ・並び順で、`templates/base/ralph.toml` と `scripts/ralph-config.sh` 両面と `defaults_sync_test` でロックステップ一致。`DefaultModelForDriver(cfg, "claude")` が `fable`、`"codex"` が `gpt-6-astra` を返す。
+- [x] AC-4: `ralph doctor` に codex スラッグ Check があり、fixture テストで (a) 全スラッグ一致 → pass、(b) 未知スラッグ → warn に当該スラッグ名、(c) キャッシュ無し → info スキップ、の 3 経路が通る。`--probe-models` の既存挙動は不変。
+- [x] AC-5: `ralph org spawn` / `start` の両方で `--model` 省略時にエラーにならず、stderr に警告 1 行を出してプール先頭へフォールバックする(`spawn` の required ループから `--model` が外れ、ヘルプ文が更新されている)。CLI テストで spawn / start それぞれの省略経路を確認。`/org` skill に `--model` 明示ルールが記載されている。
+- [x] AC-6: `[org.budget]` セクション、`OrgBudgetConfig`、`RALPH_ORG_{SEAT,TOTAL}_BUDGET_MINUTES` / `RALPH_ORG_MAX_FIX_ROUNDS` が 3 面から消え、`grep -rn -i 'budget' internal/ scripts/ templates/base/ralph.toml templates/base/scripts .claude/skills/org docs/quality` が identifier.go の「32 文字 budget」と watch.go の `scopeChangeBodyBudget`(いずれも別概念)以外ゼロ。`[org.budget]` を含む旧 ralph.toml を `Load()` すると未知セクションとして無視される(エラーにしない)ことをテストで確認。
+- [x] AC-7: `ralph org watch` が budget 遮断なしで stall / 生存 / スコープ外変更 / デッドマンを従来通り検知する(`watch_test.go` の非 budget テストが全て pass、`Cutoff` / `OrgStartTS` 参照ゼロ)。
+- [x] AC-7b: budget 系の `Conditions` / `PendingAlerts` / `Escalated` を含む旧 watch-status fixture を読み込んだ 1 サイクルで、当該エントリが prune され、デッドマン人間エスカレーションが発火しないことを回帰テストで確認。
+- [x] AC-8: spec / quality-gates / tech-debt / `/org` skill / model-routing の記述が新状態と整合し、`./scripts/check-sync.sh` / `check-skill-sync.sh` / `check-pipeline-sync.sh` / `test-no-loop-references.sh` が green。
+- [x] AC-9: `go build ./...` / `go vet ./...` / `go test ./...` / `./scripts/run-verify.sh` が green。
 
 ## Implementation outline
 
@@ -142,11 +142,28 @@ org runtime の座席機構を次の 3 点で見直す。
 
 - なし(budget と既定モデルの 2 点は解決済み)。
 
+## Deviation notes (実装時)
+
+- Slice 2 が `templates/base/ralph.toml` の `[org.roles]` 例とコメント更新(計画では Slice 5)を吸収した。同一ファイルの二重編集を避けるため。
+- Slice 1 で `internal/cli/doctor_org_test.go` は編集不要だった(`Budget:` リテラルなし。"ContextBudget" はプローブ timeout の別概念)。
+- Slice 1 で deadman 系テスト 2 件は削除せず、名前から "Cutoff" を外して残した(watchdog 自身の Stop を lead activity に数えない挙動は budget と独立)。
+- Slice 3 の `--model` 省略時警告の文言アサートは spawn テストのみ。start は同一ヘルパー経由で、既存の `TestOrgStart_ModelFlagOmitted_DefaultsToFirstMatchingPoolEntry` がフォールバック値を検証する。
+- Slice 5: `docs/quality/quality-gates.md` と `.claude/rules/ralph/model-routing.md` の root/template 間に既存の KNOWN_DIFF があり、両面へ同旨の編集を当てて drift は増やしていない。
+
+## Commits
+
+- 7b6a720 docs: add plan
+- ef3dce4 refactor: remove org budget concept and watchdog wall-clock cutoff (Slice 1)
+- 3f9b4a0 feat: refresh default org model_pool (Slice 2)
+- b901364 feat: doctor codex model-slug check and unified --model fallback warning (Slice 3)
+- 185920c feat: add implementer seat template and in-seat fan-out guidance (Slice 4)
+- f729a15 docs: align org runtime docs (Slice 5)
+
 ## Progress checklist
 
-- [ ] Plan reviewed
+- [x] Plan reviewed
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
