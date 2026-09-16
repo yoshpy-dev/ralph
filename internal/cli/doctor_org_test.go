@@ -374,3 +374,130 @@ func (r recordingRunner) Run(ctx context.Context, name string, args ...string) (
 	}
 	return driver.ExecRunner{}.Run(ctx, name, args...)
 }
+
+// writeCodexModelsCache writes a minimal codex models_cache.json fixture at
+// dir/models_cache.json containing one entry per slug (mirroring the
+// codex-cli 0.149.1 shape: {"models": [{"slug": "...", ...}, ...]}).
+func writeCodexModelsCache(t *testing.T, dir string, slugs ...string) {
+	t.Helper()
+	var b strings.Builder
+	b.WriteString(`{"models": [`)
+	for i, slug := range slugs {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		b.WriteString(`{"slug": "` + slug + `", "display_name": "` + slug + `", "visibility": "list"}`)
+	}
+	b.WriteString(`]}`)
+	if err := os.WriteFile(filepath.Join(dir, "models_cache.json"), []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestCheckCodexModelSlugs_AllPresent_Pass covers AC-4(a): every codex
+// model_pool slug is present in the cache -> pass, listing the count.
+func TestCheckCodexModelSlugs_AllPresent_Pass(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CODEX_HOME", dir)
+	writeCodexModelsCache(t, dir, "gpt-5.5", "gpt-5.5-codex")
+
+	cfg := config.Config{Org: config.OrgConfig{ModelPool: []config.OrgModelPoolEntry{
+		{Driver: "claude", Model: "sonnet"},
+		{Driver: "codex", Model: "gpt-5.5"},
+		{Driver: "codex", Model: "gpt-5.5-codex"},
+	}}}
+
+	r := checkCodexModelSlugs(cfg)
+	if r.Status != "pass" {
+		t.Fatalf("status = %q, want pass (detail=%q)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "2 codex model_pool slug(s)") {
+		t.Errorf("detail %q should report the codex slug count (2)", r.Detail)
+	}
+}
+
+// TestCheckCodexModelSlugs_SomeMissing_WarnNamesEach covers AC-4(b): one or
+// more pool codex slugs absent from the cache -> warn, naming each missing
+// slug.
+func TestCheckCodexModelSlugs_SomeMissing_WarnNamesEach(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CODEX_HOME", dir)
+	writeCodexModelsCache(t, dir, "gpt-5.5")
+
+	cfg := config.Config{Org: config.OrgConfig{ModelPool: []config.OrgModelPoolEntry{
+		{Driver: "codex", Model: "gpt-5.5"},
+		{Driver: "codex", Model: "gpt-9000-retired"},
+	}}}
+
+	r := checkCodexModelSlugs(cfg)
+	if r.Status != "warn" {
+		t.Fatalf("status = %q, want warn (detail=%q)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "gpt-9000-retired") {
+		t.Errorf("detail %q should name the missing slug", r.Detail)
+	}
+	if strings.Contains(r.Detail, "gpt-5.5,") || strings.Contains(r.Detail, "gpt-5.5 ") {
+		t.Errorf("detail %q should not name the present slug as missing", r.Detail)
+	}
+}
+
+// TestCheckCodexModelSlugs_CacheMissing_InfoNamesPath covers AC-4(c): the
+// cache file does not exist -> info skip naming the path it looked for.
+func TestCheckCodexModelSlugs_CacheMissing_InfoNamesPath(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CODEX_HOME", dir) // no models_cache.json written.
+
+	cfg := config.Config{Org: config.OrgConfig{ModelPool: []config.OrgModelPoolEntry{
+		{Driver: "codex", Model: "gpt-5.5"},
+	}}}
+
+	r := checkCodexModelSlugs(cfg)
+	if r.Status != "info" {
+		t.Fatalf("status = %q, want info (detail=%q)", r.Status, r.Detail)
+	}
+	wantPath := filepath.Join(dir, "models_cache.json")
+	if !strings.Contains(r.Detail, wantPath) {
+		t.Errorf("detail %q should name the cache path it looked for (%s)", r.Detail, wantPath)
+	}
+}
+
+// TestCheckCodexModelSlugs_NoCodexEntries_Info covers the no-codex-entries
+// branch: model_pool has entries, but none for driver codex -> info,
+// without ever touching the cache path.
+func TestCheckCodexModelSlugs_NoCodexEntries_Info(t *testing.T) {
+	cfg := config.Config{Org: config.OrgConfig{ModelPool: []config.OrgModelPoolEntry{
+		{Driver: "claude", Model: "sonnet"},
+		{Driver: "claude", Model: "opus"},
+	}}}
+
+	r := checkCodexModelSlugs(cfg)
+	if r.Status != "info" {
+		t.Fatalf("status = %q, want info (detail=%q)", r.Status, r.Detail)
+	}
+	if r.Detail != "no codex entries in model_pool" {
+		t.Errorf("detail = %q, want exact %q", r.Detail, "no codex entries in model_pool")
+	}
+}
+
+// TestCheckCodexModelSlugs_UnparsableCache_InfoNotWarn covers AC-4's
+// unparsable-JSON case: an invalid cache file is skipped with "info" (the
+// cache is best-effort data owned by codex, not a ralph-level warning).
+func TestCheckCodexModelSlugs_UnparsableCache_InfoNotWarn(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CODEX_HOME", dir)
+	if err := os.WriteFile(filepath.Join(dir, "models_cache.json"), []byte("{not valid json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Config{Org: config.OrgConfig{ModelPool: []config.OrgModelPoolEntry{
+		{Driver: "codex", Model: "gpt-5.5"},
+	}}}
+
+	r := checkCodexModelSlugs(cfg)
+	if r.Status != "info" {
+		t.Fatalf("status = %q, want info (a malformed cache must never be a warn — it is codex-owned best-effort data)", r.Status)
+	}
+	if !strings.Contains(r.Detail, "not valid JSON") {
+		t.Errorf("detail %q should surface the parse error", r.Detail)
+	}
+}
