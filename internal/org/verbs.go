@@ -233,9 +233,10 @@ type StopParams struct {
 	DryRun bool
 	// Reason, when non-empty, is appended to the stopped event's Details as
 	// " reason=<Reason>" -- the audit trail for an automatic (non-operator)
-	// stop, e.g. `ralph org watch`'s budget cutoff
-	// ("watchdog_budget_cutoff seat_wall_clock=30m observed=31m"). A manual
-	// `ralph org stop` invocation leaves this blank.
+	// stop, e.g. a future watchdog enforcement action (see
+	// leadActivityEventCount's "reason=watchdog_..." exclusion in
+	// internal/org/watch.go). A manual `ralph org stop` invocation leaves
+	// this blank.
 	Reason string
 }
 

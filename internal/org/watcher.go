@@ -95,8 +95,7 @@ const watcherErrorReason = "watcher_error"
 
 // WatcherParams describes one on-demand semantic-judgment invocation (AC-6):
 // the pulse layer's WatchHooks.OnSemanticTrigger seam calls RunWatcher with
-// exactly these four values (see watch.go's raiseOrClear/evaluateTotalBudget
-// call sites).
+// exactly these four values (see watch.go's raiseOrClear call site).
 type WatcherParams struct {
 	OrgID         string
 	SeatID        string

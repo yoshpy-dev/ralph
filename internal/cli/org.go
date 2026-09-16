@@ -639,10 +639,10 @@ func newOrgReportCmd(orgID, stateDir, configPath *string) *cobra.Command {
 
 // newOrgWatchCmd wires `ralph org watch` (PR④ pulse layer, AC-3/3b/3c/4/5):
 // a deterministic, interval-driven condition loop over (*org.Org).RunWatch.
-// All condition evaluation, budget-cutoff, ALERT dedupe, and deadman
-// escalation logic lives in internal/org/watch.go -- this command resolves
-// the state directory (the same one manifest/receipts already live in, via
-// org.ResolveOrgStateDir) and wires flags through to org.WatchParams.
+// All condition evaluation, ALERT dedupe, and deadman escalation logic lives
+// in internal/org/watch.go -- this command resolves the state directory (the
+// same one manifest/receipts already live in, via org.ResolveOrgStateDir)
+// and wires flags through to org.WatchParams.
 func newOrgWatchCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	var (
 		intervalSeconds int
@@ -653,10 +653,8 @@ func newOrgWatchCmd(orgID, stateDir, configPath *string) *cobra.Command {
 		Use:   "watch",
 		Short: "Run the deterministic pulse-layer watchdog for an org",
 		Long: "ralph org watch evaluates watch conditions every --interval-seconds\n" +
-			"(default: [org.watchdog].interval_seconds) for --org-id: seat/org\n" +
-			"wall-clock budget cutoff (auto Stop, the same verb `ralph org stop`\n" +
-			"uses -- StopParams.Reason records the condition/threshold/observed\n" +
-			"value), heartbeat-stall / process-liveness / worktree-scope-change\n" +
+			"(default: [org.watchdog].interval_seconds) for --org-id:\n" +
+			"heartbeat-stall / process-liveness / worktree-scope-change\n" +
 			"ALERTs sent to the lead seat, and a deadman escalation\n" +
 			"(<state-dir>/escalations.jsonl + stderr banner + best-effort darwin\n" +
 			"notification) when the lead does not respond within\n" +

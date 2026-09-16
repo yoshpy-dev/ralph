@@ -149,12 +149,6 @@ func TestDefaultsLockStep(t *testing.T) {
 
 	check("org.max_seats", "RALPH_ORG_MAX_SEATS",
 		strconv.Itoa(tomlCfg.Org.MaxSeats), strconv.Itoa(goCfg.Org.MaxSeats))
-	check("org.budget.seat_wall_clock_minutes", "RALPH_ORG_SEAT_BUDGET_MINUTES",
-		strconv.Itoa(tomlCfg.Org.Budget.SeatWallClockMinutes), strconv.Itoa(goCfg.Org.Budget.SeatWallClockMinutes))
-	check("org.budget.total_wall_clock_minutes", "RALPH_ORG_TOTAL_BUDGET_MINUTES",
-		strconv.Itoa(tomlCfg.Org.Budget.TotalWallClockMinutes), strconv.Itoa(goCfg.Org.Budget.TotalWallClockMinutes))
-	check("org.budget.max_fix_rounds", "RALPH_ORG_MAX_FIX_ROUNDS",
-		strconv.Itoa(tomlCfg.Org.Budget.MaxFixRounds), strconv.Itoa(goCfg.Org.Budget.MaxFixRounds))
 	check("org.deadman_minutes", "RALPH_ORG_DEADMAN_MINUTES",
 		strconv.Itoa(tomlCfg.Org.DeadmanMinutes), strconv.Itoa(goCfg.Org.DeadmanMinutes))
 	check("org.agmsg_home", "RALPH_ORG_AGMSG_HOME",

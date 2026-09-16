@@ -44,9 +44,6 @@ type OrgConfig struct {
 	Roles map[string][]string `toml:"roles"`
 	// MaxSeats caps concurrently spawned seats per org_id namespace.
 	MaxSeats int `toml:"max_seats"`
-	// Budget holds wall-clock and fix-round ceilings for org seats. PR①
-	// records these values only; enforcement (Watchdog) lands in PR④.
-	Budget OrgBudgetConfig `toml:"budget"`
 	// DeadmanMinutes is a reserved field for the PR④ Watchdog deadman timer.
 	// PR① only stores and round-trips this value; nothing consumes it yet.
 	DeadmanMinutes int `toml:"deadman_minutes"`
@@ -100,13 +97,6 @@ type OrgModelPoolEntry struct {
 	Model  string `toml:"model"`
 }
 
-// OrgBudgetConfig holds wall-clock and fix-round ceilings for org seats.
-type OrgBudgetConfig struct {
-	SeatWallClockMinutes  int `toml:"seat_wall_clock_minutes"`
-	TotalWallClockMinutes int `toml:"total_wall_clock_minutes"`
-	MaxFixRounds          int `toml:"max_fix_rounds"`
-}
-
 // OrgWatchdogConfig holds the `[org.watchdog]` settings for `ralph org
 // watch`'s two layers: a deterministic pulse-layer timer (IntervalSeconds,
 // StallMinutes) and an on-demand semantic-judgment watcher layer
@@ -114,15 +104,15 @@ type OrgBudgetConfig struct {
 // docs/plans/active/2026-08-02-org-runtime-watchdog.md for the full design.
 type OrgWatchdogConfig struct {
 	// IntervalSeconds is how often the pulse layer evaluates watch
-	// conditions (heartbeat stall, process liveness, budget, scope change).
+	// conditions (heartbeat stall, process liveness, scope change).
 	IntervalSeconds int `toml:"interval_seconds"`
 	// StallMinutes is the heartbeat-stall threshold: how long a seat's last
 	// manifest event time and herdr state_change_seq may both stay unchanged
 	// before the pulse layer treats it as stalled.
 	StallMinutes int `toml:"stall_minutes"`
 	// WatcherEnabled toggles the on-demand `claude -p` semantic-judgment
-	// watcher layer. When false, the pulse layer still runs (budget cutoff,
-	// ALERT notifications) but never triggers the watcher.
+	// watcher layer. When false, the pulse layer still runs (ALERT
+	// notifications) but never triggers the watcher.
 	WatcherEnabled bool `toml:"watcher_enabled"`
 	// WatcherModel is the model alias passed to the on-demand watcher
 	// invocation (e.g. "haiku"). Required (non-empty) when WatcherEnabled is
@@ -145,13 +135,8 @@ func Default() Config {
 				{Driver: "claude", Model: "sonnet"},
 				{Driver: "claude", Model: "haiku"},
 			},
-			Roles:    map[string][]string{},
-			MaxSeats: 5,
-			Budget: OrgBudgetConfig{
-				SeatWallClockMinutes:  30,
-				TotalWallClockMinutes: 120,
-				MaxFixRounds:          2,
-			},
+			Roles:          map[string][]string{},
+			MaxSeats:       5,
 			DeadmanMinutes: 10,
 			AgmsgHome:      "~/.agents/skills/agmsg",
 			Permissions: OrgPermissionsConfig{
@@ -239,15 +224,6 @@ func Load(path string) (Config, error) {
 	if cfg.Org.MaxSeats < 1 {
 		return cfg, fmt.Errorf("[org].max_seats must be >= 1, got %d", cfg.Org.MaxSeats)
 	}
-	if cfg.Org.Budget.SeatWallClockMinutes < 1 {
-		return cfg, fmt.Errorf("[org.budget].seat_wall_clock_minutes must be >= 1, got %d", cfg.Org.Budget.SeatWallClockMinutes)
-	}
-	if cfg.Org.Budget.TotalWallClockMinutes < 1 {
-		return cfg, fmt.Errorf("[org.budget].total_wall_clock_minutes must be >= 1, got %d", cfg.Org.Budget.TotalWallClockMinutes)
-	}
-	if cfg.Org.Budget.MaxFixRounds < 1 {
-		return cfg, fmt.Errorf("[org.budget].max_fix_rounds must be >= 1, got %d", cfg.Org.Budget.MaxFixRounds)
-	}
 	// AgmsgHome is a string default, so (unlike the strict-validation fields
 	// above) it follows the same explicit zero-value backfill pattern as
 	// PipelineConfig: an explicit `agmsg_home = ""` in the source document
@@ -275,10 +251,11 @@ func Load(path string) (Config, error) {
 		}
 	}
 
-	// [org.watchdog] validation. Same strict pattern as [org.budget]: cfg
-	// already carries Default()'s Watchdog values before Unmarshal runs, so
-	// an absent [org.watchdog] section (or an absent key within a present
-	// one) never reaches these checks with a zero/invalid value.
+	// [org.watchdog] validation. Same strict pattern as [org].max_seats
+	// above: cfg already carries Default()'s Watchdog values before
+	// Unmarshal runs, so an absent [org.watchdog] section (or an absent key
+	// within a present one) never reaches these checks with a zero/invalid
+	// value.
 	if cfg.Org.Watchdog.IntervalSeconds < 1 {
 		return cfg, fmt.Errorf("[org.watchdog].interval_seconds must be >= 1, got %d", cfg.Org.Watchdog.IntervalSeconds)
 	}

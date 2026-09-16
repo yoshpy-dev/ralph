@@ -113,7 +113,7 @@ require_go = false
 }
 
 // TestDefault_Org verifies the [org] envelope defaults (AC-6): driver_pool,
-// model_pool, roles, max_seats, budget, and deadman_minutes.
+// model_pool, roles, max_seats, and deadman_minutes.
 func TestDefault_Org(t *testing.T) {
 	o := Default().Org
 	if len(o.DriverPool) != 2 || o.DriverPool[0] != "claude" || o.DriverPool[1] != "codex" {
@@ -137,15 +137,6 @@ func TestDefault_Org(t *testing.T) {
 	}
 	if o.MaxSeats != 5 {
 		t.Errorf("max_seats = %d, want 5", o.MaxSeats)
-	}
-	if o.Budget.SeatWallClockMinutes != 30 {
-		t.Errorf("budget.seat_wall_clock_minutes = %d, want 30", o.Budget.SeatWallClockMinutes)
-	}
-	if o.Budget.TotalWallClockMinutes != 120 {
-		t.Errorf("budget.total_wall_clock_minutes = %d, want 120", o.Budget.TotalWallClockMinutes)
-	}
-	if o.Budget.MaxFixRounds != 2 {
-		t.Errorf("budget.max_fix_rounds = %d, want 2", o.Budget.MaxFixRounds)
 	}
 	if o.DeadmanMinutes != 10 {
 		t.Errorf("deadman_minutes = %d, want 10", o.DeadmanMinutes)
@@ -191,9 +182,6 @@ model = "opus"
 	if cfg.Org.MaxSeats != want.MaxSeats {
 		t.Errorf("max_seats = %d, want %d", cfg.Org.MaxSeats, want.MaxSeats)
 	}
-	if cfg.Org.Budget != want.Budget {
-		t.Errorf("budget = %+v, want %+v", cfg.Org.Budget, want.Budget)
-	}
 	if cfg.Org.DeadmanMinutes != want.DeadmanMinutes {
 		t.Errorf("deadman_minutes = %d, want %d", cfg.Org.DeadmanMinutes, want.DeadmanMinutes)
 	}
@@ -227,8 +215,7 @@ func TestLoad_OrgRolesEmpty(t *testing.T) {
 }
 
 // TestLoad_OrgFullRoundTrip verifies a fully specified [org] section
-// (including [org.roles] and [org.budget]) round-trips through Load()
-// unchanged.
+// (including [org.roles]) round-trips through Load() unchanged.
 func TestLoad_OrgFullRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "ralph.toml")
@@ -244,11 +231,6 @@ agmsg_home = "~/custom/agmsg-home"
 
 [org.roles]
 reviewer = ["opus"]
-
-[org.budget]
-seat_wall_clock_minutes = 45
-total_wall_clock_minutes = 90
-max_fix_rounds = 1
 `
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		t.Fatal(err)
@@ -271,15 +253,6 @@ max_fix_rounds = 1
 	}
 	if models := cfg.Org.Roles["reviewer"]; len(models) != 1 || models[0] != "opus" {
 		t.Errorf("roles[reviewer] = %v, want [opus]", models)
-	}
-	if cfg.Org.Budget.SeatWallClockMinutes != 45 {
-		t.Errorf("budget.seat_wall_clock_minutes = %d, want 45", cfg.Org.Budget.SeatWallClockMinutes)
-	}
-	if cfg.Org.Budget.TotalWallClockMinutes != 90 {
-		t.Errorf("budget.total_wall_clock_minutes = %d, want 90", cfg.Org.Budget.TotalWallClockMinutes)
-	}
-	if cfg.Org.Budget.MaxFixRounds != 1 {
-		t.Errorf("budget.max_fix_rounds = %d, want 1", cfg.Org.Budget.MaxFixRounds)
 	}
 	if cfg.Org.AgmsgHome != "~/custom/agmsg-home" {
 		t.Errorf("agmsg_home = %q, want %q", cfg.Org.AgmsgHome, "~/custom/agmsg-home")
@@ -311,8 +284,7 @@ agmsg_home = ""
 
 // TestLoad_OrgRejects is a table-driven check of every [org] validation
 // rejection: driver absent from driver_pool, duplicate model_pool entries,
-// explicitly empty model_pool, roles referencing an unknown model, and
-// out-of-range budget values.
+// explicitly empty model_pool, and roles referencing an unknown model.
 func TestLoad_OrgRejects(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -354,27 +326,6 @@ reviewer = ["sonnet"]
 `,
 			wantSub: "reviewer",
 		},
-		{
-			name: "seat_wall_clock_minutes below 1",
-			body: `[org.budget]
-seat_wall_clock_minutes = 0
-`,
-			wantSub: "seat_wall_clock_minutes",
-		},
-		{
-			name: "total_wall_clock_minutes below 1",
-			body: `[org.budget]
-total_wall_clock_minutes = 0
-`,
-			wantSub: "total_wall_clock_minutes",
-		},
-		{
-			name: "max_fix_rounds below 1",
-			body: `[org.budget]
-max_fix_rounds = 0
-`,
-			wantSub: "max_fix_rounds",
-		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -391,6 +342,30 @@ max_fix_rounds = 0
 				t.Errorf("error %q does not mention %q", err.Error(), tc.wantSub)
 			}
 		})
+	}
+}
+
+// TestLoad_IgnoresRetiredOrgBudgetTable verifies that a ralph.toml which
+// still carries the retired [org.budget] table (seat_wall_clock_minutes/
+// total_wall_clock_minutes/max_fix_rounds -- removed together with the org
+// budget concept) loads without error: go-toml's Unmarshal ignores TOML
+// keys/tables with no matching Go struct field, so an unrecognized
+// [org.budget] table is silently skipped rather than rejected. This is what
+// lets a downstream project's existing ralph.toml (written before this
+// removal) keep working unchanged after an upgrade.
+func TestLoad_IgnoresRetiredOrgBudgetTable(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ralph.toml")
+	content := `[org.budget]
+seat_wall_clock_minutes = 30
+total_wall_clock_minutes = 120
+max_fix_rounds = 2
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err != nil {
+		t.Fatalf("Load: expected a retired [org.budget] table to be silently ignored, got error: %v", err)
 	}
 }
 
