@@ -145,25 +145,31 @@ func resolveOrgConfig(configPath string) (config.OrgConfig, error) {
 	return cfg.Org, nil
 }
 
-// resolveModelOrWarn resolves the effective --model value for driver: when
-// model is non-blank it is returned unchanged, otherwise it falls back to
-// org.DefaultModelForDriver(cfg, driver) (the first [org].model_pool entry
-// for driver) and prints exactly one warning line to stderr, so both
+// resolveModelOrWarn resolves the effective --model value for driver/role:
+// when model is non-blank it is returned unchanged, otherwise it falls back
+// to org.DefaultModelForDriverAndRole(cfg, driver, role) (the first
+// [org].model_pool entry for driver that is also permitted for role under
+// [org.roles]) and prints exactly one warning line to stderr, so both
 // `ralph org spawn` and `ralph org start` share the same fallback behavior
-// and the same warning wording instead of each hand-rolling it. stderr is
+// and the same warning wording instead of each hand-rolling it. Threading
+// role through the fallback (rather than plain org.DefaultModelForDriver)
+// keeps the warning honest: if it prints a model, that model also passes
+// ValidateSpawnEnvelope's own modelAllowedForRole check, instead of
+// warn-then-reject when a role-restricted pool's head entry is
+// impermissible for the requesting role (self-review MEDIUM-2). stderr is
 // cmd.ErrOrStderr() at call sites so tests can capture the warning without
 // touching the real process stderr.
-func resolveModelOrWarn(cfg config.OrgConfig, driverName, model string, stderr io.Writer) (string, error) {
+func resolveModelOrWarn(cfg config.OrgConfig, driverName, role, model string, stderr io.Writer) (string, error) {
 	if strings.TrimSpace(model) != "" {
 		return model, nil
 	}
-	resolved, err := org.DefaultModelForDriver(cfg, driverName)
+	resolved, err := org.DefaultModelForDriverAndRole(cfg, driverName, role)
 	if err != nil {
 		return "", err
 	}
 	_, _ = fmt.Fprintf(stderr,
-		"org: --model omitted; falling back to first [org].model_pool entry for %s: %s (pass --model explicitly)\n",
-		driverName, resolved)
+		"org: --model omitted; falling back to first [org].model_pool entry permitted for role %s on %s: %s (pass --model explicitly)\n",
+		role, driverName, resolved)
 	return resolved, nil
 }
 
@@ -211,7 +217,7 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			resolvedModel, err := resolveModelOrWarn(rt.Config, driverName, model, cmd.ErrOrStderr())
+			resolvedModel, err := resolveModelOrWarn(rt.Config, driverName, role, model, cmd.ErrOrStderr())
 			if err != nil {
 				return err
 			}
@@ -228,7 +234,7 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	cmd.Flags().StringVar(&seatID, "id", "", "seat id (required)")
 	cmd.Flags().StringVar(&role, "role", "", "seat role (required)")
 	cmd.Flags().StringVar(&driverName, "driver", "", "driver CLI: claude|codex (required)")
-	cmd.Flags().StringVar(&model, "model", "", "model name or alias (default: first [org].model_pool entry for --driver, with a warning)")
+	cmd.Flags().StringVar(&model, "model", "", "model name or alias (default: first [org].model_pool entry permitted for the role on --driver, with a warning)")
 	cmd.Flags().StringVar(&cwd, "cwd", "", "working directory for the new seat (required)")
 	cmd.Flags().StringVar(&prompt, "prompt", "", "optional initial prompt passed to the agent")
 	cmd.Flags().StringVar(&scope, "scope", "", "optional scope description (recorded on the spawned event; substituted into --role templates as {{SCOPE}})")
@@ -303,7 +309,7 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			resolvedModel, err := resolveModelOrWarn(rt.Config, driverName, model, cmd.ErrOrStderr())
+			resolvedModel, err := resolveModelOrWarn(rt.Config, driverName, org.LeadIdentity, model, cmd.ErrOrStderr())
 			if err != nil {
 				return err
 			}
@@ -323,7 +329,7 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&driverName, "driver", "claude", "driver CLI the lead seat runs as: claude|codex")
-	cmd.Flags().StringVar(&model, "model", "", "model name or alias (default: first [org].model_pool entry for --driver, with a warning)")
+	cmd.Flags().StringVar(&model, "model", "", "model name or alias (default: first [org].model_pool entry permitted for the role on --driver, with a warning)")
 	cmd.Flags().StringVar(&cwd, "cwd", "", "working directory for the lead seat (required)")
 	cmd.Flags().StringVar(&scope, "scope", "", "optional scope description (see `ralph org spawn --scope`)")
 	cmd.Flags().IntVar(&timeoutMS, "timeout-ms", 60000, "per-step herdr timeout in milliseconds")

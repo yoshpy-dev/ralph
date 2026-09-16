@@ -20,8 +20,12 @@
   コマンド(指示がなければ `./scripts/run-verify.sh`)を実行し、通過してから
   scope 内のパスだけを `git add <path>...`(`-A` / `-u` / `.` は使わない)で
   ステージし、Conventional Commits(`<type>: <description>`)でコミットする。
-  コミットは必ず `git commit -F <file>` を使う(`git commit -m "$(...)"` は
-  禁止 — `.claude/rules/ralph/git-commit-strategy.md` 参照)。1 スライス =
+  コミットメッセージは `git commit -F <ファイル>` またはシングルクォート区切
+  りの HEREDOC(`git commit -m "$(cat <<'EOF' ... EOF)"`)で渡す。ダブルクォ
+  ート内で展開されるバッククォートや `$(...)` を含めない(理由は
+  `.claude/rules/ralph/git-commit-strategy.md` 参照。このリポジトリの
+  `pre_bash_guard.sh` フックはシェルレベルで `-m "$(` 形式を拒否するため、
+  両エージェント共通で確実に使えるのは `-F` 形式)。1 スライス =
   1 コミットとする
 - 検証が失敗した状態のままコミットしない。テストやチェックを弱めて通す
   ことは禁止する

@@ -6,7 +6,7 @@ Ralph Loop(/loop)の自律実行系を撤去し、Lead LLM が herdr(実行・�
 
 ### 2026-09-16 改訂(feat/org-implementer-seat-envelope)
 
-- (a) budget 概念(`[org.budget]`・watchdog の wall-clock 自動遮断・fix ラウンド上限)は撤去。FR-2 の「budget」、FR-7 の「fix ラウンド既定 2、上限はエンベロープが執行」、FR-8 の「budget / ラウンド cap」、NFR「予算執行の決定論性」、AC「wall-clock budget 超過」「fix ラウンドが上限到達」は無効。停滞・生存・スコープ外変更・デッドマンは存続。
+- (a) budget 概念(`[org.budget]`・watchdog の wall-clock 自動遮断・fix ラウンド上限)は撤去。FR-2 の「budget」、FR-7 の「fix ラウンド既定 2、上限はエンベロープが執行」、FR-8 の「budget / ラウンド cap」、NFR「予算執行の決定論性」、Desired state の「品質ゲート(verify / test / cycle cap / budget)…」の budget、FR-10 の「budget 作法」(→ permission 作法)、AC「wall-clock budget 超過」「fix ラウンドが上限到達」は無効。停滞・生存・スコープ外変更・デッドマンは存続。
 - (b) 役割は lead / implementer / reviewer / qa の 4 種(FR-4 の identity 例 `impl-<slug>` は `implementer-<n>` 等の任意 seat id で運用)。座席内サブエージェント fan-out を雛形で明示許可。
 - (c) model_pool 既定は claude `fable`/`opus`/`sonnet`/`haiku` + codex `gpt-6-astra`/`gpt-5.6-sol`/`gpt-5.6-terra`/`gpt-5.6-luna`/`gpt-5.5`。claude はエイリアス、codex はスラッグ。`ralph doctor` に codex スラッグの軽量 Check を追加(FR-2 末尾の「全プールエントリを起動プローブ」は `--probe-models` のオプトインのまま)。
 - (d) `--model` は運用上必須、省略時はプール先頭へ警告付きフォールバック。
@@ -26,7 +26,7 @@ Ralph Loop(/loop)の自律実行系を撤去し、Lead LLM が herdr(実行・�
 - 人間はエンベロープ(使用可能モデルプール・座席上限・予算)を ralph.toml に定義して Lead を起動するだけ。Lead がタスクを分類し、herdr pane 上の常駐対話セッションとして座席を spawn し、agmsg で統括する。
 - 座席は対話セッションなので、走行中のステアリング・herdr の blocked 検知・人間の pane 介入・座席内サブエージェント fan-out が全て可能になる。
 - モデル選定は「人間がプールを定義し、Lead がプール内でタスクごとに動的選択」の二層。対話セッション起動なので `codex --model` も効く。
-- 品質ゲート(verify / test / cycle cap / budget)は hook と動詞バリデーションで LLM 迂回不能に執行され、全編成・全判断が org manifest と receipts に自動記録される。
+- 品質ゲート(verify / test / cycle cap / budget **(2026-09-16 改訂で撤去)**)は hook と動詞バリデーションで LLM 迂回不能に執行され、全編成・全判断が org manifest と receipts に自動記録される。
 - LLM を全部止めても、機構層だけで安全停止と状態説明ができる。
 
 ## Requirements
@@ -42,7 +42,7 @@ Ralph Loop(/loop)の自律実行系を撤去し、Lead LLM が herdr(実行・�
 - [ ] **FR-7 新品質パイプライン(4フェーズ)**: ① impl 座席が退出チェック(スコープ内・コミット境界・verify / test のローカル通過)付きで RESULT 報告 → ② QA 座席が `run-static-verify.sh` / `run-test.sh` を実行・解釈し QA レポート作成 → ③ reviewer 座席が独立レビュー(diff 品質+仕様適合を統合。入力は要求・AC・diff・QA レポートのみ。逆 CLI 要件は撤廃し `[org.roles].reviewer` プールから選定)→ ④ lead 裁定(fix ラウンド既定 2、上限はエンベロープが執行)→ doc-maintainer を on-demand spawn → lead 最終確認 → PR。旧 6 フェーズ(self-review / verify / test / sync-docs / cross-review / pr)はこの新順序に置換される。ゲートは hook で LLM 迂回不能とする。
 - [ ] **FR-8 Watchdog 二層**: パルス層(決定論タイマー、既定 30 秒: heartbeat 途絶 / プロセス生存 / budget / スコープ外変更 / ラウンド cap。ハードリミット超過は判断を経由せず自動遮断)+ ウォッチャー層(パルス層トリガーのオンデマンド LLM 判定: 意味判定トリガー検知時のみ `claude -p` を非同期 single-flight で 1 回起動し、パルスを塞がない。循環議論・役割逸脱・偽進捗の意味判定)。常駐 LLM 座席ではなくオンデマンド起動とすることで、常駐コストゼロ・判定器ハングは次回起動で回復する(PR④ `feat/org-runtime-watchdog` の設計決定、`docs/plans/active/2026-08-02-org-runtime-watchdog.md` の Design decisions 参照)。通知は Lead 宛。デッドマン条項: 異常主体が Lead 自身、または Lead が通知に N 分無応答の場合のみ人間へエスカレーション(端末 + PushNotification)。権限は PAUSE / REPLAN 要求 / 通知のみ。
 - [ ] **FR-9 監査証跡**: org manifest(`.harness/state/org/manifest.jsonl`)へ全 spawn / send / stop / disband / 遮断イベントを動詞が自動追記(Lead の自己申告に依存しない)。全イベントに `org_id`(実行単位の名前空間)/ `seat_id` / `worktree` を必須フィールド化し、`max_seats` 集計・status・disband は同一 `org_id` 内に限定する。dry-run イベントは `dry_run: true` を刻印し既定で集計から除外する。spawn は saga(`spawn_started` → `spawned` / `spawn_failed` + 補償記録)として記録する。完了時に編成履歴を `docs/reports/` へ成果物化。model receipts は `commanded_model` / `reported_effective_model` / `honored: true|false|unknown` の三値とし、`true` はドライバ観測による確認がある場合のみ記録する。insights スキーマを拡張(リードタイム、初回 CI 成功率、レビュー往復数、人間介入数、座席数、停滞率)。
-- [ ] **FR-10 `/org` skill**: 動詞の使い方、編成パターン(Solo / Leaded / Parallel の型)、agmsg プロトコル、スター型規約、budget 作法、役割プロンプト雛形を収録。`.agents/skills/` ミラーを `sync-skills.sh` で同期し、Codex 座席からも参照可能にする。
+- [ ] **FR-10 `/org` skill**: 動詞の使い方、編成パターン(Solo / Leaded / Parallel の型)、agmsg プロトコル、スター型規約、budget 作法 **(2026-09-16 改訂で撤去)**、役割プロンプト雛形を収録。`.agents/skills/` ミラーを `sync-skills.sh` で同期し、Codex 座席からも参照可能にする。
 - [ ] **FR-11 Ralph Loop 自律実行系の完全撤去**(段階移行なし・PR 系列の最終 PR で一括削除。**適用範囲確定(PR⑤ 計画時のユーザー確定判断)**: 撤去対象は Ralph Loop の自律実行系のみ。標準フロー開発ハーネス skill 群(`/spec` `/plan` `/work` `/self-review` `/verify` `/test` `/sync-docs` `/cross-review` `/pr`)は org runtime と並存する開発ハーネスとして存続する — org の reviewer/qa 座席がこれらの検証スクリプト/skill を実行する関係でもあるため): `ralph-orchestrator.sh`、`ralph-pipeline.sh`、loop-init、旧 shell CLI の loop 系コマンド、`/loop` スキル(4 面ミラー)、loop 系テンプレート・レシピ・rules 節、`internal/ui` の Bubble Tea TUI(ライブビューは herdr に委譲)、`internal/state` のスライス/checkpoint リーダー、`internal/action` retry/abort。`ralph status` は org manifest を読むテキスト座席ビューに書き換える。`run-static-verify.sh` / `run-test.sh` / `ralph-worktree.sh` / driver 起動ロジックは標準フロー・QA 座席・動詞側の双方で存続利用する。
 
 ### Non-functional requirements
