@@ -154,6 +154,7 @@ org runtime の座席機構を次の 3 点で見直す。
 
 - Codex cross-review ACTION_REQUIRED #1: `driver_pool` のみを上書きした ralph.toml が新既定の codex model_pool エントリで Load に失敗する後方互換退行。`Load()` で `model_pool` 未指定かつ `driver_pool` 指定時に、継承した既定プールを宣言 driver に絞ってから検証するよう修正(`orgPoolKeysPresent` / `filterModelPoolByDrivers`)。回帰テスト 5 件追加。コミット 0d41553。
 - パイプライン cycle 2/2 として /self-review → /verify → /test → /sync-docs → /cross-review を再実行。
+- cycle-2 self-review C2-M1/C2-L1 の修正(コミット 79bcb96): 絞り込み後にプールが空になった場合のエラーメッセージが `[org].model_pool` ではなく `[org].driver_pool` を名指しするよう修正し、`orgPoolKeysPresent` の未使用named returnsを削除。残る LOW 所見(cycle-1 分 + C2-L2)は `docs/tech-debt/README.md` の "org-implementer-seat-envelope: deferred LOW findings batch (cosmetic)" 行に記録済み。
 
 ## Commits
 

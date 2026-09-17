@@ -133,3 +133,39 @@ org runtime `[org.budget]` concept removed by this plan. Left in place.
 
 - `docs/plans/active/2026-09-16-org-implementer-seat-envelope.md` (Progress checklist)
 - `docs/reports/sync-docs-2026-09-16-org-implementer-seat-envelope.md` (this report)
+
+## Cycle 2 (2026-09-17)
+
+- Reconciled behavior change from commits `0d41553` (`fix: keep driver_pool-only overrides loadable with codex default models`) and `79bcb96` (`fix: name driver_pool when an inherited model_pool filters to empty`): `config.Load()` now, when `[org].driver_pool` is set but `[org].model_pool` is not, filters the inherited default `model_pool` down to the declared drivers; if that leaves it empty, `Load()` errors with `[org].driver_pool <list> has no default [org].model_pool entries; set [org].model_pool explicitly` naming the key the document actually wrote. An explicit `model_pool` skips the filter and is validated strictly as before (unchanged).
+
+### Files checked, no drift found
+
+- `templates/base/ralph.toml` — the `[org].driver_pool` comment block (added by `0d41553`) already states the filtering behavior and matches the current error text and `Load()` logic verbatim (`internal/config/config.go:250-256`). No edit needed.
+- `.claude/skills/org/SKILL.md` (+ 3 mirrors) — the 既定 model_pool table documents the shipped defaults only; it makes no claim about partial-override filtering, so there is nothing in it to contradict the new behavior. Left as-is.
+- `docs/recipes/*.md`, `README.md` — no `driver_pool`/`model_pool` mentions (`grep -rn` empty); no drift.
+- `.claude/rules/ralph/model-routing.md` — already carries the codex-slug/no-alias note from cycle 1; it does not describe the `driver_pool`/`model_pool` relationship, so cycle-2's filter behavior does not touch it. Left as-is.
+
+### Drift found and fixed
+
+- `docs/specs/2026-08-01-org-runtime.md` — the 2026-09-16 revision block (bullets a-d) predates the cycle-2 fix and didn't record the driver_pool-only override compatibility behavior. Added bullet `(e)` describing the filter-then-validate behavior, the empty-pool error naming `driver_pool`, and both commit SHAs.
+
+### Tech debt
+
+- Appended one open row to `docs/tech-debt/README.md` batching the deferred LOW findings still open per `docs/reports/self-review-2026-09-16-org-implementer-seat-envelope.md`: cycle-1 LOW findings (`doctor_codex_models.go` home-dir error, `DefaultModelForDriver` stale doc, `RolePromptVars.PlanPath` missing `implementer.md`, `/org` skill Leaded-row contradiction, two over-claiming test assertions, `lead.md` 常体/敬体 mix, `OrgModelPoolEntry` "later slice" doc, `pruneRetiredConditions` redundant delete, stale 3-entry envelope fixture) plus cycle-2 C2-L2 (two under-named/under-asserted `driver_pool` filter regression tests). C2-M1 and C2-L1 are not included — both were already fixed in commit `79bcb96`. This closes the cycle-2 verify follow-up referencing C2-L3.
+
+### Verification commands run (cycle 2)
+
+```
+./scripts/sync-skills.sh          # [sync-skills] done: 13 skill(s) mirrored to .agents/skills
+./scripts/check-skill-sync.sh     # [ok] check-skill-sync: 13 skill(s) in lock-step
+./scripts/check-sync.sh           # PASS: all files in sync. (DRIFTED: 0, KNOWN_DIFF: 5, all pre-existing)
+./scripts/check-pipeline-sync.sh  # [ok] all 7 referencing docs list every pipeline step
+sh tests/test-no-loop-references.sh  # PASS: no live references to the retired Ralph Loop system
+```
+
+### Files changed by this cycle-2 sync-docs pass
+
+- `docs/specs/2026-08-01-org-runtime.md` (revision block bullet (e))
+- `docs/tech-debt/README.md` (new deferred-LOW-findings batch row)
+- `docs/plans/active/2026-09-16-org-implementer-seat-envelope.md` (Cycle 2 section note, Commits)
+- `docs/reports/sync-docs-2026-09-16-org-implementer-seat-envelope.md` (this section)

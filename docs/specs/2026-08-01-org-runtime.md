@@ -10,6 +10,7 @@ Ralph Loop(/loop)の自律実行系を撤去し、Lead LLM が herdr(実行・�
 - (b) 役割は lead / implementer / reviewer / qa の 4 種(FR-4 の identity 例 `impl-<slug>` は `implementer-<n>` 等の任意 seat id で運用)。座席内サブエージェント fan-out を雛形で明示許可。
 - (c) model_pool 既定は claude `fable`/`opus`/`sonnet`/`haiku` + codex `gpt-6-astra`/`gpt-5.6-sol`/`gpt-5.6-terra`/`gpt-5.6-luna`/`gpt-5.5`。claude はエイリアス、codex はスラッグ。`ralph doctor` に codex スラッグの軽量 Check を追加(FR-2 末尾の「全プールエントリを起動プローブ」は `--probe-models` のオプトインのまま)。
 - (d) `--model` は運用上必須、省略時はプール先頭へ警告付きフォールバック。
+- (e) `[org].driver_pool` のみを設定し `model_pool` を省略した ralph.toml は、継承した既定 `model_pool` を宣言 driver に絞ってから検証する(後方互換の維持。cross-review ACTION_REQUIRED #1 起因、コミット 0d41553)。絞った結果が空になる場合は `[org].driver_pool` を名指しするエラーで fail する(コミット 79bcb96)。`model_pool` を明示した場合はこのフィルタを経由せず、従来通り厳密検証される。
 
 ## Background and problem
 
