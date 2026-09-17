@@ -722,10 +722,12 @@ driver_pool = ["claude"]
 	}
 }
 
-// TestLoad_DriverPoolOnlyOverride_Codex verifies the same driver_pool-only
-// override behavior for a codex-only driver_pool: the inherited default pool
-// filters down to the 5 codex slugs, in Default()'s declared order.
-func TestLoad_DriverPoolOnlyOverride_Codex(t *testing.T) {
+// TestLoad_DriverPoolOnlyOverride_Codex_KeepsOnlyCodexDefaultEntriesInOrder
+// verifies that `driver_pool = ["codex"]` alone inherits exactly Default()'s
+// codex model_pool entries -- every one of them, in Default()'s declared
+// order, and no claude entry -- rather than the whole default pool or an
+// empty one.
+func TestLoad_DriverPoolOnlyOverride_Codex_KeepsOnlyCodexDefaultEntriesInOrder(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "ralph.toml")
 	content := `[org]
@@ -823,7 +825,11 @@ reviewer = ["gpt-5.5"]
 	if err == nil {
 		t.Fatal("Load: expected error, got nil")
 	}
-	if !contains(err.Error(), "reviewer") {
-		t.Errorf("error %q does not mention %q", err.Error(), "reviewer")
+	// The distinguishing phrase from config.go's roles validation: the role,
+	// the filtered-out model, and the reason. A "reviewer"-only check would
+	// also accept an unrelated error that merely names the role.
+	want := `[org.roles].reviewer references model "gpt-5.5" not present in [org].model_pool`
+	if !contains(err.Error(), want) {
+		t.Errorf("error %q does not contain %q", err.Error(), want)
 	}
 }

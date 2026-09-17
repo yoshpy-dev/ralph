@@ -3,6 +3,8 @@ package org
 import (
 	"strings"
 	"testing"
+
+	"github.com/yoshpy-dev/ralph/internal/config"
 )
 
 func testRolePromptVars() RolePromptVars {
@@ -10,6 +12,24 @@ func testRolePromptVars() RolePromptVars {
 		OrgID: "org-a", SeatID: "reviewer-1", Team: "ralph-org-a",
 		Role: "reviewer", Scope: "internal/org/**", PlanPath: "docs/plans/active/2026-08-02-org-runtime-seats.md",
 	}
+}
+
+// markdownSection returns the body of the level-2 markdown section that
+// starts with header (e.g. "## 座席内 fan-out"): the text after the header
+// line up to, but not including, the next line that starts with "## ", or
+// the end of text. found is false when header is absent. It lets tests
+// assert on one section without a match elsewhere in the template masking a
+// regression in that section.
+func markdownSection(text, header string) (body string, found bool) {
+	start := strings.Index(text, header)
+	if start < 0 {
+		return "", false
+	}
+	body = text[start+len(header):]
+	if end := strings.Index(body, "\n## "); end >= 0 {
+		body = body[:end]
+	}
+	return body, true
 }
 
 func TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted(t *testing.T) {
@@ -92,7 +112,11 @@ func TestRenderRolePrompt_Lead_AllKnownVarsSubstituted(t *testing.T) {
 	vars.Role = "lead"
 	vars.SeatID = "lead"
 	vars.Task = "dry-run 座席を1つ spawn し、typed message を送り、status を確認して disband せよ"
-	vars.Envelope = "model_pool: claude/opus, claude/sonnet, claude/haiku | max_seats: 5 | permission default: autonomous"
+	// Derive the envelope from the shipped default pool (EnvelopeSummary is
+	// what `ralph org start` renders) so this fixture never goes stale when
+	// the default model_pool changes; defaults_sync_test.go locks that
+	// default separately.
+	vars.Envelope = EnvelopeSummary(config.Default().Org)
 	text, ok, err := RenderRolePrompt("lead", vars)
 	if err != nil {
 		t.Fatalf("RenderRolePrompt: unexpected error: %v", err)
@@ -149,14 +173,15 @@ func TestRolePrompts_SeatTemplatesContainFanOutSection(t *testing.T) {
 			if !ok {
 				t.Fatalf("expected ok=true for the built-in %s template", role)
 			}
-			if !strings.Contains(text, "## 座席内 fan-out") {
-				t.Errorf("expected %s template to contain a '## 座席内 fan-out' section, got:\n%s", role, text)
+			section, found := markdownSection(text, "## 座席内 fan-out")
+			if !found {
+				t.Fatalf("expected %s template to contain a '## 座席内 fan-out' section, got:\n%s", role, text)
 			}
-			if !strings.Contains(text, "max_seats") {
-				t.Errorf("expected %s template's fan-out section to mention max_seats, got:\n%s", role, text)
+			if !strings.Contains(section, "max_seats") {
+				t.Errorf("expected %s template's fan-out section to mention max_seats, got section:\n%s", role, section)
 			}
-			if !strings.Contains(text, "lead") || !strings.Contains(text, "送ることは絶対に") {
-				t.Errorf("expected %s template's fan-out section to prohibit sub-agents from sending to lead, got:\n%s", role, text)
+			if !strings.Contains(section, "lead") || !strings.Contains(section, "送ることは絶対に") {
+				t.Errorf("expected %s template's fan-out section to prohibit sub-agents from sending to lead, got section:\n%s", role, section)
 			}
 		})
 	}
