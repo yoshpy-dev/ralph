@@ -604,12 +604,12 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	// observable effect on the agmsg steps further down.
 	team := agmsgTeam(p.OrgID)
 
-	// AC-4: a known --role expands the embedded template (reviewer.md /
-	// qa.md / lead.md) into the initial prompt; --prompt, if also given, is
-	// appended after it. An unknown role leaves initialPrompt as plain
-	// --prompt (possibly empty) -- no error, no fallback template. Task and
-	// Envelope are only referenced by prompts/lead.md today; every other
-	// template ignores them.
+	// AC-4: a known --role expands the embedded template (lead.md /
+	// implementer.md / reviewer.md / qa.md) into the initial prompt;
+	// --prompt, if also given, is appended after it. An unknown role leaves
+	// initialPrompt as plain --prompt (possibly empty) -- no error, no
+	// fallback template. Task and Envelope are only referenced by
+	// prompts/lead.md today; every other template ignores them.
 	initialPrompt := p.Prompt
 	rendered, ok, err := RenderRolePrompt(p.Role, RolePromptVars{
 		OrgID: p.OrgID, SeatID: p.SeatID, Team: team, Role: p.Role, Scope: p.Scope,

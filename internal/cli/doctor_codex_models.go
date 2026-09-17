@@ -14,17 +14,17 @@ import (
 )
 
 // codexModelsCachePath resolves the path codex itself uses for its local
-// model-slug cache: $CODEX_HOME/models_cache.json when CODEX_HOME is set,
-// else $HOME/.codex/models_cache.json. It mirrors codex's own resolver
-// exactly (codex-rs/utils/home-dir/src/lib.rs, find_codex_home -- identical
-// at rust-v0.149.1, rust-v0.154.0, and main): CODEX_HOME is filtered only on
-// emptiness (`!val.is_empty()`) and then used literally -- never trimmed or
-// otherwise normalized -- so this check reads the same directory codex
-// itself would. Kept as its own function (rather than inlined into
-// checkCodexModelSlugs) so tests can pin it via t.Setenv without touching
-// any other doctor check. Returns an error when CODEX_HOME is empty and the
-// home directory cannot be resolved; the caller reports that as an info
-// result rather than failing the check.
+// model-slug cache: $CODEX_HOME/models_cache.json when CODEX_HOME is set, else
+// $HOME/.codex/models_cache.json. It mirrors codex's own resolver exactly
+// (codex-rs/utils/home-dir/src/lib.rs, find_codex_home -- identical at
+// rust-v0.149.1 and rust-v0.154.0, checked 2026-09-17): CODEX_HOME is filtered
+// only on emptiness (`!val.is_empty()`) and then used literally -- never
+// trimmed or otherwise normalized -- so this check reads the same directory
+// codex itself would. Kept as its own function (rather than inlined into
+// checkCodexModelSlugs) so tests can pin it via t.Setenv without touching any
+// other doctor check. Returns an error when CODEX_HOME is empty and the home
+// directory cannot be resolved; the caller reports that as an info result
+// rather than failing the check.
 func codexModelsCachePath() (string, error) {
 	if home := os.Getenv("CODEX_HOME"); home != "" {
 		return filepath.Join(home, "models_cache.json"), nil
@@ -33,7 +33,7 @@ func codexModelsCachePath() (string, error) {
 	// fallback names), while also handling Windows correctly.
 	uh, err := os.UserHomeDir()
 	if err != nil {
-		return "", fmt.Errorf("resolve home directory for codex models cache: %w", err)
+		return "", fmt.Errorf("resolve home directory: %w", err)
 	}
 	return filepath.Join(uh, ".codex", "models_cache.json"), nil
 }
@@ -57,8 +57,10 @@ type codexModelsCacheDoc struct {
 // check always runs -- it is cheap (a single local file read) and does not
 // require codex to be on PATH.
 //
-// Five deterministic outcomes:
+// Six deterministic outcomes:
 //   - no codex entries in model_pool at all -> info, no cache lookup performed
+//   - CODEX_HOME empty and the home directory unresolvable -> info, names
+//     the resolution error (there is no cache path to look up)
 //   - cache file missing -> info, names the path it looked for (codex may
 //     simply not have been run locally yet -- not a project misconfiguration)
 //   - cache file present but not valid JSON -> info, names the parse error

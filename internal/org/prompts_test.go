@@ -14,18 +14,23 @@ func testRolePromptVars() RolePromptVars {
 	}
 }
 
-// markdownSection returns the body of the level-2 markdown section that
-// starts with header (e.g. "## 座席内 fan-out"): the text after the header
-// line up to, but not including, the next line that starts with "## ", or
-// the end of text. found is false when header is absent. It lets tests
-// assert on one section without a match elsewhere in the template masking a
-// regression in that section.
+// markdownSection returns the body of the level-2 markdown section whose
+// header occupies a whole line (e.g. a line that is exactly "## 座席内
+// fan-out"): the text after that header line up to, but not including, the
+// next line that starts with "## ", or the end of text. found is false when
+// header is absent. It lets tests assert on one section without a match
+// elsewhere in the template masking a regression in that section.
 func markdownSection(text, header string) (body string, found bool) {
-	start := strings.Index(text, header)
+	// Anchor header to a whole line ("\n<header>\n" in a text padded with a
+	// leading newline) so a demoted "### <header>" line or a mid-line
+	// mention of the header text cannot satisfy the lookup.
+	padded := "\n" + text
+	needle := "\n" + header + "\n"
+	start := strings.Index(padded, needle)
 	if start < 0 {
 		return "", false
 	}
-	body = text[start+len(header):]
+	body = padded[start+len(needle):]
 	if end := strings.Index(body, "\n## "); end >= 0 {
 		body = body[:end]
 	}
