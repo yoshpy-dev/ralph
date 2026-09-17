@@ -150,6 +150,11 @@ org runtime の座席機構を次の 3 点で見直す。
 - Slice 3 の `--model` 省略時警告の文言アサートは spawn テストのみ。start は同一ヘルパー経由で、既存の `TestOrgStart_ModelFlagOmitted_DefaultsToFirstMatchingPoolEntry` がフォールバック値を検証する。
 - Slice 5: `docs/quality/quality-gates.md` と `.claude/rules/ralph/model-routing.md` の root/template 間に既存の KNOWN_DIFF があり、両面へ同旨の編集を当てて drift は増やしていない。
 
+## Cycle 2 (cross-review fix)
+
+- Codex cross-review ACTION_REQUIRED #1: `driver_pool` のみを上書きした ralph.toml が新既定の codex model_pool エントリで Load に失敗する後方互換退行。`Load()` で `model_pool` 未指定かつ `driver_pool` 指定時に、継承した既定プールを宣言 driver に絞ってから検証するよう修正(`orgPoolKeysPresent` / `filterModelPoolByDrivers`)。回帰テスト 5 件追加。コミット 0d41553。
+- パイプライン cycle 2/2 として /self-review → /verify → /test → /sync-docs → /cross-review を再実行。
+
 ## Commits
 
 - 7b6a720 docs: add plan
@@ -158,6 +163,9 @@ org runtime の座席機構を次の 3 点で見直す。
 - b901364 feat: doctor codex model-slug check and unified --model fallback warning (Slice 3)
 - 185920c feat: add implementer seat template and in-seat fan-out guidance (Slice 4)
 - f729a15 docs: align org runtime docs (Slice 5)
+- 649901a fix: self-review MEDIUM-1/2/4
+- 463e943 docs: verify follow-ups
+- 0d41553 fix: driver_pool-only override compatibility (cross-review cycle 1)
 
 ## Progress checklist
 
