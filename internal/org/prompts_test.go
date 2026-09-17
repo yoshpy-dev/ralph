@@ -41,16 +41,18 @@ func markdownSection(text, header string) (body string, found bool) {
 }
 
 func TestMarkdownSection_AnchorsHeaderAndBoundsBody(t *testing.T) {
-	const doc = "intro\n## A\nbody a\n### A sub\nsub text\n## B\n## C\nbody c"
+	// "see ## D" is a deliberate mid-line mention: the unanchored lookup this
+	// helper replaced would have matched it.
+	const doc = "intro\n## A\nbody a, see ## D for details\n### A sub\nsub text\n## B\n## C\nbody c"
 	cases := []struct {
 		name, header, wantBody string
 		wantFound              bool
 	}{
-		{"normal section stops at the next level-2 header", "## A", "\nbody a\n### A sub\nsub text", true},
+		{"normal section stops at the next level-2 header", "## A", "\nbody a, see ## D for details\n### A sub\nsub text", true},
 		{"empty section returns an empty body, not the next section", "## B", "", true},
 		{"section at end of text runs to EOF", "## C", "\nbody c", true},
 		{"a level-3 header does not satisfy a level-2 lookup", "## A sub", "", false},
-		{"a mid-line mention does not satisfy the lookup", "## text", "", false},
+		{"a mid-line mention does not satisfy the lookup", "## D", "", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
