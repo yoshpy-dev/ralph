@@ -555,6 +555,9 @@ func TestCheckCodexModelSlugs_CodexHomeUsedLiterally_TrailingSpace(t *testing.T)
 // missing at that literal path (info, never a hard failure) instead of
 // silently reading a different directory.
 func TestCheckCodexModelSlugs_WhitespaceOnlyCodexHome_UsedLiterally(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("relies on a whitespace-only path component resolving to fs.ErrNotExist, which Windows does not guarantee")
+	}
 	t.Setenv("CODEX_HOME", " ")
 
 	cfg := config.Config{Org: config.OrgConfig{ModelPool: []config.OrgModelPoolEntry{

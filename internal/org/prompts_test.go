@@ -30,11 +30,36 @@ func markdownSection(text, header string) (body string, found bool) {
 	if start < 0 {
 		return "", false
 	}
-	body = padded[start+len(needle):]
+	// Keep the header line's trailing newline at the head of body so that an
+	// empty section (header immediately followed by the next "## " line)
+	// yields "" rather than leaking the following section's text.
+	body = padded[start+len(needle)-1:]
 	if end := strings.Index(body, "\n## "); end >= 0 {
 		body = body[:end]
 	}
 	return body, true
+}
+
+func TestMarkdownSection_AnchorsHeaderAndBoundsBody(t *testing.T) {
+	const doc = "intro\n## A\nbody a\n### A sub\nsub text\n## B\n## C\nbody c"
+	cases := []struct {
+		name, header, wantBody string
+		wantFound              bool
+	}{
+		{"normal section stops at the next level-2 header", "## A", "\nbody a\n### A sub\nsub text", true},
+		{"empty section returns an empty body, not the next section", "## B", "", true},
+		{"section at end of text runs to EOF", "## C", "\nbody c", true},
+		{"a level-3 header does not satisfy a level-2 lookup", "## A sub", "", false},
+		{"a mid-line mention does not satisfy the lookup", "## text", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body, found := markdownSection(doc, tc.header)
+			if found != tc.wantFound || body != tc.wantBody {
+				t.Errorf("markdownSection(doc, %q) = (%q, %v), want (%q, %v)", tc.header, body, found, tc.wantBody, tc.wantFound)
+			}
+		})
+	}
 }
 
 func TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted(t *testing.T) {
