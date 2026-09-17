@@ -688,3 +688,142 @@ watcher_model = ""
 		t.Errorf("watchdog.watcher_model = %q, want empty", cfg.Org.Watchdog.WatcherModel)
 	}
 }
+
+// TestLoad_DriverPoolOnlyOverride_FiltersInheritedDefaultModelPool verifies
+// that a ralph.toml overriding only [org].driver_pool (leaving model_pool
+// unset) inherits the default model_pool filtered down to the declared
+// driver_pool, rather than the raw (unfiltered) default pool -- a claude-only
+// driver_pool must not inherit the default pool's codex entries and fail the
+// driver-membership check (cross-review ACTION_REQUIRED #1).
+func TestLoad_DriverPoolOnlyOverride_FiltersInheritedDefaultModelPool(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ralph.toml")
+	content := `[org]
+driver_pool = ["claude"]
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: unexpected error: %v", err)
+	}
+	wantModels := []string{"fable", "opus", "sonnet", "haiku"}
+	if len(cfg.Org.ModelPool) != len(wantModels) {
+		t.Fatalf("model_pool = %+v, want %d claude entries %v", cfg.Org.ModelPool, len(wantModels), wantModels)
+	}
+	for i, entry := range cfg.Org.ModelPool {
+		if entry.Driver != "claude" {
+			t.Errorf("model_pool[%d].driver = %q, want claude", i, entry.Driver)
+		}
+		if entry.Model != wantModels[i] {
+			t.Errorf("model_pool[%d].model = %q, want %q", i, entry.Model, wantModels[i])
+		}
+	}
+}
+
+// TestLoad_DriverPoolOnlyOverride_Codex verifies the same driver_pool-only
+// override behavior for a codex-only driver_pool: the inherited default pool
+// filters down to the 5 codex slugs, in Default()'s declared order.
+func TestLoad_DriverPoolOnlyOverride_Codex(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ralph.toml")
+	content := `[org]
+driver_pool = ["codex"]
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: unexpected error: %v", err)
+	}
+	wantModels := []string{"gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5"}
+	if len(cfg.Org.ModelPool) != len(wantModels) {
+		t.Fatalf("model_pool = %+v, want %d codex entries %v", cfg.Org.ModelPool, len(wantModels), wantModels)
+	}
+	for i, entry := range cfg.Org.ModelPool {
+		if entry.Driver != "codex" {
+			t.Errorf("model_pool[%d].driver = %q, want codex", i, entry.Driver)
+		}
+		if entry.Model != wantModels[i] {
+			t.Errorf("model_pool[%d].model = %q, want %q", i, entry.Model, wantModels[i])
+		}
+	}
+}
+
+// TestLoad_DriverPoolOnlyOverride_NoDefaultModels_Errors verifies that when
+// the declared driver_pool names only drivers with no entries in Default()'s
+// model_pool (e.g. a hypothetical "gemini" driver), filtering the inherited
+// default pool down to that driver_pool leaves it empty, and Load() still
+// returns the existing "[org].model_pool must not be empty" error rather than
+// silently succeeding with zero usable models.
+func TestLoad_DriverPoolOnlyOverride_NoDefaultModels_Errors(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ralph.toml")
+	content := `[org]
+driver_pool = ["gemini"]
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load: expected error, got nil")
+	}
+	if !contains(err.Error(), "model_pool must not be empty") {
+		t.Errorf("error %q does not mention %q", err.Error(), "model_pool must not be empty")
+	}
+}
+
+// TestLoad_ExplicitModelPoolStillStrict verifies that a document which sets
+// model_pool explicitly is not subject to the driver_pool-only inheritance
+// filter: an explicit codex entry alongside a claude-only driver_pool must
+// still fail the driver-membership check exactly as before this change.
+func TestLoad_ExplicitModelPoolStillStrict(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ralph.toml")
+	content := `[org]
+driver_pool = ["claude"]
+model_pool = [
+  { driver = "claude", model = "opus" },
+  { driver = "codex", model = "gpt-5.5" },
+]
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load: expected error, got nil")
+	}
+	if !contains(err.Error(), "not present in [org].driver_pool") {
+		t.Errorf("error %q does not mention %q", err.Error(), "not present in [org].driver_pool")
+	}
+}
+
+// TestLoad_DriverPoolOnlyOverride_RolesReferencingFilteredModelErrors
+// verifies that [org.roles] validation still runs against the filtered
+// (inherited) model_pool: a role referencing a model that driver_pool
+// filtering dropped (or that was never in the default pool) must still
+// error via the existing roles check.
+func TestLoad_DriverPoolOnlyOverride_RolesReferencingFilteredModelErrors(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ralph.toml")
+	content := `[org]
+driver_pool = ["claude"]
+
+[org.roles]
+reviewer = ["gpt-5.5"]
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load: expected error, got nil")
+	}
+	if !contains(err.Error(), "reviewer") {
+		t.Errorf("error %q does not mention %q", err.Error(), "reviewer")
+	}
+}

@@ -14,6 +14,11 @@ require_go = false
 # Watchdog) build on a stable foundation. Absent [org] is fully compatible —
 # Load() backfills these exact defaults with no warnings.
 [org]
+# Overriding only driver_pool (leaving model_pool unset) narrows the
+# inherited default model_pool to entries whose driver is in this list —
+# e.g. driver_pool = ["claude"] alone keeps loading and drops the default
+# codex entries. Set model_pool explicitly to choose specific models
+# instead of inheriting the filtered default.
 driver_pool = ["claude", "codex"]
 # model_pool entries are CLI-native model names/aliases, passed verbatim to
 # `claude --model` / `codex --model`. Claude entries are stable CLI aliases

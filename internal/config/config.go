@@ -183,6 +183,42 @@ var orgPermissionModeAllowed = map[string]bool{
 	"guarded":    true,
 }
 
+// orgPoolKeysPresent reports whether the source document explicitly sets
+// [org].driver_pool and/or [org].model_pool. toml.Unmarshal into a
+// Default()-populated Config cannot answer this on its own (an absent key
+// and an explicit key that happens to match the default look identical
+// afterwards), so this does a second, minimal unmarshal into a probe struct
+// with pointer fields — go-toml/v2 leaves an unset pointer field nil, which
+// is how "key absent" becomes observable.
+func orgPoolKeysPresent(data []byte) (driverPoolSet, modelPoolSet bool, err error) {
+	var probe struct {
+		Org struct {
+			DriverPool *[]string            `toml:"driver_pool"`
+			ModelPool  *[]OrgModelPoolEntry `toml:"model_pool"`
+		} `toml:"org"`
+	}
+	if err := toml.Unmarshal(data, &probe); err != nil {
+		return false, false, err
+	}
+	return probe.Org.DriverPool != nil, probe.Org.ModelPool != nil, nil
+}
+
+// filterModelPoolByDrivers returns the subset of pool whose Driver is present
+// in drivers, preserving pool's declared order.
+func filterModelPoolByDrivers(pool []OrgModelPoolEntry, drivers []string) []OrgModelPoolEntry {
+	driverSet := make(map[string]bool, len(drivers))
+	for _, d := range drivers {
+		driverSet[d] = true
+	}
+	filtered := make([]OrgModelPoolEntry, 0, len(pool))
+	for _, entry := range pool {
+		if driverSet[entry.Driver] {
+			filtered = append(filtered, entry)
+		}
+	}
+	return filtered
+}
+
 // Load reads ralph.toml from the given path, falling back to defaults.
 func Load(path string) (Config, error) {
 	cfg := Default()
@@ -199,6 +235,21 @@ func Load(path string) (Config, error) {
 		return cfg, err
 	}
 
+	driverPoolSet, modelPoolSet, err := orgPoolKeysPresent(data)
+	if err != nil {
+		return cfg, err
+	}
+	if driverPoolSet && !modelPoolSet {
+		// The document narrows [org].driver_pool but leaves [org].model_pool
+		// unset, so cfg.Org.ModelPool is still Default()'s pool (including
+		// any driver Default()'s driver_pool covers but this document's
+		// narrower driver_pool doesn't). Inherit the default pool filtered to
+		// the drivers this document actually declared, so e.g.
+		// `driver_pool = ["claude"]` alone keeps loading even as Default()
+		// grows more non-claude default model_pool entries over time.
+		cfg.Org.ModelPool = filterModelPoolByDrivers(Default().Org.ModelPool, cfg.Org.DriverPool)
+	}
+
 	// [org] validation.
 	//
 	// Unlike PipelineConfig's ints (which silently backfill on zero), Org's
@@ -206,8 +257,15 @@ func Load(path string) (Config, error) {
 	// present in the source document (cfg already carries Default()'s Org
 	// values before Unmarshal runs), so an absent [org] section — or an
 	// absent individual key within a present [org] section — never reaches
-	// these checks with a zero/invalid value. Only an *explicit* invalid
-	// value (e.g. `max_seats = 0`) can trigger a validation error here.
+	// these checks with a zero/invalid value, with one deliberate exception:
+	// when driver_pool is set but model_pool is not, the inherited default
+	// model_pool is filtered to the declared driver_pool above (so a
+	// claude-only driver_pool override doesn't inherit codex's default
+	// entries and fail the driver-membership check below). A document that
+	// sets model_pool explicitly skips that filtering and is validated
+	// strictly as before. Only an *explicit* invalid value (e.g. `max_seats
+	// = 0`, or an explicit model_pool entry naming a driver outside
+	// driver_pool) can trigger a validation error here.
 	if len(cfg.Org.ModelPool) == 0 {
 		return cfg, fmt.Errorf("[org].model_pool must not be empty")
 	}
