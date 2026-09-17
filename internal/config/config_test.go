@@ -756,7 +756,7 @@ driver_pool = ["codex"]
 // the declared driver_pool names only drivers with no entries in Default()'s
 // model_pool (e.g. a hypothetical "gemini" driver), filtering the inherited
 // default pool down to that driver_pool leaves it empty, and Load() still
-// returns the existing "[org].model_pool must not be empty" error rather than
+// returns an error that names [org].driver_pool (the key the document actually wrote) rather than
 // silently succeeding with zero usable models.
 func TestLoad_DriverPoolOnlyOverride_NoDefaultModels_Errors(t *testing.T) {
 	dir := t.TempDir()
@@ -771,8 +771,8 @@ driver_pool = ["gemini"]
 	if err == nil {
 		t.Fatal("Load: expected error, got nil")
 	}
-	if !contains(err.Error(), "model_pool must not be empty") {
-		t.Errorf("error %q does not mention %q", err.Error(), "model_pool must not be empty")
+	if !contains(err.Error(), "driver_pool [gemini] has no default [org].model_pool entries") {
+		t.Errorf("error %q does not mention %q", err.Error(), "driver_pool [gemini] has no default [org].model_pool entries")
 	}
 }
 

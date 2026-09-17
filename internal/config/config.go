@@ -190,7 +190,7 @@ var orgPermissionModeAllowed = map[string]bool{
 // afterwards), so this does a second, minimal unmarshal into a probe struct
 // with pointer fields — go-toml/v2 leaves an unset pointer field nil, which
 // is how "key absent" becomes observable.
-func orgPoolKeysPresent(data []byte) (driverPoolSet, modelPoolSet bool, err error) {
+func orgPoolKeysPresent(data []byte) (bool, bool, error) {
 	var probe struct {
 		Org struct {
 			DriverPool *[]string            `toml:"driver_pool"`
@@ -248,6 +248,12 @@ func Load(path string) (Config, error) {
 		// `driver_pool = ["claude"]` alone keeps loading even as Default()
 		// grows more non-claude default model_pool entries over time.
 		cfg.Org.ModelPool = filterModelPoolByDrivers(Default().Org.ModelPool, cfg.Org.DriverPool)
+		if len(cfg.Org.ModelPool) == 0 {
+			// Name the key the document actually wrote: the empty pool is a
+			// consequence of this driver_pool, not of a model_pool the
+			// document never set.
+			return cfg, fmt.Errorf("[org].driver_pool %v has no default [org].model_pool entries; set [org].model_pool explicitly", cfg.Org.DriverPool)
+		}
 	}
 
 	// [org] validation.
