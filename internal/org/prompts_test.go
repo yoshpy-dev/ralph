@@ -3,12 +3,64 @@ package org
 import (
 	"strings"
 	"testing"
+
+	"github.com/yoshpy-dev/ralph/internal/config"
 )
 
 func testRolePromptVars() RolePromptVars {
 	return RolePromptVars{
 		OrgID: "org-a", SeatID: "reviewer-1", Team: "ralph-org-a",
 		Role: "reviewer", Scope: "internal/org/**", PlanPath: "docs/plans/active/2026-08-02-org-runtime-seats.md",
+	}
+}
+
+// markdownSection returns the body of the level-2 markdown section whose
+// header occupies a whole line (e.g. a line that is exactly "## 座席内
+// fan-out"): the text after that header line up to, but not including, the
+// next line that starts with "## ", or the end of text. found is false when
+// header is absent. It lets tests assert on one section without a match
+// elsewhere in the template masking a regression in that section.
+func markdownSection(text, header string) (body string, found bool) {
+	// Anchor header to a whole line ("\n<header>\n" in a text padded with a
+	// leading newline) so a demoted "### <header>" line or a mid-line
+	// mention of the header text cannot satisfy the lookup.
+	padded := "\n" + text
+	needle := "\n" + header + "\n"
+	start := strings.Index(padded, needle)
+	if start < 0 {
+		return "", false
+	}
+	// Keep the header line's trailing newline at the head of body so that an
+	// empty section (header immediately followed by the next "## " line)
+	// yields "" rather than leaking the following section's text.
+	body = padded[start+len(needle)-1:]
+	if end := strings.Index(body, "\n## "); end >= 0 {
+		body = body[:end]
+	}
+	return body, true
+}
+
+func TestMarkdownSection_AnchorsHeaderAndBoundsBody(t *testing.T) {
+	// "see ## D" is a deliberate mid-line mention: the unanchored lookup this
+	// helper replaced would have matched it.
+	const doc = "intro\n## A\nbody a, see ## D for details\n### A sub\nsub text\n## B\n## C\nbody c"
+	cases := []struct {
+		name, header, wantBody string
+		wantFound              bool
+	}{
+		{"normal section stops at the next level-2 header", "## A", "\nbody a, see ## D for details\n### A sub\nsub text", true},
+		{"empty section returns an empty body, not the next section", "## B", "", true},
+		{"section at end of text runs to EOF", "## C", "\nbody c", true},
+		{"a level-3 header does not satisfy a level-2 lookup", "## A sub", "", false},
+		{"a mid-line mention does not satisfy the lookup", "## D", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body, found := markdownSection(doc, tc.header)
+			if found != tc.wantFound || body != tc.wantBody {
+				t.Errorf("markdownSection(doc, %q) = (%q, %v), want (%q, %v)", tc.header, body, found, tc.wantBody, tc.wantFound)
+			}
+		})
 	}
 }
 
@@ -92,7 +144,11 @@ func TestRenderRolePrompt_Lead_AllKnownVarsSubstituted(t *testing.T) {
 	vars.Role = "lead"
 	vars.SeatID = "lead"
 	vars.Task = "dry-run 座席を1つ spawn し、typed message を送り、status を確認して disband せよ"
-	vars.Envelope = "model_pool: claude/opus, claude/sonnet, claude/haiku | max_seats: 5 | permission default: autonomous"
+	// Derive the envelope from the shipped default pool (EnvelopeSummary is
+	// what `ralph org start` renders) so this fixture never goes stale when
+	// the default model_pool changes; defaults_sync_test.go locks that
+	// default separately.
+	vars.Envelope = EnvelopeSummary(config.Default().Org)
 	text, ok, err := RenderRolePrompt("lead", vars)
 	if err != nil {
 		t.Fatalf("RenderRolePrompt: unexpected error: %v", err)
@@ -149,14 +205,15 @@ func TestRolePrompts_SeatTemplatesContainFanOutSection(t *testing.T) {
 			if !ok {
 				t.Fatalf("expected ok=true for the built-in %s template", role)
 			}
-			if !strings.Contains(text, "## 座席内 fan-out") {
-				t.Errorf("expected %s template to contain a '## 座席内 fan-out' section, got:\n%s", role, text)
+			section, found := markdownSection(text, "## 座席内 fan-out")
+			if !found {
+				t.Fatalf("expected %s template to contain a '## 座席内 fan-out' section, got:\n%s", role, text)
 			}
-			if !strings.Contains(text, "max_seats") {
-				t.Errorf("expected %s template's fan-out section to mention max_seats, got:\n%s", role, text)
+			if !strings.Contains(section, "max_seats") {
+				t.Errorf("expected %s template's fan-out section to mention max_seats, got section:\n%s", role, section)
 			}
-			if !strings.Contains(text, "lead") || !strings.Contains(text, "送ることは絶対に") {
-				t.Errorf("expected %s template's fan-out section to prohibit sub-agents from sending to lead, got:\n%s", role, text)
+			if !strings.Contains(section, "lead") || !strings.Contains(section, "送ることは絶対に") {
+				t.Errorf("expected %s template's fan-out section to prohibit sub-agents from sending to lead, got section:\n%s", role, section)
 			}
 		})
 	}

@@ -32,12 +32,13 @@ type RolePromptVars struct {
 	Team   string
 	Role   string
 	Scope  string
-	// PlanPath is not wired into any embedded template today -- reviewer.md
-	// and qa.md do not reference {{PLAN_PATH}} (removed: no production
-	// caller populated it, so every rendered prompt shipped a literal
-	// "- plan: " with nothing after it -- self-review finding M5). The field
-	// is kept so PR③ (Lead 自律編成) can wire a `--plan` flag through to a
-	// template substitution without another RolePromptVars schema change.
+	// PlanPath is not wired into any embedded template today -- none of the
+	// four templates (lead.md, implementer.md, reviewer.md, qa.md)
+	// reference {{PLAN_PATH}} (removed: no production caller populated it,
+	// so every rendered prompt shipped a literal "- plan: " with nothing
+	// after it -- self-review finding M5). The field is kept so a future
+	// `--plan` flag can be wired through to a template substitution without
+	// another RolePromptVars schema change.
 	PlanPath string
 	// Task is the task text substituted for {{TASK}} -- currently only
 	// prompts/lead.md references it. `ralph org start`'s positional task
@@ -76,7 +77,7 @@ func RenderRolePrompt(role string, vars RolePromptVars) (string, bool, error) {
 		"{{TEAM}}", vars.Team,
 		"{{ROLE}}", vars.Role,
 		"{{SCOPE}}", scope,
-		// PLAN_PATH is reserved for PR③ (no template uses it today). The
+		// PLAN_PATH has no consumer among the embedded templates today. The
 		// replacer entry stays so a template that re-adds {{PLAN_PATH}} can
 		// never ship the literal placeholder to a seat.
 		"{{PLAN_PATH}}", vars.PlanPath,

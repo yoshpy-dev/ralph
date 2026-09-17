@@ -98,8 +98,9 @@ type OrgPermissionsConfig struct {
 // alias. Claude entries are CLI aliases (stable across model releases,
 // e.g. "opus", "sonnet", "haiku"). Codex has no aliases, so codex entries
 // are model slugs as listed in codex's own models_cache.json and go stale
-// when codex retires a model -- the `ralph doctor` slug check (added in a
-// later slice) warns about that.
+// when codex retires a model -- the `ralph doctor` slug check
+// (checkCodexModelSlugs, internal/cli/doctor_codex_models.go) warns about
+// that.
 type OrgModelPoolEntry struct {
 	Driver string `toml:"driver"`
 	Model  string `toml:"model"`

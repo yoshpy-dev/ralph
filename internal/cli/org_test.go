@@ -670,8 +670,8 @@ func TestOrgSpawn_ModelFlagOmitted_DefaultsToFirstMatchingPoolEntry(t *testing.T
 		t.Fatalf("expected spawn without --model to succeed, err=%v (output: %s)", err, out)
 	}
 	wantWarn := "org: --model omitted; falling back to first [org].model_pool entry permitted for role worker on claude: opus (pass --model explicitly)"
-	if !strings.Contains(out, wantWarn) {
-		t.Errorf("expected exactly one fallback warning line in output, got: %s", out)
+	if n := strings.Count(out, wantWarn); n != 1 {
+		t.Errorf("expected exactly one fallback warning line in output, got %d in: %s", n, out)
 	}
 
 	events := readManifestEvents(t, org.ManifestPathIn(stateDir))
