@@ -1,6 +1,6 @@
 # org-envelope-low-findings
 
-- Status: In progress
+- Status: Done (PR #157)
 - Owner: Claude Code
 - Date: 2026-09-17
 - Related request: PR #152 の self-review(cycle 1 / cycle 2)で LOW と判定し、パイプライン cap 到達時に先送りした所見 10 件を 1 PR で一括修正する(issue #154)
@@ -134,4 +134,4 @@ Critical forks: None(全項目が数行の可逆な編集で、既定で解け�
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
-- [ ] PR created
+- [x] PR created (#157)
