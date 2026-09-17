@@ -16,7 +16,7 @@
 
 | # | 所見 | ファイル | 対応 |
 |---|------|---------|------|
-| 1 | `codexModelsCachePath` が `os.UserHomeDir` のエラーを捨て、`CODEX_HOME` を trim せずに join | `internal/cli/doctor_codex_models.go`, `internal/cli/doctor_org_test.go` | `CODEX_HOME` は **trim しない**。codex 本体の `find_codex_home`(`codex-rs/utils/home-dir/src/lib.rs`、0.149.1〜main で同一)は `is_empty()` でのみ濾し、空でなければ値をそのまま使うので、doctor も `home == ""` の厳密判定に揃える(現状の `TrimSpace(home) == ""` は空白のみを未設定扱いにしており、codex とずれる)。home 解決失敗時は `(string, error)` で返し、呼び出し元 `checkCodexModelSlugs` は status `info` +「could not resolve … — skipping」で報告する。テスト 2 件追加(末尾空白付きディレクトリを literal に読む回帰 / HOME 空でのエラー経路) |
+| 1 | `codexModelsCachePath` が `os.UserHomeDir` のエラーを捨て、`CODEX_HOME` を trim せずに join | `internal/cli/doctor_codex_models.go`, `internal/cli/doctor_org_test.go` | `CODEX_HOME` は **trim しない**。codex 本体の `find_codex_home`(`codex-rs/utils/home-dir/src/lib.rs`、rust-v0.149.1 と rust-v0.154.0 で同一を 2026-09-17 に確認)は `is_empty()` でのみ濾し、空でなければ値をそのまま使うので、doctor も `home == ""` の厳密判定に揃える(現状の `TrimSpace(home) == ""` は空白のみを未設定扱いにしており、codex とずれる)。home 解決失敗時は `(string, error)` で返し、呼び出し元 `checkCodexModelSlugs` は status `info` +「could not resolve … — skipping」で報告する。テスト 2 件追加(末尾空白付きディレクトリを literal に読む回帰 / HOME 空でのエラー経路) |
 | 2 | `DefaultModelForDriver` の doc comment の呼び出し元記述 | `internal/org/envelope_summary.go` | 現状確認のみ。463e943 で「production caller なし、CLI は role-aware 版を `resolveModelOrWarn` 経由で使う」に更新済み。`grep -rn 'DefaultModelForDriver(' internal --include='*.go' \| grep -v _test` は定義行のみで一致しており修正不要。Deviation notes に記録 |
 | 3 | `RolePromptVars.PlanPath` の doc が非消費者として `implementer.md` を挙げていない | `internal/org/prompts.go` | 「4 雛形(lead/implementer/reviewer/qa)のいずれも `{{PLAN_PATH}}` を参照しない」に書き換え。同じコメントにある「PR③」前方参照(struct doc と replacer コメントの 2 箇所)も「将来の `--plan` フラグ配線のため保持」に中立化する |
 | 4 | `/org` skill の Leaded 行が `lead.md` の implementer 優先委譲と矛盾 | `.claude/skills/org/SKILL.md`(+ `.agents/`, `templates/base/.claude/`, `templates/base/.agents/` の 3 ミラー) | 「実装は Lead 自身か既存フローに任せつつ」を「実装は完了済みか既存フロー(`/work`)で進める前提で Lead 自身は実装せず」に改める。`scripts/sync-skills.sh` で `.agents/` を再生成し、`templates/base/` の 2 面へ cp |
@@ -39,14 +39,14 @@
 ## Assumptions
 
 - 4 つの skill ミラーは `scripts/sync-skills.sh`(`.claude/` → `.agents/`)と手動 cp(`templates/base/` 2 面)で揃え、`check-skill-sync.sh` / `check-sync.sh` が一致を保証する
-- codex の `CODEX_HOME` 判定は `std::env::var("CODEX_HOME").ok().filter(|val| !val.is_empty())`(rust-v0.149.1 / rust-v0.154.0 / main で同一を 2026-09-17 に確認)。doctor はこの判定に合わせ、値を trim も正規化もしない
+- codex の `CODEX_HOME` 判定は `std::env::var("CODEX_HOME").ok().filter(|val| !val.is_empty())`(rust-v0.149.1 と rust-v0.154.0 で同一を 2026-09-17 に確認。タグのみを根拠にし、動く `main` は引かない)。doctor はこの判定に合わせ、値を trim も正規化もしない
 - `os.UserHomeDir` は unix で `$HOME` 空のときエラーを返すので、`t.Setenv("HOME", "")` + `t.Setenv("CODEX_HOME", "")` で 1 のエラー経路を決定的に再現できる
 - `internal/org` パッケージ内テストから `internal/config` を import しても循環しない(`envelope_summary.go` が既に import 済み)
 
 ## Affected areas
 
 - `internal/cli/doctor_codex_models.go`, `internal/cli/doctor_org_test.go`, `internal/cli/org_test.go`
-- `internal/org/prompts.go`, `internal/org/prompts_test.go`, `internal/org/prompts/lead.md`, `internal/org/watch.go`
+- `internal/org/prompts.go`, `internal/org/prompts_test.go`, `internal/org/prompts/lead.md`, `internal/org/watch.go`, `internal/org/spawn.go`(Slice D で追加: 雛形一覧コメント 1 行)
 - `internal/config/config.go`, `internal/config/config_test.go`
 - `.claude/skills/org/SKILL.md`, `.agents/skills/org/SKILL.md`, `templates/base/.claude/skills/org/SKILL.md`, `templates/base/.agents/skills/org/SKILL.md`
 - `docs/tech-debt/README.md`
@@ -116,11 +116,12 @@ Critical forks: None(全項目が数行の可逆な編集で、既定で解け�
 
 ## Deviation notes
 
-- 2026-09-17 plan: Codex plan advisory(codex-cli 0.154.0)が MEDIUM 1 件(`CODEX_HOME` trim が codex リゾルバと乖離)を報告。codex ソース 3 ref で裏取りし、項目 1 の方針を「trim しない・厳密空判定」に変更。Design decisions / AC-1 / Test plan / Risks / Rollout を更新済み
+- 2026-09-17 plan: Codex plan advisory(codex-cli 0.154.0)が MEDIUM 1 件(`CODEX_HOME` trim が codex リゾルバと乖離)を報告。codex ソースのタグ 2 ref(+ 当日の main)で裏取りし、項目 1 の方針を「trim しない・厳密空判定」に変更。Design decisions / AC-1 / Test plan / Risks / Rollout を更新済み
 - 項目 2(`DefaultModelForDriver` doc)は 463e943 で修正済みを確認。本 PR では触らない
 - 2026-09-17 work: `./scripts/branch-name.sh from-plan` は issue 番号付きの `chore/154/org-envelope-low-findings` を返すが、`/plan` が作成した worktree state(`plan-org-envelope-low-findings`)は `chore/org-envelope-low-findings` で登録済み。`/work` 手順 2d(既存 state を resume)に従い state 側のブランチを維持
 - 2026-09-17 work: Slice A = 314b89f(項目 1・3・7・8 + テスト 2 件)、Slice B = 746c70d(項目 5・9・10)。いずれも implementer 委譲、逸脱なし。Slice B の implementer が `docs/reports/self-review-2026-09-16-org-implementer-seat-envelope.md` に旧テスト名 `TestLoad_DriverPoolOnlyOverride_Codex` が残ると報告 — 過去レポートは当時の名称を記録した履歴として据え置く(tech-debt 行は Slice C でクローズ)
 - 2026-09-17 work: Slice C = 3a9362c(項目 4・6、tech-debt 行クローズ、4 面ミラー同期)。implementer が tech-debt 行編集中に句「since every file is already open.」を一度消し、自己検出して復元。orchestrator 側でパイプ数(6→6)と他 3 セルのハッシュ一致を確認済み。全 11 AC 達成、`./scripts/run-verify.sh` green(evidence: `docs/evidence/verify-2026-09-17-092738.log`、gitignored)
+- 2026-09-17 self-review(cycle 1): Merge 判定、LOW 8 件(L1〜L8)、CRITICAL/HIGH/MEDIUM なし。本 PR の趣旨(先送り LOW の一括解消)に照らし、8 件すべてを同 cycle 内で修正する(Slice D)。うち L1 は `internal/org/spawn.go` の雛形一覧コメントに `implementer.md` が欠ける同種欠陥で、plan の Affected areas 外だがスコープを 1 コメント行分だけ広げる。L4 は plan の Edge cases にあった空白のみ `CODEX_HOME` を実際にアサートするテストを追加。L7 に従い、codex ソースの根拠から動く `main` ref を外す(本 plan の記述も同時に修正)
 
 ## Progress checklist
 
