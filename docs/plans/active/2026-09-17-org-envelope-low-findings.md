@@ -123,6 +123,7 @@ Critical forks: None(全項目が数行の可逆な編集で、既定で解け�
 - 2026-09-17 work: Slice C = 3a9362c(項目 4・6、tech-debt 行クローズ、4 面ミラー同期)。implementer が tech-debt 行編集中に句「since every file is already open.」を一度消し、自己検出して復元。orchestrator 側でパイプ数(6→6)と他 3 セルのハッシュ一致を確認済み。全 11 AC 達成、`./scripts/run-verify.sh` green(evidence: `docs/evidence/verify-2026-09-17-092738.log`、gitignored)
 - 2026-09-17 self-review(cycle 1): Merge 判定、LOW 8 件(L1〜L8)、CRITICAL/HIGH/MEDIUM なし。本 PR の趣旨(先送り LOW の一括解消)に照らし、8 件すべてを同 cycle 内で修正する(Slice D)。うち L1 は `internal/org/spawn.go` の雛形一覧コメントに `implementer.md` が欠ける同種欠陥で、plan の Affected areas 外だがスコープを 1 コメント行分だけ広げる。L4 は plan の Edge cases にあった空白のみ `CODEX_HOME` を実際にアサートするテストを追加。L7 に従い、codex ソースの根拠から動く `main` ref を外す(本 plan の記述も同時に修正)
 - 2026-09-17 work: Slice D = ff30ee2(L1〜L8、9 ファイル)。implementer 委譲、逸脱なし(L1 のコメント再折返しが段落 6 行に及んだのみ)。orchestrator 側で tech-debt 行のパイプ数 6 と Impact/Why deferred セルのハッシュ一致、cli/org テスト pass を確認。`./scripts/run-verify.sh` green(evidence: `docs/evidence/verify-2026-09-17-095011.log`)
+- 2026-09-17 self-review 再検証: L1〜L8 全件解消。修正コミット ff30ee2 から新規 LOW 2 件(N1: `markdownSection` が空セクションで次セクション本文を返す(現雛形では到達不能)、N2: 空白のみ `CODEX_HOME` テストに Windows skip なし)。2 ファイル・数行のため inline 例外(`.claude/rules/ralph/subagent-policy.md` の trivial edit)として orchestrator が修正、Slice E = b677a95。N1 には normal / empty / EOF / `###` 降格 / 行中言及の 5 ケースを固定する `TestMarkdownSection_AnchorsHeaderAndBoundsBody` を追加。`gofmt -w` 後 `./scripts/run-verify.sh` green(evidence: `docs/evidence/verify-2026-09-17-100515.log`)
 
 ## Progress checklist
 
