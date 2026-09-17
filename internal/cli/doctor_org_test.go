@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -499,5 +500,68 @@ func TestCheckCodexModelSlugs_UnparsableCache_InfoNotWarn(t *testing.T) {
 	}
 	if !strings.Contains(r.Detail, "not valid JSON") {
 		t.Errorf("detail %q should surface the parse error", r.Detail)
+	}
+}
+
+// TestCheckCodexModelSlugs_CodexHomeUsedLiterally_TrailingSpace pins the
+// "use CODEX_HOME literally, like codex's own find_codex_home"
+// contract (codex-rs/utils/home-dir/src/lib.rs, identical at
+// rust-v0.149.1, rust-v0.154.0, and main: CODEX_HOME is filtered only on
+// emptiness and then used as-is -- never trimmed). A directory whose name
+// carries a trailing space holds a cache with every codex slug the test's
+// cfg uses (so reading it would pass), while the trimmed-name sibling
+// holds a cache missing those slugs (so reading it would warn). Setting
+// CODEX_HOME to the untrimmed literal name and asserting pass proves
+// codexModelsCachePath read the literal directory, not a trimmed one.
+func TestCheckCodexModelSlugs_CodexHomeUsedLiterally_TrailingSpace(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("trailing-space directory names are not creatable on Windows")
+	}
+
+	literal := filepath.Join(t.TempDir(), "codex ")
+	trimmed := strings.TrimRight(literal, " ")
+	if err := os.MkdirAll(literal, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(trimmed, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeCodexModelsCache(t, literal, "gpt-5.5")
+	writeCodexModelsCache(t, trimmed /* no matching slugs */)
+
+	t.Setenv("CODEX_HOME", literal)
+
+	cfg := config.Config{Org: config.OrgConfig{ModelPool: []config.OrgModelPoolEntry{
+		{Driver: "codex", Model: "gpt-5.5"},
+	}}}
+
+	r := checkCodexModelSlugs(cfg)
+	if r.Status != "pass" {
+		t.Fatalf("status = %q, want pass (detail=%q) -- CODEX_HOME must be read literally, not trimmed", r.Status, r.Detail)
+	}
+}
+
+// TestCheckCodexModelSlugs_HomeUnresolvable_Info covers AC-1(b): when
+// CODEX_HOME is empty and os.UserHomeDir cannot resolve a home directory,
+// checkCodexModelSlugs reports status info (a best-effort check, never a
+// hard failure) with the resolution error surfaced in Detail.
+func TestCheckCodexModelSlugs_HomeUnresolvable_Info(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("os.UserHomeDir falls back to USERPROFILE/HOMEDRIVE+HOMEPATH on Windows, not HOME")
+	}
+
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv("HOME", "")
+
+	cfg := config.Config{Org: config.OrgConfig{ModelPool: []config.OrgModelPoolEntry{
+		{Driver: "codex", Model: "gpt-5.5"},
+	}}}
+
+	r := checkCodexModelSlugs(cfg)
+	if r.Status != "info" {
+		t.Fatalf("status = %q, want info (detail=%q)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "could not resolve codex models cache path") {
+		t.Errorf("detail %q should name the resolution failure", r.Detail)
 	}
 }

@@ -15,20 +15,27 @@ import (
 
 // codexModelsCachePath resolves the path codex itself uses for its local
 // model-slug cache: $CODEX_HOME/models_cache.json when CODEX_HOME is set,
-// else $HOME/.codex/models_cache.json. Kept as its own function (rather than
-// inlined into checkCodexModelSlugs) so tests can pin it via t.Setenv
-// without touching any other doctor check.
-func codexModelsCachePath() string {
-	home := os.Getenv("CODEX_HOME")
-	if strings.TrimSpace(home) == "" {
-		// os.UserHomeDir reads $HOME on unix (the same env var the plan's
-		// fallback names), while also handling Windows correctly.
-		if uh, err := os.UserHomeDir(); err == nil {
-			home = uh
-		}
-		home = filepath.Join(home, ".codex")
+// else $HOME/.codex/models_cache.json. It mirrors codex's own resolver
+// exactly (codex-rs/utils/home-dir/src/lib.rs, find_codex_home -- identical
+// at rust-v0.149.1, rust-v0.154.0, and main): CODEX_HOME is filtered only on
+// emptiness (`!val.is_empty()`) and then used literally -- never trimmed or
+// otherwise normalized -- so this check reads the same directory codex
+// itself would. Kept as its own function (rather than inlined into
+// checkCodexModelSlugs) so tests can pin it via t.Setenv without touching
+// any other doctor check. Returns an error when CODEX_HOME is empty and the
+// home directory cannot be resolved; the caller reports that as an info
+// result rather than failing the check.
+func codexModelsCachePath() (string, error) {
+	if home := os.Getenv("CODEX_HOME"); home != "" {
+		return filepath.Join(home, "models_cache.json"), nil
 	}
-	return filepath.Join(home, "models_cache.json")
+	// os.UserHomeDir reads $HOME on unix (the same env var the plan's
+	// fallback names), while also handling Windows correctly.
+	uh, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve home directory for codex models cache: %w", err)
+	}
+	return filepath.Join(uh, ".codex", "models_cache.json"), nil
 }
 
 // codexModelsCacheDoc is a minimal decode of codex's models_cache.json
@@ -79,7 +86,13 @@ func checkCodexModelSlugs(cfg config.Config) checkResult {
 	}
 	sort.Strings(codexSlugs)
 
-	cachePath := codexModelsCachePath()
+	cachePath, err := codexModelsCachePath()
+	if err != nil {
+		r.Status = "info"
+		r.Detail = fmt.Sprintf("could not resolve codex models cache path: %v — skipping", err)
+		return r
+	}
+
 	data, err := os.ReadFile(cachePath)
 	if err != nil {
 		r.Status = "info"

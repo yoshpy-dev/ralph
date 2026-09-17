@@ -568,7 +568,6 @@ func pruneRetiredConditions(status *watchStatusFile) {
 	for alertID := range status.PendingAlerts {
 		if retiredConditionNames[retiredConditionTypeFromAlertID(alertID)] {
 			delete(status.PendingAlerts, alertID)
-			delete(status.Escalated, alertID)
 		}
 	}
 	for alertID := range status.Escalated {
