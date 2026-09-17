@@ -64,16 +64,16 @@ Critical forks: None(全項目が数行の可逆な編集で、既定で解け�
 
 ## Acceptance criteria
 
-- [ ] AC-1: `codexModelsCachePath` は空でない `CODEX_HOME` を literal に使い(`grep -n 'TrimSpace' internal/cli/doctor_codex_models.go` が空)、`CODEX_HOME` 空かつ home 解決失敗時にエラーを返す。`checkCodexModelSlugs` はその場合 status `info` で失敗理由を Detail に含める。テスト: (a) 末尾空白付き名のディレクトリ(`<tmp>/codex `)に全 slug 入り cache、trim 後名(`<tmp>/codex`)に slug 欠落 cache を置き、`CODEX_HOME=<tmp>/codex ` で pass になる(literal 側を読んだ証拠)、(b) `HOME=""` + `CODEX_HOME=""` で info になる、の 2 件が追加され pass
-- [ ] AC-2: `DefaultModelForDriver` の doc が現状(production caller なし、CLI は `resolveModelOrWarn` 経由で role-aware 版)と一致することを確認し、修正不要を Deviation notes に記録
-- [ ] AC-3: `grep -n 'PR③' internal/org/prompts.go` が空。`PlanPath` doc が 4 雛形すべてを非消費者として挙げる。`grep -rn 'PLAN_PATH' internal/org/prompts/` は引き続き空
+- [x] AC-1: `codexModelsCachePath` は空でない `CODEX_HOME` を literal に使い(`grep -n 'TrimSpace' internal/cli/doctor_codex_models.go` が空)、`CODEX_HOME` 空かつ home 解決失敗時にエラーを返す。`checkCodexModelSlugs` はその場合 status `info` で失敗理由を Detail に含める。テスト: (a) 末尾空白付き名のディレクトリ(`<tmp>/codex `)に全 slug 入り cache、trim 後名(`<tmp>/codex`)に slug 欠落 cache を置き、`CODEX_HOME=<tmp>/codex ` で pass になる(literal 側を読んだ証拠)、(b) `HOME=""` + `CODEX_HOME=""` で info になる、の 2 件が追加され pass
+- [x] AC-2: `DefaultModelForDriver` の doc が現状(production caller なし、CLI は `resolveModelOrWarn` 経由で role-aware 版)と一致することを確認し、修正不要を Deviation notes に記録
+- [x] AC-3: `grep -n 'PR③' internal/org/prompts.go` が空。`PlanPath` doc が 4 雛形すべてを非消費者として挙げる。`grep -rn 'PLAN_PATH' internal/org/prompts/` は引き続き空
 - [ ] AC-4: `/org` SKILL.md の Leaded 行が「Lead 自身は実装しない」旨で `lead.md` と整合し、`grep -rn 'Lead 自身か既存フロー' .claude .agents templates/base` が空。`./scripts/check-skill-sync.sh` と `./scripts/check-sync.sh` が pass
-- [ ] AC-5: `org_test.go` の fallback warning 検査が `strings.Count(...) != 1` で失敗する形になっている。`prompts_test.go` の fan-out 検査が節スコープのヘルパー経由で、全文検査(`strings.Contains(text, "max_seats")` 等)を残さない
+- [x] AC-5: `org_test.go` の fallback warning 検査が `strings.Count(...) != 1` で失敗する形になっている。`prompts_test.go` の fan-out 検査が節スコープのヘルパー経由で、全文検査(`strings.Contains(text, "max_seats")` 等)を残さない
 - [ ] AC-6: `lead.md` ミッション段落の文末がすべて敬体。`TestRenderRolePrompt_Lead_DelegatesToImplementer` pass
-- [ ] AC-7: `grep -n 'later slice' internal/config/config.go` が空で、doc が `checkCodexModelSlugs` を名指しする
-- [ ] AC-8: `pruneRetiredConditions` の `PendingAlerts` ループに `Escalated` への delete がなく、`TestWatch_PrunesRetiredBudgetEntriesFromStatus_NoEscalation` pass
-- [ ] AC-9: `grep -n 'claude/opus, claude/sonnet, claude/haiku' internal/org/prompts_test.go` が空で、lead fixture が `EnvelopeSummary(config.Default().Org)` を使う
-- [ ] AC-10: `grep -n 'func TestLoad_DriverPoolOnlyOverride_Codex(' internal/config/config_test.go` が空(改名済み)で新名に doc comment がある。roles 参照テストが `not present in [org].model_pool` と `gpt-5.5` の両方を検査する
+- [x] AC-7: `grep -n 'later slice' internal/config/config.go` が空で、doc が `checkCodexModelSlugs` を名指しする
+- [x] AC-8: `pruneRetiredConditions` の `PendingAlerts` ループに `Escalated` への delete がなく、`TestWatch_PrunesRetiredBudgetEntriesFromStatus_NoEscalation` pass
+- [x] AC-9: `grep -n 'claude/opus, claude/sonnet, claude/haiku' internal/org/prompts_test.go` が空で、lead fixture が `EnvelopeSummary(config.Default().Org)` を使う
+- [x] AC-10: `grep -n 'func TestLoad_DriverPoolOnlyOverride_Codex(' internal/config/config_test.go` が空(改名済み)で新名に doc comment がある。roles 参照テストが `not present in [org].model_pool` と `gpt-5.5` の両方を検査する
 - [ ] AC-11: `docs/tech-debt/README.md` の該当行が `~~` でクローズされ、issue #154 と項目別処置を記す。`./scripts/run-verify.sh` と `go test ./internal/...` が green
 
 ## Implementation outline
@@ -118,6 +118,8 @@ Critical forks: None(全項目が数行の可逆な編集で、既定で解け�
 
 - 2026-09-17 plan: Codex plan advisory(codex-cli 0.154.0)が MEDIUM 1 件(`CODEX_HOME` trim が codex リゾルバと乖離)を報告。codex ソース 3 ref で裏取りし、項目 1 の方針を「trim しない・厳密空判定」に変更。Design decisions / AC-1 / Test plan / Risks / Rollout を更新済み
 - 項目 2(`DefaultModelForDriver` doc)は 463e943 で修正済みを確認。本 PR では触らない
+- 2026-09-17 work: `./scripts/branch-name.sh from-plan` は issue 番号付きの `chore/154/org-envelope-low-findings` を返すが、`/plan` が作成した worktree state(`plan-org-envelope-low-findings`)は `chore/org-envelope-low-findings` で登録済み。`/work` 手順 2d(既存 state を resume)に従い state 側のブランチを維持
+- 2026-09-17 work: Slice A = 314b89f(項目 1・3・7・8 + テスト 2 件)、Slice B = 746c70d(項目 5・9・10)。いずれも implementer 委譲、逸脱なし。Slice B の implementer が `docs/reports/self-review-2026-09-16-org-implementer-seat-envelope.md` に旧テスト名 `TestLoad_DriverPoolOnlyOverride_Codex` が残ると報告 — 過去レポートは当時の名称を記録した履歴として据え置く(tech-debt 行は Slice C でクローズ)
 
 ## Progress checklist
 
