@@ -72,3 +72,79 @@ None. No failing tests in any suite.
 - Blocked: none.
 
 Behavioral test execution is complete for this plan. Proceeding to `/pr` is unblocked from `/test`'s perspective (deferred items above are pre-existing environment limitations, not plan-introduced gaps).
+
+## Cycle 2 (2026-09-17)
+
+- Scope: pipeline cycle 2 of 2 (fix-and-revalidate after cross-review ACTION_REQUIRED #1). `git diff 1a2baf4...HEAD` — commit `0d41553` (driver_pool-only override compatibility fix in `internal/config/config.go`: `orgPoolKeysPresent`/`filterModelPoolByDrivers`, inherits the default `[org].model_pool` filtered to a narrower `driver_pool` instead of failing the driver-membership check) and commit `79bcb96` (names `[org].driver_pool` in the empty-filtered-pool error message, not `[org].model_pool`), plus 5 new `internal/config` tests and a `templates/base/ralph.toml` comment. Behavioral tests only; no static analysis (verifier's scope, cycle 2 PASS per `docs/reports/verify-2026-09-16-org-implementer-seat-envelope.md`'s Cycle 2 section).
+- Evidence: `docs/evidence/test-2026-09-17-org-implementer-seat-envelope-cycle2.log` (`./scripts/run-test.sh` raw output, exit 0).
+
+### Test execution
+
+| Suite / Command | Tests | Passed | Failed | Skipped |
+| --- | --- | --- | --- | --- |
+| `./scripts/run-test.sh` (full shell suite, 28 files under `tests/`, full-scope fallback — `scripts/ralph-config.sh` remains language-unclassified from cycle 1, unchanged this cycle) | 691 assertions | 691 | 0 | 0 |
+| `go test ./... -count=1 -v` (fresh, uncached) | 8/8 packages | 8 | 0 | 0 |
+| `go test ./internal/config/ -run 'TestLoad_DriverPoolOnly\|TestLoad_ExplicitModelPool' -v -count=1` (the 5 new cycle-2 tests) | 5 | 5 | 0 | 0 |
+
+Shell suite is 28 files this cycle (`tests/*.sh` on disk), not the 23 cited in the cycle-1 report — the discrepancy predates this plan's changes (cycle 1's tester report undercounted; no test file was added or removed by this plan's cycle-2 commits). 691 total shell assertions counted by summing each file's own reported total (`PASS: N / M`, `N passed, M failed, T total`, or a bare `PASS: N` with `FAIL: 0`).
+
+New tests this cycle, all in `internal/config/config_test.go`:
+- `TestLoad_DriverPoolOnlyOverride_FiltersInheritedDefaultModelPool` — claude-only `driver_pool` inherits the 4 claude default models.
+- `TestLoad_DriverPoolOnlyOverride_Codex` — codex-only `driver_pool` inherits the 5 codex default slugs.
+- `TestLoad_DriverPoolOnlyOverride_NoDefaultModels_Errors` — a `driver_pool` naming only a driver absent from the default pool (`gemini`) errors, naming `[org].driver_pool` in the message.
+- `TestLoad_ExplicitModelPoolStillStrict` — an explicit `model_pool` alongside a narrower `driver_pool` is still validated strictly (no inheritance filtering applied).
+- `TestLoad_DriverPoolOnlyOverride_RolesReferencingFilteredModelErrors` — `[org.roles]` validation still runs against the filtered pool.
+
+### Coverage
+
+- `internal/config`: 92.3% (down from cycle 1's 93.5% — the new `orgPoolKeysPresent` helper's `toml.Unmarshal` error branch is uncovered; see Coverage gap below). `filterModelPoolByDrivers`: 100%. `orgPoolKeysPresent`: 75%.
+- `internal/org`: 89.1%, `internal/org/driver`: 92.0%, `internal/org/protocol`: 97.9% (all unchanged from cycle 1 — untouched by the cycle-2 fix).
+- `internal/cli`: 80.9% (unchanged from cycle 1 — untouched by the cycle-2 fix).
+
+### Coverage gap
+
+- `orgPoolKeysPresent`'s `toml.Unmarshal` error return path (config.go:200-ish) is untested and likely unreachable in practice: by the time `Load()` calls this helper, an earlier `toml.Unmarshal(data, &cfg)` call in the same function has already succeeded against the same `data` bytes, so a second unmarshal of a probe struct over identical bytes should not fail independently. Defensive error handling, not a behavioral gap — consistent with this repo's existing pattern of erring on the side of surfacing parse failures rather than assuming they can't happen.
+
+### Failure analysis
+
+None. No failing tests.
+
+### Regression checks
+
+| Previously broken / cycle-1-verified behavior | Status | Evidence |
+| --- | --- | --- |
+| `ralph org spawn --dry-run` with explicit `--model` (claude) | Confirmed unchanged | `spawned seat "implementer-1" (... model=fable ... dry_run=true)`, exit 0 |
+| `ralph org spawn --dry-run` without `--model` (claude) — warn-and-fallback | Confirmed unchanged | stderr: `org: --model omitted; falling back to first [org].model_pool entry permitted for role implementer on claude: fable ...`, followed by successful spawn line, exit 0 |
+| `ralph doctor`'s `Org codex model slugs` check | Confirmed unchanged | `✓ Org codex model slugs: pass — 5 codex model_pool slug(s) present in /Users/hiroki.yoshioka/.codex/models_cache.json` (real machine cache, same as cycle 1's environment-dependent check; today reports pass) |
+| A `ralph.toml` with only `[org].driver_pool = ["claude"]` (the cross-review regression this cycle fixes) must load without a parse-error warning | Confirmed fixed | See Integration checks below |
+| An empty-after-filtering `driver_pool` must still fail closed, naming the key the document actually wrote | Confirmed fixed | See Integration checks below |
+
+### Integration checks (this cycle's task-specified scenarios)
+
+Built a fresh binary (`go build -o <scratch>/ralph-cycle2 ./cmd/ralph`) since `ralph doctor`/`ralph org spawn` resolve `ralph.toml` from the process's current working directory with no `--config` flag (confirmed via `internal/cli/doctor.go:88` and `newDoctorCmd`'s `runDoctorFull(".", ...)` — `ralph org` has a `--config` flag but `ralph doctor` does not), so each scenario below `cd`s into its own scratch directory before invoking the binary.
+
+- Scratch `<scratchpad>/cycle2/claude-only/ralph.toml` containing only:
+  ```
+  [org]
+  driver_pool = ["claude"]
+  ```
+  `ralph doctor` run from that directory: no `ralph.toml: warn` line at all (confirms clean load, no parse-error), and `ℹ Org envelope: info — model_pool: 4 entries, max_seats: 5` — 4 model_pool entries, matching the 4 claude default models (fable/opus/sonnet/haiku).
+- Scratch `<scratchpad>/cycle2/gemini-only/ralph.toml` containing only:
+  ```
+  [org]
+  driver_pool = ["gemini"]
+  ```
+  `ralph doctor` run from that directory: `⚠ ralph.toml: warn — parse error: [org].driver_pool [gemini] has no default [org].model_pool entries; set [org].model_pool explicitly — using defaults`, and `ℹ Org envelope: info — model_pool: 0 entries, max_seats: 5` (defaults substituted after the warn, per doctor's existing fail-open-with-warning convention for config parse errors). Confirms the driver_pool-naming error message from `TestLoad_DriverPoolOnlyOverride_NoDefaultModels_Errors` surfaces identically through the live CLI path, not just the unit test.
+
+### Test gaps
+
+- Carried over from cycle 1 (unaffected by this cycle's fix): no live non-dry-run `ralph org spawn` (agmsg/herdr tooling unavailable in this dev environment); no end-to-end codex-driver spawn success (`codex_verified=true` is out of scope); branch/function coverage is not separately instrumented (`go test -cover` reports statement coverage only); the doctor codex-slug pass/warn result is environment-dependent on the live `~/.codex/models_cache.json`.
+- New this cycle: `orgPoolKeysPresent`'s defensive `toml.Unmarshal` error branch is untested (see Coverage gap above) — believed unreachable given `Load()`'s existing earlier unmarshal of the same bytes, not treated as a blocking gap.
+
+### Verdict
+
+- Pass: all 691 shell assertions across 28 `tests/*.sh` files, all 8 Go packages (`go test ./... -count=1 -v`, fresh uncached run), all 5 new `internal/config` driver_pool/model_pool tests (targeted verbose run), both live-binary integration scenarios from this cycle's task (claude-only driver_pool loads clean with 4 model_pool entries; gemini-only driver_pool fails closed naming `[org].driver_pool`), and both cycle-1 regression checks re-run (spawn `--dry-run` with/without `--model`, doctor codex-slug line).
+- Fail: none.
+- Blocked: none.
+
+Behavioral test execution is complete for pipeline cycle 2 of 2. Proceeding to `/sync-docs` → `/cross-review` → `/pr` is unblocked from `/test`'s perspective.
