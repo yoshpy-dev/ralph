@@ -20,7 +20,7 @@ pointer, not a dump.
 
 - Every seat's identity is either `lead` (the org's coordinating identity,
   registered once per org via `ensureLeadJoined`) or a seat id
-  (`--id` at spawn time, e.g. `reviewer`, `qa`).
+  (`--id` at spawn time, e.g. `implementer`, `reviewer`, `qa`).
 - A seat only ever addresses `TO: lead`. Seats do not message each other
   directly — that keeps the message graph a star, not a mesh, so `lead` has
   a single point from which to observe and arbitrate the whole org.

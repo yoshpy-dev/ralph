@@ -59,7 +59,7 @@ in `scripts/ralph-config.sh`.
 - **Always pin `model:` in agent frontmatter.** Omitted `model:` means
   `inherit` — a subagent spawned from an expensive main session silently runs
   on that expensive model, multiplied by parallel fan-out.
-- **Use stable aliases (`opus`, `sonnet`, `haiku`), not full model IDs**, in
+- **Use stable aliases (`fable`, `opus`, `sonnet`, `haiku`), not full model IDs**, in
   agent frontmatter, `ralph.toml`, `scripts/ralph-config.sh`, and skill docs.
   Full IDs go stale and can break `claude -p` at runtime. Pin a full ID only
   via environment variable when a specific run must be reproducible.
@@ -86,7 +86,9 @@ via the tier table above. Each spawn appends a JSON line to
 driver / commanded_model / reported_effective_model / honored / reason`. This
 is a separate mechanism from the `/work` subagent tiers documented above —
 see the org runtime spec shipped with your project for its own model
-selection rules.
+selection rules. Codex seats have no aliases; `[org].model_pool` carries
+codex model slugs, and `ralph doctor` warns when a slug is missing from
+codex's local model cache.
 
 ## Where the values live
 

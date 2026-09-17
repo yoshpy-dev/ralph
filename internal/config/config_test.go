@@ -113,16 +113,22 @@ require_go = false
 }
 
 // TestDefault_Org verifies the [org] envelope defaults (AC-6): driver_pool,
-// model_pool, roles, max_seats, budget, and deadman_minutes.
+// model_pool, roles, max_seats, and deadman_minutes.
 func TestDefault_Org(t *testing.T) {
 	o := Default().Org
 	if len(o.DriverPool) != 2 || o.DriverPool[0] != "claude" || o.DriverPool[1] != "codex" {
 		t.Errorf("driver_pool = %v, want [claude codex]", o.DriverPool)
 	}
 	wantModelPool := []OrgModelPoolEntry{
+		{Driver: "claude", Model: "fable"},
 		{Driver: "claude", Model: "opus"},
 		{Driver: "claude", Model: "sonnet"},
 		{Driver: "claude", Model: "haiku"},
+		{Driver: "codex", Model: "gpt-6-astra"},
+		{Driver: "codex", Model: "gpt-5.6-sol"},
+		{Driver: "codex", Model: "gpt-5.6-terra"},
+		{Driver: "codex", Model: "gpt-5.6-luna"},
+		{Driver: "codex", Model: "gpt-5.5"},
 	}
 	if len(o.ModelPool) != len(wantModelPool) {
 		t.Fatalf("model_pool = %+v, want %+v", o.ModelPool, wantModelPool)
@@ -137,15 +143,6 @@ func TestDefault_Org(t *testing.T) {
 	}
 	if o.MaxSeats != 5 {
 		t.Errorf("max_seats = %d, want 5", o.MaxSeats)
-	}
-	if o.Budget.SeatWallClockMinutes != 30 {
-		t.Errorf("budget.seat_wall_clock_minutes = %d, want 30", o.Budget.SeatWallClockMinutes)
-	}
-	if o.Budget.TotalWallClockMinutes != 120 {
-		t.Errorf("budget.total_wall_clock_minutes = %d, want 120", o.Budget.TotalWallClockMinutes)
-	}
-	if o.Budget.MaxFixRounds != 2 {
-		t.Errorf("budget.max_fix_rounds = %d, want 2", o.Budget.MaxFixRounds)
 	}
 	if o.DeadmanMinutes != 10 {
 		t.Errorf("deadman_minutes = %d, want 10", o.DeadmanMinutes)
@@ -191,9 +188,6 @@ model = "opus"
 	if cfg.Org.MaxSeats != want.MaxSeats {
 		t.Errorf("max_seats = %d, want %d", cfg.Org.MaxSeats, want.MaxSeats)
 	}
-	if cfg.Org.Budget != want.Budget {
-		t.Errorf("budget = %+v, want %+v", cfg.Org.Budget, want.Budget)
-	}
 	if cfg.Org.DeadmanMinutes != want.DeadmanMinutes {
 		t.Errorf("deadman_minutes = %d, want %d", cfg.Org.DeadmanMinutes, want.DeadmanMinutes)
 	}
@@ -221,14 +215,13 @@ func TestLoad_OrgRolesEmpty(t *testing.T) {
 		t.Errorf("roles = %v, want empty", cfg.Org.Roles)
 	}
 	// model_pool must still fall back to the default pool.
-	if len(cfg.Org.ModelPool) != 3 {
-		t.Errorf("model_pool = %+v, want 3 default entries", cfg.Org.ModelPool)
+	if len(cfg.Org.ModelPool) != 9 {
+		t.Errorf("model_pool = %+v, want 9 default entries", cfg.Org.ModelPool)
 	}
 }
 
 // TestLoad_OrgFullRoundTrip verifies a fully specified [org] section
-// (including [org.roles] and [org.budget]) round-trips through Load()
-// unchanged.
+// (including [org.roles]) round-trips through Load() unchanged.
 func TestLoad_OrgFullRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "ralph.toml")
@@ -244,11 +237,6 @@ agmsg_home = "~/custom/agmsg-home"
 
 [org.roles]
 reviewer = ["opus"]
-
-[org.budget]
-seat_wall_clock_minutes = 45
-total_wall_clock_minutes = 90
-max_fix_rounds = 1
 `
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		t.Fatal(err)
@@ -271,15 +259,6 @@ max_fix_rounds = 1
 	}
 	if models := cfg.Org.Roles["reviewer"]; len(models) != 1 || models[0] != "opus" {
 		t.Errorf("roles[reviewer] = %v, want [opus]", models)
-	}
-	if cfg.Org.Budget.SeatWallClockMinutes != 45 {
-		t.Errorf("budget.seat_wall_clock_minutes = %d, want 45", cfg.Org.Budget.SeatWallClockMinutes)
-	}
-	if cfg.Org.Budget.TotalWallClockMinutes != 90 {
-		t.Errorf("budget.total_wall_clock_minutes = %d, want 90", cfg.Org.Budget.TotalWallClockMinutes)
-	}
-	if cfg.Org.Budget.MaxFixRounds != 1 {
-		t.Errorf("budget.max_fix_rounds = %d, want 1", cfg.Org.Budget.MaxFixRounds)
 	}
 	if cfg.Org.AgmsgHome != "~/custom/agmsg-home" {
 		t.Errorf("agmsg_home = %q, want %q", cfg.Org.AgmsgHome, "~/custom/agmsg-home")
@@ -311,8 +290,7 @@ agmsg_home = ""
 
 // TestLoad_OrgRejects is a table-driven check of every [org] validation
 // rejection: driver absent from driver_pool, duplicate model_pool entries,
-// explicitly empty model_pool, roles referencing an unknown model, and
-// out-of-range budget values.
+// explicitly empty model_pool, and roles referencing an unknown model.
 func TestLoad_OrgRejects(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -354,27 +332,6 @@ reviewer = ["sonnet"]
 `,
 			wantSub: "reviewer",
 		},
-		{
-			name: "seat_wall_clock_minutes below 1",
-			body: `[org.budget]
-seat_wall_clock_minutes = 0
-`,
-			wantSub: "seat_wall_clock_minutes",
-		},
-		{
-			name: "total_wall_clock_minutes below 1",
-			body: `[org.budget]
-total_wall_clock_minutes = 0
-`,
-			wantSub: "total_wall_clock_minutes",
-		},
-		{
-			name: "max_fix_rounds below 1",
-			body: `[org.budget]
-max_fix_rounds = 0
-`,
-			wantSub: "max_fix_rounds",
-		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -391,6 +348,30 @@ max_fix_rounds = 0
 				t.Errorf("error %q does not mention %q", err.Error(), tc.wantSub)
 			}
 		})
+	}
+}
+
+// TestLoad_IgnoresRetiredOrgBudgetTable verifies that a ralph.toml which
+// still carries the retired [org.budget] table (seat_wall_clock_minutes/
+// total_wall_clock_minutes/max_fix_rounds -- removed together with the org
+// budget concept) loads without error: go-toml's Unmarshal ignores TOML
+// keys/tables with no matching Go struct field, so an unrecognized
+// [org.budget] table is silently skipped rather than rejected. This is what
+// lets a downstream project's existing ralph.toml (written before this
+// removal) keep working unchanged after an upgrade.
+func TestLoad_IgnoresRetiredOrgBudgetTable(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ralph.toml")
+	content := `[org.budget]
+seat_wall_clock_minutes = 30
+total_wall_clock_minutes = 120
+max_fix_rounds = 2
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err != nil {
+		t.Fatalf("Load: expected a retired [org.budget] table to be silently ignored, got error: %v", err)
 	}
 }
 
@@ -705,5 +686,144 @@ watcher_model = ""
 	}
 	if cfg.Org.Watchdog.WatcherModel != "" {
 		t.Errorf("watchdog.watcher_model = %q, want empty", cfg.Org.Watchdog.WatcherModel)
+	}
+}
+
+// TestLoad_DriverPoolOnlyOverride_FiltersInheritedDefaultModelPool verifies
+// that a ralph.toml overriding only [org].driver_pool (leaving model_pool
+// unset) inherits the default model_pool filtered down to the declared
+// driver_pool, rather than the raw (unfiltered) default pool -- a claude-only
+// driver_pool must not inherit the default pool's codex entries and fail the
+// driver-membership check (cross-review ACTION_REQUIRED #1).
+func TestLoad_DriverPoolOnlyOverride_FiltersInheritedDefaultModelPool(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ralph.toml")
+	content := `[org]
+driver_pool = ["claude"]
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: unexpected error: %v", err)
+	}
+	wantModels := []string{"fable", "opus", "sonnet", "haiku"}
+	if len(cfg.Org.ModelPool) != len(wantModels) {
+		t.Fatalf("model_pool = %+v, want %d claude entries %v", cfg.Org.ModelPool, len(wantModels), wantModels)
+	}
+	for i, entry := range cfg.Org.ModelPool {
+		if entry.Driver != "claude" {
+			t.Errorf("model_pool[%d].driver = %q, want claude", i, entry.Driver)
+		}
+		if entry.Model != wantModels[i] {
+			t.Errorf("model_pool[%d].model = %q, want %q", i, entry.Model, wantModels[i])
+		}
+	}
+}
+
+// TestLoad_DriverPoolOnlyOverride_Codex verifies the same driver_pool-only
+// override behavior for a codex-only driver_pool: the inherited default pool
+// filters down to the 5 codex slugs, in Default()'s declared order.
+func TestLoad_DriverPoolOnlyOverride_Codex(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ralph.toml")
+	content := `[org]
+driver_pool = ["codex"]
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: unexpected error: %v", err)
+	}
+	wantModels := []string{"gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5"}
+	if len(cfg.Org.ModelPool) != len(wantModels) {
+		t.Fatalf("model_pool = %+v, want %d codex entries %v", cfg.Org.ModelPool, len(wantModels), wantModels)
+	}
+	for i, entry := range cfg.Org.ModelPool {
+		if entry.Driver != "codex" {
+			t.Errorf("model_pool[%d].driver = %q, want codex", i, entry.Driver)
+		}
+		if entry.Model != wantModels[i] {
+			t.Errorf("model_pool[%d].model = %q, want %q", i, entry.Model, wantModels[i])
+		}
+	}
+}
+
+// TestLoad_DriverPoolOnlyOverride_NoDefaultModels_Errors verifies that when
+// the declared driver_pool names only drivers with no entries in Default()'s
+// model_pool (e.g. a hypothetical "gemini" driver), filtering the inherited
+// default pool down to that driver_pool leaves it empty, and Load() still
+// returns an error that names [org].driver_pool (the key the document actually wrote) rather than
+// silently succeeding with zero usable models.
+func TestLoad_DriverPoolOnlyOverride_NoDefaultModels_Errors(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ralph.toml")
+	content := `[org]
+driver_pool = ["gemini"]
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load: expected error, got nil")
+	}
+	if !contains(err.Error(), "driver_pool [gemini] has no default [org].model_pool entries") {
+		t.Errorf("error %q does not mention %q", err.Error(), "driver_pool [gemini] has no default [org].model_pool entries")
+	}
+}
+
+// TestLoad_ExplicitModelPoolStillStrict verifies that a document which sets
+// model_pool explicitly is not subject to the driver_pool-only inheritance
+// filter: an explicit codex entry alongside a claude-only driver_pool must
+// still fail the driver-membership check exactly as before this change.
+func TestLoad_ExplicitModelPoolStillStrict(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ralph.toml")
+	content := `[org]
+driver_pool = ["claude"]
+model_pool = [
+  { driver = "claude", model = "opus" },
+  { driver = "codex", model = "gpt-5.5" },
+]
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load: expected error, got nil")
+	}
+	if !contains(err.Error(), "not present in [org].driver_pool") {
+		t.Errorf("error %q does not mention %q", err.Error(), "not present in [org].driver_pool")
+	}
+}
+
+// TestLoad_DriverPoolOnlyOverride_RolesReferencingFilteredModelErrors
+// verifies that [org.roles] validation still runs against the filtered
+// (inherited) model_pool: a role referencing a model that driver_pool
+// filtering dropped (or that was never in the default pool) must still
+// error via the existing roles check.
+func TestLoad_DriverPoolOnlyOverride_RolesReferencingFilteredModelErrors(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ralph.toml")
+	content := `[org]
+driver_pool = ["claude"]
+
+[org.roles]
+reviewer = ["gpt-5.5"]
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load: expected error, got nil")
+	}
+	if !contains(err.Error(), "reviewer") {
+		t.Errorf("error %q does not mention %q", err.Error(), "reviewer")
 	}
 }

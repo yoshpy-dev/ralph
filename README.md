@@ -229,7 +229,7 @@ See `.claude/rules/ralph/post-implementation-pipeline.md` for the canonical pipe
 
 ## Org runtime (autonomous multi-seat execution)
 
-For autonomous execution outside the interactive `/work` loop, `ralph org` spawns and coordinates multiple agent seats (a `lead` plus roles like `reviewer`, `qa`) over a typed messaging protocol (star topology — every seat addresses `TO: lead` only), with a two-layer watchdog (pulse watch + on-demand watcher) and an append-only manifest so `ralph status` works even if the underlying driver is stopped.
+For autonomous execution outside the interactive `/work` loop, `ralph org` spawns and coordinates multiple agent seats (a `lead` plus `implementer`, `reviewer`, and `qa` seats) over a typed messaging protocol (star topology — every seat addresses `TO: lead` only), with a two-layer watchdog (pulse watch + on-demand watcher) and an append-only manifest so `ralph status` works even if the underlying driver is stopped.
 
 ```sh
 ralph org spawn --org-id my-task --id lead --role lead

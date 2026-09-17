@@ -94,8 +94,8 @@ func requireSeatIdentifier(flag, value string) error {
 // for the full rationale (fixes the lead/operator cwd-split, tech-debt
 // "state-dir の cwd 相対解決"). A caller that also needs the resolved
 // config.OrgConfig for its own purposes beyond wiring (e.g.
-// newOrgStartCmd's --model default resolution via
-// org.DefaultModelForDriver) reads it back off the returned *org.Org's
+// resolveModelOrWarn's --model default resolution via
+// org.DefaultModelForDriverAndRole) reads it back off the returned *org.Org's
 // exported Config field rather than newOrgRuntime returning a second
 // value.
 func newOrgRuntime(cmd *cobra.Command, stateDir, configPath string) (*org.Org, error) {
@@ -145,6 +145,34 @@ func resolveOrgConfig(configPath string) (config.OrgConfig, error) {
 	return cfg.Org, nil
 }
 
+// resolveModelOrWarn resolves the effective --model value for driver/role:
+// when model is non-blank it is returned unchanged, otherwise it falls back
+// to org.DefaultModelForDriverAndRole(cfg, driver, role) (the first
+// [org].model_pool entry for driver that is also permitted for role under
+// [org.roles]) and prints exactly one warning line to stderr, so both
+// `ralph org spawn` and `ralph org start` share the same fallback behavior
+// and the same warning wording instead of each hand-rolling it. Threading
+// role through the fallback (rather than plain org.DefaultModelForDriver)
+// keeps the warning honest: if it prints a model, that model also passes
+// ValidateSpawnEnvelope's own modelAllowedForRole check, instead of
+// warn-then-reject when a role-restricted pool's head entry is
+// impermissible for the requesting role (self-review MEDIUM-2). stderr is
+// cmd.ErrOrStderr() at call sites so tests can capture the warning without
+// touching the real process stderr.
+func resolveModelOrWarn(cfg config.OrgConfig, driverName, role, model string, stderr io.Writer) (string, error) {
+	if strings.TrimSpace(model) != "" {
+		return model, nil
+	}
+	resolved, err := org.DefaultModelForDriverAndRole(cfg, driverName, role)
+	if err != nil {
+		return "", err
+	}
+	_, _ = fmt.Fprintf(stderr,
+		"org: --model omitted; falling back to first [org].model_pool entry permitted for role %s on %s: %s (pass --model explicitly)\n",
+		role, driverName, resolved)
+	return resolved, nil
+}
+
 // splitCommaList splits a comma-separated flag value into a trimmed,
 // non-empty slice. An all-blank input yields nil.
 func splitCommaList(s string) []string {
@@ -179,7 +207,7 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err := requireSeatIdentifier("--id", seatID); err != nil {
 				return err
 			}
-			for flag, val := range map[string]string{"--role": role, "--driver": driverName, "--model": model, "--cwd": cwd} {
+			for flag, val := range map[string]string{"--role": role, "--driver": driverName, "--cwd": cwd} {
 				if strings.TrimSpace(val) == "" {
 					return fmt.Errorf("org: %s is required", flag)
 				}
@@ -189,8 +217,12 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			resolvedModel, err := resolveModelOrWarn(rt.Config, driverName, role, model, cmd.ErrOrStderr())
+			if err != nil {
+				return err
+			}
 			result := rt.Spawn(org.SpawnParams{
-				OrgID: *orgID, SeatID: seatID, Role: role, Driver: driverName, Model: model,
+				OrgID: *orgID, SeatID: seatID, Role: role, Driver: driverName, Model: resolvedModel,
 				Cwd: cwd, Prompt: prompt, Scope: scope, TimeoutMS: timeoutMS, DryRun: dryRun,
 				LeadDriver: leadDriver, AllowUnscoped: allowUnscoped,
 			})
@@ -202,7 +234,7 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	cmd.Flags().StringVar(&seatID, "id", "", "seat id (required)")
 	cmd.Flags().StringVar(&role, "role", "", "seat role (required)")
 	cmd.Flags().StringVar(&driverName, "driver", "", "driver CLI: claude|codex (required)")
-	cmd.Flags().StringVar(&model, "model", "", "model name or alias (required)")
+	cmd.Flags().StringVar(&model, "model", "", "model name or alias (default: first [org].model_pool entry permitted for the role on --driver, with a warning)")
 	cmd.Flags().StringVar(&cwd, "cwd", "", "working directory for the new seat (required)")
 	cmd.Flags().StringVar(&prompt, "prompt", "", "optional initial prompt passed to the agent")
 	cmd.Flags().StringVar(&scope, "scope", "", "optional scope description (recorded on the spawned event; substituted into --role templates as {{SCOPE}})")
@@ -277,12 +309,9 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			resolvedModel := model
-			if strings.TrimSpace(resolvedModel) == "" {
-				resolvedModel, err = org.DefaultModelForDriver(rt.Config, driverName)
-				if err != nil {
-					return err
-				}
+			resolvedModel, err := resolveModelOrWarn(rt.Config, driverName, org.LeadIdentity, model, cmd.ErrOrStderr())
+			if err != nil {
+				return err
 			}
 
 			result := rt.Spawn(org.SpawnParams{
@@ -300,7 +329,7 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&driverName, "driver", "claude", "driver CLI the lead seat runs as: claude|codex")
-	cmd.Flags().StringVar(&model, "model", "", "model name or alias (default: first [org].model_pool entry for --driver)")
+	cmd.Flags().StringVar(&model, "model", "", "model name or alias (default: first [org].model_pool entry permitted for the role on --driver, with a warning)")
 	cmd.Flags().StringVar(&cwd, "cwd", "", "working directory for the lead seat (required)")
 	cmd.Flags().StringVar(&scope, "scope", "", "optional scope description (see `ralph org spawn --scope`)")
 	cmd.Flags().IntVar(&timeoutMS, "timeout-ms", 60000, "per-step herdr timeout in milliseconds")
@@ -639,10 +668,10 @@ func newOrgReportCmd(orgID, stateDir, configPath *string) *cobra.Command {
 
 // newOrgWatchCmd wires `ralph org watch` (PR④ pulse layer, AC-3/3b/3c/4/5):
 // a deterministic, interval-driven condition loop over (*org.Org).RunWatch.
-// All condition evaluation, budget-cutoff, ALERT dedupe, and deadman
-// escalation logic lives in internal/org/watch.go -- this command resolves
-// the state directory (the same one manifest/receipts already live in, via
-// org.ResolveOrgStateDir) and wires flags through to org.WatchParams.
+// All condition evaluation, ALERT dedupe, and deadman escalation logic lives
+// in internal/org/watch.go -- this command resolves the state directory (the
+// same one manifest/receipts already live in, via org.ResolveOrgStateDir)
+// and wires flags through to org.WatchParams.
 func newOrgWatchCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	var (
 		intervalSeconds int
@@ -653,10 +682,8 @@ func newOrgWatchCmd(orgID, stateDir, configPath *string) *cobra.Command {
 		Use:   "watch",
 		Short: "Run the deterministic pulse-layer watchdog for an org",
 		Long: "ralph org watch evaluates watch conditions every --interval-seconds\n" +
-			"(default: [org.watchdog].interval_seconds) for --org-id: seat/org\n" +
-			"wall-clock budget cutoff (auto Stop, the same verb `ralph org stop`\n" +
-			"uses -- StopParams.Reason records the condition/threshold/observed\n" +
-			"value), heartbeat-stall / process-liveness / worktree-scope-change\n" +
+			"(default: [org.watchdog].interval_seconds) for --org-id:\n" +
+			"heartbeat-stall / process-liveness / worktree-scope-change\n" +
 			"ALERTs sent to the lead seat, and a deadman escalation\n" +
 			"(<state-dir>/escalations.jsonl + stderr banner + best-effort darwin\n" +
 			"notification) when the lead does not respond within\n" +

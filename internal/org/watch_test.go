@@ -256,7 +256,6 @@ func watchTestConfig() config.OrgConfig {
 		ModelPool:      []config.OrgModelPoolEntry{{Driver: "claude", Model: "sonnet"}},
 		Roles:          map[string][]string{},
 		MaxSeats:       10,
-		Budget:         config.OrgBudgetConfig{SeatWallClockMinutes: 30, TotalWallClockMinutes: 120},
 		DeadmanMinutes: 10,
 		Watchdog: config.OrgWatchdogConfig{
 			IntervalSeconds: 30, StallMinutes: 15, WatcherEnabled: true, WatcherModel: "haiku",
@@ -312,245 +311,10 @@ func newTestWatchRun(o *Org, gitStatus GitStatusFunc, escalateFn EscalateFunc, s
 	}, statusPath, escalationsPath
 }
 
-// --- AC-3: seat wall-clock budget cutoff ------------------------------------
-
-func TestWatch_SeatBudgetCutoff_AtBoundary_NotBeforeThenCutoffThenDeduped(t *testing.T) {
-	o, h, a, clk := testWatchOrg(t)
-	o.Config.Watchdog.StallMinutes = 10000 // keep the stall condition out of the picture
-	// Deliberately no lead seat spawned -- ALERT delivery must not depend on
-	// one (Bug 1 regression; see the ALERT assertions below via watchdogAlerts(a)).
-	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
-		t.Fatalf("spawn failed: %+v", r)
-	}
-
-	run, statusPath, _ := newTestWatchRun(o, nil, nil, &bytes.Buffer{})
-	status, err := loadWatchStatus(statusPath, "org-a")
-	if err != nil {
-		t.Fatalf("loadWatchStatus: %v", err)
-	}
-
-	// Cycle 1: 29 minutes elapsed -- must NOT cut off yet.
-	clk.Advance(29 * time.Minute)
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
-		t.Fatalf("cycle 1: %v", err)
-	}
-	if st, _ := o.Status("org-a", false); !findSeatStatus(t, st.Seats, "seat-1").Active {
-		t.Fatalf("expected seat-1 still active after 29m, got %+v", st.Seats)
-	}
-
-	// Cycle 2: exactly 30 minutes elapsed -- boundary itself must NOT cut off
-	// ("not before", i.e. strictly greater than the limit).
-	clk.Advance(1 * time.Minute)
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
-		t.Fatalf("cycle 2: %v", err)
-	}
-	if st, _ := o.Status("org-a", false); !findSeatStatus(t, st.Seats, "seat-1").Active {
-		t.Fatalf("expected seat-1 still active at exactly the 30m boundary, got %+v", st.Seats)
-	}
-
-	// Cycle 3: 30m + 1s -- must cut off now.
-	clk.Advance(1 * time.Second)
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
-		t.Fatalf("cycle 3: %v", err)
-	}
-	st, err := o.Status("org-a", false)
-	if err != nil {
-		t.Fatalf("status: %v", err)
-	}
-	seat1 := findSeatStatus(t, st.Seats, "seat-1")
-	if seat1.Active {
-		t.Fatalf("expected seat-1 stopped after exceeding budget, got %+v", st.Seats)
-	}
-	if !strings.Contains(seat1.Details, "watchdog_budget_cutoff seat_wall_clock=30m") {
-		t.Fatalf("expected stopped Details to record the watchdog Reason, got %q", seat1.Details)
-	}
-	if n := h.countKeys("C-c"); n != 1 {
-		t.Fatalf("expected exactly 1 Stop attempt (C-c), got %d", n)
-	}
-	alerts := watchdogAlerts(a)
-	if n := len(alerts); n != 1 {
-		t.Fatalf("expected exactly 1 ALERT sent, got %d: %+v", n, alerts)
-	}
-	if alerts[0].from != watchdogIdentity || alerts[0].to != LeadIdentity {
-		t.Errorf("expected the ALERT to be sent from %q to %q, got from=%q to=%q", watchdogIdentity, LeadIdentity, alerts[0].from, alerts[0].to)
-	}
-	if err := protocol.ValidateText(alerts[0].message, 0); err != nil {
-		t.Errorf("expected the generated ALERT to be protocol-conformant, got %v (text=%q)", err, alerts[0].message)
-	}
-	if !strings.Contains(alerts[0].message, "TYPE: ALERT") || !strings.Contains(alerts[0].message, "watchdog_budget_cutoff") {
-		t.Errorf("expected ALERT body to carry TYPE: ALERT and the cutoff reason, got %q", alerts[0].message)
-	}
-
-	// Cycle 4 and 5 (3 total cycles past the cutoff): dedupe -- no second
-	// Stop attempt, no second ALERT.
-	for range 2 {
-		clk.Advance(1 * time.Minute)
-		if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
-			t.Fatalf("dedupe cycle: %v", err)
-		}
-	}
-	if n := h.countKeys("C-c"); n != 1 {
-		t.Fatalf("expected still exactly 1 Stop attempt after 2 more cycles (dedupe), got %d", n)
-	}
-	if n := len(watchdogAlerts(a)); n != 1 {
-		t.Fatalf("expected still exactly 1 ALERT after 2 more cycles (dedupe), got %d", n)
-	}
-}
-
-// --- AC-3b: org total wall-clock budget cutoff ------------------------------
-
-func TestWatch_TotalBudgetCutoff_CutsAllActiveSeats_OneOrgLevelAlert(t *testing.T) {
-	o, h, a, clk := testWatchOrg(t)
-	o.Config.Budget.TotalWallClockMinutes = 5
-	o.Config.Budget.SeatWallClockMinutes = 1000 // avoid seat-level cutoff firing first
-	// Deliberately no lead seat spawned -- ALERT delivery must not depend on
-	// one (Bug 1 regression).
-
-	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
-		t.Fatalf("spawn seat-1 failed: %+v", r)
-	}
-	clk.Advance(1 * time.Minute)
-	if r := o.Spawn(watchSpawnParams("org-a", "seat-2", "worker")); r.Outcome != SpawnOutcomeSpawned {
-		t.Fatalf("spawn seat-2 failed: %+v", r)
-	}
-
-	run, statusPath, _ := newTestWatchRun(o, nil, nil, &bytes.Buffer{})
-	status, err := loadWatchStatus(statusPath, "org-a")
-	if err != nil {
-		t.Fatalf("loadWatchStatus: %v", err)
-	}
-
-	clk.Advance(10 * time.Minute) // org_start (seat-1's spawn, the earliest active seat) + ~10m > 5m total budget
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
-		t.Fatalf("evaluateCycle: %v", err)
-	}
-
-	st, err := o.Status("org-a", false)
-	if err != nil {
-		t.Fatalf("status: %v", err)
-	}
-	for _, seatID := range []string{"seat-1", "seat-2"} {
-		s := findSeatStatus(t, st.Seats, seatID)
-		if s.Active {
-			t.Errorf("expected seat %q stopped by total-budget cutoff, still active: %+v", seatID, s)
-		}
-		if !strings.Contains(s.Details, "watchdog_total_budget_cutoff") {
-			t.Errorf("expected seat %q Details to record total-budget reason, got %q", seatID, s.Details)
-		}
-	}
-	if n := h.countKeys("C-c"); n != 2 {
-		t.Fatalf("expected exactly 2 Stop attempts (one per seat), got %d", n)
-	}
-	if n := len(watchdogAlerts(a)); n != 1 {
-		t.Fatalf("expected exactly 1 org-level ALERT, got %d: %+v", n, watchdogAlerts(a))
-	}
-	if !strings.Contains(watchdogAlerts(a)[0].message, "CONDITION: total_budget") {
-		t.Errorf("expected the org-level ALERT to carry CONDITION: total_budget, got %q", watchdogAlerts(a)[0].message)
-	}
-
-	// A further cycle must not re-cut or re-alert (AC-3c, cutoff never
-	// clears).
-	clk.Advance(1 * time.Minute)
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
-		t.Fatalf("second evaluateCycle: %v", err)
-	}
-	if n := h.countKeys("C-c"); n != 2 {
-		t.Fatalf("expected still exactly 2 Stop attempts after a further cycle, got %d", n)
-	}
-	if n := len(watchdogAlerts(a)); n != 1 {
-		t.Fatalf("expected still exactly 1 org-level ALERT after a further cycle, got %d", n)
-	}
-}
-
-// TestWatch_TotalBudgetCutoff_NoActiveSeats_NoAlertNoEscalation_ThenCutsNewSeat
-// pins the cross-review AR-2 fix: an org that has already aged past its
-// total wall-clock budget but currently has zero active seats (e.g. every
-// seat was already stopped, by a prior cutoff or normal completion) must
-// produce no total-budget ALERT and register no AC-5 pending-alert deadman
-// record -- there is nothing to cut off, so an ALERT would be a false
-// positive, repeating every cycle forever. Once a new seat becomes active in
-// that same, still-over-budget org, total-budget enforcement resumes
-// normally.
-//
-// Expectations here are unchanged by the tech-debt "watchdog deferred LOW
-// (4)" fix (clearing Conditions[key].Active when the zero-active-seats guard
-// fires): this test's zero-active-seats window begins *before* any
-// total-budget ALERT was ever sent for org-a (seat-1 is stopped by test
-// setup, pre-cycle), so Conditions[key] is nil the whole way through and the
-// new clear-on-empty branch is a no-op here. The scenario that branch
-// actually fixes -- an ALERT already fired (Conditions[key].Active == true)
-// before every seat stopped -- is
-// TestWatch_TotalBudgetCutoff_ResumeAfterAllSeatsStop_ReAlertsOnNewCutoff,
-// below.
-func TestWatch_TotalBudgetCutoff_NoActiveSeats_NoAlertNoEscalation_ThenCutsNewSeat(t *testing.T) {
-	o, _, a, clk := testWatchOrg(t)
-	o.Config.Budget.TotalWallClockMinutes = 5
-	o.Config.Budget.SeatWallClockMinutes = 1000 // avoid seat-level cutoff firing first
-	o.Config.DeadmanMinutes = 5
-
-	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
-		t.Fatalf("spawn seat-1 failed: %+v", r)
-	}
-	if r := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-1", Reason: "test setup: leave the org with zero active seats"}); r.Err != nil {
-		t.Fatalf("stop seat-1: %v", r.Err)
-	}
-
-	run, statusPath, escalationsPath := newTestWatchRun(o, nil, nil, &bytes.Buffer{})
-	status, err := loadWatchStatus(statusPath, "org-a")
-	if err != nil {
-		t.Fatalf("loadWatchStatus: %v", err)
-	}
-
-	// org_start (seat-1's spawn) + ~10m > 5m total budget, but zero active
-	// seats -- must not ALERT.
-	clk.Advance(10 * time.Minute)
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
-		t.Fatalf("cycle 1: %v", err)
-	}
-	if n := len(watchdogAlerts(a)); n != 0 {
-		t.Fatalf("expected no total-budget ALERT for an org with zero active seats, got %d: %+v", n, watchdogAlerts(a))
-	}
-	if len(status.PendingAlerts) != 0 {
-		t.Errorf("expected no pending deadman record for an org with zero active seats, got %+v", status.PendingAlerts)
-	}
-
-	// A second cycle, past DeadmanMinutes too (proving no pending alert was
-	// ever registered to escalate): still no ALERT, no escalation.
-	clk.Advance(6 * time.Minute)
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
-		t.Fatalf("cycle 2: %v", err)
-	}
-	if n := len(watchdogAlerts(a)); n != 0 {
-		t.Fatalf("expected still no ALERT after a second cycle with zero active seats, got %d", n)
-	}
-	assertNoEscalations(t, escalationsPath)
-
-	// A new active seat appears in the same, still-over-budget org: the
-	// zero-active-seats guard must not silently disable enforcement once a
-	// seat becomes active again -- the org is cut.
-	if r := o.Spawn(watchSpawnParams("org-a", "seat-2", "worker")); r.Outcome != SpawnOutcomeSpawned {
-		t.Fatalf("spawn seat-2 failed: %+v", r)
-	}
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
-		t.Fatalf("cycle 3 (seat-2 active): %v", err)
-	}
-	st, err := o.Status("org-a", false)
-	if err != nil {
-		t.Fatalf("status: %v", err)
-	}
-	if findSeatStatus(t, st.Seats, "seat-2").Active {
-		t.Fatalf("expected seat-2 to be cut off by the still-exceeded total budget once it is the org's only active seat")
-	}
-	if n := len(watchdogAlerts(a)); n != 1 {
-		t.Fatalf("expected exactly 1 total-budget ALERT once an active seat exists, got %d: %+v", n, watchdogAlerts(a))
-	}
-}
-
 // --- AC-4: heartbeat stall (ALERT, no cutoff, recovers, re-fires) ----------
 
-func TestWatch_Stall_AlertsNoCutoff_RecoversAndRefires(t *testing.T) {
+func TestWatch_Stall_AlertsOnlyNeverStops_RecoversAndRefires(t *testing.T) {
 	o, h, a, clk := testWatchOrg(t)
-	o.Config.Budget.SeatWallClockMinutes = 1000 // keep budget out of the picture
 	o.Config.Watchdog.StallMinutes = 5
 	// Deliberately no lead seat spawned -- ALERT delivery must not depend on
 	// one (Bug 1 regression).
@@ -660,7 +424,7 @@ func TestWatch_Liveness_AlertOnAgentGetError(t *testing.T) {
 
 // --- AC-4: scope change ------------------------------------------------------
 
-func TestWatch_ScopeChange_AlertCarriesScopeText_NoCutoff(t *testing.T) {
+func TestWatch_ScopeChange_AlertCarriesScopeText_NoStop(t *testing.T) {
 	o, h, a, _ := testWatchOrg(t)
 	// Deliberately no lead seat spawned -- ALERT delivery must not depend on
 	// one (Bug 1 regression).
@@ -1089,92 +853,11 @@ func TestRunWatch_MultipleOrgs_SeparateStatusFiles(t *testing.T) {
 	}
 }
 
-// TestWatch_SeatBudgetCutoff_StopFails_RetriesThenSucceeds pins the
-// self-review H-2 fix: a Stop call whose `stopped` manifest write fails must
-// not set the Cutoff ratchet -- the failure is logged to stderr and the next
-// cycle retries Stop for the still-active seat, only ratcheting Cutoff once
-// a retry actually succeeds. The ALERT is still sent exactly once regardless
-// of the Stop outcome.
-func TestWatch_SeatBudgetCutoff_StopFails_RetriesThenSucceeds(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("running as root: a read-only manifest file is still writable, so this permission-based failure injection does not apply")
-	}
-	o, h, a, clk := testWatchOrg(t)
-	o.Config.Watchdog.StallMinutes = 10000 // keep the stall condition out of the picture
-	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
-		t.Fatalf("spawn failed: %+v", r)
-	}
-
-	var stderr bytes.Buffer
-	run, statusPath, _ := newTestWatchRun(o, nil, nil, &stderr)
-	status, err := loadWatchStatus(statusPath, "org-a")
-	if err != nil {
-		t.Fatalf("loadWatchStatus: %v", err)
-	}
-
-	clk.Advance(31 * time.Minute) // past the 30m seat budget
-
-	// Make the manifest file unwritable so Stop's appendEvent (the `stopped`
-	// event write) fails deterministically -- Stop's own PaneSendKeys/Leave
-	// failures are captured as best-effort Details notes, never as
-	// StopResult.Err (see verbs.go's Stop doc comment); only findSeat's read
-	// or appendEvent's write can produce a non-nil Stop error.
-	manifestPath := o.Manifest.Path()
-	if err := os.Chmod(manifestPath, 0o444); err != nil {
-		t.Fatalf("chmod manifest read-only: %v", err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(manifestPath, 0o644) })
-
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
-		t.Fatalf("cycle 1 (Stop's manifest write fails): %v", err)
-	}
-	if !strings.Contains(stderr.String(), "budget cutoff Stop failed") {
-		t.Fatalf("expected a stderr line reporting the failed cutoff Stop, got %q", stderr.String())
-	}
-	key := conditionKey("org-a", "seat-1", condSeatBudget)
-	if rec := status.Conditions[key]; rec == nil || rec.Cutoff {
-		t.Fatalf("expected Cutoff to remain false after a failed Stop, got %+v", rec)
-	}
-	if n := len(watchdogAlerts(a)); n != 1 {
-		t.Fatalf("expected exactly 1 ALERT even though Stop's manifest write failed, got %d", n)
-	}
-	if st, serr := o.Status("org-a", false); serr != nil || !findSeatStatus(t, st.Seats, "seat-1").Active {
-		t.Fatalf("expected seat-1 to remain active after the failed Stop (status err=%v)", serr)
-	}
-
-	// Restore write permission -- the next cycle must retry Stop (the seat
-	// is still active per the roster) and this time set Cutoff, without a
-	// second ALERT.
-	if err := os.Chmod(manifestPath, 0o644); err != nil {
-		t.Fatalf("chmod manifest writable: %v", err)
-	}
-	clk.Advance(time.Minute)
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
-		t.Fatalf("cycle 2 (Stop retries and succeeds): %v", err)
-	}
-	if rec := status.Conditions[key]; rec == nil || !rec.Cutoff {
-		t.Fatalf("expected Cutoff to be set true after the retried Stop succeeds, got %+v", rec)
-	}
-	if n := len(watchdogAlerts(a)); n != 1 {
-		t.Fatalf("expected still exactly 1 ALERT after the retry succeeds (deduped), got %d", n)
-	}
-	st, err := o.Status("org-a", false)
-	if err != nil {
-		t.Fatalf("status: %v", err)
-	}
-	if findSeatStatus(t, st.Seats, "seat-1").Active {
-		t.Fatalf("expected seat-1 to be stopped once the retried Stop succeeds")
-	}
-	if n := h.countKeys("C-c"); n != 2 {
-		t.Fatalf("expected 2 Stop attempts (1 failed manifest write + 1 successful retry), got %d", n)
-	}
-}
-
-// TestWatch_Deadman_WatchdogsOwnCutoffEvent_DoesNotClearPendingAlert pins
+// TestWatch_Deadman_WatchdogsOwnStopEvent_DoesNotClearPendingAlert pins
 // the self-review M-4 fix: the deadman's manifest-growth "has anything
 // happened since the ALERT" activity source must not count the watchdog's
 // own cutoff of an unrelated seat as if it were genuine lead/seat activity.
-func TestWatch_Deadman_WatchdogsOwnCutoffEvent_DoesNotClearPendingAlert(t *testing.T) {
+func TestWatch_Deadman_WatchdogsOwnStopEvent_DoesNotClearPendingAlert(t *testing.T) {
 	o, h, _, clk := testWatchOrg(t)
 	o.Config.DeadmanMinutes = 5
 	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
@@ -1200,12 +883,12 @@ func TestWatch_Deadman_WatchdogsOwnCutoffEvent_DoesNotClearPendingAlert(t *testi
 	}
 
 	// Simulate the watchdog cutting off a DIFFERENT seat (seat-2) between
-	// cycles, via the same Details shape evaluateSeatBudget/
-	// evaluateTotalBudget produce ("reason=watchdog_..."). Before the M-4
-	// fix, this alone grows the manifest enough to satisfy the deadman's
-	// unfiltered len(rr.Events) > ManifestLen check and wrongly clears
-	// seat-1's still-unanswered pending alert.
-	if r := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-2", Reason: "watchdog_budget_cutoff seat_wall_clock=30m observed=31m0s"}); r.Err != nil {
+	// cycles, via the same Details shape a watchdog enforcement Stop would
+	// produce ("reason=watchdog_..."). Before the M-4 fix, this alone grows
+	// the manifest enough to satisfy the deadman's unfiltered
+	// len(rr.Events) > ManifestLen check and wrongly clears seat-1's
+	// still-unanswered pending alert.
+	if r := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-2", Reason: "watchdog_cutoff seat_wall_clock=30m observed=31m0s"}); r.Err != nil {
 		t.Fatalf("stop seat-2: %v", r.Err)
 	}
 
@@ -1277,7 +960,7 @@ func TestWatch_Deadman_CrossOrgActivity_DoesNotClearPendingAlert(t *testing.T) {
 	}
 }
 
-// TestWatch_Deadman_SeatSentEvent_ClearsPendingAlert_WatchdogCutoffDoesNot
+// TestWatch_Deadman_SeatSentEvent_ClearsPendingAlert_WatchdogStopDoesNot
 // pins the self-review cycle-3 H3-1 fix and replaces the earlier (inverted)
 // TestWatch_Deadman_UnrelatedSeatEvent_DoesNotClearPendingAlert, which
 // claimed a `sent` event whose SeatID names a different seat must NOT count
@@ -1291,10 +974,10 @@ func TestWatch_Deadman_CrossOrgActivity_DoesNotClearPendingAlert(t *testing.T) {
 // seat-2), and must clear seat-1's pending alert. The genuinely non-clearing
 // case is the watchdog's OWN cutoff `stopped` write (reason=watchdog_...,
 // already pinned by
-// TestWatch_Deadman_WatchdogsOwnCutoffEvent_DoesNotClearPendingAlert above)
+// TestWatch_Deadman_WatchdogsOwnStopEvent_DoesNotClearPendingAlert above)
 // -- this test reuses that same non-clearing shape for a THIRD seat before
 // showing the `sent` event's positive, clearing case.
-func TestWatch_Deadman_SeatSentEvent_ClearsPendingAlert_WatchdogCutoffDoesNot(t *testing.T) {
+func TestWatch_Deadman_SeatSentEvent_ClearsPendingAlert_WatchdogStopDoesNot(t *testing.T) {
 	o, h, _, clk := testWatchOrg(t)
 	o.Config.DeadmanMinutes = 5
 	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
@@ -1324,7 +1007,7 @@ func TestWatch_Deadman_SeatSentEvent_ClearsPendingAlert_WatchdogCutoffDoesNot(t 
 
 	// The watchdog cutting off seat-3 (its own enforcement write, carrying
 	// "reason=watchdog_...") must NOT count as lead activity.
-	if r := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-3", Reason: "watchdog_budget_cutoff seat_wall_clock=30m observed=31m0s"}); r.Err != nil {
+	if r := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-3", Reason: "watchdog_cutoff observed=31m0s"}); r.Err != nil {
 		t.Fatalf("stop seat-3: %v", r.Err)
 	}
 	clk.Advance(3 * time.Minute) // still within DeadmanMinutes
@@ -1439,7 +1122,7 @@ func TestWatch_Deadman_LeadSpawnsReplacementSeat_ClearsPendingAlert(t *testing.T
 // for it to exist, and issuing that command is itself a lead-driven action
 // -- unlike the watchdog's own cutoff `stopped` events
 // (reason=watchdog_..., excluded by
-// TestWatch_Deadman_WatchdogsOwnCutoffEvent_DoesNotClearPendingAlert above),
+// TestWatch_Deadman_WatchdogsOwnStopEvent_DoesNotClearPendingAlert above),
 // which are self-inflicted and prove nothing about lead responsiveness.
 func TestWatch_Deadman_ManualStopOfOtherSeat_ClearsPendingAlert(t *testing.T) {
 	o, h, _, clk := testWatchOrg(t)
@@ -1485,7 +1168,6 @@ func TestWatch_Deadman_ManualStopOfOtherSeat_ClearsPendingAlert(t *testing.T) {
 // active seat's own `spawned` TS forever).
 func TestWatch_Stall_UsesLatestEventOfAnyType_NotOnlyStateEvents(t *testing.T) {
 	o, h, a, clk := testWatchOrg(t)
-	o.Config.Budget.SeatWallClockMinutes = 1000 // keep budget out of the picture
 	o.Config.Watchdog.StallMinutes = 10
 
 	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
@@ -1700,121 +1382,6 @@ func TestWatch_Deadman_HistoryWindowEviction_DoesNotFalselyClearPendingAlert(t *
 			len(status.PendingAlerts), status.PendingAlerts)
 	}
 	assertNoEscalations(t, escalationsPath)
-}
-
-// --- cross-review-triage cycle-2 #4: skip just-cut seats within the cycle --
-
-// TestWatch_TotalBudgetCutoff_SkipsCutSeatsForRestOfSameCycle pins the fix:
-// once evaluateTotalBudget stops every active seat in a cycle, that same
-// cycle's per-seat loop must not still probe those seats for
-// stall/liveness/scope-change -- doing so would call herdr AgentGet against a
-// seat that was just stopped and could raise a spurious ALERT (and deadman
-// pending-alert record) purely because activeSeats was snapshotted before
-// the cutoff ran.
-func TestWatch_TotalBudgetCutoff_SkipsCutSeatsForRestOfSameCycle(t *testing.T) {
-	o, h, a, clk := testWatchOrg(t)
-	o.Config.Budget.TotalWallClockMinutes = 5
-	o.Config.Budget.SeatWallClockMinutes = 1000 // avoid seat-level cutoff firing first
-
-	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
-		t.Fatalf("spawn seat-1 failed: %+v", r)
-	}
-	if r := o.Spawn(watchSpawnParams("org-a", "seat-2", "worker")); r.Outcome != SpawnOutcomeSpawned {
-		t.Fatalf("spawn seat-2 failed: %+v", r)
-	}
-
-	target1 := herdrAgentName("org-a", "seat-1")
-	target2 := herdrAgentName("org-a", "seat-2")
-	// Sticky liveness failure for both seats -- if evaluateSeat's liveness
-	// probe still ran against a just-cut seat this cycle, it would both call
-	// AgentGet against its target and raise a spurious liveness ALERT.
-	h.AgentGetErrSeq[target1] = []error{errors.New("herdr: agent not found")}
-	h.AgentGetErrSeq[target2] = []error{errors.New("herdr: agent not found")}
-
-	run, statusPath, _ := newTestWatchRun(o, nil, nil, &bytes.Buffer{})
-	status, err := loadWatchStatus(statusPath, "org-a")
-	if err != nil {
-		t.Fatalf("loadWatchStatus: %v", err)
-	}
-
-	clk.Advance(10 * time.Minute) // past total budget
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
-		t.Fatalf("evaluateCycle: %v", err)
-	}
-
-	st, err := o.Status("org-a", false)
-	if err != nil {
-		t.Fatalf("status: %v", err)
-	}
-	for _, seatID := range []string{"seat-1", "seat-2"} {
-		if findSeatStatus(t, st.Seats, seatID).Active {
-			t.Fatalf("expected seat %q cut off by total-budget", seatID)
-		}
-	}
-
-	for _, c := range h.agentGetCalls {
-		if c == target1 || c == target2 {
-			t.Errorf("expected no AgentGet probe for just-cut seat target %q in the cutoff cycle, but one was made (calls: %v)", c, h.agentGetCalls)
-		}
-	}
-
-	alerts := watchdogAlerts(a)
-	if len(alerts) != 1 {
-		t.Fatalf("expected exactly 1 ALERT (org-level total-budget only, no per-seat liveness ALERTs), got %d: %+v", len(alerts), alerts)
-	}
-	if !strings.Contains(alerts[0].message, "CONDITION: total_budget") {
-		t.Errorf("expected the sole ALERT to be total_budget, got %q", alerts[0].message)
-	}
-}
-
-// TestWatch_SeatBudgetCutoff_SkipsFurtherProbesForCutSeatSameCycle is the
-// single-seat analogue: once evaluateSeatBudget stops a seat, evaluateSeat
-// must return before its stall/liveness/scope-change checks run against that
-// same, now-stale seat this cycle.
-func TestWatch_SeatBudgetCutoff_SkipsFurtherProbesForCutSeatSameCycle(t *testing.T) {
-	o, h, a, clk := testWatchOrg(t)
-	o.Config.Budget.SeatWallClockMinutes = 5
-	o.Config.Budget.TotalWallClockMinutes = 1000 // avoid total-budget firing first
-
-	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
-		t.Fatalf("spawn seat-1 failed: %+v", r)
-	}
-
-	target := herdrAgentName("org-a", "seat-1")
-	h.AgentGetErrSeq[target] = []error{errors.New("herdr: agent not found")}
-
-	run, statusPath, _ := newTestWatchRun(o, nil, nil, &bytes.Buffer{})
-	status, err := loadWatchStatus(statusPath, "org-a")
-	if err != nil {
-		t.Fatalf("loadWatchStatus: %v", err)
-	}
-
-	clk.Advance(10 * time.Minute) // past seat budget
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
-		t.Fatalf("evaluateCycle: %v", err)
-	}
-
-	st, err := o.Status("org-a", false)
-	if err != nil {
-		t.Fatalf("status: %v", err)
-	}
-	if findSeatStatus(t, st.Seats, "seat-1").Active {
-		t.Fatalf("expected seat-1 cut off by seat-budget")
-	}
-
-	for _, c := range h.agentGetCalls {
-		if c == target {
-			t.Errorf("expected no AgentGet probe for the just-cut seat in the cutoff cycle, but one was made (calls: %v)", h.agentGetCalls)
-		}
-	}
-
-	alerts := watchdogAlerts(a)
-	if len(alerts) != 1 {
-		t.Fatalf("expected exactly 1 ALERT (seat_budget only, no liveness ALERT), got %d: %+v", len(alerts), alerts)
-	}
-	if !strings.Contains(alerts[0].message, "CONDITION: seat_budget") {
-		t.Errorf("expected the sole ALERT to be seat_budget, got %q", alerts[0].message)
-	}
 }
 
 // --- PR④ known gap #5: deadman probe-recovery false-clear -------------------
@@ -2105,148 +1672,103 @@ func TestWatch_EscalateAlert_PrunesAt101stEscalation(t *testing.T) {
 	}
 }
 
-// --- AC-3b: total-budget zero-active-seats guard resume semantics
-// (tech-debt: "watchdog deferred LOW (4)") ----------------------------------
+// --- org budget removal: retired condition pruning --------------------------
 
-// TestWatch_TotalBudgetCutoff_ResumeAfterAllSeatsStop_ReAlertsOnNewCutoff is
-// the scenario TestWatch_TotalBudgetCutoff_NoActiveSeats_NoAlertNoEscalation_ThenCutsNewSeat
-// does not cover: that test's zero-active-seats window begins *before* any
-// total-budget ALERT was ever sent (the only seat was stopped by test setup
-// pre-cycle, so Conditions[key] is nil throughout). This test instead gets
-// Conditions[key].Active to true (an ALERT already fired) *while leaving
-// Cutoff false* -- otherwise the separate "one cutoff per key, ever" ratchet
-// (rec.Cutoff, evaluateTotalBudget's own early return) would permanently
-// block this key regardless of the Active-clearing fix under test, making
-// the two mechanisms indistinguishable. That combination is reached by
-// making the watchdog's own Stop attempt fail (chmod trick, same technique
-// as TestWatch_SeatBudgetCutoff_StopFails_RetriesThenSucceeds) so cycle 1
-// ALERTs (Active=true) without ever ratcheting Cutoff, then an out-of-band
-// `o.Stop` (simulating an operator manually stopping the stuck seat, not
-// the watchdog's own cutoff) empties the roster without touching rec at
-// all. Only then does a replacement seat spawn into the still-over-budget
-// org -- before this fix, the never-cleared Active flag silently gated that
-// occurrence's ALERT (Cutoff stays false throughout, so the ratchet itself
-// never fires and cannot explain a missing ALERT).
-func TestWatch_TotalBudgetCutoff_ResumeAfterAllSeatsStop_ReAlertsOnNewCutoff(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("running as root: a read-only manifest file is still writable, so this permission-based failure injection does not apply")
-	}
+// TestWatch_PrunesRetiredBudgetEntriesFromStatus_NoEscalation pins the
+// pruneRetiredConditions fix (AC-7b): a watch-status file persisted before
+// the org budget concept was removed can still carry seat_budget/
+// total_budget entries in Conditions, PendingAlerts, and Escalated. Without
+// pruning, a stale seat_budget PendingAlerts entry old enough to exceed
+// DeadmanMinutes would escalate on the very first cycle after upgrading --
+// a false-positive deadman escalation for a condition type that no longer
+// exists. This test hand-writes exactly such a legacy fixture (including
+// the retired "cutoff" field the current watchConditionRecord no longer
+// declares, which json.Unmarshal silently ignores), then asserts one cycle
+// prunes every retired-condition entry and produces no escalation and no
+// ALERT.
+func TestWatch_PrunesRetiredBudgetEntriesFromStatus_NoEscalation(t *testing.T) {
 	o, _, a, clk := testWatchOrg(t)
-	o.Config.Budget.TotalWallClockMinutes = 5
-	o.Config.Budget.SeatWallClockMinutes = 1000 // avoid seat-level cutoff firing first
 	o.Config.DeadmanMinutes = 5
 
-	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
-		t.Fatalf("spawn seat-1 failed: %+v", r)
+	var escalateCalls int
+	escalateFn := func(context.Context, string) error {
+		escalateCalls++
+		return nil
+	}
+	run, statusPath, escalationsPath := newTestWatchRun(o, nil, escalateFn, &bytes.Buffer{})
+
+	// A legacy fixture: seat_budget/total_budget entries in all three
+	// dedupe/deadman maps, alongside a live scope_change entry that must
+	// survive pruning untouched. The pending seat_budget alert's ts is well
+	// over an hour before the fakeClock's start (2026-01-01T00:00:00Z, see
+	// newFakeClock), so -- absent pruning -- checkDeadman's
+	// now.Sub(ts) > DeadmanMinutes check would escalate it on cycle 1.
+	fixture := `{
+  "org_id": "org-a",
+  "last_cycle_ts": "2025-12-31T23:00:00Z",
+  "cycles": 3,
+  "conditions": {
+    "org-a/seat-z/seat_budget": {"active": true, "cutoff": true, "first_ts": "2025-12-31T22:00:00Z"},
+    "org-a//total_budget": {"active": true, "cutoff": false, "first_ts": "2025-12-31T22:00:00Z"},
+    "org-a/seat-w/scope_change": {"active": true, "first_ts": "2025-12-31T22:30:00Z"}
+  },
+  "pending_alerts": {
+    "org-a/seat-z/seat_budget@1000000000": {
+      "alert_id": "org-a/seat-z/seat_budget@1000000000",
+      "ts": "2025-12-31T22:00:00Z",
+      "subject": "seat-z",
+      "manifest_len": 0,
+      "lead_agent_get": "",
+      "history_lead_lines": -1
+    }
+  },
+  "escalated": {
+    "org-a//total_budget@2000000000": true
+  }
+}`
+	if err := os.WriteFile(statusPath, []byte(fixture), 0o644); err != nil {
+		t.Fatalf("write legacy status fixture: %v", err)
 	}
 
-	run, statusPath, _ := newTestWatchRun(o, nil, nil, &bytes.Buffer{})
 	status, err := loadWatchStatus(statusPath, "org-a")
 	if err != nil {
 		t.Fatalf("loadWatchStatus: %v", err)
 	}
-
-	// Cycle 1: seat-1 is active and the org is over budget. Manifest is
-	// read-only, so the watchdog's own Stop attempt fails: Active becomes
-	// true (the ALERT still sends) but Cutoff stays false.
-	manifestPath := o.Manifest.Path()
-	if err := os.Chmod(manifestPath, 0o444); err != nil {
-		t.Fatalf("chmod manifest read-only: %v", err)
+	if len(status.Conditions) != 3 || len(status.PendingAlerts) != 1 || len(status.Escalated) != 1 {
+		t.Fatalf("setup: expected the fixture to load unpruned, got conditions=%+v pending=%+v escalated=%+v",
+			status.Conditions, status.PendingAlerts, status.Escalated)
 	}
-	clk.Advance(10 * time.Minute)
+
+	clk.Advance(time.Minute) // now well past the pending alert's ts + DeadmanMinutes
 	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
-		t.Fatalf("cycle 1 (ALERTs, Stop fails): %v", err)
-	}
-	if err := os.Chmod(manifestPath, 0o644); err != nil {
-		t.Fatalf("chmod manifest writable: %v", err)
-	}
-	if n := len(watchdogAlerts(a)); n != 1 {
-		t.Fatalf("expected exactly 1 total-budget ALERT from cycle 1, got %d: %+v", n, watchdogAlerts(a))
-	}
-	key := conditionKey("org-a", "", condTotalBudget)
-	if rec := status.Conditions[key]; rec == nil || !rec.Active || rec.Cutoff {
-		t.Fatalf("expected Active=true, Cutoff=false after cycle 1 (Stop failed), got %+v", rec)
-	}
-	preResumeFirstTS := status.Conditions[key].FirstTS
-	if preResumeFirstTS == "" {
-		t.Fatalf("expected a non-empty FirstTS to be recorded by cycle 1")
-	}
-	st, err := o.Status("org-a", false)
-	if err != nil {
-		t.Fatalf("status: %v", err)
-	}
-	if !findSeatStatus(t, st.Seats, "seat-1").Active {
-		t.Fatalf("expected seat-1 to remain active after the failed Stop")
+		t.Fatalf("evaluateCycle: %v", err)
 	}
 
-	// An operator manually stops the stuck seat out-of-band (not through
-	// the watchdog's own cutoff attempt) -- this is what actually empties
-	// the roster, distinct from evaluateTotalBudget ever succeeding at it.
-	if r := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-1", Reason: "operator manual stop"}); r.Err != nil {
-		t.Fatalf("manual stop seat-1: %v", r.Err)
+	for key := range status.Conditions {
+		if strings.HasSuffix(key, "/seat_budget") || strings.HasSuffix(key, "/total_budget") {
+			t.Errorf("expected retired condition %q to be pruned, but it survived: %+v", key, status.Conditions)
+		}
+	}
+	if _, ok := status.Conditions["org-a/seat-w/scope_change"]; !ok {
+		t.Errorf("expected the live scope_change condition to survive pruning, got %+v", status.Conditions)
+	}
+	if len(status.PendingAlerts) != 0 {
+		t.Errorf("expected the retired seat_budget pending alert to be pruned before the deadman sweep, got %+v", status.PendingAlerts)
+	}
+	if status.Escalated["org-a//total_budget@2000000000"] {
+		t.Errorf("expected the retired total_budget escalated entry to be pruned, got %+v", status.Escalated)
 	}
 
-	// Cycle 2: zero active seats -- the AR-2 guard fires. Must not
-	// spuriously re-ALERT, and (the fix under test) must clear Active so a
-	// later occurrence is not silently gated.
-	clk.Advance(1 * time.Minute)
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
-		t.Fatalf("cycle 2 (zero active seats): %v", err)
+	assertNoEscalations(t, escalationsPath)
+	if n := len(watchdogAlerts(a)); n != 0 {
+		t.Errorf("expected no ALERT to fire for a pruned retired condition, got %d: %+v", n, watchdogAlerts(a))
 	}
-	if n := len(watchdogAlerts(a)); n != 1 {
-		t.Fatalf("expected still exactly 1 ALERT while zero seats are active, got %d: %+v", n, watchdogAlerts(a))
-	}
-	if rec := status.Conditions[key]; rec == nil || rec.Active {
-		t.Fatalf("expected Active cleared (recovered semantics) once the zero-active-seats guard fires, got %+v", rec)
-	}
-	if rec := status.Conditions[key]; rec != nil && rec.Cutoff {
-		t.Fatalf("expected Cutoff to remain untouched (still false) by the zero-active-seats guard, got %+v", rec)
-	}
-	if rec := status.Conditions[key]; rec != nil && rec.FirstTS != "" {
-		t.Fatalf("expected FirstTS cleared alongside Active by the zero-active-seats guard (self-review M3), got %q", rec.FirstTS)
-	}
-
-	// A new seat spawns into the same, still-over-budget org: this is the
-	// resume case. Before this fix, the never-cleared Active flag from
-	// cycle 1 would silently gate this occurrence's ALERT even though
-	// Cutoff (false) never blocks the ratchet from trying again.
-	if r := o.Spawn(watchSpawnParams("org-a", "seat-2", "worker")); r.Outcome != SpawnOutcomeSpawned {
-		t.Fatalf("spawn seat-2 failed: %+v", r)
-	}
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
-		t.Fatalf("cycle 3 (seat-2 active, resumed cutoff): %v", err)
-	}
-	if n := len(watchdogAlerts(a)); n != 2 {
-		t.Fatalf("expected a second total-budget ALERT once a new seat resumes the still-over-budget org (silent-resume regression), got %d: %+v",
-			n, watchdogAlerts(a))
-	}
-	if st, serr := o.Status("org-a", false); serr != nil || findSeatStatus(t, st.Seats, "seat-2").Active {
-		t.Fatalf("expected seat-2 to be cut off by the resumed total-budget cutoff (status err=%v)", serr)
-	}
-	// self-review M3: the re-raised condition's FirstTS must be fresh (the
-	// resumed occurrence's own timestamp), not inherited from the
-	// pre-resume occurrence -- conditionFirstTS only preserves a non-empty
-	// FirstTS across a retry, so clearing it in cycle 2 is what forces this.
-	if rec := status.Conditions[key]; rec == nil || rec.FirstTS == "" {
-		t.Fatalf("expected a fresh, non-empty FirstTS on the resumed cutoff, got %+v", rec)
-	} else if rec.FirstTS == preResumeFirstTS {
-		t.Fatalf("expected the resumed cutoff's FirstTS (%q) to differ from the pre-resume occurrence's FirstTS (%q), got the stale pre-resume value",
-			rec.FirstTS, preResumeFirstTS)
+	if escalateCalls != 0 {
+		t.Errorf("expected the EscalateFunc hook to never fire for a pruned retired condition, got %d call(s)", escalateCalls)
 	}
 }
 
 // --- helpers -----------------------------------------------------------------
-
-func findSeatStatus(t *testing.T, seats []SeatStatus, seatID string) SeatStatus {
-	t.Helper()
-	for _, s := range seats {
-		if s.SeatID == seatID {
-			return s
-		}
-	}
-	t.Fatalf("seat %q not found in %+v", seatID, seats)
-	return SeatStatus{}
-}
 
 func assertNoEscalations(t *testing.T, path string) {
 	t.Helper()

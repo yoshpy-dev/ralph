@@ -67,7 +67,7 @@ func runDoctor(targetDir string) error {
 
 // runDoctorOpts is runDoctor plus the --probe-models opt-in: when true, every
 // [org].model_pool entry is probed via internal/org/driver.ProbeModel (Check
-// 11). Model probes are the only check in this function that spawn CLI
+// 12). Model probes are the only check in this function that spawn CLI
 // subprocesses beyond the pre-existing --version probes, so they stay
 // opt-in and off by default.
 //
@@ -126,12 +126,17 @@ func runDoctorFull(targetDir string, probeModels, strict bool) error {
 	// Check 10: [org] envelope summary (pool size / max_seats).
 	results = append(results, checkOrgEnvelope(cfg))
 
-	// Check 11: optional model-pool probes (--probe-models).
+	// Check 11: [org].model_pool codex slugs vs codex's local
+	// models_cache.json. Always runs unconditionally (no flag) -- it is a
+	// single local file read, never spawns a process, unlike Check 12 below.
+	results = append(results, checkCodexModelSlugs(cfg))
+
+	// Check 12: optional model-pool probes (--probe-models).
 	if probeModels {
 		results = append(results, checkOrgModelProbes(cfg, driver.ExecRunner{})...)
 	}
 
-	// Check 12: FR-9 scaffold integrity (core hashes, managed blocks,
+	// Check 13: FR-9 scaffold integrity (core hashes, managed blocks,
 	// settings.json owned keys, conflict markers, manifest/disk
 	// consistency). Always runs (findings are warnings by default); strict
 	// controls only whether a violation is reported as "fail". See

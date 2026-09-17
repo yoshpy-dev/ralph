@@ -37,16 +37,17 @@ func EnvelopeSummary(cfg config.OrgConfig) string {
 }
 
 // DefaultModelForDriver returns the Model of the first cfg.ModelPool entry
-// whose Driver matches driver, in cfg.ModelPool's declared order. This is
-// `ralph org start`'s --model default (internal/cli/org.go's
-// newOrgStartCmd) when the caller omits --model: rather than picking an
-// opinionated hardcoded alias, the org's own model_pool -- already the
-// allowlist ValidateSpawnEnvelope checks Spawn's request against -- is the
-// single source of truth for "what's available", so the default can never
-// itself be out-of-pool. An error is returned when no model_pool entry
-// matches driver, so `org start` fails fast with an actionable message
-// instead of falling through to an empty --model that Spawn would reject
-// with a less specific "model \"\" not in [org].model_pool" error.
+// whose Driver matches driver, in cfg.ModelPool's declared order, ignoring
+// [org.roles]. It is the role-agnostic primitive behind
+// DefaultModelForDriverAndRole; the CLI's --model fallback for both
+// `ralph org spawn` and `ralph org start` goes through the role-aware
+// variant (internal/cli/org.go's resolveModelOrWarn), so this function has
+// no production caller today and is kept as the documented "pool head per
+// driver" query (unit-tested in envelope_summary_test.go). The org's own
+// model_pool -- already the allowlist ValidateSpawnEnvelope checks Spawn's
+// request against -- is the single source of truth for "what's available",
+// so a value returned here can never itself be out-of-pool. An error is
+// returned when no model_pool entry matches driver.
 func DefaultModelForDriver(cfg config.OrgConfig, driver string) (string, error) {
 	for _, entry := range cfg.ModelPool {
 		if entry.Driver == driver {
@@ -54,4 +55,28 @@ func DefaultModelForDriver(cfg config.OrgConfig, driver string) (string, error) 
 		}
 	}
 	return "", fmt.Errorf("org: no [org].model_pool entry for driver %q; pass --model explicitly", driver)
+}
+
+// DefaultModelForDriverAndRole returns the Model of the first cfg.ModelPool
+// entry whose Driver matches driver AND is permitted for role under
+// [org.roles] (modelAllowedForRole, envelope.go), in cfg.ModelPool's
+// declared order. This is `ralph org spawn`'s --model default when the
+// caller omits --model (and `ralph org start`'s, with role lead): spawn
+// accepts arbitrary roles, so a role-restricted pool (e.g. `implementer =
+// ["sonnet"]`) can make the pool's own head entry impermissible for the
+// requesting role -- picking that head anyway would warn-then-reject via
+// ValidateSpawnEnvelope's own modelAllowedForRole check
+// (self-review MEDIUM-2). Skipping straight to the first
+// driver-and-role-permitted entry keeps the fallback warning honest: if it
+// prints a model, that model will also pass validation. An error is
+// returned when no model_pool entry satisfies both driver and role, so the
+// caller fails fast with an actionable message instead of falling through
+// to an empty --model.
+func DefaultModelForDriverAndRole(cfg config.OrgConfig, driver, role string) (string, error) {
+	for _, entry := range cfg.ModelPool {
+		if entry.Driver == driver && modelAllowedForRole(cfg, role, entry.Model) {
+			return entry.Model, nil
+		}
+	}
+	return "", fmt.Errorf("org: no [org].model_pool entry for driver %q is permitted for role %q; pass --model explicitly", driver, role)
 }

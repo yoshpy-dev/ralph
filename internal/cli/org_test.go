@@ -633,6 +633,169 @@ func TestOrgSpawn_DryRun_NoPATHNeeded_StatusExclusionAndAll(t *testing.T) {
 	}
 }
 
+// TestOrgSpawn_ModelFlagOmitted_DefaultsToFirstMatchingPoolEntry covers
+// AC-5: `ralph org spawn` without --model no longer errors -- it resolves
+// org.DefaultModelForDriverAndRole for --driver/--role (the first matching
+// role-permitted [org].model_pool entry) and prints exactly one fallback warning line to
+// stderr. Uses --dry-run (per the plan's "dry-run is fine for spawn") so no
+// herdr/agmsg PATH lookup is needed.
+func TestOrgSpawn_ModelFlagOmitted_DefaultsToFirstMatchingPoolEntry(t *testing.T) {
+	t.Setenv("PATH", "") // no herdr/agmsg lookup should ever be attempted
+	dir := t.TempDir()
+	stateDir := filepath.Join(dir, "state")
+	configPath := filepath.Join(dir, "ralph.toml")
+	content := "[org]\n" +
+		"max_seats = 5\n" +
+		"driver_pool = [\"claude\", \"codex\"]\n\n" +
+		"[[org.model_pool]]\n" +
+		"driver = \"codex\"\n" +
+		"model = \"gpt-5.5-codex\"\n\n" +
+		"[[org.model_pool]]\n" +
+		"driver = \"claude\"\n" +
+		"model = \"opus\"\n\n" +
+		"[[org.model_pool]]\n" +
+		"driver = \"claude\"\n" +
+		"model = \"sonnet\"\n"
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	out, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
+		"--driver", "claude", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
+		"--state-dir", stateDir, "--config", configPath, "--dry-run",
+	)
+	if err != nil {
+		t.Fatalf("expected spawn without --model to succeed, err=%v (output: %s)", err, out)
+	}
+	wantWarn := "org: --model omitted; falling back to first [org].model_pool entry permitted for role worker on claude: opus (pass --model explicitly)"
+	if !strings.Contains(out, wantWarn) {
+		t.Errorf("expected exactly one fallback warning line in output, got: %s", out)
+	}
+
+	events := readManifestEvents(t, org.ManifestPathIn(stateDir))
+	last := events[len(events)-1]
+	// The first claude entry in declared model_pool order is "opus" (codex's
+	// entry precedes it but does not match --driver claude).
+	if last.Model != "opus" {
+		t.Fatalf("expected default --model resolution to pick the first matching pool entry (opus), got %q", last.Model)
+	}
+}
+
+// TestOrgSpawn_ModelFlagExplicit_NoWarning confirms an explicit --model
+// wins over the fallback and prints no fallback warning line.
+func TestOrgSpawn_ModelFlagExplicit_NoWarning(t *testing.T) {
+	t.Setenv("PATH", "")
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	out, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
+		"--driver", "claude", "--model", "haiku", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
+		"--state-dir", stateDir, "--dry-run",
+	)
+	if err != nil {
+		t.Fatalf("spawn failed: %v (output: %s)", err, out)
+	}
+	if strings.Contains(out, "--model omitted") {
+		t.Errorf("expected no fallback warning when --model is explicit, got: %s", out)
+	}
+
+	events := readManifestEvents(t, org.ManifestPathIn(stateDir))
+	last := events[len(events)-1]
+	if last.Model != "haiku" {
+		t.Fatalf("expected explicit --model to win over the default, got %q", last.Model)
+	}
+}
+
+// TestOrgSpawn_ModelFlagOmitted_RespectsRoleAllowlist covers self-review
+// MEDIUM-2: a role-restricted pool ([org.roles] implementer = ["sonnet"])
+// whose driver head entry (claude/fable) is not permitted for the spawned
+// role must fall back to the first role-permitted entry (sonnet), not
+// warn-then-reject.
+func TestOrgSpawn_ModelFlagOmitted_RespectsRoleAllowlist(t *testing.T) {
+	t.Setenv("PATH", "")
+	dir := t.TempDir()
+	stateDir := filepath.Join(dir, "state")
+	configPath := filepath.Join(dir, "ralph.toml")
+	content := "[org]\n" +
+		"max_seats = 5\n" +
+		"driver_pool = [\"claude\"]\n\n" +
+		"[[org.model_pool]]\n" +
+		"driver = \"claude\"\n" +
+		"model = \"fable\"\n\n" +
+		"[[org.model_pool]]\n" +
+		"driver = \"claude\"\n" +
+		"model = \"sonnet\"\n\n" +
+		"[org.roles]\n" +
+		"implementer = [\"sonnet\"]\n"
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	out, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "implementer",
+		"--driver", "claude", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
+		"--state-dir", stateDir, "--config", configPath, "--dry-run",
+	)
+	if err != nil {
+		t.Fatalf("expected spawn without --model to succeed under a role allowlist, err=%v (output: %s)", err, out)
+	}
+	wantWarn := "org: --model omitted; falling back to first [org].model_pool entry permitted for role implementer on claude: sonnet (pass --model explicitly)"
+	if !strings.Contains(out, wantWarn) {
+		t.Errorf("expected role-aware fallback warning, got: %s", out)
+	}
+
+	events := readManifestEvents(t, org.ManifestPathIn(stateDir))
+	last := events[len(events)-1]
+	if last.Model != "sonnet" {
+		t.Fatalf("expected the fallback to skip the role-impermissible pool head (fable) and pick sonnet, got %q", last.Model)
+	}
+}
+
+// TestOrgSpawn_ModelFlagOmitted_NoPermittedModel_NonZeroExit covers the
+// error path: a role restricted to a model that has no matching --driver
+// entry at all must fail fast with the driver+role error, not silently pick
+// an impermissible model.
+func TestOrgSpawn_ModelFlagOmitted_NoPermittedModel_NonZeroExit(t *testing.T) {
+	t.Setenv("PATH", "")
+	dir := t.TempDir()
+	stateDir := filepath.Join(dir, "state")
+	configPath := filepath.Join(dir, "ralph.toml")
+	content := "[org]\n" +
+		"max_seats = 5\n" +
+		"driver_pool = [\"claude\", \"codex\"]\n\n" +
+		"[[org.model_pool]]\n" +
+		"driver = \"claude\"\n" +
+		"model = \"fable\"\n\n" +
+		"[[org.model_pool]]\n" +
+		"driver = \"codex\"\n" +
+		"model = \"gpt-6-astra\"\n\n" +
+		"[org.roles]\n" +
+		"reviewer = [\"gpt-6-astra\"]\n"
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	out, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "reviewer",
+		"--driver", "claude", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
+		"--state-dir", stateDir, "--config", configPath, "--dry-run",
+	)
+	if err == nil {
+		t.Fatalf("expected non-zero exit when no [org].model_pool entry for --driver is permitted for --role, output: %s", out)
+	}
+	if !strings.Contains(err.Error(), `driver "claude"`) || !strings.Contains(err.Error(), `role "reviewer"`) {
+		t.Errorf("expected error to name both the driver and role, got: %v", err)
+	}
+	if strings.Contains(out, "--model omitted") {
+		t.Errorf("expected no fallback warning to be printed when the fallback itself fails, got: %s", out)
+	}
+}
+
 func TestOrgStatus_EmptyPATH_FullRosterFromManifestWithCorruptCount(t *testing.T) {
 	t.Setenv("PATH", "")
 	stateDir := t.TempDir()

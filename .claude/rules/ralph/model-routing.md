@@ -59,7 +59,7 @@ in `scripts/ralph-config.sh`.
 - **Always pin `model:` in agent frontmatter.** Omitted `model:` means
   `inherit` — a subagent spawned from an expensive main session silently runs
   on that expensive model, multiplied by parallel fan-out.
-- **Use stable aliases (`opus`, `sonnet`, `haiku`), not full model IDs**, in
+- **Use stable aliases (`fable`, `opus`, `sonnet`, `haiku`), not full model IDs**, in
   agent frontmatter, `ralph.toml`, `scripts/ralph-config.sh`, and skill docs.
   Full IDs go stale and can break `claude -p` at runtime. Pin a full ID only
   via environment variable when a specific run must be reproducible.
@@ -90,7 +90,9 @@ from the `/work` subagent tiers documented above — see
 selection rules. `ralph insights` reads this file by default (resolved via
 the same org state-dir precedence as `ralph org` verbs) and aggregates it
 by `org_id` x `seat_id` with tri-state `honored` (true/false/unknown) in
-its Receipts section.
+its Receipts section. Codex seats have no aliases; `[org].model_pool`
+carries codex model slugs, and `ralph doctor` warns when a slug is missing
+from codex's local model cache.
 
 ## Where the values live
 

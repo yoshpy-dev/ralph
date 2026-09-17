@@ -66,9 +66,8 @@ own gates deterministically, independent of any LLM judgment:
 | Gate | Mechanism | On failure |
 |------|-----------|------------|
 | Envelope validation | model pool / role pool / `max_seats` checked by `ralph org spawn` | Spawn rejected, recorded in manifest |
-| Budget enforcement | wall-clock and fix-round ceilings enforced by the watchdog pulse layer | Seat cut off without LLM judgment, manifest event + lead notification |
+| Watchdog pulse layer | stall / liveness / scope-change ALERT and deadman human escalation (`ralph org watch`) | ALERT to lead; unanswered alerts escalate to a human |
 | Quality pipeline gate | impl exit checks → QA (`run-static-verify.sh` / `run-test.sh`) → reviewer → lead arbitration | QA fail routes back to impl before reviewer sees it |
-| Fix-round cap | envelope-enforced ceiling on reviewer↔impl rounds | Cap reached routes to lead arbitration instead of auto-continuing |
 
 See `.claude/rules/ralph/agent-messaging.md` for the org runtime protocol and
 `.harness/state/org/manifest.jsonl` for the append-only audit trail.

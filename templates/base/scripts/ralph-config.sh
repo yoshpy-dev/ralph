@@ -41,11 +41,8 @@ RALPH_CLAUDE_REVIEWER_MODEL="${RALPH_CLAUDE_REVIEWER_MODEL:-opus}"
 # ═══════════════════════════════════════════════════════════════════
 
 RALPH_ORG_DRIVER_POOL="${RALPH_ORG_DRIVER_POOL:-claude,codex}"
-RALPH_ORG_MODEL_POOL="${RALPH_ORG_MODEL_POOL:-claude:opus,claude:sonnet,claude:haiku}"
+RALPH_ORG_MODEL_POOL="${RALPH_ORG_MODEL_POOL:-claude:fable,claude:opus,claude:sonnet,claude:haiku,codex:gpt-6-astra,codex:gpt-5.6-sol,codex:gpt-5.6-terra,codex:gpt-5.6-luna,codex:gpt-5.5}"
 RALPH_ORG_MAX_SEATS="${RALPH_ORG_MAX_SEATS:-5}"
-RALPH_ORG_SEAT_BUDGET_MINUTES="${RALPH_ORG_SEAT_BUDGET_MINUTES:-30}"
-RALPH_ORG_TOTAL_BUDGET_MINUTES="${RALPH_ORG_TOTAL_BUDGET_MINUTES:-120}"
-RALPH_ORG_MAX_FIX_ROUNDS="${RALPH_ORG_MAX_FIX_ROUNDS:-2}"
 RALPH_ORG_DEADMAN_MINUTES="${RALPH_ORG_DEADMAN_MINUTES:-10}"
 RALPH_ORG_AGMSG_HOME="${RALPH_ORG_AGMSG_HOME:-~/.agents/skills/agmsg}"
 # RALPH_ORG_PERMISSION_DEFAULT mirrors [org.permissions].default. Kept
@@ -90,8 +87,7 @@ RALPH_ORG_WATCHDOG_WATCHER_MODEL="${RALPH_ORG_WATCHDOG_WATCHER_MODEL:-haiku}"
 # regex) still sees the same default value.
 export RALPH_CLAUDE_REVIEWER_MODEL
 export RALPH_ORG_DRIVER_POOL RALPH_ORG_MODEL_POOL RALPH_ORG_MAX_SEATS
-export RALPH_ORG_SEAT_BUDGET_MINUTES RALPH_ORG_TOTAL_BUDGET_MINUTES
-export RALPH_ORG_MAX_FIX_ROUNDS RALPH_ORG_DEADMAN_MINUTES
+export RALPH_ORG_DEADMAN_MINUTES
 
 # ═══════════════════════════════════════════════════════════════════
 # Validation helpers
