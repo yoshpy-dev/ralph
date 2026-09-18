@@ -22,7 +22,7 @@
 | 3b | legacy fixture 化 | `internal/org/watch_test.go` | `TestWatch_Deadman_SeatSentEvent_ClearsPendingAlert_WatchdogStopDoesNot` → `…_LegacyWatchdogStopDoesNot` に改名。seat-3 の cutoff を同じく `Manifest.Append` の旧形式イベントに置き換え、`sent` の正の検証(H3-1 pin)はそのまま残す。doc comment の参照名を更新 |
 | 3c | Reason なしに書き換え | `internal/org/watch_test.go` | `TestWatch_Deadman_ManualStopOfOtherSeat_ClearsPendingAlert` の `Stop` 呼び出しから `Reason:` を外す。doc comment(1118-1126 行)と行内コメント(1149 行)の参照名を 3a の新名に更新し、「手動停止は Details に reason を持たない」旨に直す |
 | 3d | アップグレード境界の回帰テスト追加 | `internal/org/watch_test.go` | `TestWatch_Deadman_PersistedAlertBaseline_SurvivesLegacyWatchdogStop`: 既存の `TestWatch_PrunesRetiredBudgetEntriesFromStatus_NoEscalation` と同じ手書き status JSON 方式で、(i) manifest に seat-1 の `spawned` と旧 cutoff `stopped`(`reason=watchdog_…`)を持たせ、(ii) pending liveness alert を `manifest_len` = 現行規則で数えた値(旧 cutoff を除外した数)で保存し、(iii) 新規イベントなし・probe 不変・DeadmanMinutes 超過で 1 cycle 回す → alert が誤って消えず escalation が 1 回起きること、(iv) 続けて lead の `sent` を追加して次 cycle で alert が消えること、を検証する |
-| 4 | tech-debt 行クローズ | `docs/tech-debt/README.md` | `StopParams.Reason` の行(129 行)を `~~` で打ち消し、Debt item セル末尾に `(RESOLVED 2026-09-17 in refactor/org-stop-reason-removal)`、Trigger セル末尾に「プロデューサ側のみ削除。reader 側の除外は legacy 互換ガードとして意図的に残す(Codex plan advisory HIGH-1: 撤去前に保存された pending alert の `ManifestLen` ベースラインが数え直し規則の変更でずれ、alert が誤って消える)」を追記。Related セルに本 plan の archive パスと self-review レポートを追加 |
+| 4 | tech-debt 行クローズ | `docs/tech-debt/README.md` | `StopParams.Reason` の行(129 行)を `~~` で打ち消し、Debt item セル末尾に `(RESOLVED 2026-09-18 in refactor/org-stop-reason-removal)`、Trigger セル末尾に「プロデューサ側のみ削除。reader 側の除外は legacy 互換ガードとして意図的に残す(Codex plan advisory HIGH-1: 撤去前に保存された pending alert の `ManifestLen` ベースラインが数え直し規則の変更でずれ、alert が誤って消える)」を追記。Related セルに本 plan の archive パスと self-review レポートを追加 |
 
 ## Non-goals
 
@@ -66,7 +66,7 @@ Critical forks: 2 件、いずれもユーザーと解決済み。
 - [ ] AC-3: `grep -n 'WatchdogsOwnStopEvent\|_WatchdogStopDoesNot' internal/org/watch_test.go` が空(改名済み)。`TestWatch_Deadman_LegacyWatchdogStopEvent_DoesNotClearPendingAlert` と `TestWatch_Deadman_SeatSentEvent_ClearsPendingAlert_LegacyWatchdogStopDoesNot` が `o.Manifest.Append` で `reason=watchdog_` 付き `stopped` を書き、`o.Stop(` 経由ではない。`TestWatch_Deadman_ManualStopOfOtherSeat_ClearsPendingAlert` が Reason なしで pass
 - [ ] AC-4: `TestWatch_Deadman_PersistedAlertBaseline_SurvivesLegacyWatchdogStop` が存在し、(i) 新規イベントなしで escalation が 1 回起きる、(ii) `sent` 追加後の cycle で alert が消える、の両方を assert して pass
 - [ ] AC-5: `go test ./internal/org/... ./internal/cli/... -count=1` green。`./scripts/run-verify.sh` green
-- [ ] AC-6: `docs/tech-debt/README.md` の `StopParams.Reason` 行が `~~` + `(RESOLVED 2026-09-17 in refactor/org-stop-reason-removal)` でクローズされ、「プロデューサ側のみ削除、reader 側は legacy 互換で残す」と Codex HIGH-1 の理由が記録されている。行のパイプ数は 6 のまま、他行は無変更
+- [ ] AC-6: `docs/tech-debt/README.md` の `StopParams.Reason` 行が `~~` + `(RESOLVED 2026-09-18 in refactor/org-stop-reason-removal)` でクローズされ、「プロデューサ側のみ削除、reader 側は legacy 互換で残す」と Codex HIGH-1 の理由が記録されている。行のパイプ数は 6 のまま、他行は無変更
 - [ ] AC-7: `grep -rn 'StopParams.Reason' docs/specs docs/recipes README.md .claude templates/base` が空(履歴レポート `docs/reports/` と archive plan は対象外)
 
 ## Implementation outline
@@ -108,6 +108,9 @@ Critical forks: 2 件、いずれもユーザーと解決済み。
 ## Deviation notes
 
 - 2026-09-18 plan: Codex plan advisory(codex-cli 0.154.0、初回は stdin 待ちでハングしたため `</dev/null` を付けて再実行)が HIGH 1 件を報告(除外分岐の削除で保存済み `ManifestLen` ベースラインがずれ、アップグレード境界で保留 alert が誤って消える)。`checkDeadman` の比較式と `loadWatchStatus` の復元で機構を確認し、ユーザーに再度選択を求めて「プロデューサ側のみ削除」を採用。Scope 2・3a〜3d、Assumptions、AC-2〜AC-4、Non-goals を全面改訂
+- 2026-09-18 work: `./scripts/branch-name.sh from-plan` は `refactor/153/org-stop-reason-removal` を返すが、`/plan` が登録した worktree state のブランチ `refactor/org-stop-reason-removal` を `/work` 手順 2d(既存 state を resume)に従い維持
+- 2026-09-18 work: Slice A = bce892c(implementer 委譲)。逸脱 1 件を採用: 3d のベースラインを legacy cutoff 追加の **前** に計算する。plan の手順どおり追加後に計算すると、ベースラインも同じ関数で算出されるため除外分岐を消しても両方が同じだけ動き、テストが判別できない。前に計算すれば除外の有無だけが recount とベースラインの一致/不一致を決める(テストの doc comment「Discrimination note」に記録)
+- 2026-09-18 work: Slice B は inline 例外(単一ファイル数行)で orchestrator が実施。パイプ数 6、Impact/Why deferred セルのハッシュ一致、struck 行 44→45 を確認。RESOLVED 日付は実施日の 2026-09-18(AC-6 の記述も合わせて修正)
 
 ## Progress checklist
 
