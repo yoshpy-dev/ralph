@@ -1,6 +1,6 @@
 # doctor-shell-alias-check
 
-- Status: Draft
+- Status: In progress
 - Owner: Claude Code
 - Date: 2026-09-18
 - Related request: #155 の実機検証で、ユーザーの `~/.zshrc` の `alias codex="codex -m gpt-6-astra …"` が herdr pane の対話シェルで展開され、`ralph org spawn --model` が生成する `codex … --model` と衝突して `error: the argument '--model <MODEL>' cannot be used multiple times` で座席が即終了、`spawn_failed` になった(evidence P1)。`alias claude="claude --model fable …"` も同じ形で衝突するはず(未検証)。herdr は実行ファイル名をそのまま pane に送るため ralph 側で alias を迂回できない。`ralph doctor` で検出して warn する(issue #162)
@@ -106,7 +106,7 @@ doctor の Check 追加のみ。下流へは次回 release でバイナリ経由
 
 - [x] Plan reviewed
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
