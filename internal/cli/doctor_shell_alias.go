@@ -142,19 +142,28 @@ var shellAliasStatementMarkers = map[string]bool{
 }
 
 // shellAliasStatements splits one logical line (possibly several physical
-// lines already joined by scanShellAliasFile) into shell statements, each a
-// slice of words. Word splitting understands three states: unquoted,
-// single-quoted, and double-quoted. Unquoted and double-quoted text treat a
-// backslash as escaping the next byte (the backslash itself is dropped);
-// single-quoted text has no escapes. Quote characters delimit a segment and
-// are dropped from the result; adjacent segments concatenate into one word
-// regardless of which state produced them. Unquoted whitespace ends a word.
-// An unquoted `;`, `|`, or `&` ends the current statement -- a run like `&&`
-// or `||` produces no empty statement in between (empty statements are
-// dropped). Quotes protect all of `;`, `|`, `&`, and `#` from ending
-// anything. An unquoted `#` at the very start of a word ends scanning
-// entirely: the rest of the line, including any later statement, is a
-// trailing comment. In unquoted or double-quoted state, a backslash
+// lines already joined by scanShellAliasFile, or an alias value re-read by
+// shellAliasValueTokens) into shell statements, each a slice of words. Word
+// splitting understands three states: unquoted, single-quoted, and
+// double-quoted. Unquoted and double-quoted text treat a backslash as
+// escaping the next byte (the backslash itself is dropped); single-quoted
+// text has no escapes. Quote characters delimit a segment and are dropped
+// from the result; adjacent segments concatenate into one word regardless
+// of which state produced them. Unquoted whitespace -- space, tab, or a raw
+// newline/carriage return, which reach this reader once a multi-line value
+// or joined rc lines are re-scanned -- ends a word; inside a quote none of
+// that is special, so a quoted segment that spans a join point keeps its
+// embedded newline as literal content. An unquoted `;`, `|`, or `&` ends
+// the current statement -- a run like `&&` or `||` produces no empty
+// statement in between (empty statements are dropped). Quotes protect all
+// of `;`, `|`, `&`, and `#` from ending anything. stopAtComment controls
+// whether an unquoted `#` at the very start of a word ends scanning
+// entirely (true: the rest of the line, including any later statement, is
+// a trailing comment -- the right rule for an rc line, always read
+// non-interactively; false: `#` is an ordinary word character -- the right
+// rule for shellAliasValueTokens, since herdr's pane is an interactive zsh
+// with interactivecomments off by default, so `#` loses its comment
+// meaning there). In unquoted or double-quoted state, a backslash
 // immediately followed by a newline is a shell line-continuation: both
 // bytes are dropped, joining the surrounding text seamlessly -- this is
 // what lets scanShellAliasFile join two physical lines with a literal "\n"
@@ -163,7 +172,7 @@ var shellAliasStatementMarkers = map[string]bool{
 // quote, or on a bare trailing backslash with nothing after it (no
 // newline) -- both are scanShellAliasFile's signal to read and append the
 // next physical line.
-func shellAliasStatements(line string) (stmts [][]string, open bool) {
+func shellAliasStatements(line string, stopAtComment bool) (stmts [][]string, open bool) {
 	var words []string
 	var cur strings.Builder
 	inWord := false
@@ -190,7 +199,7 @@ func shellAliasStatements(line string) (stmts [][]string, open bool) {
 	for i < n {
 		c := line[i]
 		switch {
-		case c == ' ' || c == '\t':
+		case c == ' ' || c == '\t' || c == '\n' || c == '\r':
 			flushWord()
 			i++
 		case c == '\'':
@@ -242,7 +251,7 @@ func shellAliasStatements(line string) (stmts [][]string, open bool) {
 				trailingBackslash = true
 				i++
 			}
-		case c == '#' && !inWord:
+		case c == '#' && !inWord && stopAtComment:
 			flushStatement()
 			return stmts, openQuote || trailingBackslash
 		case c == ';' || c == '|' || c == '&':
@@ -275,7 +284,7 @@ type shellAliasAssignment struct {
 // alias statement -- an open quote on an unrelated line cannot swallow a
 // later, independent alias line.
 func parseAliasStatements(line string) (defs []shellAliasAssignment, openAlias bool) {
-	stmts, open := shellAliasStatements(line)
+	stmts, open := shellAliasStatements(line, true)
 	for _, words := range stmts {
 		i := 0
 		for i < len(words) && shellAliasStatementMarkers[words[i]] {
@@ -354,25 +363,53 @@ type shellAliasDef struct {
 	Incomplete bool
 }
 
+// shellAliasFileScan is scanShellAliasFile's result.
+type shellAliasFileScan struct {
+	Defs []shellAliasDef
+
+	// Unclosed holds the first physical line of every alias statement that
+	// was still open (unterminated quote or trailing backslash) at
+	// scanShellAliasFile's 32-line continuation cap or at EOF, INCLUDING
+	// one that defined no codex/claude assignment at all (e.g. `alias
+	// msg='don` swallows the rest of the file into `msg`'s value with no
+	// Defs entry to carry Incomplete). checkShellAliases folds this
+	// together with any Incomplete def's file:line into one "not fully
+	// parsed" clause. NOT covered: an unbalanced quote that a *later*
+	// line's own quote happens to close swallows the lines in between
+	// without any signal here -- zsh itself would report that rc as
+	// broken, and there is no local marker for it in a single statement's
+	// open/closed state.
+	Unclosed []int
+
+	// Opened reports whether the file was successfully opened at all --
+	// when false, Err came from os.Open and the file was never read.
+	Opened bool
+
+	// Err is non-nil either when Opened is false (see above) or when the
+	// scanner failed partway through; in the latter case Defs and Unclosed
+	// are never discarded because of it -- they hold whatever was read
+	// before the failure.
+	Err error
+}
+
 // scanShellAliasFile reads one rc file and returns every codex/claude alias
 // definition found, in file order, whether or not it carries a conflicting
-// flag. opened reports whether the file was successfully opened at all --
-// when opened is false, err came from os.Open and the file was never read;
-// when opened is true and err is non-nil, err came from the scanner after
-// some lines (possibly with alias definitions) were already read
-// successfully, so defs is never discarded because of it. Each physical
-// line is bounded at 1 MiB (bufio.Scanner's own 64 KiB default would
-// otherwise abort the whole file on one long line). When a line's last
-// statement is an unterminated alias statement (see parseAliasStatements'
-// openAlias), up to 32 further physical lines are appended and re-parsed as
-// one logical line before giving up; past that point, or at EOF, whatever
-// definitions the statement yielded from what was actually read are kept
-// and marked Incomplete. The reported Line is always the statement's first
+// flag (shellAliasFileScan.Defs), plus every alias statement that was never
+// fully read (shellAliasFileScan.Unclosed). Each physical line is bounded
+// at 1 MiB (bufio.Scanner's own 64 KiB default would otherwise abort the
+// whole file on one long line). When a line's last statement is an
+// unterminated alias statement (see parseAliasStatements' openAlias), up to
+// 32 further physical lines are appended and re-parsed as one logical line
+// before giving up; past that point, or at EOF, whatever definitions the
+// statement yielded from what was actually read are kept and marked
+// Incomplete, and the statement's first line is recorded in Unclosed
+// regardless of whether it yielded any definition. The reported Line (on a
+// def) or line number (in Unclosed) is always the statement's first
 // physical line, however many lines it ended up spanning.
-func scanShellAliasFile(path string) (defs []shellAliasDef, opened bool, err error) {
+func scanShellAliasFile(path string) shellAliasFileScan {
 	f, openErr := os.Open(path)
 	if openErr != nil {
-		return nil, false, openErr
+		return shellAliasFileScan{Opened: false, Err: openErr}
 	}
 	defer func() { _ = f.Close() }()
 
@@ -381,6 +418,7 @@ func scanShellAliasFile(path string) (defs []shellAliasDef, opened bool, err err
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
 
+	var result shellAliasFileScan
 	lineNum := 0
 	for scanner.Scan() {
 		lineNum++
@@ -396,8 +434,11 @@ func scanShellAliasFile(path string) (defs []shellAliasDef, opened bool, err err
 			assignments, openAlias = parseAliasStatements(joined)
 		}
 
+		if openAlias {
+			result.Unclosed = append(result.Unclosed, startLine)
+		}
 		for _, a := range assignments {
-			defs = append(defs, shellAliasDef{
+			result.Defs = append(result.Defs, shellAliasDef{
 				Name:       a.Name,
 				File:       path,
 				Line:       startLine,
@@ -406,10 +447,9 @@ func scanShellAliasFile(path string) (defs []shellAliasDef, opened bool, err err
 			})
 		}
 	}
-	if scanErr := scanner.Err(); scanErr != nil {
-		return defs, true, scanErr
-	}
-	return defs, true, nil
+	result.Opened = true
+	result.Err = scanner.Err()
+	return result
 }
 
 // shellAliasClassModel, shellAliasClassSandbox, shellAliasClassApproval, and
@@ -434,7 +474,13 @@ const (
 // not). For claude, --permission-mode goes to edits and autonomous seats
 // (permissionArgsForDriver's claude case). A guarded seat of either driver
 // gets none of the three permission-class flags, so that class's alias
-// value applies unopposed on a guarded seat.
+// value applies unopposed on a guarded seat. codex's two permission-class
+// flags additionally require [org.permissions].codex_verified = true
+// (internal/config/config.go's CodexVerified, default false):
+// permissionArgsForDriver fails codex edits/autonomous closed until an
+// operator sets it, so on a default project no codex seat ever reaches
+// edits or autonomous and every codex seat is guarded regardless of its
+// configured mode.
 func shellAliasFlagClass(label string) string {
 	switch label {
 	case "--model", "--model (-m)":
@@ -458,10 +504,13 @@ func shellAliasFlagClass(label string) string {
 // would miss it, since the quote characters would still be attached to the
 // token. All statements' words are flattened in order, so an unquoted `;`,
 // `|`, or `&` inside the value merely separates words rather than hiding
-// anything, and an unquoted `#` that starts a word still ends the value
-// early, matching real shell comment handling.
+// anything. Unlike an rc line, an unquoted `#` does NOT end the value early
+// (stopAtComment is false): herdr's pane is an interactive zsh, where
+// interactivecomments is off by default, so a `#` in the expanded alias
+// text is an ordinary argument, not a comment marker -- `codex #keep
+// --model x` really does pass --model to codex.
 func shellAliasValueTokens(value string) []string {
-	stmts, _ := shellAliasStatements(value)
+	stmts, _ := shellAliasStatements(value, false)
 	var tokens []string
 	for _, words := range stmts {
 		tokens = append(tokens, words...)
@@ -544,6 +593,110 @@ func shellAliasUnreadableReason(err error) string {
 	return err.Error()
 }
 
+// shellAliasCodexSentence assembles the codex Detail sentence from items
+// (already-formatted "alias codex in <file>:<line> adds <flags>" strings,
+// one per finding) and which flag classes appeared among them. Pure -- no
+// filesystem, no env -- so it is testable with plain slices and bools.
+// Returns "" when items is empty. Clause order: the opening "rejects a
+// flag given twice" clause (always), then model/sandbox/approval clauses
+// each only when that class was found, then the closing "remove the
+// alias" clause (always); the herdr-not-installed suffix is appended
+// whenever herdrPresent is false, regardless of flag class, since any
+// codex finding is worth surfacing at some severity.
+func shellAliasCodexSentence(items []string, hasModel, hasSandbox, hasApproval, herdrPresent bool) string {
+	if len(items) == 0 {
+		return ""
+	}
+	clauses := []string{
+		strings.Join(items, "; ") +
+			` — herdr expands the alias in the seat's pane and codex rejects a flag given twice ("cannot be used multiple times")`,
+	}
+	if hasModel {
+		clauses = append(clauses, "ralph org spawn always passes --model, so every spawn fails")
+	}
+	if hasSandbox {
+		clauses = append(clauses, "ralph passes --sandbox to edits and autonomous seats (modes a codex seat gets only once "+
+			"[org.permissions].codex_verified = true), so those spawns fail while a guarded seat silently runs with the alias's sandbox")
+	}
+	if hasApproval {
+		clauses = append(clauses, "ralph passes --ask-for-approval to autonomous seats only (a mode a codex seat gets only once "+
+			"[org.permissions].codex_verified = true), so those spawns fail while edits and guarded seats silently run with the alias's approval policy")
+	}
+	clauses = append(clauses, "remove the alias or start herdr from an alias-free rc (docs/recipes/codex-seat-permissions.md)")
+	sentence := strings.Join(clauses, "; ")
+	if !herdrPresent {
+		sentence += " (herdr not installed, so no seat is affected today)"
+	}
+	return sentence
+}
+
+// shellAliasClaudeSentence is shellAliasCodexSentence's claude counterpart.
+// Unlike codex, the herdr-not-installed suffix is appended only when
+// hasPermissionMode is also true: a claude --model-only finding never
+// warns in the first place (see checkShellAliases' status switch), so
+// there is nothing for the suffix to qualify when herdr is absent and only
+// --model was found.
+func shellAliasClaudeSentence(items []string, hasModel, hasPermissionMode, herdrPresent bool) string {
+	if len(items) == 0 {
+		return ""
+	}
+	clauses := []string{
+		strings.Join(items, "; ") + " — claude accepts a flag given twice and the last value wins",
+	}
+	if hasModel {
+		clauses = append(clauses, "ralph org spawn always passes --model after the alias, so its value applies and the seat still starts")
+	}
+	if hasPermissionMode {
+		clauses = append(clauses, "ralph passes --permission-mode only to edits and autonomous seats, "+
+			"so a guarded seat runs with the alias's permission mode")
+	}
+	clauses = append(clauses, "the alias's other flags reach every seat")
+	sentence := strings.Join(clauses, "; ")
+	if !herdrPresent && hasPermissionMode {
+		sentence += " (herdr not installed, so no seat is affected today)"
+	}
+	return sentence
+}
+
+// shellAliasScannedClause renders checkShellAliases' always-present,
+// always-last Detail clause naming what was actually scanned.
+// candidateCount and inaccessibleDirCount are len(candidates) and
+// len(inaccessibleDirs) from shellAliasRcCandidates; scannedOK is the
+// display-path list of files that were at least opened (successfully or
+// partially read -- see checkShellAliases).
+func shellAliasScannedClause(candidateCount, inaccessibleDirCount int, scannedOK []string) string {
+	switch {
+	case candidateCount == 0 && inaccessibleDirCount == 0:
+		return "no shell rc file found to scan"
+	case len(scannedOK) == 0:
+		return "scanned 0 shell rc file(s) (files they source are not followed)"
+	default:
+		return fmt.Sprintf("scanned %d shell rc file(s): %s (files they source are not followed)",
+			len(scannedOK), strings.Join(scannedOK, ", "))
+	}
+}
+
+// shellAliasDetail joins checkShellAliases' ordered Detail pieces: the
+// codex/claude/harmless/no-alias sentences, then (each only when non-empty)
+// the not-fully-parsed clause, the could-not-read clause, the
+// partially-read clause, and finally scannedClause, which is always
+// present.
+func shellAliasDetail(sentences, notFullyParsed, couldNotRead, partiallyRead []string, scannedClause string) string {
+	var parts []string
+	parts = append(parts, sentences...)
+	if len(notFullyParsed) > 0 {
+		parts = append(parts, "not fully parsed: "+strings.Join(notFullyParsed, ", ")+" — the alias value continues past what was read")
+	}
+	if len(couldNotRead) > 0 {
+		parts = append(parts, "could not read: "+strings.Join(couldNotRead, ", ")+" — aliases there were not checked")
+	}
+	if len(partiallyRead) > 0 {
+		parts = append(parts, "partially read: "+strings.Join(partiallyRead, ", ")+" — aliases after that point were not checked")
+	}
+	parts = append(parts, scannedClause)
+	return strings.Join(parts, ". ")
+}
+
 // checkShellAliases is doctor's "Shell aliases (codex/claude)" check.
 // resolveEnv supplies the home directory and $ZDOTDIR to scan from
 // (production: doctorShellAliasEnv; tests: a closure or TestMain's pin).
@@ -562,7 +715,9 @@ func shellAliasUnreadableReason(err error) string {
 // seat's pane) regardless of flag class, and makes a claude finding warn
 // only for --permission-mode (a claude --model finding is always
 // informational, since the worst case is ralph's own value winning, never
-// a spawn failure or an unopposed alias).
+// a spawn failure or an unopposed alias). The Detail sentences are built by
+// shellAliasCodexSentence/shellAliasClaudeSentence; the read-status clauses
+// by shellAliasDetail and shellAliasScannedClause.
 func checkShellAliases(resolveEnv func() (shellAliasEnv, error), herdrPresent bool) checkResult {
 	r := checkResult{Name: "Shell aliases (codex/claude)"}
 
@@ -588,36 +743,43 @@ func checkShellAliases(resolveEnv func() (shellAliasEnv, error), herdrPresent bo
 		couldNotRead = append(couldNotRead, fmt.Sprintf("%s (%s)", displayPath(d.Dir), d.Reason))
 	}
 
+	// notFullyParsed is built here, per candidate file, from
+	// shellAliasFileScan.Unclosed -- an alias statement that never closed,
+	// whether or not it yielded a codex/claude assignment (C2-2). It is
+	// deduplicated by file:line since the same statement's Unclosed entry
+	// and any Incomplete def it produced would otherwise name the same
+	// line twice.
 	var defs []shellAliasDef
 	var scannedOK []string
 	var partiallyRead []string
+	var notFullyParsed []string
+	seenUnclosed := map[string]bool{}
 	for _, c := range candidates {
-		fileDefs, wasOpened, scanErr := scanShellAliasFile(c)
-		defs = append(defs, fileDefs...)
+		scan := scanShellAliasFile(c)
+		defs = append(defs, scan.Defs...)
+		for _, line := range scan.Unclosed {
+			key := fmt.Sprintf("%s:%d", displayPath(c), line)
+			if !seenUnclosed[key] {
+				seenUnclosed[key] = true
+				notFullyParsed = append(notFullyParsed, key)
+			}
+		}
 		switch {
-		case !wasOpened:
-			couldNotRead = append(couldNotRead, fmt.Sprintf("%s (%s)", displayPath(c), shellAliasUnreadableReason(scanErr)))
-		case scanErr != nil:
-			partiallyRead = append(partiallyRead, fmt.Sprintf("%s (%s)", displayPath(c), shellAliasUnreadableReason(scanErr)))
+		case !scan.Opened:
+			couldNotRead = append(couldNotRead, fmt.Sprintf("%s (%s)", displayPath(c), shellAliasUnreadableReason(scan.Err)))
+		case scan.Err != nil:
+			partiallyRead = append(partiallyRead, fmt.Sprintf("%s (%s)", displayPath(c), shellAliasUnreadableReason(scan.Err)))
 			scannedOK = append(scannedOK, displayPath(c))
 		default:
 			scannedOK = append(scannedOK, displayPath(c))
 		}
 	}
 
-	var codexItems, claudeItems, harmlessItems, notFullyParsed []string
+	var codexItems, claudeItems, harmlessItems []string
 	var codexHasModel, codexHasSandbox, codexHasApproval bool
 	var claudeHasModel, claudeHasPermissionMode bool
-	seenIncomplete := map[string]bool{}
 	for _, d := range defs {
 		item := fmt.Sprintf("alias %s in %s:%d", d.Name, displayPath(d.File), d.Line)
-		if d.Incomplete {
-			key := fmt.Sprintf("%s:%d", displayPath(d.File), d.Line)
-			if !seenIncomplete[key] {
-				seenIncomplete[key] = true
-				notFullyParsed = append(notFullyParsed, key)
-			}
-		}
 		if len(d.Flags) == 0 {
 			if !d.Incomplete {
 				harmlessItems = append(harmlessItems, item)
@@ -653,46 +815,11 @@ func checkShellAliases(resolveEnv func() (shellAliasEnv, error), herdrPresent bo
 	claudeFound := len(claudeItems) > 0
 
 	var sentences []string
-	if codexFound {
-		clauses := []string{
-			strings.Join(codexItems, "; ") +
-				` — herdr expands the alias in the seat's pane and codex rejects a flag given twice ("cannot be used multiple times")`,
-		}
-		if codexHasModel {
-			clauses = append(clauses, "ralph org spawn always passes --model, so every spawn fails")
-		}
-		if codexHasSandbox {
-			clauses = append(clauses, "ralph passes --sandbox to edits and autonomous seats, "+
-				"so those spawns fail while a guarded seat silently runs with the alias's sandbox")
-		}
-		if codexHasApproval {
-			clauses = append(clauses, "ralph passes --ask-for-approval to autonomous seats only, "+
-				"so those spawns fail while edits and guarded seats silently run with the alias's approval policy")
-		}
-		clauses = append(clauses, "remove the alias or start herdr from an alias-free rc (docs/recipes/codex-seat-permissions.md)")
-		sentence := strings.Join(clauses, "; ")
-		if !herdrPresent {
-			sentence += " (herdr not installed, so no seat is affected today)"
-		}
-		sentences = append(sentences, sentence)
+	if s := shellAliasCodexSentence(codexItems, codexHasModel, codexHasSandbox, codexHasApproval, herdrPresent); s != "" {
+		sentences = append(sentences, s)
 	}
-	if claudeFound {
-		clauses := []string{
-			strings.Join(claudeItems, "; ") + " — claude accepts a flag given twice and the last value wins",
-		}
-		if claudeHasModel {
-			clauses = append(clauses, "ralph org spawn always passes --model after the alias, so its value applies and the seat still starts")
-		}
-		if claudeHasPermissionMode {
-			clauses = append(clauses, "ralph passes --permission-mode only to edits and autonomous seats, "+
-				"so a guarded seat runs with the alias's permission mode")
-		}
-		clauses = append(clauses, "the alias's other flags reach every seat")
-		sentence := strings.Join(clauses, "; ")
-		if !herdrPresent && claudeHasPermissionMode {
-			sentence += " (herdr not installed, so no seat is affected today)"
-		}
-		sentences = append(sentences, sentence)
+	if s := shellAliasClaudeSentence(claudeItems, claudeHasModel, claudeHasPermissionMode, herdrPresent); s != "" {
+		sentences = append(sentences, s)
 	}
 	switch {
 	case codexFound || claudeFound:
@@ -705,37 +832,17 @@ func checkShellAliases(resolveEnv func() (shellAliasEnv, error), herdrPresent bo
 			verb = "have"
 		}
 		sentences = append(sentences, strings.Join(harmlessItems, "; ")+" "+verb+" no conflicting flags")
-	case len(defs) > 0:
-		// Every def found is incomplete; the not-fully-parsed clause below
-		// names it, so no "no alias found" claim belongs here.
+	case len(defs) > 0 || len(notFullyParsed) > 0:
+		// Either every def found is incomplete, or an alias statement never
+		// closed at all (with or without any codex/claude assignment); the
+		// not-fully-parsed clause below names it, so no "no alias found"
+		// claim belongs here.
 	case len(scannedOK) > 0:
 		sentences = append(sentences, "no codex/claude alias found")
 	}
 
-	var scannedClause string
-	switch {
-	case len(candidates) == 0 && len(inaccessibleDirs) == 0:
-		scannedClause = "no shell rc file found to scan"
-	case len(scannedOK) == 0:
-		scannedClause = "scanned 0 shell rc file(s) (files they source are not followed)"
-	default:
-		scannedClause = fmt.Sprintf("scanned %d shell rc file(s): %s (files they source are not followed)",
-			len(scannedOK), strings.Join(scannedOK, ", "))
-	}
-
-	var detailParts []string
-	detailParts = append(detailParts, sentences...)
-	if len(notFullyParsed) > 0 {
-		detailParts = append(detailParts, "not fully parsed: "+strings.Join(notFullyParsed, ", ")+" — the alias value continues past what was read")
-	}
-	if len(couldNotRead) > 0 {
-		detailParts = append(detailParts, "could not read: "+strings.Join(couldNotRead, ", ")+" — aliases there were not checked")
-	}
-	if len(partiallyRead) > 0 {
-		detailParts = append(detailParts, "partially read: "+strings.Join(partiallyRead, ", ")+" — aliases after that point were not checked")
-	}
-	detailParts = append(detailParts, scannedClause)
-	r.Detail = strings.Join(detailParts, ". ")
+	scannedClause := shellAliasScannedClause(len(candidates), len(inaccessibleDirs), scannedOK)
+	r.Detail = shellAliasDetail(sentences, notFullyParsed, couldNotRead, partiallyRead, scannedClause)
 
 	switch {
 	case herdrPresent && (codexFound || claudeHasPermissionMode):

@@ -377,7 +377,7 @@ func TestCheckShellAliases_CodexSandboxOnly_WarnsWithSandboxClauseOnly(t *testin
 	if r.Status != "warn" {
 		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
 	}
-	for _, want := range []string{"to edits and autonomous seats", "alias's sandbox"} {
+	for _, want := range []string{"to edits and autonomous seats", "alias's sandbox", "codex_verified = true"} {
 		if !strings.Contains(r.Detail, want) {
 			t.Errorf("expected detail to contain %q, got: %s", want, r.Detail)
 		}
@@ -402,7 +402,7 @@ func TestCheckShellAliases_CodexApprovalOnly_WarnsWithApprovalClauseOnly(t *test
 	if r.Status != "warn" {
 		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
 	}
-	for _, want := range []string{"to autonomous seats only", "edits and guarded seats silently run with the alias's approval policy"} {
+	for _, want := range []string{"to autonomous seats only", "edits and guarded seats silently run with the alias's approval policy", "codex_verified = true"} {
 		if !strings.Contains(r.Detail, want) {
 			t.Errorf("expected detail to contain %q, got: %s", want, r.Detail)
 		}
@@ -630,16 +630,43 @@ func TestCheckShellAliases_ContinuedDoubleQuotedValue_WarnsAtFirstLine(t *testin
 
 // TestCheckShellAliases_ContinuedSingleQuotedValueAcrossThreeLines_Warns is
 // N2's continuation handling for a single-quoted value spanning more than
-// two physical lines (single quotes have no escapes, so the embedded
-// newlines are preserved literally in the value, which is fine for
-// whitespace-based flag tokenization).
+// two physical lines: single quotes have no escapes, so the embedded
+// newlines are preserved literally in the value. The fixture uses the LONG
+// --model flag with the line break landing right after it (C2-1): before
+// the C2-1 fix, the reader's whitespace case did not treat a raw newline
+// as a word boundary, so the token read as the single glued word
+// "--model\n" and never matched "--model" or the "--model=" prefix --
+// this exact test passed anyway only because the SHORT-flag concatenation
+// rule (`tok[2] != '-'`) happens to accept a newline as if it were part of
+// a value, which is the bug C2-1 reports, not evidence of correctness.
 func TestCheckShellAliases_ContinuedSingleQuotedValueAcrossThreeLines_Warns(t *testing.T) {
 	dir := t.TempDir()
-	writeAliasRc(t, filepath.Join(dir, ".zshrc"), "alias codex='codex\n  -m\n  x'\n")
+	writeAliasRc(t, filepath.Join(dir, ".zshrc"), "alias codex='codex --model\n  gpt\n'\n")
 
 	r := checkShellAliases(shellAliasTestEnv(dir), true)
 	if r.Status != "warn" {
 		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "--model") {
+		t.Errorf("expected detail to contain --model, got: %s", r.Detail)
+	}
+}
+
+// TestCheckShellAliases_ContinuedSingleQuotedValueAcrossTwoLines_WarnsAtFirstLine
+// is C2-1's two-line variant: the newline lands directly after the long
+// flag, with the closing quote on the same second line.
+func TestCheckShellAliases_ContinuedSingleQuotedValueAcrossTwoLines_WarnsAtFirstLine(t *testing.T) {
+	dir := t.TempDir()
+	writeAliasRc(t, filepath.Join(dir, ".zshrc"), "alias codex='codex --model\n  gpt'\n")
+
+	r := checkShellAliases(shellAliasTestEnv(dir), true)
+	if r.Status != "warn" {
+		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
+	}
+	for _, want := range []string{"--model", ":1"} {
+		if !strings.Contains(r.Detail, want) {
+			t.Errorf("expected detail to contain %q, got: %s", want, r.Detail)
+		}
 	}
 }
 
@@ -735,6 +762,23 @@ func TestCheckShellAliases_QuotedShortFlagInValue_Warn(t *testing.T) {
 	}
 	if !strings.Contains(r.Detail, "--model (-m)") {
 		t.Errorf("expected detail to contain --model (-m), got: %s", r.Detail)
+	}
+}
+
+// TestCheckShellAliases_HashInsideValue_StillWarns is the C2-3 fix: an
+// unquoted "#" inside the alias VALUE is not a comment marker (herdr's
+// pane is an interactive zsh with interactivecomments off by default), so
+// the flag after it must still be detected.
+func TestCheckShellAliases_HashInsideValue_StillWarns(t *testing.T) {
+	dir := t.TempDir()
+	writeAliasRc(t, filepath.Join(dir, ".zshrc"), `alias codex='codex #keep --model x'`+"\n")
+
+	r := checkShellAliases(shellAliasTestEnv(dir), true)
+	if r.Status != "warn" {
+		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "--model") {
+		t.Errorf("expected detail to contain --model, got: %s", r.Detail)
 	}
 }
 
@@ -912,42 +956,46 @@ func TestCheckShellAliases_AliasValueNeverAppearsInDetail(t *testing.T) {
 
 func TestShellAliasStatements(t *testing.T) {
 	cases := []struct {
-		name     string
-		line     string
-		wantStmt [][]string
-		wantOpen bool
+		name          string
+		line          string
+		stopAtComment bool
+		wantStmt      [][]string
+		wantOpen      bool
 	}{
-		{"simple unquoted", "codex x", [][]string{{"codex", "x"}}, false},
-		{"single-quoted with spaces", `codex='codex -m x'`, [][]string{{"codex=codex -m x"}}, false},
-		{"double-quoted with escaped quote", `codex="codex -m \"x\""`, [][]string{{`codex=codex -m "x"`}}, false},
-		{"single-quote concatenation", `codex='a'\''b'`, [][]string{{"codex=a'b"}}, false},
-		{"comment ends statement", "codex=codex # trailing comment", [][]string{{"codex=codex"}}, false},
-		{"hash mid-word is not a comment", "codex=codex#not-a-comment", [][]string{{"codex=codex#not-a-comment"}}, false},
-		{"semicolon splits into two statements", "codex=codex; claude=claude", [][]string{{"codex=codex"}, {"claude=claude"}}, false},
-		{"pipe splits into two statements", "codex=codex | cat", [][]string{{"codex=codex"}, {"cat"}}, false},
-		{"double ampersand produces no empty statement", "codex=codex && claude=claude", [][]string{{"codex=codex"}, {"claude=claude"}}, false},
-		{"quotes protect statement separators", `codex='a;b|c&d#e'`, [][]string{{"codex=a;b|c&d#e"}}, false},
-		{"unterminated single quote runs to EOL and stays open", `codex='codex -m x`, [][]string{{"codex=codex -m x"}}, true},
-		{"unterminated double quote runs to EOL and stays open", `codex="codex -m x`, [][]string{{"codex=codex -m x"}}, true},
-		{"trailing backslash stays open with no spurious word", `codex=codex \`, [][]string{{"codex=codex"}}, true},
-		{"backslash-newline joins across the join point", "codex=\"codex \\\n-m x\"", [][]string{{"codex=codex -m x"}}, false},
+		{"simple unquoted", "codex x", true, [][]string{{"codex", "x"}}, false},
+		{"single-quoted with spaces", `codex='codex -m x'`, true, [][]string{{"codex=codex -m x"}}, false},
+		{"double-quoted with escaped quote", `codex="codex -m \"x\""`, true, [][]string{{`codex=codex -m "x"`}}, false},
+		{"single-quote concatenation", `codex='a'\''b'`, true, [][]string{{"codex=a'b"}}, false},
+		{"comment ends statement", "codex=codex # trailing comment", true, [][]string{{"codex=codex"}}, false},
+		{"hash mid-word is not a comment", "codex=codex#not-a-comment", true, [][]string{{"codex=codex#not-a-comment"}}, false},
+		{"semicolon splits into two statements", "codex=codex; claude=claude", true, [][]string{{"codex=codex"}, {"claude=claude"}}, false},
+		{"pipe splits into two statements", "codex=codex | cat", true, [][]string{{"codex=codex"}, {"cat"}}, false},
+		{"double ampersand produces no empty statement", "codex=codex && claude=claude", true, [][]string{{"codex=codex"}, {"claude=claude"}}, false},
+		{"quotes protect statement separators", `codex='a;b|c&d#e'`, true, [][]string{{"codex=a;b|c&d#e"}}, false},
+		{"unterminated single quote runs to EOL and stays open", `codex='codex -m x`, true, [][]string{{"codex=codex -m x"}}, true},
+		{"unterminated double quote runs to EOL and stays open", `codex="codex -m x`, true, [][]string{{"codex=codex -m x"}}, true},
+		{"trailing backslash stays open with no spurious word", `codex=codex \`, true, [][]string{{"codex=codex"}}, true},
+		{"backslash-newline joins across the join point", "codex=\"codex \\\n-m x\"", true, [][]string{{"codex=codex -m x"}}, false},
+		{"newline between unquoted words ends the word (C2-1)", "codex\nx", true, [][]string{{"codex", "x"}}, false},
+		{"newline inside a single-quoted word stays inside the word (C2-1)", "codex='a\nb'", true, [][]string{{"codex=a\nb"}}, false},
+		{"hash does not end scanning when stopAtComment is false (C2-3)", "codex #keep --model x", false, [][]string{{"codex", "#keep", "--model", "x"}}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			gotStmts, gotOpen := shellAliasStatements(tc.line)
+			gotStmts, gotOpen := shellAliasStatements(tc.line, tc.stopAtComment)
 			if gotOpen != tc.wantOpen {
-				t.Errorf("shellAliasStatements(%q) open = %v, want %v", tc.line, gotOpen, tc.wantOpen)
+				t.Errorf("shellAliasStatements(%q, %v) open = %v, want %v", tc.line, tc.stopAtComment, gotOpen, tc.wantOpen)
 			}
 			if len(gotStmts) != len(tc.wantStmt) {
-				t.Fatalf("shellAliasStatements(%q) = %#v, want %#v", tc.line, gotStmts, tc.wantStmt)
+				t.Fatalf("shellAliasStatements(%q, %v) = %#v, want %#v", tc.line, tc.stopAtComment, gotStmts, tc.wantStmt)
 			}
 			for i := range gotStmts {
 				if len(gotStmts[i]) != len(tc.wantStmt[i]) {
-					t.Fatalf("shellAliasStatements(%q)[%d] = %#v, want %#v", tc.line, i, gotStmts[i], tc.wantStmt[i])
+					t.Fatalf("shellAliasStatements(%q, %v)[%d] = %#v, want %#v", tc.line, tc.stopAtComment, i, gotStmts[i], tc.wantStmt[i])
 				}
 				for j := range gotStmts[i] {
 					if gotStmts[i][j] != tc.wantStmt[i][j] {
-						t.Errorf("shellAliasStatements(%q)[%d][%d] = %q, want %q", tc.line, i, j, gotStmts[i][j], tc.wantStmt[i][j])
+						t.Errorf("shellAliasStatements(%q, %v)[%d][%d] = %q, want %q", tc.line, tc.stopAtComment, i, j, gotStmts[i][j], tc.wantStmt[i][j])
 					}
 				}
 			}
@@ -1004,7 +1052,7 @@ func TestShellAliasValueTokens(t *testing.T) {
 	}{
 		{"inner double quotes are stripped", `codex "--model" gpt-5`, []string{"codex", "--model", "gpt-5"}},
 		{"inner single quotes are stripped", "codex '-m' x", []string{"codex", "-m", "x"}},
-		{"hash-started word ends the value", "codex -m x # rest ignored", []string{"codex", "-m", "x"}},
+		{"hash-started word is kept, not treated as a comment (C2-3)", "codex #keep --model x", []string{"codex", "#keep", "--model", "x"}},
 		{"semicolon flattens statements into one token list", "a; b", []string{"a", "b"}},
 	}
 	for _, tc := range cases {
@@ -1042,6 +1090,159 @@ func TestShellAliasFlagClass(t *testing.T) {
 				t.Errorf("shellAliasFlagClass(%q) = %q, want %q", tc.label, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestShellAliasCodexSentence is the C2-6 extraction: shellAliasCodexSentence
+// is pure (no filesystem, no env), so every clause combination is testable
+// directly against plain slices and bools.
+func TestShellAliasCodexSentence(t *testing.T) {
+	items := []string{"alias codex in ~/.zshrc:1 adds --model (-m)"}
+	cases := []struct {
+		name                              string
+		items                             []string
+		hasModel, hasSandbox, hasApproval bool
+		herdrPresent                      bool
+		want, notWant                     []string
+	}{
+		{"empty items returns empty string", nil, false, false, false, true, nil, nil},
+		{"model-only", items, true, false, false, true,
+			[]string{"every spawn fails"}, []string{"alias's sandbox", "approval policy", "herdr not installed"}},
+		{"sandbox-only", items, false, true, false, true,
+			[]string{"alias's sandbox", "codex_verified = true"}, []string{"every spawn fails", "approval policy"}},
+		{"approval-only", items, false, false, true, true,
+			[]string{"approval policy", "codex_verified = true"}, []string{"every spawn fails", "alias's sandbox"}},
+		{"all three", items, true, true, true, true,
+			[]string{"every spawn fails", "alias's sandbox", "approval policy"}, nil},
+		{"herdr absent appends the suffix", items, true, false, false, false,
+			[]string{"herdr not installed"}, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := shellAliasCodexSentence(tc.items, tc.hasModel, tc.hasSandbox, tc.hasApproval, tc.herdrPresent)
+			if tc.items == nil {
+				if got != "" {
+					t.Fatalf("expected empty string for no items, got %q", got)
+				}
+				return
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(got, want) {
+					t.Errorf("shellAliasCodexSentence(...) = %q, expected it to contain %q", got, want)
+				}
+			}
+			for _, notWant := range tc.notWant {
+				if strings.Contains(got, notWant) {
+					t.Errorf("shellAliasCodexSentence(...) = %q, expected it to NOT contain %q", got, notWant)
+				}
+			}
+		})
+	}
+}
+
+// TestShellAliasClaudeSentence is shellAliasCodexSentence's counterpart.
+func TestShellAliasClaudeSentence(t *testing.T) {
+	items := []string{"alias claude in ~/.zshrc:1 adds --model"}
+	cases := []struct {
+		name                        string
+		items                       []string
+		hasModel, hasPermissionMode bool
+		herdrPresent                bool
+		want, notWant               []string
+	}{
+		{"empty items returns empty string", nil, false, false, true, nil, nil},
+		{"model-only", items, true, false, true,
+			[]string{"the seat still starts"}, []string{"permission mode", "herdr not installed"}},
+		{"permission-only", items, false, true, true,
+			[]string{"guarded seat runs with the alias's permission mode"}, []string{"the seat still starts"}},
+		{"both", items, true, true, true,
+			[]string{"the seat still starts", "guarded seat runs with the alias's permission mode"}, nil},
+		{"permission plus herdr absent appends the suffix", items, false, true, false,
+			[]string{"herdr not installed"}, nil},
+		{"model-only plus herdr absent has no suffix", items, true, false, false,
+			nil, []string{"herdr not installed"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := shellAliasClaudeSentence(tc.items, tc.hasModel, tc.hasPermissionMode, tc.herdrPresent)
+			if tc.items == nil {
+				if got != "" {
+					t.Fatalf("expected empty string for no items, got %q", got)
+				}
+				return
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(got, want) {
+					t.Errorf("shellAliasClaudeSentence(...) = %q, expected it to contain %q", got, want)
+				}
+			}
+			for _, notWant := range tc.notWant {
+				if strings.Contains(got, notWant) {
+					t.Errorf("shellAliasClaudeSentence(...) = %q, expected it to NOT contain %q", got, notWant)
+				}
+			}
+		})
+	}
+}
+
+// TestCheckShellAliases_UnclosedAliasStatementWithoutCodexClaudeName_NotFullyParsed
+// is the C2-2 fix: an alias statement for an unrelated name (msg) that
+// never closes swallows the rest of the file -- including a real codex
+// alias on the next line -- and yields zero defs. Before the fix,
+// scanShellAliasFile only ever recorded Incomplete through a def, so this
+// case produced no signal at all and doctor claimed "no codex/claude alias
+// found" about a file that (mangled beyond recovery) actually named codex.
+// The fixture has an odd total count of single quotes (1 on line 1, 2 on
+// line 2 = 3 total), so the reader's simple, non-nesting quote matching
+// leaves the statement still open at EOF even after the second line is
+// absorbed into msg's runaway value.
+func TestCheckShellAliases_UnclosedAliasStatementWithoutCodexClaudeName_NotFullyParsed(t *testing.T) {
+	dir := t.TempDir()
+	writeAliasRc(t, filepath.Join(dir, ".zshrc"),
+		`alias msg='don`+"\n"+`alias codex='codex -m x'`+"\n")
+
+	r := checkShellAliases(shellAliasTestEnv(dir), true)
+	if r.Status != "info" {
+		t.Fatalf("expected info, got %s (%s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "not fully parsed: ~"+string(filepath.Separator)+".zshrc:1") {
+		t.Errorf("expected detail to report the unparsed statement, got: %s", r.Detail)
+	}
+	if strings.Contains(r.Detail, "no codex/claude alias found") {
+		t.Errorf("must not claim no alias found when a statement never closed, got: %s", r.Detail)
+	}
+}
+
+// TestCheckShellAliases_UnclosedStatementAtContinuationCap_NamesFirstLineAndFindsLaterAlias
+// is C2-2's cap variant: an alias statement that stays open through all 32
+// continuation lines (1 initial + 32 continuation = lines 1-33) must still
+// be named at its first line, and an unrelated, well-formed codex alias
+// later in the file (line 40 here) must still be found once scanning
+// resumes fresh after the cap gives up.
+func TestCheckShellAliases_UnclosedStatementAtContinuationCap_NamesFirstLineAndFindsLaterAlias(t *testing.T) {
+	dir := t.TempDir()
+	var b strings.Builder
+	b.WriteString("alias msg='never closes\n") // line 1
+	for i := 0; i < 32; i++ {                  // lines 2-33: the continuation cap
+		b.WriteString("filler line\n")
+	}
+	for i := 0; i < 6; i++ { // lines 34-39: ordinary lines once the cap gives up
+		b.WriteString("\n")
+	}
+	b.WriteString(`alias codex='codex -m x'` + "\n") // line 40
+	writeAliasRc(t, filepath.Join(dir, ".zshrc"), b.String())
+
+	r := checkShellAliases(shellAliasTestEnv(dir), true)
+	if r.Status != "warn" {
+		t.Fatalf("expected warn (the later alias must still be found), got %s (%s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "not fully parsed: ~"+string(filepath.Separator)+".zshrc:1") {
+		t.Errorf("expected detail to name line 1 as unparsed, got: %s", r.Detail)
+	}
+	for _, want := range []string{"--model (-m)", ":40"} {
+		if !strings.Contains(r.Detail, want) {
+			t.Errorf("expected the later codex alias (line 40) to still be found, got: %s", r.Detail)
+		}
 	}
 }
 
