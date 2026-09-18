@@ -33,7 +33,7 @@ recorded in `docs/evidence/codex-seat-permissions-2026-09-18.md`.
   alias's permission mode. Every other flag in the alias still reaches
   each seat. `ralph doctor`'s "Shell aliases (codex/claude)" check reports
   such aliases with the rc file and line (info when a claude alias only
-  adds `--model`, warn otherwise).
+  adds `--model` or when herdr is not installed, warn otherwise).
 - **Add the agmsg database to the sandbox's writable roots.** Under
   `--sandbox workspace-write` codex can write only to the working directory
   and to `/tmp`-style temp roots; the agmsg SQLite database

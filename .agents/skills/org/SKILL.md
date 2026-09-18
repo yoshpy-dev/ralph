@@ -48,8 +48,8 @@ Lead(座席の編成・統括を行う識別子)がその機構をどう操作�
   付けるので ralph の値が効くが、`--permission-mode` は guarded 座席には
   付けないため、その座席は alias の permission mode で動く。alias の他の
   フラグは全座席に効く。`ralph doctor` の「Shell aliases (codex/claude)」
-  Check が該当 alias を file:line 付きで報告する(claude の `--model` だけ
-  なら info、それ以外は warn)。
+  Check が該当 alias を file:line 付きで報告する(claude の `--model` だけ、
+  または herdr 未導入なら info、それ以外は warn)。
 - **`--model` は `spawn` / `start` で必ず明示する**。省略するとプール先頭
   (claude は `fable`、codex は `gpt-6-astra`)へ stderr 警告付きでフォール
   バックするが、モデル選択の意図が残らないため運用ルールとして省略しない。

@@ -69,7 +69,7 @@ Critical forks: None。
 
 - [ ] AC-1: `ralph doctor` の出力に「Shell aliases (codex/claude)」Check が herdr Check の直後に出る。`grep -c 'checkShellAliases' internal/cli/doctor.go` が 1 以上
 - [ ] AC-2: テスト (a)〜(k) と改訂で追加したケースが pass し、codex の warn Detail が `file:line`(home は `~`)、衝突フラグ名、`docs/recipes/codex-seat-permissions.md` を含む。`-m value` / `-mvalue` / `--model=value`、`-s value` / `-svalue`、`-a value` の各形式が検出される fixture がある。行末コメント中の `--model` は検出されない。1 つの alias 文に `codex=` と `claude=` が並ぶ場合にそれぞれ正しい名前で報告される。symlink ケースで所見が 1 件だけ。`ZDOTDIR` ケースで検出される
-- [ ] AC-3: herdr あり + codex の所見 は `warn`、herdr あり + claude の `--permission-mode` の所見 は `warn`、herdr 未導入の所見 は `info`、claude の `--model` だけの所見 は `info`、解析しきれなかった alias 文(`not fully parsed`)があり他に所見なし は `info`、alias なし / 衝突なし は `pass`(衝突なしの alias は file:line で名指し)、home 解決不能は `info`、読めない rc があり所見なし は `info`。どの Detail も走査したファイルを列挙する。`countFailed` の対象にならない(既存の `TestRunDoctorOpts_HerdrAgmsgAbsent_ExitCodeUnaffected` が引き続き pass)
+- [ ] AC-3: herdr あり + codex の所見 は `warn`、herdr あり + claude の `--permission-mode` の所見 は `warn`、herdr 未導入の所見 は `info`、claude の `--model` だけの所見 は `info`、解析しきれなかった alias 文(`not fully parsed`)があり他に所見なし は `info`、alias なし / 衝突なし は `pass`(衝突なしの alias は file:line で名指し)、home 解決不能は `info`、読めない rc があり所見なし は `info`。home 解決不能で走査自体を行わない場合を除き、どの Detail も走査したファイルを列挙する。`countFailed` の対象にならない(既存の `TestRunDoctorOpts_HerdrAgmsgAbsent_ExitCodeUnaffected` が引き続き pass)
 - [ ] AC-4: `/org` skill の前提節(4 面 `cmp` 一致)と recipe(root / template 一致)に `ralph doctor` の Check への言及がある。`check-skill-sync.sh` / `check-sync.sh` / `check-template-purity.sh` pass
 - [ ] AC-5: `gofmt` / `go vet` / golangci-lint clean、`go test ./internal/cli/... -count=1` green、`./scripts/run-verify.sh` green。このマシンで `go run ./cmd/ralph doctor` を実行すると本 Check が warn し、`~/.config/zsh/.zshrc:35` の codex alias を spawn 失敗の原因として、`:34` の claude alias を「座席は起動するが alias のフラグが全座席に効く」ものとして名指しする(evidence としてレポートに記録)
 - [ ] AC-6: PR 本文は `Closes #162`
@@ -121,6 +121,7 @@ doctor の Check 追加のみ。下流へは次回 release でバイナリ経由
 - 2026-09-18 self-review 再確認(同 report の Revalidation 節、1cf548d): 当初 9 件はすべて解消。修正で生じた新所見 6 件(MEDIUM 2 / LOW 4)も同 cycle 内で直す。N1 Detail と文書が「ralph も同じフラグを付ける」前提で書かれているが permission フラグは guarded では付かない → 文をフラグ種別ごとに書き分け、claude の `--permission-mode` は warn に上げる。N2 継続行と `;` 以降の alias を見逃したまま pass と言い切る → 行を文に分割して読み、継続行を連結し、読み切れなければ `not fully parsed` を出す。N3 部分読み取りの Detail が自己矛盾 → `partially read:` に分け、走査済みに数える。N4 「claude に短縮形はない」は誤り → 該当 2 フラグに短縮形がない、に修正。N5 型名 `shellAliasWord` → `shellAliasAssignment`。N6 Assumptions に残った旧文言を更新
 - 2026-09-18 work: Slice D(再確認の新所見 N1〜N5)は implementer に委譲(33e5bad、2 ファイル、逸脱なし)。implementer が指摘した `doctor.go` の Check 8b コメントの陳腐化は orchestrator が 4352419 で修正。再々確認は行わない(1 cycle 1 回)ため、orchestrator が差分を通読し、ビルドしたバイナリを偽 HOME の fixture 3 種で実行して確認した: `command -v codex >/dev/null && alias codex="codex -s danger-full-access"` → warn(guarded の文のみ)、`alias claude='claude --permission-mode bypassPermissions'  # --model in a comment` → warn(`--permission-mode` のみ検出)、3 行にまたがる二重引用符の値 → warn(`:1` を報告)。`go test ./internal/cli/... -count=1` と `./scripts/run-verify.sh` は green
 - 2026-09-18 work: AC-5 の実機 evidence(最終)。`go run ./cmd/ralph doctor` の該当行は warn で、codex の文は `alias codex in ~/.config/zsh/.zshrc:35 adds --model (-m) — … ralph org spawn always passes --model, so every spawn fails; …`、claude の文は `alias claude in ~/.config/zsh/.zshrc:34 adds --model — claude accepts a flag given twice and the last value wins; ralph org spawn always passes --model after the alias, so its value applies and the seat still starts; the alias's other flags reach every seat`、末尾は `scanned 4 shell rc file(s): ~/.config/zsh/.zshrc, ~/.config/zsh/.zshenv, ~/.zprofile, ~/.profile (files they source are not followed)`
+- 2026-09-18 verify(`docs/reports/verify-2026-09-18-doctor-shell-alias-check.md`、0c22388): PASS。非ブロッキングの指摘 2 件を反映: AC-3 に「home 解決不能の場合は走査ファイルを列挙しない」例外を明記、skill / recipe の重大度要約に herdr 未導入なら info であることを追記
 
 ## Progress checklist
 
@@ -128,6 +129,6 @@ doctor の Check 追加のみ。下流へは次回 release でバイナリ経由
 - [x] Branch created
 - [x] Implementation started
 - [x] Review artifact created
-- [ ] Verification artifact created
+- [x] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
