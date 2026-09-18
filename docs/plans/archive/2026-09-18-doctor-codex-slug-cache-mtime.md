@@ -1,6 +1,6 @@
 # doctor-codex-slug-cache-mtime
 
-- Status: In progress
+- Status: Done (PR #161)
 - Owner: Claude Code
 - Date: 2026-09-18
 - Related request: `ralph doctor` の「Org codex model slugs」Check はローカルの `models_cache.json` を読むだけで、その cache がいつ書かれたものかを出さない。warn が出た瞬間の出力に鮮度が見えないと、数日前の cache に基づく warn を運用者が真に受けて seed-once の `ralph.toml` からスラッグを誤って外すリスクが残る(2026-09-17 の一時的消失の事例)。#156 の文書化では散文で注意しているが、注意が効くべき場所は出力そのもの(issue #159、PR #160 の self-review Follow-ups 起点)
@@ -66,7 +66,7 @@ Critical forks: None(閾値・Status 不変・Stat 失敗時の扱いはいず�
 - [x] AC-4: 読み取り前後の `f.Stat()` が一致しない場合、Detail に `freshness unknown` が付き、stale 注記と `cache written` は付かず、スラッグ判定は読んだ内容に基づく。テスト (e) が test seam 経由で pass。`f.Stat()` 失敗時は mtime 節なしの従来 Detail になる(コード上の分岐として存在し、reviewer が確認。単体テストでは再現しないため Known gaps に記載)
 - [x] AC-5: `/org` skill の段落が「鮮度確認もしない」を含まず(`grep -c '鮮度確認もしない' .claude/skills/org/SKILL.md` が 0)、`stale 注記` を含む。4 面 `cmp` 一致、`./scripts/check-skill-sync.sh` / `./scripts/check-sync.sh` pass
 - [x] AC-6: spec (d) が「鮮度確認もしない」を含まず、`cache written` または `stale 注記` と issue #159 への参照を含む
-- [ ] AC-7: `go test ./internal/cli/... -count=1` と `./scripts/run-verify.sh` が green。PR 本文は `Closes #159`
+- [x] AC-7: `go test ./internal/cli/... -count=1` と `./scripts/run-verify.sh` が green。PR 本文は `Closes #159`
 
 ## Implementation outline
 
@@ -111,6 +111,7 @@ Critical forks: None(閾値・Status 不変・Stat 失敗時の扱いはいず�
 - 2026-09-18 self-review(cycle 1): Merge 推奨、MEDIUM 1(M1: spec の観測手順が `cache written` を観測時刻と突き合わせるよう書いているが表示は UTC で JST と 9 時間ずれる)+ LOW 4(L2: `codexCacheFreshnessClause` の `now` 注入が未活用で 24h 境界と Stat 失敗の空文字列が未固定、L3: doc comment が in-place 書き換え検知を無条件に主張、L4: seam が最初の Stat 失敗の return より前に走る、L5: `24 * time.Hour` が閾値と表示粒度の 2 意味で重複)。全件 inline で修正 = 8f3f72b(spec に UTC / `<age> ago` の補足、skill 4 面に「UTC で」、`TestCodexCacheFreshnessClause` テーブル 5 行、doc の機構明記、seam の配置移動、`hoursPerDay` 定数)。verify スクリプト exit 0、lint 0 issues(evidence: `docs/evidence/verify-2026-09-18-052324.log`)。L2 のテーブルは clause 側の空文字列(zero mtime)を固定するが、実際の `f.Stat()` 失敗経路は単体テストでは再現できず未テストのまま(AC-4 の Known gap は残る)
 - 2026-09-18 plan drift: Design decisions の「clock 注入は入れない」は L2 で撤回。`codexCacheFreshnessClause` は `now` を引数に取っており、テーブルテストがそれを使って 24h 境界を固定する。`checkCodexModelSlugs` 経由のテストは引き続き実時刻 + `os.Chtimes`
 - 2026-09-18 self-review 再検証: M1・L2〜L5 全件解消、Merge 判定。修正コミット由来の cosmetic 4 点(新テストの挿入位置が `TestFormatCacheAge` の doc comment を分断、doc 行 111 桁、skill 行の幅、spec の `stat` 句の位置)を inline で修正(同じ回のコミット)。reviewer の再検証は 1 ラウンドのみ
+- 2026-09-18 pr: verify PASS / test PASS(カバレッジ 81.1%)/ sync-docs 変更なし / cross-review 所見 0。PR #161 本文 `Closes #159`、`Refs #156`。PR 作成時に gh のアクティブアカウントが EMU 側に戻っていて 1 回拒否されたため、切替と作成を同一コマンドで再実行
 
 ## Progress checklist
 
@@ -120,4 +121,4 @@ Critical forks: None(閾値・Status 不変・Stat 失敗時の扱いはいず�
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
-- [ ] PR created
+- [x] PR created (#161)
