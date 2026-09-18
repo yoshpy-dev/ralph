@@ -105,3 +105,9 @@ CI fails on drift, so always edit both sides whenever you touch a skill.
 If `ralph upgrade` is unavailable or refuses to converge, restore from a
 pre-upgrade commit (`git restore --source=<sha> -- .claude .codex .agents`)
 and retry once you can run the upgrade end-to-end.
+
+## See also
+
+- [codex-seat-permissions.md](codex-seat-permissions.md) — verify codex seat
+  permission modes (autonomous / edits) on this machine before enabling
+  `[org.permissions].codex_verified`.

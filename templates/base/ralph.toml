@@ -59,17 +59,20 @@ agmsg_home = "~/.agents/skills/agmsg"
 # flags at spawn time (claude: --permission-mode bypassPermissions|
 # acceptEdits|<none>). Modes: autonomous (no interactive prompts) | edits
 # (auto-accept file edits, still prompts otherwise) | guarded (the driver
-# CLI's own interactive default). codex seats only accept guarded today --
-# codex's interactive permission flags are fail-closed until live-verified
-# (see docs/tech-debt/README.md).
+# CLI's own interactive default). codex seats accept only guarded until
+# codex_verified below is set -- the codex flag mapping depends on the codex
+# CLI version and on your ~/.codex/config.toml, so verify it per machine
+# first (docs/recipes/codex-seat-permissions.md).
 [org.permissions]
 default = "autonomous"
 # codex_verified gates codex seats' autonomous/edits permission modes:
-# false (default) keeps codex fail-closed to guarded until an operator has
-# live-verified their installed codex CLI's interactive sandbox/approval
-# flags (see docs/tech-debt/README.md); flip to true only after that
-# verification, which unlocks the autonomous -> `--sandbox workspace-write
-# --ask-for-approval never` / edits -> `--sandbox workspace-write` mapping.
+# false (default) keeps codex fail-closed to guarded. Flip to true only after
+# running docs/recipes/codex-seat-permissions.md on this machine: it unlocks
+# autonomous -> `--sandbox workspace-write --ask-for-approval never` and
+# edits -> `--sandbox workspace-write`. Both inherit the rest of your codex
+# config (approval_policy, sandbox writable_roots); in particular the agmsg
+# DB directory must be a writable root or seats cannot send RESULT. Re-verify
+# after a codex upgrade or a config change.
 codex_verified = false
 
 # [org.permissions.roles] overrides the default mode per role. A role

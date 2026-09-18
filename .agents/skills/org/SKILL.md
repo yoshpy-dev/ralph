@@ -35,6 +35,12 @@ Lead(座席の編成・統括を行う識別子)がその機構をどう操作�
   場合のみ `--state-dir` を明示的に揃えること。
 - `--org-id` は組織の実行名前空間。同一 `--org-id` の座席は同一 manifest /
   receipts に記録される。
+- **shell alias に注意**: `alias codex="codex -m …"` のようにモデル指定を
+  含む alias があると、herdr が pane の対話シェルに送る座席コマンドで alias が
+  展開され、`--model` の二重指定で座席が起動しない(`spawn_failed`、codex で
+  実測)。`--model` を付ける `claude` の alias も同じ衝突を起こすはず(未検証)。
+  alias を外すか、alias を読まない HOME / rc で herdr を起動する
+  (`docs/recipes/codex-seat-permissions.md` の前提を参照)。
 - **`--model` は `spawn` / `start` で必ず明示する**。省略するとプール先頭
   (claude は `fable`、codex は `gpt-6-astra`)へ stderr 警告付きでフォール
   バックするが、モデル選択の意図が残らないため運用ルールとして省略しない。
@@ -190,8 +196,12 @@ EVIDENCE: docs/reports/self-review-foo.md
   `edits` / `guarded`)を役割別に定義する envelope。既定は全役割
   `autonomous`。役割を絞りたい場合は `[org.permissions.roles]` に
   `role = "mode"` を追加する。
-- `codex` driver の座席は `guarded` 以外を明確なエラーで拒否する
-  (fail-closed。実機検証未了のための暫定制約)。
+- `codex` driver の座席は既定では `guarded` 以外を明確なエラーで拒否する
+  (fail-closed)。`[org.permissions].codex_verified = true` で autonomous /
+  edits が有効になるが、挙動は codex のバージョンとユーザーの codex config に
+  依存する(agmsg の DB を writable root に足さないと RESULT を送れない、等)
+  ので、マシンごとに `docs/recipes/codex-seat-permissions.md` の手順で検証して
+  から有効にする。
 - `autonomous` モードの spawn は `--scope` を必須とし(fail-closed)、
   省略したい場合のみ `--allow-unscoped` を明示する。`--scope` は
   「担当範囲」を短く書く(例: `"internal/org/**"`、`"docs/reports/**"` )。
