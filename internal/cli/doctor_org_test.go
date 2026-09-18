@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/yoshpy-dev/ralph/internal/config"
 	"github.com/yoshpy-dev/ralph/internal/org/driver"
@@ -596,5 +597,219 @@ func TestCheckCodexModelSlugs_HomeUnresolvable_Info(t *testing.T) {
 	}
 	if !strings.Contains(r.Detail, "could not resolve codex models cache path") {
 		t.Errorf("detail %q should name the resolution failure", r.Detail)
+	}
+}
+
+// TestCheckCodexModelSlugs_DetailCarriesExactCacheMtime pins AC-1: the
+// rendered timestamp is the cache file's actual mtime, not the wall clock at
+// check time. os.Chtimes sets a known, second-aligned mtime five minutes in
+// the past; an implementation that rendered time.Now() instead would not
+// produce this exact RFC3339 substring.
+func TestCheckCodexModelSlugs_DetailCarriesExactCacheMtime(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CODEX_HOME", dir)
+	writeCodexModelsCache(t, dir, "gpt-5.5")
+
+	known := time.Now().Add(-5 * time.Minute).Truncate(time.Second)
+	if err := os.Chtimes(filepath.Join(dir, "models_cache.json"), known, known); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Config{Org: config.OrgConfig{ModelPool: []config.OrgModelPoolEntry{
+		{Driver: "codex", Model: "gpt-5.5"},
+	}}}
+
+	r := checkCodexModelSlugs(cfg)
+	if r.Status != "pass" {
+		t.Fatalf("status = %q, want pass (detail=%q)", r.Status, r.Detail)
+	}
+	wantStamp := "cache written " + known.UTC().Format(time.RFC3339)
+	if !strings.Contains(r.Detail, wantStamp) {
+		t.Errorf("detail %q should contain the exact mtime stamp %q", r.Detail, wantStamp)
+	}
+	if strings.Contains(r.Detail, "cache may be stale") {
+		t.Errorf("detail %q should not carry a stale note for a 5-minute-old cache", r.Detail)
+	}
+	if !strings.Contains(r.Detail, "5m ago") {
+		t.Errorf("detail %q should report the age as 5m ago", r.Detail)
+	}
+}
+
+// TestCheckCodexModelSlugs_StaleCache_WarnCarriesExactMtimeAndStaleNote
+// covers AC-1/AC-2 on the warn path: a 48-hour-old cache still names the
+// missing slug, carries the exact mtime, and carries the stale note.
+func TestCheckCodexModelSlugs_StaleCache_WarnCarriesExactMtimeAndStaleNote(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CODEX_HOME", dir)
+	writeCodexModelsCache(t, dir, "gpt-5.5")
+
+	known := time.Now().Add(-48 * time.Hour).Truncate(time.Second)
+	if err := os.Chtimes(filepath.Join(dir, "models_cache.json"), known, known); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Config{Org: config.OrgConfig{ModelPool: []config.OrgModelPoolEntry{
+		{Driver: "codex", Model: "gpt-5.5"},
+		{Driver: "codex", Model: "gpt-9000-retired"},
+	}}}
+
+	r := checkCodexModelSlugs(cfg)
+	if r.Status != "warn" {
+		t.Fatalf("status = %q, want warn (detail=%q)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "gpt-9000-retired") {
+		t.Errorf("detail %q should name the missing slug", r.Detail)
+	}
+	wantStamp := "cache written " + known.UTC().Format(time.RFC3339)
+	if !strings.Contains(r.Detail, wantStamp) {
+		t.Errorf("detail %q should contain the exact mtime stamp %q", r.Detail, wantStamp)
+	}
+	if !strings.Contains(r.Detail, "cache may be stale") {
+		t.Errorf("detail %q should carry a stale note for a 48-hour-old cache", r.Detail)
+	}
+	if !strings.Contains(r.Detail, "2d ago") {
+		t.Errorf("detail %q should report the age as 2d ago", r.Detail)
+	}
+}
+
+// TestCheckCodexModelSlugs_StaleCache_PassAlsoCarriesStaleNote covers AC-2:
+// stale notes apply to pass too, because an old cache is weak evidence a
+// slug still exists.
+func TestCheckCodexModelSlugs_StaleCache_PassAlsoCarriesStaleNote(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CODEX_HOME", dir)
+	writeCodexModelsCache(t, dir, "gpt-5.5")
+
+	known := time.Now().Add(-48 * time.Hour).Truncate(time.Second)
+	if err := os.Chtimes(filepath.Join(dir, "models_cache.json"), known, known); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Config{Org: config.OrgConfig{ModelPool: []config.OrgModelPoolEntry{
+		{Driver: "codex", Model: "gpt-5.5"},
+	}}}
+
+	r := checkCodexModelSlugs(cfg)
+	if r.Status != "pass" {
+		t.Fatalf("status = %q, want pass (detail=%q)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "cache may be stale") {
+		t.Errorf("detail %q should carry a stale note for a 48-hour-old cache even on pass", r.Detail)
+	}
+}
+
+// TestCodexCacheFreshnessClause pins the clause builder directly, with an
+// injected now, so the 24h boundary (strictly greater than
+// codexCacheStaleAfter is stale; exactly 24h is not), the changed-wins rule,
+// and the Stat-failure empty clause are fixed without depending on the wall
+// clock or on a real cache file.
+func TestCodexCacheFreshnessClause(t *testing.T) {
+	now := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name      string
+		mtime     time.Time
+		changed   bool
+		wantHas   []string
+		wantLacks []string
+	}{
+		{"fresh cache renders mtime and age, no stale note", now.Add(-time.Hour), false,
+			[]string{"cache written 2026-09-18T11:00:00Z", "1h ago"}, []string{"cache may be stale", "freshness unknown"}},
+		{"exactly 24h old is not stale", now.Add(-codexCacheStaleAfter), false,
+			[]string{"cache written 2026-09-17T12:00:00Z", "1d ago"}, []string{"cache may be stale"}},
+		{"24h plus one second is stale", now.Add(-codexCacheStaleAfter - time.Second), false,
+			[]string{"cache written 2026-09-17T11:59:59Z", "cache may be stale"}, nil},
+		{"changed wins over an old mtime", now.Add(-48 * time.Hour), true,
+			[]string{"freshness unknown"}, []string{"cache written", "cache may be stale"}},
+		{"zero mtime (Stat failed) yields an empty clause", time.Time{}, false, nil, []string{"cache"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := codexCacheFreshnessClause(tc.mtime, tc.changed, now)
+			if tc.mtime.IsZero() && !tc.changed && got != "" {
+				t.Fatalf("clause = %q, want empty", got)
+			}
+			for _, w := range tc.wantHas {
+				if !strings.Contains(got, w) {
+					t.Errorf("clause %q should contain %q", got, w)
+				}
+			}
+			for _, w := range tc.wantLacks {
+				if strings.Contains(got, w) {
+					t.Errorf("clause %q should not contain %q", got, w)
+				}
+			}
+		})
+	}
+}
+
+// TestFormatCacheAge covers AC-3: the age formatter's granularity switches
+// (minutes below an hour, hours below a day, days otherwise) and clamps
+// negative ages (clock skew or a future mtime) to 0m.
+func TestFormatCacheAge(t *testing.T) {
+	tests := []struct {
+		name string
+		d    time.Duration
+		want string
+	}{
+		{"negative clamps to 0m", -time.Minute, "0m"},
+		{"sub-minute rounds to 0m", 30 * time.Second, "0m"},
+		{"90 minutes is 1h", 90 * time.Minute, "1h"},
+		{"47 hours is 1d", 47 * time.Hour, "1d"},
+		{"49 hours is 2d", 49 * time.Hour, "2d"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := formatCacheAge(tt.d); got != tt.want {
+				t.Errorf("formatCacheAge(%v) = %q, want %q", tt.d, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestCheckCodexModelSlugs_CacheChangedWhileReading_FreshnessUnknown covers
+// AC-4: readCodexModelsCache's before/after Stat disagree when the cache is
+// rewritten in place while being read. writeCodexModelsCache uses
+// os.WriteFile, which truncates and rewrites the same inode, so the open
+// handle's second Stat observes the new size/mtime (this holds on
+// darwin/linux, the CI platforms this repo targets). The slug verdict must
+// still come from the bytes read before the rewrite (the original,
+// missing-slug cache), while the Detail reports the freshness as unknown
+// instead of presenting a stale or fresh timestamp for a version of the
+// cache that isn't the one the verdict was computed from.
+func TestCheckCodexModelSlugs_CacheChangedWhileReading_FreshnessUnknown(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CODEX_HOME", dir)
+	writeCodexModelsCache(t, dir, "gpt-5.5")
+
+	known := time.Now().Add(-48 * time.Hour).Truncate(time.Second)
+	if err := os.Chtimes(filepath.Join(dir, "models_cache.json"), known, known); err != nil {
+		t.Fatal(err)
+	}
+
+	codexCacheBetweenReadAndStat = func() {
+		writeCodexModelsCache(t, dir, "gpt-5.5", "gpt-9000-retired")
+	}
+	t.Cleanup(func() { codexCacheBetweenReadAndStat = nil })
+
+	cfg := config.Config{Org: config.OrgConfig{ModelPool: []config.OrgModelPoolEntry{
+		{Driver: "codex", Model: "gpt-5.5"},
+		{Driver: "codex", Model: "gpt-9000-retired"},
+	}}}
+
+	r := checkCodexModelSlugs(cfg)
+	if r.Status != "warn" {
+		t.Fatalf("status = %q, want warn (verdict must come from the bytes read before the in-place rewrite; detail=%q)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "gpt-9000-retired") {
+		t.Errorf("detail %q should name the slug missing from the pre-rewrite cache", r.Detail)
+	}
+	if !strings.Contains(r.Detail, "freshness unknown") {
+		t.Errorf("detail %q should report freshness unknown after an in-place rewrite during read", r.Detail)
+	}
+	if strings.Contains(r.Detail, "cache may be stale") {
+		t.Errorf("detail %q should not carry a stale note when freshness is unknown", r.Detail)
+	}
+	if strings.Contains(r.Detail, "cache written") {
+		t.Errorf("detail %q should not carry a cache written timestamp when freshness is unknown", r.Detail)
 	}
 }
