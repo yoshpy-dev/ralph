@@ -11,8 +11,10 @@
 
   ```toml
   [sandbox_workspace_write]
-  writable_roots = ["/Users/<you>/.agents/skills/agmsg/db"]
+  writable_roots = ["<your home directory>/.agents/skills/agmsg/db"]
   ```
+
+  絶対パスで書く(`~` は展開されない。`echo $HOME/.agents/skills/agmsg/db` の出力を使う)。
 
 - 検証用の cwd は **`/tmp` 配下に置かない**(`/tmp` は writable root なので「cwd 外」の否定テストにならない)。`$HOME` 配下の使い捨てディレクトリを `git init` して使う
 
