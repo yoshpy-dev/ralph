@@ -121,13 +121,14 @@ Critical forks: 2 件、ユーザーと解決済み(2026-09-18、AskUserQuestion
 - 2026-09-18 work: 初回の verify スクリプトは `check-template-purity.sh` が template 側 recipe の `/Users/<you>/…` を開発マシンの絶対パスとして検出して fail。プレースホルダを `<your home directory>` に変更(529b360)して green(evidence: `docs/evidence/verify-2026-09-18-072736.log`、gitignored)。AC-6 の `Closes #155` は `/pr` で満たす(座席の残留なしは各 run の後始末で確認済み)
 - 2026-09-18 self-review(cycle 1): do-not-merge-as-is、HIGH 1(H1: `config.go` の `OrgPermissionsConfig` / `CodexVerified` doc と `permissions.go` 上部のコメントに「未検証、tech-debt 参照、Slice 5 の smoke 待ち」が残存。AC-4 の grep が `ralph.toml` しか見ていなかった)、MEDIUM 3(M1: `permissions.go` の「cwd 外を拒否」は evidence P4(`/tmp` は writable root)より強い、M2: recipe の edits 手順に spawn コマンドがなく同じ org_id を再利用すると idempotent respawn で autonomous 座席を再観測する、M3: alias 注意の適用範囲が「検証中」に限定され `/org` skill に記載なし)、LOW 7(`codex-setup.md` の 184 桁行、evidence の archive パス前方参照、evidence の `~` 表記と recipe の「`~` は展開されない」の不整合と根拠不足、生ログポインタが解決不能、recipe だけ日本語、`[org.permissions.roles] reviewer = "edits"` の 1 行 TOML が無効、fail-closed エラー文言が「not yet live-verified」のまま recipe を指さない)。全件 inline で修正 = 51df396: 3 面のコメントを「2026-09-18 に検証済み、既定 false は設計、マシンごと opt-in」に統一、`writable roots(cwd + /tmp 系)の外`に修正、recipe を英語で書き直し(edits 用の別 org_id spawn、alias は全 spawn に影響、TOML 2 行、`~` は未検証と明記)、skill 前提節に alias 注意を追加(4 面)、evidence 3 箇所修正、`codex-setup.md` 折り返し、エラー文言を `requires [org.permissions].codex_verified=true … docs/recipes/codex-seat-permissions.md` に変更しテスト 3 箇所を追従(ロジック不変)。AC-4 の記述をこれに合わせて改訂
 - 2026-09-18 plan drift: Non-goals の「`permissions.go` はコメントのみ」はエラー文言 2 行の変更で逸脱。運用者向けメッセージが存在しない follow-up を指すのは誤解を招くため、ロジック不変の文言変更として受け入れた
+- 2026-09-18 self-review 再検証: H1・M1〜M3・L1〜L7 全件解消、Merge 判定。Follow-ups(LOW 4: テストの失敗メッセージ、claude 座席の alias 衝突を断定、recipe の後始末が 1 org 前提、`config.go:112` の `active/` 参照)を inline で修正 = 7d07e2f。AC-5 は 51df396 の後に verify スクリプトを再実行して再確認済み(evidence: `docs/evidence/verify-2026-09-18-074556.log`)
 
 ## Progress checklist
 
 - [x] Plan reviewed
 - [x] Branch created
 - [x] Implementation started
-- [ ] Review artifact created
+- [x] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created

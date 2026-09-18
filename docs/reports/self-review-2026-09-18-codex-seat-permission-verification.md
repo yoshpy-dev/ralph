@@ -3,7 +3,7 @@
 - Date: 2026-09-18
 - Plan: `docs/plans/active/2026-09-18-codex-seat-permission-verification.md` (issue #155)
 - Reviewer: `reviewer` subagent (Claude Code, standard flow, cycle 1)
-- Scope: diff quality only for `git diff e23c1f4...HEAD` on `docs/codex-seat-permission-verification` at HEAD `529b360`. Tests, static analysis, spec-compliance and doc-drift checks were not run — those belong to `/verify` and `/test`.
+- Scope: diff quality only for `git diff e23c1f4...HEAD` on `docs/codex-seat-permission-verification`, first pass at HEAD `529b360`, then revalidated through `9f3d2db` (see Fix-and-revalidate below). Tests, static analysis, spec-compliance and doc-drift checks were not run — those belong to `/verify` and `/test`.
 
 ## Evidence reviewed
 
@@ -48,10 +48,42 @@
 
 _(This reviewer did not edit `docs/tech-debt/README.md` — the orchestrator owns that append. Add the row only if the follow-up is not taken in this cycle.)_
 
+**Closed before any register row was created.** `51df396` took the follow-up in-cycle: both error strings now name the recipe (`internal/org/permissions.go:122,127`), so no row should be appended to `docs/tech-debt/README.md` for this item. No other tech debt was identified in this review.
+
+## Fix-and-revalidate (cycle 1)
+
+All eleven findings were taken in-cycle at `51df396` (12 files, +322/-130), with the plan's AC-4 revision, the drift note, and this report added at `9f3d2db`. Revalidated at HEAD `9f3d2db`; `git status --porcelain` is clean and both recipe copies, both `codex-setup.md` copies, and all four `/org` SKILL.md copies are still byte-identical (`cmp`). No tests, linters, or sync gates were run, under the same scope rule as the first pass.
+
+| Finding | Verdict | Evidence at `51df396` |
+| --- | --- | --- |
+| HIGH-1 (reframing stopped at 3 of 5 surfaces) | **Resolved** | `internal/config/config.go:73-75` now reads "codex seats accept only guarded until the operator sets CodexVerified after verifying the codex flag mapping on their machine (docs/recipes/codex-seat-permissions.md)"; `:87-92` now carries the 2026-09-18 verification, the evidence path, and the inherit-your-own-config rationale. `internal/org/permissions.go:59-64` now reads "first stated as an assumption … and live-verified on 2026-09-18 (see the doc comment on permissionArgsForDriver below)". Both files repoint the watchdog plan at `docs/plans/archive/`. Sweeps: `grep -rn 'tech-debt' internal/config/config.go internal/org/permissions.go templates/base/ralph.toml` → 0; `grep -rn 'not yet live-verified'` → only this report, the plan's own deviation note, and three historical `docs/reports/` artifacts, all correct to leave. |
+| MEDIUM-1 ("rejects writes outside cwd") | **Resolved** | `internal/org/permissions.go:93-94`: "the sandbox rejects writes outside its writable roots (cwd plus /tmp-style temp roots -- see evidence P4)". Now agrees with the recipe (`:26-29`) and with evidence P4. |
+| MEDIUM-2 (edits step had no spawn command) | **Resolved** | `docs/recipes/codex-seat-permissions.md:100-110` adds the second spawn with `--org-id perm-edits --config ralph-edits.toml --state-dir <scratch>/state-edits` and names the trap: "reusing `perm-auto` would hit the idempotent respawn path and re-observe the autonomous seat". The edits config is now its own fenced block at `:61-65`. |
+| MEDIUM-3 (alias hazard scoped to verification) | **Resolved** | `docs/recipes/codex-seat-permissions.md:18-25`: "**Shell aliases break every codex spawn, not just this recipe.**" `.claude/skills/org/SKILL.md:38-42` gains a matching bullet in the same prerequisites list as the bypass-consent and state-dir bullets, at the section's line widths (81-103 vs neighbours' 79-110); four mirrors byte-identical. |
+| LOW-1 (184-column See-also line) | **Resolved** | `docs/recipes/codex-setup.md:111-113` wrapped to 78/71/37; template copy identical. |
+| LOW-2 (forward-referenced plan path) | **Resolved** | `docs/evidence/codex-seat-permissions-2026-09-18.md:5` adds "(PR 作成時に active から移動)", which tells a branch reader why the path does not resolve yet. |
+| LOW-3 (`~` in the writable_roots snippet) | **Resolved** | Evidence `:27` and `:46` now show `["<home>/.agents/skills/agmsg/db"]` with "実際は絶対パス。`~` 表記は未検証"; the recipe `:38-39` matches ("The meta-repo run used an absolute path; a `~` prefix was not tested"), replacing the unsourced "`~` は展開されない". The file's redaction legend at `:6` still says home is rendered as `~`, which now has these two `<home>` exceptions — harmless, since both are annotated in place. |
+| LOW-4 (unresolvable raw-log pointer) | **Resolved** | Evidence `:6`: the logs "リポジトリにはコミットしていない(pane 抜粋と manifest の要点は本ファイルに転記済み)". |
+| LOW-5 (only Japanese file in `docs/recipes/`) | **Resolved** | The recipe is rewritten in English (`grep -c '[ぁ-んァ-ン一-龥]'` → 0, matching its four siblings), 160 lines, both copies identical. |
+| LOW-6 (one-line TOML fragment) | **Resolved** | `docs/recipes/codex-seat-permissions.md:61-65` is a fenced block with `[org.permissions.roles]` and `reviewer = "edits"` on separate lines. |
+| LOW-7 (error string wording and pointer) | **Resolved** | `internal/org/permissions.go:122,127`: "requires [org.permissions].codex_verified=true; only guarded is allowed until then (fail-closed; verify the codex flag mapping on this machine first: docs/recipes/codex-seat-permissions.md)". `internal/org/permissions_test.go:94,103,113` follow; the distinctness test still discriminates, since the unknown-mode error ("unknown permission mode %q for driver %q") does not contain the new substring. |
+
+Nothing in the fix commit contradicts an earlier finding or reopens one, and no new MEDIUM-or-above issue was introduced. The logic is still untouched: the only non-comment change to `internal/org/permissions.go` is the two error strings, which the plan's revised AC-4 and a new deviation note both record against the "コメントのみ" Non-goal.
+
+Three small things the fixes introduced, plus one adjacent observation — all LOW, listed under Follow-ups rather than as open findings:
+
+- The fail-closed subtest's failure message still reads "expected fail-closed error to mention live-verification and guarded" while the assertion it belongs to now checks a different substring (`internal/org/permissions_test.go:94-95`). Same commit, one clause.
+- The MEDIUM-3 fix asserts the alias collision for `claude` seats as fact in both the recipe (`:19-20`) and the skill bullet (`.claude/skills/org/SKILL.md:38-39`), while the evidence records it as expected but untested ("claude 座席も同じ alias で同じ衝突が起きるはず(未検証)", evidence `:38`). Over-warning, not under-warning, so acting on it is harmless — but it is the same claim-outruns-evidence shape the first pass flagged.
+- Cleanup is still written for one org (`docs/recipes/codex-seat-permissions.md:129-133`) now that the MEDIUM-2 fix creates two (`perm-auto`, `perm-edits`), each with its own `--state-dir`. The `herdr agent list` check in the same step catches a leftover seat, which is why this is LOW rather than a reopened MEDIUM.
+- Related, outside the fix: the two watchdog-plan citations repointed at `docs/plans/archive/` are now 2 of 19 such citations across `internal/` — `internal/config/config.go:112`, 20 lines below the corrected one, still says `docs/plans/active/2026-08-02-org-runtime-watchdog.md`. Pre-existing and out of this PR's scope; a separate chore should sweep the class.
+
+- Orchestrator note (post-review, 7d07e2f): the four Follow-ups were applied inline right after this revalidation -- the fail-closed subtest's failure message now describes the new substring (`permissions_test.go`), the recipe and the `/org` skill now state the claude-seat alias collision as expected-but-unverified (matching evidence P1), the recipe's Cleanup step covers both orgs, and `internal/config/config.go`'s remaining watchdog-plan citation points at `docs/plans/archive/`. Mirrors re-synced (4 files byte-identical); gofmt/vet/tests/sync/purity gates green. AC-5 was re-confirmed after 51df396 by a full verify-script run (evidence log 2026-09-18-074556). Not re-reviewed (single revalidation round by design); `/verify` and `/cross-review` cover the result.
+
 ## Recommendation
 
-- Merge: **not as-is.** No CRITICAL findings, but one HIGH is open and the repo's approval criteria block on HIGH. Fix HIGH-1 (comment-only, two files) and the two one-clause MEDIUMs (`permissions.go:92-93`, recipe step 2's missing spawn command, recipe line 9's scoping), then merge. The MEDIUMs are cheap enough that deferring them costs more in register churn than fixing them.
-- Follow-ups: (1) the fail-closed error string pointer, recorded as tech debt above; (2) the derived issues the plan already lists — doctor-side alias detection, `ralph org send` Enter timing, auto-injecting the agmsg writable root, retired-model migration in `honored` receipts; (3) decide whether `docs/recipes/` is English-only and write that down somewhere the next recipe author will see.
+- Merge: **yes.** All eleven findings are resolved at `51df396`; no CRITICAL, no HIGH, and no MEDIUM remains open. The four LOW items above are cosmetic or pre-existing and do not need to hold the PR.
+- Hand-off to `/verify`: AC-5 ("`go test ./internal/org/...` と `./scripts/run-verify.sh` が green") was ticked at `76fa500`, which predates the error-string and test change in `51df396`, so that tick needs re-confirming rather than trusting. AC-4's revised wording and the new deviation note should be checked against the actual `git diff main -- internal/org/permissions.go`.
+- Follow-ups: (1) the three fix-introduced LOW items above; (2) `scripts/ralph-config.sh:55-63` and its template mirror still describe `codex_verified` as "fail-closed … until an operator has live-verified their installed codex CLI's flags" — still true under the new framing, but it is now the only member of the lock-step trio pinned by `internal/config/defaults_sync_test.go:158` that does not name the recipe; (3) the derived issues the plan already lists — doctor-side alias detection, `ralph org send` Enter timing, auto-injecting the agmsg writable root, retired-model migration in `honored` receipts; (4) the `docs/plans/active/2026-08-02-*` citation sweep across `internal/`.
 
 ## Known gaps
 
