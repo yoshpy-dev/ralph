@@ -158,3 +158,78 @@ edit, sync-skills regeneration, or tech-debt row was required.
   depends on. Left unfixed, per the self-review's own Follow-ups note ("a
   separate chore should sweep the class") — out of scope for this task and
   for `/sync-docs`, not a gap this pass introduces.
+
+## Cycle 2 (post cross-review AR-1 fix)
+
+- Date: 2026-09-18
+- Trigger: cross-review triage found one ACTION_REQUIRED item (AR-1);
+  `33158e2` carried `--org-id`/`--config`/`--state-dir` through every recipe
+  follow-up command, and `f769f40` (cycle-2 self-review LOWs) added the
+  `task.txt` typed-protocol example, split `send` from `wait`, added a
+  `--config` on the cleanup `status` line, and reflowed comments in the
+  recipe and `scripts/ralph-config.sh` + template. HEAD is now `e12bacb`
+  (cycle-2 self-review/verify/test sections committed, all Pass/PASS).
+- Prior reports (cycle 2 sections): `docs/reports/self-review-2026-09-18-codex-seat-permission-verification.md`
+  (Merge; cycle-2 LOW-4 fixed at `f769f40`, verify re-run green per
+  `docs/evidence/verify-2026-09-18-085148.log`), `docs/reports/verify-2026-09-18-codex-seat-permission-verification.md`
+  and `docs/reports/test-2026-09-18-codex-seat-permission-verification.md`
+  (cycle-2 sections, both PASS).
+
+### (a) New recipe command lines vs. other org-verb-documenting surfaces
+
+- **`.claude/skills/org/SKILL.md` 動詞リファレンス (lines 90-99)** — every
+  verb example in that table already shows `--org-id X` (`spawn`, `send`,
+  `wait`, `read`, `status`, `stop`, `disband`, `report`, `watch`, `start`).
+  The recipe's cycle-2 diff brings its own `send`/`wait`/`stop`/`disband`/
+  `status` lines up to the same pattern (`--org-id perm-auto` /
+  `--config ralph-autonomous.toml` / `--state-dir <scratch>/state-auto`, and
+  the `perm-edits` equivalents). No contradiction — the recipe now matches
+  the skill's own documented usage more closely than it did before, not less.
+- **`docs/recipes/worktrees.md`** — its one `ralph org` mention (line 55,
+  "`ralph org spawn` records each seat's worktree path in the org manifest")
+  is a one-line factual note about manifest recording, not a command example
+  with its own `--org-id` convention to reconcile. Unaffected.
+- **`docs/recipes/agent-teams.md`** — `grep -n "ralph org"` against the file
+  returns zero hits; it does not document org verbs at all. Unaffected.
+- **`.claude/rules/ralph/agent-messaging.md`** Message shape section
+  (lines 59-65: `TYPE:` / `TASK_ID:` / other header lines / blank line /
+  body) — the recipe's new `task.txt` example
+  (`docs/recipes/codex-seat-permissions.md:90-99`) is `TYPE: TASK`,
+  `TASK_ID: t-1`, a blank line, then a three-step numbered body, and the
+  recipe's own RESULT step names `TYPE: RESULT, TASK_ID: t-1`. Both TYPE
+  values and the TASK_ID-required pairing (`TASK`/`RESULT` both require
+  `TASK_ID` per the enum table, `agent-messaging.md:39-41`) match the rule
+  doc exactly; body length is a few hundred characters, well under the
+  2,000-character cap the rule doc states (`agent-messaging.md:80-87`). No
+  drift.
+
+### (b) Mirror and sync-gate re-check
+
+Re-ran directly against the cycle-2 HEAD rather than trusting the commit
+messages:
+
+- `cmp docs/recipes/codex-seat-permissions.md templates/base/docs/recipes/codex-seat-permissions.md` → identical.
+- `cmp docs/recipes/codex-setup.md templates/base/docs/recipes/codex-setup.md` → identical (untouched in cycle 2).
+- `cmp scripts/ralph-config.sh templates/base/scripts/ralph-config.sh` → identical.
+- `./scripts/check-sync.sh` → `PASS: all files in sync.` (`DRIFTED: 0`, `KNOWN_DIFF: 5`, unchanged from cycle 1).
+- `./scripts/check-template-purity.sh` → `PASS: no meta-repo-specific references found in templates.`
+- `./scripts/check-skill-sync.sh` → `[ok] check-skill-sync: 13 skill(s) in lock-step` (no skill body was touched in cycle 2, so this is a re-confirmation, not new coverage).
+
+### (c) Plan Status / Progress checklist vs. reality
+
+`docs/plans/active/2026-09-18-codex-seat-permission-verification.md:3`
+still reads `Status: In progress`; the Progress checklist (around lines
+130-137) has everything through "Test artifact created" checked and
+"PR created" still unchecked — accurate, since no PR exists yet. The plan's
+Deviation notes already carry a 2026-09-18 self-review(cycle 2) entry
+recording the LOW-4 fix and the verify re-run evidence path. No edit
+needed.
+
+### Files changed in cycle 2
+
+None. All three checks confirmed the cycle-2 docs-only fix commits
+(`33158e2`, `f769f40`) are internally consistent with every other doc
+surface that documents org verbs or the agmsg message shape, both mirror
+pairs stayed byte-identical, and the plan's own status tracking is already
+accurate. No new drift was introduced by the cross-review AR-1 fix or the
+cycle-2 self-review LOWs.
