@@ -86,9 +86,19 @@ ralph org spawn --org-id perm-auto --id reviewer --role reviewer --driver codex 
   approval, trust, or login dialog. A model-retirement notice
   ("Try new model / Use existing model") may appear; it is not an approval
   prompt, and the choice is persisted to the codex config.
-- Send a TASK with `ralph org send --to reviewer`. When the seat is idle the
-  pasted text can stay in the composer unsent; a few seconds later send
-  `herdr pane send-keys <pane> Enter` once.
+- Send a TASK (every follow-up verb needs the same `--org-id`, `--config`,
+  and `--state-dir` as the spawn, otherwise it fails with
+  `org: --org-id is required` or reads the default state directory):
+
+  ```sh
+  ralph org send --org-id perm-auto --to reviewer --text "$(cat task.txt)" \
+    --config ralph-autonomous.toml --state-dir <scratch>/state-auto
+  ralph org wait --org-id perm-auto --seat reviewer --until idle,done \
+    --timeout-ms 300000 --config ralph-autonomous.toml --state-dir <scratch>/state-auto
+  ```
+
+  When the seat is idle the pasted text can stay in the composer unsent; a
+  few seconds later send `herdr pane send-keys <pane> Enter` once.
 - TASK content: create one file inside the cwd → try to write to the
   throwaway path under `$HOME` (tell the seat explicitly **not to retry or
   work around a denial**) → send the RESULT over agmsg (the seat runs the
@@ -112,8 +122,9 @@ ralph org spawn --org-id perm-edits --id reviewer --role reviewer --driver codex
 
 - The child process arguments contain `--sandbox workspace-write` and no
   `--ask-for-approval`.
-- The same TASK completes the in-cwd edit without a prompt and the outside
-  write is denied.
+- The same TASK (sent with `--org-id perm-edits --config ralph-edits.toml
+  --state-dir <scratch>/state-edits`) completes the in-cwd edit without a
+  prompt and the outside write is denied.
 - A follow-up TASK that tells the seat to **request approval to run the
   denied command outside the sandbox** makes the pane show
   `Would you like to run the following command? … 1. Yes, proceed (y) /
@@ -129,11 +140,21 @@ ralph org spawn --org-id perm-edits --id reviewer --role reviewer --driver codex
 
 ### 3. Cleanup
 
-For each org you spawned (`perm-auto`, `perm-edits`):
-`ralph org stop --seat reviewer` → `ralph org disband` →
-`ralph org status --org-id <id>` shows no active seat → close the pane.
-Then confirm `herdr agent list` is empty and no throwaway file is left under
-`$HOME`.
+For each org you spawned, pass the same `--org-id`, `--config`, and
+`--state-dir` as its spawn (a `status` run against the default state
+directory shows an empty roster while the scratch seat keeps running):
+
+```sh
+ralph org stop --org-id perm-auto --seat reviewer \
+  --config ralph-autonomous.toml --state-dir <scratch>/state-auto
+ralph org disband --org-id perm-auto \
+  --config ralph-autonomous.toml --state-dir <scratch>/state-auto
+ralph org status --org-id perm-auto --state-dir <scratch>/state-auto   # no active seat
+```
+
+Repeat with `perm-edits` / `ralph-edits.toml` / `<scratch>/state-edits`, close
+the panes, then confirm `herdr agent list` is empty and no throwaway file is
+left under `$HOME`.
 
 ## Verdicts and opt-in
 
