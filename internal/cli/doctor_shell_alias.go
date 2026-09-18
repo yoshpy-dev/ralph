@@ -37,8 +37,8 @@ func shellAliasEnvFromOS() (shellAliasEnv, error) {
 // shellAliasEnvFromOS) so internal/cli's TestMain (main_test.go) can pin it
 // to a directory with no rc files, keeping every runDoctor*-based test
 // hermetic against the developer's real shell rc files (self-review L7:
-// without this seam, 13 pre-existing runDoctor* call sites would each open
-// up to 11 files under the real $HOME).
+// without this seam, the pre-existing runDoctor* call sites would each read
+// every candidate rc file under the real $HOME).
 var doctorShellAliasEnv = shellAliasEnvFromOS
 
 // shellAliasInaccessibleDir is a candidate directory whose os.Stat failed
