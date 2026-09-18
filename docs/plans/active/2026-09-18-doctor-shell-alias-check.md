@@ -101,6 +101,8 @@ doctor の Check 追加のみ。下流へは次回 release でバイナリ経由
 ## Deviation notes
 
 - 2026-09-18 plan: Codex plan advisory(codex-cli 0.154.0、`</dev/null` 付き)が MEDIUM 1 件(`-mgpt-5.5` の連結形式を見逃す)を報告。採用し Scope 1・Assumptions・AC-2 を改訂。Slice B(文書)は advisory 待ちの間に先行して 9344c57 で実施
+- 2026-09-18 work: Slice A は implementer に委譲(f72e1d4、3 ファイル、逸脱なし)。orchestrator が HEAD 一致・porcelain 空・差分を確認し、対象テスト 14 件+既存 `TestRunDoctorOpts_*` 2 件を再実行して pass。テストは (a)〜(i) に加えて (j) コメント行、(k) `conflictingFlag` の表(`--models-dir` や `--m` を誤検知しないこと)、`runDoctorOpts` 出力に Check 行が出る統合テストを持つ
+- 2026-09-18 work: AC-5 の実機 evidence。このマシンで `go run ./cmd/ralph doctor` を実行した結果(1 行): `⚠ Shell aliases (codex/claude): warn — alias claude in ~/.config/zsh/.zshrc:34 adds --model; alias codex in ~/.config/zsh/.zshrc:35 adds --model (-m) — herdr expands the alias in the seat's pane, ... (docs/recipes/codex-seat-permissions.md)`。`~/.zshrc` は同ファイルへの symlink なので所見は 1 ファイル分だけ
 
 ## Progress checklist
 
