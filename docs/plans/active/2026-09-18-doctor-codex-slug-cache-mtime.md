@@ -1,6 +1,6 @@
 # doctor-codex-slug-cache-mtime
 
-- Status: Draft
+- Status: In progress
 - Owner: Claude Code
 - Date: 2026-09-18
 - Related request: `ralph doctor` の「Org codex model slugs」Check はローカルの `models_cache.json` を読むだけで、その cache がいつ書かれたものかを出さない。warn が出た瞬間の出力に鮮度が見えないと、数日前の cache に基づく warn を運用者が真に受けて seed-once の `ralph.toml` からスラッグを誤って外すリスクが残る(2026-09-17 の一時的消失の事例)。#156 の文書化では散文で注意しているが、注意が効くべき場所は出力そのもの(issue #159、PR #160 の self-review Follow-ups 起点)
@@ -111,7 +111,7 @@ Critical forks: None(閾値・Status 不変・Stat 失敗時の扱いはいず�
 
 - [x] Plan reviewed
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
