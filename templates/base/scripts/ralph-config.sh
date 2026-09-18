@@ -56,12 +56,12 @@ RALPH_ORG_PERMISSION_DEFAULT="${RALPH_ORG_PERMISSION_DEFAULT:-autonomous}"
 # [org.permissions].codex_verified (PR④ AC-8): false keeps codex seats
 # fail-closed to guarded; an operator flips it on per machine after running
 # docs/recipes/codex-seat-permissions.md (the codex flag mapping inherits
-# that machine's codex config). Kept unexported for the
-# same reason as RALPH_ORG_PERMISSION_DEFAULT above: nothing in this file's
-# export block should risk shadowing a value the Go config
-# (internal/config) is the sole runtime source for. This var exists only so
-# the three lock-step surfaces agree on the default value; no `ralph org`
-# verb reads it from the environment.
+# that machine's codex config). Kept unexported for the same reason as
+# RALPH_ORG_PERMISSION_DEFAULT above: nothing in this file's export block
+# should risk shadowing a value the Go config (internal/config) is the sole
+# runtime source for. This var exists only so the three lock-step surfaces
+# agree on the default value; no `ralph org` verb reads it from the
+# environment.
 RALPH_ORG_PERMISSIONS_CODEX_VERIFIED="${RALPH_ORG_PERMISSIONS_CODEX_VERIFIED:-false}"
 # RALPH_ORG_WATCHDOG_* mirror [org.watchdog] (interval_seconds/stall_minutes/
 # watcher_enabled/watcher_model). Kept unexported for the same reason as

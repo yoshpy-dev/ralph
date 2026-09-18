@@ -18,12 +18,11 @@ recorded in `docs/evidence/codex-seat-permissions-2026-09-18.md`.
 - **Shell aliases break every codex spawn, not just this recipe.** If your
   shell rc defines `alias codex="codex -m ..."`, herdr sends the seat command
   to the pane's interactive shell as is, the alias expands, and codex exits
-  with
-  `error: the argument '--model <MODEL>' cannot be used multiple times`.
-  `ralph org spawn` then reports `spawn_failed` after the `agent_start`
-  timeout. Remove the alias, or start herdr from a HOME / rc that does not
-  define it. A `claude` alias that adds `--model` should collide the same
-  way with claude seats (not verified).
+  with `error: the argument '--model <MODEL>' cannot be used multiple
+  times`; `ralph org spawn` then reports `spawn_failed` after the
+  `agent_start` timeout. Remove the alias, or start herdr from a HOME / rc
+  that does not define it. A `claude` alias that adds `--model` should
+  collide the same way with claude seats (not verified).
 - **Add the agmsg database to the sandbox's writable roots.** Under
   `--sandbox workspace-write` codex can write only to the working directory
   and to `/tmp`-style temp roots; the agmsg SQLite database
@@ -86,23 +85,40 @@ ralph org spawn --org-id perm-auto --id reviewer --role reviewer --driver codex 
   approval, trust, or login dialog. A model-retirement notice
   ("Try new model / Use existing model") may appear; it is not an approval
   prompt, and the choice is persisted to the codex config.
-- Send a TASK (every follow-up verb needs the same `--org-id`, `--config`,
-  and `--state-dir` as the spawn, otherwise it fails with
-  `org: --org-id is required` or reads the default state directory):
+- Write the TASK as a typed-protocol message (`ralph org send` validates it:
+  `TYPE` must be one of the protocol's enum values, `TASK` needs a
+  `TASK_ID`, and the body is capped at 2,000 characters), e.g. `task.txt`:
+
+  ```
+  TYPE: TASK
+  TASK_ID: t-1
+
+  1. Create hello.txt in the working directory.
+  2. Try to write to <throwaway path under $HOME>. If it is refused, do not
+     retry and do not work around it; record the exact error text.
+  3. Send a RESULT (TYPE: RESULT, TASK_ID: t-1) to lead through the agmsg
+     skill's send script, with the outcome of each step.
+  ```
+
+- Send it. Every follow-up verb needs the same `--org-id`, `--config`, and
+  `--state-dir` as the spawn, otherwise it fails with
+  `org: --org-id is required` or reads the default state directory:
 
   ```sh
   ralph org send --org-id perm-auto --to reviewer --text "$(cat task.txt)" \
     --config ralph-autonomous.toml --state-dir <scratch>/state-auto
+  ```
+
+  When the seat is idle the pasted text can stay in the composer unsent, in
+  which case the seat is still idle and a `wait` returns at once looking like
+  success; check the pane, and a few seconds after `send` send
+  `herdr pane send-keys <pane> Enter` once. Then wait for the seat:
+
+  ```sh
   ralph org wait --org-id perm-auto --seat reviewer --until idle,done \
     --timeout-ms 300000 --config ralph-autonomous.toml --state-dir <scratch>/state-auto
   ```
 
-  When the seat is idle the pasted text can stay in the composer unsent; a
-  few seconds later send `herdr pane send-keys <pane> Enter` once.
-- TASK content: create one file inside the cwd → try to write to the
-  throwaway path under `$HOME` (tell the seat explicitly **not to retry or
-  work around a denial**) → send the RESULT over agmsg (the seat runs the
-  skill's `send.sh`).
 - Expected: no approval prompt, the outside write fails with
   `operation not permitted`, and the RESULT arrives
   (`bash ~/.agents/skills/agmsg/scripts/history.sh ralph-perm-auto lead 20`).
@@ -149,7 +165,8 @@ ralph org stop --org-id perm-auto --seat reviewer \
   --config ralph-autonomous.toml --state-dir <scratch>/state-auto
 ralph org disband --org-id perm-auto \
   --config ralph-autonomous.toml --state-dir <scratch>/state-auto
-ralph org status --org-id perm-auto --state-dir <scratch>/state-auto   # no active seat
+ralph org status --org-id perm-auto \
+  --config ralph-autonomous.toml --state-dir <scratch>/state-auto   # no active seat
 ```
 
 Repeat with `perm-edits` / `ralph-edits.toml` / `<scratch>/state-edits`, close
