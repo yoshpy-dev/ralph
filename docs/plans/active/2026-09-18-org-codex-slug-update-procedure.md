@@ -53,10 +53,10 @@ Critical forks: None。
 
 ## Acceptance criteria
 
-- [ ] AC-1: `/org` SKILL.md の「### 既定の model_pool」節に、doctor の warn を受けて自分の `ralph.toml` を直す手順、`ralph.toml` が seed-once で `ralph upgrade` に上書きされない旨、既定の追従には「バイナリ更新 → `ralph upgrade`」の順が要る旨を含む段落がある。`grep -c 'seed' .claude/skills/org/SKILL.md` と `grep -c 'brew upgrade' .claude/skills/org/SKILL.md` が各 1 以上。4 ミラーが byte 一致(`cmp` ×2)し、`./scripts/check-skill-sync.sh` と `./scripts/check-sync.sh` が pass
-- [ ] AC-2: `docs/specs/2026-08-01-org-runtime.md` に「### 運用ノート: 既定 codex スラッグの更新手順」節があり、`config.go` / `templates/base/ralph.toml` / `ralph-config.sh`(2 面)/ SKILL.md(4 面)/ spec 改訂注記 / テスト 4 ファイル / `run-verify.sh` / `ralph doctor` / `ralph upgrade` / `brew upgrade` / `ralph version` / `EmbeddedFS` / `mtime` / `codex --version` の各語を含む(`grep -c` で各 1 以上)。配布の 2 段階と観測前の cache 更新手順が明文化されている
+- [x] AC-1: `/org` SKILL.md の「### 既定の model_pool」節に、doctor の warn を受けて自分の `ralph.toml` を直す手順、`ralph.toml` が seed-once で `ralph upgrade` に上書きされない旨、既定の追従には「バイナリ更新 → `ralph upgrade`」の順が要る旨を含む段落がある。`grep -c 'seed' .claude/skills/org/SKILL.md` と `grep -c 'brew upgrade' .claude/skills/org/SKILL.md` が各 1 以上。4 ミラーが byte 一致(`cmp` ×2)し、`./scripts/check-skill-sync.sh` と `./scripts/check-sync.sh` が pass
+- [x] AC-2: `docs/specs/2026-08-01-org-runtime.md` に「### 運用ノート: 既定 codex スラッグの更新手順」節があり、`config.go` / `templates/base/ralph.toml` / `ralph-config.sh`(2 面)/ SKILL.md(4 面)/ spec 改訂注記 / テスト 4 ファイル / `run-verify.sh` / `ralph doctor` / `ralph upgrade` / `brew upgrade` / `ralph version` / `EmbeddedFS` / `mtime` / `codex --version` の各語を含む(`grep -c` で各 1 以上)。配布の 2 段階と観測前の cache 更新手順が明文化されている
 - [ ] AC-3: issue #156 に 2026-09-18 の観測コメント(cache mtime、codex バージョン、モデル数、5 スラッグの有無、doctor 結果、観測前の cache 更新手順、次回観測の目安)が投稿されている
-- [ ] AC-4: `./scripts/run-verify.sh` green(文書のみの変更だが、sync 系ゲートを含むため)
+- [x] AC-4: `./scripts/run-verify.sh` green(文書のみの変更だが、sync 系ゲートを含むため)
 - [ ] AC-5: PR 本文は `Refs #156`(`Closes` ではない)で、issue は open のまま残る
 
 ## Implementation outline
@@ -99,6 +99,7 @@ Critical forks: None。
 
 - 2026-09-18 plan: 観測の初回データ点は plan 作成時に取得済み(cache 7 モデル、5 スラッグ全存在、doctor pass)。cache mtime は最初の読み取り時 12:31、その後の `codex exec`(advisory 実行)で 12:40:07 に更新されたことを確認 — codex 起動が cache を更新する根拠
 - 2026-09-18 plan: Codex plan advisory(`</dev/null` 付きで正常完了)の HIGH-1 / MEDIUM-2 を裏取りのうえ採用。Scope 1〜3、Design decisions、AC-1〜AC-3 を改訂
+- 2026-09-18 work: Slice A = 4fa920e(`/org` skill 段落 + 4 面ミラー、`check-skill-sync.sh` / `check-sync.sh` pass)、Slice B = b66ec5c(spec 節、AC-2 の 16 語すべて 1 以上)。いずれも inline。`./scripts/run-verify.sh` green(evidence: `docs/evidence/verify-2026-09-18-035456.log`、gitignored)、`go test ./internal/config/... -count=1` ok。AC-3(issue コメント)と AC-5(`Refs #156`)は `/pr` 段階で満たす
 
 ## Progress checklist
 
