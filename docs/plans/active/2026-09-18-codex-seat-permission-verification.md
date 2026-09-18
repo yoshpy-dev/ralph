@@ -16,8 +16,9 @@
 
 | # | 変更 | ファイル | 内容 |
 |---|------|---------|------|
-| 1 | 実機検証(autonomous) | `docs/evidence/codex-seat-permissions-2026-09-18.md`(新規) | worktree から `go build -o <scratch>/ralph ./cmd/ralph` した一時バイナリ(インストール済み 5.1.0 は repo より古い)を使う。スクラッチ cwd(`git init` した一時ディレクトリ、本 repo 外)とスクラッチ `ralph.toml`(`[org.permissions] default = "autonomous"`、`codex_verified = true`)を用意し、`ralph org spawn --org-id codex-perm-<日付> --id reviewer --role reviewer --driver codex --model gpt-5.5 --cwd <scratch> --scope "<scratch>/**" --config <scratch ralph.toml> --state-dir <scratch state>` を実行。`spawned` イベントの Details に `--sandbox workspace-write --ask-for-approval never` が記録されること、`herdr pane read` で起動直後の pane に承認ダイアログが出ていないことを確認。`ralph org send --to reviewer` で TASK(`TYPE: TASK` / `TASK_ID: t-1`、本文: スクラッチ cwd 内に `hello.txt` を shell で作り、その sha256 を EVIDENCE に入れて RESULT を返す)を送り、`ralph org wait --seat reviewer --until idle,done --timeout-ms 180000` → `ralph org read --seat reviewer --lines 80` で pane を確認 → agmsg の受信(`ralph org report` または agmsg history)で RESULT を確認。`ralph org stop --seat reviewer` → `ralph org disband` → `ralph org status` に active 座席なし |
-| 2 | 実機検証(edits) | 同上 evidence | スクラッチ config の `[org.permissions.roles] reviewer = "edits"` で再 spawn(別 org_id)。`spawned` Details に `--sandbox workspace-write` のみ(`--ask-for-approval` なし)が記録されること。TASK: (i) cwd 内の `notes.md` を編集(自動承認されるはず)、(ii) cwd 外(例 `$TMPDIR/outside-<日付>.txt`)への書き込みを試みる。pane で (ii) に承認プロンプトが出るか、または sandbox で拒否されて model にエラーが返るかを観測し、どちらであったかを事実として記録(codex の `on-request` は「model が必要と判断したとき問い合わせる」なので、問い合わせが出ない可能性もある。期待と違っても改変せず記録)。承認プロンプトが出た場合は `herdr pane send-keys` で拒否し、seat を stop |
+| 1 | 実機検証(autonomous) | `docs/evidence/codex-seat-permissions-2026-09-18.md`(新規) | worktree から `go build -o <scratch>/ralph ./cmd/ralph` した一時バイナリ(インストール済み 5.1.0 は repo より古い)を使う。スクラッチ cwd(`git init` した一時ディレクトリ、本 repo 外)とスクラッチ `ralph.toml`(`[org.permissions] default = "autonomous"`、`codex_verified = true`)を用意し、`ralph org spawn --org-id codex-perm-<日付> --id reviewer --role reviewer --driver codex --model gpt-5.5 --cwd <scratch> --scope "<scratch>/**" --config <scratch ralph.toml> --state-dir <scratch state>` を実行。`spawned` イベントの Details には論理モード(`permission_mode=autonomous`)しか記録されない(`spawnedEventDetails`、dry-run で確認済み)ので、実際の子プロセス引数 `--sandbox workspace-write --ask-for-approval never --model gpt-5.5` は `herdr pane process-info <pane>` または `ps -o args -p <pid>` で codex プロセスのコマンドラインから取って記録する。`herdr pane read` で起動直後の pane に承認 / trust / login ダイアログが出ていないことを確認。`ralph org send --to reviewer` で TASK(`TYPE: TASK` / `TASK_ID: t-1`、本文: スクラッチ cwd 内に `hello.txt` を shell で作り、その sha256 を EVIDENCE に入れて RESULT を返す)を送り、`ralph org wait --seat reviewer --until idle,done --timeout-ms 180000` → `ralph org read --seat reviewer --lines 80` で pane を確認 → agmsg の受信(`ralph org report` または agmsg history)で RESULT を確認。`ralph org stop --seat reviewer` → `ralph org disband` → `ralph org status` に active 座席なし |
+| 2 | 実機検証(edits) | 同上 evidence | スクラッチ config の `[org.permissions.roles] reviewer = "edits"` で再 spawn(別 org_id)。`spawned` Details に `--sandbox workspace-write` のみ(`--ask-for-approval` なし)が記録されること。TASK: (i) cwd 内の `notes.md` を編集(自動承認されるはず)、(ii) codex の workspace-write sandbox の writable root(cwd と `/tmp` / `$TMPDIR` 系)の**外**にあることが明らかなパス `$HOME/codex-perm-outside-2026-09-18.txt`(事前に存在しないことを確認し、事後に存在しないことを独立に確認)への書き込みを試みる。pane で (ii) に承認プロンプトが出るか、sandbox で拒否されて model にエラーが返るかを観測し記録。結果は 3 値で判定する — **pass**: (i) がプロンプトなしで完了し、(ii) で承認プロンプトの文言が pane に観測された / **partial**: (i) は完了したが (ii) はプロンプトなしで sandbox 拒否(「問い合わせる」は未確立。recipe にはそのまま書き、opt-in の記述は「cwd 外は拒否される」までに留める)/ **inconclusive**: 座席が (ii) の tool call に到達しなかった、または pane が読めなかった。承認プロンプトが出た場合は `herdr pane send-keys` で拒否し、seat を stop |
+| 2b | 実効設定の記録 | 同上 evidence | 省略時の approval policy はユーザー / プロジェクト config を継承するため、検証時の `~/.codex/config.toml` の `approval_policy` / `sandbox_mode` / `sandbox_workspace_write.*`(`writable_roots` 等)/ `[profiles.*]` の値と、スクラッチ cwd に `.codex/config.toml` が無いこと、`codex --version` を evidence に記録する。recipe の opt-in 手順は「この実効設定で検証した」旨と、config やバージョンを変えたら再検証する旨を含める |
 | 3 | evidence の redact | 同上 evidence | ホームディレクトリ(`/Users/<user>` → `~`)、herdr / agmsg / codex の session UUID、pane id 以外の識別子を伏せる。生ログは scratchpad に置き、evidence には手順・コマンド・観測結果・manifest イベントの要点だけを書く(pointer 原則) |
 | 4 | recipe | `docs/recipes/codex-seat-permissions.md`(新規)+ `templates/base/docs/recipes/codex-seat-permissions.md`(byte 同一) | 前提(codex CLI バージョン、herdr / agmsg)、スクラッチ config の書き方、autonomous / edits それぞれの spawn コマンドと「観測すべきこと」、本マシンでの結果(evidence へのポインタ)、自分の `ralph.toml` で `codex_verified = true` にする手順と注意(codex のバージョンが変わったら再検証)、後始末(stop / disband / status 確認)。`docs/recipes/codex-setup.md` の末尾に 1 行のポインタを追加(root と template を同時に) |
 | 5 | コメント・文書の位置づけ更新 | `templates/base/ralph.toml`、`internal/org/permissions.go`(コメントのみ)、`.claude/skills/org/SKILL.md` + 3 ミラー | `ralph.toml` の `[org.permissions]` コメント 2 箇所の「see docs/tech-debt/README.md」(該当行は存在しない)を recipe へのポインタに置換し、「fail-closed until live-verified」を「既定は fail-closed。マシンごとに recipe の手順で検証してから `codex_verified = true` にする」に。`permissions.go` の fail-closed コメント(84-93 行付近)に「2026-09-18 に codex-cli 0.154.0 で検証済み(evidence 参照)。既定 false は運用者の opt-in 設計として維持」を追記。`/org` skill 「permission 作法」の「fail-closed。実機検証未了のための暫定制約」を「既定 fail-closed。`codex_verified = true`(recipe の手順で検証後)で autonomous / edits が有効」に書き換え、`scripts/sync-skills.sh` + cp で 4 面同期 |
@@ -36,6 +37,7 @@
 - herdr は `ralph org spawn` が workspace / tab / agent を作れる状態(doctor pass 済み)。tmux セッションは herdr が管理する
 - 座席の codex は `--model gpt-5.5`(issue 指定)。ユーザー shell の `codex` alias(`-m gpt-6-astra`)は herdr 経由の起動には適用されない
 - codex の対話セッションは初回起動時に trust / login のダイアログを出しうる。出た場合は evidence に記録し、`herdr pane send-keys` で対処する(login が必要なら ~/.codex の既存認証が使われる想定)
+- codex の workspace-write sandbox は cwd に加えて `/tmp` / `$TMPDIR` 系を writable root に含みうる(Codex plan advisory HIGH-1)。cwd 外の否定テストは `$HOME` 直下の使い捨てパスで行う
 - 「承認ダイアログで止まらない」の判定は、TASK 送信後に `ralph org wait` が `idle,done` で返り、pane に承認待ちの表示がなく、RESULT が届いたこと。「問い合わせる」の判定は pane に approval prompt が表示されたこと(`herdr pane wait-output` で文字列待ちが可能なら使う)
 - evidence は `docs/evidence/README.md` の慣例に従う markdown(既存の `codex-hooks-livefire-*.md` と同型)
 - recipe は seed-once(下流には `ralph init` 時のコピーで届く)。root と `templates/base/` を byte 同一にして `check-sync.sh` を通す(`docs/recipes/` は ROOT_ONLY 除外対象外)
@@ -59,16 +61,17 @@ Critical forks: 2 件、ユーザーと解決済み(2026-09-18、AskUserQuestion
 
 - 実機検証(Scope 1〜3)は orchestrator が inline で行う。herdr pane の観測・承認プロンプトへの応答・後始末は対話的で、implementer への handoff には向かない。Slice B(文書)は少量の散文なので同じく inline
 - 期待と異なる観測(例: edits で cwd 外操作に問い合わせが出ず sandbox 拒否になる)は「検証失敗」ではなく事実として記録し、recipe には観測どおりに書く。マッピングの是非は別 issue
+- Codex plan advisory(codex-cli 0.154.0)の 3 所見を採用: HIGH-1(否定テストの対象を writable root の外へ、結果を 3 値化)、HIGH-2(実効 approval policy / sandbox 設定を記録し、edits の「問い合わせる」は承認プロンプトの実観測を要件に。opt-in は検証時の config に条件付け)、MEDIUM-3(実引数は manifest ではなく子プロセスのコマンドラインから取る)
 - E2E のタスクは reviewer 役の雛形に合わせ、成果物をファイル 1 つに限定した小さな作業にする(RESULT の EVIDENCE は sha256 と `file:line` のポインタ)
 
 ## Acceptance criteria
 
-- [ ] AC-1: `docs/evidence/codex-seat-permissions-2026-09-18.md` に autonomous 座席の記録がある: 使ったバージョン(codex / herdr / agmsg / ralph 一時バイナリの commit)、`spawned` イベントの permission 引数、起動直後の pane 抜粋(承認ダイアログなし)、送った TASK、`wait` の結果、受け取った RESULT の要点、stop / disband / status の結果。`grep -c '/Users/' docs/evidence/codex-seat-permissions-2026-09-18.md` が 0(redact 済み)
-- [ ] AC-2: 同 evidence に edits 座席の記録がある: `spawned` の引数が `--sandbox workspace-write` のみ、cwd 内編集が承認なしで完了したこと、cwd 外操作で観測された挙動(承認プロンプト / sandbox 拒否 / その他)を事実として明記
+- [ ] AC-1: `docs/evidence/codex-seat-permissions-2026-09-18.md` に autonomous 座席の記録がある: 使ったバージョン(codex / herdr / agmsg / ralph 一時バイナリの commit)、実効 codex config の該当キー、`spawned` イベントの `permission_mode`、子プロセスのコマンドライン(`--sandbox workspace-write --ask-for-approval never`)、判定(pass / fail / inconclusive)、起動直後の pane 抜粋(承認ダイアログなし)、送った TASK、`wait` の結果、受け取った RESULT の要点、stop / disband / status の結果。`grep -c '/Users/' docs/evidence/codex-seat-permissions-2026-09-18.md` が 0(redact 済み)
+- [ ] AC-2: 同 evidence に edits 座席の記録がある: 子プロセスのコマンドラインが `--sandbox workspace-write` のみ(`--ask-for-approval` なし)、cwd 内編集が承認なしで完了したこと、writable root 外への書き込みで観測された挙動と 3 値判定(pass / partial / inconclusive)、対象ファイルが事後に存在しないことの独立確認。recipe の「edits は cwd 外を問い合わせる」という記述は判定が pass のときだけ書く
 - [ ] AC-3: `docs/recipes/codex-seat-permissions.md` が root と `templates/base/` に byte 同一で存在し(`cmp`)、前提・スクラッチ config・2 モードの spawn コマンド・観測項目・本マシンの結果へのポインタ・自分の `ralph.toml` での opt-in 手順・後始末を含む。`docs/recipes/codex-setup.md` に recipe へのポインタ 1 行(root / template 同一)。`./scripts/check-sync.sh` pass
 - [ ] AC-4: `templates/base/ralph.toml` の `[org.permissions]` コメントに `docs/tech-debt/README.md` への参照がなく(`grep -c 'tech-debt' templates/base/ralph.toml` が 0)、recipe へのポインタがある。`internal/org/permissions.go` に検証日・codex バージョン・evidence への参照があり、`git diff main -- internal/org/permissions.go` がコメント行のみ。`/org` skill の permission 作法に「暫定制約」の語がなく(`grep -c '暫定制約' .claude/skills/org/SKILL.md` が 0)、`codex_verified` と recipe への言及がある。4 面 `cmp` 一致、`check-skill-sync.sh` pass
 - [ ] AC-5: `go test ./internal/org/... -count=1` と `./scripts/run-verify.sh` が green(ロジック変更なし)
-- [ ] AC-6: 検証で使った org の座席が残っていない(`ralph org status --org-id <各 id> --state-dir <scratch>` に active なし、`herdr agent list` / `herdr pane list` に該当 pane なし)。PR 本文は `Closes #155`
+- [ ] AC-6: `codex_verified = true` への opt-in 手順が recipe で「検証時の実効 config とバージョン」に条件付けられ、config / バージョン変更時の再検証を求めている。検証で使った org の座席が残っていない(`ralph org status --org-id <各 id> --state-dir <scratch>` に active なし、`herdr agent list` / `herdr pane list` に該当 pane なし)。PR 本文は `Closes #155`
 
 ## Implementation outline
 
@@ -109,7 +112,8 @@ Critical forks: 2 件、ユーザーと解決済み(2026-09-18、AskUserQuestion
 
 ## Deviation notes
 
-(実装中に追記)
+- 2026-09-18 plan: dry-run で `spawned` Details が `permission_mode=<mode>` のみを記録することを確認(実引数なし)。Codex plan advisory の HIGH 2 件・MEDIUM 1 件を採用し Scope 1・2・2b、AC-1・2・6、Assumptions を改訂
+- 2026-09-18 plan: `herdr workspace list` が socket 不在で失敗したため `herdr server`(ヘッドレス)をバックグラウンドで起動して検証する(herdr 0.7.5、protocol 17)。検証後に `herdr server stop` で止める
 
 ## Progress checklist
 
