@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
 
 // shellAliasEnv is the part of the process environment checkShellAliases
@@ -40,47 +41,78 @@ func shellAliasEnvFromOS() (shellAliasEnv, error) {
 // up to 11 files under the real $HOME).
 var doctorShellAliasEnv = shellAliasEnvFromOS
 
-// shellAliasRcCandidates returns the rc files the check scans, in order.
-// Only files that exist are read; each is resolved through
-// filepath.EvalSymlinks and deduplicated by its real path (on macOS a
-// ~/.zshrc symlinked to ~/.config/zsh/.zshrc must count once -- the
-// reported file:line still names the symlink candidate, not the resolved
-// target, since dedup keeps the first candidate in list order, not the
-// resolved one). The list is deliberately static -- files pulled in via
+// shellAliasInaccessibleDir is a candidate directory whose os.Stat failed
+// for a reason other than "the path cannot exist" (e.g. a permission error
+// on the directory itself) -- the file(s) under it can't be ruled absent,
+// so checkShellAliases must not silently read this as "no alias here".
+type shellAliasInaccessibleDir struct {
+	Dir    string // the candidate's parent directory, as an absolute path
+	Reason string // shellAliasUnreadableReason(err) for the stat failure
+}
+
+// shellAliasRcCandidates returns the rc files the check scans, in order,
+// plus any candidate directory whose stat failed inconclusively (see
+// shellAliasInaccessibleDir). Only files that exist are read; each is
+// resolved through filepath.EvalSymlinks and deduplicated by its real path
+// (on macOS a ~/.zshrc symlinked to ~/.config/zsh/.zshrc must count once --
+// the reported file:line still names the symlink candidate, not the
+// resolved target, since dedup keeps the first candidate in list order, not
+// the resolved one). The list is deliberately static -- files pulled in via
 // `source` are not followed; checkShellAliases' Detail names every file it
 // actually scanned, so a `source`d alias reads as outside what was
-// checked, not as a silent miss. A relative $ZDOTDIR is ignored (zsh itself
-// would refuse it). ~/.zshrc and ~/.config/zsh/.zshrc are still scanned even
-// when $ZDOTDIR is set and zsh itself would skip them: this process's
-// $ZDOTDIR is not guaranteed to match the one herdr's login-zsh pane
-// resolves from /etc/zshenv, so the candidate list intentionally
-// over-approximates rather than under-approximates.
-func shellAliasRcCandidates(env shellAliasEnv) []string {
+// checked, not as a silent miss.
+//
+// herdr's pane runs a login zsh, which reads .zshenv, .zprofile, .zshrc,
+// and .zlogin -- in that load order -- from $ZDOTDIR, falling back to
+// $HOME when $ZDOTDIR is unset. The candidate list scans those four files
+// under each of $ZDOTDIR (only when set and absolute -- a relative
+// $ZDOTDIR is ignored, since zsh itself would refuse it), $HOME, and
+// $HOME/.config/zsh, in that order: $HOME and $HOME/.config/zsh are
+// scanned even when $ZDOTDIR is set and zsh itself would skip them,
+// because this process's $ZDOTDIR is not guaranteed to match the one
+// herdr's login-zsh pane resolves from /etc/zshenv, so the list
+// intentionally over-approximates rather than under-approximates. After
+// the zsh files come ~/.zsh_aliases, the bash files (.bashrc,
+// .bash_profile, .bash_login, .bash_aliases, .profile), and finally
+// ~/.config/fish/config.fish.
+func shellAliasRcCandidates(env shellAliasEnv) ([]string, []shellAliasInaccessibleDir) {
 	var raw []string
+
+	zshDirs := []string{}
 	if env.Zdotdir != "" && filepath.IsAbs(env.Zdotdir) {
-		raw = append(raw,
-			filepath.Join(env.Zdotdir, ".zshrc"),
-			filepath.Join(env.Zdotdir, ".zshenv"),
-		)
+		zshDirs = append(zshDirs, env.Zdotdir)
 	}
-	raw = append(raw,
-		filepath.Join(env.Home, ".zshrc"),
-		filepath.Join(env.Home, ".config", "zsh", ".zshrc"),
-		filepath.Join(env.Home, ".zshenv"),
-		filepath.Join(env.Home, ".zprofile"),
-		filepath.Join(env.Home, ".zsh_aliases"),
-		filepath.Join(env.Home, ".bashrc"),
-		filepath.Join(env.Home, ".bash_profile"),
-		filepath.Join(env.Home, ".bash_aliases"),
-		filepath.Join(env.Home, ".profile"),
-		filepath.Join(env.Home, ".config", "fish", "config.fish"),
-	)
+	zshDirs = append(zshDirs, env.Home, filepath.Join(env.Home, ".config", "zsh"))
+	for _, dir := range zshDirs {
+		for _, f := range []string{".zshenv", ".zprofile", ".zshrc", ".zlogin"} {
+			raw = append(raw, filepath.Join(dir, f))
+		}
+	}
+
+	raw = append(raw, filepath.Join(env.Home, ".zsh_aliases"))
+	for _, f := range []string{".bashrc", ".bash_profile", ".bash_login", ".bash_aliases", ".profile"} {
+		raw = append(raw, filepath.Join(env.Home, f))
+	}
+	raw = append(raw, filepath.Join(env.Home, ".config", "fish", "config.fish"))
 
 	seen := map[string]bool{}
+	seenDir := map[string]bool{}
 	var out []string
+	var inaccessible []shellAliasInaccessibleDir
 	for _, c := range raw {
 		info, err := os.Stat(c)
-		if err != nil || info.IsDir() {
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+				continue // the path cannot exist -- nothing was hidden from us
+			}
+			dir := filepath.Dir(c)
+			if !seenDir[dir] {
+				seenDir[dir] = true
+				inaccessible = append(inaccessible, shellAliasInaccessibleDir{Dir: dir, Reason: shellAliasUnreadableReason(err)})
+			}
+			continue
+		}
+		if info.IsDir() {
 			continue
 		}
 		real, evalErr := filepath.EvalSymlinks(c)
@@ -93,7 +125,7 @@ func shellAliasRcCandidates(env shellAliasEnv) []string {
 		seen[real] = true
 		out = append(out, c)
 	}
-	return out
+	return out, inaccessible
 }
 
 // shellAliasStatementMarkers are leading words that can precede `alias` in
@@ -380,30 +412,68 @@ func scanShellAliasFile(path string) (defs []shellAliasDef, opened bool, err err
 	return defs, true, nil
 }
 
-// shellAliasFlagIsPermission reports whether label names a permission-class
-// seat-launch flag (--sandbox, --ask-for-approval, --permission-mode, or
-// either driver's short form), as opposed to --model. This distinction
-// drives both severity and wording in checkShellAliases: ralph always
-// passes --model on every spawn (internal/org/spawn.go), but only passes a
-// permission-class flag when the seat's resolved permission mode is edits
-// or autonomous (internal/org/permissions.go's permissionArgsForDriver) --
-// a guarded seat gets none of them, so a permission-class alias flag is
-// silently unopposed rather than colliding with or being overridden by
-// ralph's own flag.
-func shellAliasFlagIsPermission(label string) bool {
+// shellAliasClassModel, shellAliasClassSandbox, shellAliasClassApproval, and
+// shellAliasClassPermissionMode are shellAliasFlagClass's return values.
+const (
+	shellAliasClassModel          = "model"
+	shellAliasClassSandbox        = "sandbox"
+	shellAliasClassApproval       = "approval"
+	shellAliasClassPermissionMode = "permission-mode"
+)
+
+// shellAliasFlagClass classifies a seat-launch flag label by which seats
+// ralph actually passes it to, so checkShellAliases can describe the true
+// blast radius instead of a blanket "permission" claim. Returns "" for a
+// label this check never produces.
+//
+// ralph passes --model on every spawn regardless of permission mode
+// (internal/org/spawn.go:643). For codex, --sandbox goes to edits and
+// autonomous seats (internal/org/permissions.go's codexEditsArgs and
+// codexAutonomousArgs both include it); --ask-for-approval goes to
+// autonomous seats only (codexAutonomousArgs has it, codexEditsArgs does
+// not). For claude, --permission-mode goes to edits and autonomous seats
+// (permissionArgsForDriver's claude case). A guarded seat of either driver
+// gets none of the three permission-class flags, so that class's alias
+// value applies unopposed on a guarded seat.
+func shellAliasFlagClass(label string) string {
 	switch label {
-	case "--sandbox", "--sandbox (-s)", "--ask-for-approval", "--ask-for-approval (-a)", "--permission-mode":
-		return true
+	case "--model", "--model (-m)":
+		return shellAliasClassModel
+	case "--sandbox", "--sandbox (-s)":
+		return shellAliasClassSandbox
+	case "--ask-for-approval", "--ask-for-approval (-a)":
+		return shellAliasClassApproval
+	case "--permission-mode":
+		return shellAliasClassPermissionMode
 	default:
-		return false
+		return ""
 	}
+}
+
+// shellAliasValueTokens re-tokenizes an alias value with shellAliasStatements
+// (the same quote-aware reader used on rc lines), because zsh re-parses
+// alias text on expansion: `alias codex='codex "--model" gpt-5'` really
+// does pass --model to codex, with the inner double quotes stripped by the
+// shell just like any other quoted word -- a plain strings.Fields split
+// would miss it, since the quote characters would still be attached to the
+// token. All statements' words are flattened in order, so an unquoted `;`,
+// `|`, or `&` inside the value merely separates words rather than hiding
+// anything, and an unquoted `#` that starts a word still ends the value
+// early, matching real shell comment handling.
+func shellAliasValueTokens(value string) []string {
+	stmts, _ := shellAliasStatements(value)
+	var tokens []string
+	for _, words := range stmts {
+		tokens = append(tokens, words...)
+	}
+	return tokens
 }
 
 // shellAliasConflictingFlags returns every seat-launch flag ralph itself
 // passes to the named driver ("codex" or "claude") that also appears in an
-// alias value, in order of first appearance, deduplicated. value is the
-// already-unquoted word the statement reader produced; it is tokenized on
-// whitespace (strings.Fields).
+// alias value, in order of first appearance, deduplicated. value is
+// re-tokenized with shellAliasValueTokens rather than a plain whitespace
+// split (see its doc comment for why).
 //
 // codex's short flags -m/-s/-a are clap aliases for --model/--sandbox/
 // --ask-for-approval and collide identically with them: verified against
@@ -420,8 +490,8 @@ func shellAliasFlagIsPermission(label string) bool {
 // these two), and does not error on a repeated --model or --permission-mode:
 // verified against claude 2.1.274, the later value -- ralph's own, since
 // ralph's flags are appended after the alias expands -- wins and the seat
-// starts. See checkShellAliases for how severity is graded once a flag is
-// found: it depends on the flag's class (model vs. permission) and the
+// starts. See checkShellAliases and shellAliasFlagClass for how severity is
+// graded once a flag is found: it depends on the flag's class and the
 // seat's resolved permission mode, not on the driver alone.
 func shellAliasConflictingFlags(name, value string) []string {
 	isShort := func(tok, letter string) bool {
@@ -437,7 +507,7 @@ func shellAliasConflictingFlags(name, value string) []string {
 		}
 	}
 
-	for _, tok := range strings.Fields(value) {
+	for _, tok := range shellAliasValueTokens(value) {
 		switch {
 		case tok == "--model", strings.HasPrefix(tok, "--model="):
 			add("--model")
@@ -478,20 +548,21 @@ func shellAliasUnreadableReason(err error) string {
 // resolveEnv supplies the home directory and $ZDOTDIR to scan from
 // (production: doctorShellAliasEnv; tests: a closure or TestMain's pin).
 //
-// Severity depends on the flag's class, not just the driver: ralph always
-// passes --model on every spawn, so a --model finding is a real spawn
-// blocker for codex (which rejects a repeated flag) and a real value
-// override for claude (which accepts it and starts anyway). A
-// permission-class flag (--sandbox / --ask-for-approval for codex,
-// --permission-mode for claude) is only ever passed by ralph when the
-// seat's resolved permission mode is edits or autonomous -- a guarded seat
-// gets none of it, so the alias's value silently applies unopposed. That
-// makes a codex finding warn whenever herdr is present (herdrPresent, since
-// only an installed herdr expands the alias in a seat's pane) regardless of
-// flag class, and makes a claude finding warn only for a permission-class
-// flag (a claude --model finding is always informational, since the worst
-// case is ralph's own value winning, never a spawn failure or an unopposed
-// alias).
+// Severity depends on the flag's class (shellAliasFlagClass), not just the
+// driver: ralph always passes --model on every spawn, so a --model finding
+// is a real spawn blocker for codex (which rejects a repeated flag) and a
+// real value override for claude (which accepts it and starts anyway). The
+// other three classes are each passed by ralph to only some permission
+// modes -- codex's --sandbox to edits and autonomous, codex's
+// --ask-for-approval to autonomous only, claude's --permission-mode to
+// edits and autonomous -- so a guarded seat (and, for --ask-for-approval,
+// an edits seat too) gets none of it and the alias's value applies
+// unopposed. That makes a codex finding warn whenever herdr is present
+// (herdrPresent, since only an installed herdr expands the alias in a
+// seat's pane) regardless of flag class, and makes a claude finding warn
+// only for --permission-mode (a claude --model finding is always
+// informational, since the worst case is ralph's own value winning, never
+// a spawn failure or an unopposed alias).
 func checkShellAliases(resolveEnv func() (shellAliasEnv, error), herdrPresent bool) checkResult {
 	r := checkResult{Name: "Shell aliases (codex/claude)"}
 
@@ -510,11 +581,15 @@ func checkShellAliases(resolveEnv func() (shellAliasEnv, error), herdrPresent bo
 		return p
 	}
 
-	candidates := shellAliasRcCandidates(env)
+	candidates, inaccessibleDirs := shellAliasRcCandidates(env)
+
+	var couldNotRead []string
+	for _, d := range inaccessibleDirs {
+		couldNotRead = append(couldNotRead, fmt.Sprintf("%s (%s)", displayPath(d.Dir), d.Reason))
+	}
 
 	var defs []shellAliasDef
 	var scannedOK []string
-	var couldNotRead []string
 	var partiallyRead []string
 	for _, c := range candidates {
 		fileDefs, wasOpened, scanErr := scanShellAliasFile(c)
@@ -531,7 +606,8 @@ func checkShellAliases(resolveEnv func() (shellAliasEnv, error), herdrPresent bo
 	}
 
 	var codexItems, claudeItems, harmlessItems, notFullyParsed []string
-	var codexHasModel, codexHasPermission, claudeHasModel, claudeHasPermission bool
+	var codexHasModel, codexHasSandbox, codexHasApproval bool
+	var claudeHasModel, claudeHasPermissionMode bool
 	seenIncomplete := map[string]bool{}
 	for _, d := range defs {
 		item := fmt.Sprintf("alias %s in %s:%d", d.Name, displayPath(d.File), d.Line)
@@ -552,19 +628,23 @@ func checkShellAliases(resolveEnv func() (shellAliasEnv, error), herdrPresent bo
 		if d.Name == "codex" {
 			codexItems = append(codexItems, full)
 			for _, f := range d.Flags {
-				if shellAliasFlagIsPermission(f) {
-					codexHasPermission = true
-				} else {
+				switch shellAliasFlagClass(f) {
+				case shellAliasClassModel:
 					codexHasModel = true
+				case shellAliasClassSandbox:
+					codexHasSandbox = true
+				case shellAliasClassApproval:
+					codexHasApproval = true
 				}
 			}
 		} else {
 			claudeItems = append(claudeItems, full)
 			for _, f := range d.Flags {
-				if shellAliasFlagIsPermission(f) {
-					claudeHasPermission = true
-				} else {
+				switch shellAliasFlagClass(f) {
+				case shellAliasClassModel:
 					claudeHasModel = true
+				case shellAliasClassPermissionMode:
+					claudeHasPermissionMode = true
 				}
 			}
 		}
@@ -581,9 +661,13 @@ func checkShellAliases(resolveEnv func() (shellAliasEnv, error), herdrPresent bo
 		if codexHasModel {
 			clauses = append(clauses, "ralph org spawn always passes --model, so every spawn fails")
 		}
-		if codexHasPermission {
-			clauses = append(clauses, "ralph passes --sandbox / --ask-for-approval only to edits and autonomous seats, "+
-				"so those spawns fail while a guarded seat silently runs with the alias's value")
+		if codexHasSandbox {
+			clauses = append(clauses, "ralph passes --sandbox to edits and autonomous seats, "+
+				"so those spawns fail while a guarded seat silently runs with the alias's sandbox")
+		}
+		if codexHasApproval {
+			clauses = append(clauses, "ralph passes --ask-for-approval to autonomous seats only, "+
+				"so those spawns fail while edits and guarded seats silently run with the alias's approval policy")
 		}
 		clauses = append(clauses, "remove the alias or start herdr from an alias-free rc (docs/recipes/codex-seat-permissions.md)")
 		sentence := strings.Join(clauses, "; ")
@@ -599,13 +683,13 @@ func checkShellAliases(resolveEnv func() (shellAliasEnv, error), herdrPresent bo
 		if claudeHasModel {
 			clauses = append(clauses, "ralph org spawn always passes --model after the alias, so its value applies and the seat still starts")
 		}
-		if claudeHasPermission {
+		if claudeHasPermissionMode {
 			clauses = append(clauses, "ralph passes --permission-mode only to edits and autonomous seats, "+
 				"so a guarded seat runs with the alias's permission mode")
 		}
 		clauses = append(clauses, "the alias's other flags reach every seat")
 		sentence := strings.Join(clauses, "; ")
-		if !herdrPresent && claudeHasPermission {
+		if !herdrPresent && claudeHasPermissionMode {
 			sentence += " (herdr not installed, so no seat is affected today)"
 		}
 		sentences = append(sentences, sentence)
@@ -630,7 +714,7 @@ func checkShellAliases(resolveEnv func() (shellAliasEnv, error), herdrPresent bo
 
 	var scannedClause string
 	switch {
-	case len(candidates) == 0:
+	case len(candidates) == 0 && len(inaccessibleDirs) == 0:
 		scannedClause = "no shell rc file found to scan"
 	case len(scannedOK) == 0:
 		scannedClause = "scanned 0 shell rc file(s) (files they source are not followed)"
@@ -654,7 +738,7 @@ func checkShellAliases(resolveEnv func() (shellAliasEnv, error), herdrPresent bo
 	r.Detail = strings.Join(detailParts, ". ")
 
 	switch {
-	case herdrPresent && (codexFound || claudeHasPermission):
+	case herdrPresent && (codexFound || claudeHasPermissionMode):
 		r.Status = "warn"
 	case codexFound || claudeFound || len(couldNotRead) > 0 || len(partiallyRead) > 0 || len(notFullyParsed) > 0:
 		r.Status = "info"

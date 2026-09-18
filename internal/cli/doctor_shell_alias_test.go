@@ -174,6 +174,88 @@ func TestCheckShellAliases_Zdotdir_Detected(t *testing.T) {
 	}
 }
 
+// TestCheckShellAliases_ZdotdirZprofile_Warn is the AR-1 fix: a login zsh
+// reads .zprofile from $ZDOTDIR too, not just .zshrc/.zshenv.
+func TestCheckShellAliases_ZdotdirZprofile_Warn(t *testing.T) {
+	dir := t.TempDir()
+	zdotdir := filepath.Join(dir, "zdot")
+	writeAliasRc(t, filepath.Join(zdotdir, ".zprofile"), `alias codex="codex -m x"`+"\n")
+
+	r := checkShellAliases(shellAliasTestEnvWithZdotdir(dir, zdotdir), true)
+	if r.Status != "warn" {
+		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, ".zprofile") {
+		t.Errorf("expected detail to name .zprofile, got: %s", r.Detail)
+	}
+}
+
+// TestCheckShellAliases_ZdotdirZlogin_Warn is AR-1's fourth login-zsh file.
+func TestCheckShellAliases_ZdotdirZlogin_Warn(t *testing.T) {
+	dir := t.TempDir()
+	zdotdir := filepath.Join(dir, "zdot")
+	writeAliasRc(t, filepath.Join(zdotdir, ".zlogin"), `alias codex="codex -m x"`+"\n")
+
+	r := checkShellAliases(shellAliasTestEnvWithZdotdir(dir, zdotdir), true)
+	if r.Status != "warn" {
+		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, ".zlogin") {
+		t.Errorf("expected detail to name .zlogin, got: %s", r.Detail)
+	}
+}
+
+// TestCheckShellAliases_ConfigZshZprofile_WarnsWhenZdotdirUnset is AR-1's
+// $HOME/.config/zsh case (the macOS /etc/zshenv convention) with no
+// $ZDOTDIR set.
+func TestCheckShellAliases_ConfigZshZprofile_WarnsWhenZdotdirUnset(t *testing.T) {
+	dir := t.TempDir()
+	writeAliasRc(t, filepath.Join(dir, ".config", "zsh", ".zprofile"), `alias codex="codex -m x"`+"\n")
+
+	r := checkShellAliases(shellAliasTestEnv(dir), true)
+	if r.Status != "warn" {
+		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
+	}
+}
+
+// TestCheckShellAliases_BashLogin_Warn is AR-1's added bash file.
+func TestCheckShellAliases_BashLogin_Warn(t *testing.T) {
+	dir := t.TempDir()
+	writeAliasRc(t, filepath.Join(dir, ".bash_login"), `alias codex="codex -m x"`+"\n")
+
+	r := checkShellAliases(shellAliasTestEnv(dir), true)
+	if r.Status != "warn" {
+		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
+	}
+}
+
+// TestCheckShellAliases_ZdotdirSymlinkedToHomeRc_ReportsZdotdirPath adapts
+// the symlink-dedup test to the new candidate order: $ZDOTDIR's files are
+// scanned before $HOME's, so when ~/.zshrc is a symlink to
+// $ZDOTDIR/.zshrc, the $ZDOTDIR candidate is the one dedup keeps and
+// reports.
+func TestCheckShellAliases_ZdotdirSymlinkedToHomeRc_ReportsZdotdirPath(t *testing.T) {
+	dir := t.TempDir()
+	zdotdir := filepath.Join(dir, "zdot")
+	real := filepath.Join(zdotdir, ".zshrc")
+	writeAliasRc(t, real, `alias codex="codex -m x"`+"\n")
+	if err := os.Symlink(real, filepath.Join(dir, ".zshrc")); err != nil {
+		t.Fatal(err)
+	}
+
+	r := checkShellAliases(shellAliasTestEnvWithZdotdir(dir, zdotdir), true)
+	if r.Status != "warn" {
+		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
+	}
+	if n := strings.Count(r.Detail, "alias codex in"); n != 1 {
+		t.Errorf("expected exactly one finding, got %d occurrences in: %s", n, r.Detail)
+	}
+	wantPath := "zdot" + string(filepath.Separator) + ".zshrc"
+	if !strings.Contains(r.Detail, wantPath) {
+		t.Errorf("expected the reported path to be the $ZDOTDIR candidate (it comes first), got: %s", r.Detail)
+	}
+}
+
 func TestCheckShellAliases_FishAlias_Warn(t *testing.T) {
 	dir := t.TempDir()
 	writeAliasRc(t, filepath.Join(dir, ".config", "fish", "config.fish"), `alias codex "codex -m x"`+"\n")
@@ -282,12 +364,12 @@ func TestCheckShellAliases_MultipleCodexFlags_ListedInOrder(t *testing.T) {
 	}
 }
 
-// TestCheckShellAliases_CodexPermissionOnly_WarnsWithGuardedClauseNotModelClause
-// is the N1 fix: a codex alias that only adds a permission-class flag
-// (--sandbox / --ask-for-approval) must describe the guarded-seat exposure,
-// not claim "every spawn fails" -- that claim is only true for --model,
-// which ralph passes unconditionally.
-func TestCheckShellAliases_CodexPermissionOnly_WarnsWithGuardedClauseNotModelClause(t *testing.T) {
+// TestCheckShellAliases_CodexSandboxOnly_WarnsWithSandboxClauseOnly is the
+// AR-2 fix: --sandbox goes to both edits and autonomous seats (unlike
+// --ask-for-approval, which is autonomous-only), so its clause says "to
+// edits and autonomous seats" with no "only", and must not claim "every
+// spawn fails" (true only for --model) or mention the approval policy.
+func TestCheckShellAliases_CodexSandboxOnly_WarnsWithSandboxClauseOnly(t *testing.T) {
 	dir := t.TempDir()
 	writeAliasRc(t, filepath.Join(dir, ".zshrc"), `alias codex='codex -s danger-full-access'`+"\n")
 
@@ -295,13 +377,62 @@ func TestCheckShellAliases_CodexPermissionOnly_WarnsWithGuardedClauseNotModelCla
 	if r.Status != "warn" {
 		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
 	}
-	for _, want := range []string{"only to edits and autonomous seats", "guarded seat silently runs"} {
+	for _, want := range []string{"to edits and autonomous seats", "alias's sandbox"} {
 		if !strings.Contains(r.Detail, want) {
 			t.Errorf("expected detail to contain %q, got: %s", want, r.Detail)
 		}
 	}
-	if strings.Contains(r.Detail, "every spawn fails") {
-		t.Errorf("a permission-only finding must not claim every spawn fails, got: %s", r.Detail)
+	for _, notWant := range []string{"every spawn fails", "approval policy"} {
+		if strings.Contains(r.Detail, notWant) {
+			t.Errorf("a sandbox-only finding must not contain %q, got: %s", notWant, r.Detail)
+		}
+	}
+}
+
+// TestCheckShellAliases_CodexApprovalOnly_WarnsWithApprovalClauseOnly is
+// AR-2's other half: --ask-for-approval only ever reaches an autonomous
+// seat (codexEditsArgs omits it), so an edits seat -- not just a guarded
+// one -- silently runs with the alias's approval policy, and the clause
+// must not read like --sandbox's "to edits and autonomous seats".
+func TestCheckShellAliases_CodexApprovalOnly_WarnsWithApprovalClauseOnly(t *testing.T) {
+	dir := t.TempDir()
+	writeAliasRc(t, filepath.Join(dir, ".zshrc"), `alias codex='codex -a never'`+"\n")
+
+	r := checkShellAliases(shellAliasTestEnv(dir), true)
+	if r.Status != "warn" {
+		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
+	}
+	for _, want := range []string{"to autonomous seats only", "edits and guarded seats silently run with the alias's approval policy"} {
+		if !strings.Contains(r.Detail, want) {
+			t.Errorf("expected detail to contain %q, got: %s", want, r.Detail)
+		}
+	}
+	for _, notWant := range []string{"to edits and autonomous seats", "every spawn fails"} {
+		if strings.Contains(r.Detail, notWant) {
+			t.Errorf("an approval-only finding must not contain %q, got: %s", notWant, r.Detail)
+		}
+	}
+}
+
+// TestCheckShellAliases_CodexAllThreeFlagClasses_ClausesInOrder pins AR-2's
+// combined case: model, sandbox, and approval clauses all appear, in that
+// order, when all three flag classes are present.
+func TestCheckShellAliases_CodexAllThreeFlagClasses_ClausesInOrder(t *testing.T) {
+	dir := t.TempDir()
+	writeAliasRc(t, filepath.Join(dir, ".zshrc"), `alias codex='codex -m x -s y -a z'`+"\n")
+
+	r := checkShellAliases(shellAliasTestEnv(dir), true)
+	if r.Status != "warn" {
+		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
+	}
+	modelIdx := strings.Index(r.Detail, "every spawn fails")
+	sandboxIdx := strings.Index(r.Detail, "alias's sandbox")
+	approvalIdx := strings.Index(r.Detail, "alias's approval policy")
+	if modelIdx == -1 || sandboxIdx == -1 || approvalIdx == -1 {
+		t.Fatalf("expected all three clauses, got: %s", r.Detail)
+	}
+	if modelIdx >= sandboxIdx || sandboxIdx >= approvalIdx {
+		t.Errorf("expected clause order model, sandbox, approval, got: %s", r.Detail)
 	}
 }
 
@@ -560,6 +691,53 @@ func TestCheckShellAliases_EscapedQuotesInValue_Warn(t *testing.T) {
 	}
 }
 
+// TestCheckShellAliases_QuotedFlagNameInValue_Warn is the WC-1 fix: zsh
+// re-parses alias text on expansion, so a flag name quoted inside the
+// value (an unusual but real spelling) still reaches codex/claude as a
+// bare flag and must still be detected.
+func TestCheckShellAliases_QuotedFlagNameInValue_Warn(t *testing.T) {
+	dir := t.TempDir()
+	writeAliasRc(t, filepath.Join(dir, ".zshrc"), `alias codex='codex "--model" gpt-5'`+"\n")
+
+	r := checkShellAliases(shellAliasTestEnv(dir), true)
+	if r.Status != "warn" {
+		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "--model") {
+		t.Errorf("expected detail to contain --model, got: %s", r.Detail)
+	}
+}
+
+// TestCheckShellAliases_QuotedPermissionModeInValue_Warn is WC-1's claude
+// counterpart.
+func TestCheckShellAliases_QuotedPermissionModeInValue_Warn(t *testing.T) {
+	dir := t.TempDir()
+	writeAliasRc(t, filepath.Join(dir, ".zshrc"), `alias claude='claude "--permission-mode" plan'`+"\n")
+
+	r := checkShellAliases(shellAliasTestEnv(dir), true)
+	if r.Status != "warn" {
+		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "--permission-mode") {
+		t.Errorf("expected detail to contain --permission-mode, got: %s", r.Detail)
+	}
+}
+
+// TestCheckShellAliases_QuotedShortFlagInValue_Warn is WC-1's short-flag
+// spelling: the flag letter itself is quoted inside a double-quoted value.
+func TestCheckShellAliases_QuotedShortFlagInValue_Warn(t *testing.T) {
+	dir := t.TempDir()
+	writeAliasRc(t, filepath.Join(dir, ".zshrc"), `alias codex="codex '-m' x"`+"\n")
+
+	r := checkShellAliases(shellAliasTestEnv(dir), true)
+	if r.Status != "warn" {
+		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "--model (-m)") {
+		t.Errorf("expected detail to contain --model (-m), got: %s", r.Detail)
+	}
+}
+
 // TestCheckShellAliases_PassDetail_NamesScannedFiles is the M2 fix: even a
 // clean pass names which rc files were actually opened, not just a count.
 func TestCheckShellAliases_PassDetail_NamesScannedFiles(t *testing.T) {
@@ -603,6 +781,64 @@ func TestCheckShellAliases_UnreadableRc_Info(t *testing.T) {
 	want := "could not read: ~" + string(filepath.Separator) + ".zshrc (permission denied)"
 	if !strings.Contains(r.Detail, want) {
 		t.Errorf("expected detail to contain %q, got: %s", want, r.Detail)
+	}
+}
+
+// TestCheckShellAliases_InaccessibleConfigZshDir_InfoOnce is the WC-2 fix:
+// a candidate directory whose stat fails for a reason other than
+// not-exist (here, no search permission) must not read as "no rc files
+// here" -- it is reported once (deduped across the four zsh files under
+// it), not once per candidate file.
+func TestCheckShellAliases_InaccessibleConfigZshDir_InfoOnce(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod 0o000 is not meaningful on windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("running as root ignores directory permissions")
+	}
+
+	dir := t.TempDir()
+	configZsh := filepath.Join(dir, ".config", "zsh")
+	if err := os.MkdirAll(configZsh, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(configZsh, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(configZsh, 0o755) })
+
+	r := checkShellAliases(shellAliasTestEnv(dir), true)
+	if r.Status != "info" {
+		t.Fatalf("expected info, got %s (%s)", r.Status, r.Detail)
+	}
+	want := "could not read: ~" + string(filepath.Separator) + ".config" + string(filepath.Separator) + "zsh (permission denied)"
+	if n := strings.Count(r.Detail, want); n != 1 {
+		t.Errorf("expected exactly one occurrence of %q, got %d in: %s", want, n, r.Detail)
+	}
+	if strings.Contains(r.Detail, "no shell rc file found to scan") {
+		t.Errorf("an inaccessible dir must not read as no shell rc file found to scan, got: %s", r.Detail)
+	}
+}
+
+// TestCheckShellAliases_ConfigIsRegularFile_PassNoShellRcFileFound is
+// WC-2's other half: when a path component of a candidate is not a
+// directory at all (ENOTDIR), that candidate cannot exist as specified --
+// it is skipped exactly like a missing file, not reported as inaccessible.
+func TestCheckShellAliases_ConfigIsRegularFile_PassNoShellRcFileFound(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".config"), []byte("not a directory"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := checkShellAliases(shellAliasTestEnv(dir), true)
+	if r.Status != "pass" {
+		t.Fatalf("expected pass, got %s (%s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "no shell rc file found to scan") {
+		t.Errorf("expected detail to contain no shell rc file found to scan, got: %s", r.Detail)
+	}
+	if strings.Contains(r.Detail, "could not read") {
+		t.Errorf("ENOTDIR must not be reported as could not read, got: %s", r.Detail)
 	}
 }
 
@@ -741,6 +977,9 @@ func TestShellAliasConflictingFlags(t *testing.T) {
 		{"claude has no --sandbox flag", "claude", "claude --sandbox x", nil},
 		{"codex has no --permission-mode flag", "codex", "codex --permission-mode x", nil},
 		{"multiple flags in order", "codex", "codex -m x -s y", []string{"--model (-m)", "--sandbox (-s)"}},
+		{"quoted flag name is still matched (WC-1)", "codex", `codex "--model" gpt-5`, []string{"--model"}},
+		{"quoted short flag name is still matched (WC-1)", "codex", "codex '-m' x", []string{"--model (-m)"}},
+		{"quoted claude permission-mode is still matched (WC-1)", "claude", `claude "--permission-mode" plan`, []string{"--permission-mode"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -752,6 +991,55 @@ func TestShellAliasConflictingFlags(t *testing.T) {
 				if got[i] != tc.want[i] {
 					t.Errorf("shellAliasConflictingFlags(%q, %q)[%d] = %q, want %q", tc.alias, tc.value, i, got[i], tc.want[i])
 				}
+			}
+		})
+	}
+}
+
+func TestShellAliasValueTokens(t *testing.T) {
+	cases := []struct {
+		name  string
+		value string
+		want  []string
+	}{
+		{"inner double quotes are stripped", `codex "--model" gpt-5`, []string{"codex", "--model", "gpt-5"}},
+		{"inner single quotes are stripped", "codex '-m' x", []string{"codex", "-m", "x"}},
+		{"hash-started word ends the value", "codex -m x # rest ignored", []string{"codex", "-m", "x"}},
+		{"semicolon flattens statements into one token list", "a; b", []string{"a", "b"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := shellAliasValueTokens(tc.value)
+			if len(got) != len(tc.want) {
+				t.Fatalf("shellAliasValueTokens(%q) = %#v, want %#v", tc.value, got, tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Errorf("shellAliasValueTokens(%q)[%d] = %q, want %q", tc.value, i, got[i], tc.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestShellAliasFlagClass(t *testing.T) {
+	cases := []struct {
+		label string
+		want  string
+	}{
+		{"--model", shellAliasClassModel},
+		{"--model (-m)", shellAliasClassModel},
+		{"--sandbox", shellAliasClassSandbox},
+		{"--sandbox (-s)", shellAliasClassSandbox},
+		{"--ask-for-approval", shellAliasClassApproval},
+		{"--ask-for-approval (-a)", shellAliasClassApproval},
+		{"--permission-mode", shellAliasClassPermissionMode},
+		{"--unknown-flag", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.label, func(t *testing.T) {
+			if got := shellAliasFlagClass(tc.label); got != tc.want {
+				t.Errorf("shellAliasFlagClass(%q) = %q, want %q", tc.label, got, tc.want)
 			}
 		})
 	}
