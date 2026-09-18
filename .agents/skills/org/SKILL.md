@@ -35,6 +35,11 @@ Lead(座席の編成・統括を行う識別子)がその機構をどう操作�
   場合のみ `--state-dir` を明示的に揃えること。
 - `--org-id` は組織の実行名前空間。同一 `--org-id` の座席は同一 manifest /
   receipts に記録される。
+- **shell alias に注意**: `alias codex="codex -m …"` / `alias claude="claude
+  --model …"` のようにモデル指定を含む alias があると、herdr が pane の対話
+  シェルに送る座席コマンドで alias が展開され、`--model` の二重指定で座席が
+  起動しない(`spawn_failed`)。alias を外すか、alias を読まない HOME / rc で
+  herdr を起動する(`docs/recipes/codex-seat-permissions.md` の前提を参照)。
 - **`--model` は `spawn` / `start` で必ず明示する**。省略するとプール先頭
   (claude は `fable`、codex は `gpt-6-astra`)へ stderr 警告付きでフォール
   バックするが、モデル選択の意図が残らないため運用ルールとして省略しない。

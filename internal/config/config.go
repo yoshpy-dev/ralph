@@ -70,9 +70,9 @@ type OrgConfig struct {
 // independent permission-mode enum (autonomous|edits|guarded), applied
 // per-role. Default applies to every role without an explicit entry in
 // Roles. internal/org maps the resolved mode to driver-native CLI flags
-// (e.g. claude: --permission-mode bypassPermissions); codex seats only
-// accept guarded until codex's own interactive permission flags are
-// live-verified (fail-closed -- see docs/tech-debt/README.md).
+// (e.g. claude: --permission-mode bypassPermissions); codex seats accept
+// only guarded until the operator sets CodexVerified after verifying the
+// codex flag mapping on their machine (docs/recipes/codex-seat-permissions.md).
 type OrgPermissionsConfig struct {
 	// Default is the permission mode every role uses unless overridden in
 	// Roles. One of "autonomous" | "edits" | "guarded".
@@ -84,13 +84,12 @@ type OrgPermissionsConfig struct {
 	// maps codex's autonomous/edits modes to real CLI flags (`--sandbox
 	// workspace-write --ask-for-approval never` / `--sandbox
 	// workspace-write`) instead of fail-closed-rejecting them (PR④ AC-8,
-	// docs/plans/active/2026-08-02-org-runtime-watchdog.md). codex's
-	// interactive sandbox/approval flags have not been live-verified against
-	// a real codex seat as of this field's introduction -- only Slice 5's
-	// live smoke does that. Default false keeps codex fail-closed (guarded
-	// only) until an operator who has live-verified their installed codex
-	// version's flags flips this on explicitly; see docs/tech-debt/README.md
-	// for the verification follow-up this flag exists to close out.
+	// docs/plans/archive/2026-08-02-org-runtime-watchdog.md). The mapping was
+	// live-verified on 2026-09-18 against codex-cli 0.154.0
+	// (docs/evidence/codex-seat-permissions-2026-09-18.md), but the flags
+	// inherit the operator's own ~/.codex/config.toml (approval_policy,
+	// sandbox writable_roots), so the default stays false by design: each
+	// machine opts in after running docs/recipes/codex-seat-permissions.md.
 	CodexVerified bool `toml:"codex_verified"`
 }
 

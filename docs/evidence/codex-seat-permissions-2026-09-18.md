@@ -2,8 +2,8 @@
 
 - Date: 2026-09-18(JST 15:36〜16:19、UTC 06:36〜07:19)
 - Issue: #155
-- Plan: docs/plans/archive/2026-09-18-codex-seat-permission-verification.md
-- 生ログ: セッションの scratchpad(`<scratch>/codex-perm/logs/run-auto.log`、`run-edits.log`、各 org の `state-*/manifest.jsonl`)。本ファイルは要点のみ(pointer 原則)。ホームディレクトリは `~`、scratchpad は `<scratch>` に置換し、session UUID は伏せた。
+- Plan: docs/plans/archive/2026-09-18-codex-seat-permission-verification.md(PR 作成時に active から移動)
+- 生ログ: セッションの scratchpad(`<scratch>/codex-perm/logs/run-auto.log`、`run-edits.log`、各 org の `state-*/manifest.jsonl`)に残したが、リポジトリにはコミットしていない(pane 抜粋と manifest の要点は本ファイルに転記済み)。ホームディレクトリは `~`、scratchpad は `<scratch>` に置換し、session UUID は伏せた。
 
 ## 環境
 
@@ -24,7 +24,7 @@
 
 座席は herdr server を偽 HOME(後述)で起動して動かしたため、座席の `CODEX_HOME` は `<fake-home>/.codex`。そこに置いた config は run ごとに切り替えた:
 
-- **minimal**: `model = "gpt-5.5"` + scratch cwd の `trust_level = "trusted"`(+ Run A2 以降は `[sandbox_workspace_write] writable_roots = ["~/.agents/skills/agmsg/db"]`)。approval policy / sandbox mode は codex の既定
+- **minimal**: `model = "gpt-5.5"` + scratch cwd の `trust_level = "trusted"`(+ Run A2 以降は `[sandbox_workspace_write] writable_roots = ["<home>/.agents/skills/agmsg/db"]`、絶対パス)。approval policy / sandbox mode は codex の既定
 - **real-copy**: 上記 `~/.codex/config.toml` の完全なコピー + trust + writable_roots(Run E1)
 
 ## 前提として判明した環境依存の問題
@@ -43,7 +43,7 @@
 
 ### P3. workspace-write 下の codex 座席は agmsg に書けない
 
-`--sandbox workspace-write` の writable root は cwd と `/tmp` 系のみ。agmsg の SQLite DB(`~/.agents/skills/agmsg/db/messages.db`)は外にあるため、座席の `send.sh` が `Runtime error near line 1: attempt to write a readonly database (8)` で失敗し、RESULT が lead に届かない(Run A、t-auto-2。座席は代わりに BLOCKED を pane に印字した)。codex config に `[sandbox_workspace_write] writable_roots = ["~/.agents/skills/agmsg/db"]` を足すと送信できる(Run A2 以降)。**`codex_verified = true` で autonomous / edits を有効にしても、この設定なしでは typed RESULT が返らない。**
+`--sandbox workspace-write` の writable root は cwd と `/tmp` 系のみ。agmsg の SQLite DB(`~/.agents/skills/agmsg/db/messages.db`)は外にあるため、座席の `send.sh` が `Runtime error near line 1: attempt to write a readonly database (8)` で失敗し、RESULT が lead に届かない(Run A、t-auto-2。座席は代わりに BLOCKED を pane に印字した)。codex config に `[sandbox_workspace_write] writable_roots = ["<home>/.agents/skills/agmsg/db"]`(実際は絶対パス。`~` 表記は未検証)を足すと送信できる(Run A2 以降)。**`codex_verified = true` で autonomous / edits を有効にしても、この設定なしでは typed RESULT が返らない。**
 
 ### P4. scratchpad が `/tmp` 配下だと「cwd 外」テストにならない
 

@@ -108,4 +108,6 @@ and retry once you can run the upgrade end-to-end.
 
 ## See also
 
-- [codex-seat-permissions.md](codex-seat-permissions.md) — verify codex seat permission modes (autonomous / edits) on this machine before enabling `[org.permissions].codex_verified`.
+- [codex-seat-permissions.md](codex-seat-permissions.md) — verify codex seat
+  permission modes (autonomous / edits) on this machine before enabling
+  `[org.permissions].codex_verified`.
