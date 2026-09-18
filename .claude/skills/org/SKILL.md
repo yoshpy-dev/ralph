@@ -59,8 +59,9 @@ doctor` の「Org codex model slugs」Check が `~/.codex/models_cache.json`
 なし)。`--probe-models` は従来通り実起動プローブ。
 
 codex スラッグは codex 側のモデル更新で消えることがある。Check はローカルの
-cache を読むだけで更新も鮮度確認もしないので、warn が出たら codex を一度起動
-して cache を更新してから再確認し、1 回の warn だけでスラッグを外さない
+cache を読むだけで更新はしない(cache の書き込み時刻を Detail に出し、24 時間
+より古ければ stale 注記が付く)ので、warn が出たら codex を一度起動して cache
+を更新してから再確認し、1 回の warn だけでスラッグを外さない
 (2026-09-17 に数時間で復帰した一時的消失の事例あり)。`ralph doctor
 --probe-models` は成功すれば存在の確認になるが、失敗は codex 側で best-effort
 扱いのため不在の証拠にはならない。確認しても消えたままなら、同じ `models_cache.json` に今あるスラッグ
