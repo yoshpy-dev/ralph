@@ -190,8 +190,12 @@ EVIDENCE: docs/reports/self-review-foo.md
   `edits` / `guarded`)を役割別に定義する envelope。既定は全役割
   `autonomous`。役割を絞りたい場合は `[org.permissions.roles]` に
   `role = "mode"` を追加する。
-- `codex` driver の座席は `guarded` 以外を明確なエラーで拒否する
-  (fail-closed。実機検証未了のための暫定制約)。
+- `codex` driver の座席は既定では `guarded` 以外を明確なエラーで拒否する
+  (fail-closed)。`[org.permissions].codex_verified = true` で autonomous /
+  edits が有効になるが、挙動は codex のバージョンとユーザーの codex config に
+  依存する(agmsg の DB を writable root に足さないと RESULT を送れない、等)
+  ので、マシンごとに `docs/recipes/codex-seat-permissions.md` の手順で検証して
+  から有効にする。
 - `autonomous` モードの spawn は `--scope` を必須とし(fail-closed)、
   省略したい場合のみ `--allow-unscoped` を明示する。`--scope` は
   「担当範囲」を短く書く(例: `"internal/org/**"`、`"docs/reports/**"` )。

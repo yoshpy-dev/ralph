@@ -82,15 +82,21 @@ var (
 // interactive default already behaves like "guarded").
 //
 // codex is fail-closed by default (Codex advisory 2, plan Design decisions
-// "codex は fail-closed"): codex's interactive-mode permission/sandbox
-// flags have not been live-verified against a real codex seat by this PR,
-// so anything other than guarded (no flag -- codex's own CLI default) is
-// rejected outright unless cfg.Permissions.CodexVerified is true. The
-// alternative -- silently emitting a stub argv that looks like it applied
-// autonomous/edits but doesn't -- is worse than a loud error: a fail-closed
-// codex seat is at least honest about running guarded. See
-// docs/tech-debt/README.md for the live-verification follow-up
-// CodexVerified closes out once an operator has actually confirmed it.
+// "codex は fail-closed"): anything other than guarded (no flag -- codex's
+// own CLI default) is rejected outright unless cfg.Permissions.CodexVerified
+// is true. The alternative -- silently emitting a stub argv that looks like
+// it applied autonomous/edits but doesn't -- is worse than a loud error: a
+// fail-closed codex seat is at least honest about running guarded.
+//
+// The mapping was live-verified on 2026-09-18 against codex-cli 0.154.0
+// (docs/evidence/codex-seat-permissions-2026-09-18.md): autonomous runs
+// with no approval prompt and the sandbox rejects writes outside cwd; edits
+// auto-accepts in-cwd edits and prompts only when the model requests an
+// escalation. The default stays false by design rather than for lack of
+// verification: the flags inherit the operator's own ~/.codex/config.toml
+// (approval_policy, sandbox writable_roots -- the agmsg DB directory must be
+// writable or seats cannot send RESULT), so each machine opts in after
+// running docs/recipes/codex-seat-permissions.md.
 func permissionArgsForDriver(cfg config.OrgConfig, driver, mode string) ([]string, error) {
 	switch driver {
 	case "claude":
