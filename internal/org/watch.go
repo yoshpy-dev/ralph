@@ -787,20 +787,26 @@ func (w *watchRun) sendAlert(ctx context.Context, status *watchStatusFile, orgID
 //	    (spawn/stop/disband), so it is evidence lead is alive and acting,
 //	    even when the event itself names a seat, not lead (e.g. lead
 //	    spawning a replacement seat in response to a stall ALERT, self-review
-//	    cycle-3 M3-1). A `stopped` event whose Details carry
-//	    "reason=watchdog_..." is excluded from (b). No code path has
-//	    produced such an event since PR #152 removed the org budget
-//	    concept (2026-09-17): StopParams no longer has a Reason field and
-//	    no pulse-layer condition calls Stop. The exclusion is kept as a
-//	    legacy-manifest compatibility guard for two reasons: (i) a
-//	    manifest written by the pre-#152 watchdog can still contain its
-//	    cutoff `stopped` events, which must never read as lead activity;
-//	    (ii) a pending alert persisted before the removal stored a
-//	    ManifestLen baseline computed under this rule, and checkDeadman
-//	    compares that baseline against a full recount of the manifest --
-//	    changing the rule would shift the recount for an unchanged
-//	    manifest and silently clear the alert (see
-//	    TestWatch_Deadman_PersistedAlertBaseline_SurvivesLegacyWatchdogStop).
+//	    cycle-3 M3-1). The exclusion applies to any event in this lifecycle
+//	    set whose Details carry "reason=watchdog_..." -- in practice only
+//	    the pre-#152 watchdog's cutoff `stopped` writes ever carried it.
+//	    No code path has produced such an event since PR #152 removed the
+//	    org budget concept (2026-09-17): StopParams no longer has a Reason
+//	    field and no pulse-layer condition calls Stop. Why the guard is
+//	    kept: this function's only production caller (checkDeadman, via
+//	    sendAlert's ManifestLen snapshot) uses the count as a *difference*
+//	    against a baseline. A legacy cutoff that predates the alert lands
+//	    in both the baseline and every recount and cancels out -- so the
+//	    guard is load-bearing only when the baseline and the recount were
+//	    computed under different rules: (a) a pending alert persisted by a
+//	    pre-#152 build (its ManifestLen excluded the cutoff, and a full
+//	    recount without the guard would read one higher for an unchanged
+//	    manifest and silently clear the alert -- see
+//	    TestWatch_Deadman_PersistedAlertBaseline_SurvivesLegacyWatchdogStop),
+//	    or (b) a mixed-version window where an old `ralph org watch`
+//	    still appends cutoffs after a new binary recorded a baseline.
+//	    Keeping the exclusion makes both rules identical, so neither case
+//	    can misfire.
 //
 // The orgID filter excludes another org's activity in the same shared
 // manifest: without it, a new event in a different, active org would clear

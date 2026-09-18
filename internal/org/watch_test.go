@@ -886,9 +886,13 @@ func TestWatch_Deadman_LegacyWatchdogStopEvent_DoesNotClearPendingAlert(t *testi
 		t.Fatalf("expected exactly 1 pending alert after cycle 1, got %+v", status.PendingAlerts)
 	}
 
-	// Reproduce a pre-#152 watchdog cutoff exactly as the old budget
-	// enforcement wrote it (Stop's Details plus its " reason=watchdog_..."
-	// suffix); no current code path emits this shape.
+	// Reproduce a pre-#152 watchdog cutoff's Details string: `pane=ok
+	// leave=ok` (what Stop wrote) plus its " reason=watchdog_..." suffix
+	// -- the only part of the old shape the exclusion predicate reads.
+	// The other fields the old producer recorded onto the event (driver,
+	// model, worktree, pane_id, agmsg_team, dry_run) are omitted, since
+	// nothing in leadActivityEventCount consults them; no current code
+	// path emits this shape at all any more.
 	if err := o.Manifest.Append(ManifestEvent{TS: clk.Now().UTC().Format(time.RFC3339), OrgID: "org-a", SeatID: "seat-2", Event: EventStopped, Role: "worker", Details: "pane=ok leave=ok reason=watchdog_cutoff seat_wall_clock=30m observed=31m0s"}); err != nil {
 		t.Fatalf("append legacy watchdog stopped event: %v", err)
 	}
@@ -917,6 +921,17 @@ func TestWatch_Deadman_LegacyWatchdogStopEvent_DoesNotClearPendingAlert(t *testi
 // survives and escalates exactly once at its deadline; (ii) a genuine lead
 // `sent` event -> the alert clears with no escalation.
 //
+// Relation to TestWatch_Deadman_LegacyWatchdogStopEvent_DoesNotClearPendingAlert:
+// that test's alert baseline is recorded live by sendAlert (with the guard
+// already applied) before the legacy cutoff exists, so it pins the
+// "cutoff after baseline" case entirely in-process. What this test adds is
+// a baseline restored from persisted status JSON instead of held in
+// memory -- the actual upgrade boundary a pre-#152 binary's on-disk state
+// crosses. Only subtest (i) discriminates the guard; subtest (ii) is a
+// sanity check that passes with or without it, since it repeats the
+// positive `sent`-clears-the-alert case already covered by
+// TestWatch_Deadman_SeatSentEvent_ClearsPendingAlert_LegacyWatchdogStopDoesNot.
+//
 // Discrimination note: the fixture captures baseline from the manifest
 // BEFORE the legacy cutoff event below is appended, mirroring the real
 // chronology (an ALERT is raised and its ManifestLen baseline recorded;
@@ -929,17 +944,34 @@ func TestWatch_Deadman_LegacyWatchdogStopEvent_DoesNotClearPendingAlert(t *testi
 // the cutoff) equals baseline only because the exclusion keeps the cutoff
 // from counting; remove the exclusion and the same recount would read one
 // higher than the unchanged baseline and wrongly clear the alert instead of
-// escalating.
+// escalating. The fixture's "lead_agent_get": "" and "history_lead_lines":
+// -1 are also load-bearing: they make checkDeadman skip its herdr-probe and
+// agmsg-history activity sources (pending.LeadAgentGet != "" and
+// pending.HistoryLeadLines >= 0 both stay false), so the manifest recount
+// above is the only signal deciding the outcome.
 func TestWatch_Deadman_PersistedAlertBaseline_SurvivesLegacyWatchdogStop(t *testing.T) {
-	newFixture := func(t *testing.T) (o *Org, run *watchRun, status *watchStatusFile, escalationsPath string, escalateCalls *int, clk *fakeClock) {
+	// baselineFixture holds one fixture instance -- returned by pointer so
+	// each subtest gets an independent org/status/clock without the old
+	// six-value named return and its unlabeled trailing `return`.
+	type baselineFixture struct {
+		o               *Org
+		run             *watchRun
+		status          *watchStatusFile
+		escalationsPath string
+		alertID         string
+		clk             *fakeClock
+		escalateCalls   int
+	}
+	newFixture := func(t *testing.T) *baselineFixture {
 		t.Helper()
+		f := &baselineFixture{}
 		var h *fakeWatchHerdr
-		o, h, _, clk = testWatchOrg(t)
-		o.Config.DeadmanMinutes = 5
-		if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
+		f.o, h, _, f.clk = testWatchOrg(t)
+		f.o.Config.DeadmanMinutes = 5
+		if r := f.o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
 			t.Fatalf("spawn seat-1 failed: %+v", r)
 		}
-		if r := o.Spawn(watchSpawnParams("org-a", "seat-2", "worker")); r.Outcome != SpawnOutcomeSpawned {
+		if r := f.o.Spawn(watchSpawnParams("org-a", "seat-2", "worker")); r.Outcome != SpawnOutcomeSpawned {
 			t.Fatalf("spawn seat-2 failed: %+v", r)
 		}
 		target := herdrAgentName("org-a", "seat-1")
@@ -947,7 +979,7 @@ func TestWatch_Deadman_PersistedAlertBaseline_SurvivesLegacyWatchdogStop(t *test
 
 		// baseline is captured BEFORE the legacy cutoff below is appended --
 		// see the discrimination note above.
-		rr, err := o.Manifest.Read()
+		rr, err := f.o.Manifest.Read()
 		if err != nil {
 			t.Fatalf("read manifest: %v", err)
 		}
@@ -955,13 +987,13 @@ func TestWatch_Deadman_PersistedAlertBaseline_SurvivesLegacyWatchdogStop(t *test
 
 		// The watchdog's own legacy (pre-#152) cutoff of seat-2, appended
 		// directly since no current code path produces this shape.
-		if err := o.Manifest.Append(ManifestEvent{TS: clk.Now().UTC().Format(time.RFC3339), OrgID: "org-a", SeatID: "seat-2", Event: EventStopped, Role: "worker", Details: "pane=ok leave=ok reason=watchdog_cutoff observed=31m0s"}); err != nil {
+		if err := f.o.Manifest.Append(ManifestEvent{TS: f.clk.Now().UTC().Format(time.RFC3339), OrgID: "org-a", SeatID: "seat-2", Event: EventStopped, Role: "worker", Details: "pane=ok leave=ok reason=watchdog_cutoff observed=31m0s"}); err != nil {
 			t.Fatalf("append legacy watchdog stopped event: %v", err)
 		}
 
 		condKey := conditionKey("org-a", "seat-1", condLiveness)
-		alertID := condKey + "@1000000000"
-		alertTS := clk.Now().Add(-10 * time.Minute).UTC().Format(time.RFC3339)
+		f.alertID = condKey + "@1000000000"
+		alertTS := f.clk.Now().Add(-10 * time.Minute).UTC().Format(time.RFC3339)
 
 		fixture := fmt.Sprintf(`{
   "org_id": "org-a",
@@ -978,71 +1010,68 @@ func TestWatch_Deadman_PersistedAlertBaseline_SurvivesLegacyWatchdogStop(t *test
       "history_lead_lines": -1
     }
   }
-}`, condKey, alertTS, alertID, alertID, alertTS, baseline)
+}`, condKey, alertTS, f.alertID, f.alertID, alertTS, baseline)
 
-		var calls int
 		escalateFn := func(context.Context, string) error {
-			calls++
+			f.escalateCalls++
 			return nil
 		}
 		var statusPath string
-		run, statusPath, escalationsPath = newTestWatchRun(o, nil, escalateFn, &bytes.Buffer{})
+		f.run, statusPath, f.escalationsPath = newTestWatchRun(f.o, nil, escalateFn, &bytes.Buffer{})
 		if err := os.WriteFile(statusPath, []byte(fixture), 0o644); err != nil {
 			t.Fatalf("write status fixture: %v", err)
 		}
-		status, err = loadWatchStatus(statusPath, "org-a")
+		f.status, err = loadWatchStatus(statusPath, "org-a")
 		if err != nil {
 			t.Fatalf("loadWatchStatus: %v", err)
 		}
-		if len(status.PendingAlerts) != 1 || len(status.Conditions) != 1 {
+		if len(f.status.PendingAlerts) != 1 || len(f.status.Conditions) != 1 {
 			t.Fatalf("setup: expected the fixture to load with 1 pending alert and 1 condition, got pending=%+v conditions=%+v",
-				status.PendingAlerts, status.Conditions)
+				f.status.PendingAlerts, f.status.Conditions)
 		}
-		escalateCalls = &calls
-		return
+		return f
 	}
 
 	t.Run("no new events: alert survives and escalates once at deadline", func(t *testing.T) {
-		_, run, status, escalationsPath, escalateCalls, _ := newFixture(t)
-		alertID := conditionKey("org-a", "seat-1", condLiveness) + "@1000000000"
+		f := newFixture(t)
 
-		if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		if err := f.run.evaluateCycle(context.Background(), "org-a", f.status); err != nil {
 			t.Fatalf("evaluateCycle: %v", err)
 		}
 
-		if *escalateCalls != 1 {
-			t.Fatalf("expected exactly 1 escalation (the persisted baseline must survive the legacy watchdog cutoff), got %d", *escalateCalls)
+		if f.escalateCalls != 1 {
+			t.Fatalf("expected exactly 1 escalation (the persisted baseline must survive the legacy watchdog cutoff), got %d", f.escalateCalls)
 		}
-		if _, ok := status.PendingAlerts[alertID]; ok {
-			t.Errorf("expected the pending alert to be removed after escalation, got %+v", status.PendingAlerts)
+		if _, ok := f.status.PendingAlerts[f.alertID]; ok {
+			t.Errorf("expected the pending alert to be removed after escalation, got %+v", f.status.PendingAlerts)
 		}
-		if !status.Escalated[alertID] {
-			t.Errorf("expected alert %q to be recorded in Escalated, got %+v", alertID, status.Escalated)
+		if !f.status.Escalated[f.alertID] {
+			t.Errorf("expected alert %q to be recorded in Escalated, got %+v", f.alertID, f.status.Escalated)
 		}
-		lines := readJSONLFile(t, escalationsPath)
+		lines := readJSONLFile(t, f.escalationsPath)
 		if len(lines) != 1 {
 			t.Fatalf("expected exactly 1 escalation record, got %d: %v", len(lines), lines)
 		}
 	})
 
 	t.Run("genuine lead sent event clears the alert without escalation", func(t *testing.T) {
-		o, run, status, escalationsPath, escalateCalls, clk := newFixture(t)
+		f := newFixture(t)
 
-		if err := o.Manifest.Append(ManifestEvent{TS: clk.Now().UTC().Format(time.RFC3339), OrgID: "org-a", SeatID: "seat-2", Event: EventSent, Details: "lead sends to seat-2"}); err != nil {
+		if err := f.o.Manifest.Append(ManifestEvent{TS: f.clk.Now().UTC().Format(time.RFC3339), OrgID: "org-a", SeatID: "seat-2", Event: EventSent, Details: "lead sends to seat-2"}); err != nil {
 			t.Fatalf("append sent event: %v", err)
 		}
 
-		if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		if err := f.run.evaluateCycle(context.Background(), "org-a", f.status); err != nil {
 			t.Fatalf("evaluateCycle: %v", err)
 		}
 
-		if *escalateCalls != 0 {
-			t.Errorf("expected no escalation once genuine lead activity is recorded, got %d", *escalateCalls)
+		if f.escalateCalls != 0 {
+			t.Errorf("expected no escalation once genuine lead activity is recorded, got %d", f.escalateCalls)
 		}
-		if len(status.PendingAlerts) != 0 {
-			t.Errorf("expected the pending alert to clear after a genuine sent event, got %+v", status.PendingAlerts)
+		if len(f.status.PendingAlerts) != 0 {
+			t.Errorf("expected the pending alert to clear after a genuine sent event, got %+v", f.status.PendingAlerts)
 		}
-		assertNoEscalations(t, escalationsPath)
+		assertNoEscalations(t, f.escalationsPath)
 	})
 }
 
