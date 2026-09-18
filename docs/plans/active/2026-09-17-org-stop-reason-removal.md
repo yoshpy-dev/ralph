@@ -112,6 +112,7 @@ Critical forks: 2 件、いずれもユーザーと解決済み。
 - 2026-09-18 work: Slice A = bce892c(implementer 委譲)。逸脱 1 件を採用: 3d のベースラインを legacy cutoff 追加の **前** に計算する。plan の手順どおり追加後に計算すると、ベースラインも同じ関数で算出されるため除外分岐を消しても両方が同じだけ動き、テストが判別できない。前に計算すれば除外の有無だけが recount とベースラインの一致/不一致を決める(テストの doc comment「Discrimination note」に記録)
 - 2026-09-18 work: Slice B は inline 例外(単一ファイル数行)で orchestrator が実施。パイプ数 6、Impact/Why deferred セルのハッシュ一致、struck 行 44→45 を確認。RESOLVED 日付は実施日の 2026-09-18(AC-6 の記述も合わせて修正)
 - 2026-09-18 work: 全 7 AC のゲートを orchestrator が再実行して達成を確認。verify スクリプト green(evidence: `docs/evidence/verify-2026-09-18-013259.log`、gitignored)
+- 2026-09-18 self-review(cycle 1): Merge 判定、MEDIUM 1(M1: watch.go の除外ガード理由 (i) は単独では成り立たない。alert 前の legacy cutoff はベースラインと recount の両方に入って相殺されるため、ガードが要るのは (ii) の「ベースラインと recount の数え方が異なる」場合、すなわち永続化ベースラインのアップグレード境界か新旧バイナリ混在窓のみ)+ LOW 5(L1 新テストの doc に既存テストとの差分を明記、L2 legacy fixture コメントの忠実性表現、L3 `newFixture` の naked return / `*int` / alertID の再構築、L4 Discrimination note に `lead_agent_get`/`history_lead_lines` の役割、L5 「a `stopped` event」→ lifecycle 5 種)。tech-debt 行 Related セルへの self-review レポート追記も follow-up。#154 と同じく全件を同 cycle 内で修正する(Slice C、implementer 委譲)
 
 ## Progress checklist
 
