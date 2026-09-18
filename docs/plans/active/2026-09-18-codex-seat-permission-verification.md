@@ -1,6 +1,6 @@
 # codex-seat-permission-verification
 
-- Status: Draft
+- Status: In progress
 - Owner: Claude Code
 - Date: 2026-09-18
 - Related request: `[org.permissions].codex_verified` は `false` のままで、codex 座席は `guarded` 以外を fail-closed で拒否する。`codex_verified = true` で有効になるマッピング(autonomous → `--sandbox workspace-write --ask-for-approval never`、edits → `--sandbox workspace-write`)は実機未検証。現行 codex CLI で実機確認し、herdr pane 内の codex 座席で typed TASK → RESULT の E2E を 1 回通し、検証ログを `docs/evidence/` に残す(issue #155)
@@ -119,7 +119,7 @@ Critical forks: 2 件、ユーザーと解決済み(2026-09-18、AskUserQuestion
 
 - [x] Plan reviewed
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
