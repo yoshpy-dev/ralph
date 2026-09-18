@@ -1,6 +1,6 @@
 # codex-seat-permission-verification
 
-- Status: In progress
+- Status: Done (PR #166)
 - Owner: Claude Code
 - Date: 2026-09-18
 - Related request: `[org.permissions].codex_verified` は `false` のままで、codex 座席は `guarded` 以外を fail-closed で拒否する。`codex_verified = true` で有効になるマッピング(autonomous → `--sandbox workspace-write --ask-for-approval never`、edits → `--sandbox workspace-write`)は実機未検証。現行 codex CLI で実機確認し、herdr pane 内の codex 座席で typed TASK → RESULT の E2E を 1 回通し、検証ログを `docs/evidence/` に残す(issue #155)
@@ -124,6 +124,8 @@ Critical forks: 2 件、ユーザーと解決済み(2026-09-18、AskUserQuestion
 - 2026-09-18 self-review 再検証: H1・M1〜M3・L1〜L7 全件解消、Merge 判定。Follow-ups(LOW 4: テストの失敗メッセージ、claude 座席の alias 衝突を断定、recipe の後始末が 1 org 前提、`config.go:112` の `active/` 参照)を inline で修正 = 7d07e2f。AC-5 は 51df396 の後に verify スクリプトを再実行して再確認済み(evidence: `docs/evidence/verify-2026-09-18-074556.log`)
 - 2026-09-18 cross-review(cycle 1): codex が P2 を 1 件(recipe の後続コマンドに `--org-id` / `--state-dir` / `--config` がなく、失敗するか既定 state の空 roster を表示する)。ACTION_REQUIRED に分類、ユーザー判断「修正して全 pipeline 再実行」。修正 = 33158e2(send / wait / stop / disband / status を明示コマンド化、2 コピー同一)。cycle 2/2 として `/self-review` から再実行
 - 2026-09-18 self-review(cycle 2): Merge、LOW 4(recipe の `task.txt` 未定義と typed protocol 検証の未記載、`send` と `wait` の同一フェンス化で composer 残留時の `wait` 即時返却が見えない、cleanup の `status` 行だけ `--config` なし、ぶら下がり語の折り返し 2 箇所)。inline で修正 = f769f40。verify スクリプト green(evidence: `docs/evidence/verify-2026-09-18-085148.log`)
+- 2026-09-18 cycle 2: verify PASS / test PASS(Go 差分なし)/ sync-docs 変更なし / cross-review 所見 0(cap 2/2 到達)。PR #166 本文 `Closes #155`。派生 issue を起票: #162(shell alias の doctor 検出)、#163(`ralph org send` の Enter timing)、#164(agmsg DB の writable root 自動付与 / doctor 検査)、#165(退役モデル自動移行を receipts の `honored` で捕捉)
+- 2026-09-18 pr: plan の Status / PR created の更新が archive 前の編集スクリプトの assert 失敗で漏れたため、archive 後に同内容を反映(本コミット)
 
 ## Progress checklist
 
@@ -133,4 +135,4 @@ Critical forks: 2 件、ユーザーと解決済み(2026-09-18、AskUserQuestion
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
-- [ ] PR created
+- [x] PR created (#166)
