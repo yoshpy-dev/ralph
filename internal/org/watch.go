@@ -779,7 +779,7 @@ func (w *watchRun) sendAlert(ctx context.Context, status *watchStatusFile, orgID
 //	    `ev.SeatID == LeadIdentity` here, which is backwards: it excluded
 //	    the star topology's mandated seat->lead `sent` traffic while
 //	    treating lead->seat sends as nothing. See
-//	    TestWatch_Deadman_SeatSentEvent_ClearsPendingAlert_WatchdogStopDoesNot.)
+//	    TestWatch_Deadman_SeatSentEvent_ClearsPendingAlert_LegacyWatchdogStopDoesNot.)
 //	(b) it is a non-watchdog event from the lead-driven lifecycle set
 //	    (spawned, spawn_started, stopped, disbanded, rejected) that is not
 //	    the watchdog's own enforcement write. Each of these is only
@@ -787,11 +787,20 @@ func (w *watchRun) sendAlert(ctx context.Context, status *watchStatusFile, orgID
 //	    (spawn/stop/disband), so it is evidence lead is alive and acting,
 //	    even when the event itself names a seat, not lead (e.g. lead
 //	    spawning a replacement seat in response to a stall ALERT, self-review
-//	    cycle-3 M3-1). Any `stopped` event the watchdog itself produces
-//	    carries "reason=watchdog_..." in its Details, which is what excludes
-//	    a watchdog-driven stop from (b) -- no current pulse-layer condition
-//	    calls Stop, so this exclusion is dormant today but stays in place for
-//	    any future watchdog enforcement action that does.
+//	    cycle-3 M3-1). A `stopped` event whose Details carry
+//	    "reason=watchdog_..." is excluded from (b). No code path has
+//	    produced such an event since PR #152 removed the org budget
+//	    concept (2026-09-17): StopParams no longer has a Reason field and
+//	    no pulse-layer condition calls Stop. The exclusion is kept as a
+//	    legacy-manifest compatibility guard for two reasons: (i) a
+//	    manifest written by the pre-#152 watchdog can still contain its
+//	    cutoff `stopped` events, which must never read as lead activity;
+//	    (ii) a pending alert persisted before the removal stored a
+//	    ManifestLen baseline computed under this rule, and checkDeadman
+//	    compares that baseline against a full recount of the manifest --
+//	    changing the rule would shift the recount for an unchanged
+//	    manifest and silently clear the alert (see
+//	    TestWatch_Deadman_PersistedAlertBaseline_SurvivesLegacyWatchdogStop).
 //
 // The orgID filter excludes another org's activity in the same shared
 // manifest: without it, a new event in a different, active org would clear

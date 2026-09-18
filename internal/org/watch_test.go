@@ -853,11 +853,15 @@ func TestRunWatch_MultipleOrgs_SeparateStatusFiles(t *testing.T) {
 	}
 }
 
-// TestWatch_Deadman_WatchdogsOwnStopEvent_DoesNotClearPendingAlert pins
-// the self-review M-4 fix: the deadman's manifest-growth "has anything
-// happened since the ALERT" activity source must not count the watchdog's
-// own cutoff of an unrelated seat as if it were genuine lead/seat activity.
-func TestWatch_Deadman_WatchdogsOwnStopEvent_DoesNotClearPendingAlert(t *testing.T) {
+// TestWatch_Deadman_LegacyWatchdogStopEvent_DoesNotClearPendingAlert pins
+// the legacy-manifest compatibility guard in leadActivityEventCount (see
+// its doc comment, case (b)): a `stopped` event carrying the pre-#152
+// watchdog's "reason=watchdog_..." suffix must not count as lead activity,
+// even though it names a real (unrelated) seat. The event is appended
+// directly via Manifest.Append rather than through Stop, because no
+// current code path produces this shape any more -- PR #152 removed the
+// org budget concept that used to call Stop with a watchdog Reason.
+func TestWatch_Deadman_LegacyWatchdogStopEvent_DoesNotClearPendingAlert(t *testing.T) {
 	o, h, _, clk := testWatchOrg(t)
 	o.Config.DeadmanMinutes = 5
 	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
@@ -882,14 +886,11 @@ func TestWatch_Deadman_WatchdogsOwnStopEvent_DoesNotClearPendingAlert(t *testing
 		t.Fatalf("expected exactly 1 pending alert after cycle 1, got %+v", status.PendingAlerts)
 	}
 
-	// Simulate the watchdog cutting off a DIFFERENT seat (seat-2) between
-	// cycles, via the same Details shape a watchdog enforcement Stop would
-	// produce ("reason=watchdog_..."). Before the M-4 fix, this alone grows
-	// the manifest enough to satisfy the deadman's unfiltered
-	// len(rr.Events) > ManifestLen check and wrongly clears seat-1's
-	// still-unanswered pending alert.
-	if r := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-2", Reason: "watchdog_cutoff seat_wall_clock=30m observed=31m0s"}); r.Err != nil {
-		t.Fatalf("stop seat-2: %v", r.Err)
+	// Reproduce a pre-#152 watchdog cutoff exactly as the old budget
+	// enforcement wrote it (Stop's Details plus its " reason=watchdog_..."
+	// suffix); no current code path emits this shape.
+	if err := o.Manifest.Append(ManifestEvent{TS: clk.Now().UTC().Format(time.RFC3339), OrgID: "org-a", SeatID: "seat-2", Event: EventStopped, Role: "worker", Details: "pane=ok leave=ok reason=watchdog_cutoff seat_wall_clock=30m observed=31m0s"}); err != nil {
+		t.Fatalf("append legacy watchdog stopped event: %v", err)
 	}
 
 	clk.Advance(6 * time.Minute) // past DeadmanMinutes, no genuine lead/seat activity
@@ -899,8 +900,150 @@ func TestWatch_Deadman_WatchdogsOwnStopEvent_DoesNotClearPendingAlert(t *testing
 
 	lines := readJSONLFile(t, escalationsPath)
 	if len(lines) != 1 {
-		t.Fatalf("expected the pending alert to still escalate (the watchdog's own cutoff of seat-2 must not count as lead activity), got %d escalation(s): %v", len(lines), lines)
+		t.Fatalf("expected the pending alert to still escalate (a legacy watchdog cutoff of seat-2 must not count as lead activity), got %d escalation(s): %v", len(lines), lines)
 	}
+}
+
+// TestWatch_Deadman_PersistedAlertBaseline_SurvivesLegacyWatchdogStop pins
+// the upgrade-boundary contract behind keeping leadActivityEventCount's
+// "reason=watchdog_" exclusion (plan org-stop-reason-removal, Codex plan
+// advisory HIGH-1): a pending alert persisted by a pre-#152 watchdog stored
+// a ManifestLen baseline that excluded the watchdog's own cutoff `stopped`
+// events, and checkDeadman compares that baseline against a full recount.
+// If the exclusion were removed, an unchanged manifest containing one legacy
+// cutoff would recount one higher than the baseline and the alert would be
+// cleared as "lead activity" -- silently, with dedupe suppressing any
+// replacement. Two cases share a fixture: (i) no new events -> the alert
+// survives and escalates exactly once at its deadline; (ii) a genuine lead
+// `sent` event -> the alert clears with no escalation.
+//
+// Discrimination note: the fixture captures baseline from the manifest
+// BEFORE the legacy cutoff event below is appended, mirroring the real
+// chronology (an ALERT is raised and its ManifestLen baseline recorded;
+// only afterwards does the watchdog cut a different seat off). Capturing
+// baseline AFTER the cutoff was already present would make baseline and
+// case (i)'s recount two calls to the identical leadActivityEventCount on
+// the identical, unchanged event set -- always equal regardless of whether
+// the exclusion exists, so that ordering could never actually exercise the
+// guard. With baseline captured first, case (i)'s recount (which does see
+// the cutoff) equals baseline only because the exclusion keeps the cutoff
+// from counting; remove the exclusion and the same recount would read one
+// higher than the unchanged baseline and wrongly clear the alert instead of
+// escalating.
+func TestWatch_Deadman_PersistedAlertBaseline_SurvivesLegacyWatchdogStop(t *testing.T) {
+	newFixture := func(t *testing.T) (o *Org, run *watchRun, status *watchStatusFile, escalationsPath string, escalateCalls *int, clk *fakeClock) {
+		t.Helper()
+		var h *fakeWatchHerdr
+		o, h, _, clk = testWatchOrg(t)
+		o.Config.DeadmanMinutes = 5
+		if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
+			t.Fatalf("spawn seat-1 failed: %+v", r)
+		}
+		if r := o.Spawn(watchSpawnParams("org-a", "seat-2", "worker")); r.Outcome != SpawnOutcomeSpawned {
+			t.Fatalf("spawn seat-2 failed: %+v", r)
+		}
+		target := herdrAgentName("org-a", "seat-1")
+		h.AgentGetErrSeq[target] = []error{errors.New("herdr: agent not found")} // sticky liveness ALERT for seat-1
+
+		// baseline is captured BEFORE the legacy cutoff below is appended --
+		// see the discrimination note above.
+		rr, err := o.Manifest.Read()
+		if err != nil {
+			t.Fatalf("read manifest: %v", err)
+		}
+		baseline := leadActivityEventCount(rr.Events, "org-a")
+
+		// The watchdog's own legacy (pre-#152) cutoff of seat-2, appended
+		// directly since no current code path produces this shape.
+		if err := o.Manifest.Append(ManifestEvent{TS: clk.Now().UTC().Format(time.RFC3339), OrgID: "org-a", SeatID: "seat-2", Event: EventStopped, Role: "worker", Details: "pane=ok leave=ok reason=watchdog_cutoff observed=31m0s"}); err != nil {
+			t.Fatalf("append legacy watchdog stopped event: %v", err)
+		}
+
+		condKey := conditionKey("org-a", "seat-1", condLiveness)
+		alertID := condKey + "@1000000000"
+		alertTS := clk.Now().Add(-10 * time.Minute).UTC().Format(time.RFC3339)
+
+		fixture := fmt.Sprintf(`{
+  "org_id": "org-a",
+  "conditions": {
+    %q: {"active": true, "first_ts": %q}
+  },
+  "pending_alerts": {
+    %q: {
+      "alert_id": %q,
+      "ts": %q,
+      "subject": "seat-1",
+      "manifest_len": %d,
+      "lead_agent_get": "",
+      "history_lead_lines": -1
+    }
+  }
+}`, condKey, alertTS, alertID, alertID, alertTS, baseline)
+
+		var calls int
+		escalateFn := func(context.Context, string) error {
+			calls++
+			return nil
+		}
+		var statusPath string
+		run, statusPath, escalationsPath = newTestWatchRun(o, nil, escalateFn, &bytes.Buffer{})
+		if err := os.WriteFile(statusPath, []byte(fixture), 0o644); err != nil {
+			t.Fatalf("write status fixture: %v", err)
+		}
+		status, err = loadWatchStatus(statusPath, "org-a")
+		if err != nil {
+			t.Fatalf("loadWatchStatus: %v", err)
+		}
+		if len(status.PendingAlerts) != 1 || len(status.Conditions) != 1 {
+			t.Fatalf("setup: expected the fixture to load with 1 pending alert and 1 condition, got pending=%+v conditions=%+v",
+				status.PendingAlerts, status.Conditions)
+		}
+		escalateCalls = &calls
+		return
+	}
+
+	t.Run("no new events: alert survives and escalates once at deadline", func(t *testing.T) {
+		_, run, status, escalationsPath, escalateCalls, _ := newFixture(t)
+		alertID := conditionKey("org-a", "seat-1", condLiveness) + "@1000000000"
+
+		if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+			t.Fatalf("evaluateCycle: %v", err)
+		}
+
+		if *escalateCalls != 1 {
+			t.Fatalf("expected exactly 1 escalation (the persisted baseline must survive the legacy watchdog cutoff), got %d", *escalateCalls)
+		}
+		if _, ok := status.PendingAlerts[alertID]; ok {
+			t.Errorf("expected the pending alert to be removed after escalation, got %+v", status.PendingAlerts)
+		}
+		if !status.Escalated[alertID] {
+			t.Errorf("expected alert %q to be recorded in Escalated, got %+v", alertID, status.Escalated)
+		}
+		lines := readJSONLFile(t, escalationsPath)
+		if len(lines) != 1 {
+			t.Fatalf("expected exactly 1 escalation record, got %d: %v", len(lines), lines)
+		}
+	})
+
+	t.Run("genuine lead sent event clears the alert without escalation", func(t *testing.T) {
+		o, run, status, escalationsPath, escalateCalls, clk := newFixture(t)
+
+		if err := o.Manifest.Append(ManifestEvent{TS: clk.Now().UTC().Format(time.RFC3339), OrgID: "org-a", SeatID: "seat-2", Event: EventSent, Details: "lead sends to seat-2"}); err != nil {
+			t.Fatalf("append sent event: %v", err)
+		}
+
+		if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+			t.Fatalf("evaluateCycle: %v", err)
+		}
+
+		if *escalateCalls != 0 {
+			t.Errorf("expected no escalation once genuine lead activity is recorded, got %d", *escalateCalls)
+		}
+		if len(status.PendingAlerts) != 0 {
+			t.Errorf("expected the pending alert to clear after a genuine sent event, got %+v", status.PendingAlerts)
+		}
+		assertNoEscalations(t, escalationsPath)
+	})
 }
 
 // TestWatch_Deadman_CrossOrgActivity_DoesNotClearPendingAlert pins the
@@ -960,7 +1103,7 @@ func TestWatch_Deadman_CrossOrgActivity_DoesNotClearPendingAlert(t *testing.T) {
 	}
 }
 
-// TestWatch_Deadman_SeatSentEvent_ClearsPendingAlert_WatchdogStopDoesNot
+// TestWatch_Deadman_SeatSentEvent_ClearsPendingAlert_LegacyWatchdogStopDoesNot
 // pins the self-review cycle-3 H3-1 fix and replaces the earlier (inverted)
 // TestWatch_Deadman_UnrelatedSeatEvent_DoesNotClearPendingAlert, which
 // claimed a `sent` event whose SeatID names a different seat must NOT count
@@ -972,12 +1115,12 @@ func TestWatch_Deadman_CrossOrgActivity_DoesNotClearPendingAlert(t *testing.T) {
 // its replies travel over the agmsg skill, never through this manifest). So
 // a `sent` event naming seat-2 as SeatID IS lead activity (lead sending to
 // seat-2), and must clear seat-1's pending alert. The genuinely non-clearing
-// case is the watchdog's OWN cutoff `stopped` write (reason=watchdog_...,
-// already pinned by
-// TestWatch_Deadman_WatchdogsOwnStopEvent_DoesNotClearPendingAlert above)
+// case is a legacy (pre-#152) watchdog cutoff `stopped` event
+// (reason=watchdog_..., already pinned by
+// TestWatch_Deadman_LegacyWatchdogStopEvent_DoesNotClearPendingAlert above)
 // -- this test reuses that same non-clearing shape for a THIRD seat before
 // showing the `sent` event's positive, clearing case.
-func TestWatch_Deadman_SeatSentEvent_ClearsPendingAlert_WatchdogStopDoesNot(t *testing.T) {
+func TestWatch_Deadman_SeatSentEvent_ClearsPendingAlert_LegacyWatchdogStopDoesNot(t *testing.T) {
 	o, h, _, clk := testWatchOrg(t)
 	o.Config.DeadmanMinutes = 5
 	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
@@ -1005,17 +1148,18 @@ func TestWatch_Deadman_SeatSentEvent_ClearsPendingAlert_WatchdogStopDoesNot(t *t
 		t.Fatalf("expected exactly 1 pending alert after cycle 1, got %+v", status.PendingAlerts)
 	}
 
-	// The watchdog cutting off seat-3 (its own enforcement write, carrying
-	// "reason=watchdog_...") must NOT count as lead activity.
-	if r := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-3", Reason: "watchdog_cutoff observed=31m0s"}); r.Err != nil {
-		t.Fatalf("stop seat-3: %v", r.Err)
+	// A legacy (pre-#152) watchdog cutoff event for seat-3, appended
+	// directly since no current code path produces this shape -- carrying
+	// "reason=watchdog_..." -- must NOT count as lead activity.
+	if err := o.Manifest.Append(ManifestEvent{TS: clk.Now().UTC().Format(time.RFC3339), OrgID: "org-a", SeatID: "seat-3", Event: EventStopped, Role: "worker", Details: "pane=ok leave=ok reason=watchdog_cutoff observed=31m0s"}); err != nil {
+		t.Fatalf("append legacy watchdog stopped event for seat-3: %v", err)
 	}
 	clk.Advance(3 * time.Minute) // still within DeadmanMinutes
 	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
-		t.Fatalf("cycle 2 (watchdog's own cutoff of seat-3 must not clear seat-1's alert): %v", err)
+		t.Fatalf("cycle 2 (the legacy watchdog cutoff of seat-3 must not clear seat-1's alert): %v", err)
 	}
 	if len(status.PendingAlerts) != 1 {
-		t.Fatalf("expected seat-1's pending alert to remain after the watchdog's own cutoff of seat-3, got %+v", status.PendingAlerts)
+		t.Fatalf("expected seat-1's pending alert to remain after the legacy watchdog cutoff of seat-3, got %+v", status.PendingAlerts)
 	}
 	assertNoEscalations(t, escalationsPath)
 
@@ -1120,10 +1264,10 @@ func TestWatch_Deadman_LeadSpawnsReplacementSeat_ClearsPendingAlert(t *testing.T
 // manual (operator-issued, non-watchdog) `stopped` event for a DIFFERENT
 // seat still counts as lead activity: someone had to run `ralph org stop`
 // for it to exist, and issuing that command is itself a lead-driven action
-// -- unlike the watchdog's own cutoff `stopped` events
+// -- unlike a legacy (pre-#152) watchdog cutoff `stopped` event
 // (reason=watchdog_..., excluded by
-// TestWatch_Deadman_WatchdogsOwnStopEvent_DoesNotClearPendingAlert above),
-// which are self-inflicted and prove nothing about lead responsiveness.
+// TestWatch_Deadman_LegacyWatchdogStopEvent_DoesNotClearPendingAlert above),
+// which is self-inflicted and proves nothing about lead responsiveness.
 func TestWatch_Deadman_ManualStopOfOtherSeat_ClearsPendingAlert(t *testing.T) {
 	o, h, _, clk := testWatchOrg(t)
 	o.Config.DeadmanMinutes = 5
@@ -1146,8 +1290,10 @@ func TestWatch_Deadman_ManualStopOfOtherSeat_ClearsPendingAlert(t *testing.T) {
 		t.Fatalf("cycle 1 (raises seat-1's ALERT): %v", err)
 	}
 
-	// A human operator manually stops seat-2 (no watchdog_ reason prefix).
-	if r := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-2", Reason: "operator: no longer needed"}); r.Err != nil {
+	// A human operator manually stops seat-2. A manual `ralph org stop`
+	// writes a `stopped` event with no `reason=` suffix at all, unlike the
+	// legacy watchdog cutoff events.
+	if r := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-2"}); r.Err != nil {
 		t.Fatalf("stop seat-2: %v", r.Err)
 	}
 
