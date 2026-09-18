@@ -1,6 +1,6 @@
 # org-codex-slug-update-procedure
 
-- Status: Draft
+- Status: In progress
 - Owner: Claude Code
 - Date: 2026-09-18
 - Related request: 既定 `[org].model_pool` の codex スラッグ(`gpt-6-astra` 等)は codex 側のモデル更新で消えうる。陳腐化の検知は `ralph doctor` の「Org codex model slugs」Check が担うが、既定値の更新手順(ロックステップ面の一覧と下流配布)が文書化されていない(issue #156 のやること 3)。あわせて観測(やること 1)の初回データ点を記録する
@@ -104,7 +104,7 @@ Critical forks: None。
 
 - [x] Plan reviewed
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
