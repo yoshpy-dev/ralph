@@ -16,9 +16,9 @@
 
 | # | 変更 | ファイル | 内容 |
 |---|------|---------|------|
-| 1 | mtime の取得と Detail への付与 | `internal/cli/doctor_codex_models.go` | `os.ReadFile` 成功後に `os.Stat(cachePath)` で `ModTime()` を取り、`cacheAgeNote := fmt.Sprintf(" (cache written %s, %s ago)", mtime.UTC().Format(time.RFC3339), humanAge)` を warn / pass 両方の Detail 末尾に付ける。`humanAge` は分未満切り捨てで `Nm` / `Nh` / `Nd`(小さなヘルパー `formatCacheAge(d time.Duration) string`)。`os.Stat` が失敗した場合(ReadFile 成功直後の稀な競合)は mtime 節を省き、Status も Detail の本体も変えない(best-effort) |
+| 1 | mtime の取得と Detail への付与 | `internal/cli/doctor_codex_models.go` | `os.ReadFile` + 別 `os.Stat` ではなく、`os.Open` した **1 つのハンドル** で `f.Stat()`(読む前)→ `io.ReadAll(f)` → `f.Stat()`(読んだ後)の順に取り、前後の `ModTime` / `Size` が一致したときだけその mtime を採用する。不一致(読んでいる間に codex が cache を書き換えた)なら内容の判定はそのまま行い、Detail には ` (cache changed while reading; freshness unknown — re-run)` を付けて stale 注記は付けない。一致した場合は `cacheAgeNote := fmt.Sprintf(" (cache written %s, %s ago)", mtime.UTC().Format(time.RFC3339), humanAge)` を warn / pass 両方の Detail 末尾に付ける。`humanAge` は分未満切り捨てで `Nm` / `Nh` / `Nd`(小さなヘルパー `formatCacheAge(d time.Duration) string`)。`f.Stat()` が失敗した場合は mtime 節を省き、Status も Detail の本体も変えない(best-effort)。読み取りとメタデータ取得の間に差し込むための test seam として、パッケージ内非公開の `var codexCacheBetweenReadAndStat func()`(既定 nil、テストだけが設定)を `io.ReadAll` の直後・2 回目の `f.Stat()` の直前で呼ぶ |
 | 2 | stale 注記 | `internal/cli/doctor_codex_models.go` | `time.Since(mtime) > codexCacheStaleAfter`(定数 `24 * time.Hour`)なら Detail 末尾に `; cache may be stale — launch codex once to refresh, then re-run` を追加。warn / pass どちらにも付ける(pass でも古い cache は「存在の証拠として弱い」ため)。Status は不変。doc comment の「Six deterministic outcomes」節に「warn / pass は cache の mtime と、24h 超の stale 注記を伴う」を追記 |
-| 3 | テスト | `internal/cli/doctor_org_test.go` | (a) `TestCheckCodexModelSlugs_DetailCarriesCacheMtime`: 書きたての cache(mtime ≈ now)で pass、Detail に `cache written ` と RFC3339 の年(`20`)を含み、stale 注記を含まない。(b) `TestCheckCodexModelSlugs_StaleCache_WarnCarriesStaleNote`: 欠落スラッグありの cache に `os.Chtimes(path, old, old)`(old = now − 48h)→ warn、Detail に `cache may be stale` と `2d ago` を含む。(c) `TestCheckCodexModelSlugs_StaleCache_PassAlsoCarriesStaleNote`: 全スラッグありの cache を 48h 古くして pass + stale 注記。(d) `TestFormatCacheAge` テーブル: 30s→`0m`、90m→`1h`、47h→`1d`、49h→`2d`。既存 8 テストは Detail の先頭一致で書かれているため変更不要(付与は末尾) |
+| 3 | テスト | `internal/cli/doctor_org_test.go` | (a) `TestCheckCodexModelSlugs_DetailCarriesExactCacheMtime`: 全スラッグありの cache に `os.Chtimes` で既知の秒揃え mtime(now − 5 分、`Truncate(time.Second)`)を設定 → pass、Detail に `cache written ` + その mtime の `UTC().Format(time.RFC3339)` を **完全一致の部分文字列** として含み、stale 注記を含まない。(b) `TestCheckCodexModelSlugs_StaleCache_WarnCarriesExactMtimeAndStaleNote`: 欠落スラッグありの cache に `os.Chtimes`(now − 48h、秒揃え)→ warn、Detail に同じく完全一致の RFC3339、`cache may be stale`、`2d ago` を含む。(c) `TestCheckCodexModelSlugs_StaleCache_PassAlsoCarriesStaleNote`: 全スラッグありの cache を 48h 古くして pass + stale 注記。(d) `TestFormatCacheAge` テーブル: −1m→`0m`、30s→`0m`、90m→`1h`、47h→`1d`、49h→`2d`。(e) `TestCheckCodexModelSlugs_CacheChangedWhileReading_FreshnessUnknown`: 欠落スラッグありの cache を 48h 古くし、`codexCacheBetweenReadAndStat` で cache を書き直す(`writeCodexModelsCache` で全スラッグあり、mtime は now)→ 判定は読んだ内容(warn、欠落スラッグ名)のまま、Detail に `freshness unknown` を含み `cache may be stale` と `cache written` を含まない。`t.Cleanup` で seam を nil に戻す。既存 8 テストは Detail の先頭一致で書かれているため変更不要(付与は末尾) |
 | 4 | 文書更新 | `.claude/skills/org/SKILL.md`(+ `.agents/`、`templates/base/` の 3 ミラー) | 「既定の model_pool」節の段落中「Check はローカルの cache を読むだけで更新も鮮度確認もしないので」→「Check はローカルの cache を読むだけで更新はしない(cache の書き込み時刻を Detail に出し、24 時間より古ければ stale 注記が付く)ので」。以降の「codex を一度起動して cache を更新してから再確認」「warn 1 回で外さない」は据え置き |
 | 5 | 文書更新 | `docs/specs/2026-08-01-org-runtime.md` | 「運用ノート」(d) の「`checkCodexModelSlugs` はローカルの `models_cache.json` を読むだけで、更新も鮮度確認もしない」→「…読むだけで更新はしない(書き込み時刻と 24h 超の stale 注記は Detail に出る、issue #159)」。観測手順の「`stat` で cache の mtime が観測時刻に更新されたことを確認」は「`ralph doctor` の Detail に出る `cache written` が観測時刻に更新されていることを確認(`stat` でも可)」に置き換え。記録項目の「cache mtime」はそのまま |
 
@@ -32,7 +32,8 @@
 
 ## Assumptions
 
-- `os.Stat().ModTime()` は macOS / Linux の CI(ubuntu)で `os.Chtimes` の設定値を秒精度で返す。テストは 48h の差で判定するため精度は問題にならない
+- `os.Stat().ModTime()` は macOS / Linux の CI(ubuntu)で `os.Chtimes` の設定値を返す。完全一致の assert は `Truncate(time.Second)` した値を `os.Chtimes` に渡し、RFC3339(秒精度)で比較するので、ファイルシステムのナノ秒精度差は影響しない
+- 1 ハンドル方式で、codex が rename で cache を差し替えた場合はハンドルが旧 inode を指し続けるため内容と mtime は旧側で一貫する。in-place 書き換えの場合だけ前後の `Stat` 不一致で検知する(Codex plan advisory MEDIUM-1 を採用)
 - 経過時間の計算は実時刻(`time.Now()`)で行う。テストは「書きたて(< 24h)」と「48h 前」の 2 点だけを使い、境界値(ちょうど 24h)はテストしない。clock 注入は不要
 - 既存テストは Detail の先頭部分(`2 codex model_pool slug(s)`、`not found at <path>` 等)だけを検査しており、末尾への付与で壊れない(2026-09-18 に `grep 'r.Detail'` で確認)
 - 4 面ミラーは `scripts/sync-skills.sh` + cp、`check-skill-sync.sh` / `check-sync.sh` で一致を検証する(#154/#156 と同じ手順)
@@ -52,15 +53,17 @@ Critical forks: None(閾値・Status 不変・Stat 失敗時の扱いはいず�
 
 - stale 注記は pass にも付ける。古い cache で pass しても「今も存在する」証拠としては弱く、#156 の観測手順(更新済み cache でのみ観測を成立とみなす)と整合させる
 - 経過時間の表示は `Nm` / `Nh` / `Nd` の粗い粒度。運用者が見るのは「数分前か、数日前か」で、秒精度は不要
-- `os.Stat` 失敗は黙って mtime 節を省く。ReadFile が成功した直後に Stat が失敗するのは競合か権限変更で、Check の本題(スラッグの有無)には影響しない
+- `f.Stat()` 失敗は黙って mtime 節を省く。Check の本題(スラッグの有無)には影響しない
+- test seam(`codexCacheBetweenReadAndStat`)は非公開のパッケージ変数 1 つ。`internal/cli` に clock 抽象や fs 抽象がなく、読み取り途中の書き換えを決定的に再現するにはこれが最小(Codex plan advisory MEDIUM-1 の「deterministic test」要求)
+- 表示時刻の正しさは既知 mtime の完全一致で固定する(Codex plan advisory MEDIUM-2 を採用)
 - テストは実時刻 + `os.Chtimes` で行い、clock 注入は入れない(`internal/cli` に既存の clock 抽象がなく、2 点判定で十分)
 
 ## Acceptance criteria
 
-- [ ] AC-1: warn と pass の Detail に `cache written <RFC3339 UTC>, <age> ago` が含まれる。`grep -c 'cache written' internal/cli/doctor_codex_models.go` が 1 以上。テスト (a) が pass
+- [ ] AC-1: warn と pass の Detail に `cache written <RFC3339 UTC>, <age> ago` が含まれ、その時刻は cache ファイルの mtime そのものである。テスト (a)(b) が `os.Chtimes` で設定した既知の mtime の RFC3339 表記を完全一致で assert して pass(`time.Now()` を表示する実装では fail する)
 - [ ] AC-2: mtime が 24h より古い cache では Detail に `cache may be stale` が付き、書きたての cache では付かない。warn / pass の両方で成立。テスト (b)(c) が pass、(a) が stale 注記の不在を assert
 - [ ] AC-3: `formatCacheAge` のテーブルテスト (d) が pass。Status は既存 8 テストのとおり不変(全 pass)
-- [ ] AC-4: `os.Stat` 失敗時は mtime 節なしの従来 Detail になる(コード上の分岐として存在し、reviewer が確認。単体テストでは再現しないため Known gaps に記載)
+- [ ] AC-4: 読み取り前後の `f.Stat()` が一致しない場合、Detail に `freshness unknown` が付き、stale 注記と `cache written` は付かず、スラッグ判定は読んだ内容に基づく。テスト (e) が test seam 経由で pass。`f.Stat()` 失敗時は mtime 節なしの従来 Detail になる(コード上の分岐として存在し、reviewer が確認。単体テストでは再現しないため Known gaps に記載)
 - [ ] AC-5: `/org` skill の段落が「鮮度確認もしない」を含まず(`grep -c '鮮度確認もしない' .claude/skills/org/SKILL.md` が 0)、`stale 注記` を含む。4 面 `cmp` 一致、`./scripts/check-skill-sync.sh` / `./scripts/check-sync.sh` pass
 - [ ] AC-6: spec (d) が「鮮度確認もしない」を含まず、`cache written` または `stale 注記` と issue #159 への参照を含む
 - [ ] AC-7: `go test ./internal/cli/... -count=1` と `./scripts/run-verify.sh` が green。PR 本文は `Closes #159`
@@ -80,7 +83,7 @@ Critical forks: None(閾値・Status 不変・Stat 失敗時の扱いはいず�
 
 ## Test plan
 
-- Unit tests: `internal/cli` の `TestCheckCodexModelSlugs_*`(既存 8 + 新規 3)と `TestFormatCacheAge`
+- Unit tests: `internal/cli` の `TestCheckCodexModelSlugs_*`(既存 8 + 新規 4)と `TestFormatCacheAge`
 - Integration tests: なし(`ralph doctor` の CLI 経路は既存の doctor テストで担保)
 - Regression tests: `go test ./internal/... -count=1`
 - Edge cases: (1) `os.Chtimes` で未来の mtime を設定した場合、経過時間が負になる → `formatCacheAge` は負値を `0m` に丸める(テーブルに 1 ケース追加)。(2) Windows では `os.Chtimes` は動くのでスキップ不要。(3) cache が空の JSON(`{"models": []}`)で全スラッグ欠落 + stale → warn + stale 注記(既存 SomeMissing の派生、(b) で兼ねる)
@@ -102,7 +105,7 @@ Critical forks: None(閾値・Status 不変・Stat 失敗時の扱いはいず�
 
 ## Deviation notes
 
-(実装中に追記)
+- 2026-09-18 plan: Codex plan advisory(codex-cli 0.154.0、`</dev/null` 付き)が MEDIUM 2 件(read/stat の分離で内容と鮮度が別バージョンになりうる、表示時刻が mtime である証明がない)を報告。両方採用し Scope 1・3、Assumptions、Design decisions、AC-1・AC-4 を改訂
 
 ## Progress checklist
 
