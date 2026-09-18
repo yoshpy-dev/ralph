@@ -21,10 +21,14 @@ recorded in `docs/evidence/codex-seat-permissions-2026-09-18.md`.
   with `error: the argument '--model <MODEL>' cannot be used multiple
   times`; `ralph org spawn` then reports `spawn_failed` after the
   `agent_start` timeout. Remove the alias, or start herdr from a HOME / rc
-  that does not define it. A `claude` alias that adds `--model` should
-  collide the same way with claude seats (not verified). `ralph doctor`'s
-  "Shell aliases (codex/claude)" check warns about such aliases with the
-  rc file and line.
+  that does not define it. The same happens for `--sandbox` /
+  `--ask-for-approval` and the short forms `-m` / `-s` / `-a`. A `claude`
+  alias that adds `--model` does not break the spawn: claude accepts a
+  repeated flag and the last value (the one ralph passes) wins, but every
+  other flag in the alias still reaches each seat (claude 2.1.274 CLI; not
+  verified on a live seat). `ralph doctor`'s "Shell aliases (codex/claude)"
+  check reports such aliases with the rc file and line (warn for codex,
+  info for claude).
 - **Add the agmsg database to the sandbox's writable roots.** Under
   `--sandbox workspace-write` codex can write only to the working directory
   and to `/tmp`-style temp roots; the agmsg SQLite database

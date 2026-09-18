@@ -38,10 +38,14 @@ Lead(座席の編成・統括を行う識別子)がその機構をどう操作�
 - **shell alias に注意**: `alias codex="codex -m …"` のようにモデル指定を
   含む alias があると、herdr が pane の対話シェルに送る座席コマンドで alias が
   展開され、`--model` の二重指定で座席が起動しない(`spawn_failed`、codex で
-  実測)。`--model` を付ける `claude` の alias も同じ衝突を起こすはず(未検証)。
-  alias を外すか、alias を読まない HOME / rc で herdr を起動する
-  (`docs/recipes/codex-seat-permissions.md` の前提を参照)。`ralph doctor` の
-  「Shell aliases (codex/claude)」Check が該当 alias を file:line 付きで warn する。
+  実測。`--sandbox` / `--ask-for-approval` と短縮形 `-m` / `-s` / `-a` も
+  同じ)。alias を外すか、alias を読まない HOME / rc で herdr を起動する
+  (`docs/recipes/codex-seat-permissions.md` の前提を参照)。`claude` は同じ
+  フラグの重複を受け付けて後ろの値(ralph が付ける方)が勝つので座席は
+  起動するが、alias の他のフラグは全座席に効く(claude 2.1.274 の CLI で
+  実測、座席では未検証)。`ralph doctor` の「Shell aliases (codex/claude)」
+  Check が該当 alias を file:line 付きで報告する(codex は warn、claude は
+  info)。
 - **`--model` は `spawn` / `start` で必ず明示する**。省略するとプール先頭
   (claude は `fable`、codex は `gpt-6-astra`)へ stderr 警告付きでフォール
   バックするが、モデル選択の意図が残らないため運用ルールとして省略しない。
