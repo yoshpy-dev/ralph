@@ -3,7 +3,7 @@
 - Date: 2026-09-18
 - Plan: `docs/plans/active/2026-09-18-codex-seat-permission-verification.md`
 - Related issue: #155
-- Verdict: **PASS**
+- Verdict: **PASS** (Cycle 1 and Cycle 2)
 
 ## Scope
 
@@ -157,7 +157,7 @@ flagged as occasional subprocess-timeout flakes under adjacent
 subprocess-heavy test load) both passed cleanly in the fresh full sweep
 (step 4) run together in the same `go test ./internal/...` invocation.
 
-## Verdict
+## Verdict (Cycle 1)
 
 **PASS.** All specified tests ran and passed: the full permission-mode
 table in `internal/org`, the config lock-step test, the changed-language
@@ -165,3 +165,81 @@ table in `internal/org`, the config lock-step test, the changed-language
 fresh full `go test ./internal/...` sweep (8/8 packages). The
 `permissions.go` diff is confirmed comment/error-string only, matching the
 plan's stated deviation. Safe to proceed to `/sync-docs` and beyond.
+
+## Cycle 2 (post cross-review AR-1 fix, HEAD `6beefa7`)
+
+- Date: 2026-09-18
+- Trigger: cross-review AR-1 fix (recipe follow-up commands gain
+  `--org-id`/`--config`/`--state-dir`, commit `33158e2`) plus cycle-2
+  self-review LOW fixes (recipe `task.txt` example, `send`/`wait`
+  separated, cleanup `status` gains `--config`, comment reflows in the
+  recipe and `scripts/ralph-config.sh` + template, commit `f769f40`).
+- Verdict: **PASS**
+
+### Scope check
+
+Confirmed no Go source changed between the cycle-1 tested HEAD (`c357cac`)
+and the cycle-2 HEAD (`6beefa7`):
+
+```
+git diff c357cac..6beefa7 --stat -- '*.go'
+```
+
+produced no output — zero `.go` files touched. `git status` is clean (no
+uncommitted changes). The cycle-2 diff versus `main` (`git diff main
+--stat`) is docs-only plus the same `internal/org/permissions.go` (+41/-27
+lines, still comment/error-string per Cycle 1's inspection — unchanged
+since then) and `internal/config/config.go` (+21/-9, comment-only,
+unchanged since Cycle 1) and `scripts/ralph-config.sh` +
+`templates/base/scripts/ralph-config.sh` (comment reflow, +15/-6 each,
+touched again this cycle but still comment-only).
+
+### What ran
+
+| # | Command | Result |
+|---|---------|--------|
+| 1 | `./scripts/run-test.sh` (changed-language scope) | PASS — exit 0, "All verifiers passed." |
+| 2 | `go test ./internal/... -count=1` (fresh, uncached) | PASS — 8/8 packages ok |
+| 3 | `go test ./internal/config/ -run TestDefaultsLockStep -count=1 -v` | PASS |
+| 4 | `go test ./internal/org/ -run Permission -count=1` (regression) | PASS |
+
+### Per-test results
+
+**1. `./scripts/run-test.sh`** — identical shape to Cycle 1: 27 shell
+suites, every one `FAIL: 0` (`test-xreview-helpers.sh` again 29/29, stable
+across cycles). Triggered the same full-scope Go fallback (`Language
+scope: full fallback (unclassified:scripts/ralph-config.sh)`) because
+`scripts/ralph-config.sh` was touched again this cycle (comment reflow)
+and remains language-unclassified — expected, not a regression. Go
+verifier: all 8 packages `ok` (cached from step 2's fresh run). Final
+line: `All verifiers passed.` Exit code captured directly: `EXIT:0`.
+Evidence log: `docs/evidence/verify-2026-09-18-090211.log` (gitignored).
+Scanned the full log for any `fail`/`FAIL` mention outside `0 failed` /
+`FAIL: 0` counts or `PASS`-labeled negative-path assertion names — none
+found.
+
+**2. `go test ./internal/... -count=1`** (fresh, uncached) — all 8
+test-bearing packages `ok`: `internal/cli` 40.842s, `internal/config`
+1.289s, `internal/insights` 0.497s, `internal/org` 11.262s,
+`internal/org/driver` 2.551s, `internal/org/protocol` 2.005s,
+`internal/scaffold` 2.666s, `internal/upgrade` 3.506s. `internal/cli` and
+`internal/org` again ran in the same sweep with no flake (second
+consecutive clean pairing across the two cycles).
+
+**3. `go test ./internal/config/ -run TestDefaultsLockStep -count=1 -v`**
+— PASS (0.00s). The `scripts/ralph-config.sh` comment reflow (commit
+`f769f40`) did not break the lock-step regex the test relies on — the
+test parses the file's *value* lines, and the reflow only touched comment
+text, not the `KEY=value` lines themselves.
+
+**4. `go test ./internal/org/ -run Permission -count=1`** — PASS (0.256s,
+non-verbose regression pass; same 13 test functions/subtests as Cycle 1's
+`-v` run, unchanged since no Go source moved between cycles).
+
+### Verdict (Cycle 2)
+
+**PASS.** No Go source changed since the Cycle 1 PASS; this cycle's
+changes are docs-only (recipe command completeness, self-review LOW
+fixes, comment reflows). All four requested checks are green, including
+the specific concern that the `ralph-config.sh` comment reflow could
+break `TestDefaultsLockStep`'s regex — it did not. Safe to proceed.
