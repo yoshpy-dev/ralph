@@ -22,7 +22,9 @@ recorded in `docs/evidence/codex-seat-permissions-2026-09-18.md`.
   times`; `ralph org spawn` then reports `spawn_failed` after the
   `agent_start` timeout. Remove the alias, or start herdr from a HOME / rc
   that does not define it. A `claude` alias that adds `--model` should
-  collide the same way with claude seats (not verified).
+  collide the same way with claude seats (not verified). `ralph doctor`'s
+  "Shell aliases (codex/claude)" check warns about such aliases with the
+  rc file and line.
 - **Add the agmsg database to the sandbox's writable roots.** Under
   `--sandbox workspace-write` codex can write only to the working directory
   and to `/tmp`-style temp roots; the agmsg SQLite database

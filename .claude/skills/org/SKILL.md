@@ -40,7 +40,8 @@ Lead(座席の編成・統括を行う識別子)がその機構をどう操作�
   展開され、`--model` の二重指定で座席が起動しない(`spawn_failed`、codex で
   実測)。`--model` を付ける `claude` の alias も同じ衝突を起こすはず(未検証)。
   alias を外すか、alias を読まない HOME / rc で herdr を起動する
-  (`docs/recipes/codex-seat-permissions.md` の前提を参照)。
+  (`docs/recipes/codex-seat-permissions.md` の前提を参照)。`ralph doctor` の
+  「Shell aliases (codex/claude)」Check が該当 alias を file:line 付きで warn する。
 - **`--model` は `spawn` / `start` で必ず明示する**。省略するとプール先頭
   (claude は `fable`、codex は `gpt-6-astra`)へ stderr 警告付きでフォール
   バックするが、モデル選択の意図が残らないため運用ルールとして省略しない。
