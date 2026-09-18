@@ -22,10 +22,12 @@ recorded in `docs/evidence/codex-seat-permissions-2026-09-18.md`.
   times`; `ralph org spawn` then reports `spawn_failed` after the
   `agent_start` timeout. Remove the alias, or start herdr from a HOME / rc
   that does not define it. The short form `-m` collides the same way. An
-  alias that adds `--sandbox` / `--ask-for-approval` (or `-s` / `-a`) fails
-  the same way on edits and autonomous seats, where ralph passes those
-  flags itself; on a guarded seat ralph passes neither, so the alias's
-  value silently applies. claude accepts a repeated flag and the last value
+  alias that adds `--sandbox` (or `-s`) fails the same way on edits and
+  autonomous seats, where ralph passes that flag itself; on a guarded seat
+  the alias's sandbox silently applies. ralph passes `--ask-for-approval`
+  to autonomous seats only, so an alias that adds it (or `-a`) fails on
+  autonomous seats and silently sets the approval policy of edits and
+  guarded seats. claude accepts a repeated flag and the last value
   wins (claude 2.1.274 CLI; not verified on a live seat): ralph always
   passes `--model` after the alias, so a `claude` alias that adds `--model`
   does not break the spawn, but ralph passes `--permission-mode` only on

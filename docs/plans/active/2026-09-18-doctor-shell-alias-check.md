@@ -31,6 +31,9 @@
 5. シグネチャは `checkShellAliases(resolveEnv func() (shellAliasEnv, error), herdrPresent bool)`。`runDoctorFull` は package 変数 `doctorShellAliasEnv`(既定 `shellAliasEnvFromOS`: `os.UserHomeDir` + `ZDOTDIR`)を渡す。`internal/cli/main_test.go` の `TestMain` がこの変数を rc のないディレクトリに固定し、既存の `runDoctor*` テスト 13 箇所が開発者の実 rc を読まないようにする(self-review L7)
 6. `doctor.go` は Check 8 の結果を `herdrResult` の名前付き変数で受けて渡す(L5)
 7. 文書: skill 4 面と recipe の「claude の alias も衝突するはず(未検証)」を CLI 実測の結果に置き換え、evidence P1 に追記を 1 行足す
+8. (cross-review AR-1)zsh の候補は `$ZDOTDIR`(絶対パスのとき)・`~`・`~/.config/zsh` の各ディレクトリについて login zsh が読む `.zshenv` / `.zprofile` / `.zshrc` / `.zlogin` の 4 つ。bash は `.bash_login` を加える
+9. (cross-review WC-2)候補の stat が「存在しない」以外の理由で失敗した場合は、その親ディレクトリを `could not read` に 1 回だけ出し、`info` にする
+10. (cross-review WC-1)alias の値も同じ reader で語に分けてから判定する(`alias codex='codex "--model" gpt-5'` のように値の中で引用符に包まれたフラグ名を拾うため)
 
 ## Non-goals
 
@@ -62,7 +65,7 @@ Critical forks: None。
 - 静的な rc 走査を採る(Non-goals 参照)。決定的で fixture テストが書け、プロセスを起動しない。見逃し(候補外の rc、動的定義)は Detail と doc comment で明示する
 - herdr 未導入時は info に落とす。org 座席を使わないユーザーにとって alias は害がなく、doctor の warn を増やすと本当に効く warn が埋もれる
 - 検出対象フラグは ralph がそのドライバに実際に付けるものに限定する。codex: `--model` / `-m`、`--sandbox` / `-s`、`--ask-for-approval` / `-a`。短縮形は clap 上同じ引数で、codex-cli 0.154.0 で `-s read-only --sandbox workspace-write` と `-a never --ask-for-approval never` がどちらも `cannot be used multiple times` になることを実測した(self-review H1)。claude: `--model`、`--permission-mode`(claude 2.1.274 の `--help` に該当する短縮形はない)。`--effort` や `-c key=value` は評価対象外
-- ドライバで重大度を分ける。codex は重複フラグを拒否して座席が起動しないので、herdr があれば `warn`。claude は重複を受け付けて後ろの値が勝つ(claude 2.1.274 で `--model haiku --model sonnet -p …` の `modelUsage` に sonnet、逆順では haiku のみ。`--permission-mode plan --permission-mode acceptEdits` もエラーにならない)。ralph のフラグは alias 展開の後ろに付くので ralph の値が効き、座席は起動する。したがって claude の `--model` の所見は `info` とし、alias の他のフラグが全座席に効くことを伝える。ただし ralph が permission フラグを付けるのは edits / autonomous 座席だけで、guarded 座席には何も付けない(`internal/org/permissions.go` の `permissionArgsForDriver`)。そのため claude の `--permission-mode` の alias は guarded 座席の permission mode を黙って変える(herdr があれば `warn`)。codex の `--sandbox` / `--ask-for-approval` の alias も、edits / autonomous では spawn 失敗、guarded では alias の値が黙って効く。Detail の文はフラグの種類ごとにこの条件を書き分ける(self-review 再確認 N1)。issue #162 の「claude も同じ形で衝突するはず(未検証)」はこの実測と合わなかった
+- ドライバで重大度を分ける。codex は重複フラグを拒否して座席が起動しないので、herdr があれば `warn`。claude は重複を受け付けて後ろの値が勝つ(claude 2.1.274 で `--model haiku --model sonnet -p …` の `modelUsage` に sonnet、逆順では haiku のみ。`--permission-mode plan --permission-mode acceptEdits` もエラーにならない)。ralph のフラグは alias 展開の後ろに付くので ralph の値が効き、座席は起動する。したがって claude の `--model` の所見は `info` とし、alias の他のフラグが全座席に効くことを伝える。ただし ralph が permission フラグを付けるのは edits / autonomous 座席だけで、guarded 座席には何も付けない(`internal/org/permissions.go` の `permissionArgsForDriver`)。そのため claude の `--permission-mode` の alias は guarded 座席の permission mode を黙って変える(herdr があれば `warn`)。codex の `--sandbox` の alias は edits / autonomous では spawn 失敗、guarded では alias の値が黙って効く。`--ask-for-approval` を ralph が付けるのは autonomous だけ(`codexEditsArgs` は `--sandbox workspace-write` のみ)なので、その alias は autonomous では spawn 失敗、edits / guarded では alias の承認ポリシーが黙って効く(cross-review AR-2)。Detail の文はフラグの種類ごとにこの条件を書き分ける(self-review 再確認 N1)。issue #162 の「claude も同じ形で衝突するはず(未検証)」はこの実測と合わなかった
 - Check 名は「Shell aliases (codex/claude)」。既存の Check 名の英語表記に合わせる
 
 ## Acceptance criteria
@@ -123,6 +126,8 @@ doctor の Check 追加のみ。下流へは次回 release でバイナリ経由
 - 2026-09-18 work: AC-5 の実機 evidence(最終)。`go run ./cmd/ralph doctor` の該当行は warn で、codex の文は `alias codex in ~/.config/zsh/.zshrc:35 adds --model (-m) — … ralph org spawn always passes --model, so every spawn fails; …`、claude の文は `alias claude in ~/.config/zsh/.zshrc:34 adds --model — claude accepts a flag given twice and the last value wins; ralph org spawn always passes --model after the alias, so its value applies and the seat still starts; the alias's other flags reach every seat`、末尾は `scanned 4 shell rc file(s): ~/.config/zsh/.zshrc, ~/.config/zsh/.zshenv, ~/.zprofile, ~/.profile (files they source are not followed)`
 - 2026-09-18 verify(`docs/reports/verify-2026-09-18-doctor-shell-alias-check.md`、0c22388): PASS。非ブロッキングの指摘 2 件を反映: AC-3 に「home 解決不能の場合は走査ファイルを列挙しない」例外を明記、skill / recipe の重大度要約に herdr 未導入なら info であることを追記
 - 2026-09-18 test(`docs/reports/test-2026-09-18-doctor-shell-alias-check.md`、9178954): PASS。対象 42 件 PASS / SKIP 0、`go test ./internal/... -count=1` 8 package ok、race なし、`internal/cli` のカバレッジ 82.5%(`doctor_shell_alias.go` の全 10 関数が 80% 以上)、ビルドしたバイナリの fixture 8 種と exit code 不変の確認も期待どおり。tester が挙げた未到達の分岐 2 つ(`parseAliasWords` の定義なしの early return、`shellAliasUnreadableReason` の PathError 以外の経路)は、報告後に orchestrator がテスト 2 件を追加して埋めた(テストのみの変更。static verify と対象テストは green)
+- 2026-09-18 sync-docs(`docs/reports/sync-docs-2026-09-18-doctor-shell-alias-check.md`、e4e98ab): tech-debt に 1 行追加のみ。README / AGENTS.md / spec は変更不要
+- 2026-09-18 cross-review cycle 1(`docs/reports/cross-review-triage-doctor-shell-alias-check.md`、913735a): Codex の所見 4 件(すべて P2)を ACTION_REQUIRED 2(AR-1 `$ZDOTDIR/.zprofile` などが候補にない、AR-2 `--ask-for-approval` を edits 座席にも付ける前提の誤った文言)/ WORTH_CONSIDERING 2(WC-1 値の中の引用符付きフラグ名、WC-2 stat エラーの黙殺)に分類。ユーザー判断(AskUserQuestion): 4 件とも修正して全 pipeline を再実行(cycle 2/2)。1 回目の `command codex exec review` は alias を迂回したため project config の `gpt-5.5` と user config の effort `max` が組み合わさり API 400 で中断(所見なし)。`-m gpt-6-astra -c model_reasoning_effort=xhigh` を明示して再実行した
 
 ## Progress checklist
 
