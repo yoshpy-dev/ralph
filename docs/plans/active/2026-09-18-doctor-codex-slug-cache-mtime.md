@@ -1,0 +1,115 @@
+# doctor-codex-slug-cache-mtime
+
+- Status: Draft
+- Owner: Claude Code
+- Date: 2026-09-18
+- Related request: `ralph doctor` の「Org codex model slugs」Check はローカルの `models_cache.json` を読むだけで、その cache がいつ書かれたものかを出さない。warn が出た瞬間の出力に鮮度が見えないと、数日前の cache に基づく warn を運用者が真に受けて seed-once の `ralph.toml` からスラッグを誤って外すリスクが残る(2026-09-17 の一時的消失の事例)。#156 の文書化では散文で注意しているが、注意が効くべき場所は出力そのもの(issue #159、PR #160 の self-review Follow-ups 起点)
+- Related issue: 159
+- Type: feat
+- Branch: feat/doctor-codex-slug-cache-mtime
+
+## Objective
+
+`checkCodexModelSlugs`(`internal/cli/doctor_codex_models.go`)の warn / pass の Detail に cache ファイルの書き込み時刻(mtime、UTC RFC3339)と経過時間を含め、mtime が 24 時間より古い場合は「cache may be stale; launch codex once to refresh, then re-run」の注記を添える。Status は変えない(warn は warn のまま、best-effort な Check の性質を維持)。テストは `os.Chtimes` で mtime を操作して、mtime が Detail に出ること・古い cache で注記が付き新しい cache では付かないことを固定する。あわせて `/org` skill(4 面)と org runtime spec の「更新も鮮度確認もしない」という記述を、実装に合わせて「更新はしないが、cache の書き込み時刻と stale 注記を Detail に出す」に更新する。
+
+## Scope
+
+| # | 変更 | ファイル | 内容 |
+|---|------|---------|------|
+| 1 | mtime の取得と Detail への付与 | `internal/cli/doctor_codex_models.go` | `os.ReadFile` 成功後に `os.Stat(cachePath)` で `ModTime()` を取り、`cacheAgeNote := fmt.Sprintf(" (cache written %s, %s ago)", mtime.UTC().Format(time.RFC3339), humanAge)` を warn / pass 両方の Detail 末尾に付ける。`humanAge` は分未満切り捨てで `Nm` / `Nh` / `Nd`(小さなヘルパー `formatCacheAge(d time.Duration) string`)。`os.Stat` が失敗した場合(ReadFile 成功直後の稀な競合)は mtime 節を省き、Status も Detail の本体も変えない(best-effort) |
+| 2 | stale 注記 | `internal/cli/doctor_codex_models.go` | `time.Since(mtime) > codexCacheStaleAfter`(定数 `24 * time.Hour`)なら Detail 末尾に `; cache may be stale — launch codex once to refresh, then re-run` を追加。warn / pass どちらにも付ける(pass でも古い cache は「存在の証拠として弱い」ため)。Status は不変。doc comment の「Six deterministic outcomes」節に「warn / pass は cache の mtime と、24h 超の stale 注記を伴う」を追記 |
+| 3 | テスト | `internal/cli/doctor_org_test.go` | (a) `TestCheckCodexModelSlugs_DetailCarriesCacheMtime`: 書きたての cache(mtime ≈ now)で pass、Detail に `cache written ` と RFC3339 の年(`20`)を含み、stale 注記を含まない。(b) `TestCheckCodexModelSlugs_StaleCache_WarnCarriesStaleNote`: 欠落スラッグありの cache に `os.Chtimes(path, old, old)`(old = now − 48h)→ warn、Detail に `cache may be stale` と `2d ago` を含む。(c) `TestCheckCodexModelSlugs_StaleCache_PassAlsoCarriesStaleNote`: 全スラッグありの cache を 48h 古くして pass + stale 注記。(d) `TestFormatCacheAge` テーブル: 30s→`0m`、90m→`1h`、47h→`1d`、49h→`2d`。既存 8 テストは Detail の先頭一致で書かれているため変更不要(付与は末尾) |
+| 4 | 文書更新 | `.claude/skills/org/SKILL.md`(+ `.agents/`、`templates/base/` の 3 ミラー) | 「既定の model_pool」節の段落中「Check はローカルの cache を読むだけで更新も鮮度確認もしないので」→「Check はローカルの cache を読むだけで更新はしない(cache の書き込み時刻を Detail に出し、24 時間より古ければ stale 注記が付く)ので」。以降の「codex を一度起動して cache を更新してから再確認」「warn 1 回で外さない」は据え置き |
+| 5 | 文書更新 | `docs/specs/2026-08-01-org-runtime.md` | 「運用ノート」(d) の「`checkCodexModelSlugs` はローカルの `models_cache.json` を読むだけで、更新も鮮度確認もしない」→「…読むだけで更新はしない(書き込み時刻と 24h 超の stale 注記は Detail に出る、issue #159)」。観測手順の「`stat` で cache の mtime が観測時刻に更新されたことを確認」は「`ralph doctor` の Detail に出る `cache written` が観測時刻に更新されていることを確認(`stat` でも可)」に置き換え。記録項目の「cache mtime」はそのまま |
+
+## Non-goals
+
+- cache の自動更新(doctor から codex を起動しない。`--probe-models` が既にその役)
+- stale 時に Status を変えること(warn → 別ステータス、pass → warn 等)。best-effort な Check の性質を保つ
+- 閾値の設定化(`ralph.toml` / 環境変数)。24h の定数で始め、必要になったら別 issue
+- 他の doctor Check への mtime 表示の横展開
+- `docs/tech-debt/README.md` の変更(該当行なし)
+
+## Assumptions
+
+- `os.Stat().ModTime()` は macOS / Linux の CI(ubuntu)で `os.Chtimes` の設定値を秒精度で返す。テストは 48h の差で判定するため精度は問題にならない
+- 経過時間の計算は実時刻(`time.Now()`)で行う。テストは「書きたて(< 24h)」と「48h 前」の 2 点だけを使い、境界値(ちょうど 24h)はテストしない。clock 注入は不要
+- 既存テストは Detail の先頭部分(`2 codex model_pool slug(s)`、`not found at <path>` 等)だけを検査しており、末尾への付与で壊れない(2026-09-18 に `grep 'r.Detail'` で確認)
+- 4 面ミラーは `scripts/sync-skills.sh` + cp、`check-skill-sync.sh` / `check-sync.sh` で一致を検証する(#154/#156 と同じ手順)
+
+## Affected areas
+
+- `internal/cli/doctor_codex_models.go`
+- `internal/cli/doctor_org_test.go`
+- `.claude/skills/org/SKILL.md` と 3 ミラー
+- `docs/specs/2026-08-01-org-runtime.md`
+
+## Design decisions
+
+Critical forks: None(閾値・Status 不変・Stat 失敗時の扱いはいずれも issue 本文と best-effort の既定で決まる)。
+
+既定として採った選択:
+
+- stale 注記は pass にも付ける。古い cache で pass しても「今も存在する」証拠としては弱く、#156 の観測手順(更新済み cache でのみ観測を成立とみなす)と整合させる
+- 経過時間の表示は `Nm` / `Nh` / `Nd` の粗い粒度。運用者が見るのは「数分前か、数日前か」で、秒精度は不要
+- `os.Stat` 失敗は黙って mtime 節を省く。ReadFile が成功した直後に Stat が失敗するのは競合か権限変更で、Check の本題(スラッグの有無)には影響しない
+- テストは実時刻 + `os.Chtimes` で行い、clock 注入は入れない(`internal/cli` に既存の clock 抽象がなく、2 点判定で十分)
+
+## Acceptance criteria
+
+- [ ] AC-1: warn と pass の Detail に `cache written <RFC3339 UTC>, <age> ago` が含まれる。`grep -c 'cache written' internal/cli/doctor_codex_models.go` が 1 以上。テスト (a) が pass
+- [ ] AC-2: mtime が 24h より古い cache では Detail に `cache may be stale` が付き、書きたての cache では付かない。warn / pass の両方で成立。テスト (b)(c) が pass、(a) が stale 注記の不在を assert
+- [ ] AC-3: `formatCacheAge` のテーブルテスト (d) が pass。Status は既存 8 テストのとおり不変(全 pass)
+- [ ] AC-4: `os.Stat` 失敗時は mtime 節なしの従来 Detail になる(コード上の分岐として存在し、reviewer が確認。単体テストでは再現しないため Known gaps に記載)
+- [ ] AC-5: `/org` skill の段落が「鮮度確認もしない」を含まず(`grep -c '鮮度確認もしない' .claude/skills/org/SKILL.md` が 0)、`stale 注記` を含む。4 面 `cmp` 一致、`./scripts/check-skill-sync.sh` / `./scripts/check-sync.sh` pass
+- [ ] AC-6: spec (d) が「鮮度確認もしない」を含まず、`cache written` または `stale 注記` と issue #159 への参照を含む
+- [ ] AC-7: `go test ./internal/cli/... -count=1` と `./scripts/run-verify.sh` が green。PR 本文は `Closes #159`
+
+## Implementation outline
+
+1. Slice A(Go、implementer 委譲): 項目 1〜3。`gofmt -l internal/`、`go vet ./internal/cli/...`、`go test ./internal/cli/ -run 'TestCheckCodexModelSlugs|TestFormatCacheAge' -count=1 -v`、`go test ./internal/cli/... -count=1`、`./scripts/run-verify.sh` → commit `feat: surface cache mtime and a stale note in the doctor codex slug check`
+2. Slice B(docs、inline): 項目 4〜5。`sync-skills.sh` → cp → `check-skill-sync.sh` / `check-sync.sh` → commit `docs: describe the doctor slug check's cache mtime and stale note`
+3. `./scripts/run-verify.sh` → post-implementation pipeline → `/cross-review` → `/pr`(`Closes #159`)
+
+## Verify plan
+
+- Static analysis checks: `./scripts/run-static-verify.sh`(gofmt / go vet / golangci-lint / staticcheck)、`check-skill-sync.sh`、`check-sync.sh`
+- Spec compliance criteria to confirm: AC-1〜AC-7 の grep / cmp。Detail の文字列が doc comment の outcomes 記述と一致すること
+- Documentation drift to check: skill 段落と spec (d) が新しい Detail の内容(mtime 表示、24h、stale 文言)と一致すること。#156 で書いた観測手順が新しい出力で簡略化されていること(`stat` は任意に)
+- Evidence to capture: grep / cmp / sync スクリプトの出力
+
+## Test plan
+
+- Unit tests: `internal/cli` の `TestCheckCodexModelSlugs_*`(既存 8 + 新規 3)と `TestFormatCacheAge`
+- Integration tests: なし(`ralph doctor` の CLI 経路は既存の doctor テストで担保)
+- Regression tests: `go test ./internal/... -count=1`
+- Edge cases: (1) `os.Chtimes` で未来の mtime を設定した場合、経過時間が負になる → `formatCacheAge` は負値を `0m` に丸める(テーブルに 1 ケース追加)。(2) Windows では `os.Chtimes` は動くのでスキップ不要。(3) cache が空の JSON(`{"models": []}`)で全スラッグ欠落 + stale → warn + stale 注記(既存 SomeMissing の派生、(b) で兼ねる)
+- Evidence to capture: `go test -count=1 -v` の対象テスト出力、`docs/reports/test-*.md`
+
+## Risks and mitigations
+
+- Detail の末尾追加が既存テストの完全一致 assert を壊す → 確認済み: 完全一致は `no codex entries in model_pool`(codex エントリなし、mtime 節が付かない経路)のみ
+- 24h の閾値が環境によっては厳しすぎる / 緩すぎる → Status は変えず注記のみなので誤検知の害は小さい。設定化は Non-goals
+- ミラー取り残し → sync + 2 つの sync チェック
+
+## Rollout or rollback notes
+
+`ralph doctor` の出力文言の追加のみ。下流へは次回 release で配布(バイナリ)。skill の文言は core として `ralph upgrade` で届く。revert は PR 単位で安全。
+
+## Open questions
+
+なし。
+
+## Deviation notes
+
+(実装中に追記)
+
+## Progress checklist
+
+- [x] Plan reviewed
+- [x] Branch created
+- [ ] Implementation started
+- [ ] Review artifact created
+- [ ] Verification artifact created
+- [ ] Test artifact created
+- [ ] PR created
