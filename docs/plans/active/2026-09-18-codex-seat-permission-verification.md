@@ -70,8 +70,8 @@ Critical forks: 2 件、ユーザーと解決済み(2026-09-18、AskUserQuestion
 - [x] AC-2: 同 evidence に edits 座席の記録がある: 子プロセスのコマンドラインが `--sandbox workspace-write` のみ(`--ask-for-approval` なし)、cwd 内編集が承認なしで完了したこと、writable root 外への書き込みで観測された挙動と 3 値判定(pass / partial / inconclusive)、対象ファイルが事後に存在しないことの独立確認。recipe の「edits は cwd 外を問い合わせる」という記述は判定が pass のときだけ書く
 - [x] AC-3: `docs/recipes/codex-seat-permissions.md` が root と `templates/base/` に byte 同一で存在し(`cmp`)、前提・スクラッチ config・2 モードの spawn コマンド・観測項目・本マシンの結果へのポインタ・自分の `ralph.toml` での opt-in 手順・後始末を含む。`docs/recipes/codex-setup.md` に recipe へのポインタ 1 行(root / template 同一)。`./scripts/check-sync.sh` pass
 - [x] AC-4: `templates/base/ralph.toml` の `[org.permissions]` コメントに `docs/tech-debt/README.md` への参照がなく(`grep -c 'tech-debt' templates/base/ralph.toml` が 0)、recipe へのポインタがある。`internal/org/permissions.go` に検証日・codex バージョン・evidence への参照があり、`git diff main -- internal/org/permissions.go` がコメント行のみ。`/org` skill の permission 作法に「暫定制約」の語がなく(`grep -c '暫定制約' .claude/skills/org/SKILL.md` が 0)、`codex_verified` と recipe への言及がある。4 面 `cmp` 一致、`check-skill-sync.sh` pass
-- [ ] AC-5: `go test ./internal/org/... -count=1` と `./scripts/run-verify.sh` が green(ロジック変更なし)
-- [ ] AC-6: `codex_verified = true` への opt-in 手順が recipe で「検証時の実効 config とバージョン」に条件付けられ、config / バージョン変更時の再検証を求めている。検証で使った org の座席が残っていない(`ralph org status --org-id <各 id> --state-dir <scratch>` に active なし、`herdr agent list` / `herdr pane list` に該当 pane なし)。PR 本文は `Closes #155`
+- [x] AC-5: `go test ./internal/org/... -count=1` と `./scripts/run-verify.sh` が green(ロジック変更なし)
+- [x] AC-6: `codex_verified = true` への opt-in 手順が recipe で「検証時の実効 config とバージョン」に条件付けられ、config / バージョン変更時の再検証を求めている。検証で使った org の座席が残っていない(`ralph org status --org-id <各 id> --state-dir <scratch>` に active なし、`herdr agent list` / `herdr pane list` に該当 pane なし)。PR 本文は `Closes #155`
 
 ## Implementation outline
 
@@ -118,6 +118,7 @@ Critical forks: 2 件、ユーザーと解決済み(2026-09-18、AskUserQuestion
 - 2026-09-18 work: 判定 — autonomous **pass**(A2)、edits **pass(機構)**: E1(実 config 複製、`approval_policy = "never"` 継承)はプロンプトなし = partial だが CLI の `--sandbox workspace-write` が `danger-full-access` を上書きすることを確認、E2(最小 config)は「回避しない」指示ではプロンプトなし = partial、E2b(escalation を要求させる指示)で承認プロンプトを観測し Esc で拒否 = pass。全 run で実ホームへの書き込みは拒否され、対象ファイルは存在しない
 - 2026-09-18 work: Slice B(文書)= recipe を root と templates/base に byte 同一で追加、`codex-setup.md` に See also、`ralph.toml` コメント 2 箇所を recipe ポインタ + 継承の注意に置換、`permissions.go` コメントに検証日 / バージョン / evidence / opt-in 設計を追記(コード不変)、skill 4 面の permission 作法を更新。後始末: 実 `~/.codex/config.toml` を backup から復元(一時追記した trust 行を除去)、複製 auth.json 削除、herdr server 停止、`~/.zshrc` 無変更
 - 2026-09-18 work: 派生 issue 候補(PR 後に起票): (a) `ralph doctor` で `codex` / `claude` の shell alias を検出して warn、(b) `ralph org send` の Enter timing、(c) codex 座席の agmsg DB writable root を ralph が `-c sandbox_workspace_write.writable_roots` で自動付与するか doctor で検査、(d) 退役モデルの自動移行を receipts の `honored` で捕捉
+- 2026-09-18 work: 初回の verify スクリプトは `check-template-purity.sh` が template 側 recipe の `/Users/<you>/…` を開発マシンの絶対パスとして検出して fail。プレースホルダを `<your home directory>` に変更(529b360)して green(evidence: `docs/evidence/verify-2026-09-18-072736.log`、gitignored)。AC-6 の `Closes #155` は `/pr` で満たす(座席の残留なしは各 run の後始末で確認済み)
 
 ## Progress checklist
 
