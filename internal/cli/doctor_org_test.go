@@ -701,6 +701,50 @@ func TestCheckCodexModelSlugs_StaleCache_PassAlsoCarriesStaleNote(t *testing.T) 
 // TestFormatCacheAge covers AC-3: the age formatter's granularity switches
 // (minutes below an hour, hours below a day, days otherwise) and clamps
 // negative ages (clock skew or a future mtime) to 0m.
+// TestCodexCacheFreshnessClause pins the clause builder directly, with an
+// injected now, so the 24h boundary (strictly greater than
+// codexCacheStaleAfter is stale; exactly 24h is not), the changed-wins rule,
+// and the Stat-failure empty clause are fixed without depending on the wall
+// clock or on a real cache file.
+func TestCodexCacheFreshnessClause(t *testing.T) {
+	now := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name      string
+		mtime     time.Time
+		changed   bool
+		wantHas   []string
+		wantLacks []string
+	}{
+		{"fresh cache renders mtime and age, no stale note", now.Add(-time.Hour), false,
+			[]string{"cache written 2026-09-18T11:00:00Z", "1h ago"}, []string{"cache may be stale", "freshness unknown"}},
+		{"exactly 24h old is not stale", now.Add(-codexCacheStaleAfter), false,
+			[]string{"cache written 2026-09-17T12:00:00Z", "1d ago"}, []string{"cache may be stale"}},
+		{"24h plus one second is stale", now.Add(-codexCacheStaleAfter - time.Second), false,
+			[]string{"cache written 2026-09-17T11:59:59Z", "cache may be stale"}, nil},
+		{"changed wins over an old mtime", now.Add(-48 * time.Hour), true,
+			[]string{"freshness unknown"}, []string{"cache written", "cache may be stale"}},
+		{"zero mtime (Stat failed) yields an empty clause", time.Time{}, false, nil, []string{"cache"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := codexCacheFreshnessClause(tc.mtime, tc.changed, now)
+			if tc.mtime.IsZero() && !tc.changed && got != "" {
+				t.Fatalf("clause = %q, want empty", got)
+			}
+			for _, w := range tc.wantHas {
+				if !strings.Contains(got, w) {
+					t.Errorf("clause %q should contain %q", got, w)
+				}
+			}
+			for _, w := range tc.wantLacks {
+				if strings.Contains(got, w) {
+					t.Errorf("clause %q should not contain %q", got, w)
+				}
+			}
+		})
+	}
+}
+
 func TestFormatCacheAge(t *testing.T) {
 	tests := []struct {
 		name string

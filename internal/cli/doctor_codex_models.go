@@ -23,9 +23,11 @@ import (
 const codexCacheStaleAfter = 24 * time.Hour
 
 // codexCacheBetweenReadAndStat is a test seam called by readCodexModelsCache
-// between reading the cache bytes and the second Stat. Tests set it to
-// rewrite the cache in place so the "changed while reading" path is
-// deterministic; production leaves it nil.
+// after the cache bytes are read and immediately before the second Stat --
+// only on the path where that second Stat actually follows (a failed first
+// Stat returns before the seam). Tests set it to rewrite the cache in place
+// so the "changed while reading" path is deterministic; production leaves it
+// nil.
 var codexCacheBetweenReadAndStat func()
 
 // codexModelsCachePath resolves the path codex itself uses for its local
@@ -73,11 +75,11 @@ func readCodexModelsCache(path string) (data []byte, mtime time.Time, changed bo
 	if err != nil {
 		return nil, time.Time{}, false, err
 	}
-	if codexCacheBetweenReadAndStat != nil {
-		codexCacheBetweenReadAndStat()
-	}
 	if statErr != nil {
 		return data, time.Time{}, false, nil
+	}
+	if codexCacheBetweenReadAndStat != nil {
+		codexCacheBetweenReadAndStat()
 	}
 	after, statErr := f.Stat()
 	if statErr != nil {
@@ -93,16 +95,20 @@ func readCodexModelsCache(path string) (data []byte, mtime time.Time, changed bo
 // "minutes ago" from "days ago": Nm below an hour, Nh below a day, Nd
 // otherwise. Negative ages (clock skew, a future mtime) render as 0m.
 func formatCacheAge(d time.Duration) string {
+	// hoursPerDay is the display-granularity switch from Nh to Nd. It is
+	// unrelated to codexCacheStaleAfter (the staleness threshold), which
+	// happens to be 24h today but may change independently.
+	const hoursPerDay = 24
 	if d < 0 {
 		d = 0
 	}
 	switch {
 	case d < time.Hour:
 		return fmt.Sprintf("%dm", int(d.Minutes()))
-	case d < 24*time.Hour:
+	case d < hoursPerDay*time.Hour:
 		return fmt.Sprintf("%dh", int(d.Hours()))
 	default:
-		return fmt.Sprintf("%dd", int(d.Hours()/24))
+		return fmt.Sprintf("%dd", int(d.Hours()/hoursPerDay))
 	}
 }
 
@@ -160,11 +166,13 @@ type codexModelsCacheDoc struct {
 // The warn and pass Details end with a freshness clause: normally
 // "(cache written <UTC RFC3339>, <age> ago)", plus "; cache may be stale —
 // launch codex once to refresh, then re-run" once that age exceeds
-// codexCacheStaleAfter. If the cache was rewritten in place while this check
-// was reading it, the clause is instead "(cache changed while reading;
-// freshness unknown — re-run)" and neither the mtime nor the stale note is
-// shown (the slug verdict itself is still based on the bytes that were
-// read). If Stat fails, the clause is omitted entirely and the Detail reads
+// codexCacheStaleAfter. If the open handle's Stat before and after the read
+// disagree in ModTime or Size (an in-place rewrite that landed while this
+// check was reading; a same-size rewrite within one mtime tick is not
+// detected, which is acceptable for a best-effort check), the clause is
+// instead "(cache changed while reading; freshness unknown — re-run)" and
+// neither the mtime nor the stale note is shown (the slug verdict itself is
+// still based on the bytes that were read). If Stat fails, the clause is omitted entirely and the Detail reads
 // exactly as it did before this freshness clause existed.
 func checkCodexModelSlugs(cfg config.Config) checkResult {
 	r := checkResult{Name: "Org codex model slugs"}
