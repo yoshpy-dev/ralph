@@ -60,9 +60,10 @@ doctor` の「Org codex model slugs」Check が `~/.codex/models_cache.json`
 
 codex スラッグは codex 側のモデル更新で消えることがある。Check はローカルの
 cache を読むだけで更新も鮮度確認もしないので、warn が出たら codex を一度起動
-して cache を更新するか `ralph doctor --probe-models` で実起動確認し、1 回の
-warn だけでスラッグを外さない(2026-09-17 に数時間で復帰した一時的消失の
-事例あり)。確認しても消えたままなら、同じ `models_cache.json` に今あるスラッグ
+して cache を更新してから再確認し、1 回の warn だけでスラッグを外さない
+(2026-09-17 に数時間で復帰した一時的消失の事例あり)。`ralph doctor
+--probe-models` は成功すれば存在の確認になるが、失敗は codex 側で best-effort
+扱いのため不在の証拠にはならない。確認しても消えたままなら、同じ `models_cache.json` に今あるスラッグ
 を見て、自分の `ralph.toml` の `[org].model_pool` と、そのスラッグを参照する
 `[org.roles]` を書き換える。`ralph.toml` は seed-once(初回 `ralph init` で
 生成されたあと `ralph upgrade` は触らない)なので、上流で既定が更新されても
@@ -70,8 +71,8 @@ warn だけでスラッグを外さない(2026-09-17 に数時間で復帰した
 (`brew update && brew upgrade ralph` 等)→ `ralph version` で確認 →
 `ralph upgrade` のあと `docs/reports/upgrade-*.md` に出る `ralph.toml` の
 seed advisory diff で確認できる。`model_pool` を書かず `driver_pool` だけの
-設定ならバイナリ埋め込みの既定が使われ、バイナリを差し替えた時点で新既定に
-切り替わる。`ralph upgrade` は core(skill・`ralph-config.sh`)を置換するだけ
+設定なら、バイナリ埋め込みの既定を宣言した driver に絞ったものが使われ、
+バイナリを差し替えた時点で新既定に切り替わる。`ralph upgrade` は core(skill・`ralph-config.sh`)を置換するだけ
 で実効プールは変えないが、今入っているバイナリのテンプレートしか適用しない
 ので、バイナリ更新の前に実行しても新しい既定は届かない。
 
