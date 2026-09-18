@@ -60,12 +60,12 @@ Critical forks: None(閾値・Status 不変・Stat 失敗時の扱いはいず�
 
 ## Acceptance criteria
 
-- [ ] AC-1: warn と pass の Detail に `cache written <RFC3339 UTC>, <age> ago` が含まれ、その時刻は cache ファイルの mtime そのものである。テスト (a)(b) が `os.Chtimes` で設定した既知の mtime の RFC3339 表記を完全一致で assert して pass(`time.Now()` を表示する実装では fail する)
-- [ ] AC-2: mtime が 24h より古い cache では Detail に `cache may be stale` が付き、書きたての cache では付かない。warn / pass の両方で成立。テスト (b)(c) が pass、(a) が stale 注記の不在を assert
-- [ ] AC-3: `formatCacheAge` のテーブルテスト (d) が pass。Status は既存 8 テストのとおり不変(全 pass)
-- [ ] AC-4: 読み取り前後の `f.Stat()` が一致しない場合、Detail に `freshness unknown` が付き、stale 注記と `cache written` は付かず、スラッグ判定は読んだ内容に基づく。テスト (e) が test seam 経由で pass。`f.Stat()` 失敗時は mtime 節なしの従来 Detail になる(コード上の分岐として存在し、reviewer が確認。単体テストでは再現しないため Known gaps に記載)
-- [ ] AC-5: `/org` skill の段落が「鮮度確認もしない」を含まず(`grep -c '鮮度確認もしない' .claude/skills/org/SKILL.md` が 0)、`stale 注記` を含む。4 面 `cmp` 一致、`./scripts/check-skill-sync.sh` / `./scripts/check-sync.sh` pass
-- [ ] AC-6: spec (d) が「鮮度確認もしない」を含まず、`cache written` または `stale 注記` と issue #159 への参照を含む
+- [x] AC-1: warn と pass の Detail に `cache written <RFC3339 UTC>, <age> ago` が含まれ、その時刻は cache ファイルの mtime そのものである。テスト (a)(b) が `os.Chtimes` で設定した既知の mtime の RFC3339 表記を完全一致で assert して pass(`time.Now()` を表示する実装では fail する)
+- [x] AC-2: mtime が 24h より古い cache では Detail に `cache may be stale` が付き、書きたての cache では付かない。warn / pass の両方で成立。テスト (b)(c) が pass、(a) が stale 注記の不在を assert
+- [x] AC-3: `formatCacheAge` のテーブルテスト (d) が pass。Status は既存 8 テストのとおり不変(全 pass)
+- [x] AC-4: 読み取り前後の `f.Stat()` が一致しない場合、Detail に `freshness unknown` が付き、stale 注記と `cache written` は付かず、スラッグ判定は読んだ内容に基づく。テスト (e) が test seam 経由で pass。`f.Stat()` 失敗時は mtime 節なしの従来 Detail になる(コード上の分岐として存在し、reviewer が確認。単体テストでは再現しないため Known gaps に記載)
+- [x] AC-5: `/org` skill の段落が「鮮度確認もしない」を含まず(`grep -c '鮮度確認もしない' .claude/skills/org/SKILL.md` が 0)、`stale 注記` を含む。4 面 `cmp` 一致、`./scripts/check-skill-sync.sh` / `./scripts/check-sync.sh` pass
+- [x] AC-6: spec (d) が「鮮度確認もしない」を含まず、`cache written` または `stale 注記` と issue #159 への参照を含む
 - [ ] AC-7: `go test ./internal/cli/... -count=1` と `./scripts/run-verify.sh` が green。PR 本文は `Closes #159`
 
 ## Implementation outline
@@ -106,6 +106,8 @@ Critical forks: None(閾値・Status 不変・Stat 失敗時の扱いはいず�
 ## Deviation notes
 
 - 2026-09-18 plan: Codex plan advisory(codex-cli 0.154.0、`</dev/null` 付き)が MEDIUM 2 件(read/stat の分離で内容と鮮度が別バージョンになりうる、表示時刻が mtime である証明がない)を報告。両方採用し Scope 1・3、Assumptions、Design decisions、AC-1・AC-4 を改訂
+- 2026-09-18 work: `./scripts/branch-name.sh from-plan` の issue 番号付きブランチ名ではなく、`/plan` が登録した worktree state の `feat/doctor-codex-slug-cache-mtime` を維持(手順 2d)
+- 2026-09-18 work: Slice B(docs)を index 衝突回避のため Slice A より先に inline で実施 = fd1be42(skill 4 面 + spec (d)、sync ゲート pass)。Slice A = 3b0fdf4(implementer 委譲)。逸脱 1 件: golangci-lint の errcheck に合わせ `defer func() { _ = f.Close() }()`(`internal/insights` の既存慣例)。orchestrator 側で diff・18 テスト pass・AC ゲート・verify スクリプト exit 0(evidence: `docs/evidence/verify-2026-09-18-051002.log`、gitignored、lint 0 issues)を確認。AC-7 の `Closes #159` は `/pr` で満たす
 
 ## Progress checklist
 
