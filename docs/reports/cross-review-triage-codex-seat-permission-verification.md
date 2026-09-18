@@ -41,3 +41,4 @@ Categories: false-positive, already-addressed, style-preference, out-of-scope, c
 ## Notes
 
 - Case A (ACTION_REQUIRED, cycle 1 of cap 2): the user decides between "fix, then re-run the full post-implementation pipeline" and "acknowledge and create the PR". The decision and its outcome are appended below.
+- Decision (2026-09-18, user): fix, then re-run the full post-implementation pipeline. AR-1 fixed in 33158e2: the recipe's `send` / `wait` / `stop` / `disband` / `status` commands now carry the matching `--org-id`, `--config`, and `--state-dir` (both copies byte-identical; check-sync and template-purity green). Cycle counter advanced to 2/2; the re-run's results are recorded as a cycle-2 section below when it completes.
