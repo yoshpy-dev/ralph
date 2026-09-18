@@ -88,3 +88,157 @@ grep -Eo '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' docs/evi
 ./scripts/check-template-purity.sh                                               # PASS
 ./scripts/run-static-verify.sh                                                   # PASS, evidence: docs/evidence/verify-2026-09-18-075351.log
 ```
+
+## Cycle 2 (post cross-review AR-1 fix)
+
+- Date: 2026-09-18
+- HEAD: `d40c6d2` (was `3dab6bc4` at cycle-1 verify; 9 commits since, all `docs:`)
+- Trigger: cross-review (codex, cycle 1/2) returned one ACTION_REQUIRED
+  (`docs/reports/cross-review-triage-codex-seat-permission-verification.md`
+  P2/AR-1): the recipe's `send`/`wait`/`stop`/`disband`/`status` follow-up
+  commands dropped `--org-id`/`--config`/`--state-dir`, so they either fail
+  outright or silently target the default state directory. User decision:
+  fix then re-run the full pipeline. Fix landed at `33158e2`. The cycle-2
+  self-review (`docs/reports/self-review-2026-09-18-codex-seat-permission-verification.md`,
+  "Cycle 2" section) then found and fixed four further LOWs at `f769f40`
+  (undefined `task.txt` in the recipe's typed-protocol example, `send`/`wait`
+  fenced together hiding the composer-trap warning, the cleanup `status`
+  line missing `--config`, two dangling-word line wraps in the recipe and in
+  `scripts/ralph-config.sh` + its template mirror). `git status --porcelain`
+  was clean before and after this cycle-2 pass; nothing was edited or
+  committed here.
+
+**(a) AC-3 / AC-4 re-confirmed at `d40c6d2`.**
+
+```
+cmp docs/recipes/codex-seat-permissions.md templates/base/docs/recipes/codex-seat-permissions.md   # identical
+cmp docs/recipes/codex-setup.md templates/base/docs/recipes/codex-setup.md                          # identical
+cmp scripts/ralph-config.sh templates/base/scripts/ralph-config.sh                                  # identical
+cmp .claude/skills/org/SKILL.md .agents/skills/org/SKILL.md                                          # identical
+cmp .claude/skills/org/SKILL.md templates/base/.claude/skills/org/SKILL.md                           # identical
+cmp .claude/skills/org/SKILL.md templates/base/.agents/skills/org/SKILL.md                           # identical
+grep -c 'tech-debt' templates/base/ralph.toml internal/config/config.go internal/org/permissions.go  # 0/0/0
+grep -c '暫定制約' .claude/skills/org/SKILL.md                                                       # 0
+./scripts/check-sync.sh          # PASS, IDENTICAL 158, DRIFTED 0
+./scripts/check-skill-sync.sh    # [ok] 13 skill(s) in lock-step
+./scripts/check-template-purity.sh   # PASS
+```
+
+No regression on either AC: the cycle-1 findings the fix commits touched
+(the recipe and `scripts/ralph-config.sh`) are still byte-identical between
+root and `templates/base/`, and the cycle-1 tech-debt-pointer/`暫定制約`
+removals in the Go doc comments and the skill are untouched by cycle 2
+(neither fix commit touches `internal/config/config.go`,
+`internal/org/permissions.go`, `templates/base/ralph.toml`, or the skill
+files — confirmed via `git diff 3dab6bc...HEAD --stat`, which lists only the
+recipe pair, `scripts/ralph-config.sh` + template, the evidence/plan/report
+files, and the two new report files).
+
+**(b) Recipe command lines re-verified against the CLI and the protocol
+package.** `--org-id`, `--config`, and `--state-dir` are declared as
+`cmd.PersistentFlags()` on the `org` root command
+(`internal/cli/org.go:40-42`), so every subcommand inherits them, including
+`send`/`wait`/`stop`/`disband`/`status` — the recipe's claim that they are
+required/accepted on every follow-up verb is accurate, not just true for
+`spawn`. Per-verb flags used in the recipe all exist: `send` has `--to`,
+`--text`, `--timeout-ms` (`internal/cli/org.go:377-379`); `wait` has
+`--seat`, `--until`, `--timeout-ms` (`:426-428`). The quoted failure text
+`org: --org-id is required` is the literal string in `requireOrgID`
+(`internal/cli/org.go:69-74`). `internal/org/protocol/protocol.go` confirms
+the enum (`TypeTask`/`TypeResult`/... , `internal/org/protocol/protocol.go:25-35`),
+that `TASK` is in `taskIDRequiredTypes` (`:56-59`), and
+`DefaultMaxBodyChars = 2000` (`:43`) — matching the recipe's new `task.txt`
+example line-for-line (`TYPE: TASK` / `TASK_ID: t-1` / blank line / body,
+"TYPE must be one of the protocol's enum values, TASK needs a TASK_ID, and
+the body is capped at 2,000 characters"). `newOrgStatusCmd` also calls
+`newOrgRuntime(cmd, *stateDir, *configPath)` (`internal/cli/org.go:515`), so
+"`status` does load the config" (self-review cycle-2, finding LOW row 3) is
+correct — the cleanup `status` line's now-added `--config` is consistent
+with its neighbours rather than merely harmless.
+
+**(c) `scripts/ralph-config.sh` / template byte-identity and lock-step
+value (static half).** `cmp` confirms byte-identity (above). The
+lock-step *test* (`go test ./internal/config/ -run TestDefaultsLockStep`)
+was not run here — that is `/test`'s call, per the task handoff. Relying on
+the static verifier and a direct code read instead:
+`RALPH_ORG_PERMISSIONS_CODEX_VERIFIED="${RALPH_ORG_PERMISSIONS_CODEX_VERIFIED:-false}"`
+is unchanged by either cycle-2 fix commit (only the surrounding comment was
+reflowed/reworded at `c357cac` and re-wrapped at `f769f40`); `templates/base/ralph.toml`
+still has `codex_verified = false`
+(`grep -n 'codex_verified = false' templates/base/ralph.toml` → 1 hit); and
+`internal/config/config.go`'s `CodexVerified bool` field default and
+`TestDefaultsLockStep`'s check at `internal/config/defaults_sync_test.go:158-159`
+compare exactly these three value sources — none of which changed value in
+cycle 2, only comment text. The three-way lock-step therefore still holds at
+the value level; `/test` still owns re-running the test itself.
+
+**(d) Static verifier re-run at `d40c6d2`.**
+
+```
+$ ./scripts/run-static-verify.sh
+==> scripts/check-sync.sh            PASS (IDENTICAL 158, DRIFTED 0)
+==> scripts/check-pipeline-sync.sh   OK
+==> scripts/check-skill-sync.sh      [ok] 13 skill(s) in lock-step
+==> scripts/check-template-purity.sh PASS
+==> golang verifier: gofmt: ok / go vet: clean / golangci-lint: 0 issues.
+==> All verifiers passed.
+Evidence saved to: docs/evidence/verify-2026-09-18-085927.log
+```
+
+Scope classifier picked `scripts/ralph-config.sh` as the changed file this
+cycle (comment-only shell edit) and still ran the full golang verifier via
+the "full fallback" path — same behavior as cycle 1, no scope regression.
+`go test` was not reachable in this run for the same structural reason
+documented in cycle 1 (`run-static-verify.sh` forces
+`HARNESS_VERIFY_MODE=static`; `packs/languages/golang/verify.sh` gates
+`go test ./...` behind a `mode == test` branch `run_static()` never enters).
+
+**(e) Documentation drift.** Read
+`docs/reports/cross-review-triage-codex-seat-permission-verification.md`
+end to end and the plan's cycle-2 deviation-note entries
+(`docs/plans/active/2026-09-18-codex-seat-permission-verification.md`,
+"cross-review(cycle 1)" and "self-review(cycle 2)" bullets) against the
+actual commits:
+
+- The triage report's Decision line ("AR-1 fixed in `33158e2`: the recipe's
+  `send` / `wait` / `stop` / `disband` / `status` commands now carry the
+  matching `--org-id`, `--config`, and `--state-dir`... Cycle counter
+  advanced to 2/2") matches `git show 33158e2 --stat` (touches only the
+  recipe pair, +62/-20) and the recipe content read in (a)/(b) above.
+- The triage report's closing sentence — "the re-run's results are recorded
+  as a cycle-2 section below when it completes" — has no cycle-2 section in
+  that file yet. This is **not drift**: cross-review is the pipeline step
+  *after* sync-docs (`/self-review → /verify → /test → /sync-docs →
+  /cross-review → /pr`), so cycle-2 cross-review has not run yet at this
+  point in the pipeline; the sentence is a forward reference to a step this
+  verify pass does not reach, not an unfulfilled promise.
+- The plan's cross-review(cycle 1) deviation note names the fix commit
+  (`33158e2`) and its effect correctly (verified against `git show 33158e2`
+  above). The plan's self-review(cycle 2) deviation note names four LOW
+  findings and the fix commit `f769f40`; all four are present and correctly
+  described in the self-review report's "Cycle 2" section and independently
+  confirmed against `git show f769f40` in (a) above — no mismatch between
+  what the plan claims was fixed and what the commit actually changed.
+- No other documentation surface (recipe, skill, `ralph.toml`,
+  `internal/config/config.go`, `internal/org/permissions.go`) was touched
+  by either cycle-2 fix commit, so none of the cycle-1 doc-drift conclusions
+  need revisiting.
+
+## Cycle-2 verdict
+
+| AC | Verdict |
+| --- | --- |
+| AC-1 | PASS (unchanged since cycle 1; not touched by cycle-2 fixes) |
+| AC-2 | PASS (unchanged since cycle 1; not touched by cycle-2 fixes) |
+| AC-3 | PASS — recipe/template and `codex-setup.md`/template still byte-identical; `check-sync.sh` DRIFTED 0; the AR-1 fix and the four cycle-2 LOW fixes make the recipe's own commands internally runnable (correct flags throughout, a defined `task.txt`, the composer-trap warning ahead of `wait`, and a consistent cleanup block) |
+| AC-4 | PASS — tech-debt pointers and `暫定制約` remain absent everywhere checked; all skill mirrors and `scripts/ralph-config.sh`/template still byte-identical; no cycle-2 commit touched the Go doc comments or `templates/base/ralph.toml`, so cycle-1's PASS there is unaffected |
+| AC-5 | PASS (static half) — `./scripts/run-static-verify.sh` green at `d40c6d2`; `go test` deferred to `/test` by design, not a gap in this check |
+| AC-6 | PASS (verify-relevant half, unchanged); `Closes #155` still correctly deferred to `/pr` |
+
+**Overall cycle-2 verdict: PASS.** No inaccurate claim found in the triage
+report or the plan's cycle-2 deviation notes. No regression to any cycle-1
+AC. The fix commits are scoped exactly as described (recipe pair +
+`scripts/ralph-config.sh` pair; no source logic, no Go doc comments, no
+skill files touched), and their technical claims about the CLI and protocol
+package hold up against the current code.
+
