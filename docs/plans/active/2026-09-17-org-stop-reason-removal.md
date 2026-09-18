@@ -113,13 +113,14 @@ Critical forks: 2 件、いずれもユーザーと解決済み。
 - 2026-09-18 work: Slice B は inline 例外(単一ファイル数行)で orchestrator が実施。パイプ数 6、Impact/Why deferred セルのハッシュ一致、struck 行 44→45 を確認。RESOLVED 日付は実施日の 2026-09-18(AC-6 の記述も合わせて修正)
 - 2026-09-18 work: 全 7 AC のゲートを orchestrator が再実行して達成を確認。verify スクリプト green(evidence: `docs/evidence/verify-2026-09-18-013259.log`、gitignored)
 - 2026-09-18 self-review(cycle 1): Merge 判定、MEDIUM 1(M1: watch.go の除外ガード理由 (i) は単独では成り立たない。alert 前の legacy cutoff はベースラインと recount の両方に入って相殺されるため、ガードが要るのは (ii) の「ベースラインと recount の数え方が異なる」場合、すなわち永続化ベースラインのアップグレード境界か新旧バイナリ混在窓のみ)+ LOW 5(L1 新テストの doc に既存テストとの差分を明記、L2 legacy fixture コメントの忠実性表現、L3 `newFixture` の naked return / `*int` / alertID の再構築、L4 Discrimination note に `lead_agent_get`/`history_lead_lines` の役割、L5 「a `stopped` event」→ lifecycle 5 種)。tech-debt 行 Related セルへの self-review レポート追記も follow-up。#154 と同じく全件を同 cycle 内で修正する(Slice C、implementer 委譲)
+- 2026-09-18 work: Slice C = 72b89d5(implementer 委譲、3 ファイル)。逸脱 3 件はいずれも妥当: seat-3 側の fixture コメントは既に正確で変更不要、L3 の説明語「naked」を検証 grep と衝突しない表現に変更、検証 grep 2 件(`exactly as` / `@1000000000`)は plan 対象外の既存テスト(`ProbeOutage…` は main 由来、`PrunesRetiredBudgetEntries…` の fixture)にも一致するため対象テスト内のみで判定。orchestrator 側でテスト関数集合の差分(改名 2・追加 1 のみ)、watch.go がコメントのみの変更であること、deadman 16 件 pass を確認
 
 ## Progress checklist
 
 - [x] Plan reviewed
 - [x] Branch created
 - [x] Implementation started
-- [ ] Review artifact created
+- [x] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
