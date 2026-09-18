@@ -172,8 +172,9 @@ type codexModelsCacheDoc struct {
 // detected, which is acceptable for a best-effort check), the clause is
 // instead "(cache changed while reading; freshness unknown — re-run)" and
 // neither the mtime nor the stale note is shown (the slug verdict itself is
-// still based on the bytes that were read). If Stat fails, the clause is omitted entirely and the Detail reads
-// exactly as it did before this freshness clause existed.
+// still based on the bytes that were read). If Stat fails, the clause is
+// omitted entirely and the Detail reads exactly as it did before this
+// freshness clause existed.
 func checkCodexModelSlugs(cfg config.Config) checkResult {
 	r := checkResult{Name: "Org codex model slugs"}
 

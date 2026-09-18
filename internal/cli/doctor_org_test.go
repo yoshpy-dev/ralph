@@ -698,9 +698,6 @@ func TestCheckCodexModelSlugs_StaleCache_PassAlsoCarriesStaleNote(t *testing.T) 
 	}
 }
 
-// TestFormatCacheAge covers AC-3: the age formatter's granularity switches
-// (minutes below an hour, hours below a day, days otherwise) and clamps
-// negative ages (clock skew or a future mtime) to 0m.
 // TestCodexCacheFreshnessClause pins the clause builder directly, with an
 // injected now, so the 24h boundary (strictly greater than
 // codexCacheStaleAfter is stale; exactly 24h is not), the changed-wins rule,
@@ -745,6 +742,9 @@ func TestCodexCacheFreshnessClause(t *testing.T) {
 	}
 }
 
+// TestFormatCacheAge covers AC-3: the age formatter's granularity switches
+// (minutes below an hour, hours below a day, days otherwise) and clamps
+// negative ages (clock skew or a future mtime) to 0m.
 func TestFormatCacheAge(t *testing.T) {
 	tests := []struct {
 		name string
