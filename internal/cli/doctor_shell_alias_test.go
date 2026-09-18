@@ -282,6 +282,121 @@ func TestCheckShellAliases_MultipleCodexFlags_ListedInOrder(t *testing.T) {
 	}
 }
 
+// TestCheckShellAliases_CodexPermissionOnly_WarnsWithGuardedClauseNotModelClause
+// is the N1 fix: a codex alias that only adds a permission-class flag
+// (--sandbox / --ask-for-approval) must describe the guarded-seat exposure,
+// not claim "every spawn fails" -- that claim is only true for --model,
+// which ralph passes unconditionally.
+func TestCheckShellAliases_CodexPermissionOnly_WarnsWithGuardedClauseNotModelClause(t *testing.T) {
+	dir := t.TempDir()
+	writeAliasRc(t, filepath.Join(dir, ".zshrc"), `alias codex='codex -s danger-full-access'`+"\n")
+
+	r := checkShellAliases(shellAliasTestEnv(dir), true)
+	if r.Status != "warn" {
+		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
+	}
+	for _, want := range []string{"only to edits and autonomous seats", "guarded seat silently runs"} {
+		if !strings.Contains(r.Detail, want) {
+			t.Errorf("expected detail to contain %q, got: %s", want, r.Detail)
+		}
+	}
+	if strings.Contains(r.Detail, "every spawn fails") {
+		t.Errorf("a permission-only finding must not claim every spawn fails, got: %s", r.Detail)
+	}
+}
+
+// TestCheckShellAliases_CodexModelOnly_WarnsWithModelClauseNotGuardedClause
+// is the N1 fix's other half: a codex alias that only adds --model must
+// claim every spawn fails (true unconditionally, since ralph always passes
+// --model), and must not mention the guarded-seat exposure that only
+// applies to permission-class flags.
+func TestCheckShellAliases_CodexModelOnly_WarnsWithModelClauseNotGuardedClause(t *testing.T) {
+	dir := t.TempDir()
+	writeAliasRc(t, filepath.Join(dir, ".zshrc"), `alias codex='codex -m x'`+"\n")
+
+	r := checkShellAliases(shellAliasTestEnv(dir), true)
+	if r.Status != "warn" {
+		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "every spawn fails") {
+		t.Errorf("expected detail to contain \"every spawn fails\", got: %s", r.Detail)
+	}
+	if strings.Contains(r.Detail, "guarded seat silently runs") {
+		t.Errorf("a model-only finding must not mention the guarded-seat clause, got: %s", r.Detail)
+	}
+}
+
+// TestCheckShellAliases_CodexModelAndPermission_WarnsWithBothClauses is N1's
+// combined case: both clauses appear when both flag classes are present.
+func TestCheckShellAliases_CodexModelAndPermission_WarnsWithBothClauses(t *testing.T) {
+	dir := t.TempDir()
+	writeAliasRc(t, filepath.Join(dir, ".zshrc"), `alias codex='codex -m x -s y'`+"\n")
+
+	r := checkShellAliases(shellAliasTestEnv(dir), true)
+	if r.Status != "warn" {
+		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
+	}
+	for _, want := range []string{"every spawn fails", "guarded seat silently runs"} {
+		if !strings.Contains(r.Detail, want) {
+			t.Errorf("expected detail to contain %q, got: %s", want, r.Detail)
+		}
+	}
+}
+
+// TestCheckShellAliases_ClaudePermissionMode_WarnsWhenHerdrPresent is the N1
+// severity fix: claude's --permission-mode is a real, silent effect on a
+// guarded seat (ralph passes --permission-mode only to edits/autonomous
+// seats), so it warns when herdr is present rather than staying info like a
+// claude --model finding.
+func TestCheckShellAliases_ClaudePermissionMode_WarnsWhenHerdrPresent(t *testing.T) {
+	dir := t.TempDir()
+	writeAliasRc(t, filepath.Join(dir, ".zshrc"), `alias claude='claude --permission-mode bypassPermissions'`+"\n")
+
+	r := checkShellAliases(shellAliasTestEnv(dir), true)
+	if r.Status != "warn" {
+		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "a guarded seat runs with the alias's permission mode") {
+		t.Errorf("expected detail to contain the guarded-seat clause, got: %s", r.Detail)
+	}
+}
+
+// TestCheckShellAliases_ClaudePermissionMode_HerdrAbsent_InfoWithSuffix is
+// the herdr-absent counterpart: still worth surfacing (info), with the
+// herdr-not-installed suffix appended since a permission flag is present.
+func TestCheckShellAliases_ClaudePermissionMode_HerdrAbsent_InfoWithSuffix(t *testing.T) {
+	dir := t.TempDir()
+	writeAliasRc(t, filepath.Join(dir, ".zshrc"), `alias claude='claude --permission-mode bypassPermissions'`+"\n")
+
+	r := checkShellAliases(shellAliasTestEnv(dir), false)
+	if r.Status != "info" {
+		t.Fatalf("expected info, got %s (%s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "herdr not installed") {
+		t.Errorf("expected detail to mention herdr not installed, got: %s", r.Detail)
+	}
+}
+
+// TestCheckShellAliases_ClaudeModelOnly_InfoWithSeatStartsClauseNotGuardedClause
+// pins that a claude --model-only finding stays info and describes the
+// "seat still starts" outcome, never the guarded-seat clause that only
+// applies to --permission-mode.
+func TestCheckShellAliases_ClaudeModelOnly_InfoWithSeatStartsClauseNotGuardedClause(t *testing.T) {
+	dir := t.TempDir()
+	writeAliasRc(t, filepath.Join(dir, ".zshrc"), `alias claude='claude --model x'`+"\n")
+
+	r := checkShellAliases(shellAliasTestEnv(dir), true)
+	if r.Status != "info" {
+		t.Fatalf("expected info, got %s (%s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "the seat still starts") {
+		t.Errorf("expected detail to contain \"the seat still starts\", got: %s", r.Detail)
+	}
+	if strings.Contains(r.Detail, "guarded seat runs with the alias's permission mode") {
+		t.Errorf("a model-only claude finding must not mention the guarded-permission clause, got: %s", r.Detail)
+	}
+}
+
 // TestCheckShellAliases_TrailingComment_NotMisreadAsFlag is the M4 fix: a
 // trailing `# ...` comment on the same line must not be tokenized into the
 // alias value.
@@ -321,16 +436,113 @@ func TestCheckShellAliases_AliasOption_StillDetected(t *testing.T) {
 	}
 }
 
-// TestCheckShellAliases_SecondStatementOnSameLine_NotDetected pins the
-// documented limitation that only one alias statement per line is read: the
-// codex alias here follows an unquoted ';' and is never examined.
-func TestCheckShellAliases_SecondStatementOnSameLine_NotDetected(t *testing.T) {
+// TestCheckShellAliases_SecondStatementOnSameLine_Detected is the N2 fix:
+// the line is split into statements at the unquoted ';', so the codex alias
+// following an unrelated first statement is now read.
+func TestCheckShellAliases_SecondStatementOnSameLine_Detected(t *testing.T) {
 	dir := t.TempDir()
 	writeAliasRc(t, filepath.Join(dir, ".zshrc"), `alias ll='ls -l'; alias codex='codex -m x'`+"\n")
 
 	r := checkShellAliases(shellAliasTestEnv(dir), true)
-	if r.Status != "pass" {
-		t.Fatalf("expected pass (documented limitation: a second statement on the line is not read), got %s (%s)", r.Status, r.Detail)
+	if r.Status != "warn" {
+		t.Fatalf("expected warn (second statement on the line is now read), got %s (%s)", r.Status, r.Detail)
+	}
+}
+
+// TestCheckShellAliases_AliasAfterAndAnd_Detected is N2's other statement
+// shape: a leading `command -v codex >/dev/null &&` guard before the real
+// alias statement must not block detection, and && must not itself produce
+// an empty statement.
+func TestCheckShellAliases_AliasAfterAndAnd_Detected(t *testing.T) {
+	dir := t.TempDir()
+	writeAliasRc(t, filepath.Join(dir, ".zshrc"),
+		`command -v codex >/dev/null && alias codex="codex -m x"`+"\n")
+
+	r := checkShellAliases(shellAliasTestEnv(dir), true)
+	if r.Status != "warn" {
+		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, ":1") {
+		t.Errorf("expected detail to report line 1, got: %s", r.Detail)
+	}
+}
+
+// TestCheckShellAliases_AliasInsideThenClause_Detected is N2's third
+// statement shape: `alias` preceded by the `then` keyword (a conditional
+// alias definition) must still be recognized.
+func TestCheckShellAliases_AliasInsideThenClause_Detected(t *testing.T) {
+	dir := t.TempDir()
+	writeAliasRc(t, filepath.Join(dir, ".zshrc"), `if true; then alias codex='codex -m x'; fi`+"\n")
+
+	r := checkShellAliases(shellAliasTestEnv(dir), true)
+	if r.Status != "warn" {
+		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
+	}
+}
+
+// TestCheckShellAliases_ContinuedDoubleQuotedValue_WarnsAtFirstLine is N2's
+// continuation-line handling: a value that continues on the next physical
+// line via a backslash-newline inside a double-quoted string must still be
+// read as one statement, reported at its first physical line.
+func TestCheckShellAliases_ContinuedDoubleQuotedValue_WarnsAtFirstLine(t *testing.T) {
+	dir := t.TempDir()
+	writeAliasRc(t, filepath.Join(dir, ".zshrc"), "alias codex=\"codex \\\n  -m gpt\"\n")
+
+	r := checkShellAliases(shellAliasTestEnv(dir), true)
+	if r.Status != "warn" {
+		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, ":1") {
+		t.Errorf("expected detail to report line 1 (the statement's first physical line), got: %s", r.Detail)
+	}
+}
+
+// TestCheckShellAliases_ContinuedSingleQuotedValueAcrossThreeLines_Warns is
+// N2's continuation handling for a single-quoted value spanning more than
+// two physical lines (single quotes have no escapes, so the embedded
+// newlines are preserved literally in the value, which is fine for
+// whitespace-based flag tokenization).
+func TestCheckShellAliases_ContinuedSingleQuotedValueAcrossThreeLines_Warns(t *testing.T) {
+	dir := t.TempDir()
+	writeAliasRc(t, filepath.Join(dir, ".zshrc"), "alias codex='codex\n  -m\n  x'\n")
+
+	r := checkShellAliases(shellAliasTestEnv(dir), true)
+	if r.Status != "warn" {
+		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
+	}
+}
+
+// TestCheckShellAliases_UnterminatedQuoteAtEOF_NotFullyParsed is N2's
+// give-up path: a codex alias statement whose quote never closes before the
+// file ends must not be reported as harmless just because nothing was found
+// in the partial value that was actually read.
+func TestCheckShellAliases_UnterminatedQuoteAtEOF_NotFullyParsed(t *testing.T) {
+	dir := t.TempDir()
+	writeAliasRc(t, filepath.Join(dir, ".zshrc"), `alias codex='codex`+"\n")
+
+	r := checkShellAliases(shellAliasTestEnv(dir), true)
+	if r.Status != "info" {
+		t.Fatalf("expected info, got %s (%s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "not fully parsed: ~"+string(filepath.Separator)+".zshrc:1") {
+		t.Errorf("expected detail to report the unparsed statement, got: %s", r.Detail)
+	}
+	if strings.Contains(r.Detail, "has no conflicting flags") {
+		t.Errorf("an incomplete def must not be claimed harmless, got: %s", r.Detail)
+	}
+}
+
+// TestCheckShellAliases_UnrelatedUnbalancedQuote_DoesNotSwallowNextAliasLine
+// proves N2's joining is limited to alias statements: a non-alias line
+// ending in a stray, never-closing apostrophe must not absorb the next
+// physical line's independent, well-formed alias statement.
+func TestCheckShellAliases_UnrelatedUnbalancedQuote_DoesNotSwallowNextAliasLine(t *testing.T) {
+	dir := t.TempDir()
+	writeAliasRc(t, filepath.Join(dir, ".zshrc"), "msg=don't\n"+`alias codex='codex -m x'`+"\n")
+
+	r := checkShellAliases(shellAliasTestEnv(dir), true)
+	if r.Status != "warn" {
+		t.Fatalf("expected warn (the unrelated unbalanced quote must not swallow the next line), got %s (%s)", r.Status, r.Detail)
 	}
 }
 
@@ -408,10 +620,12 @@ func TestCheckShellAliases_LongPrecedingLine_StillFindsLaterAlias(t *testing.T) 
 	}
 }
 
-// TestCheckShellAliases_OverLongLine_KeepsPartialFindingsAndReportsUnreadable
-// is the other half of M3: a line beyond even the 1 MiB cap still fails the
-// scan, but findings collected before the failure are kept, not discarded.
-func TestCheckShellAliases_OverLongLine_KeepsPartialFindingsAndReportsUnreadable(t *testing.T) {
+// TestCheckShellAliases_OverLongLine_KeepsPartialFindingsAndReportsPartiallyRead
+// is the N3 fix: a line beyond even the 1 MiB cap still fails the scan, but
+// findings collected before the failure are kept, the file is still named
+// in the scanned clause (it WAS opened and partly read), and the wording is
+// "partially read" rather than the open-failure "could not read".
+func TestCheckShellAliases_OverLongLine_KeepsPartialFindingsAndReportsPartiallyRead(t *testing.T) {
 	dir := t.TempDir()
 	firstLine := `alias codex="codex -m x"`
 	overLong := strings.Repeat("y", 2*1024*1024)
@@ -421,51 +635,84 @@ func TestCheckShellAliases_OverLongLine_KeepsPartialFindingsAndReportsUnreadable
 	if r.Status != "warn" {
 		t.Fatalf("expected warn (findings collected before the scan error must be kept), got %s (%s)", r.Status, r.Detail)
 	}
-	if !strings.Contains(r.Detail, "could not read:") {
-		t.Errorf("expected detail to report the scan failure, got: %s", r.Detail)
+	want := "partially read: ~" + string(filepath.Separator) + ".zshrc (a line is longer than 1 MiB)"
+	if !strings.Contains(r.Detail, want) {
+		t.Errorf("expected detail to contain %q, got: %s", want, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "scanned 1 shell rc file(s): ~"+string(filepath.Separator)+".zshrc") {
+		t.Errorf("expected the partially-read file to still be named in the scanned clause, got: %s", r.Detail)
+	}
+	if strings.Contains(r.Detail, "could not read:") {
+		t.Errorf("a partial read must not be reported as could not read, got: %s", r.Detail)
 	}
 }
 
 // TestCheckShellAliases_AliasValueNeverAppearsInDetail guards against an
 // alias value (which can hold secrets, e.g. `-c api_key=...`) leaking into
-// doctor output -- only the fixed flag labels are ever rendered.
+// doctor output -- only the fixed flag labels are ever rendered. Includes a
+// value continued across two physical lines, so the join logic added for
+// N2 gets the same guarantee.
 func TestCheckShellAliases_AliasValueNeverAppearsInDetail(t *testing.T) {
-	dir := t.TempDir()
-	writeAliasRc(t, filepath.Join(dir, ".zshrc"), `alias codex="codex -m x -c api_key=SECRET123"`+"\n")
+	t.Run("single line", func(t *testing.T) {
+		dir := t.TempDir()
+		writeAliasRc(t, filepath.Join(dir, ".zshrc"), `alias codex="codex -m x -c api_key=SECRET123"`+"\n")
 
-	r := checkShellAliases(shellAliasTestEnv(dir), true)
-	if strings.Contains(r.Detail, "SECRET123") {
-		t.Errorf("alias value must never appear in Detail, got: %s", r.Detail)
-	}
+		r := checkShellAliases(shellAliasTestEnv(dir), true)
+		if strings.Contains(r.Detail, "SECRET123") {
+			t.Errorf("alias value must never appear in Detail, got: %s", r.Detail)
+		}
+	})
+
+	t.Run("continued across two lines", func(t *testing.T) {
+		dir := t.TempDir()
+		writeAliasRc(t, filepath.Join(dir, ".zshrc"), "alias codex=\"codex -m x \\\n  -c api_key=SECRET456\"\n")
+
+		r := checkShellAliases(shellAliasTestEnv(dir), true)
+		if strings.Contains(r.Detail, "SECRET456") {
+			t.Errorf("a continued alias value must never appear in Detail, got: %s", r.Detail)
+		}
+	})
 }
 
-func TestShellAliasWords(t *testing.T) {
+func TestShellAliasStatements(t *testing.T) {
 	cases := []struct {
-		name string
-		rest string
-		want []string
+		name     string
+		line     string
+		wantStmt [][]string
+		wantOpen bool
 	}{
-		{"simple unquoted", " codex x", []string{"codex", "x"}},
-		{"single-quoted with spaces", ` codex='codex -m x'`, []string{"codex=codex -m x"}},
-		{"double-quoted with escaped quote", ` codex="codex -m \"x\""`, []string{`codex=codex -m "x"`}},
-		{"single-quote concatenation", ` codex='a'\''b'`, []string{"codex=a'b"}},
-		{"comment ends statement", " codex=codex # trailing comment", []string{"codex=codex"}},
-		{"semicolon ends statement", " codex=codex; claude=claude", []string{"codex=codex"}},
-		{"pipe ends statement", " codex=codex | cat", []string{"codex=codex"}},
-		{"ampersand ends statement", " codex=codex & echo hi", []string{"codex=codex"}},
-		{"unterminated single quote runs to EOL", ` codex='codex -m x`, []string{"codex=codex -m x"}},
-		{"unterminated double quote runs to EOL", ` codex="codex -m x`, []string{"codex=codex -m x"}},
-		{"hash mid-word is not a comment", " codex=codex#not-a-comment", []string{"codex=codex#not-a-comment"}},
+		{"simple unquoted", "codex x", [][]string{{"codex", "x"}}, false},
+		{"single-quoted with spaces", `codex='codex -m x'`, [][]string{{"codex=codex -m x"}}, false},
+		{"double-quoted with escaped quote", `codex="codex -m \"x\""`, [][]string{{`codex=codex -m "x"`}}, false},
+		{"single-quote concatenation", `codex='a'\''b'`, [][]string{{"codex=a'b"}}, false},
+		{"comment ends statement", "codex=codex # trailing comment", [][]string{{"codex=codex"}}, false},
+		{"hash mid-word is not a comment", "codex=codex#not-a-comment", [][]string{{"codex=codex#not-a-comment"}}, false},
+		{"semicolon splits into two statements", "codex=codex; claude=claude", [][]string{{"codex=codex"}, {"claude=claude"}}, false},
+		{"pipe splits into two statements", "codex=codex | cat", [][]string{{"codex=codex"}, {"cat"}}, false},
+		{"double ampersand produces no empty statement", "codex=codex && claude=claude", [][]string{{"codex=codex"}, {"claude=claude"}}, false},
+		{"quotes protect statement separators", `codex='a;b|c&d#e'`, [][]string{{"codex=a;b|c&d#e"}}, false},
+		{"unterminated single quote runs to EOL and stays open", `codex='codex -m x`, [][]string{{"codex=codex -m x"}}, true},
+		{"unterminated double quote runs to EOL and stays open", `codex="codex -m x`, [][]string{{"codex=codex -m x"}}, true},
+		{"trailing backslash stays open with no spurious word", `codex=codex \`, [][]string{{"codex=codex"}}, true},
+		{"backslash-newline joins across the join point", "codex=\"codex \\\n-m x\"", [][]string{{"codex=codex -m x"}}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := shellAliasWords(tc.rest)
-			if len(got) != len(tc.want) {
-				t.Fatalf("shellAliasWords(%q) = %#v, want %#v", tc.rest, got, tc.want)
+			gotStmts, gotOpen := shellAliasStatements(tc.line)
+			if gotOpen != tc.wantOpen {
+				t.Errorf("shellAliasStatements(%q) open = %v, want %v", tc.line, gotOpen, tc.wantOpen)
 			}
-			for i := range got {
-				if got[i] != tc.want[i] {
-					t.Errorf("shellAliasWords(%q)[%d] = %q, want %q", tc.rest, i, got[i], tc.want[i])
+			if len(gotStmts) != len(tc.wantStmt) {
+				t.Fatalf("shellAliasStatements(%q) = %#v, want %#v", tc.line, gotStmts, tc.wantStmt)
+			}
+			for i := range gotStmts {
+				if len(gotStmts[i]) != len(tc.wantStmt[i]) {
+					t.Fatalf("shellAliasStatements(%q)[%d] = %#v, want %#v", tc.line, i, gotStmts[i], tc.wantStmt[i])
+				}
+				for j := range gotStmts[i] {
+					if gotStmts[i][j] != tc.wantStmt[i][j] {
+						t.Errorf("shellAliasStatements(%q)[%d][%d] = %q, want %q", tc.line, i, j, gotStmts[i][j], tc.wantStmt[i][j])
+					}
 				}
 			}
 		})
