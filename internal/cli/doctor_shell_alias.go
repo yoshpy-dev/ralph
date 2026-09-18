@@ -287,9 +287,9 @@ func scanShellAliasFile(path string) ([]shellAliasDef, error) {
 
 // shellAliasConflictingFlags returns every seat-launch flag ralph itself
 // passes to the named driver ("codex" or "claude") that also appears in an
-// alias value, in order of first appearance, deduplicated. value is
-// tokenized on whitespace (strings.Fields) after stripping one layer of
-// surrounding quotes.
+// alias value, in order of first appearance, deduplicated. value is the
+// already-unquoted word shellAliasWords produced (quoting is handled there
+// and nowhere else); it is tokenized on whitespace (strings.Fields).
 //
 // codex's short flags -m/-s/-a are clap aliases for --model/--sandbox/
 // --ask-for-approval and collide identically with them: verified against
@@ -307,13 +307,6 @@ func scanShellAliasFile(path string) ([]shellAliasDef, error) {
 // wins and the seat starts. A claude finding is therefore informational
 // only; see checkShellAliases for how the two drivers' severities differ.
 func shellAliasConflictingFlags(name, value string) []string {
-	v := strings.TrimSpace(value)
-	if len(v) >= 2 {
-		if (v[0] == '"' && v[len(v)-1] == '"') || (v[0] == '\'' && v[len(v)-1] == '\'') {
-			v = v[1 : len(v)-1]
-		}
-	}
-
 	isShort := func(tok, letter string) bool {
 		return tok == letter || (strings.HasPrefix(tok, letter) && len(tok) > 2 && tok[2] != '-')
 	}
@@ -327,7 +320,7 @@ func shellAliasConflictingFlags(name, value string) []string {
 		}
 	}
 
-	for _, tok := range strings.Fields(v) {
+	for _, tok := range strings.Fields(value) {
 		switch {
 		case tok == "--model", strings.HasPrefix(tok, "--model="):
 			add("--model")
