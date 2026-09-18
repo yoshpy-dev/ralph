@@ -12,6 +12,15 @@ Ralph Loop(/loop)の自律実行系を撤去し、Lead LLM が herdr(実行・�
 - (d) `--model` は運用上必須、省略時はプール先頭へ警告付きフォールバック。
 - (e) `[org].driver_pool` のみを設定し `model_pool` を省略した ralph.toml は、継承した既定 `model_pool` を宣言 driver に絞ってから検証する(後方互換の維持。cross-review ACTION_REQUIRED #1 起因、コミット 0d41553)。絞った結果が空になる場合は `[org].driver_pool` を名指しするエラーで fail する(コミット 79bcb96)。`model_pool` を明示した場合はこのフィルタを経由せず、従来通り厳密検証される。
 
+### 運用ノート: 既定 codex スラッグの更新手順(2026-09-18、issue #156)
+
+既定 `[org].model_pool` の codex エントリはスラッグ指定で、codex 側のモデル更新で消えうる(2026-09-17 未明に `gpt-6-astra` が `models_cache.json` から数時間消えて復帰した事例あり)。陳腐化の検知は `ralph doctor` の「Org codex model slugs」Check(`internal/cli/doctor_codex_models.go` の `checkCodexModelSlugs`)が担い、既定値の自動更新はしない。メンテナが既定スラッグを外す・置換するときの手順は次のとおり。
+
+- **(a) 同時に変える面**: 既定は 3 面ロックステップで、`internal/config/defaults_sync_test.go` が一致を検査する — `internal/config/config.go` の `Default()`、`templates/base/ralph.toml` の `model_pool`、`scripts/ralph-config.sh` と `templates/base/scripts/ralph-config.sh` の `RALPH_ORG_MODEL_POOL`。加えて `.claude/skills/org/SKILL.md` の「既定の model_pool」表(`scripts/sync-skills.sh` で `.agents/skills/` を再生成し、`templates/base/.claude/skills/` と `templates/base/.agents/skills/` へ cp した 4 面)、本 spec の 2026-09-16 改訂注記 (c)、既定値をハードコードするテスト(`internal/config/config_test.go`、`internal/org/envelope_summary_test.go`、`internal/cli/org_test.go`)を追従させる。
+- **(b) 検証**: `./scripts/run-verify.sh`(`defaults_sync_test` と `check-sync.sh` / `check-skill-sync.sh` を含む)と `ralph doctor` が pass すること。
+- **(c) 配布は 2 段階**: `/release` でタグを切ったあと、下流は **まずバイナリを更新**(`brew update && brew upgrade ralph`、または各自のインストール経路)し `ralph version` で新バージョンを確認してから、**その後** `ralph upgrade` で core(skill・`ralph-config.sh`)を置換する。`ralph upgrade` は `cmd/ralph/main.go` が `scaffold.EmbeddedFS` に注入した「今入っているバイナリの」埋め込みテンプレートを適用するため、バイナリ更新を飛ばすと旧既定・旧 core のまま成功したように見える。seed-once の `ralph.toml` はどちらの段階でも更新されないので、下流運用者は `/org` skill の「既定の model_pool」節の手順で自分の `model_pool` を直す。
+- **(d) 観測手順と消失の判定基準**: `checkCodexModelSlugs` はローカルの `models_cache.json` を読むだけで、更新も鮮度確認もしない。観測は毎回 **cache を更新してから** 行う — `codex exec --sandbox read-only 'echo ok' </dev/null` 等で codex を一度起動(codex 起動で cache が書き直され mtime が進む。2026-09-18 に確認)→ `stat` で cache の mtime が観測時刻に更新されたことを確認 → `ralph doctor` → issue #156 のコメントに「日時 / cache mtime / `codex --version` / モデル数 / 既定 5 スラッグの有無 / doctor 結果」を記録する。mtime が更新されていない観測は不成立(inconclusive)として数えない。一時的な消失と区別するため、更新済み cache で 2〜4 週間続けて消えたままの場合だけ既定から外す(または後継スラッグへ置換する)。
+
 ## Background and problem
 
 ### Current state
