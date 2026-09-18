@@ -779,7 +779,7 @@ func (w *watchRun) sendAlert(ctx context.Context, status *watchStatusFile, orgID
 //	    `ev.SeatID == LeadIdentity` here, which is backwards: it excluded
 //	    the star topology's mandated seat->lead `sent` traffic while
 //	    treating lead->seat sends as nothing. See
-//	    TestWatch_Deadman_SeatSentEvent_ClearsPendingAlert_WatchdogStopDoesNot.)
+//	    TestWatch_Deadman_SeatSentEvent_ClearsPendingAlert_LegacyWatchdogStopDoesNot.)
 //	(b) it is a non-watchdog event from the lead-driven lifecycle set
 //	    (spawned, spawn_started, stopped, disbanded, rejected) that is not
 //	    the watchdog's own enforcement write. Each of these is only
@@ -787,11 +787,27 @@ func (w *watchRun) sendAlert(ctx context.Context, status *watchStatusFile, orgID
 //	    (spawn/stop/disband), so it is evidence lead is alive and acting,
 //	    even when the event itself names a seat, not lead (e.g. lead
 //	    spawning a replacement seat in response to a stall ALERT, self-review
-//	    cycle-3 M3-1). Any `stopped` event the watchdog itself produces
-//	    carries "reason=watchdog_..." in its Details, which is what excludes
-//	    a watchdog-driven stop from (b) -- no current pulse-layer condition
-//	    calls Stop, so this exclusion is dormant today but stays in place for
-//	    any future watchdog enforcement action that does.
+//	    cycle-3 M3-1). The exclusion applies to any event in this lifecycle
+//	    set whose Details carry "reason=watchdog_..." -- in practice only
+//	    the pre-#152 watchdog's cutoff `stopped` writes ever carried it.
+//	    No code path has produced such an event since PR #152 removed the
+//	    org budget concept (2026-09-17): StopParams no longer has a Reason
+//	    field and no pulse-layer condition calls Stop. Why the guard is
+//	    kept: this function's two production call sites are exactly a
+//	    baseline/recount pair -- sendAlert records the ManifestLen snapshot
+//	    and checkDeadman recounts against it -- so the count is only ever
+//	    used as a *difference*. A legacy cutoff that predates the alert
+//	    lands in both the baseline and every recount and cancels out; the
+//	    guard is load-bearing only when a cutoff is missing from the
+//	    baseline but present in the recount: (a) a pending alert persisted
+//	    by a pre-#152 build (its ManifestLen excluded the cutoff, and a full
+//	    recount without the guard would read one higher for an unchanged
+//	    manifest and silently clear the alert -- see
+//	    TestWatch_Deadman_PersistedAlertBaseline_SurvivesLegacyWatchdogStop),
+//	    or (b) a mixed-version window where an old `ralph org watch`
+//	    appends a cutoff after a new binary recorded the baseline. Keeping
+//	    the exclusion means such a cutoff never counts, so neither case can
+//	    misfire.
 //
 // The orgID filter excludes another org's activity in the same shared
 // manifest: without it, a new event in a different, active org would clear

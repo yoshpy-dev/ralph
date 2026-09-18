@@ -231,13 +231,6 @@ type StopParams struct {
 	OrgID  string
 	Seat   string
 	DryRun bool
-	// Reason, when non-empty, is appended to the stopped event's Details as
-	// " reason=<Reason>" -- the audit trail for an automatic (non-operator)
-	// stop, e.g. a future watchdog enforcement action (see
-	// leadActivityEventCount's "reason=watchdog_..." exclusion in
-	// internal/org/watch.go). A manual `ralph org stop` invocation leaves
-	// this blank.
-	Reason string
 }
 
 // StopResult is Stop's return value.
@@ -291,9 +284,6 @@ func (o *Org) Stop(p StopParams) StopResult {
 		}
 
 		details = paneNote + " " + leaveNote
-	}
-	if p.Reason != "" {
-		details += " reason=" + p.Reason
 	}
 
 	err = o.appendEvent(ManifestEvent{
