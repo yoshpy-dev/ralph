@@ -16,13 +16,14 @@ recorded in `docs/evidence/codex-seat-permissions-2026-09-18.md`.
 - `ralph doctor` passes for codex, herdr, and agmsg.
 - The herdr socket is up: open the herdr TUI, or run `herdr server` headless.
 - **Shell aliases break every codex spawn, not just this recipe.** If your
-  shell rc defines `alias codex="codex -m ..."` (or a `claude` alias that adds
-  `--model`), herdr sends the seat command to the pane's interactive shell as
-  is, the alias expands, and codex exits with
+  shell rc defines `alias codex="codex -m ..."`, herdr sends the seat command
+  to the pane's interactive shell as is, the alias expands, and codex exits
+  with
   `error: the argument '--model <MODEL>' cannot be used multiple times`.
   `ralph org spawn` then reports `spawn_failed` after the `agent_start`
   timeout. Remove the alias, or start herdr from a HOME / rc that does not
-  define it.
+  define it. A `claude` alias that adds `--model` should collide the same
+  way with claude seats (not verified).
 - **Add the agmsg database to the sandbox's writable roots.** Under
   `--sandbox workspace-write` codex can write only to the working directory
   and to `/tmp`-style temp roots; the agmsg SQLite database
@@ -128,9 +129,11 @@ ralph org spawn --org-id perm-edits --id reviewer --role reviewer --driver codex
 
 ### 3. Cleanup
 
+For each org you spawned (`perm-auto`, `perm-edits`):
 `ralph org stop --seat reviewer` → `ralph org disband` →
-`ralph org status --org-id <id>` shows no active seat → `herdr agent list`
-is empty → close the pane. Confirm no throwaway file is left under `$HOME`.
+`ralph org status --org-id <id>` shows no active seat → close the pane.
+Then confirm `herdr agent list` is empty and no throwaway file is left under
+`$HOME`.
 
 ## Verdicts and opt-in
 

@@ -109,7 +109,7 @@ type OrgModelPoolEntry struct {
 // watch`'s two layers: a deterministic pulse-layer timer (IntervalSeconds,
 // StallMinutes) and an on-demand semantic-judgment watcher layer
 // (WatcherEnabled, WatcherModel). See
-// docs/plans/active/2026-08-02-org-runtime-watchdog.md for the full design.
+// docs/plans/archive/2026-08-02-org-runtime-watchdog.md for the full design.
 type OrgWatchdogConfig struct {
 	// IntervalSeconds is how often the pulse layer evaluates watch
 	// conditions (heartbeat stall, process liveness, scope change).

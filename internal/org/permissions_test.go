@@ -92,7 +92,7 @@ func TestPermissionArgsForDriver_Codex_FailClosed(t *testing.T) {
 				t.Fatalf("permissionArgsForDriver(codex, %q): expected fail-closed error, got nil", mode)
 			}
 			if !strings.Contains(err.Error(), "requires [org.permissions].codex_verified=true") || !strings.Contains(err.Error(), "guarded") {
-				t.Errorf("expected fail-closed error to mention live-verification and guarded, got %v", err)
+				t.Errorf("expected fail-closed error to require codex_verified and mention guarded, got %v", err)
 			}
 		})
 	}
