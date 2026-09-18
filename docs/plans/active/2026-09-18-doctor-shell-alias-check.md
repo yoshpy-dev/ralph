@@ -119,13 +119,15 @@ doctor の Check 追加のみ。下流へは次回 release でバイナリ経由
 - 2026-09-18 work: Slice C(self-review の修正)は implementer に委譲(c12169f、4 ファイル)。逸脱 1 件: gofmt が doc comment 内の連続した引用符を曲線引用符に書き換えるため、該当例を散文に言い換えた。orchestrator が HEAD 一致・porcelain 空・差分を確認し、`shellAliasConflictingFlags` に残っていた重複の引用符剥離(word reader が処理済み)を 8202d58 で除去。対象テスト再実行と `./scripts/run-verify.sh` は green
 - 2026-09-18 work: AC-5 の実機 evidence(改訂後)。`go run ./cmd/ralph doctor` の該当行: `⚠ Shell aliases (codex/claude): warn — alias codex in ~/.config/zsh/.zshrc:35 adds --model (-m) — herdr expands the alias in the seat's pane and codex rejects the repeated flag ("cannot be used multiple times"), so ralph org spawn fails; remove the alias or start herdr from an alias-free rc (docs/recipes/codex-seat-permissions.md). alias claude in ~/.config/zsh/.zshrc:34 adds --model — claude accepts the repeated flag and the value ralph org spawn passes last wins, so the seat still starts; the alias's other flags reach every seat. scanned 4 shell rc file(s): ~/.config/zsh/.zshrc, ~/.config/zsh/.zshenv, ~/.zprofile, ~/.profile (files they source are not followed)`
 - 2026-09-18 self-review 再確認(同 report の Revalidation 節、1cf548d): 当初 9 件はすべて解消。修正で生じた新所見 6 件(MEDIUM 2 / LOW 4)も同 cycle 内で直す。N1 Detail と文書が「ralph も同じフラグを付ける」前提で書かれているが permission フラグは guarded では付かない → 文をフラグ種別ごとに書き分け、claude の `--permission-mode` は warn に上げる。N2 継続行と `;` 以降の alias を見逃したまま pass と言い切る → 行を文に分割して読み、継続行を連結し、読み切れなければ `not fully parsed` を出す。N3 部分読み取りの Detail が自己矛盾 → `partially read:` に分け、走査済みに数える。N4 「claude に短縮形はない」は誤り → 該当 2 フラグに短縮形がない、に修正。N5 型名 `shellAliasWord` → `shellAliasAssignment`。N6 Assumptions に残った旧文言を更新
+- 2026-09-18 work: Slice D(再確認の新所見 N1〜N5)は implementer に委譲(33e5bad、2 ファイル、逸脱なし)。implementer が指摘した `doctor.go` の Check 8b コメントの陳腐化は orchestrator が 4352419 で修正。再々確認は行わない(1 cycle 1 回)ため、orchestrator が差分を通読し、ビルドしたバイナリを偽 HOME の fixture 3 種で実行して確認した: `command -v codex >/dev/null && alias codex="codex -s danger-full-access"` → warn(guarded の文のみ)、`alias claude='claude --permission-mode bypassPermissions'  # --model in a comment` → warn(`--permission-mode` のみ検出)、3 行にまたがる二重引用符の値 → warn(`:1` を報告)。`go test ./internal/cli/... -count=1` と `./scripts/run-verify.sh` は green
+- 2026-09-18 work: AC-5 の実機 evidence(最終)。`go run ./cmd/ralph doctor` の該当行は warn で、codex の文は `alias codex in ~/.config/zsh/.zshrc:35 adds --model (-m) — … ralph org spawn always passes --model, so every spawn fails; …`、claude の文は `alias claude in ~/.config/zsh/.zshrc:34 adds --model — claude accepts a flag given twice and the last value wins; ralph org spawn always passes --model after the alias, so its value applies and the seat still starts; the alias's other flags reach every seat`、末尾は `scanned 4 shell rc file(s): ~/.config/zsh/.zshrc, ~/.config/zsh/.zshenv, ~/.zprofile, ~/.profile (files they source are not followed)`
 
 ## Progress checklist
 
 - [x] Plan reviewed
 - [x] Branch created
 - [x] Implementation started
-- [ ] Review artifact created
+- [x] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
