@@ -43,9 +43,11 @@ Lead(座席の編成・統括を行う識別子)がその機構をどう操作�
   失敗し、guarded 座席では alias の値が黙って効く。`--ask-for-approval`
   (`-a`)を ralph が付けるのは autonomous 座席だけなので、その alias は
   autonomous では起動に失敗し、edits / guarded 座席では alias の承認
-  ポリシーが黙って効く。alias を外すか、alias を読まない HOME / rc で
-  herdr を起動する(`docs/recipes/codex-seat-permissions.md` の前提を
-  参照)。`claude` は同じフラグの重複を受け付けて後ろの値が勝つ(claude
+  ポリシーが黙って効く。codex 座席が edits / autonomous になれるのは
+  `[org.permissions].codex_verified = true` のときだけで、既定の false では
+  codex 座席はすべて guarded として動く。alias を外すか、alias を読まない
+  HOME / rc で herdr を起動する(`docs/recipes/codex-seat-permissions.md`
+  の前提を参照)。`claude` は同じフラグの重複を受け付けて後ろの値が勝つ(claude
   2.1.274 の CLI で実測、座席では未検証)。`--model` は ralph が必ず後ろに
   付けるので ralph の値が効くが、`--permission-mode` は guarded 座席には
   付けないため、その座席は alias の permission mode で動く。alias の他の
