@@ -793,20 +793,21 @@ func (w *watchRun) sendAlert(ctx context.Context, status *watchStatusFile, orgID
 //	    No code path has produced such an event since PR #152 removed the
 //	    org budget concept (2026-09-17): StopParams no longer has a Reason
 //	    field and no pulse-layer condition calls Stop. Why the guard is
-//	    kept: this function's only production caller (checkDeadman, via
-//	    sendAlert's ManifestLen snapshot) uses the count as a *difference*
-//	    against a baseline. A legacy cutoff that predates the alert lands
-//	    in both the baseline and every recount and cancels out -- so the
-//	    guard is load-bearing only when the baseline and the recount were
-//	    computed under different rules: (a) a pending alert persisted by a
-//	    pre-#152 build (its ManifestLen excluded the cutoff, and a full
+//	    kept: this function's two production call sites are exactly a
+//	    baseline/recount pair -- sendAlert records the ManifestLen snapshot
+//	    and checkDeadman recounts against it -- so the count is only ever
+//	    used as a *difference*. A legacy cutoff that predates the alert
+//	    lands in both the baseline and every recount and cancels out; the
+//	    guard is load-bearing only when a cutoff is missing from the
+//	    baseline but present in the recount: (a) a pending alert persisted
+//	    by a pre-#152 build (its ManifestLen excluded the cutoff, and a full
 //	    recount without the guard would read one higher for an unchanged
 //	    manifest and silently clear the alert -- see
 //	    TestWatch_Deadman_PersistedAlertBaseline_SurvivesLegacyWatchdogStop),
 //	    or (b) a mixed-version window where an old `ralph org watch`
-//	    still appends cutoffs after a new binary recorded a baseline.
-//	    Keeping the exclusion makes both rules identical, so neither case
-//	    can misfire.
+//	    appends a cutoff after a new binary recorded the baseline. Keeping
+//	    the exclusion means such a cutoff never counts, so neither case can
+//	    misfire.
 //
 // The orgID filter excludes another org's activity in the same shared
 // manifest: without it, a new event in a different, active org would clear

@@ -890,7 +890,7 @@ func TestWatch_Deadman_LegacyWatchdogStopEvent_DoesNotClearPendingAlert(t *testi
 	// leave=ok` (what Stop wrote) plus its " reason=watchdog_..." suffix
 	// -- the only part of the old shape the exclusion predicate reads.
 	// The other fields the old producer recorded onto the event (driver,
-	// model, worktree, pane_id, agmsg_team, dry_run) are omitted, since
+	// model, worktree, pane_id, agmsg_team) are omitted, since
 	// nothing in leadActivityEventCount consults them; no current code
 	// path emits this shape at all any more.
 	if err := o.Manifest.Append(ManifestEvent{TS: clk.Now().UTC().Format(time.RFC3339), OrgID: "org-a", SeatID: "seat-2", Event: EventStopped, Role: "worker", Details: "pane=ok leave=ok reason=watchdog_cutoff seat_wall_clock=30m observed=31m0s"}); err != nil {
@@ -951,8 +951,8 @@ func TestWatch_Deadman_LegacyWatchdogStopEvent_DoesNotClearPendingAlert(t *testi
 // above is the only signal deciding the outcome.
 func TestWatch_Deadman_PersistedAlertBaseline_SurvivesLegacyWatchdogStop(t *testing.T) {
 	// baselineFixture holds one fixture instance -- returned by pointer so
-	// each subtest gets an independent org/status/clock without the old
-	// six-value named return and its unlabeled trailing `return`.
+	// each subtest gets an independent org/status/clock and reads the alert
+	// id the fixture actually wrote into the status JSON.
 	type baselineFixture struct {
 		o               *Org
 		run             *watchRun
