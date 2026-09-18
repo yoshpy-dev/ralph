@@ -119,5 +119,5 @@ Critical forks: None(閾値・Status 不変・Stat 失敗時の扱いはいず�
 - [x] Implementation started
 - [x] Review artifact created
 - [x] Verification artifact created
-- [ ] Test artifact created
+- [x] Test artifact created
 - [ ] PR created
