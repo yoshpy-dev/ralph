@@ -1,6 +1,6 @@
 # org-stop-reason-removal
 
-- Status: Draft
+- Status: In progress
 - Owner: Claude Code
 - Date: 2026-09-17
 - Related request: PR #152 の budget 撤去で本番プロデューサを失った `StopParams.Reason`(と `Stop` の Details 追記)を削除する。`leadActivityEventCount` の `reason=watchdog_` 除外は、旧 watchdog が書いた manifest との互換ガードとして明示的に残す(issue #153 の選択肢 2 を、Codex plan advisory の HIGH 所見を受けて「プロデューサ側のみ削除」に絞った形)
@@ -113,7 +113,7 @@ Critical forks: 2 件、いずれもユーザーと解決済み。
 
 - [x] Plan reviewed
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
