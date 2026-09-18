@@ -849,3 +849,38 @@ func TestRunDoctorOpts_ShellAliasesCheck_WarnsThroughTheSeam(t *testing.T) {
 		t.Errorf("expected a warn-level Shell aliases (codex/claude) line in output:\n%s", out)
 	}
 }
+
+// TestParseAliasWords_NoDefinition pins the two early returns that yield no
+// definition: an alias statement made only of options (`alias -g`), and the
+// fish form with a name but no value (`alias codex`, which merely prints the
+// alias in every shell).
+func TestParseAliasWords_NoDefinition(t *testing.T) {
+	for _, words := range [][]string{
+		{"-g"},
+		{"-g", "--"},
+		{"codex"},
+		{"-g", "claude"},
+		nil,
+	} {
+		if got := parseAliasWords(words); len(got) != 0 {
+			t.Errorf("parseAliasWords(%q) = %v, want no definition", words, got)
+		}
+	}
+}
+
+// TestShellAliasUnreadableReason pins both renderings: a *fs.PathError is
+// reduced to its inner error (the caller already names the file), and any
+// other error keeps its own text.
+func TestShellAliasUnreadableReason(t *testing.T) {
+	_, openErr := os.Open(filepath.Join(t.TempDir(), "no-such-rc"))
+	if openErr == nil {
+		t.Fatal("expected os.Open of a missing file to fail")
+	}
+	if got := shellAliasUnreadableReason(openErr); strings.Contains(got, "no-such-rc") || got == "" {
+		t.Errorf("PathError reason = %q, want the inner error text without the path", got)
+	}
+	plain := errors.New("scanner gave up")
+	if got := shellAliasUnreadableReason(plain); got != "scanner gave up" {
+		t.Errorf("plain error reason = %q, want %q", got, "scanner gave up")
+	}
+}

@@ -122,6 +122,7 @@ doctor の Check 追加のみ。下流へは次回 release でバイナリ経由
 - 2026-09-18 work: Slice D(再確認の新所見 N1〜N5)は implementer に委譲(33e5bad、2 ファイル、逸脱なし)。implementer が指摘した `doctor.go` の Check 8b コメントの陳腐化は orchestrator が 4352419 で修正。再々確認は行わない(1 cycle 1 回)ため、orchestrator が差分を通読し、ビルドしたバイナリを偽 HOME の fixture 3 種で実行して確認した: `command -v codex >/dev/null && alias codex="codex -s danger-full-access"` → warn(guarded の文のみ)、`alias claude='claude --permission-mode bypassPermissions'  # --model in a comment` → warn(`--permission-mode` のみ検出)、3 行にまたがる二重引用符の値 → warn(`:1` を報告)。`go test ./internal/cli/... -count=1` と `./scripts/run-verify.sh` は green
 - 2026-09-18 work: AC-5 の実機 evidence(最終)。`go run ./cmd/ralph doctor` の該当行は warn で、codex の文は `alias codex in ~/.config/zsh/.zshrc:35 adds --model (-m) — … ralph org spawn always passes --model, so every spawn fails; …`、claude の文は `alias claude in ~/.config/zsh/.zshrc:34 adds --model — claude accepts a flag given twice and the last value wins; ralph org spawn always passes --model after the alias, so its value applies and the seat still starts; the alias's other flags reach every seat`、末尾は `scanned 4 shell rc file(s): ~/.config/zsh/.zshrc, ~/.config/zsh/.zshenv, ~/.zprofile, ~/.profile (files they source are not followed)`
 - 2026-09-18 verify(`docs/reports/verify-2026-09-18-doctor-shell-alias-check.md`、0c22388): PASS。非ブロッキングの指摘 2 件を反映: AC-3 に「home 解決不能の場合は走査ファイルを列挙しない」例外を明記、skill / recipe の重大度要約に herdr 未導入なら info であることを追記
+- 2026-09-18 test(`docs/reports/test-2026-09-18-doctor-shell-alias-check.md`、9178954): PASS。対象 42 件 PASS / SKIP 0、`go test ./internal/... -count=1` 8 package ok、race なし、`internal/cli` のカバレッジ 82.5%(`doctor_shell_alias.go` の全 10 関数が 80% 以上)、ビルドしたバイナリの fixture 8 種と exit code 不変の確認も期待どおり。tester が挙げた未到達の分岐 2 つ(`parseAliasWords` の定義なしの early return、`shellAliasUnreadableReason` の PathError 以外の経路)は、報告後に orchestrator がテスト 2 件を追加して埋めた(テストのみの変更。static verify と対象テストは green)
 
 ## Progress checklist
 
@@ -130,5 +131,5 @@ doctor の Check 追加のみ。下流へは次回 release でバイナリ経由
 - [x] Implementation started
 - [x] Review artifact created
 - [x] Verification artifact created
-- [ ] Test artifact created
+- [x] Test artifact created
 - [ ] PR created
