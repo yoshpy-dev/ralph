@@ -61,13 +61,13 @@ Critical forks: 2 件、いずれもユーザーと解決済み。
 
 ## Acceptance criteria
 
-- [ ] AC-1: `grep -n 'Reason' internal/org/verbs.go` が空。`grep -n 'Reason:' internal/org/watch_test.go` が空。`grep -rn 'p.Reason' internal/` が空(watch.go の escalation レコード `Reason` フィールドは対象外で残る)
-- [ ] AC-2: `leadActivityEventCount` のコードは不変で `reason=watchdog_` 除外が残っている(`grep -c 'reason=watchdog_' internal/org/watch.go` が 2 以上: コードとコメント)。doc comment に「dormant」「future watchdog enforcement」の記述がなく(`grep -n 'dormant\|future watchdog enforcement' internal/org/watch.go` が空)、legacy 互換ガードである旨と PR #152 への参照がある。`go vet ./internal/org/...` clean
-- [ ] AC-3: `grep -n 'WatchdogsOwnStopEvent\|_WatchdogStopDoesNot' internal/org/watch_test.go` が空(改名済み)。`TestWatch_Deadman_LegacyWatchdogStopEvent_DoesNotClearPendingAlert` と `TestWatch_Deadman_SeatSentEvent_ClearsPendingAlert_LegacyWatchdogStopDoesNot` が `o.Manifest.Append` で `reason=watchdog_` 付き `stopped` を書き、`o.Stop(` 経由ではない。`TestWatch_Deadman_ManualStopOfOtherSeat_ClearsPendingAlert` が Reason なしで pass
-- [ ] AC-4: `TestWatch_Deadman_PersistedAlertBaseline_SurvivesLegacyWatchdogStop` が存在し、(i) 新規イベントなしで escalation が 1 回起きる、(ii) `sent` 追加後の cycle で alert が消える、の両方を assert して pass
-- [ ] AC-5: `go test ./internal/org/... ./internal/cli/... -count=1` green。`./scripts/run-verify.sh` green
-- [ ] AC-6: `docs/tech-debt/README.md` の `StopParams.Reason` 行が `~~` + `(RESOLVED 2026-09-18 in refactor/org-stop-reason-removal)` でクローズされ、「プロデューサ側のみ削除、reader 側は legacy 互換で残す」と Codex HIGH-1 の理由が記録されている。行のパイプ数は 6 のまま、他行は無変更
-- [ ] AC-7: `grep -rn 'StopParams.Reason' docs/specs docs/recipes README.md .claude templates/base` が空(履歴レポート `docs/reports/` と archive plan は対象外)
+- [x] AC-1: `grep -n 'Reason' internal/org/verbs.go` が空。`grep -n 'Reason:' internal/org/watch_test.go` が空。`grep -rn 'p.Reason' internal/` が空(watch.go の escalation レコード `Reason` フィールドは対象外で残る)
+- [x] AC-2: `leadActivityEventCount` のコードは不変で `reason=watchdog_` 除外が残っている(`grep -c 'reason=watchdog_' internal/org/watch.go` が 2 以上: コードとコメント)。doc comment に「dormant」「future watchdog enforcement」の記述がなく(`grep -n 'dormant\|future watchdog enforcement' internal/org/watch.go` が空)、legacy 互換ガードである旨と PR #152 への参照がある。`go vet ./internal/org/...` clean
+- [x] AC-3: `grep -n 'WatchdogsOwnStopEvent\|_WatchdogStopDoesNot' internal/org/watch_test.go` が空(改名済み)。`TestWatch_Deadman_LegacyWatchdogStopEvent_DoesNotClearPendingAlert` と `TestWatch_Deadman_SeatSentEvent_ClearsPendingAlert_LegacyWatchdogStopDoesNot` が `o.Manifest.Append` で `reason=watchdog_` 付き `stopped` を書き、`o.Stop(` 経由ではない。`TestWatch_Deadman_ManualStopOfOtherSeat_ClearsPendingAlert` が Reason なしで pass
+- [x] AC-4: `TestWatch_Deadman_PersistedAlertBaseline_SurvivesLegacyWatchdogStop` が存在し、(i) 新規イベントなしで escalation が 1 回起きる、(ii) `sent` 追加後の cycle で alert が消える、の両方を assert して pass
+- [x] AC-5: `go test ./internal/org/... ./internal/cli/... -count=1` green。`./scripts/run-verify.sh` green
+- [x] AC-6: `docs/tech-debt/README.md` の `StopParams.Reason` 行が `~~` + `(RESOLVED 2026-09-18 in refactor/org-stop-reason-removal)` でクローズされ、「プロデューサ側のみ削除、reader 側は legacy 互換で残す」と Codex HIGH-1 の理由が記録されている。行のパイプ数は 6 のまま、他行は無変更
+- [x] AC-7: `grep -rn 'StopParams.Reason' docs/specs docs/recipes README.md .claude templates/base` が空(履歴レポート `docs/reports/` と archive plan は対象外)
 
 ## Implementation outline
 
@@ -111,6 +111,7 @@ Critical forks: 2 件、いずれもユーザーと解決済み。
 - 2026-09-18 work: `./scripts/branch-name.sh from-plan` は `refactor/153/org-stop-reason-removal` を返すが、`/plan` が登録した worktree state のブランチ `refactor/org-stop-reason-removal` を `/work` 手順 2d(既存 state を resume)に従い維持
 - 2026-09-18 work: Slice A = bce892c(implementer 委譲)。逸脱 1 件を採用: 3d のベースラインを legacy cutoff 追加の **前** に計算する。plan の手順どおり追加後に計算すると、ベースラインも同じ関数で算出されるため除外分岐を消しても両方が同じだけ動き、テストが判別できない。前に計算すれば除外の有無だけが recount とベースラインの一致/不一致を決める(テストの doc comment「Discrimination note」に記録)
 - 2026-09-18 work: Slice B は inline 例外(単一ファイル数行)で orchestrator が実施。パイプ数 6、Impact/Why deferred セルのハッシュ一致、struck 行 44→45 を確認。RESOLVED 日付は実施日の 2026-09-18(AC-6 の記述も合わせて修正)
+- 2026-09-18 work: 全 7 AC のゲートを orchestrator が再実行して達成を確認。verify スクリプト green(evidence: `docs/evidence/verify-2026-09-18-013259.log`、gitignored)
 
 ## Progress checklist
 
