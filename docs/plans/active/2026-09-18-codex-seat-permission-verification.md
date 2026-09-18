@@ -123,6 +123,7 @@ Critical forks: 2 件、ユーザーと解決済み(2026-09-18、AskUserQuestion
 - 2026-09-18 plan drift: Non-goals の「`permissions.go` はコメントのみ」はエラー文言 2 行の変更で逸脱。運用者向けメッセージが存在しない follow-up を指すのは誤解を招くため、ロジック不変の文言変更として受け入れた
 - 2026-09-18 self-review 再検証: H1・M1〜M3・L1〜L7 全件解消、Merge 判定。Follow-ups(LOW 4: テストの失敗メッセージ、claude 座席の alias 衝突を断定、recipe の後始末が 1 org 前提、`config.go:112` の `active/` 参照)を inline で修正 = 7d07e2f。AC-5 は 51df396 の後に verify スクリプトを再実行して再確認済み(evidence: `docs/evidence/verify-2026-09-18-074556.log`)
 - 2026-09-18 cross-review(cycle 1): codex が P2 を 1 件(recipe の後続コマンドに `--org-id` / `--state-dir` / `--config` がなく、失敗するか既定 state の空 roster を表示する)。ACTION_REQUIRED に分類、ユーザー判断「修正して全 pipeline 再実行」。修正 = 33158e2(send / wait / stop / disband / status を明示コマンド化、2 コピー同一)。cycle 2/2 として `/self-review` から再実行
+- 2026-09-18 self-review(cycle 2): Merge、LOW 4(recipe の `task.txt` 未定義と typed protocol 検証の未記載、`send` と `wait` の同一フェンス化で composer 残留時の `wait` 即時返却が見えない、cleanup の `status` 行だけ `--config` なし、ぶら下がり語の折り返し 2 箇所)。inline で修正 = f769f40。verify スクリプト green(evidence: `docs/evidence/verify-2026-09-18-085148.log`)
 
 ## Progress checklist
 
