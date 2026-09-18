@@ -102,6 +102,7 @@ Critical forks: None。
 - 2026-09-18 work: Slice A = 4fa920e(`/org` skill 段落 + 4 面ミラー、`check-skill-sync.sh` / `check-sync.sh` pass)、Slice B = b66ec5c(spec 節、AC-2 の 16 語すべて 1 以上)。いずれも inline。`./scripts/run-verify.sh` green(evidence: `docs/evidence/verify-2026-09-18-035456.log`、gitignored)、`go test ./internal/config/... -count=1` ok。AC-3(issue コメント)と AC-5(`Refs #156`)は `/pr` 段階で満たす
 - 2026-09-18 self-review(cycle 1): conditional Merge、HIGH 1(H1: 配布される運用者段落が「warn したら書き換える」とだけ言い、cache が陳腐化しうること・一時的消失の事例を伝えていない)、MEDIUM 2(M1: (a) の列挙が閉じていて skill 冒頭の「プール先頭」記述と `templates/base/ralph.toml` の roles コメント例を取りこぼす、M2: 「追従には → `ralph upgrade` の順が要る」は機序より強い主張。実効プールはバイナリ差し替え時点で切り替わり `ralph upgrade` は変えない)、LOW 4(L1: 「3 面」と 4 パスの帰属、L2: seed advisory diff への言及なし、L3: `$CODEX_HOME 配下` の不正確な再掲、L4: 判定基準が 2〜4 週間の幅のまま)。全件を inline で修正 = 86b71fe。運用者段落は「warn 1 回で外さない → codex 起動か `--probe-models` で確認 → 書き換え → advisory diff が入口」の流れに書き直し、spec (a) に `git grep` による残存掃き取りを追加、(c) に `AdvisoryEntry` の経路を追加、(d) の判定を「2 週間連続で外す判断に入り、迷えば 4 週間まで延長」に確定
 - 2026-09-18 plan drift: Scope 2 (d) の「2〜4 週間続けて消えたままの場合だけ」は L4 を受けて上記の確定基準に置き換えた。issue コメント(Scope 3)も同じ基準で書く
+- 2026-09-18 self-review 再検証: H1・M1・M2・L1〜L4 全件解消、Merge 判定。Follow-ups(cosmetic)3 点を inline で修正 = 07cdd0d(`--probe-models` の成功/失敗の非対称、`driver_pool` のみ設定時の既定の絞り込み、spec (a) の「冒頭の」→「前提」節)。reviewer が別 issue を勧めた「doctor の warn 文言に cache の mtime を出す」は `/pr` 段階で issue 化する。`RALPH_ORG_MODEL_POOL` に Go/shell の読み手がない点は既存事象で本 PR の範囲外
 
 ## Progress checklist
 
