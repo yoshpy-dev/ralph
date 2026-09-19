@@ -478,9 +478,9 @@ const (
 // flags additionally require [org.permissions].codex_verified = true
 // (internal/config/config.go's CodexVerified, default false):
 // permissionArgsForDriver fails codex edits/autonomous closed until an
-// operator sets it, so on a default project no codex seat ever reaches
-// edits or autonomous and every codex seat is guarded regardless of its
-// configured mode.
+// operator sets it, and Spawn rejects such a seat outright rather than
+// downgrading it, so on a default project guarded is the only mode a codex
+// seat can start in.
 func shellAliasFlagClass(label string) string {
 	switch label {
 	case "--model", "--model (-m)":

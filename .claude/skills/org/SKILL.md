@@ -45,15 +45,16 @@ Lead(座席の編成・統括を行う識別子)がその機構をどう操作�
   autonomous では起動に失敗し、edits / guarded 座席では alias の承認
   ポリシーが黙って効く。codex 座席が edits / autonomous になれるのは
   `[org.permissions].codex_verified = true` のときだけで、既定の false では
-  codex 座席はすべて guarded として動く。alias を外すか、alias を読まない
-  HOME / rc で herdr を起動する(`docs/recipes/codex-seat-permissions.md`
-  の前提を参照)。`claude` は同じフラグの重複を受け付けて後ろの値が勝つ(claude
-  2.1.274 の CLI で実測、座席では未検証)。`--model` は ralph が必ず後ろに
-  付けるので ralph の値が効くが、`--permission-mode` は guarded 座席には
-  付けないため、その座席は alias の permission mode で動く。alias の他の
-  フラグは全座席に効く。`ralph doctor` の「Shell aliases (codex/claude)」
-  Check が該当 alias を file:line 付きで報告する(claude の `--model` だけ、
-  または herdr 未導入なら info、それ以外は warn)。
+  ralph がその spawn を拒否するため、起動できる codex 座席は guarded だけに
+  なる。alias を外すか、alias を読まない HOME / rc で herdr を起動する
+  (`docs/recipes/codex-seat-permissions.md` の前提を参照)。`claude` は同じ
+  フラグの重複を受け付けて後ろの値が勝つ(claude 2.1.274 の CLI で実測、
+  座席では未検証)。`--model` は ralph が必ず後ろに付けるので ralph の
+  値が効くが、`--permission-mode` は guarded 座席には付けないため、その
+  座席は alias の permission mode で動く。alias の他のフラグは全座席に
+  効く。`ralph doctor` の「Shell aliases (codex/claude)」Check が該当
+  alias を file:line 付きで報告する(claude の `--model` だけ、または
+  herdr 未導入なら info、それ以外は warn)。
 - **`--model` は `spawn` / `start` で必ず明示する**。省略するとプール先頭
   (claude は `fable`、codex は `gpt-6-astra`)へ stderr 警告付きでフォール
   バックするが、モデル選択の意図が残らないため運用ルールとして省略しない。
