@@ -9,12 +9,17 @@ api_ke[y]=SECRET(123|456)
 # (commit 5a91cff) and the range scan reads history, so allow that one line.
 SECRET[(]123[|]456[)]
 # Hygiene sentences in docs/reports/{test,verify}-2026-09-19-codex-agmsg-
-# writable-root.md name, in backticks, the secret-key patterns they assert
-# are ABSENT from fixtures (e.g. "no fixture ... contains any `api_key=`/
-# `password=`/`access_token=`-shaped string"), so naming the pattern trips
-# the scanner even though no value follows. Requires the closing backtick
+# writable-root.md name several secret-key pattern names in backticks to
+# assert they are ABSENT from fixtures, so naming the pattern trips the
+# scanner even though no value follows it. Requires the closing backtick
 # immediately after "=" (nothing in between), so a real secret pasted into
 # a backtick-quoted span (which would have a value between "=" and the
 # closing backtick) still matches the scanner, not this rule. Spelled with
 # a bracket expression for the same self-match reason as the entry above.
 `api_ke[y]=`
+# The first spelling of that comment (commit 90dc4be) quoted the flagged
+# sentences verbatim, without breaking the pattern names, and is still in
+# this branch's history — so allow that spelling too. Same bracket-
+# expression trick, applied to the other keyword this rule's own history
+# happens to repeat.
+`passwor[d]=`
