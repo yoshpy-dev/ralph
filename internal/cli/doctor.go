@@ -140,11 +140,12 @@ func runDoctorFull(targetDir string, probeModels, strict bool) error {
 	results = append(results, checkCodexModelSlugs(cfg))
 
 	// Check 11b: codex sandbox vs agmsg's message store. Static read of the
-	// user's codex config.toml; warns when codex seats run under
-	// workspace-write (codex_verified = true, or sandbox_mode =
-	// "workspace-write") but no writable root covers the agmsg store -- see
-	// checkCodexAgmsgWritableRoot and docs/recipes/codex-seat-permissions.md.
-	results = append(results, checkCodexAgmsgWritableRoot(cfg.Org.Permissions.CodexVerified, driver.ResolveAgmsgHome(cfg.Org.AgmsgHome), doctorCodexSandboxEnv))
+	// user's codex config.toml plus the project's [org] envelope (driver_pool,
+	// permissions roles/default); warns when a role that could actually run
+	// under workspace-write exists but no writable root covers the agmsg
+	// store -- see checkCodexAgmsgWritableRoot and
+	// docs/recipes/codex-seat-permissions.md.
+	results = append(results, checkCodexAgmsgWritableRoot(cfg.Org, driver.ResolveAgmsgHome(cfg.Org.AgmsgHome), doctorCodexSandboxEnv))
 
 	// Check 12: optional model-pool probes (--probe-models).
 	if probeModels {

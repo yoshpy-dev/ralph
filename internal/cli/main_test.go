@@ -22,7 +22,8 @@ func TestMain(m *testing.M) {
 		return shellAliasEnv{Home: filepath.Join(os.TempDir(), "ralph-cli-test-no-such-home")}, nil
 	}
 	doctorCodexSandboxEnv = func() (codexSandboxEnv, error) {
-		return codexSandboxEnv{ConfigPath: filepath.Join(os.TempDir(), "ralph-cli-test-no-such-home", ".codex", "config.toml")}, nil
+		noSuchHome := filepath.Join(os.TempDir(), "ralph-cli-test-no-such-home")
+		return codexSandboxEnv{Home: noSuchHome, ConfigPath: filepath.Join(noSuchHome, ".codex", "config.toml")}, nil
 	}
 	os.Exit(m.Run())
 }
