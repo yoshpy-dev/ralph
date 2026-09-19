@@ -265,3 +265,250 @@ cmp docs/recipes/codex-seat-permissions.md templates/base/docs/recipes/codex-sea
 git diff main...HEAD -- docs/evidence/codex-seat-permissions-2026-09-18.md      # +1 line addendum only
 git status --porcelain                                                          # clean before and after
 ```
+
+## Cycle 2 (post cross-review fix + cycle-2 self-review)
+
+- Date: 2026-09-19
+- HEAD: `c8cd863` (was `0c22388` at cycle-1 verify; 15 commits since)
+- Trigger: cross-review (cycle 1) found 4 issues (2 ACTION_REQUIRED: AR-1
+  missing `.zprofile`/`.zlogin` candidates and the `$ZDOTDIR` directory set,
+  AR-2 the codex sandbox/approval clauses conflated two different flag
+  classes; 2 WORTH_CONSIDERING: WC-1 quoted flag names inside an alias value,
+  WC-2 silently dropping a candidate whose `os.Stat` fails for a reason other
+  than not-exist). User decision: fix all four and re-run the full pipeline
+  (cycle 2/2). Landed in `c5d646f` (cross-review fixes) + `c8e20e5` (stale
+  seam-comment cleanup). The cycle-2 self-review (`cd0e010`, "Cycle 2"
+  section) then found and fixed 1 MEDIUM regression + 5 LOW in the same
+  cycle, landed in `3783610` — **no reviewer pass ran on `3783610`**, so it
+  was checked against the plan and the C2 findings with extra care below.
+  `git status --porcelain` was clean before and after this cycle-2 pass;
+  nothing was edited or committed here beyond this report and its insight
+  event.
+
+**Overall cycle-2 verdict: PASS.** AC-1 through AC-5 remain met (AC-6 still
+correctly deferred to `/pr`). Static analysis is fully green. Every clause in
+改訂 items 8–10 is pinned by a named test. One LOW-equivalent documentation-
+precision finding is recorded below (not introduced by a code defect, and not
+tied to any AC) — non-blocking.
+
+### Static analysis (re-run at `c8cd863`)
+
+```
+$ ./scripts/run-static-verify.sh
+==> scripts/check-sync.sh            PASS (IDENTICAL 158, DRIFTED 0)
+==> scripts/check-pipeline-sync.sh   OK
+==> scripts/check-skill-sync.sh      [ok] 13 skill(s) in lock-step
+==> scripts/check-template-purity.sh PASS
+==> golang verifier: gofmt: ok / go vet: clean (silent) / golangci-lint: 0 issues. / staticcheck: clean (silent)
+==> All verifiers passed.
+Evidence saved to: docs/evidence/verify-2026-09-19-015105.log
+```
+
+`cmp .claude/skills/org/SKILL.md templates/base/.claude/skills/org/SKILL.md`,
+`cmp .agents/skills/org/SKILL.md templates/base/.agents/skills/org/SKILL.md`,
+and `cmp docs/recipes/codex-seat-permissions.md
+templates/base/docs/recipes/codex-seat-permissions.md` are all identical.
+`go test` was not run (same structural reason as cycle 1: `run-static-verify.sh`
+forces `HARNESS_VERIFY_MODE=static`, and `packs/languages/golang/verify.sh`
+gates `go test ./...` behind a `mode == test` branch `run_static()` never
+enters) — `/test`'s job per the pipeline contract.
+
+### AC re-confirmation
+
+**AC-1 — unaffected.** `internal/cli/doctor.go` is not in this cycle's diff
+(`git diff 0c22388..HEAD --stat` lists no `doctor.go` entry); the cycle-1
+PASS carries forward unchanged.
+
+**AC-2 / AC-3 — still met, expanded coverage.** The severity matrix and
+Detail-content clauses from cycle 1 are unchanged in substance (the switch at
+`doctor_shell_alias.go:847-854` is byte-identical to cycle 1's). The new
+flag-class split (codex sandbox vs. approval, tracked separately per AR-2)
+adds two more warn sub-cases, both pinned:
+
+| New clause (AR-2 / plan Design decisions) | Pinning test(s) |
+| --- | --- |
+| codex `--sandbox`-only → sandbox clause, no "every spawn fails", no approval clause | `TestCheckShellAliases_CodexSandboxOnly_WarnsWithSandboxClauseOnly` |
+| codex `--ask-for-approval`-only → approval clause ("to autonomous seats only... edits and guarded seats silently run"), not the sandbox wording | `TestCheckShellAliases_CodexApprovalOnly_WarnsWithApprovalClauseOnly` |
+| all three flag classes (model, sandbox, approval) → three clauses in that order | `TestCheckShellAliases_CodexAllThreeFlagClasses_ClausesInOrder` |
+
+改訂 items 8–10, each mapped to named tests:
+
+| 改訂 item | Content | Pinning test(s) |
+| --- | --- | --- |
+| 8 (AR-1) | zsh candidates = `.zshenv`/`.zprofile`/`.zshrc`/`.zlogin` under each of `$ZDOTDIR` (if absolute), `~`, `~/.config/zsh`; bash adds `.bash_login` | `TestCheckShellAliases_ZdotdirZprofile_Warn`, `TestCheckShellAliases_ZdotdirZlogin_Warn`, `TestCheckShellAliases_ConfigZshZprofile_WarnsWhenZdotdirUnset`, `TestCheckShellAliases_BashLogin_Warn`, `TestCheckShellAliases_Zdotdir_Detected`, `TestCheckShellAliases_ZdotdirSymlinkedToHomeRc_ReportsZdotdirPath` (new candidate-order dedup) |
+| 9 (WC-2) | a candidate `os.Stat` failure other than not-exist reports its parent dir once as "could not read", → `info`; a not-a-directory component (`ENOTDIR`) stays a silent skip, not a report | `TestCheckShellAliases_InaccessibleConfigZshDir_InfoOnce`, `TestCheckShellAliases_ConfigIsRegularFile_PassNoShellRcFileFound` |
+| 10 (WC-1) | the alias value is re-tokenized with the same quote-aware reader before flag matching, so a quoted flag name/letter inside the value is still caught | `TestCheckShellAliases_QuotedFlagNameInValue_Warn`, `TestCheckShellAliases_QuotedPermissionModeInValue_Warn`, `TestCheckShellAliases_QuotedShortFlagInValue_Warn`, `TestShellAliasValueTokens` |
+
+No 改訂-8/9/10 clause is left without a pinning test.
+
+**N1–N6 (cycle 1) still hold** — unaffected by this cycle's diff (confirmed
+by reading `git diff 0c22388..HEAD -- internal/cli/doctor_shell_alias.go`;
+the N-series wording/logic is carried forward, only the sandbox/approval
+split and the `codex_verified` mention were added inside it).
+
+**Cycle-2 self-review findings (`cd0e010`, landed in `3783610`,
+un-reviewed) — cross-checked against the code, all confirmed correct:**
+
+- **C2-1** (newline/CR inside a joined value must act as whitespace, not
+  glue onto the token): confirmed — `shellAliasStatements`'s whitespace case
+  now includes `\n`/`\r` (`doctor_shell_alias.go:202`), with a doc comment
+  (`:152-155`) that names the alternative reading (the short-flag
+  concatenation rule accidentally accepting a newline) as the bug this fixes,
+  not evidence the old test already covered it. Pinned by
+  `TestCheckShellAliases_ContinuedSingleQuotedValueAcrossThreeLines_Warns`
+  (its own comment documents the red/green distinction) and the new
+  `TestCheckShellAliases_ContinuedSingleQuotedValueAcrossTwoLines_WarnsAtFirstLine`.
+- **C2-2** (an unclosed alias statement that names no codex/claude
+  assignment must still be reported "not fully parsed"): confirmed —
+  `shellAliasFileScan.Unclosed` is now populated independent of whether the
+  statement produced any `Defs` entry (`:437-439`), and `checkShellAliases`
+  folds `Unclosed` into `notFullyParsed` before the "no alias found" branch
+  can fire (`:835,838-839`). Pinned by
+  `TestCheckShellAliases_UnclosedAliasStatementWithoutCodexClaudeName_NotFullyParsed`
+  and the continuation-cap variant
+  `TestCheckShellAliases_UnclosedStatementAtContinuationCap_NamesFirstLineAndFindsLaterAlias`.
+- **C2-3** (`#` inside the alias's own VALUE must not be treated as a
+  comment, since herdr's interactive zsh pane has `interactivecomments`
+  off): confirmed — `shellAliasStatements` gained a `stopAtComment`
+  parameter; `parseAliasStatements` (rc-line level) passes `true`,
+  `shellAliasValueTokens` (value-level) passes `false`
+  (`doctor_shell_alias.go:287,513`), each with a doc-comment rationale.
+  Pinned by `TestCheckShellAliases_HashInsideValue_StillWarns`; the
+  pre-existing `TestCheckShellAliases_TrailingComment_NotMisreadAsFlag`
+  (rc-line-level `#`) still passes unaffected, since its fixture's value
+  never contains a `#`.
+- **C2-4** (name the `codex_verified` gate in the codex sentence and the
+  skill): confirmed in the Detail text — `shellAliasCodexSentence`'s sandbox
+  and approval clauses both now read "(modes/a mode a codex seat gets only
+  once `[org.permissions].codex_verified = true`)"
+  (`doctor_shell_alias.go:618-623`), pinned by the `codex_verified = true`
+  assertions in `TestCheckShellAliases_CodexSandboxOnly_...` and
+  `TestCheckShellAliases_CodexApprovalOnly_...`. See the drift finding below
+  for a wording-precision note on this specific addition.
+- **C2-5** (stale "値は空白でトークン化" left in Assumptions): confirmed —
+  the plan's Assumptions section (current text, line 49) now reads "値も同じ
+  reader で語に分けてから判定する(Scope 改訂 10...)", matching
+  `shellAliasValueTokens`; no leftover "空白でトークン化" phrase remains
+  (`grep -c '空白でトークン化' docs/plans/active/2026-09-18-doctor-shell-alias-check.md` = 0).
+- **C2-6** (extract the codex/claude sentence-building and Detail/scanned-
+  clause logic out of `checkShellAliases`): confirmed —
+  `shellAliasCodexSentence`, `shellAliasClaudeSentence`,
+  `shellAliasScannedClause`, and `shellAliasDetail` are now standalone, pure,
+  independently-tested functions (`doctor_shell_alias.go:606-698`); each has
+  its own unit test (`TestShellAliasCodexSentence`,
+  `TestShellAliasClaudeSentence`). `checkShellAliases` itself is
+  substantially shorter than the plan's stated pre-fix count.
+
+### Documentation-drift / precision finding (non-blocking, LOW-equivalent)
+
+**The C2-4 addition slightly loosens established fail-closed terminology in
+two places — worth a wording tightening, not a functional bug.**
+
+- `internal/cli/doctor_shell_alias.go:479-483` (the `shellAliasFlagClass`
+  doc comment, Go-internal, not user-facing): "...so on a default project no
+  codex seat ever reaches edits or autonomous and every codex seat is
+  guarded regardless of its configured mode."
+- `.claude/skills/org/SKILL.md` (+3 mirrors, operator-facing): "codex 座席が
+  edits / autonomous になれるのは `[org.permissions].codex_verified = true`
+  のときだけで、既定の false では codex 座席はすべて guarded として動く。"
+
+Verified against `internal/org/spawn.go:449-452` (not touched by this PR):
+when `permissionArgsForDriver` returns an error (codex mode is
+autonomous/edits and `CodexVerified` is false), the real path calls
+`o.reject(p, permErr)` — the **whole spawn is rejected** (`SpawnOutcomeFailed`);
+the seat never starts in any mode, it does not silently run capped to
+guarded. The two new sentences above, read at face value ("is guarded
+regardless of its configured mode" / "座席はすべて guarded として動く"),
+can be misread as "the seat still starts, just capped to guarded" — the
+opposite of what actually happens. The established, more precise phrasing
+already exists elsewhere in the codebase, unchanged by this PR:
+`internal/config/config.go:74` ("codex seats accept only guarded until the
+operator sets CodexVerified") and the recipe's own, already-correct,
+untouched first paragraph (`docs/recipes/codex-seat-permissions.md:3-4`,
+"codex seats accept only `guarded`... and reject `autonomous` / `edits` with
+a fail-closed error").
+
+This does **not** affect the actual `ralph doctor` output an operator sees:
+`shellAliasCodexSentence`'s own rendered clauses are careful and accurate —
+"modes a codex seat **gets** only once `codex_verified = true`" (not "modes
+it silently degrades from"). It also does not affect any AC (no AC text
+makes this claim) or any test (no test asserts this specific sentence). I
+read this as a LOW-equivalent documentation-precision finding worth a small
+rewording (e.g. "...so a default project's codex seats can only successfully
+spawn in guarded mode; requesting edits/autonomous fails the spawn outright
+rather than running capped") if `doctor_shell_alias.go` or the skill is
+touched again — not something that should trigger a third pipeline cycle by
+itself.
+
+### Team-lead's specific questions, answered
+
+1. **Recipe not touched for the `codex_verified` gate — confirmed, and the
+   existing text is the more accurate of the two.** The recipe's first
+   paragraph (`docs/recipes/codex-seat-permissions.md:3-4`) already states
+   the fail-closed-rejection precondition precisely ("reject `autonomous` /
+   `edits` with a fail-closed error"), predating this PR entirely (not in
+   `git diff 0c22388..HEAD`). The cycle-2 reviewer's judgment that no
+   duplicate sentence was needed there is correct. If anything, the new
+   sentences added to the Go doc comment and the skill (see the drift
+   finding above) should have matched the recipe's own wording rather than
+   introducing a looser paraphrase.
+2. **AC-5 evidence — the recorded (Slice E) evidence remains consistent with
+   the current code; no fresh evidence line is required.** Confirmed by
+   reading `git show 3783610 -- internal/cli/doctor_shell_alias.go` in full:
+   Slice F (the only commit after Slice E's real-machine run) does not touch
+   `shellAliasRcCandidates` (the candidate list/order is unchanged) and does
+   not change the `hasModel`-only branch of either
+   `shellAliasCodexSentence`/`shellAliasClaudeSentence` — the only textual
+   change it makes is adding the `codex_verified` clause to the
+   sandbox/approval branches, which this machine's aliases (both `--model`-only, per `docs/evidence/codex-seat-permissions-2026-09-18.md`) never
+   trigger. So the Slice E note (line 131: "引き続き warn(codex `:35`、
+   claude `:34`)" plus the new 4-file scanned order) is not stale — it
+   describes exactly what `c8cd863`'s code would still produce for this
+   machine's two aliases. I did not re-run `go run ./cmd/ralph doctor`
+   myself for the same reason as cycle 1 (out of scope, would read my own
+   machine's shell rc).
+3. **Candidate-list doc comment / code / plan 改訂-8 agreement — confirmed
+   exact match.** `shellAliasRcCandidates`'s doc comment
+   (`doctor_shell_alias.go:64-77`), its implementation (`:78-129`: `zshDirs
+   := [ZDOTDIR(if absolute), Home, Home/.config/zsh]`, each with `.zshenv`/
+   `.zprofile`/`.zshrc`/`.zlogin` in that order, then `.zsh_aliases`, then
+   the bash files including the newly-added `.bash_login`, then fish), and
+   the plan's 改訂 item 8 text all state the same file set and directory
+   order with no discrepancy.
+
+### Evidence commands run (cycle 2)
+
+```
+git log --oneline 0c22388..HEAD                                                 # 15 commits
+git diff 0c22388..HEAD --stat                                                   # doctor.go absent (AC-1 unaffected)
+grep -n '^func Test' internal/cli/doctor_shell_alias_test.go                    # 60 tests
+git show 3783610 -- internal/cli/doctor_shell_alias.go                          # full diff read; candidate list untouched
+git show 3783610 -- internal/cli/doctor_shell_alias.go | grep -c shellAliasRcCandidates   # 0 (function not touched)
+grep -n 'permissionArgsForDriver\|codexEditsArgs\|codexAutonomousArgs\|CodexVerified' internal/org/permissions.go
+sed -n '440,470p' internal/org/spawn.go                                         # confirms o.reject on permErr (spawn fails, not downgraded)
+cmp .claude/skills/org/SKILL.md templates/base/.claude/skills/org/SKILL.md       # identical
+cmp .agents/skills/org/SKILL.md templates/base/.agents/skills/org/SKILL.md       # identical
+cmp docs/recipes/codex-seat-permissions.md templates/base/docs/recipes/codex-seat-permissions.md   # identical
+./scripts/check-skill-sync.sh                                                   # [ok] 13 skill(s) in lock-step
+./scripts/check-sync.sh                                                         # PASS, DRIFTED 0
+./scripts/check-template-purity.sh                                              # PASS
+./scripts/run-static-verify.sh                                                  # PASS, evidence: docs/evidence/verify-2026-09-19-015105.log
+git diff 0c22388..HEAD -- docs/tech-debt/README.md                              # +1 row, config-aware-grading follow-up, accurate
+git status --porcelain                                                          # clean before and after
+```
+
+### Cycle-2 verdict
+
+| AC | Verdict |
+| --- | --- |
+| AC-1 | PASS (unaffected; `doctor.go` not touched this cycle) |
+| AC-2 | PASS — all clauses including the new sandbox/approval split pinned by named tests |
+| AC-3 | PASS — severity matrix unchanged in substance; new sub-cases pinned |
+| AC-4 | PASS — 4-way skill `cmp` and recipe pair `cmp` both identical; `check-skill-sync.sh`/`check-sync.sh`/`check-template-purity.sh` all green |
+| AC-5 | PASS (static half) — `gofmt`/`go vet`/`golangci-lint`/`staticcheck` all clean; Slice E's real-machine evidence still accurate for the current code (see above) |
+| AC-6 | Still correctly deferred to `/pr` |
+
+**Overall cycle-2 verdict: PASS.** No CRITICAL/HIGH-equivalent finding. One
+LOW-equivalent documentation-precision note (C2-4's "guarded regardless of
+configured mode" phrasing) is recorded above for an optional future
+tightening; it does not block this cycle and does not affect any AC.
