@@ -221,3 +221,113 @@ deferred work identified by this review; it is not yet in `docs/tech-debt/README
   code rather than deferred, so there is nothing to record in `docs/tech-debt/README.md`.
 - Known gaps unchanged: this is diff quality only. Acceptance criteria, static analysis,
   and the behavioural test run belong to `/verify` and `/test`.
+
+---
+
+## Cycle 2
+
+- Date: 2026-09-19
+- Range reviewed: `git diff 3e43a3c..HEAD`, HEAD `fea7fc9` (21 commits, 18 files,
+  +1582/-137), with `git diff main...HEAD` as context.
+- Trigger: cross-review cycle 1 found AR-1, WC-1, WC-2; the user chose to fix all
+  three and re-run the pipeline. This is the cycle-2 self-review, the last automatic
+  run under the default cap.
+- Verdict: **merge**. 1 MEDIUM, 7 LOW. No CRITICAL, no HIGH.
+
+### Evidence reviewed
+
+- `internal/cli/doctor_codex_writable_root.go` re-read in full (893 lines), the test
+  file (1562 lines), the unix test file, and every docs / plan / report / `.gitallowed`
+  hunk in the range.
+- New logic cross-checked against the producers: `internal/org/envelope.go`
+  (`ValidateSpawnEnvelope`, `modelInPool`, `modelAllowedForRole`),
+  `internal/org/permissions.go`, `internal/config/config.go`.
+- **Role/model matrix, seven configurations**, each driven through
+  `codexSeatModesPossible` and, independently, through `org.ValidateSpawnEnvelope` for
+  three role names x two models as an oracle. Included the lead's three requested cases:
+  an `[org.roles]` entry present but empty for the role; a role listed in `[org.roles]`
+  but absent from `[org.permissions.roles]`; and a pool whose codex entries are excluded
+  for every listed role while an unlisted role could still use them. **All seven agree
+  with the oracle**, including the two directions WC-2 was about.
+- **Implicit-root matrix, five configurations** of the two exclusion keys against
+  `TMPDIR` set to and differing from the injected fixed temp root.
+- **Symlink matrix** for the protected-directory rule: a store genuinely under
+  `.agents`, and a store reached through a `.agents` symlink whose target is outside it.
+- `TMPDIR=/tmp go test ./internal/cli/ -count=1` → `ok` (35.6s), confirming the
+  hermeticity fix in `91a5542`.
+- **Secret scanner probed with seven crafted lines** through
+  `./scripts/secret-scan.sh --file`, plus a scan of `.gitallowed` itself and of the
+  three reports that prompted the new allowlist entry (all four clean).
+- All probe files removed; `git status --porcelain` is empty.
+
+### Findings
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| MEDIUM | security | **C2-1. The protected-directory rule is applied only to the resolved spelling, so a symlink that leads out of a protected directory turns AR-1's warn back into a `pass`.** This is the one direction the triage says the check must never get wrong. | `internal/cli/doctor_codex_writable_root.go:593-601` resolves both sides with `resolveNearestExisting` and then calls `pathCrossesCodexProtectedDir` on the resolved pair only. Probed: with the agmsg home spelled through a `.agents` symlink whose target is a sibling directory, and the home directory as the sole writable root, the check returns **pass** — while the control (the store genuinely under `.agents`) correctly warns and names the blocked ancestor. The same probe prints the two verdicts side by side: the test on the configured spelling is `true`, on the resolved spelling `false`. The rule's own comment (`:487-494`) states the opposite policy — "not documented precisely, so … treats any occurrence between root and target as protected — the warn-biased reading". Codex's behaviour here (path-string or realpath) is undocumented, so the warn-biased reading should cover both spellings. | In `coveringWritableRoot`, treat a root as blocked when `pathCrossesCodexProtectedDir` is true on **either** the resolved pair or the cleaned configured pair. I checked the three legitimate shapes this must not break — root equal to the store, root equal to the agmsg home, root equal to the `.agents` directory itself — and all three produce a relative path with no protected element on both spellings, so ORing adds only the symlink case. |
+| LOW | typo | **C2-2. The implicit-root pass names the wrong exclusion key when the seat's temp directory equals codex's fixed temp root and the fixed root is excluded — it tells the operator a key "is not set" that they did set.** | `internal/cli/doctor_codex_writable_root.go:647-652` derives the key by comparing the matched root against `slashTmpDir`, but `codexImplicitWritableRoots` (`:628-640`) can return that same path from the `TMPDIR` branch after the fixed-root branch was skipped. Probed: with the fixed-root exclusion set true and `TMPDIR` equal to the fixed temp root, the implicit-roots list contains exactly one entry (from `TMPDIR`), yet the Detail reads "…which workspace-write keeps writable by default (`exclude_slash_tmp` is not set in `<cfg>`)". The converse case (the other exclusion set, `TMPDIR` equal to the fixed root) names the key correctly. | Have `codexImplicitWritableRoots` return the key alongside each root, or pass `cfg` to `codexImplicitRootKey` and return `exclude_tmpdir_env_var` whenever the fixed-root exclusion is set. Either removes the identity guess the long doc comment currently defends. |
+| LOW | security | **C2-3. The new secret-scan allowlist entry is well-narrowed on its own terms, but `is_allowed` exempts the WHOLE line, so any line containing the hygiene idiom is exempt from every scanner rule.** | The rule is at `.gitallowed:21`; `scripts/secret-scan.sh`'s `is_allowed` tests the entire matched line against each allowlist expression and suppresses the finding on a match. I probed seven crafted lines: the intended idiom is allowed; a backticked key name next to a real-looking value is still blocked; a value inside the backticks is still blocked; a real assignment with no idiom is blocked; the idiom without the trailing "-shaped" is blocked — all as the fix intended. But a line carrying the idiom **and** an AWS-access-key-shaped literal produced no finding at all. This is not hypothetical here: the two report lines the entry was added for (`docs/reports/test-2026-09-19-…md:113` and `docs/reports/verify-2026-09-19-…md:33`) are ~250-character prose lines that are now wholly exempt. | The exemption is inherent to `is_allowed`'s line scope, not to this entry, and narrowing it further inside one expression is not practical. Cheapest honest fix: one sentence in the `.gitallowed` comment block recording that an allowlisted line is exempt from every rule, so the next author keeps hygiene sentences on their own short line. |
+| LOW | maintainability | **C2-4. The new tech-debt row's "Two further limits are unverified" enumeration is falsified by this same PR, which added a third.** | `docs/tech-debt/README.md:131` lists exactly two unverified limits (whether codex expands a non-absolute root; whether a guarded seat inherits the user config's sandbox mode). The protected-directory rule added in `ab09dbc` is a third of the same kind: `internal/cli/doctor_codex_writable_root.go:487-494` says whether codex protects only a root's top-level entries or every nested occurrence "is not documented precisely", and the code picks the warn-biased reading. A closed-list phrasing that the same commit invalidates is the pattern this register has been bitten by before. | Change "Two further limits" to an open phrasing and add the any-element reading as a third item, naming `pathCrossesCodexProtectedDir`. |
+| LOW | typo | **C2-5. `codexWritableRootDetail`'s doc claims the absent-config form "never carries a blockedAncestor (an absent config has no roots to speak of)", but implicit roots are still evaluated when the config is absent, and the note is then silently dropped.** | `internal/cli/doctor_codex_writable_root.go:727-728` makes the claim; `:736-741` is the `!exists` branch, which ignores its `blockedAncestor` argument. With the config absent, `cfg` is the zero value, so `codexImplicitWritableRoots` still returns the temp roots. Probed with a store under a `.agents` directory beneath the injected fixed temp root: the check computes a blocked ancestor and the Detail omits it. The verdict (warn) is right; only the explanation the operator would act on is missing. | Either include the clause in the absent-config sentence, or reword the comment to say the absent-config form deliberately drops it because there is no `[sandbox_workspace_write]` table to point at. The comment as written asserts something the code does not guarantee. |
+| LOW | maintainability | **C2-6. The test that proves a genuinely covering root beats a blocked ancestor asserts something true either way.** | `internal/cli/doctor_codex_writable_root_test.go:428-443` checks `strings.Contains(r.Detail, store)`, but the pass Detail always ends with "covers the agmsg store `<store>`". I rendered the regression it claims to catch by calling `codexWritableRootDetail` with the home directory as the root: the assertion still passes. Only the `Status != "pass"` check discriminates, and it would not catch the blocked ancestor being named as the covering root. | Assert `strings.Contains(r.Detail, "writable root "+store+" in ")`, or assert the blocked home path is not named as the root. |
+| LOW | typo | **C2-7. A test's doc comment opens with two sentences that both introduce it.** | `internal/cli/doctor_codex_writable_root_test.go:1157-1158`: "TestCodexImplicitWritableRoots is cross-review WC-1's pure unit test." immediately followed by "TestCodexImplicitWritableRoots is a pure test of codexImplicitWritableRoots' string logic …". A second doc sentence was added without merging the first. | Merge into one sentence. |
+| LOW | readability | **C2-8. `checkCodexAgmsgWritableRoot` is now 86 lines, above the repository's 50-line function guideline, and recomputes the codex model list twice per run.** | The function body runs `internal/cli/doctor_codex_writable_root.go:809-894`; `code-review.md`'s checklist asks for functions under 50 lines. `codexModelPoolModels(orgCfg)` is called at `:821` for the early return and again inside `codexSeatModesPossible` at `:346`. | Informational. The body is a flat sequence of guard clauses with every non-trivial step already extracted into a named, table-tested helper, which is the readable shape for a nine-outcome check; splitting it further would hide the outcome order the doc comment enumerates. Passing the already-computed model list into `codexSeatModesPossible` would remove the duplicate work and the redundant empty-list guard inside it. |
+
+### Checked and clean
+
+- **Cross-review AR-1, WC-1, WC-2 are each addressed at the producer, not in prose.**
+  The role/model gate agrees with `ValidateSpawnEnvelope` on all seven matrix
+  configurations; the protected-directory rule warns for `.git`, `.agents`, and
+  `.codex` and correctly does not fire when the root *is* the protected directory or
+  the agmsg home; the implicit temp roots flip pass/warn with each exclusion key.
+- **`codexModelPermittedForRole` mirrors `modelAllowedForRole` exactly**, including the
+  nil-map case: the sibling's `len(cfg.Roles) == 0` early return is subsumed by the
+  lookup-on-nil-map returning not-ok, so the two agree for every input. It correctly
+  generalizes "is this model allowed" to "is any codex model allowed".
+- **Hermeticity.** The only `/tmp` literal in an assertion is in the unit test for the
+  production resolver, which is deterministic and independent of the machine's
+  temp directory. Every integration test injects a fixture path through the seam, and
+  `TMPDIR=/tmp go test ./internal/cli/ -count=1` passes. The seam comment explains why,
+  naming the CI runner case.
+- **No duplicated pane-environment sentence.** Probed the case the guard exists for — a
+  temp-directory-derived implicit root together with a store-location override, with and
+  without a configured profile — and the clause appears exactly once in both.
+- **The numbered outcome list in the check's doc comment matches the code's order**,
+  all nine branches, including the two new ones inserted as outcomes 3 and 8.
+- **Docs.** The recipe and the four skill mirrors are byte-identical to their
+  counterparts, and every claim in them matches the code: the model-eligibility
+  condition, both pool gates, the broad-root caveat, and the two implicit roots with
+  their exclusion keys. Skill paragraph measures 71-78 display columns, inside the
+  file's norm. The evidence-file addendum correctly says no live re-verification was
+  done.
+- **Secrets.** `.gitallowed`, and the three reports whose hygiene sentences prompted it,
+  all scan clean; the allowlist comment no longer self-matches the scanner pattern.
+- **Debug code, swallowed errors, path traversal, unbounded reads, termination:**
+  unchanged from cycle 1 and still clean. The check still never spawns a process and
+  never returns `fail`.
+
+### Positive notes
+
+- The WC-1 follow-up is the best part of this round: the implementer found that a
+  hard-coded fixed temp root made roughly a dozen tests flip on any machine whose own
+  temp directory equals it, and fixed the *class* by routing that path through the same
+  seam as the rest of the environment. The seam comment names the CI runner where it
+  would have bitten.
+- Every new decision function is pure and table-tested: the protected-element rule has
+  eleven cases including two lookalike names, the implicit-root builder nine, the
+  model-eligibility gate its own table mirroring the producer's shape.
+- The reason-numbering fix from the revalidation round held up: with both reasons firing
+  the clause now reads "(1) … and (2) …", and a single reason is left unnumbered.
+- The new unreadable-config test asserts the config path appears exactly once, which is
+  the assertion that actually pins the "reason must not repeat the path" contract.
+
+### Recommendation
+
+- **Merge: yes.** No CRITICAL or HIGH. C2-1 is the only finding that changes a verdict
+  the operator sees, and its fix is a single additional condition in one `if`.
+- Fix order if the cap is not raised: C2-1 (false pass), then C2-2 (false sentence in a
+  pass), then C2-4 and C2-5 (two claims the code does not support), then C2-3, C2-6,
+  C2-7. C2-8 is informational and needs no change.
+- Known gaps: diff quality only. Acceptance criteria, static analysis, and the test run
+  are `/verify`'s and `/test`'s, all of which already reported PASS for the pre-cycle-2
+  state; the cycle-2 code changes post-date those reports.
