@@ -105,6 +105,10 @@
 ## Deviation notes
 
 - 2026-09-19 plan: Codex plan advisory(codex-cli 0.154.0、`-m gpt-6-astra -c model_reasoning_effort=xhigh`、stdin を閉じて実行)が HIGH 1 件を報告: Enter の自動再送は、submit 済みで承認ダイアログに進んだ座席のダイアログを承認し得る。ユーザー判断(AskUserQuestion)で自動再送を不採用とし、Objective / Scope 2・3・4・5・6・7 / Non-goals / Assumptions / Design decisions / AC-1〜3・5 / Test plan / Risks を改訂した。issue #163 の「やること 2(Enter を 1 回だけ再送)」は採らない
+- 2026-09-19 work: Slice A は implementer に委譲(c990363、6 ファイル)。逸脱なし。CLI テスト用の stub に、submit の確認の待ちだけを失敗させる環境変数を足した(既存の失敗注入は両方の待ちを失敗させるため)。orchestrator が HEAD 一致・porcelain 空・`Send` の差分を確認(Enter の送信は 1 箇所だけ)、ビルド・vet・対象テストを再実行して pass。implementer の `./scripts/run-verify.sh`、`TMPDIR=/tmp` でのテスト、race、履歴込みの range secret scan は green。implementer の指摘: `Send` の send-text / Enter のエラー経路に既存の単体テストがない(本件より前からの欠落)
+- 2026-09-19 work: Slice B(実機確認、`docs/evidence/org-send-enter-timing-2026-09-19.md`、4c2d134)。codex 座席: 修正前は 5 回中 3 回で本文が入力欄に残り手動の Enter が必要、修正後(待ち 750ms)は 5 / 5 で submit、`sent` は 5 件とも submit 確認済み。既定値の変更は不要。claude 座席: 修正前でも 5 / 5 で submit(不具合は codex の TUI に固有)、修正後も 5 / 5 で退行なし。承認ダイアログ表示中の codex 座席について herdr は `blocked` を返し、ダイアログは「Yes, proceed」が選択済みで「Press enter to confirm」と表示される(Enter を再送しない根拠)。ダイアログは Escape で拒否し、対象ファイルは作られていない
+- 2026-09-19 work: Slice B の環境面。ユーザー自身の herdr server が動いていたため触れず、専用 server を別 socket で起動した。herdr は `HOME` では設定・状態ディレクトリを切り替えないことが分かり、1 回目の専用 server はユーザーの `session.json` から workspace を復元し、ユーザーの `herdr-server.log` に 8 行追記した。SIGKILL で止め、`session.json` が不変(更新時刻・ハッシュ)であることを確認。以降は `XDG_CONFIG_HOME` / `XDG_STATE_HOME` / `HERDR_SOCKET_PATH` の 3 つで分離した。claude 座席は偽 HOME では keychain を参照できず「Not logged in」になるため、実 HOME + `env -i` の最小環境で起動した。残った変更は `~/.claude.json` のスクラッチディレクトリの信頼記録 1 件と上記のログ 8 行。後始末(座席の stop / disband、複製した auth の削除、専用 server の停止、`/tmp/r163` の削除)は evidence に記録
+- 2026-09-19 work: Slice C(77371a8)。recipe(2 コピー)の手動 Enter の手順を新しい挙動の説明に置き換え、skill(4 面)の `send` の行に待ち・確認・未確認時の対処を追記、#155 の evidence P2 に追記 1 行。同期ゲート 3 本 pass
 
 ## Progress checklist
 
