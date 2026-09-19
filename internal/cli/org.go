@@ -378,16 +378,33 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 				EnterDelayMS: enterDelayMS,
 			})
 			if result.Err != nil {
-				// A typed-but-unsubmitted residue (ctx expiring during the
-				// pre-Enter pause, or PaneSendKeys itself failing -- see
-				// Send's doc comment in internal/org/verbs.go) needs the
-				// operator's attention before they retry: a second send
-				// would type on top of whatever is already sitting in the
-				// pane. TextTyped is false for every other error, including
-				// the fail-closed --timeout-ms budget check (which refuses
-				// before typing anything at all), so this note is
-				// conditional on it rather than printed for every failure.
-				if result.TextTyped {
+				// Two distinct residues after a driver call failed, and they
+				// need opposite operator instructions -- see
+				// SendResult.TextTyped/EnterPressed's doc comment in
+				// internal/org/verbs.go for the full field-level contract
+				// this switch mirrors.
+				switch {
+				case result.EnterPressed:
+					// Enter already succeeded (and confirmSubmitted already
+					// ran) by the time this error happened -- the message
+					// was very likely delivered, only the sent history
+					// record was lost (the appendEvent failure). This must
+					// NOT suggest retyping, clearing, or pressing Enter:
+					// doing so on a seat that has already submitted and may
+					// have since reached an approval dialog is exactly the
+					// blind-keystroke hazard confirmSubmitted's doc comment
+					// warns about.
+					_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
+						"note: Enter was already pressed for seat %q (pane %s); only the sent "+
+							"history event could not be recorded. Do not send the message again. "+
+							"Check the seat with 'ralph org read --org-id %s --seat %s'.\n",
+						to, result.PaneID, *orgID, to)
+				case result.TextTyped:
+					// A typed-but-unsubmitted residue (ctx expiring during
+					// the pre-Enter pause, or PaneSendKeys itself failing)
+					// needs the operator's attention before they retry: a
+					// second send would type on top of whatever is already
+					// sitting in the pane.
 					_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
 						"note: the message text was typed into pane %s of seat %q but not submitted. "+
 							"Check it with 'ralph org read --org-id %s --seat %s' and clear or submit it "+

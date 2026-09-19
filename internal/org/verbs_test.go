@@ -2,6 +2,7 @@ package org
 
 import (
 	"errors"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -241,6 +242,9 @@ func TestOrgSend_ValidTypedMessage_PassesAndDrivesRealCalls(t *testing.T) {
 	if result.Err != nil {
 		t.Fatalf("expected a well-formed typed message to pass, got %v", result.Err)
 	}
+	if !result.TextTyped || !result.EnterPressed {
+		t.Errorf("expected TextTyped and EnterPressed both true on success, got TextTyped=%v EnterPressed=%v", result.TextTyped, result.EnterPressed)
+	}
 
 	// Two AgentWait calls: the idle/done wait before send-text, and the
 	// post-Enter working/blocked confirm wait -- both target the same
@@ -317,6 +321,9 @@ func TestOrgSend_DryRun_ValidMessage_AppendsEventWithoutDriverCalls(t *testing.T
 	}
 	if result.TextTyped {
 		t.Error("expected TextTyped false for a dry-run send (PaneSendText is never attempted)")
+	}
+	if result.EnterPressed {
+		t.Error("expected EnterPressed false for a dry-run send (PaneSendKeys is never attempted)")
 	}
 	if len(h.calls) != 0 || len(a.calls) != 0 {
 		t.Fatalf("expected no driver calls for a dry-run send, got herdr=%v agmsg=%v", h.calls, a.calls)
@@ -623,6 +630,9 @@ func TestOrgSend_BudgetTooSmallForEnterDelay_NothingTyped(t *testing.T) {
 	if result.TextTyped {
 		t.Error("expected TextTyped false: the budget check must run before PaneSendText")
 	}
+	if result.EnterPressed {
+		t.Error("expected EnterPressed false: the budget check must run before PaneSendText, let alone PaneSendKeys")
+	}
 	if result.PaneID != "" {
 		t.Errorf("expected no PaneID on a return before PaneSendText was ever attempted, got %q", result.PaneID)
 	}
@@ -636,21 +646,58 @@ func TestOrgSend_BudgetTooSmallForEnterDelay_NothingTyped(t *testing.T) {
 	}
 }
 
-// Not independently testable without changing fakeHerdr (out of scope for
-// this slice -- see the Slice D handoff's file list): once the fail-closed
-// budget check above requires enterDelay < remaining ctx time to even
-// reach PaneSendText, ctx expiring *inside* waitBeforeEnter afterwards
-// would need real wall-clock time to elapse between that check and the
-// select in waitBeforeEnter -- and fakeHerdr's AgentWait/PaneSendText both
-// return synchronously with no injectable delay, so that gap is on the
-// order of nanoseconds in this suite, never enough to flip the race.
-// Shrinking the margin to try to force it would just make the test flaky
-// (exactly what self-review LOW-6 already flagged elsewhere in this file)
-// rather than deterministic. The branch itself is unchanged and still
-// there in verbs.go (waitBeforeEnter's ctx.Done() case, reachable in
-// production whenever PaneSendText's real round-trip -- unlike the fake's
-// instant one -- eats into the margin the budget check measured) -- it is
-// intentionally kept as defence in depth rather than deleted.
+// TestOrgSend_CtxExpiresDuringEnterDelay_AfterBudgetCheckPasses is the
+// self-review revalidation LOW-3 fix (docs/reports/self-review-2026-09-19-org-send-enter-timing.md,
+// "Answer to the explicit question"): a deterministic reproduction of ctx
+// expiring *inside* waitBeforeEnter, after the fail-closed budget check
+// above has already passed -- the branch that check's own passing
+// (`remaining > enterDelay`) would otherwise make unreachable through this
+// package's fake driver alone, since fakeHerdr's calls used to be
+// synchronous. fakeHerdr.paneSendTextDelay closes that gap: it simulates a
+// real herdr round trip eating into the ctx budget between the budget
+// check (which measures ctx time remaining right before PaneSendText) and
+// the actual pre-Enter wait.
+//
+// TimeoutMS: 100, SendEnterDelay: 50ms, paneSendTextDelay: 80ms. The
+// budget check passes (100ms > 50ms). PaneSendText then consumes 80ms of
+// real time, leaving roughly 20ms of ctx budget when waitBeforeEnter's
+// select races a 50ms timer against ctx.Done() -- a ~30ms margin in the
+// direction that must win, run at -count=50 to confirm it does not flake
+// (widen these three values, keeping their relative shape, if it ever
+// does).
+func TestOrgSend_CtxExpiresDuringEnterDelay_AfterBudgetCheckPasses(t *testing.T) {
+	o, h, _ := testOrg(t)
+	o.SendEnterDelay = 50 * time.Millisecond
+	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", r)
+	}
+	h.paneSendTextDelay = 80 * time.Millisecond
+	eventsBefore := len(mustReadEvents(t, o))
+
+	msg := "TYPE: TASK\nTASK_ID: t-1\n\ndo the thing"
+	result := o.Send(SendParams{OrgID: "org-a", To: "seat-1", Text: msg, TimeoutMS: 100})
+	if result.Err == nil {
+		t.Fatal("expected a non-nil Err when ctx expires inside waitBeforeEnter after the budget check passed")
+	}
+	if !strings.Contains(result.Err.Error(), "text typed but not submitted") {
+		t.Errorf("expected the error to mention the text was typed but not submitted, got %v", result.Err)
+	}
+	if !result.TextTyped {
+		t.Error("expected TextTyped true: PaneSendText already succeeded before ctx expired")
+	}
+	if result.EnterPressed {
+		t.Error("expected EnterPressed false: ctx expired before PaneSendKeys was ever called")
+	}
+	if result.PaneID == "" {
+		t.Error("expected a non-empty PaneID on the error return so the operator knows which pane to check")
+	}
+	if len(h.sendKeysKeys) != 0 {
+		t.Fatalf("expected zero PaneSendKeys calls, got %v", h.sendKeysKeys)
+	}
+	if got := len(mustReadEvents(t, o)); got != eventsBefore {
+		t.Fatalf("expected no new sent event, %d -> %d", eventsBefore, got)
+	}
+}
 
 // TestOrgSend_PaneSendKeysFails_ReportsTypedButNotSubmitted covers the L4
 // self-review fix: a PaneSendKeys failure leaves exactly the same residue
@@ -677,11 +724,68 @@ func TestOrgSend_PaneSendKeysFails_ReportsTypedButNotSubmitted(t *testing.T) {
 	if !result.TextTyped {
 		t.Error("expected TextTyped true: PaneSendText already succeeded before PaneSendKeys failed")
 	}
+	if result.EnterPressed {
+		t.Error("expected EnterPressed false: PaneSendKeys was attempted but did not succeed")
+	}
 	if result.PaneID == "" {
 		t.Error("expected a non-empty PaneID on the error return so the operator knows which pane to check")
 	}
 	if got := len(mustReadEvents(t, o)); got != eventsBefore {
 		t.Fatalf("expected no new sent event when PaneSendKeys fails, %d -> %d", eventsBefore, got)
+	}
+}
+
+// TestOrgSend_AppendEventFailsAfterEnter_ReportsSubmittedButUnrecorded is the
+// self-review revalidation NEW-1 fix
+// (docs/reports/self-review-2026-09-19-org-send-enter-timing.md): when the
+// manifest write for the `sent` event fails AFTER Enter has already
+// succeeded (and confirmSubmitted has already run), Send must report
+// EnterPressed=true alongside TextTyped=true and wrap the error to say the
+// message was submitted -- this is what lets the CLI tell "very likely
+// delivered, only the history record was lost" apart from "text is still
+// sitting unsubmitted in the pane" (see Send's doc comment and
+// SendResult.EnterPressed's).
+//
+// Unix-only, no build tag needed: this whole package already is one
+// (internal/org/lockfile.go uses syscall.Flock unconditionally). The
+// manifest file is chmod'd read-only AFTER Spawn's own writes have already
+// landed, so Send's idle/done wait, PaneSendText, PaneSendKeys and
+// confirmSubmitted all still run normally against the fake driver, and
+// only the final o.appendEvent call -- a real file write -- fails with a
+// real permission error.
+func TestOrgSend_AppendEventFailsAfterEnter_ReportsSubmittedButUnrecorded(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores a read-only file's permission bit")
+	}
+	o, h, _ := testOrg(t)
+	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", r)
+	}
+	manifestPath := o.Manifest.Path()
+	if err := os.Chmod(manifestPath, 0o444); err != nil {
+		t.Fatalf("chmod manifest read-only: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(manifestPath, 0o644) })
+
+	msg := "TYPE: TASK\nTASK_ID: t-1\n\ndo the thing"
+	result := o.Send(SendParams{OrgID: "org-a", To: "seat-1", Text: msg})
+	if result.Err == nil {
+		t.Fatal("expected a non-nil Err when the sent event cannot be appended")
+	}
+	if !strings.Contains(result.Err.Error(), "message submitted to seat") || !strings.Contains(result.Err.Error(), "could not be recorded") {
+		t.Errorf("expected the error to say the message was submitted but the sent event could not be recorded, got %v", result.Err)
+	}
+	if !result.TextTyped {
+		t.Error("expected TextTyped true: PaneSendText succeeded")
+	}
+	if !result.EnterPressed {
+		t.Error("expected EnterPressed true: PaneSendKeys succeeded before appendEvent failed")
+	}
+	if result.PaneID == "" {
+		t.Error("expected a non-empty PaneID on the error return")
+	}
+	if len(h.sendKeysKeys) != 1 || !slices.Equal(h.sendKeysKeys[0], []string{"Enter"}) {
+		t.Fatalf("expected exactly one PaneSendKeys call with exactly [\"Enter\"] (no resend on this path either), got %v", h.sendKeysKeys)
 	}
 }
 

@@ -44,6 +44,16 @@ type fakeHerdr struct {
 	// failing) without affecting any other AgentWait call. Empty queue
 	// means every call succeeds, exactly like before this field existed.
 	agentWaitErrs []error
+	// paneSendTextDelay, when > 0, makes PaneSendText sleep that long before
+	// returning -- simulating a real herdr round trip that eats into the
+	// ctx budget between Send's fail-closed pre-Enter-pause budget check
+	// (which measures ctx time remaining right before PaneSendText) and the
+	// actual pre-Enter wait, so a test can deterministically drive ctx
+	// expiry inside that wait without shaving its margin thin (see
+	// TestOrgSend_CtxExpiresDuringEnterDelay_AfterBudgetCheckPasses in
+	// verbs_test.go). Zero (the default) keeps PaneSendText instantaneous,
+	// exactly as before this field existed.
+	paneSendTextDelay time.Duration
 
 	workspaceID string
 	paneID      string
@@ -129,8 +139,12 @@ func (f *fakeHerdr) PaneRead(_ context.Context, _ string, _ int) (string, error)
 
 func (f *fakeHerdr) PaneSendText(_ context.Context, _, _ string) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.calls = append(f.calls, "pane_send_text")
+	delay := f.paneSendTextDelay
+	f.mu.Unlock()
+	if delay > 0 {
+		time.Sleep(delay)
+	}
 	return nil
 }
 

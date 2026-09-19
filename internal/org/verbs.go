@@ -118,21 +118,40 @@ type SendResult struct {
 	SubmitConfirmed bool
 	// TextTyped reports whether PaneSendText already succeeded when Send
 	// returned -- i.e. whether the message text is (or, if Enter also
-	// succeeded, was) sitting in the seat's pane. It is the signal a caller
-	// needs to tell the operator to check the pane before sending again: a
-	// retry would otherwise type a second copy on top of any residue. True
-	// on every return once PaneSendText has succeeded, including the
-	// ctx-expiry-during-the-pre-Enter-wait and PaneSendKeys-failure error
-	// returns (both leave typed-but-unsubmitted text behind -- see Send's
-	// doc comment) and the final success return. Always false for DryRun
-	// and for every error return before PaneSendText is even attempted,
-	// including the fail-closed --timeout-ms budget check.
+	// succeeded, was) sitting in the seat's pane at some point. Set true on
+	// exactly four returns: the ctx-expiry-during-the-pre-Enter-wait error,
+	// the PaneSendKeys-failure error, the appendEvent-failure error, and
+	// the final success return -- every return from the line that calls
+	// PaneSendText onward. False for DryRun and for every return before
+	// that line, including the fail-closed --timeout-ms budget check.
+	//
+	// TextTyped alone does NOT mean "check the pane, the text might still
+	// be sitting there unsubmitted" -- see EnterPressed, which narrows that
+	// down. A caller that only checks TextTyped cannot tell "Enter was
+	// never pressed" apart from "Enter was pressed and very likely
+	// submitted the message, only the history record failed" -- those need
+	// opposite operator instructions (see Send's doc comment).
 	TextTyped bool
+	// EnterPressed reports whether PaneSendKeys("Enter") already succeeded
+	// when Send returned. Set true on exactly two returns: the
+	// appendEvent-failure error and the final success return. False
+	// everywhere else, including both TextTyped=true error returns (the
+	// ctx-expiry-during-the-pre-Enter-wait error, where Enter was never
+	// attempted, and the PaneSendKeys-failure error, where it was
+	// attempted but did not succeed).
+	//
+	// TextTyped && !EnterPressed is the actual "text may be sitting
+	// unsubmitted in the pane, check before retrying" case. TextTyped &&
+	// EnterPressed && Err != nil means the message was very likely
+	// delivered (Enter succeeded) but Send could not record that fact (the
+	// appendEvent failure) -- resending would risk a duplicate submit, not
+	// a residue.
+	EnterPressed bool
 	// PaneID is the target seat's pane id. Set on every return once
-	// PaneSendText has succeeded (mirrors TextTyped, including the error
-	// returns after it), so a caller with TextTyped=true and a non-nil Err
-	// can still name the pane to check. Empty for DryRun and for any
-	// return before PaneSendText is attempted.
+	// PaneSendText has succeeded (mirrors TextTyped's four returns), so a
+	// caller with TextTyped=true and a non-nil Err can still name the pane
+	// to check. Empty for DryRun and for any return before PaneSendText is
+	// attempted.
 	PaneID string
 }
 
@@ -154,17 +173,29 @@ type SendResult struct {
 // call -- see confirmSubmitted's doc comment for why a second Enter is
 // unsafe.
 //
-// Typed-but-unsubmitted text: two failure paths can leave text sitting in
-// the pane's input box with no `sent` event ever appended for it --
-// ctx expiring during the pre-Enter wait (Enter is never pressed at all)
-// and PaneSendKeys itself failing (Enter was attempted but not delivered).
-// Both are reported via SendResult.TextTyped=true (and PaneID) so the
-// caller (the CLI) can tell the operator to check the pane before sending
-// again -- a retry would otherwise type a second copy on top of the
-// residue. A --timeout-ms budget too small to even fund the pre-Enter wait
-// is instead caught before PaneSendText is ever called (see the check
-// right after the idle/done wait below), so that case never types
-// anything in the first place.
+// Three failure paths can leave a return with TextTyped=true, and they need
+// different operator instructions -- see SendResult.TextTyped/EnterPressed
+// for the field-level contract this paragraph summarizes:
+//
+//   - ctx expiring during the pre-Enter wait: Enter is never pressed
+//     (TextTyped=true, EnterPressed=false). The message text is sitting
+//     unsubmitted in the pane's input box; a retry would type a second copy
+//     on top of it.
+//   - PaneSendKeys itself failing: Enter was attempted but not delivered
+//     (TextTyped=true, EnterPressed=false). Same residue as above.
+//   - appendEvent failing after a successful PaneSendKeys: Enter WAS
+//     delivered (TextTyped=true, EnterPressed=true) and confirmSubmitted
+//     has already run -- the message was very likely submitted, only the
+//     `sent` history record was lost. Resending here risks a duplicate
+//     submit or, worse, a blind Enter landing on an approval dialog the
+//     submitted seat has since reached (the exact hazard confirmSubmitted's
+//     doc comment explains) -- so this case must NOT be told to retype or
+//     press Enter.
+//
+// A --timeout-ms budget too small to even fund the pre-Enter wait is
+// instead caught before PaneSendText is ever called (see the check right
+// after the idle/done wait below), so that case never types anything and
+// leaves TextTyped=false.
 func (o *Org) Send(p SendParams) SendResult {
 	if !p.Raw {
 		if err := protocol.ValidateText(p.Text, protocol.DefaultMaxBodyChars); err != nil {
@@ -222,23 +253,32 @@ func (o *Org) Send(p SendParams) SendResult {
 	}
 
 	// Fail closed *before* typing anything: Send always builds ctx via
-	// context.WithTimeout above, so a deadline is always present here. If
-	// what remains of the --timeout-ms budget cannot even fund the
-	// pre-Enter pause, typing now would strand the message in the seat's
-	// composer with no way for this call to finish it -- and a later retry
-	// would type a second copy on top of that residue, so the seat could
-	// receive two concatenated protocol messages as one (self-review
-	// MEDIUM-2, docs/reports/self-review-2026-09-19-org-send-enter-timing.md).
+	// context.WithTimeout above, so a deadline is present here today -- the
+	// ok-check is defence in depth in case that ever stops being true (e.g.
+	// a future 0-means-unbounded --timeout-ms path on Send, mirroring
+	// Wait's existing one), so a deadline-less ctx skips this check rather
+	// than refusing every call with a nonsense negative figure. When a
+	// deadline IS present and what remains of the --timeout-ms budget
+	// cannot even fund the pre-Enter pause, typing now would strand the
+	// message in the seat's composer with no way for this call to finish
+	// it -- and a later retry would type a second copy on top of that
+	// residue, so the seat could receive two concatenated protocol
+	// messages as one (self-review MEDIUM-2,
+	// docs/reports/self-review-2026-09-19-org-send-enter-timing.md).
 	// Refusing here, before PaneSendText, means that case never types
 	// anything at all.
-	deadline, _ := ctx.Deadline()
-	remaining := time.Until(deadline)
-	if remaining <= enterDelay {
-		remainingMS := int(remaining / time.Millisecond)
-		enterDelayMS := int(enterDelay / time.Millisecond)
-		return SendResult{Err: fmt.Errorf(
-			"org: send: %dms of --timeout-ms left after waiting for seat %q, but the pause before Enter needs %dms; nothing was typed (raise --timeout-ms or lower --enter-delay-ms)",
-			remainingMS, p.To, enterDelayMS)}
+	if deadline, ok := ctx.Deadline(); ok {
+		remaining := time.Until(deadline)
+		if remaining <= enterDelay {
+			remainingMS := int(remaining / time.Millisecond)
+			if remainingMS < 0 {
+				remainingMS = 0
+			}
+			enterDelayMS := int(enterDelay / time.Millisecond)
+			return SendResult{Err: fmt.Errorf(
+				"org: send: %dms of --timeout-ms left after waiting for seat %q, but the pause before Enter needs %dms; nothing was typed (raise --timeout-ms or lower --enter-delay-ms)",
+				remainingMS, p.To, enterDelayMS)}
+		}
 	}
 
 	if err := o.Herdr.PaneSendText(ctx, seat.PaneID, p.Text); err != nil {
@@ -272,9 +312,20 @@ func (o *Org) Send(p SendParams) SendResult {
 		TS: o.now(), OrgID: p.OrgID, SeatID: p.To, Event: EventSent,
 		PaneID: seat.PaneID, Details: details,
 	}); err != nil {
-		return SendResult{Err: err, PaneID: seat.PaneID, TextTyped: true}
+		// Enter already succeeded (and confirmSubmitted already ran) by the
+		// time appendEvent runs -- the message was very likely delivered,
+		// only this history record was lost. The wrapped error says so
+		// explicitly, and EnterPressed=true is how the CLI tells this case
+		// apart from a genuine typed-but-unsubmitted residue (see Send's
+		// doc comment): it must not suggest retyping or pressing Enter.
+		return SendResult{
+			Err:          fmt.Errorf("org: send: message submitted to seat %q but the sent event could not be recorded: %w", p.To, err),
+			PaneID:       seat.PaneID,
+			TextTyped:    true,
+			EnterPressed: true,
+		}
 	}
-	return SendResult{SubmitConfirmed: submitConfirmed, PaneID: seat.PaneID, TextTyped: true}
+	return SendResult{SubmitConfirmed: submitConfirmed, PaneID: seat.PaneID, TextTyped: true, EnterPressed: true}
 }
 
 // sendEnterDelay returns o.SendEnterDelay, falling back to

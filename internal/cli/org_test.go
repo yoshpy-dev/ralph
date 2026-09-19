@@ -1311,6 +1311,9 @@ func TestOrgSend_PaneSendKeysFails_NotesTypedButNotSubmittedOnStderr(t *testing.
 	if !strings.Contains(out, "before sending again") {
 		t.Errorf("expected the note to warn against retrying blindly, got: %s", out)
 	}
+	if strings.Contains(out, "Enter was already pressed") {
+		t.Errorf("expected no submitted-but-unrecorded note on this path (Enter did NOT succeed here), got: %s", out)
+	}
 }
 
 // TestOrgSend_BudgetTooSmallForEnterDelay_NoTypedNoteOnStderr is the CLI
@@ -1352,6 +1355,67 @@ func TestOrgSend_BudgetTooSmallForEnterDelay_NoTypedNoteOnStderr(t *testing.T) {
 	}
 	if strings.Contains(out, "the message text was typed into pane") {
 		t.Errorf("expected no typed-but-not-submitted note when nothing was typed, got: %s", out)
+	}
+}
+
+// TestOrgSend_AppendEventFailsAfterEnter_NotesSubmittedNotRecorded is the CLI
+// counterpart of internal/org/verbs_test.go's
+// TestOrgSend_AppendEventFailsAfterEnter_ReportsSubmittedButUnrecorded
+// (self-review revalidation NEW-1): when the manifest write for the `sent`
+// event fails after Enter has already succeeded, the CLI must print the
+// "Enter was already pressed ... do not send the message again" note --
+// and must NOT print the typed-but-unsubmitted note or mention
+// "send-keys", either of which would wrongly suggest pressing Enter on a
+// seat that has very likely already submitted and may have reached an
+// approval dialog.
+//
+// Unix-only, no build tag needed: internal/cli's own test suite already is
+// one (see TestCheckCodexAgmsgWritableRoot_UnreadableConfig_InfoWithReasonOnly's
+// doc comment in doctor_codex_writable_root_unix_test.go) since
+// internal/org/lockfile.go uses syscall.Flock unconditionally. The
+// manifest file is chmod'd read-only AFTER spawn's own writes have already
+// landed, so only the send verb's own append fails.
+func TestOrgSend_AppendEventFailsAfterEnter_NotesSubmittedNotRecorded(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores a read-only file's permission bit")
+	}
+	setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	if _, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
+		"--state-dir", stateDir,
+	); err != nil {
+		t.Fatalf("spawn failed: %v", err)
+	}
+
+	manifestPath := org.ManifestPathIn(stateDir)
+	if err := os.Chmod(manifestPath, 0o444); err != nil {
+		t.Fatalf("chmod manifest read-only: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(manifestPath, 0o644) })
+
+	out, err := runOrgCmd(t, "send", "--org-id", "org-a", "--to", "seat-1",
+		"--text", "TYPE: TASK\nTASK_ID: t-1\n\ndo the thing", "--enter-delay-ms", "1", "--state-dir", stateDir)
+	if err == nil {
+		t.Fatalf("expected non-zero exit when the sent event cannot be appended, output: %s", out)
+	}
+	if !strings.Contains(out, "Enter was already pressed") {
+		t.Errorf("expected the submitted-but-unrecorded note, got: %s", out)
+	}
+	if !strings.Contains(out, "pane-stub-1") {
+		t.Errorf("expected the note to include the seat's pane id, got: %s", out)
+	}
+	if !strings.Contains(out, "Do not send the message again") {
+		t.Errorf("expected the note to warn against resending, got: %s", out)
+	}
+	if strings.Contains(out, "not submitted") {
+		t.Errorf("expected no typed-but-not-submitted wording on this path, got: %s", out)
+	}
+	if strings.Contains(out, "send-keys") {
+		t.Errorf("expected no send-keys instruction on this path (the message very likely already submitted), got: %s", out)
 	}
 }
 
