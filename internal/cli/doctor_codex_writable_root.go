@@ -19,28 +19,33 @@ import (
 
 // codexSandboxEnv is the part of the process environment
 // checkCodexAgmsgWritableRoot depends on. It is a struct (rather than
-// reading CODEX_HOME/AGMSG_STORAGE_PATH directly) so callers -- production
-// and test alike -- can substitute values through a plain function instead
-// of mutating real environment variables (mirrors shellAliasEnv's shape).
+// reading CODEX_HOME/AGMSG_STORAGE_PATH/TMPDIR directly) so callers --
+// production and test alike -- can substitute values through a plain
+// function instead of mutating real environment variables (mirrors
+// shellAliasEnv's shape).
 type codexSandboxEnv struct {
 	Home             string // the real user home directory, for "~" display only -- never used to build ConfigPath itself
 	ConfigPath       string // the user's codex config.toml, as this process would read it
 	AgmsgStoragePath string // $AGMSG_STORAGE_PATH as seen by this process ("" when unset)
+	TmpDir           string // $TMPDIR as seen by this process ("" when unset) -- see codexImplicitWritableRoots
 }
 
 // codexSandboxEnvFromOS resolves codexSandboxEnv from CODEX_HOME,
-// os.UserHomeDir, and AGMSG_STORAGE_PATH. This is the only function in this
-// file allowed to call os.UserHomeDir -- every other function that needs to
-// know the home directory (for "~" display) takes it as a parameter, so
+// os.UserHomeDir, AGMSG_STORAGE_PATH, and TMPDIR. This is the only function
+// in this file allowed to call os.UserHomeDir/os.Getenv -- every other
+// function that needs one of these values takes it as a parameter, so
 // TestMain can pin it and no test accidentally reads the developer's real
-// home. The config path follows the exact rule codexModelsCachePath uses
-// for codex's own model cache (see its doc comment): CODEX_HOME is used
-// literally when non-empty, else $HOME/.codex. Returns an error only when
-// CODEX_HOME is empty and the home directory cannot be resolved -- in that
-// case there is no way to build ConfigPath at all. When CODEX_HOME IS set
-// but the home directory still can't be resolved, Home is left "" (display
-// falls back to the raw path) rather than failing the whole check over a
-// value it doesn't strictly need.
+// home or the machine's real TMPDIR (cross-review WC-1: every t.TempDir()
+// fixture lives under the real TMPDIR, so a check that read TMPDIR directly
+// instead of through this seam could never be tested hermetically). The
+// config path follows the exact rule codexModelsCachePath uses for codex's
+// own model cache (see its doc comment): CODEX_HOME is used literally when
+// non-empty, else $HOME/.codex. Returns an error only when CODEX_HOME is
+// empty and the home directory cannot be resolved -- in that case there is
+// no way to build ConfigPath at all. When CODEX_HOME IS set but the home
+// directory still can't be resolved, Home is left "" (display falls back
+// to the raw path) rather than failing the whole check over a value it
+// doesn't strictly need.
 func codexSandboxEnvFromOS() (codexSandboxEnv, error) {
 	home, homeErr := os.UserHomeDir()
 	if homeErr != nil {
@@ -61,6 +66,7 @@ func codexSandboxEnvFromOS() (codexSandboxEnv, error) {
 		Home:             home,
 		ConfigPath:       configPath,
 		AgmsgStoragePath: os.Getenv("AGMSG_STORAGE_PATH"),
+		TmpDir:           os.Getenv("TMPDIR"),
 	}, nil
 }
 
@@ -69,18 +75,26 @@ func codexSandboxEnvFromOS() (codexSandboxEnv, error) {
 // direct call to codexSandboxEnvFromOS) so internal/cli's TestMain
 // (main_test.go) can pin it to a config path that does not exist, keeping
 // every runDoctor*-based test hermetic against the developer's real
-// ~/.codex/config.toml (same seam shape as doctorShellAliasEnv).
+// ~/.codex/config.toml (same seam shape as doctorShellAliasEnv). TestMain's
+// pinned literal leaves TmpDir unset (Go zero value ""), which is already
+// hermetic: codexImplicitWritableRoots only treats a non-empty TmpDir as a
+// candidate.
 var doctorCodexSandboxEnv = codexSandboxEnvFromOS
 
 // codexUserConfig is a minimal decode of the user-level codex config.toml:
-// only the three keys this check consumes. WritableRoots is typed any
-// (rather than []string) so a wrong TOML shape is detected and reported
-// instead of silently failing the whole decode -- see codexWritableRoots.
+// only the keys this check consumes. WritableRoots is typed any (rather
+// than []string) so a wrong TOML shape is detected and reported instead of
+// silently failing the whole decode -- see codexWritableRoots.
+// ExcludeSlashTmp/ExcludeTmpdirEnvVar gate the two implicit writable roots
+// workspace-write grants by default -- see codexImplicitWritableRoots
+// (cross-review WC-1).
 type codexUserConfig struct {
 	SandboxMode           string `toml:"sandbox_mode"`
 	Profile               string `toml:"profile"`
 	SandboxWorkspaceWrite struct {
-		WritableRoots any `toml:"writable_roots"`
+		WritableRoots       any  `toml:"writable_roots"`
+		ExcludeSlashTmp     bool `toml:"exclude_slash_tmp"`
+		ExcludeTmpdirEnvVar bool `toml:"exclude_tmpdir_env_var"`
 	} `toml:"sandbox_workspace_write"`
 }
 
@@ -242,6 +256,42 @@ func codexWritableRoots(raw any) ([]string, error) {
 	return roots, nil
 }
 
+// codexModelPoolModels returns the codex-driver entries of
+// orgCfg.ModelPool, in list order.
+func codexModelPoolModels(orgCfg config.OrgConfig) []string {
+	var models []string
+	for _, entry := range orgCfg.ModelPool {
+		if entry.Driver == "codex" {
+			models = append(models, entry.Model)
+		}
+	}
+	return models
+}
+
+// codexModelPermittedForRole mirrors internal/org/envelope.go's
+// modelAllowedForRole -- the actual gate ValidateSpawnEnvelope applies at
+// spawn time -- so this check's role-mode gating agrees with what could
+// really be spawned (cross-review WC-2: without this, a permission-mode
+// override for a role whose [org.roles] entry excludes every codex model
+// was counted as a possible codex seat, although ValidateSpawnEnvelope
+// would reject every codex model for that role). A role absent from
+// orgCfg.Roles, or mapped to an empty list, means "no restriction": any
+// codex model in the pool is enough. Otherwise the role's explicit
+// allowlist must contain at least one of codexModels. codexModels being
+// empty always returns false -- there is nothing to permit, matching the
+// "no codex model in the pool" gate checkCodexAgmsgWritableRoot already
+// applies one level up.
+func codexModelPermittedForRole(orgCfg config.OrgConfig, role string, codexModels []string) bool {
+	if len(codexModels) == 0 {
+		return false
+	}
+	allowed, ok := orgCfg.Roles[role]
+	if !ok || len(allowed) == 0 {
+		return true
+	}
+	return slices.ContainsFunc(allowed, func(m string) bool { return slices.Contains(codexModels, m) })
+}
+
 // codexSeatModesPossible reports whether any role in orgCfg could resolve
 // to a workspace-write-capable permission mode (edits or autonomous) and/or
 // to guarded, across orgCfg's effective default plus every per-role
@@ -259,9 +309,15 @@ func codexWritableRoots(raw any) ([]string, error) {
 // validates a roles entry's mode value but never its role-name key, so such
 // a document loads without error even though "" is never a real role name:
 // internal/cli/org.go's --role flag is required and non-blank at spawn
-// time). The loop below still applies every Roles value, including one
-// under an empty key -- it is a configured mode either way, just not the
-// project's default.
+// time). The loop below still applies every Roles value, but only when
+// codexModelPermittedForRole says that role could actually be assigned a
+// codex model (cross-review WC-2) -- the default itself counts iff the
+// model pool has any codex model at all (codexModelPoolModels non-empty):
+// role names are open-ended (chosen at `ralph org spawn --role <name>`), so
+// there is no fixed role name to check the default's own eligibility
+// against; the default applies to whichever unlisted role a seat spawns
+// under, and any such role could hold a codex model unless the pool itself
+// has none.
 func codexSeatModesPossible(orgCfg config.OrgConfig) (workspaceWriteRole, guardedRole bool) {
 	apply := func(mode string) {
 		switch mode {
@@ -271,11 +327,17 @@ func codexSeatModesPossible(orgCfg config.OrgConfig) (workspaceWriteRole, guarde
 			guardedRole = true
 		}
 	}
-	defaultsOnly := orgCfg
-	defaultsOnly.Permissions.Roles = nil
-	apply(org.ResolvePermissionMode(defaultsOnly, ""))
-	for _, mode := range orgCfg.Permissions.Roles {
-		apply(mode)
+
+	codexModels := codexModelPoolModels(orgCfg)
+	if len(codexModels) > 0 {
+		defaultsOnly := orgCfg
+		defaultsOnly.Permissions.Roles = nil
+		apply(org.ResolvePermissionMode(defaultsOnly, ""))
+	}
+	for role, mode := range orgCfg.Permissions.Roles {
+		if codexModelPermittedForRole(orgCfg, role, codexModels) {
+			apply(mode)
+		}
 	}
 	return workspaceWriteRole, guardedRole
 }
@@ -382,7 +444,10 @@ func agmsgStoreDir(agmsgHome, storageOverride string) (dir string, fromOverride 
 // NOT cover /a/bc, only /a/b and everything under it). A relative or
 // "~"-prefixed root is never treated as covering anything: codex is not
 // known to expand either form in writable_roots, so treating them as a
-// match would be a false pass.
+// match would be a false pass. pathCovers alone does NOT decide whether
+// codex would actually leave the target writable -- see
+// pathCrossesCodexProtectedDir for the directories codex protects even
+// inside a covering root.
 func pathCovers(root, target string) bool {
 	if !filepath.IsAbs(root) {
 		return false
@@ -397,6 +462,58 @@ func pathCovers(root, target string) bool {
 		return true
 	}
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// codexProtectedDirNames are directory names codex protects as read-only
+// even inside an otherwise-writable root, per codex's own documentation
+// ("Agent approvals & security"): .git, .agents, and .codex are excluded
+// from writes regardless of sandbox mode, and the protection is described
+// as recursive. The default agmsg home is ~/.agents/skills/agmsg, so a
+// broad writable root like the user's home directory does NOT actually make
+// the agmsg store writable (cross-review AR-1). Whether codex protects only
+// a writable root's own top-level entries or every nested occurrence is not
+// documented precisely, so pathCrossesCodexProtectedDir treats any
+// occurrence between root and target as protected -- the warn-biased
+// reading, consistent with this check's stated bias (a false pass hides the
+// exact failure this check exists to catch; a false warn costs one look at
+// the recipe).
+var codexProtectedDirNames = map[string]bool{
+	".git":    true,
+	".agents": true,
+	".codex":  true,
+}
+
+// pathCrossesCodexProtectedDir reports whether any path element of
+// filepath.Rel(root, target) -- excluding "." (root and target are the same
+// path) -- is one of codexProtectedDirNames. It applies the same ancestor
+// test pathCovers does (root must be absolute, and target must not require
+// walking "up" via ".." from root), so a root that does not actually cover
+// target at all always reports false here too, rather than an
+// off-the-rel-string false positive; callers still call pathCovers
+// separately to tell "does not cover" apart from "covers and does not
+// cross" (both false here). A path element that only superficially
+// resembles a protected name (".agentsx", "agents" without the leading
+// dot) does not match -- comparison is by exact path element, never
+// substring.
+func pathCrossesCodexProtectedDir(root, target string) bool {
+	if !filepath.IsAbs(root) {
+		return false
+	}
+	root = filepath.Clean(root)
+	target = filepath.Clean(target)
+	rel, err := filepath.Rel(root, target)
+	if err != nil || rel == "." {
+		return false
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return false // root does not actually cover target
+	}
+	for _, elem := range strings.Split(rel, string(filepath.Separator)) {
+		if codexProtectedDirNames[elem] {
+			return true
+		}
+	}
+	return false
 }
 
 // resolveNearestExisting resolves symlinks in a path that may not exist yet
@@ -427,11 +544,19 @@ func resolveNearestExisting(path string) string {
 	}
 }
 
-// coveringWritableRoot returns the first entry in roots that covers target
-// (pathCovers) once both sides are resolved through resolveNearestExisting
-// -- so a writable_roots entry spelled through a symlink, or an agmsg store
-// that lives behind one, still compares correctly. This is now the ONLY
-// comparison pass: an earlier version tried an unresolved textual
+// coveringWritableRoot returns the first entry in roots that both covers
+// target (pathCovers) AND does not cross a codex-protected directory
+// (pathCrossesCodexProtectedDir) -- both checked on resolved forms
+// (resolveNearestExisting), so a writable_roots entry spelled through a
+// symlink, or an agmsg store that lives behind one, still compares
+// correctly. A root that covers target only by crossing a protected
+// directory (cross-review AR-1 -- e.g. the home directory, when the store
+// lives under its .agents subdirectory) is recorded as blockedAncestor
+// (the first such root seen) instead of being accepted: codex would still
+// leave the store itself read-only, so this must not be reported as a real
+// covering root. blockedAncestor is "" when either some root genuinely
+// covers target, or no root is an ancestor at all. The comparison itself is
+// the ONLY pass over roots: an earlier version tried an unresolved textual
 // comparison first, which returned pass for a store directory that was
 // itself a symlink pointing OUTSIDE every configured root -- exactly the
 // misconfiguration this check exists to catch (self-review MEDIUM-3).
@@ -441,21 +566,61 @@ func resolveNearestExisting(path string) string {
 // relative or "~"-prefixed root is skipped before any resolution is
 // attempted -- checked on the root as CONFIGURED, not on its resolved form,
 // so a relative root can never become absolute by accident of where
-// symlink resolution happens to land. The returned string is always the
+// symlink resolution happens to land. Both returned strings are always the
 // ORIGINAL (unresolved) root text as written in the config, so the Detail
-// names what the operator actually configured. Returns "" when no root
-// covers target.
-func coveringWritableRoot(roots []string, target string) string {
+// names what the operator actually configured.
+func coveringWritableRoot(roots []string, target string) (covering, blockedAncestor string) {
 	resolvedTarget := resolveNearestExisting(target)
 	for _, root := range roots {
 		if !filepath.IsAbs(root) {
 			continue // a relative or ~-prefixed root never matches (see pathCovers)
 		}
-		if pathCovers(resolveNearestExisting(root), resolvedTarget) {
-			return root
+		resolvedRoot := resolveNearestExisting(root)
+		if !pathCovers(resolvedRoot, resolvedTarget) {
+			continue
 		}
+		if pathCrossesCodexProtectedDir(resolvedRoot, resolvedTarget) {
+			if blockedAncestor == "" {
+				blockedAncestor = root
+			}
+			continue
+		}
+		return root, ""
 	}
-	return ""
+	return "", blockedAncestor
+}
+
+// codexImplicitWritableRoots returns the directories workspace-write keeps
+// writable by default, regardless of writable_roots (cross-review WC-1):
+// "/tmp" unless [sandbox_workspace_write].exclude_slash_tmp is true
+// (docs/evidence/codex-seat-permissions-2026-09-18.md P4 confirms /tmp is
+// writable under workspace-write), and tmpDir (the seat's own $TMPDIR, via
+// the codexSandboxEnv seam -- never os.Getenv directly, so tests stay
+// hermetic against the real machine's TMPDIR) when it is non-empty,
+// absolute, and [sandbox_workspace_write].exclude_tmpdir_env_var is not
+// true. Order matters: coveringWritableRoot returns the first match, and
+// callers use identity against "/tmp" to tell the two apart (see
+// codexImplicitRootKey).
+func codexImplicitWritableRoots(cfg codexUserConfig, tmpDir string) []string {
+	var roots []string
+	if !cfg.SandboxWorkspaceWrite.ExcludeSlashTmp {
+		roots = append(roots, "/tmp")
+	}
+	if tmpDir != "" && filepath.IsAbs(tmpDir) && !cfg.SandboxWorkspaceWrite.ExcludeTmpdirEnvVar {
+		roots = append(roots, tmpDir)
+	}
+	return roots
+}
+
+// codexImplicitRootKey names the [sandbox_workspace_write] key that, if set
+// true, would stop implicitRoot from being writable by default:
+// exclude_slash_tmp for "/tmp", exclude_tmpdir_env_var for the $TMPDIR
+// root -- the only two values codexImplicitWritableRoots ever returns.
+func codexImplicitRootKey(implicitRoot string) string {
+	if implicitRoot == "/tmp" {
+		return "exclude_slash_tmp"
+	}
+	return "exclude_tmpdir_env_var"
 }
 
 // codexWritableRootSuffix builds the trailing notes appended to a covered
@@ -475,19 +640,65 @@ func codexWritableRootSuffix(fromOverride bool, profile, cfgDisplay string) stri
 	return suffix
 }
 
+// codexPaneEnvironmentMayDifferClause is the exact sentence fragment both
+// codexWritableRootSuffix's AGMSG_STORAGE_PATH note and
+// codexImplicitRootDetail's $TMPDIR note use to say the seat's pane
+// environment may not match this process's -- kept as one literal string so
+// codexImplicitRootDetail's substring check can reliably tell whether the
+// note is already present (cross-review WC-1: don't say it twice).
+const codexPaneEnvironmentMayDifferClause = "the seat's pane environment may differ"
+
+// codexImplicitRootDetail renders the Detail for a pass where the agmsg
+// store is covered by a directory workspace-write keeps writable by
+// default (codexImplicitWritableRoots), not by an explicit writable_roots
+// entry (cross-review WC-1). exists distinguishes "the config exists but
+// doesn't turn this default off" from "there is no config to turn it off
+// in" (the same convention codexNotNeededWhyB and codexWritableRootDetail's
+// missing-config form use). When implicitRoot came from $TMPDIR (not the
+// fixed "/tmp"), the pane-environment note is appended to suffix unless
+// it's already there from an AGMSG_STORAGE_PATH override -- the two notes
+// say the same thing, so this never repeats it.
+func codexImplicitRootDetail(implicitRoot, cfgDisplay, store string, exists bool, reasonClause, suffix string) string {
+	var keyClause string
+	if !exists {
+		keyClause = fmt.Sprintf("%s does not exist", cfgDisplay)
+	} else {
+		keyClause = fmt.Sprintf("%s is not set in %s", codexImplicitRootKey(implicitRoot), cfgDisplay)
+	}
+	if implicitRoot != "/tmp" && !strings.Contains(suffix, codexPaneEnvironmentMayDifferClause) {
+		suffix += fmt.Sprintf(" (%s)", codexPaneEnvironmentMayDifferClause)
+	}
+	return fmt.Sprintf("the agmsg store %s is under %s, which workspace-write keeps writable by default (%s); needed because %s",
+		store, implicitRoot, keyClause, reasonClause) + suffix
+}
+
+// codexBlockedAncestorClause renders the note codexWritableRootDetail
+// inserts when a writable root would cover the store but for a
+// codex-protected directory element between them (cross-review AR-1).
+// Returns "" when blockedAncestor is "".
+func codexBlockedAncestorClause(blockedAncestor string) string {
+	if blockedAncestor == "" {
+		return ""
+	}
+	return fmt.Sprintf(" (%s contains it, but codex keeps .git, .agents, and .codex directories under a writable root read-only)", blockedAncestor)
+}
+
 // codexWritableRootDetail renders the Detail for the check's last two
-// outcomes: root is coveringWritableRoot's result (non-empty on a pass,
-// "" on a warn). When there is no covering root, the wording distinguishes
-// a config that exists but simply omits a covering entry from one that
-// does not exist at all (self-review LOW-4) -- the latter also names the
-// config path in the "add ... in <cfg>" clause, since there is no existing
-// [sandbox_workspace_write] table to point the operator at otherwise. The
-// absent-config sentence leads with "<cfg> does not exist" rather than
-// parenthesizing it after the store path, so it reads as a statement about
-// the config, not about the store (self-review NEW-3: the store and config
-// are two different paths, and a trailing "(<cfg> does not exist)"
-// attached right after the store path read as if it described the store).
-func codexWritableRootDetail(root, cfgDisplay, store string, exists bool, reasonClause, suffix string) string {
+// outcomes: root is coveringWritableRoot's (or the implicit-root check's)
+// result (non-empty on a pass, "" on a warn). blockedAncestor is only ever
+// non-"" alongside an empty root -- it names a root that covers the store
+// only by crossing a codex-protected directory (cross-review AR-1), which
+// codexBlockedAncestorClause renders as a parenthetical right after the
+// store path. When there is no covering root, the wording also
+// distinguishes a config that exists but simply omits a covering entry
+// from one that does not exist at all (self-review LOW-4) -- the latter
+// also names the config path in the "add ... in <cfg>" clause, since there
+// is no existing [sandbox_workspace_write] table to point the operator at
+// otherwise, and never carries a blockedAncestor (an absent config has no
+// roots to speak of). The absent-config sentence leads with "<cfg> does not
+// exist" rather than parenthesizing it after the store path, so it reads as
+// a statement about the config, not about the store (self-review NEW-3).
+func codexWritableRootDetail(root, blockedAncestor, cfgDisplay, store string, exists bool, reasonClause, suffix string) string {
 	if root != "" {
 		return fmt.Sprintf("writable root %s in %s covers the agmsg store %s; needed because %s",
 			root, cfgDisplay, store, reasonClause) + suffix
@@ -498,9 +709,10 @@ func codexWritableRootDetail(root, cfgDisplay, store string, exists bool, reason
 			"[sandbox_workspace_write].writable_roots in %s (docs/recipes/codex-seat-permissions.md)",
 			cfgDisplay, store, reasonClause, store, cfgDisplay) + suffix
 	}
-	return fmt.Sprintf("no writable root in %s covers the agmsg store %s, so a codex seat under workspace-write cannot send RESULT to lead "+
+	return fmt.Sprintf("no writable root in %s covers the agmsg store %s%s, so a codex seat under workspace-write cannot send RESULT to lead "+
 		"(\"attempt to write a readonly database\"); needed because %s; add %s to [sandbox_workspace_write].writable_roots "+
-		"(docs/recipes/codex-seat-permissions.md)", cfgDisplay, store, reasonClause, store) + suffix
+		"(docs/recipes/codex-seat-permissions.md)",
+		cfgDisplay, store, codexBlockedAncestorClause(blockedAncestor), reasonClause, store) + suffix
 }
 
 // checkCodexAgmsgWritableRoot is `ralph doctor`'s "Codex sandbox (agmsg
@@ -510,11 +722,11 @@ func codexWritableRootDetail(root, cfgDisplay, store string, exists bool, reason
 // workspace-write -- via [org.permissions].codex_verified = true with a
 // role that resolves to edits or autonomous, or via the config's own
 // sandbox_mode = workspace-write with a role that resolves to guarded --
-// but no writable_roots entry covers the directory agmsg's SQLite message
-// store lives in: the exact failure that made a codex seat under
-// workspace-write unable to send RESULT to lead ("attempt to write a
-// readonly database", docs/evidence/codex-seat-permissions-2026-09-18.md
-// P3).
+// but no writable_roots entry, nor either of workspace-write's own implicit
+// defaults (/tmp, $TMPDIR), actually leaves the agmsg store writable: the
+// exact failure that made a codex seat under workspace-write unable to send
+// RESULT to lead ("attempt to write a readonly database", docs/evidence/
+// codex-seat-permissions-2026-09-18.md P3).
 //
 // Deterministic outcomes, in order:
 //  1. agmsg not installed at agmsgHome (driver.AgmsgAvailable) -> info --
@@ -524,8 +736,10 @@ func codexWritableRootDetail(root, cfgDisplay, store string, exists bool, reason
 //     install (see checkAgmsgAvailable).
 //  2. codex is not in [org].driver_pool -> pass -- no codex seat can ever
 //     be spawned, so nothing downstream is even read (self-review LOW-6).
-//  3. resolveEnv fails -> info, no config path to read.
-//  4. the config can't be read (permission error, not a regular file, over
+//  3. [org].model_pool has no codex model -> pass -- same reasoning as
+//     outcome 2, one level down (cross-review WC-2).
+//  4. resolveEnv fails -> info, no config path to read.
+//  5. the config can't be read (permission error, not a regular file, over
 //     codexConfigMaxBytes) -> info naming the reason (codexConfigReadReason).
 //     The config can't be decoded -- invalid TOML syntax, or syntactically
 //     valid TOML with the wrong shape (a duplicate key, a table
@@ -534,15 +748,21 @@ func codexWritableRootDetail(root, cfgDisplay, store string, exists bool, reason
 //     table name taken from the user's config, is never surfaced
 //     (codexConfigDecodeError, self-review MEDIUM-1). writable_roots is
 //     present but not an array of strings -> info.
-//  5. no role could ever make a writable root necessary
+//  6. no role could ever make a writable root necessary
 //     (codexSeatModesPossible plus codexSandboxReasons finds nothing) ->
 //     pass, naming which of the two preconditions failed on each side
 //     (codexNotNeededWhyA/codexNotNeededWhyB).
-//  6. a writable_roots entry covers the agmsg store directory
-//     (coveringWritableRoot) -> pass.
-//  7. otherwise -> warn, distinguishing a config that exists but omits a
-//     covering root from one that does not exist at all
-//     (codexWritableRootDetail).
+//  7. an explicit writable_roots entry covers the agmsg store directory
+//     without crossing a codex-protected directory (coveringWritableRoot)
+//     -> pass.
+//  8. no explicit root covers it, but one of workspace-write's own
+//     implicit defaults does (codexImplicitWritableRoots) -> pass, worded
+//     differently to say the store is covered by default rather than by
+//     configuration (codexImplicitRootDetail).
+//  9. otherwise -> warn, distinguishing a config that exists but omits a
+//     covering root from one that does not exist at all, and naming a
+//     blocked ancestor root when one exists
+//     (codexWritableRootDetail/codexBlockedAncestorClause).
 //
 // The check never returns "fail" -- a missing root is a real gap, but not
 // one that should flip doctor's exit code (see docs/recipes/
@@ -566,6 +786,11 @@ func checkCodexAgmsgWritableRoot(orgCfg config.OrgConfig, agmsgHome string, reso
 	if !slices.Contains(orgCfg.DriverPool, "codex") {
 		r.Status = "pass"
 		r.Detail = "not needed: codex is not in [org].driver_pool, so no codex seat can be spawned"
+		return r
+	}
+	if len(codexModelPoolModels(orgCfg)) == 0 {
+		r.Status = "pass"
+		r.Detail = "not needed: [org].model_pool has no codex model, so no codex seat can be spawned"
 		return r
 	}
 
@@ -614,12 +839,25 @@ func checkCodexAgmsgWritableRoot(orgCfg config.OrgConfig, agmsgHome string, reso
 	}
 	suffix := codexWritableRootSuffix(fromOverride, cfg.Profile, cfgDisplay)
 
-	root := coveringWritableRoot(roots, store)
+	root, blockedAncestor := coveringWritableRoot(roots, store)
 	if root != "" {
 		r.Status = "pass"
-	} else {
-		r.Status = "warn"
+		r.Detail = codexWritableRootDetail(root, "", cfgDisplay, store, exists, reasonClause, suffix)
+		return r
 	}
-	r.Detail = codexWritableRootDetail(root, cfgDisplay, store, exists, reasonClause, suffix)
+
+	implicitRoots := codexImplicitWritableRoots(cfg, env.TmpDir)
+	implicitRoot, implicitBlockedAncestor := coveringWritableRoot(implicitRoots, store)
+	if implicitRoot != "" {
+		r.Status = "pass"
+		r.Detail = codexImplicitRootDetail(implicitRoot, cfgDisplay, store, exists, reasonClause, suffix)
+		return r
+	}
+	if blockedAncestor == "" {
+		blockedAncestor = implicitBlockedAncestor
+	}
+
+	r.Status = "warn"
+	r.Detail = codexWritableRootDetail("", blockedAncestor, cfgDisplay, store, exists, reasonClause, suffix)
 	return r
 }
