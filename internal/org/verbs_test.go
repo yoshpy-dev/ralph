@@ -243,8 +243,8 @@ func TestOrgSend_ValidTypedMessage_PassesAndDrivesRealCalls(t *testing.T) {
 	if result.Err != nil {
 		t.Fatalf("expected a well-formed typed message to pass, got %v", result.Err)
 	}
-	if !result.TextTyped || !result.EnterPressed {
-		t.Errorf("expected TextTyped and EnterPressed both true on success, got TextTyped=%v EnterPressed=%v", result.TextTyped, result.EnterPressed)
+	if result.Progress != SendProgressEnterPressed {
+		t.Errorf("expected Progress SendProgressEnterPressed on success, got %v", result.Progress)
 	}
 
 	// Two AgentWait calls: the idle/done wait before send-text, and the
@@ -320,11 +320,8 @@ func TestOrgSend_DryRun_ValidMessage_AppendsEventWithoutDriverCalls(t *testing.T
 	if result.SubmitConfirmed {
 		t.Error("expected SubmitConfirmed false for a dry-run send (no confirmation ever attempted)")
 	}
-	if result.TextTyped {
-		t.Error("expected TextTyped false for a dry-run send (PaneSendText is never attempted)")
-	}
-	if result.EnterPressed {
-		t.Error("expected EnterPressed false for a dry-run send (PaneSendKeys is never attempted)")
+	if result.Progress != SendProgressNothingSent {
+		t.Errorf("expected Progress SendProgressNothingSent for a dry-run send (no pane call is ever attempted), got %v", result.Progress)
 	}
 	if len(h.calls) != 0 || len(a.calls) != 0 {
 		t.Fatalf("expected no driver calls for a dry-run send, got herdr=%v agmsg=%v", h.calls, a.calls)
@@ -551,8 +548,8 @@ func TestOrgSend_IdleDoneWaitFails_ErrorsBeforeAnyTypingOrEvent(t *testing.T) {
 	if !strings.Contains(result.Err.Error(), "wait for seat") {
 		t.Errorf("expected the error to name the idle/done wait, got %v", result.Err)
 	}
-	if result.TextTyped {
-		t.Error("expected TextTyped false: PaneSendText is never reached when the idle/done wait fails")
+	if result.Progress != SendProgressNothingSent {
+		t.Errorf("expected Progress SendProgressNothingSent: PaneSendText is never reached when the idle/done wait fails, got %v", result.Progress)
 	}
 	if result.PaneID != "" {
 		t.Errorf("expected empty PaneID: PaneSendText was never attempted, got %q", result.PaneID)
@@ -645,11 +642,12 @@ func TestOrgSend_EnterDelayMS_OverridesOrgSendEnterDelay(t *testing.T) {
 // docs/reports/self-review-2026-09-19-org-send-enter-timing.md): a
 // --timeout-ms budget that (after the idle/done wait) cannot even fund the
 // pre-Enter pause must be refused before anything is typed -- no
-// PaneSendText call, no PaneSendKeys call, no `sent` event, TextTyped
-// false. Before M2, this exact TimeoutMS=5 / SendEnterDelay=200ms pairing
-// used to type the text and only then hit ctx expiry inside
-// waitBeforeEnter (see the "not independently testable" note below this
-// test for what happened to that branch).
+// PaneSendText call, no PaneSendKeys call, no `sent` event, Progress stays
+// SendProgressNothingSent. Before M2, this exact TimeoutMS=5 /
+// SendEnterDelay=200ms pairing used to type the text and only then hit ctx
+// expiry inside waitBeforeEnter -- see
+// TestOrgSend_CtxExpiresDuringEnterDelay_AfterBudgetCheckPasses below for
+// how that branch is exercised deterministically today.
 func TestOrgSend_BudgetTooSmallForEnterDelay_NothingTyped(t *testing.T) {
 	o, h, _ := testOrg(t)
 	o.SendEnterDelay = 200 * time.Millisecond
@@ -667,11 +665,8 @@ func TestOrgSend_BudgetTooSmallForEnterDelay_NothingTyped(t *testing.T) {
 	if !strings.Contains(result.Err.Error(), "nothing was typed") {
 		t.Errorf("expected the error to say nothing was typed, got %v", result.Err)
 	}
-	if result.TextTyped {
-		t.Error("expected TextTyped false: the budget check must run before PaneSendText")
-	}
-	if result.EnterPressed {
-		t.Error("expected EnterPressed false: the budget check must run before PaneSendText, let alone PaneSendKeys")
+	if result.Progress != SendProgressNothingSent {
+		t.Errorf("expected Progress SendProgressNothingSent: the budget check must run before PaneSendText, got %v", result.Progress)
 	}
 	if result.PaneID != "" {
 		t.Errorf("expected no PaneID on a return before PaneSendText was ever attempted, got %q", result.PaneID)
@@ -722,11 +717,8 @@ func TestOrgSend_CtxExpiresDuringEnterDelay_AfterBudgetCheckPasses(t *testing.T)
 	if !strings.Contains(result.Err.Error(), "text typed but not submitted") {
 		t.Errorf("expected the error to mention the text was typed but not submitted, got %v", result.Err)
 	}
-	if !result.TextTyped {
-		t.Error("expected TextTyped true: PaneSendText already succeeded before ctx expired")
-	}
-	if result.EnterPressed {
-		t.Error("expected EnterPressed false: ctx expired before PaneSendKeys was ever called")
+	if result.Progress != SendProgressTextTyped {
+		t.Errorf("expected Progress SendProgressTextTyped: PaneSendText already succeeded and ctx expired before PaneSendKeys was ever called, got %v", result.Progress)
 	}
 	if result.PaneID == "" {
 		t.Error("expected a non-empty PaneID on the error return so the operator knows which pane to check")
@@ -739,13 +731,17 @@ func TestOrgSend_CtxExpiresDuringEnterDelay_AfterBudgetCheckPasses(t *testing.T)
 	}
 }
 
-// TestOrgSend_PaneSendKeysFails_ReportsTypedButNotSubmitted covers the L4
-// self-review fix: a PaneSendKeys failure leaves exactly the same residue
-// as a ctx expiry during the pre-Enter wait -- typed text, Enter attempted
-// but not delivered -- so its error must say so too (previously it did
-// not), and SendResult must report TextTyped=true with the seat's PaneID
-// so the caller (the CLI) can point the operator at the right pane.
-func TestOrgSend_PaneSendKeysFails_ReportsTypedButNotSubmitted(t *testing.T) {
+// TestOrgSend_PaneSendKeysFails_ReportsEnterUnacknowledged is the AR-1
+// cross-review fix (docs/reports/cross-review-triage-org-send-enter-timing.md):
+// a PaneSendKeys failure no longer asserts "not submitted" -- herdr's CLI
+// can be killed by ctx deadline expiry mid-call
+// (driver.ExecRunner.Run uses exec.CommandContext), so an error here does
+// NOT mean Enter failed to reach the pane; it means Send does not know
+// either way. Progress must be SendProgressEnterUnacknowledged (not the
+// old, over-confident TextTyped=true/EnterPressed=false), and the error
+// text must say the outcome is unknown rather than assert it never
+// happened.
+func TestOrgSend_PaneSendKeysFails_ReportsEnterUnacknowledged(t *testing.T) {
 	o, h, _ := testOrg(t)
 	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("spawn failed: %+v", r)
@@ -758,14 +754,14 @@ func TestOrgSend_PaneSendKeysFails_ReportsTypedButNotSubmitted(t *testing.T) {
 	if result.Err == nil {
 		t.Fatal("expected a non-nil Err when PaneSendKeys fails")
 	}
-	if !strings.Contains(result.Err.Error(), "text typed but not submitted") {
-		t.Errorf("expected the error to mention the text was typed but not submitted, got %v", result.Err)
+	if strings.Contains(result.Err.Error(), "not submitted") {
+		t.Errorf("expected the error to NOT assert the message was not submitted (the outcome is unknown), got %v", result.Err)
 	}
-	if !result.TextTyped {
-		t.Error("expected TextTyped true: PaneSendText already succeeded before PaneSendKeys failed")
+	if !strings.Contains(result.Err.Error(), "may or may not have been submitted") {
+		t.Errorf("expected the error to say the submit outcome is unknown, got %v", result.Err)
 	}
-	if result.EnterPressed {
-		t.Error("expected EnterPressed false: PaneSendKeys was attempted but did not succeed")
+	if result.Progress != SendProgressEnterUnacknowledged {
+		t.Errorf("expected Progress SendProgressEnterUnacknowledged, got %v", result.Progress)
 	}
 	if result.PaneID == "" {
 		t.Error("expected a non-empty PaneID on the error return so the operator knows which pane to check")
@@ -775,14 +771,19 @@ func TestOrgSend_PaneSendKeysFails_ReportsTypedButNotSubmitted(t *testing.T) {
 	}
 }
 
-// TestOrgSend_PaneSendTextFails_NoEnterNoEventNoTypedFlag is the twin of
-// the PaneSendKeys-failure test above for the step before it: when herdr
-// rejects the send-text call, Send must stop there -- no Enter (a keystroke
-// into a pane whose input box ralph did not fill is exactly the blind Enter
-// this change rules out), no `sent` event, and TextTyped=false so the CLI
-// does not print the "typed but not submitted" note for text ralph has no
-// reason to believe is there.
-func TestOrgSend_PaneSendTextFails_NoEnterNoEventNoTypedFlag(t *testing.T) {
+// TestOrgSend_PaneSendTextFails_ReportsTextUnacknowledged is the AR-1
+// cross-review fix (docs/reports/cross-review-triage-org-send-enter-timing.md),
+// the twin of TestOrgSend_PaneSendKeysFails_ReportsEnterUnacknowledged for
+// the step before it: when herdr rejects the send-text call, Send still
+// does not press Enter (a keystroke into a pane whose input box ralph
+// does not know it filled is exactly the blind-Enter hazard this whole
+// change rules out) and still appends no `sent` event -- but, unlike the
+// pre-AR-1 design, Send no longer claims nothing happened.
+// exec.CommandContext can kill herdr's CLI mid-call, so the paste may
+// already have landed before the error came back: Progress reports
+// SendProgressTextUnacknowledged (not the old TextTyped=false) and PaneID
+// IS set, so the CLI can still point the operator at the pane to check.
+func TestOrgSend_PaneSendTextFails_ReportsTextUnacknowledged(t *testing.T) {
 	o, h, _ := testOrg(t)
 	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("spawn failed: %+v", r)
@@ -798,8 +799,17 @@ func TestOrgSend_PaneSendTextFails_NoEnterNoEventNoTypedFlag(t *testing.T) {
 	if !strings.Contains(result.Err.Error(), "send text to seat") {
 		t.Errorf("expected the error to name the send-text step, got %v", result.Err)
 	}
-	if result.TextTyped || result.EnterPressed || result.SubmitConfirmed {
-		t.Errorf("expected TextTyped, EnterPressed and SubmitConfirmed all false, got %+v", result)
+	if !strings.Contains(result.Err.Error(), "may or may not have reached the pane") {
+		t.Errorf("expected the error to say the outcome is unknown, got %v", result.Err)
+	}
+	if result.Progress != SendProgressTextUnacknowledged {
+		t.Errorf("expected Progress SendProgressTextUnacknowledged, got %v", result.Progress)
+	}
+	if result.PaneID == "" {
+		t.Error("expected a non-empty PaneID on the error return (Send does not know whether the text reached the pane, so it still names the pane to check)")
+	}
+	if result.SubmitConfirmed {
+		t.Error("expected SubmitConfirmed false: confirmSubmitted is never reached")
 	}
 	if len(h.sendKeysKeys) != 0 {
 		t.Fatalf("expected no PaneSendKeys call after a failed PaneSendText, got %v", h.sendKeysKeys)
@@ -814,11 +824,10 @@ func TestOrgSend_PaneSendTextFails_NoEnterNoEventNoTypedFlag(t *testing.T) {
 // (docs/reports/self-review-2026-09-19-org-send-enter-timing.md): when the
 // manifest write for the `sent` event fails AFTER Enter has already
 // succeeded (and confirmSubmitted has already run), Send must report
-// EnterPressed=true alongside TextTyped=true and wrap the error to say
-// Enter was pressed -- this is what lets the CLI tell "very likely
-// delivered, only the history record was lost" apart from "text is still
-// sitting unsubmitted in the pane" (see Send's doc comment and
-// SendResult.EnterPressed's).
+// Progress=SendProgressEnterPressed and wrap the error to say Enter was
+// pressed -- this is what lets the CLI tell "very likely delivered, only
+// the history record was lost" apart from the two typed-but-unsubmitted/
+// unacknowledged residues (see Send's and SendProgress's doc comments).
 //
 // Unix-only, no build tag needed: this whole package already is one
 // (internal/org/lockfile.go uses syscall.Flock unconditionally). The
@@ -849,11 +858,8 @@ func TestOrgSend_AppendEventFailsAfterEnter_ReportsSubmittedButUnrecorded(t *tes
 	if !strings.Contains(result.Err.Error(), "Enter was pressed for seat") || !strings.Contains(result.Err.Error(), "could not be recorded") {
 		t.Errorf("expected the error to say Enter was pressed but the sent event could not be recorded, got %v", result.Err)
 	}
-	if !result.TextTyped {
-		t.Error("expected TextTyped true: PaneSendText succeeded")
-	}
-	if !result.EnterPressed {
-		t.Error("expected EnterPressed true: PaneSendKeys succeeded before appendEvent failed")
+	if result.Progress != SendProgressEnterPressed {
+		t.Errorf("expected Progress SendProgressEnterPressed: PaneSendKeys succeeded before appendEvent failed, got %v", result.Progress)
 	}
 	if result.PaneID == "" {
 		t.Error("expected a non-empty PaneID on the error return")

@@ -79,6 +79,76 @@ func resolvedHerdrAgentName(seat SeatStatus) string {
 	return herdrAgentName(seat.OrgID, seat.SeatID)
 }
 
+// SendProgress reports how far Send got before returning, replacing the
+// earlier two-bool (TextTyped/EnterPressed) design (cross-review AR-1,
+// docs/reports/cross-review-triage-org-send-enter-timing.md): a bool can
+// only say "yes" or "no", but driver.ExecRunner.Run shells out to herdr
+// under exec.CommandContext (internal/org/driver/driver.go), so a ctx
+// deadline firing while `herdr pane send-text` or `herdr pane send-keys`
+// is still in flight kills the herdr process and returns an error whether
+// or not herdr had already delivered the paste or the keystroke. The old
+// bools collapsed that into a false "no", which then told an operator
+// "not submitted, retype it" on a seat that may have already submitted and
+// reached an approval dialog -- exactly the blind-Enter hazard this whole
+// change exists to prevent (the same failure class as self-review
+// revalidation NEW-1). SendProgress instead has two "call attempted,
+// outcome unknown" states, so Send's error text and the CLI's operator
+// notes both say only what was actually observed.
+type SendProgress int
+
+const (
+	// SendProgressNothingSent is the zero value: no pane call was ever
+	// attempted. Set on protocol-validation rejection, DryRun, every
+	// seat-lookup error, the idle/done-wait failure, and the fail-closed
+	// --timeout-ms budget check -- every return before PaneSendText is
+	// even called.
+	SendProgressNothingSent SendProgress = iota
+	// SendProgressTextUnacknowledged means PaneSendText was called and
+	// returned an error. The text may or may not have reached the pane:
+	// a ctx deadline firing mid-call kills the herdr process and reports
+	// an error even if herdr had already delivered the paste.
+	SendProgressTextUnacknowledged
+	// SendProgressTextTyped means PaneSendText succeeded and Enter was
+	// never attempted. Set only when the pre-Enter pause is cut short by
+	// ctx expiring inside waitBeforeEnter -- the only way to reach this
+	// state, since PaneSendKeys is called unconditionally right after a
+	// successful wait. The text IS known to be sitting in the pane's
+	// input box, unsubmitted.
+	SendProgressTextTyped
+	// SendProgressEnterUnacknowledged means PaneSendKeys("Enter") was
+	// called and returned an error. Enter may or may not have been
+	// delivered, for the same exec.CommandContext reason as
+	// SendProgressTextUnacknowledged -- the message may or may not have
+	// been submitted.
+	SendProgressEnterUnacknowledged
+	// SendProgressEnterPressed means PaneSendKeys("Enter") succeeded. Set
+	// on exactly two returns: the appendEvent-failure error (Enter
+	// succeeded and confirmSubmitted already ran; only the `sent` history
+	// event could not be recorded) and the final success return.
+	SendProgressEnterPressed
+)
+
+// String returns a grep-able, lower-case, hyphenated name for p. Used in
+// test failure messages; production code never prints a SendProgress value
+// directly -- the CLI switches on it to choose a full operator-facing
+// sentence instead (see internal/cli/org.go's newOrgSendCmd).
+func (p SendProgress) String() string {
+	switch p {
+	case SendProgressNothingSent:
+		return "nothing-sent"
+	case SendProgressTextUnacknowledged:
+		return "text-unacknowledged"
+	case SendProgressTextTyped:
+		return "text-typed"
+	case SendProgressEnterUnacknowledged:
+		return "enter-unacknowledged"
+	case SendProgressEnterPressed:
+		return "enter-pressed"
+	default:
+		return fmt.Sprintf("SendProgress(%d)", int(p))
+	}
+}
+
 // SendParams describes one `ralph org send` invocation.
 type SendParams struct {
 	OrgID     string
@@ -116,42 +186,20 @@ type SendResult struct {
 	// Always false for DryRun (which never runs the confirmation) and for
 	// any error return.
 	SubmitConfirmed bool
-	// TextTyped reports whether PaneSendText already succeeded when Send
-	// returned -- i.e. whether the message text is (or, if Enter also
-	// succeeded, was) sitting in the seat's pane at some point. Set true on
-	// exactly four returns: the ctx-expiry-during-the-pre-Enter-wait error,
-	// the PaneSendKeys-failure error, the appendEvent-failure error, and
-	// the final success return -- every return from the line that calls
-	// PaneSendText onward. False for DryRun and for every return before
-	// that line, including the fail-closed --timeout-ms budget check.
-	//
-	// TextTyped alone does NOT mean "check the pane, the text might still
-	// be sitting there unsubmitted" -- see EnterPressed, which narrows that
-	// down. A caller that only checks TextTyped cannot tell "Enter was
-	// never pressed" apart from "Enter was pressed and very likely
-	// submitted the message, only the history record failed" -- those need
-	// opposite operator instructions (see Send's doc comment).
-	TextTyped bool
-	// EnterPressed reports whether PaneSendKeys("Enter") already succeeded
-	// when Send returned. Set true on exactly two returns: the
-	// appendEvent-failure error and the final success return. False
-	// everywhere else, including both TextTyped=true error returns (the
-	// ctx-expiry-during-the-pre-Enter-wait error, where Enter was never
-	// attempted, and the PaneSendKeys-failure error, where it was
-	// attempted but did not succeed).
-	//
-	// TextTyped && !EnterPressed is the actual "text may be sitting
-	// unsubmitted in the pane, check before retrying" case. TextTyped &&
-	// EnterPressed && Err != nil means the message was very likely
-	// delivered (Enter succeeded) but Send could not record that fact (the
-	// appendEvent failure) -- resending would risk a duplicate submit, not
-	// a residue.
-	EnterPressed bool
-	// PaneID is the target seat's pane id. Set on every return once
-	// PaneSendText has succeeded (mirrors TextTyped's four returns), so a
-	// caller with TextTyped=true and a non-nil Err can still name the pane
-	// to check. Empty for DryRun and for any return before PaneSendText is
-	// attempted.
+	// Progress reports how far Send got before returning -- see
+	// SendProgress's own doc comment for the five states and exactly which
+	// return sets each one. A caller (the CLI) switches on this instead of
+	// asserting a single "typed but not submitted" story for every
+	// failure: two of the five states are deliberately "call attempted,
+	// outcome unknown", because Send genuinely cannot tell whether a
+	// ctx-cancelled herdr call reached the pane before it was killed.
+	Progress SendProgress
+	// PaneID is the target seat's pane id. Set whenever Progress !=
+	// SendProgressNothingSent -- i.e. from the PaneSendText call onward,
+	// including that call's own error return -- so a caller can still name
+	// the pane to check even when Send does not know whether that call
+	// succeeded. Empty for DryRun and for any SendProgressNothingSent
+	// return.
 	PaneID string
 }
 
@@ -173,18 +221,25 @@ type SendResult struct {
 // call -- see confirmSubmitted's doc comment for why a second Enter is
 // unsafe.
 //
-// Three failure paths can leave a return with TextTyped=true, and they need
-// different operator instructions -- see SendResult.TextTyped/EnterPressed
-// for the field-level contract this paragraph summarizes:
+// Four failure paths land on four different SendResult.Progress states
+// (see SendProgress's own doc comment for the full five-state contract),
+// and each needs its own operator instruction because Send genuinely knows
+// different things in each case:
 //
-//   - ctx expiring during the pre-Enter wait: Enter is never pressed
-//     (TextTyped=true, EnterPressed=false). The message text is sitting
-//     unsubmitted in the pane's input box; a retry would type a second copy
-//     on top of it.
-//   - PaneSendKeys itself failing: Enter was attempted but not delivered
-//     (TextTyped=true, EnterPressed=false). Same residue as above.
-//   - appendEvent failing after a successful PaneSendKeys: Enter WAS
-//     delivered (TextTyped=true, EnterPressed=true) and confirmSubmitted
+//   - PaneSendText itself failing: SendProgressTextUnacknowledged. herdr's
+//     CLI can be killed by ctx expiry mid-call, so an error here does NOT
+//     mean the text failed to reach the pane -- it means Send does not
+//     know. The operator must check the pane before assuming anything.
+//   - ctx expiring during the pre-Enter wait: SendProgressTextTyped. This
+//     one IS known for certain: PaneSendText already returned success, and
+//     Enter was never attempted. The message text is sitting unsubmitted
+//     in the pane's input box; a retry would type a second copy on top of
+//     it.
+//   - PaneSendKeys itself failing: SendProgressEnterUnacknowledged. Same
+//     uncertainty as the PaneSendText case, one step later: Enter may or
+//     may not have reached the pane.
+//   - appendEvent failing after a successful PaneSendKeys:
+//     SendProgressEnterPressed. Enter WAS delivered and confirmSubmitted
 //     has already run -- the message was very likely submitted, only the
 //     `sent` history record was lost. Resending here risks a duplicate
 //     submit or, worse, a blind Enter landing on an approval dialog the
@@ -195,7 +250,7 @@ type SendResult struct {
 // A --timeout-ms budget too small to even fund the pre-Enter wait is
 // instead caught before PaneSendText is ever called (see the check right
 // after the idle/done wait below), so that case never types anything and
-// leaves TextTyped=false.
+// leaves Progress at its SendProgressNothingSent zero value.
 func (o *Org) Send(p SendParams) SendResult {
 	if !p.Raw {
 		if err := protocol.ValidateText(p.Text, protocol.DefaultMaxBodyChars); err != nil {
@@ -282,22 +337,37 @@ func (o *Org) Send(p SendParams) SendResult {
 	}
 
 	if err := o.Herdr.PaneSendText(ctx, seat.PaneID, p.Text); err != nil {
-		return SendResult{Err: fmt.Errorf("org: send: send text to seat %q: %w", p.To, err)}
+		// An error here does not mean the text failed to reach the pane --
+		// exec.CommandContext can kill herdr's CLI mid-call on ctx expiry,
+		// so the paste may have already landed before the error came back
+		// (cross-review AR-1). Progress and PaneID are still set so the
+		// operator has somewhere to check instead of a flat "it failed".
+		return SendResult{
+			Err:      fmt.Errorf("org: send: send text to seat %q: %w (the text may or may not have reached the pane)", p.To, err),
+			PaneID:   seat.PaneID,
+			Progress: SendProgressTextUnacknowledged,
+		}
 	}
 
 	if err := waitBeforeEnter(ctx, enterDelay); err != nil {
+		// Unlike the two "unacknowledged" cases, this one IS certain:
+		// PaneSendText already returned success above, and Enter is never
+		// attempted below when this branch is taken.
 		return SendResult{
-			Err:       fmt.Errorf("org: send: waiting before Enter for seat %q: %w (text typed but not submitted)", p.To, err),
-			PaneID:    seat.PaneID,
-			TextTyped: true,
+			Err:      fmt.Errorf("org: send: waiting before Enter for seat %q: %w (text typed but not submitted)", p.To, err),
+			PaneID:   seat.PaneID,
+			Progress: SendProgressTextTyped,
 		}
 	}
 
 	if err := o.Herdr.PaneSendKeys(ctx, seat.PaneID, "Enter"); err != nil {
+		// Same exec.CommandContext uncertainty as the PaneSendText error
+		// above, one step later: Enter may or may not have reached the
+		// pane, so the message may or may not have been submitted.
 		return SendResult{
-			Err:       fmt.Errorf("org: send: send Enter to seat %q: %w (text typed but not submitted)", p.To, err),
-			PaneID:    seat.PaneID,
-			TextTyped: true,
+			Err:      fmt.Errorf("org: send: send Enter to seat %q: %w (text typed; Enter was sent but not acknowledged, so the message may or may not have been submitted)", p.To, err),
+			PaneID:   seat.PaneID,
+			Progress: SendProgressEnterUnacknowledged,
 		}
 	}
 
@@ -317,17 +387,16 @@ func (o *Org) Send(p SendParams) SendResult {
 		// only this history record was lost. The wrapped error states only
 		// what Send observed ("Enter was pressed", not "submitted": the
 		// confirmation's outcome is not carried on an error return), and
-		// EnterPressed=true is how the CLI tells this case
-		// apart from a genuine typed-but-unsubmitted residue (see Send's
-		// doc comment): it must not suggest retyping or pressing Enter.
+		// SendProgressEnterPressed is how the CLI tells this case apart
+		// from the two typed-but-unsubmitted/unacknowledged residues above:
+		// it must not suggest retyping or pressing Enter.
 		return SendResult{
-			Err:          fmt.Errorf("org: send: Enter was pressed for seat %q but the sent event could not be recorded: %w", p.To, err),
-			PaneID:       seat.PaneID,
-			TextTyped:    true,
-			EnterPressed: true,
+			Err:      fmt.Errorf("org: send: Enter was pressed for seat %q but the sent event could not be recorded: %w", p.To, err),
+			PaneID:   seat.PaneID,
+			Progress: SendProgressEnterPressed,
 		}
 	}
-	return SendResult{SubmitConfirmed: submitConfirmed, PaneID: seat.PaneID, TextTyped: true, EnterPressed: true}
+	return SendResult{SubmitConfirmed: submitConfirmed, PaneID: seat.PaneID, Progress: SendProgressEnterPressed}
 }
 
 // sendEnterDelay returns o.SendEnterDelay, falling back to

@@ -46,6 +46,17 @@ func runOrgCmd(t *testing.T, args ...string) (string, error) {
 // including the idle/done wait Send needs to succeed before it ever
 // reaches Enter) -- it exists so CLI-level tests can exercise the
 // unconfirmed-submit warning path without also failing the send outright.
+//
+// ORG_STUB_PANE_SEND_TEXT_SLEEP, when set, makes the stub `sleep` that many
+// seconds (`sleep`'s own argument format, e.g. "0.6") before answering a
+// "pane send-text" call -- simulating a real herdr round trip that eats
+// into the ctx budget between Send's fail-closed pre-Enter-pause budget
+// check (which measures ctx time remaining right before PaneSendText) and
+// the actual pre-Enter wait. This is the CLI-level (real subprocess)
+// counterpart of fakeHerdr.paneSendTextDelay in
+// internal/org/spawn_test.go, needed because the CLI drives Send through a
+// real subprocess herdr with no other way to inject a controlled delay
+// (AR-1 CLI coverage, docs/reports/cross-review-triage-org-send-enter-timing.md).
 const herdrStub = `#!/bin/sh
 if [ -n "$ORG_HERDR_LOG" ]; then
   echo "$@" >> "$ORG_HERDR_LOG"
@@ -61,6 +72,9 @@ if [ "$1 $2" = "agent wait" ] && [ -n "$ORG_STUB_AGENT_WAIT_CONFIRM_FAIL" ]; the
       exit 1
     fi
   done
+fi
+if [ "$1 $2" = "pane send-text" ] && [ -n "$ORG_STUB_PANE_SEND_TEXT_SLEEP" ]; then
+  sleep "$ORG_STUB_PANE_SEND_TEXT_SLEEP"
 fi
 case "$1 $2" in
   "workspace create") echo '{"id":"cli:workspace:create","result":{"root_pane":{"pane_id":"ws-stub-1:p1","tab_id":"ws-stub-1:t1","workspace_id":"ws-stub-1"},"tab":{"tab_id":"ws-stub-1:t1"},"type":"workspace_created","workspace":{"active_tab_id":"ws-stub-1:t1","workspace_id":"ws-stub-1"}}}' ;;
@@ -1271,13 +1285,15 @@ func TestOrgSend_DryRun_NeverWarnsAboutUnconfirmedSubmit(t *testing.T) {
 	}
 }
 
-// TestOrgSend_PaneSendKeysFails_NotesTypedButNotSubmittedOnStderr covers the
-// CLI half of the L4/M2 self-review fixes: when PaneSendKeys itself fails
-// (text already typed, Enter attempted but not delivered), the command
-// exits non-zero AND prints a stderr note pointing the operator at the pane
-// before they retry -- distinct from the fail-closed "nothing was typed"
-// case below, which must NOT print this note.
-func TestOrgSend_PaneSendKeysFails_NotesTypedButNotSubmittedOnStderr(t *testing.T) {
+// TestOrgSend_PaneSendKeysFails_NotesEnterUnacknowledgedOnStderr is the AR-1
+// cross-review fix (docs/reports/cross-review-triage-org-send-enter-timing.md):
+// when PaneSendKeys itself fails, the CLI must no longer assert "not
+// submitted" -- herdr's CLI can be killed by ctx deadline expiry mid-call,
+// so the message may or may not have been delivered. The command still
+// exits non-zero and still prints a stderr note pointing the operator at
+// the pane, but the note must say the outcome is unknown and must not
+// issue an unconditional "press Enter" or "submit it" instruction.
+func TestOrgSend_PaneSendKeysFails_NotesEnterUnacknowledgedOnStderr(t *testing.T) {
 	setupOrgStubPATH(t)
 	stateDir := filepath.Join(t.TempDir(), "state")
 
@@ -1299,8 +1315,14 @@ func TestOrgSend_PaneSendKeysFails_NotesTypedButNotSubmittedOnStderr(t *testing.
 	if err == nil {
 		t.Fatalf("expected non-zero exit when PaneSendKeys fails, output: %s", out)
 	}
-	if !strings.Contains(out, "the message text was typed into pane") {
-		t.Errorf("expected the typed-but-not-submitted note, got: %s", out)
+	if !strings.Contains(out, "may or may not have been submitted") {
+		t.Errorf("expected the enter-unacknowledged note, got: %s", out)
+	}
+	if !strings.Contains(out, "Only if") {
+		t.Errorf("expected the note to condition the submit/clear instruction on what the operator actually sees, got: %s", out)
+	}
+	if !strings.Contains(out, "do not press Enter") {
+		t.Errorf("expected the note to explicitly say not to press Enter unconditionally, got: %s", out)
 	}
 	if !strings.Contains(out, "pane-stub-1") {
 		t.Errorf("expected the note to name the seat's pane id, got: %s", out)
@@ -1308,11 +1330,117 @@ func TestOrgSend_PaneSendKeysFails_NotesTypedButNotSubmittedOnStderr(t *testing.
 	if !strings.Contains(out, "\"seat-1\"") {
 		t.Errorf("expected the note to name the target seat, got: %s", out)
 	}
+	if strings.Contains(out, "not submitted") {
+		t.Errorf("expected no unconditional not-submitted wording on this path (the outcome is unknown), got: %s", out)
+	}
+	if strings.Contains(out, "the message text was typed into pane") {
+		t.Errorf("expected the enter-unacknowledged note, not the text-typed note, got: %s", out)
+	}
+	if strings.Contains(out, "Enter was already pressed") {
+		t.Errorf("expected no submitted-but-unrecorded note on this path (Enter's delivery is unknown, not confirmed), got: %s", out)
+	}
+}
+
+// TestOrgSend_PaneSendTextFails_NotesTextUnacknowledgedOnStderr is the AR-1
+// cross-review fix's twin for the step before PaneSendKeys: when herdr
+// rejects the send-text call, the note must say the outcome is unknown
+// (not "nothing was typed", and not "typed but not submitted") -- ctx
+// deadline expiry can kill herdr's CLI mid-call, so the paste may already
+// have landed before the error came back.
+func TestOrgSend_PaneSendTextFails_NotesTextUnacknowledgedOnStderr(t *testing.T) {
+	setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	if _, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
+		"--state-dir", stateDir,
+	); err != nil {
+		t.Fatalf("spawn failed: %v", err)
+	}
+	// Same generic ORG_STUB_FAIL mechanism as pane:send-keys above, one
+	// step earlier in the argv ("pane send-text" -> "$1:$2" = "pane:send-text").
+	t.Setenv("ORG_STUB_FAIL", "pane:send-text")
+
+	out, err := runOrgCmd(t, "send", "--org-id", "org-a", "--to", "seat-1",
+		"--text", "TYPE: TASK\nTASK_ID: t-1\n\ndo the thing", "--enter-delay-ms", "1", "--state-dir", stateDir)
+	if err == nil {
+		t.Fatalf("expected non-zero exit when PaneSendText fails, output: %s", out)
+	}
+	if !strings.Contains(out, "the send-text call") {
+		t.Errorf("expected the text-unacknowledged note, got: %s", out)
+	}
+	if !strings.Contains(out, "may or may not have been typed") {
+		t.Errorf("expected the note to say the outcome is unknown, got: %s", out)
+	}
+	if !strings.Contains(out, "pane-stub-1") {
+		t.Errorf("expected the note to include the seat's pane id, got: %s", out)
+	}
+	if !strings.Contains(out, "\"seat-1\"") {
+		t.Errorf("expected the note to name the target seat, got: %s", out)
+	}
+	if strings.Contains(out, "send-keys") {
+		t.Errorf("expected no send-keys instruction on this path, got: %s", out)
+	}
+	if strings.Contains(out, "Enter was already pressed") {
+		t.Errorf("expected no submitted-but-unrecorded note on this path, got: %s", out)
+	}
+}
+
+// TestOrgSend_CtxExpiresDuringEnterDelay_NotesTextTypedOnStderr is the CLI
+// counterpart of internal/org/verbs_test.go's
+// TestOrgSend_CtxExpiresDuringEnterDelay_AfterBudgetCheckPasses: ctx
+// expiring inside the pre-Enter pause, after PaneSendText has already
+// succeeded, must still print the ORIGINAL "typed but not submitted" note
+// -- unlike the two "unacknowledged" cases above, this state IS known for
+// certain (PaneSendText really did return success before ctx expired).
+// ORG_STUB_PANE_SEND_TEXT_SLEEP (see herdrStub's doc comment) simulates a
+// slow herdr round trip for "pane send-text" so the real subprocess-backed
+// budget check passes but the pre-Enter wait's ctx then expires -- the
+// real-subprocess analogue of fakeHerdr.paneSendTextDelay.
+//
+// --timeout-ms 1500 / --enter-delay-ms 400 / sleep 1.1s: the budget check
+// (ctx remaining roughly 1500ms minus one subprocess call's overhead) must
+// exceed 400ms -- true with a ~1000ms margin. After the 1.1s send-text
+// sleep (plus its own subprocess overhead), well under 400ms of ctx budget
+// remains when the 400ms pre-Enter timer starts, so ctx wins with a
+// comfortable margin even under generous (100-150ms) worst-case per-call
+// subprocess-overhead assumptions.
+func TestOrgSend_CtxExpiresDuringEnterDelay_NotesTextTypedOnStderr(t *testing.T) {
+	setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	if _, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
+		"--state-dir", stateDir,
+	); err != nil {
+		t.Fatalf("spawn failed: %v", err)
+	}
+	t.Setenv("ORG_STUB_PANE_SEND_TEXT_SLEEP", "1.1")
+
+	out, err := runOrgCmd(t, "send", "--org-id", "org-a", "--to", "seat-1",
+		"--text", "TYPE: TASK\nTASK_ID: t-1\n\ndo the thing",
+		"--timeout-ms", "1500", "--enter-delay-ms", "400", "--state-dir", stateDir)
+	if err == nil {
+		t.Fatalf("expected non-zero exit when ctx expires inside the pre-Enter pause, output: %s", out)
+	}
+	if !strings.Contains(out, "the message text was typed into pane") {
+		t.Errorf("expected the typed-but-not-submitted note, got: %s", out)
+	}
+	if !strings.Contains(out, "pane-stub-1") {
+		t.Errorf("expected the note to include the seat's pane id, got: %s", out)
+	}
+	if !strings.Contains(out, "\"seat-1\"") {
+		t.Errorf("expected the note to name the target seat, got: %s", out)
+	}
 	if !strings.Contains(out, "before sending again") {
 		t.Errorf("expected the note to warn against retrying blindly, got: %s", out)
 	}
-	if strings.Contains(out, "Enter was already pressed") {
-		t.Errorf("expected no submitted-but-unrecorded note on this path (Enter did NOT succeed here), got: %s", out)
+	if strings.Contains(out, "may or may not") {
+		t.Errorf("expected no uncertainty wording on this path (the state IS known), got: %s", out)
 	}
 }
 
@@ -1416,6 +1544,133 @@ func TestOrgSend_AppendEventFailsAfterEnter_NotesSubmittedNotRecorded(t *testing
 	}
 	if strings.Contains(out, "send-keys") {
 		t.Errorf("expected no send-keys instruction on this path (the message very likely already submitted), got: %s", out)
+	}
+}
+
+// TestOrgSend_StateDirHint_IncludesFlagWhenExplicit is the AR-2 cross-review
+// fix (docs/reports/cross-review-triage-org-send-enter-timing.md): when
+// --state-dir was explicitly passed, every printed `ralph org read`
+// recovery command -- the unconfirmed-submit warning and every post-error
+// note -- must include --state-dir with the resolved absolute path.
+// Without it, a human following the printed command resolves the DEFAULT
+// state dir instead and either gets "seat not found" or, worse, reads a
+// different seat that happens to share the same org_id/seat_id there.
+func TestOrgSend_StateDirHint_IncludesFlagWhenExplicit(t *testing.T) {
+	setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+	absStateDir, err := filepath.Abs(stateDir)
+	if err != nil {
+		t.Fatalf("filepath.Abs: %v", err)
+	}
+
+	if _, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
+		"--state-dir", stateDir,
+	); err != nil {
+		t.Fatalf("spawn failed: %v", err)
+	}
+
+	// The unconfirmed-submit warning (a success-path message, not a
+	// post-error note).
+	t.Setenv("ORG_STUB_AGENT_WAIT_CONFIRM_FAIL", "1")
+	out, err := runOrgCmd(t, "send", "--org-id", "org-a", "--to", "seat-1",
+		"--text", "TYPE: TASK\nTASK_ID: t-1\n\ndo the thing", "--enter-delay-ms", "1", "--state-dir", stateDir)
+	if err != nil {
+		t.Fatalf("expected exit 0 for an unconfirmed submit, got %v (output: %s)", err, out)
+	}
+	if !strings.Contains(out, " --state-dir "+absStateDir) {
+		t.Errorf("expected the unconfirmed-submit warning to include --state-dir %s, got: %s", absStateDir, out)
+	}
+	t.Setenv("ORG_STUB_AGENT_WAIT_CONFIRM_FAIL", "")
+
+	// A post-error note (the text-unacknowledged path).
+	t.Setenv("ORG_STUB_FAIL", "pane:send-text")
+	out2, err2 := runOrgCmd(t, "send", "--org-id", "org-a", "--to", "seat-1",
+		"--text", "TYPE: TASK\nTASK_ID: t-1\n\ndo the thing", "--enter-delay-ms", "1", "--state-dir", stateDir)
+	if err2 == nil {
+		t.Fatalf("expected non-zero exit when PaneSendText fails, output: %s", out2)
+	}
+	if !strings.Contains(out2, " --state-dir "+absStateDir) {
+		t.Errorf("expected the text-unacknowledged note to include --state-dir %s, got: %s", absStateDir, out2)
+	}
+}
+
+// TestOrgSend_StateDirHint_OmitsFlagWhenResolvedFromEnv is the negative
+// counterpart of TestOrgSend_StateDirHint_IncludesFlagWhenExplicit: when
+// the state dir comes from RALPH_ORG_STATE_DIR rather than an explicit
+// --state-dir flag on this invocation, the hint must NOT repeat
+// --state-dir -- the same shell resolves the same env var the same way
+// when the operator runs the printed command themselves, so repeating it
+// would be redundant (and could go stale if the env var changes between
+// the two commands).
+func TestOrgSend_StateDirHint_OmitsFlagWhenResolvedFromEnv(t *testing.T) {
+	setupOrgStubPATH(t)
+	stateDir := t.TempDir()
+	t.Setenv("RALPH_ORG_STATE_DIR", stateDir)
+
+	if _, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
+	); err != nil {
+		t.Fatalf("spawn failed: %v", err)
+	}
+
+	t.Setenv("ORG_STUB_FAIL", "pane:send-text")
+	out, err := runOrgCmd(t, "send", "--org-id", "org-a", "--to", "seat-1",
+		"--text", "TYPE: TASK\nTASK_ID: t-1\n\ndo the thing", "--enter-delay-ms", "1")
+	if err == nil {
+		t.Fatalf("expected non-zero exit when PaneSendText fails, output: %s", out)
+	}
+	if strings.Contains(out, "--state-dir") {
+		t.Errorf("expected no --state-dir in the note when the state dir came from RALPH_ORG_STATE_DIR, got: %s", out)
+	}
+}
+
+// TestOrgReadCommandHint_Table covers orgReadCommandHint and its
+// shellQuoteIfNeeded helper directly: whether --state-dir is appended at
+// all, and how a resolved state dir containing shell metacharacters (a
+// space, a single quote) is quoted so the printed command stays
+// copy-paste-safe.
+func TestOrgReadCommandHint_Table(t *testing.T) {
+	tests := []struct {
+		name             string
+		orgID, seat      string
+		resolvedStateDir string
+		stateDirFlagSet  bool
+		want             string
+	}{
+		{
+			name:  "flag not set: no --state-dir regardless of resolvedStateDir",
+			orgID: "org-a", seat: "seat-1", resolvedStateDir: "/tmp/state", stateDirFlagSet: false,
+			want: "ralph org read --org-id org-a --seat seat-1",
+		},
+		{
+			name:  "flag set, shell-safe path: unquoted",
+			orgID: "org-a", seat: "seat-1", resolvedStateDir: "/tmp/state", stateDirFlagSet: true,
+			want: "ralph org read --org-id org-a --seat seat-1 --state-dir /tmp/state",
+		},
+		{
+			name:  "flag set, path with a space: single-quoted",
+			orgID: "org-a", seat: "seat-1", resolvedStateDir: "/tmp/my state/dir", stateDirFlagSet: true,
+			want: "ralph org read --org-id org-a --seat seat-1 --state-dir '/tmp/my state/dir'",
+		},
+		{
+			name:  "flag set, path with an embedded single quote: escaped POSIX-style",
+			orgID: "org-a", seat: "seat-1", resolvedStateDir: "/tmp/o'brien", stateDirFlagSet: true,
+			want: `ralph org read --org-id org-a --seat seat-1 --state-dir '/tmp/o'\''brien'`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := orgReadCommandHint(tc.orgID, tc.seat, tc.resolvedStateDir, tc.stateDirFlagSet)
+			if got != tc.want {
+				t.Errorf("orgReadCommandHint(%q, %q, %q, %v) = %q, want %q",
+					tc.orgID, tc.seat, tc.resolvedStateDir, tc.stateDirFlagSet, got, tc.want)
+			}
+		})
 	}
 }
 
