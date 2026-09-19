@@ -137,10 +137,24 @@ ralph org spawn --org-id perm-auto --id reviewer --role reviewer --driver codex 
     --config ralph-autonomous.toml --state-dir <scratch>/state-auto
   ```
 
-  When the seat is idle the pasted text can stay in the composer unsent, in
-  which case the seat is still idle and a `wait` returns at once looking like
-  success; check the pane, and a few seconds after `send` send
-  `herdr pane send-keys <pane> Enter` once. Then wait for the seat:
+  `send` types the message, waits 750 ms (`--enter-delay-ms`), presses
+  Enter once, and then checks through herdr that the seat left idle/done.
+  Without that wait an idle codex seat often kept the pasted text in the
+  composer unsent. If `send` warns that it could not confirm the submit,
+  check the pane with `ralph org read`, and only if the message is still in
+  the composer press Enter yourself (`herdr pane send-keys <pane> Enter`);
+  ralph never resends Enter, because a blind keystroke could confirm an
+  approval dialog. If `send` exits non-zero and prints a stderr note,
+  follow the note rather than retrying blindly (a failure before anything
+  was sent to the pane, such as a validation error, an unknown seat, or a
+  `--timeout-ms` too small for the pause, prints no note and is safe to
+  retry). Every note starts with reading the pane; the `ralph org read`
+  command it prints carries `--state-dir` when you passed one. A herdr
+  call that is cut off by `--timeout-ms` returns an error even if the text
+  or the Enter already reached the pane, so in that case ralph reports what
+  it does not know instead of guessing. Read what the note says before
+  deciding whether to press Enter yourself or send again. Then wait for
+  the seat:
 
   ```sh
   ralph org wait --org-id perm-auto --seat reviewer --until idle,done \

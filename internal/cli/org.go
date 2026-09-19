@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -123,6 +124,58 @@ func newOrgRuntimeAt(resolvedStateDir, configPath string) (*org.Org, error) {
 		Herdr:    driver.Herdr{R: runner},
 		Agmsg:    driver.Agmsg{R: runner, Home: driver.ResolveAgmsgHome(orgCfg.AgmsgHome)},
 	}, nil
+}
+
+// orgReadCommandHint builds the `ralph org read` recovery command printed
+// in send's post-failure notes and its unconfirmed-submit warning (AR-2,
+// docs/reports/cross-review-triage-org-send-enter-timing.md). It appends
+// --state-dir resolvedStateDir only when stateDirFlagSet is true (--state-dir
+// was explicitly passed to this invocation of `send`): a bare `ralph org
+// read --org-id ... --seat ...` would otherwise resolve the DEFAULT state
+// dir (env/git-toplevel/cwd, see org.ResolveOrgStateDir), which either
+// fails with "seat not found" or -- worse -- silently reads a different
+// seat that happens to share the same org_id/seat_id in that default
+// manifest. An env-resolved or default-resolved state dir is deliberately
+// NOT appended: the same shell, run from the same directory with the same
+// environment, resolves it the same way when the operator runs the
+// printed command themselves, so repeating it would be redundant as long
+// as neither changes between the two commands (RALPH_ORG_STATE_DIR can go
+// stale if the env changes; the git-toplevel and cwd fallbacks depend on
+// cwd the same way, since org.ResolveOrgStateDir shells out to `git
+// rev-parse --show-toplevel` in the current directory). resolvedStateDir
+// must be the value org.ResolveOrgStateDir already returned (always
+// absolute), not the raw flag text, so the hint survives a cwd change
+// before the operator acts on it.
+//
+// --config is deliberately not included: newOrgReadCmd's RunE loads
+// *configPath into org.Org.Config, but (*org.Org).Read never reads that
+// field (it only calls findSeat, which reads the manifest, and
+// Herdr.PaneRead) -- so --config cannot affect read's seat lookup.
+func orgReadCommandHint(orgID, seat, resolvedStateDir string, stateDirFlagSet bool) string {
+	hint := fmt.Sprintf("ralph org read --org-id %s --seat %s", orgID, seat)
+	if stateDirFlagSet {
+		hint += " --state-dir " + shellQuoteIfNeeded(resolvedStateDir)
+	}
+	return hint
+}
+
+// shellSafeUnquoted matches the characters that need no quoting in a POSIX
+// shell word -- shellQuoteIfNeeded's sole caller only ever passes a
+// filesystem path, so this set (alphanumerics plus the handful of
+// characters a path commonly contains) is deliberately narrow rather than
+// attempting to cover every shell-safe character in general.
+var shellSafeUnquoted = regexp.MustCompile(`^[A-Za-z0-9_./-]+$`)
+
+// shellQuoteIfNeeded returns s unchanged when it contains only
+// shellSafeUnquoted characters; otherwise it wraps s in single quotes,
+// escaping any embedded single quote the POSIX way (close the quote, emit
+// an escaped literal quote, reopen), so a path containing a space or other
+// shell metacharacter stays copy-paste-safe in a printed recovery command.
+func shellQuoteIfNeeded(s string) string {
+	if shellSafeUnquoted.MatchString(s) {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // resolveOrgConfig loads the [org] envelope from configPath, falling back
@@ -340,10 +393,11 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 
 func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	var (
-		to, text  string
-		timeoutMS int
-		dryRun    bool
-		raw       bool
+		to, text     string
+		timeoutMS    int
+		dryRun       bool
+		raw          bool
+		enterDelayMS int
 	)
 
 	cmd := &cobra.Command{
@@ -353,32 +407,118 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"(internal/org/protocol, see .claude/rules/ralph/agent-messaging.md) before\n" +
 			"sending: TYPE must be a known value, TASK_ID is required for\n" +
 			"TASK/RESULT/REVIEW/BLOCKED/CONTRACT, and the body must not exceed the\n" +
-			"size cap. Pass --raw to bypass validation entirely for free-form text.",
+			"size cap. Pass --raw to bypass validation entirely for free-form text.\n" +
+			"After typing the text, send waits briefly and presses Enter once, then\n" +
+			"tries to confirm the seat left idle/done. It never presses Enter a\n" +
+			"second time: if the submit cannot be confirmed, it prints a warning\n" +
+			"instead of guessing -- see --enter-delay-ms below.",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if enterDelayMS < 0 {
+				return fmt.Errorf("org: --enter-delay-ms must be >= 0")
+			}
 			if err := requireOrgID(*orgID); err != nil {
 				return err
 			}
 			if err := requireSeatIdentifier("--to", to); err != nil {
 				return err
 			}
-			rt, err := newOrgRuntime(cmd, *stateDir, *configPath)
+			// Resolved once (mirrors newOrgWatchCmd's self-review LOW fix)
+			// so the recovery-command hint below (AR-2,
+			// docs/reports/cross-review-triage-org-send-enter-timing.md)
+			// can use the SAME resolved, absolute state dir newOrgRuntimeAt
+			// wires the runtime to, instead of re-deriving it (or, worse,
+			// printing the raw --state-dir flag text, which breaks if the
+			// operator's cwd differs when they run the printed command).
+			stateDirFlagSet := cmd.Flags().Changed("state-dir")
+			resolvedStateDir, _ := org.ResolveOrgStateDir(*stateDir, stateDirFlagSet)
+			rt, err := newOrgRuntimeAt(resolvedStateDir, *configPath)
 			if err != nil {
 				return err
 			}
-			result := rt.Send(org.SendParams{OrgID: *orgID, To: to, Text: text, TimeoutMS: timeoutMS, DryRun: dryRun, Raw: raw})
+			result := rt.Send(org.SendParams{
+				OrgID: *orgID, To: to, Text: text, TimeoutMS: timeoutMS, DryRun: dryRun, Raw: raw,
+				EnterDelayMS: enterDelayMS,
+			})
+			readHint := orgReadCommandHint(*orgID, to, resolvedStateDir, stateDirFlagSet)
 			if result.Err != nil {
+				// Four distinct outcomes after a driver call failed or its
+				// result could not be recorded, and each needs its own
+				// operator instruction -- see SendResult.Progress's and
+				// SendProgress's doc comments in internal/org/verbs.go for
+				// the full state-by-state contract this switch mirrors.
+				// SendProgressNothingSent (no pane call was ever attempted)
+				// prints no note.
+				switch result.Progress {
+				case org.SendProgressTextUnacknowledged:
+					// Outcome unknown, not "failed" -- see SendProgress's
+					// doc comment for why.
+					_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
+						"note: the send-text call to seat %q (pane %s) failed, so the message may or "+
+							"may not have been typed into the input box. Check the pane before sending "+
+							"again: a second send would be typed after whatever is there. Check the "+
+							"seat with '%s'.\n",
+						to, result.PaneID, readHint)
+				case org.SendProgressTextTyped:
+					// The one state that IS certain: PaneSendText really did
+					// return success before ctx expired.
+					_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
+						"note: the message text was typed into pane %s of seat %q but not submitted. "+
+							"Check it with '%s' and clear or submit it there before sending again: a "+
+							"second send would be typed after it.\n",
+						result.PaneID, to, readHint)
+				case org.SendProgressEnterUnacknowledged:
+					// Outcome unknown -- the note is conditional on purpose:
+					// never tell the operator to press Enter unconditionally.
+					_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
+						"note: the text was typed and Enter was sent to seat %q (pane %s), but herdr "+
+							"did not acknowledge it, so the message may or may not have been "+
+							"submitted. Read the pane first with '%s'. Only if the text is still "+
+							"sitting in the input box, submit or clear it there. If the seat shows "+
+							"anything else (it is working, or it shows a dialog), do not press Enter "+
+							"and do not send the message again.\n",
+						to, result.PaneID, readHint)
+				case org.SendProgressEnterPressed:
+					// The message was very likely delivered -- must NOT
+					// suggest retyping, clearing, or pressing Enter.
+					_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
+						"note: Enter was already pressed for seat %q (pane %s); only the sent "+
+							"history event could not be recorded. Do not send the message again. "+
+							"Check the seat with '%s'.\n",
+						to, result.PaneID, readHint)
+				}
 				return fmt.Errorf("org: send: %w", result.Err)
 			}
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "sent message to seat %q\n", to)
+			// A submit that Send could not confirm is not a failure (a very
+			// short agent turn can go working -> done before the confirm wait
+			// even starts) -- so this stays a stderr warning with exit 0, not
+			// an error. Send never resends Enter itself (see confirmSubmitted's
+			// doc comment in internal/org/verbs.go for why a blind second
+			// keystroke is unsafe), so the operator is the one who decides
+			// whether to submit it by hand.
+			if !dryRun && !result.SubmitConfirmed {
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
+					"warning: could not confirm that seat %q started working after Enter. "+
+						"Check its pane with '%s'. "+
+						"If the message is still sitting in the input box, submit it with "+
+						"'herdr pane send-keys %s Enter'. If the pane shows anything else "+
+						"(the seat is working, or it shows a dialog), do not press Enter. "+
+						"ralph does not resend Enter on its own: a blind keystroke could "+
+						"confirm an approval dialog.\n",
+					to, readHint, result.PaneID)
+			}
 			return nil
 		},
 	}
 
 	cmd.Flags().StringVar(&to, "to", "", "target seat id (required)")
 	cmd.Flags().StringVar(&text, "text", "", "message text")
-	cmd.Flags().IntVar(&timeoutMS, "timeout-ms", 30000, "idle-wait timeout in milliseconds before sending")
+	cmd.Flags().IntVar(&timeoutMS, "timeout-ms", 30000,
+		"overall herdr timeout in milliseconds for one send (idle wait + pre-Enter wait + submit confirmation)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "record without sending a real message")
 	cmd.Flags().BoolVar(&raw, "raw", false, "bypass typed message protocol validation")
+	cmd.Flags().IntVar(&enterDelayMS, "enter-delay-ms", 0,
+		fmt.Sprintf("wait this many milliseconds between typing the message and pressing Enter (0 = built-in default of %d)", org.DefaultSendEnterDelayMS))
 
 	return cmd
 }
