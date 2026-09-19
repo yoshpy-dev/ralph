@@ -1,6 +1,6 @@
 # codex-effective-model-receipt
 
-- Status: Draft
+- Status: In progress
 - Owner: Claude Code
 - Date: 2026-09-20
 - Related request: #155 の実機検証(`docs/evidence/codex-seat-permissions-2026-09-18.md` P5、Run E1)で、`--model gpt-5.5` を渡した codex 座席の実効モデルが `gpt-5.6-sol` になった(codex 側の退役モデルの自動移行)。ralph の model receipts は対話座席を常に `honored=unknown`(`interactive session; effective model not yet observable`)で記録しており、このケースを拾えていない(issue #165)
@@ -16,10 +16,10 @@ codex 座席の実効モデルを観測して model receipts に `honored=true|f
 
 | # | 変更 | ファイル | 内容 |
 |---|------|---------|------|
-| 1 | 観測 | `internal/org/codex_session.go`(新規) | codex の session 記録(`$CODEX_HOME/sessions/YYYY/MM/DD/rollout-*.jsonl`、`CODEX_HOME` が空なら `$HOME/.codex`)から、座席の実効モデルを読む。座席との対応付けは、user メッセージ(`response_item` / `message` / `role=user`)の本文に座席の役割指示ファイルの絶対パス(`<state-dir>/prompts/<org>_<seat>.md`)が含まれること。実効モデルはその記録の最初の `turn_context` の `model`。返すのは model だけで、記録の内容はログ・エラー・receipts のどこにも出さない |
-| 2 | 読む範囲の制限 | 同上 | spawn 開始時刻以降に更新された通常ファイルだけを読む(symlink・FIFO・ディレクトリは開かない)。日付ディレクトリは spawn の前日から当日まで。ファイル数と 1 ファイルあたりの読み取りバイト数に上限を置く(`turn_context` と役割指示のメッセージは記録の先頭 10 行以内に出る。実測 5 件)。1 行が 64 KiB を超えても読める方法で読む(実測の最大は約 44 KiB) |
-| 3 | spawn | `internal/org/spawn.go` | driver が codex で dry-run でない spawn は、`spawned` イベントの後に最大 8 秒(500ms 間隔)だけ記録を探す。見つかれば spawn の receipt を `honored=true`(一致)か `honored=false`(不一致、`reported_effective_model` と理由付き)で書く。見つからなければ従来どおり `unknown`(理由は「codex の session 記録がまだない」)。観測の失敗で spawn を失敗させない。上限と間隔は `Org` のフィールドで上書きできる(テスト用。`AgentStartRetryInterval` と同じ形) |
-| 4 | stop | `internal/org/verbs.go`(`Stop`) | driver が codex で dry-run でない stop は、その座席の直近の receipt が `unknown` のときだけ 1 回(待たずに)記録を探し、見つかれば receipt を 1 件追記する。見つからなければ何も追記しない。観測の失敗で stop を失敗させない。`stopped` イベントの Details に観測結果の短い注記を足す |
+| 1 | 観測 | `internal/org/codex_session.go`(新規) | codex の session 記録(`$CODEX_HOME/sessions/YYYY/MM/DD/rollout-*.jsonl`、`CODEX_HOME` が空なら `$HOME/.codex`)から、座席の実効モデルを読む。座席との対応付けは、user メッセージ(`response_item` / `message` / `role=user`)の本文に座席の役割指示ファイルの絶対パス(`<state-dir>/prompts/<org>_<seat>.md`)が含まれること。実効モデルはその記録の最初の `turn_context` の `model`。**Codex advisory による改訂**: 記録の 1 行目 `session_meta` の開始時刻(`timestamp`)が、その座席の spawn 開始時刻以降であることも条件にする(役割指示ファイルのパスは org と seat が同じなら再 spawn でも同じで、stop は Ctrl-C を送るだけなので、生き残った古い session が後から更新され得る。ファイルの更新時刻では区別できない)。条件を満たす記録が 2 件以上あれば、どれも採らず「特定できない」とする。返すのは model だけで、記録の内容はログ・エラー・receipts のどこにも出さない |
+| 2 | 読む範囲の制限 | 同上 | spawn 開始時刻以降に更新された通常ファイルだけを読む(symlink・FIFO・ディレクトリは開かない。更新時刻は読む量を減らすための足切りで、座席の特定には使わない)。日付ディレクトリは spawn の前日から当日まで。ファイル数と 1 ファイルあたりの読み取りバイト数に上限を置く(`turn_context` と役割指示のメッセージは記録の先頭 10 行以内に出る。実測 5 件)。1 行が 64 KiB を超えても読める方法で読む(実測の最大は約 44 KiB) |
+| 3 | spawn | `internal/org/spawn.go` | driver が codex で dry-run でなく、最初のプロンプトを役割指示ファイルで渡した spawn は、`spawned` イベントの後に最大 8 秒(500ms 間隔)だけ記録を探す。見つかれば spawn の receipt を `honored=true`(一致)か `honored=false`(不一致、`reported_effective_model` と理由付き)で書く。見つからなければ従来どおり `unknown`(理由は「codex の session 記録がまだない」)。役割指示ファイルのない座席(テンプレートのない role で、プロンプトが短く inline で渡されたか空の場合)は対応付けの手掛かりがないので、待たずに理由付きの `unknown` を書く(**Codex advisory による改訂**。プロンプトに相関 ID を足す案は、モデルに見える内容が全 codex 座席で変わり、空のプロンプトの座席がターンを始めてしまうので採らない)。観測の失敗で spawn を失敗させない。上限と間隔は `Org` のフィールドで上書きできる(テスト用。`AgentStartRetryInterval` と同じ形) |
+| 4 | stop | `internal/org/verbs.go`(`Stop`) | driver が codex で dry-run でない stop は、その座席の spawn 開始時刻以降に `reported_effective_model` の入った receipt が 1 件もないときだけ(**Codex advisory による改訂**。receipt が 1 件もない場合を含む: spawn の待ちの途中でプロセスが落ちると receipt が残らない。拒否や dry-run の receipt は `honored=false` でもモデルを持たないので、観測済みとはみなさない)、1 回(待たずに)記録を探し、見つかれば receipt を 1 件追記する。見つからなければ何も追記しない。観測の失敗で stop を失敗させない。`stopped` イベントの Details に観測結果の短い注記を足す |
 | 5 | CLI | `internal/cli/org.go`(`spawn` / `start`、`stop`) | `honored=false` の receipt を書いたときは stderr に警告を出す(指定したモデル、codex が報告したモデル、退役モデルの自動移行か config の上書きの可能性、確認先の `ralph doctor`)。exit code は変えない |
 | 6 | doctor | `internal/cli/doctor_codex_models.go`(`checkCodexModelSlugs`) | `models_cache.json` の各モデルの `upgrade`(`model` / `retirement_at`)を読み、`[org].model_pool` の codex スラッグに退役予定があれば Detail に「<スラッグ> は <日付> に退役し、codex は <移行先> に切り替える」を出す。スラッグが cache にない場合の warn が優先。退役予定だけなら info |
 | 7 | テスト | `internal/org/codex_session_test.go`(新規)、`spawn_test.go`、`verbs_test.go`、`internal/cli/org_test.go`、`internal/cli/doctor_codex_models_test.go`、`internal/org` / `internal/cli` の `TestMain` 相当 | 実記録の形(`session_meta` / `turn_context` / `response_item`)を最小限に写した fixture。テストが実ホームの `~/.codex` を読まないよう、観測先のディレクトリを seam で固定する |
@@ -37,7 +37,7 @@ codex 座席の実効モデルを観測して model receipts に `honored=true|f
 
 ## Assumptions
 
-- codex CLI 0.154.0 の session 記録の形(実測): 1 行 1 JSON、`type` と `payload`。`turn_context.payload.model` が実効モデル。役割指示ファイルのパスは ralph が座席の最初のプロンプトとして渡すので、user メッセージに必ず含まれる(`promptFilePointer`)
+- codex CLI 0.154.0 の session 記録の形(実測): 1 行 1 JSON、`type` と `payload`。`turn_context.payload.model` が実効モデル。役割指示ファイルのパスは、ralph が最初のプロンプトをファイルで渡したとき(改行を含むか 200 文字を超える場合。標準の 4 role は常に該当)に user メッセージに含まれる(`promptFilePointer`)。短いプロンプトは inline で渡され、パスは含まれない
 - 記録の形は codex の内部仕様で、予告なく変わり得る。読めない・見つからない場合は `unknown` に倒し、spawn / stop は失敗させない
 - ralph のプロセスと座席の codex が同じ `CODEX_HOME` / `HOME` を見ていること。herdr server を別の HOME で起動している場合は観測できず `unknown` になる(`CODEX_HOME` を ralph 側で指定すれば観測できる)
 - 最初のターンは spawn の直後に始まる(実測: session 開始から `turn_context` まで 2.3〜3.2 秒、役割指示のメッセージはその 0.4 秒以内)。退役ダイアログで止まった座席はターンが始まらないので spawn 時には `unknown` になり、stop 時の観測で拾う
@@ -55,15 +55,18 @@ codex 座席の実効モデルを観測して model receipts に `honored=true|f
 - **観測元は codex の session 記録**。pane のステータス行は使わない(TUI の描画に依存する。#163 でも pane の文字列は読まない方針だった)。`[notice.model_migrations]` からの推測もしない: 実 config にそのキーがなくても移行が起きた実例(Run E1)があり、「Use existing model」を選んだ後にも同じキーが書かれるため、移行の有無を決められない。
 - **記録の内容は外に出さない**。session 記録には会話の本文が入っている。読むのは spawn 以降に更新されたファイルだけ、取り出すのは model だけ、エラーにも本文を含めない(#164 の config 読み取りと同じ方針)。
 - **理由の文言は観測した事実だけを書く**(#163 の教訓)。不一致の理由は「指定は X、codex の session 記録は Y」で、原因(退役モデルの自動移行、config の上書き)は可能性として添える。`models_cache.json` の `upgrade.model` が Y と一致する場合だけ「codex の退役移行(退役日)」と書く、という分岐は足さない(`internal/org` から cache を読む経路を増やさない。退役予定は doctor が出す)。
+- **Codex plan advisory(2026-09-20、HIGH 2 / MEDIUM 1、ユーザー決定: 対応案で plan を更新)**: (1) 再 spawn で古い session を拾い得る → `session_meta` の開始時刻が spawn 開始以降であることを条件にし、複数該当は「特定できない」。(2) stop 時の条件「直近の receipt が unknown」は、待ちの途中の中断(receipt なし)や、拒否・dry-run の receipt に弱い → 「spawn 開始以降に、モデルを観測した receipt がない」に変更。スキーマは変えない。(3) 役割指示ファイルのない座席は対応付けできない → 観測せず、待たず、理由付きの `unknown`。相関 ID をプロンプトに足す案は不採用。
 - **stop 時は receipt を追記する**(既存の行は書き換えない。receipts は追記専用)。1 座席に `unknown` と `false` が 1 件ずつ残るのは仕様として文書に書く。
 
 ## Acceptance criteria
 
 - [ ] AC-1: 役割指示ファイルのパスを含む user メッセージと `turn_context` を持つ記録から、観測関数が `turn_context.model` を返す。パスを含まない記録、spawn 開始より前に更新された記録、通常ファイルでないもの、壊れた行、64 KiB を超える行があっても、誤った座席のモデルを返さず、panic もしない
 - [ ] AC-2: codex 座席の spawn で記録が見つかり model が指定と一致すれば、receipt は `honored=true`、`reported_effective_model=<model>`。不一致なら `honored=false`、`reported_effective_model=<実効モデル>`、`reason` に指定と実効の両方のモデル名が入る(fixture: `gpt-5.5` 指定で `gpt-5.6-sol`)
+- [ ] AC-2b: 同じ org・seat の古い session(`session_meta` の開始時刻が spawn 開始より前)が、後から更新されて別のモデルを報告していても、新しい spawn の receipt はそれを採らない。条件を満たす記録が 2 件ある場合は `unknown`(理由に「特定できない」)
+- [ ] AC-2c: 役割指示ファイルのない codex 座席(inline のプロンプト、空のプロンプト)の spawn は待たずに返り、receipt は理由付きの `unknown`
 - [ ] AC-3: 記録が見つからない spawn は、上限時間だけ待った後に `honored=unknown` の receipt を書き、spawn は成功する。観測中のエラー(ディレクトリなし、権限なし)でも spawn は成功する
 - [ ] AC-4: claude 座席と dry-run の spawn は観測を行わず、receipt は従来と同じ
-- [ ] AC-5: codex 座席の stop で、直近の receipt が `unknown` のときだけ観測し、見つかれば receipt を 1 件追記する。直近が `true` / `false` のとき、見つからないとき、dry-run のときは追記しない。観測の成否にかかわらず stop は従来どおり成功する
+- [ ] AC-5: codex 座席の stop で、その座席の spawn 開始以降にモデルを観測した receipt がないときだけ観測し、見つかれば receipt を 1 件追記する。receipt が 1 件もない場合(spawn の待ちの途中で中断)も、間に拒否や dry-run の receipt が挟まっている場合も観測する。観測済みの receipt があるとき、見つからないとき、dry-run のとき、役割指示ファイルのない座席のときは追記しない。観測の成否にかかわらず stop は従来どおり成功する
 - [ ] AC-6: `honored=false` の receipt を書いた `ralph org spawn` / `ralph org stop` は stderr に警告(指定と実効の両方のモデル名を含む)を出し、exit code は 0 のまま
 - [ ] AC-7: `ralph doctor` の codex スラッグ Check は、pool のスラッグに `upgrade` がある場合に退役日と移行先を Detail に出す(info)。cache にないスラッグの warn が優先される。`upgrade` がない、`retirement_at` が読めない場合も壊れない
 - [ ] AC-8: テストは実ホームの `~/.codex` を読まない(観測先を seam で固定)。`TMPDIR=/tmp` でも通る
@@ -91,7 +94,7 @@ codex 座席の実効モデルを観測して model receipts に `honored=true|f
 - Unit tests: 観測関数(一致、不一致、パスなし、古いファイル、symlink / FIFO、壊れた行、長い行、`turn_context` が user メッセージより後、複数の記録で同じ cwd・別の座席、上限超過)。環境の解決(`CODEX_HOME` あり / なし)
 - Integration tests: `Spawn`(true / false / unknown / claude / dry-run / 観測エラー)、`Stop`(unknown のとき追記、true / false のとき追記なし、見つからない、dry-run)。CLI の警告(spawn / stop、stderr、exit 0)。doctor の Detail
 - Regression tests: 既存の receipts のテスト(watcher、reject、dry-run)と `ralph insights` のテストが不変で通ること
-- Edge cases: 同じ org・seat id を stop 後に再 spawn した場合に古い記録を拾わない(spawn 開始時刻で切る)。sessions ディレクトリがない。`retirement_at` が不正な形式
+- Edge cases: 同じ org・seat id を stop 後に再 spawn した場合に、後から更新された古い記録を拾わない(`session_meta` の開始時刻で切る)。該当が 2 件。spawn の待ちの途中で中断した後の stop。拒否 / dry-run の receipt を挟んだ stop。役割指示ファイルのない座席。sessions ディレクトリがない。`retirement_at` が不正な形式
 - Evidence to capture: `./scripts/run-test.sh`、race、`TMPDIR=/tmp`、反復実行の結果
 
 ## Risks and mitigations
@@ -118,7 +121,7 @@ codex 座席の実効モデルを観測して model receipts に `honored=true|f
 
 ## Progress checklist
 
-- [ ] Plan reviewed
+- [x] Plan reviewed
 - [x] Branch created
 - [ ] Implementation started
 - [ ] Review artifact created
@@ -131,4 +134,4 @@ codex 座席の実効モデルを観測して model receipts に `honored=true|f
 - [x] 観測元を実記録 5 件で確認した(`turn_context.model`、役割指示ファイルのパス、先頭 10 行以内、session 開始から約 3 秒)
 - [x] critical fork(観測の時点)はユーザー決定済み
 - [x] AC は fixture と既存の実記録で決定的に確認できる
-- [ ] Codex plan advisory
+- [x] Codex plan advisory(3 件、対応案で plan を更新)
