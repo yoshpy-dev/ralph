@@ -117,3 +117,127 @@ No probe contradicted its expectation. Hygiene: no fixture or this report contai
 - Pass: yes — all shell suites, all targeted and regression Go tests, `-race`, hermeticity cross-checks, and all 13 built-binary probes match expectations. Proceed to `/sync-docs`.
 - Fail: none.
 - Blocked: none.
+
+## Cycle 2
+
+- Date: 2026-09-19
+- Tester: `tester` subagent (Claude Code, standard flow)
+- Branch: `feat/codex-agmsg-writable-root`, HEAD `a16e3f6` (base `main`)
+- Scope: behavioral tests only, same command set as Cycle 1, re-run against the cross-review cycle-1 fixes (`ab09dbc`, `91a5542`, `c03c21e`, `735fc45`, `5fcf070`, plus a self-review test-only follow-up `78c4ed9`). No static analysis, no source/plan/doc edits.
+- Evidence: `docs/evidence/test-2026-09-19-codex-agmsg-writable-root-cycle2.log`
+- Pipeline cycle: 2 (of cap 2).
+
+### Overall verdict: PASS
+
+All requested test commands pass. All 17 built-binary probes (a, b, c1, c2, c3, d, e, f1, f2, g1, g2, h, i, j1, j2, k, l) plus the exit-code comparison match their expected `ralph doctor` output exactly. No findings.
+
+### Test execution
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `./scripts/run-test.sh` (full fallback scope: shell suites + golang, triggered by `.gitallowed` being unclassified) | all shell files with a numeric `PASS: N / N` summary line (`test-agent-phase-boundaries.sh` 44/44, `test-detect-changed-languages.sh` 23/23, `test-detect-languages-terraform.sh` 8/8, `test-language-pack-monorepo-roots.sh` 29/29, `test-run-verify-scope.sh` 12/12, `test-self-review-scope.sh` 64/64, `test-terraform-pack-verify.sh` 36/36, `test-terraform-rule-frontmatter.sh` 11/11, `test-verify-mode-split.sh` 59/59, `test-xreview-helpers.sh` 29/29) + 8 golang packages | all | 0 | 0 | ~57s (exit 0) |
+| `go test ./internal/cli/ -run 'Codex\|PathCovers\|PathCrosses\|CoveringWritableRoot\|TestRunDoctorOpts' -count=1 -v` | 202 (top-level + subtests) | 202 | 0 | 0 | 6.54s |
+| `go test ./internal/... -count=1` (regression) | 8 packages | 8 | 0 | 0 | 44.1s (`internal/cli`) + rest |
+| `TMPDIR=/tmp go test ./internal/cli/... -count=1` (CI simulation) | full `internal/cli` suite | ok | 0 | 0 | 59.5s |
+| `go test ./internal/cli/ -race -count=1` | full `internal/cli` suite | ok | 0 | 0 | 58.2s |
+| `go test ./internal/cli/ -coverprofile=... -count=1` | full `internal/cli` suite | ok | 0 | 0 | 49.9s, 84.0% of statements |
+| `TestRunDoctorOpts_CodexSandboxCheck_HermeticByDefault` in isolation | 1 | 1 | 0 | 0 | 1.43s |
+| `TestRunDoctorOpts*` set, default env vs. hostile `CODEX_HOME` (`sandbox_mode = "workspace-write"`) | 6 each run | 6 / 6 | 0 | 0 | ~0.4-0.7s each; identical PASS/FAIL/SKIP name sets, only timing differs |
+| Hostile-`TMPDIR` probe (`TMPDIR=$HOME/ralph-tmpdir-probe-164t2 go test ./internal/cli/ -run 'Codex\|CoveringWritableRoot' -count=1`) | full filtered set | ok | 0 | 0 | 2.14s |
+| Built-binary probes (fixtures a, b, c1-c3, d, e, f1-f2, g1-g2, h, i, j1-j2, k, l + exit-code comparison) | 18 | 18 match expected | 0 | 0 | n/a (manual) |
+
+The `-run 'Codex|...'` filter count rose from 94 (cycle 1) to 202 because the cross-review cycle-1 fixes added `PathCrosses` to the filter (per the handoff) and the fixes themselves added new tests (protected-directory rule, implicit temp roots, model eligibility, mixed-spelling coverage). As in cycle 1, the filter also matches unrelated pre-existing tests elsewhere in `internal/cli` whose names happen to contain "Codex" (e.g. `doctor_codex_models.go`, some `upgrade_v2` tests); all pass and are not part of this check's own test file.
+
+### Coverage
+
+- Statement (package `internal/cli`, full suite): **84.0%** of statements (up from cycle 1's 83.5%; the delta comes from the self-review test-only follow-up `78c4ed9`, which closed two of cycle 1's flagged gaps).
+- Per-function coverage for `internal/cli/doctor_codex_writable_root.go` (`go tool cover -func`), all 27 functions:
+
+| Function | Coverage | Note |
+| --- | --- | --- |
+| `codexSandboxEnvFromOS` | 100.0% | |
+| `codexConfigDisplayPath` | 83.3% | Uncovered: line 140, the `home != "" but path does not have the home prefix` fall-through (`return path`). Same gap as cycle 1; no fixture supplies a `Home` that doesn't prefix `ConfigPath`. |
+| `(*codexConfigDecodeError).Error` | **100.0%** | Was 0.0% in cycle 1; `78c4ed9` added `TestCodexConfigDecodeError_ErrorCarriesNoConfigText`, which now calls `.Error()` directly (with and without a position) to pin the exact wording. |
+| `codexConfigDecodeDetail` | 100.0% | |
+| `readCodexUserConfig` | 92.0% | Up from cycle 1's 88.0%. Uncovered: line 199 (`os.Stat`'s non-`ErrNotExist` error branch) and lines 212-214 (`io.ReadAll` failure branch). The `os.Open` failure branch (206-208) is now covered — `78c4ed9` added `TestCheckCodexAgmsgWritableRoot_UnreadableConfig_InfoWithReasonOnly` (unix-only, `chmod 0o000` on a non-root user), which reaches it via `os.Open`, not `os.Stat`/`io.ReadAll`. |
+| `codexConfigReadReason` | **100.0%** | Was 75.0% in cycle 1; the same new chmod-0o000 test supplies a real `*fs.PathError` from `os.Open`, exercising the `errors.As(err, &pathErr)` true-branch. |
+| `codexWritableRoots` | 100.0% | |
+| `codexModelPoolModels` | 100.0% | New function (cross-review WC-2 fix, `ab09dbc`/`c03c21e`). |
+| `codexModelPermittedForRole` | 100.0% | New function (same fix). |
+| `codexSeatModesPossible` | 100.0% | |
+| `codexSandboxReasons` | 100.0% | |
+| `codexNotNeededWhyA` | 100.0% | |
+| `codexNotNeededWhyB` | 100.0% | |
+| `codexSandboxReasonClause` | 100.0% | |
+| `agmsgStoreDir` | 100.0% | |
+| `pathCovers` | 90.0% | Uncovered: line 473-475, `filepath.Rel`'s error branch. Same as cycle 1 — practically unreachable on POSIX between two absolute cleaned paths, not a real gap. |
+| `pathCrossesCodexProtectedDir` | 100.0% | New function (cross-review AR-1 fix, `ab09dbc`). |
+| `resolveNearestExisting` | 90.9% | Uncovered: line 561-563, the `parent == dir` loop-termination fallback. Same as cycle 1 — only reachable if `EvalSymlinks` fails to the filesystem root, not reproducible. |
+| `codexRootCoverage` | 100.0% | New function (cross-review C2-1 fix, `735fc45`/`5fcf070`) — the 4-way configured/resolved mixed-spelling comparison. |
+| `coveringWritableRoot` | 100.0% | |
+| `codexImplicitWritableRoots` | 100.0% | New function (cross-review WC-1 fix, `ab09dbc`/`91a5542`) — the `/tmp` and `$TMPDIR` implicit-root list. |
+| `codexCoveringImplicitRoot` | 90.9% | New function. Uncovered: line 703-704, the `!covers { continue }` branch — reached only when an implicit root candidate genuinely does not cover the target at all (as opposed to covering-but-blocked). With at most two implicit roots (`/tmp`, `$TMPDIR`) in the current fixtures, every fixture that includes a non-covering implicit root also has it either cover or be the only candidate, so this specific "does not cover, keep looking" branch is never hit. Narrow, not required by any AC. |
+| `codexWritableRootSuffix` | 100.0% | |
+| `codexPaneEnvironmentMayDifferClause` (const) | n/a | not a function |
+| `codexImplicitRootDetail` | 85.7% | New function. Uncovered: line 756-757, the `!exists` branch of the config-missing wording (`"%s does not exist"` for an implicit-root pass where the config file itself is absent). Every current implicit-root-pass fixture (including this cycle's g1) supplies a config file, so only the `exists` branch (`is not set in %s`) is exercised. Narrow, not required by any AC. |
+| `codexBlockedAncestorClause` | 100.0% | |
+| `codexWritableRootDetail` | 100.0% | |
+| `checkCodexAgmsgWritableRoot` | 100.0% | |
+
+- Branch/decision coverage: not separately instrumented (statement coverage only, as in cycle 1); the table above enumerates every uncovered statement block by hand.
+- Every function is at or above the 80% flag threshold this cycle (cycle 1 had two below: `(*codexConfigDecodeError).Error` at 0% and `codexConfigReadReason` at 75%; both are now 100%, closed by the self-review follow-up `78c4ed9`, not by anything in this cycle's own diff).
+
+### Failure analysis
+
+None. No test failed.
+
+### Regression checks
+
+| Previously broken behavior | Status | Evidence |
+| --- | --- | --- |
+| All cycle-1 fixes (self-review MEDIUM-1/2/3, NEW-1/2/3, LOW-6/7) | Still fixed | Full regression run (`go test ./internal/... -count=1`) green; targeted filter includes all cycle-1 test names, all PASS. |
+| Cross-review AR-1 (broad ancestor root treated as covering, ignoring codex's `.git`/`.agents`/`.codex` read-only protection) | Fixed and covered | `pathCrossesCodexProtectedDir` 100%; built-binary fixture c1 (root = `<home>`) warns with the exact blocked-ancestor parenthetical; fixture c2 (root = `<home>/.agents`) passes. |
+| Cross-review WC-1 (default-writable `/tmp`/`$TMPDIR` roots not counted, causing unnecessary warns) | Fixed and covered | `codexImplicitWritableRoots`/`codexCoveringImplicitRoot`/`codexImplicitRootDetail` all exercised; fixture g1 (`AGMSG_STORAGE_PATH` under `/tmp`, no exclude) passes with the exact wording; fixture g2 (`exclude_slash_tmp = true`) warns. |
+| WC-1 follow-up (the `/tmp` literal baked into the check would make `t.TempDir()` fixtures collide with it whenever the real `TMPDIR` is `/tmp`, as on the ubuntu CI runner) | Fixed and covered | `TMPDIR=/tmp go test ./internal/cli/... -count=1` is ok (full package, not just the filtered subset); hostile-`TMPDIR` probe against `$HOME/ralph-tmpdir-probe-164t2` is also ok. |
+| Cross-review WC-2 (reason counted a role even when no codex model in the pool was permitted for it) | Fixed and covered | `codexModelPoolModels`/`codexModelPermittedForRole` 100%; fixture f1 (`implementer` restricted to `opus`, a claude model) passes as not-needed; fixture f2 (same role restricted to a codex model from the default pool) warns. |
+| Cross-review C2-1 (protected-directory check only looked at the resolved spelling, missing a symlink that hides `.agents` after resolution) | Fixed and covered | `codexRootCoverage` 100%; `TestCodexRootCoverage_MixedSpellings_ProtectedSymlinkStillBlocks` passes; built-binary fixture h (symlinked `.agents` home, root = configured spelling) warns with the blocked-ancestor parenthetical. |
+| `go test ./internal/... -count=1` full regression (all 8 packages) | Green | See Test execution table; no package failed. |
+
+### Test gaps
+
+- **Two narrow branches newly introduced by the cross-review fixes are not yet exercised**: `codexCoveringImplicitRoot`'s "candidate does not cover at all" continue-branch (line 703-704), and `codexImplicitRootDetail`'s config-absent wording for an implicit-root pass (line 756-757). Neither is required by AC-2/AC-3/AC-6; both would need a fixture with two implicit roots where only one covers, or an implicit-root pass with no config file present at all. Flagged as a coverage blind spot for a possible follow-up test, not a defect.
+- The three cycle-1 gaps not tied to a permission-denied scenario remain: `codexConfigDisplayPath`'s home-prefix-mismatch fallback (140), `pathCovers`'s `filepath.Rel` error branch (473-475), and `resolveNearestExisting`'s `parent == dir` fallback (561-563) — all three practically unreachable on POSIX without a broken filesystem or a `Home` value that doesn't prefix the config path in any current fixture.
+- No gaps found relative to the plan's stated Test plan edge cases (1)-(7) (prefix collision, trailing-slash root, symlink, empty `writable_roots`, `CODEX_HOME` unset/containing spaces, config-as-directory, `~`-prefixed roots) — all still covered by name-matched tests, unchanged from cycle 1.
+
+### Probe table: built-binary fixtures
+
+All probes ran against a freshly built `ralph-bin` (`go build ./cmd/ralph`, HEAD `a16e3f6`), a fresh scratch project directory per fixture containing only the stated `ralph.toml`, and a fresh scratch `CODEX_HOME` per fixture, all under `$HOME/ralph-probe-164c2` (never under `/tmp` — a store there would be covered by the new implicit-root logic itself, which would distort every fixture except g, which tests that on purpose). The real, installed agmsg home (`~/.agents/skills/agmsg`) was used for every fixture except (k).
+
+| Fixture | Expected | Actual | Match |
+| --- | --- | --- | --- |
+| (a) `codex_verified=true`, config `model = "x"` | warn; Detail has store path, config path, recipe path, "a role that can use a codex model resolves to edits or autonomous" | warn — all four elements present verbatim | Yes |
+| (b) same `ralph.toml`; `writable_roots` = `[store]` | pass naming that root | pass — names `.../agmsg/db` exactly | Yes |
+| (c1) root = `<home>` (ancestor, but a protected element lies between) | warn with the blocked-ancestor parenthetical naming `<home>` | warn — `(/Users/hiroki.yoshioka contains it, but codex keeps .git, .agents, and .codex directories under a writable root read-only)` | Yes |
+| (c2) root = `<home>/.agents` | pass | pass — names `<home>/.agents` exactly | Yes |
+| (c3) root = `<home>/.agents/skills/agmsg/dbx` (sibling) | warn without the parenthetical | warn — no parenthetical present | Yes |
+| (d) `driver_pool = ["claude"]` (no codex), `codex_verified=true` | pass, "not needed: ... [org].driver_pool" | pass — exact text | Yes |
+| (e) `codex_verified=true`, `model_pool` has only claude entries | pass, "not needed: ... [org].model_pool has no codex model" | pass — exact text | Yes |
+| (f1) `default="guarded"`, `codex_verified=true`, `roles.implementer="autonomous"`, `[org.roles] implementer=["opus"]`, config `model="x"` | pass (not needed: no role able to use a codex model resolves to edits/autonomous) | pass — exact text (also correctly reports the guarded/`sandbox_mode` condition as unmet) | Yes |
+| (f2) same, but `implementer` restricted to a codex model from the default pool | warn | warn — exact text, same as fixture (a) | Yes |
+| (g1) `AGMSG_STORAGE_PATH=/tmp/ralph-probe-164-store`, config `model="x"` (no exclude) | pass, "is under /tmp, which workspace-write keeps writable by default (exclude_slash_tmp is not set in …)" + `AGMSG_STORAGE_PATH` suffix | pass — exact wording and suffix | Yes |
+| (g2) same, `exclude_slash_tmp = true` | warn | warn — exact wording, override suffix still present | Yes |
+| (h) symlinked `.agents` home; store reached through the symlink; root = configured home spelling | warn with the blocked-ancestor parenthetical naming that root | warn — exact parenthetical, naming the configured `<probe>/h/home` root | Yes |
+| (i) `ralph.toml` as (a); `CODEX_HOME` dir with no `config.toml` | warn starting with "`<config path>` does not exist, so no writable root covers the agmsg store" | warn — exact lead-in | Yes |
+| (j1) `ralph.toml` as (a); duplicate key (`note="a"`/`note="b"`) | info "could not be decoded as a codex config"; no `note`/`already defined` | info — exact wording, no leak | Yes |
+| (j2) `ralph.toml` as (a); `config.toml` is a FIFO | info "not a regular file"; must not hang | info — exact wording; returned within 10s under a background-kill guard (exit 0) | Yes |
+| (k) `RALPH_ORG_AGMSG_HOME=<scratch>/no-agmsg` (nonexistent) | info "agmsg not installed at ..." | info — exact wording | Yes |
+| (l) this repository's own root, real config | pass, "not needed: ... codex_verified is false and no role that can use a codex model resolves to guarded" | pass — exact text | Yes |
+| Exit code comparison | warn fixture (a) exit code == pass fixture (b) exit code | both `0` | Yes |
+
+No probe contradicted its expectation. Hygiene: no fixture command or this report contains any secret-shaped `key=value` string; the real `~/.codex/config.toml` was never read or printed directly — fixture (l) only grepped the doctor output line from a live `ralph doctor` run against the repository's real config. All scratch fixture directories (`$HOME/ralph-probe-164c2`, `$HOME/ralph-codex-home-probe-164t2`, `$HOME/ralph-tmpdir-probe-164t2`) were removed after use.
+
+### Verdict
+
+- Pass: yes — all shell suites, all targeted and regression Go tests, the CI-simulating `TMPDIR=/tmp` run, `-race`, hermeticity cross-checks, and all 17 built-binary probes plus the exit-code comparison match expectations. Proceed to `/pr`.
+- Fail: none.
+- Blocked: none.
