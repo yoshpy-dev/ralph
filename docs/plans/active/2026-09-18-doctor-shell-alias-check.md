@@ -1,6 +1,6 @@
 # doctor-shell-alias-check
 
-- Status: In progress
+- Status: Done (PR #168)
 - Owner: Claude Code
 - Date: 2026-09-18
 - Related request: #155 の実機検証で、ユーザーの `~/.zshrc` の `alias codex="codex -m gpt-6-astra …"` が herdr pane の対話シェルで展開され、`ralph org spawn --model` が生成する `codex … --model` と衝突して `error: the argument '--model <MODEL>' cannot be used multiple times` で座席が即終了、`spawn_failed` になった(evidence P1)。`alias claude="claude --model fable …"` も同じ形で衝突するはず(未検証)。herdr は実行ファイル名をそのまま pane に送るため ralph 側で alias を迂回できない。`ralph doctor` で検出して warn する(issue #162)
@@ -70,12 +70,12 @@ Critical forks: None。
 
 ## Acceptance criteria
 
-- [ ] AC-1: `ralph doctor` の出力に「Shell aliases (codex/claude)」Check が herdr Check の直後に出る。`grep -c 'checkShellAliases' internal/cli/doctor.go` が 1 以上
-- [ ] AC-2: テスト (a)〜(k) と改訂で追加したケースが pass し、codex の warn Detail が `file:line`(home は `~`)、衝突フラグ名、`docs/recipes/codex-seat-permissions.md` を含む。`-m value` / `-mvalue` / `--model=value`、`-s value` / `-svalue`、`-a value` の各形式が検出される fixture がある。行末コメント中の `--model` は検出されない。1 つの alias 文に `codex=` と `claude=` が並ぶ場合にそれぞれ正しい名前で報告される。symlink ケースで所見が 1 件だけ。`ZDOTDIR` ケースで検出される
-- [ ] AC-3: herdr あり + codex の所見 は `warn`、herdr あり + claude の `--permission-mode` の所見 は `warn`、herdr 未導入の所見 は `info`、claude の `--model` だけの所見 は `info`、解析しきれなかった alias 文(`not fully parsed`)があり他に所見なし は `info`、alias なし / 衝突なし は `pass`(衝突なしの alias は file:line で名指し)、home 解決不能は `info`、読めない rc があり所見なし は `info`。home 解決不能で走査自体を行わない場合を除き、どの Detail も走査したファイルを列挙する。`countFailed` の対象にならない(既存の `TestRunDoctorOpts_HerdrAgmsgAbsent_ExitCodeUnaffected` が引き続き pass)
-- [ ] AC-4: `/org` skill の前提節(4 面 `cmp` 一致)と recipe(root / template 一致)に `ralph doctor` の Check への言及がある。`check-skill-sync.sh` / `check-sync.sh` / `check-template-purity.sh` pass
-- [ ] AC-5: `gofmt` / `go vet` / golangci-lint clean、`go test ./internal/cli/... -count=1` green、`./scripts/run-verify.sh` green。このマシンで `go run ./cmd/ralph doctor` を実行すると本 Check が warn し、`~/.config/zsh/.zshrc:35` の codex alias を spawn 失敗の原因として、`:34` の claude alias を「座席は起動するが alias のフラグが全座席に効く」ものとして名指しする(evidence としてレポートに記録)
-- [ ] AC-6: PR 本文は `Closes #162`
+- [x] AC-1: `ralph doctor` の出力に「Shell aliases (codex/claude)」Check が herdr Check の直後に出る。`grep -c 'checkShellAliases' internal/cli/doctor.go` が 1 以上
+- [x] AC-2: テスト (a)〜(k) と改訂で追加したケースが pass し、codex の warn Detail が `file:line`(home は `~`)、衝突フラグ名、`docs/recipes/codex-seat-permissions.md` を含む。`-m value` / `-mvalue` / `--model=value`、`-s value` / `-svalue`、`-a value` の各形式が検出される fixture がある。行末コメント中の `--model` は検出されない。1 つの alias 文に `codex=` と `claude=` が並ぶ場合にそれぞれ正しい名前で報告される。symlink ケースで所見が 1 件だけ。`ZDOTDIR` ケースで検出される
+- [x] AC-3: herdr あり + codex の所見 は `warn`、herdr あり + claude の `--permission-mode` の所見 は `warn`、herdr 未導入の所見 は `info`、claude の `--model` だけの所見 は `info`、解析しきれなかった alias 文(`not fully parsed`)があり他に所見なし は `info`、alias なし / 衝突なし は `pass`(衝突なしの alias は file:line で名指し)、home 解決不能は `info`、読めない rc があり所見なし は `info`。home 解決不能で走査自体を行わない場合を除き、どの Detail も走査したファイルを列挙する。`countFailed` の対象にならない(既存の `TestRunDoctorOpts_HerdrAgmsgAbsent_ExitCodeUnaffected` が引き続き pass)
+- [x] AC-4: `/org` skill の前提節(4 面 `cmp` 一致)と recipe(root / template 一致)に `ralph doctor` の Check への言及がある。`check-skill-sync.sh` / `check-sync.sh` / `check-template-purity.sh` pass
+- [x] AC-5: `gofmt` / `go vet` / golangci-lint clean、`go test ./internal/cli/... -count=1` green、`./scripts/run-verify.sh` green。このマシンで `go run ./cmd/ralph doctor` を実行すると本 Check が warn し、`~/.config/zsh/.zshrc:35` の codex alias を spawn 失敗の原因として、`:34` の claude alias を「座席は起動するが alias のフラグが全座席に効く」ものとして名指しする(evidence としてレポートに記録)
+- [x] AC-6: PR 本文は `Closes #162`
 
 ## Implementation outline
 
@@ -134,6 +134,7 @@ doctor の Check 追加のみ。下流へは次回 release でバイナリ経由
 - 2026-09-19 verify cycle 2(同 report の Cycle 2 節、573e474): PASS。改訂 8〜10 と C2-1〜C2-6 はすべて名前付きテストに対応し、未レビューだった 3783610 も行単位で確認済み。recipe を `codex_verified` で変更しなかった判断と、Slice E の AC-5 evidence が現行コードと整合することも確認された。LOW 相当の指摘 1 件(skill と `shellAliasFlagClass` のコメントが「既定では codex 座席はすべて guarded として動く」と書いていたが、正確には edits / autonomous の spawn が拒否される)を反映
 - 2026-09-19 test cycle 2(2756ea0): PASS。対象 64 件 PASS / SKIP 0、8 package ok、race なし、`internal/cli` 82.8%、バイナリの fixture 10 種 + cycle 1 の 3 種の再確認が期待どおり。sync-docs cycle 2(4221ae8): tech-debt の 1 行を更新(`codex_verified` の値を読まないこと、偶然閉じる引用符の制限)
 - 2026-09-19 cross-review cycle 2(23b9f98): Codex の所見 2 件(P2)を WORTH_CONSIDERING に分類。WC-3 候補が FIFO だと `os.Open` で doctor が固まる、WC-4 相対 `$ZDOTDIR` を無視し、コメントの「zsh would refuse」が誤り。cycle 1 の 4 件は再指摘なし。上限(2/2)到達のためユーザーに確認し、判断は「PR を作成し、後続 issue で直す」。issue #167 を起票し、PR 本文の Known gaps に記録する
+- 2026-09-19 pr: PR #168 を作成(`Closes #162`、Known gaps に WC-3 / WC-4、後続 #167)。title prefix / ready チェック pass。walkthrough: `docs/reports/walkthrough-2026-09-19-doctor-shell-alias-check.md`
 
 ## Progress checklist
 
@@ -143,4 +144,4 @@ doctor の Check 追加のみ。下流へは次回 release でバイナリ経由
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
-- [ ] PR created
+- [x] PR created (#168)
