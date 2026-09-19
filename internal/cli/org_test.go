@@ -1271,6 +1271,90 @@ func TestOrgSend_DryRun_NeverWarnsAboutUnconfirmedSubmit(t *testing.T) {
 	}
 }
 
+// TestOrgSend_PaneSendKeysFails_NotesTypedButNotSubmittedOnStderr covers the
+// CLI half of the L4/M2 self-review fixes: when PaneSendKeys itself fails
+// (text already typed, Enter attempted but not delivered), the command
+// exits non-zero AND prints a stderr note pointing the operator at the pane
+// before they retry -- distinct from the fail-closed "nothing was typed"
+// case below, which must NOT print this note.
+func TestOrgSend_PaneSendKeysFails_NotesTypedButNotSubmittedOnStderr(t *testing.T) {
+	setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	if _, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
+		"--state-dir", stateDir,
+	); err != nil {
+		t.Fatalf("spawn failed: %v", err)
+	}
+	// The generic ORG_STUB_FAIL="pane:send-keys" marker fails every "herdr
+	// pane send-keys" call -- fine here since this test's only send-keys
+	// call is the one it means to fail (Send's Enter; no Stop is issued).
+	t.Setenv("ORG_STUB_FAIL", "pane:send-keys")
+
+	out, err := runOrgCmd(t, "send", "--org-id", "org-a", "--to", "seat-1",
+		"--text", "TYPE: TASK\nTASK_ID: t-1\n\ndo the thing", "--enter-delay-ms", "1", "--state-dir", stateDir)
+	if err == nil {
+		t.Fatalf("expected non-zero exit when PaneSendKeys fails, output: %s", out)
+	}
+	if !strings.Contains(out, "the message text was typed into pane") {
+		t.Errorf("expected the typed-but-not-submitted note, got: %s", out)
+	}
+	if !strings.Contains(out, "pane-stub-1") {
+		t.Errorf("expected the note to name the seat's pane id, got: %s", out)
+	}
+	if !strings.Contains(out, "\"seat-1\"") {
+		t.Errorf("expected the note to name the target seat, got: %s", out)
+	}
+	if !strings.Contains(out, "before sending again") {
+		t.Errorf("expected the note to warn against retrying blindly, got: %s", out)
+	}
+}
+
+// TestOrgSend_BudgetTooSmallForEnterDelay_NoTypedNoteOnStderr is the CLI
+// counterpart of TestOrgSend_BudgetTooSmallForEnterDelay_NothingTyped
+// (internal/org/verbs_test.go): a --timeout-ms budget too small to fund
+// --enter-delay-ms exits non-zero with the "nothing was typed" message,
+// and -- unlike the PaneSendKeys-failure case above -- must NOT print the
+// typed-but-not-submitted note, since nothing was ever typed.
+//
+// --timeout-ms 2000 / --enter-delay-ms 60000 are deliberately generous, not
+// tight: the idle/done wait still only needs a single fast herdr-stub
+// subprocess round trip (comfortably under 2s), so the fail-closed check
+// fires almost immediately regardless -- these values just guarantee it
+// fires deterministically (remaining ctx time will always be far below
+// 60000ms) without risking ctx expiring inside the idle/done wait itself,
+// which a tight budget (as internal/org/verbs_test.go can safely use
+// against an instantaneous fake) would risk against a real subprocess.
+func TestOrgSend_BudgetTooSmallForEnterDelay_NoTypedNoteOnStderr(t *testing.T) {
+	setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	if _, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
+		"--state-dir", stateDir,
+	); err != nil {
+		t.Fatalf("spawn failed: %v", err)
+	}
+
+	out, err := runOrgCmd(t, "send", "--org-id", "org-a", "--to", "seat-1",
+		"--text", "TYPE: TASK\nTASK_ID: t-1\n\ndo the thing",
+		"--timeout-ms", "2000", "--enter-delay-ms", "60000", "--state-dir", stateDir)
+	if err == nil {
+		t.Fatalf("expected non-zero exit when the budget cannot fund the pre-Enter pause, output: %s", out)
+	}
+	if !strings.Contains(err.Error(), "nothing was typed") {
+		t.Errorf("expected the error to say nothing was typed, got: %v", err)
+	}
+	if strings.Contains(out, "the message text was typed into pane") {
+		t.Errorf("expected no typed-but-not-submitted note when nothing was typed, got: %s", out)
+	}
+}
+
 // TestOrgWait_HappyPath_Succeeds covers `ralph org wait` end to end through
 // the real driver.ExecRunner -> exec.Command path: the herdr stub answers
 // "agent wait" with "idle", and Wait prints herdr's raw output.

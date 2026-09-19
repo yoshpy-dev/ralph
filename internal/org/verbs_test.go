@@ -315,6 +315,9 @@ func TestOrgSend_DryRun_ValidMessage_AppendsEventWithoutDriverCalls(t *testing.T
 	if result.SubmitConfirmed {
 		t.Error("expected SubmitConfirmed false for a dry-run send (no confirmation ever attempted)")
 	}
+	if result.TextTyped {
+		t.Error("expected TextTyped false for a dry-run send (PaneSendText is never attempted)")
+	}
 	if len(h.calls) != 0 || len(a.calls) != 0 {
 		t.Fatalf("expected no driver calls for a dry-run send, got herdr=%v agmsg=%v", h.calls, a.calls)
 	}
@@ -590,35 +593,95 @@ func TestOrgSend_EnterDelayMS_OverridesOrgSendEnterDelay(t *testing.T) {
 	}
 }
 
-// TestOrgSend_CtxExpiresDuringEnterDelay_NoEnterNoSentEvent covers the ctx
-// expiry path: a tiny TimeoutMS budget paired with a long SendEnterDelay
-// means ctx expires while Send is waiting to press Enter. Send must not
-// press Enter, must not append a `sent` event, and its error must say the
-// text was typed but not submitted. fakeHerdr's idle/done AgentWait
-// returns instantly regardless of timeoutMS, so only the pre-Enter delay
-// can actually observe the ctx deadline here.
-func TestOrgSend_CtxExpiresDuringEnterDelay_NoEnterNoSentEvent(t *testing.T) {
+// TestOrgSend_BudgetTooSmallForEnterDelay_NothingTyped is the M2 fail-closed
+// regression (self-review MEDIUM-2,
+// docs/reports/self-review-2026-09-19-org-send-enter-timing.md): a
+// --timeout-ms budget that (after the idle/done wait) cannot even fund the
+// pre-Enter pause must be refused before anything is typed -- no
+// PaneSendText call, no PaneSendKeys call, no `sent` event, TextTyped
+// false. Before M2, this exact TimeoutMS=5 / SendEnterDelay=200ms pairing
+// used to type the text and only then hit ctx expiry inside
+// waitBeforeEnter (see the "not independently testable" note below this
+// test for what happened to that branch).
+func TestOrgSend_BudgetTooSmallForEnterDelay_NothingTyped(t *testing.T) {
 	o, h, _ := testOrg(t)
 	o.SendEnterDelay = 200 * time.Millisecond
 	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("spawn failed: %+v", r)
 	}
+	callsBefore := len(h.calls)
 	eventsBefore := len(mustReadEvents(t, o))
-	sendKeysBefore := len(h.sendKeysKeys)
 
 	msg := "TYPE: TASK\nTASK_ID: t-1\n\ndo the thing"
 	result := o.Send(SendParams{OrgID: "org-a", To: "seat-1", Text: msg, TimeoutMS: 5})
 	if result.Err == nil {
-		t.Fatal("expected a non-nil Err when ctx expires during the pre-Enter delay")
+		t.Fatal("expected a non-nil Err when the remaining budget cannot fund the pre-Enter pause")
+	}
+	if !strings.Contains(result.Err.Error(), "nothing was typed") {
+		t.Errorf("expected the error to say nothing was typed, got %v", result.Err)
+	}
+	if result.TextTyped {
+		t.Error("expected TextTyped false: the budget check must run before PaneSendText")
+	}
+	if result.PaneID != "" {
+		t.Errorf("expected no PaneID on a return before PaneSendText was ever attempted, got %q", result.PaneID)
+	}
+	// Only the idle/done AgentWait call happened -- no PaneSendText, no
+	// PaneSendKeys, no second (confirm) AgentWait.
+	if got := h.calls[callsBefore:]; !slices.Equal(got, []string{"agent_wait"}) {
+		t.Fatalf("expected only the idle/done AgentWait call, got %v", got)
+	}
+	if got := len(mustReadEvents(t, o)); got != eventsBefore {
+		t.Fatalf("expected no new sent event, %d -> %d", eventsBefore, got)
+	}
+}
+
+// Not independently testable without changing fakeHerdr (out of scope for
+// this slice -- see the Slice D handoff's file list): once the fail-closed
+// budget check above requires enterDelay < remaining ctx time to even
+// reach PaneSendText, ctx expiring *inside* waitBeforeEnter afterwards
+// would need real wall-clock time to elapse between that check and the
+// select in waitBeforeEnter -- and fakeHerdr's AgentWait/PaneSendText both
+// return synchronously with no injectable delay, so that gap is on the
+// order of nanoseconds in this suite, never enough to flip the race.
+// Shrinking the margin to try to force it would just make the test flaky
+// (exactly what self-review LOW-6 already flagged elsewhere in this file)
+// rather than deterministic. The branch itself is unchanged and still
+// there in verbs.go (waitBeforeEnter's ctx.Done() case, reachable in
+// production whenever PaneSendText's real round-trip -- unlike the fake's
+// instant one -- eats into the margin the budget check measured) -- it is
+// intentionally kept as defence in depth rather than deleted.
+
+// TestOrgSend_PaneSendKeysFails_ReportsTypedButNotSubmitted covers the L4
+// self-review fix: a PaneSendKeys failure leaves exactly the same residue
+// as a ctx expiry during the pre-Enter wait -- typed text, Enter attempted
+// but not delivered -- so its error must say so too (previously it did
+// not), and SendResult must report TextTyped=true with the seat's PaneID
+// so the caller (the CLI) can point the operator at the right pane.
+func TestOrgSend_PaneSendKeysFails_ReportsTypedButNotSubmitted(t *testing.T) {
+	o, h, _ := testOrg(t)
+	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", r)
+	}
+	h.paneSendKeysErr = errors.New("stub: PaneSendKeys failed")
+	eventsBefore := len(mustReadEvents(t, o))
+
+	msg := "TYPE: TASK\nTASK_ID: t-1\n\ndo the thing"
+	result := o.Send(SendParams{OrgID: "org-a", To: "seat-1", Text: msg})
+	if result.Err == nil {
+		t.Fatal("expected a non-nil Err when PaneSendKeys fails")
 	}
 	if !strings.Contains(result.Err.Error(), "text typed but not submitted") {
 		t.Errorf("expected the error to mention the text was typed but not submitted, got %v", result.Err)
 	}
-	if len(h.sendKeysKeys) != sendKeysBefore {
-		t.Fatalf("expected no PaneSendKeys call when ctx expires before Enter, got %v", h.sendKeysKeys)
+	if !result.TextTyped {
+		t.Error("expected TextTyped true: PaneSendText already succeeded before PaneSendKeys failed")
+	}
+	if result.PaneID == "" {
+		t.Error("expected a non-empty PaneID on the error return so the operator knows which pane to check")
 	}
 	if got := len(mustReadEvents(t, o)); got != eventsBefore {
-		t.Fatalf("expected no new sent event when ctx expires before Enter, %d -> %d", eventsBefore, got)
+		t.Fatalf("expected no new sent event when PaneSendKeys fails, %d -> %d", eventsBefore, got)
 	}
 }
 
@@ -627,6 +690,16 @@ func TestOrgSend_CtxExpiresDuringEnterDelay_NoEnterNoSentEvent(t *testing.T) {
 // consumed by the pre-Enter delay, the confirm AgentWait's timeoutMS must
 // be capped at (roughly) whatever ctx budget remains, not at the full
 // configured SendSubmitConfirmTimeout, and must never be less than 1.
+//
+// TimeoutMS is 400 (not e.g. 40) so this test's margin over SendEnterDelay
+// (~380ms) is comparable to the neighbouring
+// TestOrgSend_BudgetTooSmallForEnterDelay_NothingTyped's margin in the
+// opposite direction, rather than the ~20ms this test used to leave itself
+// (self-review LOW-6): a loaded CI runner or -race can add tens of
+// milliseconds of scheduling jitter between the fail-closed budget check
+// and PaneSendText/waitBeforeEnter actually running, and a 20ms margin was
+// close enough to that jitter to risk turning this test itself into the
+// fail-closed-budget case instead of the case it means to cover.
 func TestOrgSend_ConfirmTimeout_CappedByRemainingCtxBudget(t *testing.T) {
 	o, h, _ := testOrg(t)
 	o.SendEnterDelay = 20 * time.Millisecond
@@ -636,7 +709,7 @@ func TestOrgSend_ConfirmTimeout_CappedByRemainingCtxBudget(t *testing.T) {
 	}
 
 	msg := "TYPE: TASK\nTASK_ID: t-1\n\ndo the thing"
-	result := o.Send(SendParams{OrgID: "org-a", To: "seat-1", Text: msg, TimeoutMS: 40})
+	result := o.Send(SendParams{OrgID: "org-a", To: "seat-1", Text: msg, TimeoutMS: 400})
 	if result.Err != nil {
 		t.Fatalf("expected Send to succeed, got %v", result.Err)
 	}
