@@ -41,6 +41,7 @@
 ### P2. `ralph org send` の本文が codex の入力欄に残り送信されないことがある
 
 座席が idle のときに `ralph org send` で複数行の TASK を送ると、本文は貼り付けられるが送信されず、`herdr pane send-keys <pane> Enter` をもう一度送ると submit された(Run A の t-auto-2)。座席が busy のときは "Queued follow-up inputs" に入り、前のターン終了後に自動送信された(t-auto-1)。ralph は `pane send-text` の直後に `send-keys Enter` を送っている(`internal/org/verbs.go` Send)ので、codex TUI の貼り付け処理との timing 問題。以降の run では send の 3 秒後に Enter を追加で送った。
+- 追記(2026-09-19、#163): `ralph org send` はテキスト送信と Enter の間に既定 750ms の待ちを入れ、Enter の後に herdr の状態で submit を確認するようになった(Enter の再送はしない)。修正前後の比較は `docs/evidence/org-send-enter-timing-2026-09-19.md`
 
 ### P3. workspace-write 下の codex 座席は agmsg に書けない
 
