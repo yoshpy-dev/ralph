@@ -141,6 +141,16 @@ type Org struct {
 	// defaultAgentStartRetryInterval" -- tests set this to a tiny value so
 	// the retry-path tests run fast without an accompanying fake Clock.
 	AgentStartRetryInterval time.Duration
+	// SendEnterDelay overrides the wait between PaneSendText and
+	// PaneSendKeys("Enter") in Send. Zero (the field's default) means "use
+	// defaultSendEnterDelay" -- tests set this to a tiny value so send
+	// tests run fast; SendParams.EnterDelayMS (when > 0) overrides this
+	// per-call instead.
+	SendEnterDelay time.Duration
+	// SendSubmitConfirmTimeout overrides how long Send waits, after Enter,
+	// to confirm the target seat left idle/done. Zero means "use
+	// defaultSendSubmitConfirmTimeout".
+	SendSubmitConfirmTimeout time.Duration
 }
 
 func (o *Org) now() string {

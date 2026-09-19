@@ -17,6 +17,23 @@ const (
 	defaultSendTimeoutMS = 30000
 	defaultReadLines     = 50
 	sendDetailsMaxLen    = 200
+	// defaultSendEnterDelay is how long Send waits between typing the
+	// message (PaneSendText) and pressing Enter (PaneSendKeys). A freshly
+	// pasted multi-line message can have an immediately-following Enter
+	// swallowed by the TUI as part of the paste rather than read as a
+	// submit keystroke -- the #155 live evidence
+	// (docs/evidence/codex-seat-permissions-2026-09-18.md, P2) saw exactly
+	// this against an idle codex seat: the text landed in the input box but
+	// was not submitted until an Enter sent roughly 3s later. Overridable
+	// via Org.SendEnterDelay (tests: a tiny value) or
+	// SendParams.EnterDelayMS (CLI: --enter-delay-ms).
+	defaultSendEnterDelay = 750 * time.Millisecond
+	// defaultSendSubmitConfirmTimeout bounds how long Send waits, after
+	// Enter, for the target seat to leave idle/done (into working or
+	// blocked) -- confirming the Enter actually submitted the message
+	// rather than merely landing in the input box. Overridable via
+	// Org.SendSubmitConfirmTimeout.
+	defaultSendSubmitConfirmTimeout = 3 * time.Second
 )
 
 // findSeat returns the current derived status of (orgID, seatID) from the
@@ -63,23 +80,51 @@ type SendParams struct {
 	// bypassed send still records raw=true on the `sent` event's Details,
 	// so it stays traceable after the fact.
 	Raw bool
+	// EnterDelayMS, when > 0, overrides both defaultSendEnterDelay and
+	// Org.SendEnterDelay for this one Send call (the CLI's
+	// --enter-delay-ms flag). <= 0 means "not specified" -- Send falls
+	// back to the Org-level setting.
+	EnterDelayMS int
 }
 
 // SendResult is Send's return value.
 type SendResult struct {
 	Err error
+	// SubmitConfirmed reports whether Send observed the target seat leave
+	// idle/done (into working or blocked) after Enter was pressed. false
+	// does not mean the message failed to send -- a very short agent turn
+	// can go working -> done before Send's confirmation wait even starts,
+	// and herdr's own state reporting can lag. It means only that Send
+	// could not positively confirm the submit, so the sent event's Details
+	// carries submit_unconfirmed=true and the caller (the CLI) should tell
+	// the operator to check the pane. Always false for DryRun and for any
+	// error return.
+	SubmitConfirmed bool
+	// PaneID is the target seat's pane id, for a caller (the CLI) that
+	// wants to name it in an unconfirmed-submit notice. Empty for DryRun
+	// and for any error return.
+	PaneID string
 }
 
 // Send validates Text against the typed message protocol (unless Raw),
-// waits for the target seat to go idle, then types Text into its pane and
-// presses Enter. A non-state `sent` event is appended for history. DryRun
-// skips the seat lookup and driver calls entirely and only appends the
-// (dry_run: true) history event -- but protocol validation still runs
-// first for DryRun too, since it is a pure, side-effect-free check.
+// waits for the target seat to go idle, then types Text into its pane,
+// waits briefly, and presses Enter exactly once. It then tries to confirm
+// the submit (see confirmSubmitted) before appending a non-state `sent`
+// event for history. DryRun skips the seat lookup and driver calls
+// entirely and only appends the (dry_run: true) history event -- but
+// protocol validation still runs first for DryRun too, since it is a
+// pure, side-effect-free check; DryRun never waits or confirms, so
+// SendResult.SubmitConfirmed is always false for it.
 //
 // AC-11: an invalid message (unless Raw) is rejected before any manifest
 // event is appended and before any driver call is attempted -- Send fails
 // closed, not open.
+//
+// No-resend design decision: Send presses Enter at most once, ever, per
+// call -- see confirmSubmitted's doc comment for why a second Enter is
+// unsafe. If ctx expires during the pre-Enter wait, Send returns an error
+// and never presses Enter at all, and never appends a `sent` event (the
+// text is sitting in the pane's input box, typed but not submitted).
 func (o *Org) Send(p SendParams) SendResult {
 	if !p.Raw {
 		if err := protocol.ValidateText(p.Text, protocol.DefaultMaxBodyChars); err != nil {
@@ -87,15 +132,15 @@ func (o *Org) Send(p SendParams) SendResult {
 		}
 	}
 
-	details := truncateForDetails(p.Text)
+	rawPrefix := ""
 	if p.Raw {
-		details = "raw=true " + details
+		rawPrefix = "raw=true "
 	}
 
 	if p.DryRun {
 		err := o.appendEvent(ManifestEvent{
 			TS: o.now(), OrgID: p.OrgID, SeatID: p.To, Event: EventSent,
-			DryRun: true, Details: details,
+			DryRun: true, Details: rawPrefix + truncateForDetails(p.Text),
 		})
 		return SendResult{Err: err}
 	}
@@ -118,19 +163,37 @@ func (o *Org) Send(p SendParams) SendResult {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutMS)*time.Millisecond)
 	defer cancel()
 
+	name := resolvedHerdrAgentName(seat)
+
 	// Wait for "idle" OR "done": live-probed herdr (v0.7.5) reports an
 	// interactive agent resting at its input prompt as "done" (turn
 	// finished), not "idle" -- waiting on "idle" alone times out against a
 	// perfectly receptive seat (found by the PR③ live smoke).
-	if _, err := o.Herdr.AgentWait(ctx, resolvedHerdrAgentName(seat), []string{"idle", "done"}, timeoutMS); err != nil {
+	if _, err := o.Herdr.AgentWait(ctx, name, []string{"idle", "done"}, timeoutMS); err != nil {
 		return SendResult{Err: fmt.Errorf("org: send: wait for seat %q idle/done: %w", p.To, err)}
 	}
 	if err := o.Herdr.PaneSendText(ctx, seat.PaneID, p.Text); err != nil {
 		return SendResult{Err: fmt.Errorf("org: send: send text to seat %q: %w", p.To, err)}
 	}
+
+	enterDelay := o.sendEnterDelay()
+	if p.EnterDelayMS > 0 {
+		enterDelay = time.Duration(p.EnterDelayMS) * time.Millisecond
+	}
+	if err := waitBeforeEnter(ctx, enterDelay); err != nil {
+		return SendResult{Err: fmt.Errorf("org: send: waiting before Enter for seat %q: %w (text typed but not submitted)", p.To, err)}
+	}
+
 	if err := o.Herdr.PaneSendKeys(ctx, seat.PaneID, "Enter"); err != nil {
 		return SendResult{Err: fmt.Errorf("org: send: send Enter to seat %q: %w", p.To, err)}
 	}
+
+	submitConfirmed := o.confirmSubmitted(ctx, name)
+	details := rawPrefix
+	if !submitConfirmed {
+		details += "submit_unconfirmed=true "
+	}
+	details += truncateForDetails(p.Text)
 
 	if err := o.appendEvent(ManifestEvent{
 		TS: o.now(), OrgID: p.OrgID, SeatID: p.To, Event: EventSent,
@@ -138,7 +201,86 @@ func (o *Org) Send(p SendParams) SendResult {
 	}); err != nil {
 		return SendResult{Err: err}
 	}
-	return SendResult{}
+	return SendResult{SubmitConfirmed: submitConfirmed, PaneID: seat.PaneID}
+}
+
+// sendEnterDelay returns o.SendEnterDelay, falling back to
+// defaultSendEnterDelay when unset (the Org zero value) -- mirrors
+// agentStartRetryInterval's pattern in spawn.go.
+func (o *Org) sendEnterDelay() time.Duration {
+	if o.SendEnterDelay > 0 {
+		return o.SendEnterDelay
+	}
+	return defaultSendEnterDelay
+}
+
+// sendSubmitConfirmTimeout returns o.SendSubmitConfirmTimeout, falling back
+// to defaultSendSubmitConfirmTimeout when unset.
+func (o *Org) sendSubmitConfirmTimeout() time.Duration {
+	if o.SendSubmitConfirmTimeout > 0 {
+		return o.SendSubmitConfirmTimeout
+	}
+	return defaultSendSubmitConfirmTimeout
+}
+
+// waitBeforeEnter blocks for delay, honoring ctx: if ctx is done first, it
+// returns ctx's error instead of waiting out the full delay. Split out of
+// Send so the ctx-vs-timer race (the mechanism that lets --timeout-ms bound
+// this wait too) is readable and independently testable.
+func waitBeforeEnter(ctx context.Context, delay time.Duration) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(delay):
+		return nil
+	}
+}
+
+// confirmSubmitted waits, after Enter, for the target seat to leave
+// idle/done (into "working" or "blocked"), and reports whether that
+// happened. Both "working" and "blocked" count as "the message was
+// submitted" -- "blocked" covers a seat that submit-triggered straight into
+// an approval-dialog wait (see #155 evidence: a codex seat showing "Yes,
+// proceed" reports blocked, not idle/done).
+//
+// Deliberate no-resend: this function never presses another key, no matter
+// what it observes. The design it replaces was "resend Enter once if
+// working is not confirmed", but that is unsafe: if the first Enter DID
+// submit and the seat has already moved into an approval dialog (a
+// "blocked" state) before this wait starts, a blind second Enter would
+// approve that dialog -- an operation Send has no authorization to take.
+// An unsent message is recoverable by resending; an approval taken without
+// a human's consent is not. So a confirmation failure here (error, or the
+// confirm timeout elapsing) is reported back to the caller via the bool
+// return only -- Send surfaces it as submit_unconfirmed=true on the `sent`
+// event and never fails the call because of it, since a very short agent
+// turn can legitimately go working -> done before this wait even begins.
+func (o *Org) confirmSubmitted(ctx context.Context, name string) bool {
+	confirmMS := capMSToContext(ctx, o.sendSubmitConfirmTimeout())
+	_, err := o.Herdr.AgentWait(ctx, name, []string{"working", "blocked"}, confirmMS)
+	return err == nil
+}
+
+// capMSToContext converts want to whole milliseconds, capped at ctx's
+// remaining deadline (if any) so a confirmation wait can never itself
+// outlive the caller's own --timeout-ms budget. Always returns at least 1
+// (herdr's AgentWait timeoutMS parameter carries no useful meaning at 0 --
+// none of its other call sites in this package pass 0 deliberately).
+func capMSToContext(ctx context.Context, want time.Duration) int {
+	ms := int(want / time.Millisecond)
+	if ms < 1 {
+		ms = 1
+	}
+	if deadline, ok := ctx.Deadline(); ok {
+		remaining := int(time.Until(deadline) / time.Millisecond)
+		if remaining < 1 {
+			remaining = 1
+		}
+		if remaining < ms {
+			ms = remaining
+		}
+	}
+	return ms
 }
 
 // truncateForDetails clips text for the manifest Details field so a long

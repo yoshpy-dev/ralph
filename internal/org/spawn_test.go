@@ -37,14 +37,24 @@ type fakeHerdr struct {
 	// agentStartErr field unmodified.
 	agentStartErrs  []error
 	paneSendKeysErr error
+	// agentWaitErrs, when non-empty, is dequeued one entry per AgentWait
+	// call (nil entries count as a successful call) -- lets a test script a
+	// specific outcome for one AgentWait call in a sequence (e.g. the send
+	// verb's idle/done wait succeeding but its post-Enter confirm wait
+	// failing) without affecting any other AgentWait call. Empty queue
+	// means every call succeeds, exactly like before this field existed.
+	agentWaitErrs []error
 
 	workspaceID string
 	paneID      string
 
-	sendKeysCalls    []string   // paneIDs PaneSendKeys was invoked with, in order
-	agentStartNames  []string   // agent names AgentStart was invoked with, in order
-	agentStartArgs   [][]string // agentArgs AgentStart was invoked with, in order (AC-4 argv assertions)
-	agentWaitTargets []string   // targets AgentWait was invoked with, in order
+	sendKeysCalls     []string   // paneIDs PaneSendKeys was invoked with, in order
+	sendKeysKeys      [][]string // keys PaneSendKeys was invoked with, in order (e.g. asserting exactly one "Enter")
+	agentStartNames   []string   // agent names AgentStart was invoked with, in order
+	agentStartArgs    [][]string // agentArgs AgentStart was invoked with, in order (AC-4 argv assertions)
+	agentWaitTargets  []string   // targets AgentWait was invoked with, in order
+	agentWaitUntil    [][]string // until states AgentWait was invoked with, in order
+	agentWaitTimeouts []int      // timeoutMS AgentWait was invoked with, in order
 }
 
 func (f *fakeHerdr) WorkspaceCreate(_ context.Context, _, _ string) (string, error) {
@@ -93,11 +103,20 @@ func (f *fakeHerdr) AgentStart(_ context.Context, name, _, _ string, _ int, agen
 	return "agent-1", nil
 }
 
-func (f *fakeHerdr) AgentWait(_ context.Context, target string, _ []string, _ int) (string, error) {
+func (f *fakeHerdr) AgentWait(_ context.Context, target string, until []string, timeoutMS int) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, "agent_wait")
 	f.agentWaitTargets = append(f.agentWaitTargets, target)
+	f.agentWaitUntil = append(f.agentWaitUntil, until)
+	f.agentWaitTimeouts = append(f.agentWaitTimeouts, timeoutMS)
+	if len(f.agentWaitErrs) > 0 {
+		err := f.agentWaitErrs[0]
+		f.agentWaitErrs = f.agentWaitErrs[1:]
+		if err != nil {
+			return "", err
+		}
+	}
 	return "idle", nil
 }
 
@@ -115,11 +134,12 @@ func (f *fakeHerdr) PaneSendText(_ context.Context, _, _ string) error {
 	return nil
 }
 
-func (f *fakeHerdr) PaneSendKeys(_ context.Context, paneID string, _ ...string) error {
+func (f *fakeHerdr) PaneSendKeys(_ context.Context, paneID string, keys ...string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, "pane_send_keys")
 	f.sendKeysCalls = append(f.sendKeysCalls, paneID)
+	f.sendKeysKeys = append(f.sendKeysKeys, keys)
 	if f.paneSendKeysErr != nil {
 		return f.paneSendKeysErr
 	}
@@ -182,17 +202,27 @@ func (f *fakeAgmsg) Leave(_ context.Context, team, agentID string) error {
 // testOrg builds an Org backed by temp-file manifest/receipt stores and
 // fresh fake driver clients, using the shared testOrgConfig() from
 // envelope_test.go (max_seats=3, claude+codex pools).
+//
+// SendEnterDelay is pinned to a tiny value here (rather than left at the
+// zero value, which would fall back to the real 750ms
+// defaultSendEnterDelay) so every Send test that doesn't care about timing
+// itself stays fast -- fakeHerdr's AgentWait/PaneSendText/PaneSendKeys
+// return instantly, so the pre-Enter wait would otherwise be the only real
+// sleep in the whole suite, once per Send call. Tests that exercise timing
+// directly (the delay actually elapsing, ctx expiring mid-delay) override
+// this field on the returned *Org after construction.
 func testOrg(t *testing.T) (*Org, *fakeHerdr, *fakeAgmsg) {
 	t.Helper()
 	dir := t.TempDir()
 	h := &fakeHerdr{}
 	a := &fakeAgmsg{}
 	o := &Org{
-		Config:   testOrgConfig(),
-		Manifest: NewManifestStoreAtPath(ManifestPathIn(dir)),
-		Receipts: NewReceiptStoreAtPath(filepath.Join(dir, "receipts.jsonl")),
-		Herdr:    h,
-		Agmsg:    a,
+		Config:         testOrgConfig(),
+		Manifest:       NewManifestStoreAtPath(ManifestPathIn(dir)),
+		Receipts:       NewReceiptStoreAtPath(filepath.Join(dir, "receipts.jsonl")),
+		Herdr:          h,
+		Agmsg:          a,
+		SendEnterDelay: time.Millisecond,
 	}
 	return o, h, a
 }

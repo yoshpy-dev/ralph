@@ -340,10 +340,11 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 
 func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	var (
-		to, text  string
-		timeoutMS int
-		dryRun    bool
-		raw       bool
+		to, text     string
+		timeoutMS    int
+		dryRun       bool
+		raw          bool
+		enterDelayMS int
 	)
 
 	cmd := &cobra.Command{
@@ -353,8 +354,15 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"(internal/org/protocol, see .claude/rules/ralph/agent-messaging.md) before\n" +
 			"sending: TYPE must be a known value, TASK_ID is required for\n" +
 			"TASK/RESULT/REVIEW/BLOCKED/CONTRACT, and the body must not exceed the\n" +
-			"size cap. Pass --raw to bypass validation entirely for free-form text.",
+			"size cap. Pass --raw to bypass validation entirely for free-form text.\n" +
+			"After typing the text, send waits briefly and presses Enter once, then\n" +
+			"tries to confirm the seat left idle/done. It never presses Enter a\n" +
+			"second time: if the submit cannot be confirmed, it prints a warning\n" +
+			"instead of guessing -- see --enter-delay-ms below.",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if enterDelayMS < 0 {
+				return fmt.Errorf("org: --enter-delay-ms must be >= 0")
+			}
 			if err := requireOrgID(*orgID); err != nil {
 				return err
 			}
@@ -365,11 +373,30 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			result := rt.Send(org.SendParams{OrgID: *orgID, To: to, Text: text, TimeoutMS: timeoutMS, DryRun: dryRun, Raw: raw})
+			result := rt.Send(org.SendParams{
+				OrgID: *orgID, To: to, Text: text, TimeoutMS: timeoutMS, DryRun: dryRun, Raw: raw,
+				EnterDelayMS: enterDelayMS,
+			})
 			if result.Err != nil {
 				return fmt.Errorf("org: send: %w", result.Err)
 			}
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "sent message to seat %q\n", to)
+			// A submit that Send could not confirm is not a failure (a very
+			// short agent turn can go working -> done before the confirm wait
+			// even starts) -- so this stays a stderr warning with exit 0, not
+			// an error. Send never resends Enter itself (see confirmSubmitted's
+			// doc comment in internal/org/verbs.go for why a blind second
+			// keystroke is unsafe), so the operator is the one who decides
+			// whether to submit it by hand.
+			if !dryRun && !result.SubmitConfirmed {
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
+					"warning: could not confirm that seat %q started working after Enter. "+
+						"Check its pane with 'ralph org read --org-id %s --seat %s'. "+
+						"If the message is still sitting in the input box, submit it with "+
+						"'herdr pane send-keys %s Enter'. ralph does not resend Enter on its "+
+						"own: a blind keystroke could confirm an approval dialog.\n",
+					to, *orgID, to, result.PaneID)
+			}
 			return nil
 		},
 	}
@@ -379,6 +406,8 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	cmd.Flags().IntVar(&timeoutMS, "timeout-ms", 30000, "idle-wait timeout in milliseconds before sending")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "record without sending a real message")
 	cmd.Flags().BoolVar(&raw, "raw", false, "bypass typed message protocol validation")
+	cmd.Flags().IntVar(&enterDelayMS, "enter-delay-ms", 0,
+		"wait this many milliseconds between typing the message and pressing Enter (0 = built-in default of 750)")
 
 	return cmd
 }

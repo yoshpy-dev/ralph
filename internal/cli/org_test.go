@@ -36,6 +36,16 @@ func runOrgCmd(t *testing.T, args ...string) (string, error) {
 // real driver.ExecRunner -> exec.Command path end to end without needing
 // herdr installed (CI has none). ORG_STUB_FAIL, set per test case, injects
 // a failure at exactly one subcommand boundary.
+//
+// ORG_STUB_AGENT_WAIT_CONFIRM_FAIL, when set, fails only the send verb's
+// post-Enter *confirm* AgentWait call -- distinguished from its idle/done
+// wait call by grepping argv for "working" (driver.Herdr.AgentWait passes
+// each `until` state as its own `--until <state>` pair, and only the
+// confirm call ever waits on "working"). This is a separate mechanism from
+// ORG_STUB_FAIL=agent:wait (which would fail *every* "agent wait" call,
+// including the idle/done wait Send needs to succeed before it ever
+// reaches Enter) -- it exists so CLI-level tests can exercise the
+// unconfirmed-submit warning path without also failing the send outright.
 const herdrStub = `#!/bin/sh
 if [ -n "$ORG_HERDR_LOG" ]; then
   echo "$@" >> "$ORG_HERDR_LOG"
@@ -43,6 +53,14 @@ fi
 if [ -n "$ORG_STUB_FAIL" ] && [ "$1:$2" = "$ORG_STUB_FAIL" ]; then
   echo "stub failure: $1 $2" >&2
   exit 1
+fi
+if [ "$1 $2" = "agent wait" ] && [ -n "$ORG_STUB_AGENT_WAIT_CONFIRM_FAIL" ]; then
+  for arg in "$@"; do
+    if [ "$arg" = "working" ]; then
+      echo "stub failure: agent wait confirm" >&2
+      exit 1
+    fi
+  done
 fi
 case "$1 $2" in
   "workspace create") echo '{"id":"cli:workspace:create","result":{"root_pane":{"pane_id":"ws-stub-1:p1","tab_id":"ws-stub-1:t1","workspace_id":"ws-stub-1"},"tab":{"tab_id":"ws-stub-1:t1"},"type":"workspace_created","workspace":{"active_tab_id":"ws-stub-1:t1","workspace_id":"ws-stub-1"}}}' ;;
@@ -139,6 +157,7 @@ func setupOrgStubPATH(t *testing.T) (herdrLog, agmsgLog string) {
 	t.Setenv("ORG_AGMSG_LOG", agmsgLog)
 
 	t.Setenv("ORG_STUB_FAIL", "")
+	t.Setenv("ORG_STUB_AGENT_WAIT_CONFIRM_FAIL", "")
 
 	return herdrLog, agmsgLog
 }
@@ -1119,7 +1138,11 @@ func TestOrgSend_RawFlag_BypassesValidation(t *testing.T) {
 		t.Fatalf("spawn failed: %v", err)
 	}
 
-	out, err := runOrgCmd(t, "send", "--org-id", "org-a", "--to", "seat-1", "--text", "not a valid protocol message", "--raw", "--state-dir", stateDir)
+	// --enter-delay-ms 1 keeps this test fast: the real default (750ms)
+	// would otherwise add real wall-clock time to every CLI-level send
+	// test that succeeds.
+	out, err := runOrgCmd(t, "send", "--org-id", "org-a", "--to", "seat-1", "--text", "not a valid protocol message",
+		"--raw", "--enter-delay-ms", "1", "--state-dir", stateDir)
 	if err != nil {
 		t.Fatalf("expected --raw to bypass protocol validation, got %v (output: %s)", err, out)
 	}
@@ -1135,7 +1158,12 @@ func TestOrgSend_RawFlag_BypassesValidation(t *testing.T) {
 }
 
 // TestOrgSend_ValidTypedMessage_Succeeds is the positive counterpart: a
-// well-formed typed message is accepted without --raw.
+// well-formed typed message is accepted without --raw, and -- since the
+// herdr stub answers every "agent wait" with exit 0 -- the submit is
+// confirmed, so no "could not confirm" warning appears on stderr (the
+// confirmed half of AC-3's "no warning" pairing; see
+// TestOrgSend_UnconfirmedSubmit_WarnsOnStderr_ExitZero for the unconfirmed
+// half).
 func TestOrgSend_ValidTypedMessage_Succeeds(t *testing.T) {
 	setupOrgStubPATH(t)
 	stateDir := filepath.Join(t.TempDir(), "state")
@@ -1149,13 +1177,97 @@ func TestOrgSend_ValidTypedMessage_Succeeds(t *testing.T) {
 		t.Fatalf("spawn failed: %v", err)
 	}
 
+	// --enter-delay-ms 1: see TestOrgSend_RawFlag_BypassesValidation's
+	// comment above.
 	out, err := runOrgCmd(t, "send", "--org-id", "org-a", "--to", "seat-1",
-		"--text", "TYPE: TASK\nTASK_ID: t-1\n\ndo the thing", "--state-dir", stateDir)
+		"--text", "TYPE: TASK\nTASK_ID: t-1\n\ndo the thing", "--enter-delay-ms", "1", "--state-dir", stateDir)
 	if err != nil {
 		t.Fatalf("expected a well-formed typed message to be accepted, got %v (output: %s)", err, out)
 	}
+	if strings.Contains(out, "could not confirm") {
+		t.Errorf("expected no unconfirmed-submit warning when the herdr stub confirms the submit, got: %s", out)
+	}
 	if !strings.Contains(out, "sent message to seat \"seat-1\"") {
 		t.Errorf("expected sent confirmation in output, got: %s", out)
+	}
+}
+
+// TestOrgSend_NegativeEnterDelayMS_NonZeroExit covers --enter-delay-ms's
+// input validation: a negative value is rejected before newOrgRuntime even
+// builds a runtime (no herdr/agmsg call of any kind).
+func TestOrgSend_NegativeEnterDelayMS_NonZeroExit(t *testing.T) {
+	herdrLog, _ := setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	out, err := runOrgCmd(t, "send", "--org-id", "org-a", "--to", "seat-1",
+		"--text", "TYPE: HEARTBEAT", "--enter-delay-ms", "-1", "--state-dir", stateDir)
+	if err == nil {
+		t.Fatalf("expected non-zero exit for a negative --enter-delay-ms, output: %s", out)
+	}
+	if !strings.Contains(err.Error(), "--enter-delay-ms") {
+		t.Errorf("expected the error to mention --enter-delay-ms, got: %v", err)
+	}
+	if herdrLines := readLogLines(t, herdrLog); len(herdrLines) != 0 {
+		t.Errorf("expected zero herdr calls for a rejected --enter-delay-ms, got: %v", herdrLines)
+	}
+}
+
+// TestOrgSend_UnconfirmedSubmit_WarnsOnStderr_ExitZero is the AC-3
+// unconfirmed-submit path: with the herdr stub set to fail only the
+// post-Enter confirm AgentWait call (ORG_STUB_AGENT_WAIT_CONFIRM_FAIL, see
+// herdrStub's doc comment), `ralph org send` still exits 0, but prints a
+// warning to stderr naming the seat, the pane id, and the no-resend
+// rationale.
+func TestOrgSend_UnconfirmedSubmit_WarnsOnStderr_ExitZero(t *testing.T) {
+	setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	if _, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope",
+		"--state-dir", stateDir,
+	); err != nil {
+		t.Fatalf("spawn failed: %v", err)
+	}
+	t.Setenv("ORG_STUB_AGENT_WAIT_CONFIRM_FAIL", "1")
+
+	out, err := runOrgCmd(t, "send", "--org-id", "org-a", "--to", "seat-1",
+		"--text", "TYPE: TASK\nTASK_ID: t-1\n\ndo the thing", "--enter-delay-ms", "1", "--state-dir", stateDir)
+	if err != nil {
+		t.Fatalf("expected exit 0 even when the submit cannot be confirmed, got %v (output: %s)", err, out)
+	}
+	if !strings.Contains(out, "could not confirm") {
+		t.Errorf("expected the unconfirmed-submit warning, got: %s", out)
+	}
+	if !strings.Contains(out, "\"seat-1\"") {
+		t.Errorf("expected the warning to name the target seat, got: %s", out)
+	}
+	if !strings.Contains(out, "pane-stub-1") {
+		t.Errorf("expected the warning to include the seat's pane id, got: %s", out)
+	}
+	if !strings.Contains(out, "does not resend Enter") {
+		t.Errorf("expected the warning to explain ralph does not resend Enter, got: %s", out)
+	}
+}
+
+// TestOrgSend_DryRun_NeverWarnsAboutUnconfirmedSubmit covers the DryRun
+// half of edge case 7 at the CLI layer: DryRun never runs the confirm wait
+// at all (see Send's doc comment), so it must never print the
+// unconfirmed-submit warning even though SubmitConfirmed is always false
+// for DryRun.
+func TestOrgSend_DryRun_NeverWarnsAboutUnconfirmedSubmit(t *testing.T) {
+	setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+	t.Setenv("ORG_STUB_AGENT_WAIT_CONFIRM_FAIL", "1")
+
+	out, err := runOrgCmd(t, "send", "--org-id", "org-a", "--to", "seat-1",
+		"--text", "TYPE: TASK\nTASK_ID: t-1\n\ndo the thing", "--dry-run", "--state-dir", stateDir)
+	if err != nil {
+		t.Fatalf("expected --dry-run to succeed, got %v (output: %s)", err, out)
+	}
+	if strings.Contains(out, "could not confirm") {
+		t.Errorf("expected no unconfirmed-submit warning for --dry-run, got: %s", out)
 	}
 }
 
