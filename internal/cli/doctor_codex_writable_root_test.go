@@ -423,8 +423,15 @@ func TestCheckCodexAgmsgWritableRoot_StoreUnderDotGitOrDotCodex_Warn(t *testing.
 
 // TestCheckCodexAgmsgWritableRoot_BlockedAncestorAndExplicitStoreBothListed_PassNamingExplicit
 // proves a genuinely covering root still wins even when a blocked ancestor
-// was tried first: the Detail must name the explicit store root, not the
-// blocked home directory.
+// was tried first: the Detail must name the explicit store root as the
+// COVERING root, not merely mention its path somewhere (self-review C2-6:
+// the pass Detail always ends with "covers the agmsg store <store>"
+// regardless of which root was actually credited, so a bare
+// strings.Contains(r.Detail, store) cannot tell the two apart -- it would
+// stay green even if the blocked home directory were wrongly named as the
+// covering root). Asserting the "writable root <store> in " prefix pins
+// which root was actually credited; the negative check pins that the
+// blocked home directory never is.
 func TestCheckCodexAgmsgWritableRoot_BlockedAncestorAndExplicitStoreBothListed_PassNamingExplicit(t *testing.T) {
 	base := t.TempDir()
 	home, agmsgHome := writeAgmsgHomeUnderDotAgents(t, base)
@@ -436,8 +443,206 @@ func TestCheckCodexAgmsgWritableRoot_BlockedAncestorAndExplicitStoreBothListed_P
 	if r.Status != "pass" {
 		t.Fatalf("expected pass, got %s (%s)", r.Status, r.Detail)
 	}
-	if !strings.Contains(r.Detail, store) {
-		t.Errorf("expected detail to name the explicit store root %q, got: %s", store, r.Detail)
+	if !strings.Contains(r.Detail, "writable root "+store+" in ") {
+		t.Errorf("expected detail to name the explicit store as the covering root, got: %s", r.Detail)
+	}
+	if strings.Contains(r.Detail, "writable root "+home+" in ") {
+		t.Errorf("the blocked ancestor must never be named as the covering root, got: %s", r.Detail)
+	}
+}
+
+// writeAgmsgHomeUnderSymlinkedDotAgents creates <base>/real-agents/skills/agmsg
+// (the real, non-symlink location) and a <base>/.agents symlink pointing to
+// <base>/real-agents -- a SIBLING of .agents, both direct children of
+// base -- so a store spelled through <base>/.agents/skills/agmsg/db
+// resolves to <base>/real-agents/skills/agmsg/db: a path that no longer
+// contains a ".agents" element once resolved, while base itself is still a
+// genuine ancestor of the resolved store either way. This is cross-review
+// C2-1's fixture: the AR-1 fix only checked the resolved spelling, so this
+// exact shape used to turn AR-1's own warn back into a pass.
+func writeAgmsgHomeUnderSymlinkedDotAgents(t *testing.T, base string) (home, agmsgHome, resolvedAgmsgHome string) {
+	t.Helper()
+	realAgents := filepath.Join(base, "real-agents")
+	resolvedAgmsgHome = filepath.Join(realAgents, "skills", "agmsg")
+	writeAgmsgHome(t, resolvedAgmsgHome, "")
+	if err := os.Symlink(realAgents, filepath.Join(base, ".agents")); err != nil {
+		t.Fatal(err)
+	}
+	agmsgHome = filepath.Join(base, ".agents", "skills", "agmsg")
+	return base, agmsgHome, resolvedAgmsgHome
+}
+
+// TestCheckCodexAgmsgWritableRoot_RootCrossesDotAgentsViaSymlinkTarget_WarnNamesBlockedAncestor
+// is cross-review C2-1's central regression test: .agents is a symlink to a
+// sibling directory, so the RESOLVED spelling of the store no longer
+// contains a ".agents" element -- but codex is given the CONFIGURED
+// spelling (through the symlink), and which spelling it actually evaluates
+// its protection against is not documented, so this must still warn.
+func TestCheckCodexAgmsgWritableRoot_RootCrossesDotAgentsViaSymlinkTarget_WarnNamesBlockedAncestor(t *testing.T) {
+	base := t.TempDir()
+	home, agmsgHome, _ := writeAgmsgHomeUnderSymlinkedDotAgents(t, base)
+	cfgDir := t.TempDir()
+	cfgPath := writeCodexConfig(t, cfgDir, "[sandbox_workspace_write]\nwritable_roots = [\""+home+"\"]\n")
+
+	r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome, codexSandboxTestEnv(cfgPath, ""))
+	if r.Status != "warn" {
+		t.Fatalf("expected warn (the configured path still crosses .agents even though the resolved path does not), got %s (%s)", r.Status, r.Detail)
+	}
+	want := fmt.Sprintf("(%s contains it, but codex keeps .git, .agents, and .codex directories under a writable root read-only)", home)
+	if !strings.Contains(r.Detail, want) {
+		t.Errorf("expected detail to contain %q, got: %s", want, r.Detail)
+	}
+}
+
+// TestCheckCodexAgmsgWritableRoot_SymlinkedDotAgentsControls_StayPass pins
+// the four shapes cross-review C2-1's fix must not break, all against the
+// same symlinked-.agents fixture as the regression test above.
+func TestCheckCodexAgmsgWritableRoot_SymlinkedDotAgentsControls_StayPass(t *testing.T) {
+	t.Run("root equals the store, configured spelling", func(t *testing.T) {
+		base := t.TempDir()
+		_, agmsgHome, _ := writeAgmsgHomeUnderSymlinkedDotAgents(t, base)
+		store := filepath.Join(agmsgHome, "db")
+		cfgDir := t.TempDir()
+		cfgPath := writeCodexConfig(t, cfgDir, "[sandbox_workspace_write]\nwritable_roots = [\""+store+"\"]\n")
+
+		r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome, codexSandboxTestEnv(cfgPath, ""))
+		if r.Status != "pass" {
+			t.Fatalf("expected pass, got %s (%s)", r.Status, r.Detail)
+		}
+	})
+
+	t.Run("root equals the agmsg home, configured spelling", func(t *testing.T) {
+		base := t.TempDir()
+		_, agmsgHome, _ := writeAgmsgHomeUnderSymlinkedDotAgents(t, base)
+		cfgDir := t.TempDir()
+		cfgPath := writeCodexConfig(t, cfgDir, "[sandbox_workspace_write]\nwritable_roots = [\""+agmsgHome+"\"]\n")
+
+		r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome, codexSandboxTestEnv(cfgPath, ""))
+		if r.Status != "pass" {
+			t.Fatalf("expected pass, got %s (%s)", r.Status, r.Detail)
+		}
+	})
+
+	t.Run("root equals the .agents directory itself", func(t *testing.T) {
+		base := t.TempDir()
+		home, agmsgHome, _ := writeAgmsgHomeUnderSymlinkedDotAgents(t, base)
+		dotAgents := filepath.Join(home, ".agents")
+		cfgDir := t.TempDir()
+		cfgPath := writeCodexConfig(t, cfgDir, "[sandbox_workspace_write]\nwritable_roots = [\""+dotAgents+"\"]\n")
+
+		r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome, codexSandboxTestEnv(cfgPath, ""))
+		if r.Status != "pass" {
+			t.Fatalf("expected pass, got %s (%s)", r.Status, r.Detail)
+		}
+	})
+
+	// root == the RESOLVED store directory: filepath.Rel between it and the
+	// CONFIGURED (symlinked) target is not an ancestor relation at all (the
+	// two spellings diverge above real-agents/.agents), so
+	// pathCrossesCodexProtectedDir on the configured pair is false by its
+	// own not-covering guard; the resolved pair collapses to the identical
+	// path on both sides (rel "."), so it is false there too. Both terms
+	// false -> not blocked -> pass, exactly as the plan predicted.
+	t.Run("root equals the resolved store directory", func(t *testing.T) {
+		base := t.TempDir()
+		_, agmsgHome, resolvedAgmsgHome := writeAgmsgHomeUnderSymlinkedDotAgents(t, base)
+		resolvedStore := filepath.Join(resolvedAgmsgHome, "db")
+		cfgDir := t.TempDir()
+		cfgPath := writeCodexConfig(t, cfgDir, "[sandbox_workspace_write]\nwritable_roots = [\""+resolvedStore+"\"]\n")
+
+		r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome, codexSandboxTestEnv(cfgPath, ""))
+		if r.Status != "pass" {
+			t.Fatalf("expected pass, got %s (%s)", r.Status, r.Detail)
+		}
+	})
+}
+
+// TestCheckCodexAgmsgWritableRoot_MissingConfigWithBlockedImplicitAncestor_WarnNamesBoth
+// is cross-review C2-5's regression test: with the config absent,
+// codexImplicitWritableRoots still returns candidates (neither exclude key
+// can be set without a config to set it in), so a blocked ancestor CAN
+// still be computed even in the missing-config warn -- the Detail must say
+// so, not silently drop it as the old doc comment claimed it always would.
+func TestCheckCodexAgmsgWritableRoot_MissingConfigWithBlockedImplicitAncestor_WarnNamesBoth(t *testing.T) {
+	base := t.TempDir()
+	shared := filepath.Join(base, "shared-implicit-root")
+	agmsgHome := filepath.Join(shared, ".agents", "skills", "agmsg")
+	writeAgmsgHome(t, agmsgHome, "")
+	cfgDir := t.TempDir()
+	noSuchCfg := filepath.Join(cfgDir, "config.toml")
+
+	r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome,
+		codexSandboxTestEnvWithImplicitRoots(noSuchCfg, "", shared, ""))
+	if r.Status != "warn" {
+		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
+	}
+	for _, want := range []string{
+		noSuchCfg + " does not exist",
+		fmt.Sprintf("(%s contains it, but codex keeps .git, .agents, and .codex directories under a writable root read-only)", shared),
+	} {
+		if !strings.Contains(r.Detail, want) {
+			t.Errorf("expected detail to contain %q, got: %s", want, r.Detail)
+		}
+	}
+}
+
+// TestCheckCodexAgmsgWritableRoot_SlashTmpDirEqualsTmpDirExcludedSlashTmp_NamesTmpdirEnvVar
+// is cross-review C2-2's regression test: the seat's own $TMPDIR happens to
+// equal codex's fixed temp root as a STRING, and exclude_slash_tmp = true
+// removes the fixed-root entry, so the match that remains comes from the
+// $TMPDIR entry -- the Detail must name exclude_tmpdir_env_var (not
+// exclude_slash_tmp, which a naive string-identity comparison against the
+// matched directory would wrongly report, since both entries share the
+// same directory value) and must carry the pane-environment note exactly
+// once.
+func TestCheckCodexAgmsgWritableRoot_SlashTmpDirEqualsTmpDirExcludedSlashTmp_NamesTmpdirEnvVar(t *testing.T) {
+	shared := filepath.Join(t.TempDir(), "shared-implicit-root")
+	agmsgHome := filepath.Join(shared, "agmsg-home")
+	writeAgmsgHome(t, agmsgHome, "")
+	cfgDir := t.TempDir()
+	cfgPath := writeCodexConfig(t, cfgDir, "[sandbox_workspace_write]\nexclude_slash_tmp = true\n")
+
+	r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome,
+		codexSandboxTestEnvWithImplicitRoots(cfgPath, "", shared, shared))
+	if r.Status != "pass" {
+		t.Fatalf("expected pass, got %s (%s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "exclude_tmpdir_env_var is not set in") {
+		t.Errorf("expected detail to name exclude_tmpdir_env_var (the entry that actually matched came from $TMPDIR), got: %s", r.Detail)
+	}
+	if strings.Contains(r.Detail, "exclude_slash_tmp is not set in") {
+		t.Errorf("expected detail NOT to name exclude_slash_tmp (that root was excluded, not the one that matched), got: %s", r.Detail)
+	}
+	if got := strings.Count(r.Detail, "the seat's pane environment may differ"); got != 1 {
+		t.Errorf("expected the pane-environment note exactly once (the match came from $TMPDIR), got %d in: %s", got, r.Detail)
+	}
+}
+
+// TestCheckCodexAgmsgWritableRoot_SlashTmpDirEqualsTmpDirExcludedTmpdirEnvVar_NamesSlashTmp
+// is C2-2's mirror case: with exclude_tmpdir_env_var = true instead, the
+// $TMPDIR entry is removed and the fixed-root entry is the one that
+// matches, so the Detail must name exclude_slash_tmp and must NOT carry
+// the pane-environment note (the match did not come from $TMPDIR).
+func TestCheckCodexAgmsgWritableRoot_SlashTmpDirEqualsTmpDirExcludedTmpdirEnvVar_NamesSlashTmp(t *testing.T) {
+	shared := filepath.Join(t.TempDir(), "shared-implicit-root")
+	agmsgHome := filepath.Join(shared, "agmsg-home")
+	writeAgmsgHome(t, agmsgHome, "")
+	cfgDir := t.TempDir()
+	cfgPath := writeCodexConfig(t, cfgDir, "[sandbox_workspace_write]\nexclude_tmpdir_env_var = true\n")
+
+	r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome,
+		codexSandboxTestEnvWithImplicitRoots(cfgPath, "", shared, shared))
+	if r.Status != "pass" {
+		t.Fatalf("expected pass, got %s (%s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "exclude_slash_tmp is not set in") {
+		t.Errorf("expected detail to name exclude_slash_tmp (the entry that actually matched is the fixed root), got: %s", r.Detail)
+	}
+	if strings.Contains(r.Detail, "exclude_tmpdir_env_var is not set in") {
+		t.Errorf("expected detail NOT to name exclude_tmpdir_env_var, got: %s", r.Detail)
+	}
+	if strings.Contains(r.Detail, "the seat's pane environment may differ") {
+		t.Errorf("the fixed-root match must not carry the TMPDIR pane-environment note, got: %s", r.Detail)
 	}
 }
 
@@ -846,8 +1051,13 @@ func TestCheckCodexAgmsgWritableRoot_StorageOverride(t *testing.T) {
 // own TMPDIR happens to live (cross-review WC-1's follow-up: a hard-coded
 // "/tmp" here made this exact test, and roughly a dozen unrelated ones,
 // silently flip to the wrong status on any machine whose real TMPDIR is
-// "/tmp", e.g. GitHub Actions' ubuntu-latest with TMPDIR unset). The Detail
-// names the injected fixture path.
+// "/tmp", e.g. GitHub Actions' ubuntu-latest with TMPDIR unset). The
+// override store path is itself nested under slashTmpFixture, so the
+// assertion checks for "is under <slashTmpFixture>," specifically rather
+// than a bare substring match (self-review C2-6's weakness: the "agmsg
+// store <store>" clause would already contain slashTmpFixture as a prefix
+// regardless of which candidate actually matched, since store is
+// slashTmpFixture's own child).
 func TestCheckCodexAgmsgWritableRoot_ImplicitSlashTmp_PassNamingSlashTmp(t *testing.T) {
 	agmsgHome := t.TempDir()
 	writeAgmsgHome(t, agmsgHome, "")
@@ -861,7 +1071,7 @@ func TestCheckCodexAgmsgWritableRoot_ImplicitSlashTmp_PassNamingSlashTmp(t *test
 	if r.Status != "pass" {
 		t.Fatalf("expected pass (workspace-write keeps the fixed temp root writable by default), got %s (%s)", r.Status, r.Detail)
 	}
-	for _, want := range []string{slashTmpFixture, "workspace-write keeps writable by default", "exclude_slash_tmp is not set in"} {
+	for _, want := range []string{"is under " + slashTmpFixture + ",", "workspace-write keeps writable by default", "exclude_slash_tmp is not set in"} {
 		if !strings.Contains(r.Detail, want) {
 			t.Errorf("expected detail to contain %q, got: %s", want, r.Detail)
 		}
@@ -892,7 +1102,12 @@ func TestCheckCodexAgmsgWritableRoot_ImplicitSlashTmpExcluded_Warn(t *testing.T)
 // workspace-write also keeps writable by default unless
 // exclude_tmpdir_env_var is set. The pane-environment note must appear,
 // since TMPDIR is seat-pane-specific. SlashTmpDir is left "" so this test
-// exercises the $TMPDIR root alone.
+// exercises the $TMPDIR root alone. agmsgHome (and so store) is itself
+// nested under tmpDirFixture, so the assertion checks for "is under
+// <tmpDirFixture>," specifically rather than a bare substring match
+// (self-review C2-6's weakness -- see the sibling slashTmpFixture test's
+// comment for why a bare match would pass regardless of which root the
+// check actually credited).
 func TestCheckCodexAgmsgWritableRoot_ImplicitTmpdirEnv_Pass(t *testing.T) {
 	tmpDirFixture := t.TempDir()
 	agmsgHome := filepath.Join(tmpDirFixture, "agmsg-home")
@@ -905,7 +1120,7 @@ func TestCheckCodexAgmsgWritableRoot_ImplicitTmpdirEnv_Pass(t *testing.T) {
 	if r.Status != "pass" {
 		t.Fatalf("expected pass (workspace-write keeps $TMPDIR writable by default), got %s (%s)", r.Status, r.Detail)
 	}
-	if !strings.Contains(r.Detail, tmpDirFixture) {
+	if !strings.Contains(r.Detail, "is under "+tmpDirFixture+",") {
 		t.Errorf("expected detail to name the TMPDIR root %q, got: %s", tmpDirFixture, r.Detail)
 	}
 	if !strings.Contains(r.Detail, "the seat's pane environment may differ") {
@@ -1154,12 +1369,12 @@ func TestPathCrossesCodexProtectedDir(t *testing.T) {
 	}
 }
 
-// TestCodexImplicitWritableRoots is cross-review WC-1's pure unit test.
-// TestCodexImplicitWritableRoots is a pure test of codexImplicitWritableRoots'
-// string logic -- it never touches the filesystem, so the literal paths
-// below (standing in for whatever codexSandboxEnvFromOS or a test fixture
-// would inject) are safe to use directly, unlike in an integration test
-// that actually resolves a store against them.
+// TestCodexImplicitWritableRoots is cross-review WC-1's pure unit test of
+// codexImplicitWritableRoots' selection and key-attribution logic -- it
+// never touches the filesystem, so the literal paths below (standing in
+// for whatever codexSandboxEnvFromOS or a test fixture would inject) are
+// safe to use directly, unlike in an integration test that actually
+// resolves a store against them.
 func TestCodexImplicitWritableRoots(t *testing.T) {
 	withExcludes := func(excludeSlashTmp, excludeTmpdirEnvVar bool) codexUserConfig {
 		var cfg codexUserConfig
@@ -1172,27 +1387,63 @@ func TestCodexImplicitWritableRoots(t *testing.T) {
 		cfg         codexUserConfig
 		slashTmpDir string
 		tmpDir      string
-		want        []string
+		want        []codexImplicitRoot
 	}{
-		{"both set, both defaults", withExcludes(false, false), "/injected/slashtmp", "/abs/tmpdir", []string{"/injected/slashtmp", "/abs/tmpdir"}},
-		{"exclude_slash_tmp drops slashTmpDir", withExcludes(true, false), "/injected/slashtmp", "/abs/tmpdir", []string{"/abs/tmpdir"}},
-		{"exclude_tmpdir_env_var drops tmpDir", withExcludes(false, true), "/injected/slashtmp", "/abs/tmpdir", []string{"/injected/slashtmp"}},
+		{
+			"both set, both defaults", withExcludes(false, false), "/injected/slashtmp", "/abs/tmpdir",
+			[]codexImplicitRoot{
+				{Dir: "/injected/slashtmp", ExcludeKey: "exclude_slash_tmp"},
+				{Dir: "/abs/tmpdir", ExcludeKey: "exclude_tmpdir_env_var", FromTmpdirEnv: true},
+			},
+		},
+		{
+			"exclude_slash_tmp drops slashTmpDir", withExcludes(true, false), "/injected/slashtmp", "/abs/tmpdir",
+			[]codexImplicitRoot{{Dir: "/abs/tmpdir", ExcludeKey: "exclude_tmpdir_env_var", FromTmpdirEnv: true}},
+		},
+		{
+			"exclude_tmpdir_env_var drops tmpDir", withExcludes(false, true), "/injected/slashtmp", "/abs/tmpdir",
+			[]codexImplicitRoot{{Dir: "/injected/slashtmp", ExcludeKey: "exclude_slash_tmp"}},
+		},
 		{"both excluded", withExcludes(true, true), "/injected/slashtmp", "/abs/tmpdir", nil},
-		{"empty slashTmpDir ignored", withExcludes(false, false), "", "/abs/tmpdir", []string{"/abs/tmpdir"}},
-		{"relative slashTmpDir ignored", withExcludes(false, false), "relative/slashtmp", "/abs/tmpdir", []string{"/abs/tmpdir"}},
-		{"empty tmpDir ignored", withExcludes(false, false), "/injected/slashtmp", "", []string{"/injected/slashtmp"}},
-		{"relative tmpDir ignored", withExcludes(false, false), "/injected/slashtmp", "relative/tmp", []string{"/injected/slashtmp"}},
+		{
+			"empty slashTmpDir ignored", withExcludes(false, false), "", "/abs/tmpdir",
+			[]codexImplicitRoot{{Dir: "/abs/tmpdir", ExcludeKey: "exclude_tmpdir_env_var", FromTmpdirEnv: true}},
+		},
+		{
+			"relative slashTmpDir ignored", withExcludes(false, false), "relative/slashtmp", "/abs/tmpdir",
+			[]codexImplicitRoot{{Dir: "/abs/tmpdir", ExcludeKey: "exclude_tmpdir_env_var", FromTmpdirEnv: true}},
+		},
+		{
+			"empty tmpDir ignored", withExcludes(false, false), "/injected/slashtmp", "",
+			[]codexImplicitRoot{{Dir: "/injected/slashtmp", ExcludeKey: "exclude_slash_tmp"}},
+		},
+		{
+			"relative tmpDir ignored", withExcludes(false, false), "/injected/slashtmp", "relative/tmp",
+			[]codexImplicitRoot{{Dir: "/injected/slashtmp", ExcludeKey: "exclude_slash_tmp"}},
+		},
 		{"both empty", withExcludes(false, false), "", "", nil},
+		{
+			// cross-review C2-2: slashTmpDir and tmpDir can legitimately be
+			// the same string. Both entries must still be returned, each
+			// with its own correct ExcludeKey/FromTmpdirEnv, so a later
+			// match on that shared directory can be attributed to whichever
+			// entry actually matched first.
+			"slashTmpDir equals tmpDir, both entries kept with distinct attribution", withExcludes(false, false), "/shared", "/shared",
+			[]codexImplicitRoot{
+				{Dir: "/shared", ExcludeKey: "exclude_slash_tmp"},
+				{Dir: "/shared", ExcludeKey: "exclude_tmpdir_env_var", FromTmpdirEnv: true},
+			},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got := codexImplicitWritableRoots(tc.cfg, tc.slashTmpDir, tc.tmpDir)
 			if len(got) != len(tc.want) {
-				t.Fatalf("codexImplicitWritableRoots(...) = %v, want %v", got, tc.want)
+				t.Fatalf("codexImplicitWritableRoots(...) = %+v, want %+v", got, tc.want)
 			}
 			for i := range got {
 				if got[i] != tc.want[i] {
-					t.Errorf("codexImplicitWritableRoots(...)[%d] = %q, want %q", i, got[i], tc.want[i])
+					t.Errorf("codexImplicitWritableRoots(...)[%d] = %+v, want %+v", i, got[i], tc.want[i])
 				}
 			}
 		})

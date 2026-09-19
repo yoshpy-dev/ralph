@@ -509,7 +509,14 @@ var codexProtectedDirNames = map[string]bool{
 // cross" (both false here). A path element that only superficially
 // resembles a protected name (".agentsx", "agents" without the leading
 // dot) does not match -- comparison is by exact path element, never
-// substring.
+// substring. Callers evaluate this on BOTH the resolved and the
+// as-configured spelling of a root/target pair (cross-review C2-1): codex
+// applies its protection to the path it is actually given, and whether
+// that is the literal path or its resolved form is not documented, so a
+// symlink that leads back under the same writable root -- but through a
+// differently-named directory -- must not be allowed to remove a protected
+// element from consideration just because the RESOLVED spelling no longer
+// contains it.
 func pathCrossesCodexProtectedDir(root, target string) bool {
 	if !filepath.IsAbs(root) {
 		return false
@@ -559,42 +566,60 @@ func resolveNearestExisting(path string) string {
 	}
 }
 
-// coveringWritableRoot returns the first entry in roots that both covers
-// target (pathCovers) AND does not cross a codex-protected directory
-// (pathCrossesCodexProtectedDir) -- both checked on resolved forms
-// (resolveNearestExisting), so a writable_roots entry spelled through a
-// symlink, or an agmsg store that lives behind one, still compares
-// correctly. A root that covers target only by crossing a protected
-// directory (cross-review AR-1 -- e.g. the home directory, when the store
-// lives under its .agents subdirectory) is recorded as blockedAncestor
-// (the first such root seen) instead of being accepted: codex would still
-// leave the store itself read-only, so this must not be reported as a real
-// covering root. blockedAncestor is "" when either some root genuinely
-// covers target, or no root is an ancestor at all. The comparison itself is
-// the ONLY pass over roots: an earlier version tried an unresolved textual
-// comparison first, which returned pass for a store directory that was
-// itself a symlink pointing OUTSIDE every configured root -- exactly the
-// misconfiguration this check exists to catch (self-review MEDIUM-3).
-// resolveNearestExisting is strictly at least as permissive as a plain
-// textual comparison (it falls back to the cleaned path when nothing
-// resolves), so dropping the textual pass loses no legitimate match. A
-// relative or "~"-prefixed root is skipped before any resolution is
-// attempted -- checked on the root as CONFIGURED, not on its resolved form,
-// so a relative root can never become absolute by accident of where
-// symlink resolution happens to land. Both returned strings are always the
-// ORIGINAL (unresolved) root text as written in the config, so the Detail
-// names what the operator actually configured.
+// codexRootCoverage tests one candidate writable root (explicit or
+// implicit) against target, given resolvedTarget (target already resolved
+// through resolveNearestExisting -- computed once by the caller, since it
+// does not change across candidates). covers is false when root is not
+// absolute, or does not genuinely cover target -- decided on the RESOLVED
+// pair via pathCovers, exactly as before this function existed. When
+// covers is true, blocked reports whether a codex-protected directory
+// element sits between root and target on EITHER the resolved pair or the
+// pair exactly as configured (cross-review C2-1): a writable_roots entry
+// or an agmsg home that reaches the store through a symlink whose target
+// lands back under the same root, but through a differently-named
+// directory, would otherwise let the RESOLVED spelling hide a protected
+// element that the CONFIGURED spelling still shows -- and which spelling
+// codex itself evaluates its protection against is not documented, so
+// pathCrossesCodexProtectedDir is checked on both (see its own doc
+// comment).
+func codexRootCoverage(root, target, resolvedTarget string) (covers, blocked bool) {
+	if !filepath.IsAbs(root) {
+		return false, false // a relative or ~-prefixed root never matches (see pathCovers)
+	}
+	resolvedRoot := resolveNearestExisting(root)
+	if !pathCovers(resolvedRoot, resolvedTarget) {
+		return false, false
+	}
+	blocked = pathCrossesCodexProtectedDir(resolvedRoot, resolvedTarget) || pathCrossesCodexProtectedDir(root, target)
+	return true, blocked
+}
+
+// coveringWritableRoot returns the first entry in roots that covers target
+// without being blocked (codexRootCoverage). A root that covers target
+// only by crossing a protected directory (cross-review AR-1 -- e.g. the
+// home directory, when the store lives under its .agents subdirectory) is
+// recorded as blockedAncestor (the first such root seen) instead of being
+// accepted: codex would still leave the store itself read-only, so this
+// must not be reported as a real covering root. blockedAncestor is "" when
+// either some root genuinely covers target, or no root is an ancestor at
+// all. The comparison itself is the ONLY pass over roots: an earlier
+// version tried an unresolved textual comparison first, which returned
+// pass for a store directory that was itself a symlink pointing OUTSIDE
+// every configured root -- exactly the misconfiguration this check exists
+// to catch (self-review MEDIUM-3). resolveNearestExisting is strictly at
+// least as permissive as a plain textual comparison (it falls back to the
+// cleaned path when nothing resolves), so dropping the textual pass loses
+// no legitimate match. The returned string is always the ORIGINAL
+// (unresolved) root text as written in the config, so the Detail names
+// what the operator actually configured.
 func coveringWritableRoot(roots []string, target string) (covering, blockedAncestor string) {
 	resolvedTarget := resolveNearestExisting(target)
 	for _, root := range roots {
-		if !filepath.IsAbs(root) {
-			continue // a relative or ~-prefixed root never matches (see pathCovers)
-		}
-		resolvedRoot := resolveNearestExisting(root)
-		if !pathCovers(resolvedRoot, resolvedTarget) {
+		covers, blocked := codexRootCoverage(root, target, resolvedTarget)
+		if !covers {
 			continue
 		}
-		if pathCrossesCodexProtectedDir(resolvedRoot, resolvedTarget) {
+		if blocked {
 			if blockedAncestor == "" {
 				blockedAncestor = root
 			}
@@ -603,6 +628,23 @@ func coveringWritableRoot(roots []string, target string) (covering, blockedAnces
 		return root, ""
 	}
 	return "", blockedAncestor
+}
+
+// codexImplicitRoot pairs one of workspace-write's implicit writable
+// directories with the [sandbox_workspace_write] key that disables it and
+// whether it came from $TMPDIR -- computed once, alongside the directory
+// itself, by codexImplicitWritableRoots. A later match is never re-derived
+// by comparing the matched directory's STRING VALUE against slashTmpDir
+// (cross-review C2-2): TmpDir can legitimately equal slashTmpDir -- e.g.
+// the seat's own $TMPDIR really is codex's fixed temp root too -- in which
+// case a post-hoc identity guess cannot tell which
+// [sandbox_workspace_write] key actually gated that particular entry, and
+// used to name the wrong one whenever the fixed-root entry was excluded
+// and the $TMPDIR entry (holding the same directory) matched instead.
+type codexImplicitRoot struct {
+	Dir           string
+	ExcludeKey    string
+	FromTmpdirEnv bool
 }
 
 // codexImplicitWritableRoots returns the directories workspace-write keeps
@@ -622,33 +664,43 @@ func coveringWritableRoot(roots []string, target string) (covering, blockedAnces
 // would make those fixtures collide with this exact implicit root and
 // silently turn dozens of "should warn" tests into "pass" (the bug this
 // seam fixes: cross-review WC-1 follow-up). Order matters:
-// coveringWritableRoot returns the first match, and callers compare the
-// match's identity against slashTmpDir (see codexImplicitRootKey) rather
-// than against a hard-coded path to tell the two apart.
-func codexImplicitWritableRoots(cfg codexUserConfig, slashTmpDir, tmpDir string) []string {
-	var roots []string
+// codexCoveringImplicitRoot returns the first match.
+func codexImplicitWritableRoots(cfg codexUserConfig, slashTmpDir, tmpDir string) []codexImplicitRoot {
+	var roots []codexImplicitRoot
 	if slashTmpDir != "" && filepath.IsAbs(slashTmpDir) && !cfg.SandboxWorkspaceWrite.ExcludeSlashTmp {
-		roots = append(roots, slashTmpDir)
+		roots = append(roots, codexImplicitRoot{Dir: slashTmpDir, ExcludeKey: "exclude_slash_tmp"})
 	}
 	if tmpDir != "" && filepath.IsAbs(tmpDir) && !cfg.SandboxWorkspaceWrite.ExcludeTmpdirEnvVar {
-		roots = append(roots, tmpDir)
+		roots = append(roots, codexImplicitRoot{Dir: tmpDir, ExcludeKey: "exclude_tmpdir_env_var", FromTmpdirEnv: true})
 	}
 	return roots
 }
 
-// codexImplicitRootKey names the [sandbox_workspace_write] key that, if set
-// true, would stop implicitRoot from being writable by default:
-// exclude_slash_tmp when implicitRoot is slashTmpDir itself,
-// exclude_tmpdir_env_var otherwise (the only other value
-// codexImplicitWritableRoots ever returns). Deciding by identity against
-// the injected slashTmpDir -- never a hard-coded path -- keeps this correct
-// even though codexSandboxEnvFromOS is the only place that ever sets
-// slashTmpDir at all.
-func codexImplicitRootKey(implicitRoot, slashTmpDir string) string {
-	if slashTmpDir != "" && implicitRoot == slashTmpDir {
-		return "exclude_slash_tmp"
+// codexCoveringImplicitRoot is coveringWritableRoot's counterpart for the
+// implicit roots list: the same coverage/blocked semantics
+// (codexRootCoverage), but it returns the matched codexImplicitRoot itself
+// -- not just its directory -- so the caller can name the exact
+// [sandbox_workspace_write] key and pane-environment note that actually
+// apply (see codexImplicitRoot's doc comment for why this must not be
+// re-derived from the directory string alone). ok is false when no root
+// covers target without being blocked; blockedAncestor mirrors
+// coveringWritableRoot's.
+func codexCoveringImplicitRoot(roots []codexImplicitRoot, target string) (matched codexImplicitRoot, ok bool, blockedAncestor string) {
+	resolvedTarget := resolveNearestExisting(target)
+	for _, r := range roots {
+		covers, blocked := codexRootCoverage(r.Dir, target, resolvedTarget)
+		if !covers {
+			continue
+		}
+		if blocked {
+			if blockedAncestor == "" {
+				blockedAncestor = r.Dir
+			}
+			continue
+		}
+		return r, true, ""
 	}
-	return "exclude_tmpdir_env_var"
+	return codexImplicitRoot{}, false, blockedAncestor
 }
 
 // codexWritableRootSuffix builds the trailing notes appended to a covered
@@ -678,28 +730,28 @@ const codexPaneEnvironmentMayDifferClause = "the seat's pane environment may dif
 
 // codexImplicitRootDetail renders the Detail for a pass where the agmsg
 // store is covered by a directory workspace-write keeps writable by
-// default (codexImplicitWritableRoots), not by an explicit writable_roots
-// entry (cross-review WC-1). exists distinguishes "the config exists but
-// doesn't turn this default off" from "there is no config to turn it off
-// in" (the same convention codexNotNeededWhyB and codexWritableRootDetail's
-// missing-config form use). When implicitRoot came from $TMPDIR rather than
-// slashTmpDir (compared by identity, never against a hard-coded path -- see
-// codexImplicitRootKey), the pane-environment note is appended to suffix
-// unless it's already there from an AGMSG_STORAGE_PATH override -- the two
-// notes say the same thing, so this never repeats it.
-func codexImplicitRootDetail(implicitRoot, slashTmpDir, cfgDisplay, store string, exists bool, reasonClause, suffix string) string {
+// default (codexCoveringImplicitRoot's matched entry), not by an explicit
+// writable_roots entry (cross-review WC-1). exists distinguishes "the
+// config exists but doesn't turn this default off" from "there is no
+// config to turn it off in" (the same convention codexNotNeededWhyB and
+// codexWritableRootDetail's missing-config form use). matched.ExcludeKey
+// names the exact key that gated this entry (never re-derived from the
+// directory string -- see codexImplicitRoot); when matched.FromTmpdirEnv,
+// the pane-environment note is appended to suffix unless it's already
+// there from an AGMSG_STORAGE_PATH override -- the two notes say the same
+// thing, so this never repeats it.
+func codexImplicitRootDetail(matched codexImplicitRoot, cfgDisplay, store string, exists bool, reasonClause, suffix string) string {
 	var keyClause string
 	if !exists {
 		keyClause = fmt.Sprintf("%s does not exist", cfgDisplay)
 	} else {
-		keyClause = fmt.Sprintf("%s is not set in %s", codexImplicitRootKey(implicitRoot, slashTmpDir), cfgDisplay)
+		keyClause = fmt.Sprintf("%s is not set in %s", matched.ExcludeKey, cfgDisplay)
 	}
-	fromTmpdirEnv := slashTmpDir == "" || implicitRoot != slashTmpDir
-	if fromTmpdirEnv && !strings.Contains(suffix, codexPaneEnvironmentMayDifferClause) {
+	if matched.FromTmpdirEnv && !strings.Contains(suffix, codexPaneEnvironmentMayDifferClause) {
 		suffix += fmt.Sprintf(" (%s)", codexPaneEnvironmentMayDifferClause)
 	}
 	return fmt.Sprintf("the agmsg store %s is under %s, which workspace-write keeps writable by default (%s); needed because %s",
-		store, implicitRoot, keyClause, reasonClause) + suffix
+		store, matched.Dir, keyClause, reasonClause) + suffix
 }
 
 // codexBlockedAncestorClause renders the note codexWritableRootDetail
@@ -715,29 +767,33 @@ func codexBlockedAncestorClause(blockedAncestor string) string {
 
 // codexWritableRootDetail renders the Detail for the check's last two
 // outcomes: root is coveringWritableRoot's (or the implicit-root check's)
-// result (non-empty on a pass, "" on a warn). blockedAncestor is only ever
-// non-"" alongside an empty root -- it names a root that covers the store
-// only by crossing a codex-protected directory (cross-review AR-1), which
-// codexBlockedAncestorClause renders as a parenthetical right after the
-// store path. When there is no covering root, the wording also
-// distinguishes a config that exists but simply omits a covering entry
-// from one that does not exist at all (self-review LOW-4) -- the latter
-// also names the config path in the "add ... in <cfg>" clause, since there
-// is no existing [sandbox_workspace_write] table to point the operator at
-// otherwise, and never carries a blockedAncestor (an absent config has no
-// roots to speak of). The absent-config sentence leads with "<cfg> does not
-// exist" rather than parenthesizing it after the store path, so it reads as
-// a statement about the config, not about the store (self-review NEW-3).
+// result (non-empty on a pass, "" on a warn). When there is no covering
+// root, blockedAncestor -- when non-"" -- names a root that covers the
+// store only by crossing a codex-protected directory (cross-review AR-1),
+// which codexBlockedAncestorClause renders as a parenthetical right after
+// the store path; this can happen in BOTH the absent-config and the
+// config-exists warn (cross-review C2-5 -- an absent config still leaves
+// [sandbox_workspace_write]'s two exclude keys at their false default, so
+// codexImplicitWritableRoots still returns candidates for
+// codexCoveringImplicitRoot to test, and one of those can be blocked just
+// as an explicit root can). The wording also distinguishes a config that
+// exists but simply omits a covering entry from one that does not exist at
+// all (self-review LOW-4) -- the latter also names the config path in the
+// "add ... in <cfg>" clause, since there is no existing
+// [sandbox_workspace_write] table to point the operator at otherwise. The
+// absent-config sentence leads with "<cfg> does not exist" rather than
+// parenthesizing it after the store path, so it reads as a statement about
+// the config, not about the store (self-review NEW-3).
 func codexWritableRootDetail(root, blockedAncestor, cfgDisplay, store string, exists bool, reasonClause, suffix string) string {
 	if root != "" {
 		return fmt.Sprintf("writable root %s in %s covers the agmsg store %s; needed because %s",
 			root, cfgDisplay, store, reasonClause) + suffix
 	}
 	if !exists {
-		return fmt.Sprintf("%s does not exist, so no writable root covers the agmsg store %s and a codex seat under workspace-write "+
+		return fmt.Sprintf("%s does not exist, so no writable root covers the agmsg store %s%s and a codex seat under workspace-write "+
 			"cannot send RESULT to lead (\"attempt to write a readonly database\"); needed because %s; add %s to "+
 			"[sandbox_workspace_write].writable_roots in %s (docs/recipes/codex-seat-permissions.md)",
-			cfgDisplay, store, reasonClause, store, cfgDisplay) + suffix
+			cfgDisplay, store, codexBlockedAncestorClause(blockedAncestor), reasonClause, store, cfgDisplay) + suffix
 	}
 	return fmt.Sprintf("no writable root in %s covers the agmsg store %s%s, so a codex seat under workspace-write cannot send RESULT to lead "+
 		"(\"attempt to write a readonly database\"); needed because %s; add %s to [sandbox_workspace_write].writable_roots "+
@@ -877,10 +933,10 @@ func checkCodexAgmsgWritableRoot(orgCfg config.OrgConfig, agmsgHome string, reso
 	}
 
 	implicitRoots := codexImplicitWritableRoots(cfg, env.SlashTmpDir, env.TmpDir)
-	implicitRoot, implicitBlockedAncestor := coveringWritableRoot(implicitRoots, store)
-	if implicitRoot != "" {
+	matchedImplicit, matchedOK, implicitBlockedAncestor := codexCoveringImplicitRoot(implicitRoots, store)
+	if matchedOK {
 		r.Status = "pass"
-		r.Detail = codexImplicitRootDetail(implicitRoot, env.SlashTmpDir, cfgDisplay, store, exists, reasonClause, suffix)
+		r.Detail = codexImplicitRootDetail(matchedImplicit, cfgDisplay, store, exists, reasonClause, suffix)
 		return r
 	}
 	if blockedAncestor == "" {
