@@ -216,8 +216,11 @@ EVIDENCE: docs/reports/self-review-foo.md
   依存する(agmsg の DB を writable root に足さないと RESULT を送れない、等)
   ので、マシンごとに `docs/recipes/codex-seat-permissions.md` の手順で検証して
   から有効にする。writable root の設定漏れは `ralph doctor` の「Codex sandbox
-  (agmsg writable root)」Check が warn する(ユーザー階層の `config.toml`
-  だけを読む。profile・project 階層・`-c` の上書きは評価しない)。
+  (agmsg writable root)」Check が warn する。対象は、`codex_verified = true`
+  で edits / autonomous に解決される role がある場合と、codex config が
+  `sandbox_mode = "workspace-write"` で guarded に解決される role がある場合
+  (`[org].driver_pool` に codex がなければ不要)。読むのはユーザー階層の
+  `config.toml` だけで、profile・project 階層・`-c` の上書きは評価しない。
 - `autonomous` モードの spawn は `--scope` を必須とし(fail-closed)、
   省略したい場合のみ `--allow-unscoped` を明示する。`--scope` は
   「担当範囲」を短く書く(例: `"internal/org/**"`、`"docs/reports/**"` )。

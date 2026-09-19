@@ -52,10 +52,13 @@ recorded in `docs/evidence/codex-seat-permissions-2026-09-18.md`.
   meta-repo run used an absolute path; a `~` prefix was not tested. If
   `AGMSG_STORAGE_PATH` is set, agmsg keeps its database there instead, so
   list that directory. `ralph doctor`'s "Codex sandbox (agmsg writable
-  root)" check warns when codex seats would run under `workspace-write`
-  (`codex_verified = true`, or `sandbox_mode = "workspace-write"` in your
-  codex config) and no writable root covers the agmsg store. It reads only
-  the user-level `config.toml`; profiles, project-level config, and `-c`
+  root)" check warns when a codex seat of this project could run under
+  `workspace-write` and no writable root covers the agmsg store. That is
+  the case when `codex_verified = true` and a role resolves to edits or
+  autonomous, or when your codex config sets `sandbox_mode =
+  "workspace-write"` and a role resolves to guarded; with codex missing
+  from `[org].driver_pool` nothing is needed. The check reads only the
+  user-level `config.toml`; profiles, project-level config, and `-c`
   overrides are not evaluated.
 - **Keep the scratch working directory out of `/tmp`.** `/tmp` is itself a
   writable root, so a target under it does not test the sandbox boundary.
