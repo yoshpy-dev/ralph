@@ -223,3 +223,157 @@ None. No test failed in any of the six execution steps.
 - Blocked: 0
 
 Tests pass. Proceeding to `/pr` is appropriate from a testing standpoint.
+
+## Cycle 2 (2026-09-19)
+
+- Plan: same, `docs/plans/active/2026-09-18-doctor-shell-alias-check.md`
+  (issue #162)
+- Tester: `tester` subagent (Claude Code, standard flow)
+- Branch: `feat/doctor-shell-alias-check`, HEAD `812d5c4` (cycle-1 report
+  commit was `9178954`; new commits since:
+  `eadf0ac`/`e4e98ab`/`913735a`/`f1898d8`/`c5d646f`/`c8e20e5`/`3c8fa2b`/
+  `cd0e010`/`56852c6`/`4d26aed`/`3783610`/`c8cd863`/`573e474`/`812d5c4`)
+- Reason: cross-review cycle 1 found 4 issues (user chose fix-all +
+  full-pipeline re-run); cycle-2 self-review found 6 more (all fixed);
+  cycle-2 `/verify` is PASS (`573e474`). This is the cycle-2 `/test` pass
+  (pipeline cycle 2 of cap 2).
+- Scope: behavioral tests only, same as cycle 1. No code/plan/docs edits
+  made here.
+- Evidence: appended to the same
+  `docs/evidence/test-2026-09-18-doctor-shell-alias-check.log` (gitignored),
+  under a `CYCLE 2 (2026-09-19)` marker.
+
+### Overall verdict: PASS
+
+Same programme as cycle 1, re-run against the cycle-2 code
+(`c5d646f`/`3783610` rewrote the candidate-file list, split codex's
+sandbox/approval clauses, added a `codex_verified`-aware Detail, and fixed
+the newline-inside-value / `#`-in-value / unclosed-statement-without-a-
+name regressions that cross-review and cycle-2 self-review flagged).
+Every command exited 0 with 0 failures and 0 skips. Both functions flagged
+as sub-100%-but-above-80% in the cycle-1 report (`parseAliasWords`,
+`shellAliasUnreadableReason`) are now at 100% — `eadf0ac` added the two
+tests that close them. All 11 new fixtures (a–k) plus the exit-code check
+matched their expected Detail text and severity exactly, and the three
+cycle-1 regression fixtures re-run under (k) still match cycle 1's report
+verbatim — no regression from the cycle-2 rewrite.
+
+### Test execution
+
+| # | Suite / Command | Tests | Passed | Failed | Skipped |
+| --- | --- | --- | --- | --- | --- |
+| 1 | `./scripts/run-test.sh` (changed-language scope) | 27 shell suites + 8 Go packages | all | 0 | 0 |
+| 2 | `go test ./internal/cli/ -run 'ShellAlias\|ParseAliasWords\|TestRunDoctorOpts' -count=1 -v` | 64 (Go `--- PASS` lines) | 64 | 0 | 0 |
+| 3 | `go test ./internal/... -count=1` (regression) | 8 packages | 8 | 0 | 0 |
+| 4a | `go test ./internal/cli/ -race -count=1` | package `internal/cli` | ok | 0 | 0 |
+| 4b | `go test ./internal/cli/ -coverprofile=... -count=1` | package `internal/cli` | ok, 82.8% stmt cov | 0 | 0 |
+| 5a | `-run 'TestRunDoctorOpts_ShellAliasesCheck_HermeticByDefault' -count=1 -v` (isolated) | 1 | 1 | 0 | 0 |
+| 5b | `-run 'TestRunDoctorOpts' -count=1 -v` under fake `HOME` with a real alias-bearing `.zshrc`, vs. real `HOME` baseline | 4 vs. 4 | 4 / 4 | 0 | 0 |
+| 6 | Built-binary edge-case probes (a–k, 11 fixtures + exit-code check) | 12 checks | 12 | 0 | 0 |
+
+The `-run` pattern grew to include `ParseAliasWords` per the handoff (the
+new `TestParseAliasWords_*` names from `eadf0ac` don't match the plain
+`ShellAlias` substring); the `--- PASS` count rose from cycle 1's 42 to 64,
+consistent with `eadf0ac`'s 2 new tests plus the larger surface `c5d646f`/
+`3783610` added (new candidate list, split codex clauses, 4 new pure
+helper functions each getting their own test coverage).
+
+### Coverage, `internal/cli/doctor_shell_alias.go`
+
+| Function | Cycle 1 | Cycle 2 |
+| --- | --- | --- |
+| `shellAliasEnvFromOS` | 100.0% | 100.0% |
+| `shellAliasRcCandidates` | 94.4% | 94.4% |
+| `shellAliasStatements` | 98.5% | 98.5% |
+| `parseAliasStatements` | 93.3% | 93.3% |
+| `parseAliasWords` | 84.2% | **100.0%** |
+| `scanShellAliasFile` | 100.0% | 100.0% |
+| `shellAliasFlagClass` (renamed from `shellAliasFlagIsPermission`) | 100.0% | 100.0% |
+| `shellAliasValueTokens` (new) | — | 100.0% |
+| `shellAliasConflictingFlags` | 100.0% | 100.0% |
+| `shellAliasUnreadableReason` | 83.3% | **100.0%** |
+| `shellAliasCodexSentence` (new) | — | 100.0% |
+| `shellAliasClaudeSentence` (new) | — | 100.0% |
+| `shellAliasScannedClause` (new) | — | 100.0% |
+| `shellAliasDetail` (new) | — | 100.0% |
+| `checkShellAliases` | 98.0% | 97.3% |
+
+No function is under 80% (lowest is `shellAliasRcCandidates`/
+`parseAliasStatements` at 93.3–94.4%, both unchanged from cycle 1 and
+already above the floor). Package-level `internal/cli` coverage: 82.8%
+(up from 82.5% in cycle 1). Both cycle-1 gaps
+(`parseAliasWords`'s all-flags-no-value branch,
+`shellAliasUnreadableReason`'s generic-error fallback) are now closed by
+`eadf0ac`'s `TestParseAliasWords_AllOptionFlags_NoName_ReturnsNil` (or
+equivalent) and a plain-error-fallback test — confirmed by the 84.2%→100%
+and 83.3%→100% jumps, not by name (the raw log has the full `-v` test
+list if exact names are needed).
+
+### Hermeticity
+
+Same cross-check as cycle 1, re-run against the cycle-2 code: isolated
+`TestRunDoctorOpts_ShellAliasesCheck_HermeticByDefault` — PASS (0.57s).
+Fake-`HOME` cross-check (a real `alias codex="codex -m x"` in `.zshrc`,
+`GOCACHE`/`GOMODCACHE` pinned via `go env`) — the 4-test
+`TestRunDoctorOpts` pass/fail/skip set was identical between the real and
+fake `HOME` runs (`diff` empty). The `doctorShellAliasEnv` seam still
+holds after the cycle-2 rewrite.
+
+### Built-binary edge-case probes (cycle 2)
+
+Built a fresh `go build -o <scratch>/ralph-bin-c2 ./cmd/ralph` (exit 0).
+herdr still installed (`herdr 0.7.5`), so codex findings are `warn` as
+expected. Same discipline as cycle 1: fresh scratch-dir `HOME` per
+fixture, never the real `~`, `grep 'Shell aliases'` on the doctor output.
+
+| Fixture | Expected | Actual | Match |
+| --- | --- | --- | --- |
+| a. C2-1 regression: `.zshrc` `alias codex='codex --model` + newline + `  gpt'` | warn `--model`, `:1` | `warn — alias codex in ~/.zshrc:1 adds --model — ...` | yes |
+| b. `.zshrc`: `alias msg='don` + newline + `alias codex=codex` (unclosed quote) | info, `not fully parsed: ~/.zshrc:1`, NOT `no codex/claude alias found` | `info — not fully parsed: ~/.zshrc:1 — the alias value continues past what was read. ...` | yes (forbidden phrase absent) |
+| c. `.bashrc`: `alias codex='codex #keep --model x'` | warn `--model` | `warn — alias codex in ~/.bashrc:1 adds --model — ...` | yes |
+| d. `ZDOTDIR=<home>/zd`, `zd/.zprofile`: `alias codex='codex "-a" never'` | warn `--ask-for-approval (-a)`; contains `to autonomous seats only`, `codex_verified = true`, `edits and guarded seats silently run with the alias's approval policy`; NOT `to edits and autonomous seats` | `warn — alias codex in ~/zd/.zprofile:1 adds --ask-for-approval (-a) — ... ralph passes --ask-for-approval to autonomous seats only (a mode a codex seat gets only once [org.permissions].codex_verified = true), so those spawns fail while edits and guarded seats silently run with the alias's approval policy; ...` | yes (all 3 required phrases present verbatim, forbidden phrase absent) |
+| e. `.zshrc`: `alias codex='codex -s read-only'` | warn; contains `to edits and autonomous seats`, `alias's sandbox`, `codex_verified = true`; NOT `approval policy` | `warn — alias codex in ~/.zshrc:1 adds --sandbox (-s) — ... ralph passes --sandbox to edits and autonomous seats (modes a codex seat gets only once [org.permissions].codex_verified = true), so those spawns fail while a guarded seat silently runs with the alias's sandbox; ...` | yes (all 3 required phrases present verbatim, forbidden phrase absent) |
+| f. `.zlogin` only: `alias claude='claude --permission-mode plan'` | warn; `a guarded seat runs with the alias's permission mode` | `warn — alias claude in ~/.zlogin:1 adds --permission-mode — ... so a guarded seat runs with the alias's permission mode; ...` | yes |
+| g. `.bash_login` only: `alias claude='claude --model x'` | info; `the seat still starts` | `info — alias claude in ~/.bash_login:1 adds --model — ... so its value applies and the seat still starts; ...` | yes |
+| h. `~/.config/zsh/.zshrc` exists, `~/.config/zsh` chmod 000 | info; `could not read: ~/.config/zsh (permission denied)` exactly once; NOT `no shell rc file found to scan` | `info — could not read: ~/.config/zsh (permission denied) — aliases there were not checked. scanned 0 shell rc file(s) ...` | yes (single occurrence, forbidden phrase absent) |
+| i. `~/.config` is a regular file | pass; `no shell rc file found to scan`; no `could not read` | `pass — no shell rc file found to scan` | yes (forbidden phrase absent) |
+| j. `.zshrc`: `command -v codex >/dev/null && alias codex="codex -m x"` | warn `:1` | `warn — alias codex in ~/.zshrc:1 adds --model (-m) — ...` | yes |
+| k. Cycle-1 regression re-check: fixture a (harmless) → pass; fixture g (no rc) → pass; fixture h (commented) → pass | identical to cycle-1 report | `pass — alias codex in ~/.zshrc:1 has no conflicting flags. ...`; `pass — no shell rc file found to scan`; `pass — no codex/claude alias found. ...` | yes, byte-identical to cycle 1 |
+
+`~/.config/zsh` was restored to mode `755` after fixture h (confirmed via
+`stat`). Exit-code check: fixture k-a (pass) and fixture j (warn) both
+exit `0` — the check still never fails the process.
+
+No alias VALUE beyond the fixtures above was printed or recorded; no real
+rc file was read.
+
+### Regression checks (cycle 2)
+
+| Previously broken/flagged behavior | Status | Evidence |
+| --- | --- | --- |
+| Cycle-1 flagged coverage gaps (`parseAliasWords`, `shellAliasUnreadableReason`) | closed — both now 100% | coverage table above |
+| Cycle-1 probe fixtures a/g/h (pass cases) | unchanged output, byte-identical | probe k row above |
+| `TestRunDoctorOpts_HerdrAgmsgAbsent_ExitCodeUnaffected` and the hermeticity seam | still PASS / still hermetic | step 2 and step 5 logs |
+| Full package regression (`internal/...`) | all 8 packages `ok`, uncached | step 3 log |
+| C2-1 (cross-review cycle-1 finding): `--model` split across a newline inside a quoted alias value was previously mis-parsed | fixed and now covered — fixture a | probe table above |
+
+### Test gaps (cycle 2)
+
+Both test gaps named in the cycle-1 report are now closed (see coverage
+table). No new gap was introduced by the cycle-2 rewrite — the 4 new pure
+helper functions (`shellAliasValueTokens`, `shellAliasCodexSentence`,
+`shellAliasClaudeSentence`, `shellAliasScannedClause`, `shellAliasDetail`)
+are all at 100%. Remaining non-goals are unchanged from cycle 1 (no
+recursive `source` tracking, no dynamic/interactive alias evaluation, no
+live codex-seat-spawn end-to-end check).
+
+### Verdict (cycle 2)
+
+- Pass: 6/6 execution steps (27 shell suites, 64 targeted Go tests, 8/8
+  package regression, race-clean, 12/12 edge-case probes including 3
+  cycle-1 regression re-checks)
+- Fail: 0
+- Blocked: 0
+
+Tests pass. No findings. Proceeding to `/pr` is appropriate from a testing
+standpoint.
