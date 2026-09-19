@@ -45,6 +45,7 @@
 ### P3. workspace-write 下の codex 座席は agmsg に書けない
 
 `--sandbox workspace-write` の writable root は cwd と `/tmp` 系のみ。agmsg の SQLite DB(`~/.agents/skills/agmsg/db/messages.db`)は外にあるため、座席の `send.sh` が `Runtime error near line 1: attempt to write a readonly database (8)` で失敗し、RESULT が lead に届かない(Run A、t-auto-2。座席は代わりに BLOCKED を pane に印字した)。codex config に `[sandbox_workspace_write] writable_roots = ["<home>/.agents/skills/agmsg/db"]`(実際は絶対パス。`~` 表記は未検証)を足すと送信できる(Run A2 以降)。**`codex_verified = true` で autonomous / edits を有効にしても、この設定なしでは typed RESULT が返らない。**
+- 追記(2026-09-19、#164): この設定漏れは `ralph doctor` の「Codex sandbox (agmsg writable root)」Check(`internal/cli/doctor_codex_writable_root.go`)が静的な config.toml 読み取りで warn するようになった。座席を起動しての再検証はしておらず、上記 Run A / A2 が根拠のまま(plan `docs/plans/active/2026-09-19-codex-agmsg-writable-root.md` Non-goals)。
 
 ### P4. scratchpad が `/tmp` 配下だと「cwd 外」テストにならない
 

@@ -1,0 +1,1909 @@
+package cli
+
+import (
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+
+	"github.com/yoshpy-dev/ralph/internal/config"
+)
+
+// codexSandboxTestEnv returns a resolveEnv closure fixed to the given
+// config path and AGMSG_STORAGE_PATH override (Home, TmpDir, and
+// SlashTmpDir all left ""), for tests that don't want to mutate process
+// environment variables at all. Leaving TmpDir/SlashTmpDir "" is what keeps
+// every such test hermetic against the real machine's TMPDIR and against
+// wherever codex's fixed temp root happens to be (cross-review WC-1 and its
+// follow-up): codexImplicitWritableRoots only treats a non-empty value as a
+// candidate for either.
+func codexSandboxTestEnv(configPath, storageOverride string) func() (codexSandboxEnv, error) {
+	return func() (codexSandboxEnv, error) {
+		return codexSandboxEnv{ConfigPath: configPath, AgmsgStoragePath: storageOverride}, nil
+	}
+}
+
+// codexSandboxTestEnvWithImplicitRoots is codexSandboxTestEnv plus explicit
+// SlashTmpDir/TmpDir, for the tests that specifically exercise one or both
+// implicit writable roots. A test using this MUST inject a fixture
+// directory (e.g. under its own t.TempDir()) for slashTmpDir -- never the
+// real "/tmp" -- so the test stays hermetic regardless of where the test
+// process's own TMPDIR happens to live (the bug cross-review WC-1's
+// follow-up fixed).
+func codexSandboxTestEnvWithImplicitRoots(configPath, storageOverride, slashTmpDir, tmpDir string) func() (codexSandboxEnv, error) {
+	return func() (codexSandboxEnv, error) {
+		return codexSandboxEnv{
+			ConfigPath:       configPath,
+			AgmsgStoragePath: storageOverride,
+			SlashTmpDir:      slashTmpDir,
+			TmpDir:           tmpDir,
+		}, nil
+	}
+}
+
+// writeCodexConfig writes content to a config.toml under dir, creating
+// parent directories as needed, and returns its path.
+func writeCodexConfig(t *testing.T, dir, content string) string {
+	t.Helper()
+	path := filepath.Join(dir, "config.toml")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// codexOrgConfig builds a minimal config.OrgConfig fixture for
+// checkCodexAgmsgWritableRoot's tests. DriverPool always includes "codex"
+// (so a codex seat can be spawned at all and the check proceeds past
+// outcome 2, the driver_pool check) -- a test that specifically wants to
+// exercise outcome 2 itself builds a config.OrgConfig by hand instead.
+// ModelPool always includes one codex and one claude entry (so the check
+// proceeds past outcome 3, the no-codex-model check, cross-review WC-2) --
+// a test that specifically wants to exercise outcome 3, or a role's
+// model-eligibility restriction (orgCfg.Roles -- a different map from
+// Permissions.Roles below), builds a config.OrgConfig by hand instead.
+// defaultMode is [org.permissions].default ("" leaves it unset, which
+// org.ResolvePermissionMode then falls back to "autonomous" for, matching
+// config.Default()); roles is [org.permissions].roles, may be nil.
+func codexOrgConfig(codexVerified bool, defaultMode string, roles map[string]string) config.OrgConfig {
+	return config.OrgConfig{
+		DriverPool: []string{"claude", "codex"},
+		ModelPool: []config.OrgModelPoolEntry{
+			{Driver: "codex", Model: "gpt-6-astra"},
+			{Driver: "claude", Model: "opus"},
+		},
+		Permissions: config.OrgPermissionsConfig{
+			CodexVerified: codexVerified,
+			Default:       defaultMode,
+			Roles:         roles,
+		},
+	}
+}
+
+func TestCheckCodexAgmsgWritableRoot_NotNeeded_CodexVerifiedFalse_NoGuardedRole(t *testing.T) {
+	agmsgHome := t.TempDir()
+	writeAgmsgHome(t, agmsgHome, "")
+	cfgDir := t.TempDir()
+	noSuchCfg := filepath.Join(cfgDir, "config.toml") // absent -- irrelevant here, guardedRole fails first.
+
+	r := checkCodexAgmsgWritableRoot(codexOrgConfig(false, "", nil), agmsgHome, codexSandboxTestEnv(noSuchCfg, ""))
+	if r.Status != "pass" {
+		t.Fatalf("expected pass, got %s (%s)", r.Status, r.Detail)
+	}
+	want := "not needed: [org.permissions].codex_verified is false and no role that can use a codex model resolves to guarded"
+	if r.Detail != want {
+		t.Errorf("Detail = %q, want %q", r.Detail, want)
+	}
+}
+
+// TestCheckCodexAgmsgWritableRoot_NotNeeded_GuardedDefaultConfigAbsent covers
+// "codex_verified = true + default guarded + no roles -> reason (a) absent"
+// plus why-b's "config does not exist" branch in the same fixture.
+func TestCheckCodexAgmsgWritableRoot_NotNeeded_GuardedDefaultConfigAbsent(t *testing.T) {
+	agmsgHome := t.TempDir()
+	writeAgmsgHome(t, agmsgHome, "")
+	cfgDir := t.TempDir()
+	noSuchCfg := filepath.Join(cfgDir, "config.toml")
+
+	r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "guarded", nil), agmsgHome, codexSandboxTestEnv(noSuchCfg, ""))
+	if r.Status != "pass" {
+		t.Fatalf("expected pass, got %s (%s)", r.Status, r.Detail)
+	}
+	want := fmt.Sprintf("not needed: no role that can use a codex model resolves to edits or autonomous and %s does not exist", noSuchCfg)
+	if r.Detail != want {
+		t.Errorf("Detail = %q, want %q", r.Detail, want)
+	}
+}
+
+// TestCheckCodexAgmsgWritableRoot_NotNeeded_GuardedDefaultConfigExists covers
+// why-b's third branch: a guarded-capable role exists and the config
+// exists, but it doesn't set sandbox_mode = "workspace-write".
+func TestCheckCodexAgmsgWritableRoot_NotNeeded_GuardedDefaultConfigExists(t *testing.T) {
+	agmsgHome := t.TempDir()
+	writeAgmsgHome(t, agmsgHome, "")
+	cfgDir := t.TempDir()
+	cfgPath := writeCodexConfig(t, cfgDir, "profile = \"x\"\n")
+
+	r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "guarded", nil), agmsgHome, codexSandboxTestEnv(cfgPath, ""))
+	if r.Status != "pass" {
+		t.Fatalf("expected pass, got %s (%s)", r.Status, r.Detail)
+	}
+	want := fmt.Sprintf("not needed: no role that can use a codex model resolves to edits or autonomous and %s does not set sandbox_mode = \"workspace-write\"", cfgPath)
+	if r.Detail != want {
+		t.Errorf("Detail = %q, want %q", r.Detail, want)
+	}
+}
+
+// TestCheckCodexAgmsgWritableRoot_NotNeeded_SandboxModeSetButNoGuardedRole is
+// the explicit case: sandbox_mode = "workspace-write" is set, the default
+// mode is autonomous (no guarded-capable role anywhere), so reason (b) is
+// absent despite the config setting the key -- proving guardedRole gates
+// it, not sandbox_mode alone.
+func TestCheckCodexAgmsgWritableRoot_NotNeeded_SandboxModeSetButNoGuardedRole(t *testing.T) {
+	agmsgHome := t.TempDir()
+	writeAgmsgHome(t, agmsgHome, "")
+	cfgDir := t.TempDir()
+	cfgPath := writeCodexConfig(t, cfgDir, "sandbox_mode = \"workspace-write\"\n")
+
+	r := checkCodexAgmsgWritableRoot(codexOrgConfig(false, "autonomous", nil), agmsgHome, codexSandboxTestEnv(cfgPath, ""))
+	if r.Status != "pass" {
+		t.Fatalf("expected pass, got %s (%s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "no role that can use a codex model resolves to guarded") {
+		t.Errorf("expected detail to name the missing guarded role, got: %s", r.Detail)
+	}
+}
+
+func TestCheckCodexAgmsgWritableRoot_CodexVerifiedNoRoots_Warn(t *testing.T) {
+	agmsgHome := t.TempDir()
+	writeAgmsgHome(t, agmsgHome, "")
+	cfgDir := t.TempDir()
+	cfgPath := writeCodexConfig(t, cfgDir, "")
+
+	r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome, codexSandboxTestEnv(cfgPath, ""))
+	if r.Status != "warn" {
+		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
+	}
+	wantStore := filepath.Join(agmsgHome, "db")
+	for _, want := range []string{wantStore, cfgPath, "docs/recipes/codex-seat-permissions.md", `"attempt to write a readonly database"`} {
+		if !strings.Contains(r.Detail, want) {
+			t.Errorf("expected detail to contain %q, got: %s", want, r.Detail)
+		}
+	}
+}
+
+// TestCheckCodexAgmsgWritableRoot_BothReasons_WarnDetailNumbersEachReason is
+// self-review NEW-1's regression test: each reason already contains its own
+// " and " (the role condition), so when both fire they must be numbered
+// (1)/(2) rather than joined with a third, indistinguishable " and ".
+func TestCheckCodexAgmsgWritableRoot_BothReasons_WarnDetailNumbersEachReason(t *testing.T) {
+	agmsgHome := t.TempDir()
+	writeAgmsgHome(t, agmsgHome, "")
+	cfgDir := t.TempDir()
+	cfgPath := writeCodexConfig(t, cfgDir, "sandbox_mode = \"workspace-write\"\n")
+	store := filepath.Join(agmsgHome, "db")
+
+	orgCfg := codexOrgConfig(true, "guarded", map[string]string{"implementer": "autonomous"})
+	r := checkCodexAgmsgWritableRoot(orgCfg, agmsgHome, codexSandboxTestEnv(cfgPath, ""))
+	if r.Status != "warn" {
+		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
+	}
+	want := "needed because (1) [org.permissions].codex_verified = true and a role that can use a codex model resolves to edits or autonomous " +
+		"(ralph passes --sandbox workspace-write to those codex seats) and (2) sandbox_mode = \"workspace-write\" in " + cfgPath +
+		" and a role that can use a codex model resolves to guarded (guarded codex seats inherit it); add " + store
+	if !strings.Contains(r.Detail, want) {
+		t.Errorf("expected detail to contain %q, got: %s", want, r.Detail)
+	}
+}
+
+func TestCheckCodexAgmsgWritableRoot_RootEqualsStore_Pass(t *testing.T) {
+	agmsgHome := t.TempDir()
+	writeAgmsgHome(t, agmsgHome, "")
+	store := filepath.Join(agmsgHome, "db")
+	cfgDir := t.TempDir()
+	cfgPath := writeCodexConfig(t, cfgDir, "[sandbox_workspace_write]\nwritable_roots = [\""+store+"\"]\n")
+
+	r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome, codexSandboxTestEnv(cfgPath, ""))
+	if r.Status != "pass" {
+		t.Fatalf("expected pass, got %s (%s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, store) {
+		t.Errorf("expected detail to contain the store %q, got: %s", store, r.Detail)
+	}
+}
+
+func TestCheckCodexAgmsgWritableRoot_RootIsAncestor_Pass(t *testing.T) {
+	agmsgHome := t.TempDir()
+	writeAgmsgHome(t, agmsgHome, "")
+	cfgDir := t.TempDir()
+	cfgPath := writeCodexConfig(t, cfgDir, "[sandbox_workspace_write]\nwritable_roots = [\""+agmsgHome+"\"]\n")
+
+	r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome, codexSandboxTestEnv(cfgPath, ""))
+	if r.Status != "pass" {
+		t.Fatalf("expected pass (agmsg home is an ancestor of its db dir), got %s (%s)", r.Status, r.Detail)
+	}
+}
+
+// TestCheckCodexAgmsgWritableRoot_PrefixSiblingNotCovered pins the
+// path-element-boundary rule: a root that merely shares a string prefix
+// with the store (…/dbx vs …/db, or /a/b vs /a/bc) must not be treated as
+// covering it.
+func TestCheckCodexAgmsgWritableRoot_PrefixSiblingNotCovered(t *testing.T) {
+	t.Run("dbx sibling of db", func(t *testing.T) {
+		agmsgHome := t.TempDir()
+		writeAgmsgHome(t, agmsgHome, "")
+		sibling := agmsgHome + "x" // …/db becomes …/dbx as a *root*, not a parent.
+		store := filepath.Join(agmsgHome, "db")
+		cfgDir := t.TempDir()
+		cfgPath := writeCodexConfig(t, cfgDir, "[sandbox_workspace_write]\nwritable_roots = [\""+filepath.Join(sibling, "db")+"\"]\n")
+
+		r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome, codexSandboxTestEnv(cfgPath, ""))
+		if r.Status != "warn" {
+			t.Fatalf("expected warn, got %s (%s) store=%s", r.Status, r.Detail, store)
+		}
+	})
+
+	t.Run("/a/b does not cover /a/bc", func(t *testing.T) {
+		if !pathCovers("/a/b", "/a/b") {
+			t.Errorf("expected /a/b to cover itself")
+		}
+		if pathCovers("/a/b", "/a/bc") {
+			t.Errorf("/a/b must not cover /a/bc")
+		}
+	})
+}
+
+func TestCheckCodexAgmsgWritableRoot_SymlinkedRoot_Pass(t *testing.T) {
+	agmsgHome := t.TempDir()
+	writeAgmsgHome(t, agmsgHome, "")
+	store := filepath.Join(agmsgHome, "db")
+	if err := os.MkdirAll(store, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	linkParent := t.TempDir()
+	link := filepath.Join(linkParent, "db-link")
+	if err := os.Symlink(store, link); err != nil {
+		t.Fatal(err)
+	}
+	cfgDir := t.TempDir()
+	cfgPath := writeCodexConfig(t, cfgDir, "[sandbox_workspace_write]\nwritable_roots = [\""+link+"\"]\n")
+
+	r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome, codexSandboxTestEnv(cfgPath, ""))
+	if r.Status != "pass" {
+		t.Fatalf("expected pass (symlinked root resolves to the store), got %s (%s)", r.Status, r.Detail)
+	}
+}
+
+// TestCheckCodexAgmsgWritableRoot_StoreSymlinkedOutsideConfiguredRoot_Warn is
+// self-review MEDIUM-3's regression test: the agmsg store directory is
+// itself a symlink pointing OUTSIDE every configured root. codex's sandbox
+// evaluates the real (resolved) path, so this must warn, not pass on a
+// textual match with the symlink's own path.
+func TestCheckCodexAgmsgWritableRoot_StoreSymlinkedOutsideConfiguredRoot_Warn(t *testing.T) {
+	agmsgHome := t.TempDir()
+	writeAgmsgHome(t, agmsgHome, "")
+	elsewhere := t.TempDir()
+	store := filepath.Join(agmsgHome, "db")
+	if err := os.Symlink(elsewhere, store); err != nil {
+		t.Fatal(err)
+	}
+	cfgDir := t.TempDir()
+	cfgPath := writeCodexConfig(t, cfgDir, "[sandbox_workspace_write]\nwritable_roots = [\""+agmsgHome+"\"]\n")
+
+	r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome, codexSandboxTestEnv(cfgPath, ""))
+	if r.Status != "warn" {
+		t.Fatalf("expected warn (the store symlinks outside every configured root), got %s (%s)", r.Status, r.Detail)
+	}
+}
+
+// TestCheckCodexAgmsgWritableRoot_StoreSymlinkedRealTargetAlsoListed_Pass is
+// the symlinked-store test's counterpart: when the real target IS also
+// listed as a writable root, the check passes and names that root (not the
+// symlink path the store happens to live under).
+func TestCheckCodexAgmsgWritableRoot_StoreSymlinkedRealTargetAlsoListed_Pass(t *testing.T) {
+	agmsgHome := t.TempDir()
+	writeAgmsgHome(t, agmsgHome, "")
+	elsewhere := t.TempDir()
+	store := filepath.Join(agmsgHome, "db")
+	if err := os.Symlink(elsewhere, store); err != nil {
+		t.Fatal(err)
+	}
+	cfgDir := t.TempDir()
+	cfgPath := writeCodexConfig(t, cfgDir, "[sandbox_workspace_write]\nwritable_roots = [\""+agmsgHome+"\", \""+elsewhere+"\"]\n")
+
+	r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome, codexSandboxTestEnv(cfgPath, ""))
+	if r.Status != "pass" {
+		t.Fatalf("expected pass, got %s (%s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, elsewhere) {
+		t.Errorf("expected detail to name the real target root %q, got: %s", elsewhere, r.Detail)
+	}
+}
+
+// writeAgmsgHomeUnderDotAgents creates <base>/.agents/skills/agmsg (via
+// writeAgmsgHome) and returns (home, agmsgHome), mimicking the default
+// agmsg home's real layout (~/.agents/skills/agmsg) so AR-1 tests can
+// exercise a root that covers the store only by crossing the .agents
+// directory codex protects.
+func writeAgmsgHomeUnderDotAgents(t *testing.T, base string) (home, agmsgHome string) {
+	t.Helper()
+	agmsgHome = filepath.Join(base, ".agents", "skills", "agmsg")
+	writeAgmsgHome(t, agmsgHome, "")
+	return base, agmsgHome
+}
+
+// TestCheckCodexAgmsgWritableRoot_RootCrossesDotAgents_WarnNamesBlockedAncestor
+// is cross-review AR-1's central regression test: the reviewer's exact
+// scenario, the home directory listed as a writable root, with the default
+// agmsg home living under its .agents subdirectory. codex keeps .agents
+// read-only inside a writable root, so this must warn, naming the blocked
+// root, rather than pass.
+func TestCheckCodexAgmsgWritableRoot_RootCrossesDotAgents_WarnNamesBlockedAncestor(t *testing.T) {
+	base := t.TempDir()
+	home, agmsgHome := writeAgmsgHomeUnderDotAgents(t, base)
+	cfgDir := t.TempDir()
+	cfgPath := writeCodexConfig(t, cfgDir, "[sandbox_workspace_write]\nwritable_roots = [\""+home+"\"]\n")
+
+	r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome, codexSandboxTestEnv(cfgPath, ""))
+	if r.Status != "warn" {
+		t.Fatalf("expected warn (the root only covers the store by crossing .agents), got %s (%s)", r.Status, r.Detail)
+	}
+	want := fmt.Sprintf("(%s contains it, but codex keeps .git, .agents, and .codex directories under a writable root read-only)", home)
+	if !strings.Contains(r.Detail, want) {
+		t.Errorf("expected detail to contain %q, got: %s", want, r.Detail)
+	}
+}
+
+// TestCheckCodexAgmsgWritableRoot_RootIsDotAgentsItself_Pass proves the
+// protected-element rule only fires on elements BETWEEN root and target: a
+// root whose own top-level directory happens to be named .agents is not
+// itself blocked, since there is no ".agents" element left in the relative
+// path from that root onward.
+func TestCheckCodexAgmsgWritableRoot_RootIsDotAgentsItself_Pass(t *testing.T) {
+	base := t.TempDir()
+	home, agmsgHome := writeAgmsgHomeUnderDotAgents(t, base)
+	dotAgents := filepath.Join(home, ".agents")
+	cfgDir := t.TempDir()
+	cfgPath := writeCodexConfig(t, cfgDir, "[sandbox_workspace_write]\nwritable_roots = [\""+dotAgents+"\"]\n")
+
+	r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome, codexSandboxTestEnv(cfgPath, ""))
+	if r.Status != "pass" {
+		t.Fatalf("expected pass, got %s (%s)", r.Status, r.Detail)
+	}
+}
+
+// TestCheckCodexAgmsgWritableRoot_RootIsAgmsgHomeItself_Pass is the same
+// idea one level deeper: the root IS the agmsg home (already nested under
+// .agents/skills), so there is nothing left to cross.
+func TestCheckCodexAgmsgWritableRoot_RootIsAgmsgHomeItself_Pass(t *testing.T) {
+	base := t.TempDir()
+	_, agmsgHome := writeAgmsgHomeUnderDotAgents(t, base)
+	cfgDir := t.TempDir()
+	cfgPath := writeCodexConfig(t, cfgDir, "[sandbox_workspace_write]\nwritable_roots = [\""+agmsgHome+"\"]\n")
+
+	r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome, codexSandboxTestEnv(cfgPath, ""))
+	if r.Status != "pass" {
+		t.Fatalf("expected pass, got %s (%s)", r.Status, r.Detail)
+	}
+}
+
+// TestCheckCodexAgmsgWritableRoot_StoreUnderDotGitOrDotCodex_Warn covers
+// AR-1's other two protected names -- .git and .codex -- with a root that
+// is a plain ancestor of a store nested under either.
+func TestCheckCodexAgmsgWritableRoot_StoreUnderDotGitOrDotCodex_Warn(t *testing.T) {
+	cases := []struct {
+		name string
+		elem string
+	}{
+		{"store under .git", ".git"},
+		{"store under .codex", ".codex"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			x := t.TempDir()
+			agmsgHome := filepath.Join(x, tc.elem, "y")
+			writeAgmsgHome(t, agmsgHome, "")
+			cfgDir := t.TempDir()
+			cfgPath := writeCodexConfig(t, cfgDir, "[sandbox_workspace_write]\nwritable_roots = [\""+x+"\"]\n")
+
+			r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome, codexSandboxTestEnv(cfgPath, ""))
+			if r.Status != "warn" {
+				t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
+			}
+		})
+	}
+}
+
+// TestCheckCodexAgmsgWritableRoot_BlockedAncestorAndExplicitStoreBothListed_PassNamingExplicit
+// proves a genuinely covering root still wins even when a blocked ancestor
+// was tried first: the Detail must name the explicit store root as the
+// COVERING root, not merely mention its path somewhere (self-review C2-6:
+// the pass Detail always ends with "covers the agmsg store <store>"
+// regardless of which root was actually credited, so a bare
+// strings.Contains(r.Detail, store) cannot tell the two apart -- it would
+// stay green even if the blocked home directory were wrongly named as the
+// covering root). Asserting the "writable root <store> in " prefix pins
+// which root was actually credited; the negative check pins that the
+// blocked home directory never is.
+func TestCheckCodexAgmsgWritableRoot_BlockedAncestorAndExplicitStoreBothListed_PassNamingExplicit(t *testing.T) {
+	base := t.TempDir()
+	home, agmsgHome := writeAgmsgHomeUnderDotAgents(t, base)
+	store := filepath.Join(agmsgHome, "db")
+	cfgDir := t.TempDir()
+	cfgPath := writeCodexConfig(t, cfgDir, "[sandbox_workspace_write]\nwritable_roots = [\""+home+"\", \""+store+"\"]\n")
+
+	r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome, codexSandboxTestEnv(cfgPath, ""))
+	if r.Status != "pass" {
+		t.Fatalf("expected pass, got %s (%s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "writable root "+store+" in ") {
+		t.Errorf("expected detail to name the explicit store as the covering root, got: %s", r.Detail)
+	}
+	if strings.Contains(r.Detail, "writable root "+home+" in ") {
+		t.Errorf("the blocked ancestor must never be named as the covering root, got: %s", r.Detail)
+	}
+}
+
+// writeAgmsgHomeUnderSymlinkedDotAgents creates <base>/real-agents/skills/agmsg
+// (the real, non-symlink location) and a <base>/.agents symlink pointing to
+// <base>/real-agents -- a SIBLING of .agents, both direct children of
+// base -- so a store spelled through <base>/.agents/skills/agmsg/db
+// resolves to <base>/real-agents/skills/agmsg/db: a path that no longer
+// contains a ".agents" element once resolved, while base itself is still a
+// genuine ancestor of the resolved store either way. This is cross-review
+// C2-1's fixture: the AR-1 fix only checked the resolved spelling, so this
+// exact shape used to turn AR-1's own warn back into a pass.
+func writeAgmsgHomeUnderSymlinkedDotAgents(t *testing.T, base string) (home, agmsgHome, resolvedAgmsgHome string) {
+	t.Helper()
+	realAgents := filepath.Join(base, "real-agents")
+	resolvedAgmsgHome = filepath.Join(realAgents, "skills", "agmsg")
+	writeAgmsgHome(t, resolvedAgmsgHome, "")
+	if err := os.Symlink(realAgents, filepath.Join(base, ".agents")); err != nil {
+		t.Fatal(err)
+	}
+	agmsgHome = filepath.Join(base, ".agents", "skills", "agmsg")
+	return base, agmsgHome, resolvedAgmsgHome
+}
+
+// TestCheckCodexAgmsgWritableRoot_RootCrossesDotAgentsViaSymlinkTarget_WarnNamesBlockedAncestor
+// is cross-review C2-1's central regression test: .agents is a symlink to a
+// sibling directory, so the RESOLVED spelling of the store no longer
+// contains a ".agents" element -- but codex is given the CONFIGURED
+// spelling (through the symlink), and which spelling it actually evaluates
+// its protection against is not documented, so this must still warn.
+func TestCheckCodexAgmsgWritableRoot_RootCrossesDotAgentsViaSymlinkTarget_WarnNamesBlockedAncestor(t *testing.T) {
+	base := t.TempDir()
+	home, agmsgHome, _ := writeAgmsgHomeUnderSymlinkedDotAgents(t, base)
+	cfgDir := t.TempDir()
+	cfgPath := writeCodexConfig(t, cfgDir, "[sandbox_workspace_write]\nwritable_roots = [\""+home+"\"]\n")
+
+	r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome, codexSandboxTestEnv(cfgPath, ""))
+	if r.Status != "warn" {
+		t.Fatalf("expected warn (the configured path still crosses .agents even though the resolved path does not), got %s (%s)", r.Status, r.Detail)
+	}
+	want := fmt.Sprintf("(%s contains it, but codex keeps .git, .agents, and .codex directories under a writable root read-only)", home)
+	if !strings.Contains(r.Detail, want) {
+		t.Errorf("expected detail to contain %q, got: %s", want, r.Detail)
+	}
+}
+
+// TestCheckCodexAgmsgWritableRoot_SymlinkedDotAgentsControls_StayPass pins
+// the four shapes cross-review C2-1's fix must not break, all against the
+// same symlinked-.agents fixture as the regression test above.
+func TestCheckCodexAgmsgWritableRoot_SymlinkedDotAgentsControls_StayPass(t *testing.T) {
+	t.Run("root equals the store, configured spelling", func(t *testing.T) {
+		base := t.TempDir()
+		_, agmsgHome, _ := writeAgmsgHomeUnderSymlinkedDotAgents(t, base)
+		store := filepath.Join(agmsgHome, "db")
+		cfgDir := t.TempDir()
+		cfgPath := writeCodexConfig(t, cfgDir, "[sandbox_workspace_write]\nwritable_roots = [\""+store+"\"]\n")
+
+		r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome, codexSandboxTestEnv(cfgPath, ""))
+		if r.Status != "pass" {
+			t.Fatalf("expected pass, got %s (%s)", r.Status, r.Detail)
+		}
+	})
+
+	t.Run("root equals the agmsg home, configured spelling", func(t *testing.T) {
+		base := t.TempDir()
+		_, agmsgHome, _ := writeAgmsgHomeUnderSymlinkedDotAgents(t, base)
+		cfgDir := t.TempDir()
+		cfgPath := writeCodexConfig(t, cfgDir, "[sandbox_workspace_write]\nwritable_roots = [\""+agmsgHome+"\"]\n")
+
+		r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome, codexSandboxTestEnv(cfgPath, ""))
+		if r.Status != "pass" {
+			t.Fatalf("expected pass, got %s (%s)", r.Status, r.Detail)
+		}
+	})
+
+	t.Run("root equals the .agents directory itself", func(t *testing.T) {
+		base := t.TempDir()
+		home, agmsgHome, _ := writeAgmsgHomeUnderSymlinkedDotAgents(t, base)
+		dotAgents := filepath.Join(home, ".agents")
+		cfgDir := t.TempDir()
+		cfgPath := writeCodexConfig(t, cfgDir, "[sandbox_workspace_write]\nwritable_roots = [\""+dotAgents+"\"]\n")
+
+		r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome, codexSandboxTestEnv(cfgPath, ""))
+		if r.Status != "pass" {
+			t.Fatalf("expected pass, got %s (%s)", r.Status, r.Detail)
+		}
+	})
+
+	// root == the RESOLVED store directory: filepath.Rel between it and the
+	// CONFIGURED (symlinked) target is not an ancestor relation at all (the
+	// two spellings diverge above real-agents/.agents), so
+	// pathCrossesCodexProtectedDir on the configured pair is false by its
+	// own not-covering guard; the resolved pair collapses to the identical
+	// path on both sides (rel "."), so it is false there too. Both terms
+	// false -> not blocked -> pass, exactly as the plan predicted.
+	t.Run("root equals the resolved store directory", func(t *testing.T) {
+		base := t.TempDir()
+		_, agmsgHome, resolvedAgmsgHome := writeAgmsgHomeUnderSymlinkedDotAgents(t, base)
+		resolvedStore := filepath.Join(resolvedAgmsgHome, "db")
+		cfgDir := t.TempDir()
+		cfgPath := writeCodexConfig(t, cfgDir, "[sandbox_workspace_write]\nwritable_roots = [\""+resolvedStore+"\"]\n")
+
+		r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome, codexSandboxTestEnv(cfgPath, ""))
+		if r.Status != "pass" {
+			t.Fatalf("expected pass, got %s (%s)", r.Status, r.Detail)
+		}
+	})
+}
+
+// TestCheckCodexAgmsgWritableRoot_MissingConfigWithBlockedImplicitAncestor_WarnNamesBoth
+// is cross-review C2-5's regression test: with the config absent,
+// codexImplicitWritableRoots still returns candidates (neither exclude key
+// can be set without a config to set it in), so a blocked ancestor CAN
+// still be computed even in the missing-config warn -- the Detail must say
+// so, not silently drop it as the old doc comment claimed it always would.
+func TestCheckCodexAgmsgWritableRoot_MissingConfigWithBlockedImplicitAncestor_WarnNamesBoth(t *testing.T) {
+	base := t.TempDir()
+	shared := filepath.Join(base, "shared-implicit-root")
+	agmsgHome := filepath.Join(shared, ".agents", "skills", "agmsg")
+	writeAgmsgHome(t, agmsgHome, "")
+	cfgDir := t.TempDir()
+	noSuchCfg := filepath.Join(cfgDir, "config.toml")
+
+	r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome,
+		codexSandboxTestEnvWithImplicitRoots(noSuchCfg, "", shared, ""))
+	if r.Status != "warn" {
+		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
+	}
+	for _, want := range []string{
+		noSuchCfg + " does not exist",
+		fmt.Sprintf("(%s contains it, but codex keeps .git, .agents, and .codex directories under a writable root read-only)", shared),
+	} {
+		if !strings.Contains(r.Detail, want) {
+			t.Errorf("expected detail to contain %q, got: %s", want, r.Detail)
+		}
+	}
+}
+
+// TestCheckCodexAgmsgWritableRoot_SlashTmpDirEqualsTmpDirExcludedSlashTmp_NamesTmpdirEnvVar
+// is cross-review C2-2's regression test: the seat's own $TMPDIR happens to
+// equal codex's fixed temp root as a STRING, and exclude_slash_tmp = true
+// removes the fixed-root entry, so the match that remains comes from the
+// $TMPDIR entry -- the Detail must name exclude_tmpdir_env_var (not
+// exclude_slash_tmp, which a naive string-identity comparison against the
+// matched directory would wrongly report, since both entries share the
+// same directory value) and must carry the pane-environment note exactly
+// once.
+func TestCheckCodexAgmsgWritableRoot_SlashTmpDirEqualsTmpDirExcludedSlashTmp_NamesTmpdirEnvVar(t *testing.T) {
+	shared := filepath.Join(t.TempDir(), "shared-implicit-root")
+	agmsgHome := filepath.Join(shared, "agmsg-home")
+	writeAgmsgHome(t, agmsgHome, "")
+	cfgDir := t.TempDir()
+	cfgPath := writeCodexConfig(t, cfgDir, "[sandbox_workspace_write]\nexclude_slash_tmp = true\n")
+
+	r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome,
+		codexSandboxTestEnvWithImplicitRoots(cfgPath, "", shared, shared))
+	if r.Status != "pass" {
+		t.Fatalf("expected pass, got %s (%s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "exclude_tmpdir_env_var is not set in") {
+		t.Errorf("expected detail to name exclude_tmpdir_env_var (the entry that actually matched came from $TMPDIR), got: %s", r.Detail)
+	}
+	if strings.Contains(r.Detail, "exclude_slash_tmp is not set in") {
+		t.Errorf("expected detail NOT to name exclude_slash_tmp (that root was excluded, not the one that matched), got: %s", r.Detail)
+	}
+	if got := strings.Count(r.Detail, "the seat's pane environment may differ"); got != 1 {
+		t.Errorf("expected the pane-environment note exactly once (the match came from $TMPDIR), got %d in: %s", got, r.Detail)
+	}
+}
+
+// TestCheckCodexAgmsgWritableRoot_SlashTmpDirEqualsTmpDirExcludedTmpdirEnvVar_NamesSlashTmp
+// is C2-2's mirror case: with exclude_tmpdir_env_var = true instead, the
+// $TMPDIR entry is removed and the fixed-root entry is the one that
+// matches, so the Detail must name exclude_slash_tmp and must NOT carry
+// the pane-environment note (the match did not come from $TMPDIR).
+func TestCheckCodexAgmsgWritableRoot_SlashTmpDirEqualsTmpDirExcludedTmpdirEnvVar_NamesSlashTmp(t *testing.T) {
+	shared := filepath.Join(t.TempDir(), "shared-implicit-root")
+	agmsgHome := filepath.Join(shared, "agmsg-home")
+	writeAgmsgHome(t, agmsgHome, "")
+	cfgDir := t.TempDir()
+	cfgPath := writeCodexConfig(t, cfgDir, "[sandbox_workspace_write]\nexclude_tmpdir_env_var = true\n")
+
+	r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome,
+		codexSandboxTestEnvWithImplicitRoots(cfgPath, "", shared, shared))
+	if r.Status != "pass" {
+		t.Fatalf("expected pass, got %s (%s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "exclude_slash_tmp is not set in") {
+		t.Errorf("expected detail to name exclude_slash_tmp (the entry that actually matched is the fixed root), got: %s", r.Detail)
+	}
+	if strings.Contains(r.Detail, "exclude_tmpdir_env_var is not set in") {
+		t.Errorf("expected detail NOT to name exclude_tmpdir_env_var, got: %s", r.Detail)
+	}
+	if strings.Contains(r.Detail, "the seat's pane environment may differ") {
+		t.Errorf("the fixed-root match must not carry the TMPDIR pane-environment note, got: %s", r.Detail)
+	}
+}
+
+func TestCheckCodexAgmsgWritableRoot_GuardedSeatSandboxModeNoRoots_Warn(t *testing.T) {
+	agmsgHome := t.TempDir()
+	writeAgmsgHome(t, agmsgHome, "")
+	cfgDir := t.TempDir()
+	cfgPath := writeCodexConfig(t, cfgDir, "sandbox_mode = \"workspace-write\"\n")
+
+	r := checkCodexAgmsgWritableRoot(codexOrgConfig(false, "guarded", nil), agmsgHome, codexSandboxTestEnv(cfgPath, ""))
+	if r.Status != "warn" {
+		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "guarded codex seats inherit it") {
+		t.Errorf("expected detail to mention guarded seats, got: %s", r.Detail)
+	}
+}
+
+// TestCheckCodexAgmsgWritableRoot_EmptyStringRoleKeyDoesNotSuppressWarn is
+// self-review NEW-2's end-to-end regression test, reproducing the exact
+// finding: default = "guarded" plus a roles entry keyed by the empty
+// string used to intercept ResolvePermissionMode's default lookup and
+// silently disable reason (b), turning a should-warn into a pass. With the
+// fix, guardedRole is still true (from the "guarded" default), so this
+// still warns.
+func TestCheckCodexAgmsgWritableRoot_EmptyStringRoleKeyDoesNotSuppressWarn(t *testing.T) {
+	agmsgHome := t.TempDir()
+	writeAgmsgHome(t, agmsgHome, "")
+	cfgDir := t.TempDir()
+	cfgPath := writeCodexConfig(t, cfgDir, "sandbox_mode = \"workspace-write\"\n")
+
+	orgCfg := codexOrgConfig(false, "guarded", map[string]string{"": "edits"})
+	r := checkCodexAgmsgWritableRoot(orgCfg, agmsgHome, codexSandboxTestEnv(cfgPath, ""))
+	if r.Status != "warn" {
+		t.Fatalf("expected warn (the empty-string role key must not shadow the \"guarded\" default), got %s (%s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "guarded codex seats inherit it") {
+		t.Errorf("expected detail to mention guarded seats, got: %s", r.Detail)
+	}
+}
+
+// TestCheckCodexAgmsgWritableRoot_MissingConfigCodexVerified_WarnNamesConfigAbsent
+// is self-review LOW-4's regression test: the "not needed" all-clear must
+// not silently apply to a warn -- when the config is absent, the warn
+// Detail must say so explicitly rather than looking identical to a config
+// that exists but simply omits sandbox_mode.
+func TestCheckCodexAgmsgWritableRoot_MissingConfigCodexVerified_WarnNamesConfigAbsent(t *testing.T) {
+	agmsgHome := t.TempDir()
+	writeAgmsgHome(t, agmsgHome, "")
+	cfgDir := t.TempDir()
+	noSuchCfg := filepath.Join(cfgDir, "config.toml")
+
+	r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome, codexSandboxTestEnv(noSuchCfg, ""))
+	if r.Status != "warn" {
+		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
+	}
+	store := filepath.Join(agmsgHome, "db")
+	for _, want := range []string{
+		noSuchCfg + " does not exist, so no writable root covers the agmsg store " + store,
+		"writable_roots in " + noSuchCfg,
+	} {
+		if !strings.Contains(r.Detail, want) {
+			t.Errorf("expected detail to contain %q, got: %s", want, r.Detail)
+		}
+	}
+	// self-review NEW-3: the old wording attached "(<cfg> does not exist)"
+	// right after the store path, reading as a claim about the store.
+	if strings.Contains(r.Detail, "("+noSuchCfg+" does not exist)") {
+		t.Errorf("the does-not-exist clause must not be parenthesized after the store path, got: %s", r.Detail)
+	}
+}
+
+// TestCheckCodexAgmsgWritableRoot_HomeSubstitution_TildeInDetail is
+// self-review MEDIUM-2's regression test: the "~" substitution must come
+// from the injected seam's Home field, not a direct os.UserHomeDir() call
+// -- proven here with a Home that is a temp dir, never the real developer
+// home, so the substitution can only have happened through the seam.
+func TestCheckCodexAgmsgWritableRoot_HomeSubstitution_TildeInDetail(t *testing.T) {
+	agmsgHome := t.TempDir()
+	writeAgmsgHome(t, agmsgHome, "")
+	home := t.TempDir()
+	cfgPath := writeCodexConfig(t, filepath.Join(home, ".codex"), "")
+
+	resolveEnv := func() (codexSandboxEnv, error) {
+		return codexSandboxEnv{Home: home, ConfigPath: cfgPath}, nil
+	}
+	r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome, resolveEnv)
+	if r.Status != "warn" {
+		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
+	}
+	wantTilde := "~" + string(filepath.Separator) + ".codex" + string(filepath.Separator) + "config.toml"
+	if !strings.Contains(r.Detail, wantTilde) {
+		t.Errorf("expected detail to contain %q (home substitution via the injected seam), got: %s", wantTilde, r.Detail)
+	}
+	if strings.Contains(r.Detail, home) {
+		t.Errorf("the raw home-prefixed path must not appear once substituted, got: %s", r.Detail)
+	}
+}
+
+// TestCheckCodexAgmsgWritableRoot_MalformedTOML_InfoWithoutContent proves the
+// TOML decode-error branch reports only the line/column, never any part of
+// the config's own content -- which can hold secrets.
+func TestCheckCodexAgmsgWritableRoot_MalformedTOML_InfoWithoutContent(t *testing.T) {
+	agmsgHome := t.TempDir()
+	writeAgmsgHome(t, agmsgHome, "")
+	cfgDir := t.TempDir()
+	// Unterminated table header -- invalid TOML syntax. The canary string
+	// must never leak into the Detail.
+	cfgPath := writeCodexConfig(t, cfgDir, "[sandbox_workspace_write\nwritable_roots = [\"CANARYLEAK123\"]\n")
+
+	r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome, codexSandboxTestEnv(cfgPath, ""))
+	if r.Status != "info" {
+		t.Fatalf("expected info, got %s (%s)", r.Status, r.Detail)
+	}
+	for _, want := range []string{"could not be decoded as a codex config", "line", "column"} {
+		if !strings.Contains(r.Detail, want) {
+			t.Errorf("expected detail to contain %q, got: %s", want, r.Detail)
+		}
+	}
+	if strings.Contains(r.Detail, "CANARYLEAK123") {
+		t.Errorf("config content must never leak into Detail, got: %s", r.Detail)
+	}
+}
+
+// TestCheckCodexAgmsgWritableRoot_DuplicateKey_InfoWithoutKeyNameOrMessage is
+// self-review MEDIUM-1's regression test: go-toml v2.3.0 raises a
+// duplicate-key error as a plain (non-*toml.DecodeError) error whose text
+// repeats the key's own name -- exactly what must never reach the Detail.
+func TestCheckCodexAgmsgWritableRoot_DuplicateKey_InfoWithoutKeyNameOrMessage(t *testing.T) {
+	agmsgHome := t.TempDir()
+	writeAgmsgHome(t, agmsgHome, "")
+	cfgDir := t.TempDir()
+	cfgPath := writeCodexConfig(t, cfgDir, "note = \"CANARYLEAK123\"\nnote = \"CANARYLEAK123\"\n")
+
+	r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome, codexSandboxTestEnv(cfgPath, ""))
+	if r.Status != "info" {
+		t.Fatalf("expected info, got %s (%s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "could not be decoded as a codex config") {
+		t.Errorf("expected the decode-failure wording, got: %s", r.Detail)
+	}
+	for _, notWant := range []string{"CANARYLEAK123", "note", "already defined"} {
+		if strings.Contains(r.Detail, notWant) {
+			t.Errorf("config key/value text must never leak into Detail (found %q), got: %s", notWant, r.Detail)
+		}
+	}
+}
+
+// TestCheckCodexAgmsgWritableRoot_TypeMismatch_InfoWithPosition is
+// self-review LOW-5's regression test: a type mismatch (sandbox_mode = 5)
+// is syntactically valid TOML that go-toml still rejects as a
+// *toml.DecodeError (with a position), so it must be worded as a decode
+// failure, never "not valid TOML".
+func TestCheckCodexAgmsgWritableRoot_TypeMismatch_InfoWithPosition(t *testing.T) {
+	agmsgHome := t.TempDir()
+	writeAgmsgHome(t, agmsgHome, "")
+	cfgDir := t.TempDir()
+	cfgPath := writeCodexConfig(t, cfgDir, "sandbox_mode = 5\n")
+
+	r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome, codexSandboxTestEnv(cfgPath, ""))
+	if r.Status != "info" {
+		t.Fatalf("expected info, got %s (%s)", r.Status, r.Detail)
+	}
+	for _, want := range []string{"could not be decoded as a codex config", "line", "column"} {
+		if !strings.Contains(r.Detail, want) {
+			t.Errorf("expected detail to contain %q, got: %s", want, r.Detail)
+		}
+	}
+	if strings.Contains(r.Detail, "not valid TOML") {
+		t.Errorf("a type mismatch in otherwise-valid TOML must not be called \"not valid TOML\", got: %s", r.Detail)
+	}
+}
+
+func TestCheckCodexAgmsgWritableRoot_WritableRootsWrongType_Info(t *testing.T) {
+	cases := []struct {
+		name string
+		toml string
+	}{
+		{"string instead of array", "[sandbox_workspace_write]\nwritable_roots = \"x\"\n"},
+		{"array of ints", "[sandbox_workspace_write]\nwritable_roots = [1, 2]\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			agmsgHome := t.TempDir()
+			writeAgmsgHome(t, agmsgHome, "")
+			cfgDir := t.TempDir()
+			cfgPath := writeCodexConfig(t, cfgDir, tc.toml)
+
+			r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome, codexSandboxTestEnv(cfgPath, ""))
+			if r.Status != "info" {
+				t.Fatalf("expected info, got %s (%s)", r.Status, r.Detail)
+			}
+			if !strings.Contains(r.Detail, "writable_roots is not an array of strings") {
+				t.Errorf("expected detail to name the type problem, got: %s", r.Detail)
+			}
+		})
+	}
+}
+
+// TestCheckCodexAgmsgWritableRoot_CodexNotInDriverPool_Pass is self-review
+// LOW-6's outcome 2 regression test: codex is not spawnable at all when
+// it's missing from [org].driver_pool, so the check passes immediately --
+// even with codex_verified = true and no config to read.
+func TestCheckCodexAgmsgWritableRoot_CodexNotInDriverPool_Pass(t *testing.T) {
+	agmsgHome := t.TempDir()
+	writeAgmsgHome(t, agmsgHome, "")
+	orgCfg := config.OrgConfig{
+		DriverPool: []string{"claude"},
+		Permissions: config.OrgPermissionsConfig{
+			CodexVerified: true,
+			Default:       "autonomous",
+		},
+	}
+	cfgDir := t.TempDir()
+	noSuchCfg := filepath.Join(cfgDir, "config.toml") // never read.
+
+	r := checkCodexAgmsgWritableRoot(orgCfg, agmsgHome, codexSandboxTestEnv(noSuchCfg, ""))
+	if r.Status != "pass" {
+		t.Fatalf("expected pass, got %s (%s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "[org].driver_pool") {
+		t.Errorf("expected detail to mention driver_pool, got: %s", r.Detail)
+	}
+}
+
+// TestCheckCodexAgmsgWritableRoot_NoCodexModelInPool_Pass is cross-review
+// WC-2's outcome-3 regression test: codex is in [org].driver_pool, but
+// [org].model_pool has no codex entry at all, so no codex seat can ever be
+// spawned -- this must pass immediately, even with codex_verified = true
+// and no root configured.
+func TestCheckCodexAgmsgWritableRoot_NoCodexModelInPool_Pass(t *testing.T) {
+	agmsgHome := t.TempDir()
+	writeAgmsgHome(t, agmsgHome, "")
+	orgCfg := config.OrgConfig{
+		DriverPool: []string{"claude", "codex"},
+		ModelPool:  []config.OrgModelPoolEntry{{Driver: "claude", Model: "opus"}},
+		Permissions: config.OrgPermissionsConfig{
+			CodexVerified: true,
+			Default:       "autonomous",
+		},
+	}
+	cfgDir := t.TempDir()
+	noSuchCfg := filepath.Join(cfgDir, "config.toml") // never read.
+
+	r := checkCodexAgmsgWritableRoot(orgCfg, agmsgHome, codexSandboxTestEnv(noSuchCfg, ""))
+	if r.Status != "pass" {
+		t.Fatalf("expected pass, got %s (%s)", r.Status, r.Detail)
+	}
+	want := "not needed: [org].model_pool has no codex model, so no codex seat can be spawned"
+	if r.Detail != want {
+		t.Errorf("Detail = %q, want %q", r.Detail, want)
+	}
+}
+
+// TestCheckCodexAgmsgWritableRoot_RoleModelRestrictionExcludesCodex_ReasonAAbsent
+// is cross-review WC-2's central regression test, reproducing the
+// reviewer's exact scenario: a guarded default, an autonomous override for
+// one role, and an [org.roles] restriction that excludes every codex model
+// for that role. ValidateSpawnEnvelope would reject every codex model for
+// this role (modelAllowedForRole), so the autonomous override must not
+// count -- reason (a) stays absent and the check reports "not needed", not
+// a warn about a codex seat that could never actually spawn.
+func TestCheckCodexAgmsgWritableRoot_RoleModelRestrictionExcludesCodex_ReasonAAbsent(t *testing.T) {
+	agmsgHome := t.TempDir()
+	writeAgmsgHome(t, agmsgHome, "")
+	cfgDir := t.TempDir()
+	noSuchCfg := filepath.Join(cfgDir, "config.toml")
+
+	orgCfg := config.OrgConfig{
+		DriverPool: []string{"claude", "codex"},
+		ModelPool: []config.OrgModelPoolEntry{
+			{Driver: "codex", Model: "gpt-x"},
+			{Driver: "claude", Model: "opus"},
+		},
+		Roles: map[string][]string{"implementer": {"opus"}}, // codex model excluded for this role.
+		Permissions: config.OrgPermissionsConfig{
+			CodexVerified: true,
+			Default:       "guarded",
+			Roles:         map[string]string{"implementer": "autonomous"},
+		},
+	}
+
+	r := checkCodexAgmsgWritableRoot(orgCfg, agmsgHome, codexSandboxTestEnv(noSuchCfg, ""))
+	if r.Status != "pass" {
+		t.Fatalf("expected pass, got %s (%s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "no role that can use a codex model resolves to edits or autonomous") {
+		t.Errorf("expected reason (a) to read as absent (the autonomous role cannot actually hold a codex model), got: %s", r.Detail)
+	}
+}
+
+// TestCheckCodexAgmsgWritableRoot_RoleModelRestrictionIncludesCodex_ReasonAPresent
+// is the same fixture with the codex model added to the role's allowlist:
+// now ValidateSpawnEnvelope really would let this role spawn a codex seat
+// under autonomous, so reason (a) fires.
+func TestCheckCodexAgmsgWritableRoot_RoleModelRestrictionIncludesCodex_ReasonAPresent(t *testing.T) {
+	agmsgHome := t.TempDir()
+	writeAgmsgHome(t, agmsgHome, "")
+	cfgDir := t.TempDir()
+	cfgPath := writeCodexConfig(t, cfgDir, "")
+
+	orgCfg := config.OrgConfig{
+		DriverPool: []string{"claude", "codex"},
+		ModelPool: []config.OrgModelPoolEntry{
+			{Driver: "codex", Model: "gpt-x"},
+			{Driver: "claude", Model: "opus"},
+		},
+		Roles: map[string][]string{"implementer": {"opus", "gpt-x"}}, // codex model included this time.
+		Permissions: config.OrgPermissionsConfig{
+			CodexVerified: true,
+			Default:       "guarded",
+			Roles:         map[string]string{"implementer": "autonomous"},
+		},
+	}
+
+	r := checkCodexAgmsgWritableRoot(orgCfg, agmsgHome, codexSandboxTestEnv(cfgPath, ""))
+	if r.Status != "warn" {
+		t.Fatalf("expected warn (reason (a) fires: the role can hold a codex model), got %s (%s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "a role that can use a codex model resolves to edits or autonomous") {
+		t.Errorf("expected reason (a) in the needed-because clause, got: %s", r.Detail)
+	}
+}
+
+func TestCheckCodexAgmsgWritableRoot_AgmsgMissing_Info(t *testing.T) {
+	agmsgHome := filepath.Join(t.TempDir(), "no-such-agmsg-home")
+	cfgDir := t.TempDir()
+	cfgPath := writeCodexConfig(t, cfgDir, "sandbox_mode = \"workspace-write\"\n")
+
+	r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome, codexSandboxTestEnv(cfgPath, ""))
+	if r.Status != "info" {
+		t.Fatalf("expected info, got %s (%s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "agmsg not installed at "+agmsgHome) {
+		t.Errorf("expected detail to name the resolved home, got: %s", r.Detail)
+	}
+}
+
+// TestCheckCodexAgmsgWritableRoot_AgmsgVersionMismatch_StillGraded proves
+// grading uses driver.AgmsgAvailable, not the separate "agmsg" check's
+// Status (which is "info" for a differently-versioned install): with roots
+// missing, a version-mismatched-but-installed agmsg home still warns.
+func TestCheckCodexAgmsgWritableRoot_AgmsgVersionMismatch_StillGraded(t *testing.T) {
+	agmsgHome := t.TempDir()
+	writeAgmsgHome(t, agmsgHome, "9.9.9") // differs from agmsgTestedVersion.
+	if av := checkAgmsgAvailable(agmsgHome); av.Status != "info" {
+		t.Fatalf("test setup: expected the agmsg check itself to be info for a version mismatch, got %s", av.Status)
+	}
+
+	cfgDir := t.TempDir()
+	cfgPath := writeCodexConfig(t, cfgDir, "")
+
+	r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome, codexSandboxTestEnv(cfgPath, ""))
+	if r.Status != "warn" {
+		t.Fatalf("expected warn despite the agmsg version mismatch (install itself is fine), got %s (%s)", r.Status, r.Detail)
+	}
+}
+
+func TestCheckCodexAgmsgWritableRoot_StorageOverride(t *testing.T) {
+	agmsgHome := t.TempDir()
+	writeAgmsgHome(t, agmsgHome, "")
+	overrideDir := t.TempDir()
+	override := filepath.Join(overrideDir, "custom-store")
+
+	t.Run("root covering only the default db dir warns", func(t *testing.T) {
+		defaultStore := filepath.Join(agmsgHome, "db")
+		cfgDir := t.TempDir()
+		cfgPath := writeCodexConfig(t, cfgDir, "[sandbox_workspace_write]\nwritable_roots = [\""+defaultStore+"\"]\n")
+
+		r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome, codexSandboxTestEnv(cfgPath, override))
+		if r.Status != "warn" {
+			t.Fatalf("expected warn (root covers the default store, not the override), got %s (%s)", r.Status, r.Detail)
+		}
+	})
+
+	t.Run("root covering the override passes with suffix", func(t *testing.T) {
+		cfgDir := t.TempDir()
+		cfgPath := writeCodexConfig(t, cfgDir, "[sandbox_workspace_write]\nwritable_roots = [\""+override+"\"]\n")
+
+		r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome, codexSandboxTestEnv(cfgPath, override))
+		if r.Status != "pass" {
+			t.Fatalf("expected pass, got %s (%s)", r.Status, r.Detail)
+		}
+		if !strings.Contains(r.Detail, "store taken from AGMSG_STORAGE_PATH") {
+			t.Errorf("expected detail to contain the override suffix, got: %s", r.Detail)
+		}
+	})
+
+	t.Run("trailing slash on the override is stripped", func(t *testing.T) {
+		cfgDir := t.TempDir()
+		cfgPath := writeCodexConfig(t, cfgDir, "[sandbox_workspace_write]\nwritable_roots = [\""+override+"\"]\n")
+
+		r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome, codexSandboxTestEnv(cfgPath, override+"/"))
+		if r.Status != "pass" {
+			t.Fatalf("expected pass (trailing slash on override must be stripped before comparison), got %s (%s)", r.Status, r.Detail)
+		}
+	})
+}
+
+// TestCheckCodexAgmsgWritableRoot_ImplicitSlashTmp_PassNamingSlashTmp is
+// cross-review WC-1's central regression test: no explicit writable root
+// covers the store, but the store itself lives under codex's fixed temp
+// root, which workspace-write keeps writable by default. slashTmpFixture
+// stands in for the real /tmp -- injected through the seam, never the real
+// "/tmp" -- so this test's result cannot depend on where the test process's
+// own TMPDIR happens to live (cross-review WC-1's follow-up: a hard-coded
+// "/tmp" here made this exact test, and roughly a dozen unrelated ones,
+// silently flip to the wrong status on any machine whose real TMPDIR is
+// "/tmp", e.g. GitHub Actions' ubuntu-latest with TMPDIR unset). The
+// override store path is itself nested under slashTmpFixture, so the
+// assertion checks for "is under <slashTmpFixture>," specifically rather
+// than a bare substring match (self-review C2-6's weakness: the "agmsg
+// store <store>" clause would already contain slashTmpFixture as a prefix
+// regardless of which candidate actually matched, since store is
+// slashTmpFixture's own child).
+func TestCheckCodexAgmsgWritableRoot_ImplicitSlashTmp_PassNamingSlashTmp(t *testing.T) {
+	agmsgHome := t.TempDir()
+	writeAgmsgHome(t, agmsgHome, "")
+	cfgDir := t.TempDir()
+	cfgPath := writeCodexConfig(t, cfgDir, "")
+	slashTmpFixture := filepath.Join(t.TempDir(), "slashtmp")
+	override := filepath.Join(slashTmpFixture, "custom-store")
+
+	r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome,
+		codexSandboxTestEnvWithImplicitRoots(cfgPath, override, slashTmpFixture, ""))
+	if r.Status != "pass" {
+		t.Fatalf("expected pass (workspace-write keeps the fixed temp root writable by default), got %s (%s)", r.Status, r.Detail)
+	}
+	for _, want := range []string{"is under " + slashTmpFixture + ",", "workspace-write keeps writable by default", "exclude_slash_tmp is not set in"} {
+		if !strings.Contains(r.Detail, want) {
+			t.Errorf("expected detail to contain %q, got: %s", want, r.Detail)
+		}
+	}
+}
+
+// TestCheckCodexAgmsgWritableRoot_ImplicitSlashTmpExcluded_Warn is the
+// counterpart: exclude_slash_tmp = true turns off the implicit fixed-temp
+// root, so the same store must now warn.
+func TestCheckCodexAgmsgWritableRoot_ImplicitSlashTmpExcluded_Warn(t *testing.T) {
+	agmsgHome := t.TempDir()
+	writeAgmsgHome(t, agmsgHome, "")
+	cfgDir := t.TempDir()
+	cfgPath := writeCodexConfig(t, cfgDir, "[sandbox_workspace_write]\nexclude_slash_tmp = true\n")
+	slashTmpFixture := filepath.Join(t.TempDir(), "slashtmp")
+	override := filepath.Join(slashTmpFixture, "custom-store")
+
+	r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome,
+		codexSandboxTestEnvWithImplicitRoots(cfgPath, override, slashTmpFixture, ""))
+	if r.Status != "warn" {
+		t.Fatalf("expected warn (exclude_slash_tmp turns off the implicit fixed-temp root), got %s (%s)", r.Status, r.Detail)
+	}
+}
+
+// TestCheckCodexAgmsgWritableRoot_ImplicitTmpdirEnv_Pass covers the other
+// implicit root: the store lives under the seat's $TMPDIR (via the
+// codexSandboxEnv seam, never the real machine's TMPDIR), which
+// workspace-write also keeps writable by default unless
+// exclude_tmpdir_env_var is set. The pane-environment note must appear,
+// since TMPDIR is seat-pane-specific. SlashTmpDir is left "" so this test
+// exercises the $TMPDIR root alone. agmsgHome (and so store) is itself
+// nested under tmpDirFixture, so the assertion checks for "is under
+// <tmpDirFixture>," specifically rather than a bare substring match
+// (self-review C2-6's weakness -- see the sibling slashTmpFixture test's
+// comment for why a bare match would pass regardless of which root the
+// check actually credited).
+func TestCheckCodexAgmsgWritableRoot_ImplicitTmpdirEnv_Pass(t *testing.T) {
+	tmpDirFixture := t.TempDir()
+	agmsgHome := filepath.Join(tmpDirFixture, "agmsg-home")
+	writeAgmsgHome(t, agmsgHome, "")
+	cfgDir := t.TempDir()
+	cfgPath := writeCodexConfig(t, cfgDir, "")
+
+	r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome,
+		codexSandboxTestEnvWithImplicitRoots(cfgPath, "", "", tmpDirFixture))
+	if r.Status != "pass" {
+		t.Fatalf("expected pass (workspace-write keeps $TMPDIR writable by default), got %s (%s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "is under "+tmpDirFixture+",") {
+		t.Errorf("expected detail to name the TMPDIR root %q, got: %s", tmpDirFixture, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "the seat's pane environment may differ") {
+		t.Errorf("expected detail to note the pane environment may differ, got: %s", r.Detail)
+	}
+}
+
+// TestCheckCodexAgmsgWritableRoot_ImplicitTmpdirEnvExcluded_Warn is the
+// counterpart: with both implicit roots excluded, the same TMPDIR-nested
+// store must warn. SlashTmpDir is left "" (as in the Pass case above), so
+// exclude_slash_tmp is redundant here but kept for documentation symmetry
+// with the two-exclude-keys config an operator would actually write.
+func TestCheckCodexAgmsgWritableRoot_ImplicitTmpdirEnvExcluded_Warn(t *testing.T) {
+	tmpDirFixture := t.TempDir()
+	agmsgHome := filepath.Join(tmpDirFixture, "agmsg-home")
+	writeAgmsgHome(t, agmsgHome, "")
+	cfgDir := t.TempDir()
+	cfgPath := writeCodexConfig(t, cfgDir, "[sandbox_workspace_write]\nexclude_tmpdir_env_var = true\nexclude_slash_tmp = true\n")
+
+	r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome,
+		codexSandboxTestEnvWithImplicitRoots(cfgPath, "", "", tmpDirFixture))
+	if r.Status != "warn" {
+		t.Fatalf("expected warn (both implicit roots excluded), got %s (%s)", r.Status, r.Detail)
+	}
+}
+
+func TestCheckCodexAgmsgWritableRoot_ProfileSuffix(t *testing.T) {
+	agmsgHome := t.TempDir()
+	writeAgmsgHome(t, agmsgHome, "")
+	cfgDir := t.TempDir()
+	cfgPath := writeCodexConfig(t, cfgDir, "profile = \"work\"\n")
+
+	r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome, codexSandboxTestEnv(cfgPath, ""))
+	if r.Status != "warn" {
+		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, `profile "work"`) || !strings.Contains(r.Detail, "is not evaluated") {
+		t.Errorf("expected detail to name the profile suffix, got: %s", r.Detail)
+	}
+}
+
+func TestCheckCodexAgmsgWritableRoot_ConfigIsDirectory_Info(t *testing.T) {
+	agmsgHome := t.TempDir()
+	writeAgmsgHome(t, agmsgHome, "")
+	cfgDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "config.toml")
+	if err := os.MkdirAll(cfgPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome, codexSandboxTestEnv(cfgPath, ""))
+	if r.Status != "info" {
+		t.Fatalf("expected info, got %s (%s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "not a regular file") {
+		t.Errorf("expected detail to mention not a regular file, got: %s", r.Detail)
+	}
+}
+
+// TestCheckCodexAgmsgWritableRoot_ConfigIsFIFO_InfoAndCompletes lives in
+// doctor_codex_writable_root_unix_test.go (self-review LOW-7: syscall.Mkfifo
+// does not exist on windows).
+
+func TestCheckCodexAgmsgWritableRoot_ConfigTooLarge_Info(t *testing.T) {
+	agmsgHome := t.TempDir()
+	writeAgmsgHome(t, agmsgHome, "")
+	cfgDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "config.toml")
+	oversized := strings.Repeat("a", codexConfigMaxBytes+1)
+	if err := os.WriteFile(cfgPath, []byte("# "+oversized+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome, codexSandboxTestEnv(cfgPath, ""))
+	if r.Status != "info" {
+		t.Fatalf("expected info, got %s (%s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "larger than 1 MiB") {
+		t.Errorf("expected detail to mention the size limit, got: %s", r.Detail)
+	}
+}
+
+func TestCheckCodexAgmsgWritableRoot_RelativeAndTildeRoots_NeverMatch(t *testing.T) {
+	agmsgHome := t.TempDir()
+	writeAgmsgHome(t, agmsgHome, "")
+	store := filepath.Join(agmsgHome, "db")
+	cfgDir := t.TempDir()
+	cfgPath := writeCodexConfig(t, cfgDir,
+		"[sandbox_workspace_write]\nwritable_roots = [\"~/agmsg\", \"relative/db\", \""+store+"x\"]\n")
+
+	r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome, codexSandboxTestEnv(cfgPath, ""))
+	if r.Status != "warn" {
+		t.Fatalf("expected warn (no configured root actually covers the store), got %s (%s)", r.Status, r.Detail)
+	}
+}
+
+func TestCheckCodexAgmsgWritableRoot_ResolveEnvError_Info(t *testing.T) {
+	wantErr := errors.New("boom")
+	// resolveEnv only runs after agmsg is confirmed installed and codex is
+	// confirmed spawnable.
+	agmsgHome := t.TempDir()
+	writeAgmsgHome(t, agmsgHome, "")
+	r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome, func() (codexSandboxEnv, error) { return codexSandboxEnv{}, wantErr })
+	if r.Status != "info" {
+		t.Fatalf("expected info, got %s (%s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "could not resolve the codex config path") {
+		t.Errorf("expected detail to mention the resolution failure, got: %s", r.Detail)
+	}
+}
+
+func TestCodexSandboxEnvFromOS(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("os.UserHomeDir on windows does not key off HOME")
+	}
+
+	t.Run("CODEX_HOME used literally", func(t *testing.T) {
+		codexHome := filepath.Join(t.TempDir(), "custom-codex-home")
+		t.Setenv("CODEX_HOME", codexHome)
+		t.Setenv("AGMSG_STORAGE_PATH", "")
+
+		env, err := codexSandboxEnvFromOS()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		want := filepath.Join(codexHome, "config.toml")
+		if env.ConfigPath != want {
+			t.Errorf("ConfigPath = %q, want %q", env.ConfigPath, want)
+		}
+	})
+
+	t.Run("falls back to HOME/.codex when CODEX_HOME is unset", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("CODEX_HOME", "")
+		t.Setenv("HOME", dir)
+
+		env, err := codexSandboxEnvFromOS()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		want := filepath.Join(dir, ".codex", "config.toml")
+		if env.ConfigPath != want {
+			t.Errorf("ConfigPath = %q, want %q", env.ConfigPath, want)
+		}
+		if env.Home != dir {
+			t.Errorf("Home = %q, want %q", env.Home, dir)
+		}
+	})
+
+	t.Run("honours AGMSG_STORAGE_PATH", func(t *testing.T) {
+		t.Setenv("CODEX_HOME", t.TempDir())
+		t.Setenv("AGMSG_STORAGE_PATH", "/some/store")
+
+		env, err := codexSandboxEnvFromOS()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if env.AgmsgStoragePath != "/some/store" {
+			t.Errorf("AgmsgStoragePath = %q, want /some/store", env.AgmsgStoragePath)
+		}
+	})
+
+	// TestCodexSandboxEnvFromOS_SlashTmpDirAndTmpDir is cross-review WC-1's
+	// follow-up regression test: SlashTmpDir must come from
+	// codexSandboxEnvFromOS itself (the one place the fixed temp root's
+	// literal path is allowed to appear), and TmpDir must reflect the
+	// process's own $TMPDIR -- neither is read anywhere else in this file.
+	t.Run("sets SlashTmpDir and TmpDir from the process environment", func(t *testing.T) {
+		t.Setenv("CODEX_HOME", t.TempDir())
+		t.Setenv("TMPDIR", "/some/seat-tmpdir")
+
+		env, err := codexSandboxEnvFromOS()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if env.SlashTmpDir != "/tmp" {
+			t.Errorf("SlashTmpDir = %q, want /tmp", env.SlashTmpDir)
+		}
+		if env.TmpDir != "/some/seat-tmpdir" {
+			t.Errorf("TmpDir = %q, want /some/seat-tmpdir", env.TmpDir)
+		}
+	})
+
+	t.Run("CODEX_HOME and HOME both empty returns an error", func(t *testing.T) {
+		t.Setenv("CODEX_HOME", "")
+		t.Setenv("HOME", "")
+
+		if _, err := codexSandboxEnvFromOS(); err == nil {
+			t.Fatal("expected an error when CODEX_HOME and HOME are both empty")
+		}
+	})
+}
+
+func TestPathCovers(t *testing.T) {
+	cases := []struct {
+		name string
+		root string
+		want map[string]bool
+	}{
+		{"root equals target", "/a/b", map[string]bool{"/a/b": true}},
+		{"root is an ancestor", "/a", map[string]bool{"/a/b": true, "/a/b/c": true}},
+		{"prefix sibling, not an ancestor", "/a/b", map[string]bool{"/a/bc": false}},
+		{"db vs dbx sibling", "/x/db", map[string]bool{"/x/dbx": false, "/x/db/child": true}},
+		{"relative root never matches", "relative/db", map[string]bool{"relative/db": false}},
+		{"tilde root never matches", "~/agmsg/db", map[string]bool{"~/agmsg/db": false}},
+		{"trailing slash on root is cleaned", "/a/b/", map[string]bool{"/a/b": true, "/a/b/c": true}},
+	}
+	for _, tc := range cases {
+		for target, want := range tc.want {
+			t.Run(tc.name+"__"+target, func(t *testing.T) {
+				if got := pathCovers(tc.root, target); got != want {
+					t.Errorf("pathCovers(%q, %q) = %v, want %v", tc.root, target, got, want)
+				}
+			})
+		}
+	}
+}
+
+// TestPathCrossesCodexProtectedDir is cross-review AR-1's pure unit test
+// for the protected-directory-element rule.
+func TestPathCrossesCodexProtectedDir(t *testing.T) {
+	cases := []struct {
+		name   string
+		root   string
+		target string
+		want   bool
+	}{
+		{"no protected element", "/a", "/a/b/c", false},
+		{"protected .agents element", "/a", "/a/.agents/b", true},
+		{"protected .git element", "/a", "/a/.git/b", true},
+		{"protected .codex element", "/a", "/a/.codex/b", true},
+		{"protected element deep in the path", "/a", "/a/b/c/.agents/d", true},
+		{"lookalike .agentsx does not match", "/a", "/a/.agentsx/b", false},
+		{"lookalike agents (no dot) does not match", "/a", "/a/agents/b", false},
+		{"root equals target", "/a/b", "/a/b", false},
+		{"root itself named .agents is not a crossing", "/a/.agents", "/a/.agents/b", false},
+		{"relative root never matches", "a", "a/.agents/b", false},
+		{"root does not cover target at all", "/a/b", "/a/c/.agents/d", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := pathCrossesCodexProtectedDir(tc.root, tc.target); got != tc.want {
+				t.Errorf("pathCrossesCodexProtectedDir(%q, %q) = %v, want %v", tc.root, tc.target, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestCodexImplicitWritableRoots is cross-review WC-1's pure unit test of
+// codexImplicitWritableRoots' selection and key-attribution logic -- it
+// never touches the filesystem, so the literal paths below (standing in
+// for whatever codexSandboxEnvFromOS or a test fixture would inject) are
+// safe to use directly, unlike in an integration test that actually
+// resolves a store against them.
+func TestCodexImplicitWritableRoots(t *testing.T) {
+	withExcludes := func(excludeSlashTmp, excludeTmpdirEnvVar bool) codexUserConfig {
+		var cfg codexUserConfig
+		cfg.SandboxWorkspaceWrite.ExcludeSlashTmp = excludeSlashTmp
+		cfg.SandboxWorkspaceWrite.ExcludeTmpdirEnvVar = excludeTmpdirEnvVar
+		return cfg
+	}
+	cases := []struct {
+		name        string
+		cfg         codexUserConfig
+		slashTmpDir string
+		tmpDir      string
+		want        []codexImplicitRoot
+	}{
+		{
+			"both set, both defaults", withExcludes(false, false), "/injected/slashtmp", "/abs/tmpdir",
+			[]codexImplicitRoot{
+				{Dir: "/injected/slashtmp", ExcludeKey: "exclude_slash_tmp"},
+				{Dir: "/abs/tmpdir", ExcludeKey: "exclude_tmpdir_env_var", FromTmpdirEnv: true},
+			},
+		},
+		{
+			"exclude_slash_tmp drops slashTmpDir", withExcludes(true, false), "/injected/slashtmp", "/abs/tmpdir",
+			[]codexImplicitRoot{{Dir: "/abs/tmpdir", ExcludeKey: "exclude_tmpdir_env_var", FromTmpdirEnv: true}},
+		},
+		{
+			"exclude_tmpdir_env_var drops tmpDir", withExcludes(false, true), "/injected/slashtmp", "/abs/tmpdir",
+			[]codexImplicitRoot{{Dir: "/injected/slashtmp", ExcludeKey: "exclude_slash_tmp"}},
+		},
+		{"both excluded", withExcludes(true, true), "/injected/slashtmp", "/abs/tmpdir", nil},
+		{
+			"empty slashTmpDir ignored", withExcludes(false, false), "", "/abs/tmpdir",
+			[]codexImplicitRoot{{Dir: "/abs/tmpdir", ExcludeKey: "exclude_tmpdir_env_var", FromTmpdirEnv: true}},
+		},
+		{
+			"relative slashTmpDir ignored", withExcludes(false, false), "relative/slashtmp", "/abs/tmpdir",
+			[]codexImplicitRoot{{Dir: "/abs/tmpdir", ExcludeKey: "exclude_tmpdir_env_var", FromTmpdirEnv: true}},
+		},
+		{
+			"empty tmpDir ignored", withExcludes(false, false), "/injected/slashtmp", "",
+			[]codexImplicitRoot{{Dir: "/injected/slashtmp", ExcludeKey: "exclude_slash_tmp"}},
+		},
+		{
+			"relative tmpDir ignored", withExcludes(false, false), "/injected/slashtmp", "relative/tmp",
+			[]codexImplicitRoot{{Dir: "/injected/slashtmp", ExcludeKey: "exclude_slash_tmp"}},
+		},
+		{"both empty", withExcludes(false, false), "", "", nil},
+		{
+			// cross-review C2-2: slashTmpDir and tmpDir can legitimately be
+			// the same string. Both entries must still be returned, each
+			// with its own correct ExcludeKey/FromTmpdirEnv, so a later
+			// match on that shared directory can be attributed to whichever
+			// entry actually matched first.
+			"slashTmpDir equals tmpDir, both entries kept with distinct attribution", withExcludes(false, false), "/shared", "/shared",
+			[]codexImplicitRoot{
+				{Dir: "/shared", ExcludeKey: "exclude_slash_tmp"},
+				{Dir: "/shared", ExcludeKey: "exclude_tmpdir_env_var", FromTmpdirEnv: true},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := codexImplicitWritableRoots(tc.cfg, tc.slashTmpDir, tc.tmpDir)
+			if len(got) != len(tc.want) {
+				t.Fatalf("codexImplicitWritableRoots(...) = %+v, want %+v", got, tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Errorf("codexImplicitWritableRoots(...)[%d] = %+v, want %+v", i, got[i], tc.want[i])
+				}
+			}
+		})
+	}
+}
+
+// TestCodexModelPermittedForRole is cross-review WC-2's pure unit test,
+// mirroring internal/org/envelope.go's modelAllowedForRole table shape.
+func TestCodexModelPermittedForRole(t *testing.T) {
+	cases := []struct {
+		name        string
+		orgCfg      config.OrgConfig
+		role        string
+		codexModels []string
+		want        bool
+	}{
+		{"no codex models at all -> never permitted", config.OrgConfig{}, "implementer", nil, false},
+		{"no [org.roles] table -> permitted", config.OrgConfig{}, "implementer", []string{"gpt-x"}, true},
+		{
+			"role absent from [org.roles] -> permitted",
+			config.OrgConfig{Roles: map[string][]string{"other": {"opus"}}}, "implementer", []string{"gpt-x"}, true,
+		},
+		{
+			"role maps to an empty list -> permitted",
+			config.OrgConfig{Roles: map[string][]string{"implementer": {}}}, "implementer", []string{"gpt-x"}, true,
+		},
+		{
+			"role's allowlist excludes every codex model -> not permitted",
+			config.OrgConfig{Roles: map[string][]string{"implementer": {"opus"}}}, "implementer", []string{"gpt-x"}, false,
+		},
+		{
+			"role's allowlist includes a codex model -> permitted",
+			config.OrgConfig{Roles: map[string][]string{"implementer": {"opus", "gpt-x"}}}, "implementer", []string{"gpt-x"}, true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := codexModelPermittedForRole(tc.orgCfg, tc.role, tc.codexModels); got != tc.want {
+				t.Errorf("codexModelPermittedForRole(%+v, %q, %v) = %v, want %v", tc.orgCfg, tc.role, tc.codexModels, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAgmsgStoreDir(t *testing.T) {
+	t.Run("no override uses agmsgHome/db", func(t *testing.T) {
+		dir, fromOverride := agmsgStoreDir("/home/agmsg", "")
+		if dir != filepath.Join("/home/agmsg", "db") || fromOverride {
+			t.Errorf("agmsgStoreDir(%q, %q) = (%q, %v), want (%q, false)", "/home/agmsg", "", dir, fromOverride, filepath.Join("/home/agmsg", "db"))
+		}
+	})
+	t.Run("override strips exactly one trailing slash", func(t *testing.T) {
+		dir, fromOverride := agmsgStoreDir("/home/agmsg", "/custom/store/")
+		if dir != "/custom/store" || !fromOverride {
+			t.Errorf("agmsgStoreDir override = (%q, %v), want (\"/custom/store\", true)", dir, fromOverride)
+		}
+	})
+	t.Run("override without trailing slash is unchanged", func(t *testing.T) {
+		dir, fromOverride := agmsgStoreDir("/home/agmsg", "/custom/store")
+		if dir != "/custom/store" || !fromOverride {
+			t.Errorf("agmsgStoreDir override = (%q, %v), want (\"/custom/store\", true)", dir, fromOverride)
+		}
+	})
+}
+
+func TestCoveringWritableRoot_StoreNotCreatedYet_AncestorCovered(t *testing.T) {
+	agmsgHome := t.TempDir() // exists; its "db" child does not.
+	store := filepath.Join(agmsgHome, "db")
+
+	root, blockedAncestor := coveringWritableRoot([]string{agmsgHome}, store)
+	if root != agmsgHome {
+		t.Fatalf("expected the existing ancestor to cover the not-yet-created store, got root=%q", root)
+	}
+	if blockedAncestor != "" {
+		t.Errorf("expected no blocked ancestor, got %q", blockedAncestor)
+	}
+}
+
+// TestCoveringWritableRoot_StoreNotCreatedYetUnderSymlinkedParent pins that
+// both sides of the comparison resolve symlinks through their nearest
+// existing ancestor: the store directory does not exist yet, the root names
+// it through a symlinked parent, and the two must still compare equal.
+func TestCoveringWritableRoot_StoreNotCreatedYetUnderSymlinkedParent(t *testing.T) {
+	base := t.TempDir()
+	realHome := filepath.Join(base, "real-agmsg")
+	if err := os.MkdirAll(realHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	linkHome := filepath.Join(base, "link-agmsg")
+	if err := os.Symlink(realHome, linkHome); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	store := filepath.Join(realHome, "db")       // not created
+	rootViaLink := filepath.Join(linkHome, "db") // not created either
+	if got, _ := coveringWritableRoot([]string{rootViaLink}, store); got != rootViaLink {
+		t.Fatalf("coveringWritableRoot = %q, want the configured root %q", got, rootViaLink)
+	}
+	if got, _ := coveringWritableRoot([]string{"relative/db", "~/db"}, store); got != "" {
+		t.Fatalf("relative and ~-prefixed roots must never cover the store, got %q", got)
+	}
+}
+
+// codexModelPoolWithCodex is a one-entry ModelPool used by
+// TestCodexSeatModesPossible's cases that are testing role/default
+// resolution, not model-pool gating itself (cross-review WC-2 has its own
+// dedicated coverage for the pool being empty or a role's model allowlist
+// excluding every codex model -- see TestCodexModelPermittedForRole and
+// TestCheckCodexAgmsgWritableRoot_NoCodexModelInPool_Pass).
+var codexModelPoolWithCodex = []config.OrgModelPoolEntry{{Driver: "codex", Model: "gpt-6-astra"}}
+
+func TestCodexSeatModesPossible(t *testing.T) {
+	cases := []struct {
+		name               string
+		orgCfg             config.OrgConfig
+		wantWorkspaceWrite bool
+		wantGuarded        bool
+	}{
+		{"empty config uses the built-in default (autonomous)", config.OrgConfig{ModelPool: codexModelPoolWithCodex}, true, false},
+		{
+			"default guarded",
+			config.OrgConfig{ModelPool: codexModelPoolWithCodex, Permissions: config.OrgPermissionsConfig{Default: "guarded"}},
+			false, true,
+		},
+		{
+			"default autonomous plus one guarded role",
+			config.OrgConfig{
+				ModelPool:   codexModelPoolWithCodex,
+				Permissions: config.OrgPermissionsConfig{Default: "autonomous", Roles: map[string]string{"reviewer": "guarded"}},
+			},
+			true, true,
+		},
+		{
+			"all roles guarded, default guarded too",
+			config.OrgConfig{
+				ModelPool:   codexModelPoolWithCodex,
+				Permissions: config.OrgPermissionsConfig{Default: "guarded", Roles: map[string]string{"a": "guarded", "b": "guarded"}},
+			},
+			false, true,
+		},
+		{
+			"an edits role under a guarded default",
+			config.OrgConfig{
+				ModelPool:   codexModelPoolWithCodex,
+				Permissions: config.OrgPermissionsConfig{Default: "guarded", Roles: map[string]string{"implementer": "edits"}},
+			},
+			true, true,
+		},
+		{
+			// self-review NEW-2: a roles entry keyed by the empty string
+			// must not shadow the real default. "" is never a real role
+			// name (internal/cli/org.go's --role is required and non-blank
+			// at spawn), so it is applied as just another configured mode
+			// alongside the "guarded" default, not in place of it.
+			"an empty-string role key does not shadow the default",
+			config.OrgConfig{
+				ModelPool:   codexModelPoolWithCodex,
+				Permissions: config.OrgPermissionsConfig{Default: "guarded", Roles: map[string]string{"": "autonomous"}},
+			},
+			true, true,
+		},
+		{
+			// cross-review WC-2: no codex model in the pool means neither
+			// the default nor any role's mode counts, regardless of what
+			// [org.permissions] configures.
+			"no codex model in the pool suppresses both, even with a guarded default and an autonomous role",
+			config.OrgConfig{Permissions: config.OrgPermissionsConfig{Default: "guarded", Roles: map[string]string{"implementer": "autonomous"}}},
+			false, false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			gotWW, gotG := codexSeatModesPossible(tc.orgCfg)
+			if gotWW != tc.wantWorkspaceWrite || gotG != tc.wantGuarded {
+				t.Errorf("codexSeatModesPossible(%+v) = (%v, %v), want (%v, %v)", tc.orgCfg, gotWW, gotG, tc.wantWorkspaceWrite, tc.wantGuarded)
+			}
+		})
+	}
+}
+
+func TestCodexNotNeededWhyA(t *testing.T) {
+	cases := []struct {
+		name          string
+		codexVerified bool
+		want          string
+	}{
+		{"codex_verified false", false, "[org.permissions].codex_verified is false"},
+		{"codex_verified true, so the role condition is what is missing", true, "no role that can use a codex model resolves to edits or autonomous"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := codexNotNeededWhyA(tc.codexVerified); got != tc.want {
+				t.Errorf("codexNotNeededWhyA(%v) = %q, want %q", tc.codexVerified, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCodexNotNeededWhyB(t *testing.T) {
+	cfgDisplay := "/some/config.toml"
+	cases := []struct {
+		name        string
+		guardedRole bool
+		exists      bool
+		want        string
+	}{
+		{"no guarded role wins regardless of config", false, true, "no role that can use a codex model resolves to guarded"},
+		{"guarded role but config absent", true, false, cfgDisplay + " does not exist"},
+		{"guarded role, config exists, sandbox_mode unset", true, true, cfgDisplay + ` does not set sandbox_mode = "workspace-write"`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := codexNotNeededWhyB(tc.guardedRole, tc.exists, cfgDisplay); got != tc.want {
+				t.Errorf("codexNotNeededWhyB(%v, %v, %q) = %q, want %q", tc.guardedRole, tc.exists, cfgDisplay, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestCodexSandboxReasonClause is self-review NEW-1's pure unit test: zero
+// reasons is never actually rendered by checkCodexAgmsgWritableRoot (it
+// takes the "not needed" branch instead), but is still defined as "" here;
+// one reason is unchanged; two or more are numbered so the boundary
+// between them stays visible despite each reason already containing its
+// own " and ".
+func TestCodexSandboxReasonClause(t *testing.T) {
+	cases := []struct {
+		name    string
+		reasons []string
+		want    string
+	}{
+		{"zero reasons renders as empty", nil, ""},
+		{"one reason is unchanged", []string{"reason a"}, "reason a"},
+		{"two reasons are numbered", []string{"reason a", "reason b"}, "(1) reason a and (2) reason b"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := codexSandboxReasonClause(tc.reasons); got != tc.want {
+				t.Errorf("codexSandboxReasonClause(%v) = %q, want %q", tc.reasons, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestRunDoctorOpts_CodexSandboxCheck_HermeticByDefault proves the TestMain
+// seam (main_test.go) works end to end: without any test-local override,
+// checkCodexAgmsgWritableRoot resolves through doctorCodexSandboxEnv, which
+// TestMain has pinned to a non-existent config path -- so with the
+// default project config (codex_verified = false, no sandbox_mode), the
+// check reads pass/"not needed" regardless of the developer's real
+// ~/.codex/config.toml.
+func TestRunDoctorOpts_CodexSandboxCheck_HermeticByDefault(t *testing.T) {
+	setupTestEmbedFS(t)
+	Version = "0.1.0-test"
+
+	dir := t.TempDir()
+	cfg := initConfig{ProjectName: "test", Packs: []string{"golang"}}
+	if err := executeInit(dir, cfg, false); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	binDir := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, bin := range []string{"claude", "codex", "go"} {
+		writeStubBin(t, binDir, bin, "")
+	}
+	t.Setenv("PATH", binDir)
+
+	agmsgHome := t.TempDir()
+	writeAgmsgHome(t, agmsgHome, "")
+	t.Setenv("RALPH_ORG_AGMSG_HOME", agmsgHome)
+
+	origStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	err := runDoctorOpts(dir, false)
+	_ = w.Close()
+	os.Stdout = origStdout
+	out, _ := io.ReadAll(r)
+
+	if err != nil {
+		t.Fatalf("runDoctorOpts returned error: %v\noutput:\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "Codex sandbox (agmsg writable root): pass") {
+		t.Errorf("expected a pass-level Codex sandbox line in output:\n%s", out)
+	}
+	if !strings.Contains(string(out), "not needed") {
+		t.Errorf("expected the not-needed detail in output:\n%s", out)
+	}
+}
+
+// TestRunDoctorOpts_CodexSandboxCheck_WarnsThroughTheSeam overrides the
+// doctorCodexSandboxEnv seam and sets [org.permissions].codex_verified =
+// true in the project's ralph.toml, proving runDoctorOpts wires
+// checkCodexAgmsgWritableRoot's result into its printed output end to end,
+// and that a warn-level finding does not flip the exit code.
+func TestRunDoctorOpts_CodexSandboxCheck_WarnsThroughTheSeam(t *testing.T) {
+	setupTestEmbedFS(t)
+	Version = "0.1.0-test"
+
+	dir := t.TempDir()
+	cfg := initConfig{ProjectName: "test", Packs: []string{"golang"}}
+	if err := executeInit(dir, cfg, false); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	ralphTomlPath := filepath.Join(dir, "ralph.toml")
+	existing, err := os.ReadFile(ralphTomlPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	appended := string(existing) + "\n[org.permissions]\ncodex_verified = true\n"
+	if err := os.WriteFile(ralphTomlPath, []byte(appended), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	binDir := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, bin := range []string{"claude", "codex", "go"} {
+		writeStubBin(t, binDir, bin, "")
+	}
+	t.Setenv("PATH", binDir)
+
+	agmsgHome := t.TempDir()
+	writeAgmsgHome(t, agmsgHome, "")
+	t.Setenv("RALPH_ORG_AGMSG_HOME", agmsgHome)
+
+	cfgDir := t.TempDir()
+	noSuchCfg := filepath.Join(cfgDir, "config.toml")
+	orig := doctorCodexSandboxEnv
+	doctorCodexSandboxEnv = codexSandboxTestEnv(noSuchCfg, "")
+	t.Cleanup(func() { doctorCodexSandboxEnv = orig })
+
+	origStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	runErr := runDoctorOpts(dir, false)
+	_ = w.Close()
+	os.Stdout = origStdout
+	out, _ := io.ReadAll(r)
+
+	if runErr != nil {
+		t.Fatalf("runDoctorOpts returned error with only a warn-level codex-sandbox finding: %v\noutput:\n%s", runErr, out)
+	}
+	if !strings.Contains(string(out), "Codex sandbox (agmsg writable root): warn") {
+		t.Errorf("expected a warn-level Codex sandbox line in output:\n%s", out)
+	}
+}
+
+// TestCodexConfigDecodeError_ErrorCarriesNoConfigText pins the error
+// interface of codexConfigDecodeError: the check itself never prints it
+// (it reads Line/Column/HasPosition), but anything that logs the error
+// with %v must get position information only, never go-toml's message,
+// which can embed key and table names from the user's config.
+func TestCodexConfigDecodeError_ErrorCarriesNoConfigText(t *testing.T) {
+	withPos := (&codexConfigDecodeError{Line: 3, Column: 7, HasPosition: true}).Error()
+	if withPos != "codex config: could not be decoded (line 3, column 7)" {
+		t.Errorf("Error() with a position = %q", withPos)
+	}
+	noPos := (&codexConfigDecodeError{}).Error()
+	if noPos != "codex config: could not be decoded" {
+		t.Errorf("Error() without a position = %q", noPos)
+	}
+}
+
+// TestCodexRootCoverage_MixedSpellings_ProtectedSymlinkStillBlocks pins the
+// mixed pairings of codexRootCoverage: the root is configured through a
+// symlink, the store is configured with the resolved prefix but reaches its
+// directory through a .agents symlink. Neither same-spelling pair is an
+// ancestor relation that also shows .agents (configured/configured is not
+// an ancestor relation at all; resolved/resolved has lost the .agents
+// element), so only the resolved-root/configured-store pairing can see it.
+func TestCodexRootCoverage_MixedSpellings_ProtectedSymlinkStillBlocks(t *testing.T) {
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	realRoot := filepath.Join(base, "real")
+	realAgents := filepath.Join(realRoot, "elsewhere", "real-agents")
+	if err := os.MkdirAll(filepath.Join(realAgents, "skills", "agmsg", "db"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(realRoot, "home"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(realAgents, filepath.Join(realRoot, "home", ".agents")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	linkRoot := filepath.Join(base, "link")
+	if err := os.Symlink(realRoot, linkRoot); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	store := filepath.Join(realRoot, "home", ".agents", "skills", "agmsg", "db")
+	covers, blocked := codexRootCoverage(linkRoot, store, resolveNearestExisting(store))
+	if !covers {
+		t.Fatalf("the symlinked root must still count as an ancestor of the store")
+	}
+	if !blocked {
+		t.Fatalf("the store is reached through a .agents symlink under the root, so the root must be blocked")
+	}
+
+	// Control: the same root against a store no spelling routes through a
+	// protected directory stays unblocked.
+	plain := filepath.Join(realRoot, "elsewhere", "real-agents", "skills", "agmsg", "db")
+	covers, blocked = codexRootCoverage(linkRoot, plain, resolveNearestExisting(plain))
+	if !covers || blocked {
+		t.Fatalf("control: covers=%v blocked=%v, want covers=true blocked=false", covers, blocked)
+	}
+}
+
+// TestCodexCoveringImplicitRoot_SkipsRootsThatDoNotCover pins the branch a
+// matching root is reached through: an implicit root that is not an
+// ancestor of the store is skipped (no match, no blocked ancestor), and a
+// later one that does cover it is returned with its own exclude key.
+func TestCodexCoveringImplicitRoot_SkipsRootsThatDoNotCover(t *testing.T) {
+	base := t.TempDir()
+	unrelated := filepath.Join(base, "unrelated")
+	covering := filepath.Join(base, "covering")
+	store := filepath.Join(covering, "store")
+	for _, dir := range []string{unrelated, store} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	roots := []codexImplicitRoot{
+		{Dir: unrelated, ExcludeKey: "exclude_slash_tmp"},
+		{Dir: covering, ExcludeKey: "exclude_tmpdir_env_var", FromTmpdirEnv: true},
+	}
+
+	matched, ok, blocked := codexCoveringImplicitRoot(roots, store)
+	if !ok || matched.Dir != covering || matched.ExcludeKey != "exclude_tmpdir_env_var" || !matched.FromTmpdirEnv {
+		t.Fatalf("matched = %+v, ok = %v; want the covering root with its own key", matched, ok)
+	}
+	if blocked != "" {
+		t.Errorf("blocked ancestor = %q, want none", blocked)
+	}
+
+	_, ok, blocked = codexCoveringImplicitRoot(roots[:1], store)
+	if ok || blocked != "" {
+		t.Errorf("a root that does not cover the store must yield no match and no blocked ancestor, got ok=%v blocked=%q", ok, blocked)
+	}
+}
+
+// TestCodexImplicitRootDetail_ConfigAbsent_SaysSoInsteadOfNamingAKey pins
+// the wording for a store under a default temp root when there is no codex
+// config at all: no exclude key can be "not set in" a file that does not
+// exist, so the Detail says the file is absent.
+func TestCodexImplicitRootDetail_ConfigAbsent_SaysSoInsteadOfNamingAKey(t *testing.T) {
+	matched := codexImplicitRoot{Dir: "/fixed-temp", ExcludeKey: "exclude_slash_tmp"}
+	got := codexImplicitRootDetail(matched, "~/.codex/config.toml", "/fixed-temp/store", false, "a reason", "")
+	want := "the agmsg store /fixed-temp/store is under /fixed-temp, which workspace-write keeps writable by default " +
+		"(~/.codex/config.toml does not exist); needed because a reason"
+	if got != want {
+		t.Errorf("Detail =\n%q\nwant\n%q", got, want)
+	}
+	if strings.Contains(got, "is not set in") {
+		t.Errorf("an absent config must not be described as leaving a key unset: %q", got)
+	}
+}
