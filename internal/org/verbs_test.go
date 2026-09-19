@@ -772,8 +772,8 @@ func TestOrgSend_AppendEventFailsAfterEnter_ReportsSubmittedButUnrecorded(t *tes
 	if result.Err == nil {
 		t.Fatal("expected a non-nil Err when the sent event cannot be appended")
 	}
-	if !strings.Contains(result.Err.Error(), "message submitted to seat") || !strings.Contains(result.Err.Error(), "could not be recorded") {
-		t.Errorf("expected the error to say the message was submitted but the sent event could not be recorded, got %v", result.Err)
+	if !strings.Contains(result.Err.Error(), "Enter was pressed for seat") || !strings.Contains(result.Err.Error(), "could not be recorded") {
+		t.Errorf("expected the error to say Enter was pressed but the sent event could not be recorded, got %v", result.Err)
 	}
 	if !result.TextTyped {
 		t.Error("expected TextTyped true: PaneSendText succeeded")

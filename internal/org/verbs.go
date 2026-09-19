@@ -314,12 +314,14 @@ func (o *Org) Send(p SendParams) SendResult {
 	}); err != nil {
 		// Enter already succeeded (and confirmSubmitted already ran) by the
 		// time appendEvent runs -- the message was very likely delivered,
-		// only this history record was lost. The wrapped error says so
-		// explicitly, and EnterPressed=true is how the CLI tells this case
+		// only this history record was lost. The wrapped error states only
+		// what Send observed ("Enter was pressed", not "submitted": the
+		// confirmation's outcome is not carried on an error return), and
+		// EnterPressed=true is how the CLI tells this case
 		// apart from a genuine typed-but-unsubmitted residue (see Send's
 		// doc comment): it must not suggest retyping or pressing Enter.
 		return SendResult{
-			Err:          fmt.Errorf("org: send: message submitted to seat %q but the sent event could not be recorded: %w", p.To, err),
+			Err:          fmt.Errorf("org: send: Enter was pressed for seat %q but the sent event could not be recorded: %w", p.To, err),
 			PaneID:       seat.PaneID,
 			TextTyped:    true,
 			EnterPressed: true,
