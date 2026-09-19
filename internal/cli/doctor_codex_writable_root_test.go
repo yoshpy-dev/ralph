@@ -14,23 +14,34 @@ import (
 )
 
 // codexSandboxTestEnv returns a resolveEnv closure fixed to the given
-// config path and AGMSG_STORAGE_PATH override (Home and TmpDir left ""),
-// for tests that don't want to mutate process environment variables at
-// all. Leaving TmpDir "" is what keeps every such test hermetic against
-// the real machine's TMPDIR (cross-review WC-1): codexImplicitWritableRoots
-// only treats a non-empty TmpDir as a candidate.
+// config path and AGMSG_STORAGE_PATH override (Home, TmpDir, and
+// SlashTmpDir all left ""), for tests that don't want to mutate process
+// environment variables at all. Leaving TmpDir/SlashTmpDir "" is what keeps
+// every such test hermetic against the real machine's TMPDIR and against
+// wherever codex's fixed temp root happens to be (cross-review WC-1 and its
+// follow-up): codexImplicitWritableRoots only treats a non-empty value as a
+// candidate for either.
 func codexSandboxTestEnv(configPath, storageOverride string) func() (codexSandboxEnv, error) {
 	return func() (codexSandboxEnv, error) {
 		return codexSandboxEnv{ConfigPath: configPath, AgmsgStoragePath: storageOverride}, nil
 	}
 }
 
-// codexSandboxTestEnvWithTmpDir is codexSandboxTestEnv plus an explicit
-// TmpDir, for the tests that specifically exercise the $TMPDIR implicit
-// writable root.
-func codexSandboxTestEnvWithTmpDir(configPath, storageOverride, tmpDir string) func() (codexSandboxEnv, error) {
+// codexSandboxTestEnvWithImplicitRoots is codexSandboxTestEnv plus explicit
+// SlashTmpDir/TmpDir, for the tests that specifically exercise one or both
+// implicit writable roots. A test using this MUST inject a fixture
+// directory (e.g. under its own t.TempDir()) for slashTmpDir -- never the
+// real "/tmp" -- so the test stays hermetic regardless of where the test
+// process's own TMPDIR happens to live (the bug cross-review WC-1's
+// follow-up fixed).
+func codexSandboxTestEnvWithImplicitRoots(configPath, storageOverride, slashTmpDir, tmpDir string) func() (codexSandboxEnv, error) {
 	return func() (codexSandboxEnv, error) {
-		return codexSandboxEnv{ConfigPath: configPath, AgmsgStoragePath: storageOverride, TmpDir: tmpDir}, nil
+		return codexSandboxEnv{
+			ConfigPath:       configPath,
+			AgmsgStoragePath: storageOverride,
+			SlashTmpDir:      slashTmpDir,
+			TmpDir:           tmpDir,
+		}, nil
 	}
 }
 
@@ -828,22 +839,29 @@ func TestCheckCodexAgmsgWritableRoot_StorageOverride(t *testing.T) {
 
 // TestCheckCodexAgmsgWritableRoot_ImplicitSlashTmp_PassNamingSlashTmp is
 // cross-review WC-1's central regression test: no explicit writable root
-// covers the store, but the store itself lives under /tmp, which
-// workspace-write keeps writable by default. The Detail names the
-// configured text "/tmp" (not /private/tmp, which is what /tmp resolves to
-// on macOS).
+// covers the store, but the store itself lives under codex's fixed temp
+// root, which workspace-write keeps writable by default. slashTmpFixture
+// stands in for the real /tmp -- injected through the seam, never the real
+// "/tmp" -- so this test's result cannot depend on where the test process's
+// own TMPDIR happens to live (cross-review WC-1's follow-up: a hard-coded
+// "/tmp" here made this exact test, and roughly a dozen unrelated ones,
+// silently flip to the wrong status on any machine whose real TMPDIR is
+// "/tmp", e.g. GitHub Actions' ubuntu-latest with TMPDIR unset). The Detail
+// names the injected fixture path.
 func TestCheckCodexAgmsgWritableRoot_ImplicitSlashTmp_PassNamingSlashTmp(t *testing.T) {
 	agmsgHome := t.TempDir()
 	writeAgmsgHome(t, agmsgHome, "")
 	cfgDir := t.TempDir()
 	cfgPath := writeCodexConfig(t, cfgDir, "")
-	override := "/tmp/ralph-cli-test-wc1-implicit-slash-tmp"
+	slashTmpFixture := filepath.Join(t.TempDir(), "slashtmp")
+	override := filepath.Join(slashTmpFixture, "custom-store")
 
-	r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome, codexSandboxTestEnv(cfgPath, override))
+	r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome,
+		codexSandboxTestEnvWithImplicitRoots(cfgPath, override, slashTmpFixture, ""))
 	if r.Status != "pass" {
-		t.Fatalf("expected pass (workspace-write keeps /tmp writable by default), got %s (%s)", r.Status, r.Detail)
+		t.Fatalf("expected pass (workspace-write keeps the fixed temp root writable by default), got %s (%s)", r.Status, r.Detail)
 	}
-	for _, want := range []string{"/tmp", "workspace-write keeps writable by default", "exclude_slash_tmp is not set in"} {
+	for _, want := range []string{slashTmpFixture, "workspace-write keeps writable by default", "exclude_slash_tmp is not set in"} {
 		if !strings.Contains(r.Detail, want) {
 			t.Errorf("expected detail to contain %q, got: %s", want, r.Detail)
 		}
@@ -851,18 +869,20 @@ func TestCheckCodexAgmsgWritableRoot_ImplicitSlashTmp_PassNamingSlashTmp(t *test
 }
 
 // TestCheckCodexAgmsgWritableRoot_ImplicitSlashTmpExcluded_Warn is the
-// counterpart: exclude_slash_tmp = true turns off the implicit /tmp root,
-// so the same store must now warn.
+// counterpart: exclude_slash_tmp = true turns off the implicit fixed-temp
+// root, so the same store must now warn.
 func TestCheckCodexAgmsgWritableRoot_ImplicitSlashTmpExcluded_Warn(t *testing.T) {
 	agmsgHome := t.TempDir()
 	writeAgmsgHome(t, agmsgHome, "")
 	cfgDir := t.TempDir()
 	cfgPath := writeCodexConfig(t, cfgDir, "[sandbox_workspace_write]\nexclude_slash_tmp = true\n")
-	override := "/tmp/ralph-cli-test-wc1-excluded-slash-tmp"
+	slashTmpFixture := filepath.Join(t.TempDir(), "slashtmp")
+	override := filepath.Join(slashTmpFixture, "custom-store")
 
-	r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome, codexSandboxTestEnv(cfgPath, override))
+	r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome,
+		codexSandboxTestEnvWithImplicitRoots(cfgPath, override, slashTmpFixture, ""))
 	if r.Status != "warn" {
-		t.Fatalf("expected warn (exclude_slash_tmp turns off the implicit /tmp root), got %s (%s)", r.Status, r.Detail)
+		t.Fatalf("expected warn (exclude_slash_tmp turns off the implicit fixed-temp root), got %s (%s)", r.Status, r.Detail)
 	}
 }
 
@@ -871,7 +891,8 @@ func TestCheckCodexAgmsgWritableRoot_ImplicitSlashTmpExcluded_Warn(t *testing.T)
 // codexSandboxEnv seam, never the real machine's TMPDIR), which
 // workspace-write also keeps writable by default unless
 // exclude_tmpdir_env_var is set. The pane-environment note must appear,
-// since TMPDIR is seat-pane-specific.
+// since TMPDIR is seat-pane-specific. SlashTmpDir is left "" so this test
+// exercises the $TMPDIR root alone.
 func TestCheckCodexAgmsgWritableRoot_ImplicitTmpdirEnv_Pass(t *testing.T) {
 	tmpDirFixture := t.TempDir()
 	agmsgHome := filepath.Join(tmpDirFixture, "agmsg-home")
@@ -879,7 +900,8 @@ func TestCheckCodexAgmsgWritableRoot_ImplicitTmpdirEnv_Pass(t *testing.T) {
 	cfgDir := t.TempDir()
 	cfgPath := writeCodexConfig(t, cfgDir, "")
 
-	r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome, codexSandboxTestEnvWithTmpDir(cfgPath, "", tmpDirFixture))
+	r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome,
+		codexSandboxTestEnvWithImplicitRoots(cfgPath, "", "", tmpDirFixture))
 	if r.Status != "pass" {
 		t.Fatalf("expected pass (workspace-write keeps $TMPDIR writable by default), got %s (%s)", r.Status, r.Detail)
 	}
@@ -893,7 +915,9 @@ func TestCheckCodexAgmsgWritableRoot_ImplicitTmpdirEnv_Pass(t *testing.T) {
 
 // TestCheckCodexAgmsgWritableRoot_ImplicitTmpdirEnvExcluded_Warn is the
 // counterpart: with both implicit roots excluded, the same TMPDIR-nested
-// store must warn.
+// store must warn. SlashTmpDir is left "" (as in the Pass case above), so
+// exclude_slash_tmp is redundant here but kept for documentation symmetry
+// with the two-exclude-keys config an operator would actually write.
 func TestCheckCodexAgmsgWritableRoot_ImplicitTmpdirEnvExcluded_Warn(t *testing.T) {
 	tmpDirFixture := t.TempDir()
 	agmsgHome := filepath.Join(tmpDirFixture, "agmsg-home")
@@ -901,7 +925,8 @@ func TestCheckCodexAgmsgWritableRoot_ImplicitTmpdirEnvExcluded_Warn(t *testing.T
 	cfgDir := t.TempDir()
 	cfgPath := writeCodexConfig(t, cfgDir, "[sandbox_workspace_write]\nexclude_tmpdir_env_var = true\nexclude_slash_tmp = true\n")
 
-	r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome, codexSandboxTestEnvWithTmpDir(cfgPath, "", tmpDirFixture))
+	r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome,
+		codexSandboxTestEnvWithImplicitRoots(cfgPath, "", "", tmpDirFixture))
 	if r.Status != "warn" {
 		t.Fatalf("expected warn (both implicit roots excluded), got %s (%s)", r.Status, r.Detail)
 	}
@@ -1043,6 +1068,27 @@ func TestCodexSandboxEnvFromOS(t *testing.T) {
 		}
 	})
 
+	// TestCodexSandboxEnvFromOS_SlashTmpDirAndTmpDir is cross-review WC-1's
+	// follow-up regression test: SlashTmpDir must come from
+	// codexSandboxEnvFromOS itself (the one place the fixed temp root's
+	// literal path is allowed to appear), and TmpDir must reflect the
+	// process's own $TMPDIR -- neither is read anywhere else in this file.
+	t.Run("sets SlashTmpDir and TmpDir from the process environment", func(t *testing.T) {
+		t.Setenv("CODEX_HOME", t.TempDir())
+		t.Setenv("TMPDIR", "/some/seat-tmpdir")
+
+		env, err := codexSandboxEnvFromOS()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if env.SlashTmpDir != "/tmp" {
+			t.Errorf("SlashTmpDir = %q, want /tmp", env.SlashTmpDir)
+		}
+		if env.TmpDir != "/some/seat-tmpdir" {
+			t.Errorf("TmpDir = %q, want /some/seat-tmpdir", env.TmpDir)
+		}
+	})
+
 	t.Run("CODEX_HOME and HOME both empty returns an error", func(t *testing.T) {
 		t.Setenv("CODEX_HOME", "")
 		t.Setenv("HOME", "")
@@ -1109,6 +1155,11 @@ func TestPathCrossesCodexProtectedDir(t *testing.T) {
 }
 
 // TestCodexImplicitWritableRoots is cross-review WC-1's pure unit test.
+// TestCodexImplicitWritableRoots is a pure test of codexImplicitWritableRoots'
+// string logic -- it never touches the filesystem, so the literal paths
+// below (standing in for whatever codexSandboxEnvFromOS or a test fixture
+// would inject) are safe to use directly, unlike in an integration test
+// that actually resolves a store against them.
 func TestCodexImplicitWritableRoots(t *testing.T) {
 	withExcludes := func(excludeSlashTmp, excludeTmpdirEnvVar bool) codexUserConfig {
 		var cfg codexUserConfig
@@ -1117,21 +1168,25 @@ func TestCodexImplicitWritableRoots(t *testing.T) {
 		return cfg
 	}
 	cases := []struct {
-		name   string
-		cfg    codexUserConfig
-		tmpDir string
-		want   []string
+		name        string
+		cfg         codexUserConfig
+		slashTmpDir string
+		tmpDir      string
+		want        []string
 	}{
-		{"both defaults, tmpDir set", withExcludes(false, false), "/abs/tmpdir", []string{"/tmp", "/abs/tmpdir"}},
-		{"exclude_slash_tmp drops /tmp", withExcludes(true, false), "/abs/tmpdir", []string{"/abs/tmpdir"}},
-		{"exclude_tmpdir_env_var drops tmpDir", withExcludes(false, true), "/abs/tmpdir", []string{"/tmp"}},
-		{"both excluded", withExcludes(true, true), "/abs/tmpdir", nil},
-		{"empty tmpDir ignored", withExcludes(false, false), "", []string{"/tmp"}},
-		{"relative tmpDir ignored", withExcludes(false, false), "relative/tmp", []string{"/tmp"}},
+		{"both set, both defaults", withExcludes(false, false), "/injected/slashtmp", "/abs/tmpdir", []string{"/injected/slashtmp", "/abs/tmpdir"}},
+		{"exclude_slash_tmp drops slashTmpDir", withExcludes(true, false), "/injected/slashtmp", "/abs/tmpdir", []string{"/abs/tmpdir"}},
+		{"exclude_tmpdir_env_var drops tmpDir", withExcludes(false, true), "/injected/slashtmp", "/abs/tmpdir", []string{"/injected/slashtmp"}},
+		{"both excluded", withExcludes(true, true), "/injected/slashtmp", "/abs/tmpdir", nil},
+		{"empty slashTmpDir ignored", withExcludes(false, false), "", "/abs/tmpdir", []string{"/abs/tmpdir"}},
+		{"relative slashTmpDir ignored", withExcludes(false, false), "relative/slashtmp", "/abs/tmpdir", []string{"/abs/tmpdir"}},
+		{"empty tmpDir ignored", withExcludes(false, false), "/injected/slashtmp", "", []string{"/injected/slashtmp"}},
+		{"relative tmpDir ignored", withExcludes(false, false), "/injected/slashtmp", "relative/tmp", []string{"/injected/slashtmp"}},
+		{"both empty", withExcludes(false, false), "", "", nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := codexImplicitWritableRoots(tc.cfg, tc.tmpDir)
+			got := codexImplicitWritableRoots(tc.cfg, tc.slashTmpDir, tc.tmpDir)
 			if len(got) != len(tc.want) {
 				t.Fatalf("codexImplicitWritableRoots(...) = %v, want %v", got, tc.want)
 			}

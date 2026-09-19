@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 
@@ -28,24 +29,32 @@ type codexSandboxEnv struct {
 	ConfigPath       string // the user's codex config.toml, as this process would read it
 	AgmsgStoragePath string // $AGMSG_STORAGE_PATH as seen by this process ("" when unset)
 	TmpDir           string // $TMPDIR as seen by this process ("" when unset) -- see codexImplicitWritableRoots
+	SlashTmpDir      string // the directory codex's workspace-write sandbox keeps writable as its fixed temp root (unix: /tmp; unset where there is no such default) -- empty disables that implicit root; see codexImplicitWritableRoots
 }
 
 // codexSandboxEnvFromOS resolves codexSandboxEnv from CODEX_HOME,
-// os.UserHomeDir, AGMSG_STORAGE_PATH, and TMPDIR. This is the only function
-// in this file allowed to call os.UserHomeDir/os.Getenv -- every other
-// function that needs one of these values takes it as a parameter, so
+// os.UserHomeDir, AGMSG_STORAGE_PATH, TMPDIR, and runtime.GOOS. This is the
+// only function in this file allowed to call os.UserHomeDir/os.Getenv, and
+// the only place the fixed temp root's literal path appears at all -- every
+// other function that needs one of these values takes it as a parameter, so
 // TestMain can pin it and no test accidentally reads the developer's real
-// home or the machine's real TMPDIR (cross-review WC-1: every t.TempDir()
-// fixture lives under the real TMPDIR, so a check that read TMPDIR directly
-// instead of through this seam could never be tested hermetically). The
-// config path follows the exact rule codexModelsCachePath uses for codex's
-// own model cache (see its doc comment): CODEX_HOME is used literally when
-// non-empty, else $HOME/.codex. Returns an error only when CODEX_HOME is
-// empty and the home directory cannot be resolved -- in that case there is
-// no way to build ConfigPath at all. When CODEX_HOME IS set but the home
-// directory still can't be resolved, Home is left "" (display falls back
-// to the raw path) rather than failing the whole check over a value it
-// doesn't strictly need.
+// home, the machine's real TMPDIR, or that hard-coded path (cross-review
+// WC-1's follow-up: every t.TempDir() fixture lives under the real TMPDIR,
+// and on a machine or CI runner whose real TMPDIR happens to equal codex's
+// own fixed temp root -- Go's own default when TMPDIR is unset -- a check
+// that hard-coded that path instead of routing it through this seam could
+// never be tested hermetically; SlashTmpDir exists so tests can inject a
+// fixture directory here instead). The config path follows the exact rule
+// codexModelsCachePath uses for codex's own model cache (see its doc
+// comment): CODEX_HOME is used literally when non-empty, else $HOME/.codex.
+// Returns an error only when CODEX_HOME is empty and the home directory
+// cannot be resolved -- in that case there is no way to build ConfigPath at
+// all. When CODEX_HOME IS set but the home directory still can't be
+// resolved, Home is left "" (display falls back to the raw path) rather
+// than failing the whole check over a value it doesn't strictly need.
+// SlashTmpDir is set on every platform except windows, where codex's
+// documented fixed temp root has no equivalent, so it stays unset there and
+// codexImplicitWritableRoots simply skips that implicit root.
 func codexSandboxEnvFromOS() (codexSandboxEnv, error) {
 	home, homeErr := os.UserHomeDir()
 	if homeErr != nil {
@@ -62,11 +71,17 @@ func codexSandboxEnvFromOS() (codexSandboxEnv, error) {
 		configPath = filepath.Join(home, ".codex", "config.toml")
 	}
 
+	var slashTmpDir string
+	if runtime.GOOS != "windows" {
+		slashTmpDir = "/tmp"
+	}
+
 	return codexSandboxEnv{
 		Home:             home,
 		ConfigPath:       configPath,
 		AgmsgStoragePath: os.Getenv("AGMSG_STORAGE_PATH"),
 		TmpDir:           os.Getenv("TMPDIR"),
+		SlashTmpDir:      slashTmpDir,
 	}, nil
 }
 
@@ -76,9 +91,9 @@ func codexSandboxEnvFromOS() (codexSandboxEnv, error) {
 // (main_test.go) can pin it to a config path that does not exist, keeping
 // every runDoctor*-based test hermetic against the developer's real
 // ~/.codex/config.toml (same seam shape as doctorShellAliasEnv). TestMain's
-// pinned literal leaves TmpDir unset (Go zero value ""), which is already
-// hermetic: codexImplicitWritableRoots only treats a non-empty TmpDir as a
-// candidate.
+// pinned literal leaves TmpDir and SlashTmpDir unset (Go zero value ""),
+// which is already hermetic: codexImplicitWritableRoots only treats a
+// non-empty value as a candidate for either.
 var doctorCodexSandboxEnv = codexSandboxEnvFromOS
 
 // codexUserConfig is a minimal decode of the user-level codex config.toml:
@@ -592,19 +607,28 @@ func coveringWritableRoot(roots []string, target string) (covering, blockedAnces
 
 // codexImplicitWritableRoots returns the directories workspace-write keeps
 // writable by default, regardless of writable_roots (cross-review WC-1):
-// "/tmp" unless [sandbox_workspace_write].exclude_slash_tmp is true
-// (docs/evidence/codex-seat-permissions-2026-09-18.md P4 confirms /tmp is
-// writable under workspace-write), and tmpDir (the seat's own $TMPDIR, via
-// the codexSandboxEnv seam -- never os.Getenv directly, so tests stay
-// hermetic against the real machine's TMPDIR) when it is non-empty,
-// absolute, and [sandbox_workspace_write].exclude_tmpdir_env_var is not
-// true. Order matters: coveringWritableRoot returns the first match, and
-// callers use identity against "/tmp" to tell the two apart (see
-// codexImplicitRootKey).
-func codexImplicitWritableRoots(cfg codexUserConfig, tmpDir string) []string {
+// slashTmpDir (codex's fixed temp root -- injected by the caller rather
+// than hard-coded here, see codexSandboxEnv.SlashTmpDir for why) unless
+// [sandbox_workspace_write].exclude_slash_tmp is true
+// (docs/evidence/codex-seat-permissions-2026-09-18.md P4 confirms this
+// fixed root is writable under workspace-write), and tmpDir (the seat's own
+// $TMPDIR) when it is non-empty, absolute, and
+// [sandbox_workspace_write].exclude_tmpdir_env_var is not true. Both values
+// come from the codexSandboxEnv seam -- never os.Getenv or a hard-coded
+// path inside this function -- specifically because every t.TempDir()
+// fixture in this package's own tests lives under the real TMPDIR, and on a
+// machine or CI runner whose real TMPDIR happens to equal codex's own fixed
+// temp root (Go's own default when TMPDIR is unset), a hard-coded path here
+// would make those fixtures collide with this exact implicit root and
+// silently turn dozens of "should warn" tests into "pass" (the bug this
+// seam fixes: cross-review WC-1 follow-up). Order matters:
+// coveringWritableRoot returns the first match, and callers compare the
+// match's identity against slashTmpDir (see codexImplicitRootKey) rather
+// than against a hard-coded path to tell the two apart.
+func codexImplicitWritableRoots(cfg codexUserConfig, slashTmpDir, tmpDir string) []string {
 	var roots []string
-	if !cfg.SandboxWorkspaceWrite.ExcludeSlashTmp {
-		roots = append(roots, "/tmp")
+	if slashTmpDir != "" && filepath.IsAbs(slashTmpDir) && !cfg.SandboxWorkspaceWrite.ExcludeSlashTmp {
+		roots = append(roots, slashTmpDir)
 	}
 	if tmpDir != "" && filepath.IsAbs(tmpDir) && !cfg.SandboxWorkspaceWrite.ExcludeTmpdirEnvVar {
 		roots = append(roots, tmpDir)
@@ -614,10 +638,14 @@ func codexImplicitWritableRoots(cfg codexUserConfig, tmpDir string) []string {
 
 // codexImplicitRootKey names the [sandbox_workspace_write] key that, if set
 // true, would stop implicitRoot from being writable by default:
-// exclude_slash_tmp for "/tmp", exclude_tmpdir_env_var for the $TMPDIR
-// root -- the only two values codexImplicitWritableRoots ever returns.
-func codexImplicitRootKey(implicitRoot string) string {
-	if implicitRoot == "/tmp" {
+// exclude_slash_tmp when implicitRoot is slashTmpDir itself,
+// exclude_tmpdir_env_var otherwise (the only other value
+// codexImplicitWritableRoots ever returns). Deciding by identity against
+// the injected slashTmpDir -- never a hard-coded path -- keeps this correct
+// even though codexSandboxEnvFromOS is the only place that ever sets
+// slashTmpDir at all.
+func codexImplicitRootKey(implicitRoot, slashTmpDir string) string {
+	if slashTmpDir != "" && implicitRoot == slashTmpDir {
 		return "exclude_slash_tmp"
 	}
 	return "exclude_tmpdir_env_var"
@@ -654,18 +682,20 @@ const codexPaneEnvironmentMayDifferClause = "the seat's pane environment may dif
 // entry (cross-review WC-1). exists distinguishes "the config exists but
 // doesn't turn this default off" from "there is no config to turn it off
 // in" (the same convention codexNotNeededWhyB and codexWritableRootDetail's
-// missing-config form use). When implicitRoot came from $TMPDIR (not the
-// fixed "/tmp"), the pane-environment note is appended to suffix unless
-// it's already there from an AGMSG_STORAGE_PATH override -- the two notes
-// say the same thing, so this never repeats it.
-func codexImplicitRootDetail(implicitRoot, cfgDisplay, store string, exists bool, reasonClause, suffix string) string {
+// missing-config form use). When implicitRoot came from $TMPDIR rather than
+// slashTmpDir (compared by identity, never against a hard-coded path -- see
+// codexImplicitRootKey), the pane-environment note is appended to suffix
+// unless it's already there from an AGMSG_STORAGE_PATH override -- the two
+// notes say the same thing, so this never repeats it.
+func codexImplicitRootDetail(implicitRoot, slashTmpDir, cfgDisplay, store string, exists bool, reasonClause, suffix string) string {
 	var keyClause string
 	if !exists {
 		keyClause = fmt.Sprintf("%s does not exist", cfgDisplay)
 	} else {
-		keyClause = fmt.Sprintf("%s is not set in %s", codexImplicitRootKey(implicitRoot), cfgDisplay)
+		keyClause = fmt.Sprintf("%s is not set in %s", codexImplicitRootKey(implicitRoot, slashTmpDir), cfgDisplay)
 	}
-	if implicitRoot != "/tmp" && !strings.Contains(suffix, codexPaneEnvironmentMayDifferClause) {
+	fromTmpdirEnv := slashTmpDir == "" || implicitRoot != slashTmpDir
+	if fromTmpdirEnv && !strings.Contains(suffix, codexPaneEnvironmentMayDifferClause) {
 		suffix += fmt.Sprintf(" (%s)", codexPaneEnvironmentMayDifferClause)
 	}
 	return fmt.Sprintf("the agmsg store %s is under %s, which workspace-write keeps writable by default (%s); needed because %s",
@@ -846,11 +876,11 @@ func checkCodexAgmsgWritableRoot(orgCfg config.OrgConfig, agmsgHome string, reso
 		return r
 	}
 
-	implicitRoots := codexImplicitWritableRoots(cfg, env.TmpDir)
+	implicitRoots := codexImplicitWritableRoots(cfg, env.SlashTmpDir, env.TmpDir)
 	implicitRoot, implicitBlockedAncestor := coveringWritableRoot(implicitRoots, store)
 	if implicitRoot != "" {
 		r.Status = "pass"
-		r.Detail = codexImplicitRootDetail(implicitRoot, cfgDisplay, store, exists, reasonClause, suffix)
+		r.Detail = codexImplicitRootDetail(implicitRoot, env.SlashTmpDir, cfgDisplay, store, exists, reasonClause, suffix)
 		return r
 	}
 	if blockedAncestor == "" {
