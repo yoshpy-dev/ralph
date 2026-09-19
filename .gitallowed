@@ -1,0 +1,5 @@
+# Narrow false-positive allowlist for scripts/secret-scan.sh (one ERE per line).
+# Fake values in internal/cli/doctor_shell_alias_test.go: the test asserts that
+# an alias VALUE never reaches a doctor Detail, so the fixture has to look like
+# a secret. They are not credentials.
+api_key=SECRET(123|456)
