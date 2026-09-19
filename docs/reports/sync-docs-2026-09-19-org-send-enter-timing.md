@@ -124,3 +124,15 @@ handled by Slice C's addendum line (see above).
   — that is a `/pr`-time pre-check per this task's own constraints; manually
   spot-checked the diff for credential-shaped `key=value` strings (none) and
   confirmed no `.gitallowed` edit was made.
+
+## Orchestrator correction (2026-09-19, after this report)
+
+The tech-debt row described above listed `PaneSendText`'s own error branch
+as untested. That was already out of date when this pass ran: commit
+3e35c4d (before this pass) added `fakeHerdr.paneSendTextErr` and
+`TestOrgSend_PaneSendTextFails_NoEnterNoEventNoTypedFlag`. The test report
+still names it as a gap because it predates that commit. The row was
+rewritten to keep only the two gaps that remain (the `findSeat` read-error
+branch, and the literal 750 ms default not asserted at runtime), and the
+skill `send` row's last sentence was reworded in Japanese only (no change
+in meaning).
