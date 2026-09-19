@@ -79,21 +79,20 @@ func resolvedHerdrAgentName(seat SeatStatus) string {
 	return herdrAgentName(seat.OrgID, seat.SeatID)
 }
 
-// SendProgress reports how far Send got before returning, replacing the
-// earlier two-bool (TextTyped/EnterPressed) design (cross-review AR-1,
-// docs/reports/cross-review-triage-org-send-enter-timing.md): a bool can
-// only say "yes" or "no", but driver.ExecRunner.Run shells out to herdr
-// under exec.CommandContext (internal/org/driver/driver.go), so a ctx
-// deadline firing while `herdr pane send-text` or `herdr pane send-keys`
-// is still in flight kills the herdr process and returns an error whether
-// or not herdr had already delivered the paste or the keystroke. The old
-// bools collapsed that into a false "no", which then told an operator
-// "not submitted, retype it" on a seat that may have already submitted and
-// reached an approval dialog -- exactly the blind-Enter hazard this whole
-// change exists to prevent (the same failure class as self-review
-// revalidation NEW-1). SendProgress instead has two "call attempted,
-// outcome unknown" states, so Send's error text and the CLI's operator
-// notes both say only what was actually observed.
+// SendProgress reports how far Send got before returning. Two of its five
+// states are deliberately "call attempted, outcome unknown": herdr calls
+// run through driver.ExecRunner.Run's exec.CommandContext
+// (internal/org/driver/driver.go), so a ctx deadline firing while `herdr
+// pane send-text` or `herdr pane send-keys` is still in flight kills the
+// herdr process and returns an error whether or not herdr had already
+// delivered the paste or the keystroke. Reporting a flat "no" for those
+// calls would tell an operator "not submitted, retype it" on a seat that
+// may have already submitted and reached an approval dialog -- exactly the
+// blind-Enter hazard this whole change exists to prevent -- so Send's
+// error text and the CLI's operator notes both say only what was actually
+// observed. See cross-review AR-1
+// (docs/reports/cross-review-triage-org-send-enter-timing.md) for the
+// incident that prompted this design.
 type SendProgress int
 
 const (

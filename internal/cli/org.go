@@ -136,13 +136,16 @@ func newOrgRuntimeAt(resolvedStateDir, configPath string) (*org.Org, error) {
 // fails with "seat not found" or -- worse -- silently reads a different
 // seat that happens to share the same org_id/seat_id in that default
 // manifest. An env-resolved or default-resolved state dir is deliberately
-// NOT appended: the same shell resolves it the same way when the operator
-// runs the printed command themselves, so repeating it would be redundant
-// (and, for RALPH_ORG_STATE_DIR, could go stale if the operator's env
-// changes between the two commands). resolvedStateDir must be the value
-// org.ResolveOrgStateDir already returned (always absolute), not the raw
-// flag text, so the hint survives a cwd change before the operator acts on
-// it.
+// NOT appended: the same shell, run from the same directory with the same
+// environment, resolves it the same way when the operator runs the
+// printed command themselves, so repeating it would be redundant as long
+// as neither changes between the two commands (RALPH_ORG_STATE_DIR can go
+// stale if the env changes; the git-toplevel and cwd fallbacks depend on
+// cwd the same way, since org.ResolveOrgStateDir shells out to `git
+// rev-parse --show-toplevel` in the current directory). resolvedStateDir
+// must be the value org.ResolveOrgStateDir already returned (always
+// absolute), not the raw flag text, so the hint survives a cwd change
+// before the operator acts on it.
 //
 // --config is deliberately not included: newOrgReadCmd's RunE loads
 // *configPath into org.Org.Config, but (*org.Org).Read never reads that
@@ -447,10 +450,8 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 				// prints no note.
 				switch result.Progress {
 				case org.SendProgressTextUnacknowledged:
-					// PaneSendText itself returned an error. herdr's CLI can
-					// be killed by ctx expiry mid-call, so this does NOT
-					// mean the text failed to reach the pane -- Send
-					// genuinely does not know either way.
+					// Outcome unknown, not "failed" -- see SendProgress's
+					// doc comment for why.
 					_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
 						"note: the send-text call to seat %q (pane %s) failed, so the message may or "+
 							"may not have been typed into the input box. Check the pane before sending "+
@@ -458,20 +459,16 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 							"seat with '%s'.\n",
 						to, result.PaneID, readHint)
 				case org.SendProgressTextTyped:
-					// Text IS known to have reached the pane (PaneSendText
-					// succeeded); Enter was never attempted -- the
-					// pre-Enter pause was cut short by ctx expiring.
+					// The one state that IS certain: PaneSendText really did
+					// return success before ctx expired.
 					_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
 						"note: the message text was typed into pane %s of seat %q but not submitted. "+
 							"Check it with '%s' and clear or submit it there before sending again: a "+
 							"second send would be typed after it.\n",
 						result.PaneID, to, readHint)
 				case org.SendProgressEnterUnacknowledged:
-					// Enter was sent, but herdr's response was cut off by
-					// ctx expiry -- the message may or may not have been
-					// submitted. Must not tell the operator to press Enter
-					// unconditionally: it might already be delivered, and
-					// the seat could be showing an approval dialog.
+					// Outcome unknown -- the note is conditional on purpose:
+					// never tell the operator to press Enter unconditionally.
 					_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
 						"note: the text was typed and Enter was sent to seat %q (pane %s), but herdr "+
 							"did not acknowledge it, so the message may or may not have been "+
@@ -481,15 +478,8 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 							"and do not send the message again.\n",
 						to, result.PaneID, readHint)
 				case org.SendProgressEnterPressed:
-					// Enter already succeeded (and confirmSubmitted already
-					// ran) by the time this error happened -- the message
-					// was very likely delivered, only the sent history
-					// record was lost (the appendEvent failure). This must
-					// NOT suggest retyping, clearing, or pressing Enter:
-					// doing so on a seat that has already submitted and may
-					// have since reached an approval dialog is exactly the
-					// blind-keystroke hazard confirmSubmitted's doc comment
-					// warns about.
+					// The message was very likely delivered -- must NOT
+					// suggest retyping, clearing, or pressing Enter.
 					_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
 						"note: Enter was already pressed for seat %q (pane %s); only the sent "+
 							"history event could not be recorded. Do not send the message again. "+
@@ -511,8 +501,10 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 					"warning: could not confirm that seat %q started working after Enter. "+
 						"Check its pane with '%s'. "+
 						"If the message is still sitting in the input box, submit it with "+
-						"'herdr pane send-keys %s Enter'. ralph does not resend Enter on its "+
-						"own: a blind keystroke could confirm an approval dialog.\n",
+						"'herdr pane send-keys %s Enter'. If the pane shows anything else "+
+						"(the seat is working, or it shows a dialog), do not press Enter. "+
+						"ralph does not resend Enter on its own: a blind keystroke could "+
+						"confirm an approval dialog.\n",
 					to, readHint, result.PaneID)
 			}
 			return nil

@@ -1230,8 +1230,11 @@ func TestOrgSend_NegativeEnterDelayMS_NonZeroExit(t *testing.T) {
 // unconfirmed-submit path: with the herdr stub set to fail only the
 // post-Enter confirm AgentWait call (ORG_STUB_AGENT_WAIT_CONFIRM_FAIL, see
 // herdrStub's doc comment), `ralph org send` still exits 0, but prints a
-// warning to stderr naming the seat, the pane id, and the no-resend
-// rationale.
+// warning to stderr naming the seat, the pane id, the no-resend rationale,
+// and (self-review cycle-2 C2-2,
+// docs/reports/self-review-2026-09-19-org-send-enter-timing.md) the same
+// "do not press Enter if the pane shows anything else" guard the error-path
+// notes already carry.
 func TestOrgSend_UnconfirmedSubmit_WarnsOnStderr_ExitZero(t *testing.T) {
 	setupOrgStubPATH(t)
 	stateDir := filepath.Join(t.TempDir(), "state")
@@ -1262,6 +1265,9 @@ func TestOrgSend_UnconfirmedSubmit_WarnsOnStderr_ExitZero(t *testing.T) {
 	}
 	if !strings.Contains(out, "does not resend Enter") {
 		t.Errorf("expected the warning to explain ralph does not resend Enter, got: %s", out)
+	}
+	if !strings.Contains(out, "do not press Enter") {
+		t.Errorf("expected the warning to explicitly say not to press Enter when the pane shows anything else, got: %s", out)
 	}
 }
 
@@ -1400,13 +1406,21 @@ func TestOrgSend_PaneSendTextFails_NotesTextUnacknowledgedOnStderr(t *testing.T)
 // budget check passes but the pre-Enter wait's ctx then expires -- the
 // real-subprocess analogue of fakeHerdr.paneSendTextDelay.
 //
-// --timeout-ms 1500 / --enter-delay-ms 400 / sleep 1.1s: the budget check
-// (ctx remaining roughly 1500ms minus one subprocess call's overhead) must
-// exceed 400ms -- true with a ~1000ms margin. After the 1.1s send-text
-// sleep (plus its own subprocess overhead), well under 400ms of ctx budget
-// remains when the 400ms pre-Enter timer starts, so ctx wins with a
-// comfortable margin even under generous (100-150ms) worst-case per-call
-// subprocess-overhead assumptions.
+// --timeout-ms 2500 / --enter-delay-ms 1800 / sleep 1.1s (self-review
+// cycle-2 C2-1, docs/reports/self-review-2026-09-19-org-send-enter-timing.md
+// -- the previous 1500/400 pairing made the ctx-vs-timer race's margin
+// equal the two herdr-stub subprocess calls' own overhead, so a FAST,
+// unloaded machine had the thinnest margin, and any overhead over 400ms
+// killed the send-text call itself and flipped the result to
+// text-unacknowledged). With o1/o2 as each stub subprocess call's own
+// overhead: the budget check's margin is about 700ms minus o1 (2500 -
+// o1 - 1800); PaneSendText's own survival margin (it must return before
+// ctx expires, or this test would hit SendProgressTextUnacknowledged
+// instead) is about 1400ms minus (o1+o2) (2500 - o1 - 1100 - o2); and once
+// PaneSendText does return, ctx has at most ~1400ms left against a 1800ms
+// timer, so it wins the pre-Enter wait by 400ms PLUS (o1+o2) -- floored at
+// 400ms regardless of overhead, and growing with it, the opposite
+// direction from before.
 func TestOrgSend_CtxExpiresDuringEnterDelay_NotesTextTypedOnStderr(t *testing.T) {
 	setupOrgStubPATH(t)
 	stateDir := filepath.Join(t.TempDir(), "state")
@@ -1423,7 +1437,7 @@ func TestOrgSend_CtxExpiresDuringEnterDelay_NotesTextTypedOnStderr(t *testing.T)
 
 	out, err := runOrgCmd(t, "send", "--org-id", "org-a", "--to", "seat-1",
 		"--text", "TYPE: TASK\nTASK_ID: t-1\n\ndo the thing",
-		"--timeout-ms", "1500", "--enter-delay-ms", "400", "--state-dir", stateDir)
+		"--timeout-ms", "2500", "--enter-delay-ms", "1800", "--state-dir", stateDir)
 	if err == nil {
 		t.Fatalf("expected non-zero exit when ctx expires inside the pre-Enter pause, output: %s", out)
 	}
@@ -1486,16 +1500,17 @@ func TestOrgSend_BudgetTooSmallForEnterDelay_NoTypedNoteOnStderr(t *testing.T) {
 	}
 }
 
-// TestOrgSend_AppendEventFailsAfterEnter_NotesSubmittedNotRecorded is the CLI
-// counterpart of internal/org/verbs_test.go's
-// TestOrgSend_AppendEventFailsAfterEnter_ReportsSubmittedButUnrecorded
-// (self-review revalidation NEW-1): when the manifest write for the `sent`
-// event fails after Enter has already succeeded, the CLI must print the
-// "Enter was already pressed ... do not send the message again" note --
-// and must NOT print the typed-but-unsubmitted note or mention
-// "send-keys", either of which would wrongly suggest pressing Enter on a
-// seat that has very likely already submitted and may have reached an
-// approval dialog.
+// TestOrgSend_AppendEventFailsAfterEnter_NotesEnterPressedNotRecorded is the
+// CLI counterpart of internal/org/verbs_test.go's
+// TestOrgSend_AppendEventFailsAfterEnter_ReportsEnterPressedButUnrecorded,
+// renamed in cycle-2 (C2-3, docs/reports/self-review-2026-09-19-org-send-enter-timing.md)
+// to say what Send actually observed: "Enter was pressed", not
+// "submitted". When the manifest write for the `sent` event fails after
+// Enter has already succeeded, the CLI must print the "Enter was already
+// pressed ... do not send the message again" note -- and must NOT print
+// the typed-but-unsubmitted note or mention "send-keys", either of which
+// would wrongly suggest pressing Enter on a seat that has very likely
+// already submitted and may have reached an approval dialog.
 //
 // Unix-only, no build tag needed: internal/cli's own test suite already is
 // one (see TestCheckCodexAgmsgWritableRoot_UnreadableConfig_InfoWithReasonOnly's
@@ -1503,7 +1518,7 @@ func TestOrgSend_BudgetTooSmallForEnterDelay_NoTypedNoteOnStderr(t *testing.T) {
 // internal/org/lockfile.go uses syscall.Flock unconditionally. The
 // manifest file is chmod'd read-only AFTER spawn's own writes have already
 // landed, so only the send verb's own append fails.
-func TestOrgSend_AppendEventFailsAfterEnter_NotesSubmittedNotRecorded(t *testing.T) {
+func TestOrgSend_AppendEventFailsAfterEnter_NotesEnterPressedNotRecorded(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores a read-only file's permission bit")
 	}

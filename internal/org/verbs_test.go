@@ -737,9 +737,8 @@ func TestOrgSend_CtxExpiresDuringEnterDelay_AfterBudgetCheckPasses(t *testing.T)
 // can be killed by ctx deadline expiry mid-call
 // (driver.ExecRunner.Run uses exec.CommandContext), so an error here does
 // NOT mean Enter failed to reach the pane; it means Send does not know
-// either way. Progress must be SendProgressEnterUnacknowledged (not the
-// old, over-confident TextTyped=true/EnterPressed=false), and the error
-// text must say the outcome is unknown rather than assert it never
+// either way. Progress must be SendProgressEnterUnacknowledged, and the
+// error text must say the outcome is unknown rather than assert it never
 // happened.
 func TestOrgSend_PaneSendKeysFails_ReportsEnterUnacknowledged(t *testing.T) {
 	o, h, _ := testOrg(t)
@@ -777,12 +776,11 @@ func TestOrgSend_PaneSendKeysFails_ReportsEnterUnacknowledged(t *testing.T) {
 // the step before it: when herdr rejects the send-text call, Send still
 // does not press Enter (a keystroke into a pane whose input box ralph
 // does not know it filled is exactly the blind-Enter hazard this whole
-// change rules out) and still appends no `sent` event -- but, unlike the
-// pre-AR-1 design, Send no longer claims nothing happened.
-// exec.CommandContext can kill herdr's CLI mid-call, so the paste may
-// already have landed before the error came back: Progress reports
-// SendProgressTextUnacknowledged (not the old TextTyped=false) and PaneID
-// IS set, so the CLI can still point the operator at the pane to check.
+// change rules out) and still appends no `sent` event -- but it does not
+// claim nothing happened either. exec.CommandContext can kill herdr's CLI
+// mid-call, so the paste may already have landed before the error came
+// back: Progress reports SendProgressTextUnacknowledged and PaneID IS set,
+// so the CLI can still point the operator at the pane to check.
 func TestOrgSend_PaneSendTextFails_ReportsTextUnacknowledged(t *testing.T) {
 	o, h, _ := testOrg(t)
 	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
@@ -819,13 +817,15 @@ func TestOrgSend_PaneSendTextFails_ReportsTextUnacknowledged(t *testing.T) {
 	}
 }
 
-// TestOrgSend_AppendEventFailsAfterEnter_ReportsSubmittedButUnrecorded is the
-// self-review revalidation NEW-1 fix
-// (docs/reports/self-review-2026-09-19-org-send-enter-timing.md): when the
-// manifest write for the `sent` event fails AFTER Enter has already
-// succeeded (and confirmSubmitted has already run), Send must report
-// Progress=SendProgressEnterPressed and wrap the error to say Enter was
-// pressed -- this is what lets the CLI tell "very likely delivered, only
+// TestOrgSend_AppendEventFailsAfterEnter_ReportsEnterPressedButUnrecorded is
+// the self-review revalidation NEW-1 fix, renamed in cycle-2 (C2-3,
+// docs/reports/self-review-2026-09-19-org-send-enter-timing.md) to say what
+// Send actually observed: "Enter was pressed", not "submitted" -- Send
+// cannot know the message was submitted, only that PaneSendKeys succeeded.
+// When the manifest write for the `sent` event fails AFTER Enter has
+// already succeeded (and confirmSubmitted has already run), Send must
+// report Progress=SendProgressEnterPressed and wrap the error to say Enter
+// was pressed -- this is what lets the CLI tell "Enter was pressed, only
 // the history record was lost" apart from the two typed-but-unsubmitted/
 // unacknowledged residues (see Send's and SendProgress's doc comments).
 //
@@ -836,7 +836,7 @@ func TestOrgSend_PaneSendTextFails_ReportsTextUnacknowledged(t *testing.T) {
 // confirmSubmitted all still run normally against the fake driver, and
 // only the final o.appendEvent call -- a real file write -- fails with a
 // real permission error.
-func TestOrgSend_AppendEventFailsAfterEnter_ReportsSubmittedButUnrecorded(t *testing.T) {
+func TestOrgSend_AppendEventFailsAfterEnter_ReportsEnterPressedButUnrecorded(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores a read-only file's permission bit")
 	}
