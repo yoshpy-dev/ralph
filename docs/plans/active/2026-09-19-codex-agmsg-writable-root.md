@@ -112,6 +112,8 @@ doctor の Check 追加と文書のみ。下流へは次回 release でバイナ
 - 2026-09-19 work: AC-7 の evidence の更新。このリポジトリ + 実 config の該当行は `✓ Codex sandbox (agmsg writable root): pass — not needed: [org.permissions].codex_verified is false and no role resolves to guarded`(既定の permission mode が autonomous で guarded の role がないため、理由 (b) の条件が外れる)。スクラッチ構成の warn / pass は理由の文が `… codex_verified = true and a role resolves to edits or autonomous (ralph passes --sandbox workspace-write to those codex seats)` に変わった以外は前回の記録と同じ
 - 2026-09-19 self-review 再確認(同 report の Revalidation 節、3e43a3c): 当初 9 件はすべて解消、verdict は merge。L6 をコードで直したため、reviewer が提案していた tech-debt 行は取り下げ。修正で生じた新所見 6 件(すべて LOW)も同 cycle 内で直す。NEW-1 理由が 2 つ立つと各理由の中の「and」と連結の「and」が混ざって 4 節の羅列になる → 2 つのときは番号を振る。NEW-2 実効 default を `ResolvePermissionMode(orgCfg, "")` で求めているため、`roles` に空文字キーがあると default が無視され、warn すべき構成が pass になる → `Roles` を外したコピーで解決する。NEW-3 config がない warn で「does not exist」の括弧が store に掛かって読める → config を主語にした文にする。NEW-4 Scope 1 の入力の記述が古い → 本コミットで修正。NEW-5 `config.Load` が失敗しても既定値の `cfg.Org` で判定する点を doc comment に明記。NEW-6 コメントの不正確な 2 箇所
 - 2026-09-19 work: Slice D(再確認の NEW-1〜3・5・6)は implementer に委譲(33ac5a8、2 ファイル、逸脱なし)。NEW-5 は `runDoctorFull` が `config.Load` の失敗後も同じ `cfg` で各 Check を続けることを implementer が `doctor.go` で確認し、doc comment に明記した。再々確認は行わない(1 cycle 1 回)ため、orchestrator が非コメントの差分(実効 default の解決、理由の番号付け、config がない warn の文)を通読し、対象テストと履歴込みの range secret scan(exit 0)を再実行した。implementer の `./scripts/run-verify.sh` は green
+- 2026-09-19 verify(`docs/reports/verify-2026-09-19-codex-agmsg-writable-root.md`、8fefb77): PASS、drift なし。AC-1〜AC-7 を満たし、未レビューだった 33ac5a8 も所見と突き合わせて確認済み。verifier が HEAD からビルドしたバイナリで AC-7 の 3 行を再現し、plan の記録と一致
+- 2026-09-19 test(`docs/reports/test-2026-09-19-codex-agmsg-writable-root.md`、4656651): PASS。対象 94 件 PASS / SKIP 0、8 package ok、race なし、`internal/cli` 83.5%、バイナリの 13 構成と exit code 不変の確認が期待どおり、`CODEX_HOME` を差し替えても `TestRunDoctorOpts*` の結果は同一。tester が挙げた未到達の分岐 2 つ(`codexConfigDecodeError.Error`、`codexConfigReadReason` の `*fs.PathError` 経路)は、報告後に orchestrator がテスト 2 件を追加して埋めた(テストのみの変更。static verify と対象テストは green)
 
 ## Progress checklist
 
@@ -119,6 +121,6 @@ doctor の Check 追加と文書のみ。下流へは次回 release でバイナ
 - [x] Branch created
 - [x] Implementation started
 - [x] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Verification artifact created
+- [x] Test artifact created
 - [ ] PR created

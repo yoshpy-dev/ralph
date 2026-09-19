@@ -1036,3 +1036,19 @@ func TestRunDoctorOpts_CodexSandboxCheck_WarnsThroughTheSeam(t *testing.T) {
 		t.Errorf("expected a warn-level Codex sandbox line in output:\n%s", out)
 	}
 }
+
+// TestCodexConfigDecodeError_ErrorCarriesNoConfigText pins the error
+// interface of codexConfigDecodeError: the check itself never prints it
+// (it reads Line/Column/HasPosition), but anything that logs the error
+// with %v must get position information only, never go-toml's message,
+// which can embed key and table names from the user's config.
+func TestCodexConfigDecodeError_ErrorCarriesNoConfigText(t *testing.T) {
+	withPos := (&codexConfigDecodeError{Line: 3, Column: 7, HasPosition: true}).Error()
+	if withPos != "codex config: could not be decoded (line 3, column 7)" {
+		t.Errorf("Error() with a position = %q", withPos)
+	}
+	noPos := (&codexConfigDecodeError{}).Error()
+	if noPos != "codex config: could not be decoded" {
+		t.Errorf("Error() without a position = %q", noPos)
+	}
+}
