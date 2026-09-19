@@ -10,6 +10,7 @@
 - Cycle: 1/2
 - Total reviewer findings: 3
 - After triage: ACTION_REQUIRED=1, WORTH_CONSIDERING=2, DISMISSED=0
+- User decision (2026-09-19, AskUserQuestion): fix all three findings (AR-1, WC-1, WC-2) and re-run the full pipeline as cycle 2/2
 
 ## Triage context
 

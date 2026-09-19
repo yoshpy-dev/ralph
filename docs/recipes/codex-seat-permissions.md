@@ -49,7 +49,10 @@ recorded in `docs/evidence/codex-seat-permissions-2026-09-18.md`.
   ```
 
   Use the absolute path (`echo "$HOME/.agents/skills/agmsg/db"`). The
-  meta-repo run used an absolute path; a `~` prefix was not tested. If
+  meta-repo run used an absolute path; a `~` prefix was not tested. List
+  the `db` directory itself: a broader root such as your home directory
+  does not help, because codex keeps `.git`, `.agents`, and `.codex`
+  directories under a writable root read-only, recursively. If
   `AGMSG_STORAGE_PATH` is set, agmsg keeps its database there instead, so
   list that directory. `ralph doctor`'s "Codex sandbox (agmsg writable
   root)" check warns when a codex seat of this project could run under
