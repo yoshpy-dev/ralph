@@ -16,7 +16,7 @@
 
 | # | 変更 | ファイル | 内容 |
 |---|------|---------|------|
-| 1 | 待ち | `internal/org/verbs.go`(`Send`) | `PaneSendText` の後、`PaneSendKeys("Enter")` の前に待つ。既定 750ms(定数 `defaultSendEnterDelay`)。`SendParams.EnterDelayMS` が正ならその値。テスト用に `Org.SendEnterDelay`(ゼロなら既定。`AgentStartRetryInterval` と同じ形)で上書きできる。待ちは ctx の期限を尊重する |
+| 1 | 待ち | `internal/org/verbs.go`(`Send`) | `PaneSendText` の後、`PaneSendKeys("Enter")` の前に待つ。既定 750ms(定数 `defaultSendEnterDelay`)。`SendParams.EnterDelayMS` が正ならその値。テスト用に `Org.SendEnterDelay`(ゼロなら既定。`AgentStartRetryInterval` と同じ形)で上書きできる。待ちは ctx の期限を尊重する。**self-review による改訂**: 座席の idle / done の待ちが終わった時点で `--timeout-ms` の残りが待ち時間以下なら、本文を入力する前にエラーで終わる(`nothing was typed`)。入力した後に失敗した場合(待ちの途中の期限切れ、Enter の送信エラー、`sent` イベントの記録エラー)は `SendResult` に `TextTyped` と `PaneID` を載せ、CLI が「その pane を確認してから送り直す」よう stderr に案内する(送り直すと入力欄の残骸の後ろに 2 通目が入力されるため) |
 | 2 | submit の確認(再送なし) | 同上 | Enter の後、`Herdr.AgentWait(ctx, name, ["working", "blocked"], confirmMS)`(既定 3,000ms、定数 `defaultSendSubmitConfirmTimeout`、`Org.SendSubmitConfirmTimeout` で上書き可)で座席が idle / done を離れるのを待つ。working も blocked も「メッセージは submit された」ことを意味する(blocked は承認ダイアログなどの入力待ち)。確認できなくても Enter は再送しない(Design decisions 参照)。herdr の状態は `idle / working / blocked / done / unknown`(herdr 0.7.5 の `agent wait --help` で確認)。pane の文字列は読まない |
 | 3 | 記録 | 同上 | 確認できなければ `sent` イベントの Details の先頭に `submit_unconfirmed=true` を付ける(`raw=true` と同じ形式)。`SendResult` に `SubmitConfirmed bool` を足す。確認できなくても `Send` はエラーにしない(ごく短いターンは待ちが始まる前に working → done になり得るため、未確認は「送信されなかった」ことを意味しない) |
 | 4 | CLI | `internal/cli/org.go`(`send`) | `--enter-delay-ms`(既定 0 = 組み込みの既定値 750ms。負の値は拒否)。submit を確認できなかった場合は stderr に注意を出す(exit code は 0 のまま): 座席の pane を `ralph org read` で確認し、本文が入力欄に残っている場合に限って `herdr pane send-keys <pane_id> Enter` を送る、という案内と pane_id |
@@ -109,13 +109,15 @@
 - 2026-09-19 work: Slice B(実機確認、`docs/evidence/org-send-enter-timing-2026-09-19.md`、4c2d134)。codex 座席: 修正前は 5 回中 3 回で本文が入力欄に残り手動の Enter が必要、修正後(待ち 750ms)は 5 / 5 で submit、`sent` は 5 件とも submit 確認済み。既定値の変更は不要。claude 座席: 修正前でも 5 / 5 で submit(不具合は codex の TUI に固有)、修正後も 5 / 5 で退行なし。承認ダイアログ表示中の codex 座席について herdr は `blocked` を返し、ダイアログは「Yes, proceed」が選択済みで「Press enter to confirm」と表示される(Enter を再送しない根拠)。ダイアログは Escape で拒否し、対象ファイルは作られていない
 - 2026-09-19 work: Slice B の環境面。ユーザー自身の herdr server が動いていたため触れず、専用 server を別 socket で起動した。herdr は `HOME` では設定・状態ディレクトリを切り替えないことが分かり、1 回目の専用 server はユーザーの `session.json` から workspace を復元し、ユーザーの `herdr-server.log` に 8 行追記した。SIGKILL で止め、`session.json` が不変(更新時刻・ハッシュ)であることを確認。以降は `XDG_CONFIG_HOME` / `XDG_STATE_HOME` / `HERDR_SOCKET_PATH` の 3 つで分離した。claude 座席は偽 HOME では keychain を参照できず「Not logged in」になるため、実 HOME + `env -i` の最小環境で起動した。残った変更は `~/.claude.json` のスクラッチディレクトリの信頼記録 1 件と上記のログ 8 行。後始末(座席の stop / disband、複製した auth の削除、専用 server の停止、`/tmp/r163` の削除)は evidence に記録
 - 2026-09-19 work: Slice C(77371a8)。recipe(2 コピー)の手動 Enter の手順を新しい挙動の説明に置き換え、skill(4 面)の `send` の行に待ち・確認・未確認時の対処を追記、#155 の evidence P2 に追記 1 行。同期ゲート 3 本 pass
+- 2026-09-19 self-review cycle 1(`docs/reports/self-review-2026-09-19-org-send-enter-timing.md`、8d7d1d2): MERGE(修正付き)、MEDIUM 3 / LOW 4。Enter が構造的に 1 回であること、再送を足すと落ちる回帰テスト、submit の確認の前提(herdr は timeout で非ゼロ終了)は確認済み。全件を同 cycle 内で修正: M1 待ち時間を最小 1ms に切り詰める理由のコメントが herdr の仕様と逆(0 は無期限待ち)、M2 `--timeout-ms` の残りが Enter 前の待ちより短いと本文を入力した後でエラーになり、送り直すと 2 通が連結され得る → 入力前に fail-closed、入力後の失敗は `TextTyped` / `PaneID` を返して CLI が案内、M3 send の `--timeout-ms` のヘルプが 3 つの段階を説明していない、L4 Enter の送信エラーにも「入力済み・未送信」を明記、L5 submit の確認は「座席が idle / done を離れた」ことしか観測していない旨を doc comment に明記、L6 余裕の小さいテストの調整、L7 既定値 750 を `DefaultSendEnterDelayMS` に一本化し、skill 4 面と recipe 2 コピーの記述が定数と一致することを確かめるテストを追加
+- 2026-09-19 work: Slice D は implementer に委譲(7813c2a、5 ファイル)。逸脱 1 件: 「待ちの途中で ctx の期限が切れる」経路は、入力前の予算チェックを通過した後でしか到達せず、同期的な fake では再現できないため、多重防御として残しテストは付けていない(テストファイルに理由を記載)。orchestrator が HEAD 一致・porcelain 空・`Send` の流れを確認し、ビルド・vet・対象テスト・履歴込みの range secret scan(exit 0)を再実行。implementer の `-count=20`、`TMPDIR=/tmp`、race、`./scripts/run-verify.sh` は green。CLI のエラー接頭辞が `org: send: org: send:` と二重になるのは main に以前からある挙動で、本件の範囲外として残した
 
 ## Progress checklist
 
 - [x] Plan reviewed
 - [x] Branch created
 - [x] Implementation started
-- [ ] Review artifact created
+- [x] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
