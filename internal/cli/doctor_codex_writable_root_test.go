@@ -638,3 +638,27 @@ func TestRunDoctorOpts_CodexSandboxCheck_WarnsThroughTheSeam(t *testing.T) {
 		t.Errorf("expected a warn-level Codex sandbox line in output:\n%s", out)
 	}
 }
+
+// TestCoveringWritableRoot_StoreNotCreatedYetUnderSymlinkedParent pins that
+// both sides of the comparison resolve symlinks through their nearest
+// existing ancestor: the store directory does not exist yet, the root names
+// it through a symlinked parent, and the two must still compare equal.
+func TestCoveringWritableRoot_StoreNotCreatedYetUnderSymlinkedParent(t *testing.T) {
+	base := t.TempDir()
+	realHome := filepath.Join(base, "real-agmsg")
+	if err := os.MkdirAll(realHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	linkHome := filepath.Join(base, "link-agmsg")
+	if err := os.Symlink(realHome, linkHome); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	store := filepath.Join(realHome, "db")       // not created
+	rootViaLink := filepath.Join(linkHome, "db") // not created either
+	if got := coveringWritableRoot([]string{rootViaLink}, store); got != rootViaLink {
+		t.Fatalf("coveringWritableRoot = %q, want the configured root %q", got, rootViaLink)
+	}
+	if got := coveringWritableRoot([]string{"relative/db", "~/db"}, store); got != "" {
+		t.Fatalf("relative and ~-prefixed roots must never cover the store, got %q", got)
+	}
+}

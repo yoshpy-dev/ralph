@@ -229,25 +229,17 @@ func pathCovers(root, target string) bool {
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-// resolveSymlinkOrClean resolves path via filepath.EvalSymlinks, falling
-// back to its cleaned form on any error (most commonly: path does not
-// exist). Used for a writable_roots entry, which is expected to already
-// exist as a real directory.
-func resolveSymlinkOrClean(path string) string {
-	clean := filepath.Clean(path)
-	if resolved, err := filepath.EvalSymlinks(clean); err == nil {
-		return resolved
-	}
-	return clean
-}
-
-// resolveNearestExisting is resolveSymlinkOrClean's counterpart for a path
-// that may not exist yet (the agmsg store directory, before agmsg has ever
-// run): it walks up to the nearest existing ancestor, resolves that
-// ancestor through filepath.EvalSymlinks, and re-appends the non-existent
-// suffix components under it. If no ancestor at all can be resolved (in
-// practice: the whole path is unreachable), it gives up and returns the
-// cleaned original path.
+// resolveNearestExisting resolves symlinks in a path that may not exist yet
+// (the agmsg store directory before agmsg has ever run, or a writable root
+// the operator configured ahead of time): it walks up to the nearest
+// existing ancestor, resolves that ancestor through filepath.EvalSymlinks,
+// and re-appends the non-existent suffix components under it. For a path
+// that exists this is plain EvalSymlinks. If no ancestor at all can be
+// resolved (in practice: the whole path is unreachable), it gives up and
+// returns the cleaned original path. Both sides of the coverage comparison
+// go through this one function so a not-yet-created store under a
+// symlinked parent compares equal to a root spelled through the same
+// symlink.
 func resolveNearestExisting(path string) string {
 	clean := filepath.Clean(path)
 	dir := clean
@@ -267,9 +259,8 @@ func resolveNearestExisting(path string) string {
 
 // coveringWritableRoot returns the first entry in roots that covers target
 // (pathCovers), trying every root in its cleaned, as-configured form first.
-// If none match, a second pass resolves symlinks on both sides --
-// resolveSymlinkOrClean for each root, resolveNearestExisting for target --
-// before comparing again. The returned string is always the ORIGINAL
+// If none match, a second pass resolves symlinks on both sides
+// (resolveNearestExisting) before comparing again. The returned string is always the ORIGINAL
 // (unresolved) root text as written in the config, so the Detail names what
 // the operator actually configured. Returns "" when no root covers target
 // either way.
@@ -281,7 +272,10 @@ func coveringWritableRoot(roots []string, target string) string {
 	}
 	resolvedTarget := resolveNearestExisting(target)
 	for _, root := range roots {
-		if pathCovers(resolveSymlinkOrClean(root), resolvedTarget) {
+		if !filepath.IsAbs(root) {
+			continue // a relative or ~-prefixed root never matches (see pathCovers)
+		}
+		if pathCovers(resolveNearestExisting(root), resolvedTarget) {
 			return root
 		}
 	}
