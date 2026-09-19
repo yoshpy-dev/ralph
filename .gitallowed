@@ -8,18 +8,14 @@ api_ke[y]=SECRET(123|456)
 # The first spelling of the rule above is still in this branch's history
 # (commit 5a91cff) and the range scan reads history, so allow that one line.
 SECRET[(]123[|]456[)]
-# Hygiene sentences in docs/reports/{test,verify}-2026-09-19-codex-agmsg-
-# writable-root.md name several secret-key pattern names in backticks to
-# assert they are ABSENT from fixtures, so naming the pattern trips the
-# scanner even though no value follows it. Requires the closing backtick
-# immediately after "=" (nothing in between), so a real secret pasted into
-# a backtick-quoted span (which would have a value between "=" and the
-# closing backtick) still matches the scanner, not this rule. Spelled with
-# a bracket expression for the same self-match reason as the entry above.
-`api_ke[y]=`
-# The first spelling of that comment (commit 90dc4be) quoted the flagged
-# sentences verbatim, without breaking the pattern names, and is still in
-# this branch's history — so allow that spelling too. Same bracket-
-# expression trick, applied to the other keyword this rule's own history
-# happens to repeat.
-`passwor[d]=`
+# Hygiene sentences in this repository's pipeline reports say that fixtures
+# contain no string "shaped" like a secret assignment, and name the key
+# patterns in backticks to do so (first seen in docs/reports/{test,verify}-
+# 2026-09-19-codex-agmsg-writable-root.md, and in an earlier spelling of
+# this comment, commit 90dc4be -- the range scan reads history). The rule
+# matches only that idiom: one or more backticked key names that end at the
+# "=" with nothing after it, joined by "/", followed by "-shaped". A
+# backticked key name alone is NOT enough, and a value between "=" and the
+# closing backtick never matches. Key names use bracket expressions so this
+# file does not trip the scanner itself.
+`(api_ke[y]|passwor[d])=`(/`[a-z_]+=`)*-shaped
