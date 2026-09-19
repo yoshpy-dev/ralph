@@ -38,9 +38,10 @@ func writeCodexConfig(t *testing.T, dir, content string) string {
 
 // codexOrgConfig builds a minimal config.OrgConfig fixture for
 // checkCodexAgmsgWritableRoot's tests. DriverPool always includes "codex"
-// (so a codex seat can be spawned at all and the check proceeds past Step
-// 0) -- a test that specifically wants to exercise Step 0 itself builds a
-// config.OrgConfig by hand instead. defaultMode is
+// (so a codex seat can be spawned at all and the check proceeds past
+// outcome 2, the driver_pool check) -- a test that specifically wants to
+// exercise outcome 2 itself builds a config.OrgConfig by hand instead.
+// defaultMode is
 // [org.permissions].default ("" leaves it unset, which
 // org.ResolvePermissionMode then falls back to "autonomous" for, matching
 // config.Default()); roles is [org.permissions].roles, may be nil.
@@ -147,27 +148,27 @@ func TestCheckCodexAgmsgWritableRoot_CodexVerifiedNoRoots_Warn(t *testing.T) {
 	}
 }
 
-// TestCheckCodexAgmsgWritableRoot_BothReasons_WarnDetailJoinsWithAnd proves
-// both reason (a) and reason (b) can fire together and are joined with
-// " and " in the needed-because clause.
-func TestCheckCodexAgmsgWritableRoot_BothReasons_WarnDetailJoinsWithAnd(t *testing.T) {
+// TestCheckCodexAgmsgWritableRoot_BothReasons_WarnDetailNumbersEachReason is
+// self-review NEW-1's regression test: each reason already contains its own
+// " and " (the role condition), so when both fire they must be numbered
+// (1)/(2) rather than joined with a third, indistinguishable " and ".
+func TestCheckCodexAgmsgWritableRoot_BothReasons_WarnDetailNumbersEachReason(t *testing.T) {
 	agmsgHome := t.TempDir()
 	writeAgmsgHome(t, agmsgHome, "")
 	cfgDir := t.TempDir()
 	cfgPath := writeCodexConfig(t, cfgDir, "sandbox_mode = \"workspace-write\"\n")
+	store := filepath.Join(agmsgHome, "db")
 
 	orgCfg := codexOrgConfig(true, "guarded", map[string]string{"implementer": "autonomous"})
 	r := checkCodexAgmsgWritableRoot(orgCfg, agmsgHome, codexSandboxTestEnv(cfgPath, ""))
 	if r.Status != "warn" {
 		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
 	}
-	aIdx := strings.Index(r.Detail, "codex_verified = true and a role resolves to edits or autonomous")
-	bIdx := strings.Index(r.Detail, `sandbox_mode = "workspace-write" in`)
-	if aIdx == -1 || bIdx == -1 {
-		t.Fatalf("expected both reasons present, got: %s", r.Detail)
-	}
-	if !strings.Contains(r.Detail, "; needed because") {
-		t.Errorf("expected the needed-because clause, got: %s", r.Detail)
+	want := "needed because (1) [org.permissions].codex_verified = true and a role resolves to edits or autonomous " +
+		"(ralph passes --sandbox workspace-write to those codex seats) and (2) sandbox_mode = \"workspace-write\" in " + cfgPath +
+		" and a role resolves to guarded (guarded codex seats inherit it); add " + store
+	if !strings.Contains(r.Detail, want) {
+		t.Errorf("expected detail to contain %q, got: %s", want, r.Detail)
 	}
 }
 
@@ -310,6 +311,29 @@ func TestCheckCodexAgmsgWritableRoot_GuardedSeatSandboxModeNoRoots_Warn(t *testi
 	}
 }
 
+// TestCheckCodexAgmsgWritableRoot_EmptyStringRoleKeyDoesNotSuppressWarn is
+// self-review NEW-2's end-to-end regression test, reproducing the exact
+// finding: default = "guarded" plus a roles entry keyed by the empty
+// string used to intercept ResolvePermissionMode's default lookup and
+// silently disable reason (b), turning a should-warn into a pass. With the
+// fix, guardedRole is still true (from the "guarded" default), so this
+// still warns.
+func TestCheckCodexAgmsgWritableRoot_EmptyStringRoleKeyDoesNotSuppressWarn(t *testing.T) {
+	agmsgHome := t.TempDir()
+	writeAgmsgHome(t, agmsgHome, "")
+	cfgDir := t.TempDir()
+	cfgPath := writeCodexConfig(t, cfgDir, "sandbox_mode = \"workspace-write\"\n")
+
+	orgCfg := codexOrgConfig(false, "guarded", map[string]string{"": "edits"})
+	r := checkCodexAgmsgWritableRoot(orgCfg, agmsgHome, codexSandboxTestEnv(cfgPath, ""))
+	if r.Status != "warn" {
+		t.Fatalf("expected warn (the empty-string role key must not shadow the \"guarded\" default), got %s (%s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "guarded codex seats inherit it") {
+		t.Errorf("expected detail to mention guarded seats, got: %s", r.Detail)
+	}
+}
+
 // TestCheckCodexAgmsgWritableRoot_MissingConfigCodexVerified_WarnNamesConfigAbsent
 // is self-review LOW-4's regression test: the "not needed" all-clear must
 // not silently apply to a warn -- when the config is absent, the warn
@@ -327,13 +351,17 @@ func TestCheckCodexAgmsgWritableRoot_MissingConfigCodexVerified_WarnNamesConfigA
 	}
 	store := filepath.Join(agmsgHome, "db")
 	for _, want := range []string{
-		"no writable root covers the agmsg store " + store,
-		"(" + noSuchCfg + " does not exist)",
+		noSuchCfg + " does not exist, so no writable root covers the agmsg store " + store,
 		"writable_roots in " + noSuchCfg,
 	} {
 		if !strings.Contains(r.Detail, want) {
 			t.Errorf("expected detail to contain %q, got: %s", want, r.Detail)
 		}
+	}
+	// self-review NEW-3: the old wording attached "(<cfg> does not exist)"
+	// right after the store path, reading as a claim about the store.
+	if strings.Contains(r.Detail, "("+noSuchCfg+" does not exist)") {
+		t.Errorf("the does-not-exist clause must not be parenthesized after the store path, got: %s", r.Detail)
 	}
 }
 
@@ -465,9 +493,9 @@ func TestCheckCodexAgmsgWritableRoot_WritableRootsWrongType_Info(t *testing.T) {
 }
 
 // TestCheckCodexAgmsgWritableRoot_CodexNotInDriverPool_Pass is self-review
-// LOW-6's Step 0 regression test: codex is not spawnable at all when it's
-// missing from [org].driver_pool, so the check passes immediately -- even
-// with codex_verified = true and no config to read.
+// LOW-6's outcome 2 regression test: codex is not spawnable at all when
+// it's missing from [org].driver_pool, so the check passes immediately --
+// even with codex_verified = true and no config to read.
 func TestCheckCodexAgmsgWritableRoot_CodexNotInDriverPool_Pass(t *testing.T) {
 	agmsgHome := t.TempDir()
 	writeAgmsgHome(t, agmsgHome, "")
@@ -815,6 +843,16 @@ func TestCodexSeatModesPossible(t *testing.T) {
 			config.OrgConfig{Permissions: config.OrgPermissionsConfig{Default: "guarded", Roles: map[string]string{"implementer": "edits"}}},
 			true, true,
 		},
+		{
+			// self-review NEW-2: a roles entry keyed by the empty string
+			// must not shadow the real default. "" is never a real role
+			// name (internal/cli/org.go's --role is required and non-blank
+			// at spawn), so it is applied as just another configured mode
+			// alongside the "guarded" default, not in place of it.
+			"an empty-string role key does not shadow the default",
+			config.OrgConfig{Permissions: config.OrgPermissionsConfig{Default: "guarded", Roles: map[string]string{"": "autonomous"}}},
+			true, true,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -860,6 +898,31 @@ func TestCodexNotNeededWhyB(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := codexNotNeededWhyB(tc.guardedRole, tc.exists, cfgDisplay); got != tc.want {
 				t.Errorf("codexNotNeededWhyB(%v, %v, %q) = %q, want %q", tc.guardedRole, tc.exists, cfgDisplay, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestCodexSandboxReasonClause is self-review NEW-1's pure unit test: zero
+// reasons is never actually rendered by checkCodexAgmsgWritableRoot (it
+// takes the "not needed" branch instead), but is still defined as "" here;
+// one reason is unchanged; two or more are numbered so the boundary
+// between them stays visible despite each reason already containing its
+// own " and ".
+func TestCodexSandboxReasonClause(t *testing.T) {
+	cases := []struct {
+		name    string
+		reasons []string
+		want    string
+	}{
+		{"zero reasons renders as empty", nil, ""},
+		{"one reason is unchanged", []string{"reason a"}, "reason a"},
+		{"two reasons are numbered", []string{"reason a", "reason b"}, "(1) reason a and (2) reason b"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := codexSandboxReasonClause(tc.reasons); got != tc.want {
+				t.Errorf("codexSandboxReasonClause(%v) = %q, want %q", tc.reasons, got, tc.want)
 			}
 		})
 	}

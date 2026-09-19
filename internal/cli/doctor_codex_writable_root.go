@@ -92,13 +92,14 @@ const codexConfigMaxBytes = 1 << 20 // 1 MiB
 
 // codexConfigDisplayPath renders path with home shown as "~", mirroring
 // checkShellAliases' displayPath convention. home is supplied by the
-// caller (codexSandboxEnv.Home, itself only ever set by
-// codexSandboxEnvFromOS) rather than read here via os.UserHomeDir, so the
-// substitution is observable and controllable from the same seam as the
-// rest of the check (self-review MEDIUM-2: reading the real home directly
-// here made every Detail assertion depend on where the test process's
-// TMPDIR happened to be). Falls back to path unchanged when home is empty
-// or doesn't prefix path.
+// caller (codexSandboxEnv.Home, set by codexSandboxEnvFromOS in production
+// and by the seam -- TestMain, or a test's own resolveEnv closure -- in
+// tests) rather than read here via os.UserHomeDir, so the substitution is
+// observable and controllable from the same seam as the rest of the check
+// (self-review MEDIUM-2: reading the real home directly here made every
+// Detail assertion depend on where the test process's TMPDIR happened to
+// be). Falls back to path unchanged when home is empty or doesn't prefix
+// path.
 func codexConfigDisplayPath(home, path string) string {
 	if home == "" {
 		return path
@@ -249,6 +250,18 @@ func codexWritableRoots(raw any) ([]string, error) {
 // (a role's own entry, else Default, else the built-in default) -- there is
 // no per-spawn override, so this fully characterizes which modes a codex
 // seat in this project could ever actually run under (self-review LOW-6).
+//
+// The effective default is resolved from a copy of orgCfg with Roles nilled
+// out, not from orgCfg itself: org.ResolvePermissionMode(orgCfg, "") checks
+// Permissions.Roles[""] first, so a [org.permissions.roles] entry keyed by
+// the empty string would silently replace the real default instead of
+// being counted as just another role (self-review NEW-2 -- config.Load
+// validates a roles entry's mode value but never its role-name key, so such
+// a document loads without error even though "" is never a real role name:
+// internal/cli/org.go's --role flag is required and non-blank at spawn
+// time). The loop below still applies every Roles value, including one
+// under an empty key -- it is a configured mode either way, just not the
+// project's default.
 func codexSeatModesPossible(orgCfg config.OrgConfig) (workspaceWriteRole, guardedRole bool) {
 	apply := func(mode string) {
 		switch mode {
@@ -258,7 +271,9 @@ func codexSeatModesPossible(orgCfg config.OrgConfig) (workspaceWriteRole, guarde
 			guardedRole = true
 		}
 	}
-	apply(org.ResolvePermissionMode(orgCfg, ""))
+	defaultsOnly := orgCfg
+	defaultsOnly.Permissions.Roles = nil
+	apply(org.ResolvePermissionMode(defaultsOnly, ""))
 	for _, mode := range orgCfg.Permissions.Roles {
 		apply(mode)
 	}
@@ -313,6 +328,34 @@ func codexNotNeededWhyB(guardedRole, exists bool, cfgDisplay string) string {
 		return fmt.Sprintf("%s does not exist", cfgDisplay)
 	default:
 		return fmt.Sprintf("%s does not set sandbox_mode = \"workspace-write\"", cfgDisplay)
+	}
+}
+
+// codexSandboxReasonClause joins codexSandboxReasons' output into the
+// "needed because ..." clause. Each individual reason string already
+// contains its own " and " (the role condition -- see codexSandboxReasons),
+// so a second, plain " and " between two reasons used to read as one flat,
+// undifferentiated four-clause chain with no visible boundary between the
+// two reasons (self-review NEW-1). With more than one reason, each is
+// numbered so the boundary is visible: "(1) <reason a> and (2) <reason
+// b>". A single reason is rendered unchanged -- numbering it would only add
+// noise, since there is nothing to distinguish it from. Zero reasons
+// renders as "" -- checkCodexAgmsgWritableRoot never actually calls this in
+// that case (it takes the "not needed" branch instead), but the case is
+// defined here rather than left unspecified, since this is otherwise a
+// pure, directly testable function.
+func codexSandboxReasonClause(reasons []string) string {
+	switch len(reasons) {
+	case 0:
+		return ""
+	case 1:
+		return reasons[0]
+	default:
+		numbered := make([]string, len(reasons))
+		for i, reason := range reasons {
+			numbered[i] = fmt.Sprintf("(%d) %s", i+1, reason)
+		}
+		return strings.Join(numbered, " and ")
 	}
 }
 
@@ -438,17 +481,22 @@ func codexWritableRootSuffix(fromOverride bool, profile, cfgDisplay string) stri
 // a config that exists but simply omits a covering entry from one that
 // does not exist at all (self-review LOW-4) -- the latter also names the
 // config path in the "add ... in <cfg>" clause, since there is no existing
-// [sandbox_workspace_write] table to point the operator at otherwise.
+// [sandbox_workspace_write] table to point the operator at otherwise. The
+// absent-config sentence leads with "<cfg> does not exist" rather than
+// parenthesizing it after the store path, so it reads as a statement about
+// the config, not about the store (self-review NEW-3: the store and config
+// are two different paths, and a trailing "(<cfg> does not exist)"
+// attached right after the store path read as if it described the store).
 func codexWritableRootDetail(root, cfgDisplay, store string, exists bool, reasonClause, suffix string) string {
 	if root != "" {
 		return fmt.Sprintf("writable root %s in %s covers the agmsg store %s; needed because %s",
 			root, cfgDisplay, store, reasonClause) + suffix
 	}
 	if !exists {
-		return fmt.Sprintf("no writable root covers the agmsg store %s (%s does not exist), so a codex seat under workspace-write "+
+		return fmt.Sprintf("%s does not exist, so no writable root covers the agmsg store %s and a codex seat under workspace-write "+
 			"cannot send RESULT to lead (\"attempt to write a readonly database\"); needed because %s; add %s to "+
 			"[sandbox_workspace_write].writable_roots in %s (docs/recipes/codex-seat-permissions.md)",
-			store, cfgDisplay, reasonClause, store, cfgDisplay) + suffix
+			cfgDisplay, store, reasonClause, store, cfgDisplay) + suffix
 	}
 	return fmt.Sprintf("no writable root in %s covers the agmsg store %s, so a codex seat under workspace-write cannot send RESULT to lead "+
 		"(\"attempt to write a readonly database\"); needed because %s; add %s to [sandbox_workspace_write].writable_roots "+
@@ -499,6 +547,14 @@ func codexWritableRootDetail(root, cfgDisplay, store string, exists bool, reason
 // The check never returns "fail" -- a missing root is a real gap, but not
 // one that should flip doctor's exit code (see docs/recipes/
 // codex-seat-permissions.md for the fix).
+//
+// This check trusts orgCfg as loaded and does not itself detect a broken
+// ralph.toml: runDoctorFull still calls it with config.Load's returned
+// cfg.Org even when config.Load itself returned an error (e.g. an invalid
+// [org.permissions].default) -- the separate "ralph.toml" check reports
+// that load failure on its own line. In that case this check's verdict
+// describes the partially-populated defaults Load returned alongside the
+// error, not the document the operator actually wrote (self-review NEW-5).
 func checkCodexAgmsgWritableRoot(orgCfg config.OrgConfig, agmsgHome string, resolveEnv func() (codexSandboxEnv, error)) checkResult {
 	r := checkResult{Name: "Codex sandbox (agmsg writable root)"}
 
@@ -550,7 +606,7 @@ func checkCodexAgmsgWritableRoot(orgCfg config.OrgConfig, agmsgHome string, reso
 			codexNotNeededWhyB(guardedRole, exists, cfgDisplay))
 		return r
 	}
-	reasonClause := strings.Join(reasons, " and ")
+	reasonClause := codexSandboxReasonClause(reasons)
 
 	store, fromOverride := agmsgStoreDir(agmsgHome, env.AgmsgStoragePath)
 	if abs, absErr := filepath.Abs(store); absErr == nil {
