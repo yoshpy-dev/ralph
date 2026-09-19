@@ -89,3 +89,79 @@ No open row in `docs/tech-debt/README.md` is invalidated by this diff.
   the third is a fail-closed guard of a few lines.
 - Follow-ups: the four LOW findings, in the same cycle if the fix round is
   taken.
+
+_(Superseded by the Revalidation section below — all seven were fixed in this
+cycle.)_
+
+## Revalidation (cycle 1 fix round, 2026-09-19)
+
+- Fix range: `git diff a88ce2f..HEAD` — `7813c2a` (Go fixes, implementer) and `1461aac` (plan notes). HEAD `1461aac`, working tree clean.
+- Scope unchanged: diff quality only. No tests, static analysis, spec-compliance or doc-drift checks were run.
+- Evidence: full read of the fix diff for `internal/org/verbs.go`, `internal/cli/org.go`, `internal/org/verbs_test.go`, `internal/cli/org_test.go`, the new `internal/org/send_defaults_sync_test.go`, and the plan; re-verification of each cycle-1 citation against post-fix line numbers; `grep -rn 'TextTyped'` and `grep -rn 'rt.Send('` for every producer and consumer of the new field; marker-occurrence counts in all six doc surfaces; `grep -rn CtxExpiresDuringEnterDelay` (zero hits — the renamed test is not referenced anywhere); credential and debug-code sweeps over the added lines (clean).
+
+### Verdict
+
+MERGE. All seven cycle-1 findings are resolved. The fix round introduces one
+MEDIUM and three LOW findings, all in the new code and all with local fixes; none
+of them affects the default-settings happy path.
+
+| Severity | Cycle 1 | New in fix round |
+|----------|---------|------------------|
+| CRITICAL | 0 | 0 |
+| HIGH     | 0 | 0 |
+| MEDIUM   | 3 (all resolved) | 1 |
+| LOW      | 4 (all resolved) | 3 |
+
+### Per-finding status
+
+| # | Cycle-1 finding | Status | Post-fix evidence |
+| --- | --- | --- | --- |
+| M1 | `capMSToContext` comment inverts herdr's contract | **Resolved** | `internal/org/verbs.go:346-358`. The new text states the driver behaviour (`AgentWait` omits `--timeout` for values <= 0), quotes herdr's own help ("without --timeout, waits indefinitely"), and names `Wait` as a caller for which 0 *is* a valid choice. Every clause re-checked against `internal/org/driver/herdr.go:168-170`, `internal/org/verbs.go:330-334` and `internal/cli/org.go:456`. Code unchanged, as intended. |
+| M2 | Short `--timeout-ms` strands typed text with no record | **Resolved** (see NEW-1 for a consumer-side defect the fix introduced) | `internal/org/verbs.go:234-243`: the check runs after the idle/done wait and before `PaneSendText`, so the deterministic case never types. `enterDelay` was hoisted above the wait to make that possible. All four returns after a successful `PaneSendText` now carry `PaneID` and `TextTyped` (`verbs.go:252,260,275,277`). `TestOrgSend_BudgetTooSmallForEnterDelay_NothingTyped` asserts the full call list is exactly `["agent_wait"]`, `TextTyped` false, `PaneID` empty, and no `sent` event — it fails on a revert in four independent ways. The repurposed fixture (`TimeoutMS: 5` vs a 200 ms delay) is deterministic: `5 <= 200` holds regardless of jitter. |
+| M3 | `--timeout-ms` help describes only the idle wait | **Resolved** | `internal/cli/org.go:422-423` now reads "overall herdr timeout in milliseconds for one send (idle wait + pre-Enter wait + submit confirmation)", matching the ctx's real span and the sibling `spawn`/`start` wording. |
+| L4 | Enter-failure error omits "typed but not submitted" | **Resolved** | `internal/org/verbs.go:257-262` appends the same clause; `Send`'s doc comment (`verbs.go:157-165`) now names both paths under one "Typed-but-unsubmitted text" paragraph instead of only the ctx one. New `TestOrgSend_PaneSendKeysFails_ReportsTypedButNotSubmitted` pins the message, `TextTyped`, `PaneID` and the absence of a `sent` event. |
+| L5 | Confirmation described as stronger than it is | **Resolved** | Three surfaces updated consistently: `verbs.go:44-47` ("best available proxy … though not proof of it"), `verbs.go:319-327` (a dedicated "What this does NOT prove" paragraph naming the three racing causes), and `SubmitConfirmed`'s own doc (`verbs.go:107-118`, "true does not prove OUR Enter caused the transition"). No code change, which was the recommendation. |
+| L6 | 20 ms margin in the cap test | **Resolved** | `internal/org/verbs_test.go:712` uses `TimeoutMS: 400` against a 20 ms delay (~380 ms margin), and the added comment explains the direction the margin protects. The assertion still discriminates: `confirmMS` lands near 380 and the test fails if it reaches the configured 10 s. |
+| L7 | `750` duplicated across 8 normative surfaces with no gate | **Resolved** | `internal/org/verbs.go:16-26` exports `DefaultSendEnterDelayMS`; `defaultSendEnterDelay` derives from it; `internal/cli/org.go:427` builds the flag help with `fmt.Sprintf`, so the CLI literal is gone; `internal/org/send_defaults_sync_test.go` pins the remaining six hand-written doc surfaces. Marker spellings verified against the files: each of the four skill mirrors contains exactly one `750ms` and one `--enter-delay-ms`, each recipe copy exactly one `750 ms` and one `--enter-delay-ms`, so the check cannot pass on an unrelated occurrence today. |
+
+### New findings introduced by the fix round
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| MEDIUM | exception-handling | The CLI's new typed-but-unsubmitted note also fires on the one error return where the message **was** submitted, and tells the operator to press Enter on it. `Send` sets `TextTyped: true` on four returns; three of them follow a *successful* `PaneSendKeys`, and one of those three is an error — the `appendEvent` failure at `verbs.go:275`, reached when the manifest write fails (`appendEvent` → `Manifest.Append`, a flock + JSONL append that can fail on a lock timeout, a full disk, or permissions) after Enter was delivered and `confirmSubmitted` has already run. The CLI gates only on `result.TextTyped` (`internal/cli/org.go:390`), so that path prints "the message text was typed into pane %s of seat %q **but not submitted** … **clear or submit it** there before sending again". An operator obeying it on a seat that submitted and has since reached an approval dialog presses exactly the blind Enter this PR exists to prevent — `confirmSubmitted`'s own doc calls that "an operation Send has no authorization to take" (`verbs.go:328-337`), and the live evidence shows the dialog preselects "Yes, proceed". The CLI's justifying comment states the opposite of the code: "TextTyped is false for every other error, including the fail-closed --timeout-ms budget check" (`internal/cli/org.go:386-388`) — the `appendEvent` failure is another error with `TextTyped` true. The plan's revised Scope row 1 lists all three post-typing failures (including `sent` イベントの記録エラー) under the single instruction "その pane を確認してから送り直す", so the two surfaces written in this fix round disagree about how many paths there are. `TextTyped`'s own doc (`verbs.go:119-130`) enumerates only the two unsubmitted returns plus success, which is how the omission slipped through. | `internal/org/verbs.go:275` vs `internal/cli/org.go:386-397`; `internal/org/verbs.go:328-337`; `docs/plans/active/2026-09-19-org-send-enter-timing.md` Scope row 1 | Distinguish "typed, not submitted" from "typed and submitted". Smallest honest change: add an `EnterPressed bool` (set from the successful `PaneSendKeys` onward), gate the existing note on `TextTyped && !EnterPressed`, and give the `appendEvent` path its own one-line note saying the message *was* submitted but the `sent` event could not be recorded, so it must **not** be resent. Alternative with a smaller diff: rename the field to what the CLI actually needs (e.g. `UnsubmittedText`) and leave it false on the `appendEvent` return — then fix `TextTyped`'s doc, the CLI comment, and the plan row to match. Either way the CLI comment's "every other error" sentence needs correcting. |
+| LOW | null-safety | The budget check discards `ctx.Deadline()`'s `ok` and would refuse every send, with a nonsense number, if a deadline-less ctx ever reached it. `deadline, _ := ctx.Deadline()` (`verbs.go:234`) is safe today — `Send` always builds ctx with `context.WithTimeout`, and `timeoutMS <= 0` is normalised to the 30 s default at `verbs.go:199-202` — and the comment says so. But the sibling verb makes the trap likely: `ralph org wait --timeout-ms 0` is documented as an unbounded wait and `Wait` skips `WithTimeout` for it (`verbs.go:330-332`), and this same fix round added a comment at `verbs.go:355-358` explaining that asymmetry. A contributor extending send with the same `0 = unbounded` semantics gets `time.Until(time.Time{})`, a hugely negative `remaining`, and every send refused with "-62135596800000ms of --timeout-ms left". The printed value is also unclamped for the (much rarer) case where the idle/done wait returns success just past the deadline. | `internal/org/verbs.go:234-243`; `internal/org/verbs.go:330-334`; `internal/cli/org.go:456` | `if deadline, ok := ctx.Deadline(); ok { … }` so a deadline-less ctx skips the check rather than failing every call, and clamp `remainingMS` at 0 in the message. Two lines, and it removes the trap the next likely edit would spring. |
+| LOW | maintainability | The block comment covering the now-untested ctx-inside-the-pause branch overstates the difficulty and points at a non-repo artifact. `verbs_test.go:639-653` says the branch is "Not independently testable without changing fakeHerdr (out of scope for this slice -- see the Slice D handoff's file list)" and then argues that shrinking the margin would only produce a flaky test. The second half is correct; the first is scoped to this slice rather than to the repo, and `internal/org/spawn_test.go` (where `fakeHerdr` lives) was already edited by this PR's own cycle-1 commit. A deterministic test does exist and needs no margin shaving: add a `paneSendTextDelay time.Duration` to `fakeHerdr` that `PaneSendText` sleeps, then run `TimeoutMS: 100`, `SendEnterDelay: 50ms`, `paneSendTextDelay: 80ms` — the budget check passes (100 > 50), `PaneSendText` consumes 80 ms, and `waitBeforeEnter` faces a 20 ms deadline against a 50 ms timer, i.e. a 30 ms margin in the direction that must win, the same robustness as the passing tests around it. That also exercises the exact production scenario the comment names ("PaneSendText's real round-trip … eats into the margin"). Separately, "the Slice D handoff's file list" is a message, not a repo artifact, so a future reader cannot resolve the pointer. | `internal/org/verbs_test.go:639-653`; `internal/org/spawn_test.go` (`fakeHerdr`, already modified by `c990363`) | Either add the fake's delay hook and the test, or keep the branch untested and reword the comment to say what is true: a deterministic test needs an injectable `PaneSendText` delay in `fakeHerdr`, which this slice chose not to add. Replace the handoff pointer with the plan's Deviation-notes line, which is in the repo. |
+| LOW | maintainability | The sync test's failure message and doc comment both promise an adjacency check the assertion does not perform. `send_defaults_sync_test.go:81-85` is a whole-file `strings.Contains(text, s.marker)`, while the message says the value is expected "next to its --enter-delay-ms mention" and the file header repeats "next to its own --enter-delay-ms mention". Harmless today (verified: exactly one `750ms` / `750 ms` and one `--enter-delay-ms` per surface), but the gate would pass on an unrelated occurrence of the new number elsewhere in the file after a constant change — which is precisely the drift it exists to catch. | `internal/org/send_defaults_sync_test.go:12-13,77-85` | Either drop "next to its --enter-delay-ms mention" from both strings, or assert it: each surface has exactly one `--enter-delay-ms` line, so scanning for the line containing the flag and checking the marker within it is a few lines and makes the message true. |
+
+### Answer to the explicit question (the untested ctx-inside-the-pause branch)
+
+Keeping the branch is right — it is genuinely reachable in production once a real
+`PaneSendText` round trip eats into the margin the budget check measured, and
+deleting it would re-open M2 in a narrower form. Leaving it untested is *not*
+necessary, though: the `paneSendTextDelay` hook described in the LOW above makes
+it deterministic with a 30 ms margin and about six lines in `fakeHerdr`. My
+recommendation is to add it (it is the same class of seam the fake already has
+for `agentWaitErrs` and `paneSendKeysErr`); if the slice boundary matters more,
+the acceptable minimum is rewording the comment, since as written it tells a
+future reader the test cannot be built.
+
+### Re-checked and still sound
+
+- Exactly one `PaneSendKeys` in the send path (`verbs.go:256`); the no-resend regression test is unchanged and still asserts one call with exactly `["Enter"]`.
+- The renamed `TestOrgSend_BudgetTooSmallForEnterDelay_NothingTyped` left no dangling references: `grep -rn CtxExpiresDuringEnterDelay` over `*.go` and `*.md` returns nothing.
+- `SubmitConfirmed` remains false on every error return including the `appendEvent` one, matching its doc; the CLI's unconfirmed-submit warning is unreachable on error paths because the error return precedes it, so no double message.
+- The new CLI tests discriminate: the `PaneSendKeys`-failure test asserts the note is present, the budget test asserts it is absent, and both assert non-zero exit. The budget test's generous `--timeout-ms 2000 / --enter-delay-ms 60000` pairing is deterministic against a real stub subprocess and carries no flake risk.
+- `send_defaults_sync_test.go`'s `t.Skipf` on a missing surface halts the whole test (fail-open for a vendored checkout), which the file's own comment states plainly and which matches the existing convention in `internal/config/defaults_sync_test.go` (three `t.Skipf` sites for the same reason). Consistent with the repo, so not raised as a finding.
+- The doubled `org: send: org: send:` error prefix is pre-existing on `main` (the CLI wraps an already-prefixed error); the new budget-check message inherits it. Confirmed out of scope and recorded in the plan.
+- Hygiene over the fix range: no credential-shaped assignments, no `TODO`/`FIXME`/debug prints, no orphaned doc comments above the inserted test functions.
+
+### Recommendation (updated)
+
+- Merge: yes. Cycle-1 findings are 7/7 resolved with regression tests that fail
+  on a revert. Fix NEW-1 before merge — it is a wrong and actively unsafe
+  instruction to a human on a reachable path, and the fix is one field plus one
+  branch. The three LOWs are worth taking in the same commit; none blocks merge.
+- Tech debt: still no register row. If NEW-3's test is not added, that is the one
+  item that becomes a deferral, and the drafted row should say "the
+  ctx-expiry-inside-the-pre-Enter-pause branch in `Send` has no test; trigger:
+  the next `fakeHerdr` change".
