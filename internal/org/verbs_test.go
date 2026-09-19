@@ -1,6 +1,7 @@
 package org
 
 import (
+	"context"
 	"errors"
 	"os"
 	"slices"
@@ -525,6 +526,45 @@ func TestOrgSend_UnconfirmedSubmit_NeverResendsEnter(t *testing.T) {
 	}
 }
 
+// TestOrgSend_IdleDoneWaitFails_ErrorsBeforeAnyTypingOrEvent covers the
+// first AgentWait call (waiting for the seat to go idle/done before typing
+// anything) failing -- the mirror image of
+// TestOrgSend_UnconfirmedSubmit_NeverResendsEnter, which covers the second
+// (confirm) AgentWait failing. Unlike the confirm wait, an idle/done wait
+// failure means Send never reaches PaneSendText at all: nothing is typed,
+// no Enter is sent, and no `sent` event is appended. This path had no
+// direct coverage before (found via go tool cover -func on verbs.go).
+func TestOrgSend_IdleDoneWaitFails_ErrorsBeforeAnyTypingOrEvent(t *testing.T) {
+	o, h, _ := testOrg(t)
+	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", r)
+	}
+	h.agentWaitErrs = []error{errors.New("stub: idle/done wait failed")}
+	eventsBefore := len(mustReadEvents(t, o))
+	callsBefore := len(h.calls)
+
+	msg := "TYPE: TASK\nTASK_ID: t-1\n\ndo the thing"
+	result := o.Send(SendParams{OrgID: "org-a", To: "seat-1", Text: msg})
+	if result.Err == nil {
+		t.Fatal("expected a non-nil Err when the idle/done AgentWait fails")
+	}
+	if !strings.Contains(result.Err.Error(), "wait for seat") {
+		t.Errorf("expected the error to name the idle/done wait, got %v", result.Err)
+	}
+	if result.TextTyped {
+		t.Error("expected TextTyped false: PaneSendText is never reached when the idle/done wait fails")
+	}
+	if result.PaneID != "" {
+		t.Errorf("expected empty PaneID: PaneSendText was never attempted, got %q", result.PaneID)
+	}
+	if got, want := h.calls[callsBefore:], []string{"agent_wait"}; !slices.Equal(got, want) {
+		t.Fatalf("expected only the idle/done AgentWait call after Send, got %v", got)
+	}
+	if got := len(mustReadEvents(t, o)); got != eventsBefore {
+		t.Fatalf("expected no new manifest event when the idle/done wait fails, %d -> %d", eventsBefore, got)
+	}
+}
+
 // TestOrgSend_RawAndUnconfirmed_DetailsPrefixOrder pins the exact prefix
 // order when both markers apply: "raw=true " comes first, then
 // "submit_unconfirmed=true ", then the (possibly truncated) text -- the
@@ -828,6 +868,47 @@ func TestOrgSend_ConfirmTimeout_CappedByRemainingCtxBudget(t *testing.T) {
 	if confirmMS >= int(o.SendSubmitConfirmTimeout/time.Millisecond) {
 		t.Errorf("expected the confirm timeout (%dms) to be capped well below the configured SendSubmitConfirmTimeout (%v), it was not", confirmMS, o.SendSubmitConfirmTimeout)
 	}
+}
+
+// TestCapMSToContext_FloorsAtOneMillisecond is a direct unit pin for
+// capMSToContext's own two "at least 1" floors (self-review M1,
+// docs/reports/self-review-2026-09-19-org-send-enter-timing.md): herdr
+// (v0.7.5) treats a 0 --timeout as "wait indefinitely", so this helper must
+// never return less than 1, whether it is want itself that rounds down to
+// zero/negative milliseconds, or ctx's remaining budget that has already
+// gone negative. TestOrgSend_ConfirmTimeout_CappedByRemainingCtxBudget only
+// exercises the "cap to whatever remains" branch with a comfortably
+// positive remaining (~380ms); it never drives either floor down to where
+// it actually clamps, so both are pinned here directly against the pure
+// function instead of through Send's timing-sensitive plumbing.
+func TestCapMSToContext_FloorsAtOneMillisecond(t *testing.T) {
+	t.Run("want itself rounds below 1ms, no deadline", func(t *testing.T) {
+		if got := capMSToContext(context.Background(), 0); got != 1 {
+			t.Errorf("capMSToContext(no deadline, want=0) = %d, want 1", got)
+		}
+	})
+
+	t.Run("want is negative, no deadline", func(t *testing.T) {
+		if got := capMSToContext(context.Background(), -5*time.Second); got != 1 {
+			t.Errorf("capMSToContext(no deadline, want=-5s) = %d, want 1", got)
+		}
+	})
+
+	t.Run("ctx deadline already passed, want comfortably positive", func(t *testing.T) {
+		ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Hour))
+		defer cancel()
+		if got := capMSToContext(ctx, 10*time.Second); got != 1 {
+			t.Errorf("capMSToContext(expired deadline, want=10s) = %d, want 1", got)
+		}
+	})
+
+	t.Run("ctx deadline already passed, want itself also rounds below 1ms", func(t *testing.T) {
+		ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Hour))
+		defer cancel()
+		if got := capMSToContext(ctx, 0); got != 1 {
+			t.Errorf("capMSToContext(expired deadline, want=0) = %d, want 1", got)
+		}
+	})
 }
 
 // TestResolvedHerdrAgentName_EmptyVsSet is a direct unit pin for the helper
