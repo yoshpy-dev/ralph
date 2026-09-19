@@ -315,9 +315,10 @@ edit. No skill files were touched this cycle either, so
 
 ### Secret scan (cycle 2)
 
-To be run after this cycle's commits land, over the full range since
-`main`: `./scripts/secret-scan.sh --range "$(git merge-base HEAD main)..HEAD"`.
-Result recorded once available.
+`./scripts/secret-scan.sh --range "$(git merge-base HEAD main)..HEAD"`
+(merge-base `2c511a4`, covering all commits on this branch through
+`d18fc36`, the tech-debt-row-plus-report commit above) → exit 0. No
+`.gitallowed` change was needed this cycle.
 
 ### Progress checklist (cycle 2)
 
