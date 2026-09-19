@@ -144,14 +144,17 @@ ralph org spawn --org-id perm-auto --id reviewer --role reviewer --driver codex 
   check the pane with `ralph org read`, and only if the message is still in
   the composer press Enter yourself (`herdr pane send-keys <pane> Enter`);
   ralph never resends Enter, because a blind keystroke could confirm an
-  approval dialog. If `send` exits non-zero instead of just warning,
-  follow the stderr note it prints rather than retrying blindly. Every note
-  starts with reading the pane; the `ralph org read` command it prints
-  carries `--state-dir` when you passed one. A herdr call that is cut off
-  by `--timeout-ms` returns an error even if the text or the Enter already
-  reached the pane, so in that case ralph says it does not know: submit or
-  clear only if the text is still in the composer, and otherwise do not
-  press Enter and do not send again. Then wait for the seat:
+  approval dialog. If `send` exits non-zero and prints a stderr note,
+  follow the note rather than retrying blindly (a failure before anything
+  was sent to the pane, such as a validation error, an unknown seat, or a
+  `--timeout-ms` too small for the pause, prints no note and is safe to
+  retry). Every note starts with reading the pane; the `ralph org read`
+  command it prints carries `--state-dir` when you passed one. A herdr
+  call that is cut off by `--timeout-ms` returns an error even if the text
+  or the Enter already reached the pane, so in that case ralph says it
+  does not know: submit or clear only if the text is still in the
+  composer, and otherwise do not press Enter and do not send again. Then
+  wait for the seat:
 
   ```sh
   ralph org wait --org-id perm-auto --seat reviewer --until idle,done \
