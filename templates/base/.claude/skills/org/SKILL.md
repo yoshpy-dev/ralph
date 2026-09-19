@@ -215,7 +215,9 @@ EVIDENCE: docs/reports/self-review-foo.md
   edits が有効になるが、挙動は codex のバージョンとユーザーの codex config に
   依存する(agmsg の DB を writable root に足さないと RESULT を送れない、等)
   ので、マシンごとに `docs/recipes/codex-seat-permissions.md` の手順で検証して
-  から有効にする。
+  から有効にする。writable root の設定漏れは `ralph doctor` の「Codex sandbox
+  (agmsg writable root)」Check が warn する(ユーザー階層の `config.toml`
+  だけを読む。profile・project 階層・`-c` の上書きは評価しない)。
 - `autonomous` モードの spawn は `--scope` を必須とし(fail-closed)、
   省略したい場合のみ `--allow-unscoped` を明示する。`--scope` は
   「担当範囲」を短く書く(例: `"internal/org/**"`、`"docs/reports/**"` )。

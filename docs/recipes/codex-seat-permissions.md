@@ -49,7 +49,14 @@ recorded in `docs/evidence/codex-seat-permissions-2026-09-18.md`.
   ```
 
   Use the absolute path (`echo "$HOME/.agents/skills/agmsg/db"`). The
-  meta-repo run used an absolute path; a `~` prefix was not tested.
+  meta-repo run used an absolute path; a `~` prefix was not tested. If
+  `AGMSG_STORAGE_PATH` is set, agmsg keeps its database there instead, so
+  list that directory. `ralph doctor`'s "Codex sandbox (agmsg writable
+  root)" check warns when codex seats would run under `workspace-write`
+  (`codex_verified = true`, or `sandbox_mode = "workspace-write"` in your
+  codex config) and no writable root covers the agmsg store. It reads only
+  the user-level `config.toml`; profiles, project-level config, and `-c`
+  overrides are not evaluated.
 - **Keep the scratch working directory out of `/tmp`.** `/tmp` is itself a
   writable root, so a target under it does not test the sandbox boundary.
   Use a throwaway directory under `$HOME` (`git init` it) for the seat's cwd
