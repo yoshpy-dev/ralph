@@ -163,7 +163,163 @@ repo's commit-strategy rule. Final state: `secret-scan.sh --range
 "$(git merge-base HEAD main)..HEAD"` exits 0 (re-run after `ee70868`,
 covering all commits through the `.gitallowed` fix itself).
 
-## Progress checklist
+## Progress checklist (cycle 1)
+
+- Plan's `PR created` checkbox left unchecked, per the handoff — `/pr` has
+  not run yet.
+
+---
+
+## Cycle 2
+
+- Date: 2026-09-19
+- Pipeline cycle: 2 (of cap 2)
+- Branch: `feat/codex-agmsg-writable-root`, HEAD `c83ce78` (base `main`);
+  `git status --porcelain` empty before starting.
+- Prior reports for this cycle: `docs/reports/self-review-2026-09-19-codex-agmsg-writable-root.md`
+  (Cycle 2 section, merge), `docs/reports/verify-2026-09-19-codex-agmsg-writable-root.md`
+  (Cycle 2 section, PASS), `docs/reports/test-2026-09-19-codex-agmsg-writable-root.md`
+  (Cycle 2 section, PASS), `docs/reports/cross-review-triage-codex-agmsg-writable-root.md`.
+- Range since cycle 1 (`04b6df5`/`b6e85d0`): cross-review cycle-1 fixes and
+  their docs (`ab09dbc`…`4c891ec`), self-review cycle-2 fixes and docs
+  (`4c48ae3`…`235abb0`), the fresh AC-3/AC-7 evidence and `/org` skill
+  temp-root note (`a16e3f6`), and two test-only commits closing coverage
+  gaps (`5e939d1`, `c83ce78`).
+
+### Files changed
+
+- `docs/tech-debt/README.md` — extended the `checkCodexAgmsgWritableRoot`
+  row's "Three further limits" clause to a fourth: `$TMPDIR` and
+  `AGMSG_STORAGE_PATH` are read from doctor's own process environment
+  (`codexSandboxEnvFromOS`), not the herdr seat's pane, and the Detail
+  names this only in the branches where the value actually drove the
+  result (`codexWritableRootSuffix`'s override note,
+  `codexImplicitRootDetail`'s `$TMPDIR` note) — not when doctor's own
+  environment simply lacks a value the pane's has. This limit is already
+  recorded as an Assumption in the plan ("座席が見る環境変数は herdr の
+  pane のもので、doctor のプロセスと一致するとは限らない") but had no
+  tech-debt row entry; it was missing from the row's "Three further
+  limits" enumeration even though the other three are all documented
+  there. Left Impact/Trigger unchanged in substance (only extended their
+  wording enough to cover the fourth case) — the existing "false positive
+  (misleading warn), not a missed real gap" framing still holds: doctor's
+  own environment lacking a value the pane's pane has can only make the
+  check consider fewer implicit roots or the wrong (default) store
+  directory than the pane's own send.sh would use, which biases toward an
+  unnecessary `warn`, not a silent `pass` over a real gap. Extended the
+  Evidence column with the two newly-cited functions
+  (`codexSandboxEnvFromOS`, `codexImplicitRootDetail`). Kept it one row,
+  per the handoff.
+
+### Files checked (no changes needed)
+
+- **`internal/cli/doctor.go`'s Check 11b comment** (item 1 of the handoff)
+  — read against the full doc comment on `checkCodexAgmsgWritableRoot`
+  (`internal/cli/doctor_codex_writable_root.go`). The comment is shorter
+  than the full doc comment it points readers to (it doesn't spell out the
+  `model_pool` gate, the protected-directory rule, or the implicit
+  temp-root rule), but it does not claim anything the code contradicts:
+  "warns when a role that could actually run under workspace-write exists
+  but no writable root covers the agmsg store" is still an accurate
+  summary of the warn condition — reason (b) (a guarded seat inheriting
+  `sandbox_mode = "workspace-write"` from the user's own config) still
+  describes a seat that actually runs under `workspace-write`, even though
+  ralph itself passes no sandbox flag for it; "no writable root covers"
+  does not distinguish explicit vs. implicit roots or the protected-dir
+  exclusion, but nothing said is false about either. Verdict: **shorter,
+  not inaccurate** — no edit (this is code, not sync-docs' to touch
+  regardless).
+- **Recipe bullet vs. skill bullet vs. Go `Detail`/doc-comment text** (item
+  2) — re-read `docs/recipes/codex-seat-permissions.md`'s "Add the agmsg
+  database…" bullet and `.claude/skills/org/SKILL.md`'s writable-root
+  sentence (both already updated this cycle by commits `a49763a`/`4c891ec`/
+  `a16e3f6`, before this pass) against `codexSandboxReasons`,
+  `codexSeatModesPossible`, `codexModelPermittedForRole`,
+  `codexImplicitWritableRoots`, and `codexWritableRootSuffix`. All four
+  claim categories the handoff named — (a) when a root is needed
+  (`codex_verified` + edits/autonomous role, or `sandbox_mode =
+  "workspace-write"` + guarded role, both gated to "a role that may use a
+  codex model" and to `driver_pool`/`model_pool`), (b) what counts as
+  covering (explicit root; `/tmp`/`$TMPDIR` by default unless excluded;
+  never through `.git`/`.agents`/`.codex`), (c) what is read (user-level
+  `config.toml` only; no profile/project/`-c`), (d) the store-location rule
+  (`AGMSG_STORAGE_PATH` override, else the default `db` dir) — match the
+  code exactly in both the English recipe and the Japanese skill sentence.
+  No sentence in either claims more than the code does. No edit.
+- **`docs/evidence/codex-seat-permissions-2026-09-18.md` P3** (item 5) —
+  unchanged since `b6e85d0` (`git diff b6e85d0..HEAD` is empty for this
+  file). Re-read the cycle-1 follow-up bullet: it says only that a static
+  doctor check now detects the missing writable root and that no live seat
+  re-verification was done for issue #164, with Run A/A2 remaining the
+  evidence for the underlying failure/fix — still accurate, does not
+  overclaim. No edit.
+- **`README.md`, `AGENTS.md`, `docs/specs/2026-08-01-org-runtime.md`,
+  `docs/recipes/codex-setup.md`, `docs/quality/definition-of-done.md`,
+  `docs/quality/quality-gates.md`** (item 4) — `git diff b6e85d0..HEAD`
+  empty for all six; nothing changed since cycle 1's confirmation that none
+  of them enumerate individual doctor Checks. No edit.
+- `docs/recipes/codex-seat-permissions.md` + `templates/base/` copy,
+  `.claude/skills/org/SKILL.md` + 3 mirrors — already updated in this cycle
+  by prior commits (`a16e3f6` for the temp-root note); `diff`/`cmp` across
+  all mirror pairs still byte-identical (see Gate results below). No
+  further edit.
+- `.gitallowed` — not touched, per the handoff; the cycle-2 narrowing
+  (`e2c64c3` on `main`, inherited via this branch's earlier rebase-free
+  history) is the orchestrator's, not sync-docs'.
+
+### Decided not to change (and why)
+
+- Did not touch the plan's AC-3/AC-7 text or Deviation notes — the
+  handoff's item 3 scope is the tech-debt row; the plan's own drift-closing
+  edit already landed in `a16e3f6` (recorded in the plan's own Deviation
+  notes for verify cycle 2), and re-reading it against the current
+  `checkCodexAgmsgWritableRoot` outcome chain confirms it now enumerates
+  all 9 outcomes (`model_pool` pass, implicit temp-root pass,
+  blocked-ancestor-named warn included).
+- Did not add a `docs/insights/events/` entry for this cycle-2 pass — same
+  gap noted in cycle 1 (`.claude/skills/sync-docs/SKILL.md` still has no
+  `insights-append.sh` step; tracked in `docs/tech-debt/README.md`'s
+  "insight event の cycle スタンプ機構が脆弱" row).
+- Did not touch `internal/cli/doctor_codex_writable_root.go` or its tests —
+  documenting a known limit is not a code fix, and extending the check to
+  read the seat's own pane environment (rather than doctor's process
+  environment) would need doctor to inspect a running seat's process,
+  which the plan's Non-goals rule out (see the tech-debt row's own Why
+  deferred column, extended this cycle to say so).
+
+### Gate results (cycle 2)
+
+```
+$ ./scripts/check-sync.sh
+=== Sync Summary ===
+  IDENTICAL:      158
+  DRIFTED:        0
+  ROOT_ONLY:      0
+  TEMPLATE_ONLY:  11
+  KNOWN_DIFF:     5
+PASS: all files in sync.
+
+$ ./scripts/check-skill-sync.sh
+[ok] check-skill-sync: 13 skill(s) in lock-step
+
+$ ./scripts/check-template-purity.sh
+PASS: no meta-repo-specific references found in templates.
+```
+
+`docs/tech-debt/README.md` is a `ROOT_ONLY_EXCLUSIONS` entry in
+`scripts/check-sync.sh` (confirmed by name in the script's exclusion list),
+so the one file this cycle changed has no `templates/base/` copy to keep in
+step; `check-sync.sh`'s pass above carries over unaffected by this cycle's
+edit. No skill files were touched this cycle either, so
+`check-skill-sync.sh`'s pass also carries over unaffected.
+
+### Secret scan (cycle 2)
+
+To be run after this cycle's commits land, over the full range since
+`main`: `./scripts/secret-scan.sh --range "$(git merge-base HEAD main)..HEAD"`.
+Result recorded once available.
+
+### Progress checklist (cycle 2)
 
 - Plan's `PR created` checkbox left unchecked, per the handoff — `/pr` has
   not run yet.
