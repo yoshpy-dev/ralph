@@ -289,11 +289,11 @@ func codexSandboxReasons(codexVerified, workspaceWriteRole, guardedRole bool, cf
 }
 
 // codexNotNeededWhyA explains why reason (a) (codexVerified plus a
-// workspace-write-capable role) does not apply, picking the first
-// applicable explanation: codexVerified itself being false takes
-// precedence over the role condition, since it is the simpler, more
-// directly actionable fact.
-func codexNotNeededWhyA(codexVerified, workspaceWriteRole bool) string {
+// workspace-write-capable role) does not apply. It is only called when
+// reason (a) is absent, so codexVerified alone decides the wording:
+// codexVerified being false is the simpler, more directly actionable fact,
+// and when it is true the missing piece can only be the role condition.
+func codexNotNeededWhyA(codexVerified bool) string {
 	if !codexVerified {
 		return "[org.permissions].codex_verified is false"
 	}
@@ -546,7 +546,7 @@ func checkCodexAgmsgWritableRoot(orgCfg config.OrgConfig, agmsgHome string, reso
 	if len(reasons) == 0 {
 		r.Status = "pass"
 		r.Detail = fmt.Sprintf("not needed: %s and %s",
-			codexNotNeededWhyA(orgCfg.Permissions.CodexVerified, workspaceWriteRole),
+			codexNotNeededWhyA(orgCfg.Permissions.CodexVerified),
 			codexNotNeededWhyB(guardedRole, exists, cfgDisplay))
 		return r
 	}

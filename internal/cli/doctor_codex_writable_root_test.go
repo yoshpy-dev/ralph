@@ -828,19 +828,17 @@ func TestCodexSeatModesPossible(t *testing.T) {
 
 func TestCodexNotNeededWhyA(t *testing.T) {
 	cases := []struct {
-		name               string
-		codexVerified      bool
-		workspaceWriteRole bool
-		want               string
+		name          string
+		codexVerified bool
+		want          string
 	}{
-		{"codex_verified false wins regardless of role", false, true, "[org.permissions].codex_verified is false"},
-		{"codex_verified false and no role", false, false, "[org.permissions].codex_verified is false"},
-		{"codex_verified true but no workspace-write role", true, false, "no role resolves to edits or autonomous"},
+		{"codex_verified false", false, "[org.permissions].codex_verified is false"},
+		{"codex_verified true, so the role condition is what is missing", true, "no role resolves to edits or autonomous"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := codexNotNeededWhyA(tc.codexVerified, tc.workspaceWriteRole); got != tc.want {
-				t.Errorf("codexNotNeededWhyA(%v, %v) = %q, want %q", tc.codexVerified, tc.workspaceWriteRole, got, tc.want)
+			if got := codexNotNeededWhyA(tc.codexVerified); got != tc.want {
+				t.Errorf("codexNotNeededWhyA(%v) = %q, want %q", tc.codexVerified, got, tc.want)
 			}
 		})
 	}
