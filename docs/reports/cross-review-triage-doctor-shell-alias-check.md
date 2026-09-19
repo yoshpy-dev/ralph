@@ -49,4 +49,4 @@ Categories: false-positive, already-addressed, style-preference, out-of-scope, c
 - Reviewer run: `codex exec review --base main` (codex-cli 0.154.0, `-m gpt-6-astra -c model_reasoning_effort=xhigh`, stdin closed) at HEAD 4221ae8. The reviewer confirmed the CLI tests and `go vet` pass and reproduced both findings with fixtures.
 - Findings: 2 (WC-3, WC-4 above), both WORTH_CONSIDERING. None of the cycle 1 findings was re-reported.
 - Case B with the cap reached (cycle 2/2): no automatic re-run. The user decides between raising the cap and re-running, creating the PR with WC-3 / WC-4 recorded as known gaps, and aborting. The decision is appended below.
-
+- Decision (2026-09-19, user, AskUserQuestion): create the PR and fix WC-3 / WC-4 in a follow-up. Both are recorded in the PR body under Known gaps and tracked in issue #167. No cap raise, no further pipeline run.
