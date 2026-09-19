@@ -1811,3 +1811,49 @@ func TestCodexConfigDecodeError_ErrorCarriesNoConfigText(t *testing.T) {
 		t.Errorf("Error() without a position = %q", noPos)
 	}
 }
+
+// TestCodexRootCoverage_MixedSpellings_ProtectedSymlinkStillBlocks pins the
+// mixed pairings of codexRootCoverage: the root is configured through a
+// symlink, the store is configured with the resolved prefix but reaches its
+// directory through a .agents symlink. Neither same-spelling pair is an
+// ancestor relation that also shows .agents (configured/configured is not
+// an ancestor relation at all; resolved/resolved has lost the .agents
+// element), so only the resolved-root/configured-store pairing can see it.
+func TestCodexRootCoverage_MixedSpellings_ProtectedSymlinkStillBlocks(t *testing.T) {
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	realRoot := filepath.Join(base, "real")
+	realAgents := filepath.Join(realRoot, "elsewhere", "real-agents")
+	if err := os.MkdirAll(filepath.Join(realAgents, "skills", "agmsg", "db"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(realRoot, "home"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(realAgents, filepath.Join(realRoot, "home", ".agents")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	linkRoot := filepath.Join(base, "link")
+	if err := os.Symlink(realRoot, linkRoot); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	store := filepath.Join(realRoot, "home", ".agents", "skills", "agmsg", "db")
+	covers, blocked := codexRootCoverage(linkRoot, store, resolveNearestExisting(store))
+	if !covers {
+		t.Fatalf("the symlinked root must still count as an ancestor of the store")
+	}
+	if !blocked {
+		t.Fatalf("the store is reached through a .agents symlink under the root, so the root must be blocked")
+	}
+
+	// Control: the same root against a store no spelling routes through a
+	// protected directory stays unblocked.
+	plain := filepath.Join(realRoot, "elsewhere", "real-agents", "skills", "agmsg", "db")
+	covers, blocked = codexRootCoverage(linkRoot, plain, resolveNearestExisting(plain))
+	if !covers || blocked {
+		t.Fatalf("control: covers=%v blocked=%v, want covers=true blocked=false", covers, blocked)
+	}
+}

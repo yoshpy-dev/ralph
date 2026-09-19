@@ -573,15 +573,23 @@ func resolveNearestExisting(path string) string {
 // absolute, or does not genuinely cover target -- decided on the RESOLVED
 // pair via pathCovers, exactly as before this function existed. When
 // covers is true, blocked reports whether a codex-protected directory
-// element sits between root and target on EITHER the resolved pair or the
-// pair exactly as configured (cross-review C2-1): a writable_roots entry
+// element sits between root and target on ANY pairing of the two spellings
+// of each side -- resolved/resolved, configured/configured, and the two
+// mixed pairings (cross-review C2-1): a writable_roots entry
 // or an agmsg home that reaches the store through a symlink whose target
 // lands back under the same root, but through a differently-named
 // directory, would otherwise let the RESOLVED spelling hide a protected
 // element that the CONFIGURED spelling still shows -- and which spelling
 // codex itself evaluates its protection against is not documented, so
-// pathCrossesCodexProtectedDir is checked on both (see its own doc
-// comment).
+// pathCrossesCodexProtectedDir is checked on every pairing (see its own
+// doc comment). The mixed pairings matter when the root is spelled through
+// a symlink (the sandbox's fixed temp root on darwin is one: it resolves to
+// a differently-named directory) while the store is spelled with the
+// resolved prefix but still reaches its directory through a protected
+// symlink deeper down: neither same-spelling pair is then an ancestor
+// relation that also shows the protected element. A pairing that is not an
+// ancestor relation simply reports false, so checking all four cannot
+// block a root that no spelling routes through a protected directory.
 func codexRootCoverage(root, target, resolvedTarget string) (covers, blocked bool) {
 	if !filepath.IsAbs(root) {
 		return false, false // a relative or ~-prefixed root never matches (see pathCovers)
@@ -590,7 +598,10 @@ func codexRootCoverage(root, target, resolvedTarget string) (covers, blocked boo
 	if !pathCovers(resolvedRoot, resolvedTarget) {
 		return false, false
 	}
-	blocked = pathCrossesCodexProtectedDir(resolvedRoot, resolvedTarget) || pathCrossesCodexProtectedDir(root, target)
+	blocked = pathCrossesCodexProtectedDir(resolvedRoot, resolvedTarget) ||
+		pathCrossesCodexProtectedDir(root, target) ||
+		pathCrossesCodexProtectedDir(resolvedRoot, target) ||
+		pathCrossesCodexProtectedDir(root, resolvedTarget)
 	return true, blocked
 }
 
