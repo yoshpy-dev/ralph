@@ -139,6 +139,30 @@ All three PASS. No skill files were touched in this pass (Slice B already
 landed the `/org` skill edits), so `check-skill-sync.sh`'s pass carries over
 unchanged.
 
+## Secret scan
+
+`./scripts/secret-scan.sh --range "$(git merge-base HEAD main)..HEAD"`
+(commit `04b6df5`, the doc-edits-plus-report commit above) failed: two
+"generic secret assignment" false positives, both in this branch's own
+`docs/reports/{test,verify}-2026-09-19-codex-agmsg-writable-root.md`
+hygiene sentences ("no fixture ... contains any `` `api_key=` ``/
+`` `password=` ``/`` `access_token=` ``-shaped string") — the scanner's
+generic-assignment pattern doesn't exclude backtick as a value character,
+so naming the pattern in prose (to assert it is *absent*) trips the same
+rule the prose is describing. Fixed by extending `.gitallowed` with a
+narrow ERE requiring the closing backtick immediately after `=` (so a real
+secret pasted into a backtick span, which would have a value between `=`
+and the closing backtick, still matches) — same shape as the two existing
+entries for `internal/cli/doctor_shell_alias_test.go`'s fixture values
+(commits `5a91cff`/`00eb183` on `main`). The first spelling of my own
+allowlist comment (commit `90dc4be`) quoted the flagged sentences verbatim
+without breaking the pattern names, which self-matched the very rule it
+was adding (the same pitfall `00eb183` fixed for the shell-alias entry);
+corrected in a follow-up commit (`ee70868`) rather than amending, per this
+repo's commit-strategy rule. Final state: `secret-scan.sh --range
+"$(git merge-base HEAD main)..HEAD"` exits 0 (re-run after `ee70868`,
+covering all commits through the `.gitallowed` fix itself).
+
 ## Progress checklist
 
 - Plan's `PR created` checkbox left unchecked, per the handoff — `/pr` has
