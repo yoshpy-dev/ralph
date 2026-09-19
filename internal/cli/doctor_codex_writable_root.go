@@ -370,12 +370,12 @@ func codexSandboxReasons(codexVerified, workspaceWriteRole, guardedRole bool, cf
 	var reasons []string
 	if codexVerified && workspaceWriteRole {
 		reasons = append(reasons,
-			"[org.permissions].codex_verified = true and a role resolves to edits or autonomous "+
+			"[org.permissions].codex_verified = true and a role that can use a codex model resolves to edits or autonomous "+
 				"(ralph passes --sandbox workspace-write to those codex seats)")
 	}
 	if cfg.SandboxMode == "workspace-write" && guardedRole {
 		reasons = append(reasons,
-			fmt.Sprintf("sandbox_mode = \"workspace-write\" in %s and a role resolves to guarded (guarded codex seats inherit it)", cfgDisplay))
+			fmt.Sprintf("sandbox_mode = \"workspace-write\" in %s and a role that can use a codex model resolves to guarded (guarded codex seats inherit it)", cfgDisplay))
 	}
 	return reasons
 }
@@ -389,7 +389,7 @@ func codexNotNeededWhyA(codexVerified bool) string {
 	if !codexVerified {
 		return "[org.permissions].codex_verified is false"
 	}
-	return "no role resolves to edits or autonomous"
+	return "no role that can use a codex model resolves to edits or autonomous"
 }
 
 // codexNotNeededWhyB is codexNotNeededWhyA's counterpart for reason (b)
@@ -400,7 +400,7 @@ func codexNotNeededWhyA(codexVerified bool) string {
 func codexNotNeededWhyB(guardedRole, exists bool, cfgDisplay string) string {
 	switch {
 	case !guardedRole:
-		return "no role resolves to guarded"
+		return "no role that can use a codex model resolves to guarded"
 	case !exists:
 		return fmt.Sprintf("%s does not exist", cfgDisplay)
 	default:

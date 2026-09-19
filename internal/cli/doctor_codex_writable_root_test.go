@@ -97,7 +97,7 @@ func TestCheckCodexAgmsgWritableRoot_NotNeeded_CodexVerifiedFalse_NoGuardedRole(
 	if r.Status != "pass" {
 		t.Fatalf("expected pass, got %s (%s)", r.Status, r.Detail)
 	}
-	want := "not needed: [org.permissions].codex_verified is false and no role resolves to guarded"
+	want := "not needed: [org.permissions].codex_verified is false and no role that can use a codex model resolves to guarded"
 	if r.Detail != want {
 		t.Errorf("Detail = %q, want %q", r.Detail, want)
 	}
@@ -116,7 +116,7 @@ func TestCheckCodexAgmsgWritableRoot_NotNeeded_GuardedDefaultConfigAbsent(t *tes
 	if r.Status != "pass" {
 		t.Fatalf("expected pass, got %s (%s)", r.Status, r.Detail)
 	}
-	want := fmt.Sprintf("not needed: no role resolves to edits or autonomous and %s does not exist", noSuchCfg)
+	want := fmt.Sprintf("not needed: no role that can use a codex model resolves to edits or autonomous and %s does not exist", noSuchCfg)
 	if r.Detail != want {
 		t.Errorf("Detail = %q, want %q", r.Detail, want)
 	}
@@ -135,7 +135,7 @@ func TestCheckCodexAgmsgWritableRoot_NotNeeded_GuardedDefaultConfigExists(t *tes
 	if r.Status != "pass" {
 		t.Fatalf("expected pass, got %s (%s)", r.Status, r.Detail)
 	}
-	want := fmt.Sprintf("not needed: no role resolves to edits or autonomous and %s does not set sandbox_mode = \"workspace-write\"", cfgPath)
+	want := fmt.Sprintf("not needed: no role that can use a codex model resolves to edits or autonomous and %s does not set sandbox_mode = \"workspace-write\"", cfgPath)
 	if r.Detail != want {
 		t.Errorf("Detail = %q, want %q", r.Detail, want)
 	}
@@ -156,7 +156,7 @@ func TestCheckCodexAgmsgWritableRoot_NotNeeded_SandboxModeSetButNoGuardedRole(t 
 	if r.Status != "pass" {
 		t.Fatalf("expected pass, got %s (%s)", r.Status, r.Detail)
 	}
-	if !strings.Contains(r.Detail, "no role resolves to guarded") {
+	if !strings.Contains(r.Detail, "no role that can use a codex model resolves to guarded") {
 		t.Errorf("expected detail to name the missing guarded role, got: %s", r.Detail)
 	}
 }
@@ -195,9 +195,9 @@ func TestCheckCodexAgmsgWritableRoot_BothReasons_WarnDetailNumbersEachReason(t *
 	if r.Status != "warn" {
 		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
 	}
-	want := "needed because (1) [org.permissions].codex_verified = true and a role resolves to edits or autonomous " +
+	want := "needed because (1) [org.permissions].codex_verified = true and a role that can use a codex model resolves to edits or autonomous " +
 		"(ralph passes --sandbox workspace-write to those codex seats) and (2) sandbox_mode = \"workspace-write\" in " + cfgPath +
-		" and a role resolves to guarded (guarded codex seats inherit it); add " + store
+		" and a role that can use a codex model resolves to guarded (guarded codex seats inherit it); add " + store
 	if !strings.Contains(r.Detail, want) {
 		t.Errorf("expected detail to contain %q, got: %s", want, r.Detail)
 	}
@@ -724,7 +724,7 @@ func TestCheckCodexAgmsgWritableRoot_RoleModelRestrictionExcludesCodex_ReasonAAb
 	if r.Status != "pass" {
 		t.Fatalf("expected pass, got %s (%s)", r.Status, r.Detail)
 	}
-	if !strings.Contains(r.Detail, "no role resolves to edits or autonomous") {
+	if !strings.Contains(r.Detail, "no role that can use a codex model resolves to edits or autonomous") {
 		t.Errorf("expected reason (a) to read as absent (the autonomous role cannot actually hold a codex model), got: %s", r.Detail)
 	}
 }
@@ -757,7 +757,7 @@ func TestCheckCodexAgmsgWritableRoot_RoleModelRestrictionIncludesCodex_ReasonAPr
 	if r.Status != "warn" {
 		t.Fatalf("expected warn (reason (a) fires: the role can hold a codex model), got %s (%s)", r.Status, r.Detail)
 	}
-	if !strings.Contains(r.Detail, "a role resolves to edits or autonomous") {
+	if !strings.Contains(r.Detail, "a role that can use a codex model resolves to edits or autonomous") {
 		t.Errorf("expected reason (a) in the needed-because clause, got: %s", r.Detail)
 	}
 }
@@ -1379,7 +1379,7 @@ func TestCodexNotNeededWhyA(t *testing.T) {
 		want          string
 	}{
 		{"codex_verified false", false, "[org.permissions].codex_verified is false"},
-		{"codex_verified true, so the role condition is what is missing", true, "no role resolves to edits or autonomous"},
+		{"codex_verified true, so the role condition is what is missing", true, "no role that can use a codex model resolves to edits or autonomous"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1398,7 +1398,7 @@ func TestCodexNotNeededWhyB(t *testing.T) {
 		exists      bool
 		want        string
 	}{
-		{"no guarded role wins regardless of config", false, true, "no role resolves to guarded"},
+		{"no guarded role wins regardless of config", false, true, "no role that can use a codex model resolves to guarded"},
 		{"guarded role but config absent", true, false, cfgDisplay + " does not exist"},
 		{"guarded role, config exists, sandbox_mode unset", true, true, cfgDisplay + ` does not set sandbox_mode = "workspace-write"`},
 	}
