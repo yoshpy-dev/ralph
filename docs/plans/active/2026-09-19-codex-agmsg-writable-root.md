@@ -1,6 +1,6 @@
 # codex-agmsg-writable-root
 
-- Status: In progress
+- Status: Done (PR #171)
 - Owner: Claude Code
 - Date: 2026-09-19
 - Related request: #155 の実機検証(`docs/evidence/codex-seat-permissions-2026-09-18.md` P3、Run A → A2)で、`--sandbox workspace-write` で動く codex 座席は agmsg の SQLite DB(`~/.agents/skills/agmsg/db/messages.db`)に書けず(`attempt to write a readonly database (8)`)、RESULT を lead に送れなかった。codex config の `[sandbox_workspace_write] writable_roots` に agmsg の `db` ディレクトリを足すと送れる。現状は recipe で手動設定を求めているだけで、設定漏れに気づく手段がない(issue #164)
@@ -56,14 +56,14 @@
 
 ## Acceptance criteria
 
-- [ ] AC-1: `ralph doctor` の出力に「Codex sandbox (agmsg writable root)」Check が codex スラッグの Check の直後に出る
-- [ ] AC-2: Scope 5 のテストがすべて pass。warn の Detail が agmsg の `db` ディレクトリ、読んだ config のパス、`docs/recipes/codex-seat-permissions.md` を含む。祖先判定がパス要素単位で、接頭辞が同じだけのディレクトリを覆っているとみなさない
-- [ ] AC-3: `driver_pool` に codex なし → `pass`、`model_pool` に codex の model なし → `pass`、理由なし(`codex_verified` が false / edits・autonomous に解決される role がない / guarded に解決される role がない / `sandbox_mode` が workspace-write でない)→ `pass`、覆っている → `pass`、保存ディレクトリが既定で書ける一時 root(固定の一時ディレクトリ / `$TMPDIR`。`exclude_slash_tmp` / `exclude_tmpdir_env_var` で除外されていないもの)の下 → `pass`、覆っていない → `warn`(agmsg が導入済みならバージョン違いでも warn)、祖先の root が `.git` / `.agents` / `.codex` をまたぐだけ → `warn`(その root を名指し)、`AGMSG_STORAGE_PATH` があればその値で判定、agmsg 未導入 / 読めない config / 型違い / codex home 解決不能 → `info`。`countFailed` の対象にならない(既存の exit code テストが pass のまま)
-- [ ] AC-4: 既存の `runDoctor*` テストが開発者の実 `~/.codex/config.toml` を読まない(`TestMain` の固定と、それを確かめるテスト)
-- [ ] AC-5: recipe(root / template 一致)と `/org` skill(4 面一致)に Check への言及がある。`check-skill-sync.sh` / `check-sync.sh` / `check-template-purity.sh` pass
-- [ ] AC-6: `gofmt` / `go vet` / golangci-lint clean、`go test ./internal/cli/... -count=1` green、`./scripts/run-verify.sh` green、`./scripts/secret-scan.sh --range "$(git merge-base HEAD origin/main)..HEAD"` が exit 0
-- [ ] AC-7: evidence として、このマシンの実 config での `ralph doctor` の該当行と、スクラッチの `CODEX_HOME` + `codex_verified = true` の `ralph.toml` で root なし(warn)/ root あり(pass)の該当行を plan に記録する。issue の受け入れ条件「実機で確認」は、採用方式が検出のみであるため、この doctor 出力と #155 の Run A / A2(root なしで失敗、ありで成功)への参照で満たす
-- [ ] AC-8: PR 本文は `Closes #164`
+- [x] AC-1: `ralph doctor` の出力に「Codex sandbox (agmsg writable root)」Check が codex スラッグの Check の直後に出る
+- [x] AC-2: Scope 5 のテストがすべて pass。warn の Detail が agmsg の `db` ディレクトリ、読んだ config のパス、`docs/recipes/codex-seat-permissions.md` を含む。祖先判定がパス要素単位で、接頭辞が同じだけのディレクトリを覆っているとみなさない
+- [x] AC-3: `driver_pool` に codex なし → `pass`、`model_pool` に codex の model なし → `pass`、理由なし(`codex_verified` が false / edits・autonomous に解決される role がない / guarded に解決される role がない / `sandbox_mode` が workspace-write でない)→ `pass`、覆っている → `pass`、保存ディレクトリが既定で書ける一時 root(固定の一時ディレクトリ / `$TMPDIR`。`exclude_slash_tmp` / `exclude_tmpdir_env_var` で除外されていないもの)の下 → `pass`、覆っていない → `warn`(agmsg が導入済みならバージョン違いでも warn)、祖先の root が `.git` / `.agents` / `.codex` をまたぐだけ → `warn`(その root を名指し)、`AGMSG_STORAGE_PATH` があればその値で判定、agmsg 未導入 / 読めない config / 型違い / codex home 解決不能 → `info`。`countFailed` の対象にならない(既存の exit code テストが pass のまま)
+- [x] AC-4: 既存の `runDoctor*` テストが開発者の実 `~/.codex/config.toml` を読まない(`TestMain` の固定と、それを確かめるテスト)
+- [x] AC-5: recipe(root / template 一致)と `/org` skill(4 面一致)に Check への言及がある。`check-skill-sync.sh` / `check-sync.sh` / `check-template-purity.sh` pass
+- [x] AC-6: `gofmt` / `go vet` / golangci-lint clean、`go test ./internal/cli/... -count=1` green、`./scripts/run-verify.sh` green、`./scripts/secret-scan.sh --range "$(git merge-base HEAD origin/main)..HEAD"` が exit 0
+- [x] AC-7: evidence として、このマシンの実 config での `ralph doctor` の該当行と、スクラッチの `CODEX_HOME` + `codex_verified = true` の `ralph.toml` で root なし(warn)/ root あり(pass)の該当行を plan に記録する。issue の受け入れ条件「実機で確認」は、採用方式が検出のみであるため、この doctor 出力と #155 の Run A / A2(root なしで失敗、ありで成功)への参照で満たす
+- [x] AC-8: PR 本文は `Closes #164`
 
 ## Implementation outline
 
@@ -126,6 +126,7 @@ doctor の Check 追加と文書のみ。下流へは次回 release でバイナ
 - 2026-09-19 test cycle 2(同 report の Cycle 2 節、5e939d1): PASS、所見なし。対象 202 件 PASS / SKIP 0、8 package ok、CI を模擬する `TMPDIR=/tmp go test ./internal/cli/... -count=1` ok、race なし、`internal/cli` 84.0%(`doctor_codex_writable_root.go` の全 27 関数が 80% 以上)。`$HOME` 配下に作った fixture でビルド済みバイナリの 17 構成(ホームを root にした場合の名指し付き warn、`.agents` が symlink の場合の warn、`driver_pool` / `model_pool` に codex なしの pass、role の model 制限、`/tmp` の保存先と `exclude_slash_tmp`、重複キー、FIFO、agmsg 未導入 など)と exit code 不変を確認。`CODEX_HOME` / `TMPDIR` を差し替えても結果は同一。履歴込みの range secret scan は exit 0。tester が挙げた未到達の分岐 2 つ(覆っていない暗黙 root の読み飛ばし、config がないときの暗黙 root の pass の文言)は、報告後に orchestrator がテスト 2 件を追加して埋めた(テストのみの変更。static verify と対象テストは green)
 - 2026-09-19 sync-docs cycle 2(d18fc36 / aaf876b): tech-debt の行に 4 つ目の制限(`$TMPDIR` / `AGMSG_STORAGE_PATH` は doctor 自身のプロセス環境から読むため、herdr の pane の値と違い得る)を追記。recipe / skill はコードと一致、`doctor.go` の Check 11b のコメントは短いだけで不正確ではない、との確認。同期ゲート 3 本 pass、履歴込みの range secret scan は exit 0
 - 2026-09-19 cross-review cycle 2(bc36054): Codex の所見 1 件(P2)を WORTH_CONSIDERING に分類。WC-3 agmsg の保存先が座席の作業ディレクトリの中にあると、追加の root なしで書けるのに warn が出る(誤 warn。既定の保存先では起きない)。doctor は座席の `--cwd` を知り得ないので、プロジェクトディレクトリを無条件に root とみなす対応は誤 pass の危険がある。cycle 1 の 3 件は再指摘なし。上限(2/2)到達のためユーザーに確認し、判断は「PR を作成し、後続 issue で直す」。issue #170 を起票し、PR 本文の Known gaps に記録する
+- 2026-09-19 pr: PR #171 を作成(`Closes #164`、Known gaps に WC-3、後続 #170)。push 前に `./scripts/run-verify.sh` green、`TMPDIR=/tmp go test ./internal/cli/... -count=1` ok、`origin/main` 基準の履歴込みの range secret scan exit 0 を確認。title prefix / ready チェック pass。walkthrough: `docs/reports/walkthrough-2026-09-19-codex-agmsg-writable-root.md`
 
 ## Progress checklist
 
@@ -135,4 +136,4 @@ doctor の Check 追加と文書のみ。下流へは次回 release でバイナ
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
-- [ ] PR created
+- [x] PR created (#171)
