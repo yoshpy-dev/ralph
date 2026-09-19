@@ -221,7 +221,9 @@ EVIDENCE: docs/reports/self-review-foo.md
   `sandbox_mode = "workspace-write"` で guarded に解決される role がある場合。
   数えるのは codex の model を使える role だけで、`[org].driver_pool` か
   `[org].model_pool` に codex がなければ不要。ホームのような広い root は
-  `.agents` が保護されるため効かず、`db` ディレクトリ自体を指定する。読むのは
+  `.agents` が保護されるため効かず、`db` ディレクトリ自体を指定する。保存先が
+  `/tmp` や `$TMPDIR` の下なら既定で書けるので不要(`exclude_slash_tmp` /
+  `exclude_tmpdir_env_var` で除外していない場合)。読むのは
   ユーザー階層の `config.toml` だけで、profile・project 階層・`-c` の上書きは
   評価しない。
 - `autonomous` モードの spawn は `--scope` を必須とし(fail-closed)、
