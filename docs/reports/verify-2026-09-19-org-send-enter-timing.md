@@ -57,3 +57,64 @@ None found. Checked:
 ## Verdict
 
 **Pass.** AC-1 through AC-6 are fully met with direct code + test evidence. AC-7 is met for its static-analysis half (the half `/verify` owns); its test-execution half is deferred to `/test` as designed, not a failure here. AC-8 is not yet applicable. No documentation drift found across the code doc comments, CLI help/flag text, the `/org` skill (4 mirrors), the recipe (2 copies), or the three cross-referenced docs that mention `ralph org send`. All three requested sync gates and the scoped `gofmt`/`go vet` checks pass clean.
+
+## Cycle 2 (2026-09-19)
+
+- Scope: re-verify against HEAD `bf4c8c8` (the cycle-1 section above is scoped to `9d99f39` and describes the superseded `SendResult.TextTyped`/`EnterPressed` two-bool contract — do not treat it as current for anything past AC wording). Diff since the cycle-1 verify commit: `git diff 354e580..HEAD`, 18 files, +1156/−180. `git status --porcelain` empty at start and end.
+- What changed: cross-review cycle 1 found two ACTION_REQUIRED items (`docs/reports/cross-review-triage-org-send-enter-timing.md`) — AR-1 replaced `TextTyped`/`EnterPressed` with `SendResult.Progress` (`SendProgress`, five states: nothing-sent, text-unacknowledged, text-typed, enter-unacknowledged, enter-pressed), because a ctx deadline can kill a herdr call mid-flight and Send genuinely cannot tell whether the pane call landed; AR-2 added `orgReadCommandHint`, which appends `--state-dir <resolved-absolute-path>` to the printed `ralph org read` recovery command only when `--state-dir` was explicitly passed. Cycle-2 self-review then found and fixed six more items (C2-1..C2-6): a CLI timing test with an accidental (not designed) margin, one added sentence to the exit-0 unconfirmed-submit warning, two test renames, a doc-comment reorder, and a recipe/skill wording qualification.
+
+### Acceptance criteria (re-verified against bf4c8c8)
+
+| AC | Status | Evidence |
+|----|--------|----------|
+| AC-1: fixed fake-herdr call order | **Met, unchanged** | `TestOrgSend_Confirmed_ExactCallOrderAndUntilStates` (`internal/org/verbs_test.go:448-483`) is untouched by the AR-1/self-review-cycle-2 diff and still asserts `wantOrder := []string{"agent_wait", "pane_send_text", "pane_send_keys", "agent_wait"}` plus the `["idle","done"]` / `["working","blocked"]` `until` values. Code path unchanged: `verbs.go:305` (idle/done wait) → `:338` (`PaneSendText`) → `:351` (`waitBeforeEnter`) → `:362` (`PaneSendKeys("Enter")`) → `:373` (`confirmSubmitted`). |
+| AC-2: unconfirmed → `submit_unconfirmed=true`, `Send` succeeds, exactly one Enter | **Met, unchanged** | `TestOrgSend_UnconfirmedSubmit_NeverResendsEnter` (`verbs_test.go:494-524`) unchanged: `result.Err == nil`, `SubmitConfirmed == false`, `len(h.sendKeysKeys) == 1` with `["Enter"]`, `Details` starts with `submit_unconfirmed=true `. Code: `verbs.go:373-378`. |
+| AC-3: `--enter-delay-ms` usable/negative-rejected; unconfirmed-submit stderr note has `pane_id`, exit 0 | **Met, strengthened** | Flag/rejection unchanged (`internal/cli/org.go:400,416-417,520-521`; `TestOrgSend_NegativeEnterDelayMS_NonZeroExit`). The warning itself changed (C2-2): `org.go:499-509` now adds "If the pane shows anything else (the seat is working, or it shows a dialog), do not press Enter." `TestOrgSend_UnconfirmedSubmit_WarnsOnStderr_ExitZero` (`org_test.go:1238-1272`, read in full) asserts exit 0, `"could not confirm"`, seat name, `pane-stub-1`, `"does not resend Enter"`, and the new `"do not press Enter"` clause — all five present. The AC's wording ("pane_id を含む") still matches: the pane id is still in the message, just alongside more text. |
+| AC-4: existing paths unchanged (protocol-validation rejection, dry-run, unknown seat, send-text/Enter errors) | **Met, one path enriched not broken** | Validation/dry-run/unknown-seat/no-pane-id (`verbs.go:254-282`) are byte-for-byte unchanged from cycle-1 HEAD; their four regression tests (`TestOrgSend_Malformed_RejectedNoManifestEventNoDriverCall`, `TestOrgSend_DryRun_Malformed_AlsoRejectedBeforeManifestEvent`, `TestOrgSend_UnknownSeat_ErrorsWithoutDriverCall`, `TestOrgSend_SeatWithoutPaneID_Errors`) are present and unmodified (`git diff` shows only additions in this test file, no deleted `func Test`). The send-text/Enter error paths still error the same way at the top level (non-nil `Err`, no `sent` event appended) — what changed is that they now report *more* information (`Progress` + `PaneID`) than the old two-bool return, which is the AR-1 fix, not a regression. New tests: `TestOrgSend_PaneSendTextFails_ReportsTextUnacknowledged` (`verbs_test.go:784-818`), `TestOrgSend_PaneSendKeysFails_ReportsEnterUnacknowledged` (`:743-771`), and their CLI counterparts `TestOrgSend_PaneSendTextFails_NotesTextUnacknowledgedOnStderr` / `TestOrgSend_PaneSendKeysFails_NotesEnterUnacknowledgedOnStderr` (`org_test.go:1302,1356`). |
+| AC-5: live evidence | **Met, unchanged** | `git diff 354e580..HEAD -- docs/evidence/org-send-enter-timing-2026-09-19.md` is empty — the cycle-1 timing measurements are unaffected by AR-1/AR-2 (both are error-reporting/message-wording changes, not timing changes), so no re-measurement was needed or done. |
+| AC-6: recipe + 4 skill surfaces describe current behavior, 3 sync gates pass | **Met, updated correctly** | Recipe (`docs/recipes/codex-seat-permissions.md:140-152` + template) and skill (`.claude/skills/org/SKILL.md:105` + 3 mirrors) now describe the AR-1 "may or may not have reached the pane" uncertainty, the AR-2 `--state-dir`-carrying hint, and the C2-5 qualification (no note on `SendProgressNothingSent` failures). All 6 files re-diffed pairwise: `diff .claude/skills/org/SKILL.md .agents/skills/org/SKILL.md`, `diff .claude/skills/org/SKILL.md templates/base/.claude/skills/org/SKILL.md`, `diff .claude/skills/org/SKILL.md templates/base/.agents/skills/org/SKILL.md`, `diff docs/recipes/codex-seat-permissions.md templates/base/docs/recipes/codex-seat-permissions.md` — all empty (byte-identical). `./scripts/check-skill-sync.sh` / `check-sync.sh` / `check-template-purity.sh` all PASS (see Deterministic checks below). |
+| AC-7: static half | **Met** | See Deterministic checks below — clean at `bf4c8c8`. Test-execution half remains `/test`'s job; not re-run here. |
+| AC-8: PR body `Closes #163` | **Not yet applicable** | No PR exists yet (this is pipeline cycle 2 of 2, still pre-`/pr`). |
+
+**AC wording vs. the old two-bool contract**: none of AC-1 through AC-8's text names `TextTyped` or `EnterPressed` directly — they describe behavior ("Enter は 1 回しか送られない", "pane_id を含む", "既存の経路が不変") at a level of abstraction the AR-1 `SendProgress` refactor preserves. No AC reads stale.
+
+### Static analysis (re-run at bf4c8c8)
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `./scripts/run-static-verify.sh` (changed-language scope) | PASS | Same battery as cycle 1: config-validity checks, Codex hook/PR-provenance guards, `check-sync.sh` (`DRIFTED: 0`), `check-pipeline-sync.sh`, `check-skill-sync.sh` (13 skills in lock-step), `check-template-purity.sh`, then golang: `gofmt: ok`, `go vet` silent, golangci-lint `0 issues.`, staticcheck silent. Evidence: `docs/evidence/verify-2026-09-19-160021.log`. |
+| `gofmt -l internal/org internal/cli` | PASS | No output. |
+| `go vet ./internal/org/... ./internal/cli/...` | PASS | No output. |
+| `./scripts/check-skill-sync.sh` | PASS | Included in the run above. |
+| `./scripts/check-sync.sh` | PASS | `DRIFTED: 0`. |
+| `./scripts/check-template-purity.sh` | PASS | No meta-repo-specific references in templates. |
+
+### Documentation drift (re-checked against bf4c8c8)
+
+One finding, not present in cycle 1 (it was introduced by a commit in this cycle's own range):
+
+- **`docs/tech-debt/README.md:133` cites a test function name that no longer exists.** The row (added at `6a3a9d5`, during cycle-1 sync-docs, before the AR-1/cycle-2-self-review commits) reads "...the read-only-manifest trick used by `TestOrgSend_AppendEventFailsAfterEnter_ReportsSubmittedButUnrecorded` fails a write...". That test was renamed to `TestOrgSend_AppendEventFailsAfterEnter_ReportsEnterPressedButUnrecorded` by the C2-3 self-review fix (`646fb4b`) — confirmed by `grep -rn ReportsSubmittedButUnrecorded .`, which now only matches this tech-debt row and the two dated report files (`docs/reports/test-2026-09-19-org-send-enter-timing.md`, itself a HEAD-pinned cycle-1 artifact the cross-review report already flagged as due for its own cycle-2 `/test` re-verification, not a live doc). The self-review's own C2-3 recommendation named the test-report reference for a possible fix but did not catch this tech-debt-register reference. This is cosmetic (the row's substance — the coverage gap itself — is still accurate and still open) but is exactly the kind of dangling-identifier drift `/verify` exists to catch. **Recommendation**: one-word edit, `s/ReportsSubmittedButUnrecorded/ReportsEnterPressedButUnrecorded/` in `docs/tech-debt/README.md:133`, foldable into `/sync-docs`'s cycle-2 pass rather than a blocker.
+
+Everything re-checked from cycle 1 and still sound:
+
+- `internal/cli/org.go`'s `send` `Long` description, `orgReadCommandHint`'s doc comment (including the C2-6 "same shell, run from the same directory" qualification), and the `--timeout-ms` help text are all consistent with the code they describe.
+- `docs/evidence/codex-seat-permissions-2026-09-18.md`'s P2 pointer line is unchanged and still accurate.
+- `docs/specs/2026-08-01-org-runtime.md`, `README.md`, `.claude/rules/ralph/agent-messaging.md`: `git diff 354e580..HEAD` touches none of the three, and cycle 1 already confirmed none of them mention `ralph org send`'s Enter-timing behavior — still true.
+- `internal/org/send_defaults_sync_test.go` untouched by this cycle's diff, still enforces the line-adjacency check.
+- No leftover bare `TextTyped`/`EnterPressed` identifiers anywhere in `*.go` or current `*.md` docs (excluding the dated `docs/reports/` artifacts, which cite them accurately for the commits they describe): `grep -rn 'TextTyped\|EnterPressed'` over the whole tree turns up only `SendProgressTextTyped`/`SendProgressEnterPressed` enum-constant names in code/tests, plus the dated reports and the plan's own revision history (the plan intentionally keeps its superseded Scope-row-1 sentence followed by the AR-1 revision paragraph as a revision record, per the cross-review triage's own answer to this exact question — not drift).
+
+### Non-goals sweep (re-checked at bf4c8c8)
+
+- **No automatic Enter resend**: `grep -rn 'PaneSendKeys(' internal/org internal/cli` (non-test) — exactly one Enter call site (`verbs.go:362`, inside `Send`) plus the two pre-existing `C-c` sites in `Stop` (`spawn.go:1324`, `verbs.go:624`). No retry loop around any pane call (`grep -n 'for.*PaneSendText\|for.*PaneSendKeys' internal/org/verbs.go` — no hits). `Send` still has exactly one CLI call site (`internal/cli/org.go:438`).
+- **No pane-content scraping in `Send`**: the only `PaneRead` call in `internal/org/verbs.go` remains inside `Read`, not `Send`.
+- **No new `ralph.toml` key**: `git diff main...HEAD -- ralph.toml templates/base/ralph.toml internal/config/` is empty.
+
+### Coverage gaps / what remains unverified
+
+- Same as cycle 1: behavioral test execution and the range secret scan remain `/test`'s and the pre-push-check's responsibility, not independently re-run here.
+- `docs/reports/test-2026-09-19-org-send-enter-timing.md` and `docs/reports/sync-docs-2026-09-19-org-send-enter-timing.md` are cycle-1-pinned artifacts per the cross-review triage's own "Known gaps" section; cycle 2's own `/test` and `/sync-docs` runs (still pending in this pipeline cycle) are the ones responsible for producing current versions, not this `/verify` pass.
+- AC-8 remains not yet applicable (pre-`/pr`).
+
+### Verdict (cycle 2)
+
+**Pass.** AC-1 through AC-6 remain met (three strengthened by the AR-1/AR-2/self-review-cycle-2 fixes, three unchanged), AC-7's static half is clean, AC-8 is not yet applicable. No AC reads stale against the `SendProgress` refactor. One minor, non-blocking documentation-drift finding: a dangling pre-rename test-function-name citation in `docs/tech-debt/README.md:133`, worth a one-word fix in `/sync-docs` but not a merge blocker on its own.
