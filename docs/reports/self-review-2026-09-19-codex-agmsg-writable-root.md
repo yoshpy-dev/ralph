@@ -128,3 +128,96 @@ deferred work identified by this review; it is not yet in `docs/tech-debt/README
 - Known gaps in this review: severity judgements are diff-quality only. Spec compliance
   against AC-1..AC-8, static analysis, and behavioural test results are `/verify`'s and
   `/test`'s to report; nothing here was run as a gate.
+
+---
+
+## Revalidation (cycle 1, fix round)
+
+- Date: 2026-09-19
+- Fix range reviewed: `git diff 03d9e93..HEAD`, HEAD `3856643` (`636da6a` plan,
+  `0811070` Go fixes, `65a6f86` parameter drop, `5bacc46` docs, `3856643` plan notes).
+  12 files, +785/-219.
+- Verdict: **merge**. All nine original findings are resolved. Six new findings, all
+  LOW, none blocking.
+
+### Evidence reviewed for the fix round
+
+- `internal/cli/doctor_codex_writable_root.go` re-read in full (now 572 lines), plus
+  the rewritten test file, the new `internal/cli/doctor_codex_writable_root_unix_test.go`,
+  and the `doctor.go` / `main_test.go` / docs / plan hunks.
+- New logic cross-checked against the producer: `internal/org/permissions.go`
+  (`ResolvePermissionMode` precedence, `permissionArgsForDriver`'s codex arms),
+  `internal/org/envelope.go:53,77` (driver rejected when outside `[org].driver_pool`),
+  `internal/config/config.go:140,157,320-331` (defaults and `[org.permissions]`
+  validation), `internal/cli/org.go:210-214` (`--role` is required and non-blank, so
+  a seat's role is never the empty string).
+- A 15-case matrix driven through the real `checkCodexAgmsgWritableRoot` in a throwaway
+  test, printing `codexSeatModesPossible`'s two flags plus the status and Detail for each,
+  next to `permissionArgsForDriver`'s actual output for all six (codex_verified × mode)
+  pairs. Probe files removed; `git status --porcelain` is empty.
+- `TMPDIR="$HOME/ralph-tmpdir-probe" go test ./internal/cli/ -run
+  'TestCheckCodexAgmsgWritableRoot|TestCodex|TestCovering|TestPathCovers|TestAgmsgStoreDir'
+  -count=1` → `ok`. This is the exact command that failed before the fix.
+- `GOOS=windows go vet ./internal/cli/` → only the pre-existing
+  `internal/org/lockfile.go` `syscall.Flock` errors; nothing from the writable-root files.
+- Mirror parity re-checked with `cmp`: all four `org/SKILL.md` copies byte-identical,
+  both `codex-seat-permissions.md` copies byte-identical. Revised skill paragraph
+  measures 71-77 display columns, the recipe 60-73.
+
+### Per-finding status
+
+| Finding | Status | Evidence |
+| --- | --- | --- |
+| MEDIUM-1 (go-toml message text leaks a config key name) | **Resolved** | Every `toml.Unmarshal` failure is now wrapped in `codexConfigDecodeError` (`internal/cli/doctor_codex_writable_root.go:125-139`, wrapped at `:186-197`), which carries only `Line`/`Column`/`HasPosition` and no text. The caller branches on it at `:531-536` and renders through `codexConfigDecodeDetail` (`:142-152`). `codexConfigReadReason` (`:207-212`) is now reachable only for read failures, and its doc comment says so. `TestCheckCodexAgmsgWritableRoot_DuplicateKey_InfoWithoutKeyNameOrMessage` (test:396) asserts the absence of `note`, `already defined`, and the canary value; it passed in the hostile-`TMPDIR` run above. |
+| MEDIUM-2 (real `os.UserHomeDir` in the display helper) | **Resolved** | `codexSandboxEnv.Home` added (`:26`), filled in `codexSandboxEnvFromOS` (`:45-64`), pinned in `TestMain` (`internal/cli/main_test.go:25-27`). `codexConfigDisplayPath(home, path)` (`:103-111`) no longer calls `os.UserHomeDir`; `grep -n os.UserHomeDir` finds exactly one occurrence in the production file, inside `codexSandboxEnvFromOS`. The `TMPDIR` reproduction now passes, and `TestCheckCodexAgmsgWritableRoot_HomeSubstitution_TildeInDetail` (test:345) proves the `~` came through the seam by using a temp-dir home. |
+| MEDIUM-3 (textual first pass returns a false `pass`) | **Resolved** | `coveringWritableRoot` (`:405-416`) has a single pass, resolving both sides. `TestCheckCodexAgmsgWritableRoot_StoreSymlinkedOutsideConfiguredRoot_Warn` (test:257) pins the exact case I reported, and `..._StoreSymlinkedRealTargetAlsoListed_Pass` (test:278) pins that the legitimate match still passes and names the real-target root. Restoring the deleted loop turns the first test red. |
+| LOW-4 (all-clear about an absent config) | **Resolved** | `exists` is consumed at `:527` and reaches both `codexNotNeededWhyB` (`:308-317`, "…does not exist") and `codexWritableRootDetail`'s warn branch (`:448-452`). Pinned by `..._NotNeeded_GuardedDefaultConfigAbsent` (test:77) and `..._MissingConfigCodexVerified_WarnNamesConfigAbsent` (test:318), both asserting the full expected string. |
+| LOW-5 ("is not valid TOML" for a type mismatch) | **Resolved** | Wording is now "could not be decoded as a codex config" (`:142-152`); `..._TypeMismatch_InfoWithPosition` (test:421) asserts the position is present and the old phrase is absent. |
+| LOW-6 (reason driven by `codex_verified` alone) | **Resolved in code, not deferred** | `checkCodexAgmsgWritableRoot` now takes `config.OrgConfig` (`:502`), short-circuits on `!slices.Contains(orgCfg.DriverPool, "codex")` (`:510-514`), and gates each reason on `codexSeatModesPossible` (`:252-266`, `:277-291`). I verified the gating against the producer for all six (codex_verified × mode) pairs: codex + guarded returns no args either way, codex + edits/autonomous errors when unverified and returns `--sandbox workspace-write` when verified. The 15-case matrix agrees with that table in every row. See NEW-2 and NEW-5 for two residual edges. |
+| LOW-7 (unreachable Windows skip) | **Resolved** | The FIFO test moved to `internal/cli/doctor_codex_writable_root_unix_test.go` behind `//go:build !windows`; `syscall` is no longer imported by `doctor_codex_writable_root_test.go`. `GOOS=windows go vet ./internal/cli/` reports only the pre-existing `internal/org/lockfile.go` failures, and the new file's header comment names that pre-existing constraint accurately. |
+| LOW-8 (test did not exercise the helper it credited) | **Resolved** | With the textual pass gone, `TestCoveringWritableRoot_StoreNotCreatedYet_AncestorCovered` (test:760) now reaches `resolveNearestExisting` on both sides, so its name matches what it runs. |
+| LOW-9 (evidence file credited for `AGMSG_STORAGE_PATH`) | **Resolved** | `agmsgStoreDir`'s comment (`:321-331`) now credits `scripts/lib/storage.sh` for the override and its trim, keeps the evidence file only for the default location, and states outright that the evidence file does not describe the variable. |
+
+### New findings introduced by the fix round
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| LOW | readability | **NEW-1. When both reasons fire, the reason clause reads as a flat four-clause `and` chain.** Each reason string now contains its own " and " (the role condition), and `strings.Join(reasons, " and ")` adds a third, so the reader cannot see where one reason ends and the next begins. | `internal/cli/doctor_codex_writable_root.go:279-289` build the two reasons; `:553` joins them. Matrix case 9 output: `needed because [org.permissions].codex_verified = true and a role resolves to edits or autonomous (ralph passes --sandbox workspace-write to those codex seats) and sandbox_mode = "workspace-write" in <cfg> and a role resolves to guarded (guarded codex seats inherit it)`. `TestCheckCodexAgmsgWritableRoot_BothReasons_WarnDetailJoinsWithAnd` (test:153) pins this shape as intended, so nothing will flag it later. This was unambiguous before the fix, when each reason was a single clause. | Join with `"; "` instead of `" and "`, or wrap each reason in parentheses. Update the test's name and assertion to match. |
+| LOW | maintainability | **NEW-2. `codexSeatModesPossible` derives the effective default through `ResolvePermissionMode(orgCfg, "")`, which a `[org.permissions.roles]` entry keyed with the empty string silently intercepts — turning a should-warn into a `pass`.** | `internal/cli/doctor_codex_writable_root.go:261`. `org.ResolvePermissionMode` returns `Roles[role]` first, so with `default = "guarded"` and `roles = {"": "edits"}` the default is never applied. Probed (matrix case 12): `modes(ww=true, guarded=false)` and, with `sandbox_mode = "workspace-write"` in the codex config, the check returns `pass — not needed: … and no role resolves to guarded` where it should warn. `config.Load` accepts such a document, because `internal/config/config.go:326-330` validates only the mode value, never the role key. Likelihood is low: `--role` is required and non-blank at spawn (`internal/cli/org.go:210-214`), so `""` is not a real role — it is a config typo that disables reason (b). | Two lines at `:261`: copy `orgCfg`, nil out `Permissions.Roles` on the copy, and resolve the default from that copy, so no role entry can intercept it. The loop over `orgCfg.Permissions.Roles` below already covers every real role. |
+| LOW | readability | **NEW-3. In the config-absent warn, the "does not exist" parenthetical is attached to the store path, not to the config path it describes.** | `internal/cli/doctor_codex_writable_root.go:448-452` renders `no writable root covers the agmsg store <store> (<config> does not exist), so a codex seat …`. The two paths differ, so a careful reader recovers, but at a glance the parenthetical reads as a statement about the store directory. `..._MissingConfigCodexVerified_WarnNamesConfigAbsent` (test:318) asserts this exact adjacency. | Reword to `no writable root covers the agmsg store %s — there is no codex config at %s — so a codex seat …`, or move the clause next to the `add … in %s` fragment that already names the config. |
+| LOW | unnecessary-change | **NEW-4. The plan's Scope row 1 still enumerates the check's input as `codex_verified` only, contradicting the same table's row 2, AC-3, and the shipped signature.** | `docs/plans/active/2026-09-19-codex-agmsg-writable-root.md` Scope row 1 reads "入力: `codex_verified`(`cfg.Org.Permissions.CodexVerified`)、解決済みの agmsg home…", while row 2 and AC-3 were both revised for `driver_pool` and roles, and `internal/cli/doctor_codex_writable_root.go:502` takes `config.OrgConfig`. Scope row 5's test enumeration likewise predates the driver-pool and role tests. | One-line edit to Scope row 1 ("入力: `[org]` envelope(`cfg.Org`)、…"). `/verify` owns the acceptance-criteria judgement; this is flagged only as an internal contradiction inside the diff. |
+| LOW | maintainability | **NEW-5. The check now consumes `cfg.Org` even when `config.Load` returned an error, so an invalid `[org.permissions].default` produces a confident `pass` whose two stated reasons are both false.** Optional to fix. | `internal/cli/doctor.go:148` passes `cfg.Org` unconditionally; `runDoctorFull` keeps going after a load error (`internal/cli/doctor.go:89-96`, which prints its own `ralph.toml: warn`). `config.Load` returns the partially-populated `cfg` alongside a validation error (`internal/config/config.go:323-331`). Probed (matrix case 13): `default = "typo"` yields `modes(ww=false, guarded=false)` and `pass — not needed: no role resolves to edits or autonomous and no role resolves to guarded`, although the document does set a default. The verdict is harmless (a project whose `ralph.toml` does not load cannot spawn any seat), only the reasons are wrong, and doctor prints the parse warning on its own line. Before the fix the check read a single bool and could not hit this. | Cheapest option: add a sentence to `checkCodexAgmsgWritableRoot`'s doc comment saying it trusts the `[org]` envelope as loaded and that an unloadable `ralph.toml` is reported by the separate `ralph.toml` check. A behavioural fix would need `cfgErr` threaded to the check, which is more churn than the case warrants. |
+| LOW | typo | **NEW-6. Two small comment inaccuracies.** (a) `codexConfigDisplayPath`'s doc says `Home` is "itself only ever set by `codexSandboxEnvFromOS`", but `TestMain` and one test also set it — which is the entire point of the MEDIUM-2 fix. (b) Two test comments call the driver-pool branch "Step 0", a label the implementation's own enumeration does not use; the source numbers it outcome 2. | (a) `internal/cli/doctor_codex_writable_root.go:95-96` versus `internal/cli/main_test.go:26` and `internal/cli/doctor_codex_writable_root_test.go:352`. (b) `internal/cli/doctor_codex_writable_root_test.go:42,468` versus `internal/cli/doctor_codex_writable_root.go:478-480`. | (a) "set by `codexSandboxEnvFromOS` in production and by the seam in tests". (b) Say "outcome 2" so the label is greppable against the source. |
+
+### Positive notes on the fix round
+
+- The LOW-6 fix went to the producer rather than to prose: I checked
+  `permissionArgsForDriver`'s output for all six (codex_verified × mode) pairs and every
+  row of a 15-case config matrix agrees with it, including the two directions that matter
+  most — `codex_verified = false` with an edits role warns about nothing (the spawn would
+  error), and `default = "guarded"` with `sandbox_mode = "workspace-write"` warns on
+  reason (b) alone.
+- `codexConfigDecodeError` fixes the class rather than the instance: it wraps *every*
+  `toml.Unmarshal` failure, so a future go-toml release that adds a new plain-error shape
+  cannot reopen MEDIUM-1.
+- The three `codexNotNeededWhyB` branches, the two `codexNotNeededWhyA` branches, and
+  `codexSeatModesPossible`'s five mode combinations each have a direct table test
+  (test:794, test:829, test:847), and four of the not-needed cases assert the full Detail
+  string with `!=` rather than `strings.Contains`, so a wording regression cannot slip past.
+- The windows fix used a build tag rather than a broader refactor, and its comment states
+  the pre-existing unix-only constraint instead of claiming portability the package
+  does not have.
+
+### Updated recommendation
+
+- **Merge: yes.** All three MEDIUMs and all six LOWs from the initial review are resolved,
+  each with a test that goes red on a revert. The six new findings are LOW: NEW-1 through
+  NEW-3 are wording or a two-line guard, NEW-4 is a one-line plan edit, NEW-5 is optional
+  and documented, NEW-6 is two comments.
+- Follow-ups if the round has room: NEW-2 (the two-line default-resolution guard) is the
+  only one with a behavioural consequence; NEW-1 and NEW-3 are the two that a user actually
+  reads. NEW-4 is worth doing before `/verify` reads the plan.
+- The tech-debt row proposed in the initial review is **withdrawn**: LOW-6 was fixed in
+  code rather than deferred, so there is nothing to record in `docs/tech-debt/README.md`.
+- Known gaps unchanged: this is diff quality only. Acceptance criteria, static analysis,
+  and the behavioural test run belong to `/verify` and `/test`.
