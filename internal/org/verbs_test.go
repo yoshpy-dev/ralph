@@ -775,13 +775,47 @@ func TestOrgSend_PaneSendKeysFails_ReportsTypedButNotSubmitted(t *testing.T) {
 	}
 }
 
+// TestOrgSend_PaneSendTextFails_NoEnterNoEventNoTypedFlag is the twin of
+// the PaneSendKeys-failure test above for the step before it: when herdr
+// rejects the send-text call, Send must stop there -- no Enter (a keystroke
+// into a pane whose input box ralph did not fill is exactly the blind Enter
+// this change rules out), no `sent` event, and TextTyped=false so the CLI
+// does not print the "typed but not submitted" note for text ralph has no
+// reason to believe is there.
+func TestOrgSend_PaneSendTextFails_NoEnterNoEventNoTypedFlag(t *testing.T) {
+	o, h, _ := testOrg(t)
+	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", r)
+	}
+	h.paneSendTextErr = errors.New("stub: PaneSendText failed")
+	eventsBefore := len(mustReadEvents(t, o))
+
+	msg := "TYPE: TASK\nTASK_ID: t-1\n\ndo the thing"
+	result := o.Send(SendParams{OrgID: "org-a", To: "seat-1", Text: msg})
+	if result.Err == nil {
+		t.Fatal("expected a non-nil Err when PaneSendText fails")
+	}
+	if !strings.Contains(result.Err.Error(), "send text to seat") {
+		t.Errorf("expected the error to name the send-text step, got %v", result.Err)
+	}
+	if result.TextTyped || result.EnterPressed || result.SubmitConfirmed {
+		t.Errorf("expected TextTyped, EnterPressed and SubmitConfirmed all false, got %+v", result)
+	}
+	if len(h.sendKeysKeys) != 0 {
+		t.Fatalf("expected no PaneSendKeys call after a failed PaneSendText, got %v", h.sendKeysKeys)
+	}
+	if got := len(mustReadEvents(t, o)); got != eventsBefore {
+		t.Fatalf("expected no new sent event when PaneSendText fails, %d -> %d", eventsBefore, got)
+	}
+}
+
 // TestOrgSend_AppendEventFailsAfterEnter_ReportsSubmittedButUnrecorded is the
 // self-review revalidation NEW-1 fix
 // (docs/reports/self-review-2026-09-19-org-send-enter-timing.md): when the
 // manifest write for the `sent` event fails AFTER Enter has already
 // succeeded (and confirmSubmitted has already run), Send must report
-// EnterPressed=true alongside TextTyped=true and wrap the error to say the
-// message was submitted -- this is what lets the CLI tell "very likely
+// EnterPressed=true alongside TextTyped=true and wrap the error to say
+// Enter was pressed -- this is what lets the CLI tell "very likely
 // delivered, only the history record was lost" apart from "text is still
 // sitting unsubmitted in the pane" (see Send's doc comment and
 // SendResult.EnterPressed's).

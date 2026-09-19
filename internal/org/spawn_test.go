@@ -37,6 +37,9 @@ type fakeHerdr struct {
 	// agentStartErr field unmodified.
 	agentStartErrs  []error
 	paneSendKeysErr error
+	// paneSendTextErr, when non-nil, makes PaneSendText fail (after the
+	// optional paneSendTextDelay below).
+	paneSendTextErr error
 	// agentWaitErrs, when non-empty, is dequeued one entry per AgentWait
 	// call (nil entries count as a successful call) -- lets a test script a
 	// specific outcome for one AgentWait call in a sequence (e.g. the send
@@ -141,11 +144,12 @@ func (f *fakeHerdr) PaneSendText(_ context.Context, _, _ string) error {
 	f.mu.Lock()
 	f.calls = append(f.calls, "pane_send_text")
 	delay := f.paneSendTextDelay
+	err := f.paneSendTextErr
 	f.mu.Unlock()
 	if delay > 0 {
 		time.Sleep(delay)
 	}
-	return nil
+	return err
 }
 
 func (f *fakeHerdr) PaneSendKeys(_ context.Context, paneID string, keys ...string) error {
