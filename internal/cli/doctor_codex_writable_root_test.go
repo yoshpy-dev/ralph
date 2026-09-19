@@ -1857,3 +1857,53 @@ func TestCodexRootCoverage_MixedSpellings_ProtectedSymlinkStillBlocks(t *testing
 		t.Fatalf("control: covers=%v blocked=%v, want covers=true blocked=false", covers, blocked)
 	}
 }
+
+// TestCodexCoveringImplicitRoot_SkipsRootsThatDoNotCover pins the branch a
+// matching root is reached through: an implicit root that is not an
+// ancestor of the store is skipped (no match, no blocked ancestor), and a
+// later one that does cover it is returned with its own exclude key.
+func TestCodexCoveringImplicitRoot_SkipsRootsThatDoNotCover(t *testing.T) {
+	base := t.TempDir()
+	unrelated := filepath.Join(base, "unrelated")
+	covering := filepath.Join(base, "covering")
+	store := filepath.Join(covering, "store")
+	for _, dir := range []string{unrelated, store} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	roots := []codexImplicitRoot{
+		{Dir: unrelated, ExcludeKey: "exclude_slash_tmp"},
+		{Dir: covering, ExcludeKey: "exclude_tmpdir_env_var", FromTmpdirEnv: true},
+	}
+
+	matched, ok, blocked := codexCoveringImplicitRoot(roots, store)
+	if !ok || matched.Dir != covering || matched.ExcludeKey != "exclude_tmpdir_env_var" || !matched.FromTmpdirEnv {
+		t.Fatalf("matched = %+v, ok = %v; want the covering root with its own key", matched, ok)
+	}
+	if blocked != "" {
+		t.Errorf("blocked ancestor = %q, want none", blocked)
+	}
+
+	_, ok, blocked = codexCoveringImplicitRoot(roots[:1], store)
+	if ok || blocked != "" {
+		t.Errorf("a root that does not cover the store must yield no match and no blocked ancestor, got ok=%v blocked=%q", ok, blocked)
+	}
+}
+
+// TestCodexImplicitRootDetail_ConfigAbsent_SaysSoInsteadOfNamingAKey pins
+// the wording for a store under a default temp root when there is no codex
+// config at all: no exclude key can be "not set in" a file that does not
+// exist, so the Detail says the file is absent.
+func TestCodexImplicitRootDetail_ConfigAbsent_SaysSoInsteadOfNamingAKey(t *testing.T) {
+	matched := codexImplicitRoot{Dir: "/fixed-temp", ExcludeKey: "exclude_slash_tmp"}
+	got := codexImplicitRootDetail(matched, "~/.codex/config.toml", "/fixed-temp/store", false, "a reason", "")
+	want := "the agmsg store /fixed-temp/store is under /fixed-temp, which workspace-write keeps writable by default " +
+		"(~/.codex/config.toml does not exist); needed because a reason"
+	if got != want {
+		t.Errorf("Detail =\n%q\nwant\n%q", got, want)
+	}
+	if strings.Contains(got, "is not set in") {
+		t.Errorf("an absent config must not be described as leaving a key unset: %q", got)
+	}
+}
