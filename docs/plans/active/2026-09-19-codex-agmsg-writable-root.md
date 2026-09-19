@@ -1,6 +1,6 @@
 # codex-agmsg-writable-root
 
-- Status: Draft
+- Status: In progress
 - Owner: Claude Code
 - Date: 2026-09-19
 - Related request: #155 の実機検証(`docs/evidence/codex-seat-permissions-2026-09-18.md` P3、Run A → A2)で、`--sandbox workspace-write` で動く codex 座席は agmsg の SQLite DB(`~/.agents/skills/agmsg/db/messages.db`)に書けず(`attempt to write a readonly database (8)`)、RESULT を lead に送れなかった。codex config の `[sandbox_workspace_write] writable_roots` に agmsg の `db` ディレクトリを足すと送れる。現状は recipe で手動設定を求めているだけで、設定漏れに気づく手段がない(issue #164)
@@ -16,11 +16,11 @@
 
 | # | 変更 | ファイル | 内容 |
 |---|------|---------|------|
-| 1 | Check 本体 | `internal/cli/doctor_codex_writable_root.go`(新規) | `checkCodexAgmsgWritableRoot(...) checkResult`。入力: `codex_verified`(`cfg.Org.Permissions.CodexVerified`)、解決済みの agmsg home(`driver.ResolveAgmsgHome(cfg.Org.AgmsgHome)`)、agmsg Check の結果が pass か、codex config のパスを返す resolver。config は `github.com/pelletier/go-toml/v2`(既存依存)で読む。プロセスは起動しない |
-| 2 | 判定 | 同上 | 「writable root が必要な理由」を集める: (a) `codex_verified = true`(edits / autonomous の codex 座席に ralph が `--sandbox workspace-write` を付ける)、(b) ユーザー config の `sandbox_mode = "workspace-write"`(ralph がフラグを付けない guarded の codex 座席がそのまま継承する)。理由がなければ `pass`(不要である旨と根拠)。理由があれば `writable_roots` の各要素を `filepath.Clean` し、agmsg の `db` ディレクトリと同一、またはその祖先であれば「覆っている」とみなす(両者を `filepath.EvalSymlinks` で解決した形でも比較。解決できなければ解決前の形で比較)。覆っていれば `pass`(該当 root を名指し)、覆っていなければ `warn` |
-| 3 | 重大度の例外 | 同上 | agmsg が未導入(agmsg Check が pass でない)なら org 座席自体が使えないので `info`。config が存在しない場合は `writable_roots` なしとして扱う(理由があれば warn)。config が TOML として読めない、または `writable_roots` が文字列配列でない場合は `info`(パスと理由だけを出し、config の内容は出さない)。codex home を解決できない場合は `info`。トップレベルの `profile` が設定されている場合は、Detail に「profile は評価していない」と添える。warn / info は exit code に影響しない |
-| 4 | 登録と seam | `internal/cli/doctor.go`、`internal/cli/main_test.go` | Check 11(codex スラッグ)の直後に Check 11b として登録。config パスの resolver は package 変数 `doctorCodexConfigPath`(既定は `$CODEX_HOME` を `codexModelsCachePath` と同じ規則でリテラルに使う)にし、`TestMain` で存在しないパスに固定して、既存の `runDoctor*` テストが開発者の実 config を読まないようにする(#162 の `doctorShellAliasEnv` と同じ形) |
-| 5 | テスト | `internal/cli/doctor_codex_writable_root_test.go`(新規) | temp dir の config fixture で: 不要(理由なし)→ pass、`codex_verified = true` で root なし → warn(`db` ディレクトリ、config パス、recipe パスを含む)、root が `db` と同一 → pass、root が祖先(agmsg home)→ pass、接頭辞が同じだけの別ディレクトリ(`…/db` に対する `…/dbx`、`/a/bc` に対する `/a/b`)→ warn、symlink 経由で同一 → pass、`codex_verified = false` でも `sandbox_mode = "workspace-write"` なら warn(guarded 座席に言及)、config なし + `codex_verified = true` → warn、壊れた TOML → info(内容を出さない)、`writable_roots` が配列でない → info、agmsg 未導入 → info、`CODEX_HOME` がリテラルに使われる、`profile` 設定時の注記、`runDoctorOpts` の出力に Check 行が出る統合テストと `TestMain` 既定での pass。fixture に `api_key=` のような secret 風の文字列を書かない |
+| 1 | Check 本体 | `internal/cli/doctor_codex_writable_root.go`(新規) | `checkCodexAgmsgWritableRoot(...) checkResult`。入力: `codex_verified`(`cfg.Org.Permissions.CodexVerified`)、解決済みの agmsg home(`driver.ResolveAgmsgHome(cfg.Org.AgmsgHome)`)、agmsg が導入済みか(`driver.AgmsgAvailable(home) == nil`。agmsg Check の Status は使わない。バージョン違いの導入済み環境は info を返すため)、環境の resolver(codex config のパスと `AGMSG_STORAGE_PATH` の値を返す)。config は `github.com/pelletier/go-toml/v2`(既存依存)で読む。プロセスは起動しない |
+| 2 | 判定 | 同上 | 「writable root が必要な理由」を集める: (a) `codex_verified = true`(edits / autonomous の codex 座席に ralph が `--sandbox workspace-write` を付ける)、(b) ユーザー config の `sandbox_mode = "workspace-write"`(ralph がフラグを付けない guarded の codex 座席がそのまま継承する)。理由がなければ `pass`(不要である旨と根拠)。理由があれば、まず agmsg の保存ディレクトリを agmsg 自身と同じ優先順で決める: `AGMSG_STORAGE_PATH` が空でなければその値(末尾のスラッシュを 1 つ落とす)、なければ `<agmsg home>/db`。次に `writable_roots` の各要素を `filepath.Clean` し、その保存ディレクトリと同一、またはその祖先であれば「覆っている」とみなす(両者を `filepath.EvalSymlinks` で解決した形でも比較。解決できなければ解決前の形で比較)。覆っていれば `pass`(該当 root を名指し)、覆っていなければ `warn` |
+| 3 | 重大度の例外 | 同上 | agmsg が未導入(`driver.AgmsgAvailable` がエラー)なら org 座席自体が使えないので `info`。導入済みでバージョンだけ違う場合は通常どおり判定する。`AGMSG_STORAGE_PATH` を使った場合は Detail にその旨と、herdr の pane の環境変数が doctor のものと違い得ることを添える。config が存在しない場合は `writable_roots` なしとして扱う(理由があれば warn)。config が TOML として読めない、または `writable_roots` が文字列配列でない場合は `info`(パスと理由だけを出し、config の内容は出さない)。codex home を解決できない場合は `info`。トップレベルの `profile` が設定されている場合は、Detail に「profile は評価していない」と添える。warn / info は exit code に影響しない |
+| 4 | 登録と seam | `internal/cli/doctor.go`、`internal/cli/main_test.go` | Check 11(codex スラッグ)の直後に Check 11b として登録。環境の resolver は package 変数 `doctorCodexSandboxEnv`(既定は `$CODEX_HOME` を `codexModelsCachePath` と同じ規則でリテラルに使った config パスと、`AGMSG_STORAGE_PATH`)にし、`TestMain` で存在しない config パス・空の override に固定して、既存の `runDoctor*` テストが開発者の実 config を読まないようにする(#162 の `doctorShellAliasEnv` と同じ形) |
+| 5 | テスト | `internal/cli/doctor_codex_writable_root_test.go`(新規) | temp dir の config fixture で: 不要(理由なし)→ pass、`codex_verified = true` で root なし → warn(`db` ディレクトリ、config パス、recipe パスを含む)、root が `db` と同一 → pass、root が祖先(agmsg home)→ pass、接頭辞が同じだけの別ディレクトリ(`…/db` に対する `…/dbx`、`/a/bc` に対する `/a/b`)→ warn、symlink 経由で同一 → pass、`codex_verified = false` でも `sandbox_mode = "workspace-write"` なら warn(guarded 座席に言及)、config なし + `codex_verified = true` → warn、壊れた TOML → info(内容を出さない)、`writable_roots` が配列でない → info、agmsg 未導入 → info、導入済みでバージョン違い(agmsg Check が info)でも root なしなら warn、`AGMSG_STORAGE_PATH` 設定時に既定の `db` だけを覆う root → warn / override 先を覆う root → pass、`CODEX_HOME` がリテラルに使われる、`profile` 設定時の注記、`runDoctorOpts` の出力に Check 行が出る統合テストと `TestMain` 既定での pass。fixture に `api_key=` のような secret 風の文字列を書かない |
 | 6 | 文書 | `docs/recipes/codex-seat-permissions.md` + template、`.claude/skills/org/SKILL.md` + 3 ミラー | recipe の「Add the agmsg database to the sandbox's writable roots」節と、skill の permission 作法の codex 行に「`ralph doctor` の Check が設定漏れを warn する」を一文追加 |
 
 ## Non-goals
@@ -32,7 +32,7 @@
 
 ## Assumptions
 
-- agmsg の DB は `<agmsg home>/db/` の下にある(#155 evidence P3、`~/.agents/skills/agmsg/db/messages.db`)。SQLite は同じディレクトリに journal / WAL を作るので、必要なのはファイルではなくディレクトリへの書き込み権
+- agmsg の DB は既定で `<agmsg home>/db/` の下にある(#155 evidence P3、`~/.agents/skills/agmsg/db/messages.db`)。agmsg 1.1.13 の `scripts/lib/storage.sh` は `AGMSG_STORAGE_PATH`(messages.db を置くディレクトリ)を最優先で使うので、Check も同じ優先順に従う。座席が見る環境変数は herdr の pane のもので、doctor のプロセスと一致するとは限らない。SQLite は同じディレクトリに journal / WAL を作るので、必要なのはファイルではなくディレクトリへの書き込み権
 - codex は `writable_roots` の要素を絶対パスとして扱う。`~` や相対パスの要素を codex が展開するかは未確認なので、Check は展開せず、一致しないものとして扱う(見逃しではなく warn 側に倒れる)
 - codex home の解決は `codexModelsCachePath` と同じ規則(`CODEX_HOME` が空でなければリテラルに使用、なければ `~/.codex`)
 - guarded の codex 座席がユーザー config の `sandbox_mode` を継承することは、ralph が guarded にフラグを付けない(`permissionArgsForDriver` が nil を返す)ことからの推論で、座席での実測はしていない。Detail はこの条件を断定ではなく理由として書く
@@ -58,7 +58,7 @@
 
 - [ ] AC-1: `ralph doctor` の出力に「Codex sandbox (agmsg writable root)」Check が codex スラッグの Check の直後に出る
 - [ ] AC-2: Scope 5 のテストがすべて pass。warn の Detail が agmsg の `db` ディレクトリ、読んだ config のパス、`docs/recipes/codex-seat-permissions.md` を含む。祖先判定がパス要素単位で、接頭辞が同じだけのディレクトリを覆っているとみなさない
-- [ ] AC-3: 理由なし → `pass`、覆っている → `pass`、覆っていない → `warn`、agmsg 未導入 / 読めない config / 型違い / codex home 解決不能 → `info`。`countFailed` の対象にならない(既存の exit code テストが pass のまま)
+- [ ] AC-3: 理由なし → `pass`、覆っている → `pass`、覆っていない → `warn`(agmsg が導入済みならバージョン違いでも warn)、`AGMSG_STORAGE_PATH` があればその値で判定、agmsg 未導入 / 読めない config / 型違い / codex home 解決不能 → `info`。`countFailed` の対象にならない(既存の exit code テストが pass のまま)
 - [ ] AC-4: 既存の `runDoctor*` テストが開発者の実 `~/.codex/config.toml` を読まない(`TestMain` の固定と、それを確かめるテスト)
 - [ ] AC-5: recipe(root / template 一致)と `/org` skill(4 面一致)に Check への言及がある。`check-skill-sync.sh` / `check-sync.sh` / `check-template-purity.sh` pass
 - [ ] AC-6: `gofmt` / `go vet` / golangci-lint clean、`go test ./internal/cli/... -count=1` green、`./scripts/run-verify.sh` green、`./scripts/secret-scan.sh --range "$(git merge-base HEAD origin/main)..HEAD"` が exit 0
@@ -104,12 +104,13 @@ doctor の Check 追加と文書のみ。下流へは次回 release でバイナ
 ## Deviation notes
 
 - 2026-09-19 plan: 方式選択の前に、`-c sandbox_workspace_write.writable_roots=…` がユーザー設定の配列を置き換えるか併合するかを、API を呼ばない `codex sandbox` サブコマンド(スクラッチの `CODEX_HOME`)で確かめようとしたが、同サブコマンドは config の `sandbox_mode` を見ず既定が読み取り専用で、permission profile の指定方法も合わなかったため確認できなかった。ユーザーには未確認である旨を示したうえで方式を選んでもらい、「doctor で検査」に決定
+- 2026-09-19 plan: Codex plan advisory(codex-cli 0.154.0、`-m gpt-6-astra -c model_reasoning_effort=xhigh`、stdin を閉じて実行)が MEDIUM 2 件を報告。どちらも事実を確認して採用した。(1) agmsg 1.1.13 は `AGMSG_STORAGE_PATH` を最優先で使うので、`<agmsg home>/db` 固定では別の場所を検査して pass と言い得る → agmsg と同じ優先順で保存ディレクトリを決める。(2) 既存の agmsg Check はバージョン違いの導入済み環境に info を返すので、「pass でなければ未導入」とすると agmsg の更新で warn が消える → 導入判定は `driver.AgmsgAvailable` で行う
 
 ## Progress checklist
 
-- [ ] Plan reviewed
+- [x] Plan reviewed
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
