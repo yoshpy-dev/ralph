@@ -136,3 +136,138 @@ rewritten to keep only the two gaps that remain (the `findSeat` read-error
 branch, and the literal 750 ms default not asserted at runtime), and the
 skill `send` row's last sentence was reworded in Japanese only (no change
 in meaning).
+
+## Cycle 2 (2026-09-19)
+
+- Scope: pipeline cycle 2/2 (the last cycle). Re-checked against HEAD
+  `fda0c20`; `git status --porcelain` confirmed empty before starting.
+  Prior reports for this cycle: self-review cycle 2, verify cycle 2 (Pass),
+  test cycle 2 (Pass, `docs/reports/test-2026-09-19-org-send-enter-timing.md`
+  "Cycle 2" section) — all cited in this report's header.
+- What changed in the code since cycle 1 (per the handoff, confirmed by
+  reading `internal/org/verbs.go` and `internal/cli/org.go` directly):
+  cross-review AR-1/AR-2 replaced the two-bool `SendResult.TextTyped`/`EnterPressed`
+  contract with a five-state `SendResult.Progress` (`SendProgress`:
+  nothing-sent, text-unacknowledged, text-typed, enter-unacknowledged,
+  enter-pressed) so a `--timeout-ms`-cancelled herdr call is reported as
+  "outcome unknown" rather than a false "not submitted"; added
+  `orgReadCommandHint`/`shellQuoteIfNeeded` so post-error notes and the
+  exit-0 unconfirmed-submit warning carry a copy-paste `ralph org read`
+  recovery command (with `--state-dir` only when the flag was explicitly
+  passed); and the exit-0 warning gained "If the pane shows anything else
+  (the seat is working, or it shows a dialog), do not press Enter."
+
+### Files changed in this pass
+
+- `.claude/skills/org/SKILL.md` — reworded the `send` row's closing two
+  sentences. The removed sentence ("入力欄に本文が残っているときだけ submit
+  か消去をし、それ以外なら Enter を押さず、送り直さない") stated one rule for
+  all four post-error CLI notes, but that rule is verbatim-accurate only for
+  the `enter-unacknowledged` note — see "Why the closing-sentence fix"
+  below. Replaced with an accurate deferral to the note's own instruction.
+  Net effect: also 73 characters shorter (2024 → 1951 on that table row),
+  which is the "tighten" the handoff asked for as well as a correctness fix.
+- `.agents/skills/org/SKILL.md`, `templates/base/.claude/skills/org/SKILL.md`,
+  `templates/base/.agents/skills/org/SKILL.md` — synced via
+  `./scripts/sync-skills.sh` plus a manual `cp` to both `templates/base/`
+  paths (`sync-skills.sh` only mirrors `.claude/` → `.agents/`); all four
+  byte-identical again.
+- `docs/recipes/codex-seat-permissions.md` — same fix, recipe-side: replaced
+  "submit or clear only if the text is still in the composer, and otherwise
+  do not press Enter and do not send again" (the same over-generalization)
+  with "Read what the note says before deciding whether to press Enter
+  yourself or send again." Kept the sentence before it (why the uncertainty
+  exists — a herdr call cut off by `--timeout-ms`) unchanged, since that
+  part is accurate for all cases, not just one.
+- `templates/base/docs/recipes/codex-seat-permissions.md` — copied verbatim
+  (`diff` empty after the copy).
+- `docs/tech-debt/README.md` — added a third clause to the existing `Send`
+  row: the `remainingMS < 0` clamp in the fail-closed `--timeout-ms` budget
+  check's error message, named as a still-open, unclosed gap in **both**
+  the cycle-1 and cycle-2 sections of the test report, was missing from the
+  row (the row only carried the `findSeat` read-error branch and the
+  literal 750 ms default). Extended the Impact/Why-deferred/Trigger cells
+  to cover it too (it needs the same `fakeHerdr` delay-injection seam the
+  literal-750ms gap's neighbor mentions). Did **not** add a new row for the
+  cycle-2 test report's other incidental finding (`newOrgSendCmd`'s
+  untested `requireOrgID`/`newOrgRuntimeAt` failure paths): confirmed via
+  `grep -n 'requireOrgID\|newOrgRuntimeAt\|newOrgRuntime\b' docs/tech-debt/README.md`
+  that no existing row tracks this pattern, and the test report itself
+  says it is "the same boilerplate ... repeated near-identically at the
+  top of every `newOrg*Cmd` RunE" — pre-existing, shared across every org
+  subcommand, not specific to this task's diff. Per the handoff's own
+  instruction ("do not add a second row for pre-existing boilerplate
+  unless an existing row already tracks it"), left alone.
+
+### Why the closing-sentence fix (detail)
+
+Compared the removed doc sentence against the four `SendProgress`-keyed
+CLI notes in `newOrgSendCmd` (`internal/cli/org.go`):
+
+- `SendProgressTextUnacknowledged`: "Check the pane before sending again: a
+  second send would be typed after whatever is there." Does not forbid
+  resending — if the pane confirms nothing landed, resending is the
+  correct, safe action for this state.
+- `SendProgressTextTyped`: "clear or submit it there before sending
+  again." Trivially matches "only if text remains" (it always does for
+  this state).
+- `SendProgressEnterUnacknowledged`: "Only if the text is still sitting in
+  the input box, submit or clear it there. If the seat shows anything
+  else ..., do not press Enter and do not send the message again." This is
+  the one state the removed sentence actually paraphrased correctly.
+- `SendProgressEnterPressed`: "Do not send the message again." Unconditional
+  — not "only if text remains, otherwise don't."
+
+The removed sentence generalized the third state's wording to all four. An
+operator hitting a `text-unacknowledged` failure with a confirmed-empty
+pane would, per the old wording, wrongly believe a resend was forbidden —
+the single safest of the four failure states, blocked by an
+over-generalization. The fix defers to "read what the note says" instead
+of restating per-state logic in the doc a second time (which is also how
+the doc avoids drifting from the CLI's own wording again later).
+
+### Surfaces checked — no change needed (re-confirmed against the current diff)
+
+- `docs/specs/2026-08-01-org-runtime.md`, `README.md`, `AGENTS.md`,
+  `.claude/rules/ralph/agent-messaging.md`, `internal/org/prompts/*.md` —
+  re-ran `grep -n "org send\|send-keys\|Enter\|enter-delay\|SendProgress"`
+  against all of them; same hits as cycle 1 (bare command examples,
+  unrelated `STOP`-type/protocol-validation mentions, lead-prompt
+  delegation instructions), nothing describing Enter timing or the
+  `SendProgress` states.
+- `docs/evidence/org-send-enter-timing-2026-09-19.md` — read in full.
+  `grep -n 'note:\|warning:\|could not confirm\|send-keys\|submit_unconfirmed\|typed but not submitted'`
+  returns no hits: the file never quotes CLI stderr/warning text verbatim.
+  Its claims are aggregate measured results ("5/5 submitted", "stderr の
+  注意なし", `blocked` state observed during the approval dialog) and a
+  description of the underlying mechanism ("750ms の待ち、herdr の状態で
+  確認、Enter の再送なし") that is still true after the `SendProgress`
+  refactor — the refactor changed how a *failure* is reported, not the
+  wait/confirm/no-resend mechanism these runs measured. No edit made.
+- Stray `TextTyped`/`EnterPressed`/"typed but not submitted" outside dated
+  reports and plan history:
+  `grep -rn 'TextTyped\|EnterPressed' --include='*.md' . | grep -v 'docs/reports/\|docs/plans/'`
+  and the same grep for `"typed but not submitted"` — both empty.
+
+### Gate results
+
+| Check | Result |
+| --- | --- |
+| `./scripts/check-skill-sync.sh` | PASS — 13 skill(s) in lock-step |
+| `./scripts/check-sync.sh` | PASS — `DRIFTED: 0` |
+| `./scripts/check-template-purity.sh` | PASS — no meta-repo-specific references found in templates |
+| `go test ./internal/org/ -run TestSendDefaults -count=1 -v` | PASS — `TestSendDefaults_DocsMatchConstant` |
+| U+FFFD substitute for `check_mojibake.sh` (needs PostToolUse JSON on stdin, not run directly) | `grep -c $'\xef\xbf\xbd'` against all 7 files touched this cycle → 0 each |
+| Markdown table well-formedness (edited tech-debt row) | 6 pipes (unchanged column count), even backtick count (38, balanced) |
+| Credential-shape sweep | `git diff \| grep -Ei '(secret\|token\|passwd\|password\|apikey\|api_key\|credential\|private_key)'` → empty; no `.gitallowed` edit |
+
+### Known gaps
+
+- Did not re-run the full Go test suite, `-race`, or `TMPDIR=/tmp` — `/test`
+  cycle 2 already Pass (cited above); only re-ran
+  `TestSendDefaults_DocsMatchConstant` since it is the one test that
+  directly reads the two doc surfaces this pass edited.
+- Did not re-run the range secret scan
+  (`./scripts/secret-scan.sh --range ...`) — a `/pr`-time precheck per this
+  task's own constraints; spot-checked the diff for credential-shaped
+  strings instead (see Gate results, empty).

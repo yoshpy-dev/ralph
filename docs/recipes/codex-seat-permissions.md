@@ -151,10 +151,10 @@ ralph org spawn --org-id perm-auto --id reviewer --role reviewer --driver codex 
   retry). Every note starts with reading the pane; the `ralph org read`
   command it prints carries `--state-dir` when you passed one. A herdr
   call that is cut off by `--timeout-ms` returns an error even if the text
-  or the Enter already reached the pane, so in that case ralph says it
-  does not know: submit or clear only if the text is still in the
-  composer, and otherwise do not press Enter and do not send again. Then
-  wait for the seat:
+  or the Enter already reached the pane, so in that case ralph reports what
+  it does not know instead of guessing. Read what the note says before
+  deciding whether to press Enter yourself or send again. Then wait for
+  the seat:
 
   ```sh
   ralph org wait --org-id perm-auto --seat reviewer --until idle,done \
