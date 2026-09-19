@@ -126,3 +126,92 @@ No Scope-5 clause was found without a pinning test. Fixture strings were grepped
 - Verified: AC-1, AC-2, AC-3, AC-4, AC-5, AC-6 (static half), AC-7 — code read plus live static-verify/secret-scan/sync-gate runs plus live-binary reproduction of the recorded doctor output (all three AC-7 lines and the AC-1 adjacency).
 - Partially verified: AC-6 as a whole — `go test`/`run-verify.sh` intentionally not re-run here; the plan's Deviation notes record the implementer's own green runs after the latest commit (`33ac5a8`), which `/test` should independently confirm.
 - Not verified: AC-8 (PR-time only, not yet applicable).
+
+---
+
+## Cycle 2
+
+- Date: 2026-09-19
+- Verifier: `verifier` subagent (Claude Code, standard flow), pipeline cycle 2 of cap 2
+- Range: `eec559b..HEAD` (21 commits) since the cycle-1 verify above: cross-review cycle 1 fixes (`ab09dbc`, `91a5542`, `c03c21e` + docs `4c891ec`), cycle-2 self-review (`4c48ae3`) and its two fix commits with **no reviewer pass** (`735fc45`, `5fcf070`), sync-docs/secret-scan-allowlist churn (`04b6df5`…`e2c64c3`), and plan bookkeeping (`fea7fc9`, `7184b2c`).
+- Branch: `feat/codex-agmsg-writable-root`, HEAD `7184b2c` (base `main`); `git status --porcelain` empty before and after this pass.
+- Scope: spec compliance re-check of AC-1–AC-7 against HEAD, plus static analysis (`./scripts/run-static-verify.sh`) and a fresh history-range secret scan. No behavioral tests run.
+- Evidence: `docs/evidence/verify-2026-09-19-090307.log` (gitignored, same convention as cycle 1); live-binary reproduction below.
+
+### Overall verdict: PASS
+
+No blocking finding. Two non-blocking documentation-drift items (AC-3, AC-7 — both wording/enumeration, not code defects) should be closed before `/pr`; see below.
+
+### Spec compliance (cycle 2)
+
+| Acceptance criterion | Status | Evidence |
+| --- | --- | --- |
+| AC-1: adjacency | Met (reconfirmed) | Rebuilt the binary from HEAD `7184b2c`; `ralph doctor` from the repo root still prints `"Codex sandbox (agmsg writable root)"` immediately after `"Org codex model slugs"`. Unaffected by the cycle-2 range (registration in `doctor.go:142-148` untouched). |
+| AC-2: Scope-5 matrix + Detail contents + path-element boundary | Met | The cycle-1 mapping (this report, "Scope-5 clause → test mapping") still holds — none of the cycle-2 commits touched `pathCovers` or removed a pinning test. The cycle-2 range *adds* tests beyond Scope-5's literal enumeration, each read for assertion strength, not just presence: `TestCheckCodexAgmsgWritableRoot_RootCrossesDotAgentsViaSymlinkTarget_WarnNamesBlockedAncestor`, `_SymlinkedDotAgentsControls_StayPass`, `_StoreUnderDotGitOrDotCodex_Warn`, `_MissingConfigWithBlockedImplicitAncestor_WarnNamesBoth`, `_BlockedAncestorAndExplicitStoreBothListed_PassNamingExplicit` (self-review C2-6's own regression test — asserts `"writable root "+store+" in "` is present and `"writable root "+home+" in "` is absent, not a bare `strings.Contains(r.Detail, store)`), `_SlashTmpDirEqualsTmpDirExcludedSlashTmp_NamesTmpdirEnvVar`, `_SlashTmpDirEqualsTmpDirExcludedTmpdirEnvVar_NamesSlashTmp` (C2-2's regression pair), and `TestCodexRootCoverage_MixedSpellings_ProtectedSymlinkStillBlocks` (`5fcf070`'s own new unit test, with an explicit `covers=true, blocked=false` control case). |
+| AC-3: outcome matrix incl. `driver_pool`/`model_pool`/role conditions, decode/type/home failures, `countFailed` exclusion | Met in code; **plan enumeration is behind the code (drift, non-blocking)** | `checkCodexAgmsgWritableRoot`'s 9-outcome doc comment (`internal/cli/doctor_codex_writable_root.go:828-862`) matches the actual `if`/`switch` chain line-by-line, including the two outcomes added since cycle 1 (outcome 3: no codex model in `[org].model_pool` → pass; outcome 8: an implicit temp root covers the store → pass). `Status` is still only ever `"pass"`/`"warn"`/`"info"`, so `countFailed` (`doctor.go`) remains unaffected — confirmed by re-reading the full outcome chain, no new `"fail"` path exists. **Gap:** the plan's own AC-3 text (`docs/plans/active/2026-09-19-codex-agmsg-writable-root.md:61`) does not name the "no codex model in the pool → pass", "store covered by an implicit temp root → pass", or "blocked-ancestor named on warn" outcomes — these were introduced by Scope row 2's cross-review revision passage but AC-3's own enumeration was never updated to match. The behavior itself is correct and tested; only the plan's checklist text is incomplete. |
+| AC-4: hermeticity | Met (reconfirmed) | `internal/cli/main_test.go:24-27` unchanged in this range; `TestMain` still pins `doctorCodexSandboxEnv` to a non-existent `ConfigPath` and leaves `TmpDir`/`SlashTmpDir` at their Go zero value (`""`), which `codexImplicitWritableRoots` treats as "no implicit root" — matches the doc comment's claim at `:94-96`. None of the cycle-2 fix commits touched the seam shape. |
+| AC-5: recipe + skill mentions, 3 sync gates | Met | Re-ran all three gates this cycle: `./scripts/check-skill-sync.sh` → `13 skill(s) in lock-step`; `./scripts/check-sync.sh` → `DRIFTED: 0`; `./scripts/check-template-purity.sh` → PASS. `cmp` confirms all three mirror pairs are still byte-identical: `docs/recipes/codex-seat-permissions.md` vs its template, `.claude/skills/org/SKILL.md` vs its template, `.agents/skills/org/SKILL.md` vs its template. Both doc surfaces were re-read against the current code (see Documentation drift below); content matches. |
+| AC-6: static clean; range secret scan exit 0 | Met (static half only — `go test` is `/test`'s job) | `./scripts/run-static-verify.sh` → `gofmt: ok`, `go vet` silent (clean), `golangci-lint run` → `0 issues.`, `staticcheck` silent (clean) → `All verifiers passed.`, exit 0. `./scripts/secret-scan.sh --range "$(git merge-base HEAD main)..HEAD"` → exit 0 across all 21 commits in the cycle-2 range (merge-base unchanged at `2c511a4`). `go test ./internal/cli/... -count=1` / `./scripts/run-verify.sh` remain out of scope for `/verify`; the plan's Deviation notes record the implementer's `TMPDIR=/tmp go test ./internal/cli/... -count=1` → `ok` after `5fcf070` (the last code-changing commit; `7184b2c` is docs-only). |
+| AC-7: evidence lines match current behavior | **Drift found (non-blocking)** — see Observational checks | The plan's last-recorded real-config evidence line (line 112) no longer matches HEAD's output literally: commit `c03c21e` (cycle 2, cross-review WC-2 fix) added the clause "that can use a codex model" to every reason string `codexSandboxReasons` produces and to both `codexNotNeededWhyA`/`codexNotNeededWhyB`, *after* line 112 was written, and no later Deviation note re-records the line. Reproduced live below. The pass/warn/info **verdicts** themselves are unaffected — only the quoted wording is stale. |
+| AC-8: PR body `Closes #164` | Pending `/pr` | Unchanged, out of scope. |
+
+### Static analysis (cycle 2)
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `./scripts/run-static-verify.sh` | Pass (exit 0) | Scope auto-selected `golang` (changed-language default); `gofmt: ok`, `go vet` clean, `golangci-lint run` → `0 issues.`, `staticcheck` silent/clean. Evidence: `docs/evidence/verify-2026-09-19-090307.log`. |
+| `./scripts/secret-scan.sh --range "$(git merge-base HEAD main)..HEAD"` | Pass (exit 0) | History-range scan across all 21 commits on this branch (merge-base `2c511a4`); no findings, including the `.gitallowed` narrowing commits (`90dc4be`, `ee70868`, `e2c64c3`) and the report-hygiene sentences they were added for. |
+| `./scripts/check-skill-sync.sh` | Pass | `13 skill(s) in lock-step`. |
+| `./scripts/check-sync.sh` | Pass | `DRIFTED: 0`. |
+| `./scripts/check-template-purity.sh` | Pass | No meta-repo-specific references in templates. |
+| `cmp` recipe root vs template, both skill mirrors vs their templates | Pass (3/3) | Byte-identical. |
+
+### Documentation drift (cycle 2)
+
+| Doc / contract | In sync? | Notes |
+| --- | --- | --- |
+| `internal/cli/doctor.go` Check 11b comment (`:142-147`) | Yes (accurate, intentionally abbreviated) | States the `driver_pool`/permissions inputs and the core warn condition, then points to `checkCodexAgmsgWritableRoot` for detail; does not itself enumerate the `model_pool` gate, the protected-directory rule, or the implicit temp roots added since cycle 1 — but it never claims completeness, and the referenced function's own doc comment does carry all of them. Not drift. |
+| `checkCodexAgmsgWritableRoot`'s 9-outcome doc comment | Yes | Matches the `if`/`switch` chain read line-by-line, including outcomes 3 and 8 added in the cycle-2 range. |
+| `docs/recipes/codex-seat-permissions.md` (+ template) | Yes | States both trigger conditions, the `driver_pool`/`model_pool` gates, "only roles that may use a codex model count," the `/tmp`/`$TMPDIR` implicit roots with their exclusion keys, and the user-level-config-only scope. All match the code (`codexSandboxReasons`, `codexModelPermittedForRole`, `codexImplicitWritableRoots`). |
+| `.claude/skills/org/SKILL.md` (4 mirrors) | Yes, with one completeness gap (informational) | States the same trigger conditions, the `driver_pool`/`model_pool` gates, "the model-eligible roles only" restriction, the `.agents`-is-protected caveat (name the `db` directory directly), and the user-level-config-only scope — all match the code. Unlike the recipe, it does not mention the `/tmp`/`$TMPDIR` implicit-root exemption; this is an omission, not a false claim, and AC-5 only requires "a mention of the Check," which is met. Not blocking. |
+| `.gitallowed` comment (self-review C2-3 fix) | Yes | States explicitly that the allowlist is evaluated per line and that once a rule matches, nothing else on that line is scanned — matches `secret-scan.sh`'s `is_allowed` behavior and C2-3's recommendation verbatim. |
+| `docs/tech-debt/README.md` row (self-review C2-4 fix) | Yes | Now names three (not two) unverified limits — `~`/relative expansion, the protected-directory scope (`pathCrossesCodexProtectedDir`, named explicitly), and guarded-seat `sandbox_mode` inheritance — closing the closed-list overclaim C2-4 flagged. |
+| `docs/evidence/codex-seat-permissions-2026-09-18.md` P3 addendum | Yes | States the doctor Check now catches the gap statically, that no live seat re-verification was done, and points at the plan's Non-goals — accurate and unchanged this cycle. |
+| Plan AC-3 (acceptance criteria text) | **No — drift (non-blocking)** | See Spec compliance table above: AC-3's own enumeration predates the `model_pool` gate and the implicit-temp-root/blocked-ancestor outcomes. |
+| Plan AC-7 evidence quotes (Deviation notes line 112) | **No — drift (non-blocking)** | See Observational checks below. |
+
+### Observational checks (cycle 2)
+
+1. **Live reproduction of the real-config AC-7 line.** Built `./cmd/ralph` from HEAD `7184b2c` into a scratch directory outside the repo, then ran it from the repo root against the real `~/.codex/config.toml` (content never printed, per task instructions):
+   ```
+   ✓ Codex sandbox (agmsg writable root): pass — not needed: [org.permissions].codex_verified is false and no role that can use a codex model resolves to guarded
+   ```
+   immediately preceded by `✓ Org codex model slugs: pass — ...` (AC-1 adjacency, reconfirmed). Exit code 0.
+
+   This does **not** literally match the plan's last-recorded quote (Deviation notes, line 112): `"pass — not needed: [org.permissions].codex_verified is false and no role resolves to guarded"` — missing the clause "that can use a codex model" before "resolves to guarded". `git show c03c21e -- internal/cli/doctor_codex_writable_root.go` confirms this exact clause was added to `codexSandboxReasons`, `codexNotNeededWhyA`, and `codexNotNeededWhyB` in that commit, which post-dates the plan line it was supposed to update (`c03c21e` is a cycle-2 cross-review fix; line 112 was written during the cycle-1 revalidation round, well before cross-review cycle 1 even ran). No later Deviation note re-quotes this line with the corrected wording.
+
+   The two scratch-project (warn / pass) AC-7 lines recorded at the same plan line 112 were not independently rebuilt this cycle, but both render their "needed because ..." clause through the exact same `codexSandboxReasons`/`codexSandboxReasonClause` functions the real-config line does — confirmed by code read (`internal/cli/doctor_codex_writable_root.go:369-381`, `:924-931`) — so they carry the identical wording staleness by construction, not by separate reproduction.
+
+   **Recommendation:** append a fresh AC-7 evidence entry (all three lines) to the plan's Deviation notes before `/pr`; not done here since `/verify` does not edit the plan.
+
+2. **Read `735fc45` and `5fcf070` in full** (the two commits the self-review Cycle 2 section never reviewed) against findings C2-1 and C2-2 and the plan's own account (Deviation notes, lines 122-123):
+   - **C2-1** (protected-directory rule checked only on the resolved spelling, letting a symlink hide a protected element): `735fc45` introduces `codexRootCoverage`, checking the `resolved/resolved` and `configured/configured` pairs (an improvement over the single resolved-only check C2-1 found, but the commit's own doc comment at the time only claimed "EITHER" of two pairings). `5fcf070` extends the same function to all four pairings (adding `resolved-root/configured-target` and `configured-root/resolved-target`), matching the plan's own account of a residual gap the implementer found manually testing a `.agents`-symlink shape that neither same-spelling pairing could see. The new test `TestCodexRootCoverage_MixedSpellings_ProtectedSymlinkStillBlocks` constructs exactly that shape (root spelled through a symlink; store spelled with the resolved prefix but reaching a protected `.agents` symlink deeper down) and asserts `covers=true, blocked=true`, plus a control case (`covers=true, blocked=false`) for a store no spelling routes through a protected directory. By inspection of the four-term `||` in `codexRootCoverage` (`:601-604`), the test can only pass with all four pairings present — dropping the mixed-pair terms makes the primary assertion fail, since neither same-spelling pair sees the protected element in this fixture.
+   - **C2-2** (implicit-root pass names the wrong exclusion key when the seat's `$TMPDIR` equals codex's fixed temp root): `735fc45` replaces the `[]string` implicit-roots list with `[]codexImplicitRoot{Dir, ExcludeKey, FromTmpdirEnv}`, each entry's key set once at construction in `codexImplicitWritableRoots` (`:679-687`) rather than re-derived post hoc by comparing the matched directory string against `slashTmpDir`. Two new tests — `TestCheckCodexAgmsgWritableRoot_SlashTmpDirEqualsTmpDirExcludedSlashTmp_NamesTmpdirEnvVar` and its `_ExcludedTmpdirEnvVar_NamesSlashTmp` counterpart — construct the exact ambiguous case (`TMPDIR` == the fixed temp root) for both exclusion combinations and assert the correct key is present while the other is explicitly absent, plus (for the `TMPDIR`-sourced match) that the pane-environment note appears exactly once. Read in full; no string-identity comparison remains anywhere in the matched-entry rendering path (`codexImplicitRootDetail`, `:754-766`).
+   - Both fix commits' new tests were read for assertion strength (specific field/phrase, not a bare status check) before being counted as verifying the fix.
+
+### Coverage gaps (cycle 2)
+
+- **Not verified here (by design):** `go test ./internal/cli/... -count=1` was not run — that is `/test`'s responsibility. The plan's Deviation notes record the implementer's own `TMPDIR=/tmp` green run after `5fcf070` (the last code-changing commit before this report; `7184b2c` is docs-only).
+- **AC-3 plan enumeration** (see above) — behavior correct and tested, plan checklist text incomplete. Non-blocking.
+- **AC-7 plan evidence quotes** (see above) — verdicts correct, literal wording stale post-`c03c21e`. A fresh evidence entry should be appended before `/pr`. Non-blocking.
+- **Skill bullet's `/tmp`/`$TMPDIR` omission** relative to the recipe — informational, does not affect AC-5.
+- **Scratch-project warn/pass AC-7 lines** were not independently rebuilt this cycle (see Observational checks item 1) — their staleness is inferred from the shared producer function, not from a fresh live run. If a fresh AC-7 evidence entry is added to the plan, it should include a live rebuild of both scratch scenarios, not just the real-config line.
+- **Unchanged from cycle 1, still out of scope:** the Windows FIFO-equivalent gap; codex's own interpretation of `writable_roots` (relative/`~` expansion, `-c` merge-vs-replace semantics).
+
+### Verdict (cycle 2)
+
+- Verified: AC-1, AC-2, AC-4, AC-5, AC-6 (static half) — reconfirmed against the full cycle-2 range with live rebuild, static-verify/secret-scan/sync-gate reruns, and a full read of the two previously-unreviewed fix commits (`735fc45`, `5fcf070`) against their target findings.
+- Verified in code, with a non-blocking plan-drift gap: AC-3 (the doc comment / `if`-chain / tests are all correct and complete; the plan's own AC-3 text has not been updated for the two newest outcomes), AC-7 (the pass/warn/info verdicts are correct and reconfirmed live; the plan's quoted wording is stale after `c03c21e` and needs a fresh evidence entry before `/pr`).
+- Partially verified: AC-6 as a whole — `go test`/`run-verify.sh` intentionally not re-run here; the plan's Deviation notes record the implementer's own green run after `5fcf070`, which `/test` should independently confirm for the cycle-2 range.
+- Not verified: AC-8 (PR-time only, not yet applicable).
+- **Overall: PASS.** No CRITICAL/blocking finding. Recommend closing the two documentation-drift items (AC-3 enumeration, AC-7 evidence refresh) in the plan before `/pr` — both are wording gaps, not behavioral defects.
