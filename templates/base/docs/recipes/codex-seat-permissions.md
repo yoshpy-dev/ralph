@@ -59,10 +59,12 @@ recorded in `docs/evidence/codex-seat-permissions-2026-09-18.md`.
   `workspace-write` and no writable root covers the agmsg store. That is
   the case when `codex_verified = true` and a role resolves to edits or
   autonomous, or when your codex config sets `sandbox_mode =
-  "workspace-write"` and a role resolves to guarded; with codex missing
-  from `[org].driver_pool` nothing is needed. The check reads only the
-  user-level `config.toml`; profiles, project-level config, and `-c`
-  overrides are not evaluated.
+  "workspace-write"` and a role resolves to guarded. Only roles that may
+  use a codex model count, and with codex missing from `[org].driver_pool`
+  or `[org].model_pool` nothing is needed. `/tmp` and `$TMPDIR` count as
+  writable unless `exclude_slash_tmp` / `exclude_tmpdir_env_var` is set.
+  The check reads only the user-level `config.toml`; profiles,
+  project-level config, and `-c` overrides are not evaluated.
 - **Keep the scratch working directory out of `/tmp`.** `/tmp` is itself a
   writable root, so a target under it does not test the sandbox boundary.
   Use a throwaway directory under `$HOME` (`git init` it) for the seat's cwd
