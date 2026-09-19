@@ -36,6 +36,7 @@
 - `ZDOTDIR` を差し替えた環境で `herdr server` を起動しても効かない(pane の zsh は `/etc/zshenv` の `ZDOTDIR=$HOME/.config/zsh` を読む)
 - 回避: `herdr server` を **偽 HOME**(alias なしの `.zshrc`、`.config/zsh/.zshrc` も alias なし、`.config/herdr` は実体への symlink で socket を共有、`.agents` / `.local` は実体への symlink、`.codex` に `auth.json` と最小 config を複製)で起動した。ユーザーの dotfile は変更していない(`~/.zshrc` は backup と byte 一致を確認)
 - claude 座席も同じ alias で同じ衝突が起きるはず(未検証。#155 の範囲外)
+- 追記(2026-09-18、#162): claude 2.1.274 の CLI は `--model` / `--permission-mode` の重複をエラーにせず、後ろの値が勝つことを実測した(`--model haiku --model sonnet -p …` の `modelUsage` に sonnet、逆順では haiku のみ)。上の「同じ衝突が起きるはず」は CLI 単体では当たらない。座席を起動しての確認は未実施
 
 ### P2. `ralph org send` の本文が codex の入力欄に残り送信されないことがある
 

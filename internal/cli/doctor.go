@@ -118,7 +118,15 @@ func runDoctorFull(targetDir string, probeModels, strict bool) error {
 	results = append(results, checkGo(cfg))
 
 	// Check 8: herdr availability (org runtime driver adapter).
-	results = append(results, checkHerdrAvailable())
+	herdrResult := checkHerdrAvailable()
+	results = append(results, herdrResult)
+
+	// Check 8b: codex/claude shell aliases that add seat-launch flags (static
+	// rc scan). Only org seats are affected, so nothing warns unless herdr is
+	// present; with herdr, codex findings and claude --permission-mode
+	// findings warn, and a claude --model finding stays informational -- see
+	// checkShellAliases and docs/recipes/codex-seat-permissions.md.
+	results = append(results, checkShellAliases(doctorShellAliasEnv, herdrResult.Status == "pass"))
 
 	// Check 9: agmsg availability (org runtime driver adapter).
 	results = append(results, checkAgmsgAvailable(driver.ResolveAgmsgHome(cfg.Org.AgmsgHome)))

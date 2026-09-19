@@ -21,8 +21,21 @@ recorded in `docs/evidence/codex-seat-permissions-2026-09-18.md`.
   with `error: the argument '--model <MODEL>' cannot be used multiple
   times`; `ralph org spawn` then reports `spawn_failed` after the
   `agent_start` timeout. Remove the alias, or start herdr from a HOME / rc
-  that does not define it. A `claude` alias that adds `--model` should
-  collide the same way with claude seats (not verified).
+  that does not define it. The short form `-m` collides the same way. An
+  alias that adds `--sandbox` (or `-s`) fails the same way on edits and
+  autonomous seats, where ralph passes that flag itself; on a guarded seat
+  the alias's sandbox silently applies. ralph passes `--ask-for-approval`
+  to autonomous seats only, so an alias that adds it (or `-a`) fails on
+  autonomous seats and silently sets the approval policy of edits and
+  guarded seats. claude accepts a repeated flag and the last value
+  wins (claude 2.1.274 CLI; not verified on a live seat): ralph always
+  passes `--model` after the alias, so a `claude` alias that adds `--model`
+  does not break the spawn, but ralph passes `--permission-mode` only on
+  edits and autonomous seats, so a guarded claude seat runs with the
+  alias's permission mode. Every other flag in the alias still reaches
+  each seat. `ralph doctor`'s "Shell aliases (codex/claude)" check reports
+  such aliases with the rc file and line (info when a claude alias only
+  adds `--model` or when herdr is not installed, warn otherwise).
 - **Add the agmsg database to the sandbox's writable roots.** Under
   `--sandbox workspace-write` codex can write only to the working directory
   and to `/tmp`-style temp roots; the agmsg SQLite database

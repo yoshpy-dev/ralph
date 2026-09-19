@@ -1,0 +1,10 @@
+# Narrow false-positive allowlist for scripts/secret-scan.sh (one ERE per line).
+#
+# Fake values in internal/cli/doctor_shell_alias_test.go: the test asserts that
+# an alias VALUE never reaches a doctor Detail, so the fixture has to look like
+# a secret. They are not credentials. The key name is spelled with a bracket
+# expression so this line does not match the scanner's own pattern.
+api_ke[y]=SECRET(123|456)
+# The first spelling of the rule above is still in this branch's history
+# (commit 5a91cff) and the range scan reads history, so allow that one line.
+SECRET[(]123[|]456[)]
