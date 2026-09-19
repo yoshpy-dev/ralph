@@ -562,6 +562,42 @@ func TestOrgSend_IdleDoneWaitFails_ErrorsBeforeAnyTypingOrEvent(t *testing.T) {
 	}
 }
 
+// TestSendProgress_String_Table is a direct unit pin for SendProgress's own
+// String method -- it had zero test coverage before this (found via
+// go tool cover -func on internal/org/verbs.go): every %v/%q formatting of
+// a SendProgress value inside the existing tests' t.Errorf calls happens on
+// the ARGUMENT side of an Errorf that never actually fires (the tests all
+// pass before reaching that format verb), so the Stringer method itself was
+// never exercised. Covers all five named states plus the out-of-range
+// default branch (an out-of-range value cannot occur through Send's own
+// code today -- SendProgress is only ever set to one of the five named
+// constants -- but the default branch exists specifically so a value that
+// somehow got out of range still prints something grep-able instead of a
+// silent zero-value/panic, and the doc comment promises "SendProgress(N)"
+// for it, which nothing was checking).
+func TestSendProgress_String_Table(t *testing.T) {
+	tests := []struct {
+		name string
+		p    SendProgress
+		want string
+	}{
+		{"nothing sent", SendProgressNothingSent, "nothing-sent"},
+		{"text unacknowledged", SendProgressTextUnacknowledged, "text-unacknowledged"},
+		{"text typed", SendProgressTextTyped, "text-typed"},
+		{"enter unacknowledged", SendProgressEnterUnacknowledged, "enter-unacknowledged"},
+		{"enter pressed", SendProgressEnterPressed, "enter-pressed"},
+		{"out of range (positive)", SendProgress(99), "SendProgress(99)"},
+		{"out of range (negative)", SendProgress(-1), "SendProgress(-1)"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.p.String(); got != tc.want {
+				t.Errorf("SendProgress(%d).String() = %q, want %q", int(tc.p), got, tc.want)
+			}
+		})
+	}
+}
+
 // TestOrgSend_RawAndUnconfirmed_DetailsPrefixOrder pins the exact prefix
 // order when both markers apply: "raw=true " comes first, then
 // "submit_unconfirmed=true ", then the (possibly truncated) text -- the
