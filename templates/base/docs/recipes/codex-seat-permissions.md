@@ -144,7 +144,10 @@ ralph org spawn --org-id perm-auto --id reviewer --role reviewer --driver codex 
   check the pane with `ralph org read`, and only if the message is still in
   the composer press Enter yourself (`herdr pane send-keys <pane> Enter`);
   ralph never resends Enter, because a blind keystroke could confirm an
-  approval dialog. Then wait for the seat:
+  approval dialog. If `send` exits non-zero instead of just warning,
+  follow the stderr note it prints rather than retrying blindly: typed-only
+  means check the pane and clear or submit before resending, and
+  Enter-already-pressed means do not send again. Then wait for the seat:
 
   ```sh
   ralph org wait --org-id perm-auto --seat reviewer --until idle,done \
