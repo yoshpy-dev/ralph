@@ -2,7 +2,7 @@
 
 - Date: 2026-09-20
 - Plan: `docs/plans/active/2026-09-20-codex-effective-model-receipt.md`
-- 対象: `internal/org/codex_session.go` の `ObserveCodexEffectiveModel`(commit 78692f4)
+- 対象: `internal/org/codex_session.go` の `ObserveCodexEffectiveModel`(commit 78692f4 で実行。self-review の修正後の 26b03ce で再実行して同じ結果)
 - codex CLI: 0.154.0(記録を作った時点の版)
 
 ## 何を確認したか
@@ -43,13 +43,18 @@ codex の session 記録から座席の実効モデルを読む観測関数が�
 - Run E1 は #165 のきっかけになった実例で、`--model gpt-5.5` で起動した座席が `gpt-5.6-sol` で動いていた。receipts では `honored=false`、`reported_effective_model=gpt-5.6-sol` になる
 - 4 行目は、同じ org・seat で再 spawn したときに古い session を採らないことの確認(session の開始時刻が spawn 開始より前の記録は対象外)
 - エラーはどのケースでも nil
+- 26b03ce では座席の特定を 2 点変えた: user メッセージは役割指示ファイルのパスだけでなく、ralph が渡す指示文全体(`役割指示を読み込んで従ってください: <パス>`)を含むこと。探す日付ディレクトリは spawn 日の前日・当日・翌日の 3 つだけ。上の 5 ケースは変更後も同じ結果だった(実記録の user メッセージは指示文全体を含んでいる)
+
+## 記録は開始日のディレクトリに残る(メタデータだけで確認)
+
+探すディレクトリを spawn 日の前後 1 日に限ってよい根拠。この環境の実ホームの `~/.codex/sessions/` について、ファイルのパスと更新時刻だけを調べた(内容は読んでいない): 記録 1,013 件のうち 57 件は、ディレクトリの日付より後の日に更新されていた(最大 17 日後)。どれも開始日のディレクトリに残っており、ファイル名の日付はすべてディレクトリの日付と一致した。長く動いた座席を何日も後に stop しても、記録は spawn 日のディレクトリにある。
 
 ## `ralph doctor` の表示(この環境の実 cache)
 
-`models_cache.json` の `gpt-5.5` には `upgrade`(移行先 `gpt-5.6-sol`、`retirement_at = 2026-10-14T19:00:00Z`)が入っている。commit 80a50c2 のバイナリでの表示:
+`models_cache.json` の `gpt-5.5` には `upgrade`(移行先 `gpt-5.6-sol`、`retirement_at = 2026-10-14T19:00:00Z`)が入っている。commit 26b03ce のバイナリでの表示:
 
 ```
-ℹ Org codex model slugs: info — 5 codex model_pool slug(s) present in ~/.codex/models_cache.json; retiring: gpt-5.5 -> gpt-5.6-sol on 2026-10-14. codex may run the replacement instead of the commanded model; ralph records that as honored=false in the org model receipts. (cache written 2026-09-20T01:00:14Z, 2m ago)
+ℹ Org codex model slugs: info — 5 codex model_pool slug(s) present in ~/.codex/models_cache.json; retiring: gpt-5.5 -> gpt-5.6-sol on 2026-10-14. codex may run the replacement instead of the commanded model; when ralph can identify the seat's codex session record, it records the mismatch as honored=false in the org model receipts. (cache written 2026-09-20T01:39:04Z, 0m ago)
 ```
 
 (パスのホーム部分は `~` に置き換えた。)

@@ -97,15 +97,16 @@ and records its `turn_context.model` as `reported_effective_model`, with
 `honored=true` when it equals the commanded model and `honored=false` when
 it does not (codex switches a retiring model to its replacement on its own;
 `ralph doctor` lists pool slugs that carry such a notice). The record is
-matched by the seat's role-prompt path and by a session start time not
-before the spawn, and only the model is read from it. A seat whose record
-cannot be identified stays `unknown`: no turn yet (for example a
-model-retirement dialog is open), an inline or empty initial prompt (no
-role-prompt file to match), or a herdr server whose `CODEX_HOME` differs
-from ralph's. `ralph org stop` looks once more for a seat that has no
-observed receipt since its spawn and appends one, so a seat can have an
-`unknown` receipt from spawn and an observed one from stop. claude seats
-are not observed and stay `unknown`.
+matched by the sentence ralph passes to the seat to point it at its
+role-prompt file and by a session start time not before the spawn, and only
+the model is read from it. A seat whose record cannot be identified stays
+`unknown`: no turn yet (for example a model-retirement dialog is open), an
+inline or empty initial prompt (no role-prompt file to match), or a herdr
+server whose `CODEX_HOME` differs from ralph's. `ralph org stop` looks once
+more for a seat that has no observed receipt since its spawn and, when it
+finds the record, appends one, so a seat can have an `unknown` receipt from
+spawn and an observed one from stop. claude seats are not observed and stay
+`unknown`.
 
 ## Where the values live
 

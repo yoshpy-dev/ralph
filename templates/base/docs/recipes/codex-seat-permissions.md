@@ -119,7 +119,8 @@ ralph org spawn --org-id perm-auto --id reviewer --role reviewer --driver codex 
   `honored=false` on a mismatch comes with a stderr warning, and
   `ralph doctor` lists pool slugs that codex has scheduled for retirement.
   While the dialog is open no turn has started, so the spawn receipt stays
-  `unknown`; `ralph org stop` looks once more and appends the observed one.
+  `unknown`; `ralph org stop` looks once more and, when it finds the seat's
+  session record, appends the observed one.
 - Write the TASK as a typed-protocol message (`ralph org send` validates it:
   `TYPE` must be one of the protocol's enum values, `TASK` needs a
   `TASK_ID`, and the body is capped at 2,000 characters), e.g. `task.txt`:
