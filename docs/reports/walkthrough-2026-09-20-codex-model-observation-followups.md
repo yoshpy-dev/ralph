@@ -4,7 +4,7 @@
 - Plan: docs/plans/archive/2026-09-20-codex-model-observation-followups.md(PR 作成時に active から移動)
 - Issue: #173(Closes)。#165 / PR #174 の最終 cross-review の残件
 - Branch: fix/codex-model-observation-followups(base: main @ 3d355bd)
-- 差分規模: 約 20 files / +1,900 −190。Go は `internal/org/` の 6 ファイル(+1,322 −159)で、実装は `verbs.go`(+233)、`codex_session.go`(+114)、`spawn.go`(+83)。残りはテスト(約 1,050 行)。ほかは rule 2 面、recipe 2 コピー、skill 4 面に各 1 節、plan、pipeline レポート
+- 差分規模: 約 23 files / +2,500 −190(うち pipeline のレポートと plan が約 1,000 行)。Go の実装は `internal/org/` の 3 ファイル(`verbs.go`、`codex_session.go`、`spawn.go`)。残りの Go はテスト(`internal/org/` の 3 ファイルと `internal/cli/org_test.go`)。ほかは rule 2 面、recipe 2 コピー、skill 4 面に各 1 節、plan、pipeline レポート
 
 ## 何が変わったか
 
@@ -30,6 +30,7 @@ PR #174 は、codex 座席の実効モデルを codex の session 記録から�
 | 6564680 | self-review の 7 件(doc comment、確認の位置を固定するテスト 3 件、manifest の読み取りを 1 回に、コメントの整理) |
 | 4300307 | tester が足したテスト 5 件(壊しても落ちなかった 3 種類の変更を検出するテストを含む) |
 | 7c95d3f | 文書: stop の観測も同じ上限で区切られる旨を rule・recipe・skill に 1 節 |
+| 5e239b0, 711cd9d, a1afc0c | cross-review cycle 1 の 1 件と self-review cycle 2 の指摘(テストだけ): 走査の途中でも上限が効くようになったため、テスト用の 1ms の上限が「観測の成功を期待するテスト」と競争していた。成功を期待するテストには 30 秒(見つかればすぐ返る)、spawn が `unknown` で終わる前提の stop のテストは spawn の後に広げる、上限切れの前に 1 回の走査の完了が必要なテストは 200ms、timeout を確かめるテストは小さいまま。本番コードは `verbs.go` のコメントだけ |
 | その他 | plan の進捗・逸脱記録、各レポート、insight events |
 
 ## 注意して見てほしい点
@@ -37,7 +38,8 @@ PR #174 は、codex 座席の実効モデルを codex の session 記録から�
 - `Stop` の観測まわりが roster の値を一切使わないこと(`stopped` イベントだけが roster の値を記録する)。
 - 打ち切られた走査が found を返す経路がないこと、走査の完了後に余計な ctx の確認がないこと。
 - ctx のエラーや読み取りエラーの文言が、receipt の理由・manifest・stderr に出ないこと。
-- 既存の挙動(receipts / manifest のスキーマ、CLI の警告、doctor、claude 座席)は変えていない。`internal/cli/` は無変更。
+- 既存の挙動(receipts / manifest のスキーマ、CLI の警告、doctor、claude 座席)は変えていない。`internal/cli/` の差分はテスト(`org_test.go`)だけ。
+- テストの上限の 3 分類(`internal/org/spawn_test.go` の `testCodexObserveGenerousBudget` のコメント)。走査に 3 / 10 / 25 / 60ms の遅延を注入しても全テストが通ることを tester が確認した。
 
 ## Known limitations
 
