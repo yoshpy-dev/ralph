@@ -142,6 +142,9 @@ if [ -s "$findings" ]; then
   printf 'Potential secrets were found:\n' >&2
   sort -u "$findings" >&2
   printf '\nIf this is a false positive, add a narrow regex to .gitallowed.\n' >&2
+  printf 'Write the key name as a bracket expression (e.g. api_ke[y]) so the\n' >&2
+  printf 'allowlist line itself does not match a scanner pattern -- a branch-\n' >&2
+  printf 'history scan also reads the commit that adds the allowlist line.\n' >&2
   exit 1
 fi
 

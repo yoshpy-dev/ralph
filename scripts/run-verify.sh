@@ -204,6 +204,26 @@ scope_file=".harness/state/verify-scope"
     fi
   fi
 
+  # Branch-history secret scan: mirrors the CI step
+  # (.github/workflows/verify.yml) so a leak surfaces here, before push,
+  # instead of only after CI reads the pushed history. Runs in static and
+  # all modes (not test mode, to keep run-test.sh behavioral-only); does
+  # not count toward ran_any -- it is not a language verifier.
+  case "$HARNESS_VERIFY_MODE" in
+    static|all)
+      if [ -n "${RALPH_VERIFY_SKIP_BRANCH_SECRET_SCAN:-}" ]; then
+        echo "==> Skipping branch secret scan (RALPH_VERIFY_SKIP_BRANCH_SECRET_SCAN set)"
+      elif [ -x ./scripts/secret-scan-branch.sh ]; then
+        echo "==> Running branch secret scan"
+        if ! ./scripts/secret-scan-branch.sh; then
+          status=1
+        fi
+      else
+        echo "==> Branch secret scan skipped: ./scripts/secret-scan-branch.sh missing or not executable"
+      fi
+      ;;
+  esac
+
   if [ "$ran_any" -eq 0 ]; then
     if [ "$docs_only" -eq 1 ]; then
       echo "No language verifier ran. This appears to be docs or scaffold-level work only."
