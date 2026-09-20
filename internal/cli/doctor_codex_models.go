@@ -196,7 +196,7 @@ func parseCodexModelUpgrade(raw json.RawMessage) (model string, retirementAt tim
 // codexRetirementSentence is the fixed sentence appended once, after every
 // retiring:/retired: slug list, whenever codexRetirementClause finds at
 // least one slug with a usable upgrade.
-const codexRetirementSentence = " codex may run the replacement instead of the commanded model; ralph records that as honored=false in the org model receipts."
+const codexRetirementSentence = ". codex may run the replacement instead of the commanded model; ralph records that as honored=false in the org model receipts."
 
 // codexRetirementClause builds the "; retiring: ...; retired: ..." +
 // codexRetirementSentence suffix (AC-7) for the subset of slugs (the
