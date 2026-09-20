@@ -687,7 +687,7 @@ func (o *Org) Stop(p StopParams) StopResult {
 // codexSpawnCorrelation resolves what Stop needs to correlate a codex
 // seat with its codex session record: the TS of the seat's current (most
 // recent) spawn_started event for (orgID, seatID), parsed as a time.Time,
-// alongside that same TS string (hasObservedCodexReceiptSince compares
+// alongside that same TS string (hasObservedCodexReceiptAfter compares
 // receipt TS strings lexicographically, the same trick latestSeatEventTS
 // -- watch.go -- already relies on for RFC3339 UTC timestamps), and the
 // role-prompt file path recorded on that same spawn attempt's
@@ -737,27 +737,91 @@ func codexSpawnCorrelation(events []ManifestEvent, orgID, seatID string) (spawnS
 		if ev.DryRun || ev.OrgID != orgID || ev.SeatID != seatID || ev.Event != EventSpawnStep {
 			continue
 		}
-		if path, found := strings.CutPrefix(ev.Details, codexPromptFileDetailsPrefix); found {
+		if path, found := promptPathFromAgentStartedDetails(ev.Details); found {
 			promptPath = path
 		}
 	}
 	return t, tsStr, promptPath, true
 }
 
-// hasObservedCodexReceiptSince reports whether any receipt for (orgID,
-// seatID) with TS at or after spawnStartedTS already carries a non-empty
-// ReportedEffectiveModel -- i.e. an observation (Honored true or false,
-// from Spawn's own poll or an earlier Stop call) already happened for this
-// spawn attempt. A rejection or dry-run receipt never carries a reported
-// model, so neither ever suppresses a Stop-time observation; a spawn
-// attempt with no receipt at all (e.g. interrupted mid-poll) is likewise
-// not suppressed, since there is nothing to compare against (AC-5).
-func hasObservedCodexReceiptSince(receipts []Receipt, orgID, seatID, spawnStartedTS string) bool {
+// promptPathFromAgentStartedDetails extracts the role-prompt file path
+// from one agent_started spawn_step event's Details, stripping a trailing
+// " agent_start_retries=<digits>" suffix if AgentStart needed a retry
+// (spawn.go's agentStartedDetails: "agent_started prompt_file=<path>[
+// agent_start_retries=<N>]"). ok is false only when details does not
+// start with codexPromptFileDetailsPrefix at all; a prefix with an empty
+// remaining path returns ok=true, path="" -- codexSpawnCorrelation still
+// assigns it, the same "nothing to correlate" signal an inline prompt
+// already produces.
+//
+// The suffix is stripped from the END of the string only (cross-review
+// AR-1): strings.LastIndex finds the rightmost " agent_start_retries="
+// substring, and everything after it must be non-empty and all-digit for
+// it to count as the real suffix -- so a path that legitimately contains
+// spaces, or even the literal text "agent_start_retries=" in the middle
+// of itself (state dirs can live under arbitrary directory names), is
+// never mistaken for the suffix and survives untouched.
+func promptPathFromAgentStartedDetails(details string) (path string, ok bool) {
+	rest, found := strings.CutPrefix(details, codexPromptFileDetailsPrefix)
+	if !found {
+		return "", false
+	}
+	marker := " " + codexAgentStartRetriesDetailsSuffixKey
+	idx := strings.LastIndex(rest, marker)
+	if idx == -1 {
+		return rest, true
+	}
+	digits := rest[idx+len(marker):]
+	if digits == "" || !isAllDigits(digits) {
+		return rest, true
+	}
+	return rest[:idx], true
+}
+
+// isAllDigits reports whether every byte of s is an ASCII digit. s is
+// never empty when called from promptPathFromAgentStartedDetails (checked
+// by the caller).
+func isAllDigits(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// hasObservedCodexReceiptAfter reports whether any receipt for (orgID,
+// seatID), with TS strictly after spawnStartedTS, already carries a
+// non-empty ReportedEffectiveModel -- i.e. an observation (Honored true or
+// false, from Spawn's own poll or an earlier Stop call) already happened
+// for this spawn attempt. A rejection or dry-run receipt never carries a
+// reported model, so neither ever suppresses a Stop-time observation; a
+// spawn attempt with no receipt at all (e.g. interrupted mid-poll) is
+// likewise not suppressed, since there is nothing to compare against
+// (AC-5).
+//
+// The comparison is strict, not "at or after" (cross-review AR-2): every
+// timestamp in this package is RFC3339 at whole seconds (o.now()), so a
+// stop followed by a re-spawn of the same seat within one real second --
+// what a lead does when it replaces a seat, and what a scripted flow can
+// do in milliseconds -- can leave the PREVIOUS spawn's stop-time receipt
+// carrying the exact same second-string as the NEW spawn's own
+// spawn_started. Under an inclusive "at or after" comparison, that old
+// receipt would be mistaken for having already observed the new spawn,
+// silently suppressing the new spawn's own stop-time observation. On a
+// real codex seat, a receipt that genuinely belongs to THIS spawn cannot
+// land in the same second as its own spawn_started -- the session record
+// only appears some seconds later (the plan's own real-record
+// measurement) -- so requiring strictly-after costs nothing there. If it
+// ever did land in the same second, the cost of this stricter rule is one
+// duplicate observed receipt at stop, not a silently missed mismatch --
+// the safer direction to err in.
+func hasObservedCodexReceiptAfter(receipts []Receipt, orgID, seatID, spawnStartedTS string) bool {
 	for _, r := range receipts {
 		if r.OrgID != orgID || r.SeatID != seatID {
 			continue
 		}
-		if r.TS < spawnStartedTS {
+		if r.TS <= spawnStartedTS {
 			continue
 		}
 		if r.ReportedEffectiveModel != "" {
@@ -771,11 +835,11 @@ func hasObservedCodexReceiptSince(receipts []Receipt, orgID, seatID, spawnStarte
 // Stop performs (AC-5). It returns observed=false -- doing nothing else --
 // unless every one of these holds: seat.Driver is "codex"; seatID has a
 // spawn_started event with a resolvable TS and a recorded role-prompt file
-// (codexSpawnCorrelation); and no receipt since that spawn_started already
-// carries a reported model (hasObservedCodexReceiptSince). Only then does
-// it call ObserveCodexEffectiveModel once, with no retry and no wait --
-// unlike Spawn's own poll, Stop has already waited as long as the seat
-// itself ran. A not-found, ambiguous, or observer-error result also
+// (codexSpawnCorrelation); and no receipt strictly after that spawn_started
+// already carries a reported model (hasObservedCodexReceiptAfter). Only
+// then does it call ObserveCodexEffectiveModel once, with no retry and no
+// wait -- unlike Spawn's own poll, Stop has already waited as long as the
+// seat itself ran. A not-found, ambiguous, or observer-error result also
 // returns observed=false: Stop appends nothing in any of those cases (see
 // Stop's own doc comment).
 func (o *Org) observeStopModelReceipt(seat SeatStatus, seatID string) (Receipt, bool) {
@@ -792,7 +856,7 @@ func (o *Org) observeStopModelReceipt(seat SeatStatus, seatID string) (Receipt, 
 	if err != nil {
 		return Receipt{}, false
 	}
-	if hasObservedCodexReceiptSince(rec.Receipts, seat.OrgID, seatID, spawnStartedTS) {
+	if hasObservedCodexReceiptAfter(rec.Receipts, seat.OrgID, seatID, spawnStartedTS) {
 		return Receipt{}, false
 	}
 

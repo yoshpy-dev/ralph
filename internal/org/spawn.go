@@ -741,7 +741,7 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 		return o.failStepWithNote(p, "agent_start", err, paneID, fmt.Sprintf("agent_start_retries=%d", retries))
 	}
 	if retries > 0 {
-		agentStartedDetails = fmt.Sprintf("%s agent_start_retries=%d", agentStartedDetails, retries)
+		agentStartedDetails = fmt.Sprintf("%s %s%d", agentStartedDetails, codexAgentStartRetriesDetailsSuffixKey, retries)
 	}
 	if err := o.appendEvent(ManifestEvent{
 		TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnStep,
@@ -1241,6 +1241,19 @@ const maxInlinePromptRunes = 200
 // single named constant instead of two independent literals keeps the
 // write and read sides from silently drifting apart.
 const codexPromptFileDetailsPrefix = "agent_started prompt_file="
+
+// codexAgentStartRetriesDetailsSuffixKey is the fixed key Spawn appends,
+// space-separated, onto the agent_started spawn_step's Details when
+// AgentStart needed a retry (agentStartedDetails below): "agent_started
+// prompt_file=<path> agent_start_retries=<N>". Shared with verbs.go's
+// promptPathFromAgentStartedDetails, which strips this exact trailing
+// suffix back off to recover the path at Stop time -- a single named
+// constant instead of two independent literals keeps the write and strip
+// sides from silently drifting apart, the same reason
+// codexPromptFileDetailsPrefix exists (cross-review AR-1: before this,
+// the suffix was left in place, so the recovered "path" never matched the
+// pointer sentence a retried spawn actually wrote).
+const codexAgentStartRetriesDetailsSuffixKey = "agent_start_retries="
 
 // needsPromptFile reports whether prompt is too unsafe to pass directly as
 // a herdr agent argument and must instead be written to a prompt file with
