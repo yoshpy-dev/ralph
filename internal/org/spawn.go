@@ -1118,7 +1118,9 @@ func (o *Org) observeCodexSpawnReceipt(ctx context.Context, base Receipt, prompt
 		case CodexObservationAmbiguous:
 			return codexUnknownReceipt(base, "more than one codex session record matches this spawn; not guessing")
 		}
-		if err != nil && !isCtxDoneErr(err) {
+		// A completed pass sets lastErr even when it is nil: a clean later
+		// pass clears an earlier read error.
+		if !isCtxDoneErr(err) {
 			lastErr = err
 		}
 
