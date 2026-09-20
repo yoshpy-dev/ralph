@@ -681,7 +681,7 @@ func TestOrgSend_EnterDelayMS_OverridesOrgSendEnterDelay(t *testing.T) {
 // PaneSendText call, no PaneSendKeys call, no `sent` event, Progress stays
 // SendProgressNothingSent. Before M2, this exact TimeoutMS=5 /
 // SendEnterDelay=200ms pairing used to type the text and only then hit ctx
-// expiry inside waitBeforeEnter -- see
+// expiry inside waitOrCtxDone -- see
 // TestOrgSend_CtxExpiresDuringEnterDelay_AfterBudgetCheckPasses below for
 // how that branch is exercised deterministically today.
 func TestOrgSend_BudgetTooSmallForEnterDelay_NothingTyped(t *testing.T) {
@@ -720,7 +720,7 @@ func TestOrgSend_BudgetTooSmallForEnterDelay_NothingTyped(t *testing.T) {
 // TestOrgSend_CtxExpiresDuringEnterDelay_AfterBudgetCheckPasses is the
 // self-review revalidation LOW-3 fix (docs/reports/self-review-2026-09-19-org-send-enter-timing.md,
 // "Answer to the explicit question"): a deterministic reproduction of ctx
-// expiring *inside* waitBeforeEnter, after the fail-closed budget check
+// expiring *inside* waitOrCtxDone, after the fail-closed budget check
 // above has already passed -- the branch that check's own passing
 // (`remaining > enterDelay`) would otherwise make unreachable through this
 // package's fake driver alone, since fakeHerdr's calls used to be
@@ -731,7 +731,7 @@ func TestOrgSend_BudgetTooSmallForEnterDelay_NothingTyped(t *testing.T) {
 //
 // TimeoutMS: 100, SendEnterDelay: 50ms, paneSendTextDelay: 80ms. The
 // budget check passes (100ms > 50ms). PaneSendText then consumes 80ms of
-// real time, leaving roughly 20ms of ctx budget when waitBeforeEnter's
+// real time, leaving roughly 20ms of ctx budget when waitOrCtxDone's
 // select races a 50ms timer against ctx.Done() -- a ~30ms margin in the
 // direction that must win, run at -count=50 to confirm it does not flake
 // (widen these three values, keeping their relative shape, if it ever
@@ -748,7 +748,7 @@ func TestOrgSend_CtxExpiresDuringEnterDelay_AfterBudgetCheckPasses(t *testing.T)
 	msg := "TYPE: TASK\nTASK_ID: t-1\n\ndo the thing"
 	result := o.Send(SendParams{OrgID: "org-a", To: "seat-1", Text: msg, TimeoutMS: 100})
 	if result.Err == nil {
-		t.Fatal("expected a non-nil Err when ctx expires inside waitBeforeEnter after the budget check passed")
+		t.Fatal("expected a non-nil Err when ctx expires inside waitOrCtxDone after the budget check passed")
 	}
 	if !strings.Contains(result.Err.Error(), "text typed but not submitted") {
 		t.Errorf("expected the error to mention the text was typed but not submitted, got %v", result.Err)
@@ -917,7 +917,7 @@ func TestOrgSend_AppendEventFailsAfterEnter_ReportsEnterPressedButUnrecorded(t *
 // opposite direction, rather than the ~20ms this test used to leave itself
 // (self-review LOW-6): a loaded CI runner or -race can add tens of
 // milliseconds of scheduling jitter between the fail-closed budget check
-// and PaneSendText/waitBeforeEnter actually running, and a 20ms margin was
+// and PaneSendText/waitOrCtxDone actually running, and a 20ms margin was
 // close enough to that jitter to risk turning this test itself into the
 // fail-closed-budget case instead of the case it means to cover.
 func TestOrgSend_ConfirmTimeout_CappedByRemainingCtxBudget(t *testing.T) {
@@ -1464,6 +1464,97 @@ func TestOrgStop_Codex_AppendsWhenOnlyRejectionReceiptExistsSince(t *testing.T) 
 	if result.ModelReceipt.Honored != HonoredTrue {
 		t.Fatalf("expected the rejection receipt (no reported model) to not suppress observation, got %+v", result.ModelReceipt)
 	}
+}
+
+// TestOrgStop_Codex_DryRunRespawnDoesNotDisplaceRealSpawnCorrelation is the
+// self-review M2 fix: a `ralph org spawn --dry-run` issued for an
+// already-spawned codex seat appends its own dry-run spawn_started/
+// spawn_step trail (dryRunSpawn, spawn.go) for the SAME org/seat -- with
+// DryRun: true. codexSpawnCorrelation must skip those dry-run events in
+// both of its loops, so this later dry-run trail never becomes "the
+// latest spawn_started" and displaces the real one; Stop must still
+// correlate against the real spawn and observe successfully.
+func TestOrgStop_Codex_DryRunRespawnDoesNotDisplaceRealSpawnCorrelation(t *testing.T) {
+	o, _, _ := codexGuardedOrg(t, "implementer")
+	p := mustCodexSpawnParams("org-a", "seat-1")
+
+	// A deterministic, strictly-increasing fake clock (1 tick per o.now()/
+	// o.nowTime() call) replaces the real wall clock for this test: it
+	// needs the real spawn's own spawn_started to be provably,
+	// unambiguously earlier than the dry-run respawn's own (later)
+	// spawn_started -- RFC3339's whole-second TS precision means a short
+	// real sleep could land both in the same second and fail to
+	// distinguish the bug from the fix; a monotonic fake clock gets the
+	// same guarantee instantly and deterministically.
+	base := time.Date(2026, 9, 18, 7, 20, 0, 0, time.UTC)
+	var tick int64
+	o.Now = func() time.Time {
+		tick++
+		return base.Add(time.Duration(tick) * time.Second)
+	}
+
+	spawnResult := o.Spawn(p)
+	if spawnResult.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("real spawn failed: %+v", spawnResult)
+	}
+	if spawnResult.ModelReceipt.Honored != HonoredUnknown {
+		t.Fatalf("expected the real spawn's own receipt to be unknown (no fixture yet), got %+v", spawnResult.ModelReceipt)
+	}
+
+	mrr, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	var realSpawnStartedAt time.Time
+	for _, ev := range mrr.Events {
+		if ev.OrgID == "org-a" && ev.SeatID == "seat-1" && ev.Event == EventSpawnStarted {
+			realSpawnStartedAt, err = time.Parse(time.RFC3339, ev.TS)
+			if err != nil {
+				t.Fatalf("parse spawn_started TS: %v", err)
+			}
+		}
+	}
+	if realSpawnStartedAt.IsZero() {
+		t.Fatalf("test setup invariant broken: no spawn_started event found for the real spawn")
+	}
+
+	// This record's session_meta is exactly the real spawn's own
+	// spawn_started instant -- guaranteed, by the strictly-increasing fake
+	// clock, to be chronologically before the dry-run respawn's own
+	// spawn_started below (appended by a later call to the same clock).
+	// It is exactly the record that must be picked when correlation
+	// (correctly) uses the REAL spawn_started as its age cutoff, and
+	// exactly the record that would be wrongly excluded by age if
+	// correlation instead used the dry-run's (later) spawn_started as
+	// cutoff -- the self-review M2 bug this test guards against.
+	promptPath, err := o.promptFilePath(p.OrgID, p.SeatID)
+	if err != nil {
+		t.Fatalf("promptFilePath: %v", err)
+	}
+	writeQualifyingCodexFixture(t, o.CodexSessionsDir, promptPath, realSpawnStartedAt, "gpt-5-codex")
+
+	dryRunResult := o.Spawn(SpawnParams{
+		OrgID: p.OrgID, SeatID: p.SeatID, Role: p.Role, Driver: p.Driver, Model: p.Model,
+		Cwd: p.Cwd, Scope: p.Scope, DryRun: true,
+	})
+	if dryRunResult.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("dry-run respawn of the same seat failed: %+v", dryRunResult)
+	}
+
+	result := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-1"})
+	if result.Err != nil {
+		t.Fatalf("expected Stop to succeed, got %v", result.Err)
+	}
+	if result.ModelReceipt.Honored != HonoredTrue {
+		t.Fatalf("expected the observed receipt for the real spawn's own (earlier) session, got %+v", result.ModelReceipt)
+	}
+
+	mrr2, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	last := mrr2.Events[len(mrr2.Events)-1]
+	assertDetailsContains(t, last.Details, "model_observed=true")
 }
 
 // TestOrgStop_Codex_NothingAppended_NotFound: no qualifying record exists

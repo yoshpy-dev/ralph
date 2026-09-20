@@ -2071,6 +2071,14 @@ func TestOrgSpawn_Codex_AutonomousDefault_RejectedFailClosed_WithReceipt(t *test
 	if len(receiptRR.Receipts) != 1 || receiptRR.Receipts[0].Honored != HonoredFalse {
 		t.Fatalf("expected 1 receipt honored=false, got %+v", receiptRR.Receipts)
 	}
+	// Self-review M3 fix: reject() sets SpawnResult.ModelReceipt to the
+	// same receipt it appended, not the zero value.
+	if result.ModelReceipt != receiptRR.Receipts[0] {
+		t.Fatalf("expected SpawnResult.ModelReceipt to match the persisted rejection receipt, got %+v vs %+v", result.ModelReceipt, receiptRR.Receipts[0])
+	}
+	if result.ModelReceipt.ReportedEffectiveModel != "" {
+		t.Fatalf("expected the rejection receipt to carry no reported model, got %+v", result.ModelReceipt)
+	}
 }
 
 // TestOrgSpawn_Codex_GuardedRoleOverride_Spawns is the positive fail-closed
@@ -2137,7 +2145,7 @@ func writeQualifyingCodexFixture(t *testing.T, sessionsDir, promptPath string, a
 	t.Helper()
 	lines := []string{
 		sessionMetaLine(t, rfc3339Milli(at)),
-		userMessageLine(t, rfc3339Milli(at.Add(50*time.Millisecond)), "role prompt: "+promptPath),
+		userMessageLine(t, rfc3339Milli(at.Add(50*time.Millisecond)), promptFilePointer(promptPath)),
 		turnContextLine(t, rfc3339Milli(at.Add(20*time.Millisecond)), model),
 	}
 	name := fmt.Sprintf("rollout-%d.jsonl", at.UnixNano())
@@ -2218,6 +2226,79 @@ func TestOrgSpawn_Codex_ModelObservation_NotFoundAfterTimeout(t *testing.T) {
 	}
 }
 
+// TestOrgSpawn_Codex_ModelObservation_ReadError_DistinctReason is the
+// self-review L3/L4 fix: the poll's timeout elapses and the LAST attempt
+// returned a non-nil observer error (a candidate record existed -- it was
+// already Lstat'd as regular/name-matching/recently-modified -- but could
+// not be opened), so the unknown receipt's reason must say so distinctly
+// from "nothing found yet", without ever naming the error text or the
+// path (content-free, matching ObserveCodexEffectiveModel's own error
+// contract).
+func TestOrgSpawn_Codex_ModelObservation_ReadError_DistinctReason(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root ignores a read-only file's permission bit")
+	}
+	o, _, _ := codexGuardedOrg(t, "implementer")
+	p := mustCodexSpawnParams("org-a", "seat-1")
+
+	promptPath, err := o.promptFilePath(p.OrgID, p.SeatID)
+	if err != nil {
+		t.Fatalf("promptFilePath: %v", err)
+	}
+	fixturePath := writeQualifyingCodexFixture(t, o.CodexSessionsDir, promptPath, time.Now().Add(time.Second), "gpt-5-codex")
+	if err := os.Chmod(fixturePath, 0o000); err != nil {
+		t.Fatalf("chmod fixture unreadable: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(fixturePath, 0o644) })
+
+	result := o.Spawn(p)
+	if result.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("expected spawned, got %+v", result)
+	}
+	if result.ModelReceipt.Honored != HonoredUnknown || result.ModelReceipt.ReportedEffectiveModel != "" {
+		t.Fatalf("expected an unknown receipt with no reported model, got %+v", result.ModelReceipt)
+	}
+	if result.ModelReceipt.Reason != codexReadErrorReason {
+		t.Fatalf("expected reason %q, got %q", codexReadErrorReason, result.ModelReceipt.Reason)
+	}
+}
+
+// TestObserveCodexSpawnReceipt_CtxDone_DistinctReason is the self-review
+// L3/L4 fix's third case: the wait is cut short by ctx (Spawn's own
+// --timeout-ms budget) before this function's own timeout naturally
+// elapses -- a distinct reason from both "nothing found yet" and "a
+// record could not be read". Unit-tested directly against
+// observeCodexSpawnReceipt (the smallest setup that reaches this arm; see
+// the plan hand-off) rather than threading a cancelled ctx through the
+// full Spawn/herdr round trip.
+func TestObserveCodexSpawnReceipt_CtxDone_DistinctReason(t *testing.T) {
+	o, _, _ := codexGuardedOrg(t, "implementer")
+	// Wide enough that the poll would keep retrying for a while on its own
+	// -- ctx must be what actually cuts it short here, not this timeout.
+	o.CodexModelObserveTimeout = time.Second
+	o.CodexModelObserveInterval = 500 * time.Millisecond
+
+	promptPath, err := o.promptFilePath("org-a", "seat-1")
+	if err != nil {
+		t.Fatalf("promptFilePath: %v", err)
+	}
+	// No fixture at all: every poll attempt is not-found, no error -- ctx
+	// expiring mid-wait is the only way this reaches its return.
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+
+	base := Receipt{OrgID: "org-a", SeatID: "seat-1", Role: "implementer", Driver: "codex", CommandedModel: "gpt-5-codex"}
+	receipt := o.observeCodexSpawnReceipt(ctx, base, promptPath, time.Now())
+
+	if receipt.Honored != HonoredUnknown || receipt.ReportedEffectiveModel != "" {
+		t.Fatalf("expected an unknown receipt with no reported model, got %+v", receipt)
+	}
+	if receipt.Reason != codexCutShortReason {
+		t.Fatalf("expected reason %q, got %q", codexCutShortReason, receipt.Reason)
+	}
+}
+
 // TestOrgSpawn_Codex_ModelObservation_Ambiguous is AC-2b's sibling: two
 // records both qualify (same promptPath, both age-eligible), so the poll
 // ends at once with an unknown receipt naming neither model -- never a
@@ -2264,7 +2345,7 @@ func TestOrgSpawn_Codex_ModelObservation_FoundOnLaterPoll(t *testing.T) {
 	dateDir := fixtureDateDir(o.CodexSessionsDir, at)
 	lines := []string{
 		sessionMetaLine(t, rfc3339Milli(at)),
-		userMessageLine(t, rfc3339Milli(at.Add(5*time.Millisecond)), "role prompt: "+promptPath),
+		userMessageLine(t, rfc3339Milli(at.Add(5*time.Millisecond)), promptFilePointer(promptPath)),
 		turnContextLine(t, rfc3339Milli(at.Add(3*time.Millisecond)), "gpt-5-codex"),
 	}
 	content := strings.Join(lines, "\n") + "\n"
@@ -2385,7 +2466,11 @@ func TestOrgSpawn_Claude_ModelReceiptTextUnchanged(t *testing.T) {
 // TestOrgSpawn_Codex_DryRun_ModelReceiptUnchanged is the AC-4 regression
 // guard for the dry-run path: dryRunSpawn's own receipt (Reason "dry-run")
 // must stay exactly what it was before this plan, for codex the same as
-// any other driver -- dry-run never calls the observer at all.
+// any other driver -- dry-run never calls the observer at all. Also the
+// self-review M3 fix's own regression guard: SpawnResult.ModelReceipt must
+// equal the persisted receipt here too, not stay the zero value the way
+// it used to before M3 (the tell that first exposed the doc/code mismatch
+// -- this test used to only check the store).
 func TestOrgSpawn_Codex_DryRun_ModelReceiptUnchanged(t *testing.T) {
 	o, _, _ := codexGuardedOrg(t, "implementer")
 	p := mustCodexSpawnParams("org-a", "seat-1")
@@ -2395,11 +2480,14 @@ func TestOrgSpawn_Codex_DryRun_ModelReceiptUnchanged(t *testing.T) {
 	if result.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("expected spawned (dry-run), got %+v", result)
 	}
+	if result.ModelReceipt.Reason != "dry-run" || result.ModelReceipt.Honored != HonoredUnknown {
+		t.Fatalf("expected SpawnResult.ModelReceipt to carry the dry-run receipt, got %+v", result.ModelReceipt)
+	}
 	rr, err := o.Receipts.Read()
 	if err != nil {
 		t.Fatalf("read receipts: %v", err)
 	}
-	if len(rr.Receipts) != 1 || rr.Receipts[0].Reason != "dry-run" || rr.Receipts[0].Honored != HonoredUnknown {
-		t.Fatalf("expected the unchanged dry-run receipt, got %+v", rr.Receipts)
+	if len(rr.Receipts) != 1 || rr.Receipts[0] != result.ModelReceipt {
+		t.Fatalf("expected the persisted receipt to match SpawnResult.ModelReceipt, got %+v vs %+v", rr.Receipts, result.ModelReceipt)
 	}
 }

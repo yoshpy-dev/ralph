@@ -110,7 +110,7 @@ const (
 	SendProgressTextUnacknowledged
 	// SendProgressTextTyped means PaneSendText succeeded and Enter was
 	// never attempted. Set only when the pre-Enter pause is cut short by
-	// ctx expiring inside waitBeforeEnter -- the only way to reach this
+	// ctx expiring inside waitOrCtxDone -- the only way to reach this
 	// state, since PaneSendKeys is called unconditionally right after a
 	// successful wait. The text IS known to be sitting in the pane's
 	// input box, unsubmitted.
@@ -349,7 +349,7 @@ func (o *Org) Send(p SendParams) SendResult {
 		}
 	}
 
-	if err := waitBeforeEnter(ctx, enterDelay); err != nil {
+	if err := waitOrCtxDone(ctx, enterDelay); err != nil {
 		// Unlike the two "unacknowledged" cases, this one IS certain:
 		// PaneSendText already returned success above, and Enter is never
 		// attempted below when this branch is taken.
@@ -418,11 +418,15 @@ func (o *Org) sendSubmitConfirmTimeout() time.Duration {
 	return defaultSendSubmitConfirmTimeout
 }
 
-// waitBeforeEnter blocks for delay, honoring ctx: if ctx is done first, it
-// returns ctx's error instead of waiting out the full delay. Split out of
-// Send so the ctx-vs-timer race (the mechanism that lets --timeout-ms bound
-// this wait too) is readable and independently testable.
-func waitBeforeEnter(ctx context.Context, delay time.Duration) error {
+// waitOrCtxDone blocks for delay, honoring ctx: if ctx is done first, it
+// returns ctx's error instead of waiting out the full delay. Two callers
+// share this: Send's pre-Enter pause (delay is SendEnterDelay or
+// SendParams.EnterDelayMS) and Spawn's codex model-observation poll
+// (observeCodexSpawnReceipt, spawn.go; delay is one poll interval, clamped
+// to the remaining budget). Both need the same ctx-vs-timer race -- the
+// mechanism that lets --timeout-ms bound the wait too -- so it is factored
+// out once, readable and independently testable rather than duplicated.
+func waitOrCtxDone(ctx context.Context, delay time.Duration) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -590,11 +594,15 @@ type StopParams struct {
 // StopResult is Stop's return value.
 type StopResult struct {
 	Err error
-	// ModelReceipt is the Receipt Stop appended for a codex seat's
-	// unresolved model observation (AC-5), the zero Receipt when nothing
-	// was appended -- the CLI layer reads this to decide whether to print
-	// the codex model-mismatch warning (AC-6), without re-reading the
-	// receipts file.
+	// ModelReceipt is the Receipt this call appended, same contract as
+	// SpawnResult.ModelReceipt: set when Stop's own observation
+	// (observeStopModelReceipt, AC-5) finds a record and appends a
+	// receipt, the zero Receipt on every other path -- not-found,
+	// ambiguous, an observer error, an already-observed spawn attempt, a
+	// claude seat, a dry-run stop, a seat with no role-prompt file, or a
+	// receipts-append failure. The CLI layer reads this the same way it
+	// reads SpawnResult.ModelReceipt, to decide whether to print the codex
+	// model-mismatch warning (AC-6) without re-reading the receipts file.
 	ModelReceipt Receipt
 }
 
@@ -699,12 +707,22 @@ func (o *Org) Stop(p StopParams) StopResult {
 // have been appended before the current attempt's own spawn_started --
 // Spawn's idempotent/stale-in-flight checks are what guarantee a seat
 // never has two unresolved spawn_started entries at once).
+//
+// Dry-run events are skipped entirely, in both loops: a `ralph org spawn
+// --dry-run` for an already-spawned seat appends its own spawn_started/
+// spawn_step trail with DryRun: true (dryRunSpawn, spawn.go), and package
+// invariant (manifest.go's Roster doc comment) is that a dry-run event for
+// a seat_id never becomes or clears a real seat's state. Without this
+// filter, a later dry-run's spawn_started would look like "the latest" and
+// displace the real one, so Stop would correlate against the dry-run's
+// timestamp instead and silently find nothing to observe.
 func codexSpawnCorrelation(events []ManifestEvent, orgID, seatID string) (spawnStartedAt time.Time, spawnStartedTS, promptPath string, ok bool) {
 	startedIdx := -1
 	for i, ev := range events {
-		if ev.OrgID == orgID && ev.SeatID == seatID && ev.Event == EventSpawnStarted {
-			startedIdx = i
+		if ev.DryRun || ev.OrgID != orgID || ev.SeatID != seatID || ev.Event != EventSpawnStarted {
+			continue
 		}
+		startedIdx = i
 	}
 	if startedIdx == -1 {
 		return time.Time{}, "", "", false
@@ -716,7 +734,7 @@ func codexSpawnCorrelation(events []ManifestEvent, orgID, seatID string) (spawnS
 	}
 	for i := startedIdx; i < len(events); i++ {
 		ev := events[i]
-		if ev.OrgID != orgID || ev.SeatID != seatID || ev.Event != EventSpawnStep {
+		if ev.DryRun || ev.OrgID != orgID || ev.SeatID != seatID || ev.Event != EventSpawnStep {
 			continue
 		}
 		if path, found := strings.CutPrefix(ev.Details, codexPromptFileDetailsPrefix); found {

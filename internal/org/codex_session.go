@@ -15,10 +15,14 @@ import (
 	"time"
 )
 
-// Plan: docs/plans/active/2026-09-20-codex-effective-model-receipt.md,
-// Scope rows 1-2, AC-1/AC-2b. This file is the observer only -- nothing
-// here reads the process environment, writes anything, or is wired into
-// Spawn/Stop yet (that wiring is a later slice).
+// This file is the observer only: it reads codex session records and
+// reports a model, nothing else -- it never reads any other part of the
+// process environment, and it never writes anything. Two callers wire it
+// in: Spawn's own poll after a codex seat reaches `spawned`
+// (spawn.go's observeCodexSpawnReceipt) and Stop's single, non-waiting
+// check (verbs.go's observeStopModelReceipt). See issue #165 and
+// docs/evidence/codex-effective-model-receipt-2026-09-20.md for the
+// real-record measurements this file's constants are built from.
 
 // codexObserveMaxFiles caps how many rollout-*.jsonl files ObserveCodexEffectiveModel
 // actually opens and scans per call, newest (by ModTime) first. Real codex
@@ -108,14 +112,16 @@ type CodexModelObservation struct {
 
 // ObserveCodexEffectiveModel looks for the codex session record of one seat
 // spawn under sessionsDir, identifying it by promptPath -- the absolute
-// path to the seat's role-prompt file (see spawn.go's promptFilePath),
-// which appears verbatim in the session's first user message when ralph
-// passed the prompt by file. spawnStarted is the spawn's own start time;
-// only a session that began at or after spawnStarted (truncated to whole
-// seconds, since that is the precision the manifest stores -- see AC-2b)
-// can belong to this spawn, which is what lets a re-spawn of the same
-// org_id/seat_id (same promptPath) tell its own session apart from an
-// older one that happens to still be running or gets touched again later.
+// path to the seat's role-prompt file (see spawn.go's promptFilePath). A
+// record qualifies only when a user message's content contains the full
+// pointer sentence ralph itself passed the seat, promptFilePointer(promptPath)
+// (see codexResponseItemMentionsPrompt), not merely the bare path.
+// spawnStarted is the spawn's own start time; only a session that began at
+// or after spawnStarted (truncated to whole seconds, since that is the
+// precision the manifest stores -- see AC-2b) can belong to this spawn,
+// which is what lets a re-spawn of the same org_id/seat_id (same
+// promptPath) tell its own session apart from an older one that happens to
+// still be running or gets touched again later.
 //
 // This function is pure: no environment reads, no globals mutated, no
 // goroutines, no writes. It never returns partial or guessed content -- see
@@ -125,9 +131,9 @@ type CodexModelObservation struct {
 // denied); every other failure mode -- a missing sessionsDir, an unreadable
 // date directory, a missing/unreadable candidate file, a malformed or
 // oversized line -- degrades silently to CodexObservationNotFound with a
-// nil error, per the plan's rule that a codex CLI record-shape change or a
-// permissions quirk must never fail the caller (Spawn/Stop, in the slice
-// that wires this in).
+// nil error. Neither caller (Spawn's poll, Stop's single check) ever lets a
+// codex CLI record-shape change or a permissions quirk fail the seat's own
+// spawn or stop.
 func ObserveCodexEffectiveModel(sessionsDir, promptPath string, spawnStarted time.Time) (CodexModelObservation, error) {
 	if sessionsDir == "" || promptPath == "" {
 		return CodexModelObservation{Status: CodexObservationNotFound}, nil
@@ -232,26 +238,31 @@ func isCodexRolloutFileName(name string) bool {
 	return strings.HasPrefix(name, codexRolloutFilePrefix) && strings.HasSuffix(name, codexRolloutFileSuffix)
 }
 
-// codexSessionDateDirs returns the inclusive list of YYYY/MM/DD date
-// directories (codex's own layout) to walk: from spawnStarted's local date
-// minus one day, through today's local date plus one day. The two-day
-// slack on each side absorbs a UTC/local day-boundary mismatch between
-// whatever clock named the directory (codex documents it as a "local
-// timestamp") and either endpoint used here -- narrowing this to exactly
-// spawnStarted's date would risk silently missing a real file created just
-// across a midnight boundary. The upper bound is anchored to the current
-// wall-clock date (not spawnStarted's) because ObserveCodexEffectiveModel
-// can run well after spawnStarted (e.g. from Stop, in the slice that wires
-// this in), and a session file can only ever be created on or after today.
+// codexSessionDateDirs returns exactly three YYYY/MM/DD date directories
+// (codex's own layout) to walk: spawnStarted's local date, minus one day
+// and plus one day. A session's record lives in the directory of the day
+// the session STARTED, no matter how much longer codex keeps writing to it
+// afterward -- confirmed against this machine's real sessions directory
+// (file metadata only): of 1,013 records, 57 were last modified on a later
+// calendar day than their directory date (up to 17 days later), none had
+// moved to a different directory, and every file name's embedded date
+// matched its directory date exactly. So this walk never needs "today" (or
+// any other wall-clock read) -- it only needs the single day spawnStarted
+// itself falls on. The one-day pad on each side absorbs a UTC/local
+// day-boundary mismatch between whatever clock named the directory (codex
+// documents it as a "local timestamp") and spawnStarted's own Location --
+// narrowing this to exactly spawnStarted's date would risk silently
+// missing a real file created just across a midnight boundary. This was
+// also the only place in this package that read the live wall clock;
+// removing that read here means ObserveCodexEffectiveModel never touches
+// it at all, only the caller-supplied spawnStarted.
 func codexSessionDateDirs(spawnStarted time.Time) []string {
-	startDay := truncateToLocalDay(spawnStarted).AddDate(0, 0, -1)
-	endDay := truncateToLocalDay(time.Now()).AddDate(0, 0, 1)
-
-	var dirs []string
-	for d := startDay; !d.After(endDay); d = d.AddDate(0, 0, 1) {
-		dirs = append(dirs, d.Format(codexSessionDateLayout))
+	day := truncateToLocalDay(spawnStarted)
+	return []string{
+		day.AddDate(0, 0, -1).Format(codexSessionDateLayout),
+		day.Format(codexSessionDateLayout),
+		day.AddDate(0, 0, 1).Format(codexSessionDateLayout),
 	}
-	return dirs
 }
 
 // truncateToLocalDay returns t converted to its local time zone with the
@@ -391,9 +402,16 @@ func codexTurnContextModel(payload json.RawMessage) string {
 }
 
 // codexResponseItemMentionsPrompt reports whether a response_item line's
-// payload is a user message whose content contains promptPath as a
-// substring. Only role=="user" messages count -- an assistant message that
-// happens to echo the same path (e.g. quoting it back) is not evidence the
+// payload is a user message whose content contains the full pointer
+// sentence ralph passes the seat as its role-prompt argument --
+// promptFilePointer(promptPath), spawn.go, e.g. "役割指示を読み込んで従っ
+// てください: <path>" -- as a substring (Contains, not equality: codex may
+// wrap the text). Matching on the bare path alone would also match any
+// other message that merely quotes it, such as a TASK text relayed to a
+// different seat; the full sentence is the exact literal ralph itself
+// writes, so only a record whose seat was actually handed this pointer can
+// match. Only role=="user" messages count -- an assistant message that
+// happens to echo the same text (e.g. quoting it back) is not evidence the
 // seat's own initial prompt was this one.
 func codexResponseItemMentionsPrompt(payload json.RawMessage, promptPath string) bool {
 	var p struct {
@@ -409,8 +427,9 @@ func codexResponseItemMentionsPrompt(payload json.RawMessage, promptPath string)
 	if p.Type != "message" || p.Role != "user" {
 		return false
 	}
+	pointer := promptFilePointer(promptPath)
 	for _, part := range p.Content {
-		if strings.Contains(part.Text, promptPath) {
+		if strings.Contains(part.Text, pointer) {
 			return true
 		}
 	}

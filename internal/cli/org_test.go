@@ -1095,7 +1095,13 @@ func writeCliCodexFixture(t *testing.T, sessionsDir, promptPath string, at time.
 			"type": "message",
 			"role": "user",
 			"content": []map[string]string{
-				{"type": "input_text", "text": "role prompt: " + promptPath},
+				// The observer (F9/L7 fix) matches on the full pointer
+				// sentence ralph itself passes the seat as its initial
+				// prompt argument when the role-prompt was written to a
+				// file (promptFilePointer, internal/org/spawn.go), not
+				// merely the bare path -- this literal must stay byte-for-
+				// byte identical to that function's own text.
+				{"type": "input_text", "text": "役割指示を読み込んで従ってください: " + promptPath},
 			},
 		}),
 	}

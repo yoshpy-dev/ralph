@@ -254,10 +254,18 @@ type SpawnResult struct {
 	Outcome SpawnOutcome
 	Seat    SeatStatus
 	Err     error
-	// ModelReceipt is the Receipt this call appended, the zero Receipt when
-	// none was (every outcome except SpawnOutcomeSpawned) -- the CLI layer
-	// reads this to decide whether to print the codex model-mismatch
-	// warning (AC-6), without re-reading the receipts file.
+	// ModelReceipt is the Receipt this call appended, set on every path
+	// that appends one: the real spawn path's own observation, reject()'s
+	// envelope-rejection receipt, and dryRunSpawn's dry-run receipt all set
+	// it. It is the zero Receipt on every path that appends no receipt at
+	// all -- an idempotent respawn, a pre-manifest identifier-validation
+	// rejection (reject() is never reached for those; see Spawn's own doc
+	// comment), and every SpawnOutcomeFailed return. The CLI layer reads
+	// this to decide whether to print the codex model-mismatch warning
+	// (AC-6), without re-reading the receipts file -- its gate
+	// (Honored=="false" AND a non-empty ReportedEffectiveModel) is what
+	// keeps a rejection or dry-run receipt (both honored=false/unknown with
+	// no reported model) from ever being printed as a mismatch.
 	ModelReceipt Receipt
 }
 
@@ -1040,13 +1048,22 @@ func (o *Org) codexSessionsDir() string {
 // ambiguous, or o.codexModelObserveTimeout() elapses -- an ambiguous
 // result ends the poll at once, since waiting cannot resolve two matching
 // session records into one. Each wait is clamped to the remaining budget
-// and goes through waitBeforeEnter (verbs.go), which select{}s against
-// ctx, so this never sleeps past the timeout and returns as soon as ctx is
+// and goes through waitOrCtxDone (verbs.go), which select{}s against ctx,
+// so this never sleeps past the timeout and returns as soon as ctx is
 // cancelled (e.g. Spawn's own TimeoutMS elapsing). An observer error is
 // never surfaced here -- not on the receipt, not as a returned error, not
-// logged -- it is treated exactly like not-found, per
-// ObserveCodexEffectiveModel's own doc comment on why that degrades
-// silently rather than failing the caller.
+// logged, never its own text or a path -- but the RECEIPT'S REASON does
+// distinguish, in bare category terms, which of three things actually
+// happened, per the plan's "理由の文言は観測した事実だけを書く" design
+// decision:
+//   - the timeout elapsed and the last poll attempt returned no error:
+//     codexNotFoundReason (nothing found, cause unknown to this function).
+//   - the timeout elapsed and the last poll attempt DID return an error
+//     (e.g. a candidate record could not be opened): codexReadErrorReason
+//     -- a different, more specific cause than "nothing found yet".
+//   - the wait was cut short by ctx (Spawn's own --timeout-ms budget, not
+//     this function's own timeout): codexCutShortReason -- neither of the
+//     above two reasons is true; the poll simply never got to finish.
 func (o *Org) observeCodexSpawnReceipt(ctx context.Context, base Receipt, promptPath string, spawnStartedAt time.Time) Receipt {
 	if promptPath == "" {
 		return codexUnknownReceipt(base, "no role-prompt file to match a codex session record with (inline or empty initial prompt)")
@@ -1056,8 +1073,10 @@ func (o *Org) observeCodexSpawnReceipt(ctx context.Context, base Receipt, prompt
 	interval := o.codexModelObserveInterval()
 	deadline := time.Now().Add(o.codexModelObserveTimeout())
 
+	var lastErr error
 	for {
-		obs, _ := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStartedAt)
+		obs, err := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStartedAt)
+		lastErr = err
 		switch obs.Status {
 		case CodexObservationFound:
 			return codexFoundReceipt(base, base.CommandedModel, obs.Model)
@@ -1067,23 +1086,35 @@ func (o *Org) observeCodexSpawnReceipt(ctx context.Context, base Receipt, prompt
 
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
+			if lastErr != nil {
+				return codexUnknownReceipt(base, codexReadErrorReason)
+			}
 			return codexUnknownReceipt(base, codexNotFoundReason)
 		}
 		wait := interval
 		if remaining < wait {
 			wait = remaining
 		}
-		if err := waitBeforeEnter(ctx, wait); err != nil {
-			return codexUnknownReceipt(base, codexNotFoundReason)
+		if err := waitOrCtxDone(ctx, wait); err != nil {
+			return codexUnknownReceipt(base, codexCutShortReason)
 		}
 	}
 }
 
-// codexNotFoundReason is shared by observeCodexSpawnReceipt (Spawn) and
+// codexNotFoundReason, codexReadErrorReason, and codexCutShortReason are
+// observeCodexSpawnReceipt's three distinct "nothing observed" causes (see
+// its own doc comment). codexNotFoundReason is also used by
 // observeStopModelReceipt (Stop, verbs.go) for the identical "nothing
-// found yet" outcome, so the two call sites' receipts read the same way in
-// `ralph org report`.
-const codexNotFoundReason = "no codex session record for this spawn yet (no turn started, or CODEX_HOME differs from the seat's)"
+// found yet, no error" outcome, so the two call sites' receipts read the
+// same way in `ralph org report` for that one shared case -- Stop's single
+// call never distinguishes the other two causes, since it never surfaces
+// an unknown reason at all (an unsuccessful Stop-time observation appends
+// no receipt).
+const (
+	codexNotFoundReason  = "no codex session record for this spawn yet (no turn started, or CODEX_HOME differs from the seat's)"
+	codexReadErrorReason = "a codex session record could not be read; effective model not observed"
+	codexCutShortReason  = "observation was cut short by the spawn timeout; effective model not observed"
+)
 
 // codexFoundReceipt fills base's Honored/ReportedEffectiveModel/Reason for
 // a found observation: true when effective matches commanded, false with
@@ -1275,18 +1306,26 @@ func promptFilePointer(path string) string {
 
 // reject records an envelope-validation rejection: a `rejected` manifest
 // event plus an honored=false receipt, per AC-1/AC-2. No spawn_started is
-// written since no external side effect was ever attempted.
+// written since no external side effect was ever attempted. The rejection
+// receipt never carries a reported model (it is not a codex model
+// observation, just a fail-closed envelope decision) -- ModelReceipt on the
+// returned SpawnResult is this same receipt regardless, since it is the
+// receipt this call appended (see SpawnResult.ModelReceipt's doc comment);
+// the CLI's model-mismatch warning gate (Honored=="false" AND a non-empty
+// ReportedEffectiveModel) is what keeps a rejection from ever being printed
+// as one.
 func (o *Org) reject(p SpawnParams, cause error) SpawnResult {
 	_ = o.appendEvent(ManifestEvent{
 		TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventRejected,
 		Role: p.Role, Driver: p.Driver, Model: p.Model, Worktree: p.Cwd,
 		DryRun: p.DryRun, Details: cause.Error(),
 	})
-	_ = o.Receipts.Append(Receipt{
+	receipt := Receipt{
 		TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Role: p.Role, Driver: p.Driver,
 		CommandedModel: p.Model, Honored: HonoredFalse, Reason: cause.Error(),
-	})
-	return SpawnResult{Outcome: SpawnOutcomeRejected, Err: cause}
+	}
+	_ = o.Receipts.Append(receipt)
+	return SpawnResult{Outcome: SpawnOutcomeRejected, Err: cause, ModelReceipt: receipt}
 }
 
 // dryRunSpawn simulates the full saga's manifest trail with DryRun: true on
@@ -1399,17 +1438,18 @@ func (o *Org) dryRunSpawn(p SpawnParams, mode string) SpawnResult {
 		}
 	}
 
-	if err := o.Receipts.Append(Receipt{
+	receipt := Receipt{
 		TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Role: p.Role, Driver: p.Driver,
 		CommandedModel: p.Model, Honored: HonoredUnknown, Reason: "dry-run",
-	}); err != nil {
+	}
+	if err := o.Receipts.Append(receipt); err != nil {
 		return SpawnResult{Outcome: SpawnOutcomeFailed, Err: err}
 	}
 
 	return SpawnResult{Outcome: SpawnOutcomeSpawned, Seat: SeatStatus{
 		OrgID: p.OrgID, SeatID: p.SeatID, Role: p.Role, Driver: p.Driver, Model: p.Model,
 		Worktree: p.Cwd, AgmsgTeam: team, Event: EventSpawned, Active: false, DryRun: true,
-	}}
+	}, ModelReceipt: receipt}
 }
 
 // resolveWorkspace reuses the org's existing herdr workspace (recorded via

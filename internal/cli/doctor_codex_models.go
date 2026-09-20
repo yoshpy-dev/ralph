@@ -112,10 +112,10 @@ func formatCacheAge(d time.Duration) string {
 	}
 }
 
-// codexCacheFreshnessClause is the suffix appended to the slug check's warn
-// and pass Detail. changed wins over mtime; a zero mtime with changed=false
-// (Stat failed) yields "" so the Detail reads exactly as before this clause
-// existed.
+// codexCacheFreshnessClause is the suffix appended to the slug check's
+// warn, info, and pass Detail. changed wins over mtime; a zero mtime with
+// changed=false (Stat failed) yields "" so the Detail reads exactly as
+// before this clause existed.
 func codexCacheFreshnessClause(mtime time.Time, changed bool, now time.Time) string {
 	if changed {
 		return " (cache changed while reading; freshness unknown — re-run)"
@@ -195,8 +195,16 @@ func parseCodexModelUpgrade(raw json.RawMessage) (model string, retirementAt tim
 
 // codexRetirementSentence is the fixed sentence appended once, after every
 // retiring:/retired: slug list, whenever codexRetirementClause finds at
-// least one slug with a usable upgrade.
-const codexRetirementSentence = ". codex may run the replacement instead of the commanded model; ralph records that as honored=false in the org model receipts."
+// least one slug with a usable upgrade. The hedge ("when ralph can
+// identify the seat's codex session record") matters: a spawn commanding a
+// retiring slug does not unconditionally get an honored=false receipt --
+// only when the observer can actually correlate a codex session record
+// with that spawn (see internal/org/codex_session.go's
+// ObserveCodexEffectiveModel). Every seat it cannot observe (a claude
+// seat, an inline/empty initial prompt, a herdr server on a different
+// CODEX_HOME, no turn started yet) stays honored=unknown regardless of
+// whether the commanded slug is retiring.
+const codexRetirementSentence = ". codex may run the replacement instead of the commanded model; when ralph can identify the seat's codex session record, it records the mismatch as honored=false in the org model receipts."
 
 // codexRetirementClause builds the "; retiring: ...; retired: ..." +
 // codexRetirementSentence suffix (AC-7) for the subset of slugs (the
