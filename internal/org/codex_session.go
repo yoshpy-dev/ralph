@@ -229,8 +229,7 @@ func ObserveCodexEffectiveModel(ctx context.Context, sessionsDir, promptPath str
 // as opposed to a genuine read error (a wrapped os.PathError; see
 // scanRolloutRecord's own doc comment). Only a ctx-cut-short error ends the
 // whole ObserveCodexEffectiveModel pass early; a genuine read error is
-// recorded (firstErr) and scanning continues to the next candidate, exactly
-// as before ctx was threaded through this file.
+// recorded (firstErr) and scanning continues to the next candidate.
 func isCtxDoneErr(err error) bool {
 	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
@@ -262,10 +261,11 @@ type codexRolloutCandidate struct {
 // caller's deadline (ObserveCodexEffectiveModel's own doc comment). A
 // non-nil error return means the walk was cut short: it is always exactly
 // ctx.Err() (context.Canceled or context.DeadlineExceeded), never a
-// directory-read error (those are skipped silently, as before), and the
-// returned candidate slice is nil in that case -- a partial candidate list
-// is never useful to the caller, which discards the whole pass on this
-// error regardless of what had already been gathered.
+// directory-read error (those are skipped silently, per the paragraph
+// above), and the returned candidate slice is nil in that case -- a
+// partial candidate list is never useful to the caller, which discards
+// the whole pass on this error regardless of what had already been
+// gathered.
 func codexRolloutCandidates(ctx context.Context, sessionsDir string, spawnStarted, until time.Time) ([]codexRolloutCandidate, error) {
 	minModTime := spawnStarted.Add(-codexObserveModTimeSlack)
 

@@ -1273,10 +1273,11 @@ func appendInterruptedCodexSpawnTrail(t *testing.T, o *Org, orgID, seatID, promp
 // EventSpawned): a second Spawn call for the same org/seat still reaches
 // ValidateSpawnEnvelope, which runs BEFORE Spawn's own stale-in-flight
 // compensation branch -- so an invalid retry gets rejected via reject()
-// while these two events survive untouched on the manifest, exactly the
-// AR-3 setup (docs/reports/cross-review-triage-codex-effective-model-receipt.md):
-// codexSpawnCorrelation still finds this ORIGINAL spawn_started, while the
-// roster's latest state becomes the REJECTED retry's own Driver/Model.
+// while these two events survive untouched on the manifest. That lets a
+// test set up exactly the scenario codexSpawnCorrelation must handle
+// correctly (issue #173): it still finds this ORIGINAL spawn_started,
+// while the roster's latest state becomes the REJECTED retry's own
+// Driver/Model.
 // base carries whichever Role/Driver/Model the caller needs (AC-1 uses
 // codex/codex; AC-2's reverse case uses a claude-launched seat).
 func appendInterruptedAgentStartedTrail(t *testing.T, o *Org, base ManifestEvent, promptPath string, spawnStartedAt time.Time) {
@@ -1611,8 +1612,8 @@ func TestOrgStop_Codex_DryRunRespawnDoesNotDisplaceRealSpawnCorrelation(t *testi
 	assertDetailsContains(t, last.Details, "model_observed=true")
 }
 
-// --- AR-3: Stop compares against the spawn that actually launched the
-// seat, never the roster (docs/reports/cross-review-triage-codex-effective-model-receipt.md) ---
+// --- issue #173: Stop compares against the spawn that actually launched
+// the seat, never the roster ---
 
 // TestOrgStop_Codex_RecoversCommandedModelAfterInterruptedRetryRejected is
 // AC-1: a codex spawn interrupted right after agent_started (no `spawned`
@@ -1649,9 +1650,9 @@ func TestOrgStop_Codex_RecoversCommandedModelAfterInterruptedRetryRejected(t *te
 		t.Fatalf("expected the retry to be rejected (out-of-pool model), got %+v", retryResult)
 	}
 
-	// Test setup invariant: the roster now reflects the REJECTED retry's
-	// own model, not the original spawn's -- exactly the stale data Stop
-	// must not compare against.
+	// Test setup invariant: after the rejected retry, the roster reflects
+	// that retry's own model, not the original spawn's -- exactly the
+	// stale data Stop must not compare against.
 	seat, ok, err := o.findSeat(orgID, seatID)
 	if err != nil || !ok {
 		t.Fatalf("findSeat: ok=%v err=%v", ok, err)
@@ -1878,11 +1879,12 @@ func TestHasObservedCodexReceiptAfter_OnlyThisSpawnsObservedReceiptCounts(t *tes
 // therefore also return that later attempt's own promptPath, never the
 // first attempt's -- both asserted directly here since this is the smallest
 // setup that reaches the exact behavior (no herdr/agmsg round trip needed).
-// AR-3's own fields (Model/Driver/Role) are asserted the same way: the
-// second spawn_started's own values win, and a trailing `rejected` event
-// for a THIRD, different model/driver -- the roster's own latest state,
-// were codexSpawnCorrelation ever to read it -- must have no effect at
-// all, since this function only ever reads spawn_started/spawn_step.
+// The struct's other fields (Model/Driver/Role) are asserted the same
+// way: the second spawn_started's own values win, and a trailing
+// `rejected` event for a THIRD, different model/driver -- the roster's
+// own latest state, were codexSpawnCorrelation ever to read it -- must
+// have no effect at all, since this function only ever reads
+// spawn_started/spawn_step.
 func TestCodexSpawnCorrelation_TwoRealSpawns_LatestWins(t *testing.T) {
 	events := []ManifestEvent{
 		{TS: "2026-09-18T07:00:00Z", OrgID: "org-a", SeatID: "seat-1", Event: EventSpawnStarted, Model: "gpt-5-codex", Driver: "codex", Role: "implementer"},
@@ -1894,10 +1896,10 @@ func TestCodexSpawnCorrelation_TwoRealSpawns_LatestWins(t *testing.T) {
 		// must not displace the second (real) spawn_started either -- the
 		// dry-run filter in both of codexSpawnCorrelation's loops.
 		{TS: "2026-09-18T08:30:00Z", OrgID: "org-a", SeatID: "seat-1", Event: EventSpawnStarted, Model: "gpt-9-dryrun", Driver: "claude", DryRun: true},
-		// A trailing rejected retry (a different model/driver, exactly
-		// AR-3's own shape) is a state event that would become the
-		// roster's own latest SeatStatus, but codexSpawnCorrelation never
-		// reads EventRejected at all -- it must have zero effect here.
+		// A trailing rejected retry (a different model/driver) is a state
+		// event that would become the roster's own latest SeatStatus, but
+		// codexSpawnCorrelation never reads EventRejected at all -- it
+		// must have zero effect here.
 		{TS: "2026-09-18T09:00:00Z", OrgID: "org-a", SeatID: "seat-1", Event: EventRejected, Model: "gpt-9-nonexistent", Driver: "claude", Role: "worker"},
 	}
 
@@ -2374,8 +2376,7 @@ func TestOrgStop_Codex_ReceiptsAppendFailureLeavesStopSuccessful(t *testing.T) {
 }
 
 // TestOrgStop_Codex_ObservationCutShort_NothingAppendedStopStillSucceeds is
-// AC-6 (AR-4, docs/reports/cross-review-triage-codex-effective-model-receipt.md):
-// Stop's own single observation is now bounded by the same
+// AC-6: Stop's own single observation is bounded by the same
 // o.codexModelObserveTimeout() budget Spawn's poll uses. A genuinely
 // qualifying fixture exists on disk, but the budget is exhausted (pinned
 // to a single nanosecond, so obsCtx is already done by the observer's own

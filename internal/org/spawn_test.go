@@ -2339,8 +2339,7 @@ func TestObserveCodexSpawnReceipt_CtxDone_DistinctReason(t *testing.T) {
 }
 
 // TestOrgSpawn_Codex_ObservationBudgetExhaustedMidPass_UnknownNotFoundReason
-// is AC-5's first clause, driven through the full Spawn saga (AR-4,
-// docs/reports/cross-review-triage-codex-effective-model-receipt.md): a
+// is AC-5's first clause, driven through the full Spawn saga: a
 // genuinely qualifying fixture exists on disk, but the observation's own
 // budget (o.codexModelObserveTimeout(), not Spawn's --timeout-ms) is
 // exhausted before any pass can complete -- o.CodexModelObserveTimeout set

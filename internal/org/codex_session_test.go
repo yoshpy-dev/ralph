@@ -97,9 +97,8 @@ func assistantMessageLine(t *testing.T, ts, text string) string {
 
 // --- countingCtx: deterministic, call-count-based fake context.Context ---
 //
-// AR-4's ctx-threading fix (docs/reports/cross-review-triage-codex-effective-model-receipt.md)
-// checks ctx.Err() at specific, documented points inside
-// ObserveCodexEffectiveModel's own pass (candidate collection, before
+// ObserveCodexEffectiveModel checks ctx.Err() at specific, documented
+// points inside its own pass (candidate collection, before
 // opening each candidate, once per line while reading one). Proving those
 // checks land exactly where documented -- not one call early, not one call
 // late -- needs a ctx whose "done" transition is pinned to an exact call
@@ -242,9 +241,20 @@ func TestObserveCodexEffectiveModel_CtxDoneBeforeSecondCandidate_SecondFileNever
 }
 
 // TestObserveCodexEffectiveModel_CtxDoneDuringCandidateCollection_NotFound
-// is AC-4b's first clause: ctx becomes done partway through gathering
-// candidates (many directory entries), not while reading any file -- the
-// walk itself must stop, returning not-found and ctx's own error.
+// is AC-4b's first clause: SOME ctx.Err() check inside candidate
+// collection -- not a check made while opening or reading any file's
+// content -- is enough to stop the whole pass early, returning not-found
+// and ctx's own error. It does not by itself prove WHICH checkpoint
+// (per-directory or per-entry) is the one doing the work: with n=3, the
+// cut lands on the second per-entry check inside the "day" directory
+// (day-1's own per-directory check succeeds since that directory doesn't
+// exist and is skipped; day's own per-directory check succeeds; the first
+// entry's per-entry check succeeds; the second entry's fails) -- day+1 is
+// never reached at all, since the walk is ascending (day-1, day, day+1)
+// and the cutoff happens before it. Placement itself is pinned by
+// TestCodexRolloutCandidates_PerDateDirectoryCheckIsPinned_AlreadyDoneCtx
+// and TestCodexRolloutCandidates_PerEntryCheckIsPinned_CtxDoneAtLastDirectory
+// below, each of which fails if its own specific check is removed.
 func TestObserveCodexEffectiveModel_CtxDoneDuringCandidateCollection_NotFound(t *testing.T) {
 	dir := t.TempDir()
 	sessionsDir := filepath.Join(dir, "sessions")
@@ -265,10 +275,6 @@ func TestObserveCodexEffectiveModel_CtxDoneDuringCandidateCollection_NotFound(t 
 		}
 	}
 
-	// n=3 lands inside the 20-entry loop for the date directory that
-	// actually exists (day-1 and day+1 each cost one failed-ReadDir check
-	// first) -- proving the cut lands mid-collection, not merely at the
-	// very start or end.
 	ctx := newCountingCtx(3)
 	obs, err := ObserveCodexEffectiveModel(ctx, sessionsDir, promptPath, spawnStarted, spawnStarted)
 	if !errors.Is(err, context.DeadlineExceeded) {
@@ -276,6 +282,100 @@ func TestObserveCodexEffectiveModel_CtxDoneDuringCandidateCollection_NotFound(t 
 	}
 	if obs.Status != CodexObservationNotFound {
 		t.Fatalf("got %+v, want not-found (cut short mid candidate-collection)", obs)
+	}
+}
+
+// TestCodexRolloutCandidates_PerDateDirectoryCheckIsPinned_AlreadyDoneCtx
+// is M2's first placement-pinning test: with an already-done ctx and a
+// sessions directory whose date directories don't even exist (nothing to
+// Lstat, no entries loop ever reached), codexRolloutCandidates must still
+// report ctx's own error. Without the per-directory ctx.Err() check, this
+// call has nothing else to trip on -- every os.ReadDir fails silently and
+// is skipped (a missing date directory is not an error, per this
+// function's own doc comment) -- so it would walk straight through the
+// whole span and return (nil, nil), never reporting that it was actually
+// cut short. Deleting the per-directory check reproduces exactly that
+// (verified: temporarily removed the check, this test failed with
+// err=<nil>, restored it, green again).
+func TestCodexRolloutCandidates_PerDateDirectoryCheckIsPinned_AlreadyDoneCtx(t *testing.T) {
+	dir := t.TempDir()
+	sessionsDir := filepath.Join(dir, "sessions") // never created: no date directory exists
+	spawnStarted := time.Date(2026, 9, 18, 7, 20, 0, 0, time.UTC)
+
+	ctx := newCountingCtx(0) // already done on the very first Err() call
+	candidates, err := codexRolloutCandidates(ctx, sessionsDir, spawnStarted, spawnStarted)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected ctx's own error, got %v", err)
+	}
+	if candidates != nil {
+		t.Fatalf("expected no candidates on a cut-short walk, got %+v", candidates)
+	}
+}
+
+// TestCodexRolloutCandidates_PerEntryCheckIsPinned_CtxDoneAtLastDirectory
+// is M2's second placement-pinning test: entries exist ONLY in the LAST
+// date directory the walk reaches (codexSessionDateDirs' own ascending
+// order: spawnStarted's date minus one day, ..., until's date plus one
+// day) -- every EARLIER directory doesn't exist, so its own
+// per-directory check is the only ctx.Err() call it costs (os.ReadDir
+// fails and is skipped, per-entry never runs for a directory with no
+// entries loop reached). N is derived from codexSessionDateDirs itself,
+// not hard-coded, so this test survives a change to how many directories
+// the window spans: with N = len(dirs) calls already spent (one per
+// directory), the very next call is the FIRST per-entry check, inside the
+// last directory's own entries loop. Without that check,
+// codexRolloutCandidates would finish listing the last directory and
+// return its entries with err=nil (verified: temporarily removed the
+// check, this test failed with err=<nil> and a non-nil candidates slice,
+// restored it, green again).
+func TestCodexRolloutCandidates_PerEntryCheckIsPinned_CtxDoneAtLastDirectory(t *testing.T) {
+	dir := t.TempDir()
+	sessionsDir := filepath.Join(dir, "sessions")
+	spawnStarted := time.Date(2026, 9, 18, 7, 20, 0, 0, time.UTC)
+	until := spawnStarted
+
+	dirs := codexSessionDateDirs(spawnStarted, until)
+	lastDir := filepath.Join(sessionsDir, dirs[len(dirs)-1])
+	if err := os.MkdirAll(lastDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	for i := 0; i < 5; i++ {
+		name := fmt.Sprintf("rollout-filler-%02d.jsonl", i)
+		if err := os.WriteFile(filepath.Join(lastDir, name), []byte("{}\n"), 0o644); err != nil {
+			t.Fatalf("write filler %d: %v", i, err)
+		}
+	}
+
+	ctx := newCountingCtx(len(dirs))
+	candidates, err := codexRolloutCandidates(ctx, sessionsDir, spawnStarted, until)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected ctx's own error, got %v", err)
+	}
+	if candidates != nil {
+		t.Fatalf("expected no candidates on a cut-short walk, got %+v", candidates)
+	}
+}
+
+// TestScanRolloutRecord_BeforeOpenCheckIsPinned_AlreadyDoneCtx is M2's
+// third placement-pinning test: an already-done ctx plus a path that does
+// NOT exist. With the before-open check, scanRolloutRecord reports ctx's
+// own error. Without it, os.Open's own ErrNotExist is what this function
+// reaches next, mapped (deliberately, for a real missing-file race) to
+// matched=false, err=nil -- observably identical to "nothing found", so a
+// removed check would silently disappear here rather than fail loudly
+// (verified: temporarily removed the check, this test failed with
+// err=<nil>, restored it, green again).
+func TestScanRolloutRecord_BeforeOpenCheckIsPinned_AlreadyDoneCtx(t *testing.T) {
+	dir := t.TempDir()
+	nonexistentPath := filepath.Join(dir, "does-not-exist.jsonl")
+
+	ctx := newCountingCtx(0) // already done on the very first Err() call
+	matched, model, err := scanRolloutRecord(ctx, nonexistentPath, "/prompts/x.md", time.Now())
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected ctx's own error, got %v", err)
+	}
+	if matched || model != "" {
+		t.Fatalf("expected matched=false, model=\"\", got matched=%v model=%q", matched, model)
 	}
 }
 
