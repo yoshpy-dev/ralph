@@ -49,13 +49,13 @@ codex 座席の実効モデルの観測(#165)に残った 2 つの不具合を�
 
 ## Acceptance criteria
 
-- [ ] AC-1: spawn が `agent_started` の後で中断され、同じ org・seat への別モデルでの再試行が拒否された後の stop で、receipt の `commanded_model` は実際に起動した spawn の値になり、記録のモデルがそれと一致すれば `honored=true`、警告なし。修正前のコードではこのテストが落ちる(誤った `honored=false`)
-- [ ] AC-2: roster の driver が拒否された要求のもの(claude)でも、起動した spawn が codex なら stop は観測する。逆(起動した spawn が claude、拒否された要求が codex)では観測しない
-- [ ] AC-3: 取り消し済みの ctx を渡した観測は、一致する記録があっても not-found と ctx のエラーを返す(走査していないことの確認)
-- [ ] AC-4: N 件目の候補の前で ctx が終わる場合、それ以降のファイルは開かれず、それまでに一致が 1 件あっても found を返さない
-- [ ] AC-4b: 候補の収集中(エントリの途中)に ctx が終わる場合、走査は打ち切られ not-found と ctx のエラーを返す。唯一の候補を読んでいる途中(行の途中)で ctx が終わる場合も、その記録が一致していても found を返さない。走査を最後まで終えた後に ctx が終わっていた場合は、結果をそのまま返す
-- [ ] AC-5: spawn の待ちは、走査の途中で観測の上限に達したら「見つからない」の `unknown`、親の ctx が終わったら「spawn の timeout で打ち切り」の `unknown` を書く。既存の理由の区別(読めない、特定できない、役割指示ファイルなし)は変わらない
-- [ ] AC-6: stop の観測が打ち切られた場合、receipt は追記されず `model_observed=none`、stop は成功する
+- [x] AC-1: spawn が `agent_started` の後で中断され、同じ org・seat への別モデルでの再試行が拒否された後の stop で、receipt の `commanded_model` は実際に起動した spawn の値になり、記録のモデルがそれと一致すれば `honored=true`、警告なし。修正前のコードではこのテストが落ちる(誤った `honored=false`)
+- [x] AC-2: roster の driver が拒否された要求のもの(claude)でも、起動した spawn が codex なら stop は観測する。逆(起動した spawn が claude、拒否された要求が codex)では観測しない
+- [x] AC-3: 取り消し済みの ctx を渡した観測は、一致する記録があっても not-found と ctx のエラーを返す(走査していないことの確認)
+- [x] AC-4: N 件目の候補の前で ctx が終わる場合、それ以降のファイルは開かれず、それまでに一致が 1 件あっても found を返さない
+- [x] AC-4b: 候補の収集中(エントリの途中)に ctx が終わる場合、走査は打ち切られ not-found と ctx のエラーを返す。唯一の候補を読んでいる途中(行の途中)で ctx が終わる場合も、その記録が一致していても found を返さない。走査を最後まで終えた後に ctx が終わっていた場合は、結果をそのまま返す
+- [x] AC-5: spawn の待ちは、走査の途中で観測の上限に達したら「見つからない」の `unknown`、親の ctx が終わったら「spawn の timeout で打ち切り」の `unknown` を書く。既存の理由の区別(読めない、特定できない、役割指示ファイルなし)は変わらない
+- [x] AC-6: stop の観測が打ち切られた場合、receipt は追記されず `model_observed=none`、stop は成功する
 - [ ] AC-7: 既存のテスト(#165 の観測・配線・CLI・doctor)が変更なしの意図のまま通る。`./scripts/run-verify.sh` と `./scripts/run-test.sh` が green。PR 本文に `Closes #173`
 
 ## Implementation outline
