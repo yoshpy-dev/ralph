@@ -171,3 +171,171 @@ drops it outright. `git diff main...HEAD -- internal/org internal/cli | grep
 ## Insight event
 
 Appended via `./scripts/insights-append.sh --slug codex-effective-model-receipt --flow standard --phase verify --verdict pass --source skill --cycle 1`.
+
+## Cycle 2 (2026-09-20)
+
+- Verifier: `verifier` subagent (Claude Code), standard flow, pipeline cycle 2 of cap 2 (the final cycle).
+- Scope: spec compliance (AC-1..AC-11) + static analysis + documentation drift for
+  `git diff main...HEAD` on `feat/codex-effective-model-receipt`, re-derived against
+  HEAD `a4f6db2` (working tree clean at start and end). The cycle-1 section above
+  describes HEAD `ccd3d2f` and names `hasObservedCodexReceiptSince`, which no
+  longer exists at HEAD (renamed to `hasObservedCodexReceiptAfter` — see AC-5
+  below) — every row in this section is re-derived from scratch against `a4f6db2`,
+  per self-review cycle-2 finding C2-6, not carried forward. No tests run — that
+  is `/test`'s job.
+- What changed since the cycle-1 verify commit (`3031afc`): two test-only commits
+  (`771e446`, `a7180ca`); a sync-docs commit (`27b6759`, one skill sentence + one
+  `docs/tech-debt/README.md` row); cross-review cycle 1
+  (`docs/reports/cross-review-triage-codex-effective-model-receipt.md`, both
+  findings ACTION_REQUIRED), fixed in `d24a030` (AR-1: strip a trailing
+  ` agent_start_retries=<digits>` suffix off the recovered prompt path; AR-2:
+  count only receipts strictly newer than spawn start); self-review cycle 2
+  (same report file, "Cycle 2" section), fixed in `53f6b16` (code) and `2af0bce`
+  (docs) — C2-1 through C2-5, all in-cycle.
+
+### Verdict
+
+**PASS.** No AC is not-met. AC-11's test-execution half and `Closes #165` half
+remain out of scope here. All requested static checks are green. No
+documentation drift found. Two AC wordings are narrower than what the code now
+does (both are the team lead's own flagged candidates, confirmed by reading the
+diff) — noted below as informational, not as AC failures, since the code's
+behavior is a superset/refinement of what the AC promises, not a violation of it.
+
+### AC table
+
+| AC | Status | Evidence |
+|----|--------|----------|
+| AC-1 | Met | Unchanged this cycle at the level AC-1 describes. `scanRolloutRecord`/`codexRolloutCandidates` (`internal/org/codex_session.go`) still degrade to `matched=false` on no-pointer-match, a pre-cutoff `session_meta`, a non-regular file, a malformed line, or an oversized line — none of the cycle-2 diff hunks touch this decision logic, only the *set of directories* fed into it (see AC wording note below). The ModTime pre-filter AC-1 refers to ("spawn 開始より前に更新された記録") is explicitly still anchored to `spawnStarted` only, not `until` (`codexRolloutCandidates`'s updated doc comment: "The ModTime pre-filter is anchored to spawnStarted only, not until"). No new panic path introduced — `codexSessionDateDirs`'s loop is a plain bounded `for` over `time.Time` values, no new decode path. |
+| AC-2 | Met | Unchanged: `codexFoundReceipt` untouched this cycle (`git diff ccd3d2f..HEAD` touches no line of it). |
+| AC-2b | Met | Unchanged: the `session_meta` cutoff check (`scanRolloutRecord`, `codex_session.go:356-360` region) still uses `spawnStarted.Truncate(time.Second)` regardless of how wide the date-directory window is — widening the window (`until`) cannot make an old, pre-spawn session qualify, since qualification is decided by the record's own `session_meta` timestamp, not by which directory it was found in. `TestObserveCodexEffectiveModel_OldSessionUpdatedLaterNotPicked`/`_TwoQualifyingRecordsAmbiguous` untouched; `TestCodexSpawnCorrelation_TwoRealSpawns_LatestWins` (new, `internal/org/verbs_test.go:1635`) exercises the "latest spawn_started wins" correlation rule at the Stop-lookup layer, a sibling guarantee. |
+| AC-2c | Met | Unchanged: `observeCodexSpawnReceipt`'s empty-`promptPath` short-circuit untouched this cycle. |
+| AC-3 | Met | Unchanged: `observeCodexSpawnReceipt`'s poll loop and its `until = spawnStartedAt` argument (`spawn.go:1093`, new this cycle) still bound Spawn's own window to the original three directories — the comment explains why: "the poll runs moments after the spawn … there is nothing later to reach". `TestOrgSpawn_Codex_ModelObservation_NotFoundAfterTimeout` untouched. |
+| AC-4 | Met | Unchanged: the claude/dry-run branches in `Spawn`/`dryRunSpawn` are untouched by `git diff ccd3d2f..HEAD -- internal/org/spawn.go` outside the `ModelReceipt`-on-append-success change (C2-3, orthogonal to AC-4 — it *tightens* the "no receipt persisted" case, it does not change the claude/dry-run text). `TestOrgSpawn_Claude_ModelReceiptTextUnchanged` untouched. |
+| AC-5 | Met, with an AC-wording note (flagged as requested) | Code: `observeStopModelReceipt` (`verbs.go`) still gates on `seat.Driver=="codex"`, not dry-run, a resolvable `codexSpawnCorrelation`, and `!hasObservedCodexReceiptAfter(...)` (renamed from `hasObservedCodexReceiptSince`, cross-review AR-2) — the comparison is now `r.TS <= spawnStartedTS` skips (strictly-after required), not `r.TS < spawnStartedTS` skips (at-or-after required) as at cycle 1. This means a receipt whose TS is the exact same second as `spawnStartedTS` no longer counts as "already observed" and Stop will attempt (one more, harmless per the design) observation in that narrow window. **AC wording**: AC-5's Japanese text says "spawn 開始**以降**に…observed receipt がないときだけ観測し" (以降 = "at or after", inclusive) — the code now implements "strictly after" (exclusive of the exact same second). The plan's own Scope row 4 already documents this exact deviation ("cross-review cycle 1 による改訂: 秒精度で同じ時刻の receipt は数えない"), and the direction is safety-conservative (worst case is one harmless duplicate receipt at stop, not a missed mismatch, per self-review's own point 2 and `hasObservedCodexReceiptAfter`'s doc comment) — not a regression against the AC's *intent*, only against its literal inclusive/exclusive wording. Recommend updating AC-5's prose to say "厳密に後" (strictly after) the next time the plan is touched; not a blocker. All ten edge-case states remain covered: `TestOrgStop_Codex_AppendsWhenSpawnReceiptWasUnknown/_HonoredFalse_ObservedAtStop/_DoesNotAppendWhenAlreadyObserved/_AppendsWhenNoReceiptAtAllForThisSpawn/_AppendsWhenOnlyRejectionReceiptExistsSince/_DryRunRespawnDoesNotDisplaceRealSpawnCorrelation/_NothingAppended_NotFound/_DryRun_NoObservationAttempted/_NoPromptFileSeat_NothingAppended/_ReceiptsAppendFailureLeavesStopSuccessful` (`verbs_test.go:1273-2047`) plus three new ones: `TestOrgStop_Codex_RecoversPromptPathAfterAgentStartRetry` (AR-1), `TestOrgStop_Codex_SameSecondRespawn_PreviousReceiptDoesNotSuppressObservation` (AR-2), `TestOrgStop_Codex_ObservesSessionThatStartedDaysAfterSpawn` (C2-1's `until` widening). |
+| AC-6 | Met | Unchanged: `git diff ccd3d2f..HEAD -- internal/cli/org.go` is empty — `printCodexModelMismatchWarning`/`printSpawnResult` untouched this cycle. |
+| AC-7 | Met | Unchanged: `git diff ccd3d2f..HEAD -- internal/cli/doctor_codex_models.go` is empty — `codexRetirementClause`/`checkCodexModelSlugs` untouched this cycle. |
+| AC-8 | Met | Unchanged: `testOrg(t)` (`spawn_test.go`) and `TestMain` (`main_test.go`) still pin `CodexSessionsDir`/observe-timeout/observe-interval to nonexistent tmp paths and ms-scale durations; neither seam was touched by the `until` parameter addition (`until` is always caller-supplied — `spawnStartedAt` at Spawn, `o.nowTime()` at Stop — never independently resolved from the environment). `TMPDIR=/tmp` claim: code-read only, as in cycle 1, not an actual test run (`/test`'s scope). |
+| AC-9 | Met | Evidence file's new appended lines (`docs/evidence/codex-effective-model-receipt-2026-09-20.md`) still contain only model/status/elapsed-time data plus a stated inference about *when* codex writes the record (see Documentation drift below) — no conversation content, no full paths beyond the already-documented shape. Re-read in full at HEAD; no regression from cycle 1's privacy property. |
+| AC-10 | Met | See Documentation drift below — all updated surfaces match the code at HEAD; the three sync gates pass (see Static analysis). |
+| AC-11 | Not applicable to `/verify` | Unchanged: test execution is `/test`'s scope, `Closes #165` is `/pr`'s scope. |
+
+**AC-1 wording note** (the second candidate the hand-off named): AC-1's own clause
+"spawn 開始より前に更新された記録…があっても…panic もしない" is about the ModTime
+pre-filter, which cycle 2 did **not** widen (confirmed above — still anchored to
+`spawnStarted` only). What cycle 2 widened is a different axis: which
+*date directories* get walked in the first place (`codexSessionDateDirs`'s
+`until` parameter, capped at `codexObserveMaxDateDirs = 32`). AC-1's text does
+not claim a fixed three-directory window, so this widening does not contradict
+AC-1 — it is silent on the window's reach entirely. No wording change needed;
+noted only because the hand-off asked to check for it.
+
+### Static analysis results
+
+| Command | Result |
+|---|---|
+| `HARNESS_VERIFY_MODE=static ./scripts/run-static-verify.sh` | PASS (exit 0). Same shape as cycle 1: `check-sync.sh` (DRIFTED: 0), `check-pipeline-sync.sh` (ok), `check-skill-sync.sh` (13 skills in lock-step), `check-template-purity.sh` (PASS), golang pack verifier (`gofmt: ok`, `0 issues.`). |
+| `gofmt -l internal/org internal/cli` | Clean (no output). |
+| `go vet ./internal/org/... ./internal/cli/...` | Clean (no output). |
+| `./scripts/check-skill-sync.sh` | PASS, run standalone. |
+| `./scripts/check-sync.sh` | PASS, run standalone (`DRIFTED: 0`, `KNOWN_DIFF: 5` — same pre-existing, already-approved set as cycle 1). |
+| `./scripts/check-template-purity.sh` | PASS, run standalone. |
+
+Full command transcripts:
+`docs/evidence/verify-2026-09-20-codex-effective-model-receipt-cycle2.log`
+(gitignored per `docs/evidence/*.log`, not committed — same convention as
+cycle 1's log).
+
+### Documentation drift
+
+None found. Every surface the hand-off named was re-read at HEAD and
+cross-checked against the code:
+
+- `.claude/rules/ralph/model-routing.md` + template copy: both gained the
+  sentence "Stop also covers a session that started days after the spawn (a
+  startup dialog answered late), up to about a month." — matches
+  `codexObserveMaxDateDirs = 32` and the `until` widening exactly (32 days ≈
+  "about a month"). Neither copy overclaims "always finds" — "covers … up to
+  about a month" correctly states the bound (the cap, the ModTime pre-filter,
+  and the 200-file cap all still apply underneath it).
+- `docs/recipes/codex-seat-permissions.md` + template copy: gained "(codex
+  appears to create the record only once the dialog is answered; stop searches
+  from the spawn date to the stop date, up to about a month)" — the "appears
+  to" hedge is the correct strength: the evidence file's own "確認していない
+  こと" section states this is an inference from one real record's timing
+  (`session_meta`→`turn_context` gap unchanged at ~2.5s whether or not the
+  dialog appeared), not a confirmed fact. Does not present the inference as
+  confirmed.
+- `.claude/skills/org/SKILL.md` + 3 mirrors: all four byte-identical (diffed
+  pairwise). Two hunks: (1) the same "spawn の数日後に始まった session も対象
+  …探すのは spawn 日から約 1 か月分まで" sentence, matching the rule doc's
+  English equivalent; (2) the doctor-info sentence changed from unconditionally
+  naming both 移行先 and 退役日 to "読み取れた場合は退役日を示す" (shows the
+  retirement date only if it could be read) — matches
+  `parseCodexModelUpgrade`'s `hasDate=false` branch (`codexRetirementClause`,
+  `internal/cli/doctor_codex_models.go`, unchanged this cycle). The base
+  sentence was only added post-cycle-1-verify by the sync-docs commit
+  (`27b6759`, confirmed via `git log -S`) without this hedge; self-review
+  cycle 2's C2-6 minor observation caught the gap and `2af0bce` added it —
+  so this was never reviewed unhedged in a prior verify cycle, just fixed
+  before its first review.
+- `docs/evidence/codex-effective-model-receipt-2026-09-20.md`: the new line
+  under "26b03ce では…" describes the `53f6b16` re-run with `until` two days
+  later, same five results — consistent with the code, which still reads no
+  wall clock (both endpoints caller-supplied). The rewritten "確認していない
+  こと" bullet states the dialog-timing read as "と読める(推定)" (reads as …,
+  an inference) rather than a confirmed fact — does not overclaim. The quoted
+  `ralph doctor` Detail line in the "表示" section is unchanged from cycle 1
+  and `codexRetirementSentence`'s text is unchanged this cycle
+  (`git diff ccd3d2f..HEAD -- internal/cli/doctor_codex_models.go` is empty),
+  so the quote is still accurate.
+- `docs/evidence/codex-seat-permissions-2026-09-18.md` P5: unchanged this cycle
+  (`git diff ccd3d2f..HEAD` for this file is empty) — no new claim to check.
+- `docs/specs/2026-08-01-org-runtime.md` FR-9: unchanged this cycle — the
+  cycle-1 clause is still accurate (nothing cycle 2 changed contradicts it).
+- `docs/tech-debt/README.md`: one new row (added by `27b6759`, after the
+  cycle-1 verify commit, so not previously reviewed) — states the observer
+  depends on codex's undocumented internal session-record shape, measured only
+  on codex-cli 0.154.0 against five real records, and that a format change
+  degrades silently to `honored=unknown` with no operator-visible signal. This
+  matches the code (every failure mode in `codex_session.go` does degrade
+  silently, by design) and the plan's own Risks table, which already named
+  this risk and accepted "degrade to unknown" as the mitigation. Not
+  duplicated (`grep -c` confirms exactly one row).
+
+### Non-goals held (cycle-2 delta)
+
+- `git diff ccd3d2f..HEAD -- internal/org/receipts.go internal/org/manifest.go` empty.
+- `git diff ccd3d2f..HEAD -- ralph.toml templates/base/ralph.toml internal/config/` empty.
+- `git diff ccd3d2f..HEAD -- internal/insights/` empty.
+- `git diff ccd3d2f..HEAD -- internal/cli/org.go internal/cli/doctor_codex_models.go` empty — no pane reading was ever introduced, and none of this cycle's fixes touch the CLI warning or doctor logic.
+
+### Privacy property (static reading only, cycle-2 delta)
+
+Re-confirmed by reading the cycle-2 diff in full: `git diff ccd3d2f..HEAD --
+internal/org internal/cli | grep 't\.Logf\|log\.Print\|fmt\.Print'` on added
+lines returns nothing. The `until` parameter carries only a `time.Time`
+instant (never record content) into `ObserveCodexEffectiveModel`; the
+`promptPathFromAgentStartedDetails`/`isAllDigits` addition (AR-1) parses a
+manifest Details string ralph itself wrote (`agent_started prompt_file=<path>[
+agent_start_retries=<N>]`), never a codex session record — outside this
+function's privacy boundary entirely. No new error return was added anywhere
+in the cycle-2 diff; the single content-free error site from cycle 1
+(`codex_session.go:315`'s `fmt.Errorf(...)`) is untouched.
+
+### What remains unverified
+
+- Same as cycle 1: `go test`/`go vet`-via-test-run, an actual `TMPDIR=/tmp go
+  test` execution, `Closes #165`, end-to-end behavior against a live codex
+  seat.
+- The dialog-timing inference in the evidence file (record created only after
+  the dialog is answered) is explicitly unconfirmed by the plan/evidence
+  themselves, not just by this verify pass — stated as such in both places, so
+  this is not a gap this cycle introduced.
+- AC-5's wording (以降 vs strictly-after) — flagged above as an informational
+  note for the plan's next edit, not re-verified as fixed since it is a
+  documentation-precision item, not a behavior to test.
+
+### Insight event
+
+Appended via `./scripts/insights-append.sh --slug codex-effective-model-receipt --flow standard --phase verify --verdict pass --source skill --cycle 2`.
