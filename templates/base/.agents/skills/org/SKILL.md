@@ -88,7 +88,9 @@ Lead(座席の編成・統括を行う識別子)がその機構をどう操作�
 claude はエイリアス、codex はスラッグ(codex にエイリアスは無い)。`ralph
 doctor` の「Org codex model slugs」Check が `~/.codex/models_cache.json`
 (既定。`$CODEX_HOME` で上書き可)に無いスラッグを warn する(プロセス起動
-なし)。`--probe-models` は従来通り実起動プローブ。
+なし)。cache にあっても退役予定(`upgrade`)を持つスラッグは info で移行先
+と退役日を示す(無いスラッグの warn が優先する)。`--probe-models` は従来
+通り実起動プローブ。
 
 codex スラッグは codex 側のモデル更新で消えることがある。Check はローカルの
 cache を読むだけで更新はしない(cache の書き込み時刻を UTC で Detail に出し、
