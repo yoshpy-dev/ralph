@@ -784,6 +784,115 @@ func TestCodexSessionDateDirs_CapKeepsEarliestDirectories(t *testing.T) {
 	}
 }
 
+// TestCodexSessionDateDirs_UntilZeroValue_TreatedAsSpawnStarted is a /test
+// cycle-2 addition pinning ObserveCodexEffectiveModel's doc comment
+// literally ("until earlier than spawnStarted, INCLUDING THE ZERO VALUE, is
+// treated as spawnStarted") against the actual zero time.Time{} value, not
+// just an arbitrary earlier instant (TestCodexSessionDateDirs_UntilBeforeSpawnStarted
+// above already covers "earlier", but never the literal zero value the doc
+// comment calls out by name).
+func TestCodexSessionDateDirs_UntilZeroValue_TreatedAsSpawnStarted(t *testing.T) {
+	spawnStarted := time.Date(2026, 9, 18, 7, 20, 0, 0, time.UTC)
+	got := codexSessionDateDirs(spawnStarted, time.Time{})
+	want := codexSessionDateDirs(spawnStarted, spawnStarted)
+	if !slices.Equal(got, want) {
+		t.Fatalf("codexSessionDateDirs(spawnStarted, zero-value until) = %v, want %v (same as until == spawnStarted)", got, want)
+	}
+}
+
+// TestCodexSessionDateDirs_UntilYearsLater_CapHoldsAndReturnsQuickly is a
+// /test cycle-2 addition: TestCodexSessionDateDirs_CapKeepsEarliestDirectories
+// already proves the cap's CONTENT is correct for a 60-day span, but never
+// exercises a span so wide it would otherwise mean tens of thousands of
+// loop iterations (a multi-year until, e.g. a stop called long after an
+// abandoned seat) -- proving both that the cap still holds at that scale
+// and that codexSessionDateDirs returns near-instantly rather than
+// building and discarding a huge slice first.
+func TestCodexSessionDateDirs_UntilYearsLater_CapHoldsAndReturnsQuickly(t *testing.T) {
+	spawnStarted := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	until := spawnStarted.AddDate(3, 0, 0) // 3 years later
+
+	start := time.Now()
+	got := codexSessionDateDirs(spawnStarted, until)
+	elapsed := time.Since(start)
+
+	if len(got) != codexObserveMaxDateDirs {
+		t.Fatalf("len(got) = %d, want %d (the cap must hold for a multi-year span too)", len(got), codexObserveMaxDateDirs)
+	}
+	if elapsed > 100*time.Millisecond {
+		t.Fatalf("codexSessionDateDirs took %s for a 3-year until span -- the cap should keep this near-instant, not proportional to the span", elapsed)
+	}
+}
+
+// TestObserveCodexEffectiveModel_WidenedWindowStillExcludesStaleRecord is a
+// /test cycle-2 addition probing the interaction the hand-off asked about
+// between C2-1 (the until widening) and AC-2b (the session_meta age
+// exclusion). Structurally, codexSessionDateDirs's startDay is fixed at
+// spawnStarted's own local date minus one day, independent of until (see
+// its own doc comment) -- so widening until can only add directories on
+// the FUTURE side of spawnStarted, never reach further into the past. A
+// record whose session_meta genuinely predates spawnStarted therefore
+// cannot become newly reachable through this widening under codex's own
+// "a record lives in the directory of the day it started" convention. This
+// test still proves the underlying safety property directly rather than by
+// argument alone: even a record deliberately misfiled into a
+// later-dated directory (a shape real codex never produces, but the only
+// way to make "reachable only via the wider window" and "stale" true at
+// the same time in a fixture) is excluded by its own session_meta
+// timestamp, not read as qualifying just because its directory is now in
+// reach -- matching codexRolloutCandidates' own doc comment ("This is a
+// pre-filter only -- it never decides which record belongs to which
+// seat").
+func TestObserveCodexEffectiveModel_WidenedWindowStillExcludesStaleRecord(t *testing.T) {
+	dir := t.TempDir()
+	sessionsDir := filepath.Join(dir, "sessions")
+	promptPath := filepath.Join(dir, "state", "prompts", "org1_seat1.md")
+	spawnStarted := time.Date(2026, 9, 18, 7, 20, 0, 0, time.UTC)
+
+	// staleStart predates spawnStarted (AC-2b's own disqualifying
+	// condition), but is deliberately filed under a directory 5 days AFTER
+	// spawnStarted's own day -- only reachable because until (below)
+	// widens the window that far forward.
+	staleStart := spawnStarted.Add(-1 * time.Hour)
+	staleDir := fixtureDateDir(sessionsDir, spawnStarted.AddDate(0, 0, 5))
+	staleLines := []string{
+		sessionMetaLine(t, rfc3339Milli(staleStart)),
+		userMessageLine(t, rfc3339Milli(staleStart.Add(400*time.Millisecond)), PromptFilePointer(promptPath)),
+		turnContextLine(t, rfc3339Milli(staleStart.Add(300*time.Millisecond)), "gpt-5.5-stale"),
+	}
+	staleFile := writeRolloutFile(t, staleDir, "rollout-misplaced-stale.jsonl", staleLines)
+	// The ModTime pre-filter is anchored to spawnStarted only (never to
+	// until or to the file's own directory) -- touch it forward so it
+	// survives that pre-filter and actually reaches scanRolloutRecord,
+	// where the session_meta check is what this test is proving.
+	touchedAt := spawnStarted.Add(1 * time.Minute)
+	if err := os.Chtimes(staleFile, touchedAt, touchedAt); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+
+	// validStart is the seat's own, real, in-window session, correctly
+	// filed under spawnStarted's own day.
+	validStart := spawnStarted.Add(1 * time.Second)
+	validLines := []string{
+		sessionMetaLine(t, rfc3339Milli(validStart)),
+		userMessageLine(t, rfc3339Milli(validStart.Add(400*time.Millisecond)), PromptFilePointer(promptPath)),
+		turnContextLine(t, rfc3339Milli(validStart.Add(300*time.Millisecond)), "gpt-5.6-sol"),
+	}
+	writeRolloutFile(t, fixtureDateDir(sessionsDir, validStart), "rollout-valid.jsonl", validLines)
+
+	// until reaches well past the misplaced stale record's own directory,
+	// simulating a Stop call running days after a slow-starting seat --
+	// exactly the scenario C2-1's widening exists for.
+	until := spawnStarted.AddDate(0, 0, 10)
+	obs, err := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStarted, until)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if obs.Status != CodexObservationFound || obs.Model != "gpt-5.6-sol" {
+		t.Fatalf("got %+v, want found/gpt-5.6-sol (the widened window reaching the misplaced stale record's directory must not change AC-2b's session_meta-based exclusion)", obs)
+	}
+}
+
 func TestObserveCodexEffectiveModel_SessionsDirMissing(t *testing.T) {
 	dir := t.TempDir()
 	sessionsDir := filepath.Join(dir, "does-not-exist")

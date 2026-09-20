@@ -1691,6 +1691,18 @@ func TestPromptPathFromAgentStartedDetails(t *testing.T) {
 			wantOK:   true,
 		},
 		{
+			// /test cycle-2 addition: isAllDigits/CutPrefix never parse the
+			// digits into a number (agentStartWithRetry's real retry count
+			// is bounded by maxAgentStartAttempts, far smaller than this),
+			// so an implausibly large digit string must still strip
+			// cleanly -- no int overflow or truncation risk, since nothing
+			// here ever converts it.
+			name:     "retries suffix with an implausibly large digit string",
+			details:  codexPromptFileDetailsPrefix + "/state/prompts/org-a_seat-1.md agent_start_retries=99999999999999999999999999999999",
+			wantPath: "/state/prompts/org-a_seat-1.md",
+			wantOK:   true,
+		},
+		{
 			name:     "path with spaces plus a retries suffix",
 			details:  codexPromptFileDetailsPrefix + "/state dir/with spaces/prompts/org-a_seat-1.md agent_start_retries=3",
 			wantPath: "/state dir/with spaces/prompts/org-a_seat-1.md",
@@ -1728,6 +1740,22 @@ func TestPromptPathFromAgentStartedDetails(t *testing.T) {
 			name:     "retries suffix is not the last field, so it is not stripped",
 			details:  codexPromptFileDetailsPrefix + "/state/prompts/org-a_seat-1.md agent_start_retries=2 some_later_field=x",
 			wantPath: "/state/prompts/org-a_seat-1.md agent_start_retries=2 some_later_field=x",
+			wantOK:   true,
+		},
+		{
+			// /test cycle-2 addition: unlike the two "suffix key in the
+			// middle" cases above, this path contains a SECOND real
+			// (space-prefixed) " agent_start_retries=<digits>" match, not
+			// just the bare key text -- the exact shape needed to tell
+			// "the LAST occurrence" apart from "the FIRST occurrence"
+			// (strings.LastIndex vs. strings.Index). A first-occurrence
+			// implementation would stop at the middle match, see
+			// "42/y.md agent_start_retries=7" as its "digits" (fails
+			// isAllDigits), and give up stripping anything at all --
+			// proven via red/green (see /test's report).
+			name:     "two real retries-suffix matches: only the last is stripped",
+			details:  codexPromptFileDetailsPrefix + "/state/x agent_start_retries=42/y.md agent_start_retries=7",
+			wantPath: "/state/x agent_start_retries=42/y.md",
 			wantOK:   true,
 		},
 	}
