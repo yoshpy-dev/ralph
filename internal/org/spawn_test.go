@@ -229,18 +229,35 @@ func (f *fakeAgmsg) Leave(_ context.Context, team, agentID string) error {
 // sleep in the whole suite, once per Send call. Tests that exercise timing
 // directly (the delay actually elapsing, ctx expiring mid-delay) override
 // this field on the returned *Org after construction.
+//
+// CodexSessionsDir is pinned to an empty "codex-sessions" subdirectory of
+// dir (created lazily -- nothing writes to it unless a test asks it to) so
+// no test in this package ever falls through to resolving CODEX_HOME/HOME
+// and reading a developer's real ~/.codex/sessions -- codexSessionsDir
+// treats a non-empty override literally, with no further
+// CodexSessionsDir(codexHome, home) join on top. A test that wants a
+// qualifying fixture writes into this same directory under its own
+// YYYY/MM/DD layout (codex_session_test.go's fixture helpers). The
+// observe timeout/interval are pinned to near-zero so a codex seat's
+// spawn-time poll never adds real wall-clock time to a test that doesn't
+// care about it -- tests that do (the poll actually retrying) override
+// both fields on the returned *Org after construction, the same pattern
+// SendEnterDelay already uses above.
 func testOrg(t *testing.T) (*Org, *fakeHerdr, *fakeAgmsg) {
 	t.Helper()
 	dir := t.TempDir()
 	h := &fakeHerdr{}
 	a := &fakeAgmsg{}
 	o := &Org{
-		Config:         testOrgConfig(),
-		Manifest:       NewManifestStoreAtPath(ManifestPathIn(dir)),
-		Receipts:       NewReceiptStoreAtPath(filepath.Join(dir, "receipts.jsonl")),
-		Herdr:          h,
-		Agmsg:          a,
-		SendEnterDelay: time.Millisecond,
+		Config:                    testOrgConfig(),
+		Manifest:                  NewManifestStoreAtPath(ManifestPathIn(dir)),
+		Receipts:                  NewReceiptStoreAtPath(filepath.Join(dir, "receipts.jsonl")),
+		Herdr:                     h,
+		Agmsg:                     a,
+		SendEnterDelay:            time.Millisecond,
+		CodexSessionsDir:          filepath.Join(dir, "codex-sessions"),
+		CodexModelObserveTimeout:  time.Millisecond,
+		CodexModelObserveInterval: time.Millisecond,
 	}
 	return o, h, a
 }
@@ -2077,5 +2094,312 @@ func TestOrgSpawn_Codex_GuardedRoleOverride_Spawns(t *testing.T) {
 	args := h.agentStartArgs[0]
 	if len(args) != 2 || args[0] != "--model" {
 		t.Fatalf("expected no permission flags for guarded mode, got %v", args)
+	}
+}
+
+// --- codex model observation (plan Scope row 3, AC-2/AC-2b/AC-2c/AC-3/AC-4) ---
+
+// codexGuardedOrg returns testOrg(t) with role guarded under codex's
+// fail-closed autonomous default (permissionArgsForDriver rejects a codex
+// seat under autonomous mode -- see
+// TestOrgSpawn_Codex_AutonomousDefault_RejectedFailClosed_WithReceipt
+// above), so every model-observation test below can reach
+// SpawnOutcomeSpawned without also exercising that unrelated gate.
+func codexGuardedOrg(t *testing.T, role string) (*Org, *fakeHerdr, *fakeAgmsg) {
+	t.Helper()
+	o, h, a := testOrg(t)
+	o.Config.Permissions = config.OrgPermissionsConfig{Roles: map[string]string{role: PermissionModeGuarded}}
+	return o, h, a
+}
+
+// mustCodexSpawnParams returns spawn params for a codex seat whose Role
+// ("implementer") renders a long embedded template (RenderRolePrompt,
+// prompts.go), guaranteeing needsPromptFile is true and a role-prompt file
+// gets written -- every model-observation test needs that file to exist so
+// there is a promptPath to correlate a fixture session record with. Model
+// is testOrgConfig()'s only codex [org].model_pool entry.
+func mustCodexSpawnParams(orgID, seatID string) SpawnParams {
+	p := mustSpawnParams(orgID, seatID)
+	p.Role = "implementer"
+	p.Driver = "codex"
+	p.Model = "gpt-5-codex"
+	return p
+}
+
+// writeQualifyingCodexFixture writes a minimal rollout-*.jsonl record under
+// sessionsDir's date directory for at that fully qualifies
+// ObserveCodexEffectiveModel for promptPath: a session_meta at at, a user
+// message containing promptPath, and a turn_context reporting model. Built
+// on codex_session_test.go's own line-builders/writeRolloutFile/
+// fixtureDateDir (same package) rather than duplicating them -- see this
+// file's mustCodexSpawnParams for the promptPath every test here needs.
+func writeQualifyingCodexFixture(t *testing.T, sessionsDir, promptPath string, at time.Time, model string) string {
+	t.Helper()
+	lines := []string{
+		sessionMetaLine(t, rfc3339Milli(at)),
+		userMessageLine(t, rfc3339Milli(at.Add(50*time.Millisecond)), "role prompt: "+promptPath),
+		turnContextLine(t, rfc3339Milli(at.Add(20*time.Millisecond)), model),
+	}
+	name := fmt.Sprintf("rollout-%d.jsonl", at.UnixNano())
+	return writeRolloutFile(t, fixtureDateDir(sessionsDir, at), name, lines)
+}
+
+// TestOrgSpawn_Codex_ModelObservation_Found covers AC-2's true/false split:
+// a session record that already exists (before Spawn is even called, so
+// the very first, no-wait poll finds it) reporting the commanded model
+// gets honored=true; reporting a different model gets honored=false with
+// both model names surfaced in Reason.
+func TestOrgSpawn_Codex_ModelObservation_Found(t *testing.T) {
+	cases := []struct {
+		name          string
+		reportedModel string
+		wantHonored   string
+	}{
+		{"matches commanded model", "gpt-5-codex", HonoredTrue},
+		{"differs from commanded model (retired/migrated)", "gpt-5.6-sol", HonoredFalse},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			o, _, _ := codexGuardedOrg(t, "implementer")
+			p := mustCodexSpawnParams("org-a", "seat-1")
+
+			promptPath, err := o.promptFilePath(p.OrgID, p.SeatID)
+			if err != nil {
+				t.Fatalf("promptFilePath: %v", err)
+			}
+			writeQualifyingCodexFixture(t, o.CodexSessionsDir, promptPath, time.Now().Add(time.Second), tc.reportedModel)
+
+			result := o.Spawn(p)
+			if result.Outcome != SpawnOutcomeSpawned {
+				t.Fatalf("expected spawned, got %+v", result)
+			}
+			if result.ModelReceipt.Honored != tc.wantHonored {
+				t.Fatalf("expected honored=%s, got %+v", tc.wantHonored, result.ModelReceipt)
+			}
+			if result.ModelReceipt.ReportedEffectiveModel != tc.reportedModel {
+				t.Fatalf("expected reported model %q, got %+v", tc.reportedModel, result.ModelReceipt)
+			}
+			if tc.wantHonored == HonoredFalse {
+				if !strings.Contains(result.ModelReceipt.Reason, tc.reportedModel) || !strings.Contains(result.ModelReceipt.Reason, "gpt-5-codex") {
+					t.Fatalf("expected Reason to name both the commanded and reported models, got %q", result.ModelReceipt.Reason)
+				}
+			}
+
+			// AC-4 (recorded alongside AC-2 here): the same receipt is
+			// persisted, not only returned.
+			rr, err := o.Receipts.Read()
+			if err != nil {
+				t.Fatalf("read receipts: %v", err)
+			}
+			if len(rr.Receipts) != 1 || rr.Receipts[0] != result.ModelReceipt {
+				t.Fatalf("expected the persisted receipt to match SpawnResult.ModelReceipt, got %+v vs %+v", rr.Receipts, result.ModelReceipt)
+			}
+		})
+	}
+}
+
+// TestOrgSpawn_Codex_ModelObservation_NotFoundAfterTimeout is AC-3: no
+// matching session record exists at all, so the poll runs out its (tiny,
+// testOrg-pinned) timeout and the spawn still succeeds, with an
+// honored=unknown receipt.
+func TestOrgSpawn_Codex_ModelObservation_NotFoundAfterTimeout(t *testing.T) {
+	o, _, _ := codexGuardedOrg(t, "implementer")
+	p := mustCodexSpawnParams("org-a", "seat-1")
+
+	result := o.Spawn(p)
+	if result.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("expected spawned, got %+v", result)
+	}
+	if result.ModelReceipt.Honored != HonoredUnknown || result.ModelReceipt.ReportedEffectiveModel != "" {
+		t.Fatalf("expected an unknown receipt with no reported model, got %+v", result.ModelReceipt)
+	}
+	if !strings.Contains(result.ModelReceipt.Reason, "no codex session record") {
+		t.Fatalf("expected the not-found reason text, got %q", result.ModelReceipt.Reason)
+	}
+}
+
+// TestOrgSpawn_Codex_ModelObservation_Ambiguous is AC-2b's sibling: two
+// records both qualify (same promptPath, both age-eligible), so the poll
+// ends at once with an unknown receipt naming neither model -- never a
+// guess.
+func TestOrgSpawn_Codex_ModelObservation_Ambiguous(t *testing.T) {
+	o, _, _ := codexGuardedOrg(t, "implementer")
+	p := mustCodexSpawnParams("org-a", "seat-1")
+
+	promptPath, err := o.promptFilePath(p.OrgID, p.SeatID)
+	if err != nil {
+		t.Fatalf("promptFilePath: %v", err)
+	}
+	writeQualifyingCodexFixture(t, o.CodexSessionsDir, promptPath, time.Now().Add(time.Second), "gpt-5-codex")
+	writeQualifyingCodexFixture(t, o.CodexSessionsDir, promptPath, time.Now().Add(2*time.Second), "gpt-5.6-sol")
+
+	result := o.Spawn(p)
+	if result.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("expected spawned, got %+v", result)
+	}
+	if result.ModelReceipt.Honored != HonoredUnknown || result.ModelReceipt.ReportedEffectiveModel != "" {
+		t.Fatalf("expected an unknown receipt with no reported model, got %+v", result.ModelReceipt)
+	}
+	if !strings.Contains(result.ModelReceipt.Reason, "more than one") {
+		t.Fatalf("expected the ambiguous reason text, got %q", result.ModelReceipt.Reason)
+	}
+}
+
+// TestOrgSpawn_Codex_ModelObservation_FoundOnLaterPoll proves the poll
+// actually retries: no record exists at spawn time, one appears from a
+// background goroutine partway through the (widened, for this test only)
+// observe window, and Spawn's own receipt still picks it up.
+func TestOrgSpawn_Codex_ModelObservation_FoundOnLaterPoll(t *testing.T) {
+	o, _, _ := codexGuardedOrg(t, "implementer")
+	o.CodexModelObserveInterval = 10 * time.Millisecond
+	o.CodexModelObserveTimeout = 2 * time.Second
+	p := mustCodexSpawnParams("org-a", "seat-1")
+
+	promptPath, err := o.promptFilePath(p.OrgID, p.SeatID)
+	if err != nil {
+		t.Fatalf("promptFilePath: %v", err)
+	}
+
+	at := time.Now().Add(time.Second)
+	dateDir := fixtureDateDir(o.CodexSessionsDir, at)
+	lines := []string{
+		sessionMetaLine(t, rfc3339Milli(at)),
+		userMessageLine(t, rfc3339Milli(at.Add(5*time.Millisecond)), "role prompt: "+promptPath),
+		turnContextLine(t, rfc3339Milli(at.Add(3*time.Millisecond)), "gpt-5-codex"),
+	}
+	content := strings.Join(lines, "\n") + "\n"
+	fixturePath := filepath.Join(dateDir, "rollout-late.jsonl")
+
+	// The write happens on a background goroutine (not via t.Fatalf-using
+	// helpers -- testing.T's FailNow must only be called from the test's
+	// own goroutine) partway through the poll window, so the first several
+	// ObserveCodexEffectiveModel calls must come back not-found before a
+	// later one finds it.
+	writeErrCh := make(chan error, 1)
+	go func() {
+		time.Sleep(30 * time.Millisecond)
+		if err := os.MkdirAll(dateDir, 0o755); err != nil {
+			writeErrCh <- err
+			return
+		}
+		writeErrCh <- os.WriteFile(fixturePath, []byte(content), 0o644)
+	}()
+
+	result := o.Spawn(p)
+	if err := <-writeErrCh; err != nil {
+		t.Fatalf("write delayed fixture: %v", err)
+	}
+	if result.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("expected spawned, got %+v", result)
+	}
+	if result.ModelReceipt.Honored != HonoredTrue {
+		t.Fatalf("expected honored=true once the record appears on a later poll, got %+v", result.ModelReceipt)
+	}
+}
+
+// TestOrgSpawn_Codex_OldSessionRecordNotPickedOnRespawn is AC-2b through
+// Spawn's own wiring (not only through ObserveCodexEffectiveModel's unit
+// tests in codex_session_test.go): a stale record at this exact seat's
+// promptPath (promptFilePath is deterministic on org_id/seat_id, so a
+// prior attempt's record shares the same path a fresh spawn's role-prompt
+// file gets written to) that started long before this Spawn call, but
+// whose file is touched again afterward -- simulating a still-running old
+// codex process appending to its own log -- must not be picked. Spawn's
+// own spawnStartedAt (not the fixture's ModTime) is what has to exclude
+// it.
+func TestOrgSpawn_Codex_OldSessionRecordNotPickedOnRespawn(t *testing.T) {
+	o, _, _ := codexGuardedOrg(t, "implementer")
+	p := mustCodexSpawnParams("org-a", "seat-1")
+
+	promptPath, err := o.promptFilePath(p.OrgID, p.SeatID)
+	if err != nil {
+		t.Fatalf("promptFilePath: %v", err)
+	}
+
+	staleAt := time.Now().Add(-time.Hour)
+	staleFixture := writeQualifyingCodexFixture(t, o.CodexSessionsDir, promptPath, staleAt, "gpt-5.5-stale")
+	touchedAt := time.Now().Add(time.Hour)
+	if err := os.Chtimes(staleFixture, touchedAt, touchedAt); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+
+	result := o.Spawn(p)
+	if result.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("expected spawned, got %+v", result)
+	}
+	if result.ModelReceipt.Honored != HonoredUnknown || result.ModelReceipt.ReportedEffectiveModel != "" {
+		t.Fatalf("expected the stale record to be excluded (unknown, no reported model), got %+v", result.ModelReceipt)
+	}
+}
+
+// TestOrgSpawn_Codex_InlinePromptSkipsObservation_NoWaiting is AC-2c: a
+// codex seat whose initial prompt is short enough to pass inline (no
+// role-prompt file ever gets written) must return its "no role-prompt
+// file" unknown receipt without ever polling -- proven here by pinning a
+// deliberately large observe timeout/interval and asserting Spawn still
+// returns almost immediately, well under that timeout.
+func TestOrgSpawn_Codex_InlinePromptSkipsObservation_NoWaiting(t *testing.T) {
+	o, _, _ := codexGuardedOrg(t, "worker") // "worker" has no embedded template (see RenderRolePrompt/mustSpawnParams)
+	o.CodexModelObserveTimeout = 2 * time.Second
+	o.CodexModelObserveInterval = 50 * time.Millisecond
+
+	p := mustSpawnParams("org-a", "seat-1")
+	p.Driver = "codex"
+	p.Model = "gpt-5-codex"
+	p.Prompt = "short inline prompt" // no newline, well under maxInlinePromptRunes -> passed inline, no file written
+
+	start := time.Now()
+	result := o.Spawn(p)
+	elapsed := time.Since(start)
+
+	if result.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("expected spawned, got %+v", result)
+	}
+	if result.ModelReceipt.Honored != HonoredUnknown || result.ModelReceipt.ReportedEffectiveModel != "" {
+		t.Fatalf("expected an unknown receipt with no reported model, got %+v", result.ModelReceipt)
+	}
+	if !strings.Contains(result.ModelReceipt.Reason, "no role-prompt file") {
+		t.Fatalf("expected the no-role-prompt-file reason text, got %q", result.ModelReceipt.Reason)
+	}
+	if elapsed >= o.CodexModelObserveTimeout {
+		t.Fatalf("expected no waiting for a seat with no role-prompt file: spawn took %s (>= the %s observe timeout)", elapsed, o.CodexModelObserveTimeout)
+	}
+}
+
+// TestOrgSpawn_Claude_ModelReceiptTextUnchanged is the AC-4 regression
+// guard: a claude seat's receipt text must stay exactly what it was before
+// this plan (no observation is ever attempted for a non-codex driver).
+func TestOrgSpawn_Claude_ModelReceiptTextUnchanged(t *testing.T) {
+	o, _, _ := testOrg(t)
+	p := mustSpawnParams("org-a", "seat-1") // Driver: "claude" (mustSpawnParams default)
+
+	result := o.Spawn(p)
+	if result.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("expected spawned, got %+v", result)
+	}
+	if result.ModelReceipt.Honored != HonoredUnknown || result.ModelReceipt.Reason != "interactive session; effective model not yet observable" {
+		t.Fatalf("expected the unchanged claude receipt text, got %+v", result.ModelReceipt)
+	}
+}
+
+// TestOrgSpawn_Codex_DryRun_ModelReceiptUnchanged is the AC-4 regression
+// guard for the dry-run path: dryRunSpawn's own receipt (Reason "dry-run")
+// must stay exactly what it was before this plan, for codex the same as
+// any other driver -- dry-run never calls the observer at all.
+func TestOrgSpawn_Codex_DryRun_ModelReceiptUnchanged(t *testing.T) {
+	o, _, _ := codexGuardedOrg(t, "implementer")
+	p := mustCodexSpawnParams("org-a", "seat-1")
+	p.DryRun = true
+
+	result := o.Spawn(p)
+	if result.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("expected spawned (dry-run), got %+v", result)
+	}
+	rr, err := o.Receipts.Read()
+	if err != nil {
+		t.Fatalf("read receipts: %v", err)
+	}
+	if len(rr.Receipts) != 1 || rr.Receipts[0].Reason != "dry-run" || rr.Receipts[0].Honored != HonoredUnknown {
+		t.Fatalf("expected the unchanged dry-run receipt, got %+v", rr.Receipts)
 	}
 }

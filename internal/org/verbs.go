@@ -3,6 +3,7 @@ package org
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/yoshpy-dev/ralph/internal/org/protocol"
@@ -589,6 +590,12 @@ type StopParams struct {
 // StopResult is Stop's return value.
 type StopResult struct {
 	Err error
+	// ModelReceipt is the Receipt Stop appended for a codex seat's
+	// unresolved model observation (AC-5), the zero Receipt when nothing
+	// was appended -- the CLI layer reads this to decide whether to print
+	// the codex model-mismatch warning (AC-6), without re-reading the
+	// receipts file.
+	ModelReceipt Receipt
 }
 
 // Stop sends a best-effort C-c to Seat's pane and a best-effort agmsg
@@ -639,12 +646,149 @@ func (o *Org) Stop(p StopParams) StopResult {
 		details = paneNote + " " + leaveNote
 	}
 
+	// The codex model observation runs after the driver calls above and
+	// before the `stopped` event append below, so its outcome can ride
+	// along on that same event's Details (AC-5) instead of needing a
+	// second manifest write. Only for a real (non-dry-run) codex seat --
+	// see observeStopModelReceipt's own doc comment for when it actually
+	// observes versus reports "none" without calling the observer at all.
+	var modelReceipt Receipt
+	if !p.DryRun && seat.Driver == "codex" {
+		token := "none"
+		if receipt, observed := o.observeStopModelReceipt(seat, p.Seat); observed {
+			if appendErr := o.Receipts.Append(receipt); appendErr == nil {
+				modelReceipt = receipt
+				token = receipt.Honored // "true" or "false" -- observeStopModelReceipt never returns observed=true for an unknown outcome
+			}
+			// A receipts append failure leaves token at "none": nothing was
+			// actually persisted, so Stop must not claim otherwise, but the
+			// failure itself must never turn a successful stop into an
+			// error (same contract as every other best-effort step above).
+		}
+		details = details + " model_observed=" + token
+	}
+
 	err = o.appendEvent(ManifestEvent{
 		TS: o.now(), OrgID: p.OrgID, SeatID: p.Seat, Event: EventStopped,
 		Role: seat.Role, Driver: seat.Driver, Model: seat.Model, Worktree: seat.Worktree,
 		PaneID: paneID, AgmsgTeam: team, DryRun: p.DryRun, Details: details,
 	})
-	return StopResult{Err: err}
+	return StopResult{Err: err, ModelReceipt: modelReceipt}
+}
+
+// codexSpawnCorrelation resolves what Stop needs to correlate a codex
+// seat with its codex session record: the TS of the seat's current (most
+// recent) spawn_started event for (orgID, seatID), parsed as a time.Time,
+// alongside that same TS string (hasObservedCodexReceiptSince compares
+// receipt TS strings lexicographically, the same trick latestSeatEventTS
+// -- watch.go -- already relies on for RFC3339 UTC timestamps), and the
+// role-prompt file path recorded on that same spawn attempt's
+// agent_started spawn_step (spawn.go's codexPromptFileDetailsPrefix).
+// ok is false only when there is no spawn_started for (orgID, seatID) at
+// all, or its TS fails to parse -- promptPath legitimately comes back ""
+// (with ok=true) for a seat whose initial prompt was passed inline or was
+// empty; the caller (observeStopModelReceipt) treats both "not ok" and an
+// empty promptPath as "nothing to correlate".
+//
+// events are assumed to be in manifest (append/chronological) order, same
+// as every other roster/event-scan helper in this package -- so "the
+// latest spawn_started" is simply the last matching entry seen while
+// scanning forward, and only spawn_step events at or after that entry's
+// index can belong to the same spawn attempt (an older attempt's
+// spawn_step, from a prior stale/failed saga for the same seat, can only
+// have been appended before the current attempt's own spawn_started --
+// Spawn's idempotent/stale-in-flight checks are what guarantee a seat
+// never has two unresolved spawn_started entries at once).
+func codexSpawnCorrelation(events []ManifestEvent, orgID, seatID string) (spawnStartedAt time.Time, spawnStartedTS, promptPath string, ok bool) {
+	startedIdx := -1
+	for i, ev := range events {
+		if ev.OrgID == orgID && ev.SeatID == seatID && ev.Event == EventSpawnStarted {
+			startedIdx = i
+		}
+	}
+	if startedIdx == -1 {
+		return time.Time{}, "", "", false
+	}
+	tsStr := events[startedIdx].TS
+	t, err := time.Parse(time.RFC3339, tsStr)
+	if err != nil {
+		return time.Time{}, "", "", false
+	}
+	for i := startedIdx; i < len(events); i++ {
+		ev := events[i]
+		if ev.OrgID != orgID || ev.SeatID != seatID || ev.Event != EventSpawnStep {
+			continue
+		}
+		if path, found := strings.CutPrefix(ev.Details, codexPromptFileDetailsPrefix); found {
+			promptPath = path
+		}
+	}
+	return t, tsStr, promptPath, true
+}
+
+// hasObservedCodexReceiptSince reports whether any receipt for (orgID,
+// seatID) with TS at or after spawnStartedTS already carries a non-empty
+// ReportedEffectiveModel -- i.e. an observation (Honored true or false,
+// from Spawn's own poll or an earlier Stop call) already happened for this
+// spawn attempt. A rejection or dry-run receipt never carries a reported
+// model, so neither ever suppresses a Stop-time observation; a spawn
+// attempt with no receipt at all (e.g. interrupted mid-poll) is likewise
+// not suppressed, since there is nothing to compare against (AC-5).
+func hasObservedCodexReceiptSince(receipts []Receipt, orgID, seatID, spawnStartedTS string) bool {
+	for _, r := range receipts {
+		if r.OrgID != orgID || r.SeatID != seatID {
+			continue
+		}
+		if r.TS < spawnStartedTS {
+			continue
+		}
+		if r.ReportedEffectiveModel != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// observeStopModelReceipt runs the single, non-waiting codex observation
+// Stop performs (AC-5). It returns observed=false -- doing nothing else --
+// unless every one of these holds: seat.Driver is "codex"; seatID has a
+// spawn_started event with a resolvable TS and a recorded role-prompt file
+// (codexSpawnCorrelation); and no receipt since that spawn_started already
+// carries a reported model (hasObservedCodexReceiptSince). Only then does
+// it call ObserveCodexEffectiveModel once, with no retry and no wait --
+// unlike Spawn's own poll, Stop has already waited as long as the seat
+// itself ran. A not-found, ambiguous, or observer-error result also
+// returns observed=false: Stop appends nothing in any of those cases (see
+// Stop's own doc comment).
+func (o *Org) observeStopModelReceipt(seat SeatStatus, seatID string) (Receipt, bool) {
+	rr, err := o.Manifest.Read()
+	if err != nil {
+		return Receipt{}, false
+	}
+	spawnStartedAt, spawnStartedTS, promptPath, ok := codexSpawnCorrelation(rr.Events, seat.OrgID, seatID)
+	if !ok || promptPath == "" {
+		return Receipt{}, false
+	}
+
+	rec, err := o.Receipts.Read()
+	if err != nil {
+		return Receipt{}, false
+	}
+	if hasObservedCodexReceiptSince(rec.Receipts, seat.OrgID, seatID, spawnStartedTS) {
+		return Receipt{}, false
+	}
+
+	obs, _ := ObserveCodexEffectiveModel(o.codexSessionsDir(), promptPath, spawnStartedAt)
+	if obs.Status != CodexObservationFound {
+		return Receipt{}, false
+	}
+	base := Receipt{
+		TS: o.now(), OrgID: seat.OrgID, SeatID: seatID, Role: seat.Role, Driver: seat.Driver,
+		CommandedModel: seat.Model,
+	}
+	receipt := codexFoundReceipt(base, seat.Model, obs.Model)
+	receipt.Reason += " (observed at stop)"
+	return receipt, true
 }
 
 // StatusResult is Status's return value: the derived roster for one org_id,

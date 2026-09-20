@@ -22,6 +22,18 @@ const defaultSpawnTimeoutMS = 60000
 // agentStartWithRetry's doc comment for why this retry exists.
 const defaultAgentStartRetryInterval = 500 * time.Millisecond
 
+// defaultCodexModelObserveTimeout and defaultCodexModelObserveInterval
+// bound observeCodexSpawnReceipt's poll when Org.CodexModelObserveTimeout/
+// Org.CodexModelObserveInterval are unset (zero value): real-record
+// measurements (plan Assumptions) put a codex session's first turn_context
+// about 2.3-3.2s after spawn, so 8s at 500ms gives several polls of margin
+// beyond the slowest observed case. Tests override both to tiny values so
+// the not-found/timeout path stays fast.
+const (
+	defaultCodexModelObserveTimeout  = 8 * time.Second
+	defaultCodexModelObserveInterval = 500 * time.Millisecond
+)
+
 // maxAgentStartAttempts bounds agentStartWithRetry's total AgentStart call
 // count (including the first, non-retry attempt) so a herdr pane that never
 // becomes ready cannot retry forever independent of the saga's own ctx
@@ -151,6 +163,23 @@ type Org struct {
 	// to confirm the target seat left idle/done. Zero means "use
 	// defaultSendSubmitConfirmTimeout".
 	SendSubmitConfirmTimeout time.Duration
+	// CodexSessionsDir overrides where observeCodexSpawnReceipt/
+	// observeStopModelReceipt look for codex session records (see
+	// codex_session.go's CodexSessionsDir). Empty (the field's default)
+	// means "resolve from the environment at call time" -- CODEX_HOME if
+	// set, else <os.UserHomeDir()>/.codex/sessions -- via this package's
+	// own codexSessionsDir() method; see its doc comment for the
+	// home-directory-unresolvable fallback. Tests set this to an empty
+	// t.TempDir() so no test ever observes a developer's real ~/.codex.
+	CodexSessionsDir string
+	// CodexModelObserveTimeout and CodexModelObserveInterval override how
+	// long and how often observeCodexSpawnReceipt polls
+	// ObserveCodexEffectiveModel after a codex seat's spawn. Zero (the
+	// fields' default) means "use defaultCodexModelObserveTimeout/
+	// defaultCodexModelObserveInterval". Tests set both to tiny values so
+	// the poll's not-found/timeout path runs fast.
+	CodexModelObserveTimeout  time.Duration
+	CodexModelObserveInterval time.Duration
 }
 
 func (o *Org) now() string {
@@ -225,6 +254,11 @@ type SpawnResult struct {
 	Outcome SpawnOutcome
 	Seat    SeatStatus
 	Err     error
+	// ModelReceipt is the Receipt this call appended, the zero Receipt when
+	// none was (every outcome except SpawnOutcomeSpawned) -- the CLI layer
+	// reads this to decide whether to print the codex model-mismatch
+	// warning (AC-6), without re-reading the receipts file.
+	ModelReceipt Receipt
 }
 
 // Spawn runs the full spawn saga described in
@@ -398,6 +432,16 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	// never resolved) -- compensation is deferred to after Phase 1's lock
 	// releases (see the doc comment above).
 	var staleExisting *SeatStatus
+	// spawnStartedAt is checkCapacityAndStart's own capture of the instant
+	// (via o.nowTime(), the same clock o.now() formats onto the
+	// spawn_started event's TS) it appended that event -- the codex
+	// model-observation step far below needs this exact value to correlate
+	// a codex session record with this spawn, not a fresh time.Now() taken
+	// after the workspace/agent/agmsg round trip that follows. Set on
+	// whichever of Phase 1/Phase 2 below actually appends spawn_started;
+	// stays the zero value on every early-return path, which never reaches
+	// the observation step.
+	var spawnStartedAt time.Time
 	req := SpawnRequest{OrgID: p.OrgID, SeatID: p.SeatID, Role: p.Role, Driver: p.Driver, Model: p.Model}
 
 	// Phase 1 (locked): fresh read, idempotent/envelope/permission checks,
@@ -513,7 +557,7 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 			return nil
 		}
 
-		early = checkCapacityAndStart(o, p, req, events)
+		early, spawnStartedAt = checkCapacityAndStart(o, p, req, events)
 		return nil
 	})
 	if lockErr != nil {
@@ -581,7 +625,7 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 				}
 			}
 
-			early = checkCapacityAndStart(o, p, req, events)
+			early, spawnStartedAt = checkCapacityAndStart(o, p, req, events)
 			return nil
 		})
 		if lockErr != nil {
@@ -652,9 +696,22 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	agentArgs := append([]string{}, permArgs...)
 	agentArgs = append(agentArgs, "--model", p.Model)
 	agentStartedDetails := "agent_started"
+	// promptPath is hoisted to this outer scope (rather than declared
+	// inside the needsPromptFile branch below, as before) because the
+	// codex model-observation step far below needs it too, to correlate a
+	// codex session record with this exact spawn (AC-2c: a seat with no
+	// role-prompt file at all -- prompt passed inline, or none -- has
+	// nothing to correlate a session record with, so it stays ""). It is
+	// also embedded in agentStartedDetails below via
+	// codexPromptFileDetailsPrefix, the same constant Stop's own
+	// correlation (verbs.go's codexSpawnCorrelation) parses back out of
+	// the persisted spawn_step Details, so the two call sites cannot drift
+	// out of sync with each other.
+	var promptPath string
 	if initialPrompt != "" {
 		if needsPromptFile(initialPrompt) {
-			promptPath, perr := o.promptFilePath(p.OrgID, p.SeatID)
+			var perr error
+			promptPath, perr = o.promptFilePath(p.OrgID, p.SeatID)
 			if perr != nil {
 				return o.failStep(p, "prompt_file", perr, paneID)
 			}
@@ -662,7 +719,7 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 				return o.failStep(p, "prompt_file", err, paneID)
 			}
 			agentArgs = append(agentArgs, promptFilePointer(promptPath))
-			agentStartedDetails = fmt.Sprintf("agent_started prompt_file=%s", promptPath)
+			agentStartedDetails = codexPromptFileDetailsPrefix + promptPath
 		} else {
 			agentArgs = append(agentArgs, initialPrompt)
 		}
@@ -768,11 +825,23 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	}); err != nil {
 		return SpawnResult{Outcome: SpawnOutcomeFailed, Err: err}
 	}
-	if err := o.Receipts.Append(Receipt{
-		TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Role: p.Role, Driver: p.Driver,
-		CommandedModel: p.Model, Honored: HonoredUnknown,
-		Reason: "interactive session; effective model not yet observable",
-	}); err != nil {
+
+	// The model receipt is built after `spawned`, before it is appended:
+	// for a codex seat with a role-prompt file, observeCodexSpawnReceipt
+	// polls ObserveCodexEffectiveModel (codex_session.go) against
+	// spawnStartedAt, up to o.codexModelObserveTimeout() -- see its own
+	// doc comment for the full true/false/unknown decision table (plan
+	// AC-2/AC-2b/AC-2c). Every other seat (claude, or a codex seat with no
+	// role-prompt file to correlate) keeps today's receipt text exactly.
+	receipt := Receipt{OrgID: p.OrgID, SeatID: p.SeatID, Role: p.Role, Driver: p.Driver, CommandedModel: p.Model}
+	if p.Driver == "codex" {
+		receipt = o.observeCodexSpawnReceipt(ctx, receipt, promptPath, spawnStartedAt)
+	} else {
+		receipt.Honored = HonoredUnknown
+		receipt.Reason = "interactive session; effective model not yet observable"
+	}
+	receipt.TS = o.now()
+	if err := o.Receipts.Append(receipt); err != nil {
 		return SpawnResult{Outcome: SpawnOutcomeFailed, Err: err}
 	}
 
@@ -780,7 +849,7 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 		OrgID: p.OrgID, SeatID: p.SeatID, Role: p.Role, Driver: p.Driver, Model: p.Model,
 		Worktree: p.Cwd, PaneID: paneID, AgmsgTeam: team, HerdrAgentName: agentName,
 		Event: EventSpawned, Active: true,
-	}}
+	}, ModelReceipt: receipt}
 }
 
 // checkCapacityAndStart runs the capacity check + spawn_started append
@@ -793,21 +862,28 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 // check nor the spawn_started append is safe unlocked. The returned
 // *SpawnResult is non-nil only on a capacity rejection or an append failure;
 // callers should assign it to their enclosing `early` var and `return nil`
-// right after, exactly as the closure this replaced did.
-func checkCapacityAndStart(o *Org, p SpawnParams, req SpawnRequest, events []ManifestEvent) *SpawnResult {
+// right after, exactly as the closure this replaced did. The second return
+// value is the instant (o.nowTime()) the spawn_started event's TS was
+// formatted from -- zero on either failure path, meaningful only when the
+// first return is nil -- so a codex spawn's later model observation
+// correlates against the exact time this saga's own spawn_started was
+// recorded, not a fresh read taken after the workspace/agent/agmsg round
+// trip that follows in Spawn.
+func checkCapacityAndStart(o *Org, p SpawnParams, req SpawnRequest, events []ManifestEvent) (*SpawnResult, time.Time) {
 	activeSeats := ActiveSeatCount(events, p.OrgID, RosterOptions{})
 	if err := ValidateSpawnCapacity(o.Config, req, activeSeats); err != nil {
 		r := o.reject(p, err)
-		return &r
+		return &r, time.Time{}
 	}
+	startedAt := o.nowTime()
 	if err := o.appendEvent(ManifestEvent{
-		TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnStarted,
+		TS: startedAt.UTC().Format(time.RFC3339), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnStarted,
 		Role: p.Role, Driver: p.Driver, Model: p.Model, Worktree: p.Cwd,
 	}); err != nil {
 		r := SpawnResult{Outcome: SpawnOutcomeFailed, Err: err}
-		return &r
+		return &r, time.Time{}
 	}
-	return nil
+	return nil, startedAt
 }
 
 // autonomousScopeGateErr reports the AC-2b minimum control gate's error when
@@ -908,6 +984,136 @@ func (o *Org) agentStartRetryInterval() time.Duration {
 	return defaultAgentStartRetryInterval
 }
 
+// codexModelObserveTimeout returns o.CodexModelObserveTimeout, falling back
+// to defaultCodexModelObserveTimeout when unset.
+func (o *Org) codexModelObserveTimeout() time.Duration {
+	if o.CodexModelObserveTimeout > 0 {
+		return o.CodexModelObserveTimeout
+	}
+	return defaultCodexModelObserveTimeout
+}
+
+// codexModelObserveInterval returns o.CodexModelObserveInterval, falling
+// back to defaultCodexModelObserveInterval when unset.
+func (o *Org) codexModelObserveInterval() time.Duration {
+	if o.CodexModelObserveInterval > 0 {
+		return o.CodexModelObserveInterval
+	}
+	return defaultCodexModelObserveInterval
+}
+
+// codexSessionsDir returns o.CodexSessionsDir when set, otherwise resolves
+// the same way codex itself does at call time: CODEX_HOME if non-empty,
+// else <os.UserHomeDir()>/.codex/sessions (via CodexSessionsDir,
+// codex_session.go). If CODEX_HOME is empty and the home directory cannot
+// be resolved, this returns "" -- ObserveCodexEffectiveModel already treats
+// an empty sessionsDir as not-found with a nil error, so that single
+// fallback is enough; no separate error path is needed here.
+func (o *Org) codexSessionsDir() string {
+	if o.CodexSessionsDir != "" {
+		return o.CodexSessionsDir
+	}
+	codexHome := os.Getenv("CODEX_HOME")
+	home, err := os.UserHomeDir()
+	if err != nil {
+		if codexHome == "" {
+			return ""
+		}
+		home = ""
+	}
+	return CodexSessionsDir(codexHome, home)
+}
+
+// observeCodexSpawnReceipt builds (but does not append) the model receipt
+// for a real, non-dry-run codex spawn, layering the observed outcome onto
+// base (already carrying OrgID/SeatID/Role/Driver/CommandedModel; TS is
+// left for the caller to set right before appending, same as every other
+// receipt in this file). promptPath is the role-prompt file path this
+// spawn's initial prompt was written to -- "" when the prompt was short
+// enough to pass inline, or absent entirely. AC-2c: with no prompt file
+// there is nothing to correlate a codex session record with, so this
+// returns immediately with the "no role-prompt file" unknown receipt,
+// never calling the observer (no waiting).
+//
+// Otherwise it polls: call ObserveCodexEffectiveModel immediately, then
+// again every o.codexModelObserveInterval() until it reports found or
+// ambiguous, or o.codexModelObserveTimeout() elapses -- an ambiguous
+// result ends the poll at once, since waiting cannot resolve two matching
+// session records into one. Each wait is clamped to the remaining budget
+// and goes through waitBeforeEnter (verbs.go), which select{}s against
+// ctx, so this never sleeps past the timeout and returns as soon as ctx is
+// cancelled (e.g. Spawn's own TimeoutMS elapsing). An observer error is
+// never surfaced here -- not on the receipt, not as a returned error, not
+// logged -- it is treated exactly like not-found, per
+// ObserveCodexEffectiveModel's own doc comment on why that degrades
+// silently rather than failing the caller.
+func (o *Org) observeCodexSpawnReceipt(ctx context.Context, base Receipt, promptPath string, spawnStartedAt time.Time) Receipt {
+	if promptPath == "" {
+		return codexUnknownReceipt(base, "no role-prompt file to match a codex session record with (inline or empty initial prompt)")
+	}
+
+	sessionsDir := o.codexSessionsDir()
+	interval := o.codexModelObserveInterval()
+	deadline := time.Now().Add(o.codexModelObserveTimeout())
+
+	for {
+		obs, _ := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStartedAt)
+		switch obs.Status {
+		case CodexObservationFound:
+			return codexFoundReceipt(base, base.CommandedModel, obs.Model)
+		case CodexObservationAmbiguous:
+			return codexUnknownReceipt(base, "more than one codex session record matches this spawn; not guessing")
+		}
+
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return codexUnknownReceipt(base, codexNotFoundReason)
+		}
+		wait := interval
+		if remaining < wait {
+			wait = remaining
+		}
+		if err := waitBeforeEnter(ctx, wait); err != nil {
+			return codexUnknownReceipt(base, codexNotFoundReason)
+		}
+	}
+}
+
+// codexNotFoundReason is shared by observeCodexSpawnReceipt (Spawn) and
+// observeStopModelReceipt (Stop, verbs.go) for the identical "nothing
+// found yet" outcome, so the two call sites' receipts read the same way in
+// `ralph org report`.
+const codexNotFoundReason = "no codex session record for this spawn yet (no turn started, or CODEX_HOME differs from the seat's)"
+
+// codexFoundReceipt fills base's Honored/ReportedEffectiveModel/Reason for
+// a found observation: true when effective matches commanded, false with
+// both model names in Reason otherwise (AC-2). Shared by Spawn's poll and
+// Stop's single observation (verbs.go appends " (observed at stop)" to
+// this same Reason text for the latter).
+func codexFoundReceipt(base Receipt, commanded, effective string) Receipt {
+	base.ReportedEffectiveModel = effective
+	if effective == commanded {
+		base.Honored = HonoredTrue
+		base.Reason = "codex session record reports the commanded model"
+		return base
+	}
+	base.Honored = HonoredFalse
+	base.Reason = fmt.Sprintf(
+		"codex session record reports %s, not the commanded %s (a retired model that codex migrated, or a codex config override)",
+		effective, commanded,
+	)
+	return base
+}
+
+// codexUnknownReceipt fills base's Honored=unknown and Reason for every
+// non-found outcome: no prompt file, not-found, ambiguous, or ctx
+// cancellation.
+func codexUnknownReceipt(base Receipt, reason string) Receipt {
+	base.Honored = HonoredUnknown
+	base.Reason = reason
+	return base
+}
+
 // agentStartWithRetry calls Herdr.AgentStart, retrying with a bounded
 // interval when the herdr adapter reports agent_pane_busy: a freshly created
 // tab's pane is still initializing its shell for ~1-3s and rejects
@@ -995,6 +1201,15 @@ const maxHerdrAgentNameLen = 32
 // caution, even though only the newline case has been observed to fail
 // against the real CLI.
 const maxInlinePromptRunes = 200
+
+// codexPromptFileDetailsPrefix is the fixed prefix Spawn writes onto a
+// spawn_step event's Details when the initial prompt was written to a
+// role-prompt file (agentStartedDetails below): "agent_started
+// prompt_file=<path>". Shared with verbs.go's codexSpawnCorrelation, which
+// parses this exact prefix back out of the manifest at Stop time -- a
+// single named constant instead of two independent literals keeps the
+// write and read sides from silently drifting apart.
+const codexPromptFileDetailsPrefix = "agent_started prompt_file="
 
 // needsPromptFile reports whether prompt is too unsafe to pass directly as
 // a herdr agent argument and must instead be written to a prompt file with
@@ -1131,7 +1346,7 @@ func (o *Org) dryRunSpawn(p SpawnParams, mode string) SpawnResult {
 		if perr != nil {
 			return o.failStep(p, "prompt_file", perr, "")
 		}
-		agentStartedDetails = fmt.Sprintf("agent_started prompt_file=%s", promptPath)
+		agentStartedDetails = codexPromptFileDetailsPrefix + promptPath
 	}
 
 	step = base
