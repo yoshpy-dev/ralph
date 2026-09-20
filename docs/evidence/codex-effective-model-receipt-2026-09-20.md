@@ -1,7 +1,7 @@
 # codex 座席の実効モデルの観測: 実記録での確認(#165)
 
 - Date: 2026-09-20
-- Plan: `docs/plans/active/2026-09-20-codex-effective-model-receipt.md`
+- Plan: `docs/plans/archive/2026-09-20-codex-effective-model-receipt.md`
 - 対象: `internal/org/codex_session.go` の `ObserveCodexEffectiveModel`(commit 78692f4 で実行。self-review の修正後の 26b03ce と 53f6b16 で再実行して同じ結果)
 - codex CLI: 0.154.0(記録を作った時点の版)
 
