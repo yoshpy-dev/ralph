@@ -164,6 +164,39 @@ func TestObserveCodexEffectiveModel_AlreadyDoneCtx_NotFoundDespiteMatchingRecord
 	}
 }
 
+// TestObserveCodexEffectiveModel_AlreadyDoneCtx_ZeroCandidates_ReturnsCtxError
+// is a /test cycle-1 addition (issue #173 handoff item 10: "a ctx whose
+// deadline is already past but with zero candidates"). The test above
+// proves an already-done ctx wins even when a matching record sits on
+// disk; this one proves the SAME ctx error -- never a plain nil "clean
+// not-found" -- comes back when sessionsDir exists but is genuinely empty
+// (no rollout files anywhere), so a caller can never mistake "ctx cut this
+// short" for "genuinely nothing here" by checking err alone. This is
+// reachable because codexRolloutCandidates' per-date-directory ctx.Err()
+// check runs on the very first iteration of codexSessionDateDirs' own
+// (always non-empty) list, before it ever tries to read a directory that
+// may not exist on disk.
+func TestObserveCodexEffectiveModel_AlreadyDoneCtx_ZeroCandidates_ReturnsCtxError(t *testing.T) {
+	dir := t.TempDir()
+	sessionsDir := filepath.Join(dir, "sessions")
+	promptPath := filepath.Join(dir, "state", "prompts", "org1_seat1.md")
+	spawnStarted := time.Date(2026, 9, 18, 7, 20, 0, 0, time.UTC)
+	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
+		t.Fatalf("mkdir sessionsDir: %v", err)
+	}
+	// sessionsDir exists (passes the earlier os.Stat check) but holds no
+	// date directories and no rollout files at all.
+
+	ctx := newCountingCtx(0) // done on the very first Err() call
+	obs, err := ObserveCodexEffectiveModel(ctx, sessionsDir, promptPath, spawnStarted, spawnStarted)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected ctx's own error even with zero candidates, got %v", err)
+	}
+	if obs.Status != CodexObservationNotFound {
+		t.Fatalf("got %+v, want not-found", obs)
+	}
+}
+
 // TestObserveCodexEffectiveModel_CtxDoneBeforeSecondCandidate_SecondFileNeverOpened
 // is AC-4: two candidates exist, sorted newest-first; the newer one
 // matches. ctx becomes done at the exact moment the older (second)
@@ -455,6 +488,63 @@ func TestObserveCodexEffectiveModel_CtxExhaustedExactlyAsPassCompletes_FoundStil
 	}
 	if err := ctx.Err(); err == nil {
 		t.Fatalf("test setup invariant broken: expected ctx's budget to already be exactly exhausted after the pass")
+	}
+}
+
+// TestObserveCodexEffectiveModel_NoCtxCheckAfterCandidateLoopCompletes is a
+// /test cycle-1 addition (issue #173 handoff item 9f): a /test-cycle
+// mutation run found that
+// TestObserveCodexEffectiveModel_CtxExhaustedExactlyAsPassCompletes_FoundStillReturned
+// above does NOT fail when a ctx.Err() check is added right after the
+// candidate loop (before the matchCount switch) -- because that test
+// self-calibrates its budget by running ObserveCodexEffectiveModel itself
+// once (calib.calls), so any extra real call the mutated function makes is
+// silently absorbed into the calibration rather than exceeding it. This
+// test instead derives its budget by calling codexRolloutCandidates and
+// scanRolloutRecord DIRECTLY and summing their own call counts, never
+// running ObserveCodexEffectiveModel to calibrate -- so a ctx.Err() call
+// anywhere in ObserveCodexEffectiveModel's own body that neither of those
+// two helpers made is not part of the budget and flips the result to
+// not-found, which this test catches as a failure. Confirmed to fail (red)
+// against the "add a ctx check after the candidate loop" mutation, and to
+// pass (green) at HEAD.
+func TestObserveCodexEffectiveModel_NoCtxCheckAfterCandidateLoopCompletes(t *testing.T) {
+	dir := t.TempDir()
+	sessionsDir := filepath.Join(dir, "sessions")
+	promptPath := filepath.Join(dir, "state", "prompts", "org1_seat1.md")
+	spawnStarted := time.Date(2026, 9, 18, 7, 20, 0, 0, time.UTC)
+	start := spawnStarted.Add(1 * time.Second)
+
+	lines := []string{
+		sessionMetaLine(t, rfc3339Milli(start)),
+		userMessageLine(t, rfc3339Milli(start.Add(400*time.Millisecond)), PromptFilePointer(promptPath)),
+		turnContextLine(t, rfc3339Milli(start.Add(300*time.Millisecond)), "gpt-5.6-sol"),
+	}
+	writeRolloutFile(t, fixtureDateDir(sessionsDir, start), "rollout-exact.jsonl", lines)
+
+	// Calibrate collection and the one candidate's scan independently of
+	// ObserveCodexEffectiveModel itself.
+	collectCtx := newCountingCtx(1 << 30)
+	candidates, err := codexRolloutCandidates(collectCtx, sessionsDir, spawnStarted, spawnStarted)
+	if err != nil || len(candidates) != 1 {
+		t.Fatalf("test setup invariant broken: candidates=%+v err=%v", candidates, err)
+	}
+	collectionCalls := collectCtx.calls
+
+	scanCtx := newCountingCtx(1 << 30)
+	matched, model, err := scanRolloutRecord(scanCtx, candidates[0].path, promptPath, spawnStarted.Truncate(time.Second))
+	if err != nil || !matched || model != "gpt-5.6-sol" {
+		t.Fatalf("test setup invariant broken: matched=%v model=%q err=%v", matched, model, err)
+	}
+	scanCalls := scanCtx.calls
+
+	ctx := newCountingCtx(collectionCalls + scanCalls)
+	obs, err := ObserveCodexEffectiveModel(ctx, sessionsDir, promptPath, spawnStarted, spawnStarted)
+	if err != nil {
+		t.Fatalf("unexpected error: %v (ObserveCodexEffectiveModel must make no ctx.Err() call beyond exactly what candidate collection plus the one candidate's scan need)", err)
+	}
+	if obs.Status != CodexObservationFound || obs.Model != "gpt-5.6-sol" {
+		t.Fatalf("got %+v, want found/gpt-5.6-sol", obs)
 	}
 }
 

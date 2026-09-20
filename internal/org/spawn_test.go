@@ -2338,6 +2338,69 @@ func TestObserveCodexSpawnReceipt_CtxDone_DistinctReason(t *testing.T) {
 	}
 }
 
+// TestObserveCodexSpawnReceipt_ReadErrorClearedByLaterCleanPass is a /test
+// cycle-1 addition (issue #173 handoff item 9g): a /test-cycle mutation run
+// confirmed that reverting the 6b63b69 fix -- so a completed pass's lastErr
+// is only ever SET on a genuine error and never CLEARED by a later clean
+// pass ("if err != nil && !isCtxDoneErr(err) { lastErr = err }" instead of
+// "if !isCtxDoneErr(err) { lastErr = err }") -- makes the whole
+// internal/org suite pass unchanged; no existing test pinned this specific
+// behavior. This test does: a candidate file that exists but is
+// permission-denied on the first poll (a genuine read error, matched by
+// TestOrgSpawn_Codex_ModelObservation_ReadError_DistinctReason's own
+// technique), fixed to readable by a background goroutine shortly after
+// (comfortably before the observation budget elapses, given the margins
+// below) -- but its content never matches promptPath, so every pass after
+// the fix completes cleanly (no error, no match), never
+// CodexObservationFound. The receipt's reason must be codexNotFoundReason
+// (the later clean pass cleared the earlier read error), never
+// codexReadErrorReason. Confirmed to fail (red) against the 9g mutation and
+// pass (green) at HEAD.
+func TestObserveCodexSpawnReceipt_ReadErrorClearedByLaterCleanPass(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root ignores a read-only file's permission bit")
+	}
+	o, _, _ := codexGuardedOrg(t, "implementer")
+	o.CodexModelObserveTimeout = 300 * time.Millisecond
+	o.CodexModelObserveInterval = 5 * time.Millisecond
+
+	promptPath, err := o.promptFilePath("org-a", "seat-1")
+	if err != nil {
+		t.Fatalf("promptFilePath: %v", err)
+	}
+	spawnStartedAt := time.Now()
+	// A candidate whose embedded pointer sentence names a wholly unrelated
+	// path -- NOT a suffix/prefix variant of promptPath (which would still
+	// contain promptPath as a substring and match anyway, per
+	// codexResponseItemMentionsPrompt's Contains check) -- so no pass this
+	// test drives can ever match it, and the loop keeps polling (never
+	// CodexObservationFound) until the observation budget above elapses.
+	nonMatching := writeQualifyingCodexFixture(t, o.CodexSessionsDir, "/unrelated/other-org_other-seat.md", spawnStartedAt.Add(time.Second), "gpt-5-codex")
+	if err := os.Chmod(nonMatching, 0o000); err != nil {
+		t.Fatalf("chmod fixture unreadable: %v", err)
+	}
+	fixed := make(chan struct{})
+	go func() {
+		time.Sleep(15 * time.Millisecond)
+		_ = os.Chmod(nonMatching, 0o644)
+		close(fixed)
+	}()
+	t.Cleanup(func() {
+		<-fixed
+		_ = os.Chmod(nonMatching, 0o644)
+	})
+
+	base := Receipt{OrgID: "org-a", SeatID: "seat-1", Role: "implementer", Driver: "codex", CommandedModel: "gpt-5-codex"}
+	receipt := o.observeCodexSpawnReceipt(context.Background(), base, promptPath, spawnStartedAt)
+
+	if receipt.Honored != HonoredUnknown || receipt.ReportedEffectiveModel != "" {
+		t.Fatalf("expected an unknown receipt with no reported model, got %+v", receipt)
+	}
+	if receipt.Reason != codexNotFoundReason {
+		t.Fatalf("expected reason %q (a later CLEAN pass must clear an earlier pass's read error), got %q", codexNotFoundReason, receipt.Reason)
+	}
+}
+
 // TestOrgSpawn_Codex_ObservationBudgetExhaustedMidPass_UnknownNotFoundReason
 // is AC-5's first clause, driven through the full Spawn saga: a
 // genuinely qualifying fixture exists on disk, but the observation's own
@@ -2396,6 +2459,58 @@ func TestOrgSpawn_Codex_ParentCtxCancelledFirst_UnknownCutShortReason(t *testing
 	}
 	if result.ModelReceipt.Reason != codexCutShortReason {
 		t.Fatalf("expected reason %q (the PARENT ctx, Spawn's own --timeout-ms, cut this short), got %q", codexCutShortReason, result.ModelReceipt.Reason)
+	}
+}
+
+// TestOrgSpawn_Codex_ParentCtxCancelledAfterReadError_CutShortStillWins is a
+// /test cycle-1 addition (issue #173 handoff item 9h): a /test-cycle
+// mutation run confirmed that swapping observeCodexSpawnReceipt's priority
+// order -- checking lastErr before ctx.Err(), so a genuine read error from
+// an earlier completed pass would win over a parent ctx that is ALSO done
+// by the time the wait fails -- makes the whole internal/org suite pass
+// unchanged; TestOrgSpawn_Codex_ParentCtxCancelledFirst_UnknownCutShortReason
+// above never actually exercises a non-nil lastErr (it writes no fixture at
+// all), so it cannot discriminate the swap. This test combines both: a
+// permission-denied fixture makes the very first poll pass record a
+// genuine read error (same technique as
+// TestOrgSpawn_Codex_ModelObservation_ReadError_DistinctReason), and a
+// short-but-not-immediate p.TimeoutMS (long enough to survive the saga and
+// that first pass, short enough to expire during the generous
+// CodexModelObserveInterval wait that follows) makes the parent ctx also
+// done by the time waitOrCtxDone fails. codexCutShortReason (the parent
+// ctx) must still win, per this function's own documented priority order
+// ("checked first, so it wins over the two reasons below whenever both are
+// true"). Confirmed to fail (red) against the 9h swap and pass (green) at
+// HEAD.
+func TestOrgSpawn_Codex_ParentCtxCancelledAfterReadError_CutShortStillWins(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root ignores a read-only file's permission bit")
+	}
+	o, _, _ := codexGuardedOrg(t, "implementer")
+	o.CodexModelObserveTimeout = time.Second
+	o.CodexModelObserveInterval = 500 * time.Millisecond
+	p := mustCodexSpawnParams("org-a", "seat-1")
+	p.TimeoutMS = 50
+
+	promptPath, err := o.promptFilePath(p.OrgID, p.SeatID)
+	if err != nil {
+		t.Fatalf("promptFilePath: %v", err)
+	}
+	fixturePath := writeQualifyingCodexFixture(t, o.CodexSessionsDir, promptPath, time.Now().Add(time.Second), "gpt-5-codex")
+	if err := os.Chmod(fixturePath, 0o000); err != nil {
+		t.Fatalf("chmod fixture unreadable: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(fixturePath, 0o644) })
+
+	result := o.Spawn(p)
+	if result.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("expected spawned, got %+v", result)
+	}
+	if result.ModelReceipt.Honored != HonoredUnknown || result.ModelReceipt.ReportedEffectiveModel != "" {
+		t.Fatalf("expected an unknown receipt with no reported model, got %+v", result.ModelReceipt)
+	}
+	if result.ModelReceipt.Reason != codexCutShortReason {
+		t.Fatalf("expected reason %q (the parent ctx must win even though an earlier pass also recorded a genuine read error), got %q", codexCutShortReason, result.ModelReceipt.Reason)
 	}
 }
 

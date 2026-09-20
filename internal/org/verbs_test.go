@@ -1092,6 +1092,44 @@ func TestOrgStop_ExistingSeat_NoPaneOrAgmsgTeam_RecordsSkippedNotes(t *testing.T
 	assertDetailsContains(t, last.Details, "pane=no pane_id on record", "leave=skipped: no agmsg_team on record")
 }
 
+// TestOrgStop_LegacySpawnedEvent_NoSpawnStarted_NoModelObservedToken is a
+// /test cycle-1 addition (issue #173 handoff item 10: "Stop for a seat with
+// NO spawn_started at all in the manifest -- legacy or hand-built events").
+// TestOrgStop_ExistingSeat_NoPaneOrAgmsgTeam_RecordsSkippedNotes above
+// already exercises codexSpawnCorrelation's ok=false path (its seat's only
+// manifest event is a legacy EventSpawned, never EventSpawnStarted) but
+// never asserts the specific claim this item names: no model_observed=
+// TOKEN AT ALL on the stopped event -- not even "none" -- since
+// isCodexSpawn is false for a seat with nothing to correlate
+// (observeStopModelReceipt's own doc comment), distinct from a codex seat
+// whose correlated spawn just could not be observed (which DOES get
+// "model_observed=none", per TestOrgStop_Codex_NoPromptFileSeat_NothingAppended
+// above). This test names and pins that distinction directly, plus
+// StopResult.ModelReceipt staying the zero Receipt and Stop still
+// succeeding.
+func TestOrgStop_LegacySpawnedEvent_NoSpawnStarted_NoModelObservedToken(t *testing.T) {
+	o, _, _ := testOrg(t)
+	if err := o.appendEvent(ManifestEvent{
+		TS: o.now(), OrgID: "org-a", SeatID: "seat-legacy", Event: EventSpawned,
+	}); err != nil {
+		t.Fatalf("seed manifest event: %v", err)
+	}
+
+	result := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-legacy"})
+	if result.Err != nil {
+		t.Fatalf("expected Stop to succeed, got %v", result.Err)
+	}
+	if result.ModelReceipt != (Receipt{}) {
+		t.Fatalf("expected no receipt for a seat with no correlated spawn_started, got %+v", result.ModelReceipt)
+	}
+
+	events := mustReadEvents(t, o)
+	last := events[len(events)-1]
+	if strings.Contains(last.Details, "model_observed=") {
+		t.Fatalf("expected no model_observed= token at all (not even \"none\") for a seat with no spawn_started to correlate, got Details=%q", last.Details)
+	}
+}
+
 // TestOrgWait_HappyPath_ReturnsHerdrOutputAndTargetsNamespacedAgent covers
 // the happy path for Wait: it targets the org_id-namespaced herdr agent
 // name (herdrAgentName), returns herdr's raw output verbatim, and never
