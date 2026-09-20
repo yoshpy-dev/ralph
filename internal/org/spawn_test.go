@@ -217,6 +217,32 @@ func (f *fakeAgmsg) Leave(_ context.Context, team, agentID string) error {
 	return f.leaveErr
 }
 
+// testCodexObserveGenerousBudget is the scan budget a test sets (in place
+// of testOrg's tiny default below) whenever Spawn's poll or Stop's single
+// check must actually FIND a real, matching session record: a found or
+// ambiguous result returns at once, so this budget is only an upper
+// bound, never something the test waits out -- it costs nothing on the
+// normal (fast) path and only matters as headroom against ReadDir/Lstat/
+// open/line-read latency under CI-level scheduling contention (the ctx
+// checked inside a single scan pass, not merely between polls). A test
+// that instead wants the budget itself to run out (not-found, cut-short,
+// budget-exhausted-mid-pass) keeps testOrg's own tiny default or sets its
+// own small, explicit value -- never this constant.
+const testCodexObserveGenerousBudget = 30 * time.Second
+
+// raiseCodexObserveBudgetForStop sets o.CodexModelObserveTimeout to
+// testCodexObserveGenerousBudget, for the common shape across the Stop
+// tests below: Spawn runs first under testOrg's own tiny default (so a
+// spawn with no fixture on disk yet still returns quickly, honored
+// unknown), then a fixture appears, then Stop's own separate observation
+// must actually find it. Every call site places this AFTER the Spawn call
+// it follows and BEFORE the Stop call it precedes -- never before Spawn,
+// or Spawn's own poll would wait out the generous budget instead of
+// returning its intended "nothing here yet" result.
+func raiseCodexObserveBudgetForStop(o *Org) {
+	o.CodexModelObserveTimeout = testCodexObserveGenerousBudget
+}
+
 // testOrg builds an Org backed by temp-file manifest/receipt stores and
 // fresh fake driver clients, using the shared testOrgConfig() from
 // envelope_test.go (max_seats=3, claude+codex pools).
@@ -240,9 +266,11 @@ func (f *fakeAgmsg) Leave(_ context.Context, team, agentID string) error {
 // YYYY/MM/DD layout (codex_session_test.go's fixture helpers). The
 // observe timeout/interval are pinned to near-zero so a codex seat's
 // spawn-time poll never adds real wall-clock time to a test that doesn't
-// care about it -- tests that do (the poll actually retrying) override
-// both fields on the returned *Org after construction, the same pattern
-// SendEnterDelay already uses above.
+// care about it -- tests that do (the poll actually retrying, or a pass
+// that must genuinely find a record) override CodexModelObserveTimeout
+// (testCodexObserveGenerousBudget, above, for the found case) and/or
+// CodexModelObserveInterval on the returned *Org after construction, the
+// same pattern SendEnterDelay already uses above.
 func testOrg(t *testing.T) (*Org, *fakeHerdr, *fakeAgmsg) {
 	t.Helper()
 	dir := t.TempDir()
@@ -2208,6 +2236,10 @@ func TestOrgSpawn_Codex_ModelObservation_Found(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			o, _, _ := codexGuardedOrg(t, "implementer")
+			// The fixture already qualifies before Spawn is even called, so
+			// its very first, no-wait poll must find it -- give that pass a
+			// generous scan budget rather than testOrg's tiny default.
+			o.CodexModelObserveTimeout = testCodexObserveGenerousBudget
 			p := mustCodexSpawnParams("org-a", "seat-1")
 
 			promptPath, err := o.promptFilePath(p.OrgID, p.SeatID)
@@ -2520,6 +2552,10 @@ func TestOrgSpawn_Codex_ParentCtxCancelledAfterReadError_CutShortStillWins(t *te
 // guess.
 func TestOrgSpawn_Codex_ModelObservation_Ambiguous(t *testing.T) {
 	o, _, _ := codexGuardedOrg(t, "implementer")
+	// Reaching "ambiguous" requires reading BOTH qualifying candidates in
+	// full before the first, no-wait poll can conclude -- give that pass a
+	// generous scan budget rather than testOrg's tiny default.
+	o.CodexModelObserveTimeout = testCodexObserveGenerousBudget
 	p := mustCodexSpawnParams("org-a", "seat-1")
 
 	promptPath, err := o.promptFilePath(p.OrgID, p.SeatID)
@@ -2548,7 +2584,7 @@ func TestOrgSpawn_Codex_ModelObservation_Ambiguous(t *testing.T) {
 func TestOrgSpawn_Codex_ModelObservation_FoundOnLaterPoll(t *testing.T) {
 	o, _, _ := codexGuardedOrg(t, "implementer")
 	o.CodexModelObserveInterval = 10 * time.Millisecond
-	o.CodexModelObserveTimeout = 2 * time.Second
+	o.CodexModelObserveTimeout = testCodexObserveGenerousBudget
 	p := mustCodexSpawnParams("org-a", "seat-1")
 
 	promptPath, err := o.promptFilePath(p.OrgID, p.SeatID)
@@ -2605,6 +2641,19 @@ func TestOrgSpawn_Codex_ModelObservation_FoundOnLaterPoll(t *testing.T) {
 // it.
 func TestOrgSpawn_Codex_OldSessionRecordNotPickedOnRespawn(t *testing.T) {
 	o, _, _ := codexGuardedOrg(t, "implementer")
+	// This test's own claim is that the stale candidate is examined and
+	// excluded BY AGE -- not merely that Spawn ends up unknown some other
+	// way. With testOrg's tiny (1ms) default, a pass cut short mid-scan
+	// would reach the same "unknown" outcome without ever actually reading
+	// the stale record's session_meta timestamp, letting this test pass
+	// for the wrong reason under load. Unlike the FOUND tests, this one
+	// must NOT use the generous budget: nothing here will ever be found,
+	// so the poll always waits out the full budget before returning --
+	// testCodexObserveGenerousBudget would make this one test take 30s. A
+	// modest, explicit budget instead gives ample margin over the single
+	// fast (one-line) read this test's single candidate needs, without
+	// slowing the suite.
+	o.CodexModelObserveTimeout = 50 * time.Millisecond
 	p := mustCodexSpawnParams("org-a", "seat-1")
 
 	promptPath, err := o.promptFilePath(p.OrgID, p.SeatID)

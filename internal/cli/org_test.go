@@ -1128,6 +1128,32 @@ func setCodexSessionsDirOverride(t *testing.T, dir string) {
 	t.Cleanup(func() { orgCodexSessionsDirOverride = orig })
 }
 
+// testOrgCodexObserveGenerousBudget is the scan budget a CLI test sets (in
+// place of TestMain's tiny 50ms default) whenever a spawn or stop it
+// drives must actually FIND a real, matching session record on disk: a
+// found or ambiguous result returns at once, so this budget is only an
+// upper bound and costs nothing on the normal (fast) path -- it only
+// matters as headroom against ReadDir/Lstat/open/line-read latency under
+// CI-level scheduling contention, since org.Org's observer now checks its
+// ctx inside a single scan pass, not merely between polls.
+const testOrgCodexObserveGenerousBudget = 30 * time.Second
+
+// setCodexModelObserveTimeoutOverride points org.go's
+// orgCodexModelObserveTimeoutOverride seam at timeout for the duration of
+// the calling test, restoring TestMain's own pinned value afterward -- the
+// same save/restore/cleanup pattern setCodexSessionsDirOverride above
+// uses. A spawn test that needs its OWN poll to find a record sets this
+// before running that spawn; a stop test whose spawn is meant to come back
+// unknown (no fixture yet) sets this AFTER that spawn and BEFORE the stop
+// that must find one, so the spawn still runs under TestMain's own tiny
+// default.
+func setCodexModelObserveTimeoutOverride(t *testing.T, timeout time.Duration) {
+	t.Helper()
+	orig := orgCodexModelObserveTimeoutOverride
+	orgCodexModelObserveTimeoutOverride = timeout
+	t.Cleanup(func() { orgCodexModelObserveTimeoutOverride = orig })
+}
+
 // TestOrgSpawn_CLI_CodexModelMismatch_PrintsWarning is AC-6's spawn-time
 // path: a codex seat's session record (already on disk before the command
 // runs, so Spawn's very first, no-wait poll finds it) reports a different
@@ -1140,6 +1166,10 @@ func TestOrgSpawn_CLI_CodexModelMismatch_PrintsWarning(t *testing.T) {
 	configPath := writeCodexOrgConfig(t, dir, 3, "implementer")
 	sessionsDir := filepath.Join(dir, "codex-sessions")
 	setCodexSessionsDirOverride(t, sessionsDir)
+	// The fixture below already qualifies before spawn even runs, so its
+	// very first, no-wait poll must find it -- give that pass a generous
+	// scan budget rather than TestMain's tiny default.
+	setCodexModelObserveTimeoutOverride(t, testOrgCodexObserveGenerousBudget)
 
 	promptPath := codexPromptPathFor(stateDir, "org-a", "seat-1")
 	writeCliCodexFixture(t, sessionsDir, promptPath, time.Now().Add(time.Second), codexOrgTestReportedModel)
@@ -1169,6 +1199,13 @@ func TestOrgSpawn_CLI_CodexModelMatch_NoWarning(t *testing.T) {
 	configPath := writeCodexOrgConfig(t, dir, 3, "implementer")
 	sessionsDir := filepath.Join(dir, "codex-sessions")
 	setCodexSessionsDirOverride(t, sessionsDir)
+	// This test's own claim is that a MATCHING observation prints no
+	// warning -- not merely that an observation cut short (which also
+	// prints no warning) happened to land here too. The fixture already
+	// qualifies before spawn runs, so give its first, no-wait poll a
+	// generous scan budget rather than TestMain's tiny default, so it
+	// actually reaches the match path.
+	setCodexModelObserveTimeoutOverride(t, testOrgCodexObserveGenerousBudget)
 
 	promptPath := codexPromptPathFor(stateDir, "org-a", "seat-1")
 	writeCliCodexFixture(t, sessionsDir, promptPath, time.Now().Add(time.Second), codexOrgTestCommandedModel)
@@ -1238,6 +1275,11 @@ func TestOrgStop_CLI_CodexModelMismatch_PrintsWarning(t *testing.T) {
 	if strings.Contains(spawnOut, "warning:") {
 		t.Errorf("expected no warning at spawn time (no fixture yet), got: %s", spawnOut)
 	}
+	// Spawn ran above under TestMain's own tiny default (correctly: no
+	// fixture existed yet). Only stop's separate observation below needs a
+	// generous budget to actually find the fixture written just after
+	// this line.
+	setCodexModelObserveTimeoutOverride(t, testOrgCodexObserveGenerousBudget)
 
 	promptPath := codexPromptPathFor(stateDir, "org-a", "seat-1")
 	writeCliCodexFixture(t, sessionsDir, promptPath, time.Now().Add(time.Second), codexOrgTestReportedModel)
@@ -1271,6 +1313,10 @@ func TestOrgStop_CLI_CodexModelMatch_NoWarning(t *testing.T) {
 	); err != nil {
 		t.Fatalf("spawn failed: %v", err)
 	}
+	// This test's own claim is that a MATCHING observation prints no
+	// warning at stop time -- not merely that an observation cut short
+	// (which also prints no warning) happened to land here too.
+	setCodexModelObserveTimeoutOverride(t, testOrgCodexObserveGenerousBudget)
 
 	promptPath := codexPromptPathFor(stateDir, "org-a", "seat-1")
 	writeCliCodexFixture(t, sessionsDir, promptPath, time.Now().Add(time.Second), codexOrgTestCommandedModel)

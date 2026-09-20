@@ -1353,6 +1353,11 @@ func TestOrgStop_Codex_AppendsWhenSpawnReceiptWasUnknown(t *testing.T) {
 	if spawnResult.ModelReceipt.Honored != HonoredUnknown {
 		t.Fatalf("expected spawn's own receipt to be unknown (no fixture yet), got %+v", spawnResult.ModelReceipt)
 	}
+	// Spawn ran above under testOrg's own tiny default (correctly, so its
+	// own poll returns quickly with nothing to find); only Stop's separate
+	// observation below needs a generous budget to actually find the
+	// fixture written just after this line.
+	raiseCodexObserveBudgetForStop(o)
 
 	promptPath, err := o.promptFilePath(p.OrgID, p.SeatID)
 	if err != nil {
@@ -1396,6 +1401,7 @@ func TestOrgStop_Codex_HonoredFalse_ObservedAtStop(t *testing.T) {
 	if r := o.Spawn(p); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("spawn failed: %+v", r)
 	}
+	raiseCodexObserveBudgetForStop(o)
 
 	promptPath, err := o.promptFilePath(p.OrgID, p.SeatID)
 	if err != nil {
@@ -1443,6 +1449,10 @@ func TestOrgStop_Codex_HonoredFalse_ObservedAtStop(t *testing.T) {
 // produce the same zero ModelReceipt and the same receipts-file count.
 func TestOrgStop_Codex_DoesNotAppendWhenAlreadyObserved(t *testing.T) {
 	o, _, _ := codexGuardedOrg(t, "implementer")
+	// The fixture below already qualifies before Spawn is even called, so
+	// Spawn's own first, no-wait poll must find it -- give that pass a
+	// generous scan budget rather than testOrg's tiny default.
+	o.CodexModelObserveTimeout = testCodexObserveGenerousBudget
 	p := mustCodexSpawnParams("org-a", "seat-1")
 
 	base := time.Date(2026, 9, 18, 7, 20, 0, 0, time.UTC)
@@ -1500,6 +1510,10 @@ func TestOrgStop_Codex_DoesNotAppendWhenAlreadyObserved(t *testing.T) {
 // not the same as "already observed".
 func TestOrgStop_Codex_AppendsWhenNoReceiptAtAllForThisSpawn(t *testing.T) {
 	o, _, _ := codexGuardedOrg(t, "implementer")
+	// No Spawn call happens in this test (the manifest trail is seeded
+	// directly below), so only Stop's own observation is at stake -- give
+	// it a generous scan budget rather than testOrg's tiny default.
+	o.CodexModelObserveTimeout = testCodexObserveGenerousBudget
 	promptPath, err := o.promptFilePath("org-a", "seat-1")
 	if err != nil {
 		t.Fatalf("promptFilePath: %v", err)
@@ -1533,6 +1547,10 @@ func TestOrgStop_Codex_AppendsWhenNoReceiptAtAllForThisSpawn(t *testing.T) {
 // mistaken for "already observed".
 func TestOrgStop_Codex_AppendsWhenOnlyRejectionReceiptExistsSince(t *testing.T) {
 	o, _, _ := codexGuardedOrg(t, "implementer")
+	// No Spawn call happens in this test (the manifest trail is seeded
+	// directly below), so only Stop's own observation is at stake -- give
+	// it a generous scan budget rather than testOrg's tiny default.
+	o.CodexModelObserveTimeout = testCodexObserveGenerousBudget
 	promptPath, err := o.promptFilePath("org-a", "seat-1")
 	if err != nil {
 		t.Fatalf("promptFilePath: %v", err)
@@ -1593,6 +1611,11 @@ func TestOrgStop_Codex_DryRunRespawnDoesNotDisplaceRealSpawnCorrelation(t *testi
 	if spawnResult.ModelReceipt.Honored != HonoredUnknown {
 		t.Fatalf("expected the real spawn's own receipt to be unknown (no fixture yet), got %+v", spawnResult.ModelReceipt)
 	}
+	// The real spawn above ran under testOrg's own tiny default (correctly:
+	// no fixture existed yet). The dry-run respawn below never calls the
+	// observer at all (AC-8), so only Stop's own separate observation
+	// needs the generous budget.
+	raiseCodexObserveBudgetForStop(o)
 
 	mrr, err := o.Manifest.Read()
 	if err != nil {
@@ -1669,6 +1692,11 @@ func TestOrgStop_Codex_DryRunRespawnDoesNotDisplaceRealSpawnCorrelation(t *testi
 // a false honored=false.
 func TestOrgStop_Codex_RecoversCommandedModelAfterInterruptedRetryRejected(t *testing.T) {
 	o, _, _ := codexGuardedOrg(t, "implementer")
+	// The only Spawn call in this test is the rejected retry below, which
+	// fails envelope validation before ever reaching the observer -- so
+	// only Stop's own observation is at stake. Give it a generous scan
+	// budget rather than testOrg's tiny default.
+	o.CodexModelObserveTimeout = testCodexObserveGenerousBudget
 	const orgID, seatID = "org-a", "seat-1"
 
 	promptPath, err := o.promptFilePath(orgID, seatID)
@@ -1730,6 +1758,11 @@ func TestOrgStop_Codex_RecoversCommandedModelAfterInterruptedRetryRejected(t *te
 // CORRELATED spawn's own Driver, never the roster's.
 func TestOrgStop_Codex_ObservesWhenRejectedRetryUsedADifferentDriver(t *testing.T) {
 	o, _, _ := codexGuardedOrg(t, "implementer")
+	// The only Spawn call in this test is the rejected retry below, which
+	// fails envelope validation before ever reaching the observer -- so
+	// only Stop's own observation is at stake. Give it a generous scan
+	// budget rather than testOrg's tiny default.
+	o.CodexModelObserveTimeout = testCodexObserveGenerousBudget
 	const orgID, seatID = "org-a", "seat-1"
 
 	promptPath, err := o.promptFilePath(orgID, seatID)
@@ -2098,6 +2131,7 @@ func TestOrgStop_Codex_RecoversPromptPathAfterAgentStartRetry(t *testing.T) {
 	if spawnResult.ModelReceipt.Honored != HonoredUnknown {
 		t.Fatalf("expected spawn's own receipt to be unknown (no fixture yet), got %+v", spawnResult.ModelReceipt)
 	}
+	raiseCodexObserveBudgetForStop(o)
 
 	// Test setup invariant: the retry actually happened, and the persisted
 	// Details carries the exact suffix this fix must see through.
@@ -2172,6 +2206,7 @@ func TestOrgStop_Codex_SameSecondRespawn_PreviousReceiptDoesNotSuppressObservati
 	if spawnResult.ModelReceipt.Honored != HonoredUnknown {
 		t.Fatalf("expected B's own spawn-time receipt to be unknown (no fixture yet), got %+v", spawnResult.ModelReceipt)
 	}
+	raiseCodexObserveBudgetForStop(o)
 
 	promptPath, err := o.promptFilePath(p.OrgID, p.SeatID)
 	if err != nil {
@@ -2222,6 +2257,7 @@ func TestOrgStop_Codex_ObservesSessionThatStartedDaysAfterSpawn(t *testing.T) {
 	if spawnResult.ModelReceipt.Honored != HonoredUnknown {
 		t.Fatalf("expected spawn's own receipt to be unknown (no session record yet), got %+v", spawnResult.ModelReceipt)
 	}
+	raiseCodexObserveBudgetForStop(o)
 
 	// The dialog is answered three days later -- advance the fake clock so
 	// Stop's own until (o.nowTime()) reaches that day's directory.
@@ -2384,6 +2420,12 @@ func TestOrgStop_Codex_ReceiptsAppendFailureLeavesStopSuccessful(t *testing.T) {
 	if r := o.Spawn(p); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("spawn failed: %+v", r)
 	}
+	// This test's own claim is that the append call is actually attempted
+	// and fails -- not merely that nothing ends up persisted for some
+	// other reason (e.g. the observation itself being cut short). Stop's
+	// observation below must genuinely find the fixture for that call to
+	// be reached at all.
+	raiseCodexObserveBudgetForStop(o)
 
 	promptPath, err := o.promptFilePath(p.OrgID, p.SeatID)
 	if err != nil {
