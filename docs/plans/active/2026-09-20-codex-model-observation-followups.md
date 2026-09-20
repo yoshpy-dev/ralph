@@ -99,6 +99,7 @@ codex 座席の実効モデルの観測(#165)に残った 2 つの不具合を�
 - 2026-09-20 work: Slice A(1205775)と Slice B(b133022)は implementer に委譲。Slice A: `codexSpawnCorrelation` が `codexSpawnInfo`(開始時刻、役割指示ファイルのパス、`Model` / `Driver` / `Role`)を返し、`Stop` の「codex 座席か」の判定と receipt の比較対象はこの値を使う。AC-1 の順序(中断 → 別モデルでの再試行が拒否 → stop)のテストは、修正前のコードで誤った `honored=false` になることを確認済み。manifest の二重読み取りは残した(正しさを優先)。Slice B: 観測関数に ctx を通し、候補の収集(ディレクトリごと・エントリごと)、ファイルを開く前、1 行ごとに確認する。打ち切られた走査は found を返さない。spawn は観測の上限で区切った ctx、stop も同じ上限。テストは回数で終わる fake の ctx を使い、実時間に依存しない。逸脱: ファイルを開く前の確認だけを外してもテストは落ちず(1 行目の確認が同じ結果を出す)、両方外して初めて落ちることを implementer が確認
 - 2026-09-20 work: orchestrator が HEAD 一致・porcelain 空・差分を確認。`observeCodexSpawnReceipt` の `lastErr` は「最後に完了した走査のエラー」という doc comment に反して、エラーなしで完了した走査が前の読み取りエラーを消していなかった(早い走査で読めず、後の走査で読めて一致もしなかった場合に「読めない」と報告する)ため、完了した走査は nil でも代入するよう修正(6b63b69、inline の 1 行)
 - 2026-09-20 self-review cycle 1(`docs/reports/self-review-2026-09-20-codex-model-observation-followups.md`、b4b8075): Merge、MEDIUM 2 / LOW 5。2 つの修正が判定を実際に下している箇所に入っていること、「完了した走査は ctx が切れていても結果を返す」がそのとおり実装されていること、ctx のエラーが receipt の理由に漏れないことを確認。全件を同 cycle 内で修正(implementer、6564680。orchestrator が差分を確認): M1 spawn の待ちの doc comment をコードの規則に合わせた(親の ctx が先、それ以外は最後に完了した走査が決める)。M2 ctx の確認の位置が 1 行ごとの確認しかテストで固定されていなかった → ディレクトリごと・エントリごと・ファイルを開く前の確認それぞれに、消すと落ちるテストを追加(3 件とも一時的に消して失敗を確認)。L1 `stopped` イベントが roster の値を記録し続けるのは意図どおりであることをコメントで明記。L2 stop の manifest の読み取りを 1 回に統一(`seatFromEvents` を切り出し、同じ events を対応付けにも渡す。既存の stop のテストは変更なしで通る)。L3 / L4 指摘番号だけの引用と変更前の状態を語るコメントを挙動の説明に書き換え。L5 `StopResult.ModelReceipt` の doc を全 return に合わせた
+- 2026-09-20 sync-docs cycle 1: self-review / verify 共通で指摘された既知の drift(stop の 1 回の観測自体が spawn と同じ最大 8 秒の上限を持つことがどこにも書かれていない)に、`.claude/rules/ralph/model-routing.md`(+ `templates/base/` 側)、`docs/recipes/codex-seat-permissions.md`(+ `templates/base/` 側)、`.claude/skills/org/SKILL.md`(+ `.agents/skills/org/`・`templates/base/` 2 面)の既存文に一節ずつ追記。spawn 側の「最大 8 秒」の文言、`rejected` 再試行修正の doc 追記、`docs/tech-debt/README.md`(#173 を指す行なし、既存行は不変)は変更不要と判断(詳細は sync-docs report)
 
 ## Progress checklist
 
@@ -106,8 +107,8 @@ codex 座席の実効モデルの観測(#165)に残った 2 つの不具合を�
 - [x] Branch created
 - [x] Implementation started
 - [x] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Verification artifact created
+- [x] Test artifact created
 - [ ] PR created
 
 ## Readiness checklist
