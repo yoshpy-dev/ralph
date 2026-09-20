@@ -96,11 +96,14 @@ codex 座席の実効モデルの観測(#165)に残った 2 つの不具合を�
 
 ## Deviation notes
 
+- 2026-09-20 work: Slice A(1205775)と Slice B(b133022)は implementer に委譲。Slice A: `codexSpawnCorrelation` が `codexSpawnInfo`(開始時刻、役割指示ファイルのパス、`Model` / `Driver` / `Role`)を返し、`Stop` の「codex 座席か」の判定と receipt の比較対象はこの値を使う。AC-1 の順序(中断 → 別モデルでの再試行が拒否 → stop)のテストは、修正前のコードで誤った `honored=false` になることを確認済み。manifest の二重読み取りは残した(正しさを優先)。Slice B: 観測関数に ctx を通し、候補の収集(ディレクトリごと・エントリごと)、ファイルを開く前、1 行ごとに確認する。打ち切られた走査は found を返さない。spawn は観測の上限で区切った ctx、stop も同じ上限。テストは回数で終わる fake の ctx を使い、実時間に依存しない。逸脱: ファイルを開く前の確認だけを外してもテストは落ちず(1 行目の確認が同じ結果を出す)、両方外して初めて落ちることを implementer が確認
+- 2026-09-20 work: orchestrator が HEAD 一致・porcelain 空・差分を確認。`observeCodexSpawnReceipt` の `lastErr` は「最後に完了した走査のエラー」という doc comment に反して、エラーなしで完了した走査が前の読み取りエラーを消していなかった(早い走査で読めず、後の走査で読めて一致もしなかった場合に「読めない」と報告する)ため、完了した走査は nil でも代入するよう修正(6b63b69、inline の 1 行)
+
 ## Progress checklist
 
 - [x] Plan reviewed
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
