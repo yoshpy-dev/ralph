@@ -3,6 +3,7 @@ package org
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -136,15 +137,35 @@ type CodexModelObservation struct {
 // This function is pure: no environment reads, no globals mutated, no
 // goroutines, no writes. It never returns partial or guessed content -- see
 // CodexModelObservation's doc comment. The non-nil error return is reserved
-// for a specific, content-free signal a caller might want to log (a
-// candidate file that exists but could not be opened, e.g. permission
-// denied); every other failure mode -- a missing sessionsDir, an unreadable
-// date directory, a missing/unreadable candidate file, a malformed or
-// oversized line -- degrades silently to CodexObservationNotFound with a
-// nil error. Neither caller (Spawn's poll, Stop's single check) ever lets a
-// codex CLI record-shape change or a permissions quirk fail the seat's own
-// spawn or stop.
-func ObserveCodexEffectiveModel(sessionsDir, promptPath string, spawnStarted, until time.Time) (CodexModelObservation, error) {
+// for two content-free signals a caller might want to log: a candidate file
+// that exists but could not be opened (e.g. permission denied), or ctx
+// being done (see below); every other failure mode -- a missing
+// sessionsDir, an unreadable date directory, a missing/unreadable candidate
+// file, a malformed or oversized line -- degrades silently to
+// CodexObservationNotFound with a nil error. Neither caller (Spawn's poll,
+// Stop's single check) ever lets a codex CLI record-shape change or a
+// permissions quirk fail the seat's own spawn or stop.
+//
+// ctx cancellation is cooperative and checked at three points: before each
+// date directory and each directory entry considered while gathering
+// candidates (codexRolloutCandidates), before opening each candidate file,
+// and once per line while reading a candidate (scanRolloutRecord) -- so a
+// caller-supplied deadline (e.g. observeCodexSpawnReceipt's own observation
+// budget) bounds a single call, not just the gap between repeated calls.
+// A pass cut short by ctx at any of those points returns
+// CodexObservationNotFound alongside ctx's own error and NEVER
+// CodexObservationFound, even if a match was already seen on an earlier
+// candidate -- an unexamined later candidate could still have made the
+// result ambiguous, so "cut short" can never be distinguished from
+// "genuinely not found" well enough to report found. A pass that reaches
+// its natural end (every candidate examined) returns its real result even
+// if ctx expired right as it finished -- the identification is already
+// sound at that point. Because the checks are cooperative, not preemptive,
+// synchronous file I/O itself cannot be interrupted: this call can overrun
+// ctx's deadline by the time of one read (at most codexObserveMaxLineBytes)
+// or one syscall (ReadDir/Lstat/Open) already in flight when ctx becomes
+// done.
+func ObserveCodexEffectiveModel(ctx context.Context, sessionsDir, promptPath string, spawnStarted, until time.Time) (CodexModelObservation, error) {
 	if sessionsDir == "" || promptPath == "" {
 		return CodexModelObservation{Status: CodexObservationNotFound}, nil
 	}
@@ -155,7 +176,12 @@ func ObserveCodexEffectiveModel(sessionsDir, promptPath string, spawnStarted, un
 	}
 
 	cutoff := spawnStarted.Truncate(time.Second)
-	candidates := codexRolloutCandidates(sessionsDir, spawnStarted, until)
+	candidates, err := codexRolloutCandidates(ctx, sessionsDir, spawnStarted, until)
+	if err != nil {
+		// Cut short while still gathering candidates: the pass never even
+		// finished deciding what to look at, let alone which one qualifies.
+		return CodexModelObservation{Status: CodexObservationNotFound}, err
+	}
 
 	var (
 		matchedModel string
@@ -163,9 +189,16 @@ func ObserveCodexEffectiveModel(sessionsDir, promptPath string, spawnStarted, un
 		firstErr     error
 	)
 	for _, c := range candidates {
-		matched, model, err := scanRolloutRecord(c.path, promptPath, cutoff)
-		if err != nil && firstErr == nil {
-			firstErr = err
+		matched, model, scanErr := scanRolloutRecord(ctx, c.path, promptPath, cutoff)
+		if isCtxDoneErr(scanErr) {
+			// Cut short before this candidate could even be opened, or
+			// partway through reading it: whatever matched on an earlier
+			// candidate cannot be trusted as the final answer (see this
+			// function's own doc comment) -- unknown, never found.
+			return CodexModelObservation{Status: CodexObservationNotFound}, scanErr
+		}
+		if scanErr != nil && firstErr == nil {
+			firstErr = scanErr
 		}
 		if !matched {
 			continue
@@ -190,6 +223,17 @@ func ObserveCodexEffectiveModel(sessionsDir, promptPath string, spawnStarted, un
 	}
 }
 
+// isCtxDoneErr reports whether err is exactly the ctx-cancellation signal
+// scanRolloutRecord (or codexRolloutCandidates) returns when a pass was cut
+// short -- context.Canceled or context.DeadlineExceeded, ctx's own Err() --
+// as opposed to a genuine read error (a wrapped os.PathError; see
+// scanRolloutRecord's own doc comment). Only a ctx-cut-short error ends the
+// whole ObserveCodexEffectiveModel pass early; a genuine read error is
+// recorded (firstErr) and scanning continues to the next candidate.
+func isCtxDoneErr(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+
 // codexRolloutCandidate is one file gathered by codexRolloutCandidates,
 // carrying just enough to sort and open it.
 type codexRolloutCandidate struct {
@@ -210,17 +254,35 @@ type codexRolloutCandidate struct {
 // spawnStarted only, not until -- it stays a cheap "cannot possibly be
 // this spawn" filter, never a decision about how late a legitimate record
 // may have been touched (see the constant's own doc comment).
-func codexRolloutCandidates(sessionsDir string, spawnStarted, until time.Time) []codexRolloutCandidate {
+//
+// ctx.Err() is checked before each date directory's own ReadDir and before
+// each of its entries' Lstat -- listing, stat'ing, and sorting are
+// otherwise unbounded work that would run to completion regardless of a
+// caller's deadline (ObserveCodexEffectiveModel's own doc comment). A
+// non-nil error return means the walk was cut short: it is always exactly
+// ctx.Err() (context.Canceled or context.DeadlineExceeded), never a
+// directory-read error (those are skipped silently, per the paragraph
+// above), and the returned candidate slice is nil in that case -- a
+// partial candidate list is never useful to the caller, which discards
+// the whole pass on this error regardless of what had already been
+// gathered.
+func codexRolloutCandidates(ctx context.Context, sessionsDir string, spawnStarted, until time.Time) ([]codexRolloutCandidate, error) {
 	minModTime := spawnStarted.Add(-codexObserveModTimeSlack)
 
 	var candidates []codexRolloutCandidate
 	for _, dateDir := range codexSessionDateDirs(spawnStarted, until) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		dirPath := filepath.Join(sessionsDir, dateDir)
 		entries, err := os.ReadDir(dirPath)
 		if err != nil {
 			continue
 		}
 		for _, entry := range entries {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			name := entry.Name()
 			if !isCodexRolloutFileName(name) {
 				continue
@@ -243,7 +305,7 @@ func codexRolloutCandidates(sessionsDir string, spawnStarted, until time.Time) [
 	if len(candidates) > codexObserveMaxFiles {
 		candidates = candidates[:codexObserveMaxFiles]
 	}
-	return candidates
+	return candidates, nil
 }
 
 // isCodexRolloutFileName reports whether name matches codex's rollout
@@ -350,14 +412,19 @@ const (
 // seen -- scanning stops and matched is false unless everything needed was
 // already found.
 //
-// err is non-nil only when path exists (it was already Lstat'd as a
+// err is non-nil in two cases: path exists (it was already Lstat'd as a
 // regular, name-matching, recently-modified file by the caller) but could
-// not be opened -- e.g. permission denied. That error is a plain wrapped
-// os.PathError: it names the operation and the path, never any line
-// content. Every other failure -- the file having vanished in the race
-// between Lstat and Open, a malformed line, an unparsable timestamp --
-// degrades to matched=false, err=nil.
-func scanRolloutRecord(path, promptPath string, cutoff time.Time) (matched bool, model string, err error) {
+// not be opened -- e.g. permission denied -- which returns a plain wrapped
+// os.PathError naming the operation and the path, never any line content;
+// or ctx became done, checked once before opening path and once per line
+// read thereafter, which returns ctx.Err() itself (see isCtxDoneErr, the
+// caller's way to tell the two apart). Every other failure -- the file
+// having vanished in the race between Lstat and Open, a malformed line, an
+// unparsable timestamp -- degrades to matched=false, err=nil.
+func scanRolloutRecord(ctx context.Context, path, promptPath string, cutoff time.Time) (matched bool, model string, err error) {
+	if err := ctx.Err(); err != nil {
+		return false, "", err
+	}
 	f, openErr := os.Open(path)
 	if openErr != nil {
 		if errors.Is(openErr, fs.ErrNotExist) {
@@ -380,6 +447,9 @@ func scanRolloutRecord(path, promptPath string, cutoff time.Time) (matched bool,
 	}
 
 	for {
+		if err := ctx.Err(); err != nil {
+			return false, "", err
+		}
 		line, readErr := reader.ReadBytes('\n')
 		if len(line) > 0 && len(line) <= codexObserveMaxLineBytes {
 			trimmed := bytes.TrimSpace(line)

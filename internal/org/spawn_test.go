@@ -217,6 +217,43 @@ func (f *fakeAgmsg) Leave(_ context.Context, team, agentID string) error {
 	return f.leaveErr
 }
 
+// testCodexObserveGenerousBudget is the scan budget a test sets (in place
+// of testOrg's tiny default below) whenever Spawn's poll or Stop's single
+// check must actually FIND a real, matching session record: a found or
+// ambiguous result returns at once, so this budget is only an upper
+// bound, never something the test waits out -- it costs nothing on the
+// normal (fast) path and only matters as headroom against ReadDir/Lstat/
+// open/line-read latency under CI-level scheduling contention (the ctx
+// checked inside a single scan pass, not merely between polls). A test
+// that instead wants the budget itself to run out (not-found, cut-short,
+// budget-exhausted-mid-pass) keeps testOrg's own tiny default or sets its
+// own small, explicit value -- never this constant.
+//
+// A third category needs neither: a test whose terminal state depends on
+// at least one pass COMPLETING (reaching os.Open and recording a read
+// error, say) before the budget expires, but that budget must still run
+// out quickly because nothing it can find will ever satisfy it. testOrg's
+// 1ms default risks cutting that first pass short (degrading the result
+// to not-found, since a cut-short pass never sets lastErr); this
+// constant's 30s would make the test wait out the full 30s for nothing.
+// Such a test sets its own modest, explicit budget instead (e.g. 50ms) --
+// enough margin for one pass to complete, small enough to keep the suite
+// fast.
+const testCodexObserveGenerousBudget = 30 * time.Second
+
+// raiseCodexObserveBudgetForStop sets o.CodexModelObserveTimeout to
+// testCodexObserveGenerousBudget, for the common shape across the Stop
+// tests below: Spawn runs first under testOrg's own tiny default (so a
+// spawn with no fixture on disk yet still returns quickly, honored
+// unknown), then a fixture appears, then Stop's own separate observation
+// must actually find it. Every call site places this AFTER the Spawn call
+// it follows and BEFORE the Stop call it precedes -- never before Spawn,
+// or Spawn's own poll would wait out the generous budget instead of
+// returning its intended "nothing here yet" result.
+func raiseCodexObserveBudgetForStop(o *Org) {
+	o.CodexModelObserveTimeout = testCodexObserveGenerousBudget
+}
+
 // testOrg builds an Org backed by temp-file manifest/receipt stores and
 // fresh fake driver clients, using the shared testOrgConfig() from
 // envelope_test.go (max_seats=3, claude+codex pools).
@@ -240,9 +277,11 @@ func (f *fakeAgmsg) Leave(_ context.Context, team, agentID string) error {
 // YYYY/MM/DD layout (codex_session_test.go's fixture helpers). The
 // observe timeout/interval are pinned to near-zero so a codex seat's
 // spawn-time poll never adds real wall-clock time to a test that doesn't
-// care about it -- tests that do (the poll actually retrying) override
-// both fields on the returned *Org after construction, the same pattern
-// SendEnterDelay already uses above.
+// care about it -- tests that do (the poll actually retrying, or a pass
+// that must genuinely find a record) override CodexModelObserveTimeout
+// (testCodexObserveGenerousBudget, above, for the found case) and/or
+// CodexModelObserveInterval on the returned *Org after construction, the
+// same pattern SendEnterDelay already uses above.
 func testOrg(t *testing.T) (*Org, *fakeHerdr, *fakeAgmsg) {
 	t.Helper()
 	dir := t.TempDir()
@@ -2208,6 +2247,10 @@ func TestOrgSpawn_Codex_ModelObservation_Found(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			o, _, _ := codexGuardedOrg(t, "implementer")
+			// The fixture already qualifies before Spawn is even called, so
+			// its very first, no-wait poll must find it -- give that pass a
+			// generous scan budget rather than testOrg's tiny default.
+			o.CodexModelObserveTimeout = testCodexObserveGenerousBudget
 			p := mustCodexSpawnParams("org-a", "seat-1")
 
 			promptPath, err := o.promptFilePath(p.OrgID, p.SeatID)
@@ -2278,6 +2321,19 @@ func TestOrgSpawn_Codex_ModelObservation_ReadError_DistinctReason(t *testing.T) 
 		t.Skip("root ignores a read-only file's permission bit")
 	}
 	o, _, _ := codexGuardedOrg(t, "implementer")
+	// This test's own claim is that the exact reason text distinguishes a
+	// COMPLETED read-error pass from not-found -- that requires at least
+	// one pass to reach os.Open on the permission-denied candidate and
+	// return before the budget expires. testOrg's tiny (1ms) default risks
+	// cutting that first pass short, degrading the reason to not-found
+	// (lastErr stays nil): the third category testCodexObserveGenerousBudget's
+	// own doc names -- a pass must COMPLETE before the budget runs out. A
+	// modest, explicit budget gives that one open+immediate-fail pass ample
+	// margin while still running out quickly (this poll never finds
+	// anything to return early on, so the test takes as long as this
+	// budget: 200ms buys a wide margin over one pass for 0.2s of suite
+	// time).
+	o.CodexModelObserveTimeout = 200 * time.Millisecond
 	p := mustCodexSpawnParams("org-a", "seat-1")
 
 	promptPath, err := o.promptFilePath(p.OrgID, p.SeatID)
@@ -2338,12 +2394,192 @@ func TestObserveCodexSpawnReceipt_CtxDone_DistinctReason(t *testing.T) {
 	}
 }
 
+// TestObserveCodexSpawnReceipt_ReadErrorClearedByLaterCleanPass is a /test
+// cycle-1 addition (issue #173 handoff item 9g): a /test-cycle mutation run
+// confirmed that reverting the 6b63b69 fix -- so a completed pass's lastErr
+// is only ever SET on a genuine error and never CLEARED by a later clean
+// pass ("if err != nil && !isCtxDoneErr(err) { lastErr = err }" instead of
+// "if !isCtxDoneErr(err) { lastErr = err }") -- makes the whole
+// internal/org suite pass unchanged; no existing test pinned this specific
+// behavior. This test does: a candidate file that exists but is
+// permission-denied on the first poll (a genuine read error, matched by
+// TestOrgSpawn_Codex_ModelObservation_ReadError_DistinctReason's own
+// technique), fixed to readable by a background goroutine shortly after
+// (comfortably before the observation budget elapses, given the margins
+// below) -- but its content never matches promptPath, so every pass after
+// the fix completes cleanly (no error, no match), never
+// CodexObservationFound. The receipt's reason must be codexNotFoundReason
+// (the later clean pass cleared the earlier read error), never
+// codexReadErrorReason. Confirmed to fail (red) against the 9g mutation and
+// pass (green) at HEAD.
+func TestObserveCodexSpawnReceipt_ReadErrorClearedByLaterCleanPass(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root ignores a read-only file's permission bit")
+	}
+	o, _, _ := codexGuardedOrg(t, "implementer")
+	o.CodexModelObserveTimeout = 300 * time.Millisecond
+	o.CodexModelObserveInterval = 5 * time.Millisecond
+
+	promptPath, err := o.promptFilePath("org-a", "seat-1")
+	if err != nil {
+		t.Fatalf("promptFilePath: %v", err)
+	}
+	spawnStartedAt := time.Now()
+	// A candidate whose embedded pointer sentence names a wholly unrelated
+	// path -- NOT a suffix/prefix variant of promptPath (which would still
+	// contain promptPath as a substring and match anyway, per
+	// codexResponseItemMentionsPrompt's Contains check) -- so no pass this
+	// test drives can ever match it, and the loop keeps polling (never
+	// CodexObservationFound) until the observation budget above elapses.
+	nonMatching := writeQualifyingCodexFixture(t, o.CodexSessionsDir, "/unrelated/other-org_other-seat.md", spawnStartedAt.Add(time.Second), "gpt-5-codex")
+	if err := os.Chmod(nonMatching, 0o000); err != nil {
+		t.Fatalf("chmod fixture unreadable: %v", err)
+	}
+	fixed := make(chan struct{})
+	go func() {
+		time.Sleep(15 * time.Millisecond)
+		_ = os.Chmod(nonMatching, 0o644)
+		close(fixed)
+	}()
+	t.Cleanup(func() {
+		<-fixed
+		_ = os.Chmod(nonMatching, 0o644)
+	})
+
+	base := Receipt{OrgID: "org-a", SeatID: "seat-1", Role: "implementer", Driver: "codex", CommandedModel: "gpt-5-codex"}
+	receipt := o.observeCodexSpawnReceipt(context.Background(), base, promptPath, spawnStartedAt)
+
+	if receipt.Honored != HonoredUnknown || receipt.ReportedEffectiveModel != "" {
+		t.Fatalf("expected an unknown receipt with no reported model, got %+v", receipt)
+	}
+	if receipt.Reason != codexNotFoundReason {
+		t.Fatalf("expected reason %q (a later CLEAN pass must clear an earlier pass's read error), got %q", codexNotFoundReason, receipt.Reason)
+	}
+}
+
+// TestOrgSpawn_Codex_ObservationBudgetExhaustedMidPass_UnknownNotFoundReason
+// is AC-5's first clause, driven through the full Spawn saga: a
+// genuinely qualifying fixture exists on disk, but the observation's own
+// budget (o.codexModelObserveTimeout(), not Spawn's --timeout-ms) is
+// exhausted before any pass can complete -- o.CodexModelObserveTimeout set
+// to a single nanosecond means obsCtx is already done by the time the
+// observer's own first ctx.Err() check runs (inside candidate collection),
+// so this is deterministic without any real sleeping. The result must
+// still be codexNotFoundReason (this function's own budget, not the
+// parent ctx) despite the fixture's existence.
+func TestOrgSpawn_Codex_ObservationBudgetExhaustedMidPass_UnknownNotFoundReason(t *testing.T) {
+	o, _, _ := codexGuardedOrg(t, "implementer")
+	p := mustCodexSpawnParams("org-a", "seat-1")
+
+	promptPath, err := o.promptFilePath(p.OrgID, p.SeatID)
+	if err != nil {
+		t.Fatalf("promptFilePath: %v", err)
+	}
+	writeQualifyingCodexFixture(t, o.CodexSessionsDir, promptPath, time.Now().Add(time.Second), "gpt-5-codex")
+	o.CodexModelObserveTimeout = time.Nanosecond
+
+	result := o.Spawn(p)
+	if result.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("expected spawned, got %+v", result)
+	}
+	if result.ModelReceipt.Honored != HonoredUnknown || result.ModelReceipt.ReportedEffectiveModel != "" {
+		t.Fatalf("expected an unknown receipt with no reported model despite a qualifying fixture existing, got %+v", result.ModelReceipt)
+	}
+	if !strings.Contains(result.ModelReceipt.Reason, "no codex session record") {
+		t.Fatalf("expected the not-found reason text (the observation budget ran out, not the parent ctx), got %q", result.ModelReceipt.Reason)
+	}
+}
+
+// TestOrgSpawn_Codex_ParentCtxCancelledFirst_UnknownCutShortReason is AC-5's
+// second clause, driven through the full Spawn saga: this function's own
+// observation budget is comparatively generous, but Spawn's own
+// --timeout-ms (p.TimeoutMS, 1ms here) is what has already elapsed by the
+// time the observation step runs -- deterministic given the manifest
+// writes and locking every earlier saga step performs, without any real
+// sleeping in this test itself. codexCutShortReason (the parent ctx),
+// never codexNotFoundReason (this function's own budget), must be
+// reported.
+func TestOrgSpawn_Codex_ParentCtxCancelledFirst_UnknownCutShortReason(t *testing.T) {
+	o, _, _ := codexGuardedOrg(t, "implementer")
+	o.CodexModelObserveTimeout = time.Second
+	o.CodexModelObserveInterval = 500 * time.Millisecond
+	p := mustCodexSpawnParams("org-a", "seat-1")
+	p.TimeoutMS = 1
+
+	result := o.Spawn(p)
+	if result.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("expected spawned, got %+v", result)
+	}
+	if result.ModelReceipt.Honored != HonoredUnknown || result.ModelReceipt.ReportedEffectiveModel != "" {
+		t.Fatalf("expected an unknown receipt with no reported model, got %+v", result.ModelReceipt)
+	}
+	if result.ModelReceipt.Reason != codexCutShortReason {
+		t.Fatalf("expected reason %q (the PARENT ctx, Spawn's own --timeout-ms, cut this short), got %q", codexCutShortReason, result.ModelReceipt.Reason)
+	}
+}
+
+// TestOrgSpawn_Codex_ParentCtxCancelledAfterReadError_CutShortStillWins is a
+// /test cycle-1 addition (issue #173 handoff item 9h): a /test-cycle
+// mutation run confirmed that swapping observeCodexSpawnReceipt's priority
+// order -- checking lastErr before ctx.Err(), so a genuine read error from
+// an earlier completed pass would win over a parent ctx that is ALSO done
+// by the time the wait fails -- makes the whole internal/org suite pass
+// unchanged; TestOrgSpawn_Codex_ParentCtxCancelledFirst_UnknownCutShortReason
+// above never actually exercises a non-nil lastErr (it writes no fixture at
+// all), so it cannot discriminate the swap. This test combines both: a
+// permission-denied fixture makes the very first poll pass record a
+// genuine read error (same technique as
+// TestOrgSpawn_Codex_ModelObservation_ReadError_DistinctReason), and a
+// short-but-not-immediate p.TimeoutMS (long enough to survive the saga and
+// that first pass, short enough to expire during the generous
+// CodexModelObserveInterval wait that follows) makes the parent ctx also
+// done by the time waitOrCtxDone fails. codexCutShortReason (the parent
+// ctx) must still win, per this function's own documented priority order
+// ("checked first, so it wins over the two reasons below whenever both are
+// true"). Confirmed to fail (red) against the 9h swap and pass (green) at
+// HEAD.
+func TestOrgSpawn_Codex_ParentCtxCancelledAfterReadError_CutShortStillWins(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root ignores a read-only file's permission bit")
+	}
+	o, _, _ := codexGuardedOrg(t, "implementer")
+	o.CodexModelObserveTimeout = time.Second
+	o.CodexModelObserveInterval = 500 * time.Millisecond
+	p := mustCodexSpawnParams("org-a", "seat-1")
+	p.TimeoutMS = 50
+
+	promptPath, err := o.promptFilePath(p.OrgID, p.SeatID)
+	if err != nil {
+		t.Fatalf("promptFilePath: %v", err)
+	}
+	fixturePath := writeQualifyingCodexFixture(t, o.CodexSessionsDir, promptPath, time.Now().Add(time.Second), "gpt-5-codex")
+	if err := os.Chmod(fixturePath, 0o000); err != nil {
+		t.Fatalf("chmod fixture unreadable: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(fixturePath, 0o644) })
+
+	result := o.Spawn(p)
+	if result.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("expected spawned, got %+v", result)
+	}
+	if result.ModelReceipt.Honored != HonoredUnknown || result.ModelReceipt.ReportedEffectiveModel != "" {
+		t.Fatalf("expected an unknown receipt with no reported model, got %+v", result.ModelReceipt)
+	}
+	if result.ModelReceipt.Reason != codexCutShortReason {
+		t.Fatalf("expected reason %q (the parent ctx must win even though an earlier pass also recorded a genuine read error), got %q", codexCutShortReason, result.ModelReceipt.Reason)
+	}
+}
+
 // TestOrgSpawn_Codex_ModelObservation_Ambiguous is AC-2b's sibling: two
 // records both qualify (same promptPath, both age-eligible), so the poll
 // ends at once with an unknown receipt naming neither model -- never a
 // guess.
 func TestOrgSpawn_Codex_ModelObservation_Ambiguous(t *testing.T) {
 	o, _, _ := codexGuardedOrg(t, "implementer")
+	// Reaching "ambiguous" requires reading BOTH qualifying candidates in
+	// full before the first, no-wait poll can conclude -- give that pass a
+	// generous scan budget rather than testOrg's tiny default.
+	o.CodexModelObserveTimeout = testCodexObserveGenerousBudget
 	p := mustCodexSpawnParams("org-a", "seat-1")
 
 	promptPath, err := o.promptFilePath(p.OrgID, p.SeatID)
@@ -2372,7 +2608,7 @@ func TestOrgSpawn_Codex_ModelObservation_Ambiguous(t *testing.T) {
 func TestOrgSpawn_Codex_ModelObservation_FoundOnLaterPoll(t *testing.T) {
 	o, _, _ := codexGuardedOrg(t, "implementer")
 	o.CodexModelObserveInterval = 10 * time.Millisecond
-	o.CodexModelObserveTimeout = 2 * time.Second
+	o.CodexModelObserveTimeout = testCodexObserveGenerousBudget
 	p := mustCodexSpawnParams("org-a", "seat-1")
 
 	promptPath, err := o.promptFilePath(p.OrgID, p.SeatID)
@@ -2429,6 +2665,26 @@ func TestOrgSpawn_Codex_ModelObservation_FoundOnLaterPoll(t *testing.T) {
 // it.
 func TestOrgSpawn_Codex_OldSessionRecordNotPickedOnRespawn(t *testing.T) {
 	o, _, _ := codexGuardedOrg(t, "implementer")
+	// This test's own claim is that the stale candidate is examined and
+	// excluded BY AGE -- not merely that Spawn ends up unknown some other
+	// way. With testOrg's tiny (1ms) default, a pass cut short mid-scan
+	// would reach the same "unknown" outcome without ever actually reading
+	// the stale record's session_meta timestamp, letting this test pass
+	// for the wrong reason under load. Unlike the FOUND tests, this one
+	// must NOT use the generous budget: nothing here will ever be found,
+	// so the poll always waits out the full budget before returning --
+	// testCodexObserveGenerousBudget would make this one test take 30s. A
+	// modest, explicit budget instead gives ample margin over the single
+	// fast (one-line) read this test's single candidate needs, without
+	// slowing the suite. Under a slow enough scan even this 50ms can still
+	// be cut short, and the test still passes without ever reading the
+	// record's age -- it cannot fail from an unlucky schedule, only pass
+	// for the wrong reason; the age-exclusion rule itself is pinned
+	// deterministically, independent of any real clock, by
+	// TestObserveCodexEffectiveModel_OldSessionUpdatedLaterNotPicked
+	// (codex_session_test.go), which runs on context.Background() and so
+	// can never be cut short at all.
+	o.CodexModelObserveTimeout = 50 * time.Millisecond
 	p := mustCodexSpawnParams("org-a", "seat-1")
 
 	promptPath, err := o.promptFilePath(p.OrgID, p.SeatID)

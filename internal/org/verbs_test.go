@@ -1092,6 +1092,44 @@ func TestOrgStop_ExistingSeat_NoPaneOrAgmsgTeam_RecordsSkippedNotes(t *testing.T
 	assertDetailsContains(t, last.Details, "pane=no pane_id on record", "leave=skipped: no agmsg_team on record")
 }
 
+// TestOrgStop_LegacySpawnedEvent_NoSpawnStarted_NoModelObservedToken is a
+// /test cycle-1 addition (issue #173 handoff item 10: "Stop for a seat with
+// NO spawn_started at all in the manifest -- legacy or hand-built events").
+// TestOrgStop_ExistingSeat_NoPaneOrAgmsgTeam_RecordsSkippedNotes above
+// already exercises codexSpawnCorrelation's ok=false path (its seat's only
+// manifest event is a legacy EventSpawned, never EventSpawnStarted) but
+// never asserts the specific claim this item names: no model_observed=
+// TOKEN AT ALL on the stopped event -- not even "none" -- since
+// isCodexSpawn is false for a seat with nothing to correlate
+// (observeStopModelReceipt's own doc comment), distinct from a codex seat
+// whose correlated spawn just could not be observed (which DOES get
+// "model_observed=none", per TestOrgStop_Codex_NoPromptFileSeat_NothingAppended
+// above). This test names and pins that distinction directly, plus
+// StopResult.ModelReceipt staying the zero Receipt and Stop still
+// succeeding.
+func TestOrgStop_LegacySpawnedEvent_NoSpawnStarted_NoModelObservedToken(t *testing.T) {
+	o, _, _ := testOrg(t)
+	if err := o.appendEvent(ManifestEvent{
+		TS: o.now(), OrgID: "org-a", SeatID: "seat-legacy", Event: EventSpawned,
+	}); err != nil {
+		t.Fatalf("seed manifest event: %v", err)
+	}
+
+	result := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-legacy"})
+	if result.Err != nil {
+		t.Fatalf("expected Stop to succeed, got %v", result.Err)
+	}
+	if result.ModelReceipt != (Receipt{}) {
+		t.Fatalf("expected no receipt for a seat with no correlated spawn_started, got %+v", result.ModelReceipt)
+	}
+
+	events := mustReadEvents(t, o)
+	last := events[len(events)-1]
+	if strings.Contains(last.Details, "model_observed=") {
+		t.Fatalf("expected no model_observed= token at all (not even \"none\") for a seat with no spawn_started to correlate, got Details=%q", last.Details)
+	}
+}
+
 // TestOrgWait_HappyPath_ReturnsHerdrOutputAndTargetsNamespacedAgent covers
 // the happy path for Wait: it targets the org_id-namespaced herdr agent
 // name (herdrAgentName), returns herdr's raw output verbatim, and never
@@ -1264,6 +1302,40 @@ func appendInterruptedCodexSpawnTrail(t *testing.T, o *Org, orgID, seatID, promp
 	}
 }
 
+// appendInterruptedAgentStartedTrail seeds only spawn_started and
+// spawn_step(agent_started prompt_file=...) -- WITHOUT ever reaching
+// `spawned` -- simulating a process killed between AgentStart succeeding
+// and the spawned event being written. Roster derives this seat as Active
+// (spawn_started/spawn_step both count, seat.go's activeEvents) but NOT
+// idempotent-eligible (Spawn's own idempotent early return only fires on
+// EventSpawned): a second Spawn call for the same org/seat still reaches
+// ValidateSpawnEnvelope, which runs BEFORE Spawn's own stale-in-flight
+// compensation branch -- so an invalid retry gets rejected via reject()
+// while these two events survive untouched on the manifest. That lets a
+// test set up exactly the scenario codexSpawnCorrelation must handle
+// correctly (issue #173): it still finds this ORIGINAL spawn_started,
+// while the roster's latest state becomes the REJECTED retry's own
+// Driver/Model.
+// base carries whichever Role/Driver/Model the caller needs (AC-1 uses
+// codex/codex; AC-2's reverse case uses a claude-launched seat).
+func appendInterruptedAgentStartedTrail(t *testing.T, o *Org, base ManifestEvent, promptPath string, spawnStartedAt time.Time) {
+	t.Helper()
+	started := base
+	started.TS = spawnStartedAt.UTC().Format(time.RFC3339)
+	started.Event = EventSpawnStarted
+	if err := o.appendEvent(started); err != nil {
+		t.Fatalf("seed spawn_started: %v", err)
+	}
+
+	step := base
+	step.TS = spawnStartedAt.Add(time.Second).UTC().Format(time.RFC3339)
+	step.Event = EventSpawnStep
+	step.Details = codexPromptFileDetailsPrefix + promptPath
+	if err := o.appendEvent(step); err != nil {
+		t.Fatalf("seed spawn_step: %v", err)
+	}
+}
+
 // TestOrgStop_Codex_AppendsWhenSpawnReceiptWasUnknown is AC-5's main path:
 // Spawn's own poll found nothing (testOrg's tiny timeout, no fixture yet),
 // so its receipt is honored=unknown with no reported model -- that does
@@ -1281,6 +1353,11 @@ func TestOrgStop_Codex_AppendsWhenSpawnReceiptWasUnknown(t *testing.T) {
 	if spawnResult.ModelReceipt.Honored != HonoredUnknown {
 		t.Fatalf("expected spawn's own receipt to be unknown (no fixture yet), got %+v", spawnResult.ModelReceipt)
 	}
+	// Spawn ran above under testOrg's own tiny default (correctly, so its
+	// own poll returns quickly with nothing to find); only Stop's separate
+	// observation below needs a generous budget to actually find the
+	// fixture written just after this line.
+	raiseCodexObserveBudgetForStop(o)
 
 	promptPath, err := o.promptFilePath(p.OrgID, p.SeatID)
 	if err != nil {
@@ -1324,6 +1401,7 @@ func TestOrgStop_Codex_HonoredFalse_ObservedAtStop(t *testing.T) {
 	if r := o.Spawn(p); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("spawn failed: %+v", r)
 	}
+	raiseCodexObserveBudgetForStop(o)
 
 	promptPath, err := o.promptFilePath(p.OrgID, p.SeatID)
 	if err != nil {
@@ -1371,6 +1449,10 @@ func TestOrgStop_Codex_HonoredFalse_ObservedAtStop(t *testing.T) {
 // produce the same zero ModelReceipt and the same receipts-file count.
 func TestOrgStop_Codex_DoesNotAppendWhenAlreadyObserved(t *testing.T) {
 	o, _, _ := codexGuardedOrg(t, "implementer")
+	// The fixture below already qualifies before Spawn is even called, so
+	// Spawn's own first, no-wait poll must find it -- give that pass a
+	// generous scan budget rather than testOrg's tiny default.
+	o.CodexModelObserveTimeout = testCodexObserveGenerousBudget
 	p := mustCodexSpawnParams("org-a", "seat-1")
 
 	base := time.Date(2026, 9, 18, 7, 20, 0, 0, time.UTC)
@@ -1428,6 +1510,10 @@ func TestOrgStop_Codex_DoesNotAppendWhenAlreadyObserved(t *testing.T) {
 // not the same as "already observed".
 func TestOrgStop_Codex_AppendsWhenNoReceiptAtAllForThisSpawn(t *testing.T) {
 	o, _, _ := codexGuardedOrg(t, "implementer")
+	// No Spawn call happens in this test (the manifest trail is seeded
+	// directly below), so only Stop's own observation is at stake -- give
+	// it a generous scan budget rather than testOrg's tiny default.
+	o.CodexModelObserveTimeout = testCodexObserveGenerousBudget
 	promptPath, err := o.promptFilePath("org-a", "seat-1")
 	if err != nil {
 		t.Fatalf("promptFilePath: %v", err)
@@ -1461,6 +1547,10 @@ func TestOrgStop_Codex_AppendsWhenNoReceiptAtAllForThisSpawn(t *testing.T) {
 // mistaken for "already observed".
 func TestOrgStop_Codex_AppendsWhenOnlyRejectionReceiptExistsSince(t *testing.T) {
 	o, _, _ := codexGuardedOrg(t, "implementer")
+	// No Spawn call happens in this test (the manifest trail is seeded
+	// directly below), so only Stop's own observation is at stake -- give
+	// it a generous scan budget rather than testOrg's tiny default.
+	o.CodexModelObserveTimeout = testCodexObserveGenerousBudget
 	promptPath, err := o.promptFilePath("org-a", "seat-1")
 	if err != nil {
 		t.Fatalf("promptFilePath: %v", err)
@@ -1521,6 +1611,11 @@ func TestOrgStop_Codex_DryRunRespawnDoesNotDisplaceRealSpawnCorrelation(t *testi
 	if spawnResult.ModelReceipt.Honored != HonoredUnknown {
 		t.Fatalf("expected the real spawn's own receipt to be unknown (no fixture yet), got %+v", spawnResult.ModelReceipt)
 	}
+	// The real spawn above ran under testOrg's own tiny default (correctly:
+	// no fixture existed yet). The dry-run respawn below never calls the
+	// observer at all (AC-8), so only Stop's own separate observation
+	// needs the generous budget.
+	raiseCodexObserveBudgetForStop(o)
 
 	mrr, err := o.Manifest.Read()
 	if err != nil {
@@ -1578,6 +1673,229 @@ func TestOrgStop_Codex_DryRunRespawnDoesNotDisplaceRealSpawnCorrelation(t *testi
 	assertDetailsContains(t, last.Details, "model_observed=true")
 }
 
+// --- issue #173: Stop compares against the spawn that actually launched
+// the seat, never the roster ---
+
+// TestOrgStop_Codex_RecoversCommandedModelAfterInterruptedRetryRejected is
+// AC-1: a codex spawn interrupted right after agent_started (no `spawned`
+// yet -- a stale in-flight saga), followed by a retry for the SAME
+// org/seat with a DIFFERENT, out-of-pool model, which Spawn rejects via
+// ValidateSpawnEnvelope BEFORE it ever reaches the stale-in-flight
+// compensation branch (Spawn's own doc comment: step 2 runs before step
+// 4). The `rejected` event this appends carries the RETRY's own
+// Model/Driver, becoming the roster's latest SeatStatus for this seat --
+// but codexSpawnCorrelation still finds the ORIGINAL spawn_started
+// (rejected events are never scanned by it), so Stop's receipt must
+// compare the session record against the ORIGINAL commanded model, never
+// the rejected one. Before the fix, this test fails: the old code
+// compared against seat.Model (the roster's "gpt-9-nonexistent"), giving
+// a false honored=false.
+func TestOrgStop_Codex_RecoversCommandedModelAfterInterruptedRetryRejected(t *testing.T) {
+	o, _, _ := codexGuardedOrg(t, "implementer")
+	// The only Spawn call in this test is the rejected retry below, which
+	// fails envelope validation before ever reaching the observer -- so
+	// only Stop's own observation is at stake. Give it a generous scan
+	// budget rather than testOrg's tiny default.
+	o.CodexModelObserveTimeout = testCodexObserveGenerousBudget
+	const orgID, seatID = "org-a", "seat-1"
+
+	promptPath, err := o.promptFilePath(orgID, seatID)
+	if err != nil {
+		t.Fatalf("promptFilePath: %v", err)
+	}
+	spawnStartedAt := time.Now()
+	appendInterruptedAgentStartedTrail(t, o, ManifestEvent{
+		OrgID: orgID, SeatID: seatID, Role: "implementer", Driver: "codex", Model: "gpt-5-codex",
+	}, promptPath, spawnStartedAt)
+
+	retryResult := o.Spawn(SpawnParams{
+		OrgID: orgID, SeatID: seatID, Role: "implementer", Driver: "codex", Model: "gpt-9-nonexistent",
+		Cwd: "/tmp/seat", TimeoutMS: 5000, Scope: "test-scope",
+	})
+	if retryResult.Outcome != SpawnOutcomeRejected {
+		t.Fatalf("expected the retry to be rejected (out-of-pool model), got %+v", retryResult)
+	}
+
+	// Test setup invariant: after the rejected retry, the roster reflects
+	// that retry's own model, not the original spawn's -- exactly the
+	// stale data Stop must not compare against.
+	seat, ok, err := o.findSeat(orgID, seatID)
+	if err != nil || !ok {
+		t.Fatalf("findSeat: ok=%v err=%v", ok, err)
+	}
+	if seat.Model != "gpt-9-nonexistent" {
+		t.Fatalf("test setup invariant broken: expected the roster to reflect the rejected retry's model, got %q", seat.Model)
+	}
+
+	// The session record for the ORIGINAL spawn reports the ORIGINAL
+	// commanded model.
+	writeQualifyingCodexFixture(t, o.CodexSessionsDir, promptPath, spawnStartedAt.Add(time.Second), "gpt-5-codex")
+
+	result := o.Stop(StopParams{OrgID: orgID, Seat: seatID})
+	if result.Err != nil {
+		t.Fatalf("expected Stop to succeed, got %v", result.Err)
+	}
+	if result.ModelReceipt.CommandedModel != "gpt-5-codex" {
+		t.Fatalf("expected the receipt's commanded model to be the ORIGINAL spawn's model, not the rejected retry's, got %+v", result.ModelReceipt)
+	}
+	if result.ModelReceipt.Honored != HonoredTrue || result.ModelReceipt.ReportedEffectiveModel != "gpt-5-codex" {
+		t.Fatalf("expected honored=true (before the fix: false, wrongly compared against the rejected retry's model), got %+v", result.ModelReceipt)
+	}
+
+	mrr, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	last := mrr.Events[len(mrr.Events)-1]
+	assertDetailsContains(t, last.Details, "model_observed=true")
+}
+
+// TestOrgStop_Codex_ObservesWhenRejectedRetryUsedADifferentDriver is AC-2's
+// forward case: the seat's ORIGINAL (launched) spawn was codex, but a
+// later retry for a DIFFERENT DRIVER (claude) gets rejected -- becoming
+// the roster's latest SeatStatus with Driver="claude". Stop must still
+// attempt observation: "is this a codex seat" is decided by the
+// CORRELATED spawn's own Driver, never the roster's.
+func TestOrgStop_Codex_ObservesWhenRejectedRetryUsedADifferentDriver(t *testing.T) {
+	o, _, _ := codexGuardedOrg(t, "implementer")
+	// The only Spawn call in this test is the rejected retry below, which
+	// fails envelope validation before ever reaching the observer -- so
+	// only Stop's own observation is at stake. Give it a generous scan
+	// budget rather than testOrg's tiny default.
+	o.CodexModelObserveTimeout = testCodexObserveGenerousBudget
+	const orgID, seatID = "org-a", "seat-1"
+
+	promptPath, err := o.promptFilePath(orgID, seatID)
+	if err != nil {
+		t.Fatalf("promptFilePath: %v", err)
+	}
+	spawnStartedAt := time.Now()
+	appendInterruptedAgentStartedTrail(t, o, ManifestEvent{
+		OrgID: orgID, SeatID: seatID, Role: "implementer", Driver: "codex", Model: "gpt-5-codex",
+	}, promptPath, spawnStartedAt)
+
+	retryResult := o.Spawn(SpawnParams{
+		OrgID: orgID, SeatID: seatID, Role: "implementer", Driver: "claude", Model: "not-a-real-model",
+		Cwd: "/tmp/seat", TimeoutMS: 5000, Scope: "test-scope",
+	})
+	if retryResult.Outcome != SpawnOutcomeRejected {
+		t.Fatalf("expected the retry to be rejected (out-of-pool model), got %+v", retryResult)
+	}
+
+	seat, ok, err := o.findSeat(orgID, seatID)
+	if err != nil || !ok {
+		t.Fatalf("findSeat: ok=%v err=%v", ok, err)
+	}
+	if seat.Driver != "claude" {
+		t.Fatalf("test setup invariant broken: expected the roster to reflect the rejected retry's driver, got %q", seat.Driver)
+	}
+
+	writeQualifyingCodexFixture(t, o.CodexSessionsDir, promptPath, spawnStartedAt.Add(time.Second), "gpt-5-codex")
+
+	result := o.Stop(StopParams{OrgID: orgID, Seat: seatID})
+	if result.Err != nil {
+		t.Fatalf("expected Stop to succeed, got %v", result.Err)
+	}
+	if result.ModelReceipt.Honored != HonoredTrue || result.ModelReceipt.ReportedEffectiveModel != "gpt-5-codex" {
+		t.Fatalf("expected Stop to observe despite the roster showing a claude driver, got %+v", result.ModelReceipt)
+	}
+
+	mrr, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	last := mrr.Events[len(mrr.Events)-1]
+	assertDetailsContains(t, last.Details, "model_observed=true")
+}
+
+// TestOrgStop_Codex_NoObservationWhenLaunchedSpawnWasClaude_DespiteRejectedCodexRetry
+// is AC-2's reverse case: the seat's ORIGINAL (launched) spawn was claude,
+// and a later codex retry gets rejected -- the roster's latest SeatStatus
+// shows Driver="codex", but Stop must not observe at all (not even
+// model_observed=none): the CORRELATED spawn decides "is this a codex
+// seat", and it never was.
+func TestOrgStop_Codex_NoObservationWhenLaunchedSpawnWasClaude_DespiteRejectedCodexRetry(t *testing.T) {
+	o, _, _ := codexGuardedOrg(t, "implementer")
+	const orgID, seatID = "org-a", "seat-1"
+
+	spawnStartedAt := time.Now()
+	appendInterruptedAgentStartedTrail(t, o, ManifestEvent{
+		OrgID: orgID, SeatID: seatID, Role: "implementer", Driver: "claude", Model: "sonnet",
+	}, "", spawnStartedAt)
+
+	retryResult := o.Spawn(SpawnParams{
+		OrgID: orgID, SeatID: seatID, Role: "implementer", Driver: "codex", Model: "gpt-9-nonexistent",
+		Cwd: "/tmp/seat", TimeoutMS: 5000, Scope: "test-scope",
+	})
+	if retryResult.Outcome != SpawnOutcomeRejected {
+		t.Fatalf("expected the retry to be rejected (out-of-pool model), got %+v", retryResult)
+	}
+
+	seat, ok, err := o.findSeat(orgID, seatID)
+	if err != nil || !ok {
+		t.Fatalf("findSeat: ok=%v err=%v", ok, err)
+	}
+	if seat.Driver != "codex" {
+		t.Fatalf("test setup invariant broken: expected the roster to reflect the rejected retry's driver, got %q", seat.Driver)
+	}
+
+	result := o.Stop(StopParams{OrgID: orgID, Seat: seatID})
+	if result.Err != nil {
+		t.Fatalf("expected Stop to succeed, got %v", result.Err)
+	}
+	if result.ModelReceipt != (Receipt{}) {
+		t.Fatalf("expected no receipt appended, got %+v", result.ModelReceipt)
+	}
+
+	mrr, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	last := mrr.Events[len(mrr.Events)-1]
+	if strings.Contains(last.Details, "model_observed=") {
+		t.Fatalf("expected no model_observed token at all (the launched spawn was claude, not codex), got %q", last.Details)
+	}
+}
+
+// TestOrgStop_Codex_EmptyModelOnCorrelatedSpawn_NothingObserved covers the
+// plan's own edge case: a spawn_started event with no Model at all (an old
+// manifest recorded before that field existed -- a real spawn_started
+// always carries it via checkCapacityAndStart). codexSpawnCorrelation
+// still returns ok=true with an empty Model, but observeStopModelReceipt
+// must treat that as "nothing to compare against": isCodexSpawn stays
+// true (so the stopped event still gets a model_observed= token), but
+// observed stays false, same as an empty PromptPath.
+func TestOrgStop_Codex_EmptyModelOnCorrelatedSpawn_NothingObserved(t *testing.T) {
+	o, _, _ := codexGuardedOrg(t, "implementer")
+	const orgID, seatID = "org-a", "seat-1"
+
+	promptPath, err := o.promptFilePath(orgID, seatID)
+	if err != nil {
+		t.Fatalf("promptFilePath: %v", err)
+	}
+	spawnStartedAt := time.Now()
+	appendInterruptedAgentStartedTrail(t, o, ManifestEvent{
+		OrgID: orgID, SeatID: seatID, Role: "implementer", Driver: "codex", Model: "",
+	}, promptPath, spawnStartedAt)
+
+	writeQualifyingCodexFixture(t, o.CodexSessionsDir, promptPath, spawnStartedAt.Add(time.Second), "gpt-5-codex")
+
+	result := o.Stop(StopParams{OrgID: orgID, Seat: seatID})
+	if result.Err != nil {
+		t.Fatalf("expected Stop to succeed, got %v", result.Err)
+	}
+	if result.ModelReceipt != (Receipt{}) {
+		t.Fatalf("expected no receipt appended when the correlated spawn has no commanded model, got %+v", result.ModelReceipt)
+	}
+
+	mrr, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	last := mrr.Events[len(mrr.Events)-1]
+	assertDetailsContains(t, last.Details, "model_observed=none")
+}
+
 // TestHasObservedCodexReceiptAfter_OnlyThisSpawnsObservedReceiptCounts pins
 // which receipts stop Stop from observing again: only one for the same org
 // and seat, written STRICTLY AFTER this spawn started, that carries a
@@ -1632,31 +1950,49 @@ func TestHasObservedCodexReceiptAfter_OnlyThisSpawnsObservedReceiptCounts(t *tes
 // therefore also return that later attempt's own promptPath, never the
 // first attempt's -- both asserted directly here since this is the smallest
 // setup that reaches the exact behavior (no herdr/agmsg round trip needed).
+// The struct's other fields (Model/Driver/Role) are asserted the same
+// way: the second spawn_started's own values win, and a trailing
+// `rejected` event for a THIRD, different model/driver -- the roster's
+// own latest state, were codexSpawnCorrelation ever to read it -- must
+// have no effect at all, since this function only ever reads
+// spawn_started/spawn_step.
 func TestCodexSpawnCorrelation_TwoRealSpawns_LatestWins(t *testing.T) {
 	events := []ManifestEvent{
-		{TS: "2026-09-18T07:00:00Z", OrgID: "org-a", SeatID: "seat-1", Event: EventSpawnStarted},
+		{TS: "2026-09-18T07:00:00Z", OrgID: "org-a", SeatID: "seat-1", Event: EventSpawnStarted, Model: "gpt-5-codex", Driver: "codex", Role: "implementer"},
 		{TS: "2026-09-18T07:00:01Z", OrgID: "org-a", SeatID: "seat-1", Event: EventSpawnStep, Details: codexPromptFileDetailsPrefix + "/state/prompts/org-a_seat-1-first.md"},
 		{TS: "2026-09-18T07:00:05Z", OrgID: "org-a", SeatID: "seat-1", Event: "stopped"},
-		{TS: "2026-09-18T08:00:00Z", OrgID: "org-a", SeatID: "seat-1", Event: EventSpawnStarted},
+		{TS: "2026-09-18T08:00:00Z", OrgID: "org-a", SeatID: "seat-1", Event: EventSpawnStarted, Model: "gpt-5-codex", Driver: "codex", Role: "worker"},
 		{TS: "2026-09-18T08:00:01Z", OrgID: "org-a", SeatID: "seat-1", Event: EventSpawnStep, Details: codexPromptFileDetailsPrefix + "/state/prompts/org-a_seat-1-second.md"},
+		// A later dry-run spawn_started/spawn_step for a third model/driver
+		// must not displace the second (real) spawn_started either -- the
+		// dry-run filter in both of codexSpawnCorrelation's loops.
+		{TS: "2026-09-18T08:30:00Z", OrgID: "org-a", SeatID: "seat-1", Event: EventSpawnStarted, Model: "gpt-9-dryrun", Driver: "claude", DryRun: true},
+		// A trailing rejected retry (a different model/driver) is a state
+		// event that would become the roster's own latest SeatStatus, but
+		// codexSpawnCorrelation never reads EventRejected at all -- it
+		// must have zero effect here.
+		{TS: "2026-09-18T09:00:00Z", OrgID: "org-a", SeatID: "seat-1", Event: EventRejected, Model: "gpt-9-nonexistent", Driver: "claude", Role: "worker"},
 	}
 
-	spawnStartedAt, spawnStartedTS, promptPath, ok := codexSpawnCorrelation(events, "org-a", "seat-1")
+	corr, ok := codexSpawnCorrelation(events, "org-a", "seat-1")
 	if !ok {
 		t.Fatalf("expected ok=true")
 	}
-	if spawnStartedTS != "2026-09-18T08:00:00Z" {
-		t.Fatalf("expected the LATER real spawn_started's TS, got %q", spawnStartedTS)
+	if corr.StartedTS != "2026-09-18T08:00:00Z" {
+		t.Fatalf("expected the LATER real spawn_started's TS, got %q", corr.StartedTS)
 	}
 	wantAt, err := time.Parse(time.RFC3339, "2026-09-18T08:00:00Z")
 	if err != nil {
 		t.Fatalf("parse want TS: %v", err)
 	}
-	if !spawnStartedAt.Equal(wantAt) {
-		t.Fatalf("expected spawnStartedAt %v, got %v", wantAt, spawnStartedAt)
+	if !corr.StartedAt.Equal(wantAt) {
+		t.Fatalf("expected StartedAt %v, got %v", wantAt, corr.StartedAt)
 	}
-	if promptPath != "/state/prompts/org-a_seat-1-second.md" {
-		t.Fatalf("expected the second spawn's own promptPath, not the first attempt's, got %q", promptPath)
+	if corr.PromptPath != "/state/prompts/org-a_seat-1-second.md" {
+		t.Fatalf("expected the second spawn's own promptPath, not the first attempt's, got %q", corr.PromptPath)
+	}
+	if corr.Model != "gpt-5-codex" || corr.Driver != "codex" || corr.Role != "worker" {
+		t.Fatalf("expected the second (real, non-dry-run) spawn_started's own Model/Driver/Role, unaffected by the later dry-run or rejected events, got %+v", corr)
 	}
 }
 
@@ -1795,6 +2131,7 @@ func TestOrgStop_Codex_RecoversPromptPathAfterAgentStartRetry(t *testing.T) {
 	if spawnResult.ModelReceipt.Honored != HonoredUnknown {
 		t.Fatalf("expected spawn's own receipt to be unknown (no fixture yet), got %+v", spawnResult.ModelReceipt)
 	}
+	raiseCodexObserveBudgetForStop(o)
 
 	// Test setup invariant: the retry actually happened, and the persisted
 	// Details carries the exact suffix this fix must see through.
@@ -1869,6 +2206,7 @@ func TestOrgStop_Codex_SameSecondRespawn_PreviousReceiptDoesNotSuppressObservati
 	if spawnResult.ModelReceipt.Honored != HonoredUnknown {
 		t.Fatalf("expected B's own spawn-time receipt to be unknown (no fixture yet), got %+v", spawnResult.ModelReceipt)
 	}
+	raiseCodexObserveBudgetForStop(o)
 
 	promptPath, err := o.promptFilePath(p.OrgID, p.SeatID)
 	if err != nil {
@@ -1919,6 +2257,7 @@ func TestOrgStop_Codex_ObservesSessionThatStartedDaysAfterSpawn(t *testing.T) {
 	if spawnResult.ModelReceipt.Honored != HonoredUnknown {
 		t.Fatalf("expected spawn's own receipt to be unknown (no session record yet), got %+v", spawnResult.ModelReceipt)
 	}
+	raiseCodexObserveBudgetForStop(o)
 
 	// The dialog is answered three days later -- advance the fake clock so
 	// Stop's own until (o.nowTime()) reaches that day's directory.
@@ -2081,6 +2420,12 @@ func TestOrgStop_Codex_ReceiptsAppendFailureLeavesStopSuccessful(t *testing.T) {
 	if r := o.Spawn(p); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("spawn failed: %+v", r)
 	}
+	// This test's own claim is that the append call is actually attempted
+	// and fails -- not merely that nothing ends up persisted for some
+	// other reason (e.g. the observation itself being cut short). Stop's
+	// observation below must genuinely find the fixture for that call to
+	// be reached at all.
+	raiseCodexObserveBudgetForStop(o)
 
 	promptPath, err := o.promptFilePath(p.OrgID, p.SeatID)
 	if err != nil {
@@ -2108,4 +2453,47 @@ func TestOrgStop_Codex_ReceiptsAppendFailureLeavesStopSuccessful(t *testing.T) {
 	}
 	last := mrr.Events[len(mrr.Events)-1]
 	assertDetailsContains(t, last.Details, "model_observed=none")
+}
+
+// TestOrgStop_Codex_ObservationCutShort_NothingAppendedStopStillSucceeds is
+// AC-6: Stop's own single observation is bounded by the same
+// o.codexModelObserveTimeout() budget Spawn's poll uses. A genuinely
+// qualifying fixture exists on disk, but the budget is exhausted (pinned
+// to a single nanosecond, so obsCtx is already done by the observer's own
+// first ctx.Err() check -- deterministic, no real sleeping) before any
+// pass can complete: Stop must append no receipt, record
+// model_observed=none (the same token an ordinary not-found gets), and
+// still succeed.
+func TestOrgStop_Codex_ObservationCutShort_NothingAppendedStopStillSucceeds(t *testing.T) {
+	o, _, _ := codexGuardedOrg(t, "implementer")
+	p := mustCodexSpawnParams("org-a", "seat-1")
+	if r := o.Spawn(p); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", r)
+	}
+
+	promptPath, err := o.promptFilePath(p.OrgID, p.SeatID)
+	if err != nil {
+		t.Fatalf("promptFilePath: %v", err)
+	}
+	writeQualifyingCodexFixture(t, o.CodexSessionsDir, promptPath, time.Now().Add(time.Second), "gpt-5-codex")
+
+	// Only affects Stop's own observation below -- Spawn's poll above
+	// already ran (and found nothing, honored=unknown) under testOrg's own
+	// tiny-but-workable default timeout.
+	o.CodexModelObserveTimeout = time.Nanosecond
+
+	result := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-1"})
+	if result.Err != nil {
+		t.Fatalf("expected Stop to succeed despite the observation being cut short, got %v", result.Err)
+	}
+	if result.ModelReceipt != (Receipt{}) {
+		t.Fatalf("expected no receipt appended when the observation is cut short, got %+v", result.ModelReceipt)
+	}
+
+	mrr2, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	last2 := mrr2.Events[len(mrr2.Events)-1]
+	assertDetailsContains(t, last2.Details, "model_observed=none")
 }

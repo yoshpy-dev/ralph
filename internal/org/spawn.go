@@ -1059,23 +1059,35 @@ func (o *Org) codexSessionsDir() string {
 // again every o.codexModelObserveInterval() until it reports found or
 // ambiguous, or o.codexModelObserveTimeout() elapses -- an ambiguous
 // result ends the poll at once, since waiting cannot resolve two matching
-// session records into one. Each wait is clamped to the remaining budget
-// and goes through waitOrCtxDone (verbs.go), which select{}s against ctx,
-// so this never sleeps past the timeout and returns as soon as ctx is
-// cancelled (e.g. Spawn's own TimeoutMS elapsing). An observer error is
-// never surfaced here -- not on the receipt, not as a returned error, not
-// logged, never its own text or a path -- but the RECEIPT'S REASON does
-// distinguish, in bare category terms, which of three things actually
-// happened, per the plan's "理由の文言は観測した事実だけを書く" design
-// decision:
-//   - the timeout elapsed and the last poll attempt returned no error:
-//     codexNotFoundReason (nothing found, cause unknown to this function).
-//   - the timeout elapsed and the last poll attempt DID return an error
-//     (e.g. a candidate record could not be opened): codexReadErrorReason
-//     -- a different, more specific cause than "nothing found yet".
-//   - the wait was cut short by ctx (Spawn's own --timeout-ms budget, not
-//     this function's own timeout): codexCutShortReason -- neither of the
-//     above two reasons is true; the poll simply never got to finish.
+// session records into one. obsCtx (derived from ctx, bounded by
+// o.codexModelObserveTimeout()) is threaded into every
+// ObserveCodexEffectiveModel call, not just the waits between them: a
+// single pass that runs long -- many non-matching candidates, or a large
+// file -- is itself bounded by the same budget, not only checked for
+// between polls. Each wait goes through waitOrCtxDone (verbs.go), which
+// select{}s obsCtx against a timer, so a still-running poll never sleeps
+// past whichever of Spawn's own --timeout-ms or this function's own
+// timeout arrives first; obsCtx's own Done() carries that bound, so no
+// separate deadline/remaining-budget arithmetic is needed here. An observer
+// error is never surfaced here -- not on the receipt, not as a returned
+// error, not logged, never its own text or a path -- but the RECEIPT'S
+// REASON does distinguish, in bare category terms, which of three things
+// actually happened, per the plan's "理由の文言は観測した事実だけを書く"
+// design decision. The check order below is the code's own priority order
+// (waitOrCtxDone's failure is followed by a parent-ctx check, then a
+// lastErr check):
+//   - the parent ctx (Spawn's own --timeout-ms) is done at all -- whether
+//     it was cancelled before this function's own budget, or the two
+//     happened to run out around the same time: codexCutShortReason. This
+//     is checked first, so it wins over the two reasons below whenever
+//     both are true.
+//   - otherwise, this function's own observation budget ran out, and the
+//     LAST COMPLETED pass (never a pass that was itself cut short by that
+//     same budget -- see the lastErr comment below) reported a genuine
+//     error (e.g. a candidate record could not be opened):
+//     codexReadErrorReason.
+//   - otherwise (the observation budget ran out and no completed pass
+//     reported an error): codexNotFoundReason.
 func (o *Org) observeCodexSpawnReceipt(ctx context.Context, base Receipt, promptPath string, spawnStartedAt time.Time) Receipt {
 	if promptPath == "" {
 		return codexUnknownReceipt(base, "no role-prompt file to match a codex session record with (inline or empty initial prompt)")
@@ -1083,8 +1095,16 @@ func (o *Org) observeCodexSpawnReceipt(ctx context.Context, base Receipt, prompt
 
 	sessionsDir := o.codexSessionsDir()
 	interval := o.codexModelObserveInterval()
-	deadline := time.Now().Add(o.codexModelObserveTimeout())
 
+	obsCtx, cancel := context.WithTimeout(ctx, o.codexModelObserveTimeout())
+	defer cancel()
+
+	// lastErr tracks the LAST COMPLETED pass's own error (nil or genuine),
+	// never a pass that was itself cut short by obsCtx: a later poll racing
+	// the same expiring budget can return a ctx-done pseudo-error, and that
+	// must never overwrite (shadow) an earlier pass's real read error, nor
+	// can it clear one -- only another COMPLETED pass can, clean or not --
+	// see this function's own doc comment, second bullet.
 	var lastErr error
 	for {
 		// until is spawnStartedAt itself, not a later instant: the poll runs
@@ -1092,28 +1112,33 @@ func (o *Org) observeCodexSpawnReceipt(ctx context.Context, base Receipt, prompt
 		// seconds), so there is nothing later to reach -- this keeps Spawn's
 		// own window at the original three directories (see
 		// ObserveCodexEffectiveModel's doc comment).
-		obs, err := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStartedAt, spawnStartedAt)
-		lastErr = err
+		obs, err := ObserveCodexEffectiveModel(obsCtx, sessionsDir, promptPath, spawnStartedAt, spawnStartedAt)
 		switch obs.Status {
 		case CodexObservationFound:
 			return codexFoundReceipt(base, base.CommandedModel, obs.Model)
 		case CodexObservationAmbiguous:
 			return codexUnknownReceipt(base, "more than one codex session record matches this spawn; not guessing")
 		}
+		// A completed pass sets lastErr even when it is nil: a clean later
+		// pass clears an earlier read error.
+		if !isCtxDoneErr(err) {
+			lastErr = err
+		}
 
-		remaining := time.Until(deadline)
-		if remaining <= 0 {
+		if waitErr := waitOrCtxDone(obsCtx, interval); waitErr != nil {
+			// obsCtx is done -- either the parent ctx (Spawn's own
+			// --timeout-ms) is done, or this function's own observation
+			// budget simply ran out. ctx's own Err() (the PARENT, not
+			// obsCtx) is what tells the two apart: it is non-nil only in
+			// the former case, since obsCtx propagates the parent's error
+			// verbatim when the parent is the actual cause.
+			if ctx.Err() != nil {
+				return codexUnknownReceipt(base, codexCutShortReason)
+			}
 			if lastErr != nil {
 				return codexUnknownReceipt(base, codexReadErrorReason)
 			}
 			return codexUnknownReceipt(base, codexNotFoundReason)
-		}
-		wait := interval
-		if remaining < wait {
-			wait = remaining
-		}
-		if err := waitOrCtxDone(ctx, wait); err != nil {
-			return codexUnknownReceipt(base, codexCutShortReason)
 		}
 	}
 }
