@@ -1,6 +1,6 @@
 # codex-effective-model-receipt
 
-- Status: In progress
+- Status: Done (PR #174)
 - Owner: Claude Code
 - Date: 2026-09-20
 - Related request: #155 の実機検証(`docs/evidence/codex-seat-permissions-2026-09-18.md` P5、Run E1)で、`--model gpt-5.5` を渡した codex 座席の実効モデルが `gpt-5.6-sol` になった(codex 側の退役モデルの自動移行)。ralph の model receipts は対話座席を常に `honored=unknown`(`interactive session; effective model not yet observable`)で記録しており、このケースを拾えていない(issue #165)
@@ -60,19 +60,19 @@ codex 座席の実効モデルを観測して model receipts に `honored=true|f
 
 ## Acceptance criteria
 
-- [ ] AC-1: 役割指示ファイルのパスを含む user メッセージと `turn_context` を持つ記録から、観測関数が `turn_context.model` を返す。パスを含まない記録、spawn 開始より前に更新された記録、通常ファイルでないもの、壊れた行、64 KiB を超える行があっても、誤った座席のモデルを返さず、panic もしない
-- [ ] AC-2: codex 座席の spawn で記録が見つかり model が指定と一致すれば、receipt は `honored=true`、`reported_effective_model=<model>`。不一致なら `honored=false`、`reported_effective_model=<実効モデル>`、`reason` に指定と実効の両方のモデル名が入る(fixture: `gpt-5.5` 指定で `gpt-5.6-sol`)
-- [ ] AC-2b: 同じ org・seat の古い session(`session_meta` の開始時刻が spawn 開始より前)が、後から更新されて別のモデルを報告していても、新しい spawn の receipt はそれを採らない。条件を満たす記録が 2 件ある場合は `unknown`(理由に「特定できない」)
-- [ ] AC-2c: 役割指示ファイルのない codex 座席(inline のプロンプト、空のプロンプト)の spawn は待たずに返り、receipt は理由付きの `unknown`
-- [ ] AC-3: 記録が見つからない spawn は、上限時間だけ待った後に `honored=unknown` の receipt を書き、spawn は成功する。観測中のエラー(ディレクトリなし、権限なし)でも spawn は成功する
-- [ ] AC-4: claude 座席と dry-run の spawn は観測を行わず、receipt は従来と同じ
-- [ ] AC-5: codex 座席の stop で、その座席の spawn 開始より後(秒精度で同じ時刻の receipt は数えない。cross-review cycle 1 の AR-2)にモデルを観測した receipt がないときだけ観測し、見つかれば receipt を 1 件追記する。receipt が 1 件もない場合(spawn の待ちの途中で中断)も、間に拒否や dry-run の receipt が挟まっている場合も観測する。観測済みの receipt があるとき、見つからないとき、dry-run のとき、役割指示ファイルのない座席のときは追記しない。観測の成否にかかわらず stop は従来どおり成功する
-- [ ] AC-6: `honored=false` の receipt を書いた `ralph org spawn` / `ralph org stop` は stderr に警告(指定と実効の両方のモデル名を含む)を出し、exit code は 0 のまま
-- [ ] AC-7: `ralph doctor` の codex スラッグ Check は、pool のスラッグに `upgrade` がある場合に退役日と移行先を Detail に出す(info)。cache にないスラッグの warn が優先される。`upgrade` がない、`retirement_at` が読めない場合も壊れない
-- [ ] AC-8: テストは実ホームの `~/.codex` を読まない(観測先を seam で固定)。`TMPDIR=/tmp` でも通る
-- [ ] AC-9: 実記録 5 件での確認結果が evidence にあり、model 以外の内容が evidence に含まれない
-- [ ] AC-10: 文書(rule / spec / recipe / skill 4 面 / evidence の追記)が実装と一致し、同期ゲート 3 本が通る
-- [ ] AC-11: `./scripts/run-verify.sh` と `./scripts/run-test.sh` が green。PR 本文に `Closes #165`
+- [x] AC-1: 役割指示ファイルのパスを含む user メッセージと `turn_context` を持つ記録から、観測関数が `turn_context.model` を返す。パスを含まない記録、spawn 開始より前に更新された記録、通常ファイルでないもの、壊れた行、64 KiB を超える行があっても、誤った座席のモデルを返さず、panic もしない
+- [x] AC-2: codex 座席の spawn で記録が見つかり model が指定と一致すれば、receipt は `honored=true`、`reported_effective_model=<model>`。不一致なら `honored=false`、`reported_effective_model=<実効モデル>`、`reason` に指定と実効の両方のモデル名が入る(fixture: `gpt-5.5` 指定で `gpt-5.6-sol`)
+- [x] AC-2b: 同じ org・seat の古い session(`session_meta` の開始時刻が spawn 開始より前)が、後から更新されて別のモデルを報告していても、新しい spawn の receipt はそれを採らない。条件を満たす記録が 2 件ある場合は `unknown`(理由に「特定できない」)
+- [x] AC-2c: 役割指示ファイルのない codex 座席(inline のプロンプト、空のプロンプト)の spawn は待たずに返り、receipt は理由付きの `unknown`
+- [x] AC-3: 記録が見つからない spawn は、上限時間だけ待った後に `honored=unknown` の receipt を書き、spawn は成功する。観測中のエラー(ディレクトリなし、権限なし)でも spawn は成功する
+- [x] AC-4: claude 座席と dry-run の spawn は観測を行わず、receipt は従来と同じ
+- [x] AC-5: codex 座席の stop で、その座席の spawn 開始より後(秒精度で同じ時刻の receipt は数えない。cross-review cycle 1 の AR-2)にモデルを観測した receipt がないときだけ観測し、見つかれば receipt を 1 件追記する。receipt が 1 件もない場合(spawn の待ちの途中で中断)も、間に拒否や dry-run の receipt が挟まっている場合も観測する。観測済みの receipt があるとき、見つからないとき、dry-run のとき、役割指示ファイルのない座席のときは追記しない。観測の成否にかかわらず stop は従来どおり成功する
+- [x] AC-6: `honored=false` の receipt を書いた `ralph org spawn` / `ralph org stop` は stderr に警告(指定と実効の両方のモデル名を含む)を出し、exit code は 0 のまま
+- [x] AC-7: `ralph doctor` の codex スラッグ Check は、pool のスラッグに `upgrade` がある場合に退役日と移行先を Detail に出す(info)。cache にないスラッグの warn が優先される。`upgrade` がない、`retirement_at` が読めない場合も壊れない
+- [x] AC-8: テストは実ホームの `~/.codex` を読まない(観測先を seam で固定)。`TMPDIR=/tmp` でも通る
+- [x] AC-9: 実記録 5 件での確認結果が evidence にあり、model 以外の内容が evidence に含まれない
+- [x] AC-10: 文書(rule / spec / recipe / skill 4 面 / evidence の追記)が実装と一致し、同期ゲート 3 本が通る
+- [x] AC-11: `./scripts/run-verify.sh` と `./scripts/run-test.sh` が green。PR 本文に `Closes #165`
 
 ## Implementation outline
 
@@ -133,6 +133,7 @@ codex 座席の実効モデルを観測して model receipts に `honored=true|f
 - 2026-09-20 sync-docs cycle 2(`doc-maintainer`、最終 cycle): HEAD `4fb17ef` のコードと、2af0bce で更新済みの文書(rule / skill 4 面 / recipe 2 面 / evidence)を照合し、いずれも正確と確認(`until` の扱い、32 日上限、stop 専用である旨の限定、ダイアログ推定のヘッジ、doctor の「読み取れた場合」ヘッジを含む)。`docs/tech-debt/README.md` の既存行に 1 節を追加: 座席の特定が codex 自身の記録形式だけでなく、ralph 自身が生成する `PromptFilePointer` の文言にも依存する(spawn 時に記録へ焼き込まれ、stop 時は現在のバイナリで再計算されるため、両者の間で文言が変わる ralph アップグレードは stop の再観測を静かに外す)。第二行は追加しなかった。`hasObservedCodexReceiptSince` / `waitBeforeEnter` / `promptFilePointer`(旧名)の残存と、observer の探索範囲を spawn 日の 3 ディレクトリだけに限定する記述が日付付き report・plan ログの外にないことを grep で確認(該当なし)。README.md・AGENTS.md の `internal/org/` 行・`docs/insights/README.md`・`internal/org/prompts/lead.md`・skill の spawn/stop 動詞表は cycle 1 からコード変更の影響を受けておらず、確認のみで変更なし。同期ゲート 3 本と `TestSendDefaults` は green
 - 2026-09-20 cycle 2 の結果: verify pass(6ab3600。AC-5 の文面を厳密な比較に合わせて修正: c47370d)、test pass(4fb17ef。タイムゾーン 5 種類で同一結果、red/green 9 種類、テスト 5 件追加。既存の表テストが接尾辞の除去位置を区別できていなかったのを tester が発見して補った)、sync-docs(58a9791。tech-debt の行に「座席の特定は ralph が渡す指示文の文言にも依存する」を追記)。push 前に `./scripts/run-verify.sh`、`TMPDIR=/tmp` の Go テスト、履歴込みの range secret scan を実行してすべて pass
 - 2026-09-20 cross-review cycle 2(cap 到達、a59ffda): cycle 1 の 2 件の再指摘はなし。新しい指摘 2 件(どちらも P2、ACTION_REQUIRED)。AR-3 stop 時の観測が、比較する指定モデルを roster から取っている(spawn の中断 → 別モデルでの再試行が拒否 → stop の順で、誤った `honored=false` と警告が出る)。AR-4 観測の 1 回の走査が期限も ctx の取り消しも見ない(約 3.8 MiB の記録 50 件で 8 秒の上限に対し 9.45 秒)。ユーザー決定(AskUserQuestion): PR を作成し、後続 issue #173 で直す。PR 本文の Known gaps に記載
+- 2026-09-20 PR #174 を作成(`Closes #165`)。cross-review cycle 2 の 2 件(AR-3、AR-4)は PR 本文の Known gaps と後続 issue #173 に記録
 
 ## Progress checklist
 
@@ -142,7 +143,7 @@ codex 座席の実効モデルを観測して model receipts に `honored=true|f
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
-- [ ] PR created
+- [x] PR created (#174)
 
 ## Readiness checklist
 
