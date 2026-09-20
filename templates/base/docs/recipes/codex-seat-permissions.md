@@ -120,7 +120,9 @@ ralph org spawn --org-id perm-auto --id reviewer --role reviewer --driver codex 
   `ralph doctor` lists pool slugs that codex has scheduled for retirement.
   While the dialog is open no turn has started, so the spawn receipt stays
   `unknown`; `ralph org stop` looks once more and, when it finds the seat's
-  session record, appends the observed one.
+  session record, appends the observed one (codex appears to create the
+  record only once the dialog is answered; stop searches from the spawn
+  date to the stop date, up to about a month).
 - Write the TASK as a typed-protocol message (`ralph org send` validates it:
   `TYPE` must be one of the protocol's enum values, `TASK` needs a
   `TASK_ID`, and the body is capped at 2,000 characters), e.g. `task.txt`:

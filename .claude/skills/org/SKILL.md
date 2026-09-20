@@ -42,7 +42,8 @@ Lead(座席の編成・統括を行う識別子)がその機構をどう操作�
   stderr に警告が出る(codex は退役予定のモデルを自動で移行先に切り替える。
   `ralph doctor` の codex スラッグ Check が退役予定を表示する)。spawn 時に
   取れなかった座席は `stop` 時にもう一度だけ探し、記録が見つかれば receipt を
-  1 件追記する。
+  1 件追記する(spawn の数日後に始まった session も対象。起動時のダイアログに
+  後から答えた場合など。探すのは spawn 日から約 1 か月分まで)。
   ターンが始まっていない座席(退役ダイアログの表示中など)、役割指示
   ファイルのない座席(雛形のない role に短いプロンプトを渡した場合)、
   herdr を別の HOME で起動していて `CODEX_HOME` が ralph 側と違う場合は
@@ -89,8 +90,8 @@ claude はエイリアス、codex はスラッグ(codex にエイリアスは無
 doctor` の「Org codex model slugs」Check が `~/.codex/models_cache.json`
 (既定。`$CODEX_HOME` で上書き可)に無いスラッグを warn する(プロセス起動
 なし)。cache にあっても退役予定(`upgrade`)を持つスラッグは info で移行先
-と退役日を示す(無いスラッグの warn が優先する)。`--probe-models` は従来
-通り実起動プローブ。
+と、読み取れた場合は退役日を示す(無いスラッグの warn が優先する)。
+`--probe-models` は従来通り実起動プローブ。
 
 codex スラッグは codex 側のモデル更新で消えることがある。Check はローカルの
 cache を読むだけで更新はしない(cache の書き込み時刻を UTC で Detail に出し、

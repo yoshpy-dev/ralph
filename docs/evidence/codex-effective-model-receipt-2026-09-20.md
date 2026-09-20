@@ -2,7 +2,7 @@
 
 - Date: 2026-09-20
 - Plan: `docs/plans/active/2026-09-20-codex-effective-model-receipt.md`
-- 対象: `internal/org/codex_session.go` の `ObserveCodexEffectiveModel`(commit 78692f4 で実行。self-review の修正後の 26b03ce で再実行して同じ結果)
+- 対象: `internal/org/codex_session.go` の `ObserveCodexEffectiveModel`(commit 78692f4 で実行。self-review の修正後の 26b03ce と 53f6b16 で再実行して同じ結果)
 - codex CLI: 0.154.0(記録を作った時点の版)
 
 ## 何を確認したか
@@ -44,6 +44,7 @@ codex の session 記録から座席の実効モデルを読む観測関数が�
 - 4 行目は、同じ org・seat で再 spawn したときに古い session を採らないことの確認(session の開始時刻が spawn 開始より前の記録は対象外)
 - エラーはどのケースでも nil
 - 26b03ce では座席の特定を 2 点変えた: user メッセージは役割指示ファイルのパスだけでなく、ralph が渡す指示文全体(`役割指示を読み込んで従ってください: <パス>`)を含むこと。探す日付ディレクトリは spawn 日の前日・当日・翌日の 3 つだけ。上の 5 ケースは変更後も同じ結果だった(実記録の user メッセージは指示文全体を含んでいる)
+- 53f6b16 では観測関数に `until` を足し、spawn 日の前日から `until` の翌日までのディレクトリを探す(上限 32 日分)。spawn は `until` に spawn 開始時刻を渡すので 3 つのまま、stop は現在時刻を渡す。`until` を spawn の 2 日後にして再実行しても 5 ケースは同じ結果だった
 
 ## 記録は開始日のディレクトリに残る(メタデータだけで確認)
 
@@ -62,5 +63,5 @@ codex の session 記録から座席の実効モデルを読む観測関数が�
 ## 確認していないこと
 
 - 新しい座席を起動しての end-to-end(spawn 中の待ちで receipt が書かれること、stop 時の追記、CLI の警告)。これらは fixture と herdr stub のテストで確認している
-- 退役ダイアログの表示中に session 記録が作られるかどうか。作られない、または `turn_context` がない場合、spawn 時は `unknown` になり、stop 時の観測で拾う設計
+- 退役ダイアログの表示中に session 記録が作られるかどうか。直接は確認していない。上の表の 09-18 15:53:56 の記録は起動時にダイアログが出た実行(#155 Run A、手で「2」を選択)だが、`session_meta` から `turn_context` までは 2.5 秒で、ダイアログのなかった記録と変わらない。記録はダイアログに答えた後に作られた、と読める(推定)。その場合、ダイアログに何日も後で答えた座席の記録は spawn 日から離れた日付のディレクトリに入るので、stop 時の観測は spawn 日から stop 日までを探す(53f6b16)。spawn 時は `unknown` になる
 - codex CLI 0.154.0 以外の版の記録の形

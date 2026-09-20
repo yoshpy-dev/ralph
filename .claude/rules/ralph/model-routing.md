@@ -110,7 +110,9 @@ role-prompt file to match), or a herdr server whose `CODEX_HOME` differs
 from ralph's. `ralph org stop` looks once more for a seat that has no
 observed receipt since its spawn and, when it finds the record, appends
 one, so a seat can have an `unknown` receipt from spawn and an observed one
-from stop. claude seats are not observed and stay `unknown`.
+from stop. Stop also covers a session that started days after the spawn
+(a startup dialog answered late), up to about a month. claude seats are not
+observed and stay `unknown`.
 
 ## Where the values live
 
