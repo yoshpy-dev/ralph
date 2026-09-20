@@ -66,7 +66,7 @@ codex 座席の実効モデルを観測して model receipts に `honored=true|f
 - [ ] AC-2c: 役割指示ファイルのない codex 座席(inline のプロンプト、空のプロンプト)の spawn は待たずに返り、receipt は理由付きの `unknown`
 - [ ] AC-3: 記録が見つからない spawn は、上限時間だけ待った後に `honored=unknown` の receipt を書き、spawn は成功する。観測中のエラー(ディレクトリなし、権限なし)でも spawn は成功する
 - [ ] AC-4: claude 座席と dry-run の spawn は観測を行わず、receipt は従来と同じ
-- [ ] AC-5: codex 座席の stop で、その座席の spawn 開始以降にモデルを観測した receipt がないときだけ観測し、見つかれば receipt を 1 件追記する。receipt が 1 件もない場合(spawn の待ちの途中で中断)も、間に拒否や dry-run の receipt が挟まっている場合も観測する。観測済みの receipt があるとき、見つからないとき、dry-run のとき、役割指示ファイルのない座席のときは追記しない。観測の成否にかかわらず stop は従来どおり成功する
+- [ ] AC-5: codex 座席の stop で、その座席の spawn 開始より後(秒精度で同じ時刻の receipt は数えない。cross-review cycle 1 の AR-2)にモデルを観測した receipt がないときだけ観測し、見つかれば receipt を 1 件追記する。receipt が 1 件もない場合(spawn の待ちの途中で中断)も、間に拒否や dry-run の receipt が挟まっている場合も観測する。観測済みの receipt があるとき、見つからないとき、dry-run のとき、役割指示ファイルのない座席のときは追記しない。観測の成否にかかわらず stop は従来どおり成功する
 - [ ] AC-6: `honored=false` の receipt を書いた `ralph org spawn` / `ralph org stop` は stderr に警告(指定と実効の両方のモデル名を含む)を出し、exit code は 0 のまま
 - [ ] AC-7: `ralph doctor` の codex スラッグ Check は、pool のスラッグに `upgrade` がある場合に退役日と移行先を Detail に出す(info)。cache にないスラッグの warn が優先される。`upgrade` がない、`retirement_at` が読めない場合も壊れない
 - [ ] AC-8: テストは実ホームの `~/.codex` を読まない(観測先を seam で固定)。`TMPDIR=/tmp` でも通る
