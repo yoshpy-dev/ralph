@@ -55,6 +55,7 @@ Run A の t-auto-1 で座席の `$HOME`(偽 HOME、`/private/tmp/...` 配下)へ
 ### P5. gpt-5.5 の退役ダイアログ / 自動移行
 
 minimal config では起動直後に「GPT-5.5 retires on October 14, 2026 … 1. Try new model / 2. Use existing model」の対話ダイアログが出る(herdr の `agent wait --until idle` はこれを idle と判定する)。「2」を選ぶと codex は `[notice.model_migrations] "gpt-5.5" = "gpt-5.6-sol"` と `[tui.model_availability_nux]` を config に書き、以後はダイアログなし。real-copy config(Run E1)ではダイアログなしでステータス行が `gpt-5.6-sol · low` になり、`--model gpt-5.5` は実効モデルとして尊重されなかった(codex 側の退役移行)。ralph の receipts が追う `honored` はこのケースを拾う対象。
+- 追記(2026-09-20、#165): ralph は codex 座席の実効モデルを codex の session 記録の `turn_context.model` から観測し、receipts に `reported_effective_model` と `honored=true|false` を記録するようになった。この Run E1 の記録に対して観測を実行すると `gpt-5.6-sol`(指定は `gpt-5.5`)が返る。`docs/evidence/codex-effective-model-receipt-2026-09-20.md`
 
 ## Run A / A2: autonomous(`--sandbox workspace-write --ask-for-approval never`)
 

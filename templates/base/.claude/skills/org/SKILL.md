@@ -35,6 +35,17 @@ Lead(座席の編成・統括を行う識別子)がその機構をどう操作�
   場合のみ `--state-dir` を明示的に揃えること。
 - `--org-id` は組織の実行名前空間。同一 `--org-id` の座席は同一 manifest /
   receipts に記録される。
+- **codex 座席の実効モデルは receipts に記録される**: `ralph org spawn` は
+  codex 座席の起動後に最大 8 秒だけ codex の session 記録
+  (`$CODEX_HOME/sessions/`)を探し、実効モデルを receipt の
+  `reported_effective_model` に入れる。指定と違えば `honored=false` になり、
+  stderr に警告が出る(codex は退役予定のモデルを自動で移行先に切り替える。
+  `ralph doctor` の codex スラッグ Check が退役予定を表示する)。spawn 時に
+  取れなかった座席は `stop` 時にもう一度だけ探して receipt を 1 件追記する。
+  ターンが始まっていない座席(退役ダイアログの表示中など)、役割指示
+  ファイルのない座席(雛形のない role に短いプロンプトを渡した場合)、
+  herdr を別の HOME で起動していて `CODEX_HOME` が ralph 側と違う場合は
+  観測できず `unknown` のままになる。claude 座席は観測しない。
 - **shell alias に注意**: `alias codex="codex -m …"` のようにモデル指定を
   含む alias があると、herdr が pane の対話シェルに送る座席コマンドで alias が
   展開され、`--model` の二重指定で座席が起動しない(`spawn_failed`、codex で
