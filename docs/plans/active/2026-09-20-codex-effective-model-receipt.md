@@ -119,11 +119,14 @@ codex 座席の実効モデルを観測して model receipts に `honored=true|f
 
 ## Deviation notes
 
+- 2026-09-20 work: Slice A(観測関数)は implementer に委譲(78692f4、2 ファイル、テスト 20 件)。逸脱 2 件: 日付ディレクトリの上端は壁時計の「今日 + 1 日」(stop 時は spawn から日が経っていることがあるため)。Lstat を通った記録を開けなかった場合(権限なしなど)だけ、内容を含まないエラーを返す(それ以外は not-found)。orchestrator が HEAD 一致・porcelain 空・コードを確認し、#155 / #163 の実機実行で scratch に残っている実記録 5 件に対して観測を実行した(コミットしない一時テスト): `gpt-5.5` 指定の Run E1 は `gpt-5.6-sol`、Run E2 は `gpt-5.5`、#163 の座席は `gpt-6-astra`、spawn 時刻を session 開始より後にすると not-found、存在しないパスは not-found。1 回あたり 1〜11ms
+- 2026-09-20 work: Slice B(配線)は implementer に委譲(d2bf6e4、7 ファイル)。`Org` に `CodexSessionsDir` / `CodexModelObserveTimeout`(既定 8 秒)/ `CodexModelObserveInterval`(既定 500ms)を追加。`checkCapacityAndStart` が `spawn_started` を記録した時刻を返すようにし、観測はその時刻を基準にする。役割指示ファイルのパスは `Spawn` のローカル変数を持ち回り、stop 時は manifest の `agent_started prompt_file=` から読む(同じ定数 `codexPromptFileDetailsPrefix` を両方で使う)。`SpawnResult` / `StopResult` に `ModelReceipt` を追加し、CLI は `honored=false` かつ実効モデルが入っているときだけ警告する(エンベロープの拒否では出さない)。CLI 側の seam は package 変数 3 つを `TestMain` で固定。逸脱: 指定した `HOME=/nonexistent… go test` は go 自体が build cache に HOME を使うため実行できず、テストバイナリをビルドしてからその環境で実行して pass を確認した。orchestrator が HEAD 一致・porcelain 空・`Spawn` / `Stop` の差分を確認
+
 ## Progress checklist
 
 - [x] Plan reviewed
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
