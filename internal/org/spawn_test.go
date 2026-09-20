@@ -2330,8 +2330,10 @@ func TestOrgSpawn_Codex_ModelObservation_ReadError_DistinctReason(t *testing.T) 
 	// own doc names -- a pass must COMPLETE before the budget runs out. A
 	// modest, explicit budget gives that one open+immediate-fail pass ample
 	// margin while still running out quickly (this poll never finds
-	// anything to return early on).
-	o.CodexModelObserveTimeout = 50 * time.Millisecond
+	// anything to return early on, so the test takes as long as this
+	// budget: 200ms buys a wide margin over one pass for 0.2s of suite
+	// time).
+	o.CodexModelObserveTimeout = 200 * time.Millisecond
 	p := mustCodexSpawnParams("org-a", "seat-1")
 
 	promptPath, err := o.promptFilePath(p.OrgID, p.SeatID)
