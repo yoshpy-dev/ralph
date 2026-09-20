@@ -124,13 +124,14 @@ codex 座席の実効モデルを観測して model receipts に `honored=true|f
 - 2026-09-20 work: Slice C(doctor)は implementer に委譲(7963da0、2 ファイル)。逸脱: テストは plan に書いた `doctor_codex_models_test.go` ではなく、既存のテストがある `internal/cli/doctor_org_test.go` に追加(該当ファイルは存在しなかった)。`upgrade` は `json.RawMessage` で受け、型が想定外の 1 件で cache 全体の decode が失敗しないようにした。`migration_markdown` は decode しない。orchestrator が実 cache での表示を確認し、退役スラッグの一覧と固定文の間に区切りがなく読みにくかったためピリオドを足した(80a50c2、1 行)
 - 2026-09-20 work: Slice D / E(a660122、orchestrator)。実記録 5 件での確認を `docs/evidence/codex-effective-model-receipt-2026-09-20.md` に記録(model と status 以外は出力していない)。文書: `model-routing.md`(meta と template。template 側は source のパスを書かない)、spec の FR-9、recipe(2 コピー)、skill(4 面)、#155 の evidence P5 に追記 1 行。同期ゲート 3 本 pass
 - 2026-09-20 メモ: 既定の `[org].model_pool` に退役予定の `gpt-5.5`(2026-10-14)が入っているため、既定の設定でも doctor の info が出る。既定値の見直しは #156 の範囲(次回の観測時に issue へ記録する)
+- 2026-09-20 self-review cycle 1(`docs/reports/self-review-2026-09-20-codex-effective-model-receipt.md`、d73dbdd): MERGE(MEDIUM の修正後)、MEDIUM 4 / LOW 7。記録の本文が外に出る経路はない、再 spawn と古い session は開始時刻で除外される、spawn の待ちはロックを保持しない、と確認された。全件を同 cycle 内で修正(コードは implementer、26b03ce。文書は orchestrator、9961b8d。再確認は orchestrator が差分と実記録で行う)。M1 観測関数のコメントに残っていた「まだ配線されていない」を削除、M2 stop 時の対応付けが dry-run のイベントを除外していなかった(起動済みの座席への `spawn --dry-run` が本物の spawn を押しのける)→ 除外し、修正前のコードで落ちる回帰テストを追加、M3 `SpawnResult.ModelReceipt` を「この呼び出しが追記した receipt」に統一(拒否と dry-run も設定)、M4 doctor の固定文が無条件に「honored=false と記録する」と述べていた → 「session 記録を特定できたときは」に修正、L1 `waitBeforeEnter` を中立な名前に改名、L2 探す日付ディレクトリを spawn 日の前後 1 日の 3 つに限定(記録は開始日のディレクトリに残り続ける。実ホームのメタデータだけで確認: 1,013 件中 57 件が後日に更新、移動は 0 件)。観測関数から壁時計がなくなった、L3 / L4 `unknown` の理由を原因ごとに分けた(見つからない / 記録を読めない / spawn の timeout で打ち切り。エラーの本文は出さない)、L5 文書 6 面の「stop が 1 件追記する」を「記録が見つかれば」に修正、L6 doc comment、L7 座席の特定をパスの部分一致から ralph が渡す指示文全体(`promptFilePointer`)の一致に絞った。修正後の観測関数を実記録 5 件に再実行して同じ結果を確認し、evidence を更新
 
 ## Progress checklist
 
 - [x] Plan reviewed
 - [x] Branch created
 - [x] Implementation started
-- [ ] Review artifact created
+- [x] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
