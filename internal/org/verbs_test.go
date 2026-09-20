@@ -1557,6 +1557,45 @@ func TestOrgStop_Codex_DryRunRespawnDoesNotDisplaceRealSpawnCorrelation(t *testi
 	assertDetailsContains(t, last.Details, "model_observed=true")
 }
 
+// TestHasObservedCodexReceiptSince_OnlyThisSpawnsObservedReceiptCounts pins
+// which receipts stop Stop from observing again: only one for the same org
+// and seat, written at or after this spawn started, that carries a reported
+// model. An observed receipt left by an EARLIER spawn of the same seat must
+// not count (the respawned seat may run a different model), and neither do
+// receipts without a reported model (unknown, rejection, dry-run) or another
+// seat's receipts.
+func TestHasObservedCodexReceiptSince_OnlyThisSpawnsObservedReceiptCounts(t *testing.T) {
+	const spawnTS = "2026-09-20T01:00:00Z"
+	observed := func(org, seat, ts string) Receipt {
+		return Receipt{TS: ts, OrgID: org, SeatID: seat, Honored: HonoredTrue, ReportedEffectiveModel: "gpt-5.5"}
+	}
+	cases := []struct {
+		name     string
+		receipts []Receipt
+		want     bool
+	}{
+		{"no receipts at all", nil, false},
+		{"observed receipt from an earlier spawn of the same seat", []Receipt{observed("org-a", "seat-1", "2026-09-20T00:59:59Z")}, false},
+		{"observed receipt in the same second as the spawn", []Receipt{observed("org-a", "seat-1", spawnTS)}, true},
+		{"observed receipt after the spawn", []Receipt{observed("org-a", "seat-1", "2026-09-20T01:00:05Z")}, true},
+		{"unknown receipt after the spawn", []Receipt{{TS: "2026-09-20T01:00:05Z", OrgID: "org-a", SeatID: "seat-1", Honored: HonoredUnknown}}, false},
+		{"rejection receipt after the spawn", []Receipt{{TS: "2026-09-20T01:00:05Z", OrgID: "org-a", SeatID: "seat-1", Honored: HonoredFalse, Reason: "rejected"}}, false},
+		{"another seat's observed receipt", []Receipt{observed("org-a", "seat-2", "2026-09-20T01:00:05Z")}, false},
+		{"another org's observed receipt", []Receipt{observed("org-b", "seat-1", "2026-09-20T01:00:05Z")}, false},
+		{"earlier observed plus later unknown", []Receipt{
+			observed("org-a", "seat-1", "2026-09-19T23:00:00Z"),
+			{TS: "2026-09-20T01:00:05Z", OrgID: "org-a", SeatID: "seat-1", Honored: HonoredUnknown},
+		}, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := hasObservedCodexReceiptSince(c.receipts, "org-a", "seat-1", spawnTS); got != c.want {
+				t.Errorf("hasObservedCodexReceiptSince = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
 // TestCodexSpawnCorrelation_TwoRealSpawns_LatestWins is a /test cycle-1
 // addition (plan's Test plan edge cases: "同じ org・seat id を stop 後に再
 // spawn した場合"). TestOrgStop_Codex_DryRunRespawnDoesNotDisplaceRealSpawnCorrelation
