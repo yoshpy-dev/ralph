@@ -610,12 +610,12 @@ type StopResult struct {
 	// receipt, the zero Receipt on every other path -- no correlated
 	// spawn_started at all, a seat whose correlated spawn was not a codex
 	// spawn, a seat with no role-prompt file to correlate, no commanded
-	// model recorded on the correlated spawn_started, an already-observed
-	// spawn attempt, not-found, ambiguous, an observation cut short by its
-	// own deadline, a dry-run stop, or a receipts-append failure. The CLI
-	// layer reads this the same way it reads SpawnResult.ModelReceipt, to
-	// decide whether to print the codex model-mismatch warning (AC-6)
-	// without re-reading the receipts file.
+	// model recorded on the correlated spawn_started, a receipts-file read
+	// failure, an already-observed spawn attempt, not-found, ambiguous, an
+	// observation cut short by its own deadline, a dry-run stop, or a
+	// receipts-append failure. The CLI layer reads this the same way it
+	// reads SpawnResult.ModelReceipt, to decide whether to print the codex
+	// model-mismatch warning (AC-6) without re-reading the receipts file.
 	ModelReceipt Receipt
 }
 
@@ -916,13 +916,13 @@ func hasObservedCodexReceiptAfter(receipts []Receipt, orgID, seatID, spawnStarte
 // isCodexSpawn is false, and it can also be false when isCodexSpawn is
 // true: no role-prompt file to correlate, no commanded model on the
 // correlated spawn_started (an old manifest event recorded before that
-// field existed -- nothing to compare against), an already-observed spawn
-// attempt (hasObservedCodexReceiptAfter), or a not-found/ambiguous/
-// observer-error result. Stop appends nothing in any of those cases (see
-// Stop's own doc comment). When isCodexSpawn is true, the observation
-// itself -- when it runs at all -- has no retry and no wait, unlike
-// Spawn's own poll: Stop has already waited as long as the seat itself
-// ran.
+// field existed -- nothing to compare against), a receipts-file read
+// failure, an already-observed spawn attempt (hasObservedCodexReceiptAfter),
+// or a not-found/ambiguous/observer-error result. Stop appends nothing in
+// any of those cases (see Stop's own doc comment). When isCodexSpawn is
+// true, the observation itself -- when it runs at all -- has no retry and
+// no wait, unlike Spawn's own poll: Stop has already waited as long as
+// the seat itself ran.
 func (o *Org) observeStopModelReceipt(events []ManifestEvent, orgID, seatID string) (receipt Receipt, observed bool, isCodexSpawn bool) {
 	corr, ok := codexSpawnCorrelation(events, orgID, seatID)
 	if !ok || corr.Driver != "codex" {

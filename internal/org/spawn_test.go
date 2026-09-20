@@ -228,6 +228,17 @@ func (f *fakeAgmsg) Leave(_ context.Context, team, agentID string) error {
 // that instead wants the budget itself to run out (not-found, cut-short,
 // budget-exhausted-mid-pass) keeps testOrg's own tiny default or sets its
 // own small, explicit value -- never this constant.
+//
+// A third category needs neither: a test whose terminal state depends on
+// at least one pass COMPLETING (reaching os.Open and recording a read
+// error, say) before the budget expires, but that budget must still run
+// out quickly because nothing it can find will ever satisfy it. testOrg's
+// 1ms default risks cutting that first pass short (degrading the result
+// to not-found, since a cut-short pass never sets lastErr); this
+// constant's 30s would make the test wait out the full 30s for nothing.
+// Such a test sets its own modest, explicit budget instead (e.g. 50ms) --
+// enough margin for one pass to complete, small enough to keep the suite
+// fast.
 const testCodexObserveGenerousBudget = 30 * time.Second
 
 // raiseCodexObserveBudgetForStop sets o.CodexModelObserveTimeout to
@@ -2310,6 +2321,17 @@ func TestOrgSpawn_Codex_ModelObservation_ReadError_DistinctReason(t *testing.T) 
 		t.Skip("root ignores a read-only file's permission bit")
 	}
 	o, _, _ := codexGuardedOrg(t, "implementer")
+	// This test's own claim is that the exact reason text distinguishes a
+	// COMPLETED read-error pass from not-found -- that requires at least
+	// one pass to reach os.Open on the permission-denied candidate and
+	// return before the budget expires. testOrg's tiny (1ms) default risks
+	// cutting that first pass short, degrading the reason to not-found
+	// (lastErr stays nil): the third category testCodexObserveGenerousBudget's
+	// own doc names -- a pass must COMPLETE before the budget runs out. A
+	// modest, explicit budget gives that one open+immediate-fail pass ample
+	// margin while still running out quickly (this poll never finds
+	// anything to return early on).
+	o.CodexModelObserveTimeout = 50 * time.Millisecond
 	p := mustCodexSpawnParams("org-a", "seat-1")
 
 	promptPath, err := o.promptFilePath(p.OrgID, p.SeatID)
@@ -2652,7 +2674,14 @@ func TestOrgSpawn_Codex_OldSessionRecordNotPickedOnRespawn(t *testing.T) {
 	// testCodexObserveGenerousBudget would make this one test take 30s. A
 	// modest, explicit budget instead gives ample margin over the single
 	// fast (one-line) read this test's single candidate needs, without
-	// slowing the suite.
+	// slowing the suite. Under a slow enough scan even this 50ms can still
+	// be cut short, and the test still passes without ever reading the
+	// record's age -- it cannot fail from an unlucky schedule, only pass
+	// for the wrong reason; the age-exclusion rule itself is pinned
+	// deterministically, independent of any real clock, by
+	// TestObserveCodexEffectiveModel_OldSessionUpdatedLaterNotPicked
+	// (codex_session_test.go), which runs on context.Background() and so
+	// can never be cut short at all.
 	o.CodexModelObserveTimeout = 50 * time.Millisecond
 	p := mustCodexSpawnParams("org-a", "seat-1")
 
