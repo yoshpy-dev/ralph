@@ -754,9 +754,9 @@ func codexSpawnCorrelation(events []ManifestEvent, orgID, seatID string) (spawnS
 // assigns it, the same "nothing to correlate" signal an inline prompt
 // already produces.
 //
-// The suffix is stripped from the END of the string only (cross-review
-// AR-1): strings.LastIndex finds the rightmost " agent_start_retries="
-// substring, and everything after it must be non-empty and all-digit for
+// The suffix is stripped from the END of the string only: strings.LastIndex
+// finds the rightmost " agent_start_retries=" substring, and everything
+// after it must be non-empty and all-digit for
 // it to count as the real suffix -- so a path that legitimately contains
 // spaces, or even the literal text "agent_start_retries=" in the middle
 // of itself (state dirs can live under arbitrary directory names), is
@@ -800,7 +800,7 @@ func isAllDigits(s string) bool {
 // likewise not suppressed, since there is nothing to compare against
 // (AC-5).
 //
-// The comparison is strict, not "at or after" (cross-review AR-2): every
+// The comparison is strict, not "at or after": every
 // timestamp in this package is RFC3339 at whole seconds (o.now()), so a
 // stop followed by a re-spawn of the same seat within one real second --
 // what a lead does when it replaces a seat, and what a scripted flow can
@@ -860,7 +860,13 @@ func (o *Org) observeStopModelReceipt(seat SeatStatus, seatID string) (Receipt, 
 		return Receipt{}, false
 	}
 
-	obs, _ := ObserveCodexEffectiveModel(o.codexSessionsDir(), promptPath, spawnStartedAt)
+	// until is Stop's own current instant, via the same injectable clock
+	// spawn_started itself is read through (o.nowTime()) -- Stop can run
+	// long after the spawn, so the date-directory walk needs to reach a
+	// session that started well after spawnStartedAt (e.g. a codex
+	// model-retirement dialog answered days later; see
+	// codexSessionDateDirs's own doc comment).
+	obs, _ := ObserveCodexEffectiveModel(o.codexSessionsDir(), promptPath, spawnStartedAt, o.nowTime())
 	if obs.Status != CodexObservationFound {
 		return Receipt{}, false
 	}

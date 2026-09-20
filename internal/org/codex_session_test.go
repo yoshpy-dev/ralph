@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -112,7 +113,7 @@ func TestObserveCodexEffectiveModel_Found(t *testing.T) {
 
 			meta := sessionMetaLine(t, rfc3339Milli(base))
 			turn := turnContextLine(t, rfc3339Milli(base.Add(2*time.Second)), "gpt-5.6-sol")
-			user := userMessageLine(t, rfc3339Milli(base.Add(2300*time.Millisecond)), promptFilePointer(promptPath))
+			user := userMessageLine(t, rfc3339Milli(base.Add(2300*time.Millisecond)), PromptFilePointer(promptPath))
 
 			var lines []string
 			if tc.turnBeforeUser {
@@ -122,7 +123,7 @@ func TestObserveCodexEffectiveModel_Found(t *testing.T) {
 			}
 			writeRolloutFile(t, fixtureDateDir(sessionsDir, base), "rollout-found.jsonl", lines)
 
-			obs, err := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStarted)
+			obs, err := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStarted, spawnStarted)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -147,7 +148,7 @@ func TestObserveCodexEffectiveModel_PromptPathAbsent(t *testing.T) {
 	}
 	writeRolloutFile(t, fixtureDateDir(sessionsDir, start), "rollout-noprompt.jsonl", lines)
 
-	obs, err := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStarted)
+	obs, err := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStarted, spawnStarted)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -170,7 +171,7 @@ func TestObserveCodexEffectiveModel_PromptPathOnlyInAssistantMessageDoesNotCount
 	}
 	writeRolloutFile(t, fixtureDateDir(sessionsDir, start), "rollout-assistantonly.jsonl", lines)
 
-	obs, err := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStarted)
+	obs, err := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStarted, spawnStarted)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -179,13 +180,12 @@ func TestObserveCodexEffectiveModel_PromptPathOnlyInAssistantMessageDoesNotCount
 	}
 }
 
-// TestObserveCodexEffectiveModel_PathOnlyQuoteInUserMessageDoesNotMatch is
-// the self-review L7 fix: a user message that merely quotes the bare
-// prompt path -- without the full pointer sentence ralph itself writes,
-// promptFilePointer(promptPath) -- must not count as evidence this
-// session is the seat's own. This is the scenario the plan's own finding
-// named: a TASK text relayed to a different seat that happens to mention
-// this seat's prompt path.
+// TestObserveCodexEffectiveModel_PathOnlyQuoteInUserMessageDoesNotMatch: a
+// user message that merely quotes the bare prompt path -- without the
+// full pointer sentence ralph itself writes, PromptFilePointer(promptPath)
+// -- must not count as evidence this session is the seat's own. This is
+// the scenario the plan itself named: a TASK text relayed to a different
+// seat that happens to mention this seat's prompt path.
 func TestObserveCodexEffectiveModel_PathOnlyQuoteInUserMessageDoesNotMatch(t *testing.T) {
 	dir := t.TempDir()
 	sessionsDir := filepath.Join(dir, "sessions")
@@ -200,7 +200,7 @@ func TestObserveCodexEffectiveModel_PathOnlyQuoteInUserMessageDoesNotMatch(t *te
 	}
 	writeRolloutFile(t, fixtureDateDir(sessionsDir, start), "rollout-pathonly.jsonl", lines)
 
-	obs, err := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStarted)
+	obs, err := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStarted, spawnStarted)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -211,7 +211,7 @@ func TestObserveCodexEffectiveModel_PathOnlyQuoteInUserMessageDoesNotMatch(t *te
 
 // TestObserveCodexEffectiveModel_PointerSentenceMatches is the positive
 // counterpart: the exact literal ralph writes as the seat's initial prompt
-// argument, promptFilePointer(promptPath), does match.
+// argument, PromptFilePointer(promptPath), does match.
 func TestObserveCodexEffectiveModel_PointerSentenceMatches(t *testing.T) {
 	dir := t.TempDir()
 	sessionsDir := filepath.Join(dir, "sessions")
@@ -221,12 +221,12 @@ func TestObserveCodexEffectiveModel_PointerSentenceMatches(t *testing.T) {
 
 	lines := []string{
 		sessionMetaLine(t, rfc3339Milli(start)),
-		userMessageLine(t, rfc3339Milli(start.Add(400*time.Millisecond)), promptFilePointer(promptPath)),
+		userMessageLine(t, rfc3339Milli(start.Add(400*time.Millisecond)), PromptFilePointer(promptPath)),
 		turnContextLine(t, rfc3339Milli(start.Add(300*time.Millisecond)), "gpt-5.6-sol"),
 	}
 	writeRolloutFile(t, fixtureDateDir(sessionsDir, start), "rollout-pointerexact.jsonl", lines)
 
-	obs, err := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStarted)
+	obs, err := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStarted, spawnStarted)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -246,7 +246,7 @@ func TestObserveCodexEffectiveModel_PointerSentenceInsideLongerTextMatches(t *te
 	spawnStarted := time.Date(2026, 9, 18, 7, 20, 0, 0, time.UTC)
 	start := spawnStarted.Add(1 * time.Second)
 
-	wrapped := "<environment_context>\n" + promptFilePointer(promptPath) + "\n</environment_context>"
+	wrapped := "<environment_context>\n" + PromptFilePointer(promptPath) + "\n</environment_context>"
 	lines := []string{
 		sessionMetaLine(t, rfc3339Milli(start)),
 		userMessageLine(t, rfc3339Milli(start.Add(400*time.Millisecond)), wrapped),
@@ -254,7 +254,7 @@ func TestObserveCodexEffectiveModel_PointerSentenceInsideLongerTextMatches(t *te
 	}
 	writeRolloutFile(t, fixtureDateDir(sessionsDir, start), "rollout-pointerwrapped.jsonl", lines)
 
-	obs, err := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStarted)
+	obs, err := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStarted, spawnStarted)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -277,7 +277,7 @@ func TestObserveCodexEffectiveModel_OldSessionUpdatedLaterNotPicked(t *testing.T
 	oldStart := spawnStarted.Add(-10 * time.Second)
 	oldLines := []string{
 		sessionMetaLine(t, rfc3339Milli(oldStart)),
-		userMessageLine(t, rfc3339Milli(oldStart.Add(400*time.Millisecond)), promptFilePointer(promptPath)),
+		userMessageLine(t, rfc3339Milli(oldStart.Add(400*time.Millisecond)), PromptFilePointer(promptPath)),
 		turnContextLine(t, rfc3339Milli(oldStart.Add(300*time.Millisecond)), "gpt-5.5-old"),
 	}
 	oldPath := writeRolloutFile(t, fixtureDateDir(sessionsDir, oldStart), "rollout-old.jsonl", oldLines)
@@ -289,12 +289,12 @@ func TestObserveCodexEffectiveModel_OldSessionUpdatedLaterNotPicked(t *testing.T
 	newStart := spawnStarted.Add(1 * time.Second)
 	newLines := []string{
 		sessionMetaLine(t, rfc3339Milli(newStart)),
-		userMessageLine(t, rfc3339Milli(newStart.Add(400*time.Millisecond)), promptFilePointer(promptPath)),
+		userMessageLine(t, rfc3339Milli(newStart.Add(400*time.Millisecond)), PromptFilePointer(promptPath)),
 		turnContextLine(t, rfc3339Milli(newStart.Add(300*time.Millisecond)), "gpt-5.6-sol"),
 	}
 	writeRolloutFile(t, fixtureDateDir(sessionsDir, newStart), "rollout-new.jsonl", newLines)
 
-	obs, err := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStarted)
+	obs, err := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStarted, spawnStarted)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -313,13 +313,13 @@ func TestObserveCodexEffectiveModel_TwoQualifyingRecordsAmbiguous(t *testing.T) 
 		start := spawnStarted.Add(time.Duration(i+1) * time.Second)
 		lines := []string{
 			sessionMetaLine(t, rfc3339Milli(start)),
-			userMessageLine(t, rfc3339Milli(start.Add(400*time.Millisecond)), promptFilePointer(promptPath)),
+			userMessageLine(t, rfc3339Milli(start.Add(400*time.Millisecond)), PromptFilePointer(promptPath)),
 			turnContextLine(t, rfc3339Milli(start.Add(300*time.Millisecond)), model),
 		}
 		writeRolloutFile(t, fixtureDateDir(sessionsDir, start), fmt.Sprintf("rollout-dup-%d.jsonl", i), lines)
 	}
 
-	obs, err := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStarted)
+	obs, err := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStarted, spawnStarted)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -349,12 +349,12 @@ func TestObserveCodexEffectiveModel_SameSecondAsSpawnStartedQualifies(t *testing
 
 	lines := []string{
 		sessionMetaLine(t, rfc3339Milli(sessionStart)),
-		userMessageLine(t, rfc3339Milli(sessionStart.Add(300*time.Millisecond)), promptFilePointer(promptPath)),
+		userMessageLine(t, rfc3339Milli(sessionStart.Add(300*time.Millisecond)), PromptFilePointer(promptPath)),
 		turnContextLine(t, rfc3339Milli(sessionStart.Add(200*time.Millisecond)), "gpt-5.6-sol"),
 	}
 	writeRolloutFile(t, fixtureDateDir(sessionsDir, sessionStart), "rollout-samesecond.jsonl", lines)
 
-	obs, err := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStarted)
+	obs, err := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStarted, spawnStarted)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -372,7 +372,7 @@ func TestObserveCodexEffectiveModel_SymlinkIgnored(t *testing.T) {
 
 	lines := []string{
 		sessionMetaLine(t, rfc3339Milli(start)),
-		userMessageLine(t, rfc3339Milli(start.Add(400*time.Millisecond)), promptFilePointer(promptPath)),
+		userMessageLine(t, rfc3339Milli(start.Add(400*time.Millisecond)), PromptFilePointer(promptPath)),
 		turnContextLine(t, rfc3339Milli(start.Add(300*time.Millisecond)), "gpt-5.6-sol"),
 	}
 	dateDir := fixtureDateDir(sessionsDir, start)
@@ -383,7 +383,7 @@ func TestObserveCodexEffectiveModel_SymlinkIgnored(t *testing.T) {
 		t.Fatalf("symlink: %v", err)
 	}
 
-	obs, err := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStarted)
+	obs, err := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStarted, spawnStarted)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -413,7 +413,7 @@ func TestObserveCodexEffectiveModel_FIFODoesNotHang(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		_, _ = ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStarted)
+		_, _ = ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStarted, spawnStarted)
 		close(done)
 	}()
 	select {
@@ -433,13 +433,13 @@ func TestObserveCodexEffectiveModel_MalformedLineSkipped(t *testing.T) {
 	lines := []string{
 		sessionMetaLine(t, rfc3339Milli(start)),
 		"not even json",
-		userMessageLine(t, rfc3339Milli(start.Add(400*time.Millisecond)), promptFilePointer(promptPath)),
+		userMessageLine(t, rfc3339Milli(start.Add(400*time.Millisecond)), PromptFilePointer(promptPath)),
 		`{"type": "turn_context", "payload": {`, // truncated/invalid JSON
 		turnContextLine(t, rfc3339Milli(start.Add(300*time.Millisecond)), "gpt-5.6-sol"),
 	}
 	writeRolloutFile(t, fixtureDateDir(sessionsDir, start), "rollout-malformed.jsonl", lines)
 
-	obs, err := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStarted)
+	obs, err := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStarted, spawnStarted)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -463,12 +463,12 @@ func TestObserveCodexEffectiveModel_OversizedLineSkipped(t *testing.T) {
 
 	lines := []string{
 		sessionMetaLine(t, rfc3339Milli(start)),
-		userMessageLine(t, rfc3339Milli(start.Add(400*time.Millisecond)), promptFilePointer(promptPath)),
+		userMessageLine(t, rfc3339Milli(start.Add(400*time.Millisecond)), PromptFilePointer(promptPath)),
 		oversizedTurn,
 	}
 	writeRolloutFile(t, fixtureDateDir(sessionsDir, start), "rollout-oversized.jsonl", lines)
 
-	obs, err := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStarted)
+	obs, err := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStarted, spawnStarted)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -486,11 +486,11 @@ func TestObserveCodexEffectiveModel_SessionMetaWithoutTurnContext(t *testing.T) 
 
 	lines := []string{
 		sessionMetaLine(t, rfc3339Milli(start)),
-		userMessageLine(t, rfc3339Milli(start.Add(400*time.Millisecond)), promptFilePointer(promptPath)),
+		userMessageLine(t, rfc3339Milli(start.Add(400*time.Millisecond)), PromptFilePointer(promptPath)),
 	}
 	writeRolloutFile(t, fixtureDateDir(sessionsDir, start), "rollout-noturn.jsonl", lines)
 
-	obs, err := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStarted)
+	obs, err := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStarted, spawnStarted)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -509,13 +509,13 @@ func TestObserveCodexEffectiveModel_FileByteCapStopsBeforeMatch(t *testing.T) {
 	filler := `{"type":"noise","payload":{"blob":"` + strings.Repeat("x", codexObserveMaxFileBytes+100*1024) + `"}}`
 	lines := []string{
 		sessionMetaLine(t, rfc3339Milli(start)),
-		userMessageLine(t, rfc3339Milli(start.Add(400*time.Millisecond)), promptFilePointer(promptPath)),
+		userMessageLine(t, rfc3339Milli(start.Add(400*time.Millisecond)), PromptFilePointer(promptPath)),
 		filler,
 		turnContextLine(t, rfc3339Milli(start.Add(300*time.Millisecond)), "gpt-should-not-be-seen"),
 	}
 	writeRolloutFile(t, fixtureDateDir(sessionsDir, start), "rollout-bytecap.jsonl", lines)
 
-	obs, err := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStarted)
+	obs, err := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStarted, spawnStarted)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -539,13 +539,13 @@ func TestObserveCodexEffectiveModel_YesterdaysDateDirectoryIsWalked(t *testing.T
 
 	lines := []string{
 		sessionMetaLine(t, rfc3339Milli(sessionStart)),
-		userMessageLine(t, rfc3339Milli(sessionStart.Add(400*time.Millisecond)), promptFilePointer(promptPath)),
+		userMessageLine(t, rfc3339Milli(sessionStart.Add(400*time.Millisecond)), PromptFilePointer(promptPath)),
 		turnContextLine(t, rfc3339Milli(sessionStart.Add(300*time.Millisecond)), "gpt-yesterday-dir"),
 	}
 	yesterdayDir := filepath.Join(sessionsDir, spawnStarted.Local().AddDate(0, 0, -1).Format(codexSessionDateLayout))
 	writeRolloutFile(t, yesterdayDir, "rollout-yesterday-dir.jsonl", lines)
 
-	obs, err := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStarted)
+	obs, err := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStarted, spawnStarted)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -567,7 +567,7 @@ func TestObserveCodexEffectiveModel_ThreeDaysOldDateDirectoryNotWalked(t *testin
 
 	lines := []string{
 		sessionMetaLine(t, rfc3339Milli(sessionStart)),
-		userMessageLine(t, rfc3339Milli(sessionStart.Add(400*time.Millisecond)), promptFilePointer(promptPath)),
+		userMessageLine(t, rfc3339Milli(sessionStart.Add(400*time.Millisecond)), PromptFilePointer(promptPath)),
 		turnContextLine(t, rfc3339Milli(sessionStart.Add(300*time.Millisecond)), "gpt-3days-dir"),
 	}
 	threeDaysDir := filepath.Join(sessionsDir, spawnStarted.Local().AddDate(0, 0, -3).Format(codexSessionDateLayout))
@@ -577,7 +577,7 @@ func TestObserveCodexEffectiveModel_ThreeDaysOldDateDirectoryNotWalked(t *testin
 		t.Fatalf("chtimes: %v", err)
 	}
 
-	obs, err := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStarted)
+	obs, err := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStarted, spawnStarted)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -587,8 +587,8 @@ func TestObserveCodexEffectiveModel_ThreeDaysOldDateDirectoryNotWalked(t *testin
 }
 
 // TestObserveCodexEffectiveModel_DirectoryThreeDaysAfterSpawnDateNotWalked
-// is the self-review L2 fix's own test: codexSessionDateDirs no longer has
-// an unbounded "through today" upper bound, so a directory three days
+// pins that codexSessionDateDirs has no unbounded "through today" upper
+// bound, so a directory three days
 // AFTER spawnStarted's own date must not be walked either -- this is the
 // direction the old "today+1" bound could never have caught (a directory
 // well after spawnStarted's date used to be reachable whenever the real
@@ -606,13 +606,13 @@ func TestObserveCodexEffectiveModel_DirectoryThreeDaysAfterSpawnDateNotWalked(t 
 
 	lines := []string{
 		sessionMetaLine(t, rfc3339Milli(sessionStart)),
-		userMessageLine(t, rfc3339Milli(sessionStart.Add(400*time.Millisecond)), promptFilePointer(promptPath)),
+		userMessageLine(t, rfc3339Milli(sessionStart.Add(400*time.Millisecond)), PromptFilePointer(promptPath)),
 		turnContextLine(t, rfc3339Milli(sessionStart.Add(300*time.Millisecond)), "gpt-3days-after-dir"),
 	}
 	threeDaysAfterDir := filepath.Join(sessionsDir, spawnStarted.Local().AddDate(0, 0, 3).Format(codexSessionDateLayout))
 	writeRolloutFile(t, threeDaysAfterDir, "rollout-3days-after-dir.jsonl", lines)
 
-	obs, err := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStarted)
+	obs, err := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStarted, spawnStarted)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -622,8 +622,9 @@ func TestObserveCodexEffectiveModel_DirectoryThreeDaysAfterSpawnDateNotWalked(t 
 }
 
 // TestObserveCodexEffectiveModel_SpawnDateDirectory_ModTimeManyDaysLaterStillFound
-// is L2's other half: the record's directory matches the day the session
-// STARTED (spawnStarted's own date), but the file's ModTime is many days
+// is the other direction from the test above: the record's directory
+// matches the day the session STARTED (spawnStarted's own date), but the
+// file's ModTime is many days
 // later -- codex kept writing to it long after the session began. Real
 // file-metadata evidence (docs/evidence/codex-effective-model-receipt-2026-09-20.md's
 // follow-up check): of 1,013 real records, 57 were last modified on a
@@ -641,7 +642,7 @@ func TestObserveCodexEffectiveModel_SpawnDateDirectory_ModTimeManyDaysLaterStill
 
 	lines := []string{
 		sessionMetaLine(t, rfc3339Milli(sessionStart)),
-		userMessageLine(t, rfc3339Milli(sessionStart.Add(400*time.Millisecond)), promptFilePointer(promptPath)),
+		userMessageLine(t, rfc3339Milli(sessionStart.Add(400*time.Millisecond)), PromptFilePointer(promptPath)),
 		turnContextLine(t, rfc3339Milli(sessionStart.Add(300*time.Millisecond)), "gpt-long-lived-session"),
 	}
 	spawnDateDir := filepath.Join(sessionsDir, spawnStarted.Local().Format(codexSessionDateLayout))
@@ -651,7 +652,7 @@ func TestObserveCodexEffectiveModel_SpawnDateDirectory_ModTimeManyDaysLaterStill
 		t.Fatalf("chtimes: %v", err)
 	}
 
-	obs, err := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStarted)
+	obs, err := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStarted, spawnStarted)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -660,10 +661,133 @@ func TestObserveCodexEffectiveModel_SpawnDateDirectory_ModTimeManyDaysLaterStill
 	}
 }
 
+// TestObserveCodexEffectiveModel_UntilReachesSessionStartedDaysAfterSpawn
+// covers cycle-2 self-review C2-1
+// (docs/reports/self-review-2026-09-20-codex-effective-model-receipt.md):
+// a codex model-retirement dialog left open for three days before being
+// answered means the session record itself does not start until day 3 --
+// until must be able to reach
+// that day's directory for Stop's second-chance observation to find it.
+func TestObserveCodexEffectiveModel_UntilReachesSessionStartedDaysAfterSpawn(t *testing.T) {
+	dir := t.TempDir()
+	sessionsDir := filepath.Join(dir, "sessions")
+	promptPath := filepath.Join(dir, "state", "prompts", "org1_seat1.md")
+	spawnStarted := time.Date(2026, 9, 18, 7, 20, 0, 0, time.UTC)
+	sessionStart := spawnStarted.AddDate(0, 0, 3)
+	until := spawnStarted.AddDate(0, 0, 4)
+
+	lines := []string{
+		sessionMetaLine(t, rfc3339Milli(sessionStart)),
+		userMessageLine(t, rfc3339Milli(sessionStart.Add(400*time.Millisecond)), PromptFilePointer(promptPath)),
+		turnContextLine(t, rfc3339Milli(sessionStart.Add(300*time.Millisecond)), "gpt-5.6-sol"),
+	}
+	writeRolloutFile(t, fixtureDateDir(sessionsDir, sessionStart), "rollout-late-start.jsonl", lines)
+
+	obs, err := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStarted, until)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if obs.Status != CodexObservationFound || obs.Model != "gpt-5.6-sol" {
+		t.Fatalf("got %+v, want found/gpt-5.6-sol (until must reach a session that started days after the spawn)", obs)
+	}
+}
+
+// TestObserveCodexEffectiveModel_UntilEqualsSpawnStarted_LateSessionNotFound
+// is the same fixture as above with until pinned back to spawnStarted --
+// documenting Spawn's own narrow window (it always passes spawnStarted for
+// until, since its poll runs moments after the spawn): a session that only
+// starts three days later is out of reach for Spawn's own poll, exactly as
+// before this fix.
+func TestObserveCodexEffectiveModel_UntilEqualsSpawnStarted_LateSessionNotFound(t *testing.T) {
+	dir := t.TempDir()
+	sessionsDir := filepath.Join(dir, "sessions")
+	promptPath := filepath.Join(dir, "state", "prompts", "org1_seat1.md")
+	spawnStarted := time.Date(2026, 9, 18, 7, 20, 0, 0, time.UTC)
+	sessionStart := spawnStarted.AddDate(0, 0, 3)
+
+	lines := []string{
+		sessionMetaLine(t, rfc3339Milli(sessionStart)),
+		userMessageLine(t, rfc3339Milli(sessionStart.Add(400*time.Millisecond)), PromptFilePointer(promptPath)),
+		turnContextLine(t, rfc3339Milli(sessionStart.Add(300*time.Millisecond)), "gpt-5.6-sol"),
+	}
+	writeRolloutFile(t, fixtureDateDir(sessionsDir, sessionStart), "rollout-late-start.jsonl", lines)
+
+	obs, err := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStarted, spawnStarted)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if obs.Status != CodexObservationNotFound {
+		t.Fatalf("got %+v, want not-found (until == spawnStarted must not reach a session that starts 3 days later)", obs)
+	}
+}
+
+// TestObserveCodexEffectiveModel_UntilBeforeSpawnStarted_TreatedAsSpawnStarted
+// pins that an until earlier than spawnStarted never shrinks the window
+// below the original three directories -- a record in spawnStarted's own
+// date is still found.
+func TestObserveCodexEffectiveModel_UntilBeforeSpawnStarted_TreatedAsSpawnStarted(t *testing.T) {
+	dir := t.TempDir()
+	sessionsDir := filepath.Join(dir, "sessions")
+	promptPath := filepath.Join(dir, "state", "prompts", "org1_seat1.md")
+	spawnStarted := time.Date(2026, 9, 18, 7, 20, 0, 0, time.UTC)
+	sessionStart := spawnStarted.Add(1 * time.Second)
+
+	lines := []string{
+		sessionMetaLine(t, rfc3339Milli(sessionStart)),
+		userMessageLine(t, rfc3339Milli(sessionStart.Add(400*time.Millisecond)), PromptFilePointer(promptPath)),
+		turnContextLine(t, rfc3339Milli(sessionStart.Add(300*time.Millisecond)), "gpt-5.6-sol"),
+	}
+	writeRolloutFile(t, fixtureDateDir(sessionsDir, sessionStart), "rollout-same-day.jsonl", lines)
+
+	until := spawnStarted.Add(-10 * time.Hour)
+	obs, err := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStarted, until)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if obs.Status != CodexObservationFound || obs.Model != "gpt-5.6-sol" {
+		t.Fatalf("got %+v, want found/gpt-5.6-sol (until before spawnStarted must behave like until == spawnStarted, not shrink the window)", obs)
+	}
+}
+
+// TestCodexSessionDateDirs_UntilBeforeSpawnStarted is the pure-function
+// counterpart of the test above: an until earlier than spawnStarted must
+// produce the exact same directory list as until == spawnStarted.
+func TestCodexSessionDateDirs_UntilBeforeSpawnStarted(t *testing.T) {
+	spawnStarted := time.Date(2026, 9, 18, 7, 20, 0, 0, time.UTC)
+	until := spawnStarted.Add(-10 * time.Hour)
+	got := codexSessionDateDirs(spawnStarted, until)
+	want := codexSessionDateDirs(spawnStarted, spawnStarted)
+	if !slices.Equal(got, want) {
+		t.Fatalf("codexSessionDateDirs(spawnStarted, until-before-spawnStarted) = %v, want %v (same as until == spawnStarted)", got, want)
+	}
+}
+
+// TestCodexSessionDateDirs_CapKeepsEarliestDirectories is the self-review
+// cycle-2 fix's own cap test: a 60-day span between spawnStarted and until
+// yields exactly codexObserveMaxDateDirs directories, and they are the
+// EARLIEST consecutive days in that span (starting at spawnStarted's local
+// date minus one day), not an arbitrary or a latest-days subset.
+func TestCodexSessionDateDirs_CapKeepsEarliestDirectories(t *testing.T) {
+	spawnStarted := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	until := spawnStarted.AddDate(0, 0, 60)
+
+	got := codexSessionDateDirs(spawnStarted, until)
+	if len(got) != codexObserveMaxDateDirs {
+		t.Fatalf("len(got) = %d, want %d", len(got), codexObserveMaxDateDirs)
+	}
+	startDay := truncateToLocalDay(spawnStarted).AddDate(0, 0, -1)
+	for i, dir := range got {
+		want := startDay.AddDate(0, 0, i).Format(codexSessionDateLayout)
+		if dir != want {
+			t.Fatalf("got[%d] = %q, want %q (consecutive earliest days starting at spawnStarted's date minus one)", i, dir, want)
+		}
+	}
+}
+
 func TestObserveCodexEffectiveModel_SessionsDirMissing(t *testing.T) {
 	dir := t.TempDir()
 	sessionsDir := filepath.Join(dir, "does-not-exist")
-	obs, err := ObserveCodexEffectiveModel(sessionsDir, filepath.Join(dir, "prompts", "org1_seat1.md"), time.Now())
+	obs, err := ObserveCodexEffectiveModel(sessionsDir, filepath.Join(dir, "prompts", "org1_seat1.md"), time.Now(), time.Now())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -684,7 +808,7 @@ func TestObserveCodexEffectiveModel_EmptyInputsReturnNotFoundImmediately(t *test
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			obs, err := ObserveCodexEffectiveModel(tc.sessionsDir, tc.promptPath, time.Now())
+			obs, err := ObserveCodexEffectiveModel(tc.sessionsDir, tc.promptPath, time.Now(), time.Now())
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -714,7 +838,7 @@ func TestObserveCodexEffectiveModel_PermissionDeniedDoesNotLeakContent(t *testin
 	const sentinel = "sentinel-fixture-body-must-not-appear-in-any-error"
 	lines := []string{
 		sessionMetaLine(t, rfc3339Milli(start)),
-		userMessageLine(t, rfc3339Milli(start.Add(400*time.Millisecond)), promptFilePointer(promptPath)+" "+sentinel),
+		userMessageLine(t, rfc3339Milli(start.Add(400*time.Millisecond)), PromptFilePointer(promptPath)+" "+sentinel),
 		turnContextLine(t, rfc3339Milli(start.Add(300*time.Millisecond)), "gpt-5.6-sol"),
 	}
 	path := writeRolloutFile(t, fixtureDateDir(sessionsDir, start), "rollout-noperm.jsonl", lines)
@@ -723,7 +847,7 @@ func TestObserveCodexEffectiveModel_PermissionDeniedDoesNotLeakContent(t *testin
 	}
 	t.Cleanup(func() { _ = os.Chmod(path, 0o644) })
 
-	obs, err := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStarted)
+	obs, err := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStarted, spawnStarted)
 	if err == nil {
 		t.Fatalf("expected a non-nil error for a permission-denied candidate file, got obs=%+v", obs)
 	}

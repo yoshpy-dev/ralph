@@ -114,7 +114,7 @@ type CodexModelObservation struct {
 // spawn under sessionsDir, identifying it by promptPath -- the absolute
 // path to the seat's role-prompt file (see spawn.go's promptFilePath). A
 // record qualifies only when a user message's content contains the full
-// pointer sentence ralph itself passed the seat, promptFilePointer(promptPath)
+// pointer sentence ralph itself passed the seat, PromptFilePointer(promptPath)
 // (see codexResponseItemMentionsPrompt), not merely the bare path.
 // spawnStarted is the spawn's own start time; only a session that began at
 // or after spawnStarted (truncated to whole seconds, since that is the
@@ -122,6 +122,16 @@ type CodexModelObservation struct {
 // which is what lets a re-spawn of the same org_id/seat_id (same
 // promptPath) tell its own session apart from an older one that happens to
 // still be running or gets touched again later.
+//
+// until is how far past spawnStarted the date-directory walk reaches
+// (codexSessionDateDirs) -- a session can start well after the spawn when
+// codex's own model-retirement dialog is left open, since the record is
+// only written once the dialog is answered and the first turn begins.
+// Spawn's own poll passes spawnStarted for until (the observation happens
+// moments after the spawn, so there is nothing later to reach); Stop
+// passes its own current instant, since it can run long after the spawn.
+// until earlier than spawnStarted, including the zero value, is treated
+// as spawnStarted.
 //
 // This function is pure: no environment reads, no globals mutated, no
 // goroutines, no writes. It never returns partial or guessed content -- see
@@ -134,7 +144,7 @@ type CodexModelObservation struct {
 // nil error. Neither caller (Spawn's poll, Stop's single check) ever lets a
 // codex CLI record-shape change or a permissions quirk fail the seat's own
 // spawn or stop.
-func ObserveCodexEffectiveModel(sessionsDir, promptPath string, spawnStarted time.Time) (CodexModelObservation, error) {
+func ObserveCodexEffectiveModel(sessionsDir, promptPath string, spawnStarted, until time.Time) (CodexModelObservation, error) {
 	if sessionsDir == "" || promptPath == "" {
 		return CodexModelObservation{Status: CodexObservationNotFound}, nil
 	}
@@ -145,7 +155,7 @@ func ObserveCodexEffectiveModel(sessionsDir, promptPath string, spawnStarted tim
 	}
 
 	cutoff := spawnStarted.Truncate(time.Second)
-	candidates := codexRolloutCandidates(sessionsDir, spawnStarted)
+	candidates := codexRolloutCandidates(sessionsDir, spawnStarted, until)
 
 	var (
 		matchedModel string
@@ -188,19 +198,23 @@ type codexRolloutCandidate struct {
 }
 
 // codexRolloutCandidates walks the date-directory window codexSessionDateDirs
-// returns for spawnStarted, collects every regular rollout-*.jsonl file
-// whose ModTime is not older than spawnStarted minus codexObserveModTimeSlack,
-// and returns them newest-first, capped at codexObserveMaxFiles. A symlink,
-// FIFO, device, or directory that happens to match the name pattern is
-// identified via os.Lstat (which never follows a symlink) and dropped --
-// never opened -- so a FIFO left behind in the tree cannot hang this call.
-// A missing or unreadable date directory is silently skipped (per
-// ObserveCodexEffectiveModel's doc comment, not an error).
-func codexRolloutCandidates(sessionsDir string, spawnStarted time.Time) []codexRolloutCandidate {
+// returns for spawnStarted/until, collects every regular rollout-*.jsonl
+// file whose ModTime is not older than spawnStarted minus
+// codexObserveModTimeSlack, and returns them newest-first, capped at
+// codexObserveMaxFiles. A symlink, FIFO, device, or directory that happens
+// to match the name pattern is identified via os.Lstat (which never
+// follows a symlink) and dropped -- never opened -- so a FIFO left behind
+// in the tree cannot hang this call. A missing or unreadable date
+// directory is silently skipped (per ObserveCodexEffectiveModel's doc
+// comment, not an error). The ModTime pre-filter is anchored to
+// spawnStarted only, not until -- it stays a cheap "cannot possibly be
+// this spawn" filter, never a decision about how late a legitimate record
+// may have been touched (see the constant's own doc comment).
+func codexRolloutCandidates(sessionsDir string, spawnStarted, until time.Time) []codexRolloutCandidate {
 	minModTime := spawnStarted.Add(-codexObserveModTimeSlack)
 
 	var candidates []codexRolloutCandidate
-	for _, dateDir := range codexSessionDateDirs(spawnStarted) {
+	for _, dateDir := range codexSessionDateDirs(spawnStarted, until) {
 		dirPath := filepath.Join(sessionsDir, dateDir)
 		entries, err := os.ReadDir(dirPath)
 		if err != nil {
@@ -238,31 +252,68 @@ func isCodexRolloutFileName(name string) bool {
 	return strings.HasPrefix(name, codexRolloutFilePrefix) && strings.HasSuffix(name, codexRolloutFileSuffix)
 }
 
-// codexSessionDateDirs returns exactly three YYYY/MM/DD date directories
-// (codex's own layout) to walk: spawnStarted's local date, minus one day
-// and plus one day. A session's record lives in the directory of the day
-// the session STARTED, no matter how much longer codex keeps writing to it
-// afterward -- confirmed against this machine's real sessions directory
-// (file metadata only): of 1,013 records, 57 were last modified on a later
+// codexObserveMaxDateDirs caps how many date directories codexSessionDateDirs
+// returns, keeping the EARLIEST ones when the [spawnStarted-1d, until+1d]
+// span would exceed it. A seat left running -- or parked on a startup
+// dialog -- for more than a month before Stop's second-chance observation
+// runs is out of scope: 32 days of headroom is generous for the
+// documented "codex's model-retirement dialog answered more than a day
+// later" case this bound exists for, while still keeping the walk bounded
+// no matter how stale a caller's until ends up being. Keeping the
+// earliest days, not the latest, is deliberate: the session that answers
+// a startup dialog still started on or soon after spawnStarted, so if a
+// span ever needed trimming, the directories nearest the actual spawn are
+// the ones most likely to hold the real record.
+const codexObserveMaxDateDirs = 32
+
+// codexSessionDateDirs returns the YYYY/MM/DD date directories (codex's
+// own layout) to walk: from spawnStarted's local date minus one day,
+// through until's local date plus one day, capped at
+// codexObserveMaxDateDirs (keeping the earliest days -- see its own doc
+// comment). until earlier than spawnStarted, including the zero value, is
+// treated as spawnStarted, so a caller that only has the spawn time still
+// gets the original three-directory window.
+//
+// A session's record lives in the directory of the day the session
+// STARTED, no matter how much longer codex keeps writing to it afterward
+// -- confirmed against this machine's real sessions directory (file
+// metadata only): of 1,013 records, 57 were last modified on a later
 // calendar day than their directory date (up to 17 days later), none had
 // moved to a different directory, and every file name's embedded date
-// matched its directory date exactly. So this walk never needs "today" (or
-// any other wall-clock read) -- it only needs the single day spawnStarted
-// itself falls on. The one-day pad on each side absorbs a UTC/local
-// day-boundary mismatch between whatever clock named the directory (codex
-// documents it as a "local timestamp") and spawnStarted's own Location --
-// narrowing this to exactly spawnStarted's date would risk silently
-// missing a real file created just across a midnight boundary. This was
-// also the only place in this package that read the live wall clock;
-// removing that read here means ObserveCodexEffectiveModel never touches
-// it at all, only the caller-supplied spawnStarted.
-func codexSessionDateDirs(spawnStarted time.Time) []string {
-	day := truncateToLocalDay(spawnStarted)
-	return []string{
-		day.AddDate(0, 0, -1).Format(codexSessionDateLayout),
-		day.Format(codexSessionDateLayout),
-		day.AddDate(0, 0, 1).Format(codexSessionDateLayout),
+// matched its directory date exactly. But the session can also START
+// later than the spawn: when codex's model-retirement dialog is open, the
+// record is not written until the dialog is answered and the first turn
+// begins -- the one real record that had the dialog shows the same
+// ~2.5s gap between session_meta and turn_context as every dialog-free
+// record, meaning the record was created at first-turn time, not at
+// process launch. A seat left on that dialog for two days needs until to
+// reach that day's directory, which is why this function takes it as a
+// second, caller-supplied endpoint rather than assuming spawnStarted
+// alone always covers the session's real start. The one-day pad on each
+// side of the resulting span absorbs a UTC/local day-boundary mismatch
+// between whatever clock named the directory (codex documents it as a
+// "local timestamp") and either endpoint's own Location -- narrowing
+// either side to exactly its own date would risk silently missing a real
+// file created just across a midnight boundary.
+//
+// This function still never reads the live wall clock itself -- both
+// endpoints are caller-supplied, so ObserveCodexEffectiveModel as a whole
+// still touches no clock but the ones its caller already had.
+func codexSessionDateDirs(spawnStarted, until time.Time) []string {
+	if until.Before(spawnStarted) {
+		until = spawnStarted
 	}
+	startDay := truncateToLocalDay(spawnStarted).AddDate(0, 0, -1)
+	endDay := truncateToLocalDay(until).AddDate(0, 0, 1)
+
+	var dirs []string
+	for d := startDay; !d.After(endDay); d = d.AddDate(0, 0, 1) {
+		dirs = append(dirs, d.Format(codexSessionDateLayout))
+		if len(dirs) >= codexObserveMaxDateDirs {
+			break
+		}
+	}
+	return dirs
 }
 
 // truncateToLocalDay returns t converted to its local time zone with the
@@ -404,7 +455,7 @@ func codexTurnContextModel(payload json.RawMessage) string {
 // codexResponseItemMentionsPrompt reports whether a response_item line's
 // payload is a user message whose content contains the full pointer
 // sentence ralph passes the seat as its role-prompt argument --
-// promptFilePointer(promptPath), spawn.go, e.g. "役割指示を読み込んで従っ
+// PromptFilePointer(promptPath), spawn.go, e.g. "役割指示を読み込んで従っ
 // てください: <path>" -- as a substring (Contains, not equality: codex may
 // wrap the text). Matching on the bare path alone would also match any
 // other message that merely quotes it, such as a TASK text relayed to a
@@ -427,7 +478,7 @@ func codexResponseItemMentionsPrompt(payload json.RawMessage, promptPath string)
 	if p.Type != "message" || p.Role != "user" {
 		return false
 	}
-	pointer := promptFilePointer(promptPath)
+	pointer := PromptFilePointer(promptPath)
 	for _, part := range p.Content {
 		if strings.Contains(part.Text, pointer) {
 			return true

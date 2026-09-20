@@ -255,17 +255,21 @@ type SpawnResult struct {
 	Seat    SeatStatus
 	Err     error
 	// ModelReceipt is the Receipt this call appended, set on every path
-	// that appends one: the real spawn path's own observation, reject()'s
-	// envelope-rejection receipt, and dryRunSpawn's dry-run receipt all set
-	// it. It is the zero Receipt on every path that appends no receipt at
-	// all -- an idempotent respawn, a pre-manifest identifier-validation
-	// rejection (reject() is never reached for those; see Spawn's own doc
-	// comment), and every SpawnOutcomeFailed return. The CLI layer reads
-	// this to decide whether to print the codex model-mismatch warning
-	// (AC-6), without re-reading the receipts file -- its gate
-	// (Honored=="false" AND a non-empty ReportedEffectiveModel) is what
-	// keeps a rejection or dry-run receipt (both honored=false/unknown with
-	// no reported model) from ever being printed as a mismatch.
+	// that successfully appends one: the real spawn path's own observation,
+	// reject()'s envelope-rejection receipt, and dryRunSpawn's dry-run
+	// receipt all set it -- each only once its own Receipts.Append call has
+	// actually succeeded, so this field never names a receipt that was
+	// never persisted. It is the zero Receipt on every path that appends no
+	// receipt at all, or whose append failed: an idempotent respawn, a
+	// pre-manifest identifier-validation rejection (reject() is never
+	// reached for those; see Spawn's own doc comment), every
+	// SpawnOutcomeFailed return, and a reject()/dryRunSpawn receipts-append
+	// failure. The CLI layer reads this to decide whether to print the
+	// codex model-mismatch warning (AC-6), without re-reading the receipts
+	// file -- its gate (Honored=="false" AND a non-empty
+	// ReportedEffectiveModel) is what keeps a rejection or dry-run receipt
+	// (both honored=false/unknown with no reported model) from ever being
+	// printed as a mismatch.
 	ModelReceipt Receipt
 }
 
@@ -726,7 +730,7 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 			if err := writePromptFile(promptPath, initialPrompt); err != nil {
 				return o.failStep(p, "prompt_file", err, paneID)
 			}
-			agentArgs = append(agentArgs, promptFilePointer(promptPath))
+			agentArgs = append(agentArgs, PromptFilePointer(promptPath))
 			agentStartedDetails = codexPromptFileDetailsPrefix + promptPath
 		} else {
 			agentArgs = append(agentArgs, initialPrompt)
@@ -741,6 +745,14 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 		return o.failStepWithNote(p, "agent_start", err, paneID, fmt.Sprintf("agent_start_retries=%d", retries))
 	}
 	if retries > 0 {
+		// This must stay the LAST thing appended to agentStartedDetails:
+		// promptPathFromAgentStartedDetails (verbs.go) strips this suffix
+		// only when it runs to the very end of the string. A field added
+		// after this point would silently become part of the "path"
+		// codexSpawnCorrelation recovers at Stop time, breaking the
+		// recovered pointer sentence's match against the session record
+		// the same way an unstripped suffix once did. A future field
+		// belongs before `prompt_file=` instead.
 		agentStartedDetails = fmt.Sprintf("%s %s%d", agentStartedDetails, codexAgentStartRetriesDetailsSuffixKey, retries)
 	}
 	if err := o.appendEvent(ManifestEvent{
@@ -1075,7 +1087,12 @@ func (o *Org) observeCodexSpawnReceipt(ctx context.Context, base Receipt, prompt
 
 	var lastErr error
 	for {
-		obs, err := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStartedAt)
+		// until is spawnStartedAt itself, not a later instant: the poll runs
+		// moments after the spawn (AC-3's own timeout is at most a handful of
+		// seconds), so there is nothing later to reach -- this keeps Spawn's
+		// own window at the original three directories (see
+		// ObserveCodexEffectiveModel's doc comment).
+		obs, err := ObserveCodexEffectiveModel(sessionsDir, promptPath, spawnStartedAt, spawnStartedAt)
 		lastErr = err
 		switch obs.Status {
 		case CodexObservationFound:
@@ -1250,15 +1267,22 @@ const codexPromptFileDetailsPrefix = "agent_started prompt_file="
 // suffix back off to recover the path at Stop time -- a single named
 // constant instead of two independent literals keeps the write and strip
 // sides from silently drifting apart, the same reason
-// codexPromptFileDetailsPrefix exists (cross-review AR-1: before this,
-// the suffix was left in place, so the recovered "path" never matched the
-// pointer sentence a retried spawn actually wrote).
+// codexPromptFileDetailsPrefix exists: a retried spawn used to leave this
+// suffix in place unstripped, so the recovered "path" never matched the
+// pointer sentence that spawn actually wrote.
+//
+// This must stay the LAST field ever appended to agentStartedDetails:
+// promptPathFromAgentStartedDetails strips it only when it runs to the
+// very end of the string, so a field appended after it would silently
+// become part of the "path" instead of being stripped, breaking the
+// recovered path the same way again in a different shape. A future field
+// belongs before codexPromptFileDetailsPrefix's own prompt_file= instead.
 const codexAgentStartRetriesDetailsSuffixKey = "agent_start_retries="
 
 // needsPromptFile reports whether prompt is too unsafe to pass directly as
 // a herdr agent argument and must instead be written to a prompt file with
 // only a one-line pointer passed inline (see promptFilePath/writePromptFile/
-// promptFilePointer below).
+// PromptFilePointer below).
 func needsPromptFile(prompt string) bool {
 	return strings.Contains(prompt, "\n") || utf8.RuneCountInString(prompt) > maxInlinePromptRunes
 }
@@ -1310,10 +1334,10 @@ func writePromptFile(path, content string) error {
 	return nil
 }
 
-// promptFilePointer is the single-line agent argument passed in place of
+// PromptFilePointer is the single-line agent argument passed in place of
 // the full prompt once it has been written to path: a short instruction
 // telling the agent to read and follow that file instead.
-func promptFilePointer(path string) string {
+func PromptFilePointer(path string) string {
 	return "役割指示を読み込んで従ってください: " + path
 }
 
@@ -1321,12 +1345,18 @@ func promptFilePointer(path string) string {
 // event plus an honored=false receipt, per AC-1/AC-2. No spawn_started is
 // written since no external side effect was ever attempted. The rejection
 // receipt never carries a reported model (it is not a codex model
-// observation, just a fail-closed envelope decision) -- ModelReceipt on the
-// returned SpawnResult is this same receipt regardless, since it is the
-// receipt this call appended (see SpawnResult.ModelReceipt's doc comment);
-// the CLI's model-mismatch warning gate (Honored=="false" AND a non-empty
+// observation, just a fail-closed envelope decision) -- the CLI's
+// model-mismatch warning gate (Honored=="false" AND a non-empty
 // ReportedEffectiveModel) is what keeps a rejection from ever being printed
 // as one.
+//
+// The manifest-event append error is still ignored (a rejection stays a
+// rejection either way -- the caller's Outcome and Err are unaffected),
+// but ModelReceipt on the returned SpawnResult is set only when
+// Receipts.Append actually succeeded, mirroring how Stop guards its own
+// ModelReceipt (verbs.go): "the receipt this call appended" (see
+// SpawnResult.ModelReceipt's doc comment) must never name a receipt that
+// was never persisted.
 func (o *Org) reject(p SpawnParams, cause error) SpawnResult {
 	_ = o.appendEvent(ManifestEvent{
 		TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventRejected,
@@ -1337,8 +1367,11 @@ func (o *Org) reject(p SpawnParams, cause error) SpawnResult {
 		TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Role: p.Role, Driver: p.Driver,
 		CommandedModel: p.Model, Honored: HonoredFalse, Reason: cause.Error(),
 	}
-	_ = o.Receipts.Append(receipt)
-	return SpawnResult{Outcome: SpawnOutcomeRejected, Err: cause, ModelReceipt: receipt}
+	result := SpawnResult{Outcome: SpawnOutcomeRejected, Err: cause}
+	if err := o.Receipts.Append(receipt); err == nil {
+		result.ModelReceipt = receipt
+	}
+	return result
 }
 
 // dryRunSpawn simulates the full saga's manifest trail with DryRun: true on

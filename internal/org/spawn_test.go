@@ -2071,13 +2071,52 @@ func TestOrgSpawn_Codex_AutonomousDefault_RejectedFailClosed_WithReceipt(t *test
 	if len(receiptRR.Receipts) != 1 || receiptRR.Receipts[0].Honored != HonoredFalse {
 		t.Fatalf("expected 1 receipt honored=false, got %+v", receiptRR.Receipts)
 	}
-	// Self-review M3 fix: reject() sets SpawnResult.ModelReceipt to the
-	// same receipt it appended, not the zero value.
+	// reject() sets SpawnResult.ModelReceipt to the same receipt it
+	// appended, not the zero value.
 	if result.ModelReceipt != receiptRR.Receipts[0] {
 		t.Fatalf("expected SpawnResult.ModelReceipt to match the persisted rejection receipt, got %+v vs %+v", result.ModelReceipt, receiptRR.Receipts[0])
 	}
 	if result.ModelReceipt.ReportedEffectiveModel != "" {
 		t.Fatalf("expected the rejection receipt to carry no reported model, got %+v", result.ModelReceipt)
+	}
+}
+
+// TestOrgSpawn_Reject_ReceiptsAppendFailureLeavesModelReceiptZero covers
+// cycle-2 self-review C2-3
+// (docs/reports/self-review-2026-09-20-codex-effective-model-receipt.md):
+// reject() must not claim ModelReceipt for a receipt that was never
+// actually persisted, mirroring how Stop already
+// guards its own ModelReceipt (verbs.go). Uses the same read-only-file
+// technique as TestOrgSend_AppendEventFailsAfterEnter_ReportsEnterPressedButUnrecorded
+// (verbs_test.go) and TestOrgStop_Codex_ReceiptsAppendFailureLeavesStopSuccessful.
+func TestOrgSpawn_Reject_ReceiptsAppendFailureLeavesModelReceiptZero(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root ignores a read-only file's permission bit")
+	}
+	o, _, _ := testOrg(t)
+
+	// A prior successful spawn creates the receipts file so it exists to
+	// chmod below.
+	if r := o.Spawn(mustSpawnParams("org-a", "seat-warmup")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("warmup spawn failed: %+v", r)
+	}
+
+	receiptsPath := o.Receipts.Path()
+	if err := os.Chmod(receiptsPath, 0o444); err != nil {
+		t.Fatalf("chmod receipts read-only: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(receiptsPath, 0o644) })
+
+	p := mustSpawnParams("org-a", "seat-1")
+	p.Driver = "codex"
+	p.Model = "gpt-5-codex" // fail-closed under the default autonomous mode, routing through reject()
+
+	result := o.Spawn(p)
+	if result.Outcome != SpawnOutcomeRejected {
+		t.Fatalf("expected SpawnOutcomeRejected, got %+v", result)
+	}
+	if result.ModelReceipt != (Receipt{}) {
+		t.Fatalf("expected zero ModelReceipt when the receipts append failed, got %+v", result.ModelReceipt)
 	}
 }
 
@@ -2145,7 +2184,7 @@ func writeQualifyingCodexFixture(t *testing.T, sessionsDir, promptPath string, a
 	t.Helper()
 	lines := []string{
 		sessionMetaLine(t, rfc3339Milli(at)),
-		userMessageLine(t, rfc3339Milli(at.Add(50*time.Millisecond)), promptFilePointer(promptPath)),
+		userMessageLine(t, rfc3339Milli(at.Add(50*time.Millisecond)), PromptFilePointer(promptPath)),
 		turnContextLine(t, rfc3339Milli(at.Add(20*time.Millisecond)), model),
 	}
 	name := fmt.Sprintf("rollout-%d.jsonl", at.UnixNano())
@@ -2226,9 +2265,9 @@ func TestOrgSpawn_Codex_ModelObservation_NotFoundAfterTimeout(t *testing.T) {
 	}
 }
 
-// TestOrgSpawn_Codex_ModelObservation_ReadError_DistinctReason is the
-// self-review L3/L4 fix: the poll's timeout elapses and the LAST attempt
-// returned a non-nil observer error (a candidate record existed -- it was
+// TestOrgSpawn_Codex_ModelObservation_ReadError_DistinctReason: the poll's
+// timeout elapses and the LAST attempt returned a non-nil observer error
+// (a candidate record existed -- it was
 // already Lstat'd as regular/name-matching/recently-modified -- but could
 // not be opened), so the unknown receipt's reason must say so distinctly
 // from "nothing found yet", without ever naming the error text or the
@@ -2263,13 +2302,13 @@ func TestOrgSpawn_Codex_ModelObservation_ReadError_DistinctReason(t *testing.T) 
 	}
 }
 
-// TestObserveCodexSpawnReceipt_CtxDone_DistinctReason is the self-review
-// L3/L4 fix's third case: the wait is cut short by ctx (Spawn's own
+// TestObserveCodexSpawnReceipt_CtxDone_DistinctReason covers the third
+// unknown-reason case: the wait is cut short by ctx (Spawn's own
 // --timeout-ms budget) before this function's own timeout naturally
 // elapses -- a distinct reason from both "nothing found yet" and "a
 // record could not be read". Unit-tested directly against
-// observeCodexSpawnReceipt (the smallest setup that reaches this arm; see
-// the plan hand-off) rather than threading a cancelled ctx through the
+// observeCodexSpawnReceipt (the smallest setup that reaches this arm)
+// rather than threading a cancelled ctx through the
 // full Spawn/herdr round trip.
 func TestObserveCodexSpawnReceipt_CtxDone_DistinctReason(t *testing.T) {
 	o, _, _ := codexGuardedOrg(t, "implementer")
@@ -2345,7 +2384,7 @@ func TestOrgSpawn_Codex_ModelObservation_FoundOnLaterPoll(t *testing.T) {
 	dateDir := fixtureDateDir(o.CodexSessionsDir, at)
 	lines := []string{
 		sessionMetaLine(t, rfc3339Milli(at)),
-		userMessageLine(t, rfc3339Milli(at.Add(5*time.Millisecond)), promptFilePointer(promptPath)),
+		userMessageLine(t, rfc3339Milli(at.Add(5*time.Millisecond)), PromptFilePointer(promptPath)),
 		turnContextLine(t, rfc3339Milli(at.Add(3*time.Millisecond)), "gpt-5-codex"),
 	}
 	content := strings.Join(lines, "\n") + "\n"
@@ -2466,11 +2505,10 @@ func TestOrgSpawn_Claude_ModelReceiptTextUnchanged(t *testing.T) {
 // TestOrgSpawn_Codex_DryRun_ModelReceiptUnchanged is the AC-4 regression
 // guard for the dry-run path: dryRunSpawn's own receipt (Reason "dry-run")
 // must stay exactly what it was before this plan, for codex the same as
-// any other driver -- dry-run never calls the observer at all. Also the
-// self-review M3 fix's own regression guard: SpawnResult.ModelReceipt must
-// equal the persisted receipt here too, not stay the zero value the way
-// it used to before M3 (the tell that first exposed the doc/code mismatch
-// -- this test used to only check the store).
+// any other driver -- dry-run never calls the observer at all. It also
+// asserts through SpawnResult.ModelReceipt, not only the receipts store:
+// that field must equal the persisted receipt here too, never stay the
+// zero value while a receipt was actually appended.
 func TestOrgSpawn_Codex_DryRun_ModelReceiptUnchanged(t *testing.T) {
 	o, _, _ := codexGuardedOrg(t, "implementer")
 	p := mustCodexSpawnParams("org-a", "seat-1")
