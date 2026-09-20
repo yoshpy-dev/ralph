@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -394,6 +395,59 @@ func writeCodexModelsCache(t *testing.T, dir string, slugs ...string) {
 	if err := os.WriteFile(filepath.Join(dir, "models_cache.json"), []byte(b.String()), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// codexModelsCacheEntry describes one models_cache.json entry for
+// writeCodexModelsCacheEntries (AC-7's retirement-clause tests):
+// writeCodexModelsCache itself stays unchanged and untouched by any of
+// them, since every one of its existing callers' caches has no "upgrade"
+// field at all. UpgradeRaw, when non-empty, is embedded verbatim as the
+// entry's "upgrade" field -- letting a test write a well-formed object, a
+// literal null, or a deliberately wrong-typed value (a bare string,
+// number, or array) to exercise parseCodexModelUpgrade's tolerance. An
+// empty UpgradeRaw omits the "upgrade" key entirely, matching codex's own
+// cache for a model with nothing scheduled.
+type codexModelsCacheEntry struct {
+	Slug       string
+	UpgradeRaw string
+}
+
+// writeCodexModelsCacheEntries is writeCodexModelsCache's more general
+// sibling, for fixtures that need an "upgrade" field on some entries.
+func writeCodexModelsCacheEntries(t *testing.T, dir string, entries ...codexModelsCacheEntry) {
+	t.Helper()
+	var b strings.Builder
+	b.WriteString(`{"models": [`)
+	for i, e := range entries {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		b.WriteString(`{"slug": "` + e.Slug + `", "display_name": "` + e.Slug + `", "visibility": "list"`)
+		if e.UpgradeRaw != "" {
+			b.WriteString(`, "upgrade": ` + e.UpgradeRaw)
+		}
+		b.WriteString(`}`)
+	}
+	b.WriteString(`]}`)
+	if err := os.WriteFile(filepath.Join(dir, "models_cache.json"), []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// codexMigrationMarkdownSentinel is embedded in every codexUpgradeJSON
+// fixture's migration_markdown field, so
+// TestCheckCodexModelSlugs_MigrationMarkdownNeverInDetail has real markdown
+// text to prove absent from Detail -- parseCodexModelUpgrade has no field
+// for migration_markdown at all, so this can never leak through.
+const codexMigrationMarkdownSentinel = "MIGRATION-MARKDOWN-MUST-NEVER-APPEAR-IN-DETAIL"
+
+// codexUpgradeJSON builds a well-formed "upgrade" object fragment (for
+// codexModelsCacheEntry.UpgradeRaw) reporting model and retirementAt, plus
+// a migration_markdown field -- the real cache carries one too (see
+// codexMigrationMarkdownSentinel).
+func codexUpgradeJSON(model string, retirementAt time.Time) string {
+	return `{"model": "` + model + `", "retirement_at": "` + retirementAt.UTC().Format(time.RFC3339) +
+		`", "migration_markdown": "` + codexMigrationMarkdownSentinel + `"}`
 }
 
 // TestCheckCodexModelSlugs_AllPresent_Pass covers AC-4(a): every codex
@@ -811,5 +865,264 @@ func TestCheckCodexModelSlugs_CacheChangedWhileReading_FreshnessUnknown(t *testi
 	}
 	if strings.Contains(r.Detail, "cache written") {
 		t.Errorf("detail %q should not carry a cache written timestamp when freshness is unknown", r.Detail)
+	}
+}
+
+// --- codex model_pool slug retirement clause (plan Scope row 6, AC-7) ---
+
+// TestCodexRetirementClause pins the clause builder directly, with an
+// injected now, the same way TestCodexCacheFreshnessClause pins
+// codexCacheFreshnessClause -- checkCodexModelSlugs itself still calls
+// time.Now() directly (no new seam), matching that existing pattern.
+func TestCodexRetirementClause(t *testing.T) {
+	now := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
+	future := now.AddDate(0, 1, 0) // 2026-10-20
+	past := now.AddDate(0, -1, 0)  // 2026-08-20
+
+	cases := []struct {
+		name    string
+		slugs   []string
+		entries []codexModelsCacheEntry
+		want    string
+	}{
+		{
+			name:    "no upgrade field at all",
+			slugs:   []string{"gpt-5.5"},
+			entries: []codexModelsCacheEntry{{Slug: "gpt-5.5"}},
+			want:    "",
+		},
+		{
+			name:    "upgrade explicitly null",
+			slugs:   []string{"gpt-5.5"},
+			entries: []codexModelsCacheEntry{{Slug: "gpt-5.5", UpgradeRaw: "null"}},
+			want:    "",
+		},
+		{
+			name:    "future retirement date is retiring",
+			slugs:   []string{"gpt-5.5"},
+			entries: []codexModelsCacheEntry{{Slug: "gpt-5.5", UpgradeRaw: codexUpgradeJSON("gpt-5.6-sol", future)}},
+			want:    "; retiring: gpt-5.5 -> gpt-5.6-sol on 2026-10-20" + codexRetirementSentence,
+		},
+		{
+			name:    "past retirement date is retired",
+			slugs:   []string{"gpt-5.5"},
+			entries: []codexModelsCacheEntry{{Slug: "gpt-5.5", UpgradeRaw: codexUpgradeJSON("gpt-5.6-sol", past)}},
+			want:    "; retired: gpt-5.5 -> gpt-5.6-sol on 2026-08-20" + codexRetirementSentence,
+		},
+		{
+			name:    "retirement instant exactly now counts as already retired",
+			slugs:   []string{"gpt-5.5"},
+			entries: []codexModelsCacheEntry{{Slug: "gpt-5.5", UpgradeRaw: codexUpgradeJSON("gpt-5.6-sol", now)}},
+			want:    "; retired: gpt-5.5 -> gpt-5.6-sol on 2026-09-20" + codexRetirementSentence,
+		},
+		{
+			name:  "unparsable retirement_at: no date, still under retiring",
+			slugs: []string{"gpt-5.5"},
+			entries: []codexModelsCacheEntry{
+				{Slug: "gpt-5.5", UpgradeRaw: `{"model": "gpt-5.6-sol", "retirement_at": "not-a-date"}`},
+			},
+			want: "; retiring: gpt-5.5 -> gpt-5.6-sol" + codexRetirementSentence,
+		},
+		{
+			name:    "wrong JSON type (string) does not produce a clause",
+			slugs:   []string{"gpt-5.5"},
+			entries: []codexModelsCacheEntry{{Slug: "gpt-5.5", UpgradeRaw: `"unexpected-string"`}},
+			want:    "",
+		},
+		{
+			name:    "wrong JSON type (number)",
+			slugs:   []string{"gpt-5.5"},
+			entries: []codexModelsCacheEntry{{Slug: "gpt-5.5", UpgradeRaw: `42`}},
+			want:    "",
+		},
+		{
+			name:    "wrong JSON type (array)",
+			slugs:   []string{"gpt-5.5"},
+			entries: []codexModelsCacheEntry{{Slug: "gpt-5.5", UpgradeRaw: `["not", "an", "object"]`}},
+			want:    "",
+		},
+		{
+			name:  "empty upgrade.model is ignored",
+			slugs: []string{"gpt-5.5"},
+			entries: []codexModelsCacheEntry{
+				{Slug: "gpt-5.5", UpgradeRaw: `{"model": "", "retirement_at": "` + future.UTC().Format(time.RFC3339) + `"}`},
+			},
+			want: "",
+		},
+		{
+			name:  "two retiring slugs join sorted, comma-separated",
+			slugs: []string{"gpt-5.5", "gpt-6-astra"},
+			entries: []codexModelsCacheEntry{
+				{Slug: "gpt-5.5", UpgradeRaw: codexUpgradeJSON("gpt-5.6-sol", future)},
+				{Slug: "gpt-6-astra", UpgradeRaw: codexUpgradeJSON("gpt-6-nova", future)},
+			},
+			want: "; retiring: gpt-5.5 -> gpt-5.6-sol on 2026-10-20, gpt-6-astra -> gpt-6-nova on 2026-10-20" + codexRetirementSentence,
+		},
+		{
+			name:  "a retiring model not in the pool is not mentioned",
+			slugs: []string{"gpt-5.5"}, // pool has only gpt-5.5
+			entries: []codexModelsCacheEntry{
+				{Slug: "gpt-5.5"}, // no upgrade
+				{Slug: "gpt-6-astra", UpgradeRaw: codexUpgradeJSON("gpt-6-nova", future)}, // retiring, but not in the pool
+			},
+			want: "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeCodexModelsCacheEntries(t, dir, tc.entries...)
+			data, err := os.ReadFile(filepath.Join(dir, "models_cache.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var doc codexModelsCacheDoc
+			if err := json.Unmarshal(data, &doc); err != nil {
+				t.Fatalf("fixture must decode cleanly (a wrong-typed upgrade must never break the whole document): %v", err)
+			}
+			got := codexRetirementClause(tc.slugs, doc, now)
+			if got != tc.want {
+				t.Errorf("codexRetirementClause() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestCheckCodexModelSlugs_Retiring_InfoWithClause is AC-7's end-to-end
+// info path: every pool slug is present, and one carries a usable upgrade
+// with a retirement date far enough in the future (10 years) that it can
+// never flip to "retired" by the time this test actually runs.
+func TestCheckCodexModelSlugs_Retiring_InfoWithClause(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CODEX_HOME", dir)
+	future := time.Now().AddDate(10, 0, 0)
+	writeCodexModelsCacheEntries(t, dir,
+		codexModelsCacheEntry{Slug: "gpt-5.5", UpgradeRaw: codexUpgradeJSON("gpt-5.6-sol", future)},
+	)
+
+	cfg := config.Config{Org: config.OrgConfig{ModelPool: []config.OrgModelPoolEntry{
+		{Driver: "codex", Model: "gpt-5.5"},
+	}}}
+
+	r := checkCodexModelSlugs(cfg)
+	if r.Status != "info" {
+		t.Fatalf("status = %q, want info (detail=%q)", r.Status, r.Detail)
+	}
+	wantClause := "; retiring: gpt-5.5 -> gpt-5.6-sol on " + future.UTC().Format("2006-01-02")
+	if !strings.Contains(r.Detail, wantClause) {
+		t.Errorf("detail %q should contain %q", r.Detail, wantClause)
+	}
+	if !strings.Contains(r.Detail, "codex may run the replacement instead of the commanded model") {
+		t.Errorf("detail %q should contain the fixed retirement sentence", r.Detail)
+	}
+}
+
+// TestCheckCodexModelSlugs_Retired_InfoWithClause mirrors the above for a
+// retirement date far enough in the past (10 years).
+func TestCheckCodexModelSlugs_Retired_InfoWithClause(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CODEX_HOME", dir)
+	past := time.Now().AddDate(-10, 0, 0)
+	writeCodexModelsCacheEntries(t, dir,
+		codexModelsCacheEntry{Slug: "gpt-5.5", UpgradeRaw: codexUpgradeJSON("gpt-5.6-sol", past)},
+	)
+
+	cfg := config.Config{Org: config.OrgConfig{ModelPool: []config.OrgModelPoolEntry{
+		{Driver: "codex", Model: "gpt-5.5"},
+	}}}
+
+	r := checkCodexModelSlugs(cfg)
+	if r.Status != "info" {
+		t.Fatalf("status = %q, want info (detail=%q)", r.Status, r.Detail)
+	}
+	wantClause := "; retired: gpt-5.5 -> gpt-5.6-sol on " + past.UTC().Format("2006-01-02")
+	if !strings.Contains(r.Detail, wantClause) {
+		t.Errorf("detail %q should contain %q", r.Detail, wantClause)
+	}
+}
+
+// TestCheckCodexModelSlugs_MissingWins_RetiringClauseStillAppended is AC-7's
+// priority rule: a missing slug always still produces warn, but a
+// co-present retiring slug's clause is appended too, in the documented
+// order (missing sentence, retiring clause + fixed sentence, freshness
+// clause).
+func TestCheckCodexModelSlugs_MissingWins_RetiringClauseStillAppended(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CODEX_HOME", dir)
+	future := time.Now().AddDate(10, 0, 0)
+	writeCodexModelsCacheEntries(t, dir,
+		codexModelsCacheEntry{Slug: "gpt-5.5", UpgradeRaw: codexUpgradeJSON("gpt-5.6-sol", future)},
+	)
+
+	cfg := config.Config{Org: config.OrgConfig{ModelPool: []config.OrgModelPoolEntry{
+		{Driver: "codex", Model: "gpt-5.5"},
+		{Driver: "codex", Model: "gpt-9000-retired"}, // not in the cache at all
+	}}}
+
+	r := checkCodexModelSlugs(cfg)
+	if r.Status != "warn" {
+		t.Fatalf("status = %q, want warn (a missing slug always wins), detail=%q", r.Status, r.Detail)
+	}
+	missingIdx := strings.Index(r.Detail, "gpt-9000-retired")
+	retiringIdx := strings.Index(r.Detail, "; retiring:")
+	sentenceIdx := strings.Index(r.Detail, "codex may run the replacement")
+	freshnessIdx := strings.Index(r.Detail, "(cache written")
+	if missingIdx < 0 || retiringIdx < 0 || sentenceIdx < 0 || freshnessIdx < 0 {
+		t.Fatalf("detail %q missing one of the expected pieces (missing=%d retiring=%d sentence=%d freshness=%d)",
+			r.Detail, missingIdx, retiringIdx, sentenceIdx, freshnessIdx)
+	}
+	if missingIdx >= retiringIdx || retiringIdx >= sentenceIdx || sentenceIdx >= freshnessIdx {
+		t.Errorf("detail %q pieces out of order (missing=%d retiring=%d sentence=%d freshness=%d)",
+			r.Detail, missingIdx, retiringIdx, sentenceIdx, freshnessIdx)
+	}
+}
+
+// TestCheckCodexModelSlugs_MigrationMarkdownNeverInDetail is AC-7's
+// content-safety guard: migration_markdown is present in the fixture (as
+// codex's own cache would carry it) but must never appear in Detail --
+// codexModelUpgrade has no field for it at all.
+func TestCheckCodexModelSlugs_MigrationMarkdownNeverInDetail(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CODEX_HOME", dir)
+	future := time.Now().AddDate(10, 0, 0)
+	writeCodexModelsCacheEntries(t, dir,
+		codexModelsCacheEntry{Slug: "gpt-5.5", UpgradeRaw: codexUpgradeJSON("gpt-5.6-sol", future)},
+	)
+
+	cfg := config.Config{Org: config.OrgConfig{ModelPool: []config.OrgModelPoolEntry{
+		{Driver: "codex", Model: "gpt-5.5"},
+	}}}
+
+	r := checkCodexModelSlugs(cfg)
+	if strings.Contains(r.Detail, codexMigrationMarkdownSentinel) {
+		t.Errorf("detail %q must never contain migration_markdown text", r.Detail)
+	}
+}
+
+// TestCheckCodexModelSlugs_WrongTypedUpgrade_SlugStillPresentDocStillDecodes
+// is AC-7's decode-safety guard at the checkCodexModelSlugs level (not only
+// the pure codexRetirementClause unit tests above): one entry's "upgrade"
+// being a JSON type parseCodexModelUpgrade can't use must not make the
+// whole models_cache.json document fail to decode -- codexModelsCacheDoc
+// stores Upgrade as json.RawMessage for exactly this reason -- and the
+// slug itself must still count as present (pass, not warn or info).
+func TestCheckCodexModelSlugs_WrongTypedUpgrade_SlugStillPresentDocStillDecodes(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CODEX_HOME", dir)
+	writeCodexModelsCacheEntries(t, dir,
+		codexModelsCacheEntry{Slug: "gpt-5.5", UpgradeRaw: `12345`}, // wrong JSON type: a number, not an object
+	)
+
+	cfg := config.Config{Org: config.OrgConfig{ModelPool: []config.OrgModelPoolEntry{
+		{Driver: "codex", Model: "gpt-5.5"},
+	}}}
+
+	r := checkCodexModelSlugs(cfg)
+	if r.Status != "pass" {
+		t.Fatalf("status = %q, want pass (a wrong-typed upgrade must not turn the slug missing or the check into an error), detail=%q", r.Status, r.Detail)
+	}
+	if strings.Contains(r.Detail, "retiring") || strings.Contains(r.Detail, "retired") {
+		t.Errorf("detail %q should not claim a retirement clause for an unusable upgrade", r.Detail)
 	}
 }

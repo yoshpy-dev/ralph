@@ -132,15 +132,129 @@ func codexCacheFreshnessClause(mtime time.Time, changed bool, now time.Time) str
 }
 
 // codexModelsCacheDoc is a minimal decode of codex's models_cache.json
-// (verified shape on codex-cli 0.149.1): a top-level object with a "models"
-// array of entries carrying at least a "slug". Every other field
-// (display_name, visibility, ...) is ignored -- a listed slug counts as
-// present regardless of its visibility value (e.g. "hide" still means the
-// model is known to codex, just not offered in interactive pickers).
+// (verified shape on codex-cli 0.149.1 and 0.154.0): a top-level object
+// with a "models" array of entries carrying at least a "slug". Every other
+// field except "upgrade" (display_name, visibility, ...) is ignored -- a
+// listed slug counts as present regardless of its visibility value (e.g.
+// "hide" still means the model is known to codex, just not offered in
+// interactive pickers).
+//
+// Upgrade is decoded as json.RawMessage, not a typed struct, deliberately:
+// codex's own field is either JSON null or an object
+// ({"model":...,"migration_markdown":...,"retirement_at":...}), but a
+// typed struct field would make the whole document fail to decode if any
+// one entry's "upgrade" ever carried an unexpected JSON type (a string, a
+// number, an array) -- one odd entry must never hide every slug. See
+// parseCodexModelUpgrade for the actual interpretation, which tolerates
+// exactly that.
 type codexModelsCacheDoc struct {
 	Models []struct {
-		Slug string `json:"slug"`
+		Slug    string          `json:"slug"`
+		Upgrade json.RawMessage `json:"upgrade"`
 	} `json:"models"`
+}
+
+// codexModelUpgrade is the subset of codex's models_cache.json "upgrade"
+// object this check reads: the replacement slug and when the source slug
+// retires. migration_markdown (present in the real cache) has no field
+// here and is never decoded or surfaced in any Detail -- see
+// checkCodexModelSlugs's doc comment.
+type codexModelUpgrade struct {
+	Model        string `json:"model"`
+	RetirementAt string `json:"retirement_at"`
+}
+
+// parseCodexModelUpgrade decodes raw (one models_cache.json entry's
+// "upgrade" field) into a usable (model, retirement time, hasDate)
+// triple. raw may be JSON null, absent (empty RawMessage), a well-formed
+// object, or -- if codex's cache format ever drifts -- any other JSON
+// type. Every case other than "a well-formed object with a non-empty
+// model" returns ok=false, which the caller (codexRetirementClause) treats
+// as "this slug has no usable upgrade", never as a reason to fail the
+// whole check (AC-7: "an upgrade that cannot be used is simply treated as
+// having none"). A usable model with an unparsable/missing retirement_at
+// still returns ok=true, hasDate=false, so the caller can still name the
+// replacement without a date.
+func parseCodexModelUpgrade(raw json.RawMessage) (model string, retirementAt time.Time, hasDate, ok bool) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return "", time.Time{}, false, false
+	}
+	var u codexModelUpgrade
+	if err := json.Unmarshal(raw, &u); err != nil {
+		return "", time.Time{}, false, false
+	}
+	if u.Model == "" {
+		return "", time.Time{}, false, false
+	}
+	t, err := time.Parse(time.RFC3339, u.RetirementAt)
+	if err != nil {
+		return u.Model, time.Time{}, false, true
+	}
+	return u.Model, t, true, true
+}
+
+// codexRetirementSentence is the fixed sentence appended once, after every
+// retiring:/retired: slug list, whenever codexRetirementClause finds at
+// least one slug with a usable upgrade.
+const codexRetirementSentence = " codex may run the replacement instead of the commanded model; ralph records that as honored=false in the org model receipts."
+
+// codexRetirementClause builds the "; retiring: ...; retired: ..." +
+// codexRetirementSentence suffix (AC-7) for the subset of slugs (the
+// pool's own sorted codex slugs) that are present in doc's cache and carry
+// a usable upgrade (parseCodexModelUpgrade). Returns "" when none do, so
+// the caller can splice it into Detail unconditionally.
+//
+// A slug with a usable model but no usable date is listed under
+// "retiring:" without a date -- there is no way to tell it apart from
+// "retired:" without one, and defaulting to the milder claim avoids
+// overstating what is known. A slug with a usable date is "retiring:" when
+// retirementAt is after now, "retired:" otherwise (not strictly after --
+// the retirement instant itself counts as already retired). Multiple
+// slugs of the same kind are joined into one comma-separated list inside
+// that kind's single clause; retiring: always comes before retired: when
+// both are non-empty.
+func codexRetirementClause(slugs []string, doc codexModelsCacheDoc, now time.Time) string {
+	upgrades := make(map[string]json.RawMessage, len(doc.Models))
+	for _, m := range doc.Models {
+		upgrades[m.Slug] = m.Upgrade
+	}
+
+	var retiring, retired []string
+	for _, slug := range slugs {
+		raw, present := upgrades[slug]
+		if !present {
+			continue
+		}
+		model, retirementAt, hasDate, ok := parseCodexModelUpgrade(raw)
+		if !ok {
+			continue
+		}
+		if !hasDate {
+			retiring = append(retiring, fmt.Sprintf("%s -> %s", slug, model))
+			continue
+		}
+		entry := fmt.Sprintf("%s -> %s on %s", slug, model, retirementAt.UTC().Format("2006-01-02"))
+		if retirementAt.After(now) {
+			retiring = append(retiring, entry)
+		} else {
+			retired = append(retired, entry)
+		}
+	}
+	if len(retiring) == 0 && len(retired) == 0 {
+		return ""
+	}
+
+	var clause strings.Builder
+	if len(retiring) > 0 {
+		clause.WriteString("; retiring: ")
+		clause.WriteString(strings.Join(retiring, ", "))
+	}
+	if len(retired) > 0 {
+		clause.WriteString("; retired: ")
+		clause.WriteString(strings.Join(retired, ", "))
+	}
+	clause.WriteString(codexRetirementSentence)
+	return clause.String()
 }
 
 // checkCodexModelSlugs is `ralph doctor`'s "Org codex model slugs" check
@@ -150,7 +264,7 @@ type codexModelsCacheDoc struct {
 // check always runs -- it is cheap (a single local file read) and does not
 // require codex to be on PATH.
 //
-// Six deterministic outcomes:
+// Seven deterministic outcomes:
 //   - no codex entries in model_pool at all -> info, no cache lookup performed
 //   - CODEX_HOME empty and the home directory unresolvable -> info, names
 //     the resolution error (there is no cache path to look up)
@@ -159,11 +273,19 @@ type codexModelsCacheDoc struct {
 //   - cache file present but not valid JSON -> info, names the parse error
 //     (the cache is best-effort data owned by codex, not ralph, so a
 //     malformed cache is not itself a ralph-level warning)
-//   - every pool codex slug found in the cache -> pass, listing the count
 //   - one or more pool codex slugs absent from the cache -> warn, naming
-//     each missing slug (the model_pool entry may be stale/retired)
+//     each missing slug (the model_pool entry may be stale/retired) --
+//     wins over the next outcome even when a present slug is also retiring
+//   - every pool codex slug present, and at least one carries a usable
+//     "upgrade" in the cache -> info, naming which slug(s) are retiring or
+//     already retired and to what replacement (see codexRetirementClause)
+//   - every pool codex slug present, none retiring -> pass, listing the count
 //
-// The warn and pass Details end with a freshness clause: normally
+// The warn/info/pass Details share two optional trailing pieces, always in
+// this order: codexRetirementClause's "; retiring: ...; retired: ..." +
+// fixed sentence (AC-7, present whenever at least one present slug has a
+// usable upgrade -- see its own doc comment for exactly what counts as
+// usable), then the freshness clause. The freshness clause reads
 // "(cache written <UTC RFC3339>, <age> ago)", plus "; cache may be stale —
 // launch codex once to refresh, then re-run" once that age exceeds
 // codexCacheStaleAfter. If the open handle's Stat before and after the read
@@ -232,15 +354,24 @@ func checkCodexModelSlugs(cfg config.Config) checkResult {
 	}
 
 	freshness := codexCacheFreshnessClause(mtime, changed, time.Now())
+	retirement := codexRetirementClause(codexSlugs, doc, time.Now())
 
 	if len(missing) > 0 {
 		r.Status = "warn"
 		r.Detail = fmt.Sprintf("%d codex model_pool slug(s) not found in %s: %s",
-			len(missing), cachePath, strings.Join(missing, ", ")) + freshness
+			len(missing), cachePath, strings.Join(missing, ", ")) + retirement + freshness
 		return r
 	}
 
-	r.Status = "pass"
-	r.Detail = fmt.Sprintf("%d codex model_pool slug(s) present in %s", len(codexSlugs), cachePath) + freshness
+	// AC-7: every pool slug is present, but one or more carries a usable
+	// upgrade in the cache -- info, not pass or warn, since nothing is
+	// actually missing, but a spawn commanding that slug may not run the
+	// model the operator expects.
+	if retirement != "" {
+		r.Status = "info"
+	} else {
+		r.Status = "pass"
+	}
+	r.Detail = fmt.Sprintf("%d codex model_pool slug(s) present in %s", len(codexSlugs), cachePath) + retirement + freshness
 	return r
 }
