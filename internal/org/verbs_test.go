@@ -1557,6 +1557,46 @@ func TestOrgStop_Codex_DryRunRespawnDoesNotDisplaceRealSpawnCorrelation(t *testi
 	assertDetailsContains(t, last.Details, "model_observed=true")
 }
 
+// TestCodexSpawnCorrelation_TwoRealSpawns_LatestWins is a /test cycle-1
+// addition (plan's Test plan edge cases: "同じ org・seat id を stop 後に再
+// spawn した場合"). TestOrgStop_Codex_DryRunRespawnDoesNotDisplaceRealSpawnCorrelation
+// above only exercises one real spawn_started plus a later dry-run one; this
+// covers the genuinely untested case -- TWO REAL (non-dry-run) spawn_started
+// events for the same org_id/seat_id, as a real Stop-then-respawn produces.
+// codexSpawnCorrelation's forward scan keeps overwriting startedIdx on every
+// matching spawn_started, so it must land on the later attempt's own index,
+// and its second loop (which only starts scanning from startedIdx) must
+// therefore also return that later attempt's own promptPath, never the
+// first attempt's -- both asserted directly here since this is the smallest
+// setup that reaches the exact behavior (no herdr/agmsg round trip needed).
+func TestCodexSpawnCorrelation_TwoRealSpawns_LatestWins(t *testing.T) {
+	events := []ManifestEvent{
+		{TS: "2026-09-18T07:00:00Z", OrgID: "org-a", SeatID: "seat-1", Event: EventSpawnStarted},
+		{TS: "2026-09-18T07:00:01Z", OrgID: "org-a", SeatID: "seat-1", Event: EventSpawnStep, Details: codexPromptFileDetailsPrefix + "/state/prompts/org-a_seat-1-first.md"},
+		{TS: "2026-09-18T07:00:05Z", OrgID: "org-a", SeatID: "seat-1", Event: "stopped"},
+		{TS: "2026-09-18T08:00:00Z", OrgID: "org-a", SeatID: "seat-1", Event: EventSpawnStarted},
+		{TS: "2026-09-18T08:00:01Z", OrgID: "org-a", SeatID: "seat-1", Event: EventSpawnStep, Details: codexPromptFileDetailsPrefix + "/state/prompts/org-a_seat-1-second.md"},
+	}
+
+	spawnStartedAt, spawnStartedTS, promptPath, ok := codexSpawnCorrelation(events, "org-a", "seat-1")
+	if !ok {
+		t.Fatalf("expected ok=true")
+	}
+	if spawnStartedTS != "2026-09-18T08:00:00Z" {
+		t.Fatalf("expected the LATER real spawn_started's TS, got %q", spawnStartedTS)
+	}
+	wantAt, err := time.Parse(time.RFC3339, "2026-09-18T08:00:00Z")
+	if err != nil {
+		t.Fatalf("parse want TS: %v", err)
+	}
+	if !spawnStartedAt.Equal(wantAt) {
+		t.Fatalf("expected spawnStartedAt %v, got %v", wantAt, spawnStartedAt)
+	}
+	if promptPath != "/state/prompts/org-a_seat-1-second.md" {
+		t.Fatalf("expected the second spawn's own promptPath, not the first attempt's, got %q", promptPath)
+	}
+}
+
 // TestOrgStop_Codex_NothingAppended_NotFound: no qualifying record exists
 // at stop time either -- Stop must append nothing and record
 // model_observed=none.
