@@ -681,7 +681,7 @@ func TestOrgSend_EnterDelayMS_OverridesOrgSendEnterDelay(t *testing.T) {
 // PaneSendText call, no PaneSendKeys call, no `sent` event, Progress stays
 // SendProgressNothingSent. Before M2, this exact TimeoutMS=5 /
 // SendEnterDelay=200ms pairing used to type the text and only then hit ctx
-// expiry inside waitBeforeEnter -- see
+// expiry inside waitOrCtxDone -- see
 // TestOrgSend_CtxExpiresDuringEnterDelay_AfterBudgetCheckPasses below for
 // how that branch is exercised deterministically today.
 func TestOrgSend_BudgetTooSmallForEnterDelay_NothingTyped(t *testing.T) {
@@ -720,7 +720,7 @@ func TestOrgSend_BudgetTooSmallForEnterDelay_NothingTyped(t *testing.T) {
 // TestOrgSend_CtxExpiresDuringEnterDelay_AfterBudgetCheckPasses is the
 // self-review revalidation LOW-3 fix (docs/reports/self-review-2026-09-19-org-send-enter-timing.md,
 // "Answer to the explicit question"): a deterministic reproduction of ctx
-// expiring *inside* waitBeforeEnter, after the fail-closed budget check
+// expiring *inside* waitOrCtxDone, after the fail-closed budget check
 // above has already passed -- the branch that check's own passing
 // (`remaining > enterDelay`) would otherwise make unreachable through this
 // package's fake driver alone, since fakeHerdr's calls used to be
@@ -731,7 +731,7 @@ func TestOrgSend_BudgetTooSmallForEnterDelay_NothingTyped(t *testing.T) {
 //
 // TimeoutMS: 100, SendEnterDelay: 50ms, paneSendTextDelay: 80ms. The
 // budget check passes (100ms > 50ms). PaneSendText then consumes 80ms of
-// real time, leaving roughly 20ms of ctx budget when waitBeforeEnter's
+// real time, leaving roughly 20ms of ctx budget when waitOrCtxDone's
 // select races a 50ms timer against ctx.Done() -- a ~30ms margin in the
 // direction that must win, run at -count=50 to confirm it does not flake
 // (widen these three values, keeping their relative shape, if it ever
@@ -748,7 +748,7 @@ func TestOrgSend_CtxExpiresDuringEnterDelay_AfterBudgetCheckPasses(t *testing.T)
 	msg := "TYPE: TASK\nTASK_ID: t-1\n\ndo the thing"
 	result := o.Send(SendParams{OrgID: "org-a", To: "seat-1", Text: msg, TimeoutMS: 100})
 	if result.Err == nil {
-		t.Fatal("expected a non-nil Err when ctx expires inside waitBeforeEnter after the budget check passed")
+		t.Fatal("expected a non-nil Err when ctx expires inside waitOrCtxDone after the budget check passed")
 	}
 	if !strings.Contains(result.Err.Error(), "text typed but not submitted") {
 		t.Errorf("expected the error to mention the text was typed but not submitted, got %v", result.Err)
@@ -917,7 +917,7 @@ func TestOrgSend_AppendEventFailsAfterEnter_ReportsEnterPressedButUnrecorded(t *
 // opposite direction, rather than the ~20ms this test used to leave itself
 // (self-review LOW-6): a loaded CI runner or -race can add tens of
 // milliseconds of scheduling jitter between the fail-closed budget check
-// and PaneSendText/waitBeforeEnter actually running, and a 20ms margin was
+// and PaneSendText/waitOrCtxDone actually running, and a 20ms margin was
 // close enough to that jitter to risk turning this test itself into the
 // fail-closed-budget case instead of the case it means to cover.
 func TestOrgSend_ConfirmTimeout_CappedByRemainingCtxBudget(t *testing.T) {
@@ -1224,4 +1224,888 @@ func TestOrgRead_SeatWithoutPaneID_Errors(t *testing.T) {
 	if len(h.calls) != 0 {
 		t.Fatalf("expected no herdr calls for a paneless seat, got %v", h.calls)
 	}
+}
+
+// --- codex model observation at stop (plan Scope row 4, AC-5/AC-6) ---
+
+// appendInterruptedCodexSpawnTrail directly seeds the manifest trail a real
+// Spawn call for a codex seat with a role-prompt file produces up through
+// `spawned` -- WITHOUT ever appending a receipt -- simulating a process
+// killed partway through observeCodexSpawnReceipt's poll (spawn_started ->
+// spawn_step(agent_started prompt_file=...) -> spawned all durably
+// written; the receipt append that follows in Spawn never ran). Used by
+// the "no receipt at all for this spawn attempt" test below, which needs
+// that exact on-disk shape without going through the full Spawn saga
+// (which always eventually appends some receipt itself).
+func appendInterruptedCodexSpawnTrail(t *testing.T, o *Org, orgID, seatID, promptPath string, spawnStartedAt time.Time) {
+	t.Helper()
+	base := ManifestEvent{OrgID: orgID, SeatID: seatID, Role: "implementer", Driver: "codex", Model: "gpt-5-codex"}
+
+	started := base
+	started.TS = spawnStartedAt.UTC().Format(time.RFC3339)
+	started.Event = EventSpawnStarted
+	if err := o.appendEvent(started); err != nil {
+		t.Fatalf("seed spawn_started: %v", err)
+	}
+
+	step := base
+	step.TS = spawnStartedAt.Add(time.Second).UTC().Format(time.RFC3339)
+	step.Event = EventSpawnStep
+	step.Details = codexPromptFileDetailsPrefix + promptPath
+	if err := o.appendEvent(step); err != nil {
+		t.Fatalf("seed spawn_step: %v", err)
+	}
+
+	spawned := base
+	spawned.TS = spawnStartedAt.Add(2 * time.Second).UTC().Format(time.RFC3339)
+	spawned.Event = EventSpawned
+	if err := o.appendEvent(spawned); err != nil {
+		t.Fatalf("seed spawned: %v", err)
+	}
+}
+
+// TestOrgStop_Codex_AppendsWhenSpawnReceiptWasUnknown is AC-5's main path:
+// Spawn's own poll found nothing (testOrg's tiny timeout, no fixture yet),
+// so its receipt is honored=unknown with no reported model -- that does
+// not suppress Stop's own, single, non-waiting observation. Once a
+// qualifying record exists by the time Stop runs, Stop appends a second
+// receipt and records model_observed=true on the stopped event.
+func TestOrgStop_Codex_AppendsWhenSpawnReceiptWasUnknown(t *testing.T) {
+	o, _, _ := codexGuardedOrg(t, "implementer")
+	p := mustCodexSpawnParams("org-a", "seat-1")
+
+	spawnResult := o.Spawn(p)
+	if spawnResult.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", spawnResult)
+	}
+	if spawnResult.ModelReceipt.Honored != HonoredUnknown {
+		t.Fatalf("expected spawn's own receipt to be unknown (no fixture yet), got %+v", spawnResult.ModelReceipt)
+	}
+
+	promptPath, err := o.promptFilePath(p.OrgID, p.SeatID)
+	if err != nil {
+		t.Fatalf("promptFilePath: %v", err)
+	}
+	writeQualifyingCodexFixture(t, o.CodexSessionsDir, promptPath, time.Now().Add(time.Second), "gpt-5-codex")
+
+	result := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-1"})
+	if result.Err != nil {
+		t.Fatalf("expected Stop to succeed, got %v", result.Err)
+	}
+	if result.ModelReceipt.Honored != HonoredTrue || result.ModelReceipt.ReportedEffectiveModel != "gpt-5-codex" {
+		t.Fatalf("expected an honored=true receipt appended at stop, got %+v", result.ModelReceipt)
+	}
+	if !strings.Contains(result.ModelReceipt.Reason, "(observed at stop)") {
+		t.Fatalf("expected the stop-time Reason suffix, got %q", result.ModelReceipt.Reason)
+	}
+
+	rr, err := o.Receipts.Read()
+	if err != nil {
+		t.Fatalf("read receipts: %v", err)
+	}
+	if len(rr.Receipts) != 2 {
+		t.Fatalf("expected 2 receipts (spawn's unknown + stop's observed), got %+v", rr.Receipts)
+	}
+
+	mrr, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	last := mrr.Events[len(mrr.Events)-1]
+	assertDetailsContains(t, last.Details, "model_observed=true")
+}
+
+// TestOrgStop_Codex_HonoredFalse_ObservedAtStop mirrors the above for the
+// mismatch case, through Stop instead of Spawn's own poll.
+func TestOrgStop_Codex_HonoredFalse_ObservedAtStop(t *testing.T) {
+	o, _, _ := codexGuardedOrg(t, "implementer")
+	p := mustCodexSpawnParams("org-a", "seat-1")
+
+	if r := o.Spawn(p); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", r)
+	}
+
+	promptPath, err := o.promptFilePath(p.OrgID, p.SeatID)
+	if err != nil {
+		t.Fatalf("promptFilePath: %v", err)
+	}
+	writeQualifyingCodexFixture(t, o.CodexSessionsDir, promptPath, time.Now().Add(time.Second), "gpt-5.6-sol")
+
+	result := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-1"})
+	if result.Err != nil {
+		t.Fatalf("expected Stop to succeed, got %v", result.Err)
+	}
+	if result.ModelReceipt.Honored != HonoredFalse || result.ModelReceipt.ReportedEffectiveModel != "gpt-5.6-sol" {
+		t.Fatalf("expected an honored=false receipt appended at stop, got %+v", result.ModelReceipt)
+	}
+	if !strings.Contains(result.ModelReceipt.Reason, "gpt-5.6-sol") || !strings.Contains(result.ModelReceipt.Reason, "gpt-5-codex") {
+		t.Fatalf("expected Reason to name both models, got %q", result.ModelReceipt.Reason)
+	}
+
+	mrr, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	last := mrr.Events[len(mrr.Events)-1]
+	assertDetailsContains(t, last.Details, "model_observed=false")
+}
+
+// TestOrgStop_Codex_DoesNotAppendWhenAlreadyObserved: Spawn's own poll
+// already found and recorded the model, so Stop must not observe again.
+//
+// A deterministic, strictly-increasing fake clock (the same pattern
+// TestOrgStop_Codex_DryRunRespawnDoesNotDisplaceRealSpawnCorrelation
+// uses) guarantees Spawn's own found receipt lands strictly after its own
+// spawn_started -- matching hasObservedCodexReceiptAfter's own strict
+// "after, not at-or-after" rule -- rather than depending on whether a
+// fast test run happens to keep both timestamps in the same wall-clock
+// second, which a real `o.now()` clock cannot guarantee either way.
+//
+// Only ONE qualifying fixture exists on disk (deliberately not a second,
+// contradicting one, unlike an earlier version of this test): if Stop
+// wrongly re-observed instead of skipping, it would still find this same
+// single fixture and append a SECOND receipt to the store, so "exactly
+// one receipt persisted" is what actually proves Stop never called the
+// observer a second time. Two qualifying fixtures would make "ambiguous,
+// nothing appended" indistinguishable from "correctly skipped" -- both
+// produce the same zero ModelReceipt and the same receipts-file count.
+func TestOrgStop_Codex_DoesNotAppendWhenAlreadyObserved(t *testing.T) {
+	o, _, _ := codexGuardedOrg(t, "implementer")
+	p := mustCodexSpawnParams("org-a", "seat-1")
+
+	base := time.Date(2026, 9, 18, 7, 20, 0, 0, time.UTC)
+	var tick int64
+	o.Now = func() time.Time {
+		tick++
+		return base.Add(time.Duration(tick) * time.Second)
+	}
+
+	promptPath, err := o.promptFilePath(p.OrgID, p.SeatID)
+	if err != nil {
+		t.Fatalf("promptFilePath: %v", err)
+	}
+	// Safely after any plausible spawn_started tick (a saga is at most a
+	// few dozen o.now() calls), so the age gate passes regardless of the
+	// exact count, without needing to read spawn_started back first.
+	writeQualifyingCodexFixture(t, o.CodexSessionsDir, promptPath, base.Add(1000*time.Second), "gpt-5-codex")
+
+	spawnResult := o.Spawn(p)
+	if spawnResult.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", spawnResult)
+	}
+	if spawnResult.ModelReceipt.Honored != HonoredTrue {
+		t.Fatalf("expected spawn's own poll to have already observed the model, got %+v", spawnResult.ModelReceipt)
+	}
+
+	result := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-1"})
+	if result.Err != nil {
+		t.Fatalf("expected Stop to succeed, got %v", result.Err)
+	}
+	if result.ModelReceipt != (Receipt{}) {
+		t.Fatalf("expected no receipt appended at stop, got %+v", result.ModelReceipt)
+	}
+
+	rr, err := o.Receipts.Read()
+	if err != nil {
+		t.Fatalf("read receipts: %v", err)
+	}
+	if len(rr.Receipts) != 1 {
+		t.Fatalf("expected only spawn's own receipt (a second receipt here would mean Stop re-observed), got %+v", rr.Receipts)
+	}
+
+	mrr, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	last := mrr.Events[len(mrr.Events)-1]
+	assertDetailsContains(t, last.Details, "model_observed=none")
+}
+
+// TestOrgStop_Codex_AppendsWhenNoReceiptAtAllForThisSpawn is AC-5's
+// explicit edge case: a spawn attempt that reached `spawned` but never got
+// as far as appending any receipt at all (process killed mid-poll) must
+// still be observed at stop -- there being nothing to compare against is
+// not the same as "already observed".
+func TestOrgStop_Codex_AppendsWhenNoReceiptAtAllForThisSpawn(t *testing.T) {
+	o, _, _ := codexGuardedOrg(t, "implementer")
+	promptPath, err := o.promptFilePath("org-a", "seat-1")
+	if err != nil {
+		t.Fatalf("promptFilePath: %v", err)
+	}
+	spawnStartedAt := time.Now()
+	appendInterruptedCodexSpawnTrail(t, o, "org-a", "seat-1", promptPath, spawnStartedAt)
+
+	rr, err := o.Receipts.Read()
+	if err != nil {
+		t.Fatalf("read receipts: %v", err)
+	}
+	if len(rr.Receipts) != 0 {
+		t.Fatalf("test setup invariant broken: expected zero receipts before stop, got %+v", rr.Receipts)
+	}
+
+	writeQualifyingCodexFixture(t, o.CodexSessionsDir, promptPath, spawnStartedAt.Add(time.Second), "gpt-5-codex")
+
+	result := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-1"})
+	if result.Err != nil {
+		t.Fatalf("expected Stop to succeed, got %v", result.Err)
+	}
+	if result.ModelReceipt.Honored != HonoredTrue {
+		t.Fatalf("expected an honored=true receipt appended at stop, got %+v", result.ModelReceipt)
+	}
+}
+
+// TestOrgStop_Codex_AppendsWhenOnlyRejectionReceiptExistsSince covers the
+// Codex-advisory fix (plan Design decisions): a rejection or dry-run
+// receipt for this seat, sitting after this spawn attempt's
+// spawn_started, never carries a reported model -- it must not be
+// mistaken for "already observed".
+func TestOrgStop_Codex_AppendsWhenOnlyRejectionReceiptExistsSince(t *testing.T) {
+	o, _, _ := codexGuardedOrg(t, "implementer")
+	promptPath, err := o.promptFilePath("org-a", "seat-1")
+	if err != nil {
+		t.Fatalf("promptFilePath: %v", err)
+	}
+	spawnStartedAt := time.Now()
+	appendInterruptedCodexSpawnTrail(t, o, "org-a", "seat-1", promptPath, spawnStartedAt)
+
+	if err := o.Receipts.Append(Receipt{
+		TS:    spawnStartedAt.Add(3 * time.Second).UTC().Format(time.RFC3339),
+		OrgID: "org-a", SeatID: "seat-1", Role: "implementer", Driver: "codex",
+		CommandedModel: "gpt-5-codex", Honored: HonoredFalse, Reason: "unrelated rejection receipt",
+	}); err != nil {
+		t.Fatalf("seed rejection receipt: %v", err)
+	}
+
+	writeQualifyingCodexFixture(t, o.CodexSessionsDir, promptPath, spawnStartedAt.Add(4*time.Second), "gpt-5-codex")
+
+	result := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-1"})
+	if result.Err != nil {
+		t.Fatalf("expected Stop to succeed, got %v", result.Err)
+	}
+	if result.ModelReceipt.Honored != HonoredTrue {
+		t.Fatalf("expected the rejection receipt (no reported model) to not suppress observation, got %+v", result.ModelReceipt)
+	}
+}
+
+// TestOrgStop_Codex_DryRunRespawnDoesNotDisplaceRealSpawnCorrelation: a
+// `ralph org spawn --dry-run` issued for an already-spawned codex seat
+// appends its own dry-run spawn_started/
+// spawn_step trail (dryRunSpawn, spawn.go) for the SAME org/seat -- with
+// DryRun: true. codexSpawnCorrelation must skip those dry-run events in
+// both of its loops, so this later dry-run trail never becomes "the
+// latest spawn_started" and displaces the real one; Stop must still
+// correlate against the real spawn and observe successfully.
+func TestOrgStop_Codex_DryRunRespawnDoesNotDisplaceRealSpawnCorrelation(t *testing.T) {
+	o, _, _ := codexGuardedOrg(t, "implementer")
+	p := mustCodexSpawnParams("org-a", "seat-1")
+
+	// A deterministic, strictly-increasing fake clock (1 tick per o.now()/
+	// o.nowTime() call) replaces the real wall clock for this test: it
+	// needs the real spawn's own spawn_started to be provably,
+	// unambiguously earlier than the dry-run respawn's own (later)
+	// spawn_started -- RFC3339's whole-second TS precision means a short
+	// real sleep could land both in the same second and fail to
+	// distinguish the bug from the fix; a monotonic fake clock gets the
+	// same guarantee instantly and deterministically.
+	base := time.Date(2026, 9, 18, 7, 20, 0, 0, time.UTC)
+	var tick int64
+	o.Now = func() time.Time {
+		tick++
+		return base.Add(time.Duration(tick) * time.Second)
+	}
+
+	spawnResult := o.Spawn(p)
+	if spawnResult.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("real spawn failed: %+v", spawnResult)
+	}
+	if spawnResult.ModelReceipt.Honored != HonoredUnknown {
+		t.Fatalf("expected the real spawn's own receipt to be unknown (no fixture yet), got %+v", spawnResult.ModelReceipt)
+	}
+
+	mrr, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	var realSpawnStartedAt time.Time
+	for _, ev := range mrr.Events {
+		if ev.OrgID == "org-a" && ev.SeatID == "seat-1" && ev.Event == EventSpawnStarted {
+			realSpawnStartedAt, err = time.Parse(time.RFC3339, ev.TS)
+			if err != nil {
+				t.Fatalf("parse spawn_started TS: %v", err)
+			}
+		}
+	}
+	if realSpawnStartedAt.IsZero() {
+		t.Fatalf("test setup invariant broken: no spawn_started event found for the real spawn")
+	}
+
+	// This record's session_meta is exactly the real spawn's own
+	// spawn_started instant -- guaranteed, by the strictly-increasing fake
+	// clock, to be chronologically before the dry-run respawn's own
+	// spawn_started below (appended by a later call to the same clock).
+	// It is exactly the record that must be picked when correlation
+	// (correctly) uses the REAL spawn_started as its age cutoff, and
+	// exactly the record that would be wrongly excluded by age if
+	// correlation instead used the dry-run's (later) spawn_started as
+	// cutoff -- the displacement bug this test guards against.
+	promptPath, err := o.promptFilePath(p.OrgID, p.SeatID)
+	if err != nil {
+		t.Fatalf("promptFilePath: %v", err)
+	}
+	writeQualifyingCodexFixture(t, o.CodexSessionsDir, promptPath, realSpawnStartedAt, "gpt-5-codex")
+
+	dryRunResult := o.Spawn(SpawnParams{
+		OrgID: p.OrgID, SeatID: p.SeatID, Role: p.Role, Driver: p.Driver, Model: p.Model,
+		Cwd: p.Cwd, Scope: p.Scope, DryRun: true,
+	})
+	if dryRunResult.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("dry-run respawn of the same seat failed: %+v", dryRunResult)
+	}
+
+	result := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-1"})
+	if result.Err != nil {
+		t.Fatalf("expected Stop to succeed, got %v", result.Err)
+	}
+	if result.ModelReceipt.Honored != HonoredTrue {
+		t.Fatalf("expected the observed receipt for the real spawn's own (earlier) session, got %+v", result.ModelReceipt)
+	}
+
+	mrr2, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	last := mrr2.Events[len(mrr2.Events)-1]
+	assertDetailsContains(t, last.Details, "model_observed=true")
+}
+
+// TestHasObservedCodexReceiptAfter_OnlyThisSpawnsObservedReceiptCounts pins
+// which receipts stop Stop from observing again: only one for the same org
+// and seat, written STRICTLY AFTER this spawn started, that carries a
+// reported model. An observed receipt left by an EARLIER spawn of the same
+// seat must not count (the respawned seat may run a different model), and
+// neither do receipts without a reported model (unknown, rejection,
+// dry-run) or another seat's receipts. The same-second case is its own
+// case: a same-second receipt cannot be proven to belong to THIS spawn
+// rather than a previous one that happened to stop and respawn within the
+// same real second, so it must not count either.
+func TestHasObservedCodexReceiptAfter_OnlyThisSpawnsObservedReceiptCounts(t *testing.T) {
+	const spawnTS = "2026-09-20T01:00:00Z"
+	observed := func(org, seat, ts string) Receipt {
+		return Receipt{TS: ts, OrgID: org, SeatID: seat, Honored: HonoredTrue, ReportedEffectiveModel: "gpt-5.5"}
+	}
+	cases := []struct {
+		name     string
+		receipts []Receipt
+		want     bool
+	}{
+		{"no receipts at all", nil, false},
+		{"observed receipt from an earlier spawn of the same seat", []Receipt{observed("org-a", "seat-1", "2026-09-20T00:59:59Z")}, false},
+		{"same-second receipt may belong to the previous spawn, not this one", []Receipt{observed("org-a", "seat-1", spawnTS)}, false},
+		{"observed receipt after the spawn", []Receipt{observed("org-a", "seat-1", "2026-09-20T01:00:05Z")}, true},
+		{"unknown receipt after the spawn", []Receipt{{TS: "2026-09-20T01:00:05Z", OrgID: "org-a", SeatID: "seat-1", Honored: HonoredUnknown}}, false},
+		{"rejection receipt after the spawn", []Receipt{{TS: "2026-09-20T01:00:05Z", OrgID: "org-a", SeatID: "seat-1", Honored: HonoredFalse, Reason: "rejected"}}, false},
+		{"another seat's observed receipt", []Receipt{observed("org-a", "seat-2", "2026-09-20T01:00:05Z")}, false},
+		{"another org's observed receipt", []Receipt{observed("org-b", "seat-1", "2026-09-20T01:00:05Z")}, false},
+		{"earlier observed plus later unknown", []Receipt{
+			observed("org-a", "seat-1", "2026-09-19T23:00:00Z"),
+			{TS: "2026-09-20T01:00:05Z", OrgID: "org-a", SeatID: "seat-1", Honored: HonoredUnknown},
+		}, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := hasObservedCodexReceiptAfter(c.receipts, "org-a", "seat-1", spawnTS); got != c.want {
+				t.Errorf("hasObservedCodexReceiptAfter = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
+// TestCodexSpawnCorrelation_TwoRealSpawns_LatestWins is a /test cycle-1
+// addition (plan's Test plan edge cases: "同じ org・seat id を stop 後に再
+// spawn した場合"). TestOrgStop_Codex_DryRunRespawnDoesNotDisplaceRealSpawnCorrelation
+// above only exercises one real spawn_started plus a later dry-run one; this
+// covers the genuinely untested case -- TWO REAL (non-dry-run) spawn_started
+// events for the same org_id/seat_id, as a real Stop-then-respawn produces.
+// codexSpawnCorrelation's forward scan keeps overwriting startedIdx on every
+// matching spawn_started, so it must land on the later attempt's own index,
+// and its second loop (which only starts scanning from startedIdx) must
+// therefore also return that later attempt's own promptPath, never the
+// first attempt's -- both asserted directly here since this is the smallest
+// setup that reaches the exact behavior (no herdr/agmsg round trip needed).
+func TestCodexSpawnCorrelation_TwoRealSpawns_LatestWins(t *testing.T) {
+	events := []ManifestEvent{
+		{TS: "2026-09-18T07:00:00Z", OrgID: "org-a", SeatID: "seat-1", Event: EventSpawnStarted},
+		{TS: "2026-09-18T07:00:01Z", OrgID: "org-a", SeatID: "seat-1", Event: EventSpawnStep, Details: codexPromptFileDetailsPrefix + "/state/prompts/org-a_seat-1-first.md"},
+		{TS: "2026-09-18T07:00:05Z", OrgID: "org-a", SeatID: "seat-1", Event: "stopped"},
+		{TS: "2026-09-18T08:00:00Z", OrgID: "org-a", SeatID: "seat-1", Event: EventSpawnStarted},
+		{TS: "2026-09-18T08:00:01Z", OrgID: "org-a", SeatID: "seat-1", Event: EventSpawnStep, Details: codexPromptFileDetailsPrefix + "/state/prompts/org-a_seat-1-second.md"},
+	}
+
+	spawnStartedAt, spawnStartedTS, promptPath, ok := codexSpawnCorrelation(events, "org-a", "seat-1")
+	if !ok {
+		t.Fatalf("expected ok=true")
+	}
+	if spawnStartedTS != "2026-09-18T08:00:00Z" {
+		t.Fatalf("expected the LATER real spawn_started's TS, got %q", spawnStartedTS)
+	}
+	wantAt, err := time.Parse(time.RFC3339, "2026-09-18T08:00:00Z")
+	if err != nil {
+		t.Fatalf("parse want TS: %v", err)
+	}
+	if !spawnStartedAt.Equal(wantAt) {
+		t.Fatalf("expected spawnStartedAt %v, got %v", wantAt, spawnStartedAt)
+	}
+	if promptPath != "/state/prompts/org-a_seat-1-second.md" {
+		t.Fatalf("expected the second spawn's own promptPath, not the first attempt's, got %q", promptPath)
+	}
+}
+
+// TestPromptPathFromAgentStartedDetails is promptPathFromAgentStartedDetails's
+// own pure-function table test: it must strip a trailing
+// " agent_start_retries=<digits>" suffix anchored at the very end of
+// Details, never a path that merely contains that text (or spaces)
+// somewhere in the middle.
+func TestPromptPathFromAgentStartedDetails(t *testing.T) {
+	cases := []struct {
+		name     string
+		details  string
+		wantPath string
+		wantOK   bool
+	}{
+		{
+			name:     "no retries suffix",
+			details:  codexPromptFileDetailsPrefix + "/state/prompts/org-a_seat-1.md",
+			wantPath: "/state/prompts/org-a_seat-1.md",
+			wantOK:   true,
+		},
+		{
+			name:     "single-digit retries suffix",
+			details:  codexPromptFileDetailsPrefix + "/state/prompts/org-a_seat-1.md agent_start_retries=1",
+			wantPath: "/state/prompts/org-a_seat-1.md",
+			wantOK:   true,
+		},
+		{
+			name:     "two-digit retries suffix",
+			details:  codexPromptFileDetailsPrefix + "/state/prompts/org-a_seat-1.md agent_start_retries=12",
+			wantPath: "/state/prompts/org-a_seat-1.md",
+			wantOK:   true,
+		},
+		{
+			// /test cycle-2 addition: isAllDigits/CutPrefix never parse the
+			// digits into a number (agentStartWithRetry's real retry count
+			// is bounded by maxAgentStartAttempts, far smaller than this),
+			// so an implausibly large digit string must still strip
+			// cleanly -- no int overflow or truncation risk, since nothing
+			// here ever converts it.
+			name:     "retries suffix with an implausibly large digit string",
+			details:  codexPromptFileDetailsPrefix + "/state/prompts/org-a_seat-1.md agent_start_retries=99999999999999999999999999999999",
+			wantPath: "/state/prompts/org-a_seat-1.md",
+			wantOK:   true,
+		},
+		{
+			name:     "path with spaces plus a retries suffix",
+			details:  codexPromptFileDetailsPrefix + "/state dir/with spaces/prompts/org-a_seat-1.md agent_start_retries=3",
+			wantPath: "/state dir/with spaces/prompts/org-a_seat-1.md",
+			wantOK:   true,
+		},
+		{
+			name:     "path contains the suffix key in the middle, plus a real trailing suffix",
+			details:  codexPromptFileDetailsPrefix + "/state/agent_start_retries=3 more/org-a_seat-1.md agent_start_retries=5",
+			wantPath: "/state/agent_start_retries=3 more/org-a_seat-1.md",
+			wantOK:   true,
+		},
+		{
+			name:     "path contains the suffix key in the middle, no real trailing suffix",
+			details:  codexPromptFileDetailsPrefix + "/state/agent_start_retries=3 more/org-a_seat-1.md",
+			wantPath: "/state/agent_start_retries=3 more/org-a_seat-1.md",
+			wantOK:   true,
+		},
+		{
+			name:    "Details without the prefix at all",
+			details: "agent_started",
+			wantOK:  false,
+		},
+		{
+			name:     "prefix with an empty path",
+			details:  codexPromptFileDetailsPrefix,
+			wantPath: "",
+			wantOK:   true,
+		},
+		{
+			// The retries suffix is only stripped when it is the LAST
+			// field -- a field appended after it (the shape a future edit
+			// to agentStartedDetails could introduce) is not stripped and
+			// becomes part of the "path" instead, pinning the contract
+			// the constant's own doc comment now states.
+			name:     "retries suffix is not the last field, so it is not stripped",
+			details:  codexPromptFileDetailsPrefix + "/state/prompts/org-a_seat-1.md agent_start_retries=2 some_later_field=x",
+			wantPath: "/state/prompts/org-a_seat-1.md agent_start_retries=2 some_later_field=x",
+			wantOK:   true,
+		},
+		{
+			// /test cycle-2 addition: unlike the two "suffix key in the
+			// middle" cases above, this path contains a SECOND real
+			// (space-prefixed) " agent_start_retries=<digits>" match, not
+			// just the bare key text -- the exact shape needed to tell
+			// "the LAST occurrence" apart from "the FIRST occurrence"
+			// (strings.LastIndex vs. strings.Index). A first-occurrence
+			// implementation would stop at the middle match, see
+			// "42/y.md agent_start_retries=7" as its "digits" (fails
+			// isAllDigits), and give up stripping anything at all --
+			// proven via red/green (see /test's report).
+			name:     "two real retries-suffix matches: only the last is stripped",
+			details:  codexPromptFileDetailsPrefix + "/state/x agent_start_retries=42/y.md agent_start_retries=7",
+			wantPath: "/state/x agent_start_retries=42/y.md",
+			wantOK:   true,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			path, ok := promptPathFromAgentStartedDetails(c.details)
+			if ok != c.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, c.wantOK)
+			}
+			if ok && path != c.wantPath {
+				t.Fatalf("path = %q, want %q", path, c.wantPath)
+			}
+		})
+	}
+}
+
+// TestOrgStop_Codex_RecoversPromptPathAfterAgentStartRetry is an
+// integration test: when AgentStart needed a retry (agent_pane_busy, the
+// same transient error agentStartWithRetry's other tests drive via
+// fakeHerdr.agentStartErrs), Spawn's agent_started Details carries a
+// trailing " agent_start_retries=N" after the prompt path.
+// codexSpawnCorrelation must still recover the real path so Stop's
+// second-chance observation still works -- exactly for the slow-starting
+// seats it exists to help, since a busy pane is the same slow-start
+// situation in which the spawn-time observation is most likely to have
+// come back unknown.
+func TestOrgStop_Codex_RecoversPromptPathAfterAgentStartRetry(t *testing.T) {
+	o, h, _ := codexGuardedOrg(t, "implementer")
+	o.AgentStartRetryInterval = time.Millisecond
+	h.agentStartErrs = []error{agentPaneBusyErr(), nil}
+	p := mustCodexSpawnParams("org-a", "seat-1")
+
+	spawnResult := o.Spawn(p)
+	if spawnResult.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", spawnResult)
+	}
+	if spawnResult.ModelReceipt.Honored != HonoredUnknown {
+		t.Fatalf("expected spawn's own receipt to be unknown (no fixture yet), got %+v", spawnResult.ModelReceipt)
+	}
+
+	// Test setup invariant: the retry actually happened, and the persisted
+	// Details carries the exact suffix this fix must see through.
+	rr, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	var agentStartedDetails string
+	for _, ev := range rr.Events {
+		if ev.OrgID == "org-a" && ev.SeatID == "seat-1" && ev.Event == EventSpawnStep && strings.HasPrefix(ev.Details, "agent_started") {
+			agentStartedDetails = ev.Details
+		}
+	}
+	assertDetailsContains(t, agentStartedDetails, "agent_start_retries=1")
+
+	promptPath, err := o.promptFilePath(p.OrgID, p.SeatID)
+	if err != nil {
+		t.Fatalf("promptFilePath: %v", err)
+	}
+	writeQualifyingCodexFixture(t, o.CodexSessionsDir, promptPath, time.Now().Add(time.Second), "gpt-5-codex")
+
+	result := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-1"})
+	if result.Err != nil {
+		t.Fatalf("expected Stop to succeed, got %v", result.Err)
+	}
+	if result.ModelReceipt.Honored != HonoredTrue || result.ModelReceipt.ReportedEffectiveModel != "gpt-5-codex" {
+		t.Fatalf("expected Stop to recover the prompt path and observe successfully despite the retry suffix, got %+v", result.ModelReceipt)
+	}
+
+	mrr, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	last := mrr.Events[len(mrr.Events)-1]
+	assertDetailsContains(t, last.Details, "model_observed=true")
+}
+
+// TestOrgStop_Codex_SameSecondRespawn_PreviousReceiptDoesNotSuppressObservation
+// is an integration test: a previous spawn attempt (A) of this exact seat
+// was already observed, its receipt sitting at exactly
+// the same whole-second timestamp a respawn (B) of the same seat gets for
+// its own spawn_started -- reproducing "stop followed by spawn of the
+// same seat within one second", what a lead does when it replaces a seat
+// and what a scripted flow can do in milliseconds. A's receipt must not
+// suppress B's own stop-time observation.
+func TestOrgStop_Codex_SameSecondRespawn_PreviousReceiptDoesNotSuppressObservation(t *testing.T) {
+	o, _, _ := codexGuardedOrg(t, "implementer")
+	p := mustCodexSpawnParams("org-a", "seat-1")
+
+	const sameSecond = "2026-09-10T01:00:00Z" // safely in the past: real wall-clock "now" during this test is always after it
+	fixedNow, err := time.Parse(time.RFC3339, sameSecond)
+	if err != nil {
+		t.Fatalf("parse fixed clock time: %v", err)
+	}
+	if err := o.Receipts.Append(Receipt{
+		TS: sameSecond, OrgID: "org-a", SeatID: "seat-1", Role: "implementer", Driver: "codex",
+		CommandedModel: "gpt-5.5", Honored: HonoredTrue, ReportedEffectiveModel: "gpt-5.5",
+	}); err != nil {
+		t.Fatalf("seed spawn A's observed receipt: %v", err)
+	}
+
+	// A constant fake clock: every o.now()/o.nowTime() call during B's own
+	// spawn (below) and stop returns exactly the same instant as A's
+	// seeded receipt above -- the exact same-second tie
+	// hasObservedCodexReceiptAfter must not be fooled by.
+	o.Now = func() time.Time { return fixedNow }
+
+	spawnResult := o.Spawn(p)
+	if spawnResult.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("respawn B failed: %+v", spawnResult)
+	}
+	if spawnResult.ModelReceipt.Honored != HonoredUnknown {
+		t.Fatalf("expected B's own spawn-time receipt to be unknown (no fixture yet), got %+v", spawnResult.ModelReceipt)
+	}
+
+	promptPath, err := o.promptFilePath(p.OrgID, p.SeatID)
+	if err != nil {
+		t.Fatalf("promptFilePath: %v", err)
+	}
+	// Relative to the fake clock's own date (not real wall-clock "now"),
+	// so the fixture lands in the same date-directory window B's own
+	// spawnStartedAt derives.
+	writeQualifyingCodexFixture(t, o.CodexSessionsDir, promptPath, fixedNow.Add(time.Second), "gpt-5-codex")
+
+	result := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-1"})
+	if result.Err != nil {
+		t.Fatalf("expected Stop to succeed, got %v", result.Err)
+	}
+	if result.ModelReceipt.Honored != HonoredTrue || result.ModelReceipt.ReportedEffectiveModel != "gpt-5-codex" {
+		t.Fatalf("expected Stop to append B's own observed receipt despite A's same-second receipt, got %+v", result.ModelReceipt)
+	}
+
+	rr, err := o.Receipts.Read()
+	if err != nil {
+		t.Fatalf("read receipts: %v", err)
+	}
+	if len(rr.Receipts) != 3 {
+		t.Fatalf("expected 3 receipts (A's seeded observed + B's own unknown + B's stop-time observed), got %+v", rr.Receipts)
+	}
+}
+
+// TestOrgStop_Codex_ObservesSessionThatStartedDaysAfterSpawn is the
+// end-to-end case for cycle-2 self-review C2-1
+// (docs/reports/self-review-2026-09-20-codex-effective-model-receipt.md):
+// the seat's spawn finds no session record yet (a codex model-retirement
+// dialog is open),
+// so its own receipt stays unknown; three days later the dialog is
+// answered and the session record appears; Stop's second-chance
+// observation -- now reaching until = o.nowTime(), not just spawnStartedAt
+// -- must still find it.
+func TestOrgStop_Codex_ObservesSessionThatStartedDaysAfterSpawn(t *testing.T) {
+	o, _, _ := codexGuardedOrg(t, "implementer")
+	p := mustCodexSpawnParams("org-a", "seat-1")
+
+	base := time.Date(2026, 9, 18, 7, 20, 0, 0, time.UTC)
+	o.Now = func() time.Time { return base }
+
+	spawnResult := o.Spawn(p)
+	if spawnResult.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", spawnResult)
+	}
+	if spawnResult.ModelReceipt.Honored != HonoredUnknown {
+		t.Fatalf("expected spawn's own receipt to be unknown (no session record yet), got %+v", spawnResult.ModelReceipt)
+	}
+
+	// The dialog is answered three days later -- advance the fake clock so
+	// Stop's own until (o.nowTime()) reaches that day's directory.
+	dayThree := base.AddDate(0, 0, 3)
+	o.Now = func() time.Time { return dayThree }
+
+	promptPath, err := o.promptFilePath(p.OrgID, p.SeatID)
+	if err != nil {
+		t.Fatalf("promptFilePath: %v", err)
+	}
+	writeQualifyingCodexFixture(t, o.CodexSessionsDir, promptPath, dayThree, "gpt-5-codex")
+
+	result := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-1"})
+	if result.Err != nil {
+		t.Fatalf("expected Stop to succeed, got %v", result.Err)
+	}
+	if result.ModelReceipt.Honored != HonoredTrue || result.ModelReceipt.ReportedEffectiveModel != "gpt-5-codex" {
+		t.Fatalf("expected Stop to observe the session that started 3 days after the spawn, got %+v", result.ModelReceipt)
+	}
+
+	mrr, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	last := mrr.Events[len(mrr.Events)-1]
+	assertDetailsContains(t, last.Details, "model_observed=true")
+}
+
+// TestOrgStop_Codex_NothingAppended_NotFound: no qualifying record exists
+// at stop time either -- Stop must append nothing and record
+// model_observed=none.
+func TestOrgStop_Codex_NothingAppended_NotFound(t *testing.T) {
+	o, _, _ := codexGuardedOrg(t, "implementer")
+	p := mustCodexSpawnParams("org-a", "seat-1")
+	if r := o.Spawn(p); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", r)
+	}
+
+	result := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-1"})
+	if result.Err != nil {
+		t.Fatalf("expected Stop to succeed, got %v", result.Err)
+	}
+	if result.ModelReceipt != (Receipt{}) {
+		t.Fatalf("expected no receipt appended at stop, got %+v", result.ModelReceipt)
+	}
+
+	rr, err := o.Receipts.Read()
+	if err != nil {
+		t.Fatalf("read receipts: %v", err)
+	}
+	if len(rr.Receipts) != 1 {
+		t.Fatalf("expected only spawn's own unknown receipt, got %+v", rr.Receipts)
+	}
+
+	mrr, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	last := mrr.Events[len(mrr.Events)-1]
+	assertDetailsContains(t, last.Details, "model_observed=none")
+}
+
+// TestOrgStop_Codex_DryRun_NoObservationAttempted: a dry-run stop of a
+// codex seat never observes at all -- no model_observed token of any kind
+// on the stopped event's Details, not even "none".
+func TestOrgStop_Codex_DryRun_NoObservationAttempted(t *testing.T) {
+	o, _, _ := codexGuardedOrg(t, "implementer")
+	p := mustCodexSpawnParams("org-a", "seat-1")
+	if r := o.Spawn(p); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", r)
+	}
+
+	result := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-1", DryRun: true})
+	if result.Err != nil {
+		t.Fatalf("expected Stop to succeed, got %v", result.Err)
+	}
+	if result.ModelReceipt != (Receipt{}) {
+		t.Fatalf("expected no receipt appended for a dry-run stop, got %+v", result.ModelReceipt)
+	}
+
+	mrr, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	last := mrr.Events[len(mrr.Events)-1]
+	if strings.Contains(last.Details, "model_observed=") {
+		t.Fatalf("expected no model_observed token at all for a dry-run stop, got %q", last.Details)
+	}
+}
+
+// TestOrgStop_Claude_NoObservationAttempted: a claude seat's stopped event
+// never carries a model_observed token -- observation is codex-only.
+func TestOrgStop_Claude_NoObservationAttempted(t *testing.T) {
+	o, _, _ := testOrg(t)
+	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", r)
+	}
+
+	result := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-1"})
+	if result.Err != nil {
+		t.Fatalf("expected Stop to succeed, got %v", result.Err)
+	}
+	if result.ModelReceipt != (Receipt{}) {
+		t.Fatalf("expected no receipt appended for a claude seat, got %+v", result.ModelReceipt)
+	}
+
+	mrr, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	last := mrr.Events[len(mrr.Events)-1]
+	if strings.Contains(last.Details, "model_observed=") {
+		t.Fatalf("expected no model_observed token at all for a claude seat, got %q", last.Details)
+	}
+}
+
+// TestOrgStop_Codex_NoPromptFileSeat_NothingAppended: a codex seat whose
+// initial prompt was short enough to pass inline (no role-prompt file, so
+// codexSpawnCorrelation's promptPath comes back empty) has nothing to
+// correlate a session record with -- Stop appends nothing and records
+// model_observed=none.
+func TestOrgStop_Codex_NoPromptFileSeat_NothingAppended(t *testing.T) {
+	o, _, _ := codexGuardedOrg(t, "worker") // "worker" has no embedded template
+	p := mustSpawnParams("org-a", "seat-1")
+	p.Driver = "codex"
+	p.Model = "gpt-5-codex"
+	p.Prompt = "short inline prompt"
+	if r := o.Spawn(p); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", r)
+	}
+
+	result := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-1"})
+	if result.Err != nil {
+		t.Fatalf("expected Stop to succeed, got %v", result.Err)
+	}
+	if result.ModelReceipt != (Receipt{}) {
+		t.Fatalf("expected no receipt appended for a seat with no role-prompt file, got %+v", result.ModelReceipt)
+	}
+
+	mrr, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	last := mrr.Events[len(mrr.Events)-1]
+	assertDetailsContains(t, last.Details, "model_observed=none")
+}
+
+// TestOrgStop_Codex_ReceiptsAppendFailureLeavesStopSuccessful uses the same
+// read-only-file technique as
+// TestOrgSend_AppendEventFailsAfterEnter_ReportsEnterPressedButUnrecorded
+// (above): a receipts append failure at stop time must never turn a
+// successful stop into an error, and must record model_observed=none since
+// nothing was actually persisted.
+func TestOrgStop_Codex_ReceiptsAppendFailureLeavesStopSuccessful(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores a read-only file's permission bit")
+	}
+	o, _, _ := codexGuardedOrg(t, "implementer")
+	p := mustCodexSpawnParams("org-a", "seat-1")
+	if r := o.Spawn(p); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", r)
+	}
+
+	promptPath, err := o.promptFilePath(p.OrgID, p.SeatID)
+	if err != nil {
+		t.Fatalf("promptFilePath: %v", err)
+	}
+	writeQualifyingCodexFixture(t, o.CodexSessionsDir, promptPath, time.Now().Add(time.Second), "gpt-5-codex")
+
+	receiptsPath := o.Receipts.Path()
+	if err := os.Chmod(receiptsPath, 0o444); err != nil {
+		t.Fatalf("chmod receipts read-only: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(receiptsPath, 0o644) })
+
+	result := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-1"})
+	if result.Err != nil {
+		t.Fatalf("expected Stop to succeed despite a receipts append failure, got %v", result.Err)
+	}
+	if result.ModelReceipt != (Receipt{}) {
+		t.Fatalf("expected zero ModelReceipt when the append failed, got %+v", result.ModelReceipt)
+	}
+
+	mrr, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	last := mrr.Events[len(mrr.Events)-1]
+	assertDetailsContains(t, last.Details, "model_observed=none")
 }

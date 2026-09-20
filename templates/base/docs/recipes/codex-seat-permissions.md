@@ -112,7 +112,17 @@ ralph org spawn --org-id perm-auto --id reviewer --role reviewer --driver codex 
 - The pane right after startup (`herdr pane read <pane> --lines 40`) shows no
   approval, trust, or login dialog. A model-retirement notice
   ("Try new model / Use existing model") may appear; it is not an approval
-  prompt, and the choice is persisted to the codex config.
+  prompt, and the choice is persisted to the codex config. codex can also
+  switch a retiring model to its replacement without asking. ralph records
+  what the seat really runs: the spawn receipt in
+  `<state-dir>/model-receipts.jsonl` carries `reported_effective_model`,
+  `honored=false` on a mismatch comes with a stderr warning, and
+  `ralph doctor` lists pool slugs that codex has scheduled for retirement.
+  While the dialog is open no turn has started, so the spawn receipt stays
+  `unknown`; `ralph org stop` looks once more and, when it finds the seat's
+  session record, appends the observed one (codex appears to create the
+  record only once the dialog is answered; stop searches from the spawn
+  date to the stop date, up to about a month).
 - Write the TASK as a typed-protocol message (`ralph org send` validates it:
   `TYPE` must be one of the protocol's enum values, `TASK` needs a
   `TASK_ID`, and the body is capped at 2,000 characters), e.g. `task.txt`:

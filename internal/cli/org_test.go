@@ -1012,6 +1012,278 @@ func containsLine(lines []string, want string) bool {
 	return slices.Contains(lines, want)
 }
 
+// --- codex model observation CLI warning (plan Scope row 5, AC-6) ---
+
+// codexOrgTestCommandedModel/codexOrgTestReportedModel mirror the plan's
+// own motivating incident (#155 evidence, plan background: "--model
+// gpt-5.5 を渡した codex 座席の実効モデルが gpt-5.6-sol になった"): a
+// --model gpt-5.5 spawn whose codex session record reports gpt-5.6-sol.
+const (
+	codexOrgTestCommandedModel = "gpt-5.5"
+	codexOrgTestReportedModel  = "gpt-5.6-sol"
+)
+
+// writeCodexOrgConfig writes a ralph.toml with an [org] section that allows
+// the codex driver (one [[org.model_pool]] entry,
+// codexOrgTestCommandedModel) and, when guardedRole is non-empty, maps that
+// role to guarded permission mode -- codex's fail-closed autonomous default
+// (permissionArgsForDriver) would otherwise reject every codex spawn in
+// this file outright, the same gate internal/org/spawn_test.go's
+// codexGuardedOrg works around for the library-level tests. An empty
+// guardedRole deliberately leaves every role on the autonomous default, for
+// the one test that needs that fail-closed rejection.
+func writeCodexOrgConfig(t *testing.T, dir string, maxSeats int, guardedRole string) string {
+	t.Helper()
+	path := filepath.Join(dir, "ralph.toml")
+	content := "[org]\n" +
+		"max_seats = " + itoa(maxSeats) + "\n" +
+		"driver_pool = [\"claude\", \"codex\"]\n\n" +
+		"[[org.model_pool]]\n" +
+		"driver = \"codex\"\n" +
+		"model = \"" + codexOrgTestCommandedModel + "\"\n\n" +
+		"[org.permissions]\n" +
+		"default = \"autonomous\"\n"
+	if guardedRole != "" {
+		content += "\n[org.permissions.roles]\n" + guardedRole + " = \"guarded\"\n"
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write codex org config: %v", err)
+	}
+	return path
+}
+
+// codexPromptPathFor mirrors internal/org's promptFilePath convention
+// (<state-dir>/prompts/<org_id>_<seat_id>.md, spawn.go) so a CLI test can
+// pre-write a session-record fixture at the exact path the spawn it is
+// about to run will itself write the role-prompt file to. stateDir must
+// already be absolute (every test below passes one built from t.TempDir()),
+// matching promptFilePath's own absPath(filepath.Dir(...)) resolution.
+func codexPromptPathFor(stateDir, orgID, seatID string) string {
+	return filepath.Join(stateDir, "prompts", orgID+"_"+seatID+".md")
+}
+
+// cliCodexFixtureLine is the common envelope every fixture line below
+// marshals through -- see writeCliCodexFixture.
+type cliCodexFixtureLine struct {
+	Timestamp string `json:"timestamp"`
+	Type      string `json:"type"`
+	Payload   any    `json:"payload"`
+}
+
+// writeCliCodexFixture writes a minimal qualifying rollout-*.jsonl record
+// (session_meta + turn_context + a user message containing promptPath)
+// under sessionsDir for at, shaped like the real codex-cli records
+// internal/org/codex_session.go's ObserveCodexEffectiveModel reads. This is
+// a CLI-package-local rebuild of internal/org/codex_session_test.go's line
+// builders (unexported there, so not reachable across the package
+// boundary) -- the two stay in sync by both matching the same real-record
+// shape the plan documents, not by sharing code.
+func writeCliCodexFixture(t *testing.T, sessionsDir, promptPath string, at time.Time, model string) {
+	t.Helper()
+	ts := func(tm time.Time) string { return tm.UTC().Format("2006-01-02T15:04:05.000Z") }
+	marshal := func(typ string, payload any) string {
+		b, err := json.Marshal(cliCodexFixtureLine{Timestamp: ts(at), Type: typ, Payload: payload})
+		if err != nil {
+			t.Fatalf("marshal codex fixture line: %v", err)
+		}
+		return string(b)
+	}
+	lines := []string{
+		marshal("session_meta", map[string]string{"timestamp": ts(at)}),
+		marshal("turn_context", map[string]string{"model": model, "effort": "medium"}),
+		marshal("response_item", map[string]any{
+			"type": "message",
+			"role": "user",
+			"content": []map[string]string{
+				// The observer matches on the full pointer sentence ralph
+				// itself passes the seat as its initial prompt argument
+				// when the role-prompt was written to a file, not merely
+				// the bare path -- calling the exported
+				// org.PromptFilePointer here (rather than duplicating its
+				// Japanese literal) keeps this fixture from ever silently
+				// drifting out of sync with it.
+				{"type": "input_text", "text": org.PromptFilePointer(promptPath)},
+			},
+		}),
+	}
+	dateDir := filepath.Join(sessionsDir, at.Local().Format("2006/01/02"))
+	if err := os.MkdirAll(dateDir, 0o755); err != nil {
+		t.Fatalf("mkdir codex session date dir: %v", err)
+	}
+	fixturePath := filepath.Join(dateDir, "rollout-cli-test.jsonl")
+	if err := os.WriteFile(fixturePath, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("write codex fixture: %v", err)
+	}
+}
+
+// setCodexSessionsDirOverride points org.go's orgCodexSessionsDirOverride
+// seam (see main_test.go's TestMain) at dir for the duration of the
+// calling test, restoring TestMain's own pinned value afterward -- the
+// same save/restore/cleanup pattern doctor_shell_alias_test.go and
+// doctor_codex_writable_root_test.go already use for their own seams.
+func setCodexSessionsDirOverride(t *testing.T, dir string) {
+	t.Helper()
+	orig := orgCodexSessionsDirOverride
+	orgCodexSessionsDirOverride = dir
+	t.Cleanup(func() { orgCodexSessionsDirOverride = orig })
+}
+
+// TestOrgSpawn_CLI_CodexModelMismatch_PrintsWarning is AC-6's spawn-time
+// path: a codex seat's session record (already on disk before the command
+// runs, so Spawn's very first, no-wait poll finds it) reports a different
+// model than --model commanded, so `ralph org spawn` prints the mismatch
+// warning to stderr (merged into runOrgCmd's combined buffer) with exit 0.
+func TestOrgSpawn_CLI_CodexModelMismatch_PrintsWarning(t *testing.T) {
+	setupOrgStubPATH(t)
+	dir := t.TempDir()
+	stateDir := filepath.Join(dir, "state")
+	configPath := writeCodexOrgConfig(t, dir, 3, "implementer")
+	sessionsDir := filepath.Join(dir, "codex-sessions")
+	setCodexSessionsDirOverride(t, sessionsDir)
+
+	promptPath := codexPromptPathFor(stateDir, "org-a", "seat-1")
+	writeCliCodexFixture(t, sessionsDir, promptPath, time.Now().Add(time.Second), codexOrgTestReportedModel)
+
+	out, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "implementer",
+		"--driver", "codex", "--model", codexOrgTestCommandedModel, "--cwd", t.TempDir(),
+		"--scope", "test-scope",
+		"--state-dir", stateDir, "--config", configPath,
+	)
+	if err != nil {
+		t.Fatalf("spawn failed: %v (output: %s)", err, out)
+	}
+	wantWarning := `warning: seat "seat-1" was started with --model ` + codexOrgTestCommandedModel +
+		", but codex reports it is running " + codexOrgTestReportedModel + "."
+	if !strings.Contains(out, wantWarning) {
+		t.Errorf("expected the model-mismatch warning in output, got: %s", out)
+	}
+}
+
+// TestOrgSpawn_CLI_CodexModelMatch_NoWarning is the negative case: the
+// session record reports the commanded model, so no warning is printed.
+func TestOrgSpawn_CLI_CodexModelMatch_NoWarning(t *testing.T) {
+	setupOrgStubPATH(t)
+	dir := t.TempDir()
+	stateDir := filepath.Join(dir, "state")
+	configPath := writeCodexOrgConfig(t, dir, 3, "implementer")
+	sessionsDir := filepath.Join(dir, "codex-sessions")
+	setCodexSessionsDirOverride(t, sessionsDir)
+
+	promptPath := codexPromptPathFor(stateDir, "org-a", "seat-1")
+	writeCliCodexFixture(t, sessionsDir, promptPath, time.Now().Add(time.Second), codexOrgTestCommandedModel)
+
+	out, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "implementer",
+		"--driver", "codex", "--model", codexOrgTestCommandedModel, "--cwd", t.TempDir(),
+		"--scope", "test-scope",
+		"--state-dir", stateDir, "--config", configPath,
+	)
+	if err != nil {
+		t.Fatalf("spawn failed: %v (output: %s)", err, out)
+	}
+	if strings.Contains(out, "warning:") {
+		t.Errorf("expected no warning when the observed model matches, got: %s", out)
+	}
+}
+
+// TestOrgSpawn_CLI_EnvelopeRejection_NoModelWarning is AC-6's negative
+// guard against the envelope-rejection false positive: a codex seat
+// rejected fail-closed by permissionArgsForDriver (autonomous default, no
+// guarded role) gets an honored=false receipt with NO reported model
+// (reject(), spawn.go) -- that must never be printed as a model-mismatch
+// warning.
+func TestOrgSpawn_CLI_EnvelopeRejection_NoModelWarning(t *testing.T) {
+	setupOrgStubPATH(t)
+	dir := t.TempDir()
+	stateDir := filepath.Join(dir, "state")
+	configPath := writeCodexOrgConfig(t, dir, 3, "") // no guarded role at all
+
+	out, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "implementer",
+		"--driver", "codex", "--model", codexOrgTestCommandedModel, "--cwd", t.TempDir(),
+		"--scope", "test-scope",
+		"--state-dir", stateDir, "--config", configPath,
+	)
+	if err == nil {
+		t.Fatalf("expected the fail-closed autonomous-codex rejection to exit non-zero, output: %s", out)
+	}
+	if strings.Contains(out, "warning: seat") {
+		t.Errorf("expected no model-mismatch warning for an envelope rejection, got: %s", out)
+	}
+}
+
+// TestOrgStop_CLI_CodexModelMismatch_PrintsWarning is AC-6's stop-time
+// path: spawn finds nothing (no fixture yet, so its own receipt is
+// unknown, printing no warning), a mismatching record appears before
+// `ralph org stop` runs, and stop's own single observation prints the
+// warning.
+func TestOrgStop_CLI_CodexModelMismatch_PrintsWarning(t *testing.T) {
+	setupOrgStubPATH(t)
+	dir := t.TempDir()
+	stateDir := filepath.Join(dir, "state")
+	configPath := writeCodexOrgConfig(t, dir, 3, "implementer")
+	sessionsDir := filepath.Join(dir, "codex-sessions")
+	setCodexSessionsDirOverride(t, sessionsDir)
+
+	spawnOut, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "implementer",
+		"--driver", "codex", "--model", codexOrgTestCommandedModel, "--cwd", t.TempDir(),
+		"--scope", "test-scope",
+		"--state-dir", stateDir, "--config", configPath,
+	)
+	if err != nil {
+		t.Fatalf("spawn failed: %v (output: %s)", err, spawnOut)
+	}
+	if strings.Contains(spawnOut, "warning:") {
+		t.Errorf("expected no warning at spawn time (no fixture yet), got: %s", spawnOut)
+	}
+
+	promptPath := codexPromptPathFor(stateDir, "org-a", "seat-1")
+	writeCliCodexFixture(t, sessionsDir, promptPath, time.Now().Add(time.Second), codexOrgTestReportedModel)
+
+	stopOut, err := runOrgCmd(t, "stop", "--org-id", "org-a", "--seat", "seat-1", "--state-dir", stateDir, "--config", configPath)
+	if err != nil {
+		t.Fatalf("stop failed: %v (output: %s)", err, stopOut)
+	}
+	wantWarning := `warning: seat "seat-1" was started with --model ` + codexOrgTestCommandedModel +
+		", but codex reports it is running " + codexOrgTestReportedModel + "."
+	if !strings.Contains(stopOut, wantWarning) {
+		t.Errorf("expected the model-mismatch warning in stop's output, got: %s", stopOut)
+	}
+}
+
+// TestOrgStop_CLI_CodexModelMatch_NoWarning is the negative case for stop:
+// the record found at stop time reports the commanded model.
+func TestOrgStop_CLI_CodexModelMatch_NoWarning(t *testing.T) {
+	setupOrgStubPATH(t)
+	dir := t.TempDir()
+	stateDir := filepath.Join(dir, "state")
+	configPath := writeCodexOrgConfig(t, dir, 3, "implementer")
+	sessionsDir := filepath.Join(dir, "codex-sessions")
+	setCodexSessionsDirOverride(t, sessionsDir)
+
+	if _, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "implementer",
+		"--driver", "codex", "--model", codexOrgTestCommandedModel, "--cwd", t.TempDir(),
+		"--scope", "test-scope",
+		"--state-dir", stateDir, "--config", configPath,
+	); err != nil {
+		t.Fatalf("spawn failed: %v", err)
+	}
+
+	promptPath := codexPromptPathFor(stateDir, "org-a", "seat-1")
+	writeCliCodexFixture(t, sessionsDir, promptPath, time.Now().Add(time.Second), codexOrgTestCommandedModel)
+
+	stopOut, err := runOrgCmd(t, "stop", "--org-id", "org-a", "--seat", "seat-1", "--state-dir", stateDir, "--config", configPath)
+	if err != nil {
+		t.Fatalf("stop failed: %v (output: %s)", err, stopOut)
+	}
+	if strings.Contains(stopOut, "warning:") {
+		t.Errorf("expected no warning when the observed model matches, got: %s", stopOut)
+	}
+}
+
 // TestOrgSpawn_RoleAndScopeFlags_ExpandTemplateAndRecordScope covers AC-4
 // and the scope half of AC-7/design: `--role reviewer --scope ...` expands
 // the embedded reviewer template (with org_id/seat_id/scope substituted).

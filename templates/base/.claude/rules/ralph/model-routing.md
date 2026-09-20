@@ -90,6 +90,25 @@ selection rules. Codex seats have no aliases; `[org].model_pool` carries
 codex model slugs, and `ralph doctor` warns when a slug is missing from
 codex's local model cache.
 
+For a codex seat the receipt carries an observation, not only the command:
+after the seat starts, `ralph org spawn` looks for up to 8 s for the seat's
+codex session record (`$CODEX_HOME/sessions/`, else `~/.codex/sessions/`)
+and records its `turn_context.model` as `reported_effective_model`, with
+`honored=true` when it equals the commanded model and `honored=false` when
+it does not (codex switches a retiring model to its replacement on its own;
+`ralph doctor` lists pool slugs that carry such a notice). The record is
+matched by the sentence ralph passes to the seat to point it at its
+role-prompt file and by a session start time not before the spawn, and only
+the model is read from it. A seat whose record cannot be identified stays
+`unknown`: no turn yet (for example a model-retirement dialog is open), an
+inline or empty initial prompt (no role-prompt file to match), or a herdr
+server whose `CODEX_HOME` differs from ralph's. `ralph org stop` looks once
+more for a seat that has no observed receipt since its spawn and, when it
+finds the record, appends one, so a seat can have an `unknown` receipt from
+spawn and an observed one from stop. Stop also covers a session that
+started days after the spawn (a startup dialog answered late), up to about
+a month. claude seats are not observed and stay `unknown`.
+
 ## Where the values live
 
 - `.claude/agents/*.md` — pipeline subagent tiers (frontmatter `model:`)

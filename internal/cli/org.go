@@ -123,8 +123,41 @@ func newOrgRuntimeAt(resolvedStateDir, configPath string) (*org.Org, error) {
 		Receipts: org.NewReceiptStoreAtPath(org.ReceiptsPathIn(resolvedStateDir)),
 		Herdr:    driver.Herdr{R: runner},
 		Agmsg:    driver.Agmsg{R: runner, Home: driver.ResolveAgmsgHome(orgCfg.AgmsgHome)},
+		// The three Codex* fields below are only ever non-zero in tests
+		// (TestMain pins orgCodexSessionsDirOverride to a directory that
+		// does not exist, plus tiny observe timeout/interval, the same
+		// seam shape as doctorShellAliasEnv/doctorCodexSandboxEnv --
+		// main_test.go). Production always leaves all three at their zero
+		// value here, so org.Org resolves CodexSessionsDir from the
+		// environment at call time and uses its own built-in observe
+		// timeout/interval, exactly as before this plan.
+		CodexSessionsDir:          orgCodexSessionsDirOverride,
+		CodexModelObserveTimeout:  orgCodexModelObserveTimeoutOverride,
+		CodexModelObserveInterval: orgCodexModelObserveIntervalOverride,
 	}, nil
 }
+
+// orgCodexSessionsDirOverride, orgCodexModelObserveTimeoutOverride, and
+// orgCodexModelObserveIntervalOverride are copied into every org.Org this
+// package constructs (newOrgRuntimeAt), overriding org.Org's own
+// environment-at-call-time default resolution for CodexSessionsDir and its
+// built-in observe timeout/interval defaults. All three are the zero value
+// in production. TestMain pins orgCodexSessionsDirOverride to a directory
+// that does not exist and both durations to near-zero, for the same reason
+// it pins doctorShellAliasEnv/doctorCodexSandboxEnv (main_test.go): without
+// this seam, every runOrg*-based test would silently start reading the
+// developer's real ~/.codex/sessions and waiting out the real 8s poll
+// timeout. A test that specifically exercises codex model observation
+// overrides orgCodexSessionsDirOverride (and, if it needs the poll to
+// actually retry, the two duration overrides) to its own fixture directory
+// for the duration of that one test, restoring it via t.Cleanup -- the
+// same save/restore/cleanup pattern doctor_shell_alias_test.go and
+// doctor_codex_writable_root_test.go already use for their own seams.
+var (
+	orgCodexSessionsDirOverride          string
+	orgCodexModelObserveTimeoutOverride  time.Duration
+	orgCodexModelObserveIntervalOverride time.Duration
+)
 
 // orgReadCommandHint builds the `ralph org read` recovery command printed
 // in send's post-failure notes and its unconfirmed-submit warning (AR-2,
@@ -313,6 +346,23 @@ func printSpawnResult(cmd *cobra.Command, r org.SpawnResult) {
 	case org.SpawnOutcomeFailed:
 		_, _ = fmt.Fprintf(out, "spawn failed: %v\n", r.Err)
 	}
+	printCodexModelMismatchWarning(cmd, r.Seat.SeatID, r.ModelReceipt)
+}
+
+// printCodexModelMismatchWarning writes AC-6's stderr warning when receipt
+// is a genuine codex model mismatch: Honored == "false" AND a non-empty
+// ReportedEffectiveModel. That second condition is what keeps an envelope
+// rejection (also honored=false, but with no reported model at all --
+// reject(), spawn.go) from ever being mistaken for a model mismatch here.
+// Exit code is never touched by this function -- the caller's own Err
+// still decides that, unchanged.
+func printCodexModelMismatchWarning(cmd *cobra.Command, seatID string, r org.Receipt) {
+	if r.Honored != org.HonoredFalse || r.ReportedEffectiveModel == "" {
+		return
+	}
+	_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
+		"warning: seat %q was started with --model %s, but codex reports it is running %s. codex switches retired models on its own, and a codex config override has the same effect. Check 'ralph doctor' (codex model slugs) and the seat's pane.\n",
+		seatID, r.CommandedModel, r.ReportedEffectiveModel)
 }
 
 // newOrgStartCmd wires `ralph org start` -- headless-lead spawn sugar over
@@ -632,6 +682,7 @@ func newOrgStopCmd(orgID, stateDir, configPath *string) *cobra.Command {
 				return fmt.Errorf("org: stop: %w", result.Err)
 			}
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "stopped seat %q\n", seat)
+			printCodexModelMismatchWarning(cmd, seat, result.ModelReceipt)
 			return nil
 		},
 	}
