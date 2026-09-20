@@ -1,6 +1,6 @@
 # local-branch-secret-scan
 
-- Status: Draft
+- Status: In progress
 - Owner: Claude Code
 - Date: 2026-09-20
 - Related request: CI の `verify` ジョブは `./scripts/secret-scan.sh --range "$(git merge-base HEAD origin/<base>)..HEAD"` で branch の履歴全体(`git log -p` の追加行)を scan するが、ローカルには同じ scan を走らせる手順がない。PR #168 では、テストの偽の値と、それを許可するために足した `.gitallowed` の行自体が CI で初めて掛かり、push 後に 2 回失敗した。履歴を読む scan なので、push 後に気づくと fixture を直しても過去の commit で掛かり続ける(issue #169)
@@ -10,15 +10,15 @@
 
 ## Objective
 
-CI と同じ「branch の履歴込みの secret scan」を、push の前にローカルで必ず通るようにする。`/pr` の事前チェックと `./scripts/run-verify.sh` の両方から、1 つのスクリプトで実行する。
+CI と同じ「branch の履歴込みの secret scan」を、push の前にローカルで必ず通るようにする。`/pr`(push の直前)と `./scripts/run-verify.sh` の両方から、1 つのスクリプトで実行する。
 
 ## Scope
 
 | # | 変更 | ファイル | 内容 |
 |---|------|---------|------|
-| 1 | branch scan | `scripts/secret-scan-branch.sh`(新規)+ `templates/base/scripts/` のコピー | base branch を解決し(`GITHUB_BASE_REF` があればそれ、なければ `scripts/xreview-helpers.sh` の `detect_base_branch`)、`origin/<base>`(なければローカルの `<base>`)との merge-base から `HEAD` までを `./scripts/secret-scan.sh --range` で scan する。exit 0 = 問題なし、または理由を 1 行出して skip。exit 1 = 検出。exit 2 = 使い方の誤り。skip するのは: git の作業ツリーでない、HEAD が base branch そのもの、base の ref がどちらもない、merge-base が取れない、range に commit がない、scanner がない。skip は失敗にしない(CI が最終の関門) |
+| 1 | branch scan | `scripts/secret-scan-branch.sh`(新規)+ `templates/base/scripts/` のコピー | base branch を解決し(`GITHUB_BASE_REF` があればそれ、なければ `scripts/xreview-helpers.sh` の `detect_base_branch`)、`origin/<base>`(なければローカルの `<base>`)との merge-base から `HEAD` までを `./scripts/secret-scan.sh --range` で scan する。exit 0 = 問題なし、または理由を 1 行出して skip。exit 1 = 検出。exit 2 = 使い方の誤り。skip するのは: git の作業ツリーでない、HEAD が base branch そのもの、base の ref がどちらもない、merge-base が取れない、range に commit がない、scanner がない。skip は既定では失敗にしない(`run-verify.sh` 用)。**Codex advisory による改訂**: `--strict` を付けると、「scan できなかった」(scanner がない、git の作業ツリーでない、base の ref がどちらもない、merge-base が取れない)は exit 3 で終わる。問題なし(exit 0)と区別するため。range が空(push するものがない)は strict でも exit 0。allowlist は常に HEAD にコミット済みの `.gitallowed` を使う(`git show HEAD:.gitallowed` を一時ファイルに書き出して scanner に渡す。HEAD にファイルがなければ空)。作業ツリーの未コミットの変更や `RALPH_SECRET_ALLOWLIST` の上書きは、CI が読まないので無視し、無視したことを 1 行出す |
 | 2 | run-verify | `scripts/run-verify.sh` + `templates/base/scripts/` のコピー | `HARNESS_VERIFY_MODE` が `static` か `all` のとき、branch scan を 1 つの step として実行する。検出したら全体を失敗にする(`status=1`)。「言語の verifier が 1 つも走らなかった」の判定(`ran_any`)には数えない。緊急時の回避として `RALPH_VERIFY_SKIP_BRANCH_SECRET_SCAN=1` で飛ばせる(飛ばしたことを 1 行出す) |
-| 3 | /pr | `.claude/skills/pr/SKILL.md` + `.agents/skills/pr/SKILL.md` + `templates/base/` の 2 面 | Pre-checks に「`./scripts/secret-scan-branch.sh` が exit 0」を追加 |
+| 3 | /pr | `.claude/skills/pr/SKILL.md` + `.agents/skills/pr/SKILL.md` + `templates/base/` の 2 面 | **Codex advisory による改訂**: Pre-checks ではなく Steps に入れる。未コミットの変更をコミットする手順の後、`git push` の直前に「`./scripts/secret-scan-branch.sh --strict` を実行し、exit 0 以外なら push しない」を置く(事前チェックの後にコミットが増えるので、scan は実際に push する HEAD に対して行う)。exit 1(検出)と exit 3(scan できない)それぞれの対処を 1〜2 行で書く |
 | 4 | 案内 | `scripts/secret-scan.sh` + template のコピー、`docs/quality/quality-gates.md` | 検出時の案内文に 1 行: `.gitallowed` に足す行は、その行自体が scanner のパターンに一致しない形で書く(例: キー名を `api_ke[y]` のように括弧式にする)。range の scan は `.gitallowed` を足した commit の追加行も読むため。quality-gates にローカルの branch scan を追記 |
 | 5 | 必須ファイル | `scripts/check-template.sh` + template のコピー | 必須ファイルの一覧に `scripts/secret-scan-branch.sh` を追加 |
 | 6 | テスト | `tests/test-secret-scan.sh`(または新規 `tests/test-secret-scan-branch.sh`)、必要なら scaffold のテスト | 下の Test plan |
@@ -47,18 +47,21 @@ CI と同じ「branch の履歴込みの secret scan」を、push の前にロ�
 ## Design decisions
 
 - Critical forks: None。
+- **Codex plan advisory(2026-09-20、HIGH 1 / MEDIUM 1、ユーザー決定: 対応案で plan を更新)**: (1) skip が exit 0 だと、scan できていない状態でも `/pr` の関門を通り、未 scan の履歴が remote に出る → `--strict` を足し、`/pr` は strict で呼ぶ。(2) scan が実際に push する内容に紐づいていない(`/pr` は事前チェックの後にコミットする。scanner は作業ツリーや環境変数の allowlist を読む)→ `/pr` の scan を push の直前に移し、allowlist は HEAD にコミット済みのものだけを使う。
 - 1 つのスクリプトに寄せる。`/pr` と `run-verify.sh` と人が、同じコマンドで同じ結果を得る。base の解決や skip の条件を 2 箇所に書かない。
-- skip は失敗にしない。ローカルの scan は「push 前に気づく」ための早期検出で、最終の関門は CI。fetch していない、base の ref がない、といった環境の事情で verify 全体を落とさない。代わりに skip の理由を必ず 1 行出す。
+- `run-verify.sh` から呼ぶときの skip は失敗にしない。ここでの scan は「push 前に気づく」ための早期検出で、最終の関門は `/pr` の strict な scan と CI。fetch していない、base の ref がない、といった環境の事情で verify 全体を落とさない。代わりに skip の理由を必ず 1 行出す。
 - `run-verify.sh` では既定で有効にする。無効が既定だと #168 と同じ見落としが起きる。scaffold 先でも CI と同じ基準なので、新しい種類の失敗は増えない。
 
 ## Acceptance criteria
 
 - [ ] AC-1: feature branch の途中の commit に secret 風の文字列があり、後の commit で消してあっても、`./scripts/secret-scan-branch.sh` は exit 1 になる(履歴を読むことの確認)
 - [ ] AC-2: 問題のない feature branch では exit 0。base branch 上、base の ref がない、merge-base が取れない、range が空、git の外、では理由を 1 行出して exit 0
+- [ ] AC-2b: `--strict` では、scanner がない、git の作業ツリーでない、base の ref がどちらもない、merge-base が取れない、のいずれも exit 3 で理由を出す。range が空の場合と base branch 上は strict でも exit 0
+- [ ] AC-2c: allowlist は HEAD にコミット済みの `.gitallowed` だけが効く。作業ツリーで未コミットの行を足しても、`RALPH_SECRET_ALLOWLIST` で別のファイルを指しても検出は消えず、無視した旨が 1 行出る。コミットすれば効く
 - [ ] AC-3: `origin/<base>` があればそれを、なければローカルの `<base>` を使う。`GITHUB_BASE_REF` があればそれを base にする
 - [ ] AC-4: `./scripts/run-verify.sh` は、`static` / `all` のとき branch scan を実行し、検出したら非 0 で終わる。`test` のときは実行しない。`RALPH_VERIFY_SKIP_BRANCH_SECRET_SCAN=1` で飛ばせ、その旨を出力する。docs だけの変更の判定や既存の出力は変わらない
 - [ ] AC-5: `.gitallowed` に、scanner のパターンに自分自身が一致する行を足した commit を含む branch は exit 1 になり、案内文が書き方の注意を示す。括弧式で書いた行なら exit 0
-- [ ] AC-6: `/pr` の Pre-checks に branch scan が入り、skill の 4 面が一致する(`check-skill-sync.sh` / `check-sync.sh` / `check-template-purity.sh` が通る)
+- [ ] AC-6: `/pr` の Steps の「コミットの後、push の直前」に strict な branch scan が入り、exit 0 以外では push しないと明記され、skill の 4 面が一致する(`check-skill-sync.sh` / `check-sync.sh` / `check-template-purity.sh` が通る)
 - [ ] AC-7: `scripts/` と `templates/base/scripts/` の該当ファイルが同一で、`check-template.sh` の必須一覧に新しいスクリプトが入っている。scaffold / upgrade の Go テストが通る
 - [ ] AC-8: `./scripts/run-verify.sh` と `./scripts/run-test.sh` が green。PR 本文に `Closes #169`
 
@@ -66,7 +69,7 @@ CI と同じ「branch の履歴込みの secret scan」を、push の前にロ�
 
 1. Slice A: `secret-scan-branch.sh` とテスト(AC-1〜AC-3、AC-5)。template へのコピーと必須一覧(AC-7)
 2. Slice B: `run-verify.sh` への組み込みとテスト(AC-4)、scanner の案内文(AC-5 の後半)
-3. Slice C: `/pr` の Pre-checks(4 面)と `quality-gates.md` などの文書(AC-6)
+3. Slice C: `/pr` の Steps(push の直前、4 面)と `quality-gates.md` などの文書(AC-6)
 
 ## Verify plan
 
@@ -80,7 +83,7 @@ CI と同じ「branch の履歴込みの secret scan」を、push の前にロ�
 - Unit tests: 一時 repo を作る shell テスト。検出あり(途中の commit、後で削除)、問題なし、base branch 上、origin なし(ローカルの base に fallback)、base がどちらもない、range が空、`GITHUB_BASE_REF`、git の外、`.gitallowed` の自己一致と括弧式
 - Integration tests: `run-verify.sh` の 3 つの mode と環境変数での skip。検出時の exit code
 - Regression tests: 既存の `tests/test-secret-scan.sh`、`run-verify.sh` を使う既存のテスト、scaffold / upgrade の Go テスト
-- Edge cases: detached HEAD、base と同じ commit にいる feature branch(range が空)、`RALPH_XREVIEW_BASE` の上書き、空白を含むパス
+- Edge cases: strict での各「scan できない」条件、未コミットの allowlist と環境変数の上書き、detached HEAD、base と同じ commit にいる feature branch(range が空)、`RALPH_XREVIEW_BASE` の上書き、空白を含むパス
 - Evidence to capture: `./scripts/run-test.sh` の出力
 
 ## Risks and mitigations
@@ -104,7 +107,7 @@ CI と同じ「branch の履歴込みの secret scan」を、push の前にロ�
 
 ## Progress checklist
 
-- [ ] Plan reviewed
+- [x] Plan reviewed
 - [x] Branch created
 - [ ] Implementation started
 - [ ] Review artifact created
@@ -117,4 +120,4 @@ CI と同じ「branch の履歴込みの secret scan」を、push の前にロ�
 - [x] 現状の配線を確認した(CI の step、hook 群、`run-verify.sh`、template のコピー、既存の range のテスト)
 - [x] critical fork なし
 - [x] AC は一時 repo を使う shell テストで決定的に確認できる
-- [ ] Codex plan advisory
+- [x] Codex plan advisory(2 件、対応案で plan を更新)
