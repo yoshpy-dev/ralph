@@ -80,3 +80,66 @@ No rule/skill/recipe/spec file was touched by this branch (`git diff main...HEAD
 ## Verdict
 
 **Pass.** AC-1 through AC-6 are fully met with evidence-backed, non-hardcoded tests (calibrated against real call counts, not magic numbers) at the exact deciding sites named in the plan. AC-7's static half (compiles, `gofmt`/`go vet` clean, non-goals held) is met; its test-execution and PR-body halves are correctly deferred to `/test` and `/pr`. Static analysis is clean across the shell/JSON/skill-sync/template-purity/Go gates. One documentation drift item was found (Stop's new 8 s bound is undocumented) and is already correctly queued for `/sync-docs`, not blocking this verdict.
+
+## Cycle 2 (2026-09-20)
+
+- Scope: spec compliance + static analysis for `git diff main...HEAD` at `b1777d0` (branch `fix/codex-model-observation-followups`). This section supersedes the cycle-1 section above for "current AC status" purposes; the cycle-1 section is left unedited as a point-in-time artifact, per this repo's convention for prior-cycle reports.
+- Delta since the cycle-1 report (`638db39`): `4300307` (tester, five new tests, no production change), `7c95d3f` (doc-maintainer, one clause added identically to 8 doc copies), `e5c0aed`/`0f379da` (cycle-1 cross-review: 1 ACTION_REQUIRED, test-only), `5e239b0` (AR-1 fix: generous scan budgets for tests that must find a record), `bb1e79b`/`84b3387` (cycle-2 self-review: 1 HIGH + 3 LOW), `711cd9d`/`a1afc0c` (cycle-2 self-review fixes).
+- Production code since `638db39`: `git diff 638db39..HEAD --stat -- internal/org/*.go ':!internal/org/*_test.go'` shows only `internal/org/verbs.go`, +13/-13, comment text only (confirmed by reading the full diff — both doc-comment enumerations gained "a receipts-file read failure" as a listed branch; no logic line changed). No other production file differs from `638db39`.
+
+### Per-AC status at HEAD
+
+| AC | Status | Evidence |
+| --- | --- | --- |
+| AC-1 | Met (unchanged from cycle 1, line-shifted) | `TestOrgStop_Codex_RecoversCommandedModelAfterInterruptedRetryRejected` (`internal/org/verbs_test.go:1693`). The only change since `638db39` is one added line setting `o.CodexModelObserveTimeout = testCodexObserveGenerousBudget` (the AR-1 fix, since this test's only `Spawn` call is the rejected retry, which fails envelope validation before reaching the observer — only Stop's own observation is at stake); the assertions are byte-identical. `codexSpawnCorrelation` (`verbs.go` ~745-800, unmoved) still builds `CommandedModel`/`Driver`/`Role` only from the latest non-dry-run `spawn_started`. |
+| AC-2 | Met (unchanged, line-shifted) | Forward case `TestOrgStop_Codex_ObservesWhenRejectedRetryUsedADifferentDriver` (`verbs_test.go:1759`), reverse case `TestOrgStop_Codex_NoObservationWhenLaunchedSpawnWasClaude_DespiteRejectedCodexRetry` (`verbs_test.go:1817`) — same one-line generous-budget addition, same assertions. `isCodexSpawn` still comes from `corr.Driver`, not `seat.Driver`. |
+| AC-3 | Met (unchanged, line-shifted) | `TestObserveCodexEffectiveModel_AlreadyDoneCtx_NotFoundDespiteMatchingRecord` (`internal/org/codex_session_test.go:143`, same line as cycle 1 — `codex_session_test.go` was not touched by any commit since `638db39`). |
+| AC-4 | Met (unchanged, line-shifted) | `TestObserveCodexEffectiveModel_CtxDoneBeforeSecondCandidate_SecondFileNeverOpened` (`codex_session_test.go:211`, shifted +33 lines by the tester's earlier insertions, content unchanged). |
+| AC-4b | Met (unchanged, line-shifted; one new test strengthens it further) | Collection cut-short: `TestObserveCodexEffectiveModel_CtxDoneDuringCandidateCollection_NotFound` (`:291`), pinned by `TestCodexRolloutCandidates_PerDateDirectoryCheckIsPinned_AlreadyDoneCtx` (`:333`) and `TestCodexRolloutCandidates_PerEntryCheckIsPinned_CtxDoneAtLastDirectory` (`:364`). Before-open: `TestScanRolloutRecord_BeforeOpenCheckIsPinned_AlreadyDoneCtx` (`:401`). Mid-line cut-short: `TestObserveCodexEffectiveModel_CtxDoneMidFileRead_NotFoundEvenThoughRecordWouldMatch` (`:419`). Completed-pass-survives-expired-ctx: `TestObserveCodexEffectiveModel_CtxExhaustedExactlyAsPassCompletes_FoundStillReturned` (`:461`). New in this delta (tester, `4300307`): `TestObserveCodexEffectiveModel_NoCtxCheckAfterCandidateLoopCompletes` (`:511`) — asserts there is no stray `ctx.Err()` check between the candidate loop and the final match, by summing `codexRolloutCandidates`'s and `scanRolloutRecord`'s own call counts directly rather than calibrating through `ObserveCodexEffectiveModel` itself (avoids the self-calibration blind spot the self-review's Positive notes call out). |
+| AC-5 | Met (unchanged, line-shifted) | `TestObserveCodexSpawnReceipt_CtxDone_DistinctReason` (`spawn_test.go:2369`), `TestOrgSpawn_Codex_ObservationBudgetExhaustedMidPass_UnknownNotFoundReason` (`:2470`), `TestOrgSpawn_Codex_ParentCtxCancelledFirst_UnknownCutShortReason` (`:2502`). The read-error reason path — previously only covered by reading, per cycle-1's report — now has its own dedicated regression test, `TestOrgSpawn_Codex_ModelObservation_ReadError_DistinctReason` (`:2311`), fixed in this delta from a flaky 1ms budget (cross-review AR-1's sibling gap, self-review C2-H1) to an explicit 200ms budget (`:2336`, widened from an initial 50ms by `a1afc0c` per the commit's own reasoning) — confirmed via the classification-rule comment at `:220-241`, which now names this as a third category ("a pass must complete, but the budget must still run out quickly"). Two more regression tests added in this delta cover adjacent read-error/ctx interactions: `TestObserveCodexSpawnReceipt_ReadErrorClearedByLaterCleanPass` (`:2415`) and `TestOrgSpawn_Codex_ParentCtxCancelledAfterReadError_CutShortStillWins` (`:2541`). |
+| AC-6 | Met (unchanged, line-shifted) | `TestOrgStop_Codex_ObservationCutShort_NothingAppendedStopStillSucceeds` (`verbs_test.go:2467`). `observeStopModelReceipt` still derives `obsCtx` from `context.WithTimeout(context.Background(), o.codexModelObserveTimeout())` — unchanged in this delta (only its doc-comment enumeration gained the receipts-read-failure item, `verbs.go:915-921`). New in this delta: `TestOrgStop_LegacySpawnedEvent_NoSpawnStarted_NoModelObservedToken` (`verbs_test.go:1110`) closes a cycle-1 coverage gap (a seat with a legacy `spawned` event and no `spawn_started` at all gets no `model_observed=` token). |
+| AC-7 | Partially met (static half only, unchanged verdict) | Compiles (`go vet` clean), `gofmt` clean, non-goals held (below). Per the task assignment, the plan's own AC-1..AC-7 checkboxes are still `[ ]` at HEAD (self-review's C2-L3) — this table is the verdict the team lead asked me to hand back so the checkboxes can be ticked from it; I have not edited the plan. Test-execution and `Closes #173` halves remain out of `/verify` scope. |
+
+### Static analysis (re-run at b1777d0)
+
+| Command | Result |
+| --- | --- |
+| `./scripts/run-static-verify.sh` | OK (exit 0). Evidence: `docs/evidence/verify-2026-09-20-114027.log` |
+| `gofmt -l internal/org internal/cli` | OK (no output) |
+| `go vet ./internal/org/... ./internal/cli/...` | OK (no output) |
+| `./scripts/check-skill-sync.sh` | OK — `13 skill(s) in lock-step` |
+| `./scripts/check-sync.sh` | OK — `IDENTICAL: 158, DRIFTED: 0, ROOT_ONLY: 0, TEMPLATE_ONLY: 11, KNOWN_DIFF: 5` (same 5 pre-existing known diffs as cycle 1, including `model-routing.md`) |
+| `./scripts/check-template-purity.sh` | OK — no meta-repo-specific references in templates |
+
+### Documentation drift (the new clause, re-checked against code)
+
+The clause added by `7c95d3f` — "(that single look is itself bounded by the same up-to-8s budget as spawn's poll)" / recipe's "(bounded by the same [budget]...)" / skill's "spawn と同じ最大 8 秒の上限でもう一度" — is accurate at HEAD:
+
+- `observeStopModelReceipt` derives `obsCtx, cancel := context.WithTimeout(context.Background(), o.codexModelObserveTimeout())` (`verbs.go:960-961`), the same `o.codexModelObserveTimeout()` helper Spawn's own poll uses (`spawn.go:1099`), both falling back to `defaultCodexModelObserveTimeout = 8 * time.Second` (`spawn.go:33`) when unset — "the same … budget" is literally the same constant/config field, not merely the same default value.
+- "bounded" matches the code's cooperative-cancellation contract exactly (checked before/during candidate collection, before opening, per line — `codex_session.go:274,283,425,450`), the same caveat the pre-existing "looks for up to 8 s" sentence about Spawn already approximates.
+- Confirmed present and textually consistent (not merely both non-empty) across all 8 copies: `.claude/rules/ralph/model-routing.md:112` and `templates/base/.claude/rules/ralph/model-routing.md:107-108` (the only diff between the two is pre-existing meta-repo-path stripping two sentences earlier, unrelated to this clause — confirmed via `diff`); `docs/recipes/codex-seat-permissions.md:122` and its `templates/base/` copy — byte-identical (`cmp`, exit 0); all 4 `org/SKILL.md` mirrors (`.claude/skills/`, `.agents/skills/`, and both `templates/base/` copies) — byte-identical (`cmp`, exit 0).
+- Stop has no outer `--timeout-ms`-equivalent bound of its own (`context.Background()` is the parent, `verbs.go:961`) — the clause correctly does not claim otherwise; it names only the observation's own budget, matching the sentence's careful "that single look is itself bounded", not "Stop is bounded".
+
+**Nothing else went stale.** The test-only and comment-only changes since the cycle-1 report touch no operator-facing behavior, so no other doc passage needed re-checking; I re-read the same 8 files' surrounding paragraphs anyway (unchanged except the one clause) and found no other drift. `docs/tech-debt/README.md`: still no row mentions AR-3/AR-4/#173/C2-H1/C2-L1/C2-L2 (grep empty); the pre-existing codex-observer row (line 134) is untouched.
+
+### Non-goals (re-checked at b1777d0)
+
+- Schemas: `git diff main...HEAD -- internal/org/receipts.go internal/org/manifest.go internal/org/seat.go` is empty.
+- `internal/cli/`: `git diff main...HEAD --stat -- internal/cli` shows only `internal/cli/org_test.go` (+46 lines, test-only — the per-test `setCodexModelObserveTimeoutOverride` calls the AR-1 fix added to the CLI's own codex-warning tests). No production `internal/cli` file differs from `main`. The seam it uses (`orgCodexModelObserveTimeoutOverride`, `internal/cli/org.go:158`) predates this branch entirely — introduced in `d2bf6e4`, already on `main` (confirmed via `git merge-base --is-ancestor d2bf6e4 main`).
+- `internal/insights/`: diff stat empty.
+- `internal/config/` (no new `ralph.toml` key): diff stat empty.
+- The observer still reads no wall clock and has no leftover test-injection artifact: `grep -n 'time.Now()' internal/org/codex_session.go` and `grep -n 'time.Sleep' internal/org/codex_session.go` both return no match (the self-review's cycle-2 `time.Sleep(N)`-at-top-of-`scanRolloutRecord` injection technique, used to demonstrate C2-H1/C2-L2, was a throwaway `git archive` copy under the scratchpad, not applied to the real worktree — confirmed clean here).
+
+### Privacy (re-checked at b1777d0)
+
+Unchanged since cycle 1. The only production diff (`verbs.go`, comment-only) adds no new field or code path — `receipt.Reason`/`Details` assignment sites are identical to cycle 1's read. Re-confirmed: `codexNotFoundReason`/`codexReadErrorReason`/`codexCutShortReason` (`spawn.go:1156-1158`) are unchanged static strings; `observeStopModelReceipt` still discards the observer's own error outright (`verbs.go:962`, unmoved in substance).
+
+### What remains unverified
+
+- Same as cycle 1: test execution (including the five new tester-added tests and the two cycle-2 self-review fix commits' own tests) and the `Closes #173` PR-body text are out of `/verify` scope — hand to `/test` and `/pr`.
+- I did not independently re-run the self-review's cycle-2 scan-latency injection (`time.Sleep(N)` at the top of `scanRolloutRecord`) that demonstrated C2-H1/C2-L2 — I relied on reading the fixed test bodies (the explicit 200ms budget, the deterministic-pin comment) rather than re-injecting latency myself, consistent with this skill's no-`go test` scope.
+- C2-L3 (plan AC checkboxes) is intentionally left for the team lead to apply from this report's per-AC table, per the task assignment — not edited by me.
+
+### Verdict (cycle 2)
+
+**Pass.** All of AC-1 through AC-6 remain fully met at `b1777d0`, with the same tests (mostly line-shifted, one HIGH-severity flake closed with a dedicated new test) proving each AC's exact deciding site. AC-7's static half remains met. The one production change since cycle 1 (`verbs.go`, `711cd9d`) is comment-only and improves accuracy (adds the missing receipts-read-failure branch to both doc-comment enumerations, closing self-review C2-L1). The new documentation clause across all 8 copies is accurate, consistent, and closes the drift item raised in the cycle-1 section. No new drift found. This is the last pipeline cycle under the cap; nothing here blocks proceeding.
