@@ -10,6 +10,7 @@
 - Cycle: 1/2
 - Total reviewer findings: 1
 - After triage: ACTION_REQUIRED=1, WORTH_CONSIDERING=0, DISMISSED=0
+- User decision (2026-09-20, AskUserQuestion): fix AR-1 and re-run the full pipeline as cycle 2/2
 
 ## Triage context
 
