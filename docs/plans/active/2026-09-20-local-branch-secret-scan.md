@@ -105,11 +105,14 @@ CI と同じ「branch の履歴込みの secret scan」を、push の前にロ�
 
 ## Deviation notes
 
+- 2026-09-21 work: Slice A(2ca73aa)、B(335dddf)、C(d4b9336)は implementer に委譲。A: `scripts/secret-scan-branch.sh`(base の解決、merge-base..HEAD の scan、既定は skip で exit 0、`--strict` は「scan できない」で exit 3、allowlist は HEAD にコミット済みの `.gitallowed` だけ)とテスト 44 件。「base branch 上」と「range が空」の判定は scanner の有無の確認より前に置いた(strict でも exit 0 にするため)。template へのコピー、`check-template.sh` の必須一覧、`internal/scaffold/embed_test.go` の必須スクリプトの一覧に追加。B: `run-verify.sh` が `static` / `all` で branch scan を実行(`ran_any` には数えない、環境変数で skip、スクリプトがなければ 1 行出して続行)、scanner の案内文に `.gitallowed` の書き方を 3 行。テスト 21 件。テストは CI の `GITHUB_BASE_REF` と `run-test.sh` が export する `RALPH_VERIFY_SCOPE` を継承しないよう、入れ子の実行の前に固定する。C: `/pr` の Steps に strict な scan(コミットの後・push の直前)を追加して以降の番号を振り直し、既存の誤り(Step 1 が archival を Step 6 と書いていた)も直した。`quality-gates.md`(template 側は issue 番号を書かない)、AGENTS.md の scripts の説明。逸脱: 自己一致する allowlist の行のテストは、2 コミットの形にした(HEAD の `.gitallowed` がその行を含む間は、その行自体が許可されるため。後のコミットで行が変わると過去の追加行が検出される: PR #168 と同じ形)
+- 2026-09-21 work: orchestrator が HEAD 一致・porcelain 空・スクリプト全文と差分を確認。`/pr` は PR 作成後にも push する(plan の確定とアーカイブ)ので、「以降の push の前にも毎回実行する」の 1 文を skill の 4 面に追記(eda0248)。新しいテスト 2 本と、この branch 自身への `--strict` の実行が pass
+
 ## Progress checklist
 
 - [x] Plan reviewed
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
