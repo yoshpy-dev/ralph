@@ -920,7 +920,18 @@ func (o *Org) observeStopModelReceipt(orgID, seatID string) (receipt Receipt, ob
 	// session that started well after corr.StartedAt (e.g. a codex
 	// model-retirement dialog answered days later; see
 	// codexSessionDateDirs's own doc comment).
-	obs, _ := ObserveCodexEffectiveModel(o.codexSessionsDir(), corr.PromptPath, corr.StartedAt, o.nowTime())
+	//
+	// The single observation is bounded by the same budget Spawn's own
+	// poll uses (o.codexModelObserveTimeout(), AR-4) -- Stop has no ctx of
+	// its own (every other driver call in Stop uses context.Background()
+	// too), so a sessions directory large enough to make one pass slow
+	// cannot make Stop itself hang: a cut-short pass here returns
+	// not-found, same as a genuine miss (see ObserveCodexEffectiveModel's
+	// own doc comment) -- observed stays false, and the caller (Stop)
+	// appends nothing.
+	obsCtx, cancel := context.WithTimeout(context.Background(), o.codexModelObserveTimeout())
+	defer cancel()
+	obs, _ := ObserveCodexEffectiveModel(obsCtx, o.codexSessionsDir(), corr.PromptPath, corr.StartedAt, o.nowTime())
 	if obs.Status != CodexObservationFound {
 		return Receipt{}, false, true
 	}

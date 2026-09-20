@@ -2338,6 +2338,68 @@ func TestObserveCodexSpawnReceipt_CtxDone_DistinctReason(t *testing.T) {
 	}
 }
 
+// TestOrgSpawn_Codex_ObservationBudgetExhaustedMidPass_UnknownNotFoundReason
+// is AC-5's first clause, driven through the full Spawn saga (AR-4,
+// docs/reports/cross-review-triage-codex-effective-model-receipt.md): a
+// genuinely qualifying fixture exists on disk, but the observation's own
+// budget (o.codexModelObserveTimeout(), not Spawn's --timeout-ms) is
+// exhausted before any pass can complete -- o.CodexModelObserveTimeout set
+// to a single nanosecond means obsCtx is already done by the time the
+// observer's own first ctx.Err() check runs (inside candidate collection),
+// so this is deterministic without any real sleeping. The result must
+// still be codexNotFoundReason (this function's own budget, not the
+// parent ctx) despite the fixture's existence.
+func TestOrgSpawn_Codex_ObservationBudgetExhaustedMidPass_UnknownNotFoundReason(t *testing.T) {
+	o, _, _ := codexGuardedOrg(t, "implementer")
+	p := mustCodexSpawnParams("org-a", "seat-1")
+
+	promptPath, err := o.promptFilePath(p.OrgID, p.SeatID)
+	if err != nil {
+		t.Fatalf("promptFilePath: %v", err)
+	}
+	writeQualifyingCodexFixture(t, o.CodexSessionsDir, promptPath, time.Now().Add(time.Second), "gpt-5-codex")
+	o.CodexModelObserveTimeout = time.Nanosecond
+
+	result := o.Spawn(p)
+	if result.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("expected spawned, got %+v", result)
+	}
+	if result.ModelReceipt.Honored != HonoredUnknown || result.ModelReceipt.ReportedEffectiveModel != "" {
+		t.Fatalf("expected an unknown receipt with no reported model despite a qualifying fixture existing, got %+v", result.ModelReceipt)
+	}
+	if !strings.Contains(result.ModelReceipt.Reason, "no codex session record") {
+		t.Fatalf("expected the not-found reason text (the observation budget ran out, not the parent ctx), got %q", result.ModelReceipt.Reason)
+	}
+}
+
+// TestOrgSpawn_Codex_ParentCtxCancelledFirst_UnknownCutShortReason is AC-5's
+// second clause, driven through the full Spawn saga: this function's own
+// observation budget is comparatively generous, but Spawn's own
+// --timeout-ms (p.TimeoutMS, 1ms here) is what has already elapsed by the
+// time the observation step runs -- deterministic given the manifest
+// writes and locking every earlier saga step performs, without any real
+// sleeping in this test itself. codexCutShortReason (the parent ctx),
+// never codexNotFoundReason (this function's own budget), must be
+// reported.
+func TestOrgSpawn_Codex_ParentCtxCancelledFirst_UnknownCutShortReason(t *testing.T) {
+	o, _, _ := codexGuardedOrg(t, "implementer")
+	o.CodexModelObserveTimeout = time.Second
+	o.CodexModelObserveInterval = 500 * time.Millisecond
+	p := mustCodexSpawnParams("org-a", "seat-1")
+	p.TimeoutMS = 1
+
+	result := o.Spawn(p)
+	if result.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("expected spawned, got %+v", result)
+	}
+	if result.ModelReceipt.Honored != HonoredUnknown || result.ModelReceipt.ReportedEffectiveModel != "" {
+		t.Fatalf("expected an unknown receipt with no reported model, got %+v", result.ModelReceipt)
+	}
+	if result.ModelReceipt.Reason != codexCutShortReason {
+		t.Fatalf("expected reason %q (the PARENT ctx, Spawn's own --timeout-ms, cut this short), got %q", codexCutShortReason, result.ModelReceipt.Reason)
+	}
+}
+
 // TestOrgSpawn_Codex_ModelObservation_Ambiguous is AC-2b's sibling: two
 // records both qualify (same promptPath, both age-eligible), so the poll
 // ends at once with an unknown receipt naming neither model -- never a

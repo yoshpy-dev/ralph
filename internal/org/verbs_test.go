@@ -2372,3 +2372,47 @@ func TestOrgStop_Codex_ReceiptsAppendFailureLeavesStopSuccessful(t *testing.T) {
 	last := mrr.Events[len(mrr.Events)-1]
 	assertDetailsContains(t, last.Details, "model_observed=none")
 }
+
+// TestOrgStop_Codex_ObservationCutShort_NothingAppendedStopStillSucceeds is
+// AC-6 (AR-4, docs/reports/cross-review-triage-codex-effective-model-receipt.md):
+// Stop's own single observation is now bounded by the same
+// o.codexModelObserveTimeout() budget Spawn's poll uses. A genuinely
+// qualifying fixture exists on disk, but the budget is exhausted (pinned
+// to a single nanosecond, so obsCtx is already done by the observer's own
+// first ctx.Err() check -- deterministic, no real sleeping) before any
+// pass can complete: Stop must append no receipt, record
+// model_observed=none (the same token an ordinary not-found gets), and
+// still succeed.
+func TestOrgStop_Codex_ObservationCutShort_NothingAppendedStopStillSucceeds(t *testing.T) {
+	o, _, _ := codexGuardedOrg(t, "implementer")
+	p := mustCodexSpawnParams("org-a", "seat-1")
+	if r := o.Spawn(p); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", r)
+	}
+
+	promptPath, err := o.promptFilePath(p.OrgID, p.SeatID)
+	if err != nil {
+		t.Fatalf("promptFilePath: %v", err)
+	}
+	writeQualifyingCodexFixture(t, o.CodexSessionsDir, promptPath, time.Now().Add(time.Second), "gpt-5-codex")
+
+	// Only affects Stop's own observation below -- Spawn's poll above
+	// already ran (and found nothing, honored=unknown) under testOrg's own
+	// tiny-but-workable default timeout.
+	o.CodexModelObserveTimeout = time.Nanosecond
+
+	result := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-1"})
+	if result.Err != nil {
+		t.Fatalf("expected Stop to succeed despite the observation being cut short, got %v", result.Err)
+	}
+	if result.ModelReceipt != (Receipt{}) {
+		t.Fatalf("expected no receipt appended when the observation is cut short, got %+v", result.ModelReceipt)
+	}
+
+	mrr2, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	last2 := mrr2.Events[len(mrr2.Events)-1]
+	assertDetailsContains(t, last2.Details, "model_observed=none")
+}
