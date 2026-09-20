@@ -12,6 +12,7 @@
 - After triage: ACTION_REQUIRED=2, WORTH_CONSIDERING=0, DISMISSED=0
 - Note: the summary line reflects cycle 2 (current state): two NEW findings, AR-3 and AR-4. Cycle 1 was also ACTION_REQUIRED=2 (AR-1, AR-2); both were fixed in d24a030 (rows kept below as history, marked resolved) and the reviewer did not raise them again in cycle 2.
 - User decision (2026-09-20, AskUserQuestion): fix both findings (AR-1, AR-2) and re-run the full pipeline as cycle 2/2
+- User decision at the cap (2026-09-20, AskUserQuestion, cycle 2): create the PR and fix AR-3 and AR-4 in a follow-up issue (#173); both are listed as known gaps in the PR body
 
 ## Triage context
 
