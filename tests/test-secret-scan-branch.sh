@@ -138,11 +138,28 @@ assert_stderr_contains() {
   fi
 }
 
+assert_stderr_not_contains() {
+  _desc="$1"
+  _needle="$2"
+  if grep -F -- "$_needle" "$err_file" >/dev/null 2>&1; then
+    not_ok "$_desc (unexpectedly present in stderr: $_needle)"
+    printf '%s\n' "--- stderr ---"
+    cat "$err_file"
+  else
+    ok "$_desc"
+  fi
+}
+
+# assert_stderr_line_count -- counts lines that literally START WITH
+# _prefix (awk's index(), not a regex match, so a prefix containing regex
+# metacharacters is still matched literally) and defaults to 0 rather than
+# an empty string so `set -eu` cannot trip on a failed/empty command
+# substitution.
 assert_stderr_line_count() {
   _desc="$1"
   _prefix="$2"
   _want="$3"
-  _got="$(grep -c -- "$_prefix" "$err_file" 2>/dev/null || true)"
+  _got="$(awk -v p="$_prefix" 'index($0, p) == 1 { c++ } END { print c+0 }' "$err_file" 2>/dev/null)" || _got=0
   if [ "$_got" -eq "$_want" ]; then
     ok "$_desc"
   else
@@ -150,6 +167,19 @@ assert_stderr_line_count() {
     printf '%s\n' "--- stderr ---"
     cat "$err_file"
   fi
+}
+
+# assert_scanned_clean <desc> <base_ref> -- the literal phrase
+# "against <ref>: clean" appears ONLY in the success report line
+# (`scanned <a>..<b> against <ref>: clean`). A `cannot_scan` reason can
+# independently mention the ref name (e.g. "checked refs/remotes/origin/
+# <ref>"), so an assertion that only checks for the ref name, or only for
+# "clean" or "scanned" in isolation, can pass on a skip instead of a real
+# clean scan; this phrase together is what actually distinguishes them.
+assert_scanned_clean() {
+  _desc="$1"
+  _ref="$2"
+  assert_stderr_contains "$_desc" "against ${_ref}: clean"
 }
 
 git_repo() {
@@ -206,13 +236,16 @@ test_clean_branch() {
   )
   run "$repo"
   assert_exit "clean feature branch exits 0" 0
-  assert_stderr_contains "clean feature branch reports scanned+clean" "scanned"
-  assert_stderr_contains "clean feature branch reports clean verdict" "clean"
+  assert_scanned_clean "clean feature branch reports scanned+clean" "main"
   assert_stderr_line_count "clean feature branch prints exactly one status line" "secret-scan-branch:" 1
 }
 
 # ---------------------------------------------------------------------------
-# On the base branch itself, and an empty range: both exit 0 in both modes.
+# On the base branch itself, and an empty range: default mode exits 0 for
+# both (early-warning gate, never fails on an unscannable/empty state).
+# --strict now exits 3 for both (self-review cycle 1, M2): exit 0 under
+# --strict must mean exactly "scanned, clean", never "there was nothing to
+# look at".
 # ---------------------------------------------------------------------------
 test_on_base_branch_and_empty_range() {
   repo="$workdir/onbase"
@@ -229,7 +262,8 @@ test_on_base_branch_and_empty_range() {
   assert_stderr_contains "on base branch: reports nothing to scan" "nothing to scan"
   assert_stderr_line_count "on base branch: exactly one status line" "secret-scan-branch:" 1
   run "$repo" --strict
-  assert_exit "on base branch: strict mode exits 0" 0
+  assert_exit "on base branch: strict mode exits 3" 3
+  assert_stderr_contains "on base branch: strict mode keeps the same reason" "nothing to scan"
 
   (
     cd "$repo"
@@ -239,7 +273,65 @@ test_on_base_branch_and_empty_range() {
   assert_exit "empty range: default mode exits 0" 0
   assert_stderr_contains "empty range: reports nothing to scan" "nothing to scan"
   run "$repo" --strict
-  assert_exit "empty range: strict mode exits 0" 0
+  assert_exit "empty range: strict mode exits 3" 3
+  assert_stderr_contains "empty range: strict mode keeps the same reason" "nothing to scan"
+}
+
+# ---------------------------------------------------------------------------
+# self-review cycle 1 (M2): two ways an operator following the /pr skill
+# could previously reach a strict-mode exit 0 while the branch still carried
+# unpushed, fixture-carrying commits -- both must now exit 3.
+# ---------------------------------------------------------------------------
+test_strict_closes_base_override_bypass() {
+  repo="$workdir/strict-bypass-base-override"
+  git_repo "$repo"
+  (
+    cd "$repo"
+    git checkout -q -B main
+    printf 'clean\n' > README.md
+    git add README.md
+    git commit -q -m init
+    git checkout -q -b feature
+    token="$(printf 'ghp_%s' 'BYPASSbaseoverrideabcdefghijklm')"
+    printf 'deploy token %s\n' "$token" > leaked.txt
+    git add leaked.txt
+    git commit -q -m 'add leaked token'
+  )
+  # Pointing the base at the CURRENT branch's own name makes
+  # "HEAD is the base branch" fire even though feature carries an unpushed
+  # commit with a fixture: this used to exit 0 under --strict too.
+  run_with_xreview_base "$repo" feature
+  assert_exit "base-override bypass: default mode still exits 0" 0
+  run_with_xreview_base "$repo" feature --strict
+  assert_exit "base-override bypass: strict mode now exits 3" 3
+  assert_stderr_contains "base-override bypass: reason is HEAD is the base branch" "HEAD is the base branch"
+}
+
+test_strict_closes_local_base_fast_forward_bypass() {
+  repo="$workdir/strict-bypass-fast-forward"
+  git_repo "$repo"
+  (
+    cd "$repo"
+    git checkout -q -B main
+    printf 'clean\n' > README.md
+    git add README.md
+    git commit -q -m init
+    git checkout -q -b feature
+    token="$(printf 'ghp_%s' 'BYPASSfastforwardabcdefghijklmn')"
+    printf 'deploy token %s\n' "$token" > leaked.txt
+    git add leaked.txt
+    git commit -q -m 'add leaked token'
+    # No origin/main ref exists, so fast-forwarding the LOCAL main onto the
+    # feature tip makes the range empty (merge-base == HEAD) even though
+    # the branch still carries the fixture relative to where main actually
+    # was: this used to exit 0 under --strict too.
+    git branch -f main feature
+  )
+  run "$repo"
+  assert_exit "fast-forward bypass: default mode still exits 0" 0
+  run "$repo" --strict
+  assert_exit "fast-forward bypass: strict mode now exits 3" 3
+  assert_stderr_contains "fast-forward bypass: reason is no commits between" "no commits between"
 }
 
 # ---------------------------------------------------------------------------
@@ -290,7 +382,11 @@ test_origin_preference_and_fallback() {
   # preferred over local <base> (which would still find the secret).
   run "$repo"
   assert_exit "origin/<base> ref present: preferred over local, clean" 0
-  assert_stderr_contains "origin preference: report names origin/main" "origin/main"
+  # "origin/main" alone is not enough: a cannot_scan regression here would
+  # print "cannot scan, no base ref for 'main' (checked refs/remotes/
+  # origin/main and refs/heads/main)", which also contains "origin/main"
+  # and also exits 0 in default mode.
+  assert_scanned_clean "origin preference: report names origin/main" "origin/main"
 }
 
 # ---------------------------------------------------------------------------
@@ -417,6 +513,44 @@ test_cannot_scan_scanner_missing() {
 }
 
 # ---------------------------------------------------------------------------
+# self-review cycle 1 (LOW): only a scanner exit of 1 means "findings".
+# Any other non-zero exit (a scanner bug, a signal) is a scanner failure --
+# fail closed (the exit code still propagates and blocks the caller) but
+# say so accurately, instead of sending the operator looking for a leak
+# that does not exist. Uses a stub secret-scan.sh copied into a temp dir;
+# the repo's real scanner is never touched.
+# ---------------------------------------------------------------------------
+test_scanner_failure_is_not_findings() {
+  repo="$workdir/scanner-failure-repo"
+  git_repo "$repo"
+  (
+    cd "$repo"
+    git checkout -q -B main
+    printf 'clean\n' > README.md
+    git add README.md
+    git commit -q -m init
+    git checkout -q -b feature
+    printf 'change\n' >> README.md
+    git add README.md
+    git commit -q -m change
+  )
+
+  for rc in 2 130; do
+    copy_dir="$workdir/scanner-failure-copy-$rc"
+    mkdir -p "$copy_dir"
+    cp "$PROJECT_ROOT/scripts/secret-scan-branch.sh" "$copy_dir/secret-scan-branch.sh"
+    cp "$PROJECT_ROOT/scripts/xreview-helpers.sh" "$copy_dir/xreview-helpers.sh"
+    printf '#!/usr/bin/env sh\nexit %s\n' "$rc" > "$copy_dir/secret-scan.sh"
+    chmod +x "$copy_dir/secret-scan-branch.sh" "$copy_dir/secret-scan.sh"
+
+    run_bin "$copy_dir/secret-scan-branch.sh" "$repo"
+    assert_exit "scanner exit $rc: propagated as-is" "$rc"
+    assert_stderr_contains "scanner exit $rc: labeled a scanner failure, not findings" "scanner failed with exit $rc"
+    assert_stderr_not_contains "scanner exit $rc: never labeled findings" "findings"
+  done
+}
+
+# ---------------------------------------------------------------------------
 # AC-2c: only the .gitallowed committed at HEAD suppresses a finding.
 # ---------------------------------------------------------------------------
 test_allowlist_only_committed_at_head() {
@@ -460,6 +594,7 @@ test_allowlist_only_committed_at_head() {
   )
   run "$repo"
   assert_exit "AC-2c: committed allowlist suppresses the finding" 0
+  assert_scanned_clean "AC-2c: committed allowlist suppresses the finding" "main"
 }
 
 # ---------------------------------------------------------------------------
@@ -509,6 +644,7 @@ test_allowlist_self_match() {
   )
   run "$repo"
   assert_exit "AC-5: bracket-expression allowlist line is not a finding" 0
+  assert_scanned_clean "AC-5: bracket-expression allowlist line is not a finding" "main"
 }
 
 # ---------------------------------------------------------------------------
@@ -535,17 +671,21 @@ test_usage_and_space_path() {
   )
   run "$repo"
   assert_exit "repo path with a space: clean scan exits 0" 0
+  assert_scanned_clean "repo path with a space: clean scan exits 0" "main"
 }
 
 test_ac1_deleted_secret_still_found
 test_clean_branch
 test_on_base_branch_and_empty_range
+test_strict_closes_base_override_bypass
+test_strict_closes_local_base_fast_forward_bypass
 test_origin_preference_and_fallback
 test_base_override_reporting
 test_cannot_scan_no_base_ref
 test_cannot_scan_unrelated_histories
 test_cannot_scan_outside_repo
 test_cannot_scan_scanner_missing
+test_scanner_failure_is_not_findings
 test_allowlist_only_committed_at_head
 test_allowlist_self_match
 test_usage_and_space_path

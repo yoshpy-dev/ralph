@@ -209,14 +209,16 @@ scope_file=".harness/state/verify-scope"
   # instead of only after CI reads the pushed history. Runs in static and
   # all modes (not test mode, to keep run-test.sh behavioral-only); does
   # not count toward ran_any -- it is not a language verifier.
+  branch_scan_failed=0
   case "$HARNESS_VERIFY_MODE" in
     static|all)
-      if [ -n "${RALPH_VERIFY_SKIP_BRANCH_SECRET_SCAN:-}" ]; then
-        echo "==> Skipping branch secret scan (RALPH_VERIFY_SKIP_BRANCH_SECRET_SCAN set)"
+      if [ "${RALPH_VERIFY_SKIP_BRANCH_SECRET_SCAN:-}" = "1" ]; then
+        echo "==> Skipping branch secret scan (RALPH_VERIFY_SKIP_BRANCH_SECRET_SCAN=1)"
       elif [ -x ./scripts/secret-scan-branch.sh ]; then
         echo "==> Running branch secret scan"
         if ! ./scripts/secret-scan-branch.sh; then
           status=1
+          branch_scan_failed=1
         fi
       else
         echo "==> Branch secret scan skipped: ./scripts/secret-scan-branch.sh missing or not executable"
@@ -239,6 +241,16 @@ scope_file=".harness/state/verify-scope"
     else
       echo "==> Some verifiers failed."
     fi
+  fi
+
+  # branch_scan_failed is tracked separately from status: the docs_only=0
+  # arm above overwrites status with 2 ("no verifier for code-like
+  # changes"), which would otherwise erase the fact that the branch scan
+  # itself also failed. Print this unconditionally, independent of
+  # ran_any/docs_only, so a docs-only-looking run with a real finding never
+  # closes on a purely reassuring summary.
+  if [ "$branch_scan_failed" -eq 1 ]; then
+    echo "==> Branch secret scan failed: see \"secret-scan-branch:\" above."
   fi
 
   printf '%s' "$status" > "$status_file"

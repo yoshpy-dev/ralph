@@ -9,17 +9,23 @@
 # Usage: secret-scan-branch.sh [--strict]
 #
 # Exit codes:
-#   0  nothing to scan, or scanned and found nothing
+#   0  scanned and found nothing; in default mode, also nothing to scan or
+#      could not scan (see --strict below)
 #   1  scanned and found something
 #   2  usage error
-#   3  (--strict only) could not determine what to scan
+#   3  (--strict only) could not scan, or nothing to scan
 #
 # Default mode never fails on an unscannable state (no base ref, no
-# merge-base, ...): it is meant for run-verify.sh, an early-warning gate
-# that must not block on environment gaps such as a repo without a fetched
-# base branch. --strict is for a caller that needs a real answer before an
-# irreversible step (the /pr skill, right before push): "could not check"
-# (exit 3) is kept apart from "checked, clean" (exit 0).
+# merge-base, ...) or on a genuinely empty range: it is meant for
+# run-verify.sh, an early-warning gate that must not block on environment
+# gaps such as a repo without a fetched base branch. --strict is for a
+# caller that needs a real answer before an irreversible step (the /pr
+# skill, right before push), where exit 0 must mean exactly "scanned,
+# clean": both "could not scan" and "nothing to scan" (HEAD is the base
+# branch, or the base and HEAD have no commits between them -- either one
+# reachable by pointing the base at HEAD's own branch, or by fast-forwarding
+# a local base ref onto HEAD while origin/<base> is absent) exit 3, so a
+# caller cannot mistake "did not look" for "looked and it was clean".
 set -eu
 
 usage() {
@@ -49,29 +55,44 @@ cleanup() {
   [ -n "$tmp_allowlist" ] && rm -f "$tmp_allowlist"
   return 0
 }
-trap cleanup EXIT HUP INT TERM
+# POSIX sh resumes the script after a signal trap's action runs (a signal
+# trap is not a special early exit): without an explicit exit here, a
+# HUP/INT/TERM delivered mid-script would run its trap action and then fall
+# through to whatever command was next, instead of stopping. Exit with the
+# conventional 128+signum code so the EXIT trap (cleanup) still fires.
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 report() {
   printf 'secret-scan-branch: %s\n' "$1" >&2
 }
 
-# cannot_scan <reason> -- default mode: exit 0 with the reason (this scan is
-# an early-warning gate, not a hard requirement). --strict: exit 3, so a
-# caller that needs a real answer can tell "could not check" apart from a
-# clean scan.
-cannot_scan() {
-  report "cannot scan, $1"
+# report_and_exit <prefix> <reason> -- shared exit logic for both
+# "cannot scan" (could not determine what to scan) and "nothing to scan"
+# (determined there is genuinely nothing to look at): default mode never
+# fails on either (this scan is an early-warning gate, not a hard
+# requirement). --strict treats both as "not a clean scan" (exit 3), so a
+# caller that needs a real answer never confuses "did not look" with
+# "looked and it was clean" -- exit 0 under --strict means exactly
+# "scanned, clean".
+report_and_exit() {
+  report "$1, $2"
   if [ "$strict" -eq 1 ]; then
     exit 3
   fi
   exit 0
 }
 
-# nothing_to_scan <reason> -- always exit 0: there is genuinely nothing to
-# check (not "could not check"), so --strict does not change this.
+# cannot_scan <reason> -- see report_and_exit.
+cannot_scan() {
+  report_and_exit "cannot scan" "$1"
+}
+
+# nothing_to_scan <reason> -- see report_and_exit.
 nothing_to_scan() {
-  report "nothing to scan, $1"
-  exit 0
+  report_and_exit "nothing to scan" "$1"
 }
 
 if ! repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
@@ -148,6 +169,15 @@ if RALPH_SECRET_ALLOWLIST="$tmp_allowlist" "$scanner" --range "$merge_base..HEAD
   exit 0
 else
   scan_rc=$?
-  report "scanned ${base_short}..${head_short} against ${base_ref}: findings"
+  # Only exit 1 is "the scanner ran and found something" (secret-scan.sh's
+  # own contract). Any other non-zero exit (a usage error, a signal) is a
+  # scanner failure, not a finding -- fail closed (propagate the exit code
+  # so the caller still blocks) but say so accurately, instead of sending
+  # the operator looking for a leak that does not exist.
+  if [ "$scan_rc" -eq 1 ]; then
+    report "scanned ${base_short}..${head_short} against ${base_ref}: findings"
+  else
+    report "scanner failed with exit ${scan_rc} on ${merge_base}..HEAD"
+  fi
   exit "$scan_rc"
 fi

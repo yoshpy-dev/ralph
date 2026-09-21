@@ -55,10 +55,12 @@ SH
   printf '%s\n' "$_repo"
 }
 
-# run_verify <repo> <mode> [env=val ...] -- runs run-verify.sh from <repo>
+# run_verify <repo> <mode> [skip_value] -- runs run-verify.sh from <repo>
 # with a clean slate for GITHUB_BASE_REF/RALPH_XREVIEW_BASE (this suite's
 # own CI sets GITHUB_BASE_REF for real) and captures combined output +
-# exit code.
+# exit code. skip_value is assigned directly to
+# RALPH_VERIFY_SKIP_BRANCH_SECRET_SCAN (run-verify.sh only treats "1" as
+# "skip"; other test cases pass "0" or leave it unset via "").
 run_verify() {
   _repo="$1"
   _mode="$2"
@@ -153,7 +155,10 @@ test_mode_routing_clean() {
 
 # ---------------------------------------------------------------------------
 # A finding fails the run even when no language verifier ran (ran_any=0):
-# the "docs-only" summary must not paper over a real failure.
+# the "docs-only" summary alone is no longer the whole story -- self-review
+# cycle 1 (M1) found that a docs-only-looking run with a real finding used
+# to close on a purely reassuring summary. An explicit failure line must
+# now appear near the end regardless of ran_any/docs_only.
 # ---------------------------------------------------------------------------
 test_finding_fails_even_with_ran_any_zero() {
   repo="$(make_repo finding-fails)"
@@ -164,16 +169,17 @@ test_finding_fails_even_with_ran_any_zero() {
   assert_contains "finding: reports the branch scan ran" "Running branch secret scan"
   assert_contains "finding: reports findings" "findings"
   # ran_any stays 0 (no language verifier, no verify.local.sh), so the
-  # generic "No language verifier ran" summary still prints -- but status
-  # was set independently by the branch scan, and it alone must still
-  # drive a non-zero exit (checked above).
+  # generic "No language verifier ran" summary still prints alongside the
+  # explicit failure line below -- both are true and both must appear.
   assert_contains "finding: the generic no-verifier-ran message still appears" "No language verifier ran"
+  assert_contains "finding: an explicit failure line appears despite the reassuring summary" "Branch secret scan failed"
 }
 
 # ---------------------------------------------------------------------------
 # A finding also fails the run when a language verifier DID run (ran_any=1):
 # the scan failure must still flip the overall verdict to "Some verifiers
-# failed", not get masked by an otherwise-passing language verifier.
+# failed", not get masked by an otherwise-passing language verifier, and
+# the explicit failure line appears here too.
 # ---------------------------------------------------------------------------
 test_finding_fails_with_ran_any_one() {
   repo="$(make_repo finding-fails-ran-any-one)"
@@ -194,19 +200,32 @@ SH
   assert_exit "finding with a passing language verifier: still exits non-zero" 1
   assert_contains "finding+ran_any=1: reports the branch scan ran" "Running branch secret scan"
   assert_contains "finding+ran_any=1: overall verdict says some verifiers failed" "Some verifiers failed"
+  assert_contains "finding+ran_any=1: explicit failure line also appears" "Branch secret scan failed"
 }
 
 # ---------------------------------------------------------------------------
-# RALPH_VERIFY_SKIP_BRANCH_SECRET_SCAN=1 skips the scan and says so.
+# self-review cycle 1 (LOW, D3): the skip variable must act only when it is
+# exactly "1" -- "0" and "true" must NOT skip (an unforgiving reading is the
+# safe direction for a leak gate).
 # ---------------------------------------------------------------------------
 test_skip_env_var() {
   repo="$(make_repo skip-env)"
   (cd "$repo" && git checkout -q -b feature && add_secret_commit)
 
   run_verify "$repo" static 1
-  assert_exit "skip env var: exits 0 despite the secret commit" 0
-  assert_contains "skip env var: reports the skip" "Skipping branch secret scan"
-  assert_not_contains "skip env var: does not run the scan" "Running branch secret scan"
+  assert_exit "skip env var =1: exits 0 despite the secret commit" 0
+  assert_contains "skip env var =1: reports the skip" "Skipping branch secret scan"
+  assert_not_contains "skip env var =1: does not run the scan" "Running branch secret scan"
+
+  run_verify "$repo" static 0
+  assert_exit "skip env var =0: does NOT skip, still fails" 1
+  assert_contains "skip env var =0: runs the scan" "Running branch secret scan"
+  assert_not_contains "skip env var =0: does not report a skip" "Skipping branch secret scan"
+
+  run_verify "$repo" static true
+  assert_exit "skip env var =true: does NOT skip, still fails" 1
+  assert_contains "skip env var =true: runs the scan" "Running branch secret scan"
+  assert_not_contains "skip env var =true: does not report a skip" "Skipping branch secret scan"
 }
 
 # ---------------------------------------------------------------------------
