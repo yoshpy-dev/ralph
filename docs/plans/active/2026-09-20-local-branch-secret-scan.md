@@ -108,13 +108,15 @@ CI と同じ「branch の履歴込みの secret scan」を、push の前にロ�
 - 2026-09-21 work: Slice A(2ca73aa)、B(335dddf)、C(d4b9336)は implementer に委譲。A: `scripts/secret-scan-branch.sh`(base の解決、merge-base..HEAD の scan、既定は skip で exit 0、`--strict` は「scan できない」で exit 3、allowlist は HEAD にコミット済みの `.gitallowed` だけ)とテスト 44 件。「base branch 上」と「range が空」の判定は scanner の有無の確認より前に置いた(strict でも exit 0 にするため)。template へのコピー、`check-template.sh` の必須一覧、`internal/scaffold/embed_test.go` の必須スクリプトの一覧に追加。B: `run-verify.sh` が `static` / `all` で branch scan を実行(`ran_any` には数えない、環境変数で skip、スクリプトがなければ 1 行出して続行)、scanner の案内文に `.gitallowed` の書き方を 3 行。テスト 21 件。テストは CI の `GITHUB_BASE_REF` と `run-test.sh` が export する `RALPH_VERIFY_SCOPE` を継承しないよう、入れ子の実行の前に固定する。C: `/pr` の Steps に strict な scan(コミットの後・push の直前)を追加して以降の番号を振り直し、既存の誤り(Step 1 が archival を Step 6 と書いていた)も直した。`quality-gates.md`(template 側は issue 番号を書かない)、AGENTS.md の scripts の説明。逸脱: 自己一致する allowlist の行のテストは、2 コミットの形にした(HEAD の `.gitallowed` がその行を含む間は、その行自体が許可されるため。後のコミットで行が変わると過去の追加行が検出される: PR #168 と同じ形)
 - 2026-09-21 work: orchestrator が HEAD 一致・porcelain 空・スクリプト全文と差分を確認。`/pr` は PR 作成後にも push する(plan の確定とアーカイブ)ので、「以降の push の前にも毎回実行する」の 1 文を skill の 4 面に追記(eda0248)。新しいテスト 2 本と、この branch 自身への `--strict` の実行が pass
 - 2026-09-21 self-review cycle 1(`docs/reports/self-review-2026-09-21-local-branch-secret-scan.md`、0d7b4d0): マージ可(MEDIUM を先に修正)、MEDIUM 2 / LOW 10。4 面の skill と scripts のコピーが byte 一致、fixture が実行時組み立て、linked worktree・detached HEAD・空白入りパスで動くことは確認された。全件を同 cycle 内で修正する。M1 branch scan だけが失敗し言語の verifier が 1 つも走らなかった場合、exit は非 0 なのに締めの行が「docs だけの変更」で終わる(テストもその挙動を固定し、コメントは逆のことを書いていた)。M2 strict の exit 0 が「scan して問題なし」と「scan するものがない」を兼ねていた → strict では後者も exit 3 にする(AC-2b と Scope 1 を改訂。当初の案は orchestrator の提案で、すり抜けの実証を受けて安全側に変更)。LOW: skip の環境変数は `1` のときだけ効かせる、scanner の exit 1 以外を `findings` と表示しない、signal の trap で exit する、exit 3 の説明、`xreview-helpers.sh` を必須一覧に追加、archive の手順に再 scan を明記、テストの理由行の固定と helper の修正、`quality-gates.md` の issue 番号
+- 2026-09-22 work: Slice D は implementer に委譲(3afac6e、15 ファイル)。self-review cycle 1 の 12 件を修正。`run-verify.sh` は scan の失敗を `branch_scan_failed` で持ち、`ran_any` に関係なく末尾に失敗行を出す。skip の環境変数は `1` のときだけ効く。`secret-scan-branch.sh` は strict で「scan するものがない」も exit 3(reviewer のすり抜け 2 通りをテストに追加)、scanner の exit 1 以外は「scanner failed with exit <rc>」と表示、signal の trap は exit する。`xreview-helpers.sh` を必須一覧に追加し、そのヘッダーの「/cross-review だけが使う」という記述を直した。`/pr` の skill は exit 0 の意味(scan して問題なし)と exit 3 の 2 つの場合を書き、archive の手順に「コミット、再 scan、push」を明記。テストは exit 0 の理由行(`against <ref>: clean`)を固定。修正前のスクリプトに戻すと、新旧のテストがそれぞれ 8 件落ちることを implementer が確認。逸脱: SIGINT はこの実行環境では再現できず(background の shell は INT を無視する)、TERM だけを実機で確認した(exit 143、一時ファイルは削除)。INT / HUP は同じ形の trap。orchestrator が HEAD 一致・porcelain 空・差分を確認
+- 2026-09-22 メモ: この Slice は handoff から完了まで約 30 時間かかったが、ファイルの更新時刻から見て実働は断続的な数十分で、間の空白(20 時間と 5 時間)はセッションが動いていなかった時間とみられる(原因は未確認)。固まったプロセスはなかった
 
 ## Progress checklist
 
 - [x] Plan reviewed
 - [x] Branch created
 - [x] Implementation started
-- [ ] Review artifact created
+- [x] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
