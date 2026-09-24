@@ -484,8 +484,8 @@ test_base_name_with_slash() {
 # passing the short base ref to merge-base picks the tag instead of the
 # base branch that was actually validated to exist.
 # ---------------------------------------------------------------------------
-test_ar2_tag_shadows_base_branch() {
-  repo="$workdir/ar2-tag-shadow"
+test_ac3b_tag_shadows_base_branch() {
+  repo="$workdir/ac3b-tag-shadow"
   git_repo "$repo"
   (
     cd "$repo"
@@ -525,8 +525,8 @@ test_ar2_tag_shadows_base_branch() {
 # the short base ref to merge-base picks the local branch instead of the
 # remote-tracking ref that was actually validated to exist.
 # ---------------------------------------------------------------------------
-test_ar2_local_branch_shadows_remote_tracking_ref() {
-  repo="$workdir/ar2-remote-shadow"
+test_ac3b_local_branch_shadows_remote_tracking_ref() {
+  repo="$workdir/ac3b-remote-shadow"
   git_repo "$repo"
   (
     cd "$repo"
@@ -789,8 +789,8 @@ test_allowlist_self_match() {
 # file content, so reading it as-is (rather than resolving the target)
 # would use that path string as a bogus allowlist rule.
 # ---------------------------------------------------------------------------
-test_ar1_symlinked_allowlist_resolves_target() {
-  repo="$workdir/ar1-symlink-resolves"
+test_ac2d_symlinked_allowlist_resolves_target() {
+  repo="$workdir/ac2d-symlink-resolves"
   git_repo "$repo"
   val="$(printf 'ABCDEFGHIJKLMNOPQRSTUVWXYZ%s' 'symlinkresolve01')"
   (
@@ -818,8 +818,8 @@ test_ar1_symlinked_allowlist_resolves_target() {
 # AC-2d: the same symlinked-allowlist layout, but the committed target
 # file does not have a rule matching the fixture: the finding stands.
 # ---------------------------------------------------------------------------
-test_ar1_symlinked_allowlist_denies_fixture() {
-  repo="$workdir/ar1-symlink-denies"
+test_ac2d_symlinked_allowlist_denies_fixture() {
+  repo="$workdir/ac2d-symlink-denies"
   git_repo "$repo"
   val="$(printf 'ABCDEFGHIJKLMNOPQRSTUVWXYZ%s' 'symlinkdenies02')"
   (
@@ -847,8 +847,8 @@ test_ar1_symlinked_allowlist_denies_fixture() {
 # notice, in both directions: a fixture is still found, and a clean branch
 # still reports clean.
 # ---------------------------------------------------------------------------
-test_ar1_symlinked_allowlist_dangling() {
-  repo="$workdir/ar1-symlink-dangling"
+test_ac2d_symlinked_allowlist_dangling() {
+  repo="$workdir/ac2d-symlink-dangling"
   git_repo "$repo"
   val="$(printf 'ABCDEFGHIJKLMNOPQRSTUVWXYZ%s' 'symlinkdangle03')"
   (
@@ -889,8 +889,8 @@ test_ar1_symlinked_allowlist_dangling() {
 # rule equal to the fixture value would then match it as a plain
 # substring and hide the leak.
 # ---------------------------------------------------------------------------
-test_ar1_symlinked_allowlist_target_name_not_used_as_regex() {
-  repo="$workdir/ar1-symlink-self-name"
+test_ac2d_symlinked_allowlist_target_name_not_used_as_regex() {
+  repo="$workdir/ac2d-symlink-self-name"
   git_repo "$repo"
   token="$(printf 'ghp_%s' 'SYMLINKSELFNAMEabcdefghijklmnop')"
   (
@@ -965,8 +965,8 @@ test_ls_tree_mode_check_is_root_relative() {
 # file, and a line from that listing could end up used as an allowlist
 # regex.
 # ---------------------------------------------------------------------------
-test_ar1_symlinked_allowlist_directory_target_rejected() {
-  repo="$workdir/ar1-symlink-dir-target"
+test_ac2d_symlinked_allowlist_directory_target_rejected() {
+  repo="$workdir/ac2d-symlink-dir-target"
   git_repo "$repo"
   token="$(printf 'ghp_%s' 'DIRTARGETabcdefghijklmnopqrstuv')"
   (
@@ -999,8 +999,8 @@ test_ar1_symlinked_allowlist_directory_target_rejected() {
 # recorded as ".", so the exact-path-match requirement already rejects
 # this on its own; this test pins that behavior.
 # ---------------------------------------------------------------------------
-test_ar1_symlinked_allowlist_dot_target_rejected() {
-  repo="$workdir/ar1-symlink-dot-target"
+test_ac2d_symlinked_allowlist_dot_target_rejected() {
+  repo="$workdir/ac2d-symlink-dot-target"
   git_repo "$repo"
   token="$(printf 'ghp_%s' 'DOTTARGETabcdefghijklmnopqrstuv')"
   (
@@ -1020,6 +1020,129 @@ test_ar1_symlinked_allowlist_dot_target_rejected() {
   run "$repo"
   assert_exit "symlink dot target: finding not suppressed" 1
   assert_stderr_contains "symlink dot target: could-not-read notice" "could not be read as a file"
+}
+
+# ---------------------------------------------------------------------------
+# Self-review cycle 2 (C2-M1 / coverage gap 1): a .gitallowed symlink
+# whose target names a directory WITHOUT a trailing slash. `git ls-tree
+# --full-tree HEAD -- rules` returns exactly one entry -- the directory's
+# own tree entry, recorded path "rules" -- so it passes both the
+# single-line check and the exact-path check; the mode case (040000 is
+# not 100644|100755) is the guard that actually rejects it. This test is
+# the one the self-review's mutation matrix showed missing: widening the
+# mode case to also accept 040000 must make it fail.
+# ---------------------------------------------------------------------------
+test_ac2d_symlinked_allowlist_bare_directory_target_rejected() {
+  repo="$workdir/ac2d-symlink-bare-dir"
+  git_repo "$repo"
+  token="$(printf 'ghp_%s' 'BAREDIRabcdefghijklmnopqrstuvwx')"
+  (
+    cd "$repo"
+    git checkout -q -B main
+    printf 'clean\n' > README.md
+    mkdir rules
+    printf 'irrelevant\n' > rules/deploy
+    git add README.md rules/deploy
+    git commit -q -m init
+
+    git checkout -q -b feature
+    printf 'deploy token %s\n' "$token" > secret.txt
+    # No trailing slash: `git ls-tree` resolves this to the directory's
+    # own single tree entry, not its children.
+    ln -s rules .gitallowed
+    git add secret.txt .gitallowed
+    git commit -q -m 'add fixture and a symlink targeting a bare directory'
+  )
+  run "$repo"
+  assert_exit "bare directory target: finding not suppressed" 1
+  assert_stderr_contains "bare directory target: could-not-read notice" "could not be read as a file"
+}
+
+# ---------------------------------------------------------------------------
+# Self-review cycle 2 (coverage gap 2): a symlink target that is an
+# ABSOLUTE path must be rejected by the script's own
+# allowlist_target_is_safe check, not merely by git's own pathspec
+# refusal for a path outside the repository.
+# ---------------------------------------------------------------------------
+test_ac2d_symlinked_allowlist_absolute_target_rejected() {
+  repo="$workdir/ac2d-symlink-absolute-target"
+  git_repo "$repo"
+  token="$(printf 'ghp_%s' 'ABSOLUTEabcdefghijklmnopqrstuvw')"
+  (
+    cd "$repo"
+    git checkout -q -B main
+    printf 'clean\n' > README.md
+    git add README.md
+    git commit -q -m init
+
+    git checkout -q -b feature
+    printf 'deploy token %s\n' "$token" > secret.txt
+    absolute_target="/$(printf 'scratch-%s' "$$")"
+    ln -s "$absolute_target" .gitallowed
+    git add secret.txt .gitallowed
+    git commit -q -m 'add fixture and an absolute-target symlink'
+  )
+  run "$repo"
+  assert_exit "absolute target: finding not suppressed" 1
+  assert_stderr_contains "absolute target: could-not-read notice" "could not be read as a file"
+}
+
+# ---------------------------------------------------------------------------
+# Self-review cycle 2 (coverage gap 2): a symlink target containing a
+# ".." path component must be rejected by allowlist_target_is_safe.
+# ---------------------------------------------------------------------------
+test_ac2d_symlinked_allowlist_dotdot_target_rejected() {
+  repo="$workdir/ac2d-symlink-dotdot-target"
+  git_repo "$repo"
+  token="$(printf 'ghp_%s' 'DOTDOTabcdefghijklmnopqrstuvwxy')"
+  (
+    cd "$repo"
+    git checkout -q -B main
+    printf 'clean\n' > README.md
+    git add README.md
+    git commit -q -m init
+
+    git checkout -q -b feature
+    printf 'deploy token %s\n' "$token" > secret.txt
+    dotdot_target="$(printf '..%sscratch-target' '/')"
+    ln -s "$dotdot_target" .gitallowed
+    git add secret.txt .gitallowed
+    git commit -q -m 'add fixture and a symlink target containing ..'
+  )
+  run "$repo"
+  assert_exit "dotdot target: finding not suppressed" 1
+  assert_stderr_contains "dotdot target: could-not-read notice" "could not be read as a file"
+}
+
+# ---------------------------------------------------------------------------
+# Self-review cycle 2 (C2-L2): a symlink target with a leading "./" must
+# be rejected by the script's own notice, not surface a raw git error.
+# Stripping "./" from ".//x" yields "/x" -- validating BEFORE stripping
+# would let this absolute path slip past allowlist_target_is_safe and
+# reach git as an out-of-repository pathspec instead.
+# ---------------------------------------------------------------------------
+test_ac2d_symlinked_allowlist_leading_dotslash_target_rejected() {
+  repo="$workdir/ac2d-symlink-dotslash-target"
+  git_repo "$repo"
+  token="$(printf 'ghp_%s' 'DOTSLASHabcdefghijklmnopqrstuvw')"
+  (
+    cd "$repo"
+    git checkout -q -B main
+    printf 'clean\n' > README.md
+    git add README.md
+    git commit -q -m init
+
+    git checkout -q -b feature
+    printf 'deploy token %s\n' "$token" > secret.txt
+    dotslash_target="$(printf './/%s' 'scratch-target')"
+    ln -s "$dotslash_target" .gitallowed
+    git add secret.txt .gitallowed
+    git commit -q -m 'add fixture and a symlink target with a leading ./'
+  )
+  run "$repo"
+  assert_exit "leading ./ target: finding not suppressed" 1
+  assert_stderr_contains "leading ./ target: could-not-read notice" "could not be read as a file"
+  assert_stderr_not_contains "leading ./ target: no raw git error leaks" "fatal:"
 }
 
 # ---------------------------------------------------------------------------
@@ -1057,8 +1180,8 @@ test_strict_closes_local_base_fast_forward_bypass
 test_origin_preference_and_fallback
 test_base_override_reporting
 test_base_name_with_slash
-test_ar2_tag_shadows_base_branch
-test_ar2_local_branch_shadows_remote_tracking_ref
+test_ac3b_tag_shadows_base_branch
+test_ac3b_local_branch_shadows_remote_tracking_ref
 test_cannot_scan_no_base_ref
 test_cannot_scan_unrelated_histories
 test_cannot_scan_outside_repo
@@ -1066,13 +1189,17 @@ test_cannot_scan_scanner_missing
 test_scanner_failure_is_not_findings
 test_allowlist_only_committed_at_head
 test_allowlist_self_match
-test_ar1_symlinked_allowlist_resolves_target
-test_ar1_symlinked_allowlist_denies_fixture
-test_ar1_symlinked_allowlist_dangling
-test_ar1_symlinked_allowlist_target_name_not_used_as_regex
+test_ac2d_symlinked_allowlist_resolves_target
+test_ac2d_symlinked_allowlist_denies_fixture
+test_ac2d_symlinked_allowlist_dangling
+test_ac2d_symlinked_allowlist_target_name_not_used_as_regex
 test_ls_tree_mode_check_is_root_relative
-test_ar1_symlinked_allowlist_directory_target_rejected
-test_ar1_symlinked_allowlist_dot_target_rejected
+test_ac2d_symlinked_allowlist_directory_target_rejected
+test_ac2d_symlinked_allowlist_dot_target_rejected
+test_ac2d_symlinked_allowlist_bare_directory_target_rejected
+test_ac2d_symlinked_allowlist_absolute_target_rejected
+test_ac2d_symlinked_allowlist_dotdot_target_rejected
+test_ac2d_symlinked_allowlist_leading_dotslash_target_rejected
 test_usage_and_space_path
 
 printf '\n-- Summary --\n  PASS: %s\n  FAIL: %s\n' "$pass" "$fail"

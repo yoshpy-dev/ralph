@@ -6,18 +6,10 @@
 # finding here or in CI -- the range scan still reads the commit that
 # introduced it.
 #
-# The base ref used for merge-base is always the fully qualified form
-# (refs/remotes/origin/<base> or refs/heads/<base>) that was actually
-# checked to exist, never the short name: git resolves a short name
-# through refs/<name>, refs/tags/<name>, refs/heads/<name>, then
-# refs/remotes/<name>, so a tag or a differently-scoped ref sharing the
-# base's short name could otherwise be picked instead and silently change
-# the range. The allowlist is always .gitallowed as committed at HEAD; if
-# that entry is a symlink, its target is resolved one level inside the
-# committed tree (the same content a checkout of HEAD would show CI's
-# scanner). Anything that cannot be resolved that way scans with an empty
-# allowlist rather than skipping the scan, since fewer exceptions can only
-# add findings, never hide one.
+# The base ref for merge-base is always kept fully qualified -- see the
+# comment above the merge-base call below. The allowlist is always
+# .gitallowed as committed at HEAD, with a symlink resolved one level
+# inside the tree -- see the comment above the allowlist case block below.
 #
 # Usage: secret-scan-branch.sh [--strict]
 #
@@ -191,20 +183,29 @@ tab="$(printf '\t')"
 # fails) otherwise. --full-tree makes the pathspec root-relative
 # regardless of the script's own cwd: a plain `git ls-tree HEAD --
 # <path>` is cwd-relative and silently finds nothing when this script
-# runs from a subdirectory. Requiring a single entry whose path matches
-# exactly guards against a directory pathspec (bare, or with a trailing
-# slash): `git ls-tree` lists a directory's CHILDREN instead of failing,
-# so without this check a symlink target naming a directory could pass
-# the mode check via its first child's mode while what gets read next
-# (`git show HEAD:<path>`) is a tree listing, not a file.
+# runs from a subdirectory. The exact-path check rejects a directory
+# pathspec with a trailing slash: `git ls-tree` lists that directory's
+# CHILDREN, none of whose own recorded paths equals the query. A BARE
+# directory (or a submodule) passes this check via its own single
+# entry -- the mode case below is what rejects it (040000 / 160000
+# are not 100644|100755), not this function.
 allowlist_ls_tree_mode() {
   entry="$(git ls-tree --full-tree HEAD -- "$1" 2>/dev/null)"
   [ -n "$entry" ] || return 1
+  # Belt-and-braces ahead of the exact-path check below: a multi-line
+  # entry can never equal a single-line path, so this alone never decides.
   case "$entry" in
     *"$newline"*) return 1 ;;
   esac
   [ "${entry#*"$tab"}" = "$1" ] || return 1
   printf '%s\n' "${entry%% *}"
+}
+
+# report_allowlist_unreadable -- the one shared notice for every arm of
+# the case below that falls back to an empty allowlist because the
+# committed .gitallowed could not be resolved to a readable file.
+report_allowlist_unreadable() {
+  report "committed .gitallowed could not be read as a file; scanning without allowlist exceptions"
 }
 
 # Always scan with the .gitallowed COMMITTED at HEAD, regardless of
@@ -223,15 +224,26 @@ tmp_allowlist="$(mktemp "${TMPDIR:-/tmp}/ralph-secret-scan-branch-allowlist.XXXX
 allowlist_mode="$(allowlist_ls_tree_mode .gitallowed)" || allowlist_mode=""
 case "$allowlist_mode" in
   100644|100755)
-    git show "HEAD:.gitallowed" > "$tmp_allowlist"
+    # The mode check above already proved this blob exists at HEAD, so a
+    # failure here means a damaged object or a broken $TMPDIR -- fail
+    # closed like an unresolved symlink target, instead of letting git's
+    # exit status (1 means "findings" in this script's own contract)
+    # leak through set -e.
+    if ! git show "HEAD:.gitallowed" > "$tmp_allowlist" 2>/dev/null; then
+      : > "$tmp_allowlist"
+      report_allowlist_unreadable
+    fi
     ;;
   120000)
     allowlist_link_target="$(git show "HEAD:.gitallowed" 2>/dev/null)"
+    # Strip a leading "./" before validating, not after: stripping it
+    # from ".//x" yields "/x", an absolute path, so validating the
+    # unstripped value first would let an absolute target slip through.
+    while [ "${allowlist_link_target#./}" != "$allowlist_link_target" ]; do
+      allowlist_link_target="${allowlist_link_target#./}"
+    done
     allowlist_resolved=0
     if allowlist_target_is_safe "$allowlist_link_target"; then
-      while [ "${allowlist_link_target#./}" != "$allowlist_link_target" ]; do
-        allowlist_link_target="${allowlist_link_target#./}"
-      done
       allowlist_target_mode="$(allowlist_ls_tree_mode "$allowlist_link_target")" || allowlist_target_mode=""
       case "$allowlist_target_mode" in
         100644|100755)
@@ -243,7 +255,7 @@ case "$allowlist_mode" in
     fi
     if [ "$allowlist_resolved" -eq 0 ]; then
       : > "$tmp_allowlist"
-      report "committed .gitallowed could not be read as a file; scanning without allowlist exceptions"
+      report_allowlist_unreadable
     fi
     ;;
   "")
@@ -251,7 +263,7 @@ case "$allowlist_mode" in
     ;;
   *)
     : > "$tmp_allowlist"
-    report "committed .gitallowed could not be read as a file; scanning without allowlist exceptions"
+    report_allowlist_unreadable
     ;;
 esac
 
