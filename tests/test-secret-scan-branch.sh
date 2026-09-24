@@ -10,6 +10,13 @@
 # and RALPH_SECRET_ALLOWLIST before running: this suite's own CI run sets
 # GITHUB_BASE_REF for real, and a leaked value would silently pick the wrong
 # base branch or allowlist for these ad hoc test repos.
+#
+# Hermeticity: HOME/GIT_CONFIG_GLOBAL/GIT_CONFIG_SYSTEM are isolated to a
+# throwaway dir (same pattern as tests/test-terraform-gitignore.sh), because
+# every fixture repo below runs `git commit`: a host or CI runner with a
+# global `commit.gpgsign = true` (or any other global config) would
+# otherwise make every commit in this file fail with a gpg-signing error
+# unrelated to the script under test.
 set -eu
 
 SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
@@ -33,6 +40,14 @@ out_file="$(mktemp "${TMPDIR:-/tmp}/ralph-secret-scan-branch-test.out.XXXXXX")"
 err_file="$(mktemp "${TMPDIR:-/tmp}/ralph-secret-scan-branch-test.err.XXXXXX")"
 workdir="$(mktemp -d "${TMPDIR:-/tmp}/ralph secret scan branch.XXXXXX")"
 trap 'rm -rf "$workdir" "$out_file" "$err_file"' EXIT HUP INT TERM
+
+hermetic_home="$workdir/.home"
+mkdir -p "$hermetic_home"
+HOME="$hermetic_home"
+GIT_CONFIG_GLOBAL="$hermetic_home/.gitconfig"
+GIT_CONFIG_SYSTEM=/dev/null
+GIT_TERMINAL_PROMPT=0
+export HOME GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_TERMINAL_PROMPT
 
 # run_bin <binary> <cwd> [args...] -- runs <binary> from <cwd> with a clean
 # slate for the three env vars this script reads. Captures stdout/stderr
@@ -427,6 +442,41 @@ test_base_override_reporting() {
 }
 
 # ---------------------------------------------------------------------------
+# Edge case: a base branch name containing a slash (e.g. "release/1.0")
+# must resolve correctly through both refs/heads/<name> and
+# refs/remotes/origin/<name> -- the base name is spliced directly into the
+# ref path (`refs/heads/$base_name`), so a naive future refactor that
+# tried to parse or split base_name on "/" could break this silently.
+# ---------------------------------------------------------------------------
+test_base_name_with_slash() {
+  repo="$workdir/slash-base"
+  git_repo "$repo"
+  (
+    cd "$repo"
+    git checkout -q -B "release/1.0"
+    printf 'clean\n' > README.md
+    git add README.md
+    git commit -q -m init
+    git checkout -q -b feature
+    token="$(printf 'ghp_%s' 'SLASHBASEabcdefghijklmnopqrstuv')"
+    printf 'deploy token %s\n' "$token" > leaked.txt
+    git add leaked.txt
+    git commit -q -m 'add leaked token'
+  )
+  run_with_xreview_base "$repo" "release/1.0"
+  assert_exit "slash-containing local base: still detects" 1
+  assert_stderr_contains "slash-containing local base: reports the full name" "against release/1.0"
+
+  (
+    cd "$repo"
+    git update-ref "refs/remotes/origin/release/1.0" "release/1.0"
+  )
+  run_with_xreview_base "$repo" "release/1.0"
+  assert_exit "slash-containing origin base: still detects" 1
+  assert_stderr_contains "slash-containing origin base: reports the full name" "against origin/release/1.0"
+}
+
+# ---------------------------------------------------------------------------
 # Cannot-scan states: default mode exits 0 with a reason, --strict exits 3.
 # ---------------------------------------------------------------------------
 test_cannot_scan_no_base_ref() {
@@ -681,6 +731,7 @@ test_strict_closes_base_override_bypass
 test_strict_closes_local_base_fast_forward_bypass
 test_origin_preference_and_fallback
 test_base_override_reporting
+test_base_name_with_slash
 test_cannot_scan_no_base_ref
 test_cannot_scan_unrelated_histories
 test_cannot_scan_outside_repo

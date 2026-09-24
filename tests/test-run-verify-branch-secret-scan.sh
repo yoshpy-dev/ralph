@@ -6,6 +6,13 @@
 #
 # All fixture values are assembled at test RUNTIME from split pieces (see
 # tests/test-secret-scan-branch.sh for why).
+#
+# Hermeticity: HOME/GIT_CONFIG_GLOBAL/GIT_CONFIG_SYSTEM are isolated to a
+# throwaway dir (same pattern as tests/test-terraform-gitignore.sh and
+# tests/test-secret-scan-branch.sh), because every fixture repo below runs
+# `git commit`: a host or CI runner with a global `commit.gpgsign = true`
+# would otherwise make every commit in this file fail with a gpg-signing
+# error unrelated to the script under test.
 set -eu
 
 SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
@@ -25,6 +32,14 @@ not_ok() {
 }
 
 workdir="$(mktemp -d "${TMPDIR:-/tmp}/ralph-run-verify-branch-secret-scan.XXXXXX")"
+
+hermetic_home="$workdir/.home"
+mkdir -p "$hermetic_home"
+HOME="$hermetic_home"
+GIT_CONFIG_GLOBAL="$hermetic_home/.gitconfig"
+GIT_CONFIG_SYSTEM=/dev/null
+GIT_TERMINAL_PROMPT=0
+export HOME GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_TERMINAL_PROMPT
 
 # make_repo <name> -- a fresh git repo with scripts/run-verify.sh and the
 # secret-scan scripts it needs, no language packs and no verify.local.sh
@@ -154,6 +169,23 @@ test_mode_routing_clean() {
 }
 
 # ---------------------------------------------------------------------------
+# Edge case: test_mode_routing_clean above only proves test mode is silent
+# on a CLEAN branch. This proves the stronger claim AC-4 actually makes --
+# test mode never invokes the branch scan even on a branch that WOULD fail
+# it -- by running mode=test against a secret-carrying branch and asserting
+# both a clean exit and the absence of any scan output.
+# ---------------------------------------------------------------------------
+test_mode_test_never_runs_even_with_a_finding() {
+  repo="$(make_repo mode-test-with-finding)"
+  (cd "$repo" && git checkout -q -b feature && add_secret_commit)
+
+  run_verify "$repo" test
+  assert_exit "test mode, secret-carrying branch: still exits 0" 0
+  assert_not_contains "test mode+finding: does not run the branch scan" "Running branch secret scan"
+  assert_not_contains "test mode+finding: no findings text leaks through" "findings"
+}
+
+# ---------------------------------------------------------------------------
 # A finding fails the run even when no language verifier ran (ran_any=0):
 # the "docs-only" summary alone is no longer the whole story -- self-review
 # cycle 1 (M1) found that a docs-only-looking run with a real finding used
@@ -256,6 +288,7 @@ test_missing_scanner_is_non_fatal() {
 }
 
 test_mode_routing_clean
+test_mode_test_never_runs_even_with_a_finding
 test_finding_fails_even_with_ran_any_zero
 test_finding_fails_with_ran_any_one
 test_skip_env_var
