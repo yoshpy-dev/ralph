@@ -6,6 +6,19 @@
 # finding here or in CI -- the range scan still reads the commit that
 # introduced it.
 #
+# The base ref used for merge-base is always the fully qualified form
+# (refs/remotes/origin/<base> or refs/heads/<base>) that was actually
+# checked to exist, never the short name: git resolves a short name
+# through refs/<name>, refs/tags/<name>, refs/heads/<name>, then
+# refs/remotes/<name>, so a tag or a differently-scoped ref sharing the
+# base's short name could otherwise be picked instead and silently change
+# the range. The allowlist is always .gitallowed as committed at HEAD; if
+# that entry is a symlink, its target is resolved one level inside the
+# committed tree (the same content a checkout of HEAD would show CI's
+# scanner). Anything that cannot be resolved that way scans with an empty
+# allowlist rather than skipping the scan, since fewer exceptions can only
+# add findings, never hide one.
+#
 # Usage: secret-scan-branch.sh [--strict]
 #
 # Exit codes:
@@ -119,14 +132,23 @@ if [ "$current_branch" = "$base_name" ]; then
 fi
 
 if git rev-parse --verify --quiet "refs/remotes/origin/$base_name" >/dev/null 2>&1; then
+  base_ref_full="refs/remotes/origin/$base_name"
   base_ref="origin/$base_name"
 elif git rev-parse --verify --quiet "refs/heads/$base_name" >/dev/null 2>&1; then
+  base_ref_full="refs/heads/$base_name"
   base_ref="$base_name"
 else
   cannot_scan "no base ref for '$base_name' (checked refs/remotes/origin/$base_name and refs/heads/$base_name)"
 fi
 
-if ! merge_base="$(git merge-base HEAD "$base_ref" 2>/dev/null)"; then
+# merge-base is computed from base_ref_full (the fully qualified ref just
+# checked above), never from the short base_ref: a bare short name is
+# resolved by git's own disambiguation order, which checks refs/tags/<name>
+# and refs/heads/<name> before refs/remotes/<name> -- a tag or a
+# differently-scoped ref sharing the base's short name would otherwise be
+# picked over the ref that was actually validated. base_ref (short form)
+# is used only in the printed report lines below.
+if ! merge_base="$(git merge-base HEAD "$base_ref_full" 2>/dev/null)"; then
   cannot_scan "no merge-base between HEAD and $base_ref (unrelated histories or a shallow clone?)"
 fi
 
@@ -142,15 +164,96 @@ fi
 base_short="$(git rev-parse --short "$merge_base")"
 head_short="$(git rev-parse --short HEAD)"
 
+# allowlist_target_is_safe <target> -- true if <target> (the stored
+# content of a .gitallowed symlink, i.e. its link target path) is safe to
+# resolve one level inside the committed tree: not absolute, and with no
+# ".." path component. .gitallowed always sits at the repo root, so a
+# relative target is relative to the root.
+allowlist_target_is_safe() {
+  case "$1" in
+    /* | "") return 1 ;;
+  esac
+  case "/$1/" in
+    */../*) return 1 ;;
+  esac
+  return 0
+}
+
+# newline / tab -- single-character values used to parse `git ls-tree`
+# output below (one entry per line, fields "<mode> <type> <sha>\t<path>").
+newline='
+'
+tab="$(printf '\t')"
+
+# allowlist_ls_tree_mode <path> -- prints the tree-entry MODE for <path>
+# at HEAD, but only when `git ls-tree --full-tree` returns EXACTLY ONE
+# entry whose own recorded path is <path> itself; prints nothing (and
+# fails) otherwise. --full-tree makes the pathspec root-relative
+# regardless of the script's own cwd: a plain `git ls-tree HEAD --
+# <path>` is cwd-relative and silently finds nothing when this script
+# runs from a subdirectory. Requiring a single entry whose path matches
+# exactly guards against a directory pathspec (bare, or with a trailing
+# slash): `git ls-tree` lists a directory's CHILDREN instead of failing,
+# so without this check a symlink target naming a directory could pass
+# the mode check via its first child's mode while what gets read next
+# (`git show HEAD:<path>`) is a tree listing, not a file.
+allowlist_ls_tree_mode() {
+  entry="$(git ls-tree --full-tree HEAD -- "$1" 2>/dev/null)"
+  [ -n "$entry" ] || return 1
+  case "$entry" in
+    *"$newline"*) return 1 ;;
+  esac
+  [ "${entry#*"$tab"}" = "$1" ] || return 1
+  printf '%s\n' "${entry%% *}"
+}
+
 # Always scan with the .gitallowed COMMITTED at HEAD, regardless of
 # uncommitted worktree edits or a caller-set RALPH_SECRET_ALLOWLIST: CI
 # reads only the committed file, so this must match what CI will see.
+#
+# The tree entry's mode decides how it is read: a regular file (100644 /
+# 100755) is read directly with `git show`. A symlink (120000) stores its
+# link target as the blob's content -- `git show HEAD:.gitallowed` on a
+# symlink prints that target PATH STRING, not file content, so it is
+# resolved one level inside the committed tree instead of used as-is.
+# Anything else (no entry, a directory, a submodule, or a symlink target
+# that cannot be resolved to a readable file) falls back to an empty
+# allowlist: fewer exceptions can only add findings, never hide one.
 tmp_allowlist="$(mktemp "${TMPDIR:-/tmp}/ralph-secret-scan-branch-allowlist.XXXXXX")"
-if git cat-file -e "HEAD:.gitallowed" 2>/dev/null; then
-  git show "HEAD:.gitallowed" > "$tmp_allowlist"
-else
-  : > "$tmp_allowlist"
-fi
+allowlist_mode="$(allowlist_ls_tree_mode .gitallowed)" || allowlist_mode=""
+case "$allowlist_mode" in
+  100644|100755)
+    git show "HEAD:.gitallowed" > "$tmp_allowlist"
+    ;;
+  120000)
+    allowlist_link_target="$(git show "HEAD:.gitallowed" 2>/dev/null)"
+    allowlist_resolved=0
+    if allowlist_target_is_safe "$allowlist_link_target"; then
+      while [ "${allowlist_link_target#./}" != "$allowlist_link_target" ]; do
+        allowlist_link_target="${allowlist_link_target#./}"
+      done
+      allowlist_target_mode="$(allowlist_ls_tree_mode "$allowlist_link_target")" || allowlist_target_mode=""
+      case "$allowlist_target_mode" in
+        100644|100755)
+          if git show "HEAD:$allowlist_link_target" > "$tmp_allowlist" 2>/dev/null; then
+            allowlist_resolved=1
+          fi
+          ;;
+      esac
+    fi
+    if [ "$allowlist_resolved" -eq 0 ]; then
+      : > "$tmp_allowlist"
+      report "committed .gitallowed could not be read as a file; scanning without allowlist exceptions"
+    fi
+    ;;
+  "")
+    : > "$tmp_allowlist"
+    ;;
+  *)
+    : > "$tmp_allowlist"
+    report "committed .gitallowed could not be read as a file; scanning without allowlist exceptions"
+    ;;
+esac
 
 worktree_allowlist="$repo_root/.gitallowed"
 worktree_differs=0
