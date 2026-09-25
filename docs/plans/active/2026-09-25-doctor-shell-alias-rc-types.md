@@ -15,7 +15,7 @@
 ## Scope
 
 1. **通常ファイルでない rc を開かない(WC-3)**: 候補の rc が存在し(symlink は辿る)、ディレクトリでも通常ファイルでもないとき、`os.Open` を呼ばない。Detail の既存の「could not read」の節に `<file> (not a regular file)` として出し、Check は info(他の rc の所見による warn はそのまま優先)。ディレクトリは今までどおり黙って飛ばす。判定と文言は #164 の `readCodexUserConfig`(`internal/cli/doctor_codex_writable_root.go`、stat して通常ファイルでなければ開かずに `not a regular file`)に揃える
-2. **相対パスの `$ZDOTDIR`(WC-4)**: `shellAliasEnv` に doctor の作業ディレクトリ(`Cwd`)を足し、`shellAliasEnvFromOS` は `os.Getwd()` で埋める。相対の `$ZDOTDIR` は `Cwd` を基準に絶対パスにして、絶対パスの `$ZDOTDIR` と同じ位置(候補の先頭)で走査する。`Cwd` が空(`os.Getwd` の失敗)のときは相対の `$ZDOTDIR` を今までどおり飛ばす。環境の値は seam から注入し、テストは実際の cwd や環境変数に依存しない
+2. **相対パスの `$ZDOTDIR`(WC-4)**: `shellAliasEnv` に doctor の作業ディレクトリ(`Cwd`)を足し、`shellAliasEnvFromOS` は `os.Getwd()` で埋める。相対の `$ZDOTDIR` は `Cwd` を基準に絶対パスにして、絶対パスの `$ZDOTDIR` と同じ位置(候補の先頭)で走査する。`Cwd` が空(`os.Getwd` の失敗)のときは相対の `$ZDOTDIR` を今までどおり飛ばす。環境の値は seam から注入し、テストは実際の cwd や環境変数に依存しない。`$ZDOTDIR` 由来の候補(絶対・相対とも)は `filepath.Join` で作らない: `Join` は `..` を字面で消すが、zsh は `$ZDOTDIR/.zshrc` をそのまま OS に渡すので、`..` は直前の symlink の実体側で解決される。候補は区切り文字の連結で作り、`..` の解決は stat / open の時点で OS に任せる(`Cwd` が symlink を含む論理パスでも、OS の解決は zsh の物理的な cwd からの解決と一致する)。読めないディレクトリの報告に使う親ディレクトリも字面で正規化しない
 3. **コメント**: 「zsh itself would refuse it」を消し、zsh は相対の `ZDOTDIR` をシェルの作業ディレクトリ基準で解決すること、herdr の pane の cwd(座席の `--cwd`)は doctor の cwd と一致するとは限らず doctor は自分の cwd で近似すること、候補の一覧は over-approximate の方針のままであることを書く
 
 ## Non-goals
@@ -45,6 +45,7 @@
 
 - 通常ファイルの判定は「stat して通常ファイルでなければ開かない」(#164 の前例)。open に `O_NONBLOCK` を付けて開いた後に fstat する方式もあるが、前例と揃える方を採る(競合は Non-goals)
 - 相対の `$ZDOTDIR` の基準は doctor の cwd を seam(`shellAliasEnv.Cwd`)で渡す。`filepath.Abs` を直接呼ぶとテストが実際の cwd に依存するため
+- **Codex plan advisory(2026-09-25、MEDIUM 1、ユーザー決定: 対応案で plan を更新)**: `$ZDOTDIR` の候補を `filepath.Join` で作ると `..` が字面で消え、`ZDOTDIR=link/../rc`(`link` が別の場所への symlink)で zsh と別の rc を読む。doctor と座席の cwd が同じでも起きるので、cwd の近似では説明できない → `$ZDOTDIR` 由来の候補は連結で作り、`..` は OS に解決させる(Scope 2)。AC-5b〜5d を追加
 - Critical forks: None(issue が方式を指定しており、前例がある)
 
 ## Acceptance criteria
@@ -54,6 +55,9 @@
 - [ ] AC-3: FIFO の rc があっても他の候補は走査され、別の rc にある codex の alias(herdr あり)は warn になり、Detail に両方が出る
 - [ ] AC-4: 候補の位置にあるディレクトリは今までどおり黙って飛ばす(Detail に「could not read」が出ない)
 - [ ] AC-5: `$ZDOTDIR` が相対パス(例 `relative-rc`)で `Cwd` が与えられたとき、`<Cwd>/relative-rc/.zshrc` の codex の alias が検出される(herdr ありで warn)。Detail は解決後のパスで file:line を示す
+- [ ] AC-5b: `$ZDOTDIR` が相対の `link/../rc` で、`<Cwd>/link` が別の場所 `<X>/config` への symlink のとき、zsh と同じく `<X>/rc/.zshrc` の codex の alias を検出する(`<Cwd>/rc/.zshrc` は読まない)
+- [ ] AC-5c: `Cwd` 自体が symlink を含む論理パス(`<A>/l` が `<B>/c` への symlink)で `$ZDOTDIR` が `..` のとき、`<B>/.zshrc` の alias を検出する
+- [ ] AC-5d: 絶対パスの `$ZDOTDIR` に `link/..` が含まれるときも AC-5b と同じく OS の解決に従う
 - [ ] AC-6: `$ZDOTDIR` が相対パスで `Cwd` が空のとき、候補は `$ZDOTDIR` 未設定と同じになり、panic しない
 - [ ] AC-7: `shellAliasEnvFromOS` は `Cwd` を `os.Getwd()` の値で埋める。絶対パスの `$ZDOTDIR` と未設定の挙動は変わらない(既存のテストが pass)
 - [ ] AC-8: `internal/cli/doctor_shell_alias.go` に「would refuse」の記述が残っていない。相対の `$ZDOTDIR` の解決と、doctor の cwd による近似がコメントに書かれている
@@ -76,8 +80,8 @@
 - Unit tests: `checkShellAliases` の FIFO(直接、symlink 経由)、他の rc の所見との併存、ディレクトリの回帰、相対 `$ZDOTDIR`(検出、`Cwd` 空)、`shellAliasEnvFromOS` の `Cwd`(`t.Chdir`)
 - Integration tests: `runDoctor*` 経由の既存テストが TestMain の固定のまま pass すること
 - Regression tests: 既存の shell alias のテスト一式(絶対 `$ZDOTDIR`、symlink の dedup、読めない rc、長い行 ほか)
-- Edge cases: FIFO を指す symlink、`$ZDOTDIR` が `.`(cwd そのもの)、相対 `$ZDOTDIR` の解決先が `$HOME` と同じ(dedup で 1 回)
-- Evidence to capture: red/green(判定を外すと FIFO のテストが時間切れで落ちる、相対の解決を外すと AC-5 のテストが落ちる)、`TMPDIR=/tmp` での実行、race
+- Edge cases: FIFO を指す symlink、`$ZDOTDIR` が `.`(cwd そのもの)、相対 `$ZDOTDIR` の解決先が `$HOME` と同じ(dedup で 1 回)、`link/../rc`(相対・絶対)、symlink を含む `Cwd` と `..`
+- Evidence to capture: red/green(判定を外すと FIFO のテストが時間切れで落ちる、相対の解決を外すと AC-5 のテストが落ちる、候補を `filepath.Join` に戻すと AC-5b〜5d のテストが落ちる)、`TMPDIR=/tmp` での実行、race
 
 ## Risks and mitigations
 
@@ -94,6 +98,10 @@
 
 - なし
 
+## Deviation notes
+
+- 2026-09-25 plan: Codex plan advisory の MEDIUM 1 件(`$ZDOTDIR` の `..` を字面で消す)を反映。ユーザー決定(AskUserQuestion): 対応案で plan を更新
+
 ## Progress checklist
 
 - [x] Plan reviewed
@@ -108,4 +116,5 @@
 
 - [x] 現状のコード(候補の解決、走査、Detail の組み立て、TestMain の固定)と #164 の前例を確認した
 - [x] critical fork なし
+- [x] Codex plan advisory(1 件、対応案で plan を更新)
 - [x] AC は hermetic な fixture(`t.TempDir()`、seam の `shellAliasEnv`)で決定的に確認できる
