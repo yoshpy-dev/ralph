@@ -102,13 +102,15 @@
 
 - 2026-09-25 plan: Codex plan advisory の MEDIUM 1 件(`$ZDOTDIR` の `..` を字面で消す)を反映。ユーザー決定(AskUserQuestion): 対応案で plan を更新
 - 2026-09-25 work: Slice A(daaf29f)と B(b42533e)は implementer に委譲。A: `scanShellAliasFile` が先に stat し、通常ファイルでなければ開かずに `not a regular file` を返す(既存の「could not read」の経路に合流、候補の数え方は不変)。FIFO のテストは `doctor_shell_alias_unix_test.go`(`//go:build !windows`)に 3 件、ディレクトリの回帰 1 件。B: `shellAliasEnv.Cwd`(`os.Getwd`、失敗時は空)、`$ZDOTDIR` 由来の候補は `shellAliasJoinRaw`(連結、`Join` / `Clean` を使わない)、読めないディレクトリの報告は `shellAliasRawParent`(字面で正規化しない)。テスト 7 件(相対、`Cwd` 空、`link/../rc` の相対と絶対、symlink を含む `Cwd` と `..`、`$HOME` への dedup、`shellAliasEnvFromOS` の `Cwd`)。red/green: 判定を外すと FIFO のテストが 5 秒で落ちる、候補を `filepath.Join` に戻すと 5b〜5d が落ちる、相対の解決を外すと AC-5 が落ちる。実機: 修正前のバイナリは FIFO の `.zshrc` の偽 HOME で 10 秒後も止まったまま、修正後は 1 秒以内に終わり `not a regular file` を出す(orchestrator も再現)。orchestrator は HEAD 一致・porcelain 空・差分を確認し、`..` を含む候補の dedup が物理的な解決で 1 件になることを一時テストで確認。軽微な点: `$ZDOTDIR=/` のとき `shellAliasRawParent` は空文字を返す(読めないディレクトリの報告名が空になる。self-review の確認点)。逸脱: implementer が実機確認の 1 回目で `ZDOTDIR` を外し忘れ、実際の dotfiles を読んだ(出力は破棄し、`env -u ZDOTDIR` で再実行)。範囲外の発見: `run-verify.sh` の 1 回で `tests/test-ralph-dispatch.sh` の「I. SIGTERM cleanup left stray ralph-dispatch-* temp files」が落ち、単独では 26/26 pass。テストは共有の `$TMPDIR` を集合差で見るので、同時に動く Claude Code の hook(`ralph-dispatch.sh`)の一時ファイルを拾った可能性が高い(未確認)。sync-docs で tech-debt に記録する
+- 2026-09-25 self-review cycle 1(`docs/reports/self-review-2026-09-25-doctor-shell-alias-rc-types.md`、fadd3d8): pass、推奨 merge、LOW 6。L1 `shellAliasRawParent("/.zshrc")` が空文字(`HOME=/` でも起きる)、L2 長い 1 行コメント・`..` の理由の重複・`shellAliasJoinRaw` の「区切りは 1 つ」が末尾 `//` で偽、L3 doc comment に `Cwd` がない、L4 表示パスを接尾辞でしか確認しておらず `displayPath` に `filepath.Clean` を入れても新テストが通る、L5 FIFO テストのブロックの重複、L6 `Cwd` のサブテストが HOME を固定しない。reviewer は実機の zsh で相対 `ZDOTDIR` と `link/..` の物理解決を確認。sync-docs への引き継ぎ: `docs/tech-debt/README.md` の shell alias Check の行のトリガー(このファイルを別の理由で次に触ったとき)がこの PR で発火した
+- 2026-09-25 work: Slice C は implementer に委譲(b611661、3 ファイル)。6 件を修正: root の親は `/`、`shellAliasJoinRaw` は末尾の区切りをすべて落とす(`/` は `/.zshrc`)、コメントの折り返しと理由の一本化、doc comment に `Cwd`、FIFO テストの helper 化、HOME の固定。表示パスは AC-5 / 5b / 5c / 5d と dedup のテストで完全一致(orchestrator の審査で 5c / 5d と dedup が漏れていたのを追加し amend)。`displayPath` に `filepath.Clean` を入れると 5b / 5c / 5d が落ちることを implementer が確認。`run-verify.sh` は pass
 
 ## Progress checklist
 
 - [x] Plan reviewed
 - [x] Branch created
 - [x] Implementation started
-- [ ] Review artifact created
+- [x] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
