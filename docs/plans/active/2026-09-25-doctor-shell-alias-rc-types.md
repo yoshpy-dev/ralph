@@ -1,6 +1,6 @@
 # doctor-shell-alias-rc-types
 
-- Status: Draft
+- Status: In progress
 - Owner: Claude Code
 - Date: 2026-09-25
 - Related request: #162(`ralph doctor` の「Shell aliases (codex/claude)」Check、PR #168)の cross-review cycle 2 で WORTH_CONSIDERING が 2 件残り、cap 到達のためユーザー判断でこの issue に送った(triage: `docs/reports/cross-review-triage-doctor-shell-alias-check.md` の WC-3 / WC-4)。(1) rc の候補が FIFO だと `os.Open` が書き手を待って固まり、`ralph doctor` 全体が何も出さずに止まる。(2) 相対パスの `$ZDOTDIR` を無視しており、doc comment の「zsh itself would refuse it」は誤り(zsh はシェルの作業ディレクトリ基準で解決して読む)
@@ -101,12 +101,13 @@
 ## Deviation notes
 
 - 2026-09-25 plan: Codex plan advisory の MEDIUM 1 件(`$ZDOTDIR` の `..` を字面で消す)を反映。ユーザー決定(AskUserQuestion): 対応案で plan を更新
+- 2026-09-25 work: Slice A(daaf29f)と B(b42533e)は implementer に委譲。A: `scanShellAliasFile` が先に stat し、通常ファイルでなければ開かずに `not a regular file` を返す(既存の「could not read」の経路に合流、候補の数え方は不変)。FIFO のテストは `doctor_shell_alias_unix_test.go`(`//go:build !windows`)に 3 件、ディレクトリの回帰 1 件。B: `shellAliasEnv.Cwd`(`os.Getwd`、失敗時は空)、`$ZDOTDIR` 由来の候補は `shellAliasJoinRaw`(連結、`Join` / `Clean` を使わない)、読めないディレクトリの報告は `shellAliasRawParent`(字面で正規化しない)。テスト 7 件(相対、`Cwd` 空、`link/../rc` の相対と絶対、symlink を含む `Cwd` と `..`、`$HOME` への dedup、`shellAliasEnvFromOS` の `Cwd`)。red/green: 判定を外すと FIFO のテストが 5 秒で落ちる、候補を `filepath.Join` に戻すと 5b〜5d が落ちる、相対の解決を外すと AC-5 が落ちる。実機: 修正前のバイナリは FIFO の `.zshrc` の偽 HOME で 10 秒後も止まったまま、修正後は 1 秒以内に終わり `not a regular file` を出す(orchestrator も再現)。orchestrator は HEAD 一致・porcelain 空・差分を確認し、`..` を含む候補の dedup が物理的な解決で 1 件になることを一時テストで確認。軽微な点: `$ZDOTDIR=/` のとき `shellAliasRawParent` は空文字を返す(読めないディレクトリの報告名が空になる。self-review の確認点)。逸脱: implementer が実機確認の 1 回目で `ZDOTDIR` を外し忘れ、実際の dotfiles を読んだ(出力は破棄し、`env -u ZDOTDIR` で再実行)。範囲外の発見: `run-verify.sh` の 1 回で `tests/test-ralph-dispatch.sh` の「I. SIGTERM cleanup left stray ralph-dispatch-* temp files」が落ち、単独では 26/26 pass。テストは共有の `$TMPDIR` を集合差で見るので、同時に動く Claude Code の hook(`ralph-dispatch.sh`)の一時ファイルを拾った可能性が高い(未確認)。sync-docs で tech-debt に記録する
 
 ## Progress checklist
 
 - [x] Plan reviewed
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
