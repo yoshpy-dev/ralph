@@ -1,6 +1,6 @@
 # doctor-shell-alias-rc-types
 
-- Status: In progress
+- Status: Done (PR #178)
 - Owner: Claude Code
 - Date: 2026-09-25
 - Related request: #162(`ralph doctor` の「Shell aliases (codex/claude)」Check、PR #168)の cross-review cycle 2 で WORTH_CONSIDERING が 2 件残り、cap 到達のためユーザー判断でこの issue に送った(triage: `docs/reports/cross-review-triage-doctor-shell-alias-check.md` の WC-3 / WC-4)。(1) rc の候補が FIFO だと `os.Open` が書き手を待って固まり、`ralph doctor` 全体が何も出さずに止まる。(2) 相対パスの `$ZDOTDIR` を無視しており、doc comment の「zsh itself would refuse it」は誤り(zsh はシェルの作業ディレクトリ基準で解決して読む)
@@ -108,6 +108,7 @@
 - 2026-09-25 test(c74b7a0): PASS。`./scripts/run-test.sh` が 8 パッケージ全て green、`ShellAlias` スコープのテストが `-race`・`TMPDIR=/tmp`・20 回反復で安定。red/green mutation 5/5 が計画どおり判別(うち 2 件は計画より強く判別)。実機デモで FIFO 回避(1 秒未満)と相対 `$ZDOTDIR`(`link/../rc` 経由を含む)の OS 解決一致を確認、zsh 本体の `source` でも同じ物理パスに解決することをクロスチェック。変更対象 6 関数のカバレッジ 97-100%(未カバーの 5 箇所は計画の AC 外・既存の防御的分岐、§7 に記録)。`tests/test-ralph-dispatch.sh` の case I の既知 flake はこの回では再現せず
 - 2026-09-25 sync-docs(cycle 1): 文書 drift の再確認(recipe 2 コピー、`/org` skill の 4 ミラー、README.md、docs/specs/)は verify の判定どおり drift なしを確認。`docs/tech-debt/README.md:132` の `checkShellAliases` 行のトリガー欄に「#167 がこのトリガーの前半(FIFO/非通常ファイルの扱い、相対 `$ZDOTDIR` の解決)を発火させたが、plan の Non-goals どおり severity の規則は変更していない」旨を追記し、残りのトリガーを明記。`tests/test-ralph-dispatch.sh` case I の 2026-09-25 の単発失敗(work スロットの逸脱記録)を新規の tech-debt 行として追加(原因は未確認、テスト分離の疑い)。walkthrough は `git diff main...HEAD --stat -- internal/` が 576 行(533 追加・43 削除、500 行超)のため作成せず、要否は `/pr` の判断に委ねる
 - 2026-09-25 cross-review cycle 1(`docs/reports/cross-review-triage-doctor-shell-alias-rc-types.md`、reviewed HEAD fe13aa2): Codex の指摘 0 件(Case C)。walkthrough を追加(`internal/` の差分が 576 行で 500 行を超えるため)
+- 2026-09-25 `/pr`: PR #178 を作成(Closes #167)。push 前の `run-verify.sh` pass、`TMPDIR=/tmp go test ./internal/cli/...` pass、`secret-scan-branch.sh --strict` は 0d7205e で clean。`ensure-pr-title-prefix.sh` / `ensure-pr-ready.sh` pass
 
 ## Progress checklist
 
@@ -117,7 +118,7 @@
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
-- [ ] PR created
+- [x] PR created (#178)
 
 ## Readiness checklist
 
