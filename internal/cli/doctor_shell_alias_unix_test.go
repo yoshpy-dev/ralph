@@ -20,13 +20,33 @@ import (
 // intended), there is no blocked reader to release and the non-blocking
 // write-side open simply fails; that failure is ignored. os.OpenFile has no
 // portable O_NONBLOCK flag, hence syscall.Open here rather than os.
-func unblockFIFOOpen(t *testing.T, path string) {
-	t.Helper()
+func unblockFIFOOpen(path string) {
 	fd, err := syscall.Open(path, syscall.O_WRONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return
 	}
 	_ = syscall.Close(fd)
+}
+
+// checkShellAliasesWithin runs checkShellAliases in a goroutine and returns
+// its result, or fails the test if it does not return within 5s -- the
+// shared guard every FIFO test in this file needs, since opening a FIFO for
+// read can block forever and a stuck goroutine must not hang the test
+// binary itself (the goroutine leaks harmlessly past the failing test; see
+// unblockFIFOOpen).
+func checkShellAliasesWithin(t *testing.T, resolveEnv func() (shellAliasEnv, error), herdrPresent bool) checkResult {
+	t.Helper()
+	done := make(chan checkResult, 1)
+	go func() {
+		done <- checkShellAliases(resolveEnv, herdrPresent)
+	}()
+	select {
+	case r := <-done:
+		return r
+	case <-time.After(5 * time.Second):
+		t.Fatal("checkShellAliases did not return within 5s -- likely blocked opening the FIFO")
+		return checkResult{} // unreachable: t.Fatal stops this goroutine
+	}
 }
 
 // TestCheckShellAliases_ZshrcIsFIFO_InfoAndCompletes is AC-1: a FIFO
@@ -42,25 +62,15 @@ func TestCheckShellAliases_ZshrcIsFIFO_InfoAndCompletes(t *testing.T) {
 	if err := syscall.Mkfifo(fifoPath, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { unblockFIFOOpen(t, fifoPath) })
+	t.Cleanup(func() { unblockFIFOOpen(fifoPath) })
 
-	type result struct{ r checkResult }
-	done := make(chan result, 1)
-	go func() {
-		done <- result{checkShellAliases(shellAliasTestEnv(home), true)}
-	}()
-
-	select {
-	case got := <-done:
-		if got.r.Status != "info" {
-			t.Fatalf("expected info, got %s (%s)", got.r.Status, got.r.Detail)
-		}
-		want := "could not read: ~" + string(filepath.Separator) + ".zshrc (not a regular file)"
-		if !strings.Contains(got.r.Detail, want) {
-			t.Errorf("expected detail to contain %q, got: %s", want, got.r.Detail)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("checkShellAliases did not return within 5s -- likely blocked opening the FIFO")
+	r := checkShellAliasesWithin(t, shellAliasTestEnv(home), true)
+	if r.Status != "info" {
+		t.Fatalf("expected info, got %s (%s)", r.Status, r.Detail)
+	}
+	want := "could not read: ~" + string(filepath.Separator) + ".zshrc (not a regular file)"
+	if !strings.Contains(r.Detail, want) {
+		t.Errorf("expected detail to contain %q, got: %s", want, r.Detail)
 	}
 }
 
@@ -76,28 +86,18 @@ func TestCheckShellAliases_ZshrcSymlinksToFIFO_InfoNamedBySymlink(t *testing.T) 
 	if err := syscall.Mkfifo(fifoPath, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { unblockFIFOOpen(t, fifoPath) })
+	t.Cleanup(func() { unblockFIFOOpen(fifoPath) })
 	if err := os.Symlink(fifoPath, filepath.Join(home, ".zshrc")); err != nil {
 		t.Fatal(err)
 	}
 
-	type result struct{ r checkResult }
-	done := make(chan result, 1)
-	go func() {
-		done <- result{checkShellAliases(shellAliasTestEnv(home), true)}
-	}()
-
-	select {
-	case got := <-done:
-		if got.r.Status != "info" {
-			t.Fatalf("expected info, got %s (%s)", got.r.Status, got.r.Detail)
-		}
-		want := "could not read: ~" + string(filepath.Separator) + ".zshrc (not a regular file)"
-		if !strings.Contains(got.r.Detail, want) {
-			t.Errorf("expected detail to contain %q, got: %s", want, got.r.Detail)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("checkShellAliases did not return within 5s -- likely blocked opening the FIFO")
+	r := checkShellAliasesWithin(t, shellAliasTestEnv(home), true)
+	if r.Status != "info" {
+		t.Fatalf("expected info, got %s (%s)", r.Status, r.Detail)
+	}
+	want := "could not read: ~" + string(filepath.Separator) + ".zshrc (not a regular file)"
+	if !strings.Contains(r.Detail, want) {
+		t.Errorf("expected detail to contain %q, got: %s", want, r.Detail)
 	}
 }
 
@@ -111,29 +111,19 @@ func TestCheckShellAliases_FIFOAndOtherRcAlias_WarnsAndNamesBoth(t *testing.T) {
 	if err := syscall.Mkfifo(fifoPath, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { unblockFIFOOpen(t, fifoPath) })
+	t.Cleanup(func() { unblockFIFOOpen(fifoPath) })
 	writeAliasRc(t, filepath.Join(home, ".bashrc"), `alias codex="codex -m x"`+"\n")
 
-	type result struct{ r checkResult }
-	done := make(chan result, 1)
-	go func() {
-		done <- result{checkShellAliases(shellAliasTestEnv(home), true)}
-	}()
-
-	select {
-	case got := <-done:
-		if got.r.Status != "warn" {
-			t.Fatalf("expected warn, got %s (%s)", got.r.Status, got.r.Detail)
+	r := checkShellAliasesWithin(t, shellAliasTestEnv(home), true)
+	if r.Status != "warn" {
+		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
+	}
+	for _, want := range []string{
+		"could not read: ~" + string(filepath.Separator) + ".zshrc (not a regular file)",
+		"--model (-m)",
+	} {
+		if !strings.Contains(r.Detail, want) {
+			t.Errorf("expected detail to contain %q, got: %s", want, r.Detail)
 		}
-		for _, want := range []string{
-			"could not read: ~" + string(filepath.Separator) + ".zshrc (not a regular file)",
-			"--model (-m)",
-		} {
-			if !strings.Contains(got.r.Detail, want) {
-				t.Errorf("expected detail to contain %q, got: %s", want, got.r.Detail)
-			}
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("checkShellAliases did not return within 5s -- likely blocked opening the FIFO")
 	}
 }

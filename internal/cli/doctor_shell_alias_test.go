@@ -282,9 +282,12 @@ func TestCheckShellAliases_RelativeZdotdir_Detected(t *testing.T) {
 	if r.Status != "warn" {
 		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
 	}
-	wantSuffix := "relative-rc" + string(filepath.Separator) + ".zshrc"
-	if !strings.Contains(r.Detail, wantSuffix) {
-		t.Errorf("expected detail to name the resolved file, got: %s", r.Detail)
+	// The exact item, not just a suffix: a suffix match cannot tell the
+	// resolved path from a lexically cleaned one, since neither differs
+	// here at the trailing "relative-rc/.zshrc" component.
+	want := "alias codex in " + filepath.Join(cwd, "relative-rc", ".zshrc") + ":1"
+	if !strings.Contains(r.Detail, want) {
+		t.Errorf("expected detail to contain %q, got: %s", want, r.Detail)
 	}
 }
 
@@ -325,9 +328,13 @@ func TestCheckShellAliases_RelativeZdotdirWithDotDotThroughSymlink_FollowsOSReso
 	if r.Status != "warn" {
 		t.Fatalf("expected warn (the OS, not filepath.Join, must resolve the \"..\"), got %s (%s)", r.Status, r.Detail)
 	}
-	wantSuffix := "rc" + string(filepath.Separator) + ".zshrc"
-	if !strings.Contains(r.Detail, wantSuffix) {
-		t.Errorf("expected detail to name the resolved file, got: %s", r.Detail)
+	// The exact, uncleaned item: filepath.Join(cwd, "rc", ".zshrc") would
+	// also satisfy a suffix match on "rc/.zshrc" even though that lexically
+	// cleaned path is never read by zsh and nothing is written there in
+	// this fixture -- only the raw, symlink-resolved path proves the fix.
+	want := "alias codex in " + rawPathJoin(cwd, "link", "..", "rc", ".zshrc") + ":1"
+	if !strings.Contains(r.Detail, want) {
+		t.Errorf("expected detail to contain %q, got: %s", want, r.Detail)
 	}
 }
 
@@ -352,6 +359,14 @@ func TestCheckShellAliases_CwdThroughSymlinkWithDotDotZdotdir_FollowsOSResolutio
 	if r.Status != "warn" {
 		t.Fatalf("expected warn (the symlink target's parent, not the pre-symlink path), got %s (%s)", r.Status, r.Detail)
 	}
+	// The exact, uncleaned item: a suffix match on ".zshrc" cannot tell
+	// <A>/l/../.zshrc (what zsh actually reads, via the symlink) from a
+	// lexically cleaned <A>/.zshrc, which is never read and does not exist
+	// in this fixture.
+	want := "alias codex in " + rawPathJoin(cwd, "..", ".zshrc") + ":1"
+	if !strings.Contains(r.Detail, want) {
+		t.Errorf("expected detail to contain %q, got: %s", want, r.Detail)
+	}
 }
 
 // TestCheckShellAliases_AbsoluteZdotdirWithDotDotThroughSymlink_FollowsOSResolution
@@ -375,6 +390,13 @@ func TestCheckShellAliases_AbsoluteZdotdirWithDotDotThroughSymlink_FollowsOSReso
 	if r.Status != "warn" {
 		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
 	}
+	// The exact, uncleaned item, same rationale as AC-5b: a suffix match on
+	// "rc/.zshrc" would also accept the lexically cleaned, never-read
+	// <cwd>/rc/.zshrc.
+	want := "alias codex in " + rawPathJoin(absoluteZdotdir, ".zshrc") + ":1"
+	if !strings.Contains(r.Detail, want) {
+		t.Errorf("expected detail to contain %q, got: %s", want, r.Detail)
+	}
 }
 
 // TestCheckShellAliases_RelativeZdotdirResolvesToHome_DedupedToOne is the
@@ -390,6 +412,15 @@ func TestCheckShellAliases_RelativeZdotdirResolvesToHome_DedupedToOne(t *testing
 	}
 	if n := strings.Count(r.Detail, "alias codex in"); n != 1 {
 		t.Errorf("expected exactly one finding, got %d occurrences in: %s", n, r.Detail)
+	}
+	// Pin which candidate dedup keeps, not just that exactly one survives:
+	// the $ZDOTDIR-derived raw path (home + "/./.zshrc") comes first in
+	// list order, ahead of the plain $HOME candidate that resolves to the
+	// same real file.
+	raw := rawPathJoin(home, ".", ".zshrc")
+	want := "alias codex in ~" + string(filepath.Separator) + strings.TrimPrefix(raw, home+string(filepath.Separator)) + ":1"
+	if !strings.Contains(r.Detail, want) {
+		t.Errorf("expected detail to contain %q, got: %s", want, r.Detail)
 	}
 }
 
@@ -459,6 +490,7 @@ func TestShellAliasEnvFromOS(t *testing.T) {
 
 	t.Run("resolves Cwd from the process's working directory", func(t *testing.T) {
 		dir := t.TempDir()
+		t.Setenv("HOME", dir)
 		t.Chdir(dir)
 
 		env, err := shellAliasEnvFromOS()
@@ -1555,5 +1587,54 @@ func TestShellAliasUnreadableReason(t *testing.T) {
 	plain := errors.New("scanner gave up")
 	if got := shellAliasUnreadableReason(plain); got != "scanner gave up" {
 		t.Errorf("plain error reason = %q, want %q", got, "scanner gave up")
+	}
+}
+
+// TestShellAliasRawParent is the self-review L1 fix: a root-level path
+// keeps "/" as its parent (matching filepath.Dir), a ".." component
+// survives (unlike filepath.Dir), and a path with no separator at all is
+// returned unchanged.
+func TestShellAliasRawParent(t *testing.T) {
+	cases := []struct {
+		path string
+		want string
+	}{
+		{"/.zshrc", "/"},
+		{"/a/.zshrc", "/a"},
+		{"/a/link/../rc/.zshrc", "/a/link/../rc"},
+		{"x", "x"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.path, func(t *testing.T) {
+			if got := shellAliasRawParent(tc.path); got != tc.want {
+				t.Errorf("shellAliasRawParent(%q) = %q, want %q", tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestShellAliasJoinRaw is the self-review L2(c) fix: every trailing
+// separator on dir is trimmed, so the result never doubles a separator --
+// including a dir made entirely of separators, which trims to "" and still
+// joins correctly. A ".." component elsewhere in dir survives untouched.
+func TestShellAliasJoinRaw(t *testing.T) {
+	cases := []struct {
+		dir  string
+		name string
+		want string
+	}{
+		{"/", ".zshrc", "/.zshrc"},
+		{"/a", ".zshrc", "/a/.zshrc"},
+		{"/a/", ".zshrc", "/a/.zshrc"},
+		{"/a//", ".zshrc", "/a/.zshrc"},
+		{"rel/", ".zshrc", "rel/.zshrc"},
+		{"a/link/../rc", ".zshrc", "a/link/../rc/.zshrc"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.dir+"+"+tc.name, func(t *testing.T) {
+			if got := shellAliasJoinRaw(tc.dir, tc.name); got != tc.want {
+				t.Errorf("shellAliasJoinRaw(%q, %q) = %q, want %q", tc.dir, tc.name, got, tc.want)
+			}
+		})
 	}
 }

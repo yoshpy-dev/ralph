@@ -12,14 +12,18 @@ import (
 )
 
 // shellAliasEnv is the part of the process environment checkShellAliases
-// depends on. It is a struct (rather than reading os.UserHomeDir/os.Getenv
-// directly) so callers -- production and test alike -- can substitute
-// values through a plain function instead of mutating real environment
-// variables.
+// depends on. It is a struct (rather than reading os.UserHomeDir/os.Getenv/
+// os.Getwd directly) so callers -- production and test alike -- can
+// substitute values through a plain function instead of mutating real
+// environment variables or the real working directory.
 type shellAliasEnv struct {
 	Home    string // user home directory
 	Zdotdir string // $ZDOTDIR as seen by this process ("" when unset)
-	Cwd     string // doctor's own working directory, for resolving a relative $ZDOTDIR ("" skips a relative $ZDOTDIR entirely; see shellAliasZdotdirBase)
+
+	// Cwd is doctor's own working directory. A relative $ZDOTDIR is
+	// resolved against it ("" skips a relative $ZDOTDIR entirely); see
+	// shellAliasZdotdirBase.
+	Cwd string
 }
 
 // shellAliasEnvFromOS resolves shellAliasEnv from os.UserHomeDir, $ZDOTDIR,
@@ -51,30 +55,43 @@ var doctorShellAliasEnv = shellAliasEnvFromOS
 // on the directory itself) -- the file(s) under it can't be ruled absent,
 // so checkShellAliases must not silently read this as "no alias here".
 type shellAliasInaccessibleDir struct {
-	Dir    string // the candidate's parent directory, as an absolute path -- derived by shellAliasRawParent, not filepath.Dir, so a ".." inside a $ZDOTDIR-derived candidate is not lexically resolved away
+	// Dir is the candidate's parent directory, as an absolute path --
+	// derived by shellAliasRawParent, not filepath.Dir, so a ".." is not
+	// lexically resolved away; see shellAliasRcCandidates.
+	Dir string
+
 	Reason string // shellAliasUnreadableReason(err) for the stat failure
 }
 
 // shellAliasJoinRaw concatenates dir and name with exactly one path
-// separator between them, without filepath.Join's lexical cleaning: a ".."
-// or "." component already present in dir is left untouched for the OS to
-// resolve at stat/open time, rather than being lexically simplified away
-// before the filesystem ever sees it. A single trailing separator on dir is
-// trimmed first so the result never doubles it.
+// separator between them, without filepath.Join's lexical cleaning -- a
+// ".." or "." component already present in dir reaches the OS unresolved
+// (see shellAliasRcCandidates for why that matters). Every trailing
+// separator on dir is trimmed first, so a doubled one never survives; dir
+// consisting only of separators (e.g. "/") trims to "", and the single
+// separator this function adds back still yields the right result ("/" +
+// ".zshrc" = "/.zshrc").
 func shellAliasJoinRaw(dir, name string) string {
-	return strings.TrimSuffix(dir, string(filepath.Separator)) + string(filepath.Separator) + name
+	return strings.TrimRight(dir, string(filepath.Separator)) + string(filepath.Separator) + name
 }
 
 // shellAliasRawParent returns path's parent directory by trimming the last
 // path-separator-delimited component, without filepath.Dir's lexical
-// cleaning -- filepath.Dir would resolve a ".." component in a $ZDOTDIR-
-// derived candidate (see shellAliasZdotdirBase) before the OS ever sees it,
-// defeating the point of having built that candidate by concatenation.
+// cleaning -- see shellAliasRcCandidates for why a ".." must reach the OS
+// unresolved. A root-level path (separator at index 0, e.g. "/.zshrc")
+// keeps the separator itself as its parent, matching filepath.Dir; a path
+// with no separator at all is returned unchanged (no caller passes one
+// today).
 func shellAliasRawParent(path string) string {
-	if i := strings.LastIndexByte(path, filepath.Separator); i >= 0 {
+	i := strings.LastIndexByte(path, filepath.Separator)
+	switch {
+	case i < 0:
+		return path
+	case i == 0:
+		return path[:1]
+	default:
 		return path[:i]
 	}
-	return path
 }
 
 // shellAliasZdotdirBase returns the directory this process's $ZDOTDIR
@@ -776,7 +793,8 @@ func shellAliasDetail(sentences, notFullyParsed, couldNotRead, partiallyRead []s
 }
 
 // checkShellAliases is doctor's "Shell aliases (codex/claude)" check.
-// resolveEnv supplies the home directory and $ZDOTDIR to scan from
+// resolveEnv supplies the home directory, $ZDOTDIR, and the working
+// directory a relative $ZDOTDIR is resolved against, to scan from
 // (production: doctorShellAliasEnv; tests: a closure or TestMain's pin).
 //
 // Severity depends on the flag's class (shellAliasFlagClass), not just the
