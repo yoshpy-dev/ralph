@@ -7,7 +7,9 @@
 # textconv, external diff, rename/copy detection, the diff algorithm, the
 # big-file threshold, a user-level attributes file, root-commit diffs,
 # submodule diffs, replace refs), and checks git's exit status before
-# parsing, so a git failure is never read as a clean scan.
+# parsing, so a git failure is never read as a clean scan. --staged reads
+# each staged blob by its object id, so neither file name quoting nor
+# diff.relative can skip a file.
 #
 # Exit codes:
 #   0  scanned, nothing found
@@ -94,21 +96,50 @@ scan_stdin() {
   scan_file "$file" "$label"
 }
 
+# scan_staged -- scans each staged blob by its object id, so a file name is
+# only the finding's label and its quoting cannot decide what gets read:
+#   --no-replace-objects       HEAD and each blob as the commit records them
+#   diff.relative=false        a subdirectory cwd still lists the whole index
+#   core.quotePath=false       non-ASCII names print unquoted
+#   --no-renames               a rename or copy lists as a plain addition
+#   --diff-filter=d            every change except a deletion, type changes too
+# A listed blob that cannot be read exits 3.
 scan_staged() {
-  staged_paths="$tmp_dir/staged-paths"
-  git diff --cached --name-only --diff-filter=ACMR -- > "$staged_paths"
-
-  if [ ! -s "$staged_paths" ]; then
-    return 0
+  staged_list="$tmp_dir/staged-list"
+  list_rc=0
+  git --no-replace-objects -c diff.relative=false -c core.quotePath=false \
+    diff --cached --raw --no-abbrev --no-renames --no-color --diff-filter=d -- \
+    > "$staged_list" || list_rc=$?
+  if [ "$list_rc" -ne 0 ]; then
+    printf 'secret-scan: could not scan the staged changes: git diff --cached exited with %s\n' "$list_rc" >&2
+    exit 3
   fi
 
-  while IFS= read -r path || [ -n "$path" ]; do
-    [ -n "$path" ] || continue
-    blob="$tmp_dir/blob"
-    if git show ":$path" > "$blob" 2>/dev/null; then
-      scan_file "$blob" "$path"
+  tab="$(printf '\t')"
+  blob="$tmp_dir/blob"
+  # Each line is ":<old mode> <new mode> <old id> <new id> <status>\t<path>".
+  # git still C-quotes a path holding a tab, newline, double quote, or
+  # backslash, so the line never splits; the path is only a label.
+  while IFS="$tab" read -r meta path || [ -n "$meta" ]; do
+    [ -n "$meta" ] || continue
+    read -r _ new_mode _ new_id _ <<EOF
+$meta
+EOF
+    # A gitlink (submodule) records a commit, not content of this repo.
+    case "$new_mode" in
+      160000) continue ;;
+    esac
+    # An all-zero id means no blob is staged (an unmerged path).
+    case "$new_id" in
+      *[!0]*) ;;
+      *) continue ;;
+    esac
+    if ! git --no-replace-objects cat-file blob "$new_id" > "$blob" 2>/dev/null; then
+      printf 'secret-scan: could not scan the staged changes: blob %s for %s cannot be read\n' "$new_id" "$path" >&2
+      exit 3
     fi
-  done < "$staged_paths"
+    scan_file "$blob" "$path"
+  done < "$staged_list"
 }
 
 # scan_diff_stream [label] -- scans the added lines of a unified diff on

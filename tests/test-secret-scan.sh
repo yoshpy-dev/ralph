@@ -86,11 +86,12 @@ expect_exit "range added secret exits 1" 1 "$SCANNER" --range "$base_branch..lea
 
 # ---------------------------------------------------------------------------
 # Hermetic section: CI scans a range with git's default config, so local git
-# config and repo state must not change which added lines --range reads, and
-# a git failure must not read as a clean scan. From here on every repo runs
-# under an isolated HOME and global config (the cases above run under the
-# caller's own config). Fixture values are assembled at runtime from split
-# pieces: this file's own history is read by the same range scan.
+# config and repo state must not change which added lines --range reads (nor
+# which files --staged reads), and a git failure must not read as a clean
+# scan. From here on every repo runs under an isolated HOME and global config
+# (the cases above run under the caller's own config). Fixture values are
+# assembled at runtime from split pieces: this file's own history is read by
+# the same range scan.
 # ---------------------------------------------------------------------------
 hermetic_home="$workdir/.home"
 mkdir -p "$hermetic_home"
@@ -319,6 +320,114 @@ expect_exit "submodule bump with diff.submodule=diff matches the default result"
 colored_diff="$workdir/colored.diff"
 printf '\033[1mdiff --git a/a b/a\033[m\n\033[1m--- a/a\033[m\n\033[1m+++ b/a\033[m\n\033[32m+\033[m\033[32mdeploy token %s\033[m\n' "$token" > "$colored_diff"
 expect_exit "AC-10: --diff finds the token in a colored added line" 1 sh -c "'$SCANNER' --diff 'colored diff' < '$colored_diff'"
+
+# --staged reads each staged blob by its object id: file name quoting,
+# diff.relative, and a local replace ref cannot skip or swap a file.
+repo="$workdir/staged-names"
+new_repo "$repo"
+cd "$repo"
+expect_exit "staged: an empty staging area exits 0" 0 "$SCANNER" --staged
+
+# expect_staged_name_found <description> <file name> -- stages one file
+# holding the token under <file name>, scans, then unstages and removes it.
+expect_staged_name_found() {
+  printf 'deploy token %s\n' "$token" > "$2"
+  git add -- "$2"
+  expect_exit "AC-7: staged file whose name has $1 is scanned" 1 "$SCANNER" --staged
+  git rm -q --cached -- "$2"
+  rm -f -- "$2"
+}
+
+non_ascii_name="$(printf 'caf\303\251.txt')"
+expect_staged_name_found "a non-ASCII character" "$non_ascii_name"
+expect_stderr_contains "AC-7: a non-ASCII name is labeled unquoted" "  - $non_ascii_name:1 ["
+expect_staged_name_found "a space" 'with space.txt'
+expect_staged_name_found "a tab" "$(printf 'with\ttab.txt')"
+expect_staged_name_found "a double quote" 'with"quote.txt'
+expect_staged_name_found "a backslash" 'with\backslash.txt'
+expect_staged_name_found "a leading dash" '-leading-dash.txt'
+expect_staged_name_found "a newline" "$(printf 'with\nnewline.txt')"
+
+repo="$workdir/staged-relative"
+new_repo "$repo"
+cd "$repo"
+mkdir sub
+printf 'placeholder\n' > sub/placeholder.txt
+git add sub/placeholder.txt
+git commit -q -m 'add sub'
+git config diff.relative true
+printf 'deploy token %s\n' "$token" > leak.txt
+git add leak.txt
+cd sub
+expect_exit "AC-8: staged scan with diff.relative=true from a subdirectory reads a file outside it" 1 "$SCANNER" --staged
+cd ..
+
+repo="$workdir/staged-typechange"
+new_repo "$repo"
+cd "$repo"
+ln -s README.md swapped.txt
+git add swapped.txt
+git commit -q -m 'add symlink'
+rm swapped.txt
+printf 'deploy token %s\n' "$token" > swapped.txt
+git add swapped.txt
+expect_exit "staged: a symlink replaced by a file holding the token is scanned" 1 "$SCANNER" --staged
+
+repo="$workdir/staged-rename"
+new_repo "$repo"
+cd "$repo"
+printf 'deploy token %s\n' "$token" > base.txt
+git add base.txt
+git commit -q -m 'add base file'
+git mv base.txt renamed.txt
+expect_exit "staged: a renamed file is scanned" 1 "$SCANNER" --staged
+expect_stderr_contains "staged: a renamed file is labeled by its new name" "  - renamed.txt:1 ["
+
+repo="$workdir/staged-replace"
+new_repo "$repo"
+cd "$repo"
+printf 'deploy token %s\n' "$token" > leak.txt
+git add leak.txt
+clean_blob="$(printf 'clean\n' | git hash-object -w --stdin)"
+git replace "$(git rev-parse :leak.txt)" "$clean_blob"
+expect_exit "staged: a local replace ref cannot swap the staged blob" 1 "$SCANNER" --staged
+git replace -d "$(git rev-parse :leak.txt)" >/dev/null
+# A replaced HEAD whose tree already holds the staged file would hide it
+# from the staged list.
+stand_in="$(git commit-tree -p HEAD -m 'stand-in holding the index' "$(git write-tree)")"
+git replace HEAD "$stand_in"
+expect_exit "staged: a local replace ref for HEAD cannot hide a staged file" 1 "$SCANNER" --staged
+
+repo="$workdir/staged-unreadable"
+new_repo "$repo"
+cd "$repo"
+printf 'deploy token %s\n' "$token" > leak.txt
+git add leak.txt
+blob="$(git rev-parse :leak.txt)"
+rm -f ".git/objects/$(printf '%s' "$blob" | cut -c1-2)/$(printf '%s' "$blob" | cut -c3-)"
+expect_exit "AC-9: a staged blob that cannot be read exits 3" 3 "$SCANNER" --staged
+expect_stderr_contains "AC-9: an unreadable blob names the file" "could not scan the staged changes: blob $blob for leak.txt"
+
+repo="$workdir/staged-gitlink"
+new_repo "$repo"
+cd "$repo"
+git update-index --add --cacheinfo "160000,$(git rev-parse HEAD),sub"
+expect_exit "AC-9: a staged gitlink does not fail the scan" 0 "$SCANNER" --staged
+
+repo="$workdir/staged-unmerged"
+new_repo "$repo"
+cd "$repo"
+printf 'base\n' > conflict.txt
+git add conflict.txt
+git commit -q -m 'add conflict file'
+git checkout -q -b other
+printf 'other side\n' > conflict.txt
+git commit -q -a -m 'other side'
+git checkout -q main
+printf 'main side\n' > conflict.txt
+git commit -q -a -m 'main side'
+git merge -q other >/dev/null 2>&1 || true
+expect_exit "staged: an unmerged path (no staged blob) does not fail the scan" 0 "$SCANNER" --staged
 
 printf '\n-- Summary --\n  PASS: %s\n  FAIL: %s\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
