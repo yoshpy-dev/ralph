@@ -112,3 +112,131 @@ No CRITICAL or HIGH findings.
 - LOW-2: fix now. It is one token.
 - LOW-1 and LOW-6: comment wording. Fix these in the same pass.
 - LOW-3, LOW-4, LOW-5: these fit the batch of tech-debt rows the plan already plans for out-of-scope findings, or they can be fixed cheaply now.
+
+## Cycle 2
+
+- Date: 2026-09-25
+- Plan: docs/plans/active/2026-09-25-secret-scan-git-config.md
+- Reviewer: reviewer subagent (Claude Code)
+- Scope: diff quality only for `git diff f6a6c82...HEAD` at 45ce71f, read in full with the whole branch as context. The range contains the code commits aecee05 (Slice D, fixes for this report's cycle-1 findings) and ca8a212 (Slice E, cross-review AR-1), and the documentation commits 95a02f9, b76d9da, 237dc14, f6d1b87, f413a58, and 45ce71f. Cycle-1 findings are re-opened only where they came back or got worse. This is cycle 2 of 2, so any LOW left unfixed here becomes a deferral.
+
+### Evidence reviewed
+
+- Starting state: worktree HEAD 45ce71f, `git status --porcelain` empty. Both scanners are still `cmp`-identical to their `templates/base/scripts/` copies. The DAG is linear: ca8a212's parent is f413a58, and aecee05's parent is f6a6c82.
+- Test suites: `sh tests/test-secret-scan.sh` passes 69/69 and `sh tests/test-secret-scan-branch.sh` passes 108/108. Both also pass on a scratch copy with both scanners run under `/bin/dash`. The TERM test passed in 3 of 3 repeated runs.
+- **State machine against a hunk-counting oracle.** The oracle is a small Python parser that reads `@@ -a,b +c,d @@` and counts lines down each hunk; `\` lines do not count. I compared its output with three awk programs taken byte for byte from `git show <rev>:scripts/secret-scan.sh`: the new awk (45ce71f), main's (c1785b8), and cycle 1's (f6a6c82).
+  - Shape fixture, a five-commit `main..feature` range. It covers:
+    - several files in one commit;
+    - `commit <sha>` lines between commits, and an empty commit;
+    - a binary file (`Binary files ... differ`);
+    - a mode-only change;
+    - a pure rename, and a rename with an edit;
+    - a new empty file;
+    - `\ No newline at end of file`;
+    - a submodule pointer change under `--submodule=short`;
+    - CRLF content;
+    - a deletion;
+    - a file with two hunks;
+    - content lines that look like headers: `++ `, `+++ `, `diff --git`, `@@`, `--- `, `-- `, and one that starts with a literal ESC `[32m`;
+    - file names that look like headers or tokens: a token-shaped name, `@@x`, `diff y`, `+plus.txt`.
+
+    Results:
+    - new awk: identical to the oracle (24 lines).
+    - main: drops exactly the three `++ ` content lines.
+    - cycle 1: also removes the content's own escape sequence.
+    - `--color=always` output of the same range: after removing SGR codes from the awk's output, it equals the oracle.
+    - The real scanner gives rc 0 on this range and on its colored log: the token-shaped name is never reported.
+  - This repo's full history at HEAD (1,604 commits, 24.7 MB of `git log -p` with `scan_range`'s pins): main awk, new awk, and the oracle each extract 215,825 lines, and all three outputs are byte-identical.
+- **awk portability of `while (sub(/^\033\[[0-9;:]*m/, "")) {}`.** I ran the program on the plain and colored shape logs, and on a file with several SGR codes in front of one line, under:
+  - BWK awk 20200816 (macOS),
+  - mawk (`ubuntu:24.04`, CI's awk),
+  - busybox awk (`redis:7-alpine`),
+  - gawk (installed in the same image).
+
+  All four produce identical bytes.
+- **git 2.8.6** (`alpine:3.4`, busybox sh and awk): the HEAD scanner's `--range` gives rc 1 with both findings (a plain token line and a `++ ` line), also rc 1 with 2 findings under `color.ui=always`. `--staged` gives rc 1, `--file` on a missing path gives rc 3, and `--diff` on a `++ ` hunk line gives rc 1. The header's claim "every option used works on git 2.8" holds.
+- **The `diff.renameLimit=1000 (git's default since 2.33)` comment:** with 500 renamed-and-edited files, git 2.32.7 (`alpine:3.14`) skips inexact rename detection (0 renames, plus the warning), and git 2.34.8 (`alpine:3.15`) detects all 500. This is consistent with a default of 400 before 2.33 and 1000 from 2.33.
+- Mutations, each run on a scratch copy and checked for its changed-line count before running. The worktree was never modified.
+
+  | Mutation | Result |
+  | --- | --- |
+  | drop the `diff ` reset | both token-name tests red |
+  | skip every `+++ ` line again | both `++ ` tests red |
+  | never enter a hunk | both `++ ` tests red |
+  | drop the leading-SGR strip | AC-10 and the colored-hunk test red |
+  | cycle-1 single-line trap | TERM test red, exit 0 where 143 is wanted |
+  | drop `-c diff.renameLimit=1000` | the renameLimit test red |
+  | drop the `--file` check | three tests red |
+  | drop `is_object_id` | three tests red |
+  | `while (sub(...))` changed to a single `sub` | nothing red (see Coverage gaps) |
+  | drop `-c log.showSignature=false` | nothing red (already recorded in tech-debt) |
+
+- Probes of the tech-debt rows:
+  - An uncommitted working-tree `.gitattributes` holding `*.txt -diff` turns a range that gives rc 1 into rc 0. Setting `GIT_ATTR_SOURCE=HEAD` on the same run brings it back to rc 1.
+  - `diff.external` and `GIT_EXTERNAL_DIFF` are not invoked by `git log -p` without `--ext-diff`, which confirms the row's "structural no-op" claim.
+  - `--diff` on a unified diff with two files and no `diff ` line between them (plain `diff -u` concatenation, or svn-style `Index:` sections) reports the second file's token-shaped name (rc 1).
+
+### Findings
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| LOW | `docs/quality/quality-gates.md:46`, `templates/base/docs/quality/quality-gates.md:46` | Cycle-1 LOW-1 has come back on a new, shipped surface. The script header now correctly lists the local-only gaps it cannot pin. But `/sync-docs` added "so a local run scans the same added lines as CI **regardless of local git config**" to both copies of the quality gates, and one of those gaps, a local `diff.<driver>.binary=true`, is itself a local git config setting. The `templates/base/` copy ships to scaffolded projects. `docs/reports/sync-docs-2026-09-25-secret-scan-git-config.md:14` repeats the claim. | Cycle-1 probe: `diff.scrub.binary=true` gives rc 0 where CI gives rc 1. `scripts/secret-scan.sh:10-13` names the same gap. | Say "regardless of the local git settings it pins (the scanner header lists the known exceptions)" in both copies. |
+| LOW | `scripts/secret-scan.sh:10-13`; `docs/tech-debt/README.md:139` | The header's list of "Known local-only gaps it cannot pin" names two gaps. A third one reproduces: an uncommitted working-tree `.gitattributes` with `*.txt -diff` makes the range scan clean where CI's checkout of HEAD finds the token. It can also be pinned: `GIT_ATTR_SOURCE=HEAD` reads attributes from HEAD's tree, which is what CI's worktree holds. The tech-debt row covering it has four inaccuracies. It says the item is "plausible mechanism, unverified this cycle". Its Justification says "Reproduced during #176's investigation". It opens with "none pinnable by `-c` or a command-line option". Its own fourth item says "closable with `GIT_NO_REPLACE_OBJECTS=1`", which is the env form of the same `--no-replace-objects` option `scan_range` already passes. Impact is limited: `/pr` step 2 commits before the strict scan runs, so the gap mainly affects the default-mode `run-verify.sh` run. | Fixture: rc 1 at baseline, rc 0 with the uncommitted `.gitattributes`, rc 1 again with `GIT_ATTR_SOURCE=HEAD`. Reading of the row's cells. | Either add `GIT_ATTR_SOURCE=HEAD` to the `scan_range` git call (an unknown env var is ignored by an older git; it applies only to the `--range` path, where HEAD exists), or add the gap to the header list. Rewrite the row: item 3 reproduced (with this fixture), items 3 and 4 pinnable (`GIT_ATTR_SOURCE=HEAD`, `GIT_NO_REPLACE_OBJECTS=1`), and drop "none pinnable". I did not check which git version added `GIT_ATTR_SOURCE`. |
+| LOW | `scripts/secret-scan.sh:174-180`, `:188-190` | In `--diff` mode, the state machine resets the header state only on a `diff ` line. For a unified diff with several files and no `diff ` line between them (concatenated `diff -u` output, svn-style `Index:` sections), the second and later files' `+++ ` headers arrive while `in_hunk` is still 1. They are then read as added content, so a token-shaped file name is reported. Main skipped every `+++ ` line, so this is a new false positive, though only an over-report. `--range` is not affected (git always prints `diff --git`, and the full-history oracle comparison is identical), and no caller in the repo uses `--diff`. The comment states the rule accurately. | `--diff` on `--- a/x`, `+++ b/x`, `@@`, `+clean`, `--- a/<token-name>`, `+++ b/<token-name>`, `@@`, `+clean`: one finding, rc 1. The svn-style input also gives rc 1. | Record it in tech-debt. Either say in the usage text or comment that `--diff` expects git-style input with one `diff ` line per file, or count hunk lines from the `@@ -a,b +c,d @@` header (this review's oracle does that, and it matched the new awk on the full history), so a header after a hunk is recognized without a `diff ` line. |
+| LOW | `scripts/secret-scan.sh:22-23`, `:127`; `docs/tech-debt/README.md:140` | Three small wording issues. (a) The exit-3 parenthetical "(a missing or unreadable --file, or git failed)" leaves out the third cause the same commit added: a staged entry that does not parse (`:152-155`). (b) `--no-abbrev` is explained as "full object ids, as cat-file reads them", but `cat-file` accepts abbreviated ids. The reader that needs full ids is `is_object_id` (40 or 64 hex), and without the flag every staged file exits 3. (c) The new test-gaps row attributes an observation to "self-review Slice D", but Slice D is an implementer slice. The cycle-1 self-review noted that `--no-show-signature` was untested. | Reading of the lines cited. | (a) Add "or a staged entry that does not parse". (b) Say "full object ids, which is_object_id requires". (c) Say "the cycle-1 self-review". |
+
+No CRITICAL, HIGH, or MEDIUM findings.
+
+Status of the cycle-1 findings at HEAD:
+- MEDIUM-1: fixed, with a discriminating test.
+- LOW-2, LOW-3, LOW-4: fixed, each with a discriminating test.
+- LOW-5: fixed by ca8a212, and the "++ " item was correctly removed from the CI-shared tech-debt row.
+- LOW-6: fixed.
+- LOW-1: fixed in the script header, but it came back in the quality gates (the first finding above).
+
+### Positive notes
+
+- The state-aware header rule matches a line-counting oracle exactly, both on real git output (215,825 lines across the whole history) and on a fixture built to contain every header-looking content line and header-looking file name I could think of. It is also a strict superset of main's reads: the only lines it adds are hunk content that starts with `++ `.
+- The leading-only SGR strip removes the root cause of AR-1 instead of patching around it. A file's own escape bytes now reach the patterns unchanged, and a colored `+++ b/<name>` header is still skipped.
+- Every Slice D and Slice E fix came with a test that turns red when the fix is reverted. The TERM test is built carefully: the FIFO holds the scanner in `cat`, the signal is sent only after the findings file exists, and it measures the scanner rather than the harness. It exits 0 under the cycle-1 trap and 143 under the fixed one. The fake `git` wrapper for the unparsed-line test intercepts only `--raw` and passes every other call through.
+- The fixes follow the cycle-1 recommendations as mechanisms, not just instances. The header now says "listed there" and names its exceptions instead of claiming "every". `-c log.showSignature=false` is a portable pin. The traps copy the sibling script's pattern and its comment.
+- The branch-script header's exit-code list is now self-consistent, and the `/pr` skill's exit-3 text (all four copies) matches it.
+
+### Coverage gaps
+
+- No test depends on the `while` in the SGR strip: a single `sub` keeps every test green. git's own colored output never puts two SGR codes in front of a line (checked with `color.diff.new='green bold reverse'`, `diff.colorMoved=zebra`, `diff.wsErrorHighlight=all`). The loop only matters for `--diff` input from other tools. A stacked-code case in the colored `--diff` test would pin it.
+- `GIT_ATTR_SOURCE`: I verified its effect on git 2.49 only. I did not check which git release introduced it.
+- Combined-diff input (`@@@`, lines that start with ` +`) under `--diff` is not handled, the same as on main. `git log -p` prints no merge diffs, which is already a Non-goal with a tech-debt row.
+- The cycle-1 `sync-docs` report (lines 53-60) still describes the CI-shared row as including the `++ ` item. ca8a212 changed that. The cycle-2 `/sync-docs` should say so.
+
+### Answers to the focus points
+
+1. **State machine.** For `git log -p` output it reads exactly the added lines: the oracle comparison is identical on the shape fixture and on the full history.
+   - Every shape listed was checked: several files per commit, several commits with `commit <sha>` lines, binary, mode-only, rename with and without an edit, new empty file, `\ No newline`, `--submodule=short`, CRLF, deletion, multi-hunk, and colored `--diff` input.
+   - No real added line is skipped, because a line inside a hunk can never start with `diff ` or `@@`: every content line carries its prefix.
+   - No header line is scanned for `--range`, and token-shaped file names are never reported (rc 0 on the fixture).
+   - The one header-as-content case is `--diff` input without `diff ` separator lines (LOW, third finding).
+2. **Leading-SGR loop.** BWK awk, mawk, busybox awk, and gawk give identical bytes on plain, colored, and stacked-code inputs. The anchored pattern needs at least 3 bytes, so the loop always ends. It has no discriminating test (Coverage gaps).
+3. **CI parity.**
+   - For `--range`, the new rule reads more than main in exactly one class: hunk lines whose content starts with `++ `, which is intended. Nothing else changes: on the full history all three extractions are byte-identical, and every other difference is a line that does not start with `+`, which neither version prints.
+   - It can newly block a branch only if that branch adds a line starting with `++ ` that also matches a secret pattern. That is a true positive. False positives are unlikely: git shows a committed patch's own `+++ ` headers as `++++ `, which main already scanned. So the change is acceptable.
+   - `--diff` also reads more for colored input (intended) and for multi-file input without `diff ` lines (the third finding). No CI caller uses `--diff`.
+4. **Tech-debt rows and docs.**
+   - The CI-shared row matches the code after the `++ ` removal.
+   - The "Four local-only ways" row is inaccurate on reproduction and on pinnability (second finding).
+   - The test-gaps row's no-op claim is correct, and its attribution is off (fourth finding).
+   - The quality gates overclaim (first finding).
+   - `/pr` SKILL.md (four copies) and `repo-map.md` match the code.
+5. **Comments and tests.**
+   - The `scan_diff_stream` comment describes the rule exactly. The `scan_range` option list still matches the invocation in order, and the "since 2.33" claim holds (2.32.7 against 2.34.8).
+   - Three wording nits (fourth finding).
+   - The tests are hermetic: `GIT_CONFIG_NOSYSTEM=1` and `unset XDG_CONFIG_HOME` were added in both files. Their names say what they protect. They build their token fixtures at runtime and discriminate every fix under mutation, apart from the SGR loop.
+
+### Recommendation
+
+**Pass**: no CRITICAL, HIGH, or MEDIUM findings, so the branch can proceed to `/verify` → `/test` → `/sync-docs` → `/cross-review` → `/pr`.
+
+This is the final cycle, so each of the four LOWs must be fixed now or recorded:
+- Findings 1 and 4 are wording changes, cheap to fix in the `/sync-docs` pass.
+- For finding 2, correct the existing "Four local-only ways" row in the same pass (reproduced; `GIT_ATTR_SOURCE=HEAD` and `GIT_NO_REPLACE_OBJECTS=1` as the known closures), or add the one-line env pin.
+- For finding 3, either state git-style input in the `--diff` usage, or add it to the tech-debt register together with the untested SGR loop.
