@@ -11,6 +11,7 @@
 - Total reviewer findings: 2 (cycle 2)
 - After triage: ACTION_REQUIRED=2, WORTH_CONSIDERING=0, DISMISSED=0
 - User decision (2026-09-24, AskUserQuestion, cycle 1): fix both findings (AR-1, AR-2) and re-run the full pipeline as cycle 2/2
+- User decision (2026-09-25, AskUserQuestion, cycle 2, cap reached): create the PR with AR-3 and AR-4 recorded as known gaps and fix them in a follow-up issue
 
 ## Triage context
 
