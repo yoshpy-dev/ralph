@@ -1,5 +1,19 @@
 #!/usr/bin/env sh
 # secret-scan.sh - shared secret scanner for Ralph git hooks.
+#
+# CI runs --range with git's default config, so a local --range must read
+# the same added lines: scan_range neutralizes every local git setting that
+# changes which added lines `git log -p` prints (color, diff.relative,
+# textconv, external diff, rename/copy detection, the diff algorithm, the
+# big-file threshold, a user-level attributes file, root-commit diffs,
+# submodule diffs, replace refs), and checks git's exit status before
+# parsing, so a git failure is never read as a clean scan.
+#
+# Exit codes:
+#   0  scanned, nothing found
+#   1  scanned, found something
+#   2  usage error
+#   3  could not scan (git failed, so the content was not fully read)
 set -eu
 
 usage() {
@@ -97,21 +111,57 @@ scan_staged() {
   done < "$staged_paths"
 }
 
+# scan_diff_stream [label] -- scans the added lines of a unified diff on
+# stdin. ANSI color sequences are removed first: in a colored diff an added
+# line starts with an escape sequence, not with "+".
 scan_diff_stream() {
   label=${1:-diff}
   diff_file="$tmp_dir/diff"
   added_file="$tmp_dir/diff-added"
   cat > "$diff_file"
   awk '
+    { gsub(/\033\[[0-9;:]*m/, "") }
     /^\+\+\+ / { next }
     /^\+/ { sub(/^\+/, ""); print }
   ' "$diff_file" > "$added_file"
   scan_file "$added_file" "$label"
 }
 
+# scan_range <rev-range> -- reads the range the way a fresh clone with git's
+# default config (CI) does. Each option below neutralizes one local setting
+# that changes which added lines `git log -p` prints:
+#   --no-replace-objects             refs/replace/* substitutions
+#   diff.relative=false              a subdirectory cwd
+#   diff.renames=true                renames detected, copies not
+#   core.bigFileThreshold=512m       a small threshold turns text into binary
+#   core.attributesFile=/dev/null    a user-level attributes file (-diff)
+#   log.showRoot=true                a root commit's own diff
+#   --no-color                       color.ui / color.diff
+#   --no-textconv, --no-ext-diff     diff drivers from the local config
+#   --diff-algorithm=default         diff.algorithm
+#   --submodule=short                diff.submodule
+#   --no-show-signature              log.showSignature
+# The output goes to a file, not a pipe, so git's exit status is checked
+# before parsing: a git log that fails before or partway through its output
+# exits 3 rather than scanning what it printed.
 scan_range() {
   range=$1
-  git log --format='commit %H' --no-ext-diff -p "$range" -- | scan_diff_stream "$range"
+  log_file="$tmp_dir/range-log"
+  log_rc=0
+  git --no-replace-objects \
+    -c diff.relative=false \
+    -c diff.renames=true \
+    -c core.bigFileThreshold=512m \
+    -c core.attributesFile=/dev/null \
+    -c log.showRoot=true \
+    log --format='commit %H' --no-color --no-textconv --no-ext-diff \
+    --diff-algorithm=default --submodule=short --no-show-signature \
+    -p "$range" -- > "$log_file" || log_rc=$?
+  if [ "$log_rc" -ne 0 ]; then
+    printf 'secret-scan: could not scan %s: git log exited with %s, so the range was not (fully) scanned\n' "$range" "$log_rc" >&2
+    exit 3
+  fi
+  scan_diff_stream "$range" < "$log_file"
 }
 
 case "${1:-}" in
