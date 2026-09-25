@@ -12,24 +12,33 @@ import (
 )
 
 // shellAliasEnv is the part of the process environment checkShellAliases
-// depends on. It is a struct (rather than reading os.UserHomeDir/os.Getenv
-// directly) so callers -- production and test alike -- can substitute
-// values through a plain function instead of mutating real environment
-// variables.
+// depends on. It is a struct (rather than reading os.UserHomeDir/os.Getenv/
+// os.Getwd directly) so callers -- production and test alike -- can
+// substitute values through a plain function instead of mutating real
+// environment variables or the real working directory.
 type shellAliasEnv struct {
 	Home    string // user home directory
 	Zdotdir string // $ZDOTDIR as seen by this process ("" when unset)
+
+	// Cwd is doctor's own working directory. A relative $ZDOTDIR is
+	// resolved against it ("" skips a relative $ZDOTDIR entirely); see
+	// shellAliasZdotdirBase.
+	Cwd string
 }
 
-// shellAliasEnvFromOS resolves shellAliasEnv from os.UserHomeDir and
-// $ZDOTDIR. This is the production resolver; doctorShellAliasEnv below wraps
-// it as the package-level default that runDoctorFull actually calls.
+// shellAliasEnvFromOS resolves shellAliasEnv from os.UserHomeDir, $ZDOTDIR,
+// and os.Getwd. This is the production resolver; doctorShellAliasEnv below
+// wraps it as the package-level default that runDoctorFull actually calls.
+// A failed os.Getwd leaves Cwd empty rather than failing env resolution --
+// see shellAliasZdotdirBase for what an empty Cwd means for a relative
+// $ZDOTDIR.
 func shellAliasEnvFromOS() (shellAliasEnv, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return shellAliasEnv{}, err
 	}
-	return shellAliasEnv{Home: home, Zdotdir: os.Getenv("ZDOTDIR")}, nil
+	cwd, _ := os.Getwd()
+	return shellAliasEnv{Home: home, Zdotdir: os.Getenv("ZDOTDIR"), Cwd: cwd}, nil
 }
 
 // doctorShellAliasEnv is the environment resolver runDoctorFull hands to
@@ -46,44 +55,113 @@ var doctorShellAliasEnv = shellAliasEnvFromOS
 // on the directory itself) -- the file(s) under it can't be ruled absent,
 // so checkShellAliases must not silently read this as "no alias here".
 type shellAliasInaccessibleDir struct {
-	Dir    string // the candidate's parent directory, as an absolute path
+	// Dir is the candidate's parent directory, as an absolute path --
+	// derived by shellAliasRawParent, not filepath.Dir, so a ".." is not
+	// lexically resolved away; see shellAliasRcCandidates.
+	Dir string
+
 	Reason string // shellAliasUnreadableReason(err) for the stat failure
+}
+
+// shellAliasJoinRaw concatenates dir and name with exactly one path
+// separator between them, without filepath.Join's lexical cleaning -- a
+// ".." or "." component already present in dir reaches the OS unresolved
+// (see shellAliasRcCandidates for why that matters). Every trailing
+// separator on dir is trimmed first, so a doubled one never survives; dir
+// consisting only of separators (e.g. "/") trims to "", and the single
+// separator this function adds back still yields the right result ("/" +
+// ".zshrc" = "/.zshrc").
+func shellAliasJoinRaw(dir, name string) string {
+	return strings.TrimRight(dir, string(filepath.Separator)) + string(filepath.Separator) + name
+}
+
+// shellAliasRawParent returns path's parent directory by trimming the last
+// path-separator-delimited component, without filepath.Dir's lexical
+// cleaning -- see shellAliasRcCandidates for why a ".." must reach the OS
+// unresolved. A root-level path (separator at index 0, e.g. "/.zshrc")
+// keeps the separator itself as its parent, matching filepath.Dir; a path
+// with no separator at all is returned unchanged (no caller passes one
+// today).
+func shellAliasRawParent(path string) string {
+	i := strings.LastIndexByte(path, filepath.Separator)
+	switch {
+	case i < 0:
+		return path
+	case i == 0:
+		return path[:1]
+	default:
+		return path[:i]
+	}
+}
+
+// shellAliasZdotdirBase returns the directory this process's $ZDOTDIR
+// resolves to, as a raw (uncleaned) string, or "" when there is nothing to
+// scan under it: $ZDOTDIR is unset, or it is relative and env.Cwd is empty
+// (shellAliasEnvFromOS leaves Cwd empty when os.Getwd failed). A relative
+// $ZDOTDIR is resolved against env.Cwd with shellAliasJoinRaw, never
+// filepath.Join -- see shellAliasRcCandidates' doc comment for why a ".."
+// inside $ZDOTDIR must reach the OS unresolved.
+func shellAliasZdotdirBase(env shellAliasEnv) string {
+	if env.Zdotdir == "" {
+		return ""
+	}
+	if filepath.IsAbs(env.Zdotdir) {
+		return env.Zdotdir
+	}
+	if env.Cwd == "" {
+		return ""
+	}
+	return shellAliasJoinRaw(env.Cwd, env.Zdotdir)
 }
 
 // shellAliasRcCandidates returns the rc files the check scans, in order,
 // plus any candidate directory whose stat failed inconclusively (see
-// shellAliasInaccessibleDir). Only files that exist are read; each is
-// resolved through filepath.EvalSymlinks and deduplicated by its real path
-// (on macOS a ~/.zshrc symlinked to ~/.config/zsh/.zshrc must count once --
-// the reported file:line still names the symlink candidate, not the
-// resolved target, since dedup keeps the first candidate in list order, not
-// the resolved one). The list is deliberately static -- files pulled in via
+// shellAliasInaccessibleDir). Only non-directory paths that exist become
+// candidates -- a directory is silently skipped, and scanShellAliasFile (not
+// this function) is what rejects a candidate that stats successfully but is
+// not a regular file, see its doc comment. Each candidate is resolved
+// through filepath.EvalSymlinks and deduplicated by its real path (on macOS
+// a ~/.zshrc symlinked to ~/.config/zsh/.zshrc must count once -- the
+// reported file:line still names the symlink candidate, not the resolved
+// target, since dedup keeps the first candidate in list order, not the
+// resolved one). The list is deliberately static -- files pulled in via
 // `source` are not followed; checkShellAliases' Detail names every file it
 // actually scanned, so a `source`d alias reads as outside what was
 // checked, not as a silent miss.
 //
 // herdr's pane runs a login zsh, which reads .zshenv, .zprofile, .zshrc,
 // and .zlogin -- in that load order -- from $ZDOTDIR, falling back to
-// $HOME when $ZDOTDIR is unset. The candidate list scans those four files
-// under each of $ZDOTDIR (only when set and absolute -- a relative
-// $ZDOTDIR is ignored, since zsh itself would refuse it), $HOME, and
+// $HOME when $ZDOTDIR is unset. zsh resolves a relative $ZDOTDIR against
+// the shell's own working directory, not against $HOME. This check has no
+// way to observe the herdr pane's actual working directory (the seat's
+// --cwd), so it approximates with doctor's own working directory instead
+// (env.Cwd, filled by shellAliasEnvFromOS from os.Getwd -- see
+// shellAliasZdotdirBase). The candidate list scans those four files under
+// each of $ZDOTDIR (set, and either absolute or relative with a non-empty
+// env.Cwd to resolve it against -- otherwise skipped entirely), $HOME, and
 // $HOME/.config/zsh, in that order: $HOME and $HOME/.config/zsh are
 // scanned even when $ZDOTDIR is set and zsh itself would skip them,
-// because this process's $ZDOTDIR is not guaranteed to match the one
-// herdr's login-zsh pane resolves from /etc/zshenv, so the list
-// intentionally over-approximates rather than under-approximates. After
-// the zsh files come ~/.zsh_aliases, the bash files (.bashrc,
-// .bash_profile, .bash_login, .bash_aliases, .profile), and finally
-// ~/.config/fish/config.fish.
+// because this process's own resolution of $ZDOTDIR is not guaranteed to
+// match what herdr's login-zsh pane actually reads (a relative $ZDOTDIR
+// resolved from doctor's cwd is an even weaker guarantee than an absolute
+// one), so the list intentionally over-approximates rather than
+// under-approximates. Every $ZDOTDIR-derived candidate is built by string
+// concatenation (shellAliasJoinRaw), never filepath.Join: zsh hands
+// $ZDOTDIR/.zshrc to the OS exactly as written, so a ".." inside $ZDOTDIR
+// is resolved by the OS at stat/open time -- against wherever a preceding
+// symlink component actually points, if any -- rather than lexically
+// removed beforehand the way filepath.Join would. After the zsh files come
+// ~/.zsh_aliases, the bash files (.bashrc, .bash_profile, .bash_login,
+// .bash_aliases, .profile), and finally ~/.config/fish/config.fish.
 func shellAliasRcCandidates(env shellAliasEnv) ([]string, []shellAliasInaccessibleDir) {
 	var raw []string
 
-	zshDirs := []string{}
-	if env.Zdotdir != "" && filepath.IsAbs(env.Zdotdir) {
-		zshDirs = append(zshDirs, env.Zdotdir)
+	if base := shellAliasZdotdirBase(env); base != "" {
+		for _, f := range []string{".zshenv", ".zprofile", ".zshrc", ".zlogin"} {
+			raw = append(raw, shellAliasJoinRaw(base, f))
+		}
 	}
-	zshDirs = append(zshDirs, env.Home, filepath.Join(env.Home, ".config", "zsh"))
-	for _, dir := range zshDirs {
+	for _, dir := range []string{env.Home, filepath.Join(env.Home, ".config", "zsh")} {
 		for _, f := range []string{".zshenv", ".zprofile", ".zshrc", ".zlogin"} {
 			raw = append(raw, filepath.Join(dir, f))
 		}
@@ -105,7 +183,7 @@ func shellAliasRcCandidates(env shellAliasEnv) ([]string, []shellAliasInaccessib
 			if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
 				continue // the path cannot exist -- nothing was hidden from us
 			}
-			dir := filepath.Dir(c)
+			dir := shellAliasRawParent(c)
 			if !seenDir[dir] {
 				seenDir[dir] = true
 				inaccessible = append(inaccessible, shellAliasInaccessibleDir{Dir: dir, Reason: shellAliasUnreadableReason(err)})
@@ -382,7 +460,10 @@ type shellAliasFileScan struct {
 	Unclosed []int
 
 	// Opened reports whether the file was successfully opened at all --
-	// when false, Err came from os.Open and the file was never read.
+	// when false, Err came from the leading os.Stat (a stat failure, or a
+	// synthetic "not a regular file" error for a candidate that exists but
+	// is a FIFO, device, or socket) or from os.Open, and the file was
+	// never read.
 	Opened bool
 
 	// Err is non-nil either when Opened is false (see above) or when the
@@ -395,18 +476,32 @@ type shellAliasFileScan struct {
 // scanShellAliasFile reads one rc file and returns every codex/claude alias
 // definition found, in file order, whether or not it carries a conflicting
 // flag (shellAliasFileScan.Defs), plus every alias statement that was never
-// fully read (shellAliasFileScan.Unclosed). Each physical line is bounded
-// at 1 MiB (bufio.Scanner's own 64 KiB default would otherwise abort the
-// whole file on one long line). When a line's last statement is an
-// unterminated alias statement (see parseAliasStatements' openAlias), up to
-// 32 further physical lines are appended and re-parsed as one logical line
-// before giving up; past that point, or at EOF, whatever definitions the
-// statement yielded from what was actually read are kept and marked
-// Incomplete, and the statement's first line is recorded in Unclosed
-// regardless of whether it yielded any definition. The reported Line (on a
-// def) or line number (in Unclosed) is always the statement's first
-// physical line, however many lines it ended up spanning.
+// fully read (shellAliasFileScan.Unclosed). path is stat'd first: a path
+// that stats successfully but is not a regular file (a FIFO, device, or
+// socket -- a directory candidate is already filtered out by
+// shellAliasRcCandidates) is reported as an error without ever being
+// opened, since opening a FIFO can block forever waiting for a writer to
+// attach (mirrors readCodexUserConfig in doctor_codex_writable_root.go).
+// Each physical line is bounded at 1 MiB (bufio.Scanner's own 64 KiB
+// default would otherwise abort the whole file on one long line). When a
+// line's last statement is an unterminated alias statement (see
+// parseAliasStatements' openAlias), up to 32 further physical lines are
+// appended and re-parsed as one logical line before giving up; past that
+// point, or at EOF, whatever definitions the statement yielded from what
+// was actually read are kept and marked Incomplete, and the statement's
+// first line is recorded in Unclosed regardless of whether it yielded any
+// definition. The reported Line (on a def) or line number (in Unclosed) is
+// always the statement's first physical line, however many lines it ended
+// up spanning.
 func scanShellAliasFile(path string) shellAliasFileScan {
+	info, statErr := os.Stat(path)
+	if statErr != nil {
+		return shellAliasFileScan{Opened: false, Err: statErr}
+	}
+	if !info.Mode().IsRegular() {
+		return shellAliasFileScan{Opened: false, Err: errors.New("not a regular file")}
+	}
+
 	f, openErr := os.Open(path)
 	if openErr != nil {
 		return shellAliasFileScan{Opened: false, Err: openErr}
@@ -698,7 +793,8 @@ func shellAliasDetail(sentences, notFullyParsed, couldNotRead, partiallyRead []s
 }
 
 // checkShellAliases is doctor's "Shell aliases (codex/claude)" check.
-// resolveEnv supplies the home directory and $ZDOTDIR to scan from
+// resolveEnv supplies the home directory, $ZDOTDIR, and the working
+// directory a relative $ZDOTDIR is resolved against, to scan from
 // (production: doctorShellAliasEnv; tests: a closure or TestMain's pin).
 //
 // Severity depends on the flag's class (shellAliasFlagClass), not just the
