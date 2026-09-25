@@ -5,22 +5,23 @@
 # the same added lines: scan_range pins the local git settings listed there
 # (color, diff.relative, textconv, external diff, rename/copy detection and
 # its limit, the diff algorithm, the big-file threshold, a user-level
-# attributes file, root-commit diffs, submodule diffs, replace refs,
-# signature output) to git's defaults, and checks git's exit status before
-# parsing, so a git failure is never read as a clean scan. Known local-only
-# gaps it cannot pin: a `-diff`/`binary` attribute in .git/info/attributes,
-# and a local diff.<driver>.binary=true for a driver the committed
-# .gitattributes names. --staged reads each staged blob by its object id, so
-# neither file name quoting nor diff.relative can skip a file. Every option
-# used works on git 2.8; a -c key an older git does not know is ignored, and
-# such a git has no such setting to neutralize.
+# attributes file, working-tree attributes, root-commit diffs, submodule
+# diffs, replace refs, signature output) to git's defaults, and checks git's
+# exit status before parsing, so a git failure is never read as a clean
+# scan. Known local-only gaps it cannot pin: a `-diff`/`binary` attribute in
+# .git/info/attributes, and a local diff.<driver>.binary=true for a driver
+# the committed .gitattributes names. --staged reads each staged blob by its
+# object id, so neither file name quoting nor diff.relative can skip a file.
+# Every option used works on git 2.8; a -c key or environment variable an
+# older git does not know is ignored, and such a git has no such setting to
+# neutralize.
 #
 # Exit codes:
 #   0  scanned, nothing found
 #   1  scanned, found something
 #   2  usage error
-#   3  could not scan (a missing or unreadable --file, or git failed), so
-#      the content was not fully read
+#   3  could not scan (a missing or unreadable --file, a staged entry that
+#      does not parse, or git failed), so the content was not fully read
 # A HUP, INT, or TERM stops the scan with 129, 130, or 143.
 set -eu
 
@@ -31,7 +32,7 @@ Usage:
   secret-scan.sh --stdin [label]
   secret-scan.sh --staged
   secret-scan.sh --range <rev-range>
-  secret-scan.sh --diff [label]
+  secret-scan.sh --diff [label]    (git-style diff: a "diff " line per file)
 EOF
   exit 2
 }
@@ -124,7 +125,7 @@ is_object_id() {
 #   diff.relative=false        a subdirectory cwd still lists the whole index
 #   core.quotePath=false       non-ASCII names print unquoted
 #   --raw                      one line per entry, with modes and object ids
-#   --no-abbrev                full object ids, as cat-file reads them
+#   --no-abbrev                full object ids, which is_object_id requires
 #   --no-renames               a rename or copy lists as a plain addition
 #   --diff-filter=d            every change except a deletion, type changes too
 # A line that does not parse, or a listed blob that cannot be read, exits 3.
@@ -177,7 +178,10 @@ EOF
 # ANSI color codes in front of a line's first character are removed (a
 # colored diff puts them before "+", "@@", or "diff"); content after that
 # character is kept byte for byte, so an escape sequence in a file's own
-# content cannot turn an added line into a header.
+# content cannot turn an added line into a header. The input must be
+# git-style, with a "diff " line before each file's header: in a multi-file
+# diff without them, a later file's "+++ " header arrives inside the
+# previous hunk and is read as content.
 scan_diff_stream() {
   label=${1:-diff}
   diff_file="$tmp_dir/diff"
@@ -196,6 +200,10 @@ scan_diff_stream() {
 # scan_range <rev-range> -- reads the range the way a fresh clone with git's
 # default config (CI) does. Each option below neutralizes one local setting
 # that changes which added lines `git log -p` prints:
+#   GIT_ATTR_SOURCE=HEAD             attributes from HEAD's tree, as CI's
+#                                    checkout has them, not a working-tree
+#                                    .gitattributes edit or attr.tree
+#                                    (git 2.41+)
 #   --no-replace-objects             refs/replace/* substitutions
 #   diff.relative=false              a subdirectory cwd
 #   diff.renames=true                renames detected, copies not
@@ -215,7 +223,7 @@ scan_range() {
   range=$1
   log_file="$tmp_dir/range-log"
   log_rc=0
-  git --no-replace-objects \
+  GIT_ATTR_SOURCE=HEAD git --no-replace-objects \
     -c diff.relative=false \
     -c diff.renames=true \
     -c diff.renameLimit=1000 \

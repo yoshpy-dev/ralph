@@ -181,6 +181,29 @@ git config core.attributesFile "$workdir/user-attributes"
 expect_exit "range scan ignores a user-level attributes file marking the file -diff" 1 "$SCANNER" --range main..feature
 git config --unset core.attributesFile
 
+# Attributes come from HEAD's tree, as in CI's checkout (GIT_ATTR_SOURCE,
+# git 2.41 or later; an older git reads the working tree).
+git_version="$(git --version | awk '{ print $3 }')"
+git_major=${git_version%%.*}
+git_minor=${git_version#*.}
+git_minor=${git_minor%%.*}
+if [ "$git_major" -gt 2 ] || { [ "$git_major" -eq 2 ] && [ "$git_minor" -ge 41 ]; }; then
+  attr_source_supported=1
+else
+  attr_source_supported=0
+  printf '  SKIP: attributes-from-HEAD cases (git %s is older than 2.41)\n' "$git_version"
+fi
+if [ "$attr_source_supported" -eq 1 ]; then
+  printf '*.txt -diff\n' > .gitattributes
+  expect_exit "range scan ignores an uncommitted working-tree .gitattributes marking the file -diff" 1 "$SCANNER" --range main..feature
+  rm .gitattributes
+  attr_blob="$(printf '*.txt -diff\n' | git hash-object -w --stdin)"
+  attr_tree="$(printf '100644 blob %s\t.gitattributes\n' "$attr_blob" | git mktree)"
+  git config attr.tree "$attr_tree"
+  expect_exit "range scan ignores a local attr.tree marking the file -diff" 1 "$SCANNER" --range main..feature
+  git config --unset attr.tree
+fi
+
 git config diff.orderFile "$workdir/does-not-exist.order"
 expect_exit "AC-15: git log failing before any output (missing diff.orderFile) exits 3" 3 "$SCANNER" --range main..feature
 expect_stderr_contains "AC-15: missing diff.orderFile names the unscanned range" "could not scan main..feature"
@@ -189,6 +212,29 @@ git config --unset diff.orderFile
 
 expect_exit "AC-15: a range that does not resolve exits 3" 3 "$SCANNER" --range does-not-exist..feature
 expect_stderr_contains "AC-15: unresolved range names the unscanned range" "could not scan does-not-exist..feature"
+
+# A committed .gitattributes applies exactly as in CI's checkout, even when
+# the working-tree copy is removed: a committed -diff hides the file from
+# CI too (a CI-shared gap recorded in docs/tech-debt). With HEAD unborn the
+# attributes cannot be read at all, and the scan exits 3.
+if [ "$attr_source_supported" -eq 1 ]; then
+  repo="$workdir/cfg-attr-source"
+  new_repo "$repo"
+  cd "$repo"
+  printf '*.txt -diff\n' > .gitattributes
+  git add .gitattributes
+  git commit -q -m 'mark txt files -diff'
+  git checkout -q -b feature
+  printf 'deploy token %s\n' "$token" > leak.txt
+  git add leak.txt
+  git commit -q -m 'add leaked token'
+  rm .gitattributes
+  expect_exit "range scan reads the committed .gitattributes, not the working tree, as CI's checkout does" 0 "$SCANNER" --range main..feature
+  git checkout -q -- .gitattributes
+  git checkout -q --orphan unborn
+  expect_exit "range scan with an unborn HEAD exits 3" 3 "$SCANNER" --range main..feature
+  expect_stderr_contains "range scan with an unborn HEAD names the unscanned range" "could not scan main..feature"
+fi
 
 # A local textconv for a diff driver named in the committed .gitattributes
 # would rewrite the token before the scan reads it.

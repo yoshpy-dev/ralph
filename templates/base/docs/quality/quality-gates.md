@@ -43,7 +43,7 @@ Use these in CI or later-stage review:
 
 ### Must pass in CI before merge
 
-- `./scripts/secret-scan.sh --range <merge-base>..HEAD` — pull request secret leak scan (`.github/workflows/verify.yml`); the range scan pins the git settings it reads under, so a local run scans the same added lines as CI regardless of local git config, and exits 3 (not clean) when git cannot read the range
+- `./scripts/secret-scan.sh --range <merge-base>..HEAD` — pull request secret leak scan (`.github/workflows/verify.yml`); the range scan pins the local git settings that change which added lines `git log -p` prints, so a local run scans the same added lines as CI except for a few local-only attribute sources it cannot pin (listed in the `scripts/secret-scan.sh` header), and exits 3 (not clean) when git cannot read the range
   - Local mirror of this same range scan: `./scripts/secret-scan-branch.sh` runs automatically from `./scripts/run-verify.sh` (static and all modes, default mode — an unscannable state is a one-line notice, not a failure) and again with `--strict` from `/pr` right before push
 - `RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh` (`.github/workflows/verify.yml`)
 - `./scripts/check-template.sh` — required-file / structure check (`.github/workflows/verify.yml`)
