@@ -176,3 +176,94 @@ None of the above block the PASS verdict: all are either explicitly accepted by 
 ```
 ./scripts/insights-append.sh --slug secret-scan-git-config --flow standard --phase test --cycle 1 --verdict pass --critical 0 --high 0 --medium 0 --low 0 --source skill
 ```
+
+## Cycle 2
+
+- Date: 2026-09-25
+- HEAD: `092c5e37890bf853e527e35a9b4211a61cd41944` (worktree `git status --porcelain` empty at start and end; confirmed again after every mutation revert)
+- Delta since cycle 1 (`b76d9da`): `f6d1b87` sync-docs, `f413a58` cycle-1 cross-review triage (AR-1), `ca8a212` **fix AR-1** (state-aware `+++ ` header rule: `scan_diff_stream` now skips `+++ ` only between a `diff ` line and the next `@@`, so every `+` line inside a hunk is added content — including one whose content starts with `++ ` or ESC`[32m++ `), `45ce71f` plan notes, `750d247` cycle-2 self-review, `443ffb7` **Slice F** (`GIT_ATTR_SOURCE=HEAD` on the `scan_range` git invocation, so an uncommitted working-tree `.gitattributes` or a local `attr.tree` cannot change what CI's checkout of HEAD would scan; git 2.41+, older git ignores it and reads the working tree as before; an unborn HEAD now exits 3), `5774b5f`/`092c5e3` plan/report notes. `tests/test-secret-scan.sh` grew 61 → 74.
+
+### Verdict: PASS
+
+`tests/test-secret-scan.sh` 74/74, unchanged 108/108 and 32/32 for the other two files, stable across 3 shells, 2 real awk implementations (mawk, busybox awk) beyond macOS's own, 10 repeat runs, and the cycle-1 hostile outer config extended with an `attr.tree` setting. 3 of 4 requested mutations discriminated exactly as predicted; the 4th (replacing the anchored while-loop SGR strip with an unanchored global `gsub`) showed **0 failures** — not a surprise once traced through: it generalizes a gap self-review had already disclosed (`while(sub(...))` vs a single `sub`) to the stronger claim that the strip's anchoring itself is currently undiscriminated, because the new `in_hunk` state machine alone already prevents the AR-1 regression class regardless of how the strip is written. All 4 live-demonstration scenarios matched the predicted exit codes exactly, including the intermediate (pre-AR-1-fix) scanner reproducing the regression. CI parity holds on all 4 cycle-1 fixtures plus a new full-history (1,607 commits, root..HEAD) added-line-set comparison: byte-identical, 213,915 lines each, 0 differences.
+
+### 1. Execution
+
+| Command | Result |
+|---|---|
+| `./scripts/run-test.sh` (full changed-scope run) | PASS — "All verifiers passed." Evidence: `docs/evidence/verify-2026-09-25-133950.log`. `tests/test-secret-scan.sh` 74/74, `tests/test-secret-scan-branch.sh` 108/108, `tests/test-run-verify-branch-secret-scan.sh` 32/32; full shell suite and `go test ./...` (8 packages) also green. |
+| `sh tests/test-secret-scan.sh` (standalone) | 74/74 |
+| `sh tests/test-secret-scan-branch.sh` (standalone) | 108/108 |
+| `sh tests/test-run-verify-branch-secret-scan.sh` (standalone) | 32/32 |
+| Same 3, with `TMPDIR=/tmp` | 74/74, 108/108, 32/32 — identical |
+
+### 2. Environment matrix
+
+| Variant | `test-secret-scan.sh` | `test-secret-scan-branch.sh` |
+|---|---|---|
+| `/bin/sh` | 74/74 | 108/108 |
+| `/bin/dash` | 74/74 | 108/108 |
+| `/bin/bash --posix` | 74/74 | 108/108 |
+| Cycle-1 hostile outer config **+ `[attr] tree = 0000...0000`** | 74/74 (all 4 `GIT_ATTR_SOURCE`-related assertions individually confirmed: the uncommitted `.gitattributes` case, the local `attr.tree` case, the committed-not-working-tree case, and the unborn-HEAD case) | 108/108 |
+
+The suite's own hermetic section (`HOME`/`GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM=/dev/null`) reassigns before any of the new `GIT_ATTR_SOURCE`-related fixtures run, so the outer `attr.tree` never reaches them — confirmed empirically, matching cycle 1's finding for the other hostile settings.
+
+**awk portability (mawk, busybox awk):** rather than running the full suite inside a container (needs git + sh, more moving parts than the question warrants), I extracted the exact `scan_diff_stream` awk program and ran it directly under `docker run ubuntu:24.04 awk` (mawk 1.3.4) and `docker run busybox awk` against a hand-built fixture covering every branch: plain hunk content, a `+++ `-shaped hunk-content header look-alike, content starting with an escaped `ESC[32m++ `, content starting with two *stacked* SGR codes (`ESC[1mESC[32m`) both as file content and directly in front of the leading `+`, and a second file's own (also stacked-SGR-colored) header arriving after the first file's hunk (`in_hunk` reset via the `diff ` line). Both mawk and busybox awk produced output byte-identical to macOS's system awk (`awk version 20200816`) via `diff`. Docker Desktop's default bind-mount sharing does not cover `/private/tmp` on this machine — the mount silently became an empty directory instead of erroring, which cost one debugging round-trip; the fixture had to live under `$HOME` (cleaned up afterward) for the container mounts to see the actual file.
+
+### 3. Repeat
+
+10 sequential runs each, `sh`: `tests/test-secret-scan.sh` 74/74 every time (10/10), `tests/test-secret-scan-branch.sh` 108/108 every time (10/10). No flakes.
+
+### 4. Red/green mutations
+
+Applied in place to `scripts/secret-scan.sh` with the same single-occurrence Python replace used in cycle 1, tested, reverted with `git checkout --`, `git status --porcelain` confirmed clean after every revert and again at the end (byte-diff against a pre-mutation backup also clean).
+
+| Mutation | Failing test(s) | Match? |
+|---|---|---|
+| Drop the `in_hunk` state (`!in_hunk && /^\+\+\+ /` → `/^\+\+\+ /`, always skip `+++ `) | `range scan finds a token in content that starts with '++ '`, `--diff finds a token in hunk content that starts with '++ '` (2) | Exact |
+| Drop the `diff ` reset (`/^diff / { in_hunk = 0; next }` removed, `@@`'s `in_hunk = 1` kept) | `range scan does not report a token-looking name in a +++ file header`, `--diff does not report a token-looking name in the +++ header after a hunk` (2) — `in_hunk` never resets for the second file, so its own `+++ ` header is no longer recognized as a header and gets reported as a false-positive finding instead | Exact |
+| Replace `{ while (sub(/^\033\[[0-9;:]*m/, "")) {} }` with `{ gsub(/\033\[[0-9;:]*m/, "") }` (the *exact* pre-AR-1-fix strip, unanchored and global, reintroduced on top of the new `in_hunk` state machine) | **0 failures** | Not a surprise, but a real, now-more-precisely-characterized gap — see "Coverage gaps" below |
+| Drop `GIT_ATTR_SOURCE=HEAD` from the `scan_range` git invocation | `range scan ignores an uncommitted working-tree .gitattributes marking the file -diff`, `range scan ignores a local attr.tree marking the file -diff`, `range scan reads the committed .gitattributes, not the working tree, as CI's checkout does`, `range scan with an unborn HEAD exits 3`, `range scan with an unborn HEAD names the unscanned range` (5) | Exact |
+
+### 5. Live demonstration
+
+Same isolated-fixture methodology as cycle 1 (isolated `HOME`/`GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM=/dev/null`, token from split pieces). Scanners: `main` (`git show main:scripts/secret-scan.sh`), the pre-AR-1-fix **intermediate** scanner (`git show f413a58:scripts/secret-scan.sh` — identical code to cycle-1's own HEAD, `b76d9da`, since the intervening commits up to `f413a58` are docs-only), and **new** (this worktree, `092c5e3`).
+
+| Scenario | main | intermediate (pre-AR-1) | new |
+|---|---|---|---|
+| (a) committed line: content is ESC`[32m++ ` + token | exit=1, `secret-a.txt:1 [Stripe live secret key]` | **exit=0, clean — the regression** | exit=1, `secret-a.txt:1 [Stripe live secret key]` |
+| (b) committed line: content is `++ ` + token (no escape) | exit=0, clean (pre-existing, CI-shared gap, now closed) | (not run — same code as cycle-1 baseline, already covered by (a)'s intermediate row) | exit=1, `secret-b.txt:1 [Stripe live secret key]` |
+| (c) uncommitted working-tree `.gitattributes` (`*.txt -diff`) over a clean committed tree | (not applicable — pre-AR-1 scanner has no `GIT_ATTR_SOURCE` fix either way) | exit=0, clean (baseline with no `.gitattributes` edit: exit=1, detects normally — confirms the miss is specific to the edit, not a fixture error) | exit=1, `secret-c.txt:1 [Stripe live secret key]` |
+| (d) a token-looking file name appearing only in a `+++ ` header | exit=0, clean | (not run) | exit=0, clean |
+
+All 4 exactly as predicted. (a)/(b) together demonstrate the AR-1 fix closes both the colored and the plain `++ `-prefixed-content case; (a)'s three-way comparison specifically shows the fix is a genuine regression-fix against `main`'s own contemporary behavior, not just an improvement over the broken intermediate. (c) demonstrates Slice F end-to-end with an explicit before/after-edit baseline pair so the miss can't be mistaken for a fixture mistake. (d) confirms the new state machine doesn't newly break the pre-existing "don't scan header lines" behavior that `main` already had (both agree).
+
+### 6. CI parity
+
+**Cycle-1's 4 comparisons, re-run under the cycle-2 scanner (all still MATCH):**
+
+| Range | main | new | Result |
+|---|---|---|---|
+| (a) plain leak, fresh fixture, default config | exit=1, 1 finding | exit=1, 1 finding | MATCH |
+| (b) a branch with a pure rename | exit=0, 0 findings | exit=0, 0 findings | MATCH |
+| (c) a branch with a submodule pointer bump | exit=0, 0 findings | exit=0, 0 findings | MATCH |
+| (d) this repository's own range, `c1785b8..092c5e3` | exit=0, 0 findings | exit=0, 0 findings; full stdout+stderr byte-identical | MATCH |
+
+**New this cycle — whole-repository history, added-line-set comparison (not just exit codes):** generated one canonical `git log -p` transcript for `root..HEAD` (root `868da02`, HEAD `092c5e3`, 1,607 commits, using the current `scan_range` pin set including `GIT_ATTR_SOURCE=HEAD`; 387,316 raw diff lines), then ran *only the awk extraction logic* (not the full scanner) from `main`'s `scan_diff_stream` and from the new one against that same transcript, and `diff`'d the two extracted added-line sets. **213,915 lines each, `diff` output empty — byte-identical.** This repository's own history contains zero instances of the widened case (a real added line whose own content happens to start with `++ ` or an SGR-escaped `++ `), so the AR-1 fix's "strict superset" widening is confirmed to change nothing about this repo's own historical scan results — consistent with cross-review's own 215,825-line oracle finding (a smaller number, from an earlier HEAD before this cycle's later commits).
+
+No behavior difference found anywhere in this cycle's CI-parity checks.
+
+### 7. Gaps (updated)
+
+1. **`HUP`/`INT` signal-trap exit codes are still unexercised** (cycle-1 finding, re-confirmed unchanged at `092c5e3`: mutating only the `HUP` trap's exit-code literal again produces 0 failures across all 74 tests). No trap-related code was touched this cycle. Still not closed, same reasoning as cycle 1 (fixture cost vs. narrow, low-severity value).
+2. **The leading-SGR strip's anchoring is unexercised, and this cycle's mutation 3 shows the gap is broader than self-review characterized it.** Self-review's own cycle-2 report names the gap as "`while(sub(...))` changed to a single `sub` — nothing red" (i.e., the *looping*, for stacked codes, is untested). This cycle's mutation went further — replacing the loop with a fully **unanchored global `gsub`** (the literal pre-AR-1-fix code) — and *also* produced 0 failures. Root cause, traced by hand: the `in_hunk` state machine added by the AR-1 fix is what actually prevents header-misdetection now; the strip's exact shape (looped vs. single, anchored vs. global) no longer changes whether a `+++ `-shaped hunk-content line gets mis-skipped, because `in_hunk` gates the skip rule regardless of what the stripped text looks like. This is a real, still-open, low-severity gap — not a new independent problem, but self-review's own characterization of it should be understood as the narrower case of this broader one. Recorded, not closed (per the "otherwise record gaps" instruction; closing it would mean constructing a scenario where anchoring specifically matters, and none was found to exist given `in_hunk`'s current coverage).
+3. **`--no-ext-diff` — still not a gap, unchanged from cycle 1.** No cycle-2 change touched this pin or its rationale (git requires an explicit `--ext-diff` flag on `git log`, never passed by `scan_range`).
+4. **Which git release introduced `GIT_ATTR_SOURCE` is still unconfirmed** — both self-review and this cycle verified its *effect* only on git 2.49 (this machine's version); neither checked the changelog for the exact minimum version (self-review's own header comment says "git 2.41+", not independently re-verified here). Low risk: an older git silently ignores the unknown env var and falls back to reading the working tree, matching pre-Slice-F behavior exactly (documented, tested via the version-gated `SKIP:` path in `tests/test-secret-scan.sh:184-195`, though that path itself is untested *on* an actual pre-2.41 git in this environment — this machine only has 2.49).
+
+None of the above block the PASS verdict.
+
+### Insight event (cycle 2)
+
+```
+./scripts/insights-append.sh --slug secret-scan-git-config --flow standard --phase test --cycle 2 --verdict pass --critical 0 --high 0 --medium 0 --low 0 --source skill
+```
