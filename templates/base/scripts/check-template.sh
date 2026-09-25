@@ -22,6 +22,8 @@ scripts/branch-name.sh
 scripts/ensure-pr-ready.sh
 scripts/ensure-pr-title-prefix.sh
 scripts/secret-scan.sh
+scripts/secret-scan-branch.sh
+scripts/xreview-helpers.sh
 scripts/pre-commit-secret-guard.sh
 scripts/commit-msg-guard.sh
 scripts/prepare-commit-msg-secret-guard.sh

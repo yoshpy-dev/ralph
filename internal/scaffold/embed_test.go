@@ -75,6 +75,7 @@ func TestTemplateBaseScriptsExist(t *testing.T) {
 		"ralph-worktree.sh",
 		"xreview-helpers.sh",
 		"secret-scan.sh",
+		"secret-scan-branch.sh",
 		"pre-commit-secret-guard.sh",
 		"commit-msg-guard.sh",
 		"prepare-commit-msg-secret-guard.sh",

@@ -7,13 +7,17 @@
 #   count_triage_findings <triage_report_path> <category>
 #
 # Extracted from the retired driver dispatcher script (Ralph Loop
-# execution system) when Ralph Loop was removed: /cross-review is the only
-# consumer of these three functions and it survives as part of the standard
-# development harness. The loop-only pieces of that dispatcher script
-# (run_agent, resolve_phase_model, write_model_receipt, the codex/claude
-# dispatch wrappers) were deleted along with the rest of the Ralph Loop
-# execution system — they had no remaining consumer once the Loop's
-# per-slice driver script was removed.
+# execution system) when Ralph Loop was removed: /cross-review is the
+# consumer of all three functions and survives as part of the standard
+# development harness. scripts/secret-scan-branch.sh also sources this
+# file, for detect_base_branch alone (base-branch resolution for the
+# branch-history secret scan), so a future /cross-review refactor that
+# changes detect_base_branch's contract must check that second consumer
+# too. The loop-only pieces of that dispatcher script (run_agent,
+# resolve_phase_model, write_model_receipt, the codex/claude dispatch
+# wrappers) were deleted along with the rest of the Ralph Loop execution
+# system — they had no remaining consumer once the Loop's per-slice driver
+# script was removed.
 
 # detect_base_branch — print the repo's true merge-target branch name.
 #
