@@ -62,3 +62,68 @@ No skill, script, `.gitallowed`, or `.github/workflows` file was touched — onl
 ## Commit
 
 `docs: sync docs for local-branch-secret-scan` — files: `docs/plans/active/2026-09-20-local-branch-secret-scan.md`, `docs/tech-debt/README.md`, this report.
+
+## Cycle 2
+
+- Date: 2026-09-25
+- Plan: `docs/plans/active/2026-09-20-local-branch-secret-scan.md` (issue #169), AC-2d and AC-3b, Scope row 1's current contract
+- Agent: `doc-maintainer` subagent (Claude Code), pipeline cycle 2/2
+- Precondition confirmed: HEAD `0e7f164` (docs: add cycle-2 test report), `git status --porcelain` empty at start
+- Scope: documentation sync for the cycle-2 delta. Reference reports: `docs/reports/self-review-2026-09-21-local-branch-secret-scan.md` `## Cycle 2` (973bd15, MEDIUM 1 / LOW 5, all fixed in fc7d2e4), `docs/reports/verify-2026-09-22-local-branch-secret-scan.md` `## Cycle 2` (7d46144, pass, drift: only the walkthrough), `docs/reports/test-2026-09-24-local-branch-secret-scan.md` `## Cycle 2` (0e7f164, pass, two open gaps: submodule and symlink-to-symlink `.gitallowed` targets confirmed fail-closed by hand but with no suite test — `check-template.sh` required_files gap carried from cycle 1)
+
+### Doc drift check (task item 1)
+
+Re-checked the same shipped-doc surfaces the cycle-2 verify report already covered, plus a couple the handoff added explicitly:
+
+- `.claude/skills/pr/SKILL.md` and its three mirrors (`.agents/skills/pr/`, `templates/base/.claude/skills/pr/`, `templates/base/.agents/skills/pr/`) — byte-unchanged since `ca3d824` (cycle-1 verify's own check, re-confirmed via `git diff ca3d824..HEAD --stat` on all four paths: empty). Step 3's exit-code prose (0/1/3) already describes the contract, not the allowlist-resolution internals the cycle-2 fix rewired — no drift.
+- `docs/quality/quality-gates.md` + `templates/base/docs/quality/quality-gates.md` — byte-unchanged since `ca3d824`; both still describe the local mirror at contract level.
+- `AGENTS.md` scripts bullet — already names `secret-scan-branch.sh` (added cycle-1 `/sync-docs`); no change needed.
+- `README.md`, `docs/quality/definition-of-done.md`, `docs/recipes/*`, `.ralph/core/AGENTS.core.md` — `grep -rl "secret-scan-branch\|gitallowed"` against all four returns nothing; none of them ever named this mechanism, so there is nothing for the cycle-2 internals to make stale.
+- `scripts/secret-scan.sh`'s on-finding guidance lines — byte-unchanged since `ca3d824`; unaffected by the cycle-2 delta (which touched only `secret-scan-branch.sh`).
+- `scripts/secret-scan-branch.sh`'s own header/usage comment (`:1-29`) — read in full. It already states the fully-qualified-base-ref rule and the committed-`.gitallowed`-with-symlink-resolution rule in its opening paragraph (added as part of the C2-L5 self-review fix in `fc7d2e4`), and the 0/1/2/3 exit-code table is unchanged by the cycle-2 fix (only the internal mechanism deciding which exit fires changed). No drift.
+
+No shipped doc was stale. This matches the cycle-2 verify report's own drift finding (none in shipped docs; one already-known-stale line in the walkthrough report, handled below).
+
+### `docs/tech-debt/README.md` (task item 2)
+
+The cycle-1 row about `check-template.sh`'s `required_files` list (line 135, unchanged) still holds — the cycle-2 delta touched neither `check-template.sh` nor the required-files list itself.
+
+Added one new row for the cycle-2 test gaps: `scripts/secret-scan-branch.sh`'s committed-`.gitallowed` mode dispatch has no regression test for a submodule target (mode `160000`) or a symlink-to-symlink target (`120000` → `120000`); both are confirmed fail-closed by hand (empty allowlist plus the `report_allowlist_unreadable` notice, `--strict` exit 1 on the fixture's own planted finding) per the cycle-2 test report's "Re-confirmations" section, but neither has a fixture in `tests/test-secret-scan-branch.sh` — a submodule fixture needs `git -c protocol.file.allow=always submodule add` plus `.gitmodules`/`.git/modules/` bookkeeping, which the tester judged out of proportion to the one mode-branch check it would pin.
+
+### Walkthrough (task item 3)
+
+Updated `docs/reports/walkthrough-2026-09-24-local-branch-secret-scan.md` for the cycle-2 delta:
+
+- Header 差分規模 line — recomputed from `git diff main...HEAD --stat` (32 files, +3,194/−67) and `wc -l scripts/secret-scan-branch.sh` (298 lines, up from cycle 1's 183), with the two test files' own line counts (1,206 / 299) alongside their assertion counts (96 / 32).
+- 何が変わったか item 1 — added that `merge-base` takes the validated full ref (`refs/remotes/origin/<base>` / `refs/heads/<base>`, never the short name), and described the committed-`.gitallowed` mode-dispatch rule (regular file read directly, symlink resolved one level with the absolute/`..` checks, anything else falls back to an empty allowlist plus a notice).
+- 読む順番 item 1 — inserted the allowlist mode dispatch (`allowlist_ls_tree_mode` / `allowlist_target_is_safe` / `report_allowlist_unreadable`) between "HEAD の `.gitallowed` を一時ファイルへ" and "無視の通知"; item 4 — updated the assertion count to 96 and named the `test_ac2d_*` / `test_ac3b_*` groups.
+- コミット単位 table — added rows for `dbba825` (cross-review cycle 1's AR-1/AR-2 fix, plus the two additional holes the orchestrator's own probe found and folded into the same commit by amend: cwd-relative `ls-tree` and a directory-target symlink with a trailing slash) and `fc7d2e4` (self-review cycle 2's MEDIUM 1 / LOW 5 fixes plus four new tests); extended the "その他" row to mention the cycle-2 reports.
+- 設計判断 — added one bullet: symlink resolution goes one level deep only, falling back to an empty allowlist (fail-closed) when it cannot resolve.
+- 注意して見てほしい点 — added one bullet about `allowlist_ls_tree_mode`'s single-line/exact-path check and the mode `case` rejecting different inputs (trailing-slash directory vs. bare directory/submodule).
+- Known limitations — removed the now-stale symlink-notice-misfire line (closed in cycle 2, per the cycle-2 self-review and test reports); added two lines: the submodule/symlink-to-symlink test gap (same content as the new tech-debt row), and a note that the `./`-normalisation-order fix and the guarded regular-file `git show` produce no observable red/green in the suite (as the self-review predicted; the corrupted-object case was confirmed only by hand).
+
+Tone and format kept consistent with the existing report: Japanese, factual, no headers added, no exaggerated adjectives.
+
+### Plan (task item 4)
+
+Added three Deviation-notes bullets to `docs/plans/active/2026-09-20-local-branch-secret-scan.md`, one per phase, in the same style as the existing entries: `/verify` cycle 2 (7d46144, pass), `/test` cycle 2 (0e7f164, pass, the two gaps above plus the carried-over `check-template.sh` gap), and this `/sync-docs` cycle-2 pass (dated 2026-09-25). No AC checkbox was touched.
+
+### Gate results
+
+| Gate | Result |
+| --- | --- |
+| `./scripts/check-skill-sync.sh` | PASS — 13 skills in lock-step |
+| `./scripts/check-sync.sh` | PASS — IDENTICAL 159 / DRIFTED 0 / TEMPLATE_ONLY 11 / KNOWN_DIFF 5 (unchanged from cycle 1) |
+| `./scripts/check-template-purity.sh` | PASS — no meta-repo-specific references in templates |
+| `./scripts/secret-scan.sh --staged` (before commit) | see commit section below |
+| `./scripts/secret-scan-branch.sh --strict` (after commit) | see commit section below |
+
+No skill, script, `.gitallowed`, or `.github/workflows` file was touched this cycle either — only the plan, the tech-debt register, the walkthrough, and this report — so `sync-skills.sh` and the template-copy step were not needed.
+
+### Insight event
+
+`./scripts/insights-append.sh --slug local-branch-secret-scan --flow standard --phase sync_docs --cycle 2 --verdict complete --critical 0 --high 0 --medium 0 --low 0 --source skill` (best-effort, per the handoff).
+
+### Cycle-2 commit
+
+`docs: sync docs for local-branch-secret-scan (cycle 2)` — files: `docs/plans/active/2026-09-20-local-branch-secret-scan.md`, `docs/tech-debt/README.md`, `docs/reports/walkthrough-2026-09-24-local-branch-secret-scan.md`, this report.
