@@ -171,16 +171,23 @@ EOF
 }
 
 # scan_diff_stream [label] -- scans the added lines of a unified diff on
-# stdin. ANSI color sequences are removed first: in a colored diff an added
-# line starts with an escape sequence, not with "+".
+# stdin. A "+++ " line is a file header only between a "diff " line (or the
+# start of the input) and the next "@@" hunk line; inside a hunk every "+"
+# line is added content, even one whose content starts with "++ ". Only the
+# ANSI color codes in front of a line's first character are removed (a
+# colored diff puts them before "+", "@@", or "diff"); content after that
+# character is kept byte for byte, so an escape sequence in a file's own
+# content cannot turn an added line into a header.
 scan_diff_stream() {
   label=${1:-diff}
   diff_file="$tmp_dir/diff"
   added_file="$tmp_dir/diff-added"
   cat > "$diff_file"
   awk '
-    { gsub(/\033\[[0-9;:]*m/, "") }
-    /^\+\+\+ / { next }
+    { while (sub(/^\033\[[0-9;:]*m/, "")) {} }
+    /^diff / { in_hunk = 0; next }
+    /^@@/ { in_hunk = 1; next }
+    !in_hunk && /^\+\+\+ / { next }
     /^\+/ { sub(/^\+/, ""); print }
   ' "$diff_file" > "$added_file"
   scan_file "$added_file" "$label"

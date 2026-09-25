@@ -347,6 +347,47 @@ colored_diff="$workdir/colored.diff"
 printf '\033[1mdiff --git a/a b/a\033[m\n\033[1m--- a/a\033[m\n\033[1m+++ b/a\033[m\n\033[32m+\033[m\033[32mdeploy token %s\033[m\n' "$token" > "$colored_diff"
 expect_exit "AC-10: --diff finds the token in a colored added line" 1 sh -c "'$SCANNER' --diff 'colored diff' < '$colored_diff'"
 
+# Inside a hunk a "+" line is added content even when the content itself
+# starts with "++ " (so the line reads "+++ "), with or without an escape
+# sequence in front of that content; only a "+++ " line in a file header is
+# skipped.
+repo="$workdir/content-plus-prefix"
+new_repo "$repo"
+cd "$repo"
+git checkout -q -b escaped
+printf '\033[32m++ deploy token %s\n' "$token" > escaped.txt
+git add escaped.txt
+git commit -q -m 'add a line whose content is an escape sequence then ++'
+expect_exit "range scan finds a token in content that is an escape sequence then '++ '" 1 "$SCANNER" --range main..escaped
+git checkout -q -b plain main
+printf '++ deploy token %s\n' "$token" > plain.txt
+git add plain.txt
+git commit -q -m 'add a line whose content starts with ++'
+expect_exit "range scan finds a token in content that starts with '++ '" 1 "$SCANNER" --range main..plain
+
+# A token-looking file name appears only in header lines ("diff --git",
+# "+++ b/<path>"), so it is not reported, including a header that follows
+# another file's hunk.
+token_name="$(printf 'sk_live_%s' 'filenameabcdefghijklmn').txt"
+git checkout -q -b token-name main
+printf 'clean\n' > a-first.txt
+printf 'also clean\n' > "$token_name"
+git add a-first.txt "$token_name"
+git commit -q -m 'add a file with a token-looking name after another file'
+expect_exit "range scan does not report a token-looking name in a +++ file header" 0 "$SCANNER" --range main..token-name
+
+hunk_diff="$workdir/hunk.diff"
+printf 'diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -0,0 +1 @@\n+++ deploy token %s\n' "$token" > "$hunk_diff"
+expect_exit "--diff finds a token in hunk content that starts with '++ '" 1 sh -c "'$SCANNER' --diff 'hunk diff' < '$hunk_diff'"
+printf 'diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -0,0 +1 @@\n+\033[32m++ deploy token %s\n' "$token" > "$hunk_diff"
+expect_exit "--diff finds a token in hunk content that is an escape sequence then '++ '" 1 sh -c "'$SCANNER' --diff 'hunk diff' < '$hunk_diff'"
+printf 'diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -0,0 +1 @@\n+clean\ndiff --git a/%s b/%s\n--- /dev/null\n+++ b/%s\n@@ -0,0 +1 @@\n+also clean\n' "$token_name" "$token_name" "$token_name" > "$hunk_diff"
+expect_exit "--diff does not report a token-looking name in the +++ header after a hunk" 0 sh -c "'$SCANNER' --diff 'hunk diff' < '$hunk_diff'"
+printf '\033[1mdiff --git a/a b/a\033[m\n\033[1m--- a/a\033[m\n\033[1m+++ b/%s\033[m\n\033[36m@@ -0,0 +1 @@\033[m\n\033[32m+\033[m\033[32mdeploy token %s\033[m\n' "$token_name" "$token" > "$hunk_diff"
+expect_exit "--diff finds the token in a colored hunk" 1 sh -c "'$SCANNER' --diff 'colored hunk diff' < '$hunk_diff'"
+# Only the hunk's one added line is read: a scanned header would add a second.
+expect_stderr_not_contains "--diff skips a colored +++ header with a token-looking name" "colored hunk diff:2 ["
+
 # --staged reads each staged blob by its object id: file name quoting,
 # diff.relative, and a local replace ref cannot skip or swap a file.
 repo="$workdir/staged-names"
