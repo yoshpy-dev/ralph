@@ -57,6 +57,7 @@ CI の `verify` ジョブは branch の履歴全体(`git log -p` の追加行)�
 
 ## Known limitations
 
+- 最終の cross-review(cycle 2、cap 到達)の 2 件は未修正で #176 に送った: git の設定に `color.ui=always` があると scanner の `git log -p` の追加行が色のエスケープで始まり読み飛ばされる(scanner 既存の弱点)。symlink の `.gitallowed` のリンク先が改行で終わると、コマンド置換で改行が落ちて改行なしの名前のファイルに解決される。どちらも「strict は clean、CI は検出」の向き(`docs/reports/cross-review-triage-local-branch-secret-scan.md` の AR-3 / AR-4)。
 - 中断は協調的。`scanner failed with exit <rc>` は scanner 側の異常終了(130 など)で出る。
 - `scripts/check-template.sh` の必須一覧には、項目を落としても落ちるテストがない(既存の欠落。test report に記録)。
 - SIGINT の trap は実行環境の制約で実機確認できていない(TERM で確認。INT / HUP は同じ形)。
