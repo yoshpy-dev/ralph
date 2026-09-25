@@ -122,3 +122,120 @@ production-code walkthrough decision is `/pr`'s, based on the full
 - `./scripts/secret-scan-branch.sh --strict` was run after staging this
   pass's own changes, per the handoff's step 9 — see the commit-boundary
   evidence reported back to the orchestrator, not reproduced here.
+
+## Cycle 2
+
+- Date: 2026-09-25
+- Plan: `docs/plans/active/2026-09-25-secret-scan-git-config.md` (issue #176)
+- Prior reports since cycle 1 (`f6d1b87`): cross-review triage
+  (`docs/reports/cross-review-triage-secret-scan-git-config.md`, AR-1,
+  ACTION_REQUIRED, user chose fix-and-re-run), self-review cycle 2 (same
+  report file, `## Cycle 2`, `750d247`, LOW 4), verify cycle 2 (same
+  report file, `## Cycle 2`, `092c5e3`, PASS), test cycle 2 (same report
+  file, `## Cycle 2`, `b403b9f`, PASS)
+
+### Correction to the cycle-1 section above
+
+**Do not re-read the cycle-1 section's quality-gates claim as current.**
+Cycle-1's `## Files changed in this pass` said the
+`docs/quality/quality-gates.md` edit added "the range scan reads the same
+lines as CI regardless of local git config." The cycle-2 self-review
+(finding 1) found this an overclaim: `diff.<driver>.binary=true` is
+itself a local git config setting the scanner cannot pin, so "regardless
+of local git config" was not true even at cycle-1 HEAD. Fixed in `443ffb7`
+(a code/doc commit, not a `/sync-docs` commit) to "except for a few
+local-only attribute sources it cannot pin (listed in the
+`scripts/secret-scan.sh` header ...)". The cycle-1 section of this report
+is left as written (an accurate record of what that pass did), not edited
+to match; this note is the correction.
+
+Two other cycle-1 items were also superseded by code changes after
+cycle-1's `/sync-docs` pass, not by a documentation error: `ca8a212`
+(cross-review's AR-1 fix) removed the "++ " item from the CI-shared
+tech-debt row cycle 1 added, since the state-aware header rule now
+detects that case; `443ffb7` (Slice F) rewrote the local-only tech-debt
+row cycle 1 added, since `GIT_ATTR_SOURCE=HEAD` newly pins the
+uncommitted-`.gitattributes` gap that row had listed as unpinnable.
+
+### Documentation drift checked this cycle
+
+Re-checked every surface cycle 1 touched, plus the doc-facing findings
+from self-review/verify/test cycle 2, against the code at `b403b9f`:
+
+- **`.claude/skills/pr/SKILL.md`** (+ 3 mirrors) — no cycle-2 change
+  touched `secret-scan-branch.sh`'s exit-code contract; still `diff`-
+  identical across all four copies. No edit needed.
+- **`docs/quality/quality-gates.md`** (root + `templates/base/`) —
+  already corrected by `443ffb7` before this pass started (see above);
+  verify cycle 2 confirmed no open drift here. No edit needed.
+- **`docs/architecture/repo-map.md`** — unaffected by any cycle-2 code
+  change; verify cycle 2 confirmed `secret-scan-branch.sh` is still
+  listed. No edit needed.
+- **`scripts/secret-scan.sh` header / `templates/base/scripts/
+  secret-scan.sh` header** — `443ffb7` already updated the exit-code
+  list, the local-only-gaps list, the `--diff` usage line, and the
+  `--no-abbrev` comment per self-review cycle 2's findings 2–4; both
+  copies are still `cmp`-identical. No edit needed.
+- **`docs/tech-debt/README.md`** — the one item that *was* stale: the
+  test-gaps row cycle 1 added (rewritten once already by `443ffb7`
+  after self-review cycle 2) characterized the SGR-strip gap narrowly
+  ("the `while` loop... a single `sub` passes every test"). Test cycle
+  2's mutation 3 (replacing the whole anchored strip with the original
+  unanchored `gsub`) showed the gap is broader: the `in_hunk` state
+  machine, not the strip's shape, is what now prevents header
+  misdetection, so no version of the strip is currently discriminated.
+  Rewrote the row's SGR clause to say so, and added one sentence noting
+  the header's "git 2.41+" claim for `GIT_ATTR_SOURCE` is unverified
+  against the git changelog (test cycle 2's gap 4) — worded to state
+  the header's claim as fact and flag only the *verification* as open,
+  matching the header text itself rather than contradicting it.
+
+### Files changed this cycle
+
+- **`docs/tech-debt/README.md`** — rewrote the test-gaps row's SGR-strip
+  clause (see above); no other row touched.
+- **`docs/plans/active/2026-09-25-secret-scan-git-config.md`** — added
+  Deviation-notes bullets for verify cycle 2 (`092c5e3`, PASS), test
+  cycle 2 (`b403b9f`, PASS: 74/108/32, 3 of 4 requested mutations
+  discriminating exactly, whole-history added-line-set parity at
+  213,915 lines byte-identical, gaps updated), and this sync-docs cycle
+  2 pass, dated 2026-09-25, matching the style of the existing bullets.
+  No AC or checklist box changed this cycle (both were already ticked
+  in cycle 1). `grep -c '^# '` = 1 before and after.
+- **`docs/insights/events/2026-09-25-secret-scan-git-config.jsonl`** —
+  appended via `./scripts/insights-append.sh` (sync_docs, cycle 2,
+  complete, 0/0/0/0).
+- **This report** — this `## Cycle 2` section.
+
+### Mirror/sync verification (cycle 2)
+
+```
+$ ./scripts/check-skill-sync.sh      # [ok] check-skill-sync: 13 skill(s) in lock-step
+$ ./scripts/check-sync.sh            # PASS: all files in sync
+$ ./scripts/check-template-purity.sh # PASS: no meta-repo-specific references found in templates.
+```
+
+No skill body or `templates/base` mirror was touched this cycle, so
+`sync-skills.sh` was not re-run.
+
+### Walkthrough (cycle 2)
+
+`git diff main...HEAD --stat -- scripts tests`: 4 files, 866
+insertions(+), 49 deletions(-) (`scripts/secret-scan.sh`,
+`scripts/secret-scan-branch.sh`, `tests/test-secret-scan.sh`,
+`tests/test-secret-scan-branch.sh`) — up from cycle 1's 762(+)/47(-) by
+the AR-1 fix and Slice F. Walkthrough-or-not is `/pr`'s decision, based
+on the full `main...HEAD` diff.
+
+### Known gaps (cycle 2)
+
+- Did not re-run `./scripts/run-verify.sh`, `./scripts/run-test.sh`, or
+  the secret-scan test suites; `/verify` and `/test` cycle 2 already did
+  (both cited above, Pass).
+- Did not chase down which git release introduced `GIT_ATTR_SOURCE`; the
+  header's "2.41+" claim is carried forward as-is (test cycle 2's own
+  gap 4), now also flagged in the tech-debt test-gaps row.
+- `./scripts/secret-scan-branch.sh --strict` was run after staging this
+  cycle's own changes, per the handoff's step 5 — see the commit-
+  boundary evidence reported back to the orchestrator, not reproduced
+  here.
