@@ -382,7 +382,10 @@ type shellAliasFileScan struct {
 	Unclosed []int
 
 	// Opened reports whether the file was successfully opened at all --
-	// when false, Err came from os.Open and the file was never read.
+	// when false, Err came from the leading os.Stat (a stat failure, or a
+	// synthetic "not a regular file" error for a candidate that exists but
+	// is a FIFO, device, or socket) or from os.Open, and the file was
+	// never read.
 	Opened bool
 
 	// Err is non-nil either when Opened is false (see above) or when the
@@ -395,18 +398,32 @@ type shellAliasFileScan struct {
 // scanShellAliasFile reads one rc file and returns every codex/claude alias
 // definition found, in file order, whether or not it carries a conflicting
 // flag (shellAliasFileScan.Defs), plus every alias statement that was never
-// fully read (shellAliasFileScan.Unclosed). Each physical line is bounded
-// at 1 MiB (bufio.Scanner's own 64 KiB default would otherwise abort the
-// whole file on one long line). When a line's last statement is an
-// unterminated alias statement (see parseAliasStatements' openAlias), up to
-// 32 further physical lines are appended and re-parsed as one logical line
-// before giving up; past that point, or at EOF, whatever definitions the
-// statement yielded from what was actually read are kept and marked
-// Incomplete, and the statement's first line is recorded in Unclosed
-// regardless of whether it yielded any definition. The reported Line (on a
-// def) or line number (in Unclosed) is always the statement's first
-// physical line, however many lines it ended up spanning.
+// fully read (shellAliasFileScan.Unclosed). path is stat'd first: a path
+// that stats successfully but is not a regular file (a FIFO, device, or
+// socket -- a directory candidate is already filtered out by
+// shellAliasRcCandidates) is reported as an error without ever being
+// opened, since opening a FIFO can block forever waiting for a writer to
+// attach (mirrors readCodexUserConfig in doctor_codex_writable_root.go).
+// Each physical line is bounded at 1 MiB (bufio.Scanner's own 64 KiB
+// default would otherwise abort the whole file on one long line). When a
+// line's last statement is an unterminated alias statement (see
+// parseAliasStatements' openAlias), up to 32 further physical lines are
+// appended and re-parsed as one logical line before giving up; past that
+// point, or at EOF, whatever definitions the statement yielded from what
+// was actually read are kept and marked Incomplete, and the statement's
+// first line is recorded in Unclosed regardless of whether it yielded any
+// definition. The reported Line (on a def) or line number (in Unclosed) is
+// always the statement's first physical line, however many lines it ended
+// up spanning.
 func scanShellAliasFile(path string) shellAliasFileScan {
+	info, statErr := os.Stat(path)
+	if statErr != nil {
+		return shellAliasFileScan{Opened: false, Err: statErr}
+	}
+	if !info.Mode().IsRegular() {
+		return shellAliasFileScan{Opened: false, Err: errors.New("not a regular file")}
+	}
+
 	f, openErr := os.Open(path)
 	if openErr != nil {
 		return shellAliasFileScan{Opened: false, Err: openErr}

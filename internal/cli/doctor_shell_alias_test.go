@@ -864,6 +864,28 @@ func TestCheckShellAliases_InaccessibleConfigZshDir_InfoOnce(t *testing.T) {
 	}
 }
 
+// TestCheckShellAliases_ZshrcIsDirectory_SkippedSilently is AC-4's
+// regression: a directory sitting at a candidate rc position is skipped
+// exactly as before -- it is never reported as "could not read", the same
+// as any other directory candidate.
+func TestCheckShellAliases_ZshrcIsDirectory_SkippedSilently(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".zshrc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	r := checkShellAliases(shellAliasTestEnv(dir), true)
+	if r.Status != "pass" {
+		t.Fatalf("expected pass, got %s (%s)", r.Status, r.Detail)
+	}
+	if strings.Contains(r.Detail, "could not read") {
+		t.Errorf("a directory candidate must not be reported as could not read, got: %s", r.Detail)
+	}
+	if !strings.Contains(r.Detail, "no shell rc file found to scan") {
+		t.Errorf("expected detail to contain no shell rc file found to scan, got: %s", r.Detail)
+	}
+}
+
 // TestCheckShellAliases_ConfigIsRegularFile_PassNoShellRcFileFound is
 // WC-2's other half: when a path component of a candidate is not a
 // directory at all (ENOTDIR), that candidate cannot exist as specified --
