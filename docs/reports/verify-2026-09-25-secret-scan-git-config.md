@@ -84,3 +84,77 @@ No static findings, no failed acceptance criteria, no Non-goals violations. Thre
 ## Insight event
 
 Appended: `docs/insights/events/2026-09-25-secret-scan-git-config.jsonl` (phase=verify, cycle=1, verdict=pass, critical=0, high=0, medium=0, low=0).
+
+## Cycle 2
+
+- Date: 2026-09-25
+- HEAD: 5774b5f (worktree `git status --porcelain` empty at start and end)
+- Delta since cycle 1 (b76d9da): `237dc14` test report, `f6d1b87` sync-docs, `f413a58` cycle-1 cross-review triage (AR-1), `ca8a212` fix AR-1 (state-aware `+++ ` header rule), `45ce71f` plan notes, `750d247` cycle-2 self-review, `443ffb7` Slice F (`GIT_ATTR_SOURCE=HEAD` + doc corrections), `5774b5f` plan notes
+
+### Static analysis (re-run)
+
+| Check | Result |
+|---|---|
+| `./scripts/run-static-verify.sh` | PASS — full-scope fallback (unchanged reason); gofmt ok, go vet 0 issues, `check-sync.sh` DRIFTED=0, `check-pipeline-sync.sh` ok, `check-skill-sync.sh` ok, `check-template-purity.sh` PASS, branch secret scan clean (`scanned c1785b8..5774b5f against origin/main: clean`). Evidence: `docs/evidence/verify-2026-09-25-133512.log` |
+| `sh -n` | PASS on all 6 files (both scripts, both template copies, both test files) |
+| `shellcheck --severity=warning` | 0 issues on both scripts + both test files |
+| `cmp` templates | `scripts/secret-scan.sh` and `scripts/secret-scan-branch.sh` still byte-identical to their `templates/base/scripts/` copies |
+
+No new static findings. `scripts/secret-scan-branch.sh` is unchanged in this delta (confirmed via `git diff b76d9da..5774b5f --stat` — only `scripts/secret-scan.sh` + template copy touched among the scanners), so its own static checks carry over unchanged from cycle 1.
+
+### AR-1 fix (cross-review)
+
+Cross-review triage (`docs/reports/cross-review-triage-secret-scan-git-config.md`) found AR-1: the ANSI-strip added by this PR ran a global `gsub` before the `/^\+\+\+ /` file-header rule, so a *committed* line whose content is an escape sequence followed by `++ ` (e.g. `ESC[32m++ <token>`) collapsed to `+++ ...` after stripping and was silently dropped as a header — a regression against `main`, which detects that same line (main has no ANSI-stripping at all, so `+ESC[...]++ ` never literally starts with `+++ `). This is a different, narrower case than self-review cycle-1's LOW-5 (plain, uncolored content starting with `++ `, already present pre-PR and deferred as CI-shared tech debt).
+
+Fix `ca8a212` (`scripts/secret-scan.sh:185-198`) replaces the global rule with a state machine: `in_hunk` is reset to 0 on a `diff ` line and set to 1 on a `@@` line; `+++ ` is skipped only when `!in_hunk`; the ANSI strip is now anchored (`while (sub(/^\033\[[0-9;:]*m/, "")) {}`, line 191) so it only removes *leading* escape codes, never ones embedded in content. This fixes AR-1 and, as a side effect proven correct by the self-review's oracle comparison (a Python hunk-counter run against 215,825 lines of this repo's own `git log -p` history plus a synthetic fixture covering every header-look-alike shape), also closes LOW-5 — it is "a strict superset of main's reads: the only lines it adds are hunk content that starts with `++ `" (self-review, Positive notes).
+
+Evidence re-checked at HEAD:
+- `tests/test-secret-scan.sh:406-407` (escaped `++ ` content, `--range`), `:412` (plain `++ ` content, `--range`), `:423` (token-looking file name in a `+++ ` header not reported), `:427,429,431,433,435` (the same four shapes plus a colored hunk, under `--diff`).
+- Ran `sh tests/test-secret-scan.sh` once at HEAD (same narrow AC-6-evidence carve-out as cycle 1): 74/74 PASS (up from 61/61 in cycle 1, consistent with the ~13 new assertions for AR-1 + `GIT_ATTR_SOURCE`).
+- Cross-review's own full-history oracle run (215,825 lines, byte-identical across main's awk, the new awk, and the oracle) is stronger evidence than any single fixture that the new rule reads a strict superset of `main`'s lines with no unrelated behavior change.
+
+### AC re-map (current code, cycle-2 line numbers)
+
+AC-1, AC-2, AC-3, AC-4, AC-5, AC-7, AC-8, AC-9, AC-11, AC-12, AC-13, AC-15, AC-16, AC-17 — unchanged in substance from cycle 1; re-grepped and still PASS at the current line numbers (`scan_staged`/`scan_range` pin block now at `scripts/secret-scan.sh:203-236` after the `GIT_ATTR_SOURCE=HEAD` comment insertion; `is_object_id` still `:113-120`; `scan_staged` still `:132-172`). Only the two ACs below have cycle-2-specific behavior to re-verify:
+
+- **AC-6 (default-config range results unchanged)**: still PASS, with one intentional, plan-acknowledged addition. The state-aware header rule (above) now scans hunk lines whose content starts with `++ ` — previously dropped, including under the default config — as findings. This is a widening in the "finds more" direction only (a strict superset per the oracle comparison), and it is the explicit purpose of fixing AR-1/LOW-5, not a spec violation: the plan's Design decisions and both self-review cycles treat "CI and local agree" as the contract, and a line CI's own `git log -p` already contains was previously under-scanned locally in the same way it was under-scanned by `main`. `tests/test-secret-scan.sh:228,274,318,364` (unrelated default-config assertions carried over from cycle 1, still passing) plus the new `:407,412,423` assertions confirm the widened set is exactly the `++ `-prefixed hunk-content case, nothing broader.
+- **AC-16 / range scan config-independence**: unchanged (`core.bigFileThreshold=512m` still pinned, `scripts/secret-scan.sh:211`); no interaction with this cycle's fixes.
+
+**New in cycle 2, not covered by cycle-1's AC list**: `GIT_ATTR_SOURCE=HEAD` (Slice F, `443ffb7`) closes a gap the plan's own Deviation notes had flagged as "unconfirmed" (an uncommitted working-tree `.gitattributes` edit, or a local `attr.tree`, marking a file `-diff` so the range scan misses it while CI's checkout of HEAD would not). `scripts/secret-scan.sh:226` sets `GIT_ATTR_SOURCE=HEAD` on the `scan_range` git invocation (git 2.41+; ignored by an older git, which still reads the working tree — documented at `:203-206` and in the header at `:8`). This was not one of the plan's original 17 ACs (it is a self-review cycle-2 fix, not a plan acceptance criterion), so it does not get an AC number, but it is fully tested: `tests/test-secret-scan.sh:184-236` (version-gated on git ≥ 2.41 via `git_version`/`git_major`/`git_minor` parsing at `:185-195`, with an explicit `SKIP:` print on an older git) covers an uncommitted `-diff` edit, a local `attr.tree`, a committed `.gitattributes` read correctly from HEAD even with the working-tree copy removed (matching CI's checkout), and an unborn-HEAD edge case correctly exiting 3. Cross-review verified the git-version claim directly: "git 2.32.7 ... skips inexact rename detection ... and git 2.34.8 ... detects all 500," and separately confirmed `GIT_ATTR_SOURCE`'s effect on git 2.49; neither self-review nor cross-review checked which git release *introduced* `GIT_ATTR_SOURCE` itself (recorded as a coverage gap in the self-review, not contradicted by anything found here).
+
+### Non-goals (re-check)
+
+Still respected: `git diff b76d9da..5774b5f -- .gitallowed .github/workflows/` is empty (not re-touched in this delta either), and the `record_matches` pattern lines are unchanged in the cycle-2 diff. The AR-1 fix and `GIT_ATTR_SOURCE=HEAD` are both scanner-mechanism changes, not pattern or allowlist changes.
+
+### Documentation drift (re-check against cycle-1's flagged items)
+
+All three cycle-1 items are resolved:
+
+1. **`pr/SKILL.md` exit-3 description (×4 mirrors)** — now reads "Exit 3 covers three different problems: ... and the scanner itself failing to read the range (printed as `scanner failed with exit 3`; for example a git error)" (`.claude/skills/pr/SKILL.md:29`, and identically in `.agents/skills/pr/SKILL.md`, `templates/base/.claude/skills/pr/SKILL.md`, `templates/base/.agents/skills/pr/SKILL.md`). Matches the actual passthrough behavior confirmed in cycle 1.
+2. **`docs/tech-debt/README.md` Non-goals rows** — now present: line 138 (CI-shared blind spots: committed `-diff`/binary attribute or a real binary file, and merge commits — no longer lists the `++ ` item, confirmed absent) and line 139 (local-only gaps: exactly two unpinnable — `.git/info/attributes` `-diff` and a local `diff.<driver>.binary=true` for a committed-`.gitattributes`-named driver — plus the one closable-but-not-yet-done item, a local replace ref on `secret-scan-branch.sh`'s own git calls, closable with `GIT_NO_REPLACE_OBJECTS=1`; the row also correctly notes the uncommitted-`.gitattributes` case is now pinned by `GIT_ATTR_SOURCE=HEAD` rather than counting it among the two unpinnable gaps).
+3. **Stale `diff.renameLimit` deviation-note watch item** — resolved as anticipated: `docs/tech-debt/README.md` carries no open row for it (MEDIUM-1 fixed it in cycle 1, before cycle 1's `/sync-docs` even ran), so there was nothing for `/sync-docs` to file.
+
+New drift, found in cycle-2 self-review and fixed by Slice F (spot-checked at current HEAD, all confirmed fixed, no re-open):
+
+4. `docs/quality/quality-gates.md:46` (both root and `templates/base/` copies) previously overclaimed "regardless of local git config"; now reads "except for a few local-only attribute sources it cannot pin (listed in the `scripts/secret-scan.sh` header ...)" — matches the header's own "Known local-only gaps" list (`scripts/secret-scan.sh:10-13`). Confirmed no remaining claim anywhere in the diff that the scan is independent of *all* local git settings.
+5. `docs/architecture/repo-map.md:61` now lists `secret-scan-branch.sh` alongside `secret-scan.sh` under "secret and commit safety" — closes the pre-existing gap cycle 1 flagged as out-of-scope.
+6. `docs/tech-debt/README.md` row 140 (test-gaps) now attributes the untested `--no-show-signature` observation to "the cycle-1 self-review" rather than the implementer-facing "self-review Slice D" (Slice D is an implementer slice, not a self-review) — matches self-review cycle-2 finding (c).
+
+No remaining open documentation-drift items found in this scope.
+
+### Diff hygiene (cycle 2)
+
+`git diff b76d9da..5774b5f --stat`: 17 files touched, all within plan/report/tech-debt/doc-mirror scope plus the two scanner-mechanism files and their tests (listed above). No unexpected files.
+
+### Verdict: PASS
+
+No static findings, no failed acceptance criteria (all 17 plan ACs plus the un-numbered `GIT_ATTR_SOURCE=HEAD` fix), no Non-goals violations, and all documentation drift from cycle 1 is resolved with no new open items.
+
+### Follow-ups
+
+- `/test`: `docs/reports/test-2026-09-25-secret-scan-git-config.md` on file is a **cycle-1** report (HEAD `b76d9da`, 61/61) that predates `ca8a212` (AR-1 fix) and `443ffb7` (`GIT_ATTR_SOURCE=HEAD`) — it does not cover either fix. `/test` needs a genuine cycle-2 pass at `5774b5f`: full behavioral suites (now 74/74 for `tests/test-secret-scan.sh` per the AC-6-evidence run above), plus the cycle-2 self-review's mutation-based red/green claims (state-machine mutations, the `while`-loop-to-single-`sub` non-discriminating mutation already disclosed as a coverage gap).
+- No verifier-level follow-ups remain; ready for `/cross-review` (cycle 2) → `/pr` per the pipeline once `/test` confirms.
+
+### Insight event (cycle 2)
+
+Appended: `docs/insights/events/2026-09-25-secret-scan-git-config.jsonl` (phase=verify, cycle=2, verdict=pass, critical=0, high=0, medium=0, low=0).
