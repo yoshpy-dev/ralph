@@ -35,6 +35,20 @@ func shellAliasTestEnvWithZdotdir(home, zdotdir string) func() (shellAliasEnv, e
 	return func() (shellAliasEnv, error) { return shellAliasEnv{Home: home, Zdotdir: zdotdir}, nil }
 }
 
+// shellAliasTestEnvWithZdotdirAndCwd is shellAliasTestEnvWithZdotdir plus a
+// Cwd, for fixtures exercising a relative $ZDOTDIR.
+func shellAliasTestEnvWithZdotdirAndCwd(home, zdotdir, cwd string) func() (shellAliasEnv, error) {
+	return func() (shellAliasEnv, error) { return shellAliasEnv{Home: home, Zdotdir: zdotdir, Cwd: cwd}, nil }
+}
+
+// rawPathJoin concatenates parts with the OS path separator, without any
+// lexical cleaning -- unlike filepath.Join, a ".." component survives, so
+// fixtures can build a $ZDOTDIR value that only resolves correctly through
+// a symlink, mirroring shellAliasJoinRaw in the production code.
+func rawPathJoin(parts ...string) string {
+	return strings.Join(parts, string(filepath.Separator))
+}
+
 func TestCheckShellAliases_NoRcFiles_Pass(t *testing.T) {
 	dir := t.TempDir()
 
@@ -256,6 +270,129 @@ func TestCheckShellAliases_ZdotdirSymlinkedToHomeRc_ReportsZdotdirPath(t *testin
 	}
 }
 
+// TestCheckShellAliases_RelativeZdotdir_Detected is AC-5: a relative
+// $ZDOTDIR is resolved against Cwd, and the codex alias found under it is
+// reported with the resolved path.
+func TestCheckShellAliases_RelativeZdotdir_Detected(t *testing.T) {
+	home := t.TempDir()
+	cwd := t.TempDir()
+	writeAliasRc(t, filepath.Join(cwd, "relative-rc", ".zshrc"), `alias codex="codex -m x"`+"\n")
+
+	r := checkShellAliases(shellAliasTestEnvWithZdotdirAndCwd(home, "relative-rc", cwd), true)
+	if r.Status != "warn" {
+		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
+	}
+	wantSuffix := "relative-rc" + string(filepath.Separator) + ".zshrc"
+	if !strings.Contains(r.Detail, wantSuffix) {
+		t.Errorf("expected detail to name the resolved file, got: %s", r.Detail)
+	}
+}
+
+// TestCheckShellAliases_RelativeZdotdirEmptyCwd_SameAsUnset is AC-6: a
+// relative $ZDOTDIR with no Cwd to resolve it against must behave exactly
+// like $ZDOTDIR being unset, without panicking.
+func TestCheckShellAliases_RelativeZdotdirEmptyCwd_SameAsUnset(t *testing.T) {
+	home := t.TempDir()
+	writeAliasRc(t, filepath.Join(home, ".zshrc"), `alias codex="codex -m x"`+"\n")
+
+	r := checkShellAliases(shellAliasTestEnvWithZdotdirAndCwd(home, "relative-rc", ""), true)
+	if r.Status != "warn" {
+		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
+	}
+	if strings.Contains(r.Detail, "relative-rc") {
+		t.Errorf("a relative $ZDOTDIR with no Cwd must be skipped entirely, got: %s", r.Detail)
+	}
+}
+
+// TestCheckShellAliases_RelativeZdotdirWithDotDotThroughSymlink_FollowsOSResolution
+// is AC-5b: $ZDOTDIR = "link/../rc" where <Cwd>/link is a symlink to
+// <X>/config must resolve the way zsh does -- against the symlink's
+// target, not lexically -- landing on <X>/rc/.zshrc, never
+// <Cwd>/rc/.zshrc (nothing is written there).
+func TestCheckShellAliases_RelativeZdotdirWithDotDotThroughSymlink_FollowsOSResolution(t *testing.T) {
+	home := t.TempDir()
+	cwd := t.TempDir()
+	x := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(x, "config"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(x, "config"), filepath.Join(cwd, "link")); err != nil {
+		t.Fatal(err)
+	}
+	writeAliasRc(t, filepath.Join(x, "rc", ".zshrc"), `alias codex="codex -m x"`+"\n")
+
+	r := checkShellAliases(shellAliasTestEnvWithZdotdirAndCwd(home, rawPathJoin("link", "..", "rc"), cwd), true)
+	if r.Status != "warn" {
+		t.Fatalf("expected warn (the OS, not filepath.Join, must resolve the \"..\"), got %s (%s)", r.Status, r.Detail)
+	}
+	wantSuffix := "rc" + string(filepath.Separator) + ".zshrc"
+	if !strings.Contains(r.Detail, wantSuffix) {
+		t.Errorf("expected detail to name the resolved file, got: %s", r.Detail)
+	}
+}
+
+// TestCheckShellAliases_CwdThroughSymlinkWithDotDotZdotdir_FollowsOSResolution
+// is AC-5c: Cwd itself is a path through a symlink (<A>/l -> <B>/c) and
+// $ZDOTDIR is "..", so the alias found must be the one at <B>/.zshrc, the
+// symlink target's parent, not <A>/.zshrc.
+func TestCheckShellAliases_CwdThroughSymlinkWithDotDotZdotdir_FollowsOSResolution(t *testing.T) {
+	home := t.TempDir()
+	a := t.TempDir()
+	b := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(b, "c"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(b, "c"), filepath.Join(a, "l")); err != nil {
+		t.Fatal(err)
+	}
+	writeAliasRc(t, filepath.Join(b, ".zshrc"), `alias codex="codex -m x"`+"\n")
+
+	cwd := filepath.Join(a, "l")
+	r := checkShellAliases(shellAliasTestEnvWithZdotdirAndCwd(home, "..", cwd), true)
+	if r.Status != "warn" {
+		t.Fatalf("expected warn (the symlink target's parent, not the pre-symlink path), got %s (%s)", r.Status, r.Detail)
+	}
+}
+
+// TestCheckShellAliases_AbsoluteZdotdirWithDotDotThroughSymlink_FollowsOSResolution
+// is AC-5d: an absolute $ZDOTDIR containing "link/.." must resolve the same
+// way as the relative case (AC-5b) -- Cwd is set to "" here to prove it is
+// irrelevant once $ZDOTDIR is absolute.
+func TestCheckShellAliases_AbsoluteZdotdirWithDotDotThroughSymlink_FollowsOSResolution(t *testing.T) {
+	home := t.TempDir()
+	cwd := t.TempDir()
+	x := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(x, "config"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(x, "config"), filepath.Join(cwd, "link")); err != nil {
+		t.Fatal(err)
+	}
+	writeAliasRc(t, filepath.Join(x, "rc", ".zshrc"), `alias codex="codex -m x"`+"\n")
+
+	absoluteZdotdir := rawPathJoin(cwd, "link", "..", "rc")
+	r := checkShellAliases(shellAliasTestEnvWithZdotdirAndCwd(home, absoluteZdotdir, ""), true)
+	if r.Status != "warn" {
+		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
+	}
+}
+
+// TestCheckShellAliases_RelativeZdotdirResolvesToHome_DedupedToOne is the
+// dedup edge case: a relative $ZDOTDIR that resolves to $HOME itself must
+// still count the alias once, the same as the existing symlink-dedup cases.
+func TestCheckShellAliases_RelativeZdotdirResolvesToHome_DedupedToOne(t *testing.T) {
+	home := t.TempDir()
+	writeAliasRc(t, filepath.Join(home, ".zshrc"), `alias codex="codex -m x"`+"\n")
+
+	r := checkShellAliases(shellAliasTestEnvWithZdotdirAndCwd(home, ".", home), true)
+	if r.Status != "warn" {
+		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
+	}
+	if n := strings.Count(r.Detail, "alias codex in"); n != 1 {
+		t.Errorf("expected exactly one finding, got %d occurrences in: %s", n, r.Detail)
+	}
+}
+
 func TestCheckShellAliases_FishAlias_Warn(t *testing.T) {
 	dir := t.TempDir()
 	writeAliasRc(t, filepath.Join(dir, ".config", "fish", "config.fish"), `alias codex "codex -m x"`+"\n")
@@ -317,6 +454,31 @@ func TestShellAliasEnvFromOS(t *testing.T) {
 		}
 		if env.Zdotdir != zdotdir {
 			t.Errorf("expected Zdotdir %q, got %q", zdotdir, env.Zdotdir)
+		}
+	})
+
+	t.Run("resolves Cwd from the process's working directory", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Chdir(dir)
+
+		env, err := shellAliasEnvFromOS()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		// Compare through filepath.EvalSymlinks on both sides: on macOS
+		// t.TempDir() is itself under a symlink (/tmp -> /private/tmp), so
+		// a byte-for-byte comparison of env.Cwd against dir would fail even
+		// when os.Getwd resolved to the same physical directory.
+		wantCwd, err := filepath.EvalSymlinks(dir)
+		if err != nil {
+			t.Fatalf("EvalSymlinks(%q): %v", dir, err)
+		}
+		gotCwd, err := filepath.EvalSymlinks(env.Cwd)
+		if err != nil {
+			t.Fatalf("EvalSymlinks(%q): %v", env.Cwd, err)
+		}
+		if gotCwd != wantCwd {
+			t.Errorf("expected Cwd to resolve to %q, got %q (raw %q)", wantCwd, gotCwd, env.Cwd)
 		}
 	})
 }
