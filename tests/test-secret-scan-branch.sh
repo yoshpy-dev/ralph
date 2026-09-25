@@ -16,7 +16,9 @@
 # every fixture repo below runs `git commit`: a host or CI runner with a
 # global `commit.gpgsign = true` (or any other global config) would
 # otherwise make every commit in this file fail with a gpg-signing error
-# unrelated to the script under test.
+# unrelated to the script under test. GIT_CONFIG_NOSYSTEM also covers a git
+# older than 2.32, which ignores GIT_CONFIG_SYSTEM, and XDG_CONFIG_HOME is
+# unset so no user-level git config or attributes file under it is read.
 set -eu
 
 SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
@@ -46,8 +48,10 @@ mkdir -p "$hermetic_home"
 HOME="$hermetic_home"
 GIT_CONFIG_GLOBAL="$hermetic_home/.gitconfig"
 GIT_CONFIG_SYSTEM=/dev/null
+GIT_CONFIG_NOSYSTEM=1
 GIT_TERMINAL_PROMPT=0
-export HOME GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_TERMINAL_PROMPT
+export HOME GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM GIT_TERMINAL_PROMPT
+unset XDG_CONFIG_HOME
 
 # run_bin <binary> <cwd> [args...] -- runs <binary> from <cwd> with a clean
 # slate for the three env vars this script reads. Captures stdout/stderr

@@ -2,20 +2,26 @@
 # secret-scan.sh - shared secret scanner for Ralph git hooks.
 #
 # CI runs --range with git's default config, so a local --range must read
-# the same added lines: scan_range neutralizes every local git setting that
-# changes which added lines `git log -p` prints (color, diff.relative,
-# textconv, external diff, rename/copy detection, the diff algorithm, the
-# big-file threshold, a user-level attributes file, root-commit diffs,
-# submodule diffs, replace refs), and checks git's exit status before
-# parsing, so a git failure is never read as a clean scan. --staged reads
-# each staged blob by its object id, so neither file name quoting nor
-# diff.relative can skip a file.
+# the same added lines: scan_range pins the local git settings listed there
+# (color, diff.relative, textconv, external diff, rename/copy detection and
+# its limit, the diff algorithm, the big-file threshold, a user-level
+# attributes file, root-commit diffs, submodule diffs, replace refs,
+# signature output) to git's defaults, and checks git's exit status before
+# parsing, so a git failure is never read as a clean scan. Known local-only
+# gaps it cannot pin: a `-diff`/`binary` attribute in .git/info/attributes,
+# and a local diff.<driver>.binary=true for a driver the committed
+# .gitattributes names. --staged reads each staged blob by its object id, so
+# neither file name quoting nor diff.relative can skip a file. Every option
+# used works on git 2.8; a -c key an older git does not know is ignored, and
+# such a git has no such setting to neutralize.
 #
 # Exit codes:
 #   0  scanned, nothing found
 #   1  scanned, found something
 #   2  usage error
-#   3  could not scan (git failed, so the content was not fully read)
+#   3  could not scan (a missing or unreadable --file, or git failed), so
+#      the content was not fully read
+# A HUP, INT, or TERM stops the scan with 129, 130, or 143.
 set -eu
 
 usage() {
@@ -36,7 +42,14 @@ tmp_dir="${TMPDIR:-/tmp}/ralph-secret-scan.$$"
 findings="$tmp_dir/findings"
 
 mkdir -p "$tmp_dir"
-trap 'rm -rf "$tmp_dir"' EXIT HUP INT TERM
+# POSIX sh resumes the script after a signal trap's action runs, so a
+# signal trap that only removed $tmp_dir would let the scan continue without
+# its findings file and end with exit 0. Exit with the conventional
+# 128+signum code instead; the EXIT trap still cleans up.
+trap 'rm -rf "$tmp_dir"' EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 : > "$findings"
 
 is_allowed() {
@@ -96,19 +109,30 @@ scan_stdin() {
   scan_file "$file" "$label"
 }
 
+# is_object_id <id> -- true for a full lowercase hex object id (40 hex
+# characters for SHA-1, 64 for SHA-256).
+is_object_id() {
+  case "$1" in
+    "" | *[!0-9a-f]*) return 1 ;;
+  esac
+  [ "${#1}" -eq 40 ] || [ "${#1}" -eq 64 ]
+}
+
 # scan_staged -- scans each staged blob by its object id, so a file name is
 # only the finding's label and its quoting cannot decide what gets read:
 #   --no-replace-objects       HEAD and each blob as the commit records them
 #   diff.relative=false        a subdirectory cwd still lists the whole index
 #   core.quotePath=false       non-ASCII names print unquoted
+#   --raw                      one line per entry, with modes and object ids
+#   --no-abbrev                full object ids, as cat-file reads them
 #   --no-renames               a rename or copy lists as a plain addition
 #   --diff-filter=d            every change except a deletion, type changes too
-# A listed blob that cannot be read exits 3.
+# A line that does not parse, or a listed blob that cannot be read, exits 3.
 scan_staged() {
   staged_list="$tmp_dir/staged-list"
   list_rc=0
   git --no-replace-objects -c diff.relative=false -c core.quotePath=false \
-    diff --cached --raw --no-abbrev --no-renames --no-color --diff-filter=d -- \
+    diff --cached --raw --no-abbrev --no-renames --diff-filter=d -- \
     > "$staged_list" || list_rc=$?
   if [ "$list_rc" -ne 0 ]; then
     printf 'secret-scan: could not scan the staged changes: git diff --cached exited with %s\n' "$list_rc" >&2
@@ -125,6 +149,10 @@ scan_staged() {
     read -r _ new_mode _ new_id _ <<EOF
 $meta
 EOF
+    if ! is_object_id "$new_id"; then
+      printf 'secret-scan: could not scan the staged changes: cannot parse the entry for %s (%s)\n' "$path" "$meta" >&2
+      exit 3
+    fi
     # A gitlink (submodule) records a commit, not content of this repo.
     case "$new_mode" in
       160000) continue ;;
@@ -164,14 +192,15 @@ scan_diff_stream() {
 #   --no-replace-objects             refs/replace/* substitutions
 #   diff.relative=false              a subdirectory cwd
 #   diff.renames=true                renames detected, copies not
+#   diff.renameLimit=1000            rename candidates (git's default since 2.33)
 #   core.bigFileThreshold=512m       a small threshold turns text into binary
 #   core.attributesFile=/dev/null    a user-level attributes file (-diff)
 #   log.showRoot=true                a root commit's own diff
+#   log.showSignature=false          signature lines in the output
 #   --no-color                       color.ui / color.diff
 #   --no-textconv, --no-ext-diff     diff drivers from the local config
 #   --diff-algorithm=default         diff.algorithm
 #   --submodule=short                diff.submodule
-#   --no-show-signature              log.showSignature
 # The output goes to a file, not a pipe, so git's exit status is checked
 # before parsing: a git log that fails before or partway through its output
 # exits 3 rather than scanning what it printed.
@@ -182,11 +211,13 @@ scan_range() {
   git --no-replace-objects \
     -c diff.relative=false \
     -c diff.renames=true \
+    -c diff.renameLimit=1000 \
     -c core.bigFileThreshold=512m \
     -c core.attributesFile=/dev/null \
     -c log.showRoot=true \
+    -c log.showSignature=false \
     log --format='commit %H' --no-color --no-textconv --no-ext-diff \
-    --diff-algorithm=default --submodule=short --no-show-signature \
+    --diff-algorithm=default --submodule=short \
     -p "$range" -- > "$log_file" || log_rc=$?
   if [ "$log_rc" -ne 0 ]; then
     printf 'secret-scan: could not scan %s: git log exited with %s, so the range was not (fully) scanned\n' "$range" "$log_rc" >&2
@@ -198,6 +229,10 @@ scan_range() {
 case "${1:-}" in
   --file)
     [ "$#" -ge 2 ] || usage
+    if [ ! -f "$2" ] || [ ! -r "$2" ]; then
+      printf 'secret-scan: could not scan %s: not a readable file\n' "$2" >&2
+      exit 3
+    fi
     scan_file "$2" "${3:-$2}"
     ;;
   --stdin)

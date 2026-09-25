@@ -19,13 +19,14 @@
 #
 # Exit codes:
 #   0  scanned and found nothing; in default mode, also nothing to scan or
-#      could not scan (see --strict below)
+#      could not determine what to scan (see --strict below)
 #   1  scanned and found something
 #   2  usage error
-#   3  (--strict only) could not scan, or nothing to scan
-# In either mode, a scanner exit other than 0 or 1 (secret-scan.sh exits 3
-# when git could not read the range) is reported as "scanner failed with
-# exit <rc>" and propagated as this script's exit code.
+#   3  --strict: could not determine what to scan, or nothing to scan;
+#      either mode: the scanner could not read the range (its own exit 3,
+#      propagated)
+# In either mode, a scanner exit other than 0 or 1 is reported as "scanner
+# failed with exit <rc>" and propagated as this script's exit code.
 #
 # Default mode never fails on an unscannable state (no base ref, no
 # merge-base, ...) or on a genuinely empty range: it is meant for

@@ -88,19 +88,22 @@ expect_exit "range added secret exits 1" 1 "$SCANNER" --range "$base_branch..lea
 # Hermetic section: CI scans a range with git's default config, so local git
 # config and repo state must not change which added lines --range reads (nor
 # which files --staged reads), and a git failure must not read as a clean
-# scan. From here on every repo runs under an isolated HOME and global config
-# (the cases above run under the caller's own config). Fixture values are
-# assembled at runtime from split pieces: this file's own history is read by
-# the same range scan.
+# scan. From here on every repo runs under an isolated HOME, global config,
+# and system config, with no XDG config dir (the cases above run under the
+# caller's own config). GIT_CONFIG_NOSYSTEM also covers a git older than
+# 2.32, which ignores GIT_CONFIG_SYSTEM. Fixture values are assembled at
+# runtime from split pieces: this file's own history is read by the same
+# range scan.
 # ---------------------------------------------------------------------------
 hermetic_home="$workdir/.home"
 mkdir -p "$hermetic_home"
 HOME="$hermetic_home"
 GIT_CONFIG_GLOBAL="$hermetic_home/.gitconfig"
 GIT_CONFIG_SYSTEM=/dev/null
+GIT_CONFIG_NOSYSTEM=1
 GIT_TERMINAL_PROMPT=0
-export HOME GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_TERMINAL_PROMPT
-unset RALPH_SECRET_ALLOWLIST
+export HOME GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM GIT_TERMINAL_PROMPT
+unset XDG_CONFIG_HOME RALPH_SECRET_ALLOWLIST
 git config --global user.email test@example.com
 git config --global user.name "Secret Scan Test"
 git config --global commit.gpgsign false
@@ -228,6 +231,29 @@ for renames in copies false; do
   expect_exit "AC-4: pure rename with diff.renames=$renames matches the default result" 0 "$SCANNER" --range main..rename
   git config --unset diff.renames
 done
+
+# A low local diff.renameLimit skips inexact rename detection, so renamed
+# and edited files would show their unchanged lines (a token already on
+# main) as added.
+repo="$workdir/cfg-rename-limit"
+new_repo "$repo"
+cd "$repo"
+for n in 1 2 3; do
+  printf 'deploy token %s\nline two %s\nline three\nline four\nline five\n' "$token" "$n" > "base$n.txt"
+done
+git add base1.txt base2.txt base3.txt
+git commit -q -m 'add base files'
+git checkout -q -b feature
+for n in 1 2 3; do
+  git mv "base$n.txt" "moved$n.txt"
+  printf 'edited\n' >> "moved$n.txt"
+done
+git add moved1.txt moved2.txt moved3.txt
+git commit -q -m 'rename and edit base files'
+expect_exit "renamed-and-edited files under the default config add no token line" 0 "$SCANNER" --range main..feature
+git config diff.renameLimit 1
+expect_exit "renamed-and-edited files with diff.renameLimit=1 match the default result" 0 "$SCANNER" --range main..feature
+git config --unset diff.renameLimit
 
 # The token line moves from the end of the file to its start past a run of
 # repeated lines. The default (myers) diff reports it as added; histogram
@@ -428,6 +454,84 @@ printf 'main side\n' > conflict.txt
 git commit -q -a -m 'main side'
 git merge -q other >/dev/null 2>&1 || true
 expect_exit "staged: an unmerged path (no staged blob) does not fail the scan" 0 "$SCANNER" --staged
+
+# A raw staged line without a full object id exits 3 instead of being
+# skipped. git never prints one, so a wrapper on PATH stands in for
+# `git diff --cached --raw` and passes every other git call through.
+real_git="$(command -v git)"
+fake_bin="$workdir/fake-git-bin"
+fake_raw="$workdir/fake-raw-output"
+mkdir -p "$fake_bin"
+cat > "$fake_bin/git" <<EOF
+#!/bin/sh
+case " \$* " in
+  *" --raw "*) cat "$fake_raw"; exit 0 ;;
+esac
+exec "$real_git" "\$@"
+EOF
+chmod +x "$fake_bin/git"
+repo="$workdir/staged-unparsable"
+new_repo "$repo"
+cd "$repo"
+zero_id="$(printf '%040d' 0)"
+printf ':000000 100644 %s\tleak.txt\n' "$zero_id" > "$fake_raw"
+expect_exit "staged: a raw line with no new object id exits 3" 3 env PATH="$fake_bin:$PATH" "$SCANNER" --staged
+expect_stderr_contains "staged: an unparsable line names the entry" "cannot parse the entry for leak.txt"
+printf ':000000 100644 %s 0000000 A\tleak.txt\n' "$zero_id" > "$fake_raw"
+expect_exit "staged: an abbreviated all-zero object id exits 3" 3 env PATH="$fake_bin:$PATH" "$SCANNER" --staged
+
+# Exit 0 means "scanned": a --file path that cannot be read exits 3, while
+# an existing empty file is a clean scan.
+file_dir="$workdir/file-cases"
+mkdir -p "$file_dir"
+cd "$file_dir"
+expect_exit "--file on a missing path exits 3" 3 "$SCANNER" --file "$file_dir/missing.txt"
+expect_stderr_contains "--file on a missing path names it" "could not scan $file_dir/missing.txt"
+: > "$file_dir/empty.txt"
+expect_exit "--file on an existing empty file exits 0" 0 "$SCANNER" --file "$file_dir/empty.txt"
+printf 'deploy token %s\n' "$token" > "$file_dir/unreadable.txt"
+chmod 000 "$file_dir/unreadable.txt"
+if [ "$(id -u)" -eq 0 ]; then
+  printf '  SKIP: --file on an unreadable file (root can read it anyway)\n'
+else
+  expect_exit "--file on an unreadable file exits 3" 3 "$SCANNER" --file "$file_dir/unreadable.txt"
+fi
+chmod 644 "$file_dir/unreadable.txt"
+
+# A TERM during the scan must stop it with 143, not resume it without its
+# temp dir and report clean. The scanner blocks reading stdin from a FIFO
+# when the TERM arrives, and the trap runs once that read ends; the TERM is
+# sent only after the scanner's findings file (created after its traps are
+# set) exists.
+sig_dir="$workdir/signal"
+mkdir -p "$sig_dir/tmp"
+mkfifo "$sig_dir/fifo"
+TMPDIR="$sig_dir/tmp" "$SCANNER" --stdin 'signal test' < "$sig_dir/fifo" > "$sig_dir/out" 2> "$sig_dir/err" &
+sig_pid=$!
+exec 9> "$sig_dir/fifo"
+tries=0
+while [ ! -f "$sig_dir/tmp/ralph-secret-scan.$sig_pid/findings" ] && [ "$tries" -lt 20 ]; do
+  sleep 1
+  tries=$((tries + 1))
+done
+kill -TERM "$sig_pid"
+printf 'deploy token %s\n' "$token" >&9
+exec 9>&-
+set +e
+wait "$sig_pid"
+sig_rc=$?
+set -e
+if [ "$sig_rc" -eq 143 ]; then
+  ok "a TERM during the scan exits 143"
+else
+  not_ok "a TERM during the scan exits 143 (exit $sig_rc, want 143)"
+  cat "$sig_dir/err"
+fi
+if [ -d "$sig_dir/tmp/ralph-secret-scan.$sig_pid" ]; then
+  not_ok "a TERM during the scan still removes the temp dir"
+else
+  ok "a TERM during the scan still removes the temp dir"
+fi
 
 printf '\n-- Summary --\n  PASS: %s\n  FAIL: %s\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
