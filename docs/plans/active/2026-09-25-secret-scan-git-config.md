@@ -1,6 +1,6 @@
 # secret-scan-git-config
 
-- Status: Draft
+- Status: In progress
 - Owner: Claude Code
 - Date: 2026-09-25
 - Related request: #169(PR #177)の最終 cross-review(cycle 2、cap 到達)で残った 2 件(`docs/reports/cross-review-triage-local-branch-secret-scan.md` の AR-3 / AR-4)。AR-3: git の設定に `color.ui=always` があると scanner の `git log -p` の追加行が色のエスケープで始まり、`+` で始まる行だけを読む parser が読み飛ばす。AR-4: symlink の `.gitallowed` のリンク先の末尾改行がコマンド置換で落ち、別のファイルに解決される。plan 作成時の調査で同じ種類の見落としをさらに 4 つ再現し、ユーザー判断(AskUserQuestion)ですべてこの issue で直す
@@ -121,12 +121,13 @@
 
 - 2026-09-25 plan: issue の 2 件に加え、調査で再現した 4 経路(`diff.relative`、textconv、`diff.renames=copies`、staged の非 ASCII のファイル名)を範囲に入れた。ユーザー決定(AskUserQuestion): すべて #176 で直す
 - 2026-09-25 plan: Codex plan advisory の HIGH 2 件を反映。(1) `git log | scan_diff_stream` のパイプでは `git log` の失敗が見えず、存在しない `diff.orderFile` などで追加行 0 件の clean になる → 出力を一時ファイルに取り終了状態を確かめる(Scope 1b、AC-15、AC-17)。(2) `core.bigFileThreshold` が小さいとテキストがバイナリ扱いになり本文の diff が出ない → 512m に固定(Scope 1、AC-16)。ユーザー決定(AskUserQuestion): 対応案で plan を更新
+- 2026-09-25 work: Slice A(014ab77)、B(3060815)、C(a8adfc7)は implementer に委譲(security の関門なので model-routing の規則どおり opus)。A: `scan_range` は `git log` の出力を一時ファイルに取り終了状態を確かめてから解析、失敗は exit 3。固定は `--no-color` / `--no-textconv` / `--no-ext-diff` / `--diff-algorithm=default` / `--no-show-signature` と `-c diff.relative=false` / `diff.renames=true` / `core.bigFileThreshold=512m`。implementer が再現した上で 4 つ追加: `core.attributesFile=/dev/null`(ユーザー単位の `-diff`)、`log.showRoot=true`(無関係な履歴を merge した branch の root commit)、`--no-replace-objects`(replace ref による差し替え)、`--submodule=short`(`diff.submodule=diff` で CI より多く scan)。`scan_diff_stream` は色のエスケープを外す。AC-5 は myers と histogram / patience で追加行が変わる fixture(繰り返し行を越える移動)を作れたので固定した。B: staged は `git diff --cached --raw --no-abbrev --no-renames --diff-filter=d` の blob id を `git cat-file blob` で読み、パスはラベルだけ。gitlink と 0 の id は飛ばし、読めない blob は exit 3。改行を含むファイル名も scan する。C: symlink のリンク先は sentinel 付きで読み、改行を含むリンク先は解決しない。`ls-tree` は `core.quotePath=false`。`git show` を `git cat-file blob` に置き換え。scanner の exit 3 は既存の「scanner failed with exit <rc>」の経路で伝わる。テストは 6 → 50 件、96 → 108 件。修正前の scanner では新しいテストの大半が落ちる(A 20 件、B 13 件、C は両方修正前で 12 件)。固定を 1 つずつ外す mutation で対応するテストが落ちる(例外: `--no-color` は色の除去と二重の防御なので単独では落ちない、`--no-show-signature` はテストなし)。orchestrator は HEAD 一致・porcelain 空・差分・template の byte 一致、最初の probe の 5 経路がすべて検出に変わること、テスト 3 本、`run-verify.sh`、strict scan を確認。範囲外の発見(tech-debt に記録する): `.git/info/attributes` の `-diff`(config ではないので `-c` で消せない)、コミット済みの `.gitattributes` が指す driver へのローカルの `diff.<driver>.binary=true`、作業ツリーの `.gitattributes` の未コミットの変更(推測、未確認)、`diff.renameLimit`(未確認)、`secret-scan-branch.sh` 自身の git 呼び出しの replace ref。Non-goals の 2 件(コミット済みの `-diff` / `binary`、merge commit の diff)も同じく記録する
 
 ## Progress checklist
 
 - [x] Plan reviewed
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
