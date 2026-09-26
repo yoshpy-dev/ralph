@@ -267,3 +267,93 @@ None of the above block the PASS verdict.
 ```
 ./scripts/insights-append.sh --slug secret-scan-git-config --flow standard --phase test --cycle 2 --verdict pass --critical 0 --high 0 --medium 0 --low 0 --source skill
 ```
+
+## Cycle 3 (final, run 3 of 3)
+
+- Date: 2026-09-26
+- HEAD: `28cd7c186087491463d475bf17d4527ff48cdc57` (worktree `git status --porcelain` empty at start and end; confirmed again after every mutation revert)
+- Delta since cycle 2 (`b403b9f`): `dca6c2f` cycle-2 sync-docs, `df3193e` cycle-2 cross-review triage (**AR-2**: `GIT_ATTR_SOURCE=HEAD` broke `prepare-commit-msg-secret-guard.sh`'s merge-in-progress scan, `HEAD..$merge_head`, which does not end at HEAD; user raised the pipeline cap to 3), `004d99e` **Slice G** (attribute source = the range's own end commit, not always HEAD — fixed AR-2's exact shape but, per self-review run 3, only *moved* the misread to the mirror case, C3-H1), `63461d6` plan notes, `9e297e4` self-review run 3, `0e136fc` **Slice H** (final fix: pin `GIT_ATTR_SOURCE` to HEAD's own commit *only* when the range's resolved end equals HEAD; for any other end, explicitly `unset GIT_ATTR_SOURCE` — including one inherited from the caller's environment — and add `-c attr.tree=` so a local `attr.tree` can't step in either, falling back to the working tree's live attributes exactly as `main` did; a range end that doesn't resolve to a commit now exits 3 before `git log` even runs), `c2ad097` plan notes. `tests/test-secret-scan.sh` grew 74 → 86.
+
+### Verdict: PASS
+
+`tests/test-secret-scan.sh` 86/86, unchanged 108/108 and 32/32 for the other two files. Stable across 3 shells, the hostile outer config, 10 repeat runs, and two real git versions via Docker (2.40.4 — pre-`GIT_ATTR_SOURCE`, correctly version-gate-skips — and 2.43.7 — supports both `GIT_ATTR_SOURCE` and `attr.tree=`, fully exercises them). All 5 requested mutations discriminated exactly as predicted, including the two that reproduce the AR-2→C3-H1 arc directly (always-pin-the-end reproduces C3-H1's mirror miss; never-pin reproduces AR-2's original regression). All 4 live-demonstration scenarios matched the predicted exit codes exactly, once a self-caught fixture-construction mistake was fixed (see below). CI parity holds on all 4 cycle-1 fixtures, this repository's own range, and a new whole-history comparison for both a HEAD-ending and a non-HEAD-ending range — all byte-identical to `main`.
+
+### 1. Execution
+
+| Command | Result |
+|---|---|
+| `./scripts/run-test.sh` (full changed-scope run) | PASS — "All verifiers passed." Evidence: `docs/evidence/verify-2026-09-26-101048.log`. `tests/test-secret-scan.sh` 86/86, `tests/test-secret-scan-branch.sh` 108/108, `tests/test-run-verify-branch-secret-scan.sh` 32/32; full shell suite and `go test ./...` (8 packages) also green. |
+| `sh tests/test-secret-scan.sh` / `test-secret-scan-branch.sh` / `test-run-verify-branch-secret-scan.sh` (standalone) | 86/86, 108/108, 32/32 |
+| Same 3, with `TMPDIR=/tmp` | 86/86, 108/108, 32/32 — identical |
+
+### 2. Environment matrix
+
+| Variant | `test-secret-scan.sh` | `test-secret-scan-branch.sh` |
+|---|---|---|
+| `/bin/sh` | 86/86 | 108/108 |
+| `/bin/dash` | 86/86 | 108/108 |
+| `/bin/bash --posix` | 86/86 | 108/108 |
+| Cycle-1/2 hostile outer config (`color.ui=always`, `diff.relative=true`, `diff.renames=copies`, `diff.algorithm=histogram`, `log.showSignature=true`, `core.bigFileThreshold=1`, `attr.tree=0000...0000`) | 86/86 (all merge-guard/attr-source assertions individually confirmed, including the two new merge-guard scenarios and both `A...B` cases) | 108/108 |
+| git 2.40.4 (Docker, `alpine:3.18`, pre-`GIT_ATTR_SOURCE`) | 70/70 (the whole `attr_source_supported`-gated block correctly `SKIP:`s with "git 2.40.4 is older than 2.41", not a failure) | 108/108 |
+| git 2.43.7 (Docker, `alpine:3.19`, supports `GIT_ATTR_SOURCE` **and** `attr.tree=`) | 85/85 (only the expected root-can-always-read `--file` skip; every attr-source assertion runs and passes) | 108/108 |
+
+**Outer `GIT_ATTR_SOURCE` export — narrower than a full-suite run turned out to be meaningful.** Exporting a syntactically-invalid or merely-unresolvable `GIT_ATTR_SOURCE` (e.g. a nonexistent string) into the *whole test process's* environment breaks essentially all git operations, not just the scanner's own — confirmed by hand: `git add` itself fails with `fatal: bad --attr-source or GIT_ATTR_SOURCE` for any path that doesn't resolve in the *current* repo, and since `test-secret-scan.sh` builds dozens of independent throwaway fixture repos, no single external value can be simultaneously valid in all of them; a garbage or foreign-repo value just breaks fixture construction itself, which tests git's own eagerness, not the scanner. The meaningful, realistic version of this check — a **valid-but-wrong** commit id, from within the actual fixture repo the scan is running in — is exactly what the shipped test "an inherited `GIT_ATTR_SOURCE` does not choose the merge guard's attributes" already does (part of the 86/86 above). I additionally re-verified by hand, directly against `scan_range`'s subshell, that even a completely garbage/unresolvable inherited `GIT_ATTR_SOURCE` is fully neutralized for **both** branches: `unset GIT_ATTR_SOURCE`-branch (merge guard, range not ending at HEAD) → `exit=0`, no `fatal:`; `GIT_ATTR_SOURCE=$head_commit`-branch (CI/branch-scan shape) → `exit=0`, no `fatal:` — the explicit reassignment/unset inside the subshell overwrites the inherited value either way, regardless of how badly it was poisoned.
+
+### 3. Repeat
+
+10 sequential runs, `sh tests/test-secret-scan.sh`: 86/86 every time (10/10), no flakes. (This suite took longer than the 180s default timeout to run 10x back-to-back this cycle — the new real-`git merge`-based fixtures add real work per run — so it was moved to a background task; full output confirmed 10/10 clean.)
+
+### 4. Red/green mutations
+
+Applied in place to `scripts/secret-scan.sh`, tested, reverted with `git checkout --`, `git status --porcelain` and a byte-diff against a pre-mutation backup both confirmed clean after every revert.
+
+| Mutation | Failing test(s) | Match? |
+|---|---|---|
+| Always pin the range end's own commit (Slice G behavior: `GIT_ATTR_SOURCE=$end_commit` unconditionally, no `if`/`else`) | `A...B with B other than HEAD reads the working tree's attributes`, `merge where HEAD's side drops -diff: HEAD..<merge head> range finds the token`, `merge where HEAD's side drops -diff: prepare-commit-msg guard finds the token`, `an inherited GIT_ATTR_SOURCE does not choose the merge guard's attributes`, `a local attr.tree does not replace the merge guard's working-tree attributes` (5) — exactly C3-H1's mirror-case tests; the *original* AR-2-shape merge tests stay green, since Slice G's own approach happens to fix that specific shape | Exact — reproduces C3-H1 |
+| Never pin (`main` behavior: `unset GIT_ATTR_SOURCE` unconditionally) | `range scan ignores an uncommitted working-tree .gitattributes marking the file -diff`, `a ..HEAD range reads attributes from HEAD, not the working tree`, `a range with an empty end reads attributes from HEAD, not the working tree`, `range scan reads the committed .gitattributes, not the working tree, as CI's checkout does`, `A...B with B at HEAD reads HEAD's attributes` (5) — exactly the HEAD-pin tests; both merge-guard tests stay green, since that is exactly `main`'s own (correct-for-that-case) behavior | Exact — reproduces the original AR-2 regression |
+| Drop the `else` branch's `unset GIT_ATTR_SOURCE` (keep the `if`, drop only the `else`) | `an inherited GIT_ATTR_SOURCE does not choose the merge guard's attributes` (1) | Exact |
+| Drop `-c attr.tree=` | `a local attr.tree does not replace the merge guard's working-tree attributes` (1) — the HEAD-ending `attr.tree` test stays green, since `GIT_ATTR_SOURCE` already takes precedence over `attr.tree` on that branch regardless | Exact |
+| Drop the range-end resolution `exit 3` check (fold it into a soft `\|\| end_commit=""` instead) | `a range whose end does not resolve names that end` (1 — the *specific* diagnostic message goes missing) | The exit-code guarantee itself does **not** regress — `a range whose end does not resolve exits 3` and both unborn-HEAD tests stay green, because an unresolvable range end still makes the later `git log` call fail, which the pre-existing `log_rc` check catches and reports (with a more generic message). The dedicated check's value is a faster, more specific diagnostic, not the exit-code contract itself. |
+
+### 5. Live demonstration
+
+Real merges, the real `scripts/prepare-commit-msg-secret-guard.sh` (copied into each fixture's own `scripts/` so it resolves the scanner under test), three scanners: `main` (`git show main:...`), **Slice G** (`git show 9e297e4:scripts/secret-scan.sh`), and **new** (this worktree, `28cd7c1`).
+
+| Scenario | main | Slice G | new |
+|---|---|---|---|
+| AR-2 shape (HEAD keeps `-diff`, incoming drops it and adds-then-deletes a token) | range=1, guard=1 | range=1, guard=1 | range=1, guard=1 |
+| mirror shape (HEAD's side drops `-diff`, incoming — forked before that — keeps it and adds-then-deletes a token) | range=1, guard=1 | **range=0, guard=0 (missed)** | range=1, guard=1 |
+| `--range base..HEAD` with an uncommitted working-tree `-diff` (confirms the HEAD-pin still works) | exit=0 (misses — reads the live working tree, as `main` always does) | (not run) | exit=1 (detects — pinned to HEAD's own committed tree, which has no `.gitattributes` at all) |
+
+Exactly as predicted: main 1/1, Slice G 1/0, new 1/1 for the two merge scenarios; main 0, new 1 for the HEAD-pin check.
+
+**Self-caught fixture mistake, fixed before reporting:** my first attempt at the third scenario reused the *same* repo as the two merge scenarios above it, whose `main` branch had already accumulated a real, committed `*.txt -diff` from the AR-2-shape setup earlier in the script. Re-adding an "uncommitted" `.gitattributes` with the same content on top of that wasn't actually testing an uncommitted-attribute bypass — it was re-stating an attribute already legitimately present in HEAD's own committed tree, so both `main` and `new` correctly matched at `exit=0` for the wrong reason. Fixed by building the third scenario in a completely fresh, `.gitattributes`-history-free repo instead; the corrected run reproduces the predicted `main=0, new=1` split.
+
+### 6. CI parity
+
+**Cycle-1's 4 fixtures, re-run under the cycle-3 scanner (all still MATCH):** plain leak, pure rename, submodule pointer bump, this repository's own range (`c1785b8..28cd7c1`) — same table shape as cycles 1–2, all MATCH, `d`'s stdout+stderr byte-identical.
+
+**Whole-history comparison, both range shapes:**
+
+| Range | main | new | Result |
+|---|---|---|---|
+| Ends at HEAD: `868da02..HEAD` (root, 1,616 commits) | exit=0, 0 findings | exit=0, 0 findings; full output byte-identical | MATCH |
+| Does **not** end at HEAD: `868da02..HEAD~50` | exit=0, 0 findings | exit=0, 0 findings; full output byte-identical | MATCH |
+
+No behavior difference anywhere in this repository's own real history, for either range shape — the attribute-source fix changes nothing about what actually gets scanned here today, same conclusion as cycle 2's AR-1 finding.
+
+### 7. Gaps (updated)
+
+1. **`HUP`/`INT` signal-trap exit codes are still unexercised** (unchanged from cycles 1–2; re-confirmed at `28cd7c1`, 86-test file: mutating only the `HUP` trap's exit code again produces 0 failures). No trap-related code was touched this cycle.
+2. **The leading-SGR strip's anchoring is still unexercised** (unchanged from cycle 2; re-confirmed at `28cd7c1`: replacing the anchored while-loop with the pre-AR-1-fix unanchored global `gsub` again produces 0 failures, for the same reason as cycle 2 — `in_hunk` fully gates header-misdetection regardless). No `scan_diff_stream` code was touched this cycle.
+3. **New this cycle — the `A...B` residual is real, disclosed, and now concretely demonstrated (not just described), but remains low-priority and untested-by-name since no caller uses this form.** For a symmetric-difference range `A...B` where `B` is the resolved range end and equals HEAD, `GIT_ATTR_SOURCE` pins to `B`'s (HEAD's) tree for *every* commit shown, including ones reachable only from `A` — whose *own* tree may have a different attribute state. Built a direct fixture: `unique-a` (forked from a clean base, no `.gitattributes` anywhere in its history, adds a token) scanned directly (`base..unique-a`) detects the token (exit 1, as expected); the same commit scanned via `unique-a...head-with-diff` (with `head-with-diff`, which *does* commit `*.txt -diff`, checked out as HEAD) is **missed** (exit 0) — `head-with-diff`'s `-diff` attribute gets wrongly applied to `unique-a`'s own commit. This is the asymmetric-miss direction of the residual the plan/self-review only described in general terms; verified concretely this cycle. Two existing tests (`A...B with B other than HEAD reads the working tree's attributes`, `A...B with B at HEAD reads HEAD's attributes`) pin the *documented* behavior by name, but neither is actually the two-unrelated-branches-with-divergent-attribute-state shape that produces a real miss — so the miss itself remains unexercised by name, even though the underlying mechanism (HEAD's attributes apply to the whole symmetric-difference output) is fully intentional and disclosed (`scripts/secret-scan.sh:229-236`, `docs/tech-debt/README.md`'s new C3-L3 row). No caller in this repository passes an `A...B` range (`verify.yml`, `secret-scan-branch.sh`, and `prepare-commit-msg-secret-guard.sh` all pass plain `A..B`), so this stays a documented, low-priority residual rather than something to fix or add a dedicated regression test for.
+4. **git 2.41.x/2.42.x specifically unrun.** This cycle exercised git 2.40.4 (pre-`GIT_ATTR_SOURCE`, correctly version-gates) and 2.43.7 (supports both `GIT_ATTR_SOURCE` and `attr.tree=`) via Docker/alpine. The narrower band that supports `GIT_ATTR_SOURCE` (2.41+) but not yet `attr.tree=` (2.43+) — i.e. exactly 2.41.x or 2.42.x — was not tested; no readily available alpine tag ships exactly that range (`3.18`→2.40, `3.19`→2.43). Low risk: `-c attr.tree=` on a git that doesn't understand `attr.tree` at all is simply ignored the same way any unknown `-c` key is (documented in the header, `scripts/secret-scan.sh:9-13`), and the version-gate test in `tests/test-secret-scan.sh` only checks `>= 2.41` for the `GIT_ATTR_SOURCE`-dependent assertions as a group, not the `attr.tree=`-specific sub-behavior separately — a git in the 2.41-2.42 band would take the version-gate's "supported" branch and could, in principle, behave differently for the `attr.tree=` cases specifically. Not confirmed either way this cycle.
+5. **Which git release introduced `GIT_ATTR_SOURCE` is still unconfirmed** (unchanged from cycle 2 — both self-review and testing across all 3 cycles verified its *effect* only empirically, on 2.40.4/2.43.7/2.49.0, not against git's own changelog).
+
+None of the above block the PASS verdict.
+
+### Insight event (cycle 3)
+
+```
+./scripts/insights-append.sh --slug secret-scan-git-config --flow standard --phase test --cycle 3 --verdict pass --critical 0 --high 0 --medium 0 --low 0 --source skill
+```
