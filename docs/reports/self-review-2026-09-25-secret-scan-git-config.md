@@ -240,3 +240,124 @@ This is the final cycle, so each of the four LOWs must be fixed now or recorded:
 - Findings 1 and 4 are wording changes, cheap to fix in the `/sync-docs` pass.
 - For finding 2, correct the existing "Four local-only ways" row in the same pass (reproduced; `GIT_ATTR_SOURCE=HEAD` and `GIT_NO_REPLACE_OBJECTS=1` as the known closures), or add the one-line env pin.
 - For finding 3, either state git-style input in the `--diff` usage, or add it to the tech-debt register together with the untested SGR loop.
+
+## Cycle 3
+
+- Date: 2026-09-26
+- Plan: docs/plans/active/2026-09-25-secret-scan-git-config.md
+- Reviewer: reviewer subagent (Claude Code)
+- Scope: diff quality only for `git diff 750d247...HEAD` at 63461d6, read in full with the whole branch as context. The code commits are 443ffb7 (Slice F: the fixes for cycle 2's findings plus `GIT_ATTR_SOURCE=HEAD`) and 004d99e (Slice G: the fix for cross-review AR-2). No self-review had seen 443ffb7 before, so it is reviewed here together with 004d99e. The docs commits are 5774b5f, 092c5e3, b403b9f, dca6c2f, df3193e, and 63461d6. This is the final run (the cap was raised to 3), so any finding left unfixed becomes a deferral.
+
+### Evidence reviewed
+
+- Starting state: worktree HEAD 63461d6, `git status --porcelain` empty. The DAG is linear from 750d247. Both scanners are still `cmp`-identical to their `templates/base/scripts/` copies.
+- Test suites:
+  - `sh tests/test-secret-scan.sh` passes 81/81, and gives the same 81/81 on a scratch copy with the scanners run under `/bin/dash`.
+  - `sh tests/test-secret-scan-branch.sh` passes 108/108.
+  - After the runs, the real worktree has no `MERGE_HEAD`, no `info/attributes`, no local `attr.*`/`diff.*` config, and its hooks are unchanged.
+- **Mirror of AR-2** (fixture `scratchpad/c3/mirror.sh`). The base commit has `*.txt -diff`. The incoming branch, forked from base, adds a token and deletes it again. `main` then removes `.gitattributes`. During `git merge --no-ff --no-commit incoming`, the working tree (the merge in progress) has no `.gitattributes`, while the incoming side's tree still has `*.txt -diff`.
+
+  | Check | rc |
+  | --- | --- |
+  | `prepare-commit-msg-secret-guard.sh` with main's scanner (c1785b8) | 1 |
+  | the same guard with the HEAD scanner | **0** |
+  | `--staged` (the pre-merge-commit guard) | 0 |
+  | after committing, a range ending at the merge commit (what CI reads) | 1 |
+  | after committing, a `base..HEAD` branch-style scan | 1 |
+
+  With `GIT_ATTR_SOURCE=<merge head>`, `git log -p` prints `Binary files /dev/null and b/leak.txt differ` for both incoming commits.
+- **Prototype fix** (scratch copy only): set `GIT_ATTR_SOURCE` only when the range end resolves to HEAD's commit; otherwise read the working tree, as main did.
+  - The mirror case gives rc 1.
+  - The whole test file gives 80/81, and the AR-2 merge and guard tests stay green.
+  - The one failure is `a symmetric A...B range reads attributes from B`, the test that pins the choice this finding questions.
+- **Range forms** (fixture `c3/forms.sh`, HEAD = `feature`, with an upstream set). Each form below was run through `git log -p` (which accepted all of them) and through the scanner:
+
+  | Form | Scanner |
+  | --- | --- |
+  | `main..feature`, `main...feature`, `main..`, `feature`, `main..@{u}`, `@{u}`, `main..HEAD@{0}`, `main..feature~0`, `main..feature^{/fix}` | rc 1 (resolved) |
+  | `..feature` | rc 0 (the range is empty) |
+  | `^main` | rc 0 (git log prints nothing; `rev-parse --verify` returns `^<sha>`, which git would reject with `bad --attr-source` only if it needed attributes) |
+  | `feature^!`, `feature^@`, `feature^-`, `feature^-1`, `main..:/fix: add` | **rc 3**, "does not name a commit" |
+  | `main..:/add..x` | git log itself fails (rc 128); scanner rc 3 |
+
+- **CI parity.** `.github/workflows/verify.yml` scans `$base..HEAD`, and `secret-scan-branch.sh` scans `$merge_base..HEAD`: both resolve the end to HEAD. The fixture `c3/prmerge.sh` simulates CI's `pull_request` checkout of the PR merge commit, with base carrying `-diff`, main later dropping it, and the branch adding a token:
+
+  | Scan | rc |
+  | --- | --- |
+  | CI-style `base..<PR merge>` | 1 |
+  | local branch scan, HEAD scanner | 0 |
+  | local branch scan, main's scanner | 0 |
+
+  So this divergence predates the PR and is reproduced here.
+- **`.git/info/attributes` under `GIT_ATTR_SOURCE`:** rc 1 at baseline and rc 0 with `*.txt -diff` in `info/attributes`. This confirms the tech-debt row's claim that the variable does not reach it.
+- **Mutations for Slice G** (scratch copy; each checked for its changed-line count):
+
+  | Mutation | Tests that went red |
+  | --- | --- |
+  | back to `GIT_ATTR_SOURCE=HEAD` | the `A...B`, merge-head and guard tests |
+  | drop `GIT_ATTR_SOURCE` | six attribute tests |
+  | drop the empty-end-to-HEAD default | the `main..` test (rc 3) |
+  | replace the exit 3 with `attr_source=HEAD` | only the stderr assertion (git log still fails for a missing end) |
+  | split at the first `..` | the `A...B` test (rc 3) |
+
+- Not run: git 2.41 or 2.42. `alpine/git` and `bitnami/git` have no such tags, so the tech-debt row's "2.41 and 2.42 themselves were not run" still stands.
+
+### Findings
+
+| ID | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| C3-H1 | HIGH | `scripts/secret-scan.sh:221-224`, `:230-238`; `tests/test-secret-scan.sh:263`, `:273`, `:276` | The AR-2 fix swaps which side of a merge is misread; it does not stop the misreading. The merge guard scans `HEAD..<merge head>` before HEAD advances. What CI will read later, and what main's guard read, is the attribute set of the **merge result**, which is the working tree during the merge. It is neither HEAD's tree (the AR-2 regression) nor the merge head's tree (this one). When HEAD's side has removed a `-diff` that the incoming side still carries from the fork point, the incoming side's add-then-delete token is now hidden. main's guard and the post-merge scan detect it. The staged guard cannot catch it, because the token is deleted before the merge. The comment "the merge guard ends at the merge head, whose attributes are the incoming side's" states the rationale that fails here. Mitigations are the same as for AR-2: after the merge commit, `secret-scan-branch.sh` (`/pr --strict`, `run-verify.sh`) and CI read the merge result and catch it before or at push. The trigger is as narrow as AR-2's, but this is the same kind of fail-open regression versus main, in the same guard, and AR-2 was fixed for exactly that reason. | Mirror fixture: main's guard rc 1, HEAD guard rc 0, staged rc 0, post-merge rc 1. The prototype described below gives rc 1 and keeps AR-2 fixed. | Set `GIT_ATTR_SOURCE` only when the resolved range end is HEAD's commit. That covers CI and the branch scan, and all Slice F cases stay pinned. For any other end, leave attributes to the working tree, which during a merge is the merge result and was main's behavior. Alternatively, have the guard pass the merged index's tree (`git write-tree` at prepare-commit-msg time, when the index is fully merged) as the source. Add the mirror fixture as a test next to the AR-2 one. Drop or rewrite the `A...B reads B` test and the "incoming side's" comment. If this is deferred instead, it needs the user's explicit acceptance and a tech-debt row, since it is a regression versus main. |
+| C3-L1 | LOW | `scripts/secret-scan.sh:36`, `:221-224`, `:230-232` | The range-end parser accepts fewer forms than git. `X^!`, `X^@`, `X^-`, `X^-N`, and a `:/<regex>` end now exit 3 where `git log` accepts them. For `:/<regex>`, the appended `^{commit}` becomes part of the regex. All of these fail closed, and no caller in the repo passes them. Two forms resolve to a commit other than the one whose history is being read. `A...B` has two tips, but B's attributes are applied to A's side too, and a test pins this. The parser also splits at the **last** `..` while git splits at the first. These differ only when the end revision itself contains `..` (`:/<regex>`), and in the probes such a form failed closed. | Forms probe table above. | Say in the usage line or the `scan_range` comment which forms are supported: `A..B`, `A..`, `..B`, or a single revision. Other forms exit 3. `A...B` either exits 3 or falls back to the working tree once C3-H1 is fixed as recommended. |
+| C3-L2 | LOW | `scripts/secret-scan.sh:5-9`, `:15-17` | Two header sentences 443ffb7 extended are now inaccurate. (a) "working-tree attributes … to git's defaults": attributes are pinned to the range end's tree, not to a git default. (b) "a -c key or environment variable an older git does not know is ignored, and such a git has no such setting to neutralize" is true for the `-c` keys but false for `GIT_ATTR_SOURCE`. git 2.8 through 2.40 does read working-tree attributes and ignores the variable, so on those versions the gap stays open. The tech-debt test-gaps row says so ("falls back to the pre-Slice-F working-tree read"). | Reading of the header against `docs/tech-debt/README.md:140`. | (a) "… replace refs, signature output) to git's defaults, working-tree attributes to the range end's tree, …". (b) "a -c key an older git does not know is ignored, and such a git has no such setting; `GIT_ATTR_SOURCE` needs git 2.41, and an older git keeps reading the working tree's attributes." |
+| C3-L3 | LOW | `docs/plans/active/2026-09-25-secret-scan-git-config.md:133` (Slice F bullet); `docs/tech-debt/README.md`; `docs/quality/quality-gates.md:46` | The pre-existing divergence that CI's `pull_request` checkout of the PR merge commit reads that commit's attributes, while the local branch scan reads the branch tip's, is recorded only as "未確認の注意点" in a plan bullet. `/pr` archives the plan, so this final run is the last chance to register it. It reproduces: when main drops a `-diff` after the branch forked, CI finds the branch's token and every local scan, including main's scanner, reports clean. The quality-gates sentence names only "local-only attribute sources" as exceptions, so it does not cover this case either. | Fixture `c3/prmerge.sh`: CI-style rc 1, local rc 0 with both scanners. | Add a tech-debt row, or extend the local-only row: pre-existing, reproduced, with its trigger. Make the quality-gates exception wording general enough to include it, for example "except for the attribute differences listed in …". |
+
+No CRITICAL or MEDIUM findings.
+
+Status of the cycle-2 findings at HEAD:
+- All four were fixed in 443ffb7.
+- Finding 1: the quality-gates wording now names the exceptions.
+- Finding 2: the uncommitted `.gitattributes` gap is now pinned. The tech-debt row was rewritten, and its claims hold: `info/attributes` is still read (probe above), and `GIT_NO_REPLACE_OBJECTS=1` closes the replace-ref item.
+- Finding 3: the `--diff` input limit is in the usage text, the comment, and tech-debt.
+- Finding 4: all three wording items are fixed.
+
+### Positive notes
+
+- Slice G fails closed where it cannot decide: an end that does not resolve to a commit, or an unborn HEAD, exits 3 with a message naming the end. `GIT_ATTR_SOURCE` receives the resolved commit id, not the name.
+- The new tests exercise the real mechanism. They run a real `git merge --no-commit` and the real `prepare-commit-msg-secret-guard.sh` inside a fixture repo that holds a copy of the scanner. They skip cleanly on git older than 2.41, and they tidy up with `git merge --abort` and `rm -rf scripts`. Nothing touches the real repo's hooks, config, or git dir, which I checked after the runs.
+- 443ffb7's rewrite of the tech-debt row is precise where precision matters. "No value restores git's own binary detection" is correct for `diff.<driver>.binary`, where `false` forces text rather than switching to auto-detection. The row also states where `GIT_ATTR_SOURCE` does and does not reach.
+
+### Coverage gaps
+
+- git 2.41 and 2.42 are still not run for `GIT_ATTR_SOURCE`. No image with those versions was found; the tech-debt row already states this.
+- No test covers the mirror merge case (C3-H1) or a merge whose two sides both edit `.gitattributes`.
+- The `^main` form yields `GIT_ATTR_SOURCE=^<sha>`. It is harmless today, because a range with only negative revisions prints nothing and git never resolves the source. If attributes are ever needed on that path, git will die with `bad --attr-source` (rc 128, then exit 3), so it fails closed.
+
+### Answers to the focus points
+
+1. **443ffb7 together with 004d99e.**
+   - 443ffb7's four cycle-2 fixes are correct. Its `GIT_ATTR_SOURCE=HEAD` produced AR-2.
+   - 004d99e fixes AR-2 but opens its mirror (C3-H1).
+   - 443ffb7's header wording is partly inaccurate (C3-L2).
+   - 443ffb7's tech-debt rewrite is accurate against probes.
+2. **Range-end parsing.**
+   - Resolved correctly: `A..B`, `A...B` (to B), `A..` and `A...` (to HEAD), `..B`, a single revision, and `@{u}`, `HEAD@{n}`, `~n` and `^{/text}` ends.
+   - Exit 3 where git log accepts: `X^!`, `X^@`, `X^-`, `X^-N`, and `:/<regex>` ends. All fail closed.
+   - A different commit than the one being read: `A...B`, whose A side is read with B's attributes, and the merge-guard case (C3-H1, which fails open). The last-`..` split differs from git only when the end itself contains `..`, and that failed closed in the probe.
+3. **`GIT_ATTR_SOURCE` semantics.**
+   - A commit id works as the tree-ish.
+   - git older than 2.41 ignores the variable and reads the working tree, as the tech-debt row states; the header sentence says otherwise (C3-L2). 2.41 and 2.42 themselves were not run.
+   - An unborn HEAD with a `..HEAD` or empty end exits 3, and a test covers it.
+   - Shallow clones: the range end is the checked-out HEAD (CI, with `fetch-depth: 0`, and the branch scan) or a fetched `MERGE_HEAD` (the guard), so it is always present.
+4. **CI parity.** verify.yml and the branch scan both end at HEAD, so attributes come from HEAD's tree. In CI that is the checked-out PR merge commit, identical to its worktree. The remaining divergence is local branch tip against CI's merge commit when the base changed its attributes after the branch forked. It is pre-existing and reproduced, but not registered (C3-L3).
+5. **Tech-debt rows.**
+   - The local-only row is accurate: `info/attributes` and `diff.<driver>.binary` are unpinnable, the replace ref is closable, and the `GIT_ATTR_SOURCE` note is correct.
+   - The test-gaps row's version claim is honest about 2.41 and 2.42 being unrun.
+   - The CI-shared row is unchanged and still accurate.
+   - Missing: a row for C3-L3, and for C3-H1 if it is deferred.
+6. **Tests.** Hermetic (isolated HOME, global and system config, `GIT_CONFIG_NOSYSTEM`, no XDG). Tokens are built at runtime, and a scan of the report is clean. The merge fixture and the guard run stay inside `$workdir` and use a copied scanner. Each Slice G mutation turns at least one test red. The `A...B` test pins behaviour that C3-H1 recommends changing.
+
+### Recommendation
+
+**No merge until C3-H1 is fixed or explicitly accepted by the user.** The verdict is pass by the pipeline's stop rule (no CRITICAL).
+- C3-H1 is a verified fail-open regression versus main in the same guard AR-2 was about, and it was introduced by the AR-2 fix. The prototype fix is a two-line change: `GIT_ATTR_SOURCE` only when the end is HEAD. With it, 80 of 81 existing tests stay green, and the one that fails pins the questionable choice. A fix needs another pipeline run beyond the raised cap of 3; accepting the regression needs a tech-debt row that states it is a regression versus main.
+- The three LOWs are documentation and registration work, cheap in either path.
