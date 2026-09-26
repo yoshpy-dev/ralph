@@ -1,6 +1,6 @@
 # secret-scan-git-config
 
-- Status: In progress
+- Status: Done (PR #179)
 - Owner: Claude Code
 - Date: 2026-09-25
 - Related request: #169(PR #177)の最終 cross-review(cycle 2、cap 到達)で残った 2 件(`docs/reports/cross-review-triage-local-branch-secret-scan.md` の AR-3 / AR-4)。AR-3: git の設定に `color.ui=always` があると scanner の `git log -p` の追加行が色のエスケープで始まり、`+` で始まる行だけを読む parser が読み飛ばす。AR-4: symlink の `.gitallowed` のリンク先の末尾改行がコマンド置換で落ち、別のファイルに解決される。plan 作成時の調査で同じ種類の見落としをさらに 4 つ再現し、ユーザー判断(AskUserQuestion)ですべてこの issue で直す
@@ -63,23 +63,23 @@
 
 ## Acceptance criteria
 
-- [ ] AC-1: range scan は、repo の設定に `color.ui=always` があっても、`color.diff=always` があっても fixture を検出する(exit 1)
-- [ ] AC-2: range scan は、`diff.relative=true` の repo でサブディレクトリから実行しても、サブディレクトリの外の fixture を検出する
-- [ ] AC-3: range scan は、コミット済みの `.gitattributes` の diff driver にローカルの textconv が設定されていても、元の内容を scan して fixture を検出する
-- [ ] AC-4: range scan は、`diff.renames=copies` の repo で base のファイルを複製した branch の fixture を検出する。rename だけの branch では、既定の設定と同じ結果になる(rename 検出は維持)
-- [ ] AC-5: range scan は diff のアルゴリズムを git の既定(myers)に固定し、`diff.algorithm` の設定に左右されない。設定で追加行が変わる fixture を作れればテストで固定し、作れなければ固定したことだけを確認して test report にその旨を記録する(未確認の経路。防御的な固定)
-- [ ] AC-6: 既定の設定での range scan の結果は変わらない(既存のテストがそのまま pass)
-- [ ] AC-7: staged scan は、非 ASCII、空白、タブ、引用符、バックスラッシュを含む名前の staged ファイルの fixture を検出する
-- [ ] AC-8: staged scan は、`diff.relative=true` の repo でサブディレクトリから実行しても、repo 全体の staged ファイルを scan する
-- [ ] AC-9: staged scan は、一覧に出たパスの blob が読めないとき exit 0 にならない(理由を出す)。staged の gitlink は失敗にしない
-- [ ] AC-10: `--diff` モードは、色付きの diff の追加行を検出する
-- [ ] AC-11: `secret-scan-branch.sh --strict` は、symlink の `.gitallowed` のリンク先が改行で終わる(改行なしの名前のファイルと両方コミットされている)とき、改行なしのファイルを allowlist として読まず、空の allowlist と通知で scan して fixture を検出する
-- [ ] AC-12: `secret-scan-branch.sh --strict` は、非 ASCII の名前のリンク先を解決して allowlist として読む
-- [ ] AC-13: `secret-scan-branch.sh --strict` は、repo の設定に `color.ui=always` があっても fixture を検出する(end-to-end)
-- [ ] AC-15: range scan は、`git log` が出力の前に失敗したとき(存在しない `diff.orderFile` の設定、存在しない範囲)も、出力の途中で失敗したとき(範囲の途中の object が壊れている)も、exit 0 にも exit 1 にもならず、理由を出す
-- [ ] AC-16: range scan は、`core.bigFileThreshold` がそのファイルより小さい repo でも、テキストファイルの fixture を検出する
-- [ ] AC-17: `secret-scan-branch.sh --strict` は、scanner が AC-15 の失敗で終わったとき clean を出さず、scanner の終了コードで終わる(既存の「scanner failed with exit <rc>」の経路)
-- [ ] AC-14: `scripts/` と `templates/base/scripts/` のコピーが byte 一致。`./scripts/run-verify.sh` green、この branch 自身の `secret-scan-branch.sh --strict` が clean
+- [x] AC-1: range scan は、repo の設定に `color.ui=always` があっても、`color.diff=always` があっても fixture を検出する(exit 1)
+- [x] AC-2: range scan は、`diff.relative=true` の repo でサブディレクトリから実行しても、サブディレクトリの外の fixture を検出する
+- [x] AC-3: range scan は、コミット済みの `.gitattributes` の diff driver にローカルの textconv が設定されていても、元の内容を scan して fixture を検出する
+- [x] AC-4: range scan は、`diff.renames=copies` の repo で base のファイルを複製した branch の fixture を検出する。rename だけの branch では、既定の設定と同じ結果になる(rename 検出は維持)
+- [x] AC-5: range scan は diff のアルゴリズムを git の既定(myers)に固定し、`diff.algorithm` の設定に左右されない。設定で追加行が変わる fixture を作れればテストで固定し、作れなければ固定したことだけを確認して test report にその旨を記録する(未確認の経路。防御的な固定)
+- [x] AC-6: 既定の設定での range scan の結果は変わらない(既存のテストがそのまま pass)
+- [x] AC-7: staged scan は、非 ASCII、空白、タブ、引用符、バックスラッシュを含む名前の staged ファイルの fixture を検出する
+- [x] AC-8: staged scan は、`diff.relative=true` の repo でサブディレクトリから実行しても、repo 全体の staged ファイルを scan する
+- [x] AC-9: staged scan は、一覧に出たパスの blob が読めないとき exit 0 にならない(理由を出す)。staged の gitlink は失敗にしない
+- [x] AC-10: `--diff` モードは、色付きの diff の追加行を検出する
+- [x] AC-11: `secret-scan-branch.sh --strict` は、symlink の `.gitallowed` のリンク先が改行で終わる(改行なしの名前のファイルと両方コミットされている)とき、改行なしのファイルを allowlist として読まず、空の allowlist と通知で scan して fixture を検出する
+- [x] AC-12: `secret-scan-branch.sh --strict` は、非 ASCII の名前のリンク先を解決して allowlist として読む
+- [x] AC-13: `secret-scan-branch.sh --strict` は、repo の設定に `color.ui=always` があっても fixture を検出する(end-to-end)
+- [x] AC-15: range scan は、`git log` が出力の前に失敗したとき(存在しない `diff.orderFile` の設定、存在しない範囲)も、出力の途中で失敗したとき(範囲の途中の object が壊れている)も、exit 0 にも exit 1 にもならず、理由を出す
+- [x] AC-16: range scan は、`core.bigFileThreshold` がそのファイルより小さい repo でも、テキストファイルの fixture を検出する
+- [x] AC-17: `secret-scan-branch.sh --strict` は、scanner が AC-15 の失敗で終わったとき clean を出さず、scanner の終了コードで終わる(既存の「scanner failed with exit <rc>」の経路)
+- [x] AC-14: `scripts/` と `templates/base/scripts/` のコピーが byte 一致。`./scripts/run-verify.sh` green、この branch 自身の `secret-scan-branch.sh --strict` が clean
 
 ## Implementation outline
 
@@ -142,6 +142,7 @@
 - 2026-09-26 test run 3(`docs/reports/test-2026-09-25-secret-scan-git-config.md` の `## Cycle 3`、0b4f254): PASS。`tests/test-secret-scan.sh`(86/86、cycle 2 の 74 から増加)、他 2 ファイル不変(108/108、32/32)。3 シェル・敵対的な外側設定・10 回に加え、docker で実際の git 2 版(2.40.4: `GIT_ATTR_SOURCE` 未対応で正しく SKIP、2.43.7: `GIT_ATTR_SOURCE` と `attr.tree=` の両方に対応)で安定。要求された mutation 5 件すべてが対応するテストの失敗で判別(うち 2 件は AR-2 → C3-H1 の経緯を直接再現: 常に範囲の終わりを pin すると C3-H1 の鏡像を再現、常に pin しないと元の AR-2 の後退を再現)。live demo 4 シナリオ(AR-2 の形、鏡像の形、HEAD pin の確認)はすべて予測どおり(自己発見した fixture の誤りを 1 件修正の上)。CI parity は cycle 1 の fixture・この repo 自身の範囲に加え、HEAD で終わる経路と終わらない経路の両方で全履歴が main と byte 一致。gaps(更新): `HUP`/`INT` unchanged、SGR anchoring unchanged、`A...B` の残差を今回具体的に実証(`unique-a` を直接 scan すると検出、`unique-a...head-with-diff` 経由だと `head-with-diff` の属性が誤って適用されて見逃す。呼び出し元なし)、git 2.41.x/2.42.x そのものは今回も未実行(2.40.4 と 2.43.7 で挟んだのみ)、`GIT_ATTR_SOURCE` を導入した git の版は test 側では経験的にしか確認していない(changelog 突合は tech-debt の行が release notes を根拠に別途記載)
 - 2026-09-26 sync-docs run 3(最終): 最終コードに対して pr/SKILL.md(4 コピー)・quality-gates(2 コピー)・repo-map・scanner のヘッダー/コメントを再確認 — すべて Slice H で正確、変更なし。tech-debt に Slice G の「範囲の終わりの commit」ルールが現行として書かれている行がないことを確認(なし)。test-gaps の行に `A...B` の残差(今回具体的に実証)を追加し、`GIT_ATTR_SOURCE` の版の下限の記述に cycle 3 の docker 実行(2.40.4/2.43.7)を反映、`HUP`/`INT` と SGR anchoring の行に「cycle 3 でも不変」を追記。本ファイルに run 3 の Deviation notes(verify・test・sync-docs)を追加。sync-docs report に `## Cycle 3` を追記(cycle 1・2 のセクションはそのまま)
 - 2026-09-26 cross-review run 3(同じ triage report、reviewed HEAD ee2d7a3、cap 3 に到達): Codex の指摘 0 件。walkthrough を追加(scripts と tests の差分が 1,217 行)
+- 2026-09-26 `/pr`: PR #179 を作成(Closes #176)。push 前の `run-verify.sh` pass、range scan exit 0、`secret-scan-branch.sh --strict` は 11721b0 で clean。`ensure-pr-title-prefix.sh` / `ensure-pr-ready.sh` pass
 ## Progress checklist
 
 - [x] Plan reviewed
@@ -150,7 +151,7 @@
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
-- [ ] PR created
+- [x] PR created (#179)
 
 ## Readiness checklist
 
