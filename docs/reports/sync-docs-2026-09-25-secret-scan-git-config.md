@@ -239,3 +239,123 @@ on the full `main...HEAD` diff.
   cycle's own changes, per the handoff's step 5 — see the commit-
   boundary evidence reported back to the orchestrator, not reproduced
   here.
+
+## Cycle 3 (final, run 3 of 3)
+
+- Date: 2026-09-26
+- Plan: `docs/plans/active/2026-09-25-secret-scan-git-config.md` (issue #176)
+- Prior reports since cycle 2 (`dca6c2f`): cross-review triage (same
+  report file, cycle-2 section, AR-2, ACTION_REQUIRED, user raised the
+  pipeline cap to 3 and chose fix-and-re-run), self-review run 3 (same
+  report file, `## Cycle 3`, `9e297e4`, HIGH C3-H1 / LOW 3), verify run 3
+  (same report file, `## Cycle 3`, `28cd7c1`, PASS, no open drift), test
+  run 3 (same report file, `## Cycle 3`, `0b4f254`, PASS)
+
+### The AR-2 -> C3-H1 -> Slice H arc, in one line
+
+Slice F (`443ffb7`) pinned `GIT_ATTR_SOURCE=HEAD` unconditionally, which
+broke the merge guard's `HEAD..<merge head>` scan (AR-2, found by
+cross-review cycle 2). Slice G (`004d99e`) pinned the attribute source to
+the range's own end commit instead — closed AR-2's exact shape but only
+moved the misread to the mirror case (C3-H1, HIGH, found by self-review
+run 3: HEAD's own side dropping the attribute). Slice H (`0e136fc`) pins
+`GIT_ATTR_SOURCE` only when the range's resolved end equals HEAD, and
+explicitly unsets it (plus `-c attr.tree=`) otherwise, falling back to the
+working tree exactly as `main` did — fixing both AR-2 and C3-H1 in both
+directions, tested with real `git merge` fixtures and the real
+`prepare-commit-msg-secret-guard.sh`.
+
+### Documentation drift checked this cycle
+
+Re-checked every surface prior cycles touched, plus the doc-facing
+findings from self-review/verify/test run 3, against the code at
+`0b4f254`:
+
+- **`.claude/skills/pr/SKILL.md`** (+ 3 mirrors) — no cycle-3 change
+  touched `secret-scan-branch.sh`'s exit-code contract (the new "a
+  `--range` end that is not a commit" exit-3 cause is internal to
+  `secret-scan.sh` and reaches `/pr`'s Step 3 text through the same
+  existing "scanner failed with exit 3" passthrough); verify run 3
+  confirmed untouched, no issue. No edit needed.
+- **`docs/quality/quality-gates.md`** (root + `templates/base/`) —
+  already widened by Slice H (`0e136fc`) to "a few attribute differences
+  it cannot pin, local-only attribute sources and CI's checkout of the
+  PR merge commit"; verify run 3 confirmed no open drift. No edit
+  needed.
+- **`docs/architecture/repo-map.md`** — unaffected; verify run 3
+  confirmed untouched. No edit needed.
+- **`scripts/secret-scan.sh` header / `templates/base/scripts/
+  secret-scan.sh` header** — already corrected by Slice H for both LOWs
+  self-review run 3 found (C3-L2: the "to git's defaults" and
+  git-version-gating sentences), plus the new exit-3 cause and the
+  supported-range-forms line; both copies still `cmp`-identical. No edit
+  needed. Confirmed no leftover text anywhere (header, comments,
+  `docs/tech-debt/README.md`, `quality-gates.md`, `pr/SKILL.md`,
+  `repo-map.md`) still describes Slice G's superseded "attribute source
+  = the range's own end commit, unconditionally" rule as current — none
+  found (`grep -rn` for `GIT_ATTR_SOURCE` and "range's own end" across
+  those surfaces shows only Slice H's final wording).
+- **`docs/tech-debt/README.md`** — one row *was* stale: the test-gaps
+  row didn't yet mention the `A...B` residual test run 3 concretely
+  demonstrated (self-review run 3's C3-L1 disclosed it in general terms;
+  no row existed for the concrete miss). Added it to the existing
+  test-gaps row, folded in cycle-3's `HUP`/`INT` and SGR-anchoring
+  re-confirmations ("unchanged"), and attributed the `GIT_ATTR_SOURCE`
+  version-floor evidence to cycle-3 `/test`'s own 2.40.4/2.43.7 Docker
+  runs (bounding, not directly hitting, 2.41.x/2.42.x) rather than
+  leaving it credited only to cycle-2 `/test`.
+
+### Files changed this cycle
+
+- **`docs/tech-debt/README.md`** — extended the test-gaps row with the
+  `A...B` residual (disclosed by self-review run 3's C3-L1, concretely
+  demonstrated by test run 3) and cycle-3 attribution/re-confirmation
+  notes; no other row touched.
+- **`docs/plans/active/2026-09-25-secret-scan-git-config.md`** — added
+  Deviation-notes bullets for verify run 3 (`28cd7c1`, PASS, no open
+  drift), test run 3 (`0b4f254`, PASS: 86/108/32, all 5 requested
+  mutations discriminating exactly including both directions of the
+  AR-2/C3-H1 arc, two real git versions via Docker, whole-history CI
+  parity for both range shapes, `A...B` residual concretely
+  demonstrated), and this sync-docs run 3, dated 2026-09-26, matching
+  the style of the existing bullets. No AC or checklist box changed
+  this cycle. `grep -c '^# '` = 1 before and after.
+- **`docs/insights/events/2026-09-26-secret-scan-git-config.jsonl`** —
+  appended via `./scripts/insights-append.sh` (sync_docs, cycle 3,
+  complete, 0/0/0/0); the file itself already existed from `/verify`
+  and `/test` run 3's own events, dated 2026-09-26.
+- **This report** — this `## Cycle 3` section.
+
+### Mirror/sync verification (cycle 3)
+
+```
+$ ./scripts/check-skill-sync.sh      # [ok] check-skill-sync: 13 skill(s) in lock-step
+$ ./scripts/check-sync.sh            # PASS: all files in sync
+$ ./scripts/check-template-purity.sh # PASS: no meta-repo-specific references found in templates.
+```
+
+No skill body or `templates/base` mirror was touched this cycle, so
+`sync-skills.sh` was not re-run.
+
+### Walkthrough (cycle 3)
+
+`git diff main...HEAD --stat -- scripts tests`: 4 files, 987
+insertions(+), 50 deletions(-) (`scripts/secret-scan.sh`,
+`scripts/secret-scan-branch.sh`, `tests/test-secret-scan.sh`,
+`tests/test-secret-scan-branch.sh`) — up from cycle 2's 866(+)/49(-) by
+the AR-2/C3-H1/Slice H arc. Walkthrough-or-not is `/pr`'s decision,
+based on the full `main...HEAD` diff.
+
+### Known gaps (cycle 3)
+
+- Did not re-run `./scripts/run-verify.sh`, `./scripts/run-test.sh`, or
+  the secret-scan test suites; `/verify` and `/test` run 3 already did
+  (both cited above, Pass).
+- Did not independently re-verify which git release introduced
+  `GIT_ATTR_SOURCE` against the changelog; carried forward as the
+  tech-debt row states it (release notes plus the 2.40.4/2.43.7
+  boundary runs, without a direct 2.41/2.42 run).
+- `./scripts/secret-scan-branch.sh --strict` was run after staging this
+  cycle's own changes, per the handoff's step 5 — see the commit-
+  boundary evidence reported back to the orchestrator, not reproduced
+  here.
