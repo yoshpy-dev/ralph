@@ -10,15 +10,23 @@
 # comment above the merge-base call below. The allowlist is always
 # .gitallowed as committed at HEAD, with a symlink resolved one level
 # inside the tree -- see the comment above the allowlist case block below.
+# It is read byte for byte, independent of local git config: blobs come
+# from `git cat-file blob`, a symlink target keeps its trailing newlines (a
+# target holding a newline is not resolved), and the tree lookup runs with
+# core.quotePath=false so a non-ASCII target resolves.
 #
 # Usage: secret-scan-branch.sh [--strict]
 #
 # Exit codes:
 #   0  scanned and found nothing; in default mode, also nothing to scan or
-#      could not scan (see --strict below)
+#      could not determine what to scan (see --strict below)
 #   1  scanned and found something
 #   2  usage error
-#   3  (--strict only) could not scan, or nothing to scan
+#   3  --strict: could not determine what to scan, or nothing to scan;
+#      either mode: the scanner could not read the range (its own exit 3,
+#      propagated)
+# In either mode, a scanner exit other than 0 or 1 is reported as "scanner
+# failed with exit <rc>" and propagated as this script's exit code.
 #
 # Default mode never fails on an unscannable state (no base ref, no
 # merge-base, ...) or on a genuinely empty range: it is meant for
@@ -156,26 +164,28 @@ fi
 base_short="$(git rev-parse --short "$merge_base")"
 head_short="$(git rev-parse --short HEAD)"
 
+# newline / tab -- single-character values used to reject a link target
+# holding a newline and to parse `git ls-tree` output below (one entry per
+# line, fields "<mode> <type> <sha>\t<path>").
+newline='
+'
+tab="$(printf '\t')"
+
 # allowlist_target_is_safe <target> -- true if <target> (the stored
 # content of a .gitallowed symlink, i.e. its link target path) is safe to
-# resolve one level inside the committed tree: not absolute, and with no
-# ".." path component. .gitallowed always sits at the repo root, so a
-# relative target is relative to the root.
+# resolve one level inside the committed tree: not absolute, with no ".."
+# path component, and with no newline (the tree lookup below reads one
+# entry per line). .gitallowed always sits at the repo root, so a relative
+# target is relative to the root.
 allowlist_target_is_safe() {
   case "$1" in
-    /* | "") return 1 ;;
+    /* | "" | *"$newline"*) return 1 ;;
   esac
   case "/$1/" in
     */../*) return 1 ;;
   esac
   return 0
 }
-
-# newline / tab -- single-character values used to parse `git ls-tree`
-# output below (one entry per line, fields "<mode> <type> <sha>\t<path>").
-newline='
-'
-tab="$(printf '\t')"
 
 # allowlist_ls_tree_mode <path> -- prints the tree-entry MODE for <path>
 # at HEAD, but only when `git ls-tree --full-tree` returns EXACTLY ONE
@@ -188,9 +198,12 @@ tab="$(printf '\t')"
 # CHILDREN, none of whose own recorded paths equals the query. A BARE
 # directory (or a submodule) passes this check via its own single
 # entry -- the mode case below is what rejects it (040000 / 160000
-# are not 100644|100755), not this function.
+# are not 100644|100755), not this function. core.quotePath=false prints
+# a non-ASCII path as-is so it can match; a path git still C-quotes (a
+# tab, newline, double quote, or backslash) never equals the query, so
+# it stays unresolved (fail closed).
 allowlist_ls_tree_mode() {
-  entry="$(git ls-tree --full-tree HEAD -- "$1" 2>/dev/null)"
+  entry="$(git -c core.quotePath=false ls-tree --full-tree HEAD -- "$1" 2>/dev/null)"
   [ -n "$entry" ] || return 1
   # Belt-and-braces ahead of the exact-path check below: a multi-line
   # entry can never equal a single-line path, so this alone never decides.
@@ -213,10 +226,11 @@ report_allowlist_unreadable() {
 # reads only the committed file, so this must match what CI will see.
 #
 # The tree entry's mode decides how it is read: a regular file (100644 /
-# 100755) is read directly with `git show`. A symlink (120000) stores its
-# link target as the blob's content -- `git show HEAD:.gitallowed` on a
-# symlink prints that target PATH STRING, not file content, so it is
-# resolved one level inside the committed tree instead of used as-is.
+# 100755) is read directly with `git cat-file blob`. A symlink (120000)
+# stores its link target as the blob's content -- reading
+# HEAD:.gitallowed on a symlink yields that target PATH STRING, not file
+# content, so it is resolved one level inside the committed tree instead
+# of used as-is.
 # Anything else (no entry, a directory, a submodule, or a symlink target
 # that cannot be resolved to a readable file) falls back to an empty
 # allowlist: fewer exceptions can only add findings, never hide one.
@@ -229,13 +243,21 @@ case "$allowlist_mode" in
     # closed like an unresolved symlink target, instead of letting git's
     # exit status (1 means "findings" in this script's own contract)
     # leak through set -e.
-    if ! git show "HEAD:.gitallowed" > "$tmp_allowlist" 2>/dev/null; then
+    if ! git cat-file blob "HEAD:.gitallowed" > "$tmp_allowlist" 2>/dev/null; then
       : > "$tmp_allowlist"
       report_allowlist_unreadable
     fi
     ;;
   120000)
-    allowlist_link_target="$(git show "HEAD:.gitallowed" 2>/dev/null)"
+    # Command substitution strips trailing newlines, which would turn a
+    # target "rules<newline>" into "rules", a different file: the "x"
+    # sentinel keeps the target's bytes exactly, and
+    # allowlist_target_is_safe then rejects a target holding a newline.
+    if allowlist_link_target="$(git cat-file blob "HEAD:.gitallowed" 2>/dev/null && printf x)"; then
+      allowlist_link_target="${allowlist_link_target%x}"
+    else
+      allowlist_link_target=""
+    fi
     # Strip a leading "./" before validating, not after: stripping it
     # from ".//x" yields "/x", an absolute path, so validating the
     # unstripped value first would let an absolute target slip through.
@@ -247,7 +269,7 @@ case "$allowlist_mode" in
       allowlist_target_mode="$(allowlist_ls_tree_mode "$allowlist_link_target")" || allowlist_target_mode=""
       case "$allowlist_target_mode" in
         100644|100755)
-          if git show "HEAD:$allowlist_link_target" > "$tmp_allowlist" 2>/dev/null; then
+          if git cat-file blob "HEAD:$allowlist_link_target" > "$tmp_allowlist" 2>/dev/null; then
             allowlist_resolved=1
           fi
           ;;
@@ -285,10 +307,11 @@ if RALPH_SECRET_ALLOWLIST="$tmp_allowlist" "$scanner" --range "$merge_base..HEAD
 else
   scan_rc=$?
   # Only exit 1 is "the scanner ran and found something" (secret-scan.sh's
-  # own contract). Any other non-zero exit (a usage error, a signal) is a
-  # scanner failure, not a finding -- fail closed (propagate the exit code
-  # so the caller still blocks) but say so accurately, instead of sending
-  # the operator looking for a leak that does not exist.
+  # own contract). Any other non-zero exit (a usage error, git failing to
+  # read the range, a signal) is a scanner failure, not a finding -- fail
+  # closed (propagate the exit code so the caller still blocks) but say so
+  # accurately, instead of sending the operator looking for a leak that
+  # does not exist.
   if [ "$scan_rc" -eq 1 ]; then
     report "scanned ${base_short}..${head_short} against ${base_ref}: findings"
   else

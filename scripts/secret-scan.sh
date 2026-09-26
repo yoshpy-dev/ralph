@@ -1,5 +1,33 @@
 #!/usr/bin/env sh
 # secret-scan.sh - shared secret scanner for Ralph git hooks.
+#
+# CI runs --range with git's default config, so a local --range must read
+# the same added lines: scan_range pins the local git settings listed there
+# (color, diff.relative, textconv, external diff, rename/copy detection and
+# its limit, the diff algorithm, the big-file threshold, a user-level
+# attributes file, attr.tree, root-commit diffs, submodule diffs, replace
+# refs, signature output) to git's defaults and, for a range ending at HEAD,
+# the attributes to HEAD's tree; it checks git's exit status before
+# parsing, so a git failure is never read as a clean scan. Known local-only
+# gaps it cannot pin: a `-diff`/`binary` attribute in .git/info/attributes,
+# and a local diff.<driver>.binary=true for a driver the committed
+# .gitattributes names. CI's pull_request checkout is the PR merge commit,
+# so its attributes differ from the branch tip's when the base changed
+# .gitattributes after the branch forked. --staged reads each staged blob
+# by its object id, so neither file name quoting nor diff.relative can skip
+# a file. Every option used works on git 2.8, and a -c key an older git
+# does not know is ignored because that git has no such setting;
+# GIT_ATTR_SOURCE needs git 2.41, and an older git keeps reading the working
+# tree's attributes.
+#
+# Exit codes:
+#   0  scanned, nothing found
+#   1  scanned, found something
+#   2  usage error
+#   3  could not scan (a missing or unreadable --file, a staged entry that
+#      does not parse, a --range end that is not a commit, or git failed),
+#      so the content was not fully read
+# A HUP, INT, or TERM stops the scan with 129, 130, or 143.
 set -eu
 
 usage() {
@@ -8,8 +36,8 @@ Usage:
   secret-scan.sh --file <path> [label]
   secret-scan.sh --stdin [label]
   secret-scan.sh --staged
-  secret-scan.sh --range <rev-range>
-  secret-scan.sh --diff [label]
+  secret-scan.sh --range <rev-range>    (A..B, A...B, A.., ..B, or one revision)
+  secret-scan.sh --diff [label]    (git-style diff: a "diff " line per file)
 EOF
   exit 2
 }
@@ -20,7 +48,14 @@ tmp_dir="${TMPDIR:-/tmp}/ralph-secret-scan.$$"
 findings="$tmp_dir/findings"
 
 mkdir -p "$tmp_dir"
-trap 'rm -rf "$tmp_dir"' EXIT HUP INT TERM
+# POSIX sh resumes the script after a signal trap's action runs, so a
+# signal trap that only removed $tmp_dir would let the scan continue without
+# its findings file and end with exit 0. Exit with the conventional
+# 128+signum code instead; the EXIT trap still cleans up.
+trap 'rm -rf "$tmp_dir"' EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 : > "$findings"
 
 is_allowed() {
@@ -80,43 +115,174 @@ scan_stdin() {
   scan_file "$file" "$label"
 }
 
-scan_staged() {
-  staged_paths="$tmp_dir/staged-paths"
-  git diff --cached --name-only --diff-filter=ACMR -- > "$staged_paths"
-
-  if [ ! -s "$staged_paths" ]; then
-    return 0
-  fi
-
-  while IFS= read -r path || [ -n "$path" ]; do
-    [ -n "$path" ] || continue
-    blob="$tmp_dir/blob"
-    if git show ":$path" > "$blob" 2>/dev/null; then
-      scan_file "$blob" "$path"
-    fi
-  done < "$staged_paths"
+# is_object_id <id> -- true for a full lowercase hex object id (40 hex
+# characters for SHA-1, 64 for SHA-256).
+is_object_id() {
+  case "$1" in
+    "" | *[!0-9a-f]*) return 1 ;;
+  esac
+  [ "${#1}" -eq 40 ] || [ "${#1}" -eq 64 ]
 }
 
+# scan_staged -- scans each staged blob by its object id, so a file name is
+# only the finding's label and its quoting cannot decide what gets read:
+#   --no-replace-objects       HEAD and each blob as the commit records them
+#   diff.relative=false        a subdirectory cwd still lists the whole index
+#   core.quotePath=false       non-ASCII names print unquoted
+#   --raw                      one line per entry, with modes and object ids
+#   --no-abbrev                full object ids, which is_object_id requires
+#   --no-renames               a rename or copy lists as a plain addition
+#   --diff-filter=d            every change except a deletion, type changes too
+# A line that does not parse, or a listed blob that cannot be read, exits 3.
+scan_staged() {
+  staged_list="$tmp_dir/staged-list"
+  list_rc=0
+  git --no-replace-objects -c diff.relative=false -c core.quotePath=false \
+    diff --cached --raw --no-abbrev --no-renames --diff-filter=d -- \
+    > "$staged_list" || list_rc=$?
+  if [ "$list_rc" -ne 0 ]; then
+    printf 'secret-scan: could not scan the staged changes: git diff --cached exited with %s\n' "$list_rc" >&2
+    exit 3
+  fi
+
+  tab="$(printf '\t')"
+  blob="$tmp_dir/blob"
+  # Each line is ":<old mode> <new mode> <old id> <new id> <status>\t<path>".
+  # git still C-quotes a path holding a tab, newline, double quote, or
+  # backslash, so the line never splits; the path is only a label.
+  while IFS="$tab" read -r meta path || [ -n "$meta" ]; do
+    [ -n "$meta" ] || continue
+    read -r _ new_mode _ new_id _ <<EOF
+$meta
+EOF
+    if ! is_object_id "$new_id"; then
+      printf 'secret-scan: could not scan the staged changes: cannot parse the entry for %s (%s)\n' "$path" "$meta" >&2
+      exit 3
+    fi
+    # A gitlink (submodule) records a commit, not content of this repo.
+    case "$new_mode" in
+      160000) continue ;;
+    esac
+    # An all-zero id means no blob is staged (an unmerged path).
+    case "$new_id" in
+      *[!0]*) ;;
+      *) continue ;;
+    esac
+    if ! git --no-replace-objects cat-file blob "$new_id" > "$blob" 2>/dev/null; then
+      printf 'secret-scan: could not scan the staged changes: blob %s for %s cannot be read\n' "$new_id" "$path" >&2
+      exit 3
+    fi
+    scan_file "$blob" "$path"
+  done < "$staged_list"
+}
+
+# scan_diff_stream [label] -- scans the added lines of a unified diff on
+# stdin. A "+++ " line is a file header only between a "diff " line (or the
+# start of the input) and the next "@@" hunk line; inside a hunk every "+"
+# line is added content, even one whose content starts with "++ ". Only the
+# ANSI color codes in front of a line's first character are removed (a
+# colored diff puts them before "+", "@@", or "diff"); content after that
+# character is kept byte for byte, so an escape sequence in a file's own
+# content cannot turn an added line into a header. The input must be
+# git-style, with a "diff " line before each file's header: in a multi-file
+# diff without them, a later file's "+++ " header arrives inside the
+# previous hunk and is read as content.
 scan_diff_stream() {
   label=${1:-diff}
   diff_file="$tmp_dir/diff"
   added_file="$tmp_dir/diff-added"
   cat > "$diff_file"
   awk '
-    /^\+\+\+ / { next }
+    { while (sub(/^\033\[[0-9;:]*m/, "")) {} }
+    /^diff / { in_hunk = 0; next }
+    /^@@/ { in_hunk = 1; next }
+    !in_hunk && /^\+\+\+ / { next }
     /^\+/ { sub(/^\+/, ""); print }
   ' "$diff_file" > "$added_file"
   scan_file "$added_file" "$label"
 }
 
+# scan_range <rev-range> -- reads the range the way a fresh clone with git's
+# default config (CI) does. Each option below neutralizes one local setting
+# that changes which added lines `git log -p` prints:
+#   GIT_ATTR_SOURCE=<HEAD's commit>  for a range ending at HEAD only:
+#                                    attributes from HEAD's tree, as CI's
+#                                    checkout has them, not a working-tree
+#                                    .gitattributes edit or attr.tree
+#                                    (git 2.41+)
+#   --no-replace-objects             refs/replace/* substitutions
+#   diff.relative=false              a subdirectory cwd
+#   diff.renames=true                renames detected, copies not
+#   diff.renameLimit=1000            rename candidates (git's default since 2.33)
+#   core.bigFileThreshold=512m       a small threshold turns text into binary
+#   core.attributesFile=/dev/null    a user-level attributes file (-diff)
+#   attr.tree=                       a local attr.tree (git 2.43+) in place
+#                                    of the working tree's attributes; an
+#                                    empty value names no tree, so git
+#                                    ignores it
+#   log.showRoot=true                a root commit's own diff
+#   log.showSignature=false          signature lines in the output
+#   --no-color                       color.ui / color.diff
+#   --no-textconv, --no-ext-diff     diff drivers from the local config
+#   --diff-algorithm=default         diff.algorithm
+#   --submodule=short                diff.submodule
+# Supported range forms: A..B, A...B, A.., ..B, or a single revision. The
+# range end is the revision after the last "..", HEAD when that is empty,
+# or the whole argument when it has no ".."; other forms (X^!, X^@, X^-, a
+# :/regex end) do not resolve to a commit and exit 3 rather than being
+# guessed. CI and the branch scan end at HEAD, so their attributes come from
+# HEAD's tree. Any other end (the merge guard's HEAD..<merge head>) reads the
+# working tree's attributes, which during a merge are the merge result's,
+# the tree CI reads once the merge is pushed.
+# The output goes to a file, not a pipe, so git's exit status is checked
+# before parsing: a git log that fails before or partway through its output
+# exits 3 rather than scanning what it printed.
 scan_range() {
   range=$1
-  git log --format='commit %H' --no-ext-diff -p "$range" -- | scan_diff_stream "$range"
+  range_end=${range##*..}
+  [ -n "$range_end" ] || range_end=HEAD
+  if ! end_commit="$(git --no-replace-objects rev-parse --verify --quiet "$range_end^{commit}")"; then
+    printf 'secret-scan: could not scan %s: %s does not name a commit\n' "$range" "$range_end" >&2
+    exit 3
+  fi
+  head_commit="$(git --no-replace-objects rev-parse --verify --quiet 'HEAD^{commit}')" || head_commit=""
+  log_file="$tmp_dir/range-log"
+  log_rc=0
+  (
+    # An inherited GIT_ATTR_SOURCE must not choose the attributes either.
+    if [ "$end_commit" = "$head_commit" ]; then
+      GIT_ATTR_SOURCE=$head_commit
+      export GIT_ATTR_SOURCE
+    else
+      unset GIT_ATTR_SOURCE
+    fi
+    exec git --no-replace-objects \
+      -c diff.relative=false \
+      -c diff.renames=true \
+      -c diff.renameLimit=1000 \
+      -c core.bigFileThreshold=512m \
+      -c core.attributesFile=/dev/null \
+      -c attr.tree= \
+      -c log.showRoot=true \
+      -c log.showSignature=false \
+      log --format='commit %H' --no-color --no-textconv --no-ext-diff \
+      --diff-algorithm=default --submodule=short \
+      -p "$range" --
+  ) > "$log_file" || log_rc=$?
+  if [ "$log_rc" -ne 0 ]; then
+    printf 'secret-scan: could not scan %s: git log exited with %s, so the range was not (fully) scanned\n' "$range" "$log_rc" >&2
+    exit 3
+  fi
+  scan_diff_stream "$range" < "$log_file"
 }
 
 case "${1:-}" in
   --file)
     [ "$#" -ge 2 ] || usage
+    if [ ! -f "$2" ] || [ ! -r "$2" ]; then
+      printf 'secret-scan: could not scan %s: not a readable file\n' "$2" >&2
+      exit 3
+    fi
     scan_file "$2" "${3:-$2}"
     ;;
   --stdin)

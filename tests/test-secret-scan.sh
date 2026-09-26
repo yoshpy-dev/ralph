@@ -84,5 +84,626 @@ git add leak.txt
 git commit -q -m 'add leaked secret'
 expect_exit "range added secret exits 1" 1 "$SCANNER" --range "$base_branch..leak"
 
+# ---------------------------------------------------------------------------
+# Hermetic section: CI scans a range with git's default config, so local git
+# config and repo state must not change which added lines --range reads (nor
+# which files --staged reads), and a git failure must not read as a clean
+# scan. From here on every repo runs under an isolated HOME, global config,
+# and system config, with no XDG config dir (the cases above run under the
+# caller's own config). GIT_CONFIG_NOSYSTEM also covers a git older than
+# 2.32, which ignores GIT_CONFIG_SYSTEM. Fixture values are assembled at
+# runtime from split pieces: this file's own history is read by the same
+# range scan.
+# ---------------------------------------------------------------------------
+hermetic_home="$workdir/.home"
+mkdir -p "$hermetic_home"
+HOME="$hermetic_home"
+GIT_CONFIG_GLOBAL="$hermetic_home/.gitconfig"
+GIT_CONFIG_SYSTEM=/dev/null
+GIT_CONFIG_NOSYSTEM=1
+GIT_TERMINAL_PROMPT=0
+export HOME GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM GIT_TERMINAL_PROMPT
+unset XDG_CONFIG_HOME RALPH_SECRET_ALLOWLIST
+git config --global user.email test@example.com
+git config --global user.name "Secret Scan Test"
+git config --global commit.gpgsign false
+
+token="$(printf 'sk_live_%s' 'abcdefghijklmnopqrstuv')"
+
+expect_stderr_contains() {
+  name=$1
+  needle=$2
+  if grep -F -- "$needle" /tmp/ralph-secret-scan-test.err >/dev/null 2>&1; then
+    ok "$name"
+  else
+    not_ok "$name (missing in stderr: $needle)"
+    cat /tmp/ralph-secret-scan-test.err
+  fi
+}
+
+expect_stderr_not_contains() {
+  name=$1
+  needle=$2
+  if grep -F -- "$needle" /tmp/ralph-secret-scan-test.err >/dev/null 2>&1; then
+    not_ok "$name (unexpectedly in stderr: $needle)"
+    cat /tmp/ralph-secret-scan-test.err
+  else
+    ok "$name"
+  fi
+}
+
+# new_repo <dir> -- a repo whose main branch has one clean commit.
+new_repo() {
+  mkdir -p "$1"
+  (
+    cd "$1"
+    git init -q
+    git checkout -q -B main
+    printf 'clean\n' > README.md
+    git add README.md
+    git commit -q -m init
+  )
+}
+
+# One branch adding a token at the repo root, scanned under one local
+# setting at a time.
+repo="$workdir/cfg-leak"
+new_repo "$repo"
+cd "$repo"
+mkdir sub
+printf 'placeholder\n' > sub/placeholder.txt
+git add sub/placeholder.txt
+git commit -q -m 'add sub'
+git checkout -q -b feature
+printf 'deploy token %s\n' "$token" > leak.txt
+git add leak.txt
+git commit -q -m 'add leaked token'
+
+git config color.ui always
+expect_exit "AC-1: range scan with color.ui=always finds the token" 1 "$SCANNER" --range main..feature
+git config --unset color.ui
+git config color.diff always
+expect_exit "AC-1: range scan with color.diff=always finds the token" 1 "$SCANNER" --range main..feature
+git config --unset color.diff
+
+git config diff.relative true
+cd sub
+expect_exit "AC-2: range scan with diff.relative=true from a subdirectory finds a token outside it" 1 "$SCANNER" --range main..feature
+cd ..
+git config --unset diff.relative
+
+git config core.bigFileThreshold 1
+expect_exit "AC-16: range scan with core.bigFileThreshold=1 still reads the text file" 1 "$SCANNER" --range main..feature
+git config --unset core.bigFileThreshold
+
+printf '*.txt -diff\n' > "$workdir/user-attributes"
+git config core.attributesFile "$workdir/user-attributes"
+expect_exit "range scan ignores a user-level attributes file marking the file -diff" 1 "$SCANNER" --range main..feature
+git config --unset core.attributesFile
+
+# Attributes come from the tree of the commit the range ends at, here HEAD,
+# as in CI's checkout (GIT_ATTR_SOURCE, git 2.41 or later; an older git
+# reads the working tree).
+git_version="$(git --version | awk '{ print $3 }')"
+git_major=${git_version%%.*}
+git_minor=${git_version#*.}
+git_minor=${git_minor%%.*}
+if [ "$git_major" -gt 2 ] || { [ "$git_major" -eq 2 ] && [ "$git_minor" -ge 41 ]; }; then
+  attr_source_supported=1
+else
+  attr_source_supported=0
+  printf '  SKIP: attributes-from-HEAD cases (git %s is older than 2.41)\n' "$git_version"
+fi
+if [ "$attr_source_supported" -eq 1 ]; then
+  printf '*.txt -diff\n' > .gitattributes
+  expect_exit "range scan ignores an uncommitted working-tree .gitattributes marking the file -diff" 1 "$SCANNER" --range main..feature
+  expect_exit "a ..HEAD range reads attributes from HEAD, not the working tree" 1 "$SCANNER" --range main..HEAD
+  expect_exit "a range with an empty end reads attributes from HEAD, not the working tree" 1 "$SCANNER" --range main..
+  rm .gitattributes
+  attr_blob="$(printf '*.txt -diff\n' | git hash-object -w --stdin)"
+  attr_tree="$(printf '100644 blob %s\t.gitattributes\n' "$attr_blob" | git mktree)"
+  git config attr.tree "$attr_tree"
+  expect_exit "range scan ignores a local attr.tree marking the file -diff" 1 "$SCANNER" --range main..feature
+  git config --unset attr.tree
+fi
+
+git config diff.orderFile "$workdir/does-not-exist.order"
+expect_exit "AC-15: git log failing before any output (missing diff.orderFile) exits 3" 3 "$SCANNER" --range main..feature
+expect_stderr_contains "AC-15: missing diff.orderFile names the unscanned range" "could not scan main..feature"
+expect_stderr_not_contains "AC-15: missing diff.orderFile is not reported as findings" "BLOCKED"
+git config --unset diff.orderFile
+
+expect_exit "AC-15: a range that does not resolve exits 3" 3 "$SCANNER" --range does-not-exist..feature
+expect_stderr_contains "AC-15: unresolved range names the unscanned range" "could not scan does-not-exist..feature"
+expect_exit "a range whose end does not resolve exits 3" 3 "$SCANNER" --range main..does-not-exist
+expect_stderr_contains "a range whose end does not resolve names that end" "could not scan main..does-not-exist: does-not-exist does not name a commit"
+
+# A committed .gitattributes applies exactly as in CI's checkout, even when
+# the working-tree copy is removed: a committed -diff hides the file from
+# CI too (a CI-shared gap recorded in docs/tech-debt). A ..HEAD range with
+# HEAD unborn has no commit to read attributes from, and exits 3.
+if [ "$attr_source_supported" -eq 1 ]; then
+  repo="$workdir/cfg-attr-source"
+  new_repo "$repo"
+  cd "$repo"
+  printf '*.txt -diff\n' > .gitattributes
+  git add .gitattributes
+  git commit -q -m 'mark txt files -diff'
+  git checkout -q -b feature
+  printf 'deploy token %s\n' "$token" > leak.txt
+  git add leak.txt
+  git commit -q -m 'add leaked token'
+  rm .gitattributes
+  expect_exit "range scan reads the committed .gitattributes, not the working tree, as CI's checkout does" 0 "$SCANNER" --range main..feature
+  git checkout -q -- .gitattributes
+  git checkout -q --orphan unborn
+  expect_exit "a ..HEAD range with an unborn HEAD exits 3" 3 "$SCANNER" --range main..HEAD
+  expect_stderr_contains "a ..HEAD range with an unborn HEAD names the unscanned range" "could not scan main..HEAD"
+fi
+
+# A range that does not end at HEAD reads the working tree's attributes, as
+# main's scanner did; during a merge those are the merge result's, the tree
+# CI reads once the merge is pushed. A range ending at HEAD reads HEAD's.
+# expect_merge_guard_finds <description> -- with a merge in progress, scans
+# the guard's HEAD..<merge head> range and runs the real prepare-commit-msg
+# guard, and expects both to find the token.
+expect_merge_guard_finds() {
+  expect_exit "$1: HEAD..<merge head> range finds the token" 1 "$SCANNER" --range "HEAD..$(git rev-parse MERGE_HEAD)"
+  mkdir -p scripts
+  cp "$SCANNER" scripts/secret-scan.sh
+  expect_exit "$1: prepare-commit-msg guard finds the token" 1 "$REPO_ROOT/scripts/prepare-commit-msg-secret-guard.sh"
+  rm -rf scripts
+}
+
+if [ "$attr_source_supported" -eq 1 ]; then
+  repo="$workdir/cfg-attr-range-end"
+  new_repo "$repo"
+  cd "$repo"
+  printf '*.txt -diff\n' > .gitattributes
+  git add .gitattributes
+  git commit -q -m 'mark txt files -diff'
+  base_commit="$(git rev-parse HEAD)"
+
+  # A...B with B other than HEAD: HEAD and B both commit -diff, and only the
+  # working tree drops it.
+  git checkout -q -b side
+  printf 'deploy token %s\n' "$token" > leak.txt
+  git add leak.txt
+  git commit -q -m 'add a leaked token under -diff'
+  git checkout -q main
+  : > .gitattributes
+  expect_exit "A...B with B other than HEAD reads the working tree's attributes" 1 "$SCANNER" --range main...side
+  git checkout -q -- .gitattributes
+
+  # A...B with B at HEAD: HEAD drops -diff, and only the working tree adds
+  # it back.
+  git checkout -q -b side-head main
+  git rm -q .gitattributes
+  printf 'deploy token %s\n' "$token" > leak.txt
+  git add leak.txt
+  git commit -q -m 'drop the attribute and add a leaked token'
+  printf '*.txt -diff\n' > .gitattributes
+  expect_exit "A...B with B at HEAD reads HEAD's attributes" 1 "$SCANNER" --range main...side-head
+  rm .gitattributes
+  git checkout -q main
+
+  # Merge guard, HEAD keeping -diff: the incoming side drops it and adds,
+  # then deletes, a token.
+  git checkout -q -b incoming main
+  git rm -q .gitattributes
+  printf 'deploy token %s\n' "$token" > leak.txt
+  git add leak.txt
+  git commit -q -m 'drop the attribute and add a leaked token'
+  git rm -q leak.txt
+  git commit -q -m 'delete the leaked token again'
+  git checkout -q main
+  git merge -q --no-ff --no-commit incoming >/dev/null 2>&1
+  expect_merge_guard_finds "merge where the incoming side drops -diff"
+  git merge --abort
+
+  # Merge guard, the mirror case: HEAD's side drops -diff, and the incoming
+  # side, forked before that, keeps it and adds, then deletes, a token.
+  git checkout -q -b incoming-keeps "$base_commit"
+  printf 'deploy token %s\n' "$token" > leak.txt
+  git add leak.txt
+  git commit -q -m 'add a leaked token under -diff'
+  git rm -q leak.txt
+  git commit -q -m 'delete the leaked token again'
+  git checkout -q -b head-drops main
+  git rm -q .gitattributes
+  git commit -q -m 'drop the attribute'
+  git merge -q --no-ff --no-commit incoming-keeps >/dev/null 2>&1
+  expect_merge_guard_finds "merge where HEAD's side drops -diff"
+  expect_exit "an inherited GIT_ATTR_SOURCE does not choose the merge guard's attributes" 1 env GIT_ATTR_SOURCE="$(git rev-parse incoming-keeps)" "$SCANNER" --range "HEAD..$(git rev-parse MERGE_HEAD)"
+  git config attr.tree "$(git rev-parse 'incoming-keeps^{tree}')"
+  expect_exit "a local attr.tree does not replace the merge guard's working-tree attributes" 1 "$SCANNER" --range "HEAD..$(git rev-parse MERGE_HEAD)"
+  git config --unset attr.tree
+  git merge --abort
+fi
+
+# A local textconv for a diff driver named in the committed .gitattributes
+# would rewrite the token before the scan reads it.
+repo="$workdir/cfg-textconv"
+new_repo "$repo"
+cd "$repo"
+printf '*.txt diff=scrub\n' > .gitattributes
+git add .gitattributes
+git commit -q -m 'add diff driver attribute'
+git checkout -q -b feature
+printf 'deploy token %s\n' "$token" > leak.txt
+git add leak.txt
+git commit -q -m 'add leaked token'
+git config diff.scrub.textconv cksum
+expect_exit "AC-3: range scan ignores a local textconv for a committed diff driver" 1 "$SCANNER" --range main..feature
+
+# Copy detection would show a copied file as "copy from/copy to" with no
+# added lines; rename detection stays on, as in CI, so a pure rename adds
+# nothing to scan under any diff.renames setting.
+repo="$workdir/cfg-renames"
+new_repo "$repo"
+cd "$repo"
+printf 'deploy token %s\nline two\nline three\n' "$token" > base.txt
+git add base.txt
+git commit -q -m 'add base file'
+git checkout -q -b copy
+cp base.txt copy.txt
+printf 'line four\n' >> base.txt
+git add base.txt copy.txt
+git commit -q -m 'copy base file'
+git config diff.renames copies
+expect_exit "AC-4: range scan with diff.renames=copies finds the token in a copied file" 1 "$SCANNER" --range main..copy
+git config --unset diff.renames
+git checkout -q -b rename main
+git mv base.txt renamed.txt
+git commit -q -m 'rename base file'
+expect_exit "AC-4: pure rename under the default config adds nothing to scan" 0 "$SCANNER" --range main..rename
+for renames in copies false; do
+  git config diff.renames "$renames"
+  expect_exit "AC-4: pure rename with diff.renames=$renames matches the default result" 0 "$SCANNER" --range main..rename
+  git config --unset diff.renames
+done
+
+# A low local diff.renameLimit skips inexact rename detection, so renamed
+# and edited files would show their unchanged lines (a token already on
+# main) as added.
+repo="$workdir/cfg-rename-limit"
+new_repo "$repo"
+cd "$repo"
+for n in 1 2 3; do
+  printf 'deploy token %s\nline two %s\nline three\nline four\nline five\n' "$token" "$n" > "base$n.txt"
+done
+git add base1.txt base2.txt base3.txt
+git commit -q -m 'add base files'
+git checkout -q -b feature
+for n in 1 2 3; do
+  git mv "base$n.txt" "moved$n.txt"
+  printf 'edited\n' >> "moved$n.txt"
+done
+git add moved1.txt moved2.txt moved3.txt
+git commit -q -m 'rename and edit base files'
+expect_exit "renamed-and-edited files under the default config add no token line" 0 "$SCANNER" --range main..feature
+git config diff.renameLimit 1
+expect_exit "renamed-and-edited files with diff.renameLimit=1 match the default result" 0 "$SCANNER" --range main..feature
+git config --unset diff.renameLimit
+
+# The token line moves from the end of the file to its start past a run of
+# repeated lines. The default (myers) diff reports it as added; histogram
+# and patience keep it as a unique common line and report the repeated
+# lines as added instead.
+repo="$workdir/cfg-algorithm"
+new_repo "$repo"
+cd "$repo"
+printf 'anchor\nsame\nsame\nsame\nsame\ndeploy token %s\n' "$token" > moved.txt
+git add moved.txt
+git commit -q -m 'add moved file'
+git checkout -q -b feature
+printf 'deploy token %s\nsame\nsame\nsame\nsame\nanchor\n' "$token" > moved.txt
+git add moved.txt
+git commit -q -m 'move the token line'
+expect_exit "AC-5: moved token line under the default diff algorithm exits 1" 1 "$SCANNER" --range main..feature
+for algorithm in histogram patience; do
+  git config diff.algorithm "$algorithm"
+  expect_exit "AC-5: moved token line with diff.algorithm=$algorithm matches the default result" 1 "$SCANNER" --range main..feature
+  git config --unset diff.algorithm
+done
+
+# The newest commit is clean and the older one's added blob is missing:
+# git log prints the newest commit, then fails.
+repo="$workdir/cfg-midway"
+new_repo "$repo"
+cd "$repo"
+git checkout -q -b feature
+printf 'deploy token %s\n' "$token" > old.txt
+git add old.txt
+git commit -q -m 'older commit'
+printf 'still clean\n' > new.txt
+git add new.txt
+git commit -q -m 'newest commit'
+blob="$(git rev-parse feature~1:old.txt)"
+rm -f ".git/objects/$(printf '%s' "$blob" | cut -c1-2)/$(printf '%s' "$blob" | cut -c3-)"
+expect_exit "AC-15: git log failing partway through the range exits 3" 3 "$SCANNER" --range main..feature
+expect_stderr_contains "AC-15: partway failure names the unscanned range" "could not scan main..feature"
+
+# log.showRoot=false hides the diff of a root commit, here an unrelated
+# history merged into the branch.
+repo="$workdir/cfg-root"
+new_repo "$repo"
+cd "$repo"
+git checkout -q --orphan other
+git rm -q -r -f .
+printf 'deploy token %s\n' "$token" > root.txt
+git add root.txt
+git commit -q -m 'unrelated root commit'
+git checkout -q -b feature main
+git merge -q --allow-unrelated-histories -m 'merge unrelated history' other
+git config log.showRoot false
+expect_exit "range scan with log.showRoot=false still reads a root commit's diff" 1 "$SCANNER" --range main..feature
+
+# A local replace ref substitutes a clean commit for the leaking one; CI's
+# clone has no refs/replace/*.
+repo="$workdir/cfg-replace"
+new_repo "$repo"
+cd "$repo"
+git checkout -q -b feature
+printf 'deploy token %s\n' "$token" > leak.txt
+git add leak.txt
+git commit -q -m 'add leaked token'
+stand_in="$(git commit-tree -p main -m 'clean stand-in' "$(git rev-parse 'main^{tree}')")"
+git replace feature "$stand_in"
+expect_exit "range scan ignores a local replace ref for the leaking commit" 1 "$SCANNER" --range main..feature
+
+# diff.submodule=diff would inline the submodule's own history, which CI
+# never reads.
+sub_src="$workdir/cfg-submodule-src"
+new_repo "$sub_src"
+repo="$workdir/cfg-submodule"
+new_repo "$repo"
+cd "$repo"
+git -c protocol.file.allow=always submodule --quiet add "$sub_src" sub
+git commit -q -m 'add submodule'
+git checkout -q -b feature
+(
+  cd sub
+  printf 'deploy token %s\n' "$token" > leak.txt
+  git add leak.txt
+  git commit -q -m 'add leaked token inside the submodule'
+)
+git add sub
+git commit -q -m 'bump submodule'
+expect_exit "submodule bump under the default config reads no submodule content" 0 "$SCANNER" --range main..feature
+git config diff.submodule diff
+expect_exit "submodule bump with diff.submodule=diff matches the default result" 0 "$SCANNER" --range main..feature
+
+colored_diff="$workdir/colored.diff"
+printf '\033[1mdiff --git a/a b/a\033[m\n\033[1m--- a/a\033[m\n\033[1m+++ b/a\033[m\n\033[32m+\033[m\033[32mdeploy token %s\033[m\n' "$token" > "$colored_diff"
+expect_exit "AC-10: --diff finds the token in a colored added line" 1 sh -c "'$SCANNER' --diff 'colored diff' < '$colored_diff'"
+
+# Inside a hunk a "+" line is added content even when the content itself
+# starts with "++ " (so the line reads "+++ "), with or without an escape
+# sequence in front of that content; only a "+++ " line in a file header is
+# skipped.
+repo="$workdir/content-plus-prefix"
+new_repo "$repo"
+cd "$repo"
+git checkout -q -b escaped
+printf '\033[32m++ deploy token %s\n' "$token" > escaped.txt
+git add escaped.txt
+git commit -q -m 'add a line whose content is an escape sequence then ++'
+expect_exit "range scan finds a token in content that is an escape sequence then '++ '" 1 "$SCANNER" --range main..escaped
+git checkout -q -b plain main
+printf '++ deploy token %s\n' "$token" > plain.txt
+git add plain.txt
+git commit -q -m 'add a line whose content starts with ++'
+expect_exit "range scan finds a token in content that starts with '++ '" 1 "$SCANNER" --range main..plain
+
+# A token-looking file name appears only in header lines ("diff --git",
+# "+++ b/<path>"), so it is not reported, including a header that follows
+# another file's hunk.
+token_name="$(printf 'sk_live_%s' 'filenameabcdefghijklmn').txt"
+git checkout -q -b token-name main
+printf 'clean\n' > a-first.txt
+printf 'also clean\n' > "$token_name"
+git add a-first.txt "$token_name"
+git commit -q -m 'add a file with a token-looking name after another file'
+expect_exit "range scan does not report a token-looking name in a +++ file header" 0 "$SCANNER" --range main..token-name
+
+hunk_diff="$workdir/hunk.diff"
+printf 'diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -0,0 +1 @@\n+++ deploy token %s\n' "$token" > "$hunk_diff"
+expect_exit "--diff finds a token in hunk content that starts with '++ '" 1 sh -c "'$SCANNER' --diff 'hunk diff' < '$hunk_diff'"
+printf 'diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -0,0 +1 @@\n+\033[32m++ deploy token %s\n' "$token" > "$hunk_diff"
+expect_exit "--diff finds a token in hunk content that is an escape sequence then '++ '" 1 sh -c "'$SCANNER' --diff 'hunk diff' < '$hunk_diff'"
+printf 'diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -0,0 +1 @@\n+clean\ndiff --git a/%s b/%s\n--- /dev/null\n+++ b/%s\n@@ -0,0 +1 @@\n+also clean\n' "$token_name" "$token_name" "$token_name" > "$hunk_diff"
+expect_exit "--diff does not report a token-looking name in the +++ header after a hunk" 0 sh -c "'$SCANNER' --diff 'hunk diff' < '$hunk_diff'"
+printf '\033[1mdiff --git a/a b/a\033[m\n\033[1m--- a/a\033[m\n\033[1m+++ b/%s\033[m\n\033[36m@@ -0,0 +1 @@\033[m\n\033[32m+\033[m\033[32mdeploy token %s\033[m\n' "$token_name" "$token" > "$hunk_diff"
+expect_exit "--diff finds the token in a colored hunk" 1 sh -c "'$SCANNER' --diff 'colored hunk diff' < '$hunk_diff'"
+# Only the hunk's one added line is read: a scanned header would add a second.
+expect_stderr_not_contains "--diff skips a colored +++ header with a token-looking name" "colored hunk diff:2 ["
+
+# --staged reads each staged blob by its object id: file name quoting,
+# diff.relative, and a local replace ref cannot skip or swap a file.
+repo="$workdir/staged-names"
+new_repo "$repo"
+cd "$repo"
+expect_exit "staged: an empty staging area exits 0" 0 "$SCANNER" --staged
+
+# expect_staged_name_found <description> <file name> -- stages one file
+# holding the token under <file name>, scans, then unstages and removes it.
+expect_staged_name_found() {
+  printf 'deploy token %s\n' "$token" > "$2"
+  git add -- "$2"
+  expect_exit "AC-7: staged file whose name has $1 is scanned" 1 "$SCANNER" --staged
+  git rm -q --cached -- "$2"
+  rm -f -- "$2"
+}
+
+non_ascii_name="$(printf 'caf\303\251.txt')"
+expect_staged_name_found "a non-ASCII character" "$non_ascii_name"
+expect_stderr_contains "AC-7: a non-ASCII name is labeled unquoted" "  - $non_ascii_name:1 ["
+expect_staged_name_found "a space" 'with space.txt'
+expect_staged_name_found "a tab" "$(printf 'with\ttab.txt')"
+expect_staged_name_found "a double quote" 'with"quote.txt'
+expect_staged_name_found "a backslash" 'with\backslash.txt'
+expect_staged_name_found "a leading dash" '-leading-dash.txt'
+expect_staged_name_found "a newline" "$(printf 'with\nnewline.txt')"
+
+repo="$workdir/staged-relative"
+new_repo "$repo"
+cd "$repo"
+mkdir sub
+printf 'placeholder\n' > sub/placeholder.txt
+git add sub/placeholder.txt
+git commit -q -m 'add sub'
+git config diff.relative true
+printf 'deploy token %s\n' "$token" > leak.txt
+git add leak.txt
+cd sub
+expect_exit "AC-8: staged scan with diff.relative=true from a subdirectory reads a file outside it" 1 "$SCANNER" --staged
+cd ..
+
+repo="$workdir/staged-typechange"
+new_repo "$repo"
+cd "$repo"
+ln -s README.md swapped.txt
+git add swapped.txt
+git commit -q -m 'add symlink'
+rm swapped.txt
+printf 'deploy token %s\n' "$token" > swapped.txt
+git add swapped.txt
+expect_exit "staged: a symlink replaced by a file holding the token is scanned" 1 "$SCANNER" --staged
+
+repo="$workdir/staged-rename"
+new_repo "$repo"
+cd "$repo"
+printf 'deploy token %s\n' "$token" > base.txt
+git add base.txt
+git commit -q -m 'add base file'
+git mv base.txt renamed.txt
+expect_exit "staged: a renamed file is scanned" 1 "$SCANNER" --staged
+expect_stderr_contains "staged: a renamed file is labeled by its new name" "  - renamed.txt:1 ["
+
+repo="$workdir/staged-replace"
+new_repo "$repo"
+cd "$repo"
+printf 'deploy token %s\n' "$token" > leak.txt
+git add leak.txt
+clean_blob="$(printf 'clean\n' | git hash-object -w --stdin)"
+git replace "$(git rev-parse :leak.txt)" "$clean_blob"
+expect_exit "staged: a local replace ref cannot swap the staged blob" 1 "$SCANNER" --staged
+git replace -d "$(git rev-parse :leak.txt)" >/dev/null
+# A replaced HEAD whose tree already holds the staged file would hide it
+# from the staged list.
+stand_in="$(git commit-tree -p HEAD -m 'stand-in holding the index' "$(git write-tree)")"
+git replace HEAD "$stand_in"
+expect_exit "staged: a local replace ref for HEAD cannot hide a staged file" 1 "$SCANNER" --staged
+
+repo="$workdir/staged-unreadable"
+new_repo "$repo"
+cd "$repo"
+printf 'deploy token %s\n' "$token" > leak.txt
+git add leak.txt
+blob="$(git rev-parse :leak.txt)"
+rm -f ".git/objects/$(printf '%s' "$blob" | cut -c1-2)/$(printf '%s' "$blob" | cut -c3-)"
+expect_exit "AC-9: a staged blob that cannot be read exits 3" 3 "$SCANNER" --staged
+expect_stderr_contains "AC-9: an unreadable blob names the file" "could not scan the staged changes: blob $blob for leak.txt"
+
+repo="$workdir/staged-gitlink"
+new_repo "$repo"
+cd "$repo"
+git update-index --add --cacheinfo "160000,$(git rev-parse HEAD),sub"
+expect_exit "AC-9: a staged gitlink does not fail the scan" 0 "$SCANNER" --staged
+
+repo="$workdir/staged-unmerged"
+new_repo "$repo"
+cd "$repo"
+printf 'base\n' > conflict.txt
+git add conflict.txt
+git commit -q -m 'add conflict file'
+git checkout -q -b other
+printf 'other side\n' > conflict.txt
+git commit -q -a -m 'other side'
+git checkout -q main
+printf 'main side\n' > conflict.txt
+git commit -q -a -m 'main side'
+git merge -q other >/dev/null 2>&1 || true
+expect_exit "staged: an unmerged path (no staged blob) does not fail the scan" 0 "$SCANNER" --staged
+
+# A raw staged line without a full object id exits 3 instead of being
+# skipped. git never prints one, so a wrapper on PATH stands in for
+# `git diff --cached --raw` and passes every other git call through.
+real_git="$(command -v git)"
+fake_bin="$workdir/fake-git-bin"
+fake_raw="$workdir/fake-raw-output"
+mkdir -p "$fake_bin"
+cat > "$fake_bin/git" <<EOF
+#!/bin/sh
+case " \$* " in
+  *" --raw "*) cat "$fake_raw"; exit 0 ;;
+esac
+exec "$real_git" "\$@"
+EOF
+chmod +x "$fake_bin/git"
+repo="$workdir/staged-unparsable"
+new_repo "$repo"
+cd "$repo"
+zero_id="$(printf '%040d' 0)"
+printf ':000000 100644 %s\tleak.txt\n' "$zero_id" > "$fake_raw"
+expect_exit "staged: a raw line with no new object id exits 3" 3 env PATH="$fake_bin:$PATH" "$SCANNER" --staged
+expect_stderr_contains "staged: an unparsable line names the entry" "cannot parse the entry for leak.txt"
+printf ':000000 100644 %s 0000000 A\tleak.txt\n' "$zero_id" > "$fake_raw"
+expect_exit "staged: an abbreviated all-zero object id exits 3" 3 env PATH="$fake_bin:$PATH" "$SCANNER" --staged
+
+# Exit 0 means "scanned": a --file path that cannot be read exits 3, while
+# an existing empty file is a clean scan.
+file_dir="$workdir/file-cases"
+mkdir -p "$file_dir"
+cd "$file_dir"
+expect_exit "--file on a missing path exits 3" 3 "$SCANNER" --file "$file_dir/missing.txt"
+expect_stderr_contains "--file on a missing path names it" "could not scan $file_dir/missing.txt"
+: > "$file_dir/empty.txt"
+expect_exit "--file on an existing empty file exits 0" 0 "$SCANNER" --file "$file_dir/empty.txt"
+printf 'deploy token %s\n' "$token" > "$file_dir/unreadable.txt"
+chmod 000 "$file_dir/unreadable.txt"
+if [ "$(id -u)" -eq 0 ]; then
+  printf '  SKIP: --file on an unreadable file (root can read it anyway)\n'
+else
+  expect_exit "--file on an unreadable file exits 3" 3 "$SCANNER" --file "$file_dir/unreadable.txt"
+fi
+chmod 644 "$file_dir/unreadable.txt"
+
+# A TERM during the scan must stop it with 143, not resume it without its
+# temp dir and report clean. The scanner blocks reading stdin from a FIFO
+# when the TERM arrives, and the trap runs once that read ends; the TERM is
+# sent only after the scanner's findings file (created after its traps are
+# set) exists.
+sig_dir="$workdir/signal"
+mkdir -p "$sig_dir/tmp"
+mkfifo "$sig_dir/fifo"
+TMPDIR="$sig_dir/tmp" "$SCANNER" --stdin 'signal test' < "$sig_dir/fifo" > "$sig_dir/out" 2> "$sig_dir/err" &
+sig_pid=$!
+exec 9> "$sig_dir/fifo"
+tries=0
+while [ ! -f "$sig_dir/tmp/ralph-secret-scan.$sig_pid/findings" ] && [ "$tries" -lt 20 ]; do
+  sleep 1
+  tries=$((tries + 1))
+done
+kill -TERM "$sig_pid"
+printf 'deploy token %s\n' "$token" >&9
+exec 9>&-
+set +e
+wait "$sig_pid"
+sig_rc=$?
+set -e
+if [ "$sig_rc" -eq 143 ]; then
+  ok "a TERM during the scan exits 143"
+else
+  not_ok "a TERM during the scan exits 143 (exit $sig_rc, want 143)"
+  cat "$sig_dir/err"
+fi
+if [ -d "$sig_dir/tmp/ralph-secret-scan.$sig_pid" ]; then
+  not_ok "a TERM during the scan still removes the temp dir"
+else
+  ok "a TERM during the scan still removes the temp dir"
+fi
+
 printf '\n-- Summary --\n  PASS: %s\n  FAIL: %s\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

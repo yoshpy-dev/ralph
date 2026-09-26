@@ -16,7 +16,9 @@
 # every fixture repo below runs `git commit`: a host or CI runner with a
 # global `commit.gpgsign = true` (or any other global config) would
 # otherwise make every commit in this file fail with a gpg-signing error
-# unrelated to the script under test.
+# unrelated to the script under test. GIT_CONFIG_NOSYSTEM also covers a git
+# older than 2.32, which ignores GIT_CONFIG_SYSTEM, and XDG_CONFIG_HOME is
+# unset so no user-level git config or attributes file under it is read.
 set -eu
 
 SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
@@ -46,8 +48,10 @@ mkdir -p "$hermetic_home"
 HOME="$hermetic_home"
 GIT_CONFIG_GLOBAL="$hermetic_home/.gitconfig"
 GIT_CONFIG_SYSTEM=/dev/null
+GIT_CONFIG_NOSYSTEM=1
 GIT_TERMINAL_PROMPT=0
-export HOME GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_TERMINAL_PROMPT
+export HOME GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM GIT_TERMINAL_PROMPT
+unset XDG_CONFIG_HOME
 
 # run_bin <binary> <cwd> [args...] -- runs <binary> from <cwd> with a clean
 # slate for the three env vars this script reads. Captures stdout/stderr
@@ -784,8 +788,8 @@ test_allowlist_self_match() {
 # ---------------------------------------------------------------------------
 # AC-2d (cross-review cycle 1, AR-1): a committed symlink `.gitallowed`
 # resolves its target one level inside the committed tree, the same
-# content a checkout of HEAD would show CI's scanner. `git show
-# HEAD:.gitallowed` on a symlink entry prints the link's TARGET PATH, not
+# content a checkout of HEAD would show CI's scanner. Reading
+# HEAD:.gitallowed on a symlink entry yields the link's TARGET PATH, not
 # file content, so reading it as-is (rather than resolving the target)
 # would use that path string as a bogus allowlist rule.
 # ---------------------------------------------------------------------------
@@ -916,8 +920,8 @@ test_ac2d_symlinked_allowlist_target_name_not_used_as_regex() {
 # ---------------------------------------------------------------------------
 # Regression (adjudication after cross-review cycle 1's fix, AC-2d): the
 # committed-.gitallowed lookup must be root-relative, not relative to the
-# script's own cwd. `git show HEAD:.gitallowed` (the pre-existing read
-# path) is already root-relative regardless of cwd; `git ls-tree HEAD --
+# script's own cwd. HEAD:.gitallowed (the object name the content read
+# uses) is already root-relative regardless of cwd; `git ls-tree HEAD --
 # .gitallowed` (added to read the tree-entry mode) is NOT -- from a
 # subdirectory it silently finds nothing unless the pathspec is passed to
 # `git ls-tree --full-tree`.
@@ -961,9 +965,7 @@ test_ls_tree_mode_check_is_root_relative() {
 # <dir>/` lists the directory's CHILDREN rather than failing, so without
 # requiring the resolved entry's own recorded path to equal the target
 # exactly, the mode check would pass on the first child's mode while the
-# content read next (`git show HEAD:<dir>/`, a tree listing) is not a
-# file, and a line from that listing could end up used as an allowlist
-# regex.
+# content read next (HEAD:<dir>/) is a tree, not a file.
 # ---------------------------------------------------------------------------
 test_ac2d_symlinked_allowlist_directory_target_rejected() {
   repo="$workdir/ac2d-symlink-dir-target"
@@ -1146,6 +1148,127 @@ test_ac2d_symlinked_allowlist_leading_dotslash_target_rejected() {
 }
 
 # ---------------------------------------------------------------------------
+# AC-11 (#176): a symlink target is read byte for byte. The target here is
+# "rules" plus a trailing newline -- a different committed file, without
+# the rule, which a checkout of HEAD (CI) follows. Command substitution
+# would strip the newline and resolve to "rules" (holding the rule)
+# instead; a target holding a newline is not resolved at all.
+# ---------------------------------------------------------------------------
+test_ac11_symlinked_allowlist_target_trailing_newline() {
+  repo="$workdir/ac11-symlink-target-newline"
+  git_repo "$repo"
+  val="$(printf 'ABCDEFGHIJKLMNOPQRSTUVWXYZ%s' 'targetnewline05')"
+  (
+    cd "$repo"
+    git checkout -q -B main
+    printf 'clean\n' > README.md
+    git add README.md
+    git commit -q -m init
+
+    git checkout -q -b feature
+    key="$(printf 'api%s' '_key')"
+    printf '%s=%s\n' "$key" "$val" > secret.txt
+    bracket_key="$(printf 'api_ke%s' '[y]')"
+    printf '%s=%s\n' "$bracket_key" "$val" > rules
+    target="$(printf 'rules\nx')"
+    target="${target%x}"
+    printf '# no matching rule\n' > "$target"
+    ln -s "$target" .gitallowed
+    git add secret.txt rules "$target" .gitallowed
+    git commit -q -m 'add fixture and a symlink whose target ends with a newline'
+  )
+  run "$repo" --strict
+  assert_exit "AC-11 target ending with a newline: the newline-less file's rule is not used" 1
+  assert_stderr_contains "AC-11 target ending with a newline: could-not-read notice" "could not be read as a file"
+}
+
+# ---------------------------------------------------------------------------
+# AC-12 (#176): a non-ASCII symlink target resolves. `git ls-tree` quotes a
+# non-ASCII path under the default core.quotePath, which would never equal
+# the target and fall back to an empty allowlist.
+# ---------------------------------------------------------------------------
+test_ac12_symlinked_allowlist_non_ascii_target() {
+  repo="$workdir/ac12-symlink-non-ascii-target"
+  git_repo "$repo"
+  val="$(printf 'ABCDEFGHIJKLMNOPQRSTUVWXYZ%s' 'nonasciitarget06')"
+  (
+    cd "$repo"
+    git checkout -q -B main
+    printf 'clean\n' > README.md
+    git add README.md
+    git commit -q -m init
+
+    git checkout -q -b feature
+    key="$(printf 'api%s' '_key')"
+    printf '%s=%s\n' "$key" "$val" > secret.txt
+    bracket_key="$(printf 'api_ke%s' '[y]')"
+    target="$(printf 'r\303\274les')"
+    printf '%s=%s\n' "$bracket_key" "$val" > "$target"
+    ln -s "$target" .gitallowed
+    git add secret.txt "$target" .gitallowed
+    git commit -q -m 'add fixture and a symlink to a non-ASCII allowlist file'
+  )
+  run "$repo" --strict
+  assert_exit "AC-12 non-ASCII target: its rule suppresses the finding" 0
+  assert_scanned_clean "AC-12 non-ASCII target: reports scanned+clean" "main"
+  assert_stderr_not_contains "AC-12 non-ASCII target: no could-not-read notice" "could not be read as a file"
+}
+
+# ---------------------------------------------------------------------------
+# AC-13 (#176): a repo-level color.ui=always must not hide a finding (end to
+# end through secret-scan.sh --range).
+# ---------------------------------------------------------------------------
+test_ac13_color_ui_always_still_finds() {
+  repo="$workdir/ac13-color-ui-always"
+  git_repo "$repo"
+  (
+    cd "$repo"
+    git checkout -q -B main
+    printf 'clean\n' > README.md
+    git add README.md
+    git commit -q -m init
+    git checkout -q -b feature
+    token="$(printf 'ghp_%s' 'COLORUIabcdefghijklmnopqrstuvwx')"
+    printf 'deploy token %s\n' "$token" > leaked.txt
+    git add leaked.txt
+    git commit -q -m 'add leaked token'
+    git config color.ui always
+  )
+  run "$repo" --strict
+  assert_exit "AC-13 color.ui=always: finding still detected" 1
+  assert_stderr_contains "AC-13 color.ui=always: reports findings" "findings"
+}
+
+# ---------------------------------------------------------------------------
+# AC-17 (#176): when git cannot read the range (here a diff.orderFile that
+# does not exist), secret-scan.sh exits 3; this script must report a
+# scanner failure with that exit code, never "clean".
+# ---------------------------------------------------------------------------
+test_ac17_scanner_git_failure_is_not_clean() {
+  repo="$workdir/ac17-scanner-git-failure"
+  git_repo "$repo"
+  (
+    cd "$repo"
+    git checkout -q -B main
+    printf 'clean\n' > README.md
+    git add README.md
+    git commit -q -m init
+    git checkout -q -b feature
+    printf 'still clean\n' >> README.md
+    git add README.md
+    git commit -q -m 'clean change'
+    git config diff.orderFile "$workdir/does-not-exist.order"
+  )
+  run "$repo" --strict
+  assert_exit "AC-17 git log failure: strict mode exits with the scanner's 3" 3
+  assert_stderr_contains "AC-17 git log failure: labeled a scanner failure" "scanner failed with exit 3"
+  assert_stderr_not_contains "AC-17 git log failure: never reported clean" ": clean"
+  run "$repo"
+  assert_exit "AC-17 git log failure: default mode also exits 3" 3
+  assert_stderr_not_contains "AC-17 git log failure: default mode never reported clean" ": clean"
+}
+
+# ---------------------------------------------------------------------------
 # Usage errors, and correct behavior under a repo path containing a space.
 # ---------------------------------------------------------------------------
 test_usage_and_space_path() {
@@ -1200,6 +1323,10 @@ test_ac2d_symlinked_allowlist_bare_directory_target_rejected
 test_ac2d_symlinked_allowlist_absolute_target_rejected
 test_ac2d_symlinked_allowlist_dotdot_target_rejected
 test_ac2d_symlinked_allowlist_leading_dotslash_target_rejected
+test_ac11_symlinked_allowlist_target_trailing_newline
+test_ac12_symlinked_allowlist_non_ascii_target
+test_ac13_color_ui_always_still_finds
+test_ac17_scanner_git_failure_is_not_clean
 test_usage_and_space_path
 
 printf '\n-- Summary --\n  PASS: %s\n  FAIL: %s\n' "$pass" "$fail"
