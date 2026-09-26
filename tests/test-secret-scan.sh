@@ -241,12 +241,20 @@ if [ "$attr_source_supported" -eq 1 ]; then
   expect_stderr_contains "a ..HEAD range with an unborn HEAD names the unscanned range" "could not scan main..HEAD"
 fi
 
-# A range that does not end at HEAD reads attributes from the commit it
-# ends at. Here HEAD (main) marks *.txt -diff, and the other side removes
-# that line and adds a token: a symmetric range reads its right-hand side,
-# and the merge guard's HEAD..<merge head> range reads the incoming side,
-# as the merge result (and CI after the merge) has it, even though the
-# incoming side deletes the token again.
+# A range that does not end at HEAD reads the working tree's attributes, as
+# main's scanner did; during a merge those are the merge result's, the tree
+# CI reads once the merge is pushed. A range ending at HEAD reads HEAD's.
+# expect_merge_guard_finds <description> -- with a merge in progress, scans
+# the guard's HEAD..<merge head> range and runs the real prepare-commit-msg
+# guard, and expects both to find the token.
+expect_merge_guard_finds() {
+  expect_exit "$1: HEAD..<merge head> range finds the token" 1 "$SCANNER" --range "HEAD..$(git rev-parse MERGE_HEAD)"
+  mkdir -p scripts
+  cp "$SCANNER" scripts/secret-scan.sh
+  expect_exit "$1: prepare-commit-msg guard finds the token" 1 "$REPO_ROOT/scripts/prepare-commit-msg-secret-guard.sh"
+  rm -rf scripts
+}
+
 if [ "$attr_source_supported" -eq 1 ]; then
   repo="$workdir/cfg-attr-range-end"
   new_repo "$repo"
@@ -254,13 +262,33 @@ if [ "$attr_source_supported" -eq 1 ]; then
   printf '*.txt -diff\n' > .gitattributes
   git add .gitattributes
   git commit -q -m 'mark txt files -diff'
+  base_commit="$(git rev-parse HEAD)"
+
+  # A...B with B other than HEAD: HEAD and B both commit -diff, and only the
+  # working tree drops it.
   git checkout -q -b side
+  printf 'deploy token %s\n' "$token" > leak.txt
+  git add leak.txt
+  git commit -q -m 'add a leaked token under -diff'
+  git checkout -q main
+  : > .gitattributes
+  expect_exit "A...B with B other than HEAD reads the working tree's attributes" 1 "$SCANNER" --range main...side
+  git checkout -q -- .gitattributes
+
+  # A...B with B at HEAD: HEAD drops -diff, and only the working tree adds
+  # it back.
+  git checkout -q -b side-head main
   git rm -q .gitattributes
   printf 'deploy token %s\n' "$token" > leak.txt
   git add leak.txt
   git commit -q -m 'drop the attribute and add a leaked token'
+  printf '*.txt -diff\n' > .gitattributes
+  expect_exit "A...B with B at HEAD reads HEAD's attributes" 1 "$SCANNER" --range main...side-head
+  rm .gitattributes
   git checkout -q main
-  expect_exit "a symmetric A...B range reads attributes from B" 1 "$SCANNER" --range main...side
+
+  # Merge guard, HEAD keeping -diff: the incoming side drops it and adds,
+  # then deletes, a token.
   git checkout -q -b incoming main
   git rm -q .gitattributes
   printf 'deploy token %s\n' "$token" > leak.txt
@@ -270,11 +298,26 @@ if [ "$attr_source_supported" -eq 1 ]; then
   git commit -q -m 'delete the leaked token again'
   git checkout -q main
   git merge -q --no-ff --no-commit incoming >/dev/null 2>&1
-  expect_exit "a merge head range reads attributes from the incoming side" 1 "$SCANNER" --range "HEAD..$(git rev-parse MERGE_HEAD)"
-  mkdir -p scripts
-  cp "$SCANNER" scripts/secret-scan.sh
-  expect_exit "prepare-commit-msg guard finds a token the incoming side adds and deletes" 1 "$REPO_ROOT/scripts/prepare-commit-msg-secret-guard.sh"
-  rm -rf scripts
+  expect_merge_guard_finds "merge where the incoming side drops -diff"
+  git merge --abort
+
+  # Merge guard, the mirror case: HEAD's side drops -diff, and the incoming
+  # side, forked before that, keeps it and adds, then deletes, a token.
+  git checkout -q -b incoming-keeps "$base_commit"
+  printf 'deploy token %s\n' "$token" > leak.txt
+  git add leak.txt
+  git commit -q -m 'add a leaked token under -diff'
+  git rm -q leak.txt
+  git commit -q -m 'delete the leaked token again'
+  git checkout -q -b head-drops main
+  git rm -q .gitattributes
+  git commit -q -m 'drop the attribute'
+  git merge -q --no-ff --no-commit incoming-keeps >/dev/null 2>&1
+  expect_merge_guard_finds "merge where HEAD's side drops -diff"
+  expect_exit "an inherited GIT_ATTR_SOURCE does not choose the merge guard's attributes" 1 env GIT_ATTR_SOURCE="$(git rev-parse incoming-keeps)" "$SCANNER" --range "HEAD..$(git rev-parse MERGE_HEAD)"
+  git config attr.tree "$(git rev-parse 'incoming-keeps^{tree}')"
+  expect_exit "a local attr.tree does not replace the merge guard's working-tree attributes" 1 "$SCANNER" --range "HEAD..$(git rev-parse MERGE_HEAD)"
+  git config --unset attr.tree
   git merge --abort
 fi
 

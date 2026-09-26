@@ -5,16 +5,20 @@
 # the same added lines: scan_range pins the local git settings listed there
 # (color, diff.relative, textconv, external diff, rename/copy detection and
 # its limit, the diff algorithm, the big-file threshold, a user-level
-# attributes file, working-tree attributes, root-commit diffs, submodule
-# diffs, replace refs, signature output) to git's defaults, and checks git's
-# exit status before parsing, so a git failure is never read as a clean
-# scan. Known local-only gaps it cannot pin: a `-diff`/`binary` attribute in
-# .git/info/attributes, and a local diff.<driver>.binary=true for a driver
-# the committed .gitattributes names. --staged reads each staged blob by its
-# object id, so neither file name quoting nor diff.relative can skip a file.
-# Every option used works on git 2.8; a -c key or environment variable an
-# older git does not know is ignored, and such a git has no such setting to
-# neutralize.
+# attributes file, attr.tree, root-commit diffs, submodule diffs, replace
+# refs, signature output) to git's defaults and, for a range ending at HEAD,
+# the attributes to HEAD's tree; it checks git's exit status before
+# parsing, so a git failure is never read as a clean scan. Known local-only
+# gaps it cannot pin: a `-diff`/`binary` attribute in .git/info/attributes,
+# and a local diff.<driver>.binary=true for a driver the committed
+# .gitattributes names. CI's pull_request checkout is the PR merge commit,
+# so its attributes differ from the branch tip's when the base changed
+# .gitattributes after the branch forked. --staged reads each staged blob
+# by its object id, so neither file name quoting nor diff.relative can skip
+# a file. Every option used works on git 2.8, and a -c key an older git
+# does not know is ignored because that git has no such setting;
+# GIT_ATTR_SOURCE needs git 2.41, and an older git keeps reading the working
+# tree's attributes.
 #
 # Exit codes:
 #   0  scanned, nothing found
@@ -32,7 +36,7 @@ Usage:
   secret-scan.sh --file <path> [label]
   secret-scan.sh --stdin [label]
   secret-scan.sh --staged
-  secret-scan.sh --range <rev-range>
+  secret-scan.sh --range <rev-range>    (A..B, A...B, A.., ..B, or one revision)
   secret-scan.sh --diff [label]    (git-style diff: a "diff " line per file)
 EOF
   exit 2
@@ -201,9 +205,9 @@ scan_diff_stream() {
 # scan_range <rev-range> -- reads the range the way a fresh clone with git's
 # default config (CI) does. Each option below neutralizes one local setting
 # that changes which added lines `git log -p` prints:
-#   GIT_ATTR_SOURCE=<range end>      attributes from the tree of the commit
-#                                    the range ends at, as a checkout of it
-#                                    has them, not a working-tree
+#   GIT_ATTR_SOURCE=<HEAD's commit>  for a range ending at HEAD only:
+#                                    attributes from HEAD's tree, as CI's
+#                                    checkout has them, not a working-tree
 #                                    .gitattributes edit or attr.tree
 #                                    (git 2.41+)
 #   --no-replace-objects             refs/replace/* substitutions
@@ -212,16 +216,24 @@ scan_diff_stream() {
 #   diff.renameLimit=1000            rename candidates (git's default since 2.33)
 #   core.bigFileThreshold=512m       a small threshold turns text into binary
 #   core.attributesFile=/dev/null    a user-level attributes file (-diff)
+#   attr.tree=                       a local attr.tree (git 2.43+) in place
+#                                    of the working tree's attributes; an
+#                                    empty value names no tree, so git
+#                                    ignores it
 #   log.showRoot=true                a root commit's own diff
 #   log.showSignature=false          signature lines in the output
 #   --no-color                       color.ui / color.diff
 #   --no-textconv, --no-ext-diff     diff drivers from the local config
 #   --diff-algorithm=default         diff.algorithm
 #   --submodule=short                diff.submodule
-# The range end is the revision after the last ".." (or "..."), HEAD when
-# that is empty, or the whole argument when it has no "..". CI and the
-# branch scan end at HEAD; the merge guard ends at the merge head, whose
-# attributes are the incoming side's. An end that is not a commit exits 3.
+# Supported range forms: A..B, A...B, A.., ..B, or a single revision. The
+# range end is the revision after the last "..", HEAD when that is empty,
+# or the whole argument when it has no ".."; other forms (X^!, X^@, X^-, a
+# :/regex end) do not resolve to a commit and exit 3 rather than being
+# guessed. CI and the branch scan end at HEAD, so their attributes come from
+# HEAD's tree. Any other end (the merge guard's HEAD..<merge head>) reads the
+# working tree's attributes, which during a merge are the merge result's,
+# the tree CI reads once the merge is pushed.
 # The output goes to a file, not a pipe, so git's exit status is checked
 # before parsing: a git log that fails before or partway through its output
 # exits 3 rather than scanning what it printed.
@@ -229,23 +241,34 @@ scan_range() {
   range=$1
   range_end=${range##*..}
   [ -n "$range_end" ] || range_end=HEAD
-  if ! attr_source="$(git --no-replace-objects rev-parse --verify --quiet "$range_end^{commit}")"; then
+  if ! end_commit="$(git --no-replace-objects rev-parse --verify --quiet "$range_end^{commit}")"; then
     printf 'secret-scan: could not scan %s: %s does not name a commit\n' "$range" "$range_end" >&2
     exit 3
   fi
+  head_commit="$(git --no-replace-objects rev-parse --verify --quiet 'HEAD^{commit}')" || head_commit=""
   log_file="$tmp_dir/range-log"
   log_rc=0
-  GIT_ATTR_SOURCE=$attr_source git --no-replace-objects \
-    -c diff.relative=false \
-    -c diff.renames=true \
-    -c diff.renameLimit=1000 \
-    -c core.bigFileThreshold=512m \
-    -c core.attributesFile=/dev/null \
-    -c log.showRoot=true \
-    -c log.showSignature=false \
-    log --format='commit %H' --no-color --no-textconv --no-ext-diff \
-    --diff-algorithm=default --submodule=short \
-    -p "$range" -- > "$log_file" || log_rc=$?
+  (
+    # An inherited GIT_ATTR_SOURCE must not choose the attributes either.
+    if [ "$end_commit" = "$head_commit" ]; then
+      GIT_ATTR_SOURCE=$head_commit
+      export GIT_ATTR_SOURCE
+    else
+      unset GIT_ATTR_SOURCE
+    fi
+    exec git --no-replace-objects \
+      -c diff.relative=false \
+      -c diff.renames=true \
+      -c diff.renameLimit=1000 \
+      -c core.bigFileThreshold=512m \
+      -c core.attributesFile=/dev/null \
+      -c attr.tree= \
+      -c log.showRoot=true \
+      -c log.showSignature=false \
+      log --format='commit %H' --no-color --no-textconv --no-ext-diff \
+      --diff-algorithm=default --submodule=short \
+      -p "$range" --
+  ) > "$log_file" || log_rc=$?
   if [ "$log_rc" -ne 0 ]; then
     printf 'secret-scan: could not scan %s: git log exited with %s, so the range was not (fully) scanned\n' "$range" "$log_rc" >&2
     exit 3
