@@ -21,7 +21,8 @@
 #   1  scanned, found something
 #   2  usage error
 #   3  could not scan (a missing or unreadable --file, a staged entry that
-#      does not parse, or git failed), so the content was not fully read
+#      does not parse, a --range end that is not a commit, or git failed),
+#      so the content was not fully read
 # A HUP, INT, or TERM stops the scan with 129, 130, or 143.
 set -eu
 
@@ -200,8 +201,9 @@ scan_diff_stream() {
 # scan_range <rev-range> -- reads the range the way a fresh clone with git's
 # default config (CI) does. Each option below neutralizes one local setting
 # that changes which added lines `git log -p` prints:
-#   GIT_ATTR_SOURCE=HEAD             attributes from HEAD's tree, as CI's
-#                                    checkout has them, not a working-tree
+#   GIT_ATTR_SOURCE=<range end>      attributes from the tree of the commit
+#                                    the range ends at, as a checkout of it
+#                                    has them, not a working-tree
 #                                    .gitattributes edit or attr.tree
 #                                    (git 2.41+)
 #   --no-replace-objects             refs/replace/* substitutions
@@ -216,14 +218,24 @@ scan_diff_stream() {
 #   --no-textconv, --no-ext-diff     diff drivers from the local config
 #   --diff-algorithm=default         diff.algorithm
 #   --submodule=short                diff.submodule
+# The range end is the revision after the last ".." (or "..."), HEAD when
+# that is empty, or the whole argument when it has no "..". CI and the
+# branch scan end at HEAD; the merge guard ends at the merge head, whose
+# attributes are the incoming side's. An end that is not a commit exits 3.
 # The output goes to a file, not a pipe, so git's exit status is checked
 # before parsing: a git log that fails before or partway through its output
 # exits 3 rather than scanning what it printed.
 scan_range() {
   range=$1
+  range_end=${range##*..}
+  [ -n "$range_end" ] || range_end=HEAD
+  if ! attr_source="$(git --no-replace-objects rev-parse --verify --quiet "$range_end^{commit}")"; then
+    printf 'secret-scan: could not scan %s: %s does not name a commit\n' "$range" "$range_end" >&2
+    exit 3
+  fi
   log_file="$tmp_dir/range-log"
   log_rc=0
-  GIT_ATTR_SOURCE=HEAD git --no-replace-objects \
+  GIT_ATTR_SOURCE=$attr_source git --no-replace-objects \
     -c diff.relative=false \
     -c diff.renames=true \
     -c diff.renameLimit=1000 \

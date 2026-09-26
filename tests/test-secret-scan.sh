@@ -181,8 +181,9 @@ git config core.attributesFile "$workdir/user-attributes"
 expect_exit "range scan ignores a user-level attributes file marking the file -diff" 1 "$SCANNER" --range main..feature
 git config --unset core.attributesFile
 
-# Attributes come from HEAD's tree, as in CI's checkout (GIT_ATTR_SOURCE,
-# git 2.41 or later; an older git reads the working tree).
+# Attributes come from the tree of the commit the range ends at, here HEAD,
+# as in CI's checkout (GIT_ATTR_SOURCE, git 2.41 or later; an older git
+# reads the working tree).
 git_version="$(git --version | awk '{ print $3 }')"
 git_major=${git_version%%.*}
 git_minor=${git_version#*.}
@@ -196,6 +197,8 @@ fi
 if [ "$attr_source_supported" -eq 1 ]; then
   printf '*.txt -diff\n' > .gitattributes
   expect_exit "range scan ignores an uncommitted working-tree .gitattributes marking the file -diff" 1 "$SCANNER" --range main..feature
+  expect_exit "a ..HEAD range reads attributes from HEAD, not the working tree" 1 "$SCANNER" --range main..HEAD
+  expect_exit "a range with an empty end reads attributes from HEAD, not the working tree" 1 "$SCANNER" --range main..
   rm .gitattributes
   attr_blob="$(printf '*.txt -diff\n' | git hash-object -w --stdin)"
   attr_tree="$(printf '100644 blob %s\t.gitattributes\n' "$attr_blob" | git mktree)"
@@ -212,11 +215,13 @@ git config --unset diff.orderFile
 
 expect_exit "AC-15: a range that does not resolve exits 3" 3 "$SCANNER" --range does-not-exist..feature
 expect_stderr_contains "AC-15: unresolved range names the unscanned range" "could not scan does-not-exist..feature"
+expect_exit "a range whose end does not resolve exits 3" 3 "$SCANNER" --range main..does-not-exist
+expect_stderr_contains "a range whose end does not resolve names that end" "could not scan main..does-not-exist: does-not-exist does not name a commit"
 
 # A committed .gitattributes applies exactly as in CI's checkout, even when
 # the working-tree copy is removed: a committed -diff hides the file from
-# CI too (a CI-shared gap recorded in docs/tech-debt). With HEAD unborn the
-# attributes cannot be read at all, and the scan exits 3.
+# CI too (a CI-shared gap recorded in docs/tech-debt). A ..HEAD range with
+# HEAD unborn has no commit to read attributes from, and exits 3.
 if [ "$attr_source_supported" -eq 1 ]; then
   repo="$workdir/cfg-attr-source"
   new_repo "$repo"
@@ -232,8 +237,45 @@ if [ "$attr_source_supported" -eq 1 ]; then
   expect_exit "range scan reads the committed .gitattributes, not the working tree, as CI's checkout does" 0 "$SCANNER" --range main..feature
   git checkout -q -- .gitattributes
   git checkout -q --orphan unborn
-  expect_exit "range scan with an unborn HEAD exits 3" 3 "$SCANNER" --range main..feature
-  expect_stderr_contains "range scan with an unborn HEAD names the unscanned range" "could not scan main..feature"
+  expect_exit "a ..HEAD range with an unborn HEAD exits 3" 3 "$SCANNER" --range main..HEAD
+  expect_stderr_contains "a ..HEAD range with an unborn HEAD names the unscanned range" "could not scan main..HEAD"
+fi
+
+# A range that does not end at HEAD reads attributes from the commit it
+# ends at. Here HEAD (main) marks *.txt -diff, and the other side removes
+# that line and adds a token: a symmetric range reads its right-hand side,
+# and the merge guard's HEAD..<merge head> range reads the incoming side,
+# as the merge result (and CI after the merge) has it, even though the
+# incoming side deletes the token again.
+if [ "$attr_source_supported" -eq 1 ]; then
+  repo="$workdir/cfg-attr-range-end"
+  new_repo "$repo"
+  cd "$repo"
+  printf '*.txt -diff\n' > .gitattributes
+  git add .gitattributes
+  git commit -q -m 'mark txt files -diff'
+  git checkout -q -b side
+  git rm -q .gitattributes
+  printf 'deploy token %s\n' "$token" > leak.txt
+  git add leak.txt
+  git commit -q -m 'drop the attribute and add a leaked token'
+  git checkout -q main
+  expect_exit "a symmetric A...B range reads attributes from B" 1 "$SCANNER" --range main...side
+  git checkout -q -b incoming main
+  git rm -q .gitattributes
+  printf 'deploy token %s\n' "$token" > leak.txt
+  git add leak.txt
+  git commit -q -m 'drop the attribute and add a leaked token'
+  git rm -q leak.txt
+  git commit -q -m 'delete the leaked token again'
+  git checkout -q main
+  git merge -q --no-ff --no-commit incoming >/dev/null 2>&1
+  expect_exit "a merge head range reads attributes from the incoming side" 1 "$SCANNER" --range "HEAD..$(git rev-parse MERGE_HEAD)"
+  mkdir -p scripts
+  cp "$SCANNER" scripts/secret-scan.sh
+  expect_exit "prepare-commit-msg guard finds a token the incoming side adds and deletes" 1 "$REPO_ROOT/scripts/prepare-commit-msg-secret-guard.sh"
+  rm -rf scripts
+  git merge --abort
 fi
 
 # A local textconv for a diff driver named in the committed .gitattributes
