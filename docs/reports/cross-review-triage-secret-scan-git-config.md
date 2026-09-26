@@ -1,19 +1,49 @@
 # Cross-review triage report: secret-scan-git-config
 
-- Date: 2026-09-25 (cycle 2; cycle 1 is kept below under `## Cycle 1`)
+- Date: 2026-09-26 (run 3; cycles 2 and 1 are kept below)
 - Plan: docs/plans/active/2026-09-25-secret-scan-git-config.md
 - Base branch: main
 - Driver: claude
 - Reviewer: codex
 - Triager: Claude Code (main context)
 - Self-review cross-ref: yes
-- Cycle: 2/2 (cap reached)
-- Total reviewer findings: 1 (cycle 2)
-- After triage: ACTION_REQUIRED=1, WORTH_CONSIDERING=0, DISMISSED=0
+- Cycle: 3/3 (cap reached; the user raised the cap from 2 to 3 after cycle 2)
+- Total reviewer findings: 0 (run 3)
+- After triage: ACTION_REQUIRED=0, WORTH_CONSIDERING=0, DISMISSED=0
 - User decision (cycle 1, 2026-09-25, AskUserQuestion): fix AR-1 and re-run the full pipeline as cycle 2/2
 - User decision (cycle 2, 2026-09-26, AskUserQuestion, cap reached): raise the cap to 3 and fix AR-2 in a third and final pipeline run
 
 ## Triage context
+
+- Active plan: docs/plans/active/2026-09-25-secret-scan-git-config.md
+- Self-review report: docs/reports/self-review-2026-09-25-secret-scan-git-config.md (`## Cycle 3`: HIGH 1 / LOW 3, all fixed in 0e136fc; HIGH C3-H1 showed the first AR-2 fix only moved the merge misread to the mirror case)
+- Verify report: docs/reports/verify-2026-09-25-secret-scan-git-config.md (`## Cycle 3`: pass)
+- Test report: docs/reports/test-2026-09-25-secret-scan-git-config.md (`## Cycle 3`: pass; real merges through the real guard in both directions match main)
+- Reviewed HEAD: ee2d7a3. Reviewer command: `codex -m gpt-6-astra -c model_reasoning_effort=xhigh exec review --base main` with stdin closed. The reviewer reported no actionable regressions; it ran the relevant test assertions (226, pass), shell syntax checks, warning-level ShellCheck, and the template parity checks, and did not run the full repository verification suite.
+- Implementation context summary: the range scan now pins attributes to HEAD's tree only for ranges ending at HEAD (CI, the branch scan) and otherwise reads the working tree's attributes as main does (the merge guard reads the merge result), which resolves AR-2 without the mirror regression.
+
+## ACTION_REQUIRED
+
+| # | Reviewer finding | Triage rationale | Affected file(s) |
+|---|-------------------|------------------|-------------------|
+
+## WORTH_CONSIDERING
+
+| # | Reviewer finding | Triage rationale | Affected file(s) |
+|---|-------------------|------------------|-------------------|
+
+## DISMISSED
+
+| # | Reviewer finding | Dismissal reason | Category |
+|---|-------------------|------------------|----------|
+
+Categories: false-positive, already-addressed, style-preference, out-of-scope, context-aware-safe
+
+## Cycle 2 (2026-09-26, reviewed HEAD dca6c2f)
+
+- Total reviewer findings: 1. After triage (cycle 2): ACTION_REQUIRED 1 (AR-2). Fixed in 004d99e and, after the run-3 self-review showed that fix moved the misread to the mirror case, in 0e136fc; validated in run 3.
+
+### Triage context
 
 - Active plan: docs/plans/active/2026-09-25-secret-scan-git-config.md
 - Self-review report: docs/reports/self-review-2026-09-25-secret-scan-git-config.md (cycle 2: LOW 4, all fixed in 443ffb7; the fix for finding 2 added `GIT_ATTR_SOURCE=HEAD`, the line this finding is about, and as the last cycle it was not re-reviewed by the self-review)
@@ -22,18 +52,18 @@
 - Reviewed HEAD: dca6c2f. The reviewer ran the three targeted suites (pass) and reproduced the finding with the merge guard.
 - Implementation context summary: `GIT_ATTR_SOURCE=HEAD` makes `--range` read attributes from HEAD's tree, which matches CI for the callers whose range ends at HEAD (CI's own `base..HEAD`, `secret-scan-branch.sh`'s `merge-base..HEAD`). `prepare-commit-msg-secret-guard.sh` is the one caller whose range ends elsewhere: during a merge it scans `HEAD..<merge head>` before HEAD advances, and the attributes that apply to the resulting merge (the working tree, or the incoming side) can differ from HEAD's.
 
-## ACTION_REQUIRED
+### ACTION_REQUIRED
 
 | # | Reviewer finding | Triage rationale | Affected file(s) |
 |---|-------------------|------------------|-------------------|
 | AR-2 | [P2] Preserve merge-result attributes for incoming-history scans. During a non-fast-forward merge, `prepare-commit-msg-secret-guard.sh` scans `HEAD..$merge_head` before HEAD advances. If HEAD contains `*.txt -diff`, but the incoming branch removes that attribute and adds then deletes a token, forcing attributes from HEAD suppresses the incoming history's text diffs. Reproduced: the original merge guard exits 1, the patched guard exits 0, and the post-merge CI scan exits 1. The staged guard also passes because the token was subsequently deleted. Make attribute-source selection account for merge-state callers rather than unconditionally using HEAD. | Real by code reading: `scan_range` sets `GIT_ATTR_SOURCE=HEAD` for every range, and the merge guard's range does not end at HEAD. It is a regression versus main in the local merge guard only (main read the working-tree attributes, i.e. the merge in progress). The trigger is narrow: HEAD must carry a `-diff`/`binary` attribute for the file type, the incoming branch must remove it, and the token must be added and removed again on the incoming side; CI still detects it once the merge is pushed through a PR. Candidate fix: take the attribute source from the range's right-hand end (the commit the scan is about) instead of always HEAD, i.e. `<merge head>` for the merge guard and HEAD for CI and the branch scan, falling back to HEAD when the range has no parsable right-hand end; plus a test with the reviewer's merge reproduction. | `scripts/secret-scan.sh` (+ template copy), `tests/test-secret-scan.sh` |
 
-## WORTH_CONSIDERING
+### WORTH_CONSIDERING
 
 | # | Reviewer finding | Triage rationale | Affected file(s) |
 |---|-------------------|------------------|-------------------|
 
-## DISMISSED
+### DISMISSED
 
 | # | Reviewer finding | Dismissal reason | Category |
 |---|-------------------|------------------|----------|
