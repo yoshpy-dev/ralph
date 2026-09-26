@@ -158,3 +158,89 @@ No static findings, no failed acceptance criteria (all 17 plan ACs plus the un-n
 ### Insight event (cycle 2)
 
 Appended: `docs/insights/events/2026-09-25-secret-scan-git-config.jsonl` (phase=verify, cycle=2, verdict=pass, critical=0, high=0, medium=0, low=0).
+
+## Cycle 3
+
+- Date: 2026-09-26
+- HEAD: c2ad097 (worktree `git status --porcelain` empty at start and end)
+- This is run 3 of 3 (final; the user raised the pipeline cap to 3 after cross-review cycle 2 found AR-2)
+- Delta since cycle-2 verify (092c5e3): `b403b9f` cycle-2 test report, `dca6c2f` cycle-2 sync-docs, `df3193e` cycle-2 cross-review triage (AR-2, cap raised to 3), `004d99e` Slice G (attributes from the range end — this is what introduced C3-H1, see below), `63461d6` plan notes, `9e297e4` self-review run 3 (HIGH C3-H1, LOW ×3), `0e136fc` Slice H (the fix for C3-H1 and the three LOWs), `c2ad097` plan notes
+
+### Static analysis (re-run)
+
+| Check | Result |
+|---|---|
+| `./scripts/run-static-verify.sh` | PASS — full-scope fallback (unchanged reason); gofmt ok, go vet 0 issues, `check-sync.sh` DRIFTED=0, `check-pipeline-sync.sh` ok, `check-skill-sync.sh` ok, `check-template-purity.sh` PASS, branch secret scan clean (`scanned c1785b8..c2ad097 against origin/main: clean`). Evidence: `docs/evidence/verify-2026-09-26-100534.log` |
+| `sh -n` | PASS on all 6 files |
+| `shellcheck --severity=warning` | 0 issues on both scripts + both test files |
+| `cmp` templates | both scanners still byte-identical to their `templates/base/scripts/` copies |
+| `sh tests/test-secret-scan.sh` (AC-6/CI-parity evidence, same carve-out as prior cycles) | 86/86 PASS at HEAD (up from 74/74 in cycle 2, matching the plan's own count) |
+| `./scripts/secret-scan-branch.sh --strict` (AC-14 evidence) | `scanned c1785b8..c2ad097 against origin/main: clean`, exit 0 |
+
+No new static findings.
+
+### The AR-2 -> C3-H1 -> Slice H arc
+
+This cycle's core mechanism change is in three steps, all now landed:
+
+1. **AR-2 (cross-review cycle 2, found against 443ffb7's `GIT_ATTR_SOURCE=HEAD`)**: `prepare-commit-msg-secret-guard.sh` calls `secret-scan.sh --range "HEAD..$merge_head"` during a merge — a range that does *not* end at HEAD. Cycle 2's unconditional `GIT_ATTR_SOURCE=HEAD` forced *every* range, including this one, to read HEAD's (pre-merge) attributes. If HEAD carries a `-diff` that the incoming side had already dropped, and the incoming side adds-then-deletes a secret, the merge guard now misses it — a genuine regression against `main` (which read the working tree's live attributes, i.e. the in-progress merge result, and caught it).
+2. **Slice G (`004d99e`)** tried "attribute source = the range's own end commit" (HEAD for CI/branch-scan, `$merge_head` for the guard). Self-review run 3 (`9e297e4`) found this only **moves** the misread, doesn't remove it (**C3-H1**, HIGH): the guard's `$merge_head` is the *incoming* side's own tree, not the actual merge result. Constructed the mirror case — HEAD's side drops `-diff` (forked from a base that had it), the incoming side keeps it and adds-then-deletes a token — and confirmed Slice G's guard misses it while `main`'s guard and the post-merge/CI scan both catch it.
+3. **Slice H (`0e136fc`, current HEAD)** implements C3-H1's own recommendation exactly: pin `GIT_ATTR_SOURCE` to HEAD's commit *only when the range's resolved end equals HEAD*; for any other end (the merge guard), explicitly `unset GIT_ATTR_SOURCE` (including one inherited from the caller's environment) and add `-c attr.tree=` so a local `attr.tree` config doesn't step in either — falling back to the working tree's attributes exactly as `main` did. Verified in code: `scripts/secret-scan.sh:240-277` (`end_commit`/`head_commit` comparison, lines 253-258 are the branch).
+
+Evidence re-checked at HEAD:
+- `tests/test-secret-scan.sh` new section at `:239-321` (the `expect_merge_guard_finds` helper plus four merge scenarios): "merge where the incoming side drops -diff" (the original AR-2 shape) and "merge where HEAD's side drops -diff" (the C3-H1 mirror) both run a *real* `git merge --no-ff --no-commit` and invoke the *real* `prepare-commit-msg-secret-guard.sh` (not just `--range` directly), confirming the actual caller is fixed, not just the library function. Also: "an inherited GIT_ATTR_SOURCE does not choose the merge guard's attributes" and "a local attr.tree does not replace the merge guard's working-tree attributes" (`:305-309`).
+- The two `A...B` tests (`:255-274`, "A...B with B other than HEAD reads the working tree's attributes" / "A...B with B at HEAD reads HEAD's attributes") replace the earlier "a symmetric A...B range reads attributes from B" test that C3-L1 asked to be dropped or rewritten — they now pin the exact, disclosed HEAD-only-pin behavior instead of a blanket per-end-tree pin.
+- Ran `sh tests/test-secret-scan.sh` once at HEAD (same AC-6-evidence carve-out as prior cycles): 86/86 PASS.
+
+I did not independently re-run the merge-fixture reproduction by hand — it has already been reproduced three times by three independent parties (cross-review's own fixture for AR-2, self-review run 3's own mirror fixture for C3-H1, and now a hermetic, committed regression test for both directions plus the real guard script), which is stronger evidence than a fourth manual repro would add.
+
+### AC re-map (current code, cycle-3 line numbers)
+
+All 17 plan ACs are unaffected in substance by this cycle's fix (the attribute-source logic only changes *which git config governs .gitattributes*, not which added lines a range's diff contains) and still PASS at re-grepped line numbers: `is_object_id` `:120-125`, `scan_staged` `:137-177`, `scan_diff_stream` `:190-203`, `scan_range`'s pin block `:240-277`. AC-13 (color.ui=always end-to-end via `secret-scan-branch.sh`) is unaffected — that script's range still ends at HEAD, so it still takes the `GIT_ATTR_SOURCE=$head_commit` branch, same as cycle 2.
+
+New in this cycle, not part of the plan's original 17 ACs (same status as cycle 2's `GIT_ATTR_SOURCE=HEAD` — a self-review/cross-review-driven fix, not a plan acceptance criterion):
+- **Merge-guard attribute correctness** (AR-2/C3-H1, above): fixed and tested in both directions.
+- **Range-end resolution and its own exit-3 case** (`scripts/secret-scan.sh:242-247`): `range_end=${range##*..}` (last `..`, matching the header's documented forms `A..B`, `A...B`, `A..`, `..B`, or a single revision), defaulting to `HEAD` when empty, then `git rev-parse --verify --quiet "$range_end^{commit}"` — a form that doesn't resolve to a commit (`X^!`, `X^@`, `X^-`, a `:/regex` end) exits 3 with "`<end> does not name a commit`" rather than being guessed. This is a *new* exit-3 trigger, additive to AC-15's existing "git log failed" case (it fires *before* `git log` even runs), and it's covered by `tests/test-secret-scan.sh:217-219` ("a range whose end does not resolve exits 3"). Per cross-review's own forms probe (`docs/reports/cross-review-triage-secret-scan-git-config.md`, "Range forms" table), no real caller in the repo passes an unsupported form — verify.yml, `secret-scan-branch.sh`, and `prepare-commit-msg-secret-guard.sh` all pass plain `A..B`.
+- **`A...B` accuracy is a disclosed, tested, narrow residual limitation, not a bug**: for a triple-dot range whose end happens to equal HEAD, attributes are still pinned to HEAD even though a symmetric-difference scan also prints commits reachable only from the *other* side — those commits' own diffs get HEAD's attributes rather than their own tree's. No caller in the repo uses `A...B`; both directions are pinned by name in the two new tests above rather than left as silent behavior.
+
+### AC-6 / CI parity (re-confirmed for this cycle's specific claim)
+
+Team lead's framing for this cycle — "verify.yml's `$base..HEAD` and the branch scan's `merge-base..HEAD` (both end at HEAD)" — holds: both ranges resolve `range_end` to `HEAD` literally, so both take the `end_commit = head_commit` branch and get `GIT_ATTR_SOURCE=$head_commit`, identical to cycle 2's intent for these two callers. Only `prepare-commit-msg-secret-guard.sh`'s range does not end at HEAD, and that is exactly the caller Slice H's `else` branch targets. `sh tests/test-secret-scan.sh` at 86/86 (above) includes the full set of default-config and attribute-source assertions carried over from cycles 1-2 plus this cycle's additions, none regressed.
+
+### Exit-code contract (re-check)
+
+`scripts/secret-scan.sh`'s header (`:23-29`) now lists four exit-3 causes: a missing/unreadable `--file`, an unparsable staged entry, **a `--range` end that is not a commit** (new this cycle), or `git` failing. All four are still just "any non-zero, not 1" to every caller (the four hook wrappers, `secret-scan-branch.sh`, `run-verify.sh`'s branch-scan call) — none of those call sites special-case by exit value beyond the existing 0/1/other split, so the new exit-3 trigger needed no caller-side changes, same conclusion as cycle 1/2 for the earlier exit-3 additions. Confirmed no caller file was touched in this delta (`git diff 092c5e3..c2ad097 --stat` lists only `scripts/secret-scan.sh` + template copy among scanner-adjacent scripts).
+
+### Non-goals (re-check)
+
+Still respected: `git diff 092c5e3..c2ad097 -- .gitallowed .github/workflows/` is empty, and `record_matches` pattern lines are unchanged in this delta too.
+
+### Documentation drift (re-check)
+
+All items from self-review run 3 (C3-H1's own doc angle, C3-L1, C3-L2, C3-L3) are fixed by Slice H, confirmed at current HEAD:
+
+1. **C3-H1 doc angle** — the `scan_range` comment's "incoming side's" framing (which stated the rationale that C3-H1 disproved) is gone; the current comment (`scripts/secret-scan.sh:229-236`) correctly says a range not ending at HEAD "reads the working tree's attributes, which during a merge are the merge result's, the tree CI reads once the merge is pushed" — matching Slice H's actual (corrected) behavior, not Slice G's.
+2. **C3-L1 (range-form documentation)** — usage text now states supported forms inline (`:39`: "A..B, A...B, A.., ..B, or one revision"), and the `scan_range` comment (`:229-236`) states the resolution rule and names the unsupported forms explicitly. The `A...B` residual (above) is now disclosed via the two dedicated tests rather than left implicit.
+3. **C3-L2 (header wording)** — both sentences flagged are corrected: attributes are now described as pinned "for a range ending at HEAD" (not "to git's defaults", `:8-10`), and the git-version-gating sentence now correctly singles out `GIT_ATTR_SOURCE` as needing git 2.41 separately from the `-c` keys (`:18-21`), matching `docs/tech-debt/README.md`'s test-gaps row.
+4. **C3-L3 (CI's PR-merge-commit attribute divergence)** — now has its own dedicated tech-debt row (`docs/tech-debt/README.md`, the new row added in this delta, right after the "Local-only ways" row) and `docs/quality/quality-gates.md` (both root and `templates/base/` copies, line 46) now says "except for a few attribute differences it cannot pin, local-only attribute sources and CI's checkout of the PR merge commit" — broadened from cycle 2's "local-only attribute sources" alone, per C3-L3's exact request.
+
+`pr/SKILL.md` (×4) and `docs/architecture/repo-map.md` are untouched in this delta (not in `git diff 092c5e3..c2ad097 --stat`) — consistent with self-review run 3's own "Status of the cycle-2 findings at HEAD" section, which found no new issues with either.
+
+No open documentation-drift items found in this scope.
+
+### Diff hygiene (cycle 3)
+
+`git diff 092c5e3..c2ad097 --stat`: 13 files, all within plan/report/tech-debt/doc scope plus `scripts/secret-scan.sh` + template copy + `tests/test-secret-scan.sh`. No unexpected files. `secret-scan-branch.sh` and its test file remain untouched across all three cycles of this plan.
+
+### Verdict: PASS
+
+No static findings, no failed acceptance criteria, no Non-goals violations. The HIGH finding from self-review run 3 (C3-H1) is fixed and tested in both directions (not deferred), and all three LOWs are fixed. No documentation drift remains open.
+
+### Follow-ups
+
+- `/test`: needs a genuine cycle-3 pass at `c2ad097` (same caution as cycle 2 — `docs/reports/test-2026-09-25-secret-scan-git-config.md`'s cycle-2 section is itself only current through `b403b9f`/`5774b5f`-era HEAD, predating Slices G and H). In particular, confirm the merge-guard mutation set (dropping the `end_commit = head_commit` branch, dropping the `unset GIT_ATTR_SOURCE`/`-c attr.tree=` else-branch pins) each turns red the corresponding new test.
+- This is the final planned pipeline run (cap 3, user-approved) — no further verifier-level follow-ups; ready for `/cross-review` (cycle 3) → `/pr` once `/test` confirms.
+
+### Insight event (cycle 3)
+
+Appended: `docs/insights/events/2026-09-26-secret-scan-git-config.jsonl` (phase=verify, cycle=3, verdict=pass, critical=0, high=0, medium=0, low=0).
