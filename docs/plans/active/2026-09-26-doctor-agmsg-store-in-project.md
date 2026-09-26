@@ -10,12 +10,12 @@
 
 ## Objective
 
-agmsg の保存先がプロジェクトディレクトリ(doctor の対象ディレクトリ)の中にあり、codex の保護ディレクトリ(`.git` / `.agents` / `.codex`)をまたがないとき、warn の Detail に「作業ディレクトリがこの保存先を含む座席はすでに書ける。task worktree など別の cwd で動く座席には root が要る」と補足する。status は warn のまま。
+agmsg の保存先がプロジェクトディレクトリ(doctor の対象ディレクトリ)の中にあり、codex の保護ディレクトリ(`.git` / `.agents` / `.codex`)をまたがないとき、warn の Detail を、「送れない」と「writable root を足す」がその保存先を作業ディレクトリに含まない座席(task worktree など)についての話だと分かる文にする(作業ディレクトリが保存先を含む座席はすでに書けると書く)。status は warn のまま。
 
 ## Scope
 
 1. `checkCodexAgmsgWritableRoot` がプロジェクトディレクトリを受け取る(`runDoctorFull` の `targetDir` を絶対パスにして渡す)。テストでは任意のディレクトリを渡せる
-2. warn の場合だけ、保存先がプロジェクトディレクトリの配下にあり保護ディレクトリをまたがないかを判定し(既存の `codexRootCoverage` と同じく、symlink を解決した組み合わせも見る)、該当すれば Detail に補足を 1 文足す。pass と info の Detail は変えない
+2. warn の場合だけ、保存先がプロジェクトディレクトリの配下にあり保護ディレクトリをまたがないかを判定し(既存の `codexRootCoverage` と同じく、symlink を解決した組み合わせも見る)、該当すれば warn の文そのものを条件付きにする: 「RESULT を送れない」の断定と「writable root を足す」の指示を、作業ディレクトリが保存先を含まない座席に限定し、含む座席はすでに書けると書く。config がある場合とない場合の両方の文に適用する。末尾に補足を足すだけにはしない(同じ診断の中で案内が矛盾するため)。pass と info の Detail は変えない
 3. 文書: `docs/recipes/codex-seat-permissions.md`(2 コピー)と `/org` skill(4 面)に同じ補足を 1 文ずつ
 4. `docs/tech-debt/README.md` の `checkCodexAgmsgWritableRoot` の行に「座席の cwd を知らない(補足で案内するだけ、status は warn のまま)」を反映
 
@@ -44,10 +44,11 @@ agmsg の保存先がプロジェクトディレクトリ(doctor の対象ディ
 - status は warn のまま、Detail の補足だけにする(issue の指定。座席の cwd が分からないため)
 - 判定は既存の coverage の関数を再利用し、symlink の解決済みの組み合わせも含めて保護ディレクトリをまたがないことを確かめる
 - Critical forks: None(issue が方式を指定している)
+- **Codex plan advisory(2026-09-27、MEDIUM 1、ユーザー決定: 対応案で plan を更新)**: 補足を末尾に足すだけでは、既存の warn の「RESULT を送れない」の断定と無条件の「root を足す」の指示と矛盾し、不要な設定をなお誘発する → プロジェクト内の保存先では warn の文そのものを条件付きにする(Scope 2、AC-1)
 
 ## Acceptance criteria
 
-- [ ] AC-1: 保存先がプロジェクトディレクトリの配下にあり保護ディレクトリをまたがない warn では、Detail に補足(作業ディレクトリがこの保存先を含む座席はすでに書ける、別の cwd の座席には root が要る)が入る。status は warn
+- [ ] AC-1: 保存先がプロジェクトディレクトリの配下にあり保護ディレクトリをまたがない warn では、Detail が「作業ディレクトリがこの保存先を含む座席はすでに書ける」と述べ、「RESULT を送れない」と「writable root を足す」は作業ディレクトリが保存先を含まない座席(task worktree など)についてだけ述べる。無条件の「送れない」の断定と無条件の追加の指示は残らない。config がある場合とない場合の両方で確かめる。status は warn
 - [ ] AC-2: 保存先がプロジェクトの `.agents`(または `.git` / `.codex`)の配下にある warn では、補足が入らない
 - [ ] AC-3: 保存先がプロジェクトの外にある warn では、Detail が従来と同じ(既存のテストがそのまま pass)
 - [ ] AC-4: pass(明示の root、暗黙の root)と info の Detail は変わらない
@@ -90,6 +91,8 @@ agmsg の保存先がプロジェクトディレクトリ(doctor の対象ディ
 
 ## Deviation notes
 
+- 2026-09-27 plan: Codex plan advisory の MEDIUM 1 件を反映(warn の文そのものを条件付きにする)。ユーザー決定(AskUserQuestion): 対応案で plan を更新
+
 ## Progress checklist
 
 - [x] Plan reviewed
@@ -104,4 +107,5 @@ agmsg の保存先がプロジェクトディレクトリ(doctor の対象ディ
 
 - [x] Check の本体、Detail の組み立て、coverage の関数、呼び出し元、文書の該当箇所を確認した
 - [x] critical fork なし
+- [x] Codex plan advisory(1 件、対応案で plan を更新)
 - [x] AC は hermetic な fixture で決定的に確認できる
