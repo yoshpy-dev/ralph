@@ -132,6 +132,17 @@ expect_stderr_not_contains() {
   fi
 }
 
+# expect_plain_log_hides <description> <range> -- a fixture check: a plain
+# `git log -p` under the repo's local config prints no added token line
+# for <range>, so the scanner's own result depends on what it pins.
+expect_plain_log_hides() {
+  if git log -p "$2" -- | grep -q '^+deploy token'; then
+    not_ok "$1 (a plain git log prints the token line as added)"
+  else
+    ok "$1"
+  fi
+}
+
 # new_repo <dir> -- a repo whose main branch has one clean commit.
 new_repo() {
   mkdir -p "$1"
@@ -188,6 +199,11 @@ git_version="$(git --version | awk '{ print $3 }')"
 git_major=${git_version%%.*}
 git_minor=${git_version#*.}
 git_minor=${git_minor%%.*}
+# git_is_at_least <major> <minor> -- true when the git under test is at
+# least <major>.<minor>.
+git_is_at_least() {
+  [ "$git_major" -gt "$1" ] || { [ "$git_major" -eq "$1" ] && [ "$git_minor" -ge "$2" ]; }
+}
 if [ "$git_major" -gt 2 ] || { [ "$git_major" -eq 2 ] && [ "$git_minor" -ge 41 ]; }; then
   attr_source_supported=1
 else
@@ -321,6 +337,38 @@ if [ "$attr_source_supported" -eq 1 ]; then
   git merge --abort
 fi
 
+# RALPH_SECRET_SCAN_ATTR_SOURCE names the tree whose .gitattributes a range
+# ending at HEAD reads in place of HEAD's. HEAD has no attributes here, so
+# only a source tree marking the file -diff makes the scan clean. A value
+# that does not resolve to a tree exits 3; a range ending elsewhere ignores
+# the variable and reads the working tree's attributes.
+if [ "$attr_source_supported" -eq 1 ]; then
+  repo="$workdir/cfg-attr-source-env"
+  new_repo "$repo"
+  cd "$repo"
+  git checkout -q -b feature
+  printf 'deploy token %s\n' "$token" > leak.txt
+  git add leak.txt
+  git commit -q -m 'add leaked token'
+  hiding_blob="$(printf '*.txt -diff\n' | git hash-object -w --stdin)"
+  hiding_tree="$(printf '100644 blob %s\t.gitattributes\n' "$hiding_blob" | git mktree)"
+  hiding_commit="$(git commit-tree -m 'tree marking txt files -diff' "$hiding_tree")"
+  expect_exit "attribute source: unset reads HEAD's attributes and finds the token" 1 "$SCANNER" --range main..feature
+  expect_exit "attribute source: an empty value reads HEAD's attributes" 1 env RALPH_SECRET_SCAN_ATTR_SOURCE= "$SCANNER" --range main..feature
+  expect_exit "attribute source: a tree id marking the file -diff is read in place of HEAD's" 0 env RALPH_SECRET_SCAN_ATTR_SOURCE="$hiding_tree" "$SCANNER" --range main..feature
+  expect_exit "attribute source: a commit resolves to its tree" 0 env RALPH_SECRET_SCAN_ATTR_SOURCE="$hiding_commit" "$SCANNER" --range main..HEAD
+  expect_exit "attribute source: a name that does not resolve exits 3" 3 env RALPH_SECRET_SCAN_ATTR_SOURCE=does-not-exist "$SCANNER" --range main..feature
+  expect_stderr_contains "attribute source: an unresolved name is named in the reason" "could not scan main..feature: RALPH_SECRET_SCAN_ATTR_SOURCE (does-not-exist) does not name a tree"
+  expect_stderr_not_contains "attribute source: an unresolved name is not reported as findings" "BLOCKED"
+  expect_exit "attribute source: a blob id is not a tree and exits 3" 3 env RALPH_SECRET_SCAN_ATTR_SOURCE="$hiding_blob" "$SCANNER" --range main..feature
+  git checkout -q main
+  expect_exit "attribute source: a range not ending at HEAD ignores a tree marking the file -diff" 1 env RALPH_SECRET_SCAN_ATTR_SOURCE="$hiding_tree" "$SCANNER" --range HEAD..feature
+  expect_exit "attribute source: a range not ending at HEAD ignores a name that does not resolve" 1 env RALPH_SECRET_SCAN_ATTR_SOURCE=does-not-exist "$SCANNER" --range HEAD..feature
+  printf '*.txt -diff\n' > .gitattributes
+  expect_exit "attribute source: a range not ending at HEAD still reads the working tree's attributes" 0 env RALPH_SECRET_SCAN_ATTR_SOURCE="$(git rev-parse 'main^{tree}')" "$SCANNER" --range HEAD..feature
+  rm .gitattributes
+fi
+
 # A local textconv for a diff driver named in the committed .gitattributes
 # would rewrite the token before the scan reads it.
 repo="$workdir/cfg-textconv"
@@ -335,6 +383,41 @@ git add leak.txt
 git commit -q -m 'add leaked token'
 git config diff.scrub.textconv cksum
 expect_exit "AC-3: range scan ignores a local textconv for a committed diff driver" 1 "$SCANNER" --range main..feature
+
+# A local diff.<driver>.binary=true for a driver named in the committed
+# .gitattributes marks the file binary and hides its added lines; CI has no
+# driver config. Each branch adds the token under one driver. The config
+# key names the driver between its first and last ".", so a driver name
+# may hold "." or "=" (git config -c splits at the first "=").
+repo="$workdir/cfg-driver-binary"
+new_repo "$repo"
+cd "$repo"
+printf '*.one diff=one\n*.two diff=two\n*.dot diff=review.driver\n*.eq diff=a=b\n' > .gitattributes
+git add .gitattributes
+git commit -q -m 'add diff driver attributes'
+for ext in one two dot eq; do
+  git checkout -q -b "$ext" main
+  printf 'deploy token %s\n' "$token" > "leak.$ext"
+  git add "leak.$ext"
+  git commit -q -m "add leaked token under the $ext driver"
+done
+git config diff.one.binary true
+expect_plain_log_hides "fixture: diff.one.binary=true hides the file from a plain git log" main..one
+expect_exit "range scan pins a local diff.<driver>.binary=true for a committed driver" 1 "$SCANNER" --range main..one
+git config diff.two.binary true
+expect_plain_log_hides "fixture: diff.two.binary=true hides the file from a plain git log" main..two
+expect_exit "range scan with two drivers marked binary pins the first" 1 "$SCANNER" --range main..one
+expect_exit "range scan with two drivers marked binary pins the second" 1 "$SCANNER" --range main..two
+git config diff.review.driver.binary true
+expect_plain_log_hides "fixture: diff.review.driver.binary=true hides the file from a plain git log" main..dot
+expect_exit "range scan pins a driver whose name holds a dot" 1 "$SCANNER" --range main..dot
+git config 'diff.a=b.binary' true
+expect_plain_log_hides "fixture: diff.a=b.binary=true hides the file from a plain git log" main..eq
+if git_is_at_least 2 31; then
+  expect_exit "range scan pins a driver whose name holds '='" 1 "$SCANNER" --range main..eq
+else
+  expect_exit "range scan with a driver whose name holds '=' on a git without --config-env exits 3" 3 "$SCANNER" --range main..eq
+fi
 
 # Copy detection would show a copied file as "copy from/copy to" with no
 # added lines; rename detection stays on, as in CI, so a pure rename adds
@@ -406,6 +489,72 @@ for algorithm in histogram patience; do
   expect_exit "AC-5: moved token line with diff.algorithm=$algorithm matches the default result" 1 "$SCANNER" --range main..feature
   git config --unset diff.algorithm
 done
+
+# The same move under a diff driver named in the committed .gitattributes:
+# a local diff.<driver>.algorithm (git 2.42+) applies unless the command
+# line names an algorithm, which --diff-algorithm=default does.
+repo="$workdir/cfg-driver-algorithm"
+new_repo "$repo"
+cd "$repo"
+printf 'moved.txt diff=moves\n' > .gitattributes
+printf 'anchor\nsame\nsame\nsame\nsame\ndeploy token %s\n' "$token" > moved.txt
+git add .gitattributes moved.txt
+git commit -q -m 'add moved file under a diff driver'
+git checkout -q -b feature
+printf 'deploy token %s\nsame\nsame\nsame\nsame\nanchor\n' "$token" > moved.txt
+git add moved.txt
+git commit -q -m 'move the token line'
+for algorithm in histogram patience; do
+  git config diff.moves.algorithm "$algorithm"
+  if git_is_at_least 2 42; then
+    expect_plain_log_hides "fixture: diff.moves.algorithm=$algorithm hides the moved token line from a plain git log" main..feature
+  fi
+  expect_exit "moved token line with diff.<driver>.algorithm=$algorithm matches the default result" 1 "$SCANNER" --range main..feature
+  git config --unset diff.moves.algorithm
+done
+
+# CI's clone has no .git/info/attributes, and git reads a local one under
+# every setting, so a rule line there stops the range scan with exit 3.
+# Blank lines and "#" comments are not rules.
+repo="$workdir/cfg-info-attributes"
+new_repo "$repo"
+cd "$repo"
+git checkout -q -b feature
+printf 'deploy token %s\n' "$token" > leak.txt
+git add leak.txt
+git commit -q -m 'add leaked token'
+info_attributes="$(git rev-parse --git-path info/attributes)"
+mkdir -p "$(dirname "$info_attributes")"
+printf '*.txt -diff\n' > "$info_attributes"
+expect_plain_log_hides "fixture: a -diff rule in .git/info/attributes hides the file from a plain git log" main..feature
+expect_exit "range scan with a rule in .git/info/attributes exits 3" 3 "$SCANNER" --range main..feature
+expect_stderr_contains "a rule in .git/info/attributes names the file and the fix" "could not scan main..feature: $info_attributes holds attribute rules that CI does not read; move them to .gitattributes or remove the file"
+expect_stderr_not_contains "a rule in .git/info/attributes is not reported as findings" "BLOCKED"
+printf '# a comment\n\n   # an indented comment\n\t\n' > "$info_attributes"
+expect_exit "range scan with only comments and blank lines in .git/info/attributes scans" 1 "$SCANNER" --range main..feature
+: > "$info_attributes"
+expect_exit "range scan with an empty .git/info/attributes scans" 1 "$SCANNER" --range main..feature
+rm -f "$info_attributes"
+printf '*.txt -diff\n' > "$workdir/info-attributes-rules"
+ln -s "$workdir/info-attributes-rules" "$info_attributes"
+expect_exit "range scan with .git/info/attributes symlinked to a rules file exits 3" 3 "$SCANNER" --range main..feature
+rm -f "$info_attributes"
+ln -s "$workdir/does-not-exist.attributes" "$info_attributes"
+expect_exit "range scan with .git/info/attributes symlinked to a missing file scans" 1 "$SCANNER" --range main..feature
+rm -f "$info_attributes"
+mkdir "$info_attributes"
+expect_exit "range scan with a directory at .git/info/attributes exits 3" 3 "$SCANNER" --range main..feature
+expect_stderr_contains "a directory at .git/info/attributes is named in the reason" "$info_attributes exists but cannot be read as a file"
+rmdir "$info_attributes"
+printf '# only a comment\n' > "$info_attributes"
+chmod 000 "$info_attributes"
+if [ "$(id -u)" -eq 0 ]; then
+  printf '  SKIP: an unreadable .git/info/attributes (root can read it anyway)\n'
+else
+  expect_exit "range scan with an unreadable .git/info/attributes exits 3" 3 "$SCANNER" --range main..feature
+fi
+chmod 644 "$info_attributes"
+rm -f "$info_attributes"
 
 # The newest commit is clean and the older one's added blob is missing:
 # git log prints the newest commit, then fails.
@@ -651,6 +800,29 @@ expect_exit "staged: a raw line with no new object id exits 3" 3 env PATH="$fake
 expect_stderr_contains "staged: an unparsable line names the entry" "cannot parse the entry for leak.txt"
 printf ':000000 100644 %s 0000000 A\tleak.txt\n' "$zero_id" > "$fake_raw"
 expect_exit "staged: an abbreviated all-zero object id exits 3" 3 env PATH="$fake_bin:$PATH" "$SCANNER" --staged
+
+# The range scan lists the local diff.<driver>.binary keys before it pins
+# them, and a failed listing exits 3. A broken config would fail every git
+# call, so a wrapper on PATH fails only `git config --get-regexp`.
+fake_config_bin="$workdir/fake-git-config-bin"
+mkdir -p "$fake_config_bin"
+cat > "$fake_config_bin/git" <<EOF
+#!/bin/sh
+case " \$* " in
+  *" --get-regexp "*) exit 5 ;;
+esac
+exec "$real_git" "\$@"
+EOF
+chmod +x "$fake_config_bin/git"
+repo="$workdir/cfg-binary-list-failure"
+new_repo "$repo"
+cd "$repo"
+git checkout -q -b feature
+printf 'still clean\n' > new.txt
+git add new.txt
+git commit -q -m 'clean change'
+expect_exit "range scan exits 3 when listing the diff drivers marked binary fails" 3 env PATH="$fake_config_bin:$PATH" "$SCANNER" --range main..feature
+expect_stderr_contains "a failed driver listing names git's exit code" "listing the diff drivers marked binary failed (git config exited with 5)"
 
 # Exit 0 means "scanned": a --file path that cannot be read exits 3, while
 # an existing empty file is a clean scan.
