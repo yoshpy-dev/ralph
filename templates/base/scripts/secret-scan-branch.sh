@@ -15,6 +15,20 @@
 # target holding a newline is not resolved), and the tree lookup runs with
 # core.quotePath=false so a non-ASCII target resolves.
 #
+# The attributes the scan reads follow CI's checkout, the PR merge commit,
+# whose .gitattributes are the merge result's -- see the comment above
+# use_merge_attributes below. When the base changed no .gitattributes (at
+# the root or below it) since the merge-base, the merge keeps HEAD's, and
+# the scanner reads HEAD's. When it did, the scanner reads the tree of
+# `git merge-tree --write-tree <base> HEAD` (through
+# RALPH_SECRET_SCAN_ATTR_SOURCE; an inherited value is never used), and a
+# notice says so. A merge that conflicts reads HEAD's attributes in both
+# modes, with a notice: CI does not run on a conflicting pull request. When
+# the merge cannot be computed the way CI's is (a local merge driver in
+# merge.default or merge.<name>.driver, a git older than 2.41, a merge-tree
+# without --write-tree, or merge-tree failing), --strict exits 3, and
+# default mode reports it and reads HEAD's attributes.
+#
 # Usage: secret-scan-branch.sh [--strict]
 #
 # Exit codes:
@@ -22,9 +36,10 @@
 #      could not determine what to scan (see --strict below)
 #   1  scanned and found something
 #   2  usage error
-#   3  --strict: could not determine what to scan, or nothing to scan;
-#      either mode: the scanner could not read the range (its own exit 3,
-#      propagated)
+#   3  --strict: could not determine what to scan, nothing to scan, or the
+#      base changed .gitattributes and the merge result's attributes cannot
+#      be computed the way CI's are; either mode: the scanner could not
+#      read the range (its own exit 3, propagated)
 # In either mode, a scanner exit other than 0 or 1 is reported as "scanner
 # failed with exit <rc>" and propagated as this script's exit code.
 #
@@ -64,8 +79,10 @@ script_dir="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 scanner="$script_dir/secret-scan.sh"
 
 tmp_allowlist=""
+tmp_merge_err=""
 cleanup() {
   [ -n "$tmp_allowlist" ] && rm -f "$tmp_allowlist"
+  [ -n "$tmp_merge_err" ] && rm -f "$tmp_merge_err"
   return 0
 }
 # POSIX sh resumes the script after a signal trap's action runs (a signal
@@ -301,7 +318,110 @@ if [ -n "${RALPH_SECRET_ALLOWLIST:-}" ] || [ "$worktree_differs" -eq 1 ]; then
   report "ignoring uncommitted .gitallowed edits and/or RALPH_SECRET_ALLOWLIST; CI reads only the .gitallowed committed at HEAD"
 fi
 
-if RALPH_SECRET_ALLOWLIST="$tmp_allowlist" "$scanner" --range "$merge_base..HEAD"; then
+# attributes_unguaranteed <reason> -- the base changed .gitattributes, but
+# the merge result's attributes cannot be computed the way CI's merge
+# commit has them. --strict stops with exit 3 (cannot_scan); default mode
+# reports the reason and lets the scanner read HEAD's attributes.
+attributes_unguaranteed() {
+  if [ "$strict" -eq 1 ]; then
+    cannot_scan "$1"
+  fi
+  report "$1; attributes read from HEAD"
+}
+
+# git_version_at_least <major> <minor> <`git version` output> -- true when
+# the version in the output is at least <major>.<minor>; false when it
+# does not parse.
+git_version_at_least() {
+  gv=${3#git version }
+  gv_major=${gv%%.*}
+  gv_minor=${gv#*.}
+  gv_minor=${gv_minor%%[!0-9]*}
+  case "$gv_major" in
+    "" | *[!0-9]*) return 1 ;;
+  esac
+  case "$gv_minor" in
+    "") return 1 ;;
+  esac
+  [ "$gv_major" -gt "$1" ] || { [ "$gv_major" -eq "$1" ] && [ "$gv_minor" -ge "$2" ]; }
+}
+
+# use_merge_attributes -- called when the base changed .gitattributes since
+# the merge-base. CI's pull_request job checks out the PR merge commit, so
+# it reads the merge result's attributes. `git merge-tree --write-tree
+# <base> HEAD` computes that tree (it writes the merged objects to the
+# object database, not to the index or the working tree). Sets
+# attr_source_tree to it, with a notice, or leaves attr_source_tree empty
+# so the scanner reads HEAD's attributes:
+#   - merge-tree exits 1 (a conflict): a notice in both modes, since CI
+#     does not run on a pull request that does not merge;
+#   - a local merge.default or merge.<name>.driver would run inside
+#     merge-tree, while CI's merge runs none; a git older than 2.41 ignores
+#     GIT_ATTR_SOURCE (and one older than 2.38 has no --write-tree);
+#     merge-tree has no --write-tree or exits with another code:
+#     attributes_unguaranteed.
+use_merge_attributes() {
+  changed="${base_ref} changed .gitattributes since ${base_short}"
+  drivers_rc=0
+  merge_drivers="$(git config --name-only --get-regexp '^merge\.(default|.*\.driver)$')" || drivers_rc=$?
+  case "$drivers_rc" in
+    0)
+      merge_drivers="$(printf '%s\n' "$merge_drivers" | awk 'NR > 1 { printf ", " } { printf "%s", $0 }')"
+      attributes_unguaranteed "$changed, and local merge driver config ($merge_drivers) would run in git merge-tree but not in CI's merge"
+      return 0
+      ;;
+    1) ;;
+    *)
+      attributes_unguaranteed "$changed, and listing the local merge driver config failed (git config exited with $drivers_rc)"
+      return 0
+      ;;
+  esac
+  git_version_text="$(git version 2>/dev/null)" || git_version_text=""
+  if ! git_version_at_least 2 41 "$git_version_text"; then
+    attributes_unguaranteed "$changed, and ${git_version_text:-an unreadable git version} is not 2.41 or later, which GIT_ATTR_SOURCE needs"
+    return 0
+  fi
+  tmp_merge_err="$(mktemp "${TMPDIR:-/tmp}/ralph-secret-scan-branch-merge.XXXXXX")"
+  merge_rc=0
+  merge_out="$(git merge-tree --write-tree "$base_ref_full" HEAD 2>"$tmp_merge_err")" || merge_rc=$?
+  case "$merge_rc" in
+    0)
+      if attr_source_tree="$(git rev-parse --verify --quiet "${merge_out%%"$newline"*}^{tree}")"; then
+        report "attributes read from the merge of ${base_ref} and HEAD (${changed})"
+      else
+        attr_source_tree=""
+        attributes_unguaranteed "$changed, and git merge-tree printed no tree id"
+      fi
+      ;;
+    1)
+      report "${changed}, but the merge conflicts; attributes read from HEAD (CI does not run on a conflicting pull request)"
+      ;;
+    *)
+      if ! git merge-tree -h 2>&1 | grep -q -- '--write-tree'; then
+        attributes_unguaranteed "$changed, and this git's merge-tree has no --write-tree"
+        return 0
+      fi
+      merge_err_line="$(head -n 1 "$tmp_merge_err")" || merge_err_line=""
+      attributes_unguaranteed "$changed, and git merge-tree --write-tree exited with ${merge_rc}${merge_err_line:+: $merge_err_line}"
+      ;;
+  esac
+}
+
+# Whether the base changed any .gitattributes since the merge-base decides
+# where the attributes come from. The pathspec is root-relative (top) and
+# matches .gitattributes at any depth (glob "**/"), and diff.relative is
+# pinned off, so a subdirectory cwd cannot narrow the comparison.
+attr_source_tree=""
+attr_diff_rc=0
+git -c diff.relative=false diff --quiet --no-ext-diff --no-textconv \
+  "$merge_base" "$base_ref_full" -- ':(top,glob)**/.gitattributes' || attr_diff_rc=$?
+case "$attr_diff_rc" in
+  0) ;;
+  1) use_merge_attributes ;;
+  *) attributes_unguaranteed "could not tell whether ${base_ref} changed .gitattributes since ${base_short} (git diff exited with ${attr_diff_rc})" ;;
+esac
+
+if RALPH_SECRET_ALLOWLIST="$tmp_allowlist" RALPH_SECRET_SCAN_ATTR_SOURCE="$attr_source_tree" "$scanner" --range "$merge_base..HEAD"; then
   report "scanned ${base_short}..${head_short} against ${base_ref}: clean"
   exit 0
 else
