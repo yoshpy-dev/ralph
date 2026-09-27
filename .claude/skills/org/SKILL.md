@@ -241,7 +241,9 @@ EVIDENCE: docs/reports/self-review-foo.md
   `/tmp` や `$TMPDIR` の下なら既定で書けるので不要(`exclude_slash_tmp` /
   `exclude_tmpdir_env_var` で除外していない場合)。読むのは
   ユーザー階層の `config.toml` だけで、profile・project 階層・`-c` の上書きは
-  評価しない。
+  評価しない。保存先がこのプロジェクトの中にある場合、作業ディレクトリが
+  それを含む座席はすでに書けており、warn はその旨を示す。別の作業ディレクトリ
+  (task worktree など)で動く座席には root がなお必要。
 - `autonomous` モードの spawn は `--scope` を必須とし(fail-closed)、
   省略したい場合のみ `--allow-unscoped` を明示する。`--scope` は
   「担当範囲」を短く書く(例: `"internal/org/**"`、`"docs/reports/**"` )。
