@@ -144,8 +144,14 @@ func runDoctorFull(targetDir string, probeModels, strict bool) error {
 	// permissions roles/default); warns when a role that could actually run
 	// under workspace-write exists but no writable root covers the agmsg
 	// store -- see checkCodexAgmsgWritableRoot and
-	// docs/recipes/codex-seat-permissions.md.
-	results = append(results, checkCodexAgmsgWritableRoot(cfg.Org, driver.ResolveAgmsgHome(cfg.Org.AgmsgHome), doctorCodexSandboxEnv))
+	// docs/recipes/codex-seat-permissions.md. projectDir is targetDir made
+	// absolute ("" when that fails) so the warn can tell whether the store
+	// itself lies inside the project (issue #170).
+	projectDir, projectDirErr := filepath.Abs(targetDir)
+	if projectDirErr != nil {
+		projectDir = ""
+	}
+	results = append(results, checkCodexAgmsgWritableRoot(cfg.Org, driver.ResolveAgmsgHome(cfg.Org.AgmsgHome), projectDir, doctorCodexSandboxEnv))
 
 	// Check 12: optional model-pool probes (--probe-models).
 	if probeModels {

@@ -33,7 +33,7 @@ func TestCheckCodexAgmsgWritableRoot_ConfigIsFIFO_InfoAndCompletes(t *testing.T)
 	}
 	done := make(chan result, 1)
 	go func() {
-		done <- result{checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome, codexSandboxTestEnv(cfgPath, ""))}
+		done <- result{checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome, "", codexSandboxTestEnv(cfgPath, ""))}
 	}()
 
 	select {
@@ -66,7 +66,7 @@ func TestCheckCodexAgmsgWritableRoot_UnreadableConfig_InfoWithReasonOnly(t *test
 	}
 	t.Cleanup(func() { _ = os.Chmod(cfgPath, 0o644) })
 
-	r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome, codexSandboxTestEnv(cfgPath, ""))
+	r := checkCodexAgmsgWritableRoot(codexOrgConfig(true, "", nil), agmsgHome, "", codexSandboxTestEnv(cfgPath, ""))
 	if r.Status != "info" {
 		t.Fatalf("expected info, got %s (%s)", r.Status, r.Detail)
 	}
