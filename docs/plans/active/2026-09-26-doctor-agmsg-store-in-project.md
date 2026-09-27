@@ -112,6 +112,7 @@ agmsg の保存先がプロジェクトディレクトリ(doctor の対象ディ
 - worktree: `.claude/worktrees/doctor-agmsg-store-in-project`、branch `fix/doctor-agmsg-store-in-project`(未 push)。この節を追加したコミットが HEAD。`git status --porcelain` は空
 - pipeline の状態: `.harness/state/standard-pipeline/active-plan.json` と `cycle-count.json`(cycle 1、cap 2)は worktree に残してある。消さずにそのまま使う
 - 済み: plan(Codex plan advisory の MEDIUM 1 件を反映)、work(Slice A 24e455f、B c71a93b、C a2faa60)、self-review cycle 1(LOW 6、すべて Slice C で修正)、verify cycle 1(pass)
+- 停止した tester が書きかけた test report(判定 PASS、全節あり、未コミット、orchestrator は未検証)を `.harness/state/standard-pipeline/test-report-draft.md`(gitignore 済み)に置いた。/test の再実行の参考にしてよいが、そのまま commit せず、内容を確かめ直してから `docs/reports/` に書く
 - 次に行うこと(この順):
   1. /test cycle 1(`tester`): `./scripts/run-test.sh`、`go test ./internal/cli/ -run 'CodexAgmsgWritableRoot|Doctor' -count=1 -race`、`TMPDIR=/tmp go test ./internal/cli/... -count=1`。mutation(判定を常に true / false、`!blocked` を外す、doctor.go で "" を渡す、2 つの文の入れ替え)、ビルドしたバイナリと main のバイナリで実機の比較(プロジェクト内・`.agents` の下・プロジェクト外)。実機は必ず `env -u ZDOTDIR HOME=<偽の HOME> CODEX_HOME=<偽の codex home>` で実行し、本物の HOME / `~/.codex` / agmsg の保存先に触れない。report は `docs/reports/test-2026-09-27-doctor-agmsg-store-in-project.md`
   2. /sync-docs(`doc-maintainer`): recipe 2 コピー、`/org` skill 4 面、tech-debt の行は Slice B / C で更新済み。drift の再確認と、この plan への記録、sync-docs の report
