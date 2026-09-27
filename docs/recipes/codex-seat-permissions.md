@@ -65,10 +65,11 @@ recorded in `docs/evidence/codex-seat-permissions-2026-09-18.md`.
   writable unless `exclude_slash_tmp` / `exclude_tmpdir_env_var` is set.
   The check reads only the user-level `config.toml`; profiles,
   project-level config, and `-c` overrides are not evaluated. When the
-  agmsg store itself lives inside this project, a seat whose working
-  directory contains it can already write there and the warn says so; a
-  seat running elsewhere (a task worktree, for example) still needs the
-  writable root.
+  agmsg store itself lives inside this project (and not under its `.git`,
+  `.agents`, or `.codex` directory), a seat whose working directory
+  contains it can already write there and the warn says so; a seat whose
+  working directory does not contain it (a task worktree, for example)
+  still needs the writable root.
 - **Keep the scratch working directory out of `/tmp`.** `/tmp` is itself a
   writable root, so a target under it does not test the sandbox boundary.
   Use a throwaway directory under `$HOME` (`git init` it) for the seat's cwd

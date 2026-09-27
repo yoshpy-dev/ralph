@@ -1796,6 +1796,87 @@ func TestRunDoctorOpts_CodexSandboxCheck_WarnsThroughTheSeam(t *testing.T) {
 	}
 }
 
+// TestRunDoctorOpts_CodexSandboxCheck_StoreInsideProjectThroughTheSeam pins
+// runDoctorFull's own projectDir wiring end to end (self-review coverage gap
+// (a)): unlike TestRunDoctorOpts_CodexSandboxCheck_WarnsThroughTheSeam's
+// agmsgHome (a bare t.TempDir(), unrelated to the scaffolded project), this
+// places agmsgHome INSIDE the scaffolded project directory that dir itself
+// is, so the in-project wording can only appear if runDoctorFull actually
+// passes targetDir's absolute form through as checkCodexAgmsgWritableRoot's
+// projectDir -- reverting internal/cli/doctor.go's call site back to a
+// literal "" makes this test fail (see the plan's red-evidence run) while
+// every other test in this file stays green, closing the gap the self-review
+// report's "Coverage gaps" section named. codexSandboxTestEnv leaves
+// SlashTmpDir/TmpDir "" (see its own doc comment), so the store never
+// qualifies for either of workspace-write's implicit roots (/tmp, $TMPDIR)
+// regardless of where the real machine's TMPDIR happens to be, and the warn
+// path is reached deterministically.
+func TestRunDoctorOpts_CodexSandboxCheck_StoreInsideProjectThroughTheSeam(t *testing.T) {
+	setupTestEmbedFS(t)
+	Version = "0.1.0-test"
+
+	dir := t.TempDir()
+	cfg := initConfig{ProjectName: "test", Packs: []string{"golang"}}
+	if err := executeInit(dir, cfg, false); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	ralphTomlPath := filepath.Join(dir, "ralph.toml")
+	existing, err := os.ReadFile(ralphTomlPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	appended := string(existing) + "\n[org.permissions]\ncodex_verified = true\n"
+	if err := os.WriteFile(ralphTomlPath, []byte(appended), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	binDir := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, bin := range []string{"claude", "codex", "go"} {
+		writeStubBin(t, binDir, bin, "")
+	}
+	t.Setenv("PATH", binDir)
+
+	agmsgHome := filepath.Join(dir, "agmsg-store-home") // inside the project dir passed to runDoctorOpts.
+	writeAgmsgHome(t, agmsgHome, "")
+
+	cfgDir := t.TempDir()
+	noSuchCfg := filepath.Join(cfgDir, "config.toml")
+	orig := doctorCodexSandboxEnv
+	doctorCodexSandboxEnv = codexSandboxTestEnv(noSuchCfg, "")
+	t.Cleanup(func() { doctorCodexSandboxEnv = orig })
+	t.Setenv("RALPH_ORG_AGMSG_HOME", agmsgHome)
+
+	origStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	runErr := runDoctorOpts(dir, false)
+	_ = w.Close()
+	os.Stdout = origStdout
+	out, _ := io.ReadAll(r)
+
+	if runErr != nil {
+		t.Fatalf("runDoctorOpts returned error with only a warn-level codex-sandbox finding: %v\noutput:\n%s", runErr, out)
+	}
+	if !strings.Contains(string(out), "Codex sandbox (agmsg writable root): warn") {
+		t.Errorf("expected a warn-level Codex sandbox line in output:\n%s", out)
+	}
+	for _, want := range []string{
+		"the agmsg store is inside this project (",
+		"working directory contains it can already write it",
+	} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("expected the in-project wording (proves runDoctorFull wired targetDir through as projectDir) in output:\n%s\nwant substring: %q", out, want)
+		}
+	}
+	if strings.Contains(string(out), codexWorkspaceWriteUnconditionalPhrase) {
+		t.Errorf("the unconditional \"cannot send RESULT\" phrasing must not remain in output:\n%s", out)
+	}
+}
+
 // TestCodexConfigDecodeError_ErrorCarriesNoConfigText pins the error
 // interface of codexConfigDecodeError: the check itself never prints it
 // (it reads Line/Column/HasPosition), but anything that logs the error
@@ -1909,30 +1990,39 @@ func TestCodexImplicitRootDetail_ConfigAbsent_SaysSoInsteadOfNamingAKey(t *testi
 }
 
 // --- issue #170: agmsg store inside the project directory ---
-//
-// checkCodexAgmsgWritableRoot's warn wording narrows its "cannot send
-// RESULT" / "add ..." instruction to seats whose working directory does not
-// contain the agmsg store, when the store itself lies inside the project
-// directory doctor was run against (codex's workspace-write sandbox already
-// permits writes inside a seat's own working directory, so a seat whose
-// --cwd covers the store needs no extra writable root).
-// codexWorkspaceWriteUnconditionalPhrase is the exact substring both of the
-// ORIGINAL (not-in-project) warn wordings share -- the absent-config form
-// uses "and a codex seat under workspace-write cannot send RESULT to lead",
-// the exists-config form uses ", so a codex seat under workspace-write
-// cannot send RESULT to lead" -- and the in-project wording deliberately
-// does not contain it (it says "a codex seat running elsewhere ... cannot
-// send RESULT to lead" instead, with no "under workspace-write" in between),
-// so its absence is what proves the conditional wording REPLACED the
-// unconditional one rather than being appended alongside it.
+
+// checkCodexAgmsgWritableRoot's warn narrows its wording when the store
+// itself lies inside the project doctor was run against -- see
+// codexWritableRootDetail's containingProject parameter for the rule and
+// its rationale. codexWorkspaceWriteUnconditionalPhrase is the exact
+// substring both of the ORIGINAL (not-narrowed) warn wordings share -- the
+// absent-config form uses "and a codex seat under workspace-write cannot
+// send RESULT to lead", the exists-config form uses ", so a codex seat
+// under workspace-write cannot send RESULT to lead" -- and the narrowed
+// wording deliberately does not contain it (it says "a codex seat whose
+// working directory does not contain it ... cannot send RESULT to lead"
+// instead, with no "under workspace-write" in between), so its absence is
+// what proves the conditional wording REPLACED the unconditional one
+// rather than being appended alongside it.
 const codexWorkspaceWriteUnconditionalPhrase = "seat under workspace-write cannot send RESULT to lead"
+
+// codexAddWritableRootUnconditionalPhrase is the other half of the same
+// replaced-not-appended proof (self-review coverage gap (b)): both original
+// wordings also give the unconditional instruction "add <store> to
+// [sandbox_workspace_write].writable_roots" with no qualifier in front of
+// "add", so an implementation that kept that sentence alongside the new
+// narrowed one (rather than replacing it) would still pass every assertion
+// that checks only for codexWorkspaceWriteUnconditionalPhrase's absence.
+const codexAddWritableRootUnconditionalPhrase = "; add %s to [sandbox_workspace_write].writable_roots"
 
 // TestCheckCodexAgmsgWritableRoot_StoreInsideProject_Warn is AC-1: with the
 // agmsg store inside the project directory and no codex-protected directory
 // between them, both the config-absent and the config-exists warn must name
 // the project, say a seat whose working directory contains the store can
 // already write it, and scope "cannot send RESULT" / "add ..." to a seat
-// running elsewhere -- the old unconditional phrasing must not remain.
+// whose working directory does not contain it -- the old unconditional
+// phrasing must not remain (both halves: the "cannot send RESULT" claim and
+// the unqualified "add ..." instruction).
 func TestCheckCodexAgmsgWritableRoot_StoreInsideProject_Warn(t *testing.T) {
 	project := t.TempDir()
 	agmsgHome := filepath.Join(project, "agmsg-store-home")
@@ -1957,6 +2047,9 @@ func TestCheckCodexAgmsgWritableRoot_StoreInsideProject_Warn(t *testing.T) {
 		}
 		if strings.Contains(r.Detail, codexWorkspaceWriteUnconditionalPhrase) {
 			t.Errorf("the unconditional \"cannot send RESULT\" phrasing must not remain, got: %s", r.Detail)
+		}
+		if unqualifiedAdd := fmt.Sprintf(codexAddWritableRootUnconditionalPhrase, store); strings.Contains(r.Detail, unqualifiedAdd) {
+			t.Errorf("the unconditional, unqualified %q instruction must not remain, got: %s", unqualifiedAdd, r.Detail)
 		}
 	}
 
