@@ -1,6 +1,6 @@
 # secret-scan-attr-parity
 
-- Status: Draft
+- Status: In progress
 - Owner: Claude Code
 - Date: 2026-09-27
 - Related request: #176(PR #179)で `scripts/secret-scan.sh` の range scan はローカルの git 設定を git の既定に固定し、CI と同じ追加行を読むようになったが、属性(attributes)の読み元に固定できない差が 3 つ残った(`docs/tech-debt/README.md` に記録)。いずれも「ローカルの `--strict` は clean、CI は検出」の向き。(1) `.git/info/attributes` の `-diff` / `binary`(config の key ではないので `-c` でも `GIT_ATTR_SOURCE` でも消えない)。(2) コミット済みの `.gitattributes` が指す diff driver に、ローカルで `diff.<driver>.binary=true` があると binary 扱い。(3) CI の `pull_request` は PR の merge commit を checkout するので、branch の作成後に base 側で `.gitattributes` が変わると CI とローカルの結果がずれる(issue #181)
@@ -109,12 +109,12 @@ secret scan の属性の読み元について、固定できる差は固定し�
 ## Deviation notes
 
 - 2026-09-27 plan: Codex plan advisory の HIGH 3 件を反映(Design decisions を参照)。ユーザー決定(AskUserQuestion): 対応案で plan を更新
-
+- 2026-09-27 work: Slice A(7e0c529)、B(beb19f1)、C(ad8c475)は implementer に委譲(scanner は関門なので opus)。A: driver の binary は `git config --name-only --get-regexp` で列挙した key をそのまま `-c <key>=false`(`=` を含む key は `--config-env` で。git 2.31 未満は exit 3)。driver ごとの algorithm は `--diff-algorithm=default` が上書きすることを fixture で確認したので固定は足さずテストのみ。`.git/info/attributes` は git の parser と同じ規則(空行と `#` 以外)で規則の行があれば exit 3、読めなければ exit 3、dangling symlink は scan。`RALPH_SECRET_SCAN_ATTR_SOURCE` は `^{tree}` で解決し、範囲が HEAD で終わるときだけ使う。ヘッダーに Environment 節。B: merge-base と base の間で `:(top,glob)**/.gitattributes` に変更がなければ従来どおり HEAD の属性。変更があれば、ローカルの merge driver の config → git 2.41 未満 → merge-tree の順に判定し、rc 0 なら tree を渡して通知、rc 1(衝突)は HEAD の属性と通知、それ以外と `--write-tree` 非対応は strict で exit 3(既定は通知)。この diff 自体の失敗も strict で exit 3(逸脱、fail-closed)。CI の実行では merge-base が base の先端なので merge-tree は走らない。C: quality-gates 2 コピー、tech-debt の 2 行(plan の参照は archive のパスに)、`/pr` skill の exit 3 の句(4 面。1 行形式なので折り返しはしない)。テストは 74 → 123 件、108 → 163 件。修正前の scanner で新規 19 件、branch script で 36 件が落ちる。全履歴の比較で main と一致(219,578 行)。orchestrator は HEAD 一致・porcelain 空・差分・template の byte 一致、probe(3 経路とも期待どおり)、テスト 3 本、`run-verify.sh`、strict scan を確認。範囲外の発見: merge-tree に対する `merge.renames` などの設定は未固定(probe で差は出ず、tech-debt に未再現として記録)。tech-debt の別の 2 行が archive 済み plan の active のパスを参照している(sync-docs で直す)
 ## Progress checklist
 
 - [x] Plan reviewed
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
