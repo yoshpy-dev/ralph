@@ -97,18 +97,21 @@ agmsg の保存先がプロジェクトディレクトリ(doctor の対象ディ
 - 2026-09-27 work: Slice C は implementer に委譲(a2faa60、9 ファイル)。6 件を修正し、doctor.go の配線を固定するテスト(`runDoctorOpts` 経由でプロジェクト内の保存先の文が出る)と AC-1 の否定の確認を追加。配線を "" に戻すとその 1 件だけが落ちることを implementer が確認。orchestrator は HEAD 一致・porcelain 空・変更ファイル・差分・テストを確認
 - 2026-09-27 verify(`docs/reports/verify-2026-09-27-doctor-agmsg-store-in-project.md`、ebb112d): pass。AC-1〜AC-7 を対応付け、AC-8 は静的な半分のみ(`go test` は /test)。プロジェクト外の文は main と byte 一致、文書の drift なし
 - 2026-09-27 中断: ユーザーの依頼で、別のターミナルで続行するため /test の途中で一時停止した(tester は停止し、未コミットの変更なし)。再開の手順は下の「再開の手順」の節
+- 2026-09-27 test cycle 1(`docs/reports/test-2026-09-27-doctor-agmsg-store-in-project.md`、9d22ac7): PASS。`run-test.sh` green、対象テストは `-race` と `-count=20` で安定。mutation 5 件(常に true / 常に false / `!blocked` を外す / doctor.go で "" を渡す / 2 つの文の入れ替え)はすべて予測どおりに落ちた。実機比較(ビルドした本 branch と main のバイナリ)でプロジェクト内・保護ディレクトリ配下・プロジェクト外の 3 ケースを確認、うち 2 ケースは byte 比較で main と一致。一時停止時に残した draft report(`.harness/state/standard-pipeline/test-report-draft.md`)は再利用せず、この cycle で新規に実行し直した。狭い gap 1 件(`TestCheckCodexAgmsgWritableRoot_StoreEqualsProjectDir_Warn` が「送れる/送れない」の入れ替えを個別には検出しない)と無関係の既存動作 1 件(サブディレクトリから `ralph doctor` を実行すると `ralph.toml` を探し上げないため warn の分岐に到達しない)を記録、`docs/tech-debt/README.md` に 1 行追加
+- 2026-09-27 sync-docs cycle 1: recipe 2 コピー・`/org` skill 4 面・tech-debt の既存行(#170 分)は Slice B/C で更新済みで drift なしを確認(README.md、`docs/specs/2026-08-01-org-runtime.md`、`docs/quality/*.md` に本 Check への言及なし)。test report の 2 件の gap を tech-debt に 1 行追加。この Deviation notes と再開の手順の先頭注記を追加
 ## Progress checklist
 
 - [x] Plan reviewed
 - [x] Branch created
 - [x] Implementation started
 - [x] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Verification artifact created
+- [x] Test artifact created
 - [ ] PR created
 
 ## 再開の手順(2026-09-27 中断時点)
 
+- 2026-09-27 に再開済み。この節は中断時点の記録であり、以下は履歴として残す
 - worktree: `.claude/worktrees/doctor-agmsg-store-in-project`、branch `fix/doctor-agmsg-store-in-project`(未 push)。この節を追加したコミットが HEAD。`git status --porcelain` は空
 - pipeline の状態: `.harness/state/standard-pipeline/active-plan.json` と `cycle-count.json`(cycle 1、cap 2)は worktree に残してある。消さずにそのまま使う
 - 済み: plan(Codex plan advisory の MEDIUM 1 件を反映)、work(Slice A 24e455f、B c71a93b、C a2faa60)、self-review cycle 1(LOW 6、すべて Slice C で修正)、verify cycle 1(pass)
