@@ -93,12 +93,14 @@ agmsg の保存先がプロジェクトディレクトリ(doctor の対象ディ
 
 - 2026-09-27 plan: Codex plan advisory の MEDIUM 1 件を反映(warn の文そのものを条件付きにする)。ユーザー決定(AskUserQuestion): 対応案で plan を更新
 - 2026-09-27 work: Slice A(24e455f)と B(c71a93b)は implementer に委譲。A: `checkCodexAgmsgWritableRoot` に `projectDir` の引数を追加(`runDoctorFull` が `targetDir` を絶対パスにして渡す)。warn のときだけ既存の `codexRootCoverage` で保存先がプロジェクト内かつ保護ディレクトリをまたがないかを判定し、該当すれば config の有無の両方の文を条件付きの形にする(「送れない」と「root を足す」は別の作業ディレクトリの座席だけの話として書く)。プロジェクト外の文は従来と byte 一致。テストの呼び出し 53 か所を更新し、新しいテスト約 10 件。判定を常に false / true にする mutation で対応するテストが落ちる。実機でプロジェクト内の保存先の Detail を確認。B: recipe 2 コピー、`/org` skill 4 面、tech-debt の行に 1 文ずつ。orchestrator は HEAD 一致・porcelain 空・差分・テスト・`check-skill-sync.sh` を確認
+- 2026-09-27 self-review cycle 1(`docs/reports/self-review-2026-09-27-doctor-agmsg-store-in-project.md`、f558dd3): pass、LOW 6。「elsewhere」は task worktree(プロジェクトの中)と矛盾する対比、`(inProject, projectDir)` の組が不正な状態を表せる、コメントの誤りと重複、「seats often run in task worktrees」の裏付けがない、テストの見出しの空行、recipe と skill が保護ディレクトリの例外を書いていない。/test への引き継ぎ: doctor.go の配線を固定するテストがない、AC-1 の「add」側の否定の確認がない
+- 2026-09-27 work: Slice C は implementer に委譲(a2faa60、9 ファイル)。6 件を修正し、doctor.go の配線を固定するテスト(`runDoctorOpts` 経由でプロジェクト内の保存先の文が出る)と AC-1 の否定の確認を追加。配線を "" に戻すとその 1 件だけが落ちることを implementer が確認。orchestrator は HEAD 一致・porcelain 空・変更ファイル・差分・テストを確認
 ## Progress checklist
 
 - [x] Plan reviewed
 - [x] Branch created
 - [x] Implementation started
-- [ ] Review artifact created
+- [x] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
