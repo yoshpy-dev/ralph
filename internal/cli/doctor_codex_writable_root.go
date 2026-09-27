@@ -795,16 +795,45 @@ func codexBlockedAncestorClause(blockedAncestor string) string {
 // absent-config sentence leads with "<cfg> does not exist" rather than
 // parenthesizing it after the store path, so it reads as a statement about
 // the config, not about the store (self-review NEW-3).
-func codexWritableRootDetail(root, blockedAncestor, cfgDisplay, store string, exists bool, reasonClause, suffix string) string {
+//
+// inProject narrows the "cannot send RESULT" / "add ..." instruction to
+// seats whose working directory does not contain the store (issue #170):
+// when the agmsg store lies inside projectDir without crossing a
+// codex-protected directory (checkCodexAgmsgWritableRoot's own
+// codexRootCoverage(projectDir, ...) call decides this), codex's
+// workspace-write sandbox already permits writes inside a seat's own
+// working directory, so a seat whose --cwd covers the store can already
+// write it -- only a seat running elsewhere (a task worktree, for example)
+// still cannot send RESULT without an explicit writable root. This
+// replaces the unconditional wording rather than appending to it: printing
+// both in the same Detail line would tell the operator to add a root that
+// some seats do not actually need. inProject is always false when root !=
+// "" (a pass) or when projectDir is "" -- both cases leave this parameter
+// unused.
+func codexWritableRootDetail(root, blockedAncestor, cfgDisplay, store string, exists bool, reasonClause, suffix string, inProject bool, projectDir string) string {
 	if root != "" {
 		return fmt.Sprintf("writable root %s in %s covers the agmsg store %s; needed because %s",
 			root, cfgDisplay, store, reasonClause) + suffix
 	}
 	if !exists {
+		if inProject {
+			return fmt.Sprintf("%s does not exist, so no writable root covers the agmsg store %s%s; the agmsg store is inside this project (%s), "+
+				"so a codex seat whose working directory contains it can already write it; a codex seat running elsewhere (for example a task "+
+				"worktree) cannot send RESULT to lead (\"attempt to write a readonly database\") unless %s is added to "+
+				"[sandbox_workspace_write].writable_roots in %s (docs/recipes/codex-seat-permissions.md); needed because %s",
+				cfgDisplay, store, codexBlockedAncestorClause(blockedAncestor), projectDir, store, cfgDisplay, reasonClause) + suffix
+		}
 		return fmt.Sprintf("%s does not exist, so no writable root covers the agmsg store %s%s and a codex seat under workspace-write "+
 			"cannot send RESULT to lead (\"attempt to write a readonly database\"); needed because %s; add %s to "+
 			"[sandbox_workspace_write].writable_roots in %s (docs/recipes/codex-seat-permissions.md)",
 			cfgDisplay, store, codexBlockedAncestorClause(blockedAncestor), reasonClause, store, cfgDisplay) + suffix
+	}
+	if inProject {
+		return fmt.Sprintf("no writable root in %s covers the agmsg store %s%s; the agmsg store is inside this project (%s), so a codex seat "+
+			"whose working directory contains it can already write it; a codex seat running elsewhere (for example a task worktree) cannot "+
+			"send RESULT to lead (\"attempt to write a readonly database\") unless %s is added to [sandbox_workspace_write].writable_roots "+
+			"(docs/recipes/codex-seat-permissions.md); needed because %s",
+			cfgDisplay, store, codexBlockedAncestorClause(blockedAncestor), projectDir, store, reasonClause) + suffix
 	}
 	return fmt.Sprintf("no writable root in %s covers the agmsg store %s%s, so a codex seat under workspace-write cannot send RESULT to lead "+
 		"(\"attempt to write a readonly database\"); needed because %s; add %s to [sandbox_workspace_write].writable_roots "+
@@ -872,7 +901,22 @@ func codexWritableRootDetail(root, blockedAncestor, cfgDisplay, store string, ex
 // that load failure on its own line. In that case this check's verdict
 // describes the partially-populated defaults Load returned alongside the
 // error, not the document the operator actually wrote (self-review NEW-5).
-func checkCodexAgmsgWritableRoot(orgCfg config.OrgConfig, agmsgHome string, resolveEnv func() (codexSandboxEnv, error)) checkResult {
+//
+// projectDir is runDoctorFull's targetDir made absolute (filepath.Abs), or
+// "" when that failed. It is used only on the warn outcome (9), to decide
+// whether the agmsg store itself lies inside the project without crossing a
+// codex-protected directory (issue #170): doctor cannot know a codex seat's
+// actual --cwd (org seats often run in task worktrees under the project,
+// which would NOT contain a store at the project root), but when the store
+// IS covered by projectDir, a seat whose working directory contains it can
+// already write it under workspace-write, regardless of writable_roots --
+// codexWritableRootDetail's inProject parameter narrows the warn's "cannot
+// send RESULT" / "add ..." wording to seats that are NOT in that position,
+// rather than reporting an unconditional gap that does not apply to every
+// seat. A "" projectDir (or one that does not cover the store) reproduces
+// the prior unconditional wording exactly, since codexRootCoverage("", ...)
+// -- root is not absolute -- always reports covers=false.
+func checkCodexAgmsgWritableRoot(orgCfg config.OrgConfig, agmsgHome, projectDir string, resolveEnv func() (codexSandboxEnv, error)) checkResult {
 	r := checkResult{Name: "Codex sandbox (agmsg writable root)"}
 
 	if err := driver.AgmsgAvailable(agmsgHome); err != nil {
@@ -939,7 +983,7 @@ func checkCodexAgmsgWritableRoot(orgCfg config.OrgConfig, agmsgHome string, reso
 	root, blockedAncestor := coveringWritableRoot(roots, store)
 	if root != "" {
 		r.Status = "pass"
-		r.Detail = codexWritableRootDetail(root, "", cfgDisplay, store, exists, reasonClause, suffix)
+		r.Detail = codexWritableRootDetail(root, "", cfgDisplay, store, exists, reasonClause, suffix, false, "")
 		return r
 	}
 
@@ -954,7 +998,13 @@ func checkCodexAgmsgWritableRoot(orgCfg config.OrgConfig, agmsgHome string, reso
 		blockedAncestor = implicitBlockedAncestor
 	}
 
+	var inProject bool
+	if projectDir != "" {
+		covers, blocked := codexRootCoverage(projectDir, store, resolveNearestExisting(store))
+		inProject = covers && !blocked
+	}
+
 	r.Status = "warn"
-	r.Detail = codexWritableRootDetail("", blockedAncestor, cfgDisplay, store, exists, reasonClause, suffix)
+	r.Detail = codexWritableRootDetail("", blockedAncestor, cfgDisplay, store, exists, reasonClause, suffix, inProject, projectDir)
 	return r
 }
