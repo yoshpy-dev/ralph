@@ -1,6 +1,6 @@
 # doctor-agmsg-store-in-project
 
-- Status: In progress
+- Status: Done (PR #180)
 - Owner: Claude Code
 - Date: 2026-09-26
 - Related request: #164(`ralph doctor` の「Codex sandbox (agmsg writable root)」Check、PR #171)の cross-review cycle 2 で残った WORTH_CONSIDERING 1 件(`docs/reports/cross-review-triage-codex-agmsg-writable-root.md` の WC-3)。agmsg の保存先(`<agmsg home>/db` または `AGMSG_STORAGE_PATH`)が座席の作業ディレクトリの中にあると、codex の workspace-write は追加の writable root なしで書けるのに、Check は warn を出して不要な writable root を勧める(誤 warn。誤 pass ではない)。Codex は codex-cli 0.154.0 で、warn の状態のままプロジェクト内の保存先への sandbox 下の SQLite 書き込みが成功することを再現した
@@ -48,14 +48,14 @@ agmsg の保存先がプロジェクトディレクトリ(doctor の対象ディ
 
 ## Acceptance criteria
 
-- [ ] AC-1: 保存先がプロジェクトディレクトリの配下にあり保護ディレクトリをまたがない warn では、Detail が「作業ディレクトリがこの保存先を含む座席はすでに書ける」と述べ、「RESULT を送れない」と「writable root を足す」は作業ディレクトリが保存先を含まない座席(task worktree など)についてだけ述べる。無条件の「送れない」の断定と無条件の追加の指示は残らない。config がある場合とない場合の両方で確かめる。status は warn
-- [ ] AC-2: 保存先がプロジェクトの `.agents`(または `.git` / `.codex`)の配下にある warn では、補足が入らない
-- [ ] AC-3: 保存先がプロジェクトの外にある warn では、Detail が従来と同じ(既存のテストがそのまま pass)
-- [ ] AC-4: pass(明示の root、暗黙の root)と info の Detail は変わらない
-- [ ] AC-5: プロジェクトディレクトリが symlink を含むパスで渡されても(macOS の `/var` と `/private/var`)、AC-1 / AC-2 の判定が同じになる
-- [ ] AC-6: `AGMSG_STORAGE_PATH` でプロジェクト内に置いた保存先でも AC-1 が成り立つ
-- [ ] AC-7: recipe(2 コピー)と `/org` skill(4 面)に同じ補足があり、`check-skill-sync.sh` / `check-sync.sh` が pass。tech-debt の行が更新されている
-- [ ] AC-8: `./scripts/run-verify.sh` green、`TMPDIR=/tmp go test ./internal/cli/... -count=1` ok、push 前の `./scripts/secret-scan-branch.sh --strict` が clean
+- [x] AC-1: 保存先がプロジェクトディレクトリの配下にあり保護ディレクトリをまたがない warn では、Detail が「作業ディレクトリがこの保存先を含む座席はすでに書ける」と述べ、「RESULT を送れない」と「writable root を足す」は作業ディレクトリが保存先を含まない座席(task worktree など)についてだけ述べる。無条件の「送れない」の断定と無条件の追加の指示は残らない。config がある場合とない場合の両方で確かめる。status は warn
+- [x] AC-2: 保存先がプロジェクトの `.agents`(または `.git` / `.codex`)の配下にある warn では、補足が入らない
+- [x] AC-3: 保存先がプロジェクトの外にある warn では、Detail が従来と同じ(既存のテストがそのまま pass)
+- [x] AC-4: pass(明示の root、暗黙の root)と info の Detail は変わらない
+- [x] AC-5: プロジェクトディレクトリが symlink を含むパスで渡されても(macOS の `/var` と `/private/var`)、AC-1 / AC-2 の判定が同じになる
+- [x] AC-6: `AGMSG_STORAGE_PATH` でプロジェクト内に置いた保存先でも AC-1 が成り立つ
+- [x] AC-7: recipe(2 コピー)と `/org` skill(4 面)に同じ補足があり、`check-skill-sync.sh` / `check-sync.sh` が pass。tech-debt の行が更新されている
+- [x] AC-8: `./scripts/run-verify.sh` green、`TMPDIR=/tmp go test ./internal/cli/... -count=1` ok、push 前の `./scripts/secret-scan-branch.sh --strict` が clean
 
 ## Implementation outline
 
@@ -100,6 +100,7 @@ agmsg の保存先がプロジェクトディレクトリ(doctor の対象ディ
 - 2026-09-27 test cycle 1(`docs/reports/test-2026-09-27-doctor-agmsg-store-in-project.md`、9d22ac7): PASS。`run-test.sh` green、対象テストは `-race` と `-count=20` で安定。mutation 5 件(常に true / 常に false / `!blocked` を外す / doctor.go で "" を渡す / 2 つの文の入れ替え)はすべて予測どおりに落ちた。実機比較(ビルドした本 branch と main のバイナリ)でプロジェクト内・保護ディレクトリ配下・プロジェクト外の 3 ケースを確認、うち 2 ケースは byte 比較で main と一致。一時停止時に残した draft report(`.harness/state/standard-pipeline/test-report-draft.md`)は再利用せず、この cycle で新規に実行し直した。狭い gap 1 件(`TestCheckCodexAgmsgWritableRoot_StoreEqualsProjectDir_Warn` が「送れる/送れない」の入れ替えを個別には検出しない)と無関係の既存動作 1 件(サブディレクトリから `ralph doctor` を実行すると `ralph.toml` を探し上げないため warn の分岐に到達しない)を記録、`docs/tech-debt/README.md` に 1 行追加
 - 2026-09-27 sync-docs cycle 1: recipe 2 コピー・`/org` skill 4 面・tech-debt の既存行(#170 分)は Slice B/C で更新済みで drift なしを確認(README.md、`docs/specs/2026-08-01-org-runtime.md`、`docs/quality/*.md` に本 Check への言及なし)。test report の 2 件の gap を tech-debt に 1 行追加。この Deviation notes と再開の手順の先頭注記を追加
 - 2026-09-27 cross-review cycle 1(`docs/reports/cross-review-triage-doctor-agmsg-store-in-project.md`、reviewed HEAD 6e3cdc7): Codex の指摘 0 件(Case C)。walkthrough を追加(branch 全体の差分が 1,151 行)
+- 2026-09-27 `/pr`: PR #180 を作成(Closes #170)。push 前の `run-verify.sh` pass、`TMPDIR=/tmp go test ./internal/cli/...` pass、range scan exit 0、`secret-scan-branch.sh --strict` は 2d4b7ee で clean。`ensure-pr-title-prefix.sh` / `ensure-pr-ready.sh` pass。AC は verify(AC-1〜7)と test(AC-8)の pass を受けてチェック
 ## Progress checklist
 
 - [x] Plan reviewed
@@ -108,7 +109,7 @@ agmsg の保存先がプロジェクトディレクトリ(doctor の対象ディ
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
-- [ ] PR created
+- [x] PR created (#180)
 
 ## 再開の手順(2026-09-27 中断時点)
 
