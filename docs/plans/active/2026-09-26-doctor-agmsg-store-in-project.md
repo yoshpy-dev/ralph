@@ -95,6 +95,8 @@ agmsg の保存先がプロジェクトディレクトリ(doctor の対象ディ
 - 2026-09-27 work: Slice A(24e455f)と B(c71a93b)は implementer に委譲。A: `checkCodexAgmsgWritableRoot` に `projectDir` の引数を追加(`runDoctorFull` が `targetDir` を絶対パスにして渡す)。warn のときだけ既存の `codexRootCoverage` で保存先がプロジェクト内かつ保護ディレクトリをまたがないかを判定し、該当すれば config の有無の両方の文を条件付きの形にする(「送れない」と「root を足す」は別の作業ディレクトリの座席だけの話として書く)。プロジェクト外の文は従来と byte 一致。テストの呼び出し 53 か所を更新し、新しいテスト約 10 件。判定を常に false / true にする mutation で対応するテストが落ちる。実機でプロジェクト内の保存先の Detail を確認。B: recipe 2 コピー、`/org` skill 4 面、tech-debt の行に 1 文ずつ。orchestrator は HEAD 一致・porcelain 空・差分・テスト・`check-skill-sync.sh` を確認
 - 2026-09-27 self-review cycle 1(`docs/reports/self-review-2026-09-27-doctor-agmsg-store-in-project.md`、f558dd3): pass、LOW 6。「elsewhere」は task worktree(プロジェクトの中)と矛盾する対比、`(inProject, projectDir)` の組が不正な状態を表せる、コメントの誤りと重複、「seats often run in task worktrees」の裏付けがない、テストの見出しの空行、recipe と skill が保護ディレクトリの例外を書いていない。/test への引き継ぎ: doctor.go の配線を固定するテストがない、AC-1 の「add」側の否定の確認がない
 - 2026-09-27 work: Slice C は implementer に委譲(a2faa60、9 ファイル)。6 件を修正し、doctor.go の配線を固定するテスト(`runDoctorOpts` 経由でプロジェクト内の保存先の文が出る)と AC-1 の否定の確認を追加。配線を "" に戻すとその 1 件だけが落ちることを implementer が確認。orchestrator は HEAD 一致・porcelain 空・変更ファイル・差分・テストを確認
+- 2026-09-27 verify(`docs/reports/verify-2026-09-27-doctor-agmsg-store-in-project.md`、ebb112d): pass。AC-1〜AC-7 を対応付け、AC-8 は静的な半分のみ(`go test` は /test)。プロジェクト外の文は main と byte 一致、文書の drift なし
+- 2026-09-27 中断: ユーザーの依頼で、別のターミナルで続行するため /test の途中で一時停止した(tester は停止し、未コミットの変更なし)。再開の手順は下の「再開の手順」の節
 ## Progress checklist
 
 - [x] Plan reviewed
@@ -104,6 +106,18 @@ agmsg の保存先がプロジェクトディレクトリ(doctor の対象ディ
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
+
+## 再開の手順(2026-09-27 中断時点)
+
+- worktree: `.claude/worktrees/doctor-agmsg-store-in-project`、branch `fix/doctor-agmsg-store-in-project`(未 push)。この節を追加したコミットが HEAD。`git status --porcelain` は空
+- pipeline の状態: `.harness/state/standard-pipeline/active-plan.json` と `cycle-count.json`(cycle 1、cap 2)は worktree に残してある。消さずにそのまま使う
+- 済み: plan(Codex plan advisory の MEDIUM 1 件を反映)、work(Slice A 24e455f、B c71a93b、C a2faa60)、self-review cycle 1(LOW 6、すべて Slice C で修正)、verify cycle 1(pass)
+- 次に行うこと(この順):
+  1. /test cycle 1(`tester`): `./scripts/run-test.sh`、`go test ./internal/cli/ -run 'CodexAgmsgWritableRoot|Doctor' -count=1 -race`、`TMPDIR=/tmp go test ./internal/cli/... -count=1`。mutation(判定を常に true / false、`!blocked` を外す、doctor.go で "" を渡す、2 つの文の入れ替え)、ビルドしたバイナリと main のバイナリで実機の比較(プロジェクト内・`.agents` の下・プロジェクト外)。実機は必ず `env -u ZDOTDIR HOME=<偽の HOME> CODEX_HOME=<偽の codex home>` で実行し、本物の HOME / `~/.codex` / agmsg の保存先に触れない。report は `docs/reports/test-2026-09-27-doctor-agmsg-store-in-project.md`
+  2. /sync-docs(`doc-maintainer`): recipe 2 コピー、`/org` skill 4 面、tech-debt の行は Slice B / C で更新済み。drift の再確認と、この plan への記録、sync-docs の report
+  3. /cross-review: worktree で Codex の review(`codex -m gpt-6-astra -c 'model_reasoning_effort=xhigh' exec review --base main`、stdin は `/dev/null`)を実行し、triage を `docs/reports/cross-review-triage-doctor-agmsg-store-in-project.md` に書く(件数は `count_triage_findings` で確認)
+  4. /pr: `Closes #170`。push の前に `./scripts/run-verify.sh`、`TMPDIR=/tmp go test ./internal/cli/... -count=1`、`./scripts/secret-scan-branch.sh --strict`(exit 0 のときだけ push)。差分が 500 行を超えるので walkthrough を書く。gh の書き込みは `gh auth switch --hostname github.com --user yoshpy-dev` と同じコマンドの中で行い、終わったら `hiroki-yoshioka_dena` に戻す。plan を確定(Status、PR 番号、AC のチェック)してから archive、再 scan、push。CI が pass したら merge(このリポジトリでは自作 PR の CI pass 後の merge が承認済み)、`./scripts/ralph-worktree.sh cleanup --id plan-doctor-agmsg-store-in-project --force-branch`、main を pull
+- 注意: コミットは単独の Bash 呼び出しで、メッセージは heredoc から `-F -` で渡す(行番号付きの検索や表示、run-verify と同じ呼び出しに入れると PreToolUse の hook が誤って止める)。secret 風のリテラルを fixture・report・コメントに書かない
 
 ## Readiness checklist
 
