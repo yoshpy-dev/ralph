@@ -224,17 +224,49 @@ run_with_env() {
   set -e
 }
 
-# Stub git binaries for the attribute-source cases. Each one handles a
-# single git subcommand and runs the real git for everything else.
+# The merge-derived attribute cases need a real git 2.41 or later, which
+# GIT_ATTR_SOURCE needs; on an older git the script refuses them by design
+# (test_attr_real_old_git checks that instead). The version is read the
+# same way tests/test-secret-scan.sh reads it.
+git_version="$(git --version | awk '{ print $3 }')"
+git_major=${git_version%%.*}
+git_minor=${git_version#*.}
+git_minor=${git_minor%%.*}
+if [ "$git_major" -gt 2 ] || { [ "$git_major" -eq 2 ] && [ "$git_minor" -ge 41 ]; }; then
+  merge_attr_supported=1
+else
+  merge_attr_supported=0
+fi
+
+# skip_without_merge_attr <description> -- prints a SKIP line and succeeds
+# when the host git is older than 2.41, so the caller returns before a
+# case that needs the merge-derived path.
+skip_without_merge_attr() {
+  [ "$merge_attr_supported" -eq 0 ] || return 1
+  printf '  SKIP: %s (git %s is older than 2.41)\n' "$1" "$git_version"
+}
+
+# Stub binaries for the attribute-source cases. Each one handles a single
+# call, matched on its whole argument list since the script puts -c
+# options before the subcommand, and runs the real binary for everything
+# else.
 real_git="$(command -v git)"
 stub_merge_tree_fails="$workdir/stub-merge-tree-fails"
 stub_old_git="$workdir/stub-old-git"
 stub_no_write_tree="$workdir/stub-no-write-tree"
-mkdir -p "$stub_merge_tree_fails" "$stub_old_git" "$stub_no_write_tree"
+stub_driver_list_fails="$workdir/stub-driver-list-fails"
+stub_attr_diff_fails="$workdir/stub-attr-diff-fails"
+stub_malformed_version="$workdir/stub-malformed-version"
+stub_empty_version="$workdir/stub-empty-version"
+stub_grep_fails="$workdir/stub-grep-fails"
+no_stub="$workdir/no-stub"
+mkdir -p "$stub_merge_tree_fails" "$stub_old_git" "$stub_no_write_tree" \
+  "$stub_driver_list_fails" "$stub_attr_diff_fails" "$stub_malformed_version" \
+  "$stub_empty_version" "$stub_grep_fails" "$no_stub"
 cat > "$stub_merge_tree_fails/git" <<EOF
 #!/bin/sh
-case "\$1 \$2" in
-  "merge-tree --write-tree") printf 'fatal: stub merge-tree failure\n' >&2; exit 128 ;;
+case " \$* " in
+  *" merge-tree --write-tree "*) printf 'fatal: stub merge-tree failure\n' >&2; exit 128 ;;
 esac
 exec "$real_git" "\$@"
 EOF
@@ -247,15 +279,53 @@ exec "$real_git" "\$@"
 EOF
 cat > "$stub_no_write_tree/git" <<EOF
 #!/bin/sh
-case "\$1" in
-  merge-tree)
+case " \$* " in
+  *" merge-tree "*)
     printf 'usage: git merge-tree <base-tree> <branch1> <branch2>\n' >&2
     exit 129
     ;;
 esac
 exec "$real_git" "\$@"
 EOF
-chmod +x "$stub_merge_tree_fails/git" "$stub_old_git/git" "$stub_no_write_tree/git"
+cat > "$stub_driver_list_fails/git" <<EOF
+#!/bin/sh
+case " \$* " in
+  *" --get-regexp ^merge"*) exit 5 ;;
+esac
+exec "$real_git" "\$@"
+EOF
+cat > "$stub_attr_diff_fails/git" <<EOF
+#!/bin/sh
+case " \$* " in
+  *" diff --quiet "*) exit 5 ;;
+esac
+exec "$real_git" "\$@"
+EOF
+cat > "$stub_malformed_version/git" <<EOF
+#!/bin/sh
+case "\$1" in
+  version | --version) printf 'git version 2.x\n'; exit 0 ;;
+esac
+exec "$real_git" "\$@"
+EOF
+cat > "$stub_empty_version/git" <<EOF
+#!/bin/sh
+case "\$1" in
+  version | --version) exit 0 ;;
+esac
+exec "$real_git" "\$@"
+EOF
+real_grep="$(command -v grep)"
+cat > "$stub_grep_fails/grep" <<EOF
+#!/bin/sh
+case "\$1" in
+  -Eqv) exit 2 ;;
+esac
+exec "$real_grep" "\$@"
+EOF
+chmod +x "$stub_merge_tree_fails/git" "$stub_old_git/git" "$stub_no_write_tree/git" \
+  "$stub_driver_list_fails/git" "$stub_attr_diff_fails/git" "$stub_malformed_version/git" \
+  "$stub_empty_version/git" "$stub_grep_fails/grep"
 # A stub mktemp fails only for the merge-tree error file, so the allowlist
 # temp file before it is still created.
 real_mktemp="$(command -v mktemp)"
@@ -1364,6 +1434,7 @@ test_ac17_scanner_git_failure_is_not_clean() {
 # base removed stops hiding it.
 # ---------------------------------------------------------------------------
 test_attr_base_adds_diff_reads_merge() {
+  skip_without_merge_attr "base adds -diff cases" && return 0
   repo="$workdir/attr-base-adds"
   attr_base_adds_repo "$repo"
   run "$repo" --strict
@@ -1375,6 +1446,7 @@ test_attr_base_adds_diff_reads_merge() {
 }
 
 test_attr_base_removes_diff_reads_merge() {
+  skip_without_merge_attr "base removes -diff cases" && return 0
   repo="$workdir/attr-base-removes"
   git_repo "$repo"
   (
@@ -1402,6 +1474,7 @@ test_attr_base_removes_diff_reads_merge() {
 # A .gitattributes below the root counts as a change too, from any cwd,
 # even with diff.relative=true.
 test_attr_nested_change_reads_merge() {
+  skip_without_merge_attr "nested .gitattributes change cases" && return 0
   repo="$workdir/attr-nested"
   git_repo "$repo"
   (
@@ -1479,6 +1552,7 @@ test_attr_base_unchanged_reads_head() {
 # (CI does not run on a conflicting pull request). HEAD's attributes let
 # the scan find the token; the conflicted merge tree would hide it.
 test_attr_merge_conflict_reads_head() {
+  skip_without_merge_attr "conflicting merge cases" && return 0
   repo="$workdir/attr-conflict"
   git_repo "$repo"
   (
@@ -1548,10 +1622,22 @@ expect_attr_unguaranteed() {
 }
 
 test_attr_merge_unavailable() {
-  expect_attr_unguaranteed "merge-tree exits 128" "$stub_merge_tree_fails" \
-    "git merge-tree --write-tree exited with 128: fatal: stub merge-tree failure"
+  # These reasons come before the version check, so any git reaches them.
   expect_attr_unguaranteed "git older than 2.41" "$stub_old_git" \
     "git version 2.40.1 is not 2.41 or later, which GIT_ATTR_SOURCE needs"
+  expect_attr_unguaranteed "a version string that does not parse" "$stub_malformed_version" \
+    "git version 2.x is not 2.41 or later, which GIT_ATTR_SOURCE needs"
+  expect_attr_unguaranteed "an empty version string" "$stub_empty_version" \
+    "an unreadable git version is not 2.41 or later, which GIT_ATTR_SOURCE needs"
+  expect_attr_unguaranteed "listing the merge driver config fails" "$stub_driver_list_fails" \
+    "listing the local merge driver config failed (git config exited with 5)"
+  expect_attr_unguaranteed "comparing .gitattributes with the base fails" "$stub_attr_diff_fails" \
+    "(git diff exited with 5)"
+
+  # These need a real git 2.41 or later to get past the version check.
+  skip_without_merge_attr "merge-tree failure cases" && return 0
+  expect_attr_unguaranteed "merge-tree exits 128" "$stub_merge_tree_fails" \
+    "git merge-tree --write-tree exited with 128: fatal: stub merge-tree failure"
   expect_attr_unguaranteed "merge-tree without --write-tree" "$stub_no_write_tree" \
     "this git's merge-tree has no --write-tree"
   expect_attr_unguaranteed "no temporary file for merge-tree's errors" "$stub_merge_mktemp_fails" \
@@ -1569,6 +1655,120 @@ test_attr_merge_unavailable() {
   chmod -R u+w "$repo/.git/objects"
   assert_exit "read-only object database: strict mode exits 3" 3
   assert_stderr_contains "read-only object database: strict reason names merge-tree's exit" "git merge-tree --write-tree exited with 128"
+}
+
+# On a real git older than 2.41, the documented behavior holds: --strict
+# exits 3 naming the version, and default mode reads HEAD's attributes.
+# A git 2.41 or later reaches the same path only through the stub above.
+test_attr_real_old_git() {
+  if [ "$merge_attr_supported" -eq 1 ]; then
+    printf '  SKIP: the real git older than 2.41 case (git %s is 2.41 or later; the stubbed old git covers it)\n' "$git_version"
+    return 0
+  fi
+  expect_attr_unguaranteed "real git $git_version" "$no_stub" \
+    "is not 2.41 or later, which GIT_ATTR_SOURCE needs"
+}
+
+# attr_conflict_repo <dir> -- main and feature (HEAD) both edit
+# .gitattributes after the fork, so git's default merge conflicts there;
+# feature adds a token in leak.txt, and main's side marks *.txt -diff.
+# HEAD's attributes let the scan find the token; a merge that keeps both
+# sides (a union merge) hides it.
+attr_conflict_repo() {
+  git_repo "$1"
+  (
+    cd "$1"
+    git checkout -q -B main
+    printf '# attributes\n' > .gitattributes
+    git add .gitattributes
+    git commit -q -m 'add .gitattributes'
+    git checkout -q -b feature
+    printf '*.md text\n' > .gitattributes
+    token="$(printf 'ghp_%s' 'ATTRISOLATEabcdefghijklmnopqrst')"
+    printf 'deploy token %s\n' "$token" > leak.txt
+    git add .gitattributes leak.txt
+    git commit -q -m 'change .gitattributes and add leaked token'
+    git checkout -q main
+    printf '*.txt -diff\n' > .gitattributes
+    git add .gitattributes
+    git commit -q -m 'mark txt files -diff'
+    git checkout -q feature
+  )
+}
+
+# git merge-tree runs isolated from local settings that change how a
+# .gitattributes merges; CI's merge has none of them. Each case must give
+# the default merge's result.
+test_attr_merge_isolated_from_local_config() {
+  skip_without_merge_attr "merge-tree isolation cases" && return 0
+
+  # merge.renormalize with a clean filter for .gitattributes, chosen by a
+  # user-level attributes file: the filter rewrites every side to
+  # "*.txt -diff". Both sides edit different lines, so the default merge
+  # is clean and keeps no -diff.
+  repo="$workdir/attr-isolate-renormalize"
+  git_repo "$repo"
+  (
+    cd "$repo"
+    git checkout -q -B main
+    printf '# top\n# middle\n# bottom\n' > .gitattributes
+    git add .gitattributes
+    git commit -q -m 'add .gitattributes'
+    git checkout -q -b feature
+    printf '# top\n# middle\n*.md text\n' > .gitattributes
+    token="$(printf 'ghp_%s' 'ATTRRENORMabcdefghijklmnopqrstu')"
+    printf 'deploy token %s\n' "$token" > leak.txt
+    git add .gitattributes leak.txt
+    git commit -q -m 'change the last line and add leaked token'
+    git checkout -q main
+    printf '*.cfg text\n# middle\n# bottom\n' > .gitattributes
+    git add .gitattributes
+    git commit -q -m 'change the first line'
+    git checkout -q feature
+  )
+  run "$repo" --strict
+  assert_exit "renormalize fixture under the default config: the merge keeps no -diff" 1
+  printf '#!/bin/sh\ncat >/dev/null\nprintf %s\n' "'*.txt -diff\\n'" > "$workdir/hide-attributes-filter"
+  chmod +x "$workdir/hide-attributes-filter"
+  printf '.gitattributes filter=hide\n' > "$workdir/user-attributes-filter"
+  git -C "$repo" config core.attributesFile "$workdir/user-attributes-filter"
+  # git runs the filter through the shell, and $workdir holds spaces.
+  git -C "$repo" config filter.hide.clean "'$workdir/hide-attributes-filter'"
+  git -C "$repo" config merge.renormalize true
+  run "$repo" --strict
+  assert_exit "merge.renormalize with a local clean filter: the merge matches the default and the token is found" 1
+  assert_stderr_contains "merge.renormalize with a local clean filter: notice names the merge" "attributes read from the merge of main and HEAD"
+
+  # A user-level attributes file giving .gitattributes merge=union.
+  repo="$workdir/attr-isolate-user-union"
+  attr_conflict_repo "$repo"
+  printf '.gitattributes merge=union\n' > "$workdir/user-attributes-union"
+  git -C "$repo" config core.attributesFile "$workdir/user-attributes-union"
+  run "$repo" --strict
+  assert_exit "user attributes file with merge=union: the merge conflicts as by default and HEAD's attributes find the token" 1
+  assert_stderr_contains "user attributes file with merge=union: conflict notice as by default" "but the merge conflicts; attributes read from HEAD"
+
+  # An uncommitted working-tree .gitattributes giving itself merge=union.
+  repo="$workdir/attr-isolate-worktree-union"
+  attr_conflict_repo "$repo"
+  printf '*.md text\n.gitattributes merge=union\n' > "$repo/.gitattributes"
+  run "$repo" --strict
+  assert_exit "working-tree .gitattributes with merge=union: the merge conflicts as by default" 1
+  assert_stderr_contains "working-tree .gitattributes with merge=union: conflict notice as by default" "but the merge conflicts; attributes read from HEAD"
+
+  # An inherited GIT_ATTR_SOURCE naming a tree whose .gitattributes gives
+  # itself merge=union, or marks *.txt -diff.
+  repo="$workdir/attr-isolate-inherited-union"
+  attr_conflict_repo "$repo"
+  union_blob="$(printf '.gitattributes merge=union\n' | git -C "$repo" hash-object -w --stdin)"
+  union_tree="$(printf '100644 blob %s\t.gitattributes\n' "$union_blob" | git -C "$repo" mktree)"
+  run_with_env "$repo" "GIT_ATTR_SOURCE=$union_tree" --strict
+  assert_exit "inherited GIT_ATTR_SOURCE with merge=union: the merge conflicts as by default" 1
+  assert_stderr_contains "inherited GIT_ATTR_SOURCE with merge=union: conflict notice as by default" "but the merge conflicts; attributes read from HEAD"
+  hiding_blob="$(printf '*.txt -diff\n' | git -C "$repo" hash-object -w --stdin)"
+  hiding_tree="$(printf '100644 blob %s\t.gitattributes\n' "$hiding_blob" | git -C "$repo" mktree)"
+  run_with_env "$repo" "GIT_ATTR_SOURCE=$hiding_tree" --strict
+  assert_exit "inherited GIT_ATTR_SOURCE marking *.txt -diff: no effect, the token is found" 1
 }
 
 # CI's clone has no .git/info/attributes, and git reads a local one under
@@ -1652,6 +1852,13 @@ test_info_attributes_refused() {
     assert_exit "an unreadable .git/info/attributes: default mode exits 0" 0
   fi
   chmod 644 "$info_attributes"
+
+  # grep failing on the file (exit 2) cannot tell whether it holds a rule.
+  run_with_env "$repo" "PATH=$stub_grep_fails:$PATH" --strict
+  assert_exit "reading .git/info/attributes fails: strict mode exits 3" 3
+  assert_stderr_contains "reading .git/info/attributes fails: the reason names grep's exit" "cannot scan, reading .git/info/attributes failed (grep exited with 2)"
+  run_with_env "$repo" "PATH=$stub_grep_fails:$PATH"
+  assert_exit "reading .git/info/attributes fails: default mode exits 0" 0
   rm -f "$info_attributes"
 }
 
@@ -1721,6 +1928,8 @@ test_attr_base_unchanged_reads_head
 test_attr_merge_conflict_reads_head
 test_attr_local_merge_driver
 test_attr_merge_unavailable
+test_attr_real_old_git
+test_attr_merge_isolated_from_local_config
 test_info_attributes_refused
 test_usage_and_space_path
 

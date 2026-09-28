@@ -22,9 +22,12 @@
 # the scanner reads HEAD's. When it did, the scanner reads the tree of
 # `git merge-tree --write-tree <base> HEAD` (through
 # RALPH_SECRET_SCAN_ATTR_SOURCE; an inherited value is never used), and a
-# notice says so. A merge that conflicts reads HEAD's attributes in both
-# modes, with a notice: CI does not run on a conflicting pull request. When
-# the merge cannot be computed the way CI's is (a local merge driver in
+# notice says so. merge-tree runs with git's default merge settings and
+# with HEAD's committed attributes only, so no local attributes file,
+# renormalization, or rename setting changes how .gitattributes merges.
+# A merge that conflicts reads HEAD's attributes in both modes, with a
+# notice: CI does not run on a conflicting pull request. When the merge
+# cannot be computed the way CI's is (a local merge driver in
 # merge.default or merge.<name>.driver, a git older than 2.41, a merge-tree
 # without --write-tree, or merge-tree failing), --strict exits 3, and
 # default mode reports it and reads HEAD's attributes. Either way the
@@ -408,6 +411,25 @@ git_version_at_least() {
 #     merge-tree has no --write-tree or exits with another code; no
 #     temporary file for its errors can be created:
 #     attributes_unguaranteed.
+# merge-tree runs isolated from the local settings that change how a
+# .gitattributes merges, since CI's merge has none of them:
+#   GIT_ATTR_SOURCE=<HEAD's commit>  the attributes that pick merge
+#                                    drivers come from HEAD's commit, not
+#                                    the working tree or an inherited value
+#   GIT_ATTR_NOSYSTEM=1,             the system-wide and user-level
+#   core.attributesFile=/dev/null    attributes files (a merge=union or a
+#                                    filter for .gitattributes)
+#   attr.tree=                       a local attr.tree
+#   merge.renormalize=false          no clean filter runs on the merged
+#                                    blobs (git's default is off)
+#   merge.renames=true,              rename handling as git's defaults have
+#   merge.directoryRenames=conflict, it; merge.renames otherwise follows
+#   merge.renameLimit=7000           diff.renames, and merge.renameLimit
+#                                    follows diff.renameLimit before
+#                                    falling back to 7000
+# merge-tree reads no diff.algorithm (it sets up its merge without the UI
+# config), and merge.conflictStyle changes only a conflict's content,
+# which is never read.
 use_merge_attributes() {
   changed="${base_ref} changed .gitattributes since ${base_short}"
   drivers_rc=0
@@ -434,8 +456,24 @@ use_merge_attributes() {
     attributes_unguaranteed "$changed, and a temporary file for git merge-tree's errors could not be created"
     return 0
   fi
+  if ! head_commit="$(git rev-parse --verify --quiet 'HEAD^{commit}')"; then
+    attributes_unguaranteed "$changed, and HEAD does not resolve to a commit"
+    return 0
+  fi
   merge_rc=0
-  merge_out="$(git merge-tree --write-tree "$base_ref_full" HEAD 2>"$tmp_merge_err")" || merge_rc=$?
+  merge_out="$(
+    GIT_ATTR_SOURCE=$head_commit
+    GIT_ATTR_NOSYSTEM=1
+    export GIT_ATTR_SOURCE GIT_ATTR_NOSYSTEM
+    exec git \
+      -c core.attributesFile=/dev/null \
+      -c attr.tree= \
+      -c merge.renormalize=false \
+      -c merge.renames=true \
+      -c merge.directoryRenames=conflict \
+      -c merge.renameLimit=7000 \
+      merge-tree --write-tree "$base_ref_full" HEAD 2>"$tmp_merge_err"
+  )" || merge_rc=$?
   case "$merge_rc" in
     0)
       if attr_source_tree="$(git rev-parse --verify --quiet "${merge_out%%"$newline"*}^{tree}")"; then
