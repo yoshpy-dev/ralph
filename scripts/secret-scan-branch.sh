@@ -27,7 +27,16 @@
 # the merge cannot be computed the way CI's is (a local merge driver in
 # merge.default or merge.<name>.driver, a git older than 2.41, a merge-tree
 # without --write-tree, or merge-tree failing), --strict exits 3, and
-# default mode reports it and reads HEAD's attributes.
+# default mode reports it and reads HEAD's attributes. Either way the
+# reason says how to get past it: merge or rebase the base into the branch,
+# so HEAD carries the base's .gitattributes, and re-run.
+#
+# CI's clone has no .git/info/attributes, and no setting stops git from
+# reading a local one, so while that file holds a rule this script does not
+# scan ("cannot scan": exit 3 under --strict, exit 0 in default mode) -- see
+# the comment above check_info_attributes below. The scanner itself reads
+# the file as git does, so an unrelated rule there does not block the
+# scanner's other callers, such as the merge guard.
 #
 # Usage: secret-scan-branch.sh [--strict]
 #
@@ -36,10 +45,11 @@
 #      could not determine what to scan (see --strict below)
 #   1  scanned and found something
 #   2  usage error
-#   3  --strict: could not determine what to scan, nothing to scan, or the
-#      base changed .gitattributes and the merge result's attributes cannot
-#      be computed the way CI's are; either mode: the scanner could not
-#      read the range (its own exit 3, propagated)
+#   3  --strict: could not determine what to scan (a rule in
+#      .git/info/attributes included), nothing to scan, or the base changed
+#      .gitattributes and the merge result's attributes cannot be computed
+#      the way CI's are; either mode: the scanner could not read the range
+#      (its own exit 3, propagated)
 # In either mode, a scanner exit other than 0 or 1 is reported as "scanner
 # failed with exit <rc>" and propagated as this script's exit code.
 #
@@ -177,6 +187,39 @@ fi
 if [ ! -x "$scanner" ]; then
   cannot_scan "scanner not found or not executable at $scanner"
 fi
+
+# check_info_attributes -- CI's fresh clone has no .git/info/attributes,
+# and no option, setting, or environment variable stops git from reading a
+# local one (GIT_ATTR_SOURCE does not), so the scanner reads it. A file
+# that holds a rule line (any line but a blank one or a "#" comment, the
+# lines git's own parser skips) therefore stops this scan (cannot_scan)
+# rather than scanning under attributes CI does not have. The rules are not
+# interpreted, so a macro or an unset form cannot slip past. A path that
+# exists but is not a readable regular file (a directory, a FIFO, no read
+# permission) stops it too; a missing file, or a symlink to one, is nothing
+# to read, as git treats it. The check sits here, not in the scanner, so
+# an unrelated rule does not block the scanner's other callers (the merge
+# guard runs on every non-fast-forward merge).
+check_info_attributes() {
+  if ! info_attributes="$(git rev-parse --git-path info/attributes 2>/dev/null)"; then
+    cannot_scan "could not locate .git/info/attributes"
+  fi
+  [ -e "$info_attributes" ] || return 0
+  if [ ! -f "$info_attributes" ] || [ ! -r "$info_attributes" ]; then
+    cannot_scan "$info_attributes exists but cannot be read as a file, so whether it holds attribute rules that CI does not read is unknown"
+  fi
+  # git's parser skips leading spaces, tabs, and carriage returns before
+  # deciding that a line is blank or a comment.
+  skipped_line="^[ $(printf '\t\r')]*(#|\$)"
+  rule_rc=0
+  grep -Eqv -- "$skipped_line" "$info_attributes" || rule_rc=$?
+  case "$rule_rc" in
+    0) cannot_scan "$info_attributes holds attribute rules that CI does not read; move them to .gitattributes or remove the file" ;;
+    1) ;;
+    *) cannot_scan "reading $info_attributes failed (grep exited with $rule_rc)" ;;
+  esac
+}
+check_info_attributes
 
 base_short="$(git rev-parse --short "$merge_base")"
 head_short="$(git rev-parse --short HEAD)"
@@ -321,12 +364,16 @@ fi
 # attributes_unguaranteed <reason> -- the base changed .gitattributes, but
 # the merge result's attributes cannot be computed the way CI's merge
 # commit has them. --strict stops with exit 3 (cannot_scan); default mode
-# reports the reason and lets the scanner read HEAD's attributes.
+# reports the reason and lets the scanner read HEAD's attributes. Both
+# name the remedy: once the base is merged or rebased into the branch, the
+# merge-base is the base tip, nothing changed since it, and HEAD's
+# attributes are the merge's.
 attributes_unguaranteed() {
+  remedy="merge or rebase ${base_ref} into this branch so HEAD carries its .gitattributes, then re-run"
   if [ "$strict" -eq 1 ]; then
-    cannot_scan "$1"
+    cannot_scan "$1; $remedy"
   fi
-  report "$1; attributes read from HEAD"
+  report "$1; attributes read from HEAD; $remedy"
 }
 
 # git_version_at_least <major> <minor> <`git version` output> -- true when
@@ -358,7 +405,8 @@ git_version_at_least() {
 #   - a local merge.default or merge.<name>.driver would run inside
 #     merge-tree, while CI's merge runs none; a git older than 2.41 ignores
 #     GIT_ATTR_SOURCE (and one older than 2.38 has no --write-tree);
-#     merge-tree has no --write-tree or exits with another code:
+#     merge-tree has no --write-tree or exits with another code; no
+#     temporary file for its errors can be created:
 #     attributes_unguaranteed.
 use_merge_attributes() {
   changed="${base_ref} changed .gitattributes since ${base_short}"
@@ -381,7 +429,11 @@ use_merge_attributes() {
     attributes_unguaranteed "$changed, and ${git_version_text:-an unreadable git version} is not 2.41 or later, which GIT_ATTR_SOURCE needs"
     return 0
   fi
-  tmp_merge_err="$(mktemp "${TMPDIR:-/tmp}/ralph-secret-scan-branch-merge.XXXXXX")"
+  if ! tmp_merge_err="$(mktemp "${TMPDIR:-/tmp}/ralph-secret-scan-branch-merge.XXXXXX")"; then
+    tmp_merge_err=""
+    attributes_unguaranteed "$changed, and a temporary file for git merge-tree's errors could not be created"
+    return 0
+  fi
   merge_rc=0
   merge_out="$(git merge-tree --write-tree "$base_ref_full" HEAD 2>"$tmp_merge_err")" || merge_rc=$?
   case "$merge_rc" in

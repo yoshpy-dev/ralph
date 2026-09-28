@@ -51,7 +51,7 @@ GIT_CONFIG_SYSTEM=/dev/null
 GIT_CONFIG_NOSYSTEM=1
 GIT_TERMINAL_PROMPT=0
 export HOME GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM GIT_TERMINAL_PROMPT
-unset XDG_CONFIG_HOME
+unset XDG_CONFIG_HOME RALPH_SECRET_SCAN_ATTR_SOURCE GIT_ATTR_SOURCE
 
 # run_bin <binary> <cwd> [args...] -- runs <binary> from <cwd> with a clean
 # slate for the three env vars this script reads. Captures stdout/stderr
@@ -256,6 +256,19 @@ esac
 exec "$real_git" "\$@"
 EOF
 chmod +x "$stub_merge_tree_fails/git" "$stub_old_git/git" "$stub_no_write_tree/git"
+# A stub mktemp fails only for the merge-tree error file, so the allowlist
+# temp file before it is still created.
+real_mktemp="$(command -v mktemp)"
+stub_merge_mktemp_fails="$workdir/stub-merge-mktemp-fails"
+mkdir -p "$stub_merge_mktemp_fails"
+cat > "$stub_merge_mktemp_fails/mktemp" <<EOF
+#!/bin/sh
+case "\$*" in
+  *ralph-secret-scan-branch-merge*) exit 1 ;;
+esac
+exec "$real_mktemp" "\$@"
+EOF
+chmod +x "$stub_merge_mktemp_fails/mktemp"
 
 # attr_base_adds_repo <dir> -- feature (HEAD) forks from main and adds a
 # token in leak.txt; main then commits a .gitattributes marking *.txt
@@ -1505,25 +1518,33 @@ test_attr_local_merge_driver() {
     assert_stderr_contains "local $key: strict reason names the key" "cannot scan, main changed .gitattributes since "
     assert_stderr_contains "local $key: strict reason names the config" "local merge driver config ($key)"
     assert_stderr_not_contains "local $key: strict never reports clean" ": clean"
+    assert_stderr_contains "local $key: strict reason names the remedy" "$attr_remedy"
     run "$repo"
     assert_exit "local $key: default mode reads HEAD's attributes and finds the token" 1
-    assert_stderr_contains "local $key: default notice says HEAD's attributes are read" "($key) would run in git merge-tree but not in CI's merge; attributes read from HEAD"
+    assert_stderr_contains "local $key: default notice says HEAD's attributes are read" "($key) would run in git merge-tree but not in CI's merge; attributes read from HEAD; $attr_remedy"
   done
 }
 
+# attr_remedy -- the way past every refusal or fallback of the base-changed
+# case: once main is merged or rebased into the branch, HEAD's attributes
+# are the merge's.
+attr_remedy="merge or rebase main into this branch so HEAD carries its .gitattributes, then re-run"
+
 # expect_attr_unguaranteed <description> <PATH prefix> <reason> -- with the
-# base-adds fixture and a stub git first in PATH, --strict exits 3 with
-# <reason>, and default mode reads HEAD's attributes and finds the token.
+# base-adds fixture and a stub first in PATH, --strict exits 3 with
+# <reason> and the remedy, and default mode reads HEAD's attributes, says
+# so with the remedy, and finds the token.
 expect_attr_unguaranteed() {
   repo="$workdir/attr-unguaranteed-$(printf '%s' "$1" | tr -c 'a-z0-9' '-')"
   attr_base_adds_repo "$repo"
   run_with_env "$repo" "PATH=$2:$PATH" --strict
   assert_exit "$1: strict mode exits 3" 3
-  assert_stderr_contains "$1: strict reason" "$3"
+  assert_stderr_contains "$1: strict reason" "$3; $attr_remedy"
   assert_stderr_not_contains "$1: strict never reports clean" ": clean"
   run_with_env "$repo" "PATH=$2:$PATH"
   assert_exit "$1: default mode reads HEAD's attributes and finds the token" 1
-  assert_stderr_contains "$1: default notice says HEAD's attributes are read" "$3; attributes read from HEAD"
+  assert_stderr_contains "$1: default notice says HEAD's attributes are read" "$3; attributes read from HEAD; $attr_remedy"
+  assert_stderr_contains "$1: default mode still prints the scan's status line" "against main: findings"
 }
 
 test_attr_merge_unavailable() {
@@ -1533,6 +1554,8 @@ test_attr_merge_unavailable() {
     "git version 2.40.1 is not 2.41 or later, which GIT_ATTR_SOURCE needs"
   expect_attr_unguaranteed "merge-tree without --write-tree" "$stub_no_write_tree" \
     "this git's merge-tree has no --write-tree"
+  expect_attr_unguaranteed "no temporary file for merge-tree's errors" "$stub_merge_mktemp_fails" \
+    "a temporary file for git merge-tree's errors could not be created"
 
   # The real merge-tree fails when it cannot write the merged objects.
   if [ "$(id -u)" -eq 0 ]; then
@@ -1548,9 +1571,13 @@ test_attr_merge_unavailable() {
   assert_stderr_contains "read-only object database: strict reason names merge-tree's exit" "git merge-tree --write-tree exited with 128"
 }
 
-# CI's clone has no .git/info/attributes; the scanner exits 3 on a rule
-# there, and --strict reports a scanner failure, never clean.
-test_info_attributes_stops_strict() {
+# CI's clone has no .git/info/attributes, and git reads a local one under
+# every setting, so while it holds a rule line this script does not scan:
+# "cannot scan", exit 3 under --strict and exit 0 without a scan in default
+# mode. Blank lines and "#" comments are not rules. A path that exists but
+# is not a readable regular file cannot be checked and stops the scan too;
+# a symlink to a missing file is nothing to read, as git treats it.
+test_info_attributes_refused() {
   repo="$workdir/info-attributes"
   git_repo "$repo"
   (
@@ -1564,17 +1591,68 @@ test_info_attributes_stops_strict() {
     printf 'deploy token %s\n' "$token" > leak.txt
     git add leak.txt
     git commit -q -m 'add leaked token'
-    info_attributes="$(git rev-parse --git-path info/attributes)"
-    mkdir -p "$(dirname "$info_attributes")"
-    printf '*.txt -diff\n' > "$info_attributes"
   )
+  info_attributes="$(git -C "$repo" rev-parse --absolute-git-dir)/info/attributes"
+  mkdir -p "$(dirname "$info_attributes")"
+
+  printf '*.txt -diff\n' > "$info_attributes"
   run "$repo" --strict
-  assert_exit ".git/info/attributes rule: strict mode exits with the scanner's 3" 3
-  assert_stderr_contains ".git/info/attributes rule: labeled a scanner failure" "scanner failed with exit 3"
-  assert_stderr_contains ".git/info/attributes rule: the scanner's reason is shown" "holds attribute rules that CI does not read"
-  assert_stderr_not_contains ".git/info/attributes rule: never reported clean" ": clean"
+  assert_exit ".git/info/attributes rule: strict mode exits 3" 3
+  assert_stderr_contains ".git/info/attributes rule: the reason names the file and the fix" "cannot scan, .git/info/attributes holds attribute rules that CI does not read; move them to .gitattributes or remove the file"
+  assert_stderr_not_contains ".git/info/attributes rule: strict never reports clean" ": clean"
+  assert_stderr_not_contains ".git/info/attributes rule: strict does not scan" "scanned "
   run "$repo"
-  assert_exit ".git/info/attributes rule: default mode also exits 3" 3
+  assert_exit ".git/info/attributes rule: default mode exits 0" 0
+  assert_stderr_contains ".git/info/attributes rule: default mode gives the same reason" "cannot scan, .git/info/attributes holds attribute rules that CI does not read"
+  assert_stderr_not_contains ".git/info/attributes rule: default mode does not scan" "scanned "
+
+  printf '*.md linguist-documentation\n' > "$info_attributes"
+  run "$repo" --strict
+  assert_exit ".git/info/attributes rule unrelated to diffs: strict mode still exits 3" 3
+
+  printf '# a comment\n\n   # an indented comment\n\t\n' > "$info_attributes"
+  run "$repo" --strict
+  assert_exit ".git/info/attributes with only comments and blank lines: strict scans and finds the token" 1
+  assert_stderr_contains ".git/info/attributes with only comments and blank lines: reports findings" "against main: findings"
+  : > "$info_attributes"
+  run "$repo" --strict
+  assert_exit "empty .git/info/attributes: strict scans and finds the token" 1
+
+  rm -f "$info_attributes"
+  printf '*.txt -diff\n' > "$workdir/info-attributes-rules"
+  ln -s "$workdir/info-attributes-rules" "$info_attributes"
+  run "$repo" --strict
+  assert_exit ".git/info/attributes symlinked to a rules file: strict mode exits 3" 3
+  assert_stderr_contains ".git/info/attributes symlinked to a rules file: the reason names the file" "holds attribute rules that CI does not read"
+  run "$repo"
+  assert_exit ".git/info/attributes symlinked to a rules file: default mode exits 0" 0
+  rm -f "$info_attributes"
+  ln -s "$workdir/does-not-exist.attributes" "$info_attributes"
+  run "$repo" --strict
+  assert_exit ".git/info/attributes symlinked to a missing file: strict scans and finds the token" 1
+
+  rm -f "$info_attributes"
+  mkdir "$info_attributes"
+  run "$repo" --strict
+  assert_exit "a directory at .git/info/attributes: strict mode exits 3" 3
+  assert_stderr_contains "a directory at .git/info/attributes: the reason names it" "cannot scan, .git/info/attributes exists but cannot be read as a file"
+  run "$repo"
+  assert_exit "a directory at .git/info/attributes: default mode exits 0" 0
+  rmdir "$info_attributes"
+
+  printf '# only a comment\n' > "$info_attributes"
+  chmod 000 "$info_attributes"
+  if [ "$(id -u)" -eq 0 ]; then
+    printf '  SKIP: an unreadable .git/info/attributes (root can read it anyway)\n'
+  else
+    run "$repo" --strict
+    assert_exit "an unreadable .git/info/attributes: strict mode exits 3" 3
+    assert_stderr_contains "an unreadable .git/info/attributes: the reason names it" "cannot scan, .git/info/attributes exists but cannot be read as a file"
+    run "$repo"
+    assert_exit "an unreadable .git/info/attributes: default mode exits 0" 0
+  fi
+  chmod 644 "$info_attributes"
+  rm -f "$info_attributes"
 }
 
 # ---------------------------------------------------------------------------
@@ -1643,7 +1721,7 @@ test_attr_base_unchanged_reads_head
 test_attr_merge_conflict_reads_head
 test_attr_local_merge_driver
 test_attr_merge_unavailable
-test_info_attributes_stops_strict
+test_info_attributes_refused
 test_usage_and_space_path
 
 printf '\n-- Summary --\n  PASS: %s\n  FAIL: %s\n' "$pass" "$fail"
