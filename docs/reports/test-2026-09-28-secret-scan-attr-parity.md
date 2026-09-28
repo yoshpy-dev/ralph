@@ -237,3 +237,103 @@ with this plan's Non-goals (CI's own shared gaps) and existing tech-debt entries
 ```
 ./scripts/insights-append.sh --slug secret-scan-attr-parity --flow standard --phase test --cycle 1 --verdict pass --critical 0 --high 0 --medium 0 --low 0 --source skill
 ```
+
+## Cycle 2
+
+- Date: 2026-09-28
+- HEAD at test time: `0dd855e5b522fbb8e8992be223c27078579f6aa1` (`fix/secret-scan-attr-parity`), confirmed clean
+  `git status --porcelain` before and after this cycle
+- Scope: behavioral tests only, re-run against the delta since cycle 1 — cross-review cycle-1 fix Slice E
+  (`fe4f383`: merge-tree isolation, real-git version gate, 4 previously-untested error branches) and cycle-2
+  self-review fixes Slice F (`8443a03`: C2-M1/L2/L3/L4/L5; C2-L1 deferred per the plan's own decision). Verify
+  cycle 2 (`docs/reports/verify-2026-09-28-secret-scan-attr-parity.md` `## Cycle 2`) already passed; `scripts/secret-scan.sh`
+  and `tests/test-secret-scan.sh` have a zero-line diff since cycle 1's HEAD.
+
+### Verdict: PASS
+
+### Execution
+
+| Command | Result |
+|---|---|
+| `./scripts/run-test.sh` | exit 0; `tests/test-secret-scan-branch.sh` 246/0, `tests/test-secret-scan.sh` 123/0, all other shell suites green. Evidence: `docs/evidence/verify-2026-09-28-062828.log` |
+| `sh tests/test-secret-scan-branch.sh` | 246/0, 1 `SKIP` ("the real git older than 2.41 case (git 2.49.0 is 2.41 or later; the stubbed old git covers it)") — matches the expected count exactly |
+| `sh tests/test-secret-scan.sh` | 123/0 |
+| `sh tests/test-run-verify-branch-secret-scan.sh` | 32/0 |
+| `dash tests/test-secret-scan-branch.sh` | 246/0, same single `SKIP` |
+
+### Docker git-version matrix
+
+Same staging technique as cycle 1 (minimal `scripts/`+`tests/` tree under `$HOME`).
+
+| Image | git | `test-secret-scan.sh` | `test-secret-scan-branch.sh` |
+|---|---|---|---|
+| alpine:3.18 | 2.40.4 | 94/0 (2 `SKIP`: 1 real-git-version, 1 root-permission) | 194/0 (10 `SKIP`: 9 real-git-version-gated groups — `base adds/removes -diff`, `nested .gitattributes change`, `conflicting merge`, `merge-tree failure`, `merge-tree isolation`, `merge.renormalize`, `merge.directoryRenames`, `merge-tree environment` — + 1 root-permission, `an unreadable .git/info/attributes`) |
+| alpine:3.19 | 2.43.7 | 122/0 (1 `SKIP`: root-permission) | 241/0 (3 `SKIP`: the same "real git 2.41+, stub covers it" line as the host, + 2 root-permission: `read-only object database`, `an unreadable .git/info/attributes`) |
+
+0 `FAIL` in every cell. The 9 named real-git-version `SKIP` groups on alpine:3.18 are new this cycle (AR-2's real-git
+gate, `skip_without_merge_attr`) — each collapses several assertions that need git 2.41+ into a single line, which
+is why totals do not sum to 246 the way a 1-for-1 SKIP would; this is the intended behavior of that helper, not a
+miscount. My raw counts differ slightly from the handoff's own estimate (197/0 with 9 `SKIP` for 3.18; 246/0 for
+3.19) — the difference traces entirely to root-permission `SKIP`s that also fire in this Docker environment (Alpine's
+default container user is root, which can always read/write, so the two permission-dependent tests `read-only
+object database` and `an unreadable .git/info/attributes` skip under Docker but ran as real assertions on the
+host and, presumably, in whatever non-root environment produced the handoff's estimate) — the same root-permission
+effect cycle 1's report already documented. 0 `FAIL` either way is the signal that matters; no behavior regression.
+
+### Mutation testing
+
+Per the handoff's constraint, all mutations were applied to a **scratch copy** outside the worktree
+(`scripts/secret-scan-branch.sh` + its runtime deps `secret-scan.sh`/`xreview-helpers.sh`, staged into a scratch
+`scripts/`+`tests/` tree with `tests/test-secret-scan-branch.sh` alongside it, so the suite's own `PROJECT_ROOT`
+resolution points at the scratch copy) — the tracked worktree file was never touched. A pristine backup of the
+scratch copy was restored (`cp` from a `.orig`) between every mutation. Baseline run against the untouched scratch
+copy first confirmed 246/0, identical to the tracked file.
+
+| # | Mutation | Result |
+|---|---|---|
+| 1 | Drop `-c merge.renormalize=false` | **1 FAIL** — `merge.renormalize pin: a clean filter the committed .gitattributes names leaves the merge as by default`. (The sibling case using a *user*-level attributes-file filter is a separate, `core.attributesFile`-named test per Slice F's C2-M1 rename — see mutation 6 — so it correctly does not fail here.) |
+| 2 | Drop the `GIT_ATTR_NOSYSTEM=1` export in the merge-tree subshell | **1 FAIL** — `merge-tree environment: GIT_ATTR_NOSYSTEM=1 and GIT_ATTR_SOURCE=HEAD's commit` (reports `NOSYSTEM=0`) |
+| 3 | Drop `-c merge.directoryRenames=conflict` | **2 FAIL** — both `merge.directoryRenames pin` assertions (conflicts as by default / the merge's tree is not used) |
+| 4 | Revert the allowlist `mktemp` guard to the unguarded assignment | **4 FAIL** — all four `no allowlist temp file` assertions (strict exit 3 + reason, default exit 0 + reason) |
+| 5 | Replace `GIT_ATTR_SOURCE=$head_commit` with `unset GIT_ATTR_SOURCE` | **3 FAIL** — both `working-tree .gitattributes with merge=union` assertions (the scenario AR-1 exists specifically to close) + the `merge-tree environment` probe (reports `SOURCE=unset`) |
+| 6 | Drop `-c core.attributesFile=/dev/null` | **2 FAIL** — both `user attributes file with merge=union` assertions (the C2-M1-renamed sibling of mutation 1) |
+
+Every mutation's failure set matches its corresponding pin/design decision exactly, with no bleed into unrelated
+assertions. Final confirmation: scratch copy restored to pristine, `diff` against the tracked worktree file empty,
+re-run 246/0, and `git status --porcelain` / `git rev-parse HEAD` on the worktree unchanged throughout.
+
+### Gap status (delta from cycle 1)
+
+Slice E's "4 previously-untested branches" work closes four of cycle 1's five open gaps outright, and Slice E/F's
+new pins close a fifth (the tech-debt-filed one) and the Docker-portability gap:
+
+- **Closed:** `use_merge_attributes`'s `drivers_rc`=other branch — now tested (`tests/test-secret-scan-branch.sh:1688`,
+  `expect_attr_unguaranteed "listing the merge driver config fails" ...`).
+- **Closed:** the top-level `attr_diff_rc`=other branch — now tested (`:1690`,
+  `expect_attr_unguaranteed "comparing .gitattributes with the base fails" ...`).
+- **Closed:** `check_info_attributes`'s `grep`-exits-other-than-0/1 branch — now tested (`:2033`,
+  `"reading .git/info/attributes fails: the reason names grep's exit"`).
+- **Closed:** `git_version_at_least`'s malformed/empty-version-string branch — now tested (dedicated
+  `stub_malformed_version` and `stub_empty_version` fixtures).
+- **Closed:** cycle 1's Docker/real-old-git test-portability gap — `tests/test-secret-scan-branch.sh` now has its
+  own real-git-version `SKIP` gate (`skip_without_merge_attr`, 9 named groups), confirmed 0 `FAIL` on alpine:3.18
+  (real git 2.40.4) this cycle, matching the sibling file's already-working pattern.
+- **Superseded/closed:** cycle 1's gap 6 (`merge.renames`-like config not separately pinned, filed as unreproduced
+  tech-debt) — Slice E added `merge.renormalize=false`, `merge.directoryRenames=conflict`, and `merge.renameLimit=7000`
+  pins, each now covered by a dedicated red/green test (mutations 1 and 3 above); the plan's own notes confirm the
+  tech-debt row was removed.
+
+**Still open, unchanged from the verify report's own cycle-2 finding (not new this cycle):** the `HEAD does not
+resolve to a commit` branch in `use_merge_attributes` (`scripts/secret-scan-branch.sh` around the `head_commit`
+assignment) has no dedicated test — confirmed by grep (zero matches for that string in the test file). Self-review's
+own C2-L4 note already judged this practically unreachable, since `git merge-base HEAD <base>` and `git rev-list`
+must both already succeed earlier in the script before this point is reached. Not fixed this cycle (constraint: do
+not edit scripts or tests, report only).
+
+No new gaps found this cycle.
+
+### Insight event (cycle 2)
+
+```
+./scripts/insights-append.sh --slug secret-scan-attr-parity --flow standard --phase test --cycle 2 --verdict pass --critical 0 --high 0 --medium 0 --low 0 --source skill
+```
