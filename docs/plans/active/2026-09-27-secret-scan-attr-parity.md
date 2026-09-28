@@ -1,6 +1,6 @@
 # secret-scan-attr-parity
 
-- Status: In progress
+- Status: PR created (#187), awaiting CI and merge
 - Owner: Claude Code
 - Date: 2026-09-27
 - Related request: #176(PR #179)で `scripts/secret-scan.sh` の range scan はローカルの git 設定を git の既定に固定し、CI と同じ追加行を読むようになったが、属性(attributes)の読み元に固定できない差が 3 つ残った(`docs/tech-debt/README.md` に記録)。いずれも「ローカルの `--strict` は clean、CI は検出」の向き。(1) `.git/info/attributes` の `-diff` / `binary`(config の key ではないので `-c` でも `GIT_ATTR_SOURCE` でも消えない)。(2) コミット済みの `.gitattributes` が指す diff driver に、ローカルで `diff.<driver>.binary=true` があると binary 扱い。(3) CI の `pull_request` は PR の merge commit を checkout するので、branch の作成後に base 側で `.gitattributes` が変わると CI とローカルの結果がずれる(issue #181)
@@ -58,17 +58,17 @@ secret scan の属性の読み元について、固定できる差は固定し�
 
 ## Acceptance criteria
 
-- [ ] AC-1: コミット済みの `.gitattributes` が `diff=<driver>` を指し、ローカルに `diff.<driver>.binary=true` がある repo で、range scan が fixture を検出する(exit 1)。driver が 2 つあっても両方固定される。driver 名が `.` を含む(`diff=review.driver`、config の key は `diff.review.driver.binary`)場合も固定される
-- [ ] AC-2: driver ごとの `diff.<driver>.algorithm`(histogram / patience)があっても、range scan の結果は既定の設定と同じ(algorithm で追加行が変わる fixture で確認)
-- [ ] AC-3: `.git/info/attributes` に規則の行がある repo では、`secret-scan-branch.sh` が scan せずに理由を出す(`--strict` は exit 3、既定は exit 0)。コメントと空行だけなら scan する。scanner 自体(`--range`)は info/attributes を理由に拒否しない(merge 中の hook が止まらないように。self-review cycle 1 の M3 で改訂)
-- [ ] AC-4: `secret-scan-branch.sh --strict` は、base が分岐後に `.gitattributes` で `-diff` を足した branch で fixture を検出せず(CI と同じ、exit 0 clean)、base が `-diff` を外した branch では検出する(exit 1)。どちらも merge 結果の属性で scan したことが分かる。base が `.gitattributes` を変えていない branch では merge-tree を呼ばず、従来どおり HEAD の属性で scan する(下位ディレクトリの `.gitattributes` の変更も「変えた」に数える)
-- [ ] AC-5: base が `.gitattributes` を変え、かつ base と HEAD が衝突する branch では、`secret-scan-branch.sh --strict` は HEAD の属性で scan し、通知を 1 行出す(exit は scan の結果どおり)
-- [ ] AC-5b: base が `.gitattributes` を変えていて、ローカルに `merge.default` または `merge.<name>.driver` の config がある repo では、`--strict` は exit 3 と理由を出し clean を出さない。既定の mode は通知して HEAD の属性で scan する
-- [ ] AC-5c: base が `.gitattributes` を変えていて、merge-tree が rc 1 以外で失敗する(例: object の書き込み先を読み取り専用にする)、または git が `--write-tree` か `GIT_ATTR_SOURCE` に対応しない(stub の git で模擬してよい)場合、`--strict` は exit 3 と理由を出す。既定の mode は通知して HEAD の属性で scan する
-- [ ] AC-6: `RALPH_SECRET_SCAN_ATTR_SOURCE` が tree-ish に解決できないとき、range scan は exit 3。範囲が HEAD で終わらないときは無視される
-- [ ] AC-7: `.git/info/attributes` の規則がある repo では `secret-scan-branch.sh --strict` が自身の検査で「cannot scan」の理由(規則を `.gitattributes` に移すか、ファイルを消す)を出して exit 3 で止まり、clean を出さない(「scanner failed with exit 3」は scanner 側の失敗にだけ使う。self-review cycle 1 の M3 で改訂)
-- [ ] AC-8: 既定の設定での range scan の結果は変わらない(この repo の全履歴で、取り出す追加行が main と一致)
-- [ ] AC-9: 文書(ヘッダー、quality-gates 2 コピー、tech-debt)が最終の挙動と一致し、`scripts/` と `templates/base/scripts/` が byte 一致。`./scripts/run-verify.sh` green
+- [x] AC-1: コミット済みの `.gitattributes` が `diff=<driver>` を指し、ローカルに `diff.<driver>.binary=true` がある repo で、range scan が fixture を検出する(exit 1)。driver が 2 つあっても両方固定される。driver 名が `.` を含む(`diff=review.driver`、config の key は `diff.review.driver.binary`)場合も固定される
+- [x] AC-2: driver ごとの `diff.<driver>.algorithm`(histogram / patience)があっても、range scan の結果は既定の設定と同じ(algorithm で追加行が変わる fixture で確認)
+- [x] AC-3: `.git/info/attributes` に規則の行がある repo では、`secret-scan-branch.sh` が scan せずに理由を出す(`--strict` は exit 3、既定は exit 0)。コメントと空行だけなら scan する。scanner 自体(`--range`)は info/attributes を理由に拒否しない(merge 中の hook が止まらないように。self-review cycle 1 の M3 で改訂)
+- [x] AC-4: `secret-scan-branch.sh --strict` は、base が分岐後に `.gitattributes` で `-diff` を足した branch で fixture を検出せず(CI と同じ、exit 0 clean)、base が `-diff` を外した branch では検出する(exit 1)。どちらも merge 結果の属性で scan したことが分かる。base が `.gitattributes` を変えていない branch では merge-tree を呼ばず、従来どおり HEAD の属性で scan する(下位ディレクトリの `.gitattributes` の変更も「変えた」に数える)
+- [x] AC-5: base が `.gitattributes` を変え、かつ base と HEAD が衝突する branch では、`secret-scan-branch.sh --strict` は HEAD の属性で scan し、通知を 1 行出す(exit は scan の結果どおり)
+- [x] AC-5b: base が `.gitattributes` を変えていて、ローカルに `merge.default` または `merge.<name>.driver` の config がある repo では、`--strict` は exit 3 と理由を出し clean を出さない。既定の mode は通知して HEAD の属性で scan する
+- [x] AC-5c: base が `.gitattributes` を変えていて、merge-tree が rc 1 以外で失敗する(例: object の書き込み先を読み取り専用にする)、または git が `--write-tree` か `GIT_ATTR_SOURCE` に対応しない(stub の git で模擬してよい)場合、`--strict` は exit 3 と理由を出す。既定の mode は通知して HEAD の属性で scan する
+- [x] AC-6: `RALPH_SECRET_SCAN_ATTR_SOURCE` が tree-ish に解決できないとき、range scan は exit 3。範囲が HEAD で終わらないときは無視される
+- [x] AC-7: `.git/info/attributes` の規則がある repo では `secret-scan-branch.sh --strict` が自身の検査で「cannot scan」の理由(規則を `.gitattributes` に移すか、ファイルを消す)を出して exit 3 で止まり、clean を出さない(「scanner failed with exit 3」は scanner 側の失敗にだけ使う。self-review cycle 1 の M3 で改訂)
+- [x] AC-8: 既定の設定での range scan の結果は変わらない(この repo の全履歴で、取り出す追加行が main と一致)
+- [x] AC-9: 文書(ヘッダー、quality-gates 2 コピー、tech-debt)が最終の挙動と一致し、`scripts/` と `templates/base/scripts/` が byte 一致。`./scripts/run-verify.sh` green
 
 ## Implementation outline
 
@@ -127,7 +127,7 @@ secret scan の属性の読み元について、固定できる差は固定し�
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
-- [ ] PR created
+- [x] PR created (#187)
 
 ## Readiness checklist
 
