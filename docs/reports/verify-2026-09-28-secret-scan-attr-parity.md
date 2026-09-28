@@ -75,3 +75,64 @@ This is documentation/spec drift in the plan's own AC-7 text, not a behavioral g
 
 - Behavioral test suite execution (`tests/test-secret-scan.sh`, `tests/test-secret-scan-branch.sh`) — `/test`'s job.
 - Diff-quality review — already completed by self-review cycle 1.
+
+## Cycle 2
+
+- Date: 2026-09-28
+- Verifier: verifier subagent (Claude Code)
+- Scope: spec compliance + static analysis at the new HEAD, focused on the delta since cycle 1 (`git diff 49e4684...HEAD`): cross-review cycle-1 fix (Slice E, `fe4f383`) and cycle-2 self-review fixes (Slice F, `8443a03`). No behavioral test run (tester's job).
+- HEAD: `56c96b1` (`fix/secret-scan-attr-parity`), `git status --porcelain` empty, confirmed at start and end of this run.
+
+### What changed since cycle 1
+
+`scripts/secret-scan.sh`, its template mirror, and `tests/test-secret-scan.sh` have a zero-line diff since `49e4684` — the scanner itself and its unit tests are untouched this cycle, so cycle 1's AC-1, AC-2, AC-3 (scanner side), AC-6, and AC-8 findings still hold unchanged. The delta is entirely in `scripts/secret-scan-branch.sh` (+ template mirror), `tests/test-secret-scan-branch.sh`, and docs (`docs/quality/quality-gates.md` + template mirror, `docs/tech-debt/README.md`, the plan file, and pipeline reports). The four `pr/SKILL.md` copies have a zero-line diff since cycle 1 and remain byte-identical to each other.
+
+### Static analysis
+
+| Check | Result |
+| --- | --- |
+| `./scripts/run-static-verify.sh` | PASS. `check-sync.sh` 159 identical / 0 drifted. `check-pipeline-sync.sh` OK. `check-skill-sync.sh` 13 in lock-step. `check-template-purity.sh` PASS. Branch secret scan (no-scope run): scanned 03f3e8a..56c96b1 against origin/main: clean. Evidence: `docs/evidence/verify-2026-09-28-062403.log` |
+| `./scripts/check-sync.sh` (standalone) | PASS, same counts as above, exit 0 |
+| `./scripts/check-skill-sync.sh` (standalone) | `[ok] check-skill-sync: 13 skill(s) in lock-step`, exit 0 |
+| `cmp scripts/secret-scan-branch.sh templates/base/scripts/secret-scan-branch.sh` | byte-identical |
+| `cmp scripts/secret-scan.sh templates/base/scripts/secret-scan.sh` | byte-identical |
+| `sh -n` (branch script, its test file, template copy) | clean |
+| `shellcheck --severity=warning` (branch script + its test file) | zero warnings, exit 0 |
+
+### Acceptance criteria (delta focus)
+
+| AC | Code at HEAD | Test evidence |
+| --- | --- | --- |
+| AC-4 / AC-5 (merge-tree isolation; `GIT_ATTR_SOURCE` pinned to HEAD's commit, not unset) | `scripts/secret-scan-branch.sh:421-444` (pin comment, all 8 pins named), `:476-489` (subshell: `GIT_ATTR_SOURCE=$head_commit`, `GIT_ATTR_NOSYSTEM=1`, `-c core.attributesFile=/dev/null -c attr.tree= -c merge.renormalize=false -c merge.renames=true -c merge.directoryRenames=conflict -c merge.renameLimit=7000`) | `tests/test-secret-scan-branch.sh:1904-1919` (PATH-wrapper proves `GIT_ATTR_NOSYSTEM=1`/`GIT_ATTR_SOURCE=HEAD's commit` reach `git merge-tree` even when the caller exports `GIT_ATTR_NOSYSTEM=0`), `:1826-1866` (renormalize: both a user-attributes-file filter and, new this cycle, a filter named by the **committed** `.gitattributes` — closes cycle-2 self-review's C2-M1 gap where only the `core.attributesFile` pin was exercised), `:1868-1901` (`merge.directoryRenames` pin: a local `false` still conflicts as by default) |
+| AC-5b (local merge driver config: strict exit 3 + remedy) | `secret-scan-branch.sh:448-461` | `tests/test-secret-scan-branch.sh:1679-1686` (both `merge.default` and `merge.<name>.driver` key shapes, remedy present) |
+| AC-5c (merge-tree non-1 failure / old git / malformed or empty version string / no `--write-tree` / mktemp failure / driver-list failure / attr-diff failure: strict exit 3, remedy present only where merging would actually help) | `secret-scan-branch.sh:382-387` (`attributes_unguaranteed` now takes an optional `<remedy>` argument), `:462-509` (callers) | `tests/test-secret-scan-branch.sh:1652-1700` (`expect_attr_unguaranteed` with a `no-remedy` flag): remedy present for old-git, malformed/empty version, driver-list failure, merge-tree exit 128, no-`--write-tree`; remedy **absent** for the `git diff` comparison failure (`:524`, correctly — that caller cannot even tell whether the base changed `.gitattributes`) and the merge-tree-error temp-file failure (`:469`) — closes cycle-2 self-review's C2-L4 finding |
+| AC-3 (revised, unchanged this cycle) + C2-L1 deferral | `secret-scan-branch.sh:206-225` (`check_info_attributes`, still unconditional `cannot_scan`, no default-mode scan-anyway fallback) | Behavior unchanged from cycle 1; the deferral (default mode no longer scans while `.git/info/attributes` holds a rule, where `main` did) is explicitly recorded in `docs/tech-debt/README.md` (see Documentation drift below), matching the plan's Deviation notes ("AC-3 の決定どおり据え置き") |
+| AC-9 (docs match behavior; byte-identical; `run-verify.sh` green) | Confirmed via `cmp` and `run-static-verify.sh` PASS above | `docs/quality/quality-gates.md` (both copies) gained "on git 2.41 or later" (cycle-2 self-review C2-L5), matching the merge-tree isolation's actual git-version floor |
+
+Also spot-checked: the allowlist `mktemp` failure (cycle-2 self-review C2-L2) is now guarded — `secret-scan-branch.sh:300-303` (`cannot_scan "could not create a temporary file for the allowlist"` instead of a bare `set -e` exit 1) — tested at `tests/test-secret-scan-branch.sh:1925-1945` (strict exit 3 / default exit 0, correct reason, no scan attempted).
+
+Cycle-1 self-review findings table (in `docs/reports/self-review-2026-09-27-secret-scan-attr-parity.md`, `## Cycle 2` section) re-derived independently and matches: M1/M2/L1/L2 fully fixed and unaffected by this cycle's delta; M3 fixed, unaffected; L3 (mktemp exit 1) was "half-fixed" at cycle-1 verify time (only the merge-tree site was guarded) — now fully fixed, since C2-L2 closes the remaining allowlist-site gap.
+
+### Pin comment vs. code cross-check
+
+The `use_merge_attributes` doc comment (`secret-scan-branch.sh:421-444`) names exactly the 8 `-c`/env pins the subshell (`:477-488`) sets, in the same grouping the comment uses (isolation pins vs. the three "restate git's defaults" pins: `attr.tree=`, `merge.renames=true`, `merge.renameLimit=7000`). No undocumented pin, no documented pin missing from the code.
+
+### Documentation drift
+
+- `docs/tech-debt/README.md`: the "Local-only ways" row now explicitly states the C2-L1 deferral (default mode prints "cannot scan" and exits 0 without scanning while `.git/info/attributes` holds a rule, where `main`'s script scanned; `--strict` still exits 3) with a trigger ("the next touch to `check_info_attributes`") — this is the correct place for it per the plan's own decision to leave AC-3 as specified rather than add a scan-anyway fallback in default mode.
+- The CI-merge-commit row now documents the 8 merge-tree isolation pins inline and cites the cycle-1 cross-review triage by a fixed HEAD (`reviewed HEAD af29652`) plus the commit where that triage file itself was written (`d884024`), correctly anticipating that `/cross-review` rewrites the per-slug triage file in place on the next cycle (cycle-2 self-review's C2-L5 finding) — this pointer will not go stale when a future cross-review cycle runs.
+- `docs/quality/quality-gates.md` (both copies): "on git 2.41 or later" added, matching the scanner/branch-script headers' stated floor for `GIT_ATTR_SOURCE`/merge-tree parity. No other drift found in the delta.
+- No change to `.claude/skills/pr/SKILL.md` or its 3 mirrors this cycle (zero-line diff, still byte-identical) — correct, since this cycle's fixes are internal isolation/error-message-scoping changes that do not add a new exit-3 cause or change the documented exit-code contract.
+
+### Non-goals / constraints check
+
+`.github/workflows/`, `scripts/run-verify.sh`, `scripts/prepare-commit-msg-secret-guard.sh`, `scripts/xreview-helpers.sh`, `.gitallowed`, and the scanner's secret-detection patterns (`scripts/secret-scan.sh`) all show zero diff against cycle 1 and against `main` respectively — nothing outside `secret-scan-branch.sh`, its tests, and the documented doc set was touched this cycle.
+
+### Cycle 2 verdict
+
+**PASS.** Both cross-review cycle-1 findings (AR-1 merge-tree isolation, AR-2 real-git version gate — verified via the test report, not re-run here) and all five cycle-2 self-review findings that were slated for an in-cycle fix (C2-M1, C2-L2, C2-L3, C2-L4, C2-L5) are confirmed fixed in code and covered by a targeted regression test each. The one deliberately deferred finding (C2-L1) is correctly recorded as tech debt rather than silently dropped. Static analysis is clean. No new documentation drift found beyond what the plan's own Deviation notes already describe. AC-7's cycle-1 wording caveat (see above) is unchanged and still non-blocking.
+
+### Cycle 2 gaps
+
+- No behavioral test execution this cycle (by design — `/test` runs next; the cycle-1 `/test` report already exists at `docs/reports/test-2026-09-28-secret-scan-attr-parity.md` but predates Slice E/F and should be re-run or a cycle-2 test pass added).
+- The "HEAD does not resolve to a commit" branch in `use_merge_attributes` (`secret-scan-branch.sh:472-474`) still has no dedicated test — self-review's own C2-L4 finding already judged this practically unreachable once `git merge-base HEAD <base>` and `git rev-list` have succeeded earlier in the script, so this is not a new gap, just confirmed still true at HEAD.
