@@ -101,12 +101,12 @@ case I の dispatcher の実行と漏れの検査をテスト専用の `TMPDIR` 
 ## Deviation notes
 
 - 2026-09-28 plan: Codex plan advisory(gpt-6-astra、xhigh)が 2 件。HIGH 1: 修正前の再現をホストの共有 `TMPDIR` で行うと旧 case I の `rm -f` が他セッションのファイルを消しうる → 模擬共有 TMPDIR(`$workdir/shared-tmp`)を環境の `TMPDIR` にし、ホストの共有領域を列挙・削除しない AC-7 を追加。MEDIUM 2: 第 2 の dispatcher を旧検査のスナップショットより前に起動すると差分が空で red にならない → 再現の順序を marker で同期し、落ちた対象が fixture 所有であることを確認する AC-3 に改訂。ユーザー決定: 対応案で plan を更新
-
+- 2026-09-28 work: Slice A は implementer(sonnet)に委譲(84c412f、2 ファイル、+117 / -23、push 済み)。設計は plan の (b): `workdir` 作成直後に `TMPDIR=$workdir/shared-tmp` を export(模擬共有 dir)。case I の対象 dispatcher は起動サブシェル内で `TMPDIR=$workdir/case-i-tmp`、検査はその dir だけを `find`(共有 dir のスナップショットと `rm -f $i_leaked_tmp` は削除)。第 2 の dispatcher は `$workdir/repo2` の `Stop.d/10-concurrent-slow.sh`(sleep 30)で、started marker(最大 5 秒)→ 模擬共有 dir に `ralph-dispatch-*` があることの assertion → case I → TERM + wait → 消えたことの assertion。EXIT trap でも TERM と `pkill -f`。ヘッダーの `i.` を更新、tech-debt の行を削除。red: 旧テスト(efd4ec1)の scratch コピーで事前スナップショットの直後に fixture を挿入し `TMPDIR=<scratch>/shared` で実行 → 25 PASS / 1 FAIL「left stray ralph-dispatch-* temp files: …/shared/ralph-dispatch-{merged,out,stdin}.*」(fixture 所有)。ホストの canary は残った。green: 29 / 0(26 から +3)、5 回連続、shellcheck clean、`run-verify.sh` All verifiers passed。orchestrator も 29 / 0・canary・shellcheck を確認
 ## Progress checklist
 
 - [x] Plan reviewed
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
