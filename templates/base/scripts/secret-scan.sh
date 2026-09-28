@@ -3,30 +3,48 @@
 #
 # CI runs --range with git's default config, so a local --range must read
 # the same added lines: scan_range pins the local git settings listed there
-# (color, diff.relative, textconv, external diff, rename/copy detection and
-# its limit, the diff algorithm, the big-file threshold, a user-level
-# attributes file, attr.tree, root-commit diffs, submodule diffs, replace
-# refs, signature output) to git's defaults and, for a range ending at HEAD,
-# the attributes to HEAD's tree; it checks git's exit status before
-# parsing, so a git failure is never read as a clean scan. Known local-only
-# gaps it cannot pin: a `-diff`/`binary` attribute in .git/info/attributes,
-# and a local diff.<driver>.binary=true for a driver the committed
-# .gitattributes names. CI's pull_request checkout is the PR merge commit,
-# so its attributes differ from the branch tip's when the base changed
-# .gitattributes after the branch forked. --staged reads each staged blob
-# by its object id, so neither file name quoting nor diff.relative can skip
-# a file. Every option used works on git 2.8, and a -c key an older git
-# does not know is ignored because that git has no such setting;
-# GIT_ATTR_SOURCE needs git 2.41, and an older git keeps reading the working
-# tree's attributes.
+# (color, diff.relative, textconv, external diff, a diff driver's
+# algorithm, rename/copy detection and its limit, the diff algorithm, the
+# big-file threshold, attr.tree, root-commit diffs, submodule diffs,
+# replace refs, signature output) to git's defaults, returns a diff
+# driver's binary flag to git's own content check (CI has no driver
+# config), drops the user-level and the system-wide attributes files, and,
+# for a range ending at HEAD, reads the attributes from HEAD's tree or from
+# the tree RALPH_SECRET_SCAN_ATTR_SOURCE names; it checks git's exit status
+# before parsing, so a git failure is never read as a clean scan. A local
+# .git/info/attributes cannot be dropped, since git reads it under every
+# setting. --range reads it as git does, so an unrelated rule there does
+# not block the merge guard or another hook; secret-scan-branch.sh, the
+# local mirror of CI's scan, refuses to scan while it holds a rule. CI's
+# pull_request checkout is the PR merge commit, so its attributes differ
+# from the branch tip's when the base changed .gitattributes after the
+# branch forked; secret-scan-branch.sh passes the merge result's tree
+# through RALPH_SECRET_SCAN_ATTR_SOURCE for that case.
+# --staged reads each staged blob by its object id, so neither file name
+# quoting nor diff.relative can skip a file. Every option used works on git
+# 2.8, and a -c key an older git does not know is ignored because that git
+# has no such setting; GIT_ATTR_SOURCE needs git 2.41, and an older git
+# keeps reading the working tree's attributes; a diff driver whose name
+# holds "=" is pinned with --config-env, which needs git 2.31, and an older
+# git rejects it, so the scan exits 3.
+#
+# Environment:
+#   RALPH_SECRET_ALLOWLIST         the allowlist file (default: .gitallowed at
+#                                  the repo root)
+#   RALPH_SECRET_SCAN_ATTR_SOURCE  a tree-ish whose .gitattributes a --range
+#                                  ending at HEAD reads in place of HEAD's
+#                                  (unset or empty: HEAD's); a value that
+#                                  does not resolve to a tree exits 3; a
+#                                  range ending elsewhere ignores it
 #
 # Exit codes:
 #   0  scanned, nothing found
 #   1  scanned, found something
 #   2  usage error
 #   3  could not scan (a missing or unreadable --file, a staged entry that
-#      does not parse, a --range end that is not a commit, or git failed),
-#      so the content was not fully read
+#      does not parse, a --range end that is not a commit, a
+#      RALPH_SECRET_SCAN_ATTR_SOURCE that does not name a tree, or git
+#      failed), so the content was not fully read
 # A HUP, INT, or TERM stops the scan with 129, 130, or 143.
 set -eu
 
@@ -205,35 +223,56 @@ scan_diff_stream() {
 # scan_range <rev-range> -- reads the range the way a fresh clone with git's
 # default config (CI) does. Each option below neutralizes one local setting
 # that changes which added lines `git log -p` prints:
-#   GIT_ATTR_SOURCE=<HEAD's commit>  for a range ending at HEAD only:
-#                                    attributes from HEAD's tree, as CI's
-#                                    checkout has them, not a working-tree
-#                                    .gitattributes edit or attr.tree
-#                                    (git 2.41+)
+#   GIT_ATTR_SOURCE=<tree-ish>       for a range ending at HEAD only:
+#                                    attributes from HEAD's commit, as CI's
+#                                    checkout has them, or from the tree
+#                                    RALPH_SECRET_SCAN_ATTR_SOURCE names; not
+#                                    a working-tree .gitattributes edit or
+#                                    attr.tree (git 2.41+)
 #   --no-replace-objects             refs/replace/* substitutions
 #   diff.relative=false              a subdirectory cwd
 #   diff.renames=true                renames detected, copies not
 #   diff.renameLimit=1000            rename candidates (git's default since 2.33)
 #   core.bigFileThreshold=512m       a small threshold turns text into binary
 #   core.attributesFile=/dev/null    a user-level attributes file (-diff)
+#   GIT_ATTR_NOSYSTEM=1              the system-wide attributes file
+#                                    ($(prefix)/etc/gitattributes)
 #   attr.tree=                       a local attr.tree (git 2.43+) in place
 #                                    of the working tree's attributes; an
 #                                    empty value names no tree, so git
 #                                    ignores it
 #   log.showRoot=true                a root commit's own diff
 #   log.showSignature=false          signature lines in the output
+#   <key>=auto for each local        a diff driver the committed
+#   diff.<driver>.binary key         .gitattributes names, marked binary or
+#                                    text by the local config; CI has no
+#                                    driver config, so git decides from the
+#                                    content there (a NUL byte means
+#                                    binary), and "auto" restores that
+#                                    check. The key goes to -c as git
+#                                    config lists it, so a driver name
+#                                    holding "." keeps it; -c splits at the
+#                                    first "=", so a key holding "=" goes
+#                                    through --config-env instead (git
+#                                    2.31+)
 #   --no-color                       color.ui / color.diff
 #   --no-textconv, --no-ext-diff     diff drivers from the local config
-#   --diff-algorithm=default         diff.algorithm
+#   --diff-algorithm=default         diff.algorithm, and a driver's own
+#                                    diff.<driver>.algorithm (git 2.42+)
 #   --submodule=short                diff.submodule
+# A .git/info/attributes rule cannot be neutralized, and --range reads it
+# as git does; secret-scan-branch.sh refuses to scan while it holds a rule.
 # Supported range forms: A..B, A...B, A.., ..B, or a single revision. The
 # range end is the revision after the last "..", HEAD when that is empty,
 # or the whole argument when it has no ".."; other forms (X^!, X^@, X^-, a
 # :/regex end) do not resolve to a commit and exit 3 rather than being
 # guessed. CI and the branch scan end at HEAD, so their attributes come from
-# HEAD's tree. Any other end (the merge guard's HEAD..<merge head>) reads the
-# working tree's attributes, which during a merge are the merge result's,
-# the tree CI reads once the merge is pushed.
+# HEAD's tree, or from RALPH_SECRET_SCAN_ATTR_SOURCE when the caller sets
+# it (the branch scan passes the tree of its merge with the base). Any
+# other end (the merge guard's HEAD..<merge head>) reads the working tree's
+# attributes, which during a merge are the merge result's, the tree CI
+# reads once the merge is pushed; RALPH_SECRET_SCAN_ATTR_SOURCE is ignored
+# there.
 # The output goes to a file, not a pipe, so git's exit status is checked
 # before parsing: a git log that fails before or partway through its output
 # exits 3 rather than scanning what it printed.
@@ -246,16 +285,47 @@ scan_range() {
     exit 3
   fi
   head_commit="$(git --no-replace-objects rev-parse --verify --quiet 'HEAD^{commit}')" || head_commit=""
+  attr_source=""
+  if [ "$end_commit" = "$head_commit" ]; then
+    attr_source=$head_commit
+    if [ -n "${RALPH_SECRET_SCAN_ATTR_SOURCE:-}" ]; then
+      if ! attr_source="$(git --no-replace-objects rev-parse --verify --quiet "$RALPH_SECRET_SCAN_ATTR_SOURCE^{tree}")"; then
+        printf 'secret-scan: could not scan %s: RALPH_SECRET_SCAN_ATTR_SOURCE (%s) does not name a tree\n' "$range" "$RALPH_SECRET_SCAN_ATTR_SOURCE" >&2
+        exit 3
+      fi
+    fi
+  fi
+  binary_keys="$tmp_dir/driver-binary-keys"
+  keys_rc=0
+  git config --name-only --get-regexp '^diff\..*\.binary$' > "$binary_keys" || keys_rc=$?
+  case "$keys_rc" in
+    0 | 1) ;;
+    *)
+      printf 'secret-scan: could not scan %s: listing the diff drivers marked binary failed (git config exited with %s)\n' "$range" "$keys_rc" >&2
+      exit 3
+      ;;
+  esac
   log_file="$tmp_dir/range-log"
   log_rc=0
   (
     # An inherited GIT_ATTR_SOURCE must not choose the attributes either.
-    if [ "$end_commit" = "$head_commit" ]; then
-      GIT_ATTR_SOURCE=$head_commit
+    if [ -n "$attr_source" ]; then
+      GIT_ATTR_SOURCE=$attr_source
       export GIT_ATTR_SOURCE
     else
       unset GIT_ATTR_SOURCE
     fi
+    GIT_ATTR_NOSYSTEM=1
+    RALPH_SECRET_SCAN_BINARY_AUTO=auto
+    export GIT_ATTR_NOSYSTEM RALPH_SECRET_SCAN_BINARY_AUTO
+    set --
+    while IFS= read -r binary_key || [ -n "$binary_key" ]; do
+      case "$binary_key" in
+        "") ;;
+        *=*) set -- "$@" "--config-env=$binary_key=RALPH_SECRET_SCAN_BINARY_AUTO" ;;
+        *) set -- "$@" -c "$binary_key=auto" ;;
+      esac
+    done < "$binary_keys"
     exec git --no-replace-objects \
       -c diff.relative=false \
       -c diff.renames=true \
@@ -265,6 +335,7 @@ scan_range() {
       -c attr.tree= \
       -c log.showRoot=true \
       -c log.showSignature=false \
+      "$@" \
       log --format='commit %H' --no-color --no-textconv --no-ext-diff \
       --diff-algorithm=default --submodule=short \
       -p "$range" --
