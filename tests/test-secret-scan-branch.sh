@@ -224,6 +224,24 @@ run_with_env() {
   set -e
 }
 
+# run_with_two_env <cwd> <NAME=value> <NAME=value> [args...] -- like
+# run_with_env, with two assignments (a stub on PATH and a caller-exported
+# variable).
+run_with_two_env() {
+  _cwd="$1"
+  _assign1="$2"
+  _assign2="$3"
+  shift 3
+  set +e
+  (
+    cd "$_cwd" || exit 127
+    unset GITHUB_BASE_REF RALPH_XREVIEW_BASE RALPH_SECRET_ALLOWLIST
+    env "$_assign1" "$_assign2" "$SCANNER_BRANCH" "$@" >"$out_file" 2>"$err_file"
+  )
+  run_rc=$?
+  set -e
+}
+
 # The merge-derived attribute cases need a real git 2.41 or later, which
 # GIT_ATTR_SOURCE needs; on an older git the script refuses them by design
 # (test_attr_real_old_git checks that instead). The version is read the
@@ -339,6 +357,34 @@ esac
 exec "$real_mktemp" "\$@"
 EOF
 chmod +x "$stub_merge_mktemp_fails/mktemp"
+# A stub mktemp that fails only for the allowlist file, the first temp
+# file the script creates on every run.
+stub_allowlist_mktemp_fails="$workdir/stub-allowlist-mktemp-fails"
+mkdir -p "$stub_allowlist_mktemp_fails"
+cat > "$stub_allowlist_mktemp_fails/mktemp" <<EOF
+#!/bin/sh
+case "\$*" in
+  *ralph-secret-scan-branch-allowlist*) exit 1 ;;
+esac
+exec "$real_mktemp" "\$@"
+EOF
+chmod +x "$stub_allowlist_mktemp_fails/mktemp"
+# A wrapper that records the attribute environment git merge-tree runs
+# with; the real system-wide attributes file is outside any fixture and
+# not writable here.
+stub_merge_tree_env="$workdir/stub-merge-tree-env"
+merge_tree_env_seen="$workdir/merge-tree-env-seen"
+mkdir -p "$stub_merge_tree_env"
+cat > "$stub_merge_tree_env/git" <<EOF
+#!/bin/sh
+case " \$* " in
+  *" merge-tree --write-tree "*)
+    printf 'NOSYSTEM=%s SOURCE=%s\n' "\${GIT_ATTR_NOSYSTEM-unset}" "\${GIT_ATTR_SOURCE-unset}" > "$merge_tree_env_seen"
+    ;;
+esac
+exec "$real_git" "\$@"
+EOF
+chmod +x "$stub_merge_tree_env/git"
 
 # attr_base_adds_repo <dir> -- feature (HEAD) forks from main and adds a
 # token in leak.txt; main then commits a .gitattributes marking *.txt
@@ -1604,21 +1650,31 @@ test_attr_local_merge_driver() {
 # are the merge's.
 attr_remedy="merge or rebase main into this branch so HEAD carries its .gitattributes, then re-run"
 
-# expect_attr_unguaranteed <description> <PATH prefix> <reason> -- with the
-# base-adds fixture and a stub first in PATH, --strict exits 3 with
-# <reason> and the remedy, and default mode reads HEAD's attributes, says
-# so with the remedy, and finds the token.
+# expect_attr_unguaranteed <description> <PATH prefix> <reason> [no-remedy]
+# -- with the base-adds fixture and a stub first in PATH, --strict exits 3
+# with <reason>, and default mode reads HEAD's attributes, says so, and
+# finds the token. Both append the merge-or-rebase remedy, except with
+# no-remedy, where the cause is one that merging would not get past and
+# the remedy must be absent.
 expect_attr_unguaranteed() {
   repo="$workdir/attr-unguaranteed-$(printf '%s' "$1" | tr -c 'a-z0-9' '-')"
   attr_base_adds_repo "$repo"
+  _remedy_suffix="; $attr_remedy"
+  [ "${4:-}" != no-remedy ] || _remedy_suffix=""
   run_with_env "$repo" "PATH=$2:$PATH" --strict
   assert_exit "$1: strict mode exits 3" 3
-  assert_stderr_contains "$1: strict reason" "$3; $attr_remedy"
+  assert_stderr_contains "$1: strict reason" "$3$_remedy_suffix"
   assert_stderr_not_contains "$1: strict never reports clean" ": clean"
+  if [ -z "$_remedy_suffix" ]; then
+    assert_stderr_not_contains "$1: strict reason gives no merge-or-rebase remedy" "merge or rebase"
+  fi
   run_with_env "$repo" "PATH=$2:$PATH"
   assert_exit "$1: default mode reads HEAD's attributes and finds the token" 1
-  assert_stderr_contains "$1: default notice says HEAD's attributes are read" "$3; attributes read from HEAD; $attr_remedy"
+  assert_stderr_contains "$1: default notice says HEAD's attributes are read" "$3; attributes read from HEAD$_remedy_suffix"
   assert_stderr_contains "$1: default mode still prints the scan's status line" "against main: findings"
+  if [ -z "$_remedy_suffix" ]; then
+    assert_stderr_not_contains "$1: default notice gives no merge-or-rebase remedy" "merge or rebase"
+  fi
 }
 
 test_attr_merge_unavailable() {
@@ -1632,7 +1688,7 @@ test_attr_merge_unavailable() {
   expect_attr_unguaranteed "listing the merge driver config fails" "$stub_driver_list_fails" \
     "listing the local merge driver config failed (git config exited with 5)"
   expect_attr_unguaranteed "comparing .gitattributes with the base fails" "$stub_attr_diff_fails" \
-    "(git diff exited with 5)"
+    "(git diff exited with 5)" no-remedy
 
   # These need a real git 2.41 or later to get past the version check.
   skip_without_merge_attr "merge-tree failure cases" && return 0
@@ -1641,7 +1697,7 @@ test_attr_merge_unavailable() {
   expect_attr_unguaranteed "merge-tree without --write-tree" "$stub_no_write_tree" \
     "this git's merge-tree has no --write-tree"
   expect_attr_unguaranteed "no temporary file for merge-tree's errors" "$stub_merge_mktemp_fails" \
-    "a temporary file for git merge-tree's errors could not be created"
+    "a temporary file for git merge-tree's errors could not be created" no-remedy
 
   # The real merge-tree fails when it cannot write the merged objects.
   if [ "$(id -u)" -eq 0 ]; then
@@ -1702,43 +1758,6 @@ attr_conflict_repo() {
 test_attr_merge_isolated_from_local_config() {
   skip_without_merge_attr "merge-tree isolation cases" && return 0
 
-  # merge.renormalize with a clean filter for .gitattributes, chosen by a
-  # user-level attributes file: the filter rewrites every side to
-  # "*.txt -diff". Both sides edit different lines, so the default merge
-  # is clean and keeps no -diff.
-  repo="$workdir/attr-isolate-renormalize"
-  git_repo "$repo"
-  (
-    cd "$repo"
-    git checkout -q -B main
-    printf '# top\n# middle\n# bottom\n' > .gitattributes
-    git add .gitattributes
-    git commit -q -m 'add .gitattributes'
-    git checkout -q -b feature
-    printf '# top\n# middle\n*.md text\n' > .gitattributes
-    token="$(printf 'ghp_%s' 'ATTRRENORMabcdefghijklmnopqrstu')"
-    printf 'deploy token %s\n' "$token" > leak.txt
-    git add .gitattributes leak.txt
-    git commit -q -m 'change the last line and add leaked token'
-    git checkout -q main
-    printf '*.cfg text\n# middle\n# bottom\n' > .gitattributes
-    git add .gitattributes
-    git commit -q -m 'change the first line'
-    git checkout -q feature
-  )
-  run "$repo" --strict
-  assert_exit "renormalize fixture under the default config: the merge keeps no -diff" 1
-  printf '#!/bin/sh\ncat >/dev/null\nprintf %s\n' "'*.txt -diff\\n'" > "$workdir/hide-attributes-filter"
-  chmod +x "$workdir/hide-attributes-filter"
-  printf '.gitattributes filter=hide\n' > "$workdir/user-attributes-filter"
-  git -C "$repo" config core.attributesFile "$workdir/user-attributes-filter"
-  # git runs the filter through the shell, and $workdir holds spaces.
-  git -C "$repo" config filter.hide.clean "'$workdir/hide-attributes-filter'"
-  git -C "$repo" config merge.renormalize true
-  run "$repo" --strict
-  assert_exit "merge.renormalize with a local clean filter: the merge matches the default and the token is found" 1
-  assert_stderr_contains "merge.renormalize with a local clean filter: notice names the merge" "attributes read from the merge of main and HEAD"
-
   # A user-level attributes file giving .gitattributes merge=union.
   repo="$workdir/attr-isolate-user-union"
   attr_conflict_repo "$repo"
@@ -1757,7 +1776,7 @@ test_attr_merge_isolated_from_local_config() {
   assert_stderr_contains "working-tree .gitattributes with merge=union: conflict notice as by default" "but the merge conflicts; attributes read from HEAD"
 
   # An inherited GIT_ATTR_SOURCE naming a tree whose .gitattributes gives
-  # itself merge=union, or marks *.txt -diff.
+  # itself merge=union.
   repo="$workdir/attr-isolate-inherited-union"
   attr_conflict_repo "$repo"
   union_blob="$(printf '.gitattributes merge=union\n' | git -C "$repo" hash-object -w --stdin)"
@@ -1765,10 +1784,165 @@ test_attr_merge_isolated_from_local_config() {
   run_with_env "$repo" "GIT_ATTR_SOURCE=$union_tree" --strict
   assert_exit "inherited GIT_ATTR_SOURCE with merge=union: the merge conflicts as by default" 1
   assert_stderr_contains "inherited GIT_ATTR_SOURCE with merge=union: conflict notice as by default" "but the merge conflicts; attributes read from HEAD"
+
+  # A scanner-override check, not a merge-tree one: an inherited
+  # GIT_ATTR_SOURCE marking *.txt -diff would hide the token from the
+  # scan, and the scanner replaces it with its own attribute source.
   hiding_blob="$(printf '*.txt -diff\n' | git -C "$repo" hash-object -w --stdin)"
   hiding_tree="$(printf '100644 blob %s\t.gitattributes\n' "$hiding_blob" | git -C "$repo" mktree)"
   run_with_env "$repo" "GIT_ATTR_SOURCE=$hiding_tree" --strict
-  assert_exit "inherited GIT_ATTR_SOURCE marking *.txt -diff: no effect, the token is found" 1
+  assert_exit "scanner override: an inherited GIT_ATTR_SOURCE marking *.txt -diff is replaced, and the token is found" 1
+}
+
+# attr_renormalize_repo <dir> <middle line> -- main and feature (HEAD)
+# edit different lines of .gitattributes after the fork, so git's default
+# merge is clean and keeps no -diff; feature adds a token in leak.txt.
+# <middle line> sits unchanged between them on every side.
+attr_renormalize_repo() {
+  git_repo "$1"
+  (
+    cd "$1"
+    git checkout -q -B main
+    printf '# top\n%s\n# bottom\n' "$2" > .gitattributes
+    git add .gitattributes
+    git commit -q -m 'add .gitattributes'
+    git checkout -q -b feature
+    printf '# top\n%s\n*.md text\n' "$2" > .gitattributes
+    token="$(printf 'ghp_%s' 'ATTRRENORMabcdefghijklmnopqrstu')"
+    printf 'deploy token %s\n' "$token" > leak.txt
+    git add .gitattributes leak.txt
+    git commit -q -m 'change the last line and add leaked token'
+    git checkout -q main
+    printf '*.cfg text\n%s\n# bottom\n' "$2" > .gitattributes
+    git add .gitattributes
+    git commit -q -m 'change the first line'
+    git checkout -q feature
+  )
+}
+
+# use_hide_filter <repo> -- a local clean filter "hide" that rewrites any
+# content to "*.txt -diff", with merge.renormalize=true, so a merge that
+# renormalizes .gitattributes through it hides the token.
+use_hide_filter() {
+  # git runs the filter through the shell, and $workdir holds spaces.
+  git -C "$1" config filter.hide.clean "'$workdir/hide-attributes-filter'"
+  git -C "$1" config merge.renormalize true
+}
+
+# merge.renormalize runs a clean filter on each side before the merge. The
+# default merge keeps no -diff, so the token must be found either way.
+test_attr_merge_renormalize_pinned() {
+  skip_without_merge_attr "merge.renormalize cases" && return 0
+  printf '#!/bin/sh\ncat >/dev/null\nprintf %s\n' "'*.txt -diff\\n'" > "$workdir/hide-attributes-filter"
+  chmod +x "$workdir/hide-attributes-filter"
+
+  # The filter is chosen by a user-level attributes file. The
+  # core.attributesFile pin drops that file, and the merge.renormalize pin
+  # would stop the filter as well, so this case fails only when both are
+  # gone; the merge=union case in test_attr_merge_isolated_from_local_config
+  # fails on the core.attributesFile pin alone.
+  repo="$workdir/attr-isolate-renormalize"
+  attr_renormalize_repo "$repo" '# middle'
+  run "$repo" --strict
+  assert_exit "renormalize fixture under the default config: the merge keeps no -diff" 1
+  printf '.gitattributes filter=hide\n' > "$workdir/user-attributes-filter"
+  git -C "$repo" config core.attributesFile "$workdir/user-attributes-filter"
+  use_hide_filter "$repo"
+  run "$repo" --strict
+  assert_exit "core.attributesFile pin, backed by merge.renormalize: a user attributes file choosing a clean filter leaves the merge as by default" 1
+  assert_stderr_contains "core.attributesFile pin, backed by merge.renormalize: notice names the merge" "attributes read from the merge of main and HEAD"
+
+  # The filter is chosen by the committed .gitattributes on both sides, so
+  # only the merge.renormalize pin keeps it from running.
+  repo="$workdir/attr-isolate-renormalize-committed"
+  attr_renormalize_repo "$repo" '.gitattributes filter=hide'
+  run "$repo" --strict
+  assert_exit "committed-filter fixture under the default config: the merge keeps no -diff" 1
+  use_hide_filter "$repo"
+  run "$repo" --strict
+  assert_exit "merge.renormalize pin: a clean filter the committed .gitattributes names leaves the merge as by default" 1
+  assert_stderr_contains "merge.renormalize pin: notice names the merge" "attributes read from the merge of main and HEAD"
+}
+
+# merge.directoryRenames: the base renames a/ to b/ (and edits the root
+# .gitattributes, so merge-tree runs), and the branch adds a/.gitattributes.
+# git's default reports a conflict for that file; a local false or true
+# would merge it, so the pin keeps the conflict.
+test_attr_merge_directory_renames_pinned() {
+  skip_without_merge_attr "merge.directoryRenames case" && return 0
+  repo="$workdir/attr-isolate-directory-renames"
+  git_repo "$repo"
+  (
+    cd "$repo"
+    git checkout -q -B main
+    mkdir a
+    printf '# root\n' > .gitattributes
+    printf 'one\n' > a/one.md
+    printf 'two\n' > a/two.md
+    git add .gitattributes a
+    git commit -q -m init
+    git checkout -q -b feature
+    printf '*.md text\n' > a/.gitattributes
+    git add a/.gitattributes
+    git commit -q -m 'add a/.gitattributes'
+    git checkout -q main
+    git mv a b
+    printf '# root, edited\n' > .gitattributes
+    git add .gitattributes
+    git commit -q -m 'rename a to b and edit the root .gitattributes'
+    git checkout -q feature
+  )
+  run "$repo" --strict
+  assert_stderr_contains "directory-rename fixture under the default config: the merge conflicts" "but the merge conflicts; attributes read from HEAD"
+  git -C "$repo" config merge.directoryRenames false
+  run "$repo" --strict
+  assert_exit "merge.directoryRenames pin: a local false still scans with HEAD's attributes" 0
+  assert_stderr_contains "merge.directoryRenames pin: the merge conflicts as by default" "but the merge conflicts; attributes read from HEAD"
+  assert_stderr_not_contains "merge.directoryRenames pin: the merge's tree is not used" "attributes read from the merge of"
+}
+
+# The environment git merge-tree receives: GIT_ATTR_NOSYSTEM=1 and
+# GIT_ATTR_SOURCE set to HEAD's commit, even when the caller exports
+# GIT_ATTR_NOSYSTEM=0.
+test_attr_merge_environment_pinned() {
+  skip_without_merge_attr "merge-tree environment case" && return 0
+  repo="$workdir/attr-isolate-environment"
+  attr_base_adds_repo "$repo"
+  printf 'not run\n' > "$merge_tree_env_seen"
+  run_with_two_env "$repo" "PATH=$stub_merge_tree_env:$PATH" "GIT_ATTR_NOSYSTEM=0" --strict
+  assert_exit "merge-tree environment: the base-adds merge scans clean" 0
+  want="NOSYSTEM=1 SOURCE=$(git -C "$repo" rev-parse HEAD)"
+  got="$(cat "$merge_tree_env_seen")"
+  if [ "$got" = "$want" ]; then
+    ok "merge-tree environment: GIT_ATTR_NOSYSTEM=1 and GIT_ATTR_SOURCE=HEAD's commit"
+  else
+    not_ok "merge-tree environment: GIT_ATTR_NOSYSTEM=1 and GIT_ATTR_SOURCE=HEAD's commit (got: $got, want: $want)"
+  fi
+}
+
+# The allowlist temp file is the first one the script creates. When it
+# cannot be created, the scan stops as "cannot scan", never as findings.
+test_allowlist_mktemp_fails() {
+  repo="$workdir/allowlist-mktemp-fails"
+  git_repo "$repo"
+  (
+    cd "$repo"
+    git checkout -q -B main
+    printf 'clean\n' > README.md
+    git add README.md
+    git commit -q -m init
+    git checkout -q -b feature
+    printf 'still clean\n' >> README.md
+    git add README.md
+    git commit -q -m 'clean change'
+  )
+  run_with_env "$repo" "PATH=$stub_allowlist_mktemp_fails:$PATH" --strict
+  assert_exit "no allowlist temp file: strict mode exits 3" 3
+  assert_stderr_contains "no allowlist temp file: the reason says so" "cannot scan, could not create a temporary file for the allowlist"
+  run_with_env "$repo" "PATH=$stub_allowlist_mktemp_fails:$PATH"
+  assert_exit "no allowlist temp file: default mode exits 0" 0
+  assert_stderr_contains "no allowlist temp file: default mode gives the cannot-scan notice" "cannot scan, could not create a temporary file for the allowlist"
+  assert_stderr_not_contains "no allowlist temp file: default mode does not scan" "scanned "
 }
 
 # CI's clone has no .git/info/attributes, and git reads a local one under
@@ -1857,6 +2031,7 @@ test_info_attributes_refused() {
   run_with_env "$repo" "PATH=$stub_grep_fails:$PATH" --strict
   assert_exit "reading .git/info/attributes fails: strict mode exits 3" 3
   assert_stderr_contains "reading .git/info/attributes fails: the reason names grep's exit" "cannot scan, reading .git/info/attributes failed (grep exited with 2)"
+  assert_stderr_not_contains "reading .git/info/attributes fails: no merge-or-rebase remedy" "merge or rebase"
   run_with_env "$repo" "PATH=$stub_grep_fails:$PATH"
   assert_exit "reading .git/info/attributes fails: default mode exits 0" 0
   rm -f "$info_attributes"
@@ -1930,6 +2105,10 @@ test_attr_local_merge_driver
 test_attr_merge_unavailable
 test_attr_real_old_git
 test_attr_merge_isolated_from_local_config
+test_attr_merge_renormalize_pinned
+test_attr_merge_directory_renames_pinned
+test_attr_merge_environment_pinned
+test_allowlist_mktemp_fails
 test_info_attributes_refused
 test_usage_and_space_path
 

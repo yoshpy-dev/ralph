@@ -297,7 +297,10 @@ report_allowlist_unreadable() {
 # Anything else (no entry, a directory, a submodule, or a symlink target
 # that cannot be resolved to a readable file) falls back to an empty
 # allowlist: fewer exceptions can only add findings, never hide one.
-tmp_allowlist="$(mktemp "${TMPDIR:-/tmp}/ralph-secret-scan-branch-allowlist.XXXXXX")"
+if ! tmp_allowlist="$(mktemp "${TMPDIR:-/tmp}/ralph-secret-scan-branch-allowlist.XXXXXX")"; then
+  tmp_allowlist=""
+  cannot_scan "could not create a temporary file for the allowlist"
+fi
 allowlist_mode="$(allowlist_ls_tree_mode .gitallowed)" || allowlist_mode=""
 case "$allowlist_mode" in
   100644|100755)
@@ -364,19 +367,23 @@ if [ -n "${RALPH_SECRET_ALLOWLIST:-}" ] || [ "$worktree_differs" -eq 1 ]; then
   report "ignoring uncommitted .gitallowed edits and/or RALPH_SECRET_ALLOWLIST; CI reads only the .gitallowed committed at HEAD"
 fi
 
-# attributes_unguaranteed <reason> -- the base changed .gitattributes, but
-# the merge result's attributes cannot be computed the way CI's merge
-# commit has them. --strict stops with exit 3 (cannot_scan); default mode
-# reports the reason and lets the scanner read HEAD's attributes. Both
-# name the remedy: once the base is merged or rebased into the branch, the
-# merge-base is the base tip, nothing changed since it, and HEAD's
-# attributes are the merge's.
+# attributes_unguaranteed <reason> [<remedy>] -- the base changed
+# .gitattributes, or whether it did cannot be told, and the merge result's
+# attributes cannot be computed the way CI's merge commit has them.
+# --strict stops with exit 3 (cannot_scan); default mode reports the
+# reason and lets the scanner read HEAD's attributes. Both append
+# <remedy> when the caller passes one. use_merge_attributes passes
+# merge_remedy for the causes that merging or rebasing the base into the
+# branch gets past (a local merge driver, an old git, merge-tree missing
+# or failing): the merge-base then is the base tip, nothing changed since
+# it, and HEAD's attributes are the merge's. A missing temporary file
+# (which the scan needs as well), an unresolvable HEAD, and a failed
+# .gitattributes comparison give the reason only.
 attributes_unguaranteed() {
-  remedy="merge or rebase ${base_ref} into this branch so HEAD carries its .gitattributes, then re-run"
   if [ "$strict" -eq 1 ]; then
-    cannot_scan "$1; $remedy"
+    cannot_scan "$1${2:+; $2}"
   fi
-  report "$1; attributes read from HEAD; $remedy"
+  report "$1; attributes read from HEAD${2:+; $2}"
 }
 
 # git_version_at_least <major> <minor> <`git version` output> -- true when
@@ -414,41 +421,47 @@ git_version_at_least() {
 # merge-tree runs isolated from the local settings that change how a
 # .gitattributes merges, since CI's merge has none of them:
 #   GIT_ATTR_SOURCE=<HEAD's commit>  the attributes that pick merge
-#                                    drivers come from HEAD's commit, not
-#                                    the working tree or an inherited value
+#                                    drivers and filters come from HEAD's
+#                                    commit, not the working tree or an
+#                                    inherited value
 #   GIT_ATTR_NOSYSTEM=1,             the system-wide and user-level
 #   core.attributesFile=/dev/null    attributes files (a merge=union or a
 #                                    filter for .gitattributes)
-#   attr.tree=                       a local attr.tree
 #   merge.renormalize=false          no clean filter runs on the merged
-#                                    blobs (git's default is off)
-#   merge.renames=true,              rename handling as git's defaults have
-#   merge.directoryRenames=conflict, it; merge.renames otherwise follows
-#   merge.renameLimit=7000           diff.renames, and merge.renameLimit
-#                                    follows diff.renameLimit before
-#                                    falling back to 7000
-# merge-tree reads no diff.algorithm (it sets up its merge without the UI
-# config), and merge.conflictStyle changes only a conflict's content,
-# which is never read.
+#                                    blobs, even one that the committed
+#                                    .gitattributes names (git's default
+#                                    is off)
+#   merge.directoryRenames=conflict  a file the branch adds in a directory
+#                                    the base renamed conflicts, as by
+#                                    default; false or true would merge it
+# The other three restate git's defaults: attr.tree= changes nothing
+# while GIT_ATTR_SOURCE is set, and it always is here; merge.renames=true
+# and merge.renameLimit=7000 cover a git that reads them (merge-tree on
+# 2.49 followed a base-side move with merge.renames=false). 7000 is
+# merge's default, where the scanner's diff.renameLimit=1000 is diff's;
+# they differ on purpose. merge-tree reads no diff.algorithm (it sets up
+# its merge without the UI config), and merge.conflictStyle changes only a
+# conflict's content, which is never read.
 use_merge_attributes() {
   changed="${base_ref} changed .gitattributes since ${base_short}"
+  merge_remedy="merge or rebase ${base_ref} into this branch so HEAD carries its .gitattributes, then re-run"
   drivers_rc=0
   merge_drivers="$(git config --name-only --get-regexp '^merge\.(default|.*\.driver)$')" || drivers_rc=$?
   case "$drivers_rc" in
     0)
       merge_drivers="$(printf '%s\n' "$merge_drivers" | awk 'NR > 1 { printf ", " } { printf "%s", $0 }')"
-      attributes_unguaranteed "$changed, and local merge driver config ($merge_drivers) would run in git merge-tree but not in CI's merge"
+      attributes_unguaranteed "$changed, and local merge driver config ($merge_drivers) would run in git merge-tree but not in CI's merge" "$merge_remedy"
       return 0
       ;;
     1) ;;
     *)
-      attributes_unguaranteed "$changed, and listing the local merge driver config failed (git config exited with $drivers_rc)"
+      attributes_unguaranteed "$changed, and listing the local merge driver config failed (git config exited with $drivers_rc)" "$merge_remedy"
       return 0
       ;;
   esac
   git_version_text="$(git version 2>/dev/null)" || git_version_text=""
   if ! git_version_at_least 2 41 "$git_version_text"; then
-    attributes_unguaranteed "$changed, and ${git_version_text:-an unreadable git version} is not 2.41 or later, which GIT_ATTR_SOURCE needs"
+    attributes_unguaranteed "$changed, and ${git_version_text:-an unreadable git version} is not 2.41 or later, which GIT_ATTR_SOURCE needs" "$merge_remedy"
     return 0
   fi
   if ! tmp_merge_err="$(mktemp "${TMPDIR:-/tmp}/ralph-secret-scan-branch-merge.XXXXXX")"; then
@@ -480,7 +493,7 @@ use_merge_attributes() {
         report "attributes read from the merge of ${base_ref} and HEAD (${changed})"
       else
         attr_source_tree=""
-        attributes_unguaranteed "$changed, and git merge-tree printed no tree id"
+        attributes_unguaranteed "$changed, and git merge-tree printed no tree id" "$merge_remedy"
       fi
       ;;
     1)
@@ -488,11 +501,11 @@ use_merge_attributes() {
       ;;
     *)
       if ! git merge-tree -h 2>&1 | grep -q -- '--write-tree'; then
-        attributes_unguaranteed "$changed, and this git's merge-tree has no --write-tree"
+        attributes_unguaranteed "$changed, and this git's merge-tree has no --write-tree" "$merge_remedy"
         return 0
       fi
       merge_err_line="$(head -n 1 "$tmp_merge_err")" || merge_err_line=""
-      attributes_unguaranteed "$changed, and git merge-tree --write-tree exited with ${merge_rc}${merge_err_line:+: $merge_err_line}"
+      attributes_unguaranteed "$changed, and git merge-tree --write-tree exited with ${merge_rc}${merge_err_line:+: $merge_err_line}" "$merge_remedy"
       ;;
   esac
 }
