@@ -66,7 +66,7 @@ secret scan の属性の読み元について、固定できる差は固定し�
 - [ ] AC-5b: base が `.gitattributes` を変えていて、ローカルに `merge.default` または `merge.<name>.driver` の config がある repo では、`--strict` は exit 3 と理由を出し clean を出さない。既定の mode は通知して HEAD の属性で scan する
 - [ ] AC-5c: base が `.gitattributes` を変えていて、merge-tree が rc 1 以外で失敗する(例: object の書き込み先を読み取り専用にする)、または git が `--write-tree` か `GIT_ATTR_SOURCE` に対応しない(stub の git で模擬してよい)場合、`--strict` は exit 3 と理由を出す。既定の mode は通知して HEAD の属性で scan する
 - [ ] AC-6: `RALPH_SECRET_SCAN_ATTR_SOURCE` が tree-ish に解決できないとき、range scan は exit 3。範囲が HEAD で終わらないときは無視される
-- [ ] AC-7: `.git/info/attributes` の規則がある repo では `secret-scan-branch.sh --strict` が「scanner failed with exit 3」で止まり clean を出さない
+- [ ] AC-7: `.git/info/attributes` の規則がある repo では `secret-scan-branch.sh --strict` が自身の検査で「cannot scan」の理由(規則を `.gitattributes` に移すか、ファイルを消す)を出して exit 3 で止まり、clean を出さない(「scanner failed with exit 3」は scanner 側の失敗にだけ使う。self-review cycle 1 の M3 で改訂)
 - [ ] AC-8: 既定の設定での range scan の結果は変わらない(この repo の全履歴で、取り出す追加行が main と一致)
 - [ ] AC-9: 文書(ヘッダー、quality-gates 2 コピー、tech-debt)が最終の挙動と一致し、`scripts/` と `templates/base/scripts/` が byte 一致。`./scripts/run-verify.sh` green
 
@@ -112,13 +112,14 @@ secret scan の属性の読み元について、固定できる差は固定し�
 - 2026-09-27 work: Slice A(7e0c529)、B(beb19f1)、C(ad8c475)は implementer に委譲(scanner は関門なので opus)。A: driver の binary は `git config --name-only --get-regexp` で列挙した key をそのまま `-c <key>=false`(`=` を含む key は `--config-env` で。git 2.31 未満は exit 3)。driver ごとの algorithm は `--diff-algorithm=default` が上書きすることを fixture で確認したので固定は足さずテストのみ。`.git/info/attributes` は git の parser と同じ規則(空行と `#` 以外)で規則の行があれば exit 3、読めなければ exit 3、dangling symlink は scan。`RALPH_SECRET_SCAN_ATTR_SOURCE` は `^{tree}` で解決し、範囲が HEAD で終わるときだけ使う。ヘッダーに Environment 節。B: merge-base と base の間で `:(top,glob)**/.gitattributes` に変更がなければ従来どおり HEAD の属性。変更があれば、ローカルの merge driver の config → git 2.41 未満 → merge-tree の順に判定し、rc 0 なら tree を渡して通知、rc 1(衝突)は HEAD の属性と通知、それ以外と `--write-tree` 非対応は strict で exit 3(既定は通知)。この diff 自体の失敗も strict で exit 3(逸脱、fail-closed)。CI の実行では merge-base が base の先端なので merge-tree は走らない。C: quality-gates 2 コピー、tech-debt の 2 行(plan の参照は archive のパスに)、`/pr` skill の exit 3 の句(4 面。1 行形式なので折り返しはしない)。テストは 74 → 123 件、108 → 163 件。修正前の scanner で新規 19 件、branch script で 36 件が落ちる。全履歴の比較で main と一致(219,578 行)。orchestrator は HEAD 一致・porcelain 空・差分・template の byte 一致、probe(3 経路とも期待どおり)、テスト 3 本、`run-verify.sh`、strict scan を確認。範囲外の発見: merge-tree に対する `merge.renames` などの設定は未固定(probe で差は出ず、tech-debt に未再現として記録)。tech-debt の別の 2 行が archive 済み plan の active のパスを参照している(sync-docs で直す)
 - 2026-09-27 self-review cycle 1(`docs/reports/self-review-2026-09-27-secret-scan-attr-parity.md`、5107fb2): pass、MEDIUM 3 / LOW 3。M1 `diff.<driver>.binary` を `false` に固定するとバイナリ内容のファイルまで text として読み CI(内容判定で「Binary files differ」)より多く検出する → `auto`。M2 システム全体の attributes ファイルが未固定 → `GIT_ATTR_NOSYSTEM=1`。M3 info/attributes の拒否が全 `--range` に掛かり、merge 中の hook で無関係な規則でも `git merge` が止まる → 拒否を branch scan に移す。LOW: 対処法(base を merge / rebase)を理由の行に、テストの隔離に属性の環境変数、mktemp の失敗が exit 1
 - 2026-09-28 work: Slice D は implementer に委譲(f2ceeca、13 ファイル、push 済み)。6 件を修正。逸脱: AC-3 の拒否の場所を scanner から `secret-scan-branch.sh` に変えた(scanner は hook からも呼ばれ、CI との一致は `/pr` の関門の契約なので)。`.git/info/attributes` を git と同じく読むことは merge guard に残る local-only の差として tech-debt に記録。テストは 123 件 / 190 件。修正前で scanner 側 7 件、branch 側 22 件が落ちる。全履歴の比較で main と一致(220,084 行)。orchestrator は差分・template の byte 一致・テスト・`run-verify.sh`・strict scan を確認
+- 2026-09-28 verify(`docs/reports/verify-2026-09-28-secret-scan-attr-parity.md`、733b727): pass。AC-1〜AC-9 を対応付け、AC-7 の文言が M3 の改訂を反映していなかったので plan を訂正(挙動とテストは改訂後の形で pass)。Non-goals の維持、文書の drift なし
 ## Progress checklist
 
 - [x] Plan reviewed
 - [x] Branch created
 - [x] Implementation started
 - [x] Review artifact created
-- [ ] Verification artifact created
+- [x] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
 
