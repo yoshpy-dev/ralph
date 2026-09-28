@@ -113,6 +113,8 @@ secret scan の属性の読み元について、固定できる差は固定し�
 - 2026-09-27 self-review cycle 1(`docs/reports/self-review-2026-09-27-secret-scan-attr-parity.md`、5107fb2): pass、MEDIUM 3 / LOW 3。M1 `diff.<driver>.binary` を `false` に固定するとバイナリ内容のファイルまで text として読み CI(内容判定で「Binary files differ」)より多く検出する → `auto`。M2 システム全体の attributes ファイルが未固定 → `GIT_ATTR_NOSYSTEM=1`。M3 info/attributes の拒否が全 `--range` に掛かり、merge 中の hook で無関係な規則でも `git merge` が止まる → 拒否を branch scan に移す。LOW: 対処法(base を merge / rebase)を理由の行に、テストの隔離に属性の環境変数、mktemp の失敗が exit 1
 - 2026-09-28 work: Slice D は implementer に委譲(f2ceeca、13 ファイル、push 済み)。6 件を修正。逸脱: AC-3 の拒否の場所を scanner から `secret-scan-branch.sh` に変えた(scanner は hook からも呼ばれ、CI との一致は `/pr` の関門の契約なので)。`.git/info/attributes` を git と同じく読むことは merge guard に残る local-only の差として tech-debt に記録。テストは 123 件 / 190 件。修正前で scanner 側 7 件、branch 側 22 件が落ちる。全履歴の比較で main と一致(220,084 行)。orchestrator は差分・template の byte 一致・テスト・`run-verify.sh`・strict scan を確認
 - 2026-09-28 verify(`docs/reports/verify-2026-09-28-secret-scan-attr-parity.md`、733b727): pass。AC-1〜AC-9 を対応付け、AC-7 の文言が M3 の改訂を反映していなかったので plan を訂正(挙動とテストは改訂後の形で pass)。Non-goals の維持、文書の drift なし
+- 2026-09-28 test(`docs/reports/test-2026-09-28-secret-scan-attr-parity.md`、b8e46fc): pass。`tests/test-secret-scan.sh` 123/123、`tests/test-secret-scan-branch.sh` 190/190、`tests/test-run-verify-branch-secret-scan.sh` 32/32。要求された 10 件の red/green mutation は全て discriminate。main の pre-fix scanner との live 比較(10 シナリオ・15 呼び出し)は plan の再現表と一致。全履歴比較(root..HEAD)は 394,454 行で main と byte 一致。Docker(alpine:3.18 git 2.40.4 / alpine:3.19 git 2.43.7)でも確認。gap: `test-secret-scan-branch.sh` に real-git-version の SKIP ゲートがなく(`test-secret-scan.sh` にはある)、2.40.4 環境で 19 件が本番的には正しい理由だが文言が食い違う形で FAIL。加えて `use_merge_attributes` の `drivers_rc`=other、外側の `attr_diff_rc`=other、`check_info_attributes` の grep 異常終了、`git_version_at_least` の不正な version 文字列の 4 分岐が未テスト。コードは変更せず、tech-debt への記録を sync-docs に引き継ぐ
+- 2026-09-28 sync-docs(cycle 1): 文書 drift の再確認(`scripts/secret-scan.sh` / `scripts/secret-scan-branch.sh` のヘッダー、quality-gates 2 コピー、`/pr` skill の 4 ミラー、README.md、`docs/quality/definition-of-done.md`、docs/recipes/、AGENTS.md、`docs/architecture/repo-map.md`)は変更不要を確認。`docs/tech-debt/README.md` の `docs/plans/active/2026-09-25-doctor-shell-alias-rc-types.md` 参照(実際は archive 済み)を `docs/plans/archive/` に訂正し、test cycle 1 の gap(`test-secret-scan-branch.sh` の real-git-version SKIP ゲート欠如と未テスト分岐 4 件)を tech-debt に新規 1 行で追加。AC のチェックボックスは変更せず、Progress checklist の Test artifact created のみ更新
 ## Progress checklist
 
 - [x] Plan reviewed
@@ -120,7 +122,7 @@ secret scan の属性の読み元について、固定できる差は固定し�
 - [x] Implementation started
 - [x] Review artifact created
 - [x] Verification artifact created
-- [ ] Test artifact created
+- [x] Test artifact created
 - [ ] PR created
 
 ## Readiness checklist
