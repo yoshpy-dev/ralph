@@ -24,7 +24,7 @@
 ## Scope
 
 - `scripts/ralph-config.sh`(+ template、byte 一致): `RALPH_CODEX_REVIEWER_MODEL`(既定 `gpt-6-astra`)と `RALPH_CODEX_REASONING_EFFORT`(既定 `xhigh`)を `RALPH_CLAUDE_REVIEWER_MODEL` と同じ形で定義し export する。
-- `/plan` と `/cross-review` の skill 本文(4 面): codex の呼び出しを `command codex -m "${RALPH_CODEX_REVIEWER_MODEL:-gpt-6-astra}" -c "model_reasoning_effort=${RALPH_CODEX_REASONING_EFFORT:-xhigh}" exec ... </dev/null` にし、先に `scripts/ralph-config.sh` を source すること、数分かかりうるのでバックグラウンドで起動して出力をファイルに落とし最終ブロックを読むこと、`</dev/null` と `command` の理由を 1〜2 文で書く。
+- `/plan` と `/cross-review` の skill 本文(4 面): codex の呼び出しを `command codex -m "${RALPH_CODEX_REVIEWER_MODEL:-gpt-6-astra}" -c "model_reasoning_effort=${RALPH_CODEX_REASONING_EFFORT:-xhigh}" exec ... -o <last-message-file> </dev/null` にし、先に `scripts/ralph-config.sh` を source すること、`</dev/null` と `command` の理由を 1〜2 文で書く。完了の contract(Codex advisory への対応): 数分かかりうるのでバックグラウンドで起動し(Claude Code は Bash の `run_in_background`、Codex driver は自身の background 実行)、その task の完了通知を待ってから、exit code が 0 で、`-o` の最終応答ファイルが新しく書かれて空でないことを確認してから結果を読む。exit が非 0、上限時間(20 分)までに完了しない、最終応答ファイルが空か古い、のいずれかは「review 未完了」として扱い、cross-review では triage report の header に `Reviewer status: incomplete (<reason>)` を書いて Case C(指摘なし)には進まない(再実行するか、`/pr` に known gap として記録するかを AskUserQuestion / 番号選択で選ぶ)。plan advisory では「Codex advisory: incomplete」と記録して先に進む。中断(timeout)時は残った process を止める。最終応答の抽出は人間向けログの `^codex$` ブロックではなく `-o` のファイルを読む。
 - 回帰テスト: `tests/test-codex-exec-invocation.sh`(新規、100755)。4 面 × 2 skill の `codex ... exec` を含む行がすべて `</dev/null` と明示の `-m` / `-c model_reasoning_effort=` を持つこと、skill の fallback が `ralph-config.sh` の既定と一致することを検査する。`internal/config/defaults_sync_test.go` の SKILL.md fallback 検査を表駆動にして codex の 2 変数(plan と cross-review の両方)も対象にする。`tests/test-ralph-config.sh` に 2 変数の export と上書きの assertion。
 - 文書: `.claude/rules/ralph/model-routing.md`(sync note と値の所在)、`docs/recipes/codex-setup.md`(agent の Bash から `codex exec` を呼ぶときの規則を短く)。
 
@@ -60,16 +60,17 @@
 ## Acceptance criteria
 
 - [ ] AC-1: `scripts/ralph-config.sh` と template が byte 一致で、`RALPH_CODEX_REVIEWER_MODEL="${RALPH_CODEX_REVIEWER_MODEL:-gpt-6-astra}"` と `RALPH_CODEX_REASONING_EFFORT="${RALPH_CODEX_REASONING_EFFORT:-xhigh}"` を定義して export する。`tests/test-ralph-config.sh` が既定値と環境からの上書きを確認する。
-- [ ] AC-2: `/plan`(step 11.c)と `/cross-review`(step 4 と CLI execution modes 表)の codex の呼び出しが 4 面すべてで `command codex -m "${RALPH_CODEX_REVIEWER_MODEL:-gpt-6-astra}" -c "model_reasoning_effort=${RALPH_CODEX_REASONING_EFFORT:-xhigh}" exec ... </dev/null` の形で、先に `scripts/ralph-config.sh` を source すること、バックグラウンド起動と出力ファイルの読み方、`</dev/null` と `command` の理由が書かれている。`./scripts/check-skill-sync.sh` と `./scripts/check-sync.sh` が pass。
-- [ ] AC-3: `tests/test-codex-exec-invocation.sh`(100755)が、4 面 × 2 skill の `codex ... exec` 行の `</dev/null`、`-m "${RALPH_CODEX_REVIEWER_MODEL:-`、`model_reasoning_effort=${RALPH_CODEX_REASONING_EFFORT:-` の存在と、fallback が `ralph-config.sh` の既定と等しいことを検査する。mutation: 1 面から `</dev/null` を外す、fallback を変える、`ralph-config.sh` の既定を変える、のそれぞれで落ちる。
+- [ ] AC-2: `/plan`(step 11.c)と `/cross-review`(step 4 と CLI execution modes 表)の codex の呼び出しが 4 面すべてで `command codex -m "${RALPH_CODEX_REVIEWER_MODEL:-gpt-6-astra}" -c "model_reasoning_effort=${RALPH_CODEX_REASONING_EFFORT:-xhigh}" exec ... -o <file> </dev/null` の形で、先に `scripts/ralph-config.sh` を source すること、バックグラウンド起動と完了の contract(完了通知を待つ、exit 0、`-o` の最終応答ファイルが新しく空でない、20 分の上限、中断時の停止)、`</dev/null` と `command` の理由が書かれている。`./scripts/check-skill-sync.sh` と `./scripts/check-sync.sh` が pass。
+- [ ] AC-3: `tests/test-codex-exec-invocation.sh`(100755)が、4 面 × 2 skill の `codex ... exec` 行の `</dev/null`、`-m "${RALPH_CODEX_REVIEWER_MODEL:-`、`model_reasoning_effort=${RALPH_CODEX_REASONING_EFFORT:-`、`-o`(または `--output-last-message`)の存在と、fallback が `ralph-config.sh` の既定と等しいことを検査する。mutation: 1 面から `</dev/null` を外す、`-o` を外す、fallback を変える、`ralph-config.sh` の既定を変える、のそれぞれで落ちる。
 - [ ] AC-4: `internal/config/defaults_sync_test.go` が SKILL.md の fallback 検査を表駆動にし、`RALPH_CLAUDE_REVIEWER_MODEL`(cross-review)に加えて `RALPH_CODEX_REVIEWER_MODEL` と `RALPH_CODEX_REASONING_EFFORT`(plan と cross-review)を検査する。`go test ./internal/config/...` と `TMPDIR=/tmp go test ./internal/config/...` が green。mutation: skill の fallback を変えると落ちる。
 - [ ] AC-5: `.claude/rules/ralph/model-routing.md` の「Cross-review sync note」と「Where the values live」に codex の 2 変数が入り、`docs/recipes/codex-setup.md` に agent の Bash から `codex exec` を呼ぶ規則(`</dev/null`、明示の model / effort、バックグラウンドと出力ファイル)が短く書かれている。`.claude/skills`、`.agents/skills`、`templates/base`、`docs/recipes`、`README.md`、`.claude/rules` に `</dev/null` のない `codex exec` の呼び出し例が残っていない(「`codex exec review` を呼ぶ」という名前だけの言及は可)。
-- [ ] AC-6: 実機確認: `. scripts/ralph-config.sh; command codex -m "$RALPH_CODEX_REVIEWER_MODEL" -c "model_reasoning_effort=$RALPH_CODEX_REASONING_EFFORT" exec --sandbox read-only 'Reply with the single word ok' </dev/null` が 1 分以内に返り、出力に ok を含む(test report に記録。codex がなければその旨を記録)。
+- [ ] AC-6: 実機確認: `. scripts/ralph-config.sh; command codex -m "$RALPH_CODEX_REVIEWER_MODEL" -c "model_reasoning_effort=$RALPH_CODEX_REASONING_EFFORT" exec --sandbox read-only -o <file> 'Reply with the single word ok' </dev/null` が 1 分以内に exit 0 で返り、`<file>` の内容(前後の空白を除く)が `ok` に完全一致する(test report に記録。codex がなければその旨を記録)。plan 時の probe(2026-09-29): 同じ形(`-o` なし)で 11 秒、exit 0、出力の末尾が `ok`。
 - [ ] AC-7: `RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh` green(#190 のため full を明示)、`shellcheck -S warning` で新規テストに警告なし。
+- [ ] AC-8: `/cross-review` の skill 本文(4 面)に「reviewer 未完了」の経路がある: exit 非 0 / 上限時間 / 最終応答ファイルが空か古い、のとき triage report の header に `Reviewer status: incomplete (<reason>)` を書き、Case C には進まず、再実行か `/pr`(known gap として記録)かを選ばせる。`/plan` は「Codex advisory: incomplete」と記録して進む。`tests/test-codex-exec-invocation.sh` が cross-review の 4 面に `Reviewer status: incomplete` の文言があることを検査する(mutation: 1 面から消すと落ちる)。
 
 ## Implementation outline
 
-1. Slice A(implementer、sonnet): `ralph-config.sh`(2 コピー)の 2 変数、skill 本文 2 つの書き換えと `sync-skills.sh` による `.agents` 側の再生成(root と template の両方)、template の `.claude/skills` への反映、`tests/test-codex-exec-invocation.sh`、`tests/test-ralph-config.sh` の追加 assertion、`defaults_sync_test.go` の表駆動化、`model-routing.md` と `codex-setup.md` の文書。1 コミット。red の証拠: AC-3 / AC-4 の mutation。実機確認は AC-6。
+1. Slice A(implementer、sonnet): `ralph-config.sh`(2 コピー)の 2 変数、skill 本文 2 つの書き換え(呼び出し形、完了の contract、未完了の経路)と `sync-skills.sh` による `.agents` 側の再生成(root と template の両方)、template の `.claude/skills` への反映、`tests/test-codex-exec-invocation.sh`、`tests/test-ralph-config.sh` の追加 assertion、`defaults_sync_test.go` の表駆動化、`model-routing.md` と `codex-setup.md` の文書。1 コミット。red の証拠: AC-3 / AC-4 / AC-8 の mutation。実機確認は AC-6。
 2. pipeline: self-review → verify → test → sync-docs → cross-review(この skill の新しい呼び出し形で実行する)→ PR。
 
 ## Verify plan
@@ -84,7 +85,7 @@
 - Unit tests: `sh tests/test-codex-exec-invocation.sh`、`bash tests/test-ralph-config.sh`、`go test ./internal/config/... -count=1`。
 - Integration tests: `RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh`、AC-6 の実機確認。cross-review 自体を新しい呼び出し形で実行する(pipeline の中で自然に検証される)。
 - Regression tests: AC-3 / AC-4 の mutation(`</dev/null` の削除、fallback の変更、既定の変更)。
-- Edge cases: `RALPH_CODEX_REVIEWER_MODEL` を環境で上書きしたときに skill の形がそのまま使えること、`ralph-config.sh` を source していない shell でも fallback で動くこと、alias が定義された shell で `command codex` が alias を迂回すること(テストでは alias を定義した fixture で `command -v` / 実行行の確認)。
+- Edge cases: `RALPH_CODEX_REVIEWER_MODEL` を環境で上書きしたときに skill の形がそのまま使えること、`ralph-config.sh` を source していない shell でも fallback で動くこと、alias が定義された shell で `command codex` が alias を迂回すること(テストでは alias を定義した fixture で `command -v` / 実行行の確認)、`-o` のファイルが存在しない・空・古い場合を「未完了」と判定する手順が skill に書かれていること。
 - Evidence to capture: test report(件数、mutation 表、実機確認の出力)。
 
 ## Risks and mitigations
@@ -102,9 +103,13 @@ skill 本文・設定・テスト・文書の変更のみ。問題があれば 1
 - `.codex/config.toml` の `model = "gpt-5.5"`(退役予定)を `gpt-6-astra` に更新するかは #156 の観測で判断する。
 - codex 側の reviewer の既定 effort を `xhigh` のままにするか `high` に下げるかは、コストの実測がないので現状維持。
 
+## Deviation notes
+
+- 2026-09-29 plan: Codex plan advisory(gpt-6-astra、xhigh)は MEDIUM 1: バックグラウンド実行に完了・失敗の contract がなく、失敗した reviewer が「指摘なし → PR」に落ちうる → `-o`(`--output-last-message`、`exec` と `exec review` の両方で利用可と確認)で最終応答をファイルに取り、完了通知・exit 0・新しく空でないファイル・20 分の上限・中断時の停止を contract として AC-2 に入れ、未完了の経路を AC-8 として追加、AC-6 を「exit 0 かつ完全一致」に締めた。ユーザー決定: 対応案で plan を更新。plan 時の probe で `-m` / `-c` 付きの `codex exec ... </dev/null` が 11 秒で `ok` を返すことを確認
+
 ## Progress checklist
 
-- [ ] Plan reviewed
+- [x] Plan reviewed
 - [x] Branch created
 - [ ] Implementation started
 - [ ] Review artifact created
@@ -116,5 +121,5 @@ skill 本文・設定・テスト・文書の変更のみ。問題があれば 1
 
 - [x] 呼び出し箇所、ミラーの生成と検査の仕組み、既存の fallback 検査をコードで確認した
 - [x] critical fork なし
-- [ ] Codex plan advisory
+- [x] Codex plan advisory(MEDIUM 1、対応案で plan を更新)
 - [x] AC は決定的なテストと 1 回の実機確認で確認できる
