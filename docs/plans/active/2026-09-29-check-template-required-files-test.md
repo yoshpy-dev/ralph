@@ -1,6 +1,6 @@
 # check-template-required-files-test
 
-- Status: Draft
+- Status: PR created (#191), awaiting CI and merge
 - Owner: Claude Code
 - Date: 2026-09-29
 - Related request: `scripts/check-template.sh` の `required_files` の一覧には回帰テストがない。#169 の `/test`(mutation 6f)で、一覧から `scripts/xreview-helpers.sh` を落としても既存のテストはどれも落ちなかった。`internal/scaffold/embed_test.go` の `TestTemplateBaseScriptsExist` は Go 側の別の一覧で、shell 側とは連動していない(`docs/tech-debt/README.md` に記録済み)。issue #183
@@ -55,13 +55,13 @@
 
 ## Acceptance criteria
 
-- [ ] AC-1: `tests/test-check-template.sh` があり、`scripts/check-template.sh` の `required_files` から任意の 1 項目を落とすと、golden の比較(A)と fixture の削除ループ(B)の両方が落ちる(scratch のコピーで全項目について mutation を回し、report に残す)。
-- [ ] AC-2: `internal/scaffold/embed_test.go` に、template 側 `check-template.sh` の `scripts/` 項目の集合と Go 側 `required` が等しいことを確かめるテストがあり、どちらか一方から 1 項目を落とすと落ちる(両方向の mutation を report に残す)。不一致の出力は「どちらにだけある名前」を列挙する。
-- [ ] AC-3: `required_files` に Go 側だけにあった 10 本を追加し、root と template が byte 一致。meta-repo の root で `CI=true ./scripts/check-template.sh` の exit code が今までどおり 0 で、`Missing required file` の行が出ない。`go run ./cmd/ralph init --yes <tmpdir>` で作った fresh scaffold に 10 本すべてが存在し、そこでの `check-template.sh` の `Missing required file` の行が #189 の 3 項目(`README.md`、docs 2 件)だけである(scaffold 全体の pass は #189 の対象)。
-- [ ] AC-4: fixture の検査(B)は `check-template.sh` の他の検査に引っかからない最小構成で pass する(`.claude/settings.json` は `{}`、`.claude/hooks` / `.claude/skills` / `.claude/agents` / `packs` / `scripts` は空ディレクトリ、`.git` なし)。
-- [ ] AC-5: `bash -n` / `shellcheck -S warning tests/test-check-template.sh` 警告なし、`go test ./internal/scaffold/...` と `TMPDIR=/tmp go test ./internal/scaffold/...` green、`./scripts/run-verify.sh` green。
-- [ ] AC-6: `docs/tech-debt/README.md` の該当行が削除され、#189 の内容(hook 参照検査の誤検出と fail-open、meta-repo 専用の 3 項目)が tech-debt の 1 行として #189 を指して記録され、`docs/quality/quality-gates.md` / `docs/architecture/repo-map.md` の記述が最終の挙動と一致する。
-- [ ] AC-7: `tests/test-check-template.sh` は Git mode `100755` でコミットされる(`git ls-files -s tests/test-check-template.sh` で確認)。scratch のコピーでこのテストをわざと落とした(golden に存在しない項目を足すなど)状態で `HARNESS_VERIFY_MODE=test ./scripts/verify.local.sh` が非ゼロで終わり、失敗の出力にこのテストの名前が出る(runner が実行権限のないファイルを黙ってスキップするため)。
+- [x] AC-1: `tests/test-check-template.sh` があり、`scripts/check-template.sh` の `required_files` から任意の 1 項目を落とすと、golden の比較(A)と fixture の削除ループ(B)の両方が落ちる(scratch のコピーで全項目について mutation を回し、report に残す)。
+- [x] AC-2: `internal/scaffold/embed_test.go` に、template 側 `check-template.sh` の `scripts/` 項目の集合と Go 側 `required` が等しいことを確かめるテストがあり、どちらか一方から 1 項目を落とすと落ちる(両方向の mutation を report に残す)。不一致の出力は「どちらにだけある名前」を列挙する。
+- [x] AC-3: `required_files` に Go 側だけにあった 10 本を追加し、root と template が byte 一致。meta-repo の root で `CI=true ./scripts/check-template.sh` の exit code が今までどおり 0 で、`Missing required file` の行が出ない。`go run ./cmd/ralph init --yes <tmpdir>` で作った fresh scaffold に 10 本すべてが存在し、そこでの `check-template.sh` の `Missing required file` の行が #189 の 3 項目(`README.md`、docs 2 件)だけである(scaffold 全体の pass は #189 の対象)。
+- [x] AC-4: fixture の検査(B)は `check-template.sh` の他の検査に引っかからない最小構成で pass する(`.claude/settings.json` は `{}`、`.claude/hooks` / `.claude/skills` / `.claude/agents` / `packs` / `scripts` は空ディレクトリ、`.git` なし)。
+- [x] AC-5: `bash -n` / `shellcheck -S warning tests/test-check-template.sh` 警告なし、`go test ./internal/scaffold/...` と `TMPDIR=/tmp go test ./internal/scaffold/...` green、`./scripts/run-verify.sh` green。
+- [x] AC-6: `docs/tech-debt/README.md` の該当行が削除され、#189 の内容(hook 参照検査の誤検出と fail-open、meta-repo 専用の 3 項目)が tech-debt の 1 行として #189 を指して記録され、`docs/quality/quality-gates.md` / `docs/architecture/repo-map.md` の記述が最終の挙動と一致する。
+- [x] AC-7: `tests/test-check-template.sh` は Git mode `100755` でコミットされる(`git ls-files -s tests/test-check-template.sh` で確認)。scratch のコピーでこのテストをわざと落とした(golden に存在しない項目を足すなど)状態で `HARNESS_VERIFY_MODE=test ./scripts/verify.local.sh` が非ゼロで終わり、失敗の出力にこのテストの名前が出る(runner が実行権限のないファイルを黙ってスキップするため)。
 
 ## Implementation outline
 
@@ -114,7 +114,7 @@
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
-- [ ] PR created
+- [x] PR created (#191)
 
 ## Readiness checklist
 
