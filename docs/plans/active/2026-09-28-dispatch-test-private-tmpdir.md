@@ -105,14 +105,17 @@ case I の dispatcher の実行と漏れの検査をテスト専用の `TMPDIR` 
 - 2026-09-29 self-review(cycle 1、b45326e): CRITICAL 0 / HIGH 0 / MEDIUM 1 / LOW 5、merge 可。MEDIUM: 第 2 の dispatcher を止める `pkill -f "Stop.d/10-concurrent-slow.sh"` が同一ホストの別スイート実行の hook にも一致する(dispatcher は hook を相対パスで起動するので cmdline に実行ごとの区別がない)。LOW: `sleep 30` が TERM 後に孤児化、模擬共有 dir の事前空チェックがない、専用 dir の検査が名前で絞っている、PASS 行に実行ごとのパス、コメント 4 か所のずれ。全件を in-cycle で修正
 - 2026-09-29 work: Slice B は implementer に委譲(3ba2f65、2 ファイル、+92 / -31)。第 2 の dispatcher の hook を `10-concurrent-slow-$$.sh` にして `pkill -f` を 2 か所とも削除(停止は trap の `kill -TERM` + `wait`)、hook の末尾を `exec sleep 30`(TERM が sleep 自身に届く。停止後の `wait` の rc が 143 であることを assertion)、fixture 起動前に `$shared_tmp` が空であることの assertion、`find` の対象を `$shared_tmp` に、専用 dir は `-mindepth 1` で全件、PASS 行は件数だけ、コメントを修正。テスト 31 / 0(29 から +2)。implementer が並走 2 本で既存の `PreCompact.d/10-slow.sh` の `pgrep`/`pkill` が互いの hook を拾い 6 組中 4 組が落ちることを実測(旧テスト efd4ec1 でも 4 / 6、同じ失敗の型を含む)。この時点では tech-debt の行として記録
 - 2026-09-29 work(非目標の改訂): Slice C は implementer に委譲(300aa85、2 ファイル、+28 / -16)。case I 自身の hook も `10-slow-$$.sh` にし、`pgrep -f` / `pkill -f` を同じ実行ごとのパスに。Slice B の tech-debt の行を削除、ヘッダーの `i.` に一意な名前の理由を 1 文。並走 2 本 × 6 組と 3 本 × 1 組はすべて rc 0、FAIL 行なし、孤児の `sleep` なし。orchestrator も並走 2 本(31 / 0 × 2)、ホストの canary、孤児プロセスなしを確認。理由: 修正が hook 名の一意化の数行で、放置すると #182 と同じ「同一ホストの別実行」型の偽 FAIL が残るため
+- 2026-09-29 verify(cycle 1、d23f08d): PASS。AC-1〜AC-7 の静的な半分と self-review 6 件の修正をコードで確認、`run-static-verify.sh`(full)・shellcheck・`bash -n` green、doc drift なし。動的な半分(件数、5 回連続、canary)は test に委ねた
+- 2026-09-29 test(cycle 1、85fe405): PASS。`run-test.sh` green、31 / 0、5 回連続、並走 6 組 + 3 本すべて rc 0、canary 3 回とも残存、孤児プロセスなし。mutation: (a) 対象 dispatcher の専用 `TMPDIR` を外しても 31 / 0 のまま(dispatcher の trap がどの dir でも消すので事後の検査では区別できない)= テストの穴、(b) `exec sleep 30` を `sleep 30` に戻しても exit 143 の assertion は通る(コメントに書いた既知の限界、孤児の sleep は残る)、(c) 専用 dir の検査を `true` にして漏れを植えると元は 30 / 1、変異は 31 / 0(assertion は生きている)、(d) 旧テスト + fixture は 26 / 1「left stray …」で red。旧テストの並走 2 本は 3 組中 2 組が落ち、両方の型(stray temp files、child alive)を再現
+- 2026-09-29 work: Slice D は implementer に委譲(feb016b、1 ファイル、+35 / -8)。mutation (a) の穴を塞ぐため、対象の started marker の直後(TERM の前)に「専用 dir に対象の一時ファイルがある(件数 > 0)」と「模擬共有 dir の `ralph-dispatch-*` の件数が fixture の件数のまま」の 2 assertion を追加(33 / 0)。変異(`TMPDIR` の上書きを外す)は 31 / 2 で、両方の新 assertion が落ちる(共有 dir が 3 → 6)。5 回連続、並走 3 組、`run-verify.sh`、canary は green。orchestrator も 33 / 0 を確認
 ## Progress checklist
 
 - [x] Plan reviewed
 - [x] Branch created
 - [x] Implementation started
 - [x] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Verification artifact created
+- [x] Test artifact created
 - [ ] PR created
 
 ## Readiness checklist
