@@ -28,10 +28,14 @@
 #      separate event/hook name) holds its own temp files in the suite's
 #      simulated shared TMPDIR for the whole check, proving the private
 #      TMPDIR -- not the shared one -- is what the cleanup check inspects.
-#      The same SIGTERM also kills the hook script that was actively
-#      running underneath the dispatcher, verified two ways: it never
-#      reaches the marker it would only write on natural completion, and
-#      (defense in depth) no matching process remains alive per pgrep.
+#      Both dispatchers' hook scripts carry a per-run name (this test
+#      process's own PID), so two runs of this suite on one host never
+#      match each other's pgrep/pkill and cannot kill or "see" each
+#      other's process. The same SIGTERM also kills the hook script that
+#      was actively running underneath the dispatcher, verified two ways:
+#      it never reaches the marker it would only write on natural
+#      completion, and (defense in depth) no matching process remains
+#      alive per pgrep.
 
 set -u
 
@@ -381,7 +385,14 @@ printf '{}' > "$i_stdin"
 # check would find nothing to fail on. Checking finished_marker immediately
 # after "wait $i_pid" returns catches this regardless of how quickly (or
 # slowly) that wait unblocks.
-write_script "$fixture/.claude/hooks/PreCompact.d/10-slow.sh" <<EOF
+#
+# The hook's file name carries this test process's own PID ($$), the same
+# as the concurrent fixture's hook below: the dispatcher runs hooks by a
+# $workdir-relative path with nothing per-run in the command line, so a
+# bare "10-slow.sh" would let the pgrep/pkill checks below match (and the
+# pkill kill) a sibling run's own hook process when two runs of this suite
+# race on one host.
+write_script "$fixture/.claude/hooks/PreCompact.d/10-slow-$$.sh" <<EOF
 #!/usr/bin/env sh
 cat >/dev/null
 touch "$started_marker"
@@ -406,13 +417,13 @@ chmod +x "$concurrent_fixture/.claude/hooks/ralph-dispatch.sh"
 concurrent_started="$workdir/case-i-concurrent-started"
 concurrent_out="$workdir/case-i-concurrent-out.log"
 rm -f "$concurrent_started" "$concurrent_out"
-# The hook's file name carries this test process's own PID ($$) so it can
-# never collide with another concurrent run of this same suite on the host
-# -- a bare "10-concurrent-slow.sh" would, since the dispatcher runs hooks
-# by a $workdir-relative path with nothing per-run in the command line, and
-# a pkill/pgrep on that path would then match (and could kill) a sibling
-# run's fixture too (docs/tech-debt/README.md tracks the same class of
-# collision for case I's own pgrep/pkill on "PreCompact.d/10-slow.sh").
+# The hook's file name carries this test process's own PID ($$), the same
+# as case I's own hook above, so it can never collide with another
+# concurrent run of this same suite on the host -- a bare
+# "10-concurrent-slow.sh" would, since the dispatcher runs hooks by a
+# $workdir-relative path with nothing per-run in the command line, and a
+# pkill/pgrep on that path would then match (and could kill) a sibling
+# run's fixture too.
 # "exec sleep 30" (not a plain "sleep 30") replaces this script's own
 # process image with sleep, so the TERM the dispatcher's kill_child sends
 # to this script's PID lands on the sleep itself instead of leaving it
@@ -541,7 +552,7 @@ fi
 # a reverted fix, since (per the comment at its declaration) an unfixed
 # dispatcher's "wait $i_pid" does not return until the child has already
 # exited on its own, so pgrep alone would find nothing to fail on either way.
-if pgrep -f "PreCompact.d/10-slow.sh" >/dev/null 2>&1; then
+if pgrep -f "PreCompact.d/10-slow-$$.sh" >/dev/null 2>&1; then
   record_fail "I. SIGTERM left the running hook script child alive (dispatcher did not kill it)"
 else
   record_pass "I. SIGTERM killed the running hook script child (no longer alive after dispatcher exit)"
@@ -549,8 +560,10 @@ fi
 
 # Reap the orphaned drop-in (still sleeping past its parent's death) so it
 # does not outlive this test run — a no-op once the child-kill assertion
-# above passes; kept as a safety net if it does not.
-pkill -f "PreCompact.d/10-slow.sh" >/dev/null 2>&1 || true
+# above passes; kept as a safety net if it does not. The per-run path
+# (this test process's own $$, matching the hook's file name above) means
+# this pkill can only ever match this run's own hook, never a sibling run's.
+pkill -f "PreCompact.d/10-slow-$$.sh" >/dev/null 2>&1 || true
 
 # Stop the concurrent-dispatcher fixture and confirm its own temp files are
 # gone from the simulated shared TMPDIR. This runs after all of case I's
