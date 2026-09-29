@@ -1,6 +1,6 @@
 # dispatch-test-private-tmpdir
 
-- Status: Draft
+- Status: PR created (#188), awaiting CI and merge
 - Owner: Claude Code
 - Date: 2026-09-28
 - Related request: `tests/test-ralph-dispatch.sh` の case I(SIGTERM 後に dispatcher の一時ファイルが残らないことの検査)が、共有の `${TMPDIR:-/tmp}` にある `ralph-dispatch-*` を実行前後の集合差で比べるため、同じマシンで動く別の Claude Code / Codex セッションの hook(同じ `ralph-dispatch.sh`)が作った一時ファイルを「漏れ」として拾い、不安定になる(#167 の実装中に 1 回失敗、`docs/tech-debt/README.md` に記録)。issue #182
@@ -55,13 +55,13 @@ case I の dispatcher の実行と漏れの検査をテスト専用の `TMPDIR` 
 
 ## Acceptance criteria
 
-- [ ] AC-1: case I の dispatcher は `$workdir` 配下の専用 `TMPDIR` で起動され、漏れの検査はそのディレクトリだけを列挙する。SIGTERM 後にそのディレクトリに `ralph-dispatch-*` が残らない(既存の意図の維持)。共有の `${TMPDIR:-/tmp}` は列挙も削除もしない(`rm -f $i_leaked_tmp` は削除)。
-- [ ] AC-2: 再現 fixture: case I の実行中、第 2 の dispatcher(別の fixture repo、別の event 名の遅い hook)が模擬共有 TMPDIR(`$workdir/shared-tmp`、環境の `TMPDIR`)に `ralph-dispatch-*` を持つ状態を作り、その存在をテスト自身が確認する(fixture が効いていることの sanity。存在しなければ FAIL)。この状態で case I の全 assertion が pass する。
-- [ ] AC-3: 同じ fixture を修正前の case I(環境の `TMPDIR` の集合差)に、旧検査の事前スナップショットの後・対象への TERM の前に起動する順で当てると、「left stray ralph-dispatch-* temp files」で落ち、落ちた対象は模擬共有 dir の中の fixture 所有のファイルである(scratch のコピーに fixture を挿入して確認し、test report に残す。ホストの共有領域は使わない)。
-- [ ] AC-4: 第 2 の dispatcher は case I の終わりに TERM で止め、その一時ファイルが模擬共有 dir から消えたことを確認する。テストが途中で止まっても残らないよう、EXIT の trap でも止める。
-- [ ] AC-5: `tests/test-ralph-dispatch.sh` の既存ケース A〜I がすべて pass(26 件 + 追加分)、5 回連続で pass、`shellcheck -S warning` で警告なし、`./scripts/run-verify.sh` green。
-- [ ] AC-6: ヘッダーのケース一覧(`i.`)が新しい検査を説明し、`docs/tech-debt/README.md` の case I の行が削除されている。
-- [ ] AC-7: テストはホストの共有 `${TMPDIR:-/tmp}` を `workdir` の作成にだけ使い、そこで `ralph-dispatch-*` を列挙も削除もしない(`find` / `rm` の対象は `$workdir` 配下だけ。静的に確認)。tester はホストの共有 dir に `ralph-dispatch-canary.*` を置いてスイートを走らせ、実行後も残っていることで動的にも確認する。
+- [x] AC-1: case I の dispatcher は `$workdir` 配下の専用 `TMPDIR` で起動され、漏れの検査はそのディレクトリだけを列挙する。SIGTERM 後にそのディレクトリに `ralph-dispatch-*` が残らない(既存の意図の維持)。共有の `${TMPDIR:-/tmp}` は列挙も削除もしない(`rm -f $i_leaked_tmp` は削除)。
+- [x] AC-2: 再現 fixture: case I の実行中、第 2 の dispatcher(別の fixture repo、別の event 名の遅い hook)が模擬共有 TMPDIR(`$workdir/shared-tmp`、環境の `TMPDIR`)に `ralph-dispatch-*` を持つ状態を作り、その存在をテスト自身が確認する(fixture が効いていることの sanity。存在しなければ FAIL)。この状態で case I の全 assertion が pass する。
+- [x] AC-3: 同じ fixture を修正前の case I(環境の `TMPDIR` の集合差)に、旧検査の事前スナップショットの後・対象への TERM の前に起動する順で当てると、「left stray ralph-dispatch-* temp files」で落ち、落ちた対象は模擬共有 dir の中の fixture 所有のファイルである(scratch のコピーに fixture を挿入して確認し、test report に残す。ホストの共有領域は使わない)。
+- [x] AC-4: 第 2 の dispatcher は case I の終わりに TERM で止め、その一時ファイルが模擬共有 dir から消えたことを確認する。テストが途中で止まっても残らないよう、EXIT の trap でも止める。
+- [x] AC-5: `tests/test-ralph-dispatch.sh` の既存ケース A〜I がすべて pass(26 件 + 追加分)、5 回連続で pass、`shellcheck -S warning` で警告なし、`./scripts/run-verify.sh` green。
+- [x] AC-6: ヘッダーのケース一覧(`i.`)が新しい検査を説明し、`docs/tech-debt/README.md` の case I の行が削除されている。
+- [x] AC-7: テストはホストの共有 `${TMPDIR:-/tmp}` を `workdir` の作成にだけ使い、そこで `ralph-dispatch-*` を列挙も削除もしない(`find` / `rm` の対象は `$workdir` 配下だけ。静的に確認)。tester はホストの共有 dir に `ralph-dispatch-canary.*` を置いてスイートを走らせ、実行後も残っていることで動的にも確認する。
 
 ## Implementation outline
 
@@ -117,7 +117,7 @@ case I の dispatcher の実行と漏れの検査をテスト専用の `TMPDIR` 
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
-- [ ] PR created
+- [x] PR created (#188)
 
 ## Readiness checklist
 
