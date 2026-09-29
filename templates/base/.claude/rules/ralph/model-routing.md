@@ -51,8 +51,11 @@ call (e.g. `opus` for security-sensitive changes) — no new env knob.
 
 **Cross-review sync note:** `.claude/skills/cross-review/SKILL.md` reads
 `RALPH_CLAUDE_REVIEWER_MODEL` (with an `opus` fallback) for the claude reviewer
-path. Keep reviewer-model defaults in sync when changing `RALPH_CLAUDE_REVIEWER_MODEL`
-in `scripts/ralph-config.sh`.
+path, and `RALPH_CODEX_REVIEWER_MODEL` / `RALPH_CODEX_REASONING_EFFORT` (with
+`gpt-6-astra` / `xhigh` fallbacks) for the codex reviewer path — `.claude/skills/plan/SKILL.md`'s
+Codex plan advisory reads the same two codex-side variables. Keep these
+fallback defaults in sync when changing any of the three vars in
+`scripts/ralph-config.sh`.
 
 ## Rules
 
@@ -115,4 +118,5 @@ late), up to about a month. claude seats are not observed and stay
 
 - `.claude/agents/*.md` — pipeline subagent tiers (frontmatter `model:`)
 - `scripts/ralph-config.sh` — effective Ralph defaults (`RALPH_CLAUDE_REVIEWER_MODEL`,
+  `RALPH_CODEX_REVIEWER_MODEL`, `RALPH_CODEX_REASONING_EFFORT`,
   `RALPH_STANDARD_MAX_PIPELINE_CYCLES`)

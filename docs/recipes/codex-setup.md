@@ -81,6 +81,19 @@ fallback in the report. The cycle cap (`RALPH_STANDARD_MAX_PIPELINE_CYCLES`)
 still applies, so a fix-and-revalidate run cannot exceed two passes by
 default.
 
+## Running `codex exec` from an agent's Bash tool
+
+`/plan`'s Codex plan advisory and `/cross-review`'s codex reviewer path both
+call `codex exec` from a Bash tool, not an interactive session. Close stdin
+with `</dev/null` so codex never blocks on "Reading additional input from
+stdin..."; run `command codex` (not a bare `codex`) with an explicit `-m` and
+`-c model_reasoning_effort=` sourced from `scripts/ralph-config.sh` so a
+shell alias that injects its own `-m` cannot collide with it. Write the final
+answer with `-o <file>` (or `--output-last-message`) instead of parsing the
+log. Run long calls in the background and only treat the call as complete
+once it exits 0 and the `-o` file is fresh and non-empty — otherwise treat it
+as incomplete, never as "no findings".
+
 ## Drift safety
 
 `scripts/check-skill-sync.sh` compares `.claude/skills/<name>/SKILL.md` and

@@ -29,6 +29,14 @@ RALPH_STANDARD_MAX_PIPELINE_CYCLES="${RALPH_STANDARD_MAX_PIPELINE_CYCLES:-2}"
 # codex, reviewer = claude).
 RALPH_CLAUDE_REVIEWER_MODEL="${RALPH_CLAUDE_REVIEWER_MODEL:-opus}"
 
+# RALPH_CODEX_REVIEWER_MODEL and RALPH_CODEX_REASONING_EFFORT are the model
+# and reasoning effort passed as `-m` / `-c model_reasoning_effort=` to
+# `codex exec` by /plan (Codex plan advisory) and /cross-review (reviewer =
+# codex). Explicit so the call does not depend on .codex/config.toml's model
+# or a shell alias.
+RALPH_CODEX_REVIEWER_MODEL="${RALPH_CODEX_REVIEWER_MODEL:-gpt-6-astra}"
+RALPH_CODEX_REASONING_EFFORT="${RALPH_CODEX_REASONING_EFFORT:-xhigh}"
+
 # ═══════════════════════════════════════════════════════════════════
 # [org] envelope defaults — mirror internal/config/config.go OrgConfig
 # and templates/base/ralph.toml [org]. Must change in lock-step (see
@@ -86,7 +94,7 @@ RALPH_ORG_WATCHDOG_WATCHER_MODEL="${RALPH_ORG_WATCHDOG_WATCHER_MODEL:-haiku}"
 # script sourced defaults. The default-assignment line above is kept
 # unexported so `defaults_sync_test.go` (which parses this file's text via
 # regex) still sees the same default value.
-export RALPH_CLAUDE_REVIEWER_MODEL
+export RALPH_CLAUDE_REVIEWER_MODEL RALPH_CODEX_REVIEWER_MODEL RALPH_CODEX_REASONING_EFFORT
 export RALPH_ORG_DRIVER_POOL RALPH_ORG_MODEL_POOL RALPH_ORG_MAX_SEATS
 export RALPH_ORG_DEADMAN_MINUTES
 

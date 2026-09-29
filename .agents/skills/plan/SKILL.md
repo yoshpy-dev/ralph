@@ -65,16 +65,21 @@ worktree.
 11. **Codex plan advisory (optional)**:
     a. Run `./scripts/codex-check.sh` via Bash.
     b. If exit 1 (not available): note "Codex not available — skipping plan advisory" and proceed to completion.
-    c. If exit 0 (available): invoke Codex to adversarially review the plan via Bash:
-       `codex exec --sandbox read-only "You are an adversarial plan reviewer. Your job is to break confidence in this plan, not to validate it. Default to skepticism — assume the plan can fail in subtle, high-cost ways until evidence says otherwise. Review for: (1) blind spots and missing risks — what failure modes are not addressed? (2) scope concerns — too broad, too narrow, or poorly bounded? (3) acceptance criteria gaps — can each criterion be verified deterministically? (4) design decision weaknesses — are there simpler or safer alternatives? (5) rollback and partial-failure scenarios — what happens if implementation stalls halfway? Report only material findings. Each finding must answer: What can go wrong? Why is this plan vulnerable? What is the likely impact? What concrete change would reduce the risk? Number each finding with severity [HIGH/MEDIUM/LOW]. Prefer one strong finding over several weak ones. If the plan looks solid, say so directly with no findings. Here is the plan file to review: docs/plans/active/<plan-file>"`
-    d. Present Codex findings to the user as a numbered list.
-    e. If Codex returned no actionable findings: note "Codex: no findings" and proceed to completion.
-    f. If findings exist, use AskUserQuestion:
+    c. If exit 0 (available): invoke Codex to adversarially review the plan via Bash. Source `./scripts/ralph-config.sh` first for the model/effort defaults, then launch the call in the background (Claude Code: Bash `run_in_background`; Codex driver: its own background run) and wait for the task's completion notification instead of polling:
+       ```
+       . ./scripts/ralph-config.sh
+       command codex -m "${RALPH_CODEX_REVIEWER_MODEL:-gpt-6-astra}" -c "model_reasoning_effort=${RALPH_CODEX_REASONING_EFFORT:-xhigh}" exec --sandbox read-only -o <scratch>/plan-advisory-last.md "You are an adversarial plan reviewer. Your job is to break confidence in this plan, not to validate it. Default to skepticism — assume the plan can fail in subtle, high-cost ways until evidence says otherwise. Review for: (1) blind spots and missing risks — what failure modes are not addressed? (2) scope concerns — too broad, too narrow, or poorly bounded? (3) acceptance criteria gaps — can each criterion be verified deterministically? (4) design decision weaknesses — are there simpler or safer alternatives? (5) rollback and partial-failure scenarios — what happens if implementation stalls halfway? Report only material findings. Each finding must answer: What can go wrong? Why is this plan vulnerable? What is the likely impact? What concrete change would reduce the risk? Number each finding with severity [HIGH/MEDIUM/LOW]. Prefer one strong finding over several weak ones. If the plan looks solid, say so directly with no findings. Here is the plan file to review: docs/plans/active/<plan-file>" </dev/null > <scratch>/plan-advisory.log 2>&1
+       ```
+       `</dev/null` closes stdin so codex does not wait for "additional input from stdin"; `command` bypasses a shell alias that adds its own `-m` (codex rejects a duplicated flag).
+    d. **Completion contract**: once the background task reports completion, confirm exit code 0 and that the `-o` file was written after launch and is non-empty; read the findings from the `-o` file, not the log. Otherwise (non-zero exit, no completion within 20 minutes, or the `-o` file missing/empty): stop the process if it is still running, note "Codex advisory: incomplete (<reason>)", and proceed to completion — never report it as "Codex: no findings".
+    e. Present Codex findings to the user as a numbered list.
+    f. If Codex returned no actionable findings: note "Codex: no findings" and proceed to completion.
+    g. If findings exist, use AskUserQuestion:
        - Question: "Codex returned findings on the plan. How do you want to proceed?"
        - Options:
          1. Update plan — edit plan per relevant findings, then re-display
          2. Acknowledge findings, continue — proceed without changes
-    g. After user decision, state that `/work` is the next skill to invoke.
+    h. After user decision, state that `/work` is the next skill to invoke.
 
 ## Output
 

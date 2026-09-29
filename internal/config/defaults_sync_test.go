@@ -7,8 +7,9 @@ package config
 //  2. templates/base/ralph.toml — declarative project config
 //  3. config.Default()          — Go CLI defaults exported as RALPH_* env vars
 //
-// It also checks that the cross-review SKILL.md fallback for
-// RALPH_CLAUDE_REVIEWER_MODEL matches the shell default.
+// It also checks that the /plan and /cross-review SKILL.md fallback tokens
+// for RALPH_CLAUDE_REVIEWER_MODEL, RALPH_CODEX_REVIEWER_MODEL, and
+// RALPH_CODEX_REASONING_EFFORT match the shell defaults.
 //
 // Any mismatch is a test failure naming the surface and key.  The test uses
 // runtime.Caller to resolve paths relative to this file so it works from any
@@ -166,32 +167,54 @@ func TestDefaultsLockStep(t *testing.T) {
 	check("org.watchdog.watcher_model", "RALPH_ORG_WATCHDOG_WATCHER_MODEL",
 		tomlCfg.Org.Watchdog.WatcherModel, goCfg.Org.Watchdog.WatcherModel)
 
-	// ── cross-review SKILL.md fallback matches shell ──────────────────────────
-	// The SKILL.md documents: ${RALPH_CLAUDE_REVIEWER_MODEL:-opus}
-	// We grep for the documented fallback token and assert it equals the shell
-	// default for RALPH_CLAUDE_REVIEWER_MODEL.
-	skillPath := filepath.Join(root, ".claude", "skills", "cross-review", "SKILL.md")
-	if _, err := os.Stat(skillPath); err != nil {
-		t.Skipf(".claude/skills/cross-review/SKILL.md not found (%v) — skipping reviewer fallback check", err)
+	// ── SKILL.md fallback tokens match shell defaults ─────────────────────────
+	// Both /plan and /cross-review document `${VAR:-fallback}` tokens for the
+	// model/effort env vars they source from scripts/ralph-config.sh. This is
+	// table-driven so every (skill, var) pair is checked the same way and every
+	// occurrence in the file (not only the first) is verified — the codex exec
+	// invocation line and the "CLI execution modes" table row must both carry
+	// the current default (docs/plans/active/2026-09-29-codex-exec-stdin-and-model.md
+	// AC-4).
+	type skillVarCheck struct {
+		skillDir string // under .claude/skills/
+		envVar   string
 	}
-	{
+	skillVarChecks := []skillVarCheck{
+		{"cross-review", "RALPH_CLAUDE_REVIEWER_MODEL"},
+		{"cross-review", "RALPH_CODEX_REVIEWER_MODEL"},
+		{"cross-review", "RALPH_CODEX_REASONING_EFFORT"},
+		{"plan", "RALPH_CODEX_REVIEWER_MODEL"},
+		{"plan", "RALPH_CODEX_REASONING_EFFORT"},
+	}
+
+	for _, c := range skillVarChecks {
+		skillPath := filepath.Join(root, ".claude", "skills", c.skillDir, "SKILL.md")
+		if _, err := os.Stat(skillPath); err != nil {
+			// t.Skipf halts this whole test function (not just this loop
+			// iteration), matching the pre-existing skip semantics above for
+			// a vendored/downstream repo missing the meta-repo's .claude tree.
+			t.Skipf(".claude/skills/%s/SKILL.md not found (%v) — skipping %s fallback check", c.skillDir, err, c.envVar)
+		}
+
 		data, err := os.ReadFile(skillPath)
 		if err != nil {
-			t.Fatalf("cannot read cross-review/SKILL.md: %v", err)
+			t.Fatalf("cannot read %s/SKILL.md: %v", c.skillDir, err)
 		}
-		// Pattern: ${RALPH_CLAUDE_REVIEWER_MODEL:-<fallback>}
-		re := regexp.MustCompile(`\$\{RALPH_CLAUDE_REVIEWER_MODEL:-([^}]+)\}`)
+
+		// Pattern: ${VAR:-<fallback>}
+		re := regexp.MustCompile(`\$\{` + regexp.QuoteMeta(c.envVar) + `:-([^}]+)\}`)
 		matches := re.FindAllSubmatch(data, -1)
 		if len(matches) == 0 {
-			t.Fatal(".claude/skills/cross-review/SKILL.md: no ${RALPH_CLAUDE_REVIEWER_MODEL:-<fallback>} pattern found — update the regex if the wording changed")
+			t.Errorf(".claude/skills/%s/SKILL.md: no ${%s:-<fallback>} pattern found — update the regex if the wording changed", c.skillDir, c.envVar)
+			continue
 		}
-		// All occurrences must agree and match the shell default.
-		shellVal := mustShell(t, shell, "RALPH_CLAUDE_REVIEWER_MODEL")
+
+		shellVal := mustShell(t, shell, c.envVar)
 		for _, m := range matches {
 			skillFallback := string(m[1])
 			if skillFallback != shellVal {
-				t.Errorf("cross-review SKILL.md reviewer fallback = %q, want %q (scripts/ralph-config.sh RALPH_CLAUDE_REVIEWER_MODEL default)",
-					skillFallback, shellVal)
+				t.Errorf("%s/SKILL.md %s fallback = %q, want %q (scripts/ralph-config.sh %s default)",
+					c.skillDir, c.envVar, skillFallback, shellVal, c.envVar)
 			}
 		}
 	}

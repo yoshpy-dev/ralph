@@ -52,9 +52,15 @@ Provide a cross-model second opinion on the current diff before PR creation.
 4. **Invoke reviewer**:
    - Determine base branch via Bash: `. scripts/xreview-helpers.sh; BASE=$(detect_base_branch)` — resolution order: (1) `$RALPH_XREVIEW_BASE` if set and non-empty (explicit override); (2) `git symbolic-ref --quiet --short refs/remotes/origin/HEAD` with leading `origin/` stripped (repo default branch); (3) `main` if `refs/heads/main` exists, else `master`.
    - Check the diff is non-empty: `git diff "$BASE"...HEAD --quiet` — if exit 0 (no diff), skip with a note and proceed to /pr.
-   - **reviewer = `codex`**: `codex exec review --base "$BASE"`
-     The native reviewer analyzes the full diff and returns structured findings with severity, affected files, and recommendations.
-   - **reviewer = `claude`**: `claude -p --model "${RALPH_CLAUDE_REVIEWER_MODEL:-opus}" --permission-mode auto --output-format json` with a prompt that instructs Claude to act as an adversarial diff reviewer (see prompt template at the end of this file). (the variable is read from the environment — set it directly or source `scripts/ralph-config.sh`, which exports it; unset falls back to `opus`)
+   - **reviewer = `codex`**: The native reviewer analyzes the full diff and returns structured findings with severity, affected files, and recommendations. Source `./scripts/ralph-config.sh` first for the model/effort defaults, then launch the call in the background (Claude Code: Bash `run_in_background`; Codex driver: its own background run) and wait for the task's completion notification instead of polling:
+     ```
+     . ./scripts/ralph-config.sh
+     command codex -m "${RALPH_CODEX_REVIEWER_MODEL:-gpt-6-astra}" -c "model_reasoning_effort=${RALPH_CODEX_REASONING_EFFORT:-xhigh}" exec review --base "$BASE" -o <scratch>/cross-review-last.md </dev/null > <scratch>/cross-review.log 2>&1
+     ```
+     `</dev/null` closes stdin so codex does not wait for "additional input from stdin"; `command` bypasses a shell alias that adds its own `-m` (codex rejects a duplicated flag) — see `/plan` step 11.c for the shared rationale.
+
+     **Completion contract**: once the background task reports completion, confirm exit code 0 and that the `-o` file was written after launch and is non-empty; read the findings from the `-o` file, not the log. Otherwise (non-zero exit, no completion within 20 minutes, or the `-o` file missing/empty): stop the process if it is still running. Treat the reviewer as **incomplete**: write `Reviewer status: incomplete (<reason>)` in the triage report header (instead of `Reviewer status: complete`), skip Step 5 triage, and in Step 8 do not use Cases A–C — instead ask (`AskUserQuestion` under Claude, numbered options under Codex) with (1) re-run the reviewer, (2) proceed to `/pr` recording "cross-review incomplete" as a known gap, (3) abort.
+   - **reviewer = `claude`**: `claude -p --model "${RALPH_CLAUDE_REVIEWER_MODEL:-opus}" --permission-mode auto --output-format json` with a prompt that instructs Claude to act as an adversarial diff reviewer (see prompt template at the end of this file). (the variable is read from the environment — set it directly or source `scripts/ralph-config.sh`, which exports it; unset falls back to `opus`). This path is synchronous, so it always yields `Reviewer status: complete`.
 
    Both paths must produce findings with: severity (HIGH/MEDIUM/LOW), affected file/line refs, what-can-go-wrong, recommended fix.
 
@@ -96,6 +102,7 @@ Provide a cross-model second opinion on the current diff before PR creation.
 6. **Write triage report**:
    Write the triage report to `docs/reports/cross-review-triage-<plan-slug>.md` using the template at `docs/reports/templates/cross-review-triage-report.md`. Include:
    - Header line `Driver: <claude|codex>  Reviewer: <claude|codex>` so the report is self-describing.
+   - Header line `Reviewer status: complete` (or `incomplete (<reason>)` per Step 4's completion contract when reviewer = codex and the background call did not finish cleanly).
    - All findings in their classified sections (ACTION_REQUIRED, WORTH_CONSIDERING, DISMISSED)
    - Triage rationale (1-2 sentences per finding to limit token cost)
    - Dismissal reasons with category for all DISMISSED findings
@@ -155,7 +162,7 @@ Provide a cross-model second opinion on the current diff before PR creation.
 
 | Aspect | Claude Code (driver = claude) | Codex (driver = codex) |
 |--------|-------------------------------|------------------------|
-| Reviewer invocation | `codex exec review --base "$BASE"` | `claude -p --model "${RALPH_CLAUDE_REVIEWER_MODEL:-opus}" --permission-mode auto --output-format json` (adversarial reviewer prompt) |
+| Reviewer invocation | `command codex -m "${RALPH_CODEX_REVIEWER_MODEL:-gpt-6-astra}" -c "model_reasoning_effort=${RALPH_CODEX_REASONING_EFFORT:-xhigh}" exec review --base "$BASE" -o <scratch>/cross-review-last.md </dev/null` (background; see Step 4) | `claude -p --model "${RALPH_CLAUDE_REVIEWER_MODEL:-opus}" --permission-mode auto --output-format json` (adversarial reviewer prompt) |
 | Step 8 user dialog | Structured choices via `AskUserQuestion` | Numbered options printed to stdout, awaiting a digit 1–3 |
 | Triage execution | inline (main context) | inline — chained within a single agent |
 | Output file | `docs/reports/cross-review-triage-<slug>.md` | Same |
