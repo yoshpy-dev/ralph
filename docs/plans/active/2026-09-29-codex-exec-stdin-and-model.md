@@ -1,0 +1,120 @@
+# codex-exec-stdin-and-model
+
+- Status: Draft
+- Owner: Claude Code
+- Date: 2026-09-29
+- Related request: `/plan` の Codex plan advisory と `/cross-review` の `codex exec review` を Bash ツールから起動すると、codex が「Reading additional input from stdin...」で stdin の EOF を待ち続けて止まることがある(2026-09-17 の #153 で約 4 時間)。回避策の `</dev/null` は毎回手で付けており、skill 本体には入っていない。また shell alias を迂回して起動すると、`.codex/config.toml` の `model` とユーザー config の `model_reasoning_effort` の組み合わせで API が 400 を返して review が中断した(2026-09-18、#162)。`-m` と `-c model_reasoning_effort=...` を明示すれば確実。issue #184
+- Related issue: 184
+- Type: fix
+- Branch: fix/codex-exec-stdin-and-model
+
+## Objective
+
+`/plan` と `/cross-review` の skill 本文(4 面)の codex の呼び出しを、stdin を閉じ(`</dev/null`)、model と reasoning effort を `scripts/ralph-config.sh` の設定値から明示する形にし、その形が崩れたらテストが落ちるようにする。
+
+## 調査で確認したこと(2026-09-29、main 6e26aaf)
+
+- 呼び出し箇所は 2 つ: `.claude/skills/plan/SKILL.md` の step 11.c(`codex exec --sandbox read-only "<adversarial prompt> docs/plans/active/<plan-file>"`)と `.claude/skills/cross-review/SKILL.md` の step 4(`codex exec review --base "$BASE"`)および末尾の CLI execution modes 表(同じ形)。どちらも `</dev/null` がなく、model / effort も付いていない。
+- 4 面の関係: root の `.claude/skills/` が source。`.agents/skills/` は `scripts/sync-skills.sh` が frontmatter を変換して生成し(`CLAUDE_ROOT` / `CODEX_ROOT` で template 側にも使える)、`scripts/check-skill-sync.sh` が drift を検査する。`templates/base/.claude/skills/` は root と byte 一致で `scripts/check-sync.sh` が検査する(`release` skill だけ repo 専用として除外)。
+- `scripts/ralph-config.sh`(template と byte 一致)は `RALPH_CLAUDE_REVIEWER_MODEL="${RALPH_CLAUDE_REVIEWER_MODEL:-opus}"` を持ち、`internal/config/defaults_sync_test.go` が cross-review SKILL.md の `${RALPH_CLAUDE_REVIEWER_MODEL:-opus}` の fallback と shell の既定の一致を検査している(`parseShellDefaults` は `^NAME="${NAME:-default}"` の行を読む)。codex 側の model / effort の設定値はまだない。
+- これまでの issue 処理(2026-09-18 以降)では `command codex -m gpt-6-astra -c 'model_reasoning_effort=xhigh' exec review --base main </dev/null` をバックグラウンドで起動し、出力ファイルの `^codex$` 以降の最終ブロックを読む形で安定して動いている。`command` は shell alias(`-m` を足すものがあり、codex は同じフラグの重複を拒否する)を迂回するため。
+- `.codex/config.toml`(project 設定)の `model = "gpt-5.5"` は 2026-10-14 に退役予定(#156 の観測対象)。skill が `-m` を明示すれば `exec` の呼び出しはこの値に依存しなくなる。
+- `docs/recipes/codex-setup.md` の `codex exec` への言及は hook の承認の話で、呼び出し形は書いていない。`README.md` と `.claude/rules/ralph/post-implementation-pipeline.md` は「`codex exec review` を呼ぶ」とだけ書いている。`.claude/rules/ralph/model-routing.md` は「Cross-review sync note」と「Where the values live」で `RALPH_CLAUDE_REVIEWER_MODEL` に触れている。
+
+## Scope
+
+- `scripts/ralph-config.sh`(+ template、byte 一致): `RALPH_CODEX_REVIEWER_MODEL`(既定 `gpt-6-astra`)と `RALPH_CODEX_REASONING_EFFORT`(既定 `xhigh`)を `RALPH_CLAUDE_REVIEWER_MODEL` と同じ形で定義し export する。
+- `/plan` と `/cross-review` の skill 本文(4 面): codex の呼び出しを `command codex -m "${RALPH_CODEX_REVIEWER_MODEL:-gpt-6-astra}" -c "model_reasoning_effort=${RALPH_CODEX_REASONING_EFFORT:-xhigh}" exec ... </dev/null` にし、先に `scripts/ralph-config.sh` を source すること、数分かかりうるのでバックグラウンドで起動して出力をファイルに落とし最終ブロックを読むこと、`</dev/null` と `command` の理由を 1〜2 文で書く。
+- 回帰テスト: `tests/test-codex-exec-invocation.sh`(新規、100755)。4 面 × 2 skill の `codex ... exec` を含む行がすべて `</dev/null` と明示の `-m` / `-c model_reasoning_effort=` を持つこと、skill の fallback が `ralph-config.sh` の既定と一致することを検査する。`internal/config/defaults_sync_test.go` の SKILL.md fallback 検査を表駆動にして codex の 2 変数(plan と cross-review の両方)も対象にする。`tests/test-ralph-config.sh` に 2 変数の export と上書きの assertion。
+- 文書: `.claude/rules/ralph/model-routing.md`(sync note と値の所在)、`docs/recipes/codex-setup.md`(agent の Bash から `codex exec` を呼ぶときの規則を短く)。
+
+## Non-goals
+
+- `/cross-review` の codex 出力の解釈や triage の変更。
+- org runtime の codex 座席の起動(`ralph org spawn`)。別の機構で model を指定している。
+- `.codex/config.toml` の `model = "gpt-5.5"` の更新(#156 の観測で判断)。`exec` の呼び出しは本 issue で `-m` 明示になるので影響を受けない。
+- `scripts/codex-check.sh` の変更。
+- codex の `--sandbox` や承認の設定。
+
+## Assumptions
+
+- codex は `-m <model>` と `-c model_reasoning_effort=<level>` を `exec` / `exec review` の両方で受け付ける(2026-09-18 以降の実績)。
+- `defaults_sync_test.go` の `parseShellDefaults` の書式(`NAME="${NAME:-default}"`)に合わせれば、新しい変数も同じ仕組みで読める。Go の `config.Default()` に対応する項目は不要(`RALPH_CLAUDE_REVIEWER_MODEL` も shell 専用)。
+- `check-sync.sh` は `.claude/skills/`(`release` を除く)と `scripts/ralph-config.sh` の root / template の一致を検査する(実装時に pass で確認)。
+
+## Affected areas
+
+- `scripts/ralph-config.sh`、`templates/base/scripts/ralph-config.sh`
+- `.claude/skills/plan/SKILL.md`、`.claude/skills/cross-review/SKILL.md` とそのミラー 3 面(`.agents/skills/`、`templates/base/.claude/skills/`、`templates/base/.agents/skills/`)
+- `tests/test-codex-exec-invocation.sh`(新規)、`tests/test-ralph-config.sh`、`internal/config/defaults_sync_test.go`
+- `.claude/rules/ralph/model-routing.md`(+ template があれば同様)、`docs/recipes/codex-setup.md`
+
+## Design decisions
+
+- 設定値の置き場は `scripts/ralph-config.sh`(既存の `RALPH_CLAUDE_REVIEWER_MODEL` と対称)。skill 本文は `${VAR:-default}` で fallback を持ち、fallback と shell の既定の一致をテストで守る(既存の仕組みの延長)。
+- 既定値は `gpt-6-astra` / `xhigh`。2026-09-18 以降の cross-review と plan advisory で使ってきた組み合わせで、org の `model_pool` 既定の先頭とも一致する。effort の既定を `high` にしない理由は、review と advisory は 1 回の呼び出しで結論を出す用途で、これまで `xhigh` で問題がなかったこと。
+- `command codex` で alias を迂回する。alias が `-m` を足すと codex はフラグの重複を拒否するため、明示のフラグと共存させない。
+- 回帰テストは grep 型(`tests/test-no-loop-references.sh` と同じ流儀)。skill 本文の「呼び出し形」は実行できないので、行の形を検査するのが最も安い。
+- Critical forks: None
+
+## Acceptance criteria
+
+- [ ] AC-1: `scripts/ralph-config.sh` と template が byte 一致で、`RALPH_CODEX_REVIEWER_MODEL="${RALPH_CODEX_REVIEWER_MODEL:-gpt-6-astra}"` と `RALPH_CODEX_REASONING_EFFORT="${RALPH_CODEX_REASONING_EFFORT:-xhigh}"` を定義して export する。`tests/test-ralph-config.sh` が既定値と環境からの上書きを確認する。
+- [ ] AC-2: `/plan`(step 11.c)と `/cross-review`(step 4 と CLI execution modes 表)の codex の呼び出しが 4 面すべてで `command codex -m "${RALPH_CODEX_REVIEWER_MODEL:-gpt-6-astra}" -c "model_reasoning_effort=${RALPH_CODEX_REASONING_EFFORT:-xhigh}" exec ... </dev/null` の形で、先に `scripts/ralph-config.sh` を source すること、バックグラウンド起動と出力ファイルの読み方、`</dev/null` と `command` の理由が書かれている。`./scripts/check-skill-sync.sh` と `./scripts/check-sync.sh` が pass。
+- [ ] AC-3: `tests/test-codex-exec-invocation.sh`(100755)が、4 面 × 2 skill の `codex ... exec` 行の `</dev/null`、`-m "${RALPH_CODEX_REVIEWER_MODEL:-`、`model_reasoning_effort=${RALPH_CODEX_REASONING_EFFORT:-` の存在と、fallback が `ralph-config.sh` の既定と等しいことを検査する。mutation: 1 面から `</dev/null` を外す、fallback を変える、`ralph-config.sh` の既定を変える、のそれぞれで落ちる。
+- [ ] AC-4: `internal/config/defaults_sync_test.go` が SKILL.md の fallback 検査を表駆動にし、`RALPH_CLAUDE_REVIEWER_MODEL`(cross-review)に加えて `RALPH_CODEX_REVIEWER_MODEL` と `RALPH_CODEX_REASONING_EFFORT`(plan と cross-review)を検査する。`go test ./internal/config/...` と `TMPDIR=/tmp go test ./internal/config/...` が green。mutation: skill の fallback を変えると落ちる。
+- [ ] AC-5: `.claude/rules/ralph/model-routing.md` の「Cross-review sync note」と「Where the values live」に codex の 2 変数が入り、`docs/recipes/codex-setup.md` に agent の Bash から `codex exec` を呼ぶ規則(`</dev/null`、明示の model / effort、バックグラウンドと出力ファイル)が短く書かれている。`.claude/skills`、`.agents/skills`、`templates/base`、`docs/recipes`、`README.md`、`.claude/rules` に `</dev/null` のない `codex exec` の呼び出し例が残っていない(「`codex exec review` を呼ぶ」という名前だけの言及は可)。
+- [ ] AC-6: 実機確認: `. scripts/ralph-config.sh; command codex -m "$RALPH_CODEX_REVIEWER_MODEL" -c "model_reasoning_effort=$RALPH_CODEX_REASONING_EFFORT" exec --sandbox read-only 'Reply with the single word ok' </dev/null` が 1 分以内に返り、出力に ok を含む(test report に記録。codex がなければその旨を記録)。
+- [ ] AC-7: `RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh` green(#190 のため full を明示)、`shellcheck -S warning` で新規テストに警告なし。
+
+## Implementation outline
+
+1. Slice A(implementer、sonnet): `ralph-config.sh`(2 コピー)の 2 変数、skill 本文 2 つの書き換えと `sync-skills.sh` による `.agents` 側の再生成(root と template の両方)、template の `.claude/skills` への反映、`tests/test-codex-exec-invocation.sh`、`tests/test-ralph-config.sh` の追加 assertion、`defaults_sync_test.go` の表駆動化、`model-routing.md` と `codex-setup.md` の文書。1 コミット。red の証拠: AC-3 / AC-4 の mutation。実機確認は AC-6。
+2. pipeline: self-review → verify → test → sync-docs → cross-review(この skill の新しい呼び出し形で実行する)→ PR。
+
+## Verify plan
+
+- Static analysis checks: `shellcheck -S warning tests/test-codex-exec-invocation.sh`、`bash -n` / `sh -n`、`gofmt -l internal/config`、`go vet ./internal/config/...`、`RALPH_VERIFY_BASE=main ./scripts/run-static-verify.sh`、`./scripts/check-skill-sync.sh`、`./scripts/check-sync.sh`。
+- Spec compliance criteria to confirm: AC-1〜AC-7 を該当行と実行結果で確認。4 面の呼び出し行が同一であること。
+- Documentation drift to check: `model-routing.md`、`codex-setup.md`、`README.md`、`post-implementation-pipeline.md`、`docs/quality/`。
+- Evidence to capture: `docs/evidence/verify-*.log`、verify report の AC 表。
+
+## Test plan
+
+- Unit tests: `sh tests/test-codex-exec-invocation.sh`、`bash tests/test-ralph-config.sh`、`go test ./internal/config/... -count=1`。
+- Integration tests: `RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh`、AC-6 の実機確認。cross-review 自体を新しい呼び出し形で実行する(pipeline の中で自然に検証される)。
+- Regression tests: AC-3 / AC-4 の mutation(`</dev/null` の削除、fallback の変更、既定の変更)。
+- Edge cases: `RALPH_CODEX_REVIEWER_MODEL` を環境で上書きしたときに skill の形がそのまま使えること、`ralph-config.sh` を source していない shell でも fallback で動くこと、alias が定義された shell で `command codex` が alias を迂回すること(テストでは alias を定義した fixture で `command -v` / 実行行の確認)。
+- Evidence to capture: test report(件数、mutation 表、実機確認の出力)。
+
+## Risks and mitigations
+
+- 既定の model が退役する: 値は `ralph-config.sh` の 1 箇所に集まり、`ralph doctor` の退役表示(#165)と #156 の観測で更新する。環境変数で上書きできる。
+- 4 面の drift: `check-skill-sync.sh` と `check-sync.sh` が CI で止める。新規テストも 4 面を個別に読む。
+- skill 本文が長くなる: 理由は 1〜2 文にとどめ、詳しい経緯は recipe に置く。
+
+## Rollout or rollback notes
+
+skill 本文・設定・テスト・文書の変更のみ。問題があれば 1 コミットを revert する。既存の環境変数の意味は変えない。
+
+## Open questions
+
+- `.codex/config.toml` の `model = "gpt-5.5"`(退役予定)を `gpt-6-astra` に更新するかは #156 の観測で判断する。
+- codex 側の reviewer の既定 effort を `xhigh` のままにするか `high` に下げるかは、コストの実測がないので現状維持。
+
+## Progress checklist
+
+- [ ] Plan reviewed
+- [x] Branch created
+- [ ] Implementation started
+- [ ] Review artifact created
+- [ ] Verification artifact created
+- [ ] Test artifact created
+- [ ] PR created
+
+## Readiness checklist
+
+- [x] 呼び出し箇所、ミラーの生成と検査の仕組み、既存の fallback 検査をコードで確認した
+- [x] critical fork なし
+- [ ] Codex plan advisory
+- [x] AC は決定的なテストと 1 回の実機確認で確認できる
