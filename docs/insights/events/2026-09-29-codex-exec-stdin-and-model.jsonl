@@ -1,0 +1,1 @@
+{"schema":1,"ts":"2026-09-29T09:51:03Z","slug":"codex-exec-stdin-and-model","flow":"standard","phase":"self_review","cycle":1,"verdict":"pass","findings":{"critical":0,"high":0,"medium":5,"low":10},"triage":{"action_required":0,"worth_considering":0,"dismissed":0},"source":"skill"}
