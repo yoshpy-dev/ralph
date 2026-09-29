@@ -83,24 +83,32 @@ concurrent_pid=""
 cleanup() {
   # Stop case I's concurrent-dispatcher fixture if the suite exits (early
   # failure, signal) before case I's own explicit stop runs. concurrent_pid
-  # is set only while that fixture's dispatcher is actually running -- see
-  # case I below.
+  # is set right after the fixture is launched, before its start is even
+  # confirmed, and stays set until case I's own explicit stop clears it back
+  # to "" -- see case I below. Killing/waiting on an already-dead PID here
+  # is a harmless no-op. No pkill safety net is needed: the fixture hook
+  # ends in "exec sleep 30" (see case I), so the dispatcher's own kill_child
+  # reaches the sleep directly instead of leaving it orphaned.
   if [ -n "$concurrent_pid" ]; then
     kill -TERM "$concurrent_pid" 2>/dev/null
     wait "$concurrent_pid" 2>/dev/null
   fi
-  pkill -f "Stop.d/10-concurrent-slow.sh" >/dev/null 2>&1 || true
   rm -rf "$workdir"
 }
 trap cleanup EXIT
 
-# Simulated shared TMPDIR: case I's concurrent-dispatcher fixture (and its
-# pre-fix reproduction, run separately from scratch -- see AC-3 in the plan)
-# use this instead of the host's real ${TMPDIR:-/tmp}, so this suite never
-# lists or deletes another session's real temp files, and a leaked temp file
-# can never land outside $workdir (AC-7). $workdir itself was created above
-# using the host's TMPDIR (or /tmp) -- that is the only host-shared-dir use
-# in this suite.
+# Simulated shared TMPDIR (issue #182): every dispatcher this suite runs --
+# cases A-H, case H's run-verify.sh/run-test.sh mktemp calls, and case I's
+# concurrent-dispatcher fixture below (plus its pre-fix reproduction, done
+# separately in a throwaway scratch copy of this file, never committed) --
+# gets this directory instead of the host's real ${TMPDIR:-/tmp}. That is
+# fine because nothing in this suite ever needs to see another process's
+# real temp files: cases A-H only assert on their own fixtures' output, and
+# case I's own dispatcher run below gets a further-private TMPDIR on top of
+# this one. The result: this suite never lists or deletes another session's
+# real temp files, and a leaked temp file can never land outside $workdir.
+# $workdir itself was created above using the host's TMPDIR (or /tmp) --
+# that is the only host-shared-dir use in this suite.
 shared_tmp="$workdir/shared-tmp"
 mkdir -p "$shared_tmp"
 TMPDIR="$shared_tmp"
@@ -382,14 +390,14 @@ touch "$finished_marker"
 EOF
 
 # Concurrent-dispatcher fixture: a second, independent fixture repo running
-# its own dispatcher against the suite's simulated shared TMPDIR ($TMPDIR,
-# set to $shared_tmp above), started before and stopped after case I's own
-# dispatcher run below. This reproduces the real flake (#182): another
-# Claude Code/Codex session's hook run through the same ralph-dispatch.sh
-# leaves its own "ralph-dispatch-*" temp files in a shared TMPDIR while case
-# I's dispatcher is mid-run. Its hook lives under a different event (Stop,
-# not PreCompact) and a differently-named script so it never matches case
-# I's own pgrep/finished_marker checks below.
+# its own dispatcher against the suite's simulated shared TMPDIR ($shared_tmp,
+# exported as TMPDIR above), started before and stopped after case I's own
+# dispatcher run below. This models the condition behind the flake in #182:
+# another Claude Code/Codex session's hook run through the same
+# ralph-dispatch.sh leaves its own "ralph-dispatch-*" temp files in a shared
+# TMPDIR while case I's dispatcher is mid-run. Its hook lives under a
+# different event (Stop, not PreCompact) and a per-run-named script (below)
+# so it never matches case I's own pgrep/finished_marker checks.
 concurrent_fixture="$workdir/repo2"
 mkdir -p "$concurrent_fixture/.claude/hooks"
 cp "$DISPATCHER_SRC" "$concurrent_fixture/.claude/hooks/ralph-dispatch.sh"
@@ -398,14 +406,41 @@ chmod +x "$concurrent_fixture/.claude/hooks/ralph-dispatch.sh"
 concurrent_started="$workdir/case-i-concurrent-started"
 concurrent_out="$workdir/case-i-concurrent-out.log"
 rm -f "$concurrent_started" "$concurrent_out"
-write_script "$concurrent_fixture/.claude/hooks/Stop.d/10-concurrent-slow.sh" <<EOF
+# The hook's file name carries this test process's own PID ($$) so it can
+# never collide with another concurrent run of this same suite on the host
+# -- a bare "10-concurrent-slow.sh" would, since the dispatcher runs hooks
+# by a $workdir-relative path with nothing per-run in the command line, and
+# a pkill/pgrep on that path would then match (and could kill) a sibling
+# run's fixture too (docs/tech-debt/README.md tracks the same class of
+# collision for case I's own pgrep/pkill on "PreCompact.d/10-slow.sh").
+# "exec sleep 30" (not a plain "sleep 30") replaces this script's own
+# process image with sleep, so the TERM the dispatcher's kill_child sends
+# to this script's PID lands on the sleep itself instead of leaving it
+# orphaned once this script's own shell would otherwise have exited.
+write_script "$concurrent_fixture/.claude/hooks/Stop.d/10-concurrent-slow-$$.sh" <<EOF
 #!/usr/bin/env sh
 cat >/dev/null
 touch "$concurrent_started"
-sleep 30
+exec sleep 30
 EOF
+
+# Baseline: nothing in this suite writes to $shared_tmp before this point
+# (cases A-H's dispatcher runs and case H's run-verify.sh/run-test.sh calls
+# have all already returned and cleaned up their own mktemp files), so it
+# must be empty before the concurrent fixture starts. A failure here means
+# something in cases A-H (or a prior run of this suite) left files behind,
+# not that the concurrent fixture is misbehaving.
+shared_tmp_baseline="$(find "$shared_tmp" -maxdepth 1 -name 'ralph-dispatch-*' 2>/dev/null | sort | paste -sd ' ' -)"
+if [ -n "$shared_tmp_baseline" ]; then
+  record_fail "I. simulated shared TMPDIR already had ralph-dispatch-* files before the concurrent fixture started: $shared_tmp_baseline"
+else
+  record_pass "I. simulated shared TMPDIR had no ralph-dispatch-* files before the concurrent fixture started"
+fi
+
 (
   cd "$concurrent_fixture" || exit 1
+  TMPDIR="$shared_tmp"
+  export TMPDIR
   exec ./.claude/hooks/ralph-dispatch.sh Stop < /dev/null > "$concurrent_out" 2>&1
 ) &
 concurrent_pid=$!
@@ -423,10 +458,12 @@ fi
 # Sanity check that the fixture is actually effective: the concurrent
 # dispatcher's own mktemp'd files must be visible in the simulated shared
 # TMPDIR while it is running, since that is the exact condition case I's
-# private-TMPDIR fix must be immune to.
-concurrent_tmp_seen="$(find "$TMPDIR" -maxdepth 1 -name 'ralph-dispatch-*' 2>/dev/null | sort | tr '\n' ' ')"
-if [ -n "$concurrent_tmp_seen" ]; then
-  record_pass "I. concurrent dispatcher's temp files present in simulated shared TMPDIR: $concurrent_tmp_seen"
+# private-TMPDIR fix must be immune to. Count only (not the actual paths,
+# which are per-run and would make two green result blocks never match) --
+# see the FAIL branches below for paths when something is actually wrong.
+concurrent_tmp_count="$(find "$shared_tmp" -maxdepth 1 -name 'ralph-dispatch-*' 2>/dev/null | wc -l | tr -d ' ')"
+if [ "$concurrent_tmp_count" -gt 0 ]; then
+  record_pass "I. concurrent dispatcher's temp files present in simulated shared TMPDIR ($concurrent_tmp_count files)"
 else
   record_fail "I. concurrent dispatcher's temp files missing from simulated shared TMPDIR (fixture not effective)"
 fi
@@ -484,11 +521,18 @@ else
   record_pass "I. SIGTERM cleanup left no stray .first file in fixture cwd"
 fi
 
-i_tmp_leftover="$(find "$case_i_tmpdir" -maxdepth 1 -name 'ralph-dispatch-*' 2>/dev/null)"
-if [ -n "$i_tmp_leftover" ]; then
-  record_fail "I. SIGTERM cleanup left stray ralph-dispatch-* temp files in its private TMPDIR: $i_tmp_leftover"
+# $case_i_tmpdir belongs to case I's own dispatcher alone (nothing else in
+# this suite writes there), so any entry at all -- not just a
+# "ralph-dispatch-*" one -- is a leak.
+if [ ! -d "$case_i_tmpdir" ]; then
+  record_fail "I. private TMPDIR $case_i_tmpdir is missing after the dispatcher exited (cannot check for leftovers)"
 else
-  record_pass "I. SIGTERM cleanup left no stray ralph-dispatch-* temp files in its private TMPDIR"
+  i_tmp_leftover="$(find "$case_i_tmpdir" -mindepth 1 -maxdepth 1 2>/dev/null | sort | paste -sd ' ' -)"
+  if [ -n "$i_tmp_leftover" ]; then
+    record_fail "I. SIGTERM cleanup left stray entries in its private TMPDIR: $i_tmp_leftover"
+  else
+    record_pass "I. SIGTERM cleanup left no stray entries in its private TMPDIR"
+  fi
 fi
 
 # I (child-kill, defense in depth): no process matching the hook script's
@@ -512,11 +556,27 @@ pkill -f "PreCompact.d/10-slow.sh" >/dev/null 2>&1 || true
 # gone from the simulated shared TMPDIR. This runs after all of case I's
 # own private-TMPDIR checks above, which must not depend on the concurrent
 # fixture having stopped first.
+concurrent_rc=0
 kill -TERM "$concurrent_pid" 2>/dev/null
-wait "$concurrent_pid" 2>/dev/null || true
-pkill -f "Stop.d/10-concurrent-slow.sh" >/dev/null 2>&1 || true
+wait "$concurrent_pid" 2>/dev/null || concurrent_rc=$?
 concurrent_pid=""
-concurrent_tmp_after="$(find "$TMPDIR" -maxdepth 1 -name 'ralph-dispatch-*' 2>/dev/null)"
+
+# The dispatcher's own TERM trap (kill_child, then exit 143 -- see
+# ralph-dispatch.sh) TERMs its hook's PID and *waits* for it to exit before
+# the trap itself returns. Because the hook ends in "exec sleep 30" above,
+# that PID *is* the sleep process by the time TERM arrives, so seeing exit
+# 143 here means the exec'd sleep was already reaped before this dispatcher
+# exited, not merely signaled and abandoned. A pgrep-based check is not
+# possible here the way case I's own child-kill check (above) does it:
+# once "exec" replaces the hook script with "sleep 30", its command line is
+# just "sleep 30", indistinguishable from an unrelated sleep on the host.
+if [ "$concurrent_rc" -eq 143 ]; then
+  record_pass "I. concurrent dispatcher's SIGTERM handling reaped its exec'd sleep child before exiting (exit 143)"
+else
+  record_fail "I. concurrent dispatcher did not exit 143 on SIGTERM (exit $concurrent_rc); its exec'd sleep child's fate is unverified"
+fi
+
+concurrent_tmp_after="$(find "$shared_tmp" -maxdepth 1 -name 'ralph-dispatch-*' 2>/dev/null | sort | paste -sd ' ' -)"
 if [ -z "$concurrent_tmp_after" ]; then
   record_pass "I. concurrent dispatcher's temp files removed from simulated shared TMPDIR after it was stopped"
 else
