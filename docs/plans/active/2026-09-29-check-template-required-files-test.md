@@ -18,7 +18,7 @@
 - Go 側の `required`(`internal/scaffold/embed_test.go:62-85`)は `templates/base/scripts/` に存在すべき 22 本のスクリプト名。shell 側の 12 本はすべて含まれ、Go 側だけにあるのは 10 本(`run-static-verify.sh`、`run-test.sh`、`detect-changed-languages.sh`、`detect-languages.sh`、`new-feature-plan.sh`、`codex-check.sh`、`ralph-config.sh`、`ralph-worktree.sh`、`check-template.sh`、`check-skill-sync.sh`)。いずれも skill や `run-verify.sh` から呼ばれる core のスクリプトで、`ralph init` / `upgrade` が必ず配る。
 - `templates/base/scripts/` には他に 6 本(`check-coverage.sh`、`check-pipeline-sync.sh`、`gc-artifacts.sh`、`insights-append.sh`、`ralph-common.sh`、`sync-skills.sh`)があり、どちらの一覧にもない。
 - `tests/test-*.sh` は `scripts/verify.local.sh` が全件実行し、shellcheck も同じ glob で掛かる。ただし runner(`run_hook_tests`、213 行)は実行権限のないファイルを黙ってスキップし、`bootstrap.sh` の権限付与にも `tests/` は含まれない(Codex advisory)。`tests/test-check-template.sh` はまだない。
-- fresh scaffold(`go run ./cmd/ralph init --yes <tmpdir>`)には 30 本のスクリプトが配られ、Go 側だけにあった 10 本もすべて存在する。一方 `check-template.sh` 自体は main の時点で fresh scaffold を通らない: `README.md`、`docs/research/approach-comparison.md`、`docs/roadmap/harness-maturity-model.md` は template に配られず(`.gitkeep` だけ)、settings の hook 参照の検査は引数込みのコマンド文字列を拾って誤検出し、`| while` の subshell で `status=1` が捨てられる(root の CI は 7 行の FAIL を出しつつ exit 0)。これらは #189 に起票した(#183 の範囲外)。
+- fresh scaffold(`go run ./cmd/ralph init --yes <tmpdir>`)には 30 本のスクリプトが配られ、Go 側だけにあった 10 本もすべて存在する。一方 `check-template.sh` 自体は main の時点で fresh scaffold を通らない: `README.md`、`docs/research/approach-comparison.md`、`docs/roadmap/harness-maturity-model.md` は template に配られず(`.gitkeep` だけ)、settings の hook 参照の検査は引数込みのコマンド文字列を拾って誤検出し、`| while` の subshell で `status=1` が捨てられる(root の CI は 7 行の FAIL を出しつつ exit 0)。scaffold 側で `check-template.sh` を呼ぶのは `bootstrap.sh`(template に入らない)ではなく `templates/base/.github/workflows/verify.yml` の "Check template structure"(`on: pull_request`)なので、scaffold された project の PR CI は最初から red(self-review cycle 1 の訂正)。README.md は配布対象外、docs の 2 件はディレクトリに `.gitkeep` だけ。これらは #189 に起票した(#183 の範囲外)。
 
 ## Scope
 
@@ -30,7 +30,7 @@
 ## Non-goals
 
 - どちらの一覧にもない 6 本(`check-coverage.sh` など)を必須にするかどうかの判断。今回は両方の一覧に「入っているもの」を一致させるだけにとどめる(Open questions に記録)。
-- `check-template.sh` の他の検査(実行属性、SKILL.md、agent の frontmatter、settings の hook 参照、git hook の導入)のテストと修正。fixture は pass する最小構成にするだけ。settings の hook 参照の検査の誤検出と fail-open、`required_files` の meta-repo 専用 3 項目(fresh scaffold で必ず red)は #189 で扱う。
+- `check-template.sh` の他の検査(実行属性、SKILL.md、agent の frontmatter、settings の hook 参照、git hook の導入)のテストと修正。fixture は pass する最小構成にするだけ。settings の hook 参照の検査の誤検出と fail-open、`required_files` の meta-repo 専用 3 項目(fresh scaffold の PR CI が必ず red)は #189 で扱う。
 - Go 側のテストが `check-template.sh` を実際に scaffold へ実行すること(sh への依存を Go テストに持ち込まない)。fresh scaffold 全体が `check-template.sh` を通ることは #189 の対象(main の時点で通らない)。
 
 ## Assumptions
@@ -101,12 +101,14 @@
 
 - 2026-09-29 plan: fresh scaffold の probe で `check-template.sh` が main の時点で通らないことを発見(meta-repo 専用の必須 3 項目、hook 参照検査の誤検出と fail-open)。#183 の範囲外として #189 に起票し、AC-3 を「10 本の存在と root の exit 0」に修正。Codex plan advisory(gpt-6-astra、xhigh)は MEDIUM 1: 新規テストが実行権限なしだと `verify.local.sh` が黙ってスキップし CI で走らない → AC-7(`100755` と、わざと落としたコピーで `verify.local.sh` が非ゼロ)を追加。ユーザー決定: 対応案で plan を更新
 - 2026-09-29 work: Slice A は implementer(sonnet)に委譲(26c247f、5 ファイル、+330 / -29、push 済み)。`required_files` は 28 項目(非スクリプト 6 + `scripts/` 22、Go 側と同じ順)、root と template は byte 一致。`tests/test-check-template.sh`(mode 100755、32 assertion): A = golden との順序込みの一致(空ブロックは FAIL)、B = fixture で pass + 28 項目を 1 つずつ外して `Missing required file` を検出、C = repo root に全項目が存在。Go 側は `required` を package 変数 `requiredTemplateScripts` にし、`TestTemplateBaseScriptsMatchCheckTemplateRequiredFiles` が template 側の `scripts/` 項目の集合と等しいことを確認(不一致は「only in check-template.sh / only in the Go list」で列挙、0 件なら書式変更として Fatal)。tech-debt は該当行を削除し #189 の行を追加。red: shell 側 28 項目すべてで A / B が落ちる、Go 側と template 側からそれぞれ 1 項目落として等価テストが落ちる、golden をわざと壊したコピーで `HARNESS_VERIFY_MODE=test ./scripts/verify.local.sh` が exit 1(chmod -x にすると黙って exit 0 = AC-7 の根拠)。fresh scaffold には 22 本すべてあり、`check-template.sh` の `Missing required file` は #189 の 3 項目だけ。orchestrator も 32 / 0、`go test`、cmp、shellcheck、mode を確認。逸脱: golden の非スクリプト項目は 4 ではなく 6(handoff の数え間違い、plan の 18 + 10 = 28 と一致)
+- 2026-09-29 self-review(cycle 1、9525535): CRITICAL 0 / HIGH 0 / MEDIUM 2 / LOW 4、merge 可。MEDIUM は #189 の tech-debt 行の 2 件: コードスパン内の `|` が未エスケープで表が崩れる、scaffold 側の呼び出し元を `bootstrap.sh`(template に入らない)と誤記(実際は `templates/base/.github/workflows/verify.yml` の PR CI で、scaffold された project の PR CI が最初から red)。LOW: fixture の `mktemp -d` の失敗未確認と EXIT trap なし、コメントの更新箇所の抜けと順序の主張、`docs/plans/active/` への参照 3 箇所(archive でリンク切れ)、case A の失敗出力が一覧 2 つの丸ごと出力。全件を in-cycle で修正。orchestrator は #189 の本文と plan の調査節の同じ誤りを訂正した
+- 2026-09-29 work: Slice B は implementer に委譲(6f3d48a、3 ファイル、+34 / -19、push 済み)。tech-debt 行の `\|` エスケープと呼び出し元・影響の訂正、fixture の `mktemp -d` 失敗時の FAIL と EXIT trap(正常経路の後に `trap - EXIT`)、コメントに更新箇所 4 つ(check-template.sh 2 コピー、`requiredTemplateScripts`、`GOLDEN_ENTRIES`)を明記し順序は慣習だけと記述、参照は issue #183 に、case A の失敗出力は `diff`。SIGTERM で中断しても fixture が残らないことを確認。32 / 0、`go test` ok、`run-verify.sh` green
 ## Progress checklist
 
 - [x] Plan reviewed
 - [x] Branch created
 - [x] Implementation started
-- [ ] Review artifact created
+- [x] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
