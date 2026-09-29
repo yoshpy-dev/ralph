@@ -28,14 +28,17 @@
 #      separate event/hook name) holds its own temp files in the suite's
 #      simulated shared TMPDIR for the whole check, proving the private
 #      TMPDIR -- not the shared one -- is what the cleanup check inspects.
-#      Both dispatchers' hook scripts carry a per-run name (this test
-#      process's own PID), so two runs of this suite on one host never
-#      match each other's pgrep/pkill and cannot kill or "see" each
-#      other's process. The same SIGTERM also kills the hook script that
-#      was actively running underneath the dispatcher, verified two ways:
-#      it never reaches the marker it would only write on natural
-#      completion, and (defense in depth) no matching process remains
-#      alive per pgrep.
+#      A mid-run check confirms the target dispatcher's own files actually
+#      land in its private TMPDIR (not just that they are absent from it
+#      afterward, which cleanup alone cannot distinguish from never having
+#      been written there at all). Both dispatchers' hook scripts carry a
+#      per-run name (this test process's own PID), so two runs of this
+#      suite on one host never match each other's pgrep/pkill and cannot
+#      kill or "see" each other's process. The same SIGTERM also kills the
+#      hook script that was actively running underneath the dispatcher,
+#      verified two ways: it never reaches the marker it would only write
+#      on natural completion, and (defense in depth) no matching process
+#      remains alive per pgrep.
 
 set -u
 
@@ -503,6 +506,30 @@ for _ in $(seq 1 50); do
   [ -f "$started_marker" ] && break
   sleep 0.1
 done
+
+# These two mid-run checks are what actually pin the private-TMPDIR fix.
+# The post-TERM cleanup checks below cannot: ralph-dispatch.sh's own trap
+# removes its mktemp'd files on exit regardless of which directory TMPDIR
+# pointed at when they were created, so if the "TMPDIR=$case_i_tmpdir"
+# override above were silently dropped, the target would write into the
+# shared $shared_tmp instead and still leave both directories looking
+# clean afterward -- only a live look while the target is still running
+# can tell the two cases apart.
+i_tmpdir_live_count="$(find "$case_i_tmpdir" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l | tr -d ' ')"
+if [ "$i_tmpdir_live_count" -gt 0 ]; then
+  record_pass "I. target dispatcher's temp files present in its private TMPDIR while running ($i_tmpdir_live_count files)"
+else
+  record_fail "I. target dispatcher's temp files missing from its private TMPDIR ($case_i_tmpdir) while running"
+fi
+
+i_shared_tmp_count="$(find "$shared_tmp" -maxdepth 1 -name 'ralph-dispatch-*' 2>/dev/null | wc -l | tr -d ' ')"
+if [ "$i_shared_tmp_count" -eq "$concurrent_tmp_count" ]; then
+  record_pass "I. simulated shared TMPDIR still holds only the concurrent fixture's temp files while the target runs ($i_shared_tmp_count files)"
+else
+  i_shared_tmp_entries="$(find "$shared_tmp" -maxdepth 1 -name 'ralph-dispatch-*' 2>/dev/null | sort | paste -sd ' ' -)"
+  record_fail "I. simulated shared TMPDIR gained unexpected entries while the target ran (expected $concurrent_tmp_count from the concurrent fixture, got $i_shared_tmp_count): $i_shared_tmp_entries"
+fi
+
 i_term_start="$(date +%s)"
 kill -TERM "$i_pid" 2>/dev/null
 i_rc=0
