@@ -108,6 +108,7 @@ case I の dispatcher の実行と漏れの検査をテスト専用の `TMPDIR` 
 - 2026-09-29 verify(cycle 1、d23f08d): PASS。AC-1〜AC-7 の静的な半分と self-review 6 件の修正をコードで確認、`run-static-verify.sh`(full)・shellcheck・`bash -n` green、doc drift なし。動的な半分(件数、5 回連続、canary)は test に委ねた
 - 2026-09-29 test(cycle 1、85fe405): PASS。`run-test.sh` green、31 / 0、5 回連続、並走 6 組 + 3 本すべて rc 0、canary 3 回とも残存、孤児プロセスなし。mutation: (a) 対象 dispatcher の専用 `TMPDIR` を外しても 31 / 0 のまま(dispatcher の trap がどの dir でも消すので事後の検査では区別できない)= テストの穴、(b) `exec sleep 30` を `sleep 30` に戻しても exit 143 の assertion は通る(コメントに書いた既知の限界、孤児の sleep は残る)、(c) 専用 dir の検査を `true` にして漏れを植えると元は 30 / 1、変異は 31 / 0(assertion は生きている)、(d) 旧テスト + fixture は 26 / 1「left stray …」で red。旧テストの並走 2 本は 3 組中 2 組が落ち、両方の型(stray temp files、child alive)を再現
 - 2026-09-29 work: Slice D は implementer に委譲(feb016b、1 ファイル、+35 / -8)。mutation (a) の穴を塞ぐため、対象の started marker の直後(TERM の前)に「専用 dir に対象の一時ファイルがある(件数 > 0)」と「模擬共有 dir の `ralph-dispatch-*` の件数が fixture の件数のまま」の 2 assertion を追加(33 / 0)。変異(`TMPDIR` の上書きを外す)は 31 / 2 で、両方の新 assertion が落ちる(共有 dir が 3 → 6)。5 回連続、並走 3 組、`run-verify.sh`、canary は green。orchestrator も 33 / 0 を確認
+- 2026-09-29 sync-docs(cycle 1、6f4acc8): drift なし。cross-review(codex gpt-6-astra、HEAD 6f4acc8): 指摘 0 件(reviewer は 33 件の assertion、TMPDIR を変えた並走、中断時の後始末を実行)。Case C なので `/pr` へ
 ## Progress checklist
 
 - [x] Plan reviewed
