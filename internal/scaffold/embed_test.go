@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
+	"strings"
 	"testing"
 	"testing/fstest"
 )
@@ -46,6 +48,36 @@ func TestEmbedFSInterface(t *testing.T) {
 	var _ = EmbeddedFS // type is embed.FS
 }
 
+// requiredTemplateScripts lists the scripts every `ralph init` scaffold must
+// ship. This is the same set of names TestTemplateBaseScriptsMatchCheckTemplateRequiredFiles
+// checks against the `scripts/` entries of check-template.sh's required_files
+// list, so a name dropped from either list is caught by one of the two
+// tests (see docs/plans/active/2026-09-29-check-template-required-files-test.md).
+var requiredTemplateScripts = []string{
+	"run-verify.sh",
+	"run-static-verify.sh",
+	"run-test.sh",
+	"detect-changed-languages.sh",
+	"detect-languages.sh",
+	"archive-plan.sh",
+	"branch-name.sh",
+	"ensure-pr-ready.sh",
+	"ensure-pr-title-prefix.sh",
+	"new-feature-plan.sh",
+	"codex-check.sh",
+	"ralph-config.sh",
+	"ralph-worktree.sh",
+	"xreview-helpers.sh",
+	"secret-scan.sh",
+	"secret-scan-branch.sh",
+	"pre-commit-secret-guard.sh",
+	"commit-msg-guard.sh",
+	"prepare-commit-msg-secret-guard.sh",
+	"pre-merge-commit-secret-guard.sh",
+	"check-template.sh",
+	"check-skill-sync.sh",
+}
+
 // TestTemplateBaseScriptsExist verifies all required scripts are present
 // in templates/base/scripts/ on disk. This catches distribution gaps where
 // template docs reference scripts that are not actually included.
@@ -59,32 +91,7 @@ func TestTemplateBaseScriptsExist(t *testing.T) {
 	repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..")
 	scriptsDir := filepath.Join(repoRoot, "templates", "base", "scripts")
 
-	required := []string{
-		"run-verify.sh",
-		"run-static-verify.sh",
-		"run-test.sh",
-		"detect-changed-languages.sh",
-		"detect-languages.sh",
-		"archive-plan.sh",
-		"branch-name.sh",
-		"ensure-pr-ready.sh",
-		"ensure-pr-title-prefix.sh",
-		"new-feature-plan.sh",
-		"codex-check.sh",
-		"ralph-config.sh",
-		"ralph-worktree.sh",
-		"xreview-helpers.sh",
-		"secret-scan.sh",
-		"secret-scan-branch.sh",
-		"pre-commit-secret-guard.sh",
-		"commit-msg-guard.sh",
-		"prepare-commit-msg-secret-guard.sh",
-		"pre-merge-commit-secret-guard.sh",
-		"check-template.sh",
-		"check-skill-sync.sh",
-	}
-
-	for _, name := range required {
+	for _, name := range requiredTemplateScripts {
 		path := filepath.Join(scriptsDir, name)
 		info, err := os.Stat(path)
 		if err != nil {
@@ -95,6 +102,92 @@ func TestTemplateBaseScriptsExist(t *testing.T) {
 		if runtime.GOOS != "windows" && info.Mode().Perm()&0111 == 0 {
 			t.Errorf("script not executable: templates/base/scripts/%s (mode %o)", name, info.Mode().Perm())
 		}
+	}
+}
+
+// extractCheckTemplateRequiredFiles reads a check-template.sh script and
+// returns the entries of its `required_files` heredoc-style block (the
+// lines between `required_files="` and the closing `"` line), in order,
+// with blank lines dropped. Returns an empty slice if the block cannot be
+// found (e.g. the script's format changed).
+func extractCheckTemplateRequiredFiles(t *testing.T, path string) []string {
+	t.Helper()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+
+	lines := strings.Split(string(data), "\n")
+	var entries []string
+	inBlock := false
+	for _, line := range lines {
+		if !inBlock {
+			if line == `required_files="` {
+				inBlock = true
+			}
+			continue
+		}
+		if line == `"` {
+			break
+		}
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		entries = append(entries, line)
+	}
+	return entries
+}
+
+// TestTemplateBaseScriptsMatchCheckTemplateRequiredFiles verifies that the
+// `scripts/` entries of templates/base/scripts/check-template.sh's
+// required_files list are exactly the set in requiredTemplateScripts. A name
+// dropped from either list (the Go list or the shell list) fails this test,
+// keeping the "scripts every scaffold ships" contract and the "scripts
+// check-template.sh itself requires" contract in sync.
+func TestTemplateBaseScriptsMatchCheckTemplateRequiredFiles(t *testing.T) {
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("cannot determine test file location")
+	}
+	repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..")
+	checkTemplatePath := filepath.Join(repoRoot, "templates", "base", "scripts", "check-template.sh")
+
+	rawEntries := extractCheckTemplateRequiredFiles(t, checkTemplatePath)
+	if len(rawEntries) == 0 {
+		t.Fatalf("required_files block in %s yielded 0 entries; the extraction format (required_files=\"...\") may have changed", checkTemplatePath)
+	}
+
+	scriptEntries := make(map[string]bool)
+	for _, entry := range rawEntries {
+		name, ok := strings.CutPrefix(entry, "scripts/")
+		if !ok {
+			continue // non-script entry (README.md, docs/..., .claude/settings.json)
+		}
+		scriptEntries[name] = true
+	}
+
+	goEntries := make(map[string]bool, len(requiredTemplateScripts))
+	for _, name := range requiredTemplateScripts {
+		goEntries[name] = true
+	}
+
+	var onlyInScript, onlyInGo []string
+	for name := range scriptEntries {
+		if !goEntries[name] {
+			onlyInScript = append(onlyInScript, name)
+		}
+	}
+	for name := range goEntries {
+		if !scriptEntries[name] {
+			onlyInGo = append(onlyInGo, name)
+		}
+	}
+	sort.Strings(onlyInScript)
+	sort.Strings(onlyInGo)
+
+	if len(onlyInScript) > 0 || len(onlyInGo) > 0 {
+		t.Errorf("scripts/ entries in check-template.sh's required_files and requiredTemplateScripts disagree:\n  only in check-template.sh: %v\n  only in the Go list: %v", onlyInScript, onlyInGo)
 	}
 }
 
