@@ -103,14 +103,17 @@
 - 2026-09-29 work: Slice A は implementer(sonnet)に委譲(26c247f、5 ファイル、+330 / -29、push 済み)。`required_files` は 28 項目(非スクリプト 6 + `scripts/` 22、Go 側と同じ順)、root と template は byte 一致。`tests/test-check-template.sh`(mode 100755、32 assertion): A = golden との順序込みの一致(空ブロックは FAIL)、B = fixture で pass + 28 項目を 1 つずつ外して `Missing required file` を検出、C = repo root に全項目が存在。Go 側は `required` を package 変数 `requiredTemplateScripts` にし、`TestTemplateBaseScriptsMatchCheckTemplateRequiredFiles` が template 側の `scripts/` 項目の集合と等しいことを確認(不一致は「only in check-template.sh / only in the Go list」で列挙、0 件なら書式変更として Fatal)。tech-debt は該当行を削除し #189 の行を追加。red: shell 側 28 項目すべてで A / B が落ちる、Go 側と template 側からそれぞれ 1 項目落として等価テストが落ちる、golden をわざと壊したコピーで `HARNESS_VERIFY_MODE=test ./scripts/verify.local.sh` が exit 1(chmod -x にすると黙って exit 0 = AC-7 の根拠)。fresh scaffold には 22 本すべてあり、`check-template.sh` の `Missing required file` は #189 の 3 項目だけ。orchestrator も 32 / 0、`go test`、cmp、shellcheck、mode を確認。逸脱: golden の非スクリプト項目は 4 ではなく 6(handoff の数え間違い、plan の 18 + 10 = 28 と一致)
 - 2026-09-29 self-review(cycle 1、9525535): CRITICAL 0 / HIGH 0 / MEDIUM 2 / LOW 4、merge 可。MEDIUM は #189 の tech-debt 行の 2 件: コードスパン内の `|` が未エスケープで表が崩れる、scaffold 側の呼び出し元を `bootstrap.sh`(template に入らない)と誤記(実際は `templates/base/.github/workflows/verify.yml` の PR CI で、scaffold された project の PR CI が最初から red)。LOW: fixture の `mktemp -d` の失敗未確認と EXIT trap なし、コメントの更新箇所の抜けと順序の主張、`docs/plans/active/` への参照 3 箇所(archive でリンク切れ)、case A の失敗出力が一覧 2 つの丸ごと出力。全件を in-cycle で修正。orchestrator は #189 の本文と plan の調査節の同じ誤りを訂正した
 - 2026-09-29 work: Slice B は implementer に委譲(6f3d48a、3 ファイル、+34 / -19、push 済み)。tech-debt 行の `\|` エスケープと呼び出し元・影響の訂正、fixture の `mktemp -d` 失敗時の FAIL と EXIT trap(正常経路の後に `trap - EXIT`)、コメントに更新箇所 4 つ(check-template.sh 2 コピー、`requiredTemplateScripts`、`GOLDEN_ENTRIES`)を明記し順序は慣習だけと記述、参照は issue #183 に、case A の失敗出力は `diff`。SIGTERM で中断しても fixture が残らないことを確認。32 / 0、`go test` ok、`run-verify.sh` green
+- 2026-09-29 verify(cycle 1、e90ffa3): PASS。AC-1〜AC-7 を実コマンドで確認(golden と Go の等価テストの両方向の mutation も再現)。verifier が「push 済み branch では `run-static-verify.sh` の既定 scope が Go の検査を飛ばす」ことを発見 → #190 に起票、handoff では `RALPH_VERIFY_SCOPE=full` を使う
+- 2026-09-29 test(cycle 1、ce51738): PASS。`run-test.sh` は既定と full の両 scope で green、32 / 0 を 3 回、SIGTERM 中断で fixture が残らない、mutation 32 回(shell 28 項目、Go 側・template 側の 1 項目、書式変更、実行権限)すべて期待どおり、fresh scaffold の `Missing required file` は #189 の 3 項目だけ
+- 2026-09-29 sync-docs(cycle 1、bd29265): drift なし。cross-review(codex gpt-6-astra、HEAD bd29265): 指摘 0 件(reviewer は shell 32 件と Go テスト、必須項目の削除の検出を確認)。Case C なので `/pr` へ
 ## Progress checklist
 
 - [x] Plan reviewed
 - [x] Branch created
 - [x] Implementation started
 - [x] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Verification artifact created
+- [x] Test artifact created
 - [ ] PR created
 
 ## Readiness checklist
