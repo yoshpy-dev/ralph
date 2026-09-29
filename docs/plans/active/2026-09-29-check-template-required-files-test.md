@@ -100,12 +100,12 @@
 ## Deviation notes
 
 - 2026-09-29 plan: fresh scaffold の probe で `check-template.sh` が main の時点で通らないことを発見(meta-repo 専用の必須 3 項目、hook 参照検査の誤検出と fail-open)。#183 の範囲外として #189 に起票し、AC-3 を「10 本の存在と root の exit 0」に修正。Codex plan advisory(gpt-6-astra、xhigh)は MEDIUM 1: 新規テストが実行権限なしだと `verify.local.sh` が黙ってスキップし CI で走らない → AC-7(`100755` と、わざと落としたコピーで `verify.local.sh` が非ゼロ)を追加。ユーザー決定: 対応案で plan を更新
-
+- 2026-09-29 work: Slice A は implementer(sonnet)に委譲(26c247f、5 ファイル、+330 / -29、push 済み)。`required_files` は 28 項目(非スクリプト 6 + `scripts/` 22、Go 側と同じ順)、root と template は byte 一致。`tests/test-check-template.sh`(mode 100755、32 assertion): A = golden との順序込みの一致(空ブロックは FAIL)、B = fixture で pass + 28 項目を 1 つずつ外して `Missing required file` を検出、C = repo root に全項目が存在。Go 側は `required` を package 変数 `requiredTemplateScripts` にし、`TestTemplateBaseScriptsMatchCheckTemplateRequiredFiles` が template 側の `scripts/` 項目の集合と等しいことを確認(不一致は「only in check-template.sh / only in the Go list」で列挙、0 件なら書式変更として Fatal)。tech-debt は該当行を削除し #189 の行を追加。red: shell 側 28 項目すべてで A / B が落ちる、Go 側と template 側からそれぞれ 1 項目落として等価テストが落ちる、golden をわざと壊したコピーで `HARNESS_VERIFY_MODE=test ./scripts/verify.local.sh` が exit 1(chmod -x にすると黙って exit 0 = AC-7 の根拠)。fresh scaffold には 22 本すべてあり、`check-template.sh` の `Missing required file` は #189 の 3 項目だけ。orchestrator も 32 / 0、`go test`、cmp、shellcheck、mode を確認。逸脱: golden の非スクリプト項目は 4 ではなく 6(handoff の数え間違い、plan の 18 + 10 = 28 と一致)
 ## Progress checklist
 
 - [x] Plan reviewed
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
