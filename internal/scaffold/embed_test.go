@@ -49,10 +49,16 @@ func TestEmbedFSInterface(t *testing.T) {
 }
 
 // requiredTemplateScripts lists the scripts every `ralph init` scaffold must
-// ship. This is the same set of names TestTemplateBaseScriptsMatchCheckTemplateRequiredFiles
-// checks against the `scripts/` entries of check-template.sh's required_files
-// list, so a name dropped from either list is caught by one of the two
-// tests (see docs/plans/active/2026-09-29-check-template-required-files-test.md).
+// ship. TestTemplateBaseScriptsExist checks that each one exists (and is
+// executable) under templates/base/scripts/, but does not catch a name
+// dropped from this list.
+// TestTemplateBaseScriptsMatchCheckTemplateRequiredFiles compares this set
+// against the `scripts/` entries of check-template.sh's required_files
+// list; that is what catches a name dropped from either side. A
+// `scripts/` entry lives in four places that must change together:
+// scripts/check-template.sh, templates/base/scripts/check-template.sh
+// (kept byte-identical to it), this list, and the golden list in
+// tests/test-check-template.sh's GOLDEN_ENTRIES (issue #183).
 var requiredTemplateScripts = []string{
 	"run-verify.sh",
 	"run-static-verify.sh",
@@ -106,10 +112,10 @@ func TestTemplateBaseScriptsExist(t *testing.T) {
 }
 
 // extractCheckTemplateRequiredFiles reads a check-template.sh script and
-// returns the entries of its `required_files` heredoc-style block (the
-// lines between `required_files="` and the closing `"` line), in order,
-// with blank lines dropped. Returns an empty slice if the block cannot be
-// found (e.g. the script's format changed).
+// returns the entries of its `required_files="..."` multi-line
+// double-quoted assignment (the lines between `required_files="` and the
+// closing `"` line), in order, with blank lines dropped. Returns an empty
+// slice if the block cannot be found (e.g. the script's format changed).
 func extractCheckTemplateRequiredFiles(t *testing.T, path string) []string {
 	t.Helper()
 

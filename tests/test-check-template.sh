@@ -13,8 +13,7 @@
 #      check-template.sh fail with "Missing required file: <entry>".
 #   C. root sanity: every golden entry exists at this repo's own root.
 #
-# Spec: docs/plans/active/2026-09-29-check-template-required-files-test.md
-# (issue #183). The Go-side counterpart lives in
+# Spec: issue #183. The Go-side counterpart lives in
 # internal/scaffold/embed_test.go (TestTemplateBaseScriptsMatchCheckTemplateRequiredFiles).
 
 set -u
@@ -41,10 +40,13 @@ fail() {
 }
 
 # The golden required_files list: the 6 non-script entries in their current
-# order, followed by the 22 scripts/ entries in the same order as
-# internal/scaffold/embed_test.go's requiredTemplateScripts. Update this
+# order, followed by the 22 scripts/ entries, ordered here to match
+# internal/scaffold/embed_test.go's requiredTemplateScripts as a
+# readability convention only (the Go test compares both as sets, so
+# reordering either list does not by itself fail anything). Update this
 # list in the same commit as any change to required_files in
-# scripts/check-template.sh and templates/base/scripts/check-template.sh.
+# scripts/check-template.sh, templates/base/scripts/check-template.sh, and
+# requiredTemplateScripts in internal/scaffold/embed_test.go.
 GOLDEN_ENTRIES=(
   "README.md"
   "AGENTS.md"
@@ -126,10 +128,8 @@ run_case_a() {
     pass "A. required_files matches the golden list (${#GOLDEN_ENTRIES[@]} entries, in order)"
   else
     fail "A. required_files differs from the golden list"
-    echo "    --- script: $CHECK_TEMPLATE ---"
-    printf '%s\n' "$actual" | sed 's/^/    /'
-    echo "    --- golden ---"
-    printf '%s\n' "$expected" | sed 's/^/    /'
+    echo "    --- diff (< script: $CHECK_TEMPLATE, > golden) ---"
+    diff <(printf '%s\n' "$actual") <(printf '%s\n' "$expected") | sed 's/^/    /'
   fi
 }
 
@@ -137,7 +137,15 @@ run_case_a() {
 run_case_b() {
   local fixture entry saved output rc
 
-  fixture="$(mktemp -d "${TMPDIR:-/tmp}/check-template-fixture.XXXXXX")"
+  fixture="$(mktemp -d "${TMPDIR:-/tmp}/check-template-fixture.XXXXXX")" || {
+    fail "B. mktemp -d failed; skipping the fixture cases"
+    return
+  }
+  # Safety net for an interrupted run or a runner timeout mid-loop; the
+  # explicit rm -rf at the end of this function also runs on the normal
+  # path, after which this trap is cleared.
+  trap 'rm -rf "$fixture"' EXIT
+
   build_fixture "$fixture"
 
   output="$(cd "$fixture" && CI=true sh "$CHECK_TEMPLATE" 2>&1)"
@@ -164,6 +172,7 @@ run_case_b() {
   done
 
   rm -rf "$fixture"
+  trap - EXIT
 }
 
 # --- C. root sanity: this repo satisfies its own golden list ----------------
