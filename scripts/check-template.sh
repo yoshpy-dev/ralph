@@ -17,17 +17,27 @@ CLAUDE.md
 docs/research/approach-comparison.md
 docs/roadmap/harness-maturity-model.md
 scripts/run-verify.sh
+scripts/run-static-verify.sh
+scripts/run-test.sh
+scripts/detect-changed-languages.sh
+scripts/detect-languages.sh
 scripts/archive-plan.sh
 scripts/branch-name.sh
 scripts/ensure-pr-ready.sh
 scripts/ensure-pr-title-prefix.sh
+scripts/new-feature-plan.sh
+scripts/codex-check.sh
+scripts/ralph-config.sh
+scripts/ralph-worktree.sh
+scripts/xreview-helpers.sh
 scripts/secret-scan.sh
 scripts/secret-scan-branch.sh
-scripts/xreview-helpers.sh
 scripts/pre-commit-secret-guard.sh
 scripts/commit-msg-guard.sh
 scripts/prepare-commit-msg-secret-guard.sh
 scripts/pre-merge-commit-secret-guard.sh
+scripts/check-template.sh
+scripts/check-skill-sync.sh
 "
 
 for file in $required_files; do
