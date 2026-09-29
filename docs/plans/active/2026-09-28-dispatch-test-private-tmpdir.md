@@ -29,7 +29,7 @@ case I の dispatcher の実行と漏れの検査をテスト専用の `TMPDIR` 
 ## Non-goals
 
 - `ralph-dispatch.sh` 自体の変更(`TMPDIR` はすでに尊重している)。
-- case I の `pgrep -f "PreCompact.d/10-slow.sh"` / `pkill -f` による子プロセスの検査が、同じスイートの並走(別セッションが同時に同じテストを走らせる)と衝突しうる件。記録にとどめる。
+- (2026-09-29 に改訂、Slice C で対応済み)case I の `pgrep -f "PreCompact.d/10-slow.sh"` / `pkill -f` による子プロセスの検査が、同じスイートの並走(別セッションが同時に同じテストを走らせる)と衝突する件。当初は記録にとどめる予定だったが、並走 2 本で 6 組中 4 組が落ちることを実測し、修正が hook 名の一意化の数行だったので対象に含めた(Deviation notes 参照)。
 - 他のケース(A〜H)の隔離の強化。専用 `TMPDIR` をスイート全体に適用する案は実装の選択として許す(下記)が、A〜H の assertion は変えない。
 - `docs/plans/archive/2026-09-25-doctor-shell-alias-rc-types.md` の記録は履歴なので触らない。
 
@@ -102,12 +102,15 @@ case I の dispatcher の実行と漏れの検査をテスト専用の `TMPDIR` 
 
 - 2026-09-28 plan: Codex plan advisory(gpt-6-astra、xhigh)が 2 件。HIGH 1: 修正前の再現をホストの共有 `TMPDIR` で行うと旧 case I の `rm -f` が他セッションのファイルを消しうる → 模擬共有 TMPDIR(`$workdir/shared-tmp`)を環境の `TMPDIR` にし、ホストの共有領域を列挙・削除しない AC-7 を追加。MEDIUM 2: 第 2 の dispatcher を旧検査のスナップショットより前に起動すると差分が空で red にならない → 再現の順序を marker で同期し、落ちた対象が fixture 所有であることを確認する AC-3 に改訂。ユーザー決定: 対応案で plan を更新
 - 2026-09-28 work: Slice A は implementer(sonnet)に委譲(84c412f、2 ファイル、+117 / -23、push 済み)。設計は plan の (b): `workdir` 作成直後に `TMPDIR=$workdir/shared-tmp` を export(模擬共有 dir)。case I の対象 dispatcher は起動サブシェル内で `TMPDIR=$workdir/case-i-tmp`、検査はその dir だけを `find`(共有 dir のスナップショットと `rm -f $i_leaked_tmp` は削除)。第 2 の dispatcher は `$workdir/repo2` の `Stop.d/10-concurrent-slow.sh`(sleep 30)で、started marker(最大 5 秒)→ 模擬共有 dir に `ralph-dispatch-*` があることの assertion → case I → TERM + wait → 消えたことの assertion。EXIT trap でも TERM と `pkill -f`。ヘッダーの `i.` を更新、tech-debt の行を削除。red: 旧テスト(efd4ec1)の scratch コピーで事前スナップショットの直後に fixture を挿入し `TMPDIR=<scratch>/shared` で実行 → 25 PASS / 1 FAIL「left stray ralph-dispatch-* temp files: …/shared/ralph-dispatch-{merged,out,stdin}.*」(fixture 所有)。ホストの canary は残った。green: 29 / 0(26 から +3)、5 回連続、shellcheck clean、`run-verify.sh` All verifiers passed。orchestrator も 29 / 0・canary・shellcheck を確認
+- 2026-09-29 self-review(cycle 1、b45326e): CRITICAL 0 / HIGH 0 / MEDIUM 1 / LOW 5、merge 可。MEDIUM: 第 2 の dispatcher を止める `pkill -f "Stop.d/10-concurrent-slow.sh"` が同一ホストの別スイート実行の hook にも一致する(dispatcher は hook を相対パスで起動するので cmdline に実行ごとの区別がない)。LOW: `sleep 30` が TERM 後に孤児化、模擬共有 dir の事前空チェックがない、専用 dir の検査が名前で絞っている、PASS 行に実行ごとのパス、コメント 4 か所のずれ。全件を in-cycle で修正
+- 2026-09-29 work: Slice B は implementer に委譲(3ba2f65、2 ファイル、+92 / -31)。第 2 の dispatcher の hook を `10-concurrent-slow-$$.sh` にして `pkill -f` を 2 か所とも削除(停止は trap の `kill -TERM` + `wait`)、hook の末尾を `exec sleep 30`(TERM が sleep 自身に届く。停止後の `wait` の rc が 143 であることを assertion)、fixture 起動前に `$shared_tmp` が空であることの assertion、`find` の対象を `$shared_tmp` に、専用 dir は `-mindepth 1` で全件、PASS 行は件数だけ、コメントを修正。テスト 31 / 0(29 から +2)。implementer が並走 2 本で既存の `PreCompact.d/10-slow.sh` の `pgrep`/`pkill` が互いの hook を拾い 6 組中 4 組が落ちることを実測(旧テスト efd4ec1 でも 4 / 6、同じ失敗の型を含む)。この時点では tech-debt の行として記録
+- 2026-09-29 work(非目標の改訂): Slice C は implementer に委譲(300aa85、2 ファイル、+28 / -16)。case I 自身の hook も `10-slow-$$.sh` にし、`pgrep -f` / `pkill -f` を同じ実行ごとのパスに。Slice B の tech-debt の行を削除、ヘッダーの `i.` に一意な名前の理由を 1 文。並走 2 本 × 6 組と 3 本 × 1 組はすべて rc 0、FAIL 行なし、孤児の `sleep` なし。orchestrator も並走 2 本(31 / 0 × 2)、ホストの canary、孤児プロセスなしを確認。理由: 修正が hook 名の一意化の数行で、放置すると #182 と同じ「同一ホストの別実行」型の偽 FAIL が残るため
 ## Progress checklist
 
 - [x] Plan reviewed
 - [x] Branch created
 - [x] Implementation started
-- [ ] Review artifact created
+- [x] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
