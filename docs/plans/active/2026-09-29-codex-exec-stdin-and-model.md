@@ -106,12 +106,12 @@ skill 本文・設定・テスト・文書の変更のみ。問題があれば 1
 ## Deviation notes
 
 - 2026-09-29 plan: Codex plan advisory(gpt-6-astra、xhigh)は MEDIUM 1: バックグラウンド実行に完了・失敗の contract がなく、失敗した reviewer が「指摘なし → PR」に落ちうる → `-o`(`--output-last-message`、`exec` と `exec review` の両方で利用可と確認)で最終応答をファイルに取り、完了通知・exit 0・新しく空でないファイル・20 分の上限・中断時の停止を contract として AC-2 に入れ、未完了の経路を AC-8 として追加、AC-6 を「exit 0 かつ完全一致」に締めた。ユーザー決定: 対応案で plan を更新。plan 時の probe で `-m` / `-c` 付きの `codex exec ... </dev/null` が 11 秒で `ok` を返すことを確認
-
+- 2026-09-29 work: Slice A は implementer(sonnet)に委譲(076b546、19 ファイル、+423 / -65、push 済み)。`ralph-config.sh`(2 コピー)に `RALPH_CODEX_REVIEWER_MODEL`(gpt-6-astra)と `RALPH_CODEX_REASONING_EFFORT`(xhigh)を定義・export。`/plan` 11.c と `/cross-review` step 4・表を `command codex -m … -c … exec … -o <file> </dev/null` にし、バックグラウンド起動・完了通知待ち・exit 0・新しく空でない `-o` ファイル・20 分・停止の contract と、cross-review の `Reviewer status: incomplete (<reason>)` の経路(再実行 / `/pr` に known gap / 中止)を追加。triage report の template に `Reviewer status: complete` 行。4 面は `sync-skills.sh` で再生成し `check-skill-sync.sh` / `check-sync.sh` pass(`model-routing.md` の既知差分は維持)。`tests/test-codex-exec-invocation.sh`(100755、84 assertion)、`tests/test-ralph-config.sh` +4、`defaults_sync_test.go` を表駆動(5 組、全出現を検査)、`model-routing.md` と `codex-setup.md`(2 コピー)。逸脱: skill 本文の「background execution」を「background run」に言い換え(テストの行検出 `codex` + ` exec` が「execution」に誤反応するため。パターンは緩めない)。red: (i) `</dev/null` 除去、(ii) `-o` 除去、(iii) fallback 変更(shell と Go の両方)、(iv) `ralph-config.sh` の既定変更、(v) `Reviewer status: incomplete` 除去、すべて該当ファイルを名指しで落ちる。AC-6: `-o` 付きで rc 0、11 秒、ファイル内容 `ok`。`RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh` green。orchestrator も 84 / 84、19 / 19、`go test`、check-skill-sync、check-sync を確認
 ## Progress checklist
 
 - [x] Plan reviewed
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
