@@ -124,6 +124,43 @@ If `ralph upgrade` is unavailable or refuses to converge, restore from a
 pre-upgrade commit (`git restore --source=<sha> -- .claude .codex .agents`)
 and retry once you can run the upgrade end-to-end.
 
+## If `.codex/config.toml` changes on its own
+
+Symptom: `ralph-worktree.sh ensure` (via `/plan`, `/spec`) or
+`validate-clean-base` stops with an "uncommitted changes" error, and
+`.codex/config.toml` has lost all of its comments and/or gained a trailing
+`[shell_environment_policy]` table it did not have before. `ralph-worktree.sh`
+recognizes this specific shape and explains it directly in the error message
+with recovery commands; any other kind of dirty state still gets the generic
+"has uncommitted changes" message.
+
+Check the diff before doing anything else:
+
+```sh
+git diff -- .codex/config.toml
+```
+
+If the diff is only the known rewrite, restore the tracked version:
+
+```sh
+git checkout -- .codex/config.toml
+git status --porcelain   # should print nothing
+```
+
+(When developing ralph itself — not a scaffolded project — you can also
+confirm parity with `cmp .codex/config.toml templates/base/.codex/config.toml`.)
+
+Cause: not yet identified. Ruled out: the Claude Code `openai-codex` and
+`everything-claude-code` plugins (neither writes to `.codex/config.toml` or
+`shell_environment_policy`), ralph's own Go code (only reads
+`.codex/config.toml`), and codex's regular config-writing subcommands
+(`codex features enable ...` writes the user-level config, not the project
+one, confirmed in an isolated probe). Remaining candidates: an interactive
+codex TUI dialog (project trust, hook trust, model migration), the Codex
+desktop app or IDE extension, or config migration on a codex version update.
+See `docs/evidence/codex-config-rewrite-2026-09-30.md` for the
+full write-up and what evidence to capture if it happens again.
+
 ## See also
 
 - [codex-seat-permissions.md](codex-seat-permissions.md) — verify codex seat
