@@ -171,10 +171,23 @@ func TestDefaultsLockStep(t *testing.T) {
 	// Both /plan and /cross-review document `${VAR:-fallback}` tokens for the
 	// model/effort env vars they source from scripts/ralph-config.sh. This is
 	// table-driven so every (skill, var) pair is checked the same way and every
-	// occurrence in the file (not only the first) is verified — the codex exec
-	// invocation line and the "CLI execution modes" table row must both carry
-	// the current default (docs/plans/active/2026-09-29-codex-exec-stdin-and-model.md
+	// occurrence in the file (not only the first) is verified: for cross-review
+	// that means both the codex-exec invocation line and the "CLI execution
+	// modes" table row (plan has no such table; its only occurrence is the
+	// step 11.c invocation line) must carry the current default (issue #184,
 	// AC-4).
+	//
+	// Skip scope: a single gate below, before the loop, skips the whole
+	// sub-test when .claude/skills itself is absent (a vendored/downstream
+	// repo without the meta-repo's .claude tree). Once that gate has passed,
+	// a missing individual SKILL.md is a defect, not an environment
+	// difference, so the loop reports it with t.Errorf and continues instead
+	// of skipping.
+	skillsRoot := filepath.Join(root, ".claude", "skills")
+	if _, err := os.Stat(skillsRoot); err != nil {
+		t.Skipf(".claude/skills not found (%v) — skipping /plan and /cross-review SKILL.md fallback checks (vendored repo?)", err)
+	}
+
 	type skillVarCheck struct {
 		skillDir string // under .claude/skills/
 		envVar   string
@@ -190,10 +203,8 @@ func TestDefaultsLockStep(t *testing.T) {
 	for _, c := range skillVarChecks {
 		skillPath := filepath.Join(root, ".claude", "skills", c.skillDir, "SKILL.md")
 		if _, err := os.Stat(skillPath); err != nil {
-			// t.Skipf halts this whole test function (not just this loop
-			// iteration), matching the pre-existing skip semantics above for
-			// a vendored/downstream repo missing the meta-repo's .claude tree.
-			t.Skipf(".claude/skills/%s/SKILL.md not found (%v) — skipping %s fallback check", c.skillDir, err, c.envVar)
+			t.Errorf(".claude/skills/%s/SKILL.md not found (%v) — skipping %s fallback check", c.skillDir, err, c.envVar)
+			continue
 		}
 
 		data, err := os.ReadFile(skillPath)

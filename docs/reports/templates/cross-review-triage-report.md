@@ -6,7 +6,7 @@
 - Driver: <claude|codex>
 - Reviewer: <claude|codex>
 - Triager: <CLI driving this run, e.g. "Claude Code (main context)" or "Codex (single-agent inline)">
-- Reviewer status: complete
+- Reviewer status: <complete | incomplete (<reason>)>
 - Self-review cross-ref: yes/no
 - Cycle: X/Y
 - Total reviewer findings: N

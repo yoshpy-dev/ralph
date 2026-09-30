@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 # shellcheck disable=SC1090  # the whole point is sourcing $CONFIG dynamically
 # test-codex-exec-invocation.sh — regression guard for the codex-exec-stdin-and-model
-# plan (issue #184, docs/plans/active/2026-09-29-codex-exec-stdin-and-model.md).
+# fix (issue #184).
 #
 # `codex exec` calls launched from an agent's Bash tool used to hang waiting
 # for stdin ("Reading additional input from stdin...", #153) and could 400
@@ -60,11 +60,29 @@ EXPECT_EFFORT="$(unset RALPH_CODEX_REASONING_EFFORT; . "$CONFIG"; echo "$RALPH_C
 FACES=".claude/skills .agents/skills templates/base/.claude/skills templates/base/.agents/skills"
 SKILLS="plan cross-review"
 
+# expected_invocation_count <skill>
+# /plan carries exactly one codex-exec invocation line (step 11.c).
+# /cross-review carries exactly two: the Step 4 fenced-block line and the
+# "CLI execution modes" table row. A line split across a backslash
+# continuation, or a removed invocation, changes this count.
+expected_invocation_count() {
+  case "$1" in
+    plan) echo 1 ;;
+    cross-review) echo 2 ;;
+    *) echo 0 ;;
+  esac
+}
+
 # check_invocation_line <face> <skill> <lineno> <content>
-# Verifies one codex-exec invocation line carries all four required tokens.
+# Verifies one codex-exec invocation line carries all five required tokens.
 check_invocation_line() {
   face="$1"; skill="$2"; lineno="$3"; content="$4"
   label="$face/$skill/SKILL.md:$lineno"
+
+  case "$content" in
+    *'command codex '*) pass "$label: has command codex " ;;
+    *) fail "$label: missing 'command codex ' -- $content" ;;
+  esac
 
   case "$content" in
     *'</dev/null'*) pass "$label: has </dev/null" ;;
@@ -101,6 +119,7 @@ check_fallback_values() {
     old_ifs=$IFS
     IFS='
 '
+    set -f
     for m in $model_matches; do
       fb="${m#*:-}"
       fb="${fb%\}}"
@@ -110,6 +129,7 @@ check_fallback_values() {
         fail "$label: RALPH_CODEX_REVIEWER_MODEL fallback = '$fb', want '$EXPECT_MODEL' (scripts/ralph-config.sh default)"
       fi
     done
+    set +f
     IFS=$old_ifs
   fi
 
@@ -120,6 +140,7 @@ check_fallback_values() {
     old_ifs=$IFS
     IFS='
 '
+    set -f
     for m in $effort_matches; do
       fb="${m#*:-}"
       fb="${fb%\}}"
@@ -129,6 +150,7 @@ check_fallback_values() {
         fail "$label: RALPH_CODEX_REASONING_EFFORT fallback = '$fb', want '$EXPECT_EFFORT' (scripts/ralph-config.sh default)"
       fi
     done
+    set +f
     IFS=$old_ifs
   fi
 }
@@ -145,25 +167,39 @@ check_face_skill() {
   fi
 
   # A codex-exec invocation line: contains the lowercase `codex` binary name
-  # and a following ` exec` token. Lowercase `codex` (vs. prose "Codex") is
-  # deliberate -- it is what distinguishes a real invocation from a prose
-  # mention, so this file's own prose is worded to avoid a false match
-  # (no lowercase `codex` token sitting on the same line as the substring
-  # " exec", e.g. inside a word like "execution").
-  invocation_lines="$(grep -n 'codex' "$file" | grep ' exec' || true)"
+  # and the token " exec " (a bare "exec" preceded and followed by a space).
+  # The trailing space is deliberate: it excludes a word like "execution"
+  # that only shares the substring "exec", the exact false match this
+  # skill body's own prose used to trip before the wording was fixed
+  # (see docs/reports/self-review-2026-09-29-codex-exec-stdin-and-model.md,
+  # LOW "test (detector wording)"). Every real invocation line also starts
+  # with `command codex `, checked separately in check_invocation_line.
+  invocation_lines="$(grep -n 'codex' "$file" | grep ' exec ' || true)"
+
+  actual_count=0
+  if [ -n "$invocation_lines" ]; then
+    actual_count="$(printf '%s\n' "$invocation_lines" | grep -c .)"
+  fi
+  expected_count="$(expected_invocation_count "$skill")"
+  if [ "$actual_count" = "$expected_count" ]; then
+    pass "$label: has exactly $expected_count codex exec invocation line(s)"
+  else
+    fail "$label: expected $expected_count codex exec invocation line(s), found $actual_count -- a line split (e.g. a backslash continuation) or a removed invocation changes this count"
+  fi
 
   if [ -z "$invocation_lines" ]; then
     fail "$label: no codex exec invocation line found"
   else
-    pass "$label: has at least one codex exec invocation line"
     old_ifs=$IFS
     IFS='
 '
+    set -f
     for line in $invocation_lines; do
       lineno="${line%%:*}"
       content="${line#*:}"
       check_invocation_line "$face" "$skill" "$lineno" "$content"
     done
+    set +f
     IFS=$old_ifs
   fi
 

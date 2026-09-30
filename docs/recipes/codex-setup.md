@@ -86,13 +86,18 @@ default.
 `/plan`'s Codex plan advisory and `/cross-review`'s codex reviewer path both
 call `codex exec` from a Bash tool, not an interactive session. Close stdin
 with `</dev/null` so codex never blocks on "Reading additional input from
-stdin..."; run `command codex` (not a bare `codex`) with an explicit `-m` and
-`-c model_reasoning_effort=` sourced from `scripts/ralph-config.sh` so a
-shell alias that injects its own `-m` cannot collide with it. Write the final
-answer with `-o <file>` (or `--output-last-message`) instead of parsing the
-log. Run long calls in the background and only treat the call as complete
-once it exits 0 and the `-o` file is fresh and non-empty — otherwise treat it
-as incomplete, never as "no findings".
+stdin...". Run `command codex` (not a bare `codex`) so a shell alias that
+injects its own `-m` cannot collide with the explicit one below (codex
+rejects a duplicated flag). Pass an explicit `-m` and `-c
+model_reasoning_effort=` sourced from `scripts/ralph-config.sh` so the call
+does not depend on `.codex/config.toml`'s project-level model. Write the
+final answer with `-o <file>` (or `--output-last-message`) instead of
+parsing the log, after `rm -f`-ing that file first so "non-empty" means
+"written by this run". Run long calls in the background with a watchdog (a
+`sleep 1200 && kill` in the same background shell) so a hang becomes a
+normal non-zero exit instead of an unbounded wait — only exit 0 plus a
+fresh, non-empty `-o` file count as complete, otherwise the call is
+incomplete, never "no findings".
 
 ## Drift safety
 

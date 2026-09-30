@@ -1,17 +1,22 @@
 #!/usr/bin/env sh
 # ralph-config.sh — shared configuration for the standard-flow development
-# harness's cross-review gate and the [org] envelope lock-step surfaces.
+# harness's /plan and /cross-review codex calls, and the [org] envelope
+# lock-step surfaces.
 #
 # The Ralph Loop autonomous execution system (its batch orchestrator/pipeline
 # scripts, the per-phase CLI driver, and the legacy shell CLI) was removed;
 # this file's [loop]/[pipeline] defaults (RALPH_LOOP_*, per-phase
-# RALPH_*_MODEL, RALPH_MAX_* iteration caps) went with it. The two survivors
-# below still have a live consumer:
+# RALPH_*_MODEL, RALPH_MAX_* iteration caps) went with it. The surviving
+# standard-flow vars below have two live consumers:
 # /cross-review (.claude/skills/cross-review/SKILL.md), which sources this
 # file for the standard-flow pipeline cycle cap (RALPH_STANDARD_MAX_PIPELINE_CYCLES
-# is deliberately not exported below -- only sourcing this file picks it up)
-# and reads the claude-as-reviewer model fallback either way (RALPH_CLAUDE_REVIEWER_MODEL
-# is exported, so setting it directly in the environment also works).
+# is deliberately not exported below -- only sourcing this file picks it up),
+# the claude-as-reviewer model fallback (RALPH_CLAUDE_REVIEWER_MODEL), and the
+# codex-as-reviewer model/effort fallbacks (RALPH_CODEX_REVIEWER_MODEL,
+# RALPH_CODEX_REASONING_EFFORT); and /plan (.claude/skills/plan/SKILL.md),
+# whose Codex plan advisory reads the same two codex-side variables. All
+# three reviewer model/effort vars are exported, so setting them directly in
+# the environment also works without sourcing this file.
 #
 # Priority: environment variable > default value
 #
