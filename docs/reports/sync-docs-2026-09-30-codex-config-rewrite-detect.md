@@ -85,3 +85,95 @@ described, and this recipe describes none.
 Drift found and fixed: one missing `docs/tech-debt/README.md` row. All
 other checked locations were already in sync with the shipped detector and
 evidence record.
+
+## Cycle 2
+
+- Date: 2026-09-30
+- Plan: `docs/plans/active/2026-09-30-codex-config-rewrite-detect.md`
+  (Deviation notes: cross-review AR-1 + Slice D `ee397e9` — indented
+  headers in the appended region now fall to the generic message; self-review
+  cycle 2 + Slice E `a2c721d` — an at-least-one-known-change guard, single-quote
+  root quoting for non-ASCII paths, and doc corrections; `ae96cd2` repoints
+  the plan/evidence/tech-debt references at `docs/plans/archive/`)
+- Branch: `fix/codex-config-rewrite-detect`, HEAD `3186527` (cycle 1 was
+  `9b68c43`)
+
+### Checked
+
+- `docs/tech-debt/README.md`'s row from cycle 1: diffed `9b68c43..HEAD`.
+  Slice E already repointed the evidence cell's plan reference from
+  `docs/plans/active/2026-09-30-codex-config-rewrite-detect.md` to
+  `docs/plans/archive/2026-09-30-codex-config-rewrite-detect.md` (valid once
+  `/pr` archives it) — the only change to this row. The "what"/"impact"/"why
+  deferred"/"trigger" cells describe the observed symptom and the
+  detect-only scope at a level that does not enumerate the matcher's
+  internals (indented headers, the at-least-one-known-change guard), so
+  cycle 2's narrower matching does not make any of those cells stale.
+  Column count unchanged: 6 pipes / 5 cells, matching the header.
+- `docs/recipes/codex-setup.md` + `templates/base/docs/recipes/codex-setup.md`
+  (`cmp` PASS) and `docs/evidence/codex-config-rewrite-2026-09-30.md`:
+  diffed `9b68c43..HEAD`. Both were edited in Slice E and now state the
+  at-least-one-known-change guard ("with at least one comment/blank line
+  actually dropped or at least one policy table actually appended") and its
+  negative cases (mode-only change, trailing newline added/removed, only
+  blank/whitespace-only lines appended), matching the function comment and
+  logic in `scripts/ralph-worktree.sh:89-166` (`dropped`,
+  `saw_policy_header`, the final `if (!dropped && !saw_policy_header)`
+  guard) and the die message's unchanged wording
+  (`scripts/ralph-worktree.sh:187-204`; only the root-quoting mechanism
+  changed, to single-quote escaping, which the recipe's `git -C` examples
+  already render generically without depending on the quoting form). The
+  ECC description was also corrected (Slice E, C2-4) to name the actual
+  tables/keys it inserts (`[features]`, `[profiles.*]`, `[agents.*]`, root
+  keys) instead of "append-only" — matches `merge-codex-config.js:27-34,295,300,313`
+  as cited in the evidence file. Confirmed only, not rewritten, per this
+  cycle's task.
+  One minor completeness note, not treated as drift: the evidence file's
+  "この調査が変えたこと" paragraph dropped its earlier explicit mention of
+  "改行コードの変更" (line-ending/CRLF change) as an example of what falls
+  to the generic message, while the recipe still lists it explicitly. Both
+  statements remain true (case 11, CRLF-only, still asserts the generic
+  message; `git diff main...HEAD -- scripts/ralph-worktree.sh` shows no
+  change to CR handling in cycle 2) — the evidence file is just terser, not
+  wrong. Left as Slice E wrote it.
+- Indented-header behavior (Slice D, the actual AR-1 fix): confirmed present
+  in `docs/recipes/codex-setup.md`'s new sentence "an appended table that
+  is not `shell_environment_policy`" paragraph is unchanged in scope, but
+  the negative-case list does not name "indented header" explicitly either
+  — it was already covered by "an appended table that is not
+  `shell_environment_policy`" reading loosely, and by the script comment's
+  own explicit statement that an indented header, policy or not, falls to
+  the generic message. Not a contradiction; the recipe's list was not
+  required to enumerate every internal branch, and cycle 1's self-review
+  standard for this recipe was end-to-end symptom/recovery accuracy, which
+  holds.
+- Re-confirmed unchanged from cycle 1 (re-grepped at HEAD `3186527`):
+  `docs/recipes/worktrees.md`, `README.md`, `AGENTS.md`,
+  `.claude/skills/plan/SKILL.md`, `.claude/skills/spec/SKILL.md` (+
+  `.agents/skills/` and `templates/base/.claude/skills/` mirrors),
+  `docs/evidence/README.md`. Same grep results as cycle 1 — no new hits,
+  nothing stale.
+- Gates: `./scripts/check-skill-sync.sh` (13 skills in lock-step),
+  `./scripts/check-sync.sh` (159 IDENTICAL / 0 DRIFTED / 0 ROOT_ONLY /
+  11 TEMPLATE_ONLY / 5 KNOWN_DIFF, PASS), `./scripts/check-template-purity.sh`
+  (PASS). `cmp` on `docs/recipes/codex-setup.md` and
+  `scripts/ralph-worktree.sh` against their template copies: both PASS.
+
+### Stale
+
+None found.
+
+### Changed
+
+None. The one thing this cycle's task asked to verify (the tech-debt row's
+plan reference) was already fixed by Slice E before this cycle started.
+
+### Left
+
+None outstanding. The evidence file's dropped CRLF example (noted above) is
+a completeness nit, not inaccurate, and was left as-is since this cycle's
+task was to confirm, not rewrite, the recipe/evidence prose.
+
+### Verdict
+
+No drift found this cycle. No files changed.
