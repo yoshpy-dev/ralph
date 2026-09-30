@@ -112,6 +112,7 @@
 - 2026-09-30 test(cycle 1、1c503ee): PASS。`RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh` green、105 / 0 を sh で 3 回・dash・空白を含む TMPDIR で。scratch clone での end-to-end: 書き換えの形で `ensure` が専用の文言で止まり worktree も state も作らない → 案内どおりに戻すと `ensure` が通る、値の変更を混ぜる・stage する → 一般の文言、サブディレクトリから実行しても案内のコマンドが動く。mutation: 常に MATCH → 8 ケース、porcelain の制限を外す → 4 ケースが落ちる。追加 table の中のコメント行と `[[shell_environment_policy]]` の見出しは、どちらの変異もテストが捕まえない(穴)
 - 2026-09-30 work: Slice C は implementer に委譲(d84cdab、テストだけ、+48)。ケース 20(追加 table の中のコメント行)と 21(`[[shell_environment_policy]]`)を追加し、どちらも一般の文言。111 / 0。red: 上の 2 つの変異がそれぞれ 20 と 21 で落ちる
 - 2026-09-30 sync-docs(cycle 1、9b68c43): tech-debt に原因未特定の行を追加、他は drift なし。cross-review(cycle 1、HEAD 9b68c43、watchdog の 1 行で実行、`codex rc=0`、`-o` 965 バイト): ACTION_REQUIRED 1 件(AR-1: 追加部分の見出し判定が `/^\[/` だけなので、policy の table の後のインデントされた `  [features]` が見出しと見なされず、その下の実際の設定の追加まで書き換えと判定して checkout を案内する。空白でもタブでも再現)。ユーザー決定: 修正して pipeline を cycle 2/2 として再実行
+- 2026-09-30 work(cycle 2): Slice D は implementer に委譲(ee397e9、3 ファイル、+45 / -4、push 済み)。追加部分の見出し判定を `/^[ \t]*\[/` にし、インデントされた見出しも見出しとして扱う。受け入れるのはインデントのない policy の見出しだけ(`is_sep_header` は変えない)なので、インデントされた見出しは policy でも一般の文言になる(安全側)。ケース 22(空白 2 つの `[features]`)、23(タブ)、24(インデントされた policy の見出し)を追加、120 / 0。red: 判定を `/^\[/` に戻すと 22 / 23 / 24、インデントされた policy の見出しを受け入れると 24 だけが落ちる。`RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh` green。orchestrator も 120 / 0 と cmp を確認
 ## Progress checklist
 
 - [x] Plan reviewed
