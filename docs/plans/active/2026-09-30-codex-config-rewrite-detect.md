@@ -63,7 +63,7 @@
 
 - [ ] AC-1: `.codex/config.toml` だけが未ステージで dirty で、差分がコメント行・空行の削除と末尾の `shell_environment_policy` の table の追加だけのとき、`ralph-worktree.sh validate-clean-base` と `ensure` が非 0 で止まり、stderr に書き換えの説明、`git -C <root> diff -- .codex/config.toml`、`git -C <root> checkout -- .codex/config.toml`、`git -C <root> status --porcelain` が空になることの確認が出る。template との `cmp` は案内に含めない。テストは案内のコマンドをそのまま実行して、その後 `validate-clean-base` が pass することまで確認する。
 - [ ] AC-2: 次の場合は従来の `base branch '<base>' has uncommitted changes` で止まり、専用の文言は出ない: (a) 同じ書き換えに値の変更が 1 つ混ざる、(b) `.codex/config.toml` 以外にも dirty なファイルがある、(c) `shell_environment_policy` 以外の table が追加されている、(d) 未追跡のファイルだけがある、(e) 書き換えをステージした(`M `)、部分的にステージした(`MM`)、(f) HEAD の版に複数行文字列があり、その中の `#` 行か空行が消えている(Codex advisory の反例)。
-- [ ] AC-3: コメントの削除だけ(table の追加なし)の差分と、table の追加だけ(コメントは残る)の差分も AC-1 と同じ扱いになる。
+- [ ] AC-3: コメントの削除だけ(table の追加なし)の差分と、table の追加だけ(コメントは残る)の差分も AC-1 と同じ扱いになる。コメントの書き換え・追加、インデントだけの変更、CRLF 化、行末コメント付きの見出しの追加は一般の文言になる(self-review cycle 1 の MEDIUM で改訂。判定は生の行で行い、HEAD の行はコメント行と空行だけを落とせる)。
 - [ ] AC-4: clean な base では従来どおり pass。`scripts/ralph-worktree.sh` と template が byte 一致。
 - [ ] AC-5: `tests/test-ralph-worktree.sh` に AC-1〜AC-4 のケースがあり、mutation(検知の関数が常に偽を返す、table 名の判定を外す)で落ちる。
 - [ ] AC-6: `docs/recipes/codex-setup.md`(+ template)に症状・確認・戻し方(`git status --porcelain` が空になることの確認。template との `cmp` は ralph 本体を開発するときだけ)・調査の状況の段落があり、`docs/evidence/codex-config-rewrite-2026-09-30.md` に調査の記録(否定した候補とその根拠、probe の手順と結果、残る候補、次に起きたときに取る証拠: 書き換え直後の `stat` の時刻、実行中だった codex のプロセスと親、`~/.codex/log` の該当時刻)がある。
@@ -106,12 +106,14 @@
 
 - 2026-09-30 plan: Codex plan advisory(gpt-6-astra、xhigh、#192 の新しい呼び出し形で実行、rc 0、`-o` 2943 バイト)は MEDIUM 3 件。(1) ステージ済みの書き換えでは `git diff` が空、`git checkout --` が index から戻すので dirty のまま → 検知を未ステージの ` M` 1 行だけに限定し、案内どおりに戻して clean になることまでテストする。(2) 行単位の正規化は TOML の複数行文字列の中の `#` 行・空行を値として扱えず、設定の変更を書き換えと誤判定する → 複数行文字列の区切りがあれば検知しない。(3) 配布先には template がないので `cmp` の手順が使えない → 確認は `git status --porcelain` が空になることにし、`cmp` は ralph 本体の開発時だけ recipe に書く。ユーザー決定: 対応案で plan を更新
 - 2026-09-30 work: Slice A は implementer(sonnet)に委譲(cd1aadb、6 ファイル、+716 / -4、push 済み)。`codex_config_external_rewrite_only`(awk で HEAD と作業ツリーを正規化して比較、複数行文字列があれば検知しない)を、porcelain がちょうど ` M .codex/config.toml` のときだけ `validate_clean_base` から呼び、一致したら専用の文言と戻し方(diff → checkout → status が空)で止まる。template は byte 一致。`tests/test-ralph-worktree.sh` に 13 ケース(86 / 0)。逸脱: 調査の記録は `docs/reports/` ではなく `docs/evidence/codex-config-rewrite-2026-09-30.md` に置いた(check-sync は `docs/reports/` のうち pipeline の接頭辞だけを除外し、`investigation-` は ROOT_ONLY で落ちる。`docs/evidence/` は除外済みで、#155 などの調査記録も同じ場所にある)。plan 内の参照 3 箇所も更新。red: 判定を常に偽 → 一致ケース 17 assertion が落ちる、table 名を任意に → ケース 6、複数行文字列のガードを外す → ケース 10、porcelain の制限を外す → ケース 5 / 7 / 8 / 9。`RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh` green、check-sync pass。orchestrator も 86 / 0、cmp、check-sync を確認
+- 2026-09-30 self-review(cycle 1、b164556): CRITICAL 0 / HIGH 0 / MEDIUM 1 / LOW 9、merge 可。MEDIUM: 判定がコメント・空行・空白・改行コードの中の差分をすべて既知の書き換えと見なす(コメントの書き換え・追加、インデント、CRLF 化でも checkout を案内する)。LOW: 行末コメント付きの見出しが shell_environment_policy の table に吸収される、HEAD が 0 バイトだと `FNR == NR` で取りこぼす、案内のパスが引用なし、temp ファイル、テストのコメントの位置と fixture の重複、調査記録の結論の強さ、plugin の記述の範囲、`stat` の書式。全件を in-cycle で修正
+- 2026-09-30 work: Slice B は implementer に委譲(0bb6aae、6 ファイル、+406 / -270、push 済み)。判定を生の行の照合にした(HEAD の行はコメント行と空行だけ落とせる、ほかは byte 単位で一致、末尾は空行と `[shell_environment_policy]` / `[shell_environment_policy.<name>]` の table だけ)。HEAD の版は stdin で awk に渡し `FILENAME == "-"` で区別(temp ファイルなし、空の HEAD も正しく扱う)、案内のパスは `printf -v qroot %q`。テストは case 11(CRLF)を一般の文言に変え、6 ケース追加(コメントの書き換え、追加、インデント、`[features2] # c`、空の HEAD、空白を含むパスで案内どおりに戻す)。105 / 0。調査記録: trust 済みの偽 project でも `codex features enable` はユーザーレベルだけを書く(再 probe)、「codex exec は原因ではない」は「15 回以上で再現せず、可能性は低い」に弱めた。逸脱: 見出しの判定は括弧の内側の空白も許さない(「その形だけ」の指示の帰結)。red: 5 種の変異がそれぞれ該当ケースで落ちる(%q を外すとテストが git のエラーで中断する)。orchestrator も 105 / 0 と cmp を確認
 ## Progress checklist
 
 - [x] Plan reviewed
 - [x] Branch created
 - [x] Implementation started
-- [ ] Review artifact created
+- [x] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
