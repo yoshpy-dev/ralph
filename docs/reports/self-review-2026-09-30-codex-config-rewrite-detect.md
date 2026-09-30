@@ -76,3 +76,88 @@ CRITICAL と HIGH はない。
 
 - Merge: 可(CRITICAL / HIGH なし)。ただし 1 の MEDIUM はこの cycle での修正を勧める。狭めるか説明を揃えるかは実装側の判断
 - Follow-ups: 2〜4 はスクリプトの小さな修正で、1 と同じコミットで直せる。8〜10 は調査記録と recipe の言い方の修正。5〜7 は任意
+
+## Cycle 2
+
+- Date: 2026-09-30
+- Reviewed HEAD: a777e82(コードのコミットは Slice B 0bb6aae、Slice C d84cdab、Slice D ee397e9)
+- Scope: `git diff b164556...HEAD -- scripts/ tests/ docs/recipes/ docs/evidence/ templates/ docs/tech-debt/`。diff の品質だけで、範囲は cycle 1 と同じ
+- Cycle: 2/2(上限の cycle)
+
+### Evidence reviewed
+
+- `cmp` で script と recipe が template と一致することを確認
+- 新しい判定(HEAD の生の行を順に照合する)を fixture の repo で probe した。macOS の `/bin/sh`、`/bin/bash` 3.2.57、awk 20200816 を使った。結果は下の表のとおり
+- `FILENAME == "-"` の移植性: macOS の awk、ubuntu:24.04 の mawk(docker、`--network none`)、BusyBox の awk で、どれも `-` が返った。gawk は手元になく未確認
+- `%q` の出力: bash 3.2 は UTF-8 のロケール(このマシンは `en_US.UTF-8`)で、日本語の先頭バイトを生のまま、続くバイトの一部を 8 進のエスケープで出す。端末には `$'/tmp/�\227��\234��\236/repo'` と表示された。C ロケールでは全バイトがエスケープされる
+- 空白を含む TMPDIR で `sh tests/test-ralph-worktree.sh` を実行し、120 / 0 だった。ただし macOS の `mktemp -d` はこの TMPDIR を使わず、`/var/folders/...` に作っていた(probe で確認)
+- ECC 1.9.0 の `scripts/codex/merge-codex-config.js` で、merge する table の一覧(27〜34 行の `TABLE_PATHS`)と書き込み(295、300、313 行)を確認した
+- `docs/insights/events/2026-09-30-codex-config-rewrite-detect.jsonl`: cycle 1 の self_review / verify / test / sync_docs / cross_review がそろっている
+- tech-debt に追加された行: セルの区切りは 6 本で、見出しの行と同じ
+
+| probe | 作業ツリーの変更 | 結果 |
+| --- | --- | --- |
+| M1 | 内容は同じで、モードだけ変えた(`chmod +x`) | 専用の文言 |
+| M2 | 末尾の改行を外しただけ | 専用の文言 |
+| M3 | 末尾の改行を足しただけ(HEAD にはなかった) | 専用の文言 |
+| M4 | 末尾に空行を足しただけ | 専用の文言 |
+| M5 | 末尾に空白だけの行を足しただけ | 専用の文言 |
+| G1 | コメント行と空行を消し、policy の table を足した(対照) | 専用の文言 |
+| G2 | policy の table の後に、インデントした `[[features]]` を置いた | 一般の文言 |
+| G3 | policy の table に `exclude = [1, 2]` と inline table の key を置いた | 専用の文言(key 行として扱う) |
+| G4 | policy の table に、入れ子の配列の続きの行 `  [1, 2],` を置いた | 一般の文言(安全側) |
+| G5 | policy の table に dotted key の `features.hooks = false` を置いた | 専用の文言(policy の名前空間の中) |
+| G6 | 末尾に CRLF の policy の table を足した | 一般の文言 |
+| G7 | HEAD の見出しの行 `[features]` を消した | 一般の文言 |
+| G8 | HEAD の末尾がすでに policy の table で、そこに key を足した | 一般の文言(安全側の見逃し) |
+
+照合の順序について。貪欲な照合で位置がずれる心配はない。前から照合して一致した作業ツリー側の行は、HEAD の行を順に拾ったものになる。拾われなかった HEAD の行はすべて空行かコメント行になる。つまり一致の結論は「HEAD から空行とコメント行だけを消したもの」を意味し、どの順で照合しても変わらない。HEAD のコメント行が後ろの作業ツリーの行と同じ文字列でも、照合できるのは同じ位置の行とだけなので、途中への挿入や移動は NOMATCH になる。HEAD の空行と追加部分の空行が揃う場合も、結果は変わらない。追加部分では空行が許されているからである。追加部分で policy 以外の table が始まるのは `[` で始まる行だけで、それは G2 と Slice D で塞がっている。`key = [1, 2]` のように `=` の後で `[` が来る行は、key 行のまま扱われる(G3)。
+
+### cycle 1 の所見の確認
+
+| # | cycle 1 の所見 | HEAD での状態 |
+| --- | --- | --- |
+| 1 | MEDIUM: 判定が広すぎる | 直っている。照合は生の行で行い、コメントの書き換え、コメントの追加、インデント、CRLF は一般の文言になる(ケース 14、15、16、11)。文言も「comment or blank lines deleted」に変わった。ただし、何も変わっていない形が残っている(下の C2-1) |
+| 2 | LOW: 行末コメント付きの見出し | 直っている。追加部分は `/^[ \t]*\[/` で見出しを判定し、受け入れるのは policy の見出しの正確な形だけ(ケース 17、22〜24) |
+| 3 | LOW: `FNR == NR` と空の HEAD | 直っている。`FILENAME == "-"` で区別する(ケース 18)。移植性は上のとおり |
+| 4 | LOW: root が引用されていない | 空白は直っている(ケース 19)。ただし `%q` が非 ASCII の root で新しい問題を作った(下の C2-2) |
+| 5 | LOW: temp ファイル | 直っている。HEAD の版を stdin で渡すので、temp ファイルはない |
+| 6 | LOW: 説明コメントの位置 | 直っている。`tests/test-ralph-worktree.sh:201-209` のコメントが `:210` の関数の直前にある |
+| 7 | LOW: fixture の重複 | 直っている。`_cx_write_rewrite_shape` と `_cx_new_repo` の引数にまとめた |
+| 8 | LOW: 調査記録の結論の強さ | 直っている。`codex exec` の結論を弱め、`codex features enable` の範囲を限定し、trust 済みでの再 probe を足した |
+| 9 | LOW: plugin の記述の範囲 | 「project's」の限定は入った。ただし ECC が書く中身の説明が recipe と調査記録で食い違い、どちらも実物と合わない(下の C2-4) |
+| 10 | LOW: `stat` の書式 | 直っている。`-t '%Y-%m-%dT%H:%M:%S%z'` に変わり、GNU 版の書き方も添えてある |
+
+### Findings
+
+| # | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| C2-1 | LOW | コメントと挙動の一致 | 判定には「既知の変更が 1 つでもあった」という条件がない。そのため、awk の行の比較では違いが見えない変更が、どれも専用の文言になる。該当するのは、モードだけの変更、末尾の改行の有無、末尾に空行や空白だけの行を足す変更(probe M1〜M5)。文言は「comment or blank lines deleted and/or a [shell_environment_policy] table appended」だが、実際にはどちらも起きていない。関数のコメントは、行末の変更は一般の文言に落ちると書き(94〜96 行)、` M` なので差分は必ずあり、差分なしの場合を特別扱いしないとも書いている(104〜106 行)。後者の理由付けが、そのままこの漏れを作っている。recipe と調査記録にも同じ言い方がある。checkout で消えるのはモードや末尾の改行だけなので、実害は文言が不正確になることにとどまる | `scripts/ralph-worktree.sh:94-96`、`:104-106`、`:139-162`(照合と追加部分のループ)、`docs/recipes/codex-setup.md:136`、`docs/evidence/codex-config-rewrite-2026-09-30.md:151` | awk で「HEAD の行を 1 つ以上落とした」か「policy の見出しが 1 つ以上ある」ことを記録し、どちらもなければ NOMATCH にする。モードだけの変更と末尾の改行だけの変更のテストを足す |
+| C2-2 | LOW | 操作性(修正による退行) | cycle 1 の 4 に対する修正の `printf -v qroot '%q'` は、`#!/usr/bin/env bash` が選ぶ macOS の bash 3.2 と UTF-8 のロケールで、非 ASCII の root を生のバイトとエスケープの混ざった形で出す。端末には `$'/tmp/�\227��\234��\236/repo'` と表示され、端末からコピーしたパスは壊れる。修正前は、空白のない非 ASCII のパスならそのまま貼り付けられた。生のバイト列を eval すれば元に戻る(zsh でも bash でも rc 0)ので、ケース 19 の `bash -c` による往復ではこの問題を捕まえられない | `scripts/ralph-worktree.sh:182`。bash 3.2.57 で C、`en_US.UTF-8`、`ja_JP.UTF-8` の各ロケールで probe | 単一引用符の形にする。`sq="'\\''"; qroot="'${root//\'/$sq}'"` なら、bash 3.2 で日本語、空白、`'`、`$` とバッククォートの 4 種のパスが zsh で元に戻ることを確認した(置き換える文字列を直接書く `${root//\'/\'\\\'\'}` は、bash 3.2 では `'` を含むパスで壊れる)。非 ASCII の root のテストを 1 つ足す |
+| C2-3 | LOW | テストの堅牢さ | `_cx_assert_specific` は、引用しない root で `git -C $2 diff ...` を期待している。文言が出すのは `%q` の形なので、このテストが通るのは fixture の root に引用が要らないからにすぎない。macOS の `mktemp -d` は TMPDIR を使わないので問題は出ない。Linux の `mktemp -d` は TMPDIR に従うので、空白か非 ASCII を含む TMPDIR では、ケース 1、2、3、18 の文言の assertion が落ちるはずである(コードからの推論で、Linux では実行していない)。また、ケース 19 の `bash -c "$_cx_checkout_line"` は `set -e` の下で守られていない。印字された行が壊れると、FAIL の行も集計も出さずにテスト全体が止まる(plan の Slice B の記録に「%q を外すとテストが git のエラーで中断する」とある) | `tests/test-ralph-worktree.sh:286-294`(`:289` ほか)、`:568` | 期待値を、スクリプトと同じ引用の形で helper の中で組み立てる(C2-2 の単一引用符の形にするなら、sh の中で同じ置き換えを書ける)。ケース 19 の実行を `set +e` で囲み、終了コードを `assert_eq` で確かめる |
+| C2-4 | LOW | 記述の正確さ | ECC がユーザーレベルの config に書く中身の説明が、recipe と調査記録で食い違い、どちらも実物と合わない。recipe は「`[features]` の項目」、調査記録は「ECC 自身のフック定義」と書いている。`merge-codex-config.js` が足すのは MCP 以外の基本設定で、中身は `features`、`profiles.strict`、`profiles.yolo`、`agents.*` の table と、ルートの key である。調査記録の「追記だけ」も正確ではない。ルートの key は最初の table の前に差し込み、既存の table には key を足す。ただし全体を再シリアライズしない文字列の編集なので、コメントを剥がさないという結論は変わらない。「フック定義」の記述は cycle 1 からあり、私も見落としていた | `docs/recipes/codex-setup.md:160-162`、`docs/evidence/codex-config-rewrite-2026-09-30.md:38`、`:41`。ECC 1.9.0 の `merge-codex-config.js:27-34`、`:295`、`:300`、`:313` | 両方を「MCP 以外の基本設定(`[features]`、`[profiles.*]`、`[agents.*]`、ルートの key)を、既存の文字列に差し込む形で足す」に揃える |
+| C2-5 | LOW | 読みやすさ | 関数のコメントに、書き直しの跡が 2 つ残っている。103 行は `is` で途切れる短い行で、104 行に続く(折り返しの直し残し)。107 行は、Slice B で正規化をやめて生の行の比較にした後も「line-based normalization」と書いている | `scripts/ralph-worktree.sh:102-104`、`:107` | 102〜104 行を折り返し直し、107 行を「line-based comparison」にする |
+
+CRITICAL、HIGH、MEDIUM はない。
+
+### Positive notes
+
+- 照合の順序で結論が変わらないこと、追加部分で policy 以外の table が始まる道が `[` の行しかないことを、上の probe で確かめた(G2〜G8)
+- 想定外の形はどれも一般の文言に倒れる。インデントした `[[...]]`、入れ子の配列の続きの行、CRLF、見出しの削除、HEAD の末尾にある既存の policy の table への key の追加(G2、G4、G6、G7、G8)
+- HEAD の版は stdin で awk に渡され、temp ファイルと 3 か所の後始末がなくなった。`git cat-file -e` で HEAD にないパスを先に落としている
+- `FILENAME == "-"` は BWK awk、mawk、BusyBox の awk で同じ値になる
+- Slice D の判定は、インデントした policy の見出しも一般の文言にする。受け入れる形を増やさずに穴を塞いでいる
+- 新しいテストのケース 14〜24 は、それぞれ 1 つの条件だけを変えている。ケース 22〜24 は、判定を `/^\[/` に戻すと落ちる
+- script と recipe は template と byte 一致。tech-debt の行はセルの数が合っている。insight のイベントもそろっている
+
+### Coverage gaps
+
+- gawk での `FILENAME == "-"` は確かめていない。CI は pull_request のときだけ動くので、このブランチの Linux での結果はまだない
+- 空白を含む TMPDIR での実行(テスト報告にある)は、macOS では `mktemp -d` がその TMPDIR を使わないため、引用が必要な root を試せていない。ディレクトリを明示するケース 19 は例外
+- C2-3 の Linux での失敗は、コードを読んだうえでの推論で、実行はしていない
+- Windows の `core.autocrlf=true` のように checkout で改行を変換する環境では、`git show` の blob と作業ツリーの版がすべての行で食い違い、一般の文言になる。見逃しの方向なので安全側。対象の環境かどうかは判断していない
+
+### Recommendation
+
+- Merge: 可(CRITICAL、HIGH、MEDIUM なし)
+- Follow-ups: この cycle は上限の 2/2 で、plan は `/pr` で archive される。直さなかった LOW は、どこにも残らないまま置き去りになる。C2-1〜C2-3 はスクリプトとテストの小さな修正で、1 コミットで直せる。直さないなら、C2-1〜C2-5 をまとめた tech-debt の行を 1 つ作ることを勧める。発火条件は「`codex_config_external_rewrite_only` への次の変更」がよい
