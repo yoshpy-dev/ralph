@@ -570,5 +570,53 @@ assert_eq "case 19 (root path has a space): status is clean after the printed ch
 _cx_run "$_cx_repo19"
 assert_eq "case 19 (root path has a space): validate-clean-base now passes" 0 "$_cx_exit"
 
+# Case 20: comments/blanks stripped, and the appended table itself carries a
+# genuine comment line ("# injected" between two shell_environment_policy
+# headers) -> generic message. A comment inside the appended region is
+# never allowed, even when everything around it is otherwise valid.
+_cx_repo20="$(_cx_new_repo)"
+cat > "$_cx_repo20/.codex/config.toml" <<'CASE20'
+model = "gpt-5.5"
+sandbox_mode = "danger-full-access"
+
+[features]
+hooks = true
+
+[profiles.work]
+model = "gpt-5.5"
+approval_policy = "on-request"
+
+[shell_environment_policy]
+inherit = "core"
+# injected
+
+[shell_environment_policy.set]
+SOME_VAR = "1"
+CASE20
+_cx_run "$_cx_repo20"
+_cx_assert_generic "case 20 (comment injected inside the appended policy table)"
+
+# Case 21: comments stripped, and an array-of-tables header
+# ("[[shell_environment_policy]]") appended instead of the bare table ->
+# generic message. The known rewrite only ever emits the single-bracket
+# form; the double-bracket form must not be accepted as a policy header.
+_cx_repo21="$(_cx_new_repo)"
+cat > "$_cx_repo21/.codex/config.toml" <<'CASE21'
+model = "gpt-5.5"
+sandbox_mode = "danger-full-access"
+
+[features]
+hooks = true
+
+[profiles.work]
+model = "gpt-5.5"
+approval_policy = "on-request"
+
+[[shell_environment_policy]]
+inherit = "core"
+CASE21
+_cx_run "$_cx_repo21"
+_cx_assert_generic "case 21 (array-of-tables header appended instead of a bare table)"
+
 printf '\nralph-worktree tests: %s passed, %s failed, %s total\n' "$_pass" "$_fail" "$_total"
 [ "$_fail" -eq 0 ]
