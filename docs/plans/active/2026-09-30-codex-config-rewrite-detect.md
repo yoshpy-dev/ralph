@@ -1,0 +1,119 @@
+# codex-config-rewrite-detect
+
+- Status: Draft
+- Owner: Claude Code
+- Date: 2026-09-30
+- Related request: main のチェックアウトにある追跡ファイル `.codex/config.toml`(`templates/base/.codex/config.toml` と byte 一致が `scripts/check-sync.sh` の要件)が、値は同じままコメントをすべて剥がされ、末尾に `[shell_environment_policy]`(`inherit = "core"` と `[shell_environment_policy.set]` の `CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING = "1"`)を足された状態に書き換わることがある(2026-09-17、09-18)。その状態では `scripts/ralph-worktree.sh ensure` が「base branch 'main' has uncommitted changes」で止まり、次の plan の worktree が作れない。issue #185
+- Related issue: 185
+- Type: fix
+- Branch: fix/codex-config-rewrite-detect
+
+## Objective
+
+原因の調査結果を記録し、書き換えが起きたときに `ralph-worktree.sh` が理由と戻し方を示して止まるようにする(issue の案 (c))。症状と戻し方を recipe に書く。
+
+## 調査で確認したこと(2026-09-30、main 5efd3d6)
+
+- issue と memory の仮説は「Claude Code の codex プラグイン(codex-companion)が `codex exec` の起動時に書き込む」だったが、ソースを読む限り当たらない:
+  - openai-codex プラグイン(`~/.claude/plugins/cache/openai-codex/codex/1.0.2/scripts/`)の `writeFileSync` は state / job / broker / pid の JSON とログだけで、`config.toml` にも `shell_environment_policy` にも触れない。hooks は SessionStart / SessionEnd / Stop の 3 つ。
+  - everything-claude-code プラグインの `scripts/sync-ecc-to-codex.sh` と `scripts/codex/merge-codex-config.js` は codex の config を扱うが、`shell_environment_policy` を含まない。hooks.json に codex の登録はない。
+  - ralph 自身の Go コードは `.codex/config.toml` を読むだけ(`internal/cli/doctor.go`)で、書かない。
+- 追加される設定の出どころ: `CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING=1` はユーザーの `~/.claude/settings.json` とこの repo の `.claude/settings.json` の `env` にある。2026-08-24 の plan(38612ef、`codex-hooks-multi-event`)の Non-goals に「`shell_environment_policy` のユーザレベル移動 → メンテナ環境の main 差分ゼロ化(ローカル作業)」とある。つまりこの table はもともとメンテナが project の `.codex/config.toml` に手で入れていたもので、その後ユーザーレベルに移した。書き換えは「ユーザーレベルに移した table が、コメントを落とした再シリアライズとともに project 側に戻ってくる」形をしている。
+- 隔離環境(scratch の偽 `HOME` / `CODEX_HOME`、ユーザーの実際の `~/.codex` は使わない)での probe: ユーザーレベルに `shell_environment_policy` とコメントを持つ config、project に template の `.codex/config.toml` を置き、project の中で `codex features enable <feature>`(config を書くサブコマンド)を実行した。書き込まれたのはユーザーレベルの config で、コメントは残り、`[features]` が追記されただけだった。project の config は変わらなかった。codex の通常の設定変更は原因ではない。
+- この session(2026-09-27〜30)では worktree から `codex exec` / `codex exec review` を 15 回以上実行したが、書き換えは一度も起きていない。`codex exec` そのものは原因ではない。
+- 残る候補(未確認、自動での再現が難しい): codex の TUI のダイアログ(project の trust、hook の trust、model 移行の確認)で設定を保存する経路、Codex の desktop app / IDE 拡張の設定 UI、codex のバージョン更新時の設定移行。発生した 09-17〜18 は codex の TUI 座席で実機確認をしていた時期(#155、#162)と重なる。
+- `validate_clean_base`(`scripts/ralph-worktree.sh` 89〜99 行、template と byte 一致)は `git status --porcelain` が空でなければ一律に `base branch '<base>' has uncommitted changes` で止まる。
+- 追跡している `.codex/config.toml` にインラインのコメントはなく、コメントは行頭 `#` の行だけ。
+
+## Scope
+
+- `scripts/ralph-worktree.sh`(+ template、byte 一致): `validate_clean_base` で、dirty な項目が `.codex/config.toml` の変更だけで、その差分が「コメント行・空行の削除」と「末尾への `[shell_environment_policy]` / `[shell_environment_policy.<name>]` table の追加」だけのとき、専用の理由と戻し方(`git -C <root> checkout -- .codex/config.toml`、戻した後の `cmp` の確認)を出して止まる。それ以外はこれまでどおりの文言で止まる。自動では戻さない。
+- `tests/test-ralph-worktree.sh`: 検知の red / green のケース。
+- `docs/recipes/codex-setup.md`(+ template): 症状、確認、戻し方、調査の状況(否定した候補と残る候補)を 1 段落で。
+- 調査の記録: `docs/reports/investigation-2026-09-30-codex-config-rewrite.md`(上の確認事項、probe の手順と結果、残る候補、次に起きたときに取る証拠)。
+
+## Non-goals
+
+- 原因の特定そのもの(残る候補はどれも対話的な操作で、この PR の中では再現できない)。issue #185 は open のまま残し、PR は `Refs #185` とする。
+- 書き換えの自動修復(作業ツリーを変える操作で、手で入れた変更を消す危険がある)。
+- `check-sync.sh` への検知の追加(issue の案 (b))。書き換えが実際に止めるのは worktree の作成なので、そこで案内すれば足りる。
+- `.codex/config.toml` の中身の変更(`model = "gpt-5.5"` の退役は #156 で判断する)。
+
+## Assumptions
+
+- 書き換えの形は memory と issue に記録されたもの(コメント行の削除と、末尾への `shell_environment_policy` の table の追加)に限る。値の変更、table の並べ替え、引用符の変更を伴う差分は、この検知の対象にしない(一般の文言で止まる。安全側)。
+- `validate_clean_base` は `ensure` と `validate-clean-base` の両方から呼ばれる。
+
+## Affected areas
+
+- `scripts/ralph-worktree.sh`、`templates/base/scripts/ralph-worktree.sh`
+- `tests/test-ralph-worktree.sh`
+- `docs/recipes/codex-setup.md`、`templates/base/docs/recipes/codex-setup.md`
+- `docs/reports/investigation-2026-09-30-codex-config-rewrite.md`(新規)
+
+## Design decisions
+
+- 検知は `validate_clean_base` の中で、dirty の一覧が `.codex/config.toml` 1 件だけのときに限って行う。判定は「作業ツリーのファイルからコメント行と空行を除いたもの」が「HEAD の版からコメント行と空行を除いたもの」に、`shell_environment_policy` の table(見出し行とその下の `key = value` 行)を末尾に足しただけと一致するかどうか。
+- 止まる挙動は変えない(exit code は非 0 のまま)。変わるのは文言だけで、呼び出し元(`/plan`、`/spec`)の分岐は影響を受けない。
+- 案内は戻す前に差分を見ることを先に書く(`git -C <root> diff -- .codex/config.toml`)。
+- Critical forks: None(issue を open のまま残すか閉じるかは簡単に戻せる判断で、既定は open)
+
+## Acceptance criteria
+
+- [ ] AC-1: `.codex/config.toml` だけが dirty で、差分がコメント行・空行の削除と末尾の `shell_environment_policy` の table の追加だけのとき、`ralph-worktree.sh validate-clean-base` と `ensure` が非 0 で止まり、stderr に書き換えの説明、`git -C <root> diff -- .codex/config.toml`、`git -C <root> checkout -- .codex/config.toml`、template との `cmp` の手順が出る。
+- [ ] AC-2: 次の場合は従来の `base branch '<base>' has uncommitted changes` で止まり、専用の文言は出ない: (a) 同じ書き換えに値の変更が 1 つ混ざる、(b) `.codex/config.toml` 以外にも dirty なファイルがある、(c) `shell_environment_policy` 以外の table が追加されている、(d) 未追跡のファイルだけがある。
+- [ ] AC-3: コメントの削除だけ(table の追加なし)の差分と、table の追加だけ(コメントは残る)の差分も AC-1 と同じ扱いになる。
+- [ ] AC-4: clean な base では従来どおり pass。`scripts/ralph-worktree.sh` と template が byte 一致。
+- [ ] AC-5: `tests/test-ralph-worktree.sh` に AC-1〜AC-4 のケースがあり、mutation(検知の関数が常に偽を返す、table 名の判定を外す)で落ちる。
+- [ ] AC-6: `docs/recipes/codex-setup.md`(+ template)に症状・確認・戻し方・調査の状況の段落があり、`docs/reports/investigation-2026-09-30-codex-config-rewrite.md` に調査の記録(否定した候補とその根拠、probe の手順と結果、残る候補、次に起きたときに取る証拠: 書き換え直後の `stat` の時刻、実行中だった codex のプロセスと親、`~/.codex/log` の該当時刻)がある。
+- [ ] AC-7: `shellcheck -S warning` で警告なし、`RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh` green、`./scripts/check-sync.sh` pass。
+
+## Implementation outline
+
+1. Slice A(implementer、sonnet): `validate_clean_base` の検知(関数 1 つ、awk で正規化)、テスト、recipe の段落、調査の記録。1 コミット。red の証拠: AC-5 の mutation。
+2. pipeline: self-review → verify → test → sync-docs → cross-review → PR(`Refs #185`)。merge 後に #185 へ調査結果のコメントを書き、open のまま残す。
+
+## Verify plan
+
+- Static analysis checks: `shellcheck -S warning scripts/ralph-worktree.sh tests/test-ralph-worktree.sh`、`sh -n`、`RALPH_VERIFY_SCOPE=full ./scripts/run-static-verify.sh`、`./scripts/check-sync.sh`。
+- Spec compliance criteria to confirm: AC-1〜AC-7 を該当行とテストの結果で確認。
+- Documentation drift to check: `docs/recipes/codex-setup.md`、`docs/recipes/` の worktree の recipe、memory ではなく repo の記録に調査が残っていること。
+- Evidence to capture: `docs/evidence/verify-*.log`、verify report の AC 表。
+
+## Test plan
+
+- Unit tests: `sh tests/test-ralph-worktree.sh`(fixture repo に `.codex/config.toml` を追跡させ、書き換えの形を作って `validate-clean-base` を呼ぶ)。
+- Integration tests: `RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh`、fixture で `ensure` 経由でも同じ文言になること。
+- Regression tests: AC-5 の mutation。
+- Edge cases: ファイルが削除された(` D`)、rename、HEAD に `.codex/config.toml` がない repo、`shell_environment_policy.set` のような dotted table、CRLF の改行、末尾の改行の有無。
+- Evidence to capture: test report(件数、mutation 表)。
+
+## Risks and mitigations
+
+- 検知が広すぎて、手で入れた変更を「外部の書き換え」と案内してしまう: 判定を「コメント・空行の削除」と「`shell_environment_policy` の table の追加」だけに絞り、値の変更や他の table の追加は一般の文言にする。案内は戻す前に diff を見ることを先に書き、自動では戻さない。
+- 原因が分からないまま再発する: 検知で止まる理由が分かるようにし、次に起きたときに取る証拠を記録に書く。issue は open のまま残す。
+
+## Rollout or rollback notes
+
+文言の追加だけで、止まる / 通る の判定は変えない。問題があれば 1 コミットを revert する。
+
+## Open questions
+
+- 原因(TUI のダイアログ、desktop app、バージョン更新時の移行のどれか)。次に起きたときの証拠で判断する。
+
+## Progress checklist
+
+- [ ] Plan reviewed
+- [x] Branch created
+- [ ] Implementation started
+- [ ] Review artifact created
+- [ ] Verification artifact created
+- [ ] Test artifact created
+- [ ] PR created
+
+## Readiness checklist
+
+- [x] プラグイン説を否定する根拠(ソース)と、codex の通常の設定変更がユーザーレベルに入ること(隔離 probe)を確認した
+- [x] critical fork なし
+- [ ] Codex plan advisory
+- [x] AC は fixture の shell テストで確認できる
