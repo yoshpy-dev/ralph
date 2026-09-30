@@ -63,6 +63,12 @@ test_defaults() {
 
   _reviewer="$(unset RALPH_CLAUDE_REVIEWER_MODEL; . "$CONFIG"; echo "$RALPH_CLAUDE_REVIEWER_MODEL")"
   assert_eq "default RALPH_CLAUDE_REVIEWER_MODEL" "opus" "$_reviewer"
+
+  _codex_reviewer="$(unset RALPH_CODEX_REVIEWER_MODEL; . "$CONFIG"; echo "$RALPH_CODEX_REVIEWER_MODEL")"
+  assert_eq "default RALPH_CODEX_REVIEWER_MODEL" "gpt-6-astra" "$_codex_reviewer"
+
+  _codex_effort="$(unset RALPH_CODEX_REASONING_EFFORT; . "$CONFIG"; echo "$RALPH_CODEX_REASONING_EFFORT")"
+  assert_eq "default RALPH_CODEX_REASONING_EFFORT" "xhigh" "$_codex_effort"
 }
 
 # ═══════════════════════════════════════════════════════════════════
@@ -80,6 +86,12 @@ test_env_override() {
 
   _reviewer="$(RALPH_CLAUDE_REVIEWER_MODEL=sonnet; . "$CONFIG"; echo "$RALPH_CLAUDE_REVIEWER_MODEL")"
   assert_eq "override RALPH_CLAUDE_REVIEWER_MODEL=sonnet" "sonnet" "$_reviewer"
+
+  _codex_reviewer="$(RALPH_CODEX_REVIEWER_MODEL=gpt-x; . "$CONFIG"; echo "$RALPH_CODEX_REVIEWER_MODEL")"
+  assert_eq "override RALPH_CODEX_REVIEWER_MODEL=gpt-x" "gpt-x" "$_codex_reviewer"
+
+  _codex_effort="$(RALPH_CODEX_REASONING_EFFORT=high; . "$CONFIG"; echo "$RALPH_CODEX_REASONING_EFFORT")"
+  assert_eq "override RALPH_CODEX_REASONING_EFFORT=high" "high" "$_codex_effort"
 }
 
 # ═══════════════════════════════════════════════════════════════════

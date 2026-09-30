@@ -1,17 +1,22 @@
 #!/usr/bin/env sh
 # ralph-config.sh — shared configuration for the standard-flow development
-# harness's cross-review gate and the [org] envelope lock-step surfaces.
+# harness's /plan and /cross-review codex calls, and the [org] envelope
+# lock-step surfaces.
 #
 # The Ralph Loop autonomous execution system (its batch orchestrator/pipeline
 # scripts, the per-phase CLI driver, and the legacy shell CLI) was removed;
 # this file's [loop]/[pipeline] defaults (RALPH_LOOP_*, per-phase
-# RALPH_*_MODEL, RALPH_MAX_* iteration caps) went with it. The two survivors
-# below still have a live consumer:
+# RALPH_*_MODEL, RALPH_MAX_* iteration caps) went with it. The surviving
+# standard-flow vars below have two live consumers:
 # /cross-review (.claude/skills/cross-review/SKILL.md), which sources this
 # file for the standard-flow pipeline cycle cap (RALPH_STANDARD_MAX_PIPELINE_CYCLES
-# is deliberately not exported below -- only sourcing this file picks it up)
-# and reads the claude-as-reviewer model fallback either way (RALPH_CLAUDE_REVIEWER_MODEL
-# is exported, so setting it directly in the environment also works).
+# is deliberately not exported below -- only sourcing this file picks it up),
+# the claude-as-reviewer model fallback (RALPH_CLAUDE_REVIEWER_MODEL), and the
+# codex-as-reviewer model/effort fallbacks (RALPH_CODEX_REVIEWER_MODEL,
+# RALPH_CODEX_REASONING_EFFORT); and /plan (.claude/skills/plan/SKILL.md),
+# whose Codex plan advisory reads the same two codex-side variables. All
+# three reviewer model/effort vars are exported, so setting them directly in
+# the environment also works without sourcing this file.
 #
 # Priority: environment variable > default value
 #
@@ -28,6 +33,14 @@ RALPH_STANDARD_MAX_PIPELINE_CYCLES="${RALPH_STANDARD_MAX_PIPELINE_CYCLES:-2}"
 # adversarial reviewer in /cross-review's reviewer-inversion path (driver =
 # codex, reviewer = claude).
 RALPH_CLAUDE_REVIEWER_MODEL="${RALPH_CLAUDE_REVIEWER_MODEL:-opus}"
+
+# RALPH_CODEX_REVIEWER_MODEL and RALPH_CODEX_REASONING_EFFORT are the model
+# and reasoning effort passed as `-m` / `-c model_reasoning_effort=` to
+# `codex exec` by /plan (Codex plan advisory) and /cross-review (reviewer =
+# codex). Explicit so the call does not depend on .codex/config.toml's model
+# or a shell alias.
+RALPH_CODEX_REVIEWER_MODEL="${RALPH_CODEX_REVIEWER_MODEL:-gpt-6-astra}"
+RALPH_CODEX_REASONING_EFFORT="${RALPH_CODEX_REASONING_EFFORT:-xhigh}"
 
 # ═══════════════════════════════════════════════════════════════════
 # [org] envelope defaults — mirror internal/config/config.go OrgConfig
@@ -86,7 +99,7 @@ RALPH_ORG_WATCHDOG_WATCHER_MODEL="${RALPH_ORG_WATCHDOG_WATCHER_MODEL:-haiku}"
 # script sourced defaults. The default-assignment line above is kept
 # unexported so `defaults_sync_test.go` (which parses this file's text via
 # regex) still sees the same default value.
-export RALPH_CLAUDE_REVIEWER_MODEL
+export RALPH_CLAUDE_REVIEWER_MODEL RALPH_CODEX_REVIEWER_MODEL RALPH_CODEX_REASONING_EFFORT
 export RALPH_ORG_DRIVER_POOL RALPH_ORG_MODEL_POOL RALPH_ORG_MAX_SEATS
 export RALPH_ORG_DEADMAN_MINUTES
 

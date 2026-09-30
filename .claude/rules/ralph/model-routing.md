@@ -51,8 +51,11 @@ call (e.g. `opus` for security-sensitive changes) — no new env knob.
 
 **Cross-review sync note:** `.claude/skills/cross-review/SKILL.md` reads
 `RALPH_CLAUDE_REVIEWER_MODEL` (with an `opus` fallback) for the claude reviewer
-path. Keep reviewer-model defaults in sync when changing `RALPH_CLAUDE_REVIEWER_MODEL`
-in `scripts/ralph-config.sh`.
+path, and `RALPH_CODEX_REVIEWER_MODEL` / `RALPH_CODEX_REASONING_EFFORT` (with
+`gpt-6-astra` / `xhigh` fallbacks) for the codex reviewer path — `.claude/skills/plan/SKILL.md`'s
+Codex plan advisory reads the same two codex-side variables. Keep these
+fallback defaults in sync when changing any of the three vars in
+`scripts/ralph-config.sh`.
 
 ## Rules
 
@@ -63,6 +66,10 @@ in `scripts/ralph-config.sh`.
   agent frontmatter, `ralph.toml`, `scripts/ralph-config.sh`, and skill docs.
   Full IDs go stale and can break `claude -p` at runtime. Pin a full ID only
   via environment variable when a specific run must be reproducible.
+- **Codex has no model aliases.** `RALPH_CODEX_REVIEWER_MODEL` in
+  `scripts/ralph-config.sh` pins a literal codex model slug (e.g.
+  `gpt-6-astra`), unlike the Claude-side aliases above. Update it when
+  `ralph doctor` reports the pinned slug's retirement.
 - **Do not export `CLAUDE_CODE_SUBAGENT_MODEL`.** It silently overrides every
   frontmatter `model:` and per-call `model` parameter. Treat it as an
   emergency-only blunt instrument.
@@ -119,5 +126,6 @@ seats are not observed and stay `unknown`.
 
 - `.claude/agents/*.md` — pipeline subagent tiers (frontmatter `model:`)
 - `scripts/ralph-config.sh` — effective Ralph defaults (`RALPH_CLAUDE_REVIEWER_MODEL`,
+  `RALPH_CODEX_REVIEWER_MODEL`, `RALPH_CODEX_REASONING_EFFORT`,
   `RALPH_STANDARD_MAX_PIPELINE_CYCLES`)
-- `internal/config/defaults_sync_test.go` — asserts the cross-review SKILL.md reviewer-model fallback matches `RALPH_CLAUDE_REVIEWER_MODEL` in ralph-config.sh
+- `internal/config/defaults_sync_test.go` — asserts the plan/cross-review SKILL.md fallbacks match `RALPH_CLAUDE_REVIEWER_MODEL` / `RALPH_CODEX_REVIEWER_MODEL` / `RALPH_CODEX_REASONING_EFFORT` in ralph-config.sh
