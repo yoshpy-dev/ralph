@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 # tests/test-check-template.sh — regression coverage for scripts/check-template.sh's
-# required_files list and its find-driven checks.
+# required_files list, its settings hook-reference check, its find-driven
+# loops, and a fresh `ralph init` scaffold.
 #
 # Without this test, an entry can be silently dropped from required_files
 # and no automated check notices: #169's /test mutation 6f removed
 # scripts/xreview-helpers.sh from the list and nothing failed. This test
-# closes that gap, plus the fail-open / fail-open-adjacent regressions fixed
-# for #189, with these cases:
+# closes that gap, plus the fail-open regressions in the hook-reference
+# check and the three find-driven loops, and the required_files drift that
+# broke every fresh `ralph init` scaffold's own CI, all fixed for #189,
+# with these cases:
 #   A. golden: the required_files block in scripts/check-template.sh must
 #      match a hardcoded golden list, in order.
 #   B. fixture: a synthetic project with every golden file present passes
@@ -17,10 +20,15 @@
 #      exits 0 with no FAIL line.
 #   E. settings hook-reference check: an existing hook referenced with an
 #      argument passes; a missing hook fails with the path only (no
-#      argument) and exit 1.
+#      argument) and exit 1; an unreadable settings.json is reported
+#      instead of silently skipping the check (skipped when running as
+#      root); a dispatcher missing across several events produces exactly
+#      one FAIL line.
 #   F. the three find-driven loops (executable check, SKILL.md check, agent
-#      frontmatter check) each propagate a failure to the exit code, and a
-#      script path containing a space is still checked correctly.
+#      frontmatter check) each propagate a failure to the exit code, a
+#      script path containing a space is still checked correctly, and an
+#      unreadable subtree is reported instead of silently skipping the
+#      files inside it (skipped when running as root).
 #   G. fresh scaffold: `go run ./cmd/ralph init --yes <tmp>` (when `go` is
 #      available) passes check-template.sh with no FAIL line.
 #
@@ -39,6 +47,7 @@ fi
 
 pass_count=0
 fail_count=0
+skip_count=0
 
 pass() {
   pass_count=$((pass_count + 1))
@@ -48,6 +57,16 @@ pass() {
 fail() {
   fail_count=$((fail_count + 1))
   printf '  FAIL: %s\n' "$1"
+}
+
+# skip <description> — prints a SKIP line and counts it separately from
+# pass/fail (same convention as tests/test-secret-scan-branch.sh's inline
+# SKIP lines). Used for cases whose fixture only proves anything on a
+# non-root user (chmod 000 does not block root's own read access) and for
+# case G when `go` is unavailable.
+skip() {
+  skip_count=$((skip_count + 1))
+  printf '  SKIP: %s\n' "$1"
 }
 
 # The golden required_files list: the 3 non-script entries in their current
@@ -97,8 +116,9 @@ extract_required_files() {
 # build_fixture <dir> — populate a minimal project tree that passes
 # check-template.sh: every golden entry exists, .claude/settings.json is
 # "{}", every scripts/*.sh is an executable one-line stub, and the
-# directories check-template.sh scans with `find` exist (even if empty) so
-# it does not warn about a missing search root.
+# directories check-template.sh scans with `find` exist (even if empty),
+# so every search root is present for the caller to mutate (e.g. making a
+# subtree unreadable) without also having to create the root itself.
 build_fixture() {
   local dir="$1" entry
   for entry in "${GOLDEN_ENTRIES[@]}"; do
@@ -215,7 +235,7 @@ run_case_d() {
 
 # --- E. settings hook-reference check: existing (with arg) vs missing ------
 run_case_e() {
-  local fixture output rc
+  local fixture output rc fail_lines
 
   fixture="$(mktemp -d "${TMPDIR:-/tmp}/check-template-hooks.XXXXXX")" || {
     fail "E. mktemp -d failed; skipping the hook-reference cases"
@@ -263,6 +283,52 @@ JSON
   else
     fail "E. a missing hook did NOT fail as expected (exit $rc)"
     printf '%s\n' "$output" | sed 's/^/    /'
+  fi
+
+  # A dispatcher missing across several events must produce exactly one
+  # FAIL line for it (the paths are de-duplicated before being checked).
+  cat > "$fixture/.claude/settings.json" <<'JSON'
+{
+  "hooks": {
+    "SessionStart": [
+      {"hooks": [{"type": "command", "command": "./.claude/hooks/missing-dispatch.sh SessionStart"}]}
+    ],
+    "PreToolUse": [
+      {"hooks": [{"type": "command", "command": "./.claude/hooks/missing-dispatch.sh PreToolUse"}]}
+    ],
+    "PostToolUse": [
+      {"hooks": [{"type": "command", "command": "./.claude/hooks/missing-dispatch.sh PostToolUse"}]}
+    ]
+  }
+}
+JSON
+  output="$(cd "$fixture" && CI=true sh "$CHECK_TEMPLATE" 2>&1)"
+  rc=$?
+  fail_lines="$(printf '%s\n' "$output" | grep -cF 'FAIL: Settings file .claude/settings.json references missing hook: ./.claude/hooks/missing-dispatch.sh')"
+  if [ "$rc" -ne 0 ] && [ "$fail_lines" -eq 1 ]; then
+    pass "E. a dispatcher missing across several events produces exactly one FAIL line"
+  else
+    fail "E. a dispatcher missing across several events produced $fail_lines FAIL line(s) instead of exactly one (exit $rc)"
+    printf '%s\n' "$output" | sed 's/^/    /'
+  fi
+
+  # An unreadable settings.json must be reported instead of silently
+  # skipping the hook check. chmod 000 does not block root's own read
+  # access, so this only proves anything as a non-root user.
+  if [ "$(id -u)" -eq 0 ]; then
+    skip "E. unreadable settings.json check skipped (running as root)"
+  else
+    printf '{}\n' > "$fixture/.claude/settings.json"
+    chmod 000 "$fixture/.claude/settings.json"
+    output="$(cd "$fixture" && CI=true sh "$CHECK_TEMPLATE" 2>&1)"
+    rc=$?
+    chmod 644 "$fixture/.claude/settings.json"
+    if [ "$rc" -ne 0 ] && printf '%s\n' "$output" | grep -qF 'FAIL: could not read hook commands from .claude/settings.json'; then
+      pass "E. an unreadable settings.json is reported instead of silently skipped"
+    else
+      fail "E. an unreadable settings.json was NOT reported (exit $rc)"
+      printf '%s\n' "$output" | sed 's/^/    /'
+    fi
   fi
 
   rm -rf "$fixture"
@@ -324,13 +390,35 @@ run_case_f() {
   chmod +x "$fixture/scripts/with space/exec.sh"
   output="$(cd "$fixture" && CI=true sh "$CHECK_TEMPLATE" 2>&1)"
   rc=$?
-  if [ "$rc" -eq 0 ] && ! printf '%s\n' "$output" | grep -qF 'with space'; then
+  if [ "$rc" -eq 0 ] && ! printf '%s\n' "$output" | grep -q '^FAIL:'; then
     pass "F. an executable script path containing a space is not flagged"
   else
     fail "F. an executable script path containing a space was incorrectly flagged (exit $rc)"
     printf '%s\n' "$output" | sed 's/^/    /'
   fi
   rm -rf "$fixture/scripts/with space"
+
+  # F5: an unreadable subtree under scripts/ must be reported (via find's
+  # own non-zero exit) instead of being silently skipped. chmod 000 does
+  # not block root's own read access, so this only proves anything as a
+  # non-root user.
+  if [ "$(id -u)" -eq 0 ]; then
+    skip "F. unreadable subtree check skipped (running as root)"
+  else
+    mkdir -p "$fixture/scripts/locked"
+    printf '#!/bin/sh\n' > "$fixture/scripts/locked/inner.sh"
+    chmod 000 "$fixture/scripts/locked"
+    output="$(cd "$fixture" && CI=true sh "$CHECK_TEMPLATE" 2>&1)"
+    rc=$?
+    chmod 755 "$fixture/scripts/locked"
+    rm -rf "$fixture/scripts/locked"
+    if [ "$rc" -ne 0 ] && printf '%s\n' "$output" | grep -qF 'FAIL: could not list scripts'; then
+      pass "F. an unreadable subtree under scripts/ is reported instead of silently skipped"
+    else
+      fail "F. an unreadable subtree under scripts/ was NOT reported (exit $rc)"
+      printf '%s\n' "$output" | sed 's/^/    /'
+    fi
+  fi
 
   rm -rf "$fixture"
   trap - EXIT
@@ -341,7 +429,7 @@ run_case_g() {
   local fresh init_output output rc
 
   if ! command -v go >/dev/null 2>&1; then
-    pass "G. fresh scaffold check skipped (go is unavailable)"
+    skip "G. fresh scaffold check skipped (go is unavailable)"
     return
   fi
 
@@ -380,5 +468,5 @@ run_case_e
 run_case_f
 run_case_g
 
-printf '\ntest-check-template: %s passed, %s failed\n' "$pass_count" "$fail_count"
+printf '\ntest-check-template: %s passed, %s failed, %s skipped\n' "$pass_count" "$fail_count" "$skip_count"
 [ "$fail_count" -eq 0 ]
