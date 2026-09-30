@@ -108,14 +108,17 @@
 - 2026-09-30 work: Slice A は implementer(sonnet)に委譲(cd1aadb、6 ファイル、+716 / -4、push 済み)。`codex_config_external_rewrite_only`(awk で HEAD と作業ツリーを正規化して比較、複数行文字列があれば検知しない)を、porcelain がちょうど ` M .codex/config.toml` のときだけ `validate_clean_base` から呼び、一致したら専用の文言と戻し方(diff → checkout → status が空)で止まる。template は byte 一致。`tests/test-ralph-worktree.sh` に 13 ケース(86 / 0)。逸脱: 調査の記録は `docs/reports/` ではなく `docs/evidence/codex-config-rewrite-2026-09-30.md` に置いた(check-sync は `docs/reports/` のうち pipeline の接頭辞だけを除外し、`investigation-` は ROOT_ONLY で落ちる。`docs/evidence/` は除外済みで、#155 などの調査記録も同じ場所にある)。plan 内の参照 3 箇所も更新。red: 判定を常に偽 → 一致ケース 17 assertion が落ちる、table 名を任意に → ケース 6、複数行文字列のガードを外す → ケース 10、porcelain の制限を外す → ケース 5 / 7 / 8 / 9。`RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh` green、check-sync pass。orchestrator も 86 / 0、cmp、check-sync を確認
 - 2026-09-30 self-review(cycle 1、b164556): CRITICAL 0 / HIGH 0 / MEDIUM 1 / LOW 9、merge 可。MEDIUM: 判定がコメント・空行・空白・改行コードの中の差分をすべて既知の書き換えと見なす(コメントの書き換え・追加、インデント、CRLF 化でも checkout を案内する)。LOW: 行末コメント付きの見出しが shell_environment_policy の table に吸収される、HEAD が 0 バイトだと `FNR == NR` で取りこぼす、案内のパスが引用なし、temp ファイル、テストのコメントの位置と fixture の重複、調査記録の結論の強さ、plugin の記述の範囲、`stat` の書式。全件を in-cycle で修正
 - 2026-09-30 work: Slice B は implementer に委譲(0bb6aae、6 ファイル、+406 / -270、push 済み)。判定を生の行の照合にした(HEAD の行はコメント行と空行だけ落とせる、ほかは byte 単位で一致、末尾は空行と `[shell_environment_policy]` / `[shell_environment_policy.<name>]` の table だけ)。HEAD の版は stdin で awk に渡し `FILENAME == "-"` で区別(temp ファイルなし、空の HEAD も正しく扱う)、案内のパスは `printf -v qroot %q`。テストは case 11(CRLF)を一般の文言に変え、6 ケース追加(コメントの書き換え、追加、インデント、`[features2] # c`、空の HEAD、空白を含むパスで案内どおりに戻す)。105 / 0。調査記録: trust 済みの偽 project でも `codex features enable` はユーザーレベルだけを書く(再 probe)、「codex exec は原因ではない」は「15 回以上で再現せず、可能性は低い」に弱めた。逸脱: 見出しの判定は括弧の内側の空白も許さない(「その形だけ」の指示の帰結)。red: 5 種の変異がそれぞれ該当ケースで落ちる(%q を外すとテストが git のエラーで中断する)。orchestrator も 105 / 0 と cmp を確認
+- 2026-09-30 verify(cycle 1、8e7a678): PASS。AC-1〜AC-7 をコードとテストで確認、mutation 4 種を独立に再現。`RALPH_VERIFY_SCOPE=full ./scripts/run-static-verify.sh` green、check-sync pass
+- 2026-09-30 test(cycle 1、1c503ee): PASS。`RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh` green、105 / 0 を sh で 3 回・dash・空白を含む TMPDIR で。scratch clone での end-to-end: 書き換えの形で `ensure` が専用の文言で止まり worktree も state も作らない → 案内どおりに戻すと `ensure` が通る、値の変更を混ぜる・stage する → 一般の文言、サブディレクトリから実行しても案内のコマンドが動く。mutation: 常に MATCH → 8 ケース、porcelain の制限を外す → 4 ケースが落ちる。追加 table の中のコメント行と `[[shell_environment_policy]]` の見出しは、どちらの変異もテストが捕まえない(穴)
+- 2026-09-30 work: Slice C は implementer に委譲(d84cdab、テストだけ、+48)。ケース 20(追加 table の中のコメント行)と 21(`[[shell_environment_policy]]`)を追加し、どちらも一般の文言。111 / 0。red: 上の 2 つの変異がそれぞれ 20 と 21 で落ちる
 ## Progress checklist
 
 - [x] Plan reviewed
 - [x] Branch created
 - [x] Implementation started
 - [x] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Verification artifact created
+- [x] Test artifact created
 - [ ] PR created
 
 ## Readiness checklist
