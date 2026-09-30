@@ -1,7 +1,7 @@
 # 調査記録: `.codex/config.toml` の外部書き換え
 
 - Date: 2026-09-30
-- Related plan: `docs/plans/active/2026-09-30-codex-config-rewrite-detect.md`
+- Related plan: `docs/plans/archive/2026-09-30-codex-config-rewrite-detect.md`
 - Related issue: #185
 - Status: 原因未特定。open のまま残す。
 
@@ -160,5 +160,5 @@ HEAD の内容を使い切った後に残る作業ツリー側の行だけを
 文言になる。この形に一致するときだけ、専用の理由と戻し方を表示して
 止まる。原因不明のまま再発しても、影響(worktree 作成の停止)と復旧手順は
 その場で分かるようにするための対応。詳細は
-`docs/plans/active/2026-09-30-codex-config-rewrite-detect.md` と
+`docs/plans/archive/2026-09-30-codex-config-rewrite-detect.md` と
 `docs/recipes/codex-setup.md` を参照。
