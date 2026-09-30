@@ -186,3 +186,165 @@ confirmed before and after).
   evidence doc.
 
 **Overall verdict: PASS.** No blocking findings.
+
+## Cycle 2
+
+- Date: 2026-09-30
+- Verifier: verifier subagent (Claude), cycle 2 (pipeline cap 2/2)
+- Reviewed HEAD: `ae96cd2` (worktree confirmed clean at this SHA before
+  starting)
+- Scope: `git diff 8e7a678...HEAD` — cycle-1 test (`d84cdab`, cases 20-21),
+  cross-review triage AR-1 fix (`ee397e9`, cases 22-24), cycle-2 self-review
+  (`f49ceb9`, findings C2-1..C2-5), and the C2-1..C2-5 fix (`a2c721d`, cases
+  25-28 plus the "at least one known change" guard and single-quote root
+  quoting), plus doc/tech-debt reference repointing to the archive path
+  (`ae96cd2`)
+
+### Deterministic checks run
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `cmp scripts/ralph-worktree.sh templates/base/scripts/ralph-worktree.sh` | PASS | byte-identical |
+| `cmp docs/recipes/codex-setup.md templates/base/docs/recipes/codex-setup.md` | PASS | byte-identical |
+| `bash -n scripts/ralph-worktree.sh` | PASS | no syntax errors |
+| `sh -n tests/test-ralph-worktree.sh` | PASS | no syntax errors |
+| `shellcheck -S warning scripts/ralph-worktree.sh` | PASS | 0 warnings |
+| `shellcheck -S warning tests/test-ralph-worktree.sh` | PASS | 0 warnings |
+| `RALPH_VERIFY_SCOPE=full ./scripts/run-static-verify.sh` | PASS | full scope (issue #190); evidence: `docs/evidence/verify-2026-09-30-095033.log`; all sub-checks `[ok]`/`OK`, golang verifier clean, branch secret scan clean (`5efd3d6..ae96cd2`) |
+| `./scripts/check-sync.sh` (standalone) | PASS | `IDENTICAL: 159, DRIFTED: 0, ROOT_ONLY: 0` |
+| `sh tests/test-ralph-worktree.sh` (read once for AC evidence, not authored/altered) | PASS | `143 passed, 0 failed, 143 total` |
+
+### Spec compliance delta (AC-1..AC-7 at HEAD)
+
+- **AC-1**: PASS, still holds, with the recovery-command quoting now
+  POSIX single-quote form (`scripts/ralph-worktree.sh:189-195`, `sq`/`qroot`)
+  instead of bash `%q` — the self-review cycle-2 finding C2-2 fix. Test
+  case 19 (space in path) and case 28 (Japanese path component plus a
+  literal `'`) both round-trip the printed checkout command through
+  `bash -c` (`tests/test-ralph-worktree.sh:590-603`, `:707-726`), and case
+  28 additionally round-trips through `zsh -c` when available
+  (`:728-744`). `_cx_assert_specific` now computes its expected quoted
+  root via `_cx_shquote`, which runs the literal substitution script
+  (`:278-295`) rather than assuming an unquoted root — closes self-review
+  C2-3. Still no `templates/`/`cmp` mention in the message. All PASS live.
+- **AC-2 / AC-3 (revised, further narrowed)**: PASS. New generic-message
+  cases added this cycle: a comment injected inside the appended policy
+  table (case 20, `:605-629`), an array-of-tables header
+  `[[shell_environment_policy]]` (case 21, `:631-651`), an indented
+  non-policy header with spaces (case 22) and with a tab (case 23) after
+  the policy table (`:653-671`, the cross-review AR-1 fix), an indented
+  *policy* header itself (case 24, `:673-680`), a mode-only change with
+  byte-identical content (case 25, `:682-689`), a removed trailing newline
+  (case 26, `:691-697`), and blank/whitespace-only appended lines (case 27,
+  `:699-705`). Cases 25-27 exercise the new "at least one known change"
+  guard: the appended-region header check is now `nl ~ /^[ \t]*\[/` so an
+  indented header of any kind is recognized as a header and rejected
+  unless it is the exact unindented policy form
+  (`scripts/ralph-worktree.sh:164-168`), and the function tracks
+  `dropped`/`saw_policy_header` and requires at least one to be true before
+  printing `MATCH` (`:145`, `:153`, `:159`, `:165`, `:170`) — this is the
+  self-review C2-1 fix. All 8 new cases PASS live, and the two mutations
+  the plan's cycle-1-test report flagged as uncaught (comment inside the
+  appended table; `[[shell_environment_policy]]`) are now covered by cases
+  20-21 per the Slice C/cycle-1-test deviation notes.
+- **AC-4**: PASS, unchanged in substance; byte identity confirmed above;
+  `ensure` still shares `validate_clean_base`.
+- **AC-5**: PASS. Case count grew from 19 to 28 across this delta (cases
+  20-21 in Slice C/`d84cdab`, 22-24 in Slice D/`ee397e9`, 25-28 in Slice
+  E/`a2c721d`), each targeting exactly one of the gaps found by the prior
+  test/self-review/cross-review cycle. The plan's deviation notes record
+  red evidence for each slice (reverting the header regex breaks
+  22/23/24; reverting the "at least one known change" guard breaks
+  25/26/27; reverting `%q`→single-quote breaks 1/2/3/18/28; unquoted
+  test expectations break 1/2/3/18/28). Did not independently rerun new
+  mutations this cycle (cycle-1 verify already reran 4; the delta here is
+  additive narrowing on top of an already-mutation-tested core, and the
+  self-review cycle 2 report independently probed 13 additional shapes
+  — M1-M5, G1-G8 — by hand, which is a stronger independent check than a
+  mechanical mutation for this delta).
+- **AC-6**: PASS, with the C2-4 wording fix confirmed against the actual
+  plugin source (not just re-read as prose): `merge-codex-config.js`
+  (`~/.claude/plugins/cache/everything-claude-code/everything-claude-code/1.9.0/scripts/codex/merge-codex-config.js:26-35`)
+  defines `TABLE_PATHS` as `features`, `profiles.strict`, `profiles.yolo`,
+  `agents(.explorer/.reviewer/.docs_researcher)` — matching the evidence
+  doc's revised claim (`docs/evidence/codex-config-rewrite-2026-09-30.md:38-40`)
+  — and never includes `shell_environment_policy`; root keys are spliced
+  in before the first table and missing table keys are appended
+  in-place (`:293-300`, add-only, matching "既存のコメントを剥がすこともない"),
+  confirming the doc's "insert/append, not full re-serialize" framing
+  (`docs/recipes/codex-setup.md:163-166`). The write target is
+  `$CODEX_HOME/config.toml` with `CODEX_HOME` defaulting to `$HOME/.codex`
+  (`sync-ecc-to-codex.sh:23-25`), confirming "the user-level config" and
+  "a different file from the project's" (recipe `:166`). This was a
+  read-only check of the installed plugin's own source, not the user's
+  `~/.codex` config; no real `~/.codex` content appears in either doc.
+  Recipe and evidence doc symptom text both now list the new negative
+  cases (mode-only, trailing newline, blank/whitespace-only appended) —
+  `docs/recipes/codex-setup.md:133-143`, evidence doc `:156-159` — and the
+  function comment, die message, and both docs describe the same final
+  rule (raw lines; HEAD may lose only blank/whole-line-comment lines;
+  appended region: blank lines, exact unindented policy headers, key
+  lines under them; at least one dropped line or one appended policy
+  header required).
+- **AC-7**: PASS — see Deterministic checks table above.
+
+### Reference-path check
+
+`docs/evidence/codex-config-rewrite-2026-09-30.md:4`, `:163` and the new
+`docs/tech-debt/README.md` row (`grep -n "codex-config-rewrite-detect"
+docs/tech-debt/README.md`) now cite
+`docs/plans/archive/2026-09-30-codex-config-rewrite-detect.md`, while the
+plan file itself is still at `docs/plans/active/2026-09-30-codex-config-rewrite-detect.md`
+(confirmed via `ls docs/plans/active/`). This is a deliberate forward
+reference per the plan's Slice E deviation note — the path becomes valid
+once `/pr` archives the plan — not a broken link. The tech-debt row's cell
+count matches the table header (6 pipes, 5 columns, same as the header row
+and other existing rows).
+
+### Cross-review triage cross-check
+
+`docs/reports/cross-review-triage-codex-config-rewrite-detect.md` records
+one ACTION_REQUIRED finding (AR-1: indented non-policy headers after a
+policy table absorbed as key lines) against HEAD `9b68c43`, with the
+user's decision to fix and re-run as cycle 2/2. Confirmed AR-1's exact fix
+is present: `is_sep_header` itself is unchanged (still requires the exact
+unindented form), but the appended-region loop's header test widened from
+`/^\[/` to `/^[ \t]*\[/` (`scripts/ralph-worktree.sh:164`), so an indented
+header of any kind is now recognized and rejected unless it is the exact
+policy form — matching the triage's prescribed fix and covered by cases
+22-24.
+
+### Coverage gaps
+
+- Same non-goal gap as cycle 1: the real external rewrite has still never
+  been reproduced; this cycle's narrowing (cases 20-28) is validated
+  against constructed fixtures and the self-review's hand-probed shapes,
+  not a live repro.
+- Did not independently rerun mutation testing for this cycle's delta
+  (see AC-5 note above) — relied on the plan's recorded red evidence per
+  slice plus the self-review cycle 2 report's independent 13-shape probe
+  table (M1-M5, G1-G8), which exercises the same code paths a mutation
+  would target.
+- `gawk` portability of `FILENAME == "-"` remains unconfirmed (noted as a
+  gap in the self-review cycle 2 report itself); this repo's CI runs on
+  Linux where the default `awk` may or may not be gawk — not independently
+  checked in this pass.
+- Did not re-verify the self-review cycle 2 report's own claim about
+  `core.autocrlf=true` environments (stated there as a safe-side
+  miss-in-the-safe-direction, not re-derived here).
+
+### Verdict (Cycle 2)
+
+- Verified: AC-1..AC-4, AC-6, AC-7 at the new HEAD; the cross-review AR-1
+  fix; self-review C2-1..C2-5 fixes (cross-checked against code, not
+  re-reviewed for diff quality); the archive-path forward-reference is
+  intentional, not a doc-drift bug; tech-debt row structure.
+- Partially verified: AC-5 — case coverage and the plan's own recorded red
+  evidence confirmed; no independent mutation rerun this cycle (see gap
+  above).
+- Not verified: real-world rewrite fidelity (plan non-goal, unchanged from
+  cycle 1); `gawk` portability of the HEAD/working-tree split.
+
+**Overall verdict: PASS.** No blocking findings. This is the pipeline's
+2nd and final cycle per `RALPH_STANDARD_MAX_PIPELINE_CYCLES` (default 2);
+no further fix-and-revalidate re-run is expected after this cycle.
