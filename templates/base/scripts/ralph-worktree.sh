@@ -86,8 +86,96 @@ abs_from_repo_root() {
 
 # default_branch is provided by ralph-common.sh (sourced above).
 
+# codex_config_external_rewrite_only — true when the working tree's only
+# change to .codex/config.toml is the known external rewrite: HEAD's
+# comment and/or blank lines deleted, and/or trailing
+# [shell_environment_policy] (or dotted [shell_environment_policy.<name>])
+# tables appended, with every other line byte-for-byte identical to HEAD
+# (no whitespace trimming, no CR stripping — a changed or added comment,
+# re-indentation, or an appended non-policy table all fall through to the
+# generic "uncommitted changes" message instead). At least one HEAD
+# comment/blank line must actually have been dropped, or at least one
+# policy header must actually appear in the appended region: a dirty
+# .codex/config.toml whose lines otherwise compare equal for some other
+# reason (a mode-only change, a trailing newline added or removed, or only
+# blank/whitespace-only lines appended) is not treated as the known
+# rewrite either. In the appended region, a line is recognised as a table
+# header with or without leading whitespace (TOML allows indenting a
+# header), but only the exact, unindented [shell_environment_policy] /
+# [shell_environment_policy.<name>] forms are accepted as a policy header —
+# an indented header, whether policy or not, falls to the generic message
+# instead of having its key lines absorbed as policy settings. Callers must
+# already know `git status --porcelain` is exactly " M .codex/config.toml"
+# before calling this. A multi-line TOML string ("""/''') on either side
+# disables the check: line-based comparison cannot tell a real
+# comment/blank line from one that is only part of the string's value.
+codex_config_external_rewrite_only() {
+  local root work_file result
+  root="$(git rev-parse --show-toplevel)"
+  work_file="${root}/.codex/config.toml"
+  [ -f "$work_file" ] || return 1
+  git -C "$root" cat-file -e 'HEAD:.codex/config.toml' 2>/dev/null || return 1
+  result="$(git -C "$root" show 'HEAD:.codex/config.toml' | awk -v q3="'''" '
+    function is_blank(line) { return (line ~ /^[ \t]*$/) }
+    function is_comment(line) { return (line ~ /^[ \t]*#/) }
+    function is_skippable(line) { return (is_blank(line) || is_comment(line)) }
+    function is_sep_header(line) {
+      return (line ~ /^\[shell_environment_policy(\.[A-Za-z0-9_-]+)?\]$/)
+    }
+    function has_multiline(line) {
+      return (index(line, "\"\"\"") > 0 || index(line, q3) > 0)
+    }
+    # HEAD reaches awk over stdin as "-"; FILENAME (not FNR == NR) tells the
+    # two inputs apart so an empty HEAD file does not get misread as the
+    # start of the working-tree file (FNR and NR coincide on record 1 of the
+    # second file whenever the first file contributed zero records).
+    FILENAME == "-" {
+      if (has_multiline($0)) { multiline = 1 }
+      old[++old_n] = $0
+      next
+    }
+    {
+      if (has_multiline($0)) { multiline = 1 }
+      new[++new_n] = $0
+    }
+    END {
+      if (multiline) { print "NOMATCH"; exit }
+      i = 0
+      j = 0
+      dropped = 0
+      while (i < old_n) {
+        cur = old[i + 1]
+        if (j < new_n && new[j + 1] == cur) {
+          i++
+          j++
+        } else if (is_skippable(cur)) {
+          i++
+          dropped = 1
+        } else {
+          print "NOMATCH"; exit
+        }
+      }
+      in_sep = 0
+      saw_policy_header = 0
+      for (k = j + 1; k <= new_n; k++) {
+        nl = new[k]
+        if (is_blank(nl)) { continue }
+        if (is_comment(nl)) { print "NOMATCH"; exit }
+        if (nl ~ /^[ \t]*\[/) {
+          if (is_sep_header(nl)) { in_sep = 1; saw_policy_header = 1; continue }
+          print "NOMATCH"; exit
+        }
+        if (!in_sep) { print "NOMATCH"; exit }
+      }
+      if (!dropped && !saw_policy_header) { print "NOMATCH"; exit }
+      print "MATCH"
+    }
+  ' - "$work_file")"
+  [ "$result" = "MATCH" ]
+}
+
 validate_clean_base() {
-  local base current dirty
+  local base current dirty root sq qroot msg
   base="${1:-$(default_branch)}"
   git rev-parse --verify "${base}^{commit}" >/dev/null 2>&1 ||
     die "base branch not found: $base"
@@ -95,7 +183,28 @@ validate_clean_base() {
   [ "$current" = "$base" ] ||
     die "must start from clean default branch '$base' (current: ${current:-detached})"
   dirty="$(git status --porcelain)"
-  [ -z "$dirty" ] || die "base branch '$base' has uncommitted changes"
+  if [ -n "$dirty" ]; then
+    if [ "$dirty" = " M .codex/config.toml" ] && codex_config_external_rewrite_only; then
+      root="$(git rev-parse --show-toplevel)"
+      # POSIX single-quote escaping (not `printf '%q'`): bash 3.2 (the
+      # macOS default `/usr/bin/env bash` resolves to) renders %q of a
+      # non-ASCII path as a mix of raw bytes and octal escapes under a
+      # UTF-8 locale, which a terminal cannot paste back verbatim. This
+      # form survives arbitrary bytes, including embedded single quotes.
+      sq="'\\''"
+      qroot="'${root//\'/$sq}'"
+      msg="base branch '${base}' has uncommitted changes only in .codex/config.toml, and they look like the known external rewrite (comment or blank lines deleted and/or a [shell_environment_policy] table appended; see docs/recipes/codex-setup.md).
+Review the diff:
+  git -C ${qroot} diff -- .codex/config.toml
+If that is the only change, restore it:
+  git -C ${qroot} checkout -- .codex/config.toml
+Then confirm it is clean and re-run:
+  git -C ${qroot} status --porcelain
+(should print nothing)"
+      die "$msg"
+    fi
+    die "base branch '$base' has uncommitted changes"
+  fi
 }
 
 json_get() {
