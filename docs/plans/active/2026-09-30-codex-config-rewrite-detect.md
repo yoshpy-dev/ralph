@@ -27,7 +27,7 @@
 
 ## Scope
 
-- `scripts/ralph-worktree.sh`(+ template、byte 一致): `validate_clean_base` で、dirty な項目が `.codex/config.toml` の変更だけで、その差分が「コメント行・空行の削除」と「末尾への `[shell_environment_policy]` / `[shell_environment_policy.<name>]` table の追加」だけのとき、専用の理由と戻し方(`git -C <root> checkout -- .codex/config.toml`、戻した後の `cmp` の確認)を出して止まる。それ以外はこれまでどおりの文言で止まる。自動では戻さない。
+- `scripts/ralph-worktree.sh`(+ template、byte 一致): `validate_clean_base` で、dirty な項目が `.codex/config.toml` の未ステージの変更だけ(`git status --porcelain` が ` M .codex/config.toml` の 1 行だけ)で、その差分が「コメント行・空行の削除」と「末尾への `[shell_environment_policy]` / `[shell_environment_policy.<name>]` table の追加」だけのとき、専用の理由と戻し方を出して止まる。戻し方は `git -C <root> diff -- .codex/config.toml` で差分を見てから `git -C <root> checkout -- .codex/config.toml`、確認は `git -C <root> status --porcelain` が空になること(配布先には template がないので、template との `cmp` は案内しない)。それ以外(ステージ済み・部分ステージ、HEAD または作業ツリーの版に複数行文字列 `"""` / `'''` がある、など)はこれまでどおりの文言で止まる。自動では戻さない。
 - `tests/test-ralph-worktree.sh`: 検知の red / green のケース。
 - `docs/recipes/codex-setup.md`(+ template): 症状、確認、戻し方、調査の状況(否定した候補と残る候補)を 1 段落で。
 - 調査の記録: `docs/reports/investigation-2026-09-30-codex-config-rewrite.md`(上の確認事項、probe の手順と結果、残る候補、次に起きたときに取る証拠)。
@@ -42,6 +42,7 @@
 ## Assumptions
 
 - 書き換えの形は memory と issue に記録されたもの(コメント行の削除と、末尾への `shell_environment_policy` の table の追加)に限る。値の変更、table の並べ替え、引用符の変更を伴う差分は、この検知の対象にしない(一般の文言で止まる。安全側)。
+- 行単位の正規化は、TOML の複数行文字列(`"""` / `'''`)の中の `#` 行や空行を値として扱えない(Codex advisory)。どちらかの版に複数行文字列の区切りがあれば検知しない(一般の文言)。TOML パーサは shell から使えないので導入しない。
 - `validate_clean_base` は `ensure` と `validate-clean-base` の両方から呼ばれる。
 
 ## Affected areas
@@ -60,12 +61,12 @@
 
 ## Acceptance criteria
 
-- [ ] AC-1: `.codex/config.toml` だけが dirty で、差分がコメント行・空行の削除と末尾の `shell_environment_policy` の table の追加だけのとき、`ralph-worktree.sh validate-clean-base` と `ensure` が非 0 で止まり、stderr に書き換えの説明、`git -C <root> diff -- .codex/config.toml`、`git -C <root> checkout -- .codex/config.toml`、template との `cmp` の手順が出る。
-- [ ] AC-2: 次の場合は従来の `base branch '<base>' has uncommitted changes` で止まり、専用の文言は出ない: (a) 同じ書き換えに値の変更が 1 つ混ざる、(b) `.codex/config.toml` 以外にも dirty なファイルがある、(c) `shell_environment_policy` 以外の table が追加されている、(d) 未追跡のファイルだけがある。
+- [ ] AC-1: `.codex/config.toml` だけが未ステージで dirty で、差分がコメント行・空行の削除と末尾の `shell_environment_policy` の table の追加だけのとき、`ralph-worktree.sh validate-clean-base` と `ensure` が非 0 で止まり、stderr に書き換えの説明、`git -C <root> diff -- .codex/config.toml`、`git -C <root> checkout -- .codex/config.toml`、`git -C <root> status --porcelain` が空になることの確認が出る。template との `cmp` は案内に含めない。テストは案内のコマンドをそのまま実行して、その後 `validate-clean-base` が pass することまで確認する。
+- [ ] AC-2: 次の場合は従来の `base branch '<base>' has uncommitted changes` で止まり、専用の文言は出ない: (a) 同じ書き換えに値の変更が 1 つ混ざる、(b) `.codex/config.toml` 以外にも dirty なファイルがある、(c) `shell_environment_policy` 以外の table が追加されている、(d) 未追跡のファイルだけがある、(e) 書き換えをステージした(`M `)、部分的にステージした(`MM`)、(f) HEAD の版に複数行文字列があり、その中の `#` 行か空行が消えている(Codex advisory の反例)。
 - [ ] AC-3: コメントの削除だけ(table の追加なし)の差分と、table の追加だけ(コメントは残る)の差分も AC-1 と同じ扱いになる。
 - [ ] AC-4: clean な base では従来どおり pass。`scripts/ralph-worktree.sh` と template が byte 一致。
 - [ ] AC-5: `tests/test-ralph-worktree.sh` に AC-1〜AC-4 のケースがあり、mutation(検知の関数が常に偽を返す、table 名の判定を外す)で落ちる。
-- [ ] AC-6: `docs/recipes/codex-setup.md`(+ template)に症状・確認・戻し方・調査の状況の段落があり、`docs/reports/investigation-2026-09-30-codex-config-rewrite.md` に調査の記録(否定した候補とその根拠、probe の手順と結果、残る候補、次に起きたときに取る証拠: 書き換え直後の `stat` の時刻、実行中だった codex のプロセスと親、`~/.codex/log` の該当時刻)がある。
+- [ ] AC-6: `docs/recipes/codex-setup.md`(+ template)に症状・確認・戻し方(`git status --porcelain` が空になることの確認。template との `cmp` は ralph 本体を開発するときだけ)・調査の状況の段落があり、`docs/reports/investigation-2026-09-30-codex-config-rewrite.md` に調査の記録(否定した候補とその根拠、probe の手順と結果、残る候補、次に起きたときに取る証拠: 書き換え直後の `stat` の時刻、実行中だった codex のプロセスと親、`~/.codex/log` の該当時刻)がある。
 - [ ] AC-7: `shellcheck -S warning` で警告なし、`RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh` green、`./scripts/check-sync.sh` pass。
 
 ## Implementation outline
@@ -85,7 +86,7 @@
 - Unit tests: `sh tests/test-ralph-worktree.sh`(fixture repo に `.codex/config.toml` を追跡させ、書き換えの形を作って `validate-clean-base` を呼ぶ)。
 - Integration tests: `RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh`、fixture で `ensure` 経由でも同じ文言になること。
 - Regression tests: AC-5 の mutation。
-- Edge cases: ファイルが削除された(` D`)、rename、HEAD に `.codex/config.toml` がない repo、`shell_environment_policy.set` のような dotted table、CRLF の改行、末尾の改行の有無。
+- Edge cases: ファイルが削除された(` D`)、rename、HEAD に `.codex/config.toml` がない repo、`shell_environment_policy.set` のような dotted table、CRLF の改行、末尾の改行の有無、ステージ済み / 部分ステージ、複数行文字列、template のない fixture(配布先と同じ形)で案内どおりに戻して clean になること。
 - Evidence to capture: test report(件数、mutation 表)。
 
 ## Risks and mitigations
@@ -101,9 +102,13 @@
 
 - 原因(TUI のダイアログ、desktop app、バージョン更新時の移行のどれか)。次に起きたときの証拠で判断する。
 
+## Deviation notes
+
+- 2026-09-30 plan: Codex plan advisory(gpt-6-astra、xhigh、#192 の新しい呼び出し形で実行、rc 0、`-o` 2943 バイト)は MEDIUM 3 件。(1) ステージ済みの書き換えでは `git diff` が空、`git checkout --` が index から戻すので dirty のまま → 検知を未ステージの ` M` 1 行だけに限定し、案内どおりに戻して clean になることまでテストする。(2) 行単位の正規化は TOML の複数行文字列の中の `#` 行・空行を値として扱えず、設定の変更を書き換えと誤判定する → 複数行文字列の区切りがあれば検知しない。(3) 配布先には template がないので `cmp` の手順が使えない → 確認は `git status --porcelain` が空になることにし、`cmp` は ralph 本体の開発時だけ recipe に書く。ユーザー決定: 対応案で plan を更新
+
 ## Progress checklist
 
-- [ ] Plan reviewed
+- [x] Plan reviewed
 - [x] Branch created
 - [ ] Implementation started
 - [ ] Review artifact created
@@ -115,5 +120,5 @@
 
 - [x] プラグイン説を否定する根拠(ソース)と、codex の通常の設定変更がユーザーレベルに入ること(隔離 probe)を確認した
 - [x] critical fork なし
-- [ ] Codex plan advisory
+- [x] Codex plan advisory(MEDIUM 3、対応案で plan を更新)
 - [x] AC は fixture の shell テストで確認できる
