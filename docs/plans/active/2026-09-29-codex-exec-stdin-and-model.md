@@ -110,6 +110,8 @@ skill 本文・設定・テスト・文書の変更のみ。問題があれば 1
 - 2026-09-29 self-review(cycle 1、c9384a8): CRITICAL 0 / HIGH 0 / MEDIUM 5 / LOW 10、merge 可。MEDIUM: 20 分の上限を効かせる仕組みがない(完了通知は hang では来ない)、`-o` の鮮度を確かめられない(固定名、`<scratch>` 未定義)、未完了の経路が Step 4 / 8 で途切れる(insight は pass、backfill も 0/0/0 を pass と読む、Step 9 に再実行の分岐なし)、claude 経路の「常に complete」は誤り、テストが 1 行前提で行分割を見落とす。LOW: ` exec` が「execution」に一致、`command` 未検査、`set -f`、Go の `t.Skipf` が loop 内、plan パス参照、config ヘッダー、到達しない「Codex driver」、理由の重複、`$BASE` の持ち越し、template と文書の表現。14 件を in-cycle で修正し、1 件は据え置き(下の verify の行を参照)
 - 2026-09-30 work: Slice B は implementer に委譲(173e8cc、19 ファイル、+180 / -96、push 済み)。設計の逸脱(実機で発見): handoff の watchdog `( sleep 1200; kill "$cpid" ) &` は wrapper を kill しても子の `sleep` が孤児になり、TERM された codex は rc 0 で終わる(codex-cli 0.154.0、1 秒と 5 秒の timeout で確認)。最終形は `codex` と `sleep 1200` を直接の兄弟として background にし、`kill -0 "$spid"` のポーリングで期限切れを検知して codex を kill、`wait "$cpid"` の後に `sleep` とループを kill する。完了の判定は「`codex rc=0` かつ `-o` ファイルが空でない」で、timeout は `-o` の欠落で捕まえる(rc 0 だけでは完了と見なさない)。skill 本文にこの理由を書き、実機で plan advisory(282 秒)と cross-review(290 秒)が rc 0・孤児なし・`.codex/config.toml` 変更なしで通ることを確認。他: `rm -f` と slug / cycle 付きのファイル名、`<scratch>` の定義、`$BASE` と config の source を同じ Bash 呼び出しに、claude 経路も exit 0 かつ非空のときだけ complete、未完了は insight `--verdict n/a` と cycle 据え置き、backfill が 0/0/0 を pass と読む件は tech-debt に記録、テストは ` exec ` と `command codex ` を検査し呼び出し行数(plan 1、cross-review 2)を assert、`set -f`、Go は dir の有無だけで skip、参照は #184。96 / 96、19 / 19、`go test` ok、check-skill-sync / check-sync pass。red: 行分割と `command` 除去で落ちる。orchestrator も 96 / 96 と sync 系を確認
 - 2026-09-30 verify(cycle 1、3a15d60): PASS。AC-1〜AC-8 を確認。watchdog の 1 行を `sh -n` で検査し、記述(兄弟の `sleep`、`kill -0` のポーリング、`wait` の後の後始末)と一致。`RALPH_VERIFY_SCOPE=full ./scripts/run-static-verify.sh` green。verifier の指摘: self-review の重複の LOW は半分だけ直っている。理由の一文は /plan への参照に置き換えた(修正済み)。完了 contract の段落は cross-review 側にも残した。この重複は設計判断で残す: 各 skill は単独で読まれて実行され、cross-review の contract には /plan にない未完了時の経路(triage report の `Reviewer status` 行、triage の省略、Step 8 の代替の選択肢)が要るため。tech-debt には記録しない
+- 2026-09-30 test(cycle 1、b045ccb): PASS。`RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh` green、96 / 96、19 / 19、`go test` ok。skill の 1 行をそのまま実機で: ok の経路(rc 0、約 15 秒、`-o` が `ok`)、timeout の経路(`sleep 3`、rc 0、`-o` なし = contract の判定どおり)、cross-review の形(rc 0、約 291 秒、`-o` 190 バイト)、dash と `bash --posix` でも完走、孤児なし、`.codex/config.toml` 変更なし。mutation 6 種のうち 5 種が red(行分割は件数ではなく行内容の assertion で落ちる)、`sleep 12000` への変更はどのテストも捕まえない(情報)
+- 2026-09-30 sync-docs(cycle 1、88c50b1): drift なし。cross-review(cycle 1、HEAD 88c50b1): この branch の新しい step 4 の形(watchdog の 1 行、`-o`)でそのまま実行。`codex rc=0`、`-o` 189 バイトで contract 上 complete、指摘 0 件。孤児なし、`config.toml` 変更なし。Case C なので `/pr` へ
 ## Progress checklist
 
 - [x] Plan reviewed
@@ -117,7 +119,7 @@ skill 本文・設定・テスト・文書の変更のみ。問題があれば 1
 - [x] Implementation started
 - [x] Review artifact created
 - [x] Verification artifact created
-- [ ] Test artifact created
+- [x] Test artifact created
 - [ ] PR created
 
 ## Readiness checklist
