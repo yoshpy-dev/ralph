@@ -111,6 +111,7 @@
 - 2026-09-30 verify(cycle 1、8e7a678): PASS。AC-1〜AC-7 をコードとテストで確認、mutation 4 種を独立に再現。`RALPH_VERIFY_SCOPE=full ./scripts/run-static-verify.sh` green、check-sync pass
 - 2026-09-30 test(cycle 1、1c503ee): PASS。`RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh` green、105 / 0 を sh で 3 回・dash・空白を含む TMPDIR で。scratch clone での end-to-end: 書き換えの形で `ensure` が専用の文言で止まり worktree も state も作らない → 案内どおりに戻すと `ensure` が通る、値の変更を混ぜる・stage する → 一般の文言、サブディレクトリから実行しても案内のコマンドが動く。mutation: 常に MATCH → 8 ケース、porcelain の制限を外す → 4 ケースが落ちる。追加 table の中のコメント行と `[[shell_environment_policy]]` の見出しは、どちらの変異もテストが捕まえない(穴)
 - 2026-09-30 work: Slice C は implementer に委譲(d84cdab、テストだけ、+48)。ケース 20(追加 table の中のコメント行)と 21(`[[shell_environment_policy]]`)を追加し、どちらも一般の文言。111 / 0。red: 上の 2 つの変異がそれぞれ 20 と 21 で落ちる
+- 2026-09-30 sync-docs(cycle 1、9b68c43): tech-debt に原因未特定の行を追加、他は drift なし。cross-review(cycle 1、HEAD 9b68c43、watchdog の 1 行で実行、`codex rc=0`、`-o` 965 バイト): ACTION_REQUIRED 1 件(AR-1: 追加部分の見出し判定が `/^\[/` だけなので、policy の table の後のインデントされた `  [features]` が見出しと見なされず、その下の実際の設定の追加まで書き換えと判定して checkout を案内する。空白でもタブでも再現)。ユーザー決定: 修正して pipeline を cycle 2/2 として再実行
 ## Progress checklist
 
 - [x] Plan reviewed
