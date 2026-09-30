@@ -25,13 +25,15 @@ meta-repo の root でも fresh scaffold でも `CI=true ./scripts/check-templat
 
 - `scripts/check-template.sh`(+ template、byte 一致):
   - hook の参照の検査: コマンド文字列の最初の語(空白の前まで)をパスとして取り出して存在を確かめる。subshell を使わない(`for` とファイル経由、または here-document)ので、`fail` が `status` に反映される。
+  - 実行属性・SKILL.md・agent の frontmatter の 3 つのループ(`for x in $(find ...)`、shellcheck SC2044)を、`find` の結果を一時ファイルに落として `while IFS= read -r` で読む形にする(subshell にしないので `fail` が `status` に伝わる。空白を含むパスでも壊れない)。一時ファイルは EXIT trap で消す。
   - `required_files` から meta-repo にしかない 3 項目(`README.md`、`docs/research/approach-comparison.md`、`docs/roadmap/harness-maturity-model.md`)を外す(25 項目になる)。理由を 1 行のコメントで書く。
 - `tests/test-check-template.sh`: `GOLDEN_ENTRIES` を 25 項目に更新。hook の参照の検査の red / green のケース(存在する hook を引数付きで参照 → FAIL なし、存在しない hook を参照 → exit 1 で名前を出す)。fresh scaffold のケース(`go` があれば `go run ./cmd/ralph init --yes <tmp>` して `CI=true sh scripts/check-template.sh` が FAIL なしで exit 0、なければ SKIP)。root のケース(`CI=true` で FAIL 行なし)。
+- `scripts/verify.local.sh`: shellcheck の対象の一覧に `scripts/check-template.sh` を加え、SC2044 のような警告が再び入ったら run-verify が止まるようにする(template に同じ一覧があれば同じく)。
 - `docs/tech-debt/README.md` の #189 の行を削除。
 
 ## Non-goals
 
-- `check-template.sh` の他の検査(実行属性、SKILL.md、agent の frontmatter、git hook の導入)の変更。
+- `check-template.sh` の他の検査の判定の変更(実行属性、SKILL.md、agent の frontmatter はループの書き方だけを直し、判定は変えない。git hook の導入の検査は触らない)。
 - hook のコマンドにパスの空白やクォートがある形の対応(settings の `command` は ralph が生成する固定の形)。
 - 外した 3 項目を別の場所で検査すること(meta-repo の README とこの 2 つの docs は、検査の対象にする意味が薄い)。
 - `scripts/bootstrap.sh` の変更。
@@ -44,6 +46,7 @@ meta-repo の root でも fresh scaffold でも `CI=true ./scripts/check-templat
 ## Affected areas
 
 - `scripts/check-template.sh`、`templates/base/scripts/check-template.sh`
+- `scripts/verify.local.sh`(template に同じファイルがあれば同じく)
 - `tests/test-check-template.sh`
 - `docs/tech-debt/README.md`
 
@@ -60,7 +63,8 @@ meta-repo の root でも fresh scaffold でも `CI=true ./scripts/check-templat
 - [ ] AC-3: `go run ./cmd/ralph init --yes <tmp>` で作った fresh scaffold で `CI=true sh scripts/check-template.sh` が FAIL 行なしで exit 0(テストで確認、`go` がなければ SKIP と明示)。
 - [ ] AC-4: `required_files` が 25 項目で、`GOLDEN_ENTRIES` と一致(ケース A)、Go の `TestTemplateBaseScriptsMatchCheckTemplateRequiredFiles` が green、root と template の `check-template.sh` が byte 一致。
 - [ ] AC-5: mutation: hook の検査を `| while` の subshell に戻す → 存在しない hook のケースが落ちる、最初の語ではなく全体をパスにする → 引数付きのケースが落ちる。
-- [ ] AC-6: `docs/tech-debt/README.md` の #189 の行が削除されている。`shellcheck -S warning`、`RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh`、`./scripts/check-sync.sh` が green。
+- [ ] AC-7: 3 つのループの失敗が exit code に伝わる: 実行属性のない `.sh`、SKILL.md のない skill、`tools:` のない agent の fixture で、それぞれ exit 1 と該当の FAIL 行になる。空白を含むパスのスクリプトも 1 つのパスとして扱われる。mutation: いずれかのループを `find ... | while read` の subshell にすると該当ケースが落ちる。
+- [ ] AC-6: `docs/tech-debt/README.md` の #189 の行が削除されている。`shellcheck -S warning scripts/check-template.sh tests/test-check-template.sh` が警告なし、`scripts/verify.local.sh` の shellcheck の対象に `scripts/check-template.sh` が入っている、`RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh`、`./scripts/check-sync.sh` が green。
 
 ## Implementation outline
 
@@ -95,9 +99,13 @@ meta-repo の root でも fresh scaffold でも `CI=true ./scripts/check-templat
 
 なし。
 
+## Deviation notes
+
+- 2026-09-30 plan: Codex plan advisory(gpt-6-astra、xhigh、watchdog の 1 行、`codex rc=0`、`-o` 1074 バイト)は MEDIUM 1: 既存の 3 つのループが shellcheck SC2044 で `-S warning` が exit 1 になり、AC-6 が scope のままでは通らない(`check-template.sh` は `verify.local.sh` の shellcheck の対象外なので run-verify は止まらない)。ユーザー決定: 3 つのループも直す。ループを一時ファイル経由の `while read` にし、失敗が exit code に伝わることをテストで確かめ(AC-7)、`check-template.sh` を `verify.local.sh` の shellcheck の対象に加える
+
 ## Progress checklist
 
-- [ ] Plan reviewed
+- [x] Plan reviewed
 - [x] Branch created
 - [ ] Implementation started
 - [ ] Review artifact created
@@ -109,5 +117,5 @@ meta-repo の root でも fresh scaffold でも `CI=true ./scripts/check-templat
 
 - [x] 2 つの不具合を root と fresh scaffold で確認した(#183 の probe)
 - [x] critical fork なし
-- [ ] Codex plan advisory
+- [x] Codex plan advisory(MEDIUM 1、対応案で plan を更新)
 - [x] AC は fixture と fresh scaffold のテストで確認できる
