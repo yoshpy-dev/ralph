@@ -92,19 +92,22 @@ abs_from_repo_root() {
 # [shell_environment_policy] (or dotted [shell_environment_policy.<name>])
 # tables appended, with every other line byte-for-byte identical to HEAD
 # (no whitespace trimming, no CR stripping — a changed or added comment,
-# re-indentation, a line-ending change, an appended non-policy table, or an
-# appended comment all fall through to the generic "uncommitted changes"
-# message instead). In the appended region, a line is recognised as a table
+# re-indentation, or an appended non-policy table all fall through to the
+# generic "uncommitted changes" message instead). At least one HEAD
+# comment/blank line must actually have been dropped, or at least one
+# policy header must actually appear in the appended region: a dirty
+# .codex/config.toml whose lines otherwise compare equal for some other
+# reason (a mode-only change, a trailing newline added or removed, or only
+# blank/whitespace-only lines appended) is not treated as the known
+# rewrite either. In the appended region, a line is recognised as a table
 # header with or without leading whitespace (TOML allows indenting a
 # header), but only the exact, unindented [shell_environment_policy] /
 # [shell_environment_policy.<name>] forms are accepted as a policy header —
 # an indented header, whether policy or not, falls to the generic message
 # instead of having its key lines absorbed as policy settings. Callers must
-# already know `git status --porcelain` is
-# exactly " M .codex/config.toml" before calling this — that guarantees the
-# file differs from HEAD in some way, so this function does not special-case
-# "no difference at all". A multi-line TOML string ("""/''') on either side
-# disables the check: line-based normalization cannot tell a real
+# already know `git status --porcelain` is exactly " M .codex/config.toml"
+# before calling this. A multi-line TOML string ("""/''') on either side
+# disables the check: line-based comparison cannot tell a real
 # comment/blank line from one that is only part of the string's value.
 codex_config_external_rewrite_only() {
   local root work_file result
@@ -139,6 +142,7 @@ codex_config_external_rewrite_only() {
       if (multiline) { print "NOMATCH"; exit }
       i = 0
       j = 0
+      dropped = 0
       while (i < old_n) {
         cur = old[i + 1]
         if (j < new_n && new[j + 1] == cur) {
@@ -146,21 +150,24 @@ codex_config_external_rewrite_only() {
           j++
         } else if (is_skippable(cur)) {
           i++
+          dropped = 1
         } else {
           print "NOMATCH"; exit
         }
       }
       in_sep = 0
+      saw_policy_header = 0
       for (k = j + 1; k <= new_n; k++) {
         nl = new[k]
         if (is_blank(nl)) { continue }
         if (is_comment(nl)) { print "NOMATCH"; exit }
         if (nl ~ /^[ \t]*\[/) {
-          if (is_sep_header(nl)) { in_sep = 1; continue }
+          if (is_sep_header(nl)) { in_sep = 1; saw_policy_header = 1; continue }
           print "NOMATCH"; exit
         }
         if (!in_sep) { print "NOMATCH"; exit }
       }
+      if (!dropped && !saw_policy_header) { print "NOMATCH"; exit }
       print "MATCH"
     }
   ' - "$work_file")"
@@ -168,7 +175,7 @@ codex_config_external_rewrite_only() {
 }
 
 validate_clean_base() {
-  local base current dirty root qroot msg
+  local base current dirty root sq qroot msg
   base="${1:-$(default_branch)}"
   git rev-parse --verify "${base}^{commit}" >/dev/null 2>&1 ||
     die "base branch not found: $base"
@@ -179,7 +186,13 @@ validate_clean_base() {
   if [ -n "$dirty" ]; then
     if [ "$dirty" = " M .codex/config.toml" ] && codex_config_external_rewrite_only; then
       root="$(git rev-parse --show-toplevel)"
-      printf -v qroot '%q' "$root"
+      # POSIX single-quote escaping (not `printf '%q'`): bash 3.2 (the
+      # macOS default `/usr/bin/env bash` resolves to) renders %q of a
+      # non-ASCII path as a mix of raw bytes and octal escapes under a
+      # UTF-8 locale, which a terminal cannot paste back verbatim. This
+      # form survives arbitrary bytes, including embedded single quotes.
+      sq="'\\''"
+      qroot="'${root//\'/$sq}'"
       msg="base branch '${base}' has uncommitted changes only in .codex/config.toml, and they look like the known external rewrite (comment or blank lines deleted and/or a [shell_environment_policy] table appended; see docs/recipes/codex-setup.md).
 Review the diff:
   git -C ${qroot} diff -- .codex/config.toml

@@ -130,14 +130,17 @@ Symptom: `ralph-worktree.sh ensure` (via `/plan`, `/spec`) or
 `validate-clean-base` stops with an "uncommitted changes" error, and
 `.codex/config.toml` has lost some or all of its comment/blank lines and/or
 gained a trailing `[shell_environment_policy]` table it did not have
-before, with every other line otherwise byte-for-byte identical to the
-tracked version. `ralph-worktree.sh` recognizes exactly that shape and
-explains it directly in the error message with recovery commands. Anything
-else — a changed or added comment, re-indentation, a line-ending change, an
-appended table that is not `shell_environment_policy`, or a comment
-appended after one — is reported as an ordinary uncommitted change instead
-(the generic "has uncommitted changes" message), same as any other kind of
-dirty state.
+before, with at least one comment/blank line actually dropped or at least
+one policy table actually appended, and every other line otherwise
+byte-for-byte identical to the tracked version. `ralph-worktree.sh`
+recognizes exactly that shape and explains it directly in the error
+message with recovery commands. Anything else — a changed or added
+comment, re-indentation, a line-ending change, an appended table that is
+not `shell_environment_policy`, a comment appended after one, a mode-only
+change, a trailing newline added or removed with nothing else changed, or
+only blank/whitespace-only lines appended — is reported as an ordinary
+uncommitted change instead (the generic "has uncommitted changes"
+message), same as any other kind of dirty state.
 
 Check the diff before doing anything else:
 
@@ -157,9 +160,11 @@ confirm parity with `cmp .codex/config.toml templates/base/.codex/config.toml`.)
 
 Cause: not yet identified. Ruled out: the Claude Code `openai-codex` and
 `everything-claude-code` plugins (neither writes to the *project's*
-`.codex/config.toml`; `everything-claude-code` does write a
-`shell_environment_policy`-free `[features]` entry to the user-level
-config, but that is a different file), ralph's own Go code (only reads
+`.codex/config.toml`; `everything-claude-code` does insert/append
+non-MCP base settings — the `[features]`, `[profiles.*]`, and `[agents.*]`
+tables plus root-level keys — into the user-level config, never a
+`shell_environment_policy` table, but that is a different file from the
+project's), ralph's own Go code (only reads
 `.codex/config.toml`), and `codex features enable ...` (one of codex's
 config-writing subcommands, not all of them): in an isolated probe it
 writes the user-level config regardless of whether the project is marked

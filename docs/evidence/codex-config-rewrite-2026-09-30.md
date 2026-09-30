@@ -35,12 +35,16 @@ codex-companion が書き込む」だったが、ソースを読む限り当た�
   経由で書き込みを行うが、その対象はユーザーレベルの config
   (既定 `~/.codex/config.toml`、ECC 1.9.0 の `sync-ecc-to-codex.sh:24-26`、
   `merge-codex-config.js:313`)であり、project の `.codex/config.toml` では
-  ない。追記だけなので、書き込み先のコメントを剥がすこともない。つまり
-  「project の `.codex/config.toml` にはどちらのプラグインも書かない」が
-  正確な言い方で、ユーザーレベルの config への書き込みは
-  everything-claude-code に限って起きる(対象は ECC 自身のフック定義で、
-  `shell_environment_policy` は生成しない)。プラグインの `hooks.json` には
-  codex 関連のイベント登録がない。
+  ない。書き込む中身は MCP 以外の基本設定で、`merge-codex-config.js` の
+  27〜34 行の `TABLE_PATHS` によれば `[features]`、`[profiles.strict]`、
+  `[profiles.yolo]`、`[agents.*]` の table と、ルートの key
+  (295、300、313 行)。ルートの key は最初の table の前に差し込み、
+  既存の table には key を足す形で書き込む(全体を再シリアライズしない
+  文字列編集なので、追記だけとは言えないが、既存のコメントを剥がすことも
+  ない)。`shell_environment_policy` は生成しない。つまり「project の
+  `.codex/config.toml` にはどちらのプラグインも書かない」が正確な言い方で、
+  ユーザーレベルの config への書き込みは everything-claude-code に限って
+  起きる。プラグインの `hooks.json` には codex 関連のイベント登録がない。
 
 ### ralph 自身のコード
 
@@ -148,9 +152,13 @@ ps -axo pid,ppid,lstart,command | grep -i codex
 HEAD の内容を使い切った後に残る作業ツリー側の行だけを
 `[shell_environment_policy]`(または dotted な `[shell_environment_policy.<name>]`)
 テーブルとその配下の `key = value` 行として許す。コメントの書き換えや
-追加、インデントだけの変更、改行コードの変更はこの一致から外れ、他の
-どの dirty な状態とも同じ一般の文言になる。この形に一致するときだけ、
-専用の理由と戻し方を表示して止まる。原因不明のまま再発しても、影響
-(worktree 作成の停止)と復旧手順はその場で分かるようにするための対応。
-詳細は `docs/plans/active/2026-09-30-codex-config-rewrite-detect.md` と
+追加、インデントだけの変更はこの一致から外れ、他のどの dirty な状態とも
+同じ一般の文言になる。加えて、HEAD の行を 1 つ以上落としたか、policy の
+見出しを 1 つ以上足したかのどちらかが実際に起きていることも求める。
+そのため、モードだけの変更、末尾の改行の有無、末尾に空行や空白だけの行を
+足す変更のように、行の比較だけでは差が見えない dirty な状態も一般の
+文言になる。この形に一致するときだけ、専用の理由と戻し方を表示して
+止まる。原因不明のまま再発しても、影響(worktree 作成の停止)と復旧手順は
+その場で分かるようにするための対応。詳細は
+`docs/plans/active/2026-09-30-codex-config-rewrite-detect.md` と
 `docs/recipes/codex-setup.md` を参照。

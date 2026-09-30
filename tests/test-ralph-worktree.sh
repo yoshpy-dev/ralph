@@ -221,6 +221,10 @@ _cx_new_repo() {
     git init -b main >/dev/null
     git config user.email test@example.com
     git config user.name "Ralph Test"
+    # Explicit rather than relying on git's own default (true on macOS and
+    # Linux) so a mode-only change (case 25) is reliably visible to
+    # `git status --porcelain` regardless of the host's default.
+    git config core.fileMode true
     printf 'hello\n' > README.md
     git add README.md
     if [ "$_cx_src" != "-" ]; then
@@ -271,6 +275,25 @@ _cx_run() {
   set -e
 }
 
+# _cx_shquote_script computes, via bash, the exact POSIX single-quoted form
+# validate_clean_base builds for its printed root path (the same
+# `sq="'\''"; qroot="'${root//\'/$sq}'"` substitution). Running the literal
+# script rather than re-implementing the substitution in sh keeps the two
+# computations from silently drifting apart.
+_cx_shquote_script="$_tmp/cx-shquote.sh"
+cat > "$_cx_shquote_script" <<'SHQUOTE'
+root="$1"
+sq="'\\''"
+qroot="'${root//\'/$sq}'"
+printf '%s' "$qroot"
+SHQUOTE
+
+# _cx_shquote <path> — print the quoted root the script would print for
+# <path>.
+_cx_shquote() {
+  bash "$_cx_shquote_script" "$1"
+}
+
 # _cx_assert_generic <label> — assert the last _cx_run result is the
 # pre-existing generic "has uncommitted changes" message (no
 # rewrite-specific text).
@@ -281,14 +304,17 @@ _cx_assert_generic() {
 }
 
 # _cx_assert_specific <label> <root> — assert the last _cx_run result is the
-# rewrite-specific message with the three recovery commands, and omits
-# template guidance that a scaffolded (template-free) project cannot use.
+# rewrite-specific message with the three recovery commands (root quoted
+# the same way the script quotes it, so this does not pass merely because
+# the fixture root needs no quoting), and omits template guidance that a
+# scaffolded (template-free) project cannot use.
 _cx_assert_specific() {
+  _cx_qroot="$(_cx_shquote "$2")"
   assert_eq "$1: exits non-zero" 1 "$_cx_exit"
   assert_contains "$1: mentions external rewrite" "external rewrite" "$_cx_stderr"
-  assert_contains "$1: has diff command" "git -C $2 diff -- .codex/config.toml" "$_cx_stderr"
-  assert_contains "$1: has checkout command" "git -C $2 checkout -- .codex/config.toml" "$_cx_stderr"
-  assert_contains "$1: has status command" "git -C $2 status --porcelain" "$_cx_stderr"
+  assert_contains "$1: has diff command" "git -C $_cx_qroot diff -- .codex/config.toml" "$_cx_stderr"
+  assert_contains "$1: has checkout command" "git -C $_cx_qroot checkout -- .codex/config.toml" "$_cx_stderr"
+  assert_contains "$1: has status command" "git -C $_cx_qroot status --porcelain" "$_cx_stderr"
   assert_not_contains "$1: omits templates/" "templates/" "$_cx_stderr"
   assert_not_contains "$1: omits cmp" "cmp" "$_cx_stderr"
 }
@@ -556,16 +582,22 @@ _cx_run "$_cx_repo18"
 _cx_assert_specific "case 18 (HEAD's .codex/config.toml is empty)" "$_cx_repo18"
 
 # Case 19: the repo root path contains a space -> specific message with a
-# %q-quoted root in the three recovery commands, and the printed checkout
+# quoted root in the three recovery commands, and the printed checkout
 # command, run verbatim through `bash -c`, actually restores a clean,
-# passing state.
+# passing state. The `bash -c` call is guarded with set +e/set -e (not run
+# bare) so a broken printed command records a FAIL and the suite still
+# prints its summary, instead of aborting the whole run under `set -e`.
 _cx_repo19="$(_cx_new_repo "$_cx_fixture" "$_tmp/codex repo with space")"
 _cx_write_rewrite_shape "$_cx_repo19/.codex/config.toml"
 _cx_run "$_cx_repo19"
 assert_eq "case 19 (root path has a space): exits non-zero" 1 "$_cx_exit"
 assert_contains "case 19 (root path has a space): mentions external rewrite" "external rewrite" "$_cx_stderr"
 _cx_checkout_line="$(printf '%s\n' "$_cx_stderr" | grep 'checkout -- .codex/config.toml' | sed 's/^[[:space:]]*//')"
+set +e
 bash -c "$_cx_checkout_line"
+_cx_checkout_rc=$?
+set -e
+assert_eq "case 19 (root path has a space): printed checkout succeeds under bash -c" 0 "$_cx_checkout_rc"
 assert_eq "case 19 (root path has a space): status is clean after the printed checkout" "" "$(git -C "$_cx_repo19" status --porcelain)"
 _cx_run "$_cx_repo19"
 assert_eq "case 19 (root path has a space): validate-clean-base now passes" 0 "$_cx_exit"
@@ -646,6 +678,70 @@ _cx_write_rewrite_shape "$_cx_repo24/.codex/config.toml"
 printf '\n  [shell_environment_policy]\n  inherit = "core"\n' >> "$_cx_repo24/.codex/config.toml"
 _cx_run "$_cx_repo24"
 _cx_assert_generic "case 24 (indented policy header in the appended region)"
+
+# Case 25: mode-only change (chmod +x), content byte-identical to HEAD ->
+# generic message. No HEAD line was dropped and no policy header was
+# appended, so the "at least one known change" guard must reject this even
+# though the raw-line comparison alone would otherwise treat it as a match.
+_cx_repo25="$(_cx_new_repo)"
+chmod +x "$_cx_repo25/.codex/config.toml"
+_cx_run "$_cx_repo25"
+_cx_assert_generic "case 25 (mode-only change, identical content)"
+
+# Case 26: the trailing newline is removed, nothing else changes -> generic
+# message. `$(...)` strips the trailing newline(s) from the fixture's
+# content, and `printf '%s'` writes it back without adding one.
+_cx_repo26="$(_cx_new_repo)"
+printf '%s' "$(cat "$_cx_fixture")" > "$_cx_repo26/.codex/config.toml"
+_cx_run "$_cx_repo26"
+_cx_assert_generic "case 26 (trailing newline removed, no other change)"
+
+# Case 27: only blank or whitespace-only lines are appended (an empty
+# line, a spaces-only line, a tab-only line) -> generic message.
+_cx_repo27="$(_cx_new_repo)"
+cat "$_cx_fixture" > "$_cx_repo27/.codex/config.toml"
+printf '\n   \n\t\n' >> "$_cx_repo27/.codex/config.toml"
+_cx_run "$_cx_repo27"
+_cx_assert_generic "case 27 (only blank or whitespace-only lines appended)"
+
+# Case 28: the repo root path has a Japanese component and a literal single
+# quote -> specific message; the printed checkout command round-trips
+# through both bash -c and (if available) zsh -c. %q's mixed raw-byte and
+# octal-escape output for a non-ASCII root does not round-trip through a
+# terminal paste; the POSIX single-quote form this fixes it to should
+# round-trip through any POSIX-ish shell.
+_cx_repo28="$(_cx_new_repo "$_cx_fixture" "$_tmp/ralph テスト's repo")"
+
+_cx_write_rewrite_shape "$_cx_repo28/.codex/config.toml"
+_cx_run "$_cx_repo28"
+_cx_assert_specific "case 28 (non-ASCII path with a quote)" "$_cx_repo28"
+_cx_checkout_line28="$(printf '%s\n' "$_cx_stderr" | grep 'checkout -- .codex/config.toml' | sed 's/^[[:space:]]*//')"
+set +e
+bash -c "$_cx_checkout_line28"
+_cx_checkout_rc=$?
+set -e
+assert_eq "case 28 (non-ASCII path with a quote): printed checkout succeeds under bash -c" 0 "$_cx_checkout_rc"
+assert_eq "case 28 (non-ASCII path with a quote): status is clean after bash -c checkout" "" "$(git -C "$_cx_repo28" status --porcelain)"
+_cx_run "$_cx_repo28"
+assert_eq "case 28 (non-ASCII path with a quote): validate-clean-base passes after bash -c recovery" 0 "$_cx_exit"
+
+if command -v zsh >/dev/null 2>&1; then
+  _cx_write_rewrite_shape "$_cx_repo28/.codex/config.toml"
+  _cx_run "$_cx_repo28"
+  _cx_checkout_line28z="$(printf '%s\n' "$_cx_stderr" | grep 'checkout -- .codex/config.toml' | sed 's/^[[:space:]]*//')"
+  set +e
+  zsh -c "$_cx_checkout_line28z"
+  _cx_checkout_rc=$?
+  set -e
+  assert_eq "case 28 (non-ASCII path with a quote): printed checkout succeeds under zsh -c" 0 "$_cx_checkout_rc"
+  assert_eq "case 28 (non-ASCII path with a quote): status is clean after zsh -c checkout" "" "$(git -C "$_cx_repo28" status --porcelain)"
+  _cx_run "$_cx_repo28"
+  assert_eq "case 28 (non-ASCII path with a quote): validate-clean-base passes after zsh -c recovery" 0 "$_cx_exit"
+else
+  _total=$((_total + 1))
+  _pass=$((_pass + 1))
+  printf '  PASS: case 28 (non-ASCII path with a quote): zsh not available, skipped\n'
+fi
 
 printf '\nralph-worktree tests: %s passed, %s failed, %s total\n' "$_pass" "$_fail" "$_total"
 [ "$_fail" -eq 0 ]
