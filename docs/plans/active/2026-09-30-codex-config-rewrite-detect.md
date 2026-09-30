@@ -30,7 +30,7 @@
 - `scripts/ralph-worktree.sh`(+ template、byte 一致): `validate_clean_base` で、dirty な項目が `.codex/config.toml` の未ステージの変更だけ(`git status --porcelain` が ` M .codex/config.toml` の 1 行だけ)で、その差分が「コメント行・空行の削除」と「末尾への `[shell_environment_policy]` / `[shell_environment_policy.<name>]` table の追加」だけのとき、専用の理由と戻し方を出して止まる。戻し方は `git -C <root> diff -- .codex/config.toml` で差分を見てから `git -C <root> checkout -- .codex/config.toml`、確認は `git -C <root> status --porcelain` が空になること(配布先には template がないので、template との `cmp` は案内しない)。それ以外(ステージ済み・部分ステージ、HEAD または作業ツリーの版に複数行文字列 `"""` / `'''` がある、など)はこれまでどおりの文言で止まる。自動では戻さない。
 - `tests/test-ralph-worktree.sh`: 検知の red / green のケース。
 - `docs/recipes/codex-setup.md`(+ template): 症状、確認、戻し方、調査の状況(否定した候補と残る候補)を 1 段落で。
-- 調査の記録: `docs/reports/investigation-2026-09-30-codex-config-rewrite.md`(上の確認事項、probe の手順と結果、残る候補、次に起きたときに取る証拠)。
+- 調査の記録: `docs/evidence/codex-config-rewrite-2026-09-30.md`(上の確認事項、probe の手順と結果、残る候補、次に起きたときに取る証拠)。
 
 ## Non-goals
 
@@ -50,7 +50,7 @@
 - `scripts/ralph-worktree.sh`、`templates/base/scripts/ralph-worktree.sh`
 - `tests/test-ralph-worktree.sh`
 - `docs/recipes/codex-setup.md`、`templates/base/docs/recipes/codex-setup.md`
-- `docs/reports/investigation-2026-09-30-codex-config-rewrite.md`(新規)
+- `docs/evidence/codex-config-rewrite-2026-09-30.md`(新規)
 
 ## Design decisions
 
@@ -66,7 +66,7 @@
 - [ ] AC-3: コメントの削除だけ(table の追加なし)の差分と、table の追加だけ(コメントは残る)の差分も AC-1 と同じ扱いになる。
 - [ ] AC-4: clean な base では従来どおり pass。`scripts/ralph-worktree.sh` と template が byte 一致。
 - [ ] AC-5: `tests/test-ralph-worktree.sh` に AC-1〜AC-4 のケースがあり、mutation(検知の関数が常に偽を返す、table 名の判定を外す)で落ちる。
-- [ ] AC-6: `docs/recipes/codex-setup.md`(+ template)に症状・確認・戻し方(`git status --porcelain` が空になることの確認。template との `cmp` は ralph 本体を開発するときだけ)・調査の状況の段落があり、`docs/reports/investigation-2026-09-30-codex-config-rewrite.md` に調査の記録(否定した候補とその根拠、probe の手順と結果、残る候補、次に起きたときに取る証拠: 書き換え直後の `stat` の時刻、実行中だった codex のプロセスと親、`~/.codex/log` の該当時刻)がある。
+- [ ] AC-6: `docs/recipes/codex-setup.md`(+ template)に症状・確認・戻し方(`git status --porcelain` が空になることの確認。template との `cmp` は ralph 本体を開発するときだけ)・調査の状況の段落があり、`docs/evidence/codex-config-rewrite-2026-09-30.md` に調査の記録(否定した候補とその根拠、probe の手順と結果、残る候補、次に起きたときに取る証拠: 書き換え直後の `stat` の時刻、実行中だった codex のプロセスと親、`~/.codex/log` の該当時刻)がある。
 - [ ] AC-7: `shellcheck -S warning` で警告なし、`RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh` green、`./scripts/check-sync.sh` pass。
 
 ## Implementation outline
@@ -105,12 +105,12 @@
 ## Deviation notes
 
 - 2026-09-30 plan: Codex plan advisory(gpt-6-astra、xhigh、#192 の新しい呼び出し形で実行、rc 0、`-o` 2943 バイト)は MEDIUM 3 件。(1) ステージ済みの書き換えでは `git diff` が空、`git checkout --` が index から戻すので dirty のまま → 検知を未ステージの ` M` 1 行だけに限定し、案内どおりに戻して clean になることまでテストする。(2) 行単位の正規化は TOML の複数行文字列の中の `#` 行・空行を値として扱えず、設定の変更を書き換えと誤判定する → 複数行文字列の区切りがあれば検知しない。(3) 配布先には template がないので `cmp` の手順が使えない → 確認は `git status --porcelain` が空になることにし、`cmp` は ralph 本体の開発時だけ recipe に書く。ユーザー決定: 対応案で plan を更新
-
+- 2026-09-30 work: Slice A は implementer(sonnet)に委譲(cd1aadb、6 ファイル、+716 / -4、push 済み)。`codex_config_external_rewrite_only`(awk で HEAD と作業ツリーを正規化して比較、複数行文字列があれば検知しない)を、porcelain がちょうど ` M .codex/config.toml` のときだけ `validate_clean_base` から呼び、一致したら専用の文言と戻し方(diff → checkout → status が空)で止まる。template は byte 一致。`tests/test-ralph-worktree.sh` に 13 ケース(86 / 0)。逸脱: 調査の記録は `docs/reports/` ではなく `docs/evidence/codex-config-rewrite-2026-09-30.md` に置いた(check-sync は `docs/reports/` のうち pipeline の接頭辞だけを除外し、`investigation-` は ROOT_ONLY で落ちる。`docs/evidence/` は除外済みで、#155 などの調査記録も同じ場所にある)。plan 内の参照 3 箇所も更新。red: 判定を常に偽 → 一致ケース 17 assertion が落ちる、table 名を任意に → ケース 6、複数行文字列のガードを外す → ケース 10、porcelain の制限を外す → ケース 5 / 7 / 8 / 9。`RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh` green、check-sync pass。orchestrator も 86 / 0、cmp、check-sync を確認
 ## Progress checklist
 
 - [x] Plan reviewed
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
