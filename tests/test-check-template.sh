@@ -1,19 +1,30 @@
 #!/usr/bin/env bash
 # tests/test-check-template.sh — regression coverage for scripts/check-template.sh's
-# required_files list.
+# required_files list and its find-driven checks.
 #
 # Without this test, an entry can be silently dropped from required_files
 # and no automated check notices: #169's /test mutation 6f removed
 # scripts/xreview-helpers.sh from the list and nothing failed. This test
-# closes that gap with three cases:
+# closes that gap, plus the fail-open / fail-open-adjacent regressions fixed
+# for #189, with these cases:
 #   A. golden: the required_files block in scripts/check-template.sh must
 #      match a hardcoded golden list, in order.
 #   B. fixture: a synthetic project with every golden file present passes
 #      check-template.sh; removing any one golden file (one at a time) makes
 #      check-template.sh fail with "Missing required file: <entry>".
 #   C. root sanity: every golden entry exists at this repo's own root.
+#   D. root sanity: `CI=true sh scripts/check-template.sh` from the repo root
+#      exits 0 with no FAIL line.
+#   E. settings hook-reference check: an existing hook referenced with an
+#      argument passes; a missing hook fails with the path only (no
+#      argument) and exit 1.
+#   F. the three find-driven loops (executable check, SKILL.md check, agent
+#      frontmatter check) each propagate a failure to the exit code, and a
+#      script path containing a space is still checked correctly.
+#   G. fresh scaffold: `go run ./cmd/ralph init --yes <tmp>` (when `go` is
+#      available) passes check-template.sh with no FAIL line.
 #
-# Spec: issue #183. The Go-side counterpart lives in
+# Spec: issue #183, issue #189. The Go-side counterpart lives in
 # internal/scaffold/embed_test.go (TestTemplateBaseScriptsMatchCheckTemplateRequiredFiles).
 
 set -u
@@ -39,7 +50,7 @@ fail() {
   printf '  FAIL: %s\n' "$1"
 }
 
-# The golden required_files list: the 6 non-script entries in their current
+# The golden required_files list: the 3 non-script entries in their current
 # order, followed by the 22 scripts/ entries, ordered here to match
 # internal/scaffold/embed_test.go's requiredTemplateScripts as a
 # readability convention only (the Go test compares both as sets, so
@@ -48,12 +59,9 @@ fail() {
 # scripts/check-template.sh, templates/base/scripts/check-template.sh, and
 # requiredTemplateScripts in internal/scaffold/embed_test.go.
 GOLDEN_ENTRIES=(
-  "README.md"
   "AGENTS.md"
   "CLAUDE.md"
   ".claude/settings.json"
-  "docs/research/approach-comparison.md"
-  "docs/roadmap/harness-maturity-model.md"
   "scripts/run-verify.sh"
   "scripts/run-static-verify.sh"
   "scripts/run-test.sh"
@@ -189,9 +197,188 @@ run_case_c() {
   fi
 }
 
+# --- D. root sanity: CI=true run from the repo root has no FAIL line -------
+run_case_d() {
+  local output rc
+
+  output="$(cd "$REPO_ROOT" && CI=true sh "$CHECK_TEMPLATE" 2>&1)"
+  rc=$?
+  if [ "$rc" -eq 0 ] \
+     && printf '%s\n' "$output" | grep -qF 'Template structure looks good.' \
+     && ! printf '%s\n' "$output" | grep -q '^FAIL:'; then
+    pass "D. CI=true sh check-template.sh from the repo root exits 0 with no FAIL line"
+  else
+    fail "D. CI=true sh check-template.sh from the repo root did NOT pass cleanly (exit $rc)"
+    printf '%s\n' "$output" | sed 's/^/    /'
+  fi
+}
+
+# --- E. settings hook-reference check: existing (with arg) vs missing ------
+run_case_e() {
+  local fixture output rc
+
+  fixture="$(mktemp -d "${TMPDIR:-/tmp}/check-template-hooks.XXXXXX")" || {
+    fail "E. mktemp -d failed; skipping the hook-reference cases"
+    return
+  }
+  trap 'rm -rf "$fixture"' EXIT
+
+  build_fixture "$fixture"
+  printf '#!/bin/sh\necho ok\n' > "$fixture/.claude/hooks/ok.sh"
+  chmod +x "$fixture/.claude/hooks/ok.sh"
+
+  cat > "$fixture/.claude/settings.json" <<'JSON'
+{
+  "hooks": {
+    "SessionStart": [
+      {"hooks": [{"type": "command", "command": "./.claude/hooks/ok.sh SessionStart"}]}
+    ]
+  }
+}
+JSON
+  output="$(cd "$fixture" && CI=true sh "$CHECK_TEMPLATE" 2>&1)"
+  rc=$?
+  if [ "$rc" -eq 0 ] && ! printf '%s\n' "$output" | grep -q '^FAIL:'; then
+    pass "E. an existing hook referenced with an argument passes with no FAIL"
+  else
+    fail "E. an existing hook referenced with an argument did NOT pass (exit $rc)"
+    printf '%s\n' "$output" | sed 's/^/    /'
+  fi
+
+  cat > "$fixture/.claude/settings.json" <<'JSON'
+{
+  "hooks": {
+    "SessionStart": [
+      {"hooks": [{"type": "command", "command": "./.claude/hooks/missing.sh SessionStart"}]}
+    ]
+  }
+}
+JSON
+  output="$(cd "$fixture" && CI=true sh "$CHECK_TEMPLATE" 2>&1)"
+  rc=$?
+  if [ "$rc" -ne 0 ] \
+     && printf '%s\n' "$output" | grep -qF 'FAIL: Settings file .claude/settings.json references missing hook: ./.claude/hooks/missing.sh' \
+     && ! printf '%s\n' "$output" | grep -qF './.claude/hooks/missing.sh SessionStart'; then
+    pass "E. a missing hook fails with the path only (no argument) and exit 1"
+  else
+    fail "E. a missing hook did NOT fail as expected (exit $rc)"
+    printf '%s\n' "$output" | sed 's/^/    /'
+  fi
+
+  rm -rf "$fixture"
+  trap - EXIT
+}
+
+# --- F. the three find-driven loops propagate failures ---------------------
+run_case_f() {
+  local fixture output rc
+
+  fixture="$(mktemp -d "${TMPDIR:-/tmp}/check-template-loops.XXXXXX")" || {
+    fail "F. mktemp -d failed; skipping the loop-propagation cases"
+    return
+  }
+  trap 'rm -rf "$fixture"' EXIT
+
+  build_fixture "$fixture"
+
+  # F1: a non-executable scripts/*.sh must fail the executable check.
+  printf '#!/bin/sh\n' > "$fixture/scripts/extra-nonexec.sh"
+  chmod -x "$fixture/scripts/extra-nonexec.sh"
+  output="$(cd "$fixture" && CI=true sh "$CHECK_TEMPLATE" 2>&1)"
+  rc=$?
+  if [ "$rc" -ne 0 ] && printf '%s\n' "$output" | grep -qF 'FAIL: Script is not executable: scripts/extra-nonexec.sh'; then
+    pass "F. a non-executable scripts/*.sh is detected and fails"
+  else
+    fail "F. a non-executable scripts/*.sh was NOT detected (exit $rc)"
+    printf '%s\n' "$output" | sed 's/^/    /'
+  fi
+  rm -f "$fixture/scripts/extra-nonexec.sh"
+
+  # F2: a skill dir without SKILL.md must fail.
+  mkdir -p "$fixture/.claude/skills/broken-skill"
+  output="$(cd "$fixture" && CI=true sh "$CHECK_TEMPLATE" 2>&1)"
+  rc=$?
+  if [ "$rc" -ne 0 ] && printf '%s\n' "$output" | grep -qF 'FAIL: Skill missing SKILL.md: .claude/skills/broken-skill'; then
+    pass "F. a skill dir without SKILL.md is detected and fails"
+  else
+    fail "F. a skill dir without SKILL.md was NOT detected (exit $rc)"
+    printf '%s\n' "$output" | sed 's/^/    /'
+  fi
+  rm -rf "$fixture/.claude/skills/broken-skill"
+
+  # F3: an agent file without a 'tools:' field must fail.
+  printf 'name: broken\ndescription: broken\n' > "$fixture/.claude/agents/broken-agent.md"
+  output="$(cd "$fixture" && CI=true sh "$CHECK_TEMPLATE" 2>&1)"
+  rc=$?
+  if [ "$rc" -ne 0 ] && printf '%s\n' "$output" | grep -qF "FAIL: Agent missing 'tools' field: .claude/agents/broken-agent.md"; then
+    pass "F. an agent file without 'tools:' is detected and fails"
+  else
+    fail "F. an agent file without 'tools:' was NOT detected (exit $rc)"
+    printf '%s\n' "$output" | sed 's/^/    /'
+  fi
+  rm -f "$fixture/.claude/agents/broken-agent.md"
+
+  # F4: a script path containing a space that IS executable must not fail.
+  mkdir -p "$fixture/scripts/with space"
+  printf '#!/bin/sh\n' > "$fixture/scripts/with space/exec.sh"
+  chmod +x "$fixture/scripts/with space/exec.sh"
+  output="$(cd "$fixture" && CI=true sh "$CHECK_TEMPLATE" 2>&1)"
+  rc=$?
+  if [ "$rc" -eq 0 ] && ! printf '%s\n' "$output" | grep -qF 'with space'; then
+    pass "F. an executable script path containing a space is not flagged"
+  else
+    fail "F. an executable script path containing a space was incorrectly flagged (exit $rc)"
+    printf '%s\n' "$output" | sed 's/^/    /'
+  fi
+  rm -rf "$fixture/scripts/with space"
+
+  rm -rf "$fixture"
+  trap - EXIT
+}
+
+# --- G. fresh scaffold: go run ./cmd/ralph init --yes <tmp> -----------------
+run_case_g() {
+  local fresh init_output output rc
+
+  if ! command -v go >/dev/null 2>&1; then
+    pass "G. fresh scaffold check skipped (go is unavailable)"
+    return
+  fi
+
+  fresh="$(mktemp -d "${TMPDIR:-/tmp}/check-template-fresh.XXXXXX")" || {
+    fail "G. mktemp -d failed; skipping the fresh scaffold case"
+    return
+  }
+  trap 'rm -rf "$fresh"' EXIT
+
+  if ! init_output="$(cd "$REPO_ROOT" && go run ./cmd/ralph init --yes "$fresh" 2>&1)"; then
+    fail "G. go run ./cmd/ralph init --yes $fresh failed"
+    printf '%s\n' "$init_output" | sed 's/^/    /'
+    rm -rf "$fresh"
+    trap - EXIT
+    return
+  fi
+
+  output="$(cd "$fresh" && CI=true sh scripts/check-template.sh 2>&1)"
+  rc=$?
+  if [ "$rc" -eq 0 ] && ! printf '%s\n' "$output" | grep -q '^FAIL:'; then
+    pass "G. a fresh ralph init scaffold passes check-template.sh with no FAIL line"
+  else
+    fail "G. a fresh ralph init scaffold did NOT pass check-template.sh (exit $rc)"
+    printf '%s\n' "$output" | sed 's/^/    /'
+  fi
+
+  rm -rf "$fresh"
+  trap - EXIT
+}
+
 run_case_a
 run_case_b
 run_case_c
+run_case_d
+run_case_e
+run_case_f
+run_case_g
 
 printf '\ntest-check-template: %s passed, %s failed\n' "$pass_count" "$fail_count"
 [ "$fail_count" -eq 0 ]

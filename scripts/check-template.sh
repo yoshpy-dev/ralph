@@ -8,14 +8,25 @@ fail() {
   status=1
 }
 
+# All find-driven loops below read from a temp file instead of piping into
+# `while` (a pipeline runs the loop body in a subshell, so `fail`'s
+# status=1 never reaches this shell) or looping over `$(find ...)` directly
+# (word-splits on whitespace, breaking on paths containing spaces).
+tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/check-template.XXXXXX")"
+cleanup() {
+  rm -rf "$tmpdir"
+}
+trap cleanup EXIT
+
 # --- Required files ---
+# README.md, docs/research/approach-comparison.md, and
+# docs/roadmap/harness-maturity-model.md are meta-repo-only: scaffolded
+# projects never receive them, so they are intentionally not listed here
+# (issue #189).
 required_files="
-README.md
 AGENTS.md
 CLAUDE.md
 .claude/settings.json
-docs/research/approach-comparison.md
-docs/roadmap/harness-maturity-model.md
 scripts/run-verify.sh
 scripts/run-static-verify.sh
 scripts/run-test.sh
@@ -48,35 +59,44 @@ done
 
 # --- Shell scripts must be executable ---
 # .claude/hooks/local/ is reserved for user-local (gitignored) hooks; skip.
-for script in $(find .claude/hooks packs scripts -type f -name '*.sh' -not -path '.claude/hooks/local/*'); do
+find .claude/hooks packs scripts -type f -name '*.sh' -not -path '.claude/hooks/local/*' \
+  > "$tmpdir/scripts.list" 2>/dev/null || true
+while IFS= read -r script; do
   if [ ! -x "$script" ]; then
     fail "Script is not executable: $script"
   fi
-done
+done < "$tmpdir/scripts.list"
 
 # --- Every skill directory must have a SKILL.md ---
-for skill_dir in $(find .claude/skills -mindepth 1 -maxdepth 1 -type d); do
+find .claude/skills -mindepth 1 -maxdepth 1 -type d > "$tmpdir/skills.list" 2>/dev/null || true
+while IFS= read -r skill_dir; do
   if [ ! -f "$skill_dir/SKILL.md" ]; then
     fail "Skill missing SKILL.md: $skill_dir"
   fi
-done
+done < "$tmpdir/skills.list"
 
 # --- Every agent file must have required frontmatter fields ---
-for agent_file in $(find .claude/agents -type f -name '*.md'); do
+find .claude/agents -type f -name '*.md' > "$tmpdir/agents.list" 2>/dev/null || true
+while IFS= read -r agent_file; do
   for field in name description tools; do
     if ! grep -q "^${field}:" "$agent_file"; then
       fail "Agent missing '$field' field: $agent_file"
     fi
   done
-done
+done < "$tmpdir/agents.list"
 
 # --- Settings file must reference only existing hook scripts ---
 if [ -f .claude/settings.json ]; then
-  grep -o '"\./.claude/hooks/[^"]*"' .claude/settings.json 2>/dev/null | tr -d '"' | while IFS= read -r hook_path; do
+  grep -o '"\./.claude/hooks/[^"]*"' .claude/settings.json 2>/dev/null | tr -d '"' \
+    > "$tmpdir/hooks.list" || true
+  while IFS= read -r hook_cmd; do
+    # Settings commands are "./.claude/hooks/<file> <args...>"; keep only
+    # the path (the first word) so an argument is never checked as a path.
+    hook_path=${hook_cmd%% *}
     if [ ! -f "$hook_path" ]; then
       fail "Settings file .claude/settings.json references missing hook: $hook_path"
     fi
-  done
+  done < "$tmpdir/hooks.list"
 fi
 
 # --- git secret hook installation check (local only) ---
