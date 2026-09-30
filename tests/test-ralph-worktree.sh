@@ -180,10 +180,6 @@ assert_not_contains() {
   fi
 }
 
-# _cx_new_repo — create a fresh git repo on main with the fixture
-# .codex/config.toml committed; prints the repo's physical (symlink-free)
-# path, matching the pwd -P resolution done for $_repo above so stderr
-# text built from `git rev-parse --show-toplevel` compares equal to it.
 _cx_fixture="$_tmp/codex-fixture.toml"
 cat > "$_cx_fixture" <<'FIXTURE'
 # .codex/config.toml — test fixture.
@@ -202,20 +198,68 @@ model = "gpt-5.5"
 approval_policy = "on-request"
 FIXTURE
 
+# _cx_new_repo [head-fixture-file] [target-dir] — create a fresh git repo
+# on main with README.md committed. Unless head-fixture-file is "-", also
+# commit .codex/config.toml copied from it (default: $_cx_fixture); "-"
+# skips creating .codex/config.toml at all, so HEAD has no such path.
+# target-dir defaults to a fresh `mktemp -d` under $_tmp; pass one
+# explicitly for a path shape mktemp cannot produce (e.g. one containing a
+# space). Prints the repo's physical (symlink-free) path, matching the
+# pwd -P resolution done for $_repo above so stderr text built from
+# `git rev-parse --show-toplevel` compares equal to it.
 _cx_new_repo() {
-  _cx_dir="$(mktemp -d "$_tmp/codex-repo.XXXXXX")"
-  mkdir -p "$_cx_dir/.codex"
-  cp "$_cx_fixture" "$_cx_dir/.codex/config.toml"
+  _cx_src="${1:-$_cx_fixture}"
+  _cx_target_dir="${2:-}"
+  if [ -n "$_cx_target_dir" ]; then
+    mkdir -p "$_cx_target_dir"
+    _cx_dir="$_cx_target_dir"
+  else
+    _cx_dir="$(mktemp -d "$_tmp/codex-repo.XXXXXX")"
+  fi
   (
     cd "$_cx_dir"
     git init -b main >/dev/null
     git config user.email test@example.com
     git config user.name "Ralph Test"
     printf 'hello\n' > README.md
-    git add README.md .codex/config.toml
+    git add README.md
+    if [ "$_cx_src" != "-" ]; then
+      mkdir -p .codex
+      cp "$_cx_src" .codex/config.toml
+      git add .codex/config.toml
+    fi
     git commit -m 'chore: initial' >/dev/null
   )
   cd "$_cx_dir" && pwd -P
+}
+
+# _cx_write_rewrite_shape <target-file> [approval-policy-value] — write the
+# fixture's HEAD content with comments and blank lines removed and a
+# [shell_environment_policy] + [shell_environment_policy.set] table
+# appended (the match shape reused by several cases below). An optional
+# second argument replaces approval_policy's value, used to prove a
+# genuine value change alongside the match shape still falls back to the
+# generic message.
+_cx_write_rewrite_shape() {
+  _cx_target="$1"
+  _cx_approval="${2:-on-request}"
+  cat > "$_cx_target" <<CX_REWRITE
+model = "gpt-5.5"
+sandbox_mode = "danger-full-access"
+
+[features]
+hooks = true
+
+[profiles.work]
+model = "gpt-5.5"
+approval_policy = "$_cx_approval"
+
+[shell_environment_policy]
+inherit = "core"
+
+[shell_environment_policy.set]
+SOME_VAR = "1"
+CX_REWRITE
 }
 
 # _cx_run <repo> — run validate-clean-base main in <repo>; sets $_cx_stderr
@@ -253,23 +297,7 @@ _cx_assert_specific() {
 # specific message (also via ensure), then the printed recovery commands
 # actually restore a clean, passing state.
 _cx_repo1="$(_cx_new_repo)"
-cat > "$_cx_repo1/.codex/config.toml" <<'CASE1'
-model = "gpt-5.5"
-sandbox_mode = "danger-full-access"
-
-[features]
-hooks = true
-
-[profiles.work]
-model = "gpt-5.5"
-approval_policy = "on-request"
-
-[shell_environment_policy]
-inherit = "core"
-
-[shell_environment_policy.set]
-SOME_VAR = "1"
-CASE1
+_cx_write_rewrite_shape "$_cx_repo1/.codex/config.toml"
 _cx_run "$_cx_repo1"
 _cx_assert_specific "case 1 (match shape)" "$_cx_repo1"
 
@@ -315,39 +343,13 @@ _cx_assert_specific "case 3 (table appended only)" "$_cx_repo3"
 
 # Case 4: match shape plus one changed value -> generic message.
 _cx_repo4="$(_cx_new_repo)"
-cat > "$_cx_repo4/.codex/config.toml" <<'CASE4'
-model = "gpt-5.5"
-sandbox_mode = "danger-full-access"
-
-[features]
-hooks = true
-
-[profiles.work]
-model = "gpt-5.5"
-approval_policy = "never"
-
-[shell_environment_policy]
-inherit = "core"
-CASE4
+_cx_write_rewrite_shape "$_cx_repo4/.codex/config.toml" "never"
 _cx_run "$_cx_repo4"
 _cx_assert_generic "case 4 (value changed alongside match shape)"
 
 # Case 5: match shape plus another dirty tracked file -> generic message.
 _cx_repo5="$(_cx_new_repo)"
-cat > "$_cx_repo5/.codex/config.toml" <<'CASE5'
-model = "gpt-5.5"
-sandbox_mode = "danger-full-access"
-
-[features]
-hooks = true
-
-[profiles.work]
-model = "gpt-5.5"
-approval_policy = "on-request"
-
-[shell_environment_policy]
-inherit = "core"
-CASE5
+_cx_write_rewrite_shape "$_cx_repo5/.codex/config.toml"
 printf 'dirty\n' >> "$_cx_repo5/README.md"
 _cx_run "$_cx_repo5"
 _cx_assert_generic "case 5 (another dirty tracked file)"
@@ -381,68 +383,32 @@ rm -f "$_cx_repo7/scratch.txt"
 
 # Case 8: match shape fully staged -> generic message.
 _cx_repo8="$(_cx_new_repo)"
-cat > "$_cx_repo8/.codex/config.toml" <<'CASE8'
-model = "gpt-5.5"
-sandbox_mode = "danger-full-access"
-
-[features]
-hooks = true
-
-[profiles.work]
-model = "gpt-5.5"
-approval_policy = "on-request"
-
-[shell_environment_policy]
-inherit = "core"
-CASE8
+_cx_write_rewrite_shape "$_cx_repo8/.codex/config.toml"
 git -C "$_cx_repo8" add .codex/config.toml
 _cx_run "$_cx_repo8"
 _cx_assert_generic "case 8 (staged rewrite)"
 
 # Case 9: match shape partially staged (MM) -> generic message.
 _cx_repo9="$(_cx_new_repo)"
-cat > "$_cx_repo9/.codex/config.toml" <<'CASE9A'
-model = "gpt-5.5"
-sandbox_mode = "danger-full-access"
-
-[features]
-hooks = true
-
-[profiles.work]
-model = "gpt-5.5"
-approval_policy = "on-request"
-
-[shell_environment_policy]
-inherit = "core"
-CASE9A
+_cx_write_rewrite_shape "$_cx_repo9/.codex/config.toml"
 git -C "$_cx_repo9" add .codex/config.toml
-printf '\n[shell_environment_policy.set]\nSOME_VAR = "1"\n' >> "$_cx_repo9/.codex/config.toml"
+printf '\n[shell_environment_policy.extra]\nOTHER_VAR = "2"\n' >> "$_cx_repo9/.codex/config.toml"
 _cx_run "$_cx_repo9"
 _cx_assert_generic "case 9 (partially staged rewrite)"
 
 # Case 10: HEAD has a multi-line string whose body contains a '#' line, and
 # the working copy drops that line -> generic message (Codex advisory
 # counter-example; the guard must not treat it as a comment removal).
-_cx_repo10="$(mktemp -d "$_tmp/codex-repo.XXXXXX")"
-mkdir -p "$_cx_repo10/.codex"
-cat > "$_cx_repo10/.codex/config.toml" <<'CASE10HEAD'
+_cx_multiline_fixture="$_tmp/codex-fixture-multiline.toml"
+cat > "$_cx_multiline_fixture" <<'MLHEAD'
 description = """
 Line one
 # looks like a comment but is not
 Line three
 """
 model = "gpt-5.5"
-CASE10HEAD
-(
-  cd "$_cx_repo10"
-  git init -b main >/dev/null
-  git config user.email test@example.com
-  git config user.name "Ralph Test"
-  printf 'hello\n' > README.md
-  git add README.md .codex/config.toml
-  git commit -m 'chore: initial' >/dev/null
-)
-_cx_repo10="$(cd "$_cx_repo10" && pwd -P)"
+MLHEAD
+_cx_repo10="$(_cx_new_repo "$_cx_multiline_fixture")"
 cat > "$_cx_repo10/.codex/config.toml" <<'CASE10WORK'
 description = """
 Line one
@@ -453,38 +419,19 @@ CASE10WORK
 _cx_run "$_cx_repo10"
 _cx_assert_generic "case 10 (multi-line string guard)"
 
-# Case 11: match shape with CRLF line endings -> specific message.
+# Case 11: match shape with CRLF line endings -> generic message. The
+# classifier compares raw lines (no CR stripping), so a line-ending-only
+# change is no longer indistinguishable from the known rewrite.
 _cx_repo11="$(_cx_new_repo)"
-awk '{printf "%s\r\n", $0}' <<'CASE11' > "$_cx_repo11/.codex/config.toml"
-model = "gpt-5.5"
-sandbox_mode = "danger-full-access"
-
-[features]
-hooks = true
-
-[profiles.work]
-model = "gpt-5.5"
-approval_policy = "on-request"
-
-[shell_environment_policy]
-inherit = "core"
-CASE11
+_cx_write_rewrite_shape "$_cx_repo11/.codex/config.toml"
+awk '{printf "%s\r\n", $0}' "$_cx_repo11/.codex/config.toml" > "$_cx_repo11/.codex/config.toml.crlf"
+mv "$_cx_repo11/.codex/config.toml.crlf" "$_cx_repo11/.codex/config.toml"
 _cx_run "$_cx_repo11"
-_cx_assert_specific "case 11 (CRLF line endings)" "$_cx_repo11"
+_cx_assert_generic "case 11 (CRLF line endings)"
 
 # Case 12: .codex/config.toml absent from HEAD (untracked new file) ->
 # generic message.
-_cx_repo12="$(mktemp -d "$_tmp/codex-repo.XXXXXX")"
-(
-  cd "$_cx_repo12"
-  git init -b main >/dev/null
-  git config user.email test@example.com
-  git config user.name "Ralph Test"
-  printf 'hello\n' > README.md
-  git add README.md
-  git commit -m 'chore: initial' >/dev/null
-)
-_cx_repo12="$(cd "$_cx_repo12" && pwd -P)"
+_cx_repo12="$(_cx_new_repo -)"
 mkdir -p "$_cx_repo12/.codex"
 cp "$_cx_fixture" "$_cx_repo12/.codex/config.toml"
 _cx_run "$_cx_repo12"
@@ -494,6 +441,134 @@ _cx_assert_generic "case 12 (.codex/config.toml untracked/new)"
 _cx_repo13="$(_cx_new_repo)"
 _cx_run "$_cx_repo13"
 assert_eq "case 13 (clean base) exits 0" 0 "$_cx_exit"
+
+# Case 14: a HEAD comment's content is changed (not deleted) -> generic
+# message. Comparison is raw-line, so the working-tree comment no longer
+# equals the next kept HEAD line.
+_cx_repo14="$(_cx_new_repo)"
+cat > "$_cx_repo14/.codex/config.toml" <<'CASE14'
+# .codex/config.toml — test fixture.
+#
+# A DIFFERENT leading comment block, not a deletion.
+
+model = "gpt-5.5"
+sandbox_mode = "danger-full-access"
+
+[features]
+# hooks comment
+hooks = true
+
+[profiles.work]
+model = "gpt-5.5"
+approval_policy = "on-request"
+CASE14
+_cx_run "$_cx_repo14"
+_cx_assert_generic "case 14 (comment content changed, not deleted)"
+
+# Case 15: a new comment line is added (nothing deleted) -> generic
+# message. The added line is not the next kept HEAD line either.
+_cx_repo15="$(_cx_new_repo)"
+cat > "$_cx_repo15/.codex/config.toml" <<'CASE15'
+# .codex/config.toml — test fixture.
+#
+# A leading comment block explaining the file.
+# A newly added comment, not present in HEAD.
+
+model = "gpt-5.5"
+sandbox_mode = "danger-full-access"
+
+[features]
+# hooks comment
+hooks = true
+
+[profiles.work]
+model = "gpt-5.5"
+approval_policy = "on-request"
+CASE15
+_cx_run "$_cx_repo15"
+_cx_assert_generic "case 15 (comment added, not deleted)"
+
+# Case 16: a kept value line's indentation changes, nothing else -> generic
+# message (raw-line comparison, no whitespace trimming).
+_cx_repo16="$(_cx_new_repo)"
+cat > "$_cx_repo16/.codex/config.toml" <<'CASE16'
+# .codex/config.toml — test fixture.
+#
+# A leading comment block explaining the file.
+
+  model = "gpt-5.5"
+sandbox_mode = "danger-full-access"
+
+[features]
+# hooks comment
+hooks = true
+
+[profiles.work]
+model = "gpt-5.5"
+approval_policy = "on-request"
+CASE16
+_cx_run "$_cx_repo16"
+_cx_assert_generic "case 16 (indentation-only change on a kept value line)"
+
+# Case 17: a header with a trailing comment is appended after a genuine
+# shell_environment_policy table -> generic message (a bracketed line is
+# only ever accepted when it is exactly a shell_environment_policy header;
+# "[features2] # c" must not be absorbed as a key = value line even while
+# a preceding policy table put the walk in the "inside a policy table"
+# state).
+_cx_repo17="$(_cx_new_repo)"
+cat > "$_cx_repo17/.codex/config.toml" <<'CASE17'
+# .codex/config.toml — test fixture.
+#
+# A leading comment block explaining the file.
+
+model = "gpt-5.5"
+sandbox_mode = "danger-full-access"
+
+[features]
+# hooks comment
+hooks = true
+
+[profiles.work]
+model = "gpt-5.5"
+approval_policy = "on-request"
+
+[shell_environment_policy]
+inherit = "core"
+
+[features2] # c
+foo = true
+CASE17
+_cx_run "$_cx_repo17"
+_cx_assert_generic "case 17 (header with trailing comment appended after a policy table)"
+
+# Case 18: HEAD's .codex/config.toml is empty (0 bytes) and the working
+# copy is only an appended shell_environment_policy table -> specific
+# message (regression test for the FNR == NR / empty-first-file bug).
+_cx_empty_fixture="$_tmp/codex-fixture-empty.toml"
+: > "$_cx_empty_fixture"
+_cx_repo18="$(_cx_new_repo "$_cx_empty_fixture")"
+cat > "$_cx_repo18/.codex/config.toml" <<'CASE18'
+[shell_environment_policy]
+inherit = "core"
+CASE18
+_cx_run "$_cx_repo18"
+_cx_assert_specific "case 18 (HEAD's .codex/config.toml is empty)" "$_cx_repo18"
+
+# Case 19: the repo root path contains a space -> specific message with a
+# %q-quoted root in the three recovery commands, and the printed checkout
+# command, run verbatim through `bash -c`, actually restores a clean,
+# passing state.
+_cx_repo19="$(_cx_new_repo "$_cx_fixture" "$_tmp/codex repo with space")"
+_cx_write_rewrite_shape "$_cx_repo19/.codex/config.toml"
+_cx_run "$_cx_repo19"
+assert_eq "case 19 (root path has a space): exits non-zero" 1 "$_cx_exit"
+assert_contains "case 19 (root path has a space): mentions external rewrite" "external rewrite" "$_cx_stderr"
+_cx_checkout_line="$(printf '%s\n' "$_cx_stderr" | grep 'checkout -- .codex/config.toml' | sed 's/^[[:space:]]*//')"
+bash -c "$_cx_checkout_line"
+assert_eq "case 19 (root path has a space): status is clean after the printed checkout" "" "$(git -C "$_cx_repo19" status --porcelain)"
+_cx_run "$_cx_repo19"
+assert_eq "case 19 (root path has a space): validate-clean-base now passes" 0 "$_cx_exit"
 
 printf '\nralph-worktree tests: %s passed, %s failed, %s total\n' "$_pass" "$_fail" "$_total"
 [ "$_fail" -eq 0 ]

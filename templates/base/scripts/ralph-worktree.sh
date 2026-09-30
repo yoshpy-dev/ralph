@@ -87,78 +87,82 @@ abs_from_repo_root() {
 # default_branch is provided by ralph-common.sh (sourced above).
 
 # codex_config_external_rewrite_only — true when the working tree's only
-# change to .codex/config.toml is the known external rewrite: comment and
-# blank lines removed and/or a trailing [shell_environment_policy] (or
-# dotted [shell_environment_policy.<name>]) table appended, with everything
-# else identical to HEAD. Callers must already know `git status --porcelain`
-# is exactly " M .codex/config.toml" before calling this — it does not
-# re-check that itself. A multi-line TOML string ("""/''') in either version
+# change to .codex/config.toml is the known external rewrite: HEAD's
+# comment and/or blank lines deleted, and/or trailing
+# [shell_environment_policy] (or dotted [shell_environment_policy.<name>])
+# tables appended, with every other line byte-for-byte identical to HEAD
+# (no whitespace trimming, no CR stripping — a changed or added comment,
+# re-indentation, a line-ending change, an appended non-policy table, or an
+# appended comment all fall through to the generic "uncommitted changes"
+# message instead). Callers must already know `git status --porcelain` is
+# exactly " M .codex/config.toml" before calling this — that guarantees the
+# file differs from HEAD in some way, so this function does not special-case
+# "no difference at all". A multi-line TOML string ("""/''') on either side
 # disables the check: line-based normalization cannot tell a real
 # comment/blank line from one that is only part of the string's value.
 codex_config_external_rewrite_only() {
-  local root work_file head_file result
+  local root work_file result
   root="$(git rev-parse --show-toplevel)"
   work_file="${root}/.codex/config.toml"
   [ -f "$work_file" ] || return 1
-  head_file="$(mktemp "${TMPDIR:-/tmp}/ralph-worktree-codex-config.XXXXXX")" || return 1
-  if ! git -C "$root" show 'HEAD:.codex/config.toml' >"$head_file" 2>/dev/null; then
-    rm -f "$head_file"
-    return 1
-  fi
-  if grep -q '"""' "$head_file" "$work_file" 2>/dev/null ||
-     grep -q "'''" "$head_file" "$work_file" 2>/dev/null; then
-    rm -f "$head_file"
-    return 1
-  fi
-  result="$(awk '
-    function normalize(line,    t) {
-      sub(/\r$/, "", line)
-      t = line
-      sub(/^[ \t]+/, "", t)
-      sub(/[ \t]+$/, "", t)
-      return t
+  git -C "$root" cat-file -e 'HEAD:.codex/config.toml' 2>/dev/null || return 1
+  result="$(git -C "$root" show 'HEAD:.codex/config.toml' | awk -v q3="'''" '
+    function is_blank(line) { return (line ~ /^[ \t]*$/) }
+    function is_comment(line) { return (line ~ /^[ \t]*#/) }
+    function is_skippable(line) { return (is_blank(line) || is_comment(line)) }
+    function is_sep_header(line) {
+      return (line ~ /^\[shell_environment_policy(\.[A-Za-z0-9_-]+)?\]$/)
     }
-    function is_skippable(t) {
-      return (t == "" || t ~ /^#/)
+    function has_multiline(line) {
+      return (index(line, "\"\"\"") > 0 || index(line, q3) > 0)
     }
-    function is_sep_header(t) {
-      return (t ~ /^\[[ \t]*shell_environment_policy([ \t]*\.[ \t]*[A-Za-z0-9_-]+)?[ \t]*\]$/)
-    }
-    function is_any_header(t) {
-      return (t ~ /^\[.*\]$/)
-    }
-    FNR == NR {
-      t = normalize($0)
-      if (!is_skippable(t)) { old[++old_n] = t }
+    # HEAD reaches awk over stdin as "-"; FILENAME (not FNR == NR) tells the
+    # two inputs apart so an empty HEAD file does not get misread as the
+    # start of the working-tree file (FNR and NR coincide on record 1 of the
+    # second file whenever the first file contributed zero records).
+    FILENAME == "-" {
+      if (has_multiline($0)) { multiline = 1 }
+      old[++old_n] = $0
       next
     }
     {
-      t = normalize($0)
-      if (!is_skippable(t)) { new[++new_n] = t }
+      if (has_multiline($0)) { multiline = 1 }
+      new[++new_n] = $0
     }
     END {
-      if (new_n + 0 < old_n + 0) { print "NOMATCH"; exit }
-      for (i = 1; i <= old_n; i++) {
-        if (new[i] != old[i]) { print "NOMATCH"; exit }
-      }
-      in_sep = 0
-      for (i = old_n + 1; i <= new_n; i++) {
-        t = new[i]
-        if (is_any_header(t)) {
-          if (is_sep_header(t)) { in_sep = 1 } else { print "NOMATCH"; exit }
-        } else if (!in_sep) {
+      if (multiline) { print "NOMATCH"; exit }
+      i = 0
+      j = 0
+      while (i < old_n) {
+        cur = old[i + 1]
+        if (j < new_n && new[j + 1] == cur) {
+          i++
+          j++
+        } else if (is_skippable(cur)) {
+          i++
+        } else {
           print "NOMATCH"; exit
         }
       }
+      in_sep = 0
+      for (k = j + 1; k <= new_n; k++) {
+        nl = new[k]
+        if (is_blank(nl)) { continue }
+        if (is_comment(nl)) { print "NOMATCH"; exit }
+        if (nl ~ /^\[/) {
+          if (is_sep_header(nl)) { in_sep = 1; continue }
+          print "NOMATCH"; exit
+        }
+        if (!in_sep) { print "NOMATCH"; exit }
+      }
       print "MATCH"
     }
-  ' "$head_file" "$work_file")"
-  rm -f "$head_file"
+  ' - "$work_file")"
   [ "$result" = "MATCH" ]
 }
 
 validate_clean_base() {
-  local base current dirty root msg
+  local base current dirty root qroot msg
   base="${1:-$(default_branch)}"
   git rev-parse --verify "${base}^{commit}" >/dev/null 2>&1 ||
     die "base branch not found: $base"
@@ -169,13 +173,14 @@ validate_clean_base() {
   if [ -n "$dirty" ]; then
     if [ "$dirty" = " M .codex/config.toml" ] && codex_config_external_rewrite_only; then
       root="$(git rev-parse --show-toplevel)"
-      msg="base branch '${base}' has uncommitted changes only in .codex/config.toml, and they look like the known external rewrite (comments removed and/or a [shell_environment_policy] table appended; see docs/recipes/codex-setup.md).
+      printf -v qroot '%q' "$root"
+      msg="base branch '${base}' has uncommitted changes only in .codex/config.toml, and they look like the known external rewrite (comment or blank lines deleted and/or a [shell_environment_policy] table appended; see docs/recipes/codex-setup.md).
 Review the diff:
-  git -C ${root} diff -- .codex/config.toml
+  git -C ${qroot} diff -- .codex/config.toml
 If that is the only change, restore it:
-  git -C ${root} checkout -- .codex/config.toml
+  git -C ${qroot} checkout -- .codex/config.toml
 Then confirm it is clean and re-run:
-  git -C ${root} status --porcelain
+  git -C ${qroot} status --porcelain
 (should print nothing)"
       die "$msg"
     fi

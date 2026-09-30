@@ -128,11 +128,16 @@ and retry once you can run the upgrade end-to-end.
 
 Symptom: `ralph-worktree.sh ensure` (via `/plan`, `/spec`) or
 `validate-clean-base` stops with an "uncommitted changes" error, and
-`.codex/config.toml` has lost all of its comments and/or gained a trailing
-`[shell_environment_policy]` table it did not have before. `ralph-worktree.sh`
-recognizes this specific shape and explains it directly in the error message
-with recovery commands; any other kind of dirty state still gets the generic
-"has uncommitted changes" message.
+`.codex/config.toml` has lost some or all of its comment/blank lines and/or
+gained a trailing `[shell_environment_policy]` table it did not have
+before, with every other line otherwise byte-for-byte identical to the
+tracked version. `ralph-worktree.sh` recognizes exactly that shape and
+explains it directly in the error message with recovery commands. Anything
+else — a changed or added comment, re-indentation, a line-ending change, an
+appended table that is not `shell_environment_policy`, or a comment
+appended after one — is reported as an ordinary uncommitted change instead
+(the generic "has uncommitted changes" message), same as any other kind of
+dirty state.
 
 Check the diff before doing anything else:
 
@@ -151,13 +156,17 @@ git status --porcelain   # should print nothing
 confirm parity with `cmp .codex/config.toml templates/base/.codex/config.toml`.)
 
 Cause: not yet identified. Ruled out: the Claude Code `openai-codex` and
-`everything-claude-code` plugins (neither writes to `.codex/config.toml` or
-`shell_environment_policy`), ralph's own Go code (only reads
-`.codex/config.toml`), and codex's regular config-writing subcommands
-(`codex features enable ...` writes the user-level config, not the project
-one, confirmed in an isolated probe). Remaining candidates: an interactive
-codex TUI dialog (project trust, hook trust, model migration), the Codex
-desktop app or IDE extension, or config migration on a codex version update.
+`everything-claude-code` plugins (neither writes to the *project's*
+`.codex/config.toml`; `everything-claude-code` does write a
+`shell_environment_policy`-free `[features]` entry to the user-level
+config, but that is a different file), ralph's own Go code (only reads
+`.codex/config.toml`), and `codex features enable ...` (one of codex's
+config-writing subcommands, not all of them): in an isolated probe it
+writes the user-level config regardless of whether the project is marked
+trusted, and never touches the project one. Remaining candidates: an
+interactive codex TUI dialog (project trust, hook trust, model migration),
+the Codex desktop app or IDE extension, or config migration on a codex
+version update.
 See `docs/evidence/codex-config-rewrite-2026-09-30.md` for the
 full write-up and what evidence to capture if it happens again.
 

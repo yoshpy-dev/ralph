@@ -31,9 +31,15 @@ codex-companion が書き込む」だったが、ソースを読む限り当た�
   SessionStart / SessionEnd / Stop の 3 つで、いずれも Codex の設定ファイルを
   書く処理を持たない。
 - `everything-claude-code` プラグイン(`~/.claude/plugins/cache/everything-claude-code/`)
-  の `scripts/sync-ecc-to-codex.sh` と `scripts/codex/merge-codex-config.js` は
-  Codex 向けの設定をマージするが、対象は ECC 自身のフック定義であり、
-  `shell_environment_policy` は生成しない。プラグインの `hooks.json` には
+  の `scripts/sync-ecc-to-codex.sh` は `scripts/codex/merge-codex-config.js`
+  経由で書き込みを行うが、その対象はユーザーレベルの config
+  (既定 `~/.codex/config.toml`、ECC 1.9.0 の `sync-ecc-to-codex.sh:24-26`、
+  `merge-codex-config.js:313`)であり、project の `.codex/config.toml` では
+  ない。追記だけなので、書き込み先のコメントを剥がすこともない。つまり
+  「project の `.codex/config.toml` にはどちらのプラグインも書かない」が
+  正確な言い方で、ユーザーレベルの config への書き込みは
+  everything-claude-code に限って起きる(対象は ECC 自身のフック定義で、
+  `shell_environment_policy` は生成しない)。プラグインの `hooks.json` には
   codex 関連のイベント登録がない。
 
 ### ralph 自身のコード
@@ -54,29 +60,47 @@ ralph の Go コードで `.codex/config.toml` を参照しているのは
 config に移した。観測される書き換えは「ユーザーレベルに移した table が、
 コメントを落とした再シリアライズとともに project 側に戻ってくる」形をしている。
 
-これが codex の通常の設定変更(`codex features enable` などの config
-書き込みサブコマンド)によるものかどうかを、隔離した環境で確認した。
+これが codex の config 書き込みサブコマンドの 1 つ(`codex features
+enable <feature>`)によるものかどうかを、隔離した環境で確認した。示せるのは
+このサブコマンド 1 つについての結果までで、codex の設定変更サブコマンド
+全般を検証したわけではない。
 
-**probe 手順**(実際の `~/.codex` は使わない):
+**probe 手順**(実際の `~/.codex` は使わない)、1 回目・project が未 trust:
 
 1. scratch ディレクトリに偽の `HOME` / `CODEX_HOME` を用意する。
 2. 偽ユーザーレベルの config に `shell_environment_policy` テーブルと
-   コメントを持つ内容を置く。
+   コメントを持つ内容を置く。project を trust 済みにする `[projects."<path>"]`
+   の記述は置かない(= project は未 trust の状態)。
 3. 別の scratch ディレクトリに project を模した `.codex/config.toml`
    (このリポジトリの template 相当のコメント付き内容)を置く。
-4. project ディレクトリの中で、config を書き込む codex のサブコマンド
-   (`codex features enable <feature>`)を実行する。
+4. project ディレクトリの中で `codex features enable <feature>` を実行する。
 
 **結果**: 書き込まれたのはユーザーレベルの config のみだった。コメントは
 残ったまま、`[features]` テーブルが追記されただけで、`shell_environment_policy`
 には触れなかった。project 側の `.codex/config.toml` は変化しなかった。
-→ codex の通常の設定変更コマンドは、観測された書き換えの原因ではない。
+
+project が未 trust だと、codex は project レイヤの config をそもそも
+読まない可能性がある(`docs/recipes/codex-setup.md` の「One-time setup」
+が `codex trust .` を必須としているのはこのため)。その場合、この 1 回目の
+probe は project レイヤの読み込み・書き込み経路を通っていない疑いが残る。
+
+**2 回目・project を trust 済みにして再実行**: 偽ユーザーレベルの config に
+`[projects."<project の絶対パス>"] trust_level = "trusted"` を追記し、同じ
+project ディレクトリの中で同じ `codex features enable <feature>` を実行した。
+
+**結果**: trust 済みでも書き込み先は変わらなかった。ユーザーレベルの config
+にコメントを残したまま `[features]` テーブルが追記され、project 側の
+`.codex/config.toml` は 1 回目と同様に変化しなかった。
+→ `codex features enable` は、project が未 trust か trust 済みかに関わらず、
+観測された書き換えの原因ではない。他の config 書き込みサブコマンドは未確認。
 
 ### `codex exec` そのもの
 
 2026-09-27〜30 のこの session 中、worktree から `codex exec` /
 `codex exec review` を 15 回以上実行したが、書き換えは一度も発生しなかった。
-→ `codex exec` の起動・終了そのものは原因ではない。
+示せたのは毎回起きるわけではないことまでで、`codex exec` の起動・終了への
+関与を否定する根拠にはならない(対話的な操作を伴わない実行では起きていない、
+という観測範囲の言い方が正確)。
 
 ## 残る候補(未確認)
 
@@ -97,8 +121,12 @@ config に移した。観測される書き換えは「ユーザーレベルに�
 以下を記録する。
 
 ```sh
-# 書き換わったファイルの最終更新時刻
-stat -f '%Sm %N' .codex/config.toml
+# 書き換わったファイルの最終更新時刻(タイムゾーンのオフセット付き。
+# macOS / BSD の stat 用。codex のログの時刻と照合するときに、
+# オフセットがないとローカル時刻がどちらのタイムゾーンか分からず、
+# 9 時間ずれて照合する余地がある)
+stat -f '%Sm %N' -t '%Y-%m-%dT%H:%M:%S%z' .codex/config.toml
+# GNU coreutils(Linux)なら代わりに: stat -c '%y %n' .codex/config.toml
 
 # そのとき動いていた codex 関連プロセスと親プロセス
 ps -axo pid,ppid,lstart,command | grep -i codex
@@ -115,9 +143,14 @@ ps -axo pid,ppid,lstart,command | grep -i codex
 ## この調査が変えたこと
 
 原因そのものは特定できなかったが、`scripts/ralph-worktree.sh` の
-`validate_clean_base` に検知を追加し、書き換えの形(コメント・空行の削除、
-および/または末尾への `[shell_environment_policy]` テーブルの追加)に一致する
-ときだけ、専用の理由と戻し方を表示して止まるようにした。原因不明のまま
-再発しても、影響(worktree 作成の停止)と復旧手順はその場で分かるようにする
-ための対応。詳細は `docs/plans/active/2026-09-30-codex-config-rewrite-detect.md`
-と `docs/recipes/codex-setup.md` を参照。
+`validate_clean_base` に検知を追加した。HEAD のコメント・空行が削除
+された分だけを見逃し、それ以外の行は HEAD と一字一句一致することを求め、
+HEAD の内容を使い切った後に残る作業ツリー側の行だけを
+`[shell_environment_policy]`(または dotted な `[shell_environment_policy.<name>]`)
+テーブルとその配下の `key = value` 行として許す。コメントの書き換えや
+追加、インデントだけの変更、改行コードの変更はこの一致から外れ、他の
+どの dirty な状態とも同じ一般の文言になる。この形に一致するときだけ、
+専用の理由と戻し方を表示して止まる。原因不明のまま再発しても、影響
+(worktree 作成の停止)と復旧手順はその場で分かるようにするための対応。
+詳細は `docs/plans/active/2026-09-30-codex-config-rewrite-detect.md` と
+`docs/recipes/codex-setup.md` を参照。
