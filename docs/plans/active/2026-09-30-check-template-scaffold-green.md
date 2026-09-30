@@ -105,14 +105,16 @@ meta-repo の root でも fresh scaffold でも `CI=true ./scripts/check-templat
 - 2026-09-30 work: Slice A は implementer(sonnet)に委譲(d66be51、5 ファイル、+257 / -31、push 済み)。一時ディレクトリを EXIT trap で消す形で、4 つの検査(実行属性、SKILL.md、agent の frontmatter、hook の参照)を `find` / `grep` の結果を一時ファイルに落として `while IFS= read -r ... < file` で読む形にした(subshell にしないので `fail` が `status` に伝わる)。hook のパスは `${hook_cmd%% *}`。`required_files` は 25 項目(meta-repo にしかない 3 項目を外し、理由をコメント)。`verify.local.sh` の shellcheck の対象に `scripts/check-template.sh` を追加。テストはケース D(root で FAIL なし)、E(引数付きの既存 hook は通る、存在しない hook は exit 1 でパスを出す)、F(3 つのループの失敗が exit 1 に伝わる、空白を含むパス)、G(`go run ./cmd/ralph init --yes` の fresh scaffold で FAIL なし)を追加、37 / 0。逸脱: `find` の後に `2>/dev/null || true` を付けた(探索先のディレクトリがないときに `set -e` で止まらないため。以前の `$(find ...)` と同じ許容)。red: subshell に戻す → E の存在しない hook が exit 0、パス全体を使う → E の既存 hook が FAIL、ループを `| while` に戻す → F が exit 0、README.md を戻す → A と G が落ちる。`RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh` green。orchestrator も 37 / 0、root の rc 0、shellcheck、cmp を確認
 - 2026-09-30 self-review(cycle 1、375d6fa): CRITICAL 0 / HIGH 0 / MEDIUM 1 / LOW 8、merge 可。MEDIUM: 配布されるコメントに "meta-repo-only" と "(issue #189)" が残る(scaffold 先ではその project の issue を指す)。LOW: `find` の `2>/dev/null || true` が読めないサブツリーを黙って飛ばす、`grep | tr` の終了コードが grep を隠し settings.json が読めないと hook を 1 つも検査しない、dispatcher がないと同じ FAIL が 7 行、コメントとテストの見出しの不正確さ、`embed_test.go` のコメントの古い例、go がないときの G を PASS と数える、F4 の grep 判定が効いていない、SIGTERM で一時ディレクトリが残る(dash)。全件を in-cycle で修正
 - 2026-10-01 work: Slice B は implementer に委譲(8fd5113、4 ファイル、+215 / -49、push 済み。途中で API の接続エラーで止まり、再開した)。配布されるコメントは issue 番号と meta-repo の語を外した。`find` には存在する探索先だけを渡し、非 0 なら「could not list ...」で FAIL。settings.json は grep の rc を見て 2 以上なら FAIL、パスは `cut -d " " -f 1 | sort -u` で重複を除く。INT / TERM / HUP の trap を追加。テストは SKIP を PASS と別に数え、F4 は `^FAIL:` がないことで判定、(a) 読めないサブツリー、(b) 読めない settings.json、(c) 複数の event から参照される存在しない dispatcher で FAIL が 1 行、を追加。40 / 0 / skip 0。red: `2>/dev/null || true` に戻す → (a)、settings の検査を外す → (b)、`sort -u` を外す → (c) が落ちる。dash でも root と fixture で同じ挙動。既知の gap: シグナルの trap には専用のテストがない(タイミングに依存して不安定になるため)。orchestrator も 40 / 0、root の rc 0、cmp、purity を確認
+- 2026-10-01 verify(cycle 1、842856a): PASS。AC-1〜AC-7 と self-review 9 件の修正をコードで確認、AC-5 の mutation 2 種と SIGTERM の trap(sh / bash / dash で exit 143)を独立に再現。`RALPH_VERIFY_SCOPE=full ./scripts/run-static-verify.sh`、check-sync、purity green
+- 2026-10-01 test(cycle 1、b2d965a): PASS。`RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh` green、40 / 0 / 0 を 3 回、`go test ./internal/scaffold/...` 27 / 27。root と fresh scaffold で sh・dash・`bash --posix` のどれも exit 0 で FAIL なし(busybox は未導入)。scaffold で git の commit をしてから PR CI と同じ `CI=true ./scripts/check-template.sh` → exit 0。mutation 8 種(find のループ 3 つを個別に、hook の検査の subshell、`sort -u`、`2>/dev/null`、settings の検査、README.md の追加)がすべて該当ケースで落ちる。5 万ファイルの fixture で SIGTERM を 6 回 → すべて exit 143、一時ディレクトリは残らない
 ## Progress checklist
 
 - [x] Plan reviewed
 - [x] Branch created
 - [x] Implementation started
 - [x] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Verification artifact created
+- [x] Test artifact created
 - [ ] PR created
 
 ## Readiness checklist
