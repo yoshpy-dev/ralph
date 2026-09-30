@@ -102,12 +102,12 @@ meta-repo の root でも fresh scaffold でも `CI=true ./scripts/check-templat
 ## Deviation notes
 
 - 2026-09-30 plan: Codex plan advisory(gpt-6-astra、xhigh、watchdog の 1 行、`codex rc=0`、`-o` 1074 バイト)は MEDIUM 1: 既存の 3 つのループが shellcheck SC2044 で `-S warning` が exit 1 になり、AC-6 が scope のままでは通らない(`check-template.sh` は `verify.local.sh` の shellcheck の対象外なので run-verify は止まらない)。ユーザー決定: 3 つのループも直す。ループを一時ファイル経由の `while read` にし、失敗が exit code に伝わることをテストで確かめ(AC-7)、`check-template.sh` を `verify.local.sh` の shellcheck の対象に加える
-
+- 2026-09-30 work: Slice A は implementer(sonnet)に委譲(d66be51、5 ファイル、+257 / -31、push 済み)。一時ディレクトリを EXIT trap で消す形で、4 つの検査(実行属性、SKILL.md、agent の frontmatter、hook の参照)を `find` / `grep` の結果を一時ファイルに落として `while IFS= read -r ... < file` で読む形にした(subshell にしないので `fail` が `status` に伝わる)。hook のパスは `${hook_cmd%% *}`。`required_files` は 25 項目(meta-repo にしかない 3 項目を外し、理由をコメント)。`verify.local.sh` の shellcheck の対象に `scripts/check-template.sh` を追加。テストはケース D(root で FAIL なし)、E(引数付きの既存 hook は通る、存在しない hook は exit 1 でパスを出す)、F(3 つのループの失敗が exit 1 に伝わる、空白を含むパス)、G(`go run ./cmd/ralph init --yes` の fresh scaffold で FAIL なし)を追加、37 / 0。逸脱: `find` の後に `2>/dev/null || true` を付けた(探索先のディレクトリがないときに `set -e` で止まらないため。以前の `$(find ...)` と同じ許容)。red: subshell に戻す → E の存在しない hook が exit 0、パス全体を使う → E の既存 hook が FAIL、ループを `| while` に戻す → F が exit 0、README.md を戻す → A と G が落ちる。`RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh` green。orchestrator も 37 / 0、root の rc 0、shellcheck、cmp を確認
 ## Progress checklist
 
 - [x] Plan reviewed
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
