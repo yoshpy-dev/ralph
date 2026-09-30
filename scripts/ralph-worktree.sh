@@ -94,7 +94,13 @@ abs_from_repo_root() {
 # (no whitespace trimming, no CR stripping — a changed or added comment,
 # re-indentation, a line-ending change, an appended non-policy table, or an
 # appended comment all fall through to the generic "uncommitted changes"
-# message instead). Callers must already know `git status --porcelain` is
+# message instead). In the appended region, a line is recognised as a table
+# header with or without leading whitespace (TOML allows indenting a
+# header), but only the exact, unindented [shell_environment_policy] /
+# [shell_environment_policy.<name>] forms are accepted as a policy header —
+# an indented header, whether policy or not, falls to the generic message
+# instead of having its key lines absorbed as policy settings. Callers must
+# already know `git status --porcelain` is
 # exactly " M .codex/config.toml" before calling this — that guarantees the
 # file differs from HEAD in some way, so this function does not special-case
 # "no difference at all". A multi-line TOML string ("""/''') on either side
@@ -149,7 +155,7 @@ codex_config_external_rewrite_only() {
         nl = new[k]
         if (is_blank(nl)) { continue }
         if (is_comment(nl)) { print "NOMATCH"; exit }
-        if (nl ~ /^\[/) {
+        if (nl ~ /^[ \t]*\[/) {
           if (is_sep_header(nl)) { in_sep = 1; continue }
           print "NOMATCH"; exit
         }

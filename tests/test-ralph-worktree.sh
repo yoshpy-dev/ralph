@@ -618,5 +618,34 @@ CASE21
 _cx_run "$_cx_repo21"
 _cx_assert_generic "case 21 (array-of-tables header appended instead of a bare table)"
 
+# Case 22: recorded rewrite shape, then an indented non-policy header
+# ("  [features]", two spaces) with "hooks = false" appended after the
+# policy table -> generic message. TOML allows leading whitespace before a
+# header; the check must still recognise it as a header (and reject it,
+# since it is not the exact unindented policy form) instead of absorbing
+# its key line as a policy setting.
+_cx_repo22="$(_cx_new_repo)"
+_cx_write_rewrite_shape "$_cx_repo22/.codex/config.toml"
+printf '\n  [features]\n  hooks = false\n' >> "$_cx_repo22/.codex/config.toml"
+_cx_run "$_cx_repo22"
+_cx_assert_generic "case 22 (indented non-policy header with spaces after the policy table)"
+
+# Case 23: same as case 22, but the header is indented with a tab instead
+# of spaces -> generic message.
+_cx_repo23="$(_cx_new_repo)"
+_cx_write_rewrite_shape "$_cx_repo23/.codex/config.toml"
+printf '\n\t[features]\n\thooks = false\n' >> "$_cx_repo23/.codex/config.toml"
+_cx_run "$_cx_repo23"
+_cx_assert_generic "case 23 (indented non-policy header with a tab after the policy table)"
+
+# Case 24: an indented shell_environment_policy header itself (not just a
+# non-policy one) appended in the region -> generic message. Only the
+# exact, unindented header forms are accepted as a policy header.
+_cx_repo24="$(_cx_new_repo)"
+_cx_write_rewrite_shape "$_cx_repo24/.codex/config.toml"
+printf '\n  [shell_environment_policy]\n  inherit = "core"\n' >> "$_cx_repo24/.codex/config.toml"
+_cx_run "$_cx_repo24"
+_cx_assert_generic "case 24 (indented policy header in the appended region)"
+
 printf '\nralph-worktree tests: %s passed, %s failed, %s total\n' "$_pass" "$_fail" "$_total"
 [ "$_fail" -eq 0 ]
