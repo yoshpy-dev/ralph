@@ -147,7 +147,6 @@ func Default() Config {
 				{Driver: "codex", Model: "gpt-5.6-sol"},
 				{Driver: "codex", Model: "gpt-5.6-terra"},
 				{Driver: "codex", Model: "gpt-5.6-luna"},
-				{Driver: "codex", Model: "gpt-5.5"},
 			},
 			Roles:          map[string][]string{},
 			MaxSeats:       5,

@@ -128,7 +128,6 @@ func TestDefault_Org(t *testing.T) {
 		{Driver: "codex", Model: "gpt-5.6-sol"},
 		{Driver: "codex", Model: "gpt-5.6-terra"},
 		{Driver: "codex", Model: "gpt-5.6-luna"},
-		{Driver: "codex", Model: "gpt-5.5"},
 	}
 	if len(o.ModelPool) != len(wantModelPool) {
 		t.Fatalf("model_pool = %+v, want %+v", o.ModelPool, wantModelPool)
@@ -136,6 +135,13 @@ func TestDefault_Org(t *testing.T) {
 	for i, e := range wantModelPool {
 		if o.ModelPool[i] != e {
 			t.Errorf("model_pool[%d] = %+v, want %+v", i, o.ModelPool[i], e)
+		}
+	}
+	// gpt-5.5 was dropped from the default on 2026-10-02 (#156); a regression
+	// that re-adds it must fail here by name, not only via the length check.
+	for _, e := range o.ModelPool {
+		if e.Model == "gpt-5.5" {
+			t.Errorf("model_pool contains retired default %+v, want it absent", e)
 		}
 	}
 	if len(o.Roles) != 0 {
@@ -215,8 +221,8 @@ func TestLoad_OrgRolesEmpty(t *testing.T) {
 		t.Errorf("roles = %v, want empty", cfg.Org.Roles)
 	}
 	// model_pool must still fall back to the default pool.
-	if len(cfg.Org.ModelPool) != 9 {
-		t.Errorf("model_pool = %+v, want 9 default entries", cfg.Org.ModelPool)
+	if len(cfg.Org.ModelPool) != 8 {
+		t.Errorf("model_pool = %+v, want 8 default entries", cfg.Org.ModelPool)
 	}
 }
 
@@ -740,7 +746,7 @@ driver_pool = ["codex"]
 	if err != nil {
 		t.Fatalf("Load: unexpected error: %v", err)
 	}
-	wantModels := []string{"gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5"}
+	wantModels := []string{"gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"}
 	if len(cfg.Org.ModelPool) != len(wantModels) {
 		t.Fatalf("model_pool = %+v, want %d codex entries %v", cfg.Org.ModelPool, len(wantModels), wantModels)
 	}
@@ -831,5 +837,48 @@ reviewer = ["gpt-5.5"]
 	want := `[org.roles].reviewer references model "gpt-5.5" not present in [org].model_pool`
 	if !contains(err.Error(), want) {
 		t.Errorf("error %q does not contain %q", err.Error(), want)
+	}
+}
+
+// TestLoad_OmittedModelPoolWithRolesNamingDroppedDefault_Errors verifies the
+// fail-closed consequence of dropping gpt-5.5 from the default model_pool
+// (#156): a ralph.toml that omits model_pool (and driver_pool) but names
+// gpt-5.5 under [org.roles] now fails validation against the 8-entry default
+// pool, and the error carries the exact role/model wording the org skill's
+// recovery paragraph quotes. Setting model_pool explicitly with gpt-5.5
+// restores a loadable config.
+func TestLoad_OmittedModelPoolWithRolesNamingDroppedDefault_Errors(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ralph.toml")
+	content := `[org.roles]
+reviewer = ["gpt-5.5"]
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load: expected error for a role naming gpt-5.5 with the default model_pool, got nil")
+	}
+	want := `[org.roles].reviewer references model "gpt-5.5" not present in [org].model_pool`
+	if !contains(err.Error(), want) {
+		t.Errorf("error %q does not contain %q", err.Error(), want)
+	}
+
+	fixed := filepath.Join(dir, "fixed.toml")
+	fixedContent := `[org]
+model_pool = [
+  { driver = "claude", model = "opus" },
+  { driver = "codex", model = "gpt-5.5" },
+]
+
+[org.roles]
+reviewer = ["gpt-5.5"]
+`
+	if err := os.WriteFile(fixed, []byte(fixedContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(fixed); err != nil {
+		t.Errorf("Load of the migrated config (explicit model_pool including gpt-5.5): unexpected error: %v", err)
 	}
 }
