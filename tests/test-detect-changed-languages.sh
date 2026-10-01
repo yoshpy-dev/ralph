@@ -612,6 +612,54 @@ assert_field "URL as tracked remote records no_remote_default:url" reason "no_re
 assert_output_lacks "URL as tracked remote leaves the scheme out of the output" "${url_scheme}://" "$out"
 assert_output_lacks "URL as tracked remote leaves the path out of the output" "$url_bare" "$out"
 
+# 34. main tracks a "ghost" remote: its config section is gone but its
+#     refs/remotes/<name>/* remain. It is not a configured remote name, so the
+#     reason says "url" and step 2 must not consult the leftover refs (using
+#     them would report a changed-scope golang diff instead of the full
+#     fallback).
+repo="$(make_repo)"
+ghost_bare="$(mktemp -d "$workdir/bare.XXXXXX")"
+git init -q --bare "$ghost_bare"
+(
+  cd "$repo"
+  git remote add ghost "$ghost_bare"
+  git push -q -u ghost main
+  git config --remove-section remote.ghost
+  commit_go_module
+)
+if (cd "$repo" && git show-ref --verify --quiet refs/remotes/ghost/main &&
+  ! git config --get remote.ghost.url >/dev/null 2>&1 &&
+  [ "$(git config --get branch.main.remote)" = ghost ]); then
+  record_pass "ghost fixture keeps refs/remotes/ghost/main without a remote.ghost section"
+else
+  record_fail "ghost fixture keeps refs/remotes/ghost/main without a remote.ghost section"
+fi
+out="$workdir/ghost-remote.out"
+run_detect "$repo" "$out"
+assert_field "ghost remote falls back to full" scope full "$out"
+assert_field "ghost remote records no_remote_default:url" reason "no_remote_default:url" "$out"
+
+# 35. A remote name with both a dot and a slash is a configured remote name: the
+#     fetched one supplies the base, the unfetched one is named in the reason.
+dotted_remote="team/central.eu"
+repo="$(make_repo_with_remote "$dotted_remote" main)"
+(cd "$repo" && commit_go_module)
+out="$workdir/dotted-remote-fetched.out"
+run_detect "$repo" "$out"
+assert_field "dotted and slashed remote name uses changed scope" scope changed "$out"
+assert_field "dotted and slashed remote name selects golang" languages golang "$out"
+
+repo="$(make_repo)"
+(
+  cd "$repo"
+  track_unfetched_remote "$dotted_remote" main
+  commit_go_module
+)
+out="$workdir/dotted-remote-unfetched.out"
+run_detect "$repo" "$out"
+assert_field "unfetched dotted and slashed remote falls back to full" scope full "$out"
+assert_field "unfetched dotted and slashed remote is named in the reason" reason "no_remote_default:$dotted_remote" "$out"
+
 printf '\n-- Summary --\n'
 printf '  PASS: %d / %d\n' "$_pass" "$_total"
 printf '  FAIL: %d\n' "$_fail"
