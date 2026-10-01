@@ -159,3 +159,116 @@ None blocks the verdict; all are closable with the fixtures listed above. Counte
 - Blocked: no.
 
 Proceeding to `/sync-docs` is appropriate. Four LOW test gaps (G-1 to G-4) are recorded for the operator to decide on; none is a defect in the shipped detector.
+
+---
+
+## Cycle 1 addendum (Slices C and D)
+
+- Date: 2026-10-01
+- Scope: delta test of `git diff 725e7a9b..HEAD -- scripts/ tests/ templates/` at HEAD `02f7c78e` (Slice C `7f5c6235`: closes G-1 to G-4 and O-1; Slice D `54ab517c`: the reason shows only `remote_label`, never the raw `branch.<b>.remote`). Three files changed (+202 / -23): the detector, its template copy (`cmp`-identical to the root script), and `tests/test-detect-changed-languages.sh` (cases 26 to 33). Behavioral tests only; same isolation as above (`HOME=<scratch>`, `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_NOSYSTEM=1`). No credential-shaped literal was written anywhere; where a probe needed a URL carrying a userinfo component, it was assembled at runtime from a generated token and is described in words here.
+- Pipeline cycle: still 1 (this is a delta of the same cycle, not a re-run of the pipeline).
+
+### Test execution
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh` (foreground) | full repo test scope | all green, exit 0 | 0 | 0 | 3:51 |
+| `tests/test-detect-changed-languages.sh` (inside the full run) | 76 (was 60) | 76 | 0 | 0 | 12.1 s (dash, timed once) |
+| `tests/test-run-verify-scope.sh` (inside the full run) | 19 | 19 | 0 | 0 | ~8 s |
+| `sh` x3 and `dash` x3 of the detector suite | 76 each | 76 each (6 runs) | 0 | 0 | - |
+| `sh` x3 and `dash` x3 of the scope suite | 19 each | 19 each (6 runs) | 0 | 0 | - |
+| `go test ./...` (inside the full run) | 8 test-bearing packages | 8 `ok` | 0 | 0 | org 9.1 s, rest cached |
+
+The other shell suites in the full run report the same totals as in the first run (44, 8, 29, 64, 36, 11, 59 passed, each with `FAIL: 0`). All 12 repeat runs were identical (no flakiness). The 16 new assertions are cases 26 (2), 27 (2), 28 (2), 29 (1), 30 (1), 31 (2), 32 (2) and 33 (4: `scope`, `reason`, and two `assert_output_lacks` checks for the scheme and the path).
+
+### Mutation table (HEAD `02f7c78e`)
+
+Harness as in the first run (`git archive HEAD` mirror, edits applied to the mirror's root script only, both suites run under `sh`, restore plus `cmp` of root and template after each). Baseline on the mirror: detector 76/76, scope 19/19. Anchors were re-derived for the changed code (the guard now tests `configured_remote`; `i` is redefined as "drop the `.` branch of the label `case`", which makes `.` fall into the configured-remote branch and be labelled `url`).
+
+28 mutations: 24 caught, 4 survived (1 equivalent, 1 cosmetic, 2 real closable gaps).
+
+Previously surviving, now caught (the lead's list):
+
+| # | Mutation | Caught by (detector suite; scope suite survives, as expected) |
+| --- | --- | --- |
+| g | tracked remote before origin | case 26 "origin default branch wins over the tracked fork (exact languages)" (got `golang python`) |
+| h | drop the `refs/remotes/<remote>/` prefix check | case 31 "origin/HEAD outside the remote falls through to origin/main" |
+| i | `.` no longer special (labelled `url`) | case 32 "main tracking a local branch records no_remote_default" (got `no_remote_default:url`) |
+| j1 | drop the remote `master` fallback | case 27, both assertions |
+| j2 | drop the local `master` fallback | case 28, both assertions |
+| p | remote `master` before `main` | case 29 (got `golang python`) |
+| q | local `master` before `main` | case 30 (got `golang python`) |
+| o1 | O-1 revert (`.` treated as no remote for the guard) | case 32, both assertions (got `no_changes`) |
+| A1 | reason prints the raw `branch.<b>.remote` | case 33: the `no_remote_default:url` reason assertion and both `assert_output_lacks` checks (scheme and path) |
+
+Carried over, still caught with the same or a larger set of assertions: a (9 detector assertions plus the scope suite's pushed-branch assertion), b, c, d (both suites), e, f (8 assertions now, including cases 32 and 33), k, n, u, r, s.
+
+New variants for Slice D:
+
+| # | Mutation | Result | Catcher |
+| --- | --- | --- | --- |
+| A1b | non-remote value labelled with itself instead of `url` | caught | case 33, reason plus both lacks checks |
+| A1c | label for a non-remote value empty | caught | case 33, reason (got `no_remote_default:`) |
+| A2 | drop the configured-remote check (every non-`.` value is a remote name) | caught | case 33 (raw value reaches the reason) |
+| A2c | configured-remote check inverted | caught | cases 17, 23, 24, 33 and the scope suite's `central` case |
+| A2b | step 2 consults the raw value even when it is not a configured remote (label stays `url`) | SURVIVED both suites | G-5 |
+| A2d | configured-remote check keyed on `remote.<name>.fetch` instead of `.url` | SURVIVED both suites | G-6 |
+| A3 | configured-remote key built from the first dot or slash segment of the name | SURVIVED both suites | G-7 |
+| t | tracked-remote step no longer skips `origin` | SURVIVED, equivalent | `remote_default_ref origin` just runs twice with an identical empty result |
+
+All first-run required mutations (a to f) still go red on the assertions named in the first run's table.
+
+### Probes (real wrappers, hermetic scratch fixtures)
+
+The fixtures reuse the first run's pattern: the real `run-verify.sh`, `run-static-verify.sh`, `run-test.sh` plus the HEAD detector, stub golang and python packs, a stub `detect-languages.sh` (prints both) and a stub `verify.local.sh`, with no `RALPH_VERIFY_SCOPE` set.
+
+A-1, URL-valued `branch.main.remote` (main has no remote, a Go commit sits on main, so the L-1 guard fires). Eight runtime-built value shapes: a `file://` URL to a scratch bare repo, an scp-style `host:path`, an `ssh://` URL, a relative path, `-x`, `r*`, `a b`, and an `ssh://` URL whose authority carried a userinfo component with a generated token.
+
+| Observation | Result for all 8 shapes |
+| --- | --- |
+| Detector output | `scope=full reason=no_remote_default:url` |
+| `./scripts/run-test.sh` and `./scripts/run-static-verify.sh` (default scope) | both exit 0 and print `==> Language scope: full fallback (no_remote_default:url)`; the golang and python stub packs both run with no project roots (full fallback) |
+| `.harness/state/verify-scope` | `reason=no_remote_default:url` |
+| Leak scan of the wrappers' stdout and stderr, the stub call logs, `.harness/state/verify-scope` and both `docs/evidence/verify-*.log` files (7 files per shape) for the scheme, host, path, the raw value and, for the userinfo shape, the user name and the token | 0 hits for every shape. The raw value exists only in the fixture's `.git/config`, where the user put it. The short values (`-x`, `r*`, `a b`) were checked against the `Language scope` and `reason=` lines only, since they match unrelated text elsewhere (the copied wrapper script itself contains `-x`); no hit |
+
+The scan was sanity-checked: each scanned file does contain the `no_remote_default:url` label, and the extracted token was non-empty (12 characters).
+
+Configured remote names containing a dot or a slash (`my.remote`, `team/central`, `a.b/c.d`), each added with `git remote add`, pushed with `-u`, then an unpushed Go commit on main:
+
+| Name | Fetched remote, unpushed Go commit | Configured but never fetched |
+| --- | --- | --- |
+| `my.remote` | detector `golang`; both wrappers run `golang:*:changed:service` only | `full no_remote_default:my.remote` |
+| `team/central` | same | `full no_remote_default:team/central` |
+| `a.b/c.d` | same | `full no_remote_default:a.b/c.d` |
+
+So step 2 consults such remotes (otherwise the local main would equal HEAD and the guard would have forced `full`), and the reason carries the name. The suite does not pin these (G-7).
+
+O-1 under the real wrappers (main tracks a local branch with no remote, Go commit on main): detector `full no_remote_default:.`; both wrappers print `==> Language scope: full fallback (no_remote_default:.)` and run the golang pack (and the stub python pack) with no project roots. Before Slice C this shape reported `no_changes` and ran nothing; the old `main` detector reported `golang` through its `@{upstream}` base. The first run's probe set re-run on the HEAD detector is otherwise unchanged (P-g, P-h, P-j1, P-j2, P-p, P-q, E1 to E9 give the same results as before; only P-i changed, to the O-1 result above).
+
+Survivor probes:
+
+| Probe | Fixture | Baseline | Mutant |
+| --- | --- | --- | --- |
+| ghost | `branch.main.remote` names a remote whose `remote.<name>` section was removed while `refs/remotes/<name>/main` remains | `full no_remote_default:url` | A2b: `changed golang` |
+| fetchless | `remote.<name>.url` set, no `fetch` refspec, main tracks it | `full no_remote_default:<name>` | A2d: `full no_remote_default:url` |
+| dotted names | the three fetched-remote fixtures above | `changed golang` | A3: `full no_remote_default:url` |
+
+### Remaining gaps
+
+None blocks the verdict. Counted as LOW findings.
+
+- G-5 (LOW): the Slice D rule "step 2 skips a value that is not a configured remote name" is not observable in case 33, because a URL cannot name a valid `refs/remotes/<x>/` namespace. Only a stale namespace (config section removed, refs kept: the ghost fixture) tells the two apart. Mutation A2b survives; the ghost fixture kills it. Defensive code for a rare shape (`git remote remove` deletes the refs too).
+- G-6 (cosmetic, not counted): A2d changes only the reason label for a remote that has a `url` but no `fetch` refspec. Such a remote has no fetch refspec, so it normally holds no remote-tracking refs and step 2 finds nothing either way. Equivalent in effect except for the label text; a `git config remote.<name>.url` only fixture would pin it if wanted.
+- G-7 (LOW): no case uses a remote name with a dot or slash, so a naive-split bug in the name handling (A3) would pass both suites. The probes show the current code is correct for `my.remote`, `team/central` and `a.b/c.d`; adding one fetched-remote case with such a name closes it.
+- G-1 to G-4 from the first run are closed (mutations g, h, i, j1, j2, p, q caught).
+- Unchanged from the first run: busybox sh not available on this machine.
+- Observation O-1 from the first run is resolved by Slice C: a default branch tracking a local branch now falls back to full instead of `no_changes`. The remote-less V-1 limitation (no tracked remote at all) is unchanged.
+- Flakiness: none observed across 12 repeat runs plus one full-scope run in this delta.
+
+### Verdict (addendum)
+
+- Pass: yes. Full-scope `run-test.sh` exits 0; detector suite 76/76 and scope suite 19/19, identical under sh and dash on 3 runs each; g, h, i, j1, j2, p, q, o1 and the A-1 revert are all caught by the new cases; A-1 holds end to end (8 URL-valued shapes give `no_remote_default:url` and no wrapper output, state file or evidence log contains the value); dotted and slashed remote names are consulted and named in the reason; O-1 runs the golang pack under the real wrappers.
+- Fail: no.
+- Blocked: no.
+
+Proceeding to `/sync-docs` is appropriate. Two further LOW test gaps (G-5, G-7) are recorded for the operator to decide on; neither is a defect in the shipped detector.
