@@ -23,10 +23,11 @@ set -eu
 # git merge-base as full ref names, so a tag or branch sharing a short name
 # cannot take their place. The branch's own @{upstream} is never consulted:
 # after a push it equals HEAD and would hide every change committed since the
-# branch left the default branch. When the current branch tracks a remote,
-# neither origin nor that remote has a default branch ref locally, and the
-# local fallback is the current branch itself, committed changes cannot be
-# seen, so the result is full with reason no_remote_default:<remote>.
+# branch left the default branch. When branch.<current>.remote is set (a
+# remote, or "." for a local branch), neither origin nor that remote has a
+# default branch ref locally, and the local fallback is the current branch
+# itself, committed changes cannot be seen, so the result is full with reason
+# no_remote_default:<value> (no_remote_default:. for a local branch).
 
 languages=""
 typescript_roots=""
@@ -157,12 +158,13 @@ remote_default_ref() {
 base_ref="${RALPH_VERIFY_BASE:-}"
 if [ -z "$base_ref" ]; then
   current_ref="$(git symbolic-ref --quiet HEAD 2>/dev/null || true)"
-  tracked_remote=""
+  configured_remote=""
   case "$current_ref" in
     refs/heads/?*)
-      tracked_remote="$(git config --get "branch.${current_ref#refs/heads/}.remote" 2>/dev/null || true)"
+      configured_remote="$(git config --get "branch.${current_ref#refs/heads/}.remote" 2>/dev/null || true)"
       ;;
   esac
+  tracked_remote="$configured_remote"
   case "$tracked_remote" in
     .) tracked_remote="" ;;
   esac
@@ -178,8 +180,8 @@ if [ -z "$base_ref" ]; then
     elif git show-ref --verify --quiet refs/heads/master; then
       local_default="refs/heads/master"
     fi
-    if [ -n "$tracked_remote" ] && [ "$local_default" = "$current_ref" ]; then
-      fallback_full "no_remote_default:$tracked_remote"
+    if [ -n "$configured_remote" ] && [ "$local_default" = "$current_ref" ]; then
+      fallback_full "no_remote_default:$configured_remote"
     fi
     base_ref="$local_default"
   fi

@@ -159,6 +159,13 @@ track_unfetched_remote() {
   git config "branch.$2.merge" "refs/heads/$2"
 }
 
+# Commit a python file in the current directory.
+commit_python_tool() {
+  printf 'print("x")\n' > tool.py
+  git add tool.py
+  git commit -q -m "add python tool"
+}
+
 # Guard against a vacuous fixture: <name> must resolve to HEAD as a short name.
 assert_short_name_shadowed() {
   _desc="$1"
@@ -365,9 +372,7 @@ assert_field "central-only remote selects golang for unpushed commit" languages 
 repo="$(make_repo_with_remote central main)"
 (
   cd "$repo"
-  printf 'print("x")\n' > tool.py
-  git add tool.py
-  git commit -q -m "add python tool"
+  commit_python_tool
   git checkout -q -b feature
   commit_go_module
   git checkout -q --detach
@@ -466,6 +471,112 @@ out="$workdir/unfetched-feature.out"
 run_detect "$repo" "$out"
 assert_field "unfetched remote on a feature branch uses changed scope" scope changed "$out"
 assert_field "unfetched remote on a feature branch diffs against local main" languages golang "$out"
+
+# 26. origin is consulted before the tracked remote: a stale fork that the
+#     feature branch tracks must not become the base (its older main would pull
+#     main's python commit into the result).
+repo="$(make_repo_with_remote fork main)"
+origin_bare="$(mktemp -d "$workdir/bare.XXXXXX")"
+git init -q --bare "$origin_bare"
+(
+  cd "$repo"
+  commit_python_tool
+  git remote add origin "$origin_bare"
+  git push -q origin main
+  git checkout -q -b feature
+  commit_go_module
+  git push -q -u fork feature
+)
+out="$workdir/origin-before-tracked.out"
+run_detect "$repo" "$out"
+assert_field "origin plus a tracked stale fork uses changed scope" scope changed "$out"
+assert_field "origin default branch wins over the tracked fork (exact languages)" languages golang "$out"
+
+# 27. A remote whose only default branch is master (no main anywhere, no remote
+#     HEAD) is the base.
+repo="$(make_repo_with_remote origin master)"
+(
+  cd "$repo"
+  git checkout -q -b feature
+  commit_go_module
+  git push -q -u origin feature
+  git branch -q -D master
+)
+out="$workdir/remote-master.out"
+run_detect "$repo" "$out"
+assert_field "remote master-only default uses changed scope" scope changed "$out"
+assert_field "remote master-only default selects golang" languages golang "$out"
+
+# 28. A repo with no remote and only a local master uses it as the base.
+repo="$(make_repo)"
+(
+  cd "$repo"
+  git branch -q -m main master
+  git checkout -q -b feature
+  commit_go_module
+)
+out="$workdir/local-master.out"
+run_detect "$repo" "$out"
+assert_field "local master-only default uses changed scope" scope changed "$out"
+assert_field "local master-only default selects golang" languages golang "$out"
+
+# 29. When a remote has both main and master at different tips, main is the base
+#     (the stale master would pull main's python commit into the result).
+repo="$(make_repo_with_remote origin master)"
+(
+  cd "$repo"
+  git checkout -q -b main
+  commit_python_tool
+  git push -q -u origin main
+  git checkout -q -b feature
+  commit_go_module
+  git push -q -u origin feature
+)
+out="$workdir/remote-main-over-master.out"
+run_detect "$repo" "$out"
+assert_field "remote main wins over a stale master" languages golang "$out"
+
+# 30. The same order holds for local branches: main wins over a stale master.
+repo="$(make_repo)"
+(
+  cd "$repo"
+  git branch -q master
+  commit_python_tool
+  git checkout -q -b feature
+  commit_go_module
+)
+out="$workdir/local-main-over-master.out"
+run_detect "$repo" "$out"
+assert_field "local main wins over a stale master" languages golang "$out"
+
+# 31. A refs/remotes/origin/HEAD that points outside refs/remotes/origin/ (here
+#     at the current branch) is ignored; origin/main is the base.
+repo="$(make_repo_with_remote origin main)"
+(
+  cd "$repo"
+  git checkout -q -b feature
+  commit_go_module
+  git symbolic-ref refs/remotes/origin/HEAD refs/heads/feature
+)
+out="$workdir/head-outside-remote.out"
+run_detect "$repo" "$out"
+assert_field "origin/HEAD outside the remote uses changed scope" scope changed "$out"
+assert_field "origin/HEAD outside the remote falls through to origin/main" languages golang "$out"
+
+# 32. main tracks a local branch (remote ".") and there is no remote default:
+#     the local base is main itself, so committed changes are invisible and the
+#     result falls back to full, naming "." as the remote.
+repo="$(make_repo)"
+(
+  cd "$repo"
+  git branch -q base
+  git branch -q --set-upstream-to=base main
+  commit_go_module
+)
+out="$workdir/local-upstream-main.out"
+run_detect "$repo" "$out"
+assert_field "main tracking a local branch falls back to full" scope full "$out"
+assert_field "main tracking a local branch records no_remote_default" reason "no_remote_default:." "$out"
 
 printf '\n-- Summary --\n'
 printf '  PASS: %d / %d\n' "$_pass" "$_total"
