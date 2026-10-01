@@ -81,3 +81,89 @@ tr -d '"' < "$tmpdir/hooks.raw" | cut -d ' ' -f 1 | sort -u > "$tmpdir/hooks.lis
 
 - Merge: 可(CRITICAL / HIGH なし)。1 の MEDIUM は配布物に出る文言なので、この cycle で直すことを勧める
 - Follow-ups: 2〜4 と 9 は `check-template.sh` の小さな修正で、1 と同じコミットで直せる(byte 一致の template も同時に)。5〜8 はコメントとテストの書き方の修正で、任意
+
+## Cycle 2
+
+- Date: 2026-10-01
+- Reviewed HEAD: bc8a7e4(コードのコミットは Slice B 8fd5113 と Slice C 39c2629)
+- Scope: `git diff 375d6fa...HEAD -- scripts/ templates/ tests/ internal/`。diff の品質だけで、範囲の考え方は cycle 1 と同じ
+- Cycle: 2/2(上限の cycle)
+
+### Evidence reviewed
+
+- `git diff 375d6fa...HEAD --stat`(対象の 4 ファイル): +282 / -51
+- `cmp scripts/check-template.sh templates/base/scripts/check-template.sh`: 一致。HEAD のバイナリで作った fresh scaffold の `scripts/check-template.sh` も HEAD と一致
+- template の版に `issue #` と `meta-repo` は 0 件
+- root と template の `.gitignore` で、探索先の下にある ignore 対象は `.claude/hooks/local/` だけ。packs と scripts に同じ扱いは要らない
+- `[ -d "$root" ] && set -- ...` のループを、最後の探索先がない状態にして `set -eu` の下で走らせた。macOS sh、dash、bash、busybox ash、ubuntu dash のどれも止まらず、残りの探索先を渡した
+- top level の `set --` が上書きする位置引数を読むのは、このブロック(72〜84 行)だけ。`fail` の `$1` は関数の引数
+- 下の 12 ケースを、macOS の BSD find、ubuntu:24.04 の GNU find、busybox find で、uid 1000 として走らせた(docker は `--network none`)。3 つの結果は一致した
+- 同じ trap の形の script に TERM と HUP を送った。dash、bash、macOS sh、busybox ash のどれも exit 143 / 129 で終わり、一時ディレクトリは消えた
+- 読めないファイル(`chmod 000` の `.sh`)は、BSD find でも GNU find でも rc 0 で列挙される
+- mutation: `git archive HEAD` を scratchpad に展開し、`check-template.sh` を 1 箇所ずつ変えて `tests/test-check-template.sh` を走らせた。go を PATH から外したので case G は SKIP。対照は 42 / 0 / 1
+
+### probe の結果(HEAD、uid 1000、3 種類の find で同じ)
+
+| ケース | 結果 |
+| --- | --- |
+| fresh scaffold | exit 0 |
+| `.claude/hooks/local/disabled` を 000 | exit 0 |
+| `.claude/hooks/local` 自体を 000 | exit 0 |
+| `.claude/hooks/local/a.sh` に実行属性がない | exit 0 |
+| `scripts/locked` を 000 | exit 1。`could not list scripts ...` と find の `Permission denied` |
+| `.claude/agents/sub` を 000 | exit 1。`could not list agent files ...` |
+| `.claude/skills/zz` を 000 | exit 1。`Skill missing SKILL.md`(以前からの判定) |
+| `.claude/settings.json` を 000 | exit 1。`could not read hook commands ...` と grep の `Permission denied` |
+| settings.json が `{}`(hook なし) | exit 0 |
+| dispatcher を削除 | exit 1。FAIL は 1 行 |
+| `packs/` を削除 | exit 0。何も出ない |
+| `.claude/hooks/Stop.d/local/x` を 000(実在の規約ではない比較用) | exit 1。prune は `.claude/hooks/local` だけに効く |
+
+### mutation の結果
+
+| mutation | 落ちたケース |
+| --- | --- |
+| prune を `-not -path '.claude/hooks/local/*'` に戻す(AR-1 の退行) | F7 |
+| settings の grep の rc 2 を無視する | E(読めない settings.json) |
+| scripts の find の rc による `fail` を外す | F5 |
+| `-print` を外す | なし |
+| 探索先を `[ -d ]` で絞らずに全部渡す | なし |
+| `.claude/skills` と `.claude/agents` の `[ -d ]` を外す(2 件) | なし |
+| skills と agents の find の rc による `fail` を外す(2 件) | なし |
+| INT / TERM / HUP の trap を外す | なし(計画の known gap に記載あり) |
+
+### cycle 1 の指摘の確認
+
+| cycle 1 | 状態 | HEAD での根拠 |
+| --- | --- | --- |
+| #1 MEDIUM 配布されるコメント | 修正済み | `scripts/check-template.sh:27-29`。issue 番号も "meta-repo" もなく、scaffold の読み手にも通じる |
+| #2 find の `2>/dev/null` | 修正済み | 72-84、92-100、108-116 行。探索先を絞り、rc が 0 でなければ FAIL。find の stderr も出る |
+| #3 grep の rc | 修正済み | 127-131 行。rc 1 は通し、2 以上は FAIL |
+| #4 同じ FAIL が 7 行 | 修正済み | 136 行の `cut` と `sort -u`。probe でも 1 行 |
+| #5 コメントとテストの見出し | 修正済み | 11-16 行、`tests/test-check-template.sh:2-12` |
+| #6 `embed_test.go` の例 | 修正済み | `internal/scaffold/embed_test.go:171` |
+| #7 G の skip | 修正済み | `tests/test-check-template.sh:71-74` の `skip` と 491 行。集計の行にも skipped が出る |
+| #8 F4 の判定 | 修正済み | `tests/test-check-template.sh:397` が `^FAIL:` で判定する |
+| #9 signal の trap | 修正済み | 22-24 行。probe で exit 143 / 129、一時ディレクトリは残らない |
+
+cross-review の AR-1 も直っている。78 行の `-path '.claude/hooks/local' -prune -o -type f -name '*.sh' -print` は、探索先の文字列 `.claude/hooks` から find が出すパスの形と一致し、`-print` は右側の枝にだけ付いているので、prune したディレクトリは出力されない。
+
+### Findings
+
+| # | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| C2-1 | LOW | テストの判定 | Slice B と C で増えた分岐のうち、外すとテストが落ちるのは 3 つだけ(上の mutation の表)。押さえられていない分岐のうち 2 つは、外すと製品の挙動が変わる。探索先の絞り込みを外すと、`packs/` のない project が `could not list scripts` で FAIL になる。`-print` を外すと、実行ビットのない `.claude/hooks/local` が `Script is not executable` で FAIL になる。どちらの mutation でもテストは緑のまま。build_fixture は探索先を必ず作るので、探索先のない project を通るケースが 1 つもない | `scripts/check-template.sh:73-75, 78, 92, 108`、`tests/test-check-template.sh:120-125`。probe: `packs/` を消した scaffold では、絞り込みを外した版が `find: packs: No such file or directory` と FAIL を出し、HEAD は exit 0。`chmod 644 .claude/hooks/local` では、`-print` を外した版だけが FAIL を出す | fixture から `packs/` と `.claude/agents/` を消して exit 0 を確かめるケースと、F8 で `local` を 644 にするケースを足す。読めない `.claude/agents` のサブツリーは F5 の隣に足せる。網羅の判断は /test に渡す |
+| C2-2 | LOW | コメント | 配られるコメントに不正確な箇所が 2 つある。69-70 行の「a missing root stays silent, as before」の "as before" が正しいのは、ブランチの途中の Slice A(d66be51)に対してだけ。main は探索先がないと stderr に `find: packs: No such file or directory` を出していたので、merge 後に読むと main の挙動を取り違える。67 行の「an unreadable file or directory」の file は意味がない。find は中の項目を lstat するだけで、読めないファイルで find が失敗することはない。あわせて、新しい 4 つの FAIL の文言は小文字で始まり、既存の FAIL(`Missing required file` など)と揃っていない | `scripts/check-template.sh:65-71`、80、96、112、130 行(template も同じ)。probe: main の版と d66be51 の版を `packs/` のない scaffold で走らせて比べた。読めないファイルの probe は上の Evidence を参照 | 「a missing root is skipped without a message」「an unreadable directory anywhere inside it」のように直す。FAIL の文言の頭を揃えるかは任意 |
+
+### Recommendation
+
+- Merge: 可(CRITICAL / HIGH / MEDIUM なし)。cycle 1 の 9 件と AR-1 は、どれも HEAD で直っている
+- Follow-ups: 今回が上限の cycle なので、C2-1 と C2-2 を直さずに /pr へ進むなら、tech-debt に 1 行まとめて残す。C2-2 はコメントと文言だけの修正、C2-1 は fixture を 2〜3 個足す修正
+
+### Known gaps
+
+- SIGINT は確かめていない(background の job では SIGINT が無視される)。TERM と HUP の結果だけを根拠にしている
+- F5 や F7 の途中で止めると、000 にしたディレクトリが TMPDIR に残る。EXIT trap の `rm -rf` は、中身のある 000 のディレクトリを消せない(macOS で `Permission denied`、rc 1)。残る可能性があるのは check-template.sh を 1 回走らせる間だけ
+- `.claude/skills` の下の読めないディレクトリは `Skill missing SKILL.md` として報告される。以前からの判定で、閉じる側に倒れる
+- GitHub の ubuntu runner の image そのものは確かめていない。確認は ubuntu:24.04 の container で行った
+- テストは worktree では走らせていない。走らせたのは scratchpad のコピーでの mutation だけ
