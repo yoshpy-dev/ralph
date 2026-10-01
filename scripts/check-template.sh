@@ -8,14 +8,29 @@ fail() {
   status=1
 }
 
+# The find-driven loops below (scripts, skills, agents) read from a temp
+# file instead of looping over `$(find ...)` directly, which word-splits
+# on whitespace and breaks on paths containing spaces. The settings
+# hook-reference check below reads from a temp file instead of piping into
+# `while`, because a pipeline runs the loop body in a subshell, so `fail`'s
+# status=1 set there would never reach this shell.
+tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/check-template.XXXXXX")"
+cleanup() {
+  rm -rf "$tmpdir"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
+
 # --- Required files ---
+# Files a `ralph init` scaffold does not receive are deliberately not
+# listed here (for example, the ralph repository's own README and its
+# docs/research/ and docs/roadmap/ notes).
 required_files="
-README.md
 AGENTS.md
 CLAUDE.md
 .claude/settings.json
-docs/research/approach-comparison.md
-docs/roadmap/harness-maturity-model.md
 scripts/run-verify.sh
 scripts/run-static-verify.sh
 scripts/run-test.sh
@@ -47,36 +62,84 @@ for file in $required_files; do
 done
 
 # --- Shell scripts must be executable ---
-# .claude/hooks/local/ is reserved for user-local (gitignored) hooks; skip.
-for script in $(find .claude/hooks packs scripts -type f -name '*.sh' -not -path '.claude/hooks/local/*'); do
+# .claude/hooks/local/ is reserved for user-local (gitignored) hooks; its
+# whole subtree is pruned (not just filtered out of the results), so an
+# unreadable directory anywhere inside it never reaches find's own
+# traversal and can't turn into the FAIL below.
+# Only existing search roots are passed to find; a missing root is
+# skipped without a message. An unreadable directory inside a root that
+# does exist makes find exit non-zero, which is reported below instead
+# of silenced.
+set --
+for root in .claude/hooks packs scripts; do
+  [ -d "$root" ] && set -- "$@" "$root"
+done
+if [ "$#" -gt 0 ]; then
+  rc=0
+  find "$@" -path '.claude/hooks/local' -prune -o -type f -name '*.sh' -print > "$tmpdir/scripts.list" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    fail "Could not list scripts under $*: find exited with $rc"
+  fi
+else
+  : > "$tmpdir/scripts.list"
+fi
+while IFS= read -r script; do
   if [ ! -x "$script" ]; then
     fail "Script is not executable: $script"
   fi
-done
+done < "$tmpdir/scripts.list"
 
 # --- Every skill directory must have a SKILL.md ---
-for skill_dir in $(find .claude/skills -mindepth 1 -maxdepth 1 -type d); do
+if [ -d .claude/skills ]; then
+  rc=0
+  find .claude/skills -mindepth 1 -maxdepth 1 -type d > "$tmpdir/skills.list" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    fail "Could not list skill directories under .claude/skills: find exited with $rc"
+  fi
+else
+  : > "$tmpdir/skills.list"
+fi
+while IFS= read -r skill_dir; do
   if [ ! -f "$skill_dir/SKILL.md" ]; then
     fail "Skill missing SKILL.md: $skill_dir"
   fi
-done
+done < "$tmpdir/skills.list"
 
 # --- Every agent file must have required frontmatter fields ---
-for agent_file in $(find .claude/agents -type f -name '*.md'); do
+if [ -d .claude/agents ]; then
+  rc=0
+  find .claude/agents -type f -name '*.md' > "$tmpdir/agents.list" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    fail "Could not list agent files under .claude/agents: find exited with $rc"
+  fi
+else
+  : > "$tmpdir/agents.list"
+fi
+while IFS= read -r agent_file; do
   for field in name description tools; do
     if ! grep -q "^${field}:" "$agent_file"; then
       fail "Agent missing '$field' field: $agent_file"
     fi
   done
-done
+done < "$tmpdir/agents.list"
 
 # --- Settings file must reference only existing hook scripts ---
 if [ -f .claude/settings.json ]; then
-  grep -o '"\./.claude/hooks/[^"]*"' .claude/settings.json 2>/dev/null | tr -d '"' | while IFS= read -r hook_path; do
+  rc=0
+  grep -o '"\./.claude/hooks/[^"]*"' .claude/settings.json > "$tmpdir/hooks.raw" || rc=$?
+  if [ "$rc" -gt 1 ]; then
+    fail "Could not read hook commands from .claude/settings.json: grep exited with $rc"
+  fi
+  # Settings commands are "./.claude/hooks/<file> <args...>"; keep only the
+  # path (the first field) so an argument is never checked as a path, and
+  # de-duplicate so a dispatcher referenced by several events produces
+  # exactly one FAIL line when it is missing.
+  tr -d '"' < "$tmpdir/hooks.raw" | cut -d ' ' -f 1 | sort -u > "$tmpdir/hooks.list"
+  while IFS= read -r hook_path; do
     if [ ! -f "$hook_path" ]; then
       fail "Settings file .claude/settings.json references missing hook: $hook_path"
     fi
-  done
+  done < "$tmpdir/hooks.list"
 fi
 
 # --- git secret hook installation check (local only) ---

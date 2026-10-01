@@ -168,7 +168,7 @@ func TestTemplateBaseScriptsMatchCheckTemplateRequiredFiles(t *testing.T) {
 	for _, entry := range rawEntries {
 		name, ok := strings.CutPrefix(entry, "scripts/")
 		if !ok {
-			continue // non-script entry (README.md, docs/..., .claude/settings.json)
+			continue // non-script entry (AGENTS.md, CLAUDE.md, .claude/settings.json)
 		}
 		scriptEntries[name] = true
 	}
