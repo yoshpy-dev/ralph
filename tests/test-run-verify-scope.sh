@@ -51,6 +51,16 @@ workdir="$(mktemp -d "${TMPDIR:-/tmp}/run-verify-scope.XXXXXX")"
 cleanup() { rm -rf "$workdir"; }
 trap cleanup EXIT HUP INT TERM
 
+# Pin git away from the developer's global and system configuration.
+hermetic_home="$workdir/.home"
+mkdir -p "$hermetic_home"
+HOME="$hermetic_home"
+GIT_CONFIG_GLOBAL="$hermetic_home/.gitconfig"
+GIT_CONFIG_SYSTEM=/dev/null
+GIT_CONFIG_NOSYSTEM=1
+GIT_TERMINAL_PROMPT=0
+export HOME GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM GIT_TERMINAL_PROMPT
+
 repo="$workdir/repo"
 mkdir -p "$repo/scripts" "$repo/packs/languages/golang" "$repo/packs/languages/python"
 cp "$PROJECT_ROOT/scripts/run-verify.sh" "$repo/scripts/run-verify.sh"

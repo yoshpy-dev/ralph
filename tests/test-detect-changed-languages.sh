@@ -83,6 +83,16 @@ workdir="$(mktemp -d "${TMPDIR:-/tmp}/detect-changed-languages.XXXXXX")"
 cleanup() { rm -rf "$workdir"; }
 trap cleanup EXIT HUP INT TERM
 
+# Pin git away from the developer's global and system configuration.
+hermetic_home="$workdir/.home"
+mkdir -p "$hermetic_home"
+HOME="$hermetic_home"
+GIT_CONFIG_GLOBAL="$hermetic_home/.gitconfig"
+GIT_CONFIG_SYSTEM=/dev/null
+GIT_CONFIG_NOSYSTEM=1
+GIT_TERMINAL_PROMPT=0
+export HOME GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM GIT_TERMINAL_PROMPT
+
 make_repo() {
   _repo="$(mktemp -d "$workdir/repo.XXXXXX")"
   (
@@ -139,6 +149,28 @@ commit_go_module() {
   printf 'module example.com/test\n\ngo 1.22\n' > go.mod
   git add go.mod
   git commit -q -m "add go module"
+}
+
+# Make branch <branch> track <remote>, a remote that was never fetched (no
+# refs/remotes/<remote>/* exist).
+track_unfetched_remote() {
+  git remote add "$1" "$workdir/never-fetched.git"
+  git config "branch.$2.remote" "$1"
+  git config "branch.$2.merge" "refs/heads/$2"
+}
+
+# Guard against a vacuous fixture: <name> must resolve to HEAD as a short name.
+assert_short_name_shadowed() {
+  _desc="$1"
+  _repo="$2"
+  _name="$3"
+  _head="$(cd "$_repo" && git rev-parse HEAD)"
+  _resolved="$(cd "$_repo" && git rev-parse --verify --quiet "$_name^{commit}" 2>/dev/null || true)"
+  if [ -n "$_head" ] && [ "$_head" = "$_resolved" ]; then
+    record_pass "$_desc"
+  else
+    record_fail "$_desc (HEAD=$_head $_name=$_resolved)"
+  fi
 }
 
 # Guard against a vacuous fixture: the pushed branch's upstream must be HEAD.
@@ -327,20 +359,25 @@ run_detect "$repo" "$out"
 assert_field "central-only remote uses changed scope" scope changed "$out"
 assert_field "central-only remote selects golang for unpushed commit" languages golang "$out"
 
-# 18. Detached HEAD skips the tracked-remote step and uses the local main.
+# 18. Detached HEAD has no tracked remote to consult, so the local main is the
+#     base: central/main (older than main) is not used, and main's own python
+#     commit stays out of the result.
 repo="$(make_repo_with_remote central main)"
 (
   cd "$repo"
-  git checkout -q -B feature
+  printf 'print("x")\n' > tool.py
+  git add tool.py
+  git commit -q -m "add python tool"
+  git checkout -q -b feature
   commit_go_module
   git checkout -q --detach
 )
 out="$workdir/detached.out"
 run_detect "$repo" "$out"
 assert_field "detached HEAD uses changed scope" scope changed "$out"
-assert_field "detached HEAD falls back to local main" languages golang "$out"
+assert_field "detached HEAD diffs against local main only" languages golang "$out"
 
-# 19. A branch tracking a local branch (remote ".") uses the local main.
+# 19. A branch tracking a local branch (remote ".") still selects golang.
 repo="$(make_repo)"
 (
   cd "$repo"
@@ -350,8 +387,8 @@ repo="$(make_repo)"
 )
 out="$workdir/local-tracking.out"
 run_detect "$repo" "$out"
-assert_field "local-tracking branch uses changed scope" scope changed "$out"
-assert_field "local-tracking branch uses local main" languages golang "$out"
+assert_field "local-tracking branch (remote .) uses changed scope" scope changed "$out"
+assert_field "local-tracking branch (remote .) still selects golang" languages golang "$out"
 
 # 20. No origin, no tracked remote, and neither main nor master: no base.
 repo="$(make_repo)"
@@ -360,6 +397,75 @@ out="$workdir/no-base.out"
 run_detect "$repo" "$out"
 assert_field "repo without main or master falls back to full" scope full "$out"
 assert_field "repo without main or master records no_diff_base" reason no_diff_base "$out"
+
+# 21. A local branch literally named origin/main must not shadow
+#     refs/remotes/origin/main: defaults reach merge-base as full ref names.
+repo="$(make_repo_with_remote origin main)"
+(
+  cd "$repo"
+  git checkout -q -b feature
+  commit_go_module
+  git branch origin/main
+)
+assert_short_name_shadowed "shadow fixture: short name origin/main resolves to HEAD" "$repo" origin/main
+out="$workdir/shadow-branch.out"
+run_detect "$repo" "$out"
+assert_field "branch named origin/main does not hide the diff" scope changed "$out"
+assert_field "branch named origin/main does not hide golang" languages golang "$out"
+
+# 22. A tag named main must not shadow the local branch main.
+repo="$(make_repo)"
+(
+  cd "$repo"
+  git checkout -q -b feature
+  commit_go_module
+  git tag main
+)
+assert_short_name_shadowed "shadow fixture: short name main resolves to HEAD" "$repo" main
+out="$workdir/shadow-tag.out"
+run_detect "$repo" "$out"
+assert_field "tag named main does not hide the diff" scope changed "$out"
+assert_field "tag named main does not hide golang" languages golang "$out"
+
+# 23. main tracks a remote that was never fetched, so there is no remote default
+#     branch and the local base is main itself: committed changes are invisible,
+#     which must fall back to full instead of reporting no_changes.
+repo="$(make_repo)"
+(
+  cd "$repo"
+  track_unfetched_remote central main
+  commit_go_module
+)
+out="$workdir/unfetched-central.out"
+run_detect "$repo" "$out"
+assert_field "unfetched tracked remote falls back to full" scope full "$out"
+assert_field "unfetched tracked remote records no_remote_default" reason "no_remote_default:central" "$out"
+
+# 24. The same holds when the tracked remote is origin.
+repo="$(make_repo)"
+(
+  cd "$repo"
+  track_unfetched_remote origin main
+  commit_go_module
+)
+out="$workdir/unfetched-origin.out"
+run_detect "$repo" "$out"
+assert_field "unfetched origin falls back to full" scope full "$out"
+assert_field "unfetched origin records no_remote_default" reason "no_remote_default:origin" "$out"
+
+# 25. On another branch the local main is a different branch than HEAD's, so the
+#     diff against it is still meaningful.
+repo="$(make_repo)"
+(
+  cd "$repo"
+  git checkout -q -b feature
+  track_unfetched_remote central feature
+  commit_go_module
+)
+out="$workdir/unfetched-feature.out"
+run_detect "$repo" "$out"
+assert_field "unfetched remote on a feature branch uses changed scope" scope changed "$out"
+assert_field "unfetched remote on a feature branch diffs against local main" languages golang "$out"
 
 printf '\n-- Summary --\n'
 printf '  PASS: %d / %d\n' "$_pass" "$_total"

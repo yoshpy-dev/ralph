@@ -16,11 +16,17 @@ set -eu
 #
 # The diff base is RALPH_VERIFY_BASE when set. Otherwise it is the first
 # existing ref among: origin's default branch (the target of
-# refs/remotes/origin/HEAD, then origin/main, origin/master); the same three
-# for the remote the current branch tracks (skipped when HEAD is detached or
-# that remote is origin or "."); then local main, master. The branch's own
-# @{upstream} is never the base: after a push it equals HEAD and would hide
-# every change committed since the branch left the default branch.
+# refs/remotes/origin/HEAD when that is an existing ref under
+# refs/remotes/origin/, then origin/main, origin/master); the same three for
+# the remote the current branch tracks (skipped when HEAD is detached or that
+# remote is origin or "."); then local main, master. Defaults are handed to
+# git merge-base as full ref names, so a tag or branch sharing a short name
+# cannot take their place. The branch's own @{upstream} is never consulted:
+# after a push it equals HEAD and would hide every change committed since the
+# branch left the default branch. When the current branch tracks a remote,
+# neither origin nor that remote has a default branch ref locally, and the
+# local fallback is the current branch itself, committed changes cannot be
+# seen, so the result is full with reason no_remote_default:<remote>.
 
 languages=""
 typescript_roots=""
@@ -124,23 +130,24 @@ if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   fallback_full "no_git_repository"
 fi
 
-# Print the default branch of remote $1 as <remote>/<branch>: the branch that
-# refs/remotes/<remote>/HEAD points to (only when that ref exists), else
-# <remote>/main, else <remote>/master. Print nothing when none exists.
+# Print the default branch of remote $1 as a full ref name: the branch that
+# refs/remotes/<remote>/HEAD points to (only when it is an existing ref under
+# refs/remotes/<remote>/), else refs/remotes/<remote>/main, else
+# refs/remotes/<remote>/master. Print nothing when none exists.
 remote_default_ref() {
   remote="$1"
   head_target="$(git symbolic-ref --quiet "refs/remotes/$remote/HEAD" 2>/dev/null || true)"
   case "$head_target" in
     "refs/remotes/$remote/"?*)
       if git show-ref --verify --quiet "$head_target"; then
-        printf '%s\n' "${head_target#refs/remotes/}"
+        printf '%s\n' "$head_target"
         return 0
       fi
       ;;
   esac
   for candidate in main master; do
     if git show-ref --verify --quiet "refs/remotes/$remote/$candidate"; then
-      printf '%s/%s\n' "$remote" "$candidate"
+      printf 'refs/remotes/%s/%s\n' "$remote" "$candidate"
       return 0
     fi
   done
@@ -148,9 +155,6 @@ remote_default_ref() {
 }
 
 base_ref="${RALPH_VERIFY_BASE:-}"
-if [ -z "$base_ref" ]; then
-  base_ref="$(remote_default_ref origin)"
-fi
 if [ -z "$base_ref" ]; then
   current_ref="$(git symbolic-ref --quiet HEAD 2>/dev/null || true)"
   tracked_remote=""
@@ -160,15 +164,24 @@ if [ -z "$base_ref" ]; then
       ;;
   esac
   case "$tracked_remote" in
-    ""|.|origin) ;;
-    *) base_ref="$(remote_default_ref "$tracked_remote")" ;;
+    .) tracked_remote="" ;;
   esac
-fi
-if [ -z "$base_ref" ]; then
-  if git show-ref --verify --quiet refs/heads/main; then
-    base_ref="main"
-  elif git show-ref --verify --quiet refs/heads/master; then
-    base_ref="master"
+
+  base_ref="$(remote_default_ref origin)"
+  if [ -z "$base_ref" ] && [ -n "$tracked_remote" ] && [ "$tracked_remote" != "origin" ]; then
+    base_ref="$(remote_default_ref "$tracked_remote")"
+  fi
+  if [ -z "$base_ref" ]; then
+    local_default=""
+    if git show-ref --verify --quiet refs/heads/main; then
+      local_default="refs/heads/main"
+    elif git show-ref --verify --quiet refs/heads/master; then
+      local_default="refs/heads/master"
+    fi
+    if [ -n "$tracked_remote" ] && [ "$local_default" = "$current_ref" ]; then
+      fallback_full "no_remote_default:$tracked_remote"
+    fi
+    base_ref="$local_default"
   fi
 fi
 
