@@ -43,7 +43,11 @@ Use these in CI or later-stage review:
   The diff is taken from the merge-base of HEAD and `RALPH_VERIFY_BASE` when
   set, otherwise of HEAD and the default branch (origin's, else the current
   branch's tracked remote's, else local main/master), plus uncommitted and
-  untracked files.
+  untracked files. With no remote default branch and no tracked remote (for
+  example a repo with no remote), a HEAD on local main/master or detached at its
+  tip is its own base, so only uncommitted and untracked files count and the
+  result can be `no_changes`; set `RALPH_VERIFY_BASE` or
+  `RALPH_VERIFY_SCOPE=full` to cover committed changes.
 
 ### Must pass in CI before merge
 

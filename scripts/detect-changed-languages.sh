@@ -29,7 +29,12 @@ set -eu
 # current branch itself, committed changes cannot be seen, so the result is
 # full with reason no_remote_default:<remote> (no_remote_default:. for a local
 # branch, no_remote_default:url when the value is not a configured remote name,
-# so a URL, which may carry credentials, never reaches the output).
+# so a URL, which may carry credentials, never reaches the output). Where the
+# base resolves to HEAD itself (no remote default ref and no
+# branch.<current>.remote, on local main or master or detached at its tip),
+# committed changes are not visible, only uncommitted and untracked files
+# count, and the result can be no_changes; set RALPH_VERIFY_BASE (or
+# RALPH_VERIFY_SCOPE=full in the wrappers) to cover them.
 
 languages=""
 typescript_roots=""
