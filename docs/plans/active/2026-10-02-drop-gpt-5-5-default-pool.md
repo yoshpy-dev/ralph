@@ -109,12 +109,13 @@
 ## Deviation notes
 
 - 2026-10-02 plan: Codex plan advisory(gpt-6-astra、xhigh、watchdog の 1 行、`codex rc=0`、`-o` 2231 バイト)は HIGH 1 / MEDIUM 1。HIGH: `model_pool` を省略して `[org.roles]` で `gpt-5.5` を指定した設定は、更新後に `stop` / `status` / `disband` まで止める(`internal/cli/org.go:115` の `resolveOrgConfig` → `internal/config/config.go:298` の検証。コードで確認)。MEDIUM: AC-5 が利用者の環境に左右される。ユーザー決定: 対応案で plan を更新。org skill に移行と復旧の段落、`internal/cli` に復旧の経路の回帰テスト(AC-7)、release notes への申し送りを足し、AC-5 を作業 branch のビルドと固定の cache で確かめる形にした。teardown 系の verb の検証を緩める変更は入れない
+- 2026-10-02 work: Slice A は implementer(sonnet)に委譲(22df1937、11 ファイル、+177 / -14、push 済み)。3 面と template の `ralph-config.sh` から `gpt-5.5` を外し、既定は 8 エントリになった。`config_test.go` の 3 か所を追従させ、`TestDefault_Org` に `gpt-5.5` がないことの確認を足した。新しいテストは 2 つ: `TestLoad_OmittedModelPoolWithRolesNamingDroppedDefault_Errors` と `TestOrgStatus_ConfigFlagRecoversAfterDefaultPoolDropsRoleModel`(壊れた設定では status がモデル名を挙げて失敗し、直したコピーを `--config` で渡すと同じ state dir の座席を表示する。直し方 2 通りのサブテスト)。org skill(4 面)に移行と復旧の段落を足した(state dir の決まり方 `--state-dir` → `RALPH_ORG_STATE_DIR` → git の toplevel はコードで確認)。spec は改訂注記 (c) を直し、運用ノートに (e) を足した。逸脱 1 件: (d) の記録項目「既定 5 スラッグの有無」を「既定の codex スラッグの有無」に直した(個数が古くなるため)。`git grep` の残りは、履歴、移行と復旧の文、spec の記録、任意の値として使う fixture、`.codex/config.toml` の系統(Non-goal)だけ。red: template の `ralph.toml` にだけ戻すと `TestDefaultsLockStep`、`--config` を無視させると AC-7 のテスト、`Default()` に戻すと 5 つのテストが落ちる。AC-5 の probe(作業 branch のビルド、`model_pool` なしの scratch の project、4 スラッグだけの固定の cache): `pass — 4 codex model_pool slug(s) present`。`go test ./...` と `RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh` green。orchestrator も差分を読み、config と AC-7 のテストを確認
 
 ## Progress checklist
 
 - [x] Plan reviewed
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
