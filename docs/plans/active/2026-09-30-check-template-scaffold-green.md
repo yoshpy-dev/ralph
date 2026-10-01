@@ -1,6 +1,6 @@
 # check-template-scaffold-green
 
-- Status: Draft
+- Status: PR created (#194), awaiting CI and merge
 - Owner: Claude Code
 - Date: 2026-09-30
 - Related request: `scripts/check-template.sh` の 2 つの不具合(#183 の fresh scaffold の probe で発見)。(1) settings の hook の参照の検査が、コマンド文字列全体(`./.claude/hooks/ralph-dispatch.sh PreToolUse` のように引数込み)をパスとして `[ -f ]` にかけるので、存在する hook を 7 行の FAIL として誤検出し、しかも `| while` の subshell の中の `fail` が `status=1` を親に伝えないので exit 0 になる(fail-open)。(2) `required_files` の `README.md`、`docs/research/approach-comparison.md`、`docs/roadmap/harness-maturity-model.md` は template に配られないので、scaffold された project の PR CI(`templates/base/.github/workflows/verify.yml` の "Check template structure")が最初の PR から exit 1 になる。issue #189
@@ -58,13 +58,13 @@ meta-repo の root でも fresh scaffold でも `CI=true ./scripts/check-templat
 
 ## Acceptance criteria
 
-- [ ] AC-1: meta-repo の root で `CI=true ./scripts/check-template.sh` が FAIL 行を出さずに exit 0 で `Template structure looks good.` を出す。
-- [ ] AC-2: settings が存在しない hook(例 `./.claude/hooks/missing.sh SessionStart`)を参照すると exit 1 で、FAIL 行にそのパス(引数なし)が出る。存在する hook を引数付きで参照する場合は FAIL を出さない。どちらも `tests/test-check-template.sh` の fixture で確認する。
-- [ ] AC-3: `go run ./cmd/ralph init --yes <tmp>` で作った fresh scaffold で `CI=true sh scripts/check-template.sh` が FAIL 行なしで exit 0(テストで確認、`go` がなければ SKIP と明示)。
-- [ ] AC-4: `required_files` が 25 項目で、`GOLDEN_ENTRIES` と一致(ケース A)、Go の `TestTemplateBaseScriptsMatchCheckTemplateRequiredFiles` が green、root と template の `check-template.sh` が byte 一致。
-- [ ] AC-5: mutation: hook の検査を `| while` の subshell に戻す → 存在しない hook のケースが落ちる、最初の語ではなく全体をパスにする → 引数付きのケースが落ちる。
-- [ ] AC-7: 3 つのループの失敗が exit code に伝わる: 実行属性のない `.sh`、SKILL.md のない skill、`tools:` のない agent の fixture で、それぞれ exit 1 と該当の FAIL 行になる。空白を含むパスのスクリプトも 1 つのパスとして扱われる。mutation: いずれかのループを `find ... | while read` の subshell にすると該当ケースが落ちる。
-- [ ] AC-6: `docs/tech-debt/README.md` の #189 の行が削除されている。`shellcheck -S warning scripts/check-template.sh tests/test-check-template.sh` が警告なし、`scripts/verify.local.sh` の shellcheck の対象に `scripts/check-template.sh` が入っている、`RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh`、`./scripts/check-sync.sh` が green。
+- [x] AC-1: meta-repo の root で `CI=true ./scripts/check-template.sh` が FAIL 行を出さずに exit 0 で `Template structure looks good.` を出す。
+- [x] AC-2: settings が存在しない hook(例 `./.claude/hooks/missing.sh SessionStart`)を参照すると exit 1 で、FAIL 行にそのパス(引数なし)が出る。存在する hook を引数付きで参照する場合は FAIL を出さない。どちらも `tests/test-check-template.sh` の fixture で確認する。
+- [x] AC-3: `go run ./cmd/ralph init --yes <tmp>` で作った fresh scaffold で `CI=true sh scripts/check-template.sh` が FAIL 行なしで exit 0(テストで確認、`go` がなければ SKIP と明示)。
+- [x] AC-4: `required_files` が 25 項目で、`GOLDEN_ENTRIES` と一致(ケース A)、Go の `TestTemplateBaseScriptsMatchCheckTemplateRequiredFiles` が green、root と template の `check-template.sh` が byte 一致。
+- [x] AC-5: mutation: hook の検査を `| while` の subshell に戻す → 存在しない hook のケースが落ちる、最初の語ではなく全体をパスにする → 引数付きのケースが落ちる。
+- [x] AC-7: 3 つのループの失敗が exit code に伝わる: 実行属性のない `.sh`、SKILL.md のない skill、`tools:` のない agent の fixture で、それぞれ exit 1 と該当の FAIL 行になる。空白を含むパスのスクリプトも 1 つのパスとして扱われる。mutation: いずれかのループを `find ... | while read` の subshell にすると該当ケースが落ちる。
+- [x] AC-6: `docs/tech-debt/README.md` の #189 の行が削除されている。`shellcheck -S warning scripts/check-template.sh tests/test-check-template.sh` が警告なし、`scripts/verify.local.sh` の shellcheck の対象に `scripts/check-template.sh` が入っている、`RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh`、`./scripts/check-sync.sh` が green。
 
 ## Implementation outline
 
@@ -115,6 +115,9 @@ meta-repo の root でも fresh scaffold でも `CI=true ./scripts/check-templat
 - 2026-10-01 verify(cycle 2、4bf0749): PASS。AC-1〜AC-7 を HEAD 3d19539 で確認し直した。AR-1 は `-not -path` に戻した複製で同じ退行(読めない `.claude/hooks/local/disabled` で FAIL、exit 1)を再現し、修正後は通ることを確かめた。C2-1 の 2 つの変異(探索先の `[ -d ]` を外す、`-print` を外す)は Slice D の後では H1 と F8 で落ちる。`RALPH_VERIFY_SCOPE=full ./scripts/run-static-verify.sh`、check-sync(159 IDENTICAL)、purity green
 - 2026-10-01 test(cycle 2、039e95f): PASS。`RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh` green、47 / 0 / 0 を 5 回。sh・dash・`bash --posix` で root、fresh scaffold、local の下に読めないディレクトリを置いた scaffold のどれも exit 0。変異 9 種のうち 7 種は予想どおりのケースで落ち、残る 2 種は Slice D で記録した穴だった。tester は 2 つとも塞げると報告した: `.claude/skills` 自体を mode 000 にすると、rc の分岐を外した版だけが exit 0 になる。dash で実行すると、trap を外した版では一時ディレクトリが残る
 - 2026-10-01 work(cycle 2): Slice E は implementer に委譲(c44dc7d、テストだけの変更、+132 / -1、push 済み、`scripts/check-template.sh` は変えていない)。F10(`.claude/skills` を mode 000 にすると「Could not list skill directories」で FAIL、root では SKIP)と、ケース I(dash で、ready の印を作ってから `sleep 1` する stub の find を使い、TERM / INT / HUP でそれぞれ exit 143 / 130 / 129、private な TMPDIR に `check-template.*` が残らない。dash がなければ SKIP)を追加、54 / 0 / 0。red: skills の rc の分岐を外すと F10、trap を外すとケース I が落ちる。これで Slice D で残した 2 つの穴は塞がり、tech-debt への記録は不要になった。CI は ubuntu で同じスイートを走らせるので、orchestrator が ubuntu 24.04 のコンテナ(bash 5.2、dash、go 1.22、非 root)で 3 回実行し、3 回とも 54 / 0 / 0 だった。手元の macOS(bash 3.2)でも 54 / 0 / 0
+- 2026-10-01 sync-docs(cycle 2、2684c0f): ずれなし。新しい FAIL の文言を引用している文書はなく、`.claude/hooks/local` に触れる文書は dispatcher の層の説明だけで、prune の影響を受けない。tech-debt への記録はなし(Slice E で 2 つの穴が塞がった)。check-sync(159 IDENTICAL)、check-skill-sync、purity green
+- 2026-10-01 cross-review(cycle 2、HEAD 2684c0f、watchdog の 1 行、`codex rc=0`、`-o` 199 バイト): 指摘 0 件(Case C)。差分が 500 行を超えるので walkthrough を追加し(39526c9)、PR #194 を作成
+
 ## Progress checklist
 
 - [x] Plan reviewed
@@ -123,7 +126,7 @@ meta-repo の root でも fresh scaffold でも `CI=true ./scripts/check-templat
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
-- [ ] PR created
+- [x] PR created (#194)
 
 ## Readiness checklist
 
