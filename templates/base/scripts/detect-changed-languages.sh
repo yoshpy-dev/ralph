@@ -13,6 +13,14 @@ set -eu
 # A "full" scope is intentionally conservative. Shared harness files,
 # unclassified code-like files, or missing diff context fall back to the
 # repository-wide language detector.
+#
+# The diff base is RALPH_VERIFY_BASE when set. Otherwise it is the first
+# existing ref among: origin's default branch (the target of
+# refs/remotes/origin/HEAD, then origin/main, origin/master); the same three
+# for the remote the current branch tracks (skipped when HEAD is detached or
+# that remote is origin or "."); then local main, master. The branch's own
+# @{upstream} is never the base: after a push it equals HEAD and would hide
+# every change committed since the branch left the default branch.
 
 languages=""
 typescript_roots=""
@@ -116,17 +124,49 @@ if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   fallback_full "no_git_repository"
 fi
 
+# Print the default branch of remote $1 as <remote>/<branch>: the branch that
+# refs/remotes/<remote>/HEAD points to (only when that ref exists), else
+# <remote>/main, else <remote>/master. Print nothing when none exists.
+remote_default_ref() {
+  remote="$1"
+  head_target="$(git symbolic-ref --quiet "refs/remotes/$remote/HEAD" 2>/dev/null || true)"
+  case "$head_target" in
+    "refs/remotes/$remote/"?*)
+      if git show-ref --verify --quiet "$head_target"; then
+        printf '%s\n' "${head_target#refs/remotes/}"
+        return 0
+      fi
+      ;;
+  esac
+  for candidate in main master; do
+    if git show-ref --verify --quiet "refs/remotes/$remote/$candidate"; then
+      printf '%s/%s\n' "$remote" "$candidate"
+      return 0
+    fi
+  done
+  return 0
+}
+
 base_ref="${RALPH_VERIFY_BASE:-}"
 if [ -z "$base_ref" ]; then
-  upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)"
-  if [ -n "$upstream" ]; then
-    base_ref="$upstream"
-  elif git show-ref --verify --quiet refs/remotes/origin/main; then
-    base_ref="origin/main"
-  elif git show-ref --verify --quiet refs/heads/main; then
+  base_ref="$(remote_default_ref origin)"
+fi
+if [ -z "$base_ref" ]; then
+  current_ref="$(git symbolic-ref --quiet HEAD 2>/dev/null || true)"
+  tracked_remote=""
+  case "$current_ref" in
+    refs/heads/?*)
+      tracked_remote="$(git config --get "branch.${current_ref#refs/heads/}.remote" 2>/dev/null || true)"
+      ;;
+  esac
+  case "$tracked_remote" in
+    ""|.|origin) ;;
+    *) base_ref="$(remote_default_ref "$tracked_remote")" ;;
+  esac
+fi
+if [ -z "$base_ref" ]; then
+  if git show-ref --verify --quiet refs/heads/main; then
     base_ref="main"
-  elif git show-ref --verify --quiet refs/remotes/origin/master; then
-    base_ref="origin/master"
   elif git show-ref --verify --quiet refs/heads/master; then
     base_ref="master"
   fi

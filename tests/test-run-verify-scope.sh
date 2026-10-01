@@ -4,6 +4,9 @@ set -eu
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# Cases pick their scope and base explicitly; do not inherit them from the caller.
+unset RALPH_VERIFY_BASE RALPH_VERIFY_SCOPE
+
 _pass=0
 _fail=0
 _total=0
@@ -80,6 +83,10 @@ printf 'python:%s:%s:%s\n' "$HARNESS_VERIFY_MODE" "$RALPH_VERIFY_SCOPE" "${RALPH
 SH
 chmod +x "$repo/packs/languages/python/verify.sh"
 
+# Pristine copy of the fixture scripts and stub packs for the remote-backed cases.
+skel="$workdir/skel"
+cp -R "$repo" "$skel"
+
 (
   cd "$repo"
   git init -q
@@ -145,6 +152,82 @@ calls="$workdir/full.calls"
 assert_called "full fallback runs local test gate" "local:test:changed" "$calls"
 assert_called "full fallback runs golang pack" "golang:test:changed:" "$calls"
 assert_called "full fallback runs python pack" "python:test:changed:" "$calls"
+
+# Remote-backed fixtures: the diff base comes from the default branch, not from
+# the branch's own upstream.
+
+# Fixture on main whose only remote <remote> is a bare repo under $workdir, with
+# main pushed and tracked. Prints the fixture path.
+make_remote_fixture() {
+  _name="$1"
+  _remote="$2"
+  _bare="$workdir/$_name.git"
+  _fixture="$workdir/$_name"
+  git init -q --bare "$_bare"
+  cp -R "$skel" "$_fixture"
+  (
+    cd "$_fixture"
+    git init -q
+    git checkout -q -B main
+    git config user.name "Ralph Test"
+    git config user.email "ralph-test@example.com"
+    printf '# test repo\n' > README.md
+    git add .
+    git commit -q -m "init"
+    git remote add "$_remote" "$_bare"
+    git push -q -u "$_remote" main
+  )
+  printf '%s\n' "$_fixture"
+}
+
+# Commit a Go module under service/ in the current directory.
+commit_go_service() {
+  mkdir -p service
+  printf 'module example.com/service\n\ngo 1.22\n' > service/go.mod
+  printf 'package main\n' > service/main.go
+  git add service
+  git commit -q -m "add go service"
+}
+
+# Pushed feature branch (upstream == HEAD) with a committed Go change: the
+# /verify wrapper must still select the golang pack.
+fixture="$(make_remote_fixture pushed origin)"
+(
+  cd "$fixture"
+  git checkout -q -B feature
+  commit_go_service
+  git push -q -u origin feature
+)
+_head="$(cd "$fixture" && git rev-parse HEAD)"
+_upstream="$(cd "$fixture" && git rev-parse '@{upstream}')"
+if [ "$_head" = "$_upstream" ]; then
+  record_pass "pushed fixture has upstream equal to HEAD"
+else
+  record_fail "pushed fixture has upstream equal to HEAD (HEAD=$_head upstream=$_upstream)"
+fi
+calls="$workdir/pushed.calls"
+: > "$calls"
+(
+  cd "$fixture"
+  COMMAND_LOG="$calls" ./scripts/run-static-verify.sh >/dev/null
+)
+assert_called "pushed branch static wrapper runs local gate in changed scope" "local:static:changed" "$calls"
+assert_called "pushed branch static wrapper runs golang pack for committed change" "golang:static:changed:service" "$calls"
+assert_not_called "pushed branch static wrapper skips unrelated python pack" "python:static:changed:" "$calls"
+
+# Only remote is not named origin: an unpushed Go commit on main (tracking
+# central/main) must still select the golang pack.
+fixture="$(make_remote_fixture central central)"
+(cd "$fixture" && commit_go_service)
+calls="$workdir/central.calls"
+: > "$calls"
+(
+  cd "$fixture"
+  COMMAND_LOG="$calls" ./scripts/run-static-verify.sh >/dev/null
+)
+assert_called "central-only remote static wrapper runs local gate in changed scope" "local:static:changed" "$calls"
+assert_called "central-only remote static wrapper runs golang pack for unpushed commit" "golang:static:changed:service" "$calls"
+assert_not_called "central-only remote static wrapper skips unrelated python pack" "python:static:changed:" "$calls"
 
 printf '\n-- Summary --\n'
 printf '  PASS: %d / %d\n' "$_pass" "$_total"

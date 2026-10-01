@@ -10,6 +10,9 @@ if [ ! -x "$DETECT" ]; then
   exit 1
 fi
 
+# The default-base cases must not inherit an explicit base from the caller.
+unset RALPH_VERIFY_BASE
+
 _pass=0
 _fail=0
 _total=0
@@ -101,6 +104,56 @@ run_detect() {
   (cd "$_repo" && "$DETECT") > "$_out"
 }
 
+run_detect_base() {
+  _repo="$1"
+  _base="$2"
+  _out="$3"
+  (cd "$_repo" && RALPH_VERIFY_BASE="$_base" "$DETECT") > "$_out"
+}
+
+# Repo on <branch> whose only remote <remote> is a bare repo under $workdir,
+# with <branch> pushed and tracked.
+make_repo_with_remote() {
+  _remote="$1"
+  _branch="$2"
+  _bare="$(mktemp -d "$workdir/bare.XXXXXX")"
+  git init -q --bare "$_bare"
+  _repo="$(mktemp -d "$workdir/repo.XXXXXX")"
+  (
+    cd "$_repo"
+    git init -q
+    git checkout -q -B "$_branch"
+    git config user.name "Ralph Test"
+    git config user.email "ralph-test@example.com"
+    printf '# test repo\n' > README.md
+    git add README.md
+    git commit -q -m "init"
+    git remote add "$_remote" "$_bare"
+    git push -q -u "$_remote" "$_branch"
+  )
+  printf '%s\n' "$_repo"
+}
+
+# Commit a Go module file in the current directory.
+commit_go_module() {
+  printf 'module example.com/test\n\ngo 1.22\n' > go.mod
+  git add go.mod
+  git commit -q -m "add go module"
+}
+
+# Guard against a vacuous fixture: the pushed branch's upstream must be HEAD.
+assert_upstream_is_head() {
+  _desc="$1"
+  _repo="$2"
+  _head="$(cd "$_repo" && git rev-parse HEAD)"
+  _upstream="$(cd "$_repo" && git rev-parse '@{upstream}' 2>/dev/null || true)"
+  if [ -n "$_head" ] && [ "$_head" = "$_upstream" ]; then
+    record_pass "$_desc"
+  else
+    record_fail "$_desc (HEAD=$_head upstream=$_upstream)"
+  fi
+}
+
 # 1. Single-language uncommitted change.
 repo="$(make_repo)"
 printf 'package main\n' > "$repo/main.go"
@@ -189,6 +242,124 @@ out="$workdir/go-root.out"
 run_detect "$repo" "$out"
 assert_field "nested go change selects golang" languages golang "$out"
 assert_field "nested go change emits project root" golang_roots service "$out"
+
+# 10. A pushed branch (upstream == HEAD) still reports what it changed since it
+#     left the default branch; the upstream is not the diff base.
+repo="$(make_repo_with_remote origin main)"
+(
+  cd "$repo"
+  git checkout -q -B feature
+  commit_go_module
+  git push -q -u origin feature
+)
+assert_upstream_is_head "pushed branch fixture has upstream equal to HEAD" "$repo"
+out="$workdir/pushed.out"
+run_detect "$repo" "$out"
+assert_field "pushed branch uses changed scope" scope changed "$out"
+assert_field "pushed branch is not docs-only" docs_only false "$out"
+assert_field "pushed branch selects golang" languages golang "$out"
+
+# 11. An explicit RALPH_VERIFY_BASE still wins over the default base.
+out="$workdir/pushed-explicit.out"
+run_detect_base "$repo" origin/feature "$out"
+assert_field "explicit base equal to HEAD uses changed scope" scope changed "$out"
+assert_field "explicit base equal to HEAD reports no_changes" reason no_changes "$out"
+assert_field "explicit base equal to HEAD selects no languages" languages "" "$out"
+
+# 12. A nonexistent explicit base falls back to full, as before.
+out="$workdir/explicit-missing.out"
+run_detect_base "$repo" nope "$out"
+assert_field "missing explicit base falls back to full" scope full "$out"
+assert_field "missing explicit base records no_merge_base" reason "no_merge_base:nope" "$out"
+
+# 13. origin/HEAD naming a default branch other than main/master (trunk), with
+#     no main or master anywhere, is the diff base.
+repo="$(make_repo_with_remote origin trunk)"
+(
+  cd "$repo"
+  git symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/trunk
+  git checkout -q -B feature
+  commit_go_module
+  git push -q -u origin feature
+)
+out="$workdir/trunk.out"
+run_detect "$repo" "$out"
+assert_field "trunk default branch uses changed scope" scope changed "$out"
+assert_field "trunk default branch selects golang" languages golang "$out"
+
+# 14. origin/HEAD naming a ref that does not exist is skipped; origin/main wins.
+repo="$(make_repo_with_remote origin main)"
+(
+  cd "$repo"
+  git symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/gone
+  git checkout -q -B feature
+  commit_go_module
+  git push -q -u origin feature
+)
+out="$workdir/dangling-head.out"
+run_detect "$repo" "$out"
+assert_field "dangling origin/HEAD uses changed scope" scope changed "$out"
+assert_field "dangling origin/HEAD falls through to origin/main" languages golang "$out"
+
+# 15. On the default branch with nothing unpushed and a clean tree, there is
+#     nothing to verify.
+repo="$(make_repo_with_remote origin main)"
+out="$workdir/default-clean.out"
+run_detect "$repo" "$out"
+assert_field "clean default branch uses changed scope" scope changed "$out"
+assert_field "clean default branch reports no_changes" reason no_changes "$out"
+assert_field "clean default branch selects no languages" languages "" "$out"
+
+# 16. An unpushed commit on the default branch is still detected against
+#     origin/main.
+repo="$(make_repo_with_remote origin main)"
+(cd "$repo" && commit_go_module)
+out="$workdir/default-unpushed.out"
+run_detect "$repo" "$out"
+assert_field "unpushed commit on default branch selects golang" languages golang "$out"
+
+# 17. The only remote is not called origin: the branch's tracked remote supplies
+#     the default branch, so an unpushed commit on main is not hidden.
+repo="$(make_repo_with_remote central main)"
+(cd "$repo" && commit_go_module)
+out="$workdir/central.out"
+run_detect "$repo" "$out"
+assert_field "central-only remote uses changed scope" scope changed "$out"
+assert_field "central-only remote selects golang for unpushed commit" languages golang "$out"
+
+# 18. Detached HEAD skips the tracked-remote step and uses the local main.
+repo="$(make_repo_with_remote central main)"
+(
+  cd "$repo"
+  git checkout -q -B feature
+  commit_go_module
+  git checkout -q --detach
+)
+out="$workdir/detached.out"
+run_detect "$repo" "$out"
+assert_field "detached HEAD uses changed scope" scope changed "$out"
+assert_field "detached HEAD falls back to local main" languages golang "$out"
+
+# 19. A branch tracking a local branch (remote ".") uses the local main.
+repo="$(make_repo)"
+(
+  cd "$repo"
+  git checkout -q -b feature
+  commit_go_module
+  git branch -q --set-upstream-to=main
+)
+out="$workdir/local-tracking.out"
+run_detect "$repo" "$out"
+assert_field "local-tracking branch uses changed scope" scope changed "$out"
+assert_field "local-tracking branch uses local main" languages golang "$out"
+
+# 20. No origin, no tracked remote, and neither main nor master: no base.
+repo="$(make_repo)"
+(cd "$repo" && git branch -q -m main trunk)
+out="$workdir/no-base.out"
+run_detect "$repo" "$out"
+assert_field "repo without main or master falls back to full" scope full "$out"
+assert_field "repo without main or master records no_diff_base" reason no_diff_base "$out"
 
 printf '\n-- Summary --\n'
 printf '  PASS: %d / %d\n' "$_pass" "$_total"

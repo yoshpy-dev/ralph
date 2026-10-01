@@ -40,6 +40,10 @@ Use these in CI or later-stage review:
   `/test` wrappers default to `RALPH_VERIFY_SCOPE=changed`. Changed scope runs
   only language packs affected by the current git diff while always running
   project-local gates. Shared or ambiguous changes fall back to full scope.
+  The diff is taken against `RALPH_VERIFY_BASE` when set, otherwise against the
+  merge-base with the default branch (origin's default branch, else the current
+  branch's tracked remote's, else local main/master), plus uncommitted and
+  untracked files.
 
 ### Must pass in CI before merge
 
