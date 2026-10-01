@@ -62,7 +62,10 @@ for file in $required_files; do
 done
 
 # --- Shell scripts must be executable ---
-# .claude/hooks/local/ is reserved for user-local (gitignored) hooks; skip.
+# .claude/hooks/local/ is reserved for user-local (gitignored) hooks; its
+# whole subtree is pruned (not just filtered out of the results), so an
+# unreadable file or directory anywhere inside it never reaches find's
+# own traversal and can't turn into the FAIL below.
 # Only existing search roots are passed to find (a missing root stays
 # silent, as before); an unreadable subtree inside a root that does exist
 # makes find exit non-zero, which is reported below instead of silenced.
@@ -72,7 +75,7 @@ for root in .claude/hooks packs scripts; do
 done
 if [ "$#" -gt 0 ]; then
   rc=0
-  find "$@" -type f -name '*.sh' -not -path '.claude/hooks/local/*' > "$tmpdir/scripts.list" || rc=$?
+  find "$@" -path '.claude/hooks/local' -prune -o -type f -name '*.sh' -print > "$tmpdir/scripts.list" || rc=$?
   if [ "$rc" -ne 0 ]; then
     fail "could not list scripts under $*: find exited with $rc"
   fi

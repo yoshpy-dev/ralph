@@ -26,9 +26,13 @@
 #      one FAIL line.
 #   F. the three find-driven loops (executable check, SKILL.md check, agent
 #      frontmatter check) each propagate a failure to the exit code, a
-#      script path containing a space is still checked correctly, and an
+#      script path containing a space is still checked correctly, an
 #      unreadable subtree is reported instead of silently skipping the
-#      files inside it (skipped when running as root).
+#      files inside it (skipped when running as root), the user-local
+#      .claude/hooks/local/ tree is pruned rather than merely filtered
+#      (so an unreadable path inside it never reaches find's own exit
+#      code, skipped when running as root) while scripts elsewhere under
+#      .claude/hooks/ are still checked.
 #   G. fresh scaffold: `go run ./cmd/ralph init --yes <tmp>` (when `go` is
 #      available) passes check-template.sh with no FAIL line.
 #
@@ -418,6 +422,61 @@ run_case_f() {
       fail "F. an unreadable subtree under scripts/ was NOT reported (exit $rc)"
       printf '%s\n' "$output" | sed 's/^/    /'
     fi
+  fi
+
+  # F6: a non-executable .sh directly under .claude/hooks/ (outside
+  # local/) must still fail the executable check -- pruning local/ must
+  # not swallow the rest of .claude/hooks/ along with it.
+  printf '#!/bin/sh\n' > "$fixture/.claude/hooks/core-nonexec.sh"
+  chmod -x "$fixture/.claude/hooks/core-nonexec.sh"
+  output="$(cd "$fixture" && CI=true sh "$CHECK_TEMPLATE" 2>&1)"
+  rc=$?
+  rm -f "$fixture/.claude/hooks/core-nonexec.sh"
+  if [ "$rc" -ne 0 ] && printf '%s\n' "$output" | grep -qF 'FAIL: Script is not executable: .claude/hooks/core-nonexec.sh'; then
+    pass "F. a non-executable .sh under .claude/hooks/ (outside local/) is detected and fails"
+  else
+    fail "F. a non-executable .sh under .claude/hooks/ (outside local/) was NOT detected (exit $rc)"
+    printf '%s\n' "$output" | sed 's/^/    /'
+  fi
+
+  # F7: an unreadable directory under .claude/hooks/local/ must not cause
+  # a FAIL -- the whole local/ tree is pruned before find ever descends
+  # into it, so a permission error inside it never surfaces. chmod 000
+  # does not block root's own read access, so this only proves anything
+  # as a non-root user.
+  if [ "$(id -u)" -eq 0 ]; then
+    skip "F. unreadable .claude/hooks/local/ subtree check skipped (running as root)"
+  else
+    printf '#!/bin/sh\necho ok\n' > "$fixture/.claude/hooks/normal-hook.sh"
+    chmod +x "$fixture/.claude/hooks/normal-hook.sh"
+    mkdir -p "$fixture/.claude/hooks/local/disabled"
+    chmod 000 "$fixture/.claude/hooks/local/disabled"
+    output="$(cd "$fixture" && CI=true sh "$CHECK_TEMPLATE" 2>&1)"
+    rc=$?
+    chmod 755 "$fixture/.claude/hooks/local/disabled"
+    rm -rf "$fixture/.claude/hooks/local" "$fixture/.claude/hooks/normal-hook.sh"
+    if [ "$rc" -eq 0 ] && ! printf '%s\n' "$output" | grep -q '^FAIL:'; then
+      pass "F. an unreadable directory under .claude/hooks/local/ does not cause a FAIL"
+    else
+      fail "F. an unreadable directory under .claude/hooks/local/ incorrectly caused a FAIL (exit $rc)"
+      printf '%s\n' "$output" | sed 's/^/    /'
+    fi
+  fi
+
+  # F8: a non-executable .sh under .claude/hooks/local/ must not cause a
+  # FAIL -- the local/ tree stays excluded from the executable check, as
+  # before (now via pruning instead of post-hoc filtering).
+  mkdir -p "$fixture/.claude/hooks/local"
+  printf '#!/bin/sh\n' > "$fixture/.claude/hooks/local/disabled.sh"
+  chmod -x "$fixture/.claude/hooks/local/disabled.sh"
+  output="$(cd "$fixture" && CI=true sh "$CHECK_TEMPLATE" 2>&1)"
+  rc=$?
+  rm -rf "$fixture/.claude/hooks/local"
+  if [ "$rc" -eq 0 ] && ! printf '%s\n' "$output" | grep -q '^FAIL:'; then
+    pass "F. a non-executable .sh under .claude/hooks/local/ does not cause a FAIL"
+  else
+    fail "F. a non-executable .sh under .claude/hooks/local/ incorrectly caused a FAIL (exit $rc)"
+    printf '%s\n' "$output" | sed 's/^/    /'
   fi
 
   rm -rf "$fixture"
