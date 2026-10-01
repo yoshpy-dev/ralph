@@ -64,11 +64,12 @@ done
 # --- Shell scripts must be executable ---
 # .claude/hooks/local/ is reserved for user-local (gitignored) hooks; its
 # whole subtree is pruned (not just filtered out of the results), so an
-# unreadable file or directory anywhere inside it never reaches find's
-# own traversal and can't turn into the FAIL below.
-# Only existing search roots are passed to find (a missing root stays
-# silent, as before); an unreadable subtree inside a root that does exist
-# makes find exit non-zero, which is reported below instead of silenced.
+# unreadable directory anywhere inside it never reaches find's own
+# traversal and can't turn into the FAIL below.
+# Only existing search roots are passed to find; a missing root is
+# skipped without a message. An unreadable directory inside a root that
+# does exist makes find exit non-zero, which is reported below instead
+# of silenced.
 set --
 for root in .claude/hooks packs scripts; do
   [ -d "$root" ] && set -- "$@" "$root"
@@ -77,7 +78,7 @@ if [ "$#" -gt 0 ]; then
   rc=0
   find "$@" -path '.claude/hooks/local' -prune -o -type f -name '*.sh' -print > "$tmpdir/scripts.list" || rc=$?
   if [ "$rc" -ne 0 ]; then
-    fail "could not list scripts under $*: find exited with $rc"
+    fail "Could not list scripts under $*: find exited with $rc"
   fi
 else
   : > "$tmpdir/scripts.list"
@@ -93,7 +94,7 @@ if [ -d .claude/skills ]; then
   rc=0
   find .claude/skills -mindepth 1 -maxdepth 1 -type d > "$tmpdir/skills.list" || rc=$?
   if [ "$rc" -ne 0 ]; then
-    fail "could not list skill directories under .claude/skills: find exited with $rc"
+    fail "Could not list skill directories under .claude/skills: find exited with $rc"
   fi
 else
   : > "$tmpdir/skills.list"
@@ -109,7 +110,7 @@ if [ -d .claude/agents ]; then
   rc=0
   find .claude/agents -type f -name '*.md' > "$tmpdir/agents.list" || rc=$?
   if [ "$rc" -ne 0 ]; then
-    fail "could not list agent files under .claude/agents: find exited with $rc"
+    fail "Could not list agent files under .claude/agents: find exited with $rc"
   fi
 else
   : > "$tmpdir/agents.list"
@@ -127,7 +128,7 @@ if [ -f .claude/settings.json ]; then
   rc=0
   grep -o '"\./.claude/hooks/[^"]*"' .claude/settings.json > "$tmpdir/hooks.raw" || rc=$?
   if [ "$rc" -gt 1 ]; then
-    fail "could not read hook commands from .claude/settings.json: grep exited with $rc"
+    fail "Could not read hook commands from .claude/settings.json: grep exited with $rc"
   fi
   # Settings commands are "./.claude/hooks/<file> <args...>"; keep only the
   # path (the first field) so an argument is never checked as a path, and

@@ -32,9 +32,16 @@
 #      .claude/hooks/local/ tree is pruned rather than merely filtered
 #      (so an unreadable path inside it never reaches find's own exit
 #      code, skipped when running as root) while scripts elsewhere under
-#      .claude/hooks/ are still checked.
+#      .claude/hooks/ are still checked, a `.claude/hooks/local/` without
+#      its own execute bit does not leak into the printed results (pins
+#      the find expression's `-print` placement), and an unreadable
+#      subtree under `.claude/agents/` is reported the same way as the
+#      scripts/ case (both of the last two skipped when running as root).
 #   G. fresh scaffold: `go run ./cmd/ralph init --yes <tmp>` (when `go` is
 #      available) passes check-template.sh with no FAIL line.
+#   H. a project missing a whole search root (`packs/`, `.claude/agents/`,
+#      or `.claude/skills/`) passes with no FAIL line; a missing root is
+#      skipped, not reported.
 #
 # Spec: issue #183, issue #189. The Go-side counterpart lives in
 # internal/scaffold/embed_test.go (TestTemplateBaseScriptsMatchCheckTemplateRequiredFiles).
@@ -327,7 +334,7 @@ JSON
     output="$(cd "$fixture" && CI=true sh "$CHECK_TEMPLATE" 2>&1)"
     rc=$?
     chmod 644 "$fixture/.claude/settings.json"
-    if [ "$rc" -ne 0 ] && printf '%s\n' "$output" | grep -qF 'FAIL: could not read hook commands from .claude/settings.json'; then
+    if [ "$rc" -ne 0 ] && printf '%s\n' "$output" | grep -qF 'FAIL: Could not read hook commands from .claude/settings.json'; then
       pass "E. an unreadable settings.json is reported instead of silently skipped"
     else
       fail "E. an unreadable settings.json was NOT reported (exit $rc)"
@@ -416,7 +423,7 @@ run_case_f() {
     rc=$?
     chmod 755 "$fixture/scripts/locked"
     rm -rf "$fixture/scripts/locked"
-    if [ "$rc" -ne 0 ] && printf '%s\n' "$output" | grep -qF 'FAIL: could not list scripts'; then
+    if [ "$rc" -ne 0 ] && printf '%s\n' "$output" | grep -qF 'FAIL: Could not list scripts'; then
       pass "F. an unreadable subtree under scripts/ is reported instead of silently skipped"
     else
       fail "F. an unreadable subtree under scripts/ was NOT reported (exit $rc)"
@@ -479,6 +486,57 @@ run_case_f() {
     printf '%s\n' "$output" | sed 's/^/    /'
   fi
 
+  # F8 extension: .claude/hooks/local itself at mode 644 (no execute bit
+  # on the directory), containing a non-executable .sh, must still not
+  # cause a FAIL. Without an explicit -print on the find expression's
+  # right-hand branch, find's "no action other than -prune" default-print
+  # rule would print the pruned local/ directory entry itself (not its
+  # contents) alongside the matched scripts; that directory entry would
+  # then fail "[ -x ]" because it has no execute bit, producing a false
+  # FAIL. The explicit -print scopes printing to the right-hand branch
+  # only, so the pruned entry itself is never printed. chmod 644 removing
+  # every execute bit does not block root's own traversal the same way,
+  # so this only proves anything as a non-root user.
+  if [ "$(id -u)" -eq 0 ]; then
+    skip "F. .claude/hooks/local at mode 644 check skipped (running as root)"
+  else
+    mkdir -p "$fixture/.claude/hooks/local"
+    printf '#!/bin/sh\n' > "$fixture/.claude/hooks/local/disabled.sh"
+    chmod -x "$fixture/.claude/hooks/local/disabled.sh"
+    chmod 644 "$fixture/.claude/hooks/local"
+    output="$(cd "$fixture" && CI=true sh "$CHECK_TEMPLATE" 2>&1)"
+    rc=$?
+    chmod 755 "$fixture/.claude/hooks/local"
+    rm -rf "$fixture/.claude/hooks/local"
+    if [ "$rc" -eq 0 ] && ! printf '%s\n' "$output" | grep -q '^FAIL:'; then
+      pass "F. .claude/hooks/local at mode 644 with a non-executable .sh inside does not cause a FAIL"
+    else
+      fail "F. .claude/hooks/local at mode 644 with a non-executable .sh inside incorrectly caused a FAIL (exit $rc)"
+      printf '%s\n' "$output" | sed 's/^/    /'
+    fi
+  fi
+
+  # F9: an unreadable subtree under .claude/agents/ must be reported (via
+  # find's own non-zero exit) instead of being silently skipped, the same
+  # way as F5's scripts/ case. chmod 000 does not block root's own read
+  # access, so this only proves anything as a non-root user.
+  if [ "$(id -u)" -eq 0 ]; then
+    skip "F. unreadable .claude/agents/ subtree check skipped (running as root)"
+  else
+    mkdir -p "$fixture/.claude/agents/locked"
+    chmod 000 "$fixture/.claude/agents/locked"
+    output="$(cd "$fixture" && CI=true sh "$CHECK_TEMPLATE" 2>&1)"
+    rc=$?
+    chmod 755 "$fixture/.claude/agents/locked"
+    rm -rf "$fixture/.claude/agents/locked"
+    if [ "$rc" -ne 0 ] && printf '%s\n' "$output" | grep -qF 'FAIL: Could not list agent files'; then
+      pass "F. an unreadable subtree under .claude/agents/ is reported instead of silently skipped"
+    else
+      fail "F. an unreadable subtree under .claude/agents/ was NOT reported (exit $rc)"
+      printf '%s\n' "$output" | sed 's/^/    /'
+    fi
+  fi
+
   rm -rf "$fixture"
   trap - EXIT
 }
@@ -519,6 +577,51 @@ run_case_g() {
   trap - EXIT
 }
 
+# --- H. missing search roots are skipped, not reported -----------------
+run_case_h() {
+  local fixture output rc
+
+  fixture="$(mktemp -d "${TMPDIR:-/tmp}/check-template-missing-roots.XXXXXX")" || {
+    fail "H. mktemp -d failed; skipping the missing-root cases"
+    return
+  }
+  trap 'rm -rf "$fixture"' EXIT
+
+  # H1: a project without packs/ and without .claude/agents/ must still
+  # pass. The scripts find only receives roots that exist ([ -d ]), so a
+  # missing packs/ is simply left out of the search instead of making
+  # find error on a nonexistent path; the agents loop is skipped entirely
+  # (not run against a missing .claude/agents) the same way.
+  build_fixture "$fixture"
+  rm -rf "$fixture/packs" "$fixture/.claude/agents"
+  output="$(cd "$fixture" && CI=true sh "$CHECK_TEMPLATE" 2>&1)"
+  rc=$?
+  if [ "$rc" -eq 0 ] && ! printf '%s\n' "$output" | grep -q '^FAIL:'; then
+    pass "H. a project without packs/ and without .claude/agents/ passes with no FAIL"
+  else
+    fail "H. a project without packs/ and without .claude/agents/ did NOT pass (exit $rc)"
+    printf '%s\n' "$output" | sed 's/^/    /'
+  fi
+
+  # Rebuild a clean fixture for H2 so it isolates only the missing
+  # .claude/skills/ condition.
+  rm -rf "$fixture"
+  mkdir -p "$fixture"
+  build_fixture "$fixture"
+  rm -rf "$fixture/.claude/skills"
+  output="$(cd "$fixture" && CI=true sh "$CHECK_TEMPLATE" 2>&1)"
+  rc=$?
+  if [ "$rc" -eq 0 ] && ! printf '%s\n' "$output" | grep -q '^FAIL:'; then
+    pass "H. a project without .claude/skills/ passes with no FAIL"
+  else
+    fail "H. a project without .claude/skills/ did NOT pass (exit $rc)"
+    printf '%s\n' "$output" | sed 's/^/    /'
+  fi
+
+  rm -rf "$fixture"
+  trap - EXIT
+}
+
 run_case_a
 run_case_b
 run_case_c
@@ -526,6 +629,7 @@ run_case_d
 run_case_e
 run_case_f
 run_case_g
+run_case_h
 
 printf '\ntest-check-template: %s passed, %s failed, %s skipped\n' "$pass_count" "$fail_count" "$skip_count"
 [ "$fail_count" -eq 0 ]
