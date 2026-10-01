@@ -28,6 +28,10 @@
 - `.claude/skills/org/SKILL.md` の「既定の model_pool」表から `gpt-5.5` の行を外す。`scripts/sync-skills.sh` で `.agents/skills/org/SKILL.md` を作り直し、template の 2 面にも同じものを置く。
 - 既定値をハードコードするテストを追従させる(`internal/config/config_test.go`)。
 - `docs/specs/2026-08-01-org-runtime.md`: 改訂注記 (c) の既定の列挙を直す。運用ノートに 1 行足す: 2026-10-02 にメンテナの判断で `gpt-5.5` を既定から外した。理由は退役予告が付いたことと "Legacy" の表示で、(d) の「2 週間連続の消失」を待たない判断だった。
+- org skill の「既定の model_pool」節(4 面)に、移行と復旧の段落を足す(Codex plan advisory の HIGH)。
+  - 移行(バイナリを更新する前): `model_pool` を書かずに `[org.roles]` で `gpt-5.5` を指定している project は、`[org].model_pool` に `gpt-5.5` を含めて明示するか、role から外す。
+  - 復旧(更新した後に `ralph org` の verb が `[org.roles].<role> references model "gpt-5.5" not present in [org].model_pool` で止まった場合): `ralph.toml` に同じ修正を入れるか、直したコピーを `--config` で渡す。state dir は設定ファイルの場所で変わらない(`--state-dir`、環境変数、git の toplevel で決まる)ので、`ralph org status` / `stop` は同じ座席を扱える。
+- `internal/cli` に復旧の経路の回帰テストを足す。`model_pool` を書かずに `[org.roles]` で `gpt-5.5` を指定した `ralph.toml` で、`ralph org status` が上のエラーで失敗する。同じ state dir に座席がある状態で、直した設定を `--config` で渡すと、`status` がその座席を表示する。
 - 最後に `git grep -n 'gpt-5\.5'` で残りを掃く。履歴(`docs/insights/events/`、`docs/reports/`、`docs/plans/archive/`、`docs/evidence/`)と、既定と関係ない fixture は除く。
 
 ## Non-goals
@@ -36,7 +40,8 @@
 - `gpt-5.5` を任意の値として使うテストの fixture の書き換え。
 - 下流の `ralph.toml`(seed-once)の書き換え。`ralph upgrade` の advisory diff で見えるようになり、直すのは下流の運用者(spec の運用ノート (c))。
 - 他のスラッグの追加や入れ替え。
-- リリース(#186)。
+- リリース(#186)。release notes に載せる 1 行(移行と復旧の要点)は、PR の本文に申し送りとして書く。
+- teardown 系の verb(`stop`、`status`、`disband`)が設定の検証で止まらないようにする変更。範囲が広がるので、今回は文書とテストで扱う。
 
 ## Assumptions
 
@@ -50,6 +55,7 @@
 - `scripts/ralph-config.sh`、`templates/base/scripts/ralph-config.sh`
 - `.claude/skills/org/SKILL.md`、`.agents/skills/org/SKILL.md`、`templates/base/.claude/skills/org/SKILL.md`、`templates/base/.agents/skills/org/SKILL.md`
 - `docs/specs/2026-08-01-org-runtime.md`
+- `internal/cli/` の org のテスト(復旧の経路)
 
 ## Design decisions
 
@@ -63,7 +69,8 @@
 - [ ] AC-2: `templates/base/ralph.toml` と `scripts/ralph-config.sh`(+ template)の既定も同じ 8 エントリで、`defaults_sync_test.go` が green、root と template の `ralph-config.sh` が byte 一致。
 - [ ] AC-3: org skill の「既定の model_pool」表(4 面)に `gpt-5.5` の行がなく、`./scripts/check-skill-sync.sh` と `./scripts/check-sync.sh` が green。
 - [ ] AC-4: `git grep -n 'gpt-5\.5'` の結果に、既定のプールとしての記述が残っていない(残るのは履歴、spec の運用ノートの記録、既定と関係ない fixture、`.codex/config.toml` だけ)。残った箇所の分類を verify report に書く。
-- [ ] AC-5: 既定の設定で `ralph doctor` の「Org codex model slugs」が pass で、`4 codex model_pool slug(s)` を出す(main のビルドで確認)。
+- [ ] AC-5: 作業 branch の HEAD のビルドで、`model_pool` を書かない(既定のプールを使う)scratch の project と、残す 4 つの codex スラッグだけを入れた固定の cache(`CODEX_HOME` を scratch に向ける)を使い、`ralph doctor` の「Org codex model slugs」が pass で `4 codex model_pool slug(s)` を出す。利用者の実際の cache での確認は補足として report に書くだけで、合否には使わない(Codex plan advisory の MEDIUM)。
+- [ ] AC-7: org skill の「既定の model_pool」節(4 面)に移行と復旧の段落があり、`internal/cli` の回帰テストで、`model_pool` を省略して `[org.roles]` で `gpt-5.5` を指定した設定では `ralph org status` がモデル名を挙げて失敗し、直した設定を `--config` で渡すと同じ state dir の座席を表示することを確かめる。
 - [ ] AC-6: `RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh` と `go test ./... -count=1` が green。
 
 ## Implementation outline
@@ -88,7 +95,7 @@
 
 ## Risks and mitigations
 
-- 下流で `[org.roles]` に `gpt-5.5` を書き、`model_pool` を省略している project は、バイナリを更新すると検証エラーになる。エラーは「プールにないモデル」を名指しするので、直し方は分かる。release notes(#186)に 1 行書くよう申し送る。
+- 下流で `[org.roles]` に `gpt-5.5` を書き、`model_pool` を省略している project は、バイナリを更新すると設定の検証エラーになる。`ralph org` の verb はどれも設定を読むので、`stop` / `status` / `disband` も止まり、動いている座席を止められないまま課金が続きうる(Codex plan advisory の HIGH)。上流のコミットを revert しても、更新済みのバイナリは戻らない。対策: org skill に更新前の移行と更新後の復旧を書き、復旧の経路をテストで確かめ、release notes に 1 行載せるよう申し送る。`ralph init` が作る `ralph.toml` は `model_pool` を明示していて `gpt-5.5` も含むので、そのまま使っている project は影響を受けない。
 - 既定のプールを前提にした、別の場所のテストが落ちる: `go test ./...` で拾う。
 
 ## Rollout or rollback notes
@@ -100,6 +107,8 @@
 - `.codex/config.toml` の `model = "gpt-5.5"` を変えるかどうか(今回は対象外。メンテナに確認する)。
 
 ## Deviation notes
+
+- 2026-10-02 plan: Codex plan advisory(gpt-6-astra、xhigh、watchdog の 1 行、`codex rc=0`、`-o` 2231 バイト)は HIGH 1 / MEDIUM 1。HIGH: `model_pool` を省略して `[org.roles]` で `gpt-5.5` を指定した設定は、更新後に `stop` / `status` / `disband` まで止める(`internal/cli/org.go:115` の `resolveOrgConfig` → `internal/config/config.go:298` の検証。コードで確認)。MEDIUM: AC-5 が利用者の環境に左右される。ユーザー決定: 対応案で plan を更新。org skill に移行と復旧の段落、`internal/cli` に復旧の経路の回帰テスト(AC-7)、release notes への申し送りを足し、AC-5 を作業 branch のビルドと固定の cache で確かめる形にした。teardown 系の verb の検証を緩める変更は入れない
 
 ## Progress checklist
 
@@ -115,4 +124,4 @@
 
 - [x] 既定値の 3 面と追従させる面を特定した
 - [x] critical fork なし
-- [ ] Codex plan advisory
+- [x] Codex plan advisory(HIGH 1 / MEDIUM 1、対応案で plan を更新)
