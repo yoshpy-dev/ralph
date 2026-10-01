@@ -24,7 +24,10 @@
 ## Scope
 
 - `scripts/detect-changed-languages.sh`(+ template、byte 一致):
-  - `RALPH_VERIFY_BASE` が空のときの base を、`origin/HEAD` の指す remote の branch(ref が実在するときだけ)→ `origin/main` → `main` → `origin/master` → `master` の順で決める。`@{upstream}` は使わない(upstream は push 先で、base ではない)。
+  - `RALPH_VERIFY_BASE` が空のときの base を、次の順で最初に実在する ref に決める。`@{upstream}` そのものは base に使わない(upstream は push 先で、base ではない)。
+    1. `origin` の `refs/remotes/origin/HEAD` の指す branch(指す先の ref が実在するときだけ)→ `origin/main` → `origin/master`
+    2. 今の branch の追跡先の remote(`git config branch.<branch>.remote`。空、`.`、`origin` のとき、と detached HEAD のときは飛ばす)の HEAD の指す branch → `<remote>/main` → `<remote>/master`
+    3. ローカルの `main` → `master`
   - `RALPH_VERIFY_BASE` の明示は従来どおり最優先。
   - ヘッダのコメントに base の決め方を書く。
 - `tests/test-detect-changed-languages.sh`: 次のケースを足す。bare の remote を使う。
@@ -33,7 +36,10 @@
   - default branch が main / master ではない(`trunk`)remote で、`origin/HEAD` が `origin/trunk` を指す → `languages=golang`。
   - `origin/HEAD` が存在しない ref を指す → `origin/main` / `main` に落ちて `languages=golang`。
   - default branch の上で、未 push の commit も作業ツリーの変更もない → `no_changes`(従来どおり)。
-- `tests/test-run-verify-scope.sh`: push 済みの feature branch(upstream == HEAD)で Go を変えた commit があるとき、`run-static-verify.sh` の既定が golang の pack を呼ぶケースを足す(end-to-end)。
+  - remote が `central` だけで、`main` が `central/main` を追跡し、main の上に未 push の Go の commit がある → `languages=golang`(Codex plan advisory の反例。`origin` を前提にすると `no_changes` になる)。
+- `tests/test-run-verify-scope.sh`: 次の 2 つで、`run-static-verify.sh` の既定が golang の pack を呼ぶケースを足す(end-to-end)。
+  - push 済みの feature branch(upstream == HEAD)で Go を変えた commit がある。
+  - `central` を追跡する main の上に未 push の Go の commit がある。
 - `docs/quality/quality-gates.md`(+ template): changed scope の段落に、差分の base(`RALPH_VERIFY_BASE`、なければ default branch との merge-base)を 1 文で足す。
 
 ## Non-goals
@@ -46,7 +52,7 @@
 
 ## Assumptions
 
-- remote の名前は `origin`(既存の実装と同じ前提)。
+- remote の名前は `origin` とは限らない。今の実装も upstream 経由で他の名前の remote を扱っているので、追跡先の remote を 2 番目の候補として見る(Codex plan advisory)。
 - `git clone` した checkout には `refs/remotes/origin/HEAD` がある。ない場合は `origin/main` 以下に落ちる。
 
 ## Affected areas
@@ -58,7 +64,8 @@
 ## Design decisions
 
 - base は default branch との merge-base にし、`@{upstream}` は使わない。issue で決めた方針で、upstream を残す案(同名の remote branch のときだけ飛ばす)は、upstream が別の branch を指す形で同じ問題が残りうるので採らない。差分は広がる方向にしか変わらないので、検査が漏れる方向の後退はない。
-- 候補の順は remote を先にする(既存の `origin/main` → `main` の順を保つ)。`origin/HEAD` は ref が実在するときだけ使う。
+- 候補の順は remote を先にし(既存の `origin/main` → `main` の順を保つ)、`origin` を追跡先の remote より先に見る。fork に push する形(`origin` が本家、upstream が `fork/feature`)で、古いかもしれない fork の main を base にしないため。`origin` がなければ追跡先の remote の default branch を使う。どの remote でも、`HEAD` の指す先は ref が実在するときだけ使う。
+- ローカルの `main` / `master` は最後の候補にする。default branch の上でローカルの main を base にすると merge-base が HEAD になり、未 push の commit が差分から消えるため。
 - Critical forks: None
 
 ## Acceptance criteria
@@ -67,8 +74,9 @@
 - [ ] AC-2: `RALPH_VERIFY_BASE` を明示した場合の挙動は変わらない。明示した base が HEAD と同じなら `no_changes` を返す(テストあり)。既存の 9 ケースは green のまま。
 - [ ] AC-3: `origin/HEAD` が main / master 以外(`trunk`)を指す repo で、default branch から分かれた Go の commit が `golang` として検出される。`origin/HEAD` が存在しない ref を指すときは `origin/main` / `main` に落ちる(どちらもテストあり)。
 - [ ] AC-4: default branch の上で、未 push の commit も作業ツリーの変更もないときは、従来どおり `no_changes` を返す(テストあり)。
+- [ ] AC-8: remote が `central` だけで `main` が `central/main` を追跡し、main の上に未 push の Go の commit があるとき、既定の検出器が `languages=golang` を返し、`run-static-verify.sh` の既定が golang の pack を呼ぶ(どちらもテストあり)。
 - [ ] AC-5: push 済みの feature branch(upstream == HEAD)で Go を変えた commit があるとき、`run-static-verify.sh` の既定(`changed`)が golang の pack を呼ぶ(`tests/test-run-verify-scope.sh` のケース)。
-- [ ] AC-6: mutation: `@{upstream}` を最初に見る形に戻すと AC-1 と AC-5 のケースが落ちる。`origin/HEAD` の段を外すと AC-3 の `trunk` のケースが落ちる。ref の実在の確認を外すと、存在しない ref のケースが落ちる。
+- [ ] AC-6: mutation: `@{upstream}` を最初に見る形に戻すと AC-1 と AC-5 のケースが落ちる。`origin/HEAD` の段を外すと AC-3 の `trunk` のケースが落ちる。ref の実在の確認を外すと、存在しない ref のケースが落ちる。追跡先の remote の段を外すと AC-8 のケースが落ちる。
 - [ ] AC-7: root と template の `detect-changed-languages.sh`、`quality-gates.md` が byte 一致。`shellcheck -S warning` で警告なし、`RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh`、`./scripts/check-sync.sh` が green。
 
 ## Implementation outline
@@ -88,7 +96,7 @@
 - Unit tests: `sh tests/test-detect-changed-languages.sh`、`sh tests/test-run-verify-scope.sh`(sh と dash)。
 - Integration tests: `RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh`。この branch を push した後に、worktree で `./scripts/detect-changed-languages.sh` を実行し、`no_changes` にならないことを確かめる(この変更は検出器そのものを変えるので `shared:` の full になるはず)。
 - Regression tests: AC-6 の mutation。
-- Edge cases: upstream なし、detached HEAD、`origin` がない repo(ローカルの main に落ちる)、main も master もない repo(`no_diff_base` で full)、`RALPH_VERIFY_BASE` に存在しない ref(従来どおり `no_merge_base:<ref>` で full)。
+- Edge cases: upstream なし、detached HEAD(追跡先の remote の段を飛ばす)、`branch.<branch>.remote` が `.`(ローカルの branch を追跡)、`origin` がない repo(ローカルの main に落ちる)、main も master もない repo(`no_diff_base` で full)、`RALPH_VERIFY_BASE` に存在しない ref(従来どおり `no_merge_base:<ref>` で full)。
 - Evidence to capture: test report(件数、mutation 表)。
 
 ## Risks and mitigations
@@ -106,6 +114,8 @@
 
 ## Deviation notes
 
+- 2026-10-01 plan: Codex plan advisory(gpt-6-astra、xhigh、watchdog の 1 行、`codex rc=0`、`-o` 1225 バイト)は MEDIUM 1: `origin` 以外の remote で、default branch の上の未 push の commit が検査から漏れる(ローカルの main を base にすると merge-base が HEAD になる)。scratch で確認: `central/main` を追跡する main の上の未 push の Go の commit は、今の実装では `golang`、下書きの plan では `no_changes`、`central/main` を base にすれば `golang`。ユーザー決定: 対応案で plan を更新。候補に追跡先の remote の段を足し、AC-8 とテスト 2 件と mutation 1 種を追加した
+
 ## Progress checklist
 
 - [x] Plan reviewed
@@ -121,4 +131,4 @@
 - [x] 不具合を scratch の fixture で再現した
 - [x] issue の「run-verify.sh も影響を受ける」は誤りで、影響は wrapper の 2 つだけと確認した
 - [x] critical fork なし
-- [ ] Codex plan advisory
+- [x] Codex plan advisory(MEDIUM 1、対応案で plan を更新)
