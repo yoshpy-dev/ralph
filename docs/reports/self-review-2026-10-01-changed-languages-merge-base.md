@@ -73,3 +73,63 @@ CRITICAL と HIGH はない。
   - M-1 を直す場合は、probe A の形(ローカルの branch `origin/main` を先端に置く)の回帰ケースを 1 つ足す
   - L-1 の「base が今の branch そのもの」になる経路(remote のない repo の main など)を full に落とすかどうかは、既存の契約(ケース 1〜9)を変えるので別 issue で判断する
   - L-2〜L-5 はコメント、文書、テストの名前の直しで、挙動は変わらない
+
+## Cycle 1 addendum (Slices B and C)
+
+- Date: 2026-10-01
+- Scope: `git diff fff03042..HEAD -- scripts/ tests/ docs/quality/ templates/`(Slice B `5c26a2c3` と Slice C `7f5c6235`、HEAD `28496874`)。観点は上と同じ diff の品質だけ
+
+### Evidence reviewed
+
+- `git diff fff03042..HEAD --stat`(上の範囲): 6 ファイル、+313 / -56。`cmp scripts/detect-changed-languages.sh templates/base/scripts/detect-changed-languages.sh` は一致。`quality-gates.md` は root と template で同じ 2 行の書き換え
+- 上の probe A〜G を HEAD の版で再実行した(macOS の `/bin/sh`、F と G は `/bin/dash` でも実行)。A、B、G は `golang`、D は `golang`、E は `scope=full reason=no_remote_default:central`、F は従来どおり `no_changes`
+- guard の境界の probe(HEAD の版、git の設定は前と同じく切り離した):
+
+| probe | 形 | 結果 |
+| --- | --- | --- |
+| C-1 | main の上、remote なし、`branch.main.remote` を `r*` / `-x` / `../up.git` / URL にする | どれも `full`、`reason=no_remote_default:<その値>` |
+| C-2 | main が origin を追跡し、origin に refs がある。未 push の Go の commit | `golang`(guard は動かない) |
+| C-3 | C-2 の形で、main の先端に detached | `golang` |
+| C-4 | main が未 fetch の `central` を追跡、main の先端に detached | `no_changes`(旧版も `no_changes`) |
+| C-5 | remote なしの main の先端に detached / main がローカルの branch を追跡し、その先端に detached | どちらも `no_changes`(旧版も同じ) |
+| C-6 | guard が動く形で `RALPH_VERIFY_BASE=main` を指定 | `no_changes`(明示の base は guard を通らない) |
+| C-7 | ローカルの master だけ、master が未 fetch の `central` を追跡 | `full`、`no_remote_default:central` |
+| C-8 | main がある repo で master の上にいる、master が未 fetch の `central` を追跡 | `golang`(base はローカルの main) |
+| C-9 | feature がローカルの main を追跡(remote `.`) | `golang` |
+| C-10 | `git push -u "file://<user>:<password>@localhost<bare>" main` の後、main の上に Go の commit、origin なし(probe ではダミーの文字列を使った) | `branch.main.remote` に userinfo 付きの URL がそのまま入り、`reason=no_remote_default:file://<user>:<password>@localhost/...` が出る |
+
+- `scripts/run-verify.sh:63`、`:98` は reason を `==> Language scope: full fallback (<reason>)` として標準出力と `docs/evidence/verify-*.log` に出し、`.harness/state/verify-scope` にも書く。`docs/evidence/*.log` は `.gitignore:58` で追跡されない。一方で verify report は reason の値をそのまま引用している(`docs/reports/verify-2026-10-01-changed-languages-merge-base.md:14`、`:59`)
+
+### 前回の指摘の修正の確認
+
+| # | 状態 | 確認したこと |
+| --- | --- | --- |
+| M-1 | 修正済み | `remote_default_ref` は完全な ref 名を出し(`scripts/detect-changed-languages.sh:144`、`:151`)、ローカルの段も `refs/heads/main` / `refs/heads/master` を入れる(`:179`、`:181`)。`RALPH_VERIFY_BASE` はそのまま。ケース 21 と 22 は、先に `assert_short_name_shadowed` で短い名前が HEAD に解決されることを確かめてから結果を見るので、fixture が効いていないまま通ることはない(`tests/test-detect-changed-languages.sh:170-181`、`:406-433`) |
+| L-1 | 修正済み(範囲を絞って塞いだ) | guard は `:183-185`。今の branch に `branch.<b>.remote` があり、origin にも追跡先にも default branch の ref がなく、ローカルの候補が今の branch そのものという 3 条件がそろったときだけ動く。C-2、C-3、C-6、C-8、C-9 とケース 25 では動かない。remote のない main(F)と、default branch の先端での detached HEAD(C-4、C-5)は従来どおり `no_changes` で、旧版と同じ。これは verify の V-1 の範囲 |
+| L-2 | 修正済み | 先頭のコメントは「@{upstream} is never consulted」になり、HEAD の段の「existing ref under refs/remotes/origin/」の条件も入った(`:17-30`)。関数のコメントも同じ条件を書いている(`:134-137`) |
+| L-3 | 修正済み | `docs/quality/quality-gates.md:43-46` と template は「merge-base of HEAD and `RALPH_VERIFY_BASE` when set, otherwise of HEAD and the default branch」になり、両方とも merge-base だと読める |
+| L-4 | 修正済み | 2 本のテストが `trap cleanup` の直後で `HOME`、`GIT_CONFIG_GLOBAL`、`GIT_CONFIG_SYSTEM`、`GIT_CONFIG_NOSYSTEM`、`GIT_TERMINAL_PROMPT` を固定する(`tests/test-detect-changed-languages.sh:86-94`、`tests/test-run-verify-scope.sh:54-62`)。その前に git を呼ぶ箇所はない |
+| L-5 | 修正済み | ケース 18 は main に python の commit を足して central/main を古くし、`languages=golang` の完全一致で central/main を使っていないことを確かめる。ケース 19 は名前を確かめている内容に合わせた |
+
+### Findings
+
+| # | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| A-1 | LOW | 安全性(資格情報の表示) | guard の reason は `branch.<b>.remote` の生の値をそのまま入れる。`git push -u <URL> main` はこの値に URL をそのまま書き、URL に userinfo があれば資格情報も含まれる(C-10 で確認)。origin に default branch の ref がなく main の上にいるとき、その URL が `reason=` に出る。`run-verify.sh` は標準出力、`docs/evidence/verify-*.log`、`.harness/state/verify-scope` に書く。どれも追跡されないが、/verify や /test のエージェントは reason を report に引用し、report はコミットされる。commit 時の secret scan は既知の token の形しか止めない。Slice B より前の版はこの値を出さなかった(旧版は `@{upstream}` の失敗をそのまま base にしていた)。きっかけは、資格情報付きの URL に `-u` で push すること、origin に default branch の ref がないこと、main の上にいることの 3 つがそろう場合だけで、狭い | `scripts/detect-changed-languages.sh:164`、`:183-185`、`scripts/run-verify.sh:63`、`:98`。probe C-10 | 値が `.` か、名前付きの remote(`git config --get "remote.$configured_remote.url"` が成功する)のときだけ値を入れ、それ以外は `no_remote_default:url` のような固定の値にする。テストのケース 23、24、32 はどれもこの条件を満たすので、変更の影響を受けない |
+| A-2 | LOW | 読みやすさ | `configured_remote` と `tracked_remote` は似た意味の名前で、違い(前者は生の値で guard と reason に使い、後者は `.` を空にした step 2 用の値)が書かれていない。読む人は 167〜170 行と 183 行を見比べて推測することになる。plan の Deviation notes には説明があるが、コードにはない | `scripts/detect-changed-languages.sh:161-174`、`:183` | 167 行の前に「configured_remote is the raw branch.<b>.remote (guard and reason); tracked_remote drops "." for the remote step」のような 1 行を足す。名前を `remote_for_step2` のように役割で付ける手もある |
+
+CRITICAL、HIGH、MEDIUM はない。
+
+### 依頼された観点への回答
+
+- `configured_remote` / `tracked_remote` の分け方: 正しい。step 2 は `.` と `origin` を飛ばし(`:168-174`)、guard は生の値が空でないことだけを見る。detached HEAD では `current_ref` が空なので `configured_remote` も空のままになり、guard は動かない。名前の分かりにくさは A-2。
+- guard が動くべきでないところで動くか: 動かない。feature branch(ケース 25、C-9)、detached HEAD(C-3、C-4)、refs のある origin を追跡する main(C-2)、明示の base(C-6)、main がある repo で master の上(C-8)のどれでも動かなかった。guard は ref の名前で比べるので、default branch の先端での detached HEAD(C-4)は塞がない。ただしこれは旧版と同じ `no_changes` で、V-1 の範囲。
+- コメントの正確さ: 先頭の段落(`:17-30`)と関数のコメント(`:134-137`)はコードと一致する。guard の文は「When branch.<current>.remote is set」と、今の branch がある場合に限って書いているので、C-4 と矛盾しない。
+- ケース 21〜32 の隔離と名前: 隔離は L-4 の修正で足りている。`track_unfetched_remote` が指す `$workdir/never-fetched.git` は作られず、fetch もされないので、ケースの間で状態を共有しない。名前と fixture は一致している。ケース 26、29、30 は python の commit で古い base を見分けられる形になっていて、ケース 31 は HEAD の指す先を今の branch にしているので、接頭辞の確認を外すと `no_changes` になる。
+
+### Recommendation
+
+- Merge: 可。CRITICAL、HIGH、MEDIUM はない。A-1 と A-2 はどちらも数行の直しで、挙動の契約は変わらない
+- Follow-ups:
+  - A-1 を直す場合は、userinfo 付きの `file://` URL を `branch.main.remote` に入れたケースを 1 つ足し、reason に `@` が出ないことを見る
+  - V-1 の 1 文(sync-docs)には、remote のない main だけでなく、default branch の先端での detached HEAD も同じく commit 済みの変更が見えないこと(C-4、C-5)を含める
