@@ -36,12 +36,21 @@
 #      its own execute bit does not leak into the printed results (pins
 #      the find expression's `-print` placement), and an unreadable
 #      subtree under `.claude/agents/` is reported the same way as the
-#      scripts/ case (both of the last two skipped when running as root).
+#      scripts/ case, and an unreadable `.claude/skills/` itself (where the
+#      skills listing find fails, unlike an unreadable child directory,
+#      which the SKILL.md check reports) is reported instead of silently
+#      passing (the last three skipped when running as root).
 #   G. fresh scaffold: `go run ./cmd/ralph init --yes <tmp>` (when `go` is
 #      available) passes check-template.sh with no FAIL line.
 #   H. a project missing a whole search root (`packs/`, `.claude/agents/`,
 #      or `.claude/skills/`) passes with no FAIL line; a missing root is
 #      skipped, not reported.
+#   I. signal cleanup (dash only, skipped when `dash` is unavailable): a
+#      TERM, INT, or HUP sent to check-template.sh while it is parked in a
+#      stub `find` makes it exit 143, 130, or 129 and leaves no
+#      check-template.* directory in its TMPDIR. dash skips the EXIT trap
+#      when a signal kills it, so only the script's own signal traps
+#      remove the temp directory there.
 #
 # Spec: issue #183, issue #189. The Go-side counterpart lives in
 # internal/scaffold/embed_test.go (TestTemplateBaseScriptsMatchCheckTemplateRequiredFiles).
@@ -537,6 +546,27 @@ run_case_f() {
     fi
   fi
 
+  # F10: .claude/skills itself unreadable. The skills find then fails
+  # (unlike an unreadable child directory, which the SKILL.md loop reports
+  # on its own), and that failure must be reported. Without the find
+  # exit-status check the script prints nothing and exits 0, leaving every
+  # skill unchecked. chmod 000 does not block root's own read access, so
+  # this only proves anything as a non-root user.
+  if [ "$(id -u)" -eq 0 ]; then
+    skip "F. unreadable .claude/skills/ check skipped (running as root)"
+  else
+    chmod 000 "$fixture/.claude/skills"
+    output="$(cd "$fixture" && CI=true sh "$CHECK_TEMPLATE" 2>&1)"
+    rc=$?
+    chmod 755 "$fixture/.claude/skills"
+    if [ "$rc" -eq 1 ] && printf '%s\n' "$output" | grep -qF 'Could not list skill directories under .claude/skills'; then
+      pass "F. an unreadable .claude/skills/ is reported instead of silently skipped"
+    else
+      fail "F. an unreadable .claude/skills/ was NOT reported (exit $rc)"
+      printf '%s\n' "$output" | sed 's/^/    /'
+    fi
+  fi
+
   rm -rf "$fixture"
   trap - EXIT
 }
@@ -622,6 +652,106 @@ run_case_h() {
   trap - EXIT
 }
 
+# --- I. signal cleanup under dash ------------------------------------------
+# run_signal_case <signal> <expected-exit-status> <work-dir> — start
+# check-template.sh under dash in the background from <work-dir>/fixture
+# with a private TMPDIR and the stub `find` (<work-dir>/bin) first on PATH,
+# wait until the stub reports it is running (so the traps are installed
+# and the script is parked inside find), send <signal> to dash, then check
+# the exit status and that the private TMPDIR holds no check-template.*
+# directory. dash runs a trapped signal's handler only after the foreground
+# stub returns, so the handler's `exit` (and the EXIT trap's cleanup) runs
+# once the stub's sleep ends, bounded at about a second per signal. Without
+# the INT/TERM/HUP traps the signal kills dash outright, skipping the EXIT
+# trap and leaving the temp directory behind.
+run_signal_case() {
+  local sig="$1" want_rc="$2" work="$3"
+  local private_tmp="$work/tmp-$sig" ready="$work/ready-$sig" log="$work/out-$sig.log"
+  local pid rc polls leftover entry
+
+  mkdir -p "$private_tmp"
+  # Job control gives the background job its own process group and keeps it
+  # from starting with SIGINT ignored (a plain `&` job ignores SIGINT and
+  # SIGQUIT), so INT reaches dash's trap instead of being dropped.
+  set -m
+  (cd "$work/fixture" && PATH="$work/bin:$PATH" TMPDIR="$private_tmp" STUB_READY="$ready" CI=true exec dash "$CHECK_TEMPLATE") >"$log" 2>&1 </dev/null &
+  pid=$!
+  set +m
+
+  polls=0
+  while [ ! -e "$ready" ] && [ "$polls" -lt 100 ]; do
+    sleep 0.05
+    polls=$((polls + 1))
+  done
+  if [ -e "$ready" ]; then
+    kill -s "$sig" "$pid"
+  else
+    kill -s KILL "$pid" 2>/dev/null
+  fi
+  wait "$pid" 2>/dev/null
+  rc=$?
+  # Reap what the signal can leave running: with the traps missing, dash
+  # dies at once and the stub's sleep outlives it as an orphan in the same
+  # process group.
+  kill -s KILL -- "-$pid" 2>/dev/null
+
+  if [ ! -e "$ready" ]; then
+    fail "I. dash: $sig case never started (the stub find did not run within 5s)"
+    sed 's/^/    /' "$log"
+    return
+  fi
+  if grep -qF 'Template structure looks good.' "$log"; then
+    skip "I. dash: $sig cleanup check skipped (the script ran to completion; $sig is ignored in this environment)"
+    return
+  fi
+
+  leftover=0
+  for entry in "$private_tmp"/check-template.*; do
+    [ -e "$entry" ] && leftover=$((leftover + 1))
+  done
+  if [ "$rc" -eq "$want_rc" ]; then
+    pass "I. dash: $sig makes check-template.sh exit $want_rc"
+  else
+    fail "I. dash: $sig made check-template.sh exit $rc (want $want_rc)"
+    sed 's/^/    /' "$log"
+  fi
+  if [ "$leftover" -eq 0 ]; then
+    pass "I. dash: $sig leaves no check-template.* temp directory"
+  else
+    fail "I. dash: $sig left $leftover check-template.* temp director(ies) behind"
+  fi
+}
+
+run_case_i() {
+  local work real_find
+
+  if ! command -v dash >/dev/null 2>&1; then
+    skip "I. signal cleanup check skipped (dash is unavailable)"
+    return
+  fi
+
+  work="$(mktemp -d "${TMPDIR:-/tmp}/check-template-signals.XXXXXX")" || {
+    fail "I. mktemp -d failed; skipping the signal cleanup cases"
+    return
+  }
+  trap 'rm -rf "$work"' EXIT
+
+  build_fixture "$work/fixture"
+  # The stub marks that it is running, sleeps long enough to comfortably
+  # outlast the delay before the signal is sent, then runs the real find.
+  mkdir -p "$work/bin"
+  real_find="$(command -v find)"
+  printf '#!/bin/sh\n: > "$STUB_READY"\nsleep 1\nexec "%s" "$@"\n' "$real_find" > "$work/bin/find"
+  chmod +x "$work/bin/find"
+
+  run_signal_case TERM 143 "$work"
+  run_signal_case INT 130 "$work"
+  run_signal_case HUP 129 "$work"
+
+  rm -rf "$work"
+  trap - EXIT
+}
+
 run_case_a
 run_case_b
 run_case_c
@@ -630,6 +760,7 @@ run_case_e
 run_case_f
 run_case_g
 run_case_h
+run_case_i
 
 printf '\ntest-check-template: %s passed, %s failed, %s skipped\n' "$pass_count" "$fail_count" "$skip_count"
 [ "$fail_count" -eq 0 ]
