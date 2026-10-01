@@ -116,13 +116,14 @@
 
 - 2026-10-01 plan: Codex plan advisory(gpt-6-astra、xhigh、watchdog の 1 行、`codex rc=0`、`-o` 1225 バイト)は MEDIUM 1: `origin` 以外の remote で、default branch の上の未 push の commit が検査から漏れる(ローカルの main を base にすると merge-base が HEAD になる)。scratch で確認: `central/main` を追跡する main の上の未 push の Go の commit は、今の実装では `golang`、下書きの plan では `no_changes`、`central/main` を base にすれば `golang`。ユーザー決定: 対応案で plan を更新。候補に追跡先の remote の段を足し、AC-8 とテスト 2 件と mutation 1 種を追加した
 - 2026-10-01 work: Slice A は implementer(sonnet)に委譲(5bf0d0ad、6 ファイル、+358 / -16、push 済み)。`remote_default_ref` で remote ごとに「HEAD の指す先(実在するときだけ)→ main → master」を返し、origin → 追跡先の remote → ローカルの main / master の順に見る。detached HEAD の判定は `--short` を使わず `git symbolic-ref --quiet HEAD` から `refs/heads/` を外す(同名の tag があると `heads/<name>` が返りうるため)。検出器のテストに 11 ケース(10〜20)を追加した。push 済み、明示の base、存在しない明示の base、`trunk`、存在しない ref を指す HEAD、default branch 上で変更なし、default branch 上の未 push の commit、`central`、detached HEAD、remote `.`、base なしの各ケースで、48 / 48。scope のテストに 2 ケースを追加して 19 / 19。sh と dash の両方で同じ結果。2 本のテストの冒頭で `RALPH_VERIFY_BASE`(scope 側は `RALPH_VERIFY_SCOPE` も)を unset する。red: (a) `@{upstream}` を先頭に戻す → push 済みのケースが落ちる(fixture が push 済みなので `trunk` と存在しない ref のケースも落ちる)、(b) HEAD の段を外す → `trunk`、(c) 実在の確認を外す → 存在しない ref のケース、(d) 追跡先の remote の段を外す → `central` のケースが検出器と scope の両方で落ちる。push 後の検出器は `scope=full reason=shared:scripts/detect-changed-languages.sh`(`no_changes` ではない)。`quality-gates.md` は root と template で同じ 1 文を足した(全体の差分は check-sync の KNOWN_DIFF のまま)。implementer は「2 本のテストは run-verify に配線されていない」と報告したが誤りで、`verify.local.sh` の test モードは実行権限のある `tests/test-*.sh` を全部走らせる。run-verify の log でも 48 / 48 と 19 / 19 を確認した。orchestrator も 48 / 48(sh)、19 / 19(dash)、cmp を確認
+- 2026-10-01 self-review(cycle 1、fff03042): CRITICAL 0 / HIGH 0 / MEDIUM 1 / LOW 5、merge 可。M-1: 存在を確かめた `refs/remotes/<r>/<b>` / `refs/heads/main` ではなく短い名前を merge-base に渡すので、同名の tag やローカルの branch(`origin/main` という名前の branch など)が base になる。upstream のある経路では旧版より後退。L-1: 追跡先の remote に ref が 1 つもないまま main の上にいると、ローカルの main == HEAD になって `no_changes`。L-2: コメントの「@{upstream} is never the base」が字面どおりでない、HEAD の指す先が remote の外のときに無視する条件が書かれていない。L-3: `quality-gates.md` の文が、明示の base も merge-base を通ることを読み取れない。L-4: fixture が global / system の git 設定から切り離されていない。L-5: ケース 18 と 19 の名前が、fixture では確かめられない経路を謳っている。全件を in-cycle で修正する。L-1 は reviewer の「別 issue」案ではなく、範囲を絞って塞ぐ(orchestrator 判断): 今の branch が `.` 以外の remote を追跡していて、どの remote にも default branch の ref がなく、ローカルの段で選んだ base が今の branch そのものなら、`no_remote_default:<remote>` で full にする。remote のない repo の main(ケース 1〜9)は変わらない
 
 ## Progress checklist
 
 - [x] Plan reviewed
 - [x] Branch created
 - [x] Implementation started
-- [ ] Review artifact created
+- [x] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
