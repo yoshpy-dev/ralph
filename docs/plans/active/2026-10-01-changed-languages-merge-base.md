@@ -1,6 +1,6 @@
 # changed-languages-merge-base
 
-- Status: Draft
+- Status: PR created (#195), awaiting CI and merge
 - Owner: Claude Code
 - Date: 2026-10-01
 - Related request: `scripts/detect-changed-languages.sh` は `RALPH_VERIFY_BASE` が空のとき `@{upstream}` を base にする。push 済みの作業 branch では upstream が HEAD と同じコミットを指すので差分が空になり、`scope=changed reason=no_changes docs_only=true languages=` を返す。`changed` を既定にする `run-static-verify.sh`(`/verify`)と `run-test.sh`(`/test`)は、Go を変えた branch でも言語 pack の検査を 1 つも走らせないまま通る。issue #190
@@ -70,14 +70,14 @@
 
 ## Acceptance criteria
 
-- [ ] AC-1: upstream が HEAD と同じ push 済みの branch で、Go のファイルを変えた commit があると、既定の `./scripts/detect-changed-languages.sh` が `scope=changed`、`languages=golang` を返す(テストあり)。
-- [ ] AC-2: `RALPH_VERIFY_BASE` を明示した場合の挙動は変わらない。明示した base が HEAD と同じなら `no_changes` を返す(テストあり)。既存の 9 ケースは green のまま。
-- [ ] AC-3: `origin/HEAD` が main / master 以外(`trunk`)を指す repo で、default branch から分かれた Go の commit が `golang` として検出される。`origin/HEAD` が存在しない ref を指すときは `origin/main` / `main` に落ちる(どちらもテストあり)。
-- [ ] AC-4: default branch の上で、未 push の commit も作業ツリーの変更もないときは、従来どおり `no_changes` を返す(テストあり)。
-- [ ] AC-8: remote が `central` だけで `main` が `central/main` を追跡し、main の上に未 push の Go の commit があるとき、既定の検出器が `languages=golang` を返し、`run-static-verify.sh` の既定が golang の pack を呼ぶ(どちらもテストあり)。
-- [ ] AC-5: push 済みの feature branch(upstream == HEAD)で Go を変えた commit があるとき、`run-static-verify.sh` の既定(`changed`)が golang の pack を呼ぶ(`tests/test-run-verify-scope.sh` のケース)。
-- [ ] AC-6: mutation: `@{upstream}` を最初に見る形に戻すと AC-1 と AC-5 のケースが落ちる。`origin/HEAD` の段を外すと AC-3 の `trunk` のケースが落ちる。ref の実在の確認を外すと、存在しない ref のケースが落ちる。追跡先の remote の段を外すと AC-8 のケースが落ちる。
-- [ ] AC-7: root と template の `detect-changed-languages.sh`、`quality-gates.md` が byte 一致。`shellcheck -S warning` で警告なし、`RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh`、`./scripts/check-sync.sh` が green。
+- [x] AC-1: upstream が HEAD と同じ push 済みの branch で、Go のファイルを変えた commit があると、既定の `./scripts/detect-changed-languages.sh` が `scope=changed`、`languages=golang` を返す(テストあり)。
+- [x] AC-2: `RALPH_VERIFY_BASE` を明示した場合の挙動は変わらない。明示した base が HEAD と同じなら `no_changes` を返す(テストあり)。既存の 9 ケースは green のまま。
+- [x] AC-3: `origin/HEAD` が main / master 以外(`trunk`)を指す repo で、default branch から分かれた Go の commit が `golang` として検出される。`origin/HEAD` が存在しない ref を指すときは `origin/main` / `main` に落ちる(どちらもテストあり)。
+- [x] AC-4: default branch の上で、未 push の commit も作業ツリーの変更もないときは、従来どおり `no_changes` を返す(テストあり)。
+- [x] AC-8: remote が `central` だけで `main` が `central/main` を追跡し、main の上に未 push の Go の commit があるとき、既定の検出器が `languages=golang` を返し、`run-static-verify.sh` の既定が golang の pack を呼ぶ(どちらもテストあり)。
+- [x] AC-5: push 済みの feature branch(upstream == HEAD)で Go を変えた commit があるとき、`run-static-verify.sh` の既定(`changed`)が golang の pack を呼ぶ(`tests/test-run-verify-scope.sh` のケース)。
+- [x] AC-6: mutation: `@{upstream}` を最初に見る形に戻すと AC-1 と AC-5 のケースが落ちる。`origin/HEAD` の段を外すと AC-3 の `trunk` のケースが落ちる。ref の実在の確認を外すと、存在しない ref のケースが落ちる。追跡先の remote の段を外すと AC-8 のケースが落ちる。
+- [x] AC-7: root と template の `detect-changed-languages.sh`、`quality-gates.md` が byte 一致。`shellcheck -S warning` で警告なし、`RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh`、`./scripts/check-sync.sh` が green。
 
 ## Implementation outline
 
@@ -136,7 +136,7 @@
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
-- [ ] PR created
+- [x] PR created (#195)
 
 ## Readiness checklist
 
