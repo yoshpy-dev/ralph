@@ -103,3 +103,87 @@ All six runs: exit 143 (`128 + SIGTERM`), zero leftover temp directories, both b
 - Fail: none.
 - Blocked: none.
 - Worktree and main checkout both had empty `git status --porcelain` throughout; HEAD unchanged at `842856a`.
+
+## Cycle 2
+
+- Date: 2026-10-01
+- Tester: tester subagent (Claude Code), cycle 2 of 2 (fresh agent; cycle 1 above is unchanged)
+- HEAD under test: `4bf0749` (confirmed before the first command and again after the last). `git status --porcelain` empty in the worktree and in the main checkout before, between and after every phase.
+- Delta since cycle 1 (test commit `b2d965a`): Slice C `39c2629` (AR-1: prune `.claude/hooks/local` instead of filtering it, tests F6-F8), Slice D `7ec013d` (C2-1/C2-2: tests H1/H2, F8 mode-644 variant, F9, comment fixes, capitalized FAIL messages). Verify cycle 2 passed.
+- Scope: behavioral tests only. Run as uid 502 (non-root), so the root-skip branches ran for real. All scratch fixtures, scaffolds and mutation mirrors lived in the session scratchpad; no tracked file was edited. Scratch-only helpers (mutation harness, signal probe) are in the scratchpad and not committed.
+- Evidence: `docs/evidence/verify-2026-10-01-060228.log` (full-scope run; gitignored by `docs/evidence/*.log`, so it is local evidence and not part of the commit).
+
+### Test execution
+
+| Suite / Command | Result | Passed | Failed | Skipped |
+| --- | --- | --- | --- | --- |
+| `RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh` (foreground) | exit 0; 32 shell suites under `tests/` plus Go (language scope `full`, pack `golang`); all 8 test-bearing Go packages `ok` (`internal/cli` 43.5s, `internal/org` 10.6s, the other six cached or sub-second); no `FAIL` line in the log other than `FAIL: 0` summaries | all | 0 | 0 |
+| `tests/test-check-template.sh` inside that run | `test-check-template: 47 passed, 0 failed, 0 skipped` | 47 | 0 | 0 |
+| `bash tests/test-check-template.sh` x3 (standalone) | exit 0 each time, identical output | 47 / 47 / 47 | 0 / 0 / 0 | 0 / 0 / 0 |
+| `go test ./internal/scaffold/... -count=1 -v` | exit 0; 31 top-level tests: 29 PASS, 0 FAIL, 2 SKIP (`TestBaseFS_WithMockFS`, `TestAvailablePacks_WithMockFS`: "EmbeddedFS not initialized", pre-existing and unrelated); `TestTemplateBaseScriptsMatchCheckTemplateRequiredFiles` PASS | 29 | 0 | 2 |
+
+The suite grew 40 -> 47 as the delta predicts: F6, F7, F8 (Slice C) plus H1, H2, the F8 mode-644 variant and F9 (Slice D). No Go source changed since cycle 1 (`git diff 842856a..4bf0749 -- internal/ cmd/ templates/` touches only `templates/base/scripts/check-template.sh`), so the Go count differs from cycle 1's "27" only by how the lines were counted, not by new or removed tests.
+
+### Shells table
+
+`CI=true <shell> scripts/check-template.sh`, run from each target's root. Fresh scaffold built once with `go run ./cmd/ralph init --yes <scratch>/fresh` from the worktree root (0.29s wall, cached build). Target (c) is a `cp -a` of that scaffold with a new directory `.claude/hooks/local/disabled` set to mode 000.
+
+| Shell | (a) worktree root | (b) fresh scaffold | (c) scaffold + `chmod 000 .claude/hooks/local/disabled` |
+| --- | --- | --- | --- |
+| `sh` (`/bin/sh`) | exit 0, 0 FAIL lines | exit 0, 0 FAIL lines | exit 0, 0 FAIL lines |
+| `dash` | exit 0, 0 FAIL lines | exit 0, 0 FAIL lines | exit 0, 0 FAIL lines |
+| `bash --posix` | exit 0, 0 FAIL lines | exit 0, 0 FAIL lines | exit 0, 0 FAIL lines |
+| busybox sh | not installed (`command -v busybox` empty); not run | not run | not run |
+
+All nine runs ended with `Template structure looks good.` Two notes on method. First, my first loop passed `bash --posix` as an unquoted zsh variable and got rc 127 (zsh does not word-split); that was a harness error, not a script result, and the three `bash --posix` rows above are from a re-run with the command spelled out. Second, a control proves that `chmod 000` actually bites here: the same locked directory placed outside the pruned tree (`.claude/hooks/notlocal`) makes `sh` and `dash` exit 1 with `FAIL: Could not list scripts under .claude/hooks packs scripts: find exited with 1`. So target (c) passing is the `-prune` working, not the fixture being toothless.
+
+### Scaffold PR-CI simulation
+
+Copy of the fresh scaffold; `git add -A`; `git commit -m 'chore: init'` (config isolated with the global and system git config pointed at `/dev/null`, so no developer gpgsign setting leaks in; the scaffold's installed `commit-msg` wrapper ran and accepted the Conventional Commits subject); working tree clean afterwards. Then, from the scaffold root, the exact form of `templates/base/.github/workflows/verify.yml:16` (`run: ./scripts/check-template.sh`) with `CI=true`:
+
+- `CI=true ./scripts/check-template.sh` -> **exit 0**, `Template structure looks good.`, no FAIL line.
+- Extra data point, same scaffold with `CI` unset (local mode, the four git secret hooks installed by `ralph init`): **exit 0**, same output, so the local git-hook installation check also passes on a fresh scaffold.
+
+### Mutation table
+
+Method: `git archive HEAD` of the worktree into a scratch root, so the suite's `REPO_ROOT` resolves there. Every mutation was applied to **both** `scripts/check-template.sh` and `templates/base/scripts/check-template.sh` inside that mirror (case G builds its scaffold from the embedded template, so a root-only mutation would understate its reach; see cycle-1 Finding 1). Each application used an exact-single-match literal replacement, was confirmed to change the file (`cmp` against the saved baseline), kept the two copies byte-identical, and the mirror was restored and `cmp`-confirmed after the last mutation. Mirror baseline: `47 passed, 0 failed, 0 skipped`.
+
+| # | Mutation | Expected | Observed (suite) | Failing assertion(s) | Match |
+| --- | --- | --- | --- | --- | --- |
+| a | `-path '.claude/hooks/local' -prune -o -type f -name '*.sh' -print` back to `-type f -name '*.sh' -not -path '.claude/hooks/local/*'` | F7 fails | 46 / 1 | F7: "an unreadable directory under .claude/hooks/local/ does not cause a FAIL" (exit 1) | Yes |
+| b | prune `.claude/hooks` entirely (`-path '.claude/hooks' -prune`) | F6 fails | 46 / 1 | F6: "a non-executable .sh under .claude/hooks/ (outside local/) is detected" (exit 0, not detected) | Yes |
+| c | drop `-print` | F8 mode-644 variant fails | 46 / 1 | F8 ext.: ".claude/hooks/local at mode 644 with a non-executable .sh inside does not cause a FAIL" (exit 1) | Yes |
+| d | drop the scripts-root `[ -d "$root" ]` filter | H1 fails | 46 / 1 | H1: "a project without packs/ and without .claude/agents/ passes with no FAIL" (exit 1) | Yes |
+| e | drop the `[ -d .claude/skills ]` guard (`if true`) | H2 fails | 46 / 1 | H2: "a project without .claude/skills/ passes with no FAIL" (exit 1) | Yes |
+| f | drop the `[ -d .claude/agents ]` guard (`if true`) | H1 fails | 46 / 1 | H1 (same assertion as d) | Yes |
+| g | drop the agents `find` rc check | F9 fails | 46 / 1 | F9: "an unreadable subtree under .claude/agents/ is reported" (exit 0, not reported) | Yes |
+| h | drop the skills `find` rc check | survives (recorded gap) | **47 / 0 (survived)** | none | Yes, but see Finding 1: the gap is closable |
+| i | remove the INT/TERM/HUP traps | survives (recorded gap) | **47 / 0 (survived)** | none | Yes, but see Finding 2: the gap is closable |
+
+Seven of nine were caught, each by exactly the one assertion predicted and by nothing else. Two survivors, both predicted: (h) and (i). Two small observations on the caught ones. Under (a), only F7 fails; the F8 mode-644 variant stays green, so it is (c), not (a), that pins that variant. And (d) and (f) are both pinned only by H1, because H1 deletes `packs/` and `.claude/agents/` together: either dropped guard is caught, but the failing assertion does not say which one.
+
+### Findings
+
+1. **Survivor (h) is a real fail-open that one cheap fixture would close.** The recorded gap says an unreadable child never makes the skills `find` fail, and that is right: with an unreadable child directory the existing loop reports `Skill missing SKILL.md: .claude/skills/<child>`, and the baseline and the mutant print the same single FAIL and exit 1. But when `.claude/skills` **itself** is unreadable (mode 000, non-root), the baseline prints `FAIL: Could not list skill directories under .claude/skills: find exited with 1` and exits 1, while the (h) mutant prints nothing and **exits 0**, so every skill goes unchecked. Verified on a scratch copy of the scaffold with the baseline script and the (h) variant side by side. A test that locks `.claude/skills` itself (restoring mode 755 before cleanup, skipped as root) would pin the branch. The guard is live code, not dead code.
+2. **Survivor (i) is a real behavioral difference, and a deterministic test is feasible.** Plan Deviation notes record the trap as untested because a signal test is timing-dependent. A probe that avoids the timing dependence: put a stub `find` that just runs `sleep 2` first on `PATH`, start the script (with a private `TMPDIR` and SIGINT reset to default via a `perl -e '$SIG{INT}="DEFAULT"; exec @ARGV'` wrapper so a background job can receive INT), send the signal 0.5s in, wait, then count `check-template.*` directories. Results, 18 runs (each combination run once; a flake rate was not measured):
+   - Baseline, all 9 combinations of `sh`/`dash`/`bash --posix` x TERM/INT/HUP: exit 143/130/129 as designed, 0 leftover directories.
+   - Mutant (i): `dash` leaves **1 leftover temp directory for each of TERM, INT and HUP** (3 of 3). `sh` and `bash --posix` leave none (bash runs its EXIT trap on fatal signals), but with INT delivered to the shell PID alone they ran to completion and exited 0 instead of 130. That last point is a property of signalling only the shell, not a claim about terminal Ctrl-C.
+   So a regression test of about three signals on `dash` (skipped when `dash` is absent) would catch the removal without a 50,000-file fixture.
+3. **Fresh-agent re-verification of the AR-1 fix is complete from three independent angles:** suite F7 passes and fails under mutation (a); a hand-built locked `.claude/hooks/local/disabled` in a fresh scaffold passes on all three shells; and the locked-outside-local control fails as it should (shells table).
+4. **C2-1's previously untested branches are now each pinned:** missing-root filter (d, f via H1), `[ -d .claude/skills ]` (e via H2), `-print` (c via F8 mode-644), agents find rc (g via F9). The only branches still unpinned are the two survivors above.
+5. No leftover state: zero `check-template*` directories in `$TMPDIR` or `/tmp`, no stray `find`/`sleep` processes, locked scratch directories restored to mode 755 and removed.
+
+### Test gaps
+
+- **Open, closable (Finding 1):** the skills `find` rc check is untested. Add a case that locks `.claude/skills` itself.
+- **Open, closable (Finding 2):** the INT/TERM/HUP traps are untested. The stub-`find` probe makes a deterministic `dash` test possible.
+- **busybox sh** was not exercised (not installed); `sh`, `dash` and `bash --posix` were.
+- **Root-user behavior** was not exercised: the suite ran as uid 502, so the `skip` branches for root (E unreadable settings.json, F5/F7/F8-644/F9) are trusted as written and were not run as root.
+- **`go test ./internal/scaffold/...`** has two unrelated pre-existing skips (the mock-FS tests), which only run when built from `cmd/ralph/`.
+
+### Verdict
+
+- **Pass.** Full-scope `./scripts/run-test.sh` exit 0; the suite is 47/0/0 on five separate runs (once inside the wrapper, three standalone, once as the mutation baseline); `go test ./internal/scaffold/... -count=1` 29 pass / 0 fail / 2 pre-existing skips; `sh`, `dash` and `bash --posix` exit 0 with no FAIL line on the worktree root, a fresh scaffold, and a scaffold with an unreadable directory under `.claude/hooks/local/`; the committed-scaffold PR-CI step exits 0; 7 of 9 mutations are caught by exactly the predicted assertion and the 2 survivors are the predicted ones.
+- Fail: none. Blocked: none.
+- Two coverage gaps remain open for the human to weigh (Findings 1 and 2); neither is a defect in the script's current behavior, and both were already recorded as accepted gaps.
+- Worktree and main checkout: empty `git status --porcelain` throughout; HEAD unchanged at `4bf0749`.
