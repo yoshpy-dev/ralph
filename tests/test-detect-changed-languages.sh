@@ -64,6 +64,18 @@ assert_field_contains() {
   esac
 }
 
+assert_output_lacks() {
+  _desc="$1"
+  _needle="$2"
+  _file="$3"
+  if grep -F -q -- "$_needle" "$_file"; then
+    record_fail "$_desc (output contains $_needle)"
+    sed 's/^/    out: /' "$_file"
+  else
+    record_pass "$_desc"
+  fi
+}
+
 assert_field_prefix() {
   _desc="$1"
   _field="$2"
@@ -577,6 +589,28 @@ out="$workdir/local-upstream-main.out"
 run_detect "$repo" "$out"
 assert_field "main tracking a local branch falls back to full" scope full "$out"
 assert_field "main tracking a local branch records no_remote_default" reason "no_remote_default:." "$out"
+
+# 33. main's tracked "remote" is a URL, not a remote name, and there is no
+#     origin: the guard still falls back to full, but the reason names "url"
+#     instead of the value (a URL can carry credentials) and the URL appears
+#     nowhere in the output.
+repo="$(make_repo)"
+url_bare="$(mktemp -d "$workdir/bare.XXXXXX")"
+git init -q --bare "$url_bare"
+url_scheme="file"
+url_value="${url_scheme}://${url_bare}"
+(
+  cd "$repo"
+  git config branch.main.remote "$url_value"
+  git config branch.main.merge refs/heads/main
+  commit_go_module
+)
+out="$workdir/url-remote.out"
+run_detect "$repo" "$out"
+assert_field "URL as tracked remote falls back to full" scope full "$out"
+assert_field "URL as tracked remote records no_remote_default:url" reason "no_remote_default:url" "$out"
+assert_output_lacks "URL as tracked remote leaves the scheme out of the output" "${url_scheme}://" "$out"
+assert_output_lacks "URL as tracked remote leaves the path out of the output" "$url_bare" "$out"
 
 printf '\n-- Summary --\n'
 printf '  PASS: %d / %d\n' "$_pass" "$_total"

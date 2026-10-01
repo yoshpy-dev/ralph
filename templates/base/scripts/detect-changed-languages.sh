@@ -24,10 +24,12 @@ set -eu
 # cannot take their place. The branch's own @{upstream} is never consulted:
 # after a push it equals HEAD and would hide every change committed since the
 # branch left the default branch. When branch.<current>.remote is set (a
-# remote, or "." for a local branch), neither origin nor that remote has a
-# default branch ref locally, and the local fallback is the current branch
-# itself, committed changes cannot be seen, so the result is full with reason
-# no_remote_default:<value> (no_remote_default:. for a local branch).
+# remote name, "." for a local branch, or a URL), neither origin nor that
+# remote has a default branch ref locally, and the local fallback is the
+# current branch itself, committed changes cannot be seen, so the result is
+# full with reason no_remote_default:<remote> (no_remote_default:. for a local
+# branch, no_remote_default:url when the value is not a configured remote name,
+# so a URL, which may carry credentials, never reaches the output).
 
 languages=""
 typescript_roots=""
@@ -164,9 +166,22 @@ if [ -z "$base_ref" ]; then
       configured_remote="$(git config --get "branch.${current_ref#refs/heads/}.remote" 2>/dev/null || true)"
       ;;
   esac
-  tracked_remote="$configured_remote"
-  case "$tracked_remote" in
-    .) tracked_remote="" ;;
+  # configured_remote is the raw branch.<b>.remote (it decides the guard
+  # below); tracked_remote is the remote name step 2 consults (empty for "."
+  # or a URL); remote_label is the only form of the value the reason may show.
+  tracked_remote=""
+  remote_label=""
+  case "$configured_remote" in
+    "") ;;
+    .) remote_label="." ;;
+    *)
+      if git config --get "remote.$configured_remote.url" >/dev/null 2>&1; then
+        tracked_remote="$configured_remote"
+        remote_label="$configured_remote"
+      else
+        remote_label="url"
+      fi
+      ;;
   esac
 
   base_ref="$(remote_default_ref origin)"
@@ -181,7 +196,7 @@ if [ -z "$base_ref" ]; then
       local_default="refs/heads/master"
     fi
     if [ -n "$configured_remote" ] && [ "$local_default" = "$current_ref" ]; then
-      fallback_full "no_remote_default:$configured_remote"
+      fallback_full "no_remote_default:$remote_label"
     fi
     base_ref="$local_default"
   fi
