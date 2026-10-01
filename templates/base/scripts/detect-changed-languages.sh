@@ -13,6 +13,28 @@ set -eu
 # A "full" scope is intentionally conservative. Shared harness files,
 # unclassified code-like files, or missing diff context fall back to the
 # repository-wide language detector.
+#
+# The diff base is RALPH_VERIFY_BASE when set. Otherwise it is the first
+# existing ref among: origin's default branch (the target of
+# refs/remotes/origin/HEAD when that is an existing ref under
+# refs/remotes/origin/, then origin/main, origin/master); the same three for
+# the remote the current branch tracks (skipped when HEAD is detached or that
+# remote is origin or "."); then local main, master. Defaults are handed to
+# git merge-base as full ref names, so a tag or branch sharing a short name
+# cannot take their place. The branch's own @{upstream} is never consulted:
+# after a push it equals HEAD and would hide every change committed since the
+# branch left the default branch. When branch.<current>.remote is set (a
+# remote name, "." for a local branch, or a URL), neither origin nor that
+# remote has a default branch ref locally, and the local fallback is the
+# current branch itself, committed changes cannot be seen, so the result is
+# full with reason no_remote_default:<remote> (no_remote_default:. for a local
+# branch, no_remote_default:url when the value is not a configured remote name,
+# so a URL, which may carry credentials, never reaches the output). Where the
+# base resolves to HEAD itself (no remote default ref and no
+# branch.<current>.remote, on local main or master or detached at its tip),
+# committed changes are not visible, only uncommitted and untracked files
+# count, and the result can be no_changes; set RALPH_VERIFY_BASE (or
+# RALPH_VERIFY_SCOPE=full in the wrappers) to cover them.
 
 languages=""
 typescript_roots=""
@@ -116,19 +138,72 @@ if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   fallback_full "no_git_repository"
 fi
 
+# Print the default branch of remote $1 as a full ref name: the branch that
+# refs/remotes/<remote>/HEAD points to (only when it is an existing ref under
+# refs/remotes/<remote>/), else refs/remotes/<remote>/main, else
+# refs/remotes/<remote>/master. Print nothing when none exists.
+remote_default_ref() {
+  remote="$1"
+  head_target="$(git symbolic-ref --quiet "refs/remotes/$remote/HEAD" 2>/dev/null || true)"
+  case "$head_target" in
+    "refs/remotes/$remote/"?*)
+      if git show-ref --verify --quiet "$head_target"; then
+        printf '%s\n' "$head_target"
+        return 0
+      fi
+      ;;
+  esac
+  for candidate in main master; do
+    if git show-ref --verify --quiet "refs/remotes/$remote/$candidate"; then
+      printf 'refs/remotes/%s/%s\n' "$remote" "$candidate"
+      return 0
+    fi
+  done
+  return 0
+}
+
 base_ref="${RALPH_VERIFY_BASE:-}"
 if [ -z "$base_ref" ]; then
-  upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)"
-  if [ -n "$upstream" ]; then
-    base_ref="$upstream"
-  elif git show-ref --verify --quiet refs/remotes/origin/main; then
-    base_ref="origin/main"
-  elif git show-ref --verify --quiet refs/heads/main; then
-    base_ref="main"
-  elif git show-ref --verify --quiet refs/remotes/origin/master; then
-    base_ref="origin/master"
-  elif git show-ref --verify --quiet refs/heads/master; then
-    base_ref="master"
+  current_ref="$(git symbolic-ref --quiet HEAD 2>/dev/null || true)"
+  configured_remote=""
+  case "$current_ref" in
+    refs/heads/?*)
+      configured_remote="$(git config --get "branch.${current_ref#refs/heads/}.remote" 2>/dev/null || true)"
+      ;;
+  esac
+  # configured_remote is the raw branch.<b>.remote (it decides the guard
+  # below); tracked_remote is the remote name step 2 consults (empty for "."
+  # or a URL); remote_label is the only form of the value the reason may show.
+  tracked_remote=""
+  remote_label=""
+  case "$configured_remote" in
+    "") ;;
+    .) remote_label="." ;;
+    *)
+      if git config --get "remote.$configured_remote.url" >/dev/null 2>&1; then
+        tracked_remote="$configured_remote"
+        remote_label="$configured_remote"
+      else
+        remote_label="url"
+      fi
+      ;;
+  esac
+
+  base_ref="$(remote_default_ref origin)"
+  if [ -z "$base_ref" ] && [ -n "$tracked_remote" ] && [ "$tracked_remote" != "origin" ]; then
+    base_ref="$(remote_default_ref "$tracked_remote")"
+  fi
+  if [ -z "$base_ref" ]; then
+    local_default=""
+    if git show-ref --verify --quiet refs/heads/main; then
+      local_default="refs/heads/main"
+    elif git show-ref --verify --quiet refs/heads/master; then
+      local_default="refs/heads/master"
+    fi
+    if [ -n "$configured_remote" ] && [ "$local_default" = "$current_ref" ]; then
+      fallback_full "no_remote_default:$remote_label"
+    fi
+    base_ref="$local_default"
   fi
 fi
 
