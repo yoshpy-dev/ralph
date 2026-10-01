@@ -66,3 +66,63 @@ All 9 findings confirmed fixed against the code at HEAD `bfbbbf8`, not only agai
 - Partially verified: AC-7's loop-subshell mutation (relied on the plan's recorded evidence rather than an independent re-mutation in this pass).
 - Not verified: none.
 - **Overall verdict: PASS.**
+
+## Cycle 2
+
+- Date: 2026-10-01
+- Verifier: verifier subagent (Claude Code), cycle 2 (pipeline cap: 2/2)
+- Scope: re-verify at HEAD `3d19539`, with emphasis on `git diff 842856a...HEAD` — the AR-1 fix (Slice C `39c2629`, prune `.claude/hooks/local` instead of filtering it out of the results), self-review cycle 2 (`6106af4`, C2-1/C2-2), and Slice D (`7ec013d`, tests H1/H2, the F8 extension, F9, comment wording, capitalized FAIL messages). All AC-1..AC-7 re-checked, not only the ones the diff touched.
+
+### Deterministic checks run
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `CI=true ./scripts/check-template.sh` (repo root) | PASS | `Template structure looks good.`, exit 0, no `FAIL:` line |
+| `cmp scripts/check-template.sh templates/base/scripts/check-template.sh` | PASS | Byte-identical |
+| entry count in `required_files` | PASS | 25 (unchanged since cycle 1) |
+| `go test ./internal/scaffold/... -count=1` | PASS | `ok` |
+| `go vet ./internal/scaffold/...` | PASS | No output |
+| `bash tests/test-check-template.sh` | PASS | `47 passed, 0 failed, 0 skipped` — 7 new cases since cycle 1 (F6–F9, H1, H2, plus the mode-644-local F8 variant), all green |
+| `shellcheck -S warning scripts/check-template.sh tests/test-check-template.sh` | PASS | Exit 0, no findings at warning level or above |
+| `grep -i 'meta-repo\|issue #\|#189' scripts/check-template.sh templates/base/scripts/check-template.sh` | PASS | No match |
+| `RALPH_VERIFY_SCOPE=full ./scripts/run-static-verify.sh` | PASS | `check-sync.sh` 159 IDENTICAL / 0 DRIFTED; `check-pipeline-sync.sh` OK; `check-skill-sync.sh` 13 in lock-step; `check-template-purity.sh` PASS; golang: `gofmt: ok`, `0 issues`; `secret-scan-branch.sh` clean (`d754bcd..3d19539` against `origin/main`). Evidence: `docs/evidence/verify-2026-10-01-053729.log` |
+| `./scripts/check-sync.sh`, `./scripts/check-template-purity.sh` (standalone) | PASS | Same summaries as above |
+
+### AC-by-AC (re-check at HEAD)
+
+| AC | Verdict | Evidence |
+| --- | --- | --- |
+| AC-1 | PASS | Unchanged from cycle 1; live run above confirms it still holds after Slices C and D |
+| AC-2 | PASS | Hook-reference cases still green (test case E, 4 sub-cases); the FAIL message's capitalization changed (`Could not read hook commands from .claude/settings.json: ...`) but AC-2's own wording requirement (bare path, no argument) is unaffected — confirmed by code read (`scripts/check-template.sh:118-121`) and the live test run |
+| AC-3 | PASS | Case G still green (fresh scaffold, `go` available); `tests/test-check-template.sh:71-74`'s `skip` path for `go`-unavailable is unchanged by this cycle's diff (confirmed by reading `git diff 842856a...HEAD -- tests/test-check-template.sh`, which touches cases F and H, not G) |
+| AC-4 | PASS | 25 entries unchanged, `go test` ok, `cmp` identical |
+| AC-7 (propagation + new cases) | PASS | All 9 F-series + 2 H-series cases green, independently cross-checked beyond trusting the test names: (1) built a hand-made fixture with an unreadable directory under `.claude/hooks/local/disabled` — the fixed script passes with no FAIL, confirming the user-local tree is pruned; (2) mutated a scratch copy back to the pre-AR-1 `-not -path '.claude/hooks/local/*'` form against the same fixture — reproduced the exact AR-1 regression (`find: ... Permission denied`, `FAIL: Could not list scripts ...`, exit 1); (3) confirmed F6 live — a non-executable `.sh` placed directly under `.claude/hooks/` (outside `local/`) still fails; (4) confirmed F8 live — a non-executable `.sh` under `.claude/hooks/local/` does not fail; (5) confirmed H1 live — removing `packs/` and `.claude/agents/` from a fixture still passes with no FAIL |
+| AC-6 | PASS | shellcheck clean, `verify.local.sh`'s shellcheck target list unchanged (`scripts/check-template.sh` still present, confirmed in cycle 1 and untouched by `git diff 842856a...HEAD --stat`), full-scope static verify/check-sync/check-template-purity all green |
+
+### Self-review cycle 2 findings cross-check (C2-1, C2-2; AR-1 cross-review finding)
+
+| # | Status | Evidence |
+| --- | --- | --- |
+| AR-1 (cross-review, user-local tree traversed despite exclusion) | Fixed, independently reproduced | `scripts/check-template.sh:78`: `find "$@" -path '.claude/hooks/local' -prune -o -type f -name '*.sh' -print`. Reverting to the pre-fix `-not -path` form in a scratch copy reproduces the exact regression against a fixture with an unreadable `.claude/hooks/local/disabled` (see AC-7 row above) |
+| C2-1 (2 of 5 new branches had no test that would catch their removal: root-existence filtering, `-print`) | Fixed, and independently confirmed beyond the self-review's own (pre-Slice-D) mutation table | The self-review's mutation table (`6106af4`, run before Slice D) recorded both mutations as uncaught ("なし"). After Slice D added H1/H2 and the F8 mode-644 variant, re-ran both mutations myself in scratch copies: removing the `[ -d "$root" ]` existence guard (always passing all 3 roots to `find`) now breaks the H1-shaped fixture (`find: packs: No such file or directory`, FAIL, exit 1); removing `-print` from the hook-tree `find` now breaks the F8-shaped fixture (mode-644 `.claude/hooks/local`, FAIL `Script is not executable: .claude/hooks/local`). Both previously-uncaught branches are now caught |
+| C2-2 (2 inaccurate shipped comments; new FAIL messages lowercase while existing ones aren't) | Fixed | `scripts/check-template.sh:69-71`: "Only existing search roots are passed to find; a missing root is skipped without a message." (no more "as before"); `scripts/check-template.sh:65-68`: "an unreadable directory anywhere inside it" (no more "file or"). All four new FAIL messages now capitalized: `Could not list scripts under ...`, `Could not list skill directories under ...`, `Could not list agent files under ...`, `Could not read hook commands from .claude/settings.json: ...` (grep-confirmed, matching the existing `Missing required file:`/`Script is not executable:` capitalization) |
+
+### Residual gaps (recorded in the plan, confirmed real and not regressions)
+
+- **Skills find-rc branch unreachable via `-maxdepth 1`:** independently reproduced — placed an unreadable child directory under `.claude/skills/` (`chmod 000`) and ran the fixed script: it does *not* reach the `Could not list skill directories ...` branch; it fails closed via the pre-existing `Skill missing SKILL.md: .claude/skills/unreadable-child` check instead (`find -mindepth 1 -maxdepth 1 -type d` only `lstat`s the entry itself, not its contents, so an unreadable child doesn't make `find` exit non-zero). Confirmed real, confirmed fail-closed (not a silent-skip regression), not a failure of this cycle's work.
+- **No dedicated signal-trap test:** confirmed — grepped `tests/test-check-template.sh` for `SIGTERM`/`SIGINT`/`trap`; the only matches are the test harness's own fixture-cleanup traps, not a test of `check-template.sh`'s INT/TERM/HUP handling. Unchanged from cycle 1's known gap.
+
+Neither gap is a regression introduced since cycle 1; both are accurately recorded in the plan's Deviation notes for Slice D.
+
+### Coverage gaps
+
+- The three mutations not independently re-run this cycle: forcing `required_files`' meta-repo-only entries back in (AC-4, already covered in cycle 1), and the two `[ -d .claude/skills ]`/`[ -d .claude/agents ]` guard removals the self-review's own table also marked uncaught (lower priority than the two C2-1 mutations re-run above, since H1/H2 specifically target the `.claude/hooks`/`packs`/`scripts` root-loop guard rather than the skills/agents `if [ -d ... ]` guards individually — these remain untested by name, consistent with the self-review's own disclosure, not newly discovered here).
+- Did not re-run the fresh-scaffold case (AC-3/G) as a second standalone `go run` outside the test harness this cycle; relied on the harness's own green run, consistent with cycle 1's documented approach.
+- `docs/tech-debt/README.md` has no new row yet for the two residual gaps above; the plan's Slice D deviation note states this is `sync-docs`'s job for this cycle, not `/verify`'s — not flagged as a gap in this report, just noting it is pending elsewhere in the pipeline.
+
+### Verdict (Cycle 2)
+
+- Verified: AC-1, AC-2, AC-3, AC-4, AC-6, AC-7 (including the AR-1 fix and both previously-uncaught C2-1 branches, all independently re-mutated); both self-review cycle-2 findings (C2-1, C2-2) and the cross-review's AR-1 finding are fixed in the code at HEAD `3d19539`.
+- Partially verified: the two `[ -d .claude/skills ]`/`[ -d .claude/agents ]` guard-removal mutations (still untested by name, per the self-review's own disclosure; not independently re-mutated this cycle).
+- Not verified: none.
+- **Overall verdict: PASS.**
