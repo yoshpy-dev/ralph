@@ -100,13 +100,14 @@ project の codex 設定(`.codex/config.toml` と `templates/base/.codex/config.
 
 - 2026-10-02 plan: Codex plan advisory(gpt-6-astra、xhigh、watchdog の 1 行、`codex rc=0`、`-o` 1279 バイト)は MEDIUM 1: AC-4 は実際に動かす確認を省けてしまい、モデルが選ばれることを見るだけでは要求の成功が分からない。以前 400 になった effort `max` の組み合わせも対象外だった。ユーザー決定: 対応案で plan を更新。AC-4 を「`gpt-5.6-sol` に effort 未指定と `max` の 2 通りで要求が成功する」に、AC-4b を「worktree で既定、work、review の 3 通りが `gpt-5.6-sol` を選ぶ(trust のために `~/.codex` は書き換えない)」に分けた
 - 2026-10-02 work: Slice A は implementer(sonnet)に委譲(0c45e78d、3 ファイル、+7 / -7、push 済み)。両ファイルの 3 行を `gpt-5.6-sol` に置き換え(byte 一致、tomllib で 3 つの値を確認)、spec の F-6 に注記を足した。AC-5: `go test ./internal/scaffold/... ./internal/cli/...`、`tests/test-ralph-worktree.sh` 143 / 0、`RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh` green、fresh scaffold も新しい値。AC-4: scratch から `command codex -m gpt-5.6-sol exec` で、effort 未指定(header は `reasoning effort: low`)と `max` の 2 通りとも rc 0、`-o` は `ok`、400 なし。AC-4b: この worktree で `-m` なしの既定、`--profile work`、`--profile review` の 3 通りとも header が `model: gpt-5.6-sol`(project の設定は trust 済みで読まれている)。対照として scratch の repo の外で `-m` なしにすると、利用者の既定のモデルになった。重要な観測: codex 0.154.0 は project の `.codex/config.toml` の `[profiles.*]` を読まずに捨てる(`Ignored unsupported project-local config keys ...: profiles`。orchestrator もログで確認)。`--profile` で `gpt-5.6-sol` になったのはトップレベルの `model` の効果で、profile の値は効いていない。この変更より前からある挙動なので、tech-debt に記録し PR に書く(sync-docs で profile が効くと書いた文書がないかも確かめる)。codex の実行の前後で、worktree の 2 つの設定の内容は同じで、main のチェックアウトは clean のまま(`.codex/config.toml` の mtime も変わらず)。`~/.codex` の設定と trust は変えていない。orchestrator も差分と cmp を確認
+- 2026-10-02 self-review(cycle 1、f7cb8c0c): CRITICAL 0 / HIGH 0 / MEDIUM 1 / LOW 3、merge 可。M-1: `.codex/config.toml` のコメントが、codex が project の `[profiles.*]` を捨てること(0.154.0 と 0.159.2 で確認)と合わない。「`codex --profile <name>` で切り替える」「`/cross-review` が使う」と書いてあるが、cross-review は `--profile` を渡さず、`--profile review` でも `danger-full-access` のまま。この差分より前からある。L-1: spec に project の codex のモデルを `gpt-5.5` と書いた文が 2 か所(`2026-08-01-org-runtime.md:23`、`2026-05-07-codex-cli-parity.md:180`)。L-2: `.codex/config.toml:12-14` の「no multi-agent」は古く(Codex 側の pipeline も `.codex/agents/` を使い、モデルを引き継ぐ)、既定の effort が `low` になることにも触れていない。L-3: `chore:` のコミットは changelog から除かれるので、effort の件は #186 にも残す。全件を in-cycle で扱う(orchestrator 判断): M-1 と L-2 は Slice B でコメントを codex の実際の挙動に合わせて書き直す(表と値は残す。表を消すかは挙動に関わる別の判断なので tech-debt に記録)、L-1 も Slice B で注記を足す、L-3 はマージ後に #186 にコメントする
 
 ## Progress checklist
 
 - [x] Plan reviewed
 - [x] Branch created
 - [x] Implementation started
-- [ ] Review artifact created
+- [x] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
