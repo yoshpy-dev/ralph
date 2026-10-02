@@ -74,7 +74,7 @@ ralph を Claude Code 専用ハーネスから **Claude Code / Codex 両対応�
 1. **Codex 派の開発者として**、ralph プロジェクトに入ったら `codex` を起動して `/spec` `/plan` `/work` を回したい。なぜなら Claude Code 派と同じプラン・同じ PR フォーマットでチームに貢献したいから。
 2. **Claude Code 派の開発者として**、Codex 派の同僚が作った `docs/plans/active/<plan>.md` をそのまま `/work` で消費したい。なぜならプランは CLI 非依存で書かれているから。
 3. **チームリードとして**、CI で skill drift check が走ることで、`.claude/skills/` だけ更新して `.agents/skills/` を放置するレビューをブロックしたい。なぜなら片方のメンバー体験が劣化するから。
-4. **将来 Codex を主軸化する保守者として**、`.codex/config.toml` の profiles を増やせば現行 ralph フローのまま Codex 中心に切り替えられる柔軟性が欲しい。
+4. **将来 Codex を主軸化する保守者として**、`.codex/config.toml` の profiles を増やせば現行 ralph フローのまま Codex 中心に切り替えられる柔軟性が欲しい。(2026-10-02 注記: codex は project の `.codex/config.toml` の `[profiles.*]` を読まずに捨てる(codex-cli 0.154.0 と 0.159.2 で確認)。この要望は project の profile だけでは満たせない。経緯は `docs/tech-debt/README.md` の該当行)
 
 ## 制約条件
 
