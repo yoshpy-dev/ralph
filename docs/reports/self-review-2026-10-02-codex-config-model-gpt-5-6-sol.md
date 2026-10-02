@@ -72,3 +72,49 @@ _(この行は report の中だけにある。この phase では report と ins
 
 - Merge: 可。CRITICAL と HIGH はない。M-1 はこの diff より前からある問題で、merge を止めない。ただし、PR を作る前に tech-debt の行と PR の本文の説明を足す
 - Follow-ups: (1) M-1 の tech-debt の行を `docs/tech-debt/README.md` に足す(sync-docs)。(2) L-1 の 2 か所に括弧を足す(sync-docs)。(3) PR の本文に、既定の effort が `low` になることと、project の `--profile review` が read-only にならないことを書く。(4) #186 に L-3 の 1 行を残す。(5) 別の PR で `[profiles.*]` を消すかコメントを直し、`:12-14` のコメントも書き換える(M-1、L-2)
+
+## Cycle 1 addendum (Slice B)
+
+- Date: 2026-10-02
+- Scope: `git diff f7cb8c0c..HEAD -- .codex templates docs/specs`(Slice B、dadc1b40。HEAD 265a281b)。M-1、L-1、L-2 の直し方と、新しいコメントの各主張を確かめた。L-3 は merge 後に orchestrator が #186 で扱うので対象外
+
+### Evidence reviewed
+
+- 設定の 2 ファイルは `cmp` で一致する。f7cb8c0c と HEAD を `tomllib` で読んだ中身は、2 ファイルとも同じ。変わった行はすべてコメント行(`#` で始まらない変更行は 0)
+- 新しいコメント行はどれも 79 桁以内。80 桁の行(`:109`)は main にもある
+- `.codex/agents/*.toml` と `templates/base/.codex/agents/*.toml` の 10 ファイルとも、`model` という語を含まない
+- `/cross-review` の codex 経路は `command codex -m … -c "model_reasoning_effort=…" exec review --base … -o …`(`.claude/skills/cross-review/SKILL.md:58`)。`--profile` も sandbox の指定もない
+- 旧コメントの語句(`switch between flows`、`no multi-agent`、`used by the /cross-review skill` など)は、`docs/reports/` のほかに残っていない
+- 前回の probe と同じ scratch の環境(`HOME` と `CODEX_HOME` を分け、認証なし)で、次の 2 つを足した。`~/.codex` は読んでも書いてもいない。probe の前後で main のチェックアウトは clean
+
+| probe | 実行 | 結果 |
+| --- | --- | --- |
+| P5 | 0.154.0、skill と同じ形の `-m gpt-5.6-sol -c model_reasoning_effort=xhigh exec review --base main -o …` | header は `sandbox: danger-full-access`、`approval: never`、`reasoning effort: xhigh`。`exec review --help` に `--sandbox` はない |
+| P6 | P5 に `-c sandbox_mode=read-only` を足す | header は `sandbox: read-only` |
+
+### 前回の指摘の確認
+
+- M-1: 直っている。warning の文は codex の出力(`Ignored unsupported project-local config keys in <path>: profiles. If you want these settings to apply, manually set them in your user-level config.toml.`)を `...` で省いたもので、版の 0.154.0 と 0.159.2 は P1〜P4 と合う。「user-level の config.toml に写したときだけ効く」は codex 自身の warning と同じ内容。「この project で `--profile review` を付けても read-only にならない」は P3 と合う。`/cross-review` が `-m` と `-c model_reasoning_effort` を明示し、profile を使わないことも skill の本文と合う。表を「examples」と呼んだので、spec F-6 の「profiles 定義例」(`docs/specs/2026-05-07-codex-cli-parity.md:47`)とも食い違わない。前回 F-6 に注記を足すよう勧めたが、その必要はなくなった
+- L-1: 直っている。`docs/specs/2026-05-07-codex-cli-parity.md:180` に F-6 と同じ括弧が付き、`docs/specs/2026-08-01-org-runtime.md:23` の文には #196 の時点の記録であることと、その後の変更が書き足された
+- L-2: 直っている。「no multi-agent」が消え、`.codex/agents/` の agent が model を指定せずこのモデルを引き継ぐことと、effort を指定していないことが書かれた
+
+### Findings
+
+| # | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| M-2 | MEDIUM | security(この delta より前からある。delta の外) | 新しい `[profiles.review]` のコメントは、`/cross-review` が review の profile を使わないことを正しく書いた。しかし、その codex 経路が実際にどの sandbox で動くかは、どこにも書かれていない。trusted な project では、skill と同じ形の `codex exec review` は `sandbox: danger-full-access`、`approval: never` で動く(P5)。`exec review` には `--sandbox` の flag がなく、skill も sandbox を指定しない。一方、`/plan` の Codex plan advisory は `--sandbox read-only` を渡している(`.claude/skills/plan/SKILL.md:71`)。review する diff は外から来た内容を含みうるので、その中の指示に reviewer の codex が従った場合、承認なしで任意のコマンドを実行し、どこにでも書き込める。旧コメントは「read-only の review 用で `/cross-review` が使う」と書いていたので、読み手はこの経路が read-only だと思っていた。この delta はその誤解を取り除いたが、代わりの事実は示していない。skill の 4 面とも同じ形で、全 scaffold に届く。tech-debt の register にこの件の行はない | `.claude/skills/cross-review/SKILL.md:58`、`:167`(`.agents/` と template の写しも同じ)、`.claude/skills/plan/SKILL.md:71`、P5、P6 | この PR は止めない。sync-docs で tech-debt に 1 行足す。直すのは別の PR にし、skill の 4 面の codex 呼び出しに `-c sandbox_mode=read-only` を足す(P6 で header が `read-only` になることは確かめた)。その PR では、認証のある環境で `-o` のファイルが read-only でも書かれ、review が最後まで動くことを確かめる。この件は認証のない probe では確かめられなかった |
+| L-4 | LOW | 文の正確さ | 「the model's own default (low for gpt-5.6-sol)」の `low` は、codex が取得するモデルの一覧(models cache)の値で、2026-10-02 の一覧と、認証のある実行の header(plan の AC-4 の記録)とは合う。ただし、この値は OpenAI 側で変わりうる。また、一覧のない環境では header が `reasoning effort: none` になった(P1)。すぐ下の profile の段落は観測した版を書いているのに、こちらには時点が書かれていない | `.codex/config.toml:15-16`、plan の「調査で確認したこと」、P1 | 「(low for gpt-5.6-sol in codex's model list as of 2026-10-02)」のように時点を足す。書き換えなくても誤りではない |
+
+CRITICAL と HIGH はない。
+
+### 依頼された観点への回答
+
+- 新しいコメントの主張: warning の文、版、agent が model を指定しないこと、`/cross-review` が `-m` と `-c` を明示して `--profile` を使わないことは、どれも証拠と合う。
+- 「the user-level setting applies, else the model's own default (low for gpt-5.6-sol)」: 認証があり models cache のある通常の環境では正確。一覧のない環境の `none` は、モデルの情報がないことを示すだけで、別の既定値を示すものではない。codex が effort を送らなかったときに server がどの値を使うかは確かめていない(L-4)。
+- 「inherit this one」: `.codex/agents/` の agent が model を指定しないことは確かめた。session を `-m` 付きで起動した場合(たとえば `-m` を足す shell の alias)に、agent が project の `model` と session のモデルのどちらを使うかは確かめていない。`.codex/README.md:74` は「Codex runs follow the session/config model」と書いており、コメントの言い方と矛盾はしない。指摘にはしない。
+- 言い回しと長さ: 1 行は 79 桁以内で、段落は 3〜6 行。meta-repo だけにあるもの(issue 番号、`internal/` など)は参照していないので、template に置いてもよい。
+
+### Recommendation
+
+- Merge: 可。M-2 はこの delta より前からある問題で、merge を止めない
+- Follow-ups: (1) sync-docs で、前回の M-1 の行に加えて M-2 の行も tech-debt に足す。(2) 別の PR で、`/cross-review` の codex 呼び出しを read-only にする(M-2)。(3) 任意で L-4 の時点を足す
