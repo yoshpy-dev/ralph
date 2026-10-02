@@ -13,7 +13,7 @@
 # agents under .codex/agents/, which set no model and inherit this one, so it
 # must be capable of long-running structured edits.
 # No model_reasoning_effort is set here: the user-level setting applies, else
-# the model's own default (low for gpt-5.6-sol).
+# the model's own default (low for gpt-5.6-sol as of 2026-10-02).
 model = "gpt-5.6-sol"
 
 # Sandbox mode: danger-full-access allows unrestricted filesystem access.
