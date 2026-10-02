@@ -9,10 +9,12 @@
 # - https://developers.openai.com/codex/config-reference
 # - https://developers.openai.com/codex/hooks
 
-# Default model used by Codex when working in this project.
-# ralph runs the post-implementation pipeline sequentially (no multi-agent),
-# so the model must be capable of long-running structured edits.
-model = "gpt-5.5"
+# Model Codex uses in this project. This includes the Codex-side pipeline
+# agents under .codex/agents/, which set no model and inherit this one, so it
+# must be capable of long-running structured edits.
+# No model_reasoning_effort is set here: the user-level setting applies, else
+# the model's own default (low for gpt-5.6-sol as of 2026-10-02).
+model = "gpt-5.6-sol"
 
 # Sandbox mode: danger-full-access allows unrestricted filesystem access.
 # Pair with approval_policy below to gate destructive shell calls.
@@ -42,17 +44,24 @@ hooks = true
 notifications = true
 
 # ---------------------------------------------------------------------------
-# Profiles — switch between flows with `codex --profile <name>`.
+# Profiles — examples for the user-level config.toml.
+#
+# Codex ignores [profiles.*] in a project-local config: it prints "Ignored
+# unsupported project-local config keys ...: profiles" (observed on codex-cli
+# 0.154.0 and 0.159.2). These tables only take effect if copied into the
+# user-level config.toml. In this project `codex --profile <name>` does not
+# apply them (e.g. `--profile review` does not make the session read-only).
 # ---------------------------------------------------------------------------
 
 [profiles.work]
-# Standard /work-style implementation profile.
-model = "gpt-5.5"
+# Example implementation profile.
+model = "gpt-5.6-sol"
 approval_policy = "on-request"
 
 [profiles.review]
-# Read-only review/advisory mode (used by the /cross-review skill).
-model = "gpt-5.5"
+# Example read-only review profile. The /cross-review skill does not use it:
+# it calls `codex exec review` with explicit -m and -c model_reasoning_effort.
+model = "gpt-5.6-sol"
 sandbox_mode = "read-only"
 approval_policy = "never"
 

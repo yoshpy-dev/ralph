@@ -42,7 +42,7 @@ ralph を Claude Code 専用ハーネスから **Claude Code / Codex 両対応�
   - 参照箇所も全てリネーム (互換 alias は作成しない): `.claude/skills/cross-review/`, `.agents/skills/cross-review/`, `.claude/skills/work/SKILL.md`, `.claude/skills/loop/SKILL.md`, `.claude/rules/post-implementation-pipeline.md`, `.claude/rules/subagent-policy.md`, `CLAUDE.md`, `AGENTS.md`, `README.md`, `docs/quality/definition-of-done.md` ほか `codex-review` を含むファイル全て。
 - [ ] **F-5**: AGENTS.md を両 CLI 共通の source of truth として再構成する (32 KiB cap 内)。CLAUDE.md は Claude Code 固有事項のみに絞る。Codex 固有事項は `.codex/AGENTS.override.md` または `.codex/README.md` に切り出す。
 - [ ] **F-6**: `.codex/config.toml` テンプレートを定義する。
-  - `model = "gpt-5.5"` を既定値とする
+  - `model = "gpt-5.5"` を既定値とする (2026-10-02 に `gpt-5.6-sol` へ変更。#156)
   - `sandbox_mode`、`approval_policy`、`mcp_servers.<id>`、`[hooks]` (PreToolUse / PostToolUse / SessionStart / PermissionRequest)、`[features]` (必要に応じて)、`[tui.notifications]`
   - profiles 定義例: `[profiles.work]`, `[profiles.review]`
 - [ ] **F-7**: `scripts/check-skill-sync.sh` を新設する。`.claude/skills/<name>/SKILL.md` と `.agents/skills/<name>/SKILL.md` の本文 (frontmatter 除外) を比較し、drift があれば exit 1。`run-verify.sh` から呼び出し、CI でゲート化する。
@@ -74,7 +74,7 @@ ralph を Claude Code 専用ハーネスから **Claude Code / Codex 両対応�
 1. **Codex 派の開発者として**、ralph プロジェクトに入ったら `codex` を起動して `/spec` `/plan` `/work` を回したい。なぜなら Claude Code 派と同じプラン・同じ PR フォーマットでチームに貢献したいから。
 2. **Claude Code 派の開発者として**、Codex 派の同僚が作った `docs/plans/active/<plan>.md` をそのまま `/work` で消費したい。なぜならプランは CLI 非依存で書かれているから。
 3. **チームリードとして**、CI で skill drift check が走ることで、`.claude/skills/` だけ更新して `.agents/skills/` を放置するレビューをブロックしたい。なぜなら片方のメンバー体験が劣化するから。
-4. **将来 Codex を主軸化する保守者として**、`.codex/config.toml` の profiles を増やせば現行 ralph フローのまま Codex 中心に切り替えられる柔軟性が欲しい。
+4. **将来 Codex を主軸化する保守者として**、`.codex/config.toml` の profiles を増やせば現行 ralph フローのまま Codex 中心に切り替えられる柔軟性が欲しい。(2026-10-02 注記: codex は project の `.codex/config.toml` の `[profiles.*]` を読まずに捨てる(codex-cli 0.154.0 と 0.159.2 で確認)。この要望は project の profile だけでは満たせない。経緯は `docs/tech-debt/README.md` の該当行)
 
 ## 制約条件
 
@@ -177,7 +177,7 @@ ralph を Claude Code 専用ハーネスから **Claude Code / Codex 両対応�
 
 ## 未解決の課題
 
-- なし (主要 OQ はすべて確定済み: model = `gpt-5.5`、`/codex-review` → `/cross-review` リネーム、互換 alias なし)。
+- なし (主要 OQ はすべて確定済み: model = `gpt-5.5` (2026-10-02 に `gpt-5.6-sol` へ変更。#156)、`/codex-review` → `/cross-review` リネーム、互換 alias なし)。
 
 ## 参考資料
 
