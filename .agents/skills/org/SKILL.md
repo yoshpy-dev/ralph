@@ -85,7 +85,6 @@ Lead(座席の編成・統括を行う識別子)がその機構をどう操作�
 | codex | `gpt-5.6-sol` | |
 | codex | `gpt-5.6-terra` | |
 | codex | `gpt-5.6-luna` | |
-| codex | `gpt-5.5` | |
 
 claude はエイリアス、codex はスラッグ(codex にエイリアスは無い)。`ralph
 doctor` の「Org codex model slugs」Check が `~/.codex/models_cache.json`
@@ -112,6 +111,23 @@ seed advisory diff で確認できる。`model_pool` を書かず `driver_pool` 
 バイナリを差し替えた時点で新既定に切り替わる。`ralph upgrade` は core(skill・`ralph-config.sh`)を置換するだけ
 で実効プールは変えないが、今入っているバイナリのテンプレートしか適用しない
 ので、バイナリ更新の前に実行しても新しい既定は届かない。
+
+`[org.roles]` に書いたモデルは、実効の `[org].model_pool`(`model_pool` を
+省略したときは既定のプール)に入っている必要がある。入っていないと
+`ralph.toml` の検証が `[org.roles].<role> references model "<model>" not
+present in [org].model_pool` で通らない。`ralph org` の動詞はどれも設定
+(`--config`、省略時は cwd の `./ralph.toml`)を読むので、動いている座席への
+`status` / `stop` / `disband` も止まる。`spawn --model <model>` と `start
+--model <model>` は、そのモデルが driver の `[org].model_pool` になければ
+`org: model "<model>" not in [org].model_pool for driver "<driver>"` で拒否
+される。設定の検証エラーは、`[org].model_pool` を明示してそのモデルを含める
+か、role から外して直す。`spawn` / `start` の拒否は、プールにあるモデルを
+`--model` に渡すか、`[org].model_pool` にそのモデルを足して直す。明示した
+`[org].model_pool` は既定のプールを置き換える(足し合わせではない)ので、使
+い続ける既定のエントリも書く。直すのは `ralph.toml` で、直したコピーを
+`--config <path>` で渡してもよい。state dir は設定ファイルの場所では変わら
+ず(`--state-dir`、`RALPH_ORG_STATE_DIR`、git の toplevel、cwd の順で決ま
+る)、`ralph org status` / `stop` はそのまま同じ座席を扱える。
 
 ## 動詞リファレンス
 

@@ -887,6 +887,105 @@ func TestOrgStatus_JSON(t *testing.T) {
 	}
 }
 
+// TestOrgStatus_ConfigFlagRecoversAfterDefaultPoolDropsRoleModel is the
+// regression test for the recovery path documented in the org skill's
+// "既定の model_pool" section (#156, gpt-5.5 dropped from the default pool).
+// A project ralph.toml that omits model_pool but restricts a role to gpt-5.5
+// no longer validates against the default pool, and every ralph org verb --
+// status included -- reads that config, so the verb stops with an error that
+// names the model. The state dir is chosen by --state-dir or
+// RALPH_ORG_STATE_DIR (not by where the config lives), so a corrected copy
+// passed via --config reaches the same manifest and lists the seat that was
+// spawned before the upgrade.
+func TestOrgStatus_ConfigFlagRecoversAfterDefaultPoolDropsRoleModel(t *testing.T) {
+	t.Setenv("PATH", "")
+	stateDir := t.TempDir()
+	store := org.NewManifestStoreAtPath(org.ManifestPathIn(stateDir))
+	if err := store.Append(org.ManifestEvent{TS: "2026-08-01T00:00:00Z", OrgID: "org-a", SeatID: "seat-1", Event: "spawned", Driver: "codex", Model: "gpt-5.5", PaneID: "pane-1"}); err != nil {
+		t.Fatalf("seed manifest: %v", err)
+	}
+
+	// The project's ralph.toml, discovered from the cwd when --config is omitted.
+	projectDir := t.TempDir()
+	t.Chdir(projectDir)
+	brokenToml := "[org.roles]\nreviewer = [\"gpt-5.5\"]\n"
+	if err := os.WriteFile(filepath.Join(projectDir, "ralph.toml"), []byte(brokenToml), 0o644); err != nil {
+		t.Fatalf("write project ralph.toml: %v", err)
+	}
+
+	out, err := runOrgCmd(t, "status", "--org-id", "org-a", "--state-dir", stateDir)
+	if err == nil {
+		t.Fatalf("expected status to fail on a role naming gpt-5.5 without a model_pool, output: %s", out)
+	}
+	wantErr := `[org.roles].reviewer references model "gpt-5.5" not present in [org].model_pool`
+	if !strings.Contains(err.Error(), wantErr) {
+		t.Errorf("expected error to contain %q, got: %v", wantErr, err)
+	}
+
+	fixes := []struct {
+		name string
+		toml string
+	}{
+		{
+			name: "role restriction removed",
+			toml: "[org]\nmax_seats = 5\n",
+		},
+		{
+			name: "explicit model_pool including gpt-5.5",
+			toml: "[org]\n" +
+				"driver_pool = [\"claude\", \"codex\"]\n" +
+				"model_pool = [\n" +
+				"  { driver = \"claude\", model = \"sonnet\" },\n" +
+				"  { driver = \"codex\", model = \"gpt-5.5\" },\n" +
+				"]\n\n" +
+				"[org.roles]\n" +
+				"reviewer = [\"gpt-5.5\"]\n",
+		},
+	}
+	for _, fix := range fixes {
+		t.Run(fix.name, func(t *testing.T) {
+			fixedPath := filepath.Join(t.TempDir(), "ralph.fixed.toml")
+			if err := os.WriteFile(fixedPath, []byte(fix.toml), 0o644); err != nil {
+				t.Fatalf("write fixed config: %v", err)
+			}
+			out, err := runOrgCmd(t, "status", "--org-id", "org-a", "--state-dir", stateDir, "--config", fixedPath)
+			if err != nil {
+				t.Fatalf("status with corrected --config failed: %v (output: %s)", err, out)
+			}
+			if !strings.Contains(out, "seat-1") || !strings.Contains(out, "spawned") {
+				t.Errorf("expected seat-1 (spawned) from the same state dir, got: %s", out)
+			}
+		})
+	}
+
+	// Without --state-dir the state dir comes from RALPH_ORG_STATE_DIR, a
+	// resolution step that does not look at the config's location either.
+	// (The git-toplevel step needs a git binary, which PATH="" hides.)
+	t.Run("state dir from RALPH_ORG_STATE_DIR without --state-dir", func(t *testing.T) {
+		t.Setenv(org.EnvOrgStateDir, stateDir)
+
+		out, err := runOrgCmd(t, "status", "--org-id", "org-a")
+		if err == nil {
+			t.Fatalf("expected status to fail on the broken cwd ralph.toml, output: %s", out)
+		}
+		if !strings.Contains(err.Error(), wantErr) {
+			t.Errorf("expected error to contain %q, got: %v", wantErr, err)
+		}
+
+		fixedPath := filepath.Join(t.TempDir(), "ralph.fixed.toml")
+		if err := os.WriteFile(fixedPath, []byte("[org]\nmax_seats = 5\n"), 0o644); err != nil {
+			t.Fatalf("write fixed config: %v", err)
+		}
+		out, err = runOrgCmd(t, "status", "--org-id", "org-a", "--config", fixedPath)
+		if err != nil {
+			t.Fatalf("status with corrected --config and RALPH_ORG_STATE_DIR failed: %v (output: %s)", err, out)
+		}
+		if !strings.Contains(out, "seat-1") || !strings.Contains(out, "spawned") {
+			t.Errorf("expected seat-1 (spawned) from the env-resolved state dir, got: %s", out)
+		}
+	})
+}
+
 func TestOrgCmd_RequiresOrgID(t *testing.T) {
 	out, err := runOrgCmd(t, "status")
 	if err == nil {
