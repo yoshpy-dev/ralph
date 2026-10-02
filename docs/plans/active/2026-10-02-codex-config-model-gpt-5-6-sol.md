@@ -58,7 +58,8 @@ project の codex 設定(`.codex/config.toml` と `templates/base/.codex/config.
 - [ ] AC-1: `.codex/config.toml` と `templates/base/.codex/config.toml` の `model` が 3 か所とも `gpt-5.6-sol` で、両ファイルが byte 一致。`./scripts/check-sync.sh` が green。
 - [ ] AC-2: 両ファイルが TOML として読める(`codex` の設定の読み込みか TOML の parser で確認)。値のほかに、コメント、空行、並びを変えていない(`git diff` で 3 行の置換だけ)。
 - [ ] AC-3: `git grep -n 'gpt-5\.5'` の結果に、project の codex の既定として書いた箇所が残っていない。残るのは履歴、spec の記録、任意の値として使う fixture だけ。分類を verify report に書く。
-- [ ] AC-4: scratch の HOME と `CODEX_HOME`(利用者の実際の `~/.codex` は使わない)と、この worktree の `.codex/config.toml` を読ませた codex で、実効のモデルが `gpt-5.6-sol` になる。trust の確認や認証が要るために確かめられなければ、その理由を report に書く。
+- [ ] AC-4: `gpt-5.6-sol` への実際の要求が成功する(Codex plan advisory の MEDIUM)。いつもの codex の認証を使い、scratch のディレクトリから `command codex -m gpt-5.6-sol exec --sandbox read-only -o <file> '<小さな指示>' </dev/null` を、effort を指定しない場合(モデルの既定の `low`)と `-c model_reasoning_effort=max` の場合の 2 回送り、どちらも rc 0 で `-o` のファイルが空でない。認証がなくて送れなければ合格にせず、未解決のゲートとして PR に載せる。
+- [ ] AC-4b: この worktree で、既定、`--profile work`、`--profile review` の 3 通りの codex が `gpt-5.6-sol` を選ぶ(`-m` を付けずに実行し、選ばれたモデルを codex の出力か実行の記録で確かめる)。project の設定を codex に信頼させる必要があり、trust を得るために `~/.codex` の設定を書き換えることはしない。信頼されていなくて確かめられなければ、その状況を report に書き、PR に「未確認」として載せる。
 - [ ] AC-5: `RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh` が green。`internal/scaffold` と `internal/cli` のテスト(template の埋め込み、init、upgrade)が green。
 
 ## Implementation outline
@@ -76,7 +77,7 @@ project の codex 設定(`.codex/config.toml` と `templates/base/.codex/config.
 ## Test plan
 
 - Unit tests: `go test ./internal/scaffold/... ./internal/cli/... -count=1`。
-- Integration tests: `RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh`。fresh scaffold(`go run ./cmd/ralph init --yes <tmp>`)の `.codex/config.toml` が `gpt-5.6-sol` になること。
+- Integration tests: `RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh`。AC-4 と AC-4b の実際の codex の実行(`~/.codex` は書き換えない。codex がふだんどおり書く session の記録と cache は除く)。fresh scaffold(`go run ./cmd/ralph init --yes <tmp>`)の `.codex/config.toml` が `gpt-5.6-sol` になること。
 - Regression tests: `tests/test-ralph-worktree.sh`(#185 の書き換えの検知は HEAD の内容と比べるだけなので、モデルの値に依らないことを確かめる)。
 - Edge cases: 書き換えの検知(#185)の形の差分が、新しい値でも従来どおり見分けられること。
 - Evidence to capture: test report。
@@ -97,6 +98,8 @@ project の codex 設定(`.codex/config.toml` と `templates/base/.codex/config.
 
 ## Deviation notes
 
+- 2026-10-02 plan: Codex plan advisory(gpt-6-astra、xhigh、watchdog の 1 行、`codex rc=0`、`-o` 1279 バイト)は MEDIUM 1: AC-4 は実際に動かす確認を省けてしまい、モデルが選ばれることを見るだけでは要求の成功が分からない。以前 400 になった effort `max` の組み合わせも対象外だった。ユーザー決定: 対応案で plan を更新。AC-4 を「`gpt-5.6-sol` に effort 未指定と `max` の 2 通りで要求が成功する」に、AC-4b を「worktree で既定、work、review の 3 通りが `gpt-5.6-sol` を選ぶ(trust のために `~/.codex` は書き換えない)」に分けた
+
 ## Progress checklist
 
 - [x] Plan reviewed
@@ -111,4 +114,4 @@ project の codex 設定(`.codex/config.toml` と `templates/base/.codex/config.
 
 - [x] 変更する 3 か所と、影響を受ける経路(project の codex、Codex 側の pipeline のエージェント、`ralph upgrade`)を特定した
 - [x] critical fork なし(置き換え先はメンテナが選んだ)
-- [ ] Codex plan advisory
+- [x] Codex plan advisory(MEDIUM 1、対応案で plan を更新)
