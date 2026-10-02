@@ -117,6 +117,8 @@
 - 2026-10-02 self-review addendum(cycle 1、Slice B、436d7ea6): CRITICAL 0 / HIGH 0 / MEDIUM 0 / LOW 2、merge 可。M-1 と L-1〜L-4 は意図どおり直っていて、段落の主張(全 verb が設定を読む、省略時は cwd の `./ralph.toml`、spawn の拒否の文面と条件、state dir の 4 段)はすべてコードと一致した。A-L1: 直し方の文に、spawn / start の拒否には「別のモデルを `--model` に渡す」が当てはまることと、明示した `model_pool` は既定を丸ごと置き換えることが書かれていない。A-L2: spec の「どのタグにも含まれず」は次のタグで偽になる、影響を受ける人に `--model gpt-5.5` を渡していた人が入っていない。範囲外の気づき: plan の Risks が否定した前提を先に書いていた(orchestrator が書き直した)
 - 2026-10-02 work: Slice C は implementer に委譲(c2a0b41c、文書だけ、5 ファイル、push 済み)。A-L1: spawn / start の拒否はプールにあるモデルを渡すか `model_pool` に足して直す、明示した `model_pool` は置き換え(`TestLoad_OrgFullRoundTrip` で確認)なので使い続ける既定のエントリも書く、を足した。A-L2: spec の (e) を「この変更の時点で最新のタグは v5.1.0 で、3f9b4a01 を含むタグはなかった」に直し、`--model gpt-5.5` で spawn / start していた人も影響の範囲に入れた。check-skill-sync、check-sync、cmp green、出荷する skill に `gpt-5.5` なし。orchestrator も check-skill-sync を確認
 - 2026-10-02 verify(cycle 1、1a24d0ea): PASS。AC-1〜AC-5、AC-7 は pass、AC-6 は静的な半分を確認(振る舞いは /test)。`RALPH_VERIFY_SCOPE=full ./scripts/run-static-verify.sh` green(golangci-lint 0 issues)。既定の `run-static-verify.sh` は `unclassified:scripts/ralph-config.sh` の full で golang を選んだ(`no_changes` にならない)。AC-5: HEAD のビルドは `pass — 4 codex model_pool slug(s)`、負の対照の main のビルドは `warn — ... not found ...: gpt-5.5`。AC-4: `git grep` の 253 件を分類し、既定のプールとしての記述はなし。復旧の段落と spec (e) の主張は CLI での再現とコードと git でそろって確認した。self-review の全指摘は HEAD で解消。記録: D-1 plan のチェックボックス(PR 時に更新)、D-2 設定は cwd の `./ralph.toml`・state dir は git の toplevel という非対称と、teardown 系の verb が設定の検証で止まる件が tech-debt にない(この差分より前からある。sync-docs で行を足す)、D-3 `.codex/config.toml` の `model = "gpt-5.5"` は Open question のまま(メンテナに確認中)
+- 2026-10-02 test(cycle 1、694ddf2a): PASS、MEDIUM 1 / LOW 2。既定の `run-test.sh` は `unclassified:scripts/ralph-config.sh` の full で、`RALPH_VERIFY_SCOPE=full` と同じ。shell 32 スイート、Go 8 パッケージ green、`TMPDIR=/tmp` でも green。変えたテストは `-race -count=50` まで揺れなし。mutation 17 種のうち 14 種が落ちる(3 面それぞれへの戻し、`--config` の無視、state dir を設定の場所に依存させる、環境変数の段を外す、明示の pool を足し合わせる、など)。edge case: `driver_pool = ["codex"]` は 4 スラッグに絞られる、roles の `gpt-5.5` は検証エラー、既定のプールでの `spawn --model gpt-5.5` は herdr に触れる前に拒否される(stub のログ 0 行)。G-1(MEDIUM、この変更で生じた): `TestLoad_DriverPoolOnlyOverride_RolesReferencingFilteredModelErrors` が絞られて外れるモデルとして `gpt-5.5` を使っていて、既定から消えたので、絞った後のプールで検証しているかどうかを区別できなくなった(mutation h が生き残る)。G-2(LOW、以前から): skill の表が `Default()` に結び付いていない。G-3: template の `ralph-config.sh` だけの変更は `check-sync.sh` が拾う(対応不要)。G-4(LOW、以前から): `internal/cli/org_test.go:711` の index の未確認で、回帰がパッケージを止める panic になる。G-2 と G-4 は sync-docs で tech-debt に記録する
+- 2026-10-02 work: Slice D は implementer に委譲(c6d50f69、テストだけの変更、+7 / -4、push 済み)。G-1 のテストの fixture を、既定のプールにある `gpt-6-astra` に替え、理由をコメントに書いた。red: mutation h は旧 HEAD のテストでは生き残り、新しいテストでは `Load: expected error, got nil` で落ちる。orchestrator も差分を読み、テストを確認
 
 ## Progress checklist
 
@@ -125,7 +127,7 @@
 - [x] Implementation started
 - [x] Review artifact created
 - [x] Verification artifact created
-- [ ] Test artifact created
+- [x] Test artifact created
 - [ ] PR created
 
 ## Readiness checklist
