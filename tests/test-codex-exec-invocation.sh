@@ -13,6 +13,17 @@
 #     -c "model_reasoning_effort=${RALPH_CODEX_REASONING_EFFORT:-<default>}" \
 #     exec ... -o <file> </dev/null
 #
+# Issue #197 adds a read-only sandbox to the same lines. The project's
+# .codex/config.toml sets sandbox_mode = "danger-full-access" and
+# `codex exec` never asks for approval, so a reviewer that inherits it can
+# run whatever an instruction in the reviewed diff asks for. Every
+# invocation line must therefore also carry a read-only sandbox
+# (`--sandbox read-only` for /plan's `exec`, `-c sandbox_mode=read-only`
+# for /cross-review's `exec review`, which has no --sandbox flag) and
+# `--ignore-rules` (an execpolicy `.rules` allow rule runs a matching
+# command outside the sandbox), and must not name a wider sandbox or the
+# bypass flag.
+#
 # This test checks that shape holds across all four skill-body faces
 # (.claude/skills, .agents/skills, templates/base/.claude/skills,
 # templates/base/.agents/skills) and that the documented fallback values
@@ -74,7 +85,9 @@ expected_invocation_count() {
 }
 
 # check_invocation_line <face> <skill> <lineno> <content>
-# Verifies one codex-exec invocation line carries all five required tokens.
+# Verifies one codex-exec invocation line carries all seven required tokens
+# (the five from #184, plus the read-only sandbox and --ignore-rules from
+# #197) and no token that widens the sandbox.
 check_invocation_line() {
   face="$1"; skill="$2"; lineno="$3"; content="$4"
   label="$face/$skill/SKILL.md:$lineno"
@@ -102,6 +115,21 @@ check_invocation_line() {
   case "$content" in
     *' -o '*|*'--output-last-message'*) pass "$label: has -o / --output-last-message" ;;
     *) fail "$label: missing -o / --output-last-message -- $content" ;;
+  esac
+
+  case "$content" in
+    *'--sandbox read-only'*|*'sandbox_mode=read-only'*) pass "$label: has read-only sandbox (--sandbox read-only / sandbox_mode=read-only)" ;;
+    *) fail "$label: missing read-only sandbox (--sandbox read-only / sandbox_mode=read-only) -- $content" ;;
+  esac
+
+  case "$content" in
+    *'--ignore-rules'*) pass "$label: has --ignore-rules" ;;
+    *) fail "$label: missing --ignore-rules -- $content" ;;
+  esac
+
+  case "$content" in
+    *'danger-full-access'*|*'workspace-write'*|*'--dangerously-bypass'*) fail "$label: names a wider sandbox or the bypass flag -- $content" ;;
+    *) pass "$label: names no wider sandbox or bypass flag" ;;
   esac
 }
 

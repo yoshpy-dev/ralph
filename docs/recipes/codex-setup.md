@@ -90,7 +90,15 @@ stdin...". Run `command codex` (not a bare `codex`) so a shell alias that
 injects its own `-m` cannot collide with the explicit one below (codex
 rejects a duplicated flag). Pass an explicit `-m` and `-c
 model_reasoning_effort=` sourced from `scripts/ralph-config.sh` so the call
-does not depend on `.codex/config.toml`'s project-level model. Write the
+does not depend on `.codex/config.toml`'s project-level model. Run both
+calls read-only: the advisory passes `--sandbox read-only`, and the
+reviewer passes `-c sandbox_mode=read-only` because `codex exec review`
+has no `--sandbox` flag. Without it the reviewer inherits
+`.codex/config.toml`'s `sandbox_mode = "danger-full-access"`, and
+`codex exec` never asks for approval, so an instruction hidden in the
+diff under review could run any command. Both calls also pass
+`--ignore-rules`, so an `allow` rule in a user or project execpolicy
+`.rules` file cannot run a matching command outside the sandbox. Write the
 final answer with `-o <file>` (or `--output-last-message`) instead of
 parsing the log, after `rm -f`-ing that file first so "non-empty" means
 "written by this run". Run long calls in the background with a watchdog (a

@@ -60,7 +60,8 @@ approval_policy = "on-request"
 
 [profiles.review]
 # Example read-only review profile. The /cross-review skill does not use it:
-# it calls `codex exec review` with explicit -m and -c model_reasoning_effort.
+# it calls `codex exec review` with explicit -m, -c model_reasoning_effort,
+# -c sandbox_mode=read-only, and --ignore-rules.
 model = "gpt-5.6-sol"
 sandbox_mode = "read-only"
 approval_policy = "never"
