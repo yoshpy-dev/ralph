@@ -92,12 +92,13 @@ rejects a duplicated flag). Pass an explicit `-m` and `-c
 model_reasoning_effort=` sourced from `scripts/ralph-config.sh` so the call
 does not depend on `.codex/config.toml`'s project-level model. Run the
 commands both calls execute in a read-only sandbox, which blocks file
-writes and network access: the advisory passes `--sandbox read-only`, and
-the reviewer passes `-c sandbox_mode=read-only` because `codex exec review`
-has no `--sandbox` flag. Without it the reviewer inherits
-`.codex/config.toml`'s `sandbox_mode = "danger-full-access"`, and
-`codex exec` never asks for approval, so an instruction hidden in the
-diff under review could run any command. Both calls also pass
+writes and, by default, network access: the advisory passes
+`--sandbox read-only`, and the reviewer passes `-c sandbox_mode=read-only`
+because `codex exec review` has no `--sandbox` flag. Without it the
+reviewer inherits `.codex/config.toml`'s
+`sandbox_mode = "danger-full-access"`, and `codex exec` never asks for
+approval, so an instruction hidden in the diff under review could run any
+command. Both calls also pass
 `--ignore-rules`, so an `allow` rule in a user or project execpolicy
 `.rules` file cannot run a matching command outside the sandbox. Neither
 flag covers MCP servers from the user-level config, which still start

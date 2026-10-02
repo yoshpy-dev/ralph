@@ -23,7 +23,9 @@
 # no --sandbox flag). It must carry `--ignore-rules` (an execpolicy
 # `.rules` allow rule runs a matching command outside the sandbox), and it
 # must not name any option that widens or bypasses the sandbox or
-# approvals (see is_widening_word).
+# approvals (see is_widening_word). These rules apply to every
+# `command codex` on a line, read the way the shell splits it into
+# arguments (see CODEX_ARGS_AWK).
 #
 # This test checks that shape holds across all four skill-body faces
 # (.claude/skills, .agents/skills, templates/base/.claude/skills,
@@ -119,27 +121,96 @@ is_widening_word() {
   return 1
 }
 
+# CODEX_ARGS_AWK reads one line of skill text the way sh splits it and
+# prints, for every simple command on the line that starts with
+# `command codex`, a line "@@BEGIN", each argument after `codex` on its own
+# line, then "@@END". It honours single quotes, double quotes and
+# backslashes. A command ends at an unquoted &, ;, | or backtick (the
+# backtick closes a Markdown code span). Redirections (<, >, >>, N>,
+# 2>&1, ...) and their targets are dropped, as the shell keeps them out of
+# argv, so words after `</dev/null` are still read. Leading VAR=x
+# assignments are skipped. Skill placeholders such as <scratch> are
+# replaced first so their angle brackets do not read as redirections.
+# Each argument is then normalized for matching: leftover quote characters
+# (TOML string quotes inside a -c value) are removed, blanks around = are
+# dropped, and the ends are trimmed, so -c 'sandbox_mode = "x"' reads as
+# sandbox_mode=x.
+CODEX_ARGS_AWK='
+function flush_word() {
+  if (!inword) return
+  if (skip_target) skip_target = 0
+  else toks[++ntok] = word
+  word = ""; inword = 0
+}
+function end_command(   i, start, t) {
+  flush_word()
+  start = 1
+  while (start <= ntok && toks[start] ~ /^[A-Za-z_][A-Za-z0-9_]*=/) start++
+  if (start + 1 <= ntok && toks[start] == "command" && toks[start + 1] == "codex") {
+    print "@@BEGIN"
+    for (i = start + 2; i <= ntok; i++) {
+      t = toks[i]
+      gsub("[\"\047]", "", t)
+      gsub(/[ \t]*=[ \t]*/, "=", t)
+      sub(/^[ \t]+/, "", t)
+      sub(/[ \t]+$/, "", t)
+      print t
+    }
+    print "@@END"
+  }
+  ntok = 0; skip_target = 0
+}
+{
+  s = $0
+  gsub(/<[A-Za-z][A-Za-z0-9_-]*>/, "_placeholder_", s)
+  n = length(s); word = ""; inword = 0; ntok = 0; skip_target = 0; q = ""
+  for (i = 1; i <= n; i++) {
+    c = substr(s, i, 1)
+    if (q == "\047") {
+      if (c == "\047") q = ""; else word = word c
+      continue
+    }
+    if (q == "\"") {
+      if (c == "\\" && i < n && index("\"\\$`", substr(s, i + 1, 1))) { word = word substr(s, i + 1, 1); i++; continue }
+      if (c == "\"") q = ""; else word = word c
+      continue
+    }
+    if (c == "\\" && i < n) { word = word substr(s, i + 1, 1); inword = 1; i++; continue }
+    if (c == "\047" || c == "\"") { q = c; inword = 1; continue }
+    if (c == " " || c == "\t") { flush_word(); continue }
+    if (c == "&" || c == ";" || c == "|" || c == "`") { end_command(); continue }
+    if (c == "<" || c == ">") {
+      if (inword && word ~ /^[0-9]+$/) { word = ""; inword = 0 } else flush_word()
+      while (i < n && index("<>&|", substr(s, i + 1, 1))) i++
+      skip_target = 1
+      continue
+    }
+    word = word c; inword = 1
+  }
+  end_command()
+}'
+
 # check_sandbox_tokens <label> <content>
-# Splits the codex command on the line (from `command codex ` up to its
-# `</dev/null`, so the claude column of the cross-review table row is not
-# read) into words, and checks that (i) it selects a sandbox and every
+# Reads every `command codex` invocation on the line through CODEX_ARGS_AWK
+# and checks each one separately: (i) it selects a sandbox and every
 # selection (`--sandbox <v>`, `--sandbox=<v>`, `-s <v>`, `-s<v>`, or
-# `sandbox_mode=<v>`) has v = read-only, and (ii) no word is an option that
-# is_widening_word lists. Globbing is already off (the caller runs `set -f`
-# around its line loop); IFS is set to blanks here and restored afterwards.
+# `sandbox_mode=<v>`) has v = read-only, (ii) no argument is an option that
+# is_widening_word lists, and (iii) it passes `--ignore-rules`. The second
+# and later invocations on a line are labelled "[codex #N]".
 check_sandbox_tokens() {
   _sb_label="$1"
-  _sb_cmd="${2#*command codex }"
-  _sb_cmd="${_sb_cmd%%</dev/null*}"
-  _sb_count=0
-  _sb_bad=""
-  _sb_widen=""
-  _sb_prev=""
-  _sb_ifs=$IFS
-  IFS=' 	'
-  for _sb_w in $_sb_cmd; do
+  _sb_args="$(printf '%s\n' "$2" | awk "$CODEX_ARGS_AWK")"
+  _sb_n=0
+  _sb_count=0; _sb_bad=""; _sb_widen=""; _sb_ignore=0; _sb_prev=""
+  while IFS= read -r _sb_w; do
     case "$_sb_w" in
-      *\"*|*\'*) _sb_w="$(printf '%s' "$_sb_w" | tr -d "\"'")" ;;
+      @@BEGIN)
+        _sb_n=$((_sb_n + 1))
+        _sb_count=0; _sb_bad=""; _sb_widen=""; _sb_ignore=0; _sb_prev=""
+        continue ;;
+      @@END)
+        report_sandbox_tokens "$_sb_label" "$_sb_n" "$2"
+        continue ;;
     esac
     _sb_sel=0
     _sb_v=""
@@ -148,7 +219,7 @@ check_sandbox_tokens() {
     esac
     case "$_sb_w" in
       --sandbox=*) _sb_sel=1; _sb_v="${_sb_w#--sandbox=}" ;;
-      -s?*) _sb_sel=1; _sb_v="${_sb_w#-s}" ;;
+      -s?*) _sb_sel=1; _sb_v="${_sb_w#-s}"; _sb_v="${_sb_v#=}" ;;
       *sandbox_mode=*) _sb_sel=1; _sb_v="${_sb_w#*sandbox_mode=}" ;;
     esac
     if [ "$_sb_sel" = 1 ]; then
@@ -158,29 +229,53 @@ check_sandbox_tokens() {
     if is_widening_word "$_sb_w"; then
       _sb_widen="$_sb_widen $_sb_w"
     fi
+    if [ "$_sb_w" = --ignore-rules ]; then
+      _sb_ignore=1
+    fi
     _sb_prev="$_sb_w"
-  done
-  IFS=$_sb_ifs
+  done <<EOF
+$_sb_args
+EOF
+
+  if [ "$_sb_n" -eq 0 ]; then
+    fail "$_sb_label: no \`command codex\` invocation could be read from the line -- $2"
+  fi
+}
+
+# report_sandbox_tokens <label> <invocation number> <content>
+# Emits the three per-invocation results that check_sandbox_tokens gathered.
+report_sandbox_tokens() {
+  _rp_label="$1"
+  if [ "$2" -gt 1 ]; then
+    _rp_label="$1 [codex #$2]"
+  fi
 
   if [ "$_sb_count" -eq 0 ]; then
-    fail "$_sb_label: selects no sandbox (want --sandbox read-only, or -c sandbox_mode=read-only for exec review) -- $2"
+    fail "$_rp_label: selects no sandbox (want --sandbox read-only, or -c sandbox_mode=read-only for exec review) -- $3"
   elif [ -n "$_sb_bad" ]; then
-    fail "$_sb_label: selects a sandbox other than read-only:$_sb_bad -- $2"
+    fail "$_rp_label: selects a sandbox other than read-only:$_sb_bad -- $3"
   else
-    pass "$_sb_label: selects only the read-only sandbox ($_sb_count selection(s))"
+    pass "$_rp_label: selects only the read-only sandbox ($_sb_count selection(s))"
   fi
 
   if [ -n "$_sb_widen" ]; then
-    fail "$_sb_label: names an option that widens or bypasses the sandbox or approvals:$_sb_widen -- $2"
+    fail "$_rp_label: names an option that widens or bypasses the sandbox or approvals:$_sb_widen -- $3"
   else
-    pass "$_sb_label: names no option that widens or bypasses the sandbox or approvals"
+    pass "$_rp_label: names no option that widens or bypasses the sandbox or approvals"
+  fi
+
+  if [ "$_sb_ignore" = 1 ]; then
+    pass "$_rp_label: has --ignore-rules"
+  else
+    fail "$_rp_label: missing --ignore-rules -- $3"
   fi
 }
 
 # check_invocation_line <face> <skill> <lineno> <content>
 # Verifies one codex-exec invocation line carries the five required tokens
-# from #184 and `--ignore-rules` from #197, then hands the sandbox checks
-# to check_sandbox_tokens.
+# from #184, then hands the #197 checks (read-only sandbox, no widening
+# option, `--ignore-rules`) for each codex invocation on the line to
+# check_sandbox_tokens.
 check_invocation_line() {
   face="$1"; skill="$2"; lineno="$3"; content="$4"
   label="$face/$skill/SKILL.md:$lineno"
@@ -208,11 +303,6 @@ check_invocation_line() {
   case "$content" in
     *' -o '*|*'--output-last-message'*) pass "$label: has -o / --output-last-message" ;;
     *) fail "$label: missing -o / --output-last-message -- $content" ;;
-  esac
-
-  case "$content" in
-    *'--ignore-rules'*) pass "$label: has --ignore-rules" ;;
-    *) fail "$label: missing --ignore-rules -- $content" ;;
   esac
 
   check_sandbox_tokens "$label" "$content"
