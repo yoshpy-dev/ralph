@@ -42,7 +42,7 @@ ralph を Claude Code 専用ハーネスから **Claude Code / Codex 両対応�
   - 参照箇所も全てリネーム (互換 alias は作成しない): `.claude/skills/cross-review/`, `.agents/skills/cross-review/`, `.claude/skills/work/SKILL.md`, `.claude/skills/loop/SKILL.md`, `.claude/rules/post-implementation-pipeline.md`, `.claude/rules/subagent-policy.md`, `CLAUDE.md`, `AGENTS.md`, `README.md`, `docs/quality/definition-of-done.md` ほか `codex-review` を含むファイル全て。
 - [ ] **F-5**: AGENTS.md を両 CLI 共通の source of truth として再構成する (32 KiB cap 内)。CLAUDE.md は Claude Code 固有事項のみに絞る。Codex 固有事項は `.codex/AGENTS.override.md` または `.codex/README.md` に切り出す。
 - [ ] **F-6**: `.codex/config.toml` テンプレートを定義する。
-  - `model = "gpt-5.5"` を既定値とする
+  - `model = "gpt-5.5"` を既定値とする (2026-10-02 に `gpt-5.6-sol` へ変更。#156)
   - `sandbox_mode`、`approval_policy`、`mcp_servers.<id>`、`[hooks]` (PreToolUse / PostToolUse / SessionStart / PermissionRequest)、`[features]` (必要に応じて)、`[tui.notifications]`
   - profiles 定義例: `[profiles.work]`, `[profiles.review]`
 - [ ] **F-7**: `scripts/check-skill-sync.sh` を新設する。`.claude/skills/<name>/SKILL.md` と `.agents/skills/<name>/SKILL.md` の本文 (frontmatter 除外) を比較し、drift があれば exit 1。`run-verify.sh` から呼び出し、CI でゲート化する。
