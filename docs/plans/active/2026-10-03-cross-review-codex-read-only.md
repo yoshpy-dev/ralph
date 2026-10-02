@@ -103,12 +103,13 @@ skill の呼び出しと文書とテストの変更だけ。問題があれば r
 ## Deviation notes
 
 - 2026-10-03 plan: Codex plan advisory(gpt-6-astra、xhigh、watchdog の 1 行、`codex rc=0`、`-o` 1511 バイト)は HIGH 1: `sandbox_mode` だけを上書きしても、利用者や trust 済みの project の execpolicy の `.rules` の `decision = "allow"` に一致したコマンドは、承認なしで sandbox の外で動く。AC-3 の header と出力の確認ではこの経路を検出できない。orchestrator が `codex exec --help` と `codex exec review --help` に `--ignore-rules` があることを確認した。ユーザー決定: `/plan` の advisory も含めて更新。両方の呼び出しに `--ignore-rules` を足し、テストで固定し、一時的な project の `.rules` で回り込みの再現と遮断を確かめる AC-3b を足した
+- 2026-10-03 work: Slice A は implementer(opus、security の変更のため)に委譲(4fd7bf5f、14 ファイル、+73 / -26、push 済み)。cross-review の呼び出しは `… -c "model_reasoning_effort=…" -c sandbox_mode=read-only exec review --ignore-rules --base "$BASE" -o … </dev/null`、`/plan` の advisory は `… exec --sandbox read-only --ignore-rules -o … "<prompt>" </dev/null`(`--ignore-rules` は codex-cli 0.154.0 の `exec` と `exec review` の両方のオプション)。それぞれに理由の 1 文を足した。テストは、どの呼び出しの行にも read-only の sandbox と `--ignore-rules` があることを確かめ、さらに `danger-full-access`、`workspace-write`、`--dangerously-bypass` のどれかが行にあれば落ちる(後ろから広い sandbox で上書きする改変を止めるため。handoff からの追加)。96 / 96 から 132 / 132(sh と dash)。red: 5 種の変異でそれぞれ 1 件だけ落ちる。commit の type は guard が `security:` を受け付けないので `fix:` にした(orchestrator が了承)。AC-3: この worktree で新しい形の cross-review を `--base main` に流し、`codex rc=0`、`-o` 217 バイト、header は `sandbox: read-only` と `approval: never`。sandbox が拒否したのは入れ子の codex の PATH の警告だけ。AC-3b: 公式の Rules の仕様(https://developers.openai.com/codex/rules、trust 済みの project の `.codex/rules/*.rules`)に従って、追跡しない一時的なルールで scratch のファイル 2 つへの `touch` だけを `decision = "allow"` にした(`codex execpolicy check` で allow を確認)。(a) read-only だけでは `touch` が通ってファイルができた(回り込みの再現)、(b) `--ignore-rules` を足すと `Operation not permitted` でファイルはできない。ルールと probe のファイルは消し、worktree と main は clean、`~/.codex` には触れていない。範囲外の観測: read-only の reviewer も `~/.codex/memories/MEMORY.md` などのファイルを読める(read-only は書き込みを止めるだけ)。orchestrator も 6 面の行と、テスト 132 / 132 を確認
 
 ## Progress checklist
 
 - [x] Plan reviewed
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
