@@ -17,12 +17,16 @@
 model = "gpt-5.6-sol"
 
 # Sandbox mode: danger-full-access allows unrestricted filesystem access.
-# Pair with approval_policy below to gate destructive shell calls.
+# In an interactive session, approval_policy below gates destructive shell
+# calls. `codex exec` never asks for approval, whatever approval_policy
+# says, so ralph's own `codex exec` calls (/plan's advisory, /cross-review's
+# reviewer) pass a read-only sandbox explicitly.
 sandbox_mode = "danger-full-access"
 
-# approval_policy: when Codex pauses for user approval.
+# approval_policy: when an interactive Codex session pauses for user
+# approval (`codex exec` runs as "never" regardless).
 # - "never"      : autonomous (Claude Code's permission_mode = auto equivalent)
-# - "on-request" : tool asks → user approves (default for ralph)
+# - "on-request" : tool asks → user approves (ralph's default for interactive sessions)
 # - "untrusted"  : every tool call needs approval
 approval_policy = "on-request"
 
