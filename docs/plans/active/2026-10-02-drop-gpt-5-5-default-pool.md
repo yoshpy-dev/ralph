@@ -116,6 +116,7 @@
 - 2026-10-02 work: Slice B は implementer に委譲(67c20db0、7 ファイル、+95 / -63、push 済み)。org skill(4 面)の段落を版に依存しない復旧の手順に書き直した: `[org.roles]` のモデルは実効のプールに要る、入っていないと検証が通らず全 verb が止まる、`spawn --model` も `org: model "<model>" not in [org].model_pool for driver "<driver>"` で拒否される、直すか直したコピーを `--config` で渡す、state dir は `--state-dir` → `RALPH_ORG_STATE_DIR` → git の toplevel → cwd で決まる。`--config` を省略したときに読むのは cwd の `./ralph.toml` だけであることも書いた。出荷する skill に `gpt-5.5` は残っていない。spec の (e) は、`gpt-5.5` を既定に含むリリースがないこと(次のリリースで下流が見るのは claude 3 → claude 4 + codex 4)と、影響が 2026-09-16 以降の main をソースからビルドした場合に限られることに書き直した。L-1: ループを長さの確認より前に移した(名前つきで落ちる)。L-2: `RALPH_ORG_STATE_DIR` だけで state dir を渡すサブテストを足した。L-4: テスト名を `TestLoad_OmittedModelPoolWithRolesNamingDroppedDefault_ErrorsUntilModelPoolIsExplicit` に変えた(上の Slice A の記録にある旧名 `..._Errors` はこれのこと)。red: `--config` を無視させると 3 つのサブテスト、環境変数の段を無効にすると新しいサブテストだけ、`Default()` に戻すと `TestDefault_Org` が名前つきで落ちる。orchestrator も 3 つのサブテストと config のテストを確認
 - 2026-10-02 self-review addendum(cycle 1、Slice B、436d7ea6): CRITICAL 0 / HIGH 0 / MEDIUM 0 / LOW 2、merge 可。M-1 と L-1〜L-4 は意図どおり直っていて、段落の主張(全 verb が設定を読む、省略時は cwd の `./ralph.toml`、spawn の拒否の文面と条件、state dir の 4 段)はすべてコードと一致した。A-L1: 直し方の文に、spawn / start の拒否には「別のモデルを `--model` に渡す」が当てはまることと、明示した `model_pool` は既定を丸ごと置き換えることが書かれていない。A-L2: spec の「どのタグにも含まれず」は次のタグで偽になる、影響を受ける人に `--model gpt-5.5` を渡していた人が入っていない。範囲外の気づき: plan の Risks が否定した前提を先に書いていた(orchestrator が書き直した)
 - 2026-10-02 work: Slice C は implementer に委譲(c2a0b41c、文書だけ、5 ファイル、push 済み)。A-L1: spawn / start の拒否はプールにあるモデルを渡すか `model_pool` に足して直す、明示した `model_pool` は置き換え(`TestLoad_OrgFullRoundTrip` で確認)なので使い続ける既定のエントリも書く、を足した。A-L2: spec の (e) を「この変更の時点で最新のタグは v5.1.0 で、3f9b4a01 を含むタグはなかった」に直し、`--model gpt-5.5` で spawn / start していた人も影響の範囲に入れた。check-skill-sync、check-sync、cmp green、出荷する skill に `gpt-5.5` なし。orchestrator も check-skill-sync を確認
+- 2026-10-02 verify(cycle 1、1a24d0ea): PASS。AC-1〜AC-5、AC-7 は pass、AC-6 は静的な半分を確認(振る舞いは /test)。`RALPH_VERIFY_SCOPE=full ./scripts/run-static-verify.sh` green(golangci-lint 0 issues)。既定の `run-static-verify.sh` は `unclassified:scripts/ralph-config.sh` の full で golang を選んだ(`no_changes` にならない)。AC-5: HEAD のビルドは `pass — 4 codex model_pool slug(s)`、負の対照の main のビルドは `warn — ... not found ...: gpt-5.5`。AC-4: `git grep` の 253 件を分類し、既定のプールとしての記述はなし。復旧の段落と spec (e) の主張は CLI での再現とコードと git でそろって確認した。self-review の全指摘は HEAD で解消。記録: D-1 plan のチェックボックス(PR 時に更新)、D-2 設定は cwd の `./ralph.toml`・state dir は git の toplevel という非対称と、teardown 系の verb が設定の検証で止まる件が tech-debt にない(この差分より前からある。sync-docs で行を足す)、D-3 `.codex/config.toml` の `model = "gpt-5.5"` は Open question のまま(メンテナに確認中)
 
 ## Progress checklist
 
@@ -123,7 +124,7 @@
 - [x] Branch created
 - [x] Implementation started
 - [x] Review artifact created
-- [ ] Verification artifact created
+- [x] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
 
