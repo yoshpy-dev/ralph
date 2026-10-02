@@ -1,6 +1,6 @@
 # codex-config-model-gpt-5-6-sol
 
-- Status: Draft
+- Status: PR created (#198), awaiting CI and merge
 - Owner: Claude Code
 - Date: 2026-10-02
 - Related request: メンテナの指示(2026-10-02)。`.codex/config.toml`(と template)の `model = "gpt-5.5"` を変える。置き換え先は `gpt-5.6-sol`(AskUserQuestion で選択。9/25 の退役予告で codex が `gpt-5.5` の移行先として示したモデル)。PR #196 で既定の `[org].model_pool` から `gpt-5.5` を外したのに続く変更
@@ -56,12 +56,12 @@ project の codex 設定(`.codex/config.toml` と `templates/base/.codex/config.
 
 ## Acceptance criteria
 
-- [ ] AC-1: `.codex/config.toml` と `templates/base/.codex/config.toml` の `model` が 3 か所とも `gpt-5.6-sol` で、両ファイルが byte 一致。`./scripts/check-sync.sh` が green。
-- [ ] AC-2: 両ファイルが TOML として読める(`codex` の設定の読み込みか TOML の parser で確認)。TOML として読んだ中身を main と比べて、違うのは 3 つのモデル値だけ(コメントは Slice B と L-4 の修正で意図して書き直した。値、キー、表、並びは変えていない)。
-- [ ] AC-3: `git grep -n 'gpt-5\.5'` の結果に、project の codex の既定として書いた箇所が残っていない。残るのは履歴、spec の記録、任意の値として使う fixture だけ。分類を verify report に書く。
-- [ ] AC-4: `gpt-5.6-sol` への実際の要求が成功する(Codex plan advisory の MEDIUM)。いつもの codex の認証を使い、scratch のディレクトリから `command codex -m gpt-5.6-sol exec --sandbox read-only -o <file> '<小さな指示>' </dev/null` を、effort を指定しない場合(モデルの既定の `low`)と `-c model_reasoning_effort=max` の場合の 2 回送り、どちらも rc 0 で `-o` のファイルが空でない。認証がなくて送れなければ合格にせず、未解決のゲートとして PR に載せる。
-- [ ] AC-4b: この worktree で、既定、`--profile work`、`--profile review` の 3 通りの codex が `gpt-5.6-sol` を選ぶ(`-m` を付けずに実行し、選ばれたモデルを codex の出力か実行の記録で確かめる)。project の設定を codex に信頼させる必要があり、trust を得るために `~/.codex` の設定を書き換えることはしない。信頼されていなくて確かめられなければ、その状況を report に書き、PR に「未確認」として載せる。
-- [ ] AC-5: `RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh` が green。`internal/scaffold` と `internal/cli` のテスト(template の埋め込み、init、upgrade)が green。
+- [x] AC-1: `.codex/config.toml` と `templates/base/.codex/config.toml` の `model` が 3 か所とも `gpt-5.6-sol` で、両ファイルが byte 一致。`./scripts/check-sync.sh` が green。
+- [x] AC-2: 両ファイルが TOML として読める(`codex` の設定の読み込みか TOML の parser で確認)。TOML として読んだ中身を main と比べて、違うのは 3 つのモデル値だけ(コメントは Slice B と L-4 の修正で意図して書き直した。値、キー、表、並びは変えていない)。
+- [x] AC-3: `git grep -n 'gpt-5\.5'` の結果に、project の codex の既定として書いた箇所が残っていない。残るのは履歴、spec の記録、任意の値として使う fixture だけ。分類を verify report に書く。
+- [x] AC-4: `gpt-5.6-sol` への実際の要求が成功する(Codex plan advisory の MEDIUM)。いつもの codex の認証を使い、scratch のディレクトリから `command codex -m gpt-5.6-sol exec --sandbox read-only -o <file> '<小さな指示>' </dev/null` を、effort を指定しない場合(モデルの既定の `low`)と `-c model_reasoning_effort=max` の場合の 2 回送り、どちらも rc 0 で `-o` のファイルが空でない。認証がなくて送れなければ合格にせず、未解決のゲートとして PR に載せる。
+- [x] AC-4b: この worktree で、既定、`--profile work`、`--profile review` の 3 通りの codex が `gpt-5.6-sol` を選ぶ(`-m` を付けずに実行し、選ばれたモデルを codex の出力か実行の記録で確かめる)。project の設定を codex に信頼させる必要があり、trust を得るために `~/.codex` の設定を書き換えることはしない。信頼されていなくて確かめられなければ、その状況を report に書き、PR に「未確認」として載せる。
+- [x] AC-5: `RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh` が green。`internal/scaffold` と `internal/cli` のテスト(template の埋め込み、init、upgrade)が green。
 
 ## Implementation outline
 
@@ -119,7 +119,7 @@ project の codex 設定(`.codex/config.toml` と `templates/base/.codex/config.
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
-- [ ] PR created
+- [x] PR created (#198)
 
 ## Readiness checklist
 
