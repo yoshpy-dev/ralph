@@ -29,6 +29,7 @@ project の codex 設定(`.codex/config.toml` と `templates/base/.codex/config.
 
 - `.codex/config.toml` と `templates/base/.codex/config.toml` の 3 か所を `gpt-5.6-sol` に変える(byte 一致を保つ)。
 - `docs/specs/2026-05-07-codex-cli-parity.md` の F-6 に、2026-10-02 に `gpt-5.6-sol` へ変えたことを短く書き足す(#156)。
+- (self-review の M-1、L-1、L-2、L-4 で追加)両ファイルのコメントを codex の実際の挙動に合わせて書き直す: トップレベルの `model` の上のコメント(Codex 側の pipeline のエージェントもこのモデルを引き継ぐ、effort はユーザー設定、なければモデルの既定)と、profile の節のコメント(codex は project の `[profiles.*]` を捨てる、`/cross-review` は `--profile` を使わない)。表と値は残す。spec の 2 か所(`2026-05-07-codex-cli-parity.md:180`、`2026-08-01-org-runtime.md` の (e))に変更の注記を足す。
 - 最後に `git grep -n 'gpt-5\.5'` で、project の codex の既定として書いた箇所が残っていないか確かめる。
 
 ## Non-goals
@@ -45,7 +46,7 @@ project の codex 設定(`.codex/config.toml` と `templates/base/.codex/config.
 ## Affected areas
 
 - `.codex/config.toml`、`templates/base/.codex/config.toml`
-- `docs/specs/2026-05-07-codex-cli-parity.md`
+- `docs/specs/2026-05-07-codex-cli-parity.md`、`docs/specs/2026-08-01-org-runtime.md`(Slice B で追加)
 
 ## Design decisions
 
@@ -56,7 +57,7 @@ project の codex 設定(`.codex/config.toml` と `templates/base/.codex/config.
 ## Acceptance criteria
 
 - [ ] AC-1: `.codex/config.toml` と `templates/base/.codex/config.toml` の `model` が 3 か所とも `gpt-5.6-sol` で、両ファイルが byte 一致。`./scripts/check-sync.sh` が green。
-- [ ] AC-2: 両ファイルが TOML として読める(`codex` の設定の読み込みか TOML の parser で確認)。値のほかに、コメント、空行、並びを変えていない(`git diff` で 3 行の置換だけ)。
+- [ ] AC-2: 両ファイルが TOML として読める(`codex` の設定の読み込みか TOML の parser で確認)。TOML として読んだ中身を main と比べて、違うのは 3 つのモデル値だけ(コメントは Slice B と L-4 の修正で意図して書き直した。値、キー、表、並びは変えていない)。
 - [ ] AC-3: `git grep -n 'gpt-5\.5'` の結果に、project の codex の既定として書いた箇所が残っていない。残るのは履歴、spec の記録、任意の値として使う fixture だけ。分類を verify report に書く。
 - [ ] AC-4: `gpt-5.6-sol` への実際の要求が成功する(Codex plan advisory の MEDIUM)。いつもの codex の認証を使い、scratch のディレクトリから `command codex -m gpt-5.6-sol exec --sandbox read-only -o <file> '<小さな指示>' </dev/null` を、effort を指定しない場合(モデルの既定の `low`)と `-c model_reasoning_effort=max` の場合の 2 回送り、どちらも rc 0 で `-o` のファイルが空でない。認証がなくて送れなければ合格にせず、未解決のゲートとして PR に載せる。
 - [ ] AC-4b: この worktree で、既定、`--profile work`、`--profile review` の 3 通りの codex が `gpt-5.6-sol` を選ぶ(`-m` を付けずに実行し、選ばれたモデルを codex の出力か実行の記録で確かめる)。project の設定を codex に信頼させる必要があり、trust を得るために `~/.codex` の設定を書き換えることはしない。信頼されていなくて確かめられなければ、その状況を report に書き、PR に「未確認」として載せる。
@@ -104,6 +105,7 @@ project の codex 設定(`.codex/config.toml` と `templates/base/.codex/config.
 - 2026-10-02 work: Slice B は implementer に委譲(dadc1b40、4 ファイル、+32 / -14、push 済み)。M-1: profile の節のコメントを「project の `[profiles.*]` は codex が捨てる(0.154.0 と 0.159.2 で警告を確認)、ユーザーレベルの設定に写したときだけ効く、この project で `--profile review` を付けても read-only にならない、`/cross-review` は `--profile` を使わず `-m` と `-c` を明示する」に書き直し、表と値は残した。L-2: 先頭のコメントを「Codex 側の pipeline のエージェント(`.codex/agents/` はモデルを指定しない)もこのモデルを引き継ぐ、effort は設定していないのでユーザー設定、なければモデルの既定(`gpt-5.6-sol` は low)」に書き直した。L-1: spec の 2 か所に変更の注記を足した。確認: 2 ファイルは byte 一致、TOML として読んだ中身は HEAD と同じ(orchestrator も確認)、差分はコメント行だけ、check-sync green、`tests/test-ralph-worktree.sh` 143 / 0、worktree での codex の実行は `model: gpt-5.6-sol`、main のチェックアウトは clean
 - 2026-10-02 self-review addendum(cycle 1、Slice B、dbd3002b): CRITICAL 0 / HIGH 0 / MEDIUM 1 / LOW 1、merge 可。M-1、L-1、L-2 は意図どおり直っていて、新しいコメントの主張(警告の文と版、`.codex/agents/` がモデルを指定しないこと、`/cross-review` が `--profile` を使わないこと、`--profile review` が read-only にならないこと)は証拠と合う。M-2(この差分の外、前からある、security に関わる): `/cross-review` の `codex exec review` は `--sandbox` を渡さないので、trust 済みの project ではトップレベルの `sandbox_mode = "danger-full-access"` と `approval: never` で動く(reviewer の probe で確認)。レビューする差分の中の指示に codex が従えば、承認なしでコマンドを実行できる。`/plan` の advisory は `--sandbox read-only` を渡している。この PR の範囲外なので、tech-debt に記録し、follow-up の issue を起票する(`-c sandbox_mode=read-only` を足す案。read-only でも `-o` が書かれることを認証のある環境で確かめる必要がある)。L-4(任意): 「low for gpt-5.6-sol」は OpenAI 側の値で変わりうる
 - 2026-10-02 work(inline、軽微な変更の例外): L-4 のコメントに「as of 2026-10-02」を足した(2 ファイル、各 1 行)。byte 一致、TOML として読んだ中身は直前と同じ、check-sync green、`tests/test-ralph-worktree.sh` 143 / 0、`RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh` green
+- 2026-10-02 verify(cycle 1、57c24384): PASS、LOW 2。`RALPH_VERIFY_SCOPE=full ./scripts/run-static-verify.sh` green、既定の `run-static-verify.sh` は `unclassified:.codex/config.toml` の full。AC-1、AC-3、AC-4、AC-4b は pass(AC-4 と AC-4b は実装者の log を読んで確認。AC-4b の `--profile` の 2 通りはトップレベルの `model` の効果)、AC-2 は pass(TOML として読んだ中身を main と比べて違うのは 3 つのモデル値だけ)、AC-5 は静的な半分を確認。出荷する面に `gpt-5.5` は 0 件。新しいコメントの主張は 7 つのうち 6 つを確認、「エージェントがこのモデルを引き継ぐ」は `.codex/agents/` にモデルの指定がないことまで(実際の引き継ぎは未観測)。D-1 / D-2(LOW): plan のチェックボックスと、AC-2、Scope、Affected areas が Slice B を含んでいなかった(orchestrator が直した)。D-3: tech-debt に M-1(project の profile が捨てられる)と M-2(#197)の行がない(sync-docs)。D-4: `docs/specs/2026-05-07-codex-cli-parity.md:77` のユーザーストーリーが project の profile で切り替えられる前提になっている(sync-docs で注記を検討)
 
 ## Progress checklist
 
@@ -111,7 +113,7 @@ project の codex 設定(`.codex/config.toml` と `templates/base/.codex/config.
 - [x] Branch created
 - [x] Implementation started
 - [x] Review artifact created
-- [ ] Verification artifact created
+- [x] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
 
