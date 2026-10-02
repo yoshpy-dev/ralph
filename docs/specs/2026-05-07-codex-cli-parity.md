@@ -177,7 +177,7 @@ ralph を Claude Code 専用ハーネスから **Claude Code / Codex 両対応�
 
 ## 未解決の課題
 
-- なし (主要 OQ はすべて確定済み: model = `gpt-5.5`、`/codex-review` → `/cross-review` リネーム、互換 alias なし)。
+- なし (主要 OQ はすべて確定済み: model = `gpt-5.5` (2026-10-02 に `gpt-5.6-sol` へ変更。#156)、`/codex-review` → `/cross-review` リネーム、互換 alias なし)。
 
 ## 参考資料
 
