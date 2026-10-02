@@ -76,3 +76,53 @@ CRITICAL と HIGH はない。
   - L-1、L-2、L-4 はテストの小さな修正なので、M-1 と同じ cycle でまとめて直せる。
   - L-5: 直した 1 行を #186 にコメントとして残す。
   - 設定は cwd の `./ralph.toml`、state dir は git の toplevel から決まる非対称(probe C)は、別 issue か tech-debt の行の候補。
+
+## Cycle 1 addendum (Slice B)
+
+- Date: 2026-10-02
+- Branch: chore/drop-gpt-5-5-default-pool(HEAD 972cd37b、Slice B のコミットは 67c20db0)
+- Scope: `git diff 26b35264..HEAD -- .claude .agents templates docs/specs internal`(skill の 4 面、spec の (e)、`internal/config/config_test.go`、`internal/cli/org_test.go`)。plan の差分は対象外
+
+### Evidence reviewed
+
+- skill の 4 面は `cmp` で一致。出荷する skill(`.claude/skills`、`.agents/skills`、`templates/base/.claude`、`templates/base/.agents`)に `gpt-5.5` は 1 つも残っていない(`git grep -c` が rc 1)
+- 段落の主張とコードの照合
+  - 動詞が設定を読む: 10 の動詞すべてが `newOrgRuntime` / `newOrgRuntimeAt` を通る(cycle 1 の Evidence と同じ)
+  - `--config` を省略したときの設定: `internal/cli/org.go:218-226`。cwd の `./ralph.toml` があればそれを読み、なければ組み込みの既定を使う
+  - spawn の拒否: `internal/org/envelope.go:55-57`。同じ driver と model の組が `model_pool` にないときに `org: model %q not in [org].model_pool for driver %q` を返す。文面と条件は段落と一致する。driver が `driver_pool` にないときは、その前の `:52-54` で別のエラーになる
+  - state dir の順序: `internal/org/statedir.go:47-58` の flag → env → git の toplevel → cwd と一致する
+- spec の (e): `git fetch --tags` のあとも `git tag --contains 3f9b4a01` は空で、最新のタグは v5.1.0。3f9b4a01 は HEAD の祖先。v5.1.0 の既定が claude の 3 つだけであることは cycle 1 で確認済み
+- mutation probe。いずれも scratch のコピー(`git archive HEAD`)で行った
+  - `Default()` に `gpt-5.5` を戻す: `TestDefault_Org` は `config_test.go:137` で名前つきの Errorf を出し、そのあと `:141` の長さの Fatalf で止まる
+  - `ResolveOrgStateDir` の env の段を無効にする: 新しいサブテストが `org_test.go:984` で落ち、`no seats` が出る
+  - cycle 1 の L-2 で挙げた変更(`--config` があって `--state-dir` がないときに `filepath.Dir(configPath)` の下を使う)を `newOrgRuntime` に入れる: 同じく `:984` で落ちる
+- 新しいサブテストを含む `TestOrgStatus_ConfigFlagRecoversAfterDefaultPoolDropsRoleModel` を単独で実行し、3 つのサブテストとも pass
+
+### cycle 1 の指摘の扱い
+
+| # | 状態 | 根拠 |
+| --- | --- | --- |
+| M-1 | 直った | 段落から日付つきの経緯と `gpt-5.5` が消え、版に依存しない復旧の手順になった。spec の (e) には、`gpt-5.5` を既定に含むリリースがないことと、影響がソースビルドに限られることが書かれた。release notes への申し送りは取り下げられた。言い回しの残りは A-L1 と A-L2 |
+| L-1 | 直った | ループが長さの確認より前に移り、コメントの内容も挙動と合う(mutation probe)。メッセージは "retired" から "dropped" に変わり、`gpt-5.5` がまだ退役していない事実と合う |
+| L-2 | 直った | env の段のサブテストが追加された。cycle 1 で挙げた変更も、env を無視する変更も、どちらでも落ちる。git の toplevel の段は `PATH=""` のため試せないと、コメント(`org_test.go:961-963`)に書いてある。cycle 1 の probe B で、この段が動くことは確認済み |
+| L-3 | 直った | 退役の理由は skill から消えた。state dir の順序に cwd の段が入った(`SKILL.md:125-126`) |
+| L-4 | 直った | 名前が `…_ErrorsUntilModelPoolIsExplicit` になった(`config_test.go:850`)。doc comment も前半と後半の両方を書いている |
+| L-5 | 解消 | M-1 の訂正で、申し送る内容そのものがなくなった。plan の Non-goals に理由が書かれている |
+
+### Findings
+
+| # | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| A-L1 | LOW | 文の正確さ(skill) | 段落の後半に、手順として足りない点が 3 つある。(1) 「直すには、`[org].model_pool` を明示してそのモデルを含めるか、role から外す」は、直前の spawn の文にも続けて読める。しかし spawn の拒否には「role から外す」が当てはまらず、別のモデルを `--model` に渡すという直し方が抜けている。(2) `start --model` も同じ `ValidateSpawnEnvelope` を通って同じ文面で拒否されるが、段落は `spawn` だけを挙げる。(3) `model_pool` を明示すると既定のプールを丸ごと置き換える。この段落だけを読んで 1 エントリだけ書くと、既定の残りのエントリが使えなくなる。前の段落の「明示した `model_pool` は自動では変わらない」は、この点を言っていない。ほかに、`driver_pool` だけを書いた設定の実効のプールは「既定のプール」ではなく、既定を driver で絞ったものになる(前の段落で説明はある)。また、「直すには…。`ralph.toml` を直すか…」と「直す」の文が続いて読みにくい | `.claude/skills/org/SKILL.md:115-124`(4 面とも同じ)、`internal/cli/org.go:310`、`:420`(どちらも `rt.Spawn`)、`internal/org/spawn.go:375`、`:502`、`internal/config/config.go:241-250` | 例: 「直すには、`[org].model_pool` を明示してそのモデルを含める(明示したプールは既定を置き換えるので、使う既定のエントリも書く)か、role から外す。`spawn` / `start` なら別のモデルを `--model` に渡してもよい。`ralph.toml` で直すか、直したコピーを `--config <path>` で渡す」 |
+| A-L2 | LOW | 文の正確さ(spec) | (1) 「既定に入れた 3f9b4a01 はどのタグにも含まれず」は、次のタグを切った時点で事実でなくなる。3f9b4a01 は HEAD の祖先なので、merge のあとに main で切るタグはすべて 3f9b4a01 を含む。結論の「`gpt-5.5` を既定に含むリリースはない」は、除外がタグより先に入るので正しいままだが、根拠の文は、後から `git tag --contains` で確かめた人には誤りに見える。(2) 「影響を受けるのは、…`[org.roles]` で `gpt-5.5` を指定して `model_pool` を省略した人だけ」は、同じ期間のソースビルドで、既定のプールのまま `--model gpt-5.5` で spawn / start していた人を含まない。skill の段落は、この場合も挙げている | `docs/specs/2026-08-01-org-runtime.md:23`、`git merge-base --is-ancestor 3f9b4a01 HEAD`(真) | (1) 「3f9b4a01 からこの変更までの間にタグは切られていない(2026-10-02 時点の最新は v5.1.0)」のように、後から読んでも成り立つ形にする。(2) 「…省略した人と、既定のプールのまま `--model gpt-5.5` を渡していた人」に広げる。spawn / start の拒否は座席を作らないので、teardown が止まる話とは分けて書く |
+
+CRITICAL、HIGH、MEDIUM はない。
+
+### 対象外の気づき(件数に含めない)
+
+- plan の Risks の行は、元の前提(「下流で…バイナリを更新すると設定の検証エラーになる」「課金が続きうる」)を先に書き、訂正をあとに足している。また「`ralph init` が作る `ralph.toml` は `model_pool` を明示していて `gpt-5.5` も含む」は、この PR の前の main の template の話になっている。v5.1.0 の template の `ralph.toml` は claude の 3 つだけを明示している。plan は archive されるだけで配布されないので、直すかどうかは orchestrator に任せる。
+
+### Recommendation
+
+- Merge: 可。M-1 と L-1〜L-4 は意図どおりに直っていて、残るのは LOW 2 件の言い回しだけ。
+- Follow-ups: A-L1 と A-L2 は文書だけの修正で、4 面の同期と spec の 1 行で済む。同じ cycle で直すか、見送るかは orchestrator が判断する。見送る場合、配られる skill の段落は誤りではなく、手順が足りないだけになる。
