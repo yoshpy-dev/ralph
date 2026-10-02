@@ -106,6 +106,8 @@ project の codex 設定(`.codex/config.toml` と `templates/base/.codex/config.
 - 2026-10-02 self-review addendum(cycle 1、Slice B、dbd3002b): CRITICAL 0 / HIGH 0 / MEDIUM 1 / LOW 1、merge 可。M-1、L-1、L-2 は意図どおり直っていて、新しいコメントの主張(警告の文と版、`.codex/agents/` がモデルを指定しないこと、`/cross-review` が `--profile` を使わないこと、`--profile review` が read-only にならないこと)は証拠と合う。M-2(この差分の外、前からある、security に関わる): `/cross-review` の `codex exec review` は `--sandbox` を渡さないので、trust 済みの project ではトップレベルの `sandbox_mode = "danger-full-access"` と `approval: never` で動く(reviewer の probe で確認)。レビューする差分の中の指示に codex が従えば、承認なしでコマンドを実行できる。`/plan` の advisory は `--sandbox read-only` を渡している。この PR の範囲外なので、tech-debt に記録し、follow-up の issue を起票する(`-c sandbox_mode=read-only` を足す案。read-only でも `-o` が書かれることを認証のある環境で確かめる必要がある)。L-4(任意): 「low for gpt-5.6-sol」は OpenAI 側の値で変わりうる
 - 2026-10-02 work(inline、軽微な変更の例外): L-4 のコメントに「as of 2026-10-02」を足した(2 ファイル、各 1 行)。byte 一致、TOML として読んだ中身は直前と同じ、check-sync green、`tests/test-ralph-worktree.sh` 143 / 0、`RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh` green
 - 2026-10-02 verify(cycle 1、57c24384): PASS、LOW 2。`RALPH_VERIFY_SCOPE=full ./scripts/run-static-verify.sh` green、既定の `run-static-verify.sh` は `unclassified:.codex/config.toml` の full。AC-1、AC-3、AC-4、AC-4b は pass(AC-4 と AC-4b は実装者の log を読んで確認。AC-4b の `--profile` の 2 通りはトップレベルの `model` の効果)、AC-2 は pass(TOML として読んだ中身を main と比べて違うのは 3 つのモデル値だけ)、AC-5 は静的な半分を確認。出荷する面に `gpt-5.5` は 0 件。新しいコメントの主張は 7 つのうち 6 つを確認、「エージェントがこのモデルを引き継ぐ」は `.codex/agents/` にモデルの指定がないことまで(実際の引き継ぎは未観測)。D-1 / D-2(LOW): plan のチェックボックスと、AC-2、Scope、Affected areas が Slice B を含んでいなかった(orchestrator が直した)。D-3: tech-debt に M-1(project の profile が捨てられる)と M-2(#197)の行がない(sync-docs)。D-4: `docs/specs/2026-05-07-codex-cli-parity.md:77` のユーザーストーリーが project の profile で切り替えられる前提になっている(sync-docs で注記を検討)
+- 2026-10-02 test(cycle 1、a695e85a): PASS、LOW 1。既定の `run-test.sh` は `unclassified:.codex/config.toml` の full。shell 32 スイート、Go 8 パッケージ green(scaffold、cli、upgrade は 834 PASS)。fresh scaffold の `.codex/config.toml` は template と byte 一致で 3 つの値が新しく、その scaffold の `check-template.sh` と `ralph doctor --strict` も通る。upgrade: main のビルドで作った project にこの branch の `ralph upgrade` をかけると、手を加えていない `.codex/config.toml` は新しい内容に置き換わり(2 回目は何もしない)、手を加えたものは上書きされず drift として報告される(rc 3)。#185 の検知は新しい内容を HEAD にしても 16 / 16。worktree の codex は `model: gpt-5.6-sol`、main は clean。G-1(LOW、以前から): 配布する `.codex/config.toml` の中身を読むテストがなく、TOML を壊しても `ralph doctor` 以外では捕まらない。今回このファイルのコメントを大きく書き直したので、Slice C で塞ぐ(orchestrator 判断)
+- 2026-10-02 work: Slice C は implementer に委譲(21291931、テストだけの変更、+54、push 済み)。`TestTemplateBaseCodexTomlFilesParse` を足した: template の `.codex/config.toml` と `.codex/agents/*.toml` を TOML として読み(agents が 0 件なら失敗)、config のトップレベルの `model` が空でない文字列であることを確かめる(モデル名は固定しない)。root の `.codex/` は check-sync の byte 一致に任せる。red: config の構文エラー、トップレベルの `model` の削除、agents の構文エラー、`model` を表の中だけに置く、`model = ""` で落ちる。範囲外の気づき: `TestTemplateBaseCodexAssetsExist` の一覧に `implementer.toml` がない(別件)。orchestrator も新しいテストを確認
 
 ## Progress checklist
 
@@ -114,7 +116,7 @@ project の codex 設定(`.codex/config.toml` と `templates/base/.codex/config.
 - [x] Implementation started
 - [x] Review artifact created
 - [x] Verification artifact created
-- [ ] Test artifact created
+- [x] Test artifact created
 - [ ] PR created
 
 ## Readiness checklist
