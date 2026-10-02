@@ -117,13 +117,17 @@ seed advisory diff で確認できる。`model_pool` を書かず `driver_pool` 
 `ralph.toml` の検証が `[org.roles].<role> references model "<model>" not
 present in [org].model_pool` で通らない。`ralph org` の動詞はどれも設定
 (`--config`、省略時は cwd の `./ralph.toml`)を読むので、動いている座席への
-`status` / `stop` / `disband` も止まる。`spawn --model <model>` も、そのモデ
-ルが driver の `[org].model_pool` になければ `org: model "<model>" not in
-[org].model_pool for driver "<driver>"` で拒否される。直すには、
-`[org].model_pool` を明示してそのモデルを含めるか、role から外す。`ralph.toml`
-を直すか、直したコピーを `--config <path>` で渡す。state dir は設定ファイル
-の場所では変わらず(`--state-dir`、`RALPH_ORG_STATE_DIR`、git の toplevel、
-cwd の順で決まる)、`ralph org status` / `stop` はそのまま同じ座席を扱える。
+`status` / `stop` / `disband` も止まる。`spawn --model <model>` と `start
+--model <model>` は、そのモデルが driver の `[org].model_pool` になければ
+`org: model "<model>" not in [org].model_pool for driver "<driver>"` で拒否
+される。設定の検証エラーは、`[org].model_pool` を明示してそのモデルを含める
+か、role から外して直す。`spawn` / `start` の拒否は、プールにあるモデルを
+`--model` に渡すか、`[org].model_pool` にそのモデルを足して直す。明示した
+`[org].model_pool` は既定のプールを置き換える(足し合わせではない)ので、使
+い続ける既定のエントリも書く。直すのは `ralph.toml` で、直したコピーを
+`--config <path>` で渡してもよい。state dir は設定ファイルの場所では変わら
+ず(`--state-dir`、`RALPH_ORG_STATE_DIR`、git の toplevel、cwd の順で決ま
+る)、`ralph org status` / `stop` はそのまま同じ座席を扱える。
 
 ## 動詞リファレンス
 
