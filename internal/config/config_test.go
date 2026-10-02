@@ -814,8 +814,11 @@ model_pool = [
 // TestLoad_DriverPoolOnlyOverride_RolesReferencingFilteredModelErrors
 // verifies that [org.roles] validation still runs against the filtered
 // (inherited) model_pool: a role referencing a model that driver_pool
-// filtering dropped (or that was never in the default pool) must still
-// error via the existing roles check.
+// filtering dropped must still error via the existing roles check. The model
+// is a codex slug that IS in Default()'s pool, so only validation against the
+// filtered pool rejects it; a model absent from the default pool altogether
+// would also be rejected by validation against the unfiltered pool and could
+// not tell the two apart.
 func TestLoad_DriverPoolOnlyOverride_RolesReferencingFilteredModelErrors(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "ralph.toml")
@@ -823,7 +826,7 @@ func TestLoad_DriverPoolOnlyOverride_RolesReferencingFilteredModelErrors(t *test
 driver_pool = ["claude"]
 
 [org.roles]
-reviewer = ["gpt-5.5"]
+reviewer = ["gpt-6-astra"]
 `
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		t.Fatal(err)
@@ -835,7 +838,7 @@ reviewer = ["gpt-5.5"]
 	// The distinguishing phrase from config.go's roles validation: the role,
 	// the filtered-out model, and the reason. A "reviewer"-only check would
 	// also accept an unrelated error that merely names the role.
-	want := `[org.roles].reviewer references model "gpt-5.5" not present in [org].model_pool`
+	want := `[org.roles].reviewer references model "gpt-6-astra" not present in [org].model_pool`
 	if !contains(err.Error(), want) {
 		t.Errorf("error %q does not contain %q", err.Error(), want)
 	}
