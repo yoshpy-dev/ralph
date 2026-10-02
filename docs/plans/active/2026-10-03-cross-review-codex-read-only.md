@@ -10,7 +10,7 @@
 
 ## Objective
 
-`/cross-review` の codex reviewer を read-only の sandbox で動かす。レビューする差分の中身にかかわらず、reviewer の codex がファイルを書いたり、書き込みを伴うコマンドを実行したりできないようにする。
+`/cross-review` の codex reviewer を read-only の sandbox で動かし、利用者や project の execpolicy の許可ルール(`.rules`)も読ませない。`/plan` の advisory にも同じ指定を入れる。レビューする差分の中身にかかわらず、reviewer の codex がファイルを書いたり、書き込みを伴うコマンドを実行したりできないようにする。
 
 ## 調査で確認したこと(2026-10-03、main c9da0a27)
 
@@ -20,12 +20,14 @@
 - `tests/test-codex-exec-invocation.sh` が、4 面の `/plan` と `/cross-review` の codex の呼び出しの行に、`command codex `、`</dev/null`、`-m "${RALPH_CODEX_REVIEWER_MODEL:-`、`model_reasoning_effort=${RALPH_CODEX_REASONING_EFFORT:-`、`-o` の 5 つがあることを固定している(sandbox は見ていない)。
 - 呼び出しの形を説明している文書: `docs/recipes/codex-setup.md` 85〜100 行(+ template)、`.codex/config.toml` の profile の節のコメント(「`/cross-review` は `-m` と `-c model_reasoning_effort` を明示する」、+ template)。
 - `docs/tech-debt/README.md:147` にこの件の行がある(PR #198 で追加)。
+- codex の execpolicy の `.rules` で `decision = "allow"` のルールに一致したコマンドは、承認なしで sandbox の外で実行される(Codex plan advisory の HIGH。codex の Rules の仕様)。`codex exec` と `codex exec review` には `--ignore-rules`(「user or project の execpolicy `.rules` を読まない」)がある(codex-cli 0.154.0 の help で確認)。この repo は `.rules` を配っていない。利用者の `~/.codex` にあるかは、読まないので分からない。
 - 逆方向(Codex が driver で reviewer が claude)は `claude -p --model … --permission-mode auto --output-format json` で呼ぶ。この issue の範囲外(Open questions に記録)。
 
 ## Scope
 
-- 4 面の cross-review の codex の呼び出し(各 2 か所)に `-c sandbox_mode=read-only` を足す。ほかの `-c` と同じく `exec` の前に置く。
-- `tests/test-codex-exec-invocation.sh`: どの codex の呼び出しの行も read-only の sandbox を指定していることを検査に足す(`/plan` は `--sandbox read-only`、`/cross-review` は `sandbox_mode=read-only`)。
+- 4 面の cross-review の codex の呼び出し(各 2 か所)に `-c sandbox_mode=read-only` と `--ignore-rules` を足す。`-c` はほかの `-c` と同じく `exec` の前、`--ignore-rules` は `exec review` のオプションとして置く(help で受け付ける位置を確かめる)。
+- 4 面の `/plan` の Codex plan advisory の呼び出し(各 1 か所、すでに `--sandbox read-only`)に `--ignore-rules` を足す。
+- `tests/test-codex-exec-invocation.sh`: どの codex の呼び出しの行も read-only の sandbox(`/plan` は `--sandbox read-only`、`/cross-review` は `sandbox_mode=read-only`)と `--ignore-rules` を指定していることを検査に足す。
 - `docs/recipes/codex-setup.md`(+ template)の呼び出しの説明に、両方の呼び出しが read-only の sandbox で動くことと、その理由(project の設定の `danger-full-access` を引き継がない)を足す。
 - `.codex/config.toml`(+ template)の profile の節の、`/cross-review` の呼び出しを説明するコメントを新しい形に合わせる(値は変えない)。
 - `docs/tech-debt/README.md` のこの件の行を、ファイルの慣習(取り消し線と `RESOLVED` のコメント)で解決済みにする。
@@ -34,7 +36,6 @@
 
 - `.codex/config.toml` のトップレベルの `sandbox_mode = "danger-full-access"` の変更(project の codex の使い方全体に関わる別の判断)。
 - 逆方向の claude reviewer(`--permission-mode auto`)の権限の見直し。
-- `/plan` の advisory の変更(すでに read-only)。
 - org runtime の codex 座席の sandbox(`internal/org/permissions.go` の別の仕組み)。
 
 ## Assumptions
@@ -44,6 +45,7 @@
 ## Affected areas
 
 - `.claude/skills/cross-review/SKILL.md`、`.agents/skills/cross-review/SKILL.md`、`templates/base/.claude/skills/cross-review/SKILL.md`、`templates/base/.agents/skills/cross-review/SKILL.md`
+- `.claude/skills/plan/SKILL.md`、`.agents/skills/plan/SKILL.md`、`templates/base/.claude/skills/plan/SKILL.md`、`templates/base/.agents/skills/plan/SKILL.md`
 - `tests/test-codex-exec-invocation.sh`
 - `docs/recipes/codex-setup.md`、`templates/base/docs/recipes/codex-setup.md`
 - `.codex/config.toml`、`templates/base/.codex/config.toml`(コメントだけ)
@@ -52,14 +54,15 @@
 ## Design decisions
 
 - sandbox は `read-only` にする(`workspace-write` にはしない)。reviewer の役割に書き込みは要らず、`workspace-write` では reviewer がレビュー中の worktree を書き換えられてしまう。`/plan` の advisory と同じ扱いになる。代わりに、reviewer は書き込みを伴うコマンド(`go test` のビルドキャッシュなど)を動かせなくなる。テストは pipeline の tester が別に走らせるので、受け入れる。
-- 指定は `-c sandbox_mode=read-only`(`exec review` に `--sandbox` がないため)。
+- 指定は `-c sandbox_mode=read-only`(`exec review` に `--sandbox` がないため)と `--ignore-rules`。read-only の sandbox だけでは、許可ルールに一致したコマンドが sandbox の外で動く経路が残る。reviewer にも advisory にも、利用者のルールで許したコマンドを動かす必要はない。
 - Critical forks: None(issue と `/plan` の advisory で方針が決まっている)
 
 ## Acceptance criteria
 
-- [ ] AC-1: 4 面の cross-review の codex の呼び出し(各 2 か所)がすべて `-c sandbox_mode=read-only` を含む。`./scripts/check-skill-sync.sh` と `./scripts/check-sync.sh` が green。
-- [ ] AC-2: `tests/test-codex-exec-invocation.sh` が、どの codex の呼び出しの行にも read-only の sandbox の指定があることを検査する。red: 4 面のどれか 1 か所から外すと落ちる。`/plan` の `--sandbox read-only` を外しても落ちる。
+- [ ] AC-1: 4 面の cross-review の codex の呼び出し(各 2 か所)がすべて `-c sandbox_mode=read-only` と `--ignore-rules` を含み、4 面の `/plan` の advisory の呼び出しが `--sandbox read-only` と `--ignore-rules` を含む。`./scripts/check-skill-sync.sh` と `./scripts/check-sync.sh` が green。
+- [ ] AC-2: `tests/test-codex-exec-invocation.sh` が、どの codex の呼び出しの行にも read-only の sandbox の指定があることを検査する。red: 4 面のどれか 1 か所から read-only の指定か `--ignore-rules` を外すと落ちる。`/plan` の `--sandbox read-only` か `--ignore-rules` を外しても落ちる。
 - [ ] AC-3: 実際の codex(いつもの認証)で、新しい形の cross-review の呼び出しを、差分のある branch(この branch)に対して 1 回実行し、`codex rc=0`、`-o` のファイルが空でない、log の header が `sandbox: read-only` になる。main のチェックアウトで codex を動かさない。実行後に main のチェックアウトが clean であることを確かめる。
+- [ ] AC-3b: 許可ルールを回り込めないことを実際に確かめる(Codex plan advisory の HIGH)。この worktree(trust 済み)に、追跡しない一時的な project の `.rules` を置き、scratch のファイルへの無害な `touch` を `decision = "allow"` で許す(置き場所と書式は codex の Rules の仕様で確かめる)。同じ worktree で、codex に「その `touch` を実行して」と頼む `codex exec` を 2 回実行する: (a) `-c sandbox_mode=read-only` だけ → ルールが効いて書き込みが通る(脆弱性の再現)、(b) `-c sandbox_mode=read-only --ignore-rules` → 書き込みが拒否され、ファイルができない。(a) で書き込みが通らない場合は、ルールの置き方が効いていないので、その状況を report に書く。終わったら一時的な `.rules` と scratch のファイルを消し、worktree と main のチェックアウトが clean であることを確かめる。`~/.codex` は読まず、書き換えない。
 - [ ] AC-4: `docs/recipes/codex-setup.md`(+ template)と `.codex/config.toml`(+ template)のコメントが新しい呼び出しの形と合う。root と template が一致。
 - [ ] AC-5: `docs/tech-debt/README.md` のこの件の行が解決済みになっている。
 - [ ] AC-6: `RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh` green。
@@ -99,6 +102,8 @@ skill の呼び出しと文書とテストの変更だけ。問題があれば r
 
 ## Deviation notes
 
+- 2026-10-03 plan: Codex plan advisory(gpt-6-astra、xhigh、watchdog の 1 行、`codex rc=0`、`-o` 1511 バイト)は HIGH 1: `sandbox_mode` だけを上書きしても、利用者や trust 済みの project の execpolicy の `.rules` の `decision = "allow"` に一致したコマンドは、承認なしで sandbox の外で動く。AC-3 の header と出力の確認ではこの経路を検出できない。orchestrator が `codex exec --help` と `codex exec review --help` に `--ignore-rules` があることを確認した。ユーザー決定: `/plan` の advisory も含めて更新。両方の呼び出しに `--ignore-rules` を足し、テストで固定し、一時的な project の `.rules` で回り込みの再現と遮断を確かめる AC-3b を足した
+
 ## Progress checklist
 
 - [x] Plan reviewed
@@ -113,4 +118,4 @@ skill の呼び出しと文書とテストの変更だけ。問題があれば r
 
 - [x] 4 面 8 か所の呼び出しと、それを固定しているテストを特定した
 - [x] critical fork なし
-- [ ] Codex plan advisory
+- [x] Codex plan advisory(HIGH 1、`/plan` の advisory も含めて plan を更新)
