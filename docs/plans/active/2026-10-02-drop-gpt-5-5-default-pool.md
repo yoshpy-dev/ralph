@@ -1,6 +1,6 @@
 # drop-gpt-5-5-default-pool
 
-- Status: Draft
+- Status: PR created (#196), awaiting CI and merge
 - Owner: Claude Code
 - Date: 2026-10-02
 - Related request: メンテナの指示(2026-10-02)「#156 model_pool については、gpt-5.5 を既定から外してください」。#156 の観測では、2 回目(2026-09-25)に `gpt-5.5` へ退役予告(移行先 `gpt-5.6-sol`、2026-10-14)が付き、3 回目(2026-10-02)には予告が消えて説明が "Legacy coding model." のままだった
@@ -65,13 +65,13 @@
 
 ## Acceptance criteria
 
-- [ ] AC-1: `config.Default()` の `Org.ModelPool` が、claude 4 つ + codex 4 つの 8 エントリで、`gpt-5.5` を含まない(テストあり)。
-- [ ] AC-2: `templates/base/ralph.toml` と `scripts/ralph-config.sh`(+ template)の既定も同じ 8 エントリで、`defaults_sync_test.go` が green、root と template の `ralph-config.sh` が byte 一致。
-- [ ] AC-3: org skill の「既定の model_pool」表(4 面)に `gpt-5.5` の行がなく、`./scripts/check-skill-sync.sh` と `./scripts/check-sync.sh` が green。
-- [ ] AC-4: `git grep -n 'gpt-5\.5'` の結果に、既定のプールとしての記述が残っていない(残るのは履歴、spec の運用ノートの記録、既定と関係ない fixture、`.codex/config.toml` だけ)。残った箇所の分類を verify report に書く。
-- [ ] AC-5: 作業 branch の HEAD のビルドで、`model_pool` を書かない(既定のプールを使う)scratch の project と、残す 4 つの codex スラッグだけを入れた固定の cache(`CODEX_HOME` を scratch に向ける)を使い、`ralph doctor` の「Org codex model slugs」が pass で `4 codex model_pool slug(s)` を出す。利用者の実際の cache での確認は補足として report に書くだけで、合否には使わない(Codex plan advisory の MEDIUM)。
-- [ ] AC-7: org skill の「既定の model_pool」節(4 面)に移行と復旧の段落があり、`internal/cli` の回帰テストで、`model_pool` を省略して `[org.roles]` で `gpt-5.5` を指定した設定では `ralph org status` がモデル名を挙げて失敗し、直した設定を `--config` で渡すと同じ state dir の座席を表示することを確かめる。
-- [ ] AC-6: `RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh` と `go test ./... -count=1` が green。
+- [x] AC-1: `config.Default()` の `Org.ModelPool` が、claude 4 つ + codex 4 つの 8 エントリで、`gpt-5.5` を含まない(テストあり)。
+- [x] AC-2: `templates/base/ralph.toml` と `scripts/ralph-config.sh`(+ template)の既定も同じ 8 エントリで、`defaults_sync_test.go` が green、root と template の `ralph-config.sh` が byte 一致。
+- [x] AC-3: org skill の「既定の model_pool」表(4 面)に `gpt-5.5` の行がなく、`./scripts/check-skill-sync.sh` と `./scripts/check-sync.sh` が green。
+- [x] AC-4: `git grep -n 'gpt-5\.5'` の結果に、既定のプールとしての記述が残っていない(残るのは履歴、spec の運用ノートの記録、既定と関係ない fixture、`.codex/config.toml` だけ)。残った箇所の分類を verify report に書く。
+- [x] AC-5: 作業 branch の HEAD のビルドで、`model_pool` を書かない(既定のプールを使う)scratch の project と、残す 4 つの codex スラッグだけを入れた固定の cache(`CODEX_HOME` を scratch に向ける)を使い、`ralph doctor` の「Org codex model slugs」が pass で `4 codex model_pool slug(s)` を出す。利用者の実際の cache での確認は補足として report に書くだけで、合否には使わない(Codex plan advisory の MEDIUM)。
+- [x] AC-7: org skill の「既定の model_pool」節(4 面)に移行と復旧の段落があり、`internal/cli` の回帰テストで、`model_pool` を省略して `[org.roles]` で `gpt-5.5` を指定した設定では `ralph org status` がモデル名を挙げて失敗し、直した設定を `--config` で渡すと同じ state dir の座席を表示することを確かめる。
+- [x] AC-6: `RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh` と `go test ./... -count=1` が green。
 
 ## Implementation outline
 
@@ -130,7 +130,7 @@
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
-- [ ] PR created
+- [x] PR created (#196)
 
 ## Readiness checklist
 
