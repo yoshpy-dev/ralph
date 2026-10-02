@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	toml "github.com/pelletier/go-toml/v2"
 )
 
 func TestBaseFS_WithMockFS(t *testing.T) {
@@ -228,6 +230,58 @@ func TestTemplateBaseCodexAssetsExist(t *testing.T) {
 		if _, err := os.Stat(path); err != nil {
 			t.Errorf("required template missing: templates/base/%s (%v)", rel, err)
 		}
+	}
+}
+
+// TestTemplateBaseCodexTomlFilesParse guards the content of the Codex TOML
+// files that `ralph init` ships, which TestTemplateBaseCodexAssetsExist only
+// checks for presence: a syntax error in the template config or a custom agent
+// would otherwise reach a scaffolded project and surface only in
+// `ralph doctor`. The config must also keep a top-level `model` key. The
+// literal slug is deliberately not pinned, because it changes whenever the
+// model is retired. The meta-repo root copies under .codex/ are not parsed
+// here: scripts/check-sync.sh keeps the config and agents byte-identical to
+// the template.
+func TestTemplateBaseCodexTomlFilesParse(t *testing.T) {
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("cannot determine test file location")
+	}
+	repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..")
+	codexDir := filepath.Join(repoRoot, "templates", "base", ".codex")
+
+	agents, err := filepath.Glob(filepath.Join(codexDir, "agents", "*.toml"))
+	if err != nil {
+		t.Fatalf("glob templates/base/.codex/agents/*.toml: %v", err)
+	}
+	if len(agents) == 0 {
+		t.Fatal("no templates/base/.codex/agents/*.toml found; the glob would pass vacuously")
+	}
+	paths := append([]string{filepath.Join(codexDir, "config.toml")}, agents...)
+
+	parsed := map[string]map[string]any{}
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Errorf("read %s: %v", path, err)
+			continue
+		}
+		var doc map[string]any
+		if err := toml.Unmarshal(data, &doc); err != nil {
+			t.Errorf("%s is not valid TOML: %v", path, err)
+			continue
+		}
+		parsed[path] = doc
+	}
+
+	configPath := paths[0]
+	doc, ok := parsed[configPath]
+	if !ok {
+		return // already reported above
+	}
+	model, ok := doc["model"].(string)
+	if !ok || strings.TrimSpace(model) == "" {
+		t.Errorf("%s: top-level `model` must be a non-empty string, got %#v", configPath, doc["model"])
 	}
 }
 
