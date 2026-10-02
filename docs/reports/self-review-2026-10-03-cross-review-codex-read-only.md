@@ -88,3 +88,75 @@ _(この行は report の中だけにある。この phase では report と ins
 
 - Merge: 可。CRITICAL と HIGH はない。M-1 と M-2 は merge を止めないが、直す費用が小さいので、cross-review の結果と合わせて PR の前に直すことを勧める
 - Follow-ups: (1) M-1 の禁止の一覧に `--yolo` と `--approve-for-me` を足すか、許可の一覧の形にする。test report に 2 つの変異を記録する。(2) M-2 の文の範囲を 4 面と recipe で絞り、上の tech-debt の行を `docs/tech-debt/README.md` に足す(sync-docs)。(3) L-1 の設定のコメントを直すか、(2) の行に含める。(4) L-2 の解決のコメントに archive 後の plan とこの report のパスを書く
+
+## Cycle 1 addendum (Slice B)
+
+- Date: 2026-10-03
+- Scope: `git diff 3c11bf74..HEAD -- tests .claude .agents templates docs/recipes docs/tech-debt .codex`(Slice B、ac6300ad。HEAD c182febd)。上の M-1、M-2、L-1、L-2 の直し方、`check_sandbox_tokens` の読み方、新しい文と tech-debt の行の正確さを見た
+
+### Evidence reviewed
+
+- 4 面の写しは `.claude/` と一致する(cross-review の frontmatter の `allowed-tools` 行だけが既知の差)。`.codex/config.toml` と recipe は root と template が一致。`.codex/config.toml` で変わったのはコメントの行だけで、`tomllib` で 2 つとも読める
+- 呼び出しの行(cross-review の `:58`、`:167`、plan の `:71`)は Slice B で変わっていない
+- `tests/test-codex-exec-invocation.sh:85-177`(`is_widening_word`、`check_sandbox_tokens`)の全文
+- 新しい tech-debt の行(`docs/tech-debt/README.md:149`)。区切りの `|` は 6 個で、表の列の数と合う
+
+### probe と変異
+
+probe の環境は上と同じ(scratch の repo、偽の `HOME` / `CODEX_HOME`、認証なし、header まで)。変異は、テストとその入力を scratch に写し、`.claude/skills/<skill>/SKILL.md` に 1 つだけ置換を入れて `sh` で実行した。
+
+| # | 実行 | 結果 |
+| --- | --- | --- |
+| S1 | ユーザー設定に `[mcp_servers.probe]`(scratch のファイルへの `touch`)、`/plan` の形(`exec --sandbox read-only --ignore-rules …`) | ファイルができた。advisory の session でも MCP server が起動する |
+| S2 / S10 | `-c sandbox_mode=read-only -c 'sandbox_mode = "danger-full-access"' exec review …`(0.154.0 / 0.159.2) | どちらも `sandbox: danger-full-access`。空白を挟んだ `-c` も受け付けられ、前の read-only に勝つ |
+| S12 / S13 | `--yolo` を `-o <file>` の後ろ、または root に置いた | どちらも `sandbox: danger-full-access` |
+| S6 / S7 | `-c approval_policy=on-request` で `exec` / `exec review` | どちらも `approval: never` |
+| S3 / S8 / S9 | `approval_policy = "untrusted"` を `-c` で渡す、または project の設定に書く(0.154.0、0.159.2) | どれも `Error: approval_policy = "untrusted" is no longer supported; remove this setting` で終わる(rc 1) |
+| S11 / S5 | root に `-aon-request`、`-pwide` | どちらも `approval: never`、`sandbox: read-only`。今の版では広がらない |
+| m0 | 変更なし | 132 / 132 |
+| m6、m15、m16 | `--yolo` を `exec review` の後ろ、`--approve-for-me` を root、`--yolo` を `/plan` の行に足した | それぞれ 2 件、2 件、1 件落ちる(上の M-1 は直っている) |
+| m4、m5、m7、m8、m10、m17 | `--sandbox=danger-full-access`、`-c sandbox_mode='"danger-full-access"'`、`-c "approval_policy=on-request"`、read-only の指定を消す、`--config sandbox_mode=danger-full-access`、`/plan` から `--sandbox read-only` を消す | どれも落ちる |
+| m12、m13 | `-c 'sandbox_mode="read-only"'`、`/plan` の `--sandbox read-only` を `-s read-only` に | どちらも 132 / 132(正しい書き方を受け付ける) |
+| m2 | `-c 'sandbox_mode = "danger-full-access"'` を cross-review の行の `exec` の前に足した | 132 / 132 |
+| m1 | `--yolo` を `:58` の `</dev/null` と `>` の間に足した | 132 / 132 |
+| m3 | `:58` の行末に `; command codex --yolo exec review --base main </dev/null` を足した | 132 / 132 |
+| m9、m14 | root に `-pwide`、`-aon-request` を足した | どちらも 132 / 132(S5、S11 のとおり、今の版では広がらない) |
+
+probe の前後で、worktree、main のチェックアウト、scratch の repo の `git status --porcelain` は空のまま。
+
+### Findings
+
+| # | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| B-1 | MEDIUM | テスト(新しい検査の取りこぼし) | `check_sandbox_tokens` には、codex には届くのに検査が読まない書き方が 3 つある。(1) `-c 'sandbox_mode = "danger-full-access"'` は shell では 1 語だが、検査は空白で `sandbox_mode`、`=`、`danger-full-access` に分けるので、`*sandbox_mode=*`(`:152`)に当たらない。codex は 2 つの版とも、この書き方を受け付けて前の read-only に勝たせる(S2、S10)。TOML の `key = value` の書き方のままなので、写し間違いで入りうる。(2) `:133` が最初の `</dev/null` で切るが、shell は redirect の後ろの語も codex に渡す。`</dev/null` と `>` の間の `--yolo` は読まれずに効く(S12)。(3) 同じ行の 2 つ目の `command codex` は読まれない。どれも変異で 132 / 132 のまま(m2、m1、m3)。上の M-1 と同じ種類の取りこぼしが、書き直した検査に残っている | S2、S10、S12、m1〜m3、`tests/test-codex-exec-invocation.sh:132-133`、`:140`、`:152` | (1) 語に分ける前に `=` の前後の空白を詰める(例: `sed 's/[[:space:]]*=[[:space:]]*/=/g'`)。または `sandbox_mode` を含む語が `sandbox_mode=read-only` と完全に一致しなければ落とす。一覧の `-c` のキー(`approval_policy` など)も同じ扱いになる。(2)(3) コマンドの終わりを `</dev/null` ではなく、最初の `&`、`;`、`\|`、閉じの backtick にして、redirect の語(`</dev/null`、`>…`、`2>&1`)は飛ばす。行の中の `command codex ` ごとに検査する。test report に m1〜m3 を変異として記録する |
+| B-2 | LOW | 文の正確さ(下流に届く) | 4 面の新しい文(cross-review の `:60`、plan の `:73`)と recipe(`docs/recipes/codex-setup.md:93-95`)は、read-only の sandbox が「書き込みとネットワークを止める」と書く。ネットワークの根拠は R13 だけで、R13 は組み込みの `:read-only` の profile を使い、`-c sandbox_mode=read-only` と同じ制限かは未確認だと書いた。codex 0.154.0 の binary には `read-only (network access enabled)` という表示と、「`sandbox_mode` is `read-only` … Network access is {{ network_access }}」という文があるので、ネットワークを止めるのは read-only の既定であって、read-only の性質そのものではない | R13、上の Known gaps、codex 0.154.0 の binary の文字列 | 「書き込みを止め、既定ではネットワークも止める」に直す。header が `sandbox: read-only` のまま `(network access enabled)` が付かないことで確かめられる、と添えてもよい |
+| B-3 | LOW | 文の正確さ(配る設定のコメント) | `.codex/config.toml:20-23` は「ralph's own `codex exec` calls (/plan's advisory, /cross-review's reviewer) pass a read-only sandbox explicitly」と書く。`ralph doctor --probe-models` も `codex exec --model <m> --skip-git-repo-check ping` を動かす(`internal/org/driver/probe.go:26`)が、sandbox を指定しない。trust 済みの project では `danger-full-access` を引き継ぐ。prompt は固定の `ping` なので、差分に紛れた指示を読む経路はなく、危険は小さい。ただ、括弧の中は ralph の呼び出しを全部挙げたように読める | `internal/org/driver/probe.go:26`、`.codex/config.toml:20-23` | 「ralph's skills' `codex exec` calls」に絞る。probe にも `--sandbox read-only` を渡すかは別の判断なので、必要なら tech-debt に 1 行残す |
+| B-4 | LOW | 配る設定のコメント(前からある) | `.codex/config.toml:30` の `# - "untrusted" : every tool call needs approval` は、0.154.0 と 0.159.2 が受け付けない値を選択肢として挙げている。project の設定に書くと、project の codex の呼び出しがすべて rc 1 で終わる(S8、S9)。Slice B はこの一覧の見出し(`:26-27`)と `:29` を書き直したので、一覧は手入れ済みに見える。`:21-22` の「whatever approval_policy says」も、`untrusted` については「エラーで止まる」が正しい | S3、S8、S9、`.codex/config.toml:26-31` | `:30` を消すか「codex-cli 0.154.0 以降は受け付けない」と書く(root と template)。この PR で直さないなら tech-debt の行に入れる |
+
+CRITICAL と HIGH はない。
+
+### 上の指摘の扱い
+
+- M-1: 直っている。`--yolo`(どの位置でも)と root の `--approve-for-me` は落ちる(m6、m15、m16)。許可の一覧の形ではなく禁止の一覧を広げた形だが、選んでいる sandbox の値をすべて検査するようになったので、`danger-full-access` の文字列の有無よりも強い。取りこぼしは B-1 の 3 つ
+- M-2: 直っている。文は「実行するコマンド」に絞られ、MCP と repo の外の読み取りが範囲の外だと書いてある。tech-debt の行も足された。ネットワークの言い方は B-2
+- L-1: 直っている。対話の session と `codex exec` を分けて書いた。B-3 と B-4 は同じ箇所の別の問題
+- L-2: 直っている。解決のコメントと Related の列に、archive 後の plan とこの report のパスがある
+
+### 依頼された観点への回答
+
+- 他の書き方: `--sandbox=<v>`、`-s<v>`、`-c sandbox_mode='"<v>"'`、`--config sandbox_mode=<v>` は正しく読む(m4、m5、m10、m12、m13)。読まないのは B-1 の 3 つ
+- 誤って落とすもの: claude の列は `</dev/null` で切るので読まない。説明の文は呼び出しの行に入らない。`/plan` の行では prompt の文も語に分けて読むので、prompt に `-p`、`-a`、`--profile` や `-s` で始まる語を足すと落ちる。落ちる向きなので害は小さいが、prompt を直す人には意外になる
+- 将来使いたい option を落とすか: `-p` / `--profile` は、reviewer 用の profile を使う変更が来れば落ちる。R7 のとおり `-p` は `-c sandbox_mode` に勝たないので、今は理由のある制限というより用心で入っている。`-c default_permissions=":read-only"` も、値は read-only なのに落ちる。codex が `sandbox_mode` から permission profile に移ったとき、この一覧を直す必要がある。どちらもコメントに理由があるので、指摘にはしない。`-p<v>` と `-a<v>` のように値を続けた短い形は一覧に当たらないが、今の版では広がらない(S5、S11)
+- 新しい文の正確さ: MCP server が reviewer と advisory の両方で起動し、server のプロセスが sandbox の外で動くことは R12 と S1 で確かめた。tool を model が承認なしで呼べるかには、どの文も触れていない。ネットワークは B-2、config のコメントは B-3、B-4
+- tech-debt の行: (a) は「whether the model can call them under `approval: never` is unverified」と書いていて、言い過ぎていない。advisory の session でも起動することは S1 で確かめた。`-c 'mcp_servers={}'` が効かないこと、`enabled=false` と `--ignore-user-config` が効くこと(R12)も記録どおり。(b) の「any file the user can」は R13 の 1 ファイルからの一般化で、seatbelt の read-only がディスク全体の読み取りを許すことは確かめていない。Impact の「could see the reviewer act through it」は条件つきの言い方で、(a) の未確認と矛盾しない
+
+### Known gaps
+
+- 対話の session で `approval_policy = "on-request"` と `danger-full-access` の組が破壊的なコマンドを止めるか(`.codex/config.toml:20-21`)は、認証のない probe では確かめられない。codex の on-request は model が求めたときに承認を挟む仕組みなので、止めるとは言い切れないかもしれない。この文は Slice B の前から同じ主張だった
+- S2 と S12 は header だけを見ている。実際にコマンドが sandbox の外で動くかは確かめていない
+- m18(`/plan` の行の `exec` の前に `-c 'sandbox_mode = "workspace-write"'`)も 132 / 132 だったが、`/plan` は `--sandbox read-only` の flag を渡しているので、codex 側で広がるかは確かめていない。B-1 の (1) は cross-review の行(`-c` だけで選ぶ)で起きる
+
+### Recommendation
+
+- Merge: 可。CRITICAL と HIGH はない。B-1 は、いま skill に書かれている呼び出しの形が安全でないという意味ではない。将来の改変を検査が見逃しうるという回帰の検査の穴で、merge は止めない。上の M-1 と同じ種類なので、PR の前に直すか、test report に変異として残すことを勧める
+- Follow-ups: (1) B-1 の 3 つを検査に足し、m1〜m3 を変異として記録する。(2) B-2 の「既定では」を 4 面と recipe に足す。(3) B-3 の括弧を skill の呼び出しに絞る。(4) B-4 の `untrusted` の行を消すか注記する(root と template)
