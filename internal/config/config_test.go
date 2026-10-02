@@ -129,19 +129,20 @@ func TestDefault_Org(t *testing.T) {
 		{Driver: "codex", Model: "gpt-5.6-terra"},
 		{Driver: "codex", Model: "gpt-5.6-luna"},
 	}
+	// gpt-5.5 was dropped from the default on 2026-10-02 (#156). This check
+	// runs before the length check below, which t.Fatalf's on a mismatch, so a
+	// regression that re-adds it fails here by name as well.
+	for _, e := range o.ModelPool {
+		if e.Model == "gpt-5.5" {
+			t.Errorf("model_pool contains dropped default %+v, want it absent", e)
+		}
+	}
 	if len(o.ModelPool) != len(wantModelPool) {
 		t.Fatalf("model_pool = %+v, want %+v", o.ModelPool, wantModelPool)
 	}
 	for i, e := range wantModelPool {
 		if o.ModelPool[i] != e {
 			t.Errorf("model_pool[%d] = %+v, want %+v", i, o.ModelPool[i], e)
-		}
-	}
-	// gpt-5.5 was dropped from the default on 2026-10-02 (#156); a regression
-	// that re-adds it must fail here by name, not only via the length check.
-	for _, e := range o.ModelPool {
-		if e.Model == "gpt-5.5" {
-			t.Errorf("model_pool contains retired default %+v, want it absent", e)
 		}
 	}
 	if len(o.Roles) != 0 {
@@ -840,14 +841,13 @@ reviewer = ["gpt-5.5"]
 	}
 }
 
-// TestLoad_OmittedModelPoolWithRolesNamingDroppedDefault_Errors verifies the
-// fail-closed consequence of dropping gpt-5.5 from the default model_pool
-// (#156): a ralph.toml that omits model_pool (and driver_pool) but names
-// gpt-5.5 under [org.roles] now fails validation against the 8-entry default
-// pool, and the error carries the exact role/model wording the org skill's
-// recovery paragraph quotes. Setting model_pool explicitly with gpt-5.5
-// restores a loadable config.
-func TestLoad_OmittedModelPoolWithRolesNamingDroppedDefault_Errors(t *testing.T) {
+// TestLoad_OmittedModelPoolWithRolesNamingDroppedDefault_ErrorsUntilModelPoolIsExplicit
+// verifies the fail-closed consequence of dropping gpt-5.5 from the default
+// model_pool (#156): a ralph.toml that omits model_pool (and driver_pool) but
+// names gpt-5.5 under [org.roles] fails validation against the 8-entry default
+// pool, with the role/model wording the org skill's recovery paragraph quotes;
+// the same roles with an explicit model_pool that lists gpt-5.5 load cleanly.
+func TestLoad_OmittedModelPoolWithRolesNamingDroppedDefault_ErrorsUntilModelPoolIsExplicit(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "ralph.toml")
 	content := `[org.roles]

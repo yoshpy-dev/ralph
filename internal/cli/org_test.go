@@ -893,9 +893,10 @@ func TestOrgStatus_JSON(t *testing.T) {
 // A project ralph.toml that omits model_pool but restricts a role to gpt-5.5
 // no longer validates against the default pool, and every ralph org verb --
 // status included -- reads that config, so the verb stops with an error that
-// names the model. The state dir is chosen by --state-dir (not by where the
-// config lives), so a corrected copy passed via --config reaches the same
-// manifest and lists the seat that was spawned before the upgrade.
+// names the model. The state dir is chosen by --state-dir or
+// RALPH_ORG_STATE_DIR (not by where the config lives), so a corrected copy
+// passed via --config reaches the same manifest and lists the seat that was
+// spawned before the upgrade.
 func TestOrgStatus_ConfigFlagRecoversAfterDefaultPoolDropsRoleModel(t *testing.T) {
 	t.Setenv("PATH", "")
 	stateDir := t.TempDir()
@@ -956,6 +957,33 @@ func TestOrgStatus_ConfigFlagRecoversAfterDefaultPoolDropsRoleModel(t *testing.T
 			}
 		})
 	}
+
+	// Without --state-dir the state dir comes from RALPH_ORG_STATE_DIR, a
+	// resolution step that does not look at the config's location either.
+	// (The git-toplevel step needs a git binary, which PATH="" hides.)
+	t.Run("state dir from RALPH_ORG_STATE_DIR without --state-dir", func(t *testing.T) {
+		t.Setenv(org.EnvOrgStateDir, stateDir)
+
+		out, err := runOrgCmd(t, "status", "--org-id", "org-a")
+		if err == nil {
+			t.Fatalf("expected status to fail on the broken cwd ralph.toml, output: %s", out)
+		}
+		if !strings.Contains(err.Error(), wantErr) {
+			t.Errorf("expected error to contain %q, got: %v", wantErr, err)
+		}
+
+		fixedPath := filepath.Join(t.TempDir(), "ralph.fixed.toml")
+		if err := os.WriteFile(fixedPath, []byte("[org]\nmax_seats = 5\n"), 0o644); err != nil {
+			t.Fatalf("write fixed config: %v", err)
+		}
+		out, err = runOrgCmd(t, "status", "--org-id", "org-a", "--config", fixedPath)
+		if err != nil {
+			t.Fatalf("status with corrected --config and RALPH_ORG_STATE_DIR failed: %v (output: %s)", err, out)
+		}
+		if !strings.Contains(out, "seat-1") || !strings.Contains(out, "spawned") {
+			t.Errorf("expected seat-1 (spawned) from the env-resolved state dir, got: %s", out)
+		}
+	})
 }
 
 func TestOrgCmd_RequiresOrgID(t *testing.T) {

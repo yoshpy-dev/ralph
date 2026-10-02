@@ -112,17 +112,18 @@ seed advisory diff で確認できる。`model_pool` を書かず `driver_pool` 
 で実効プールは変えないが、今入っているバイナリのテンプレートしか適用しない
 ので、バイナリ更新の前に実行しても新しい既定は届かない。
 
-2026-10-02 に `gpt-5.5` を既定から外した(退役予告と "Legacy" の表示が付い
-たため)。`model_pool` を書かず `[org.roles]` で `gpt-5.5` を指定している
-project は、バイナリを更新すると `ralph.toml` の検証が通らなくなる。`ralph
-org` の動詞はどれも設定を読むので、動いている座席への `status` / `stop` /
-`disband` も止まる。移行(バイナリを更新する前): `[org].model_pool` を明示
-して `gpt-5.5` を含めるか、role から `gpt-5.5` を外す。復旧(更新した後に動
-詞が `[org.roles].<role> references model "gpt-5.5" not present in
-[org].model_pool` で止まった場合): `ralph.toml` に同じ修正を入れるか、直し
-たコピーを `--config <path>` で渡す。state dir は設定ファイルの場所では変わ
-らず(`--state-dir`、`RALPH_ORG_STATE_DIR`、git の toplevel の順で決まる)、
-`ralph org status` / `stop` はそのまま同じ座席を扱える。
+`[org.roles]` に書いたモデルは、実効の `[org].model_pool`(`model_pool` を
+省略したときは既定のプール)に入っている必要がある。入っていないと
+`ralph.toml` の検証が `[org.roles].<role> references model "<model>" not
+present in [org].model_pool` で通らない。`ralph org` の動詞はどれも設定
+(`--config`、省略時は cwd の `./ralph.toml`)を読むので、動いている座席への
+`status` / `stop` / `disband` も止まる。`spawn --model <model>` も、そのモデ
+ルが driver の `[org].model_pool` になければ `org: model "<model>" not in
+[org].model_pool for driver "<driver>"` で拒否される。直すには、
+`[org].model_pool` を明示してそのモデルを含めるか、role から外す。`ralph.toml`
+を直すか、直したコピーを `--config <path>` で渡す。state dir は設定ファイル
+の場所では変わらず(`--state-dir`、`RALPH_ORG_STATE_DIR`、git の toplevel、
+cwd の順で決まる)、`ralph org status` / `stop` はそのまま同じ座席を扱える。
 
 ## 動詞リファレンス
 
