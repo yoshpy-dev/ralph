@@ -119,3 +119,55 @@ No test failed in any run. No flake observed (the known doctor/watcher timing te
 - Fail: none.
 - Blocked: none.
 - Open item: G-1 is a real hole in a security guard and a realistic edit. Recommend one "no `-c` after `exec`" assertion in this cycle (the `late-c-*` mutants are its red/green script); G-2 to G-6 can be recorded as known gaps. Tests do not block `/pr`.
+
+## Cycle 1 addendum (Slice D)
+
+- Date: 2026-10-03
+- Scope: delta pass on Slice D, commit `2d385bc3` (test-only, `tests/test-codex-exec-invocation.sh` +42/-5). It adds check (iv) to `check_sandbox_tokens`: an invocation must contain the word `exec`, and nothing after the first `exec` may be `-c`, `-c<v>`, `--config`, `--config=<v>`, `--enable`, `--disable` (or their values) or any `sandbox_mode=` word, so `/cross-review`'s `-c sandbox_mode=read-only` has to be a root option and `/plan`'s `exec --sandbox read-only` flag still passes. The skill invocation lines did not change since the cycle-1 run, so real codex was not re-run. The report body above records HEAD `85208137`, which is accurate for the cycle-1 run; this pass was run against `2d385bc3` (the worktree HEAD is `2a31ea9f` = `2d385bc3` + this report).
+- Method: fresh `git archive 2d385bc3` mirror in scratch (checksum unchanged at the end; its test, skills and `ralph-config.sh` are `cmp`-identical to the worktree). The cycle-1 mutation harness plus 19 new mutations for check (iv) were built for both the old tree (`85208137`) and the new tree and run on both: 112 distinct mutations, 280 mutants, under sh and dash on macOS, and under sh, dash and bash in `ubuntu:24.04` (mawk 1.3.4) for the new tree.
+
+### Test execution
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `sh tests/test-codex-exec-invocation.sh` x3 | 144 each (132 + 12: one new assertion per invocation line) | 144 | 0 | 0 | outputs byte-identical |
+| `dash tests/test-codex-exec-invocation.sh` x3 | 144 each | 144 | 0 | 0 | byte-identical to `sh` |
+| ubuntu:24.04 (mawk) `sh`, `dash`, `bash`, 3 runs each | 144 each | 144 | 0 | 0 | 9 of 9 runs exit 0 |
+| `RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh` (foreground) | 32 shell files (1280 `PASS:` lines, no `FAIL` other than `FAIL: 0`) + 8 Go packages | all | 0 | 0 | 4m17s wall, exit 0, `All verifiers passed.` |
+
+### Delta mutation result
+
+| | cycle-1 tree `85208137` | Slice D tree `2d385bc3` |
+| --- | --- | --- |
+| mutants caught (280 total) | 104 | 162 |
+| baseline | 132/132 | 144/144 |
+
+- Regressions (caught before, survives now): 0. Every mutation caught at `85208137` is still caught; 39 of them now also trip the new assertion in addition to the original one.
+- Newly caught: 58 mutants. Run on mawk the 280 mutants give the same outcome, the same failing assertion names and the same counts as macOS (BSD awk), and the same across sh, dash and bash (162 caught / 118 survived). sh and dash agree on macOS.
+- G-1 is caught at every site (P, S, T; exit 1, assertion "-c after exec would drop the root -c sandbox_mode"): `ctl-harmless-extra-c` (`-c foo=bar`), `late-c-after-ignore`, `late-c-after-base`, `late-c-between-exec-review`, `late-c-after-exec-plan`, `late-c-plan-after-exec`, `late-c-plan-after-prompt`, `late-c-plan-after-ignore`, `late-c-after-devnull`, `--config <kv>`, `--config=<kv>`, glued `-c<kv>`, `-c` with a TOML-quoted value, `--enable`, `--disable`, `--enable=<f>`, a bare `sandbox_mode=` word after `exec`.
+- Also caught now as a side effect (all had a `-c` or `sandbox_mode=` after `exec`): post-`exec` `-c SANDBOX_MODE=...` / `Sandbox_Mode=...`, `${K:-sandbox_mode}` in the key, `-c ignore_rules=false`, `-c mcp_servers.*`, `-c notify=[...]`, `--enable foo`, and `comment-hides-sandbox` (the `# -c sandbox_mode=read-only` text now counts as a word after `exec`).
+- Controls still green: `root-benign-c`, `root-two-c-after` (two extra `-c` before `exec`), `root-enable-before` (`--enable` before `exec`), `ctl-baseline`, `ctl-spaced-readonly`.
+- `move-ro-after-exec` (the read-only `-c` itself moved after `exec`) is caught although codex honors that spelling (probe q03 in the body above): the rule intentionally demands a root option.
+- `fake-exec-before` (a dummy `exec` word placed before the real one) is caught, because the root `-c` options then sit after the first `exec` word. Stricter, not a hole.
+- `alias-e-only` (`e review` instead of `exec review`) is caught by the invocation-count check (found 1, expected 2).
+
+### Survivors at `2d385bc3` (43 distinct mutations; none mixed across sites)
+
+| Class | Mutations | codex 0.154.0 | Status |
+| --- | --- | --- | --- |
+| Controls and equivalents (8) | `ctl-baseline`, `ctl-spaced-readonly`, `root-benign-c`, `root-two-c-after`, `root-enable-before`, quoted `'--ignore-rules'`, `--strict-config`, `--ignore-user-config` | n/a | expected green |
+| Not honored (13) | `--yol`, `--dangerously-bypass-approvals` (also at root), `--cd /`, `--ignore-rules=false`, `--no-ignore-rules`, root-level `-c SANDBOX_MODE=` / `Sandbox_Mode=` / `ignore_rules=false`, `CODEX_HOME` (missing dir), `CODEX_PERMISSION_PROFILE`, `CODEX_SANDBOX`, `CODEX_EXEC_SERVER_URL` prefixes | rejected or no effect (cycle-1 probes) | no action |
+| G-2 continuation line after `</dev/null` (2) | `cont-after-devnull`, `cont-after-devnull-yolo` at S and P | `--yolo`: honored | known gap |
+| G-3 second invocation not shaped `command codex ...` (10) | subshell with and without a space, brace group, bare `codex`, absolute path, `env codex`, `sh -c`, `eval`, `time`, `if` | honored | known gap |
+| G-4 `#` comment hides `--ignore-rules` (1) | `comment-hides-flags` at P and S | honored; breaks the line visibly | known gap |
+| G-5 shell expansion producing an option (6) | `$(...)`, backtick, `${Y:---yolo}`, brace expansion, `$'..'`, glob (glob is not effective in zsh or for codex) | honored once expanded | known gap |
+| G-6 program started by a root-level `-c` (1) | `root-mcp-server` (`-c mcp_servers.x.command=touch ...` before `exec`) | honored (cycle-1 marker probe), header stays `read-only` | known gap, tech-debt (a) |
+| G-7 new: the `e` alias of `exec` (2 names) | `alias-e-late-c` at S and `alias-e-late-c-t` at T: `e review ... -c model_verbosity=low --title exec` | `codex ... e review` is accepted (probe: header `read-only`). Real mutated Step 4 line, no auth, scratch HOME: `sandbox: danger-full-access`, `reasoning effort: none`. Stub argv under bash and zsh confirms the shell passes it as written | see below |
+
+G-7: check (iv) anchors on the exact word `exec`. codex 0.154.0 accepts `e` as the subcommand alias, and a late `-c` is only flagged when it comes after an `exec` word. The mutation needs two deliberate edits: the alias, plus a dummy `exec` word placed after the late `-c` (so the invocation-line detector still finds the line; `e` alone is caught by the count check, see `alias-e-only`). Severity LOW (adversarial). A one-line hardening would treat `e` like `exec` when setting the anchor.
+
+### Verdict (addendum)
+
+- Pass: yes. Slice D closes G-1: every `-c` / `--config` / `--enable` / `--disable` / `sandbox_mode=` placement after `exec` is now caught at all sites, nothing that was caught before is lost (0 regressions in 280 mutants), the new assertion adds 12 checks (144/144) and the full-scope run is green. Results are identical on BSD awk and mawk and across sh, dash and bash.
+- Fail: none. Blocked: none.
+- Known gaps that remain (not blocking `/pr`): G-2 to G-6 as in the body, and new G-7 (`e` alias, LOW). Finding counts for this addendum: LOW 1 (G-7).
