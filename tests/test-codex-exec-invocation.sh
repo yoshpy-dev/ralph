@@ -27,6 +27,18 @@
 # `command codex` on a line, read the way the shell splits it into
 # arguments (see CODEX_ARGS_AWK).
 #
+# One more rule comes from codex itself. On codex-cli 0.154.0 (seen in a
+# real run during #197's /test), a -c / --config placed after the `exec`
+# subcommand (between `exec` and `review`, after `review`, or after the
+# prompt) makes codex drop every -c given before `exec`, including
+# -c sandbox_mode=read-only and the effort -c, even when the later -c is
+# unrelated (e.g. -c model_verbosity=low); the review then ran with
+# `sandbox: danger-full-access`. So nothing after `exec` may be a -c /
+# --config, or a --enable / --disable, which the help describes as
+# -c features.<name>=... (treated the same, not run-confirmed). That keeps
+# /cross-review's -c sandbox_mode=read-only a root option before `exec`.
+# /plan's `exec --sandbox read-only` is a flag, not a -c, and stays valid.
+#
 # This test checks that shape holds across all four skill-body faces
 # (.claude/skills, .agents/skills, templates/base/.claude/skills,
 # templates/base/.agents/skills) and that the documented fallback values
@@ -195,18 +207,23 @@ function end_command(   i, start, t) {
 # and checks each one separately: (i) it selects a sandbox and every
 # selection (`--sandbox <v>`, `--sandbox=<v>`, `-s <v>`, `-s<v>`, or
 # `sandbox_mode=<v>`) has v = read-only, (ii) no argument is an option that
-# is_widening_word lists, and (iii) it passes `--ignore-rules`. The second
-# and later invocations on a line are labelled "[codex #N]".
+# is_widening_word lists, (iii) it passes `--ignore-rules`, and (iv) it
+# has the `exec` subcommand and nothing after `exec` is a -c / --config /
+# --enable / --disable or a `sandbox_mode=` word (see the header: such a
+# -c makes codex drop the root -c sandbox_mode). The second and later
+# invocations on a line are labelled "[codex #N]".
 check_sandbox_tokens() {
   _sb_label="$1"
   _sb_args="$(printf '%s\n' "$2" | awk "$CODEX_ARGS_AWK")"
   _sb_n=0
   _sb_count=0; _sb_bad=""; _sb_widen=""; _sb_ignore=0; _sb_prev=""
+  _sb_exec=0; _sb_late=""
   while IFS= read -r _sb_w; do
     case "$_sb_w" in
       @@BEGIN)
         _sb_n=$((_sb_n + 1))
         _sb_count=0; _sb_bad=""; _sb_widen=""; _sb_ignore=0; _sb_prev=""
+        _sb_exec=0; _sb_late=""
         continue ;;
       @@END)
         report_sandbox_tokens "$_sb_label" "$_sb_n" "$2"
@@ -232,6 +249,18 @@ check_sandbox_tokens() {
     if [ "$_sb_w" = --ignore-rules ]; then
       _sb_ignore=1
     fi
+    if [ "$_sb_exec" = 1 ]; then
+      case "$_sb_prev" in
+        -c|--config|--enable|--disable) _sb_late="$_sb_late $_sb_w" ;;
+        *)
+          case "$_sb_w" in
+            -c|-c?*|--config|--config=*|--enable|--enable=*|--disable|--disable=*|*sandbox_mode=*)
+              _sb_late="$_sb_late $_sb_w" ;;
+          esac ;;
+      esac
+    elif [ "$_sb_w" = exec ]; then
+      _sb_exec=1
+    fi
     _sb_prev="$_sb_w"
   done <<EOF
 $_sb_args
@@ -243,7 +272,7 @@ EOF
 }
 
 # report_sandbox_tokens <label> <invocation number> <content>
-# Emits the three per-invocation results that check_sandbox_tokens gathered.
+# Emits the four per-invocation results that check_sandbox_tokens gathered.
 report_sandbox_tokens() {
   _rp_label="$1"
   if [ "$2" -gt 1 ]; then
@@ -269,13 +298,21 @@ report_sandbox_tokens() {
   else
     fail "$_rp_label: missing --ignore-rules -- $3"
   fi
+
+  if [ "$_sb_exec" = 0 ]; then
+    fail "$_rp_label: has no \`exec\` subcommand word, so the -c placement cannot be checked -- $3"
+  elif [ -n "$_sb_late" ]; then
+    fail "$_rp_label: -c after exec would drop the root -c sandbox_mode (codex discards every root -c once a -c follows exec):$_sb_late -- $3"
+  else
+    pass "$_rp_label: no -c after exec, so codex keeps the root -c options"
+  fi
 }
 
 # check_invocation_line <face> <skill> <lineno> <content>
 # Verifies one codex-exec invocation line carries the five required tokens
 # from #184, then hands the #197 checks (read-only sandbox, no widening
-# option, `--ignore-rules`) for each codex invocation on the line to
-# check_sandbox_tokens.
+# option, `--ignore-rules`, no -c after `exec`) for each codex invocation
+# on the line to check_sandbox_tokens.
 check_invocation_line() {
   face="$1"; skill="$2"; lineno="$3"; content="$4"
   label="$face/$skill/SKILL.md:$lineno"
