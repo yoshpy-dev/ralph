@@ -96,10 +96,17 @@ type RetiredRoleKind string
 // RetiredRoleRenamed marks a name that still exists under a new name: the
 // old spelling is rejected wherever it is *used* (spawn --role / --id, and
 // a ralph.toml key that would otherwise be silently ignored), and the
-// message points at the successor. A later kind for names that were removed
-// outright (rejected only when no --prompt gives the seat a purpose) gets
-// its own constant here, without a change to this table's shape.
+// message points at the successor.
 const RetiredRoleRenamed RetiredRoleKind = "renamed"
+
+// RetiredRoleRemoved marks a name that was removed outright: its template is
+// gone and the successor is where its duty went, not a new spelling of the
+// same role. Only `spawn --role <name>` without a --prompt is rejected (the
+// seat would start with no purpose at all, and the message points at the
+// successor and at --prompt). With a --prompt the name is an ordinary custom
+// role, so it stays a valid seat id and a valid [org.roles] /
+// [org.permissions.roles] key.
+const RetiredRoleRemoved RetiredRoleKind = "removed"
 
 // RetiredRole is one entry of retiredRoles: what replaced the name and how.
 type RetiredRole struct {
@@ -114,6 +121,7 @@ type RetiredRole struct {
 // this table, so adding a name here is the whole change.
 var retiredRoles = map[string]RetiredRole{
 	"lead": {Successor: LeaderIdentity, Kind: RetiredRoleRenamed},
+	"qa":   {Successor: "reviewer", Kind: RetiredRoleRemoved},
 }
 
 // RetiredRoleConfigKey names one ralph.toml key spelled with a renamed role
@@ -134,9 +142,11 @@ type RetiredRoleConfigKey struct {
 // Why config keys matter at all: config.Load does not validate role names,
 // so a key under the old name is accepted and then never consulted -- a
 // `lead = "guarded"` that no longer applies would silently run the leader
-// under the default (autonomous) permission mode. Spawn therefore rejects
-// such a config rather than ignoring it; config.Load itself stays quiet so
-// the read-only verbs and stop / disband can still clean up an old org.
+// with the full model_pool and with [org.permissions].default (autonomous
+// unless the operator changed it) instead of the mode the key asked for.
+// Spawn therefore rejects such a config rather than ignoring it; config.Load
+// itself stays quiet so the read-only verbs and stop / disband can still
+// clean up an old org.
 func RetiredRoleConfigKeys(cfg config.OrgConfig) []RetiredRoleConfigKey {
 	names := make([]string, 0, len(retiredRoles))
 	for name, r := range retiredRoles {

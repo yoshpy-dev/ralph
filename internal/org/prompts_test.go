@@ -455,6 +455,24 @@ func TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText(t *testing.T) {
 // through this constant so the literal appears in one place.
 const oldLeaderName = "lead"
 
+// removedRoleName is the seat template that was removed outright (its
+// deterministic-gate re-run moved to the reviewer role). Tests refer to it
+// through this constant so the literal appears in one place.
+const removedRoleName = "qa"
+
+func TestRetiredRoles_RemovedRoleNamesTheReviewerAsSuccessor(t *testing.T) {
+	r, ok := retiredRoles[removedRoleName]
+	if !ok {
+		t.Fatalf("retiredRoles has no entry for %q", removedRoleName)
+	}
+	if r.Successor != "reviewer" {
+		t.Errorf("Successor = %q, want %q", r.Successor, "reviewer")
+	}
+	if r.Kind != RetiredRoleRemoved {
+		t.Errorf("Kind = %q, want %q", r.Kind, RetiredRoleRemoved)
+	}
+}
+
 func TestRetiredRoles_OldLeaderNameIsRenamedToLeaderIdentity(t *testing.T) {
 	r, ok := retiredRoles[oldLeaderName]
 	if !ok {
@@ -526,6 +544,29 @@ func TestRetiredRoleConfigKeys(t *testing.T) {
 			name: "matching is case-sensitive",
 			cfg:  config.OrgConfig{Roles: map[string][]string{strings.ToUpper(oldLeaderName): {"sonnet"}}},
 			want: nil,
+		},
+		{
+			// A removed role's name is a legitimate custom-role key: a seat
+			// that brings its own --prompt can still be configured under it.
+			name: "removed role keys in both tables are not reported",
+			cfg: config.OrgConfig{
+				Roles:       map[string][]string{removedRoleName: {"sonnet"}},
+				Permissions: config.OrgPermissionsConfig{Roles: map[string]string{removedRoleName: "guarded"}},
+			},
+			want: nil,
+		},
+		{
+			name: "removed role keys do not hide renamed role keys",
+			cfg: config.OrgConfig{
+				Roles: map[string][]string{removedRoleName: {"sonnet"}, oldLeaderName: {"sonnet"}},
+				Permissions: config.OrgPermissionsConfig{Roles: map[string]string{
+					removedRoleName: "guarded", oldLeaderName: "guarded",
+				}},
+			},
+			want: []RetiredRoleConfigKey{
+				{Key: "[org.roles]." + oldLeaderName, RenameTo: "[org.roles]." + LeaderIdentity},
+				{Key: "[org.permissions.roles]." + oldLeaderName, RenameTo: "[org.permissions.roles]." + LeaderIdentity},
+			},
 		},
 	}
 	for _, tc := range cases {

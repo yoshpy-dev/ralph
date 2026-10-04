@@ -339,7 +339,8 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 			n, maxHerdrAgentNameLen, p.OrgID, p.SeatID,
 		)}
 	}
-	// A renamed role's old name (retiredRoles, prompts.go) is a plain
+	// A retired role name (retiredRoles, prompts.go: a renamed role's old
+	// name, or a removed role spawned with no --prompt) is a plain
 	// rejection too: it runs before ResolvePermissionMode and the manifest
 	// read, so neither a `rejected` event nor a receipt is written, in
 	// dry-run and real mode alike. `ralph org start` spawns through here, so
@@ -914,27 +915,39 @@ func checkCapacityAndStart(o *Org, p SpawnParams, req SpawnRequest, events []Man
 	return nil, startedAt
 }
 
-// retiredRoleSpawnErr is Spawn's guard for a renamed role's old name
-// (retiredRoles, prompts.go): it returns an error naming the successor when
-// p.Role or p.SeatID is the old name, or when cfg still carries the old name
-// as an [org.roles] / [org.permissions.roles] key; nil otherwise. Matching is
-// exact and case-sensitive, like the rest of the role handling.
+// retiredRoleSpawnErr is Spawn's guard for the role names in retiredRoles
+// (prompts.go): it returns an error naming the successor when p.Role or
+// p.SeatID is a retired name in a position the table rejects, or when cfg
+// still carries a renamed name as an [org.roles] / [org.permissions.roles]
+// key; nil otherwise. Matching is exact and case-sensitive, like the rest of
+// the role handling.
 //
-//   - --role <old>: rejected whatever --prompt says, because the old name
+//   - --role <renamed>: rejected whatever --prompt says, because the old name
 //     used to select the coordinator's template and permission mode.
-//   - --id <old>: rejected whatever the role or prompt, because the old name
-//     was the coordinator's agmsg identity -- a seat registered under it
+//   - --role <removed> without --prompt: rejected, because the template is
+//     gone and the seat would start with nothing to do. With a --prompt the
+//     name is an ordinary custom role and the seat starts with only that
+//     text (RenderRolePrompt finds no template for it).
+//   - --id <renamed>: rejected whatever the role or prompt, because the old
+//     name was the coordinator's agmsg identity -- a seat registered under it
 //     would receive the messages that a procedure written for the old
-//     binary addresses to the coordinator.
-//   - ralph.toml keys: config.Load does not validate role names, so a key
-//     under the old name loads fine and is never read again. A
-//     `lead = "guarded"` ignored that way would run the leader as
-//     autonomous, so the spawn is refused with the exact key to rename.
-//     Only spawn (and so `org start`) refuses; the other verbs and stop /
-//     disband keep working so an old org can still be cleaned up.
+//     binary addresses to the coordinator. A removed name was never an
+//     identity anything addresses, so --id <removed> is accepted.
+//   - ralph.toml keys (renamed names only): config.Load does not validate
+//     role names, so a key under the old name loads fine and is never read
+//     again. A `lead = "guarded"` ignored that way would run the leader with
+//     the full model_pool and with [org.permissions].default instead of the
+//     mode the key asked for, so the spawn is refused with the exact key to
+//     rename. Only spawn (and so `org start`) refuses; the other verbs and
+//     stop / disband keep working so an old org can still be cleaned up.
 func retiredRoleSpawnErr(cfg config.OrgConfig, p SpawnParams) error {
 	if r, ok := retiredRoles[p.Role]; ok && r.Kind == RetiredRoleRenamed {
 		return fmt.Errorf("org: role %q was renamed to %q: use --role %s", p.Role, r.Successor, r.Successor)
+	}
+	if r, ok := retiredRoles[p.Role]; ok && r.Kind == RetiredRoleRemoved && p.Prompt == "" {
+		return fmt.Errorf("org: role %q was removed: its deterministic-gate re-run moved to the %q role; "+
+			"spawn with --role %s, or pass --prompt to run a custom %q seat",
+			p.Role, r.Successor, r.Successor, p.Role)
 	}
 	if r, ok := retiredRoles[p.SeatID]; ok && r.Kind == RetiredRoleRenamed {
 		return fmt.Errorf("org: seat id %q is retired: it was the coordinator's agmsg identity and is now %q, "+
@@ -949,7 +962,8 @@ func retiredRoleSpawnErr(cfg config.OrgConfig, p SpawnParams) error {
 		}
 		return fmt.Errorf("org: ralph.toml has retired role key(s) %s: rename to %s "+
 			"(the old key is no longer read, so a permission mode or model list set under it "+
-			"would be silently ignored and the role would fall back to the default, autonomous)",
+			"would be silently ignored and the role would fall back to the full model_pool "+
+			"and to [org.permissions].default)",
 			strings.Join(old, ", "), strings.Join(renamed, ", "))
 	}
 	return nil

@@ -2948,3 +2948,203 @@ func TestOrgSpawn_RetiredLeaderName_UnrelatedConfigKeysAndRolesStillSpawn(t *tes
 		})
 	}
 }
+
+// TestOrgSpawn_RemovedRole_WithoutPrompt_RejectedBeforeAnyManifestWrite covers
+// the guard for a role whose template was removed outright: with no --prompt
+// there is nothing to tell the seat what to do, so the spawn is refused with
+// guidance to the successor role and to --prompt. Like the renamed-name
+// rejection it sits ahead of the manifest and the receipts, in dry-run and
+// real mode alike.
+func TestOrgSpawn_RemovedRole_WithoutPrompt_RejectedBeforeAnyManifestWrite(t *testing.T) {
+	for _, dryRun := range []bool{false, true} {
+		mode := "real"
+		if dryRun {
+			mode = "dry-run"
+		}
+		t.Run(mode, func(t *testing.T) {
+			o, h, a := testOrg(t)
+			p := mustSpawnParams("org-a", "seat-1")
+			p.DryRun = dryRun
+			p.Role = removedRoleName
+
+			result := o.Spawn(p)
+
+			if result.Outcome != SpawnOutcomeRejected {
+				t.Fatalf("Outcome = %v, want SpawnOutcomeRejected (err=%v)", result.Outcome, result.Err)
+			}
+			if result.Err == nil {
+				t.Fatal("expected a non-nil Err so the CLI exits non-zero")
+			}
+			for _, want := range []string{"reviewer", "--prompt", removedRoleName} {
+				if !strings.Contains(result.Err.Error(), want) {
+					t.Errorf("error %q should contain %q", result.Err.Error(), want)
+				}
+			}
+			if len(h.calls) != 0 || len(a.calls) != 0 {
+				t.Errorf("expected no driver calls, got herdr=%v agmsg=%v", h.calls, a.calls)
+			}
+			if got := eventNames(t, o); len(got) != 0 {
+				t.Errorf("expected no manifest event for the removed-role rejection, got %v", got)
+			}
+			rr, err := o.Receipts.Read()
+			if err != nil {
+				t.Fatalf("read receipts: %v", err)
+			}
+			if len(rr.Receipts) != 0 {
+				t.Errorf("expected no receipt for the removed-role rejection, got %+v", rr.Receipts)
+			}
+			if result.ModelReceipt != (Receipt{}) {
+				t.Errorf("expected a zero ModelReceipt, got %+v", result.ModelReceipt)
+			}
+		})
+	}
+}
+
+// TestOrgSpawn_RemovedRole_WithPrompt_StartsWithPromptOnly pins the other half
+// of the guard: a --prompt gives the seat its purpose, so the removed name is
+// then an ordinary custom role. No template exists for it, so the initial
+// prompt is exactly the --prompt text -- inline when it is short and
+// single-line, through the prompt file otherwise.
+func TestOrgSpawn_RemovedRole_WithPrompt_StartsWithPromptOnly(t *testing.T) {
+	t.Run("inline prompt", func(t *testing.T) {
+		o, h, _ := testOrg(t)
+		p := mustSpawnParams("org-a", "seat-1")
+		p.Role = removedRoleName
+		p.Prompt = "custom qa instructions"
+
+		result := o.Spawn(p)
+
+		if result.Outcome != SpawnOutcomeSpawned || result.Err != nil {
+			t.Fatalf("expected the removed role with --prompt to spawn, got %+v", result)
+		}
+		args := h.agentStartArgs[0]
+		// [--permission-mode bypassPermissions --model <model> <prompt>].
+		if len(args) != 5 || args[4] != p.Prompt {
+			t.Fatalf("expected the initial prompt to be exactly %q as the last AgentStart arg, got %v", p.Prompt, args)
+		}
+	})
+
+	t.Run("multi-line prompt goes through the prompt file unchanged", func(t *testing.T) {
+		o, h, _ := testOrg(t)
+		p := mustSpawnParams("org-a", "seat-1")
+		p.Role = removedRoleName
+		p.Prompt = "custom qa instructions\nsecond line"
+
+		result := o.Spawn(p)
+
+		if result.Outcome != SpawnOutcomeSpawned || result.Err != nil {
+			t.Fatalf("expected the removed role with --prompt to spawn, got %+v", result)
+		}
+		args := h.agentStartArgs[0]
+		if len(args) != 5 || !strings.HasPrefix(args[4], "役割指示を読み込んで従ってください: ") {
+			t.Fatalf("expected a prompt-file pointer as the last AgentStart arg, got %v", args)
+		}
+		promptPath := strings.TrimPrefix(args[4], "役割指示を読み込んで従ってください: ")
+		data, err := os.ReadFile(promptPath)
+		if err != nil {
+			t.Fatalf("expected the prompt file to exist at %q: %v", promptPath, err)
+		}
+		if string(data) != p.Prompt {
+			t.Fatalf("expected the prompt file to hold exactly the --prompt text %q, got %q", p.Prompt, string(data))
+		}
+	})
+
+	t.Run("dry-run", func(t *testing.T) {
+		o, h, _ := testOrg(t)
+		p := mustSpawnParams("org-a", "seat-1")
+		p.DryRun = true
+		p.Role = removedRoleName
+		p.Prompt = "custom qa instructions"
+
+		result := o.Spawn(p)
+
+		if result.Outcome != SpawnOutcomeSpawned || result.Err != nil {
+			t.Fatalf("expected the removed role with --prompt to pass a dry-run, got %+v", result)
+		}
+		if len(h.calls) != 0 {
+			t.Errorf("expected a dry-run to make no herdr calls, got %v", h.calls)
+		}
+	})
+}
+
+// TestOrgSpawn_RemovedRole_OnlyTheRoleIsGuarded pins what the removed-kind
+// guard leaves alone: the name as a seat id (only a renamed name's old
+// agmsg identity is rejected there), and ralph.toml keys under the name
+// (a legitimate custom-role key for a seat that brings its own --prompt).
+func TestOrgSpawn_RemovedRole_OnlyTheRoleIsGuarded(t *testing.T) {
+	t.Run("seat id with role reviewer", func(t *testing.T) {
+		o, _, _ := testOrg(t)
+		p := mustSpawnParams("org-a", removedRoleName)
+		p.Role = "reviewer"
+
+		result := o.Spawn(p)
+
+		if result.Outcome != SpawnOutcomeSpawned || result.Err != nil {
+			t.Fatalf("expected seat id %q with role reviewer to spawn, got %+v", removedRoleName, result)
+		}
+	})
+
+	t.Run("seat id with an empty role and no prompt", func(t *testing.T) {
+		o, _, _ := testOrg(t)
+		p := mustSpawnParams("org-a", removedRoleName)
+		p.Role = ""
+
+		result := o.Spawn(p)
+
+		if result.Outcome != SpawnOutcomeSpawned || result.Err != nil {
+			t.Fatalf("expected seat id %q with an empty role to spawn, got %+v", removedRoleName, result)
+		}
+	})
+
+	t.Run("config keys under the name", func(t *testing.T) {
+		o, _, _ := testOrg(t)
+		o.Config.Roles[removedRoleName] = []string{"sonnet"}
+		o.Config.Permissions.Roles = map[string]string{removedRoleName: "guarded"}
+		p := mustSpawnParams("org-a", "seat-1")
+		p.Role = removedRoleName
+		p.Prompt = "custom qa instructions"
+
+		result := o.Spawn(p)
+
+		if result.Outcome != SpawnOutcomeSpawned || result.Err != nil {
+			t.Fatalf("expected [org.roles].%s and [org.permissions.roles].%s not to block a spawn, got %+v",
+				removedRoleName, removedRoleName, result)
+		}
+	})
+
+	t.Run("upper-case spelling is an unknown role", func(t *testing.T) {
+		o, _, _ := testOrg(t)
+		p := mustSpawnParams("org-a", "seat-1")
+		p.Role = strings.ToUpper(removedRoleName)
+
+		result := o.Spawn(p)
+
+		if result.Outcome != SpawnOutcomeSpawned || result.Err != nil {
+			t.Fatalf("expected the upper-case spelling %q to spawn, got %+v", p.Role, result)
+		}
+	})
+}
+
+// TestOrgSpawn_RetiredLeaderName_ConfigKeyErrorDescribesTheRealFallback pins
+// the wording of the retired-key rejection: the role falls back to the full
+// model_pool and to [org.permissions].default, which is only "autonomous" when
+// the operator has not changed it, so the message must not assert autonomous.
+func TestOrgSpawn_RetiredLeaderName_ConfigKeyErrorDescribesTheRealFallback(t *testing.T) {
+	o, _, _ := testOrg(t)
+	o.Config.Permissions.Roles = map[string]string{oldLeaderName: "guarded"}
+
+	result := o.Spawn(mustSpawnParams("org-a", "seat-1"))
+
+	if result.Outcome != SpawnOutcomeRejected || result.Err == nil {
+		t.Fatalf("expected a rejection, got %+v", result)
+	}
+	msg := result.Err.Error()
+	for _, want := range []string{"model_pool", "[org.permissions].default"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error %q should contain %q", msg, want)
+		}
+	}
+	if strings.Contains(msg, "autonomous") {
+		t.Errorf("error %q must not claim the fallback is autonomous: [org.permissions].default decides it", msg)
+	}
+}
