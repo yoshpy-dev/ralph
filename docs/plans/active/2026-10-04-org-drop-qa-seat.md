@@ -156,14 +156,14 @@ org runtime の座席を、指示役(leader)・実装役(implementer)・レビ�
 - [x] AC-11: `LeaderIdentity == "leader"` で、`internal/org/prompts/leader.md` があり `lead.md` がない。`ralph org start` が seat id・役割ともに `leader` で座席を立てる(テスト)。agmsg の登録と、watchdog の ALERT の宛先が `leader` になる(テスト)。
 - [x] AC-12: `git grep -n -P 'Lead(?!e)|\blead[A-Z_]' -- '*.go'` の結果が、Slice 0 の時点で下の例外だけになる(Go の識別子に旧名が残っていない。`Leader` と `Leaded` は掛からない)。当初は `-E 'Lead($|[^e])|\blead[A-Z_]'` と書いたが、macOS の `git grep -E` では `\b` が効かず後半が何にも掛からないことが Slice 0 で分かったので、`-P` に改めた(計画の時点の確認は BSD の `grep` で行っていて、`git grep` では確かめていなかった)。Slice 0(eb30b172)で確認済み。Slice 1 以降に残ってよいのは、旧名の拒否のための識別子(非推奨フラグの変数など)だけ。例外として、watch の state に永続化される JSON のタグ `lead_agent_get` と `history_lead_lines`(`internal/org/watch.go:230-231` とそのテストのフィクスチャ)は残す(下の「実装中の逸脱」を参照)。
 - [x] AC-13: 旧名の拒否をテストで検査している。(a) `--role lead` と `--id lead` の spawn は、`--prompt` があっても、dry-run でも拒否され、エラー文に `leader` が含まれ、manifest と receipts に何も書かれない。(b) `ralph.toml` に `[org.roles].lead` か `[org.permissions.roles].lead` があると spawn が拒否され、エラー文がキーの改名を案内する。同じ設定でも `ralph org status`、`stop`、`disband` は動く。`ralph doctor` が warn を出す。(c) `--lead-driver` は警告付きで動き、`--leader-driver` と両方に違う値を渡すとエラーになる。
-- [ ] AC-14: `git grep -n -w -i lead -- . ':!docs/plans' ':!docs/reports' ':!docs/evidence' ':!docs/research'` に残る行が、次の分類のどれかに入る。分類ごとのファイルと理由を verify の report に書く。
+- [x] AC-14: `git grep -n -w -i lead -- . ':!docs/plans' ':!docs/reports' ':!docs/evidence' ':!docs/research'` に残る行が、次の分類のどれかに入る。分類ごとのファイルと理由を verify の report に書く。
   - 旧名の拒否のコードとテスト(撤去・改名した役割の表、spawn の拒否、`--lead-driver` の別名、doctor の warn と、それぞれのテスト)
   - 過去のデータのフィクスチャ(`internal/insights/testdata/receipts.jsonl` と、それを読む `internal/insights/insights_test.go`、過去の receipts の形の行を作る `internal/cli/insights_test.go`)
   - 履歴の記録(`docs/insights/events/*.jsonl`、spec の履歴の記述と改訂の節、tech-debt の既存の行)
   - 過去の計画・レポートのファイル名と、その文言の引用(Slice 0 の時点で `internal/org/report.go:11`、`internal/cli/org.go:369-370`、`internal/org/spawn.go:59,534,769,950`、`internal/org/spawn_test.go:545`)
   - 永続化された state のキー(`watch.go` の JSON のタグ `lead_agent_get` / `history_lead_lines` と、それを使うテストのフィクスチャ。`-w lead` には掛からないが AC-12 には掛かる)
   - 文書の中の旧名の案内(`/org` skill の「旧名の `lead` は拒否される」など)
-- [ ] AC-15: `agent-messaging.md`(2 面)の契約が `TO: leader` になり、`/org` skill(4 面)、`AGENTS.md` と `.ralph/core/AGENTS.core.md`(+ template)、`README.md`、`codex-seat-permissions.md`(2 面)、`quality-gates.md`(2 面)が `leader` を使う。`./scripts/check-skill-sync.sh` と `./scripts/check-sync.sh` が green。
+- [x] AC-15: `agent-messaging.md`(2 面)の契約が `TO: leader` になり、`/org` skill(4 面)、`AGENTS.md` と `.ralph/core/AGENTS.core.md`(+ template)、`README.md`、`codex-seat-permissions.md`(2 面)、`quality-gates.md`(2 面)が `leader` を使う。`./scripts/check-skill-sync.sh` と `./scripts/check-sync.sh` が green。
 
 ### qa の撤去
 
@@ -171,15 +171,15 @@ org runtime の座席を、指示役(leader)・実装役(implementer)・レビ�
 - [x] AC-2: reviewer 雛形のミッション節が、(a) 最初にゲート(leader の指示、なければ `run-static-verify.sh` と `run-test.sh`)を実行する、(b) `GATE: fail` なら root cause とレポートのパスを付けて BLOCKED を返し差分レビューに進まない、(c) `GATE: unrunnable` なら理由を付けて BLOCKED を返し差分レビューに進まない、(d) 通れば差分品質と受け入れ基準をレビューしてゲートの結果と合わせる、を含み、`QA 座席` を含まない。テストはミッション節だけを見る。red: 2 本のスクリプト名、`GATE: fail`、`GATE: unrunnable`、「差分レビューに進まない」の文言を 1 つずつ消すと、そのたびにテストが落ちる(mutation の結果を report に残す)。
 - [x] AC-3: leader 雛形のミッション節が、レビューと検証を reviewer に委譲すること、`GATE: fail` を implementer に差し戻すこと、`GATE: unrunnable` は implementer に戻さず leader が直すか人に上げることを含み、`qa 座席` を含まない。red: 差し戻しの文言と `GATE: unrunnable` の扱いを 1 つずつ消すと、そのたびにテストが落ちる。
 - [x] AC-4: `--role qa` と空の `--prompt` の spawn は、dry-run でも実際の spawn でも拒否され、エラー文に `reviewer` と `--prompt` が含まれ、manifest と receipts に何も書かれない。`--role qa` に `--prompt` を付けると起動し、初期プロンプトは `--prompt` だけになる。いずれもテストで検査している。
-- [ ] AC-5: `git grep -n -w -i qa -- . ':!docs/plans' ':!docs/reports' ':!docs/evidence' ':!docs/research'` の結果が、次のファイルだけになる: `internal/org/prompts.go`(撤去・改名した役割の表)、`internal/org/prompts_test.go`、`internal/org/spawn_test.go`(AC-1 と AC-4 のテスト)、`internal/cli/status_test.go`(Non-goals)、`.claude/skills/org/SKILL.md` と 3 つのミラー(撤去の案内)、`docs/specs/2026-08-01-org-runtime.md`(改訂の節と履歴の記述)、`docs/tech-debt/README.md`(既存の解決済みの行と新しい行)。表を `spawn.go` に置いた場合は `prompts.go` を `spawn.go` に読み替える。
-- [ ] AC-6: `/org` skill の 4 面で、Leaded 行・fan-out の例・役割リストが 3 役割になり、reviewer の説明にゲートの再実行と `guarded` の注意が入り、`--role qa` の拒否が書かれている。
-- [ ] AC-7: `quality-gates.md`(root と template)の Quality pipeline gate の行が新しい順序を示し、雛形の指示で動いていることを書いている。`templates/base/ralph.toml` の `reviewer = "guarded"` の例に注記がある。`docs/tech-debt/README.md` に hook 強制の未実装の行がある。
-- [ ] AC-8: spec に 2026-10-04 改訂の節があり、FR-4・FR-7・AC(74)の行に改訂の印がある。2026-09-16 改訂 (b) の「4 種」が置き換えられたことと、`lead` から `leader` への改名が改訂の節から読める。
+- [x] AC-5: `git grep -n -w -i qa -- . ':!docs/plans' ':!docs/reports' ':!docs/evidence' ':!docs/research'` の結果が、次のファイルだけになる: `internal/org/prompts.go`(撤去・改名した役割の表)、`internal/org/prompts_test.go`、`internal/org/spawn_test.go`(AC-1 と AC-4 のテスト)、`internal/cli/status_test.go`(Non-goals)、`.claude/skills/org/SKILL.md` と 3 つのミラー(撤去の案内)、`docs/specs/2026-08-01-org-runtime.md`(改訂の節と履歴の記述)、`docs/tech-debt/README.md`(既存の解決済みの行と新しい行)。表を `spawn.go` に置いた場合は `prompts.go` を `spawn.go` に読み替える。
+- [x] AC-6: `/org` skill の 4 面で、Leaded 行・fan-out の例・役割リストが 3 役割になり、reviewer の説明にゲートの再実行と `guarded` の注意が入り、`--role qa` の拒否が書かれている。
+- [x] AC-7: `quality-gates.md`(root と template)の Quality pipeline gate の行が新しい順序を示し、雛形の指示で動いていることを書いている。`templates/base/ralph.toml` の `reviewer = "guarded"` の例に注記がある。`docs/tech-debt/README.md` に hook 強制の未実装の行がある。
+- [x] AC-8: spec に 2026-10-04 改訂の節があり、FR-4・FR-7・AC(74)の行に改訂の印がある。2026-09-16 改訂 (b) の「4 種」が置き換えられたことと、`lead` から `leader` への改名が改訂の節から読める。
 - [ ] AC-9: reviewer 雛形の smoke を 1 回行う。scratch のディレクトリで、展開した reviewer 雛形と、わざと落ちるゲートのコマンド(例: `sh -c 'echo "--- FAIL: TestFixture (fixture_test.go:12)"; exit 1'`)を指定した TASK を、`claude -p --model sonnet` に渡す。agmsg はないので、`ralph org send` の代わりに送るメッセージを標準出力に出すよう指示する。ゲートのコマンドだけを実行できる権限にする。合格の条件は、出力に `TYPE: BLOCKED` と `GATE: fail` があり、`SEVERITY:` の付いたレビュー所見がないこと。生の出力を test report に残す。LLM の振る舞いなので 1 回の結果は保証ではなく、Known gap として扱う。
 
 ### 共通
 
-- [ ] AC-10: `go test ./...` と `RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh` が green。
+- [x] AC-10: `go test ./...` と `RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh` が green。
 
 ## Implementation outline
 
@@ -244,6 +244,8 @@ org runtime の座席を、指示役(leader)・実装役(implementer)・レビ�
 - 2026-10-04(Slice A、90488a06): qa の Go のコメントもこのスライスで直した(Implementation outline の 3 を参照)。AC-2 / AC-3 の mutation は 9 通り(reviewer: 2 本のスクリプト名、`GATE: fail`、`GATE: unrunnable`、2 つの項目それぞれの「差分レビューに進まない」。leader: 「implementer 座席に差し戻」「implementer には戻さず」「`GATE: unrunnable`」)で、どれも `TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing` か `TestRenderRolePrompt_Leader_MissionRoutesGateBlocked` が落ちることを確かめ、元に戻した。
 
 - 2026-10-04(Slice B、fbc9e539): 撤去した役割の判定は `p.Prompt == ""` の厳密な比較で、空白だけの `--prompt " "` は拒否しない(AC-4 の「空の `--prompt`」どおり)。表の `"qa"` は `internal/org/prompts.go` にだけあり、`spawn.go` のエラー文は `%q` で役割名を埋めるので、AC-5 の Go ファイルは計画どおり `prompts.go` になった。設定キーのエラー文は「full model_pool と `[org.permissions].default` に戻る」に直した。
+
+- 2026-10-04(Slice C、dbb782b5): template の `quality-gates.md` の Quality pipeline gate の行は、末尾の `(see docs/tech-debt)` を外した。template は元から `docs/tech-debt/README.md` を参照しておらず、`templates/base/docs/tech-debt/` には `.gitkeep` しかないため。`check-skill-sync.sh`、`check-sync.sh`、`RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh` が green。AC-5 の qa の grep は許可した 10 ファイルだけ、AC-14 の lead の grep はどの分類にも入らない行がない。AC-9 の smoke は `/test` で行う。
 
 ## Open questions
 
