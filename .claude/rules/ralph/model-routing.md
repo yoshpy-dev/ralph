@@ -8,9 +8,13 @@ tasks. Delegation timing/order lives in `subagent-policy.md`.
 | Seat | Model | Examples |
 |------|-------|----------|
 | Orchestrator (main session) | session model (user's choice) | planning, decomposition, arbitration, final review |
-| Judgment seats | `opus` | security-sensitive review (`reviewer`), design trade-offs, ambiguous root-cause debugging |
-| Procedural seats | `sonnet` | scoped implementation, spec/static verification (`verifier`), test execution (`tester`), doc sync (`doc-maintainer`) |
+| Implementation and verification seats | `opus` | scoped implementation (`implementer`), spec/static verification (`verifier`), test execution (`tester`), design trade-offs, ambiguous root-cause debugging |
+| Review and doc seats | `sonnet` | diff-quality review (`reviewer`), doc sync (`doc-maintainer`) |
 | Bulk mechanical work | `haiku` | grep/file inventory, log scanning, large read-only sweeps |
+
+Seat defaults changed on 2026-10-04 (maintainer decision): `implementer`,
+`verifier`, and `tester` moved from `sonnet` to `opus`; `reviewer` moved from
+`opus` to `sonnet`.
 
 Quality is preserved by plan artifacts, not by model tier: when delegating,
 the prompt must carry acceptance criteria, exact verification commands, and a
@@ -20,7 +24,7 @@ cheaper model with a precise plan beats an expensive model with a vague one.
 ## Standard flow delegation (/work)
 
 Implementation slices in `/work` are delegated to the `implementer` subagent
-(`model: sonnet` pinned in frontmatter; Codex: `.codex/agents/implementer.toml`).
+(`model: opus` pinned in frontmatter; Codex: `.codex/agents/implementer.toml`).
 The orchestrator (session model) retains planning, decomposition, handoff
 authoring, report adjudication, and final review — it does not write slice code
 itself.
@@ -46,8 +50,10 @@ verification evidence, commit-boundary evidence (`git status --porcelain` +
 - Dispatch failure → inline fallback, noted in the report (same convention as
   the post-implementation pipeline fallback).
 
-**Escalating a judgment-heavy slice:** pass an explicit `model` on the Task
-call (e.g. `opus` for security-sensitive changes) — no new env knob.
+**Overriding a seat's default:** pass an explicit `model` on the Task call —
+no new env knob. Typical cases: `opus` on the `reviewer` call for a
+security-sensitive diff, or `sonnet` on an `implementer` call for a mechanical
+slice.
 
 **Cross-review sync note:** `.claude/skills/cross-review/SKILL.md` reads
 `RALPH_CLAUDE_REVIEWER_MODEL` (with an `opus` fallback) for the claude reviewer

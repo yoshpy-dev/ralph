@@ -2,7 +2,7 @@
 name: reviewer
 description: Self-review specialist for diff quality — naming, readability, unnecessary changes, security, and maintainability. Does NOT evaluate spec compliance or test coverage.
 tools: Read, Grep, Glob, Bash, Write, Edit
-model: opus
+model: sonnet
 skills:
   - self-review
 memory: project
