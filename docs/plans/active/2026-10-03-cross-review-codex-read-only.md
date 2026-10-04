@@ -1,6 +1,6 @@
 # cross-review-codex-read-only
 
-- Status: Draft
+- Status: PR created (#199), awaiting CI and merge
 - Owner: Claude Code
 - Date: 2026-10-03
 - Related request: issue #197。`/cross-review` の codex reviewer(`command codex -m … -c model_reasoning_effort=… exec review --base "$BASE" -o <file> </dev/null`)は sandbox を指定しないので、trust 済みの project では `.codex/config.toml` のトップレベルの `sandbox_mode = "danger-full-access"` と、`exec` の `approval: never` で動く。レビューする差分に紛れた指示に codex が従えば、承認なしでコマンドを実行できる。PR #198 の self-review(M-2)で見つかった
@@ -59,13 +59,13 @@
 
 ## Acceptance criteria
 
-- [ ] AC-1: 4 面の cross-review の codex の呼び出し(各 2 か所)がすべて `-c sandbox_mode=read-only` と `--ignore-rules` を含み、4 面の `/plan` の advisory の呼び出しが `--sandbox read-only` と `--ignore-rules` を含む。`./scripts/check-skill-sync.sh` と `./scripts/check-sync.sh` が green。
-- [ ] AC-2: `tests/test-codex-exec-invocation.sh` が、どの codex の呼び出しの行にも read-only の sandbox の指定があることを検査する。red: 4 面のどれか 1 か所から read-only の指定か `--ignore-rules` を外すと落ちる。`/plan` の `--sandbox read-only` か `--ignore-rules` を外しても落ちる。
-- [ ] AC-3: 実際の codex(いつもの認証)で、新しい形の cross-review の呼び出しを、差分のある branch(この branch)に対して 1 回実行し、`codex rc=0`、`-o` のファイルが空でない、log の header が `sandbox: read-only` になる。main のチェックアウトで codex を動かさない。実行後に main のチェックアウトが clean であることを確かめる。
-- [ ] AC-3b: 許可ルールを回り込めないことを実際に確かめる(Codex plan advisory の HIGH)。この worktree(trust 済み)に、追跡しない一時的な project の `.rules` を置き、scratch のファイルへの無害な `touch` を `decision = "allow"` で許す(置き場所と書式は codex の Rules の仕様で確かめる)。同じ worktree で、codex に「その `touch` を実行して」と頼む `codex exec` を 2 回実行する: (a) `-c sandbox_mode=read-only` だけ → ルールが効いて書き込みが通る(脆弱性の再現)、(b) `-c sandbox_mode=read-only --ignore-rules` → 書き込みが拒否され、ファイルができない。(a) で書き込みが通らない場合は、ルールの置き方が効いていないので、その状況を report に書く。終わったら一時的な `.rules` と scratch のファイルを消し、worktree と main のチェックアウトが clean であることを確かめる。`~/.codex` は読まず、書き換えない。
-- [ ] AC-4: `docs/recipes/codex-setup.md`(+ template)と `.codex/config.toml`(+ template)のコメントが新しい呼び出しの形と合う。root と template が一致。
-- [ ] AC-5: `docs/tech-debt/README.md` のこの件の行が解決済みになっている。
-- [ ] AC-6: `RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh` green。
+- [x] AC-1: 4 面の cross-review の codex の呼び出し(各 2 か所)がすべて `-c sandbox_mode=read-only` と `--ignore-rules` を含み、4 面の `/plan` の advisory の呼び出しが `--sandbox read-only` と `--ignore-rules` を含む。`./scripts/check-skill-sync.sh` と `./scripts/check-sync.sh` が green。
+- [x] AC-2: `tests/test-codex-exec-invocation.sh` が、どの codex の呼び出しの行にも read-only の sandbox の指定があることを検査する。red: 4 面のどれか 1 か所から read-only の指定か `--ignore-rules` を外すと落ちる。`/plan` の `--sandbox read-only` か `--ignore-rules` を外しても落ちる。
+- [x] AC-3: 実際の codex(いつもの認証)で、新しい形の cross-review の呼び出しを、差分のある branch(この branch)に対して 1 回実行し、`codex rc=0`、`-o` のファイルが空でない、log の header が `sandbox: read-only` になる。main のチェックアウトで codex を動かさない。実行後に main のチェックアウトが clean であることを確かめる。
+- [x] AC-3b: 許可ルールを回り込めないことを実際に確かめる(Codex plan advisory の HIGH)。この worktree(trust 済み)に、追跡しない一時的な project の `.rules` を置き、scratch のファイルへの無害な `touch` を `decision = "allow"` で許す(置き場所と書式は codex の Rules の仕様で確かめる)。同じ worktree で、codex に「その `touch` を実行して」と頼む `codex exec` を 2 回実行する: (a) `-c sandbox_mode=read-only` だけ → ルールが効いて書き込みが通る(脆弱性の再現)、(b) `-c sandbox_mode=read-only --ignore-rules` → 書き込みが拒否され、ファイルができない。(a) で書き込みが通らない場合は、ルールの置き方が効いていないので、その状況を report に書く。終わったら一時的な `.rules` と scratch のファイルを消し、worktree と main のチェックアウトが clean であることを確かめる。`~/.codex` は読まず、書き換えない。
+- [x] AC-4: `docs/recipes/codex-setup.md`(+ template)と `.codex/config.toml`(+ template)のコメントが新しい呼び出しの形と合う。root と template が一致。
+- [x] AC-5: `docs/tech-debt/README.md` のこの件の行が解決済みになっている。
+- [x] AC-6: `RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh` green。
 
 ## Implementation outline
 
@@ -124,7 +124,7 @@ skill の呼び出しと文書とテストの変更だけ。問題があれば r
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
-- [ ] PR created
+- [x] PR created (#199)
 
 ## Readiness checklist
 
