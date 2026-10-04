@@ -109,6 +109,10 @@ skill の呼び出しと文書とテストの変更だけ。問題があれば r
 - 2026-10-03 self-review addendum(cycle 1、Slice B、1280d797): CRITICAL 0 / HIGH 0 / MEDIUM 1 / LOW 3、merge 可。M-1、M-2、L-1、L-2 は意図どおり。B-1(MEDIUM、回帰の検査の穴): `check_sandbox_tokens` は、`=` の前後に空白のある `-c 'sandbox_mode = "…"'`、`</dev/null` の後ろの語、同じ行の 2 つ目の `command codex` を読まない(どれも codex には届く)。B-2: 「ネットワークも止める」は既定の挙動。B-3: config のコメントの「ralph の `codex exec` はすべて read-only」は `ralph doctor --probe-models`(sandbox を指定しない、固定の ping)と合わない。B-4: コメントの選択肢の `"untrusted"` は codex が受け付けない。全件を in-cycle で直す
 - 2026-10-03 work: Slice C は implementer に委譲(f4b03a68、14 ファイル、+159 / -63、push 済み、呼び出しの行は変えていない)。B-1: awk の `CODEX_ARGS_AWK` で、sh と同じように行を語に分ける(単引用符、二重引用符、backslash、`&` `;` `|` backtick でコマンドの終わり、リダイレクトとその対象は除く、`command codex` で始まる単純コマンドごとに出す、`=` の前後の空白を詰める)。3 つの規則(read-only の指定、広げる語がない、`--ignore-rules`)を呼び出しごとに当てる。132 / 132。red: これまでの 21 種と reviewer の 3 つの抜け道とそのほかの変異がすべて落ち、`-c 'sandbox_mode = "read-only"'` などの対照は通る。B-2: 「既定では」を足した。B-3: config のコメントを skill の 2 つの呼び出しに絞り、tech-debt の残るリスクの行に (d) `ralph doctor --probe-models` を足した。B-4: approval_policy の選択肢から `"untrusted"` を外した(config の参照文書と `codex --help` で確認)。既知の穴: `$(...)` や引用されていない変数の展開は読まない。orchestrator: implementer は BSD awk でしか試していなかったので、CI と同じ ubuntu 24.04 のコンテナ(awk は mawk)で sh、dash、bash とも 132 / 132 を確認し、`</dev/null` の後ろの `--yolo` と空白入りの `sandbox_mode = "danger-full-access"` の変異が mawk でも落ちることを確かめた
 - 2026-10-03 verify(cycle 1、407da9f6): PASS、LOW 1 / INFO 2。AC-1(12 行すべてに期待どおりの語があり、足した語を除くと main の行と byte 一致)、AC-2(verifier が独立に 13 種の変異と対照を実行、main のテストは 96 / 96)、AC-3 と AC-3b(実装者の log で確認、後始末も確認)、AC-4、AC-5 は pass。AC-6 は静的な半分を確認。`RALPH_VERIFY_SCOPE=full ./scripts/run-static-verify.sh`、check-skill-sync、check-sync、purity、cmp 8 対、shellcheck、TOML の一致が green。self-review の 8 件は HEAD で直っている。O-3(LOW): `.codex/config.toml:20-21` の「対話の session では approval_policy が危険なコマンドを止める」は確かめていない(前からの主張の持ち越し。sync-docs で確かめた形に直すか削る)。O-1 / O-2(INFO): plan のチェックボックスと、tech-debt の行が引く archive のパスは /pr で整う。未確認: HEAD での codex の再実行、`--ignore-rules` を受け付ける最小の codex の版、`-c sandbox_mode=read-only` のネットワーク遮断が組み込みの `:read-only` と同じか
+- 2026-10-03 test(cycle 1、2a31ea9f): PASS、MEDIUM 1 / LOW 1。`RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh` green、`tests/test-codex-exec-invocation.sh` は macOS の sh と dash、ubuntu 24.04(mawk)の sh、dash、bash で 132 / 132。最終 HEAD で Step 4 の行をそのまま実際の codex で流し、`sandbox: read-only`、`codex rc=0`。抜け道の探索(93 種の変異)で G-1(MEDIUM、この変更の回帰の検査の穴): codex-cli 0.154.0 は `exec` より後ろに `-c` が 1 つでもあると、root の `-c` をすべて捨てる(無害なキーでも)。変異した行を実際に流すと `sandbox: danger-full-access` になり、テストは緑のまま。わざと書き換えないと起きない残りの穴: 行の継続、`command codex` で始まらない呼び出し、`#` コメント、`$(...)` 以外の展開、root の `-c mcp_servers.*`(MCP の command は read-only でも sandbox の外で動く)。手順の注記: tester の 1 回目の書き込みは scratch の `report-draft.md` で harness に拒否された(「subagent は結果をテキストで返す」)。メンテナの判断で tester に再試行させ、`docs/reports/` への書き込みは通った
+- 2026-10-03 work: Slice D は implementer に委譲(2d385bc3、テストだけ、+42 / -5)。check (iv): `exec` より後ろの `-c`、`--config`、`--enable`、`--disable`、`sandbox_mode=` の語で落ちる。144 / 144(sh、dash、mawk)。G-1 の変異 4 種と追加の 4 種が落ち、これまでの 29 種も落ちる
+- 2026-10-03 test addendum(Slice D、698d0d5c): PASS、LOW 1。280 の変異のうち捕まるのが 104 から 162 になり、後退は 0。BSD awk と mawk、3 つの shell で結果が一致。G-7(LOW): codex は `e` を `exec` の別名として受け付けるので、`e review … -c … --title exec` のように 2 か所をわざと書き換えると check (iv) をすり抜ける
+- 2026-10-04 work: Slice E は implementer に委譲(2b2fac0c、テストだけ、+36 / -12)。check (iv) の目印を呼び出しの最初のサブコマンドの語にし(値を取る root のオプションは `codex --help` の一覧で飛ばす)、その語は文字どおりの `exec` でなければ落ちる(`e` は「use exec, not the e alias」)。`exec` の別名は `e` だけ(`codex --help` で確認)。144 / 144(sh、dash、mawk)。G-7 の 2 つの形と `e review` が落ち、これまでの 37 種も落ちる。orchestrator も 144 / 144(sh、dash)を確認
 
 ## Progress checklist
 
@@ -117,7 +121,7 @@ skill の呼び出しと文書とテストの変更だけ。問題があれば r
 - [x] Implementation started
 - [x] Review artifact created
 - [x] Verification artifact created
-- [ ] Test artifact created
+- [x] Test artifact created
 - [ ] PR created
 
 ## Readiness checklist
