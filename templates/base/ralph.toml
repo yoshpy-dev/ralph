@@ -10,7 +10,7 @@ require_go = false
 
 # [org] — envelope config for the `ralph org` verb set (spawn / send / wait /
 # read / stop / status / disband) and for `ralph doctor`'s org checks. The
-# fields are validated so downstream PRs (seat-ification, Lead autonomy,
+# fields are validated so downstream PRs (seat-ification, Leader autonomy,
 # Watchdog) build on a stable foundation. Absent [org] is fully compatible —
 # Load() backfills these exact defaults with no warnings.
 [org]
@@ -79,6 +79,10 @@ codex_verified = false
 # Example:
 # [org.permissions.roles]
 # reviewer = "guarded"
+# Note: the reviewer re-runs run-static-verify.sh / run-test.sh, so a
+# guarded claude reviewer stops at the permission prompt. A guarded codex
+# reviewer follows codex's own approval settings instead (whether it stops
+# there is unverified).
 
 # [org.watchdog] configures `ralph org watch`'s two layers: a deterministic
 # pulse-layer timer (interval_seconds, stall_minutes) and an on-demand

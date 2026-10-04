@@ -1,6 +1,7 @@
 package org
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -64,6 +65,86 @@ func TestMarkdownSection_AnchorsHeaderAndBoundsBody(t *testing.T) {
 	}
 }
 
+// numberedItemStart matches the start of a numbered list item ("1. ", "12. ").
+var numberedItemStart = regexp.MustCompile(`^\d+\. `)
+
+// markdownItem returns the list item of section that contains marker: the text
+// from the first line containing marker up to, but not including, the next
+// line whose trimmed form starts with "- " or with a number and ". " (the next
+// bullet or numbered item), or the end of section. found is false when marker
+// is absent. It lets a test assert that one instruction carries its own
+// wording, so a match in a neighbouring item cannot mask a regression.
+func markdownItem(section, marker string) (item string, found bool) {
+	lines := strings.Split(section, "\n")
+	start := -1
+	for i, line := range lines {
+		if strings.Contains(line, marker) {
+			start = i
+			break
+		}
+	}
+	if start < 0 {
+		return "", false
+	}
+	end := len(lines)
+	for i := start + 1; i < len(lines); i++ {
+		trimmed := strings.TrimSpace(lines[i])
+		if strings.HasPrefix(trimmed, "- ") || numberedItemStart.MatchString(trimmed) {
+			end = i
+			break
+		}
+	}
+	return strings.Join(lines[start:end], "\n"), true
+}
+
+func TestMarkdownItem_BoundsItemAtNextBulletOrNumberedItem(t *testing.T) {
+	const doc = "intro\n" +
+		"1. first item\n" +
+		"   continues here\n" +
+		"2. second item mentions MARK\n" +
+		"   - nested bullet\n" +
+		"3. third item\n" +
+		"- bullet with MARK2\n" +
+		"  wrapped line\n" +
+		"- last bullet\n" +
+		"tail MARK3\n" +
+		"more tail"
+	cases := []struct {
+		name, marker, wantItem string
+		wantFound              bool
+	}{
+		{"numbered item stops before its nested bullet", "MARK", "2. second item mentions MARK", true},
+		{"bullet keeps its wrapped continuation line", "MARK2", "- bullet with MARK2\n  wrapped line", true},
+		{"a final item runs to the end of the text", "MARK3", "tail MARK3\nmore tail", true},
+		{"an absent marker is not found", "NOPE", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			item, found := markdownItem(doc, tc.marker)
+			if found != tc.wantFound || item != tc.wantItem {
+				t.Errorf("markdownItem(doc, %q) = (%q, %v), want (%q, %v)", tc.marker, item, found, tc.wantItem, tc.wantFound)
+			}
+		})
+	}
+}
+
+// renderSeatPrompt renders the built-in template for role with the shared test
+// vars and fails the test when no template is embedded.
+func renderSeatPrompt(t *testing.T, role string) string {
+	t.Helper()
+	vars := testRolePromptVars()
+	vars.Role = role
+	vars.SeatID = role
+	text, ok, err := RenderRolePrompt(role, vars)
+	if err != nil {
+		t.Fatalf("RenderRolePrompt(%q): unexpected error: %v", role, err)
+	}
+	if !ok {
+		t.Fatalf("expected ok=true for the built-in %s template", role)
+	}
+	return text
+}
+
 func TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted(t *testing.T) {
 	text, ok, err := RenderRolePrompt("reviewer", testRolePromptVars())
 	if err != nil {
@@ -112,81 +193,72 @@ func TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted(t *testing.T) {
 	}
 }
 
-func TestRenderRolePrompt_QA_AllKnownVarsSubstituted(t *testing.T) {
+func TestRenderRolePrompt_QA_NoTemplate(t *testing.T) {
+	// The qa seat template was retired: its deterministic-gate re-run moved
+	// into the reviewer template, so "qa" is an ordinary role with no template.
 	vars := testRolePromptVars()
-	vars.Role = "qa"
-	vars.SeatID = "qa-1"
-	text, ok, err := RenderRolePrompt("qa", vars)
+	vars.Role = removedRoleName
+	vars.SeatID = removedRoleName + "-1"
+	text, ok, err := RenderRolePrompt(removedRoleName, vars)
 	if err != nil {
-		t.Fatalf("RenderRolePrompt: unexpected error: %v", err)
+		t.Fatalf("RenderRolePrompt: expected no error for the retired qa role, got %v", err)
 	}
-	if !ok {
-		t.Fatal("expected ok=true for the built-in qa template")
+	if ok {
+		t.Fatal("expected ok=false: the qa seat template no longer exists")
 	}
-	for _, want := range []string{"org-a", "qa-1", "ralph-org-a", "qa", "internal/org/**"} {
-		if !strings.Contains(text, want) {
-			t.Errorf("expected rendered qa prompt to contain %q, got:\n%s", want, text)
-		}
-	}
-	if strings.Contains(text, "{{") {
-		t.Errorf("expected no unsubstituted {{...}} placeholders for known vars, got:\n%s", text)
-	}
-	if !strings.Contains(text, ".claude/rules/ralph/agent-messaging.md") {
-		t.Errorf("expected qa template to reference the protocol rule doc, got:\n%s", text)
-	}
-	if !strings.Contains(text, "run-static-verify.sh") || !strings.Contains(text, "run-test.sh") {
-		t.Errorf("expected qa template to reference the deterministic gate scripts, got:\n%s", text)
+	if text != "" {
+		t.Fatalf("expected empty text for the retired qa role, got %q", text)
 	}
 }
 
-func TestRenderRolePrompt_Lead_AllKnownVarsSubstituted(t *testing.T) {
+func TestRenderRolePrompt_Leader_AllKnownVarsSubstituted(t *testing.T) {
 	vars := testRolePromptVars()
-	vars.Role = "lead"
-	vars.SeatID = "lead"
+	vars.Role = "leader"
+	vars.SeatID = "leader"
 	vars.Task = "dry-run 座席を1つ spawn し、typed message を送り、status を確認して disband せよ"
 	// Derive the envelope from the shipped default pool (EnvelopeSummary is
 	// what `ralph org start` renders) so this fixture never goes stale when
 	// the default model_pool changes; defaults_sync_test.go locks that
 	// default separately.
 	vars.Envelope = EnvelopeSummary(config.Default().Org)
-	text, ok, err := RenderRolePrompt("lead", vars)
+	text, ok, err := RenderRolePrompt("leader", vars)
 	if err != nil {
 		t.Fatalf("RenderRolePrompt: unexpected error: %v", err)
 	}
 	if !ok {
-		t.Fatal("expected ok=true for the built-in lead template")
+		t.Fatal("expected ok=true for the built-in leader template")
 	}
-	for _, want := range []string{"org-a", "lead", "ralph-org-a", vars.Task, vars.Envelope} {
+	for _, want := range []string{"org-a", "leader", "ralph-org-a", vars.Task, vars.Envelope} {
 		if !strings.Contains(text, want) {
-			t.Errorf("expected rendered lead prompt to contain %q, got:\n%s", want, text)
+			t.Errorf("expected rendered leader prompt to contain %q, got:\n%s", want, text)
 		}
 	}
 	if strings.Contains(text, "{{") {
 		t.Errorf("expected no unsubstituted {{...}} placeholders for known vars, got:\n%s", text)
 	}
 	if !strings.Contains(text, ".claude/rules/ralph/agent-messaging.md") {
-		t.Errorf("expected lead template to reference the protocol rule doc, got:\n%s", text)
+		t.Errorf("expected leader template to reference the protocol rule doc, got:\n%s", text)
 	}
 	if !strings.Contains(text, "/org") {
-		t.Errorf("expected lead template to reference the /org skill (its full operating manual), got:\n%s", text)
+		t.Errorf("expected leader template to reference the /org skill (its full operating manual), got:\n%s", text)
 	}
 	if !strings.Contains(text, "ralph org report") {
-		t.Errorf("expected lead template to instruct the lead to run `ralph org report` before finishing, got:\n%s", text)
+		t.Errorf("expected leader template to instruct the leader to run `ralph org report` before finishing, got:\n%s", text)
 	}
 }
 
-func TestRenderRolePrompt_Lead_EmptyTaskAndEnvelope_NoLeftoverPlaceholders(t *testing.T) {
+func TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders(t *testing.T) {
 	vars := testRolePromptVars()
-	vars.Role = "lead"
-	vars.SeatID = "lead"
+	vars.Role = "leader"
+	vars.SeatID = "leader"
 	vars.Task = ""
 	vars.Envelope = ""
-	text, ok, err := RenderRolePrompt("lead", vars)
+	text, ok, err := RenderRolePrompt("leader", vars)
 	if err != nil {
 		t.Fatalf("RenderRolePrompt: unexpected error: %v", err)
 	}
 	if !ok {
-		t.Fatal("expected ok=true for the built-in lead template")
+		t.Fatal("expected ok=true for the built-in leader template")
 	}
 	if strings.Contains(text, "{{TASK}}") || strings.Contains(text, "{{ENVELOPE}}") {
 		t.Errorf("expected no leftover {{TASK}}/{{ENVELOPE}} placeholders even when both vars are empty, got:\n%s", text)
@@ -194,7 +266,7 @@ func TestRenderRolePrompt_Lead_EmptyTaskAndEnvelope_NoLeftoverPlaceholders(t *te
 }
 
 func TestRolePrompts_SeatTemplatesContainFanOutSection(t *testing.T) {
-	for _, role := range []string{"implementer", "reviewer", "qa"} {
+	for _, role := range []string{"implementer", "reviewer"} {
 		t.Run(role, func(t *testing.T) {
 			vars := testRolePromptVars()
 			vars.Role = role
@@ -212,29 +284,110 @@ func TestRolePrompts_SeatTemplatesContainFanOutSection(t *testing.T) {
 			if !strings.Contains(section, "max_seats") {
 				t.Errorf("expected %s template's fan-out section to mention max_seats, got section:\n%s", role, section)
 			}
-			if !strings.Contains(section, "lead") || !strings.Contains(section, "送ることは絶対に") {
-				t.Errorf("expected %s template's fan-out section to prohibit sub-agents from sending to lead, got section:\n%s", role, section)
+			if !strings.Contains(section, "leader") || !strings.Contains(section, "送ることは絶対に") {
+				t.Errorf("expected %s template's fan-out section to prohibit sub-agents from sending to leader, got section:\n%s", role, section)
 			}
 		})
 	}
 }
 
-func TestRenderRolePrompt_Lead_DelegatesToImplementer(t *testing.T) {
+func TestRenderRolePrompt_Leader_DelegatesToImplementer(t *testing.T) {
 	vars := testRolePromptVars()
-	vars.Role = "lead"
-	vars.SeatID = "lead"
-	text, ok, err := RenderRolePrompt("lead", vars)
+	vars.Role = "leader"
+	vars.SeatID = "leader"
+	text, ok, err := RenderRolePrompt("leader", vars)
 	if err != nil {
 		t.Fatalf("RenderRolePrompt: unexpected error: %v", err)
 	}
 	if !ok {
-		t.Fatal("expected ok=true for the built-in lead template")
+		t.Fatal("expected ok=true for the built-in leader template")
 	}
 	if !strings.Contains(text, "implementer") {
-		t.Errorf("expected lead template to delegate implementation to implementer seats, got:\n%s", text)
+		t.Errorf("expected leader template to delegate implementation to implementer seats, got:\n%s", text)
 	}
 	if strings.Contains(text, "budget") {
-		t.Errorf("expected lead template to no longer reference budget, got:\n%s", text)
+		t.Errorf("expected leader template to no longer reference budget, got:\n%s", text)
+	}
+}
+
+func TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing(t *testing.T) {
+	text := renderSeatPrompt(t, "reviewer")
+	mission, found := markdownSection(text, "## ミッション")
+	if !found {
+		t.Fatalf("expected the reviewer template to contain a '## ミッション' section, got:\n%s", text)
+	}
+
+	// The default gate commands, used when the leader's TASK names none.
+	for _, want := range []string{"./scripts/run-static-verify.sh", "./scripts/run-test.sh"} {
+		if !strings.Contains(mission, want) {
+			t.Errorf("expected the reviewer mission to name the gate script %q, got section:\n%s", want, mission)
+		}
+	}
+
+	// A failing gate and an unrunnable gate each return BLOCKED and stop short
+	// of the diff review. Each is checked inside its own list item so the
+	// wording of one cannot be satisfied by the other.
+	for _, marker := range []string{"GATE: fail", "GATE: unrunnable"} {
+		item, ok := markdownItem(mission, marker)
+		if !ok {
+			t.Errorf("expected the reviewer mission to have an item for %q, got section:\n%s", marker, mission)
+			continue
+		}
+		for _, want := range []string{"BLOCKED", "差分レビューに進まない"} {
+			if !strings.Contains(item, want) {
+				t.Errorf("expected the %q item of the reviewer mission to contain %q, got item:\n%s", marker, want, item)
+			}
+		}
+	}
+
+	// A passing gate leads to the diff review and is reported in the RESULT.
+	if !strings.Contains(mission, "GATE: pass") {
+		t.Errorf("expected the reviewer mission to report GATE: pass on a passing gate, got section:\n%s", mission)
+	}
+
+	// The retired qa seat is not a collaborator any more.
+	for _, banned := range []string{"QA 座席", "qa 座席"} {
+		if strings.Contains(text, banned) {
+			t.Errorf("expected the reviewer template not to mention %q, got:\n%s", banned, text)
+		}
+	}
+}
+
+func TestRenderRolePrompt_Leader_MissionRoutesGateBlocked(t *testing.T) {
+	text := renderSeatPrompt(t, "leader")
+	mission, found := markdownSection(text, "## ミッション")
+	if !found {
+		t.Fatalf("expected the leader template to contain a '## ミッション' section, got:\n%s", text)
+	}
+
+	// Review and verification (the gate re-run included) go to the reviewer.
+	if !strings.Contains(mission, "reviewer 座席へ委譲") {
+		t.Errorf("expected the leader mission to delegate review and verification to the reviewer seat, got section:\n%s", mission)
+	}
+
+	// GATE: fail goes back to the implementer; GATE: unrunnable does not.
+	failItem, ok := markdownItem(mission, "GATE: fail")
+	if !ok {
+		t.Errorf("expected the leader mission to handle GATE: fail, got section:\n%s", mission)
+	} else if !strings.Contains(failItem, "implementer 座席に差し戻") {
+		t.Errorf("expected the GATE: fail item to send the work back to the implementer seat, got item:\n%s", failItem)
+	}
+	unrunnableItem, ok := markdownItem(mission, "GATE: unrunnable")
+	if !ok {
+		t.Errorf("expected the leader mission to handle GATE: unrunnable, got section:\n%s", mission)
+	} else {
+		for _, want := range []string{"implementer には戻さず", "人に上げる"} {
+			if !strings.Contains(unrunnableItem, want) {
+				t.Errorf("expected the GATE: unrunnable item to contain %q, got item:\n%s", want, unrunnableItem)
+			}
+		}
+	}
+
+	// The retired qa seat is not a delegation target any more.
+	for _, banned := range []string{"qa 座席", "QA 座席"} {
+		if strings.Contains(text, banned) {
+			t.Errorf("expected the leader template not to mention %q, got:\n%s", banned, text)
+		}
 	}
 }
 
@@ -295,5 +448,138 @@ func TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText(t *testing.T) {
 	}
 	if !strings.Contains(text, defaultScopeText) {
 		t.Errorf("expected the rendered prompt to contain the default scope text %q, got:\n%s", defaultScopeText, text)
+	}
+}
+
+// oldLeaderName is the coordinator's retired identifier. Tests refer to it
+// through this constant instead of repeating the literal.
+const oldLeaderName = "lead"
+
+// removedRoleName is the seat template that was removed outright (its
+// deterministic-gate re-run moved to the reviewer role). Tests refer to it
+// through this constant instead of repeating the literal.
+const removedRoleName = "qa"
+
+func TestRetiredRoles_RemovedRoleNamesTheReviewerAsSuccessor(t *testing.T) {
+	r, ok := retiredRoles[removedRoleName]
+	if !ok {
+		t.Fatalf("retiredRoles has no entry for %q", removedRoleName)
+	}
+	if r.Successor != "reviewer" {
+		t.Errorf("Successor = %q, want %q", r.Successor, "reviewer")
+	}
+	if r.Kind != retiredRoleRemoved {
+		t.Errorf("Kind = %q, want %q", r.Kind, retiredRoleRemoved)
+	}
+}
+
+func TestRetiredRoles_OldLeaderNameIsRenamedToLeaderIdentity(t *testing.T) {
+	r, ok := retiredRoles[oldLeaderName]
+	if !ok {
+		t.Fatalf("retiredRoles has no entry for %q", oldLeaderName)
+	}
+	if r.Successor != LeaderIdentity {
+		t.Errorf("Successor = %q, want %q (LeaderIdentity)", r.Successor, LeaderIdentity)
+	}
+	if r.Kind != retiredRoleRenamed {
+		t.Errorf("Kind = %q, want %q", r.Kind, retiredRoleRenamed)
+	}
+}
+
+func TestRetiredRoles_SuccessorsAreLiveRoles(t *testing.T) {
+	// A successor that is itself retired would send the operator in a circle.
+	for name, r := range retiredRoles {
+		if _, retired := retiredRoles[r.Successor]; retired {
+			t.Errorf("retiredRoles[%q].Successor %q is itself retired", name, r.Successor)
+		}
+	}
+}
+
+func TestRetiredRoleConfigKeys(t *testing.T) {
+	cases := []struct {
+		name string
+		cfg  config.OrgConfig
+		want []RetiredRoleConfigKey
+	}{
+		{
+			name: "neither table has the old name",
+			cfg: config.OrgConfig{
+				Roles:       map[string][]string{"worker": {"sonnet"}},
+				Permissions: config.OrgPermissionsConfig{Roles: map[string]string{"reviewer": "guarded"}},
+			},
+			want: nil,
+		},
+		{
+			name: "nil maps",
+			cfg:  config.OrgConfig{},
+			want: nil,
+		},
+		{
+			name: "org.roles only",
+			cfg:  config.OrgConfig{Roles: map[string][]string{oldLeaderName: {"sonnet"}}},
+			want: []RetiredRoleConfigKey{{Key: "[org.roles]." + oldLeaderName, RenameTo: "[org.roles]." + LeaderIdentity}},
+		},
+		{
+			name: "an empty model list is still a present key",
+			cfg:  config.OrgConfig{Roles: map[string][]string{oldLeaderName: {}}},
+			want: []RetiredRoleConfigKey{{Key: "[org.roles]." + oldLeaderName, RenameTo: "[org.roles]." + LeaderIdentity}},
+		},
+		{
+			name: "org.permissions.roles only",
+			cfg:  config.OrgConfig{Permissions: config.OrgPermissionsConfig{Roles: map[string]string{oldLeaderName: "guarded"}}},
+			want: []RetiredRoleConfigKey{{Key: "[org.permissions.roles]." + oldLeaderName, RenameTo: "[org.permissions.roles]." + LeaderIdentity}},
+		},
+		{
+			name: "both tables, org.roles first",
+			cfg: config.OrgConfig{
+				Roles:       map[string][]string{oldLeaderName: {"sonnet"}},
+				Permissions: config.OrgPermissionsConfig{Roles: map[string]string{oldLeaderName: "guarded"}},
+			},
+			want: []RetiredRoleConfigKey{
+				{Key: "[org.roles]." + oldLeaderName, RenameTo: "[org.roles]." + LeaderIdentity},
+				{Key: "[org.permissions.roles]." + oldLeaderName, RenameTo: "[org.permissions.roles]." + LeaderIdentity},
+			},
+		},
+		{
+			name: "matching is case-sensitive",
+			cfg:  config.OrgConfig{Roles: map[string][]string{strings.ToUpper(oldLeaderName): {"sonnet"}}},
+			want: nil,
+		},
+		{
+			// A removed role's name is a legitimate custom-role key: a seat
+			// that brings its own --prompt can still be configured under it.
+			name: "removed role keys in both tables are not reported",
+			cfg: config.OrgConfig{
+				Roles:       map[string][]string{removedRoleName: {"sonnet"}},
+				Permissions: config.OrgPermissionsConfig{Roles: map[string]string{removedRoleName: "guarded"}},
+			},
+			want: nil,
+		},
+		{
+			name: "removed role keys do not hide renamed role keys",
+			cfg: config.OrgConfig{
+				Roles: map[string][]string{removedRoleName: {"sonnet"}, oldLeaderName: {"sonnet"}},
+				Permissions: config.OrgPermissionsConfig{Roles: map[string]string{
+					removedRoleName: "guarded", oldLeaderName: "guarded",
+				}},
+			},
+			want: []RetiredRoleConfigKey{
+				{Key: "[org.roles]." + oldLeaderName, RenameTo: "[org.roles]." + LeaderIdentity},
+				{Key: "[org.permissions.roles]." + oldLeaderName, RenameTo: "[org.permissions.roles]." + LeaderIdentity},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := RetiredRoleConfigKeys(tc.cfg)
+			if len(got) != len(tc.want) {
+				t.Fatalf("RetiredRoleConfigKeys = %+v, want %+v", got, tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Errorf("RetiredRoleConfigKeys[%d] = %+v, want %+v", i, got[i], tc.want[i])
+				}
+			}
+		})
 	}
 }

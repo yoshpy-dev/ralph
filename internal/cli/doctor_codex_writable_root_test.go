@@ -1997,14 +1997,14 @@ func TestCodexImplicitRootDetail_ConfigAbsent_SaysSoInsteadOfNamingAKey(t *testi
 // its rationale. codexWorkspaceWriteUnconditionalPhrase is the exact
 // substring both of the ORIGINAL (not-narrowed) warn wordings share -- the
 // absent-config form uses "and a codex seat under workspace-write cannot
-// send RESULT to lead", the exists-config form uses ", so a codex seat
-// under workspace-write cannot send RESULT to lead" -- and the narrowed
+// send RESULT to leader", the exists-config form uses ", so a codex seat
+// under workspace-write cannot send RESULT to leader" -- and the narrowed
 // wording deliberately does not contain it (it says "a codex seat whose
-// working directory does not contain it ... cannot send RESULT to lead"
+// working directory does not contain it ... cannot send RESULT to leader"
 // instead, with no "under workspace-write" in between), so its absence is
 // what proves the conditional wording REPLACED the unconditional one
 // rather than being appended alongside it.
-const codexWorkspaceWriteUnconditionalPhrase = "seat under workspace-write cannot send RESULT to lead"
+const codexWorkspaceWriteUnconditionalPhrase = "seat under workspace-write cannot send RESULT to leader"
 
 // codexAddWritableRootUnconditionalPhrase is the other half of the same
 // replaced-not-appended proof (self-review coverage gap (b)): both original

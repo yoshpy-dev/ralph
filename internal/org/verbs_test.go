@@ -1681,9 +1681,10 @@ func TestOrgStop_Codex_DryRunRespawnDoesNotDisplaceRealSpawnCorrelation(t *testi
 // yet -- a stale in-flight saga), followed by a retry for the SAME
 // org/seat with a DIFFERENT, out-of-pool model, which Spawn rejects via
 // ValidateSpawnEnvelope BEFORE it ever reaches the stale-in-flight
-// compensation branch (Spawn's own doc comment: step 2 runs before step
-// 4). The `rejected` event this appends carries the RETRY's own
-// Model/Driver, becoming the roster's latest SeatStatus for this seat --
+// compensation branch (Spawn's own doc comment: ValidateSpawnEnvelope runs
+// before stale-in-flight compensation). The `rejected` event this appends
+// carries the RETRY's own Model/Driver, becoming the roster's latest
+// SeatStatus for this seat --
 // but codexSpawnCorrelation still finds the ORIGINAL spawn_started
 // (rejected events are never scanned by it), so Stop's receipt must
 // compare the session record against the ORIGINAL commanded model, never
@@ -2174,7 +2175,7 @@ func TestOrgStop_Codex_RecoversPromptPathAfterAgentStartRetry(t *testing.T) {
 // was already observed, its receipt sitting at exactly
 // the same whole-second timestamp a respawn (B) of the same seat gets for
 // its own spawn_started -- reproducing "stop followed by spawn of the
-// same seat within one second", what a lead does when it replaces a seat
+// same seat within one second", what a leader does when it replaces a seat
 // and what a scripted flow can do in milliseconds. A's receipt must not
 // suppress B's own stop-time observation.
 func TestOrgStop_Codex_SameSecondRespawn_PreviousReceiptDoesNotSuppressObservation(t *testing.T) {

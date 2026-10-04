@@ -9,9 +9,9 @@ import (
 
 // EnvelopeSummary renders a single-line, human-readable summary of cfg's
 // [org] envelope: model_pool entries, max_seats, and the resolved
-// permissions default. It is substituted into prompts/lead.md's
+// permissions default. It is substituted into prompts/leader.md's
 // {{ENVELOPE}} placeholder (RenderRolePrompt, called from Spawn/dryRunSpawn
-// in spawn.go) so a headless lead seat (`ralph org start`) starts with a
+// in spawn.go) so a headless leader seat (`ralph org start`) starts with a
 // compact picture of what it is allowed to spawn, without needing to read
 // ralph.toml itself. Model pool entries are rendered in cfg.ModelPool's own
 // declared order (no re-sorting) so repeated calls with the same cfg are
@@ -61,7 +61,7 @@ func DefaultModelForDriver(cfg config.OrgConfig, driver string) (string, error) 
 // entry whose Driver matches driver AND is permitted for role under
 // [org.roles] (modelAllowedForRole, envelope.go), in cfg.ModelPool's
 // declared order. This is `ralph org spawn`'s --model default when the
-// caller omits --model (and `ralph org start`'s, with role lead): spawn
+// caller omits --model (and `ralph org start`'s, with role leader): spawn
 // accepts arbitrary roles, so a role-restricted pool (e.g. `implementer =
 // ["sonnet"]`) can make the pool's own head entry impermissible for the
 // requesting role -- picking that head anyway would warn-then-reject via

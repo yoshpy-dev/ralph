@@ -165,9 +165,9 @@ func (f *fakeHerdr) PaneSendKeys(_ context.Context, paneID string, keys ...strin
 }
 
 // fakeAgmsg is a call-recording, in-memory AgmsgClient. joinErrs, keyed by
-// agentID (e.g. "lead" or a seat id), lets a test inject a Join failure at
-// exactly one identity while leaving the other Join call (lead vs seat)
-// unaffected -- needed to test ensureLeadJoined's best-effort semantics
+// agentID (e.g. "leader" or a seat id), lets a test inject a Join failure at
+// exactly one identity while leaving the other Join call (leader vs seat)
+// unaffected -- needed to test ensureLeaderJoined's best-effort semantics
 // independently of the seat Join's hard-failure gate. mu guards every field
 // below -- see fakeHerdr's doc comment for why.
 type fakeAgmsg struct {
@@ -341,7 +341,7 @@ func TestOrgSpawn_HappyPath_EventSequenceAndReceipt(t *testing.T) {
 		t.Fatalf("expected pane_id pane-1, got %q", result.Seat.PaneID)
 	}
 
-	// tab_created, agent_started, agmsg_lead_joined, agmsg_joined, agmsg_announced.
+	// tab_created, agent_started, agmsg_leader_joined, agmsg_joined, agmsg_announced.
 	want := []string{EventSpawnStarted, EventOrgWorkspaceCreated, EventSpawnStep, EventSpawnStep, EventSpawnStep, EventSpawnStep, EventSpawnStep, EventSpawned}
 	got := eventNames(t, o)
 	if len(got) != len(want) {
@@ -357,7 +357,7 @@ func TestOrgSpawn_HappyPath_EventSequenceAndReceipt(t *testing.T) {
 	if len(h.calls) != len(wantCalls) {
 		t.Fatalf("expected herdr calls %v, got %v", wantCalls, h.calls)
 	}
-	wantAgmsgCalls := []string{"join:lead", "join:seat-1", "send"}
+	wantAgmsgCalls := []string{"join:leader", "join:seat-1", "send"}
 	if len(a.calls) != len(wantAgmsgCalls) {
 		t.Fatalf("expected agmsg calls %v, got %v", wantAgmsgCalls, a.calls)
 	}
@@ -367,17 +367,17 @@ func TestOrgSpawn_HappyPath_EventSequenceAndReceipt(t *testing.T) {
 		}
 	}
 	if len(a.joinCalls) != 2 {
-		t.Fatalf("expected 2 Join calls (lead then seat), got %+v", a.joinCalls)
+		t.Fatalf("expected 2 Join calls (leader then seat), got %+v", a.joinCalls)
 	}
-	leadJoin, seatJoin := a.joinCalls[0], a.joinCalls[1]
-	if leadJoin.agentID != "lead" || leadJoin.agmsgType != "claude-code" || leadJoin.projectPath != "/tmp/seat" {
-		t.Errorf("expected lead Join(team, lead, claude-code, /tmp/seat), got %+v", leadJoin)
+	leaderJoin, seatJoin := a.joinCalls[0], a.joinCalls[1]
+	if leaderJoin.agentID != "leader" || leaderJoin.agmsgType != "claude-code" || leaderJoin.projectPath != "/tmp/seat" {
+		t.Errorf("expected leader Join(team, leader, claude-code, /tmp/seat), got %+v", leaderJoin)
 	}
 	if seatJoin.agentID != "seat-1" || seatJoin.agmsgType != "claude-code" || seatJoin.projectPath != "/tmp/seat" {
 		t.Errorf("expected seat Join(team, seat-1, claude-code, /tmp/seat) for a claude driver seat, got %+v", seatJoin)
 	}
-	if leadJoin.team != seatJoin.team {
-		t.Errorf("expected lead and seat Join calls to target the same team, got %q vs %q", leadJoin.team, seatJoin.team)
+	if leaderJoin.team != seatJoin.team {
+		t.Errorf("expected leader and seat Join calls to target the same team, got %q vs %q", leaderJoin.team, seatJoin.team)
 	}
 
 	rr, err := o.Receipts.Read()
@@ -999,12 +999,12 @@ func TestOrgSpawn_FailureInjection_AgmsgSend_CompensatesExistingPane(t *testing.
 	if last.PaneID != "pane-1" {
 		t.Fatalf("expected orphaned pane_id pane-1 to remain traceable, got %q", last.PaneID)
 	}
-	assertDetailsContains(t, last.Details, "step=agmsg_announce", "lead_join=ok")
+	assertDetailsContains(t, last.Details, "step=agmsg_announce", "leader_join=ok")
 }
 
 func TestOrgSpawn_FailureInjection_AgmsgJoin_SeatJoinFails_CompensatesExistingPane(t *testing.T) {
-	// Seat Join is a hard-failure gate distinct from the lead's best-effort
-	// ensureLeadJoined: a seat Join failure must fail the saga at
+	// Seat Join is a hard-failure gate distinct from the leader's best-effort
+	// ensureLeaderJoined: a seat Join failure must fail the saga at
 	// "agmsg_join", before the HELLO Send is ever attempted.
 	o, h, a := testOrg(t)
 	a.joinErrs = map[string]error{"seat-1": errors.New("stub failure: seat join")}
@@ -1016,8 +1016,8 @@ func TestOrgSpawn_FailureInjection_AgmsgJoin_SeatJoinFails_CompensatesExistingPa
 	if len(h.sendKeysCalls) != 1 || h.sendKeysCalls[0] != "pane-1" {
 		t.Fatalf("expected exactly one compensation C-c to pane-1, got %v", h.sendKeysCalls)
 	}
-	if len(a.calls) != 2 || a.calls[0] != "join:lead" || a.calls[1] != "join:seat-1" {
-		t.Fatalf("expected lead Join then seat Join (no Send attempted after seat Join fails), got %v", a.calls)
+	if len(a.calls) != 2 || a.calls[0] != "join:leader" || a.calls[1] != "join:seat-1" {
+		t.Fatalf("expected leader Join then seat Join (no Send attempted after seat Join fails), got %v", a.calls)
 	}
 
 	rr, err := o.Manifest.Read()
@@ -1034,47 +1034,47 @@ func TestOrgSpawn_FailureInjection_AgmsgJoin_SeatJoinFails_CompensatesExistingPa
 	assertDetailsContains(t, last.Details, "step=agmsg_join", "C-c sent")
 }
 
-func TestOrgSpawn_EnsureLeadJoined_ErrorDoesNotFailSaga_WhenSeatJoinAndSendSucceed(t *testing.T) {
-	// ensureLeadJoined is best-effort: an error joining "lead" (e.g. it was
+func TestOrgSpawn_EnsureLeaderJoined_ErrorDoesNotFailSaga_WhenSeatJoinAndSendSucceed(t *testing.T) {
+	// ensureLeaderJoined is best-effort: an error joining "leader" (e.g. it was
 	// already a member and join.sh soft-failed on the retry) must not fail
 	// the saga on its own -- the seat's own Join and the HELLO Send are the
-	// authoritative gates. The lead-join error is still recorded on the
-	// agmsg_lead_joined spawn_step for diagnosis.
+	// authoritative gates. The leader-join error is still recorded on the
+	// agmsg_leader_joined spawn_step for diagnosis.
 	o, _, a := testOrg(t)
-	a.joinErrs = map[string]error{"lead": errors.New("stub: lead already a member")}
+	a.joinErrs = map[string]error{"leader": errors.New("stub: leader already a member")}
 
 	result := o.Spawn(mustSpawnParams("org-a", "seat-1"))
 	if result.Outcome != SpawnOutcomeSpawned {
-		t.Fatalf("expected SpawnOutcomeSpawned despite a lead-join error, got %v (err=%v)", result.Outcome, result.Err)
+		t.Fatalf("expected SpawnOutcomeSpawned despite a leader-join error, got %v (err=%v)", result.Outcome, result.Err)
 	}
 
 	rr, err := o.Manifest.Read()
 	if err != nil {
 		t.Fatalf("read manifest: %v", err)
 	}
-	var leadJoinedStep *ManifestEvent
+	var leaderJoinedStep *ManifestEvent
 	for i := range rr.Events {
 		if rr.Events[i].Details == "" {
 			continue
 		}
-		if strings.HasPrefix(rr.Events[i].Details, "agmsg_lead_joined") {
-			leadJoinedStep = &rr.Events[i]
+		if strings.HasPrefix(rr.Events[i].Details, "agmsg_leader_joined") {
+			leaderJoinedStep = &rr.Events[i]
 			break
 		}
 	}
-	if leadJoinedStep == nil {
-		t.Fatalf("expected an agmsg_lead_joined spawn_step event, got events %+v", rr.Events)
+	if leaderJoinedStep == nil {
+		t.Fatalf("expected an agmsg_leader_joined spawn_step event, got events %+v", rr.Events)
 	}
-	assertDetailsContains(t, leadJoinedStep.Details, "error=")
+	assertDetailsContains(t, leaderJoinedStep.Details, "error=")
 }
 
-func TestOrgSpawn_FailureInjection_AgmsgSend_DetailsIncludeLeadJoinError(t *testing.T) {
-	// When HELLO Send fails, the recorded lead-join outcome must be carried
+func TestOrgSpawn_FailureInjection_AgmsgSend_DetailsIncludeLeaderJoinError(t *testing.T) {
+	// When HELLO Send fails, the recorded leader-join outcome must be carried
 	// into the spawn_failed Details alongside the send failure itself, so an
-	// operator can immediately see whether a missing "lead" roster entry is
+	// operator can immediately see whether a missing "leader" roster entry is
 	// the likely root cause.
 	o, _, a := testOrg(t)
-	a.joinErrs = map[string]error{"lead": errors.New("stub: lead join failed")}
+	a.joinErrs = map[string]error{"leader": errors.New("stub: leader join failed")}
 	a.sendErr = errors.New("stub failure: agmsg send")
 
 	result := o.Spawn(mustSpawnParams("org-a", "seat-1"))
@@ -1090,7 +1090,7 @@ func TestOrgSpawn_FailureInjection_AgmsgSend_DetailsIncludeLeadJoinError(t *test
 	if last.Event != EventSpawnFailed {
 		t.Fatalf("expected last event to be spawn_failed, got %q", last.Event)
 	}
-	assertDetailsContains(t, last.Details, "step=agmsg_announce", "lead_join=", "stub: lead join failed", "stub failure: agmsg send")
+	assertDetailsContains(t, last.Details, "step=agmsg_announce", "leader_join=", "stub: leader join failed", "stub failure: agmsg send")
 }
 
 func TestOrgSpawn_DryRun_NoDriverCalls_EventsFlaggedAndExcludedByDefault(t *testing.T) {
@@ -1219,7 +1219,7 @@ func TestOrgSpawn_RoleTemplate_PromptFlagAppendedAfterTemplate(t *testing.T) {
 	o, h, _ := testOrg(t)
 
 	p := mustSpawnParams("org-a", "seat-1")
-	p.Role = "qa"
+	p.Role = "reviewer"
 	p.Prompt = "focus on the protocol package first"
 	if r := o.Spawn(p); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("spawn failed: %+v", r)
@@ -1234,7 +1234,7 @@ func TestOrgSpawn_RoleTemplate_PromptFlagAppendedAfterTemplate(t *testing.T) {
 	}
 	fileContent := string(data)
 	if !strings.Contains(fileContent, "run-static-verify.sh") {
-		t.Fatalf("expected the qa template body in the prompt file, got:\n%s", fileContent)
+		t.Fatalf("expected the reviewer template body in the prompt file, got:\n%s", fileContent)
 	}
 	if !strings.HasSuffix(fileContent, p.Prompt) {
 		t.Fatalf("expected --prompt appended at the end of the prompt file, got:\n%s", fileContent)
@@ -1626,19 +1626,19 @@ func TestOrgSpawn_FailureInjection_AgmsgSend_LeaveFailure_RecordedInDetails(t *t
 	assertDetailsContains(t, last.Details, "step=agmsg_announce", "leave=failed:", "stub failure: agmsg leave")
 }
 
-// --- AC-7: LeadIdentity const + lead agmsg type from LeadDriver -------------
+// --- AC-7: LeaderIdentity const + leader agmsg type from LeaderDriver -------------
 
-func TestLeadIdentity_ConstantValue(t *testing.T) {
-	if LeadIdentity != "lead" {
-		t.Fatalf("LeadIdentity = %q, want %q", LeadIdentity, "lead")
+func TestLeaderIdentity_ConstantValue(t *testing.T) {
+	if LeaderIdentity != "leader" {
+		t.Fatalf("LeaderIdentity = %q, want %q", LeaderIdentity, "leader")
 	}
 }
 
-func TestOrgSpawn_EnsureLeadJoined_DefaultLeadDriver_ClaudeCodeType(t *testing.T) {
+func TestOrgSpawn_EnsureLeaderJoined_DefaultLeaderDriver_ClaudeCodeType(t *testing.T) {
 	o, _, a := testOrg(t)
 
 	p := mustSpawnParams("org-a", "seat-1")
-	// LeadDriver left unset -- must default to "claude" -> "claude-code".
+	// LeaderDriver left unset -- must default to "claude" -> "claude-code".
 	result := o.Spawn(p)
 	if result.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("expected SpawnOutcomeSpawned, got %v (err=%v)", result.Outcome, result.Err)
@@ -1646,49 +1646,49 @@ func TestOrgSpawn_EnsureLeadJoined_DefaultLeadDriver_ClaudeCodeType(t *testing.T
 	if len(a.joinCalls) < 1 {
 		t.Fatalf("expected at least 1 Join call, got %+v", a.joinCalls)
 	}
-	leadJoin := a.joinCalls[0]
-	if leadJoin.agentID != LeadIdentity || leadJoin.agmsgType != "claude-code" {
-		t.Fatalf("expected lead Join(%s, claude-code, ...) by default, got %+v", LeadIdentity, leadJoin)
+	leaderJoin := a.joinCalls[0]
+	if leaderJoin.agentID != LeaderIdentity || leaderJoin.agmsgType != "claude-code" {
+		t.Fatalf("expected leader Join(%s, claude-code, ...) by default, got %+v", LeaderIdentity, leaderJoin)
 	}
 }
 
-func TestOrgSpawn_EnsureLeadJoined_LeadDriverCodex_UsesCodexAgmsgType(t *testing.T) {
-	// The lead identity's own driver (LeadDriver) is independent of the
+func TestOrgSpawn_EnsureLeaderJoined_LeaderDriverCodex_UsesCodexAgmsgType(t *testing.T) {
+	// The leader identity's own driver (LeaderDriver) is independent of the
 	// seat's Driver: a claude-driven seat spawned under a codex-coordinated
-	// org must still register "lead" with agmsg type "codex", not
+	// org must still register "leader" with agmsg type "codex", not
 	// "claude-code".
 	o, _, a := testOrg(t)
 
 	p := mustSpawnParams("org-a", "seat-1")
-	p.LeadDriver = "codex"
+	p.LeaderDriver = "codex"
 	result := o.Spawn(p)
 	if result.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("expected SpawnOutcomeSpawned, got %v (err=%v)", result.Outcome, result.Err)
 	}
 	if len(a.joinCalls) != 2 {
-		t.Fatalf("expected 2 Join calls (lead then seat), got %+v", a.joinCalls)
+		t.Fatalf("expected 2 Join calls (leader then seat), got %+v", a.joinCalls)
 	}
-	leadJoin, seatJoin := a.joinCalls[0], a.joinCalls[1]
-	if leadJoin.agentID != LeadIdentity || leadJoin.agmsgType != "codex" {
-		t.Fatalf("expected lead Join(%s, codex, ...) for LeadDriver=codex, got %+v", LeadIdentity, leadJoin)
+	leaderJoin, seatJoin := a.joinCalls[0], a.joinCalls[1]
+	if leaderJoin.agentID != LeaderIdentity || leaderJoin.agmsgType != "codex" {
+		t.Fatalf("expected leader Join(%s, codex, ...) for LeaderDriver=codex, got %+v", LeaderIdentity, leaderJoin)
 	}
 	if seatJoin.agentID != "seat-1" || seatJoin.agmsgType != "claude-code" {
 		t.Fatalf("expected the seat's own Join to still use its own Driver (claude -> claude-code), got %+v", seatJoin)
 	}
 }
 
-// --- AC-3: `ralph org start` = lead-seat spawn sugar (SeatID == LeadIdentity) ---
+// --- AC-3: `ralph org start` = leader-seat spawn sugar (SeatID == LeaderIdentity) ---
 
-func TestOrgSpawn_LeadSelfSpawn_SingleAgmsgJoin_NoHelloSend(t *testing.T) {
-	// SeatID == LeadIdentity ("ralph org start") must not double-join or
-	// HELLO-announce: the seat's own Join call IS the lead-identity join, and
-	// a HELLO from lead to lead would violate the star topology's
-	// single-coordinator premise (see the leadSelfSpawn doc comment in
+func TestOrgSpawn_LeaderSelfSpawn_SingleAgmsgJoin_NoHelloSend(t *testing.T) {
+	// SeatID == LeaderIdentity ("ralph org start") must not double-join or
+	// HELLO-announce: the seat's own Join call IS the leader-identity join, and
+	// a HELLO from leader to leader would violate the star topology's
+	// single-coordinator premise (see the leaderSelfSpawn doc comment in
 	// spawn.go's Spawn).
 	o, _, a := testOrg(t)
 
-	p := mustSpawnParams("org-a", LeadIdentity)
-	p.Role = LeadIdentity
+	p := mustSpawnParams("org-a", LeaderIdentity)
+	p.Role = LeaderIdentity
 	p.Task = "dry-run 座席を spawn し、送信・確認・disband まで行え"
 	result := o.Spawn(p)
 	if result.Outcome != SpawnOutcomeSpawned {
@@ -1696,14 +1696,14 @@ func TestOrgSpawn_LeadSelfSpawn_SingleAgmsgJoin_NoHelloSend(t *testing.T) {
 	}
 
 	if len(a.joinCalls) != 1 {
-		t.Fatalf("expected exactly 1 agmsg Join call for a lead-self spawn (no separate ensureLeadJoined), got %+v", a.joinCalls)
+		t.Fatalf("expected exactly 1 agmsg Join call for a leader-self spawn (no separate ensureLeaderJoined), got %+v", a.joinCalls)
 	}
-	if a.joinCalls[0].agentID != LeadIdentity {
-		t.Fatalf("expected the single Join call to register %q, got %+v", LeadIdentity, a.joinCalls[0])
+	if a.joinCalls[0].agentID != LeaderIdentity {
+		t.Fatalf("expected the single Join call to register %q, got %+v", LeaderIdentity, a.joinCalls[0])
 	}
 	for _, c := range a.calls {
 		if c == "send" {
-			t.Fatalf("expected no agmsg Send (HELLO) call for a lead-self spawn, got calls=%v", a.calls)
+			t.Fatalf("expected no agmsg Send (HELLO) call for a leader-self spawn, got calls=%v", a.calls)
 		}
 	}
 
@@ -1721,19 +1721,19 @@ func TestOrgSpawn_LeadSelfSpawn_SingleAgmsgJoin_NoHelloSend(t *testing.T) {
 	if joinedStep == nil {
 		t.Fatalf("expected an agmsg_joined spawn_step event, got events %+v", rr.Events)
 	}
-	assertDetailsContains(t, joinedStep.Details, "lead_self=true")
+	assertDetailsContains(t, joinedStep.Details, "leader_self=true")
 	for _, ev := range rr.Events {
-		if strings.HasPrefix(ev.Details, "agmsg_lead_joined") || ev.Details == "agmsg_announced" {
-			t.Fatalf("expected no agmsg_lead_joined/agmsg_announced step for a lead-self spawn, got %+v", ev)
+		if strings.HasPrefix(ev.Details, "agmsg_leader_joined") || ev.Details == "agmsg_announced" {
+			t.Fatalf("expected no agmsg_leader_joined/agmsg_announced step for a leader-self spawn, got %+v", ev)
 		}
 	}
 }
 
-func TestOrgSpawn_LeadSelfSpawn_DryRun_MirrorsSameSkip(t *testing.T) {
+func TestOrgSpawn_LeaderSelfSpawn_DryRun_MirrorsSameSkip(t *testing.T) {
 	o, _, _ := testOrg(t)
 
-	p := mustSpawnParams("org-a", LeadIdentity)
-	p.Role = LeadIdentity
+	p := mustSpawnParams("org-a", LeaderIdentity)
+	p.Role = LeaderIdentity
 	p.DryRun = true
 	result := o.Spawn(p)
 	if result.Outcome != SpawnOutcomeSpawned {
@@ -1744,28 +1744,28 @@ func TestOrgSpawn_LeadSelfSpawn_DryRun_MirrorsSameSkip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read manifest: %v", err)
 	}
-	sawJoinedLeadSelf := false
+	sawJoinedLeaderSelf := false
 	for _, ev := range rr.Events {
-		if strings.HasPrefix(ev.Details, "agmsg_lead_joined") || ev.Details == "agmsg_announced" {
-			t.Fatalf("expected no agmsg_lead_joined/agmsg_announced step in the dry-run trail for a lead-self spawn, got %+v", ev)
+		if strings.HasPrefix(ev.Details, "agmsg_leader_joined") || ev.Details == "agmsg_announced" {
+			t.Fatalf("expected no agmsg_leader_joined/agmsg_announced step in the dry-run trail for a leader-self spawn, got %+v", ev)
 		}
-		if ev.Details == "agmsg_joined lead_self=true" {
-			sawJoinedLeadSelf = true
+		if ev.Details == "agmsg_joined leader_self=true" {
+			sawJoinedLeaderSelf = true
 		}
 	}
-	if !sawJoinedLeadSelf {
-		t.Fatalf("expected an 'agmsg_joined lead_self=true' step in the dry-run trail, got events %+v", rr.Events)
+	if !sawJoinedLeaderSelf {
+		t.Fatalf("expected an 'agmsg_joined leader_self=true' step in the dry-run trail, got events %+v", rr.Events)
 	}
 }
 
-func TestOrgSpawn_LeadRole_TaskAndEnvelopeSubstitutedIntoPromptFile(t *testing.T) {
+func TestOrgSpawn_LeaderRole_TaskAndEnvelopeSubstitutedIntoPromptFile(t *testing.T) {
 	// `ralph org start`'s Task and the org's EnvelopeSummary must both land
-	// in the lead seat's rendered prompt file (the lead.md template is long
-	// enough to always need the prompt-file path, same as reviewer/qa).
+	// in the leader seat's rendered prompt file (the leader.md template is long
+	// enough to always need the prompt-file path, same as reviewer).
 	o, h, _ := testOrg(t)
 
-	p := mustSpawnParams("org-a", LeadIdentity)
-	p.Role = LeadIdentity
+	p := mustSpawnParams("org-a", LeaderIdentity)
+	p.Role = LeaderIdentity
 	p.Task = "dry-run 座席を1つ spawn し、typed message を送り、status を確認して disband せよ"
 	if r := o.Spawn(p); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("spawn failed: %+v", r)
@@ -1783,7 +1783,7 @@ func TestOrgSpawn_LeadRole_TaskAndEnvelopeSubstitutedIntoPromptFile(t *testing.T
 	fileContent := string(data)
 	for _, want := range []string{p.Task, "model_pool:", "max_seats:", "permission default:"} {
 		if !strings.Contains(fileContent, want) {
-			t.Errorf("expected the lead prompt file content to contain %q, got:\n%s", want, fileContent)
+			t.Errorf("expected the leader prompt file content to contain %q, got:\n%s", want, fileContent)
 		}
 	}
 }
@@ -2783,5 +2783,461 @@ func TestOrgSpawn_Codex_DryRun_ModelReceiptUnchanged(t *testing.T) {
 	}
 	if len(rr.Receipts) != 1 || rr.Receipts[0] != result.ModelReceipt {
 		t.Fatalf("expected the persisted receipt to match SpawnResult.ModelReceipt, got %+v vs %+v", rr.Receipts, result.ModelReceipt)
+	}
+}
+
+// TestOrgSpawn_RetiredLeaderName_RejectedBeforeAnyManifestWrite covers the
+// plain rejection of the coordinator's retired name: --role, --id, and the
+// two ralph.toml keys. For every case, in both dry-run and real mode, the
+// outcome is Rejected with an error that names the replacement, and the
+// guard sits ahead of any manifest event or receipt, so neither gets one
+// (the normal reject() path would have written one of each).
+func TestOrgSpawn_RetiredLeaderName_RejectedBeforeAnyManifestWrite(t *testing.T) {
+	cases := []struct {
+		name    string
+		mutate  func(p *SpawnParams, cfg *config.OrgConfig)
+		wantErr []string
+	}{
+		{
+			name:    "role",
+			mutate:  func(p *SpawnParams, _ *config.OrgConfig) { p.Role = oldLeaderName },
+			wantErr: []string{LeaderIdentity, "--role " + LeaderIdentity},
+		},
+		{
+			name: "role with --prompt is still rejected",
+			mutate: func(p *SpawnParams, _ *config.OrgConfig) {
+				p.Role = oldLeaderName
+				p.Prompt = "a prompt does not rescue the old name"
+			},
+			wantErr: []string{LeaderIdentity, "--role " + LeaderIdentity},
+		},
+		{
+			name:    "seat id",
+			mutate:  func(p *SpawnParams, _ *config.OrgConfig) { p.SeatID = oldLeaderName },
+			wantErr: []string{LeaderIdentity, "agmsg identity"},
+		},
+		{
+			name: "seat id with role leader and --prompt is still rejected",
+			mutate: func(p *SpawnParams, _ *config.OrgConfig) {
+				p.SeatID = oldLeaderName
+				p.Role = LeaderIdentity
+				p.Prompt = "custom"
+			},
+			wantErr: []string{LeaderIdentity, "agmsg identity"},
+		},
+		{
+			name:    "[org.roles] key",
+			mutate:  func(_ *SpawnParams, cfg *config.OrgConfig) { cfg.Roles[oldLeaderName] = []string{"sonnet"} },
+			wantErr: []string{"[org.roles]." + oldLeaderName, "[org.roles]." + LeaderIdentity},
+		},
+		{
+			name: "[org.permissions.roles] key",
+			mutate: func(_ *SpawnParams, cfg *config.OrgConfig) {
+				cfg.Permissions.Roles = map[string]string{oldLeaderName: "guarded"}
+			},
+			wantErr: []string{"[org.permissions.roles]." + oldLeaderName, "[org.permissions.roles]." + LeaderIdentity},
+		},
+	}
+	for _, tc := range cases {
+		for _, dryRun := range []bool{false, true} {
+			mode := "real"
+			if dryRun {
+				mode = "dry-run"
+			}
+			t.Run(tc.name+"/"+mode, func(t *testing.T) {
+				o, h, a := testOrg(t)
+				p := mustSpawnParams("org-a", "seat-1")
+				p.DryRun = dryRun
+				tc.mutate(&p, &o.Config)
+
+				result := o.Spawn(p)
+
+				if result.Outcome != SpawnOutcomeRejected {
+					t.Fatalf("Outcome = %v, want SpawnOutcomeRejected (err=%v)", result.Outcome, result.Err)
+				}
+				if result.Err == nil {
+					t.Fatal("expected a non-nil Err so the CLI exits non-zero")
+				}
+				for _, want := range tc.wantErr {
+					if !strings.Contains(result.Err.Error(), want) {
+						t.Errorf("error %q should contain %q", result.Err.Error(), want)
+					}
+				}
+				if len(h.calls) != 0 || len(a.calls) != 0 {
+					t.Errorf("expected no driver calls, got herdr=%v agmsg=%v", h.calls, a.calls)
+				}
+				if got := eventNames(t, o); len(got) != 0 {
+					t.Errorf("expected no manifest event for the retired-name rejection, got %v", got)
+				}
+				rr, err := o.Receipts.Read()
+				if err != nil {
+					t.Fatalf("read receipts: %v", err)
+				}
+				if len(rr.Receipts) != 0 {
+					t.Errorf("expected no receipt for the retired-name rejection, got %+v", rr.Receipts)
+				}
+				if result.ModelReceipt != (Receipt{}) {
+					t.Errorf("expected a zero ModelReceipt, got %+v", result.ModelReceipt)
+				}
+			})
+		}
+	}
+}
+
+// TestOrgSpawn_RetiredLeaderName_ConfigKeyErrorNamesEveryOffendingKey pins
+// that a ralph.toml with the old key in both tables lists both, so the
+// operator renames them in one pass instead of one rejection per table.
+func TestOrgSpawn_RetiredLeaderName_ConfigKeyErrorNamesEveryOffendingKey(t *testing.T) {
+	o, _, _ := testOrg(t)
+	o.Config.Roles[oldLeaderName] = []string{"sonnet"}
+	o.Config.Permissions.Roles = map[string]string{oldLeaderName: "guarded"}
+
+	result := o.Spawn(mustSpawnParams("org-a", "seat-1"))
+
+	if result.Outcome != SpawnOutcomeRejected || result.Err == nil {
+		t.Fatalf("expected a rejection, got %+v", result)
+	}
+	for _, want := range []string{"[org.roles]." + oldLeaderName, "[org.permissions.roles]." + oldLeaderName} {
+		if !strings.Contains(result.Err.Error(), want) {
+			t.Errorf("error %q should name %q", result.Err.Error(), want)
+		}
+	}
+}
+
+// TestOrgSpawn_RetiredLeaderName_CaseSensitive pins that the guard compares
+// exactly, like the rest of the role handling: an upper-case spelling is a
+// different (unknown) role and spawns normally.
+func TestOrgSpawn_RetiredLeaderName_CaseSensitive(t *testing.T) {
+	for _, dryRun := range []bool{false, true} {
+		mode := "real"
+		if dryRun {
+			mode = "dry-run"
+		}
+		t.Run(mode, func(t *testing.T) {
+			o, _, _ := testOrg(t)
+			p := mustSpawnParams("org-a", "seat-1")
+			p.DryRun = dryRun
+			p.Role = strings.ToUpper(oldLeaderName[:1]) + oldLeaderName[1:]
+
+			result := o.Spawn(p)
+
+			if result.Outcome != SpawnOutcomeSpawned || result.Err != nil {
+				t.Fatalf("expected the upper-case spelling %q to spawn, got %+v", p.Role, result)
+			}
+		})
+	}
+}
+
+// TestOrgSpawn_RetiredLeaderName_UnrelatedConfigKeysAndRolesStillSpawn is the
+// negative control for the guard: other roles, an empty role, and role keys
+// in the config tables that are not the old name must not be touched.
+func TestOrgSpawn_RetiredLeaderName_UnrelatedConfigKeysAndRolesStillSpawn(t *testing.T) {
+	for _, role := range []string{"", "worker", LeaderIdentity, "reviewer"} {
+		t.Run("role="+role, func(t *testing.T) {
+			o, _, _ := testOrg(t)
+			o.Config.Roles["worker"] = []string{"sonnet"}
+			o.Config.Permissions.Roles = map[string]string{"reviewer": "edits"}
+			p := mustSpawnParams("org-a", "seat-1")
+			p.Role = role
+
+			result := o.Spawn(p)
+
+			if result.Outcome != SpawnOutcomeSpawned || result.Err != nil {
+				t.Fatalf("expected role %q to spawn, got %+v", role, result)
+			}
+		})
+	}
+}
+
+// TestOrgSpawn_RemovedRole_WithoutPrompt_RejectedBeforeAnyManifestWrite covers
+// the guard for a role whose template was removed outright: with no --prompt
+// there is nothing to tell the seat what to do, so the spawn is refused with
+// guidance to the successor role and to --prompt. Like the renamed-name
+// rejection it sits ahead of the manifest and the receipts, in dry-run and
+// real mode alike.
+func TestOrgSpawn_RemovedRole_WithoutPrompt_RejectedBeforeAnyManifestWrite(t *testing.T) {
+	for _, dryRun := range []bool{false, true} {
+		mode := "real"
+		if dryRun {
+			mode = "dry-run"
+		}
+		t.Run(mode, func(t *testing.T) {
+			o, h, a := testOrg(t)
+			p := mustSpawnParams("org-a", "seat-1")
+			p.DryRun = dryRun
+			p.Role = removedRoleName
+
+			result := o.Spawn(p)
+
+			if result.Outcome != SpawnOutcomeRejected {
+				t.Fatalf("Outcome = %v, want SpawnOutcomeRejected (err=%v)", result.Outcome, result.Err)
+			}
+			if result.Err == nil {
+				t.Fatal("expected a non-nil Err so the CLI exits non-zero")
+			}
+			for _, want := range []string{"reviewer", "--prompt", removedRoleName} {
+				if !strings.Contains(result.Err.Error(), want) {
+					t.Errorf("error %q should contain %q", result.Err.Error(), want)
+				}
+			}
+			if len(h.calls) != 0 || len(a.calls) != 0 {
+				t.Errorf("expected no driver calls, got herdr=%v agmsg=%v", h.calls, a.calls)
+			}
+			if got := eventNames(t, o); len(got) != 0 {
+				t.Errorf("expected no manifest event for the removed-role rejection, got %v", got)
+			}
+			rr, err := o.Receipts.Read()
+			if err != nil {
+				t.Fatalf("read receipts: %v", err)
+			}
+			if len(rr.Receipts) != 0 {
+				t.Errorf("expected no receipt for the removed-role rejection, got %+v", rr.Receipts)
+			}
+			if result.ModelReceipt != (Receipt{}) {
+				t.Errorf("expected a zero ModelReceipt, got %+v", result.ModelReceipt)
+			}
+		})
+	}
+}
+
+// TestOrgSpawn_RemovedRole_WithPrompt_StartsWithPromptOnly pins the other half
+// of the guard: a --prompt gives the seat its purpose, so the removed name is
+// then an ordinary custom role. No template exists for it, so the initial
+// prompt is exactly the --prompt text -- inline when it is short and
+// single-line, through the prompt file otherwise.
+func TestOrgSpawn_RemovedRole_WithPrompt_StartsWithPromptOnly(t *testing.T) {
+	t.Run("inline prompt", func(t *testing.T) {
+		o, h, _ := testOrg(t)
+		p := mustSpawnParams("org-a", "seat-1")
+		p.Role = removedRoleName
+		p.Prompt = "custom qa instructions"
+
+		result := o.Spawn(p)
+
+		if result.Outcome != SpawnOutcomeSpawned || result.Err != nil {
+			t.Fatalf("expected the removed role with --prompt to spawn, got %+v", result)
+		}
+		args := h.agentStartArgs[0]
+		// [--permission-mode bypassPermissions --model <model> <prompt>].
+		if len(args) != 5 || args[4] != p.Prompt {
+			t.Fatalf("expected the initial prompt to be exactly %q as the last AgentStart arg, got %v", p.Prompt, args)
+		}
+	})
+
+	t.Run("multi-line prompt goes through the prompt file unchanged", func(t *testing.T) {
+		o, h, _ := testOrg(t)
+		p := mustSpawnParams("org-a", "seat-1")
+		p.Role = removedRoleName
+		p.Prompt = "custom qa instructions\nsecond line"
+
+		result := o.Spawn(p)
+
+		if result.Outcome != SpawnOutcomeSpawned || result.Err != nil {
+			t.Fatalf("expected the removed role with --prompt to spawn, got %+v", result)
+		}
+		args := h.agentStartArgs[0]
+		if len(args) != 5 || !strings.HasPrefix(args[4], "役割指示を読み込んで従ってください: ") {
+			t.Fatalf("expected a prompt-file pointer as the last AgentStart arg, got %v", args)
+		}
+		promptPath := strings.TrimPrefix(args[4], "役割指示を読み込んで従ってください: ")
+		data, err := os.ReadFile(promptPath)
+		if err != nil {
+			t.Fatalf("expected the prompt file to exist at %q: %v", promptPath, err)
+		}
+		if string(data) != p.Prompt {
+			t.Fatalf("expected the prompt file to hold exactly the --prompt text %q, got %q", p.Prompt, string(data))
+		}
+	})
+
+	t.Run("dry-run", func(t *testing.T) {
+		o, h, _ := testOrg(t)
+		p := mustSpawnParams("org-a", "seat-1")
+		p.DryRun = true
+		p.Role = removedRoleName
+		p.Prompt = "custom qa instructions"
+
+		result := o.Spawn(p)
+
+		if result.Outcome != SpawnOutcomeSpawned || result.Err != nil {
+			t.Fatalf("expected the removed role with --prompt to pass a dry-run, got %+v", result)
+		}
+		if len(h.calls) != 0 {
+			t.Errorf("expected a dry-run to make no herdr calls, got %v", h.calls)
+		}
+	})
+}
+
+// TestOrgSpawn_RemovedRole_OnlyTheRoleIsGuarded pins what the removed-kind
+// guard leaves alone: the name as a seat id (only a renamed name's old
+// agmsg identity is rejected there), and ralph.toml keys under the name
+// (a legitimate custom-role key for a seat that brings its own --prompt).
+func TestOrgSpawn_RemovedRole_OnlyTheRoleIsGuarded(t *testing.T) {
+	t.Run("seat id with role reviewer", func(t *testing.T) {
+		o, _, _ := testOrg(t)
+		p := mustSpawnParams("org-a", removedRoleName)
+		p.Role = "reviewer"
+
+		result := o.Spawn(p)
+
+		if result.Outcome != SpawnOutcomeSpawned || result.Err != nil {
+			t.Fatalf("expected seat id %q with role reviewer to spawn, got %+v", removedRoleName, result)
+		}
+	})
+
+	t.Run("seat id with an empty role and no prompt", func(t *testing.T) {
+		o, _, _ := testOrg(t)
+		p := mustSpawnParams("org-a", removedRoleName)
+		p.Role = ""
+
+		result := o.Spawn(p)
+
+		if result.Outcome != SpawnOutcomeSpawned || result.Err != nil {
+			t.Fatalf("expected seat id %q with an empty role to spawn, got %+v", removedRoleName, result)
+		}
+	})
+
+	t.Run("config keys under the name", func(t *testing.T) {
+		o, _, _ := testOrg(t)
+		o.Config.Roles[removedRoleName] = []string{"sonnet"}
+		o.Config.Permissions.Roles = map[string]string{removedRoleName: "guarded"}
+		p := mustSpawnParams("org-a", "seat-1")
+		p.Role = removedRoleName
+		p.Prompt = "custom qa instructions"
+
+		result := o.Spawn(p)
+
+		if result.Outcome != SpawnOutcomeSpawned || result.Err != nil {
+			t.Fatalf("expected [org.roles].%s and [org.permissions.roles].%s not to block a spawn, got %+v",
+				removedRoleName, removedRoleName, result)
+		}
+	})
+
+	t.Run("upper-case spelling is an unknown role", func(t *testing.T) {
+		o, _, _ := testOrg(t)
+		p := mustSpawnParams("org-a", "seat-1")
+		p.Role = strings.ToUpper(removedRoleName)
+
+		result := o.Spawn(p)
+
+		if result.Outcome != SpawnOutcomeSpawned || result.Err != nil {
+			t.Fatalf("expected the upper-case spelling %q to spawn, got %+v", p.Role, result)
+		}
+	})
+}
+
+// TestOrgSpawn_RetiredLeaderName_ConfigKeyErrorDescribesTheRealFallback pins
+// the wording of the retired-key rejection: the role falls back to the full
+// model_pool and to [org.permissions].default, which is only "autonomous" when
+// the operator has not changed it, so the message must not assert autonomous.
+func TestOrgSpawn_RetiredLeaderName_ConfigKeyErrorDescribesTheRealFallback(t *testing.T) {
+	o, _, _ := testOrg(t)
+	o.Config.Permissions.Roles = map[string]string{oldLeaderName: "guarded"}
+
+	result := o.Spawn(mustSpawnParams("org-a", "seat-1"))
+
+	if result.Outcome != SpawnOutcomeRejected || result.Err == nil {
+		t.Fatalf("expected a rejection, got %+v", result)
+	}
+	msg := result.Err.Error()
+	for _, want := range []string{"model_pool", "[org.permissions].default"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error %q should contain %q", msg, want)
+		}
+	}
+	if strings.Contains(msg, "autonomous") {
+		t.Errorf("error %q must not claim the fallback is autonomous: [org.permissions].default decides it", msg)
+	}
+}
+
+// TestOrgSpawn_RetiredLeaderName_ConfigKeyAddedAfterSpawn_RespawnStaysIdempotent
+// pins where the ralph.toml retired-key check sits on the real path: after the
+// idempotent early return. A seat spawned before the config gained the old key
+// (an org started by an older binary, or ralph.toml edited mid-org) must
+// re-run as a no-op, while a new seat under the same config is still refused
+// with the key-rename message and nothing written to the manifest or the
+// receipts.
+func TestOrgSpawn_RetiredLeaderName_ConfigKeyAddedAfterSpawn_RespawnStaysIdempotent(t *testing.T) {
+	o, h, a := testOrg(t)
+
+	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("initial spawn failed: %+v", r)
+	}
+	o.Config.Permissions.Roles = map[string]string{oldLeaderName: "guarded"}
+
+	eventsBefore := eventNames(t, o)
+	callsBefore, sendsBefore := len(h.calls), len(a.calls)
+	rrBefore, err := o.Receipts.Read()
+	if err != nil {
+		t.Fatalf("read receipts: %v", err)
+	}
+	assertNothingWritten := func(t *testing.T) {
+		t.Helper()
+		if got := eventNames(t, o); len(got) != len(eventsBefore) {
+			t.Errorf("expected no new manifest event, before=%v after=%v", eventsBefore, got)
+		}
+		if len(h.calls) != callsBefore || len(a.calls) != sendsBefore {
+			t.Errorf("expected no new driver calls, herdr %d->%d agmsg %d->%d", callsBefore, len(h.calls), sendsBefore, len(a.calls))
+		}
+		rr, err := o.Receipts.Read()
+		if err != nil {
+			t.Fatalf("read receipts: %v", err)
+		}
+		if len(rr.Receipts) != len(rrBefore.Receipts) {
+			t.Errorf("expected no new receipt, before=%d after=%d", len(rrBefore.Receipts), len(rr.Receipts))
+		}
+	}
+
+	t.Run("re-running the spawned seat is idempotent", func(t *testing.T) {
+		result := o.Spawn(mustSpawnParams("org-a", "seat-1"))
+		if result.Outcome != SpawnOutcomeIdempotent || result.Err != nil {
+			t.Fatalf("expected SpawnOutcomeIdempotent with nil Err, got %v (err=%v)", result.Outcome, result.Err)
+		}
+		assertNothingWritten(t)
+	})
+
+	t.Run("a new seat is still rejected", func(t *testing.T) {
+		result := o.Spawn(mustSpawnParams("org-a", "seat-2"))
+		if result.Outcome != SpawnOutcomeRejected || result.Err == nil {
+			t.Fatalf("expected a rejection, got %v (err=%v)", result.Outcome, result.Err)
+		}
+		for _, want := range []string{"[org.permissions.roles]." + oldLeaderName, "[org.permissions.roles]." + LeaderIdentity} {
+			if !strings.Contains(result.Err.Error(), want) {
+				t.Errorf("error %q should contain %q", result.Err.Error(), want)
+			}
+		}
+		if result.ModelReceipt != (Receipt{}) {
+			t.Errorf("expected a zero ModelReceipt, got %+v", result.ModelReceipt)
+		}
+		assertNothingWritten(t)
+	})
+}
+
+// TestOrgSpawn_RetiredLeaderName_ConfigKey_RejectedBeforeStaleCompensation pins
+// the other side of that position: the check runs before stale-in-flight
+// compensation, so a seat with an unresolved spawn_started is neither sent
+// C-c nor marked spawn_failed when the request is refused for an old key.
+func TestOrgSpawn_RetiredLeaderName_ConfigKey_RejectedBeforeStaleCompensation(t *testing.T) {
+	o, h, a := testOrg(t)
+	if err := o.Manifest.Append(ManifestEvent{
+		TS: "2026-08-01T00:00:00Z", OrgID: "org-a", SeatID: "seat-a", Event: EventSpawnStarted,
+		Role: "worker", Driver: "claude", Model: "sonnet", PaneID: "stale-pane-1",
+	}); err != nil {
+		t.Fatalf("seed stale spawn_started: %v", err)
+	}
+	o.Config.Roles[oldLeaderName] = []string{"sonnet"}
+
+	result := o.Spawn(mustSpawnParams("org-a", "seat-a"))
+
+	if result.Outcome != SpawnOutcomeRejected || result.Err == nil {
+		t.Fatalf("expected a rejection, got %v (err=%v)", result.Outcome, result.Err)
+	}
+	if !strings.Contains(result.Err.Error(), "[org.roles]."+oldLeaderName) {
+		t.Errorf("error %q should name [org.roles].%s", result.Err.Error(), oldLeaderName)
+	}
+	if len(h.calls) != 0 || len(a.calls) != 0 || len(h.sendKeysCalls) != 0 {
+		t.Errorf("expected no driver calls and no compensation, got herdr=%v agmsg=%v sendKeys=%v", h.calls, a.calls, h.sendKeysCalls)
+	}
+	if got := eventNames(t, o); len(got) != 1 || got[0] != EventSpawnStarted {
+		t.Errorf("expected only the seeded spawn_started (no spawn_failed, no rejected), got %v", got)
 	}
 }

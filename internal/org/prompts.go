@@ -2,7 +2,10 @@ package org
 
 import (
 	"embed"
+	"sort"
 	"strings"
+
+	"github.com/yoshpy-dev/ralph/internal/config"
 )
 
 // promptFS embeds every role prompt template under internal/org/prompts/.
@@ -33,7 +36,7 @@ type RolePromptVars struct {
 	Role   string
 	Scope  string
 	// PlanPath is not wired into any embedded template today -- none of the
-	// four templates (lead.md, implementer.md, reviewer.md, qa.md)
+	// three templates (leader.md, implementer.md, reviewer.md)
 	// reference {{PLAN_PATH}} (removed: no production caller populated it,
 	// so every rendered prompt shipped a literal "- plan: " with nothing
 	// after it -- self-review finding M5). The field is kept so a future
@@ -41,14 +44,14 @@ type RolePromptVars struct {
 	// another RolePromptVars schema change.
 	PlanPath string
 	// Task is the task text substituted for {{TASK}} -- currently only
-	// prompts/lead.md references it. `ralph org start`'s positional task
+	// prompts/leader.md references it. `ralph org start`'s positional task
 	// argument (internal/cli/org.go's newOrgStartCmd) flows through
 	// SpawnParams.Task (spawn.go) into this field. Every other embedded role
 	// template ignores it.
 	Task string
 	// Envelope is a one-line summary of the org's [org] envelope
 	// (EnvelopeSummary, envelope_summary.go) substituted for {{ENVELOPE}} --
-	// currently only prompts/lead.md references it.
+	// currently only prompts/leader.md references it.
 	Envelope string
 }
 
@@ -85,4 +88,96 @@ func RenderRolePrompt(role string, vars RolePromptVars) (string, bool, error) {
 		"{{ENVELOPE}}", vars.Envelope,
 	)
 	return replacer.Replace(text), true, nil
+}
+
+// retiredRoleKind says how a retired role name left the vocabulary.
+type retiredRoleKind string
+
+// retiredRoleRenamed marks a name that still exists under a new name: the
+// old spelling is rejected wherever it is *used* (spawn --role / --id, and
+// a ralph.toml key that would otherwise be silently ignored), and the
+// message points at the successor.
+const retiredRoleRenamed retiredRoleKind = "renamed"
+
+// retiredRoleRemoved marks a name that was removed outright: its template is
+// gone and the successor is where its duty went, not a new spelling of the
+// same role. Only `spawn --role <name>` without a --prompt is rejected (the
+// seat would start with no purpose at all, and the message points at the
+// successor and at --prompt). With a --prompt the name is an ordinary custom
+// role, so it stays a valid seat id and a valid [org.roles] /
+// [org.permissions.roles] key.
+const retiredRoleRemoved retiredRoleKind = "removed"
+
+// retiredRole is one entry of retiredRoles: what replaced the name and how.
+type retiredRole struct {
+	Successor string
+	Kind      retiredRoleKind
+}
+
+// retiredRoles is the single place that lists role names the runtime no
+// longer accepts, keyed by the old name (exact, case-sensitive match, like
+// the rest of the role handling). Spawn's guard (RetiredRoleInputErr and
+// retiredRoleConfigErr, spawn.go), the ralph.toml key scan
+// (RetiredRoleConfigKeys), and `ralph doctor` all read this table.
+//
+// The guard's rejection messages and its seat-id rule are written for the
+// two current entries, not derived from the table: a renamed name is refused
+// as --id because the coordinator's old name was its agmsg identity (renamed
+// to leader), and a removed name's message says its deterministic-gate
+// re-run moved to the reviewer role (the removed seat's duty). Adding an
+// entry therefore means reviewing those messages and that rule as well.
+var retiredRoles = map[string]retiredRole{
+	"lead": {Successor: LeaderIdentity, Kind: retiredRoleRenamed},
+	"qa":   {Successor: "reviewer", Kind: retiredRoleRemoved},
+}
+
+// RetiredRoleConfigKey names one ralph.toml key spelled with a renamed role
+// and the spelling it should have instead, e.g. Key
+// "[org.permissions.roles].lead" and RenameTo
+// "[org.permissions.roles].leader".
+type RetiredRoleConfigKey struct {
+	Key      string
+	RenameTo string
+}
+
+// RetiredRoleConfigKeys lists the [org.roles] and [org.permissions.roles]
+// keys in cfg that use a renamed role's old name, ordered by old name, then
+// [org.roles] before [org.permissions.roles]. Only renamed roles count: a
+// role that was removed outright may still be a legitimate custom role name
+// for a seat that brings its own --prompt.
+//
+// Why config keys matter at all: config.Load does not validate role names,
+// so a key under the old name is accepted and then never consulted -- a
+// `lead = "guarded"` that no longer applies would silently run the leader
+// with the full model_pool and with [org.permissions].default (autonomous
+// unless the operator changed it) instead of the mode the key asked for.
+// Spawn therefore rejects such a config rather than ignoring it; config.Load
+// itself stays quiet so the read-only verbs and stop / disband can still
+// clean up an old org.
+func RetiredRoleConfigKeys(cfg config.OrgConfig) []RetiredRoleConfigKey {
+	names := make([]string, 0, len(retiredRoles))
+	for name, r := range retiredRoles {
+		if r.Kind == retiredRoleRenamed {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+
+	var keys []RetiredRoleConfigKey
+	for _, name := range names {
+		successor := retiredRoles[name].Successor
+		if _, ok := cfg.Roles[name]; ok {
+			keys = append(keys, RetiredRoleConfigKey{
+				Key:      "[org.roles]." + name,
+				RenameTo: "[org.roles]." + successor,
+			})
+		}
+		if _, ok := cfg.Permissions.Roles[name]; ok {
+			keys = append(keys, RetiredRoleConfigKey{
+				Key:      "[org.permissions.roles]." + name,
+				RenameTo: "[org.permissions.roles]." + successor,
+			})
+		}
+	}
+	return keys
 }

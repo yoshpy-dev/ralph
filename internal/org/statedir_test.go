@@ -96,7 +96,7 @@ func TestResolveOrgStateDir_GitSubdirResolvesToToplevel(t *testing.T) {
 	got, source := ResolveOrgStateDir("", false)
 	want := filepath.Join(root, defaultOrgStateDirRelPath)
 	if got != want {
-		t.Errorf("dir = %q, want %q (running from a subdirectory of the repo must still resolve to the toplevel state dir, fixing the lead/operator cwd-split)", got, want)
+		t.Errorf("dir = %q, want %q (running from a subdirectory of the repo must still resolve to the toplevel state dir, fixing the leader/operator cwd-split)", got, want)
 	}
 	if source != "git-toplevel" {
 		t.Errorf("source = %q, want %q", source, "git-toplevel")

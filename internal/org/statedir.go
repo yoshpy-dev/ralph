@@ -20,7 +20,7 @@ const defaultOrgStateDirRelPath = ".harness/state/org"
 
 // ResolveOrgStateDir resolves the org state directory using the precedence
 // order documented in docs/plans/active/2026-08-02-org-runtime-watchdog.md
-// (tech-debt: "state-dir の cwd 相対解決" -- the lead/operator cwd-split):
+// (tech-debt: "state-dir の cwd 相対解決" -- the leader/operator cwd-split):
 //
 //  1. explicit flag ("flag") -- explicitSet is true (the caller passed
 //     --state-dir; detected via cobra's cmd.Flags().Changed("state-dir")
@@ -33,7 +33,7 @@ const defaultOrgStateDirRelPath = ".harness/state/org"
 //     not explicitly set.
 //  3. git toplevel ("git-toplevel") -- `git rev-parse --show-toplevel` run
 //     in the current working directory, joined with
-//     ".harness/state/org". This is what fixes the lead/operator
+//     ".harness/state/org". This is what fixes the leader/operator
 //     cwd-split: every org verb invoked from anywhere inside the same
 //     repository resolves to the same state directory, regardless of
 //     which subdirectory the caller's shell happens to be in.

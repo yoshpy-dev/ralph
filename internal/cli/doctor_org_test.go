@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/yoshpy-dev/ralph/internal/config"
+	"github.com/yoshpy-dev/ralph/internal/org"
 	"github.com/yoshpy-dev/ralph/internal/org/driver"
 )
 
@@ -1124,5 +1125,115 @@ func TestCheckCodexModelSlugs_WrongTypedUpgrade_SlugStillPresentDocStillDecodes(
 	}
 	if strings.Contains(r.Detail, "retiring") || strings.Contains(r.Detail, "retired") {
 		t.Errorf("detail %q should not claim a retirement clause for an unusable upgrade", r.Detail)
+	}
+}
+
+// TestCheckOrgRetiredRoleKeys covers the doctor warn for the coordinator's
+// retired name used as a role key: either table warns and names the exact
+// key and its replacement; neither passes.
+func TestCheckOrgRetiredRoleKeys(t *testing.T) {
+	const old = oldLeaderName
+	cases := []struct {
+		name       string
+		org        config.OrgConfig
+		wantStatus string
+		wantDetail []string
+	}{
+		{
+			name:       "defaults pass",
+			org:        config.Default().Org,
+			wantStatus: "pass",
+		},
+		{
+			name: "unrelated role keys pass",
+			org: config.OrgConfig{
+				Roles:       map[string][]string{"worker": {"sonnet"}},
+				Permissions: config.OrgPermissionsConfig{Roles: map[string]string{"reviewer": "guarded"}},
+			},
+			wantStatus: "pass",
+		},
+		{
+			name:       "[org.roles] key warns",
+			org:        config.OrgConfig{Roles: map[string][]string{old: {"sonnet"}}},
+			wantStatus: "warn",
+			wantDetail: []string{"[org.roles]." + old, "[org.roles]." + org.LeaderIdentity},
+		},
+		{
+			name:       "[org.permissions.roles] key warns",
+			org:        config.OrgConfig{Permissions: config.OrgPermissionsConfig{Roles: map[string]string{old: "guarded"}}},
+			wantStatus: "warn",
+			wantDetail: []string{"[org.permissions.roles]." + old, "[org.permissions.roles]." + org.LeaderIdentity},
+		},
+		{
+			name: "both keys warn and are both named",
+			org: config.OrgConfig{
+				Roles:       map[string][]string{old: {"sonnet"}},
+				Permissions: config.OrgPermissionsConfig{Roles: map[string]string{old: "guarded"}},
+			},
+			wantStatus: "warn",
+			wantDetail: []string{"[org.roles]." + old, "[org.permissions.roles]." + old},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := config.Default()
+			cfg.Org = tc.org
+			r := checkOrgRetiredRoleKeys(cfg)
+			if r.Status != tc.wantStatus {
+				t.Fatalf("status = %q, want %q (detail=%q)", r.Status, tc.wantStatus, r.Detail)
+			}
+			for _, want := range tc.wantDetail {
+				if !strings.Contains(r.Detail, want) {
+					t.Errorf("detail %q should contain %q", r.Detail, want)
+				}
+			}
+		})
+	}
+}
+
+// TestRunDoctorOpts_RetiredRoleKey_WarnsWithoutFailing is the wiring pin: the
+// check is part of `ralph doctor`, shows as a warning, and a warning leaves
+// the exit code alone.
+func TestRunDoctorOpts_RetiredRoleKey_WarnsWithoutFailing(t *testing.T) {
+	setupTestEmbedFS(t)
+	Version = "0.1.0-test"
+
+	dir := t.TempDir()
+	if err := executeInit(dir, initConfig{ProjectName: "test", Packs: []string{"golang"}}, false); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	tomlPath := filepath.Join(dir, "ralph.toml")
+	data, err := os.ReadFile(tomlPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tomlPath, append(data, []byte("\n[org.permissions.roles]\n"+oldLeaderName+" = \"guarded\"\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	binDir := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, bin := range []string{"claude", "codex", "go"} {
+		writeStubBin(t, binDir, bin, "")
+	}
+	t.Setenv("PATH", binDir)
+	t.Setenv("RALPH_ORG_AGMSG_HOME", filepath.Join(dir, "no-such-agmsg-home"))
+
+	origStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	runErr := runDoctorOpts(dir, false)
+	_ = w.Close()
+	os.Stdout = origStdout
+	out, _ := io.ReadAll(r)
+
+	if runErr != nil {
+		t.Fatalf("a retired-key warning must not fail doctor: %v\noutput:\n%s", runErr, out)
+	}
+	if !strings.Contains(string(out), "Org retired role keys: warn") ||
+		!strings.Contains(string(out), "[org.permissions.roles]."+oldLeaderName) {
+		t.Errorf("expected the retired-key warning naming the key in doctor output:\n%s", out)
 	}
 }

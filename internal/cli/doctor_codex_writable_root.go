@@ -823,23 +823,23 @@ func codexWritableRootDetail(root, blockedAncestor, cfgDisplay, store string, ex
 		if containingProject != "" {
 			return fmt.Sprintf("%s does not exist, so no writable root covers the agmsg store %s%s; the agmsg store is inside this project (%s), "+
 				"so a codex seat whose working directory contains it can already write it; a codex seat whose working directory does not contain "+
-				"it (for example a task worktree) cannot send RESULT to lead (\"attempt to write a readonly database\") unless %s is added to "+
+				"it (for example a task worktree) cannot send RESULT to leader (\"attempt to write a readonly database\") unless %s is added to "+
 				"[sandbox_workspace_write].writable_roots in %s (docs/recipes/codex-seat-permissions.md); needed because %s",
 				cfgDisplay, store, codexBlockedAncestorClause(blockedAncestor), containingProject, store, cfgDisplay, reasonClause) + suffix
 		}
 		return fmt.Sprintf("%s does not exist, so no writable root covers the agmsg store %s%s and a codex seat under workspace-write "+
-			"cannot send RESULT to lead (\"attempt to write a readonly database\"); needed because %s; add %s to "+
+			"cannot send RESULT to leader (\"attempt to write a readonly database\"); needed because %s; add %s to "+
 			"[sandbox_workspace_write].writable_roots in %s (docs/recipes/codex-seat-permissions.md)",
 			cfgDisplay, store, codexBlockedAncestorClause(blockedAncestor), reasonClause, store, cfgDisplay) + suffix
 	}
 	if containingProject != "" {
 		return fmt.Sprintf("no writable root in %s covers the agmsg store %s%s; the agmsg store is inside this project (%s), so a codex seat "+
 			"whose working directory contains it can already write it; a codex seat whose working directory does not contain it (for example a "+
-			"task worktree) cannot send RESULT to lead (\"attempt to write a readonly database\") unless %s is added to "+
+			"task worktree) cannot send RESULT to leader (\"attempt to write a readonly database\") unless %s is added to "+
 			"[sandbox_workspace_write].writable_roots (docs/recipes/codex-seat-permissions.md); needed because %s",
 			cfgDisplay, store, codexBlockedAncestorClause(blockedAncestor), containingProject, store, reasonClause) + suffix
 	}
-	return fmt.Sprintf("no writable root in %s covers the agmsg store %s%s, so a codex seat under workspace-write cannot send RESULT to lead "+
+	return fmt.Sprintf("no writable root in %s covers the agmsg store %s%s, so a codex seat under workspace-write cannot send RESULT to leader "+
 		"(\"attempt to write a readonly database\"); needed because %s; add %s to [sandbox_workspace_write].writable_roots "+
 		"(docs/recipes/codex-seat-permissions.md)",
 		cfgDisplay, store, codexBlockedAncestorClause(blockedAncestor), reasonClause, store) + suffix
@@ -855,7 +855,7 @@ func codexWritableRootDetail(root, blockedAncestor, cfgDisplay, store string, ex
 // but no writable_roots entry, nor either of workspace-write's own implicit
 // defaults (/tmp, $TMPDIR), actually leaves the agmsg store writable: the
 // exact failure that made a codex seat under workspace-write unable to send
-// RESULT to lead ("attempt to write a readonly database", docs/evidence/
+// RESULT to leader ("attempt to write a readonly database", docs/evidence/
 // codex-seat-permissions-2026-09-18.md P3).
 //
 // Deterministic outcomes, in order:

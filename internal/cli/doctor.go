@@ -19,6 +19,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/yoshpy-dev/ralph/internal/config"
+	"github.com/yoshpy-dev/ralph/internal/org"
 	"github.com/yoshpy-dev/ralph/internal/org/driver"
 	"github.com/yoshpy-dev/ralph/internal/scaffold"
 	"github.com/yoshpy-dev/ralph/internal/upgrade"
@@ -133,6 +134,12 @@ func runDoctorFull(targetDir string, probeModels, strict bool) error {
 
 	// Check 10: [org] envelope summary (pool size / max_seats).
 	results = append(results, checkOrgEnvelope(cfg))
+
+	// Check 10b: [org.roles] / [org.permissions.roles] keys that still use a
+	// renamed role's old name. config.Load accepts them and nothing reads
+	// them, so this is the only place an operator hears about it before
+	// `ralph org spawn` refuses.
+	results = append(results, checkOrgRetiredRoleKeys(cfg))
 
 	// Check 11: [org].model_pool codex slugs vs codex's local
 	// models_cache.json. Always runs unconditionally (no flag) -- it is a
@@ -780,6 +787,29 @@ func checkOrgEnvelope(cfg config.Config) checkResult {
 		Status: "info",
 		Detail: fmt.Sprintf("model_pool: %d entries, max_seats: %d", len(cfg.Org.ModelPool), cfg.Org.MaxSeats),
 	}
+}
+
+// checkOrgRetiredRoleKeys warns when [org.roles] or [org.permissions.roles]
+// still carries a renamed role's old name (org.RetiredRoleConfigKeys), naming
+// each key and what to rename it to. Spawn refuses such a config -- a
+// permission mode set under the old key would otherwise be silently ignored
+// -- while status / stop / disband keep working, so this is a warning, not a
+// failure. Like checkOrgEnvelope it reads the already-loaded cfg and never
+// re-loads config.
+func checkOrgRetiredRoleKeys(cfg config.Config) checkResult {
+	r := checkResult{Name: "Org retired role keys", Status: "pass"}
+	keys := org.RetiredRoleConfigKeys(cfg.Org)
+	if len(keys) == 0 {
+		return r
+	}
+	parts := make([]string, len(keys))
+	for i, k := range keys {
+		parts[i] = fmt.Sprintf("%s -> rename to %s", k.Key, k.RenameTo)
+	}
+	r.Status = "warn"
+	r.Detail = "ralph.toml uses a renamed role's old name as a key, which is no longer read; " +
+		"`ralph org spawn` refuses until it is renamed: " + strings.Join(parts, "; ")
+	return r
 }
 
 // checkOrgModelProbes runs driver.ProbeModel for every [org].model_pool

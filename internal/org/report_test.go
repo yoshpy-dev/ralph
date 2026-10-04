@@ -24,8 +24,8 @@ func fixedClock(t *testing.T, ts string) Clock {
 func fixtureReportEvents() []ManifestEvent {
 	return []ManifestEvent{
 		{TS: "2026-08-02T10:00:00Z", OrgID: "org-a", SeatID: "", Event: EventOrgWorkspaceCreated, PaneID: "ws-1"},
-		{TS: "2026-08-02T10:00:01Z", OrgID: "org-a", SeatID: "lead", Event: EventSpawnStarted, Role: "lead", Driver: "claude", Model: "opus"},
-		{TS: "2026-08-02T10:00:05Z", OrgID: "org-a", SeatID: "lead", Event: EventSpawned, Role: "lead", Driver: "claude", Model: "opus", PaneID: "pane-1", AgmsgTeam: "ralph-org-a", HerdrAgentName: "org-a_lead", Details: "scope=repo permission_mode=autonomous"},
+		{TS: "2026-08-02T10:00:01Z", OrgID: "org-a", SeatID: "leader", Event: EventSpawnStarted, Role: "leader", Driver: "claude", Model: "opus"},
+		{TS: "2026-08-02T10:00:05Z", OrgID: "org-a", SeatID: "leader", Event: EventSpawned, Role: "leader", Driver: "claude", Model: "opus", PaneID: "pane-1", AgmsgTeam: "ralph-org-a", HerdrAgentName: "org-a_leader", Details: "scope=repo permission_mode=autonomous"},
 		{TS: "2026-08-02T10:01:00Z", OrgID: "org-a", SeatID: "reviewer-1", Event: EventSpawnStarted, Role: "reviewer", Driver: "claude", Model: "sonnet"},
 		{TS: "2026-08-02T10:01:05Z", OrgID: "org-a", SeatID: "reviewer-1", Event: EventSpawned, Role: "reviewer", Driver: "claude", Model: "sonnet", PaneID: "pane-2", AgmsgTeam: "ralph-org-a", HerdrAgentName: "org-a_reviewer-1", Details: "scope=internal/org/** permission_mode=autonomous"},
 		{TS: "2026-08-02T10:05:00Z", OrgID: "org-a", SeatID: "reviewer-1", Event: EventStopped, Role: "reviewer", Driver: "claude", Model: "sonnet", PaneID: "pane-2", AgmsgTeam: "ralph-org-a", Details: "pane=ok leave=ok"},
@@ -35,7 +35,7 @@ func fixtureReportEvents() []ManifestEvent {
 
 func fixtureReportReceipts() []Receipt {
 	return []Receipt{
-		{TS: "2026-08-02T10:00:05Z", OrgID: "org-a", SeatID: "lead", Role: "lead", Driver: "claude", CommandedModel: "opus", Honored: HonoredUnknown, Reason: "interactive session; effective model not yet observable"},
+		{TS: "2026-08-02T10:00:05Z", OrgID: "org-a", SeatID: "leader", Role: "leader", Driver: "claude", CommandedModel: "opus", Honored: HonoredUnknown, Reason: "interactive session; effective model not yet observable"},
 		{TS: "2026-08-02T10:01:05Z", OrgID: "org-a", SeatID: "reviewer-1", Role: "reviewer", Driver: "claude", CommandedModel: "sonnet", Honored: HonoredUnknown},
 		{TS: "2026-08-02T10:02:00Z", OrgID: "org-b", SeatID: "seat-x", Role: "worker", Driver: "claude", CommandedModel: "sonnet", Honored: HonoredTrue, ReportedEffectiveModel: "sonnet"},
 	}
@@ -58,7 +58,7 @@ func TestBuildOrgReport_RosterTimelineReceiptsAndResiduals(t *testing.T) {
 	if strings.Contains(got, "seat-x") {
 		t.Errorf("expected org-b's seat-x excluded from org-a's report, got:\n%s", got)
 	}
-	for _, want := range []string{"## Roster", "lead", "reviewer-1", "autonomous"} {
+	for _, want := range []string{"## Roster", "leader", "reviewer-1", "autonomous"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("expected roster section to contain %q, got:\n%s", want, got)
 		}
@@ -83,7 +83,7 @@ func TestBuildOrgReport_RosterTimelineReceiptsAndResiduals(t *testing.T) {
 		}
 	}
 
-	// Known residuals: only lead is still active (reviewer-1 was stopped).
+	// Known residuals: only leader is still active (reviewer-1 was stopped).
 	if !strings.Contains(got, "## Known residuals") || !strings.Contains(got, "active seats: 1") {
 		t.Errorf("expected known residuals section reporting 1 active seat, got:\n%s", got)
 	}
@@ -188,7 +188,7 @@ func TestOrgReport_DefaultOutDir_WritesUnderDocsReports(t *testing.T) {
 		Receipts: NewReceiptStoreAtPath(filepath.Join(dir, "state", "receipts.jsonl")),
 		Now:      fixedClock(t, "2026-08-02T00:00:00Z"),
 	}
-	if err := o.Manifest.Append(ManifestEvent{TS: "2026-08-02T00:00:00Z", OrgID: "org-a", SeatID: "lead", Event: EventSpawned, Role: "lead"}); err != nil {
+	if err := o.Manifest.Append(ManifestEvent{TS: "2026-08-02T00:00:00Z", OrgID: "org-a", SeatID: "leader", Event: EventSpawned, Role: "leader"}); err != nil {
 		t.Fatalf("append event: %v", err)
 	}
 

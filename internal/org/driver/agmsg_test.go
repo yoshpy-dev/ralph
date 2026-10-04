@@ -20,10 +20,10 @@ func TestAgmsg_Send(t *testing.T) {
 	f := &fakeRunner{}
 	a := Agmsg{R: f, Home: "/home/agmsg"}
 
-	if err := a.Send(context.Background(), "ralph-org-1", "lead", "worker-1", "start now"); err != nil {
+	if err := a.Send(context.Background(), "ralph-org-1", "leader", "worker-1", "start now"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := append(bashScript("/home/agmsg", "send.sh"), "ralph-org-1", "lead", "worker-1", "start now")
+	want := append(bashScript("/home/agmsg", "send.sh"), "ralph-org-1", "leader", "worker-1", "start now")
 	if c := f.lastCall(); c.name != "bash" || !reflect.DeepEqual(c.args, want) {
 		t.Fatalf("argv mismatch: got name=%q args=%v, want name=bash args=%v", c.name, c.args, want)
 	}
@@ -43,15 +43,15 @@ func TestAgmsg_Join(t *testing.T) {
 }
 
 func TestAgmsg_TeamMembers(t *testing.T) {
-	f := &fakeRunner{outputs: []string{"lead, worker-1"}}
+	f := &fakeRunner{outputs: []string{"leader, worker-1"}}
 	a := Agmsg{R: f, Home: "/home/agmsg"}
 
 	got, err := a.TeamMembers(context.Background(), "ralph-org-1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got != "lead, worker-1" {
-		t.Fatalf("want %q, got %q", "lead, worker-1", got)
+	if got != "leader, worker-1" {
+		t.Fatalf("want %q, got %q", "leader, worker-1", got)
 	}
 	want := append(bashScript("/home/agmsg", "team.sh"), "ralph-org-1")
 	if c := f.lastCall(); !reflect.DeepEqual(c.args, want) {
@@ -74,15 +74,15 @@ func TestAgmsg_History(t *testing.T) {
 		},
 		{
 			name:    "agent only",
-			agentID: "lead",
+			agentID: "leader",
 			limit:   0,
-			want:    append(bashScript("/home/agmsg", "history.sh"), "ralph-org-1", "lead"),
+			want:    append(bashScript("/home/agmsg", "history.sh"), "ralph-org-1", "leader"),
 		},
 		{
 			name:    "agent and limit",
-			agentID: "lead",
+			agentID: "leader",
 			limit:   20,
-			want:    append(bashScript("/home/agmsg", "history.sh"), "ralph-org-1", "lead", "20"),
+			want:    append(bashScript("/home/agmsg", "history.sh"), "ralph-org-1", "leader", "20"),
 		},
 		{
 			name:    "limit without agent is dropped (positional CLI cannot express it)",

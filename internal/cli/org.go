@@ -92,7 +92,7 @@ func requireSeatIdentifier(flag, value string) error {
 // used only to detect whether --state-dir was explicitly passed
 // (cmd.Flags().Changed("state-dir")) for org.ResolveOrgStateDir's flag >
 // env > git-toplevel > cwd precedence -- see that function's doc comment
-// for the full rationale (fixes the lead/operator cwd-split, tech-debt
+// for the full rationale (fixes the leader/operator cwd-split, tech-debt
 // "state-dir の cwd 相対解決"). A caller that also needs the resolved
 // config.OrgConfig for its own purposes beyond wiring (e.g.
 // resolveModelOrWarn's --model default resolution via
@@ -276,11 +276,35 @@ func splitCommaList(s string) []string {
 	return out
 }
 
+// deprecatedLeaderDriverFlag is the flag's old spelling, kept as a hidden
+// alias of --leader-driver (cobra MarkDeprecated prints the notice on use).
+const deprecatedLeaderDriverFlag = "lead-driver"
+
+// resolveLeaderDriver picks the effective leader driver from --leader-driver
+// and its deprecated alias. Which flag was given is decided by
+// Flags().Changed, not by comparing against a default: an explicit
+// --leader-driver claude (the default value) next to --lead-driver codex is
+// still a conflict. Both spellings with the same value is accepted.
+func resolveLeaderDriver(cmd *cobra.Command, leaderDriver, deprecatedDriver string) (string, error) {
+	if !cmd.Flags().Changed(deprecatedLeaderDriverFlag) {
+		return leaderDriver, nil
+	}
+	if !cmd.Flags().Changed("leader-driver") {
+		return deprecatedDriver, nil
+	}
+	if deprecatedDriver != leaderDriver {
+		return "", fmt.Errorf("org: --%s %q conflicts with --leader-driver %q; --%s is a deprecated alias of --leader-driver, pass only --leader-driver",
+			deprecatedLeaderDriverFlag, deprecatedDriver, leaderDriver, deprecatedLeaderDriverFlag)
+	}
+	return leaderDriver, nil
+}
+
 func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	var (
-		seatID, role, driverName, model, cwd, prompt, scope, leadDriver string
-		timeoutMS                                                       int
-		dryRun, allowUnscoped                                           bool
+		seatID, role, driverName, model, cwd, prompt, scope, leaderDriver string
+		deprecatedDriver                                                  string
+		timeoutMS                                                         int
+		dryRun, allowUnscoped                                             bool
 	)
 
 	cmd := &cobra.Command{
@@ -298,6 +322,21 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 					return fmt.Errorf("org: %s is required", flag)
 				}
 			}
+			// A retired --role / --id is refused here, before
+			// resolveModelOrWarn, so the operator sees the successor
+			// guidance instead of a --model fallback warning or a
+			// model_pool error for a role that no longer exists. Spawn runs
+			// the same check again. The ralph.toml retired-key check stays
+			// in Spawn only: it must run after Spawn's idempotent return.
+			// The refusal is printed the same way as a Spawn rejection.
+			if err := org.RetiredRoleInputErr(role, seatID, prompt); err != nil {
+				printSpawnResult(cmd, org.SpawnResult{Outcome: org.SpawnOutcomeRejected, Err: err})
+				return err
+			}
+			effectiveLeaderDriver, err := resolveLeaderDriver(cmd, leaderDriver, deprecatedDriver)
+			if err != nil {
+				return err
+			}
 
 			rt, err := newOrgRuntime(cmd, *stateDir, *configPath)
 			if err != nil {
@@ -310,7 +349,7 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			result := rt.Spawn(org.SpawnParams{
 				OrgID: *orgID, SeatID: seatID, Role: role, Driver: driverName, Model: resolvedModel,
 				Cwd: cwd, Prompt: prompt, Scope: scope, TimeoutMS: timeoutMS, DryRun: dryRun,
-				LeadDriver: leadDriver, AllowUnscoped: allowUnscoped,
+				LeaderDriver: effectiveLeaderDriver, AllowUnscoped: allowUnscoped,
 			})
 			printSpawnResult(cmd, result)
 			return result.Err
@@ -324,7 +363,11 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	cmd.Flags().StringVar(&cwd, "cwd", "", "working directory for the new seat (required)")
 	cmd.Flags().StringVar(&prompt, "prompt", "", "optional initial prompt passed to the agent")
 	cmd.Flags().StringVar(&scope, "scope", "", "optional scope description (recorded on the spawned event; substituted into --role templates as {{SCOPE}})")
-	cmd.Flags().StringVar(&leadDriver, "lead-driver", "claude", "driver (claude|codex) the org's coordinating lead identity runs as, for the agmsg type registered on ensureLeadJoined")
+	cmd.Flags().StringVar(&leaderDriver, "leader-driver", "claude", "driver (claude|codex) the org's coordinating leader identity runs as, for the agmsg type registered on ensureLeaderJoined")
+	cmd.Flags().StringVar(&deprecatedDriver, deprecatedLeaderDriverFlag, "", "deprecated alias of --leader-driver")
+	if err := cmd.Flags().MarkDeprecated(deprecatedLeaderDriverFlag, "use --leader-driver"); err != nil {
+		panic(err) // the flag was registered on the line above
+	}
 	cmd.Flags().IntVar(&timeoutMS, "timeout-ms", 60000, "per-step herdr timeout in milliseconds")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "validate and record without starting a real seat")
 	cmd.Flags().BoolVar(&allowUnscoped, "allow-unscoped", false, "explicitly bypass the autonomous-mode --scope requirement (recorded on the spawned event)")
@@ -365,15 +408,15 @@ func printCodexModelMismatchWarning(cmd *cobra.Command, seatID string, r org.Rec
 		seatID, r.CommandedModel, r.ReportedEffectiveModel)
 }
 
-// newOrgStartCmd wires `ralph org start` -- headless-lead spawn sugar over
+// newOrgStartCmd wires `ralph org start` -- headless-leader spawn sugar over
 // (*org.Org).Spawn, per the plan's design decision ("`org start` = lead 座席
 // の spawn 糖衣", docs/plans/active/2026-08-02-org-runtime-lead.md). It
-// always spawns SeatID == Role == org.LeadIdentity ("lead"): the org's
-// coordinating agmsg identity and the lead seat are, by design, the same
-// seat -- see the leadSelfSpawn branch in internal/org/spawn.go's Spawn.
+// always spawns SeatID == Role == org.LeaderIdentity ("leader"): the org's
+// coordinating agmsg identity and the leader seat are, by design, the same
+// seat -- see the leaderSelfSpawn branch in internal/org/spawn.go's Spawn.
 // Every other concern (envelope validation, the permission-mode gate,
 // manifest/receipt bookkeeping) flows through the same saga every other
-// `ralph org spawn` call uses; this command does not special-case the lead
+// `ralph org spawn` call uses; this command does not special-case the leader
 // runtime object in any way beyond picking its SeatID/Role and required
 // positional task argument.
 func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
@@ -385,16 +428,16 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "start <task>",
-		Short: "Spawn a headless lead seat (sugar over `ralph org spawn --role lead`)",
+		Short: "Spawn a headless leader seat (sugar over `ralph org spawn --role leader`)",
 		Long: "ralph org start is a thin wrapper over the same Spawn saga every other\n" +
 			"`ralph org spawn` call uses: it always spawns the org's coordinating\n" +
-			"\"lead\" identity itself (seat id \"lead\", role \"lead\"), expands\n" +
-			"internal/org/prompts/lead.md with the task argument substituted for\n" +
+			"\"leader\" identity itself (seat id \"leader\", role \"leader\"), expands\n" +
+			"internal/org/prompts/leader.md with the task argument substituted for\n" +
 			"{{TASK}} and a one-line [org] envelope summary substituted for\n" +
 			"{{ENVELOPE}}. Envelope validation, the permission-mode gate, and\n" +
 			"manifest/receipt bookkeeping all flow through Spawn exactly as they\n" +
 			"would for any other seat. See .claude/skills/org/SKILL.md for the\n" +
-			"lead's full operating manual.",
+			"leader's full operating manual.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireOrgID(*orgID); err != nil {
@@ -412,28 +455,28 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			resolvedModel, err := resolveModelOrWarn(rt.Config, driverName, org.LeadIdentity, model, cmd.ErrOrStderr())
+			resolvedModel, err := resolveModelOrWarn(rt.Config, driverName, org.LeaderIdentity, model, cmd.ErrOrStderr())
 			if err != nil {
 				return err
 			}
 
 			result := rt.Spawn(org.SpawnParams{
-				OrgID: *orgID, SeatID: org.LeadIdentity, Role: org.LeadIdentity,
+				OrgID: *orgID, SeatID: org.LeaderIdentity, Role: org.LeaderIdentity,
 				Driver: driverName, Model: resolvedModel, Cwd: cwd, Task: task,
 				Scope: scope, TimeoutMS: timeoutMS, AllowUnscoped: allowUnscoped,
 			})
 			printSpawnResult(cmd, result)
 			if result.Err == nil {
 				_, _ = fmt.Fprintf(cmd.OutOrStdout(),
-					"hint: ralph org status --org-id %s ; attach with herdr to observe the lead pane\n", *orgID)
+					"hint: ralph org status --org-id %s ; attach with herdr to observe the leader pane\n", *orgID)
 			}
 			return result.Err
 		},
 	}
 
-	cmd.Flags().StringVar(&driverName, "driver", "claude", "driver CLI the lead seat runs as: claude|codex")
+	cmd.Flags().StringVar(&driverName, "driver", "claude", "driver CLI the leader seat runs as: claude|codex")
 	cmd.Flags().StringVar(&model, "model", "", "model name or alias (default: first [org].model_pool entry permitted for the role on --driver, with a warning)")
-	cmd.Flags().StringVar(&cwd, "cwd", "", "working directory for the lead seat (required)")
+	cmd.Flags().StringVar(&cwd, "cwd", "", "working directory for the leader seat (required)")
 	cmd.Flags().StringVar(&scope, "scope", "", "optional scope description (see `ralph org spawn --scope`)")
 	cmd.Flags().IntVar(&timeoutMS, "timeout-ms", 60000, "per-step herdr timeout in milliseconds")
 	cmd.Flags().BoolVar(&allowUnscoped, "allow-unscoped", false, "explicitly bypass the autonomous-mode --scope requirement")
@@ -588,7 +631,7 @@ func newOrgWaitCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"\"done\" (turn finished), not \"idle\" -- waiting on \"idle\" alone times\n" +
 			"out against a perfectly receptive seat (same finding that fixed `ralph\n" +
 			"org send`'s own wait, internal/org/verbs.go's Send). --timeout-ms\n" +
-			"defaults to a bounded 60000ms so a headless lead following this\n" +
+			"defaults to a bounded 60000ms so a headless leader following this\n" +
 			"command's own default cannot block forever; pass --timeout-ms 0 to\n" +
 			"explicitly opt into an unbounded wait.",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -875,9 +918,9 @@ func newOrgWatchCmd(orgID, stateDir, configPath *string) *cobra.Command {
 		Long: "ralph org watch evaluates watch conditions every --interval-seconds\n" +
 			"(default: [org.watchdog].interval_seconds) for --org-id:\n" +
 			"heartbeat-stall / process-liveness / worktree-scope-change\n" +
-			"ALERTs sent to the lead seat, and a deadman escalation\n" +
+			"ALERTs sent to the leader seat, and a deadman escalation\n" +
 			"(<state-dir>/escalations.jsonl + stderr banner + best-effort darwin\n" +
-			"notification) when the lead does not respond within\n" +
+			"notification) when the leader does not respond within\n" +
 			"[org].deadman_minutes. Pass --once to run exactly one cycle and exit\n" +
 			"(useful for cron/smoke); the default loops until the command's\n" +
 			"context is done (e.g. SIGINT).",
@@ -958,10 +1001,10 @@ func newOrgWatchCmd(orgID, stateDir, configPath *string) *cobra.Command {
 // concurrently).
 //
 // An abnormal verdict (anything but org.WatcherVerdictNormal) is sent to
-// lead as an ALERT via rt.SendWatchdogAlert (identity-level Agmsg.Send, not
+// leader as an ALERT via rt.SendWatchdogAlert (identity-level Agmsg.Send, not
 // the seat-steering Send verb -- see that method's doc comment for why:
 // Send's findSeat lookup fails, silently dropping the message, in the
-// normal "session-promoted lead" org shape where no lead SEAT was ever
+// normal "session-promoted leader" org shape where no leader SEAT was ever
 // spawned), in the same message shape watch.go's own (unexported) sendAlert
 // already uses for pulse-layer ALERTs, so ALERT traffic stays uniform
 // regardless of which layer produced it.
@@ -1012,7 +1055,7 @@ func newWatchdogHooks(ctx context.Context, rt *org.Org, stderr io.Writer) (org.W
 				msg := fmt.Sprintf("TYPE: ALERT\nORG_ID: %s\nSEAT: %s\nCONDITION: watcher_%s\n\nwatcher verdict=%s reason=%s",
 					orgID, seatID, conditionType, verdict.Verdict, verdict.Reason)
 				if err := rt.SendWatchdogAlert(ctx, orgID, msg); err != nil {
-					_, _ = fmt.Fprintf(stderr, "watchdog: failed to ALERT lead for org %q seat %q verdict %q: %v\n",
+					_, _ = fmt.Fprintf(stderr, "watchdog: failed to ALERT leader for org %q seat %q verdict %q: %v\n",
 						orgID, seatID, verdict.Verdict, err)
 				}
 			})

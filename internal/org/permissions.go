@@ -8,7 +8,7 @@ import (
 
 // Permission-mode enum constants (self-review MEDIUM-4): the single,
 // grep-able definition of the three permission-mode values, mirroring how
-// LeadIdentity (spawn.go) is the one place the "lead" identity literal is
+// LeaderIdentity (spawn.go) is the one place the "leader" identity literal is
 // spelled. Every internal/org call site that names a permission-mode value
 // (ResolvePermissionMode's fallback, permissionArgsForDriver's switch,
 // Spawn's AC-2b gate check) must use these constants, not a bare string.

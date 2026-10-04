@@ -109,7 +109,7 @@ exit 0
 // agmsgJoinStub is the fake `scripts/join.sh` -- driver.Agmsg shells out to
 // `bash <home>/scripts/join.sh TEAM AGENT_ID TYPE PROJECT_PATH`. Honors
 // ORG_STUB_FAIL=agmsg:join so tests can inject a failure at either the
-// ensureLeadJoined (agent_id "lead") or seat Join call.
+// ensureLeaderJoined (agent_id "leader") or seat Join call.
 const agmsgJoinStub = `#!/bin/sh
 if [ -n "$ORG_AGMSG_LOG" ]; then
   echo "$@" >> "$ORG_AGMSG_LOG"
@@ -288,7 +288,7 @@ func TestOrgSpawn_HappyPath_EventSequenceReceiptAndWorkspaceReuse(t *testing.T) 
 
 	manifestPath := org.ManifestPathIn(stateDir)
 	events := readManifestEvents(t, manifestPath)
-	// spawn_step x5: tab_created, agent_started, agmsg_lead_joined,
+	// spawn_step x5: tab_created, agent_started, agmsg_leader_joined,
 	// agmsg_joined, agmsg_announced.
 	want := []string{"spawn_started", "org_workspace_created", "spawn_step", "spawn_step", "spawn_step", "spawn_step", "spawn_step", "spawned"}
 	if got := eventTypes(events); !equalStrings(got, want) {
@@ -329,18 +329,18 @@ func TestOrgSpawn_HappyPath_EventSequenceReceiptAndWorkspaceReuse(t *testing.T) 
 	// so raw line count isn't the invocation count -- count by the
 	// "ralph-<org_id>" team-name prefix (agmsgTeam's convention) that
 	// starts every join.sh/send.sh call's argv instead. Per seat spawn: one
-	// ensureLeadJoined join.sh call, one seat join.sh call, one send.sh
+	// ensureLeaderJoined join.sh call, one seat join.sh call, one send.sh
 	// HELLO call -- 3 invocations x 2 seats = 6.
 	agmsgLines := readLogLines(t, agmsgLog)
 	if n := countLinesWithPrefix(agmsgLines, "ralph-org-a"); n != 6 {
-		t.Fatalf("expected 6 agmsg invocations (join lead + join seat + send HELLO, per seat), got %d (log: %v)", n, agmsgLines)
+		t.Fatalf("expected 6 agmsg invocations (join leader + join seat + send HELLO, per seat), got %d (log: %v)", n, agmsgLines)
 	}
 }
 
-// TestOrgSpawn_LeadDriverFlag_DefaultsToClaudeCode pins AC-7's CLI wiring:
-// omitting --lead-driver registers the lead identity with agmsg type
+// TestOrgSpawn_LeaderDriverFlag_DefaultsToClaudeCode pins AC-7's CLI wiring:
+// omitting --leader-driver registers the leader identity with agmsg type
 // "claude-code" (the flag's own default, "claude").
-func TestOrgSpawn_LeadDriverFlag_DefaultsToClaudeCode(t *testing.T) {
+func TestOrgSpawn_LeaderDriverFlag_DefaultsToClaudeCode(t *testing.T) {
 	_, agmsgLog := setupOrgStubPATH(t)
 	stateDir := filepath.Join(t.TempDir(), "state")
 
@@ -355,18 +355,18 @@ func TestOrgSpawn_LeadDriverFlag_DefaultsToClaudeCode(t *testing.T) {
 	}
 
 	agmsgLines := readLogLines(t, agmsgLog)
-	// join.sh argv: TEAM AGENT_ID TYPE PROJECT_PATH -- the lead Join is the
+	// join.sh argv: TEAM AGENT_ID TYPE PROJECT_PATH -- the leader Join is the
 	// first agmsg invocation and must carry "claude-code" (the
-	// --lead-driver flag's own default, "claude").
-	if len(agmsgLines) == 0 || !strings.Contains(agmsgLines[0], "ralph-org-a lead claude-code") {
-		t.Fatalf("expected the first agmsg call to be lead Join with type claude-code, got %v", agmsgLines)
+	// --leader-driver flag's own default, "claude").
+	if len(agmsgLines) == 0 || !strings.Contains(agmsgLines[0], "ralph-org-a leader claude-code") {
+		t.Fatalf("expected the first agmsg call to be leader Join with type claude-code, got %v", agmsgLines)
 	}
 }
 
-// TestOrgSpawn_LeadDriverFlag_Codex_RegistersLeadAsCodexType covers the
-// explicit --lead-driver=codex case: the lead identity's agmsg type must
-// follow --lead-driver, independent of the seat's own --driver.
-func TestOrgSpawn_LeadDriverFlag_Codex_RegistersLeadAsCodexType(t *testing.T) {
+// TestOrgSpawn_LeaderDriverFlag_Codex_RegistersLeaderAsCodexType covers the
+// explicit --leader-driver=codex case: the leader identity's agmsg type must
+// follow --leader-driver, independent of the seat's own --driver.
+func TestOrgSpawn_LeaderDriverFlag_Codex_RegistersLeaderAsCodexType(t *testing.T) {
 	_, agmsgLog := setupOrgStubPATH(t)
 	stateDir := filepath.Join(t.TempDir(), "state")
 
@@ -374,18 +374,18 @@ func TestOrgSpawn_LeadDriverFlag_Codex_RegistersLeadAsCodexType(t *testing.T) {
 		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
 		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
 		"--scope", "test-scope",
-		"--state-dir", stateDir, "--lead-driver", "codex",
+		"--state-dir", stateDir, "--leader-driver", "codex",
 	)
 	if err != nil {
 		t.Fatalf("spawn failed: %v (output: %s)", err, out)
 	}
 
 	agmsgLines := readLogLines(t, agmsgLog)
-	if len(agmsgLines) == 0 || !strings.Contains(agmsgLines[0], "ralph-org-a lead codex") {
-		t.Fatalf("expected the first agmsg call to be lead Join with type codex, got %v", agmsgLines)
+	if len(agmsgLines) == 0 || !strings.Contains(agmsgLines[0], "ralph-org-a leader codex") {
+		t.Fatalf("expected the first agmsg call to be leader Join with type codex, got %v", agmsgLines)
 	}
 	// The seat's own Join (second call) must still use its own --driver
-	// (claude -> claude-code), unaffected by --lead-driver.
+	// (claude -> claude-code), unaffected by --leader-driver.
 	if len(agmsgLines) < 2 || !strings.Contains(agmsgLines[1], "ralph-org-a seat-1 claude-code") {
 		t.Fatalf("expected the second agmsg call to be the seat's own Join with type claude-code, got %v", agmsgLines)
 	}
@@ -515,9 +515,9 @@ func TestOrgSpawn_FailureInjection_AgmsgJoin_CompensatesPane(t *testing.T) {
 	if last.Event != "spawn_failed" {
 		t.Fatalf("expected last event spawn_failed, got %q", last.Event)
 	}
-	// ensureLeadJoined's join.sh call also fails (same stub, best-effort --
+	// ensureLeaderJoined's join.sh call also fails (same stub, best-effort --
 	// swallowed) before the hard-failing seat Join call, so the terminal
-	// spawn_failed step is agmsg_join, not agmsg_lead_joined.
+	// spawn_failed step is agmsg_join, not agmsg_leader_joined.
 	if !strings.Contains(last.Details, "step=agmsg_join") {
 		t.Errorf("expected Details to mention step=agmsg_join, got %q", last.Details)
 	}
@@ -529,7 +529,7 @@ func TestOrgSpawn_FailureInjection_AgmsgJoin_CompensatesPane(t *testing.T) {
 
 	agmsgLines := readLogLines(t, agmsgLog)
 	if n := countLinesWithPrefix(agmsgLines, "ralph-org-a"); n != 2 {
-		t.Fatalf("expected exactly 2 agmsg join.sh invocations (lead then seat, both failing -- no send.sh reached), got %d (log: %v)", n, agmsgLines)
+		t.Fatalf("expected exactly 2 agmsg join.sh invocations (leader then seat, both failing -- no send.sh reached), got %d (log: %v)", n, agmsgLines)
 	}
 }
 
@@ -1488,7 +1488,7 @@ func TestOrgSpawn_RoleAndScopeFlags_ExpandTemplateAndRecordScope(t *testing.T) {
 
 // TestOrgSpawn_UnknownRole_NoTemplateApplied is the CLI-level counterpart of
 // the org-package unit test: an unknown --role must not fail spawn, and the
-// herdr log must not contain the reviewer/qa template markers.
+// herdr log must not contain the reviewer template markers.
 func TestOrgSpawn_UnknownRole_NoTemplateApplied(t *testing.T) {
 	herdrLog, _ := setupOrgStubPATH(t)
 	stateDir := filepath.Join(t.TempDir(), "state")
@@ -2163,7 +2163,7 @@ func TestOrgWait_UnknownSeat_StillSucceeds_PassthroughToHerdr(t *testing.T) {
 // TestOrgWait_DefaultUntilAndTimeout_AreBoundedAndDone covers the self-review
 // HIGH-1 fix: `ralph org wait`'s defaults changed from `--until idle` /
 // `--timeout-ms 0` (unbounded) to `--until idle,done` / `--timeout-ms 60000`
-// (bounded) -- a headless lead following its own default wait must not be
+// (bounded) -- a headless leader following its own default wait must not be
 // able to block forever against a perfectly receptive seat (herdr reports an
 // interactive agent resting at its input prompt as "done", not "idle"; see
 // internal/org/verbs.go's Send, which already waits on both).
@@ -2386,9 +2386,9 @@ func equalStrings(a, b []string) bool {
 	return true
 }
 
-// --- ralph org start (AC-3: headless-lead spawn sugar) ----------------------
+// --- ralph org start (AC-3: headless-leader spawn sugar) ----------------------
 
-func TestOrgStart_HappyPath_SpawnsLeadSeat_SingleAgmsgJoin_NoHello(t *testing.T) {
+func TestOrgStart_HappyPath_SpawnsLeaderSeat_SingleAgmsgJoin_NoHello(t *testing.T) {
 	_, agmsgLog := setupOrgStubPATH(t)
 	stateDir := filepath.Join(t.TempDir(), "state")
 
@@ -2401,8 +2401,8 @@ func TestOrgStart_HappyPath_SpawnsLeadSeat_SingleAgmsgJoin_NoHello(t *testing.T)
 	if err != nil {
 		t.Fatalf("start failed: %v (output: %s)", err, out)
 	}
-	if !strings.Contains(out, `spawned seat "lead"`) {
-		t.Errorf("expected spawned confirmation naming the lead seat, got: %s", out)
+	if !strings.Contains(out, `spawned seat "leader"`) {
+		t.Errorf("expected spawned confirmation naming the leader seat, got: %s", out)
 	}
 	if !strings.Contains(out, "ralph org status --org-id org-a") {
 		t.Errorf("expected a status hint in the output, got: %s", out)
@@ -2410,19 +2410,19 @@ func TestOrgStart_HappyPath_SpawnsLeadSeat_SingleAgmsgJoin_NoHello(t *testing.T)
 
 	events := readManifestEvents(t, org.ManifestPathIn(stateDir))
 	last := events[len(events)-1]
-	if last.Event != "spawned" || last.SeatID != "lead" || last.Role != "lead" {
-		t.Fatalf("expected last event spawned for seat_id=role=lead, got %+v", last)
+	if last.Event != "spawned" || last.SeatID != "leader" || last.Role != "leader" {
+		t.Fatalf("expected last event spawned for seat_id=role=leader, got %+v", last)
 	}
 
-	// leadSelfSpawn (internal/org/spawn.go's Spawn): exactly one agmsg
-	// invocation (the seat's own Join, which IS the lead-identity join) --
-	// no separate ensureLeadJoined call, no HELLO send.
+	// leaderSelfSpawn (internal/org/spawn.go's Spawn): exactly one agmsg
+	// invocation (the seat's own Join, which IS the leader-identity join) --
+	// no separate ensureLeaderJoined call, no HELLO send.
 	agmsgLines := readLogLines(t, agmsgLog)
 	if n := countLinesWithPrefix(agmsgLines, "ralph-org-a"); n != 1 {
-		t.Fatalf("expected exactly 1 agmsg invocation for a lead-self spawn, got %d (log: %v)", n, agmsgLines)
+		t.Fatalf("expected exactly 1 agmsg invocation for a leader-self spawn, got %d (log: %v)", n, agmsgLines)
 	}
-	if !strings.Contains(agmsgLines[0], "ralph-org-a lead claude-code") {
-		t.Fatalf("expected the single agmsg call to be lead's own Join, got %v", agmsgLines)
+	if !strings.Contains(agmsgLines[0], "ralph-org-a leader claude-code") {
+		t.Fatalf("expected the single agmsg call to be leader's own Join, got %v", agmsgLines)
 	}
 }
 
@@ -2449,7 +2449,7 @@ func TestOrgStart_TaskAndEnvelopeLandInPromptFile(t *testing.T) {
 		t.Fatalf("expected AgentStart argv to carry the prompt-file pointer, got:\n%s", string(data))
 	}
 
-	promptPath := filepath.Join(stateDir, "prompts", "org-a_lead.md")
+	promptPath := filepath.Join(stateDir, "prompts", "org-a_leader.md")
 	promptData, perr := os.ReadFile(promptPath)
 	if perr != nil {
 		t.Fatalf("expected prompt file at %q: %v", promptPath, perr)
@@ -2457,7 +2457,7 @@ func TestOrgStart_TaskAndEnvelopeLandInPromptFile(t *testing.T) {
 	promptText := string(promptData)
 	for _, want := range []string{task, "model_pool:", "max_seats:", "permission default:", "org-a"} {
 		if !strings.Contains(promptText, want) {
-			t.Errorf("expected lead prompt file to contain %q, got:\n%s", want, promptText)
+			t.Errorf("expected leader prompt file to contain %q, got:\n%s", want, promptText)
 		}
 	}
 }
@@ -2868,19 +2868,19 @@ func TestNewWatchdogHooks_SingleFlight_SecondTriggerSkippedWhileBusy(t *testing.
 	}
 }
 
-// TestNewWatchdogHooks_AbnormalVerdict_SendsAlertToLead pins that an
-// abnormal verdict (anything but normal) is delivered to lead as a typed
+// TestNewWatchdogHooks_AbnormalVerdict_SendsAlertToLeader pins that an
+// abnormal verdict (anything but normal) is delivered to leader as a typed
 // ALERT via rt.SendWatchdogAlert -- identity-level Agmsg.Send from the
-// watchdog identity to lead, observed here through the agmsg send.sh stub's
-// argv log. Bug 1 regression: no lead SEAT is spawned at all (the normal
-// session-promoted-lead org shape -- only the lead agmsg identity itself
-// exists, registered via ensureLeadJoined at org-start time, never a spawned
+// watchdog identity to leader, observed here through the agmsg send.sh stub's
+// argv log. Bug 1 regression: no leader SEAT is spawned at all (the normal
+// session-promoted-leader org shape -- only the leader agmsg identity itself
+// exists, registered via ensureLeaderJoined at org-start time, never a spawned
 // SEAT). The old seat-steering Send verb resolved its To target via
-// findSeat, which fails for a non-existent "lead" seat and silently drops
+// findSeat, which fails for a non-existent "leader" seat and silently drops
 // the ALERT (live smoke: agmsg history had zero ALERTs while escalations
 // fired); identity-level Agmsg.Send bypasses that seat lookup entirely, so
 // the ALERT must still land here.
-func TestNewWatchdogHooks_AbnormalVerdict_SendsAlertToLead(t *testing.T) {
+func TestNewWatchdogHooks_AbnormalVerdict_SendsAlertToLeader(t *testing.T) {
 	_, agmsgLog := setupOrgStubPATH(t)
 	writeClaudeStub(t, "#!/bin/sh\n"+
 		"cat <<'EOF'\n"+
@@ -2905,8 +2905,8 @@ func TestNewWatchdogHooks_AbnormalVerdict_SendsAlertToLead(t *testing.T) {
 		t.Fatalf("read agmsg log: %v", err)
 	}
 	log := string(data)
-	if !strings.Contains(log, "watchdog lead TYPE: ALERT") {
-		t.Errorf("expected an ALERT sent from the watchdog identity to lead, agmsg log: %s", log)
+	if !strings.Contains(log, "watchdog leader TYPE: ALERT") {
+		t.Errorf("expected an ALERT sent from the watchdog identity to leader, agmsg log: %s", log)
 	}
 	if !strings.Contains(log, "CONDITION: watcher_scope_change") {
 		t.Errorf("expected the ALERT to record the watcher condition, agmsg log: %s", log)
@@ -2997,5 +2997,379 @@ func TestOrgReport_CLI_RequiresOrgID(t *testing.T) {
 	out, err := runOrgCmd(t, "report", "--out", filepath.Join(t.TempDir(), "reports"))
 	if err == nil {
 		t.Fatalf("expected non-zero exit for a missing --org-id, output: %s", out)
+	}
+}
+
+// oldLeaderName is the coordinator's retired identifier. The tests of its
+// rejection (here and in doctor_org_test.go) refer to it through this
+// constant instead of repeating the literal. The past-receipt fixtures in
+// insights_test.go spell the old name on their own: they are historical
+// data, not the rejection.
+const oldLeaderName = "lead"
+
+// writeOrgConfigWithExtra writes the same minimal ralph.toml as
+// writeOrgConfig (max_seats 5, one claude/sonnet pool entry) followed by
+// extra, which must be complete TOML tables.
+func writeOrgConfigWithExtra(t *testing.T, dir, extra string) string {
+	t.Helper()
+	path := writeOrgConfig(t, dir, 5)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read org config: %v", err)
+	}
+	if err := os.WriteFile(path, append(data, []byte("\n"+extra)...), 0o644); err != nil {
+		t.Fatalf("write org config: %v", err)
+	}
+	return path
+}
+
+// retiredLeaderConfigs are the two ralph.toml shapes that carry the old
+// coordinator name as a role key, keyed by the key the rejection must name.
+var retiredLeaderConfigs = map[string]string{
+	"[org.roles]." + oldLeaderName:             "[org.roles]\n" + oldLeaderName + " = [\"sonnet\"]\n",
+	"[org.permissions.roles]." + oldLeaderName: "[org.permissions.roles]\n" + oldLeaderName + " = \"guarded\"\n",
+}
+
+// TestOrgSpawnAndStart_RetiredLeaderConfigKey_Rejected covers AC-13 (b) for
+// the verbs that start seats: a ralph.toml carrying the old name as a role
+// key makes `org spawn` (any role) and `org start` fail with the exact key
+// to rename, before any driver call or manifest write.
+func TestOrgSpawnAndStart_RetiredLeaderConfigKey_Rejected(t *testing.T) {
+	for key, extra := range retiredLeaderConfigs {
+		for _, verb := range []string{"spawn", "start"} {
+			t.Run(verb+"/"+key, func(t *testing.T) {
+				herdrLog, agmsgLog := setupOrgStubPATH(t)
+				stateDir := filepath.Join(t.TempDir(), "state")
+				configPath := writeOrgConfigWithExtra(t, t.TempDir(), extra)
+
+				args := []string{"--org-id", "org-a", "--driver", "claude", "--model", "sonnet",
+					"--cwd", t.TempDir(), "--scope", "org-wide",
+					"--state-dir", stateDir, "--config", configPath}
+				if verb == "spawn" {
+					args = append([]string{"spawn", "--id", "seat-1", "--role", "worker"}, args...)
+				} else {
+					args = append([]string{"start"}, append(args, "task text")...)
+				}
+				out, err := runOrgCmd(t, args...)
+
+				if err == nil {
+					t.Fatalf("expected a non-zero exit, output: %s", out)
+				}
+				for _, want := range []string{key, strings.Replace(key, "."+oldLeaderName, "."+org.LeaderIdentity, 1)} {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("error %q should contain %q", err.Error(), want)
+					}
+				}
+				if events := readManifestEvents(t, org.ManifestPathIn(stateDir)); len(events) != 0 {
+					t.Errorf("expected no manifest event, got %v", eventTypes(events))
+				}
+				if lines := readLogLines(t, herdrLog); len(lines) != 0 {
+					t.Errorf("expected no herdr call, got %v", lines)
+				}
+				if lines := readLogLines(t, agmsgLog); len(lines) != 0 {
+					t.Errorf("expected no agmsg call, got %v", lines)
+				}
+				rr, rerr := org.NewReceiptStoreAtPath(org.ReceiptsPathIn(stateDir)).Read()
+				if rerr != nil {
+					t.Fatalf("read receipts: %v", rerr)
+				}
+				if len(rr.Receipts) != 0 {
+					t.Errorf("expected no receipt, got %+v", rr.Receipts)
+				}
+			})
+		}
+	}
+}
+
+// TestOrgCleanupVerbs_RetiredLeaderConfigKey_StillWork covers the other half
+// of AC-13 (b): the old key blocks only the verbs that start seats. status,
+// stop and disband keep working under the same ralph.toml, so an operator can
+// tear down an old org before touching the file.
+func TestOrgCleanupVerbs_RetiredLeaderConfigKey_StillWork(t *testing.T) {
+	for key, extra := range retiredLeaderConfigs {
+		t.Run(key, func(t *testing.T) {
+			setupOrgStubPATH(t)
+			stateDir := filepath.Join(t.TempDir(), "state")
+			cleanConfig := writeOrgConfig(t, t.TempDir(), 5)
+			oldConfig := writeOrgConfigWithExtra(t, t.TempDir(), extra)
+
+			for _, id := range []string{"seat-1", "seat-2"} {
+				out, err := runOrgCmd(t,
+					"spawn", "--org-id", "org-a", "--id", id, "--role", "worker",
+					"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+					"--scope", "test-scope", "--state-dir", stateDir, "--config", cleanConfig)
+				if err != nil {
+					t.Fatalf("spawn %s with the clean config failed: %v (output: %s)", id, err, out)
+				}
+			}
+
+			out, err := runOrgCmd(t, "status", "--org-id", "org-a", "--state-dir", stateDir, "--config", oldConfig)
+			if err != nil {
+				t.Fatalf("status under the old key failed: %v (output: %s)", err, out)
+			}
+			if !strings.Contains(out, "seat-1") || !strings.Contains(out, "seat-2") {
+				t.Errorf("expected both seats in status output, got: %s", out)
+			}
+
+			out, err = runOrgCmd(t, "stop", "--org-id", "org-a", "--seat", "seat-1", "--state-dir", stateDir, "--config", oldConfig)
+			if err != nil {
+				t.Fatalf("stop under the old key failed: %v (output: %s)", err, out)
+			}
+
+			out, err = runOrgCmd(t, "disband", "--org-id", "org-a", "--state-dir", stateDir, "--config", oldConfig)
+			if err != nil {
+				t.Fatalf("disband under the old key failed: %v (output: %s)", err, out)
+			}
+			if !strings.Contains(out, `disbanded org "org-a"`) {
+				t.Errorf("expected the disband confirmation, got: %s", out)
+			}
+		})
+	}
+}
+
+// TestOrgSpawn_RetiredLeaderRoleAndID_RejectedThroughCLI is the CLI-level
+// view of AC-13 (a): the old name is refused as --role and as --id, with
+// --prompt and in dry-run, and the message names the replacement.
+func TestOrgSpawn_RetiredLeaderRoleAndID_RejectedThroughCLI(t *testing.T) {
+	cases := []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		{"role", []string{"--id", "seat-1", "--role", oldLeaderName}, "--role " + org.LeaderIdentity},
+		{"role with --prompt", []string{"--id", "seat-1", "--role", oldLeaderName, "--prompt", "x"}, "--role " + org.LeaderIdentity},
+		{"role dry-run", []string{"--id", "seat-1", "--role", oldLeaderName, "--dry-run"}, "--role " + org.LeaderIdentity},
+		{"id", []string{"--id", oldLeaderName, "--role", "worker"}, org.LeaderIdentity},
+		{"id with role leader and --prompt", []string{"--id", oldLeaderName, "--role", org.LeaderIdentity, "--prompt", "x"}, org.LeaderIdentity},
+		{"id dry-run", []string{"--id", oldLeaderName, "--role", "worker", "--dry-run"}, org.LeaderIdentity},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			herdrLog, _ := setupOrgStubPATH(t)
+			stateDir := filepath.Join(t.TempDir(), "state")
+
+			args := append([]string{"spawn", "--org-id", "org-a", "--driver", "claude", "--model", "sonnet",
+				"--cwd", t.TempDir(), "--scope", "test-scope", "--state-dir", stateDir}, tc.args...)
+			out, err := runOrgCmd(t, args...)
+
+			if err == nil {
+				t.Fatalf("expected a non-zero exit, output: %s", out)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("error %q should contain %q", err.Error(), tc.wantErr)
+			}
+			if events := readManifestEvents(t, org.ManifestPathIn(stateDir)); len(events) != 0 {
+				t.Errorf("expected no manifest event, got %v", eventTypes(events))
+			}
+			if lines := readLogLines(t, herdrLog); len(lines) != 0 {
+				t.Errorf("expected no herdr call, got %v", lines)
+			}
+		})
+	}
+}
+
+// removedRoleName is the role whose seat template was removed outright
+// (internal/org's retiredRoles table; its gate re-run moved to the reviewer
+// role).
+const removedRoleName = "qa"
+
+// TestOrgSpawn_RetiredRoleOrID_RefusedBeforeModelFallback covers the CLI
+// ordering of the retired-name guard: with --model omitted, `ralph org spawn`
+// refuses a retired --role / --id with the successor guidance before it
+// resolves the --model fallback, so stderr carries no fallback warning and a
+// role-restricted pool cannot answer first with a model_pool error.
+func TestOrgSpawn_RetiredRoleOrID_RefusedBeforeModelFallback(t *testing.T) {
+	cases := []struct {
+		name    string
+		args    []string
+		config  string // full ralph.toml; empty means no --config
+		wantErr []string
+	}{
+		{
+			name:    "removed role without --prompt",
+			args:    []string{"--id", "seat-1", "--role", removedRoleName},
+			wantErr: []string{"reviewer", "--prompt"},
+		},
+		{
+			name:    "renamed role",
+			args:    []string{"--id", "seat-1", "--role", oldLeaderName},
+			wantErr: []string{"--role " + org.LeaderIdentity},
+		},
+		{
+			name:    "renamed seat id",
+			args:    []string{"--id", oldLeaderName, "--role", "worker"},
+			wantErr: []string{"agmsg identity", org.LeaderIdentity},
+		},
+		{
+			// The old key limits the old role to a codex model, so the
+			// claude fallback would fail with a model_pool error first.
+			name: "renamed role whose old key allows no claude model",
+			args: []string{"--id", "seat-1", "--role", oldLeaderName},
+			config: "[org]\nmax_seats = 5\ndriver_pool = [\"claude\", \"codex\"]\n\n" +
+				"[[org.model_pool]]\ndriver = \"claude\"\nmodel = \"sonnet\"\n\n" +
+				"[[org.model_pool]]\ndriver = \"codex\"\nmodel = \"gpt-6-astra\"\n\n" +
+				"[org.roles]\n" + oldLeaderName + " = [\"gpt-6-astra\"]\n",
+			wantErr: []string{"--role " + org.LeaderIdentity},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			herdrLog, _ := setupOrgStubPATH(t)
+			stateDir := filepath.Join(t.TempDir(), "state")
+			args := []string{"spawn", "--org-id", "org-a", "--driver", "claude",
+				"--cwd", t.TempDir(), "--scope", "test-scope", "--state-dir", stateDir}
+			if tc.config != "" {
+				configPath := filepath.Join(t.TempDir(), "ralph.toml")
+				if err := os.WriteFile(configPath, []byte(tc.config), 0o644); err != nil {
+					t.Fatalf("write config: %v", err)
+				}
+				args = append(args, "--config", configPath)
+			}
+			args = append(args, tc.args...)
+
+			stdout, stderr, err := runOrgCmdSplitStreams(t, args...)
+
+			if err == nil {
+				t.Fatalf("expected a non-zero exit, stderr: %s", stderr)
+			}
+			// Printed like a Spawn rejection, so scripts that read the
+			// "rejected:" line see this refusal too.
+			if !strings.Contains(stdout, "rejected: ") {
+				t.Errorf("expected a \"rejected: \" line on stdout, got: %s", stdout)
+			}
+			for _, want := range tc.wantErr {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q should contain %q", err.Error(), want)
+				}
+			}
+			if strings.Contains(stderr, "--model omitted") {
+				t.Errorf("expected no --model fallback warning before the retired-name rejection, stderr: %s", stderr)
+			}
+			if events := readManifestEvents(t, org.ManifestPathIn(stateDir)); len(events) != 0 {
+				t.Errorf("expected no manifest event, got %v", eventTypes(events))
+			}
+			if lines := readLogLines(t, herdrLog); len(lines) != 0 {
+				t.Errorf("expected no herdr call, got %v", lines)
+			}
+		})
+	}
+}
+
+// runOrgCmdSplitStreams runs `ralph org <args...>` the way main does -- no
+// SetOut / SetErr -- with os.Stdout and os.Stderr swapped for pipes, so a
+// test can tell which stream a message went to. runOrgCmd cannot: it merges
+// both into one buffer, and once SetOut is set cobra prints its flag
+// warnings (the deprecation notice) to that writer instead of stderr.
+func runOrgCmdSplitStreams(t *testing.T, args ...string) (stdout, stderr string, err error) {
+	t.Helper()
+	outR, outW, perr := os.Pipe()
+	if perr != nil {
+		t.Fatal(perr)
+	}
+	errR, errW, perr := os.Pipe()
+	if perr != nil {
+		t.Fatal(perr)
+	}
+	origOut, origErr := os.Stdout, os.Stderr
+	os.Stdout, os.Stderr = outW, errW
+	func() {
+		defer func() { os.Stdout, os.Stderr = origOut, origErr }()
+		root := NewRootCmd()
+		root.SetArgs(append([]string{"org"}, args...))
+		err = root.Execute()
+	}()
+	_ = outW.Close()
+	_ = errW.Close()
+	outBytes, _ := io.ReadAll(outR)
+	errBytes, _ := io.ReadAll(errR)
+	return string(outBytes), string(errBytes), err
+}
+
+// TestOrgSpawn_DeprecatedDriverFlagAlias covers AC-13 (c): the old spelling
+// of --leader-driver still works but warns on stderr; both spellings with
+// different values is an error (decided by Flags().Changed, so an explicit
+// --leader-driver claude, which equals the default, still conflicts with
+// --lead-driver codex); the same value on both is fine.
+func TestOrgSpawn_DeprecatedDriverFlagAlias(t *testing.T) {
+	oldFlag := "--" + oldLeaderName + "-driver"
+	const newFlag = "--leader-driver"
+
+	cases := []struct {
+		name         string
+		flags        []string
+		wantErr      []string // substrings of the error; nil means success
+		wantAgmsg    string   // substring of the first agmsg call (success only)
+		wantDeprecat bool     // stderr carries the deprecation notice
+	}{
+		{name: "old flag alone", flags: []string{oldFlag, "codex"}, wantAgmsg: "ralph-org-a leader codex", wantDeprecat: true},
+		{name: "old flag alone equal to the default", flags: []string{oldFlag, "claude"}, wantAgmsg: "ralph-org-a leader claude-code", wantDeprecat: true},
+		{name: "new flag alone", flags: []string{newFlag, "codex"}, wantAgmsg: "ralph-org-a leader codex"},
+		{name: "neither", flags: nil, wantAgmsg: "ralph-org-a leader claude-code"},
+		{name: "both, same value", flags: []string{oldFlag, "codex", newFlag, "codex"}, wantAgmsg: "ralph-org-a leader codex", wantDeprecat: true},
+		{name: "both, different values", flags: []string{oldFlag, "codex", newFlag, "claude"}, wantErr: []string{oldFlag, newFlag}, wantDeprecat: true},
+		{name: "both, different values, new flag first", flags: []string{newFlag, "codex", oldFlag, "claude"}, wantErr: []string{oldFlag, newFlag}, wantDeprecat: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			herdrLog, agmsgLog := setupOrgStubPATH(t)
+			stateDir := filepath.Join(t.TempDir(), "state")
+
+			args := append([]string{
+				"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
+				"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+				"--scope", "test-scope", "--state-dir", stateDir,
+			}, tc.flags...)
+			stdout, stderr, err := runOrgCmdSplitStreams(t, args...)
+
+			if tc.wantDeprecat {
+				for _, want := range []string{oldFlag, "deprecated", newFlag} {
+					if !strings.Contains(stderr, want) {
+						t.Errorf("stderr should carry the deprecation notice containing %q, got stderr=%q stdout=%q", want, stderr, stdout)
+					}
+				}
+			} else if strings.Contains(stderr, "deprecated") {
+				t.Errorf("unexpected deprecation notice on stderr: %q", stderr)
+			}
+
+			if tc.wantErr != nil {
+				if err == nil {
+					t.Fatalf("expected an error, stdout=%q stderr=%q", stdout, stderr)
+				}
+				for _, want := range tc.wantErr {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("error %q should contain %q", err.Error(), want)
+					}
+				}
+				if events := readManifestEvents(t, org.ManifestPathIn(stateDir)); len(events) != 0 {
+					t.Errorf("expected no manifest event on a flag conflict, got %v", eventTypes(events))
+				}
+				if lines := readLogLines(t, herdrLog); len(lines) != 0 {
+					t.Errorf("expected no herdr call on a flag conflict, got %v", lines)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("spawn failed: %v (stdout=%q stderr=%q)", err, stdout, stderr)
+			}
+			agmsgLines := readLogLines(t, agmsgLog)
+			if len(agmsgLines) == 0 || !strings.Contains(agmsgLines[0], tc.wantAgmsg) {
+				t.Fatalf("expected the first agmsg call to contain %q, got %v", tc.wantAgmsg, agmsgLines)
+			}
+		})
+	}
+}
+
+// TestOrgSpawn_DeprecatedDriverFlagAlias_HiddenFromHelp pins that the alias
+// is hidden once deprecated, so help teaches only --leader-driver.
+func TestOrgSpawn_DeprecatedDriverFlagAlias_HiddenFromHelp(t *testing.T) {
+	out, err := runOrgCmd(t, "spawn", "--help")
+	if err != nil {
+		t.Fatalf("spawn --help failed: %v", err)
+	}
+	if !strings.Contains(out, "--leader-driver") {
+		t.Errorf("help should list --leader-driver, got:\n%s", out)
+	}
+	if strings.Contains(out, "--"+oldLeaderName+"-driver") {
+		t.Errorf("help should hide the deprecated alias, got:\n%s", out)
 	}
 }
