@@ -1,6 +1,6 @@
 # org-drop-qa-seat
 
-- Status: In progress
+- Status: Pipeline at sync-docs → cross-review (self-review, verify, test: pass; PR not created)
 - Owner: Claude Code
 - Date: 2026-10-04
 - Related request: org runtime の役割を指示役・実装役・レビュー役の 3 つに絞り、qa 座席(役割雛形)を撤去する。qa が担っていた決定論ゲート(`run-static-verify.sh` / `run-test.sh`)の再実行は reviewer の最初の手順に移し、fail なら差分レビューに進まず BLOCKED で返す。spec FR-7 の 4 フェーズの判断を改訂する。あわせて、指示役の名前 `lead` を `leader` に改める(ユーザー: 「あと、leadはleaderに変更してください。それも計画に含めて。」)

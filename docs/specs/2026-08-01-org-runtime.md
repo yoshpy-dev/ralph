@@ -16,10 +16,10 @@ Ralph Loop(/loop)の自律実行系を撤去し、Lead LLM が herdr(実行・�
 
 - (a) 役割は leader / implementer / reviewer の 3 種にする(2026-09-16 改訂 (b) の「4 種」を置き換える)。qa 座席の雛形(`internal/org/prompts/qa.md`)は撤去した。qa の仕事は決定論的な 2 本のスクリプト(`run-static-verify.sh` / `run-test.sh`)を実行して要約することで、「LLM は判断、決定論は機構と保証」の境界からすると常駐の LLM 座席を使う理由がない。implementer もスライスごとに同じスクリプトを通しており、FR-7 の順序は直列なので、座席を分けても並列化の効果はない。
 - (b) FR-7 は 3 段にする。① impl 座席が退出チェック付きで RESULT を返す。② reviewer 座席が最初に決定論ゲートを再実行する。チェックが落ちたら `GATE: fail`、権限や環境の問題で実行できなければ `GATE: unrunnable` として BLOCKED を返し、差分レビューに進まない。通れば差分品質と仕様適合をレビューし、`GATE: pass` の RESULT を返す。③ leader が裁定する。`GATE: fail` は impl に差し戻し、`GATE: unrunnable` は leader が環境や権限を直す。doc-maintainer 以降は従来どおり。
-- (c) 指示役の識別子を `lead` から `leader` に改めた(役割名、seat id、agmsg の宛先 ID、herdr のエージェント名、雛形 `leader.md`、`--leader-driver`)。旧名は案内付きで拒否する。`--role lead` と `--id lead` の spawn は拒否し、`ralph.toml` の `[org.roles].lead` / `[org.permissions.roles].lead` があれば spawn を拒否して `ralph doctor` が warn を出す。`--lead-driver` は非推奨の別名として残す。stop / disband などは旧名を拒否しないので、古い org も片付けられる。FR-4 の identity の例の `lead` は `leader` と読み替える。
+- (c) 指示役の識別子を `lead` から `leader` に改めた(役割名、seat id、agmsg の宛先 ID、herdr のエージェント名、雛形 `leader.md`、`--leader-driver`)。旧名は案内付きで拒否する。`--role lead` と `--id lead` の spawn は拒否し、`ralph.toml` の `[org.roles].lead` / `[org.permissions.roles].lead` があれば spawn を拒否して `ralph doctor` が warn を出す。`--lead-driver` は非推奨の別名として残す。stop / disband などは旧名を拒否しないので、古い org も片付けられる。FR-4 の identity の例の `lead` は `leader` と読み替える。FR-5 以降の本文にある Lead(指示役を指す語)も同じ座席のことで、識別子や宛先としては `leader` である。
 - (d) `--role qa` は `--prompt` がなければ拒否し、reviewer を案内する。`--prompt` があれば、雛形のない独自の役割として起動する。
 - (e) FR-7 の「ゲートは hook で LLM 迂回不能とする」は未実装のまま残る(docs/tech-debt に記録)。ゲートは reviewer 雛形の指示で動く。
-- 本文の履歴の記述(Summary の「QA」、FR-4 の `lead` / `qa`、FR-7 の QA 座席、FR-11 の QA 座席、AC の QA 座席、Open questions の QA)は書き換えず、該当行に改訂の印を付ける。
+- 本文の履歴の記述は書き換えない。FR-4、FR-7、FR-11、AC、Open questions の該当行には改訂の印を付けた。Summary の「QA」と 2026-09-16 改訂 (b) の「4 種」には印を付けない。上の (a) が置き換えを述べている。
 
 ### 運用ノート: 既定 codex スラッグの更新手順(2026-09-18、issue #156)
 
