@@ -98,7 +98,9 @@ because `codex exec review` has no `--sandbox` flag. Without it the
 reviewer inherits `.codex/config.toml`'s
 `sandbox_mode = "danger-full-access"`, and `codex exec` never asks for
 approval, so an instruction hidden in the diff under review could run any
-command. Both calls also pass
+command. Keep every `-c` before `exec`: on codex-cli 0.154.0 a `-c` placed
+after `exec` makes codex discard all the `-c` options given before it (the
+sandbox and the reasoning effort included). Both calls also pass
 `--ignore-rules`, so an `allow` rule in a user or project execpolicy
 `.rules` file cannot run a matching command outside the sandbox. Neither
 flag covers MCP servers from the user-level config, which still start

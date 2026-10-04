@@ -17,10 +17,12 @@
 model = "gpt-5.6-sol"
 
 # Sandbox mode: danger-full-access allows unrestricted filesystem access.
-# In an interactive session, approval_policy below gates destructive shell
-# calls. `codex exec` never asks for approval, even with "on-request", so
-# the `codex exec` calls in the /plan skill (Codex plan advisory) and the
-# /cross-review skill (codex reviewer) pass a read-only sandbox explicitly.
+# approval_policy below sets when an interactive session asks for approval
+# before running a command (`codex --help`, --ask-for-approval). `codex exec`
+# never asks for approval, even with "on-request" (its run header shows
+# `approval: never`), so the `codex exec` calls in the /plan skill (Codex
+# plan advisory) and the /cross-review skill (codex reviewer) pass a
+# read-only sandbox explicitly.
 sandbox_mode = "danger-full-access"
 
 # approval_policy: when an interactive Codex session pauses for user
