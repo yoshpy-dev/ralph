@@ -1,6 +1,6 @@
 # subagent-model-defaults
 
-- Status: Draft
+- Status: Pipeline complete (cross-review cycle 1, no findings), PR pending
 - Owner: Claude Code
 - Date: 2026-10-04
 - Related request: メンテナの依頼(2026-10-04)。「implementer と verifier、tester は sonnet となっているが、既定で opus で実行するようにしてほしい。reviewer と doc-maintainer は既定で sonnet にしてほしい」
@@ -57,12 +57,12 @@
 
 ## Acceptance criteria
 
-- [ ] AC-1: `.claude/agents/` の frontmatter が implementer `opus`、verifier `opus`、tester `opus`、reviewer `sonnet`、doc-maintainer `sonnet` になっている。template の 5 ファイルは root と byte 一致。
-- [ ] AC-2: `model-routing.md`(+ template)の tier 表が AC-1 の割り振りを示し、23 行目相当の pin の記述が `model: opus` になり、escalation の段落が新しい既定と矛盾しない(「implementer を opus に上げる」とは書かない)。tier 表から「Where the values live」の直前までは root と template で同じ文面にする(`diff` で、差分が既存の org runtime の節と、「Where the values live」にある root だけの bullet(既存の `defaults_sync_test.go` の bullet と新しい `tests/test-agent-models.sh` の bullet)だけであることを確かめる)。
-- [ ] AC-3: `tests/test-agent-models.sh` が通る。red: root と template のそれぞれで、(a) agent の `model:` を 1 つ変える、(b) tier 表の 1 行のモデルを変える、(c) tier 表から agent 名を 1 つ消す、(d) pin の記述を旧値(`model: sonnet`)に戻す、のどれでも落ち、落ちたファイルと agent 名を出す。template 側だけを変えた場合も落ちる。
-- [ ] AC-4: `./scripts/check-sync.sh`、`./scripts/check-skill-sync.sh`、`./scripts/check-template.sh` が green。
-- [ ] AC-5: `go run ./cmd/ralph init --yes` で scratch に作った fresh scaffold の `.claude/agents/` が AC-1 の値になっている。
-- [ ] AC-6: `RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh` green。
+- [x] AC-1: `.claude/agents/` の frontmatter が implementer `opus`、verifier `opus`、tester `opus`、reviewer `sonnet`、doc-maintainer `sonnet` になっている。template の 5 ファイルは root と byte 一致。
+- [x] AC-2: `model-routing.md`(+ template)の tier 表が AC-1 の割り振りを示し、23 行目相当の pin の記述が `model: opus` になり、escalation の段落が新しい既定と矛盾しない(「implementer を opus に上げる」とは書かない)。tier 表から「Where the values live」の直前までは root と template で同じ文面にする(`diff` で、差分が既存の org runtime の節と、「Where the values live」にある root だけの bullet(既存の `defaults_sync_test.go` の bullet と新しい `tests/test-agent-models.sh` の bullet)だけであることを確かめる)。
+- [x] AC-3: `tests/test-agent-models.sh` が通る。red: root と template のそれぞれで、(a) agent の `model:` を 1 つ変える、(b) tier 表の 1 行のモデルを変える、(c) tier 表から agent 名を 1 つ消す、(d) pin の記述を旧値(`model: sonnet`)に戻す、のどれでも落ち、落ちたファイルと agent 名を出す。template 側だけを変えた場合も落ちる。
+- [x] AC-4: `./scripts/check-sync.sh`、`./scripts/check-skill-sync.sh`、`./scripts/check-template.sh` が green。
+- [x] AC-5: `go run ./cmd/ralph init --yes` で scratch に作った fresh scaffold の `.claude/agents/` が AC-1 の値になっている。
+- [x] AC-6: `RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh` green。
 
 ## Implementation outline
 
