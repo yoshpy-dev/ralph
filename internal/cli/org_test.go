@@ -3170,10 +3170,8 @@ func TestOrgSpawn_RetiredLeaderRoleAndID_RejectedThroughCLI(t *testing.T) {
 
 // removedRoleName is the role whose seat template was removed outright
 // (internal/org's retiredRoles table; its gate re-run moved to the reviewer
-// role). It is spelled in two pieces so that the plan's AC-5 grep for the
-// bare word keeps listing only the table and its own tests; the value is the
-// same role name.
-const removedRoleName = "q" + "a"
+// role).
+const removedRoleName = "qa"
 
 // TestOrgSpawn_RetiredRoleOrID_RefusedBeforeModelFallback covers the CLI
 // ordering of the retired-name guard: with --model omitted, `ralph org spawn`
@@ -3229,10 +3227,15 @@ func TestOrgSpawn_RetiredRoleOrID_RefusedBeforeModelFallback(t *testing.T) {
 			}
 			args = append(args, tc.args...)
 
-			_, stderr, err := runOrgCmdSplitStreams(t, args...)
+			stdout, stderr, err := runOrgCmdSplitStreams(t, args...)
 
 			if err == nil {
 				t.Fatalf("expected a non-zero exit, stderr: %s", stderr)
+			}
+			// Printed like a Spawn rejection, so scripts that read the
+			// "rejected:" line see this refusal too.
+			if !strings.Contains(stdout, "rejected: ") {
+				t.Errorf("expected a \"rejected: \" line on stdout, got: %s", stdout)
 			}
 			for _, want := range tc.wantErr {
 				if !strings.Contains(err.Error(), want) {

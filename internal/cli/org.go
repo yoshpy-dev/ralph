@@ -328,7 +328,9 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			// model_pool error for a role that no longer exists. Spawn runs
 			// the same check again. The ralph.toml retired-key check stays
 			// in Spawn only: it must run after Spawn's idempotent return.
+			// The refusal is printed the same way as a Spawn rejection.
 			if err := org.RetiredRoleInputErr(role, seatID, prompt); err != nil {
+				printSpawnResult(cmd, org.SpawnResult{Outcome: org.SpawnOutcomeRejected, Err: err})
 				return err
 			}
 			effectiveLeaderDriver, err := resolveLeaderDriver(cmd, leaderDriver, deprecatedDriver)
