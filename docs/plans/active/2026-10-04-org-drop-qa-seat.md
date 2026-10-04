@@ -170,7 +170,7 @@ org runtime の座席を、指示役(leader)・実装役(implementer)・レビ�
 - [x] AC-1: `internal/org/prompts/qa.md` がなく、`RenderRolePrompt("qa", …)` が `ok=false` と空文字列を返すことをテストで検査している。
 - [x] AC-2: reviewer 雛形のミッション節が、(a) 最初にゲート(leader の指示、なければ `run-static-verify.sh` と `run-test.sh`)を実行する、(b) `GATE: fail` なら root cause とレポートのパスを付けて BLOCKED を返し差分レビューに進まない、(c) `GATE: unrunnable` なら理由を付けて BLOCKED を返し差分レビューに進まない、(d) 通れば差分品質と受け入れ基準をレビューしてゲートの結果と合わせる、を含み、`QA 座席` を含まない。テストはミッション節だけを見る。red: 2 本のスクリプト名、`GATE: fail`、`GATE: unrunnable`、「差分レビューに進まない」の文言を 1 つずつ消すと、そのたびにテストが落ちる(mutation の結果を report に残す)。
 - [x] AC-3: leader 雛形のミッション節が、レビューと検証を reviewer に委譲すること、`GATE: fail` を implementer に差し戻すこと、`GATE: unrunnable` は implementer に戻さず leader が直すか人に上げることを含み、`qa 座席` を含まない。red: 差し戻しの文言と `GATE: unrunnable` の扱いを 1 つずつ消すと、そのたびにテストが落ちる。
-- [ ] AC-4: `--role qa` と空の `--prompt` の spawn は、dry-run でも実際の spawn でも拒否され、エラー文に `reviewer` と `--prompt` が含まれ、manifest と receipts に何も書かれない。`--role qa` に `--prompt` を付けると起動し、初期プロンプトは `--prompt` だけになる。いずれもテストで検査している。
+- [x] AC-4: `--role qa` と空の `--prompt` の spawn は、dry-run でも実際の spawn でも拒否され、エラー文に `reviewer` と `--prompt` が含まれ、manifest と receipts に何も書かれない。`--role qa` に `--prompt` を付けると起動し、初期プロンプトは `--prompt` だけになる。いずれもテストで検査している。
 - [ ] AC-5: `git grep -n -w -i qa -- . ':!docs/plans' ':!docs/reports' ':!docs/evidence' ':!docs/research'` の結果が、次のファイルだけになる: `internal/org/prompts.go`(撤去・改名した役割の表)、`internal/org/prompts_test.go`、`internal/org/spawn_test.go`(AC-1 と AC-4 のテスト)、`internal/cli/status_test.go`(Non-goals)、`.claude/skills/org/SKILL.md` と 3 つのミラー(撤去の案内)、`docs/specs/2026-08-01-org-runtime.md`(改訂の節と履歴の記述)、`docs/tech-debt/README.md`(既存の解決済みの行と新しい行)。表を `spawn.go` に置いた場合は `prompts.go` を `spawn.go` に読み替える。
 - [ ] AC-6: `/org` skill の 4 面で、Leaded 行・fan-out の例・役割リストが 3 役割になり、reviewer の説明にゲートの再実行と `guarded` の注意が入り、`--role qa` の拒否が書かれている。
 - [ ] AC-7: `quality-gates.md`(root と template)の Quality pipeline gate の行が新しい順序を示し、雛形の指示で動いていることを書いている。`templates/base/ralph.toml` の `reviewer = "guarded"` の例に注記がある。`docs/tech-debt/README.md` に hook 強制の未実装の行がある。
@@ -242,6 +242,8 @@ org runtime の座席を、指示役(leader)・実装役(implementer)・レビ�
 - 2026-10-04(Slice 0、eb30b172): implementer は gopls ではなく、単語境界の perl の置換と `gofmt -w` で改名した。`go build` / `go vet` / `go test ./...` / `run-verify.sh` が green。manifest の Details に書く診断用の文字列(`lead_self=true` → `leader_self=true`、`lead_join=` → `leader_join=`、`lead_is_anomaly_subject` → `leader_is_anomaly_subject`、`agmsg_lead_joined` → `agmsg_leader_joined`)も改名した。これらを読むのは Go のテストだけで、過去の manifest や evidence に残る旧い文字列はそのまま。コミットの trailer は、委譲先のモデルに合わせて `Claude Sonnet 5.5` になっている。
 
 - 2026-10-04(Slice A、90488a06): qa の Go のコメントもこのスライスで直した(Implementation outline の 3 を参照)。AC-2 / AC-3 の mutation は 9 通り(reviewer: 2 本のスクリプト名、`GATE: fail`、`GATE: unrunnable`、2 つの項目それぞれの「差分レビューに進まない」。leader: 「implementer 座席に差し戻」「implementer には戻さず」「`GATE: unrunnable`」)で、どれも `TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing` か `TestRenderRolePrompt_Leader_MissionRoutesGateBlocked` が落ちることを確かめ、元に戻した。
+
+- 2026-10-04(Slice B、fbc9e539): 撤去した役割の判定は `p.Prompt == ""` の厳密な比較で、空白だけの `--prompt " "` は拒否しない(AC-4 の「空の `--prompt`」どおり)。表の `"qa"` は `internal/org/prompts.go` にだけあり、`spawn.go` のエラー文は `%q` で役割名を埋めるので、AC-5 の Go ファイルは計画どおり `prompts.go` になった。設定キーのエラー文は「full model_pool と `[org.permissions].default` に戻る」に直した。
 
 ## Open questions
 
