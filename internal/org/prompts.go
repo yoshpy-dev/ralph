@@ -33,7 +33,7 @@ type RolePromptVars struct {
 	Role   string
 	Scope  string
 	// PlanPath is not wired into any embedded template today -- none of the
-	// four templates (lead.md, implementer.md, reviewer.md, qa.md)
+	// four templates (leader.md, implementer.md, reviewer.md, qa.md)
 	// reference {{PLAN_PATH}} (removed: no production caller populated it,
 	// so every rendered prompt shipped a literal "- plan: " with nothing
 	// after it -- self-review finding M5). The field is kept so a future
@@ -41,14 +41,14 @@ type RolePromptVars struct {
 	// another RolePromptVars schema change.
 	PlanPath string
 	// Task is the task text substituted for {{TASK}} -- currently only
-	// prompts/lead.md references it. `ralph org start`'s positional task
+	// prompts/leader.md references it. `ralph org start`'s positional task
 	// argument (internal/cli/org.go's newOrgStartCmd) flows through
 	// SpawnParams.Task (spawn.go) into this field. Every other embedded role
 	// template ignores it.
 	Task string
 	// Envelope is a one-line summary of the org's [org] envelope
 	// (EnvelopeSummary, envelope_summary.go) substituted for {{ENVELOPE}} --
-	// currently only prompts/lead.md references it.
+	// currently only prompts/leader.md references it.
 	Envelope string
 }
 

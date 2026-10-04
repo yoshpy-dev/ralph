@@ -29,7 +29,7 @@ import (
 // conditions.
 
 // watchdogIdentity is the agmsg identity `ralph org watch` joins/sends
-// under -- distinct from LeadIdentity and every seat id, so ALERT traffic
+// under -- distinct from LeaderIdentity and every seat id, so ALERT traffic
 // is attributable to the pulse layer itself in agmsg history (see
 // .claude/rules/ralph/agent-messaging.md's "watchdog is a mechanism identity, not
 // a spawned seat").
@@ -104,7 +104,7 @@ type GitStatusFunc func(cwd string) (string, error)
 // worktree can have hundreds of dirty files; interpolating all of them
 // whole made the eventual sendAlert message exceed
 // protocol.DefaultMaxBodyChars and silently degrade to the content-free
-// protocol-validation-failure fallback below, so Lead saw nothing about
+// protocol-validation-failure fallback below, so Leader saw nothing about
 // what actually changed.
 const maxScopeChangeLines = 20
 
@@ -212,23 +212,23 @@ type watchConditionRecord struct {
 }
 
 // watchPendingAlert is the AC-5 deadman bookkeeping recorded when an ALERT
-// is sent: a snapshot of the 3 lead-activity information sources at ALERT
+// is sent: a snapshot of the 3 leader-activity information sources at ALERT
 // time, compared against their current value each subsequent cycle. Subject
-// is the seat_id the ALERT concerned; Subject == LeadIdentity is the
-// "anomaly subject is Lead itself" AC-5 branch that escalates without
+// is the seat_id the ALERT concerned; Subject == LeaderIdentity is the
+// "anomaly subject is Leader itself" AC-5 branch that escalates without
 // waiting for the deadman timeout.
 //
-// HistoryLeadLines is a COUNT of lead-authored agmsg history lines, not the
+// HistoryLeaderLines is a COUNT of leader-authored agmsg history lines, not the
 // filtered text itself (self-review cycle-3 M3-2 fix): see
-// historyLeadLineCount's doc comment for why a count-based "did it grow"
+// historyLeaderLineCount's doc comment for why a count-based "did it grow"
 // comparison is required instead of exact string equality.
 type watchPendingAlert struct {
-	AlertID          string `json:"alert_id"`
-	TS               string `json:"ts"`
-	Subject          string `json:"subject"`
-	ManifestLen      int    `json:"manifest_len"`
-	LeadAgentGet     string `json:"lead_agent_get"`
-	HistoryLeadLines int    `json:"history_lead_lines"`
+	AlertID            string `json:"alert_id"`
+	TS                 string `json:"ts"`
+	Subject            string `json:"subject"`
+	ManifestLen        int    `json:"manifest_len"`
+	LeaderAgentGet     string `json:"lead_agent_get"`
+	HistoryLeaderLines int    `json:"history_lead_lines"`
 }
 
 // watchSeatSnapshot holds the previous cycle's raw comparison values for a
@@ -685,12 +685,12 @@ func (w *watchRun) raiseOrClear(ctx context.Context, status *watchStatusFile, or
 }
 
 // SendWatchdogAlert sends message from the watchdogIdentity mechanism
-// identity to LeadIdentity over orgID's agmsg team, using Agmsg.Send
+// identity to LeaderIdentity over orgID's agmsg team, using Agmsg.Send
 // directly rather than the seat-steering Send verb (verbs.go). Send resolves
 // its To target as a spawned SEAT via findSeat, which fails -- silently
-// dropping the message -- in the normal "session-promoted lead" org shape
-// where no lead SEAT was ever spawned (only the lead identity itself,
-// registered via ensureLeadJoined/ensureWatchdogJoined's Join calls). Live
+// dropping the message -- in the normal "session-promoted leader" org shape
+// where no leader SEAT was ever spawned (only the leader identity itself,
+// registered via ensureLeaderJoined/ensureWatchdogJoined's Join calls). Live
 // smoke (docs/plans/active/2026-08-02-org-runtime-watchdog.md) found zero
 // ALERTs reaching agmsg history under exactly that shape while escalations
 // still fired. Both this package's own pulse-layer sendAlert and
@@ -698,14 +698,14 @@ func (w *watchRun) raiseOrClear(ctx context.Context, status *watchStatusFile, or
 // (newWatchdogHooks) call this so ALERT delivery is identical regardless of
 // which layer produced the finding.
 func (o *Org) SendWatchdogAlert(ctx context.Context, orgID, message string) error {
-	return o.Agmsg.Send(ctx, agmsgTeam(orgID), watchdogIdentity, LeadIdentity, message)
+	return o.Agmsg.Send(ctx, agmsgTeam(orgID), watchdogIdentity, LeaderIdentity, message)
 }
 
 // ensureWatchdogJoined best-effort-joins the "watchdog" mechanism identity
 // (see the const's doc comment) onto the org's agmsg team exactly once per
-// RunWatch's persisted status -- mirrors ensureLeadJoined's idempotent,
+// RunWatch's persisted status -- mirrors ensureLeaderJoined's idempotent,
 // best-effort Join semantics in spawn.go, but for the watchdog identity
-// instead of lead.
+// instead of leader.
 //
 // WatchdogJoined is set only after Join actually succeeds (PR④ known gap
 // #6, docs/reports/cross-review-triage-org-runtime-watchdog.md Cycle 3 #6):
@@ -726,18 +726,18 @@ func (w *watchRun) ensureWatchdogJoined(ctx context.Context, status *watchStatus
 	}
 }
 
-// sendAlert validates and sends one ALERT to lead via the watchdog identity
+// sendAlert validates and sends one ALERT to leader via the watchdog identity
 // (SendWatchdogAlert, not the seat-steering Send verb -- see that method's
 // doc comment for why) best-effort -- a Send failure, e.g. agmsg itself is
 // unreachable, never aborts the pulse cycle but is logged to w.stderr -- then
 // registers an AC-5 pending-alert deadman record regardless of whether Send
 // itself succeeded: the whole point of the deadman clause is to catch the
-// case where lead cannot be reached at all.
+// case where leader cannot be reached at all.
 func (w *watchRun) sendAlert(ctx context.Context, status *watchStatusFile, orgID, seatID, condType, message string, now time.Time) {
 	if err := protocol.ValidateText(message, protocol.DefaultMaxBodyChars); err != nil {
 		// SEAT is always included here (tech-debt: "watchdog deferred LOW
 		// (2)"): before this fix, a busy seat whose original message failed
-		// validation degraded to a fallback with no subject at all, so Lead
+		// validation degraded to a fallback with no subject at all, so Leader
 		// saw only "message failed protocol validation" with no way to tell
 		// which seat the finding was about.
 		message = fmt.Sprintf("TYPE: ALERT\nORG_ID: %s\nSEAT: %s\nCONDITION: %s\n\nwatchdog: message failed protocol validation: %v",
@@ -745,47 +745,47 @@ func (w *watchRun) sendAlert(ctx context.Context, status *watchStatusFile, orgID
 	}
 	w.ensureWatchdogJoined(ctx, status, orgID)
 	if err := w.org.SendWatchdogAlert(ctx, orgID, message); err != nil {
-		_, _ = fmt.Fprintf(w.stderr, "watchdog: failed to ALERT lead for org %q condition %q: %v\n", orgID, condType, err)
+		_, _ = fmt.Fprintf(w.stderr, "watchdog: failed to ALERT leader for org %q condition %q: %v\n", orgID, condType, err)
 	}
 
 	rr, _ := w.org.Manifest.Read()
 	alertID := fmt.Sprintf("%s@%d", conditionKey(orgID, seatID, condType), now.UnixNano())
 	status.PendingAlerts[alertID] = &watchPendingAlert{
-		AlertID:          alertID,
-		TS:               now.UTC().Format(time.RFC3339),
-		Subject:          seatID,
-		ManifestLen:      leadActivityEventCount(rr.Events, orgID),
-		LeadAgentGet:     w.leadProbeSnapshot(ctx, orgID),
-		HistoryLeadLines: w.historyLeadLineCount(ctx, orgID),
+		AlertID:            alertID,
+		TS:                 now.UTC().Format(time.RFC3339),
+		Subject:            seatID,
+		ManifestLen:        leaderActivityEventCount(rr.Events, orgID),
+		LeaderAgentGet:     w.leaderProbeSnapshot(ctx, orgID),
+		HistoryLeaderLines: w.historyLeaderLineCount(ctx, orgID),
 	}
 }
 
-// leadActivityEventCount counts manifest events attributable to lead for
+// leaderActivityEventCount counts manifest events attributable to leader for
 // orgID (self-review M-4 fix, org-scoped per cross-review AR-1; the seat-
 // attribution model itself was corrected by self-review cycle-3 H3-1 --
-// see below): a genuinely unresponsive lead must not have its deadman
+// see below): a genuinely unresponsive leader must not have its deadman
 // escalation silently cleared by an unrelated seat's own manifest traffic,
 // so an event only counts here when either (a) or (b) holds:
 //
-//	(a) ev.Event == EventSent. A `sent` event is lead-authored BY
+//	(a) ev.Event == EventSent. A `sent` event is leader-authored BY
 //	    CONSTRUCTION, regardless of ev.SeatID: ev.SeatID on a `sent` event
 //	    is the *recipient* (Send writes SeatID: p.To -- see verbs.go), not
 //	    the author, and `ralph org send` is the only verb that ever appends
 //	    one. In the star topology (.claude/rules/ralph/agent-messaging.md), only
-//	    lead/the operator drives that verb -- a seat's reply travels over
+//	    leader/the operator drives that verb -- a seat's reply travels over
 //	    the agmsg skill, which never touches this manifest at all -- so
-//	    every `sent` event in orgID's manifest was written by lead sending
-//	    to someone, never by a seat sending to lead. (Cycle-2's fix used
-//	    `ev.SeatID == LeadIdentity` here, which is backwards: it excluded
-//	    the star topology's mandated seat->lead `sent` traffic while
-//	    treating lead->seat sends as nothing. See
+//	    every `sent` event in orgID's manifest was written by leader sending
+//	    to someone, never by a seat sending to leader. (Cycle-2's fix used
+//	    `ev.SeatID == LeaderIdentity` here, which is backwards: it excluded
+//	    the star topology's mandated seat->leader `sent` traffic while
+//	    treating leader->seat sends as nothing. See
 //	    TestWatch_Deadman_SeatSentEvent_ClearsPendingAlert_LegacyWatchdogStopDoesNot.)
-//	(b) it is a non-watchdog event from the lead-driven lifecycle set
+//	(b) it is a non-watchdog event from the leader-driven lifecycle set
 //	    (spawned, spawn_started, stopped, disbanded, rejected) that is not
 //	    the watchdog's own enforcement write. Each of these is only
-//	    producible by a `ralph org` verb that lead/the operator runs
-//	    (spawn/stop/disband), so it is evidence lead is alive and acting,
-//	    even when the event itself names a seat, not lead (e.g. lead
+//	    producible by a `ralph org` verb that leader/the operator runs
+//	    (spawn/stop/disband), so it is evidence leader is alive and acting,
+//	    even when the event itself names a seat, not leader (e.g. leader
 //	    spawning a replacement seat in response to a stall ALERT, self-review
 //	    cycle-3 M3-1). The exclusion applies to any event in this lifecycle
 //	    set whose Details carry "reason=watchdog_..." -- in practice only
@@ -813,7 +813,7 @@ func (w *watchRun) sendAlert(ctx context.Context, status *watchStatusFile, orgID
 // manifest: without it, a new event in a different, active org would clear
 // a stalled org's pending deadman alert even though nothing happened in the
 // stalled org itself.
-func leadActivityEventCount(events []ManifestEvent, orgID string) int {
+func leaderActivityEventCount(events []ManifestEvent, orgID string) int {
 	n := 0
 	for _, ev := range events {
 		if ev.OrgID != orgID {
@@ -833,29 +833,29 @@ func leadActivityEventCount(events []ManifestEvent, orgID string) int {
 	return n
 }
 
-// leadProbeSnapshot returns the lead seat's current herdr `agent get` raw
+// leaderProbeSnapshot returns the leader seat's current herdr `agent get` raw
 // text, or "" if the probe is unavailable/errors (best-effort deadman
 // information source #2).
-func (w *watchRun) leadProbeSnapshot(ctx context.Context, orgID string) string {
+func (w *watchRun) leaderProbeSnapshot(ctx context.Context, orgID string) string {
 	probe, ok := w.org.Herdr.(watchHerdrProbe)
 	if !ok {
 		return ""
 	}
-	out, err := probe.AgentGet(ctx, herdrAgentName(orgID, LeadIdentity))
+	out, err := probe.AgentGet(ctx, herdrAgentName(orgID, LeaderIdentity))
 	if err != nil {
 		return ""
 	}
 	return out
 }
 
-// historyLeadLineCount returns the COUNT of the org's agmsg team history
-// lines that are LEAD-authored (leadHistoryLines), or -1 if the probe is
+// historyLeaderLineCount returns the COUNT of the org's agmsg team history
+// lines that are LEADER-authored (leaderHistoryLines), or -1 if the probe is
 // unavailable/errors (best-effort deadman information source #3; -1, not 0,
-// so an unavailable probe is distinguishable from "lead has genuinely never
+// so an unavailable probe is distinguishable from "leader has genuinely never
 // sent anything yet").
 //
 // Counting rather than comparing the filtered text (self-review cycle-3
-// M3-2 fix) matters because the window this reads is NOT scoped to lead's
+// M3-2 fix) matters because the window this reads is NOT scoped to leader's
 // own traffic: agentID is passed as "" below, which -- per the driver's own
 // doc comment on History -- makes it drop its LIMIT argument entirely and
 // fall through to the agmsg skill's history.sh script's own default
@@ -863,18 +863,18 @@ func (w *watchRun) leadProbeSnapshot(ctx context.Context, orgID string) string {
 // reading that script directly; it is a user-global skill install, not
 // vendored into this repo, so `.agents/skills/` here has no `agmsg/`
 // subdirectory to find it in), applied to the WHOLE team's traffic, not
-// just lead's. As other seats chat, older lead lines get evicted from that
+// just leader's. As other seats chat, older leader lines get evicted from that
 // last-20-of-everyone window and the filtered text can shrink even though
-// lead did nothing new -- comparing exact strings would read a pure
+// leader did nothing new -- comparing exact strings would read a pure
 // eviction as "activity" and wrongly clear a pending alert (the bug this
 // fix closes). A count comparison that only treats growth (cur > baseline,
 // see checkDeadman) as activity does not have that failure mode: eviction
 // can only ever decrease the count, never manufacture an increase. Passing
-// LeadIdentity as agentID to scope the query itself would be a more
+// LeaderIdentity as agentID to scope the query itself would be a more
 // complete fix (and would make the `20` argument here non-dead) but is
 // deferred -- the count comparison alone is sufficient to close the false-
 // activity bug the cycle-3 finding described.
-func (w *watchRun) historyLeadLineCount(ctx context.Context, orgID string) int {
+func (w *watchRun) historyLeaderLineCount(ctx context.Context, orgID string) int {
 	probe, ok := w.org.Agmsg.(watchAgmsgHistory)
 	if !ok {
 		return -1
@@ -883,10 +883,10 @@ func (w *watchRun) historyLeadLineCount(ctx context.Context, orgID string) int {
 	if err != nil {
 		return -1
 	}
-	return len(leadHistoryLines(out))
+	return len(leaderHistoryLines(out))
 }
 
-// leadHistoryFromField parses one agmsg history line -- the real shape is
+// leaderHistoryFromField parses one agmsg history line -- the real shape is
 // "  <status> [<ts>] <from> → <to>: <body>" (see the agmsg skill's
 // `scripts/history.sh`, a user-global install under
 // `~/.agents/skills/agmsg/`, not vendored in this repo -- its `echo "
@@ -894,7 +894,7 @@ func (w *watchRun) historyLeadLineCount(ctx context.Context, orgID string) int {
 // ok is false whenever the line does not contain both the "] " and " → "
 // markers this parse depends on; a caller must then exclude the line
 // entirely rather than guess, since an unparseable line could just as
-// easily be lead- as non-lead-authored (defensive: exclude on parse
+// easily be leader- as non-leader-authored (defensive: exclude on parse
 // failure, per cross-review-triage cycle-2 #3's "parse defensively"
 // instruction).
 //
@@ -906,7 +906,7 @@ func (w *watchRun) historyLeadLineCount(ctx context.Context, orgID string) int {
 // record is always exactly one physical line and status+timestamp always
 // come first; a body containing a literal "] " cannot introduce a second
 // line break for this parse to trip over.
-func leadHistoryFromField(line string) (string, bool) {
+func leaderHistoryFromField(line string) (string, bool) {
 	_, rest, found := strings.Cut(line, "] ")
 	if !found {
 		return "", false
@@ -922,47 +922,47 @@ func leadHistoryFromField(line string) (string, bool) {
 	return from, true
 }
 
-// leadHistoryLines returns only raw's lines whose parsed from field
-// (leadHistoryFromField) is exactly LeadIdentity. Lines that fail to parse
-// are excluded, not conservatively kept -- see leadHistoryFromField's doc
-// comment. Shared by filterLeadHistoryLines (text, used by tests to pin the
-// parsing contract directly) and historyLeadLineCount (count, used by the
+// leaderHistoryLines returns only raw's lines whose parsed from field
+// (leaderHistoryFromField) is exactly LeaderIdentity. Lines that fail to parse
+// are excluded, not conservatively kept -- see leaderHistoryFromField's doc
+// comment. Shared by filterLeaderHistoryLines (text, used by tests to pin the
+// parsing contract directly) and historyLeaderLineCount (count, used by the
 // production deadman check) so the two never drift on what counts as a
-// lead line.
-func leadHistoryLines(raw string) []string {
+// leader line.
+func leaderHistoryLines(raw string) []string {
 	var kept []string
 	for line := range strings.SplitSeq(raw, "\n") {
-		if from, ok := leadHistoryFromField(line); ok && from == LeadIdentity {
+		if from, ok := leaderHistoryFromField(line); ok && from == LeaderIdentity {
 			kept = append(kept, line)
 		}
 	}
 	return kept
 }
 
-// filterLeadHistoryLines returns leadHistoryLines(raw) joined back with
-// "\n" -- kept as a thin wrapper so TestFilterLeadHistoryLines can keep
+// filterLeaderHistoryLines returns leaderHistoryLines(raw) joined back with
+// "\n" -- kept as a thin wrapper so TestFilterLeaderHistoryLines can keep
 // pinning the parsing contract as a single string comparison.
-func filterLeadHistoryLines(raw string) string {
-	return strings.Join(leadHistoryLines(raw), "\n")
+func filterLeaderHistoryLines(raw string) string {
+	return strings.Join(leaderHistoryLines(raw), "\n")
 }
 
 // checkDeadman implements AC-5: for every still-pending ALERT, look for
-// lead activity (any of the 3 information sources changed since the ALERT
+// leader activity (any of the 3 information sources changed since the ALERT
 // was sent) and either clear the pending record (activity found, and the
-// anomaly subject is not lead itself) or escalate (deadman_minutes elapsed
-// with no activity, OR the anomaly subject is lead itself -- escalates
-// without waiting for the timeout, since lead cannot be expected to
+// anomaly subject is not leader itself) or escalate (deadman_minutes elapsed
+// with no activity, OR the anomaly subject is leader itself -- escalates
+// without waiting for the timeout, since leader cannot be expected to
 // self-report while it is the thing that is anomalous).
 //
-// The probe-based sources (#2 leadProbeSnapshot, #3 historyLeadLineCount)
+// The probe-based sources (#2 leaderProbeSnapshot, #3 historyLeaderLineCount)
 // only count as activity when the ALERT-time baseline itself was a valid,
 // comparable snapshot -- not the "probe was unavailable" sentinel
-// (LeadAgentGet == "" / HistoryLeadLines == -1, per leadProbeSnapshot's and
-// historyLeadLineCount's own doc comments, the producers of these values).
+// (LeaderAgentGet == "" / HistoryLeaderLines == -1, per leaderProbeSnapshot's and
+// historyLeaderLineCount's own doc comments, the producers of these values).
 // Without that guard, an alert recorded while a probe was down
 // (baseline collapses to the sentinel) would false-clear the moment the
 // probe merely recovers on a later cycle: cur != "" is trivially true
-// against a "" baseline even though nothing about lead's behavior actually
+// against a "" baseline even though nothing about leader's behavior actually
 // changed, only the probe's own availability did (PR④ known gap #5,
 // docs/reports/cross-review-triage-org-runtime-watchdog.md Cycle 3 #5). A
 // pending alert whose probe baseline was unavailable can still clear via
@@ -980,19 +980,19 @@ func (w *watchRun) checkDeadman(ctx context.Context, status *watchStatusFile, rr
 	// PendingAlerts too. status.Escalated's only remaining purpose is the
 	// historical audit trail pruneEscalated bounds (see escalateAlert).
 	for alertID, pending := range status.PendingAlerts {
-		activity := leadActivityEventCount(rr.Events, status.OrgID) > pending.ManifestLen
-		if !activity && pending.LeadAgentGet != "" {
-			if cur := w.leadProbeSnapshot(ctx, status.OrgID); cur != "" && cur != pending.LeadAgentGet {
+		activity := leaderActivityEventCount(rr.Events, status.OrgID) > pending.ManifestLen
+		if !activity && pending.LeaderAgentGet != "" {
+			if cur := w.leaderProbeSnapshot(ctx, status.OrgID); cur != "" && cur != pending.LeaderAgentGet {
 				activity = true
 			}
 		}
-		if !activity && pending.HistoryLeadLines >= 0 {
-			if cur := w.historyLeadLineCount(ctx, status.OrgID); cur >= 0 && cur > pending.HistoryLeadLines {
+		if !activity && pending.HistoryLeaderLines >= 0 {
+			if cur := w.historyLeaderLineCount(ctx, status.OrgID); cur >= 0 && cur > pending.HistoryLeaderLines {
 				activity = true
 			}
 		}
 
-		subjectIsLead := pending.Subject == LeadIdentity
+		subjectIsLeader := pending.Subject == LeaderIdentity
 		deadmanExceeded := false
 		if w.cfg.DeadmanMinutes > 0 {
 			if ts, err := time.Parse(time.RFC3339, pending.TS); err == nil {
@@ -1000,11 +1000,11 @@ func (w *watchRun) checkDeadman(ctx context.Context, status *watchStatusFile, rr
 			}
 		}
 
-		if activity && !subjectIsLead {
-			delete(status.PendingAlerts, alertID) // lead activity clears it
+		if activity && !subjectIsLeader {
+			delete(status.PendingAlerts, alertID) // leader activity clears it
 			continue
 		}
-		if subjectIsLead || deadmanExceeded {
+		if subjectIsLeader || deadmanExceeded {
 			w.escalateAlert(ctx, status, alertID, pending, now)
 		}
 	}
@@ -1020,8 +1020,8 @@ func (w *watchRun) checkDeadman(ctx context.Context, status *watchStatusFile, rr
 // reader that dedupe depends on.
 func (w *watchRun) escalateAlert(ctx context.Context, status *watchStatusFile, alertID string, pending *watchPendingAlert, now time.Time) {
 	reason := "deadman_timeout"
-	if pending.Subject == LeadIdentity {
-		reason = "lead_is_anomaly_subject"
+	if pending.Subject == LeaderIdentity {
+		reason = "leader_is_anomaly_subject"
 	}
 
 	rec := escalationRecord{

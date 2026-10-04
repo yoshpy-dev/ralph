@@ -26,7 +26,7 @@ func runStatusCmd(t *testing.T, args ...string) (string, error) {
 
 // seedTwoOrgManifest appends a small fixture manifest directly (no
 // herdr/agmsg involved -- `ralph status` is manifest-only, per org.Status's
-// own doc comment): org-a has two seats (lead active, reviewer stopped),
+// own doc comment): org-a has two seats (leader active, reviewer stopped),
 // org-b has one seat (qa active).
 func seedTwoOrgManifest(t *testing.T, stateDir string) {
 	t.Helper()
@@ -36,7 +36,7 @@ func seedTwoOrgManifest(t *testing.T, stateDir string) {
 	// itself reads (org.ManifestPathIn) -- not a root-relative derivation.
 	store := org.NewManifestStoreAtPath(org.ManifestPathIn(stateDir))
 	events := []org.ManifestEvent{
-		{TS: "2026-08-01T00:00:00Z", OrgID: "org-a", SeatID: "lead", Event: org.EventSpawned, Role: "lead", Driver: "claude", Model: "opus", Worktree: "/tmp/org-a-lead"},
+		{TS: "2026-08-01T00:00:00Z", OrgID: "org-a", SeatID: "leader", Event: org.EventSpawned, Role: "leader", Driver: "claude", Model: "opus", Worktree: "/tmp/org-a-leader"},
 		{TS: "2026-08-01T00:01:00Z", OrgID: "org-a", SeatID: "reviewer", Event: org.EventSpawned, Role: "reviewer", Driver: "codex", Model: "sonnet", Worktree: "/tmp/org-a-reviewer"},
 		{TS: "2026-08-01T00:02:00Z", OrgID: "org-a", SeatID: "reviewer", Event: org.EventStopped, Role: "reviewer", Driver: "codex", Model: "sonnet", Worktree: "/tmp/org-a-reviewer"},
 		{TS: "2026-08-01T00:00:00Z", OrgID: "org-b", SeatID: "qa", Event: org.EventSpawned, Role: "qa", Driver: "claude", Model: "sonnet", Worktree: "/tmp/org-b-qa"},
@@ -59,8 +59,8 @@ func TestStatusCmd_ListsAllOrgsWithRosterAndActiveCounts(t *testing.T) {
 
 	for _, want := range []string{
 		"org_id: org-a", "org_id: org-b",
-		"lead", "reviewer", "qa",
-		"active 1/2", // org-a: lead active, reviewer stopped
+		"leader", "reviewer", "qa",
+		"active 1/2", // org-a: leader active, reviewer stopped
 		"active 1/1", // org-b: qa active
 	} {
 		if !strings.Contains(out, want) {
@@ -89,7 +89,7 @@ func TestStatusCmd_OrgIDFilterShowsOnlyThatOrg(t *testing.T) {
 	}
 }
 
-// seedOrgWithDryRunSeat appends one real active seat ("lead") and one
+// seedOrgWithDryRunSeat appends one real active seat ("leader") and one
 // dry-run active seat ("shadow") to the same org_id, directly to the
 // manifest (no herdr/agmsg involved). Used to assert that a dry-run seat
 // shows up as a roster row (IncludeDryRun: true, internal/cli/status.go)
@@ -100,7 +100,7 @@ func seedOrgWithDryRunSeat(t *testing.T, stateDir string) {
 	t.Helper()
 	store := org.NewManifestStoreAtPath(org.ManifestPathIn(stateDir))
 	events := []org.ManifestEvent{
-		{TS: "2026-08-01T00:00:00Z", OrgID: "org-c", SeatID: "lead", Event: org.EventSpawned, Role: "lead", Driver: "claude", Model: "opus", Worktree: "/tmp/org-c-lead"},
+		{TS: "2026-08-01T00:00:00Z", OrgID: "org-c", SeatID: "leader", Event: org.EventSpawned, Role: "leader", Driver: "claude", Model: "opus", Worktree: "/tmp/org-c-leader"},
 		{TS: "2026-08-01T00:01:00Z", OrgID: "org-c", SeatID: "shadow", Event: org.EventSpawned, Role: "qa", Driver: "codex", Model: "sonnet", Worktree: "/tmp/org-c-shadow", DryRun: true},
 	}
 	for _, ev := range events {
@@ -206,7 +206,7 @@ func TestStatusCmd_SeesSeatWrittenByRealOrgSpawn(t *testing.T) {
 	stateDir := filepath.Join(t.TempDir(), "state")
 
 	spawnOut, err := runOrgCmd(t,
-		"spawn", "--org-id", "demo", "--id", "lead", "--role", "lead",
+		"spawn", "--org-id", "demo", "--id", "leader", "--role", "leader",
 		"--driver", "claude", "--model", "opus", "--cwd", t.TempDir(),
 		"--scope", "test-scope",
 		"--state-dir", stateDir, "--dry-run",
@@ -222,8 +222,8 @@ func TestStatusCmd_SeesSeatWrittenByRealOrgSpawn(t *testing.T) {
 	if strings.Contains(out, "no org runtime state found") {
 		t.Fatalf("ralph status did not see the seat written by a real `ralph org spawn` at the same --state-dir:\n%s", out)
 	}
-	if !strings.Contains(out, "org_id: demo") || !strings.Contains(out, "lead") {
-		t.Errorf("expected demo org's lead seat in status output, got:\n%s", out)
+	if !strings.Contains(out, "org_id: demo") || !strings.Contains(out, "leader") {
+		t.Errorf("expected demo org's leader seat in status output, got:\n%s", out)
 	}
 }
 

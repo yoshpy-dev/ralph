@@ -383,35 +383,35 @@ func TestAggregateReceipts_TriStateCountsAndRate(t *testing.T) {
 		t.Errorf("SkippedLines = %d, want 1", summary.SkippedLines)
 	}
 
-	var demoLead *ReceiptSeatStats
+	var demoLeader *ReceiptSeatStats
 	for oi := range summary.Orgs {
 		if summary.Orgs[oi].OrgID != "demo" {
 			continue
 		}
 		for si := range summary.Orgs[oi].Seats {
 			if summary.Orgs[oi].Seats[si].SeatID == "lead" {
-				demoLead = &summary.Orgs[oi].Seats[si]
+				demoLeader = &summary.Orgs[oi].Seats[si]
 			}
 		}
 	}
-	if demoLead == nil {
+	if demoLeader == nil {
 		t.Fatal("demo/lead seat not found in aggregated receipts")
 	}
 
 	// AC-3 output-contract example: true=3 false=1 unknown=2, rate=75%.
-	if demoLead.HonoredTrue != 3 {
-		t.Errorf("demo/lead HonoredTrue = %d, want 3", demoLead.HonoredTrue)
+	if demoLeader.HonoredTrue != 3 {
+		t.Errorf("demo/lead HonoredTrue = %d, want 3", demoLeader.HonoredTrue)
 	}
-	if demoLead.HonoredFalse != 1 {
-		t.Errorf("demo/lead HonoredFalse = %d, want 1", demoLead.HonoredFalse)
+	if demoLeader.HonoredFalse != 1 {
+		t.Errorf("demo/lead HonoredFalse = %d, want 1", demoLeader.HonoredFalse)
 	}
-	if demoLead.HonoredUnknown != 2 {
-		t.Errorf("demo/lead HonoredUnknown = %d, want 2", demoLead.HonoredUnknown)
+	if demoLeader.HonoredUnknown != 2 {
+		t.Errorf("demo/lead HonoredUnknown = %d, want 2", demoLeader.HonoredUnknown)
 	}
-	if len(demoLead.CommandedModels) != 1 || demoLead.CommandedModels[0] != "opus" {
-		t.Errorf("demo/lead CommandedModels = %v, want [opus]", demoLead.CommandedModels)
+	if len(demoLeader.CommandedModels) != 1 || demoLeader.CommandedModels[0] != "opus" {
+		t.Errorf("demo/lead CommandedModels = %v, want [opus]", demoLeader.CommandedModels)
 	}
-	rate, ok := demoLead.HonoredRate()
+	rate, ok := demoLeader.HonoredRate()
 	if !ok {
 		t.Fatal("demo/lead HonoredRate() ok = false, want true")
 	}
@@ -462,25 +462,25 @@ func TestAggregateReceipts_UnknownOnlySeatHasNoRate(t *testing.T) {
 
 	summary := AggregateReceipts(receipts, stats, "testdata/receipts.jsonl")
 
-	var acmeLead *ReceiptSeatStats
+	var acmeLeader *ReceiptSeatStats
 	for oi := range summary.Orgs {
 		if summary.Orgs[oi].OrgID != "acme" {
 			continue
 		}
 		for si := range summary.Orgs[oi].Seats {
 			if summary.Orgs[oi].Seats[si].SeatID == "lead" {
-				acmeLead = &summary.Orgs[oi].Seats[si]
+				acmeLeader = &summary.Orgs[oi].Seats[si]
 			}
 		}
 	}
-	if acmeLead == nil {
+	if acmeLeader == nil {
 		t.Fatal("acme/lead seat not found")
 	}
-	if acmeLead.HonoredTrue != 0 || acmeLead.HonoredFalse != 0 || acmeLead.HonoredUnknown != 1 {
+	if acmeLeader.HonoredTrue != 0 || acmeLeader.HonoredFalse != 0 || acmeLeader.HonoredUnknown != 1 {
 		t.Errorf("acme/lead counts = true=%d false=%d unknown=%d, want 0/0/1",
-			acmeLead.HonoredTrue, acmeLead.HonoredFalse, acmeLead.HonoredUnknown)
+			acmeLeader.HonoredTrue, acmeLeader.HonoredFalse, acmeLeader.HonoredUnknown)
 	}
-	if _, ok := acmeLead.HonoredRate(); ok {
+	if _, ok := acmeLeader.HonoredRate(); ok {
 		t.Error("acme/lead HonoredRate() ok = true, want false (all receipts unknown)")
 	}
 }

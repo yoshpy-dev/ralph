@@ -109,7 +109,7 @@ exit 0
 // agmsgJoinStub is the fake `scripts/join.sh` -- driver.Agmsg shells out to
 // `bash <home>/scripts/join.sh TEAM AGENT_ID TYPE PROJECT_PATH`. Honors
 // ORG_STUB_FAIL=agmsg:join so tests can inject a failure at either the
-// ensureLeadJoined (agent_id "lead") or seat Join call.
+// ensureLeaderJoined (agent_id "leader") or seat Join call.
 const agmsgJoinStub = `#!/bin/sh
 if [ -n "$ORG_AGMSG_LOG" ]; then
   echo "$@" >> "$ORG_AGMSG_LOG"
@@ -288,7 +288,7 @@ func TestOrgSpawn_HappyPath_EventSequenceReceiptAndWorkspaceReuse(t *testing.T) 
 
 	manifestPath := org.ManifestPathIn(stateDir)
 	events := readManifestEvents(t, manifestPath)
-	// spawn_step x5: tab_created, agent_started, agmsg_lead_joined,
+	// spawn_step x5: tab_created, agent_started, agmsg_leader_joined,
 	// agmsg_joined, agmsg_announced.
 	want := []string{"spawn_started", "org_workspace_created", "spawn_step", "spawn_step", "spawn_step", "spawn_step", "spawn_step", "spawned"}
 	if got := eventTypes(events); !equalStrings(got, want) {
@@ -329,18 +329,18 @@ func TestOrgSpawn_HappyPath_EventSequenceReceiptAndWorkspaceReuse(t *testing.T) 
 	// so raw line count isn't the invocation count -- count by the
 	// "ralph-<org_id>" team-name prefix (agmsgTeam's convention) that
 	// starts every join.sh/send.sh call's argv instead. Per seat spawn: one
-	// ensureLeadJoined join.sh call, one seat join.sh call, one send.sh
+	// ensureLeaderJoined join.sh call, one seat join.sh call, one send.sh
 	// HELLO call -- 3 invocations x 2 seats = 6.
 	agmsgLines := readLogLines(t, agmsgLog)
 	if n := countLinesWithPrefix(agmsgLines, "ralph-org-a"); n != 6 {
-		t.Fatalf("expected 6 agmsg invocations (join lead + join seat + send HELLO, per seat), got %d (log: %v)", n, agmsgLines)
+		t.Fatalf("expected 6 agmsg invocations (join leader + join seat + send HELLO, per seat), got %d (log: %v)", n, agmsgLines)
 	}
 }
 
-// TestOrgSpawn_LeadDriverFlag_DefaultsToClaudeCode pins AC-7's CLI wiring:
-// omitting --lead-driver registers the lead identity with agmsg type
+// TestOrgSpawn_LeaderDriverFlag_DefaultsToClaudeCode pins AC-7's CLI wiring:
+// omitting --leader-driver registers the leader identity with agmsg type
 // "claude-code" (the flag's own default, "claude").
-func TestOrgSpawn_LeadDriverFlag_DefaultsToClaudeCode(t *testing.T) {
+func TestOrgSpawn_LeaderDriverFlag_DefaultsToClaudeCode(t *testing.T) {
 	_, agmsgLog := setupOrgStubPATH(t)
 	stateDir := filepath.Join(t.TempDir(), "state")
 
@@ -355,18 +355,18 @@ func TestOrgSpawn_LeadDriverFlag_DefaultsToClaudeCode(t *testing.T) {
 	}
 
 	agmsgLines := readLogLines(t, agmsgLog)
-	// join.sh argv: TEAM AGENT_ID TYPE PROJECT_PATH -- the lead Join is the
+	// join.sh argv: TEAM AGENT_ID TYPE PROJECT_PATH -- the leader Join is the
 	// first agmsg invocation and must carry "claude-code" (the
-	// --lead-driver flag's own default, "claude").
-	if len(agmsgLines) == 0 || !strings.Contains(agmsgLines[0], "ralph-org-a lead claude-code") {
-		t.Fatalf("expected the first agmsg call to be lead Join with type claude-code, got %v", agmsgLines)
+	// --leader-driver flag's own default, "claude").
+	if len(agmsgLines) == 0 || !strings.Contains(agmsgLines[0], "ralph-org-a leader claude-code") {
+		t.Fatalf("expected the first agmsg call to be leader Join with type claude-code, got %v", agmsgLines)
 	}
 }
 
-// TestOrgSpawn_LeadDriverFlag_Codex_RegistersLeadAsCodexType covers the
-// explicit --lead-driver=codex case: the lead identity's agmsg type must
-// follow --lead-driver, independent of the seat's own --driver.
-func TestOrgSpawn_LeadDriverFlag_Codex_RegistersLeadAsCodexType(t *testing.T) {
+// TestOrgSpawn_LeaderDriverFlag_Codex_RegistersLeaderAsCodexType covers the
+// explicit --leader-driver=codex case: the leader identity's agmsg type must
+// follow --leader-driver, independent of the seat's own --driver.
+func TestOrgSpawn_LeaderDriverFlag_Codex_RegistersLeaderAsCodexType(t *testing.T) {
 	_, agmsgLog := setupOrgStubPATH(t)
 	stateDir := filepath.Join(t.TempDir(), "state")
 
@@ -374,18 +374,18 @@ func TestOrgSpawn_LeadDriverFlag_Codex_RegistersLeadAsCodexType(t *testing.T) {
 		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
 		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
 		"--scope", "test-scope",
-		"--state-dir", stateDir, "--lead-driver", "codex",
+		"--state-dir", stateDir, "--leader-driver", "codex",
 	)
 	if err != nil {
 		t.Fatalf("spawn failed: %v (output: %s)", err, out)
 	}
 
 	agmsgLines := readLogLines(t, agmsgLog)
-	if len(agmsgLines) == 0 || !strings.Contains(agmsgLines[0], "ralph-org-a lead codex") {
-		t.Fatalf("expected the first agmsg call to be lead Join with type codex, got %v", agmsgLines)
+	if len(agmsgLines) == 0 || !strings.Contains(agmsgLines[0], "ralph-org-a leader codex") {
+		t.Fatalf("expected the first agmsg call to be leader Join with type codex, got %v", agmsgLines)
 	}
 	// The seat's own Join (second call) must still use its own --driver
-	// (claude -> claude-code), unaffected by --lead-driver.
+	// (claude -> claude-code), unaffected by --leader-driver.
 	if len(agmsgLines) < 2 || !strings.Contains(agmsgLines[1], "ralph-org-a seat-1 claude-code") {
 		t.Fatalf("expected the second agmsg call to be the seat's own Join with type claude-code, got %v", agmsgLines)
 	}
@@ -515,9 +515,9 @@ func TestOrgSpawn_FailureInjection_AgmsgJoin_CompensatesPane(t *testing.T) {
 	if last.Event != "spawn_failed" {
 		t.Fatalf("expected last event spawn_failed, got %q", last.Event)
 	}
-	// ensureLeadJoined's join.sh call also fails (same stub, best-effort --
+	// ensureLeaderJoined's join.sh call also fails (same stub, best-effort --
 	// swallowed) before the hard-failing seat Join call, so the terminal
-	// spawn_failed step is agmsg_join, not agmsg_lead_joined.
+	// spawn_failed step is agmsg_join, not agmsg_leader_joined.
 	if !strings.Contains(last.Details, "step=agmsg_join") {
 		t.Errorf("expected Details to mention step=agmsg_join, got %q", last.Details)
 	}
@@ -529,7 +529,7 @@ func TestOrgSpawn_FailureInjection_AgmsgJoin_CompensatesPane(t *testing.T) {
 
 	agmsgLines := readLogLines(t, agmsgLog)
 	if n := countLinesWithPrefix(agmsgLines, "ralph-org-a"); n != 2 {
-		t.Fatalf("expected exactly 2 agmsg join.sh invocations (lead then seat, both failing -- no send.sh reached), got %d (log: %v)", n, agmsgLines)
+		t.Fatalf("expected exactly 2 agmsg join.sh invocations (leader then seat, both failing -- no send.sh reached), got %d (log: %v)", n, agmsgLines)
 	}
 }
 
@@ -2163,7 +2163,7 @@ func TestOrgWait_UnknownSeat_StillSucceeds_PassthroughToHerdr(t *testing.T) {
 // TestOrgWait_DefaultUntilAndTimeout_AreBoundedAndDone covers the self-review
 // HIGH-1 fix: `ralph org wait`'s defaults changed from `--until idle` /
 // `--timeout-ms 0` (unbounded) to `--until idle,done` / `--timeout-ms 60000`
-// (bounded) -- a headless lead following its own default wait must not be
+// (bounded) -- a headless leader following its own default wait must not be
 // able to block forever against a perfectly receptive seat (herdr reports an
 // interactive agent resting at its input prompt as "done", not "idle"; see
 // internal/org/verbs.go's Send, which already waits on both).
@@ -2386,9 +2386,9 @@ func equalStrings(a, b []string) bool {
 	return true
 }
 
-// --- ralph org start (AC-3: headless-lead spawn sugar) ----------------------
+// --- ralph org start (AC-3: headless-leader spawn sugar) ----------------------
 
-func TestOrgStart_HappyPath_SpawnsLeadSeat_SingleAgmsgJoin_NoHello(t *testing.T) {
+func TestOrgStart_HappyPath_SpawnsLeaderSeat_SingleAgmsgJoin_NoHello(t *testing.T) {
 	_, agmsgLog := setupOrgStubPATH(t)
 	stateDir := filepath.Join(t.TempDir(), "state")
 
@@ -2401,8 +2401,8 @@ func TestOrgStart_HappyPath_SpawnsLeadSeat_SingleAgmsgJoin_NoHello(t *testing.T)
 	if err != nil {
 		t.Fatalf("start failed: %v (output: %s)", err, out)
 	}
-	if !strings.Contains(out, `spawned seat "lead"`) {
-		t.Errorf("expected spawned confirmation naming the lead seat, got: %s", out)
+	if !strings.Contains(out, `spawned seat "leader"`) {
+		t.Errorf("expected spawned confirmation naming the leader seat, got: %s", out)
 	}
 	if !strings.Contains(out, "ralph org status --org-id org-a") {
 		t.Errorf("expected a status hint in the output, got: %s", out)
@@ -2410,19 +2410,19 @@ func TestOrgStart_HappyPath_SpawnsLeadSeat_SingleAgmsgJoin_NoHello(t *testing.T)
 
 	events := readManifestEvents(t, org.ManifestPathIn(stateDir))
 	last := events[len(events)-1]
-	if last.Event != "spawned" || last.SeatID != "lead" || last.Role != "lead" {
-		t.Fatalf("expected last event spawned for seat_id=role=lead, got %+v", last)
+	if last.Event != "spawned" || last.SeatID != "leader" || last.Role != "leader" {
+		t.Fatalf("expected last event spawned for seat_id=role=leader, got %+v", last)
 	}
 
-	// leadSelfSpawn (internal/org/spawn.go's Spawn): exactly one agmsg
-	// invocation (the seat's own Join, which IS the lead-identity join) --
-	// no separate ensureLeadJoined call, no HELLO send.
+	// leaderSelfSpawn (internal/org/spawn.go's Spawn): exactly one agmsg
+	// invocation (the seat's own Join, which IS the leader-identity join) --
+	// no separate ensureLeaderJoined call, no HELLO send.
 	agmsgLines := readLogLines(t, agmsgLog)
 	if n := countLinesWithPrefix(agmsgLines, "ralph-org-a"); n != 1 {
-		t.Fatalf("expected exactly 1 agmsg invocation for a lead-self spawn, got %d (log: %v)", n, agmsgLines)
+		t.Fatalf("expected exactly 1 agmsg invocation for a leader-self spawn, got %d (log: %v)", n, agmsgLines)
 	}
-	if !strings.Contains(agmsgLines[0], "ralph-org-a lead claude-code") {
-		t.Fatalf("expected the single agmsg call to be lead's own Join, got %v", agmsgLines)
+	if !strings.Contains(agmsgLines[0], "ralph-org-a leader claude-code") {
+		t.Fatalf("expected the single agmsg call to be leader's own Join, got %v", agmsgLines)
 	}
 }
 
@@ -2449,7 +2449,7 @@ func TestOrgStart_TaskAndEnvelopeLandInPromptFile(t *testing.T) {
 		t.Fatalf("expected AgentStart argv to carry the prompt-file pointer, got:\n%s", string(data))
 	}
 
-	promptPath := filepath.Join(stateDir, "prompts", "org-a_lead.md")
+	promptPath := filepath.Join(stateDir, "prompts", "org-a_leader.md")
 	promptData, perr := os.ReadFile(promptPath)
 	if perr != nil {
 		t.Fatalf("expected prompt file at %q: %v", promptPath, perr)
@@ -2457,7 +2457,7 @@ func TestOrgStart_TaskAndEnvelopeLandInPromptFile(t *testing.T) {
 	promptText := string(promptData)
 	for _, want := range []string{task, "model_pool:", "max_seats:", "permission default:", "org-a"} {
 		if !strings.Contains(promptText, want) {
-			t.Errorf("expected lead prompt file to contain %q, got:\n%s", want, promptText)
+			t.Errorf("expected leader prompt file to contain %q, got:\n%s", want, promptText)
 		}
 	}
 }
@@ -2868,19 +2868,19 @@ func TestNewWatchdogHooks_SingleFlight_SecondTriggerSkippedWhileBusy(t *testing.
 	}
 }
 
-// TestNewWatchdogHooks_AbnormalVerdict_SendsAlertToLead pins that an
-// abnormal verdict (anything but normal) is delivered to lead as a typed
+// TestNewWatchdogHooks_AbnormalVerdict_SendsAlertToLeader pins that an
+// abnormal verdict (anything but normal) is delivered to leader as a typed
 // ALERT via rt.SendWatchdogAlert -- identity-level Agmsg.Send from the
-// watchdog identity to lead, observed here through the agmsg send.sh stub's
-// argv log. Bug 1 regression: no lead SEAT is spawned at all (the normal
-// session-promoted-lead org shape -- only the lead agmsg identity itself
-// exists, registered via ensureLeadJoined at org-start time, never a spawned
+// watchdog identity to leader, observed here through the agmsg send.sh stub's
+// argv log. Bug 1 regression: no leader SEAT is spawned at all (the normal
+// session-promoted-leader org shape -- only the leader agmsg identity itself
+// exists, registered via ensureLeaderJoined at org-start time, never a spawned
 // SEAT). The old seat-steering Send verb resolved its To target via
-// findSeat, which fails for a non-existent "lead" seat and silently drops
+// findSeat, which fails for a non-existent "leader" seat and silently drops
 // the ALERT (live smoke: agmsg history had zero ALERTs while escalations
 // fired); identity-level Agmsg.Send bypasses that seat lookup entirely, so
 // the ALERT must still land here.
-func TestNewWatchdogHooks_AbnormalVerdict_SendsAlertToLead(t *testing.T) {
+func TestNewWatchdogHooks_AbnormalVerdict_SendsAlertToLeader(t *testing.T) {
 	_, agmsgLog := setupOrgStubPATH(t)
 	writeClaudeStub(t, "#!/bin/sh\n"+
 		"cat <<'EOF'\n"+
@@ -2905,8 +2905,8 @@ func TestNewWatchdogHooks_AbnormalVerdict_SendsAlertToLead(t *testing.T) {
 		t.Fatalf("read agmsg log: %v", err)
 	}
 	log := string(data)
-	if !strings.Contains(log, "watchdog lead TYPE: ALERT") {
-		t.Errorf("expected an ALERT sent from the watchdog identity to lead, agmsg log: %s", log)
+	if !strings.Contains(log, "watchdog leader TYPE: ALERT") {
+		t.Errorf("expected an ALERT sent from the watchdog identity to leader, agmsg log: %s", log)
 	}
 	if !strings.Contains(log, "CONDITION: watcher_scope_change") {
 		t.Errorf("expected the ALERT to record the watcher condition, agmsg log: %s", log)

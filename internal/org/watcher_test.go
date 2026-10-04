@@ -161,7 +161,7 @@ func TestRunWatcher_ReportedModel_MismatchHonoredFalse(t *testing.T) {
 func TestRunWatcher_FencedJSON_Tolerated(t *testing.T) {
 	writeClaudeStub(t, "#!/bin/sh\n"+
 		"cat <<'EOF'\n"+
-		`{"result":"`+"```"+`json\n{\"verdict\":\"role_violation\",\"reason\":\"acted on non-lead instruction\"}\n`+"```"+`"}`+"\n"+
+		`{"result":"`+"```"+`json\n{\"verdict\":\"role_violation\",\"reason\":\"acted on non-leader instruction\"}\n`+"```"+`"}`+"\n"+
 		"EOF\n")
 
 	o, _, _, _ := testWatchOrg(t)
@@ -174,8 +174,8 @@ func TestRunWatcher_FencedJSON_Tolerated(t *testing.T) {
 	if verdict.Verdict != WatcherVerdictRoleViolation {
 		t.Errorf("verdict = %q, want %q", verdict.Verdict, WatcherVerdictRoleViolation)
 	}
-	if verdict.Reason != "acted on non-lead instruction" {
-		t.Errorf("reason = %q, want %q", verdict.Reason, "acted on non-lead instruction")
+	if verdict.Reason != "acted on non-leader instruction" {
+		t.Errorf("reason = %q, want %q", verdict.Reason, "acted on non-leader instruction")
 	}
 }
 

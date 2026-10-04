@@ -27,7 +27,7 @@ import (
 // fakeWatchHerdr is a call-recording HerdrClient + watchHerdrProbe fake.
 // AgentGetSeq/AgentGetErrSeq, keyed by target (herdrAgentName's convention),
 // let a test script a per-cycle sequence of AgentGet outcomes for a
-// specific seat/lead target; once a sequence is exhausted the last queued
+// specific seat/leader target; once a sequence is exhausted the last queued
 // value repeats (a test that only cares about a constant value can supply
 // exactly one entry).
 type fakeWatchHerdr struct {
@@ -131,7 +131,7 @@ type fakeWatchAgmsg struct {
 	// agentID (same pop-front-then-stick-on-last-entry convention as
 	// fakeWatchHerdr.AgentGetErrSeq): a nil entry means Join succeeds that
 	// call. Once exhausted, the last queued entry repeats. Keyed by agentID
-	// (not a flat sequence) because Spawn's own lead/seat Join calls and
+	// (not a flat sequence) because Spawn's own leader/seat Join calls and
 	// ensureWatchdogJoined's watchdog-identity Join call all share this one
 	// fake method -- a flat sequence would let an unrelated identity's Join
 	// consume entries meant for "watchdog".
@@ -150,9 +150,9 @@ type watchJoinCall struct {
 // watchSendCall records one identity-level Agmsg.Send call -- this is what
 // every ALERT-delivery assertion in this file now inspects (Bug 1 fix: the
 // pulse layer and the on-demand watcher both send ALERTs via Agmsg.Send from
-// the "watchdog" identity to "lead", not via the seat-steering Send verb's
-// PaneSendText, since verb-Send silently drops the message when no lead SEAT
-// was ever spawned -- the normal session-promoted-lead org shape).
+// the "watchdog" identity to "leader", not via the seat-steering Send verb's
+// PaneSendText, since verb-Send silently drops the message when no leader SEAT
+// was ever spawned -- the normal session-promoted-leader org shape).
 type watchSendCall struct {
 	team, from, to, message string
 }
@@ -184,7 +184,7 @@ func (f *fakeWatchAgmsg) Leave(_ context.Context, _, _ string) error {
 
 // watchdogAlerts filters a.sendCalls down to messages sent from the
 // watchdog identity -- Spawn's own HELLO Send (Agmsg.Send from the spawning
-// SeatID to lead) shares the same fake/log, so ALERT-count assertions must
+// SeatID to leader) shares the same fake/log, so ALERT-count assertions must
 // not conflate the two.
 func watchdogAlerts(a *fakeWatchAgmsg) []watchSendCall {
 	a.mu.Lock()
@@ -199,7 +199,7 @@ func watchdogAlerts(a *fakeWatchAgmsg) []watchSendCall {
 }
 
 // watchdogJoinCalls filters a.joinCalls down to the watchdog identity's own
-// Join attempts -- Spawn's own lead/seat Join calls share the same fake/log,
+// Join attempts -- Spawn's own leader/seat Join calls share the same fake/log,
 // so ensureWatchdogJoined retry-count assertions must not conflate the two.
 func watchdogJoinCalls(a *fakeWatchAgmsg) []watchJoinCall {
 	a.mu.Lock()
@@ -316,7 +316,7 @@ func newTestWatchRun(o *Org, gitStatus GitStatusFunc, escalateFn EscalateFunc, s
 func TestWatch_Stall_AlertsOnlyNeverStops_RecoversAndRefires(t *testing.T) {
 	o, h, a, clk := testWatchOrg(t)
 	o.Config.Watchdog.StallMinutes = 5
-	// Deliberately no lead seat spawned -- ALERT delivery must not depend on
+	// Deliberately no leader seat spawned -- ALERT delivery must not depend on
 	// one (Bug 1 regression).
 
 	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
@@ -394,7 +394,7 @@ func TestWatch_Stall_AlertsOnlyNeverStops_RecoversAndRefires(t *testing.T) {
 
 func TestWatch_Liveness_AlertOnAgentGetError(t *testing.T) {
 	o, h, a, _ := testWatchOrg(t)
-	// Deliberately no lead seat spawned -- ALERT delivery must not depend on
+	// Deliberately no leader seat spawned -- ALERT delivery must not depend on
 	// one (Bug 1 regression).
 	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("spawn failed: %+v", r)
@@ -426,7 +426,7 @@ func TestWatch_Liveness_AlertOnAgentGetError(t *testing.T) {
 
 func TestWatch_ScopeChange_AlertCarriesScopeText_NoStop(t *testing.T) {
 	o, h, a, _ := testWatchOrg(t)
-	// Deliberately no lead seat spawned -- ALERT delivery must not depend on
+	// Deliberately no leader seat spawned -- ALERT delivery must not depend on
 	// one (Bug 1 regression).
 	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("spawn failed: %+v", r)
@@ -582,7 +582,7 @@ func TestTruncateScopeOutput_LineCountThenByteBudget(t *testing.T) {
 // TestSendAlert_ProtocolValidationFailureFallback_IncludesSeatHeader pins
 // the second half of the tech-debt "watchdog deferred LOW (2)" fix: the
 // protocol-validation-failure fallback message itself must still carry a
-// `SEAT: <seat_id>` header so Lead can identify the subject seat, instead of
+// `SEAT: <seat_id>` header so Leader can identify the subject seat, instead of
 // only "message failed protocol validation" with no indication of who it
 // was about. Constructs an oversized body directly (rather than relying on
 // scope-change's own truncation, which is designed to prevent this path
@@ -640,7 +640,7 @@ func TestWatch_Deadman_NoActivity_EscalatesOnceAfterTimeout(t *testing.T) {
 	}
 	assertNoEscalations(t, escalationsPath)
 
-	clk.Advance(6 * time.Minute) // past DeadmanMinutes, no manifest/lead/history activity
+	clk.Advance(6 * time.Minute) // past DeadmanMinutes, no manifest/leader/history activity
 	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
 		t.Fatalf("cycle 2 (deadman): %v", err)
 	}
@@ -664,7 +664,7 @@ func TestWatch_Deadman_NoActivity_EscalatesOnceAfterTimeout(t *testing.T) {
 	}
 }
 
-func TestWatch_Deadman_LeadActivity_PreventsEscalation(t *testing.T) {
+func TestWatch_Deadman_LeaderActivity_PreventsEscalation(t *testing.T) {
 	o, h, _, clk := testWatchOrg(t)
 	o.Config.DeadmanMinutes = 5
 	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
@@ -683,28 +683,28 @@ func TestWatch_Deadman_LeadActivity_PreventsEscalation(t *testing.T) {
 		t.Fatalf("cycle 1 (raises ALERT): %v", err)
 	}
 
-	// Simulate lead activity: a new manifest event recorded between cycles.
-	if err := o.Manifest.Append(ManifestEvent{TS: clk.Now().UTC().Format(time.RFC3339), OrgID: "org-a", SeatID: LeadIdentity, Event: EventSent, Details: "lead activity"}); err != nil {
-		t.Fatalf("append lead-activity event: %v", err)
+	// Simulate leader activity: a new manifest event recorded between cycles.
+	if err := o.Manifest.Append(ManifestEvent{TS: clk.Now().UTC().Format(time.RFC3339), OrgID: "org-a", SeatID: LeaderIdentity, Event: EventSent, Details: "leader activity"}); err != nil {
+		t.Fatalf("append leader-activity event: %v", err)
 	}
 
-	clk.Advance(6 * time.Minute) // past DeadmanMinutes, but lead was active
+	clk.Advance(6 * time.Minute) // past DeadmanMinutes, but leader was active
 	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
 		t.Fatalf("cycle 2: %v", err)
 	}
 	assertNoEscalations(t, escalationsPath)
 	if len(status.PendingAlerts) != 0 {
-		t.Errorf("expected the pending alert to clear after lead activity, got %+v", status.PendingAlerts)
+		t.Errorf("expected the pending alert to clear after leader activity, got %+v", status.PendingAlerts)
 	}
 }
 
-func TestWatch_Deadman_LeadIsAnomalySubject_EscalatesImmediately(t *testing.T) {
+func TestWatch_Deadman_LeaderIsAnomalySubject_EscalatesImmediately(t *testing.T) {
 	o, _, _, _ := testWatchOrg(t)
-	if r := o.Spawn(watchSpawnParams("org-a", LeadIdentity, LeadIdentity)); r.Outcome != SpawnOutcomeSpawned {
-		t.Fatalf("spawn lead failed: %+v", r)
+	if r := o.Spawn(watchSpawnParams("org-a", LeaderIdentity, LeaderIdentity)); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn leader failed: %+v", r)
 	}
-	target := herdrAgentName("org-a", LeadIdentity)
-	// Sticky liveness failure for the lead seat itself.
+	target := herdrAgentName("org-a", LeaderIdentity)
+	// Sticky liveness failure for the leader seat itself.
 	fh := o.Herdr.(*fakeWatchHerdr)
 	fh.AgentGetErrSeq[target] = []error{errors.New("herdr: agent not found")}
 
@@ -714,21 +714,21 @@ func TestWatch_Deadman_LeadIsAnomalySubject_EscalatesImmediately(t *testing.T) {
 		t.Fatalf("loadWatchStatus: %v", err)
 	}
 
-	// Same cycle: ALERT raised (subject=lead) then the deadman sweep
+	// Same cycle: ALERT raised (subject=leader) then the deadman sweep
 	// escalates immediately, without waiting for DeadmanMinutes.
 	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
 		t.Fatalf("evaluateCycle: %v", err)
 	}
 	lines := readJSONLFile(t, escalationsPath)
 	if len(lines) != 1 {
-		t.Fatalf("expected exactly 1 immediate escalation for a lead-subject anomaly, got %d: %v", len(lines), lines)
+		t.Fatalf("expected exactly 1 immediate escalation for a leader-subject anomaly, got %d: %v", len(lines), lines)
 	}
 	var rec map[string]any
 	if err := json.Unmarshal([]byte(lines[0]), &rec); err != nil {
 		t.Fatalf("parse escalation line: %v", err)
 	}
-	if rec["reason"] != "lead_is_anomaly_subject" {
-		t.Errorf("expected reason=lead_is_anomaly_subject, got %+v", rec)
+	if rec["reason"] != "leader_is_anomaly_subject" {
+		t.Errorf("expected reason=leader_is_anomaly_subject, got %+v", rec)
 	}
 }
 
@@ -854,9 +854,9 @@ func TestRunWatch_MultipleOrgs_SeparateStatusFiles(t *testing.T) {
 }
 
 // TestWatch_Deadman_LegacyWatchdogStopEvent_DoesNotClearPendingAlert pins
-// the legacy-manifest compatibility guard in leadActivityEventCount (see
+// the legacy-manifest compatibility guard in leaderActivityEventCount (see
 // its doc comment, case (b)): a `stopped` event carrying the pre-#152
-// watchdog's "reason=watchdog_..." suffix must not count as lead activity,
+// watchdog's "reason=watchdog_..." suffix must not count as leader activity,
 // even though it names a real (unrelated) seat. The event is appended
 // directly via Manifest.Append rather than through Stop, because no
 // current code path produces this shape any more -- PR #152 removed the
@@ -891,34 +891,34 @@ func TestWatch_Deadman_LegacyWatchdogStopEvent_DoesNotClearPendingAlert(t *testi
 	// -- the only part of the old shape the exclusion predicate reads.
 	// The other fields the old producer recorded onto the event (driver,
 	// model, worktree, pane_id, agmsg_team) are omitted, since
-	// nothing in leadActivityEventCount consults them; no current code
+	// nothing in leaderActivityEventCount consults them; no current code
 	// path emits this shape at all any more.
 	if err := o.Manifest.Append(ManifestEvent{TS: clk.Now().UTC().Format(time.RFC3339), OrgID: "org-a", SeatID: "seat-2", Event: EventStopped, Role: "worker", Details: "pane=ok leave=ok reason=watchdog_cutoff seat_wall_clock=30m observed=31m0s"}); err != nil {
 		t.Fatalf("append legacy watchdog stopped event: %v", err)
 	}
 
-	clk.Advance(6 * time.Minute) // past DeadmanMinutes, no genuine lead/seat activity
+	clk.Advance(6 * time.Minute) // past DeadmanMinutes, no genuine leader/seat activity
 	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
 		t.Fatalf("cycle 2 (deadman sweep): %v", err)
 	}
 
 	lines := readJSONLFile(t, escalationsPath)
 	if len(lines) != 1 {
-		t.Fatalf("expected the pending alert to still escalate (a legacy watchdog cutoff of seat-2 must not count as lead activity), got %d escalation(s): %v", len(lines), lines)
+		t.Fatalf("expected the pending alert to still escalate (a legacy watchdog cutoff of seat-2 must not count as leader activity), got %d escalation(s): %v", len(lines), lines)
 	}
 }
 
 // TestWatch_Deadman_PersistedAlertBaseline_SurvivesLegacyWatchdogStop pins
-// the upgrade-boundary contract behind keeping leadActivityEventCount's
+// the upgrade-boundary contract behind keeping leaderActivityEventCount's
 // "reason=watchdog_" exclusion (plan org-stop-reason-removal, Codex plan
 // advisory HIGH-1): a pending alert persisted by a pre-#152 watchdog stored
 // a ManifestLen baseline that excluded the watchdog's own cutoff `stopped`
 // events, and checkDeadman compares that baseline against a full recount.
 // If the exclusion were removed, an unchanged manifest containing one legacy
 // cutoff would recount one higher than the baseline and the alert would be
-// cleared as "lead activity" -- silently, with dedupe suppressing any
+// cleared as "leader activity" -- silently, with dedupe suppressing any
 // replacement. Two cases share a fixture: (i) no new events -> the alert
-// survives and escalates exactly once at its deadline; (ii) a genuine lead
+// survives and escalates exactly once at its deadline; (ii) a genuine leader
 // `sent` event -> the alert clears with no escalation.
 //
 // Relation to TestWatch_Deadman_LegacyWatchdogStopEvent_DoesNotClearPendingAlert:
@@ -937,7 +937,7 @@ func TestWatch_Deadman_LegacyWatchdogStopEvent_DoesNotClearPendingAlert(t *testi
 // chronology (an ALERT is raised and its ManifestLen baseline recorded;
 // only afterwards does the watchdog cut a different seat off). Capturing
 // baseline AFTER the cutoff was already present would make baseline and
-// case (i)'s recount two calls to the identical leadActivityEventCount on
+// case (i)'s recount two calls to the identical leaderActivityEventCount on
 // the identical, unchanged event set -- always equal regardless of whether
 // the exclusion exists, so that ordering could never actually exercise the
 // guard. With baseline captured first, case (i)'s recount (which does see
@@ -946,8 +946,8 @@ func TestWatch_Deadman_LegacyWatchdogStopEvent_DoesNotClearPendingAlert(t *testi
 // higher than the unchanged baseline and wrongly clear the alert instead of
 // escalating. The fixture's "lead_agent_get": "" and "history_lead_lines":
 // -1 are also load-bearing: they make checkDeadman skip its herdr-probe and
-// agmsg-history activity sources (pending.LeadAgentGet != "" and
-// pending.HistoryLeadLines >= 0 both stay false), so the manifest recount
+// agmsg-history activity sources (pending.LeaderAgentGet != "" and
+// pending.HistoryLeaderLines >= 0 both stay false), so the manifest recount
 // above is the only signal deciding the outcome.
 func TestWatch_Deadman_PersistedAlertBaseline_SurvivesLegacyWatchdogStop(t *testing.T) {
 	// baselineFixture holds one fixture instance -- returned by pointer so
@@ -983,7 +983,7 @@ func TestWatch_Deadman_PersistedAlertBaseline_SurvivesLegacyWatchdogStop(t *test
 		if err != nil {
 			t.Fatalf("read manifest: %v", err)
 		}
-		baseline := leadActivityEventCount(rr.Events, "org-a")
+		baseline := leaderActivityEventCount(rr.Events, "org-a")
 
 		// The watchdog's own legacy (pre-#152) cutoff of seat-2, appended
 		// directly since no current code path produces this shape.
@@ -1054,10 +1054,10 @@ func TestWatch_Deadman_PersistedAlertBaseline_SurvivesLegacyWatchdogStop(t *test
 		}
 	})
 
-	t.Run("genuine lead sent event clears the alert without escalation", func(t *testing.T) {
+	t.Run("genuine leader sent event clears the alert without escalation", func(t *testing.T) {
 		f := newFixture(t)
 
-		if err := f.o.Manifest.Append(ManifestEvent{TS: f.clk.Now().UTC().Format(time.RFC3339), OrgID: "org-a", SeatID: "seat-2", Event: EventSent, Details: "lead sends to seat-2"}); err != nil {
+		if err := f.o.Manifest.Append(ManifestEvent{TS: f.clk.Now().UTC().Format(time.RFC3339), OrgID: "org-a", SeatID: "seat-2", Event: EventSent, Details: "leader sends to seat-2"}); err != nil {
 			t.Fatalf("append sent event: %v", err)
 		}
 
@@ -1066,7 +1066,7 @@ func TestWatch_Deadman_PersistedAlertBaseline_SurvivesLegacyWatchdogStop(t *test
 		}
 
 		if f.escalateCalls != 0 {
-			t.Errorf("expected no escalation once genuine lead activity is recorded, got %d", f.escalateCalls)
+			t.Errorf("expected no escalation once genuine leader activity is recorded, got %d", f.escalateCalls)
 		}
 		if len(f.status.PendingAlerts) != 0 {
 			t.Errorf("expected the pending alert to clear after a genuine sent event, got %+v", f.status.PendingAlerts)
@@ -1076,7 +1076,7 @@ func TestWatch_Deadman_PersistedAlertBaseline_SurvivesLegacyWatchdogStop(t *test
 }
 
 // TestWatch_Deadman_CrossOrgActivity_DoesNotClearPendingAlert pins the
-// cross-review AR-1 fix: leadActivityEventCount must be scoped to the
+// cross-review AR-1 fix: leaderActivityEventCount must be scoped to the
 // watched org. A shared manifest store (RunWatch's normal shape: one
 // manifest.jsonl for every org in the harness) means an unrelated org's own
 // genuine activity must never clear a different, stalled org's pending
@@ -1118,17 +1118,17 @@ func TestWatch_Deadman_CrossOrgActivity_DoesNotClearPendingAlert(t *testing.T) {
 	}
 	assertNoEscalations(t, escalationsPath)
 
-	// A lead-authored event recorded IN org-a itself DOES clear it.
-	if err := o.Manifest.Append(ManifestEvent{TS: clk.Now().UTC().Format(time.RFC3339), OrgID: "org-a", SeatID: LeadIdentity, Event: EventSent, Details: "lead activity"}); err != nil {
-		t.Fatalf("append org-a lead-activity event: %v", err)
+	// A leader-authored event recorded IN org-a itself DOES clear it.
+	if err := o.Manifest.Append(ManifestEvent{TS: clk.Now().UTC().Format(time.RFC3339), OrgID: "org-a", SeatID: LeaderIdentity, Event: EventSent, Details: "leader activity"}); err != nil {
+		t.Fatalf("append org-a leader-activity event: %v", err)
 	}
 	clk.Advance(1 * time.Minute)
 	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
-		t.Fatalf("cycle 3 (org-a's own lead activity clears the pending alert): %v", err)
+		t.Fatalf("cycle 3 (org-a's own leader activity clears the pending alert): %v", err)
 	}
 	assertNoEscalations(t, escalationsPath)
 	if len(status.PendingAlerts) != 0 {
-		t.Errorf("expected the pending alert to clear after org-a's own lead activity, got %+v", status.PendingAlerts)
+		t.Errorf("expected the pending alert to clear after org-a's own leader activity, got %+v", status.PendingAlerts)
 	}
 }
 
@@ -1136,13 +1136,13 @@ func TestWatch_Deadman_CrossOrgActivity_DoesNotClearPendingAlert(t *testing.T) {
 // pins the self-review cycle-3 H3-1 fix and replaces the earlier (inverted)
 // TestWatch_Deadman_UnrelatedSeatEvent_DoesNotClearPendingAlert, which
 // claimed a `sent` event whose SeatID names a different seat must NOT count
-// as lead activity. That claim was backwards: ev.SeatID on a `sent` event is
+// as leader activity. That claim was backwards: ev.SeatID on a `sent` event is
 // the *recipient* (Send writes SeatID: p.To -- verbs.go), not the author, and
 // `ralph org send` -- the only verb that appends a `sent` event -- is only
-// ever driven by lead/the operator (star topology,
-// .claude/rules/ralph/agent-messaging.md: a seat only ever addresses TO: lead, and
+// ever driven by leader/the operator (star topology,
+// .claude/rules/ralph/agent-messaging.md: a seat only ever addresses TO: leader, and
 // its replies travel over the agmsg skill, never through this manifest). So
-// a `sent` event naming seat-2 as SeatID IS lead activity (lead sending to
+// a `sent` event naming seat-2 as SeatID IS leader activity (leader sending to
 // seat-2), and must clear seat-1's pending alert. The genuinely non-clearing
 // case is a legacy (pre-#152) watchdog cutoff `stopped` event
 // (reason=watchdog_..., already pinned by
@@ -1179,7 +1179,7 @@ func TestWatch_Deadman_SeatSentEvent_ClearsPendingAlert_LegacyWatchdogStopDoesNo
 
 	// A legacy (pre-#152) watchdog cutoff event for seat-3, appended
 	// directly since no current code path produces this shape -- carrying
-	// "reason=watchdog_..." -- must NOT count as lead activity.
+	// "reason=watchdog_..." -- must NOT count as leader activity.
 	if err := o.Manifest.Append(ManifestEvent{TS: clk.Now().UTC().Format(time.RFC3339), OrgID: "org-a", SeatID: "seat-3", Event: EventStopped, Role: "worker", Details: "pane=ok leave=ok reason=watchdog_cutoff observed=31m0s"}); err != nil {
 		t.Fatalf("append legacy watchdog stopped event for seat-3: %v", err)
 	}
@@ -1193,9 +1193,9 @@ func TestWatch_Deadman_SeatSentEvent_ClearsPendingAlert_LegacyWatchdogStopDoesNo
 	assertNoEscalations(t, escalationsPath)
 
 	// A `sent` event naming seat-2 as SeatID (the recipient) -- e.g.
-	// `ralph org send --to seat-2`, which only lead/the operator can run --
-	// IS lead activity by construction and DOES clear seat-1's pending alert.
-	if err := o.Manifest.Append(ManifestEvent{TS: clk.Now().UTC().Format(time.RFC3339), OrgID: "org-a", SeatID: "seat-2", Event: EventSent, Details: "lead sends to seat-2"}); err != nil {
+	// `ralph org send --to seat-2`, which only leader/the operator can run --
+	// IS leader activity by construction and DOES clear seat-1's pending alert.
+	if err := o.Manifest.Append(ManifestEvent{TS: clk.Now().UTC().Format(time.RFC3339), OrgID: "org-a", SeatID: "seat-2", Event: EventSent, Details: "leader sends to seat-2"}); err != nil {
 		t.Fatalf("append sent event: %v", err)
 	}
 	clk.Advance(3 * time.Minute) // now past DeadmanMinutes overall
@@ -1208,12 +1208,12 @@ func TestWatch_Deadman_SeatSentEvent_ClearsPendingAlert_LegacyWatchdogStopDoesNo
 	}
 }
 
-// TestWatch_Deadman_LeadSpawnedEvent_ClearsPendingAlert pins that a
-// `spawned` event -- part of leadActivityEventCount's lead-driven lifecycle
-// set (see its doc comment, case (b)) -- counts as lead activity even when
-// it names lead itself as SeatID, the concrete case a session-promoted-lead
-// org produces when lead self-registers via `ralph org spawn --id lead`.
-func TestWatch_Deadman_LeadSpawnedEvent_ClearsPendingAlert(t *testing.T) {
+// TestWatch_Deadman_LeaderSpawnedEvent_ClearsPendingAlert pins that a
+// `spawned` event -- part of leaderActivityEventCount's leader-driven lifecycle
+// set (see its doc comment, case (b)) -- counts as leader activity even when
+// it names leader itself as SeatID, the concrete case a session-promoted-leader
+// org produces when leader self-registers via `ralph org spawn --id leader`.
+func TestWatch_Deadman_LeaderSpawnedEvent_ClearsPendingAlert(t *testing.T) {
 	o, h, _, clk := testWatchOrg(t)
 	o.Config.DeadmanMinutes = 5
 	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
@@ -1232,30 +1232,30 @@ func TestWatch_Deadman_LeadSpawnedEvent_ClearsPendingAlert(t *testing.T) {
 		t.Fatalf("cycle 1 (raises ALERT): %v", err)
 	}
 
-	// Lead spawns itself between cycles.
-	if r := o.Spawn(watchSpawnParams("org-a", LeadIdentity, LeadIdentity)); r.Outcome != SpawnOutcomeSpawned {
-		t.Fatalf("spawn lead failed: %+v", r)
+	// Leader spawns itself between cycles.
+	if r := o.Spawn(watchSpawnParams("org-a", LeaderIdentity, LeaderIdentity)); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn leader failed: %+v", r)
 	}
 
-	clk.Advance(6 * time.Minute) // past DeadmanMinutes, but lead spawned in between
+	clk.Advance(6 * time.Minute) // past DeadmanMinutes, but leader spawned in between
 	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
 		t.Fatalf("cycle 2: %v", err)
 	}
 	assertNoEscalations(t, escalationsPath)
 	if len(status.PendingAlerts) != 0 {
-		t.Errorf("expected the pending alert to clear after lead's own spawned event, got %+v", status.PendingAlerts)
+		t.Errorf("expected the pending alert to clear after leader's own spawned event, got %+v", status.PendingAlerts)
 	}
 }
 
-// TestWatch_Deadman_LeadSpawnsReplacementSeat_ClearsPendingAlert pins the
+// TestWatch_Deadman_LeaderSpawnsReplacementSeat_ClearsPendingAlert pins the
 // self-review cycle-3 M3-1 fix: a `spawned` event for a DIFFERENT seat (not
-// lead itself) still counts as lead activity -- the concrete scenario is
-// lead responding to a stall ALERT by spawning a replacement seat, which
-// only lead/the operator can do via `ralph org spawn`. Before this fix,
-// leadActivityEventCount only special-cased `stopped`/`disbanded` for
-// non-lead-named events, so this spawn would have counted as nothing and
-// the deadman would escalate against a demonstrably responsive lead.
-func TestWatch_Deadman_LeadSpawnsReplacementSeat_ClearsPendingAlert(t *testing.T) {
+// leader itself) still counts as leader activity -- the concrete scenario is
+// leader responding to a stall ALERT by spawning a replacement seat, which
+// only leader/the operator can do via `ralph org spawn`. Before this fix,
+// leaderActivityEventCount only special-cased `stopped`/`disbanded` for
+// non-leader-named events, so this spawn would have counted as nothing and
+// the deadman would escalate against a demonstrably responsive leader.
+func TestWatch_Deadman_LeaderSpawnsReplacementSeat_ClearsPendingAlert(t *testing.T) {
 	o, h, _, clk := testWatchOrg(t)
 	o.Config.DeadmanMinutes = 5
 	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
@@ -1274,29 +1274,29 @@ func TestWatch_Deadman_LeadSpawnsReplacementSeat_ClearsPendingAlert(t *testing.T
 		t.Fatalf("cycle 1 (raises seat-1's ALERT): %v", err)
 	}
 
-	// Lead spawns a REPLACEMENT seat (seat-2), not itself, between cycles.
+	// Leader spawns a REPLACEMENT seat (seat-2), not itself, between cycles.
 	if r := o.Spawn(watchSpawnParams("org-a", "seat-2", "worker")); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("spawn seat-2 failed: %+v", r)
 	}
 
-	clk.Advance(6 * time.Minute) // past DeadmanMinutes, but lead spawned seat-2 in between
+	clk.Advance(6 * time.Minute) // past DeadmanMinutes, but leader spawned seat-2 in between
 	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
 		t.Fatalf("cycle 2: %v", err)
 	}
 	assertNoEscalations(t, escalationsPath)
 	if len(status.PendingAlerts) != 0 {
-		t.Errorf("expected the pending alert to clear after lead spawns a replacement seat, got %+v", status.PendingAlerts)
+		t.Errorf("expected the pending alert to clear after leader spawns a replacement seat, got %+v", status.PendingAlerts)
 	}
 }
 
 // TestWatch_Deadman_ManualStopOfOtherSeat_ClearsPendingAlert pins that a
 // manual (operator-issued, non-watchdog) `stopped` event for a DIFFERENT
-// seat still counts as lead activity: someone had to run `ralph org stop`
-// for it to exist, and issuing that command is itself a lead-driven action
+// seat still counts as leader activity: someone had to run `ralph org stop`
+// for it to exist, and issuing that command is itself a leader-driven action
 // -- unlike a legacy (pre-#152) watchdog cutoff `stopped` event
 // (reason=watchdog_..., excluded by
 // TestWatch_Deadman_LegacyWatchdogStopEvent_DoesNotClearPendingAlert above),
-// which is self-inflicted and proves nothing about lead responsiveness.
+// which is self-inflicted and proves nothing about leader responsiveness.
 func TestWatch_Deadman_ManualStopOfOtherSeat_ClearsPendingAlert(t *testing.T) {
 	o, h, _, clk := testWatchOrg(t)
 	o.Config.DeadmanMinutes = 5
@@ -1386,36 +1386,36 @@ func TestWatch_Stall_UsesLatestEventOfAnyType_NotOnlyStateEvents(t *testing.T) {
 	}
 }
 
-// --- cross-review-triage cycle-2 #3: deadman history source is lead-only ---
+// --- cross-review-triage cycle-2 #3: deadman history source is leader-only ---
 
-// TestFilterLeadHistoryLines pins leadHistoryFromField/filterLeadHistoryLines'
+// TestFilterLeaderHistoryLines pins leaderHistoryFromField/filterLeaderHistoryLines'
 // parsing contract directly: only lines whose "from" field (the segment
-// between "] " and " → ") is exactly LeadIdentity survive; anything that
+// between "] " and " → ") is exactly LeaderIdentity survive; anything that
 // does not parse into that shape is excluded, not conservatively kept.
-func TestFilterLeadHistoryLines(t *testing.T) {
+func TestFilterLeaderHistoryLines(t *testing.T) {
 	raw := strings.Join([]string{
-		"  ● [2026-01-01T00:00:00Z] lead → seat-1: kickoff task",
-		"  ○ [2026-01-01T00:01:00Z] seat-1 → lead: ack",
-		"  ● [2026-01-01T00:02:00Z] watchdog → lead: TYPE: ALERT",
+		"  ● [2026-01-01T00:00:00Z] leader → seat-1: kickoff task",
+		"  ○ [2026-01-01T00:01:00Z] seat-1 → leader: ack",
+		"  ● [2026-01-01T00:02:00Z] watchdog → leader: TYPE: ALERT",
 		"garbled line with no timestamp or arrow at all",
-		"  ● [2026-01-01T00:03:00Z] lead with no arrow marker here",
-		"  ● [2026-01-01T00:04:00Z] lead → seat-2: another lead message",
+		"  ● [2026-01-01T00:03:00Z] leader with no arrow marker here",
+		"  ● [2026-01-01T00:04:00Z] leader → seat-2: another leader message",
 	}, "\n")
 
-	got := filterLeadHistoryLines(raw)
+	got := filterLeaderHistoryLines(raw)
 	want := strings.Join([]string{
-		"  ● [2026-01-01T00:00:00Z] lead → seat-1: kickoff task",
-		"  ● [2026-01-01T00:04:00Z] lead → seat-2: another lead message",
+		"  ● [2026-01-01T00:00:00Z] leader → seat-1: kickoff task",
+		"  ● [2026-01-01T00:04:00Z] leader → seat-2: another leader message",
 	}, "\n")
 	if got != want {
-		t.Errorf("filterLeadHistoryLines:\n got:  %q\n want: %q", got, want)
+		t.Errorf("filterLeaderHistoryLines:\n got:  %q\n want: %q", got, want)
 	}
 }
 
 // TestWatch_Deadman_WatchdogAlertHistoryLine_DoesNotClearPendingAlert pins
 // cross-review-triage cycle-2 #3: a new agmsg history line produced by the
-// watchdog's OWN alert traffic (watchdog -> lead) must not count as lead
-// activity and clear a pending deadman alert -- only lead-authored lines may.
+// watchdog's OWN alert traffic (watchdog -> leader) must not count as leader
+// activity and clear a pending deadman alert -- only leader-authored lines may.
 func TestWatch_Deadman_WatchdogAlertHistoryLine_DoesNotClearPendingAlert(t *testing.T) {
 	o, h, a, clk := testWatchOrg(t)
 	o.Config.DeadmanMinutes = 100 // keep the timeout out of the picture
@@ -1426,12 +1426,12 @@ func TestWatch_Deadman_WatchdogAlertHistoryLine_DoesNotClearPendingAlert(t *test
 	h.AgentGetErrSeq[target] = []error{errors.New("herdr: agent not found")} // sticky liveness ALERT
 
 	team := agmsgTeam("org-a")
-	leadLine := "  ● [2026-01-01T00:00:00Z] lead → seat-1: kickoff task"
-	base := leadLine
-	withWatchdogAlert := leadLine + "\n  ● [2026-01-01T00:05:00Z] watchdog → lead: TYPE: ALERT\nCONDITION: liveness"
-	// call 1: sendAlert's own historyLeadLineCount capture (cycle 1); call 2:
+	leaderLine := "  ● [2026-01-01T00:00:00Z] leader → seat-1: kickoff task"
+	base := leaderLine
+	withWatchdogAlert := leaderLine + "\n  ● [2026-01-01T00:05:00Z] watchdog → leader: TYPE: ALERT\nCONDITION: liveness"
+	// call 1: sendAlert's own historyLeaderLineCount capture (cycle 1); call 2:
 	// checkDeadman's comparison in that same cycle 1; call 3: checkDeadman's
-	// comparison in cycle 2, where a new non-lead line has been appended.
+	// comparison in cycle 2, where a new non-leader line has been appended.
 	a.HistorySeq[team] = []string{base, base, withWatchdogAlert}
 
 	run, statusPath, escalationsPath := newTestWatchRun(o, nil, nil, &bytes.Buffer{})
@@ -1452,16 +1452,16 @@ func TestWatch_Deadman_WatchdogAlertHistoryLine_DoesNotClearPendingAlert(t *test
 		t.Fatalf("cycle 2: %v", err)
 	}
 	if len(status.PendingAlerts) != 1 {
-		t.Errorf("expected the pending alert to remain: a new watchdog->lead history line must not count as lead activity, got %d pending: %+v",
+		t.Errorf("expected the pending alert to remain: a new watchdog->leader history line must not count as leader activity, got %d pending: %+v",
 			len(status.PendingAlerts), status.PendingAlerts)
 	}
 	assertNoEscalations(t, escalationsPath)
 }
 
-// TestWatch_Deadman_LeadHistoryLine_ClearsPendingAlert is the positive
-// counterpart: a new agmsg history line genuinely authored BY lead (lead ->
+// TestWatch_Deadman_LeaderHistoryLine_ClearsPendingAlert is the positive
+// counterpart: a new agmsg history line genuinely authored BY leader (leader ->
 // seat) must still clear a pending deadman alert, same as before this fix.
-func TestWatch_Deadman_LeadHistoryLine_ClearsPendingAlert(t *testing.T) {
+func TestWatch_Deadman_LeaderHistoryLine_ClearsPendingAlert(t *testing.T) {
 	o, h, a, clk := testWatchOrg(t)
 	o.Config.DeadmanMinutes = 100 // keep the timeout out of the picture
 	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
@@ -1471,12 +1471,12 @@ func TestWatch_Deadman_LeadHistoryLine_ClearsPendingAlert(t *testing.T) {
 	h.AgentGetErrSeq[target] = []error{errors.New("herdr: agent not found")} // sticky liveness ALERT
 
 	team := agmsgTeam("org-a")
-	// A malformed line is deliberately mixed in alongside the genuine lead
-	// line -- it must not itself be mistaken for lead activity (it is simply
-	// excluded), the real lead -> seat line is what clears the alert.
-	withLeadLine := "garbled line with no timestamp or arrow\n" +
-		"  ● [2026-01-01T00:05:00Z] lead → seat-1: are you there?"
-	a.HistorySeq[team] = []string{"", "", withLeadLine}
+	// A malformed line is deliberately mixed in alongside the genuine leader
+	// line -- it must not itself be mistaken for leader activity (it is simply
+	// excluded), the real leader -> seat line is what clears the alert.
+	withLeaderLine := "garbled line with no timestamp or arrow\n" +
+		"  ● [2026-01-01T00:05:00Z] leader → seat-1: are you there?"
+	a.HistorySeq[team] = []string{"", "", withLeaderLine}
 
 	run, statusPath, _ := newTestWatchRun(o, nil, nil, &bytes.Buffer{})
 	status, err := loadWatchStatus(statusPath, "org-a")
@@ -1496,19 +1496,19 @@ func TestWatch_Deadman_LeadHistoryLine_ClearsPendingAlert(t *testing.T) {
 		t.Fatalf("cycle 2: %v", err)
 	}
 	if len(status.PendingAlerts) != 0 {
-		t.Errorf("expected the pending alert to clear: a new lead->seat history line is genuine lead activity, got %d pending: %+v",
+		t.Errorf("expected the pending alert to clear: a new leader->seat history line is genuine leader activity, got %d pending: %+v",
 			len(status.PendingAlerts), status.PendingAlerts)
 	}
 }
 
 // TestWatch_Deadman_HistoryWindowEviction_DoesNotFalselyClearPendingAlert
-// pins the self-review cycle-3 M3-2 fix: historyLeadLineCount's window is
+// pins the self-review cycle-3 M3-2 fix: historyLeaderLineCount's window is
 // the last-20-of-EVERYONE window (see its doc comment), so as other seats
-// chat, older lead lines fall out of that window and the visible lead-line
-// set can shrink with NO new lead activity at all. The pre-fix exact-string
+// chat, older leader lines fall out of that window and the visible leader-line
+// set can shrink with NO new leader activity at all. The pre-fix exact-string
 // comparison (`cur != "" && cur != pending.History`) treated any change --
 // including a pure shrinkage -- as activity and wrongly cleared the pending
-// alert; the count-based comparison (`cur > pending.HistoryLeadLines`) does
+// alert; the count-based comparison (`cur > pending.HistoryLeaderLines`) does
 // not, because eviction can only ever decrease the count.
 func TestWatch_Deadman_HistoryWindowEviction_DoesNotFalselyClearPendingAlert(t *testing.T) {
 	o, h, a, clk := testWatchOrg(t)
@@ -1520,20 +1520,20 @@ func TestWatch_Deadman_HistoryWindowEviction_DoesNotFalselyClearPendingAlert(t *
 	h.AgentGetErrSeq[target] = []error{errors.New("herdr: agent not found")} // sticky liveness ALERT
 
 	team := agmsgTeam("org-a")
-	threeLeadLines := strings.Join([]string{
-		"  ● [2026-01-01T00:00:00Z] lead → seat-1: msg 1",
-		"  ● [2026-01-01T00:01:00Z] lead → seat-1: msg 2",
-		"  ● [2026-01-01T00:02:00Z] lead → seat-1: msg 3",
+	threeLeaderLines := strings.Join([]string{
+		"  ● [2026-01-01T00:00:00Z] leader → seat-1: msg 1",
+		"  ● [2026-01-01T00:01:00Z] leader → seat-1: msg 2",
+		"  ● [2026-01-01T00:02:00Z] leader → seat-1: msg 3",
 	}, "\n")
 	// Simulates the underlying last-20-of-everyone window evicting the two
-	// older lead lines as other seats chat -- fewer lead lines are visible,
+	// older leader lines as other seats chat -- fewer leader lines are visible,
 	// but none of them is new.
-	shrunkWindow := "  ● [2026-01-01T00:02:00Z] lead → seat-1: msg 3"
-	// call 1: sendAlert's own historyLeadLineCount capture (cycle 1,
+	shrunkWindow := "  ● [2026-01-01T00:02:00Z] leader → seat-1: msg 3"
+	// call 1: sendAlert's own historyLeaderLineCount capture (cycle 1,
 	// count=3); call 2: checkDeadman's comparison in that same cycle 1
 	// (count=3, no growth); call 3: checkDeadman's comparison in cycle 2,
-	// where eviction has shrunk the visible window to 1 lead line.
-	a.HistorySeq[team] = []string{threeLeadLines, threeLeadLines, shrunkWindow}
+	// where eviction has shrunk the visible window to 1 leader line.
+	a.HistorySeq[team] = []string{threeLeaderLines, threeLeaderLines, shrunkWindow}
 
 	run, statusPath, escalationsPath := newTestWatchRun(o, nil, nil, &bytes.Buffer{})
 	status, err := loadWatchStatus(statusPath, "org-a")
@@ -1553,7 +1553,7 @@ func TestWatch_Deadman_HistoryWindowEviction_DoesNotFalselyClearPendingAlert(t *
 		t.Fatalf("cycle 2: %v", err)
 	}
 	if len(status.PendingAlerts) != 1 {
-		t.Errorf("expected the pending alert to remain: a shrunk (evicted) history window with no new lead line must not count as activity, got %d pending: %+v",
+		t.Errorf("expected the pending alert to remain: a shrunk (evicted) history window with no new leader line must not count as activity, got %d pending: %+v",
 			len(status.PendingAlerts), status.PendingAlerts)
 	}
 	assertNoEscalations(t, escalationsPath)
@@ -1563,12 +1563,12 @@ func TestWatch_Deadman_HistoryWindowEviction_DoesNotFalselyClearPendingAlert(t *
 
 // TestWatch_Deadman_ProbeOutageRecoveryAlone_DoesNotClearPendingAlert pins the
 // checkDeadman fix for cross-review-triage cycle-3 #5: an ALERT recorded
-// while the lead herdr probe (leadProbeSnapshot) was unavailable persists
-// LeadAgentGet == "" as its baseline. A later cycle where the probe merely
-// recovers -- with no other genuine lead activity -- must NOT by itself
-// clear the pending alert: pre-fix, `cur != "" && cur != pending.LeadAgentGet`
+// while the leader herdr probe (leaderProbeSnapshot) was unavailable persists
+// LeaderAgentGet == "" as its baseline. A later cycle where the probe merely
+// recovers -- with no other genuine leader activity -- must NOT by itself
+// clear the pending alert: pre-fix, `cur != "" && cur != pending.LeaderAgentGet`
 // is trivially satisfied by any recovered value compared against a ""
-// baseline, treating "the probe came back" as if it were "lead did
+// baseline, treating "the probe came back" as if it were "leader did
 // something new".
 func TestWatch_Deadman_ProbeOutageRecoveryAlone_DoesNotClearPendingAlert(t *testing.T) {
 	o, h, _, clk := testWatchOrg(t)
@@ -1581,12 +1581,12 @@ func TestWatch_Deadman_ProbeOutageRecoveryAlone_DoesNotClearPendingAlert(t *test
 	seatTarget := herdrAgentName("org-a", "seat-1")
 	h.AgentGetErrSeq[seatTarget] = []error{errors.New("herdr: agent not found")}
 
-	// The lead's own probe (checkDeadman's source #2) is down for exactly the
+	// The leader's own probe (checkDeadman's source #2) is down for exactly the
 	// 2 calls made during cycle 1 (sendAlert's baseline capture, then
 	// checkDeadman's own same-cycle comparison), then recovers from cycle 2
 	// onward.
-	leadTarget := herdrAgentName("org-a", LeadIdentity)
-	h.AgentGetErrSeq[leadTarget] = []error{
+	leaderTarget := herdrAgentName("org-a", LeaderIdentity)
+	h.AgentGetErrSeq[leaderTarget] = []error{
 		errors.New("herdr: unreachable"),
 		errors.New("herdr: unreachable"),
 		nil, // recovered: falls through to the default "ok" AgentGet response
@@ -1605,8 +1605,8 @@ func TestWatch_Deadman_ProbeOutageRecoveryAlone_DoesNotClearPendingAlert(t *test
 		t.Fatalf("expected 1 pending alert after cycle 1, got %d: %+v", len(status.PendingAlerts), status.PendingAlerts)
 	}
 	for _, pending := range status.PendingAlerts {
-		if pending.LeadAgentGet != "" {
-			t.Fatalf("expected the pending alert's probe baseline to be the unavailable sentinel (\"\"), got %q", pending.LeadAgentGet)
+		if pending.LeaderAgentGet != "" {
+			t.Fatalf("expected the pending alert's probe baseline to be the unavailable sentinel (\"\"), got %q", pending.LeaderAgentGet)
 		}
 	}
 
@@ -1615,7 +1615,7 @@ func TestWatch_Deadman_ProbeOutageRecoveryAlone_DoesNotClearPendingAlert(t *test
 		t.Fatalf("cycle 2 (probe recovers, no other activity): %v", err)
 	}
 	if len(status.PendingAlerts) != 1 {
-		t.Errorf("expected the pending alert to remain: probe recovery alone (unavailable baseline) must not count as lead activity, got %d pending: %+v",
+		t.Errorf("expected the pending alert to remain: probe recovery alone (unavailable baseline) must not count as leader activity, got %d pending: %+v",
 			len(status.PendingAlerts), status.PendingAlerts)
 	}
 	assertNoEscalations(t, escalationsPath)
@@ -1624,8 +1624,8 @@ func TestWatch_Deadman_ProbeOutageRecoveryAlone_DoesNotClearPendingAlert(t *test
 // TestWatch_Deadman_ProbeOutageThenGenuineManifestActivity_ClearsPendingAlert
 // is the positive counterpart: once a pending alert's probe baseline is the
 // unavailable sentinel, that source can never independently clear it (its
-// baseline is frozen at ALERT time), but genuine lead activity via a
-// different, unaffected source -- a new lead-attributable manifest event --
+// baseline is frozen at ALERT time), but genuine leader activity via a
+// different, unaffected source -- a new leader-attributable manifest event --
 // must still clear it, exactly as before this fix.
 func TestWatch_Deadman_ProbeOutageThenGenuineManifestActivity_ClearsPendingAlert(t *testing.T) {
 	o, h, _, clk := testWatchOrg(t)
@@ -1636,8 +1636,8 @@ func TestWatch_Deadman_ProbeOutageThenGenuineManifestActivity_ClearsPendingAlert
 	seatTarget := herdrAgentName("org-a", "seat-1")
 	h.AgentGetErrSeq[seatTarget] = []error{errors.New("herdr: agent not found")}
 
-	leadTarget := herdrAgentName("org-a", LeadIdentity)
-	h.AgentGetErrSeq[leadTarget] = []error{
+	leaderTarget := herdrAgentName("org-a", LeaderIdentity)
+	h.AgentGetErrSeq[leaderTarget] = []error{
 		errors.New("herdr: unreachable"),
 		errors.New("herdr: unreachable"),
 		nil, // recovered from cycle 2 onward, same as the negative test above
@@ -1664,10 +1664,10 @@ func TestWatch_Deadman_ProbeOutageThenGenuineManifestActivity_ClearsPendingAlert
 		t.Fatalf("expected the pending alert to remain after probe recovery alone, got %d pending: %+v", len(status.PendingAlerts), status.PendingAlerts)
 	}
 
-	// Genuine lead activity: a real `sent` event, lead-authored by
-	// construction (see leadActivityEventCount's doc comment).
-	if err := o.Manifest.Append(ManifestEvent{TS: clk.Now().UTC().Format(time.RFC3339), OrgID: "org-a", SeatID: "seat-1", Event: EventSent, Details: "lead activity"}); err != nil {
-		t.Fatalf("append lead-activity event: %v", err)
+	// Genuine leader activity: a real `sent` event, leader-authored by
+	// construction (see leaderActivityEventCount's doc comment).
+	if err := o.Manifest.Append(ManifestEvent{TS: clk.Now().UTC().Format(time.RFC3339), OrgID: "org-a", SeatID: "seat-1", Event: EventSent, Details: "leader activity"}); err != nil {
+		t.Fatalf("append leader-activity event: %v", err)
 	}
 
 	clk.Advance(1 * time.Minute)
@@ -1675,7 +1675,7 @@ func TestWatch_Deadman_ProbeOutageThenGenuineManifestActivity_ClearsPendingAlert
 		t.Fatalf("cycle 3 (genuine manifest activity): %v", err)
 	}
 	if len(status.PendingAlerts) != 0 {
-		t.Errorf("expected the pending alert to clear: a genuine manifest sent event is lead activity via an unaffected source, got %d pending: %+v",
+		t.Errorf("expected the pending alert to clear: a genuine manifest sent event is leader activity via an unaffected source, got %d pending: %+v",
 			len(status.PendingAlerts), status.PendingAlerts)
 	}
 	assertNoEscalations(t, escalationsPath)
@@ -1713,7 +1713,7 @@ func TestWatch_EnsureWatchdogJoined_TransientFailure_RetriesUntilSuccess(t *test
 
 	// cycle 1's Join attempt fails; cycle 3's Join attempt (the only other
 	// one -- cycle 2 raises no ALERT) succeeds. Keyed by watchdogIdentity so
-	// Spawn's own lead/seat Join calls (made before evaluateCycle even runs)
+	// Spawn's own leader/seat Join calls (made before evaluateCycle even runs)
 	// do not consume these entries.
 	a.JoinErrSeq[watchdogIdentity] = []error{errors.New("agmsg: team unreachable"), nil}
 

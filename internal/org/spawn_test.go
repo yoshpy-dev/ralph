@@ -165,9 +165,9 @@ func (f *fakeHerdr) PaneSendKeys(_ context.Context, paneID string, keys ...strin
 }
 
 // fakeAgmsg is a call-recording, in-memory AgmsgClient. joinErrs, keyed by
-// agentID (e.g. "lead" or a seat id), lets a test inject a Join failure at
-// exactly one identity while leaving the other Join call (lead vs seat)
-// unaffected -- needed to test ensureLeadJoined's best-effort semantics
+// agentID (e.g. "leader" or a seat id), lets a test inject a Join failure at
+// exactly one identity while leaving the other Join call (leader vs seat)
+// unaffected -- needed to test ensureLeaderJoined's best-effort semantics
 // independently of the seat Join's hard-failure gate. mu guards every field
 // below -- see fakeHerdr's doc comment for why.
 type fakeAgmsg struct {
@@ -341,7 +341,7 @@ func TestOrgSpawn_HappyPath_EventSequenceAndReceipt(t *testing.T) {
 		t.Fatalf("expected pane_id pane-1, got %q", result.Seat.PaneID)
 	}
 
-	// tab_created, agent_started, agmsg_lead_joined, agmsg_joined, agmsg_announced.
+	// tab_created, agent_started, agmsg_leader_joined, agmsg_joined, agmsg_announced.
 	want := []string{EventSpawnStarted, EventOrgWorkspaceCreated, EventSpawnStep, EventSpawnStep, EventSpawnStep, EventSpawnStep, EventSpawnStep, EventSpawned}
 	got := eventNames(t, o)
 	if len(got) != len(want) {
@@ -357,7 +357,7 @@ func TestOrgSpawn_HappyPath_EventSequenceAndReceipt(t *testing.T) {
 	if len(h.calls) != len(wantCalls) {
 		t.Fatalf("expected herdr calls %v, got %v", wantCalls, h.calls)
 	}
-	wantAgmsgCalls := []string{"join:lead", "join:seat-1", "send"}
+	wantAgmsgCalls := []string{"join:leader", "join:seat-1", "send"}
 	if len(a.calls) != len(wantAgmsgCalls) {
 		t.Fatalf("expected agmsg calls %v, got %v", wantAgmsgCalls, a.calls)
 	}
@@ -367,17 +367,17 @@ func TestOrgSpawn_HappyPath_EventSequenceAndReceipt(t *testing.T) {
 		}
 	}
 	if len(a.joinCalls) != 2 {
-		t.Fatalf("expected 2 Join calls (lead then seat), got %+v", a.joinCalls)
+		t.Fatalf("expected 2 Join calls (leader then seat), got %+v", a.joinCalls)
 	}
-	leadJoin, seatJoin := a.joinCalls[0], a.joinCalls[1]
-	if leadJoin.agentID != "lead" || leadJoin.agmsgType != "claude-code" || leadJoin.projectPath != "/tmp/seat" {
-		t.Errorf("expected lead Join(team, lead, claude-code, /tmp/seat), got %+v", leadJoin)
+	leaderJoin, seatJoin := a.joinCalls[0], a.joinCalls[1]
+	if leaderJoin.agentID != "leader" || leaderJoin.agmsgType != "claude-code" || leaderJoin.projectPath != "/tmp/seat" {
+		t.Errorf("expected leader Join(team, leader, claude-code, /tmp/seat), got %+v", leaderJoin)
 	}
 	if seatJoin.agentID != "seat-1" || seatJoin.agmsgType != "claude-code" || seatJoin.projectPath != "/tmp/seat" {
 		t.Errorf("expected seat Join(team, seat-1, claude-code, /tmp/seat) for a claude driver seat, got %+v", seatJoin)
 	}
-	if leadJoin.team != seatJoin.team {
-		t.Errorf("expected lead and seat Join calls to target the same team, got %q vs %q", leadJoin.team, seatJoin.team)
+	if leaderJoin.team != seatJoin.team {
+		t.Errorf("expected leader and seat Join calls to target the same team, got %q vs %q", leaderJoin.team, seatJoin.team)
 	}
 
 	rr, err := o.Receipts.Read()
@@ -999,12 +999,12 @@ func TestOrgSpawn_FailureInjection_AgmsgSend_CompensatesExistingPane(t *testing.
 	if last.PaneID != "pane-1" {
 		t.Fatalf("expected orphaned pane_id pane-1 to remain traceable, got %q", last.PaneID)
 	}
-	assertDetailsContains(t, last.Details, "step=agmsg_announce", "lead_join=ok")
+	assertDetailsContains(t, last.Details, "step=agmsg_announce", "leader_join=ok")
 }
 
 func TestOrgSpawn_FailureInjection_AgmsgJoin_SeatJoinFails_CompensatesExistingPane(t *testing.T) {
-	// Seat Join is a hard-failure gate distinct from the lead's best-effort
-	// ensureLeadJoined: a seat Join failure must fail the saga at
+	// Seat Join is a hard-failure gate distinct from the leader's best-effort
+	// ensureLeaderJoined: a seat Join failure must fail the saga at
 	// "agmsg_join", before the HELLO Send is ever attempted.
 	o, h, a := testOrg(t)
 	a.joinErrs = map[string]error{"seat-1": errors.New("stub failure: seat join")}
@@ -1016,8 +1016,8 @@ func TestOrgSpawn_FailureInjection_AgmsgJoin_SeatJoinFails_CompensatesExistingPa
 	if len(h.sendKeysCalls) != 1 || h.sendKeysCalls[0] != "pane-1" {
 		t.Fatalf("expected exactly one compensation C-c to pane-1, got %v", h.sendKeysCalls)
 	}
-	if len(a.calls) != 2 || a.calls[0] != "join:lead" || a.calls[1] != "join:seat-1" {
-		t.Fatalf("expected lead Join then seat Join (no Send attempted after seat Join fails), got %v", a.calls)
+	if len(a.calls) != 2 || a.calls[0] != "join:leader" || a.calls[1] != "join:seat-1" {
+		t.Fatalf("expected leader Join then seat Join (no Send attempted after seat Join fails), got %v", a.calls)
 	}
 
 	rr, err := o.Manifest.Read()
@@ -1034,47 +1034,47 @@ func TestOrgSpawn_FailureInjection_AgmsgJoin_SeatJoinFails_CompensatesExistingPa
 	assertDetailsContains(t, last.Details, "step=agmsg_join", "C-c sent")
 }
 
-func TestOrgSpawn_EnsureLeadJoined_ErrorDoesNotFailSaga_WhenSeatJoinAndSendSucceed(t *testing.T) {
-	// ensureLeadJoined is best-effort: an error joining "lead" (e.g. it was
+func TestOrgSpawn_EnsureLeaderJoined_ErrorDoesNotFailSaga_WhenSeatJoinAndSendSucceed(t *testing.T) {
+	// ensureLeaderJoined is best-effort: an error joining "leader" (e.g. it was
 	// already a member and join.sh soft-failed on the retry) must not fail
 	// the saga on its own -- the seat's own Join and the HELLO Send are the
-	// authoritative gates. The lead-join error is still recorded on the
-	// agmsg_lead_joined spawn_step for diagnosis.
+	// authoritative gates. The leader-join error is still recorded on the
+	// agmsg_leader_joined spawn_step for diagnosis.
 	o, _, a := testOrg(t)
-	a.joinErrs = map[string]error{"lead": errors.New("stub: lead already a member")}
+	a.joinErrs = map[string]error{"leader": errors.New("stub: leader already a member")}
 
 	result := o.Spawn(mustSpawnParams("org-a", "seat-1"))
 	if result.Outcome != SpawnOutcomeSpawned {
-		t.Fatalf("expected SpawnOutcomeSpawned despite a lead-join error, got %v (err=%v)", result.Outcome, result.Err)
+		t.Fatalf("expected SpawnOutcomeSpawned despite a leader-join error, got %v (err=%v)", result.Outcome, result.Err)
 	}
 
 	rr, err := o.Manifest.Read()
 	if err != nil {
 		t.Fatalf("read manifest: %v", err)
 	}
-	var leadJoinedStep *ManifestEvent
+	var leaderJoinedStep *ManifestEvent
 	for i := range rr.Events {
 		if rr.Events[i].Details == "" {
 			continue
 		}
-		if strings.HasPrefix(rr.Events[i].Details, "agmsg_lead_joined") {
-			leadJoinedStep = &rr.Events[i]
+		if strings.HasPrefix(rr.Events[i].Details, "agmsg_leader_joined") {
+			leaderJoinedStep = &rr.Events[i]
 			break
 		}
 	}
-	if leadJoinedStep == nil {
-		t.Fatalf("expected an agmsg_lead_joined spawn_step event, got events %+v", rr.Events)
+	if leaderJoinedStep == nil {
+		t.Fatalf("expected an agmsg_leader_joined spawn_step event, got events %+v", rr.Events)
 	}
-	assertDetailsContains(t, leadJoinedStep.Details, "error=")
+	assertDetailsContains(t, leaderJoinedStep.Details, "error=")
 }
 
-func TestOrgSpawn_FailureInjection_AgmsgSend_DetailsIncludeLeadJoinError(t *testing.T) {
-	// When HELLO Send fails, the recorded lead-join outcome must be carried
+func TestOrgSpawn_FailureInjection_AgmsgSend_DetailsIncludeLeaderJoinError(t *testing.T) {
+	// When HELLO Send fails, the recorded leader-join outcome must be carried
 	// into the spawn_failed Details alongside the send failure itself, so an
-	// operator can immediately see whether a missing "lead" roster entry is
+	// operator can immediately see whether a missing "leader" roster entry is
 	// the likely root cause.
 	o, _, a := testOrg(t)
-	a.joinErrs = map[string]error{"lead": errors.New("stub: lead join failed")}
+	a.joinErrs = map[string]error{"leader": errors.New("stub: leader join failed")}
 	a.sendErr = errors.New("stub failure: agmsg send")
 
 	result := o.Spawn(mustSpawnParams("org-a", "seat-1"))
@@ -1090,7 +1090,7 @@ func TestOrgSpawn_FailureInjection_AgmsgSend_DetailsIncludeLeadJoinError(t *test
 	if last.Event != EventSpawnFailed {
 		t.Fatalf("expected last event to be spawn_failed, got %q", last.Event)
 	}
-	assertDetailsContains(t, last.Details, "step=agmsg_announce", "lead_join=", "stub: lead join failed", "stub failure: agmsg send")
+	assertDetailsContains(t, last.Details, "step=agmsg_announce", "leader_join=", "stub: leader join failed", "stub failure: agmsg send")
 }
 
 func TestOrgSpawn_DryRun_NoDriverCalls_EventsFlaggedAndExcludedByDefault(t *testing.T) {
@@ -1626,19 +1626,19 @@ func TestOrgSpawn_FailureInjection_AgmsgSend_LeaveFailure_RecordedInDetails(t *t
 	assertDetailsContains(t, last.Details, "step=agmsg_announce", "leave=failed:", "stub failure: agmsg leave")
 }
 
-// --- AC-7: LeadIdentity const + lead agmsg type from LeadDriver -------------
+// --- AC-7: LeaderIdentity const + leader agmsg type from LeaderDriver -------------
 
-func TestLeadIdentity_ConstantValue(t *testing.T) {
-	if LeadIdentity != "lead" {
-		t.Fatalf("LeadIdentity = %q, want %q", LeadIdentity, "lead")
+func TestLeaderIdentity_ConstantValue(t *testing.T) {
+	if LeaderIdentity != "leader" {
+		t.Fatalf("LeaderIdentity = %q, want %q", LeaderIdentity, "leader")
 	}
 }
 
-func TestOrgSpawn_EnsureLeadJoined_DefaultLeadDriver_ClaudeCodeType(t *testing.T) {
+func TestOrgSpawn_EnsureLeaderJoined_DefaultLeaderDriver_ClaudeCodeType(t *testing.T) {
 	o, _, a := testOrg(t)
 
 	p := mustSpawnParams("org-a", "seat-1")
-	// LeadDriver left unset -- must default to "claude" -> "claude-code".
+	// LeaderDriver left unset -- must default to "claude" -> "claude-code".
 	result := o.Spawn(p)
 	if result.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("expected SpawnOutcomeSpawned, got %v (err=%v)", result.Outcome, result.Err)
@@ -1646,49 +1646,49 @@ func TestOrgSpawn_EnsureLeadJoined_DefaultLeadDriver_ClaudeCodeType(t *testing.T
 	if len(a.joinCalls) < 1 {
 		t.Fatalf("expected at least 1 Join call, got %+v", a.joinCalls)
 	}
-	leadJoin := a.joinCalls[0]
-	if leadJoin.agentID != LeadIdentity || leadJoin.agmsgType != "claude-code" {
-		t.Fatalf("expected lead Join(%s, claude-code, ...) by default, got %+v", LeadIdentity, leadJoin)
+	leaderJoin := a.joinCalls[0]
+	if leaderJoin.agentID != LeaderIdentity || leaderJoin.agmsgType != "claude-code" {
+		t.Fatalf("expected leader Join(%s, claude-code, ...) by default, got %+v", LeaderIdentity, leaderJoin)
 	}
 }
 
-func TestOrgSpawn_EnsureLeadJoined_LeadDriverCodex_UsesCodexAgmsgType(t *testing.T) {
-	// The lead identity's own driver (LeadDriver) is independent of the
+func TestOrgSpawn_EnsureLeaderJoined_LeaderDriverCodex_UsesCodexAgmsgType(t *testing.T) {
+	// The leader identity's own driver (LeaderDriver) is independent of the
 	// seat's Driver: a claude-driven seat spawned under a codex-coordinated
-	// org must still register "lead" with agmsg type "codex", not
+	// org must still register "leader" with agmsg type "codex", not
 	// "claude-code".
 	o, _, a := testOrg(t)
 
 	p := mustSpawnParams("org-a", "seat-1")
-	p.LeadDriver = "codex"
+	p.LeaderDriver = "codex"
 	result := o.Spawn(p)
 	if result.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("expected SpawnOutcomeSpawned, got %v (err=%v)", result.Outcome, result.Err)
 	}
 	if len(a.joinCalls) != 2 {
-		t.Fatalf("expected 2 Join calls (lead then seat), got %+v", a.joinCalls)
+		t.Fatalf("expected 2 Join calls (leader then seat), got %+v", a.joinCalls)
 	}
-	leadJoin, seatJoin := a.joinCalls[0], a.joinCalls[1]
-	if leadJoin.agentID != LeadIdentity || leadJoin.agmsgType != "codex" {
-		t.Fatalf("expected lead Join(%s, codex, ...) for LeadDriver=codex, got %+v", LeadIdentity, leadJoin)
+	leaderJoin, seatJoin := a.joinCalls[0], a.joinCalls[1]
+	if leaderJoin.agentID != LeaderIdentity || leaderJoin.agmsgType != "codex" {
+		t.Fatalf("expected leader Join(%s, codex, ...) for LeaderDriver=codex, got %+v", LeaderIdentity, leaderJoin)
 	}
 	if seatJoin.agentID != "seat-1" || seatJoin.agmsgType != "claude-code" {
 		t.Fatalf("expected the seat's own Join to still use its own Driver (claude -> claude-code), got %+v", seatJoin)
 	}
 }
 
-// --- AC-3: `ralph org start` = lead-seat spawn sugar (SeatID == LeadIdentity) ---
+// --- AC-3: `ralph org start` = leader-seat spawn sugar (SeatID == LeaderIdentity) ---
 
-func TestOrgSpawn_LeadSelfSpawn_SingleAgmsgJoin_NoHelloSend(t *testing.T) {
-	// SeatID == LeadIdentity ("ralph org start") must not double-join or
-	// HELLO-announce: the seat's own Join call IS the lead-identity join, and
-	// a HELLO from lead to lead would violate the star topology's
-	// single-coordinator premise (see the leadSelfSpawn doc comment in
+func TestOrgSpawn_LeaderSelfSpawn_SingleAgmsgJoin_NoHelloSend(t *testing.T) {
+	// SeatID == LeaderIdentity ("ralph org start") must not double-join or
+	// HELLO-announce: the seat's own Join call IS the leader-identity join, and
+	// a HELLO from leader to leader would violate the star topology's
+	// single-coordinator premise (see the leaderSelfSpawn doc comment in
 	// spawn.go's Spawn).
 	o, _, a := testOrg(t)
 
-	p := mustSpawnParams("org-a", LeadIdentity)
-	p.Role = LeadIdentity
+	p := mustSpawnParams("org-a", LeaderIdentity)
+	p.Role = LeaderIdentity
 	p.Task = "dry-run 座席を spawn し、送信・確認・disband まで行え"
 	result := o.Spawn(p)
 	if result.Outcome != SpawnOutcomeSpawned {
@@ -1696,14 +1696,14 @@ func TestOrgSpawn_LeadSelfSpawn_SingleAgmsgJoin_NoHelloSend(t *testing.T) {
 	}
 
 	if len(a.joinCalls) != 1 {
-		t.Fatalf("expected exactly 1 agmsg Join call for a lead-self spawn (no separate ensureLeadJoined), got %+v", a.joinCalls)
+		t.Fatalf("expected exactly 1 agmsg Join call for a leader-self spawn (no separate ensureLeaderJoined), got %+v", a.joinCalls)
 	}
-	if a.joinCalls[0].agentID != LeadIdentity {
-		t.Fatalf("expected the single Join call to register %q, got %+v", LeadIdentity, a.joinCalls[0])
+	if a.joinCalls[0].agentID != LeaderIdentity {
+		t.Fatalf("expected the single Join call to register %q, got %+v", LeaderIdentity, a.joinCalls[0])
 	}
 	for _, c := range a.calls {
 		if c == "send" {
-			t.Fatalf("expected no agmsg Send (HELLO) call for a lead-self spawn, got calls=%v", a.calls)
+			t.Fatalf("expected no agmsg Send (HELLO) call for a leader-self spawn, got calls=%v", a.calls)
 		}
 	}
 
@@ -1721,19 +1721,19 @@ func TestOrgSpawn_LeadSelfSpawn_SingleAgmsgJoin_NoHelloSend(t *testing.T) {
 	if joinedStep == nil {
 		t.Fatalf("expected an agmsg_joined spawn_step event, got events %+v", rr.Events)
 	}
-	assertDetailsContains(t, joinedStep.Details, "lead_self=true")
+	assertDetailsContains(t, joinedStep.Details, "leader_self=true")
 	for _, ev := range rr.Events {
-		if strings.HasPrefix(ev.Details, "agmsg_lead_joined") || ev.Details == "agmsg_announced" {
-			t.Fatalf("expected no agmsg_lead_joined/agmsg_announced step for a lead-self spawn, got %+v", ev)
+		if strings.HasPrefix(ev.Details, "agmsg_leader_joined") || ev.Details == "agmsg_announced" {
+			t.Fatalf("expected no agmsg_leader_joined/agmsg_announced step for a leader-self spawn, got %+v", ev)
 		}
 	}
 }
 
-func TestOrgSpawn_LeadSelfSpawn_DryRun_MirrorsSameSkip(t *testing.T) {
+func TestOrgSpawn_LeaderSelfSpawn_DryRun_MirrorsSameSkip(t *testing.T) {
 	o, _, _ := testOrg(t)
 
-	p := mustSpawnParams("org-a", LeadIdentity)
-	p.Role = LeadIdentity
+	p := mustSpawnParams("org-a", LeaderIdentity)
+	p.Role = LeaderIdentity
 	p.DryRun = true
 	result := o.Spawn(p)
 	if result.Outcome != SpawnOutcomeSpawned {
@@ -1744,28 +1744,28 @@ func TestOrgSpawn_LeadSelfSpawn_DryRun_MirrorsSameSkip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read manifest: %v", err)
 	}
-	sawJoinedLeadSelf := false
+	sawJoinedLeaderSelf := false
 	for _, ev := range rr.Events {
-		if strings.HasPrefix(ev.Details, "agmsg_lead_joined") || ev.Details == "agmsg_announced" {
-			t.Fatalf("expected no agmsg_lead_joined/agmsg_announced step in the dry-run trail for a lead-self spawn, got %+v", ev)
+		if strings.HasPrefix(ev.Details, "agmsg_leader_joined") || ev.Details == "agmsg_announced" {
+			t.Fatalf("expected no agmsg_leader_joined/agmsg_announced step in the dry-run trail for a leader-self spawn, got %+v", ev)
 		}
-		if ev.Details == "agmsg_joined lead_self=true" {
-			sawJoinedLeadSelf = true
+		if ev.Details == "agmsg_joined leader_self=true" {
+			sawJoinedLeaderSelf = true
 		}
 	}
-	if !sawJoinedLeadSelf {
-		t.Fatalf("expected an 'agmsg_joined lead_self=true' step in the dry-run trail, got events %+v", rr.Events)
+	if !sawJoinedLeaderSelf {
+		t.Fatalf("expected an 'agmsg_joined leader_self=true' step in the dry-run trail, got events %+v", rr.Events)
 	}
 }
 
-func TestOrgSpawn_LeadRole_TaskAndEnvelopeSubstitutedIntoPromptFile(t *testing.T) {
+func TestOrgSpawn_LeaderRole_TaskAndEnvelopeSubstitutedIntoPromptFile(t *testing.T) {
 	// `ralph org start`'s Task and the org's EnvelopeSummary must both land
-	// in the lead seat's rendered prompt file (the lead.md template is long
+	// in the leader seat's rendered prompt file (the leader.md template is long
 	// enough to always need the prompt-file path, same as reviewer/qa).
 	o, h, _ := testOrg(t)
 
-	p := mustSpawnParams("org-a", LeadIdentity)
-	p.Role = LeadIdentity
+	p := mustSpawnParams("org-a", LeaderIdentity)
+	p.Role = LeaderIdentity
 	p.Task = "dry-run 座席を1つ spawn し、typed message を送り、status を確認して disband せよ"
 	if r := o.Spawn(p); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("spawn failed: %+v", r)
@@ -1783,7 +1783,7 @@ func TestOrgSpawn_LeadRole_TaskAndEnvelopeSubstitutedIntoPromptFile(t *testing.T
 	fileContent := string(data)
 	for _, want := range []string{p.Task, "model_pool:", "max_seats:", "permission default:"} {
 		if !strings.Contains(fileContent, want) {
-			t.Errorf("expected the lead prompt file content to contain %q, got:\n%s", want, fileContent)
+			t.Errorf("expected the leader prompt file content to contain %q, got:\n%s", want, fileContent)
 		}
 	}
 }

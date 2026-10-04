@@ -2174,7 +2174,7 @@ func TestOrgStop_Codex_RecoversPromptPathAfterAgentStartRetry(t *testing.T) {
 // was already observed, its receipt sitting at exactly
 // the same whole-second timestamp a respawn (B) of the same seat gets for
 // its own spawn_started -- reproducing "stop followed by spawn of the
-// same seat within one second", what a lead does when it replaces a seat
+// same seat within one second", what a leader does when it replaces a seat
 // and what a scripted flow can do in milliseconds. A's receipt must not
 // suppress B's own stop-time observation.
 func TestOrgStop_Codex_SameSecondRespawn_PreviousReceiptDoesNotSuppressObservation(t *testing.T) {

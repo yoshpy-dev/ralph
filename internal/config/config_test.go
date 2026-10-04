@@ -408,7 +408,7 @@ default = "edits"
 
 [org.permissions.roles]
 reviewer = "guarded"
-lead = "autonomous"
+leader = "autonomous"
 `
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		t.Fatal(err)
@@ -423,8 +423,8 @@ lead = "autonomous"
 	if cfg.Org.Permissions.Roles["reviewer"] != "guarded" {
 		t.Errorf("permissions.roles[reviewer] = %q, want guarded", cfg.Org.Permissions.Roles["reviewer"])
 	}
-	if cfg.Org.Permissions.Roles["lead"] != "autonomous" {
-		t.Errorf("permissions.roles[lead] = %q, want autonomous", cfg.Org.Permissions.Roles["lead"])
+	if cfg.Org.Permissions.Roles["leader"] != "autonomous" {
+		t.Errorf("permissions.roles[leader] = %q, want autonomous", cfg.Org.Permissions.Roles["leader"])
 	}
 }
 

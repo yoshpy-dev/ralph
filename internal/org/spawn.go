@@ -48,23 +48,23 @@ const maxAgentStartAttempts = 20
 // already treats herdr/agmsg errors -- see the HerdrClient doc comment.
 const agentPaneBusyMarker = "agent_pane_busy"
 
-// LeadIdentity is the single, grep-able definition of the org's coordinating
-// "lead" agmsg identity name (see .claude/rules/ralph/agent-messaging.md's "star
+// LeaderIdentity is the single, grep-able definition of the org's coordinating
+// "leader" agmsg identity name (see .claude/rules/ralph/agent-messaging.md's "star
 // topology" section). Every production call site that names or targets the
-// lead identity (ensureLeadJoined's Join, Spawn's HELLO Send TO field) must
-// use this constant rather than a bare "lead" literal. Exported so
+// leader identity (ensureLeaderJoined's Join, Spawn's HELLO Send TO field) must
+// use this constant rather than a bare "leader" literal. Exported so
 // internal/cli/org.go's newOrgStartCmd (`ralph org start`) can spawn the
-// lead seat itself under SeatID == LeadIdentity, Role == LeadIdentity
-// (design decision: "org start" = the lead-seat spawn sugar, see
+// leader seat itself under SeatID == LeaderIdentity, Role == LeaderIdentity
+// (design decision: "org start" = the leader-seat spawn sugar, see
 // docs/plans/active/2026-08-02-org-runtime-lead.md) without a duplicate
-// "lead" literal in that package.
-const LeadIdentity = "lead"
+// "leader" literal in that package.
+const LeaderIdentity = "leader"
 
-// defaultLeadDriver is the driver ensureLeadJoined uses to derive the lead
-// identity's agmsg type (agmsgTypeForDriver) when SpawnParams.LeadDriver is
-// left unset -- matches the `ralph org spawn --lead-driver` flag's own
+// defaultLeaderDriver is the driver ensureLeaderJoined uses to derive the leader
+// identity's agmsg type (agmsgTypeForDriver) when SpawnParams.LeaderDriver is
+// left unset -- matches the `ralph org spawn --leader-driver` flag's own
 // default.
-const defaultLeadDriver = "claude"
+const defaultLeaderDriver = "claude"
 
 // EventOrgWorkspaceCreated is an org-level event (SeatID empty) recorded the
 // first time a herdr workspace is created for an org_id. Later spawns within
@@ -96,8 +96,8 @@ type AgmsgClient interface {
 	Send(ctx context.Context, team, from, to, message string) error
 	// Join registers agentID (agmsg-native agmsgType, e.g. "claude-code" or
 	// "codex") on team's roster at projectPath. The spawn saga calls this
-	// twice per seat: once for the org's "lead" identity (idempotent,
-	// best-effort -- see ensureLeadJoined in Spawn) and once for the seat
+	// twice per seat: once for the org's "leader" identity (idempotent,
+	// best-effort -- see ensureLeaderJoined in Spawn) and once for the seat
 	// itself (hard failure gate).
 	Join(ctx context.Context, team, agentID, agmsgType, projectPath string) error
 	// Leave removes agentID from team's roster (agmsg's `leave.sh TEAM
@@ -219,15 +219,15 @@ type SpawnParams struct {
 	// use is recorded on the spawned event's Details ("allow_unscoped=true")
 	// so an unscoped autonomous seat stays auditable after the fact.
 	AllowUnscoped bool
-	// LeadDriver is the driver (claude|codex) the org's coordinating "lead"
+	// LeaderDriver is the driver (claude|codex) the org's coordinating "leader"
 	// identity itself runs as -- independent of Driver, which names this
-	// seat's own driver. It is only consulted by ensureLeadJoined to pick
-	// the agmsg type ("claude-code"/"codex") registered for the lead
-	// identity on the team roster. Empty defaults to defaultLeadDriver
+	// seat's own driver. It is only consulted by ensureLeaderJoined to pick
+	// the agmsg type ("claude-code"/"codex") registered for the leader
+	// identity on the team roster. Empty defaults to defaultLeaderDriver
 	// ("claude"), matching the CLI flag's default.
-	LeadDriver string
+	LeaderDriver string
 	// Task is substituted into the seat's role prompt template as {{TASK}}
-	// (RolePromptVars.Task, prompts.go). Only prompts/lead.md references
+	// (RolePromptVars.Task, prompts.go). Only prompts/leader.md references
 	// {{TASK}} today -- `ralph org start` (internal/cli/org.go's
 	// newOrgStartCmd) is the only production caller that sets this field,
 	// passing its required positional task argument straight through. Every
@@ -545,7 +545,7 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 		//
 		// Routed through reject() (self-review LOW finding), same as every
 		// other envelope-validation rejection: a `rejected` manifest event
-		// plus an honored=false receipt are appended, so an autonomous lead
+		// plus an honored=false receipt are appended, so an autonomous leader
 		// that retry-loops unscoped spawns for a genuinely new seat leaves a
 		// visible trace in `ralph org report`'s timeline instead of none.
 		// No spawn_started is ever written for this path (reject() never
@@ -670,12 +670,12 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	// observable effect on the agmsg steps further down.
 	team := agmsgTeam(p.OrgID)
 
-	// AC-4: a known --role expands the embedded template (lead.md /
+	// AC-4: a known --role expands the embedded template (leader.md /
 	// implementer.md / reviewer.md / qa.md) into the initial prompt;
 	// --prompt, if also given, is appended after it. An unknown role leaves
 	// initialPrompt as plain --prompt (possibly empty) -- no error, no
 	// fallback template. Task and Envelope are only referenced by
-	// prompts/lead.md today; every other template ignores them.
+	// prompts/leader.md today; every other template ignores them.
 	initialPrompt := p.Prompt
 	rendered, ok, err := RenderRolePrompt(p.Role, RolePromptVars{
 		OrgID: p.OrgID, SeatID: p.SeatID, Team: team, Role: p.Role, Scope: p.Scope,
@@ -762,37 +762,37 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 		return SpawnResult{Outcome: SpawnOutcomeFailed, Err: err}
 	}
 
-	// leadSelfSpawn is true exactly when this Spawn call's own SeatID is the
-	// lead identity itself: `ralph org start` (internal/cli/org.go's
-	// newOrgStartCmd) spawns SeatID == LeadIdentity, Role == LeadIdentity by
-	// design ("org start" = the lead-seat spawn sugar, see
+	// leaderSelfSpawn is true exactly when this Spawn call's own SeatID is the
+	// leader identity itself: `ralph org start` (internal/cli/org.go's
+	// newOrgStartCmd) spawns SeatID == LeaderIdentity, Role == LeaderIdentity by
+	// design ("org start" = the leader-seat spawn sugar, see
 	// docs/plans/active/2026-08-02-org-runtime-lead.md, "Design decisions").
-	// In that one case, the seat Join call just below IS the lead-identity
+	// In that one case, the seat Join call just below IS the leader-identity
 	// join -- there is no separate coordinating identity to announce to --
-	// so a preceding ensureLeadJoined call would just re-join the exact same
-	// identity a moment later, and a HELLO from lead announcing itself to
-	// lead would violate the star topology's single-coordinator premise
-	// (.claude/rules/ralph/agent-messaging.md: every non-lead seat addresses
-	// TO: lead; lead has no "TO: lead" of its own). Both steps are skipped
+	// so a preceding ensureLeaderJoined call would just re-join the exact same
+	// identity a moment later, and a HELLO from leader announcing itself to
+	// leader would violate the star topology's single-coordinator premise
+	// (.claude/rules/ralph/agent-messaging.md: every non-leader seat addresses
+	// TO: leader; leader has no "TO: leader" of its own). Both steps are skipped
 	// only for this case; every other --role spawn still gets both,
 	// unchanged.
-	leadSelfSpawn := p.SeatID == LeadIdentity
+	leaderSelfSpawn := p.SeatID == LeaderIdentity
 
-	var leadJoinNote string
-	if !leadSelfSpawn {
-		note, err := o.ensureLeadJoined(ctx, p, team, paneID)
+	var leaderJoinNote string
+	if !leaderSelfSpawn {
+		note, err := o.ensureLeaderJoined(ctx, p, team, paneID)
 		if err != nil {
 			return SpawnResult{Outcome: SpawnOutcomeFailed, Err: err}
 		}
-		leadJoinNote = note
+		leaderJoinNote = note
 	}
 
 	if err := o.Agmsg.Join(ctx, team, p.SeatID, agmsgTypeForDriver(p.Driver), p.Cwd); err != nil {
 		return o.failStep(p, "agmsg_join", err, paneID)
 	}
 	joinedDetails := "agmsg_joined"
-	if leadSelfSpawn {
-		joinedDetails = "agmsg_joined lead_self=true"
+	if leaderSelfSpawn {
+		joinedDetails = "agmsg_joined leader_self=true"
 	}
 	if err := o.appendEvent(ManifestEvent{
 		TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnStep,
@@ -801,20 +801,20 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 		return SpawnResult{Outcome: SpawnOutcomeFailed, Err: err}
 	}
 
-	if !leadSelfSpawn {
+	if !leaderSelfSpawn {
 		// AC-11: the HELLO body must itself be protocol.ValidateText-conformant
 		// (see TestSpawn_HelloMessage_IsProtocolConformant) -- HELLO does not
 		// require TASK_ID, so a TYPE header plus these fields alone is valid.
 		msg := fmt.Sprintf("TYPE: HELLO\nSEAT: %s\nROLE: %s\nORG_ID: %s", p.SeatID, p.Role, p.OrgID)
-		if err := o.Agmsg.Send(ctx, team, p.SeatID, LeadIdentity, msg); err != nil {
+		if err := o.Agmsg.Send(ctx, team, p.SeatID, LeaderIdentity, msg); err != nil {
 			// tech-debt (docs/tech-debt/README.md, "spawn の agmsg_announce(HELLO
 			// send)失敗パスの補償..."): the seat's own Join already succeeded by
 			// this point, so a failed HELLO announce must not leave a stale
 			// roster entry behind -- best-effort Leave it back out, and record
-			// the outcome in spawn_failed's Details alongside the lead-join note
+			// the outcome in spawn_failed's Details alongside the leader-join note
 			// so both compensation steps stay auditable from the manifest alone.
 			leaveNote := compensateLeave(o.Agmsg, team, p.SeatID)
-			return o.failStepWithNote(p, "agmsg_announce", err, paneID, fmt.Sprintf("lead_join=%s leave=%s", leadJoinNote, leaveNote))
+			return o.failStepWithNote(p, "agmsg_announce", err, paneID, fmt.Sprintf("leader_join=%s leave=%s", leaderJoinNote, leaveNote))
 		}
 		if err := o.appendEvent(ManifestEvent{
 			TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnStep,
@@ -942,54 +942,54 @@ func spawnedEventDetails(p SpawnParams, mode string) string {
 	return strings.Join(parts, " ")
 }
 
-// ensureLeadJoined best-effort join.sh's <team> lead <type> <cwd>, where
-// <type> is agmsgTypeForDriver(p.LeadDriver) (defaultLeadDriver ("claude")
-// when p.LeadDriver is unset) -- the lead identity's own driver is
+// ensureLeaderJoined best-effort join.sh's <team> leader <type> <cwd>, where
+// <type> is agmsgTypeForDriver(p.LeaderDriver) (defaultLeaderDriver ("claude")
+// when p.LeaderDriver is unset) -- the leader identity's own driver is
 // independent of this seat's Driver, so a Codex-coordinated org must not
-// register "lead" under a hardcoded claude-code type (tech-debt,
+// register "leader" under a hardcoded claude-code type (tech-debt,
 // docs/tech-debt/README.md, "lead identity is a bare 'lead' string literal
 // ... and its agmsg type is hardcoded agmsgTypeForDriver('claude')"). A
-// clean agmsg team has no "lead" identity registered yet, and agmsg's
+// clean agmsg team has no "leader" identity registered yet, and agmsg's
 // roster-based send validation rejects HELLO messages whose from/to
 // identity was never join.sh'd (agmsg #355) -- so the saga must attempt to
-// register LeadIdentity before the seat's own Join+Send that follows it in
+// register LeaderIdentity before the seat's own Join+Send that follows it in
 // Spawn. join.sh is treated as idempotent (re-joining an existing member is
-// a documented no-op/soft-fail in agmsg), so a lead-join error here does
+// a documented no-op/soft-fail in agmsg), so a leader-join error here does
 // *not* fail the saga on its own: the definitive, single-authoritative-
 // failure-point gate is the seat Join immediately after this call and,
 // ultimately, the HELLO Send -- if the roster is genuinely missing
-// LeadIdentity, Send fails and the lead-join error recorded here is carried
+// LeaderIdentity, Send fails and the leader-join error recorded here is carried
 // into that failure's Details for diagnosis (see failStepWithNote's doc
 // comment).
 //
-// The returned string is the "agmsg_lead_joined <note>" note recorded on the
+// The returned string is the "agmsg_leader_joined <note>" note recorded on the
 // step's manifest event -- "ok" on success, "error=<err>" otherwise -- so
 // Spawn can also fold it into a later failure's Details. The returned error
 // is only non-nil when appending that manifest event itself fails (a
 // manifest-write failure, not a Join failure); a Join failure is captured in
 // the returned note instead of being treated as fatal, per the doc comment
 // above.
-func (o *Org) ensureLeadJoined(ctx context.Context, p SpawnParams, team, paneID string) (string, error) {
-	leadDriver := p.LeadDriver
-	if leadDriver == "" {
-		leadDriver = defaultLeadDriver
+func (o *Org) ensureLeaderJoined(ctx context.Context, p SpawnParams, team, paneID string) (string, error) {
+	leaderDriver := p.LeaderDriver
+	if leaderDriver == "" {
+		leaderDriver = defaultLeaderDriver
 	}
-	leadJoinErr := o.Agmsg.Join(ctx, team, LeadIdentity, agmsgTypeForDriver(leadDriver), p.Cwd)
-	leadJoinNote := "ok"
-	if leadJoinErr != nil {
-		leadJoinNote = fmt.Sprintf("error=%v", leadJoinErr)
+	leaderJoinErr := o.Agmsg.Join(ctx, team, LeaderIdentity, agmsgTypeForDriver(leaderDriver), p.Cwd)
+	leaderJoinNote := "ok"
+	if leaderJoinErr != nil {
+		leaderJoinNote = fmt.Sprintf("error=%v", leaderJoinErr)
 	}
 	if err := o.appendEvent(ManifestEvent{
 		TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnStep,
-		PaneID: paneID, AgmsgTeam: team, Details: fmt.Sprintf("agmsg_lead_joined %s", leadJoinNote),
+		PaneID: paneID, AgmsgTeam: team, Details: fmt.Sprintf("agmsg_leader_joined %s", leaderJoinNote),
 	}); err != nil {
-		return leadJoinNote, err
+		return leaderJoinNote, err
 	}
-	return leadJoinNote, nil
+	return leaderJoinNote, nil
 }
 
 // agmsgTeam is the team name convention used to announce a newly spawned
-// seat to the org's lead (see plan Open questions -- provisional pending
+// seat to the org's leader (see plan Open questions -- provisional pending
 // PR②'s seat prompt design).
 func agmsgTeam(orgID string) string {
 	return fmt.Sprintf("ralph-%s", orgID)
@@ -1464,31 +1464,31 @@ func (o *Org) dryRunSpawn(p SpawnParams, mode string) SpawnResult {
 	step.Details = agentStartedDetails
 	steps = append(steps, step)
 
-	// leadSelfSpawn mirrors the same branch in Spawn (see its doc comment):
+	// leaderSelfSpawn mirrors the same branch in Spawn (see its doc comment):
 	// a dry run of `ralph org start` must simulate the same skipped
-	// agmsg_lead_joined/agmsg_announced steps a real spawn would skip, so the
+	// agmsg_leader_joined/agmsg_announced steps a real spawn would skip, so the
 	// dry-run trail stays a faithful preview of what a real spawn records.
-	leadSelfSpawn := p.SeatID == LeadIdentity
+	leaderSelfSpawn := p.SeatID == LeaderIdentity
 
-	if !leadSelfSpawn {
+	if !leaderSelfSpawn {
 		step = base
 		step.Event = EventSpawnStep
 		step.AgmsgTeam = team
-		step.Details = "agmsg_lead_joined ok"
+		step.Details = "agmsg_leader_joined ok"
 		steps = append(steps, step)
 	}
 
 	step = base
 	step.Event = EventSpawnStep
 	step.AgmsgTeam = team
-	if leadSelfSpawn {
-		step.Details = "agmsg_joined lead_self=true"
+	if leaderSelfSpawn {
+		step.Details = "agmsg_joined leader_self=true"
 	} else {
 		step.Details = "agmsg_joined"
 	}
 	steps = append(steps, step)
 
-	if !leadSelfSpawn {
+	if !leaderSelfSpawn {
 		step = base
 		step.Event = EventSpawnStep
 		step.AgmsgTeam = team
@@ -1560,8 +1560,8 @@ func (o *Org) failStep(p SpawnParams, step string, cause error, paneID string) S
 
 // failStepWithNote is failStep plus an extra free-text note appended to
 // Details. Two note-carrying callers: the agmsg_announce failure path
-// (carrying the ensureLeadJoined outcome and the agmsg_announce Leave
-// compensation forward — a missing "lead" roster entry is the most likely
+// (carrying the ensureLeaderJoined outcome and the agmsg_announce Leave
+// compensation forward — a missing "leader" roster entry is the most likely
 // root cause of a Send rejection) and the agent_start failure path
 // (carrying `agent_start_retries=N` so exhausted pane-busy retries stay
 // auditable). failStep (no note) additionally covers dryRunSpawn's

@@ -868,7 +868,7 @@ func isAllDigits(s string) bool {
 // The comparison is strict, not "at or after": every
 // timestamp in this package is RFC3339 at whole seconds (o.now()), so a
 // stop followed by a re-spawn of the same seat within one real second --
-// what a lead does when it replaces a seat, and what a scripted flow can
+// what a leader does when it replaces a seat, and what a scripted flow can
 // do in milliseconds -- can leave the PREVIOUS spawn's stop-time receipt
 // carrying the exact same second-string as the NEW spawn's own
 // spawn_started. Under an inclusive "at or after" comparison, that old

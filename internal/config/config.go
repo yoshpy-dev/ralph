@@ -25,7 +25,7 @@ type DoctorConfig struct {
 // OrgConfig holds the `[org]` envelope settings consumed by the `ralph org`
 // verb set (spawn/send/wait/read/stop/status/disband, internal/org) and by
 // `ralph doctor`. The fields are validated and stored here so later PRs
-// (seat-ification, Lead autonomy, Watchdog) build on a stable, lock-stepped
+// (seat-ification, Leader autonomy, Watchdog) build on a stable, lock-stepped
 // foundation.
 //
 // See docs/plans/active/2026-08-01-org-runtime-mechanism.md (or its archived

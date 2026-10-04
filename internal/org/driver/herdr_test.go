@@ -94,14 +94,14 @@ func TestHerdr_WorkspaceCreate(t *testing.T) {
 	f := &fakeRunner{outputs: []string{"ws-123"}}
 	h := Herdr{R: f}
 
-	got, err := h.WorkspaceCreate(context.Background(), "/tmp/cwd", "lead")
+	got, err := h.WorkspaceCreate(context.Background(), "/tmp/cwd", "leader")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got != "ws-123" {
 		t.Fatalf("want ws-123, got %q", got)
 	}
-	want := []string{"workspace", "create", "--cwd", "/tmp/cwd", "--label", "lead"}
+	want := []string{"workspace", "create", "--cwd", "/tmp/cwd", "--label", "leader"}
 	if c := f.lastCall(); c.name != "herdr" || !reflect.DeepEqual(c.args, want) {
 		t.Fatalf("argv mismatch: got name=%q args=%v, want name=herdr args=%v", c.name, c.args, want)
 	}
@@ -116,7 +116,7 @@ func TestHerdr_WorkspaceCreate_RealEnvelope(t *testing.T) {
 	f := &fakeRunner{outputs: []string{realWorkspaceCreateEnvelope}}
 	h := Herdr{R: f}
 
-	got, err := h.WorkspaceCreate(context.Background(), "/tmp/cwd", "lead")
+	got, err := h.WorkspaceCreate(context.Background(), "/tmp/cwd", "leader")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestHerdr_WorkspaceCreate_ErrorEnvelope(t *testing.T) {
 	f := &fakeRunner{outputs: []string{realErrorEnvelope}}
 	h := Herdr{R: f}
 
-	_, err := h.WorkspaceCreate(context.Background(), "/tmp/cwd", "lead")
+	_, err := h.WorkspaceCreate(context.Background(), "/tmp/cwd", "leader")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}

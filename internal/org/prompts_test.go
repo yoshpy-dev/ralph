@@ -139,54 +139,54 @@ func TestRenderRolePrompt_QA_AllKnownVarsSubstituted(t *testing.T) {
 	}
 }
 
-func TestRenderRolePrompt_Lead_AllKnownVarsSubstituted(t *testing.T) {
+func TestRenderRolePrompt_Leader_AllKnownVarsSubstituted(t *testing.T) {
 	vars := testRolePromptVars()
-	vars.Role = "lead"
-	vars.SeatID = "lead"
+	vars.Role = "leader"
+	vars.SeatID = "leader"
 	vars.Task = "dry-run 座席を1つ spawn し、typed message を送り、status を確認して disband せよ"
 	// Derive the envelope from the shipped default pool (EnvelopeSummary is
 	// what `ralph org start` renders) so this fixture never goes stale when
 	// the default model_pool changes; defaults_sync_test.go locks that
 	// default separately.
 	vars.Envelope = EnvelopeSummary(config.Default().Org)
-	text, ok, err := RenderRolePrompt("lead", vars)
+	text, ok, err := RenderRolePrompt("leader", vars)
 	if err != nil {
 		t.Fatalf("RenderRolePrompt: unexpected error: %v", err)
 	}
 	if !ok {
-		t.Fatal("expected ok=true for the built-in lead template")
+		t.Fatal("expected ok=true for the built-in leader template")
 	}
-	for _, want := range []string{"org-a", "lead", "ralph-org-a", vars.Task, vars.Envelope} {
+	for _, want := range []string{"org-a", "leader", "ralph-org-a", vars.Task, vars.Envelope} {
 		if !strings.Contains(text, want) {
-			t.Errorf("expected rendered lead prompt to contain %q, got:\n%s", want, text)
+			t.Errorf("expected rendered leader prompt to contain %q, got:\n%s", want, text)
 		}
 	}
 	if strings.Contains(text, "{{") {
 		t.Errorf("expected no unsubstituted {{...}} placeholders for known vars, got:\n%s", text)
 	}
 	if !strings.Contains(text, ".claude/rules/ralph/agent-messaging.md") {
-		t.Errorf("expected lead template to reference the protocol rule doc, got:\n%s", text)
+		t.Errorf("expected leader template to reference the protocol rule doc, got:\n%s", text)
 	}
 	if !strings.Contains(text, "/org") {
-		t.Errorf("expected lead template to reference the /org skill (its full operating manual), got:\n%s", text)
+		t.Errorf("expected leader template to reference the /org skill (its full operating manual), got:\n%s", text)
 	}
 	if !strings.Contains(text, "ralph org report") {
-		t.Errorf("expected lead template to instruct the lead to run `ralph org report` before finishing, got:\n%s", text)
+		t.Errorf("expected leader template to instruct the leader to run `ralph org report` before finishing, got:\n%s", text)
 	}
 }
 
-func TestRenderRolePrompt_Lead_EmptyTaskAndEnvelope_NoLeftoverPlaceholders(t *testing.T) {
+func TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders(t *testing.T) {
 	vars := testRolePromptVars()
-	vars.Role = "lead"
-	vars.SeatID = "lead"
+	vars.Role = "leader"
+	vars.SeatID = "leader"
 	vars.Task = ""
 	vars.Envelope = ""
-	text, ok, err := RenderRolePrompt("lead", vars)
+	text, ok, err := RenderRolePrompt("leader", vars)
 	if err != nil {
 		t.Fatalf("RenderRolePrompt: unexpected error: %v", err)
 	}
 	if !ok {
-		t.Fatal("expected ok=true for the built-in lead template")
+		t.Fatal("expected ok=true for the built-in leader template")
 	}
 	if strings.Contains(text, "{{TASK}}") || strings.Contains(text, "{{ENVELOPE}}") {
 		t.Errorf("expected no leftover {{TASK}}/{{ENVELOPE}} placeholders even when both vars are empty, got:\n%s", text)
@@ -212,29 +212,29 @@ func TestRolePrompts_SeatTemplatesContainFanOutSection(t *testing.T) {
 			if !strings.Contains(section, "max_seats") {
 				t.Errorf("expected %s template's fan-out section to mention max_seats, got section:\n%s", role, section)
 			}
-			if !strings.Contains(section, "lead") || !strings.Contains(section, "送ることは絶対に") {
-				t.Errorf("expected %s template's fan-out section to prohibit sub-agents from sending to lead, got section:\n%s", role, section)
+			if !strings.Contains(section, "leader") || !strings.Contains(section, "送ることは絶対に") {
+				t.Errorf("expected %s template's fan-out section to prohibit sub-agents from sending to leader, got section:\n%s", role, section)
 			}
 		})
 	}
 }
 
-func TestRenderRolePrompt_Lead_DelegatesToImplementer(t *testing.T) {
+func TestRenderRolePrompt_Leader_DelegatesToImplementer(t *testing.T) {
 	vars := testRolePromptVars()
-	vars.Role = "lead"
-	vars.SeatID = "lead"
-	text, ok, err := RenderRolePrompt("lead", vars)
+	vars.Role = "leader"
+	vars.SeatID = "leader"
+	text, ok, err := RenderRolePrompt("leader", vars)
 	if err != nil {
 		t.Fatalf("RenderRolePrompt: unexpected error: %v", err)
 	}
 	if !ok {
-		t.Fatal("expected ok=true for the built-in lead template")
+		t.Fatal("expected ok=true for the built-in leader template")
 	}
 	if !strings.Contains(text, "implementer") {
-		t.Errorf("expected lead template to delegate implementation to implementer seats, got:\n%s", text)
+		t.Errorf("expected leader template to delegate implementation to implementer seats, got:\n%s", text)
 	}
 	if strings.Contains(text, "budget") {
-		t.Errorf("expected lead template to no longer reference budget, got:\n%s", text)
+		t.Errorf("expected leader template to no longer reference budget, got:\n%s", text)
 	}
 }
 
