@@ -197,9 +197,9 @@ func TestRenderRolePrompt_QA_NoTemplate(t *testing.T) {
 	// The qa seat template was retired: its deterministic-gate re-run moved
 	// into the reviewer template, so "qa" is an ordinary role with no template.
 	vars := testRolePromptVars()
-	vars.Role = "qa"
-	vars.SeatID = "qa-1"
-	text, ok, err := RenderRolePrompt("qa", vars)
+	vars.Role = removedRoleName
+	vars.SeatID = removedRoleName + "-1"
+	text, ok, err := RenderRolePrompt(removedRoleName, vars)
 	if err != nil {
 		t.Fatalf("RenderRolePrompt: expected no error for the retired qa role, got %v", err)
 	}
@@ -452,12 +452,12 @@ func TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText(t *testing.T) {
 }
 
 // oldLeaderName is the coordinator's retired identifier. Tests refer to it
-// through this constant so the literal appears in one place.
+// through this constant instead of repeating the literal.
 const oldLeaderName = "lead"
 
 // removedRoleName is the seat template that was removed outright (its
 // deterministic-gate re-run moved to the reviewer role). Tests refer to it
-// through this constant so the literal appears in one place.
+// through this constant instead of repeating the literal.
 const removedRoleName = "qa"
 
 func TestRetiredRoles_RemovedRoleNamesTheReviewerAsSuccessor(t *testing.T) {
@@ -468,8 +468,8 @@ func TestRetiredRoles_RemovedRoleNamesTheReviewerAsSuccessor(t *testing.T) {
 	if r.Successor != "reviewer" {
 		t.Errorf("Successor = %q, want %q", r.Successor, "reviewer")
 	}
-	if r.Kind != RetiredRoleRemoved {
-		t.Errorf("Kind = %q, want %q", r.Kind, RetiredRoleRemoved)
+	if r.Kind != retiredRoleRemoved {
+		t.Errorf("Kind = %q, want %q", r.Kind, retiredRoleRemoved)
 	}
 }
 
@@ -481,8 +481,8 @@ func TestRetiredRoles_OldLeaderNameIsRenamedToLeaderIdentity(t *testing.T) {
 	if r.Successor != LeaderIdentity {
 		t.Errorf("Successor = %q, want %q (LeaderIdentity)", r.Successor, LeaderIdentity)
 	}
-	if r.Kind != RetiredRoleRenamed {
-		t.Errorf("Kind = %q, want %q", r.Kind, RetiredRoleRenamed)
+	if r.Kind != retiredRoleRenamed {
+		t.Errorf("Kind = %q, want %q", r.Kind, retiredRoleRenamed)
 	}
 }
 

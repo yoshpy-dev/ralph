@@ -90,38 +90,45 @@ func RenderRolePrompt(role string, vars RolePromptVars) (string, bool, error) {
 	return replacer.Replace(text), true, nil
 }
 
-// RetiredRoleKind says how a retired role name left the vocabulary.
-type RetiredRoleKind string
+// retiredRoleKind says how a retired role name left the vocabulary.
+type retiredRoleKind string
 
-// RetiredRoleRenamed marks a name that still exists under a new name: the
+// retiredRoleRenamed marks a name that still exists under a new name: the
 // old spelling is rejected wherever it is *used* (spawn --role / --id, and
 // a ralph.toml key that would otherwise be silently ignored), and the
 // message points at the successor.
-const RetiredRoleRenamed RetiredRoleKind = "renamed"
+const retiredRoleRenamed retiredRoleKind = "renamed"
 
-// RetiredRoleRemoved marks a name that was removed outright: its template is
+// retiredRoleRemoved marks a name that was removed outright: its template is
 // gone and the successor is where its duty went, not a new spelling of the
 // same role. Only `spawn --role <name>` without a --prompt is rejected (the
 // seat would start with no purpose at all, and the message points at the
 // successor and at --prompt). With a --prompt the name is an ordinary custom
 // role, so it stays a valid seat id and a valid [org.roles] /
 // [org.permissions.roles] key.
-const RetiredRoleRemoved RetiredRoleKind = "removed"
+const retiredRoleRemoved retiredRoleKind = "removed"
 
-// RetiredRole is one entry of retiredRoles: what replaced the name and how.
-type RetiredRole struct {
+// retiredRole is one entry of retiredRoles: what replaced the name and how.
+type retiredRole struct {
 	Successor string
-	Kind      RetiredRoleKind
+	Kind      retiredRoleKind
 }
 
 // retiredRoles is the single place that lists role names the runtime no
 // longer accepts, keyed by the old name (exact, case-sensitive match, like
-// the rest of the role handling). Spawn's guard (retiredRoleSpawnErr), the
-// ralph.toml key scan (RetiredRoleConfigKeys), and `ralph doctor` all read
-// this table, so adding a name here is the whole change.
-var retiredRoles = map[string]RetiredRole{
-	"lead": {Successor: LeaderIdentity, Kind: RetiredRoleRenamed},
-	"qa":   {Successor: "reviewer", Kind: RetiredRoleRemoved},
+// the rest of the role handling). Spawn's guard (RetiredRoleInputErr and
+// retiredRoleConfigErr, spawn.go), the ralph.toml key scan
+// (RetiredRoleConfigKeys), and `ralph doctor` all read this table.
+//
+// The guard's rejection messages and its seat-id rule are written for the
+// two current entries, not derived from the table: a renamed name is refused
+// as --id because the coordinator's old name was its agmsg identity (renamed
+// to leader), and a removed name's message says its deterministic-gate
+// re-run moved to the reviewer role (the removed seat's duty). Adding an
+// entry therefore means reviewing those messages and that rule as well.
+var retiredRoles = map[string]retiredRole{
+	"lead": {Successor: LeaderIdentity, Kind: retiredRoleRenamed},
+	"qa":   {Successor: "reviewer", Kind: retiredRoleRemoved},
 }
 
 // RetiredRoleConfigKey names one ralph.toml key spelled with a renamed role
@@ -150,7 +157,7 @@ type RetiredRoleConfigKey struct {
 func RetiredRoleConfigKeys(cfg config.OrgConfig) []RetiredRoleConfigKey {
 	names := make([]string, 0, len(retiredRoles))
 	for name, r := range retiredRoles {
-		if r.Kind == RetiredRoleRenamed {
+		if r.Kind == retiredRoleRenamed {
 			names = append(names, name)
 		}
 	}

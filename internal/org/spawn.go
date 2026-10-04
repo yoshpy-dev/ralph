@@ -276,36 +276,46 @@ type SpawnResult struct {
 // Spawn runs the full spawn saga described in
 // docs/plans/active/2026-08-01-org-runtime-mechanism.md. For a non-dry-run
 // call, the ordering is, in this order:
+//  0. Input-only checks (identifier shape, the joined herdr agent-name
+//     length, and RetiredRoleInputErr): pure functions of the request, run
+//     before the manifest is read, each a plain rejection with no manifest
+//     event and no receipt. They run in dry-run mode too.
 //  1. Idempotent early return: an already-spawned seat returns the existing
-//     seat with no validation attempted at all (so an at-cap org can never
-//     reject a respawn-of-active-seat retry, and a no-op retry under the
-//     default autonomous mode can never be rejected by the AC-2b scope gate
-//     below either -- see that gate's doc comment for the fix this
-//     encodes).
-//  2. Stateless envelope validation (ValidateSpawnEnvelope: driver/model
+//     seat with no config-dependent validation attempted at all (so an
+//     at-cap org can never reject a respawn-of-active-seat retry, a no-op
+//     retry under the default autonomous mode can never be rejected by the
+//     AC-2b scope gate below either -- see that gate's doc comment for the
+//     fix this encodes -- and a retired [org.roles] / [org.permissions.roles]
+//     key added after the seat was spawned cannot reject the retry).
+//  2. ralph.toml retired-key check (retiredRoleConfigErr): a plain
+//     rejection (no `rejected` event, no receipt), run before stale-seat
+//     compensation and every manifest write, so only a genuinely new spawn
+//     attempt is refused for an old key.
+//  3. Stateless envelope validation (ValidateSpawnEnvelope: driver/model
 //     pool membership, role restriction; and permissionArgsForDriver:
 //     driver + resolved permission mode) -- both are pure functions of
 //     cfg+req, run before any external side effect (including stale-seat
 //     compensation) is attempted, so an envelope-invalid request is always
 //     a pure no-op.
-//  3. AC-2b minimum control gate (the autonomous-mode --scope requirement)
+//  4. AC-2b minimum control gate (the autonomous-mode --scope requirement)
 //     -- also stateless, but checked after the idempotent return and the
 //     envelope/permission checks above so it only ever applies to a
 //     genuinely new spawn attempt.
-//  4. Stale-in-flight compensation: a stale seat (prior spawn_started/
+//  5. Stale-in-flight compensation: a stale seat (prior spawn_started/
 //     spawn_step never resolved) is best-effort compensated and the
 //     manifest re-read, so it no longer counts toward max_seats.
-//  5. Capacity validation (ValidateSpawnCapacity) against the recomputed
+//  6. Capacity validation (ValidateSpawnCapacity) against the recomputed
 //     activeSeats.
 //
 // Only then does the saga proceed to (unless DryRun) the workspace/tab/
 // agent/agmsg side effects with a spawn_started -> spawn_step* ->
 // spawned|spawn_failed manifest trail and a tri-state model receipt.
 //
-// The DryRun path (self-review Cycle-2 M-1 fix) runs steps 2, 3, and 5 in
-// the exact same order as the real path above: ValidateSpawnEnvelope, then
-// permissionArgsForDriver, then the AC-2b gate, then ValidateSpawnCapacity.
-// Steps 1 and 4 have no dry-run analogue -- dry-run events are excluded
+// The DryRun path (self-review Cycle-2 M-1 fix) runs steps 0, 2, 3, 4, and
+// 6 in the exact same order as the real path above: the input-only checks,
+// retiredRoleConfigErr, ValidateSpawnEnvelope, then permissionArgsForDriver,
+// then the AC-2b gate, then ValidateSpawnCapacity.
+// Steps 1 and 5 have no dry-run analogue -- dry-run events are excluded
 // from ActiveSeatCount/roster entirely, so there is no idempotent-respawn
 // case to short-circuit and no stale-in-flight saga to detect or
 // compensate. Because the two paths now check the same conditions in the
@@ -339,13 +349,18 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 			n, maxHerdrAgentNameLen, p.OrgID, p.SeatID,
 		)}
 	}
-	// A retired role name (retiredRoles, prompts.go: a renamed role's old
-	// name, or a removed role spawned with no --prompt) is a plain
-	// rejection too: it runs before ResolvePermissionMode and the manifest
-	// read, so neither a `rejected` event nor a receipt is written, in
-	// dry-run and real mode alike. `ralph org start` spawns through here, so
-	// it is covered by the same check.
-	if err := retiredRoleSpawnErr(o.Config, p); err != nil {
+	// A retired role name in the request (retiredRoles, prompts.go: a
+	// renamed role's old name as --role or --id, or a removed role spawned
+	// with no --prompt) is a plain rejection too, for the same reason as the
+	// identifier checks above: it is a property of the input alone. It runs
+	// before ResolvePermissionMode and the manifest read, so neither a
+	// `rejected` event nor a receipt is written, in dry-run and real mode
+	// alike. `ralph org start` spawns through here, so it is covered by the
+	// same check. The ralph.toml half of the guard (retiredRoleConfigErr)
+	// depends on the config instead and does NOT run here: it runs after the
+	// idempotent early return (real path) or first in the dry-run branch, so
+	// re-running an already-spawned seat under such a config stays a no-op.
+	if err := RetiredRoleInputErr(p.Role, p.SeatID, p.Prompt); err != nil {
 		return SpawnResult{Outcome: SpawnOutcomeRejected, Err: err}
 	}
 
@@ -380,6 +395,14 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 		// No manifest lock is needed either -- dry-run events never count
 		// toward [org].max_seats, so two concurrent dry-runs cannot race on
 		// capacity.
+		//
+		// The ralph.toml retired-key check (retiredRoleConfigErr) comes first
+		// here, as a plain rejection with no manifest event or receipt. The
+		// real path runs it right after its idempotent early return instead;
+		// dry-run has no idempotent case, so first is the matching position.
+		if err := retiredRoleConfigErr(o.Config); err != nil {
+			return SpawnResult{Outcome: SpawnOutcomeRejected, Err: err}
+		}
 		req := SpawnRequest{OrgID: p.OrgID, SeatID: p.SeatID, Role: p.Role, Driver: p.Driver, Model: p.Model}
 		if err := ValidateSpawnEnvelope(o.Config, req); err != nil {
 			return o.reject(p, err)
@@ -441,12 +464,13 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	// permArgs is set inside the locked closure below (permissionArgsForDriver's
 	// success value) and consumed after the lock releases, when Spawn builds
 	// AgentStart's agentArgs. It stays nil on any early-return path that
-	// precedes its own assignment (idempotent respawn, envelope/permission
-	// rejection) -- none of those paths ever reach the AgentStart call that
-	// would read it. The one early-return path that runs *after* the
-	// assignment -- the AC-2b scope-gate rejection just below it -- also
-	// never reaches AgentStart, so a non-nil permArgs on that path is
-	// harmless: nothing reads it once Spawn has already returned.
+	// precedes its own assignment (idempotent respawn, retired-key or
+	// envelope/permission rejection) -- none of those paths ever reach the
+	// AgentStart call that would read it. The one early-return path that
+	// runs *after* the assignment -- the AC-2b scope-gate rejection just
+	// below it -- also never reaches AgentStart, so a non-nil permArgs on
+	// that path is harmless: nothing reads it once Spawn has already
+	// returned.
 	var permArgs []string
 	// staleExisting is set inside Phase 1's locked closure when the target
 	// seat has a stale in-flight saga (a prior spawn_started/spawn_step that
@@ -465,9 +489,9 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	var spawnStartedAt time.Time
 	req := SpawnRequest{OrgID: p.OrgID, SeatID: p.SeatID, Role: p.Role, Driver: p.Driver, Model: p.Model}
 
-	// Phase 1 (locked): fresh read, idempotent/envelope/permission checks,
-	// and stale-in-flight *detection*. No herdr/agmsg call happens while
-	// this lock is held.
+	// Phase 1 (locked): fresh read, idempotent/retired-key/envelope/permission
+	// checks, and stale-in-flight *detection*. No herdr/agmsg call happens
+	// while this lock is held.
 	lockErr := withManifestLock(filepath.Dir(o.Manifest.Path()), func() error {
 		// Fresh read while holding the lock: the outer `events`/`rr` read
 		// above (taken before lock acquisition, and shared with the DryRun
@@ -496,6 +520,19 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 			// max_seats pressure at the at-cap boundary. An idempotent
 			// no-op must not be able to fail validation.
 			r := SpawnResult{Outcome: SpawnOutcomeIdempotent, Seat: *existing}
+			early = &r
+			return nil
+		}
+
+		// The ralph.toml retired-key check (retiredRoleConfigErr) runs here,
+		// right after the idempotent return and before stale-in-flight
+		// detection/compensation and every manifest write: an old key in the
+		// config must not turn a re-run of an already-spawned seat into a
+		// rejection, but it must still refuse every new spawn. It is a plain
+		// rejection like the input checks at the top of Spawn (not reject()),
+		// so no `rejected` event and no receipt are written.
+		if err := retiredRoleConfigErr(o.Config); err != nil {
+			r := SpawnResult{Outcome: SpawnOutcomeRejected, Err: err}
 			early = &r
 			return nil
 		}
@@ -915,58 +952,79 @@ func checkCapacityAndStart(o *Org, p SpawnParams, req SpawnRequest, events []Man
 	return nil, startedAt
 }
 
-// retiredRoleSpawnErr is Spawn's guard for the role names in retiredRoles
-// (prompts.go): it returns an error naming the successor when p.Role or
-// p.SeatID is a retired name in a position the table rejects, or when cfg
-// still carries a renamed name as an [org.roles] / [org.permissions.roles]
-// key; nil otherwise. Matching is exact and case-sensitive, like the rest of
+// RetiredRoleInputErr is the input half of Spawn's guard for the role names
+// in retiredRoles (prompts.go): it returns an error naming the successor
+// when role or seatID is a retired name in a position the table rejects;
+// nil otherwise. It reads only the three arguments, so it is a pure check
+// on the request, like identifier validation: Spawn runs it before the
+// manifest read, and `ralph org spawn` also runs it before the --model
+// fallback so a retired name is refused before any fallback warning or
+// model_pool error. Matching is exact and case-sensitive, like the rest of
 // the role handling.
 //
-//   - --role <renamed>: rejected whatever --prompt says, because the old name
+//   - role <renamed>: rejected whatever prompt says, because the old name
 //     used to select the coordinator's template and permission mode.
-//   - --role <removed> without --prompt: rejected, because the template is
-//     gone and the seat would start with nothing to do. With a --prompt the
+//   - role <removed> with an empty prompt: rejected, because the template is
+//     gone and the seat would start with nothing to do. With a prompt the
 //     name is an ordinary custom role and the seat starts with only that
 //     text (RenderRolePrompt finds no template for it).
-//   - --id <renamed>: rejected whatever the role or prompt, because the old
+//   - seatID <renamed>: rejected whatever the role or prompt, because the old
 //     name was the coordinator's agmsg identity -- a seat registered under it
 //     would receive the messages that a procedure written for the old
 //     binary addresses to the coordinator. A removed name was never an
-//     identity anything addresses, so --id <removed> is accepted.
-//   - ralph.toml keys (renamed names only): config.Load does not validate
-//     role names, so a key under the old name loads fine and is never read
-//     again. A `lead = "guarded"` ignored that way would run the leader with
-//     the full model_pool and with [org.permissions].default instead of the
-//     mode the key asked for, so the spawn is refused with the exact key to
-//     rename. Only spawn (and so `org start`) refuses; the other verbs and
-//     stop / disband keep working so an old org can still be cleaned up.
-func retiredRoleSpawnErr(cfg config.OrgConfig, p SpawnParams) error {
-	if r, ok := retiredRoles[p.Role]; ok && r.Kind == RetiredRoleRenamed {
-		return fmt.Errorf("org: role %q was renamed to %q: use --role %s", p.Role, r.Successor, r.Successor)
+//     identity anything addresses, so a removed name as seatID is accepted.
+//
+// The ralph.toml key half is retiredRoleConfigErr, which Spawn runs later
+// (after the idempotent early return); see its doc comment for why.
+func RetiredRoleInputErr(role, seatID, prompt string) error {
+	if r, ok := retiredRoles[role]; ok && r.Kind == retiredRoleRenamed {
+		return fmt.Errorf("org: role %q was renamed to %q: use --role %s", role, r.Successor, r.Successor)
 	}
-	if r, ok := retiredRoles[p.Role]; ok && r.Kind == RetiredRoleRemoved && p.Prompt == "" {
+	if r, ok := retiredRoles[role]; ok && r.Kind == retiredRoleRemoved && prompt == "" {
 		return fmt.Errorf("org: role %q was removed: its deterministic-gate re-run moved to the %q role; "+
 			"spawn with --role %s, or pass --prompt to run a custom %q seat",
-			p.Role, r.Successor, r.Successor, p.Role)
+			role, r.Successor, r.Successor, role)
 	}
-	if r, ok := retiredRoles[p.SeatID]; ok && r.Kind == RetiredRoleRenamed {
+	if r, ok := retiredRoles[seatID]; ok && r.Kind == retiredRoleRenamed {
 		return fmt.Errorf("org: seat id %q is retired: it was the coordinator's agmsg identity and is now %q, "+
 			"so a seat by that name would receive messages addressed by the old procedure "+
-			"(pick another --id; the coordinator itself is %q)", p.SeatID, r.Successor, r.Successor)
-	}
-	if keys := RetiredRoleConfigKeys(cfg); len(keys) > 0 {
-		old := make([]string, len(keys))
-		renamed := make([]string, len(keys))
-		for i, k := range keys {
-			old[i], renamed[i] = k.Key, k.RenameTo
-		}
-		return fmt.Errorf("org: ralph.toml has retired role key(s) %s: rename to %s "+
-			"(the old key is no longer read, so a permission mode or model list set under it "+
-			"would be silently ignored and the role would fall back to the full model_pool "+
-			"and to [org.permissions].default)",
-			strings.Join(old, ", "), strings.Join(renamed, ", "))
+			"(pick another --id; the coordinator itself is %q)", seatID, r.Successor, r.Successor)
 	}
 	return nil
+}
+
+// retiredRoleConfigErr is the ralph.toml half of Spawn's guard for the
+// names in retiredRoles: it returns an error naming every key in cfg that
+// still uses a renamed role's old name (RetiredRoleConfigKeys) and the key
+// to rename it to; nil otherwise. config.Load does not validate role names,
+// so a key under the old name loads fine and is never read again. A
+// `lead = "guarded"` ignored that way would run the leader with the full
+// model_pool and with [org.permissions].default instead of the mode the key
+// asked for, so a new spawn is refused with the exact key to rename. Only
+// spawn (and so `org start`) refuses; the other verbs and stop / disband
+// keep working so an old org can still be cleaned up.
+//
+// Unlike RetiredRoleInputErr this depends on the config rather than on the
+// request, and the config can gain such a key after a seat was spawned (an
+// org started by an older binary, or ralph.toml edited mid-org). On the
+// real path Spawn therefore runs it inside the locked closure right after
+// the idempotent early return, so re-running an already-spawned seat stays
+// a no-op; the dry-run path, which has no idempotent case, runs it first.
+func retiredRoleConfigErr(cfg config.OrgConfig) error {
+	keys := RetiredRoleConfigKeys(cfg)
+	if len(keys) == 0 {
+		return nil
+	}
+	old := make([]string, len(keys))
+	renamed := make([]string, len(keys))
+	for i, k := range keys {
+		old[i], renamed[i] = k.Key, k.RenameTo
+	}
+	return fmt.Errorf("org: ralph.toml has retired role key(s) %s: rename to %s "+
+		"(the old key is no longer read, so a permission mode or model list set under it "+
+		"would be silently ignored and the role would fall back to the full model_pool "+
+		"and to [org.permissions].default)",
+		strings.Join(old, ", "), strings.Join(renamed, ", "))
 }
 
 // autonomousScopeGateErr reports the AC-2b minimum control gate's error when

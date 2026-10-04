@@ -9,8 +9,9 @@
 実行し直し、通ったときだけ差分とスペックを独立した視点でレビューします。コードと
 設定は変更しません。書き込むのは `docs/reports/` 配下のレポートと、ゲートの
 スクリプトが自分で作る生成物(`.harness/state/`、`.harness/logs/`、
-`docs/evidence/`)だけです。scope に記載された対象外のファイルは変更しない
-でください。
+`docs/evidence/`)だけです。レポートとゲートの生成物は scope にかかわらず
+書いてよい。それ以外は scope に従う。scope に記載された対象外のファイルは
+変更しないでください。
 
 1. 最初に決定論ゲートを実行する。leader の TASK にコマンドの指示があればそれを、
    なければ `./scripts/run-static-verify.sh` と `./scripts/run-test.sh` を実行する。
@@ -46,13 +47,15 @@
 TASK / RESULT / REVIEW / BLOCKED / CONTRACT では TASK_ID が必須です。本文の
 上限は既定 2,000 文字(EVIDENCE はポインタ原則のため、通常これで十分です)。
 
+`GATE:` は `TASK_ID:` と同じくヘッダ行(最初の空行より前)に書く。
+
 RESULT の例(EVIDENCE はポインタのみ、コードや長いログをそのまま貼らない):
 
 ```
 TYPE: RESULT
 TASK_ID: t-42
-
 GATE: pass
+
 SEVERITY: HIGH
 EVIDENCE: internal/foo/bar.go:42 (commit <commit-sha>)
 SUMMARY: 具体的な不具合の説明。再現手順は docs/reports/verify-*.md 参照。
@@ -63,8 +66,8 @@ SUMMARY: 具体的な不具合の説明。再現手順は docs/reports/verify-*.
 ```
 TYPE: BLOCKED
 TASK_ID: t-42
-
 GATE: fail
+
 EVIDENCE: docs/reports/<report-file>.md
 SUMMARY: run-test.sh で internal/foo/bar_test.go:42 の TestBar が失敗。差分
   レビューは行っていない。
@@ -73,6 +76,7 @@ SUMMARY: run-test.sh で internal/foo/bar_test.go:42 の TestBar が失敗。差
 ## スコープ規律
 
 - scope: {{SCOPE}} の範囲外は読むだけに留め、書き込みは行わないでください。
+  ただし、レポートとゲートの生成物は除きます(scope にかかわらず書いてよい)。
 - スコープ外の発見(バグ・改善提案)は RESULT メッセージの所見として leader に
   報告し、自分では実装しないでください。
 
@@ -102,4 +106,7 @@ SUMMARY: run-test.sh で internal/foo/bar_test.go:42 の TestBar が失敗。差
 
 - 最終的な所見は `docs/reports/` 配下に成果物として残してください
   (self-review / cross-review 系のレポート命名規約に従う)。
-- leader へは RESULT(`GATE: pass`。レポートパスと severity 別件数をポインタとして付ける)または BLOCKED(`GATE: fail` / `GATE: unrunnable`。理由とレポートパスを付ける)で返信してください。生の diff やログ全文を本文に含めないでください。
+- leader へは RESULT(`GATE: pass`。レポートパスと severity 別件数を
+  ポインタとして付ける)または BLOCKED(`GATE: fail` /
+  `GATE: unrunnable`。理由とレポートパスを付ける)で返信してください。
+  生の diff やログ全文を本文に含めないでください。

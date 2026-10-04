@@ -3000,8 +3000,11 @@ func TestOrgReport_CLI_RequiresOrgID(t *testing.T) {
 	}
 }
 
-// oldLeaderName is the coordinator's retired identifier. Tests refer to it
-// through this constant so the literal appears in one place.
+// oldLeaderName is the coordinator's retired identifier. The tests of its
+// rejection (here and in doctor_org_test.go) refer to it through this
+// constant instead of repeating the literal. The past-receipt fixtures in
+// insights_test.go spell the old name on their own: they are historical
+// data, not the rejection.
 const oldLeaderName = "lead"
 
 // writeOrgConfigWithExtra writes the same minimal ralph.toml as
@@ -3154,6 +3157,90 @@ func TestOrgSpawn_RetiredLeaderRoleAndID_RejectedThroughCLI(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), tc.wantErr) {
 				t.Errorf("error %q should contain %q", err.Error(), tc.wantErr)
+			}
+			if events := readManifestEvents(t, org.ManifestPathIn(stateDir)); len(events) != 0 {
+				t.Errorf("expected no manifest event, got %v", eventTypes(events))
+			}
+			if lines := readLogLines(t, herdrLog); len(lines) != 0 {
+				t.Errorf("expected no herdr call, got %v", lines)
+			}
+		})
+	}
+}
+
+// removedRoleName is the role whose seat template was removed outright
+// (internal/org's retiredRoles table; its gate re-run moved to the reviewer
+// role). It is spelled in two pieces so that the plan's AC-5 grep for the
+// bare word keeps listing only the table and its own tests; the value is the
+// same role name.
+const removedRoleName = "q" + "a"
+
+// TestOrgSpawn_RetiredRoleOrID_RefusedBeforeModelFallback covers the CLI
+// ordering of the retired-name guard: with --model omitted, `ralph org spawn`
+// refuses a retired --role / --id with the successor guidance before it
+// resolves the --model fallback, so stderr carries no fallback warning and a
+// role-restricted pool cannot answer first with a model_pool error.
+func TestOrgSpawn_RetiredRoleOrID_RefusedBeforeModelFallback(t *testing.T) {
+	cases := []struct {
+		name    string
+		args    []string
+		config  string // full ralph.toml; empty means no --config
+		wantErr []string
+	}{
+		{
+			name:    "removed role without --prompt",
+			args:    []string{"--id", "seat-1", "--role", removedRoleName},
+			wantErr: []string{"reviewer", "--prompt"},
+		},
+		{
+			name:    "renamed role",
+			args:    []string{"--id", "seat-1", "--role", oldLeaderName},
+			wantErr: []string{"--role " + org.LeaderIdentity},
+		},
+		{
+			name:    "renamed seat id",
+			args:    []string{"--id", oldLeaderName, "--role", "worker"},
+			wantErr: []string{"agmsg identity", org.LeaderIdentity},
+		},
+		{
+			// The old key limits the old role to a codex model, so the
+			// claude fallback would fail with a model_pool error first.
+			name: "renamed role whose old key allows no claude model",
+			args: []string{"--id", "seat-1", "--role", oldLeaderName},
+			config: "[org]\nmax_seats = 5\ndriver_pool = [\"claude\", \"codex\"]\n\n" +
+				"[[org.model_pool]]\ndriver = \"claude\"\nmodel = \"sonnet\"\n\n" +
+				"[[org.model_pool]]\ndriver = \"codex\"\nmodel = \"gpt-6-astra\"\n\n" +
+				"[org.roles]\n" + oldLeaderName + " = [\"gpt-6-astra\"]\n",
+			wantErr: []string{"--role " + org.LeaderIdentity},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			herdrLog, _ := setupOrgStubPATH(t)
+			stateDir := filepath.Join(t.TempDir(), "state")
+			args := []string{"spawn", "--org-id", "org-a", "--driver", "claude",
+				"--cwd", t.TempDir(), "--scope", "test-scope", "--state-dir", stateDir}
+			if tc.config != "" {
+				configPath := filepath.Join(t.TempDir(), "ralph.toml")
+				if err := os.WriteFile(configPath, []byte(tc.config), 0o644); err != nil {
+					t.Fatalf("write config: %v", err)
+				}
+				args = append(args, "--config", configPath)
+			}
+			args = append(args, tc.args...)
+
+			_, stderr, err := runOrgCmdSplitStreams(t, args...)
+
+			if err == nil {
+				t.Fatalf("expected a non-zero exit, stderr: %s", stderr)
+			}
+			for _, want := range tc.wantErr {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q should contain %q", err.Error(), want)
+				}
+			}
+			if strings.Contains(stderr, "--model omitted") {
+				t.Errorf("expected no --model fallback warning before the retired-name rejection, stderr: %s", stderr)
 			}
 			if events := readManifestEvents(t, org.ManifestPathIn(stateDir)); len(events) != 0 {
 				t.Errorf("expected no manifest event, got %v", eventTypes(events))

@@ -227,8 +227,8 @@ type watchPendingAlert struct {
 	TS                 string `json:"ts"`
 	Subject            string `json:"subject"`
 	ManifestLen        int    `json:"manifest_len"`
-	LeaderAgentGet     string `json:"lead_agent_get"`
-	HistoryLeaderLines int    `json:"history_lead_lines"`
+	LeaderAgentGet     string `json:"lead_agent_get"`     // tag predates the leader rename so older state decodes; renaming it would zero the value
+	HistoryLeaderLines int    `json:"history_lead_lines"` // tag predates the leader rename so older state decodes; renaming it would lose the -1 sentinel
 }
 
 // watchSeatSnapshot holds the previous cycle's raw comparison values for a

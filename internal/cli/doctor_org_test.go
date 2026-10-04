@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/yoshpy-dev/ralph/internal/config"
+	"github.com/yoshpy-dev/ralph/internal/org"
 	"github.com/yoshpy-dev/ralph/internal/org/driver"
 )
 
@@ -1131,7 +1132,7 @@ func TestCheckCodexModelSlugs_WrongTypedUpgrade_SlugStillPresentDocStillDecodes(
 // retired name used as a role key: either table warns and names the exact
 // key and its replacement; neither passes.
 func TestCheckOrgRetiredRoleKeys(t *testing.T) {
-	const old = "lead"
+	const old = oldLeaderName
 	cases := []struct {
 		name       string
 		org        config.OrgConfig
@@ -1155,13 +1156,13 @@ func TestCheckOrgRetiredRoleKeys(t *testing.T) {
 			name:       "[org.roles] key warns",
 			org:        config.OrgConfig{Roles: map[string][]string{old: {"sonnet"}}},
 			wantStatus: "warn",
-			wantDetail: []string{"[org.roles]." + old, "[org.roles].leader"},
+			wantDetail: []string{"[org.roles]." + old, "[org.roles]." + org.LeaderIdentity},
 		},
 		{
 			name:       "[org.permissions.roles] key warns",
 			org:        config.OrgConfig{Permissions: config.OrgPermissionsConfig{Roles: map[string]string{old: "guarded"}}},
 			wantStatus: "warn",
-			wantDetail: []string{"[org.permissions.roles]." + old, "[org.permissions.roles].leader"},
+			wantDetail: []string{"[org.permissions.roles]." + old, "[org.permissions.roles]." + org.LeaderIdentity},
 		},
 		{
 			name: "both keys warn and are both named",
@@ -1206,7 +1207,7 @@ func TestRunDoctorOpts_RetiredRoleKey_WarnsWithoutFailing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(tomlPath, append(data, []byte("\n[org.permissions.roles]\nlead = \"guarded\"\n")...), 0o644); err != nil {
+	if err := os.WriteFile(tomlPath, append(data, []byte("\n[org.permissions.roles]\n"+oldLeaderName+" = \"guarded\"\n")...), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1232,7 +1233,7 @@ func TestRunDoctorOpts_RetiredRoleKey_WarnsWithoutFailing(t *testing.T) {
 		t.Fatalf("a retired-key warning must not fail doctor: %v\noutput:\n%s", runErr, out)
 	}
 	if !strings.Contains(string(out), "Org retired role keys: warn") ||
-		!strings.Contains(string(out), "[org.permissions.roles].lead") {
+		!strings.Contains(string(out), "[org.permissions.roles]."+oldLeaderName) {
 		t.Errorf("expected the retired-key warning naming the key in doctor output:\n%s", out)
 	}
 }

@@ -322,6 +322,15 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 					return fmt.Errorf("org: %s is required", flag)
 				}
 			}
+			// A retired --role / --id is refused here, before
+			// resolveModelOrWarn, so the operator sees the successor
+			// guidance instead of a --model fallback warning or a
+			// model_pool error for a role that no longer exists. Spawn runs
+			// the same check again. The ralph.toml retired-key check stays
+			// in Spawn only: it must run after Spawn's idempotent return.
+			if err := org.RetiredRoleInputErr(role, seatID, prompt); err != nil {
+				return err
+			}
 			effectiveLeaderDriver, err := resolveLeaderDriver(cmd, leaderDriver, deprecatedDriver)
 			if err != nil {
 				return err

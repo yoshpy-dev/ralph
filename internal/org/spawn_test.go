@@ -3148,3 +3148,96 @@ func TestOrgSpawn_RetiredLeaderName_ConfigKeyErrorDescribesTheRealFallback(t *te
 		t.Errorf("error %q must not claim the fallback is autonomous: [org.permissions].default decides it", msg)
 	}
 }
+
+// TestOrgSpawn_RetiredLeaderName_ConfigKeyAddedAfterSpawn_RespawnStaysIdempotent
+// pins where the ralph.toml retired-key check sits on the real path: after the
+// idempotent early return. A seat spawned before the config gained the old key
+// (an org started by an older binary, or ralph.toml edited mid-org) must
+// re-run as a no-op, while a new seat under the same config is still refused
+// with the key-rename message and nothing written to the manifest or the
+// receipts.
+func TestOrgSpawn_RetiredLeaderName_ConfigKeyAddedAfterSpawn_RespawnStaysIdempotent(t *testing.T) {
+	o, h, a := testOrg(t)
+
+	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("initial spawn failed: %+v", r)
+	}
+	o.Config.Permissions.Roles = map[string]string{oldLeaderName: "guarded"}
+
+	eventsBefore := eventNames(t, o)
+	callsBefore, sendsBefore := len(h.calls), len(a.calls)
+	rrBefore, err := o.Receipts.Read()
+	if err != nil {
+		t.Fatalf("read receipts: %v", err)
+	}
+	assertNothingWritten := func(t *testing.T) {
+		t.Helper()
+		if got := eventNames(t, o); len(got) != len(eventsBefore) {
+			t.Errorf("expected no new manifest event, before=%v after=%v", eventsBefore, got)
+		}
+		if len(h.calls) != callsBefore || len(a.calls) != sendsBefore {
+			t.Errorf("expected no new driver calls, herdr %d->%d agmsg %d->%d", callsBefore, len(h.calls), sendsBefore, len(a.calls))
+		}
+		rr, err := o.Receipts.Read()
+		if err != nil {
+			t.Fatalf("read receipts: %v", err)
+		}
+		if len(rr.Receipts) != len(rrBefore.Receipts) {
+			t.Errorf("expected no new receipt, before=%d after=%d", len(rrBefore.Receipts), len(rr.Receipts))
+		}
+	}
+
+	t.Run("re-running the spawned seat is idempotent", func(t *testing.T) {
+		result := o.Spawn(mustSpawnParams("org-a", "seat-1"))
+		if result.Outcome != SpawnOutcomeIdempotent || result.Err != nil {
+			t.Fatalf("expected SpawnOutcomeIdempotent with nil Err, got %v (err=%v)", result.Outcome, result.Err)
+		}
+		assertNothingWritten(t)
+	})
+
+	t.Run("a new seat is still rejected", func(t *testing.T) {
+		result := o.Spawn(mustSpawnParams("org-a", "seat-2"))
+		if result.Outcome != SpawnOutcomeRejected || result.Err == nil {
+			t.Fatalf("expected a rejection, got %v (err=%v)", result.Outcome, result.Err)
+		}
+		for _, want := range []string{"[org.permissions.roles]." + oldLeaderName, "[org.permissions.roles]." + LeaderIdentity} {
+			if !strings.Contains(result.Err.Error(), want) {
+				t.Errorf("error %q should contain %q", result.Err.Error(), want)
+			}
+		}
+		if result.ModelReceipt != (Receipt{}) {
+			t.Errorf("expected a zero ModelReceipt, got %+v", result.ModelReceipt)
+		}
+		assertNothingWritten(t)
+	})
+}
+
+// TestOrgSpawn_RetiredLeaderName_ConfigKey_RejectedBeforeStaleCompensation pins
+// the other side of that position: the check runs before stale-in-flight
+// compensation, so a seat with an unresolved spawn_started is neither sent
+// C-c nor marked spawn_failed when the request is refused for an old key.
+func TestOrgSpawn_RetiredLeaderName_ConfigKey_RejectedBeforeStaleCompensation(t *testing.T) {
+	o, h, a := testOrg(t)
+	if err := o.Manifest.Append(ManifestEvent{
+		TS: "2026-08-01T00:00:00Z", OrgID: "org-a", SeatID: "seat-a", Event: EventSpawnStarted,
+		Role: "worker", Driver: "claude", Model: "sonnet", PaneID: "stale-pane-1",
+	}); err != nil {
+		t.Fatalf("seed stale spawn_started: %v", err)
+	}
+	o.Config.Roles[oldLeaderName] = []string{"sonnet"}
+
+	result := o.Spawn(mustSpawnParams("org-a", "seat-a"))
+
+	if result.Outcome != SpawnOutcomeRejected || result.Err == nil {
+		t.Fatalf("expected a rejection, got %v (err=%v)", result.Outcome, result.Err)
+	}
+	if !strings.Contains(result.Err.Error(), "[org.roles]."+oldLeaderName) {
+		t.Errorf("error %q should name [org.roles].%s", result.Err.Error(), oldLeaderName)
+	}
+	if len(h.calls) != 0 || len(a.calls) != 0 || len(h.sendKeysCalls) != 0 {
+		t.Errorf("expected no driver calls and no compensation, got herdr=%v agmsg=%v sendKeys=%v", h.calls, a.calls, h.sendKeysCalls)
+	}
+	if got := eventNames(t, o); len(got) != 1 || got[0] != EventSpawnStarted {
+		t.Errorf("expected only the seeded spawn_started (no spawn_failed, no rejected), got %v", got)
+	}
+}
