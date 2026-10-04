@@ -1,6 +1,6 @@
 # subagent-model-defaults
 
-- Status: Pipeline complete (cross-review cycle 1, no findings), PR pending
+- Status: PR created (#200), awaiting CI and merge
 - Owner: Claude Code
 - Date: 2026-10-04
 - Related request: メンテナの依頼(2026-10-04)。「implementer と verifier、tester は sonnet となっているが、既定で opus で実行するようにしてほしい。reviewer と doc-maintainer は既定で sonnet にしてほしい」
@@ -119,4 +119,4 @@
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
-- [ ] PR created
+- [x] PR created
