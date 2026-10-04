@@ -19,6 +19,7 @@
 - `.claude/rules/ralph/model-routing.md`(+ template)で値を書いている箇所は 3 つ: tier 表の 2 行(11〜12 行目)、「Standard flow delegation」の「`model: sonnet` pinned in frontmatter」(23 行目)、「Escalating a judgment-heavy slice」の例「`opus` for security-sensitive changes」(50 行目)。この 3 か所は root と template で同じ。両者の差分は org runtime の節と「Where the values live」の 1 行だけで、`scripts/check-sync.sh` の KNOWN_DIFF になっている。
 - agent の `model:` の値を検査するテストはない(`tests/test-agent-phase-boundaries.sh` と `tests/test-self-review-scope.sh` は model を見ない)。`scripts/verify.local.sh` の test モードは `tests/test-*.sh` をすべて走らせ、static モードは同じファイルを shellcheck にかける。
 - 似た名前で別の仕組みのもの: `RALPH_CLAUDE_REVIEWER_MODEL`(既定 `opus`。`/cross-review` で Codex が運転するときの `claude -p` のレビュアー)、`[org].model_pool` と `[org.roles]`(org runtime の座席)、`templates/base/ralph.toml` のコメントの例 `implementer = ["sonnet"]`(org runtime の役割制限の例)。
+- `.codex/README.md` の 74 行目(+ `templates/base/.codex/README.md`、byte 一致)も implementer の tier を「the `sonnet` tier applies to the Claude Code counterpart」と書いていた。計画時の調査は `model-routing.md` だけを見ていて拾えず、/verify の D-1 で見つかった。
 
 ## Scope
 
@@ -44,6 +45,7 @@
 - `.claude/agents/implementer.md`、`verifier.md`、`tester.md`、`reviewer.md`(doc-maintainer は変更なし)
 - `templates/base/.claude/agents/` の同じ 4 ファイル
 - `.claude/rules/ralph/model-routing.md`、`templates/base/.claude/rules/ralph/model-routing.md`
+- `.codex/README.md`、`templates/base/.codex/README.md`(74 行目の implementer の説明。/verify の D-1 で追加。モデル名を書かず `model-routing.md` の tier 表を指す文に直す。両コピーは byte 一致を保つ)
 - `tests/test-agent-models.sh`(新規)
 
 ## Design decisions
@@ -56,7 +58,7 @@
 ## Acceptance criteria
 
 - [ ] AC-1: `.claude/agents/` の frontmatter が implementer `opus`、verifier `opus`、tester `opus`、reviewer `sonnet`、doc-maintainer `sonnet` になっている。template の 5 ファイルは root と byte 一致。
-- [ ] AC-2: `model-routing.md`(+ template)の tier 表が AC-1 の割り振りを示し、23 行目相当の pin の記述が `model: opus` になり、escalation の段落が新しい既定と矛盾しない(「implementer を opus に上げる」とは書かない)。tier 表から「Where the values live」の直前までは root と template で同じ文面にする(`diff` で、差分が既存の org runtime の節と「Where the values live」の 1 行だけであることを確かめる)。
+- [ ] AC-2: `model-routing.md`(+ template)の tier 表が AC-1 の割り振りを示し、23 行目相当の pin の記述が `model: opus` になり、escalation の段落が新しい既定と矛盾しない(「implementer を opus に上げる」とは書かない)。tier 表から「Where the values live」の直前までは root と template で同じ文面にする(`diff` で、差分が既存の org runtime の節と、「Where the values live」にある root だけの bullet(既存の `defaults_sync_test.go` の bullet と新しい `tests/test-agent-models.sh` の bullet)だけであることを確かめる)。
 - [ ] AC-3: `tests/test-agent-models.sh` が通る。red: root と template のそれぞれで、(a) agent の `model:` を 1 つ変える、(b) tier 表の 1 行のモデルを変える、(c) tier 表から agent 名を 1 つ消す、(d) pin の記述を旧値(`model: sonnet`)に戻す、のどれでも落ち、落ちたファイルと agent 名を出す。template 側だけを変えた場合も落ちる。
 - [ ] AC-4: `./scripts/check-sync.sh`、`./scripts/check-skill-sync.sh`、`./scripts/check-template.sh` が green。
 - [ ] AC-5: `go run ./cmd/ralph init --yes` で scratch に作った fresh scaffold の `.claude/agents/` が AC-1 の値になっている。
