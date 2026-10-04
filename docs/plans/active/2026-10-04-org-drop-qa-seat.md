@@ -167,9 +167,9 @@ org runtime の座席を、指示役(leader)・実装役(implementer)・レビ�
 
 ### qa の撤去
 
-- [ ] AC-1: `internal/org/prompts/qa.md` がなく、`RenderRolePrompt("qa", …)` が `ok=false` と空文字列を返すことをテストで検査している。
-- [ ] AC-2: reviewer 雛形のミッション節が、(a) 最初にゲート(leader の指示、なければ `run-static-verify.sh` と `run-test.sh`)を実行する、(b) `GATE: fail` なら root cause とレポートのパスを付けて BLOCKED を返し差分レビューに進まない、(c) `GATE: unrunnable` なら理由を付けて BLOCKED を返し差分レビューに進まない、(d) 通れば差分品質と受け入れ基準をレビューしてゲートの結果と合わせる、を含み、`QA 座席` を含まない。テストはミッション節だけを見る。red: 2 本のスクリプト名、`GATE: fail`、`GATE: unrunnable`、「差分レビューに進まない」の文言を 1 つずつ消すと、そのたびにテストが落ちる(mutation の結果を report に残す)。
-- [ ] AC-3: leader 雛形のミッション節が、レビューと検証を reviewer に委譲すること、`GATE: fail` を implementer に差し戻すこと、`GATE: unrunnable` は implementer に戻さず leader が直すか人に上げることを含み、`qa 座席` を含まない。red: 差し戻しの文言と `GATE: unrunnable` の扱いを 1 つずつ消すと、そのたびにテストが落ちる。
+- [x] AC-1: `internal/org/prompts/qa.md` がなく、`RenderRolePrompt("qa", …)` が `ok=false` と空文字列を返すことをテストで検査している。
+- [x] AC-2: reviewer 雛形のミッション節が、(a) 最初にゲート(leader の指示、なければ `run-static-verify.sh` と `run-test.sh`)を実行する、(b) `GATE: fail` なら root cause とレポートのパスを付けて BLOCKED を返し差分レビューに進まない、(c) `GATE: unrunnable` なら理由を付けて BLOCKED を返し差分レビューに進まない、(d) 通れば差分品質と受け入れ基準をレビューしてゲートの結果と合わせる、を含み、`QA 座席` を含まない。テストはミッション節だけを見る。red: 2 本のスクリプト名、`GATE: fail`、`GATE: unrunnable`、「差分レビューに進まない」の文言を 1 つずつ消すと、そのたびにテストが落ちる(mutation の結果を report に残す)。
+- [x] AC-3: leader 雛形のミッション節が、レビューと検証を reviewer に委譲すること、`GATE: fail` を implementer に差し戻すこと、`GATE: unrunnable` は implementer に戻さず leader が直すか人に上げることを含み、`qa 座席` を含まない。red: 差し戻しの文言と `GATE: unrunnable` の扱いを 1 つずつ消すと、そのたびにテストが落ちる。
 - [ ] AC-4: `--role qa` と空の `--prompt` の spawn は、dry-run でも実際の spawn でも拒否され、エラー文に `reviewer` と `--prompt` が含まれ、manifest と receipts に何も書かれない。`--role qa` に `--prompt` を付けると起動し、初期プロンプトは `--prompt` だけになる。いずれもテストで検査している。
 - [ ] AC-5: `git grep -n -w -i qa -- . ':!docs/plans' ':!docs/reports' ':!docs/evidence' ':!docs/research'` の結果が、次のファイルだけになる: `internal/org/prompts.go`(撤去・改名した役割の表)、`internal/org/prompts_test.go`、`internal/org/spawn_test.go`(AC-1 と AC-4 のテスト)、`internal/cli/status_test.go`(Non-goals)、`.claude/skills/org/SKILL.md` と 3 つのミラー(撤去の案内)、`docs/specs/2026-08-01-org-runtime.md`(改訂の節と履歴の記述)、`docs/tech-debt/README.md`(既存の解決済みの行と新しい行)。表を `spawn.go` に置いた場合は `prompts.go` を `spawn.go` に読み替える。
 - [ ] AC-6: `/org` skill の 4 面で、Leaded 行・fan-out の例・役割リストが 3 役割になり、reviewer の説明にゲートの再実行と `guarded` の注意が入り、`--role qa` の拒否が書かれている。
@@ -240,6 +240,8 @@ org runtime の座席を、指示役(leader)・実装役(implementer)・レビ�
 - 2026-10-04(Slice 0 の前): `internal/org/watch.go` の `watchPendingAlert` は、watch の state に `lead_agent_get` と `history_lead_lines` の JSON のタグで永続化される。Go のフィールド名(`LeadAgentGet`、`HistoryLeadLines`)は改名するが、タグは残す。移行なしにキー名を変えると、更新の前に書かれた state を読んだときに値が黙ってゼロになり、`history_lead_lines` の番兵 `-1` が失われるため。AC-12 と AC-14 では、このタグを「永続化された state のキー」として例外に数える。
 
 - 2026-10-04(Slice 0、eb30b172): implementer は gopls ではなく、単語境界の perl の置換と `gofmt -w` で改名した。`go build` / `go vet` / `go test ./...` / `run-verify.sh` が green。manifest の Details に書く診断用の文字列(`lead_self=true` → `leader_self=true`、`lead_join=` → `leader_join=`、`lead_is_anomaly_subject` → `leader_is_anomaly_subject`、`agmsg_lead_joined` → `agmsg_leader_joined`)も改名した。これらを読むのは Go のテストだけで、過去の manifest や evidence に残る旧い文字列はそのまま。コミットの trailer は、委譲先のモデルに合わせて `Claude Sonnet 5.5` になっている。
+
+- 2026-10-04(Slice A、90488a06): qa の Go のコメントもこのスライスで直した(Implementation outline の 3 を参照)。AC-2 / AC-3 の mutation は 9 通り(reviewer: 2 本のスクリプト名、`GATE: fail`、`GATE: unrunnable`、2 つの項目それぞれの「差分レビューに進まない」。leader: 「implementer 座席に差し戻」「implementer には戻さず」「`GATE: unrunnable`」)で、どれも `TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing` か `TestRenderRolePrompt_Leader_MissionRoutesGateBlocked` が落ちることを確かめ、元に戻した。
 
 ## Open questions
 
