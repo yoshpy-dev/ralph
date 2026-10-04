@@ -1,6 +1,6 @@
 # org-drop-qa-seat
 
-- Status: Pipeline at sync-docs → cross-review (self-review, verify, test: pass; PR not created)
+- Status: PR created (#201), awaiting CI and merge
 - Owner: Claude Code
 - Date: 2026-10-04
 - Related request: org runtime の役割を指示役・実装役・レビュー役の 3 つに絞り、qa 座席(役割雛形)を撤去する。qa が担っていた決定論ゲート(`run-static-verify.sh` / `run-test.sh`)の再実行は reviewer の最初の手順に移し、fail なら差分レビューに進まず BLOCKED で返す。spec FR-7 の 4 フェーズの判断を改訂する。あわせて、指示役の名前 `lead` を `leader` に改める(ユーザー: 「あと、leadはleaderに変更してください。それも計画に含めて。」)
@@ -272,4 +272,4 @@ org runtime の座席を、指示役(leader)・実装役(implementer)・レビ�
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
-- [ ] PR created
+- [x] PR created
