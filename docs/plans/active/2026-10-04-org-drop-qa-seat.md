@@ -175,7 +175,7 @@ org runtime の座席を、指示役(leader)・実装役(implementer)・レビ�
 - [x] AC-6: `/org` skill の 4 面で、Leaded 行・fan-out の例・役割リストが 3 役割になり、reviewer の説明にゲートの再実行と `guarded` の注意が入り、`--role qa` の拒否が書かれている。
 - [x] AC-7: `quality-gates.md`(root と template)の Quality pipeline gate の行が新しい順序を示し、雛形の指示で動いていることを書いている。`templates/base/ralph.toml` の `reviewer = "guarded"` の例に注記がある。`docs/tech-debt/README.md` に hook 強制の未実装の行がある。
 - [x] AC-8: spec に 2026-10-04 改訂の節があり、FR-4・FR-7・AC(74)の行に改訂の印がある。2026-09-16 改訂 (b) の「4 種」が置き換えられたことと、`lead` から `leader` への改名が改訂の節から読める。
-- [ ] AC-9: reviewer 雛形の smoke を 1 回行う。scratch のディレクトリで、展開した reviewer 雛形と、わざと落ちるゲートのコマンド(例: `sh -c 'echo "--- FAIL: TestFixture (fixture_test.go:12)"; exit 1'`)を指定した TASK を、`claude -p --model sonnet` に渡す。agmsg はないので、`ralph org send` の代わりに送るメッセージを標準出力に出すよう指示する。ゲートのコマンドだけを実行できる権限にする。合格の条件は、出力に `TYPE: BLOCKED` と `GATE: fail` があり、`SEVERITY:` の付いたレビュー所見がないこと。生の出力を test report に残す。LLM の振る舞いなので 1 回の結果は保証ではなく、Known gap として扱う。
+- [x] AC-9: reviewer 雛形の smoke を 1 回行う。scratch のディレクトリで、展開した reviewer 雛形と、わざと落ちるゲートのコマンド(例: `sh -c 'echo "--- FAIL: TestFixture (fixture_test.go:12)"; exit 1'`)を指定した TASK を、`claude -p --model sonnet` に渡す。agmsg はないので、`ralph org send` の代わりに送るメッセージを標準出力に出すよう指示する。ゲートのコマンドだけを実行できる権限にする。合格の条件は、出力に `TYPE: BLOCKED` と `GATE: fail` があり、`SEVERITY:` の付いたレビュー所見がないこと。生の出力を test report に残す。LLM の振る舞いなので 1 回の結果は保証ではなく、Known gap として扱う。
 
 ### 共通
 
@@ -249,6 +249,8 @@ org runtime の座席を、指示役(leader)・実装役(implementer)・レビ�
 
 - 2026-10-04(self-review の後): main に PR #200(サブエージェントのモデルの既定)が入ったので取り込んだ(28cc057c)。重なったのは `docs/tech-debt/README.md` の表の末尾だけで、両方の行を残した。self-review の M-1〜M-4 と L-1〜L-7 を Slice D(3f30641d)で直した。M-1 では、ralph.toml の旧キーの検査を Spawn の idempotent return の直後に移し、spawn 済みの座席の再実行は何もしないで返るようにした。L-1 では、CLI が `--role` / `--id` の旧名をモデルの fallback より前に拒否する。その後、私(orchestrator)が 2 点を直接直した。(1) CLI の事前の拒否も、Spawn の拒否と同じく stdout に `rejected:` の行を出す(テストで確認し、mutation で落ちることも確かめた)。(2) CLI テストの役割名は `"q" + "a"` と分けて書いて grep を避けていたので、文字列 `"qa"` に戻し、AC-5 の許可リストに `internal/cli/org_test.go` を足した。insight event のファイルも slug に `qa` を含むので許可リストに足した。`ralph org start` は、ralph.toml に旧キーがあると model の fallback の警告を出してから拒否する(LOW、残す)。
 
+- 2026-10-04(/test): AC-9 の smoke は 2 回実行した。1 回目は `--permission-mode dontAsk` で、モデルが `sh -c '…'; echo "exit=$?"` の後ろの `echo` を拒否され、`GATE: unrunnable` の BLOCKED を返した(雛形の項目 3 どおりだが、harness 側の都合で AC-9 の条件は満たさない)。2 回目は `--setting-sources project --strict-mcp-config --permission-mode acceptEdits --permission-prompts none --allowedTools 'Bash(sh:*)' 'Bash(echo:*)'` で、`TYPE: BLOCKED` と `GATE: fail` を返し、`SEVERITY:` はなかった。利用者の設定の Bash の allow の規則を効かせないため、設定の読み込みは project に絞った。2 回目に scratch に書かれたレポートは、ゲートの失敗を `SEVERITY: HIGH` の項目として載せていた。fail のときのレポートの書き方を雛形が決めていないための揺れで、Known gap として扱う。mutation の 34 個のうち 3 個(reviewer の「最初に」「推測で結果を上書きしない」、leader の「直ったら reviewer にもう一度ゲートから実行させる」)はテストに掛からない(Known gap)。
+
 ## Open questions
 
 - codex の `guarded` 座席が、許可を求めずにゲートのスクリプトを実行できるか。この PR では確かめず、実行できなければ R4 の `GATE: unrunnable` の経路で扱う。
@@ -269,5 +271,5 @@ org runtime の座席を、指示役(leader)・実装役(implementer)・レビ�
 - [x] Implementation started
 - [x] Review artifact created
 - [x] Verification artifact created
-- [ ] Test artifact created
+- [x] Test artifact created
 - [ ] PR created
