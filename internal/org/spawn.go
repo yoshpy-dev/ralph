@@ -261,9 +261,10 @@ type SpawnResult struct {
 	// actually succeeded, so this field never names a receipt that was
 	// never persisted. It is the zero Receipt on every path that appends no
 	// receipt at all, or whose append failed: an idempotent respawn, a
-	// pre-manifest identifier-validation rejection (reject() is never
-	// reached for those; see Spawn's own doc comment), every
-	// SpawnOutcomeFailed return, and a reject()/dryRunSpawn receipts-append
+	// plain rejection that never reaches reject() (identifier validation, a
+	// retired role name, a retired ralph.toml key; see Spawn's own doc
+	// comment), every SpawnOutcomeFailed return, and a
+	// reject()/dryRunSpawn receipts-append
 	// failure. The CLI layer reads this to decide whether to print the
 	// codex model-mismatch warning (AC-6), without re-reading the receipts
 	// file -- its gate (Honored=="false" AND a non-empty
@@ -385,21 +386,22 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 
 	if p.DryRun {
 		// Dry-run mirrors the real path's ordering exactly (self-review
-		// Cycle-2 M-1 fix): ValidateSpawnEnvelope, then
-		// permissionArgsForDriver, then the AC-2b gate, then
-		// ValidateSpawnCapacity -- the same first-cause-wins order the real
-		// path's locked closure uses below, minus the two steps that have
-		// no dry-run analogue (the idempotent early return and stale-
-		// in-flight compensation; dry-run events are excluded from
-		// ActiveSeatCount/roster entirely, so neither concept applies here).
-		// No manifest lock is needed either -- dry-run events never count
-		// toward [org].max_seats, so two concurrent dry-runs cannot race on
-		// capacity.
+		// Cycle-2 M-1 fix): retiredRoleConfigErr, then
+		// ValidateSpawnEnvelope, then permissionArgsForDriver, then the
+		// AC-2b gate, then ValidateSpawnCapacity -- the same
+		// first-cause-wins order the real path's locked closure uses below,
+		// minus the two steps that have no dry-run analogue (the idempotent
+		// early return and stale-in-flight compensation; dry-run events are
+		// excluded from ActiveSeatCount/roster entirely, so neither concept
+		// applies here). No manifest lock is needed either -- dry-run events
+		// never count toward [org].max_seats, so two concurrent dry-runs
+		// cannot race on capacity.
 		//
-		// The ralph.toml retired-key check (retiredRoleConfigErr) comes first
-		// here, as a plain rejection with no manifest event or receipt. The
-		// real path runs it right after its idempotent early return instead;
-		// dry-run has no idempotent case, so first is the matching position.
+		// The ralph.toml retired-key check (retiredRoleConfigErr) is a plain
+		// rejection with no manifest event or receipt, unlike the checks
+		// after it (those go through reject()). The real path runs it right
+		// after its idempotent early return; dry-run has no idempotent case,
+		// so first is the matching position.
 		if err := retiredRoleConfigErr(o.Config); err != nil {
 			return SpawnResult{Outcome: SpawnOutcomeRejected, Err: err}
 		}
@@ -428,10 +430,11 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(p.TimeoutMS)*time.Millisecond)
 	defer cancel()
 
-	// The idempotent/stale-in-flight-detection/envelope/permission checks,
-	// the capacity check, and the spawn_started append all run inside
-	// withManifestLock: this is the exact "read manifest -> ActiveSeatCount
-	// -> ValidateSpawn -> appendEvent" window docs/tech-debt/README.md
+	// The idempotent/retired-key/envelope/permission/AC-2b-gate checks,
+	// stale-in-flight detection, the capacity check, and the spawn_started
+	// append all run inside withManifestLock: this is the exact "read
+	// manifest -> ActiveSeatCount -> ValidateSpawn -> appendEvent" window
+	// docs/tech-debt/README.md
 	// flagged as an unlocked TOCTOU race ("max_seats is enforced across an
 	// unlocked read-then-append window"). Two concurrent Spawn calls used to
 	// be able to both observe the same activeSeats snapshot and both pass

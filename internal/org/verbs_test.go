@@ -1681,9 +1681,10 @@ func TestOrgStop_Codex_DryRunRespawnDoesNotDisplaceRealSpawnCorrelation(t *testi
 // yet -- a stale in-flight saga), followed by a retry for the SAME
 // org/seat with a DIFFERENT, out-of-pool model, which Spawn rejects via
 // ValidateSpawnEnvelope BEFORE it ever reaches the stale-in-flight
-// compensation branch (Spawn's own doc comment: step 2 runs before step
-// 4). The `rejected` event this appends carries the RETRY's own
-// Model/Driver, becoming the roster's latest SeatStatus for this seat --
+// compensation branch (Spawn's own doc comment: ValidateSpawnEnvelope runs
+// before stale-in-flight compensation). The `rejected` event this appends
+// carries the RETRY's own Model/Driver, becoming the roster's latest
+// SeatStatus for this seat --
 // but codexSpawnCorrelation still finds the ORIGINAL spawn_started
 // (rejected events are never scanned by it), so Stop's receipt must
 // compare the session record against the ORIGINAL commanded model, never

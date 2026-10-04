@@ -2790,8 +2790,8 @@ func TestOrgSpawn_Codex_DryRun_ModelReceiptUnchanged(t *testing.T) {
 // plain rejection of the coordinator's retired name: --role, --id, and the
 // two ralph.toml keys. For every case, in both dry-run and real mode, the
 // outcome is Rejected with an error that names the replacement, and the
-// guard sits ahead of the manifest and the receipts, so neither gets an
-// event (the normal reject() path would have written one of each).
+// guard sits ahead of any manifest event or receipt, so neither gets one
+// (the normal reject() path would have written one of each).
 func TestOrgSpawn_RetiredLeaderName_RejectedBeforeAnyManifestWrite(t *testing.T) {
 	cases := []struct {
 		name    string
