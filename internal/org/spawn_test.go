@@ -1219,7 +1219,7 @@ func TestOrgSpawn_RoleTemplate_PromptFlagAppendedAfterTemplate(t *testing.T) {
 	o, h, _ := testOrg(t)
 
 	p := mustSpawnParams("org-a", "seat-1")
-	p.Role = "qa"
+	p.Role = "reviewer"
 	p.Prompt = "focus on the protocol package first"
 	if r := o.Spawn(p); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("spawn failed: %+v", r)
@@ -1234,7 +1234,7 @@ func TestOrgSpawn_RoleTemplate_PromptFlagAppendedAfterTemplate(t *testing.T) {
 	}
 	fileContent := string(data)
 	if !strings.Contains(fileContent, "run-static-verify.sh") {
-		t.Fatalf("expected the qa template body in the prompt file, got:\n%s", fileContent)
+		t.Fatalf("expected the reviewer template body in the prompt file, got:\n%s", fileContent)
 	}
 	if !strings.HasSuffix(fileContent, p.Prompt) {
 		t.Fatalf("expected --prompt appended at the end of the prompt file, got:\n%s", fileContent)
@@ -1761,7 +1761,7 @@ func TestOrgSpawn_LeaderSelfSpawn_DryRun_MirrorsSameSkip(t *testing.T) {
 func TestOrgSpawn_LeaderRole_TaskAndEnvelopeSubstitutedIntoPromptFile(t *testing.T) {
 	// `ralph org start`'s Task and the org's EnvelopeSummary must both land
 	// in the leader seat's rendered prompt file (the leader.md template is long
-	// enough to always need the prompt-file path, same as reviewer/qa).
+	// enough to always need the prompt-file path, same as reviewer).
 	o, h, _ := testOrg(t)
 
 	p := mustSpawnParams("org-a", LeaderIdentity)

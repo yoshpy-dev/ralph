@@ -1,6 +1,7 @@
 package org
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -64,6 +65,86 @@ func TestMarkdownSection_AnchorsHeaderAndBoundsBody(t *testing.T) {
 	}
 }
 
+// numberedItemStart matches the start of a numbered list item ("1. ", "12. ").
+var numberedItemStart = regexp.MustCompile(`^\d+\. `)
+
+// markdownItem returns the list item of section that contains marker: the text
+// from the first line containing marker up to, but not including, the next
+// line whose trimmed form starts with "- " or with a number and ". " (the next
+// bullet or numbered item), or the end of section. found is false when marker
+// is absent. It lets a test assert that one instruction carries its own
+// wording, so a match in a neighbouring item cannot mask a regression.
+func markdownItem(section, marker string) (item string, found bool) {
+	lines := strings.Split(section, "\n")
+	start := -1
+	for i, line := range lines {
+		if strings.Contains(line, marker) {
+			start = i
+			break
+		}
+	}
+	if start < 0 {
+		return "", false
+	}
+	end := len(lines)
+	for i := start + 1; i < len(lines); i++ {
+		trimmed := strings.TrimSpace(lines[i])
+		if strings.HasPrefix(trimmed, "- ") || numberedItemStart.MatchString(trimmed) {
+			end = i
+			break
+		}
+	}
+	return strings.Join(lines[start:end], "\n"), true
+}
+
+func TestMarkdownItem_BoundsItemAtNextBulletOrNumberedItem(t *testing.T) {
+	const doc = "intro\n" +
+		"1. first item\n" +
+		"   continues here\n" +
+		"2. second item mentions MARK\n" +
+		"   - nested bullet\n" +
+		"3. third item\n" +
+		"- bullet with MARK2\n" +
+		"  wrapped line\n" +
+		"- last bullet\n" +
+		"tail MARK3\n" +
+		"more tail"
+	cases := []struct {
+		name, marker, wantItem string
+		wantFound              bool
+	}{
+		{"numbered item stops before its nested bullet", "MARK", "2. second item mentions MARK", true},
+		{"bullet keeps its wrapped continuation line", "MARK2", "- bullet with MARK2\n  wrapped line", true},
+		{"a final item runs to the end of the text", "MARK3", "tail MARK3\nmore tail", true},
+		{"an absent marker is not found", "NOPE", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			item, found := markdownItem(doc, tc.marker)
+			if found != tc.wantFound || item != tc.wantItem {
+				t.Errorf("markdownItem(doc, %q) = (%q, %v), want (%q, %v)", tc.marker, item, found, tc.wantItem, tc.wantFound)
+			}
+		})
+	}
+}
+
+// renderSeatPrompt renders the built-in template for role with the shared test
+// vars and fails the test when no template is embedded.
+func renderSeatPrompt(t *testing.T, role string) string {
+	t.Helper()
+	vars := testRolePromptVars()
+	vars.Role = role
+	vars.SeatID = role
+	text, ok, err := RenderRolePrompt(role, vars)
+	if err != nil {
+		t.Fatalf("RenderRolePrompt(%q): unexpected error: %v", role, err)
+	}
+	if !ok {
+		t.Fatalf("expected ok=true for the built-in %s template", role)
+	}
+	return text
+}
+
 func TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted(t *testing.T) {
 	text, ok, err := RenderRolePrompt("reviewer", testRolePromptVars())
 	if err != nil {
@@ -112,30 +193,21 @@ func TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted(t *testing.T) {
 	}
 }
 
-func TestRenderRolePrompt_QA_AllKnownVarsSubstituted(t *testing.T) {
+func TestRenderRolePrompt_QA_NoTemplate(t *testing.T) {
+	// The qa seat template was retired: its deterministic-gate re-run moved
+	// into the reviewer template, so "qa" is an ordinary role with no template.
 	vars := testRolePromptVars()
 	vars.Role = "qa"
 	vars.SeatID = "qa-1"
 	text, ok, err := RenderRolePrompt("qa", vars)
 	if err != nil {
-		t.Fatalf("RenderRolePrompt: unexpected error: %v", err)
+		t.Fatalf("RenderRolePrompt: expected no error for the retired qa role, got %v", err)
 	}
-	if !ok {
-		t.Fatal("expected ok=true for the built-in qa template")
+	if ok {
+		t.Fatal("expected ok=false: the qa seat template no longer exists")
 	}
-	for _, want := range []string{"org-a", "qa-1", "ralph-org-a", "qa", "internal/org/**"} {
-		if !strings.Contains(text, want) {
-			t.Errorf("expected rendered qa prompt to contain %q, got:\n%s", want, text)
-		}
-	}
-	if strings.Contains(text, "{{") {
-		t.Errorf("expected no unsubstituted {{...}} placeholders for known vars, got:\n%s", text)
-	}
-	if !strings.Contains(text, ".claude/rules/ralph/agent-messaging.md") {
-		t.Errorf("expected qa template to reference the protocol rule doc, got:\n%s", text)
-	}
-	if !strings.Contains(text, "run-static-verify.sh") || !strings.Contains(text, "run-test.sh") {
-		t.Errorf("expected qa template to reference the deterministic gate scripts, got:\n%s", text)
+	if text != "" {
+		t.Fatalf("expected empty text for the retired qa role, got %q", text)
 	}
 }
 
@@ -194,7 +266,7 @@ func TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders(t *
 }
 
 func TestRolePrompts_SeatTemplatesContainFanOutSection(t *testing.T) {
-	for _, role := range []string{"implementer", "reviewer", "qa"} {
+	for _, role := range []string{"implementer", "reviewer"} {
 		t.Run(role, func(t *testing.T) {
 			vars := testRolePromptVars()
 			vars.Role = role
@@ -235,6 +307,87 @@ func TestRenderRolePrompt_Leader_DelegatesToImplementer(t *testing.T) {
 	}
 	if strings.Contains(text, "budget") {
 		t.Errorf("expected leader template to no longer reference budget, got:\n%s", text)
+	}
+}
+
+func TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing(t *testing.T) {
+	text := renderSeatPrompt(t, "reviewer")
+	mission, found := markdownSection(text, "## ミッション")
+	if !found {
+		t.Fatalf("expected the reviewer template to contain a '## ミッション' section, got:\n%s", text)
+	}
+
+	// The default gate commands, used when the leader's TASK names none.
+	for _, want := range []string{"./scripts/run-static-verify.sh", "./scripts/run-test.sh"} {
+		if !strings.Contains(mission, want) {
+			t.Errorf("expected the reviewer mission to name the gate script %q, got section:\n%s", want, mission)
+		}
+	}
+
+	// A failing gate and an unrunnable gate each return BLOCKED and stop short
+	// of the diff review. Each is checked inside its own list item so the
+	// wording of one cannot be satisfied by the other.
+	for _, marker := range []string{"GATE: fail", "GATE: unrunnable"} {
+		item, ok := markdownItem(mission, marker)
+		if !ok {
+			t.Errorf("expected the reviewer mission to have an item for %q, got section:\n%s", marker, mission)
+			continue
+		}
+		for _, want := range []string{"BLOCKED", "差分レビューに進まない"} {
+			if !strings.Contains(item, want) {
+				t.Errorf("expected the %q item of the reviewer mission to contain %q, got item:\n%s", marker, want, item)
+			}
+		}
+	}
+
+	// A passing gate leads to the diff review and is reported in the RESULT.
+	if !strings.Contains(mission, "GATE: pass") {
+		t.Errorf("expected the reviewer mission to report GATE: pass on a passing gate, got section:\n%s", mission)
+	}
+
+	// The retired qa seat is not a collaborator any more.
+	for _, banned := range []string{"QA 座席", "qa 座席"} {
+		if strings.Contains(text, banned) {
+			t.Errorf("expected the reviewer template not to mention %q, got:\n%s", banned, text)
+		}
+	}
+}
+
+func TestRenderRolePrompt_Leader_MissionRoutesGateBlocked(t *testing.T) {
+	text := renderSeatPrompt(t, "leader")
+	mission, found := markdownSection(text, "## ミッション")
+	if !found {
+		t.Fatalf("expected the leader template to contain a '## ミッション' section, got:\n%s", text)
+	}
+
+	// Review and verification (the gate re-run included) go to the reviewer.
+	if !strings.Contains(mission, "reviewer 座席へ委譲") {
+		t.Errorf("expected the leader mission to delegate review and verification to the reviewer seat, got section:\n%s", mission)
+	}
+
+	// GATE: fail goes back to the implementer; GATE: unrunnable does not.
+	failItem, ok := markdownItem(mission, "GATE: fail")
+	if !ok {
+		t.Errorf("expected the leader mission to handle GATE: fail, got section:\n%s", mission)
+	} else if !strings.Contains(failItem, "implementer 座席に差し戻") {
+		t.Errorf("expected the GATE: fail item to send the work back to the implementer seat, got item:\n%s", failItem)
+	}
+	unrunnableItem, ok := markdownItem(mission, "GATE: unrunnable")
+	if !ok {
+		t.Errorf("expected the leader mission to handle GATE: unrunnable, got section:\n%s", mission)
+	} else {
+		for _, want := range []string{"implementer には戻さず", "人に上げる"} {
+			if !strings.Contains(unrunnableItem, want) {
+				t.Errorf("expected the GATE: unrunnable item to contain %q, got item:\n%s", want, unrunnableItem)
+			}
+		}
+	}
+
+	// The retired qa seat is not a delegation target any more.
+	for _, banned := range []string{"qa 座席", "QA 座席"} {
+		if strings.Contains(text, banned) {
+			t.Errorf("expected the leader template not to mention %q, got:\n%s", banned, text)
+		}
 	}
 }
 

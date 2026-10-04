@@ -1488,7 +1488,7 @@ func TestOrgSpawn_RoleAndScopeFlags_ExpandTemplateAndRecordScope(t *testing.T) {
 
 // TestOrgSpawn_UnknownRole_NoTemplateApplied is the CLI-level counterpart of
 // the org-package unit test: an unknown --role must not fail spawn, and the
-// herdr log must not contain the reviewer/qa template markers.
+// herdr log must not contain the reviewer template markers.
 func TestOrgSpawn_UnknownRole_NoTemplateApplied(t *testing.T) {
 	herdrLog, _ := setupOrgStubPATH(t)
 	stateDir := filepath.Join(t.TempDir(), "state")

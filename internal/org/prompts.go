@@ -36,7 +36,7 @@ type RolePromptVars struct {
 	Role   string
 	Scope  string
 	// PlanPath is not wired into any embedded template today -- none of the
-	// four templates (leader.md, implementer.md, reviewer.md, qa.md)
+	// three templates (leader.md, implementer.md, reviewer.md)
 	// reference {{PLAN_PATH}} (removed: no production caller populated it,
 	// so every rendered prompt shipped a literal "- plan: " with nothing
 	// after it -- self-review finding M5). The field is kept so a future

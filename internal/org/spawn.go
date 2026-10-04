@@ -679,7 +679,7 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	team := agmsgTeam(p.OrgID)
 
 	// AC-4: a known --role expands the embedded template (leader.md /
-	// implementer.md / reviewer.md / qa.md) into the initial prompt;
+	// implementer.md / reviewer.md) into the initial prompt;
 	// --prompt, if also given, is appended after it. An unknown role leaves
 	// initialPrompt as plain --prompt (possibly empty) -- no error, no
 	// fallback template. Task and Envelope are only referenced by
