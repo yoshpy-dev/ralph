@@ -155,7 +155,7 @@ org runtime の座席を、指示役(leader)・実装役(implementer)・レビ�
 
 - [x] AC-11: `LeaderIdentity == "leader"` で、`internal/org/prompts/leader.md` があり `lead.md` がない。`ralph org start` が seat id・役割ともに `leader` で座席を立てる(テスト)。agmsg の登録と、watchdog の ALERT の宛先が `leader` になる(テスト)。
 - [x] AC-12: `git grep -n -P 'Lead(?!e)|\blead[A-Z_]' -- '*.go'` の結果が、Slice 0 の時点で下の例外だけになる(Go の識別子に旧名が残っていない。`Leader` と `Leaded` は掛からない)。当初は `-E 'Lead($|[^e])|\blead[A-Z_]'` と書いたが、macOS の `git grep -E` では `\b` が効かず後半が何にも掛からないことが Slice 0 で分かったので、`-P` に改めた(計画の時点の確認は BSD の `grep` で行っていて、`git grep` では確かめていなかった)。Slice 0(eb30b172)で確認済み。Slice 1 以降に残ってよいのは、旧名の拒否のための識別子(非推奨フラグの変数など)だけ。例外として、watch の state に永続化される JSON のタグ `lead_agent_get` と `history_lead_lines`(`internal/org/watch.go:230-231` とそのテストのフィクスチャ)は残す(下の「実装中の逸脱」を参照)。
-- [ ] AC-13: 旧名の拒否をテストで検査している。(a) `--role lead` と `--id lead` の spawn は、`--prompt` があっても、dry-run でも拒否され、エラー文に `leader` が含まれ、manifest と receipts に何も書かれない。(b) `ralph.toml` に `[org.roles].lead` か `[org.permissions.roles].lead` があると spawn が拒否され、エラー文がキーの改名を案内する。同じ設定でも `ralph org status`、`stop`、`disband` は動く。`ralph doctor` が warn を出す。(c) `--lead-driver` は警告付きで動き、`--leader-driver` と両方に違う値を渡すとエラーになる。
+- [x] AC-13: 旧名の拒否をテストで検査している。(a) `--role lead` と `--id lead` の spawn は、`--prompt` があっても、dry-run でも拒否され、エラー文に `leader` が含まれ、manifest と receipts に何も書かれない。(b) `ralph.toml` に `[org.roles].lead` か `[org.permissions.roles].lead` があると spawn が拒否され、エラー文がキーの改名を案内する。同じ設定でも `ralph org status`、`stop`、`disband` は動く。`ralph doctor` が warn を出す。(c) `--lead-driver` は警告付きで動き、`--leader-driver` と両方に違う値を渡すとエラーになる。
 - [ ] AC-14: `git grep -n -w -i lead -- . ':!docs/plans' ':!docs/reports' ':!docs/evidence' ':!docs/research'` に残る行が、次の分類のどれかに入る。分類ごとのファイルと理由を verify の report に書く。
   - 旧名の拒否のコードとテスト(撤去・改名した役割の表、spawn の拒否、`--lead-driver` の別名、doctor の warn と、それぞれのテスト)
   - 過去のデータのフィクスチャ(`internal/insights/testdata/receipts.jsonl` と、それを読む `internal/insights/insights_test.go`、過去の receipts の形の行を作る `internal/cli/insights_test.go`)
@@ -185,8 +185,8 @@ org runtime の座席を、指示役(leader)・実装役(implementer)・レビ�
 
 1. Slice 0(implementer、sonnet): leader への改名。挙動は変えない。識別子は gopls rename、文字列とコメントは `-w` の置換、`lead.md` の `git mv`、テストの追随。`go build ./... && go test ./...`。AC-11、AC-12。1 コミット(`refactor: rename the org lead identity to leader`)。
 2. Slice 1(implementer、sonnet): 旧名 `lead` の止め方。撤去・改名した役割の表、spawn の拒否、`ralph.toml` の旧キーの拒否、`--lead-driver` の非推奨の別名、doctor の warn と、AC-13 のテスト。1 コミット(`feat: reject the old lead name with rename guidance`)。
-3. Slice A(implementer、sonnet): qa の雛形とテスト。`qa.md` の削除、`reviewer.md` と `leader.md` の書き換え、AC-1〜AC-3 のテストと mutation。テストを先に赤くしてから雛形を直す。1 コミット(`refactor: drop the qa seat template from the org runtime`)。
-4. Slice B(implementer、sonnet): `--role qa` の拒否(Slice 1 の表に足す)と AC-4 のテスト、qa の Go のコメント。1 コミット(`feat: reject --role qa without --prompt`)。
+3. Slice A(implementer、sonnet): qa の雛形とテスト。`qa.md` の削除、`reviewer.md` と `leader.md` の書き換え、AC-1〜AC-3 のテストと mutation、qa の Go のコメント(`qa.md` を消すと `spawn_test.go:1222` の連結テストが落ちるので、同じスライスで直す)。テストを先に赤くしてから雛形を直す。1 コミット(`refactor: drop the qa seat template from the org runtime`)。
+4. Slice B(implementer、sonnet): `--role qa` の拒否(Slice 1 の表に「撤去」の種類を足す)と AC-4 のテスト。あわせて、Slice 1 の設定キーのエラー文の「default, autonomous に戻る」を、`[org.permissions].default` に戻るという書き方に直す(既定を変えている人には autonomous と限らないため)。1 コミット(`feat: reject --role qa without --prompt`)。
 5. Slice C(implementer、sonnet): 文書(qa と leader の両方)。`/org` skill(`.claude` 側を直してから `./scripts/sync-skills.sh` で `.agents` 側を生成し、template の 2 面に写す)、`agent-messaging.md`、`AGENTS.md` と `AGENTS.core.md`、`README.md`、`codex-seat-permissions.md`、`quality-gates.md`、`ralph.toml` の注記、spec の改訂、tech-debt の行。1 コミット(`docs: describe the three-role org runtime and the leader rename`)。
 6. pipeline: self-review → verify → test(AC-9 の smoke を含む)→ sync-docs → cross-review → PR。
 
