@@ -13,6 +13,38 @@
 #     -c "model_reasoning_effort=${RALPH_CODEX_REASONING_EFFORT:-<default>}" \
 #     exec ... -o <file> </dev/null
 #
+# Issue #197 adds a read-only sandbox to the same lines. The project's
+# .codex/config.toml sets sandbox_mode = "danger-full-access" and
+# `codex exec` never asks for approval, so a reviewer that inherits it can
+# run whatever an instruction in the reviewed diff asks for. Every
+# invocation line must therefore also select a sandbox, and every sandbox
+# it selects must be read-only (`--sandbox read-only` for /plan's `exec`,
+# `-c sandbox_mode=read-only` for /cross-review's `exec review`, which has
+# no --sandbox flag). It must carry `--ignore-rules` (an execpolicy
+# `.rules` allow rule runs a matching command outside the sandbox), and it
+# must not name any option that widens or bypasses the sandbox or
+# approvals (see is_widening_word). These rules apply to every
+# `command codex` on a line, read the way the shell splits it into
+# arguments (see CODEX_ARGS_AWK).
+#
+# One more rule comes from codex itself. On codex-cli 0.154.0 (seen in a
+# real run during #197's /test), a -c / --config placed after the `exec`
+# subcommand (between `exec` and `review`, after `review`, or after the
+# prompt) makes codex drop every -c given before `exec`, including
+# -c sandbox_mode=read-only and the effort -c, even when the later -c is
+# unrelated (e.g. -c model_verbosity=low); the review then ran with
+# `sandbox: danger-full-access`. So nothing after `exec` may be a -c /
+# --config, or a --enable / --disable, which the help describes as
+# -c features.<name>=... (treated the same, not run-confirmed). That keeps
+# /cross-review's -c sandbox_mode=read-only a root option before `exec`.
+# /plan's `exec --sandbox read-only` is a flag, not a -c, and stays valid.
+# "After exec" means after the invocation's first subcommand word: the
+# first argument that is neither an option nor the value of a root option
+# that takes one. That word must be the literal `exec`. codex-cli 0.154.0
+# also accepts the alias `e` (`codex --help`: "exec ... [aliases: e]",
+# its only alias), and the test rejects it, so a dummy `exec` word later
+# on the line cannot stand in for the real subcommand.
+#
 # This test checks that shape holds across all four skill-body faces
 # (.claude/skills, .agents/skills, templates/base/.claude/skills,
 # templates/base/.agents/skills) and that the documented fallback values
@@ -73,8 +105,238 @@ expected_invocation_count() {
   esac
 }
 
+# is_widening_word <word>
+# Succeeds when <word> (quotes already removed) is an option that widens or
+# bypasses the sandbox or approvals. The list comes from `codex --help`,
+# `codex exec --help` and `codex exec review --help` on codex-cli 0.154.0,
+# plus options observed outside those helps (R-numbers are the probes in
+# docs/reports/self-review-2026-10-03-cross-review-codex-read-only.md):
+#   --dangerously-bypass-approvals-and-sandbox  no sandbox, no approvals
+#                       (all three helps)
+#   --yolo              hidden alias, in no help; 0.154.0 accepts it at all
+#                       three levels and it beats a read-only selection (R9)
+#   --approve-for-me    approvals go to automatic review in the
+#                       workspace-write sandbox (root and exec helps; at the
+#                       root it beats a read-only selection, R10)
+#   --full-auto         older workspace-write shortcut, in no help; 0.154.0
+#                       rejects it, listed so a codex that accepts it again
+#                       cannot slip through
+#   --add-dir           extra writable directories (root and exec helps)
+#   -a / --ask-for-approval  approval policy (root help)
+#   -p / --profile      layers a config file this test cannot see (root and
+#                       exec helps)
+#   --dangerously-bypass-hook-trust  runs hooks without persisted trust
+#                       (all three helps)
+# and the `-c` keys that set the same things: approval_policy,
+# default_permissions (R4, R5), sandbox_permissions, sandbox_workspace_write.
+is_widening_word() {
+  case "$1" in
+    --dangerously-bypass-approvals-and-sandbox|--yolo|--approve-for-me|--full-auto) return 0 ;;
+    --add-dir|--add-dir=*|-a|--ask-for-approval|--ask-for-approval=*) return 0 ;;
+    -p|--profile|--profile=*|--dangerously-bypass-hook-trust) return 0 ;;
+    *approval_policy=*|*default_permissions=*|*sandbox_permissions=*|*sandbox_workspace_write*) return 0 ;;
+  esac
+  return 1
+}
+
+# CODEX_ARGS_AWK reads one line of skill text the way sh splits it and
+# prints, for every simple command on the line that starts with
+# `command codex`, a line "@@BEGIN", each argument after `codex` on its own
+# line, then "@@END". It honours single quotes, double quotes and
+# backslashes. A command ends at an unquoted &, ;, | or backtick (the
+# backtick closes a Markdown code span). Redirections (<, >, >>, N>,
+# 2>&1, ...) and their targets are dropped, as the shell keeps them out of
+# argv, so words after `</dev/null` are still read. Leading VAR=x
+# assignments are skipped. Skill placeholders such as <scratch> are
+# replaced first so their angle brackets do not read as redirections.
+# Each argument is then normalized for matching: leftover quote characters
+# (TOML string quotes inside a -c value) are removed, blanks around = are
+# dropped, and the ends are trimmed, so -c 'sandbox_mode = "x"' reads as
+# sandbox_mode=x.
+CODEX_ARGS_AWK='
+function flush_word() {
+  if (!inword) return
+  if (skip_target) skip_target = 0
+  else toks[++ntok] = word
+  word = ""; inword = 0
+}
+function end_command(   i, start, t) {
+  flush_word()
+  start = 1
+  while (start <= ntok && toks[start] ~ /^[A-Za-z_][A-Za-z0-9_]*=/) start++
+  if (start + 1 <= ntok && toks[start] == "command" && toks[start + 1] == "codex") {
+    print "@@BEGIN"
+    for (i = start + 2; i <= ntok; i++) {
+      t = toks[i]
+      gsub("[\"\047]", "", t)
+      gsub(/[ \t]*=[ \t]*/, "=", t)
+      sub(/^[ \t]+/, "", t)
+      sub(/[ \t]+$/, "", t)
+      print t
+    }
+    print "@@END"
+  }
+  ntok = 0; skip_target = 0
+}
+{
+  s = $0
+  gsub(/<[A-Za-z][A-Za-z0-9_-]*>/, "_placeholder_", s)
+  n = length(s); word = ""; inword = 0; ntok = 0; skip_target = 0; q = ""
+  for (i = 1; i <= n; i++) {
+    c = substr(s, i, 1)
+    if (q == "\047") {
+      if (c == "\047") q = ""; else word = word c
+      continue
+    }
+    if (q == "\"") {
+      if (c == "\\" && i < n && index("\"\\$`", substr(s, i + 1, 1))) { word = word substr(s, i + 1, 1); i++; continue }
+      if (c == "\"") q = ""; else word = word c
+      continue
+    }
+    if (c == "\\" && i < n) { word = word substr(s, i + 1, 1); inword = 1; i++; continue }
+    if (c == "\047" || c == "\"") { q = c; inword = 1; continue }
+    if (c == " " || c == "\t") { flush_word(); continue }
+    if (c == "&" || c == ";" || c == "|" || c == "`") { end_command(); continue }
+    if (c == "<" || c == ">") {
+      if (inword && word ~ /^[0-9]+$/) { word = ""; inword = 0 } else flush_word()
+      while (i < n && index("<>&|", substr(s, i + 1, 1))) i++
+      skip_target = 1
+      continue
+    }
+    word = word c; inword = 1
+  }
+  end_command()
+}'
+
+# check_sandbox_tokens <label> <content>
+# Reads every `command codex` invocation on the line through CODEX_ARGS_AWK
+# and checks each one separately: (i) it selects a sandbox and every
+# selection (`--sandbox <v>`, `--sandbox=<v>`, `-s <v>`, `-s<v>`, or
+# `sandbox_mode=<v>`) has v = read-only, (ii) no argument is an option that
+# is_widening_word lists, (iii) it passes `--ignore-rules`, and (iv) its
+# first subcommand word is the literal `exec` (not the `e` alias) and
+# nothing after that word is a -c / --config / --enable / --disable or a
+# `sandbox_mode=` word (see the header: such a -c makes codex drop the
+# root -c sandbox_mode). To find the first subcommand word, options are
+# skipped, and so is the value after a root option that takes one; that
+# list is the value-taking options in `codex --help` (0.154.0). The second
+# and later invocations on a line are labelled "[codex #N]".
+check_sandbox_tokens() {
+  _sb_label="$1"
+  _sb_args="$(printf '%s\n' "$2" | awk "$CODEX_ARGS_AWK")"
+  _sb_n=0
+  _sb_count=0; _sb_bad=""; _sb_widen=""; _sb_ignore=0; _sb_prev=""
+  _sb_sub=""; _sb_has_sub=0; _sb_skipval=0; _sb_late=""
+  while IFS= read -r _sb_w; do
+    case "$_sb_w" in
+      @@BEGIN)
+        _sb_n=$((_sb_n + 1))
+        _sb_count=0; _sb_bad=""; _sb_widen=""; _sb_ignore=0; _sb_prev=""
+        _sb_sub=""; _sb_has_sub=0; _sb_skipval=0; _sb_late=""
+        continue ;;
+      @@END)
+        report_sandbox_tokens "$_sb_label" "$_sb_n" "$2"
+        continue ;;
+    esac
+    _sb_sel=0
+    _sb_v=""
+    case "$_sb_prev" in
+      --sandbox|-s) _sb_sel=1; _sb_v="$_sb_w" ;;
+    esac
+    case "$_sb_w" in
+      --sandbox=*) _sb_sel=1; _sb_v="${_sb_w#--sandbox=}" ;;
+      -s?*) _sb_sel=1; _sb_v="${_sb_w#-s}"; _sb_v="${_sb_v#=}" ;;
+      *sandbox_mode=*) _sb_sel=1; _sb_v="${_sb_w#*sandbox_mode=}" ;;
+    esac
+    if [ "$_sb_sel" = 1 ]; then
+      _sb_count=$((_sb_count + 1))
+      [ "$_sb_v" = read-only ] || _sb_bad="$_sb_bad ${_sb_v:-<empty>}"
+    fi
+    if is_widening_word "$_sb_w"; then
+      _sb_widen="$_sb_widen $_sb_w"
+    fi
+    if [ "$_sb_w" = --ignore-rules ]; then
+      _sb_ignore=1
+    fi
+    if [ "$_sb_has_sub" = 1 ]; then
+      case "$_sb_prev" in
+        -c|--config|--enable|--disable) _sb_late="$_sb_late $_sb_w" ;;
+        *)
+          case "$_sb_w" in
+            -c|-c?*|--config|--config=*|--enable|--enable=*|--disable|--disable=*|*sandbox_mode=*)
+              _sb_late="$_sb_late $_sb_w" ;;
+          esac ;;
+      esac
+    elif [ "$_sb_skipval" = 1 ]; then
+      _sb_skipval=0
+    else
+      case "$_sb_w" in
+        -c|--config|--enable|--disable|--remote|--remote-auth-token-env|-i|--image|-m|--model|--local-provider|-p|--profile|-s|--sandbox|-C|--cd|--add-dir|-a|--ask-for-approval)
+          _sb_skipval=1 ;;
+        -*) ;;
+        *) _sb_sub="$_sb_w"; _sb_has_sub=1 ;;
+      esac
+    fi
+    _sb_prev="$_sb_w"
+  done <<EOF
+$_sb_args
+EOF
+
+  if [ "$_sb_n" -eq 0 ]; then
+    fail "$_sb_label: no \`command codex\` invocation could be read from the line -- $2"
+  fi
+}
+
+# report_sandbox_tokens <label> <invocation number> <content>
+# Emits the four per-invocation results that check_sandbox_tokens gathered.
+report_sandbox_tokens() {
+  _rp_label="$1"
+  if [ "$2" -gt 1 ]; then
+    _rp_label="$1 [codex #$2]"
+  fi
+
+  if [ "$_sb_count" -eq 0 ]; then
+    fail "$_rp_label: selects no sandbox (want --sandbox read-only, or -c sandbox_mode=read-only for exec review) -- $3"
+  elif [ -n "$_sb_bad" ]; then
+    fail "$_rp_label: selects a sandbox other than read-only:$_sb_bad -- $3"
+  else
+    pass "$_rp_label: selects only the read-only sandbox ($_sb_count selection(s))"
+  fi
+
+  if [ -n "$_sb_widen" ]; then
+    fail "$_rp_label: names an option that widens or bypasses the sandbox or approvals:$_sb_widen -- $3"
+  else
+    pass "$_rp_label: names no option that widens or bypasses the sandbox or approvals"
+  fi
+
+  if [ "$_sb_ignore" = 1 ]; then
+    pass "$_rp_label: has --ignore-rules"
+  else
+    fail "$_rp_label: missing --ignore-rules -- $3"
+  fi
+
+  _rp_late_note=""
+  if [ -n "$_sb_late" ]; then
+    _rp_late_note="; it is also followed by:$_sb_late"
+  fi
+  if [ "$_sb_has_sub" = 0 ]; then
+    fail "$_rp_label: has no subcommand word (want exec), so the -c placement cannot be checked -- $3"
+  elif [ "$_sb_sub" = e ]; then
+    fail "$_rp_label: use exec, not the e alias (the -c-after-exec check anchors on the first subcommand word)$_rp_late_note -- $3"
+  elif [ "$_sb_sub" != exec ]; then
+    fail "$_rp_label: first subcommand word is '$_sb_sub', want exec$_rp_late_note -- $3"
+  elif [ -n "$_sb_late" ]; then
+    fail "$_rp_label: -c after exec would drop the root -c sandbox_mode (codex discards every root -c once a -c follows exec):$_sb_late -- $3"
+  else
+    pass "$_rp_label: no -c after exec, so codex keeps the root -c options"
+  fi
+}
+
 # check_invocation_line <face> <skill> <lineno> <content>
-# Verifies one codex-exec invocation line carries all five required tokens.
+# Verifies one codex-exec invocation line carries the five required tokens
+# from #184, then hands the #197 checks (read-only sandbox, no widening
+# option, `--ignore-rules`, no -c after `exec`) for each codex invocation
+# on the line to check_sandbox_tokens.
 check_invocation_line() {
   face="$1"; skill="$2"; lineno="$3"; content="$4"
   label="$face/$skill/SKILL.md:$lineno"
@@ -103,6 +365,8 @@ check_invocation_line() {
     *' -o '*|*'--output-last-message'*) pass "$label: has -o / --output-last-message" ;;
     *) fail "$label: missing -o / --output-last-message -- $content" ;;
   esac
+
+  check_sandbox_tokens "$label" "$content"
 }
 
 # check_fallback_values <face> <skill> <file>

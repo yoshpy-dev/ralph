@@ -17,13 +17,21 @@
 model = "gpt-5.6-sol"
 
 # Sandbox mode: danger-full-access allows unrestricted filesystem access.
-# Pair with approval_policy below to gate destructive shell calls.
+# approval_policy below sets when an interactive session asks for approval
+# before running a command (`codex --help`, --ask-for-approval). `codex exec`
+# never asks for approval, even with "on-request" (its run header shows
+# `approval: never`), so the `codex exec` calls in the /plan skill (Codex
+# plan advisory) and the /cross-review skill (codex reviewer) pass a
+# read-only sandbox explicitly.
 sandbox_mode = "danger-full-access"
 
-# approval_policy: when Codex pauses for user approval.
+# approval_policy: when an interactive Codex session pauses for user
+# approval (`codex exec` runs as "never" regardless). Values codex accepts
+# (config reference above):
 # - "never"      : autonomous (Claude Code's permission_mode = auto equivalent)
-# - "on-request" : tool asks → user approves (default for ralph)
-# - "untrusted"  : every tool call needs approval
+# - "on-request" : tool asks → user approves (ralph's default for interactive sessions)
+# - { granular = { ... } } : per-category approval prompts
+# codex-cli 0.154.0 and later reject "untrusted", and "on-failure" is deprecated.
 approval_policy = "on-request"
 
 # Web search: prefer cached results to keep runs deterministic.
@@ -60,7 +68,8 @@ approval_policy = "on-request"
 
 [profiles.review]
 # Example read-only review profile. The /cross-review skill does not use it:
-# it calls `codex exec review` with explicit -m and -c model_reasoning_effort.
+# it calls `codex exec review` with explicit -m, -c model_reasoning_effort,
+# -c sandbox_mode=read-only, and --ignore-rules.
 model = "gpt-5.6-sol"
 sandbox_mode = "read-only"
 approval_policy = "never"
