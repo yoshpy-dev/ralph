@@ -101,13 +101,14 @@
 
 - 2026-10-04 plan: Codex plan advisory(gpt-6-astra、xhigh、`sandbox: read-only`、`codex rc=0`、`-o` 1259 バイト)は MEDIUM 1: template 側の `model-routing.md` の表と pin の記述を検査する手段がない(`check-sync.sh` はファイル全体を差分許容)。メンテナの決定: plan を更新。テストを root と template の両方に当て、AC-2 に `diff` での確認、AC-3 に template 側だけの mutation を足した
 - 2026-10-04 work: Slice A は implementer に委譲(173cf76d、11 ファイル、+584 / -18、push 済み)。この session の agent 定義は main のチェックアウトから読まれるので、implementer は旧既定の sonnet で動いた。frontmatter 8 ファイル、`model-routing.md` の 2 コピー(tier 表を「Implementation and verification seats / Review and doc seats」に、変更日の注記、pin の記述、escalation の段落を「Overriding a seat's default」に)、`tests/test-agent-models.sh`(100755)。テストは 36 / 36。self-test は root と template のそれぞれで mutation (a)〜(d) と、追加の (e) `model:` なし、(f) 同じ agent が 2 行、(g) agent でない backtick 語は無視、を検出する。template だけの `model:` の変更と、agent ファイルの集合差も検出する。逸脱: (1) real tree に FAIL があるときは self-test を SKIP する(壊れた木を複製して偽の失敗を大量に出さないため。real tree 側の FAIL はそのまま出る)、(2) Co-Authored-By は実行モデルに合わせて Sonnet 5.5。手動の mutation 3 通り(root の tester、template の tester だけ、template の pin だけ)はいずれも exit 1 でファイルと agent 名を出し、戻すと 36 / 36。AC-5 の fresh scaffold は implementer・verifier・tester が opus、reviewer・doc-maintainer が sonnet、pin の記述は `model: opus`。`check-sync.sh`(DRIFTED 0、KNOWN_DIFF 5)、`check-skill-sync.sh`、`check-template.sh`、shellcheck、`RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh` green。root と template の `model-routing.md` の差分は既存の 3 hunk だけ。orchestrator も HEAD の一致、porcelain が空、テスト 36 / 36、差分を確認
+- 2026-10-04 self-review(cycle 1、9b6b491e、reviewer は新しい既定に合わせて sonnet を明示): CRITICAL 0 / HIGH 0 / MEDIUM 2 / LOW 5、merge 可。F-1(MEDIUM): tier 表の下の「2026-10-04 に変えた」という段落は template 経由で全 scaffold に出るが、新しい利用先には何から変わったのか分からず、次の変更で古くなる。F-2(MEDIUM): `check_side` が 111 行で 4 つの仕事を持ち、大域変数の共有が subshell 前提なのにコメントがない。F-3: 表の列見出しが `Examples` のままで、表が機械検査されることが「Where the values live」にない。F-4: テストの限界(pin の照合は implementer だけ、agent ファイルを消して表の行を残すと通る)がヘッダにない。F-5: self-test のない分岐(pin の記述を丸ごと消す、template だけに余分な agent、ディレクトリがない)と、両側に `model:` がないときの比較の PASS 行。F-6: `_root` と `ROOT_SIDE` の「root」が別の意味、fixture の agent 名の固定に理由がない。F-7: `chore:` は `.goreleaser.yml` の changelog から外れる。orchestrator 判断: F-1〜F-6 を Slice B で直す(F-1 は段落を両コピーから削り、変更の経緯は plan と git の履歴に残す)。F-7 はコードを変えず、PR の本文に利用先への影響を書く(merge commit の件名は changelog に残る)。逸脱: なし(段落は plan の範囲外だったので、削っても AC は変わらない)
 
 ## Progress checklist
 
 - [x] Plan reviewed
 - [x] Branch created
 - [x] Implementation started
-- [ ] Review artifact created
+- [x] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
