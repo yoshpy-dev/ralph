@@ -38,6 +38,12 @@
 # -c features.<name>=... (treated the same, not run-confirmed). That keeps
 # /cross-review's -c sandbox_mode=read-only a root option before `exec`.
 # /plan's `exec --sandbox read-only` is a flag, not a -c, and stays valid.
+# "After exec" means after the invocation's first subcommand word: the
+# first argument that is neither an option nor the value of a root option
+# that takes one. That word must be the literal `exec`. codex-cli 0.154.0
+# also accepts the alias `e` (`codex --help`: "exec ... [aliases: e]",
+# its only alias), and the test rejects it, so a dummy `exec` word later
+# on the line cannot stand in for the real subcommand.
 #
 # This test checks that shape holds across all four skill-body faces
 # (.claude/skills, .agents/skills, templates/base/.claude/skills,
@@ -207,23 +213,26 @@ function end_command(   i, start, t) {
 # and checks each one separately: (i) it selects a sandbox and every
 # selection (`--sandbox <v>`, `--sandbox=<v>`, `-s <v>`, `-s<v>`, or
 # `sandbox_mode=<v>`) has v = read-only, (ii) no argument is an option that
-# is_widening_word lists, (iii) it passes `--ignore-rules`, and (iv) it
-# has the `exec` subcommand and nothing after `exec` is a -c / --config /
-# --enable / --disable or a `sandbox_mode=` word (see the header: such a
-# -c makes codex drop the root -c sandbox_mode). The second and later
-# invocations on a line are labelled "[codex #N]".
+# is_widening_word lists, (iii) it passes `--ignore-rules`, and (iv) its
+# first subcommand word is the literal `exec` (not the `e` alias) and
+# nothing after that word is a -c / --config / --enable / --disable or a
+# `sandbox_mode=` word (see the header: such a -c makes codex drop the
+# root -c sandbox_mode). To find the first subcommand word, options are
+# skipped, and so is the value after a root option that takes one; that
+# list is the value-taking options in `codex --help` (0.154.0). The second
+# and later invocations on a line are labelled "[codex #N]".
 check_sandbox_tokens() {
   _sb_label="$1"
   _sb_args="$(printf '%s\n' "$2" | awk "$CODEX_ARGS_AWK")"
   _sb_n=0
   _sb_count=0; _sb_bad=""; _sb_widen=""; _sb_ignore=0; _sb_prev=""
-  _sb_exec=0; _sb_late=""
+  _sb_sub=""; _sb_has_sub=0; _sb_skipval=0; _sb_late=""
   while IFS= read -r _sb_w; do
     case "$_sb_w" in
       @@BEGIN)
         _sb_n=$((_sb_n + 1))
         _sb_count=0; _sb_bad=""; _sb_widen=""; _sb_ignore=0; _sb_prev=""
-        _sb_exec=0; _sb_late=""
+        _sb_sub=""; _sb_has_sub=0; _sb_skipval=0; _sb_late=""
         continue ;;
       @@END)
         report_sandbox_tokens "$_sb_label" "$_sb_n" "$2"
@@ -249,7 +258,7 @@ check_sandbox_tokens() {
     if [ "$_sb_w" = --ignore-rules ]; then
       _sb_ignore=1
     fi
-    if [ "$_sb_exec" = 1 ]; then
+    if [ "$_sb_has_sub" = 1 ]; then
       case "$_sb_prev" in
         -c|--config|--enable|--disable) _sb_late="$_sb_late $_sb_w" ;;
         *)
@@ -258,8 +267,15 @@ check_sandbox_tokens() {
               _sb_late="$_sb_late $_sb_w" ;;
           esac ;;
       esac
-    elif [ "$_sb_w" = exec ]; then
-      _sb_exec=1
+    elif [ "$_sb_skipval" = 1 ]; then
+      _sb_skipval=0
+    else
+      case "$_sb_w" in
+        -c|--config|--enable|--disable|--remote|--remote-auth-token-env|-i|--image|-m|--model|--local-provider|-p|--profile|-s|--sandbox|-C|--cd|--add-dir|-a|--ask-for-approval)
+          _sb_skipval=1 ;;
+        -*) ;;
+        *) _sb_sub="$_sb_w"; _sb_has_sub=1 ;;
+      esac
     fi
     _sb_prev="$_sb_w"
   done <<EOF
@@ -299,8 +315,16 @@ report_sandbox_tokens() {
     fail "$_rp_label: missing --ignore-rules -- $3"
   fi
 
-  if [ "$_sb_exec" = 0 ]; then
-    fail "$_rp_label: has no \`exec\` subcommand word, so the -c placement cannot be checked -- $3"
+  _rp_late_note=""
+  if [ -n "$_sb_late" ]; then
+    _rp_late_note="; it is also followed by:$_sb_late"
+  fi
+  if [ "$_sb_has_sub" = 0 ]; then
+    fail "$_rp_label: has no subcommand word (want exec), so the -c placement cannot be checked -- $3"
+  elif [ "$_sb_sub" = e ]; then
+    fail "$_rp_label: use exec, not the e alias (the -c-after-exec check anchors on the first subcommand word)$_rp_late_note -- $3"
+  elif [ "$_sb_sub" != exec ]; then
+    fail "$_rp_label: first subcommand word is '$_sb_sub', want exec$_rp_late_note -- $3"
   elif [ -n "$_sb_late" ]; then
     fail "$_rp_label: -c after exec would drop the root -c sandbox_mode (codex discards every root -c once a -c follows exec):$_sb_late -- $3"
   else
