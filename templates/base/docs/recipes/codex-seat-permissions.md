@@ -40,7 +40,7 @@ recorded in `docs/evidence/codex-seat-permissions-2026-09-18.md`.
   `--sandbox workspace-write` codex can write only to the working directory
   and to `/tmp`-style temp roots; the agmsg SQLite database
   (`~/.agents/skills/agmsg/db/`) is outside them, so a seat's `send.sh` fails
-  with `attempt to write a readonly database` and no RESULT reaches lead.
+  with `attempt to write a readonly database` and no RESULT reaches leader.
   Add to `~/.codex/config.toml`:
 
   ```toml
@@ -140,7 +140,7 @@ ralph org spawn --org-id perm-auto --id reviewer --role reviewer --driver codex 
   1. Create hello.txt in the working directory.
   2. Try to write to <throwaway path under $HOME>. If it is refused, do not
      retry and do not work around it; record the exact error text.
-  3. Send a RESULT (TYPE: RESULT, TASK_ID: t-1) to lead through the agmsg
+  3. Send a RESULT (TYPE: RESULT, TASK_ID: t-1) to leader through the agmsg
      skill's send script, with the outcome of each step.
   ```
 
@@ -179,8 +179,8 @@ ralph org spawn --org-id perm-auto --id reviewer --role reviewer --driver codex 
 
 - Expected: no approval prompt, the outside write fails with
   `operation not permitted`, and the RESULT arrives
-  (`bash ~/.agents/skills/agmsg/scripts/history.sh ralph-perm-auto lead 20`).
-  Confirm from the lead side that the `$HOME` target does not exist.
+  (`bash ~/.agents/skills/agmsg/scripts/history.sh ralph-perm-auto leader 20`).
+  Confirm from the leader side that the `$HOME` target does not exist.
 
 ### 2. edits
 

@@ -19,7 +19,7 @@ Build coding-agent workflows that are:
 This project ships two independent execution surfaces:
 
 - **development harness** — the interactive standard flow below, used for all spec/plan/work/review changes.
-- **org runtime** — autonomous multi-seat execution (`ralph org spawn/send/wait/...`) for tasks that need a coordinating `lead` plus role seats running outside a single interactive session.
+- **org runtime** — autonomous multi-seat execution (`ralph org spawn/send/wait/...`) for tasks that need a coordinating `leader` plus role seats running outside a single interactive session.
 
 The development harness:
 
