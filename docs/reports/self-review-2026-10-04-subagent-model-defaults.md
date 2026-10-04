@@ -53,3 +53,55 @@ _(orchestrator が F-2 以降を直さずに進める場合は、`docs/tech-debt
 - Merge: 可。CRITICAL と HIGH はない。MEDIUM 2 件は blocking ではない
 - Follow-ups: 直すなら F-1(2 ファイルの 3 行削除)と F-3 の見出し変更を 1 つの fix commit にまとめる。fix すると pipeline が最初から再実行されるので(cap 2 回)、その費用を払わないなら F-2〜F-6 を 1 行の tech-debt にまとめて先へ進める。F-7 は `/pr` の時点で release issue へのコメントとして出せる
 - Known gaps: test を実行していないので、POSIX 準拠は読んだ範囲の判断。実際の `/bin/sh`(dash)での挙動は /test の領分
+
+## Addendum: Slice B (de01c50f)
+
+- Date: 2026-10-04
+- Branch: chore/subagent-model-defaults(HEAD 66d1065a)
+- Reviewer: reviewer subagent (Claude)、cycle 2(既定の cap 2 回のうち 2 回目)
+- Scope: `git show de01c50f` の 3 ファイル(`.claude/rules/ralph/model-routing.md`、`templates/base/.claude/rules/ralph/model-routing.md`、`tests/test-agent-models.sh`)。diff の品質だけを見た。cycle 1 の節は書き換えていない。テストと linter は実行していない。plan の Progress notes にある「sh と dash で 47 / 47」は implementer の記録で、こちらでは確かめていない(/test の領分)
+- 以下の行番号は HEAD 66d1065a で引き直した。`tests/test-agent-models.sh` は 733 行
+
+### Evidence reviewed (addendum)
+
+- `git show de01c50f` の全 hunk と `tests/test-agent-models.sh` の全文。関数の長さは `awk` で数えた。最長は `check_cross` の 43 行、次が `self_test_side_drift` の 41 行、`check_side` は 21 行
+- `diff` で root と template の `model-routing.md` を比べた。残る差は org runtime の節 2 か所と、「Where the values live」の既存の差に root だけが足した bullet。tier 表の見出しと行は両コピーで同一(`:8`、`:11`、`:12`)
+- `git grep -n 'maintainer decision\|Seat defaults changed'`(plan と report を除く): 該当なし
+- 折り返しの探査: 「`` `model: opus` pinned in `` / `frontmatter`」と 2 行に割った入力を scratchpad に作り、checker の `tr '\n' ' ' | grep -oE` は一致し、`mut_pin` と同じ式の `sed` は何も置換しないことを確かめた
+- `.goreleaser.yml:37-39`(changelog の除外は `docs:` `test:` `chore:`)と `git log 11602fed..HEAD --format=%s`(各 commit の prefix)
+- 見ていない: test、shellcheck、`check-sync.sh` の実行結果
+
+### cycle 1 の指摘の状態
+
+| ID | 状態 | 確認したこと | 残り |
+| --- | --- | --- | --- |
+| F-1 MEDIUM | fixed | 日付つきの段落は両コピーから消えた。tier 表(`model-routing.md:8-13`)の次は「Quality is preserved」の段落になっている。`git grep` で「maintainer decision」と「Seat defaults changed」は plan と report 以外に残っていない。両コピーの表は `diff` で同一 | なし |
+| F-2 MEDIUM | fixed | `check_side`(`tests/test-agent-models.sh:125-145`)は 21 行。6 関数に分かれた: `check_side`、`check_side_inputs`(`:148`)、`tier_assignments`(`:162`)、`check_agent_models`(`:191`)、`check_one_agent`(`:209`)、`check_pin_sentence`(`:241`)。最長の `check_cross`(`:268-310`)も 43 行で 50 行未満。大域変数の共有が subshell 前提であることは banner(`:116-120`)と `run_checker` のコメント(`:312-313`)に書かれ、banner が挙げる変数の一覧は実際の共有と一致する | 小さな残りが 2 つあり、blocking ではない。(a) `check_pin_sentence` は `check_agent_models` が先に走って `_impl_model` を埋める(`:217-219`)ことに依存する。`check_side` の呼び出し順(`:142-143`)を入れ替えると、implementer に model があっても「pin sentence cannot be checked because ... has no frontmatter model」(`:247-250`)と誤った理由で落ちる。依存は 2 つの関数コメントに書かれているが、`check_side` の本体にはない。(b) `tier_assignments` は PASS / FAIL を出さない parser だが、「Checkers. They print PASS / FAIL」の banner(`:112`)の区画にある。`tier_rows`(`:89`)の隣のほうが読み違えにくい |
+| F-3 LOW | fixed | 見出しは両コピーとも `Seat group \| Model \| Agents and typical work`(`model-routing.md:8`)で、`tier_rows` のコメント(`tests/test-agent-models.sh:86`)の列名と一致する。root だけに `tests/test-agent-models.sh` の bullet が足された(`.claude/rules/ralph/model-routing.md:134-136`)。root だけにしたのは正しい: `tests/` は scaffold に出ず、bullet は既存の差の hunk の中に入っている | 小さな残りが 2 つ。行名「Implementation and verification seats」(`:11`)は、同じ行の末尾の 2 例(design trade-offs、ambiguous root-cause debugging)を表さない。bullet は表と pin の照合だけを述べ、root と template の agent model の一致検査(`check_cross`、`:268`)に触れない。どちらも読み違えにくく、直さなくてよい |
+| F-4 LOW | fixed | ヘッダの「Known limits」(`:16-23`)に 2 つ書かれた。(1) pin の照合は implementer 専用: 全文を走査する `:242` と implementer との比較(`:252-262`)に一致。(2) 表の行が agent ファイルのない語を指しても無視される: `[ -f ... ] \|\| continue`(`:177`)に一致。片側だけの削除は root-vs-template の比較が拾う、という記述も正しい(`:285-289`、`:303-306`) | 両側から agent ファイルを消して表の行を残すと通る。ヘッダは「on one side only」と限っていて正確 |
+| F-5 LOW | partially fixed | (i) pin の文を消す: (h) `:605-609`。(ii) template だけの余分な agent: (i) `:692-696`。(iii) agents ディレクトリと routing 文書がない: (j) `:640`、`:646`、`:702`。(iv) 両側で `model:` がないときの PASS 行: `check_cross` は両側が空のとき何も出さず(`:296` の `elif [ -n "$_rm" ]`)、test が PASS 行がないことを確かめる(`:669-681`) | (iii) のうち「agent が 0 件」の分岐(`:199-202`)は踏まれていない。agents/ を空にした fixture が要る。同じく踏まれない FAIL 分岐が 4 つ: 表に model つきの行がない(`:137-140`)、implementer に model がなく pin を検査できない(`:247-250`)、`emit_results` の想定外の出力(`:336`)と、FAIL 行なしの非 0 終了(`:342`)。後ろの 2 つは harness 自体の防御 |
+| F-6 LOW | fixed | `_root` は `_tree` に変わった(`:126`、`:269`)。test 内に `_root` は残っていない。`TARGET_AGENT` と `CROSS_FIXTURE_AGENT` に理由のコメントが付いた(`:37`、`:39`)。fixture の agent がないときは `require_fixture_agent`(`:380-389`)が agent 名と dir を出して落ち、`self_test_guards`(`:559-567`)がその文言を検査する。`mutate` は fixture にない path を setup FAIL にする(`:510-513`)ので、`cmp` が 2 を返して「変化なし」ガードをすり抜ける経路は閉じた | なし |
+| F-7 LOW | open(コードでは直さない方針) | 状況が少し変わった。Slice B の subject は `fix:` で、`.goreleaser.yml:37-39` の除外に掛からない。この PR が自動 changelog に出す行は、内部の `fix: split the agent model checker, ...`(出荷物の欠陥を直したものではない)とマージ commit の行になり、model の既定の変更(`chore:` の 173cf76d)は出ない。マージ commit の行 `Merge pull request #N from yoshpy-dev/chore/subagent-model-defaults` は、branch 名から話題は分かるが、opus と sonnet の入れ替えも費用への影響も伝えない。push 済みの subject は force なしでは直せない | PR の記述に加えて、手動の release issue に 1 行のコメントを足す(cycle 1 の推奨のとおり)。plan の Progress notes には PR の本文に書くとあり、release issue への経路は書かれていない |
+
+### New findings
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| N-1 LOW | maintainability | self-test の mutator が、checker の受け入れる折り返しに耐えない。checker は pin の文を改行を空白に潰してから照合し、再折り返しに強いと明記している(`:237-242`)。一方 `mut_pin`(`:487-490`)と `mut_drop_pin`(`:492-495`)は行単位の `sed` で、`` `model: opus` `` と `pinned in frontmatter` の間で改行が入ると何も置換しない。`mutate` の「変化なし」ガード(`:517-518`)が「mut_pin left ... unchanged (mutation did not apply)」で落とすので、(d) と (h) が、checker が受け入れる編集に対して赤になり、原因は setup の不具合に見える。現在の文は `model-routing.md:22-23` にあり、直前の行の長さが変わると折り返し位置が動く。(d) は cycle 1 からあるが、(h) で同じ弱点が 2 か所になった | `tests/test-agent-models.sh:237-242,487-495,517-518`、`.claude/rules/ralph/model-routing.md:22-23`。scratchpad の再現: 2 行に割った入力で checker の `grep -oE` は一致し、`sed` は変更なし | mutator を、全文の改行を空白に潰してから置換する形にする(fixture は使い捨てなので書き換えてよい)。直さないなら「Known limits」に「(d) と (h) の mutator は 1 行に収まった文を前提にする」と 1 行足す |
+
+### Positive notes (addendum)
+
+- 両コピーの `model-routing.md` の変更 hunk(見出し、段落の削除)は同一で、root だけの bullet は既存の差の hunk の中にある。template が `tests/` を指すことはない
+- `require_fixture_agent` の guard そのものを `self_test_guards` が検査している。fixture の改名が「mutation が外れた」ではなく、名指しの FAIL になる
+- 両側 `model:` なしの比較は、旧ロジックでは `both <none>` の PASS 行を出していた分岐で、新しい test(`:669-681`)は PASS 行の有無を直接見る
+- `TODO`、debug 出力、行末の空白はない。モードは `100755` のまま、shebang は隣の test と同じ
+
+### Tech debt (addendum)
+
+これは既定の cap の最後の実行なので、直されない LOW は繰り延べになる。`docs/tech-debt/README.md` は指示により触っていない。残すなら 1 行にまとめる: 「`tests/test-agent-models.sh` の踏まれない FAIL 分岐(`:137-140`、`:199-202`、`:247-250`、`:336`、`:342`)と、折り返しに弱い pin の mutator(`:487-495`)」。trigger は次にこの test か `model-routing.md` の pin の段落を編集するとき。F-7 は PR の本文と release issue のコメントで足りる。
+
+### Recommendation (addendum)
+
+- Merge: 可。CRITICAL、HIGH、MEDIUM はない。cycle 1 の MEDIUM 2 件(F-1、F-2)は直った。開いている LOW は F-5 の一部、N-1、F-7 の 3 件で、どれも blocking ではない
+- Follow-ups: F-7 は `/pr` の記述に影響を書き、release issue に 1 行コメントする。F-5 の残りと N-1 は、直すなら test だけの 1 commit で済むが、直すと pipeline が最初から再実行される(cap に達している)ので、tech-debt の 1 行か PR の known gaps に回すほうが費用に合う
+- Known gaps: test を実行していないので、POSIX 準拠と 47 / 47 は読んだ範囲の判断と implementer の記録による。dash と BSD awk での挙動は /test の領分。insight event は追記していない(commit をこの report だけにする指示のため)
