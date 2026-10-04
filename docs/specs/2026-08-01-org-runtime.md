@@ -19,7 +19,7 @@ Ralph Loop(/loop)の自律実行系を撤去し、Lead LLM が herdr(実行・�
 - (c) 指示役の識別子を `lead` から `leader` に改めた(役割名、seat id、agmsg の宛先 ID、herdr のエージェント名、雛形 `leader.md`、`--leader-driver`)。旧名は案内付きで拒否する。`--role lead` と `--id lead` の spawn は拒否し、`ralph.toml` の `[org.roles].lead` / `[org.permissions.roles].lead` があれば spawn を拒否して `ralph doctor` が warn を出す。`--lead-driver` は非推奨の別名として残す。stop / disband などは旧名を拒否しないので、古い org も片付けられる。FR-4 の identity の例の `lead` は `leader` と読み替える。
 - (d) `--role qa` は `--prompt` がなければ拒否し、reviewer を案内する。`--prompt` があれば、雛形のない独自の役割として起動する。
 - (e) FR-7 の「ゲートは hook で LLM 迂回不能とする」は未実装のまま残る(docs/tech-debt に記録)。ゲートは reviewer 雛形の指示で動く。
-- 本文の履歴の記述(Summary の「QA」、FR-4 の `lead` / `qa`、FR-7 の QA 座席、AC の QA 座席)は書き換えず、該当行に改訂の印を付ける。
+- 本文の履歴の記述(Summary の「QA」、FR-4 の `lead` / `qa`、FR-7 の QA 座席、FR-11 の QA 座席、AC の QA 座席、Open questions の QA)は書き換えず、該当行に改訂の印を付ける。
 
 ### 運用ノート: 既定 codex スラッグの更新手順(2026-09-18、issue #156)
 
@@ -63,7 +63,7 @@ Ralph Loop(/loop)の自律実行系を撤去し、Lead LLM が herdr(実行・�
 - [ ] **FR-8 Watchdog 二層**: パルス層(決定論タイマー、既定 30 秒: heartbeat 途絶 / プロセス生存 / budget / スコープ外変更 / ラウンド cap **(2026-09-16 改訂で撤去)**。ハードリミット超過は判断を経由せず自動遮断)+ ウォッチャー層(パルス層トリガーのオンデマンド LLM 判定: 意味判定トリガー検知時のみ `claude -p` を非同期 single-flight で 1 回起動し、パルスを塞がない。循環議論・役割逸脱・偽進捗の意味判定)。常駐 LLM 座席ではなくオンデマンド起動とすることで、常駐コストゼロ・判定器ハングは次回起動で回復する(PR④ `feat/org-runtime-watchdog` の設計決定、`docs/plans/active/2026-08-02-org-runtime-watchdog.md` の Design decisions 参照)。通知は Lead 宛。デッドマン条項: 異常主体が Lead 自身、または Lead が通知に N 分無応答の場合のみ人間へエスカレーション(端末 + PushNotification)。権限は PAUSE / REPLAN 要求 / 通知のみ。
 - [ ] **FR-9 監査証跡**: org manifest(`.harness/state/org/manifest.jsonl`)へ全 spawn / send / stop / disband / 遮断イベントを動詞が自動追記(Lead の自己申告に依存しない)。全イベントに `org_id`(実行単位の名前空間)/ `seat_id` / `worktree` を必須フィールド化し、`max_seats` 集計・status・disband は同一 `org_id` 内に限定する。dry-run イベントは `dry_run: true` を刻印し既定で集計から除外する。spawn は saga(`spawn_started` → `spawned` / `spawn_failed` + 補償記録)として記録する。完了時に編成履歴を `docs/reports/` へ成果物化。model receipts は `commanded_model` / `reported_effective_model` / `honored: true|false|unknown` の三値とし、`true` はドライバ観測による確認がある場合のみ記録する(codex 座席は codex の session 記録の `turn_context.model` を観測する。claude 座席は未観測で `unknown`。#165)。insights スキーマを拡張(リードタイム、初回 CI 成功率、レビュー往復数、人間介入数、座席数、停滞率)。
 - [ ] **FR-10 `/org` skill**: 動詞の使い方、編成パターン(Solo / Leaded / Parallel の型)、agmsg プロトコル、スター型規約、budget 作法 **(2026-09-16 改訂で撤去)**、役割プロンプト雛形を収録。`.agents/skills/` ミラーを `sync-skills.sh` で同期し、Codex 座席からも参照可能にする。
-- [ ] **FR-11 Ralph Loop 自律実行系の完全撤去**(段階移行なし・PR 系列の最終 PR で一括削除。**適用範囲確定(PR⑤ 計画時のユーザー確定判断)**: 撤去対象は Ralph Loop の自律実行系のみ。標準フロー開発ハーネス skill 群(`/spec` `/plan` `/work` `/self-review` `/verify` `/test` `/sync-docs` `/cross-review` `/pr`)は org runtime と並存する開発ハーネスとして存続する — org の reviewer/qa 座席がこれらの検証スクリプト/skill を実行する関係でもあるため): `ralph-orchestrator.sh`、`ralph-pipeline.sh`、loop-init、旧 shell CLI の loop 系コマンド、`/loop` スキル(4 面ミラー)、loop 系テンプレート・レシピ・rules 節、`internal/ui` の Bubble Tea TUI(ライブビューは herdr に委譲)、`internal/state` のスライス/checkpoint リーダー、`internal/action` retry/abort。`ralph status` は org manifest を読むテキスト座席ビューに書き換える。`run-static-verify.sh` / `run-test.sh` / `ralph-worktree.sh` / driver 起動ロジックは標準フロー・QA 座席・動詞側の双方で存続利用する。
+- [ ] **FR-11 Ralph Loop 自律実行系の完全撤去**(段階移行なし・PR 系列の最終 PR で一括削除。**適用範囲確定(PR⑤ 計画時のユーザー確定判断)**: 撤去対象は Ralph Loop の自律実行系のみ。標準フロー開発ハーネス skill 群(`/spec` `/plan` `/work` `/self-review` `/verify` `/test` `/sync-docs` `/cross-review` `/pr`)は org runtime と並存する開発ハーネスとして存続する — org の reviewer/qa 座席がこれらの検証スクリプト/skill を実行する関係でもあるため): `ralph-orchestrator.sh`、`ralph-pipeline.sh`、loop-init、旧 shell CLI の loop 系コマンド、`/loop` スキル(4 面ミラー)、loop 系テンプレート・レシピ・rules 節、`internal/ui` の Bubble Tea TUI(ライブビューは herdr に委譲)、`internal/state` のスライス/checkpoint リーダー、`internal/action` retry/abort。`ralph status` は org manifest を読むテキスト座席ビューに書き換える。`run-static-verify.sh` / `run-test.sh` / `ralph-worktree.sh` / driver 起動ロジックは標準フロー・QA 座席・動詞側の双方で存続利用する。 **(2026-10-04 改訂で変更: QA 座席は撤去し、ゲートのスクリプトは reviewer 座席が実行する)**
 
 ### Non-functional requirements
 
@@ -174,7 +174,7 @@ Ralph Loop(/loop)の自律実行系を撤去し、Lead LLM が herdr(実行・�
 - `ralph org` 動詞の実装言語(Go サブコマンド vs shell)— /plan で決定。
 - デッドマン条項の N 分既定値(暫定 10 分)と通知チャネルの設定面。
 - agmsg メッセージスキーマの厳密なフィールド定義(プロトコルバージョニング含む)— /plan で確定。
-- 座席の worktree 割当粒度(impl 座席のみ worktree 必須か、QA / reviewer は統合ブランチ read-only チェックアウトで足りるか)。
+- 座席の worktree 割当粒度(impl 座席のみ worktree 必須か、QA / reviewer は統合ブランチ read-only チェックアウトで足りるか)。 **(2026-10-04 改訂で QA 座席は撤去)**
 
 ## References
 

@@ -267,7 +267,7 @@ org runtime の座席を、指示役(leader)・実装役(implementer)・レビ�
 - [x] Plan reviewed
 - [x] Branch created
 - [x] Implementation started
-- [ ] Review artifact created
-- [ ] Verification artifact created
+- [x] Review artifact created
+- [x] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
