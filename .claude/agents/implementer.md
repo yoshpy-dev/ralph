@@ -2,7 +2,7 @@
 name: implementer
 description: Scoped implementation specialist executing one plan slice from a structured handoff. Does not plan, review, or widen scope.
 tools: Read, Grep, Glob, Bash, Write, Edit
-model: sonnet
+model: opus
 memory: project
 # no skills: key — the implementer has no dedicated skill; its discipline lives in .claude/skills/work/SKILL.md step 6
 ---
