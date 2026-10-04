@@ -2785,3 +2785,166 @@ func TestOrgSpawn_Codex_DryRun_ModelReceiptUnchanged(t *testing.T) {
 		t.Fatalf("expected the persisted receipt to match SpawnResult.ModelReceipt, got %+v vs %+v", rr.Receipts, result.ModelReceipt)
 	}
 }
+
+// TestOrgSpawn_RetiredLeaderName_RejectedBeforeAnyManifestWrite covers the
+// plain rejection of the coordinator's retired name: --role, --id, and the
+// two ralph.toml keys. For every case, in both dry-run and real mode, the
+// outcome is Rejected with an error that names the replacement, and the
+// guard sits ahead of the manifest and the receipts, so neither gets an
+// event (the normal reject() path would have written one of each).
+func TestOrgSpawn_RetiredLeaderName_RejectedBeforeAnyManifestWrite(t *testing.T) {
+	cases := []struct {
+		name    string
+		mutate  func(p *SpawnParams, cfg *config.OrgConfig)
+		wantErr []string
+	}{
+		{
+			name:    "role",
+			mutate:  func(p *SpawnParams, _ *config.OrgConfig) { p.Role = oldLeaderName },
+			wantErr: []string{LeaderIdentity, "--role " + LeaderIdentity},
+		},
+		{
+			name: "role with --prompt is still rejected",
+			mutate: func(p *SpawnParams, _ *config.OrgConfig) {
+				p.Role = oldLeaderName
+				p.Prompt = "a prompt does not rescue the old name"
+			},
+			wantErr: []string{LeaderIdentity, "--role " + LeaderIdentity},
+		},
+		{
+			name:    "seat id",
+			mutate:  func(p *SpawnParams, _ *config.OrgConfig) { p.SeatID = oldLeaderName },
+			wantErr: []string{LeaderIdentity, "agmsg identity"},
+		},
+		{
+			name: "seat id with role leader and --prompt is still rejected",
+			mutate: func(p *SpawnParams, _ *config.OrgConfig) {
+				p.SeatID = oldLeaderName
+				p.Role = LeaderIdentity
+				p.Prompt = "custom"
+			},
+			wantErr: []string{LeaderIdentity, "agmsg identity"},
+		},
+		{
+			name:    "[org.roles] key",
+			mutate:  func(_ *SpawnParams, cfg *config.OrgConfig) { cfg.Roles[oldLeaderName] = []string{"sonnet"} },
+			wantErr: []string{"[org.roles]." + oldLeaderName, "[org.roles]." + LeaderIdentity},
+		},
+		{
+			name: "[org.permissions.roles] key",
+			mutate: func(_ *SpawnParams, cfg *config.OrgConfig) {
+				cfg.Permissions.Roles = map[string]string{oldLeaderName: "guarded"}
+			},
+			wantErr: []string{"[org.permissions.roles]." + oldLeaderName, "[org.permissions.roles]." + LeaderIdentity},
+		},
+	}
+	for _, tc := range cases {
+		for _, dryRun := range []bool{false, true} {
+			mode := "real"
+			if dryRun {
+				mode = "dry-run"
+			}
+			t.Run(tc.name+"/"+mode, func(t *testing.T) {
+				o, h, a := testOrg(t)
+				p := mustSpawnParams("org-a", "seat-1")
+				p.DryRun = dryRun
+				tc.mutate(&p, &o.Config)
+
+				result := o.Spawn(p)
+
+				if result.Outcome != SpawnOutcomeRejected {
+					t.Fatalf("Outcome = %v, want SpawnOutcomeRejected (err=%v)", result.Outcome, result.Err)
+				}
+				if result.Err == nil {
+					t.Fatal("expected a non-nil Err so the CLI exits non-zero")
+				}
+				for _, want := range tc.wantErr {
+					if !strings.Contains(result.Err.Error(), want) {
+						t.Errorf("error %q should contain %q", result.Err.Error(), want)
+					}
+				}
+				if len(h.calls) != 0 || len(a.calls) != 0 {
+					t.Errorf("expected no driver calls, got herdr=%v agmsg=%v", h.calls, a.calls)
+				}
+				if got := eventNames(t, o); len(got) != 0 {
+					t.Errorf("expected no manifest event for the retired-name rejection, got %v", got)
+				}
+				rr, err := o.Receipts.Read()
+				if err != nil {
+					t.Fatalf("read receipts: %v", err)
+				}
+				if len(rr.Receipts) != 0 {
+					t.Errorf("expected no receipt for the retired-name rejection, got %+v", rr.Receipts)
+				}
+				if result.ModelReceipt != (Receipt{}) {
+					t.Errorf("expected a zero ModelReceipt, got %+v", result.ModelReceipt)
+				}
+			})
+		}
+	}
+}
+
+// TestOrgSpawn_RetiredLeaderName_ConfigKeyErrorNamesEveryOffendingKey pins
+// that a ralph.toml with the old key in both tables lists both, so the
+// operator renames them in one pass instead of one rejection per table.
+func TestOrgSpawn_RetiredLeaderName_ConfigKeyErrorNamesEveryOffendingKey(t *testing.T) {
+	o, _, _ := testOrg(t)
+	o.Config.Roles[oldLeaderName] = []string{"sonnet"}
+	o.Config.Permissions.Roles = map[string]string{oldLeaderName: "guarded"}
+
+	result := o.Spawn(mustSpawnParams("org-a", "seat-1"))
+
+	if result.Outcome != SpawnOutcomeRejected || result.Err == nil {
+		t.Fatalf("expected a rejection, got %+v", result)
+	}
+	for _, want := range []string{"[org.roles]." + oldLeaderName, "[org.permissions.roles]." + oldLeaderName} {
+		if !strings.Contains(result.Err.Error(), want) {
+			t.Errorf("error %q should name %q", result.Err.Error(), want)
+		}
+	}
+}
+
+// TestOrgSpawn_RetiredLeaderName_CaseSensitive pins that the guard compares
+// exactly, like the rest of the role handling: an upper-case spelling is a
+// different (unknown) role and spawns normally.
+func TestOrgSpawn_RetiredLeaderName_CaseSensitive(t *testing.T) {
+	for _, dryRun := range []bool{false, true} {
+		mode := "real"
+		if dryRun {
+			mode = "dry-run"
+		}
+		t.Run(mode, func(t *testing.T) {
+			o, _, _ := testOrg(t)
+			p := mustSpawnParams("org-a", "seat-1")
+			p.DryRun = dryRun
+			p.Role = strings.ToUpper(oldLeaderName[:1]) + oldLeaderName[1:]
+
+			result := o.Spawn(p)
+
+			if result.Outcome != SpawnOutcomeSpawned || result.Err != nil {
+				t.Fatalf("expected the upper-case spelling %q to spawn, got %+v", p.Role, result)
+			}
+		})
+	}
+}
+
+// TestOrgSpawn_RetiredLeaderName_UnrelatedConfigKeysAndRolesStillSpawn is the
+// negative control for the guard: other roles, an empty role, and role keys
+// in the config tables that are not the old name must not be touched.
+func TestOrgSpawn_RetiredLeaderName_UnrelatedConfigKeysAndRolesStillSpawn(t *testing.T) {
+	for _, role := range []string{"", "worker", LeaderIdentity, "reviewer"} {
+		t.Run("role="+role, func(t *testing.T) {
+			o, _, _ := testOrg(t)
+			o.Config.Roles["worker"] = []string{"sonnet"}
+			o.Config.Permissions.Roles = map[string]string{"reviewer": "edits"}
+			p := mustSpawnParams("org-a", "seat-1")
+			p.Role = role
+
+			result := o.Spawn(p)
+
+			if result.Outcome != SpawnOutcomeSpawned || result.Err != nil {
+				t.Fatalf("expected role %q to spawn, got %+v", role, result)
+			}
+		})
+	}
+}

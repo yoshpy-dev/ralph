@@ -2999,3 +2999,287 @@ func TestOrgReport_CLI_RequiresOrgID(t *testing.T) {
 		t.Fatalf("expected non-zero exit for a missing --org-id, output: %s", out)
 	}
 }
+
+// oldLeaderName is the coordinator's retired identifier. Tests refer to it
+// through this constant so the literal appears in one place.
+const oldLeaderName = "lead"
+
+// writeOrgConfigWithExtra writes the same minimal ralph.toml as
+// writeOrgConfig (max_seats 5, one claude/sonnet pool entry) followed by
+// extra, which must be complete TOML tables.
+func writeOrgConfigWithExtra(t *testing.T, dir, extra string) string {
+	t.Helper()
+	path := writeOrgConfig(t, dir, 5)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read org config: %v", err)
+	}
+	if err := os.WriteFile(path, append(data, []byte("\n"+extra)...), 0o644); err != nil {
+		t.Fatalf("write org config: %v", err)
+	}
+	return path
+}
+
+// retiredLeaderConfigs are the two ralph.toml shapes that carry the old
+// coordinator name as a role key, keyed by the key the rejection must name.
+var retiredLeaderConfigs = map[string]string{
+	"[org.roles]." + oldLeaderName:             "[org.roles]\n" + oldLeaderName + " = [\"sonnet\"]\n",
+	"[org.permissions.roles]." + oldLeaderName: "[org.permissions.roles]\n" + oldLeaderName + " = \"guarded\"\n",
+}
+
+// TestOrgSpawnAndStart_RetiredLeaderConfigKey_Rejected covers AC-13 (b) for
+// the verbs that start seats: a ralph.toml carrying the old name as a role
+// key makes `org spawn` (any role) and `org start` fail with the exact key
+// to rename, before any driver call or manifest write.
+func TestOrgSpawnAndStart_RetiredLeaderConfigKey_Rejected(t *testing.T) {
+	for key, extra := range retiredLeaderConfigs {
+		for _, verb := range []string{"spawn", "start"} {
+			t.Run(verb+"/"+key, func(t *testing.T) {
+				herdrLog, agmsgLog := setupOrgStubPATH(t)
+				stateDir := filepath.Join(t.TempDir(), "state")
+				configPath := writeOrgConfigWithExtra(t, t.TempDir(), extra)
+
+				args := []string{"--org-id", "org-a", "--driver", "claude", "--model", "sonnet",
+					"--cwd", t.TempDir(), "--scope", "org-wide",
+					"--state-dir", stateDir, "--config", configPath}
+				if verb == "spawn" {
+					args = append([]string{"spawn", "--id", "seat-1", "--role", "worker"}, args...)
+				} else {
+					args = append([]string{"start"}, append(args, "task text")...)
+				}
+				out, err := runOrgCmd(t, args...)
+
+				if err == nil {
+					t.Fatalf("expected a non-zero exit, output: %s", out)
+				}
+				for _, want := range []string{key, strings.Replace(key, "."+oldLeaderName, "."+org.LeaderIdentity, 1)} {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("error %q should contain %q", err.Error(), want)
+					}
+				}
+				if events := readManifestEvents(t, org.ManifestPathIn(stateDir)); len(events) != 0 {
+					t.Errorf("expected no manifest event, got %v", eventTypes(events))
+				}
+				if lines := readLogLines(t, herdrLog); len(lines) != 0 {
+					t.Errorf("expected no herdr call, got %v", lines)
+				}
+				if lines := readLogLines(t, agmsgLog); len(lines) != 0 {
+					t.Errorf("expected no agmsg call, got %v", lines)
+				}
+				rr, rerr := org.NewReceiptStoreAtPath(org.ReceiptsPathIn(stateDir)).Read()
+				if rerr != nil {
+					t.Fatalf("read receipts: %v", rerr)
+				}
+				if len(rr.Receipts) != 0 {
+					t.Errorf("expected no receipt, got %+v", rr.Receipts)
+				}
+			})
+		}
+	}
+}
+
+// TestOrgCleanupVerbs_RetiredLeaderConfigKey_StillWork covers the other half
+// of AC-13 (b): the old key blocks only the verbs that start seats. status,
+// stop and disband keep working under the same ralph.toml, so an operator can
+// tear down an old org before touching the file.
+func TestOrgCleanupVerbs_RetiredLeaderConfigKey_StillWork(t *testing.T) {
+	for key, extra := range retiredLeaderConfigs {
+		t.Run(key, func(t *testing.T) {
+			setupOrgStubPATH(t)
+			stateDir := filepath.Join(t.TempDir(), "state")
+			cleanConfig := writeOrgConfig(t, t.TempDir(), 5)
+			oldConfig := writeOrgConfigWithExtra(t, t.TempDir(), extra)
+
+			for _, id := range []string{"seat-1", "seat-2"} {
+				out, err := runOrgCmd(t,
+					"spawn", "--org-id", "org-a", "--id", id, "--role", "worker",
+					"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+					"--scope", "test-scope", "--state-dir", stateDir, "--config", cleanConfig)
+				if err != nil {
+					t.Fatalf("spawn %s with the clean config failed: %v (output: %s)", id, err, out)
+				}
+			}
+
+			out, err := runOrgCmd(t, "status", "--org-id", "org-a", "--state-dir", stateDir, "--config", oldConfig)
+			if err != nil {
+				t.Fatalf("status under the old key failed: %v (output: %s)", err, out)
+			}
+			if !strings.Contains(out, "seat-1") || !strings.Contains(out, "seat-2") {
+				t.Errorf("expected both seats in status output, got: %s", out)
+			}
+
+			out, err = runOrgCmd(t, "stop", "--org-id", "org-a", "--seat", "seat-1", "--state-dir", stateDir, "--config", oldConfig)
+			if err != nil {
+				t.Fatalf("stop under the old key failed: %v (output: %s)", err, out)
+			}
+
+			out, err = runOrgCmd(t, "disband", "--org-id", "org-a", "--state-dir", stateDir, "--config", oldConfig)
+			if err != nil {
+				t.Fatalf("disband under the old key failed: %v (output: %s)", err, out)
+			}
+			if !strings.Contains(out, `disbanded org "org-a"`) {
+				t.Errorf("expected the disband confirmation, got: %s", out)
+			}
+		})
+	}
+}
+
+// TestOrgSpawn_RetiredLeaderRoleAndID_RejectedThroughCLI is the CLI-level
+// view of AC-13 (a): the old name is refused as --role and as --id, with
+// --prompt and in dry-run, and the message names the replacement.
+func TestOrgSpawn_RetiredLeaderRoleAndID_RejectedThroughCLI(t *testing.T) {
+	cases := []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		{"role", []string{"--id", "seat-1", "--role", oldLeaderName}, "--role " + org.LeaderIdentity},
+		{"role with --prompt", []string{"--id", "seat-1", "--role", oldLeaderName, "--prompt", "x"}, "--role " + org.LeaderIdentity},
+		{"role dry-run", []string{"--id", "seat-1", "--role", oldLeaderName, "--dry-run"}, "--role " + org.LeaderIdentity},
+		{"id", []string{"--id", oldLeaderName, "--role", "worker"}, org.LeaderIdentity},
+		{"id with role leader and --prompt", []string{"--id", oldLeaderName, "--role", org.LeaderIdentity, "--prompt", "x"}, org.LeaderIdentity},
+		{"id dry-run", []string{"--id", oldLeaderName, "--role", "worker", "--dry-run"}, org.LeaderIdentity},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			herdrLog, _ := setupOrgStubPATH(t)
+			stateDir := filepath.Join(t.TempDir(), "state")
+
+			args := append([]string{"spawn", "--org-id", "org-a", "--driver", "claude", "--model", "sonnet",
+				"--cwd", t.TempDir(), "--scope", "test-scope", "--state-dir", stateDir}, tc.args...)
+			out, err := runOrgCmd(t, args...)
+
+			if err == nil {
+				t.Fatalf("expected a non-zero exit, output: %s", out)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("error %q should contain %q", err.Error(), tc.wantErr)
+			}
+			if events := readManifestEvents(t, org.ManifestPathIn(stateDir)); len(events) != 0 {
+				t.Errorf("expected no manifest event, got %v", eventTypes(events))
+			}
+			if lines := readLogLines(t, herdrLog); len(lines) != 0 {
+				t.Errorf("expected no herdr call, got %v", lines)
+			}
+		})
+	}
+}
+
+// runOrgCmdSplitStreams runs `ralph org <args...>` the way main does -- no
+// SetOut / SetErr -- with os.Stdout and os.Stderr swapped for pipes, so a
+// test can tell which stream a message went to. runOrgCmd cannot: it merges
+// both into one buffer, and once SetOut is set cobra prints its flag
+// warnings (the deprecation notice) to that writer instead of stderr.
+func runOrgCmdSplitStreams(t *testing.T, args ...string) (stdout, stderr string, err error) {
+	t.Helper()
+	outR, outW, perr := os.Pipe()
+	if perr != nil {
+		t.Fatal(perr)
+	}
+	errR, errW, perr := os.Pipe()
+	if perr != nil {
+		t.Fatal(perr)
+	}
+	origOut, origErr := os.Stdout, os.Stderr
+	os.Stdout, os.Stderr = outW, errW
+	func() {
+		defer func() { os.Stdout, os.Stderr = origOut, origErr }()
+		root := NewRootCmd()
+		root.SetArgs(append([]string{"org"}, args...))
+		err = root.Execute()
+	}()
+	_ = outW.Close()
+	_ = errW.Close()
+	outBytes, _ := io.ReadAll(outR)
+	errBytes, _ := io.ReadAll(errR)
+	return string(outBytes), string(errBytes), err
+}
+
+// TestOrgSpawn_DeprecatedDriverFlagAlias covers AC-13 (c): the old spelling
+// of --leader-driver still works but warns on stderr; both spellings with
+// different values is an error (decided by Flags().Changed, so an explicit
+// --leader-driver claude, which equals the default, still conflicts with
+// --lead-driver codex); the same value on both is fine.
+func TestOrgSpawn_DeprecatedDriverFlagAlias(t *testing.T) {
+	oldFlag := "--" + oldLeaderName + "-driver"
+	const newFlag = "--leader-driver"
+
+	cases := []struct {
+		name         string
+		flags        []string
+		wantErr      []string // substrings of the error; nil means success
+		wantAgmsg    string   // substring of the first agmsg call (success only)
+		wantDeprecat bool     // stderr carries the deprecation notice
+	}{
+		{name: "old flag alone", flags: []string{oldFlag, "codex"}, wantAgmsg: "ralph-org-a leader codex", wantDeprecat: true},
+		{name: "old flag alone equal to the default", flags: []string{oldFlag, "claude"}, wantAgmsg: "ralph-org-a leader claude-code", wantDeprecat: true},
+		{name: "new flag alone", flags: []string{newFlag, "codex"}, wantAgmsg: "ralph-org-a leader codex"},
+		{name: "neither", flags: nil, wantAgmsg: "ralph-org-a leader claude-code"},
+		{name: "both, same value", flags: []string{oldFlag, "codex", newFlag, "codex"}, wantAgmsg: "ralph-org-a leader codex", wantDeprecat: true},
+		{name: "both, different values", flags: []string{oldFlag, "codex", newFlag, "claude"}, wantErr: []string{oldFlag, newFlag}, wantDeprecat: true},
+		{name: "both, different values, new flag first", flags: []string{newFlag, "codex", oldFlag, "claude"}, wantErr: []string{oldFlag, newFlag}, wantDeprecat: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			herdrLog, agmsgLog := setupOrgStubPATH(t)
+			stateDir := filepath.Join(t.TempDir(), "state")
+
+			args := append([]string{
+				"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
+				"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+				"--scope", "test-scope", "--state-dir", stateDir,
+			}, tc.flags...)
+			stdout, stderr, err := runOrgCmdSplitStreams(t, args...)
+
+			if tc.wantDeprecat {
+				for _, want := range []string{oldFlag, "deprecated", newFlag} {
+					if !strings.Contains(stderr, want) {
+						t.Errorf("stderr should carry the deprecation notice containing %q, got stderr=%q stdout=%q", want, stderr, stdout)
+					}
+				}
+			} else if strings.Contains(stderr, "deprecated") {
+				t.Errorf("unexpected deprecation notice on stderr: %q", stderr)
+			}
+
+			if tc.wantErr != nil {
+				if err == nil {
+					t.Fatalf("expected an error, stdout=%q stderr=%q", stdout, stderr)
+				}
+				for _, want := range tc.wantErr {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("error %q should contain %q", err.Error(), want)
+					}
+				}
+				if events := readManifestEvents(t, org.ManifestPathIn(stateDir)); len(events) != 0 {
+					t.Errorf("expected no manifest event on a flag conflict, got %v", eventTypes(events))
+				}
+				if lines := readLogLines(t, herdrLog); len(lines) != 0 {
+					t.Errorf("expected no herdr call on a flag conflict, got %v", lines)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("spawn failed: %v (stdout=%q stderr=%q)", err, stdout, stderr)
+			}
+			agmsgLines := readLogLines(t, agmsgLog)
+			if len(agmsgLines) == 0 || !strings.Contains(agmsgLines[0], tc.wantAgmsg) {
+				t.Fatalf("expected the first agmsg call to contain %q, got %v", tc.wantAgmsg, agmsgLines)
+			}
+		})
+	}
+}
+
+// TestOrgSpawn_DeprecatedDriverFlagAlias_HiddenFromHelp pins that the alias
+// is hidden once deprecated, so help teaches only --leader-driver.
+func TestOrgSpawn_DeprecatedDriverFlagAlias_HiddenFromHelp(t *testing.T) {
+	out, err := runOrgCmd(t, "spawn", "--help")
+	if err != nil {
+		t.Fatalf("spawn --help failed: %v", err)
+	}
+	if !strings.Contains(out, "--leader-driver") {
+		t.Errorf("help should list --leader-driver, got:\n%s", out)
+	}
+	if strings.Contains(out, "--"+oldLeaderName+"-driver") {
+		t.Errorf("help should hide the deprecated alias, got:\n%s", out)
+	}
+}

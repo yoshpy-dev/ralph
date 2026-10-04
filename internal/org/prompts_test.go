@@ -297,3 +297,95 @@ func TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText(t *testing.T) {
 		t.Errorf("expected the rendered prompt to contain the default scope text %q, got:\n%s", defaultScopeText, text)
 	}
 }
+
+// oldLeaderName is the coordinator's retired identifier. Tests refer to it
+// through this constant so the literal appears in one place.
+const oldLeaderName = "lead"
+
+func TestRetiredRoles_OldLeaderNameIsRenamedToLeaderIdentity(t *testing.T) {
+	r, ok := retiredRoles[oldLeaderName]
+	if !ok {
+		t.Fatalf("retiredRoles has no entry for %q", oldLeaderName)
+	}
+	if r.Successor != LeaderIdentity {
+		t.Errorf("Successor = %q, want %q (LeaderIdentity)", r.Successor, LeaderIdentity)
+	}
+	if r.Kind != RetiredRoleRenamed {
+		t.Errorf("Kind = %q, want %q", r.Kind, RetiredRoleRenamed)
+	}
+}
+
+func TestRetiredRoles_SuccessorsAreLiveRoles(t *testing.T) {
+	// A successor that is itself retired would send the operator in a circle.
+	for name, r := range retiredRoles {
+		if _, retired := retiredRoles[r.Successor]; retired {
+			t.Errorf("retiredRoles[%q].Successor %q is itself retired", name, r.Successor)
+		}
+	}
+}
+
+func TestRetiredRoleConfigKeys(t *testing.T) {
+	cases := []struct {
+		name string
+		cfg  config.OrgConfig
+		want []RetiredRoleConfigKey
+	}{
+		{
+			name: "neither table has the old name",
+			cfg: config.OrgConfig{
+				Roles:       map[string][]string{"worker": {"sonnet"}},
+				Permissions: config.OrgPermissionsConfig{Roles: map[string]string{"reviewer": "guarded"}},
+			},
+			want: nil,
+		},
+		{
+			name: "nil maps",
+			cfg:  config.OrgConfig{},
+			want: nil,
+		},
+		{
+			name: "org.roles only",
+			cfg:  config.OrgConfig{Roles: map[string][]string{oldLeaderName: {"sonnet"}}},
+			want: []RetiredRoleConfigKey{{Key: "[org.roles]." + oldLeaderName, RenameTo: "[org.roles]." + LeaderIdentity}},
+		},
+		{
+			name: "an empty model list is still a present key",
+			cfg:  config.OrgConfig{Roles: map[string][]string{oldLeaderName: {}}},
+			want: []RetiredRoleConfigKey{{Key: "[org.roles]." + oldLeaderName, RenameTo: "[org.roles]." + LeaderIdentity}},
+		},
+		{
+			name: "org.permissions.roles only",
+			cfg:  config.OrgConfig{Permissions: config.OrgPermissionsConfig{Roles: map[string]string{oldLeaderName: "guarded"}}},
+			want: []RetiredRoleConfigKey{{Key: "[org.permissions.roles]." + oldLeaderName, RenameTo: "[org.permissions.roles]." + LeaderIdentity}},
+		},
+		{
+			name: "both tables, org.roles first",
+			cfg: config.OrgConfig{
+				Roles:       map[string][]string{oldLeaderName: {"sonnet"}},
+				Permissions: config.OrgPermissionsConfig{Roles: map[string]string{oldLeaderName: "guarded"}},
+			},
+			want: []RetiredRoleConfigKey{
+				{Key: "[org.roles]." + oldLeaderName, RenameTo: "[org.roles]." + LeaderIdentity},
+				{Key: "[org.permissions.roles]." + oldLeaderName, RenameTo: "[org.permissions.roles]." + LeaderIdentity},
+			},
+		},
+		{
+			name: "matching is case-sensitive",
+			cfg:  config.OrgConfig{Roles: map[string][]string{strings.ToUpper(oldLeaderName): {"sonnet"}}},
+			want: nil,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := RetiredRoleConfigKeys(tc.cfg)
+			if len(got) != len(tc.want) {
+				t.Fatalf("RetiredRoleConfigKeys = %+v, want %+v", got, tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Errorf("RetiredRoleConfigKeys[%d] = %+v, want %+v", i, got[i], tc.want[i])
+				}
+			}
+		})
+	}
+}

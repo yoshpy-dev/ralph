@@ -276,9 +276,33 @@ func splitCommaList(s string) []string {
 	return out
 }
 
+// deprecatedLeaderDriverFlag is the flag's old spelling, kept as a hidden
+// alias of --leader-driver (cobra MarkDeprecated prints the notice on use).
+const deprecatedLeaderDriverFlag = "lead-driver"
+
+// resolveLeaderDriver picks the effective leader driver from --leader-driver
+// and its deprecated alias. Which flag was given is decided by
+// Flags().Changed, not by comparing against a default: an explicit
+// --leader-driver claude (the default value) next to --lead-driver codex is
+// still a conflict. Both spellings with the same value is accepted.
+func resolveLeaderDriver(cmd *cobra.Command, leaderDriver, deprecatedDriver string) (string, error) {
+	if !cmd.Flags().Changed(deprecatedLeaderDriverFlag) {
+		return leaderDriver, nil
+	}
+	if !cmd.Flags().Changed("leader-driver") {
+		return deprecatedDriver, nil
+	}
+	if deprecatedDriver != leaderDriver {
+		return "", fmt.Errorf("org: --%s %q conflicts with --leader-driver %q; --%s is a deprecated alias of --leader-driver, pass only --leader-driver",
+			deprecatedLeaderDriverFlag, deprecatedDriver, leaderDriver, deprecatedLeaderDriverFlag)
+	}
+	return leaderDriver, nil
+}
+
 func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	var (
 		seatID, role, driverName, model, cwd, prompt, scope, leaderDriver string
+		deprecatedDriver                                                  string
 		timeoutMS                                                         int
 		dryRun, allowUnscoped                                             bool
 	)
@@ -298,6 +322,10 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 					return fmt.Errorf("org: %s is required", flag)
 				}
 			}
+			effectiveLeaderDriver, err := resolveLeaderDriver(cmd, leaderDriver, deprecatedDriver)
+			if err != nil {
+				return err
+			}
 
 			rt, err := newOrgRuntime(cmd, *stateDir, *configPath)
 			if err != nil {
@@ -310,7 +338,7 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			result := rt.Spawn(org.SpawnParams{
 				OrgID: *orgID, SeatID: seatID, Role: role, Driver: driverName, Model: resolvedModel,
 				Cwd: cwd, Prompt: prompt, Scope: scope, TimeoutMS: timeoutMS, DryRun: dryRun,
-				LeaderDriver: leaderDriver, AllowUnscoped: allowUnscoped,
+				LeaderDriver: effectiveLeaderDriver, AllowUnscoped: allowUnscoped,
 			})
 			printSpawnResult(cmd, result)
 			return result.Err
@@ -325,6 +353,10 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	cmd.Flags().StringVar(&prompt, "prompt", "", "optional initial prompt passed to the agent")
 	cmd.Flags().StringVar(&scope, "scope", "", "optional scope description (recorded on the spawned event; substituted into --role templates as {{SCOPE}})")
 	cmd.Flags().StringVar(&leaderDriver, "leader-driver", "claude", "driver (claude|codex) the org's coordinating leader identity runs as, for the agmsg type registered on ensureLeaderJoined")
+	cmd.Flags().StringVar(&deprecatedDriver, deprecatedLeaderDriverFlag, "", "deprecated alias of --leader-driver")
+	if err := cmd.Flags().MarkDeprecated(deprecatedLeaderDriverFlag, "use --leader-driver"); err != nil {
+		panic(err) // the flag was registered on the line above
+	}
 	cmd.Flags().IntVar(&timeoutMS, "timeout-ms", 60000, "per-step herdr timeout in milliseconds")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "validate and record without starting a real seat")
 	cmd.Flags().BoolVar(&allowUnscoped, "allow-unscoped", false, "explicitly bypass the autonomous-mode --scope requirement (recorded on the spawned event)")
