@@ -153,14 +153,14 @@ org runtime の座席を、指示役(leader)・実装役(implementer)・レビ�
 
 ### leader への改名
 
-- [ ] AC-11: `LeaderIdentity == "leader"` で、`internal/org/prompts/leader.md` があり `lead.md` がない。`ralph org start` が seat id・役割ともに `leader` で座席を立てる(テスト)。agmsg の登録と、watchdog の ALERT の宛先が `leader` になる(テスト)。
-- [ ] AC-12: `git grep -n -E 'Lead($|[^e])|\blead[A-Z_]' -- '*.go'` の結果が、Slice 0 の時点で空になる(Go の識別子に旧名が残っていない。`Leader` と `Leaded` は掛からない。2026-10-04 に macOS の git grep で、`leadDriver` と `LeadIdentity` に掛かり `LeaderIdentity`・`leaderDriver`・`Leaded` に掛からないことを確認済み)。Slice 1 以降に残ってよいのは、旧名の拒否のための識別子(非推奨フラグの変数など)だけ。例外として、watch の state に永続化される JSON のタグ `lead_agent_get` と `history_lead_lines`(`internal/org/watch.go:230-231` とそのテストのフィクスチャ)は残す(下の「実装中の逸脱」を参照)。
+- [x] AC-11: `LeaderIdentity == "leader"` で、`internal/org/prompts/leader.md` があり `lead.md` がない。`ralph org start` が seat id・役割ともに `leader` で座席を立てる(テスト)。agmsg の登録と、watchdog の ALERT の宛先が `leader` になる(テスト)。
+- [x] AC-12: `git grep -n -P 'Lead(?!e)|\blead[A-Z_]' -- '*.go'` の結果が、Slice 0 の時点で下の例外だけになる(Go の識別子に旧名が残っていない。`Leader` と `Leaded` は掛からない)。当初は `-E 'Lead($|[^e])|\blead[A-Z_]'` と書いたが、macOS の `git grep -E` では `\b` が効かず後半が何にも掛からないことが Slice 0 で分かったので、`-P` に改めた(計画の時点の確認は BSD の `grep` で行っていて、`git grep` では確かめていなかった)。Slice 0(eb30b172)で確認済み。Slice 1 以降に残ってよいのは、旧名の拒否のための識別子(非推奨フラグの変数など)だけ。例外として、watch の state に永続化される JSON のタグ `lead_agent_get` と `history_lead_lines`(`internal/org/watch.go:230-231` とそのテストのフィクスチャ)は残す(下の「実装中の逸脱」を参照)。
 - [ ] AC-13: 旧名の拒否をテストで検査している。(a) `--role lead` と `--id lead` の spawn は、`--prompt` があっても、dry-run でも拒否され、エラー文に `leader` が含まれ、manifest と receipts に何も書かれない。(b) `ralph.toml` に `[org.roles].lead` か `[org.permissions.roles].lead` があると spawn が拒否され、エラー文がキーの改名を案内する。同じ設定でも `ralph org status`、`stop`、`disband` は動く。`ralph doctor` が warn を出す。(c) `--lead-driver` は警告付きで動き、`--leader-driver` と両方に違う値を渡すとエラーになる。
 - [ ] AC-14: `git grep -n -w -i lead -- . ':!docs/plans' ':!docs/reports' ':!docs/evidence' ':!docs/research'` に残る行が、次の分類のどれかに入る。分類ごとのファイルと理由を verify の report に書く。
   - 旧名の拒否のコードとテスト(撤去・改名した役割の表、spawn の拒否、`--lead-driver` の別名、doctor の warn と、それぞれのテスト)
-  - 過去のデータのフィクスチャ(`internal/insights/testdata/receipts.jsonl` と、それを読む insights のテスト)
+  - 過去のデータのフィクスチャ(`internal/insights/testdata/receipts.jsonl` と、それを読む `internal/insights/insights_test.go`、過去の receipts の形の行を作る `internal/cli/insights_test.go`)
   - 履歴の記録(`docs/insights/events/*.jsonl`、spec の履歴の記述と改訂の節、tech-debt の既存の行)
-  - 過去の計画のパス(`internal/org/report.go:11` のコメントの `2026-08-02-org-runtime-lead.md`)
+  - 過去の計画・レポートのファイル名と、その文言の引用(Slice 0 の時点で `internal/org/report.go:11`、`internal/cli/org.go:369-370`、`internal/org/spawn.go:59,534,769,950`、`internal/org/spawn_test.go:545`)
   - 永続化された state のキー(`watch.go` の JSON のタグ `lead_agent_get` / `history_lead_lines` と、それを使うテストのフィクスチャ。`-w lead` には掛からないが AC-12 には掛かる)
   - 文書の中の旧名の案内(`/org` skill の「旧名の `lead` は拒否される」など)
 - [ ] AC-15: `agent-messaging.md`(2 面)の契約が `TO: leader` になり、`/org` skill(4 面)、`AGENTS.md` と `.ralph/core/AGENTS.core.md`(+ template)、`README.md`、`codex-seat-permissions.md`(2 面)、`quality-gates.md`(2 面)が `leader` を使う。`./scripts/check-skill-sync.sh` と `./scripts/check-sync.sh` が green。
@@ -238,6 +238,8 @@ org runtime の座席を、指示役(leader)・実装役(implementer)・レビ�
 ## 実装中の逸脱
 
 - 2026-10-04(Slice 0 の前): `internal/org/watch.go` の `watchPendingAlert` は、watch の state に `lead_agent_get` と `history_lead_lines` の JSON のタグで永続化される。Go のフィールド名(`LeadAgentGet`、`HistoryLeadLines`)は改名するが、タグは残す。移行なしにキー名を変えると、更新の前に書かれた state を読んだときに値が黙ってゼロになり、`history_lead_lines` の番兵 `-1` が失われるため。AC-12 と AC-14 では、このタグを「永続化された state のキー」として例外に数える。
+
+- 2026-10-04(Slice 0、eb30b172): implementer は gopls ではなく、単語境界の perl の置換と `gofmt -w` で改名した。`go build` / `go vet` / `go test ./...` / `run-verify.sh` が green。manifest の Details に書く診断用の文字列(`lead_self=true` → `leader_self=true`、`lead_join=` → `leader_join=`、`lead_is_anomaly_subject` → `leader_is_anomaly_subject`、`agmsg_lead_joined` → `agmsg_leader_joined`)も改名した。これらを読むのは Go のテストだけで、過去の manifest や evidence に残る旧い文字列はそのまま。コミットの trailer は、委譲先のモデルに合わせて `Claude Sonnet 5.5` になっている。
 
 ## Open questions
 
