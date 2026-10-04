@@ -24,7 +24,7 @@
 
 - `.claude/agents/{implementer,verifier,tester}.md` と template の 3 ファイルの `model:` を `opus` に、`.claude/agents/reviewer.md` と template を `sonnet` にする。doc-maintainer は `sonnet` のまま。
 - `.claude/rules/ralph/model-routing.md`(+ template)の tier 表を新しい割り振りに書き直す。「Judgment seats / Procedural seats」の見出しは割り振りと合わなくなるので、席の名前で引ける表にする。23 行目の pin の記述と、50 行目の escalation の例を新しい既定に合わせる。
-- 新しいテスト `tests/test-agent-models.sh`: `model-routing.md` の tier 表と `.claude/agents/*.md` の frontmatter が一致すること、root と template の agent の `model:` が一致することを検査する。
+- 新しいテスト `tests/test-agent-models.sh`: root(`.claude/`)と template(`templates/base/.claude/`)のそれぞれで、`model-routing.md` の tier 表と pin の記述(「`model: <x>` pinned in frontmatter」)が、同じ側の `agents/*.md` の frontmatter と一致することを検査する。あわせて root と template の agent の `model:` が一致することも見る。`check-sync.sh` は `model-routing.md` を丸ごと差分許容にしているので、template 側の表はこのテストでしか守れない(Codex plan advisory の MEDIUM)。
 
 ## Non-goals
 
@@ -50,13 +50,14 @@
 
 - tier 表は「席 / モデル / 担う作業」の形にし、agent 名をバッククォートで書く。テストが表の行から agent 名とモデルを読めるようにするため。
 - テストは表と frontmatter の一致を見る形にする(期待値をテストに直書きしない)。モデルの割り振りを次に変えるときも、表と frontmatter を同時に直せばテストは通り、片方だけ直すと落ちる。
+- テストは root と template の両方の組(表と frontmatter)に同じ検査を当てる。Codex plan advisory(MEDIUM 1 件)の指摘で、`check-sync.sh` が `model-routing.md` を丸ごと差分許容にしているため template 側の表のずれを検出する手段がなかった。メンテナの決定: plan を更新。
 - Critical forks: None(割り振りはメンテナが指定済み。escalation の例の移し先は 1 行の記述で、後から直しても 1 slice より小さい)
 
 ## Acceptance criteria
 
 - [ ] AC-1: `.claude/agents/` の frontmatter が implementer `opus`、verifier `opus`、tester `opus`、reviewer `sonnet`、doc-maintainer `sonnet` になっている。template の 5 ファイルは root と byte 一致。
-- [ ] AC-2: `model-routing.md`(+ template)の tier 表が AC-1 の割り振りを示し、23 行目相当の pin の記述が `model: opus` になり、escalation の段落が新しい既定と矛盾しない(「implementer を opus に上げる」とは書かない)。root と template の差分は既存の KNOWN_DIFF の範囲から増えない。
-- [ ] AC-3: `tests/test-agent-models.sh` が通る。red: (a) root の agent の `model:` を 1 つ変える、(b) template の agent の `model:` を 1 つ変える、(c) tier 表の 1 行のモデルを変える、(d) tier 表から agent 名を 1 つ消す、のどれでも落ち、落ちたファイルと agent 名を出す。
+- [ ] AC-2: `model-routing.md`(+ template)の tier 表が AC-1 の割り振りを示し、23 行目相当の pin の記述が `model: opus` になり、escalation の段落が新しい既定と矛盾しない(「implementer を opus に上げる」とは書かない)。tier 表から「Where the values live」の直前までは root と template で同じ文面にする(`diff` で、差分が既存の org runtime の節と「Where the values live」の 1 行だけであることを確かめる)。
+- [ ] AC-3: `tests/test-agent-models.sh` が通る。red: root と template のそれぞれで、(a) agent の `model:` を 1 つ変える、(b) tier 表の 1 行のモデルを変える、(c) tier 表から agent 名を 1 つ消す、(d) pin の記述を旧値(`model: sonnet`)に戻す、のどれでも落ち、落ちたファイルと agent 名を出す。template 側だけを変えた場合も落ちる。
 - [ ] AC-4: `./scripts/check-sync.sh`、`./scripts/check-skill-sync.sh`、`./scripts/check-template.sh` が green。
 - [ ] AC-5: `go run ./cmd/ralph init --yes` で scratch に作った fresh scaffold の `.claude/agents/` が AC-1 の値になっている。
 - [ ] AC-6: `RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh` green。
@@ -75,7 +76,7 @@
 
 ## Test plan
 
-- Unit tests: `tests/test-agent-models.sh`(表の解析、frontmatter の読み取り、root と template の比較)。
+- Unit tests: `tests/test-agent-models.sh`(root と template のそれぞれで表と pin の記述の解析、frontmatter の読み取り、両者の照合、root と template の frontmatter の比較)。mutation は一時ディレクトリにコピーした木で行い、作業ツリーを書き換えない。
 - Integration tests: AC-5 の fresh scaffold。
 - Regression tests: `RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh`(既存の `tests/test-*.sh` と `go test ./...`)。
 - Edge cases: frontmatter に `model:` がない agent(テストは落ちる。省略すると親のモデルを継ぐので、model-routing の規則どおり失敗にする)、表にあるが `.claude/agents/` にない名前(implementer 以外の汎用の語を agent 名と誤認しない)、同じ agent が表の 2 行に出る場合(落ちる)。
@@ -95,6 +96,10 @@
 ## Open questions
 
 - なし
+
+## Progress notes
+
+- 2026-10-04 plan: Codex plan advisory(gpt-6-astra、xhigh、`sandbox: read-only`、`codex rc=0`、`-o` 1259 バイト)は MEDIUM 1: template 側の `model-routing.md` の表と pin の記述を検査する手段がない(`check-sync.sh` はファイル全体を差分許容)。メンテナの決定: plan を更新。テストを root と template の両方に当て、AC-2 に `diff` での確認、AC-3 に template 側だけの mutation を足した
 
 ## Progress checklist
 
