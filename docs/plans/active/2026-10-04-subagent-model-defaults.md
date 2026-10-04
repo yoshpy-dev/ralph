@@ -100,12 +100,13 @@
 ## Progress notes
 
 - 2026-10-04 plan: Codex plan advisory(gpt-6-astra、xhigh、`sandbox: read-only`、`codex rc=0`、`-o` 1259 バイト)は MEDIUM 1: template 側の `model-routing.md` の表と pin の記述を検査する手段がない(`check-sync.sh` はファイル全体を差分許容)。メンテナの決定: plan を更新。テストを root と template の両方に当て、AC-2 に `diff` での確認、AC-3 に template 側だけの mutation を足した
+- 2026-10-04 work: Slice A は implementer に委譲(173cf76d、11 ファイル、+584 / -18、push 済み)。この session の agent 定義は main のチェックアウトから読まれるので、implementer は旧既定の sonnet で動いた。frontmatter 8 ファイル、`model-routing.md` の 2 コピー(tier 表を「Implementation and verification seats / Review and doc seats」に、変更日の注記、pin の記述、escalation の段落を「Overriding a seat's default」に)、`tests/test-agent-models.sh`(100755)。テストは 36 / 36。self-test は root と template のそれぞれで mutation (a)〜(d) と、追加の (e) `model:` なし、(f) 同じ agent が 2 行、(g) agent でない backtick 語は無視、を検出する。template だけの `model:` の変更と、agent ファイルの集合差も検出する。逸脱: (1) real tree に FAIL があるときは self-test を SKIP する(壊れた木を複製して偽の失敗を大量に出さないため。real tree 側の FAIL はそのまま出る)、(2) Co-Authored-By は実行モデルに合わせて Sonnet 5.5。手動の mutation 3 通り(root の tester、template の tester だけ、template の pin だけ)はいずれも exit 1 でファイルと agent 名を出し、戻すと 36 / 36。AC-5 の fresh scaffold は implementer・verifier・tester が opus、reviewer・doc-maintainer が sonnet、pin の記述は `model: opus`。`check-sync.sh`(DRIFTED 0、KNOWN_DIFF 5)、`check-skill-sync.sh`、`check-template.sh`、shellcheck、`RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh` green。root と template の `model-routing.md` の差分は既存の 3 hunk だけ。orchestrator も HEAD の一致、porcelain が空、テスト 36 / 36、差分を確認
 
 ## Progress checklist
 
 - [x] Plan reviewed
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
