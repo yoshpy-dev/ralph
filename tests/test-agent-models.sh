@@ -13,6 +13,15 @@
 # frontmatter is the implementation, and the test fails when they disagree.
 # Changing a seat's model means editing the table and the frontmatter together.
 #
+# Known limits:
+#   - The pin-sentence check only covers the implementer pin. implementer is
+#     the only seat with a "`model: <x>` pinned in frontmatter" sentence, so
+#     every such sentence is compared with agents/implementer.md.
+#   - A tier-table row naming a backticked word whose agent file was deleted is
+#     ignored rather than failed: a backticked word that is not an agent cannot
+#     be told apart from a removed agent. Deleting an agent file on one side
+#     only is still caught by the root-vs-template comparison.
+#
 # The self-test section applies one kind of drift at a time to throwaway
 # copies of the real files and asserts the checker fails and names the
 # offending file and agent. It never writes to the real tree.
@@ -25,9 +34,12 @@ cd "$PROJECT_ROOT"
 
 ROOT_SIDE=".claude"
 TEMPLATE_SIDE="templates/base/.claude"
+# Mutation target: any agent but implementer, so (a)-(g) never also trip the pin-sentence check.
 TARGET_AGENT="tester"
-NL='
-'
+# Removal target for the cross check: any agent other than TARGET_AGENT, so the cross cases touch two files.
+CROSS_FIXTURE_AGENT="doc-maintainer"
+# Name of the template-only agent added by self-test (i); must not exist on either side.
+EXTRA_AGENT="self-test-extra-agent"
 
 _pass=0
 _fail=0
@@ -71,7 +83,7 @@ frontmatter_model() {
 
 # tier_rows <model-routing.md>: for each row of the "## Tier table" section
 # whose Model column holds a backticked token, print one line:
-#   <model> <backticked token from the Examples column>...
+#   <model> <backticked token from the "Agents and typical work" column>...
 # Header, separator, and rows without a backticked model (the Orchestrator
 # row) print nothing.
 tier_rows() {
@@ -98,21 +110,42 @@ tier_rows() {
 
 # ---------------------------------------------------------------------------
 # Checkers. They print "PASS: <msg>" / "FAIL: <msg>" lines and return non-zero
-# when any FAIL was printed. <root> is the tree to inspect, so the self-test
-# can aim them at a throwaway copy.
+# when any FAIL was printed. <tree> is the directory tree to inspect, so the
+# self-test can aim them at a throwaway copy.
+#
+# POSIX sh has no `local`: check_side and its helpers share `_`-prefixed
+# globals (_cdir, _routing_rel, _routing, _agents_dir, _assign, _impl_model,
+# and loop variables). That is only safe because run_checker runs every
+# checker in a `$(...)` subshell, so no state leaks into the caller or into
+# the next checker. Always call a checker through run_checker.
 # ---------------------------------------------------------------------------
 
-# check_side <root> <claude_dir>
+# check_side <tree> <claude_dir>: the tier table, the pin sentence, and the
+# agent frontmatter of one side must agree.
 check_side() {
-  _root="$1"
+  _tree="$1"
   _cdir="$2"
   _routing_rel="$_cdir/rules/ralph/model-routing.md"
-  _routing="$_root/$_routing_rel"
-  _agents_dir="$_root/$_cdir/agents"
-  _bad=0
+  _routing="$_tree/$_routing_rel"
+  _agents_dir="$_tree/$_cdir/agents"
   _impl_model=""
-  _assign=""
 
+  check_side_inputs || return 1
+
+  _side_bad=0
+  _rows="$(tier_rows "$_routing")"
+  if [ -z "$_rows" ]; then
+    printf 'FAIL: %s: no row with a backticked model under "## Tier table"\n' "$_routing_rel"
+    _side_bad=1
+  fi
+  _assign="$(tier_assignments "$_rows")"
+  check_agent_models || _side_bad=1
+  check_pin_sentence || _side_bad=1
+  return "$_side_bad"
+}
+
+# check_side_inputs: the side's model-routing.md and agents/ must exist.
+check_side_inputs() {
   if [ ! -f "$_routing" ]; then
     printf 'FAIL: %s: file not found\n' "$_routing_rel"
     return 1
@@ -121,13 +154,13 @@ check_side() {
     printf 'FAIL: %s/agents: directory not found\n' "$_cdir"
     return 1
   fi
+}
 
-  # One "<agent> <model>" line per (tier row, existing agent) pair.
-  _rows="$(tier_rows "$_routing")"
-  if [ -z "$_rows" ]; then
-    printf 'FAIL: %s: no row with a backticked model under "## Tier table"\n' "$_routing_rel"
-    _bad=1
-  fi
+# tier_assignments <tier_rows output>: print one "<agent> <model>" line per
+# (tier row, existing agent file) pair. A name repeated within one row counts
+# once; backticked words without an agents/<word>.md are skipped.
+tier_assignments() {
+  _rows_in="$1"
   while IFS= read -r _line; do
     [ -n "$_line" ] || continue
     set -f
@@ -146,98 +179,122 @@ check_side() {
         *" $_name "*) continue ;;
       esac
       _seen="$_seen$_name "
-      _assign="$_assign$_name $_model$NL"
+      printf '%s %s\n' "$_name" "$_model"
     done
   done <<EOF
-$_rows
+$_rows_in
 EOF
+}
 
+# check_agent_models: every agents/*.md must pass check_one_agent, and the
+# side must have at least one agent file.
+check_agent_models() {
+  _models_bad=0
   _agent_count=0
   for _f in "$_agents_dir"/*.md; do
     [ -f "$_f" ] || continue
     _agent_count=$((_agent_count + 1))
-    _name="$(basename "$_f" .md)"
-    _path="$_cdir/agents/$_name.md"
-    _fm="$(frontmatter_model "$_f")"
-    if [ -z "$_fm" ]; then
-      printf 'FAIL: %s (agent %s): frontmatter has no model: value (omitting it means inherit, which model-routing.md forbids)\n' "$_path" "$_name"
-      _bad=1
-      continue
-    fi
-    if [ "$_name" = "implementer" ]; then
-      _impl_model="$_fm"
-    fi
-    _hits="$(printf '%s\n' "$_assign" | awk -v n="$_name" '$1 == n { c++ } END { print c + 0 }')"
-    if [ "$_hits" -eq 0 ]; then
-      printf 'FAIL: %s (agent %s): not listed in any "## Tier table" row of %s\n' "$_path" "$_name" "$_routing_rel"
-      _bad=1
-    elif [ "$_hits" -gt 1 ]; then
-      printf 'FAIL: %s (agent %s): listed in %s "## Tier table" rows of %s (must be exactly one)\n' "$_path" "$_name" "$_hits" "$_routing_rel"
-      _bad=1
-    else
-      _want="$(printf '%s\n' "$_assign" | awk -v n="$_name" '$1 == n { print $2 }')"
-      if [ "$_fm" = "$_want" ]; then
-        printf 'PASS: %s (agent %s): model %s matches the tier table\n' "$_path" "$_name" "$_fm"
-      else
-        printf 'FAIL: %s (agent %s): frontmatter model %s but %s tier table says %s\n' "$_path" "$_name" "$_fm" "$_routing_rel" "$_want"
-        _bad=1
-      fi
-    fi
+    check_one_agent "$_f" || _models_bad=1
   done
   if [ "$_agent_count" -eq 0 ]; then
     printf 'FAIL: %s/agents: no agent files found\n' "$_cdir"
-    _bad=1
+    _models_bad=1
   fi
+  return "$_models_bad"
+}
 
-  # The pin sentence is matched on newline-collapsed text so a re-wrap of the
-  # paragraph does not hide it.
+# check_one_agent <agent.md>: the agent's frontmatter model must equal the
+# model of the one tier row that names it. Records implementer's model in
+# _impl_model for check_pin_sentence.
+check_one_agent() {
+  _name="$(basename "$1" .md)"
+  _path="$_cdir/agents/$_name.md"
+  _fm="$(frontmatter_model "$1")"
+  if [ -z "$_fm" ]; then
+    printf 'FAIL: %s (agent %s): frontmatter has no model: value (omitting it means inherit, which model-routing.md forbids)\n' "$_path" "$_name"
+    return 1
+  fi
+  if [ "$_name" = "implementer" ]; then
+    _impl_model="$_fm"
+  fi
+  _hits="$(printf '%s\n' "$_assign" | awk -v n="$_name" '$1 == n { c++ } END { print c + 0 }')"
+  if [ "$_hits" -eq 0 ]; then
+    printf 'FAIL: %s (agent %s): not listed in any "## Tier table" row of %s\n' "$_path" "$_name" "$_routing_rel"
+    return 1
+  fi
+  if [ "$_hits" -gt 1 ]; then
+    printf 'FAIL: %s (agent %s): listed in %s "## Tier table" rows of %s (must be exactly one)\n' "$_path" "$_name" "$_hits" "$_routing_rel"
+    return 1
+  fi
+  _want="$(printf '%s\n' "$_assign" | awk -v n="$_name" '$1 == n { print $2 }')"
+  if [ "$_fm" != "$_want" ]; then
+    printf 'FAIL: %s (agent %s): frontmatter model %s but %s tier table says %s\n' "$_path" "$_name" "$_fm" "$_routing_rel" "$_want"
+    return 1
+  fi
+  printf 'PASS: %s (agent %s): model %s matches the tier table\n' "$_path" "$_name" "$_fm"
+}
+
+# check_pin_sentence: every "`model: <x>` pinned in frontmatter" sentence must
+# name the frontmatter model of agents/implementer.md (set by check_one_agent).
+# The sentence is matched on newline-collapsed text so a re-wrap of the
+# paragraph does not hide it.
+check_pin_sentence() {
   _pins="$(tr '\n' ' ' < "$_routing" | grep -oE '`model: [^`]+` +pinned in +frontmatter' | sed -e 's/^`model: //' -e 's/`.*$//')"
   if [ -z "$_pins" ]; then
     printf 'FAIL: %s: sentence "model: <x> pinned in frontmatter" not found\n' "$_routing_rel"
-    _bad=1
-  elif [ -z "$_impl_model" ]; then
+    return 1
+  fi
+  if [ -z "$_impl_model" ]; then
     printf 'FAIL: %s: pin sentence cannot be checked because %s/agents/implementer.md has no frontmatter model\n' "$_routing_rel" "$_cdir"
-    _bad=1
-  else
-    while IFS= read -r _pin; do
-      [ -n "$_pin" ] || continue
-      if [ "$_pin" = "$_impl_model" ]; then
-        printf 'PASS: %s: pin sentence model %s matches %s/agents/implementer.md\n' "$_routing_rel" "$_pin" "$_cdir"
-      else
-        printf 'FAIL: %s: pin sentence says model %s but %s/agents/implementer.md frontmatter model is %s\n' "$_routing_rel" "$_pin" "$_cdir" "$_impl_model"
-        _bad=1
-      fi
-    done <<EOF
+    return 1
+  fi
+  _pin_bad=0
+  while IFS= read -r _pin; do
+    [ -n "$_pin" ] || continue
+    if [ "$_pin" = "$_impl_model" ]; then
+      printf 'PASS: %s: pin sentence model %s matches %s/agents/implementer.md\n' "$_routing_rel" "$_pin" "$_cdir"
+    else
+      printf 'FAIL: %s: pin sentence says model %s but %s/agents/implementer.md frontmatter model is %s\n' "$_routing_rel" "$_pin" "$_cdir" "$_impl_model"
+      _pin_bad=1
+    fi
+  done <<EOF
 $_pins
 EOF
-  fi
-
-  return "$_bad"
+  return "$_pin_bad"
 }
 
-# check_cross <root>: root and template must carry the same agent files with
+# check_cross <tree>: root and template must carry the same agent files with
 # the same frontmatter model.
 check_cross() {
-  _root="$1"
-  _ra="$_root/$ROOT_SIDE/agents"
-  _ta="$_root/$TEMPLATE_SIDE/agents"
-  _bad=0
+  _tree="$1"
+  _ra="$_tree/$ROOT_SIDE/agents"
+  _ta="$_tree/$TEMPLATE_SIDE/agents"
+  _cross_bad=0
+
+  for _d in "$ROOT_SIDE" "$TEMPLATE_SIDE"; do
+    if [ ! -d "$_tree/$_d/agents" ]; then
+      printf 'FAIL: %s/agents: directory not found, cannot compare root and template agents\n' "$_d"
+      _cross_bad=1
+    fi
+  done
+  [ "$_cross_bad" -eq 0 ] || return 1
 
   for _f in "$_ra"/*.md; do
     [ -f "$_f" ] || continue
     _name="$(basename "$_f" .md)"
     if [ ! -f "$_ta/$_name.md" ]; then
       printf 'FAIL: %s/agents/%s.md (agent %s): missing from %s/agents\n' "$ROOT_SIDE" "$_name" "$_name" "$TEMPLATE_SIDE"
-      _bad=1
+      _cross_bad=1
       continue
     fi
     _rm="$(frontmatter_model "$_f")"
     _tm="$(frontmatter_model "$_ta/$_name.md")"
-    if [ "$_rm" = "$_tm" ]; then
-      printf 'PASS: agent %s: root and template frontmatter model both %s\n' "$_name" "${_rm:-<none>}"
-    else
+    # Both sides lacking model: prints nothing: check_side already fails each side.
+    if [ "$_rm" != "$_tm" ]; then
       printf 'FAIL: %s/agents/%s.md vs %s/agents/%s.md (agent %s): frontmatter model %s (root) != %s (template)\n' "$ROOT_SIDE" "$_name" "$TEMPLATE_SIDE" "$_name" "$_name" "${_rm:-<none>}" "${_tm:-<none>}"
-      _bad=1
+      _cross_bad=1
+    elif [ -n "$_rm" ]; then
+      printf 'PASS: agent %s: root and template frontmatter model both %s\n' "$_name" "$_rm"
     fi
   done
   for _f in "$_ta"/*.md; do
@@ -245,14 +302,15 @@ check_cross() {
     _name="$(basename "$_f" .md)"
     if [ ! -f "$_ra/$_name.md" ]; then
       printf 'FAIL: %s/agents/%s.md (agent %s): missing from %s/agents\n' "$TEMPLATE_SIDE" "$_name" "$_name" "$ROOT_SIDE"
-      _bad=1
+      _cross_bad=1
     fi
   done
 
-  return "$_bad"
+  return "$_cross_bad"
 }
 
-# run_checker <function> [args...]: run a checker in a subshell; sets _out/_rc.
+# run_checker <function> [args...]: run a checker in a subshell (the isolation
+# the checkers' shared globals rely on); sets _out/_rc.
 run_checker() {
   if _out="$("$@")"; then
     _rc=0
@@ -317,6 +375,29 @@ other_model() {
     opus) printf 'sonnet' ;;
     *) printf 'opus' ;;
   esac
+}
+
+# require_fixture_agent <claude_dir> <name>: record an explicit setup FAIL when
+# a self-test fixture agent is missing from the real tree (renamed or removed),
+# instead of letting a mutation miss without explanation.
+require_fixture_agent() {
+  if [ -f "$PROJECT_ROOT/$1/agents/$2.md" ]; then
+    return 0
+  fi
+  record_fail "self-test fixture agent $2 not found under $1/agents"
+  return 1
+}
+
+# add_fixture_agent <claude_dir> <name>: add agents/<name>.md to FIXTURE only
+# (a copy of TARGET_AGENT); fails the setup when <name> exists in the real tree.
+add_fixture_agent() {
+  for _as in "$ROOT_SIDE" "$TEMPLATE_SIDE"; do
+    if [ -e "$PROJECT_ROOT/$_as/agents/$2.md" ]; then
+      record_fail "self-test setup: $_as/agents/$2.md exists in the real tree; rename EXTRA_AGENT"
+      return 1
+    fi
+  done
+  cp "$FIXTURE/$1/agents/$TARGET_AGENT.md" "$FIXTURE/$1/agents/$2.md"
 }
 
 # Mutators: <file> [args]. Each rewrites the file through a temp file.
@@ -408,19 +489,32 @@ mut_pin() {
   sed 's/`model: [^`]*` pinned in frontmatter/`model: '"$2"'` pinned in frontmatter/' "$1" > "$1.tmp" && mv "$1.tmp" "$1"
 }
 
-mut_remove_file() {
-  rm -f "$1"
+# mut_drop_pin <file>: delete the pin sentence.
+mut_drop_pin() {
+  sed 's/`model: [^`]*` pinned in frontmatter//' "$1" > "$1.tmp" && mv "$1.tmp" "$1"
 }
 
-# mutate <relative-path> <mutator> [args...]: apply a mutator to FIXTURE/<path>;
-# fails (and records a FAIL) when the mutation left the file identical to the
-# real one, so a stale mutation cannot masquerade as a detection.
+# mut_remove <path>: delete a fixture file or directory.
+mut_remove() {
+  rm -rf "$1"
+}
+
+# mutate <relative-path> <mutator> [args...]: apply a mutator to FIXTURE/<path>.
+# Records a setup FAIL and returns 1 when <path> is not in the fixture, or when
+# the mutation left it identical to the real one, so a stale mutation cannot
+# masquerade as a detection.
 mutate() {
   _mrel="$1"
   _mfn="$2"
   shift 2
+  if [ ! -e "$FIXTURE/$_mrel" ]; then
+    record_fail "self-test setup: $_mrel not found in the fixture copy"
+    return 1
+  fi
   "$_mfn" "$FIXTURE/$_mrel" "$@"
-  if cmp -s "$FIXTURE/$_mrel" "$PROJECT_ROOT/$_mrel" 2> /dev/null; then
+  # A removal is a change by definition; anything still present must differ.
+  [ -e "$FIXTURE/$_mrel" ] || return 0
+  if [ -d "$FIXTURE/$_mrel" ] || cmp -s "$FIXTURE/$_mrel" "$PROJECT_ROOT/$_mrel" 2> /dev/null; then
     record_fail "self-test setup: $_mfn left $_mrel unchanged (mutation did not apply)"
     return 1
   fi
@@ -461,7 +555,19 @@ assert_clean() {
   fi
 }
 
-self_test_side() {
+# self_test_guards: the fixture guard must name a missing fixture agent.
+self_test_guards() {
+  _guard_out="$(require_fixture_agent "$ROOT_SIDE" "no-such-agent" || :)"
+  case "$_guard_out" in
+    *"FAIL: self-test fixture agent no-such-agent not found under $ROOT_SIDE/agents"*)
+      record_pass "fixture guard names a missing fixture agent and its directory"
+      ;;
+    *) record_fail "fixture guard did not report a missing fixture agent: $_guard_out" ;;
+  esac
+}
+
+# self_test_side_drift <claude_dir>: table, frontmatter, and pin drift on one side.
+self_test_side_drift() {
   _side="$1"
   _agent_rel="$_side/agents/$TARGET_AGENT.md"
   _routing_rel="$_side/rules/ralph/model-routing.md"
@@ -497,6 +603,20 @@ self_test_side() {
   fi
 
   new_fixture
+  if mutate "$_routing_rel" mut_drop_pin; then
+    run_checker check_side "$FIXTURE" "$_side"
+    assert_detected "[$_side] (h) pin sentence removed" "$_rc" "$_out" "FAIL: $_routing_rel: sentence \"model: <x> pinned in frontmatter\" not found"
+  fi
+}
+
+# self_test_side_edges <claude_dir>: missing values, duplicates, ignored words,
+# and missing inputs on one side.
+self_test_side_edges() {
+  _side="$1"
+  _agent_rel="$_side/agents/$TARGET_AGENT.md"
+  _routing_rel="$_side/rules/ralph/model-routing.md"
+
+  new_fixture
   if mutate "$_agent_rel" mut_drop_fm_model; then
     run_checker check_side "$FIXTURE" "$_side"
     assert_detected "[$_side] (e) agent frontmatter lacks a model line" "$_rc" "$_out" "$_agent_rel" "$TARGET_AGENT"
@@ -513,9 +633,28 @@ self_test_side() {
     run_checker check_side "$FIXTURE" "$_side"
     assert_clean "[$_side] (g) backticked words that are not agent files are ignored" "$_rc" "$_out"
   fi
+
+  new_fixture
+  if mutate "$_side/agents" mut_remove; then
+    run_checker check_side "$FIXTURE" "$_side"
+    assert_detected "[$_side] (j) agents directory missing" "$_rc" "$_out" "FAIL: $_side/agents: directory not found"
+  fi
+
+  new_fixture
+  if mutate "$_routing_rel" mut_remove; then
+    run_checker check_side "$FIXTURE" "$_side"
+    assert_detected "[$_side] (j) model-routing.md missing" "$_rc" "$_out" "FAIL: $_routing_rel: file not found"
+  fi
 }
 
-self_test_cross() {
+self_test_side() {
+  require_fixture_agent "$1" "$TARGET_AGENT" || return 0
+  self_test_side_drift "$1"
+  self_test_side_edges "$1"
+}
+
+# self_test_cross_models: frontmatter model drift between the two sides.
+self_test_cross_models() {
   new_fixture
   run_checker check_cross "$FIXTURE"
   assert_clean "baseline copy passes root-vs-template comparison" "$_rc" "$_out"
@@ -527,11 +666,50 @@ self_test_cross() {
     assert_detected "template-only agent model change (root vs template)" "$_rc" "$_out" "$ROOT_SIDE/agents/$TARGET_AGENT.md" "$TEMPLATE_SIDE/agents/$TARGET_AGENT.md" "$TARGET_AGENT"
   fi
 
+  # check_side fails an agent with no model: on each side; the comparison must
+  # not count "both <none>" as a match.
   new_fixture
-  if mutate "$TEMPLATE_SIDE/agents/doc-maintainer.md" mut_remove_file; then
+  if mutate "$ROOT_SIDE/agents/$TARGET_AGENT.md" mut_drop_fm_model &&
+    mutate "$TEMPLATE_SIDE/agents/$TARGET_AGENT.md" mut_drop_fm_model; then
     run_checker check_cross "$FIXTURE"
-    assert_detected "agent file missing from template (root vs template)" "$_rc" "$_out" "$TEMPLATE_SIDE/agents" "doc-maintainer"
+    case "$_out" in
+      *"PASS: agent $TARGET_AGENT:"*)
+        record_fail "agent with no model: on both sides: comparison printed a PASS line"
+        ;;
+      *) record_pass "agent with no model: on both sides gets no PASS line in the root-vs-template comparison" ;;
+    esac
   fi
+}
+
+# self_test_cross_files: agent files or the agents directory present on one side only.
+self_test_cross_files() {
+  new_fixture
+  if mutate "$TEMPLATE_SIDE/agents/$CROSS_FIXTURE_AGENT.md" mut_remove; then
+    run_checker check_cross "$FIXTURE"
+    assert_detected "agent file missing from template (root vs template)" "$_rc" "$_out" "$TEMPLATE_SIDE/agents" "$CROSS_FIXTURE_AGENT"
+  fi
+
+  new_fixture
+  if add_fixture_agent "$TEMPLATE_SIDE" "$EXTRA_AGENT"; then
+    run_checker check_cross "$FIXTURE"
+    assert_detected "(i) agent file only in template (root vs template)" "$_rc" "$_out" "$TEMPLATE_SIDE/agents/$EXTRA_AGENT.md" "missing from $ROOT_SIDE/agents"
+  fi
+
+  for _xs in "$ROOT_SIDE" "$TEMPLATE_SIDE"; do
+    new_fixture
+    if mutate "$_xs/agents" mut_remove; then
+      run_checker check_cross "$FIXTURE"
+      assert_detected "(j) $_xs/agents missing (root vs template)" "$_rc" "$_out" "FAIL: $_xs/agents: directory not found"
+    fi
+  done
+}
+
+self_test_cross() {
+  require_fixture_agent "$ROOT_SIDE" "$TARGET_AGENT" || return 0
+  require_fixture_agent "$TEMPLATE_SIDE" "$TARGET_AGENT" || return 0
+  require_fixture_agent "$TEMPLATE_SIDE" "$CROSS_FIXTURE_AGENT" || return 0
+  self_test_cross_models
+  self_test_cross_files
 }
 
 printf '\n== Self-test: mutations on throwaway copies ==\n'
@@ -540,6 +718,7 @@ if [ "$_fail" -gt 0 ]; then
   # tree; with the real tree already failing, their results would only add noise.
   printf '  SKIP: real tree has %d failure(s) above; fix them to run the mutation self-test\n' "$_fail"
 else
+  self_test_guards
   self_test_side "$ROOT_SIDE"
   self_test_side "$TEMPLATE_SIDE"
   self_test_cross

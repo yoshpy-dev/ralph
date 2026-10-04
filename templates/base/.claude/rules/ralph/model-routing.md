@@ -5,16 +5,12 @@ tasks. Delegation timing/order lives in `subagent-policy.md`.
 
 ## Tier table
 
-| Seat | Model | Examples |
-|------|-------|----------|
+| Seat group | Model | Agents and typical work |
+|------------|-------|-------------------------|
 | Orchestrator (main session) | session model (user's choice) | planning, decomposition, arbitration, final review |
 | Implementation and verification seats | `opus` | scoped implementation (`implementer`), spec/static verification (`verifier`), test execution (`tester`), design trade-offs, ambiguous root-cause debugging |
 | Review and doc seats | `sonnet` | diff-quality review (`reviewer`), doc sync (`doc-maintainer`) |
 | Bulk mechanical work | `haiku` | grep/file inventory, log scanning, large read-only sweeps |
-
-Seat defaults changed on 2026-10-04 (maintainer decision): `implementer`,
-`verifier`, and `tester` moved from `sonnet` to `opus`; `reviewer` moved from
-`opus` to `sonnet`.
 
 Quality is preserved by plan artifacts, not by model tier: when delegating,
 the prompt must carry acceptance criteria, exact verification commands, and a
