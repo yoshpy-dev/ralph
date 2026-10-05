@@ -1,6 +1,7 @@
 # __TITLE__
 
 - Status: Draft
+- Approved: TBD
 - Owner: Claude Code
 - Date: __DATE__
 - Related request: __REQUEST__
@@ -17,6 +18,11 @@
 ## Assumptions
 
 ## Affected areas
+
+## Visual review
+
+<!-- Visual review page path (.harness/state/plan-visual/<slug>.html) and the self-check result. See .claude/skills/plan/diagrams.md. -->
+<!-- No page? Write: "None (<reason>)" -->
 
 ## Design decisions
 
@@ -55,6 +61,7 @@
 ## Progress checklist
 
 - [ ] Plan reviewed
+- [ ] Plan approved
 - [ ] Branch created
 - [ ] Implementation started
 - [ ] Review artifact created
