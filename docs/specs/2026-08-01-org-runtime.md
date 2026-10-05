@@ -23,8 +23,8 @@ Ralph Loop(/loop)の自律実行系を撤去し、Lead LLM が herdr(実行・�
 
 ### 2026-10-05 改訂(refactor/rename-work-skill)
 
-- (a) 標準フローの実装ステップを担うスキルを `/work` から `/implement` に改名した(Codex では `$work` から `$implement`)。Summary と FR-11 の skill 一覧にある `/work` は `/implement` と読み替える。
-- 本文の履歴の記述は書き換えない。FR-11 の行には改訂の印を付けた。Summary には印を付けない。上の (a) が読み替えを述べている。
+- (a) 標準フローの実装ステップを担うスキルを `/work` から `/implement` に改名した(Codex では `$work` から `$implement`)。Summary と FR-11 の skill 一覧にある `/work`、および影響範囲の表の `.claude/skills/`(work / loop / ...)の `work` は、`/implement`(スキル名は `implement`)と読み替える。
+- 本文の履歴の記述は書き換えない。FR-11 の行には改訂の印を付けた。Summary と影響範囲の表には印を付けない。上の (a) が読み替えを述べている。
 
 ### 運用ノート: 既定 codex スラッグの更新手順(2026-09-18、issue #156)
 

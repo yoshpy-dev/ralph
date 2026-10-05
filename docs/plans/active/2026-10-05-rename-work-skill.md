@@ -28,7 +28,7 @@
 - `docs/tech-debt/README.md` の RESOLVED 行(16〜17 行目)。履歴として残す。現行の行(150 行目)だけ直す
 - 旧名 `work` の互換スタブ(エイリアス)は置かない(Design decisions 参照)
 - 下流の seed ファイル(`.codex/AGENTS.override.md`、`docs/**`)を upgrade で自動的に書き換えること。seed は利用者の持ち物で、upgrade はテンプレートの変化を advisory diff で 1 回知らせるだけという既存の仕様に従う(AC6 で advisory に載ることを確かめる)
-- `ralph upgrade` が削除後に空ディレクトリ(`.claude/skills/work/`)を残す挙動の修正。`ApplyOps` は `os.Remove` だけを呼ぶ(`internal/upgrade/replaceplan.go:540`)。git は空ディレクトリを追跡せず、`check-skill-sync.sh` は SKILL.md のあるディレクトリだけを数えるので検査には影響しない。Claude Code / Codex のスキル探索が SKILL.md のないディレクトリを無視する点は推測で、未確認
+- `ralph upgrade` が削除後に空ディレクトリ(`.claude/skills/work/` と `.agents/skills/work/`)を残す挙動の修正。`ApplyOps` は `os.Remove` だけを呼ぶ(`internal/upgrade/replaceplan.go:540`)。git は空ディレクトリを追跡せず、`check-skill-sync.sh` は SKILL.md のあるディレクトリだけを数えるので検査には影響しない。Claude Code / Codex のスキル探索が SKILL.md のないディレクトリを無視する点は推測で、未確認
 - `implementer` サブエージェント・`.harness/state/standard-pipeline/` のパス・insights の `phase: implement` の名前変更(すでに `implement` 系でそろっている)
 - リリース(`/release` は手動。この PR では版を切らない)
 
@@ -78,7 +78,7 @@ templates 側(30 ファイル): `templates/base/` 配下の上記と同じ構成
   - core: `.claude/skills/work/SKILL.md` と `.agents/skills/work/SKILL.md` が削除され、`implement/SKILL.md`(2 か所)が作られる。upgrade レポートの Deleted / Created に載る
   - seed: upgrade レポートの advisory に `.codex/AGENTS.override.md`、`docs/quality/definition-of-done.md`、`docs/insights/README.md`、`docs/recipes/codex-setup.md` が載り、各 diff に `implement` への変更が含まれる。これらのファイルの本文は upgrade で変わらない(seed の仕様)
   - block: `AGENTS.md` の管理ブロックが `spec/plan/implement` に更新される
-- [ ] AC7: `go test ./...` と `./scripts/run-test.sh` が通る
+- [x] AC7: `go test ./...` と `./scripts/run-test.sh` が通る
 
 ## Implementation outline
 
@@ -125,9 +125,12 @@ templates 側(30 ファイル): `templates/base/` 配下の上記と同じ構成
 
 - 2026-10-05 self-review F-1(MEDIUM): 当初の AC2 の grep は、`spec, plan, work, verify`、`Spec, plan, and work flows`、`plan / work` のような列挙を拾えなかった。`README.md` 29 / 111 / 170 行目、`.codex/README.md` 48 行目(template 側も同じ)、`docs/research/approach-comparison.md` 87 行目に旧名が残っていた。`.codex/README.md` は core 扱いなので下流にも届く。AC2 に `plan,? (and )?work\b|plan / work\b` を足し、修正スライスで 6 行を直す。`docs/research/approach-comparison.md` は Affected areas になかったが、改訂の続いている現行の文書なので対象に加える
 - self-review F-2 / F-4(LOW): コメントの折り返しと段落を直す。F-5(LOW): Evidence 節にあった scratchpad のパスを消した。PR 後には残らない一時領域のため
+- verify V-1(LOW): upgrade 後に残る空ディレクトリは `.claude/skills/work/` だけでなく `.agents/skills/work/` もだった。Non-goals と Evidence の 2 か所に `.agents/` 側を足した(sync-docs)。PR 本文の移行手順には「upgrade 後、空の `.claude/skills/work/` と `.agents/skills/work/` は手で消してよい」を足す(`/pr` で書く)
+- sync-docs D-1: `docs/specs/2026-08-01-org-runtime.md` の 2026-10-05 改訂 (a) は `/work` が残る箇所を Summary と FR-11 としていたが、影響範囲の表(127 行目)の `.claude/skills/`(work / loop / ...)にも `work` がある。AC2 の grep は `docs/specs` を除外しているので検出できなかった。改訂 (a) に影響範囲の表を足した。本文の行は変えていない
 
 ## Known gaps
 
+- AC2 の旧名の grep は手で流す確認で、回帰テストにも CI にもなっていない(tester の Test gaps)。旧名が `work/` ディレクトリや `/work` の形で戻っても、今のテストは落ちない。`docs/tech-debt/README.md` に行を足した(`tests/test-no-loop-references.sh` と同じ形の回帰テストが候補)
 - self-review F-3(LOW): `detectFlow` の `/implement\b` は、`refactor/implement-foo` や `/implement.md` にも当たる。`\b` が `-` と `.` の前でも成り立つためで、そういう文字列が先頭 20 行にあるレポートは standard と判定される。Ralph Loop が撤去された今は standard と判定されることがほぼ正しいので、直さずに残す
 
 ## Progress checklist
@@ -139,9 +142,9 @@ templates 側(30 ファイル): `templates/base/` 配下の上記と同じ構成
 - [x] Slice C: AGENTS・README・docs の参照(71a3c2a8)
 - [x] Slice D: Go(6f1fec2c)
 - [x] AC5 / AC6 の実機確認
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Review artifact created
+- [x] Verification artifact created
+- [x] Test artifact created
 - [ ] PR created
 
 ## Evidence
@@ -156,7 +159,9 @@ templates 側(30 ファイル): `templates/base/` 配下の上記と同じ構成
   - core: Deleted に `work/SKILL.md` が 2 か所、Created に `implement/SKILL.md` が 2 か所載った
   - seed: Advisories(4 件)に `.codex/AGENTS.override.md`、`docs/insights/README.md`、`docs/quality/definition-of-done.md`、`docs/recipes/codex-setup.md` が載った。どの diff にも `implement` への変更が入っており、ディスク上の本文は変わっていない
   - block: `AGENTS.md` の管理ブロックが `spec/plan/implement` と `3. Implement` に更新された
-  - 空の `.claude/skills/work/` が残った(Non-goals に書いた既知の挙動)
+  - 空の `.claude/skills/work/` と `.agents/skills/work/` が残った(Non-goals に書いた既知の挙動。当初は `.claude/` 側だけと書いていたが、verify V-1 の再実行で `.agents/` 側も空のまま残ると分かった)
+- AC7: `docs/reports/test-2026-10-05-rename-work-skill.md` に記録。`go test ./... -count=1` と `./scripts/run-test.sh` はどちらも rc 0(shell 1,523 件、Go 8 パッケージ、失敗 0)。`TestDetectFlow` の 7 件は PASS で、tester が別に作った mutation 5 件はすべて red になった
+- 成果物: `docs/reports/self-review-2026-10-05-rename-work-skill.md`、`docs/reports/verify-2026-10-05-rename-work-skill.md`(pass、LOW 1 件 V-1)、`docs/reports/test-2026-10-05-rename-work-skill.md`(pass)、`docs/reports/sync-docs-2026-10-05-rename-work-skill.md`
 
 ## Readiness checklist
 
