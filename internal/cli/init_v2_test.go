@@ -49,7 +49,7 @@ func setupTestEmbedFSV2(t *testing.T) {
 		"templates/base/ralph.toml":                         {Data: []byte("[pipeline]\nmodel = \"test\"\n[doctor]\nrequire_codex_cli = false\n")},
 		"templates/base/docs/quality/definition-of-done.md": {Data: []byte("# Definition of done\n")},
 		"templates/base/.github/workflows/verify.yml":       {Data: []byte("name: verify\n")},
-		"templates/base/.claude/skills/work/SKILL.md":       {Data: []byte("---\nname: work\ndescription: work\n---\nbody\n")},
+		"templates/base/.claude/skills/implement/SKILL.md":  {Data: []byte("---\nname: implement\ndescription: implement\n---\nbody\n")},
 		"templates/base/.claude/settings.json":              {Data: []byte("{}\n")},
 		"templates/base/scripts/run-verify.sh":              {Data: []byte("#!/bin/sh\necho ok\n")},
 		"templates/base/.ralph/local/verify.d/.gitkeep":     {Data: []byte("")},
@@ -85,14 +85,14 @@ func TestExecuteInit_V2_FreshInit_LayoutAndOwners(t *testing.T) {
 		".gitignore": scaffold.OwnerBlock,
 		"CLAUDE.md":  scaffold.OwnerSeed,
 		"ralph.toml": scaffold.OwnerSeed,
-		filepath.Join("docs", "quality", "definition-of-done.md"): scaffold.OwnerSeed,
-		filepath.Join(".github", "workflows", "verify.yml"):       scaffold.OwnerSeed,
-		filepath.Join(".claude", "skills", "work", "SKILL.md"):    scaffold.OwnerCore,
-		filepath.Join("scripts", "run-verify.sh"):                 scaffold.OwnerCore,
-		filepath.Join(".ralph", "local", "verify.d", ".gitkeep"):  scaffold.OwnerSeed,
-		filepath.Join(".ralph", "core", "settings.ralph.json"):    scaffold.OwnerCore,
-		filepath.Join(".codex", "AGENTS.override.md"):             scaffold.OwnerSeed,
-		filepath.Join(".codex", "hooks.json"):                     scaffold.OwnerCore,
+		filepath.Join("docs", "quality", "definition-of-done.md"):   scaffold.OwnerSeed,
+		filepath.Join(".github", "workflows", "verify.yml"):         scaffold.OwnerSeed,
+		filepath.Join(".claude", "skills", "implement", "SKILL.md"): scaffold.OwnerCore,
+		filepath.Join("scripts", "run-verify.sh"):                   scaffold.OwnerCore,
+		filepath.Join(".ralph", "local", "verify.d", ".gitkeep"):    scaffold.OwnerSeed,
+		filepath.Join(".ralph", "core", "settings.ralph.json"):      scaffold.OwnerCore,
+		filepath.Join(".codex", "AGENTS.override.md"):               scaffold.OwnerSeed,
+		filepath.Join(".codex", "hooks.json"):                       scaffold.OwnerCore,
 	}
 	for path, wantOwner := range wantOwners {
 		entry, ok := m.Files[path]
@@ -149,7 +149,7 @@ func TestExecuteInit_V2_FreshInit_DoctorHooksIntegrityPasses(t *testing.T) {
 		"templates/base/ralph.toml":                         {Data: []byte("[pipeline]\nmodel = \"test\"\n[doctor]\nrequire_codex_cli = false\n")},
 		"templates/base/docs/quality/definition-of-done.md": {Data: []byte("# Definition of done\n")},
 		"templates/base/.github/workflows/verify.yml":       {Data: []byte("name: verify\n")},
-		"templates/base/.claude/skills/work/SKILL.md":       {Data: []byte("---\nname: work\ndescription: work\n---\nbody\n")},
+		"templates/base/.claude/skills/implement/SKILL.md":  {Data: []byte("---\nname: implement\ndescription: implement\n---\nbody\n")},
 		// Dispatcher-shaped hook command, matching production
 		// templates/base/.claude/settings.json.
 		"templates/base/.claude/settings.json": {Data: []byte(`{
