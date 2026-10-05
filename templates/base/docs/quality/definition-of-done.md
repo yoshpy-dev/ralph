@@ -2,7 +2,7 @@
 
 A task is done only when all applicable items are satisfied.
 
-## For non-trivial code changes (standard /work flow)
+## For non-trivial code changes (standard /implement flow)
 
 - [ ] Active plan exists or was explicitly deemed unnecessary
 - [ ] Repo writes happened inside a clean-base task worktree, not the default checkout
@@ -38,7 +38,7 @@ verification work during `/self-review` is not valid.
 ## For org runtime tasks (`ralph org`)
 
 Autonomous multi-seat execution is a separate surface from the standard
-`/work` flow above; see `docs/specs/2026-08-01-org-runtime.md` and
+`/implement` flow above; see `docs/specs/2026-08-01-org-runtime.md` and
 `.claude/rules/ralph/agent-messaging.md` for its own definition of done (roster
 status, manifest events, watchdog alerts).
 

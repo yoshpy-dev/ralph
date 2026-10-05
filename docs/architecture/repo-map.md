@@ -43,7 +43,7 @@
 
 - `.claude/skills/spec/`: refine vague ideas into detailed specifications (auto-invoked when a request is too vague for /plan)
 - `.claude/skills/plan/`: create plans (auto)
-- `.claude/skills/work/`: create branch and execute plans interactively (auto)
+- `.claude/skills/implement/`: create branch and execute plans interactively (auto)
 - `.claude/skills/org/`: autonomous multi-seat execution via `ralph org` verbs (auto)
 - `.claude/skills/self-review/`: self-review diff quality (auto)
 - `.claude/skills/verify/`: spec compliance and static analysis (auto)

@@ -37,12 +37,12 @@ hook-driven safety.
 Inside a `codex` session, kick off the standard flow with skill mentions:
 
 ```
-$spec    # optional; uses an isolated spec worktree for issue/spec outputs
-$plan    # ensures a clean-base task worktree, then creates docs/plans/active/<date>-<slug>.md
-$work    # resumes the task worktree, implements, runs the post-impl pipeline, then hands off to PR
+$spec       # optional; uses an isolated spec worktree for issue/spec outputs
+$plan       # ensures a clean-base task worktree, then creates docs/plans/active/<date>-<slug>.md
+$implement  # resumes the task worktree, implements, runs the post-impl pipeline, then hands off to PR
 ```
 
-After `$work` completes implementation, the standard pipeline runs
+After `$implement` completes implementation, the standard pipeline runs
 `self-review → verify → test → sync-docs` through Codex custom agents,
 then runs `$cross-review` and `$pr` inline. Invoke individual phase skills
 manually only when recovering from a failed or interrupted run.
