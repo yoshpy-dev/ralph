@@ -79,7 +79,7 @@ Example: `docs/insights/events/2026-07-13-ralph-insights.jsonl`
 
 ### Why per-task files?
 
-Each task (standard `/work` flow or an org-runtime seat) typically runs from
+Each task (standard `/implement` flow or an org-runtime seat) typically runs from
 its own worktree and branch. If all events were appended to a single global
 JSONL file, concurrent tasks would produce conflicting appends on merge.
 Per-task files make merges trivially clean: each task owns exactly one file,

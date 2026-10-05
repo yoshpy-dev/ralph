@@ -17,9 +17,9 @@ the prompt must carry acceptance criteria, exact verification commands, and a
 report contract (changed files, key decisions, verification evidence). A
 cheaper model with a precise plan beats an expensive model with a vague one.
 
-## Standard flow delegation (/work)
+## Standard flow delegation (/implement)
 
-Implementation slices in `/work` are delegated to the `implementer` subagent
+Implementation slices in `/implement` are delegated to the `implementer` subagent
 (`model: opus` pinned in frontmatter; Codex: `.codex/agents/implementer.toml`).
 The orchestrator (session model) retains planning, decomposition, handoff
 authoring, report adjudication, and final review — it does not write slice code
@@ -93,7 +93,7 @@ fallback defaults in sync when changing any of the three vars in
 via the tier table above. Each spawn appends a JSON line to
 `.harness/state/org/model-receipts.jsonl` with `ts / org_id / seat_id / role /
 driver / commanded_model / reported_effective_model / honored / reason`. This
-is a separate mechanism from the `/work` subagent tiers documented above —
+is a separate mechanism from the `/implement` subagent tiers documented above —
 see the org runtime spec shipped with your project for its own model
 selection rules. Codex seats have no aliases; `[org].model_pool` carries
 codex model slugs, and `ralph doctor` warns when a slug is missing from

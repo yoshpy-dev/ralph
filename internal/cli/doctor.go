@@ -219,7 +219,7 @@ func countFailed(results []checkResult) int {
 // callable. A bare exec.LookPath success is not enough — stale or broken
 // shims (npm-installed CLIs that lost their entry script, version managers
 // pointing at a removed install) appear on PATH but blow up at runtime,
-// which lets `ralph doctor` report `pass` while every subsequent /work or
+// which lets `ralph doctor` report `pass` while every subsequent /implement or
 // /cross-review fails.
 //
 // Bounded by a 5-second timeout so a hung CLI cannot wedge `ralph doctor`.

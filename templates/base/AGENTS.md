@@ -18,14 +18,14 @@ Build coding-agent workflows that are:
 
 This project ships two independent execution surfaces:
 
-- **development harness** — the interactive standard flow below, used for all spec/plan/work/review changes.
+- **development harness** — the interactive standard flow below, used for all spec/plan/implement/review changes.
 - **org runtime** — autonomous multi-seat execution (`ralph org spawn/send/wait/...`) for tasks that need a coordinating `leader` plus role seats running outside a single interactive session.
 
 The development harness:
 
 1. Spec (auto, optional — refines vague ideas into detailed specifications via decision-tree questioning, codebase exploration, web research, and user clarification)
 2. Plan (auto — ensures a clean-base task worktree, creates plan) [+ optional Codex plan advisory]
-3. Work (auto — resumes task worktree, interactive implementation)
+3. Implement (auto — resumes task worktree, interactive implementation)
 4. Self-review (auto — via `reviewer` subagent, or pipeline-internal)
 5. Verify (auto — via `verifier` subagent, or pipeline-internal)
 6. Test (auto — via `tester` subagent, or pipeline-internal)
@@ -34,7 +34,7 @@ The development harness:
 9. PR (auto — includes hand-off)
 10. CI verify + human merge
 
-All repo writes in spec/plan/work flows must happen inside a task worktree
+All repo writes in spec/plan/implement flows must happen inside a task worktree
 created from a clean default branch.
 
 ## Source of truth

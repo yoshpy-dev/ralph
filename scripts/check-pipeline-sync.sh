@@ -27,7 +27,7 @@ ok "Canonical source valid"
 # referenced" list in $CANONICAL itself; CLAUDE.md carries no pipeline
 # detail of its own — see .claude/rules/ralph/ralph-workflow.md)
 REFS="
-.claude/skills/work/SKILL.md
+.claude/skills/implement/SKILL.md
 .claude/skills/cross-review/SKILL.md
 .claude/rules/ralph/subagent-policy.md
 docs/quality/definition-of-done.md

@@ -42,10 +42,10 @@ Start Codex from the project root and invoke a ralph skill by mention:
 codex
 > $spec describe the change you want to scope
 > $plan
-> $work
+> $implement
 ```
 
-Spec, plan, and work flows create or resume clean-base task worktrees before
+Spec, plan, and implement flows create or resume clean-base task worktrees before
 writing repo artifacts; PR hand-off cleans up the task worktree and local
 branch.
 
@@ -58,7 +58,7 @@ will not run the ralph skill.
 | Concern | Claude Code | Codex |
 |---------|-------------|-------|
 | Skill invocation | `/skill-name` slash | `$skill-name` mention or `/skills` menu |
-| Subagents in `/work` post-impl | `Task(subagent_type=...)` calls | `.codex/agents/` custom agents with the same phase roles |
+| Subagents in `/implement` post-impl | `Task(subagent_type=...)` calls | `.codex/agents/` custom agents with the same phase roles |
 | Interactive choices | `AskUserQuestion` | Numbered prompt + single-digit reply |
 | Cross-model second opinion | `/cross-review` calls `codex exec review` | `/cross-review` calls `claude -p` |
 | Org seat permission policy | `ralph.toml` `[org.permissions] default = "autonomous"` (or `"edits"` / `"guarded"`; per-role overrides supported) | same enum, mapped to Codex's own `sandbox_mode` + `approval_policy` flags |
@@ -71,7 +71,7 @@ either.
 
 Codex role definitions live in `.codex/agents/`:
 
-- `implementer` — scoped implementation worker; receives structured handoff from the orchestrator during `/work` step 6; stages only handoff-listed paths, runs verification, and returns a report with commit-boundary evidence. Like the other Codex custom agents, no per-agent model is pinned here — the Claude Code counterpart (`.claude/agents/implementer.md`) takes its model from its frontmatter, with the tier table in `.claude/rules/ralph/model-routing.md`; Codex runs follow the session/config model
+- `implementer` — scoped implementation worker; receives structured handoff from the orchestrator during `/implement` step 6; stages only handoff-listed paths, runs verification, and returns a report with commit-boundary evidence. Like the other Codex custom agents, no per-agent model is pinned here — the Claude Code counterpart (`.claude/agents/implementer.md`) takes its model from its frontmatter, with the tier table in `.claude/rules/ralph/model-routing.md`; Codex runs follow the session/config model
 - `reviewer` — diff quality only (post-implementation)
 - `verifier` — acceptance criteria, docs drift, and static checks (post-implementation)
 - `tester` — behavioral tests and failure analysis (post-implementation)

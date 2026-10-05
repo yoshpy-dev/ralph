@@ -26,7 +26,7 @@ Claude Code gives you a powerful agent, but the default setup is a blank slate. 
 | | Bare Claude Code | `ralph init` |
 |---|:---:|:---:|
 | Always-on map (`AGENTS.md` / `CLAUDE.md`) | — | ✓ |
-| On-demand skills (spec, plan, work, verify, ...) | manual | 10+ bundled |
+| On-demand skills (spec, plan, implement, verify, ...) | manual | 10+ bundled |
 | Deterministic hooks (mojibake guard, commit-msg, bash guard, ...) | manual | pre-wired |
 | Evidence-backed pipeline (self-review → verify → test → sync-docs → cross-review) | ad hoc | canonical order, enforced |
 | Isolated task execution | ad hoc branches | clean-base task worktrees |
@@ -80,7 +80,7 @@ inside an already resolved task worktree.
 In Claude Code, follow the loop with slash commands:
 
 ```
-/spec (optional) → /plan → /work
+/spec (optional) → /plan → /implement
 → /self-review → /verify → /test → /sync-docs
 → /cross-review (optional) → /pr
 ```
@@ -89,7 +89,7 @@ In Codex, the same flow runs via skill mention syntax (`/spec` collides with
 Codex built-in slash commands — use `$skill-name` or the `/skills` menu):
 
 ```
-$spec (optional) → $plan → $work
+$spec (optional) → $plan → $implement
 → $self-review → $verify → $test → $sync-docs
 → $cross-review (optional) → $pr
 ```
@@ -108,7 +108,7 @@ Before claiming a task is done:
 | | |
 |:---|:---|
 | **Maps, not manuals**<br/>Short `AGENTS.md` / `CLAUDE.md`; push detail into rules and skills, promote repeats into hooks. | **Canonical pipeline**<br/>`self-review → verify → test → sync-docs → cross-review → pr` enforced in the standard flow. |
-| **Deterministic hooks**<br/>Mojibake guard, commit-msg secret scan, Bash guardrails, verification reminders — pre-wired in `settings.json`. | **Worktree-first flow**<br/>Spec, plan, work, and PR artifacts are produced from clean-base task worktrees, with local cleanup after hand-off. |
+| **Deterministic hooks**<br/>Mojibake guard, commit-msg secret scan, Bash guardrails, verification reminders — pre-wired in `settings.json`. | **Worktree-first flow**<br/>Spec, plan, implement, and PR artifacts are produced from clean-base task worktrees, with local cleanup after hand-off. |
 | **Org runtime**<br/>Autonomous multi-seat execution (`ralph org spawn/send/wait/...`) with a typed messaging protocol and pulse-layer watchdog — see [Org runtime](#org-runtime-autonomous-multi-seat-execution). | **Language packs**<br/>TypeScript, Python, Rust, Go, Dart, and Terraform starters (opt-in) with per-language `verify.sh` and path-scoped rules. |
 | **Drift-proof upgrades**<br/>Fully non-interactive `ralph upgrade` — core replace, managed-block update, and settings 3-way merge, with an upgrade report and a dedicated exit code for unresolved drift. | **Evidence over prose**<br/>Every self-review, verify, test, sync-docs, and cross-review triage pass produces a dated artifact in `docs/reports/`. |
 | **Cross-agent portable**<br/>`AGENTS.md` + `scripts/` + `packs/` stay neutral; `.claude/` and `.codex/` are agent-specific layers you can stack others beside. | **Local state, not repo churn**<br/>Worktree lifecycle records live under `git-common-dir`, outside tracked files and branch checkouts. |
@@ -167,7 +167,7 @@ The philosophy: **a map, not a manual**. Keep `AGENTS.md` small, push detail int
 ├── .claude/
 │   ├── settings.json         # each event points at ./.claude/hooks/ralph-dispatch.sh <event>
 │   ├── hooks/                # hook implementations + <event>.d/ dispatch entries (core -> .ralph/local -> .claude/hooks/local)
-│   ├── skills/               # on-demand workflows (plan, work, verify, ...)
+│   ├── skills/               # on-demand workflows (plan, implement, verify, ...)
 │   ├── agents/               # Claude Code subagent definitions
 │   └── rules/ralph/          # shipped ralph guidance (path-scoped, read by both agents); language pack rules render here too
 ├── .codex/
@@ -202,7 +202,7 @@ The philosophy: **a map, not a manual**. Keep `AGENTS.md` small, push detail int
 ```mermaid
 flowchart LR
     A["/spec<br/>(optional)"] --> B["/plan"]
-    B --> C["/work"]
+    B --> C["/implement"]
     C --> E["/self-review"]
     E --> F["/verify"]
     F --> G["/test"]
@@ -216,7 +216,7 @@ Every step in the loop, including `/spec`, is auto-invoked. `/release` is the on
 
 1. **Spec** (auto, optional — `/spec`) — refine vague requests through decision-tree questioning with recommended answers, codebase exploration, and interactive clarification. Issue-only specs use a temporary clean-base worktree and cleanup; saved specs create a docs/spec PR or hand off to `/plan`.
 2. **Plan** (auto — `/plan`) — ensures a clean-base task worktree, then writes a file-backed plan in `docs/plans/active/` with acceptance criteria, verify plan, test plan, risks.
-3. **Work** (auto — `/work`) — resumes the task worktree and implements interactively, delegating slices to the `implementer` subagent.
+3. **Implement** (auto — `/implement`) — resumes the task worktree and implements interactively, delegating slices to the `implementer` subagent.
 4. **Self-review** (auto — `/self-review`) — diff quality artifact.
 5. **Verify** (auto — `/verify`) — spec compliance + static analysis.
 6. **Test** (auto — `/test`) — behavioral tests must pass before PR.
@@ -229,7 +229,7 @@ See `.claude/rules/ralph/post-implementation-pipeline.md` for the canonical pipe
 
 ## Org runtime (autonomous multi-seat execution)
 
-For autonomous execution outside the interactive `/work` loop, `ralph org` spawns and coordinates multiple agent seats (a `leader` plus `implementer` and `reviewer` seats) over a typed messaging protocol (star topology — every seat addresses `TO: leader` only), with a two-layer watchdog (pulse watch + on-demand watcher) and an append-only manifest so `ralph status` works even if the underlying driver is stopped.
+For autonomous execution outside the interactive `/implement` loop, `ralph org` spawns and coordinates multiple agent seats (a `leader` plus `implementer` and `reviewer` seats) over a typed messaging protocol (star topology — every seat addresses `TO: leader` only), with a two-layer watchdog (pulse watch + on-demand watcher) and an append-only manifest so `ralph status` works even if the underlying driver is stopped.
 
 ```sh
 ralph org spawn --org-id my-task --id leader --role leader
@@ -280,7 +280,7 @@ on drift so the two agent surfaces cannot quietly diverge.
 | Concern | Claude Code | Codex |
 |---------|-------------|-------|
 | Skill invocation | `/skill-name` slash command | `$skill-name` mention or `/skills` menu — `/skill-name` collides with Codex built-ins (`/plan`, `/review`, `/status`) |
-| Subagents in `/work` post-impl | `Task(subagent_type=...)` calls | `.codex/agents/` custom agents with the same phase roles |
+| Subagents in `/implement` post-impl | `Task(subagent_type=...)` calls | `.codex/agents/` custom agents with the same phase roles |
 | Structured prompts | `AskUserQuestion` | numbered stdin prompt |
 | Cross-model reviewer | calls `codex exec review` | calls `claude -p` with adversarial reviewer prompt |
 | Org seat permission policy | `ralph.toml` `[org.permissions] default = "autonomous"` (or `"edits"` / `"guarded"`; per-role overrides supported) | same enum, mapped to Codex's own sandbox/approval flags |
@@ -291,7 +291,7 @@ on drift so the two agent surfaces cannot quietly diverge.
 See `docs/roadmap/harness-maturity-model.md`. Short version:
 
 1. Map + verify
-2. Plan/work/self-review/verify skills
+2. Plan/implement/self-review/verify skills
 3. Deterministic hooks
 4. Path-scoped rules and subagents
 5. Worktrees and agent teams for genuinely parallel tasks

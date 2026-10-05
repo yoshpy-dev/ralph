@@ -5,7 +5,7 @@ workflow guidance formerly in CLAUDE.md.
 
 ## Default behavior
 
-- All skills (`/spec`, `/plan`, `/work`, `/self-review`, `/verify`,
+- All skills (`/spec`, `/plan`, `/implement`, `/self-review`, `/verify`,
   `/test`, `/sync-docs`, `/cross-review`, `/pr`, `/audit-harness`, `/org`) are
   auto-invoked. The scaffold ships no manual-trigger skill.
 - Use `/spec` when the request is too vague for `/plan`. `/spec` refines
@@ -15,12 +15,12 @@ workflow guidance formerly in CLAUDE.md.
   create a docs/spec PR or hand off to `/plan` in the same task worktree.
 - Use `/plan` before risky, ambiguous, or multi-file work. `/plan` ensures a
   clean-base task worktree before writing plan artifacts.
-- `/work` resumes the task worktree and starts interactive implementation.
+- `/implement` resumes the task worktree and starts interactive implementation.
   Post-impl pipeline runs via subagents.
 - Autonomous multi-seat execution outside this interactive flow is the org
   runtime's job (`ralph org spawn/send/wait/...`). See the org runtime spec
   shipped with your project and `.claude/rules/ralph/agent-messaging.md`.
-- After `/work`, the post-implementation pipeline runs via subagents
+- After `/implement`, the post-implementation pipeline runs via subagents
   (`/self-review` → `/verify` → `/test` → `/sync-docs`), then `/cross-review`
   (optional, inline), then `/pr`.
 - `/self-review` is diff quality only. `/verify` is spec compliance + static
@@ -32,7 +32,7 @@ workflow guidance formerly in CLAUDE.md.
 - `/pr` creates the pull request, archives the plan, cleans up the task
   worktree/local branch, and completes the hand-off. A task is "done" when the
   PR is created and cleanup has either succeeded or reported recoverable state.
-- Subagent execution model: in `/work`, the post-impl pipeline runs via
+- Subagent execution model: in `/implement`, the post-impl pipeline runs via
   `Task(subagent_type=...)` calls (`reviewer`, `verifier`, `tester`,
   `doc-maintainer`). See `.claude/rules/ralph/subagent-policy.md`.
 - Run `./scripts/run-verify.sh` or an equivalent deterministic check before

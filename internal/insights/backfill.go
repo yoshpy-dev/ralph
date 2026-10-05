@@ -205,8 +205,15 @@ func slugAndCycleFromFilename(base, phase string) (slug string, cycle int) {
 	return slug, cycle
 }
 
+// implementSkillRe matches the /implement skill name at a word boundary so
+// paths such as agents/implementer.md do not count as a skill mention.
+var implementSkillRe = regexp.MustCompile(`/implement\b`)
+
 // detectFlow tries to infer "standard" or "loop" from report content.
 // Returns "" when not derivable — the caller omits the field.
+//
+// /implement is the standard-flow skill name since 2026-10-05; /work is its
+// former name, kept so reports written before the rename still classify.
 func detectFlow(path string) string {
 	f, err := os.Open(path)
 	if err != nil {
@@ -220,7 +227,7 @@ func detectFlow(path string) string {
 		if strings.Contains(line, "ralph-pipeline") || strings.Contains(line, "loop") {
 			return "loop"
 		}
-		if strings.Contains(line, "standard flow") || strings.Contains(line, "/work") {
+		if strings.Contains(line, "standard flow") || strings.Contains(line, "/work") || implementSkillRe.MatchString(line) {
 			return "standard"
 		}
 	}

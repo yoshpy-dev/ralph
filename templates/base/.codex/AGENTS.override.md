@@ -6,14 +6,14 @@ ignores it.
 
 ## Codex execution model
 
-- **Skill invocation**: use `$skill-name` mention syntax (e.g. `$spec`, `$work`)
+- **Skill invocation**: use `$skill-name` mention syntax (e.g. `$spec`, `$implement`)
   or pick from the `/skills` menu. Do **not** type `/skill-name` — the leading
   slash collides with Codex built-ins (`/plan`, `/review`, `/status`, etc.) and
   triggers the wrong handler.
 - **Subagents**: use Codex subagents from `.codex/agents/` for the standard
   ralph post-implementation pipeline (`self-review` → `verify` → `test` →
   `sync-docs`). Run `reviewer`, `verifier`, `tester`, and `doc-maintainer`
-  sequentially in that order. During `/work` step 6 (implementation), dispatch
+  sequentially in that order. During `/implement` step 6 (implementation), dispatch
   each slice to the `implementer` subagent (`.codex/agents/implementer.toml`)
   with the structured handoff defined in `.claude/rules/ralph/model-routing.md`. If
   dispatch fails, run the step inline and note the fallback in the report.

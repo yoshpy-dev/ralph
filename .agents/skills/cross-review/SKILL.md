@@ -23,8 +23,8 @@ Provide a cross-model second opinion on the current diff before PR creation.
    a. Read `.harness/state/standard-pipeline/active-plan.json` to get the pinned plan path.
       - **If present**: proceed to step 1.b (persisted-identity mode).
       - **If missing**: warn the user and continue in **fallback mode** — no persisted identity. In fallback mode: skip step 1.b entirely (do NOT read or create `cycle-count.json`, to avoid reusing stale counters from other plans or leaking orphan state) and set `cycle=1`, `cap=∞` for step 7 (cap cannot be enforced).
-   b. (Persisted-identity mode only) Confirm `active-plan.json` includes the task worktree metadata written by `/work`: `plan_path`, `worktree_path`, `branch`, and `worktree_state_id`. If `plan_path` no longer exists, try `./scripts/ralph-worktree.sh resume --id <worktree_state_id>` and recover the plan from the recorded canonical reference before falling back. Do not rescan `docs/plans/active/` while valid pinned state exists.
-   c. (Persisted-identity mode only) Read `.harness/state/standard-pipeline/cycle-count.json`. If its `plan_path` matches `active-plan.json`, use its `cycle`. If missing, initialize `{"plan_path": "<path>", "cycle": 1}` (first /cross-review run of this plan). If its `plan_path` does **not** match, warn and treat as fallback mode for this run (do not overwrite — `/work` is responsible for resolving mismatched state).
+   b. (Persisted-identity mode only) Confirm `active-plan.json` includes the task worktree metadata written by `/implement`: `plan_path`, `worktree_path`, `branch`, and `worktree_state_id`. If `plan_path` no longer exists, try `./scripts/ralph-worktree.sh resume --id <worktree_state_id>` and recover the plan from the recorded canonical reference before falling back. Do not rescan `docs/plans/active/` while valid pinned state exists.
+   c. (Persisted-identity mode only) Read `.harness/state/standard-pipeline/cycle-count.json`. If its `plan_path` matches `active-plan.json`, use its `cycle`. If missing, initialize `{"plan_path": "<path>", "cycle": 1}` (first /cross-review run of this plan). If its `plan_path` does **not** match, warn and treat as fallback mode for this run (do not overwrite — `/implement` is responsible for resolving mismatched state).
    d. Read `RALPH_STANDARD_MAX_PIPELINE_CYCLES` by sourcing `./scripts/ralph-config.sh` in a subshell (default `2`).
    e. Record the current cycle number and the cap for use in Step 7.
 
@@ -157,7 +157,7 @@ Provide a cross-model second opinion on the current diff before PR creation.
    - **Non-cap re-run** (Case A / Case B, `CAP_REACHED = false`): If `active-plan.json` exists, increment `cycle-count.json` (`cycle += 1`), then guide the user back to `/self-review`. The incremented cycle represents "the pass the user is about to enter".
    - **Cap-reached Option 1** ("Raise the cap temporarily and re-run"): Do **NOT** increment `cycle-count.json`. Instruct the user to `export RALPH_STANDARD_MAX_PIPELINE_CYCLES=<current cycle + 1>` (or higher) before re-running, so the unchanged `cycle` falls below the new cap. Then guide them back to `/self-review`.
    - If the user chooses `/pr`: invoke /pr (which is responsible for deleting `active-plan.json` and `cycle-count.json` on success).
-   - If the user chooses Abort: stop without invoking /pr; leave state files in place so the next `/work` can resume.
+   - If the user chooses Abort: stop without invoking /pr; leave state files in place so the next `/implement` can resume.
 
 ## CLI execution modes
 
