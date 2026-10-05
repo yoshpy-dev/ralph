@@ -1,6 +1,6 @@
 # rename-work-skill
 
-- Status: In progress
+- Status: PR created (#202), awaiting CI and merge
 - Owner: Claude Code
 - Date: 2026-10-05
 - Related request: work スキルの名称を implement スキル(もしくは短縮形)に変更したい(2026-10-05 ユーザー依頼)
@@ -145,7 +145,7 @@ templates 側(30 ファイル): `templates/base/` 配下の上記と同じ構成
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
-- [ ] PR created
+- [x] PR created
 
 ## Evidence
 
