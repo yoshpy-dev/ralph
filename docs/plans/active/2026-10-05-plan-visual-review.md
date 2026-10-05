@@ -155,7 +155,11 @@ root 側:
 - [x] Plan reviewed
 - [x] Branch created
 - [x] Visual review approved
-- [ ] Implementation started
+- [x] Implementation started
+  - S1 完了(bd6b6333): plan-visual.sh(open・shot・digest)、テスト 82 件、必須一覧の登録。digest は承認時の値 9c20a2da6606 と一致
+  - S2 完了(273a30ea): diagrams.md と visual-template.html、4 か所のミラー。SVG の色はクラスで付ける形にした(CSS の `svg text { fill }` が属性に勝つため)
+  - S3 の進め方: cross-review の SKILL.md・test-codex-exec-invocation.sh・defaults_sync_test.go が「/plan step 11.c」を参照しているので、Codex advisory は step 11 のまま残す。step 9 と 10 をまとめ、空いた step 10 に図解ページと自己チェック、step 12 に承認ゲートを置く
+  - メモ: Linux の `xdg-open` はバックエンドによってブラウザが閉じるまで戻らないかもしれない(未確認)。S3 で `open` の呼び方を書くときに考える
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
