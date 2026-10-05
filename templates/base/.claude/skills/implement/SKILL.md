@@ -1,5 +1,5 @@
 ---
-name: work
+name: implement
 description: Execute an approved plan in small coherent slices from an isolated task worktree, updating progress, evidence, and docs as implementation evolves. Invoke automatically after an approved plan exists and the task worktree is ready.
 ---
 Work from the active plan, not from memory alone.
@@ -7,10 +7,10 @@ Work from the active plan, not from memory alone.
 ## Steps
 
 1. **Resolve the target plan path** (must run before any branch or plan-file operations):
-   - `/work` operates on single-file plans (`docs/plans/active/<date>-<slug>.md`) only.
-   - Enumerate candidates: `.md` files directly under `docs/plans/active/` (excluding `.gitkeep`). **Ignore directories** — if a directory is the only entry, stop and report: this looks like a Ralph Loop directory plan (`_manifest.md` + `slice-*.md`); Ralph Loop's autonomous execution system was retired (see git history for the removed orchestration scripts, and `internal/org` for the current autonomous execution surface, `/org`). Convert the plan to a single-file plan via `/plan` and re-run `/work`, or use `/org` for autonomous multi-seat execution.
+   - `/implement` operates on single-file plans (`docs/plans/active/<date>-<slug>.md`) only.
+   - Enumerate candidates: `.md` files directly under `docs/plans/active/` (excluding `.gitkeep`). **Ignore directories** — if a directory is the only entry, stop and report: this looks like a Ralph Loop directory plan (`_manifest.md` + `slice-*.md`); Ralph Loop's autonomous execution system was retired (see git history for the removed orchestration scripts, and `internal/org` for the current autonomous execution surface, `/org`). Convert the plan to a single-file plan via `/plan` and re-run `/implement`, or use `/org` for autonomous multi-seat execution.
    - If exactly one candidate file exists, use it.
-   - If multiple candidate files exist, ask via AskUserQuestion which plan this `/work` run targets, and use the selected path.
+   - If multiple candidate files exist, ask via AskUserQuestion which plan this `/implement` run targets, and use the selected path.
    - If none exist, stop and ask the user to run `/plan` first.
    - Downstream steps in this skill — and downstream skills (`/cross-review`, `/pr`) — MUST use this resolved path instead of rescanning `docs/plans/active/`.
 2. **Resolve or resume the task worktree**, based on the plan resolved in Step 1:
@@ -18,7 +18,7 @@ Work from the active plan, not from memory alone.
    b. Determine branch name by running `./scripts/branch-name.sh from-plan <resolved-plan-path>`.
    c. Branch names must validate with `./scripts/branch-name.sh validate <branch-name>`. Allowed user-facing branch shapes are `<type>/<issue>/<slug>` (with issue) or `<type>/<slug>` (without issue), where `<type>` is one of `feat`, `fix`, `docs`, `chore`, `refactor`, `test`, `ci`, `build`, `perf`, `release`, or `security`.
    d. Run `./scripts/ralph-worktree.sh current`. If it returns a state file for the current worktree, use that state id. Otherwise run `./scripts/ralph-worktree.sh ensure --id plan-<slug> --kind standard --branch <branch-name> --path .claude/worktrees/<slug> --plan-path <absolute-plan-path> --canonical-ref <issue/spec/request reference> --cleanup-policy pr-success` unless a matching task worktree state already exists.
-   e. If this `/work` invocation is already running inside the returned worktree path, continue. If it is running outside that path, switch all subsequent commands and edits to the returned worktree path.
+   e. If this `/implement` invocation is already running inside the returned worktree path, continue. If it is running outside that path, switch all subsequent commands and edits to the returned worktree path.
    f. If the resolved plan file is a legacy plan outside the task worktree, stop and migrate it intentionally instead of silently copying it; new `/plan` runs should already create plans inside the task worktree.
    g. Update the resolved plan file inside the task worktree: replace `Branch: TBD` (or any TBD variant) with the actual branch name.
 3. **Pin the plan identity and initialize the pipeline cycle counter** (enforces the 2-cycle cap):
