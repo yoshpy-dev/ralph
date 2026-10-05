@@ -64,17 +64,17 @@ templates 側(30 ファイル): `templates/base/` 配下の上記と同じ構成
 
 ## Acceptance criteria
 
-- [ ] AC1: `.claude/skills/implement/SKILL.md`、`.agents/skills/implement/SKILL.md`、`templates/base/.claude/skills/implement/SKILL.md`、`templates/base/.agents/skills/implement/SKILL.md` が存在し、frontmatter が `name: implement`。4 か所のどこにも `work/` ディレクトリが残っていない
-- [ ] AC2: 現行ファイルに旧名の参照が残っていない。次のコマンドの出力が空になる(許容リストの 2 種類を `grep -v` で除いたあと):
+- [x] AC1: `.claude/skills/implement/SKILL.md`、`.agents/skills/implement/SKILL.md`、`templates/base/.claude/skills/implement/SKILL.md`、`templates/base/.agents/skills/implement/SKILL.md` が存在し、frontmatter が `name: implement`。4 か所のどこにも `work/` ディレクトリが残っていない
+- [x] AC2: 現行ファイルに旧名の参照が残っていない。次のコマンドの出力が空になる(許容リストの 2 種類を `grep -v` で除いたあと):
   `git grep -nP '/work\b|\$work\b|skills/work|"skills", "work"|name: work|spec/plan/work|Plan/work|\*\*Work\*\*|^[0-9]+\. Work ' -- . ':!docs/plans/archive' ':!docs/reports' ':!docs/evidence' ':!docs/specs' ':!docs/insights/events' ':!docs/plans/active/2026-10-05-rename-work-skill.md' ':!tests/test-check-template.sh' | grep -vE '^internal/insights/backfill(_test)?\.go:' | grep -v 'RESOLVED 2026-08-03 in refactor/org-runtime-retire-loop'`
   - 許容リスト: (1) `internal/insights/backfill.go` と `backfill_test.go` の旧名判定(旧レポート用に意図して残す)、(2) `docs/tech-debt/README.md` の RESOLVED 行 2 行(16〜17 行目、履歴)
   - `-P` を使う。macOS の `git grep -E` は `\b` を解釈しない。`tests/test-check-template.sh` の `$work` はシェル変数なので除外する。着手前の時点で 68 ファイルが該当
-- [ ] AC2b: 許容した履歴行が変わっていない。`git diff main...HEAD -- docs/tech-debt/README.md` の変更行が 150 行目の implementer.toml の行だけで、RESOLVED 行(16〜17 行目)に差分がない
-- [ ] AC2c: `docs/specs/2026-08-01-org-runtime.md` に「### 2026-10-05 改訂(refactor/rename-work-skill)」節があり、FR-11 の行に改訂の印がある。それ以外の本文の行は変わっていない(`git diff main...HEAD` で確認)
-- [ ] AC3: `./scripts/check-skill-sync.sh`、`./scripts/check-sync.sh`、`./scripts/check-pipeline-sync.sh`、`./scripts/run-verify.sh` がすべて exit 0
-- [ ] AC4: `detectFlow` が `/implement` を含むレポートと `/work` を含む旧レポートの両方で `"standard"` を返し、先頭 20 行に `agents/implementer.md` しか含まないレポートでは `"standard"` を返さない。単体テストで確認する
-- [ ] AC5: このブランチのバイナリで `ralph init` した空ディレクトリに `.claude/skills/implement/SKILL.md` と `.agents/skills/implement/SKILL.md` ができ、`work` スキルはできない
-- [ ] AC6: main(改名前)のバイナリで `ralph init` したプロジェクトに、このブランチのバイナリで `ralph upgrade` をかけると、次のすべてが成り立つ
+- [x] AC2b: 許容した履歴行が変わっていない。`git diff main...HEAD -- docs/tech-debt/README.md` の変更行が 150 行目の implementer.toml の行だけで、RESOLVED 行(16〜17 行目)に差分がない
+- [x] AC2c: `docs/specs/2026-08-01-org-runtime.md` に「### 2026-10-05 改訂(refactor/rename-work-skill)」節があり、FR-11 の行に改訂の印がある。それ以外の本文の行は変わっていない(`git diff main...HEAD` で確認)
+- [x] AC3: `./scripts/check-skill-sync.sh`、`./scripts/check-sync.sh`、`./scripts/check-pipeline-sync.sh`、`./scripts/run-verify.sh` がすべて exit 0
+- [x] AC4: `detectFlow` が `/implement` を含むレポートと `/work` を含む旧レポートの両方で `"standard"` を返し、先頭 20 行に `agents/implementer.md` しか含まないレポートでは `"standard"` を返さない。単体テストで確認する
+- [x] AC5: このブランチのバイナリで `ralph init` した空ディレクトリに `.claude/skills/implement/SKILL.md` と `.agents/skills/implement/SKILL.md` ができ、`work` スキルはできない
+- [x] AC6: main(改名前)のバイナリで `ralph init` したプロジェクトに、このブランチのバイナリで `ralph upgrade` をかけると、次のすべてが成り立つ
   - core: `.claude/skills/work/SKILL.md` と `.agents/skills/work/SKILL.md` が削除され、`implement/SKILL.md`(2 か所)が作られる。upgrade レポートの Deleted / Created に載る
   - seed: upgrade レポートの advisory に `.codex/AGENTS.override.md`、`docs/quality/definition-of-done.md`、`docs/insights/README.md`、`docs/recipes/codex-setup.md` が載り、各 diff に `implement` への変更が含まれる。これらのファイルの本文は upgrade で変わらない(seed の仕様)
   - block: `AGENTS.md` の管理ブロックが `spec/plan/implement` に更新される
@@ -125,15 +125,30 @@ templates 側(30 ファイル): `templates/base/` 配下の上記と同じ構成
 
 - [x] Plan reviewed
 - [x] Branch created
-- [ ] Slice A: スキル本体の改名
-- [ ] Slice B: スキル・rules・Codex 文書の参照
-- [ ] Slice C: AGENTS・README・docs の参照
-- [ ] Slice D: Go
-- [ ] AC5 / AC6 の実機確認
+- [x] Slice A: スキル本体の改名(ea470d8d)
+- [x] Slice B: スキル・rules・Codex 文書の参照(f7dc114a)
+- [x] Slice C: AGENTS・README・docs の参照(71a3c2a8)
+- [x] Slice D: Go(6f1fec2c)
+- [x] AC5 / AC6 の実機確認
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
+
+## Evidence
+
+- 4 スライスとも implementer に委譲した。各スライスの報告で、ハンドオフに書いた検証コマンドの exit 0 と、コミット後に `git status --porcelain` が空であることを確かめた。オーケストレーター側では HEAD の SHA の一致と差分を照合した
+- Slice B: `.claude/rules/ralph/model-routing.md` は `check-sync.sh` の KNOWN_DIFFS に入っている。このため root と template を別々に編集し、`cp` していない。差分は `/work` → `/implement` の 1 行ずつ
+- AC2: 最終の grep(許容リスト適用後)は 0 行
+- AC2b / AC2c: `git diff --word-diff` で確認した。tech-debt の変更は 150 行目の `/work` → `/implement` だけ。spec の変更は 2026-10-05 改訂節の追加と、FR-11 の行末に付けた改訂の印だけ
+- AC4: `TestDetectFlow` の 7 ケースがすべて PASS。implementer がミューテーション確認も行った。`/implement` の判定を外すと 2 ケースが落ち、`strings.Contains` に戻すと implementer 系の 2 ケースが落ちる
+- AC5: このブランチのビルド(`-X main.Version=0.0.0-rename6f1f`)で空ディレクトリに `ralph init --yes` を実行した。`implement/SKILL.md` が 2 か所に `name: implement` でできた。`work/` はできず、雛形全体を `git grep` しても旧名は 0 件
+- AC6: main 4a5d7071 のビルドで `ralph init --yes` したプロジェクトに、このブランチのビルドで `ralph upgrade --yes` を実行した(rc 0、`created: 2, updated: 23, deleted: 2`)
+  - core: Deleted に `work/SKILL.md` が 2 か所、Created に `implement/SKILL.md` が 2 か所載った
+  - seed: Advisories(4 件)に `.codex/AGENTS.override.md`、`docs/insights/README.md`、`docs/quality/definition-of-done.md`、`docs/recipes/codex-setup.md` が載った。どの diff にも `implement` への変更が入っており、ディスク上の本文は変わっていない
+  - block: `AGENTS.md` の管理ブロックが `spec/plan/implement` と `3. Implement` に更新された
+  - 空の `.claude/skills/work/` が残った(Non-goals に書いた既知の挙動)
+  - 証拠のコピー: scratchpad の `ac/upgrade-0.0.0-rename6f1f-2026-10-05.md`(セッション限りの一時領域)
 
 ## Readiness checklist
 
