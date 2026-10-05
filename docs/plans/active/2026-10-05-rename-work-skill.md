@@ -66,7 +66,7 @@ templates 側(30 ファイル): `templates/base/` 配下の上記と同じ構成
 
 - [x] AC1: `.claude/skills/implement/SKILL.md`、`.agents/skills/implement/SKILL.md`、`templates/base/.claude/skills/implement/SKILL.md`、`templates/base/.agents/skills/implement/SKILL.md` が存在し、frontmatter が `name: implement`。4 か所のどこにも `work/` ディレクトリが残っていない
 - [x] AC2: 現行ファイルに旧名の参照が残っていない。次のコマンドの出力が空になる(許容リストの 2 種類を `grep -v` で除いたあと):
-  `git grep -nP '/work\b|\$work\b|skills/work|"skills", "work"|name: work|spec/plan/work|Plan/work|\*\*Work\*\*|^[0-9]+\. Work ' -- . ':!docs/plans/archive' ':!docs/reports' ':!docs/evidence' ':!docs/specs' ':!docs/insights/events' ':!docs/plans/active/2026-10-05-rename-work-skill.md' ':!tests/test-check-template.sh' | grep -vE '^internal/insights/backfill(_test)?\.go:' | grep -v 'RESOLVED 2026-08-03 in refactor/org-runtime-retire-loop'`
+  `git grep -nP '/work\b|\$work\b|skills/work|"skills", "work"|name: work|spec/plan/work|Plan/work|\*\*Work\*\*|^[0-9]+\. Work |plan,? (and )?work\b|plan / work\b' -- . ':!docs/plans/archive' ':!docs/reports' ':!docs/evidence' ':!docs/specs' ':!docs/insights/events' ':!docs/plans/active/2026-10-05-rename-work-skill.md' ':!tests/test-check-template.sh' | grep -vE '^internal/insights/backfill(_test)?\.go:' | grep -v 'RESOLVED 2026-08-03 in refactor/org-runtime-retire-loop'`
   - 許容リスト: (1) `internal/insights/backfill.go` と `backfill_test.go` の旧名判定(旧レポート用に意図して残す)、(2) `docs/tech-debt/README.md` の RESOLVED 行 2 行(16〜17 行目、履歴)
   - `-P` を使う。macOS の `git grep -E` は `\b` を解釈しない。`tests/test-check-template.sh` の `$work` はシェル変数なので除外する。着手前の時点で 68 ファイルが該当
 - [x] AC2b: 許容した履歴行が変わっていない。`git diff main...HEAD -- docs/tech-debt/README.md` の変更行が 150 行目の implementer.toml の行だけで、RESOLVED 行(16〜17 行目)に差分がない
@@ -121,6 +121,15 @@ templates 側(30 ファイル): `templates/base/` 配下の上記と同じ構成
 
 - なし
 
+## Deviation notes
+
+- 2026-10-05 self-review F-1(MEDIUM): 当初の AC2 の grep は、`spec, plan, work, verify`、`Spec, plan, and work flows`、`plan / work` のような列挙を拾えなかった。`README.md` 29 / 111 / 170 行目、`.codex/README.md` 48 行目(template 側も同じ)、`docs/research/approach-comparison.md` 87 行目に旧名が残っていた。`.codex/README.md` は core 扱いなので下流にも届く。AC2 に `plan,? (and )?work\b|plan / work\b` を足し、修正スライスで 6 行を直す。`docs/research/approach-comparison.md` は Affected areas になかったが、改訂の続いている現行の文書なので対象に加える
+- self-review F-2 / F-4(LOW): コメントの折り返しと段落を直す。F-5(LOW): Evidence 節にあった scratchpad のパスを消した。PR 後には残らない一時領域のため
+
+## Known gaps
+
+- self-review F-3(LOW): `detectFlow` の `/implement\b` は、`refactor/implement-foo` や `/implement.md` にも当たる。`\b` が `-` と `.` の前でも成り立つためで、そういう文字列が先頭 20 行にあるレポートは standard と判定される。Ralph Loop が撤去された今は standard と判定されることがほぼ正しいので、直さずに残す
+
 ## Progress checklist
 
 - [x] Plan reviewed
@@ -148,7 +157,6 @@ templates 側(30 ファイル): `templates/base/` 配下の上記と同じ構成
   - seed: Advisories(4 件)に `.codex/AGENTS.override.md`、`docs/insights/README.md`、`docs/quality/definition-of-done.md`、`docs/recipes/codex-setup.md` が載った。どの diff にも `implement` への変更が入っており、ディスク上の本文は変わっていない
   - block: `AGENTS.md` の管理ブロックが `spec/plan/implement` と `3. Implement` に更新された
   - 空の `.claude/skills/work/` が残った(Non-goals に書いた既知の挙動)
-  - 証拠のコピー: scratchpad の `ac/upgrade-0.0.0-rename6f1f-2026-10-05.md`(セッション限りの一時領域)
 
 ## Readiness checklist
 
