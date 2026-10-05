@@ -26,7 +26,7 @@ Claude Code gives you a powerful agent, but the default setup is a blank slate. 
 | | Bare Claude Code | `ralph init` |
 |---|:---:|:---:|
 | Always-on map (`AGENTS.md` / `CLAUDE.md`) | — | ✓ |
-| On-demand skills (spec, plan, work, verify, ...) | manual | 10+ bundled |
+| On-demand skills (spec, plan, implement, verify, ...) | manual | 10+ bundled |
 | Deterministic hooks (mojibake guard, commit-msg, bash guard, ...) | manual | pre-wired |
 | Evidence-backed pipeline (self-review → verify → test → sync-docs → cross-review) | ad hoc | canonical order, enforced |
 | Isolated task execution | ad hoc branches | clean-base task worktrees |
@@ -108,7 +108,7 @@ Before claiming a task is done:
 | | |
 |:---|:---|
 | **Maps, not manuals**<br/>Short `AGENTS.md` / `CLAUDE.md`; push detail into rules and skills, promote repeats into hooks. | **Canonical pipeline**<br/>`self-review → verify → test → sync-docs → cross-review → pr` enforced in the standard flow. |
-| **Deterministic hooks**<br/>Mojibake guard, commit-msg secret scan, Bash guardrails, verification reminders — pre-wired in `settings.json`. | **Worktree-first flow**<br/>Spec, plan, work, and PR artifacts are produced from clean-base task worktrees, with local cleanup after hand-off. |
+| **Deterministic hooks**<br/>Mojibake guard, commit-msg secret scan, Bash guardrails, verification reminders — pre-wired in `settings.json`. | **Worktree-first flow**<br/>Spec, plan, implement, and PR artifacts are produced from clean-base task worktrees, with local cleanup after hand-off. |
 | **Org runtime**<br/>Autonomous multi-seat execution (`ralph org spawn/send/wait/...`) with a typed messaging protocol and pulse-layer watchdog — see [Org runtime](#org-runtime-autonomous-multi-seat-execution). | **Language packs**<br/>TypeScript, Python, Rust, Go, Dart, and Terraform starters (opt-in) with per-language `verify.sh` and path-scoped rules. |
 | **Drift-proof upgrades**<br/>Fully non-interactive `ralph upgrade` — core replace, managed-block update, and settings 3-way merge, with an upgrade report and a dedicated exit code for unresolved drift. | **Evidence over prose**<br/>Every self-review, verify, test, sync-docs, and cross-review triage pass produces a dated artifact in `docs/reports/`. |
 | **Cross-agent portable**<br/>`AGENTS.md` + `scripts/` + `packs/` stay neutral; `.claude/` and `.codex/` are agent-specific layers you can stack others beside. | **Local state, not repo churn**<br/>Worktree lifecycle records live under `git-common-dir`, outside tracked files and branch checkouts. |
@@ -167,7 +167,7 @@ The philosophy: **a map, not a manual**. Keep `AGENTS.md` small, push detail int
 ├── .claude/
 │   ├── settings.json         # each event points at ./.claude/hooks/ralph-dispatch.sh <event>
 │   ├── hooks/                # hook implementations + <event>.d/ dispatch entries (core -> .ralph/local -> .claude/hooks/local)
-│   ├── skills/               # on-demand workflows (plan, work, verify, ...)
+│   ├── skills/               # on-demand workflows (plan, implement, verify, ...)
 │   ├── agents/               # Claude Code subagent definitions
 │   └── rules/ralph/          # shipped ralph guidance (path-scoped, read by both agents); language pack rules render here too
 ├── .codex/

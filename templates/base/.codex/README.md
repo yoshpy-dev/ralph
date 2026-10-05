@@ -45,7 +45,7 @@ codex
 > $implement
 ```
 
-Spec, plan, and work flows create or resume clean-base task worktrees before
+Spec, plan, and implement flows create or resume clean-base task worktrees before
 writing repo artifacts; PR hand-off cleans up the task worktree and local
 branch.
 

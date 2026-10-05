@@ -211,6 +211,7 @@ var implementSkillRe = regexp.MustCompile(`/implement\b`)
 
 // detectFlow tries to infer "standard" or "loop" from report content.
 // Returns "" when not derivable — the caller omits the field.
+//
 // /implement is the standard-flow skill name since 2026-10-05; /work is its
 // former name, kept so reports written before the rename still classify.
 func detectFlow(path string) string {

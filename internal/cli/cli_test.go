@@ -346,9 +346,9 @@ func TestRunDoctor_Passes(t *testing.T) {
 
 // TestProbeBinary_BrokenShimFails covers the codex-cross-review finding that
 // `LookPath("codex")` is not enough — a broken shim on PATH lets `ralph
-// doctor` falsely report `pass` while every subsequent /implement or /cross-review
-// invocation crashes. probeBinary must run `<bin> --version` and surface the
-// failure so doctor can warn or fail.
+// doctor` falsely report `pass` while every subsequent /implement or
+// /cross-review invocation crashes. probeBinary must run `<bin> --version`
+// and surface the failure so doctor can warn or fail.
 func TestProbeBinary_BrokenShimFails(t *testing.T) {
 	dir := t.TempDir()
 	shim := filepath.Join(dir, "claude")

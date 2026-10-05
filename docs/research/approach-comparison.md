@@ -84,7 +84,7 @@ The common pattern across strong implementations is:
 
 2. **Claude-native workflow layer**
    - Rules for path-scoped guidance
-   - Skills for plan / work / review / verify
+   - Skills for plan / implement / review / verify
    - Subagents for planning, review, verification, doc maintenance
 
 3. **Deterministic rails**
