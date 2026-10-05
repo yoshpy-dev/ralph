@@ -2,9 +2,9 @@
 
 When and how to delegate work to subagents. Pipeline order is defined in `post-implementation-pipeline.md`. Model tier assignment per seat is defined in `model-routing.md`.
 
-## Post-implementation pipeline for /work — phase roles
+## Post-implementation pipeline for /implement — phase roles
 
-After `/work` completes, run the post-implementation pipeline through the
+After `/implement` completes, run the post-implementation pipeline through the
 phase-specific subagents below:
 
 | Step | Subagent | Skill | Purpose |
@@ -41,16 +41,16 @@ tester: run /test against plan <slug>
 
 If a subagent fails to execute (tool error, not a review finding), run the corresponding skill inline and note the fallback in the report.
 
-## Implementation slices (/work) — delegate to implementer
+## Implementation slices (/implement) — delegate to implementer
 
-During `/work` step 6 (implementation), each implementation slice is dispatched
+During `/implement` step 6 (implementation), each implementation slice is dispatched
 to the `implementer` subagent:
 
 - **Claude Code:** `Task(subagent_type="implementer")`
 - **Codex:** `.codex/agents/implementer.toml` custom agent
 
 The orchestrator authors the structured handoff (defined in
-`model-routing.md` — "Standard flow delegation (/work)") and does not write
+`model-routing.md` — "Standard flow delegation (/implement)") and does not write
 slice code itself. The handoff must carry: plan path, slice objective,
 acceptance criteria, files in scope, exact verification commands, and commit
 message format. The implementer returns: changed files, decisions/deviations,

@@ -1,6 +1,6 @@
 # Post-implementation pipeline order
 
-Single source of truth for the post-implementation pipeline (standard flow, `/work`).
+Single source of truth for the post-implementation pipeline (standard flow, `/implement`).
 
 ## Canonical order
 
@@ -15,7 +15,7 @@ No step may be skipped. If any step triggers a fix-and-revalidate cycle (e.g., c
 Both Claude Code and Codex run the same canonical order, but the execution
 model differs:
 
-| Step | Claude Code (`/work`) | Codex |
+| Step | Claude Code (`/implement`) | Codex |
 |------|------------------------|-------|
 | `/self-review` | `Task(subagent_type="reviewer")` | `.codex/agents/reviewer.toml` custom agent |
 | `/verify` | `Task(subagent_type="verifier")` | `.codex/agents/verifier.toml` custom agent |
@@ -62,7 +62,7 @@ See `.claude/rules/ralph/subagent-policy.md` for execution model details.
 ## Where this order is referenced
 
 If you update this order, update all of these locations:
-- `.claude/skills/work/SKILL.md` (Step 13)
+- `.claude/skills/implement/SKILL.md` (Step 13)
 - `.claude/skills/cross-review/SKILL.md` (Case A and Case B re-run)
 - `.claude/rules/ralph/subagent-policy.md` (Post-implementation pipeline table)
 - `docs/quality/definition-of-done.md` (Pipeline order)

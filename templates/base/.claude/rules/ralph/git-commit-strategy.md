@@ -2,7 +2,7 @@
 
 Single source of truth for when and how to commit in all flows.
 
-## Validation Gate (Standard Flow — /work)
+## Validation Gate (Standard Flow — /implement)
 
 Commit after each slice passes verification, not at the end:
 
@@ -14,10 +14,10 @@ Commit after each slice passes verification, not at the end:
 
 This produces a clean history of individually verified changes.
 
-Delegated slices (/work step 6, `implementer` subagent) follow the same
+Delegated slices (/implement step 6, `implementer` subagent) follow the same
 one-commit-per-slice boundary, but the implementer runs the verification and
 owns the commit; the orchestrator adjudicates the returned report instead of
-re-staging or re-committing (see `.claude/skills/work/SKILL.md` step 7).
+re-staging or re-committing (see `.claude/skills/implement/SKILL.md` step 7).
 
 ## Org Runtime Commits
 

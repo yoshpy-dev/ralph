@@ -51,7 +51,7 @@ shared map. Record the size and remediation in the audit memo.
 
 Check whether `docs/quality/` still matches reality:
 
-- Does `docs/quality/definition-of-done.md` reflect the actual completion workflow? Compare against `/work`, `/self-review`, `/verify`, `/test`, and `/pr` skill steps.
+- Does `docs/quality/definition-of-done.md` reflect the actual completion workflow? Compare against `/implement`, `/self-review`, `/verify`, `/test`, and `/pr` skill steps.
 - Does `docs/quality/quality-gates.md` list the verifiers and CI checks that actually exist in `scripts/` and `.github/workflows/`?
 - Are there new verification tools, linters, or test frameworks in use that are not mentioned in the quality gates?
 - Are there gates listed that no longer apply or have been removed?

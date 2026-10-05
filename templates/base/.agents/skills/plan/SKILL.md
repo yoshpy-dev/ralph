@@ -79,7 +79,7 @@ worktree.
        - Options:
          1. Update plan — edit plan per relevant findings, then re-display
          2. Acknowledge findings, continue — proceed without changes
-    h. After user decision, state that `/work` is the next skill to invoke.
+    h. After user decision, state that `/implement` is the next skill to invoke.
 
 ## Output
 
@@ -87,7 +87,7 @@ worktree.
 - One paragraph summary of what is in scope
 - Explicit statement of what remains unknown
 - Task worktree path and branch recorded by `ralph-worktree.sh`
-- Next step: invoke `/work`
+- Next step: invoke `/implement`
 
 ## Anti-bottleneck
 

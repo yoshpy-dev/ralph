@@ -1,6 +1,6 @@
 ---
 name: self-review
-description: Self-review the diff for code quality before formal verification. Covers naming, readability, unnecessary changes, typos, null safety, debug code, secrets, exception handling, security, and maintainability. Invoke automatically after /work completes or when significant code changes are staged.
+description: Self-review the diff for code quality before formal verification. Covers naming, readability, unnecessary changes, typos, null safety, debug code, secrets, exception handling, security, and maintainability. Invoke automatically after /implement completes or when significant code changes are staged.
 ---
 Perform a self-review of the current diff and write a report to `docs/reports/`.
 
