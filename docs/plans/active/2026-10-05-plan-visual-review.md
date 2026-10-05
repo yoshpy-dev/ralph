@@ -159,6 +159,9 @@ root 側:
   - S1 完了(bd6b6333): plan-visual.sh(open・shot・digest)、テスト 82 件、必須一覧の登録。digest は承認時の値 9c20a2da6606 と一致
   - S2 完了(273a30ea): diagrams.md と visual-template.html、4 か所のミラー。SVG の色はクラスで付ける形にした(CSS の `svg text { fill }` が属性に勝つため)
   - S3 の進め方: cross-review の SKILL.md・test-codex-exec-invocation.sh・defaults_sync_test.go が「/plan step 11.c」を参照しているので、Codex advisory は step 11 のまま残す。step 9 と 10 をまとめ、空いた step 10 に図解ページと自己チェック、step 12 に承認ゲートを置く
+  - S3 完了(cbfbdceb): /plan の step 10(図解ページ)・step 12(承認ゲート)、テンプレート 6 か所、subagent-policy.md、tests/test-new-feature-plan.sh(21 件)
+  - S4 完了(64458ca2、inline): /implement の step 4 で承認と digest を確かめる。本文を 1 ファイル直してミラーを生成するだけなので、handoff より inline の方が軽いと判断した
+  - S5 完了(84ad2d46): /pr の step 5.a〜5.c(全体図の照合・撮影・`--attach`、非ゼロ終了時の PR 有無の確認)、PR テンプレートの「全体図」節。implementer がセッション再開で途中で消えたため、作業ツリーに残った変更を orchestrator が確認し、検証とコミットを inline で行った(dispatch 中断時の fallback)
   - メモ: Linux の `xdg-open` はバックエンドによってブラウザが閉じるまで戻らないかもしれない(未確認)。S3 で `open` の呼び方を書くときに考える
 - [ ] Review artifact created
 - [ ] Verification artifact created
