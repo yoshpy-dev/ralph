@@ -2,7 +2,8 @@
 # tests/test-insights-append.sh — AC1 coverage: insights-append.sh appends
 # schema-v1-valid JSON lines; rejects invalid inputs with exit != 0 and
 # produces no file; enum validation enforced; counts land in findings/triage
-# objects; --events-dir override works.
+# objects; --events-dir override works; --cycle auto resolves the cycle from
+# the standard-pipeline state dir and falls back to 1.
 
 set -eu
 
@@ -300,6 +301,91 @@ _cycle7="$(printf '%s\n' "$_line7" | jq -r '.cycle | tostring')"
 assert_eq "7c. cycle=1 when --cycle omitted (default)" "1" "$_cycle7"
 
 cd "$OLD_DIR"; rm -rf "$TMP7"; trap - EXIT INT TERM
+
+# ── Case 8: --cycle auto reads the pipeline cycle from the state dir ─────────
+printf '\n==> Case 8: --cycle auto reads the pipeline cycle from the state dir\n'
+
+TMP8="$(mktemp -d)"
+trap 'cd "$OLD_DIR"; rm -rf "$TMP8"' EXIT INT TERM
+
+DATE="$(date -u '+%Y-%m-%d')"
+PLAN_A='{"plan_path": "/repo/docs/plans/active/2026-10-06-task-a.md"}'
+COUNT_A2='{"plan_path": "/repo/docs/plans/active/2026-10-06-task-a.md", "cycle": 2}'
+COUNT_B2='{"plan_path": "/repo/docs/plans/active/2026-10-06-task-b.md", "cycle": 2}'
+
+# write_state DIR ACTIVE_JSON COUNT_JSON — an empty JSON argument leaves that
+# file out.
+write_state() {
+  mkdir -p "$1"
+  if [ -n "$2" ]; then printf '%s\n' "$2" > "$1/active-plan.json"; fi
+  if [ -n "$3" ]; then printf '%s\n' "$3" > "$1/cycle-count.json"; fi
+}
+
+# run_cycle NAME CYCLE — append with --cycle CYCLE, --state-dir
+# $TMP8/NAME/state, and --events-dir $TMP8/NAME/events; sets _rc.
+run_cycle() {
+  _rc=0
+  bash "$APPEND_SH" \
+    --slug auto --flow standard --phase verify --verdict pass --source skill \
+    --cycle "$2" --state-dir "${TMP8}/$1/state" --events-dir "${TMP8}/$1/events" \
+    >/dev/null 2>&1 || _rc=$?
+}
+
+# cycle_of NAME — the cycle recorded by run_cycle NAME, or NO-EVENT.
+cycle_of() {
+  jq -r '.cycle | tostring' "${TMP8}/$1/events/${DATE}-auto.jsonl" 2>/dev/null \
+    || printf 'NO-EVENT'
+}
+
+write_state "${TMP8}/match/state" "$PLAN_A" "$COUNT_A2"
+run_cycle match auto
+assert_eq "8a. matching plan_path → cycle-count.json cycle (2)" "2" "$(cycle_of match)"
+
+write_state "${TMP8}/no-active/state" "" "$COUNT_A2"
+run_cycle no-active auto
+assert_eq "8b. active-plan.json missing → cycle 1" "1" "$(cycle_of no-active)"
+
+write_state "${TMP8}/mismatch/state" "$PLAN_A" "$COUNT_B2"
+run_cycle mismatch auto
+assert_eq "8c. plan_path mismatch → cycle 1" "1" "$(cycle_of mismatch)"
+
+write_state "${TMP8}/broken/state" "$PLAN_A" '{"plan_path": "/repo/docs/plans/active/2026-10-06-task-a.md", "cycle": 2'
+run_cycle broken auto
+assert_eq "8d. broken cycle-count.json → exit 0" "0" "$_rc"
+assert_eq "8e. broken cycle-count.json → cycle 1" "1" "$(cycle_of broken)"
+
+write_state "${TMP8}/zero/state" "$PLAN_A" '{"plan_path": "/repo/docs/plans/active/2026-10-06-task-a.md", "cycle": 0}'
+run_cycle zero auto
+assert_eq "8f. cycle 0 → cycle 1" "1" "$(cycle_of zero)"
+
+write_state "${TMP8}/string/state" "$PLAN_A" '{"plan_path": "/repo/docs/plans/active/2026-10-06-task-a.md", "cycle": "x"}'
+run_cycle string auto
+assert_eq "8g. cycle \"x\" → cycle 1" "1" "$(cycle_of string)"
+
+write_state "${TMP8}/numeric/state" "$PLAN_A" "$COUNT_A2"
+run_cycle numeric 3
+assert_eq "8h. numeric --cycle 3 ignores the state dir" "3" "$(cycle_of numeric)"
+
+# Without --state-dir, the state dir is <repo root>/.harness/state/standard-pipeline,
+# found from a subdirectory; outside a git repo it is the current directory's.
+mkdir -p "${TMP8}/repo/sub" "${TMP8}/nogit"
+write_state "${TMP8}/repo/.harness/state/standard-pipeline" "$PLAN_A" "$COUNT_A2"
+write_state "${TMP8}/nogit/.harness/state/standard-pipeline" "$PLAN_A" "$COUNT_A2"
+(
+  unset GIT_DIR GIT_WORK_TREE
+  git init -q "${TMP8}/repo"
+  cd "${TMP8}/repo/sub"
+  bash "$APPEND_SH" --slug auto --flow standard --phase verify --verdict pass \
+    --source skill --cycle auto --events-dir "${TMP8}/default-repo/events"
+  cd "${TMP8}/nogit"
+  GIT_CEILING_DIRECTORIES="$TMP8" bash "$APPEND_SH" --slug auto --flow standard \
+    --phase verify --verdict pass --source skill --cycle auto \
+    --events-dir "${TMP8}/default-nogit/events"
+) >/dev/null 2>&1 || true
+assert_eq "8i. default state dir is the repo root's" "2" "$(cycle_of default-repo)"
+assert_eq "8j. default state dir outside git is the current directory's" "2" "$(cycle_of default-nogit)"
+
+cd "$OLD_DIR"; rm -rf "$TMP8"; trap - EXIT INT TERM
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 printf '\ninsights-append tests: %d passed, %d failed\n' "$PASS" "$FAIL"

@@ -48,8 +48,9 @@ Run tests and write a report to `docs/reports/`.
 After writing the report, append one insight event (errors are non-fatal):
 ```
 ./scripts/insights-append.sh --slug <slug> --flow standard --phase test \
-  --verdict <pass|fail> --source skill || true
+  --verdict <pass|fail> --cycle auto --source skill || true
 ```
+`--cycle auto` reads the pipeline cycle from `.harness/state/standard-pipeline/` and falls back to 1.
 
 ## CLI execution modes
 

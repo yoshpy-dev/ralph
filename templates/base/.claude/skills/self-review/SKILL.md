@@ -45,9 +45,10 @@ Evaluate the diff for:
 After writing the report, append one insight event (errors are non-fatal):
 ```
 ./scripts/insights-append.sh --slug <slug> --flow standard --phase self_review \
-  --verdict pass --critical <N> --high <N> --medium <N> --low <N> --source skill || true
+  --verdict pass --critical <N> --high <N> --medium <N> --low <N> --cycle auto \
+  --source skill || true
 ```
-Use `--verdict fail` if CRITICAL findings block the review; set counts from the report.
+Use `--verdict fail` if CRITICAL findings block the review; set counts from the report. `--cycle auto` reads the pipeline cycle from `.harness/state/standard-pipeline/` and falls back to 1.
 
 ## CLI execution modes
 

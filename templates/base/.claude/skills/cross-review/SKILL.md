@@ -184,9 +184,9 @@ After writing the triage report (Step 6), append one insight event (errors are n
 ```
 ./scripts/insights-append.sh --slug <slug> --flow standard --phase cross_review \
   --verdict <pass|action_required> --action-required <N> --worth-considering <N> \
-  --dismissed <N> --source skill || true
+  --dismissed <N> --cycle auto --source skill || true
 ```
-Use `--verdict action_required` when ACTION_REQUIRED findings exist; `--verdict n/a` when the reviewer was incomplete (Step 4) — the review did not run, so it is neither a pass nor a fail; `pass` otherwise.
+Use `--verdict action_required` when ACTION_REQUIRED findings exist; `--verdict n/a` when the reviewer was incomplete (Step 4) — the review did not run, so it is neither a pass nor a fail; `pass` otherwise. `--cycle auto` reads the pipeline cycle from `.harness/state/standard-pipeline/` and falls back to 1, the same rule as Step 1.
 
 ## What /cross-review does NOT do
 
