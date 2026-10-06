@@ -19,15 +19,19 @@ A fix skips the full re-run only when all three of these hold:
    plan.
 2. The fix commit changes only this task's records: report files directly
    under `docs/reports/` named after the plan slug (`<kind>-<date>-<slug>.md`,
-   `cross-review-triage-<slug>.md`), and
-   `docs/insights/events/<date>-<slug>.jsonl`. `docs/reports/templates/` is
-   an input that skills read, so it is never covered.
+   such as the self-review, verify, test, and sync-docs reports), and
+   `docs/insights/events/<date>-<slug>.jsonl`. It does not touch
+   `docs/reports/cross-review-triage-<slug>.md`, which holds the cross-review
+   classifications and receives the check result below.
+   `docs/reports/templates/` is an input that skills read, so it is never
+   covered.
 3. The fix changes no verdict line in this task's self-review, verify, or test
    report: the finding severities and the `Merge:` line of the self-review
    report, and the `## Verdict` lines of the verify and test reports. `/pr`'s
    pre-checks read those verdicts.
 
-To check, make the fix a single commit `<commit>`, then:
+To check, commit the triage report first if it is not committed yet, make the
+fix a single commit `<commit>`, then:
 
 - `git diff --name-only <commit>^ <commit>` lists only the paths in condition 2.
 - `git show --stat <commit>` shows the same files.
@@ -35,10 +39,14 @@ To check, make the fix a single commit `<commit>`, then:
   test reports touches no verdict line.
 
 Record the result (the `git show --stat` output and the verdict-line result)
-in `docs/reports/cross-review-triage-<slug>.md`, and say in the PR body that
-the exception was used. `cycle-count.json` is not incremented. If any
-condition fails, re-run the full pipeline (see "Re-run after cross-review
-ACTION_REQUIRED fix" below).
+in a separate commit `<record>` that only appends to the triage report
+`<triage>` (`docs/reports/cross-review-triage-<slug>.md`):
+`git diff --name-only <record>^ <record>` lists only `<triage>`, and
+`git diff <record>^ <record> -- <triage>` shows added lines only, so no
+existing line (an `After triage:` line, a classification) changes. Say in the
+PR body that the exception was used. `cycle-count.json` is not incremented. If
+any condition fails, or `<record>` changes an existing line, re-run the full
+pipeline (see "Re-run after cross-review ACTION_REQUIRED fix" below).
 
 Only `/cross-review` offers this exception (steps 8 and 9 of
 `.claude/skills/cross-review/SKILL.md`). `/self-review`, `/verify`, and

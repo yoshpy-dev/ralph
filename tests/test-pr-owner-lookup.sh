@@ -185,7 +185,7 @@ JSON
 
   cat > "$_tmp/other-base.json" <<'JSON'
 [
-  {"url": "https://github.com/yoshpy-dev/ralph/pull/4", "baseRefName": "release", "headRepositoryOwner": {"id": "a", "login": "yoshpy-dev"}},
+  {"url": "https://github.com/yoshpy-dev/ralph/pull/4", "baseRefName": "release", "headRepositoryOwner": {"id": "a", "login": "Yoshpy-Dev"}},
   {"url": "https://github.com/yoshpy-dev/ralph/pull/5", "baseRefName": "main", "headRepositoryOwner": {"id": "b", "login": "someone-else"}},
   {"url": "https://github.com/yoshpy-dev/ralph/pull/6", "baseRefName": "main", "headRepositoryOwner": null}
 ]
@@ -204,7 +204,7 @@ JSON
     "$_jq_base" "$_tmp/null-owner.json" ''
 
   printf '==> lookup into any base (no --base)\n'
-  run_jq "open PR into another base prints its base and URL" \
+  run_jq "open PR into another base, mixed-case login, prints its base and URL" \
     "$_jq_any" "$_tmp/other-base.json" 'release https://github.com/yoshpy-dev/ralph/pull/4'
   run_jq "only another owner's PR gives empty output" \
     "$_jq_any" "$_tmp/other-owner-only.json" ''
