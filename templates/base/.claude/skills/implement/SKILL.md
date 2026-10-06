@@ -32,7 +32,7 @@ Work from the active plan, not from memory alone.
 4. Read the current active plan using the path recorded in `active-plan.json`, then check that it passed the `/plan` approval gate (`/plan` step 12). Run this check on every `/implement` start, resumes included:
    - Read the plan's `- Status:` and `- Approved:` lines and run `./scripts/plan-visual.sh digest <plan-path>`.
    - The plan is approved when `Status` is `Approved` and the `sha256:` value on the `- Approved:` line equals the digest. Continue.
-   - Otherwise (no `- Approved:` line, `TBD`, another status, or a digest mismatch, which means the plan changed after approval), tell the user which case it is and ask with `AskUserQuestion` (Codex: numbered options):
+   - Otherwise (no `- Approved:` line, `TBD`, another status, or a digest mismatch, which means the plan text changed after approval; ticking checkboxes such as acceptance criteria does not change the digest), tell the user which case it is and ask with `AskUserQuestion` (Codex: numbered options):
      1. Redo the visual review and approval — run `/plan` steps 10 and 12 on this plan, then continue
      2. Continue without approval — note that choice under the plan's `## Progress checklist`
      3. Stop
@@ -68,7 +68,7 @@ Work from the active plan, not from memory alone.
 
 - Before each major slice, re-read the plan to confirm alignment.
 - If your implementation diverges from the plan (new files, changed interfaces, different approach), update the plan FIRST with a deviation note before continuing.
-- A deviation note in the plan body changes the plan's digest, so the approval no longer matches: after writing it, redo `/plan` steps 10 and 12 for the affected figures before the next slice. Notes that only record progress go under `## Progress checklist`, which the digest skips.
+- Ticking checkboxes (acceptance criteria, checklists) does not change the plan's digest, so marking acceptance criteria done is fine. Any other change to the plan body does, including a deviation note, so the approval no longer matches: after writing it, redo `/plan` steps 10 and 12 for the affected figures before the next slice. Notes that only record progress go under `## Progress checklist`, which the digest skips.
 - Never silently drift. The plan is the contract.
 
 ## Uncertainty management

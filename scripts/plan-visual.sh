@@ -25,9 +25,12 @@ set -eu
 #   digest  Print the first 12 hex characters of the SHA-256 of <plan.md>
 #           without the `- Status:`, `- Approved:`, and `- Branch:` lines and
 #           without the `## Progress checklist` section (from that exact
-#           heading up to the next `## ` heading, or EOF). Each kept line is
-#           hashed followed by a newline, so a plan with or without a final
-#           newline gives the same digest.
+#           heading up to the next `## ` heading, or EOF). A checked box at the
+#           start of a list item (`- [x]` or `- [X]`, indented or not) is
+#           hashed as `- [ ]`, so ticking acceptance criteria or other
+#           checklists keeps the digest; an `[x]` anywhere else in a line is
+#           hashed as written. Each kept line is hashed followed by a newline,
+#           so a plan with or without a final newline gives the same digest.
 #
 # Environment:
 #   RALPH_PLAN_VISUAL_OPENER   command used to open a file (overrides the OS
@@ -50,6 +53,9 @@ Usage:
   scripts/plan-visual.sh shot <html> <png> [--fragment <id>] [--width <px>] [--height <px>] [--scale <n>]
   scripts/plan-visual.sh digest <plan.md>
   scripts/plan-visual.sh --help
+Digest:
+  Skips the "- Status:", "- Approved:", and "- Branch:" lines and the "## Progress checklist" section.
+  Reads a "- [x]" or "- [X]" box at the start of a list item as "- [ ]", so ticking checkboxes keeps the digest.
 Environment:
   RALPH_PLAN_VISUAL_OPENER   command used to open a file (overrides OS default). The value "none" disables opening.
   RALPH_PLAN_VISUAL_BROWSER  path to a Chrome/Chromium executable (overrides detection). The value "none" means no browser.
@@ -268,6 +274,10 @@ digest_body() {
     /^## / { skip = ($0 == "## Progress checklist"); if (skip) next }
     skip { next }
     /^- (Status|Approved|Branch):/ { next }
+    /^[[:space:]]*- \[[xX]\]/ {
+      match($0, /^[[:space:]]*- \[/)
+      $0 = substr($0, 1, RLENGTH) " " substr($0, RLENGTH + 2)
+    }
     { print }
   ' "$1"
 }

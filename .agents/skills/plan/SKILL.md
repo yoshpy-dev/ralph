@@ -65,10 +65,10 @@ worktree.
 
 9. Keep the plan high-level enough to avoid cascading low-level mistakes, and end it with a short readiness checklist.
 10. **Visual review page**: build a page that shows the approver what will be built.
-    a. Decide whether to draw, using [diagrams.md](diagrams.md) "When to draw, when to skip". If skipping, write `None (<reason>)` in the plan's `## Visual review` section and go to step 11 (the approval gate in step 12 still applies).
+    a. Decide whether to draw, using [diagrams.md](diagrams.md) "When to draw, when to skip". If skipping, write `None (<reason>)` in the plan's `## Visual review` section (add the section as in 10.d when missing) and go to step 11 (the approval gate in step 12 still applies).
     b. Copy [visual-template.html](visual-template.html) to `.harness/state/plan-visual/<slug>.html` inside the task worktree and fill it in following [diagrams.md](diagrams.md): the overview figure first, one detail figure per question the approver needs answered, a "What to check:" caption on every figure, and every node grounded in an existing path or a path the plan names.
     c. Self-check per [diagrams.md](diagrams.md) "Self-check before showing": shoot the full page and the overview (`--fragment overview`) with `./scripts/plan-visual.sh shot`, read both PNGs, fix what is wrong, and repeat until both are clean. If `shot` exits 2 (no Chrome / Chromium found), or the agent cannot read images, skip the self-check and say so.
-    d. Record in the plan's `## Visual review` section: the page path and the self-check result (or why the self-check was skipped).
+    d. Record in the plan's `## Visual review` section: the page path and the self-check result (or why the self-check was skipped). A plan made from an older `docs/plans/templates/feature-plan.md` (a seed file that `ralph upgrade` does not overwrite) may lack the section; add it after `## Affected areas`.
 11. **Codex plan advisory (optional)**:
     a. Run `./scripts/codex-check.sh` via Bash.
     b. If exit 1 (not available): note "Codex not available — skipping plan advisory" and proceed to step 12.
@@ -96,8 +96,8 @@ worktree.
          1. Approve — record the approval and hand off to `/implement`
          2. Needs changes — describe what should change
     d. **Needs changes**: apply the feedback to the plan, redo step 10 for the affected figures, and return to 12.a. Do not re-run the Codex advisory unless the user asks.
-    e. **Approve**: after the last edit to the plan body, run `./scripts/plan-visual.sh digest <plan-path>`. Then set `- Status: Approved`, set `- Approved: <YYYY-MM-DD> sha256:<digest>`, and tick `Plan approved` in the progress checklist. The digest skips the `- Status:`, `- Approved:`, and `- Branch:` lines and the `## Progress checklist` section, so writing them keeps it valid; re-run `digest` and confirm it still matches.
-    f. State that `/implement` is the next skill to invoke. Any later edit to the plan outside `- Status:`, `- Approved:`, `- Branch:`, and `## Progress checklist` changes the digest, and `/implement` then asks whether to redo the visual review and approval. Record implementation notes under `## Progress checklist`.
+    e. **Approve**: after the last edit to the plan body, run `./scripts/plan-visual.sh digest <plan-path>`. Then set `- Status: Approved`, set `- Approved: <YYYY-MM-DD> sha256:<digest>` (a plan made from an older `docs/plans/templates/feature-plan.md` may lack this line; add it right after `- Status:`), and tick `Plan approved` in the progress checklist. The digest skips the `- Status:`, `- Approved:`, and `- Branch:` lines and the `## Progress checklist` section and reads a `- [x]` / `- [X]` box at the start of a list item as `- [ ]`, so writing them keeps it valid; re-run `digest` and confirm it still matches.
+    f. State that `/implement` is the next skill to invoke. Ticking checkboxes (acceptance criteria, checklists) does not change the digest, so marking acceptance criteria done is fine. Any other later edit to the plan outside `- Status:`, `- Approved:`, `- Branch:`, and `## Progress checklist` changes the digest, and `/implement` then asks whether to redo the visual review and approval. Record implementation notes under `## Progress checklist`.
 
 ## Output
 

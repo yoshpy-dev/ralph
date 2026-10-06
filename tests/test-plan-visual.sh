@@ -192,6 +192,7 @@ assert_eq "--help exits 0" 0 "$_rc"
 assert_contains "--help prints usage on stdout" "Usage:" "$_out"
 assert_contains "--help documents RALPH_PLAN_VISUAL_OPENER" "RALPH_PLAN_VISUAL_OPENER" "$_out"
 assert_contains "--help documents RALPH_PLAN_VISUAL_BROWSER" "RALPH_PLAN_VISUAL_BROWSER" "$_out"
+assert_contains "--help documents that ticked boxes keep the digest" '"- [x]" or "- [X]" box' "$_out"
 run_pv "$PLAN_VISUAL" bogus
 assert_eq "unknown subcommand exits 1" 1 "$_rc"
 assert_contains "unknown subcommand prints usage on stderr" "Usage:" "$_err"
@@ -417,6 +418,41 @@ write_plan "$_v" Draft N/A TBD someone '  - Status: nested, not a header' '- [ ]
 _nested_a="$("$PLAN_VISUAL" digest "$_v")"
 write_plan "$_v" Draft N/A TBD someone '  - Status: nested, changed' '- [ ] Plan reviewed' 'Kept after the checklist.'
 assert_ne "an indented - Status: line is not excluded" "$_nested_a" "$("$PLAN_VISUAL" digest "$_v")"
+
+# write_ac_plan <file> <line>... — a plan whose acceptance criteria are the
+# given lines.
+write_ac_plan() {
+  _file="$1"
+  shift
+  {
+    printf '%s\n' '# sample-plan' '' '- Status: Draft' '' '## Acceptance criteria' ''
+    printf '%s\n' "$@"
+    printf '%s\n' '' '## Progress checklist' '' '- [ ] PR created'
+  } > "$_file"
+}
+
+_tab="$(printf '\t')"
+_ac_open="$_tmp/ac-open.md"
+write_ac_plan "$_ac_open" '- [ ] AC1: first' '- [ ] AC2: second' '  - [ ] AC2a: nested' "${_tab}- [ ] AC2b: tab-nested"
+_ac_open_digest="$("$PLAN_VISUAL" digest "$_ac_open")"
+write_ac_plan "$_v" '- [x] AC1: first' '- [X] AC2: second' '  - [x] AC2a: nested' "${_tab}- [X] AC2b: tab-nested"
+assert_eq "ticked - [x] / - [X] / indented boxes: same digest as unticked" "$_ac_open_digest" "$("$PLAN_VISUAL" digest "$_v")"
+
+write_ac_plan "$_v" '- [x] AC1: first' '- [ ] AC2: second' '  - [ ] AC2a: nested' "${_tab}- [ ] AC2b: tab-nested"
+assert_eq "one ticked box: same digest as unticked" "$_ac_open_digest" "$("$PLAN_VISUAL" digest "$_v")"
+
+write_ac_plan "$_v" '- [x] AC1: first!' '- [ ] AC2: second' '  - [ ] AC2a: nested' "${_tab}- [ ] AC2b: tab-nested"
+assert_ne "text after a ticked box still counts" "$_ac_open_digest" "$("$PLAN_VISUAL" digest "$_v")"
+
+write_ac_plan "$_v" '  - [x] AC1: first' '- [ ] AC2: second' '  - [ ] AC2a: nested' "${_tab}- [ ] AC2b: tab-nested"
+assert_ne "indentation before a ticked box still counts" "$_ac_open_digest" "$("$PLAN_VISUAL" digest "$_v")"
+
+write_ac_plan "$_v" '- [ ] AC1: first' 'Mid-line text [ ] stays as written.' '- item with [ ] inside'
+_mid_open="$("$PLAN_VISUAL" digest "$_v")"
+write_ac_plan "$_v" '- [ ] AC1: first' 'Mid-line text [x] stays as written.' '- item with [ ] inside'
+assert_ne "an [x] in the middle of a line still counts" "$_mid_open" "$("$PLAN_VISUAL" digest "$_v")"
+write_ac_plan "$_v" '- [ ] AC1: first' 'Mid-line text [ ] stays as written.' '- item with [x] inside'
+assert_ne "an [x] later in a list item still counts" "$_mid_open" "$("$PLAN_VISUAL" digest "$_v")"
 
 run_pv "$PLAN_VISUAL" digest "$_tmp/missing.md"
 assert_eq "missing plan exits 1" 1 "$_rc"
