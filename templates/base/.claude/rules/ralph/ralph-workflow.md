@@ -43,6 +43,11 @@ workflow guidance formerly in CLAUDE.md.
   `doc-maintainer`). See `.claude/rules/ralph/subagent-policy.md`.
 - Run `./scripts/run-verify.sh` or an equivalent deterministic check before
   claiming success.
+- Edit tracked files with the Edit/Write tools (`apply_patch` under Codex),
+  not with shell in-place edits (`sed -i`, ad-hoc scripts): the PostToolUse
+  hooks, such as the mojibake check, run only on those tools. Scripts a skill
+  tells you to run (for example `scripts/sync-skills.sh`) are fine; the rule
+  is about rewriting a tracked file's contents in place with shell commands.
 - If context is getting crowded, checkpoint progress in the active plan before
   compaction.
 - Keep this file small; if a rule grows, move it out.

@@ -24,7 +24,7 @@ Each event is one JSON line appended to a per-task file under `events/`.
 | `slug` | string | yes | Task slug (matches plan file basename, e.g. `ralph-insights`). |
 | `flow` | string | yes | `standard` or `loop`. `loop` is historical only (written by the retired Ralph Loop pipeline). All current skill-emitted events use `standard`. |
 | `phase` | string | yes | Phase name: `implement`, `self_review`, `verify`, `test`, `sync_docs`, `cross_review`, `pr`. |
-| `cycle` | integer | yes | 1-based outer cycle number. Default: `1` when `--cycle` is omitted from `insights-append.sh`. |
+| `cycle` | integer | yes | 1-based outer cycle number. Default: `1` when `--cycle` is omitted from `insights-append.sh`. The post-implementation skills pass `--cycle auto`, which stamps the standard-pipeline cycle (see "Appending events"). |
 | `verdict` | string | yes | `pass`, `fail`, `complete`, `action_required`, or `n/a`. |
 | `findings` | object | yes | `{"critical": N, "high": N, "medium": N, "low": N}`. Use `0` for phases where findings are not applicable. |
 | `triage` | object | yes | `{"action_required": N, "worth_considering": N, "dismissed": N}`. Use `0` for non-cross-review phases. |
@@ -126,12 +126,22 @@ scripts/insights-append.sh \
   --phase self_review \
   --verdict pass \
   --source skill \
-  --cycle 1 \
+  --cycle auto \
   --critical 0 --high 0 --medium 0 --low 0
 ```
 
 Required flags: `--slug`, `--flow`, `--phase`, `--verdict`, `--source`.
 All others are optional (defaults to 0 for counts, omitted for routing fields).
+
+`--cycle` takes a number or `auto`. `auto` follows the same rule as
+`/cross-review` step 1: when `active-plan.json` and `cycle-count.json` under
+`.harness/state/standard-pipeline/` both exist and carry the same `plan_path`,
+the event gets `cycle-count.json`'s `cycle`; in every other case (a file
+missing, a different `plan_path`, unreadable JSON) it gets `1`, and the append
+never fails because of the state files. `--state-dir DIR` points `auto` at
+another state directory (used by the tests). A cap-raised extra `/cross-review`
+pass does not raise `cycle-count.json`, so it records the same `cycle` as the
+pass before it; the per-cycle verdicts in `ralph insights` keep the later event.
 
 See `scripts/insights-append.sh --help` for the full interface.
 

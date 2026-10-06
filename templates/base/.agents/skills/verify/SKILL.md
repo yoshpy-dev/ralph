@@ -36,8 +36,9 @@ Verify the current work against the plan's acceptance criteria and run static an
 After writing the report, append one insight event (errors are non-fatal):
 ```
 ./scripts/insights-append.sh --slug <slug> --flow standard --phase verify \
-  --verdict <pass|fail> --source skill || true
+  --verdict <pass|fail> --cycle auto --source skill || true
 ```
+`--cycle auto` reads the pipeline cycle from `.harness/state/standard-pipeline/` and falls back to 1.
 
 ## CLI execution modes
 

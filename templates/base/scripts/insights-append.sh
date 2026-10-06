@@ -3,10 +3,20 @@
 #
 # Interface (named flags):
 #   Required: --slug --flow --phase --verdict --source
-#   Optional: --run-id --cycle N --critical N --high N --medium N --low N
+#   Optional: --run-id --cycle N|auto --critical N --high N --medium N --low N
 #             --action-required N --worth-considering N --dismissed N
 #             --driver X --requested-model X --effective-model X
-#             --honored true|false --events-dir DIR
+#             --honored true|false --events-dir DIR --state-dir DIR
+#
+# --cycle auto resolves the standard-pipeline cycle with the same rule as
+# /cross-review step 1: when <state-dir>/active-plan.json and
+# <state-dir>/cycle-count.json both exist, both parse as one JSON object, both
+# carry the same non-empty string plan_path (persisted-identity mode), and
+# cycle-count.json's cycle is a positive integer, that cycle is used; in every
+# other case (fallback mode) the cycle is 1. Missing, unreadable, or broken
+# state files never fail the append. <state-dir> defaults to
+# <repo root>/.harness/state/standard-pipeline (repo root from
+# `git rev-parse --show-toplevel`, else the current directory).
 #
 # Output: appends one JSON line to <events-dir>/<UTC-date>-<slug>.jsonl
 # Exit codes: 0 on success, 1 on validation failure (usage to stderr).
@@ -33,6 +43,7 @@ _requested_model=""
 _effective_model=""
 _honored=""
 _events_dir=""
+_state_dir=""
 
 # ─── Argument parsing ──────────────────────────────────────────────────────────
 
@@ -51,7 +62,10 @@ Required:
 
 Optional:
   --run-id ID              Per-pipeline-invocation ID (default: omitted)
-  --cycle N                1-based outer cycle number (default: 1)
+  --cycle N|auto           1-based outer cycle number (default: 1); auto reads
+                           the standard-pipeline cycle from the state dir
+                           (active-plan.json + cycle-count.json with matching
+                           plan_path), else 1
   --critical N             CRITICAL finding count (default: 0)
   --high N                 HIGH finding count (default: 0)
   --medium N               MEDIUM finding count (default: 0)
@@ -64,6 +78,8 @@ Optional:
   --effective-model MODEL  Model actually used (default: omitted)
   --honored true|false     Whether model request was honored (default: omitted)
   --events-dir DIR         Override events directory (default: docs/insights/events)
+  --state-dir DIR          Override the state dir read by --cycle auto
+                           (default: <repo root>/.harness/state/standard-pipeline)
 USAGE
   exit 1
 }
@@ -93,6 +109,7 @@ while [ $# -gt 0 ]; do
     --effective-model)   shift; _effective_model="${1:-}" ;;
     --honored)           shift; _honored="${1:-}"         ;;
     --events-dir)        shift; _events_dir="${1:-}"      ;;
+    --state-dir)         shift; _state_dir="${1:-}"       ;;
     -h|--help)           usage                            ;;
     *) printf 'Unknown option: %s\n' "$1" >&2; usage     ;;
   esac
@@ -126,6 +143,45 @@ validate_nonneg_int() {
   _vni_val="$2"
   case "$_vni_val" in
     ''|*[!0-9]*) _err "Invalid non-negative integer for --${_vni_name}: '${_vni_val}'" ;;
+  esac
+}
+
+# ─── --cycle auto resolution ──────────────────────────────────────────────────
+
+# Print the plan_path of a state file, or nothing when the file is missing,
+# unreadable, not exactly one JSON object, or has no non-empty string plan_path.
+state_plan_path() {
+  [ -f "$1" ] || return 0
+  jq -rs 'if length == 1 and (.[0] | type) == "object"
+             and (.[0].plan_path | type) == "string"
+          then .[0].plan_path else empty end' "$1" 2>/dev/null || true
+}
+
+# Print the cycle of cycle-count.json when it is a positive integer, else nothing.
+state_cycle() {
+  [ -f "$1" ] || return 0
+  jq -rs 'if length == 1 and (.[0] | type) == "object"
+             and (.[0].cycle | type) == "number"
+             and .[0].cycle >= 1 and .[0].cycle == (.[0].cycle | floor)
+          then .[0].cycle | floor | tostring else empty end' "$1" 2>/dev/null || true
+}
+
+# Print the cycle for --cycle auto (see the header comment for the rule).
+resolve_auto_cycle() {
+  _rac_dir="$_state_dir"
+  if [ -z "$_rac_dir" ]; then
+    _rac_root="$(git rev-parse --show-toplevel 2>/dev/null)" || _rac_root="$(pwd)"
+    _rac_dir="${_rac_root}/.harness/state/standard-pipeline"
+  fi
+  _rac_active="$(state_plan_path "${_rac_dir}/active-plan.json")"
+  _rac_counted="$(state_plan_path "${_rac_dir}/cycle-count.json")"
+  _rac_cycle="$(state_cycle "${_rac_dir}/cycle-count.json")"
+  if [ -z "$_rac_active" ] || [ "$_rac_active" != "$_rac_counted" ]; then
+    _rac_cycle=""
+  fi
+  case "$_rac_cycle" in
+    ''|*[!0-9]*) printf '1' ;;
+    *)           printf '%s' "$_rac_cycle" ;;
   esac
 }
 
@@ -170,10 +226,13 @@ validate_nonneg_int "action-required"   "$_action_required"
 validate_nonneg_int "worth-considering" "$_worth_considering"
 validate_nonneg_int "dismissed"         "$_dismissed"
 
-# Default cycle to 1 when omitted (source:pipeline events are always cycle >= 1;
-# source:skill events written by post-implementation skills also use cycle 1 for
-# the standard flow where --cycle is typically omitted).
+# Default cycle to 1 when omitted (source:pipeline events are always cycle >= 1).
+# source:skill events written by post-implementation skills pass --cycle auto so
+# a cycle-2 run is not recorded as cycle 1.
 _cycle="${_cycle:-1}"
+if [ "$_cycle" = "auto" ]; then
+  _cycle="$(resolve_auto_cycle)"
+fi
 validate_nonneg_int "cycle" "$_cycle"
 
 # ─── Destination ─────────────────────────────────────────────────────────────
@@ -189,6 +248,7 @@ _outfile="${_events_dir}/${_date}-${_slug}.jsonl"
 _ts="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 
 # Build the base object with all required fields.
+# shellcheck disable=SC2016  # $ts etc. are jq variables, expanded by jq
 _jq_filter='{
   schema: 1,
   ts: $ts,
