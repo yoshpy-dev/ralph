@@ -197,3 +197,54 @@ suite が `scripts/plan-visual.sh` の誤りを見分けられるかを確かめ
 - Blocked: なし
 
 判定は pass。/pr に進んでよい。
+
+## Cycle 2 (2026-10-06, HEAD 2b843ed9)
+
+- 対象: `git diff d85e3ab1..HEAD`(6 コミット、22 ファイル、+298/-45)。4caaec72(sync-docs)、91a9c3f6(cross-review の triage)、de99dd6c と a09c057f(/pr step 5.c の文と、plan の直しと再承認)、459db019 と 2b843ed9(レポート)
+- `git diff --stat d85e3ab1..HEAD -- scripts tests internal cmd templates/base/scripts` は空だった。スクリプト・テスト・Go のコードは変わっておらず、変わったのはスキルの本文・ドキュメント・plan・レポートだけ
+- 上の節(Test execution 〜 Verdict)は d85e3ab1 の時点の記録として残し、書き換えていない
+- Evidence: 同じログの `######## CYCLE 2` 以降に追記した。`run-test.sh` 自身のログは `docs/evidence/verify-2026-10-06-040853.log`
+
+### Test execution(cycle 2)
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh` | shell 35 ファイル(1,648 件)、Go 8 パッケージ | すべて | 0 | 1(cycle 1 と同じ git<2.41 のケース) | 255 s、rc 0 |
+| `go test ./... -count=1 -cover` | 8 パッケージ | 8 | 0 | 0(`[no test files]` の 2 パッケージを除く) | 50 s、rc 0 |
+| plan の digest(macOS の BSD awk、Docker の mawk と busybox) | 3 | 3 | 0 | 0 | rc 0 |
+| /pr step 5.c の PR の有無の確かめ方(読み取りだけ、gh 2.102.0) | 5 | 5 | 0 | 0 | 下の節 |
+
+- shell の 35 ファイルはディスク上の `tests/test-*.sh` の全件で、`comm` で比べて差はなかった。suite ごとの件数は cycle 1 の表と 1 件も違わない(集計結果を `diff` で比べた)
+- Go の coverage は `internal/cli` 84.7%、`internal/config` 92.3%、`internal/insights` 86.1%、`internal/org` 90.8%、`internal/org/driver` 92.0%、`internal/org/protocol` 97.9%、`internal/scaffold` 75.7%、`internal/upgrade` 91.2%。cycle 1 と同じ値
+- cycle 1 の mutation、Linux の awk での suite の実行、Chrome での実地確認は流し直していない。`scripts/plan-visual.sh` と `tests/` が変わっていないので、結果は cycle 1 のまま使える
+
+### plan の digest
+
+`./scripts/plan-visual.sh digest docs/plans/active/2026-10-05-plan-visual-review.md` は `4590e050b18a`(rc 0)で、plan の `- Approved: 2026-10-06 sha256:4590e050b18a` と一致した。`git archive HEAD` で固めた同じ plan を Docker の ubuntu:24.04(mawk)と alpine:3.21(busybox)で計算しても `4590e050b18a` だった。
+
+### /pr step 5.c の PR の有無の確かめ方
+
+de99dd6c と a09c057f で、`gh pr create` が非ゼロで終わったときに PR の有無を確かめる方法が `gh pr view` から `gh pr list --head <branch> --base <base> --state open --json url --jq '.[0].url'` に変わった。この repo で読み取りだけの確認をした。gh は 2.102.0、使ったアカウントは gh の active account のまま。
+
+| 確認 | 結果 |
+| --- | --- |
+| `gh pr list --head feat/plan-visual-review --base main --state open --json url --jq '.[0].url'` | rc 0、出力は空(このブランチの PR はまだない) |
+| `gh pr list --head refactor/rename-work-skill --base main --state open ...`(マージ済みのブランチ) | rc 0、出力は空 |
+| `gh pr view refactor/rename-work-skill --json state` | `MERGED`(#202)。`gh pr view` を使うとマージ済みの PR が見つかってしまう。5.c が `gh pr view` を使わないとした理由の再現 |
+| 対照: 同じ問い合わせで `--state all` | `MERGED https://github.com/yoshpy-dev/ralph/pull/202`。PR があれば URL が出る。マージ済みの PR を外しているのは `--state open` |
+| 対照: `--base no-such-base --state all` | rc 0、出力は空。base が違う PR は数えない |
+
+PR がないとき、`--jq '.[0].url'` は `null` ではなく空の出力になる。5.c の「empty output means no such PR」と合う。repo に open の PR が 1 件もないので、`--state open` で URL が返る場合は確かめられなかった。代わりに `--state all` の対照で、同じ問い合わせが URL を返す形であることを見た。
+
+### Test gaps(cycle 2)
+
+- 5.c の確かめ方を自動で見るテストはない。SKILL.md の手順なので、上の読み取りの確認までしかできない。open の PR が URL で返る場合は、この PR を作る /pr の時点で分かる
+- cycle 1 の Test gaps はそのまま残る(ブラウザの自動検出、`<png>` がディレクトリ、読めない plan、AC12 の後半、Codex での PNG の読み取り)
+
+### Verdict(cycle 2)
+
+- Pass: `./scripts/run-test.sh`(full)rc 0、shell 1,648 件と Go 8 パッケージ。`go test ./... -count=1` rc 0。plan の digest が承認の値 `4590e050b18a` と一致(BSD awk、mawk、busybox)。5.c の確かめ方が、このブランチとマージ済みのブランチの両方で空を返した
+- Fail: なし
+- Blocked: なし
+
+判定は pass。/pr に進んでよい。
