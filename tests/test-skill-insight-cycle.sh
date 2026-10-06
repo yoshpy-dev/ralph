@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 # tests/test-skill-insight-cycle.sh — the insight-event command of /self-review,
-# /verify, /test, and /cross-review passes --cycle auto on all four faces
-# (.claude/skills, .agents/skills, and their templates/base copies), so a
+# /verify, /test, /sync-docs, and /cross-review passes --cycle auto on all four
+# faces (.claude/skills, .agents/skills, and their templates/base copies), so a
 # cycle-2 pipeline run is not recorded as cycle 1.
 set -eu
 
@@ -36,7 +36,7 @@ insight_block() {
 }
 
 printf '==> insight-event command passes --cycle auto\n'
-for skill in self-review verify test cross-review; do
+for skill in self-review verify test sync-docs cross-review; do
   for face in .claude/skills .agents/skills templates/base/.claude/skills templates/base/.agents/skills; do
     _file="${PROJECT_ROOT}/${face}/${skill}/SKILL.md"
     _desc="${face}/${skill}/SKILL.md"
