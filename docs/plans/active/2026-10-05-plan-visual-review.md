@@ -1,7 +1,7 @@
 # plan-visual-review
 
 - Status: Approved
-- Approved: 2026-10-06 sha256:d4918bfcec38
+- Approved: 2026-10-06 sha256:4590e050b18a
 - Owner: Claude Code
 - Date: 2026-10-05
 - Related request: ralph の spec か plan に、承認の前に計画を図示してから承認を求める仕組みを入れたい(2026-10-05 ユーザー依頼。参考: https://github.com/nntto/skills/tree/main/skills/explanatory-diagrams)
@@ -73,6 +73,7 @@ root 側:
 - 図解ページ: `.harness/state/plan-visual/plan-visual-review.html`(この plan 自体で新しい手順を試す)
 - 自己チェック: ヘッドレス Chrome で全体と `#overview` を撮って確認(2 回。矢印とバッジの重なり 1 か所を直した)
 - 再承認(2026-10-06): /verify の指摘 V-1・V-2 で AC2b・Design decisions・Risks・Rollout を直した。どの図も digest の計算方法を描いていないので、図は変えていない
+- 再承認(2026-10-06、2 回目): cross-review の指摘で AC9 と Design decisions の PR の探し方を `gh pr list --head <branch> --base <base> --state open` に直した。図 3 の「PR はできた?」の分岐はそのまま正しいので、図は変えていない
 - digest の計算方法(S1 の `plan-visual.sh digest` はこれと同じ値を出す): `- Status:`・`- Approved:`・`- Branch:` で始まる行と、`## Progress checklist` の行から次の `## ` 見出しの手前(なければ末尾)までを除き、行頭(字下げ可)の `- [x]` / `- [X]` を `- [ ]` に直し、残りの行を改行つきでつないだ UTF-8 のバイト列の sha256 の先頭 12 桁
 
 ## Design decisions
@@ -85,7 +86,7 @@ root 側:
 - **承認の記録と失効(Codex advisory の指摘 1、ユーザー確定)**: 承認されたら `Status: Approved` に書き換え、`- Approved: <日付> sha256:<先頭 12 桁>` を書く。digest は plan 全体から `- Status:`・`- Approved:`・`- Branch:` の行と `## Progress checklist` 節を除き、行頭(字下げ可)の `- [x]` / `- [X]` を `- [ ]` とみなして計算する(`plan-visual.sh digest`)。チェックボックスの印を数えないのは、この repo では slice の記録や `/sync-docs` で AC に印を付ける慣習があり(アーカイブ済み plan に `- [x]` が 1183 か所)、印のたびに承認が外れるのを避けるため(/verify の指摘 V-1、2026-10-06 に変更)。`/implement` は `Approved` でないとき、または digest が合わないときに、図解と承認をやり直すか続けるかを聞く。止めはしない(この変更より前の Draft の plan でも進められるように)。採らなかった案: SKILL.md の規則だけで済ませる(軽いが、守られたかを機械的に確かめられない)
 - **レイアウトの数値の目安(consult の指摘)**: 試作でも文字詰まりが 1 か所出たので、手引きに数値を書く。viewBox の幅は 1080、文字は 12px 以上、ノードの幅は「全角の文字数 × 文字サイズ + 24px」以上、1 枚の図のノードは 10 個まで
 - **全体図だけの PNG**: 雛形に `#overview` のフラグメントで全体図以外を隠す CSS を入れ、`plan-visual.sh shot` にフラグメントとウィンドウの大きさを渡して撮る(consult の既定)
-- **PR への添付は同じ plan の最後の slice(ユーザー確定)**。`gh pr create --help` に `--attach` がなければ省く。添付つきの `gh pr create` が非ゼロで終わっても、PR が作られている場合がある(gh v2.99.0 の help「If some attachments upload and others fail, the pull request is still created ... the new pull request's URL is still printed to stdout」と `create.go` の `submitPR`。Codex advisory の指摘 2)。そこで終了コードと stdout を残し、stdout の URL か `gh pr view <head branch>` で PR があるかを確かめる。あれば `gh pr edit` で本文を直し、なければ添付なしで作り直す。どちらの場合も理由を本文に 1 行書く
+- **PR への添付は同じ plan の最後の slice(ユーザー確定)**。`gh pr create --help` に `--attach` がなければ省く。添付つきの `gh pr create` が非ゼロで終わっても、PR が作られている場合がある(gh v2.99.0 の help「If some attachments upload and others fail, the pull request is still created ... the new pull request's URL is still printed to stdout」と `create.go` の `submitPR`。Codex advisory の指摘 2)。そこで終了コードと stdout を残し、stdout の URL か、このブランチから base への open の PR(`gh pr list --head <branch> --base <base> --state open`)で PR があるかを確かめる。`gh pr view` は open の PR がないと同じブランチ名の merged / closed の PR を返すので使わない(cross-review の指摘、2026-10-06 に変更)。あれば `gh pr edit` で本文を直し、なければ添付なしで作り直す。どちらの場合も理由を本文に 1 行書く
 - Critical forks: None。残った分岐(PNG の撮り方、質問の分け方、`/implement` の確認の強さ)は、どれも 1 slice 以内でやり直せるので既定で決めた
 
 ## Acceptance criteria
@@ -99,7 +100,7 @@ root 側:
 - [x] AC6: `.claude/skills/plan/SKILL.md` に図解ページ・自己チェック・承認の手順があり、順序が「critical forks → 図解ページ → 自己チェック → Codex advisory → 承認」になっている。承認で `Status: Approved` と `- Approved:`(日付と digest)を書く。Needs changes なら plan と図を直して出し直す。ブラウザがない(`shot` が exit 2)ときと、ページを開けない環境のときの扱いが書いてある
 - [x] AC7: plan テンプレート(`docs/plans/templates/feature-plan.md`、`.claude/skills/plan/template.md`、それぞれの template 側)に `- Approved:` の行と `## Visual review` 節がある。`./scripts/new-feature-plan.sh` で作った plan にこの 2 つが入る
 - [x] AC8: `.claude/skills/implement/SKILL.md` が plan の `Status` と `- Approved:` の digest を `plan-visual.sh digest` の結果と比べる。`Approved` でないとき、または digest が合わないとき(承認 → 設計を変更 → 再開の場合)は、図解と承認をやり直すか続けるかをユーザーに聞く
-- [x] AC9: `.claude/skills/pr/SKILL.md` に次の手順がある。図解ページがあれば全体図だけの PNG を撮る。図のノードと `git diff --name-only <base>...HEAD` を照らし合わせ、ずれていれば図を直す。`gh pr create --attach` で本文に載せる。gh に `--attach` がない・図解ページがない・ブラウザがないときは図を省き、理由を本文に 1 行書く。添付つきの作成が非ゼロで終わったときは、stdout の URL か `gh pr view` で PR の有無を確かめ、あれば `gh pr edit` で直し、なければ添付なしで作り直す。`.claude/skills/pr/template.md` に全体図の欄がある
+- [x] AC9: `.claude/skills/pr/SKILL.md` に次の手順がある。図解ページがあれば全体図だけの PNG を撮る。図のノードと `git diff --name-only <base>...HEAD` を照らし合わせ、ずれていれば図を直す。`gh pr create --attach` で本文に載せる。gh に `--attach` がない・図解ページがない・ブラウザがないときは図を省き、理由を本文に 1 行書く。添付つきの作成が非ゼロで終わったときは、stdout の URL か、このブランチから base への open の PR(`gh pr list --head <branch> --base <base> --state open`)で PR の有無を確かめ、あれば `gh pr edit` で直し、なければ添付なしで作り直す。`.claude/skills/pr/template.md` に全体図の欄がある
 - [x] AC10: `subagent-policy.md` の Planning 節が承認ゲートを挙げている。`AGENTS.md`・`.ralph/core/AGENTS.core.md`・`README.md`・`ralph-workflow.md` の `/plan` の説明が図解と承認に触れている(root と template の両側)
 - [x] AC11: `./scripts/check-skill-sync.sh`、`./scripts/check-sync.sh`、`./scripts/run-verify.sh` が通る
 - [ ] AC12(実地): この plan で図解ページを作って承認ゲートを通す。この PR の本文に全体図の PNG が `--attach` で載る(gh を 2.99.0 以上に上げたうえで)
@@ -165,6 +166,7 @@ root 側:
   - S4 完了(64458ca2、inline): /implement の step 4 で承認と digest を確かめる。本文を 1 ファイル直してミラーを生成するだけなので、handoff より inline の方が軽いと判断した
   - S5 完了(84ad2d46): /pr の step 5.a〜5.c(全体図の照合・撮影・`--attach`、非ゼロ終了時の PR 有無の確認)、PR テンプレートの「全体図」節。implementer がセッション再開で途中で消えたため、作業ツリーに残った変更を orchestrator が確認し、検証とコミットを inline で行った(dispatch 中断時の fallback)
   - /verify(ba4bf3ad)の指摘 V-1・V-2 を b0ea4a23 で直し、plan 本文を更新して再承認した(2026-10-06、digest d4918bfcec38。最初の承認は 9c20a2da6606)
+  - cross-review(cycle 1)の指摘を de99dd6c で直した。cycle 2 の self-review の F-6 を skill で、F-7 を plan の AC9・Design decisions で直し、再承認した(2026-10-06、digest 4590e050b18a)
   - メモ: Linux の `xdg-open` はバックエンドによってブラウザが閉じるまで戻らないかもしれない(未確認)。S3 で `open` の呼び方を書くときに考える
 - [x] Review artifact created
 - [x] Verification artifact created
