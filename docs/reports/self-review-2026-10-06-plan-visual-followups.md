@@ -54,3 +54,47 @@ _(上の行は `docs/tech-debt/README.md` に 1 行にまとめて追記した�
 
 - Merge: 可。CRITICAL と HIGH はない。F-1 と F-2 は MEDIUM で、F-1 は例外の文言の閉じ方、F-2 はユーザー指示の許可の副作用の説明で、どちらも文書の修正で済む。
 - Follow-ups: F-1 は rules と `/cross-review` step 9 の 2 か所の文言(4 面)。F-3 は fixture の 1 語。F-4 は 1 行の削除(root と template)。F-2 は PR 本文に書く。F-5 と F-6 は任意。F-1 と F-3 と F-4 を直すと、文書とテストとスクリプトが変わるので、`/self-review` から回し直す。
+
+## Re-review of c24eab98
+
+- Date: 2026-10-06
+- Scope: 修正コミット `c24eab98`(`git diff 4f8924f6 c24eab98`、13 ファイル、+68/-28)だけ。F-1、F-3、F-5、F-6 の修正を確かめ、F-1 の修正が新しい穴を開けていないかを見た。F-2 は PR 本文に回す。F-4 は判断で残す。テストと linter は実行していない。
+- Reviewer: reviewer subagent (Claude)、cycle 1(`cycle-count.json` は 1)
+
+### Evidence reviewed
+
+- `.claude/rules/ralph/post-implementation-pipeline.md:13-55` の例外の節を全文読み、修正前の版と突き合わせた。
+- F-1 の新しい確かめ方を scratchpad の使い捨ての git リポジトリで実行した。`- After triage: ACTION_REQUIRED=1, ...` を持つ triage report を 1 コミットし、次のコミット(`<record>` の役)で、その行の上に `- After triage: ACTION_REQUIRED=0, WORTH_CONSIDERING=0, DISMISSED=1` を 1 行だけ挿入した。`git diff --name-only` は triage report だけを返し、`git diff <record>^ <record> -- <triage>` は `+` の 1 行だけを示し、`--numstat` は `1 0` だった。つまり新しい確かめ方の 2 つの条件は両方通る。一方、`scripts/xreview-helpers.sh` の `count_triage_findings` は `grep -m1` で最初の `After triage:` の行を読むので、ACTION_REQUIRED は 1 から 0 に変わった。旧内容が新内容の先頭と一致するかを `cmp` で見ると、一致しない(`differ: char 59, line 3`)。
+- #203 の事例 `594354a9`(`docs/insights/events/2026-10-06-plan-visual-review.jsonl` の 1 行だけを変えた)を条件 2 に当てた。許可パスに入るので、例外の対象のままである。#203 の triage report は同じファイルを cycle ごとに書き直していた(`91a9c3f6`、`39c3c820`、`ce2b1d52`)が、これは全工程を回し直す側の話で、例外の経路ではない。
+- F-3 と F-5 の式を、テストと同じ `grep` と `sed` の組で SKILL.md から取り出した。any-base は 1 行、with-base は 1 行で、式は変わっていない。新しい fixture(`Yoshpy-Dev`)に対して、書かれている式は `release https://github.com/yoshpy-dev/ralph/pull/4` を返し、`ascii_downcase` を外した変更版は空を返す。変更版を検出できるようになった。
+- ミラー: `post-implementation-pipeline.md` と `ralph-workflow.md` は root と `templates/base/` が `cmp` で一致。`cross-review` と `pr` の SKILL.md は `.claude/` と `templates/base/.claude/`、`.agents/` と `templates/base/.agents/` が一致し、`.claude/` と `.agents/` の変更行も同じ。
+
+### Per-finding status
+
+| Finding | Status | Note |
+| --- | --- | --- |
+| F-1 MEDIUM | 一部解消、新しい MEDIUM(R-1)が残る | 修正のコミットが triage report を変えられなくなったのは確かめた(条件 2 に「触らない」が入り、`<commit>` の確かめも許可パスだけを通す)。`/cross-review` step 9 は「rules の書いたとおりに」と委ねていて、二重に書いていない。残る穴は `<record>` の確かめ方(R-1) |
+| F-2 MEDIUM | PR 本文へ | `sed` の `w` と GNU `e` も含めて、PR 本文のリスク欄に書く。コードの変更なし |
+| F-3 LOW | 解消 | `other-base.json` の PR 4 の login が `Yoshpy-Dev`。`ascii_downcase` を外した変更版は空になり、テストが落ちる |
+| F-4 LOW | 判断で残す | SC2016 の disable は、既定の重さの shellcheck がその行を通るようにする。害はない。repo の gate(`--severity=warning`、対象一覧に `insights-append.sh` なし)からは到達しない行だが、残すと決めた。register の行(a)は残る |
+| F-5 LOW | 解消 | 「No PR」が子の箇条書き 5 つになった。検索コマンドは 1 行のままで、テストの式の取り出しは壊れない。`PR exists` の項目との並びも自然 |
+| F-6 LOW | 解消 | 「skill が実行を指示するスクリプトは構わない。規則の対象はシェルコマンドで追跡ファイルの中身をその場で書き換えること」が入り、`sync-skills.sh` を例に挙げている。`(sed -i, ad-hoc scripts)` の括弧は残り、新しい一文と矛盾しない |
+
+### New findings
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| R-1 MEDIUM | maintainability | `<record>` の確かめ方「`git diff <record>^ <record> -- <triage>` は追加した行だけを示す」は、末尾への追記と、途中への挿入を区別しない。挿入した行も追加の行で、`--name-only` と `--numstat`(`K 0`)も通る。`count_triage_findings` は最初の `After triage:` の行を読む(`grep -m1`)ので、既存の行の上に別の `After triage:` の行を挿入すると、分類(ACTION_REQUIRED の数)が変わるのに確かめは通る。F-1 が塞ごうとした穴の、弱い形での再開になる。ルールの文は「only appends」と「no existing line changes」と言っていて、確かめ方がその意図に届いていない | `.claude/rules/ralph/post-implementation-pipeline.md:41-49`(`templates/base/` の同じ位置)。scratchpad の probe: 挿入後の差分は `+` の 1 行、`--numstat` は `1 0`、ACTION_REQUIRED は 1 から 0、旧内容は新内容の先頭と一致しない | 確かめ方を「旧内容が新内容の先頭と一致する(追記は末尾だけ)」にする。コマンドで書くなら、`<record>^` の `<triage>` の行数を N として、差分が 1 つのハンクで、ヘッダが `@@ -N,0 +N+1,K @@` であること、または `<record>^` の内容と `<record>` の先頭 N バイトが `cmp` で一致すること。末尾に改行がない旧ファイルは一致しないので、全工程の側に倒れる(安全側)。root と template の 2 面だけを変える。`/cross-review` step 9 は rules に委ねているので変更不要 |
+
+観察(指摘ではない): 条件 1 は「記録そのものへの指摘」を許すが、条件 2 が triage report を除いたので、triage report の文言への指摘は例外を使えず、全工程を回し直す。安全側で、#203 の事例(insight event の値)には影響しない。
+
+### Open findings after re-review
+
+| Critical | High | Medium | Low |
+| --- | --- | --- | --- |
+| 0 | 0 | 2(R-1、F-2 は PR 本文に回す分) | 1(F-4、判断で残す) |
+
+### Recommendation after re-review
+
+- Merge: 可(CRITICAL と HIGH はない)。ただし R-1 は例外の規則を実際に使う将来の PR で効く穴なので、この PR で直すことを勧める。直すのは rules の 2 面(root と template)の 1 文で、直すと規則の変更なので `/self-review` から回し直しになる。直さない場合は、PR 本文の既知のギャップに書く。
+- F-1 の「別コミット」という分け方そのものは正しく、#203 の事例も通る。R-1 は確かめ方の精度だけの問題。
