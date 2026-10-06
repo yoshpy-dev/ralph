@@ -99,13 +99,13 @@
 
 ## Acceptance criteria
 
-- [ ] AC1: `pre_bash_guard.sh`(root と template、同じ内容)は、payload の `permission_mode` が `bypassPermissions` のとき ask を返さない。deny の 4 規則はどのモードでも deny を返す。`permission_mode` がないとき、`default` や `auto` のときは今までどおり ask を返す。ask と deny の両方に当たるコマンドは deny になる。jq がない環境でも、JSON エスケープされた `git commit -m "$(id)"` は deny になる(`lib_json.sh` の sed fallback がエスケープを読む。root と template は同じ内容)。`tests/test-pre-bash-guard.sh` が、期待値を none / ask / deny の 3 値にして jq あり・なしの両方で確かめる
-- [ ] AC2: `.git` と `.env` の ask は書き込み先だけを見る。`ls .git/ 2>&1`、`git status 2>&1 | grep .git/`、`cat .env.example 2>/dev/null`、`grep X .env`、`cat > .github/workflows/x.yml`、`echo x > .gitignore` は何も返さない。`echo x > .git/hooks/pre-commit`、`echo x >> /abs/repo/.git/config`、`echo x >.git/x`(空白なし)、`tee -a .git/x`、`echo x > .git`、`cat > .env <<EOF`、`printf x > .env.local` は bypass 以外で ask を返す。テストが同じ形を jq あり・なしで確かめる
-- [ ] AC3: `verify.local.sh` の shellcheck の対象が `scripts/*.sh` のグロブで、`scripts/insights-append.sh` を含む。`scripts/run-test.sh`(root と template、同じ内容)に SC2209 が出ない。`./scripts/run-verify.sh` の shellcheck の段が通る
-- [ ] AC4: `run_hook_tests` は、実行権限のない `tests/test-*.sh` と index で 100644 のものを FAIL として数え、ファイル名と直し方を出し、`verify.local.sh` が非 0 で終わる。`tests/test-verify-local-hook-tests.sh` が 3 通り(実行権限なし、index が 100644、両方そろう)を確かめる
-- [ ] AC5: `/sync-docs` の SKILL.md(4 面)に insight event の節があり、`--phase sync_docs`、`--verdict pass`、`--cycle auto`、`|| true` がある。`tests/test-skill-insight-cycle.sh` が sync-docs を含む 5 skill × 4 面で確かめる
-- [ ] AC6: `docs/tech-debt/README.md` に、archive にある plan を `docs/plans/active/` で指す参照が残っていない。`archive-plan.sh`(root と template、同じ内容)は、移動先の衝突を確かめたあと README の参照を書き換えて件数を出し、それから plan を移す。直後に名前の文字が続く参照は書き換えない。README がなければ何もしない。`/pr` の step 8(4 面)に、書き換えた README も同じコミットに入れると書いてある。`tests/test-archive-plan.sh` が、書き換え・似た名前・README なし・移動が失敗したあとのやり直し、の 4 点を確かめる。`verify.local.sh` は README の plan の参照が active か archive に実在しないと FAIL を出す
-- [ ] AC7: `./scripts/check-skill-sync.sh`、`./scripts/check-sync.sh`、`./scripts/check-pipeline-sync.sh`、`bash scripts/check-template-purity.sh`、`./scripts/run-verify.sh` が通る
+- [x] AC1: `pre_bash_guard.sh`(root と template、同じ内容)は、payload の `permission_mode` が `bypassPermissions` のとき ask を返さない。deny の 4 規則はどのモードでも deny を返す。`permission_mode` がないとき、`default` や `auto` のときは今までどおり ask を返す。ask と deny の両方に当たるコマンドは deny になる。jq がない環境でも、JSON エスケープされた `git commit -m "$(id)"` は deny になる(`lib_json.sh` の sed fallback がエスケープを読む。root と template は同じ内容)。`tests/test-pre-bash-guard.sh` が、期待値を none / ask / deny の 3 値にして jq あり・なしの両方で確かめる
+- [x] AC2: `.git` と `.env` の ask は書き込み先だけを見る。`ls .git/ 2>&1`、`git status 2>&1 | grep .git/`、`cat .env.example 2>/dev/null`、`grep X .env`、`cat > .github/workflows/x.yml`、`echo x > .gitignore` は何も返さない。`echo x > .git/hooks/pre-commit`、`echo x >> /abs/repo/.git/config`、`echo x >.git/x`(空白なし)、`tee -a .git/x`、`echo x > .git`、`cat > .env <<EOF`、`printf x > .env.local` は bypass 以外で ask を返す。テストが同じ形を jq あり・なしで確かめる
+- [x] AC3: `verify.local.sh` の shellcheck の対象が `scripts/*.sh` のグロブで、`scripts/insights-append.sh` を含む。`scripts/run-test.sh`(root と template、同じ内容)に SC2209 が出ない。`./scripts/run-verify.sh` の shellcheck の段が通る
+- [x] AC4: `run_hook_tests` は、実行権限のない `tests/test-*.sh` と index で 100644 のものを FAIL として数え、ファイル名と直し方を出し、`verify.local.sh` が非 0 で終わる。`tests/test-verify-local-hook-tests.sh` が 3 通り(実行権限なし、index が 100644、両方そろう)を確かめる
+- [x] AC5: `/sync-docs` の SKILL.md(4 面)に insight event の節があり、`--phase sync_docs`、`--verdict pass`、`--cycle auto`、`|| true` がある。`tests/test-skill-insight-cycle.sh` が sync-docs を含む 5 skill × 4 面で確かめる
+- [x] AC6: `docs/tech-debt/README.md` に、archive にある plan を `docs/plans/active/` で指す参照が残っていない。`archive-plan.sh`(root と template、同じ内容)は、移動先の衝突を確かめたあと README の参照を書き換えて件数を出し、それから plan を移す。直後に名前の文字が続く参照は書き換えない。README がなければ何もしない。`/pr` の step 8(4 面)に、書き換えた README も同じコミットに入れると書いてある。`tests/test-archive-plan.sh` が、書き換え・似た名前・README なし・移動が失敗したあとのやり直し、の 4 点を確かめる。`verify.local.sh` は README の plan の参照が active か archive に実在しないと FAIL を出す
+- [x] AC7: `./scripts/check-skill-sync.sh`、`./scripts/check-sync.sh`、`./scripts/check-pipeline-sync.sh`、`bash scripts/check-template-purity.sh`、`./scripts/run-verify.sh` が通る
 
 ## Implementation outline
 
@@ -157,7 +157,12 @@
 - [x] Plan approved
   - 2026-10-07: 承認ゲートは、ユーザーの事前の指示「以後、私は寝るので全ての確認は承認扱いで大丈夫です。起床したときにはPRがマージされている状態にしておいてください。」により Approve として記録した。Codex plan advisory の 2 件は、ユーザーが「Update plan」を選んで反映済み。consult(consult-plan-guard)の判定は「進めてよい」
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1 完了(da200cb0、implementer/opus): guard の判定を deny → bypass なら終了 → ask の順にし、`.git`・`.env` は `grep -E` で書き込み先だけを見る。`lib_json.sh` の sed fallback は `sed -E` でエスケープを読む。テストは none / ask / deny の 3 値で 220 件(jq あり・なし)。dash、GNU grep、ubuntu:24.04 でも通過。handoff からの差分: 書き込み先の語の終わりに `<` と `>` を足し(`cat >.env<<EOF`)、`tee` の直前に `/` を許した(`/usr/bin/tee`)
+  - S2 完了(9fa40302、implementer/opus): shellcheck の対象を `scripts/*.sh` に(94 ファイル、`insights-append.sh` を含む)、`run-test.sh` の SC2209 を直し、実行権限なしと index 100644 のテストを FAIL に。テストは 4 通り(handoff の 3 通りに、untracked で実行権限ありの 1 通りを足した)
+  - S3 完了(4abc3566、implementer/sonnet): `/sync-docs` の 4 面に insight event の節、`test-skill-insight-cycle.sh` は 5 skill × 4 面(20 件)
+  - S4 完了(3ac0ed9b、implementer/opus): tech-debt README の 34 か所を archive のパスに、`archive-plan.sh` は README を先に書き換えてから移す、`/pr` step 8 の 4 面、`verify.local.sh` の参照の検査、`tests/test-archive-plan.sh`(22 件)。plan の範囲内の判断 2 点: 文末の `.` を参照の区切りとして扱う(verify が末尾の `.` を落として調べるのと合わせるため)。verify の検査は「参照したパスそのものが実在する」で見る(Scope の「どちらかの下に実在」は AC6 の「active か archive に実在」の意味で、手で移したときの参照切れを拾うにはこの読みが要る)
+  - AC7: `check-skill-sync.sh`、`check-sync.sh`、`check-pipeline-sync.sh`、`check-template-purity.sh`、`run-verify.sh` がすべて通過(2026-10-07)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
