@@ -163,3 +163,57 @@
 
 - 判定: **partial-pass**。新しい指摘はない。AC10 は root と template の両側で満たし、AC9 は新しい 5.c で満たす。AC12 の前半は digest `4590e050b18a` で一致した。partial のままにしたのは、AC12 の後半(この PR の本文に `--attach` で全体図が載ること)が /pr でしか確かめられないため
 - 未確認: AC12 の後半、gh 2.99.0 以上での `--attach` と EMU / private repo での挙動、PR 本文への seed の注記(いずれも /pr)
+
+## Extra pass (cap 3, HEAD 3caa56e4)
+
+- operator が `RALPH_STANDARD_MAX_PIPELINE_CYCLES` を 3 に上げて足した 1 回分。cycle-count.json は 2 のまま
+- 対象: `git diff 2b843ed9..HEAD`(10 ファイル、+209/-8)。e2cde6cf(test レポート)、c6009a38(sync-docs)、39c3c820(cycle 2 の cross-review triage、WORTH_CONSIDERING 1 件: `gh pr list --head` が owner を区別しない)、7231c44f(5.c を `headRepositoryOwner` で絞る)、f3860425(extra pass の self-review、LOW の F-8: `gh repo view` は SSH の host alias で失敗する)、3caa56e4(owner を `git remote get-url origin` と sed で取る形に変え、5.c を箇条に分けた)
+- コードに当たる変更は `/pr` の SKILL.md の 5.c(4 か所のミラー)だけ。`scripts/`、`tests/`、`internal/` は変わっていない。plan は Progress checklist に 1 行増えただけ
+- 未追跡の `docs/reports/walkthrough-2026-10-06-plan-visual-review.md` は orchestrator のファイルなので、触れていない
+- Evidence: 同じログの `######## EXTRA PASS` 以降に追記した
+
+### AC の確認
+
+| Acceptance criterion | Status | Evidence |
+| --- | --- | --- |
+| AC9(5.c の再改訂後) | Met | `.claude/skills/pr/SKILL.md:40-46`。40 行目は、探す対象を「push 先(Step 4 の `origin`、30 行目)のこのブランチから base への open の PR」と書いている。41 行目は `gh pr list --head … --base <base> --state open --json url,headRepositoryOwner --jq '.[] \| select(.headRepositoryOwner.login == "<owner>") \| .url'` で探し、出力が空なら PR なしとする。42 行目は `<base>` を Step 3 の `<ref>` から `origin/` を除いたものとし、`<owner>` を `git remote get-url origin \| sed -E 's#.*[:/]([^/]+)/[^/]+$#\1#'` で取る。43 行目は、fork が同じブランチ名で出した PR を owner で外す理由と、`gh pr view` を使わない理由を書いている。4 か所のミラーは同一。plan の AC9(このブランチから base への open の PR)とは矛盾しない。skill の方が owner の分だけ条件が厳しい |
+| AC12 の前半 | Met | `./scripts/plan-visual.sh digest` は `4590e050b18a` で、`- Approved: 2026-10-06 sha256:4590e050b18a` と一致する。plan の差分は Progress checklist の 1 行だけなので、digest は前回と同じ |
+| AC12 の後半 | 未確認(/pr) | 手元の gh は 2.102.0(2026-09-30)に上がり、`gh pr create --help` に `--attach` が出る。載るかどうかは /pr で確かめる |
+| ほかの AC | 変化なし | 対象のファイルはこの範囲で変わっていない |
+
+### probe(読み取りだけ)
+
+owner を取る sed:
+
+| origin の URL | 出力 |
+| --- | --- |
+| この repo の origin `ssh://git@github.com/yoshpy-dev/ralph.git` | `yoshpy-dev` |
+| `git@github.com.emu:org/repo.git`(EMU の host alias) | `org` |
+| `git@github.com:yoshpy-dev/ralph.git` / `.git` なし | `yoshpy-dev` |
+| `https://github.com/yoshpy-dev/ralph.git` / `.git` なし / `https://user@github.com/…` | `yoshpy-dev` |
+| `ssh://git@ssh.github.com:443/yoshpy-dev/ralph.git`(ポートつき) | `yoshpy-dev` |
+| `https://github.com/yoshpy-dev/ralph/`(末尾が `/`) | URL 全体がそのまま出る(owner を取れない) |
+
+owner で絞った `gh pr list`(この repo には open の PR がないので、PR があるときの経路は merged の PR #202 を `--state all` で引いて代わりに確かめた):
+
+- `--json headRepositoryOwner` は gh 2.102.0 で受け付けられる。値は `{"id":…,"login":"yoshpy-dev",…}` の形で、`.headRepositoryOwner.login` で比べるのは正しい
+- `--state all` に owner `yoshpy-dev` の select を足すと `https://github.com/yoshpy-dev/ralph/pull/202`。owner を `someone-else` にすると空
+- 5.c のコマンドそのまま(`--state open`)では、merged 済みの `refactor/rename-work-skill` も今のブランチ `feat/plan-visual-review` も空で、rc 0
+
+### 静的解析(extra pass)
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `./scripts/run-static-verify.sh` | pass(rc 0) | full に切り替わったのは前回と同じ。`check-sync.sh` IDENTICAL 164 / DRIFTED 0 / ROOT_ONLY 0、`check-pipeline-sync.sh` ok、`check-skill-sync.sh` 13 skill、`check-template-purity.sh` PASS、`gofmt: ok`、golangci-lint `0 issues.`、secret scan `scanned d7877756..3caa56e4 against origin/main: clean` |
+| `./scripts/check-pipeline-sync.sh`(単独) | pass(rc 0) | 6 本すべて `all pipeline steps referenced` |
+| `git diff 2b843ed9..HEAD --check` | pass | |
+
+### 新しく気づいたこと(指摘にはしない)
+
+- 末尾が `/` の origin の URL では、sed が URL 全体を返し、owner がどの PR とも合わない。owner の login と URL の大文字・小文字が違う場合(`Yoshpy-Dev` と `yoshpy-dev`)も、jq の `==` は大文字・小文字を区別するので合わない。どちらの場合も「PR なし」と判断されて添付なしで作り直しに進む。PR がすでにあれば `gh pr create` が失敗し、5.c の「それも失敗したら止めて報告する」で止まる。PR が 2 つできることはないと考えられる。未確認です。直すなら、sed の前に末尾の `/` を落とすことと、jq で `ascii_downcase` をかけて比べることの 2 点
+- cycle 2 で書いた「別の base への open の PR」と「同じブランチの PR を 2 つ作らない」の食い違いは、そのまま残っている(指摘にはしていない)
+
+### 判定(extra pass)
+
+- 判定: **partial-pass**。新しい指摘はない。AC9 は新しい 5.c で満たし、AC12 の前半は digest `4590e050b18a` で一致した。partial のままにしたのは、AC12 の後半が /pr でしか確かめられないため
+- 未確認: AC12 の後半(gh 2.102.0 での `--attach` の実際の添付、EMU / private repo での挙動)、PR 本文への seed の注記。どちらも /pr で確かめる
