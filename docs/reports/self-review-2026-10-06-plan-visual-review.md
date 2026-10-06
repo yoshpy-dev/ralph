@@ -66,3 +66,48 @@ _(If any rows were added above, also append them to `docs/tech-debt/`.)_
 
 - F-1〜F-5 はすべて c4a66c0d で直した。F-1 は diagrams.md の Page structure 節と visual-template.html の先頭コメントにエスケープの規則を足した。F-2 は `shot` が空の `<png>`、`.png` 以外の名前、`<html>` と同じパスを exit 1 で拒むようにし、テストを 4 件足した。F-3 はコメントの理由を末尾改行の扱いに直した。F-4 は重複していた `none` の分岐を消した。F-5 は文字サイズの目安を、バッジと記号に限って 11px を認める形にし、テンプレートの ✕ を 11px にした。`tests/test-plan-visual.sh` は 96 件すべて通過、`./scripts/run-verify.sh` は rc 0。
 - Insight event は c340945f で記録した(`docs/insights/events/2026-10-06-plan-visual-review.jsonl`)。
+
+## Cycle 2 (2026-10-06, HEAD de99dd6c)
+
+- Reviewer: reviewer subagent (Claude)、cycle 2
+- Scope: diff の品質だけ。全体の `git diff d78777567f3d...HEAD`(60 ファイル、+3621/-63)を見たうえで、cycle 1 以降の `git diff 10f76e06..HEAD`(42 ファイル、+725/-96)に絞って読んだ。対象は c4a66c0d(F-1〜F-5 の修正)、b0ea4a23(digest のチェックボックス正規化と古いテンプレートへの対応)、804c5d84(再承認)、4caaec72(sync-docs)、de99dd6c(`/pr` 5.c の PR 探索)。`.agents/skills/` と `templates/base/` はミラーなので、`.claude/` 側を 1 回読み、乖離だけを見た。仕様への適合、テストの網羅、文書のずれは見ていない。
+
+### Evidence reviewed
+
+- cycle 1 の F-1〜F-5 を、修正後の現物で 1 件ずつ確認した。すべて閉じている。
+  - F-1: `.claude/skills/plan/diagrams.md:109-111` に `&` `<` `>` のエスケープ規則と例(`plan-visual/&lt;slug&gt;.html`)、`.claude/skills/plan/visual-template.html:6-7` に同じ注意書きがある。
+  - F-2: `scripts/plan-visual.sh:204`(空の `<png>` は usage で exit 1)、`:232-235`(`.png` 以外を拒否)、`:242`(`<html>` と同じパスを拒否)。header コメント `:22` にも規則がある。テスト 4 件と `.PNG` の受理は `tests/test-plan-visual.sh:314-341`。
+  - F-3: header コメント `:27-34` の理由が「末尾改行の有無でダイジェストが変わらない」に直っている。
+  - F-4: `resolve_opener` の到達しない `none` 分岐がなくなり、`:120-121` のコメントが `cmd_open` 側で扱うと書いている。
+  - F-5: `diagrams.md:82` の予算がバッジと小さな記号に限って 11px を認める形になり、`visual-template.html:44` の ✕ が 11px になった。テンプレートの CSS と SVG の `font-size` を grep すると、12px 未満は badge / pill / 見本の 11px だけ。
+- digest の正規化(`scripts/plan-visual.sh:272-284`)を probe した(リポジトリのファイルには触れず、標準入力に流した)。macOS の awk 20200816 に `- [x] a`、`  - [X] b`、タブ字下げの `- [x] c`、`- [ ] d`、`text [x] e` を渡すと、先頭 3 行が `- [ ]` になり、`- [ ] d` と行中の `[x]` はそのまま残った。`match` の `RLENGTH` で `[` までを残し、`x` だけを空白に替えているので、`]` 以降の本文は動かない。`## Progress checklist` の除外は正規化より前の規則なので、順序も合っている。
+- この plan 自身の `- Approved:`(`d4918bfcec38`)と `./scripts/plan-visual.sh digest docs/plans/active/2026-10-05-plan-visual-review.md` の出力が一致する。804c5d84 の後に 4caaec72 で plan が 15 行変わっているが、変更はチェックボックスの印だけで、digest は動いていない。
+- `gh pr list --head no-such-branch-zz --base main --state open --json url --jq '.[0].url'` を gh 2.102.0 で実行した。exit 0、stdout は改行 1 つで、`null` ではない。de99dd6c の「empty output means no such PR」と整合する。`gh pr view` が出てくるのは `.claude/skills/pr/SKILL.md:40` の「ここでは使わない」の 1 文だけ。
+- 新しいテスト(`assert_same_bytes`、`write_ac_plan`、空の `<png>` 以降の 4 件、`.PNG`、末尾改行なしの plan、チェックボックスの 8 件)を読んだ。helper の命名とコメントの形は同じファイルの既存 helper(`assert_has_line`、`write_plan`)と揃っている。
+- ミラー: cycle 1 以降に変わった `.claude/` 側・docs 側の 14 ファイルが `templates/base/` 側と `cmp` で一致。`.agents/skills/` 側の 7 ファイルも一致。`scripts/plan-visual.sh` は root と `templates/base/` が同じ blob(`8420ba7d`)で mode 100755。
+- digest の規則を述べる箇所(`implement/SKILL.md:35,71`、`plan/SKILL.md:99-100`、`plan-visual.sh` の header と usage)はどれもチェックボックスの扱いを書いていて、食い違いはない。
+- 秘密情報とデバッグ痕跡: cycle 1 以降の追加行を `/Users/`、`TODO`、`FIXME`、`console.log`、`set -x`、`password`、`api_key` で grep した。実害のあるヒットなし(`docs/reports/` の `secret-scan` の記述とパス表記だけ)。`git diff --check` は空。
+
+### Findings (cycle 2)
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| F-6 LOW | readability | `/pr` の同じ Step 内で、同じ「base」を指す記号が 2 つある。5.a は `<ref>`(「Step 3 が `against <ref>` と出した base ref」)、5.c は `--base <base>`。`<ref>` は `origin/main` の形で出る(remote の ref があるとき)が、`gh pr list --base` が取るのは `main` の形で、`<base>` が `<ref>` から `origin/` を除いたものだとはどこにも書いていない。`<ref>` をそのまま渡すと、open の PR があっても見つからず「No PR」になり、`gh pr create` が「PR が既にある」と断って、5.c が「画像以外が原因なので止めて報告する」と案内する。安全側に倒れるが、原因が分かりにくい | `.claude/skills/pr/SKILL.md:37`(`<ref>`)、`:40`(`--base <base>`)、`:29`(`git fetch origin <base>` は `<base>` をブランチ名として使っている)。`scripts/secret-scan-branch.sh:164-169,528`(remote の ref があると `base_ref="origin/$base_name"`、出力は `against origin/main: clean`) | 5.c に 1 句足す。例:「`<base>` はブランチ名で、`<ref>` から remote の接頭辞を除いたもの(`origin/main` なら `main`)」。`.claude/` を直したら `sync-skills.sh` と `templates/base/` の複製で揃える |
+| F-7 LOW | maintainability | plan の AC9 と Design decisions が、`/pr` の復旧手順を今も「`gh pr view` で PR の有無を確かめる」と書いていて、最終の実装(de99dd6c の `gh pr list --head ... --state open`)と食い違う。AC9 は `[x]` で閉じている。`/verify` の担当(仕様適合)に近いが、plan が diff に含まれ、契約として読まれるので書いておく。本文を直すと digest(`d4918bfcec38`)が変わり、再承認が要る。最後の cycle で再承認を足すのは重い | `docs/plans/active/2026-10-05-plan-visual-review.md:88`(Design decisions「`gh pr view <head branch>` で PR があるかを確かめる」)、`:102`(AC9「`gh pr view` で PR の有無を確かめ」)。実装は `.claude/skills/pr/SKILL.md:40` | digest を変えない方法で足す。plan の「Progress checklist」(`:155`、digest の対象外)に 1 行、「cross-review の指摘で、5.c の PR 探索を `gh pr view` から open の PR だけを見る `gh pr list --head <branch> --base <base> --state open` に変えた(de99dd6c)」と書く。AC9 と Design decisions の本文は、このあとの `/pr` でアーカイブされるまま残して構わない |
+
+### Positive notes (cycle 2)
+
+- F-2 の修正は、検査を usage、拡張子、同一パスの 3 段に分け、どれもブラウザを起動する前(`:204`、`:232-235`、`:242`)に置いている。テストが「拒否されたパスではブラウザが起動しない」ことと、HTML のバイト列が変わらないことを両方確かめている。
+- digest の正規化は `match` と `substr` だけで、外部コマンドを足していない。範囲を行頭の `- [x]` / `- [X]` に絞り(行中の `[x]` は数える)、その境界を 3 件のテスト(本文の変更、字下げ、行中)が固定している。header コメントと usage が同じ範囲を同じ言葉で書いている。
+- 古いテンプレートの plan への対応(`plan/SKILL.md` の 10.a、10.d、12.e)は、seed ファイルが `ralph upgrade` で書き換わらないという事実に基づいて、どこに何を足すかまで書いている。
+- de99dd6c は、`gh pr view` を使わない理由(open がないとき、同名ブランチの merged / closed の PR を返す)と、closed / merged / 別 base を「PR なし」に数える規則を同じ文に入れている。コミットメッセージが原因と対処を書いていて、diff の範囲もミラー 4 か所だけで済んでいる。
+
+### Tech debt identified (cycle 2)
+
+なし。F-6 は 1 句、F-7 は plan に 1 行で閉じる大きさなので、`docs/tech-debt/` には足さない。
+
+### Recommendation (cycle 2)
+
+- Merge: 可。CRITICAL、HIGH、MEDIUM はない。cycle 1 の 5 件は閉じている。
+- Follow-ups: F-6 と F-7 は LOW で任意。pipeline の上限(2 回)に達しているので、直す場合は doc だけの小さな commit にとどめる。直さない場合は、PR 本文の既知の欠けに 1 行ずつ残す(F-7 は plan の Progress checklist への 1 行が digest を動かさない最小の対応)。
+- Insight event: `./scripts/insights-append.sh --slug plan-visual-review --flow standard --phase self_review --cycle 2 --verdict pass --critical 0 --high 0 --medium 0 --low 2 --source skill` を実行して、この report と同じ commit に入れた。
