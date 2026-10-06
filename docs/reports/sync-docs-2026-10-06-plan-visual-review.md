@@ -100,3 +100,53 @@ AC に付けた印の根拠: AC1・AC2・AC2b・AC3・AC4・AC7・AC11 は test 
 - `templates/base/docs/recipes/codex-setup.md`
 - `docs/plans/active/2026-10-05-plan-visual-review.md`(チェックボックスのみ)
 - `docs/reports/sync-docs-2026-10-06-plan-visual-review.md`(この report)
+
+## Cycle 2
+
+- Date: 2026-10-06
+- Pipeline cycle: 2 of 2。Cycle 1 の記録(上の節)は書き換えていない。cycle 1 の sync-docs commit は `4caaec72`、今回の対象は `4caaec72..e2cde6cf`
+- きっかけ: cross-review の指摘 1 件(`/pr` の復旧で `gh pr view` が過去の merged / closed の PR を返しうる)。`de99dd6c` が `/pr` step 5.c を直し、`a09c057f` が `<base>` の説明と plan の AC9・Design decisions を揃えた
+- 先行 report(それぞれを追加または更新した commit): `docs/reports/cross-review-triage-plan-visual-review.md`(`91a9c3f6`。ACTION_REQUIRED 1 件)、`self-review-2026-10-06-plan-visual-review.md`(`459db019`。cycle 2 の F-6 と F-7)、`verify-2026-10-06-plan-visual-review.md`(`2b843ed9`)、`test-2026-10-06-plan-visual-review.md`(`e2cde6cf`)
+
+### Summary
+
+文書の変更はなし。cycle 1 で直した文書(README の Operating loop 9、`ralph-workflow.md` の `/pr` の項、`repo-map.md`、`codex-setup.md`、`definition-of-done.md`)と、`AGENTS.md` の 4 面、`.codex/` の文書は、どれも `/pr` の復旧手順(5.c)を説明していない。`/pr` について書いているのは「`gh` が `--attach` を持つとき、PR 本文に全体図を載せる」までで、今回の変更(復旧のときの PR の探し方)と矛盾しない。
+
+### Surfaces checked for drift
+
+| Surface | Finding |
+|---------|---------|
+| `.claude/skills/pr/SKILL.md` 5.c と、`.agents/skills/pr/`、`templates/base/.claude/skills/pr/`、`templates/base/.agents/skills/pr/` | 4 面とも `gh pr list --head "$(git branch --show-current)" --base <base> --state open --json url --jq '.[0].url'` で一致(`check-skill-sync.sh` と `check-sync.sh` が PASS)。`<base>` は Step 3 の `<ref>` から `origin/` を除いたもの、と同じ文の中に書いてある |
+| `.claude/skills/pr/SKILL.md` の完了条件、`template.md` の全体図の欄 | 復旧の方法には触れていない。変更なし |
+| `README.md` Operating loop 9、`ralph-workflow.md`(root と template)の `/pr` の項 | 「`gh` が `--attach` を持つとき添付する」だけで、復旧の記述なし。変更なし |
+| `AGENTS.md`、`AGENTS.core.md`(4 面)、`repo-map.md`、`definition-of-done.md`、`codex-setup.md`、`.codex/README.md` | `gh pr view` / `gh pr list` / `gh pr edit` の記述なし。変更なし |
+| `gh pr view` が残る箇所 | `scripts/ensure-pr-ready.sh`、`scripts/ensure-pr-title-prefix.sh`(root と template)は、`/pr` 5.c が作った後に PR を指す `<pr-url-or-current-branch>` を受け取って読む用途で、5.c の「PR の有無を探す」用途ではない。変更なし。`.claude/settings.json` と template の settings の許可リストは `gh pr view`・`gh pr list`・`gh pr edit`・`gh pr create` をすべて含み、5.c の新しいコマンドは追加の許可なしで動く。plan の Design decisions と AC9 は a09c057f で直っていて、`gh pr view` は「使わない」という文脈でだけ残る |
+| plan の Risks「PR が作られたのに添付つきのコマンドが非ゼロで終わる → PR の有無を確かめてから直す」と Rollout notes | 探し方を特定せず、新しい方法とも矛盾しない。承認済みの本文なので編集していない |
+| plan の `## Progress checklist` | 2 行目の再承認の記録は orchestrator が `a09c057f` で書き足し済み。ここでは何も足していない。チェックボックスも新たに付けるものがない(AC12 と「PR created」は `/pr` で確かめる) |
+| 他の cycle 2 の差分(insight event の 4 行、report の更新) | 文書の契約には影響しない |
+
+### Found but left
+
+- cycle 1 の「Found but left」の項目はそのまま有効(`planning.md` に承認ゲートの記述がないこと、plan の Scope 外の 3 文書を直したこと、Progress checklist の項目名、未確認の 4 点、insight event を追記していないこと)。cycle 2 で解消した項目はない。
+- AC12 の後半(`gh pr create --attach` で PR 本文に PNG が載ること、復旧手順 5.c が実際の GitHub で動くこと)は `/pr` で確かめる。5.c の `gh pr list` は gh 2.102.0 で、該当 PR がないとき exit 0 で空出力になることを self-review が probe で確かめている(`self-review-2026-10-06-plan-visual-review.md` の cycle 2 の節)。EMU アカウントと private repo での挙動は未確認のまま。
+
+### Checks run
+
+| Command | Result |
+|---------|--------|
+| `./scripts/check-sync.sh` | exit 0。IDENTICAL 164、DRIFTED 0、ROOT_ONLY 0、TEMPLATE_ONLY 11、KNOWN_DIFF 5 |
+| `./scripts/check-skill-sync.sh` | exit 0。`13 skill(s) in lock-step` |
+| `bash scripts/check-template-purity.sh` | exit 0。`PASS: no meta-repo-specific references found in templates.` |
+| `./scripts/check-pipeline-sync.sh` | exit 0。REFS の各ファイルが `all pipeline steps referenced` |
+| `./scripts/plan-visual.sh digest docs/plans/active/2026-10-05-plan-visual-review.md` | `4590e050b18a`。plan の `- Approved:` の値と同じ |
+| `./scripts/run-verify.sh` | exit 0。local verifier の PASS 29、FAIL 0。golangci-lint `0 issues.`、branch secret scan `scanned d7877756..e2cde6cf against origin/main: clean`。ログ: `docs/evidence/verify-2026-10-06-041634.log`(gitignore 対象) |
+
+`run-test.sh` はこの step では流していない。このサイクルの sync-docs が触るのはこの report だけで、直前の test report(`e2cde6cf`)が pass。
+
+### Diff size (for /pr)
+
+`git diff d7877756...HEAD`(この節の追記を含まない HEAD `e2cde6cf`)は 60 files changed、3,764 insertions、63 deletions。cycle 1 の sync-docs の後(`4caaec72..e2cde6cf`)の増分は 10 files、189 insertions、7 deletions。walkthrough を書くかどうかは `/pr` が決める。この step では書いていない。
+
+### Files changed in this pass
+
+- `docs/reports/sync-docs-2026-10-06-plan-visual-review.md`(この節)
