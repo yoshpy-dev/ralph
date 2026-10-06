@@ -345,6 +345,10 @@ write_state "${TMP8}/no-active/state" "" "$COUNT_A2"
 run_cycle no-active auto
 assert_eq "8b. active-plan.json missing → cycle 1" "1" "$(cycle_of no-active)"
 
+write_state "${TMP8}/no-count/state" "$PLAN_A" ""
+run_cycle no-count auto
+assert_eq "8b2. cycle-count.json missing → cycle 1" "1" "$(cycle_of no-count)"
+
 write_state "${TMP8}/mismatch/state" "$PLAN_A" "$COUNT_B2"
 run_cycle mismatch auto
 assert_eq "8c. plan_path mismatch → cycle 1" "1" "$(cycle_of mismatch)"

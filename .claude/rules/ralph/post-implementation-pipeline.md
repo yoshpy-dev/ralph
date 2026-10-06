@@ -47,13 +47,15 @@ and no existing line (an `After triage:` line, a classification) changed or
 moved:
 
 ```
-d=$(mktemp -d); git show <record>^:<triage> > "$d/old"; git show <record>:<triage> > "$d/new"
-[ -z "$(tail -c1 "$d/old")" ] && head -c "$(wc -c < "$d/old")" "$d/new" | cmp -s - "$d/old"; rc=$?; rm -rf "$d"
+d=$(mktemp -d); git cat-file -e <record>^:<triage> && git show <record>^:<triage> > "$d/old" && git show <record>:<triage> > "$d/new" \
+  && [ -z "$(tail -c1 "$d/old")" ] && head -c "$(wc -c < "$d/old")" "$d/new" | cmp -s - "$d/old"; rc=$?; rm -rf "$d"
 ```
 
-`rc=0` means an append at the end. The `tail -c1` test requires the old file
-to end with a newline (or be empty); otherwise an append could extend its last
-line and still pass the prefix check.
+`rc=0` means an append at the end. `git cat-file -e` requires the triage
+report to exist before `<record>` (a record commit that creates it does not
+qualify). The `tail -c1` test requires the old file to end with a newline (or
+be empty); otherwise an append could extend its last line and still pass the
+prefix check.
 
 A diff that shows added lines only is not enough: a line inserted above the
 `After triage:` line also shows as added only, and the triage parser reads the
@@ -109,7 +111,7 @@ Not just `/self-review → /verify → /test → /cross-review`. The `/sync-docs
 
 The post-implementation pipeline is capped at **2 total runs by default**: the initial run plus at most one fix-and-revalidate re-run. After the second run, the pipeline does not automatically regress even if cross-review still reports ACTION_REQUIRED.
 
-Controlled by `RALPH_STANDARD_MAX_PIPELINE_CYCLES` (default `2`). The counter is persisted to `.harness/state/standard-pipeline/cycle-count.json`, keyed by the pinned plan path and task worktree state in `.harness/state/standard-pipeline/active-plan.json`. When the cap is reached, `/cross-review` drops the "fix" option from Case A/B and offers: (1) raise the cap and re-run, (2) proceed to `/pr` and record remaining findings as known gaps, (3) abort. The record-only fix (see "Exception: fixes confined to this task's pipeline records") stays available at the cap, because it does not start a new run.
+Controlled by `RALPH_STANDARD_MAX_PIPELINE_CYCLES` (default `2`). The counter is persisted to `.harness/state/standard-pipeline/cycle-count.json`, keyed by the pinned plan path and task worktree state in `.harness/state/standard-pipeline/active-plan.json`. When the cap is reached, `/cross-review` drops the "fix" option from Case A/B and offers: (1) raise the cap and re-run, (2) fix records only (see "Exception: fixes confined to this task's pipeline records"; it stays available at the cap because it does not start a new run), (3) proceed to `/pr` and record remaining findings as known gaps, (4) abort.
 
 Raise the cap only when you consciously accept additional churn; the default is a deliberate "fail fast, hand back to the operator" stance.
 
