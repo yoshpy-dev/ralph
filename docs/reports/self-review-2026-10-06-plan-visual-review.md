@@ -61,3 +61,8 @@ _(If any rows were added above, also append them to `docs/tech-debt/`.)_
 - Merge: 可。CRITICAL と HIGH はない。MEDIUM 1 件(F-1)は、図解ページの手順に 1 行足せば閉じる。直してから `/verify` に進むことを勧める。直さずに進める場合は、既知の欠けとして PR 本文に残す。
 - Follow-ups: F-2 から F-5 は任意。F-2 と F-3 は `scripts/plan-visual.sh` を触る 1 コミットで済み、変更後は root と `templates/base/scripts/plan-visual.sh` を同じ内容に揃える(byte 同一を保つ)。F-1 と F-5 は `.claude/skills/plan/` を直した後に `scripts/sync-skills.sh` で `.agents/` を再生成し、`templates/base/` に複製する。
 - Insight event: 依頼で「report 以外のファイルを編集しない」とされたので、`./scripts/insights-append.sh --slug plan-visual-review --flow standard --phase self_review --verdict pass --critical 0 --high 0 --medium 1 --low 4 --source skill` は実行していない。必要なら呼び出し側で実行する。
+
+## レビュー後の対応(orchestrator 追記)
+
+- F-1〜F-5 はすべて c4a66c0d で直した。F-1 は diagrams.md の Page structure 節と visual-template.html の先頭コメントにエスケープの規則を足した。F-2 は `shot` が空の `<png>`、`.png` 以外の名前、`<html>` と同じパスを exit 1 で拒むようにし、テストを 4 件足した。F-3 はコメントの理由を末尾改行の扱いに直した。F-4 は重複していた `none` の分岐を消した。F-5 は文字サイズの目安を、バッジと記号に限って 11px を認める形にし、テンプレートの ✕ を 11px にした。`tests/test-plan-visual.sh` は 96 件すべて通過、`./scripts/run-verify.sh` は rc 0。
+- Insight event は c340945f で記録した(`docs/insights/events/2026-10-06-plan-visual-review.jsonl`)。
