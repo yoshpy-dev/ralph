@@ -51,7 +51,7 @@ If any pre-check fails, stop and explain what is missing.
       - Never create a second PR for the same branch. Then continue with Step 6.
 6. After PR creation, run `./scripts/ensure-pr-title-prefix.sh <pr-url-or-current-branch>` and `./scripts/ensure-pr-ready.sh <pr-url-or-current-branch>`. If either fails, stop and do NOT report the PR as complete.
 7. For large diffs (>500 changed lines), create a walkthrough in `docs/reports/walkthrough-<date>-<slug>.md`.
-8. Archive the plan using the path resolved in Step 1: `./scripts/archive-plan.sh <absolute-plan-path>`. This moves the plan file, so it needs its own commit and push: `git add` the move, create a conventional commit, run `./scripts/secret-scan-branch.sh --strict` again against this new `HEAD` (same rules as Step 3), and `git push origin HEAD` before treating the archive as durable.
+8. Archive the plan using the path resolved in Step 1: `./scripts/archive-plan.sh <absolute-plan-path>`. This moves the plan file, so it needs its own commit and push: `git add` the move (when the script also prints `Updated N reference(s) in docs/tech-debt/README.md`, it has rewritten that file's `docs/plans/active/` links to the plan, so `git add docs/tech-debt/README.md` too and keep the rewrite in the same commit), create a conventional commit, run `./scripts/secret-scan-branch.sh --strict` again against this new `HEAD` (same rules as Step 3), and `git push origin HEAD` before treating the archive as durable.
 9. **Clear standard-pipeline state** (on successful PR creation):
    `rm -f .harness/state/standard-pipeline/active-plan.json .harness/state/standard-pipeline/cycle-count.json`.
    If PR creation fails, leave the state files in place so the user can resume.

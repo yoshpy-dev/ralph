@@ -4,7 +4,8 @@
 #
 # Honors HARNESS_VERIFY_MODE to match the documented split in
 # docs/quality/quality-gates.md:
-#   - static: shellcheck, sh -n, jq validity, template sync
+#   - static: shellcheck, sh -n, jq validity, template sync, tech-debt
+#             plan references
 #   - test  : hook smoke tests (tests/test-check-mojibake.sh)
 #   - all   : everything (default; what run-verify.sh sets)
 #
@@ -128,6 +129,29 @@ check_codex_pr_provenance_policy() {
   done
 }
 
+# check_tech_debt_plan_refs — every docs/plans/active/<x> and
+# docs/plans/archive/<x> reference in docs/tech-debt/README.md exists at
+# exactly that path (-e: file and directory plans both count). One trailing
+# "." is dropped so a sentence-ending period is not part of the name.
+# scripts/archive-plan.sh rewrites these references when it archives a plan,
+# with the same name boundary (one trailing "." is not part of the name);
+# this catches a plan moved by hand. Prints each missing reference. No README,
+# nothing to check.
+check_tech_debt_plan_refs() {
+  readme="docs/tech-debt/README.md"
+  [ -f "$readme" ] || return 0
+  missing="$(grep -o -E 'docs/plans/(active|archive)/[A-Za-z0-9._-]+' "$readme" \
+    | sed 's/\.$//' | sort -u \
+    | while IFS= read -r ref; do
+        [ -e "$ref" ] || printf '%s\n' "$ref"
+      done)"
+  if [ -n "$missing" ]; then
+    printf '%s\n' "${readme} references plans that do not exist at that path:"
+    printf '%s\n' "$missing" | sed 's/^/  - /'
+    return 1
+  fi
+}
+
 run() {
   label="$1"
   shift
@@ -206,6 +230,9 @@ run_static_checks() {
   if [ -x scripts/check-template-purity.sh ]; then
     run "scripts/check-template-purity.sh" scripts/check-template-purity.sh
   fi
+
+  # 9. Plan references in docs/tech-debt/README.md point at real plans.
+  run "tech-debt README plan references" check_tech_debt_plan_refs
 }
 
 # hook_test_mode_problem FILE — print why FILE would not run as a test (no
