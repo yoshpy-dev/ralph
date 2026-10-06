@@ -41,12 +41,22 @@ fix a single commit `<commit>`, then:
 Record the result (the `git show --stat` output and the verdict-line result)
 in a separate commit `<record>` that only appends to the triage report
 `<triage>` (`docs/reports/cross-review-triage-<slug>.md`):
-`git diff --name-only <record>^ <record>` lists only `<triage>`, and
-`git diff <record>^ <record> -- <triage>` shows added lines only, so no
-existing line (an `After triage:` line, a classification) changes. Say in the
-PR body that the exception was used. `cycle-count.json` is not incremented. If
-any condition fails, or `<record>` changes an existing line, re-run the full
-pipeline (see "Re-run after cross-review ACTION_REQUIRED fix" below).
+`git diff --name-only <record>^ <record>` lists only `<triage>`, and the old
+`<triage>` is a byte prefix of the new one, so text was added only at the end
+and no existing line (an `After triage:` line, a classification) changed or
+moved:
+
+```
+git show <record>^:<triage> > old; git show <record>:<triage> > new
+head -c "$(wc -c < old)" new | cmp -s - old
+```
+
+A diff that shows added lines only is not enough: a line inserted above the
+`After triage:` line also shows as added only, and the triage parser reads the
+first `After triage:` line. Say in the PR body that the exception was used.
+`cycle-count.json` is not incremented. If any condition fails, or `<record>`
+is not an append at the end, re-run the full pipeline (see "Re-run after
+cross-review ACTION_REQUIRED fix" below).
 
 Only `/cross-review` offers this exception (steps 8 and 9 of
 `.claude/skills/cross-review/SKILL.md`). `/self-review`, `/verify`, and
