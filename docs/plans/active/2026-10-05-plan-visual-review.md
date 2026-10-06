@@ -167,6 +167,7 @@ root 側:
   - S5 完了(84ad2d46): /pr の step 5.a〜5.c(全体図の照合・撮影・`--attach`、非ゼロ終了時の PR 有無の確認)、PR テンプレートの「全体図」節。implementer がセッション再開で途中で消えたため、作業ツリーに残った変更を orchestrator が確認し、検証とコミットを inline で行った(dispatch 中断時の fallback)
   - /verify(ba4bf3ad)の指摘 V-1・V-2 を b0ea4a23 で直し、plan 本文を更新して再承認した(2026-10-06、digest d4918bfcec38。最初の承認は 9c20a2da6606)
   - cross-review(cycle 1)の指摘を de99dd6c で直した。cycle 2 の self-review の F-6 を skill で、F-7 を plan の AC9・Design decisions で直し、再承認した(2026-10-06、digest 4590e050b18a)
+  - cross-review(cycle 2)の WORTH_CONSIDERING(`--head` が owner を区別しない)は、ユーザーの判断で上限を 3 に上げて直した。5.c で origin の owner と `headRepositoryOwner` を照らす。plan の AC9 の記述(このブランチから base への open の PR)とは矛盾しないので本文は変えていない
   - メモ: Linux の `xdg-open` はバックエンドによってブラウザが閉じるまで戻らないかもしれない(未確認)。S3 で `open` の呼び方を書くときに考える
 - [x] Review artifact created
 - [x] Verification artifact created
