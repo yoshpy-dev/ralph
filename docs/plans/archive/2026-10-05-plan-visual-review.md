@@ -1,6 +1,6 @@
 # plan-visual-review
 
-- Status: Approved
+- Status: PR created (#203), awaiting CI and merge
 - Approved: 2026-10-06 sha256:4590e050b18a
 - Owner: Claude Code
 - Date: 2026-10-05
@@ -103,7 +103,7 @@ root 側:
 - [x] AC9: `.claude/skills/pr/SKILL.md` に次の手順がある。図解ページがあれば全体図だけの PNG を撮る。図のノードと `git diff --name-only <base>...HEAD` を照らし合わせ、ずれていれば図を直す。`gh pr create --attach` で本文に載せる。gh に `--attach` がない・図解ページがない・ブラウザがないときは図を省き、理由を本文に 1 行書く。添付つきの作成が非ゼロで終わったときは、stdout の URL か、このブランチから base への open の PR(`gh pr list --head <branch> --base <base> --state open`)で PR の有無を確かめ、あれば `gh pr edit` で直し、なければ添付なしで作り直す。`.claude/skills/pr/template.md` に全体図の欄がある
 - [x] AC10: `subagent-policy.md` の Planning 節が承認ゲートを挙げている。`AGENTS.md`・`.ralph/core/AGENTS.core.md`・`README.md`・`ralph-workflow.md` の `/plan` の説明が図解と承認に触れている(root と template の両側)
 - [x] AC11: `./scripts/check-skill-sync.sh`、`./scripts/check-sync.sh`、`./scripts/run-verify.sh` が通る
-- [ ] AC12(実地): この plan で図解ページを作って承認ゲートを通す。この PR の本文に全体図の PNG が `--attach` で載る(gh を 2.99.0 以上に上げたうえで)
+- [x] AC12(実地): この plan で図解ページを作って承認ゲートを通す。この PR の本文に全体図の PNG が `--attach` で載る(gh を 2.99.0 以上に上げたうえで)
 
 ## Implementation outline
 
@@ -172,4 +172,4 @@ root 側:
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
-- [ ] PR created
+- [x] PR created
