@@ -1,7 +1,7 @@
 # guard-bypass-and-hygiene
 
 - Status: Approved
-- Approved: 2026-10-07 sha256:c3b201489419
+- Approved: 2026-10-07 sha256:c07adf402bdb
 - Owner: Claude Code
 - Date: 2026-10-07
 - Related request: ハーネスの手入れ 5 件(2026-10-07 ユーザー依頼。bypass permissions のモードでも Bash の実行に Yes / No の確認が出る件は「bypass では出さない」をユーザーが選んだ。残りは PR #204 の後続候補)
@@ -45,9 +45,9 @@
 
 - `auto`、`dontAsk` など bypass 以外のモードでの扱いを変えること
 - Claude Code 本体が出す確認(重要なパスの `rm` など)を消すこと。hook の外にあるので変えられない
-- Codex 側の挙動を変えること。Codex の hook の payload に `permission_mode` があるかは確かめていない。なければ今までどおり ask を返す(tech-debt の 127 行目、Codex の ask の扱いは未確認のまま)
+- Codex 向けに別の扱いを作ること。self-review(L-2)が、codex-cli 0.160.0 の PreToolUse の入力にも `permission_mode` があり、値に `bypassPermissions` を含むことを確かめた。そのため Codex でもこのモードでは ask を返さなくなる。同じ binary に「ask は未対応」という文言があり、Codex は ask をもともと効かせていなかったとみられる(おそらく実害はない。未確認)。Codex が ask をどう扱うかは tech-debt の 127 行目のまま未確認として残す
 - コミットメッセージの guard の誤検知(tech-debt の 124 行目、`-m "$(cat <<'EOF'` の形を deny する)を直すこと
-- `cp`、`mv`、`sed -i` で `.git` や `.env` に書く形を新たに捕まえること。今も捕まえておらず、今回は書き込み先の判定を正すだけにする
+- `cp`、`mv`、`sed -i` で `.git` や `.env` に書く形を捕まえること。今の guard は、この形の後ろにたまたまリダイレクトがあるとき(`cp hook .git/hooks/pre-commit 2>&1` など)だけ確認を出していた。書き込み先の判定に絞るとこの偶然の検出もなくなる(self-review M-1 で実測)。リダイレクトのない `cp` や `mv` は今も捕まえていないので、新しい検出は別の作業として tech-debt に記録する
 - Go のコメントやテストの fixture に残る `docs/plans/active/` の参照(約 25 か所)を直すこと。後続候補として記録する
 - `docs/reports/` と `docs/insights/` の中の `docs/plans/active/` の参照。その時点の記録なので書き換えない
 
@@ -76,7 +76,7 @@
 - `docs/tech-debt/README.md`
 - `scripts/archive-plan.sh`、`templates/base/scripts/archive-plan.sh`
 - `tests/test-archive-plan.sh`(新規)
-- ドキュメント(`/sync-docs` で確かめる): `.codex/README.md` の 116 行目(guard が止めるという説明)、`docs/tech-debt/README.md` の 127 行目(Codex の ask)と 128・129 行目(`/sync-docs` に insight event の手順がない、という記述。S3 で事実が変わる)、`docs/quality/quality-gates.md`(verify.local.sh の説明があれば)
+- ドキュメント(`/sync-docs` で確かめる): `.codex/README.md` の 116 行目(guard が止めるという説明)、`docs/tech-debt/README.md` の 127 行目(Codex の ask。この PR で guard を触ったので見直す時期に当たる)、128・129 行目(`/sync-docs` に insight event の手順がない、という記述。S3 で事実が変わる)、157 行目(shellcheck の対象一覧。S2 で解消)、self-review が提案した新しい行(`cp`・`mv`・`sed -i` での書き込みの検出、前からある取りこぼし)、`docs/quality/quality-gates.md`(verify.local.sh の説明があれば)
 
 ## Visual review
 
@@ -133,7 +133,7 @@
 ## Risks and mitigations
 
 - bypass で ask を返さないと、`.env` への書き込みや `rm -rf` が確認なしで走る → ユーザーが選んだ挙動。deny の 4 規則と、Claude Code 本体の重要なパスの `rm` の確認は残る。PR 本文に書く
-- 書き込み先の判定を狭めて、今まで捕まえていた書き込みを見逃す → テストで書き込みの形(`>`、`>>`、空白なし、絶対パス、`tee -a`、heredoc、`.git` がファイル)を確かめる。外れるのは `.github/` と `.gitignore` など `.git` で始まる別の名前だけで、それは意図した変更
+- 書き込み先の判定を狭めて、今まで捕まえていた書き込みを見逃す → テストで書き込みの形(`>`、`>>`、空白なし、絶対パス、`tee -a`、heredoc、`.git` がファイル)を確かめる。外れるのは、`.github/` と `.gitignore` など `.git` で始まる別の名前(意図した変更)と、`cp`・`mv`・`sed -i` で書く形のうち後ろにたまたまリダイレクトがあったもの(self-review M-1)。後者は今の検出が偶然に頼っているので、PR 本文と tech-debt に書く
 - shellcheck の対象を広げると、CI の shellcheck の版で新しい warning が出るかもしれない → PR の CI で確かめる。出たら直し、直せないものは理由を書いて除く
 - `archive-plan.sh` の書き換えが README の別の参照を壊す → 名前の境界を見て、似た名前をテストで確かめる。書き換えた件数を出すので、`/pr` のコミットで差分として見える
 - 実行権限の検査が、`core.fileMode=false` の環境(Windows など)で誤って FAIL を出す → CI は ubuntu で、この repo の開発環境は macOS。起きたら index の mode だけを見る形に寄せる
@@ -163,6 +163,7 @@
   - S3 完了(4abc3566、implementer/sonnet): `/sync-docs` の 4 面に insight event の節、`test-skill-insight-cycle.sh` は 5 skill × 4 面(20 件)
   - S4 完了(3ac0ed9b、implementer/opus): tech-debt README の 34 か所を archive のパスに、`archive-plan.sh` は README を先に書き換えてから移す、`/pr` step 8 の 4 面、`verify.local.sh` の参照の検査、`tests/test-archive-plan.sh`(22 件)。plan の範囲内の判断 2 点: 文末の `.` を参照の区切りとして扱う(verify が末尾の `.` を落として調べるのと合わせるため)。verify の検査は「参照したパスそのものが実在する」で見る(Scope の「どちらかの下に実在」は AC6 の「active か archive に実在」の意味で、手で移したときの参照切れを拾うにはこの読みが要る)
   - AC7: `check-skill-sync.sh`、`check-sync.sh`、`check-pipeline-sync.sh`、`check-template-purity.sh`、`run-verify.sh` がすべて通過(2026-10-07)
+  - self-review(9bda19e3、reviewer/opus): Merge 可、MEDIUM 1・LOW 5。L-2・L-3・L-4 は 989886f2 で直した(inline。コメント 2 か所と表示の分岐 1 か所で、handoff より安いため)。M-1(`cp`・`mv`・`sed -i` の後ろにリダイレクトがある書き込みを、今は偶然捕まえていた)と L-2(Codex の payload にも `permission_mode` がある)に合わせて、plan の Non-goals・Risks・Affected areas の記述を事実に直した。本文が変わったので図 3 に `cp` の行を足して撮り直し、承認の digest を c3b201489419 から c07adf402bdb に取り直した(ユーザーの事前承認の範囲)。L-1(タブ)と L-5(tech-debt の 127・157 行目)は `/sync-docs` と tech-debt に渡す
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
