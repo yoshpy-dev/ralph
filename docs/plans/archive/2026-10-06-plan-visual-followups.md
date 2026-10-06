@@ -1,6 +1,6 @@
 # plan-visual-followups
 
-- Status: Approved
+- Status: PR created (#204), awaiting CI and merge
 - Approved: 2026-10-06 sha256:eb13fda57381
 - Owner: Claude Code
 - Date: 2026-10-06
@@ -140,4 +140,4 @@ PR #203(/plan の図解ページと承認ゲート)で残った 4 件を片付�
 - [x] Review artifact created (docs/reports/self-review-2026-10-06-plan-visual-followups.md)
 - [x] Verification artifact created (docs/reports/verify-2026-10-06-plan-visual-followups.md)
 - [x] Test artifact created (docs/reports/test-2026-10-06-plan-visual-followups.md)
-- [ ] PR created
+- [x] PR created
