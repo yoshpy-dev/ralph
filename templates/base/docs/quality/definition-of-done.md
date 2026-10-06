@@ -4,7 +4,7 @@ A task is done only when all applicable items are satisfied.
 
 ## For non-trivial code changes (standard /implement flow)
 
-- [ ] Active plan exists or was explicitly deemed unnecessary
+- [ ] Active plan exists and passed the `/plan` approval gate (`- Status: Approved` with a matching digest; or the user chose to continue without it, noted in the plan), or was explicitly deemed unnecessary
 - [ ] Repo writes happened inside a clean-base task worktree, not the default checkout
 - [ ] Acceptance criteria were addressed
 - [ ] Each implementation slice is individually committed (see `.claude/rules/ralph/git-commit-strategy.md`)

@@ -17,8 +17,8 @@ This project ships two independent execution surfaces:
 The development harness:
 
 1. Spec (auto, optional — refines vague ideas into detailed specifications via decision-tree questioning, codebase exploration, web research, and user clarification)
-2. Plan (auto — ensures a clean-base task worktree, creates plan) [+ optional Codex plan advisory]
-3. Implement (auto — resumes task worktree, interactive implementation)
+2. Plan (auto — ensures a clean-base task worktree, creates plan, shows a visual review page and asks for approval: Approve / Needs changes) [+ optional Codex plan advisory]
+3. Implement (auto — resumes task worktree, checks the plan's approval digest, interactive implementation)
 4. Self-review (auto — via `reviewer` subagent, or pipeline-internal)
 5. Verify (auto — via `verifier` subagent, or pipeline-internal)
 6. Test (auto — via `tester` subagent, or pipeline-internal)

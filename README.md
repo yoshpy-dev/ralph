@@ -215,14 +215,14 @@ flowchart LR
 Every step in the loop, including `/spec`, is auto-invoked. `/release` is the only manual-trigger skill and lives outside the loop (repo maintainer use).
 
 1. **Spec** (auto, optional — `/spec`) — refine vague requests through decision-tree questioning with recommended answers, codebase exploration, and interactive clarification. Issue-only specs use a temporary clean-base worktree and cleanup; saved specs create a docs/spec PR or hand off to `/plan`.
-2. **Plan** (auto — `/plan`) — ensures a clean-base task worktree, then writes a file-backed plan in `docs/plans/active/` with acceptance criteria, verify plan, test plan, risks.
-3. **Implement** (auto — `/implement`) — resumes the task worktree and implements interactively, delegating slices to the `implementer` subagent.
+2. **Plan** (auto — `/plan`) — ensures a clean-base task worktree, then writes a file-backed plan in `docs/plans/active/` with acceptance criteria, verify plan, test plan, risks. It then builds a visual review page (HTML diagrams of what will be built), opens it in the browser, and asks for approval (Approve / Needs changes) before `/implement`. A docs-only, single-file, or mechanical rename/value plan that changes no interaction, state, data format, or module boundary may skip the diagrams but still gets the approval.
+3. **Implement** (auto — `/implement`) — resumes the task worktree, checks the plan's approval digest (it asks whether to redo the review or continue when the plan is unapproved or changed after approval), and implements interactively, delegating slices to the `implementer` subagent.
 4. **Self-review** (auto — `/self-review`) — diff quality artifact.
 5. **Verify** (auto — `/verify`) — spec compliance + static analysis.
 6. **Test** (auto — `/test`) — behavioral tests must pass before PR.
 7. **Sync docs** (auto — `/sync-docs`) — alignment across AGENTS.md / CLAUDE.md / rules / README.
 8. **Cross-review** (auto, optional — `/cross-review`) — cross-model second opinion via the other agent: Claude Code calls Codex; Codex calls `claude -p`. Silently skipped if the reviewer side is unavailable.
-9. **PR** (auto — `/pr`) — structured PR, plan archival, hand-off, and task worktree/local branch cleanup.
+9. **PR** (auto — `/pr`) — structured PR (with the plan's overview diagram attached when `gh` supports `--attach`), plan archival, hand-off, and task worktree/local branch cleanup.
 10. **CI + human merge**.
 
 See `.claude/rules/ralph/post-implementation-pipeline.md` for the canonical pipeline order.

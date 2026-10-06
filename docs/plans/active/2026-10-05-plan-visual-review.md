@@ -90,18 +90,18 @@ root 側:
 
 ## Acceptance criteria
 
-- [ ] AC1: `scripts/plan-visual.sh open <html>` は、ファイルがあれば OS のオープナー(macOS は `open`、それ以外は `xdg-open`、環境変数で差し替え可)で開いて exit 0。オープナーがなければ、開くべきパスを stdout に出して exit 0。ファイルがなければ exit 1
-- [ ] AC2: `scripts/plan-visual.sh shot <html> <png>` は、Chrome / Chromium を見つけたら PNG を書いて exit 0。フラグメントとウィンドウの幅・高さを指定できる。ブラウザが見つからなければ、その旨を stderr に出して exit 2。環境変数でブラウザの実行ファイルを指定できる
-- [ ] AC2b: `scripts/plan-visual.sh digest <plan>` は、`- Status:`・`- Approved:`・`- Branch:` の行と `## Progress checklist` 節を除き、行頭(字下げ可)の `- [x]` / `- [X]` を `- [ ]` とみなした内容の sha256 の先頭 12 桁を stdout に出す。除いた部分とチェックボックスの印だけが違う 2 つの plan は同じ値になり、それ以外の行が 1 文字でも違えば別の値になる。macOS(`shasum`)と Linux(`sha256sum`)で同じ値を出す
-- [ ] AC3: `tests/test-plan-visual.sh` が、ファイルなし、オープナーあり / なし、ブラウザなし(exit 2)、スタブのブラウザに渡る引数(ファイル URL・フラグメント・ウィンドウの大きさ)、空白を含むパス、digest の一致と不一致(AC2b の両方向)を確かめ、`./scripts/run-test.sh` で通る
-- [ ] AC4: `scripts/plan-visual.sh` が `templates/base/scripts/` にもあり、`scripts/check-template.sh`(root と template)と `internal/scaffold/embed_test.go` の必須一覧に載っている。`./scripts/check-sync.sh` と `go test ./internal/scaffold/...` が通る
-- [ ] AC5: `.claude/skills/plan/diagrams.md` が次をすべて含む。図解の目的(見やすさ優先)、粒度の規則、表す対象から図の種類を選ぶ表、図解を省ける条件、色と線の意味、レイアウトの数値の目安、ノードを実在のパスか新規作成予定のパスに対応させる規則、参照先 skill へのリンク。`visual-template.html` が凡例・図の枠・`#overview` での全体図だけの表示を持つ
-- [ ] AC6: `.claude/skills/plan/SKILL.md` に図解ページ・自己チェック・承認の手順があり、順序が「critical forks → 図解ページ → 自己チェック → Codex advisory → 承認」になっている。承認で `Status: Approved` と `- Approved:`(日付と digest)を書く。Needs changes なら plan と図を直して出し直す。ブラウザがない(`shot` が exit 2)ときと、ページを開けない環境のときの扱いが書いてある
-- [ ] AC7: plan テンプレート(`docs/plans/templates/feature-plan.md`、`.claude/skills/plan/template.md`、それぞれの template 側)に `- Approved:` の行と `## Visual review` 節がある。`./scripts/new-feature-plan.sh` で作った plan にこの 2 つが入る
-- [ ] AC8: `.claude/skills/implement/SKILL.md` が plan の `Status` と `- Approved:` の digest を `plan-visual.sh digest` の結果と比べる。`Approved` でないとき、または digest が合わないとき(承認 → 設計を変更 → 再開の場合)は、図解と承認をやり直すか続けるかをユーザーに聞く
-- [ ] AC9: `.claude/skills/pr/SKILL.md` に次の手順がある。図解ページがあれば全体図だけの PNG を撮る。図のノードと `git diff --name-only <base>...HEAD` を照らし合わせ、ずれていれば図を直す。`gh pr create --attach` で本文に載せる。gh に `--attach` がない・図解ページがない・ブラウザがないときは図を省き、理由を本文に 1 行書く。添付つきの作成が非ゼロで終わったときは、stdout の URL か `gh pr view` で PR の有無を確かめ、あれば `gh pr edit` で直し、なければ添付なしで作り直す。`.claude/skills/pr/template.md` に全体図の欄がある
-- [ ] AC10: `subagent-policy.md` の Planning 節が承認ゲートを挙げている。`AGENTS.md`・`.ralph/core/AGENTS.core.md`・`README.md`・`ralph-workflow.md` の `/plan` の説明が図解と承認に触れている(root と template の両側)
-- [ ] AC11: `./scripts/check-skill-sync.sh`、`./scripts/check-sync.sh`、`./scripts/run-verify.sh` が通る
+- [x] AC1: `scripts/plan-visual.sh open <html>` は、ファイルがあれば OS のオープナー(macOS は `open`、それ以外は `xdg-open`、環境変数で差し替え可)で開いて exit 0。オープナーがなければ、開くべきパスを stdout に出して exit 0。ファイルがなければ exit 1
+- [x] AC2: `scripts/plan-visual.sh shot <html> <png>` は、Chrome / Chromium を見つけたら PNG を書いて exit 0。フラグメントとウィンドウの幅・高さを指定できる。ブラウザが見つからなければ、その旨を stderr に出して exit 2。環境変数でブラウザの実行ファイルを指定できる
+- [x] AC2b: `scripts/plan-visual.sh digest <plan>` は、`- Status:`・`- Approved:`・`- Branch:` の行と `## Progress checklist` 節を除き、行頭(字下げ可)の `- [x]` / `- [X]` を `- [ ]` とみなした内容の sha256 の先頭 12 桁を stdout に出す。除いた部分とチェックボックスの印だけが違う 2 つの plan は同じ値になり、それ以外の行が 1 文字でも違えば別の値になる。macOS(`shasum`)と Linux(`sha256sum`)で同じ値を出す
+- [x] AC3: `tests/test-plan-visual.sh` が、ファイルなし、オープナーあり / なし、ブラウザなし(exit 2)、スタブのブラウザに渡る引数(ファイル URL・フラグメント・ウィンドウの大きさ)、空白を含むパス、digest の一致と不一致(AC2b の両方向)を確かめ、`./scripts/run-test.sh` で通る
+- [x] AC4: `scripts/plan-visual.sh` が `templates/base/scripts/` にもあり、`scripts/check-template.sh`(root と template)と `internal/scaffold/embed_test.go` の必須一覧に載っている。`./scripts/check-sync.sh` と `go test ./internal/scaffold/...` が通る
+- [x] AC5: `.claude/skills/plan/diagrams.md` が次をすべて含む。図解の目的(見やすさ優先)、粒度の規則、表す対象から図の種類を選ぶ表、図解を省ける条件、色と線の意味、レイアウトの数値の目安、ノードを実在のパスか新規作成予定のパスに対応させる規則、参照先 skill へのリンク。`visual-template.html` が凡例・図の枠・`#overview` での全体図だけの表示を持つ
+- [x] AC6: `.claude/skills/plan/SKILL.md` に図解ページ・自己チェック・承認の手順があり、順序が「critical forks → 図解ページ → 自己チェック → Codex advisory → 承認」になっている。承認で `Status: Approved` と `- Approved:`(日付と digest)を書く。Needs changes なら plan と図を直して出し直す。ブラウザがない(`shot` が exit 2)ときと、ページを開けない環境のときの扱いが書いてある
+- [x] AC7: plan テンプレート(`docs/plans/templates/feature-plan.md`、`.claude/skills/plan/template.md`、それぞれの template 側)に `- Approved:` の行と `## Visual review` 節がある。`./scripts/new-feature-plan.sh` で作った plan にこの 2 つが入る
+- [x] AC8: `.claude/skills/implement/SKILL.md` が plan の `Status` と `- Approved:` の digest を `plan-visual.sh digest` の結果と比べる。`Approved` でないとき、または digest が合わないとき(承認 → 設計を変更 → 再開の場合)は、図解と承認をやり直すか続けるかをユーザーに聞く
+- [x] AC9: `.claude/skills/pr/SKILL.md` に次の手順がある。図解ページがあれば全体図だけの PNG を撮る。図のノードと `git diff --name-only <base>...HEAD` を照らし合わせ、ずれていれば図を直す。`gh pr create --attach` で本文に載せる。gh に `--attach` がない・図解ページがない・ブラウザがないときは図を省き、理由を本文に 1 行書く。添付つきの作成が非ゼロで終わったときは、stdout の URL か `gh pr view` で PR の有無を確かめ、あれば `gh pr edit` で直し、なければ添付なしで作り直す。`.claude/skills/pr/template.md` に全体図の欄がある
+- [x] AC10: `subagent-policy.md` の Planning 節が承認ゲートを挙げている。`AGENTS.md`・`.ralph/core/AGENTS.core.md`・`README.md`・`ralph-workflow.md` の `/plan` の説明が図解と承認に触れている(root と template の両側)
+- [x] AC11: `./scripts/check-skill-sync.sh`、`./scripts/check-sync.sh`、`./scripts/run-verify.sh` が通る
 - [ ] AC12(実地): この plan で図解ページを作って承認ゲートを通す。この PR の本文に全体図の PNG が `--attach` で載る(gh を 2.99.0 以上に上げたうえで)
 
 ## Implementation outline
@@ -166,7 +166,7 @@ root 側:
   - S5 完了(84ad2d46): /pr の step 5.a〜5.c(全体図の照合・撮影・`--attach`、非ゼロ終了時の PR 有無の確認)、PR テンプレートの「全体図」節。implementer がセッション再開で途中で消えたため、作業ツリーに残った変更を orchestrator が確認し、検証とコミットを inline で行った(dispatch 中断時の fallback)
   - /verify(ba4bf3ad)の指摘 V-1・V-2 を b0ea4a23 で直し、plan 本文を更新して再承認した(2026-10-06、digest d4918bfcec38。最初の承認は 9c20a2da6606)
   - メモ: Linux の `xdg-open` はバックエンドによってブラウザが閉じるまで戻らないかもしれない(未確認)。S3 で `open` の呼び方を書くときに考える
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Review artifact created
+- [x] Verification artifact created
+- [x] Test artifact created
 - [ ] PR created
