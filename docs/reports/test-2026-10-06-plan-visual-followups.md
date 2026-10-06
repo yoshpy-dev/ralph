@@ -203,3 +203,9 @@ AC1 の snapshot と template の一致は、`TestSettingsSnapshotTemplate_Match
 - Blocked: なし
 
 テストは通っており、/pr に進めない理由はない。Test gaps の 1 と 2 は 1 件ずつで足せるので、/sync-docs や次の修正の機会に足すかを判断してほしい。
+
+## Test gaps への対応(orchestrator 追記)
+
+- G1・G2 は e23c8047 で塞いだ。`tests/test-pr-owner-lookup.sh` に大文字の owner(`YOSHPY-DEV`)で 1 回目の検索を流すケースを足し(20 件)、`tests/test-insights-append.sh` に 2 つの状態ファイルがどちらも `plan_path` を持たないケースを足した(51 件)
+- scratch のコピーで赤になることを確かめた。`<owner>` 側の `ascii_downcase` を外すと新しいケースだけが FAIL し、`-z "$_rac_active"` の判定を外すと 8b3 だけが FAIL した
+- `./scripts/run-verify.sh` は rc 0(新しい 2 件を含む)
