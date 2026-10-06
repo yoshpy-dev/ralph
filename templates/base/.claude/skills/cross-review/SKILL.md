@@ -123,32 +123,38 @@ Provide a cross-model second opinion on the current diff before PR creation.
 
    Let `CAP_REACHED = (cycle >= RALPH_STANDARD_MAX_PIPELINE_CYCLES)`. At the default cap of 2, `CAP_REACHED` is true during the second (and final) `/cross-review` run.
 
+   **Records-only option**: offer "Fix records only" in Case A and Case B only when every finding to be fixed (the ACTION_REQUIRED findings in Case A, the WORTH_CONSIDERING findings in Case B) is confined to this task's pipeline records as defined in `.claude/rules/ralph/post-implementation-pipeline.md` ("Exception: fixes confined to this task's pipeline records"). Otherwise leave it out of the list. It is offered whether or not `CAP_REACHED`, because it does not start a new run.
+
    **Case A — ACTION_REQUIRED findings exist**:
    - If NOT `CAP_REACHED`: Use AskUserQuestion (Claude) or numbered stdin prompt (Codex):
      - Question: "Cross-review reported ACTION_REQUIRED findings. How do you want to proceed?"
      - Options:
        1. Fix — fix ACTION_REQUIRED issues, then re-run the full post-implementation pipeline: /self-review → /verify → /test → /sync-docs → /cross-review
-       2. Also review WORTH_CONSIDERING — review both ACTION_REQUIRED and WORTH_CONSIDERING, then decide
-       3. Acknowledge and create PR — proceed to /pr
+       2. Fix records only — fix the records, check the exception's conditions, record the check in the triage report, then proceed to /pr (see the records-only note above)
+       3. Also review WORTH_CONSIDERING — review both ACTION_REQUIRED and WORTH_CONSIDERING, then decide
+       4. Acknowledge and create PR — proceed to /pr
    - If `CAP_REACHED` (cap-reached flow):
      - Question: "Pipeline re-run cap (`RALPH_STANDARD_MAX_PIPELINE_CYCLES=<cap>`) reached, but ACTION_REQUIRED findings remain. What do you want to do?"
      - Options:
        1. Raise the cap temporarily and re-run — have the user set a higher `RALPH_STANDARD_MAX_PIPELINE_CYCLES` (e.g. export it) and re-run the pipeline
-       2. Record findings and create PR — add unresolved ACTION_REQUIRED findings to the PR body's Known gaps section, then proceed to /pr
-       3. Abort — stop without creating a PR; the user will resume manually
+       2. Fix records only — same as in the non-cap list; the cap does not need raising
+       3. Record findings and create PR — add unresolved ACTION_REQUIRED findings to the PR body's Known gaps section, then proceed to /pr
+       4. Abort — stop without creating a PR; the user will resume manually
 
    **Case B — No ACTION_REQUIRED, but WORTH_CONSIDERING exist**:
    - If NOT `CAP_REACHED`:
      - Question: "Cross-review reported WORTH_CONSIDERING findings (no ACTION_REQUIRED). How do you want to proceed?"
      - Options:
        1. Review and fix — review WORTH_CONSIDERING findings, fix as needed, then re-run the full post-implementation pipeline
-       2. Create PR — proceed to /pr
+       2. Fix records only — fix the records, check the exception's conditions, record the check in the triage report, then proceed to /pr (see the records-only note above)
+       3. Create PR — proceed to /pr
    - If `CAP_REACHED`:
      - Question: "Pipeline re-run cap (`RALPH_STANDARD_MAX_PIPELINE_CYCLES=<cap>`) reached, but WORTH_CONSIDERING findings remain. What do you want to do?"
      - Options:
        1. Raise the cap temporarily and re-run
-       2. Create PR — add unresolved WORTH_CONSIDERING findings to the PR body's Known gaps section, then proceed to /pr
-       3. Abort
+       2. Fix records only — same as in the non-cap list; the cap does not need raising
+       3. Create PR — add unresolved WORTH_CONSIDERING findings to the PR body's Known gaps section, then proceed to /pr
+       4. Abort
 
    **Case C — All findings DISMISSED (or no findings)**:
    Note "Cross-review: all findings triaged (no ACTION_REQUIRED) — triage report: docs/reports/cross-review-triage-<slug>.md" and proceed to /pr.
@@ -157,6 +163,7 @@ Provide a cross-model second opinion on the current diff before PR creation.
    - **Incomplete review** (Step 4's incomplete path, chosen via Step 8's alternate dialog): "re-run the reviewer" returns to Step 4 and leaves `cycle-count.json` unchanged — no review happened, so no cycle was consumed. "Proceed to `/pr`" and "abort" follow the same branches as below.
    - **Non-cap re-run** (Case A / Case B, `CAP_REACHED = false`): If `active-plan.json` exists, increment `cycle-count.json` (`cycle += 1`), then guide the user back to `/self-review`. The incremented cycle represents "the pass the user is about to enter".
    - **Cap-reached Option 1** ("Raise the cap temporarily and re-run"): Do **NOT** increment `cycle-count.json`. Instruct the user to `export RALPH_STANDARD_MAX_PIPELINE_CYCLES=<current cycle + 1>` (or higher) before re-running, so the unchanged `cycle` falls below the new cap. Then guide them back to `/self-review`.
+   - **Fix records only** (Case A / Case B, with or without `CAP_REACHED`): apply the fix as one commit, then check that commit against the three conditions in `.claude/rules/ralph/post-implementation-pipeline.md` ("Exception: fixes confined to this task's pipeline records"). If all hold, add the check result (the commit's `git show --stat` output and the verdict-line result) to the triage report, do **NOT** increment `cycle-count.json`, and invoke /pr, stating in the PR body that the exception was used. If any condition fails, the fix needs the full pipeline: take the non-cap re-run path above, or, when `CAP_REACHED`, the cap-reached Option 1 path.
    - If the user chooses `/pr`: invoke /pr (which is responsible for deleting `active-plan.json` and `cycle-count.json` on success).
    - If the user chooses Abort: stop without invoking /pr; leave state files in place so the next `/implement` can resume.
 
@@ -165,7 +172,7 @@ Provide a cross-model second opinion on the current diff before PR creation.
 | Aspect | Claude Code (driver = claude) | Codex (driver = codex) |
 |--------|-------------------------------|------------------------|
 | Reviewer invocation | `command codex -m "${RALPH_CODEX_REVIEWER_MODEL:-gpt-6-astra}" -c "model_reasoning_effort=${RALPH_CODEX_REASONING_EFFORT:-xhigh}" -c sandbox_mode=read-only exec review --ignore-rules --base "$BASE" -o <scratch>/cross-review-<slug>-c<cycle>-last.md </dev/null` (background with a 20-minute watchdog; see Step 4) | `claude -p --model "${RALPH_CLAUDE_REVIEWER_MODEL:-opus}" --permission-mode auto --output-format json` (adversarial reviewer prompt; complete only on exit 0 with a non-empty result) |
-| Step 8 user dialog | Structured choices via `AskUserQuestion` | Numbered options printed to stdout, awaiting a digit 1–3 |
+| Step 8 user dialog | Structured choices via `AskUserQuestion` | Numbered options printed to stdout, awaiting a digit 1–4 |
 | Triage execution | inline (main context) | inline — chained within a single agent |
 | Output file | `docs/reports/cross-review-triage-<slug>.md` | Same |
 

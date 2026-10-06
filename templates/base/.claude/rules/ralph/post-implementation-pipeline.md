@@ -8,7 +8,41 @@ Single source of truth for the post-implementation pipeline (standard flow, `/im
 /self-review → /verify → /test → /sync-docs → /cross-review → /pr
 ```
 
-No step may be skipped. If any step triggers a fix-and-revalidate cycle (e.g., cross-review ACTION_REQUIRED), the **full pipeline** re-runs from `/self-review` onwards.
+No step may be skipped. If any step triggers a fix-and-revalidate cycle (e.g., cross-review ACTION_REQUIRED), the **full pipeline** re-runs from `/self-review` onwards, except for the record-only fixes below.
+
+### Exception: fixes confined to this task's pipeline records
+
+A fix skips the full re-run only when all three of these hold:
+
+1. The finding is about the record itself (a report's wording, an insight
+   event's value), not about code, scripts, skills, rules, other docs, or the
+   plan.
+2. The fix commit changes only this task's records: report files directly
+   under `docs/reports/` named after the plan slug (`<kind>-<date>-<slug>.md`,
+   `cross-review-triage-<slug>.md`), and
+   `docs/insights/events/<date>-<slug>.jsonl`. `docs/reports/templates/` is
+   an input that skills read, so it is never covered.
+3. The fix changes no verdict line in this task's self-review, verify, or test
+   report: the finding severities and the `Merge:` line of the self-review
+   report, and the `## Verdict` lines of the verify and test reports. `/pr`'s
+   pre-checks read those verdicts.
+
+To check, make the fix a single commit `<commit>`, then:
+
+- `git diff --name-only <commit>^ <commit>` lists only the paths in condition 2.
+- `git show --stat <commit>` shows the same files.
+- `git diff <commit>^ <commit> -- <report>` for the self-review, verify, and
+  test reports touches no verdict line.
+
+Record the result (the `git show --stat` output and the verdict-line result)
+in `docs/reports/cross-review-triage-<slug>.md`, and say in the PR body that
+the exception was used. `cycle-count.json` is not incremented. If any
+condition fails, re-run the full pipeline (see "Re-run after cross-review
+ACTION_REQUIRED fix" below).
+
+Only `/cross-review` offers this exception (steps 8 and 9 of
+`.claude/skills/cross-review/SKILL.md`). `/self-review`, `/verify`, and
+`/test` write their own report for the current run, so they need none.
 
 ### CLI execution mode
 
@@ -53,7 +87,7 @@ Not just `/self-review → /verify → /test → /cross-review`. The `/sync-docs
 
 The post-implementation pipeline is capped at **2 total runs by default**: the initial run plus at most one fix-and-revalidate re-run. After the second run, the pipeline does not automatically regress even if cross-review still reports ACTION_REQUIRED.
 
-Controlled by `RALPH_STANDARD_MAX_PIPELINE_CYCLES` (default `2`). The counter is persisted to `.harness/state/standard-pipeline/cycle-count.json`, keyed by the pinned plan path and task worktree state in `.harness/state/standard-pipeline/active-plan.json`. When the cap is reached, `/cross-review` drops the "fix" option from Case A/B and offers: (1) raise the cap and re-run, (2) proceed to `/pr` and record remaining findings as known gaps, (3) abort.
+Controlled by `RALPH_STANDARD_MAX_PIPELINE_CYCLES` (default `2`). The counter is persisted to `.harness/state/standard-pipeline/cycle-count.json`, keyed by the pinned plan path and task worktree state in `.harness/state/standard-pipeline/active-plan.json`. When the cap is reached, `/cross-review` drops the "fix" option from Case A/B and offers: (1) raise the cap and re-run, (2) proceed to `/pr` and record remaining findings as known gaps, (3) abort. The record-only fix (see "Exception: fixes confined to this task's pipeline records") stays available at the cap, because it does not start a new run.
 
 Raise the cap only when you consciously accept additional churn; the default is a deliberate "fail fast, hand back to the operator" stance.
 
