@@ -271,7 +271,15 @@ run_hook_tests() {
       printf '==> %s\n' "$f"
       printf '    FAIL: %s (%s)\n' "$mode_problem" "$f"
       printf '    fix: chmod +x %s\n' "$f"
-      printf '         git update-index --chmod=+x %s\n' "$f"
+      # The git half of the fix depends on whether git tracks the file yet:
+      # update-index fails on an untracked path, which needs add --chmod.
+      if [ "$in_git_work_tree" = "true" ]; then
+        if git ls-files --error-unmatch -- "$f" >/dev/null 2>&1; then
+          printf '         git update-index --chmod=+x %s\n' "$f"
+        else
+          printf '         git add --chmod=+x %s\n' "$f"
+        fi
+      fi
       status=1
       continue
     fi

@@ -16,7 +16,9 @@ command="$(extract_json_field "$payload" "tool_input.command")"
 # Claude Code sends the session's permission mode at the top level
 # (default, plan, acceptEdits, auto, dontAsk, bypassPermissions). Only
 # bypassPermissions changes anything below: it skips the ask rules. An
-# absent key (e.g. a Codex payload) leaves every rule on.
+# absent key leaves every rule on. Codex's PreToolUse input (0.160.0) also
+# carries permission_mode, so the same skip applies under Codex in that
+# mode; Codex's handling of an ask decision itself is unverified.
 mode="$(extract_json_field "$payload" "permission_mode")"
 
 emit_decision() {

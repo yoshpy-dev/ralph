@@ -8,6 +8,10 @@
 #   3. executable, and the git index mode is 100755  -> runs, exit 0
 #   4. executable and untracked inside a git repo    -> runs, exit 0
 #      (no index mode; the working-tree bit decides)
+#   5. not executable and untracked inside a git repo -> FAIL, with
+#      `git add --chmod=+x` as the git fix (update-index rejects an
+#      untracked path); case 1, outside any repo, gets no git fix and
+#      case 2, tracked, gets `git update-index --chmod=+x`
 # Each case copies verify.local.sh into its own fixture under mktemp -d
 # (the script cd's to its own ..) and runs it with HARNESS_VERIFY_MODE=test.
 set -eu
@@ -84,12 +88,15 @@ show_output() {
   sed 's/^/      | /' "$_out"
 }
 
-# expect_mode_fail DESC REASON — the last run exited non-zero and printed
-# the FAIL line with REASON for tests/test-b.sh plus both fix commands,
-# while tests/test-a.sh still ran.
+# expect_mode_fail DESC REASON GIT_FIX — the last run exited non-zero and
+# printed the FAIL line with REASON for tests/test-b.sh, the chmod fix, and
+# the git fix GIT_FIX ("update-index" for a tracked file, "add" for an
+# untracked one inside a repo, "none" outside any repo), while
+# tests/test-a.sh still ran.
 expect_mode_fail() {
   _desc="$1"
   _reason="$2"
+  _git_fix="$3"
   if [ "$_rc" -eq 0 ]; then
     fail "${_desc}: verify.local.sh exited 0, expected non-zero"
     show_output
@@ -99,11 +106,24 @@ expect_mode_fail() {
   for _needle in \
     "FAIL: ${_reason} (tests/test-b.sh)" \
     "fix: chmod +x tests/test-b.sh" \
-    "git update-index --chmod=+x tests/test-b.sh" \
     "==> tests/test-a.sh"
   do
     output_has "$_needle" || _missing="${_missing} [${_needle}]"
   done
+  case "$_git_fix" in
+    update-index)
+      output_has "git update-index --chmod=+x tests/test-b.sh" || _missing="${_missing} [git update-index --chmod=+x tests/test-b.sh]"
+      output_has "git add --chmod" && _missing="${_missing} [no git add hint for a tracked file]"
+      ;;
+    add)
+      output_has "git add --chmod=+x tests/test-b.sh" || _missing="${_missing} [git add --chmod=+x tests/test-b.sh]"
+      output_has "git update-index" && _missing="${_missing} [no update-index hint for an untracked file]"
+      ;;
+    none)
+      output_has "git update-index" && _missing="${_missing} [no update-index hint outside a repo]"
+      output_has "git add --chmod" && _missing="${_missing} [no git add hint outside a repo]"
+      ;;
+  esac
   if [ -n "$_missing" ]; then
     fail "${_desc}: output lacks${_missing}"
     show_output
@@ -133,7 +153,7 @@ printf '==> run_hook_tests treats a test that would not run in CI as FAIL\n'
 # Case 1: no exec bit in the working tree, outside any git repo.
 _fx="$(make_fixture not-executable)"
 run_verify_local "$_fx"
-expect_mode_fail "not executable in the working tree" "not executable in the working tree"
+expect_mode_fail "not executable in the working tree" "not executable in the working tree" none
 
 # Case 2: exec bit in the working tree, index mode 100644.
 _fx="$(make_fixture index-644)"
@@ -149,7 +169,7 @@ else
     fail "index mode 100644: reported a working-tree problem for an executable file"
     show_output
   else
-    expect_mode_fail "executable, index mode 100644" "git index mode is 100644"
+    expect_mode_fail "executable, index mode 100644" "git index mode is 100644" update-index
   fi
 fi
 
@@ -177,6 +197,14 @@ else
   run_verify_local "$_fx"
   expect_runs "executable, untracked in a git repo"
 fi
+
+# Case 5: no exec bit, untracked inside a git repo (a test just written,
+# not added yet): the git fix is `git add --chmod=+x`, since update-index
+# rejects an untracked path.
+_fx="$(make_fixture untracked-not-executable)"
+git -C "$_fx" init -q
+run_verify_local "$_fx"
+expect_mode_fail "not executable, untracked in a git repo" "not executable in the working tree" add
 
 printf '\nverify-local-hook-tests tests: %s passed, %s failed, %s total\n' "$_pass" "$_fail" "$_total"
 [ "$_fail" -eq 0 ]
