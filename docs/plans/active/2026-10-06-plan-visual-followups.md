@@ -77,12 +77,12 @@ PR #203(/plan の図解ページと承認ゲート)で残った 4 件を片付�
 
 ## Acceptance criteria
 
-- [ ] AC1: 3 つの settings ファイルの `permissions.allow` に `Bash(git remote get-url:*)` と `Bash(sed:*)` が 1 回ずつあり、3 ファイルが同じ内容。`go test ./internal/upgrade/...` と `./scripts/check-sync.sh` が通る。JSON として読める
-- [ ] AC2: `post-implementation-pipeline.md`(root と template、同じ内容)に例外の節がある。3 つの条件(指摘が記録そのものを対象にしている、その task の slug を名前に含む `docs/reports/` 直下のレポートと `docs/insights/events/` のイベントだけを変える(`docs/reports/templates/` は対象外)、self-review・verify・test レポートの verdict の行を変えない)、確かめ方(`git diff --name-only`、修正コミットの `git show --stat`、verdict の行の差分)、triage レポートと PR 本文への記録、`cycle-count.json` を上げないこと、1 つでも外れたら全工程を回し直すこと、が書いてある。`ralph-workflow.md`(root と template)に Edit / Write を使う一文がある
-- [ ] AC3: `/cross-review` の step 8 の Case A と Case B(cap に届いていても届いていなくても)に、例外にあたる指摘だけのときの選択肢があり、step 9 にその扱い(修正、3 つの条件の確認、triage レポートへの記録、`cycle-count.json` は上げない、`/pr` へ)が書いてある。条件の文言は `post-implementation-pipeline.md` を指し、同じ内容を二重に書かない
-- [ ] AC4: `insights-append.sh --cycle auto` が、`active-plan.json` と `cycle-count.json` がそろい `plan_path` が一致するときはその `cycle` を、それ以外(片方がない、`plan_path` が違う、JSON が壊れている)は 1 を書く。`tests/test-insights-append.sh` がこの 4 通りを `--state-dir` で確かめる。4 つの skill の insight event のコマンドに `--cycle auto` があり、`tests/test-skill-insight-cycle.sh` が 4 skill × 4 面で確かめ、`--cycle auto` を外すと落ちる。root と template の `insights-append.sh` は同じ内容
-- [ ] AC5: `/pr` 5.c の `sed` が末尾の `/` を落とし、jq が owner を小文字にそろえて null でも落ちずに比べる。作り直す前に base を限らない 2 回目の検索をし、別の base への open な PR があれば作り直さずに止めて報告する、gh が「PR がすでにある」と断ったときも止めて報告する、と書いてある。`tests/test-pr-owner-lookup.sh` が SKILL.md から取り出した式で、URL 7 形(https の `.git` あり・なし・末尾 `/`、`ssh://`、ポートつき `ssh://`、`git@host:`、SSH の別名ホスト)と jq の fixture(大文字の login、null の owner、別の owner、別の base の PR)を確かめる
-- [ ] AC6: `./scripts/check-skill-sync.sh`、`./scripts/check-sync.sh`、`./scripts/check-pipeline-sync.sh`、`bash scripts/check-template-purity.sh`、`./scripts/run-verify.sh` が通る
+- [x] AC1: 3 つの settings ファイルの `permissions.allow` に `Bash(git remote get-url:*)` と `Bash(sed:*)` が 1 回ずつあり、3 ファイルが同じ内容。`go test ./internal/upgrade/...` と `./scripts/check-sync.sh` が通る。JSON として読める
+- [x] AC2: `post-implementation-pipeline.md`(root と template、同じ内容)に例外の節がある。3 つの条件(指摘が記録そのものを対象にしている、その task の slug を名前に含む `docs/reports/` 直下のレポートと `docs/insights/events/` のイベントだけを変える(`docs/reports/templates/` は対象外)、self-review・verify・test レポートの verdict の行を変えない)、確かめ方(`git diff --name-only`、修正コミットの `git show --stat`、verdict の行の差分)、triage レポートと PR 本文への記録、`cycle-count.json` を上げないこと、1 つでも外れたら全工程を回し直すこと、が書いてある。`ralph-workflow.md`(root と template)に Edit / Write を使う一文がある
+- [x] AC3: `/cross-review` の step 8 の Case A と Case B(cap に届いていても届いていなくても)に、例外にあたる指摘だけのときの選択肢があり、step 9 にその扱い(修正、3 つの条件の確認、triage レポートへの記録、`cycle-count.json` は上げない、`/pr` へ)が書いてある。条件の文言は `post-implementation-pipeline.md` を指し、同じ内容を二重に書かない
+- [x] AC4: `insights-append.sh --cycle auto` が、`active-plan.json` と `cycle-count.json` がそろい `plan_path` が一致するときはその `cycle` を、それ以外(片方がない、`plan_path` が違う、JSON が壊れている)は 1 を書く。`tests/test-insights-append.sh` がこの 4 通りを `--state-dir` で確かめる。4 つの skill の insight event のコマンドに `--cycle auto` があり、`tests/test-skill-insight-cycle.sh` が 4 skill × 4 面で確かめ、`--cycle auto` を外すと落ちる。root と template の `insights-append.sh` は同じ内容
+- [x] AC5: `/pr` 5.c の `sed` が末尾の `/` を落とし、jq が owner を小文字にそろえて null でも落ちずに比べる。作り直す前に base を限らない 2 回目の検索をし、別の base への open な PR があれば作り直さずに止めて報告する、gh が「PR がすでにある」と断ったときも止めて報告する、と書いてある。`tests/test-pr-owner-lookup.sh` が SKILL.md から取り出した式で、URL 7 形(https の `.git` あり・なし・末尾 `/`、`ssh://`、ポートつき `ssh://`、`git@host:`、SSH の別名ホスト)と jq の fixture(大文字の login、null の owner、別の owner、別の base の PR)を確かめる
+- [x] AC6: `./scripts/check-skill-sync.sh`、`./scripts/check-sync.sh`、`./scripts/check-pipeline-sync.sh`、`bash scripts/check-template-purity.sh`、`./scripts/run-verify.sh` が通る
 
 ## Implementation outline
 
@@ -137,7 +137,7 @@ PR #203(/plan の図解ページと承認ゲート)で残った 4 件を片付�
   - S4 完了(d7d31480): `/pr` 5.c の sed(末尾の `/`)、大文字小文字を区別せず null でも落ちない jq、別の base への PR を見つける 2 回目の検索、「すでにある」で止める。`tests/test-pr-owner-lookup.sh`(19 件、SKILL.md から式を取り出して実行。4 面がそろっているかも確かめる)
   - self-review の修正(c24eab98、3a426bb8、38f6931a)と verify の修正: 例外の条件 2 は plan の本文(「slug を名前に含む」「triage レポートも対象」)より厳しくした。修正のコミットは triage レポートに触れず、確認結果は別の追記だけのコミットで記録し、前の内容が新しい内容の先頭とバイト単位で一致すること・前のファイルが改行で終わること・triage レポートが前のコミットにあることを確かめる。plan の意図(範囲を狭く、verdict を守る)の内側なので、本文は直さず再承認もしない(verify の V-2)
   - メモ(範囲外): `scripts/verify.local.sh` の shellcheck の対象一覧に `scripts/insights-append.sh` が入っていない
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Review artifact created (docs/reports/self-review-2026-10-06-plan-visual-followups.md)
+- [x] Verification artifact created (docs/reports/verify-2026-10-06-plan-visual-followups.md)
+- [x] Test artifact created (docs/reports/test-2026-10-06-plan-visual-followups.md)
 - [ ] PR created
