@@ -1,7 +1,7 @@
 # docs/insights — Post-Implementation Insight Events
 
 This directory stores structured insight event data emitted by post-implementation
-skills (`/self-review`, `/verify`, `/test`, `/cross-review`) via
+skills (`/self-review`, `/verify`, `/test`, `/sync-docs`, `/cross-review`) via
 `scripts/insights-append.sh`, and derived by `ralph insights backfill` from existing
 Markdown reports. The events are the primary source for `ralph insights`.
 
@@ -116,7 +116,7 @@ do not carry routing fields.
 
 Events are written by `scripts/insights-append.sh`, called directly by the
 post-implementation skills (`/self-review`, `/verify`, `/test`,
-`/cross-review`) after each writes its report. `ralph insights backfill`
+`/sync-docs`, `/cross-review`) after each writes its report. `ralph insights backfill`
 derives events from existing Markdown reports when live events are missing.
 
 ```sh

@@ -6,7 +6,8 @@
 # docs/quality/quality-gates.md:
 #   - static: shellcheck, sh -n, jq validity, template sync, tech-debt
 #             plan references
-#   - test  : hook smoke tests (tests/test-check-mojibake.sh)
+#   - test  : every tests/test-*.sh (a file without the exec bit, in the
+#             working tree or the git index, counts as a failure)
 #   - all   : everything (default; what run-verify.sh sets)
 #
 # This file is NOT shipped to scaffolded projects; scaffolded projects

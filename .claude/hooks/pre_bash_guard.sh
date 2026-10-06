@@ -38,6 +38,8 @@ emit_decision() {
 # (CI) agree. grep reads the command line by line on the jq path, where
 # newlines are real; on the sed fallback a newline is still the two
 # characters \n, so a backslash ends a target word and a tee argument list.
+# A tab is likewise the two characters \t on the fallback, so a tab between
+# a redirection or tee and its target is not seen there (the jq path sees it).
 q="'"
 # One character of a target word.
 word_char="[^[:space:]\"${q};&|()<>\\\\]"

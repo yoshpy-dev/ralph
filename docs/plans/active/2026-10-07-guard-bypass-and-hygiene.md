@@ -164,7 +164,10 @@
   - S4 完了(3ac0ed9b、implementer/opus): tech-debt README の 34 か所を archive のパスに、`archive-plan.sh` は README を先に書き換えてから移す、`/pr` step 8 の 4 面、`verify.local.sh` の参照の検査、`tests/test-archive-plan.sh`(22 件)。plan の範囲内の判断 2 点: 文末の `.` を参照の区切りとして扱う(verify が末尾の `.` を落として調べるのと合わせるため)。verify の検査は「参照したパスそのものが実在する」で見る(Scope の「どちらかの下に実在」は AC6 の「active か archive に実在」の意味で、手で移したときの参照切れを拾うにはこの読みが要る)
   - AC7: `check-skill-sync.sh`、`check-sync.sh`、`check-pipeline-sync.sh`、`check-template-purity.sh`、`run-verify.sh` がすべて通過(2026-10-07)
   - self-review(9bda19e3、reviewer/opus): Merge 可、MEDIUM 1・LOW 5。L-2・L-3・L-4 は 989886f2 で直した(inline。コメント 2 か所と表示の分岐 1 か所で、handoff より安いため)。M-1(`cp`・`mv`・`sed -i` の後ろにリダイレクトがある書き込みを、今は偶然捕まえていた)と L-2(Codex の payload にも `permission_mode` がある)に合わせて、plan の Non-goals・Risks・Affected areas の記述を事実に直した。本文が変わったので図 3 に `cp` の行を足して撮り直し、承認の digest を c3b201489419 から c07adf402bdb に取り直した(ユーザーの事前承認の範囲)。L-1(タブ)と L-5(tech-debt の 127・157 行目)は `/sync-docs` と tech-debt に渡す
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+  - verify(`docs/reports/verify-2026-10-07-guard-bypass-and-hygiene.md`、verifier/opus): pass。AC4 の直し方の表示は plan の文言(`chmod +x` と `git update-index --chmod=+x`)より細かい(V-8)。989886f2(L-3)以降、untracked のテストには `git add --chmod=+x` を出し、index だけが 100644 で working tree に実行権限があるときも `chmod +x` を出す。AC4 の「ファイル名と直し方を出し、非 0 で終わる」は満たしている。plan の本文は digest の対象なので直していない
+  - test(`docs/reports/test-2026-10-07-guard-bypass-and-hygiene.md`、tester/opus): pass。Test gaps 1〜9 は tech-debt に 1 行にまとめた(コードとテストは足していない)
+  - sync-docs(`docs/reports/sync-docs-2026-10-07-guard-bypass-and-hygiene.md`、doc-maintainer/sonnet): V-1〜V-7、V-9 を直した。V-8 は上のとおり plan を直さない
+- [x] Review artifact created
+- [x] Verification artifact created
+- [x] Test artifact created
 - [ ] PR created
