@@ -89,3 +89,9 @@ self-review の F-2(`Bash(sed:*)` の `w` と GNU sed の `e`)は PR 本文に�
 - Verified: AC1〜AC6 の静的な部分(上の表)。plan の digest が承認の行と一致すること。静的解析の gate 全部。ミラーの一致(5 skill × 4 面、2 rules、`insights-append.sh`、3 settings)。規則の `<record>` の確かめ方を使い捨ての git リポジトリで 5 通り、3 シェルで実行した結果
 - Partially verified: AC2(plan の文言より厳しい実装で、plan の本文が追いついていない。V-2)、文書のずれ(V-3〜V-6 は LOW で、/sync-docs か次の修正で扱える)
 - Not verified: テストの実行(/test の担当)、GNU coreutils での確かめ方の実行、GNU sed の `e`、gh の実際の応答
+
+## 指摘への対応(orchestrator 追記)
+
+- V-1、V-4、テストの穴は 25c45213 で直した。V-1 は確かめのブロックの先頭に `git cat-file -e <record>^:<triage>` を足した。使い捨ての git リポジトリで、記録のコミットが triage レポートを作る場合は rc=128 で弾かれ、末尾への追記は rc=0、途中への挿入は rc=1 だった。V-4 は cap に届いたときの選択肢を (1) cap を上げる、(2) fix records only、(3) 既知の欠けとして PR、(4) 中断、にそろえた。テストは `tests/test-insights-append.sh` に 8b2(`cycle-count.json` がない → cycle 1)を足し、50 件すべて通過した
+- V-2 は plan の Progress checklist(digest の対象外)に、条件 2 が本文より厳しいことと理由を書いた
+- V-3、V-5、V-6 は `/sync-docs` に回す
