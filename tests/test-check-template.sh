@@ -111,6 +111,7 @@ GOLDEN_ENTRIES=(
   "scripts/ensure-pr-ready.sh"
   "scripts/ensure-pr-title-prefix.sh"
   "scripts/new-feature-plan.sh"
+  "scripts/plan-visual.sh"
   "scripts/codex-check.sh"
   "scripts/ralph-config.sh"
   "scripts/ralph-worktree.sh"

@@ -42,7 +42,7 @@
 ## Skills
 
 - `.claude/skills/spec/`: refine vague ideas into detailed specifications (auto-invoked when a request is too vague for /plan)
-- `.claude/skills/plan/`: create plans (auto)
+- `.claude/skills/plan/`: create plans, build the visual review page (`diagrams.md`, `visual-template.html`), and gate on user approval (auto)
 - `.claude/skills/implement/`: create branch and execute plans interactively (auto)
 - `.claude/skills/org/`: autonomous multi-seat execution via `ralph org` verbs (auto)
 - `.claude/skills/self-review/`: self-review diff quality (auto)
@@ -58,7 +58,7 @@
 ## Extensions
 
 - `packs/languages/`: stack-specific rules and verification
-- `scripts/`: init/bootstrap/install (`init-project.sh`, `bootstrap.sh`, `install.sh`), plan creation and archival (`new-feature-plan.sh`, `archive-plan.sh`), branch/worktree/PR guards (`branch-name.sh`, `ralph-worktree.sh`, `ensure-pr-ready.sh`, `ensure-pr-title-prefix.sh`), verification (`run-verify.sh`, `run-static-verify.sh`, `run-test.sh`, `verify.local.sh`), CI and drift checks (`check-coverage.sh`, `check-pipeline-sync.sh`, `check-skill-sync.sh`, `check-sync.sh`, `check-template.sh`, `check-template-purity.sh`), secret and commit safety (`secret-scan.sh`, `secret-scan-branch.sh`, `pre-commit-secret-guard.sh`, `commit-msg-guard.sh`, `prepare-commit-msg-secret-guard.sh`, `pre-merge-commit-secret-guard.sh`), language detection (`detect-languages.sh`, `detect-changed-languages.sh`), language pack creation (`new-language-pack.sh`), standard-flow shared config and cross-review helpers (`ralph-config.sh`, `xreview-helpers.sh`, `ralph-common.sh`), skills-mirror generation (`sync-skills.sh`), artifact retention (`gc-artifacts.sh`), insight events (`insights-append.sh`), Codex availability check (`codex-check.sh`)
+- `scripts/`: init/bootstrap/install (`init-project.sh`, `bootstrap.sh`, `install.sh`), plan creation and archival (`new-feature-plan.sh`, `archive-plan.sh`), branch/worktree/PR guards (`branch-name.sh`, `ralph-worktree.sh`, `ensure-pr-ready.sh`, `ensure-pr-title-prefix.sh`), verification (`run-verify.sh`, `run-static-verify.sh`, `run-test.sh`, `verify.local.sh`), CI and drift checks (`check-coverage.sh`, `check-pipeline-sync.sh`, `check-skill-sync.sh`, `check-sync.sh`, `check-template.sh`, `check-template-purity.sh`), secret and commit safety (`secret-scan.sh`, `secret-scan-branch.sh`, `pre-commit-secret-guard.sh`, `commit-msg-guard.sh`, `prepare-commit-msg-secret-guard.sh`, `pre-merge-commit-secret-guard.sh`), language detection (`detect-languages.sh`, `detect-changed-languages.sh`), language pack creation (`new-language-pack.sh`), plan visual review page open/screenshot/approval digest (`plan-visual.sh`), standard-flow shared config and cross-review helpers (`ralph-config.sh`, `xreview-helpers.sh`, `ralph-common.sh`), skills-mirror generation (`sync-skills.sh`), artifact retention (`gc-artifacts.sh`), insight events (`insights-append.sh`), Codex availability check (`codex-check.sh`)
 - `.github/workflows/`: CI checks (verify.yml, check-template.yml) and release automation (release.yml for goreleaser)
 
 ## Tests
@@ -69,5 +69,6 @@
 
 - `.harness/state/`: transient markers and summaries
 - `.harness/state/standard-pipeline/`: standard-flow post-implementation pipeline cycle-cap state (`active-plan.json`, `cycle-count.json`)
+- `.harness/state/plan-visual/`: `/plan` visual review page (`<slug>.html`) and its screenshots (`*.png`); not committed
 - `.harness/state/org/`: org runtime manifest, saga records, receipts, watchdog state
 - `.harness/logs/`: local logs

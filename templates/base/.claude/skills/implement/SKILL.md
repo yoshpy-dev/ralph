@@ -29,7 +29,13 @@ Work from the active plan, not from memory alone.
       - If the file exists AND its `plan_path` matches the pinned plan: **preserve the existing counter** (do NOT reset to 1). This keeps the cap effective when the user resumes a plan after context compaction or a later session. Inform the user of the resumed cycle number.
       - If the file exists AND its `plan_path` differs from the pinned plan: warn and prompt via AskUserQuestion whether to reset the counter for the new plan or abort.
       - The counter reflects the **current** pipeline run (1 = first run, 2 = one re-run after cross-review ACTION_REQUIRED).
-4. Read the current active plan using the path recorded in `active-plan.json`.
+4. Read the current active plan using the path recorded in `active-plan.json`, then check that it passed the `/plan` approval gate (`/plan` step 12). Run this check on every `/implement` start, resumes included:
+   - Read the plan's `- Status:` and `- Approved:` lines and run `./scripts/plan-visual.sh digest <plan-path>`.
+   - The plan is approved when `Status` is `Approved` and the `sha256:` value on the `- Approved:` line equals the digest. Continue.
+   - Otherwise (no `- Approved:` line, `TBD`, another status, or a digest mismatch, which means the plan text changed after approval; ticking checkboxes such as acceptance criteria does not change the digest), tell the user which case it is and ask with `AskUserQuestion` (Codex: numbered options):
+     1. Redo the visual review and approval — run `/plan` steps 10 and 12 on this plan, then continue
+     2. Continue without approval — note that choice under the plan's `## Progress checklist`
+     3. Stop
 5. Confirm acceptance criteria, verify plan, and test plan before editing code.
 6. Implement in small slices that can be reviewed and verified independently. **Delegate each implementation slice to the `implementer` subagent** (Claude Code: `Task(subagent_type="implementer")`; Codex: the `.codex/agents/implementer.toml` custom agent) with a structured handoff carrying: plan path, slice objective, acceptance criteria addressed, files in scope, exact verification commands, and commit message format. The main session (orchestrator) stays on decomposition, handoff authoring, report adjudication, and plan upkeep. Inline implementation is allowed only for (a) trivial single-file edits where a handoff costs more than the change, or (b) implementer dispatch failure (fall back inline and note the fallback in the report, same convention as the post-implementation pipeline). See `.claude/rules/ralph/model-routing.md` and `.claude/rules/ralph/subagent-policy.md`. Before dispatching, commit any outstanding plan/bookkeeping edits (or confirm they do not overlap the slice's files in scope) so the implementer starts from an unambiguous baseline.
 7. **Commit gate after each slice (Validation Gate):**
@@ -62,6 +68,7 @@ Work from the active plan, not from memory alone.
 
 - Before each major slice, re-read the plan to confirm alignment.
 - If your implementation diverges from the plan (new files, changed interfaces, different approach), update the plan FIRST with a deviation note before continuing.
+- Ticking checkboxes (acceptance criteria, checklists) does not change the plan's digest, so marking acceptance criteria done is fine. Any other change to the plan body does, including a deviation note, so the approval no longer matches: after writing it, redo `/plan` steps 10 and 12 for the affected figures before the next slice. Notes that only record progress go under `## Progress checklist`, which the digest skips.
 - Never silently drift. The plan is the contract.
 
 ## Uncertainty management

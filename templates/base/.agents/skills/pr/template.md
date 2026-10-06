@@ -2,6 +2,12 @@
 
 <!-- このPRが何をするかを1〜3行で。 -->
 
+## 全体図
+
+<!-- /plan の図解ページの全体図を /pr が --attach で載せる。載せられないときは理由を 1 行書く。 -->
+
+![全体図](.harness/state/plan-visual/<slug>-overview.png)
+
 ## Background
 
 <!-- なぜこの変更が必要か。背景や問題を簡潔に。 -->

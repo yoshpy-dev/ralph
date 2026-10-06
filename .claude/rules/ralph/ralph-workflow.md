@@ -14,9 +14,14 @@ workflow guidance formerly in CLAUDE.md.
   specs use a temporary clean-base worktree and cleanup; saved specs either
   create a docs/spec PR or hand off to `/plan` in the same task worktree.
 - Use `/plan` before risky, ambiguous, or multi-file work. `/plan` ensures a
-  clean-base task worktree before writing plan artifacts.
+  clean-base task worktree before writing plan artifacts, then shows a visual
+  review page (diagrams of what will be built) and asks for approval
+  (Approve / Needs changes) before `/implement`. Approval is recorded as
+  `Status: Approved` plus a digest on the plan's `- Approved:` line.
 - `/implement` resumes the task worktree and starts interactive implementation.
-  Post-impl pipeline runs via subagents.
+  It first checks that digest and asks whether to redo the review or continue
+  when the plan is unapproved or changed after approval. Post-impl pipeline
+  runs via subagents.
 - Autonomous multi-seat execution outside this interactive flow is the org
   runtime's job (`ralph org spawn/send/wait/...`). See the org runtime spec
   shipped with your project and `.claude/rules/ralph/agent-messaging.md`.
@@ -29,7 +34,8 @@ workflow guidance formerly in CLAUDE.md.
   `/cross-review` invoke Codex for second-opinion feedback. If unavailable, the
   step is silently skipped and the flow continues unchanged.
 - Codex findings are presented to the user for judgment — never auto-applied.
-- `/pr` creates the pull request, archives the plan, cleans up the task
+- `/pr` creates the pull request (attaching the plan's overview diagram when
+  `gh` supports `--attach`), archives the plan, cleans up the task
   worktree/local branch, and completes the hand-off. A task is "done" when the
   PR is created and cleanup has either succeeded or reported recoverable state.
 - Subagent execution model: in `/implement`, the post-impl pipeline runs via

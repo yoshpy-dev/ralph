@@ -38,9 +38,13 @@ Inside a `codex` session, kick off the standard flow with skill mentions:
 
 ```
 $spec       # optional; uses an isolated spec worktree for issue/spec outputs
-$plan       # ensures a clean-base task worktree, then creates docs/plans/active/<date>-<slug>.md
+$plan       # ensures a clean-base task worktree, creates docs/plans/active/<date>-<slug>.md, shows a visual review page, asks for approval
 $implement  # resumes the task worktree, implements, runs the post-impl pipeline, then hands off to PR
 ```
+
+`$plan` asks for approval with numbered options (reply with a digit). If Codex
+cannot read the page screenshot, the self-check of the page is skipped and noted
+in the plan's `## Visual review` section.
 
 After `$implement` completes implementation, the standard pipeline runs
 `self-review → verify → test → sync-docs` through Codex custom agents,

@@ -28,8 +28,8 @@ This project ships two independent execution surfaces:
 The development harness:
 
 1. Spec (auto, optional — refines vague ideas into detailed specifications via decision-tree questioning, codebase exploration, web research, and user clarification)
-2. Plan (auto — ensures a clean-base task worktree, creates plan) [+ optional Codex plan advisory]
-3. Implement (auto — resumes task worktree, interactive implementation)
+2. Plan (auto — ensures a clean-base task worktree, creates plan, shows a visual review page and asks for approval: Approve / Needs changes) [+ optional Codex plan advisory]
+3. Implement (auto — resumes task worktree, checks the plan's approval digest, interactive implementation)
 4. Self-review (auto — via `reviewer` subagent, or pipeline-internal)
 5. Verify (auto — via `verifier` subagent, or pipeline-internal)
 6. Test (auto — via `tester` subagent, or pipeline-internal)
@@ -108,7 +108,7 @@ and protocol contract.
 - `.codex/` — Codex project config for this meta-repo (`config.toml`, `hooks.json`, `agents/`, `hooks/`, `AGENTS.override.md`, `README.md`); `hooks.json` is the hook wiring source of truth (routes `PostToolUse`, `PreToolUse`, `SessionStart`, and `UserPromptSubmit` through `ralph-dispatch.sh`; `config.toml` keeps only a reference comment); `agents/` contains Codex custom agent definitions; same shape as `templates/base/.codex/` so ralph dogfoods the parity it ships
 - `templates/base/.codex/` — `ralph init` source for the same surface; root `.codex/` and template `.codex/` are kept identical via `scripts/check-sync.sh` (no KNOWN_DIFFS today)
 - `packs/languages/` — language-specific depth (also copied to `templates/packs/` for embedding)
-- `scripts/` — reusable verification and bootstrap scripts (includes `ralph-common.sh` (shared shell helpers: ts/log/default_branch/detect_active_plan_dir); `ralph-config.sh`, `ralph-worktree.sh`, `xreview-helpers.sh` (cross-review driver helpers: `detect_base_branch` / `pick_reviewer` / `count_triage_findings`), `install.sh`, skills-mirror generator `sync-skills.sh`, drift gate `check-skill-sync.sh`, artifact retention GC `gc-artifacts.sh`, insight-event appender `insights-append.sh`, Codex availability probe `codex-check.sh`, branch-history secret scan `secret-scan-branch.sh`)
+- `scripts/` — reusable verification and bootstrap scripts (includes `ralph-common.sh` (shared shell helpers: ts/log/default_branch/detect_active_plan_dir); `ralph-config.sh`, `ralph-worktree.sh`, `xreview-helpers.sh` (cross-review driver helpers: `detect_base_branch` / `pick_reviewer` / `count_triage_findings`), `install.sh`, skills-mirror generator `sync-skills.sh`, drift gate `check-skill-sync.sh`, artifact retention GC `gc-artifacts.sh`, insight-event appender `insights-append.sh`, Codex availability probe `codex-check.sh`, branch-history secret scan `secret-scan-branch.sh`, `/plan` visual review helper `plan-visual.sh` (`open` / `shot` / `digest`))
 - `docs/recipes/` — hands-on recipes (Codex setup, language packs, worktrees)
 - `.harness/state/` — runtime state, not canonical truth
 

@@ -72,6 +72,7 @@ var requiredTemplateScripts = []string{
 	"ensure-pr-ready.sh",
 	"ensure-pr-title-prefix.sh",
 	"new-feature-plan.sh",
+	"plan-visual.sh",
 	"codex-check.sh",
 	"ralph-config.sh",
 	"ralph-worktree.sh",
