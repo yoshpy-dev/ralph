@@ -144,9 +144,11 @@ run_static_checks() {
   # 1. Shellcheck on hook and verification shell scripts (if available).
   if command -v shellcheck >/dev/null 2>&1; then
     # Build the argument list via positional parameters so shellcheck
-    # does not flag unquoted expansion.
+    # does not flag unquoted expansion. scripts/*.sh is a glob, not a
+    # hand-maintained list: the list had drifted to cover 9 of 36 scripts
+    # (scripts/insights-append.sh among the ones silently left out).
     set --
-    for f in .claude/hooks/*.sh templates/base/.claude/hooks/*.sh scripts/branch-name.sh scripts/ensure-pr-ready.sh scripts/ensure-pr-title-prefix.sh scripts/plan-visual.sh scripts/ralph-worktree.sh scripts/verify.local.sh scripts/ralph-common.sh scripts/xreview-helpers.sh scripts/check-template.sh tests/test-*.sh; do
+    for f in .claude/hooks/*.sh templates/base/.claude/hooks/*.sh scripts/*.sh tests/test-*.sh; do
       [ -f "$f" ] || continue
       set -- "$@" "$f"
     done
@@ -206,12 +208,46 @@ run_static_checks() {
   fi
 }
 
+# hook_test_mode_problem FILE — print why FILE would not run as a test (no
+# exec bit in the working tree, or a git index mode of 100644), or nothing.
+# The index mode matters on its own: a local `chmod +x` leaves the index at
+# 100644 until `git update-index --chmod=+x`, and CI checks out the index
+# mode, so the test would not run there. The index is read only inside a
+# git work tree; an untracked file has no index mode and relies on the
+# working-tree bit.
+hook_test_mode_problem() {
+  test_file="$1"
+  problem=""
+  if [ ! -x "$test_file" ]; then
+    problem="not executable in the working tree"
+  fi
+  if [ "$in_git_work_tree" = "true" ]; then
+    index_mode="$(git ls-files -s -- "$test_file" | awk 'NR == 1 { print $1 }')"
+    if [ "$index_mode" = "100644" ]; then
+      problem="${problem:+${problem}; }git index mode is 100644"
+    fi
+  fi
+  printf '%s' "$problem"
+}
+
 run_hook_tests() {
   # Run every tests/test-*.sh, not a hand-maintained list: enumeration drift
   # left 5 of 28 suites (ralph-config, ralph-signals, ralph-status,
   # xreview-gate-regression, xreview-prompt-render) silently unexecuted.
+  # A test without the exec bit used to be skipped silently as well; it is
+  # now a FAIL that names the file and the fix.
+  in_git_work_tree="$(git rev-parse --is-inside-work-tree 2>/dev/null || true)"
   for f in tests/test-*.sh; do
-    [ -x "$f" ] || continue
+    [ -f "$f" ] || continue
+    mode_problem="$(hook_test_mode_problem "$f")"
+    if [ -n "$mode_problem" ]; then
+      printf '==> %s\n' "$f"
+      printf '    FAIL: %s (%s)\n' "$mode_problem" "$f"
+      printf '    fix: chmod +x %s\n' "$f"
+      printf '         git update-index --chmod=+x %s\n' "$f"
+      status=1
+      continue
+    fi
     run "$f" "$f"
   done
 }
