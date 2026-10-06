@@ -98,3 +98,43 @@ _(上の行は `docs/tech-debt/README.md` に 1 行にまとめて追記した�
 
 - Merge: 可(CRITICAL と HIGH はない)。ただし R-1 は例外の規則を実際に使う将来の PR で効く穴なので、この PR で直すことを勧める。直すのは rules の 2 面(root と template)の 1 文で、直すと規則の変更なので `/self-review` から回し直しになる。直さない場合は、PR 本文の既知のギャップに書く。
 - F-1 の「別コミット」という分け方そのものは正しく、#203 の事例も通る。R-1 は確かめ方の精度だけの問題。
+
+## R-1 confirmation (3a426bb8)
+
+- Date: 2026-10-06
+- Scope: 修正コミット `3a426bb8`(`post-implementation-pipeline.md` の 1 段落と、`templates/base/` の同じファイル)だけ。ファイルは root と template が `cmp` で一致。テストと linter は実行していない。
+
+### Probe
+
+scratchpad の使い捨ての git リポジトリで、規則の確かめ方(`git diff --name-only <record>^ <record>` と、コードブロックの `git show ... > old; git show ... > new; head -c "$(wc -c < old)" new | cmp -s - old`)を、最初の probe と同じ triage report(最初の `After triage:` の行は `ACTION_REQUIRED=1`)に 5 通りの `<record>` で当てた。`--name-only` はどれも triage report だけを返した。
+
+| `<record>` の中身 | prefix の確かめ |
+| --- | --- |
+| `After triage:` の行の上に `ACTION_REQUIRED=0` の行を挿入(R-1 の probe) | FAIL(止まる) |
+| 末尾に節を追記 | PASS |
+| `After triage:` の行をその場で書き換え | FAIL |
+| ACTION_REQUIRED の表の途中に行を挿入 | FAIL |
+| 旧ファイルが末尾の改行なしで、最後の行の後ろに文字を足す | PASS(下の R-2) |
+
+macOS の `wc -c` は `     178` のように先頭に空白を付けるが、`head -c` はそのまま受け付け、末尾追記の probe は PASS した。
+
+### Status
+
+- R-1 MEDIUM: 解消。R-1 の挿入は止まり、末尾への追記は通る。説明の文(「added lines only では足りない。`After triage:` の行の上への挿入も追加の行だけに見える」)も正しい。`/cross-review` step 9 は rules に委ねたままで変更なし。
+
+### New findings
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| R-2 LOW | maintainability | 旧ファイルが末尾の改行なしで終わるとき、prefix の確かめは追記が最後の行を延長するのを通す。probe では、旧の最後の行 `## DISMISSED` が `## DISMISSED0 extended` になったが、確かめは PASS だった。「既存の行が変わらない」という文の主張に 1 つ穴がある。実際の triage report は改行で終わるのが普通で、影響は最後の 1 行に限られる。なお、前回の R-1 の推奨で「末尾に改行がない旧ファイルは不一致になり安全側に倒れる」と書いたのは、ハンクのヘッダで見る形では正しいが、`cmp` の形では誤りだった。訂正する | `.claude/rules/ralph/post-implementation-pipeline.md` の追加されたコードブロック(`templates/base/` の同じ位置)。probe の case 5 | コードブロックに「旧ファイルが改行で終わる」確認を 1 行足す(たとえば `[ -z "$(tail -c1 old)" ]`)。足さないなら、既知のギャップとして許容する |
+| R-3 LOW | maintainability | コードブロックの `old` と `new` は cwd(task worktree のルート)に書かれ、消されない。probe では `git status --short` に `?? new` と `?? old` が出た。`/pr` step 2 は `git status --porcelain` で未コミットの変更を見るので、そのまま `/pr` に進むと、未追跡のファイルが紛れる。名前も汎用的で、別のファイルと衝突しうる | 同上。probe の `git status --short` | `<scratch>`(`/cross-review` step 4 と同じ記法)か `$(mktemp -d)` の下に書く(`> "$t/old"` の形)。または最後に `rm -f old new` を足す |
+
+### Open findings after confirmation
+
+| Critical | High | Medium | Low |
+| --- | --- | --- | --- |
+| 0 | 0 | 1(F-2、PR 本文に回す分) | 3(F-4 は判断で残す、R-2、R-3) |
+
+### Recommendation after confirmation
+
+- Merge: 可。R-1 の穴は塞がった。R-2 と R-3 は同じコードブロックの 2 行の変更で、まとめて直せる(root と template の 2 面)。直すと規則の変更なので `/self-review` から回し直しになる。直さないなら、PR 本文の既知のギャップに書く。
