@@ -111,3 +111,44 @@ _(If any rows were added above, also append them to `docs/tech-debt/`.)_
 - Merge: 可。CRITICAL、HIGH、MEDIUM はない。cycle 1 の 5 件は閉じている。
 - Follow-ups: F-6 と F-7 は LOW で任意。pipeline の上限(2 回)に達しているので、直す場合は doc だけの小さな commit にとどめる。直さない場合は、PR 本文の既知の欠けに 1 行ずつ残す(F-7 は plan の Progress checklist への 1 行が digest を動かさない最小の対応)。
 - Insight event: `./scripts/insights-append.sh --slug plan-visual-review --flow standard --phase self_review --cycle 2 --verdict pass --critical 0 --high 0 --medium 0 --low 2 --source skill` を実行して、この report と同じ commit に入れた。
+
+## Cycle 2 extra pass (cap 3, HEAD 7231c44f)
+
+- Reviewer: reviewer subagent (Claude)、cycle 2 の追加パス。pipeline の上限を 3 に上げた回(`cycle-count.json` は 2 のまま)
+- Scope: diff の品質だけ。直前の本 report 追記(459db019)以降の `git diff 459db019..HEAD`(10 ファイル、+203/-11)を読んだ。対象は a09c057f(F-6 と F-7 の修正)、7231c44f(cross-review の WORTH_CONSIDERING への修正)、2b843ed9 / e2cde6cf / c6009a38 / 39c3c820(他 phase の report とトリアージ)。ミラーは `.claude/skills/pr/SKILL.md` を 1 回読み、乖離だけを見た。untracked の `docs/reports/walkthrough-2026-10-06-plan-visual-review.md` は対象外。
+
+### Evidence reviewed
+
+- cycle 2 の F-6 と F-7 は閉じている。
+  - F-6: `.claude/skills/pr/SKILL.md:40` に「`<base>` is the branch name, i.e. the `<ref>` from Step 3 without its `origin/` prefix」が入った。`<ref>` が remote なしのローカル名(`secret-scan-branch.sh:168-169`)のときも読める書き方になっている。
+  - F-7: plan の Design decisions(`docs/plans/active/2026-10-05-plan-visual-review.md:89`)と AC9(`:103`)が `gh pr list --head <branch> --base <base> --state open` に揃い、Progress checklist(`:170`)に経緯が 1 行ある。`digest` の出力は `4590e050b18a` で、`- Approved:` の値と一致する。
+- 7231c44f の `/pr` 5.c(`.claude/skills/pr/SKILL.md:40`)を、読むだけでなく実機で probe した(read-only、gh 2.102.0)。
+  - `gh pr list --state merged --limit 1 --json url,headRepositoryOwner` は `"headRepositoryOwner":{"id":...,"name":"Hiroki Yoshioka","login":"yoshpy-dev"}` を返す。フィールド名と `.login` の位置は skill の jq と合っている。
+  - `--jq '.[] | select(.headRepositoryOwner.login == "yoshpy-dev") | .url'` は一致する PR の URL を出し、一致しない owner(`nobody`)では 0 バイトを返した(`od -c` で確認)。「empty output means no such PR」と整合する。head のリポジトリが消えた PR は `headRepositoryOwner` が null になるが、jq は `null.login` を null として扱うので落ちない。
+  - `gh repo view "$(git remote get-url origin)" --json owner --jq .owner.login` は、この repo の origin(`ssh://git@github.com/yoshpy-dev/ralph.git`)と `https://github.com/yoshpy-dev/ralph.git` の両方で `yoshpy-dev` を返した。
+  - 同じコマンドに SSH の別名ホスト(`git@github.com.emu:foo/bar.git`)を渡すと `error connecting to github.com.emu` で失敗した(F-8)。
+- ミラー: `.agents/skills/pr/SKILL.md`、`templates/base/.claude/skills/pr/SKILL.md`、`templates/base/.agents/skills/pr/SKILL.md` が `.claude/` 側と `cmp` で一致。
+- insight event の 3 行(verify と test は `cycle:2`、cross_review は `cycle:1` で `worth_considering` が 1)を読んだ。2 回目の cross_review event も `cycle:1` なので、1 回目の `action_required` と同じ cycle で区別がつかない。`/cross-review` の skill が示すコマンドに `--cycle` がなく(`.claude/skills/cross-review/SKILL.md:178-181`)、既定値の 1 になったもので、この diff の誤りではないので指摘にしていない。
+- `git diff --check` は空。7231c44f 以降の追加行に秘密情報とデバッグ痕跡はない(`docs/reports/` の `secret-scan` の記述だけ)。
+
+### Findings (extra pass)
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| F-8 LOW | exception-handling | 5.c の `<owner>` を `gh repo view "$(git remote get-url origin)"` で求める手順が、origin が SSH の別名ホストのときに失敗する。gh は repo URL を解釈するだけで `ssh -G` による別名の解決をしないので、`github.com.emu` に接続しようとする。この maintainer の会社 repo は `ghcl-emu` で `github.com.emu` の別名ホストを使う運用で(`~/.claude/rules/git-workflow.md`)、`ralph init` した下流でも同じ形がありうる。失敗すると `<owner>` が空になり、jq の条件がどの PR にも一致せず、「No PR」と判定される。そのあと `gh pr create` が「PR が既にある」と断り、5.c が「画像以外が原因なので止めて報告する」と案内する。PR を二重に作る経路はなく安全側に倒れるが、原因が owner の取得失敗だと分からない。もともと `gh pr create` が失敗した後の復旧手順で、ここで落ちると復旧できない | `.claude/skills/pr/SKILL.md:40`(`<owner>` の求め方)。probe: 別名ホストの URL は `error connecting to github.com.emu`、通常の ssh:// と https:// は `yoshpy-dev` | 次のどちらか。(a) ネットワークも gh も使わず URL から取る。例: `git remote get-url origin \| sed -E 's#.*[:/]([^/]+)/[^/]+$#\1#'`(`ssh://`、`git@host:`、https の 3 形式で owner が取れる)。(b) `gh repo view` を残すなら、失敗したときの扱いを 1 文で書く(例:「取れなければ owner の絞り込みを使わず、`gh pr list --json url,headRepositoryOwner` の出力を目で見て自分の fork 以外の PR を除く」)。5.c の 1 行が長くなっているので、`<base>` と `<owner>` の定義は、コマンドの後ろの括弧ではなく下位の箇条書き(placeholders)に移すと読みやすい。直したら `sync-skills.sh` と `templates/base/` の複製でミラーを揃える |
+
+### Positive notes (extra pass)
+
+- 7231c44f は、`--head` がブランチ名しか見ないという gh 側の制約(`gh pr list --help` の「`<owner>:<branch>` syntax not supported」)を、5.c 自身の文に理由として書いている。「別の owner のブランチの PR は No PR」という扱いも、同じ文の最後の規則に入っている。
+- a09c057f は、F-7 を plan の本文(AC9、Design decisions)で直しながら、図 3 の分岐が変わらないことを再承認の 1 行に書いている。変更の理由が plan 内に残り、`/pr` でアーカイブされる記録と実装が揃った。
+- `<base>` の注釈は、F-6 で指摘した 2 つの記号の関係(`origin/` の有無)をそのまま 1 句で書いている。
+
+### Tech debt identified (extra pass)
+
+なし。F-8 は 5.c の 1 か所を直せば閉じる大きさで、`docs/tech-debt/` には足さない。
+
+### Recommendation (extra pass)
+
+- Merge: 可。CRITICAL、HIGH、MEDIUM はない。F-6 と F-7 は閉じている。
+- Follow-ups: F-8 は LOW で任意。直す場合は skill 本文 1 か所とミラー 3 か所だけで済む。直さない場合は、PR 本文の既知の欠けに「5.c の `<owner>` 取得は SSH の別名ホストでは失敗し、安全側(止めて報告)に倒れる」と 1 行残す。
+- Insight event: `./scripts/insights-append.sh --slug plan-visual-review --flow standard --phase self_review --cycle 2 --verdict pass --critical 0 --high 0 --medium 0 --low 1 --source skill` を実行して、この report と同じ commit に入れた。
