@@ -150,3 +150,54 @@ AC に付けた印の根拠: AC1・AC2・AC2b・AC3・AC4・AC7・AC11 は test 
 ### Files changed in this pass
 
 - `docs/reports/sync-docs-2026-10-06-plan-visual-review.md`(この節)
+
+## Extra pass (cap 3, HEAD 17831028)
+
+- Date: 2026-10-06
+- 経緯: 運用者が `RALPH_STANDARD_MAX_PIPELINE_CYCLES` を 3 に上げて追加で回したパス。`cycle-count.json` は 2 のまま。cycle 1・cycle 2 の節は書き換えていない。対象は `c6009a38..17831028`
+- きっかけ: cycle 2 の cross-review の WORTH_CONSIDERING(`gh pr list --head` はブランチ名しか見ないので、fork の同名ブランチの PR を拾いうる)。`7231c44f` が open の PR の検索を `headRepositoryOwner` で絞るようにし、`3caa56e4` が owner を `git remote get-url origin` から sed で取る形にして、5.c を 3 つの sub-bullet に分けた
+- 先行 report(それぞれを追加または更新した commit): `docs/reports/cross-review-triage-plan-visual-review.md`(`39c3c820`。cycle 2 の triage)、`self-review-2026-10-06-plan-visual-review.md`(`f3860425`)、`verify-2026-10-06-plan-visual-review.md`(`11c85bc7`)、`test-2026-10-06-plan-visual-review.md`(`17831028`)
+
+### Summary
+
+文書の変更はなし。cycle 2 と同じ範囲(`/pr` の復旧手順を説明している文書)を見直した。5.c の記述は SKILL.md の 4 面だけにあり、README の Operating loop 9、`ralph-workflow.md` の `/pr` の項、`repo-map.md`、`definition-of-done.md`、`codex-setup.md`、`AGENTS.md` の 4 面は復旧手順にも owner の照合にも触れていない。
+
+### Surfaces checked for drift
+
+| Surface | Finding |
+|---------|---------|
+| `.claude/skills/pr/SKILL.md` 5.c と、`.agents/skills/pr/`、`templates/base/.claude/skills/pr/`、`templates/base/.agents/skills/pr/` | 4 面が byte 同一(`cmp`、`check-skill-sync.sh` と `check-sync.sh` も PASS)。検索は `gh pr list --head "$(git branch --show-current)" --base <base> --state open --json url,headRepositoryOwner --jq '.[] | select(.headRepositoryOwner.login == "<owner>") | .url'`、`<owner>` は `git remote get-url origin | sed -E 's#.*[:/]([^/]+)/[^/]+$#\1#'`。この worktree の origin と、`https://github.com/yoshpy-dev/ralph.git`、`git@github.com.emu:org/repo.git`、`ssh://git@github.com/o/r` の 3 形式で sed が owner の部分だけを返すことを手で確かめた |
+| README、`ralph-workflow.md`(root と template)、`repo-map.md`、`definition-of-done.md`、`codex-setup.md`、`.codex/README.md`、`AGENTS.md` と `AGENTS.core.md`(4 面) | `gh pr list` / `headRepositoryOwner` / fork の記述なし。「`gh` が `--attach` を持つとき全体図を添付する」までで、5.c の変更と矛盾しない。変更なし |
+| `/pr` の完了条件と `template.md` の全体図の欄 | 復旧の方法には触れていない。変更なし |
+| `.claude/settings.json` の許可リスト | `gh pr list`・`gh pr edit`・`gh pr create`・`gh pr view` は入っている。`sed` と `git remote get-url`(5.c の owner の取得)は入っていないので、復旧の経路に入ったときだけ 1 回許可を求められる(`Bash(git config:*)` と `Bash(./scripts/*)` は別)。文書のずれではなく、安全側に倒れる挙動なので、変更していない |
+| plan の AC9(`gh pr list --head <branch> --base <base> --state open`)と Design decisions | 5.c の検索は `headRepositoryOwner` の絞り込みが増えているが、plan の記述は「このブランチから base への open の PR」という要約で、矛盾はしない。plan の Progress checklist に orchestrator が同じ趣旨の 1 行を `7231c44f` で足してあり、digest は `4590e050b18a` のまま。本文は編集していない |
+| ミラー | `plan-visual.sh` と他の skill は今回の差分に入っていない |
+
+### Found but left
+
+- cycle 1・cycle 2 の「Found but left」の項目はそのまま有効。この pass で解消した項目はない。
+- plan の AC9 と Design decisions は、owner の照合まで書いていない。AC9 の文言(「このブランチから base への open の PR」)と矛盾しないので、再承認が要る本文の編集はしなかった。owner の照合を契約として plan に残したい場合は、plan の本文を直して再承認する(digest が変わる)。5.c の SKILL.md が現行の契約の正で、plan の Progress checklist に経緯が書いてある。
+- `.claude/settings.json` の許可リストに `sed` と `git remote get-url` はない(上の表)。5.c の復旧の経路でだけ許可を求められる。足すかどうかは運用者の判断で、許可リストは `ralph upgrade` の 3-way merge の対象でもあるので、この pass では触れていない。
+- AC12 の後半(`gh pr create --attach` と 5.c の実地)と、EMU アカウント・private repo での挙動は `/pr` で確かめる。fork の PR を弾く挙動を実際の GitHub で見ることはできていない。
+- 未追跡の `docs/reports/walkthrough-2026-10-06-plan-visual-review.md` は orchestrator のファイルなので、触れず、この commit にも入れていない。
+
+### Checks run
+
+| Command | Result |
+|---------|--------|
+| `./scripts/check-sync.sh` | exit 0。IDENTICAL 164、DRIFTED 0、ROOT_ONLY 0、TEMPLATE_ONLY 11、KNOWN_DIFF 5 |
+| `./scripts/check-skill-sync.sh` | exit 0。`13 skill(s) in lock-step` |
+| `bash scripts/check-template-purity.sh` | exit 0。`PASS: no meta-repo-specific references found in templates.` |
+| `./scripts/check-pipeline-sync.sh` | exit 0。`all pipeline steps referenced` |
+| `./scripts/plan-visual.sh digest docs/plans/active/2026-10-05-plan-visual-review.md` | `4590e050b18a`。plan の `- Approved:` の値と同じ |
+| `./scripts/run-verify.sh` | exit 0。local verifier の PASS 29、FAIL 0。golangci-lint `0 issues.`、branch secret scan `scanned d7877756..17831028 against origin/main: clean`。ログ: `docs/evidence/verify-2026-10-06-054827.log`(gitignore 対象) |
+
+`run-test.sh` はこの step では流していない。この pass の sync-docs が触るのはこの report だけで、直前の test report(`17831028`)が pass。
+
+### Diff size (for /pr)
+
+`git diff d7877756...HEAD`(この節の追記を含まない HEAD `17831028`)は 60 files changed、4,018 insertions、63 deletions。cycle 2 の sync-docs の後(`c6009a38..17831028`)の増分は 10 files、212 insertions、8 deletions。walkthrough は orchestrator が書いている。
+
+### Files changed in this pass
+
+- `docs/reports/sync-docs-2026-10-06-plan-visual-review.md`(この節)
