@@ -47,9 +47,13 @@ and no existing line (an `After triage:` line, a classification) changed or
 moved:
 
 ```
-git show <record>^:<triage> > old; git show <record>:<triage> > new
-head -c "$(wc -c < old)" new | cmp -s - old
+d=$(mktemp -d); git show <record>^:<triage> > "$d/old"; git show <record>:<triage> > "$d/new"
+[ -z "$(tail -c1 "$d/old")" ] && head -c "$(wc -c < "$d/old")" "$d/new" | cmp -s - "$d/old"; rc=$?; rm -rf "$d"
 ```
+
+`rc=0` means an append at the end. The `tail -c1` test requires the old file
+to end with a newline (or be empty); otherwise an append could extend its last
+line and still pass the prefix check.
 
 A diff that shows added lines only is not enough: a line inserted above the
 `After triage:` line also shows as added only, and the triage parser reads the
