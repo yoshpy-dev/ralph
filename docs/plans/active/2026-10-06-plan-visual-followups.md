@@ -134,6 +134,7 @@ PR #203(/plan の図解ページと承認ゲート)で残った 4 件を片付�
   - S1 完了(5160f23b、inline): 3 つの settings ファイルに 2 行。3 ファイルは byte 同一、`go test ./internal/upgrade/... ./internal/cli/...` と check-sync が通過
   - S2 完了(ee0cb3f7): 例外の節、`/cross-review` の step 8・9、ralph-workflow.md の一文。対象のファイルは「slug を名前に含む」より厳しい「plan の slug で名付けたファイル」にした(似た slug の別 task を除くため。AC2 の範囲内)。cap に届いていても例外の選択肢は使える
   - S3 完了(00dfbea3): `insights-append.sh --cycle auto` と `--state-dir`、4 skill × 4 面、テスト(49 件・16 件)。既存の jq の式の行に SC2016 の disable を 1 行足した(jq の変数で誤検知)
+  - S4 完了(d7d31480): `/pr` 5.c の sed(末尾の `/`)、大文字小文字を区別せず null でも落ちない jq、別の base への PR を見つける 2 回目の検索、「すでにある」で止める。`tests/test-pr-owner-lookup.sh`(19 件、SKILL.md から式を取り出して実行。4 面がそろっているかも確かめる)
   - メモ(範囲外): `scripts/verify.local.sh` の shellcheck の対象一覧に `scripts/insights-append.sh` が入っていない
 - [ ] Review artifact created
 - [ ] Verification artifact created
