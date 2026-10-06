@@ -248,3 +248,52 @@ PR がないとき、`--jq '.[0].url'` は `null` ではなく空の出力にな
 - Blocked: なし
 
 判定は pass。/pr に進んでよい。
+
+## Extra pass (cap 3, HEAD 11c85bc7)
+
+- 経緯: operator が `RALPH_STANDARD_MAX_PIPELINE_CYCLES` を 3 に上げて足した 1 回分。`cycle-count.json` は 2 のまま
+- 対象: `git diff 2b843ed9..HEAD`(7 コミット、11 ファイル、+264/-8。このレポートの cycle 2 の e2cde6cf を含む)。7231c44f と 3caa56e4 が /pr step 5.c の文を変えた(open の PR を探すときに、origin の owner と `headRepositoryOwner` を照らす)。ほかは sync-docs・triage・self-review・verify のレポートと、plan の Progress checklist への 1 行
+- `git diff --stat 2b843ed9..HEAD -- scripts tests internal cmd templates/base/scripts` は空だった。スクリプト・テスト・Go のコードは cycle 2 から変わっていない
+- 上の節は書き換えていない。Evidence は同じログの `######## EXTRA PASS (cap 3)` 以降に追記した。`run-test.sh` 自身のログは `docs/evidence/verify-2026-10-06-054057.log`
+
+### Test execution(extra pass)
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh` | shell 35 ファイル(1,648 件)、Go 8 パッケージ | すべて | 0 | 1(git<2.41 のケース) | 246 s、rc 0 |
+| `go test ./... -count=1 -cover` | 8 パッケージ | 8 | 0 | 0(`[no test files]` の 2 パッケージを除く) | 47 s、rc 0 |
+| plan の digest | 1 | 1 | 0 | 0 | rc 0 |
+| /pr step 5.c の問い合わせ(書かれたとおり、読み取りだけ、gh 2.102.0) | 4 | 4 | 0 | 0 | 下の節 |
+| owner を取り出す `sed` | URL 8 形 | 7 | 1(下の観察) | 0 | BSD sed と GNU sed 4.9 |
+
+- shell の 35 ファイルはディスク上の全件で、suite ごとの件数は cycle 2 と `diff` して一致した。Go の coverage も cycle 1・2 と同じ値(`internal/cli` 84.7% 〜 `internal/org/protocol` 97.9%)
+- plan の digest は `4590e050b18a` で、`- Approved: 2026-10-06 sha256:4590e050b18a` と一致した。plan の変更は Progress checklist の 1 行だけで、digest の対象外
+
+### /pr step 5.c の問い合わせ
+
+5.c の文のとおりに組み立てた。origin は `ssh://git@github.com/yoshpy-dev/ralph.git` で、`git remote get-url origin | sed -E 's#.*[:/]([^/]+)/[^/]+$#\1#'` は `yoshpy-dev` を返した。`<base>` は `main`。
+
+| 確認 | 結果 |
+| --- | --- |
+| このブランチ: `gh pr list --head feat/plan-visual-review --base main --state open --json url,headRepositoryOwner --jq '.[] \| select(.headRepositoryOwner.login == "yoshpy-dev") \| .url'` | rc 0、出力は空 |
+| マージ済みの `refactor/rename-work-skill` で同じ問い合わせ | rc 0、出力は空 |
+| 対照: マージ済みのブランチで `--state all`、owner `yoshpy-dev` | `https://github.com/yoshpy-dev/ralph/pull/202`。PR があれば URL が出る。`headRepositoryOwner.login` は `yoshpy-dev` |
+| 対照: 同じく `--state all`、owner を `someone-else` に替える | rc 0、出力は空。owner が違う PR は数えない |
+
+owner を取り出す `sed` は、`https://…/ralph.git`、`https://…/ralph`、`ssh://git@github.com/…`、`git@github.com:…`、SSH の host alias(`git@github.com.emu:in-house-tools-dena/repo.git` → `in-house-tools-dena`)、port 付きの `ssh://git@github.com:22/…`、`https://user@github.com/…` で正しい owner を返した。GNU sed 4.9(ubuntu:24.04)でも同じ結果だった。
+
+観察(LOW、マージは止めない): 末尾に `/` がある URL(`https://github.com/yoshpy-dev/ralph/`)は式に合わず、URL 全体がそのまま出る。この場合は owner が一致しないので、PR があっても「No PR」と判断され、5.c は添付なしで `gh pr create` をやり直す。gh は同じ branch から base への PR がすでにあると作成を拒むはずなので(`gh pr create` の既存 PR の確認。今回は実行していない)、5.c の「If that fails too ... stop and report it」に入って止まり、PR が 2 つできることはないとみられる。`git remote get-url` が末尾の `/` を返すのは remote をそう設定した場合だけで、この repo の origin は当てはまらない。
+
+### Test gaps(extra pass)
+
+- 5.c の問い合わせを自動で見るテストはない。open の PR が URL で返る場合は、この PR を作る /pr の時点で分かる
+- 末尾に `/` がある origin の URL(上の観察)
+- cycle 1 の Test gaps はそのまま残る
+
+### Verdict(extra pass)
+
+- Pass: `RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh` rc 0(shell 1,648 件、Go 8 パッケージ)。`go test ./... -count=1` rc 0。plan の digest が `4590e050b18a` と一致。5.c の問い合わせはこのブランチで空を返し、対照で URL が返る場合と owner で外れる場合を確かめた
+- Fail: なし
+- Blocked: なし
+
+判定は pass。/pr に進んでよい。
