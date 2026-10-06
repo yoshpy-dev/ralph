@@ -349,6 +349,10 @@ write_state "${TMP8}/no-count/state" "$PLAN_A" ""
 run_cycle no-count auto
 assert_eq "8b2. cycle-count.json missing → cycle 1" "1" "$(cycle_of no-count)"
 
+write_state "${TMP8}/no-plan-path/state" '{"worktree_path": "/repo"}' '{"cycle": 2}'
+run_cycle no-plan-path auto
+assert_eq "8b3. neither file has plan_path → cycle 1" "1" "$(cycle_of no-plan-path)"
+
 write_state "${TMP8}/mismatch/state" "$PLAN_A" "$COUNT_B2"
 run_cycle mismatch auto
 assert_eq "8c. plan_path mismatch → cycle 1" "1" "$(cycle_of mismatch)"

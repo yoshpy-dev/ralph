@@ -100,12 +100,13 @@ expect_owner_placeholder() {
   esac
 }
 
-# run_jq DESC FILTER FIXTURE EXPECTED — the filter, with "<owner>" replaced
-# by "yoshpy-dev", exits 0 on FIXTURE and prints EXPECTED (gh --jq prints
-# strings raw, as jq -r does).
+# run_jq DESC FILTER FIXTURE EXPECTED [OWNER] — the filter, with "<owner>"
+# replaced by OWNER (default "yoshpy-dev"), exits 0 on FIXTURE and prints
+# EXPECTED (gh --jq prints strings raw, as jq -r does).
 run_jq() {
   _desc="$1"
-  _filter="$(printf '%s' "$2" | sed 's/"<owner>"/"yoshpy-dev"/g')"
+  _owner="${5:-yoshpy-dev}"
+  _filter="$(printf '%s' "$2" | sed "s/\"<owner>\"/\"${_owner}\"/g")"
   set +e
   _out="$(jq -r "$_filter" "$3" 2>&1)"
   _rc="$?"
@@ -202,6 +203,8 @@ JSON
     "$_jq_base" "$_tmp/mixed.json" 'https://github.com/yoshpy-dev/ralph/pull/1'
   run_jq "null head owner alone gives empty output" \
     "$_jq_base" "$_tmp/null-owner.json" ''
+  run_jq "upper-case owner from the origin URL still matches" \
+    "$_jq_base" "$_tmp/mixed.json" 'https://github.com/yoshpy-dev/ralph/pull/1' 'YOSHPY-DEV'
 
   printf '==> lookup into any base (no --base)\n'
   run_jq "open PR into another base, mixed-case login, prints its base and URL" \
