@@ -78,3 +78,46 @@
 - Partially verified: AC3(ケースの有無を確認。実行は /test)、AC10(`subagent-policy.md` は済み。残りは /sync-docs)
 - Not verified: AC12 の後半(/pr で確認)
 - 判定: **partial-pass**。AC の違反はない。partial にしたのは、予定どおり後の手順に回した AC10 の残りと AC12 の後半があるため。指摘は MEDIUM 1 件(V-1、digest が AC の印に反応する)と LOW 1 件(V-2、upgrade した下流の plan テンプレート)で、どちらもマージを止めるものではない
+
+## Re-run (2026-10-06, after b0ea4a23 / 804c5d84)
+
+- HEAD: 804c5d84(pipeline cycle 1 の中の修正。cycle-count.json は 1 のまま)
+- 対象: `git diff ba4bf3ad..HEAD`(12 ファイル、+95/-36)。b0ea4a23 は `scripts/plan-visual.sh` の digest、`tests/test-plan-visual.sh`、`/plan` と `/implement` の SKILL.md(4 か所のミラー)を直した。804c5d84 は plan 本文を直し、承認ゲートを通し直した
+- 上の節(Spec compliance 〜 Verdict)は ba4bf3ad の時点の記録として残し、書き換えていない。digest の値 `9c20a2da6606` など古い値は、当時のものとして読む
+- Evidence: 同じログの `######## RE-RUN` 以降に追記した
+
+### 指摘の状態
+
+| ID | Status | Evidence |
+| --- | --- | --- |
+| V-1 | Resolved | `digest_body`(`scripts/plan-visual.sh:272-283`)は、行頭(字下げ可)の `- [x]` / `- [X]` を `- [ ]` に直してから hash する。probe: この plan の AC1 に `[x]` を付けても、AC 12 個に `[X]` を付けても、digest は `d4918bfcec38` のまま。印に加えて本文を 1 文字変えると `5f6f5fc04615` に変わる。Progress checklist の印でも変わらない。ba4bf3ad の plan 本文(印なし)は新しい計算でも `9c20a2da6606` で、印のない plan の値は前と同じ。`implement/SKILL.md:35,71` と `plan/SKILL.md:99-100` が「印は digest を変えない」と書き、plan の Scope、Design decisions、AC2b、Risks も同じ内容に直った。Design decisions の「アーカイブ済み plan に `- [x]` が 1183 か所」は `docs/plans/archive/*.md` を数えて 1183 で一致した。テストは 7 件増えた(`--help` の説明が 1 件。digest が 6 件で、`- [x]` / `- [X]` / 字下げ / タブをまとめた印、印 1 個、印と本文の同時変更、字下げの変更、行の途中と項目の後ろの `[x]`)。実行は /test |
+| V-2 | Resolved(PR 本文の一言は /pr で確認) | `plan/SKILL.md:71`(10.d)は節がなければ `## Affected areas` の後に足す、`:99`(12.e)は `- Approved:` の行がなければ `- Status:` の直後に足す、と書いている。どちらもテンプレートの並びと合う。`:68`(10.a)も 10.d を参照する。plan の Rollout notes(148 行目)に seed の扱いと、PR 本文に advisory の取り込みを書くことが入った。PR 本文に実際に入るかは /pr の時点で確かめる |
+
+### AC の再確認
+
+| Acceptance criterion | Status | Evidence |
+| --- | --- | --- |
+| AC2b(改訂後: 印を `- [ ]` とみなす) | Met(再計算) | `./scripts/plan-visual.sh digest` が `d4918bfcec38`。同じ規則(印の正規化を含む)を python で別に実装して求めた値も `d4918bfcec38`。上の probe で、除外部分と印だけが違う plan は同じ値、本文が 1 文字違えば別の値になった。macOS と Linux の一致はテストが見る。Linux の awk(CI の ubuntu-latest)で `[[:space:]]` を含む新しい正規表現が同じ値を出すかは、手元に gawk / mawk がないので未確認で、PR の CI で分かる |
+| AC6 | Met | step の順序(8 → 10 → 11 → 12)は変わっていない。12.e の書き込み内容に、古いテンプレートの plan への追記と、印の扱いの説明が加わった。12.d の Needs changes と、10.c / 12.a のブラウザなし・開けない環境の扱いはそのまま |
+| AC8 | Met | `implement/SKILL.md:32-38` の比較と 3 択は変わっていない。不一致の説明に「印は digest を変えない」が加わった。`:71` は印付けを許し、それ以外の本文の変更で承認が外れることを書いている |
+| AC12 の前半 | Met | plan は `Status: Approved`、`- Approved: 2026-10-06 sha256:d4918bfcec38` で、`./scripts/plan-visual.sh digest` の出力と一致する。Visual review 節に再承認の記録があり、図は変えていないと書いている(どの図も digest の計算方法を描いていないので妥当)。再承認の操作そのものは会話の中のことなので、成果物からは確かめられない |
+
+### 静的解析(再実行)
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `./scripts/run-static-verify.sh` | pass(rc 0) | 前回と同じく full に切り替わった。`check-sync.sh` は IDENTICAL 164 / DRIFTED 0 / ROOT_ONLY 0、`check-skill-sync.sh` は 13 skill、`check-template-purity.sh` PASS、`gofmt: ok`、golangci-lint `0 issues.`、secret scan `scanned d7877756..804c5d84 against origin/main: clean` |
+| `shellcheck -s sh scripts/plan-visual.sh`、`shellcheck tests/test-plan-visual.sh`、`dash -n scripts/plan-visual.sh` | pass(rc 0) | |
+| `git diff ba4bf3ad..HEAD --check` | pass | |
+| ミラー | Yes | `plan/SKILL.md` と `implement/SKILL.md` は 4 か所とも同一。`scripts/plan-visual.sh` は root と template が同じ blob `8420ba7d`(100755) |
+
+### 文書のずれ(再実行)
+
+- digest の説明は、`plan-visual.sh` の header と `--help`、`plan/SKILL.md` の 12.e / 12.f、`implement/SKILL.md` の step 4 と Plan drift detection、plan の 4 か所で同じ内容になっている。ほかに digest の範囲を説明している文書はない(`.claude/skills`、`.claude/rules`、テンプレート、`README.md`、`AGENTS.md` を grep した)
+- AC10 の残り(`AGENTS.md`、`.ralph/core/AGENTS.core.md`、`README.md`、`ralph-workflow.md`)は前回と同じく /sync-docs の担当
+- 指摘にはしない残り: 正規化するのは `-` で始まる項目だけで、`*` や `1.` で始まるチェックボックスは印が digest に入る。テンプレートと既存の plan は `-` を使っているので、実害はない
+
+### 判定(再実行)
+
+- 判定: **partial-pass**。V-1 と V-2 は解消し、新しい指摘はない。partial のままにしたのは、前回と同じく AC10 の残り(/sync-docs)と AC12 の後半(/pr での `--attach`)が残っているため
+- 未確認: Linux の awk での新しい正規表現の挙動(PR の CI で分かる)、テストの実行(/test)、PR 本文への seed の注記(/pr)
