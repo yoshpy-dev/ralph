@@ -121,3 +121,45 @@
 
 - 判定: **partial-pass**。V-1 と V-2 は解消し、新しい指摘はない。partial のままにしたのは、前回と同じく AC10 の残り(/sync-docs)と AC12 の後半(/pr での `--attach`)が残っているため
 - 未確認: Linux の awk での新しい正規表現の挙動(PR の CI で分かる)、テストの実行(/test)、PR 本文への seed の注記(/pr)
+
+## Cycle 2 (2026-10-06, HEAD a09c057f)
+
+- 対象: `git diff f557d5b9..HEAD`(22 ファイル、+455/-45)。d85e3ab1(test レポート)、4caaec72(sync-docs、plan の AC に印)、91a9c3f6(cross-review triage、ACTION_REQUIRED 1 件)、de99dd6c(`/pr` 5.c の PR の探し方)、459db019(cycle 2 の self-review、LOW の F-6 と F-7)、a09c057f(F-6 と F-7 の修正、plan の再承認)
+- d85e3ab1 より後に `scripts/`、`tests/`、`internal/` の変更はない。/test の結果(f557d5b9 で実行)は今のスクリプトとテストにそのまま当てはまる
+- 上の節(初回と Re-run)は当時の記録として残し、書き換えていない
+- Evidence: 同じログの `######## CYCLE 2` 以降に追記した
+
+### AC の確認
+
+| Acceptance criterion | Status | Evidence |
+| --- | --- | --- |
+| AC9(5.c の改訂後) | Met | `.claude/skills/pr/SKILL.md:40` は、stdout に URL がなければ `gh pr list --head "$(git branch --show-current)" --base <base> --state open --json url --jq '.[0].url'` で探す。出力が空なら PR なしとし、merged / closed の PR や別の base への PR も「PR なし」として扱う。`gh pr view` を使わない理由も書いてある。`<base>` は「Step 3 の `<ref>` から `origin/` を除いたもの」(F-6 の修正)。`scripts/secret-scan-branch.sh:164-169` が出す `<ref>` は `origin/<base>` か `<base>` の 2 形なので、この説明でどちらの場合も合う。plan の AC9 と Design decisions(89 行目)も同じ探し方になった(F-7 の修正)。4 か所のミラーは同一。読み取りだけの gh probe: 存在しないブランチでは `gh pr list … --jq '.[0].url'` が空文字(rc 0)。merged 済みの `refactor/rename-work-skill` は `gh pr list --state open` が空で、`gh pr view refactor/rename-work-skill` は `https://github.com/yoshpy-dev/ralph/pull/202 MERGED` を返した。cross-review の指摘どおりの挙動で、新しい手順はそれを避けられる |
+| AC10 | Met | 4caaec72 で残りが入った。root: `AGENTS.md:31-32`、`.ralph/core/AGENTS.core.md:20-21`、`README.md:218-219`(と 225 行目の `/pr`)、`.claude/rules/ralph/ralph-workflow.md:16-24`(と 37 行目の `/pr`)。template: `templates/base/AGENTS.md:27-28`、`templates/base/.ralph/core/AGENTS.core.md`、`templates/base/.claude/rules/ralph/ralph-workflow.md`。`AGENTS.core.md` と `ralph-workflow.md` は root と template が同一。`templates/base/AGENTS.md` の managed block は `templates/base/.ralph/core/AGENTS.core.md` と一致し、root の `AGENTS.md` の harness 一覧も `AGENTS.core.md` と一致する。`README.md` は template 側にない(前回と同じ)。`subagent-policy.md:74` は root と template の両方で承認ゲートを挙げている |
+| AC12 の前半 | Met | `./scripts/plan-visual.sh digest` が `4590e050b18a` で、plan の `- Approved: 2026-10-06 sha256:4590e050b18a` と一致する。python で別に計算した値も `4590e050b18a`。承認の操作そのものは会話の中のことなので、成果物から確かめられるのは値の一致まで |
+| AC12 の後半 | 未確認(/pr) | 前回と同じ |
+| ほかの AC | 変化なし | AC1〜AC8 と AC11 の対象(`scripts/`、`tests/`、`plan` と `implement` の SKILL.md、plan テンプレート、`diagrams.md`、雛形)は、この範囲で変わっていない。plan の AC の印(4caaec72)は AC12 を除いて `[x]` |
+
+### 文書と digest の確認
+
+- V-1 の修正を実際の作業で確かめられた。4caaec72 で plan の AC 12 個に印が付いたが、f557d5b9・4caaec72・de99dd6c・459db019 のどの時点でも digest は `d4918bfcec38` のままで、`- Approved:` の行と合っていた。a09c057f で AC9 と Design decisions の本文が変わり、`4590e050b18a` になって再承認された
+- 4caaec72 のほかの文書も手順と合っている。`docs/quality/definition-of-done.md` の承認の項目は `/implement` の 3 択の 2 番目(続けたことを plan に書く)と合う。`docs/recipes/codex-setup.md` の Codex 向けの説明(番号で答える、画像を読めないと自己チェックを省く)は `/plan` の 10.c と 12.c に合う。`docs/architecture/repo-map.md` に `plan-visual.sh` と `.harness/state/plan-visual/` が入った。DoD と codex-setup は root と template が同一
+- `gh pr view` の残り: 現役の文書で残っているのは `/pr` 5.c の「使わない」と、plan の Design decisions の同じ趣旨の記述だけ
+- Re-run の節で未確認としていた Linux の awk の挙動は、/test が ubuntu:24.04(mawk、gawk)と alpine:3.21(busybox)のコンテナで確かめ、どれも `d4918bfcec38` を出した(`docs/reports/test-2026-10-06-plan-visual-review.md` の「Linux の awk での実行」)。この検証では再実行していない
+
+### 静的解析(cycle 2)
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `./scripts/run-static-verify.sh` | pass(rc 0) | full に切り替わったのは前回と同じ。`check-sync.sh` IDENTICAL 164 / DRIFTED 0 / ROOT_ONLY 0、`check-pipeline-sync.sh` 全項目 ok、`check-skill-sync.sh` 13 skill、`check-template-purity.sh` PASS、`gofmt: ok`、golangci-lint `0 issues.`、secret scan `scanned d7877756..a09c057f against origin/main: clean` |
+| `./scripts/check-pipeline-sync.sh`(単独) | pass(rc 0) | `implement/SKILL.md`、`cross-review/SKILL.md`、`subagent-policy.md`、`definition-of-done.md`、`README.md`、`AGENTS.md` の 6 本すべて `all pipeline steps referenced`。パイプラインの順序は変わっていない |
+| `./scripts/check-template.sh` | pass(rc 0) | |
+| `git diff f557d5b9..HEAD --check` | pass | |
+
+### 新しく気づいたこと(指摘にはしない)
+
+- `/pr` 5.c は「別の base への open の PR も『PR なし』とみなし、添付なしで作り直す」としつつ、最後に「同じブランチの PR を 2 つ作らない」とも書いている。同じブランチから別の base への open の PR が先にあると、この 2 文は両立しない。起きるのは同じブランチから 2 つの base へ PR を出している場合だけで、この repo の運用では起きないと考えられる。未確認です。直すなら、その場合は止めて報告する、と 1 句足せば済む
+
+### 判定(cycle 2)
+
+- 判定: **partial-pass**。新しい指摘はない。AC10 は root と template の両側で満たし、AC9 は新しい 5.c で満たす。AC12 の前半は digest `4590e050b18a` で一致した。partial のままにしたのは、AC12 の後半(この PR の本文に `--attach` で全体図が載ること)が /pr でしか確かめられないため
+- 未確認: AC12 の後半、gh 2.99.0 以上での `--attach` と EMU / private repo での挙動、PR 本文への seed の注記(いずれも /pr)
