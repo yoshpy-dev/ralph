@@ -3,7 +3,8 @@
   Visual review page skeleton for /plan. Rules: diagrams.md (same directory).
   Copy to .harness/state/plan-visual/<slug>.html, replace every __PLACEHOLDER__,
   and replace the example figures. Keep the page self-contained: inline CSS and
-  inline SVG only (no external scripts, fonts, images, or CDNs).
+  inline SVG only (no external scripts, fonts, images, or CDNs). Escape & < >
+  in page text as &amp; &lt; &gt;: a raw <slug> is parsed as a tag.
 -->
 <html lang="__LANG__">
 <head>
@@ -40,7 +41,7 @@
   .sw.add { background: var(--blue-bg); border: 2px solid var(--blue); }
   .sw.mod { background: var(--orange-bg); border: 2px solid var(--orange); }
   .sw.keep { background: var(--card); border: 1.5px solid var(--line); }
-  .sw.del { background: var(--card); border: 1.5px dashed var(--muted); color: var(--muted); font-size: 9px; line-height: 11px; text-align: center; }
+  .sw.del { background: var(--card); border: 1.5px dashed var(--muted); color: var(--muted); font-size: 11px; line-height: 11px; text-align: center; }
   .sw.copy, .sw.uses { width: 26px; height: 0; border-radius: 0; border-top: 2px dashed var(--muted); }
   .sw.uses { border-top-color: var(--blue); }
   .pill { background: var(--blue); color: #fff; font-size: 11px; font-weight: 700; font-style: normal; line-height: 17px; padding: 0 8px; border-radius: 999px; }

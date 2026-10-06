@@ -98,6 +98,16 @@ assert_empty_file() {
   fi
 }
 
+# assert_same_bytes <desc> <expected file> <actual file>
+assert_same_bytes() {
+  if cmp -s "$2" "$3"; then
+    pass "$1"
+  else
+    fail "$1"
+    printf '    %s differs from %s\n' "$3" "$2"
+  fi
+}
+
 # run_pv <command...> — run with stdout in $_out, stderr in $_err, exit code
 # in $_rc.
 run_pv() {
@@ -300,6 +310,35 @@ assert_contains "browser output is shown on failure" "stub browser failure detai
 run_pv env RALPH_PLAN_VISUAL_BROWSER="$_tmp/bin/stub-browser" "$PLAN_VISUAL" shot "$_html" "$_tmp/no-such-dir/shot.png"
 assert_eq "missing output directory exits 1" 1 "$_rc"
 
+# A bad <png> must be rejected before the browser could write over <html>.
+_html_orig="$_tmp/page.html.orig"
+cp "$_html" "$_html_orig"
+_html_as_png="$_space_dir/page-as.png"
+cp "$_html" "$_html_as_png"
+rm -f "$PV_STUB_LOG"
+run_pv env RALPH_PLAN_VISUAL_BROWSER="$_tmp/bin/stub-browser" "$PLAN_VISUAL" shot "$_html" ""
+assert_eq "empty png path exits 1" 1 "$_rc"
+assert_contains "empty png path prints usage on stderr" "Usage:" "$_err"
+assert_same_bytes "empty png path leaves the html untouched" "$_html_orig" "$_html"
+run_pv env RALPH_PLAN_VISUAL_BROWSER="$_tmp/bin/stub-browser" "$PLAN_VISUAL" shot "$_html" "$_html"
+assert_eq "png path not ending in .png (the html itself) exits 1" 1 "$_rc"
+assert_contains "png path not ending in .png is named on stderr" "must end in .png" "$_err"
+assert_same_bytes "png path not ending in .png leaves the html untouched" "$_html_orig" "$_html"
+run_pv env RALPH_PLAN_VISUAL_BROWSER="$_tmp/bin/stub-browser" "$PLAN_VISUAL" shot "$_html_as_png" "$_tmp/dir with space/../dir with space/page-as.png"
+assert_eq "png path resolving to the html exits 1" 1 "$_rc"
+assert_contains "png path resolving to the html says so on stderr" "same file as the input html" "$_err"
+assert_same_bytes "png path resolving to the html leaves the html untouched" "$_html_orig" "$_html_as_png"
+if [ ! -e "$PV_STUB_LOG" ]; then
+  pass "rejected png paths do not start the browser"
+else
+  fail "rejected png paths do not start the browser"
+fi
+
+rm -f "$PV_STUB_LOG"
+run_pv env RALPH_PLAN_VISUAL_BROWSER="$_tmp/bin/stub-browser" "$PLAN_VISUAL" shot "$_html" "$_tmp/out/upper.PNG"
+assert_eq "upper-case .PNG is accepted" 0 "$_rc"
+assert_has_line "upper-case .PNG reaches the browser" "--screenshot=$_tmp_abs/out/upper.PNG" "$PV_STUB_LOG"
+
 rm -f "$PV_STUB_LOG"
 run_pv env RALPH_PLAN_VISUAL_BROWSER="$_tmp/bin/stub-browser" "$PLAN_VISUAL" shot "$_html" "$_png" --width abc
 assert_eq "non-numeric width exits 1" 1 "$_rc"
@@ -360,6 +399,10 @@ assert_eq "only Status/Approved/Branch and checklist body differ: same digest" "
 
 grep -v -e '^- Status:' -e '^- Approved:' -e '^- Branch:' "$_base" > "$_v"
 assert_eq "Status/Approved/Branch lines removed: same digest" "$_base_digest" "$("$PLAN_VISUAL" digest "$_v")"
+
+printf '%s' "$(cat "$_base")" > "$_v"
+assert_ne "fixture without a final newline really lacks it" "0a" "$(tail -c 1 "$_v" | od -An -tx1 | tr -d ' \n')"
+assert_eq "no final newline: same digest" "$_base_digest" "$("$PLAN_VISUAL" digest "$_v")"
 
 write_plan "$_v" Draft N/A TBD someone 'Do the thing!' '- [ ] Plan reviewed' 'Kept after the checklist.'
 assert_ne "one character in the body differs: different digest" "$_base_digest" "$("$PLAN_VISUAL" digest "$_v")"

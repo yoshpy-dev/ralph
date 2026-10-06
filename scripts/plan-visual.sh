@@ -19,14 +19,15 @@ set -eu
 #           caller can hand the printed path to a human.
 #   shot    Write a PNG of <html> (optionally scrolled to #<id>) with a
 #           headless browser and print the absolute PNG path on stdout.
+#           <png> must end in .png and must not be the same file as <html>.
 #           Defaults: --width 1200, --height 3000, --scale 1 (all positive
 #           integers). The browser's own output is shown only on failure.
 #   digest  Print the first 12 hex characters of the SHA-256 of <plan.md>
 #           without the `- Status:`, `- Approved:`, and `- Branch:` lines and
 #           without the `## Progress checklist` section (from that exact
 #           heading up to the next `## ` heading, or EOF). Each kept line is
-#           hashed followed by a newline, so the value matches across
-#           sha256sum and shasum.
+#           hashed followed by a newline, so a plan with or without a final
+#           newline gives the same digest.
 #
 # Environment:
 #   RALPH_PLAN_VISUAL_OPENER   command used to open a file (overrides the OS
@@ -110,11 +111,10 @@ url_encode_path() {
   printf '%s\n' "$1" | sed -e 's/%/%25/g' -e 's/ /%20/g' -e 's/#/%23/g' -e 's/?/%3F/g'
 }
 
+# resolve_opener — print the opener command, or return 1 when there is none.
+# cmd_open handles RALPH_PLAN_VISUAL_OPENER=none before calling this.
 resolve_opener() {
   if [ -n "${RALPH_PLAN_VISUAL_OPENER:-}" ]; then
-    if [ "$RALPH_PLAN_VISUAL_OPENER" = none ]; then
-      return 1
-    fi
     printf '%s\n' "$RALPH_PLAN_VISUAL_OPENER"
     return 0
   fi
@@ -195,6 +195,7 @@ cmd_shot() {
   _html="$1"
   _png="$2"
   shift 2
+  [ -n "$_png" ] || usage_error
   _fragment=""
   _width=1200
   _height=3000
@@ -222,11 +223,17 @@ cmd_shot() {
   require_positive_int --scale "$_scale"
 
   [ -f "$_html" ] || die 1 "file not found: $_html"
+  case "$_png" in
+    *.[Pp][Nn][Gg]) ;;
+    *) die 1 "output path must end in .png: $_png" ;;
+  esac
   _png_dir="$(parent_dir "$_png")"
   [ -d "$_png_dir" ] || die 1 "output directory not found: $_png_dir"
   [ ! -d "$_png" ] || die 1 "output path is a directory: $_png"
   _html_abs="$(abs_path "$_html")"
   _png_abs="$(abs_path "$_png")"
+  # Writing the PNG over the input would destroy the page.
+  [ "$_png_abs" != "$_html_abs" ] || die 1 "output path is the same file as the input html: $_png"
 
   _browser="$(resolve_browser)" || exit 2
 

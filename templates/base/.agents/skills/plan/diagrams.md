@@ -79,7 +79,7 @@ Use color for meaning, not decoration. Always include the legend.
 | Item | Budget |
 |------|--------|
 | SVG `viewBox` width | 1080 (the page scales it to the column); choose the height to fit |
-| Text size | ≥ 12px everywhere; node labels 13–14px |
+| Text size | ≥ 12px for labels and captions; badge text and small symbols (such as ✕) may be 11px; node labels 13–14px |
 | Node width | ≥ text width + 24px. Text width = full-width characters × font size + half-width characters × 0.55 × font size (0.6 in the mono font) |
 | Nodes per figure | ≤ 10 (groups and badges do not count) |
 | Gap between nodes | ≥ 16px |
@@ -105,6 +105,10 @@ Copy [visual-template.html](visual-template.html) to
 `.harness/state/plan-visual/<slug>.html` and fill it in. Keep the page
 self-contained: inline CSS and inline SVG only — no external scripts, fonts,
 images, or CDNs.
+
+Escape `&`, `<`, and `>` in all page text, including SVG `<text>`: write
+`&amp;`, `&lt;`, and `&gt;` (e.g. `plan-visual/&lt;slug&gt;.html`). A raw
+`<slug>` is parsed as a tag, and the rest of the label silently disappears.
 
 Order:
 
