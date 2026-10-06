@@ -1,7 +1,7 @@
 # plan-visual-review
 
 - Status: Approved
-- Approved: 2026-10-05 sha256:9c20a2da6606
+- Approved: 2026-10-06 sha256:d4918bfcec38
 - Owner: Claude Code
 - Date: 2026-10-05
 - Related request: ralph の spec か plan に、承認の前に計画を図示してから承認を求める仕組みを入れたい(2026-10-05 ユーザー依頼。参考: https://github.com/nntto/skills/tree/main/skills/explanatory-diagrams)
@@ -20,7 +20,7 @@
 - `/plan` に 3 つの手順を足す。図解ページを作る、見た目を自己チェックする、承認ゲートを通す。承認されたら plan の `Status: Draft` を `Approved` に書き換え、`- Approved:` の行に日付と plan の digest を書く
 - 図解の手引き `.claude/skills/plan/diagrams.md`(新規)。粒度の規則、表す対象から図の種類を選ぶ表、図解を省ける plan の条件、色と線の意味、レイアウトの数値の目安、図のノードとパスの対応
 - 図解ページの雛形 `.claude/skills/plan/visual-template.html`(新規)。色のトークン、凡例、図の枠、全体図だけを表示する切り替え
-- `scripts/plan-visual.sh`(新規)。`open`(ブラウザで開く。開けない環境ではパスを出す)、`shot`(ヘッドレス Chrome / Chromium で PNG を撮る。ブラウザがなければ exit 2)、`digest`(plan の承認対象の部分から sha256 を出す)の 3 つのサブコマンド
+- `scripts/plan-visual.sh`(新規)。`open`(ブラウザで開く。開けない環境ではパスを出す)、`shot`(ヘッドレス Chrome / Chromium で PNG を撮る。ブラウザがなければ exit 2)、`digest`(plan の承認対象の部分から sha256 を出す。チェックボックスの印は数えない)の 3 つのサブコマンド
 - plan テンプレートに `- Approved:` の行と `## Visual review` 節を足す。Visual review には図解ページのパスか、`なし(理由)` を書く
 - `/implement` が plan の `Status` と digest を確かめる。`Approved` でないとき、または承認後に plan が変わって digest が合わないときは、図解と承認をやり直すか、そのまま続けるかをユーザーに聞く
 - `/pr` が全体図の PNG を `gh pr create --attach` で PR 本文に載せる。載せる前に図と変更ファイルの一覧を照らし合わせる。gh に `--attach` がないときは図を省き、理由を本文に 1 行書く。添付つきの作成が非ゼロで終わったときは、PR ができたかを確かめてから直す
@@ -72,7 +72,8 @@ root 側:
 
 - 図解ページ: `.harness/state/plan-visual/plan-visual-review.html`(この plan 自体で新しい手順を試す)
 - 自己チェック: ヘッドレス Chrome で全体と `#overview` を撮って確認(2 回。矢印とバッジの重なり 1 か所を直した)
-- digest の計算方法(S1 の `plan-visual.sh digest` はこれと同じ値を出す): `- Status:`・`- Approved:`・`- Branch:` で始まる行と、`## Progress checklist` の行から次の `## ` 見出しの手前(なければ末尾)までを除き、残りの行を改行つきでつないだ UTF-8 のバイト列の sha256 の先頭 12 桁
+- 再承認(2026-10-06): /verify の指摘 V-1・V-2 で AC2b・Design decisions・Risks・Rollout を直した。どの図も digest の計算方法を描いていないので、図は変えていない
+- digest の計算方法(S1 の `plan-visual.sh digest` はこれと同じ値を出す): `- Status:`・`- Approved:`・`- Branch:` で始まる行と、`## Progress checklist` の行から次の `## ` 見出しの手前(なければ末尾)までを除き、行頭(字下げ可)の `- [x]` / `- [X]` を `- [ ]` に直し、残りの行を改行つきでつないだ UTF-8 のバイト列の sha256 の先頭 12 桁
 
 ## Design decisions
 
@@ -81,7 +82,7 @@ root 側:
 - **粒度: 全体図 1 枚 + 問いごとの詳細図(ユーザー確定)**。全体図には全機能を載せ、slice 番号か AC 番号を振る。詳細図は変更の種類で決める(やり取り → シーケンス図、状態 → 状態遷移図、データ構造 → 構造図、モジュール境界 → 変更前後の比較)。各図に「確かめてほしいこと」を 1 行添える。詳細図が 4 枚を超えたら、図を足さずに plan の分割を提案する
 - **図解を省ける条件(consult の指摘で列挙式にした)**: 次のどれかに当たり、かつ、やり取り・状態・データ形式・モジュール境界のどれも変えない plan だけが省ける。(1) ドキュメントだけの変更、(2) 1 ファイル(とその自動生成のミラー)だけの変更、(3) 名前や設定値だけを変える機械的な変更。省くときは `## Visual review` に `なし(理由)` を書く
 - **手順の順序**: 草案 → critical forks → 図解ページ → 自己チェック → Codex advisory → 承認。Codex の指摘で plan を直したら、図も作り直してから承認に進む。Codex の指摘への質問と承認の質問は別のまま並べる(consult の既定)
-- **承認の記録と失効(Codex advisory の指摘 1、ユーザー確定)**: 承認されたら `Status: Approved` に書き換え、`- Approved: <日付> sha256:<先頭 12 桁>` を書く。digest は plan 全体から `- Status:`・`- Approved:`・`- Branch:` の行と `## Progress checklist` 節を除いた部分で計算する(`plan-visual.sh digest`)。`/implement` は `Approved` でないとき、または digest が合わないときに、図解と承認をやり直すか続けるかを聞く。止めはしない(この変更より前の Draft の plan でも進められるように)。採らなかった案: SKILL.md の規則だけで済ませる(軽いが、守られたかを機械的に確かめられない)
+- **承認の記録と失効(Codex advisory の指摘 1、ユーザー確定)**: 承認されたら `Status: Approved` に書き換え、`- Approved: <日付> sha256:<先頭 12 桁>` を書く。digest は plan 全体から `- Status:`・`- Approved:`・`- Branch:` の行と `## Progress checklist` 節を除き、行頭(字下げ可)の `- [x]` / `- [X]` を `- [ ]` とみなして計算する(`plan-visual.sh digest`)。チェックボックスの印を数えないのは、この repo では slice の記録や `/sync-docs` で AC に印を付ける慣習があり(アーカイブ済み plan に `- [x]` が 1183 か所)、印のたびに承認が外れるのを避けるため(/verify の指摘 V-1、2026-10-06 に変更)。`/implement` は `Approved` でないとき、または digest が合わないときに、図解と承認をやり直すか続けるかを聞く。止めはしない(この変更より前の Draft の plan でも進められるように)。採らなかった案: SKILL.md の規則だけで済ませる(軽いが、守られたかを機械的に確かめられない)
 - **レイアウトの数値の目安(consult の指摘)**: 試作でも文字詰まりが 1 か所出たので、手引きに数値を書く。viewBox の幅は 1080、文字は 12px 以上、ノードの幅は「全角の文字数 × 文字サイズ + 24px」以上、1 枚の図のノードは 10 個まで
 - **全体図だけの PNG**: 雛形に `#overview` のフラグメントで全体図以外を隠す CSS を入れ、`plan-visual.sh shot` にフラグメントとウィンドウの大きさを渡して撮る(consult の既定)
 - **PR への添付は同じ plan の最後の slice(ユーザー確定)**。`gh pr create --help` に `--attach` がなければ省く。添付つきの `gh pr create` が非ゼロで終わっても、PR が作られている場合がある(gh v2.99.0 の help「If some attachments upload and others fail, the pull request is still created ... the new pull request's URL is still printed to stdout」と `create.go` の `submitPR`。Codex advisory の指摘 2)。そこで終了コードと stdout を残し、stdout の URL か `gh pr view <head branch>` で PR があるかを確かめる。あれば `gh pr edit` で本文を直し、なければ添付なしで作り直す。どちらの場合も理由を本文に 1 行書く
@@ -91,7 +92,7 @@ root 側:
 
 - [ ] AC1: `scripts/plan-visual.sh open <html>` は、ファイルがあれば OS のオープナー(macOS は `open`、それ以外は `xdg-open`、環境変数で差し替え可)で開いて exit 0。オープナーがなければ、開くべきパスを stdout に出して exit 0。ファイルがなければ exit 1
 - [ ] AC2: `scripts/plan-visual.sh shot <html> <png>` は、Chrome / Chromium を見つけたら PNG を書いて exit 0。フラグメントとウィンドウの幅・高さを指定できる。ブラウザが見つからなければ、その旨を stderr に出して exit 2。環境変数でブラウザの実行ファイルを指定できる
-- [ ] AC2b: `scripts/plan-visual.sh digest <plan>` は、`- Status:`・`- Approved:`・`- Branch:` の行と `## Progress checklist` 節を除いた内容の sha256 の先頭 12 桁を stdout に出す。除いた部分だけが違う 2 つの plan は同じ値になり、それ以外の行が 1 文字でも違えば別の値になる。macOS(`shasum`)と Linux(`sha256sum`)で同じ値を出す
+- [ ] AC2b: `scripts/plan-visual.sh digest <plan>` は、`- Status:`・`- Approved:`・`- Branch:` の行と `## Progress checklist` 節を除き、行頭(字下げ可)の `- [x]` / `- [X]` を `- [ ]` とみなした内容の sha256 の先頭 12 桁を stdout に出す。除いた部分とチェックボックスの印だけが違う 2 つの plan は同じ値になり、それ以外の行が 1 文字でも違えば別の値になる。macOS(`shasum`)と Linux(`sha256sum`)で同じ値を出す
 - [ ] AC3: `tests/test-plan-visual.sh` が、ファイルなし、オープナーあり / なし、ブラウザなし(exit 2)、スタブのブラウザに渡る引数(ファイル URL・フラグメント・ウィンドウの大きさ)、空白を含むパス、digest の一致と不一致(AC2b の両方向)を確かめ、`./scripts/run-test.sh` で通る
 - [ ] AC4: `scripts/plan-visual.sh` が `templates/base/scripts/` にもあり、`scripts/check-template.sh`(root と template)と `internal/scaffold/embed_test.go` の必須一覧に載っている。`./scripts/check-sync.sh` と `go test ./internal/scaffold/...` が通る
 - [ ] AC5: `.claude/skills/plan/diagrams.md` が次をすべて含む。図解の目的(見やすさ優先)、粒度の規則、表す対象から図の種類を選ぶ表、図解を省ける条件、色と線の意味、レイアウトの数値の目安、ノードを実在のパスか新規作成予定のパスに対応させる規則、参照先 skill へのリンク。`visual-template.html` が凡例・図の枠・`#overview` での全体図だけの表示を持つ
@@ -137,13 +138,14 @@ root 側:
 - `/plan` ごとのトークンが増える → 図解を省ける条件で小さな plan を外す。詳細図は 4 枚までにする
 - ミラーが 4 か所(root / template × Claude / Codex)あり、写し漏れが起きやすい → `scripts/sync-skills.sh`、`check-skill-sync.sh`、`check-sync.sh` で機械的にそろえる
 - この変更より前に作った Draft の plan で `/implement` が 1 回多く質問する → 止めずに確認だけにする
-- 承認後の plan の書き換えで digest が合わなくなる。`/implement` の途中で設計の節を直すと、再開時に聞かれる → 意図した挙動。Branch の行と Progress checklist は digest から除くので、`/implement` の定型の書き換え(step 2g の Branch、step 8 の進捗)では外れない
+- 承認後の plan の書き換えで digest が合わなくなる。`/implement` の途中で設計の節を直すと、再開時に聞かれる → 意図した挙動。Branch の行と Progress checklist は digest から除き、チェックボックスの印も数えないので、`/implement` の定型の書き換え(step 2g の Branch、step 8 の進捗)と AC への印付けでは外れない
 - PR が作られたのに添付つきのコマンドが非ゼロで終わる → PR の有無を確かめてから直す(Design decisions)
 
 ## Rollout or rollback notes
 
 - スキル本文の変更と新規スクリプトだけで、データの移行はない。戻すときは PR を revert する
 - 下流には次のリリースの `ralph upgrade` で core ファイルとして届く。戻すときも次のリリースで消す
+- ただし `docs/plans/templates/feature-plan.md` は seed なので、`ralph upgrade` では advisory が出るだけで書き換わらない(/verify の指摘 V-2)。`/plan` は、古いテンプレートから作った plan に `- Approved:` の行や `## Visual review` 節がなければ足す(step 10.d、12.e)。PR 本文にも「upgrade した下流は feature-plan.md の advisory を取り込む」と書く
 
 ## Open questions
 
@@ -162,6 +164,7 @@ root 側:
   - S3 完了(cbfbdceb): /plan の step 10(図解ページ)・step 12(承認ゲート)、テンプレート 6 か所、subagent-policy.md、tests/test-new-feature-plan.sh(21 件)
   - S4 完了(64458ca2、inline): /implement の step 4 で承認と digest を確かめる。本文を 1 ファイル直してミラーを生成するだけなので、handoff より inline の方が軽いと判断した
   - S5 完了(84ad2d46): /pr の step 5.a〜5.c(全体図の照合・撮影・`--attach`、非ゼロ終了時の PR 有無の確認)、PR テンプレートの「全体図」節。implementer がセッション再開で途中で消えたため、作業ツリーに残った変更を orchestrator が確認し、検証とコミットを inline で行った(dispatch 中断時の fallback)
+  - /verify(ba4bf3ad)の指摘 V-1・V-2 を b0ea4a23 で直し、plan 本文を更新して再承認した(2026-10-06、digest d4918bfcec38。最初の承認は 9c20a2da6606)
   - メモ: Linux の `xdg-open` はバックエンドによってブラウザが閉じるまで戻らないかもしれない(未確認)。S3 で `open` の呼び方を書くときに考える
 - [ ] Review artifact created
 - [ ] Verification artifact created
