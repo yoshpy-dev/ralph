@@ -1,7 +1,7 @@
 # org-state-dir-common
 
 - Status: Approved
-- Approved: 2026-10-07 sha256:d8a7f8ae89c1
+- Approved: 2026-10-07 sha256:79224e28032a
 - Owner: Claude Code
 - Date: 2026-10-07
 - Related request: org runtime を「機能ごとの org + herdr の外の director」に組み直す系列の 1 段目。council の結論(`~/.cache/council/20261007-0324-org-of-orgs/conclusion.md` の論点 1 と論点 9 の 1 段目)で、5 体すべてが最初に直すべきだとした
@@ -25,7 +25,7 @@ linked worktree の中から打った `ralph org` / `ralph status` / `ralph insi
   - 古い台帳に動いている座席があるとき、台帳を書き換える動詞(`ralph org spawn` / `start` / `send` / `stop` / `disband` / `watch`)は終了コード 1 で止まる。メッセージに、古い台帳のパス、新しい台帳のパス、`--state-dir` でどちらかを選ぶ方法を書く
   - 動いている座席がないとき、または読むだけの動詞(`ralph status`、`ralph org status` / `read` / `wait` / `report`、`ralph insights`)では、stderr に 1 回だけ注意を出して続ける。JSON の stdout は変えない
   - flag か env で置き場所を決めたときは、どちらもしない
-- codex の座席: permission mode が edits か autonomous(`--sandbox workspace-write`)の codex 座席で、解決した台帳のディレクトリが座席の cwd の下にないとき、起動の引数に `--add-dir <台帳のディレクトリ>` を足す。cwd の下にあるとき、guarded のとき、claude の座席では足さない
+- codex の座席: 役割が leader で、permission mode が edits か autonomous(`--sandbox workspace-write`)の codex 座席で、解決した台帳のディレクトリが座席の cwd の下にないとき、起動の引数に `--add-dir <台帳のディレクトリ>` を足す。leader 以外の役割、cwd の下にあるとき、guarded のとき、claude の座席では足さない。台帳を書くのは leader だけなので、implementer と reviewer に台帳と他の座席への指示ファイルを書ける権限を渡さない(self-review の M-1 を受けてユーザーが決めた)
 - 呼び出し元: `internal/cli/org.go`(:103、:526、:938 の 3 か所)、`internal/cli/status.go:48`、`internal/cli/insights.go:48` で、上の拒否と注意を呼ぶ。解決そのものは関数の中で変わるので、呼び出し元の解決の書き方は変えない
 - 文言: `--state-dir` フラグのヘルプ文 2 か所(`internal/cli/org.go:42`、`internal/cli/status.go:53`)、`statedir.go` と `org.go`・`status.go` のコメントの tier 名、`/org` skill の「前提」節(`.claude/skills/org/SKILL.md` と、`scripts/sync-skills.sh` で再生成する `.agents/skills/org/SKILL.md`、`templates/base/` の 2 面、計 4 面)、`docs/recipes/codex-seat-permissions.md`(root と `templates/base/` の 2 面。`--add-dir` を足すことと、その理由)
 - テスト: `internal/org/statedir_test.go`、`internal/org/permissions_test.go`(または spawn のテスト)、`internal/cli` のテスト
@@ -81,7 +81,7 @@ Critical forks: None
 - [ ] AC5: linked worktree の中の古い台帳に動いている座席があるとき、`ralph org spawn` / `start` / `send` / `stop` / `disband` / `watch` は終了コード 1 で止まり、メッセージに古い台帳のパス・新しい台帳のパス・`--state-dir` が出る。台帳と herdr には何もしない。`--state-dir` か `RALPH_ORG_STATE_DIR` で置き場所を選ぶと止まらない
 - [ ] AC6: 古い台帳に動いている座席がないとき、または読むだけの動詞(`ralph status`、`ralph org status` / `read` / `wait` / `report`、`ralph insights`)では、stderr に古い台帳のパスと `--state-dir` の使い方を含む注意を 1 回出して続ける。`--json` の stdout は変わらない。古い台帳がないとき、main のチェックアウトにいるとき、flag か env で置き場所を決めたときは出さない
 - [ ] AC7: linked worktree から打った `ralph status --json` の `state_dir` が main 側の `.harness/state/org` を指す(CLI レベルのテスト)
-- [ ] AC8: permission mode が edits か autonomous の codex 座席で、台帳のディレクトリが座席の cwd の下にないとき、起動の引数に `--add-dir <台帳のディレクトリ>` が入る。cwd の下にあるとき、guarded のとき、claude の座席では入らない(引数を組み立てる部分の単体テスト)
+- [ ] AC8: 役割が leader で、permission mode が edits か autonomous の codex 座席で、台帳のディレクトリが座席の cwd の下にないとき、起動の引数に `--add-dir <台帳のディレクトリ>` が入る。implementer と reviewer の座席、cwd の下にあるとき、guarded のとき、claude の座席では入らない(引数を組み立てる部分の単体テスト)
 - [ ] AC9: `--state-dir` のヘルプ文 2 か所、`/org` skill の「前提」節(4 面)、`docs/recipes/codex-seat-permissions.md`(2 面)が新しい解決順と `--add-dir` を書いている。`./scripts/check-skill-sync.sh` と `./scripts/check-sync.sh` が通る
 
 ## Implementation outline
@@ -139,3 +139,4 @@ Critical forks: None
 - 2026-10-07: S2 を c90a504e でコミットした(implementer)。書き換えの動詞は spawn(`--dry-run` を含む)・start・send・stop・disband・watch、読むだけの動詞は org の status・read・wait・report と `ralph status`・`ralph insights`。計画が決めていなかった 2 点は次のようにした。古い台帳が読めないとき、書き換えの動詞は止め、読むだけの動詞は注意を出す。`ralph insights` には `--state-dir` がないので、注意では `RALPH_ORG_STATE_DIR` を案内する
 - 2026-10-07: S3 を 53aa1877 でコミットした(implementer)。`--add-dir` が sandbox の中で効くことは、codex-cli 0.160.0(macOS)で実機確認した。cwd と書き込み先をどちらも `/tmp` と repo の外に置き、`--add-dir` なしでは `touch` が `Operation not permitted` で失敗し、ありでは成功した
 - 2026-10-07: S4 を bde89dc0 でコミットした(implementer)。`/org` skill の「前提」節と「既定の model_pool」節の解決順、古い台帳の箇条、permission 作法の codex 箇条、recipe の `--add-dir` の節を直した。recipe の再確認の手順に `</dev/null` と `command` を足す修正は orchestrator がこのあと行った。`docs/tech-debt/README.md` の現役の行(State dir の順)は /sync-docs で扱う
+- 2026-10-07: self-review(477cbf6b)は Merge 可、MEDIUM 1・LOW 5。M-1(`--add-dir` が全役割の codex 座席に付く)はユーザーが「leader だけ」を選び、Scope・AC8・図 1 を直して承認し直した(digest 79224e28032a)。L-1〜L-4 と一緒に直し、self-review から回し直す。L-5(tech-debt の行)は /sync-docs で扱う
