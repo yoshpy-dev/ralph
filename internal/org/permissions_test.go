@@ -170,9 +170,10 @@ func TestPermissionArgsForDriver_Codex_VerifiedUnlocksMapping(t *testing.T) {
 }
 
 // TestCodexWritableRootArgs pins AC8 (plan 2026-10-07-org-state-dir-common):
-// a workspace-write codex seat (autonomous or edits) gets --add-dir <state
-// dir> only when the state dir is outside its cwd, compared with symlinks
-// resolved; guarded codex seats and claude seats never get it.
+// a workspace-write codex leader seat (autonomous or edits) gets --add-dir
+// <state dir> only when the state dir is outside its cwd, compared with
+// symlinks resolved; implementer, reviewer, and unknown roles, guarded codex
+// seats, and claude seats never get it.
 func TestCodexWritableRootArgs(t *testing.T) {
 	root := t.TempDir()
 	mainWT := filepath.Join(root, "main")
@@ -197,33 +198,41 @@ func TestCodexWritableRootArgs(t *testing.T) {
 		t.Fatalf("EvalSymlinks: %v", err)
 	}
 	addDir := []string{"--add-dir", stateDir}
+	leader := LeaderIdentity
 
 	cases := []struct {
 		name     string
+		role     string
 		driver   string
 		mode     string
 		cwd      string
 		stateDir string
 		want     []string
 	}{
-		{"codex edits, cwd is a linked worktree outside the state dir", "codex", PermissionModeEdits, linkedWT, stateDir, addDir},
-		{"codex autonomous, cwd is a linked worktree outside the state dir", "codex", PermissionModeAutonomous, linkedWT, stateDir, addDir},
-		{"codex edits, a sibling dir sharing cwd's name prefix is outside", "codex", PermissionModeEdits, mainWT, siblingStateDir, []string{"--add-dir", siblingStateDir}},
-		{"codex edits, state dir under cwd", "codex", PermissionModeEdits, mainWT, stateDir, nil},
-		{"codex autonomous, state dir under cwd", "codex", PermissionModeAutonomous, mainWT, stateDir, nil},
-		{"codex autonomous, state dir is cwd itself", "codex", PermissionModeAutonomous, stateDir, stateDir, nil},
-		{"codex edits, cwd spelled through a symlink", "codex", PermissionModeEdits, mainLink, stateDir, nil},
-		{"codex edits, state dir spelled through a symlink", "codex", PermissionModeEdits, mainWT, filepath.Join(mainLink, ".harness", "state", "org"), nil},
-		{"codex edits, cwd symlink-resolved and state dir not", "codex", PermissionModeEdits, resolvedMain, stateDir, nil},
-		{"codex guarded, state dir outside cwd", "codex", PermissionModeGuarded, linkedWT, stateDir, nil},
-		{"claude autonomous, state dir outside cwd", "claude", PermissionModeAutonomous, linkedWT, stateDir, nil},
-		{"claude edits, state dir outside cwd", "claude", PermissionModeEdits, linkedWT, stateDir, nil},
+		{"leader codex edits, cwd is a linked worktree outside the state dir", leader, "codex", PermissionModeEdits, linkedWT, stateDir, addDir},
+		{"leader codex autonomous, cwd is a linked worktree outside the state dir", leader, "codex", PermissionModeAutonomous, linkedWT, stateDir, addDir},
+		{"leader codex edits, a sibling dir sharing cwd's name prefix is outside", leader, "codex", PermissionModeEdits, mainWT, siblingStateDir, []string{"--add-dir", siblingStateDir}},
+		{"leader codex edits, state dir under cwd", leader, "codex", PermissionModeEdits, mainWT, stateDir, nil},
+		{"leader codex autonomous, state dir under cwd", leader, "codex", PermissionModeAutonomous, mainWT, stateDir, nil},
+		{"leader codex autonomous, state dir is cwd itself", leader, "codex", PermissionModeAutonomous, stateDir, stateDir, nil},
+		{"leader codex edits, cwd spelled through a symlink", leader, "codex", PermissionModeEdits, mainLink, stateDir, nil},
+		{"leader codex edits, state dir spelled through a symlink", leader, "codex", PermissionModeEdits, mainWT, filepath.Join(mainLink, ".harness", "state", "org"), nil},
+		{"leader codex edits, cwd symlink-resolved and state dir not", leader, "codex", PermissionModeEdits, resolvedMain, stateDir, nil},
+		{"leader codex guarded, state dir outside cwd", leader, "codex", PermissionModeGuarded, linkedWT, stateDir, nil},
+		{"leader claude autonomous, state dir outside cwd", leader, "claude", PermissionModeAutonomous, linkedWT, stateDir, nil},
+		{"leader claude edits, state dir outside cwd", leader, "claude", PermissionModeEdits, linkedWT, stateDir, nil},
+		{"implementer codex autonomous, state dir outside cwd", "implementer", "codex", PermissionModeAutonomous, linkedWT, stateDir, nil},
+		{"implementer codex edits, state dir outside cwd", "implementer", "codex", PermissionModeEdits, linkedWT, stateDir, nil},
+		{"reviewer codex autonomous, state dir outside cwd", "reviewer", "codex", PermissionModeAutonomous, linkedWT, stateDir, nil},
+		{"reviewer codex edits, state dir outside cwd", "reviewer", "codex", PermissionModeEdits, linkedWT, stateDir, nil},
+		{"unknown role codex autonomous, state dir outside cwd", "worker", "codex", PermissionModeAutonomous, linkedWT, stateDir, nil},
+		{"empty role codex autonomous, state dir outside cwd", "", "codex", PermissionModeAutonomous, linkedWT, stateDir, nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := codexWritableRootArgs(tc.driver, tc.mode, tc.cwd, tc.stateDir)
+			got := codexWritableRootArgs(tc.role, tc.driver, tc.mode, tc.cwd, tc.stateDir)
 			if !slices.Equal(got, tc.want) {
-				t.Fatalf("codexWritableRootArgs(%q, %q, %q, %q) = %v, want %v", tc.driver, tc.mode, tc.cwd, tc.stateDir, got, tc.want)
+				t.Fatalf("codexWritableRootArgs(%q, %q, %q, %q, %q) = %v, want %v", tc.role, tc.driver, tc.mode, tc.cwd, tc.stateDir, got, tc.want)
 			}
 		})
 	}

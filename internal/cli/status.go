@@ -209,9 +209,10 @@ func readOrgWatchHeartbeat(stateDir, orgID string) (heartbeat orgWatchHeartbeat,
 // org.ResolveOrgStateDir precedence tier that produced it (flag/env/
 // git-main-worktree/git-toplevel/cwd) -- tech-debt "watchdog deferred LOW
 // (1)": the source was being resolved everywhere but discarded (`_`) at
-// every production call site, so an operator debugging "why did `ralph status` read from an
-// unexpected directory" had no way to see which tier won without re-deriving
-// ResolveOrgStateDir's precedence by hand.
+// every production call site, so an operator debugging "why did
+// `ralph status` read from an unexpected directory" had no way to see
+// which tier won without re-deriving ResolveOrgStateDir's precedence by
+// hand.
 func printStateDirLine(out io.Writer, stateDir, stateDirSource string) {
 	_, _ = fmt.Fprintf(out, "state-dir: %s (source: %s)\n", stateDir, stateDirSource)
 }

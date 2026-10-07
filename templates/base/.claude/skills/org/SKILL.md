@@ -300,11 +300,13 @@ EVIDENCE: docs/reports/self-review-foo.md
   座席はすでに書けており、warn はその旨を示す。作業ディレクトリが
   保存先を含まない座席(task worktree など)には writable root が
   引き続き必要。org の台帳はこれとは別で、edits / autonomous
-  (`--sandbox workspace-write`)の codex 座席の cwd の下に台帳のディレクトリ
-  がないとき(linked worktree で動く leader など)、ralph が起動の引数に
-  `--add-dir <台帳のディレクトリ>` を足して、座席が共通の台帳に書けるように
-  する。agmsg の DB はこの対象に入らないので、上の writable root の設定は
-  そのまま要る。
+  (`--sandbox workspace-write`)の codex の leader 座席の cwd の下に台帳の
+  ディレクトリがないとき(linked worktree で動くときなど)、ralph が起動の
+  引数に `--add-dir <台帳のディレクトリ>` を足して、leader が共通の台帳に
+  書けるようにする。leader 以外の役割の座席には足さない。台帳を書くのは
+  leader だけで、ほかの座席は結果を agmsg で leader に送るので、台帳に書く
+  権限は要らない。agmsg の DB はこの対象に入らないので、上の writable root
+  の設定はそのまま要る。
 - `autonomous` モードの spawn は `--scope` を必須とし(fail-closed)、
   省略したい場合のみ `--allow-unscoped` を明示する。`--scope` は
   「担当範囲」を短く書く(例: `"internal/org/**"`、`"docs/reports/**"` )。

@@ -175,14 +175,14 @@ var (
 // dir (env/git-main-worktree/git-toplevel/cwd, see org.ResolveOrgStateDir),
 // which either fails with "seat not found" or -- worse -- silently reads a
 // different seat that happens to share the same org_id/seat_id in that
-// default manifest. An env-resolved or default-resolved state dir is deliberately
-// NOT appended: the same shell, run from the same directory with the same
-// environment, resolves it the same way when the operator runs the
-// printed command themselves, so repeating it would be redundant as long
-// as neither changes between the two commands (RALPH_ORG_STATE_DIR can go
-// stale if the env changes; the git-main-worktree, git-toplevel, and cwd
-// fallbacks depend on cwd the same way, since org.ResolveOrgStateDir runs
-// git in the current directory). resolvedStateDir must be the value
+// default manifest. An env-resolved or default-resolved state dir is
+// deliberately NOT appended: the same shell, run from the same directory
+// with the same environment, resolves it the same way when the operator
+// runs the printed command themselves, so repeating it would be redundant
+// as long as neither changes between the two commands (RALPH_ORG_STATE_DIR
+// can go stale if the env changes; the git-main-worktree, git-toplevel,
+// and cwd fallbacks depend on cwd the same way, since org.ResolveOrgStateDir
+// runs git in the current directory). resolvedStateDir must be the value
 // org.ResolveOrgStateDir already returned (always absolute), not the raw
 // flag text, so the hint survives a cwd change before the operator acts on
 // it.

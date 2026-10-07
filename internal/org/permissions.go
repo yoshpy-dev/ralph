@@ -63,9 +63,9 @@ func ResolvePermissionMode(cfg config.OrgConfig, role string) string {
 // fail-closed の実機検証") and live-verified on 2026-09-18 (see the doc
 // comment on permissionArgsForDriver below); CodexVerified is the operator's
 // explicit acknowledgement that they have repeated that verification for
-// their installed codex version and config. Spawn follows either set with
-// codexWritableRootArgs (below) when the org state dir is outside the
-// seat's cwd.
+// their installed codex version and config. For a leader seat, Spawn
+// follows either set with codexWritableRootArgs (below) when the org state
+// dir is outside the seat's cwd.
 var (
 	codexAutonomousArgs = []string{"--sandbox", "workspace-write", "--ask-for-approval", "never"}
 	codexEditsArgs      = []string{"--sandbox", "workspace-write"}
@@ -137,25 +137,37 @@ func permissionArgsForDriver(cfg config.OrgConfig, driver, mode string) ([]strin
 	}
 }
 
-// codexWritableRootArgs returns `--add-dir <stateDir>` for a codex seat
-// whose permission mode runs it under `--sandbox workspace-write`
-// (autonomous or edits; Spawn only reaches this after permissionArgsForDriver
-// has accepted that mode, i.e. once cfg.Permissions.CodexVerified is true)
-// when the org state directory is not inside the seat's cwd, and nil
-// otherwise. workspace-write leaves only cwd (plus temp roots) writable, so
-// a codex leader whose cwd is a linked worktree could not append to the
-// shared ledger under the main worktree's .harness/state/org without it
-// (plan 2026-10-07-org-state-dir-common, AC8). guarded passes no sandbox
-// flag at all and claude has no such sandbox, so both get nil.
+// codexWritableRootArgs returns `--add-dir <stateDir>` for a codex leader
+// seat (role == LeaderIdentity) whose permission mode runs it under
+// `--sandbox workspace-write` (autonomous or edits; Spawn only reaches this
+// after permissionArgsForDriver has accepted that mode, i.e. once
+// cfg.Permissions.CodexVerified is true) when the org state directory is
+// not inside the seat's cwd, and nil otherwise. workspace-write leaves only
+// cwd (plus temp roots) writable, so a codex leader whose cwd is a linked
+// worktree could not append to the shared ledger under the main worktree's
+// .harness/state/org without it (plan 2026-10-07-org-state-dir-common,
+// AC8). guarded passes no sandbox flag at all and claude has no such
+// sandbox, so both get nil.
+//
+// Only the leader gets the flag because only the leader runs `ralph org`
+// verbs and so writes the ledger; implementer, reviewer, and every other
+// role (including one with no embedded template that runs from --prompt)
+// report to the leader over agmsg. Making the state dir writable for them would let any seat
+// rewrite the manifest, the model receipts, and other seats' prompt files
+// under <state-dir>/prompts/.
 //
 // The containment test compares both paths made absolute and resolved
-// through symlinks where they exist (resolvedOrClean, statedir.go: macOS's
-// /var is a symlink to /private/var), so a state dir under cwd spelled
-// through a different symlink still counts as inside. The flag carries the
-// absolute, unresolved state dir -- the same path the runtime itself writes
-// to.
-func codexWritableRootArgs(driver, mode, cwd, stateDir string) []string {
-	if driver != "codex" || (mode != PermissionModeAutonomous && mode != PermissionModeEdits) {
+// through symlinks (resolvedOrClean, statedir.go: macOS's /var is a symlink
+// to /private/var), so a state dir under cwd spelled through a different
+// symlink still counts as inside. resolvedOrClean resolves a path all or
+// nothing, so this relies on stateDir already existing: Spawn calls it
+// after withManifestLock has created the directory (lockfile.go). A state
+// dir that did not exist yet would compare unresolved against a resolved
+// cwd (/var/... against /private/var/...) and count as outside. The flag
+// carries the absolute, unresolved state dir -- the same path the runtime
+// itself writes to.
+func codexWritableRootArgs(role, driver, mode, cwd, stateDir string) []string {
+	if role != LeaderIdentity || driver != "codex" || (mode != PermissionModeAutonomous && mode != PermissionModeEdits) {
 		return nil
 	}
 	stateDir = mustAbs(stateDir)

@@ -33,8 +33,8 @@ func chdir(t *testing.T, dir string) string {
 	return resolved
 }
 
-// initGitRepo runs `git init` in dir so ResolveOrgStateDir's git-toplevel
-// tier has something to resolve against.
+// initGitRepo runs `git init` in dir so ResolveOrgStateDir's
+// git-main-worktree tier has something to resolve against.
 func initGitRepo(t *testing.T, dir string) {
 	t.Helper()
 	cmd := exec.Command("git", "init", "--quiet", dir)

@@ -42,7 +42,8 @@ const defaultOrgStateDirRelPath = ".harness/state/org"
 //     anywhere inside the main checkout or any of its linked worktrees
 //     resolves to the same state directory, so one org ledger (manifest,
 //     receipts, watch state) is shared by all of them. In the main checkout
-//     this is the same path tier 4 used to return; only the tag differs.
+//     this is the same path the git-toplevel tier below would return; only
+//     the tag differs.
 //  4. git toplevel ("git-toplevel") -- `git rev-parse --show-toplevel` run
 //     in the current working directory, joined with ".harness/state/org".
 //     Used when tier 3 cannot name a main worktree, e.g. in a linked
