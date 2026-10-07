@@ -2,7 +2,7 @@
 
 - Date: 2026-10-07
 - Plan: docs/plans/active/2026-10-07-guard-bypass-and-hygiene.md
-- Verifier: verifier subagent (Claude Opus 5.5)、cycle 1(`cycle-count.json` は 1)。cycle 2 は末尾の「Cycle 2」節で、判定は最後の `## Verdict`
+- Verifier: verifier subagent (Claude Opus 5.5)、cycle 1(`cycle-count.json` は 1)。cycle 2 は「Cycle 2」節、cap を 3 に上げた追加の回は「Cycle 2 (extra run)」節で、判定は最後の `## Verdict`
 - Scope: 仕様への適合(AC1〜AC7)、静的解析、文書のずれ。対象は `git diff origin/main...HEAD`(base 2a22ba78、HEAD c45730cf、27 ファイル、+1511/-129)。self-review の修正コミット 989886f2(L-2、L-3、L-4)と plan の訂正 c45730cf(M-1)を含む。テスト(`./scripts/run-test.sh`、`go test`、`tests/test-*.sh`)は /test の担当なので実行していない。guard、`check_tech_debt_plan_refs` は scratchpad の入力で直接動かした(観察のための probe で、テストスイートではない)
 - Evidence: `docs/evidence/verify-2026-10-07-guard-bypass-and-hygiene.log`(`docs/evidence/*.log` は gitignore 対象なので手元にだけ残る)。runner 自身のログは `docs/evidence/verify-2026-10-06-184026.log`
 
@@ -185,9 +185,57 @@ cycle 1 の記録の訂正: cycle 1 の Spec compliance の AC2 の行は、M-1 
 - 上の表の弱くなった形は、どれもテストで固定していない(none とも ask とも)。plan の AC には入っていないので AC は満たすが、次に `tee_lead` を変えたときに判定が動いても気づけない。
 - 新しい guard が live の payload で発火すること、Codex の ask の扱いは、cycle 1 と同じく未確認です。
 
+## Cycle 2 (extra run)
+
+- Date: 2026-10-07
+- Verifier: verifier subagent (Claude Opus 5.5)。cross-review cycle 2(44ab9ef7)のあと cap を 3 に上げた追加の回。`cycle-count.json` は 2 のままなので、insight event の cycle も 2 になる
+- Scope: 69d1c581..b94a9106。コードの変更は 3c0ba22a、206d8335、b94a9106 で、`pre_bash_guard.sh` の `word_end`・`tee_lead`・`env_target` とコメント(root と template)、`tests/test-pre-bash-guard.sh` の C に 2 行、D に 9 行。ほかは記録(77e4e542 の self-review など)。AC3〜AC6 のファイル(`lib_json.sh`、`post_edit_verify.sh`、`scripts/`、skill の 4 面、新しいテスト 3 本)は `git diff --quiet 69d1c581 HEAD` で変化なし。テストは実行していない(/test の担当)
+- Evidence: `docs/evidence/verify-2026-10-07-guard-bypass-and-hygiene.log` の「Cycle 2 (extra run)」節(手元だけ)。runner のログは `docs/evidence/verify-2026-10-07-042818.log`
+
+plan の承認: `./scripts/plan-visual.sh digest` は `d8f86292d5f1` を返し、承認の行と一致した。
+
+AC の判定: AC1 と AC2 は HEAD で Met。scratchpad の HEAD と template の guard に、`jq -nc --arg` で組んだ payload を jq あり・なしで渡し、920 判定で不一致は 0 だった。内訳は、deny 11 形 × 7 モード、ask 6 形 × 7 モード(bypass だけ none)、AC2 の誤検知 6 形を含む none 14 形 × 3 モード、AC2 の書き込み 7 形を含む書き込み 23 形 × 3 モード。AC3〜AC6 は戻っていない(上の `git diff --quiet`。tech-debt README の参照の検査は OK)。AC7 は Met で、`run-verify.sh` は静的解析の部分だけ確かめた。
+
+静的解析: `./scripts/run-static-verify.sh` は rc 0(verify.local.sh の static の段、golang verifier、secret scan `2a22ba78..b94a9106` clean)。単独で走らせた `check-skill-sync.sh`(13 skill)、`check-sync.sh`(IDENTICAL 164、DRIFTED 0)、`check-pipeline-sync.sh`、`check-template-purity.sh` も rc 0。`shellcheck --severity=warning` は広げた 95 ファイルで rc 0(0.11.0)。既定の重さでは、guard は 44ab9ef7 と HEAD がどちらも SC2016 の info 2 件、テストの SC2016 の info は 7 件から 17 件に増えた。増えたのは、足した行がシングルクォートの中にバッククォートを書いているためで、意図した文字列。`sh -n` と `dash -n`(guard の 2 面)、`bash -n`(テスト)、guard の `cmp`、`git diff --check`、追加行の U+FFFD 検索(0 件)も通った。
+
+版ごとの比較(モードなし、jq/nojq):
+
+| Command | origin/main | 44ab9ef7 | 3c0ba22a | 206d8335 | HEAD |
+| --- | --- | --- | --- | --- | --- |
+| ``x=`tee .git` ``、``x=`printf x > .git` `` | ask/ask | none/none | ask/ask | ask/ask | ask/ask |
+| ``x=`tee /tmp/a` .env`` | none/none | ask/ask | ask/ask | none/none | none/none |
+| `tee /tmp/build.log # .env is read separately` | none/none | ask/ask | none/none | none/none | none/none |
+| ``echo x > `pwd`/.git/x``、``tee `pwd`/.git/x`` | none/none | ask/ask | none/none | none/none | ask/ask |
+| ``echo x > `pwd`/.git/x 2>/dev/null``、``tee `pwd`/.git/x > /dev/null`` | ask/ask | ask/ask | none/none | none/none | ask/ask |
+| `tee a#b .env > /dev/null`、``tee `mktemp` .env > /dev/null`` | ask/ask | ask/ask | none/none(`` `mktemp` `` は ask/ask) | none/none | none/none |
+| `tee "a #b" .env > /dev/null` | ask/none | ask/ask | none/none | none/none | none/none |
+| `tee a#b .env`、``tee `cmd` .env`` | none/none | ask/ask | none/none(`` `cmd` `` は ask/ask) | none/none | none/none |
+| `tee "build .env.log"` | none/none | ask/ask | ask/ask | ask/ask | ask/ask |
+| `echo x > $(pwd)/.env 2>&1`、`echo x > $(pwd)/.git/x 2>/dev/null` | ask/ask | none/none | none/none | none/none | none/none |
+| `echo x > "$(pwd)/.git/x"` | none/none | none/none | none/none | none/none | none/none |
+| ``echo x > `echo .env` 2>/dev/null`` | ask/ask | none/none | none/none | none/none | none/none |
+
+cross-review cycle 2 の 1 件目(``x=`tee .git` ``)と 2 件目のコメントの側、206d8335 の誤検知、self-review の C3-L1(`` `pwd` `` で組んだ書き込み先)は HEAD で直っている。C3-L1 の形は、HEAD では後ろにリダイレクトがなくても ask を返し、origin/main より多く捕まえる。self-review の extra run は「コードは直さず記録する」と勧めていたが、b94a9106 がそのあと `word_char` にバッククォートを戻した。self-review の記録はその時点のもので、C3-L1 の `` `pwd` `` の形を未解決として register に写す必要はない。HEAD が旧 guard より弱いまま残るのは、`#` かバッククォートで引数の読み取りが止まる `tee` に後ろの `>` が付く形(C3-L2)と、`$(...)` で組んだ引用符なしの書き込み先に後ろのリダイレクトが付く形。`$(pwd)` の形は 44ab9ef7 の時点ですでに none で、この回の退行ではない。``echo x > `echo .env` 2>/dev/null`` も同じ「コマンド置換で組んだ書き込み先」に入る。HEAD の 54〜68 行目と 45〜47 行目のコメント(`$(pwd)` は見ない、`` tee `cmd` .env `` は見ない、`tee a#b .env` は見ない)は、この結果と合う。
+
+### Documentation drift (extra run)
+
+直していない(/sync-docs の担当)。
+
+| ID | Severity | Doc | Drift |
+| --- | --- | --- | --- |
+| V3-1 | LOW | `docs/tech-debt/README.md:158` | (a) の止める文字の列挙(`&`、`<`、`\`、`;`、`\|`、`)`)に `#` とバッククォートがない。例として `tee a#b .env > /dev/null`、``tee `mktemp` .env > /dev/null``、`tee "a #b" .env > /dev/null`(origin/main は jq の経路だけ ask)を足す。既知の誤検知 `tee "build .env.log"`(triage の WORTH_CONSIDERING 2 件目)もない。(a) が `"$(pwd)/.git/x"` を旧 guard も通した形として書くのは引用符付きでは正しいが、`echo x > $(pwd)/.env 2>&1` のように引用符なしで後ろにリダイレクトが続くと、origin/main は ask を返していた(C3-L1 の後半)。`` `pwd` `` で組んだ形は b94a9106 で見えるようになったので、残る注意は `$(...)` の形だけ |
+| V3-2 | LOW | plan の Progress checklist(`:154-175`) | cross-review cycle 2(44ab9ef7、ACTION_REQUIRED 1、WORTH_CONSIDERING 1)、cap を 3 に上げたこと、3c0ba22a・206d8335・b94a9106 と self-review 77e4e542 の記録がない。digest の対象外。Risks の「`&`、`<`、`\` など」は `#` とバッククォートも含む書き方なので、digest の対象の本文は直さなくてよい |
+| V3-3 | LOW | `tests/test-pre-bash-guard.sh:28-35` の見出しコメント | D の列挙に、バッククォートを含む書き込み先(`` `pwd`/.git/x ``、b94a9106 の 4 行)がない。C の ``x=`tee /tmp/a` .env`` は「...」に含まれると読める |
+
+### Coverage gaps (extra run)
+
+- /test に回したもの: `tests/test-pre-bash-guard.sh`(この回で足した 11 行)と、`./scripts/run-verify.sh` のテストの部分。
+- 上の表で HEAD が旧 guard より弱い `#`・バッククォート・`$(...)` の形は、どれもテストで固定していない(tech-debt 160 行目の (a) のとおり)。
+- guard の probe は macOS の BSD grep / sed だけで動かした。GNU では動かしていない。新しい guard の live での発火と Codex の ask の扱いも、これまでと同じく未確認です。
+
 ## Verdict
 
-- Verdict: pass
-- Verified: plan の digest が承認の行と一致すること。AC1 と AC2 を HEAD で確かめ直した(probe 560 判定、不一致 0、root と template、jq あり・なし)。AC3〜AC6 のファイルは cycle 1 から変わっていないか、コメントだけの変更であること。AC6 の README の参照の検査と、/pr の archive が出す件数(3)。静的解析の gate 全部(shellcheck は 95 ファイル)、ミラーの一致、diff の空白と U+FFFD。cross-review の 2 件と C2-M1・C2-L1 の形が HEAD で直っていること
-- Partially verified: AC7 の `run-verify.sh`(静的解析の部分だけ)。文書のずれ V2-1〜V2-4 は LOW で、/sync-docs で扱える。V2-1 は plan の digest の対象なので、直すと承認の取り直しが要る
+- Verdict: pass(Cycle 2 (extra run)、HEAD b94a9106)
+- Verified: plan の digest(`d8f86292d5f1`)が承認の行と一致すること。AC1 と AC2 を HEAD で確かめ直した(920 判定、不一致 0、root と template、jq あり・なし、7 モード)。AC3〜AC6 のファイルが 69d1c581 から変わっていないこと。静的解析の gate 全部(shellcheck は 95 ファイル)、ミラーの一致、diff の空白と U+FFFD。cross-review cycle 2 の 1 件目と 2 件目のコメントの側、206d8335 の誤検知、C3-L1 が HEAD で直っていること
+- Partially verified: AC7 の `run-verify.sh`(静的解析の部分だけ)。文書のずれ V3-1〜V3-3 は LOW で、/sync-docs で扱える。どれも plan の digest の対象ではない
 - Not verified: テストの実行(/test の担当)、GNU 環境での guard の判定、新しい guard の live での発火、Codex の ask の扱い
