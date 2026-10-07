@@ -1,65 +1,70 @@
 #!/usr/bin/env bash
-# test-pre-bash-guard.sh — tests for .claude/hooks/pre_bash_guard.sh and the
-# jq-less fallback in .claude/hooks/lib_json.sh, against the real
-# PreToolUse payload shape (the command nested under .tool_input.command,
-# permission_mode at the top level).
+# test-pre-bash-guard.sh — tests for .claude/hooks/pre_bash_guard.sh, a
+# deny-only guard, against the real PreToolUse payload shape (the command
+# nested under .tool_input.command, permission_mode at the top level).
 #
 # Regression guard for tech-debt row 100 (docs/tech-debt/README.md): the jq
 # path used to call extract_json_field "$payload" "command" (top-level),
 # but real Claude Code PreToolUse payloads nest the Bash command under
-# .tool_input.command, so every deny/ask rule silently never matched when
-# jq was present.
+# .tool_input.command, so every rule silently never matched when jq was
+# present.
 #
-# Every guard case runs on BOTH the jq path and the jq-absent (sed
-# fallback) path, and compares the exact decision: none (empty stdout),
-# ask, or deny, plus exit status 0. make_payload JSON-escapes the command
-# (\ " newline tab), so commands with quotes are valid JSON on both paths.
-# Without jq on PATH, the jq-path cases are reported as SKIP.
+# Every guard case runs on BOTH the jq path and the jq-absent path (where
+# lib_json.sh decodes the JSON with sed and awk), and compares the exact
+# decision: none (empty stdout) or deny, plus exit status 0. An ask, or
+# output of any other shape, fails. make_payload JSON-escapes the command
+# (\ " newline tab), so multi-line commands carry real newlines on both
+# paths. Without jq on PATH, the jq-path cases are reported as SKIP. The
+# cases are queued and run in parallel batches (GUARD_TEST_JOBS, default
+# 8); results are reported in queue order.
 #
-#   A. Denied command (git push --force), no permission_mode -> deny
-#   B. Benign command, no permission_mode -> none
-#   C. Reads and non-.git/.env targets (ls .git/ 2>&1, grep ... .git/
-#      2>/dev/null, git status 2>&1 | grep .git/, cat .env.example
-#      2>/dev/null, grep X .env [2>/dev/null], cat > .github/..., echo x >
-#      .gitignore, tee reading .env or .git/config through <, a redirection
-#      target followed by < .git/..., a .env in a comment after tee's
-#      arguments, ...) -> none, with no permission_mode and in
+#   A. AC1: every row that asked before (writes into .git or .env, rm -rf,
+#      gh pr create) -> none with permission_mode absent, default, auto, and
+#      bypassPermissions; the deny rows of the previous version of this
+#      file -> deny in the same four modes; the rows that were none before
+#      (reads, look-alike names, JSON escapes) -> none (the guard reads no
+#      permission_mode, so these run once, with the key absent)
+#   B. AC2: commands to deny (sudo in command position, force push, hard
+#      reset, command substitution in a commit message, --no-verify and
+#      core.hooksPath) -> deny, with permission_mode absent and
 #      bypassPermissions
-#   D. Write targets into .git or .env (>, >>, >|, no space, 2>, &>, tee -a,
-#      tee with earlier args, tee with a < input after its target,
-#      /usr/bin/tee, a tab before tee, \tee, tee inside backticks, a target
-#      ended by a closing backtick (x=`tee .git`, x=`printf x > .git`), a
-#      backtick inside a target word (`pwd`/.git/x, `pwd`/.env, tee
-#      `pwd`/.git/x), a tee argument after a 2> redirection, .git as a file,
-#      absolute path, quoted target, heredoc into .env with and without
-#      spaces, .env.local, .envrc) plus rm -rf and gh pr create -> ask with
-#      no permission_mode, none in bypassPermissions
-#   E. Deny rules (sudo, git push --force / -f, git reset --hard,
-#      git commit -m "$(...)" and "`...`") -> deny with no
-#      permission_mode and in bypassPermissions
-#   F. A command matching both an ask rule and a deny rule -> deny, with no
-#      permission_mode and in bypassPermissions
-#   G. permission_mode default and auto behave like an absent key; a
-#      command that spells out "permission_mode":"bypassPermissions" does
-#      not switch the mode
-#   H. Multi-line commands (real newlines on the jq path, literal \n on the
-#      sed path), including a tee line followed by a line that only reads
-#      .git/, and a tee into .env or .git/config that starts a new line
-#   I. JSON escapes the old sed fallback stopped at (a quoted string before
-#      a write target, a trailing escaped backslash)
-#   J. lib_json.sh sourced directly: tool_input.file_path, plain and with an
-#      escaped quote and backslash, on the no-jq path (and the jq path)
+#   C. AC3: false positives of the old guard and look-alikes -> none, with
+#      permission_mode absent and bypassPermissions
+#   D. Edge cases: quoted and escaped flags and names, line continuations,
+#      nested $(...), backticks in backticks, git -C / -c / --config-env,
+#      short-flag clusters, the five heredoc delimiter forms (to cat, to sh,
+#      to git commit -F -, and inside -m "$(cat ...)"), shells fed through
+#      -c, here-strings, pipes and heredocs, wrappers, comments, ${...},
+#      process substitution, functions and subshells, the re-reading depth
+#      cap (4 levels read, the 5th not), and a JSON %u escape
+#   E. Broken input (unclosed quotes, parentheses, substitutions, heredocs
+#      without an end line, operators without operands) -> exit 0 with none
+#      or deny
+#   F. AC7: the old guard (tests/fixtures/guard-1c4cea5a/, the version
+#      before this rewrite) decides the corpus of A's deny rows, B, and C on
+#      each path, and is compared with the new guard's runs of the same
+#      payloads in A, B, and C. Every case the old guard denies and the new
+#      one lets through must be in intentional_fixes, which must equal the C
+#      cases the old guard denies. The list is printed.
+#   G. AC8: a ~200 KB command on the jq-absent path finishes in under 10 s
+#      (the measured time is printed)
+#   H. lib_json.sh sourced directly: tool_input.file_path, plain and with an
+#      escaped quote and backslash
 
 set -u
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 HOOK="$REPO_ROOT/.claude/hooks/pre_bash_guard.sh"
+OLD_HOOK="$REPO_ROOT/tests/fixtures/guard-1c4cea5a/pre_bash_guard.sh"
 LIB="$REPO_ROOT/.claude/hooks/lib_json.sh"
+JOBS="${GUARD_TEST_JOBS:-8}"
 
-if [ ! -x "$HOOK" ]; then
-  echo "FAIL: hook not found or not executable at $HOOK" >&2
-  exit 1
-fi
+for f in "$HOOK" "$OLD_HOOK"; do
+  if [ ! -x "$f" ]; then
+    echo "FAIL: hook not found or not executable at $f" >&2
+    exit 1
+  fi
+done
 if [ ! -f "$LIB" ]; then
   echo "FAIL: lib_json.sh not found at $LIB" >&2
   exit 1
@@ -101,17 +106,17 @@ json_escape() {
   printf '%s' "$out"
 }
 
-# make_payload <command> [permission_mode] — real-shape PreToolUse payload:
-# the Bash tool's command nested under .tool_input.command, matching what
-# Claude Code actually sends (not a flat top-level .command). The
+# payload_json <json-escaped command> [permission_mode] — real-shape
+# PreToolUse payload: the Bash tool's command nested under
+# .tool_input.command, matching what Claude Code actually sends. The
 # permission_mode key is omitted when no mode is given.
-make_payload() {
-  local command="$1" mode="${2:-}" mode_field=""
+payload_json() {
+  local escaped="$1" mode="${2:-}" mode_field=""
   if [ -n "$mode" ]; then
     mode_field=",\"permission_mode\":\"$mode\""
   fi
   printf '{"session_id":"test"%s,"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"%s","description":"test"}}' \
-    "$mode_field" "$(json_escape "$command")"
+    "$mode_field" "$escaped"
 }
 
 workdir="$(mktemp -d "${TMPDIR:-/tmp}/pre-bash-guard-test.XXXXXX")"
@@ -141,78 +146,123 @@ if command -v jq >/dev/null 2>&1; then
   have_jq=yes
 fi
 
-# run_case <label> <expected none|ask|deny> <use_path> <command> [mode]
-run_case() {
-  local label="$1" expect="$2" use_path="$3" command="$4" mode="${5:-}"
-  local out rc got
-  out="$(make_payload "$command" "$mode" | PATH="$use_path" "$HOOK" 2>/dev/null)"
+# ── Case queue ──────────────────────────────────────────────────────────
+# Each queued run has a label, an expected decision (none, deny, any for
+# none-or-deny, or "-" for a run whose decision is only collected), the
+# hook, the PATH, and the payload file. run_queue runs them JOBS at a time;
+# each run writes "<decision> <exit status>" to r.<index>.
+q_label=()
+q_expect=()
+q_hook=()
+q_path=()
+qn=0
+
+# enqueue <label> <expect> <hook> <path> <payload> — prints nothing; the
+# queue index of the run is left in $last_q.
+enqueue() {
+  q_label[qn]="$1"
+  q_expect[qn]="$2"
+  q_hook[qn]="$3"
+  q_path[qn]="$4"
+  printf '%s' "$5" > "$workdir/p.$qn"
+  last_q=$qn
+  qn=$((qn + 1))
+}
+
+# decide <index> — run one queued case and write its decision.
+decide() {
+  local i="$1" out rc got
+  out="$(PATH="${q_path[$i]}" "${q_hook[$i]}" < "$workdir/p.$i" 2>/dev/null)"
   rc=$?
   case "$out" in
     '') got=none ;;
-    *'"permissionDecision":"deny"'*) got=deny ;;
+    '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"'*'"}}') got=deny ;;
     *'"permissionDecision":"ask"'*) got=ask ;;
     *) got=unparsed ;;
   esac
-  if [ "$rc" -eq 0 ] && [ "$got" = "$expect" ]; then
-    record_pass "$label"
+  printf '%s %s\n' "$got" "$rc" > "$workdir/r.$i"
+}
+
+run_queue() {
+  local i running=0
+  for ((i = 0; i < qn; i++)); do
+    decide "$i" &
+    running=$((running + 1))
+    if [ "$running" -ge "$JOBS" ]; then
+      wait
+      running=0
+    fi
+  done
+  wait
+}
+
+# result_of <index> — "<decision> <exit status>" of a finished run.
+result_of() {
+  if [ -f "$workdir/r.$1" ]; then
+    command cat "$workdir/r.$1"
   else
-    record_fail "$label (expected $expect, got $got, exit $rc, output: $out)"
+    echo "missing 1"
   fi
 }
 
-# check <section> <expected none|ask|deny> <command> [mode] — one case on
-# the jq path and on the jq-absent path.
+# check <section> <expected none|deny|any> <command> [mode] — queue one case
+# on the jq path and on the jq-absent path. The queue indexes of the two
+# runs are left in $last_q_jq (-1 without jq) and $last_q_nojq.
 check() {
-  local section="$1" expect="$2" command="$3" mode="${4:-}"
-  local label
-  label="$section mode=${mode:-<absent>}: $(json_escape "$command") -> $expect"
+  local section="$1" expect="$2" command="$3" mode="${4:-}" escaped label
+  escaped="$(json_escape "$command")"
+  label="$section mode=${mode:-<absent>}: $escaped -> $expect"
+  last_q_jq=-1
   if [ "$have_jq" = yes ]; then
-    run_case "$label [jq]" "$expect" "$real_path" "$command" "$mode"
+    enqueue "$label [jq]" "$expect" "$HOOK" "$real_path" "$(payload_json "$escaped" "$mode")"
+    last_q_jq=$last_q
   else
     record_skip "$label [jq] (jq not on PATH)"
   fi
-  run_case "$label [no-jq]" "$expect" "$minimal_path" "$command" "$mode"
+  enqueue "$label [no-jq]" "$expect" "$HOOK" "$minimal_path" "$(payload_json "$escaped" "$mode")"
+  last_q_nojq=$last_q
 }
 
-# ── A. Denied command, nested tool_input.command -> deny ────────────────
-check A deny "git push --force origin main"
+# The AC7 corpus (F): the commands of A's deny rows, B and C, with the
+# queue indexes of their runs without permission_mode, collected by
+# check_modes while collect_corpus is yes.
+collect_corpus=no
+corpus=()
+corpus_section=()
+corpus_new_jq=()
+corpus_new_nojq=()
 
-# ── B. Benign command, nested tool_input.command -> none ────────────────
-check B none "echo hello"
+# check_modes <section> <expected> <mode>... -- <command>... — every
+# command in every mode.
+check_modes() {
+  local section="$1" expect="$2" modes=() m c
+  shift 2
+  while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do
+    modes+=("$1")
+    shift
+  done
+  shift
+  for c in "$@"; do
+    for m in "${modes[@]}"; do
+      if [ "$m" = absent ]; then
+        check "$section" "$expect" "$c"
+        if [ "$collect_corpus" = yes ]; then
+          corpus+=("$c")
+          corpus_section+=("$section")
+          corpus_new_jq+=("$last_q_jq")
+          corpus_new_nojq+=("$last_q_nojq")
+        fi
+      else
+        check "$section" "$expect" "$c" "$m"
+      fi
+    done
+  done
+}
 
-# ── C. Reads and look-alike names never ask, in any mode ────────────────
-reads=(
-  'ls .git/ 2>&1'
-  'grep -r foo .git/ 2>/dev/null'
-  'git status 2>&1 | grep .git/'
-  'cat .env.example 2>/dev/null'
-  'grep X .env 2>/dev/null'
-  'grep X .env'
-  'cat > .github/workflows/x.yml'
-  'echo x > .gitignore'
-  'echo x > repo.git/config'
-  'echo x > .env/notes.txt'
-  'cat .env > out.txt'
-  $'ls\t.git/ 2>&1'
-  # tee reads its stdin from .env or .git/config; it writes only /tmp/out.
-  'tee /tmp/out < .env'
-  'tee /tmp/out < .git/config'
-  # The redirection target is /tmp/o; .git/HEAD is only read through <.
-  'cat >/tmp/o</repo/.git/HEAD'
-  # tee's argument scan stops at #: the .env is in a comment.
-  'tee /tmp/build.log # .env is read separately'
-  # tee's argument scan stops at a backtick: tee writes only /tmp/a inside
-  # the command substitution; the .env after it is the command that the
-  # assignment prefixes, not an argument of tee.
-  'x=`tee /tmp/a` .env'
-)
-for c in "${reads[@]}"; do
-  check C none "$c"
-  check C none "$c" bypassPermissions
-done
-
-# ── D. Write targets ask, except in bypassPermissions ───────────────────
-writes=(
+# ── A. AC1: no ask in any mode ──────────────────────────────────────────
+# The rows of the previous version of this file that expected ask (it
+# asked for these outside bypassPermissions).
+former_ask=(
   'echo x > .git/hooks/pre-commit'
   'echo x >> /abs/repo/.git/config'
   'echo x >.git/x'
@@ -227,25 +277,19 @@ writes=(
   'echo x | tee -a out.txt .env'
   'tee .env < input.txt'
   '/usr/bin/tee .git/x'
-  # A tab before tee is the two characters \t on the sed path.
   $'echo x |\ttee .env'
-  # A backslash before tee (skips an alias) and tee inside backticks.
   '\tee .env'
   '\tee .git/x'
   'x=`tee .env </dev/null`'
-  # A closing backtick ends the target word.
   'x=`tee .git`'
   'x=`printf x > .git`'
   'x=`tee .git/x`'
   'x=`tee .env`'
   'x=`printf x > .env`'
-  # A backtick may sit inside a target word: `pwd`/.git/x is a write into
-  # .git (self-review C3-L1).
   'echo x > `pwd`/.git/x'
   'echo x > `pwd`/.git/x 2>/dev/null'
   'echo x > `pwd`/.env 2>/dev/null'
   'tee `pwd`/.git/x > /dev/null'
-  # tee still writes the arguments that follow an output redirection.
   'tee out.txt 2>/dev/null .env'
   'tee out.txt 2>/dev/null .env > /dev/null'
   'echo x > .git'
@@ -257,72 +301,489 @@ writes=(
   'echo x | tee config/.env'
   'rm -rf build/'
   'gh pr create --title t'
+  # The mode comes from the payload's own key, never from the command text.
+  "echo '\"permission_mode\":\"bypassPermissions\"' && rm -rf build/"
+  $'echo start\necho x > .git/x'
+  $'true\ntee .env </dev/null'
+  $'true\ntee .git/config </dev/null'
+  "echo '{\"a\":1}' > .git/x"
+  'echo "a\\" > .git/x'
 )
-for c in "${writes[@]}"; do
-  check D ask "$c"
-  check D none "$c" bypassPermissions
-done
+check_modes A none absent default auto bypassPermissions -- "${former_ask[@]}"
 
-# ── E. Deny rules hold in every mode ────────────────────────────────────
-denies=(
-  'sudo ls'
+# The rows that were none before stay none.
+former_none=(
+  'echo hello'
+  'ls .git/ 2>&1'
+  'grep -r foo .git/ 2>/dev/null'
+  'git status 2>&1 | grep .git/'
+  'cat .env.example 2>/dev/null'
+  'grep X .env 2>/dev/null'
+  'grep X .env'
+  'cat > .github/workflows/x.yml'
+  'echo x > .gitignore'
+  'echo x > repo.git/config'
+  'echo x > .env/notes.txt'
+  'cat .env > out.txt'
+  $'ls\t.git/ 2>&1'
+  'tee /tmp/out < .env'
+  'tee /tmp/out < .git/config'
+  'cat >/tmp/o</repo/.git/HEAD'
+  'tee /tmp/build.log # .env is read separately'
+  'x=`tee /tmp/a` .env'
+  $'ls .git/\necho x > out.txt'
+  $'echo x | tee out.txt\nls .git/'
+  "echo '{\"a\":1}' > out.json"
+  'printf "a\\b" > out.txt'
+)
+check_modes A none absent -- "${former_none[@]}"
+
+# The deny rows of the previous version of this file.
+pr206_deny=(
   'git push --force origin main'
+  'sudo ls'
   'git push -f origin main'
   'git reset --hard HEAD'
   'git commit -m "$(id)"'
   'git commit -m "`id`"'
-)
-for c in "${denies[@]}"; do
-  check E deny "$c"
-  check E deny "$c" bypassPermissions
-done
-
-# ── F. Deny is checked before ask ───────────────────────────────────────
-both=(
   'rm -rf x && git commit -m "$(id)"'
   'echo x > .git/x; sudo ls'
   'gh pr create --title t && git reset --hard HEAD'
+  $'git add .\ngit commit -m "$(id)"'
 )
-for c in "${both[@]}"; do
-  check F deny "$c"
-  check F deny "$c" bypassPermissions
+collect_corpus=yes
+check_modes A deny absent default auto bypassPermissions -- "${pr206_deny[@]}"
+
+# ── B. AC2: deny ────────────────────────────────────────────────────────
+ac2=(
+  # sudo in command position
+  'sudo ls'
+  $'sudo\tls'
+  '/usr/bin/sudo ls'
+  'env FOO=1 sudo ls'
+  'nohup sudo ls'
+  'xargs sudo ls'
+  $'sh -c \'sudo ls\''
+  'if sudo ls; then :; fi'
+  '{ sudo ls; }'
+  '! sudo ls'
+  '2>/dev/null sudo ls'
+  # force push
+  '</dev/null git push --force'
+  'git push --force'
+  'git push origin --force'
+  'git push -f'
+  'git push origin -uf main'
+  'git push --force-with-lease'
+  'git push origin +main'
+  'git -C dir push --force'
+  'git push "--force" origin main'
+  'bash -lc "git push --force"'
+  # hard reset
+  'git reset --hard'
+  'git -C dir reset --hard HEAD~1'
+  'git reset -q --hard'
+  'eval "git reset --hard"'
+  'echo "$(git reset --hard)"'
+  'echo "`git reset --hard`"'
+  'echo "git reset --hard" | sh'
+  $'sh <<\'EOF\'\ngit push --force\nEOF'
+  # command substitution in a commit message
+  'git commit -m "$(id)"'
+  'git commit -m "`id`"'
+  'git commit -am "$(id)"'
+  'git commit -m"$(id)"'
+  'git commit --message "$(id)"'
+  'git commit --message="$(id)"'
+  $'git commit -m \'x\' -m "$(id)"'
+  'rm -rf x && git commit -m "$(id)"'
+  $'git commit -m "$(cat <<\'EOF\'; id\nfeat: x\nEOF\n)"'
+  $'git commit -F - <<EOF\nfeat: x\n\n$(id)\nEOF'
+  # --no-verify and core.hooksPath
+  'git commit --no-verify -m x'
+  'git commit -n -m x'
+  'git commit -nm x'
+  'git push --no-verify'
+  'git merge --no-verify x'
+  'git -c core.hooksPath=/dev/null commit -m x'
+  'git -c Core.HooksPath=/dev/null commit -m x'
+)
+check_modes B deny absent bypassPermissions -- "${ac2[@]}"
+
+# ── C. AC3: none ────────────────────────────────────────────────────────
+ac3=(
+  $'echo \'never use sudo here\''
+  'visudo -c'
+  'man sudo'
+  'git push origin main'
+  'git push -u origin main'
+  'git reset --soft HEAD~1'
+  $'git commit -m \'remove -n flag\''
+  $'git commit -m \'drop --force and git reset --hard from docs\''
+  'git commit -mn'
+  'git commit -uno -m x'
+  $'git commit -m \'fix: x\' && grep -n foo file'
+  'git commit -F msg.txt; sed -n 1,5p file'
+  # The recommended commit form: the quoted delimiter expands nothing, so
+  # the backticks, $(...), quotes and parentheses in the body are text.
+  $'git commit -m "$(cat <<\'EOF\'\nfeat: add a thing\n\nBody with `backticks`, $(dollar parens), don\'t, "quotes" and ) parens.\nEOF\n)"'
+  $'git commit -F - <<\'EOF\'\ndocs: never git push --force\n$(id) stays as text\nEOF'
+  $'cat > notes.md <<EOF\n- never run git push --force\nEOF'
+  'git log --no-verify-signatures'
+  $'printf \'a\\ngit push --force\''
+  'ls .git/ 2>&1'
+  'echo x > .env'
+  'rm -rf build/'
+  'gh pr create --title t'
+)
+check_modes C none absent bypassPermissions -- "${ac3[@]}"
+collect_corpus=no
+
+# ── D. Edge cases ───────────────────────────────────────────────────────
+edge_deny=(
+  # Quoted and escaped flags and names.
+  'git reset "--hard"'
+  'git commit "-n" -m x'
+  $'git push origin \'+main\''
+  'git push --for""ce'
+  'g""it push --force'
+  '\git push --force'
+  '\sudo ls'
+  $'git push $\'--force\''
+  # A backslash outside quotes escapes one character; a quote it escapes
+  # opens nothing.
+  $'echo it\\\'s; sudo ls'
+  'echo "a \" b"; sudo ls'
+  # Line continuations and multi-line commands.
+  $'echo x && \\\n sudo ls'
+  $'git push \\\n  --force'
+  $'git add .\ngit push --force'
+  # Nested substitutions, ${...}, process substitution, backticks in
+  # backticks.
+  'echo $(echo $(git reset --hard))'
+  'x=$(sudo ls)'
+  'echo "${x:-$(sudo ls)}"'
+  'diff <(sudo cat a) b'
+  'echo `echo \`sudo ls\``'
+  # git global options before the subcommand.
+  'git -c user.name=x push -f'
+  'git --git-dir=.git --work-tree=. reset --hard'
+  'git -C dir -c a=b --no-pager push --force'
+  'git -c core.hookspath=x status'
+  'git -c core.hooksPath status'
+  'git --config-env=core.hooksPath=HOOKS commit -m x'
+  'GIT_DIR=x git push --force'
+  'git push --force-with-lease=main:abc'
+  # Short-flag clusters.
+  'git push -uf origin main'
+  'git commit -anm x'
+  'git commit -vn -m x'
+  'git commit -m x -n'
+  'git rebase --no-verify main'
+  'git am --no-verify x.patch'
+  # Heredocs fed to a shell (body read as commands) and to git commit -F -
+  # with an unquoted delimiter.
+  $'sh <<EOF\ngit push --force\nEOF'
+  $'sh <<-EOF\n\tgit push --force\n\tEOF'
+  $'sh <<"EOF"\ngit push --force\nEOF'
+  $'bash -s <<\\EOF\ngit push --force\nEOF'
+  $'git commit -F - <<-EOF\n\t$(id)\n\tEOF'
+  $'git commit --file=- <<EOF\n`id`\nEOF'
+  # Only the exact recommended form passes; these do not.
+  $'git commit -m "$(cat <<EOF\nmsg\nEOF\n)"'
+  $'git commit -m "$(cat <<-\'EOF\'\nmsg\nEOF\n)"'
+  $'git commit -m "$(cat <<\'EOF\'\nmsg\nEOF\n)"x'
+  $'git commit -m "$(cat <<\'EOF\'\nmsg\nEOF\n)" && sudo ls'
+  # An unquoted heredoc body expands $(...) and backticks.
+  $'cat <<EOF > file\n$(sudo ls)\nEOF'
+  $'cat <<EOF > file\n`sudo ls`\nEOF'
+  # Shells: -c strings, here-strings, pipes, heredocs through a pipe.
+  $'bash -c \'git push --force\''
+  $'sh -lc \'sudo ls\''
+  $'bash <<< \'sudo ls\''
+  $'echo \'sudo ls\' | bash -s'
+  $'cat <<EOF | sh\nsudo ls\nEOF'
+  $'cat <<\'EOF\' |\nsudo ls\nEOF\nsh'
+  $'env -S \'sudo ls\''
+  # Wrappers.
+  'time sudo ls'
+  'timeout 5 sudo ls'
+  'timeout -s KILL 5s sudo ls'
+  'nice -n 5 sudo ls'
+  'nice --adjustment 5 sudo ls'
+  'stdbuf -oL sudo ls'
+  'exec sudo ls'
+  'command sudo ls'
+  'env -i PATH=/bin sudo ls'
+  'env -u HOME sudo ls'
+  'xargs -I{} sudo ls {}'
+  'xargs -n 1 sudo ls'
+  # Reserved words, separators, functions, subshells, comments.
+  'sudo'
+  'if true; then git reset --hard; fi'
+  'while true; do git push -f; done'
+  'true || sudo ls'
+  'true & sudo ls'
+  'true |& sudo ls'
+  'case "$x" in a) sudo ls;; esac'
+  'f() { sudo ls; }'
+  'function f { sudo ls; }'
+  '(sudo ls)'
+  'echo x | (git push --force)'
+  $'echo hi # a comment with it\'s apostrophe\nsudo ls'
+  # Re-reading depth: 4 levels are read.
+  'eval eval eval eval sudo ls'
+  'echo $(echo $(echo $(echo $(sudo ls))))'
+)
+check_modes D deny absent -- "${edge_deny[@]}"
+
+edge_none=(
+  'echo \"git reset --hard\"'
+  $'git commit -m don\\\'t\\ use\\ -n'
+  'git commit -amn'
+  'git commit -uno'
+  'git commit -m -n'
+  'git commit --author "-n x" -m y'
+  'git commit -- -n'
+  'git commit -m "fix: handle \$(id) literal"'
+  $'git commit -m \'feat: add -n option\''
+  'git commit -q -s -m x'
+  'git push origin :old-branch'
+  'git stash push -m "msg"'
+  'git -C dir status --force'
+  'git log --grep=--force'
+  'echo git push --force'
+  $'grep -n \'git reset --hard\' file'
+  'command -v sudo'
+  'type sudo'
+  'echo sudo'
+  'bash script.sh'
+  'sh -n script.sh'
+  $'echo \'sudo ls\' | bash script.sh'
+  # Heredoc bodies are data: the five delimiter forms.
+  $'cat > notes.md <<-EOF\n\tgit push --force\n\tEOF'
+  $'cat > notes.md <<\'EOF\'\ngit push --force\nEOF'
+  $'cat > notes.md <<"EOF"\ngit push --force\nEOF'
+  $'cat > notes.md <<\\EOF\ngit push --force\nEOF'
+  $'cat <<\'EOF\' > file\n$(sudo ls)\nEOF'
+  $'cat <<EOF > file\n\\$(sudo ls)\nEOF'
+  # git commit -F - with a quoted delimiter expands nothing.
+  $'git commit -F - <<"EOF"\n$(id)\nEOF'
+  $'git commit -F - <<\\EOF\n$(id)\nEOF'
+  # The recommended form with each quoted delimiter and each message flag.
+  $'git commit -m "$(cat <<"EOF"\nmsg\nEOF\n)"'
+  $'git commit -m "$(cat <<\\EOF\nmsg\nEOF\n)"'
+  $'git commit -m "$(cat <<\'EOF\'\nmsg\nEOF\n)" && echo done'
+  $'git commit --message "$(cat <<\'EOF\'\nmsg\nEOF\n)"'
+  $'git commit -m"$(cat <<\'EOF\'\nmsg\nEOF\n)"'
+  $'git commit -am "$(cat <<\'EOF\'\nmsg\nEOF\n)"'
+  # Single-quoted text is never run.
+  $'echo \'${x:-$(sudo ls)}\''
+  $'echo $\'it\\\'s sudo ls\''
+  'echo hi # sudo ls'
+  'echo $((1+2))'
+  'for f in *.md; do echo "$f"; done'
+  'case "$x" in a) echo a;; esac'
+  # bash reads a heredoc body right after the newline that ends its line,
+  # so here sh is a body line and the pipeline has no last command.
+  $'cat <<\'EOF\' |\nsh\nsudo ls\nEOF'
+  # Past the depth cap of 4 levels the text is not read again.
+  'eval eval eval eval eval sudo ls'
+  'echo $(echo $(echo $(echo $(echo $(sudo ls)))))'
+)
+check_modes D none absent -- "${edge_none[@]}"
+
+# A JSON escape in the payload: %u0073 decodes to s on both paths, so the
+# command is sudo ls. (%u stands for backslash-u: editing tools decode a
+# literal backslash-u escape of a printable character in transit.)
+check_raw() {
+  local label="$1" expect="$2" escaped
+  escaped="$(printf '%s' "$3" | sed 's/%u/\\u/g')"
+  if [ "$have_jq" = yes ]; then
+    enqueue "$label [jq]" "$expect" "$HOOK" "$real_path" "$(payload_json "$escaped")"
+  else
+    record_skip "$label [jq] (jq not on PATH)"
+  fi
+  enqueue "$label [no-jq]" "$expect" "$HOOK" "$minimal_path" "$(payload_json "$escaped")"
+}
+check_raw "D JSON escape: %u0073udo ls -> deny" deny '%u0073udo ls'
+check_raw "D JSON escape: git push %u002d-force -> deny" deny 'git push %u002d-force'
+check_raw "D JSON escape: git commit -m with %u3042 (kept as written) -> none" none "git commit -m '%u3042'"
+
+# ── E. Broken input: exit 0, none or deny ───────────────────────────────
+broken=(
+  $'echo \'unclosed'
+  'echo "unclosed'
+  'echo $(unclosed'
+  'echo `unclosed'
+  'echo ${unclosed'
+  $'echo $\'unclosed'
+  $'cat <<EOF\nno end line'
+  'cat <<EOF'
+  'cat <<'
+  ')))'
+  '((('
+  'echo >'
+  '<<<'
+  '| | | && || ;; ;& & &'
+  'echo \'
+  'git commit -m'
+  'git -c'
+  'sh -c'
+  'eval'
+  'xargs -I'
+  'timeout'
+  'env -u'
+  '$((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((('
+  '${${${${${${${${${${${${${${${${${${${${${${${${${${${${${${${${${${${${${${${${${${${${${${${${${${${${${${${${${'
+  $'"""""""""""\'\'\'\'\'\'\'\'\'\'`````````'
+)
+check_modes E any absent -- "${broken[@]}"
+# Broken input that still names a denied command.
+check E deny $'sudo ls \''
+check E deny 'git commit -m "$(id'
+
+# ── F. AC7: the old guard's denies, kept or listed ──────────────────────
+# The cases of C that the old guard denies and the new one lets through:
+# dangerous text that is not run (single quotes, an argument, a heredoc body
+# read as data, the quoted-delimiter heredoc of the recommended commit
+# form).
+intentional_fixes=(
+  $'echo \'never use sudo here\''
+  'visudo -c'
+  $'git commit -m \'drop --force and git reset --hard from docs\''
+  $'git commit -m "$(cat <<\'EOF\'\nfeat: add a thing\n\nBody with `backticks`, $(dollar parens), don\'t, "quotes" and ) parens.\nEOF\n)"'
+  $'git commit -F - <<\'EOF\'\ndocs: never git push --force\n$(id) stays as text\nEOF'
+  $'cat > notes.md <<EOF\n- never run git push --force\nEOF'
+  $'printf \'a\\ngit push --force\''
+)
+# The new guard's decisions are those of the corpus runs in A, B and C;
+# the old guard runs the same payloads (no permission_mode) here.
+ac7_paths=(no-jq)
+if [ "$have_jq" = yes ]; then
+  ac7_paths=(jq no-jq)
+else
+  record_skip "F. AC7 comparison on the jq path (jq not on PATH)"
+fi
+corpus_old_jq=()
+corpus_old_nojq=()
+for ((k = 0; k < ${#corpus[@]}; k++)); do
+  escaped="$(json_escape "${corpus[$k]}")"
+  for p in "${ac7_paths[@]}"; do
+    if [ "$p" = jq ]; then
+      enqueue "F. AC7 old [jq]: $escaped" - "$OLD_HOOK" "$real_path" "$(payload_json "$escaped")"
+      corpus_old_jq[k]=$last_q
+    else
+      enqueue "F. AC7 old [no-jq]: $escaped" - "$OLD_HOOK" "$minimal_path" "$(payload_json "$escaped")"
+      corpus_old_nojq[k]=$last_q
+    fi
+  done
 done
 
-# ── G. permission_mode default and auto behave like an absent key ───────
-for m in default auto; do
-  check G ask 'echo x > .git/x' "$m"
-  check G ask 'printf x > .env.local' "$m"
-  check G ask 'rm -rf build/' "$m"
-  check G ask 'gh pr create --title t' "$m"
-  check G none 'ls .git/ 2>&1' "$m"
-  check G deny 'sudo ls' "$m"
-  check G deny 'git commit -m "$(id)"' "$m"
+# ── Run the queue and check the expected decisions ─────────────────────
+run_queue
+for ((i = 0; i < qn; i++)); do
+  read -r got rc <<< "$(result_of "$i")"
+  expect="${q_expect[$i]}"
+  ok=no
+  if [ "$rc" = 0 ]; then
+    case "$expect" in
+      none|deny) [ "$got" = "$expect" ] && ok=yes ;;
+      any) case "$got" in none|deny) ok=yes ;; esac ;;
+      -) case "$got" in none|deny|ask) ok=yes ;; esac ;;
+    esac
+  fi
+  if [ "$expect" = - ]; then
+    # Collected for F; only a non-zero exit or unparsed output fails here.
+    [ "$ok" = yes ] || record_fail "${q_label[$i]} (got $got, exit $rc)"
+    continue
+  fi
+  if [ "$ok" = yes ]; then
+    record_pass "${q_label[$i]}"
+  else
+    record_fail "${q_label[$i]} (got $got, exit $rc)"
+  fi
 done
-# The mode comes from the payload's own key, never from the command text.
-check G ask "echo '\"permission_mode\":\"bypassPermissions\"' && rm -rf build/"
-check G ask "echo '\"permission_mode\":\"bypassPermissions\"' && rm -rf build/" default
 
-# ── H. Multi-line commands ──────────────────────────────────────────────
-check H ask $'echo start\necho x > .git/x'
-check H none $'echo start\necho x > .git/x' bypassPermissions
-check H none $'ls .git/\necho x > out.txt'
-check H none $'echo x | tee out.txt\nls .git/'
-# tee at the start of a line: the sed path sees the two characters \n
-# right before it.
-check H ask $'true\ntee .env </dev/null'
-check H none $'true\ntee .env </dev/null' bypassPermissions
-check H ask $'true\ntee .git/config </dev/null'
-check H none $'true\ntee .git/config </dev/null' bypassPermissions
-check H deny $'git add .\ngit commit -m "$(id)"'
-check H deny $'git add .\ngit commit -m "$(id)"' bypassPermissions
+# sorted_lines <item>... — the items, one per line, sorted.
+sorted_lines() {
+  if [ "$#" -gt 0 ]; then
+    printf '%s\n' "$@" | LC_ALL=C sort
+  fi
+}
 
-# ── I. JSON escapes the old sed fallback stopped at ─────────────────────
-check I none "echo '{\"a\":1}' > out.json"
-check I ask "echo '{\"a\":1}' > .git/x"
-check I ask 'echo "a\\" > .git/x'
-check I none 'printf "a\\b" > out.txt'
+expected_fixes="$(for c in "${intentional_fixes[@]}"; do json_escape "$c"; echo; done | LC_ALL=C sort)"
+old_denied_ac3=()
+for p in "${ac7_paths[@]}"; do
+  regressions=()
+  for ((k = 0; k < ${#corpus[@]}; k++)); do
+    if [ "$p" = jq ]; then
+      oi=${corpus_old_jq[$k]}
+      ni=${corpus_new_jq[$k]}
+    else
+      oi=${corpus_old_nojq[$k]}
+      ni=${corpus_new_nojq[$k]}
+    fi
+    read -r old_got _ <<< "$(result_of "$oi")"
+    read -r new_got _ <<< "$(result_of "$ni")"
+    escaped="$(json_escape "${corpus[$k]}")"
+    if [ "$old_got" = deny ] && [ "$new_got" = none ]; then
+      regressions+=("$escaped")
+    fi
+    if [ "$old_got" = deny ] && [ "${corpus_section[$k]}" = C ]; then
+      old_denied_ac3+=("$escaped")
+    fi
+  done
+  got_fixes="$(sorted_lines "${regressions[@]+"${regressions[@]}"}")"
+  if [ "$got_fixes" = "$expected_fixes" ]; then
+    record_pass "F. AC7 [$p]: every old deny that is none now is one of the ${#intentional_fixes[@]} intentional fixes"
+  else
+    record_fail "F. AC7 [$p]: old deny -> new none differs from intentional_fixes; got: $(printf '%s' "$got_fixes" | tr '\n' '|')"
+  fi
+done
+got_old_ac3="$(sorted_lines "${old_denied_ac3[@]+"${old_denied_ac3[@]}"}" | uniq)"
+if [ "$got_old_ac3" = "$expected_fixes" ]; then
+  record_pass "F. AC7: intentional_fixes equals the C (AC3) cases the old guard denies"
+else
+  record_fail "F. AC7: the C cases the old guard denies differ from intentional_fixes; got: $(printf '%s' "$got_old_ac3" | tr '\n' '|')"
+fi
 
-# ── J. lib_json.sh sourced directly ─────────────────────────────────────
+# ── G. AC8: a ~200 KB command ───────────────────────────────────────────
+# A 200,000-character single-quoted string, then a commit message with a
+# command substitution (the payload of the 28 s measurement of the old
+# guard), and 200 KB of short commands with a force push at the end. The
+# JSON is written directly (no character in the commands needs escaping
+# but the quotes around $(id)) and fed on stdin.
+repeat_text() {
+  local s="$1" n="$2" out=""
+  while [ "$n" -gt 0 ]; do
+    if [ $((n % 2)) -eq 1 ]; then out+="$s"; fi
+    s+="$s"
+    n=$((n / 2))
+  done
+  printf '%s' "$out"
+}
+long_cases=(
+  "echo '$(repeat_text x 200000)' && git commit -m \\\"\$(id)\\\""
+  "$(repeat_text 'echo a b c d; ' 13400)git push --force"
+)
+long_names=("a 200,000-character single-quoted string" "13,400 short commands")
+for ((k = 0; k < ${#long_cases[@]}; k++)); do
+  payload_json "${long_cases[$k]}" > "$workdir/long.json"
+  TIMEFORMAT=%R
+  { time out="$(PATH="$minimal_path" "$HOOK" < "$workdir/long.json" 2>/dev/null)"; } 2> "$workdir/long.time"
+  rc=$?
+  secs="$(command cat "$workdir/long.time")"
+  bytes="$(wc -c < "$workdir/long.json" | tr -d ' ')"
+  case "$out" in *'"permissionDecision":"deny"'*) got=deny ;; '') got=none ;; *) got=unparsed ;; esac
+  if [ "$rc" -eq 0 ] && [ "$got" = deny ] && awk -v s="$secs" 'BEGIN { exit !(s + 0 < 10) }'; then
+    record_pass "G. AC8 [no-jq]: ${long_names[$k]} (${bytes}-byte payload) -> deny in ${secs} s (limit 10 s)"
+  else
+    record_fail "G. AC8 [no-jq]: ${long_names[$k]} (${bytes}-byte payload): got $got, exit $rc, ${secs} s (limit 10 s)"
+  fi
+done
+
+# ── H. lib_json.sh sourced directly ─────────────────────────────────────
 # lib_case <label> <use_path> <payload> <field> <expected>
 lib_case() {
   local label="$1" use_path="$2" payload="$3" field="$4" expect="$5"
@@ -346,10 +807,10 @@ lib_both() {
   lib_case "$label [no-jq]" "$minimal_path" "$payload" "$field" "$expect"
 }
 
-lib_both "J. lib_json.sh: tool_input.file_path" \
+lib_both "H. lib_json.sh: tool_input.file_path" \
   '{"session_id":"s","tool_name":"Write","tool_input":{"file_path":"/repo/docs/a b.md","content":"x"},"tool_response":{"filePath":"/repo/docs/a b.md"}}' \
   "tool_input.file_path" "/repo/docs/a b.md"
-lib_both "J. lib_json.sh: tool_input.file_path with an escaped quote and backslash" \
+lib_both "H. lib_json.sh: tool_input.file_path with an escaped quote and backslash" \
   '{"tool_input":{"file_path":"/repo/we\"ird\\name.md","content":"say \"hi\""}}' \
   "tool_input.file_path" '/repo/we"ird\name.md'
 
@@ -357,6 +818,11 @@ echo ""
 echo "=== test-pre-bash-guard.sh results ==="
 for line in "${results[@]}"; do
   echo "  $line"
+done
+echo ""
+echo "  AC7 intentional false-positive fixes (old guard deny -> none):"
+for c in "${intentional_fixes[@]}"; do
+  echo "    $(json_escape "$c")"
 done
 echo ""
 echo "  PASS: $pass"
