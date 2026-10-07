@@ -36,7 +36,10 @@
    workspace にあるので、このセッションはそこで終わる。ralph は台帳への記録と
    出力をすべて済ませてから閉じる。disband が終了コード 1 で返ったときは
    セッションは終わっていないので、stderr に並んだ座席と workspace を見て
-   打ち直す(herdr が応答しないままなら人に上げる)
+   打ち直す(herdr が応答しないままなら人に上げる)。ただし stderr に
+   `herdr pane close` か `herdr workspace close` のコマンドが添えられている
+   ときは(台帳を読めない、または戻せなかった場合)、打ち直しても閉じる対象が
+   見つからないので、打ち直さず、そのコマンドを添えて人に上げる
 
 動詞の詳しい使い方・編成パターン(Solo / Leaded / Parallel)・permission 作法は
 `/org` skill(`.claude/skills/org/SKILL.md`)を全体マニュアルとして参照して

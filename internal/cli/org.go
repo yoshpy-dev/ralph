@@ -1028,10 +1028,10 @@ func newOrgDisbandCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"When the command runs inside a pane or workspace it closes\n" +
 			"(HERDR_PANE_ID / HERDR_WORKSPACE_ID), that one is closed last, after all\n" +
 			"output, which ends the command. If that last close fails, the command\n" +
-			"records the seat in the pane active and the workspace open again and\n" +
-			"exits 1, so running it again (or disband --all from another pane) retries\n" +
-			"the close; with --force the records stay closed and the failure is only\n" +
-			"a warning.",
+			"records the pane's seat active again and, when it was closing the\n" +
+			"workspace, the workspace open again, and exits 1, so running it again\n" +
+			"(or disband --all from another pane) retries the close; with --force the\n" +
+			"records stay closed and the failure is only a warning.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if all {
 				if err := rejectFlagsWithAll(cmd, "disband", "org-id"); err != nil {
