@@ -201,7 +201,8 @@ reads=(
   # tee's argument scan stops at #: the .env is in a comment.
   'tee /tmp/build.log # .env is read separately'
   # tee's argument scan stops at a backtick: tee writes only /tmp/a inside
-  # the command substitution; .env is an argument of x=..., not of tee.
+  # the command substitution; the .env after it is the command that the
+  # assignment prefixes, not an argument of tee.
   'x=`tee /tmp/a` .env'
 )
 for c in "${reads[@]}"; do
@@ -237,6 +238,12 @@ writes=(
   'x=`tee .git/x`'
   'x=`tee .env`'
   'x=`printf x > .env`'
+  # A backtick may sit inside a target word: `pwd`/.git/x is a write into
+  # .git (self-review C3-L1).
+  'echo x > `pwd`/.git/x'
+  'echo x > `pwd`/.git/x 2>/dev/null'
+  'echo x > `pwd`/.env 2>/dev/null'
+  'tee `pwd`/.git/x > /dev/null'
   # tee still writes the arguments that follow an output redirection.
   'tee out.txt 2>/dev/null .env'
   'tee out.txt 2>/dev/null .env > /dev/null'

@@ -42,10 +42,10 @@ emit_decision() {
 # A tab is likewise the two characters \t on the fallback, so a tab between
 # a redirection or tee and its target is not seen there (the jq path sees it).
 q="'"
-# One character of a target word. A backtick is not one: a closing backtick
-# ends the word, as in x=`tee .git`. So a target built from command
-# substitution, `pwd`/.git/x (like $(pwd)/.git/x), is not seen.
-word_char="[^[:space:]\"${q};&|()<>\`\\\\]"
+# One character of a target word. A backtick may appear inside the word, so
+# a target built with command substitution, `pwd`/.git/x, is seen ($(pwd)
+# is not: the ( and ) end the word).
+word_char="[^[:space:]\"${q};&|()<>\\\\]"
 # What may follow a target: whitespace, a quote, a shell operator, a
 # backtick (the end of `...`), a backslash, or the end of the line.
 word_end="([[:space:]\"${q};&|)<>\`\\\\]|\$)"
