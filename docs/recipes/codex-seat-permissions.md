@@ -107,11 +107,15 @@ outside any repository, so that no project's `.codex/config.toml` or
 p="$HOME/codex-add-dir-probe"
 mkdir -p "$p/cwd" "$p/target" && cd "$p/cwd"
 ask="Run this command once. If it fails, do not retry or work around it; report the exit status and the error text: touch $p/target/probe"
-codex exec --skip-git-repo-check --sandbox workspace-write "$ask"
+command codex exec --skip-git-repo-check --sandbox workspace-write "$ask" </dev/null
 ls "$p/target"   # expected: empty
-codex exec --skip-git-repo-check --sandbox workspace-write --add-dir "$p/target" "$ask"
+command codex exec --skip-git-repo-check --sandbox workspace-write --add-dir "$p/target" "$ask" </dev/null
 ls "$p/target"   # expected: probe
 ```
+
+`</dev/null` keeps `codex exec` from waiting for more input on stdin, and
+`command` skips a shell alias that adds its own flags. Both runs exit 0 even
+when `touch` fails, so judge by whether `probe` exists, not by the exit code.
 
 If the first run already creates `probe`, a writable root in your
 `~/.codex/config.toml` covers the target; move the probe directory out of
