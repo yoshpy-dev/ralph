@@ -41,7 +41,10 @@ Leader(座席の編成・統括を行う識別子)がその機構をどう操作
   運用する場合のみ `--state-dir` を明示的に揃えること。既知の制約が 1 つあり、
   `git init --separate-git-dir` で git dir を `.git` という名前にした
   リポジトリの linked worktree では、台帳が git dir の親の下にできる(git が
-  その場所を main worktree として報告するため)。
+  その場所を main worktree として報告するため)。git が 2.31 より古く
+  `--path-format=absolute` を解釈できない環境では main worktree を取れず、
+  show-toplevel に落ちる。その場合は変更前と同じく worktree ごとに台帳が
+  分かれ、古い台帳の注意も拒否も出ない。
 - **linked worktree に残った古い台帳**: 以前の ralph は linked worktree の
   中では、その worktree のルートに台帳を作っていた。
   `<worktree>/.harness/state/org/manifest.jsonl` が残っている worktree から

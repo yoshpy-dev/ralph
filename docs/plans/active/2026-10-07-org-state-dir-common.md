@@ -74,15 +74,15 @@ Critical forks: None
 
 ## Acceptance criteria
 
-- [ ] AC1: flag も env もない状態で、通常のリポジトリの main のチェックアウトのルートとサブディレクトリから `ResolveOrgStateDir("", false)` を呼ぶと、`<main のルート>/.harness/state/org` と source `git-main-worktree` が返る
-- [ ] AC2: 同じリポジトリの linked worktree のルートとサブディレクトリから呼ぶと、AC1 と同じパス(worktree のパスではない)と source `git-main-worktree` が返る
-- [ ] AC3: bare リポジトリ(名前が `.git` のものを含む)の linked worktree から呼ぶと、今と同じく show-toplevel 起点のパスと source `git-toplevel` が返る。`git init --separate-git-dir <別の場所>/.git <作業ツリー>` で作ったリポジトリでは、作業ツリーの下のパスと source `git-main-worktree` が返る(別の場所の親ではない)
-- [ ] AC4: flag と env の優先順は変わらない(既存の `TestResolveOrgStateDir_*` がそのまま通る)。git の外では source `cwd` が返る
-- [ ] AC5: linked worktree の中の古い台帳に動いている座席があるとき、`ralph org spawn` / `start` / `send` / `stop` / `disband` / `watch` は終了コード 1 で止まり、メッセージに古い台帳のパス・新しい台帳のパス・`--state-dir` が出る。台帳と herdr には何もしない。`--state-dir` か `RALPH_ORG_STATE_DIR` で置き場所を選ぶと止まらない
+- [x] AC1: flag も env もない状態で、通常のリポジトリの main のチェックアウトのルートとサブディレクトリから `ResolveOrgStateDir("", false)` を呼ぶと、`<main のルート>/.harness/state/org` と source `git-main-worktree` が返る
+- [x] AC2: 同じリポジトリの linked worktree のルートとサブディレクトリから呼ぶと、AC1 と同じパス(worktree のパスではない)と source `git-main-worktree` が返る
+- [x] AC3: bare リポジトリ(名前が `.git` のものを含む)の linked worktree から呼ぶと、今と同じく show-toplevel 起点のパスと source `git-toplevel` が返る。`git init --separate-git-dir <別の場所>/.git <作業ツリー>` で作ったリポジトリでは、作業ツリーの下のパスと source `git-main-worktree` が返る(別の場所の親ではない)
+- [x] AC4: flag と env の優先順は変わらない(既存の `TestResolveOrgStateDir_*` がそのまま通る)。git の外では source `cwd` が返る
+- [x] AC5: linked worktree の中の古い台帳に動いている座席があるとき、`ralph org spawn` / `start` / `send` / `stop` / `disband` / `watch` は終了コード 1 で止まり、メッセージに古い台帳のパス・新しい台帳のパス・`--state-dir` が出る。台帳と herdr には何もしない。`--state-dir` か `RALPH_ORG_STATE_DIR` で置き場所を選ぶと止まらない
 - [ ] AC6: 古い台帳に動いている座席がないとき、または読むだけの動詞(`ralph status`、`ralph org status` / `read` / `wait` / `report`、`ralph insights`)では、stderr に古い台帳のパスと `--state-dir` の使い方を含む注意を 1 回出して続ける。`--json` の stdout は変わらない。古い台帳がないとき、main のチェックアウトにいるとき、flag か env で置き場所を決めたときは出さない
-- [ ] AC7: linked worktree から打った `ralph status --json` の `state_dir` が main 側の `.harness/state/org` を指す(CLI レベルのテスト)
-- [ ] AC8: 役割が leader で、permission mode が edits か autonomous の codex 座席で、台帳のディレクトリが座席の cwd の下にないとき、起動の引数に `--add-dir <台帳のディレクトリ>` が入る。implementer と reviewer の座席、cwd の下にあるとき、guarded のとき、claude の座席では入らない(引数を組み立てる部分の単体テスト)
-- [ ] AC9: `--state-dir` のヘルプ文 2 か所、`/org` skill の「前提」節(4 面)、`docs/recipes/codex-seat-permissions.md`(2 面)が新しい解決順と `--add-dir` を書いている。`./scripts/check-skill-sync.sh` と `./scripts/check-sync.sh` が通る
+- [x] AC7: linked worktree から打った `ralph status --json` の `state_dir` が main 側の `.harness/state/org` を指す(CLI レベルのテスト)
+- [x] AC8: 役割が leader で、permission mode が edits か autonomous の codex 座席で、台帳のディレクトリが座席の cwd の下にないとき、起動の引数に `--add-dir <台帳のディレクトリ>` が入る。implementer と reviewer の座席、cwd の下にあるとき、guarded のとき、claude の座席では入らない(引数を組み立てる部分の単体テスト)
+- [x] AC9: `--state-dir` のヘルプ文 2 か所、`/org` skill の「前提」節(4 面)、`docs/recipes/codex-seat-permissions.md`(2 面)が新しい解決順と `--add-dir` を書いている。`./scripts/check-skill-sync.sh` と `./scripts/check-sync.sh` が通る
 
 ## Implementation outline
 
@@ -130,9 +130,9 @@ Critical forks: None
 - [x] Plan approved
 - [x] Branch created
 - [x] Implementation started
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Review artifact created
+- [x] Verification artifact created
+- [x] Test artifact created
 - [ ] PR created
 - 2026-10-07: Codex plan advisory の 3 件(sandbox の書き込み、動いている座席がある状態の切り替えと戻し、`.git` の名前だけで main と決める誤り)は、ユーザーが「計画を直す」を選び、Scope・AC・Design decisions・Rollout に反映した
 - 2026-10-07: S1 を c8dc2e8e でコミットした(implementer)。実装中に `--separate-git-dir` のリポジトリでは `git worktree list` の先頭が git dir の親になるとわかり、main の中は show-toplevel を使う形に変えた。計画の Scope・Assumptions・Non-goals・Design decisions と図 2・図 3 を直し、ユーザーが承認し直した(digest d8a7f8ae89c1)
@@ -140,3 +140,5 @@ Critical forks: None
 - 2026-10-07: S3 を 53aa1877 でコミットした(implementer)。`--add-dir` が sandbox の中で効くことは、codex-cli 0.160.0(macOS)で実機確認した。cwd と書き込み先をどちらも `/tmp` と repo の外に置き、`--add-dir` なしでは `touch` が `Operation not permitted` で失敗し、ありでは成功した
 - 2026-10-07: S4 を bde89dc0 でコミットした(implementer)。`/org` skill の「前提」節と「既定の model_pool」節の解決順、古い台帳の箇条、permission 作法の codex 箇条、recipe の `--add-dir` の節を直した。recipe の再確認の手順に `</dev/null` と `command` を足す修正は orchestrator がこのあと行った。`docs/tech-debt/README.md` の現役の行(State dir の順)は /sync-docs で扱う
 - 2026-10-07: self-review(477cbf6b)は Merge 可、MEDIUM 1・LOW 5。M-1(`--add-dir` が全役割の codex 座席に付く)はユーザーが「leader だけ」を選び、Scope・AC8・図 1 を直して承認し直した(digest 79224e28032a)。L-1〜L-4 と一緒に直し、self-review から回し直す。L-5(tech-debt の行)は /sync-docs で扱う
+- 2026-10-07: self-review の 2 回目(Merge 可)、verify(pass、LOW 3 件 V-1〜V-3)、test(pass、mutation 32 件中 30 件が red)を終えた。AC1〜AC9 のうち AC6 だけチェックを付けていない。main のチェックアウトで台帳のディレクトリが読めないとき、注意が「linked worktree の古い台帳」として出る(V-1)ため。止める・続けるの挙動は正しく、メッセージが原因を取り違えるだけで、tech-debt に記録した
+- 2026-10-07: /sync-docs で次を直した。tech-debt の State dir の行(L-5、D-1)を新しい順に更新して open のまま残し、V-1(と V-2)・テストの穴 2 件の行を足した。director spec の FR-1・Current state・`--add-dir` の記述を実装に合わせた(D-2)。`/org` skill の前提節に git 2.31 より古い環境の 1 文を足した(`--path-format=absolute` が使えず show-toplevel に落ち、変更前と同じ動作になる。test の Docker alpine:3.4 / git 2.8.6 の probe)。recipe の折り直し(V-3)、worktrees recipe と repo-map に共通の台帳の 1 文を足した

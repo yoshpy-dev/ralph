@@ -13,7 +13,7 @@ ralph には LLM を使わない制御層(共通の台帳、全 org の上限、
 ### Current state
 
 - org_id ごとに herdr の workspace と agmsg の team(`ralph-<org_id>`)が分かれている(`internal/org/spawn.go` の `resolveWorkspace`、`agmsgTeam`)。`ralph org` の動詞はすべて `--org-id` が必須で、全 org をまとめて見られるのは `ralph status --json` だけ(`internal/cli/status.go`)
-- org の台帳の既定の置き場所は `git rev-parse --show-toplevel` から決まり、linked worktree の中では worktree ごとに別の台帳ができる(`internal/org/statedir.go`)。これは 1 段目の PR で直している(計画は `2026-10-07-org-state-dir-common.md`、ブランチ `fix/org-state-dir-common`)
+- org の台帳の既定の置き場所は、1 段目の前は `git rev-parse --show-toplevel` から決まり、linked worktree の中では worktree ごとに別の台帳ができた(`internal/org/statedir.go`)。1 段目の PR で、main worktree のルートから決めるように変え、linked worktree からも main と同じ台帳を使う(計画は `2026-10-07-org-state-dir-common.md`、ブランチ `fix/org-state-dir-common`)
 - `ralph org spawn` は worktree を作らず、座席の作業場所は `--cwd` で渡すだけ。編成パターンの Parallel は、1 つの worktree・1 本のブランチ・1 本の PR を複数の implementer で使う
 - leader より上の宛先がない。leader の雛形(`internal/org/prompts/leader.md`)は「直せなければ人に上げる」と書くが、その経路は決まっていない。人に届くのは watchdog のデッドマン(`escalations.jsonl`、stderr、macOS の osascript)だけ
 - 上限は org ごとの `max_seats`(既定 5)だけで、全 org を合わせた上限はない
@@ -32,7 +32,7 @@ ralph には LLM を使わない制御層(共通の台帳、全 org の上限、
 
 段は導入の順を表す(「Rollout」を参照)。1 段を 1 本の PR にするのを目安にする。
 
-- [ ] **FR-1 共通の台帳(1 段目)**: flag と env がないとき、org の台帳の置き場所を main worktree(`git worktree list --porcelain` の先頭の、bare でない記録)から決める。linked worktree の中から打った動詞も、main と同じ台帳を使う。詳細は 1 段目の計画(`2026-10-07-org-state-dir-common.md`)に書いた
+- [ ] **FR-1 共通の台帳(1 段目)**: flag と env がないとき、org の台帳の置き場所を main worktree のルートから決める。ルートは、main worktree の中では `git rev-parse --show-toplevel`、linked worktree の中では `git worktree list --porcelain` の先頭の、bare でない記録とする。linked worktree の中から打った動詞も、main と同じ台帳を使う。詳細は 1 段目の計画(`2026-10-07-org-state-dir-common.md`)に書いた
 - [ ] **FR-2 横断の status と stop(2 段目)**: `ralph org stop --all` と `ralph org disband --all` を足す。`--org-id` なしで全 org の座席に効く。一部の座席を止められなかったときは、止められなかった座席を並べて終了コード 1 で終わる。`ralph status` は今のまま全 org を表示する
 - [ ] **FR-3 上限と担当範囲の予約(3 段目)**:
   - `[org].max_orgs`(既定 10)と `[org].max_total_seats`(既定 30)を、台帳の共通のロックの下で強制する。director は herdr の座席ではないので数えない
@@ -168,7 +168,7 @@ ralph には LLM を使わない制御層(共通の台帳、全 org の上限、
 - `Send` は宛先を `findSeat` で引き、pane のない座席には送れない(`internal/org/verbs.go`)。watchdog は同じ理由で `SendWatchdogAlert` を別に持つ(`internal/org/watch.go`)
 - 人への経路は `internal/org/watch.go` の `EscalateFunc`(既定は osascript)と `escalations.jsonl` で、差し替えられる
 - 座席の台帳は座席ごとに agmsg の team を 1 つだけ持つ(`internal/org/manifest.go`)。director を上位の agmsg team でつなぐと、この形を変えることになる
-- codex の座席は workspace-write の sandbox で動き、cwd の外には書けない(`internal/org/permissions.go`)。1 段目で `--add-dir` を足す
+- codex の座席は workspace-write の sandbox で動き、cwd の外には書けない(`internal/org/permissions.go`)。1 段目で、leader の座席にだけ `--add-dir` を足す
 
 ### Best practices
 
@@ -222,7 +222,7 @@ ralph には LLM を使わない制御層(共通の台帳、全 org の上限、
 ## Open questions
 
 - codex の director で、timeout 付きの wait を繰り返す pull が実機で使えるか
-- codex の座席の `--add-dir` が sandbox の中で効くか(1 段目で recipe に確かめ方を書く)
+- codex の座席の `--add-dir` が sandbox の中で効くか。`codex exec` の sandbox では codex-cli 0.160.0(macOS)で効くことを確かめた(`docs/evidence/codex-add-dir-2026-10-07.md`、確かめ方は `docs/recipes/codex-seat-permissions.md`)。herdr で起動した leader の座席で共通の台帳に書けるかは未確認
 - headless の director(herdr)に、外出先のスマホから話す経路。herdr の remote attach で足りるか、Orca などを使うか
 - 9 段目の試行の測り方(介入回数や介入時間を誰がどう記録するか)
 - 上限の既定(10 org・30 席)と期限の既定(10 分・60 分)は測った根拠がない。9 段目で見直す
