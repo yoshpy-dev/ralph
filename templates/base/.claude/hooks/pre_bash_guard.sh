@@ -55,7 +55,9 @@ redirect_lead=">[>|]?[[:space:]]*[\"${q}]?"
 # Before tee: the start of a line, whitespace, one of ; & | ( and /
 # (/usr/bin/tee), a backtick (tee inside `...`), a backslash (\tee, which skips an alias),
 # or the two characters \n or \t (a newline or tab on the sed fallback).
-# The earlier arguments contain no ; & | ) < # or backslash. The scan stops
+# The earlier arguments contain no ; & | ) < # backtick or backslash. A
+# backtick ends the scan so `x=`tee /tmp/a` .env` (tee inside `...`, .env
+# outside it) does not count, at the cost of `tee `cmd` .env`. The scan stops
 # at <, because the word after < is tee's input, read and not written: in
 # `tee /tmp/out < .env` the .env does not count (so an argument after the
 # input, as in `tee < in.txt .env`, is not seen either). It stops at #,
@@ -64,7 +66,7 @@ redirect_lead=">[>|]?[[:space:]]*[\"${q}]?"
 # `tee a#b .env`, is not seen either). It does not stop at >, because tee
 # still writes each file argument that follows an output redirection:
 # `tee out.txt 2>/dev/null .env` writes .env.
-tee_lead="(^|[[:space:];&|(/\`\\\\]|\\\\[nt])tee[[:space:]]([^;&|)<#\\\\]*[[:space:]\"${q}])?"
+tee_lead="(^|[[:space:];&|(/\`\\\\]|\\\\[nt])tee[[:space:]]([^;&|)<#\`\\\\]*[[:space:]\"${q}])?"
 # .git itself (a worktree's .git is a file) or a path under it, either as
 # the whole word or after a /. .github/ and .gitignore do not match.
 git_target="(${word_char}*/)?[.]git(/|${word_end})"

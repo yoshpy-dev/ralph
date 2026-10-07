@@ -200,6 +200,9 @@ reads=(
   'cat >/tmp/o</repo/.git/HEAD'
   # tee's argument scan stops at #: the .env is in a comment.
   'tee /tmp/build.log # .env is read separately'
+  # tee's argument scan stops at a backtick: tee writes only /tmp/a inside
+  # the command substitution; .env is an argument of x=..., not of tee.
+  'x=`tee /tmp/a` .env'
 )
 for c in "${reads[@]}"; do
   check C none "$c"
