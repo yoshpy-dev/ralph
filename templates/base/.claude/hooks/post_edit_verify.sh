@@ -32,9 +32,11 @@ session_cwd=""
 if [ -n "$file_path" ]; then
   edited_paths="$file_path"
 elif command -v jq >/dev/null 2>&1; then
-  # jq is required for this branch: the sed fallback in lib_json.sh reads
-  # escaped quotes but leaves \n as two characters, so a multi-line patch
-  # body comes back on one line and its file headers cannot be split out.
+  # jq is required for this branch: it reads the payload's top-level "cwd"
+  # and the multi-line patch body with jq directly, not through
+  # lib_json.sh. (lib_json.sh's jq-free path decodes \n into a real newline
+  # when awk is present; only with neither jq nor awk does it leave \n as
+  # two characters, which would join the patch body's lines into one.)
   # Without jq, an apply_patch payload falls through with no derived
   # paths -- the same no-op this hook already had for Codex edits before
   # apply_patch support was added (now observable: see the jq-missing

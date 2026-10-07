@@ -114,7 +114,9 @@ contract intact regardless of where the session starts.
 - `PreToolUse` matcher is `Bash` — live-fire confirmed the real Codex tool
   name for shell execution is `Bash` and that a `deny` decision from
   `pre_bash_guard.sh` actually blocks the command (not just a warning), so
-  this is a real enforcement hook, not a cosmetic one.
+  this is a real enforcement hook, not a cosmetic one. `deny` is the only
+  decision the guard returns: it never asks for confirmation and does not
+  read `permission_mode`, so it behaves the same in every Codex approval mode.
 - `SessionStart` and `UserPromptSubmit` omit a matcher (all sources /
   prompts match); both drive additionalContext-emitting hooks
   (`session_start_context.sh`, `prompt_gate.sh`). `prompt_gate.sh` is
