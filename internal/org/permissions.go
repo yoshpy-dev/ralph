@@ -152,9 +152,9 @@ func permissionArgsForDriver(cfg config.OrgConfig, driver, mode string) ([]strin
 // Only the leader gets the flag because only the leader runs `ralph org`
 // verbs and so writes the ledger; implementer, reviewer, and every other
 // role (including one with no embedded template that runs from --prompt)
-// report to the leader over agmsg. Making the state dir writable for them would let any seat
-// rewrite the manifest, the model receipts, and other seats' prompt files
-// under <state-dir>/prompts/.
+// report to the leader over agmsg. Making the state dir writable for them
+// would let any seat rewrite the manifest, the model receipts, and other
+// seats' prompt files under <state-dir>/prompts/.
 //
 // The containment test compares both paths made absolute and resolved
 // through symlinks (resolvedOrClean, statedir.go: macOS's /var is a symlink

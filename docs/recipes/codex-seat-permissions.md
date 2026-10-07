@@ -89,8 +89,8 @@ autonomous mode and the state directory is not inside the seat's `--cwd`.
 Only the leader gets it: seats of every other role (implementer, reviewer,
 or a role with no template that runs from `--prompt`) report to the leader
 over agmsg and do not write the ledger, and the flag would let them rewrite
-the manifest, the receipts, and other seats' prompt files. Guarded codex seats and claude
-seats get no `--add-dir` either. The flag covers only the state directory;
+the manifest, the receipts, and other seats' prompt files. Guarded codex
+seats and claude seats get no `--add-dir` either. The flag covers only the state directory;
 the agmsg database still needs the writable root above. The procedure below
 spawns reviewer seats, so their child process arguments carry no
 `--add-dir` even when the scratch `--state-dir` lies outside
