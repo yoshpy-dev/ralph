@@ -70,5 +70,5 @@
 - `.harness/state/`: transient markers and summaries
 - `.harness/state/standard-pipeline/`: standard-flow post-implementation pipeline cycle-cap state (`active-plan.json`, `cycle-count.json`)
 - `.harness/state/plan-visual/`: `/plan` visual review page (`<slug>.html`) and its screenshots (`*.png`); not committed
-- `.harness/state/org/`: org runtime manifest, saga records, receipts, watchdog state
+- `.harness/state/org/`: org runtime manifest, saga records, receipts, watchdog state; one ledger in the main worktree, shared by its linked worktrees (resolution order in the `/org` skill's prerequisites)
 - `.harness/logs/`: local logs

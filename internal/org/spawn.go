@@ -753,8 +753,13 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	// come first, then --model, then the prompt (if any) -- a deterministic
 	// order the argv tests assert on exactly. A guarded-mode seat has
 	// permArgs == nil, so agentArgs starts out identical to pre-permission-
-	// mode behavior.
+	// mode behavior. A workspace-write codex leader seat whose cwd does not
+	// contain the state dir (the manifest store's directory, as in
+	// promptFilePath) also gets codexWritableRootArgs' --add-dir right after
+	// permArgs, still before --model; other roles never do (plan
+	// 2026-10-07-org-state-dir-common, AC8).
 	agentArgs := append([]string{}, permArgs...)
+	agentArgs = append(agentArgs, codexWritableRootArgs(p.Role, p.Driver, resolvedPermMode, p.Cwd, filepath.Dir(o.Manifest.Path()))...)
 	agentArgs = append(agentArgs, "--model", p.Model)
 	agentStartedDetails := "agent_started"
 	// promptPath is hoisted to this outer scope (rather than declared

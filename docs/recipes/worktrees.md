@@ -53,7 +53,11 @@ hatch.
 ## Org runtime
 
 `ralph org spawn` records each seat's worktree path in the org manifest
-(`.harness/state/org/manifest.jsonl`, `worktree` field). The pulse-layer
+(`.harness/state/org/manifest.jsonl`, `worktree` field). Without
+`--state-dir` or `RALPH_ORG_STATE_DIR`, that ledger lives in the main
+worktree even when you run `ralph org` from a linked worktree, so every task
+worktree shares one ledger (the `/org` skill's prerequisites list the
+exceptions, such as the worktrees of a bare repository). The pulse-layer
 watchdog compares a seat's live `git status --porcelain` against its
 recorded worktree to detect out-of-scope changes (see
 `.claude/rules/ralph/agent-messaging.md` and `docs/specs/2026-08-01-org-runtime.md`).

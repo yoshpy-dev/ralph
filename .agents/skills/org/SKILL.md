@@ -29,10 +29,35 @@ Leader(座席の編成・統括を行う識別子)がその機構をどう操作
   一度だけ承諾すること(以後の座席はスキップされる)。ralph はこの同意を
   自動化しない。
 - **leader と operator は同一リポジトリ内で実行**: org の状態(manifest /
-  receipts)の既定は `--state-dir` フラグ > `RALPH_ORG_STATE_DIR` > **git
-  リポジトリルートの `.harness/state/org/`** > cwd の順で解決される。同一
-  リポジトリ内なら cwd が異なっても状態は分裂しない。リポジトリ外で運用する
-  場合のみ `--state-dir` を明示的に揃えること。
+  receipts)の置き場所は `--state-dir` フラグ > `RALPH_ORG_STATE_DIR` >
+  **main worktree のルートの `.harness/state/org/`** > show-toplevel の
+  `.harness/state/org/` > cwd の順で決まる。main worktree のルートには、
+  main worktree の中では `git rev-parse --show-toplevel` を、linked worktree
+  の中では `git worktree list --porcelain` の先頭の記録を使う。linked
+  worktree から打っても main のチェックアウトと同じ台帳を読み書きするので、
+  同一リポジトリ内なら cwd や worktree が違っても状態は分裂しない。
+  show-toplevel を使うのは main worktree が取れないとき(bare リポジトリの
+  worktree など)で、その場合は worktree ごとに台帳が分かれる。リポジトリ外で
+  運用する場合のみ `--state-dir` を明示的に揃えること。既知の制約が 1 つあり、
+  `git init --separate-git-dir` で git dir を `.git` という名前にした
+  リポジトリの linked worktree では、台帳が git dir の親の下にできる(git が
+  その場所を main worktree として報告するため)。git が 2.31 より古く
+  `--path-format=absolute` を解釈できない環境では main worktree を取れず、
+  show-toplevel に落ちる。その場合は変更前と同じく worktree ごとに台帳が
+  分かれ、古い台帳の注意も拒否も出ない。
+- **linked worktree に残った古い台帳**: 以前の ralph は linked worktree の
+  中では、その worktree のルートに台帳を作っていた。
+  `<worktree>/.harness/state/org/manifest.jsonl` が残っている worktree から
+  打つと、その台帳に動いている座席がある間(台帳が読めないときも)、台帳を
+  書き換える動詞(`spawn`(`--dry-run` を含む)/ `start` / `send` / `stop` /
+  `disband` / `watch`)は終了コード 1 で止まり、古い台帳と共通の台帳の
+  パスを示す。動いている座席がないときと、読むだけの動詞(`ralph status`、
+  `ralph org status` / `read` / `wait` / `report`、`ralph insights`)は stderr
+  に注意を 1 回出して共通の台帳で続ける。古い台帳の座席を片付けるときは
+  `--state-dir <worktree>/.harness/state/org` で台帳を選ぶ(`ralph insights`
+  には `--state-dir` がないので `RALPH_ORG_STATE_DIR` を使う)。`--state-dir`
+  か `RALPH_ORG_STATE_DIR` で置き場所を決めたときは止まらず、注意も出ない。
+  ralph は古い台帳を移したり共通の台帳に混ぜたりしない。
 - `--org-id` は組織の実行名前空間。同一 `--org-id` の座席は同一 manifest /
   receipts に記録される。
 - **codex 座席の実効モデルは receipts に記録される**: `ralph org spawn` は
@@ -126,8 +151,9 @@ present in [org].model_pool` で通らない。`ralph org` の動詞はどれも
 `[org].model_pool` は既定のプールを置き換える(足し合わせではない)ので、使
 い続ける既定のエントリも書く。直すのは `ralph.toml` で、直したコピーを
 `--config <path>` で渡してもよい。state dir は設定ファイルの場所では変わら
-ず(`--state-dir`、`RALPH_ORG_STATE_DIR`、git の toplevel、cwd の順で決ま
-る)、`ralph org status` / `stop` はそのまま同じ座席を扱える。
+ず(`--state-dir`、`RALPH_ORG_STATE_DIR`、main worktree のルート、git の
+toplevel、cwd の順で決まる。「前提」節を参照)、`ralph org status` / `stop`
+はそのまま同じ座席を扱える。
 
 ## 動詞リファレンス
 
@@ -276,7 +302,14 @@ EVIDENCE: docs/reports/self-review-foo.md
   `.agents`・`.codex` の下を除く)、作業ディレクトリがそれを含む
   座席はすでに書けており、warn はその旨を示す。作業ディレクトリが
   保存先を含まない座席(task worktree など)には writable root が
-  引き続き必要。
+  引き続き必要。org の台帳はこれとは別で、edits / autonomous
+  (`--sandbox workspace-write`)の codex の leader 座席の cwd の下に台帳の
+  ディレクトリがないとき(linked worktree で動くときなど)、ralph が起動の
+  引数に `--add-dir <台帳のディレクトリ>` を足して、leader が共通の台帳に
+  書けるようにする。leader 以外の役割の座席には足さない。台帳を書くのは
+  leader だけで、ほかの座席は結果を agmsg で leader に送るので、台帳に書く
+  権限は要らない。agmsg の DB はこの対象に入らないので、上の writable root
+  の設定はそのまま要る。
 - `autonomous` モードの spawn は `--scope` を必須とし(fail-closed)、
   省略したい場合のみ `--allow-unscoped` を明示する。`--scope` は
   「担当範囲」を短く書く(例: `"internal/org/**"`、`"docs/reports/**"` )。
