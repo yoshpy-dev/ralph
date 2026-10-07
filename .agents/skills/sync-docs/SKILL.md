@@ -29,6 +29,15 @@ When skills, hooks, rules, scripts, or language packs changed, also check:
 - **Quality gates changed**: Does `docs/quality/definition-of-done.md` match the actual completion workflow in `/implement`? Does `docs/quality/quality-gates.md` list verifiers that actually exist?
 - **PR skill consistency**: Does `/pr` SKILL.md pre-checks align with `/self-review`, `/verify`, and `/test` output? Does the PR template match the current plan template fields? Does `AGENTS.md` primary loop include the PR step?
 
+## Insight event (best-effort)
+
+After the sync is done, append one insight event (errors are non-fatal):
+```
+./scripts/insights-append.sh --slug <slug> --flow standard --phase sync_docs \
+  --verdict pass --cycle auto --source skill || true
+```
+`/sync-docs` has no stop condition, so the verdict is always `pass`. `--cycle auto` reads the pipeline cycle from `.harness/state/standard-pipeline/` and falls back to 1.
+
 ## CLI execution modes
 
 This skill runs under both Claude Code and Codex. The execution mode follows
