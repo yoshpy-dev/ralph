@@ -94,7 +94,7 @@ Critical forks: 止め方の 1 件だけで、ユーザーが決めた。ほか�
 - [x] AC13: spawn → disband(workspace を閉じる)→ 同じ org_id で spawn すると、2 回目の spawn は新しい workspace を作る(閉じた workspace の id を使わない)
 - [x] AC14: 台帳の pane id が、別の tab(label が座席 id でない)か別の workspace(label が org_id でない)に属しているとき、`stop` はその pane を閉じず、`stop_failed` と終了コード 1 を返す。workspace の id の label が org_id でないとき、`disband` はその workspace を閉じず、workspace の失敗として終了コード 1 を返す。`--force` のときは閉じずに記録だけする。自分の pane と workspace を最後に閉じるときも、同じ確認を通ったときだけ閉じる
 - [x] AC15: コマンドが成功で終わったあとに孫プロセスがパイプを握っていても、ExecRunner は成功を返す(`exec.ErrWaitDelay` を失敗にしない)
-- [ ] AC16: 自分の pane か workspace を最後に閉じる close が失敗したとき(`--force` なし)、台帳はその座席を動いている、workspace を開いている状態に戻し(補償の `spawned` と `org_workspace_created`)、`ralph org status` もそう表示して、終了コード 1 を返す。そのあと同じ `stop` / `disband` を打ち直すか、ほかの pane から `stop --all` / `disband --all` を打つと、その座席と workspace をもう一度閉じにいく。`--force` のときは補償を書かず、stderr に警告を出して終了コード 0。`disband --help` と `/org` skill は、`--force` でも確かめた workspace を閉じると中の pane も終わることを書いている
+- [x] AC16: 自分の pane か workspace を最後に閉じる close が失敗したとき(`--force` なし)、台帳はその座席を動いている、workspace を開いている状態に戻し(補償の `spawned` と `org_workspace_created`)、`ralph org status` もそう表示して、終了コード 1 を返す。そのあと同じ `stop` / `disband` を打ち直すか、ほかの pane から `stop --all` / `disband --all` を打つと、その座席と workspace をもう一度閉じにいく。`--force` のときは補償を書かず、stderr に警告を出して終了コード 0。`disband --help` と `/org` skill は、`--force` でも確かめた workspace を閉じると中の pane も終わることを書いている
 
 ## Implementation outline
 
@@ -152,6 +152,7 @@ Critical forks: 止め方の 1 件だけで、ユーザーが決めた。ほか�
 - [x] Test artifact created
 - [ ] PR created
 - 2026-10-08: cross-review(cycle 1)は ACTION_REQUIRED 1・WORTH_CONSIDERING 2(`docs/reports/cross-review-triage-org-stop-all.md`)。ユーザーが「直す」を選んだ。consult(plan)を受けて、#1 は詳細の文字列で未確認を表す案をやめ、補償のイベントを書き足す案にした。#2 と #3 と合わせて S8・AC16・図 4 を足し、Verify plan を AC1〜AC16 に直して、ユーザーが承認し直した(digest 2f2cfde39e9f)。パイプラインは 2 回目(上限)
+- 2026-10-08: S8(53807a82)。補償は台帳が実際に食い違うときだけ書く(座席は最後の状態が `stopped`、workspace は最後が `org_workspace_closed`)。`HerdrAgentName` は `stopped` にないので、それを持つ最新の記録(元の `spawned`)から写す。`--force` のときも、手で閉じる herdr のコマンドを警告に添える(打ち直しでは拾えないため)。`lastOrgOfWorkspace` は `lastWorkspaceEvent` に変えた
 - 2026-10-08: Verify plan の「AC1〜AC13」は、S7 で AC14・AC15 を足す前の記述。verify は AC1〜AC15 を確かめた(`docs/reports/verify-2026-10-07-org-stop-all.md`)。承認 digest が変わるので、この行は書き換えていない
 - 2026-10-07: consult(plan)は「直してから進める」。閉じられなかった座席に `stopped` を書く最初の案を、`stop_failed` で動いているまま残し `--force` で片付ける形に変えた
 - 2026-10-07: Codex plan advisory の 4 件(打ち直しで拾えること、応答しない呼び出し、headless の leader が自分を閉じること、閉じた workspace の使い回し)は、ユーザーが「計画を直す」を選び、Scope・AC・Design decisions・Rollout に反映した。スライスは 6 本にした
