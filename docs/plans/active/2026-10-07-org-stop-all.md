@@ -134,12 +134,11 @@ Critical forks: 止め方の 1 件だけで、ユーザーが決めた。ほか�
 - [x] Plan reviewed
 - [x] Plan approved
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
 - 2026-10-07: consult(plan)は「直してから進める」。閉じられなかった座席に `stopped` を書く最初の案を、`stop_failed` で動いているまま残し `--force` で片付ける形に変えた
 - 2026-10-07: Codex plan advisory の 4 件(打ち直しで拾えること、応答しない呼び出し、headless の leader が自分を閉じること、閉じた workspace の使い回し)は、ユーザーが「計画を直す」を選び、Scope・AC・Design decisions・Rollout に反映した。スライスは 6 本にした
-- [x] Implementation started
 - 2026-10-07: S1(0f2e9dfd)driver の close と `IsNotFound`。S2(815f5fc8)Stop: details の C-c の結果は `pane=` から `ctrl_c=` に名前を変えた、閉じられなかったときは agmsg から外さない(座席は動いているので届く状態を保つ)、not-found は driver の型に足した `NotFound()` を org 側の小さなインターフェースで読む(org から driver への import は入れない)。S3(7853d8a9)Disband: 座席が 1 つでも止まらなければ workspace は閉じない、`--force` では閉じられない workspace にも `org_workspace_closed` を書く、自分の workspace は記録を済ませてから最後に閉じる、台帳が読めないときは `disbanded` を書かない、ExecRunner に `WaitDelay` を足した。S4(47f36dad)全 org: disband の対象は「最後の `disbanded` のあとに座席か workspace の記録がある org と、開いた workspace が残る org」。自分の座席・org は、ほかがすべて成功したときだけ最後に処理する
