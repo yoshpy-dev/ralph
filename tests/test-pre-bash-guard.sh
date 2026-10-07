@@ -533,6 +533,58 @@ self_review_forms=(
 )
 check_modes B deny absent bypassPermissions -- "${self_review_forms[@]}"
 
+# The cross-review (docs/reports/cross-review-triage-guard-deny-only.md) and
+# the follow-up probes found forms where the sentinel gave a data region even
+# though the shell later runs that text. Each must deny: a top-level group or
+# compound command (the lexer cannot place the pipe or redirection around it),
+# a heredoc read across a $(...) or a backtick, a heredoc body or delimiter
+# joined by a backslash-newline, an exec with a redirection, an unsafe output
+# redirection, and printf -v (which stores into a variable). The old guard
+# denies all of these too, so they join the AC7 corpus.
+guard_deny_only_forms=(
+  # 1. Groups and compound commands (subshell, brace group, reserved word in
+  # command position), including two that were false none before.
+  $'(echo \'git push --force\') | sh'
+  $'{ echo \'sudo ls\'; } | sh'
+  $'{ echo \'git reset --hard\'; } > run.sh'
+  $'if true; then echo \'git push --force\'; fi | sh'
+  $'for x in 1; do echo \'sudo ls\'; done | bash'
+  $'case x in x) echo \'sudo ls\';; esac | sh'
+  $'f() { echo \'sudo ls\'; }; f | sh'
+  $'echo \'sudo ls\' | if true; then sh; fi'
+  $'(cat <<\'EOF\'\nsudo ls\nEOF\n) | sh'
+  '(echo sudo ls)'
+  $'if grep -q \'sudo \' file; then echo ok; fi'
+  # 2. A heredoc read across a $(...): the newline inside the substitution
+  # must not start the quoted-delimiter body, so the force push in $(...) runs.
+  $'cat <<\'OUT\' "$(\ngit push --force\n)"\nx\nOUT'
+  # 3. An unquoted heredoc whose body line ends in a backslash-newline joins
+  # with the next line before the terminator comparison (bash, zsh).
+  $'cat <<EOF\nEO\\\nF\ngit push --force'
+  $'cat <<-EOF\n\tEO\\\nF\nsudo ls'
+  # 4. A backslash-newline in the delimiter word is removed before tokenizing,
+  # so the delimiter is unquoted and the body expands.
+  $'cat <<EO\\\nF\n$(sudo ls)\nEOF'
+  # 5. exec with a redirection: a later command writes to the redirected fd.
+  $'exec >run.sh; echo \'sudo ls\'; sh run.sh'
+  $'exec 3>run.sh; echo \'sudo ls\' >&3; sh run.sh'
+  # 6. Unsafe output redirections keep a data region from echo: a dup to fd 3
+  # or higher, a dup to a word (a file to bash), &> and &>>, >| and <>, and
+  # >> into a file.
+  $'echo \'sudo ls\' >&3'
+  $'echo \'sudo ls\' >&foo'
+  $'echo \'sudo ls\' &>/dev/null'
+  $'echo \'sudo ls\' &>>log'
+  $'echo \'sudo ls\' >| out'
+  $'echo \'sudo ls\' <> f'
+  $'echo \'sudo ls\' >> notes.md'
+  # 7. printf -v stores into a variable, so its arguments are not data (also
+  # the attached -vNAME form).
+  $'printf -v c \'sudo ls\'; $c'
+  $'printf -vc \'sudo ls\'; $c'
+)
+check_modes B deny absent bypassPermissions -- "${guard_deny_only_forms[@]}"
+
 # ── C. AC3: none ────────────────────────────────────────────────────────
 ac3=(
   $'echo \'never use sudo here\''
@@ -765,6 +817,14 @@ edge_none=(
   'echo "sudo $(date) ls"'
   'echo sudo ls > /dev/stderr'
   'echo sudo ls >&2'
+  # Safe duplications of a data reader keep its data region: a dup to fd 0, 1
+  # or 2, a close, and a pipe to another data reader.
+  $'echo \'sudo ls\' 2>&1'
+  $'echo \'sudo ls\' >&2'
+  $'echo \'sudo ls\' >&1'
+  $'echo \'sudo ls\' 1>&2'
+  $'echo \'sudo ls\' >&-'
+  $'echo \'sudo ls\' 2>/dev/null | grep x'
   $'grep -r \'sudo \' . | head -5'
   $'rg \'git push --force\' docs'
   $'git tag -a v1 -m \'never git push --force\''
@@ -772,8 +832,6 @@ edge_none=(
   $'git commit -m \'one\' -m \'two: git reset --hard\''
   $'git -C dir commit -m \'git push --force\''
   'ls # sudo ls'
-  '(echo sudo ls)'
-  $'if grep -q \'sudo \' file; then echo ok; fi'
   'echo sudo ls; ls'
   'gh pr create --body-file body.md'
   # sudo after a word character, ., _ or - is another name.

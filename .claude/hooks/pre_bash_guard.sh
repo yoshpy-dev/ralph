@@ -94,6 +94,13 @@
 #      written to) is still denied, as the previous guard did, while the
 #      same words as data (echo 'never use sudo here', a commit message,
 #      grep -n 'git push --force' docs.md) pass.
+#      The guiding principle: when the guard cannot tell where a read-only
+#      command's text ends up, it gives no data region and the previous
+#      guard's rules decide. So a group or compound structure at the top
+#      level (a subshell (...), a brace group { ...; }, a reserved word such
+#      as if, for or case in command position), an exec with a redirection,
+#      a heredoc body joined by a backslash-newline, and a delimiter word
+#      with a backslash-newline each drop every data region of the command.
 # Not covered: anything only known at run time (variables such as $cmd,
 # aliases, functions, git aliases, scripts read from a file, remote commands
 # such as ssh host '...'), and shell syntax beyond the above: case
@@ -211,6 +218,7 @@ function new_ctx(d) {
   RN[CTX] = 0
   XN[CTX] = 0
   POUT[CTX] = 0
+  HPN[CTX] = 0
   PLN[CTX] = 0
   STN[CTX] = 0
   PLID[CTX] = ++PLSER
@@ -237,7 +245,7 @@ function lex_cmds(ctx, closer,    c, c2, depth, p0, e) {
     c = at(P)
     if (c == " " || c == "\t") P = skip(P, RE_NOBLANK)
     else if (c == BS && at(P + 1) == "\n") P += 2
-    else if (c == "\n") { P++; end_cmd(ctx, "nl"); read_heredocs() }
+    else if (c == "\n") { P++; end_cmd(ctx, "nl"); read_heredocs(ctx) }
     else if (c == "#") {
       # A comment; at the top level it is data.
       e = find(P, "\n")
@@ -250,18 +258,18 @@ function lex_cmds(ctx, closer,    c, c2, depth, p0, e) {
     } else if (c == "&") {
       c2 = at(P + 1)
       if (c2 == "&") { P += 2; end_cmd(ctx, "&&") }
-      else if (c2 == ">") { P++; lex_redir(ctx, P - 1) }
+      else if (c2 == ">") lex_redir(ctx, P)
       else { P++; end_cmd(ctx, "&") }
     } else if (c == "|") {
       c2 = at(P + 1)
       if (c2 == "|") { P += 2; end_cmd(ctx, "||") }
       else { P += (c2 == "&") ? 2 : 1; end_cmd(ctx, "|") }
-    } else if (c == "(") { P++; depth++; end_cmd(ctx, "(") }
+    } else if (c == "(") { P++; depth++; if (DCTX[ctx]) NODATA = 1; end_cmd(ctx, "(") }
     else if (c == ")") {
       P++
       if (depth > 0) { depth--; end_cmd(ctx, ")") }
       else if (closer == ")") { end_cmd(ctx, "end"); RLVL--; return }
-      else end_cmd(ctx, ")")
+      else { if (DCTX[ctx]) NODATA = 1; end_cmd(ctx, ")") }
     } else if (c == "<" || c == ">") lex_redir(ctx, P)
     else {
       lex_word(ctx)
@@ -279,12 +287,13 @@ function lex_cmds(ctx, closer,    c, c2, depth, p0, e) {
 # lex_word(ctx): read one word at P. Sets LW_VAL (quotes removed), LW_RAW
 # (source text), LW_SUBST (1 when $( or a backtick appears outside single
 # quotes) and LW_QUOTED (1 when any quote or backslash appears).
-function lex_word(ctx,    start, val, buf, c, c2, e, subst, quoted, piece) {
+function lex_word(ctx,    start, val, buf, c, c2, e, subst, quoted, bsnl, piece) {
   start = P
   val = ""
   buf = ""
   subst = 0
   quoted = 0
+  bsnl = 0
   while (P <= N) {
     c = at(P)
     if (c == SQ) {
@@ -301,7 +310,7 @@ function lex_word(ctx,    start, val, buf, c, c2, e, subst, quoted, piece) {
       quoted = 1
       c2 = at(P + 1)
       if (c2 == "") { piece = BS; P++ }
-      else { piece = (c2 == "\n") ? "" : c2; P += 2 }
+      else { piece = (c2 == "\n") ? "" : c2; if (c2 == "\n") bsnl = 1; P += 2 }
     } else if (c == "$") {
       c2 = at(P + 1)
       if (c2 == SQ || c2 == DQ) quoted = 1
@@ -325,6 +334,7 @@ function lex_word(ctx,    start, val, buf, c, c2, e, subst, quoted, piece) {
   LW_RAW = text(start, P)
   LW_SUBST = subst
   LW_QUOTED = quoted
+  LW_BSNL = bsnl
 }
 
 # lex_dq(ctx): P is just after an opening double quote. Reads up to the
@@ -466,7 +476,7 @@ function lex_bq(ctx,    s, e, p, c, val, buf, piece) {
 function lex_redir(ctx, rs,    c, c2, op, s, k) {
   c = at(P)
   c2 = at(P + 1)
-  if (c2 == "(") {
+  if ((c == "<" || c == ">") && c2 == "(") {
     s = P
     P += 2
     lex_cmds(new_ctx(CD[ctx] + 1), ")")
@@ -475,7 +485,12 @@ function lex_redir(ctx, rs,    c, c2, op, s, k) {
     if (c == ">") POUT[ctx] = 1
     return
   }
-  if (c == "<") {
+  # &> and &>> send both stdout and stderr to a file (never a safe
+  # duplication), so they keep their own operator for redir_safe.
+  if (c == "&") {
+    if (at(P + 2) == ">") { op = "&>>"; P += 3 }
+    else { op = "&>"; P += 2 }
+  } else if (c == "<") {
     if (c2 == "<") {
       if (at(P + 2) == "<") { op = "<<<"; P += 3 }
       else if (at(P + 2) == "-") { op = "<<-"; P += 3 }
@@ -499,40 +514,78 @@ function lex_redir(ctx, rs,    c, c2, op, s, k) {
   if (op == "<<" || op == "<<-") {
     HN++
     HDL[HN] = LW_VAL
-    HQ[HN] = LW_QUOTED
+    # A backslash-newline in the delimiter word is removed before tokenizing
+    # (cat <<EO\<newline>F is the unquoted delimiter EOF), so it does not
+    # quote the delimiter; such a body gets no data region (HBSNL).
+    HQ[HN] = LW_QUOTED && !LW_BSNL
+    HBSNL[HN] = LW_BSNL
     HT[HN] = (op == "<<-")
     HO[HN] = CUR[ctx]
     HX[HN] = ctx
+    HPQ[ctx, ++HPN[ctx]] = HN
   }
 }
 
-# read_heredocs(): P is just after a newline. Reads the bodies of the
-# heredocs opened on the line that ended, in order.
-function read_heredocs() {
-  while (HR < HN) {
-    HR++
-    read_body(HR)
-  }
+# read_heredocs(ctx): P is just after a newline in ctx. Reads the bodies of
+# the heredocs opened on the line that ended, in order. Pending heredocs are
+# kept per context so a newline inside a $(...), a backtick or a queued
+# string does not start the body of a heredoc the enclosing command
+# declared: the body begins only at a newline of the declaring context.
+function read_heredocs(ctx,    k) {
+  for (k = 1; k <= HPN[ctx]; k++) read_body(HPQ[ctx, k])
+  HPN[ctx] = 0
 }
 
 # read_body(h): the body of heredoc h starts at P and runs up to the first
 # line equal to the delimiter (after leading tabs for <<-), or to the end
 # of the text. P is left after the delimiter line. At the top level the
 # span of the body is kept (HB0/HB1) for the data regions.
-function read_body(h,    d, dl, b0, ls, le, t, body) {
+function read_body(h,    d, dl, b0, ls, le, t, body, joined, bs, q, cmp, p2) {
   d = HDL[h]
   dl = length(d)
   b0 = P
+  joined = 0
   while (1) {
     if (P > N) { body = text(b0, N + 1); ls = N + 1; break }
     ls = P
     le = find(P, "\n")
+    # For an unquoted delimiter, a line ending in an odd number of
+    # backslashes is joined with the next line before the terminator
+    # comparison (bash, zsh). A body with such a join gets no data region.
+    if (!HQ[h] && le <= N) {
+      bs = 0
+      q = le - 1
+      while (q >= ls && at(q) == BS) { bs++; q-- }
+      if (bs % 2 == 1) {
+        joined = 1
+        cmp = text(ls, le - 1)
+        p2 = le + 1
+        while (1) {
+          le = find(p2, "\n")
+          bs = 0
+          q = le - 1
+          while (q >= p2 && at(q) == BS) { bs++; q-- }
+          if (le <= N && bs % 2 == 1) { cmp = cmp text(p2, le - 1); p2 = le + 1 }
+          else { cmp = cmp text(p2, le); break }
+        }
+        t = HT[h] ? lstrip_tabs(cmp) : cmp
+        if (t == d) { body = text(b0, ls); P = le + 1; break }
+        P = le + 1
+        continue
+      }
+    }
     t = HT[h] ? skip(ls, RE_NOTAB) : ls
     if (le - t == dl && text(t, le) == d) { body = text(b0, ls); P = le + 1; break }
     P = le + 1
   }
-  if (DCTX[HX[h]]) { HDZ[h] = 1; HB0[h] = b0; HB1[h] = ls }
+  if (DCTX[HX[h]] && !joined && !HBSNL[h]) { HDZ[h] = 1; HB0[h] = b0; HB1[h] = ls }
   heredoc_done(h, body)
+}
+# lstrip_tabs(s): s without its leading tabs (for <<- delimiter matching).
+function lstrip_tabs(s,    i) {
+  i = 1
+  while (substr(s, i, 1) == "\t") i++
+  return substr(s, i)
 }
 
 # heredoc_done(h, body): what the body of heredoc h means for its command.
@@ -634,8 +687,14 @@ function end_cmd(ctx, sep,    cid) {
     if (sep != "nl" && sep != "|") pipe_close(ctx)
     return
   }
+  # A reserved word in command position or a brace group at the top level is
+  # a compound command the lexer cannot follow; it drops every data region.
+  if (DCTX[ctx] && WN[ctx] > 0 && (WR[ctx, 1] in RESW)) NODATA = 1
   cid = CUR[ctx]
   judge(ctx, cid, sep)
+  # exec with a redirection changes the current shell fds, so what a later
+  # command writes may be run; drop every data region.
+  if (DCTX[ctx] && EXEC_SEEN && RN[ctx] > 0) NODATA = 1
   if (DCTX[ctx]) { stage_note(ctx, cid); STC[ctx, ++STN[ctx]] = cid }
   if (sep == "|") { PLC[ctx, ++PLN[ctx]] = cid; CPL[cid] = PLID[ctx] }
   else {
@@ -655,6 +714,7 @@ function pipe_close(ctx) { PLN[ctx] = 0; STN[ctx] = 0; PLID[ctx] = ++PLSER }
 function cmd_pos(ctx,    i, n, r, nm) {
   n = WN[ctx]
   i = 1
+  EXEC_SEEN = 0
   while (i <= n) {
     r = WR[ctx, i]
     if (r == "if" || r == "then" || r == "else" || r == "elif" || r == "do" || r == "while" || r == "until" || r == "!" || r == "{" || r == "}") { i++; continue }
@@ -663,7 +723,7 @@ function cmd_pos(ctx,    i, n, r, nm) {
     nm = cname(ctx, i)
     if (nm == "env") i = skip_env(ctx, i + 1)
     else if (nm == "command") i = skip_command(ctx, i + 1)
-    else if (nm == "exec") i = skip_opts(ctx, i + 1, "a", "")
+    else if (nm == "exec") { EXEC_SEEN = 1; i = skip_opts(ctx, i + 1, "a", "") }
     else if (nm == "nohup") i = skip_opts(ctx, i + 1, "", "")
     else if (nm == "time") i = skip_opts(ctx, i + 1, "fo", " --format --output ")
     else if (nm == "nice") i = skip_opts(ctx, i + 1, "n", " --adjustment ")
@@ -768,8 +828,11 @@ function add_data(s, e,    k, b, b1) {
     BKI[b, ++BKN[b]] = k
   }
 }
-# in_data(a, b): 1 when S[a, b) lies inside one data span.
+# in_data(a, b): 1 when S[a, b) lies inside one data span. When NODATA is
+# set (a top-level group or compound command, or an exec with a redirection),
+# the command has no data region at all and the sentinel rules decide.
 function in_data(a, b,    bk, j, k) {
+  if (NODATA) return 0
   bk = int((a - 1) / BKW)
   if (!(bk in BKN)) return 0
   for (j = 1; j <= BKN[bk]; j++) {
@@ -779,13 +842,16 @@ function in_data(a, b,    bk, j, k) {
   return 0
 }
 # redir_safe(op, v, miss): 1 when a redirection keeps the output of its
-# command off files: any input redirection, an fd duplication (2>&1, >&2,
-# <&0, >&-), or output to /dev/null or /dev/stderr. >&file writes a file.
+# command off files. Any input redirection (<, <<, <<-, <<<, <&) is safe. An
+# output fd duplication (>&M) is safe only when M is 0, 1, 2 or - (a close):
+# >&3 and higher, a non-literal fd, and >&word (a file to bash) are unsafe.
+# Output to /dev/null or /dev/stderr is safe; any other file is not. >|, <>,
+# &> and &>> never qualify.
 function redir_safe(op, v, miss) {
-  if (op == "<" || op == "<<" || op == "<<-" || op == "<<<") return 1
+  if (op == "<" || op == "<<" || op == "<<-" || op == "<<<" || op == "<&") return 1
   if (miss) return 0
-  if ((op == "<&" || op == ">&") && v ~ /^([0-9]+|-)$/) return 1
-  if (op == ">" || op == ">>" || op == ">|" || op == ">&") return v == "/dev/null" || v == "/dev/stderr"
+  if (op == ">&") return v == "0" || v == "1" || v == "2" || v == "-"
+  if (op == ">" || op == ">>") return v == "/dev/null" || v == "/dev/stderr"
   return 0
 }
 # stage_note(ctx, cid): after judge() of a top-level command: whether it
@@ -798,6 +864,9 @@ function stage_note(ctx, cid,    i, n, j, k, ro, safe, rs, re, cur, xs, xe, m, t
   n = WN[ctx]
   ro = (i >= 1 && (J_NM in DATACMD))
   if (ro && J_NM == "rg") for (j = i + 1; j <= n; j++) if (substr(WV[ctx, j], 1, 5) == "--pre") ro = 0
+  # printf -v NAME (also attached -vNAME) stores into a variable instead of
+  # printing, so its arguments are not read-only data.
+  if (ro && J_NM == "printf") for (j = i + 1; j <= n; j++) if (substr(WV[ctx, j], 1, 2) == "-v") ro = 0
   safe = !POUT[ctx]
   for (k = 1; k <= RN[ctx]; k++) if (!redir_safe(RO[ctx, k], RV[ctx, k], RMISS[ctx, k])) safe = 0
   SRO[cid] = ro
@@ -1195,6 +1264,10 @@ BEGIN {
   # jq can run commands or write files, so they are not here.
   nx = split("echo printf cat head tail wc cut tr grep egrep fgrep zgrep rg ls stat diff test [ cd true false which type", datacmd_list, " ")
   for (; nx > 0; nx--) DATACMD[datacmd_list[nx]] = 1
+  # Reserved words in command position, and the brace-group words, that make
+  # a top-level command a compound one with no data region.
+  nx = split("if then elif else fi for while until do done case esac select function { }", resw_list, " ")
+  for (; nx > 0; nx--) RESW[resw_list[nx]] = 1
   SQ = sprintf("%c", 39)
   DQ = "\""
   BS = "\\"
@@ -1211,8 +1284,8 @@ BEGIN {
   RE_ANSI = "[\\\\" SQ "]"
   RE_BRACE = "[}\\\\$" BQ DQ SQ "]"
   RE_BRACE_DQ = "[}\\\\$" BQ DQ "]"
-  CTX = CIDN = PLSER = QN = QBYTES = HN = HR = RLVL = DN = 0
-  MAIN = DATA_OK = CUR_H = J_I = 0
+  CTX = CIDN = PLSER = QN = QBYTES = HN = RLVL = DN = 0
+  MAIN = DATA_OK = CUR_H = J_I = NODATA = EXEC_SEEN = 0
   J_NM = ""
 }
 { IN = (NR == 1) ? $0 : IN "\001" $0 }
@@ -1227,7 +1300,6 @@ END {
   # Queued text: substitutions, -c strings, eval, what is fed to a shell.
   # A job may queue more; QN is read again on every pass.
   for (qi = 1; qi <= QN; qi++) {
-    HR = HN
     RLVL = 0
     CUR_H = (QK[qi] == "h") ? QH[qi] : 0
     set_text(QT[qi])
