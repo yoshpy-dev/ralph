@@ -724,13 +724,19 @@ func newOrgStopCmd(orgID, stateDir, configPath *string) *cobra.Command {
 		Long: "ralph org stop sends C-c to the seat's herdr pane, closes the pane (which\n" +
 			"ends the seat's process and its screen output; read it first with\n" +
 			"`ralph org read` if you need it), leaves agmsg, and records `stopped`.\n" +
+			"Before sending C-c or closing, it checks that herdr has the pane in a tab\n" +
+			"labelled with the seat id, inside a workspace labelled with the org_id (the\n" +
+			"labels spawn gave them). A pane that fails the check (a label differs, or\n" +
+			"herdr cannot be asked) is not sent C-c and is not closed, because its\n" +
+			"recorded id may now name another pane.\n" +
 			"When the pane cannot be closed, the seat stays active (stop_failed) and the\n" +
 			"command exits 1; run it again once herdr answers.\n" +
 			"\n" +
 			"--all stops every active seat of every org_id, without --org-id or --seat.\n" +
 			"It keeps going past a seat it cannot stop, lists each one on stderr, and\n" +
 			"exits 1 if any is left. --force records `stopped` even when the pane could\n" +
-			"not be closed, printing the failure as a warning and exiting 0. When the\n" +
+			"not be closed, printing the failure as a warning and exiting 0; a pane that\n" +
+			"failed the check stays open, only the record is written. When the\n" +
 			"command runs inside a pane it stops (HERDR_PANE_ID), that pane is closed\n" +
 			"last, after all output, which ends the command.",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -993,16 +999,21 @@ func newOrgDisbandCmd(orgID, stateDir, configPath *string) *cobra.Command {
 		Short: "Stop every active seat, close the org's herdr workspace, and disband the org (every org with --all)",
 		Long: "ralph org disband stops every active seat of --org-id the way `ralph org\n" +
 			"stop` does (closing each seat's pane), then closes the org's herdr\n" +
-			"workspace and records `disbanded`. When a seat or the workspace cannot be\n" +
-			"closed, the org is not disbanded: each failure is listed on stderr and the\n" +
-			"command exits 1. Run it again to retry what is left.\n" +
+			"workspace and records `disbanded`. Before closing a pane or the workspace\n" +
+			"it checks that herdr labels the pane's tab with the seat id and the\n" +
+			"workspace with the org_id; one that fails the check is not closed and\n" +
+			"counts as a failure. When a seat or the workspace cannot be closed, the\n" +
+			"org is not disbanded: each failure is listed on stderr and the command\n" +
+			"exits 1. Run it again to retry what is left.\n" +
 			"\n" +
-			"--all disbands every org_id that still needs it, without --org-id, and\n" +
-			"keeps going past an org that fails. --force records past close failures\n" +
-			"(`stopped`, the workspace closed, `disbanded`), printing them as warnings\n" +
-			"and exiting 0. When the command runs inside a pane or workspace it closes\n" +
-			"(HERDR_PANE_ID / HERDR_WORKSPACE_ID), that one is closed last, after all\n" +
-			"output, which ends the command.",
+			"--all disbands every org_id that still needs it, without --org-id, which\n" +
+			"includes an org that an older ralph disbanded without closing its\n" +
+			"workspace, and keeps going past an org that fails. --force records past\n" +
+			"close failures (`stopped`, the workspace closed, `disbanded`), printing\n" +
+			"them as warnings and exiting 0; a pane or workspace that failed the check\n" +
+			"stays open, only the record is written. When the command runs inside a\n" +
+			"pane or workspace it closes (HERDR_PANE_ID / HERDR_WORKSPACE_ID), that one\n" +
+			"is closed last, after all output, which ends the command.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if all {
 				if err := rejectFlagsWithAll(cmd, "disband", "org-id"); err != nil {
