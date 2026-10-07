@@ -1,7 +1,7 @@
 # org-stop-all
 
 - Status: Approved
-- Approved: 2026-10-07 sha256:15eb2a79e2f6
+- Approved: 2026-10-08 sha256:2f2cfde39e9f
 - Owner: Claude Code
 - Date: 2026-10-07
 - Related request: 機能ごとの org と director の仕様(`docs/specs/2026-10-07-org-multi-org-director.md`)の 2 段目(FR-2 横断の status と stop)。ユーザーが「pane も閉じる」を選んだ(2026-10-07)
@@ -26,6 +26,8 @@
 - workspace の作り直し(`internal/org/spawn.go` の `resolveWorkspace`): 今は最初の `org_workspace_created` の id を無条件に使い回す。そのあとに `org_workspace_closed` があれば、新しい workspace を作る
 - C-c を送る前と閉じる前の持ち主の確認(self-review の F-1 を受けて足した): 台帳に記録した id が、今も ralph の作ったものを指すかを、C-c を送る前に確かめる(違う pane に C-c を送ると、ほかのプロセスを中断してしまう)。一致しないときは C-c も送らない。pane は `herdr pane get` で所属する tab と workspace を引き、tab の label が座席 id、workspace の label が org_id と一致するときだけ閉じる(ralph は tab を座席 id、workspace を org_id の label で作る)。workspace は `herdr workspace get` の label が org_id と一致するときだけ閉じる。見つからないときは閉じ済みとして扱う。一致しないときは閉じず、「閉じられなかった」として扱う(`stop_failed`、workspace の失敗、終了コード 1)。`--force` のときは閉じずに記録だけする。自分の pane と workspace を最後に閉じるときも同じ確認をする。driver に `PaneGet` / `TabGet` / `WorkspaceGet` を足す
 - ExecRunner の `WaitDelay`(self-review の F-2 を受けて直す): コマンドが成功したあとに孫プロセスがパイプを握っていて `exec.ErrWaitDelay` が返った場合は、成功として扱う(Go の仕様では、この値はプロセスが成功で終わったときだけ返る)
+- 自分の pane と workspace を閉じられなかったときの補償(cross-review の #1 を受けて足した): 後回しにした close(`CloseDeferredSelfPane` / `CloseDeferredSelfWorkspace`)が失敗したときは、コマンドのプロセスがまだ動いているので、台帳に補償を書き足す。自分の座席には `spawned`(詳細に `reactivated: …`、ほかの項目は直前の `stopped` から写す)、workspace には `org_workspace_created`(詳細に `reopened: …`)を書く。これで座席は動いている、workspace は開いている、org は disband の対象に戻り、`ralph org status` もそう表示する。同じ `stop` / `disband` を打ち直すか、ほかの pane から `stop --all` / `disband --all` を打てば、もう一度閉じにいく。補償の書き込みも失敗したときは、手で閉じる herdr のコマンドをエラー文に出す。`--force` のときは補償を書かず、警告を出して終了コード 0 で終わる(AC10)
+- `disband --force` の説明(cross-review の #2): label で確かめた org の workspace を閉じるので、tab の確認に落ちた座席の pane も workspace と一緒に終わる、と `disband --help` と `/org` skill に 1 文足す
 - 全 org の操作(`internal/org/verbs.go`): 全 org の動いている座席を止める関数と、まだ disband していない全 org を disband する関数を足す。どちらも 1 つの失敗で止めず、最後まで進めて、止められなかった座席と閉じられなかった workspace をまとめて返す
 - CLI(`internal/cli/org.go`): `ralph org stop --all` と `ralph org disband --all`、`--force`。`--all` のときは `--org-id` を要らなくする。`--all` と `--org-id`、`stop` の `--all` と `--seat` は同時に指定できない(エラー)。止めた座席は `stopped seat <org_id>/<seat_id>` を stdout に、止められなかったものは理由つきで stderr に出し、1 つでもあれば終了コード 1(`--force` のときは 0)。`--dry-run` は `--all` でも使え、herdr を呼ばずに記録だけする。古い台帳の判定(1 段目)は今までどおり書き換えの動詞として通す
 - leader の雛形(`internal/org/prompts/leader.md`)と `/org` skill: 締めの順を「座席を stop → `report` → `disband`」に変え、`disband` がそのセッションの最後のコマンドになる(自分の pane が閉じる)と書く
@@ -61,15 +63,15 @@
 
 ## Visual review
 
-- ページ: `.harness/state/plan-visual/org-stop-all.html`(図 1 全体、図 2 1 座席の stop の前と後、図 3 disband --all の流れ)
-- セルフチェック: 全体と全体図(`--fragment overview`)を `plan-visual.sh shot` で撮って確認した。consult と Codex の指摘を入れた版も撮り直し、図 2 の右下のノードの文字のはみ出し、全体図の `spawn.go` の説明のはみ出し、文書の列のノードが枠に接していたのを直して、もう一度確かめた。self-review の F-1・F-2 を受けて、図 2 に持ち主の確認の段、全体図に S7 を足し、矢印がノードを横切っていたのと文字のはみ出しを直して撮り直した
+- ページ: `.harness/state/plan-visual/org-stop-all.html`(図 1 全体、図 2 1 座席の stop の前と後、図 3 disband --all の流れ、図 4 自分の pane と workspace を閉じられなかったとき)
+- セルフチェック: 全体と全体図(`--fragment overview`)を `plan-visual.sh shot` で撮って確認した。consult と Codex の指摘を入れた版も撮り直し、図 2 の右下のノードの文字のはみ出し、全体図の `spawn.go` の説明のはみ出し、文書の列のノードが枠に接していたのを直して、もう一度確かめた。self-review の F-1・F-2 を受けて、図 2 に持ち主の確認の段、全体図に S7 を足し、矢印がノードを横切っていたのと文字のはみ出しを直して撮り直した。cross-review の #1 を受けて図 4 と全体図の S8 を足し、図 4 の「失敗(--force なし)」のラベルに戻りの矢印が重なっていたのを直して撮り直した
 
 ## Design decisions
 
 - 座席の止め方: C-c で中断したあと pane を閉じる。1 座席の stop と `--all` で動きを揃える(ユーザーが「pane も閉じる」を選んだ。2026-10-07)
 - 閉じられなかった座席には `stopped` を書かない(consult の指摘を受けて変えた)。`stopped` を書くと、台帳の `stopped` が「プロセスが終わった」を意味しなくなり、「ralph の仕組みだけで停止できる」の根拠が崩れる。herdr が生きていて期限切れになった場合はプロセスが残る。代わりに状態を変えない `stop_failed` を書き、打ち直しで拾えるようにする。座席が「動いている」のまま残ると上限(3 段目)を塞ぐが、異常のときは新しい起動を断るという council の合意(fail-closed)と合う。herdr に繋がらないまま片付けたいときは `--force` を使う
 - `--all` は 1 つの失敗でも、1 つの呼び出しが応答しなくても止めない(呼び出しごとの期限)。全 org を止めたいときに、1 座席のせいで残りが動き続けるのを防ぐ(Codex plan advisory の指摘 2)
-- 自分の pane は最後に閉じる。拒否する案もあるが、headless の leader が自分の org を片付けられなくなる。記録を済ませてから閉じれば、台帳は正しく残る(Codex plan advisory の指摘 3)
+- 自分の pane は最後に閉じる。拒否する案もあるが、headless の leader が自分の org を片付けられなくなる。記録を済ませてから閉じれば、台帳は正しく残る(Codex plan advisory の指摘 3)。閉じるのに失敗したときは、プロセスが動いているうちに補償(座席に `spawned`、workspace に `org_workspace_created`)を書き足して、台帳を事実に戻す。詳細の文字列(`self, closed last`)で「閉じたか未確認」を表し、`stop --all` や `disband` が拾う案もあった。しかしこの案では、`Roster` が状態のイベントだけで判定するという決まりの外に、第 2 の状態ができる。`status` では stopped なのに `stop --all` は拾う、という食い違いも生むので採らなかった(cross-review の #1、consult)
 - workspace を閉じたら `org_workspace_closed` を記録し、そのあとの spawn は新しい workspace を作る。記録しないと、同じ org_id の spawn が閉じた workspace に tab を作ろうとして失敗する(Codex plan advisory の指摘 4)
 - 閉じる前に label で持ち主を確かめる(self-review の F-1)。一致しないときに「閉じ済み」として `stopped` を書く案もあるが、人が herdr で tab の名前を変えた場合は本物の座席が動いたまま `stopped` になる。閉じずに「閉じられなかった」とすれば、台帳は事実と食い違わない。確認の呼び出しが 1 座席につき 3 回増えるが、それぞれに期限がある
 
@@ -92,6 +94,7 @@ Critical forks: 止め方の 1 件だけで、ユーザーが決めた。ほか�
 - [x] AC13: spawn → disband(workspace を閉じる)→ 同じ org_id で spawn すると、2 回目の spawn は新しい workspace を作る(閉じた workspace の id を使わない)
 - [x] AC14: 台帳の pane id が、別の tab(label が座席 id でない)か別の workspace(label が org_id でない)に属しているとき、`stop` はその pane を閉じず、`stop_failed` と終了コード 1 を返す。workspace の id の label が org_id でないとき、`disband` はその workspace を閉じず、workspace の失敗として終了コード 1 を返す。`--force` のときは閉じずに記録だけする。自分の pane と workspace を最後に閉じるときも、同じ確認を通ったときだけ閉じる
 - [x] AC15: コマンドが成功で終わったあとに孫プロセスがパイプを握っていても、ExecRunner は成功を返す(`exec.ErrWaitDelay` を失敗にしない)
+- [ ] AC16: 自分の pane か workspace を最後に閉じる close が失敗したとき(`--force` なし)、台帳はその座席を動いている、workspace を開いている状態に戻し(補償の `spawned` と `org_workspace_created`)、`ralph org status` もそう表示して、終了コード 1 を返す。そのあと同じ `stop` / `disband` を打ち直すか、ほかの pane から `stop --all` / `disband --all` を打つと、その座席と workspace をもう一度閉じにいく。`--force` のときは補償を書かず、stderr に警告を出して終了コード 0。`disband --help` と `/org` skill は、`--force` でも確かめた workspace を閉じると中の pane も終わることを書いている
 
 ## Implementation outline
 
@@ -102,17 +105,18 @@ Critical forks: 止め方の 1 件だけで、ユーザーが決めた。ほか�
 5. S5(CLI): `--all` と `--force` のフラグ、同時指定の検査、出力と終了コード、ヘルプ文(AC4〜AC7、AC10)
 6. S6(文書と雛形): leader の雛形、`/org` skill、`README.md`、仕様、evidence(AC9)
 7. S7(self-review の修正): 閉じる前の持ち主の確認(driver の `PaneGet` / `TabGet` / `WorkspaceGet`、Stop・Disband・後回しの close)と、`WaitDelay` の成功の扱い。`/org` skill と evidence に一文ずつ足す(AC14・AC15)
+8. S8(cross-review の修正): 後回しの close が失敗したときの補償、`--force` のときの警告と終了コード 0、`disband --force` の説明の 1 文(AC16)
 
 ## Verify plan
 
 - Static analysis checks: `./scripts/run-static-verify.sh`
-- Spec compliance criteria to confirm: AC1〜AC13。仕様の FR-2(横断の stop、一部の失敗の一覧と終了コード 1)と、非機能要件の「全 LLM を止めても ralph の仕組みだけで停止できる」
+- Spec compliance criteria to confirm: AC1〜AC16。仕様の FR-2(横断の stop、一部の失敗の一覧と終了コード 1)と、非機能要件の「全 LLM を止めても ralph の仕組みだけで停止できる」
 - Documentation drift to check: `git grep -n 'C-c\|disband\b.*report\|herdr workspace / agmsg' -- .claude/skills/org internal/org/prompts docs/specs README.md` で、止め方と締めの順の古い説明が残っていないか
 - Evidence to capture: verify のレポート
 
 ## Test plan
 
-- Unit tests: driver の `PaneClose` / `WorkspaceClose` の引数と、見つからないときのエラーの区別(偽の runner)。`Stop` の呼び出し順(C-c → close → Leave → 記録)、見つからないときの成功、閉じられないときの `stop_failed` と終了、`--force`。`Disband` の workspace を閉じる処理、`org_workspace_closed`、失敗の分け方。応答しない偽の driver で期限が効くこと。`HERDR_PANE_ID` / `HERDR_WORKSPACE_ID` を設定したときの呼び出し順
+- Unit tests: driver の `PaneClose` / `WorkspaceClose` の引数と、見つからないときのエラーの区別(偽の runner)。`Stop` の呼び出し順(C-c → close → Leave → 記録)、見つからないときの成功、閉じられないときの `stop_failed` と終了、`--force`。`Disband` の workspace を閉じる処理、`org_workspace_closed`、失敗の分け方。応答しない偽の driver で期限が効くこと。`HERDR_PANE_ID` / `HERDR_WORKSPACE_ID` を設定したときの呼び出し順。後回しの close を失敗させたときの補償(座席が動いている、workspace が開いているに戻り、次の `disband --all` と同じ `disband` の打ち直しが同じ座席と workspace を閉じにいく)、`--force` のときは補償を書かず終了コード 0、補償の書き込みも失敗したときのエラー文
 - Integration tests: `internal/cli` で `stop --all` / `disband --all` / `--force` の出力と終了コード、同時指定のエラー、`--dry-run`。失敗 → 偽の driver を回復させる → 同じ `--all` を打ち直して回収できること
 - Regression tests: `./scripts/run-test.sh`。今の `stop` / `disband` のテストを新しい動きに合わせて直し、意図を弱めていないことをレポートに書く。spawn → disband → 同じ org_id で spawn
 - Edge cases: pane_id のない座席、workspace の記録のない org、動いている座席のない org、空の台帳、disband 済みの org を `--all` が飛ばすこと、disband に失敗した org を `--all` が拾い直すこと
@@ -126,6 +130,7 @@ Critical forks: 止め方の 1 件だけで、ユーザーが決めた。ほか�
 - headless の leader が自分で disband すると、そのセッションが終わる: 締めの順を「report → disband」に変え、雛形と skill に書く(AC9・AC12)
 - herdr が止まっているときは閉じる操作が失敗する: `stop_failed` を書いて終了コード 1 で知らせ、座席は動いているまま残る。片付けたいときは `--force` を使う
 - `stop_failed` と `org_workspace_closed` が新しいイベントの種類になる: `Roster` は状態のイベントだけを見るので、座席の状態の判定は変わらない。`ralph org report` の時系列には出る
+- 補償の `spawned` は、spawn から来たのではない `spawned` として、report の時系列と、watch が数える leader の活動に出る: 詳細の `reactivated:` で見分けられる。座席は最初の stop で agmsg から外れているので、補償で動いている扱いに戻っても agmsg には戻らない。補償は stop と disband を打ち直すためのもので、その座席に仕事を送り直すことは想定しない
 
 ## Rollout or rollback notes
 
@@ -146,6 +151,7 @@ Critical forks: 止め方の 1 件だけで、ユーザーが決めた。ほか�
 - [x] Verification artifact created
 - [x] Test artifact created
 - [ ] PR created
+- 2026-10-08: cross-review(cycle 1)は ACTION_REQUIRED 1・WORTH_CONSIDERING 2(`docs/reports/cross-review-triage-org-stop-all.md`)。ユーザーが「直す」を選んだ。consult(plan)を受けて、#1 は詳細の文字列で未確認を表す案をやめ、補償のイベントを書き足す案にした。#2 と #3 と合わせて S8・AC16・図 4 を足し、Verify plan を AC1〜AC16 に直して、ユーザーが承認し直した(digest 2f2cfde39e9f)。パイプラインは 2 回目(上限)
 - 2026-10-08: Verify plan の「AC1〜AC13」は、S7 で AC14・AC15 を足す前の記述。verify は AC1〜AC15 を確かめた(`docs/reports/verify-2026-10-07-org-stop-all.md`)。承認 digest が変わるので、この行は書き換えていない
 - 2026-10-07: consult(plan)は「直してから進める」。閉じられなかった座席に `stopped` を書く最初の案を、`stop_failed` で動いているまま残し `--force` で片付ける形に変えた
 - 2026-10-07: Codex plan advisory の 4 件(打ち直しで拾えること、応答しない呼び出し、headless の leader が自分を閉じること、閉じた workspace の使い回し)は、ユーザーが「計画を直す」を選び、Scope・AC・Design decisions・Rollout に反映した。スライスは 6 本にした
