@@ -35,10 +35,10 @@ elif command -v jq >/dev/null 2>&1; then
   # jq is required for this branch: the sed fallback in lib_json.sh reads
   # escaped quotes but leaves \n as two characters, so a multi-line patch
   # body comes back on one line and its file headers cannot be split out.
-  # Without jq, an apply_patch payload falls
-  # through with no derived paths -- the same no-op this hook already had
-  # for Codex edits before apply_patch support was added (now observable:
-  # see the jq-missing marker below).
+  # Without jq, an apply_patch payload falls through with no derived
+  # paths -- the same no-op this hook already had for Codex edits before
+  # apply_patch support was added (now observable: see the jq-missing
+  # marker below).
   #
   # apply_patch envelope paths are relative to the Codex SESSION's cwd
   # (the payload's top-level "cwd" field), not to this hook's own cwd (the

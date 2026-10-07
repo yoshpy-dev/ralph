@@ -26,7 +26,8 @@
 #      and in bypassPermissions
 #   D. Write targets into .git or .env (>, >>, >|, no space, 2>, &>, tee -a,
 #      tee with earlier args, tee with a < input after its target,
-#      /usr/bin/tee, a tab before tee, .git as a file, absolute path,
+#      /usr/bin/tee, a tab before tee, \tee, tee inside backticks, a tee
+#      argument after a 2> redirection, .git as a file, absolute path,
 #      quoted target, heredoc into .env with and without spaces,
 #      .env.local, .envrc) plus rm -rf and gh pr create -> ask with no
 #      permission_mode, none in bypassPermissions
@@ -219,6 +220,13 @@ writes=(
   '/usr/bin/tee .git/x'
   # A tab before tee is the two characters \t on the sed path.
   $'echo x |\ttee .env'
+  # A backslash before tee (skips an alias) and tee inside backticks.
+  '\tee .env'
+  '\tee .git/x'
+  'x=`tee .env </dev/null`'
+  # tee still writes the arguments that follow an output redirection.
+  'tee out.txt 2>/dev/null .env'
+  'tee out.txt 2>/dev/null .env > /dev/null'
   'echo x > .git'
   'echo x > /abs/worktree/.git'
   $'cat > .env <<EOF\nA=1\nEOF'
