@@ -1,7 +1,7 @@
 # org-state-dir-common
 
 - Status: Approved
-- Approved: 2026-10-07 sha256:74b468873cce
+- Approved: 2026-10-07 sha256:d8a7f8ae89c1
 - Owner: Claude Code
 - Date: 2026-10-07
 - Related request: org runtime を「機能ごとの org + herdr の外の director」に組み直す系列の 1 段目。council の結論(`~/.cache/council/20261007-0324-org-of-orgs/conclusion.md` の論点 1 と論点 9 の 1 段目)で、5 体すべてが最初に直すべきだとした
@@ -17,7 +17,10 @@ linked worktree の中から打った `ralph org` / `ralph status` / `ralph insi
 
 ## Scope
 
-- `internal/org/statedir.go`: 3 段目の解決を「main worktree のルート」起点に変える。main worktree は `git worktree list --porcelain` の先頭の記録で決める。その記録が bare でなく、パスのディレクトリが存在するとき、そこに `.harness/state/org` を付ける。source のタグは `git-main-worktree`。先頭が bare のとき、ディレクトリがないとき、コマンドが失敗したときは、今の show-toplevel に戻す(タグは `git-toplevel` のまま)。git の外なら今の cwd に戻す。flag と env の優先順は変えない
+- `internal/org/statedir.go`: 3 段目の解決を「main worktree のルート」起点に変え、そこに `.harness/state/org` を付ける。source のタグは `git-main-worktree`。main worktree のルートは次の順で決める。flag と env の優先順は変えない
+  - `git rev-parse --path-format=absolute --git-dir --git-common-dir` の 2 つが同じなら、cwd は main worktree の中にあるので、show-toplevel をルートにする
+  - 違うなら(linked worktree の中)、`git worktree list --porcelain` の先頭の記録をルートにする。その記録が bare のとき、パスが common dir そのものを指すとき、ディレクトリが存在しないとき、コマンドが失敗したときは、今の show-toplevel に戻す(タグは `git-toplevel` のまま)
+  - git の外なら今の cwd に戻す
 - 古い台帳の扱い: 解決結果が `git-main-worktree` で、cwd が linked worktree の中にあり、その worktree の `<show-toplevel>/.harness/state/org/manifest.jsonl` が存在するとき、それを「古い台帳」として扱う。台帳を移したり混ぜたりはしない
   - 古い台帳に動いている座席があるとき、台帳を書き換える動詞(`ralph org spawn` / `start` / `send` / `stop` / `disband` / `watch`)は終了コード 1 で止まる。メッセージに、古い台帳のパス、新しい台帳のパス、`--state-dir` でどちらかを選ぶ方法を書く
   - 動いている座席がないとき、または読むだけの動詞(`ralph status`、`ralph org status` / `read` / `wait` / `report`、`ralph insights`)では、stderr に 1 回だけ注意を出して続ける。JSON の stdout は変えない
@@ -31,6 +34,7 @@ linked worktree の中から打った `ralph org` / `ralph status` / `ralph insi
 
 - 古い台帳(worktree の中の `.harness/state/org/`)の自動移行や統合。止めるか注意を出すだけにする
 - bare リポジトリの worktree で台帳を 1 つにすること。今と同じく worktree ごとに分かれる(show-toplevel に戻す)
+- `--separate-git-dir` で git dir の名前を `.git` にしたリポジトリの linked worktree。git 自身が git dir の親を main と返し、本当の作業ツリーはリポジトリのどこにも記録されないので、ralph からは区別できない。この場合の台帳は git dir の親の下になる(`statedir.go` のコメントに書く)
 - `scripts/insights-append.sh` など、org 以外の `.harness/state/` の置き場所(standard pipeline の状態は worktree ごとに分かれているのが正しい)
 - 座席の環境への `RALPH_ORG_STATE_DIR` の注入(council の D 案)
 - 古いバイナリの挙動を変えること。戻すときの手順は「Rollout or rollback notes」に書く
@@ -38,7 +42,7 @@ linked worktree の中から打った `ralph org` / `ralph status` / `ralph insi
 
 ## Assumptions
 
-- `git worktree list --porcelain` の先頭の記録は main worktree で、bare リポジトリなら `bare` の行が付く(git の仕様)。`--separate-git-dir` で作ったリポジトリでも、先頭は実際の作業ツリーのパスになる。submodule の中では、その submodule の main のチェックアウトになる
+- `git worktree list --porcelain` の先頭の記録は main worktree で、bare リポジトリなら `bare` の行が付く(git の仕様)。ただし `--separate-git-dir` で作ったリポジトリでは、先頭の記録は実際の作業ツリーではなく、git dir の親になる(git 2.49 で実装中に確認。git は common dir から `/.git` を除いた値を main とみなす)。このため main worktree の中では先頭の記録を使わず、show-toplevel を使う
 - 非 bare の通常のリポジトリの main のチェックアウトでは、先頭の記録のパスは show-toplevel と同じなので、今の解決結果と同じパスになる。既存の利用者の台帳は動かない(source のタグだけが `git-toplevel` から `git-main-worktree` に変わる)
 - `source` のタグは診断用の表示(`ralph status` の `state-dir: ... (source: ...)` 行と `--json` の `state_dir_source`、`ralph org watch` の状態)で、外部の契約ではない
 - 台帳を書き換えるのは leader 座席と人(将来は director)だけで、implementer と reviewer の座席は agmsg で送る(`internal/org/prompts/implementer.md`、`reviewer.md` に `ralph org` の動詞は出てこない)。codex の座席の `--add-dir` が効くのは、主に codex で動く headless leader
@@ -63,7 +67,7 @@ Critical forks: None
 
 既定の判断で決めたこと(どれも 1 スライス以内で戻せる):
 
-- main worktree は `git worktree list --porcelain` の先頭の記録で決める。最初の案(common dir の名前が `.git` なら親)は、bare リポジトリを `/x/project/.git` に置いた場合や、別置きの git ディレクトリが `.git` という名前の場合に、関係のない親を選んでしまう(Codex plan advisory の指摘 3)
+- main worktree は、main の中なら show-toplevel、linked worktree の中なら `git worktree list --porcelain` の先頭の記録で決める。最初の案(common dir の名前が `.git` なら親)は、bare リポジトリを `/x/project/.git` に置いた場合や、別置きの git ディレクトリが `.git` という名前の場合に、関係のない親を選んでしまう(Codex plan advisory の指摘 3)。先頭の記録だけで決める 2 つ目の案は、`--separate-git-dir` のリポジトリの main の中で git dir の親を選んでしまう(S1 の実装中に git 2.49 で確認した計画からの逸脱。承認をやり直した)
 - source のタグは `git-main-worktree` を足し、戻り先の `git-toplevel` と `cwd` はそのまま残す
 - 古い台帳は移さない。移行は座席の pane や agmsg の team を伴い、壊れたときに戻しにくい。代わりに、動いている座席が古い台帳にあるときは書き換える動詞を止める。注意だけだと、空の台帳に対する `disband` が成功して、実際の座席が動き続ける(Codex plan advisory の指摘 2、`internal/org/verbs.go` の `Disband`)
 - codex の座席には `--add-dir` で台帳のディレクトリを書けるようにする。workspace-write の sandbox は cwd の外に書けないので、linked worktree にいる codex の leader が共通の台帳に書けなくなる(Codex plan advisory の指摘 1、`internal/org/permissions.go:66`)
@@ -125,9 +129,10 @@ Critical forks: None
 - [x] Plan reviewed
 - [x] Plan approved
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
 - 2026-10-07: Codex plan advisory の 3 件(sandbox の書き込み、動いている座席がある状態の切り替えと戻し、`.git` の名前だけで main と決める誤り)は、ユーザーが「計画を直す」を選び、Scope・AC・Design decisions・Rollout に反映した
+- 2026-10-07: S1 を c8dc2e8e でコミットした(implementer)。実装中に `--separate-git-dir` のリポジトリでは `git worktree list` の先頭が git dir の親になるとわかり、main の中は show-toplevel を使う形に変えた。計画の Scope・Assumptions・Non-goals・Design decisions と図 2・図 3 を直し、ユーザーが承認し直した(digest d8a7f8ae89c1)
