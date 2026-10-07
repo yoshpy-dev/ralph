@@ -77,21 +77,21 @@ Critical forks: 止め方の 1 件だけで、ユーザーが決めた。ほか�
 
 ## Acceptance criteria
 
-- [ ] AC1: `ralph org stop --org-id X --seat Y` は、座席の pane に C-c を送ったあと、その pane を閉じる。台帳の `stopped` の詳細に閉じた結果が残る。pane が見つからないときは閉じ済みとして成功する
-- [ ] AC2: pane を閉じられなかったとき(herdr のエラーか期限切れ)、`stop` は台帳に `stopped` を書かず、`stop_failed`(詳細つき)を書いて、終了コード 1 と理由を返す。座席は `ralph org status` で動いているまま表示される。herdr が戻ったあと `stop --seat` と `stop --all` を打ち直すと、その座席を閉じて `stopped` を書き、終了コード 0 になる
-- [ ] AC3: `ralph org disband --org-id X` は、動いている座席をすべて止めたあと、その org の herdr workspace を閉じ、`org_workspace_closed` と `disbanded` を書く。止められなかった座席か閉じられなかった workspace があれば、`disbanded` を書かず、それを一覧にして終了コード 1。止められなかった座席を「stopped」と表示しない。打ち直すと残りを止めにいく
-- [ ] AC4: `ralph org stop --all` は、`--org-id` なしで、全 org の動いている座席をすべて止める。1 つ止められなくても残りを止め、止められなかったものを `<org_id>/<seat_id>` と理由で stderr に並べて終了コード 1。全部止まれば終了コード 0
-- [ ] AC5: `ralph org disband --all` は、まだ disband していない全 org を disband する(座席を止め、workspace を閉じ、`disbanded` を書く)。失敗の扱いは AC4 と同じ。disband に失敗した org は、次の `disband --all` でまた対象になる
-- [ ] AC6: `--all` と `--org-id`、`stop` の `--all` と `--seat` を同時に指定するとエラーになり、何もしない。`--all` を付けない `stop` と `disband` は、今までどおり `--org-id` が要る
-- [ ] AC7: `--all --dry-run` は herdr も agmsg も呼ばず、台帳に dry-run の記録だけを書く
-- [ ] AC8: ralph が台帳に記録していない herdr の workspace と pane は閉じない(テストで、記録していない id に閉じる呼び出しが行かないことを確かめる)
-- [ ] AC9: `/org` skill の動詞の表・締めの順・完了条件(4 面)、leader の雛形、`README.md`、仕様の FR-2 が新しい動きを書いている。`./scripts/check-skill-sync.sh` と `./scripts/check-sync.sh` が通る
-- [ ] AC10: `--force` を付けた `stop` / `disband` は、閉じられなかった座席にも `stopped`(詳細に forced)を書き、`disband` は `disbanded` も書く。失敗は stderr に出し、終了コードは 0
-- [ ] AC11: herdr か agmsg の呼び出しが応答しないとき(テストでは、取り消されるまで返らない偽の driver)、1 回の呼び出しは期限で打ち切られ、その座席は「閉じられなかった」になり、`--all` は残りの org の座席を止め、結果の一覧を出して終わる
-- [ ] AC12: `HERDR_PANE_ID` か `HERDR_WORKSPACE_ID` が閉じる対象の pane か workspace を指すとき、その pane と workspace を閉じる呼び出しは、ほかのすべての閉じる呼び出しと台帳への記録のあとに行われる(偽の driver の呼び出し順で確かめる)
-- [ ] AC13: spawn → disband(workspace を閉じる)→ 同じ org_id で spawn すると、2 回目の spawn は新しい workspace を作る(閉じた workspace の id を使わない)
-- [ ] AC14: 台帳の pane id が、別の tab(label が座席 id でない)か別の workspace(label が org_id でない)に属しているとき、`stop` はその pane を閉じず、`stop_failed` と終了コード 1 を返す。workspace の id の label が org_id でないとき、`disband` はその workspace を閉じず、workspace の失敗として終了コード 1 を返す。`--force` のときは閉じずに記録だけする。自分の pane と workspace を最後に閉じるときも、同じ確認を通ったときだけ閉じる
-- [ ] AC15: コマンドが成功で終わったあとに孫プロセスがパイプを握っていても、ExecRunner は成功を返す(`exec.ErrWaitDelay` を失敗にしない)
+- [x] AC1: `ralph org stop --org-id X --seat Y` は、座席の pane に C-c を送ったあと、その pane を閉じる。台帳の `stopped` の詳細に閉じた結果が残る。pane が見つからないときは閉じ済みとして成功する
+- [x] AC2: pane を閉じられなかったとき(herdr のエラーか期限切れ)、`stop` は台帳に `stopped` を書かず、`stop_failed`(詳細つき)を書いて、終了コード 1 と理由を返す。座席は `ralph org status` で動いているまま表示される。herdr が戻ったあと `stop --seat` と `stop --all` を打ち直すと、その座席を閉じて `stopped` を書き、終了コード 0 になる
+- [x] AC3: `ralph org disband --org-id X` は、動いている座席をすべて止めたあと、その org の herdr workspace を閉じ、`org_workspace_closed` と `disbanded` を書く。止められなかった座席か閉じられなかった workspace があれば、`disbanded` を書かず、それを一覧にして終了コード 1。止められなかった座席を「stopped」と表示しない。打ち直すと残りを止めにいく
+- [x] AC4: `ralph org stop --all` は、`--org-id` なしで、全 org の動いている座席をすべて止める。1 つ止められなくても残りを止め、止められなかったものを `<org_id>/<seat_id>` と理由で stderr に並べて終了コード 1。全部止まれば終了コード 0
+- [x] AC5: `ralph org disband --all` は、まだ disband していない全 org を disband する(座席を止め、workspace を閉じ、`disbanded` を書く)。失敗の扱いは AC4 と同じ。disband に失敗した org は、次の `disband --all` でまた対象になる
+- [x] AC6: `--all` と `--org-id`、`stop` の `--all` と `--seat` を同時に指定するとエラーになり、何もしない。`--all` を付けない `stop` と `disband` は、今までどおり `--org-id` が要る
+- [x] AC7: `--all --dry-run` は herdr も agmsg も呼ばず、台帳に dry-run の記録だけを書く
+- [x] AC8: ralph が台帳に記録していない herdr の workspace と pane は閉じない(テストで、記録していない id に閉じる呼び出しが行かないことを確かめる)
+- [x] AC9: `/org` skill の動詞の表・締めの順・完了条件(4 面)、leader の雛形、`README.md`、仕様の FR-2 が新しい動きを書いている。`./scripts/check-skill-sync.sh` と `./scripts/check-sync.sh` が通る
+- [x] AC10: `--force` を付けた `stop` / `disband` は、閉じられなかった座席にも `stopped`(詳細に forced)を書き、`disband` は `disbanded` も書く。失敗は stderr に出し、終了コードは 0
+- [x] AC11: herdr か agmsg の呼び出しが応答しないとき(テストでは、取り消されるまで返らない偽の driver)、1 回の呼び出しは期限で打ち切られ、その座席は「閉じられなかった」になり、`--all` は残りの org の座席を止め、結果の一覧を出して終わる
+- [x] AC12: `HERDR_PANE_ID` か `HERDR_WORKSPACE_ID` が閉じる対象の pane か workspace を指すとき、その pane と workspace を閉じる呼び出しは、ほかのすべての閉じる呼び出しと台帳への記録のあとに行われる(偽の driver の呼び出し順で確かめる)
+- [x] AC13: spawn → disband(workspace を閉じる)→ 同じ org_id で spawn すると、2 回目の spawn は新しい workspace を作る(閉じた workspace の id を使わない)
+- [x] AC14: 台帳の pane id が、別の tab(label が座席 id でない)か別の workspace(label が org_id でない)に属しているとき、`stop` はその pane を閉じず、`stop_failed` と終了コード 1 を返す。workspace の id の label が org_id でないとき、`disband` はその workspace を閉じず、workspace の失敗として終了コード 1 を返す。`--force` のときは閉じずに記録だけする。自分の pane と workspace を最後に閉じるときも、同じ確認を通ったときだけ閉じる
+- [x] AC15: コマンドが成功で終わったあとに孫プロセスがパイプを握っていても、ExecRunner は成功を返す(`exec.ErrWaitDelay` を失敗にしない)
 
 ## Implementation outline
 
@@ -142,10 +142,11 @@ Critical forks: 止め方の 1 件だけで、ユーザーが決めた。ほか�
 - [x] Plan approved
 - [x] Branch created
 - [x] Implementation started
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Review artifact created
+- [x] Verification artifact created
+- [x] Test artifact created
 - [ ] PR created
+- 2026-10-08: Verify plan の「AC1〜AC13」は、S7 で AC14・AC15 を足す前の記述。verify は AC1〜AC15 を確かめた(`docs/reports/verify-2026-10-07-org-stop-all.md`)。承認 digest が変わるので、この行は書き換えていない
 - 2026-10-07: consult(plan)は「直してから進める」。閉じられなかった座席に `stopped` を書く最初の案を、`stop_failed` で動いているまま残し `--force` で片付ける形に変えた
 - 2026-10-07: Codex plan advisory の 4 件(打ち直しで拾えること、応答しない呼び出し、headless の leader が自分を閉じること、閉じた workspace の使い回し)は、ユーザーが「計画を直す」を選び、Scope・AC・Design decisions・Rollout に反映した。スライスは 6 本にした
 - 2026-10-07: S1(0f2e9dfd)driver の close と `IsNotFound`。S2(815f5fc8)Stop: details の C-c の結果は `pane=` から `ctrl_c=` に名前を変えた、閉じられなかったときは agmsg から外さない(座席は動いているので届く状態を保つ)、not-found は driver の型に足した `NotFound()` を org 側の小さなインターフェースで読む(org から driver への import は入れない)。S3(7853d8a9)Disband: 座席が 1 つでも止まらなければ workspace は閉じない、`--force` では閉じられない workspace にも `org_workspace_closed` を書く、自分の workspace は記録を済ませてから最後に閉じる、台帳が読めないときは `disbanded` を書かない、ExecRunner に `WaitDelay` を足した。S4(47f36dad)全 org: disband の対象は「最後の `disbanded` のあとに座席か workspace の記録がある org と、開いた workspace が残る org」。自分の座席・org は、ほかがすべて成功したときだけ最後に処理する
