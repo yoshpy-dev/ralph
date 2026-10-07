@@ -1,7 +1,7 @@
 # guard-bypass-and-hygiene
 
 - Status: Approved
-- Approved: 2026-10-07 sha256:c07adf402bdb
+- Approved: 2026-10-07 sha256:d8f86292d5f1
 - Owner: Claude Code
 - Date: 2026-10-07
 - Related request: ハーネスの手入れ 5 件(2026-10-07 ユーザー依頼。bypass permissions のモードでも Bash の実行に Yes / No の確認が出る件は「bypass では出さない」をユーザーが選んだ。残りは PR #204 の後続候補)
@@ -133,7 +133,7 @@
 ## Risks and mitigations
 
 - bypass で ask を返さないと、`.env` への書き込みや `rm -rf` が確認なしで走る → ユーザーが選んだ挙動。deny の 4 規則と、Claude Code 本体の重要なパスの `rm` の確認は残る。PR 本文に書く
-- 書き込み先の判定を狭めて、今まで捕まえていた書き込みを見逃す → テストで書き込みの形(`>`、`>>`、空白なし、絶対パス、`tee -a`、heredoc、`.git` がファイル)を確かめる。外れるのは、`.github/` と `.gitignore` など `.git` で始まる別の名前(意図した変更)と、`cp`・`mv`・`sed -i` で書く形のうち後ろにたまたまリダイレクトがあったもの(self-review M-1)。後者は今の検出が偶然に頼っているので、PR 本文と tech-debt に書く
+- 書き込み先の判定を狭めて、今まで捕まえていた書き込みを見逃す → テストで書き込みの形(`>`、`>>`、空白なし、絶対パス、`tee -a`、heredoc、`.git` がファイル)を確かめる。外れるのは、`.github/` と `.gitignore` など `.git` で始まる別の名前(意図した変更)と、旧 guard が後ろの `>` に偶然当たって確認を出していた形。後者には、`cp`・`mv`・`sed -i` で書く形(self-review M-1)と、`tee` の書き込み先の前に引数の読み取りが止まる文字(`&`、`<`、`\` など)がある形(`tee out 2>&1 .env > /dev/null`、`tee < in.txt .env > /dev/null`。cycle 2 の verify)がある。どちらも今の検出が偶然に頼っているので、PR 本文と tech-debt に書く
 - shellcheck の対象を広げると、CI の shellcheck の版で新しい warning が出るかもしれない → PR の CI で確かめる。出たら直し、直せないものは理由を書いて除く
 - `archive-plan.sh` の書き換えが README の別の参照を壊す → 名前の境界を見て、似た名前をテストで確かめる。書き換えた件数を出すので、`/pr` のコミットで差分として見える
 - 実行権限の検査が、`core.fileMode=false` の環境(Windows など)で誤って FAIL を出す → CI は ubuntu で、この repo の開発環境は macOS。起きたら index の mode だけを見る形に寄せる
@@ -167,6 +167,8 @@
   - verify(`docs/reports/verify-2026-10-07-guard-bypass-and-hygiene.md`、verifier/opus): pass。AC4 の直し方の表示は plan の文言(`chmod +x` と `git update-index --chmod=+x`)より細かい(V-8)。989886f2(L-3)以降、untracked のテストには `git add --chmod=+x` を出し、index だけが 100644 で working tree に実行権限があるときも `chmod +x` を出す。AC4 の「ファイル名と直し方を出し、非 0 で終わる」は満たしている。plan の本文は digest の対象なので直していない
   - test(`docs/reports/test-2026-10-07-guard-bypass-and-hygiene.md`、tester/opus): pass。Test gaps 1〜9 は tech-debt に 1 行にまとめた(コードとテストは足していない)
   - sync-docs(`docs/reports/sync-docs-2026-10-07-guard-bypass-and-hygiene.md`、doc-maintainer/sonnet): V-1〜V-7、V-9 を直した。V-8 は上のとおり plan を直さない
+  - cross-review cycle 1(811e1452、codex): ACTION_REQUIRED 2(jq がないとき改行の後の `tee` を見逃す、`tee` の引数が `<` を越えて入力を拾う)。ユーザーの事前承認により推奨の「Fix」を選び、cycle を 2 に上げた
+  - cycle 2: 修正 0db1a97e(implementer/opus、テスト 260 件)。self-review(14d48a77)で C2-M1(`\tee` とバッククォートの中の `tee` を旧 guard より弱く見逃す)と C2-L1(`tee` の引数が `>` で止まる)が出て、ab3ee31c(implementer/opus、テスト 280 件)で直した。verify(69d1c581)は pass。旧 guard が後ろの `>` に偶然当たって確認を出していた `tee` の形が残ると分かったので、plan の Risks を直し、図 3 に行を足して、承認の digest を c07adf402bdb から d8f86292d5f1 に取り直した(ユーザーの事前承認の範囲)
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
