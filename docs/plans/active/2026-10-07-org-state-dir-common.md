@@ -136,3 +136,4 @@ Critical forks: None
 - [ ] PR created
 - 2026-10-07: Codex plan advisory の 3 件(sandbox の書き込み、動いている座席がある状態の切り替えと戻し、`.git` の名前だけで main と決める誤り)は、ユーザーが「計画を直す」を選び、Scope・AC・Design decisions・Rollout に反映した
 - 2026-10-07: S1 を c8dc2e8e でコミットした(implementer)。実装中に `--separate-git-dir` のリポジトリでは `git worktree list` の先頭が git dir の親になるとわかり、main の中は show-toplevel を使う形に変えた。計画の Scope・Assumptions・Non-goals・Design decisions と図 2・図 3 を直し、ユーザーが承認し直した(digest d8a7f8ae89c1)
+- 2026-10-07: S2 を c90a504e でコミットした(implementer)。書き換えの動詞は spawn(`--dry-run` を含む)・start・send・stop・disband・watch、読むだけの動詞は org の status・read・wait・report と `ralph status`・`ralph insights`。計画が決めていなかった 2 点は次のようにした。古い台帳が読めないとき、書き換えの動詞は止め、読むだけの動詞は注意を出す。`ralph insights` には `--state-dir` がないので、注意では `RALPH_ORG_STATE_DIR` を案内する
