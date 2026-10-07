@@ -2,7 +2,7 @@
 
 - Date: 2026-10-07(JST。実行の記録は UTC の 2026-10-06 23:19〜23:42)
 - Plan: docs/plans/active/2026-10-07-guard-bypass-and-hygiene.md
-- Tester: tester subagent (Claude Opus 5.5)、pipeline cycle 1(`cycle-count.json` は 1)
+- Tester: tester subagent (Claude Opus 5.5)、pipeline cycle 1(`cycle-count.json` は 1)。cycle 2 は末尾の「Cycle 2」節で、判定は最後の「Verdict」節
 - Scope: branch fix/guard-bypass-and-hygiene の HEAD 98a43eb1 と base origin/main 2a22ba78 の差分(28 ファイル、+1604/-129、Go のファイルは 0)。behavioral test だけを実行した(静的解析は /verify で済んでいる)。plan の Test plan の unit・integration・regression・edge case と、AC1〜AC7 のうちテストで確かめる部分を見た。guard のテストと新しい 2 本は、Docker の ubuntu:24.04(dash、GNU grep 3.11、GNU sed 4.9、bash 5.2.21)でも実行した
 - Evidence: `docs/evidence/test-2026-10-07-guard-bypass-and-hygiene.log`(`docs/evidence/*.log` は gitignore 対象なので commit しない)。`run-test.sh` 自身のログは `docs/evidence/verify-2026-10-06-231941.log`、full の test モードのログは `docs/evidence/verify-2026-10-06-232447.log`
 
@@ -255,7 +255,7 @@ AC1 の「deny が ask より先」は mutation で確かめた。ask の規則�
 8. Claude Code の実際の payload に `permission_mode: "bypassPermissions"` が入ること。この session で動いている guard は main のチェックアウトの旧版なので、新しい guard の live での確認はマージのあとになる。おそらく文書どおり。未確認です
 9. `/pr` での実際の archive。scratchpad の写しで確かめた結果は上のとおりで、実際の `/pr` で同じになるかはその時点で分かる
 
-## Verdict
+## Cycle 1 verdict
 
 - Verdict: pass
 - Pass: `./scripts/run-test.sh`(shell 39 ファイル 1,943 件、Go 8 パッケージ、rc 0)、`RALPH_VERIFY_SCOPE=full HARNESS_VERIFY_MODE=test ./scripts/run-verify.sh`(同じ件数、rc 0)、`go test ./... -count=1`(8 / 8)、指定の 5 本(220、5、22、20、51 件)を単独で 3 回ずつ、ubuntu:24.04 の GNU grep / sed での guard と新しい 2 本、`post_edit_verify.sh` の新旧の比較、mutation 39 件のうち 34 件が red。実行権限の検査で落ちたテストは 0 本
@@ -263,3 +263,91 @@ AC1 の「deny が ask より先」は mutation で確かめた。ask の規則�
 - Blocked: なし
 
 テストは通っており、/pr に進めない理由はない。Test gaps の 1〜5 はそれぞれ 1〜2 行で足せるので、/sync-docs か次の修正の機会に足すかを判断してほしい。
+
+## Cycle 2
+
+- Date: 2026-10-07(実行の記録は UTC の 02:11〜02:21)
+- Tester: tester subagent (Claude Opus 5.5)、pipeline cycle 2(`cycle-count.json` は 2)
+- Scope: cycle 1 の test(HEAD 98a43eb1)のあとのコミットで、HEAD は 51ce09f7。コードの変更は 0db1a97e と ab3ee31c の 2 つで、`pre_bash_guard.sh` の `tee_lead` の 1 行とそのコメント、`post_edit_verify.sh` のコメントの折り返し、`tests/test-pre-bash-guard.sh` の 60 件(hook は root と template で、`cmp` で一致)。`scripts/verify.local.sh` は冒頭のコメントだけ。ほかは記録と文書。依頼どおり mutation は `tee_lead` まわりの spot check に絞った
+- Evidence: `docs/evidence/test-2026-10-07-guard-bypass-and-hygiene.log` の末尾の「Cycle 2」節(手元だけ)。`run-test.sh` 自身のログは `docs/evidence/verify-2026-10-07-021111.log`
+
+### Test execution (cycle 2)
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `./scripts/run-test.sh`(既定の changed) | shell 39 ファイル(2,003 件)、Go 8 パッケージ | すべて | 0 | 1(cycle 1 と同じ) | 286 s、rc 0 |
+| `go test ./... -count=1 -cover` | 8 パッケージ | 8 | 0 | 0(`[no test files]` の 2 パッケージを除く) | 49 s、rc 0 |
+| 指定の suite と `test-insights-append.sh` を単独で 1 回 | 280 / 24 / 5 / 22 / 20 / 51 | すべて | 0 | 0 | rc 0 |
+| ubuntu:24.04、jq を入れる前の `test-pre-bash-guard.sh` | 280 | 140(jq なしの経路) | 0 | 140(jq の経路) | rc 0 |
+| ubuntu:24.04、jq を入れたあとの `test-pre-bash-guard.sh` | 280 | 280 | 0 | 0 | rc 0 |
+| mutation の spot check(9 件) | 9 | red 9 件 | - | - | 189 s |
+
+- `run-test.sh` は `Requested scope: changed` で走り、cycle 1 と同じく `Language scope: full fallback (unclassified:.claude/hooks/lib_json.sh)` になった。cycle 1 で full の 2 回目と件数が一致したので、今回は full の 2 回目を流していない。
+- shell の 39 ファイルは `tests/test-*.sh` の全件で、`find tests -name 'test-*.sh'` の一覧と実行した一覧を `comm` で比べて差はなかった。`git ls-files -s` では 39 本とも 100755 で、ログに AC4 の FAIL の行(`not executable in the working tree (` などの検出の行)はない。
+- 件数は cycle 1 と同じ数え方で、スクリプトにして cycle 1 のログ(`verify-2026-10-06-231941.log`)に当て、1,943 件と skip 1 件になることを先に確かめた。cycle 1 の表と違うのは `test-pre-bash-guard.sh` の 220 から 280 だけで、ほかの 38 本は suite ごとの件数が `diff` で一致した。合計は 1,943 から 2,003 件。
+- skip の 1 件は cycle 1 と同じ `tests/test-secret-scan-branch.sh` の「git 2.41 より古い本物の git」のケース(手元は git 2.49.0)。
+- `run-test.sh` の中の `go test ./...` は `internal/org` 以外がキャッシュの結果だったので、`-count=1` で流し直した。coverage は `internal/cli` 84.7%、`internal/config` 92.3%、`internal/insights` 86.1%、`internal/org` 90.8%、`internal/org/driver` 92.0%、`internal/org/protocol` 97.9%、`internal/scaffold` 75.7%、`internal/upgrade` 91.2% で、cycle 1 と同じ。このブランチは Go のファイルを変えていない。
+- 実行の前後で worktree の `git status --porcelain` は 0 行だった。
+
+### 指定の suite(cycle 2)
+
+| Suite | cycle 1 | cycle 2 | 変わった理由 |
+| --- | --- | --- | --- |
+| `test-pre-bash-guard.sh` | 220 / 220 | 280 / 280 | 0db1a97e と ab3ee31c が足した 60 件。C の 3 形 × 2 モード × 2 経路で 12 件、D の 10 形 × 2 × 2 で 40 件、H の 4 件 × 2 経路で 8 件 |
+| `test-post-edit-verify.sh` | 24 / 24 | 24 / 24 | なし(hook の差はコメントだけ) |
+| `test-verify-local-hook-tests.sh` | 5 / 5 | 5 / 5 | なし |
+| `test-archive-plan.sh` | 22 / 22 | 22 / 22 | なし |
+| `test-skill-insight-cycle.sh` | 20 / 20 | 20 / 20 | なし |
+
+### ubuntu:24.04 での実行(cycle 2)
+
+`git archive HEAD` の tar を標準入力からコンテナに渡した。環境は aarch64、`/bin/sh` は dash、GNU grep 3.11、GNU sed 4.9、bash 5.2.21。jq は最初は入っておらず、途中で `apt-get install jq` で jq 1.7 を入れた。jq を入れる前は 140 件 PASS(jq なしの経路)と 140 件 SKIP で rc 0、入れたあとは 280 / 280 で rc 0。cycle 2 で足した 60 件も、GNU grep / sed と BSD grep / sed で同じ結果になった。
+
+### Mutation の spot check(cycle 2)
+
+cycle 1 と同じ方法で、`git archive HEAD` の写しの `pre_bash_guard.sh` を 1 か所ずつ書き換えて `test-pre-bash-guard.sh` を流し、pristine の写しから戻して一致を確かめた。worktree の追跡ファイルには触れていない。FAIL の件数は suite の集計行を除いた数。
+
+| ID | 書き換え | 結果 |
+| --- | --- | --- |
+| T1 | `tee_lead` の `tee` の前の集合からバッククォートを外す | red(バッククォートの中の `tee .env`、2 経路で 2 件) |
+| T2 | 同じ集合から `\` を外す | red(`\tee .env`、`\tee .git/x`、4 件) |
+| T3 | 2 文字の `\n` と `\t` の選択肢を外す | red(jq なしの側の 3 件。タブのあとの `tee` と、改行のあとの `tee .env` と `tee .git/config`) |
+| T4 | `\n` だけを受け付ける(`\t` を外す) | red(タブのあとの `tee .env`、jq なし 1 件) |
+| T5 | `tee` の引数の読み取りを `>` で止める(0db1a97e の形) | red(`2>/dev/null` を挟む 2 形、4 件) |
+| T6 | `tee` の引数の読み取りを `<` で止めない(811e1452 の形) | red(C の `tee /tmp/out < .env` と `.git/config`、4 件) |
+| G8 | `word_end` から `<` と `>` を外す(cycle 1 で残った) | red(`cat >.env<<EOF`、2 件) |
+| G9 | `tee` の前の `/` を外す(cycle 1 で残った) | red(`/usr/bin/tee .git/x`、2 件) |
+| G14 | `word_char` に `<` と `>` を入れる(cycle 1 で残った) | red(C の `cat >/tmp/o</repo/.git/HEAD`、2 件) |
+
+T1〜T6 は cycle 2 の 2 つの修正の箇所で、どれも足したテストの行が見分ける。G8、G9、G14 は cycle 1 の Test gaps の 1〜3 で、0db1a97e が足した行で red になった。
+
+### Failure analysis(cycle 2)
+
+| Test | Error | Root cause | Proposed fix |
+| --- | --- | --- | --- |
+| なし | - | - | - |
+
+### Regression checks(cycle 2)
+
+| Previously broken behavior | Status | Evidence |
+| --- | --- | --- |
+| jq がないと、改行のあとの `tee .env` を見逃す(cross-review の 1 件目) | 直った | H の 4 件。T3 で red |
+| `tee` の引数が `<` を越えて、入力のファイルを書き込み先として拾う(cross-review の 2 件目) | 直った | C の `tee /tmp/out < .env` と `.git/config`。T6 で red |
+| `\tee .env` とバッククォートの中の `tee .env` を見逃す(self-review の C2-M1) | 直った | D の 3 形。T1、T2 で red |
+| リダイレクトの後ろにある `tee` の書き込み先を見逃す(self-review の C2-L1) | 直った | D の `tee out.txt 2>/dev/null .env` の 2 形。T5 で red |
+| cycle 1 で pass した shell 38 本、Go 8 パッケージ | 変わらず | suite ごとの件数が cycle 1 と一致、Go の coverage も同じ |
+
+### Test gaps(cycle 2)
+
+cycle 1 の Test gaps の 1〜3 は 0db1a97e で埋まった(上の G8、G9、G14)。6 のタブは、`tee` の前のタブだけが 0db1a97e で直り、`>` のあとと `tee` のあとのタブは jq がないと ask にならないまま残る(verify の cycle 2 の Documentation drift と同じ)。4、5、7、8、9 は cycle 1 のとおり残る。9 の `/pr` での archive は、verify の cycle 2 が scratchpad で `Updated 3 reference(s)` が出ることを確かめている。
+
+新しいテストの穴は 1 つ。verify の cycle 2 の Observational checks の表にある `tee` の形(`tee < in.txt .env > /dev/null`、`tee out 2>&1 .env > /dev/null` など、旧 guard が後ろの `>` に偶然当たって ask を返していた形)は、テストにない。今の判定(none)は plan の Risks に記録された挙動なので、テストで固定するかどうかは判断に任せる。
+
+## Verdict
+
+- Verdict: pass
+- Pass: cycle 2 の `./scripts/run-test.sh`(shell 39 ファイル 2,003 件、Go 8 パッケージ、rc 0)、`go test ./... -count=1`(8 / 8)、指定の suite を単独で 1 回(280、24、5、22、20 件と insights-append の 51 件)、ubuntu:24.04 の GNU grep / sed と dash での guard(jq なし 140 件、jq あり 280 件)、mutation の spot check 9 件がすべて red。実行権限の検査で落ちたテストは 0 本
+- Fail: なし
+- Blocked: なし
+
+テストは通っており、/pr に進めない理由はない。残っている穴は Test gaps(cycle 2)のとおりで、どれも今回の変更を止める理由ではない。
