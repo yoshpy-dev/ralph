@@ -125,7 +125,7 @@ trap cleanup EXIT
 # `command -v jq` fails and lib_json.sh falls back to its sed path.
 minimal_path="$workdir/no-jq-bin"
 mkdir -p "$minimal_path"
-for tool in sh bash dash cat grep sed printf dirname env tr command test; do
+for tool in sh bash dash cat grep sed printf dirname env tr command test awk; do
   resolved="$(command -v "$tool" 2>/dev/null || true)"
   [ -n "$resolved" ] && ln -sf "$resolved" "$minimal_path/$tool" 2>/dev/null || true
 done
