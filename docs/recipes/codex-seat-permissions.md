@@ -93,10 +93,12 @@ above. When the scratch `--state-dir` in the procedure below lies outside
 `--add-dir <scratch>/state-...`; keep the "outside" target out of that
 directory.
 
-Checked on 2026-10-07 with codex-cli 0.160.0 on macOS: with
-`--sandbox workspace-write` and both the cwd and the target outside `/tmp`,
-`touch <target>` failed with `Operation not permitted` without `--add-dir`
-and succeeded with `--add-dir <target dir>`.
+Checked on 2026-10-07 with codex-cli 0.160.0 on macOS, with the cwd and
+the target directory both outside `/tmp`, `$TMPDIR`, and the repository:
+under `--sandbox workspace-write` without `--add-dir`, `touch` created
+nothing and printed `touch: <target>: Operation not permitted` (macOS's BSD
+`touch`; other platforms may word the error differently). With
+`--add-dir <target dir>` the file was created.
 
 To re-check on your machine, run the same probe twice. Keep both
 directories outside `/tmp` and `$TMPDIR`, which are writable by default, and
