@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -2180,6 +2181,73 @@ func TestOrgSpawn_Codex_GuardedRoleOverride_Spawns(t *testing.T) {
 	args := h.agentStartArgs[0]
 	if len(args) != 2 || args[0] != "--model" {
 		t.Fatalf("expected no permission flags for guarded mode, got %v", args)
+	}
+}
+
+// TestOrgSpawn_Codex_WorkspaceWrite_AddDirWhenStateDirOutsideCwd pins AC8
+// (plan 2026-10-07-org-state-dir-common) at the AgentStart argv: once
+// codex_verified unlocks workspace-write, a codex leader seat whose --cwd is
+// a linked worktree gets --add-dir <state dir> right after the sandbox flags
+// and before --model, so it can append to the shared ledger under the main
+// worktree; a leader seat whose --cwd is the main worktree (state dir
+// inside) and an implementer seat in the same linked worktree get the
+// sandbox flags alone.
+func TestOrgSpawn_Codex_WorkspaceWrite_AddDirWhenStateDirOutsideCwd(t *testing.T) {
+	cases := []struct {
+		name      string
+		role      string
+		linked    bool
+		wantFlags bool
+	}{
+		{"leader/cwd is a linked worktree", LeaderIdentity, true, true},
+		{"leader/cwd is the main worktree", LeaderIdentity, false, false},
+		{"implementer/cwd is a linked worktree", "implementer", true, false},
+	}
+	for _, mode := range []string{PermissionModeAutonomous, PermissionModeEdits} {
+		sandbox := codexEditsArgs
+		if mode == PermissionModeAutonomous {
+			sandbox = codexAutonomousArgs
+		}
+		for _, tc := range cases {
+			t.Run(mode+"/"+tc.name, func(t *testing.T) {
+				// Each subtest gets its own tree and ledger, so a second
+				// spawn of the same seat is not an idempotent no-op.
+				root := t.TempDir()
+				mainWT := filepath.Join(root, "main")
+				linkedWT := filepath.Join(mainWT, ".claude", "worktrees", "slug")
+				stateDir := filepath.Join(mainWT, ".harness", "state", "org")
+				if err := os.MkdirAll(linkedWT, 0o755); err != nil {
+					t.Fatalf("mkdir linked worktree: %v", err)
+				}
+				cwd := mainWT
+				if tc.linked {
+					cwd = linkedWT
+				}
+				// Both roles render an embedded template long enough to go
+				// through the prompt file, so the pointer is the last arg.
+				pointer := PromptFilePointer(filepath.Join(stateDir, "prompts", "org-a_"+tc.role+".md"))
+				want := slices.Concat(sandbox, []string{"--model", "gpt-5-codex", pointer})
+				if tc.wantFlags {
+					want = slices.Concat(sandbox, []string{"--add-dir", stateDir, "--model", "gpt-5-codex", pointer})
+				}
+
+				o, h, _ := testOrg(t)
+				o.Manifest = NewManifestStoreAtPath(ManifestPathIn(stateDir))
+				o.Config.Permissions = config.OrgPermissionsConfig{Default: mode, CodexVerified: true}
+
+				p := mustSpawnParams("org-a", tc.role) // seat id = role, as `ralph org start` does for leader
+				p.Role = tc.role
+				p.Driver = "codex"
+				p.Model = "gpt-5-codex"
+				p.Cwd = cwd
+				if result := o.Spawn(p); result.Outcome != SpawnOutcomeSpawned {
+					t.Fatalf("expected spawn to succeed, got %+v", result)
+				}
+				if got := h.agentStartArgs[0]; !slices.Equal(got, want) {
+					t.Fatalf("AgentStart args = %v, want %v", got, want)
+				}
+			})
+		}
 	}
 }
 

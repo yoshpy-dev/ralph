@@ -27,9 +27,9 @@ func newInsightsCmd() *cobra.Command {
 receipts (<org-state-dir>/model-receipts.jsonl) into a pipeline summary.
 
 The org state dir is resolved with the same precedence "ralph org" verbs
-use (env RALPH_ORG_STATE_DIR, git toplevel, then cwd) -- see
-internal/org/statedir.go's ResolveOrgStateDir. Pass --receipts to point at
-an explicit file instead.
+use (env RALPH_ORG_STATE_DIR, the main worktree shared by its linked
+worktrees, git toplevel, then cwd) -- see internal/org/statedir.go's
+ResolveOrgStateDir. Pass --receipts to point at an explicit file instead.
 
 Sections:
   Events     — per-phase table: phase / events / verdicts / findings / triage
@@ -45,7 +45,10 @@ Use --json for machine-readable output of the full aggregate.`,
 				eventsDir = "docs/insights/events"
 			}
 			if receiptsPath == "" {
-				stateDir, _ := org.ResolveOrgStateDir("", false)
+				stateDir, stateDirSource := org.ResolveOrgStateDir("", false)
+				if err := guardLegacyOrgStateDir(cmd, stateDir, stateDirSource, orgLedgerReadOnly); err != nil {
+					return err
+				}
 				receiptsPath = org.ReceiptsPathIn(stateDir)
 			}
 			return runInsights(eventsDir, receiptsPath, jsonMode, cmd)
@@ -53,7 +56,7 @@ Use --json for machine-readable output of the full aggregate.`,
 	}
 
 	cmd.Flags().StringVar(&eventsDir, "events-dir", "", "directory containing insight event JSONL files (default: docs/insights/events)")
-	cmd.Flags().StringVar(&receiptsPath, "receipts", "", "path to the org runtime's model-receipts.jsonl (default: resolved via the org state-dir precedence -- env RALPH_ORG_STATE_DIR, git toplevel, or cwd)")
+	cmd.Flags().StringVar(&receiptsPath, "receipts", "", "path to the org runtime's model-receipts.jsonl (default: resolved via the org state-dir precedence -- env RALPH_ORG_STATE_DIR, the main worktree, git toplevel, or cwd)")
 	cmd.Flags().BoolVar(&jsonMode, "json", false, "emit the aggregate as JSON")
 
 	cmd.AddCommand(newInsightsBackfillCmd())
