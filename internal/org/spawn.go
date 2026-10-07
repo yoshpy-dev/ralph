@@ -103,6 +103,17 @@ type HerdrClient interface {
 	// driver.IsNotFound is true; for any other failure it is false.
 	PaneClose(ctx context.Context, paneID string) error
 	WorkspaceClose(ctx context.Context, workspaceID string) error
+	// PaneGet, TabGet and WorkspaceGet run `herdr pane get` / `herdr tab
+	// get` / `herdr workspace get`: the ids of the tab and workspace that
+	// hold a pane, and the label of a tab or workspace. Stop and Disband
+	// read them before a C-c or a close, to confirm a recorded id still
+	// names what spawn created (it labels a seat's tab with the seat id and
+	// the org's workspace with the org_id; see confirmSeatPane in
+	// verbs.go). An unknown id comes back as an error for which
+	// driver.IsNotFound is true.
+	PaneGet(ctx context.Context, paneID string) (tabID, workspaceID string, err error)
+	TabGet(ctx context.Context, tabID string) (label string, err error)
+	WorkspaceGet(ctx context.Context, workspaceID string) (label string, err error)
 }
 
 // AgmsgClient is the subset of driver.Agmsg's methods the spawn saga and the
@@ -196,10 +207,11 @@ type Org struct {
 	// the poll's not-found/timeout path runs fast.
 	CodexModelObserveTimeout  time.Duration
 	CodexModelObserveInterval time.Duration
-	// DriverCallTimeout bounds each herdr / agmsg call Stop makes (the C-c,
-	// the pane close, the agmsg Leave), each workspace close Disband makes,
-	// and the close in CloseDeferredSelfPane / CloseDeferredSelfWorkspace,
-	// one fresh deadline per call. Zero (the field's default) means "use
+	// DriverCallTimeout bounds each herdr / agmsg call Stop makes (the pane,
+	// tab and workspace gets of the ownership check, the C-c, the pane
+	// close, the agmsg Leave), each workspace get and close Disband makes,
+	// and the gets and the close in CloseDeferredSelfPane /
+	// CloseDeferredSelfWorkspace, one fresh deadline per call. Zero (the field's default) means "use
 	// defaultDriverCallTimeout" -- tests set a tiny value so a call that
 	// never answers times out fast.
 	DriverCallTimeout time.Duration

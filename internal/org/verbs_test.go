@@ -130,7 +130,10 @@ func TestOrgDisband_OnlyStopsExistingActiveSeats_UnknownNeverAppears(t *testing.
 		t.Fatalf("spawn seat-1 failed: %+v", r)
 	}
 	// seat-2 is spawned then already stopped -- Disband must not attempt to
-	// stop it a second time (it's no longer Active).
+	// stop it a second time (it's no longer Active). It gets a pane of its
+	// own: sharing pane-1 would relabel seat-1's tab, and Stop's ownership
+	// check would then refuse seat-1's pane.
+	h.paneID = "pane-2"
 	if r := o.Spawn(mustSpawnParams("org-a", "seat-2")); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("spawn seat-2 failed: %+v", r)
 	}
@@ -709,27 +712,44 @@ func TestOrgDisband_DryRun_NoDriverCallsWorkspaceStaysOpen(t *testing.T) {
 }
 
 // TestOrgCloseDeferredSelfWorkspace_Outcomes mirrors
-// TestOrgCloseDeferredSelfPane_Outcomes for the workspace.
+// TestOrgCloseDeferredSelfPane_Outcomes for the workspace, with org-a's
+// workspace recorded as ws-9.
 func TestOrgCloseDeferredSelfWorkspace_Outcomes(t *testing.T) {
 	refused := errors.New("herdr workspace close: connect: connection refused")
 	tests := []struct {
-		name      string
-		id        string
-		closeErr  error
-		block     bool
-		wantCalls int
-		wantErrIs error // nil: want a nil error
+		name        string
+		id          string
+		setup       func(h *fakeHerdr) // runs after org-a's spawn in ws-9
+		closeErr    error
+		block       bool
+		wantCalls   int
+		wantErrIs   error
+		wantErrText string
 	}{
 		{name: "empty id is a no-op", id: "", wantCalls: 0},
 		{name: "closed", id: "ws-9", wantCalls: 1},
 		{name: "not found counts as closed", id: "ws-9", closeErr: herdrWorkspaceCloseNotFound("ws-9"), wantCalls: 1},
 		{name: "other failure", id: "ws-9", closeErr: refused, wantCalls: 1, wantErrIs: refused},
 		{name: "timeout", id: "ws-9", block: true, wantCalls: 1, wantErrIs: context.DeadlineExceeded},
+		{name: "gone at the check needs no close", id: "ws-9", setup: func(h *fakeHerdr) { delete(h.workspaceLabels, "ws-9") }, wantCalls: 0},
+		{
+			name: "relabelled: left open", id: "ws-9", wantCalls: 0,
+			setup:       func(h *fakeHerdr) { h.workspaceLabels["ws-9"] = "someone-elses" },
+			wantErrText: `labels it "someone-elses"`,
+		},
+		{name: "no org recorded on it: left open", id: "ws-unrecorded", wantCalls: 0, wantErrText: "no org recorded"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			o, h, _ := testOrg(t)
 			o.DriverCallTimeout = 20 * time.Millisecond
+			h.workspaceID = "ws-9"
+			if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+				t.Fatalf("spawn failed: %+v", r)
+			}
+			if tt.setup != nil {
+				tt.setup(h)
+			}
 			h.workspaceCloseBlock = tt.block
 			if tt.closeErr != nil {
 				h.workspaceCloseErrs = map[string]error{tt.id: tt.closeErr}
@@ -738,14 +758,15 @@ func TestOrgCloseDeferredSelfWorkspace_Outcomes(t *testing.T) {
 			if len(h.workspaceCloseCalls) != tt.wantCalls {
 				t.Fatalf("WorkspaceClose calls = %v, want %d", h.workspaceCloseCalls, tt.wantCalls)
 			}
-			if tt.wantErrIs == nil {
+			if tt.wantErrIs == nil && tt.wantErrText == "" {
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)
 				}
 				return
 			}
-			if !errors.Is(err, tt.wantErrIs) || !strings.Contains(err.Error(), tt.id) {
-				t.Fatalf("expected an error wrapping %v and naming %s, got %v", tt.wantErrIs, tt.id, err)
+			if err == nil || !strings.Contains(err.Error(), tt.id) || !strings.Contains(err.Error(), tt.wantErrText) ||
+				(tt.wantErrIs != nil && !errors.Is(err, tt.wantErrIs)) {
+				t.Fatalf("expected an error naming %s, wrapping %v and containing %q, got %v", tt.id, tt.wantErrIs, tt.wantErrText, err)
 			}
 		})
 	}
@@ -1710,9 +1731,10 @@ func herdrPaneCloseNotFound(paneID string) error {
 }
 
 // TestOrgStop_CallOrder_CtrlCThenCloseThenLeaveThenStopped pins plan AC1's
-// order: the C-c, then the close of the seat's recorded pane, then the agmsg
-// Leave, and only then the `stopped` event. The Leave hook snapshots what had
-// already happened when Leave ran.
+// order, with plan AC14's ownership check in front: the pane, tab and
+// workspace gets, then the C-c, then the close of the seat's recorded pane,
+// then the agmsg Leave, and only then the `stopped` event. The Leave hook
+// snapshots what had already happened when Leave ran.
 func TestOrgStop_CallOrder_CtrlCThenCloseThenLeaveThenStopped(t *testing.T) {
 	o, h, a := testOrg(t)
 	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
@@ -1732,7 +1754,7 @@ func TestOrgStop_CallOrder_CtrlCThenCloseThenLeaveThenStopped(t *testing.T) {
 		t.Fatalf("expected a clean stop, got %+v", result)
 	}
 
-	wantHerdr := []string{"pane_send_keys", "pane_close"}
+	wantHerdr := []string{"pane_get", "tab_get", "workspace_get", "pane_send_keys", "pane_close"}
 	if !slices.Equal(herdrAtLeave, wantHerdr) {
 		t.Fatalf("herdr calls before Leave = %v, want %v", herdrAtLeave, wantHerdr)
 	}
@@ -1747,6 +1769,9 @@ func TestOrgStop_CallOrder_CtrlCThenCloseThenLeaveThenStopped(t *testing.T) {
 	}
 	if !slices.Equal(h.paneCloseCalls, []string{"pane-1"}) {
 		t.Errorf("expected exactly one PaneClose(pane-1), got %v", h.paneCloseCalls)
+	}
+	if !slices.Equal(h.paneGetCalls, []string{"pane-1"}) || !slices.Equal(h.tabGetCalls, []string{fakeTabID("pane-1")}) || !slices.Equal(h.workspaceGetCalls, []string{"ws-1"}) {
+		t.Errorf("expected the check on pane-1, its tab and ws-1, got panes %v tabs %v workspaces %v", h.paneGetCalls, h.tabGetCalls, h.workspaceGetCalls)
 	}
 
 	events := mustReadEvents(t, o)
@@ -2024,27 +2049,49 @@ func TestOrgStop_OwnPane_SkipsCtrlCAndClose_ThenClosesLast(t *testing.T) {
 }
 
 // TestOrgCloseDeferredSelfPane_Outcomes pins CloseDeferredSelfPane's error
-// contract: an empty id makes no call, closed and not-found are success, and
-// any other failure -- including a timeout -- is an error naming the pane.
+// contract, for seat-1 recorded on pane-9: an empty id makes no call; the
+// recorded pane is checked (plan AC14) and then closed, with closed and
+// not-found as success and any other close failure -- including a timeout --
+// an error naming the pane; a pane herdr no longer knows at the check needs
+// no close; and a pane whose tab is no longer seat-1's, or that no seat
+// recorded, is left open with an error naming it.
 func TestOrgCloseDeferredSelfPane_Outcomes(t *testing.T) {
 	tests := []struct {
 		name      string
 		paneID    string
+		setup     func(h *fakeHerdr) // runs after seat-1's spawn on pane-9
 		closeErr  error
 		block     bool
 		wantCalls int
-		wantErrIs error // nil: want a nil error
+		// wantErrIs / wantErrText, when set, ask for an error naming the pane
+		// that wraps wantErrIs and contains wantErrText; neither: nil.
+		wantErrIs   error
+		wantErrText string
 	}{
 		{name: "empty id is a no-op", paneID: "", wantCalls: 0},
 		{name: "closed", paneID: "pane-9", wantCalls: 1},
 		{name: "not found counts as closed", paneID: "pane-9", closeErr: herdrPaneCloseNotFound("pane-9"), wantCalls: 1},
 		{name: "other failure", paneID: "pane-9", closeErr: errTestCloseRefused, wantCalls: 1, wantErrIs: errTestCloseRefused},
 		{name: "timeout", paneID: "pane-9", block: true, wantCalls: 1, wantErrIs: context.DeadlineExceeded},
+		{name: "gone at the check needs no close", paneID: "pane-9", setup: func(h *fakeHerdr) { delete(h.paneTabs, "pane-9") }, wantCalls: 0},
+		{
+			name: "tab relabelled: left open", paneID: "pane-9", wantCalls: 0,
+			setup:       func(h *fakeHerdr) { h.tabLabels[fakeTabID("pane-9")] = "someone-else" },
+			wantErrText: `labelled "someone-else"`,
+		},
+		{name: "no seat recorded on it: left open", paneID: "pane-unrecorded", wantCalls: 0, wantErrText: "no seat recorded"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			o, h, _ := testOrg(t)
 			o.DriverCallTimeout = 20 * time.Millisecond
+			h.paneID = "pane-9"
+			if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+				t.Fatalf("spawn failed: %+v", r)
+			}
+			if tt.setup != nil {
+				tt.setup(h)
+			}
 			h.paneCloseBlock = tt.block
 			if tt.closeErr != nil {
 				h.paneCloseErrs = map[string]error{tt.paneID: tt.closeErr}
@@ -2053,14 +2100,15 @@ func TestOrgCloseDeferredSelfPane_Outcomes(t *testing.T) {
 			if len(h.paneCloseCalls) != tt.wantCalls {
 				t.Fatalf("PaneClose calls = %v, want %d", h.paneCloseCalls, tt.wantCalls)
 			}
-			if tt.wantErrIs == nil {
+			if tt.wantErrIs == nil && tt.wantErrText == "" {
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)
 				}
 				return
 			}
-			if !errors.Is(err, tt.wantErrIs) || !strings.Contains(err.Error(), tt.paneID) {
-				t.Fatalf("expected an error wrapping %v and naming %s, got %v", tt.wantErrIs, tt.paneID, err)
+			if err == nil || !strings.Contains(err.Error(), tt.paneID) || !strings.Contains(err.Error(), tt.wantErrText) ||
+				(tt.wantErrIs != nil && !errors.Is(err, tt.wantErrIs)) {
+				t.Fatalf("expected an error naming %s, wrapping %v and containing %q, got %v", tt.paneID, tt.wantErrIs, tt.wantErrText, err)
 			}
 		})
 	}
@@ -2105,6 +2153,326 @@ func TestOrgStop_ClosesOnlyTheSeatsRecordedPane(t *testing.T) {
 			t.Errorf("expected seat-2 untouched by seat-1's stop, got %+v", s)
 		}
 	}
+}
+
+// TestOrgStop_PaneNotConfirmed_NoCtrlCNoClose covers plan AC14 on the stop
+// side: when herdr no longer has the recorded pane as the seat's -- its tab
+// is labelled another seat, its workspace another org, its tab is gone
+// although the pane was found, or the pane get fails -- Stop sends no C-c and
+// does not close the pane. Without Force it records stop_failed naming what
+// did not match, skips the Leave, and the seat stays active; with Force it
+// records stopped (forced), still with no C-c and no close.
+func TestOrgStop_PaneNotConfirmed_NoCtrlCNoClose(t *testing.T) {
+	refused := errors.New("herdr pane get: connect: connection refused")
+	cases := []struct {
+		name     string
+		setup    func(h *fakeHerdr)
+		wantText string
+		wantIs   error // when non-nil, CloseErr must wrap it
+	}{
+		{
+			name:     "tab labelled another seat",
+			setup:    func(h *fakeHerdr) { h.tabLabels[fakeTabID("pane-1")] = "seat-9" },
+			wantText: `pane "pane-1" is not seat "seat-1"'s: herdr has it in tab "tab-pane-1" labelled "seat-9"`,
+		},
+		{
+			name:     "workspace labelled another org",
+			setup:    func(h *fakeHerdr) { h.workspaceLabels["ws-1"] = "org-z" },
+			wantText: `workspace "ws-1" is not org_id "org-a"'s: herdr labels it "org-z"`,
+		},
+		{
+			name:     "tab gone although the pane was found",
+			setup:    func(h *fakeHerdr) { delete(h.tabLabels, fakeTabID("pane-1")) },
+			wantText: `herdr has no tab "tab-pane-1" although it has the pane`,
+		},
+		{
+			name:     "pane get fails",
+			setup:    func(h *fakeHerdr) { h.getErrs = map[string]error{"pane-1": refused} },
+			wantText: "connection refused",
+			wantIs:   refused,
+		},
+	}
+	for _, tc := range cases {
+		for _, force := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/force=%v", tc.name, force), func(t *testing.T) {
+				o, h, a := testOrg(t)
+				if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+					t.Fatalf("spawn failed: %+v", r)
+				}
+				tc.setup(h)
+				sendKeysBefore := len(h.sendKeysCalls)
+
+				result := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-1", Force: force})
+				if got := len(h.sendKeysCalls) - sendKeysBefore; got != 0 {
+					t.Errorf("expected no C-c to an unconfirmed pane, got %d PaneSendKeys calls", got)
+				}
+				if len(h.paneCloseCalls) != 0 {
+					t.Errorf("expected no close of an unconfirmed pane, got %v", h.paneCloseCalls)
+				}
+				if result.CloseErr == nil || !strings.Contains(result.CloseErr.Error(), tc.wantText) || (tc.wantIs != nil && !errors.Is(result.CloseErr, tc.wantIs)) {
+					t.Fatalf("expected CloseErr to contain %q (wrapping %v), got %v", tc.wantText, tc.wantIs, result.CloseErr)
+				}
+				if isNotFound(result.CloseErr) {
+					t.Errorf("an unconfirmed pane must not read as already closed, got %v", result.CloseErr)
+				}
+				events := mustReadEvents(t, o)
+				last := events[len(events)-1]
+				active := activeRealSeats(t, o)
+
+				if force {
+					if result.Err != nil {
+						t.Fatalf("expected a forced stop to succeed, got %v", result.Err)
+					}
+					if last.Event != EventStopped {
+						t.Fatalf("expected stopped, got %q", last.Event)
+					}
+					assertDetailsContains(t, last.Details, "ctrl_c=skipped: pane not confirmed", "pane=not closed (forced): ", tc.wantText, "leave=ok")
+					if len(a.leaveCalls) != 1 || len(active) != 0 {
+						t.Errorf("expected the Leave and seat-1 inactive, got leaves %+v active %v", a.leaveCalls, active)
+					}
+					return
+				}
+				if !errors.Is(result.Err, result.CloseErr) {
+					t.Fatalf("expected Err to wrap CloseErr, got Err=%v", result.Err)
+				}
+				if last.Event != EventStopFailed {
+					t.Fatalf("expected stop_failed, got %q", last.Event)
+				}
+				assertDetailsContains(t, last.Details, "ctrl_c=skipped: pane not confirmed", "pane=not closed: ", tc.wantText, "leave=skipped: pane not closed")
+				if len(a.leaveCalls) != 0 || !slices.Equal(active, []OrgSeat{{"org-a", "seat-1"}}) {
+					t.Errorf("expected no Leave and seat-1 still active, got leaves %+v active %v", a.leaveCalls, active)
+				}
+			})
+		}
+	}
+}
+
+// TestOrgStop_PaneGoneAtCheck_RecordsAlreadyClosed: a pane herdr does not
+// know at the ownership check is already closed, so Stop sends no C-c, makes
+// no close call, and records stopped.
+func TestOrgStop_PaneGoneAtCheck_RecordsAlreadyClosed(t *testing.T) {
+	o, h, a := testOrg(t)
+	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", r)
+	}
+	delete(h.paneTabs, "pane-1")
+	sendKeysBefore := len(h.sendKeysCalls)
+
+	result := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-1"})
+	if result.Err != nil || result.CloseErr != nil {
+		t.Fatalf("expected a gone pane to count as closed, got Err=%v CloseErr=%v", result.Err, result.CloseErr)
+	}
+	if got := len(h.sendKeysCalls) - sendKeysBefore; got != 0 || len(h.paneCloseCalls) != 0 {
+		t.Fatalf("expected no C-c and no close, got %d C-c and closes %v", got, h.paneCloseCalls)
+	}
+	if len(h.tabGetCalls) != 0 || len(h.workspaceGetCalls) != 0 {
+		t.Errorf("expected the check to stop at the pane get, got tab gets %v workspace gets %v", h.tabGetCalls, h.workspaceGetCalls)
+	}
+	if len(a.leaveCalls) != 1 {
+		t.Errorf("expected the Leave, got %+v", a.leaveCalls)
+	}
+	events := mustReadEvents(t, o)
+	if last := events[len(events)-1]; last.Event != EventStopped || last.Details != "ctrl_c=skipped pane=already closed leave=ok" {
+		t.Fatalf("expected stopped with the already-closed note, got %s %q", last.Event, last.Details)
+	}
+}
+
+// TestOrgStopDisband_UnansweredGet_LeavesItAlone covers plan AC11 for the
+// ownership check: a get call that never answers is cut off by
+// DriverCallTimeout, and the pane or workspace counts as not closed, without
+// a C-c or a close.
+func TestOrgStopDisband_UnansweredGet_LeavesItAlone(t *testing.T) {
+	t.Run("stop", func(t *testing.T) {
+		o, h, _ := testOrg(t)
+		if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+			t.Fatalf("spawn failed: %+v", r)
+		}
+		o.DriverCallTimeout = 20 * time.Millisecond
+		h.getBlock = true
+		sendKeysBefore := len(h.sendKeysCalls)
+
+		start := time.Now()
+		result := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-1"})
+		if elapsed := time.Since(start); elapsed > 10*time.Second {
+			t.Fatalf("Stop took %v: the per-call timeout did not bound the pane get", elapsed)
+		}
+		if !errors.Is(result.Err, context.DeadlineExceeded) || !errors.Is(result.CloseErr, context.DeadlineExceeded) {
+			t.Fatalf("expected a timed-out get to fail the stop, got Err=%v CloseErr=%v", result.Err, result.CloseErr)
+		}
+		if got := len(h.sendKeysCalls) - sendKeysBefore; got != 0 || len(h.paneCloseCalls) != 0 {
+			t.Fatalf("expected no C-c and no close, got %d C-c and closes %v", got, h.paneCloseCalls)
+		}
+		if events := mustReadEvents(t, o); events[len(events)-1].Event != EventStopFailed {
+			t.Fatalf("expected stop_failed, got %v", eventNames(t, o))
+		}
+	})
+	t.Run("disband", func(t *testing.T) {
+		o, h, _ := testOrg(t)
+		if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+			t.Fatalf("spawn failed: %+v", r)
+		}
+		if r := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-1"}); r.Err != nil {
+			t.Fatalf("pre-stop: %v", r.Err)
+		}
+		o.DriverCallTimeout = 20 * time.Millisecond
+		h.getBlock = true
+
+		start := time.Now()
+		result := o.Disband(DisbandParams{OrgID: "org-a"})
+		if elapsed := time.Since(start); elapsed > 10*time.Second {
+			t.Fatalf("Disband took %v: the per-call timeout did not bound the workspace get", elapsed)
+		}
+		if result.Disbanded || len(result.FailedWorkspaces) != 1 || !errors.Is(result.FailedWorkspaces[0].Err, context.DeadlineExceeded) {
+			t.Fatalf("expected a timed-out workspace get to fail the disband, got %+v", result)
+		}
+		if len(h.workspaceCloseCalls) != 0 || len(eventsNamed(mustReadEvents(t, o), EventOrgWorkspaceClosed)) != 0 {
+			t.Fatalf("expected no workspace close and no org_workspace_closed, got closes %v events %v", h.workspaceCloseCalls, eventNames(t, o))
+		}
+	})
+}
+
+// TestOrgDisband_WorkspaceNotConfirmed_LeftOpen covers plan AC14 on the
+// disband side: a recorded workspace herdr labels with another org_id is not
+// closed. Without Force it is a workspace failure and blocks disbanded; with
+// Force it is recorded org_workspace_closed (forced) and disbanded follows,
+// still with no close. seat-1 is stopped first, so only the workspace check
+// is in play (its pane lies in the same workspace and would fail too).
+func TestOrgDisband_WorkspaceNotConfirmed_LeftOpen(t *testing.T) {
+	for _, force := range []bool{false, true} {
+		t.Run(fmt.Sprintf("force=%v", force), func(t *testing.T) {
+			o, h, _ := testOrg(t)
+			if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+				t.Fatalf("spawn failed: %+v", r)
+			}
+			if r := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-1"}); r.Err != nil {
+				t.Fatalf("pre-stop: %v", r.Err)
+			}
+			h.workspaceLabels["ws-1"] = "someone-elses"
+			const wantText = `workspace "ws-1" is not org_id "org-a"'s: herdr labels it "someone-elses"`
+
+			result := o.Disband(DisbandParams{OrgID: "org-a", Force: force})
+			if len(h.workspaceCloseCalls) != 0 {
+				t.Fatalf("expected no close of a workspace that is not the org's, got %v", h.workspaceCloseCalls)
+			}
+			if len(result.ClosedWorkspaces) != 0 || len(result.FailedWorkspaces) != 1 || result.FailedWorkspaces[0].WorkspaceID != "ws-1" ||
+				result.FailedWorkspaces[0].Forced != force || !strings.Contains(result.FailedWorkspaces[0].Err.Error(), wantText) {
+				t.Fatalf("expected ws-1 as a failure (forced=%v) naming the label, got closed=%v failed=%+v", force, result.ClosedWorkspaces, result.FailedWorkspaces)
+			}
+			events := mustReadEvents(t, o)
+			closed := eventsNamed(events, EventOrgWorkspaceClosed)
+			if !force {
+				if result.Disbanded || len(result.Errs) != 1 || len(closed) != 0 || len(eventsNamed(events, EventDisbanded)) != 0 {
+					t.Fatalf("expected no org_workspace_closed and no disbanded, got result %+v events %v", result, eventNames(t, o))
+				}
+				return
+			}
+			if !result.Disbanded || len(result.Errs) != 0 || len(closed) != 1 {
+				t.Fatalf("expected a forced disband with one org_workspace_closed, got result %+v events %v", result, eventNames(t, o))
+			}
+			assertDetailsContains(t, closed[0].Details, "workspace=not closed (forced): ", wantText)
+			if last := events[len(events)-1]; last.Event != EventDisbanded || last.Details != "forced: not closed: workspace ws-1" {
+				t.Fatalf("expected disbanded with the forced note last, got %+v", last)
+			}
+		})
+	}
+}
+
+// TestOrgStopDisband_OwnIDNotConfirmed_NotDeferredNotClosed covers the self
+// half of plan AC14: a recorded pane or workspace id that equals the
+// caller's HERDR_PANE_ID / HERDR_WORKSPACE_ID but that herdr labels as
+// someone else's is not the caller's seat or org. It is neither handed back
+// for the deferred close nor closed, and the stop or disband fails.
+func TestOrgStopDisband_OwnIDNotConfirmed_NotDeferredNotClosed(t *testing.T) {
+	t.Run("stop, own pane", func(t *testing.T) {
+		o, h, _ := testOrg(t)
+		if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+			t.Fatalf("spawn failed: %+v", r)
+		}
+		ownPaneEnv(o, "pane-1", "")
+		h.tabLabels[fakeTabID("pane-1")] = "a-shell-of-the-caller"
+		sendKeysBefore := len(h.sendKeysCalls)
+
+		result := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-1"})
+		if result.Err == nil || result.DeferredSelfPaneID != "" {
+			t.Fatalf("expected a failed stop with nothing deferred, got %+v", result)
+		}
+		if got := len(h.sendKeysCalls) - sendKeysBefore; got != 0 || len(h.paneCloseCalls) != 0 {
+			t.Fatalf("expected no C-c and no close, got %d C-c and closes %v", got, h.paneCloseCalls)
+		}
+		events := mustReadEvents(t, o)
+		if last := events[len(events)-1]; last.Event != EventStopFailed || strings.Contains(last.Details, "pane=self") {
+			t.Fatalf("expected stop_failed without the self note, got %s %q", last.Event, last.Details)
+		}
+	})
+	t.Run("disband, own workspace", func(t *testing.T) {
+		o, h, _ := testOrg(t)
+		if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+			t.Fatalf("spawn failed: %+v", r)
+		}
+		if r := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-1"}); r.Err != nil {
+			t.Fatalf("pre-stop: %v", r.Err)
+		}
+		ownPaneEnv(o, "", "ws-1")
+		h.workspaceLabels["ws-1"] = "the-callers-own"
+
+		result := o.Disband(DisbandParams{OrgID: "org-a"})
+		if result.Disbanded || result.DeferredSelfWorkspaceID != "" || result.DeferredSelfPaneID != "" {
+			t.Fatalf("expected a failed disband with nothing deferred, got %+v", result)
+		}
+		if len(result.FailedWorkspaces) != 1 || !strings.Contains(result.FailedWorkspaces[0].Err.Error(), `herdr labels it "the-callers-own"`) {
+			t.Fatalf("expected ws-1 as a failure naming its label, got %+v", result.FailedWorkspaces)
+		}
+		if len(h.workspaceCloseCalls) != 0 || len(eventsNamed(mustReadEvents(t, o), EventOrgWorkspaceClosed)) != 0 {
+			t.Fatalf("expected no close and no org_workspace_closed, got closes %v events %v", h.workspaceCloseCalls, eventNames(t, o))
+		}
+	})
+}
+
+// TestOrgCloseDeferredSelf_RecheckedBeforeTheClose: the deferred close runs
+// the ownership check again, so a pane or workspace herdr relabels between
+// Stop / Disband handing it back and the caller's last action stays open
+// (plan AC14).
+func TestOrgCloseDeferredSelf_RecheckedBeforeTheClose(t *testing.T) {
+	t.Run("pane", func(t *testing.T) {
+		o, h, _ := testOrg(t)
+		if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+			t.Fatalf("spawn failed: %+v", r)
+		}
+		ownPaneEnv(o, "pane-1", "")
+		result := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-1"})
+		if result.Err != nil || result.DeferredSelfPaneID != "pane-1" {
+			t.Fatalf("expected pane-1 handed back, got %+v", result)
+		}
+		h.tabLabels[fakeTabID("pane-1")] = "seat-9"
+
+		err := o.CloseDeferredSelfPane(result.DeferredSelfPaneID)
+		if err == nil || !strings.Contains(err.Error(), `"pane-1"`) || !strings.Contains(err.Error(), "left open") {
+			t.Fatalf("expected an error naming pane-1 left open, got %v", err)
+		}
+		if len(h.paneCloseCalls) != 0 {
+			t.Fatalf("expected no close, got %v", h.paneCloseCalls)
+		}
+	})
+	t.Run("workspace", func(t *testing.T) {
+		o, h, _ := testOrg(t)
+		if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+			t.Fatalf("spawn failed: %+v", r)
+		}
+		ownPaneEnv(o, "pane-1", "ws-1")
+		result := o.Disband(DisbandParams{OrgID: "org-a"})
+		if len(result.Errs) != 0 || result.DeferredSelfWorkspaceID != "ws-1" {
+			t.Fatalf("expected ws-1 handed back, got %+v", result)
+		}
+		h.workspaceLabels["ws-1"] = "org-z"
+
+		err := o.CloseDeferredSelfWorkspace(result.DeferredSelfWorkspaceID)
+		if err == nil || !strings.Contains(err.Error(), `"ws-1"`) || !strings.Contains(err.Error(), "left open") {
+			t.Fatalf("expected an error naming ws-1 left open, got %v", err)
+		}
+		if len(h.workspaceCloseCalls) != 0 {
+			t.Fatalf("expected no close, got %v", h.workspaceCloseCalls)
+		}
+	})
 }
 
 // TestOrgWait_HappyPath_ReturnsHerdrOutputAndTargetsNamespacedAgent covers

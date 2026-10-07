@@ -379,6 +379,37 @@ func TestOrgStopAll_OwnPaneSeatLeftRunningWhenAnotherFails(t *testing.T) {
 	}
 }
 
+// TestOrgStopAll_OwnPaneIDNotConfirmed_NotDeferred covers the self half of
+// plan AC14 for stop --all: a recorded pane id that equals HERDR_PANE_ID but
+// that herdr has in a tab labelled for something else is still handled last,
+// but Stop's ownership check refuses it, so it gets no C-c and no close, is
+// not handed back, and the seat stays active as a failure.
+func TestOrgStopAll_OwnPaneIDNotConfirmed_NotDeferred(t *testing.T) {
+	o, h, _ := testOrg(t)
+	spawnSeatIn(t, o, h, "org-a", "seat-1", "ws-a", "pane-own")
+	spawnSeatIn(t, o, h, "org-b", "seat-1", "ws-b", "pane-b1")
+	ownPaneEnv(o, "pane-own", "")
+	h.tabLabels[fakeTabID("pane-own")] = "the-callers-shell"
+	sendKeysBefore := len(h.sendKeysCalls)
+
+	result := o.StopAll(StopAllParams{})
+	if !slices.Equal(result.StoppedSeats, []OrgSeat{{"org-b", "seat-1"}}) || result.DeferredSelfPaneID != "" {
+		t.Fatalf("expected only org-b/seat-1 stopped and nothing deferred, got %+v", result)
+	}
+	if got := failedSeatRefs(result.FailedSeats); !slices.Equal(got, []OrgSeat{{"org-a", "seat-1"}}) || len(result.Errs) != 1 {
+		t.Fatalf("FailedSeats = %v (Errs %v), want org-a/seat-1 alone", got, result.Errs)
+	}
+	if !strings.Contains(result.FailedSeats[0].Err.Error(), `labelled "the-callers-shell"`) {
+		t.Errorf("expected the failure to name the tab label, got %v", result.FailedSeats[0].Err)
+	}
+	if !slices.Equal(h.paneCloseCalls, []string{"pane-b1"}) || !slices.Equal(h.sendKeysCalls[sendKeysBefore:], []string{"pane-b1"}) {
+		t.Fatalf("expected C-c and close only on pane-b1, got C-c %v closes %v", h.sendKeysCalls[sendKeysBefore:], h.paneCloseCalls)
+	}
+	if active := activeRealSeats(t, o); !slices.Equal(active, []OrgSeat{{"org-a", "seat-1"}}) {
+		t.Fatalf("expected org-a/seat-1 still active, got %v", active)
+	}
+}
+
 // TestOrgsToDisband_Definition pins which org_ids DisbandAll targets: an org
 // with a real seat state event or workspace event after its latest real
 // disbanded (or no disbanded at all), which includes every org with an

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/yoshpy-dev/ralph/internal/config"
+	"github.com/yoshpy-dev/ralph/internal/org/driver"
 	"github.com/yoshpy-dev/ralph/internal/org/protocol"
 )
 
@@ -75,6 +76,26 @@ type fakeHerdr struct {
 	paneCloseBlock      bool
 	workspaceCloseBlock bool
 
+	// herdr's view of what this fake created, which PaneGet / TabGet /
+	// WorkspaceGet answer from: WorkspaceCreate labels the workspace it hands
+	// out, and TabCreate puts the pane it hands out in a tab of its own
+	// (fakeTabID) labelled with the label it was given (the seat id), inside
+	// the workspace it was given. A later TabCreate handing out the same pane
+	// id relabels that tab, so seats meant to be stopped need pane ids of
+	// their own. A test edits these maps to model a recorded id that herdr
+	// now uses for something else (plan AC14), or deletes an entry to model
+	// one herdr no longer knows; an id with no entry is not found.
+	paneTabs        map[string]string // pane id -> tab id
+	paneWorkspaces  map[string]string // pane id -> workspace id
+	tabLabels       map[string]string // tab id -> label
+	workspaceLabels map[string]string // workspace id -> label
+	// getErrs, keyed by pane, tab or workspace id, makes PaneGet / TabGet /
+	// WorkspaceGet return that error for that id. getBlock makes the three
+	// record the call and then not return until ctx is done (see
+	// paneCloseBlock).
+	getErrs  map[string]error
+	getBlock bool
+
 	workspaceID string
 	paneID      string
 
@@ -89,9 +110,24 @@ type fakeHerdr struct {
 	paneCloseCalls      []string // paneIDs PaneClose was invoked with, in order
 	workspaceCloseCalls []string // workspaceIDs WorkspaceClose was invoked with, in order
 	tabCreateWorkspaces []string // workspaceIDs TabCreate was invoked with, in order
+	paneGetCalls        []string // paneIDs PaneGet was invoked with, in order
+	tabGetCalls         []string // tabIDs TabGet was invoked with, in order
+	workspaceGetCalls   []string // workspaceIDs WorkspaceGet was invoked with, in order
 }
 
-func (f *fakeHerdr) WorkspaceCreate(_ context.Context, _, _ string) (string, error) {
+// fakeTabID is the tab id fakeHerdr's TabCreate gives the tab holding
+// paneID.
+func fakeTabID(paneID string) string { return "tab-" + paneID }
+
+// setLabel records id -> label in *m, making the map on first use.
+func setLabel(m *map[string]string, id, label string) {
+	if *m == nil {
+		*m = make(map[string]string)
+	}
+	(*m)[id] = label
+}
+
+func (f *fakeHerdr) WorkspaceCreate(_ context.Context, _, label string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, "workspace_create")
@@ -101,10 +137,11 @@ func (f *fakeHerdr) WorkspaceCreate(_ context.Context, _, _ string) (string, err
 	if f.workspaceID == "" {
 		f.workspaceID = "ws-1"
 	}
+	setLabel(&f.workspaceLabels, f.workspaceID, label)
 	return f.workspaceID, nil
 }
 
-func (f *fakeHerdr) TabCreate(_ context.Context, workspaceID, _, _ string) (string, error) {
+func (f *fakeHerdr) TabCreate(_ context.Context, workspaceID, _, label string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, "tab_create")
@@ -115,7 +152,62 @@ func (f *fakeHerdr) TabCreate(_ context.Context, workspaceID, _, _ string) (stri
 	if f.paneID == "" {
 		f.paneID = "pane-1"
 	}
+	setLabel(&f.paneTabs, f.paneID, fakeTabID(f.paneID))
+	setLabel(&f.paneWorkspaces, f.paneID, workspaceID)
+	setLabel(&f.tabLabels, fakeTabID(f.paneID), label)
 	return f.paneID, nil
+}
+
+// fakeGet is the shared body of PaneGet / TabGet / WorkspaceGet: record id
+// in *calls and as call name in f.calls, then block (getBlock), return the
+// injected error (getErrs), or answer lookup(id), run with mu held, with
+// herdr's not-found error (notFoundCode) when it reports no entry.
+func (f *fakeHerdr) fakeGet(ctx context.Context, name string, calls *[]string, id string, lookup func(string) (string, bool), notFoundCode string) (string, error) {
+	f.mu.Lock()
+	f.calls = append(f.calls, name)
+	*calls = append(*calls, id)
+	block := f.getBlock
+	injected := f.getErrs[id]
+	value, ok := lookup(id)
+	f.mu.Unlock()
+	switch {
+	case block:
+		<-ctx.Done()
+		return "", ctx.Err()
+	case injected != nil:
+		return "", injected
+	case !ok:
+		return "", driver.NewHerdrError(notFoundCode, id+" not found")
+	}
+	return value, nil
+}
+
+// PaneGet answers the pane's tab and workspace as TabCreate recorded them.
+func (f *fakeHerdr) PaneGet(ctx context.Context, paneID string) (string, string, error) {
+	var workspaceID string
+	tabID, err := f.fakeGet(ctx, "pane_get", &f.paneGetCalls, paneID, func(id string) (string, bool) {
+		tabID, ok := f.paneTabs[id]
+		workspaceID = f.paneWorkspaces[id]
+		return tabID, ok
+	}, driver.HerdrCodePaneNotFound)
+	if err != nil {
+		return "", "", err
+	}
+	return tabID, workspaceID, nil
+}
+
+func (f *fakeHerdr) TabGet(ctx context.Context, tabID string) (string, error) {
+	return f.fakeGet(ctx, "tab_get", &f.tabGetCalls, tabID, func(id string) (string, bool) {
+		label, ok := f.tabLabels[id]
+		return label, ok
+	}, driver.HerdrCodeTabNotFound)
+}
+
+func (f *fakeHerdr) WorkspaceGet(ctx context.Context, workspaceID string) (string, error) {
+	return f.fakeGet(ctx, "workspace_get", &f.workspaceGetCalls, workspaceID, func(id string) (string, bool) {
+		label, ok := f.workspaceLabels[id]
+		return label, ok
+	}, driver.HerdrCodeWorkspaceNotFound)
 }
 
 func (f *fakeHerdr) AgentStart(_ context.Context, name, _, _ string, _ int, agentArgs []string) (string, error) {

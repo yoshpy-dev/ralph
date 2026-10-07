@@ -15,7 +15,8 @@ import (
 // do not invent subcommands beyond what herdr documents. Seat termination is
 // sequenced by the caller, not this adapter: see (*Org).Stop in
 // internal/org/verbs.go. PaneSendKeys, PaneClose and WorkspaceClose below
-// only run the herdr subcommands.
+// only run the herdr subcommands, and PaneGet, TabGet and WorkspaceGet only
+// report what herdr answers; the caller compares the labels.
 //
 // Real herdr (confirmed live, v0.7.5) wraps every command's stdout in a JSON
 // envelope -- {"id":"cli:<verb>","result":{...}} on success or
@@ -45,11 +46,13 @@ func (e *herdrError) Error() string {
 	return fmt.Sprintf("herdr: %s: %s", e.Code, e.Message)
 }
 
-// Herdr error codes for a pane or workspace id herdr does not know (confirmed
-// live, v0.7.5, as the `pane close` / `workspace close` replies for an
-// unknown id). IsNotFound matches exactly these two codes.
+// Herdr error codes for a pane, tab or workspace id herdr does not know
+// (confirmed live, v0.7.5, as the `pane close` / `workspace close` / `pane
+// get` / `tab get` / `workspace get` replies for an unknown id). IsNotFound
+// matches exactly these three codes.
 const (
 	HerdrCodePaneNotFound      = "pane_not_found"
+	HerdrCodeTabNotFound       = "tab_not_found"
 	HerdrCodeWorkspaceNotFound = "workspace_not_found"
 )
 
@@ -62,18 +65,19 @@ func NewHerdrError(code, message string) error {
 	return &herdrError{Code: code, Message: message}
 }
 
-// NotFound reports whether e's code is pane_not_found or workspace_not_found,
-// the codes IsNotFound matches. internal/org reads it through its own
-// one-method interface and errors.As, so it can tell an already-closed pane
-// from a failed close without importing this package.
+// NotFound reports whether e's code is pane_not_found, tab_not_found or
+// workspace_not_found, the codes IsNotFound matches. internal/org reads it
+// through its own one-method interface and errors.As, so it can tell an
+// already-closed pane from a failed close without importing this package.
 func (e *herdrError) NotFound() bool {
-	return e.Code == HerdrCodePaneNotFound || e.Code == HerdrCodeWorkspaceNotFound
+	return e.Code == HerdrCodePaneNotFound || e.Code == HerdrCodeTabNotFound || e.Code == HerdrCodeWorkspaceNotFound
 }
 
 // IsNotFound reports whether err carries a herdr error envelope whose code is
-// pane_not_found or workspace_not_found, i.e. the pane or workspace the
-// command targeted does not exist (for PaneClose / WorkspaceClose: it is
-// already closed). It sees through fmt.Errorf("%w") wrapping. Every other
+// pane_not_found, tab_not_found or workspace_not_found, i.e. the pane, tab or
+// workspace the command targeted does not exist (for PaneClose /
+// WorkspaceClose: it is already closed). It sees through fmt.Errorf("%w")
+// wrapping. Every other
 // failure -- other codes, a Runner error with no envelope (connection
 // refused, timeout), malformed output -- returns false, as does nil. Only a
 // parsed envelope counts: an error whose text merely contains
@@ -319,24 +323,127 @@ func (h Herdr) WorkspaceClose(ctx context.Context, workspaceID string) error {
 // envelope on stdout, so the Runner returns both an error and that stdout.
 // Unlike checkHerdrEnvelopeError, which only folds the envelope's text into
 // the message, this wraps the parsed *herdrError with %w next to the Runner
-// error, so the code survives the non-zero exit and IsNotFound can read it
-// (errors.Is on the Runner error, e.g. context.DeadlineExceeded, still
-// works). The envelope is looked for on stdout first, then in the Runner
-// error's text, where ExecRunner folds stderr. With exit 0, a success
-// envelope or non-JSON stdout (unit-test fakes) is success; the result
-// payload ({"type":"ok"}) is not read.
+// error (wrapHerdrRunError), so the code survives the non-zero exit and
+// IsNotFound can read it (errors.Is on the Runner error, e.g.
+// context.DeadlineExceeded, still works). With exit 0, a success envelope or
+// non-JSON stdout (unit-test fakes) is success; the result payload
+// ({"type":"ok"}) is not read.
 func checkHerdrCloseResult(verb, out string, err error) error {
 	if err != nil {
-		if _, envErr, isEnvelope := parseHerdrEnvelope(out); isEnvelope && envErr != nil {
-			return fmt.Errorf("herdr %s: %w (%w)", verb, err, envErr)
-		}
-		if envErr, ok := findHerdrErrorEnvelope(err.Error()); ok {
-			return fmt.Errorf("herdr %s: %w (%w)", verb, err, envErr)
-		}
-		return fmt.Errorf("herdr %s: %w", verb, err)
+		return wrapHerdrRunError(verb, out, err)
 	}
 	if _, envErr, isEnvelope := parseHerdrEnvelope(out); isEnvelope && envErr != nil {
 		return fmt.Errorf("herdr %s: unexpected error envelope with exit 0: %w", verb, envErr)
 	}
 	return nil
+}
+
+// wrapHerdrRunError wraps a failed herdr call's Runner error, naming verb,
+// together with the error envelope herdr printed, so its code stays readable
+// by IsNotFound. The envelope is looked for on stdout first, then in the
+// Runner error's text, where ExecRunner folds stderr.
+func wrapHerdrRunError(verb, out string, err error) error {
+	if _, envErr, isEnvelope := parseHerdrEnvelope(out); isEnvelope && envErr != nil {
+		return fmt.Errorf("herdr %s: %w (%w)", verb, err, envErr)
+	}
+	if envErr, ok := findHerdrErrorEnvelope(err.Error()); ok {
+		return fmt.Errorf("herdr %s: %w (%w)", verb, err, envErr)
+	}
+	return fmt.Errorf("herdr %s: %w", verb, err)
+}
+
+// herdrGetResult is the contract PaneGet, TabGet and WorkspaceGet share: a
+// failure follows checkHerdrCloseResult (an unknown id is an error for which
+// IsNotFound is true), and a success must be a JSON envelope, whose result
+// payload is returned for the caller to parse. Unlike WorkspaceCreate and
+// TabCreate, non-JSON stdout is an error, not a bare-id fallback: the caller
+// compares labels from the payload before it closes anything, so an answer
+// it cannot read must never pass as one.
+func herdrGetResult(verb, out string, err error) (json.RawMessage, error) {
+	if err != nil {
+		return nil, wrapHerdrRunError(verb, out, err)
+	}
+	result, envErr, isEnvelope := parseHerdrEnvelope(out)
+	var he *herdrError
+	switch {
+	case !isEnvelope:
+		return nil, fmt.Errorf("herdr %s: output is not a JSON envelope: %q", verb, strings.TrimSpace(out))
+	case errors.As(envErr, &he):
+		return nil, fmt.Errorf("herdr %s: unexpected error envelope with exit 0: %w", verb, envErr)
+	case envErr != nil: // malformed JSON
+		return nil, fmt.Errorf("herdr %s: %w", verb, envErr)
+	}
+	return result, nil
+}
+
+// PaneGet runs `herdr pane get PANEID` and returns the ids of the tab and the
+// workspace that hold the pane, from the envelope's result.pane.tab_id and
+// result.pane.workspace_id. An unknown id comes back as an error for which
+// IsNotFound is true (herdr exits 1 with a pane_not_found envelope).
+func (h Herdr) PaneGet(ctx context.Context, paneID string) (tabID, workspaceID string, err error) {
+	out, runErr := h.R.Run(ctx, "herdr", "pane", "get", paneID)
+	result, err := herdrGetResult("pane get", out, runErr)
+	if err != nil {
+		return "", "", err
+	}
+	var payload struct {
+		Pane *struct {
+			TabID       string `json:"tab_id"`
+			WorkspaceID string `json:"workspace_id"`
+		} `json:"pane"`
+	}
+	if err := json.Unmarshal(result, &payload); err != nil {
+		return "", "", fmt.Errorf("herdr pane get: parse result: %w", err)
+	}
+	if payload.Pane == nil || payload.Pane.TabID == "" || payload.Pane.WorkspaceID == "" {
+		return "", "", fmt.Errorf("herdr pane get: envelope missing result.pane.tab_id or result.pane.workspace_id")
+	}
+	return payload.Pane.TabID, payload.Pane.WorkspaceID, nil
+}
+
+// TabGet runs `herdr tab get TABID` and returns the tab's label, from the
+// envelope's result.tab.label (empty for a tab with no label). An unknown id
+// comes back as an error for which IsNotFound is true (tab_not_found).
+func (h Herdr) TabGet(ctx context.Context, tabID string) (label string, err error) {
+	out, runErr := h.R.Run(ctx, "herdr", "tab", "get", tabID)
+	result, err := herdrGetResult("tab get", out, runErr)
+	if err != nil {
+		return "", err
+	}
+	var payload struct {
+		Tab *struct {
+			Label string `json:"label"`
+		} `json:"tab"`
+	}
+	if err := json.Unmarshal(result, &payload); err != nil {
+		return "", fmt.Errorf("herdr tab get: parse result: %w", err)
+	}
+	if payload.Tab == nil {
+		return "", fmt.Errorf("herdr tab get: envelope missing result.tab")
+	}
+	return payload.Tab.Label, nil
+}
+
+// WorkspaceGet runs `herdr workspace get WORKSPACEID` and returns the
+// workspace's label, from the envelope's result.workspace.label (empty for a
+// workspace with no label). An unknown id comes back as an error for which
+// IsNotFound is true (workspace_not_found).
+func (h Herdr) WorkspaceGet(ctx context.Context, workspaceID string) (label string, err error) {
+	out, runErr := h.R.Run(ctx, "herdr", "workspace", "get", workspaceID)
+	result, err := herdrGetResult("workspace get", out, runErr)
+	if err != nil {
+		return "", err
+	}
+	var payload struct {
+		Workspace *struct {
+			Label string `json:"label"`
+		} `json:"workspace"`
+	}
+	if err := json.Unmarshal(result, &payload); err != nil {
+		return "", fmt.Errorf("herdr workspace get: parse result: %w", err)
+	}
+	if payload.Workspace == nil {
+		return "", fmt.Errorf("herdr workspace get: envelope missing result.workspace")
+	}
+	return payload.Workspace.Label, nil
 }

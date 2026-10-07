@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/yoshpy-dev/ralph/internal/config"
+	"github.com/yoshpy-dev/ralph/internal/org/driver"
 	"github.com/yoshpy-dev/ralph/internal/org/protocol"
 )
 
@@ -76,6 +77,21 @@ func (f *fakeWatchHerdr) PaneClose(_ context.Context, _ string) error {
 
 func (f *fakeWatchHerdr) WorkspaceClose(_ context.Context, _ string) error {
 	return nil
+}
+
+// PaneGet, TabGet and WorkspaceGet answer herdr's not-found reply for every
+// id: this fake does not model herdr's panes, so a Stop in a watch test
+// records the seat's pane as already closed, with no C-c and no close.
+func (f *fakeWatchHerdr) PaneGet(_ context.Context, paneID string) (string, string, error) {
+	return "", "", driver.NewHerdrError(driver.HerdrCodePaneNotFound, "pane "+paneID+" not found")
+}
+
+func (f *fakeWatchHerdr) TabGet(_ context.Context, tabID string) (string, error) {
+	return "", driver.NewHerdrError(driver.HerdrCodeTabNotFound, "tab "+tabID+" not found")
+}
+
+func (f *fakeWatchHerdr) WorkspaceGet(_ context.Context, workspaceID string) (string, error) {
+	return "", driver.NewHerdrError(driver.HerdrCodeWorkspaceNotFound, "workspace "+workspaceID+" not found")
 }
 
 func (f *fakeWatchHerdr) PaneSendText(_ context.Context, paneID, text string) error {

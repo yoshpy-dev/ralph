@@ -104,7 +104,10 @@ func (r *StopAllResult) failSeat(seat OrgSeat, err error) {
 // A real run stops the seat in the caller's own pane (HERDR_PANE_ID, read
 // via o.Getenv) last, and only when every other seat was recorded `stopped`
 // (forced ones included): Stop then records it without closing the pane,
-// and the pane comes back in DeferredSelfPaneID. When another seat failed,
+// and the pane comes back in DeferredSelfPaneID. Matching HERDR_PANE_ID only
+// orders the seat; Stop's ownership check still decides, so a recorded id
+// that equals the caller's but is not the seat's pane is not handed back and
+// fails like any other. When another seat failed,
 // the own seat is left running and listed in FailedSeats, so a caller that
 // ran stop --all in its own pane stays alive to see the failures and retry
 // (the same rule Disband uses).
@@ -246,7 +249,9 @@ func (r *DisbandAllResult) leaveOwnOrg(events []ManifestEvent, roster []SeatStat
 // that is HERDR_WORKSPACE_ID) last, and only when every other org was
 // disbanded: their Disband records the own pane and workspace without
 // closing them, and they come back in DeferredSelfPaneID /
-// DeferredSelfWorkspaceID. When another org failed, such an org is left
+// DeferredSelfWorkspaceID. As in StopAll, matching the caller's ids only
+// orders the org; Disband's ownership checks decide what is handed back or
+// closed. When another org failed, such an org is left
 // untouched and listed as failed (its active seats and open workspaces in
 // FailedSeats / FailedWorkspaces), so a caller that ran disband --all in its
 // own pane stays alive to see the failures and retry (the same rule Disband

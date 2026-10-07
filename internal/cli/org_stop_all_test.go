@@ -33,20 +33,44 @@ func appendSeedEvent(t *testing.T, stateDir string, ev org.ManifestEvent) {
 }
 
 // seedWorkspace records workspaceID as orgID's herdr workspace, the way
-// spawn's org_workspace_created does.
+// spawn's org_workspace_created does, and gives the herdr stub a workspace
+// of that id labelled orgID, as spawn's `workspace create` would.
 func seedWorkspace(t *testing.T, stateDir, orgID, workspaceID string) {
 	t.Helper()
 	appendSeedEvent(t, stateDir, org.ManifestEvent{OrgID: orgID, Event: org.EventOrgWorkspaceCreated, PaneID: workspaceID})
+	recordStubHerdr(t, "workspace-"+workspaceID, orgID)
 }
 
 // seedSeat records seatID of orgID as spawned in paneID, joined to the org's
-// agmsg team.
+// agmsg team, and gives the herdr stub that pane, in a tab labelled seatID
+// inside a workspace labelled orgID, as spawn's `tab create` would, so stop's
+// and disband's ownership check confirms it. The stub's workspace for the
+// pane is ws-of-<orgID>, whatever seedWorkspace recorded: only its label is
+// checked.
 func seedSeat(t *testing.T, stateDir, orgID, seatID, paneID string) {
 	t.Helper()
 	appendSeedEvent(t, stateDir, org.ManifestEvent{
 		OrgID: orgID, SeatID: seatID, Event: org.EventSpawned,
 		Role: "worker", Driver: "claude", Model: "sonnet", PaneID: paneID, AgmsgTeam: "ralph-" + orgID,
 	})
+	tab, workspace := "tab-"+paneID, "ws-of-"+orgID
+	recordStubHerdr(t, "tab-"+tab, seatID)
+	recordStubHerdr(t, "workspace-"+workspace, orgID)
+	recordStubHerdr(t, "pane-"+paneID, tab+" "+workspace)
+}
+
+// recordStubHerdr writes one file of the herdr stub's state
+// (ORG_STUB_HERDR_STATE, see herdrStub): name is pane-<id>, tab-<id> or
+// workspace-<id>.
+func recordStubHerdr(t *testing.T, name, content string) {
+	t.Helper()
+	dir := os.Getenv("ORG_STUB_HERDR_STATE")
+	if dir == "" {
+		t.Fatal("recordStubHerdr: run setupOrgStubPATH first")
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content+"\n"), 0o644); err != nil {
+		t.Fatalf("record herdr stub state %s: %v", name, err)
+	}
 }
 
 // runOrgCmdStreams runs `ralph org <args...>` in-process with stdout and

@@ -52,6 +52,14 @@ func (ExecRunner) Run(ctx context.Context, name string, args ...string) (string,
 
 	err := cmd.Run()
 	out := strings.TrimSpace(stdout.String())
+	// WaitDelay also applies to a command that exits on its own: when it
+	// exits 0 but a child still holds the pipes, Wait closes them after
+	// WaitDelay and returns exec.ErrWaitDelay, which os/exec returns only for
+	// a successful exit. The command succeeded, so that is success, with the
+	// output read so far.
+	if errors.Is(err, exec.ErrWaitDelay) && ctx.Err() == nil {
+		err = nil
+	}
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return out, fmt.Errorf("%s: timed out: %w", name, ctx.Err())
