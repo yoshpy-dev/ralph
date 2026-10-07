@@ -82,8 +82,8 @@
 #          without redirections and substitutions, when the command and
 #          every later stage of its pipeline are such commands and send
 #          output only to the terminal, the next stage, /dev/null,
-#          /dev/stderr, or a copy of fd 0, 1 or 2 (no file, no fd 3 or
-#          above, no &> or &>>, no >(...));
+#          /dev/stderr, a copy of fd 0, 1 or 2, or a closed fd (>&-) (no
+#          file, no fd 3 or above, no &> or &>>, no >(...));
 #      (b) the -m or --message value of git commit and git tag when it has
 #          no substitution (the recommended heredoc form counts as one);
 #      (c) the body of a heredoc whose delimiter is quoted, or whose body
