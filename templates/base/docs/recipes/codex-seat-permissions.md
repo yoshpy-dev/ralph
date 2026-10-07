@@ -75,6 +75,48 @@ recorded in `docs/evidence/codex-seat-permissions-2026-09-18.md`.
   Use a throwaway directory under `$HOME` (`git init` it) for the seat's cwd
   and a second throwaway file under `$HOME` as the "outside" target.
 
+## The org ledger and `--add-dir`
+
+Without `--state-dir` or `RALPH_ORG_STATE_DIR`, ralph uses one org ledger
+per repository: from the main checkout and from every linked worktree, the
+state directory is the main worktree's `.harness/state/org/` (the `/org`
+skill's prerequisites give the full order and the exceptions, such as the
+worktrees of a bare repository). A leader whose cwd is a linked worktree
+therefore writes the ledger outside its own cwd, which
+`--sandbox workspace-write` refuses. ralph adds `--add-dir <state dir>` right
+after the sandbox flags of a codex seat when the seat runs in edits or
+autonomous mode and the state directory is not inside the seat's `--cwd`.
+Guarded codex seats and claude seats get no `--add-dir`. The flag covers
+only the state directory; the agmsg database still needs the writable root
+above. When the scratch `--state-dir` in the procedure below lies outside
+`<scratch-cwd>`, the child process arguments also carry
+`--add-dir <scratch>/state-...`; keep the "outside" target out of that
+directory.
+
+Checked on 2026-10-07 with codex-cli 0.160.0 on macOS: with
+`--sandbox workspace-write` and both the cwd and the target outside `/tmp`,
+`touch <target>` failed with `Operation not permitted` without `--add-dir`
+and succeeded with `--add-dir <target dir>`.
+
+To re-check on your machine, run the same probe twice. Keep both
+directories outside `/tmp` and `$TMPDIR`, which are writable by default, and
+outside any repository, so that no project's `.codex/config.toml` or
+`AGENTS.md` changes the result:
+
+```sh
+p="$HOME/codex-add-dir-probe"
+mkdir -p "$p/cwd" "$p/target" && cd "$p/cwd"
+ask="Run this command once. If it fails, do not retry or work around it; report the exit status and the error text: touch $p/target/probe"
+codex exec --skip-git-repo-check --sandbox workspace-write "$ask"
+ls "$p/target"   # expected: empty
+codex exec --skip-git-repo-check --sandbox workspace-write --add-dir "$p/target" "$ask"
+ls "$p/target"   # expected: probe
+```
+
+If the first run already creates `probe`, a writable root in your
+`~/.codex/config.toml` covers the target; move the probe directory out of
+it and run again. Remove `$HOME/codex-add-dir-probe` afterwards.
+
 ## Scratch configuration
 
 Keep the verification config separate from your project's `ralph.toml` and
