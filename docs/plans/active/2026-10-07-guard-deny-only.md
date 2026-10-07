@@ -168,7 +168,8 @@
   - S2c 完了(df0a50d5、implementer/opus): 旧版の 4 規則を見張りとして生の文字列に当て、一致がすべて深さ 0 のデータ区間に収まるときだけ通す。テスト 1508 件(ubuntu でも 1508/0)、AC7 の例外 13 件は AC3 と一致。main を取り込んだ(9eca7573、衝突は `docs/tech-debt/README.md` だけ)
   - self-review の 2 回目(46c96511、reviewer/opus): merge。1 回目の HIGH・MEDIUM は S2c で解消。LOW 2 件(`my-sudo ls` の差、tech-debt の guard の行が古い)
   - verify(1346740f、verifier/opus): pass。AC1〜AC9 を満たす。LOW 2 件(V-1 `my-sudo ls`・`x.sudo ls` は AC7 の比較の例に入らない、V-2 テストの上限 10 秒と AC8 の 5 秒)
+  - test(095af1d7、tester/opus): pass。`tests/test-pre-bash-guard.sh` は 1576/0(39ed2759 で 68 件を足した)、`tests/test-lib-json.sh` は 126/0、`run-test.sh` と `run-verify.sh` も通る。mutation は 44 個すべてが赤になる(足す前は 8 個が緑のまま)。1 回目の `run-test.sh` で落ちた `tests/test-secret-scan.sh` の 1 件は固定の `/tmp` パスに同時実行が重なったもので、この diff とは関係しない(tech-debt に記録)
 - [x] Review artifact created
 - [x] Verification artifact created
-- [ ] Test artifact created
+- [x] Test artifact created
 - [ ] PR created
