@@ -55,6 +55,15 @@ get の応答は次のとおり(ralph が読まない項目は省いた)。
 
 ralph は座席の tab を座席 id、org の workspace を org_id の label で作る(`internal/org/spawn.go` の `TabCreate` と `WorkspaceCreate` の呼び出し)。そこで C-c を送る前と閉じる前に、`pane get` で pane のある tab と workspace を引き、tab の label が座席 id で workspace の label が org_id のときだけ C-c を送って閉じる。workspace は `workspace get` の label が org_id のときだけ閉じる(`internal/org/verbs.go` の `confirmSeatPane` と `confirmOrgWorkspace`)。
 
+## Run 5: エージェントを起動したあとの label
+
+2 回目の self-review の指摘(`herdr agent start` のあとも tab の label が保たれるか)を受けて、同じ形の隔離サーバーで確かめた。workspace を label `org-a`、tab を label `seat-1` で作り、その root pane(`w1:p2`)で次の 2 つを試した。
+
+1. pane の中で端末タイトルを書き換える制御文字(`ESC ]0;…BEL` と `ESC ]2;…BEL`)を出した。そのあとも `herdr tab get w1:t2` の label は `seat-1`、`herdr workspace get w1` の label は `org-a` のままだった
+2. `herdr agent start probe-agent --kind claude --pane w1:p2 --timeout 60000` で Claude Code を起動した。応答は `agent_started` で、`terminal_title` はシェルが展開した `claude --model opus ...` に変わった。起動の直後と 10 秒後のどちらでも、tab の label は `seat-1`、workspace の label は `org-a` のままだった
+
+端末のタイトルは pane の `terminal_title` に入り、tab と workspace の label とは別に持たれている。Claude Code はフォルダの信頼の確認で止まった状態(`agent_status: blocked`)だったので、起動を終えた Claude Code が出すタイトルでは確かめていない。ただ、1 の結果から、タイトルの書き換えで label が変わることはないと見ている。codex の座席は試していない。
+
 ## Claude Code の C-c(文書で確認)
 
 https://code.claude.com/docs/en/interactive-mode の Keyboard shortcuts によると、Ctrl+C は動いている処理を中断する。何も動いていないときは、1 回目で入力欄を消し、2 回目で終了する。このため、何もしていない Claude Code のセッションは C-c 1 回では終わらない。codex の C-c は確かめていない。
@@ -65,5 +74,6 @@ https://code.claude.com/docs/en/interactive-mode の Keyboard shortcuts によ�
 - 見つからない id には rc=1 と `pane_not_found` / `workspace_not_found` のコードが返る。ralph はこのコードを閉じ済みとして扱える
 - 自分の pane と workspace は `HERDR_PANE_ID` / `HERDR_WORKSPACE_ID` で見分ける。`herdr pane current` は使わない
 - herdr のセッションの保存ファイルが失われると id は `w1` から振り直されるので、台帳の id だけでは閉じない。閉じる前に tab と workspace の label で持ち主を確かめる
+- Claude Code を起動しても、端末のタイトルが変わっても、tab と workspace の label は変わらない。label による持ち主の確認は、ふつうに spawn した座席で通る
 
-確認のあと、`herdr server stop` でサーバーを止め、`/tmp/hp` を削除した。
+確認のあと、Run 1〜4 は `herdr server stop` で、Run 5 は隔離サーバーのプロセスを終わらせて止め、どちらも `/tmp/hp` を削除した。
