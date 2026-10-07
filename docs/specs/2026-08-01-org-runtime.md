@@ -26,6 +26,10 @@ Ralph Loop(/loop)の自律実行系を撤去し、Lead LLM が herdr(実行・�
 - (a) 標準フローの実装ステップを担うスキルを `/work` から `/implement` に改名した(Codex では `$work` から `$implement`)。Summary と FR-11 の skill 一覧にある `/work`、および影響範囲の表の `.claude/skills/`(work / loop / ...)の `work` は、`/implement`(スキル名は `implement`)と読み替える。
 - 本文の履歴の記述は書き換えない。FR-11 の行には改訂の印を付けた。Summary と影響範囲の表には印を付けない。上の (a) が読み替えを述べている。
 
+### 2026-10-07 後継の仕様(docs/spec-org-multi-org-director)
+
+- 機能ごとの org(leader / implementer / reviewer と、worktree・ブランチ・PR を 1 つずつ)を複数並べ、herdr の外の director が統括する構成を `docs/specs/2026-10-07-org-multi-org-director.md` に定めた。編成パターン(FR-10 の Solo / Leaded / Parallel)、人へのエスカレーション(FR-8 のデッドマン)、Lead の自律計画の承認(FR-6)は、その仕様の各段が入った時点でそちらの記述が優先する。この仕様の本文は書き換えない
+
 ### 運用ノート: 既定 codex スラッグの更新手順(2026-09-18、issue #156)
 
 既定 `[org].model_pool` の codex エントリはスラッグ指定で、codex 側のモデル更新で消えうる(2026-09-17 未明に `gpt-6-astra` が `models_cache.json` から数時間消えて復帰した事例あり)。陳腐化の検知は `ralph doctor` の「Org codex model slugs」Check(`internal/cli/doctor_codex_models.go` の `checkCodexModelSlugs`)が担い、既定値の自動更新はしない。メンテナが既定スラッグを外す・置換するときの手順は次のとおり。
