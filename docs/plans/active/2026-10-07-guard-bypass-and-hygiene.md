@@ -169,6 +169,7 @@
   - sync-docs(`docs/reports/sync-docs-2026-10-07-guard-bypass-and-hygiene.md`、doc-maintainer/sonnet): V-1〜V-7、V-9 を直した。V-8 は上のとおり plan を直さない
   - cross-review cycle 1(811e1452、codex): ACTION_REQUIRED 2(jq がないとき改行の後の `tee` を見逃す、`tee` の引数が `<` を越えて入力を拾う)。ユーザーの事前承認により推奨の「Fix」を選び、cycle を 2 に上げた
   - cycle 2: 修正 0db1a97e(implementer/opus、テスト 260 件)。self-review(14d48a77)で C2-M1(`\tee` とバッククォートの中の `tee` を旧 guard より弱く見逃す)と C2-L1(`tee` の引数が `>` で止まる)が出て、ab3ee31c(implementer/opus、テスト 280 件)で直した。verify(69d1c581)は pass。旧 guard が後ろの `>` に偶然当たって確認を出していた `tee` の形が残ると分かったので、plan の Risks を直し、図 3 に行を足して、承認の digest を c07adf402bdb から d8f86292d5f1 に取り直した(ユーザーの事前承認の範囲)
+  - cross-review cycle 2(44ab9ef7、codex): ACTION_REQUIRED 1(閉じるバッククォートが `.git` の書き込み先の終わりにならない)、WORTH_CONSIDERING 1(`tee` の引数の読み取りがコメントと引用符の中の空白を越える)。ユーザーの事前承認により、cap を 3 に上げて回し直すことにした(`cycle-count.json` は 2 のまま)。修正は 3c0ba22a(implementer)と、206d8335・b94a9106(inline。1 文字の変更とテストの行)。追加の回は、self-review(77e4e542)が Merge 可・LOW 3、verify(2b4e8864)が pass、test(15e5943a)が pass(guard のテスト 324 件)
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created

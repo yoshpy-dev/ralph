@@ -28,11 +28,12 @@
 #   D. Write targets into .git or .env (>, >>, >|, no space, 2>, &>, tee -a,
 #      tee with earlier args, tee with a < input after its target,
 #      /usr/bin/tee, a tab before tee, \tee, tee inside backticks, a target
-#      ended by a closing backtick (x=`tee .git`, x=`printf x > .git`), a tee
-#      argument after a 2> redirection, .git as a file, absolute path,
-#      quoted target, heredoc into .env with and without spaces,
-#      .env.local, .envrc) plus rm -rf and gh pr create -> ask with no
-#      permission_mode, none in bypassPermissions
+#      ended by a closing backtick (x=`tee .git`, x=`printf x > .git`), a
+#      backtick inside a target word (`pwd`/.git/x, `pwd`/.env, tee
+#      `pwd`/.git/x), a tee argument after a 2> redirection, .git as a file,
+#      absolute path, quoted target, heredoc into .env with and without
+#      spaces, .env.local, .envrc) plus rm -rf and gh pr create -> ask with
+#      no permission_mode, none in bypassPermissions
 #   E. Deny rules (sudo, git push --force / -f, git reset --hard,
 #      git commit -m "$(...)" and "`...`") -> deny with no
 #      permission_mode and in bypassPermissions

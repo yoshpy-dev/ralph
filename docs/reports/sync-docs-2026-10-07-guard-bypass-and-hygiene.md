@@ -132,8 +132,51 @@ tech-debt の 158 行目と 160 行目を、cycle 2 の修正後の実測に合�
 
 テスト(`./scripts/run-test.sh`、`go test`)は、コードとテストを変えていないので再実行していない。test の cycle 2 の結果(shell 39 ファイル 2,003 件、Go 8 パッケージ)が、この commit のコードにそのまま当てはまる。
 
+## Cycle 2 (extra run)
+
+- Date: 2026-10-07
+- Agent: doc-maintainer subagent。cross-review cycle 2(44ab9ef7)のあと cap を 3 に上げた追加の回(`cycle-count.json` は 2 のまま、insight event の cycle も 2)
+- Branch: fix/guard-bypass-and-hygiene(編集前の HEAD 15e5943a)
+- 前段の記録: self-review(77e4e542、Merge 可、C3-L1〜C3-L3)、verify(2b4e8864、pass、V3-1〜V3-3)、test(15e5943a、pass、guard のテスト 324 件)、cross-review triage の cycle 2。コードの修正は 3c0ba22a、206d8335、b94a9106
+
+### Summary
+
+V3-1〜V3-3 を直した。書く前に、この PR より前の guard(2a22ba78)と HEAD の guard を scratchpad に置き、記録に使う 10 形を jq あり・なしで流して判定を確かめた(40 判定、`tee "a #b" .env > /dev/null` の旧 guard が jq ありだけ ask する点も含めて verify の表と一致)。guard、plan の本文は変えていない。plan の digest は `d8f86292d5f1` のままで、承認の行と一致している。C3-L1 の `` `pwd` `` の書き込み先は b94a9106 で見えるようになったので、未解決としては書いていない。C3-L3 のテストのコメントは、HEAD で「the command that the assignment prefixes」に直っている(`tests/test-pre-bash-guard.sh:203-205`)。
+
+### Files changed
+
+| File | Change |
+|------|--------|
+| `docs/tech-debt/README.md` | 158 行目(V3-1、C3-L1、C3-L2)。(a) の止める文字に `#` とバッククォートを足し、例に `tee a#b .env > /dev/null`、``tee `mktemp` .env > /dev/null``、`tee "a #b" .env > /dev/null`(旧 guard は最後の 1 つを jq ありでだけ ask)を足した。修正の履歴に 3c0ba22a、206d8335、b94a9106(閉じるバッククォートで終わる書き込み先と、語の中のバッククォートを戻したこと、`#` とバッククォートで引数の読み取りを止めたこと)を書いた。`$(...)` で組んだ書き込み先は、引用符つきなら旧 guard も見なかったが、引用符なしで後ろにリダイレクトが付く `echo x > $(pwd)/.env 2>&1` は旧 guard が(後ろの `>` に当たって)ask していたので、冒頭の「偶然 ask を返した形」の列挙と Why deferred に足した。受け入れた edge case を 2 件から 3 件にし、`tee "build .env.log"`(引用符の中の空白で引数の読み取りが終わる誤検知、cycle 2 の cross-review の 2 件目)を足した。Related に self-review の C3-L1・C3-L2 と verify の V3-1 を足した |
+| `tests/test-pre-bash-guard.sh` | 見出しコメントの D に、語の中のバッククォート(`` `pwd`/.git/x ``、`` `pwd`/.env ``、``tee `pwd`/.git/x``、b94a9106 の 4 行)を足した(V3-3)。コメントだけ |
+| `docs/plans/active/2026-10-07-guard-bypass-and-hygiene.md` | Progress checklist の「Implementation started」の下に、cross-review cycle 2、cap を 3 に上げた判断、3 つの修正、追加の回の self-review・verify・test の結果を 1 項目で足した(V3-2)。本文は変えていない |
+| `docs/insights/events/2026-10-07-guard-bypass-and-hygiene.jsonl` | `/sync-docs` の event を 1 行追記(`--phase sync_docs --verdict pass --cycle auto`、cycle は 2) |
+| `docs/reports/sync-docs-2026-10-07-guard-bypass-and-hygiene.md` | この節と、末尾の `## Verdict` の更新 |
+
+### Drift check results (extra run)
+
+| 文書 | 結果 |
+|------|------|
+| `pre_bash_guard.sh` のコメント(root、template) | 変更なし。45〜47 行目(`$(pwd)` は見ない、バッククォートは語の中に置ける)と 58〜68 行目(`tee` の引数の読み取りが `#` とバッククォートで止まる、`tee a#b .env` と ``tee `cmd` .env`` は見ない)は、上の probe の判定と食い違わない。`cmp` で一致 |
+| `.codex/README.md`、`post_edit_verify.sh`、`docs/quality/`、`AGENTS.md`、`CLAUDE.md`、`README.md`、`.claude/rules/ralph/` | 変更なし。追加の回の修正は guard の文字クラスと `tee_lead` だけで、コマンド、契約、パイプラインの順序は動かしていない |
+| tech-debt 160 行目(Test gaps) | 変更なし。`#`・バッククォート・`$(...)` の形をテストで固定していないことは、test の extra run が「cycle 2 の Test gaps と同じ扱い」と書いており、160 行目の (a) が覆っている |
+
+### 確認(extra run)
+
+| コマンド | 結果 |
+|----------|------|
+| `./scripts/check-sync.sh` | PASS(IDENTICAL 164、DRIFTED 0、ROOT_ONLY 0、TEMPLATE_ONLY 11、KNOWN_DIFF 5) |
+| `./scripts/check-skill-sync.sh` | PASS(13 skill) |
+| `bash scripts/check-template-purity.sh` | PASS |
+| `HARNESS_VERIFY_MODE=static ./scripts/verify.local.sh` | rc 0(31 項目が OK。tech-debt README の plan 参照を含む) |
+| `bash tests/test-pre-bash-guard.sh` | rc 0(PASS 324、FAIL 0、SKIP 0) |
+| `./scripts/plan-visual.sh digest <plan>` | `d8f86292d5f1`(承認の行と一致) |
+| 旧 guard(2a22ba78)と HEAD の guard の probe | 10 形 × 2 つの guard × jq あり・なし。158 行目に書いた判定のすべてと一致 |
+
+`./scripts/run-test.sh` と `go test` は、コードを変えていない(テストの見出しコメントだけ)ので再実行していない。test の extra run の結果(shell 39 ファイル 2,047 件、Go 8 パッケージ)がそのまま当てはまる。
+
 ## Verdict
 
 - Verdict: pass
-- Verified: cycle 1 と cycle 2 の確認表。cycle 2 は tech-debt の 2 行を、旧 guard と HEAD の guard の probe で確かめてから直した
+- Verified: cycle 1、cycle 2、cycle 2 (extra run) の確認表。cycle 2 は tech-debt の 2 行を、旧 guard と HEAD の guard の probe で確かめてから直した
 - Not verified: Codex が `ask` をどう扱うか、live の bypass session で新しい guard が `ask` を返さないこと(どちらも tech-debt の 127 行目と 160 行目に記録)。GNU grep / sed での probe(test の cycle 2 が ubuntu:24.04 でテストを通している)
