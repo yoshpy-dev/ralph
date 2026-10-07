@@ -27,10 +27,16 @@
      implementer には戻さず、あなたが環境や権限を直してから reviewer に
      やり直させる(座席の権限モードを変えて spawn し直す、など)。直せなければ
      人に上げる
-6. タスクが完了したら座席を `ralph org stop` し、org 全体を
-   `ralph org disband` する
-7. 最終責任として `ralph org report --org-id {{ORG_ID}}` で編成履歴を
-   `docs/reports/` に残す
+6. 座席は作業が終わるたびに `ralph org stop` する。stop は座席の pane を
+   閉じるので、画面の出力が要るときは先に `ralph org read` で読む
+7. タスク全体が終わったら、最終責任として
+   `ralph org report --org-id {{ORG_ID}}` で編成履歴を `docs/reports/` に残す
+8. 最後のコマンドとして `ralph org disband --org-id {{ORG_ID}}` を実行する。
+   disband はこの org の herdr workspace を閉じる。あなた自身の pane もその
+   workspace にあるので、このセッションはそこで終わる。ralph は台帳への記録と
+   出力をすべて済ませてから閉じる。disband が終了コード 1 で返ったときは
+   セッションは終わっていないので、stderr に並んだ座席と workspace を見て
+   打ち直す(herdr が応答しないままなら人に上げる)
 
 動詞の詳しい使い方・編成パターン(Solo / Leaded / Parallel)・permission 作法は
 `/org` skill(`.claude/skills/org/SKILL.md`)を全体マニュアルとして参照して
@@ -80,9 +86,11 @@ SUMMARY: internal/foo/bar.go の差分をレビューし、所見を RESULT で�
 
 ## 運用規律
 
-- 座席は使い終わったら都度 `ralph org stop` し、全体のタスクが終わったら
-  必ず `ralph org disband` してください。座席を spawn したまま放置しない
-  でください。
-- 作業を終える前に必ず `ralph org report --org-id {{ORG_ID}}` を実行し、
-  編成履歴を `docs/reports/` に成果物として残してください。これがあなたの
-  最終責任です。
+- 座席は使い終わったら都度 `ralph org stop` してください。座席を spawn
+  したまま放置しないでください。
+- 全体のタスクが終わったら、`ralph org report --org-id {{ORG_ID}}` で
+  編成履歴を `docs/reports/` に成果物として残し、そのあと
+  `ralph org disband --org-id {{ORG_ID}}` を実行してください。report は
+  あなたの最終責任です。disband はあなた自身の pane を含む workspace を
+  閉じるので、必ず最後のコマンドにしてください(disband のあとに report は
+  打てません)。

@@ -291,9 +291,10 @@ ralph org status --org-id perm-auto \
   --config ralph-autonomous.toml --state-dir <scratch>/state-auto   # no active seat
 ```
 
-Repeat with `perm-edits` / `ralph-edits.toml` / `<scratch>/state-edits`, close
-the panes, then confirm `herdr agent list` is empty and no throwaway file is
-left under `$HOME`.
+Repeat with `perm-edits` / `ralph-edits.toml` / `<scratch>/state-edits`.
+`stop` closes the seat's pane and `disband` closes the org's herdr workspace;
+if either exits 1, run it again once herdr answers. Then confirm
+`herdr agent list` is empty and no throwaway file is left under `$HOME`.
 
 ## Verdicts and opt-in
 

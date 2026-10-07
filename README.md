@@ -121,7 +121,7 @@ Before claiming a task is done:
 | `ralph upgrade` | Non-interactively pull template updates; auto-migrates legacy (pre-v2) layouts first (see [`ralph upgrade`](#ralph-upgrade)). |
 | `ralph eject <path>` | Convert a core-owned scaffold path into a user-owned fork (zero disk writes); upgrade stops replacing it. |
 | `ralph adopt <path>\|--all` | Reset a fork or drifted core path back to `owner=core`, overwriting it with the current embedded template. |
-| `ralph org spawn/start/send/wait/read/watch/report/stop/status/disband` | Manage org-runtime seats for autonomous multi-seat execution. |
+| `ralph org spawn/start/send/wait/read/watch/report/stop/status/disband` | Manage org-runtime seats for autonomous multi-seat execution. `stop` closes the seat's herdr pane and `disband` closes the org's herdr workspace; `stop --all` / `disband --all` act on every org_id without `--org-id`. |
 | `ralph status [--org-id <id>]` | Show scaffold ownership (core/fork/seed/block) and unresolved drift, plus org roster status and watch-status summary (table or `--json`). |
 | `ralph pack add <lang>` | Install a language pack. |
 | `ralph doctor [--strict]` | Check Claude Code, Codex, hooks, manifest drift, language packs; `--strict` exits 1 on any core-hash mismatch, block damage, settings-key drift, conflict marker, or manifest/disk mismatch — and on any meta-failure that makes one of those checks impossible to run (e.g. an unparseable manifest or an unreadable tracked file) — the CI-grade integrity gate. Block/settings-key checks compare against the *current binary's* templates with no pending-update tolerance (unlike the core-hash check, FR-4) — run `ralph upgrade` before `doctor --strict` right after upgrading the `ralph` binary itself, or a version-skew pending update reads as scaffold damage. |
@@ -241,6 +241,8 @@ ralph status --org-id my-task
 ralph org report --org-id my-task
 ralph org disband --org-id my-task
 ```
+
+`disband` closes the org's herdr workspace, so a headless leader running inside it ends there; the leader runs `report` first and `disband` as its last command.
 
 See `docs/specs/2026-08-01-org-runtime.md` for the full protocol and `.claude/rules/ralph/agent-messaging.md` for the message-shape contract.
 

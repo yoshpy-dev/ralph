@@ -33,7 +33,7 @@ ralph には LLM を使わない制御層(共通の台帳、全 org の上限、
 段は導入の順を表す(「Rollout」を参照)。1 段を 1 本の PR にするのを目安にする。
 
 - [ ] **FR-1 共通の台帳(1 段目)**: flag と env がないとき、org の台帳の置き場所を main worktree のルートから決める。ルートは、main worktree の中では `git rev-parse --show-toplevel`、linked worktree の中では `git worktree list --porcelain` の先頭の、bare でない記録とする。linked worktree の中から打った動詞も、main と同じ台帳を使う。詳細は 1 段目の計画(`2026-10-07-org-state-dir-common.md`)に書いた
-- [ ] **FR-2 横断の status と stop(2 段目)**: `ralph org stop --all` と `ralph org disband --all` を足す。`--org-id` なしで全 org の座席に効く。一部の座席を止められなかったときは、止められなかった座席を並べて終了コード 1 で終わる。`ralph status` は今のまま全 org を表示する
+- [ ] **FR-2 横断の status と stop(2 段目)**: `ralph org stop --all` と `ralph org disband --all` を足す。`--org-id` なしで全 org の座席に効く。一部の座席を止められなかったときは、止められなかった座席を並べて終了コード 1 で終わる。`ralph status` は今のまま全 org を表示する。2 段目で、1 座席の `stop` と 1 org の `disband` も同じ止め方にすると決めた。`stop` は C-c のあと座席の herdr の pane を閉じてプロセスを終わらせ、`disband` は座席を止めたあと org の herdr の workspace を閉じる。pane を閉じられなかった座席は台帳に `stop_failed` を書いて動いているまま残すので、打ち直せば拾える。herdr に繋がらないまま片付けたいときは `--force` で `stopped` を書く。詳細は 2 段目の計画(`2026-10-07-org-stop-all.md`)に書いた
 - [ ] **FR-3 上限と担当範囲の予約(3 段目)**:
   - `[org].max_orgs`(既定 10)と `[org].max_total_seats`(既定 30)を、台帳の共通のロックの下で強制する。director は herdr の座席ではないので数えない
   - org の start のときに担当範囲を予約する。担当範囲はディレクトリの接頭辞と明示したファイルで書く。走っている他の org の予約と重なれば start を拒否する。org を disband したら予約を解く
