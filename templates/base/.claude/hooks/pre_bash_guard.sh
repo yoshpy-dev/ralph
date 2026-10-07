@@ -77,12 +77,13 @@
 #      data region, which only the top level of the command has (nothing
 #      inside $(...), backticks, or re-read text is data):
 #      (a) the arguments of a command that only reads data (DATACMD below:
-#          echo, printf, cat, grep, ls, ...; rg without --pre), from its
-#          first argument to the end of the command, without redirections
-#          and substitutions, when the command and every later stage of its
-#          pipeline are such commands and send output only to the terminal,
-#          the next stage, /dev/null, /dev/stderr, or another fd (no file,
-#          no >(...));
+#          echo, printf, cat, grep, ls, ...; rg without --pre, printf
+#          without -v), from its first argument to the end of the command,
+#          without redirections and substitutions, when the command and
+#          every later stage of its pipeline are such commands and send
+#          output only to the terminal, the next stage, /dev/null,
+#          /dev/stderr, or a copy of fd 0, 1 or 2 (no file, no fd 3 or
+#          above, no &> or &>>, no >(...));
 #      (b) the -m or --message value of git commit and git tag when it has
 #          no substitution (the recommended heredoc form counts as one);
 #      (c) the body of a heredoc whose delimiter is quoted, or whose body
@@ -98,9 +99,10 @@
 #      command's text ends up, it gives no data region and the previous
 #      guard's rules decide. So a group or compound structure at the top
 #      level (a subshell (...), a brace group { ...; }, a reserved word such
-#      as if, for or case in command position), an exec with a redirection,
-#      a heredoc body joined by a backslash-newline, and a delimiter word
-#      with a backslash-newline each drop every data region of the command.
+#      as if, for or case in command position) and an exec with a
+#      redirection each drop every data region of the command. A heredoc
+#      body joined by a backslash-newline, or read for a delimiter word that
+#      has one, is not data (only that body loses its region).
 # Not covered: anything only known at run time (variables such as $cmd,
 # aliases, functions, git aliases, scripts read from a file, remote commands
 # such as ssh host '...'), and shell syntax beyond the above: case
