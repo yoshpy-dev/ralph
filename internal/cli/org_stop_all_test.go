@@ -17,7 +17,8 @@ import (
 
 // Tests for `ralph org stop --all`, `ralph org disband --all`, --force, and
 // the deferred close of the caller's own pane / workspace (plan
-// docs/plans/active/2026-10-07-org-stop-all.md, AC4-AC7, AC10, AC12, S5).
+// docs/plans/active/2026-10-07-org-stop-all.md, AC4-AC7, AC10, AC12, AC16,
+// S5, S8).
 // The ledger is seeded directly so every seat gets its own pane id: the herdr
 // stub answers every `tab create` with the same pane id, which would make
 // "fail one seat's pane close" impossible to express.
@@ -707,6 +708,136 @@ func TestOrgStopDisband_OwnPaneOrWorkspace_ClosedLastAfterOutput(t *testing.T) {
 				if slices.Contains(lines, absent) {
 					t.Errorf("expected no %q, got log:\n%s", absent, strings.Join(lines, "\n"))
 				}
+			}
+		})
+	}
+}
+
+// TestOrgStopDisband_OwnCloseFails_LedgerRestoredForRetry covers the CLI
+// side of plan AC16: when the last close of the command's own pane or
+// workspace fails, the command exits 1, `ralph org status` shows the seat
+// active again, and once herdr answers, the --all form run from another pane
+// closes that same pane or workspace.
+func TestOrgStopDisband_OwnCloseFails_LedgerRestoredForRetry(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		args         []string
+		ownWorkspace string
+		failID       string
+		wantErr      string
+		// retry runs from another pane; wantRetryOut is one of its stdout
+		// lines and wantClose the herdr call it must repeat.
+		retry        []string
+		wantRetryOut string
+		wantClose    string
+	}{
+		{
+			name: "stop --seat", args: []string{"stop", "--org-id", "org-a", "--seat", "seat-1"},
+			failID: "p-a1", wantErr: `org: close own pane "p-a1": `,
+			retry: []string{"stop", "--all"}, wantRetryOut: "stopped seat org-a/seat-1", wantClose: "pane close p-a1",
+		},
+		{
+			name: "disband --org-id", args: []string{"disband", "--org-id", "org-a"}, ownWorkspace: "ws-a",
+			failID: "ws-a", wantErr: `org: close own workspace "ws-a": `,
+			retry: []string{"disband", "--all"}, wantRetryOut: "disbanded org org-a", wantClose: "workspace close ws-a",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			herdrLog, _ := setupOrgStubPATH(t)
+			stateDir := filepath.Join(t.TempDir(), "state")
+			seedWorkspace(t, stateDir, "org-a", "ws-a")
+			seedSeat(t, stateDir, "org-a", "seat-1", "p-a1")
+			t.Setenv("HERDR_PANE_ID", "p-a1")
+			t.Setenv("HERDR_WORKSPACE_ID", tc.ownWorkspace)
+			t.Setenv("ORG_STUB_CLOSE_FAIL_IDS", tc.failID)
+
+			_, stderr, err := runOrgCmdStreams(t, append(tc.args, "--state-dir", stateDir)...)
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) || !strings.Contains(err.Error(), `seat "seat-1" of org_id "org-a" active again`) {
+				t.Fatalf("expected exit 1 naming the own close and the seat recorded active again, got: %v (stderr: %s)", err, stderr)
+			}
+			if strings.Contains(stderr, "warning:") {
+				t.Errorf("expected no warning without --force, got: %s", stderr)
+			}
+			status, _, err := runOrgCmdStreams(t, "status", "--org-id", "org-a", "--state-dir", stateDir)
+			if err != nil || !strings.Contains(status, "seat-1\tworker\tclaude\tsonnet\tspawned (active)\tp-a1") {
+				t.Fatalf("expected status to show seat-1 active again in p-a1, got: %v\n%s", err, status)
+			}
+			if ev := lastSeatEvent(t, stateDir, "org-a", "seat-1"); !strings.HasPrefix(ev.Details, "reactivated: ") {
+				t.Errorf("expected the compensating spawned last, got %s %q", ev.Event, ev.Details)
+			}
+
+			t.Setenv("HERDR_PANE_ID", "")
+			t.Setenv("HERDR_WORKSPACE_ID", "")
+			t.Setenv("ORG_STUB_CLOSE_FAIL_IDS", "")
+			stdout, stderr, err := runOrgCmdStreams(t, append(tc.retry, "--state-dir", stateDir)...)
+			if err != nil {
+				t.Fatalf("%v from another pane failed: %v (stderr: %s)", tc.retry, err, stderr)
+			}
+			if !slices.Contains(outputLines(stdout), tc.wantRetryOut) {
+				t.Errorf("expected %q on stdout, got: %s", tc.wantRetryOut, stdout)
+			}
+			if n := countLinesWithPrefix(readLogLines(t, herdrLog), tc.wantClose); n != 2 {
+				t.Errorf("expected %q twice (the failed close, then the retry's), got %d", tc.wantClose, n)
+			}
+			if active := activeSeats(t, stateDir); len(active) != 0 {
+				t.Errorf("expected no active seat after the retry, got %v", active)
+			}
+		})
+	}
+}
+
+// TestOrgStopDisband_Force_OwnCloseFails_WarnsExitsZero covers AC10 and the
+// --force half of AC16 at the CLI: with --force, a failed last close of the
+// command's own pane or workspace is printed as a warning naming the by-hand
+// close, the command exits 0, and nothing is restored (the seat stays
+// stopped, the org disbanded).
+func TestOrgStopDisband_Force_OwnCloseFails_WarnsExitsZero(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		args         []string
+		ownWorkspace string
+		failID       string
+		wantWarning  string
+		wantOut      string
+	}{
+		{
+			name: "stop --seat --force", args: []string{"stop", "--org-id", "org-a", "--seat", "seat-1"},
+			failID: "p-a1", wantWarning: `warning: org: close own pane "p-a1": `, wantOut: `stopped seat "seat-1"`,
+		},
+		{
+			name: "disband --force", args: []string{"disband", "--org-id", "org-a"}, ownWorkspace: "ws-a",
+			failID: "ws-a", wantWarning: `warning: org: close own workspace "ws-a": `, wantOut: `disbanded org "org-a"`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setupOrgStubPATH(t)
+			stateDir := filepath.Join(t.TempDir(), "state")
+			seedWorkspace(t, stateDir, "org-a", "ws-a")
+			seedSeat(t, stateDir, "org-a", "seat-1", "p-a1")
+			t.Setenv("HERDR_PANE_ID", "p-a1")
+			t.Setenv("HERDR_WORKSPACE_ID", tc.ownWorkspace)
+			t.Setenv("ORG_STUB_CLOSE_FAIL_IDS", tc.failID)
+
+			stdout, stderr, err := runOrgCmdStreams(t, append(tc.args, "--force", "--state-dir", stateDir)...)
+			if err != nil {
+				t.Fatalf("%s must exit 0, got: %v (stderr: %s)", tc.name, err, stderr)
+			}
+			if !slices.Contains(outputLines(stdout), tc.wantOut) {
+				t.Errorf("expected %q on stdout, got: %s", tc.wantOut, stdout)
+			}
+			if !strings.Contains(stderr, tc.wantWarning) || !strings.Contains(stderr, "(--force); ") || !strings.Contains(stderr, "close it by hand: herdr ") {
+				t.Errorf("expected a forced warning naming the by-hand close, got: %s", stderr)
+			}
+			if ev := lastSeatEvent(t, stateDir, "org-a", "seat-1"); ev.Event != org.EventStopped {
+				t.Errorf("expected seat-1 left recorded stopped, got %s %q", ev.Event, ev.Details)
+			}
+			for _, ev := range readManifestEvents(t, org.ManifestPathIn(stateDir)) {
+				if strings.HasPrefix(ev.Details, "reactivated: ") || strings.HasPrefix(ev.Details, "reopened: ") {
+					t.Errorf("expected no compensating event under --force, got %+v", ev)
+				}
+			}
+			if active := activeSeats(t, stateDir); len(active) != 0 {
+				t.Errorf("expected no active seat, got %v", active)
 			}
 		})
 	}

@@ -816,7 +816,8 @@ type StopResult struct {
 // closed here, since that would end the caller before it records anything:
 // Stop skips the C-c and the close, does the Leave, appends `stopped` with
 // `pane=self, closed last`, and returns the pane id in
-// StopResult.DeferredSelfPaneID for CloseDeferredSelfPane. A recorded pane id
+// StopResult.DeferredSelfPaneID for CloseDeferredSelfPane (which records the
+// seat active again if that close fails). A recorded pane id
 // that equals HERDR_PANE_ID but fails the check is not the seat's: it is
 // neither deferred nor closed, and the stop fails as above.
 //
@@ -995,29 +996,58 @@ func (o *Org) stopSeatPane(p StopParams, paneID string) (ctrlCNote, paneNote str
 // reports not found counts as closed (nil). Any other outcome -- no seat
 // recorded on paneID, a manifest read failure, an unconfirmed pane, a failed
 // close -- is an error naming the pane, and the pane stays open.
-func (o *Org) CloseDeferredSelfPane(paneID string) error {
+//
+// A pane left open means the caller is still running while the manifest
+// says its seat is stopped, so a retry of the same stop, or stop --all,
+// would skip it. After an unconfirmed pane or a failed close, unless force,
+// it therefore appends a compensating `spawned` for that seat
+// (reactivateSeat), and the error says the seat is recorded active again.
+// With force (the CLI's --force) it appends nothing and the seat stays
+// recorded stopped. The error ends with the herdr command that closes the
+// pane by hand whenever a retry would not find it: with force, after a
+// manifest read failure or with no seat recorded on paneID, and when the
+// compensating append fails.
+func (o *Org) CloseDeferredSelfPane(paneID string, force bool) error {
 	if paneID == "" {
 		return nil
 	}
+	byHand := "close it by hand: herdr pane close " + paneID
 	rr, err := o.Manifest.Read()
 	if err != nil {
-		return fmt.Errorf("org: close own pane %q: read manifest: %w", paneID, err)
+		return fmt.Errorf("org: close own pane %q: read manifest: %w; %s", paneID, err, byHand)
 	}
 	orgID, seatID, ok := lastSeatOnPane(rr.Events, paneID)
 	if !ok {
-		return fmt.Errorf("org: close own pane %q: no seat recorded on it, left open", paneID)
+		return fmt.Errorf("org: close own pane %q: no seat recorded on it, left open; %s", paneID, byHand)
 	}
+	failure := o.closeSelfPane(orgID, seatID, paneID)
+	if failure == nil {
+		return nil
+	}
+	err = fmt.Errorf("org: close own pane %q: %w", paneID, failure)
+	if force {
+		return fmt.Errorf("%w; seat %q of org_id %q stays recorded stopped (--force); %s", err, seatID, orgID, byHand)
+	}
+	var c selfCompensation
+	c.add(o.reactivateSeat(rr.Events, orgID, seatID, paneID, "self pane close failed: "+failure.Error()))
+	return c.errorFor(err, byHand)
+}
+
+// closeSelfPane is CloseDeferredSelfPane's ownership check and close: nil
+// when the pane closed or herdr does not know it, otherwise why it is still
+// open.
+func (o *Org) closeSelfPane(orgID, seatID, paneID string) error {
 	switch gone, err := o.confirmSeatPane(orgID, seatID, paneID); {
 	case err != nil:
-		return fmt.Errorf("org: close own pane %q: left open: %w", paneID, err)
+		return fmt.Errorf("left open: %w", err)
 	case gone:
 		return nil
 	}
-	err = o.callWithTimeout(func(ctx context.Context) error {
+	err := o.callWithTimeout(func(ctx context.Context) error {
 		return o.Herdr.PaneClose(ctx, paneID)
 	})
 	if err != nil && !isNotFound(err) {
-		return fmt.Errorf("org: close own pane %q: %w", paneID, err)
+		return err
 	}
 	return nil
 }
@@ -1034,34 +1064,148 @@ func (o *Org) CloseDeferredSelfPane(paneID string) error {
 // the org of the latest real workspace event for workspaceID, the
 // org_workspace_closed Disband just wrote). Each call runs under its own
 // driverCallTimeout deadline. A workspace herdr reports not found counts as
-// closed (nil). The manifest already says the workspace is closed, so a
-// non-nil error is the only sign that it is still open: show it, then close
-// the workspace by hand if it is the org's.
-func (o *Org) CloseDeferredSelfWorkspace(workspaceID string) error {
+// closed (nil).
+//
+// When the workspace stays open (unconfirmed, or the close failed), the
+// caller and its pane are still running, while the manifest has the
+// workspace closed, the caller's seat stopped and the org disbanded. Unless
+// force, it then appends a compensating org_workspace_created for the
+// workspace (reopenWorkspace) and, when HERDR_PANE_ID (read via o.Getenv)
+// is a seat of the same org stopped in that pane, a compensating `spawned`
+// for it (reactivateSeat), so the same disband or disband --all retries
+// both. The rest follows CloseDeferredSelfPane: with force it appends
+// nothing, and the error names `herdr workspace close` (to run if the
+// workspace is the org's) in the same cases.
+func (o *Org) CloseDeferredSelfWorkspace(workspaceID string, force bool) error {
 	if workspaceID == "" {
 		return nil
 	}
+	byHand := "if it is the org's, close it by hand: herdr workspace close " + workspaceID
 	rr, err := o.Manifest.Read()
 	if err != nil {
-		return fmt.Errorf("org: close own workspace %q: read manifest: %w", workspaceID, err)
+		return fmt.Errorf("org: close own workspace %q: read manifest: %w; %s", workspaceID, err, byHand)
 	}
-	orgID, ok := lastOrgOfWorkspace(rr.Events, workspaceID)
+	last, ok := lastWorkspaceEvent(rr.Events, workspaceID)
 	if !ok {
-		return fmt.Errorf("org: close own workspace %q: no org recorded on it, left open", workspaceID)
+		return fmt.Errorf("org: close own workspace %q: no org recorded on it, left open; %s", workspaceID, byHand)
 	}
+	failure := o.closeSelfWorkspace(last.OrgID, workspaceID)
+	if failure == nil {
+		return nil
+	}
+	err = fmt.Errorf("org: close own workspace %q: %w", workspaceID, failure)
+	if force {
+		return fmt.Errorf("%w; it stays recorded closed (--force); %s", err, byHand)
+	}
+	why := "self workspace close failed: " + failure.Error()
+	var c selfCompensation
+	c.add(o.reopenWorkspace(last, why))
+	if ownPane := o.getenv(herdrPaneIDEnv); ownPane != "" {
+		if orgID, seatID, ok := lastSeatOnPane(rr.Events, ownPane); ok && orgID == last.OrgID {
+			c.add(o.reactivateSeat(rr.Events, orgID, seatID, ownPane, why))
+		}
+	}
+	return c.errorFor(err, byHand)
+}
+
+// closeSelfWorkspace is closeSelfPane for CloseDeferredSelfWorkspace.
+func (o *Org) closeSelfWorkspace(orgID, workspaceID string) error {
 	switch gone, err := o.confirmOrgWorkspace(orgID, workspaceID); {
 	case err != nil:
-		return fmt.Errorf("org: close own workspace %q: left open: %w", workspaceID, err)
+		return fmt.Errorf("left open: %w", err)
 	case gone:
 		return nil
 	}
-	err = o.callWithTimeout(func(ctx context.Context) error {
+	err := o.callWithTimeout(func(ctx context.Context) error {
 		return o.Herdr.WorkspaceClose(ctx, workspaceID)
 	})
 	if err != nil && !isNotFound(err) {
-		return fmt.Errorf("org: close own workspace %q: %w", workspaceID, err)
+		return err
 	}
 	return nil
+}
+
+// selfCompensation collects what a failed deferred self close restored in
+// the manifest, and the appends that failed, for the error it returns.
+type selfCompensation struct {
+	restored []string
+	failed   []error
+}
+
+// add records one compensation step's outcome: restored names what it
+// recorded ("" when the manifest needed nothing), err a failed append.
+func (c *selfCompensation) add(restored string, err error) {
+	if restored != "" {
+		c.restored = append(c.restored, restored)
+	}
+	if err != nil {
+		c.failed = append(c.failed, err)
+	}
+}
+
+// errorFor returns err, which names the pane or workspace left open and
+// why, followed by what was recorded again, and, when an append failed,
+// that failure and byHand, the herdr command that closes it by hand. With
+// nothing restored and nothing failed, the manifest already had the seat
+// active and the workspace open, and err is returned as is.
+func (c selfCompensation) errorFor(err error, byHand string) error {
+	if len(c.restored) > 0 {
+		err = fmt.Errorf("%w; recorded %s again, so running the command again retries the close", err, strings.Join(c.restored, " and "))
+	}
+	for _, failed := range c.failed {
+		err = fmt.Errorf("%w; %w", err, failed)
+	}
+	if len(c.failed) > 0 {
+		err = fmt.Errorf("%w; %s", err, byHand)
+	}
+	return err
+}
+
+// reactivateSeat appends the compensating `spawned` for seatID of orgID
+// when the manifest has the seat stopped in paneID (its latest real state
+// event is `stopped` with that pane_id), after a deferred close left paneID
+// open and the seat's process running. The event copies the role, driver,
+// model, worktree, pane_id and agmsg team of that `stopped`, and the herdr
+// agent name of the latest event that recorded one (`stopped` does not), so
+// Roster shows the seat as it was, active again, also after a later
+// `disbanded` of the org. Details are `reactivated: <why>`. It does not
+// rejoin agmsg: the record is there so a later stop closes the pane, not to
+// give the seat more work. It returns what it recorded for the error text,
+// "" when the seat was not stopped in paneID.
+func (o *Org) reactivateSeat(events []ManifestEvent, orgID, seatID, paneID, why string) (string, error) {
+	seat, ok := seatFromEvents(events, orgID, seatID)
+	if !ok || seat.Event != EventStopped || seat.PaneID != paneID {
+		return "", nil
+	}
+	if err := o.appendEvent(ManifestEvent{
+		TS: o.now(), OrgID: orgID, SeatID: seatID, Event: EventSpawned,
+		Role: seat.Role, Driver: seat.Driver, Model: seat.Model, Worktree: seat.Worktree,
+		PaneID: paneID, AgmsgTeam: seat.AgmsgTeam, HerdrAgentName: lastHerdrAgentName(events, orgID, seatID),
+		Details: "reactivated: " + why,
+	}); err != nil {
+		return "", fmt.Errorf("record seat %q of org_id %q active again: %w", seatID, orgID, err)
+	}
+	return fmt.Sprintf("seat %q of org_id %q active", seatID, orgID), nil
+}
+
+// reopenWorkspace appends the compensating org_workspace_created for the
+// workspace of last, its latest real workspace event, when that is
+// org_workspace_closed, after a deferred close left the workspace open.
+// openOrgWorkspaces then lists it again, so Disband and orgsToDisband
+// target the org again (also after its `disbanded`) and resolveWorkspace
+// reuses it. Details are `reopened: <why>`. It returns what it recorded for
+// the error text, "" when the manifest already had the workspace open.
+func (o *Org) reopenWorkspace(last ManifestEvent, why string) (string, error) {
+	if last.Event != EventOrgWorkspaceClosed {
+		return "", nil
+	}
+	if err := o.appendEvent(ManifestEvent{
+		TS: o.now(), OrgID: last.OrgID, SeatID: "", Event: EventOrgWorkspaceCreated,
+		PaneID: last.PaneID, Details: "reopened: " + why,
+	}); err != nil {
+		return "", fmt.Errorf("record workspace %q of org_id %q open again: %w", last.PaneID, last.OrgID, err)
+	}
+	return fmt.Sprintf("workspace %q of org_id %q open", last.PaneID, last.OrgID), nil
 }
 
 // lastSeatOnPane returns the org_id and seat_id of the latest real
@@ -1076,18 +1220,31 @@ func lastSeatOnPane(events []ManifestEvent, paneID string) (orgID, seatID string
 	return "", "", false
 }
 
-// lastOrgOfWorkspace returns the org_id of the latest real (non-dry-run)
-// org-level workspace event (org_workspace_created or org_workspace_closed)
-// for workspaceID.
-func lastOrgOfWorkspace(events []ManifestEvent, workspaceID string) (orgID string, ok bool) {
+// lastHerdrAgentName returns the herdr agent name recorded by the latest
+// real (non-dry-run) event of seatID in orgID that has one (the `spawned`
+// that started it), "" when none has.
+func lastHerdrAgentName(events []ManifestEvent, orgID, seatID string) string {
+	for i := len(events) - 1; i >= 0; i-- {
+		ev := events[i]
+		if !ev.DryRun && ev.OrgID == orgID && ev.SeatID == seatID && ev.HerdrAgentName != "" {
+			return ev.HerdrAgentName
+		}
+	}
+	return ""
+}
+
+// lastWorkspaceEvent returns the latest real (non-dry-run) org-level
+// workspace event (org_workspace_created or org_workspace_closed) for
+// workspaceID.
+func lastWorkspaceEvent(events []ManifestEvent, workspaceID string) (ManifestEvent, bool) {
 	for i := len(events) - 1; i >= 0; i-- {
 		ev := events[i]
 		if !ev.DryRun && ev.SeatID == "" && ev.PaneID == workspaceID &&
 			(ev.Event == EventOrgWorkspaceCreated || ev.Event == EventOrgWorkspaceClosed) {
-			return ev.OrgID, true
+			return ev, true
 		}
 	}
-	return "", false
+	return ManifestEvent{}, false
 }
 
 // codexSpawnInfo is codexSpawnCorrelation's structured result: everything
@@ -1520,12 +1677,14 @@ func (r *DisbandResult) forcedNote() string {
 // any other.
 // The record is written before the close because the close ends the
 // calling process, which could not write anything afterwards; the caller
-// closes them via DeferredSelfPaneID / DeferredSelfWorkspaceID and must
-// show the error if that close fails. When an earlier close failed, the
-// own seat and workspace are left untouched (and listed as failures), so a
-// leader that ran disband in its own pane stays alive to see the error and
-// retry. Telling the own pane's workspace apart relies on herdr setting
-// HERDR_WORKSPACE_ID next to HERDR_PANE_ID.
+// closes them via DeferredSelfPaneID / DeferredSelfWorkspaceID. If that
+// close fails, CloseDeferredSelfPane / CloseDeferredSelfWorkspace record
+// the own seat active and the own workspace open again, so the org is a
+// disband target again, and the caller shows the error. When an earlier
+// close failed, the own seat and workspace are left untouched (and listed
+// as failures), so a leader that ran disband in its own pane stays alive to
+// see the error and retry. Telling the own pane's workspace apart relies on
+// herdr setting HERDR_WORKSPACE_ID next to HERDR_PANE_ID.
 //
 // DryRun makes no driver call and only appends a dry-run `disbanded`.
 //

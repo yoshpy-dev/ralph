@@ -738,7 +738,10 @@ func newOrgStopCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"not be closed, printing the failure as a warning and exiting 0; a pane that\n" +
 			"failed the check stays open, only the record is written. When the\n" +
 			"command runs inside a pane it stops (HERDR_PANE_ID), that pane is closed\n" +
-			"last, after all output, which ends the command.",
+			"last, after all output, which ends the command. If that last close fails,\n" +
+			"the seat is recorded active again and the command exits 1, so running it\n" +
+			"again (or stop --all from another pane) retries the close; with --force\n" +
+			"the seat stays recorded stopped and the failure is only a warning.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if all {
 				if err := rejectFlagsWithAll(cmd, "stop", "org-id", "seat"); err != nil {
@@ -750,7 +753,7 @@ func newOrgStopCmd(orgID, stateDir, configPath *string) *cobra.Command {
 				}
 				result := rt.StopAll(org.StopAllParams{DryRun: dryRun, Force: force})
 				runErr := printStopAllResult(cmd, result)
-				return closeDeferredSelf(cmd, rt, "", result.DeferredSelfPaneID, runErr)
+				return closeDeferredSelf(cmd, rt, "", result.DeferredSelfPaneID, force, runErr)
 			}
 			if err := requireOrgID(*orgID); err != nil {
 				return err
@@ -772,7 +775,7 @@ func newOrgStopCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			} else {
 				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "stopped seat %q\n", seat)
 			}
-			return closeDeferredSelf(cmd, rt, "", result.DeferredSelfPaneID, nil)
+			return closeDeferredSelf(cmd, rt, "", result.DeferredSelfPaneID, force, nil)
 		},
 	}
 
@@ -878,19 +881,27 @@ func printStopAllResult(cmd *cobra.Command, r org.StopAllResult) error {
 // first; os.Stdout and os.Stderr are unbuffered, so nothing written so far
 // is left behind. runErr is the command's own outcome and is returned as is
 // when there is nothing to close or the close succeeds (if the process
-// survives it). A failed close is added to it, so the command exits 1 and
-// the message shows the workspace or pane is still open.
-func closeDeferredSelf(cmd *cobra.Command, rt *org.Org, workspaceID, paneID string, runErr error) error {
+// survives it). A failed close has already recorded the seat active and the
+// workspace open again (CloseDeferredSelfPane / CloseDeferredSelfWorkspace),
+// and is added to runErr, so the command exits 1 and running it again
+// retries the close. With force the records stay as written and the failure
+// is printed as a warning instead, so --force still exits 0 when nothing
+// else failed.
+func closeDeferredSelf(cmd *cobra.Command, rt *org.Org, workspaceID, paneID string, force bool, runErr error) error {
 	var closeErr error
 	switch {
 	case workspaceID != "":
 		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "note: closing this command's own herdr workspace %s last; this ends the command\n", workspaceID)
-		closeErr = rt.CloseDeferredSelfWorkspace(workspaceID)
+		closeErr = rt.CloseDeferredSelfWorkspace(workspaceID, force)
 	case paneID != "":
 		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "note: closing this command's own herdr pane %s last; this ends the command\n", paneID)
-		closeErr = rt.CloseDeferredSelfPane(paneID)
+		closeErr = rt.CloseDeferredSelfPane(paneID, force)
 	}
-	if closeErr == nil {
+	switch {
+	case closeErr == nil:
+		return runErr
+	case force:
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: %v\n", closeErr)
 		return runErr
 	}
 	return errors.Join(runErr, closeErr)
@@ -1011,9 +1022,16 @@ func newOrgDisbandCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"workspace, and keeps going past an org that fails. --force records past\n" +
 			"close failures (`stopped`, the workspace closed, `disbanded`), printing\n" +
 			"them as warnings and exiting 0; a pane or workspace that failed the check\n" +
-			"stays open, only the record is written. When the command runs inside a\n" +
-			"pane or workspace it closes (HERDR_PANE_ID / HERDR_WORKSPACE_ID), that one\n" +
-			"is closed last, after all output, which ends the command.",
+			"is not closed itself, only the record is written. Even with --force,\n" +
+			"disband closes the org's workspace once herdr confirms its label, which\n" +
+			"ends every pane in it, including a seat pane that failed the tab check.\n" +
+			"When the command runs inside a pane or workspace it closes\n" +
+			"(HERDR_PANE_ID / HERDR_WORKSPACE_ID), that one is closed last, after all\n" +
+			"output, which ends the command. If that last close fails, the command\n" +
+			"records the seat in the pane active and the workspace open again and\n" +
+			"exits 1, so running it again (or disband --all from another pane) retries\n" +
+			"the close; with --force the records stay closed and the failure is only\n" +
+			"a warning.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if all {
 				if err := rejectFlagsWithAll(cmd, "disband", "org-id"); err != nil {
@@ -1025,7 +1043,7 @@ func newOrgDisbandCmd(orgID, stateDir, configPath *string) *cobra.Command {
 				}
 				result := rt.DisbandAll(org.DisbandAllParams{DryRun: dryRun, Force: force})
 				runErr := printDisbandAllResult(cmd, result)
-				return closeDeferredSelf(cmd, rt, result.DeferredSelfWorkspaceID, result.DeferredSelfPaneID, runErr)
+				return closeDeferredSelf(cmd, rt, result.DeferredSelfWorkspaceID, result.DeferredSelfPaneID, force, runErr)
 			}
 			if err := requireOrgID(*orgID); err != nil {
 				return err
@@ -1036,7 +1054,7 @@ func newOrgDisbandCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			}
 			result := rt.Disband(org.DisbandParams{OrgID: *orgID, DryRun: dryRun, Force: force})
 			runErr := printDisbandResult(cmd, *orgID, result)
-			return closeDeferredSelf(cmd, rt, result.DeferredSelfWorkspaceID, result.DeferredSelfPaneID, runErr)
+			return closeDeferredSelf(cmd, rt, result.DeferredSelfWorkspaceID, result.DeferredSelfPaneID, force, runErr)
 		},
 	}
 
