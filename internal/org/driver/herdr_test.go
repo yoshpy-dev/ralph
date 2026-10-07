@@ -517,6 +517,9 @@ func TestHerdr_PaneClose_WorkspaceClose(t *testing.T) {
 				if got := IsNotFound(err); got != tt.wantNotFound {
 					t.Fatalf("IsNotFound = %v, want %v (err: %v)", got, tt.wantNotFound, err)
 				}
+				if got := notFoundViaInterface(err); got != tt.wantNotFound {
+					t.Fatalf("NotFound via errors.As = %v, want %v (err: %v)", got, tt.wantNotFound, err)
+				}
 				if tt.wantIs != nil && !errors.Is(err, tt.wantIs) {
 					t.Fatalf("errors.Is(err, %v) = false, err: %v", tt.wantIs, err)
 				}
@@ -528,11 +531,20 @@ func TestHerdr_PaneClose_WorkspaceClose(t *testing.T) {
 	}
 }
 
+// notFoundViaInterface is how internal/org reads the not-found distinction
+// without importing this package: a one-method interface of its own and
+// errors.As. It must agree with IsNotFound for every error.
+func notFoundViaInterface(err error) bool {
+	var nf interface{ NotFound() bool }
+	return errors.As(err, &nf) && nf.NotFound()
+}
+
 // TestIsNotFound pins IsNotFound on its own: the two not-found codes match
 // directly and through %w wrapping, while nil, other codes, and a plain error
 // whose text merely contains a not-found code do not. The NewHerdrError
 // cases are the contract internal/org's fakeHerdr builds its "already
-// closed" replies on.
+// closed" replies on. Each case also checks the error type's NotFound
+// method read through notFoundViaInterface, which must give the same answer.
 func TestIsNotFound(t *testing.T) {
 	tests := []struct {
 		name string
@@ -552,6 +564,9 @@ func TestIsNotFound(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := IsNotFound(tt.err); got != tt.want {
 				t.Fatalf("IsNotFound(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+			if got := notFoundViaInterface(tt.err); got != tt.want {
+				t.Fatalf("NotFound via errors.As (%v) = %v, want %v", tt.err, got, tt.want)
 			}
 		})
 	}

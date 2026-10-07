@@ -66,6 +66,12 @@ type fakeHerdr struct {
 	// can delete an entry between calls to model herdr coming back.
 	paneCloseErrs      map[string]error
 	workspaceCloseErrs map[string]error
+	// paneSendKeysBlock / paneCloseBlock, when true, make PaneSendKeys /
+	// PaneClose record the call and then not return until ctx is done,
+	// returning ctx.Err() -- a herdr that never answers, for the per-call
+	// timeout tests (plan AC11). The call is still logged first.
+	paneSendKeysBlock bool
+	paneCloseBlock    bool
 
 	workspaceID string
 	paneID      string
@@ -164,24 +170,33 @@ func (f *fakeHerdr) PaneSendText(_ context.Context, _, _ string) error {
 	return err
 }
 
-func (f *fakeHerdr) PaneSendKeys(_ context.Context, paneID string, keys ...string) error {
+func (f *fakeHerdr) PaneSendKeys(ctx context.Context, paneID string, keys ...string) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.calls = append(f.calls, "pane_send_keys")
 	f.sendKeysCalls = append(f.sendKeysCalls, paneID)
 	f.sendKeysKeys = append(f.sendKeysKeys, keys)
-	if f.paneSendKeysErr != nil {
-		return f.paneSendKeysErr
+	block := f.paneSendKeysBlock
+	err := f.paneSendKeysErr
+	f.mu.Unlock()
+	if block {
+		<-ctx.Done()
+		return ctx.Err()
 	}
-	return nil
+	return err
 }
 
-func (f *fakeHerdr) PaneClose(_ context.Context, paneID string) error {
+func (f *fakeHerdr) PaneClose(ctx context.Context, paneID string) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.calls = append(f.calls, "pane_close")
 	f.paneCloseCalls = append(f.paneCloseCalls, paneID)
-	return f.paneCloseErrs[paneID]
+	block := f.paneCloseBlock
+	err := f.paneCloseErrs[paneID]
+	f.mu.Unlock()
+	if block {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	return err
 }
 
 func (f *fakeHerdr) WorkspaceClose(_ context.Context, workspaceID string) error {
@@ -207,6 +222,14 @@ type fakeAgmsg struct {
 	joinCalls  []joinCall
 	leaveErr   error
 	leaveCalls []leaveCall
+	// leaveBlock, when true, makes Leave record the call and then not
+	// return until ctx is done, returning ctx.Err() -- an agmsg that never
+	// answers (see fakeHerdr's paneCloseBlock).
+	leaveBlock bool
+	// leaveHook, when non-nil, runs inside Leave (after the call is
+	// recorded, without mu held), so a test can snapshot what had already
+	// happened -- herdr calls, manifest events -- at the moment of the Leave.
+	leaveHook func()
 }
 
 type joinCall struct {
@@ -237,12 +260,22 @@ func (f *fakeAgmsg) Join(_ context.Context, team, agentID, agmsgType, projectPat
 	return nil
 }
 
-func (f *fakeAgmsg) Leave(_ context.Context, team, agentID string) error {
+func (f *fakeAgmsg) Leave(ctx context.Context, team, agentID string) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.calls = append(f.calls, "leave")
 	f.leaveCalls = append(f.leaveCalls, leaveCall{team: team, agentID: agentID})
-	return f.leaveErr
+	block := f.leaveBlock
+	err := f.leaveErr
+	hook := f.leaveHook
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
+	if block {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	return err
 }
 
 // testCodexObserveGenerousBudget is the scan budget a test sets (in place
@@ -310,6 +343,10 @@ func raiseCodexObserveBudgetForStop(o *Org) {
 // (testCodexObserveGenerousBudget, above, for the found case) and/or
 // CodexModelObserveInterval on the returned *Org after construction, the
 // same pattern SendEnterDelay already uses above.
+//
+// Getenv is pinned to report every variable unset, so Stop's own-pane check
+// (HERDR_PANE_ID) never depends on whether `go test` itself runs inside a
+// herdr pane. Self-pane tests replace it on the returned *Org.
 func testOrg(t *testing.T) (*Org, *fakeHerdr, *fakeAgmsg) {
 	t.Helper()
 	dir := t.TempDir()
@@ -325,6 +362,7 @@ func testOrg(t *testing.T) (*Org, *fakeHerdr, *fakeAgmsg) {
 		CodexSessionsDir:          filepath.Join(dir, "codex-sessions"),
 		CodexModelObserveTimeout:  time.Millisecond,
 		CodexModelObserveInterval: time.Millisecond,
+		Getenv:                    func(string) string { return "" },
 	}
 	return o, h, a
 }

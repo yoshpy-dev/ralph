@@ -2,7 +2,9 @@ package org
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -594,16 +596,87 @@ func (o *Org) Read(p ReadParams) ReadResult {
 	return ReadResult{Output: out, Err: err}
 }
 
+// defaultDriverCallTimeout bounds each herdr / agmsg call Stop makes when
+// Org.DriverCallTimeout is unset (zero value). A call that has not answered
+// by then counts as failed, so one unresponsive herdr or agmsg can never
+// hold a stop (or the stops after it) forever.
+const defaultDriverCallTimeout = 10 * time.Second
+
+// herdrPaneIDEnv is the variable herdr sets inside every pane to that pane's
+// own id (alongside HERDR_ENV=1, HERDR_TAB_ID and HERDR_WORKSPACE_ID; plan
+// Assumptions, confirmed live 2026-10-07). Stop compares it with the seat's
+// recorded pane_id to recognise the caller's own pane.
+const herdrPaneIDEnv = "HERDR_PANE_ID"
+
+// driverCallTimeout returns o.DriverCallTimeout, falling back to
+// defaultDriverCallTimeout when unset (the Org zero value) -- mirrors
+// sendEnterDelay's pattern.
+func (o *Org) driverCallTimeout() time.Duration {
+	if o.DriverCallTimeout > 0 {
+		return o.DriverCallTimeout
+	}
+	return defaultDriverCallTimeout
+}
+
+// callWithTimeout runs one external call under its own context with
+// driverCallTimeout as the deadline. The driver adapters honour ctx (the
+// real Runner is exec.CommandContext), so an unanswered call comes back as
+// a context error, which callers treat like any other failure.
+func (o *Org) callWithTimeout(call func(ctx context.Context) error) error {
+	ctx, cancel := context.WithTimeout(context.Background(), o.driverCallTimeout())
+	defer cancel()
+	return call(ctx)
+}
+
+// getenv reads key through o.Getenv, falling back to os.Getenv when unset.
+func (o *Org) getenv(key string) string {
+	if o.Getenv != nil {
+		return o.Getenv(key)
+	}
+	return os.Getenv(key)
+}
+
+// notFoundError is how this package recognises a herdr "already closed"
+// reply without importing internal/org/driver: the driver's error type has a
+// NotFound method that is true for exactly the codes driver.IsNotFound
+// matches (pane_not_found, workspace_not_found).
+type notFoundError interface{ NotFound() bool }
+
+// isNotFound reports whether err, or an error it wraps, is a herdr not-found
+// reply. Any other error, and nil, is false.
+func isNotFound(err error) bool {
+	var nf notFoundError
+	return errors.As(err, &nf) && nf.NotFound()
+}
+
 // StopParams describes one `ralph org stop` invocation.
 type StopParams struct {
 	OrgID  string
 	Seat   string
 	DryRun bool
+	// Force records `stopped` even when the seat's pane could not be closed
+	// (the CLI's --force, for cleaning up while herdr is unreachable). The
+	// close failure is then reported through StopResult.CloseErr instead of
+	// StopResult.Err.
+	Force bool
 }
 
 // StopResult is Stop's return value.
 type StopResult struct {
 	Err error
+	// CloseErr is the pane-close failure (a herdr error other than
+	// not-found, or a timeout) whenever the close failed, nil otherwise.
+	// Without Force, Err wraps the same failure and the seat stays active;
+	// with Force, Err is nil and this is the only place the failure shows,
+	// so the CLI prints it as a warning.
+	CloseErr error
+	// DeferredSelfPaneID is the seat's pane_id when that pane is the
+	// caller's own (HERDR_PANE_ID): Stop sent no C-c and did not close it,
+	// so the caller can finish its own output first and then close it with
+	// CloseDeferredSelfPane as its very last action. Empty on every other
+	// path, including a self-pane stop whose `stopped` append failed (the
+	// seat is then still active in the manifest, so the pane stays open).
+	DeferredSelfPaneID string
 	// ModelReceipt is the Receipt this call appended, same contract as
 	// SpawnResult.ModelReceipt: set when Stop's own observation
 	// (observeStopModelReceipt, AC-5) finds a record and appends a
@@ -619,10 +692,32 @@ type StopResult struct {
 	ModelReceipt Receipt
 }
 
-// Stop sends a best-effort C-c to Seat's pane and a best-effort agmsg
-// Leave (real invocations only), then appends a `stopped` state event
-// recording both outcomes. DryRun appends the event without attempting
-// either real driver call.
+// Stop ends Seat's process and records it, in this order (real invocations
+// only): a best-effort C-c to the seat's pane, `herdr pane close` on that
+// pane, a best-effort agmsg Leave, then the manifest event. Each of the three
+// external calls runs under its own driverCallTimeout deadline. Details
+// record every outcome: `ctrl_c=...`, `pane=...` (closed, already closed --
+// herdr's not-found reply -- or no pane_id on record), and `leave=...`. A
+// failed C-c alone does not fail the stop when the close succeeds. DryRun
+// appends a `stopped` event without any driver call.
+//
+// When the close fails (any herdr error other than not-found, including a
+// timeout), Stop does not append `stopped`: it skips the Leave, so the
+// still-running seat stays reachable over agmsg, appends the non-state
+// EventStopFailed with the same seat fields, and returns an error naming the
+// seat and the failure. The seat stays active in the roster, so stopping it
+// again once herdr answers closes it and records `stopped` (plan AC2). With
+// Force, a failed close is recorded as `stopped` anyway (details
+// `pane=close failed (forced): ...`, Leave attempted) and reported through
+// StopResult.CloseErr with a nil Err.
+//
+// The caller's own pane (the seat's pane_id equals HERDR_PANE_ID, read via
+// o.Getenv) is never interrupted or closed here, since that would end the
+// caller before it records anything: Stop skips the C-c and the close, does
+// the Leave, appends `stopped` with `pane=self, closed last`, and returns the
+// pane id in StopResult.DeferredSelfPaneID for CloseDeferredSelfPane.
+//
+// Stop only ever closes the pane_id the manifest recorded for this seat.
 //
 // AC-10 (existing-seat precondition): Stop resolves Seat from the manifest
 // roster *first*, for both real and dry-run invocations. A seat that was
@@ -648,35 +743,49 @@ func (o *Org) Stop(p StopParams) StopResult {
 	paneID := seat.PaneID
 	team := seat.AgmsgTeam
 	var details string
+	var closeErr error
+	selfPane := false
 
 	if p.DryRun {
 		details = "dry-run: no driver call"
 	} else {
-		var paneNote string
-		if paneID == "" {
-			paneNote = "pane=no pane_id on record"
-		} else if err := o.Herdr.PaneSendKeys(context.Background(), paneID, "C-c"); err != nil {
-			paneNote = fmt.Sprintf("pane=failed: %v", err)
-		} else {
-			paneNote = "pane=ok"
+		selfPane = paneID != "" && paneID == o.getenv(herdrPaneIDEnv)
+		var ctrlCNote, paneNote string
+		ctrlCNote, paneNote, closeErr = o.stopSeatPane(paneID, selfPane)
+		if closeErr != nil {
+			if p.Force {
+				paneNote = fmt.Sprintf("pane=close failed (forced): %v", closeErr)
+			} else {
+				paneNote = fmt.Sprintf("pane=close failed: %v", closeErr)
+			}
 		}
 
 		var leaveNote string
-		if team == "" {
+		switch {
+		case closeErr != nil && !p.Force:
+			// The seat keeps running and stays active in the roster, so it
+			// must stay reachable over agmsg until a later stop closes it.
+			leaveNote = "leave=skipped: pane not closed"
+		case team == "":
 			leaveNote = "leave=skipped: no agmsg_team on record"
-		} else if err := o.Agmsg.Leave(context.Background(), team, p.Seat); err != nil {
-			leaveNote = fmt.Sprintf("leave=failed: %v", err)
-		} else {
-			leaveNote = "leave=ok"
+		default:
+			if err := o.callWithTimeout(func(ctx context.Context) error {
+				return o.Agmsg.Leave(ctx, team, p.Seat)
+			}); err != nil {
+				leaveNote = fmt.Sprintf("leave=failed: %v", err)
+			} else {
+				leaveNote = "leave=ok"
+			}
 		}
 
-		details = paneNote + " " + leaveNote
+		details = ctrlCNote + " " + paneNote + " " + leaveNote
 	}
+	stopFailed := closeErr != nil && !p.Force
 
 	// The codex model observation runs after the driver calls above and
-	// before the `stopped` event append below, so its outcome can ride
-	// along on that same event's Details (AC-5) instead of needing a
-	// second manifest write. Only for a real (non-dry-run) stop whose
+	// before the `stopped` (or `stop_failed`) event append below, so its
+	// outcome can ride along on that same event's Details (AC-5) instead of
+	// needing a second manifest write. Only for a real (non-dry-run) stop whose
 	// CORRELATED SPAWN -- the spawn that actually launched this seat, per
 	// codexSpawnCorrelation, not the roster's latest state -- was a codex
 	// spawn: a later rejected retry for a different driver or model must
@@ -708,13 +817,84 @@ func (o *Org) Stop(p StopParams) StopResult {
 	// contract is out of scope (plan non-goal). This means the receipt
 	// appended just above -- keyed to the correlated spawn -- can legally
 	// name a different driver or model than this event does, when the
-	// roster's latest state is a rejected retry (issue #173).
+	// roster's latest state is a rejected retry (issue #173). A stop_failed
+	// event carries the same fields so the failure stays attributable.
+	event := EventStopped
+	if stopFailed {
+		event = EventStopFailed
+	}
 	err = o.appendEvent(ManifestEvent{
-		TS: o.now(), OrgID: p.OrgID, SeatID: p.Seat, Event: EventStopped,
+		TS: o.now(), OrgID: p.OrgID, SeatID: p.Seat, Event: event,
 		Role: seat.Role, Driver: seat.Driver, Model: seat.Model, Worktree: seat.Worktree,
 		PaneID: paneID, AgmsgTeam: team, DryRun: p.DryRun, Details: details,
 	})
-	return StopResult{Err: err, ModelReceipt: modelReceipt}
+	result := StopResult{ModelReceipt: modelReceipt, CloseErr: closeErr}
+	if stopFailed {
+		result.Err = fmt.Errorf("org: stop: seat %q in org_id %q: pane %q not closed, seat left active: %w", p.Seat, p.OrgID, paneID, closeErr)
+		if err != nil {
+			result.Err = errors.Join(result.Err, fmt.Errorf("org: stop: record %s: %w", EventStopFailed, err))
+		}
+		return result
+	}
+	result.Err = err
+	if selfPane && err == nil {
+		result.DeferredSelfPaneID = paneID
+	}
+	return result
+}
+
+// stopSeatPane runs the pane half of a real Stop: the C-c, then the close,
+// each under its own driverCallTimeout deadline. It returns the details
+// notes for both and the close failure, which is nil when the pane closed,
+// herdr reported it not found (already closed), or no pane_id is on record.
+// On a failure paneNote is empty; Stop writes it, since its wording depends
+// on Force. selfPane skips both calls (see Stop's doc comment).
+func (o *Org) stopSeatPane(paneID string, selfPane bool) (ctrlCNote, paneNote string, closeErr error) {
+	switch {
+	case paneID == "":
+		return "ctrl_c=skipped", "pane=no pane_id on record", nil
+	case selfPane:
+		return "ctrl_c=skipped: self pane", "pane=self, closed last", nil
+	}
+
+	ctrlCNote = "ctrl_c=ok"
+	if err := o.callWithTimeout(func(ctx context.Context) error {
+		return o.Herdr.PaneSendKeys(ctx, paneID, "C-c")
+	}); err != nil {
+		ctrlCNote = fmt.Sprintf("ctrl_c=failed: %v", err)
+	}
+
+	err := o.callWithTimeout(func(ctx context.Context) error {
+		return o.Herdr.PaneClose(ctx, paneID)
+	})
+	switch {
+	case err == nil:
+		return ctrlCNote, "pane=closed", nil
+	case isNotFound(err):
+		return ctrlCNote, "pane=already closed", nil
+	default:
+		return ctrlCNote, "", err
+	}
+}
+
+// CloseDeferredSelfPane closes the caller's own herdr pane that Stop left
+// open and returned in StopResult.DeferredSelfPaneID, under the same
+// driverCallTimeout deadline. Closing that pane ends its process, which is
+// the process calling this method (and the agent that ran the command), so
+// the caller must make this its very last action, after every manifest
+// write and all output; a nil return may never be seen. A pane herdr
+// reports not found counts as closed (nil). An empty paneID is a no-op.
+func (o *Org) CloseDeferredSelfPane(paneID string) error {
+	if paneID == "" {
+		return nil
+	}
+	err := o.callWithTimeout(func(ctx context.Context) error {
+		return o.Herdr.PaneClose(ctx, paneID)
+	})
+	if err != nil && !isNotFound(err) {
+		return fmt.Errorf("org: close own pane %q: %w", paneID, err)
+	}
+	return nil
 }
 
 // codexSpawnInfo is codexSpawnCorrelation's structured result: everything

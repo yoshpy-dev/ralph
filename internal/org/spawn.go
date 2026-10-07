@@ -186,6 +186,17 @@ type Org struct {
 	// the poll's not-found/timeout path runs fast.
 	CodexModelObserveTimeout  time.Duration
 	CodexModelObserveInterval time.Duration
+	// DriverCallTimeout bounds each herdr / agmsg call Stop makes (the C-c,
+	// the pane close, the agmsg Leave) and CloseDeferredSelfPane's close,
+	// one fresh deadline per call. Zero (the field's default) means "use
+	// defaultDriverCallTimeout" -- tests set a tiny value so a call that
+	// never answers times out fast.
+	DriverCallTimeout time.Duration
+	// Getenv overrides how Stop reads the caller's herdr environment
+	// (HERDR_PANE_ID, set by herdr inside every pane). nil (the field's
+	// default) means os.Getenv -- tests set it so the result does not depend
+	// on whether the test process itself runs inside a herdr pane.
+	Getenv func(string) string
 }
 
 func (o *Org) now() string {

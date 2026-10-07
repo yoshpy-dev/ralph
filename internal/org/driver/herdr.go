@@ -62,6 +62,14 @@ func NewHerdrError(code, message string) error {
 	return &herdrError{Code: code, Message: message}
 }
 
+// NotFound reports whether e's code is pane_not_found or workspace_not_found,
+// the codes IsNotFound matches. internal/org reads it through its own
+// one-method interface and errors.As, so it can tell an already-closed pane
+// from a failed close without importing this package.
+func (e *herdrError) NotFound() bool {
+	return e.Code == HerdrCodePaneNotFound || e.Code == HerdrCodeWorkspaceNotFound
+}
+
 // IsNotFound reports whether err carries a herdr error envelope whose code is
 // pane_not_found or workspace_not_found, i.e. the pane or workspace the
 // command targeted does not exist (for PaneClose / WorkspaceClose: it is
@@ -75,7 +83,7 @@ func IsNotFound(err error) bool {
 	if !errors.As(err, &he) {
 		return false
 	}
-	return he.Code == HerdrCodePaneNotFound || he.Code == HerdrCodeWorkspaceNotFound
+	return he.NotFound()
 }
 
 // parseHerdrEnvelope parses trimmed herdr CLI stdout as a JSON envelope.
