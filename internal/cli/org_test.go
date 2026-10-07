@@ -57,6 +57,14 @@ func runOrgCmd(t *testing.T, args ...string) (string, error) {
 // internal/org/spawn_test.go, needed because the CLI drives Send through a
 // real subprocess herdr with no other way to inject a controlled delay
 // (AR-1 CLI coverage, docs/reports/cross-review-triage-org-send-enter-timing.md).
+//
+// ORG_STUB_CLOSE_FAIL_IDS and ORG_STUB_CLOSE_NOT_FOUND_IDS are
+// space-separated pane / workspace ids: a `pane close <id>` or `workspace
+// close <id>` for an id in the first list fails with a plain error (herdr
+// unreachable), and for an id in the second it answers herdr's
+// pane_not_found / workspace_not_found envelope with exit 1 (already
+// closed). Closes of every other id succeed, so one test can fail a single
+// seat's pane among several.
 const herdrStub = `#!/bin/sh
 if [ -n "$ORG_HERDR_LOG" ]; then
   echo "$@" >> "$ORG_HERDR_LOG"
@@ -64,6 +72,20 @@ fi
 if [ -n "$ORG_STUB_FAIL" ] && [ "$1:$2" = "$ORG_STUB_FAIL" ]; then
   echo "stub failure: $1 $2" >&2
   exit 1
+fi
+if [ "$2" = "close" ]; then
+  for id in $ORG_STUB_CLOSE_FAIL_IDS; do
+    if [ "$3" = "$id" ]; then
+      echo "stub failure: $1 close $3" >&2
+      exit 1
+    fi
+  done
+  for id in $ORG_STUB_CLOSE_NOT_FOUND_IDS; do
+    if [ "$3" = "$id" ]; then
+      echo "{\"error\":{\"code\":\"${1}_not_found\",\"message\":\"$1 $3 not found\"}}"
+      exit 1
+    fi
+  done
 fi
 if [ "$1 $2" = "agent wait" ] && [ -n "$ORG_STUB_AGENT_WAIT_CONFIRM_FAIL" ]; then
   for arg in "$@"; do
@@ -172,6 +194,13 @@ func setupOrgStubPATH(t *testing.T) (herdrLog, agmsgLog string) {
 
 	t.Setenv("ORG_STUB_FAIL", "")
 	t.Setenv("ORG_STUB_AGENT_WAIT_CONFIRM_FAIL", "")
+	t.Setenv("ORG_STUB_CLOSE_FAIL_IDS", "")
+	t.Setenv("ORG_STUB_CLOSE_NOT_FOUND_IDS", "")
+	// stop and disband treat the pane and workspace these name as the
+	// caller's own and close them last; pin both unset so no test depends on
+	// whether `go test` runs inside a herdr pane.
+	t.Setenv("HERDR_PANE_ID", "")
+	t.Setenv("HERDR_WORKSPACE_ID", "")
 
 	return herdrLog, agmsgLog
 }
