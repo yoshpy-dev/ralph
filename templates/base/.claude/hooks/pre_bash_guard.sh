@@ -19,21 +19,26 @@
 #      quoted, the $(...) and backticks in the body are expanded, so they
 #      are read as commands.
 #   2. Re-reading. Text that the shell runs is read again as commands, up to
-#      4 levels deep (text nested deeper is not read): $(...), <(...) and
-#      backticks (outside quotes and inside double quotes), the string given
-#      to sh/bash/zsh/dash/ksh with -c (also in a cluster such as -lc) and to
-#      env -S, the arguments of eval, the body of a heredoc or here-string
-#      fed to a shell that reads stdin, and the arguments and heredoc bodies
-#      of the commands piped into such a shell (| sh, | bash -s).
-#      Single-quoted text elsewhere is never read as a command.
+#      4 levels deep: $(...), <(...) and backticks (outside quotes and inside
+#      double quotes), the string given to sh/bash/zsh/dash/ksh with -c (also
+#      in a cluster such as -lc) and to env -S, the arguments of eval, the
+#      body of a heredoc or here-string fed to a shell that reads stdin, and
+#      the arguments and heredoc bodies of the commands piped into such a
+#      shell (| sh, | bash -s). Single-quoted text elsewhere is never read as
+#      a command.
 #   3. Simple-command assembly. The command name is the first word after
 #      reserved words (if then else elif do while until ! { }, and function
 #      with its name), NAME=value assignments, and the wrappers env (-i,
 #      -u NAME, NAME=value), command, exec, nohup, time, nice (-n N), timeout
 #      (and its duration), xargs (and its flags), and stdbuf. Names are
-#      compared without their directory (/usr/bin/sudo is sudo).
+#      compared without their directory (/usr/bin/sudo is sudo). Unless the
+#      command is one known not to run its arguments (NOEXEC below: echo,
+#      grep, cat, cp, git, ...), its later words count as well: a word that
+#      is sudo with another word after it, or a word that is git, is judged
+#      as a command there. This covers find -exec, watch, flock, chroot, and
+#      other runners without a list of them.
 #   4. Rules (every permission mode):
-#      - sudo as the command name.
+#      - sudo as the command name, or as a later word as in 3.
 #      - git push (after git's -C <dir>, -c <k=v>, --git-dir=... and other
 #        global options) with --force, --force-with-lease[=...], a short-flag
 #        cluster containing f, or a +refspec.
@@ -51,6 +56,19 @@
 #        denied while -mn (message "n") and -uno are not.
 #      - git -c core.hooksPath=... (key in any case; also --config-env)
 #        before the subcommand.
+#      Long options may be abbreviated, as git allows: an argument that
+#      starts with -- and, without its =value, is at least 4 characters and
+#      a prefix of --force, --force-with-lease, --hard, --no-verify,
+#      --message, or --file counts as that option (--ha is --hard). An
+#      abbreviation git rejects as ambiguous is denied too; it fails anyway.
+#   5. Fail closed. Nesting deeper than 4 levels, more re-read text than 8
+#      times the command plus 64 KB, or $(...) and ${...} inside each other
+#      more than 24 levels deep (the command itself counts as one) is denied
+#      as too deep. When awk is missing or exits non-zero, the four
+#      substring rules of the previous guard decide instead: "sudo "
+#      anywhere, git push --force or -f, git reset --hard, and a git commit
+#      -m message that starts with a double quote and holds $( or a
+#      backtick.
 # Not covered: anything only known at run time (variables such as $cmd,
 # aliases, functions, git aliases, scripts read from a file, remote commands
 # such as ssh host '...'), and shell syntax beyond the above (case
@@ -74,8 +92,11 @@ emit_deny() {
 [ -n "$command" ] || exit 0
 
 # The command goes to awk on stdin (awk -v would process its backslashes).
-# awk prints the name of the first rule that denies, or nothing. A failure
-# inside awk keeps whatever it printed and is not an error of this hook.
+# awk prints the name of the first rule that denies, or nothing. Its exit
+# status goes to awk_status (the status of the assignment is that of the
+# command substitution, whose last command is awk); a missing or failing
+# awk falls back to the previous guard's rules after the program.
+awk_status=0
 rule="$(printf '%s' "$command" | LC_ALL=C awk '
 # ======================================================================
 # Text access
@@ -126,17 +147,17 @@ function skip(p, re,    r) {
 # Lexing
 # ======================================================================
 # A context is one command list: the command itself, the inside of one
-# $(...), or one queued string. CD[ctx] is its depth (0 for the command)
-# and CJ[ctx] says whether its commands are judged (depth <= MAXD). The
-# words of the simple command being assembled are WV (value, quotes
-# removed), WR (source text) and WS (1 when the source has $( or a
-# backtick outside single quotes), indexed [ctx, 1..WN[ctx]]; its
-# redirections are RO (operator) and RV/RSB (target value and subst flag),
-# indexed [ctx, 1..RN[ctx]]. CUR[ctx] is the id of that command.
+# $(...), or one queued string. CD[ctx] is its depth (0 for the command);
+# a context deeper than MAXD is denied as too deep. The words of the
+# simple command being assembled are WV (value, quotes removed), WR (source
+# text) and WS (1 when the source has $( or a backtick outside single
+# quotes), indexed [ctx, 1..WN[ctx]]; its redirections are RO (operator)
+# and RV/RSB (target value and subst flag), indexed [ctx, 1..RN[ctx]].
+# CUR[ctx] is the id of that command.
 function new_ctx(d) {
+  if (d > MAXD) deny("too_deep")
   CTX++
   CD[CTX] = d
-  CJ[CTX] = (d <= MAXD)
   WN[CTX] = 0
   RN[CTX] = 0
   PLN[CTX] = 0
@@ -149,9 +170,9 @@ function new_ctx(d) {
 # the text or, when closer is ")", after the ")" that closes the $( or <(
 # it was called for. Each simple command goes to end_cmd().
 function lex_cmds(ctx, closer,    c, c2, depth, p0) {
-  if (++RLVL > RMAX) ABORT = 1
+  if (++RLVL > RMAX) deny("too_deep")
   depth = 0
-  while (P <= N && !ABORT) {
+  while (P <= N) {
     p0 = P
     c = at(P)
     if (c == " " || c == "\t") P = skip(P, RE_NOBLANK)
@@ -200,7 +221,7 @@ function lex_word(ctx,    start, val, buf, c, c2, e, subst, quoted, piece) {
   buf = ""
   subst = 0
   quoted = 0
-  while (P <= N && !ABORT) {
+  while (P <= N) {
     c = at(P)
     if (c == SQ) {
       quoted = 1
@@ -249,7 +270,7 @@ function lex_dq(ctx,    val, buf, e, c, c2, subst, piece) {
   val = ""
   buf = ""
   subst = 0
-  while (P <= N && !ABORT) {
+  while (P <= N) {
     e = skip(P, RE_DQ)
     piece = text(P, e)
     P = e
@@ -307,9 +328,9 @@ function lex_dollar(ctx, in_dq,    s, c, f) {
 # lex_brace(ctx, in_dq): P is just after ${. Skips to the matching } and
 # returns 1 when a $( or a backtick inside it was lexed.
 function lex_brace(ctx, in_dq,    c, subst) {
-  if (++RLVL > RMAX) ABORT = 1
+  if (++RLVL > RMAX) deny("too_deep")
   subst = 0
-  while (P <= N && !ABORT) {
+  while (P <= N) {
     P = skip(P, in_dq ? RE_BRACE_DQ : RE_BRACE)
     if (P > N) break
     c = at(P)
@@ -415,7 +436,7 @@ function lex_redir(ctx,    c, c2, op, s, k) {
 # read_heredocs(): P is just after a newline. Reads the bodies of the
 # heredocs opened on the line that ended, in order.
 function read_heredocs() {
-  while (HR < HN && !ABORT) {
+  while (HR < HN) {
     HR++
     read_body(HR)
   }
@@ -443,7 +464,6 @@ function read_body(h,    d, dl, b0, ls, le, t, body) {
 function heredoc_done(h, body,    cid, ctx, d, k) {
   ctx = HX[h]
   cid = HO[h]
-  if (!CJ[ctx]) return
   d = CD[ctx]
   # Fed to a shell that reads stdin, directly or through a pipe: commands.
   if (CSH[cid] || CPSH[cid]) queue("c", body, d + 1)
@@ -459,7 +479,7 @@ function heredoc_done(h, body,    cid, ctx, d, k) {
 # lex_hd(ctx): a heredoc body whose delimiter is not quoted. It is data,
 # except that $(...), ${...} and backticks in it are expanded.
 function lex_hd(ctx,    c) {
-  while (P <= N && !ABORT) {
+  while (P <= N) {
     P = skip(P, RE_HD)
     if (P > N) break
     c = at(P)
@@ -470,12 +490,13 @@ function lex_hd(ctx,    c) {
 }
 
 # queue(kind, t, d): read t later at depth d, as commands ("c") or as an
-# unquoted heredoc body ("h"). Nothing deeper than MAXD is read, and the
-# queued text is capped at QMAX characters in total.
+# unquoted heredoc body ("h"). Text deeper than MAXD, or queued text past
+# QMAX characters in total, is denied as too deep rather than skipped.
 function queue(kind, t, d) {
-  if (d > MAXD || t == "") return
+  if (t == "") return
+  if (d > MAXD) deny("too_deep")
   QBYTES += length(t)
-  if (QBYTES > QMAX) return
+  if (QBYTES > QMAX) deny("too_deep")
   QN++
   QK[QN] = kind
   QT[QN] = t
@@ -524,7 +545,7 @@ function end_cmd(ctx, sep,    cid) {
     return
   }
   cid = CUR[ctx]
-  if (CJ[ctx]) judge(ctx, cid, sep)
+  judge(ctx, cid, sep)
   if (sep == "|") { PLC[ctx, ++PLN[ctx]] = cid; CPL[cid] = PLID[ctx] }
   else pipe_close(ctx)
   WN[ctx] = 0
@@ -649,7 +670,27 @@ function judge(ctx, cid, sep,    i, nm) {
   if (nm == "sudo") deny("sudo")
   if (nm == "sh" || nm == "bash" || nm == "zsh" || nm == "dash" || nm == "ksh") shell_rules(ctx, cid, i + 1)
   else if (nm == "eval") queue("c", join_words(ctx, i + 1), CD[ctx] + 1)
-  else if (nm == "git") git_rules(ctx, cid, i + 1)
+  else if (nm == "git") git_rules(ctx, cid, i + 1, WN[ctx])
+  if (!(nm in NOEXEC)) scan_words(ctx, cid, i + 1)
+}
+
+# scan_words(ctx, cid, i): the command before word i is not in NOEXEC, so
+# it may run its arguments (find -exec, watch, flock, chroot, ...). A later
+# word that is sudo with another word after it is denied, and a later word
+# that is git gets the git rules on the words after it, up to the next git
+# word (so each word is read by one git command: linear in the words).
+function scan_words(ctx, cid, i,    n, b, g) {
+  n = WN[ctx]
+  g = 0
+  for (; i <= n; i++) {
+    b = base(WV[ctx, i])
+    if (b == "sudo" && i < n) deny("sudo")
+    if (b == "git") {
+      if (g) git_rules(ctx, cid, g + 1, i - 1)
+      g = i
+    }
+  }
+  if (g) git_rules(ctx, cid, g + 1, n)
 }
 
 # keep_args(ctx, cid, i): a command followed by | keeps its arguments (one
@@ -702,10 +743,10 @@ function shell_rules(ctx, cid, i,    n, a, k, f, cflag, sflag, d, m, j) {
   }
 }
 
-# git_rules(ctx, cid, i): git with arguments from word i. Global options
-# come first; the first other word is the subcommand.
-function git_rules(ctx, cid, i,    n, a, sc) {
-  n = WN[ctx]
+# git_rules(ctx, cid, i, n): git with arguments in words i..n. Global
+# options come first; the first other word is the subcommand. The rules
+# below read the same range.
+function git_rules(ctx, cid, i, n,    a, sc) {
   while (i <= n) {
     a = WV[ctx, i]
     if (a == "-c" || a == "--config-env") {
@@ -724,10 +765,10 @@ function git_rules(ctx, cid, i,    n, a, sc) {
   }
   if (i > n) return
   sc = WV[ctx, i]
-  if (sc == "push") push_rules(ctx, i + 1)
-  else if (sc == "reset") reset_rules(ctx, i + 1)
-  else if (sc == "commit") commit_rules(ctx, cid, i + 1)
-  else if (sc == "merge" || sc == "rebase" || sc == "am") no_verify_rules(ctx, i + 1)
+  if (sc == "push") push_rules(ctx, i + 1, n)
+  else if (sc == "reset") reset_rules(ctx, i + 1, n)
+  else if (sc == "commit") commit_rules(ctx, cid, i + 1, n)
+  else if (sc == "merge" || sc == "rebase" || sc == "am") no_verify_rules(ctx, i + 1, n)
 }
 # hooks_key(kv): 1 when the config key of kv (name or name=value) is
 # core.hooksPath; git config keys are case-insensitive.
@@ -736,39 +777,57 @@ function hooks_key(kv,    k) {
   if (k) kv = substr(kv, 1, k - 1)
   return tolower(kv) == "core.hookspath"
 }
-function push_rules(ctx, i,    n, a) {
-  n = WN[ctx]
+# opt_is(a, full): 1 when the argument a names the long option full. git
+# accepts any unique prefix of a long option, so a counts when it starts
+# with -- and, without its =value, is at least 4 characters long and a
+# prefix of full (--ha is --hard, --force-with=x is --force-with-lease).
+function opt_is(a, full,    k) {
+  if (substr(a, 1, 2) != "--") return 0
+  k = index(a, "=")
+  if (k) a = substr(a, 1, k - 1)
+  k = length(a)
+  return k >= 4 && k <= length(full) && substr(full, 1, k) == a
+}
+function push_rules(ctx, i, n,    a) {
   for (; i <= n; i++) {
     a = WV[ctx, i]
-    if (a == "--no-verify") deny("no_verify")
-    if (a == "--force" || a == "--force-with-lease" || substr(a, 1, 19) == "--force-with-lease=") deny("force_push")
+    if (opt_is(a, "--no-verify")) deny("no_verify")
+    if (opt_is(a, "--force") || opt_is(a, "--force-with-lease")) deny("force_push")
     if (a ~ /^-[A-Za-z0-9]+$/ && index(a, "f")) deny("force_push")
     if (substr(a, 1, 1) == "+") deny("force_push")
   }
 }
-function reset_rules(ctx, i,    n) {
-  n = WN[ctx]
-  for (; i <= n; i++) if (WV[ctx, i] == "--hard") deny("hard_reset")
+function reset_rules(ctx, i, n) {
+  for (; i <= n; i++) if (opt_is(WV[ctx, i], "--hard")) deny("hard_reset")
 }
-function no_verify_rules(ctx, i,    n) {
-  n = WN[ctx]
+function no_verify_rules(ctx, i, n) {
   for (; i <= n; i++) {
     if (WV[ctx, i] == "--") return
-    if (WV[ctx, i] == "--no-verify") deny("no_verify")
+    if (opt_is(WV[ctx, i], "--no-verify")) deny("no_verify")
   }
 }
 
-# commit_rules(ctx, cid, i): git commit with arguments from word i.
-function commit_rules(ctx, cid, i,    n, a, la, k, f, v) {
-  n = WN[ctx]
+# commit_rules(ctx, cid, i, n): git commit with arguments in words i..n.
+function commit_rules(ctx, cid, i, n,    a, la, k, f, v) {
   while (i <= n) {
     a = WV[ctx, i]
     if (a == "--") break
-    if (a == "--no-verify") deny("no_verify")
-    if (a == "-m" || a == "--message") { msg_rule(wr(ctx, i + 1), ws(ctx, i + 1)); i += 2; continue }
-    if (substr(a, 1, 10) == "--message=") { msg_attached(ctx, i, "--message="); i++; continue }
-    if (a == "--file") { if (wv(ctx, i + 1) == "-") CCF[cid] = 1; i += 2; continue }
-    if (a == "--file=-") { CCF[cid] = 1; i++; continue }
+    if (opt_is(a, "--no-verify")) deny("no_verify")
+    if (a == "-m") { msg_rule(wr(ctx, i + 1), ws(ctx, i + 1)); i += 2; continue }
+    # --message and --file, also abbreviated, with the value attached
+    # after = or in the next word.
+    if (opt_is(a, "--message")) {
+      k = index(a, "=")
+      if (k) { msg_attached(ctx, i, substr(a, 1, k)); i++ }
+      else { msg_rule(wr(ctx, i + 1), ws(ctx, i + 1)); i += 2 }
+      continue
+    }
+    if (opt_is(a, "--file")) {
+      k = index(a, "=")
+      if (k) { if (substr(a, k + 1) == "-") CCF[cid] = 1; i++ }
+      else { if (wv(ctx, i + 1) == "-") CCF[cid] = 1; i += 2 }
+      continue
+    }
     if (a == "--author" || a == "--date" || a == "--fixup" || a == "--squash" || a == "--template" || a == "--cleanup" || a == "--trailer" || a == "--reuse-message" || a == "--reedit-message" || a == "--pathspec-from-file") { i += 2; continue }
     if (a ~ /^-[^-]/) {
       # A short-flag cluster, read left to right. n is --no-verify. m F C c
@@ -846,8 +905,14 @@ BEGIN {
   FS = "\001"
   W = 512
   MAXD = 4
-  RMAX = 100
-  QMAX = 4000000
+  # Nested lex_cmds and lex_brace calls. mawk stops with "eval stack size"
+  # near 49 levels of ${...} that alternate with double quotes (99 without
+  # the quotes), so the limit stays well below that.
+  RMAX = 24
+  # Commands known not to run their arguments; any other command has its
+  # later words checked by scan_words. git has rules of its own.
+  nx = split("echo printf man info whatis apropos which type grep egrep fgrep zgrep rg ag cat less more head tail wc sort cut jq ls test [ cd true false cp mv rm mkdir touch ln chmod stat file diff git", noexec_list, " ")
+  for (; nx > 0; nx--) NOEXEC[noexec_list[nx]] = 1
   SQ = sprintf("%c", 39)
   DQ = "\""
   BS = "\\"
@@ -861,24 +926,43 @@ BEGIN {
   RE_ANSI = "[\\\\" SQ "]"
   RE_BRACE = "[}\\\\$" BQ DQ SQ "]"
   RE_BRACE_DQ = "[}\\\\$" BQ DQ "]"
-  CTX = CIDN = PLSER = QN = QBYTES = HN = HR = RLVL = ABORT = 0
+  CTX = CIDN = PLSER = QN = QBYTES = HN = HR = RLVL = 0
 }
 { IN = (NR == 1) ? $0 : IN "\001" $0 }
 END {
   set_text(IN)
+  # Re-read text may grow past the command (pipes feed a shell each
+  # argument and their join), but not by more than this.
+  QMAX = 8 * N + 65536
   lex_cmds(new_ctx(0), "")
   # Queued text: substitutions, -c strings, eval, what is fed to a shell.
   # A job may queue more; QN is read again on every pass.
   for (qi = 1; qi <= QN; qi++) {
     HR = HN
-    ABORT = 0
     RLVL = 0
     set_text(QT[qi])
     if (QK[qi] == "c") lex_cmds(new_ctx(QD[qi]), "")
     else lex_hd(new_ctx(QD[qi]))
   }
 }
-' 2>/dev/null)" || true
+' 2>/dev/null)" || awk_status=$?
+
+# awk is missing or failed: decide with the substring rules of the previous
+# guard, so the four classic denies still hold. They match text anywhere in
+# the command, quoted or not, so this path also denies some harmless
+# commands (echo "never use sudo here").
+if [ "$awk_status" -ne 0 ]; then
+  case "$command" in
+    *"sudo "*) rule=sudo ;;
+    *"git push --force"*|*"git push -f"*) rule=force_push ;;
+    *"git reset --hard"*) rule=hard_reset ;;
+    *"git commit"*"-m "*)
+      case "${command#*-m }" in
+        '"'*'`'*|'"'*'$('*) rule=commit_message ;;
+      esac
+      ;;
+  esac
+fi
 
 case "$rule" in
   sudo)
@@ -898,6 +982,9 @@ case "$rule" in
     ;;
   hooks_path)
     emit_deny "git -c core.hooksPath=... replaces the repository's git hooks and is blocked by the scaffold."
+    ;;
+  too_deep)
+    emit_deny "The command is nested too deeply for the guard to check (more than 4 levels of \$(...), backticks, sh -c, eval, or input fed to a shell, or too much text to re-read), so it is blocked. Split it into simpler commands."
     ;;
 esac
 

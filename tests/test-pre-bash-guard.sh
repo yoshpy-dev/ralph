@@ -24,31 +24,41 @@
 #      file -> deny in the same four modes; the rows that were none before
 #      (reads, look-alike names, JSON escapes) -> none (the guard reads no
 #      permission_mode, so these run once, with the key absent)
-#   B. AC2: commands to deny (sudo in command position, force push, hard
-#      reset, command substitution in a commit message, --no-verify and
-#      core.hooksPath) -> deny, with permission_mode absent and
-#      bypassPermissions
-#   C. AC3: false positives of the old guard and look-alikes -> none, with
+#   B. AC2: commands to deny (sudo in command position or after a command
+#      that may run its arguments such as find -exec, watch, flock, chroot;
+#      force push; hard reset; command substitution in a commit message;
+#      --no-verify and core.hooksPath; abbreviated long options) -> deny,
+#      with permission_mode absent and bypassPermissions
+#   C. AC3: false positives of the old guard and look-alikes (sudo as an
+#      argument of echo, grep, touch, or as the last word) -> none, with
 #      permission_mode absent and bypassPermissions
 #   D. Edge cases: quoted and escaped flags and names, line continuations,
 #      nested $(...), backticks in backticks, git -C / -c / --config-env,
-#      short-flag clusters, the five heredoc delimiter forms (to cat, to sh,
-#      to git commit -F -, and inside -m "$(cat ...)"), shells fed through
-#      -c, here-strings, pipes and heredocs, wrappers, comments, ${...},
-#      process substitution, functions and subshells, the re-reading depth
-#      cap (4 levels read, the 5th not), and a JSON %u escape
+#      short-flag clusters, abbreviated long options and their look-alikes
+#      (--follow-tags, --no-thin, --soft), the five heredoc delimiter forms
+#      (to cat, to sh, to git commit -F -, and inside -m "$(cat ...)"),
+#      shells fed through -c, here-strings, pipes and heredocs, wrappers and
+#      unknown runners, comments, ${...}, process substitution, functions
+#      and subshells, and a JSON %u escape
 #   E. Broken input (unclosed quotes, parentheses, substitutions, heredocs
 #      without an end line, operators without operands) -> exit 0 with none
 #      or deny
-#   F. AC7: the old guard (tests/fixtures/guard-1c4cea5a/, the version
+#   F. AC9: fail closed. 4 levels of nesting pass and the 5th is denied
+#      ($(...), eval); re-read text past the cap (8 times the command plus
+#      64 KB, reached through nested | sh) and ${...} nested 24 deep (plain,
+#      or alternating with double quotes) are denied, 23 pass. With awk
+#      missing from PATH, or an awk that exits 2, the old guard's four
+#      substring rules decide (these need jq: lib_json.sh's jq-absent path
+#      runs awk itself)
+#   G. AC7: the old guard (tests/fixtures/guard-1c4cea5a/, the version
 #      before this rewrite) decides the corpus of A's deny rows, B, and C on
 #      each path, and is compared with the new guard's runs of the same
 #      payloads in A, B, and C. Every case the old guard denies and the new
 #      one lets through must be in intentional_fixes, which must equal the C
 #      cases the old guard denies. The list is printed.
-#   G. AC8: a ~200 KB command on the jq-absent path finishes in under 10 s
+#   H. AC8: a ~200 KB command on the jq-absent path finishes in under 10 s
 #      (the measured time is printed)
-#   H. lib_json.sh sourced directly: tool_input.file_path, plain and with an
+#   I. lib_json.sh sourced directly: tool_input.file_path, plain and with an
 #      escaped quote and backslash
 
 set -u
@@ -102,6 +112,17 @@ json_escape() {
       $'\t') out+='\t' ;;
       *) out+="$c" ;;
     esac
+  done
+  printf '%s' "$out"
+}
+
+# repeat_text <text> <count> — text repeated count times (by doubling).
+repeat_text() {
+  local s="$1" n="$2" out=""
+  while [ "$n" -gt 0 ]; do
+    if [ $((n % 2)) -eq 1 ]; then out+="$s"; fi
+    s+="$s"
+    n=$((n / 2))
   done
   printf '%s' "$out"
 }
@@ -368,6 +389,11 @@ ac2=(
   '{ sudo ls; }'
   '! sudo ls'
   '2>/dev/null sudo ls'
+  # sudo after a command that may run its arguments
+  'find . -exec sudo rm x \;'
+  'watch sudo ls'
+  'flock /tmp/l sudo ls'
+  'chroot /x sudo ls'
   # force push
   '</dev/null git push --force'
   'git push --force'
@@ -379,7 +405,13 @@ ac2=(
   'git -C dir push --force'
   'git push "--force" origin main'
   'bash -lc "git push --force"'
+  'find . -exec git push --force \;'
+  'flock /tmp/l git push --force'
+  'git push --force-with'
+  'git push --force-with=main'
   # hard reset
+  'git reset --ha'
+  'git reset --har'
   'git reset --hard'
   'git -C dir reset --hard HEAD~1'
   'git reset -q --hard'
@@ -395,11 +427,13 @@ ac2=(
   'git commit -m"$(id)"'
   'git commit --message "$(id)"'
   'git commit --message="$(id)"'
+  'git commit --mess "$(id)"'
   $'git commit -m \'x\' -m "$(id)"'
   'rm -rf x && git commit -m "$(id)"'
   $'git commit -m "$(cat <<\'EOF\'; id\nfeat: x\nEOF\n)"'
   $'git commit -F - <<EOF\nfeat: x\n\n$(id)\nEOF'
   # --no-verify and core.hooksPath
+  'git commit --no-veri -m x'
   'git commit --no-verify -m x'
   'git commit -n -m x'
   'git commit -nm x'
@@ -413,6 +447,10 @@ check_modes B deny absent bypassPermissions -- "${ac2[@]}"
 # ── C. AC3: none ────────────────────────────────────────────────────────
 ac3=(
   $'echo \'never use sudo here\''
+  'echo sudo ls'
+  'grep sudo file'
+  'touch sudo'
+  'apt-get install sudo'
   'visudo -c'
   'man sudo'
   'git push origin main'
@@ -481,6 +519,18 @@ edge_deny=(
   'git commit -m x -n'
   'git rebase --no-verify main'
   'git am --no-verify x.patch'
+  # Abbreviated long options (at least 4 characters, =value dropped).
+  'git commit --mess="$(id)"'
+  $'git commit --fi - <<EOF\n$(id)\nEOF'
+  $'git commit --fi=- <<EOF\n$(id)\nEOF'
+  'git merge --no-veri x'
+  'git push --forc'
+  'git rebase --no-verif main'
+  # Unknown runners: sudo with a word after it, or git, in a later word.
+  'docker run img sudo ls'
+  'nohup watch -n 5 sudo ls'
+  'xargs -I{} flock /tmp/l git push -f'
+  'find . -exec git status \; -exec git push --force \;'
   # Heredocs fed to a shell (body read as commands) and to git commit -F -
   # with an unquoted delimiter.
   $'sh <<EOF\ngit push --force\nEOF'
@@ -531,7 +581,7 @@ edge_deny=(
   '(sudo ls)'
   'echo x | (git push --force)'
   $'echo hi # a comment with it\'s apostrophe\nsudo ls'
-  # Re-reading depth: 4 levels are read.
+  # Re-reading depth: 4 levels are read (the 5th is denied, in F).
   'eval eval eval eval sudo ls'
   'echo $(echo $(echo $(echo $(sudo ls))))'
 )
@@ -560,6 +610,22 @@ edge_none=(
   'bash script.sh'
   'sh -n script.sh'
   $'echo \'sudo ls\' | bash script.sh'
+  # sudo as an argument of a command that runs nothing, or as the last word,
+  # and git as the last word of an unknown command.
+  'cp sudo dest'
+  'apt-get install sudo 2>/dev/null'
+  'brew install git'
+  $'find . -exec git status \\;'
+  # Long options that only look like the abbreviated ones.
+  'git push --follow-tags origin main'
+  'git push --no-thin origin main'
+  'git push --force-if-includes origin main'
+  'git reset --h'
+  'git commit --no-edit'
+  'git commit --fixup HEAD'
+  'git commit --mess=x'
+  $'git commit --mess \'x $(id)\''
+  $'git commit --fi - <<\'EOF\'\n$(id)\nEOF'
   # Heredoc bodies are data: the five delimiter forms.
   $'cat > notes.md <<-EOF\n\tgit push --force\n\tEOF'
   $'cat > notes.md <<\'EOF\'\ngit push --force\nEOF'
@@ -587,9 +653,6 @@ edge_none=(
   # bash reads a heredoc body right after the newline that ends its line,
   # so here sh is a body line and the pipeline has no last command.
   $'cat <<\'EOF\' |\nsh\nsudo ls\nEOF'
-  # Past the depth cap of 4 levels the text is not read again.
-  'eval eval eval eval eval sudo ls'
-  'echo $(echo $(echo $(echo $(echo $(sudo ls)))))'
 )
 check_modes D none absent -- "${edge_none[@]}"
 
@@ -643,13 +706,101 @@ check_modes E any absent -- "${broken[@]}"
 check E deny $'sudo ls \''
 check E deny 'git commit -m "$(id'
 
-# ── F. AC7: the old guard's denies, kept or listed ──────────────────────
+# ── F. AC9: fail closed ─────────────────────────────────────────────────
+# Nesting: 4 levels are read, a 5th is denied even when it runs nothing
+# dangerous. The nesting limit counts ${...} inside each other: 23 pass and
+# 24 are denied, and 150 that alternate with double quotes are denied too
+# (without the limit, mawk stops at about 49 of those with "eval stack
+# size", and a failing awk falls back to rules that miss them).
+nested_braces() {
+  printf 'echo %s' "$(repeat_text '${x:-' "$1")a$(repeat_text '}' "$1")"
+}
+nested_quoted_braces() {
+  printf 'echo "%s"' "$(repeat_text '${x:-"' "$1")a$(repeat_text '"}' "$1")"
+}
+check_modes F none absent -- \
+  'echo $(echo $(echo $(echo $(echo hi))))' \
+  'eval eval eval eval echo hi' \
+  "$(nested_braces 23)" \
+  "$(nested_quoted_braces 23)"
+check_modes F deny absent -- \
+  'echo $(echo $(echo $(echo $(echo $(echo hi)))))' \
+  'eval eval eval eval eval echo hi' \
+  'echo $(echo $(echo $(echo $(echo $(sudo ls)))))' \
+  'eval eval eval eval eval sudo ls' \
+  "$(nested_braces 24)" \
+  "$(nested_quoted_braces 24)" \
+  "$(nested_quoted_braces 150)"
+
+# Re-read text past the cap (8 times the command plus 64 KB). wrap C is
+# echo 'C' "" | sh, which has the guard read C twice (the argument and the
+# arguments joined), so four wraps of an 8,000-character command make it
+# read about 30 times that, within 4 levels: three wraps pass, four are
+# denied. The JSON is escaped with sed (no newline or tab in these).
+wrap_for_sh() {
+  printf "echo '%s' \"\" | sh" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+check_sed_escaped() {
+  local label="$1" expect="$2" escaped
+  escaped="$(printf '%s' "$3" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
+  if [ "$have_jq" = yes ]; then
+    enqueue "$label [jq]" "$expect" "$HOOK" "$real_path" "$(payload_json "$escaped")"
+  else
+    record_skip "$label [jq] (jq not on PATH)"
+  fi
+  enqueue "$label [no-jq]" "$expect" "$HOOK" "$minimal_path" "$(payload_json "$escaped")"
+}
+wrapped="echo $(repeat_text x 8000)"
+for k in 1 2 3 4; do
+  wrapped="$(wrap_for_sh "$wrapped")"
+  if [ "$k" -lt 4 ]; then expect=none; else expect=deny; fi
+  check_sed_escaped "F re-read cap: $k nested | sh around an 8,000-character echo (${#wrapped} characters) -> $expect" "$expect" "$wrapped"
+done
+
+# Without awk the old guard's four substring rules decide. lib_json.sh
+# needs jq here (its jq-absent path runs awk too), so these run with jq on a
+# PATH that has no awk, and with an awk that only exits 2.
+if [ "$have_jq" = yes ]; then
+  noawk_path="$workdir/no-awk-bin"
+  fakeawk_path="$workdir/fake-awk-bin"
+  mkdir -p "$noawk_path" "$fakeawk_path"
+  for tool in sh bash dash cat grep sed printf dirname env tr test jq; do
+    resolved="$(command -v "$tool" 2>/dev/null || true)"
+    if [ -n "$resolved" ]; then
+      ln -sf "$resolved" "$noawk_path/$tool" 2>/dev/null || true
+      ln -sf "$resolved" "$fakeawk_path/$tool" 2>/dev/null || true
+    fi
+  done
+  printf '#!/bin/sh\nexit 2\n' > "$fakeawk_path/awk"
+  chmod +x "$fakeawk_path/awk"
+  if PATH="$noawk_path" "$noawk_path/sh" -c 'command -v awk' >/dev/null 2>&1; then
+    record_fail "F. awk is still reachable from the no-awk PATH $noawk_path"
+  else
+    for c in 'sudo ls' 'git push --force' 'git reset --hard' 'git commit -m "$(id)"' \
+      $'echo \'never use sudo here\''; do
+      escaped="$(json_escape "$c")"
+      enqueue "F. no awk on PATH: $escaped -> deny" deny "$HOOK" "$noawk_path" "$(payload_json "$escaped")"
+    done
+    enqueue "F. no awk on PATH: ls -> none" none "$HOOK" "$noawk_path" "$(payload_json ls)"
+  fi
+  for c in 'sudo ls' 'git reset --hard' 'git commit -m "$(id)"'; do
+    escaped="$(json_escape "$c")"
+    enqueue "F. awk exits 2: $escaped -> deny" deny "$HOOK" "$fakeawk_path" "$(payload_json "$escaped")"
+  done
+  enqueue "F. awk exits 2: ls -> none" none "$HOOK" "$fakeawk_path" "$(payload_json ls)"
+else
+  record_skip "F. the awk fallback cases (jq not on PATH: lib_json.sh needs awk or jq)"
+fi
+
+# ── G. AC7: the old guard's denies, kept or listed ──────────────────────
 # The cases of C that the old guard denies and the new one lets through:
 # dangerous text that is not run (single quotes, an argument, a heredoc body
 # read as data, the quoted-delimiter heredoc of the recommended commit
 # form).
 intentional_fixes=(
   $'echo \'never use sudo here\''
+  'echo sudo ls'
+  'grep sudo file'
   'visudo -c'
   $'git commit -m \'drop --force and git reset --hard from docs\''
   $'git commit -m "$(cat <<\'EOF\'\nfeat: add a thing\n\nBody with `backticks`, $(dollar parens), don\'t, "quotes" and ) parens.\nEOF\n)"'
@@ -663,7 +814,7 @@ ac7_paths=(no-jq)
 if [ "$have_jq" = yes ]; then
   ac7_paths=(jq no-jq)
 else
-  record_skip "F. AC7 comparison on the jq path (jq not on PATH)"
+  record_skip "G. AC7 comparison on the jq path (jq not on PATH)"
 fi
 corpus_old_jq=()
 corpus_old_nojq=()
@@ -671,10 +822,10 @@ for ((k = 0; k < ${#corpus[@]}; k++)); do
   escaped="$(json_escape "${corpus[$k]}")"
   for p in "${ac7_paths[@]}"; do
     if [ "$p" = jq ]; then
-      enqueue "F. AC7 old [jq]: $escaped" - "$OLD_HOOK" "$real_path" "$(payload_json "$escaped")"
+      enqueue "G. AC7 old [jq]: $escaped" - "$OLD_HOOK" "$real_path" "$(payload_json "$escaped")"
       corpus_old_jq[k]=$last_q
     else
-      enqueue "F. AC7 old [no-jq]: $escaped" - "$OLD_HOOK" "$minimal_path" "$(payload_json "$escaped")"
+      enqueue "G. AC7 old [no-jq]: $escaped" - "$OLD_HOOK" "$minimal_path" "$(payload_json "$escaped")"
       corpus_old_nojq[k]=$last_q
     fi
   done
@@ -736,33 +887,24 @@ for p in "${ac7_paths[@]}"; do
   done
   got_fixes="$(sorted_lines "${regressions[@]+"${regressions[@]}"}")"
   if [ "$got_fixes" = "$expected_fixes" ]; then
-    record_pass "F. AC7 [$p]: every old deny that is none now is one of the ${#intentional_fixes[@]} intentional fixes"
+    record_pass "G. AC7 [$p]: every old deny that is none now is one of the ${#intentional_fixes[@]} intentional fixes"
   else
-    record_fail "F. AC7 [$p]: old deny -> new none differs from intentional_fixes; got: $(printf '%s' "$got_fixes" | tr '\n' '|')"
+    record_fail "G. AC7 [$p]: old deny -> new none differs from intentional_fixes; got: $(printf '%s' "$got_fixes" | tr '\n' '|')"
   fi
 done
 got_old_ac3="$(sorted_lines "${old_denied_ac3[@]+"${old_denied_ac3[@]}"}" | uniq)"
 if [ "$got_old_ac3" = "$expected_fixes" ]; then
-  record_pass "F. AC7: intentional_fixes equals the C (AC3) cases the old guard denies"
+  record_pass "G. AC7: intentional_fixes equals the C (AC3) cases the old guard denies"
 else
-  record_fail "F. AC7: the C cases the old guard denies differ from intentional_fixes; got: $(printf '%s' "$got_old_ac3" | tr '\n' '|')"
+  record_fail "G. AC7: the C cases the old guard denies differ from intentional_fixes; got: $(printf '%s' "$got_old_ac3" | tr '\n' '|')"
 fi
 
-# ── G. AC8: a ~200 KB command ───────────────────────────────────────────
+# ── H. AC8: a ~200 KB command ───────────────────────────────────────────
 # A 200,000-character single-quoted string, then a commit message with a
 # command substitution (the payload of the 28 s measurement of the old
 # guard), and 200 KB of short commands with a force push at the end. The
 # JSON is written directly (no character in the commands needs escaping
 # but the quotes around $(id)) and fed on stdin.
-repeat_text() {
-  local s="$1" n="$2" out=""
-  while [ "$n" -gt 0 ]; do
-    if [ $((n % 2)) -eq 1 ]; then out+="$s"; fi
-    s+="$s"
-    n=$((n / 2))
-  done
-  printf '%s' "$out"
-}
 long_cases=(
   "echo '$(repeat_text x 200000)' && git commit -m \\\"\$(id)\\\""
   "$(repeat_text 'echo a b c d; ' 13400)git push --force"
@@ -777,13 +919,13 @@ for ((k = 0; k < ${#long_cases[@]}; k++)); do
   bytes="$(wc -c < "$workdir/long.json" | tr -d ' ')"
   case "$out" in *'"permissionDecision":"deny"'*) got=deny ;; '') got=none ;; *) got=unparsed ;; esac
   if [ "$rc" -eq 0 ] && [ "$got" = deny ] && awk -v s="$secs" 'BEGIN { exit !(s + 0 < 10) }'; then
-    record_pass "G. AC8 [no-jq]: ${long_names[$k]} (${bytes}-byte payload) -> deny in ${secs} s (limit 10 s)"
+    record_pass "H. AC8 [no-jq]: ${long_names[$k]} (${bytes}-byte payload) -> deny in ${secs} s (limit 10 s)"
   else
-    record_fail "G. AC8 [no-jq]: ${long_names[$k]} (${bytes}-byte payload): got $got, exit $rc, ${secs} s (limit 10 s)"
+    record_fail "H. AC8 [no-jq]: ${long_names[$k]} (${bytes}-byte payload): got $got, exit $rc, ${secs} s (limit 10 s)"
   fi
 done
 
-# ── H. lib_json.sh sourced directly ─────────────────────────────────────
+# ── I. lib_json.sh sourced directly ─────────────────────────────────────
 # lib_case <label> <use_path> <payload> <field> <expected>
 lib_case() {
   local label="$1" use_path="$2" payload="$3" field="$4" expect="$5"
@@ -807,10 +949,10 @@ lib_both() {
   lib_case "$label [no-jq]" "$minimal_path" "$payload" "$field" "$expect"
 }
 
-lib_both "H. lib_json.sh: tool_input.file_path" \
+lib_both "I. lib_json.sh: tool_input.file_path" \
   '{"session_id":"s","tool_name":"Write","tool_input":{"file_path":"/repo/docs/a b.md","content":"x"},"tool_response":{"filePath":"/repo/docs/a b.md"}}' \
   "tool_input.file_path" "/repo/docs/a b.md"
-lib_both "H. lib_json.sh: tool_input.file_path with an escaped quote and backslash" \
+lib_both "I. lib_json.sh: tool_input.file_path with an escaped quote and backslash" \
   '{"tool_input":{"file_path":"/repo/we\"ird\\name.md","content":"say \"hi\""}}' \
   "tool_input.file_path" '/repo/we"ird\name.md'
 
