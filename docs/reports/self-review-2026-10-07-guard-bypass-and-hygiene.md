@@ -3,7 +3,7 @@
 - Date: 2026-10-07
 - Plan: docs/plans/active/2026-10-07-guard-bypass-and-hygiene.md
 - Branch: fix/guard-bypass-and-hygiene(base 2a22ba78、HEAD ed4e4ae5)
-- Reviewer: reviewer subagent (Claude)、cycle 1(cycle 2 は末尾の「Cycle 2」節。判定はその節の Merge 行)
+- Reviewer: reviewer subagent (Claude)、cycle 1(cycle 2 は「Cycle 2」節、cap を 3 に上げた追加の回は末尾の「Cycle 2 (extra run)」節。判定は末尾の節の Merge 行)
 - Scope: diff の品質だけを見た(命名、読みやすさ、不要な変更、コメントの正確さ、正規表現と sed の式、一時ファイルの扱い、安全性)。対象は `git diff origin/main...HEAD`(23 ファイル、+1400/-121)。`templates/base/` と `.agents/skills/` はコピーなので、root の `.claude/` と `scripts/` を読み、コピーとの差は `cmp` で見た。仕様への適合、テストの網羅、文書のずれは見ていない(`/verify`、`/test`、`/sync-docs` の担当)。リポジトリのテストと linter は実行していない。guard と `archive-plan.sh` は scratchpad に置いた入力で直接動かした。
 
 ## Evidence reviewed
@@ -119,5 +119,30 @@ _(orchestrator の指示で、このコミットにはレポートと insight ev
 
 ### Recommendation (cycle 2)
 
-- Merge: 可(条件付き)。CRITICAL と HIGH はない。cross-review の 2 件は直っていて、新しいテストの行は直す前のコードで落ちる。条件は C2-M1 の扱いで、区切りの括弧を直す(1 か所、root と template、テスト 2 行)か、plan の 136 行目、register の 158 行目、PR 本文に、旧 guard より弱くなった形として書く。
+- Cycle 2 の判定: 可(条件付き)。CRITICAL と HIGH はない。cross-review の 2 件は直っていて、新しいテストの行は直す前のコードで落ちる。条件は C2-M1 の扱いで、区切りの括弧を直す(1 か所、root と template、テスト 2 行)か、plan の 136 行目、register の 158 行目、PR 本文に、旧 guard より弱くなった形として書く。
 - Follow-ups: C2-M1 と C2-L1 はコードを直すなら `/self-review` から回し直しになる(cap 2 に達しているので、cap を上げるか、文書で記録するかを orchestrator が選ぶ)。C2-L2 は `/sync-docs` で register の 158 行目と 160 行目を直す。C2-L3 は急がない。plan の Progress に cycle 2(cross-review の 2 件と 0db1a97e)の記録がないので、`/sync-docs` で足す。cycle 2 の `/cross-review` は、guard の位置を行番号ではなく `tee_lead`(`pre_bash_guard.sh`)のように名前で書くと、後のコミットで指す先がずれない。
+
+## Cycle 2 (extra run)
+
+- Date: 2026-10-07
+- Reviewer: reviewer subagent (Claude Opus 5.5)。cross-review の cycle 2 のあと、cap を 3 に上げて回し直した回(`cycle-count.json` は 2 のまま)
+- Scope: 44ab9ef7..HEAD(3c0ba22a と 206d8335、3 ファイル、+50/-23)。テストと linter は実行していない。guard は origin/main、44ab9ef7、HEAD の 3 版と、HEAD の `word_char` にバッククォートを戻しただけのコピー(以下「変種」)を scratchpad に置き、`jq -nc --arg` で組んだ同じ payload を jq あり・なしの両方で渡した。例は 102 個(差分まわりの 40 個と `$(pwd)` 系の 5 個、`tests/test-pre-bash-guard.sh` の C・D・I・H から取った 57 行)
+
+### Evidence reviewed (extra run)
+
+- root と `templates/base/` の `pre_bash_guard.sh` は `cmp` で一致した。102 例のどれでも、HEAD の jq あり・なしの判定は一致した(バッククォートと `#` は JSON でエスケープされないので、2 つの経路で読み方が変わらない)。
+- cross-review の 1 件目は直った。`` x=`tee .git` `` と `` x=`printf x > .git` `` は、44ab9ef7 では両経路で none、HEAD では両経路で ask。origin/main も ask。
+- 2 件目のコメントの側と 206d8335 の誤検知も直った。`tee /tmp/build.log # .env is read separately` と `` x=`tee /tmp/a` .env `` は、44ab9ef7 では ask、HEAD では none。origin/main も none。テストに足した 7 行のうち、C の 2 行と D の `.git` の 2 行は、44ab9ef7 では期待と違う判定になる。D の残りの 3 行(`.git/x` と `.env` の 2 つ)は 44ab9ef7 でも ask で、今の判定を固定する行である。
+- 受け入れ済みの 4 つは確かめた。`tee "build .env.log"` は HEAD が両経路で ask(origin/main は none)。`tee a#b .env` と `` tee `cmd` .env `` は HEAD が none(origin/main も none、44ab9ef7 は ask)。`` echo x > `pwd`/.git/x `` と `` tee `pwd`/.git/x `` は HEAD が none(origin/main も none、44ab9ef7 は ask)。ただし後ろにリダイレクトが続くと、origin/main は ask を返す(C3-L1、C3-L2)。
+
+### Findings (extra run)
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| C3-L1 LOW | security | 3c0ba22a は `word_char` からバッククォートを外した。cross-review の 1 件目を直すのに要ったのは `word_end` への追加で、`word_char` から外す必要はなかった。外したせいで、`` `pwd`/.git/x `` や `` /tmp/`date`/.git/x `` のような書き込み先が見えなくなった。44ab9ef7 はこれらに ask を返していた。受け入れの前提「origin/main も見ていなかった」は、後ろにリダイレクトが続かないときにしか成り立たない。`` echo x > `pwd`/.git/x 2>/dev/null ``、`` echo x > `pwd`/.env 2>/dev/null ``、`` tee `pwd`/.git/x > /dev/null `` には、origin/main と 44ab9ef7 が両経路で ask を返し、HEAD は両経路で none を返す。C2-L1 と同じで、受け入れた形に旧版のリダイレクトを付けると前提が崩れる。register の 158 行目の (a) は、`$(pwd)` の形を旧 guard も通したものとして書いているが、`echo x > $(pwd)/.env 2>&1` にも origin/main は両経路で ask を返す(この回より前からの食い違い) | `.claude/hooks/pre_bash_guard.sh:45-48`(`word_char` と、見えなくなることを書いたコメント)、`:72`、`:75`。変種は、テストから取った 57 行のすべてで HEAD と同じ判定を返した。違いが出たのは 102 例のうち、`` `...` `` を含む書き込み先の 7 例だけで、変種はどれにも両経路で ask を返した | cap 3 の最後の回なので、コードは直さず記録する。register の 158 行目の (a) と PR 本文に、`` `pwd`/.git/x `` と `$(pwd)/.git/x` の書き込み先は、後ろにリダイレクトが続く形なら旧 guard が ask していた、と書く。後で直すときは、`word_char` にバッククォートを戻す 1 文字の変更と、45〜47 行目のコメントの書き直しで済む(root と template) |
+| C3-L2 LOW | maintainability | register の 158 行目の (a) は、`tee` の引数の読み取りを止める文字を `&` `<` `\` `;` `\|` `)` と列挙している。この回でここに `#` とバッククォートが加わった。`` tee `mktemp` .env > /dev/null ``、`tee a#b .env > /dev/null`、`tee "a #b" .env > /dev/null` には、origin/main が ask を返し(3 つ目は jq の経路だけ)、HEAD は両経路で none を返す。この 3 つは、旧 guard が後ろの `>` で偶然捕まえていた `tee` の形の一覧に入るはずである。triage が既知の誤検知として足すとした `tee "build .env.log"` も、まだ register にない | `docs/tech-debt/README.md:158`、`.claude/hooks/pre_bash_guard.sh:58-69`、triage report の WORTH_CONSIDERING の 2 件目 | `/sync-docs` で 158 行目を更新する。止める文字に `#` とバッククォートを足し、上の 3 例と `tee "build .env.log"`(誤検知)を書く |
+| C3-L3 LOW | readability | テストのコメントに「.env is an argument of x=..., not of tee」とある。シェルでは、代入の語のあとに来る `.env` はコマンド名で、`x` を設定したうえで `.env` が実行される。代入の引数ではない。判定には関係しない | `tests/test-pre-bash-guard.sh:203-204` | 「.env is the command run after the assignment, not an argument of tee」のように直す。急がない |
+
+### Recommendation (extra run)
+
+- Merge: 可。CRITICAL、HIGH、MEDIUM はない。cross-review の cycle 2 の 1 件目と、2 件目のコメントの側は直っている(引用符の側は既知の誤検知として残す)。両経路の判定は一致し、root と template も一致している。C3-L1 と C3-L2 は、`/sync-docs` で register の 158 行目に記録し、PR 本文にも書く。コードの修正は要らない。C3-L3 は急がない。
