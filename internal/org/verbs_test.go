@@ -190,6 +190,567 @@ func TestOrgDisband_EmptyOrg_StillAppendsDisbandedEvent(t *testing.T) {
 	}
 }
 
+// herdrWorkspaceCloseNotFound is herdrPaneCloseNotFound for `herdr workspace
+// close`: the wrapped workspace_not_found envelope the real driver returns.
+func herdrWorkspaceCloseNotFound(workspaceID string) error {
+	return fmt.Errorf("herdr workspace close: %w (%w)", errors.New("exit status 1"),
+		driver.NewHerdrError(driver.HerdrCodeWorkspaceNotFound, "workspace "+workspaceID+" not found"))
+}
+
+// spawnTwoSeats spawns seat-1 (pane-1) and seat-2 (pane-2) in org-a; both
+// tabs land in the org's one workspace, ws-1.
+func spawnTwoSeats(t *testing.T, o *Org, h *fakeHerdr) {
+	t.Helper()
+	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn seat-1 failed: %+v", r)
+	}
+	h.paneID = "pane-2"
+	if r := o.Spawn(mustSpawnParams("org-a", "seat-2")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn seat-2 failed: %+v", r)
+	}
+}
+
+// eventsNamed returns the events of the given type, in manifest order.
+func eventsNamed(events []ManifestEvent, name string) []ManifestEvent {
+	var out []ManifestEvent
+	for _, ev := range events {
+		if ev.Event == name {
+			out = append(out, ev)
+		}
+	}
+	return out
+}
+
+// TestOrgDisband_ClosesSeatPanesThenWorkspace covers plan AC3's success
+// path: Disband closes every active seat's pane, then the org's workspace,
+// records org_workspace_closed (org-level, PaneID = the workspace id) and
+// then disbanded, and reports the seats as stopped and the workspace as
+// closed.
+func TestOrgDisband_ClosesSeatPanesThenWorkspace(t *testing.T) {
+	o, h, _ := testOrg(t)
+	spawnTwoSeats(t, o, h)
+	herdrBefore := len(h.calls)
+
+	result := o.Disband(DisbandParams{OrgID: "org-a"})
+	if len(result.Errs) != 0 || !result.Disbanded {
+		t.Fatalf("expected a clean disband, got %+v", result)
+	}
+	if !slices.Equal(result.StoppedSeats, []string{"seat-1", "seat-2"}) || len(result.FailedSeats) != 0 {
+		t.Fatalf("StoppedSeats = %v, FailedSeats = %+v; want both seats stopped", result.StoppedSeats, result.FailedSeats)
+	}
+	if !slices.Equal(result.ClosedWorkspaces, []string{"ws-1"}) || len(result.FailedWorkspaces) != 0 {
+		t.Fatalf("ClosedWorkspaces = %v, FailedWorkspaces = %+v; want ws-1 closed", result.ClosedWorkspaces, result.FailedWorkspaces)
+	}
+	if result.DeferredSelfPaneID != "" || result.DeferredSelfWorkspaceID != "" {
+		t.Fatalf("expected nothing deferred, got %+v", result)
+	}
+	if !slices.Equal(h.paneCloseCalls, []string{"pane-1", "pane-2"}) || !slices.Equal(h.workspaceCloseCalls, []string{"ws-1"}) {
+		t.Fatalf("closes: panes %v, workspaces %v", h.paneCloseCalls, h.workspaceCloseCalls)
+	}
+	calls := h.calls[herdrBefore:]
+	if calls[len(calls)-1] != "workspace_close" || countString(calls, "workspace_close") != 1 {
+		t.Fatalf("expected the workspace close to come after every pane close, got %v", calls)
+	}
+
+	events := mustReadEvents(t, o)
+	n := len(events)
+	closed, disbanded := events[n-2], events[n-1]
+	if closed.Event != EventOrgWorkspaceClosed || closed.SeatID != "" || closed.OrgID != "org-a" || closed.PaneID != "ws-1" || closed.Details != "workspace=closed" {
+		t.Fatalf("expected org_workspace_closed for ws-1 before disbanded, got %+v", closed)
+	}
+	if disbanded.Event != EventDisbanded || disbanded.SeatID != "" || disbanded.Details != "" {
+		t.Fatalf("expected a plain disbanded event last, got %+v", disbanded)
+	}
+	if got := len(eventsNamed(events, EventStopped)); got != 2 {
+		t.Fatalf("expected 2 stopped events, got %d", got)
+	}
+	if isStateEvent(EventOrgWorkspaceClosed) {
+		t.Fatal("org_workspace_closed must not be a state event")
+	}
+}
+
+// TestOrgDisband_SeatCloseFails_LeavesWorkspaceAndRetries covers plan AC3's
+// failure path for a seat: the seat whose pane could not be closed is in
+// FailedSeats (not StoppedSeats), records stop_failed and stays active; no
+// workspace is closed (the seat still runs in it) and none is recorded
+// closed; no disbanded; the error comes back. A second disband once herdr
+// answers stops only that seat, closes the workspace and disbands.
+func TestOrgDisband_SeatCloseFails_LeavesWorkspaceAndRetries(t *testing.T) {
+	o, h, _ := testOrg(t)
+	spawnTwoSeats(t, o, h)
+	closeErr := errors.New("herdr pane close: connect: connection refused")
+	h.paneCloseErrs = map[string]error{"pane-2": closeErr}
+
+	result := o.Disband(DisbandParams{OrgID: "org-a"})
+	if result.Disbanded || len(result.Errs) == 0 {
+		t.Fatalf("expected a failed disband, got %+v", result)
+	}
+	if !slices.Equal(result.StoppedSeats, []string{"seat-1"}) {
+		t.Fatalf("StoppedSeats = %v, want only seat-1", result.StoppedSeats)
+	}
+	if len(result.FailedSeats) != 1 || result.FailedSeats[0].SeatID != "seat-2" || result.FailedSeats[0].Forced || !errors.Is(result.FailedSeats[0].Err, closeErr) {
+		t.Fatalf("FailedSeats = %+v, want seat-2 with the close failure", result.FailedSeats)
+	}
+	if len(h.workspaceCloseCalls) != 0 {
+		t.Fatalf("expected no workspace close while seat-2 still runs, got %v", h.workspaceCloseCalls)
+	}
+	if len(result.FailedWorkspaces) != 1 || result.FailedWorkspaces[0].WorkspaceID != "ws-1" || result.FailedWorkspaces[0].Forced || len(result.ClosedWorkspaces) != 0 {
+		t.Fatalf("expected ws-1 reported left open, got closed=%v failed=%+v", result.ClosedWorkspaces, result.FailedWorkspaces)
+	}
+	if len(result.Errs) != 2 || !errors.Is(result.Errs[0], closeErr) {
+		t.Fatalf("Errs = %v, want the seat-2 failure and the workspace left open", result.Errs)
+	}
+	events := mustReadEvents(t, o)
+	if len(eventsNamed(events, EventDisbanded)) != 0 || len(eventsNamed(events, EventOrgWorkspaceClosed)) != 0 {
+		t.Fatalf("expected no disbanded and no org_workspace_closed, got %v", eventNames(t, o))
+	}
+	if failed := eventsNamed(events, EventStopFailed); len(failed) != 1 || failed[0].SeatID != "seat-2" {
+		t.Fatalf("expected one stop_failed for seat-2, got %+v", failed)
+	}
+	statusResult, err := o.Status("org-a", false)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	for _, s := range statusResult.Seats {
+		if (s.SeatID == "seat-2") != s.Active {
+			t.Fatalf("expected only seat-2 still active, got %+v", statusResult.Seats)
+		}
+	}
+
+	delete(h.paneCloseErrs, "pane-2")
+	retry := o.Disband(DisbandParams{OrgID: "org-a"})
+	if len(retry.Errs) != 0 || !retry.Disbanded {
+		t.Fatalf("expected the retry to disband, got %+v", retry)
+	}
+	if !slices.Equal(retry.StoppedSeats, []string{"seat-2"}) || !slices.Equal(retry.ClosedWorkspaces, []string{"ws-1"}) {
+		t.Fatalf("retry stopped %v and closed %v, want seat-2 and ws-1", retry.StoppedSeats, retry.ClosedWorkspaces)
+	}
+	if !slices.Equal(h.paneCloseCalls, []string{"pane-1", "pane-2", "pane-2"}) || !slices.Equal(h.workspaceCloseCalls, []string{"ws-1"}) {
+		t.Fatalf("closes after retry: panes %v, workspaces %v", h.paneCloseCalls, h.workspaceCloseCalls)
+	}
+}
+
+// TestOrgDisband_WorkspaceCloseFails_NoDisbandedThenRetry: a workspace that
+// could not be closed is in FailedWorkspaces, gets no org_workspace_closed,
+// and blocks disbanded. Once herdr answers, a second disband (no seat left
+// to stop) closes it, records it and disbands.
+func TestOrgDisband_WorkspaceCloseFails_NoDisbandedThenRetry(t *testing.T) {
+	o, h, _ := testOrg(t)
+	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", r)
+	}
+	closeErr := errors.New("herdr workspace close: connect: connection refused")
+	h.workspaceCloseErrs = map[string]error{"ws-1": closeErr}
+
+	result := o.Disband(DisbandParams{OrgID: "org-a"})
+	if result.Disbanded || len(result.Errs) != 1 || !errors.Is(result.Errs[0], closeErr) {
+		t.Fatalf("expected the workspace failure to fail the disband, got %+v", result)
+	}
+	if !slices.Equal(result.StoppedSeats, []string{"seat-1"}) {
+		t.Fatalf("StoppedSeats = %v, want seat-1", result.StoppedSeats)
+	}
+	if len(result.FailedWorkspaces) != 1 || result.FailedWorkspaces[0].WorkspaceID != "ws-1" || result.FailedWorkspaces[0].Forced || !errors.Is(result.FailedWorkspaces[0].Err, closeErr) {
+		t.Fatalf("FailedWorkspaces = %+v, want ws-1 with the close failure", result.FailedWorkspaces)
+	}
+	if !strings.Contains(result.Errs[0].Error(), `"ws-1"`) || !strings.Contains(result.Errs[0].Error(), `"org-a"`) {
+		t.Errorf("expected the error to name the workspace and org, got %v", result.Errs[0])
+	}
+	events := mustReadEvents(t, o)
+	if len(eventsNamed(events, EventDisbanded)) != 0 || len(eventsNamed(events, EventOrgWorkspaceClosed)) != 0 {
+		t.Fatalf("expected no disbanded and no org_workspace_closed, got %v", eventNames(t, o))
+	}
+
+	delete(h.workspaceCloseErrs, "ws-1")
+	retry := o.Disband(DisbandParams{OrgID: "org-a"})
+	if len(retry.Errs) != 0 || !retry.Disbanded || len(retry.StoppedSeats) != 0 || !slices.Equal(retry.ClosedWorkspaces, []string{"ws-1"}) {
+		t.Fatalf("expected the retry to close ws-1 and disband, got %+v", retry)
+	}
+	if !slices.Equal(h.workspaceCloseCalls, []string{"ws-1", "ws-1"}) {
+		t.Fatalf("expected ws-1 closed again on the retry, got %v", h.workspaceCloseCalls)
+	}
+	events = mustReadEvents(t, o)
+	if got := eventsNamed(events, EventOrgWorkspaceClosed); len(got) != 1 || got[0].PaneID != "ws-1" {
+		t.Fatalf("expected one org_workspace_closed for ws-1, got %+v", got)
+	}
+	if events[len(events)-1].Event != EventDisbanded {
+		t.Fatalf("expected disbanded last, got %v", eventNames(t, o))
+	}
+}
+
+// TestOrgDisband_WorkspaceNotFound_CountsAsClosed: herdr's
+// workspace_not_found means the workspace is already gone.
+func TestOrgDisband_WorkspaceNotFound_CountsAsClosed(t *testing.T) {
+	o, h, _ := testOrg(t)
+	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", r)
+	}
+	h.workspaceCloseErrs = map[string]error{"ws-1": herdrWorkspaceCloseNotFound("ws-1")}
+
+	result := o.Disband(DisbandParams{OrgID: "org-a"})
+	if len(result.Errs) != 0 || !result.Disbanded || !slices.Equal(result.ClosedWorkspaces, []string{"ws-1"}) {
+		t.Fatalf("expected not-found to count as closed, got %+v", result)
+	}
+	closed := eventsNamed(mustReadEvents(t, o), EventOrgWorkspaceClosed)
+	if len(closed) != 1 || closed[0].Details != "workspace=already closed" {
+		t.Fatalf("expected org_workspace_closed with the already-closed note, got %+v", closed)
+	}
+}
+
+// TestOrgDisband_UnansweredWorkspaceClose_TimesOut covers plan AC11 on the
+// disband side: a workspace close that never answers is cut off by
+// DriverCallTimeout and counts as not closed.
+func TestOrgDisband_UnansweredWorkspaceClose_TimesOut(t *testing.T) {
+	o, h, _ := testOrg(t)
+	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", r)
+	}
+	o.DriverCallTimeout = 20 * time.Millisecond
+	h.workspaceCloseBlock = true
+
+	start := time.Now()
+	result := o.Disband(DisbandParams{OrgID: "org-a"})
+	if elapsed := time.Since(start); elapsed > 10*time.Second {
+		t.Fatalf("Disband took %v: the per-call timeout did not bound the workspace close", elapsed)
+	}
+	if result.Disbanded || len(result.FailedWorkspaces) != 1 || !errors.Is(result.FailedWorkspaces[0].Err, context.DeadlineExceeded) {
+		t.Fatalf("expected a timed-out workspace close to fail the disband, got %+v", result)
+	}
+	if len(eventsNamed(mustReadEvents(t, o), EventOrgWorkspaceClosed)) != 0 {
+		t.Fatal("expected no org_workspace_closed after a timed-out close")
+	}
+}
+
+// TestOrgDisband_Force_RecordsPastCloseFailures covers plan AC10 on the
+// disband side: with Force, a seat whose pane could not be closed is
+// recorded stopped (forced), a workspace that could not be closed is
+// recorded org_workspace_closed (forced), disbanded is appended with a note
+// naming both, both come back as Forced failures (warnings), and Errs is
+// empty.
+func TestOrgDisband_Force_RecordsPastCloseFailures(t *testing.T) {
+	o, h, _ := testOrg(t)
+	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", r)
+	}
+	paneErr := errors.New("herdr pane close: connect: connection refused")
+	wsErr := errors.New("herdr workspace close: connect: connection refused")
+	h.paneCloseErrs = map[string]error{"pane-1": paneErr}
+	h.workspaceCloseErrs = map[string]error{"ws-1": wsErr}
+
+	result := o.Disband(DisbandParams{OrgID: "org-a", Force: true})
+	if len(result.Errs) != 0 || !result.Disbanded {
+		t.Fatalf("expected a forced disband to succeed, got %+v", result)
+	}
+	if len(result.StoppedSeats) != 0 || len(result.FailedSeats) != 1 || result.FailedSeats[0].SeatID != "seat-1" || !result.FailedSeats[0].Forced || !errors.Is(result.FailedSeats[0].Err, paneErr) {
+		t.Fatalf("expected seat-1 as a forced failure, got stopped=%v failed=%+v", result.StoppedSeats, result.FailedSeats)
+	}
+	if len(result.ClosedWorkspaces) != 0 || len(result.FailedWorkspaces) != 1 || !result.FailedWorkspaces[0].Forced || !errors.Is(result.FailedWorkspaces[0].Err, wsErr) {
+		t.Fatalf("expected ws-1 as a forced failure, got closed=%v failed=%+v", result.ClosedWorkspaces, result.FailedWorkspaces)
+	}
+	if !slices.Equal(h.workspaceCloseCalls, []string{"ws-1"}) {
+		t.Fatalf("expected the workspace close to be attempted, got %v", h.workspaceCloseCalls)
+	}
+
+	events := mustReadEvents(t, o)
+	stopped := eventsNamed(events, EventStopped)
+	if len(stopped) != 1 || len(eventsNamed(events, EventStopFailed)) != 0 {
+		t.Fatalf("expected one stopped and no stop_failed, got %v", eventNames(t, o))
+	}
+	assertDetailsContains(t, stopped[0].Details, "pane=close failed (forced): ", "connection refused")
+	closed := eventsNamed(events, EventOrgWorkspaceClosed)
+	if len(closed) != 1 || closed[0].PaneID != "ws-1" {
+		t.Fatalf("expected org_workspace_closed for ws-1, got %+v", closed)
+	}
+	assertDetailsContains(t, closed[0].Details, "workspace=close failed (forced): ", "connection refused")
+	last := events[len(events)-1]
+	if last.Event != EventDisbanded || last.Details != "forced: not closed: seat seat-1, workspace ws-1" {
+		t.Fatalf("expected disbanded with the forced note last, got %+v", last)
+	}
+	statusResult, err := o.Status("org-a", false)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if len(statusResult.Seats) != 1 || statusResult.Seats[0].Active {
+		t.Fatalf("expected seat-1 inactive after a forced disband, got %+v", statusResult.Seats)
+	}
+}
+
+// ownPaneEnv makes o.Getenv report the caller as running in pane / workspace
+// (either may be empty: unset).
+func ownPaneEnv(o *Org, pane, workspace string) {
+	o.Getenv = func(key string) string {
+		switch key {
+		case "HERDR_PANE_ID":
+			return pane
+		case "HERDR_WORKSPACE_ID":
+			return workspace
+		}
+		return ""
+	}
+}
+
+// TestOrgDisband_OwnWorkspace_ClosedLastByCaller covers plan AC12 on the
+// disband side: when the caller runs in a seat's pane inside the org's
+// workspace, Disband closes the other seat's pane, stops the caller's seat
+// only after that (record only), records org_workspace_closed for the own
+// workspace and then disbanded, and makes no close call on the own pane or
+// workspace. It hands the workspace back (the pane is inside it, so no pane
+// is handed back); CloseDeferredSelfWorkspace then closes it without writing
+// anything.
+func TestOrgDisband_OwnWorkspace_ClosedLastByCaller(t *testing.T) {
+	o, h, a := testOrg(t)
+	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn seat-1 failed: %+v", r)
+	}
+	// seat-0 sorts before seat-1 in the roster, so stopping it after seat-1
+	// shows Disband moved it last on purpose.
+	h.paneID = "pane-own"
+	if r := o.Spawn(mustSpawnParams("org-a", "seat-0")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn seat-0 failed: %+v", r)
+	}
+	ownPaneEnv(o, "pane-own", "ws-1")
+	sendKeysBefore := len(h.sendKeysCalls)
+
+	result := o.Disband(DisbandParams{OrgID: "org-a"})
+	if len(result.Errs) != 0 || !result.Disbanded {
+		t.Fatalf("expected a clean disband, got %+v", result)
+	}
+	if result.DeferredSelfWorkspaceID != "ws-1" || result.DeferredSelfPaneID != "" {
+		t.Fatalf("deferred workspace %q pane %q, want ws-1 and no pane", result.DeferredSelfWorkspaceID, result.DeferredSelfPaneID)
+	}
+	if !slices.Equal(result.StoppedSeats, []string{"seat-1", "seat-0"}) || len(result.ClosedWorkspaces) != 0 || len(result.FailedWorkspaces) != 0 {
+		t.Fatalf("expected seat-1 then seat-0 stopped and ws-1 only deferred, got %+v", result)
+	}
+	if !slices.Equal(h.paneCloseCalls, []string{"pane-1"}) || len(h.workspaceCloseCalls) != 0 {
+		t.Fatalf("expected only pane-1 closed inline, got panes %v workspaces %v", h.paneCloseCalls, h.workspaceCloseCalls)
+	}
+	if got := h.sendKeysCalls[sendKeysBefore:]; !slices.Equal(got, []string{"pane-1"}) {
+		t.Fatalf("expected the C-c only to pane-1, got %v", got)
+	}
+	if len(a.leaveCalls) != 2 || a.leaveCalls[1].agentID != "seat-0" {
+		t.Fatalf("expected seat-0's Leave after seat-1's, got %+v", a.leaveCalls)
+	}
+
+	events := mustReadEvents(t, o)
+	n := len(events)
+	tail := []ManifestEvent{events[n-4], events[n-3], events[n-2], events[n-1]}
+	if tail[0].Event != EventStopped || tail[0].SeatID != "seat-1" || tail[1].Event != EventStopped || tail[1].SeatID != "seat-0" {
+		t.Fatalf("expected seat-1 stopped, then seat-0 stopped, got %+v", tail[:2])
+	}
+	assertDetailsContains(t, tail[1].Details, "ctrl_c=skipped: self pane", "pane=self, closed last")
+	if tail[2].Event != EventOrgWorkspaceClosed || tail[2].PaneID != "ws-1" || tail[2].Details != "workspace=self, closed last" {
+		t.Fatalf("expected org_workspace_closed for the own ws-1, got %+v", tail[2])
+	}
+	if tail[3].Event != EventDisbanded {
+		t.Fatalf("expected disbanded last, got %+v", tail[3])
+	}
+
+	if err := o.CloseDeferredSelfWorkspace(result.DeferredSelfWorkspaceID); err != nil {
+		t.Fatalf("CloseDeferredSelfWorkspace: %v", err)
+	}
+	if !slices.Equal(h.workspaceCloseCalls, []string{"ws-1"}) {
+		t.Fatalf("expected CloseDeferredSelfWorkspace to close ws-1, got %v", h.workspaceCloseCalls)
+	}
+	if got := len(mustReadEvents(t, o)); got != n {
+		t.Errorf("expected CloseDeferredSelfWorkspace to write no event, %d -> %d", n, got)
+	}
+}
+
+// TestOrgDisband_OwnPaneOutsideOrgWorkspace_HandsPaneBack: when the caller's
+// own pane is a seat's but HERDR_WORKSPACE_ID names no workspace of the org,
+// the org's workspace is closed inline and the own pane is handed back for
+// the caller to close last.
+func TestOrgDisband_OwnPaneOutsideOrgWorkspace_HandsPaneBack(t *testing.T) {
+	o, h, _ := testOrg(t)
+	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", r)
+	}
+	ownPaneEnv(o, "pane-1", "ws-elsewhere")
+
+	result := o.Disband(DisbandParams{OrgID: "org-a"})
+	if len(result.Errs) != 0 || !result.Disbanded {
+		t.Fatalf("expected a clean disband, got %+v", result)
+	}
+	if result.DeferredSelfPaneID != "pane-1" || result.DeferredSelfWorkspaceID != "" {
+		t.Fatalf("deferred pane %q workspace %q, want pane-1 and no workspace", result.DeferredSelfPaneID, result.DeferredSelfWorkspaceID)
+	}
+	if len(h.paneCloseCalls) != 0 || !slices.Equal(h.workspaceCloseCalls, []string{"ws-1"}) {
+		t.Fatalf("expected no pane close and ws-1 closed inline, got panes %v workspaces %v", h.paneCloseCalls, h.workspaceCloseCalls)
+	}
+}
+
+// TestOrgDisband_OwnSeatAndWorkspaceKeptWhenAnotherSeatFails: if another
+// seat could not be stopped, the caller's own seat is left running (not
+// stopped, still active) and its own workspace left open, both listed as
+// failures, nothing deferred -- so a leader that ran disband in its own pane
+// survives to see the error and retry.
+func TestOrgDisband_OwnSeatAndWorkspaceKeptWhenAnotherSeatFails(t *testing.T) {
+	o, h, a := testOrg(t)
+	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn seat-1 failed: %+v", r)
+	}
+	h.paneID = "pane-own"
+	if r := o.Spawn(mustSpawnParams("org-a", "seat-0")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn seat-0 failed: %+v", r)
+	}
+	ownPaneEnv(o, "pane-own", "ws-1")
+	h.paneCloseErrs = map[string]error{"pane-1": errors.New("herdr pane close: connect: connection refused")}
+
+	result := o.Disband(DisbandParams{OrgID: "org-a"})
+	if result.Disbanded || len(result.StoppedSeats) != 0 {
+		t.Fatalf("expected a failed disband with nothing stopped, got %+v", result)
+	}
+	if result.DeferredSelfPaneID != "" || result.DeferredSelfWorkspaceID != "" {
+		t.Fatalf("expected nothing deferred, got pane %q workspace %q", result.DeferredSelfPaneID, result.DeferredSelfWorkspaceID)
+	}
+	var failedSeats []string
+	for _, f := range result.FailedSeats {
+		failedSeats = append(failedSeats, f.SeatID)
+	}
+	if !slices.Equal(failedSeats, []string{"seat-1", "seat-0"}) {
+		t.Fatalf("FailedSeats = %+v, want seat-1 then seat-0", result.FailedSeats)
+	}
+	if !strings.Contains(result.FailedSeats[1].Err.Error(), "caller's own pane") {
+		t.Errorf("expected seat-0's reason to name the own pane, got %v", result.FailedSeats[1].Err)
+	}
+	if len(result.FailedWorkspaces) != 1 || result.FailedWorkspaces[0].WorkspaceID != "ws-1" || !strings.Contains(result.FailedWorkspaces[0].Err.Error(), "caller's own workspace") {
+		t.Fatalf("FailedWorkspaces = %+v, want ws-1 left open as the own workspace", result.FailedWorkspaces)
+	}
+	if len(h.workspaceCloseCalls) != 0 || len(a.leaveCalls) != 0 {
+		t.Fatalf("expected no workspace close and no Leave, got %v / %+v", h.workspaceCloseCalls, a.leaveCalls)
+	}
+	events := mustReadEvents(t, o)
+	if len(eventsNamed(events, EventStopped)) != 0 || len(eventsNamed(events, EventOrgWorkspaceClosed)) != 0 || len(eventsNamed(events, EventDisbanded)) != 0 {
+		t.Fatalf("expected no stopped / org_workspace_closed / disbanded, got %v", eventNames(t, o))
+	}
+	statusResult, err := o.Status("org-a", false)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	for _, s := range statusResult.Seats {
+		if !s.Active {
+			t.Fatalf("expected both seats still active, got %+v", statusResult.Seats)
+		}
+	}
+}
+
+// TestOrgDisband_ClosesOnlyThisOrgsRecordedIDs covers plan AC8 on the
+// disband side: Disband closes only the panes and workspace recorded for
+// this org_id -- not another org's, not the caller's unrelated pane or
+// workspace -- and a workspace already recorded closed is not closed again.
+func TestOrgDisband_ClosesOnlyThisOrgsRecordedIDs(t *testing.T) {
+	o, h, _ := testOrg(t)
+	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn org-a failed: %+v", r)
+	}
+	h.workspaceID = "ws-b"
+	h.paneID = "pane-b"
+	if r := o.Spawn(mustSpawnParams("org-b", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn org-b failed: %+v", r)
+	}
+	ownPaneEnv(o, "pane-caller", "ws-caller")
+
+	result := o.Disband(DisbandParams{OrgID: "org-a"})
+	if len(result.Errs) != 0 || !result.Disbanded {
+		t.Fatalf("expected a clean disband, got %+v", result)
+	}
+	if !slices.Equal(h.paneCloseCalls, []string{"pane-1"}) || !slices.Equal(h.workspaceCloseCalls, []string{"ws-1"}) {
+		t.Fatalf("expected only org-a's pane-1 and ws-1 closed, got panes %v workspaces %v", h.paneCloseCalls, h.workspaceCloseCalls)
+	}
+	statusResult, err := o.Status("org-b", false)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if len(statusResult.Seats) != 1 || !statusResult.Seats[0].Active {
+		t.Fatalf("expected org-b's seat untouched, got %+v", statusResult.Seats)
+	}
+
+	again := o.Disband(DisbandParams{OrgID: "org-a"})
+	if len(again.Errs) != 0 || !again.Disbanded || len(again.ClosedWorkspaces) != 0 {
+		t.Fatalf("expected a second disband to find nothing to close, got %+v", again)
+	}
+	if !slices.Equal(h.workspaceCloseCalls, []string{"ws-1"}) || !slices.Equal(h.paneCloseCalls, []string{"pane-1"}) {
+		t.Fatalf("expected no close call on the second disband, got panes %v workspaces %v", h.paneCloseCalls, h.workspaceCloseCalls)
+	}
+}
+
+// TestOrgDisband_DryRun_NoDriverCallsWorkspaceStaysOpen covers plan AC7 for
+// one org: a dry-run disband makes no herdr or agmsg call and only appends a
+// dry-run disbanded, so the real seat stays active and the workspace stays
+// open in the manifest.
+func TestOrgDisband_DryRun_NoDriverCallsWorkspaceStaysOpen(t *testing.T) {
+	o, h, a := testOrg(t)
+	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", r)
+	}
+	herdrBefore, agmsgBefore := len(h.calls), len(a.calls)
+	eventsBefore := len(mustReadEvents(t, o))
+
+	result := o.Disband(DisbandParams{OrgID: "org-a", DryRun: true})
+	if len(result.Errs) != 0 || !result.Disbanded || len(result.StoppedSeats) != 0 || len(result.ClosedWorkspaces) != 0 {
+		t.Fatalf("expected a record-only dry run, got %+v", result)
+	}
+	if len(h.calls) != herdrBefore || len(a.calls) != agmsgBefore {
+		t.Fatalf("expected no driver call, got herdr %v agmsg %v", h.calls[herdrBefore:], a.calls[agmsgBefore:])
+	}
+	events := mustReadEvents(t, o)
+	if len(events) != eventsBefore+1 || events[len(events)-1].Event != EventDisbanded || !events[len(events)-1].DryRun {
+		t.Fatalf("expected exactly one dry-run disbanded appended, got %v", eventNames(t, o))
+	}
+	if open := openOrgWorkspaces(events, "org-a"); !slices.Equal(open, []string{"ws-1"}) {
+		t.Fatalf("expected ws-1 still open after a dry run, got %v", open)
+	}
+	statusResult, err := o.Status("org-a", false)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if len(statusResult.Seats) != 1 || !statusResult.Seats[0].Active {
+		t.Fatalf("expected seat-1 still active after a dry run, got %+v", statusResult.Seats)
+	}
+}
+
+// TestOrgCloseDeferredSelfWorkspace_Outcomes mirrors
+// TestOrgCloseDeferredSelfPane_Outcomes for the workspace.
+func TestOrgCloseDeferredSelfWorkspace_Outcomes(t *testing.T) {
+	refused := errors.New("herdr workspace close: connect: connection refused")
+	tests := []struct {
+		name      string
+		id        string
+		closeErr  error
+		block     bool
+		wantCalls int
+		wantErrIs error // nil: want a nil error
+	}{
+		{name: "empty id is a no-op", id: "", wantCalls: 0},
+		{name: "closed", id: "ws-9", wantCalls: 1},
+		{name: "not found counts as closed", id: "ws-9", closeErr: herdrWorkspaceCloseNotFound("ws-9"), wantCalls: 1},
+		{name: "other failure", id: "ws-9", closeErr: refused, wantCalls: 1, wantErrIs: refused},
+		{name: "timeout", id: "ws-9", block: true, wantCalls: 1, wantErrIs: context.DeadlineExceeded},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			o, h, _ := testOrg(t)
+			o.DriverCallTimeout = 20 * time.Millisecond
+			h.workspaceCloseBlock = tt.block
+			if tt.closeErr != nil {
+				h.workspaceCloseErrs = map[string]error{tt.id: tt.closeErr}
+			}
+			err := o.CloseDeferredSelfWorkspace(tt.id)
+			if len(h.workspaceCloseCalls) != tt.wantCalls {
+				t.Fatalf("WorkspaceClose calls = %v, want %d", h.workspaceCloseCalls, tt.wantCalls)
+			}
+			if tt.wantErrIs == nil {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if !errors.Is(err, tt.wantErrIs) || !strings.Contains(err.Error(), tt.id) {
+				t.Fatalf("expected an error wrapping %v and naming %s, got %v", tt.wantErrIs, tt.id, err)
+			}
+		})
+	}
+}
+
 // TestOrgSend_Malformed_RejectedNoManifestEventNoDriverCall covers AC-11:
 // a message that fails protocol.ValidateText is rejected before any
 // manifest event is appended and before any driver call (AgentWait/

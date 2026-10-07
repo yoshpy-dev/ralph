@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // Runner executes name with args, returning combined stdout (trimmed).
@@ -29,6 +30,10 @@ type Runner interface {
 // ExecRunner is the real Runner, backed by exec.CommandContext.
 type ExecRunner struct{}
 
+// execWaitDelay is ExecRunner's exec.Cmd.WaitDelay. A var so a test can
+// shorten it.
+var execWaitDelay = 2 * time.Second
+
 // Run executes name with args via exec.CommandContext, honoring ctx
 // cancellation/timeout. On failure, captured stderr (if any) is folded into
 // the returned error so callers get CLI diagnostics without re-running the
@@ -38,6 +43,12 @@ func (ExecRunner) Run(ctx context.Context, name string, args ...string) (string,
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	// Killing the command when ctx ends does not close its stdout/stderr
+	// pipes if a child it started still holds them (a background job of a
+	// shell script, say), and Wait would block until that child exits, so
+	// the caller's deadline would not end the call. WaitDelay closes the
+	// pipes that long after the kill.
+	cmd.WaitDelay = execWaitDelay
 
 	err := cmd.Run()
 	out := strings.TrimSpace(stdout.String())

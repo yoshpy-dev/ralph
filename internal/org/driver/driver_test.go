@@ -79,6 +79,32 @@ func TestExecRunner_Run_TimeoutHonored(t *testing.T) {
 	}
 }
 
+// TestExecRunner_Run_TimeoutNotHeldByGrandchild: a timed-out command whose
+// background child still holds stdout/stderr must not keep Run waiting for
+// that child. The shell is killed at the deadline; without WaitDelay, Wait
+// would block until the `sleep 3` in the background exits.
+func TestExecRunner_Run_TimeoutNotHeldByGrandchild(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not available")
+	}
+	orig := execWaitDelay
+	execWaitDelay = 100 * time.Millisecond
+	defer func() { execWaitDelay = orig }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := ExecRunner{}.Run(ctx, "sh", "-c", "sleep 3 & sleep 3")
+	elapsed := time.Since(start)
+
+	if err == nil || !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("expected a timed-out error, got %v", err)
+	}
+	if elapsed > 2*time.Second {
+		t.Fatalf("Run took %v: it waited for the background child holding the pipes", elapsed)
+	}
+}
+
 func TestExecRunner_Run_StderrCaptured(t *testing.T) {
 	r := ExecRunner{}
 	_, err := r.Run(context.Background(), "sh", "-c", "echo err >&2; exit 3")

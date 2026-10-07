@@ -66,12 +66,14 @@ type fakeHerdr struct {
 	// can delete an entry between calls to model herdr coming back.
 	paneCloseErrs      map[string]error
 	workspaceCloseErrs map[string]error
-	// paneSendKeysBlock / paneCloseBlock, when true, make PaneSendKeys /
-	// PaneClose record the call and then not return until ctx is done,
-	// returning ctx.Err() -- a herdr that never answers, for the per-call
-	// timeout tests (plan AC11). The call is still logged first.
-	paneSendKeysBlock bool
-	paneCloseBlock    bool
+	// paneSendKeysBlock / paneCloseBlock / workspaceCloseBlock, when true,
+	// make PaneSendKeys / PaneClose / WorkspaceClose record the call and then
+	// not return until ctx is done, returning ctx.Err() -- a herdr that never
+	// answers, for the per-call timeout tests (plan AC11). The call is still
+	// logged first.
+	paneSendKeysBlock   bool
+	paneCloseBlock      bool
+	workspaceCloseBlock bool
 
 	workspaceID string
 	paneID      string
@@ -86,6 +88,7 @@ type fakeHerdr struct {
 
 	paneCloseCalls      []string // paneIDs PaneClose was invoked with, in order
 	workspaceCloseCalls []string // workspaceIDs WorkspaceClose was invoked with, in order
+	tabCreateWorkspaces []string // workspaceIDs TabCreate was invoked with, in order
 }
 
 func (f *fakeHerdr) WorkspaceCreate(_ context.Context, _, _ string) (string, error) {
@@ -101,10 +104,11 @@ func (f *fakeHerdr) WorkspaceCreate(_ context.Context, _, _ string) (string, err
 	return f.workspaceID, nil
 }
 
-func (f *fakeHerdr) TabCreate(_ context.Context, _, _, _ string) (string, error) {
+func (f *fakeHerdr) TabCreate(_ context.Context, workspaceID, _, _ string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, "tab_create")
+	f.tabCreateWorkspaces = append(f.tabCreateWorkspaces, workspaceID)
 	if f.tabCreateErr != nil {
 		return "", f.tabCreateErr
 	}
@@ -199,12 +203,18 @@ func (f *fakeHerdr) PaneClose(ctx context.Context, paneID string) error {
 	return err
 }
 
-func (f *fakeHerdr) WorkspaceClose(_ context.Context, workspaceID string) error {
+func (f *fakeHerdr) WorkspaceClose(ctx context.Context, workspaceID string) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.calls = append(f.calls, "workspace_close")
 	f.workspaceCloseCalls = append(f.workspaceCloseCalls, workspaceID)
-	return f.workspaceCloseErrs[workspaceID]
+	block := f.workspaceCloseBlock
+	err := f.workspaceCloseErrs[workspaceID]
+	f.mu.Unlock()
+	if block {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	return err
 }
 
 // fakeAgmsg is a call-recording, in-memory AgmsgClient. joinErrs, keyed by
@@ -528,6 +538,103 @@ func TestOrgSpawn_WorkspaceReusedForSecondSeat(t *testing.T) {
 	}
 	if orgLevelWorkspaceEvents != 1 {
 		t.Fatalf("expected exactly 1 org_workspace_created event, got %d", orgLevelWorkspaceEvents)
+	}
+}
+
+// TestOrgSpawn_AfterDisbandClosedWorkspace_CreatesNewWorkspace covers plan
+// AC13: once disband closed the org's workspace and recorded
+// org_workspace_closed, the next spawn in the same org_id creates a new
+// workspace and puts its tab there instead of in the closed one, and the
+// spawn after that reuses the new workspace.
+func TestOrgSpawn_AfterDisbandClosedWorkspace_CreatesNewWorkspace(t *testing.T) {
+	o, h, _ := testOrg(t)
+	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("first spawn failed: %+v", r)
+	}
+	if d := o.Disband(DisbandParams{OrgID: "org-a"}); !d.Disbanded || len(d.Errs) != 0 {
+		t.Fatalf("disband failed: %+v", d)
+	}
+	if !slices.Equal(h.workspaceCloseCalls, []string{"ws-1"}) {
+		t.Fatalf("expected disband to close ws-1, got %v", h.workspaceCloseCalls)
+	}
+
+	h.workspaceID = "ws-2"
+	h.paneID = "pane-2"
+	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn after disband failed: %+v", r)
+	}
+	h.paneID = "pane-3"
+	if r := o.Spawn(mustSpawnParams("org-a", "seat-2")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("second spawn after disband failed: %+v", r)
+	}
+
+	if got := countString(h.calls, "workspace_create"); got != 2 {
+		t.Fatalf("expected workspace_create once before and once after the disband, got %d (calls=%v)", got, h.calls)
+	}
+	if want := []string{"ws-1", "ws-2", "ws-2"}; !slices.Equal(h.tabCreateWorkspaces, want) {
+		t.Fatalf("TabCreate workspaces = %v, want %v (no tab in the closed ws-1)", h.tabCreateWorkspaces, want)
+	}
+	var created []string
+	for _, ev := range mustReadEvents(t, o) {
+		if ev.Event == EventOrgWorkspaceCreated {
+			created = append(created, ev.PaneID)
+		}
+	}
+	if !slices.Equal(created, []string{"ws-1", "ws-2"}) {
+		t.Fatalf("org_workspace_created ids = %v, want [ws-1 ws-2]", created)
+	}
+}
+
+func countString(list []string, s string) int {
+	n := 0
+	for _, v := range list {
+		if v == s {
+			n++
+		}
+	}
+	return n
+}
+
+// TestOpenOrgWorkspaces pins which recorded workspaces count as open: a
+// created id stays open until a later real org-level org_workspace_closed
+// for the same org_id and id, and a closed id that is created again is open
+// again.
+func TestOpenOrgWorkspaces(t *testing.T) {
+	created := func(org, id string) ManifestEvent {
+		return ManifestEvent{OrgID: org, Event: EventOrgWorkspaceCreated, PaneID: id}
+	}
+	closed := func(org, id string) ManifestEvent {
+		return ManifestEvent{OrgID: org, Event: EventOrgWorkspaceClosed, PaneID: id}
+	}
+	dryRunClosed := closed("org-a", "ws-1")
+	dryRunClosed.DryRun = true
+	seatLevelClosed := closed("org-a", "ws-1")
+	seatLevelClosed.SeatID = "seat-1"
+
+	tests := []struct {
+		name   string
+		events []ManifestEvent
+		want   []string
+	}{
+		{name: "none recorded", want: nil},
+		{name: "created", events: []ManifestEvent{created("org-a", "ws-1")}, want: []string{"ws-1"}},
+		{name: "created then closed", events: []ManifestEvent{created("org-a", "ws-1"), closed("org-a", "ws-1")}, want: nil},
+		{name: "closed then a new one created", events: []ManifestEvent{created("org-a", "ws-1"), closed("org-a", "ws-1"), created("org-a", "ws-2")}, want: []string{"ws-2"}},
+		{name: "same id created again after close", events: []ManifestEvent{created("org-a", "ws-1"), closed("org-a", "ws-1"), created("org-a", "ws-1")}, want: []string{"ws-1"}},
+		{name: "two created, oldest first", events: []ManifestEvent{created("org-a", "ws-1"), created("org-a", "ws-2")}, want: []string{"ws-1", "ws-2"}},
+		{name: "close of another id", events: []ManifestEvent{created("org-a", "ws-1"), closed("org-a", "ws-9")}, want: []string{"ws-1"}},
+		{name: "close in another org", events: []ManifestEvent{created("org-a", "ws-1"), closed("org-b", "ws-1")}, want: []string{"ws-1"}},
+		{name: "workspace of another org", events: []ManifestEvent{created("org-b", "ws-1")}, want: nil},
+		{name: "dry-run close ignored", events: []ManifestEvent{created("org-a", "ws-1"), dryRunClosed}, want: []string{"ws-1"}},
+		{name: "seat-level close ignored", events: []ManifestEvent{created("org-a", "ws-1"), seatLevelClosed}, want: []string{"ws-1"}},
+		{name: "empty id skipped", events: []ManifestEvent{created("org-a", "")}, want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := openOrgWorkspaces(tt.events, "org-a"); !slices.Equal(got, tt.want) {
+				t.Fatalf("openOrgWorkspaces = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 

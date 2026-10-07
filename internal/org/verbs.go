@@ -596,10 +596,10 @@ func (o *Org) Read(p ReadParams) ReadResult {
 	return ReadResult{Output: out, Err: err}
 }
 
-// defaultDriverCallTimeout bounds each herdr / agmsg call Stop makes when
-// Org.DriverCallTimeout is unset (zero value). A call that has not answered
-// by then counts as failed, so one unresponsive herdr or agmsg can never
-// hold a stop (or the stops after it) forever.
+// defaultDriverCallTimeout bounds each herdr / agmsg call Stop and Disband
+// make when Org.DriverCallTimeout is unset (zero value). A call that has not
+// answered by then counts as failed, so one unresponsive herdr or agmsg can
+// never hold a stop (or the stops after it) forever.
 const defaultDriverCallTimeout = 10 * time.Second
 
 // herdrPaneIDEnv is the variable herdr sets inside every pane to that pane's
@@ -607,6 +607,12 @@ const defaultDriverCallTimeout = 10 * time.Second
 // Assumptions, confirmed live 2026-10-07). Stop compares it with the seat's
 // recorded pane_id to recognise the caller's own pane.
 const herdrPaneIDEnv = "HERDR_PANE_ID"
+
+// herdrWorkspaceIDEnv is the variable herdr sets inside every pane to the id
+// of the workspace that holds it (see herdrPaneIDEnv). Disband compares it
+// with the org's recorded workspace ids to recognise the caller's own
+// workspace.
+const herdrWorkspaceIDEnv = "HERDR_WORKSPACE_ID"
 
 // driverCallTimeout returns o.DriverCallTimeout, falling back to
 // defaultDriverCallTimeout when unset (the Org zero value) -- mirrors
@@ -897,6 +903,29 @@ func (o *Org) CloseDeferredSelfPane(paneID string) error {
 	return nil
 }
 
+// CloseDeferredSelfWorkspace closes the caller's own herdr workspace that
+// Disband recorded as closed but left open, returned in
+// DisbandResult.DeferredSelfWorkspaceID, under the same driverCallTimeout
+// deadline. Closing it closes every pane in it, including the caller's, so
+// the same rule as CloseDeferredSelfPane applies: make it the very last
+// action, after all output; a nil return may never be seen. The manifest
+// already says the workspace is closed, so a non-nil error is the only sign
+// that it is still open: show it, then close the workspace by hand. A
+// workspace herdr reports not found counts as closed (nil). An empty
+// workspaceID is a no-op.
+func (o *Org) CloseDeferredSelfWorkspace(workspaceID string) error {
+	if workspaceID == "" {
+		return nil
+	}
+	err := o.callWithTimeout(func(ctx context.Context) error {
+		return o.Herdr.WorkspaceClose(ctx, workspaceID)
+	})
+	if err != nil && !isNotFound(err) {
+		return fmt.Errorf("org: close own workspace %q: %w", workspaceID, err)
+	}
+	return nil
+}
+
 // codexSpawnInfo is codexSpawnCorrelation's structured result: everything
 // Stop needs to know about the spawn that actually launched a seat --
 // StartedAt, StartedTS, and PromptPath (identifying the spawn attempt and
@@ -1181,50 +1210,286 @@ func (o *Org) Status(orgID string, all bool) (StatusResult, error) {
 type DisbandParams struct {
 	OrgID  string
 	DryRun bool
+	// Force is the CLI's --force: every seat's Stop gets StopParams.Force,
+	// a workspace whose close failed is recorded org_workspace_closed
+	// anyway (Details `workspace=close failed (forced): ...`), and
+	// `disbanded` is appended despite those failures. They still come back
+	// in FailedSeats / FailedWorkspaces with Forced set, as warnings.
+	Force bool
 }
 
-// DisbandResult is Disband's return value: which seats were stopped (best
-// effort -- Disband continues past individual Stop errors) and any errors
-// encountered along the way, including from the final disbanded event.
+// SeatFailure is one seat Disband did not stop cleanly, and why.
+type SeatFailure struct {
+	SeatID string
+	Err    error
+	// Forced is true when the seat's pane could not be closed but Force
+	// recorded it `stopped` anyway: the seat is no longer active, and Err is
+	// the close failure, a warning. When false the seat is still active
+	// (Stop recorded stop_failed, or Disband left it running; see Disband),
+	// so the next disband stops it again, and Err is also in
+	// DisbandResult.Errs.
+	Forced bool
+}
+
+// WorkspaceFailure is one recorded org workspace Disband did not close, and
+// why. Forced means the same as in SeatFailure: true when Force recorded
+// org_workspace_closed anyway, false when the manifest still has the
+// workspace open, so the next disband closes it again.
+type WorkspaceFailure struct {
+	WorkspaceID string
+	Err         error
+	Forced      bool
+}
+
+// DisbandResult is Disband's return value. After a real Disband that could
+// read the manifest, each seat that was active is in exactly one of
+// StoppedSeats and FailedSeats, and each workspace the manifest had open
+// for the org is in exactly one of ClosedWorkspaces, FailedWorkspaces, and
+// DeferredSelfWorkspaceID.
 type DisbandResult struct {
+	// StoppedSeats are the seats Stop recorded `stopped` with the pane
+	// closed, already gone, never recorded, or left to the caller (its own).
 	StoppedSeats []string
-	Errs         []error
+	FailedSeats  []SeatFailure
+	// ClosedWorkspaces are the workspaces closed (or not found) and
+	// recorded org_workspace_closed.
+	ClosedWorkspaces []string
+	FailedWorkspaces []WorkspaceFailure
+	// Disbanded is true once the `disbanded` event was appended.
+	Disbanded bool
+	// DeferredSelfPaneID is the caller's own pane when Disband recorded the
+	// seat in it `stopped` but left the pane open (StopResult's field of the
+	// same name), and DeferredSelfWorkspaceID the caller's own workspace when
+	// Disband recorded it org_workspace_closed but left it open. The caller
+	// must finish all output and then close them with CloseDeferredSelfPane
+	// / CloseDeferredSelfWorkspace as its very last action, since either
+	// close ends the calling process. The own pane lies in the own
+	// workspace, so when DeferredSelfWorkspaceID is set, closing the
+	// workspace covers the pane and DeferredSelfPaneID is empty. Each is set
+	// whenever its record was written, even if a later step failed.
+	DeferredSelfPaneID      string
+	DeferredSelfWorkspaceID string
+	// Errs is every error that makes this disband fail: the Err of each
+	// FailedSeats / FailedWorkspaces entry whose Forced is false, and
+	// manifest read / append failures. It is empty exactly when Disbanded
+	// is true.
+	Errs []error
 }
 
-// Disband best-effort-stops every currently active seat in OrgID (each via
-// Stop, so pane C-c and agmsg Leave are both attempted per seat -- AC-5),
-// then appends an org-level `disbanded` event (SeatID empty) that marks
+func (r *DisbandResult) recordStop(seatID string, res StopResult) {
+	switch {
+	case res.Err != nil:
+		r.failSeat(seatID, res.Err)
+	case res.CloseErr != nil:
+		r.FailedSeats = append(r.FailedSeats, SeatFailure{SeatID: seatID, Err: res.CloseErr, Forced: true})
+	default:
+		r.StoppedSeats = append(r.StoppedSeats, seatID)
+	}
+	if res.DeferredSelfPaneID != "" {
+		r.DeferredSelfPaneID = res.DeferredSelfPaneID
+	}
+}
+
+func (r *DisbandResult) failSeat(seatID string, err error) {
+	r.FailedSeats = append(r.FailedSeats, SeatFailure{SeatID: seatID, Err: err})
+	r.Errs = append(r.Errs, err)
+}
+
+func (r *DisbandResult) failWorkspace(workspaceID string, err error, forced bool) {
+	r.FailedWorkspaces = append(r.FailedWorkspaces, WorkspaceFailure{WorkspaceID: workspaceID, Err: err, Forced: forced})
+	if !forced {
+		r.Errs = append(r.Errs, err)
+	}
+}
+
+// forcedNote is the `disbanded` event's Details when Force recorded past a
+// close failure, naming what was not closed; empty otherwise.
+func (r *DisbandResult) forcedNote() string {
+	var parts []string
+	for _, f := range r.FailedSeats {
+		if f.Forced {
+			parts = append(parts, "seat "+f.SeatID)
+		}
+	}
+	for _, f := range r.FailedWorkspaces {
+		if f.Forced {
+			parts = append(parts, "workspace "+f.WorkspaceID)
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "forced: not closed: " + strings.Join(parts, ", ")
+}
+
+// Disband stops every active seat of OrgID with Stop (C-c, pane close, agmsg
+// Leave, `stopped`), then closes each herdr workspace the manifest has open
+// for the org (openOrgWorkspaces) and records org_workspace_closed for it,
+// then appends the org-level `disbanded` event (SeatID empty) that marks
 // every seat in that org_id inactive from that point forward (see Roster).
-// DryRun skips stopping real seats and only appends the disbanded event.
+// Each workspace close runs under its own driverCallTimeout deadline, and a
+// workspace herdr reports not found counts as closed.
 //
-// AC-10: the seats iterated here come from Roster, which by construction
-// only contains seats that actually have a recorded state event -- so
-// Disband inherently only ever processes existing (never phantom/unknown)
-// active seats.
+// `disbanded` is appended only when nothing failed: a seat Stop could not
+// close stays active (stop_failed) and is in FailedSeats, a workspace that
+// could not be closed stays open in the manifest and is in
+// FailedWorkspaces, and the result's Errs make the CLI exit 1. Disband never
+// skips a seat because an earlier one failed, but if any seat failed it
+// closes no workspace, since closing one ends whatever still runs in it;
+// those workspaces are listed in FailedWorkspaces. Disbanding again later
+// retries what is left. With Force, close failures are recorded anyway
+// (`stopped (forced)`, org_workspace_closed) and reported as Forced
+// warnings, and `disbanded` is appended with a `forced: not closed: ...`
+// note.
+//
+// The caller's own pane (HERDR_PANE_ID) and workspace (HERDR_WORKSPACE_ID),
+// read via o.Getenv, are handled last, after every other close succeeded:
+// the seat in the own pane is stopped only then (Stop records it without
+// closing the pane), and the own workspace is only recorded
+// org_workspace_closed (`workspace=self, closed last`), before `disbanded`.
+// The record is written before the close because the close ends the
+// calling process, which could not write anything afterwards; the caller
+// closes them via DeferredSelfPaneID / DeferredSelfWorkspaceID and must
+// show the error if that close fails. When an earlier close failed, the
+// own seat and workspace are left untouched (and listed as failures), so a
+// leader that ran disband in its own pane stays alive to see the error and
+// retry. Telling the own pane's workspace apart relies on herdr setting
+// HERDR_WORKSPACE_ID next to HERDR_PANE_ID.
+//
+// DryRun makes no driver call and only appends a dry-run `disbanded`.
+//
+// AC-10 / plan AC8: the seats come from Roster and the workspaces from
+// org_workspace_created events of this org_id, so Disband only ever closes
+// panes and workspaces this org's manifest recorded.
 func (o *Org) Disband(p DisbandParams) DisbandResult {
 	var result DisbandResult
+	if p.DryRun {
+		o.appendDisbanded(p, "", &result)
+		return result
+	}
+	rr, err := o.Manifest.Read()
+	if err != nil {
+		result.Errs = append(result.Errs, fmt.Errorf("org: disband: read manifest: %w", err))
+		return result
+	}
 
-	if !p.DryRun {
-		rr, err := o.Manifest.Read()
-		if err != nil {
-			result.Errs = append(result.Errs, fmt.Errorf("org: disband: read manifest: %w", err))
-		} else {
-			for _, s := range Roster(rr.Events, RosterOptions{}) {
-				if s.OrgID != p.OrgID || !s.Active {
-					continue
-				}
-				if res := o.Stop(StopParams{OrgID: p.OrgID, Seat: s.SeatID}); res.Err != nil {
-					result.Errs = append(result.Errs, res.Err)
-				}
-				result.StoppedSeats = append(result.StoppedSeats, s.SeatID)
-			}
+	ownPane := o.getenv(herdrPaneIDEnv)
+	var ownSeats []string
+	for _, s := range Roster(rr.Events, RosterOptions{}) {
+		if s.OrgID != p.OrgID || !s.Active {
+			continue
+		}
+		if ownPane != "" && s.PaneID == ownPane {
+			ownSeats = append(ownSeats, s.SeatID)
+			continue
+		}
+		result.recordStop(s.SeatID, o.Stop(StopParams{OrgID: p.OrgID, Seat: s.SeatID, Force: p.Force}))
+	}
+
+	ownWorkspaceEnv := o.getenv(herdrWorkspaceIDEnv)
+	seatsFailed := len(result.Errs) > 0
+	var ownWorkspace string
+	for _, ws := range openOrgWorkspaces(rr.Events, p.OrgID) {
+		switch {
+		case ownWorkspaceEnv != "" && ws == ownWorkspaceEnv:
+			ownWorkspace = ws
+		case seatsFailed:
+			result.failWorkspace(ws, fmt.Errorf("org: disband: workspace %q of org_id %q left open: a seat in the org could not be stopped", ws, p.OrgID), false)
+		default:
+			o.closeOrgWorkspace(p, ws, &result)
 		}
 	}
 
-	if err := o.appendEvent(ManifestEvent{
-		TS: o.now(), OrgID: p.OrgID, SeatID: "", Event: EventDisbanded, DryRun: p.DryRun,
-	}); err != nil {
-		result.Errs = append(result.Errs, err)
+	o.disbandOwnLast(p, ownSeats, ownWorkspace, &result)
+	if len(result.Errs) > 0 {
+		return result
 	}
+	o.appendDisbanded(p, result.forcedNote(), &result)
 	return result
+}
+
+// disbandOwnLast is Disband's last step before `disbanded`: the seats in the
+// caller's own pane and the caller's own workspace (empty: none). When
+// nothing failed so far it stops those seats and records the workspace
+// org_workspace_closed without closing it; otherwise it leaves both as they
+// are and lists them as failures. See Disband's doc comment.
+func (o *Org) disbandOwnLast(p DisbandParams, ownSeats []string, ownWorkspace string, result *DisbandResult) {
+	const why = "disband closes it last, after every other seat and workspace closed, and one did not"
+	for _, seat := range ownSeats {
+		if len(result.Errs) > 0 {
+			result.failSeat(seat, fmt.Errorf("org: disband: seat %q in org_id %q left running in the caller's own pane: %s", seat, p.OrgID, why))
+			continue
+		}
+		result.recordStop(seat, o.Stop(StopParams{OrgID: p.OrgID, Seat: seat, Force: p.Force}))
+	}
+	if ownWorkspace == "" {
+		return
+	}
+	if len(result.Errs) > 0 {
+		result.failWorkspace(ownWorkspace, fmt.Errorf("org: disband: the caller's own workspace %q of org_id %q left open: %s", ownWorkspace, p.OrgID, why), false)
+		return
+	}
+	if err := o.recordWorkspaceClosed(p.OrgID, ownWorkspace, "workspace=self, closed last"); err != nil {
+		result.failWorkspace(ownWorkspace, err, false)
+		return
+	}
+	result.DeferredSelfWorkspaceID = ownWorkspace
+	result.DeferredSelfPaneID = ""
+}
+
+// closeOrgWorkspace closes one recorded workspace of p.OrgID under its own
+// driverCallTimeout deadline and records the outcome on result. Closed or
+// not found appends org_workspace_closed; any other failure, including a
+// timeout, appends nothing and is a workspace failure -- unless p.Force,
+// which appends org_workspace_closed with the failure in Details and
+// reports it as a Forced failure.
+func (o *Org) closeOrgWorkspace(p DisbandParams, workspaceID string, result *DisbandResult) {
+	closeErr := o.callWithTimeout(func(ctx context.Context) error {
+		return o.Herdr.WorkspaceClose(ctx, workspaceID)
+	})
+	var note string
+	switch {
+	case closeErr == nil:
+		note = "workspace=closed"
+	case isNotFound(closeErr):
+		note, closeErr = "workspace=already closed", nil
+	case p.Force:
+		note = fmt.Sprintf("workspace=close failed (forced): %v", closeErr)
+	default:
+		result.failWorkspace(workspaceID, fmt.Errorf("org: disband: workspace %q of org_id %q not closed: %w", workspaceID, p.OrgID, closeErr), false)
+		return
+	}
+	if err := o.recordWorkspaceClosed(p.OrgID, workspaceID, note); err != nil {
+		result.failWorkspace(workspaceID, err, false)
+		return
+	}
+	if closeErr != nil {
+		result.failWorkspace(workspaceID, closeErr, true)
+		return
+	}
+	result.ClosedWorkspaces = append(result.ClosedWorkspaces, workspaceID)
+}
+
+// recordWorkspaceClosed appends the org-level org_workspace_closed event for
+// workspaceID with details. A failed append leaves the workspace open in the
+// manifest, so the next disband closes it again (not found then counts as
+// closed).
+func (o *Org) recordWorkspaceClosed(orgID, workspaceID, details string) error {
+	if err := o.appendEvent(ManifestEvent{
+		TS: o.now(), OrgID: orgID, SeatID: "", Event: EventOrgWorkspaceClosed,
+		PaneID: workspaceID, Details: details,
+	}); err != nil {
+		return fmt.Errorf("org: disband: record %s for workspace %q of org_id %q: %w", EventOrgWorkspaceClosed, workspaceID, orgID, err)
+	}
+	return nil
+}
+
+func (o *Org) appendDisbanded(p DisbandParams, details string, result *DisbandResult) {
+	if err := o.appendEvent(ManifestEvent{
+		TS: o.now(), OrgID: p.OrgID, SeatID: "", Event: EventDisbanded, DryRun: p.DryRun, Details: details,
+	}); err != nil {
+		result.Errs = append(result.Errs, fmt.Errorf("org: disband: record %s: %w", EventDisbanded, err))
+		return
+	}
+	result.Disbanded = true
 }
