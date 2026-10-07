@@ -71,8 +71,69 @@ verify の文書のずれ V-1〜V-7 と V-9 を直し、self-review の tech-deb
 
 テストの全体(`./scripts/run-test.sh`、`go test`)は、コードを変えていないので再実行していない。test report の結果(shell 39 ファイル 1,943 件、Go 8 パッケージ)が、この commit のコードに対してもそのまま当てはまる。
 
-## Verdict
+## Cycle 1 verdict
 
 - Verdict: pass
 - Verified: 上の確認表
 - Not verified: Codex が `ask` をどう扱うか、live の bypass session で新しい guard が `ask` を返さないこと(どちらも tech-debt の 127 行目と 160 行目に記録)
+
+## Cycle 2
+
+- Date: 2026-10-07
+- Agent: doc-maintainer subagent、pipeline cycle 2(`cycle-count.json` は 2)
+- Branch: fix/guard-bypass-and-hygiene(編集前の HEAD 79c9664b)
+- 前段の記録: self-review cycle 2(C2-M1、C2-L1、C2-L2、C2-L3)、verify cycle 2(V2-1〜V2-4)、test cycle 2(pass、guard のテスト 280 件)、cross-review triage(cycle 1 の ACTION_REQUIRED 2 件)。コードの修正は 0db1a97e(cross-review の 2 件)と ab3ee31c(C2-M1、C2-L1、C2-L3)
+
+### Summary
+
+tech-debt の 158 行目と 160 行目を、cycle 2 の修正後の実測に合わせて書き直した(C2-L2、V2-2、V2-3)。書く前に、旧 guard(2a22ba78)と HEAD の guard を scratchpad に置き、同じ 35 形を jq あり・なしの両方で流して判定を確かめた(140 判定)。guard、テスト、plan の本文は変えていない。plan の digest は `d8f86292d5f1` で、承認の行と一致している(`./scripts/plan-visual.sh digest`)。V2-1(plan の Risks)と V2-4(Progress checklist)は、plan の側で済んでいる(51ce09f7 と `:171`)。
+
+### Files changed
+
+| File | Change |
+|------|--------|
+| `docs/tech-debt/README.md` | 158 行目(guard の取りこぼし)と 160 行目(テストの穴)。下の表のとおり |
+| `docs/insights/events/2026-10-07-guard-bypass-and-hygiene.jsonl` | `/sync-docs` の event を 1 行追記(`--phase sync_docs --verdict pass --cycle auto`、cycle は 2) |
+| `docs/reports/sync-docs-2026-10-07-guard-bypass-and-hygiene.md` | この節。cycle 1 の `## Verdict` は、verify と test の report にならって `## Cycle 1 verdict` に改め、最後に cycle 2 を含む `## Verdict` を置いた |
+
+| 行 | 変更 |
+|----|------|
+| 158(冒頭) | 「旧 guard が通した中で、偶然 ask を返したのは M-1 の 5 例だけ」という書き方を、「後ろの `>` が部分一致に当たって偶然 ask を返した形(M-1 の 5 例と (a) の `tee` の形)」に直した。「旧 guard」は、マージ後に読んでも指せるよう「この PR より前の guard」と添えた(`origin/main` は書かなかった) |
+| 158 (a) | `tee` の書き込み先が、引数の読み取りを止める文字(`&`、`<`、`\`、`;`、`\|`、`)`)の後ろにある形を足した。例は `tee out 2>&1 .env > /dev/null`、`tee < in.txt .env > /dev/null`、`tee out &>/dev/null .env > /dev/null`、`tee $(mktemp) .env > /dev/null`、`tee out\ x .env > /dev/null`。旧 guard は後ろの `>` が当たったときだけ ask を返し、`>` がなければ返さなかった。引用符の中の `;` と `\|`(`tee "a;b" .git/x > /dev/null`)は、旧 guard が jq ありでだけ ask した。0db1a97e と ab3ee31c が、改行のあと(sed 経路)、バックスラッシュとバッククォートのあと、`2>/dev/null` を挟む `tee` を戻したことも書いた |
+| 158 (c) | 「`tee` の前のタブは 0db1a97e で見えるようになった。`>` のあと、`tee` のあと、`tee` の引数のあいだのタブは、sed 経路で今も見えない」に絞った。旧 guard は両経路で none だったので、退行ではない。受け入れた 2 件を足した: `tee out.txt 2>/dev/null .env` は ask になる(`.env` に書くので正しい。旧 guard は後ろに `>` がなければ ask しなかった)、`printf "a\\ntee .env"` は両経路で ask になる(書き込みはないので誤検知。旧 guard は jq ありでだけ ask した) |
+| 158(Why deferred、Trigger、Related) | 退行ではない形に `tee` の形を加えた。Trigger は「guard-bypass-and-hygiene の次の変更」に書き直した(この PR の `tee_lead` の修正が前のきっかけに当たったため)。(c) の直し方は、`\t` を受け付ける位置を `>` のあと、`tee` のあと、`tee` の引数のあいだの 3 か所にした。Related に verify の cycle 2 と cross-review の triage を足した |
+| 160(冒頭) | Test gaps 1〜9 のうち 1〜3 は済んだと書いた |
+| 160 (a) | 3 形(`cat >.env<<EOF`、`/usr/bin/tee`、`cat >/tmp/o</repo/.git/HEAD`)を取り消し線にし、0db1a97e で済んだと書いた。テストは `tests/test-pre-bash-guard.sh` の D(`:220`、`:233`)と C(`:198`)で、cycle 2 の `/test` が G8、G9、G14 の red を確かめている。G9 の行に `-a` はないが、mutation は見分ける。残りは `plan`・`acceptEdits`・`dontAsk` と、後ろの `>` で偶然 ask だった `tee` の形がテストにないこと(今の判定は none で、固定されていない) |
+| 160(Impact、Trigger、Related) | `tee` の形の判定が変わっても赤くならないことを Impact に、`tee_lead` に次に触れるときにテストへ足すことを Trigger に書いた。Related に test の cycle 2 と verify の Coverage gaps を足した |
+
+158 行目と 160 行目の plan の参照は `docs/plans/active/2026-10-07-guard-bypass-and-hygiene.md` のままにした(`verify.local.sh` の参照の検査は実在するパスを見る。`/pr` の `archive-plan.sh` が移動と同時に書き換える)。表の列数は 157〜160 行目とも同じで、`\|` のエスケープを保っている。
+
+### Drift check results (cycle 2)
+
+| 文書 | 結果 |
+|------|------|
+| `.codex/README.md:114-117`(root、template) | 変更なし。書いてあるのは `deny` がコマンドを止めることだけで、cycle 2 の修正は `ask` の規則だけを動かした。`cmp` で一致 |
+| `pre_bash_guard.sh` のコメント(root、template) | 変更なし。37〜43 行目(sed 経路の `\n` と `\t`)と 52〜61 行目(`tee` の前に置ける文字、`<` で止める理由、`>` で止めない理由)は、probe の判定と食い違わない。33〜36 行目の「each argument of tee」は、引数の読み取りが `;` `&` `\|` `)` `<` とバックスラッシュで止まることを 52〜61 行目が書いているので、直していない(811e1452 から同じ書き方)。`cmp` で一致 |
+| `post_edit_verify.sh` のコメント(root、template) | 変更なし。C2-L3 は ab3ee31c で直っている |
+| `tests/test-pre-bash-guard.sh` の見出しコメント | 変更なし。C、D、H の列挙は足した行と合う(verify の cycle 2 で確認済み) |
+| `docs/quality/`、`AGENTS.md`、`CLAUDE.md`、`README.md`、`.claude/rules/ralph/` | 変更なし。cycle 2 の修正は `tee_lead` の 1 行で、コマンド、契約、パイプラインの順序は動かしていない |
+| plan の Progress checklist | 変更なし。cycle 2 の記録は `:171` にあり、本文には触れていない |
+
+### 確認(cycle 2)
+
+| コマンド | 結果 |
+|----------|------|
+| `./scripts/check-sync.sh` | PASS(IDENTICAL 164、DRIFTED 0、ROOT_ONLY 0、TEMPLATE_ONLY 11、KNOWN_DIFF 5) |
+| `./scripts/check-skill-sync.sh` | PASS(13 skill) |
+| `bash scripts/check-template-purity.sh` | PASS |
+| `HARNESS_VERIFY_MODE=static ./scripts/verify.local.sh` | rc 0(31 項目が OK。tech-debt README の plan 参照を含む) |
+| `./scripts/plan-visual.sh digest <plan>` | `d8f86292d5f1`(承認の行と一致) |
+| 旧 guard と HEAD の guard の probe | 35 形 × 2 つの guard × jq あり・なし。158 行目に書いた判定のすべてと一致 |
+
+テスト(`./scripts/run-test.sh`、`go test`)は、コードとテストを変えていないので再実行していない。test の cycle 2 の結果(shell 39 ファイル 2,003 件、Go 8 パッケージ)が、この commit のコードにそのまま当てはまる。
+
+## Verdict
+
+- Verdict: pass
+- Verified: cycle 1 と cycle 2 の確認表。cycle 2 は tech-debt の 2 行を、旧 guard と HEAD の guard の probe で確かめてから直した
+- Not verified: Codex が `ask` をどう扱うか、live の bypass session で新しい guard が `ask` を返さないこと(どちらも tech-debt の 127 行目と 160 行目に記録)。GNU grep / sed での probe(test の cycle 2 が ubuntu:24.04 でテストを通している)
