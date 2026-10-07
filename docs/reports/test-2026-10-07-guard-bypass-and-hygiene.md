@@ -343,7 +343,7 @@ cycle 1 の Test gaps の 1〜3 は 0db1a97e で埋まった(上の G8、G9、G1
 
 新しいテストの穴は 1 つ。verify の cycle 2 の Observational checks の表にある `tee` の形(`tee < in.txt .env > /dev/null`、`tee out 2>&1 .env > /dev/null` など、旧 guard が後ろの `>` に偶然当たって ask を返していた形)は、テストにない。今の判定(none)は plan の Risks に記録された挙動なので、テストで固定するかどうかは判断に任せる。
 
-## Verdict
+## Cycle 2 verdict
 
 - Verdict: pass
 - Pass: cycle 2 の `./scripts/run-test.sh`(shell 39 ファイル 2,003 件、Go 8 パッケージ、rc 0)、`go test ./... -count=1`(8 / 8)、指定の suite を単独で 1 回(280、24、5、22、20 件と insights-append の 51 件)、ubuntu:24.04 の GNU grep / sed と dash での guard(jq なし 140 件、jq あり 280 件)、mutation の spot check 9 件がすべて red。実行権限の検査で落ちたテストは 0 本
@@ -351,3 +351,59 @@ cycle 1 の Test gaps の 1〜3 は 0db1a97e で埋まった(上の G8、G9、G1
 - Blocked: なし
 
 テストは通っており、/pr に進めない理由はない。残っている穴は Test gaps(cycle 2)のとおりで、どれも今回の変更を止める理由ではない。
+
+## Cycle 2 (extra run)
+
+- Date: 2026-10-07(実行の記録は UTC の 04:37〜04:52)
+- Tester: tester subagent (Claude Opus 5.5)。cross-review cycle 2(44ab9ef7)のあと cap を 3 に上げた追加の回。`cycle-count.json` は 2 のままなので、insight event の cycle も 2 になる
+- Scope: cycle 2 の test(79c9664b)のあとのコミットで、HEAD は 2b4e8864。コードの変更は 3c0ba22a、206d8335、b94a9106 の 3 つで、`pre_bash_guard.sh` の `word_end`・`tee_lead`・`env_target` とそのコメント(root と template で、`cmp` で一致)、`tests/test-pre-bash-guard.sh` の C に 2 行、D に 9 行。ほかは記録と文書(4f52f2f2 の tech-debt README を含む)。依頼どおり mutation は流していない
+- Evidence: `docs/evidence/test-2026-10-07-guard-bypass-and-hygiene.log` の末尾の「Cycle 2 (extra run)」節(手元だけ)。`run-test.sh` 自身のログは `docs/evidence/verify-2026-10-07-043708.log`
+
+### Test execution (extra run)
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `./scripts/run-test.sh`(既定の changed) | shell 39 ファイル(2,047 件)、Go 8 パッケージ | すべて | 0 | 1(cycle 1 と同じ) | 340 s、rc 0 |
+| `go test ./... -count=1 -cover` | 8 パッケージ | 8 | 0 | 0(テストのない 2 パッケージを除く) | 54 s、rc 0 |
+| ubuntu:24.04、jq を入れる前の `test-pre-bash-guard.sh` | 324 | 162(jq なしの経路) | 0 | 162(jq の経路) | rc 0 |
+| ubuntu:24.04、jq を入れたあとの `test-pre-bash-guard.sh` | 324 | 324 | 0 | 0 | rc 0 |
+
+- `run-test.sh` は `Requested scope: changed` で走り、これまでと同じく `Language scope: full fallback (unclassified:.claude/hooks/lib_json.sh)` になった。
+- shell の 39 ファイルは `tests/test-*.sh` の全件で、`find` の一覧と実行した一覧を `comm` で比べて差はなかった。`git ls-files -s` では 39 本とも 100755。
+- 件数は cycle 2 と同じ数え方の awk で数え、先に cycle 2 のログ(`verify-2026-10-07-021111.log`)に当てて 2,003 件と skip 1 件になることを確かめた。cycle 2 と違うのは `test-pre-bash-guard.sh` の 280 から 324 だけで、ほかの 38 本は suite ごとの件数が `diff` で一致した。増えた 44 件は、足した 11 行 × 2 モード × 2 経路で、ログでは 44 件とも PASS。
+- skip の 1 件は cycle 1 と同じ `tests/test-secret-scan-branch.sh` の「git 2.41 より古い本物の git」のケース(手元は git 2.49.0)。
+- Go の coverage は `internal/cli` 84.7%、`internal/config` 92.3%、`internal/insights` 86.1%、`internal/org` 90.8%、`internal/org/driver` 92.0%、`internal/org/protocol` 97.9%、`internal/scaffold` 75.7%、`internal/upgrade` 91.2% で、cycle 1・2 と同じ。このブランチは Go のファイルを変えていない。
+- ubuntu:24.04 には `git archive HEAD` の tar を標準入力で渡し、コンテナで動かすスクリプトは `sh -c` の引数で渡した。aarch64、dash、GNU grep 3.11、GNU sed 4.9、bash 5.2.21、jq 1.7。
+- 実行の前後で worktree の `git status --porcelain` は 0 行だった。
+
+### 足した行が前の版の guard で red になるか
+
+`git archive HEAD` の写しで guard だけを前の版に戻し、HEAD の `tests/test-pre-bash-guard.sh` を流した。worktree の追跡ファイルには触れていない。red になったのはどれも `mode=<absent>` の行で、jq と jq なしの 2 経路とも red。
+
+| guard の版 | red の行 |
+| --- | --- |
+| 44ab9ef7(cross-review cycle 2 の時点) | C の `tee /tmp/build.log # .env is read separately` と ``x=`tee /tmp/a` .env``、D の ``x=`tee .git` `` と ``x=`printf x > .git` ``(8 件) |
+| 3c0ba22a | C の ``x=`tee /tmp/a` .env``、D の `` `pwd` `` で組んだ 4 形(10 件) |
+| 206d8335 | D の `` `pwd` `` で組んだ 4 形(8 件) |
+
+3 つの修正のどれにも、直す前の版で red になる行がある。``x=`tee .git/x` ``、``x=`tee .env` ``、``x=`printf x > .env` `` の 3 行は 3 つの版とも pass で、この回の修正では判定が変わっていない形を固定している。
+
+### Failure analysis (extra run)
+
+| Test | Error | Root cause | Proposed fix |
+| --- | --- | --- | --- |
+| なし | - | - | - |
+
+### Test gaps (extra run)
+
+cycle 2 の Test gaps は変わらない。verify の extra run の表で HEAD が旧 guard より弱い形(`tee a#b .env > /dev/null`、``tee `mktemp` .env > /dev/null``、`echo x > $(pwd)/.env 2>&1` など)は、どれもテストで固定していない。guard のコメントと tech-debt README に「見ない」と書いてある形で、cycle 2 の Test gaps に書いた偶然の `tee` の形と同じ扱いになる。
+
+## Verdict
+
+- Verdict: pass(Cycle 2 (extra run)、HEAD 2b4e8864)
+- Pass: `./scripts/run-test.sh`(shell 39 ファイル 2,047 件、Go 8 パッケージ、rc 0)、`go test ./... -count=1 -cover`(8 / 8、coverage は変わらず)、ubuntu:24.04 の dash と GNU grep / sed での guard(jq なし 162 件、jq あり 324 件)。足した 11 行のうち 8 行は、前の 3 つの版のどれかの guard で red になる
+- Fail: なし
+- Blocked: なし
+- Skipped: 1 件(`tests/test-secret-scan-branch.sh` の git 2.41 未満のケース。cycle 1 から同じ)
+
+テストは通っており、/pr に進めない理由はない。残っている穴は Test gaps(cycle 2)と Test gaps (extra run) のとおりで、どれも今回の変更を止める理由ではない。
