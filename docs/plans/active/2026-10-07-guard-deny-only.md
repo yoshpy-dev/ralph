@@ -88,20 +88,20 @@
 
 ## Acceptance criteria
 
-- [ ] AC1: `pre_bash_guard.sh`(root と template、同じ内容)は、どのモード(`permission_mode` なし、`default`、`auto`、`bypassPermissions`)でも ask を返さない。PR #206 のテストで ask を期待していた行(`.git`・`.env` への書き込み、`rm -rf`、`gh pr create`)はすべて none になる
-- [ ] AC2: 次がどのモードでも deny になる。
+- [x] AC1: `pre_bash_guard.sh`(root と template、同じ内容)は、どのモード(`permission_mode` なし、`default`、`auto`、`bypassPermissions`)でも ask を返さない。PR #206 のテストで ask を期待していた行(`.git`・`.env` への書き込み、`rm -rf`、`gh pr create`)はすべて none になる
+- [x] AC2: 次がどのモードでも deny になる。
   - sudo: `sudo ls`、`sudo` + タブ + `ls`、`/usr/bin/sudo ls`、`env FOO=1 sudo ls`、`nohup sudo ls`、`xargs sudo ls`、`sh -c 'sudo ls'`、`if sudo ls; then :; fi`、`{ sudo ls; }`、`! sudo ls`、`2>/dev/null sudo ls`、`find . -exec sudo rm x \;`、`watch sudo ls`、`flock /tmp/l sudo ls`、`chroot /x sudo ls`
   - force push: `</dev/null git push --force`、`git push --force`、`git push origin --force`、`git push -f`、`git push origin -uf main`、`git push --force-with-lease`、`git push origin +main`、`git -C dir push --force`、`git push "--force" origin main`、`bash -lc "git push --force"`、`find . -exec git push --force \;`、`flock /tmp/l git push --force`、`git push --force-with`、`git push --force-with=main`
   - hard reset: `git reset --ha`、`git reset --har`、`git reset --hard`、`git -C dir reset --hard HEAD~1`、`git reset -q --hard`、`eval "git reset --hard"`、`echo "$(git reset --hard)"`、``echo "`git reset --hard`"``、`echo "git reset --hard" | sh`、`sh` に流すヒアドキュメントの本文の `git push --force`
   - コミットメッセージの置換: `git commit -m "$(id)"`、``git commit -m "`id`"``、`git commit -am "$(id)"`、`git commit -m"$(id)"`、`git commit --message "$(id)"`、`git commit --message="$(id)"`、`git commit --mess "$(id)"`、`git commit -m 'x' -m "$(id)"`、`rm -rf x && git commit -m "$(id)"`、`git commit -m "$(cat <<'EOF'; id` で始まる形、区切りに引用符のないヒアドキュメントを `git commit -F -` に流して本文に `$(id)` がある形
   - `--no-verify`: `git commit --no-veri -m x`、`git commit --no-verify -m x`、`git commit -n -m x`、`git commit -nm x`、`git push --no-verify`、`git merge --no-verify x`、`git -c core.hooksPath=/dev/null commit -m x`、`git -c Core.HooksPath=/dev/null commit -m x`
-- [ ] AC3: 次がどのモードでも none になる。`echo 'never use sudo here'`、`echo sudo ls`、`grep sudo file`、`touch sudo`、`apt-get install sudo`、`visudo -c`、`man sudo`、`git push origin main`、`git push -u origin main`、`git reset --soft HEAD~1`、`git commit -m 'remove -n flag'`、`git commit -m 'drop --force and git reset --hard from docs'`、`git commit -mn`(メッセージ `n`)、`git commit -uno -m x`、`git commit -m 'fix: x' && grep -n foo file`、`git commit -F msg.txt; sed -n 1,5p file`、`git commit -m "$(cat <<'EOF'` で始まる複数行の推奨の形、区切りに引用符のあるヒアドキュメントを `git commit -F -` に流して本文に `git push --force` や `$(id)` と書いた形、`cat > notes.md <<EOF` の本文に `git push --force` と書いた形(本文はデータ)、`git log --no-verify-signatures`、`printf 'a\ngit push --force'`(シングルクォートの中の文字の `\n`)、`ls .git/ 2>&1`、`echo x > .env`、`rm -rf build/`、`gh pr create --title t`
-- [ ] AC4: jq がない環境でも AC1〜AC3 が同じ結果になる。`lib_json.sh` は jq がなくても `\n`・`\t`・`\"`・`\\`・`\/`・ASCII の範囲の `\uXXXX` を戻し(`\u0080` 以上とサロゲートペアはそのまま残す)、本物の改行と文字の `\n` を区別する(`tests/test-lib-json.sh`)。`tests/test-pre-bash-guard.sh` が jq あり・なしの両方で、期待値を none / deny の 2 値で厳密に比べる
-- [ ] AC5: `docs/tech-debt/README.md` の 124・127・158・160 行目が、この PR に合わせて解消済みか書き直されている。guard の挙動を説明する文書が ask に触れていない
-- [ ] AC6: `./scripts/check-sync.sh`、`./scripts/check-skill-sync.sh`、`./scripts/check-pipeline-sync.sh`、`bash scripts/check-template-purity.sh`、`./scripts/run-verify.sh` が通る
-- [ ] AC7: 旧版(origin/main の guard)が deny にする形は、新版でも deny になる。例外は Assumptions の最後の項目で定めた誤検知の形だけで、テストに入れる例外はすべて AC3 に挙げる。テストが旧版と新版に同じ例の集まり(AC2 と AC3 の全部と、PR #206 のテストの deny の行)を渡して確かめる
-- [ ] AC8: 200 KB のコマンドで、guard が macOS の awk でも 5 秒以内に終わる(PR #206 の記録では、旧版の jq の経路で 28 秒)
-- [ ] AC9: 止める側に倒す場合が働く。読み直しの深さ・キュー・入れ子の上限を超えた入力は deny になる。PATH から awk を外すと、旧版の 4 規則で判定する(`sudo ls`、`git push --force`、`git reset --hard`、`git commit -m "$(id)"` が deny になる)。テストで確かめる
+- [x] AC3: 次がどのモードでも none になる。`echo 'never use sudo here'`、`echo sudo ls`、`grep sudo file`、`touch sudo`、`apt-get install sudo`、`visudo -c`、`man sudo`、`git push origin main`、`git push -u origin main`、`git reset --soft HEAD~1`、`git commit -m 'remove -n flag'`、`git commit -m 'drop --force and git reset --hard from docs'`、`git commit -mn`(メッセージ `n`)、`git commit -uno -m x`、`git commit -m 'fix: x' && grep -n foo file`、`git commit -F msg.txt; sed -n 1,5p file`、`git commit -m "$(cat <<'EOF'` で始まる複数行の推奨の形、区切りに引用符のあるヒアドキュメントを `git commit -F -` に流して本文に `git push --force` や `$(id)` と書いた形、`cat > notes.md <<EOF` の本文に `git push --force` と書いた形(本文はデータ)、`git log --no-verify-signatures`、`printf 'a\ngit push --force'`(シングルクォートの中の文字の `\n`)、`ls .git/ 2>&1`、`echo x > .env`、`rm -rf build/`、`gh pr create --title t`
+- [x] AC4: jq がない環境でも AC1〜AC3 が同じ結果になる。`lib_json.sh` は jq がなくても `\n`・`\t`・`\"`・`\\`・`\/`・ASCII の範囲の `\uXXXX` を戻し(`\u0080` 以上とサロゲートペアはそのまま残す)、本物の改行と文字の `\n` を区別する(`tests/test-lib-json.sh`)。`tests/test-pre-bash-guard.sh` が jq あり・なしの両方で、期待値を none / deny の 2 値で厳密に比べる
+- [x] AC5: `docs/tech-debt/README.md` の 124・127・158・160 行目が、この PR に合わせて解消済みか書き直されている。guard の挙動を説明する文書が ask に触れていない
+- [x] AC6: `./scripts/check-sync.sh`、`./scripts/check-skill-sync.sh`、`./scripts/check-pipeline-sync.sh`、`bash scripts/check-template-purity.sh`、`./scripts/run-verify.sh` が通る
+- [x] AC7: 旧版(origin/main の guard)が deny にする形は、新版でも deny になる。例外は Assumptions の最後の項目で定めた誤検知の形だけで、テストに入れる例外はすべて AC3 に挙げる。テストが旧版と新版に同じ例の集まり(AC2 と AC3 の全部と、PR #206 のテストの deny の行)を渡して確かめる
+- [x] AC8: 200 KB のコマンドで、guard が macOS の awk でも 5 秒以内に終わる(PR #206 の記録では、旧版の jq の経路で 28 秒)
+- [x] AC9: 止める側に倒す場合が働く。読み直しの深さ・キュー・入れ子の上限を超えた入力は deny になる。PATH から awk を外すと、旧版の 4 規則で判定する(`sudo ls`、`git push --force`、`git reset --hard`、`git commit -m "$(id)"` が deny になる)。テストで確かめる
 
 ## Implementation outline
 
@@ -152,6 +152,10 @@
 - [x] Implementation started
   - S1 完了(181e1065、implementer/opus): `lib_json.sh` が jq なしでも JSON のエスケープを戻す(512 文字の窓で読む awk)。`tests/test-lib-json.sh`(125 件)。guard のテストの jq なしの PATH に awk を足した(範囲を広げて承認)
   - S2 完了(e48797a2、implementer/opus): guard を deny だけにし、POSIX awk の字句解析で判定。テスト 1057 件、AC7 の例外 7 件は AC3 と一致、200 KB で macOS の awk 0.28〜0.83 秒。比較用の例の外で、旧版より弱く通す形(`find -exec sudo`、`flock … git push --force`、`git push --force-with`)と、awk が使えないと何も止めないことが分かった。consult(consult-plan-denyonly)と相談して Scope に 4 点を足し、ユーザーが再承認(digest 87e47b5feb8e → bf33328dae82)
+  - S2b 完了(5b0b20d5、implementer/opus): 引数を実行しないコマンド以外の後ろの sudo・git を見る補い、長いオプションの省略、止める側に倒す場合(深さ・キュー・入れ子の上限、awk がないときは旧版の 4 規則)。テスト 1203 件、AC7 の例外 9 件。入れ子の上限は mawk の eval stack に合わせて 24 にした。同じ git の後ろの読み直しを次の git の手前までにして、2 乗の時間を避けた
+  - 追加の修正(13b36abd、inline: 2 ファイルの分岐とテスト 1 件): jq も awk もないと `lib_json.sh` がコマンドを返さず guard が何も止めなかったので、sed だけの戻しに落とすようにした
+  - S3 完了(c133bde5、implementer/sonnet): tech-debt の 124・127・159 行目を解消済みに、158・160 行目を残る限界に書き直した。`.codex/README.md` と `post_edit_verify.sh` のコメントを直した
+  - AC1〜AC9: テスト(`tests/test-pre-bash-guard.sh` 1203 件、`tests/test-lib-json.sh` 126 件)と `run-verify.sh` で確かめた(2026-10-07)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
