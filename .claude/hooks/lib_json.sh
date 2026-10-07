@@ -33,6 +33,15 @@ extract_json_field() {
     printf '%s' "$_payload" | jq -r ".${_field} // empty" 2>/dev/null
   else
     _leaf="${_field##*.}"
+    # Neither jq nor awk: decode only \" and \\ with sed, as before the awk
+    # decoder existed. \n and \t stay as two characters, but callers such as
+    # the Bash guard still get the command instead of nothing.
+    if ! command -v awk >/dev/null 2>&1; then
+      printf '%s\n' "$_payload" \
+        | sed -n -E "s/.*\"${_leaf}\"[[:space:]]*:[[:space:]]*\"(([^\"\\\\]|\\\\.)*)\".*/\\1/p" \
+        | sed -E 's/\\(["\\])/\1/g'
+      return 0
+    fi
     # The trailing newline makes sed end its output line even for an empty
     # value (GNU and BSD sed omit it when the input lacks one), so awk sees
     # an empty record and prints a newline, as jq -r does for "".

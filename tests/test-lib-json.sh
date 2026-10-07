@@ -273,6 +273,29 @@ done
 check "F. a ${#long_json}-byte JSON string with escapes throughout" same \
   "$(cmd "$long_json")" tool_input.command "$long_value"
 
+# G. Neither jq nor awk: the sed-only fallback still returns the command,
+# with \" and \\ decoded and \n kept as two characters (so a caller such as
+# the Bash guard gets something to judge instead of nothing).
+noawk_path="$workdir/no-jq-no-awk-bin"
+mkdir -p "$noawk_path"
+for tool in sh bash dash cat grep sed printf dirname env tr command test; do
+  resolved="$(command -v "$tool" 2>/dev/null || true)"
+  [ -n "$resolved" ] && ln -sf "$resolved" "$noawk_path/$tool" 2>/dev/null || true
+done
+if PATH="$noawk_path" "$noawk_path/sh" -c 'command -v awk || command -v jq' >/dev/null 2>&1; then
+  record_fail "G. awk or jq is still reachable from $noawk_path"
+else
+  noawk_payload='{"tool_input":{"command":"git commit -m \"x\" && echo a\nb \\\\ c"}}'
+  extract_raw "$noawk_path" "$noawk_path/sh" "$noawk_payload" tool_input.command
+  noawk_want="$(printf '%s\n.' 'git commit -m "x" && echo a\nb \\ c')"
+  noawk_want="${noawk_want%.}"
+  if [ "$got_rc" -eq 0 ] && [ "$got_raw" = "$noawk_want" ]; then
+    record_pass "G. no jq and no awk: sed-only fallback decodes \\\" and \\\\, keeps \\n"
+  else
+    record_fail "G. no jq and no awk: sed-only fallback (expected $(show "$noawk_want"), got $(show "$got_raw"), exit $got_rc)"
+  fi
+fi
+
 echo ""
 echo "=== test-lib-json.sh results ==="
 for line in "${results[@]}"; do
