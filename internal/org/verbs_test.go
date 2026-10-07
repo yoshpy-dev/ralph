@@ -2710,6 +2710,34 @@ func TestOrgCloseDeferredSelfPane_CloseFails_SeatReactivated(t *testing.T) {
 	}
 }
 
+// TestOrgCloseDeferredSelfPane_CloseFails_SameSeatIDInAnotherOrg_KeepsOwnAgentName:
+// the compensating `spawned` takes the herdr agent name from the seat's own
+// spawn record, not from a later spawn of the same seat id in another org,
+// whose herdr agent name is namespaced with that org_id.
+func TestOrgCloseDeferredSelfPane_CloseFails_SameSeatIDInAnotherOrg_KeepsOwnAgentName(t *testing.T) {
+	o, h, _ := testOrg(t)
+	spawnSeatIn(t, o, h, "org-a", "seat-1", "ws-1", "pane-1")
+	spawnSeatIn(t, o, h, "org-b", "seat-1", "ws-2", "pane-2")
+	if herdrAgentName("org-a", "seat-1") == herdrAgentName("org-b", "seat-1") {
+		t.Fatal("fixture needs distinct herdr agent names per org")
+	}
+	ownPaneEnv(o, "pane-1", "")
+	if r := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-1"}); r.Err != nil || r.DeferredSelfPaneID != "pane-1" {
+		t.Fatalf("expected pane-1 handed back, got %+v", r)
+	}
+	h.paneCloseErrs = map[string]error{"pane-1": errTestCloseRefused}
+
+	if err := o.CloseDeferredSelfPane("pane-1", false); err == nil || !strings.Contains(err.Error(), "active again") {
+		t.Fatalf("expected the seat recorded active again, got %v", err)
+	}
+	events := mustReadEvents(t, o)
+	last := events[len(events)-1]
+	if last.OrgID != "org-a" || last.HerdrAgentName != herdrAgentName("org-a", "seat-1") {
+		t.Fatalf("expected org-a's seat-1 reactivated under its own herdr agent name, got %+v", last)
+	}
+	assertReactivatedCopy(t, events, last, "seat-1", "reactivated: self pane close failed: ")
+}
+
 // TestOrgCloseDeferredSelfPane_CloseFails_RetryClosesIt: after the
 // compensation, the seat is picked up again once herdr answers (plan AC16).
 // A stop from inside the same pane defers the pane again (AC12 order
@@ -2868,6 +2896,69 @@ func TestOrgCloseDeferredSelfWorkspace_CloseFails_ReopenedAndReactivated(t *test
 	}
 }
 
+// TestOrgCloseDeferredSelfWorkspace_CloseFails_CallerPaneSeatNotReactivated:
+// the compensating `spawned` is only for a seat of the disbanded org that is
+// stopped in the caller's own pane. In the first two cases HERDR_PANE_ID is
+// pane-1, whose latest seat record is a seat that is not that: org-a's
+// seat-1, which was stopped in pane-1 and spawned again in pane-3, or
+// org-b's seat-1, stopped in pane-1 (herdr gave the id to the caller's pane
+// later). In the third, HERDR_PANE_ID is unset and org-a has a seat with no
+// pane id, which must not count as stopped in the caller's pane. When the
+// deferred close of org-a's ws-1 fails, the workspace is reopened, but no
+// seat is recorded active, which would point a later stop at the caller.
+func TestOrgCloseDeferredSelfWorkspace_CloseFails_CallerPaneSeatNotReactivated(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		ownPane string
+		setup   func(t *testing.T, o *Org, h *fakeHerdr)
+	}{
+		{"seat now in another pane", "pane-1", func(t *testing.T, o *Org, h *fakeHerdr) {
+			spawnSeatIn(t, o, h, "org-a", "seat-1", "ws-1", "pane-1")
+			if r := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-1"}); r.Err != nil {
+				t.Fatalf("stop seat-1 in pane-1: %+v", r)
+			}
+			spawnSeatIn(t, o, h, "org-a", "seat-1", "ws-1", "pane-3")
+		}},
+		{"seat of another org", "pane-1", func(t *testing.T, o *Org, h *fakeHerdr) {
+			spawnSeatIn(t, o, h, "org-b", "seat-1", "ws-2", "pane-1")
+			if r := o.Stop(StopParams{OrgID: "org-b", Seat: "seat-1"}); r.Err != nil {
+				t.Fatalf("stop org-b's seat-1 in pane-1: %+v", r)
+			}
+			spawnSeatIn(t, o, h, "org-a", "seat-2", "ws-1", "pane-2")
+		}},
+		{"no HERDR_PANE_ID, a seat with no pane id", "", func(t *testing.T, o *Org, h *fakeHerdr) {
+			spawnSeatIn(t, o, h, "org-a", "seat-2", "ws-1", "pane-2")
+			if err := o.appendEvent(ManifestEvent{TS: o.now(), OrgID: "org-a", SeatID: "seat-bare", Event: EventSpawned}); err != nil {
+				t.Fatalf("seed manifest event: %v", err)
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			o, h, _ := testOrg(t)
+			tc.setup(t, o, h)
+			ownPaneEnv(o, tc.ownPane, "ws-1")
+			result := o.Disband(DisbandParams{OrgID: "org-a"})
+			if len(result.Errs) != 0 || !result.Disbanded || result.DeferredSelfWorkspaceID != "ws-1" || result.DeferredSelfPaneID != "" {
+				t.Fatalf("expected org-a disbanded with only ws-1 handed back, got %+v", result)
+			}
+			h.workspaceCloseErrs = map[string]error{"ws-1": errTestWorkspaceCloseRefused}
+			before := len(mustReadEvents(t, o))
+
+			err := o.CloseDeferredSelfWorkspace("ws-1", false)
+			if err == nil || !strings.Contains(err.Error(), `recorded workspace "ws-1" of org_id "org-a" open again`) || strings.Contains(err.Error(), "active") {
+				t.Fatalf("expected only ws-1 recorded open again, got %v", err)
+			}
+			events := mustReadEvents(t, o)
+			if len(events) != before+1 || events[before].Event != EventOrgWorkspaceCreated {
+				t.Fatalf("expected only the reopen of ws-1, got %v", eventNames(t, o)[before:])
+			}
+			if active := activeRealSeats(t, o); len(active) != 0 {
+				t.Fatalf("expected every seat still recorded stopped, got active %v", active)
+			}
+		})
+	}
+}
+
 // TestOrgCloseDeferredSelfWorkspace_CloseFails_RetryClosesIt: after the
 // compensation, the org is disbanded again once herdr answers (plan AC16).
 // A disband --all from another pane stops seat-1 (C-c, close), closes ws-1
@@ -2979,7 +3070,8 @@ func TestOrgCloseDeferredSelf_Force_NoCompensation(t *testing.T) {
 // failed deferred close cannot restore the records -- the manifest cannot be
 // read, or the compensating append fails -- the error names the herdr
 // command that closes the pane or workspace by hand, since a retry would not
-// find it. An unreadable manifest also means no ownership check, so no close.
+// find it, and does not say the records were restored. An unreadable
+// manifest also means no ownership check, so no close.
 func TestOrgCloseDeferredSelf_NothingRestored_NamesTheManualClose(t *testing.T) {
 	unreadable := func(t *testing.T, o *Org) { o.Manifest = NewManifestStoreAtPath(t.TempDir()) } // a directory: Read fails
 	for _, tc := range []struct {
@@ -3035,6 +3127,9 @@ func TestOrgCloseDeferredSelf_NothingRestored_NamesTheManualClose(t *testing.T) 
 				if !strings.Contains(err.Error(), want) {
 					t.Errorf("error %q should contain %q", err, want)
 				}
+			}
+			if strings.Contains(err.Error(), "retries the close") {
+				t.Errorf("error %q says the records were restored, but nothing was", err)
 			}
 			closes := len(h.paneCloseCalls)
 			if tc.workspace {

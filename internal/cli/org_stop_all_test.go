@@ -717,7 +717,8 @@ func TestOrgStopDisband_OwnPaneOrWorkspace_ClosedLastAfterOutput(t *testing.T) {
 // side of plan AC16: when the last close of the command's own pane or
 // workspace fails, the command exits 1, `ralph org status` shows the seat
 // active again, and once herdr answers, the --all form run from another pane
-// closes that same pane or workspace.
+// closes that same pane or workspace. Each of the four forms that defers its
+// own close passes its own (unset) --force on to closeDeferredSelf.
 func TestOrgStopDisband_OwnCloseFails_LedgerRestoredForRetry(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
@@ -738,6 +739,16 @@ func TestOrgStopDisband_OwnCloseFails_LedgerRestoredForRetry(t *testing.T) {
 		},
 		{
 			name: "disband --org-id", args: []string{"disband", "--org-id", "org-a"}, ownWorkspace: "ws-a",
+			failID: "ws-a", wantErr: `org: close own workspace "ws-a": `,
+			retry: []string{"disband", "--all"}, wantRetryOut: "disbanded org org-a", wantClose: "workspace close ws-a",
+		},
+		{
+			name: "stop --all", args: []string{"stop", "--all"},
+			failID: "p-a1", wantErr: `org: close own pane "p-a1": `,
+			retry: []string{"stop", "--all"}, wantRetryOut: "stopped seat org-a/seat-1", wantClose: "pane close p-a1",
+		},
+		{
+			name: "disband --all", args: []string{"disband", "--all"}, ownWorkspace: "ws-a",
 			failID: "ws-a", wantErr: `org: close own workspace "ws-a": `,
 			retry: []string{"disband", "--all"}, wantRetryOut: "disbanded org org-a", wantClose: "workspace close ws-a",
 		},
@@ -790,7 +801,8 @@ func TestOrgStopDisband_OwnCloseFails_LedgerRestoredForRetry(t *testing.T) {
 // --force half of AC16 at the CLI: with --force, a failed last close of the
 // command's own pane or workspace is printed as a warning naming the by-hand
 // close, the command exits 0, and nothing is restored (the seat stays
-// stopped, the org disbanded).
+// stopped, the org disbanded). The --all forms are separate rows because
+// each RunE branch passes force to closeDeferredSelf on its own line.
 func TestOrgStopDisband_Force_OwnCloseFails_WarnsExitsZero(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
@@ -807,6 +819,14 @@ func TestOrgStopDisband_Force_OwnCloseFails_WarnsExitsZero(t *testing.T) {
 		{
 			name: "disband --force", args: []string{"disband", "--org-id", "org-a"}, ownWorkspace: "ws-a",
 			failID: "ws-a", wantWarning: `warning: org: close own workspace "ws-a": `, wantOut: `disbanded org "org-a"`,
+		},
+		{
+			name: "stop --all --force", args: []string{"stop", "--all"},
+			failID: "p-a1", wantWarning: `warning: org: close own pane "p-a1": `, wantOut: "stopped seat org-a/seat-1",
+		},
+		{
+			name: "disband --all --force", args: []string{"disband", "--all"}, ownWorkspace: "ws-a",
+			failID: "ws-a", wantWarning: `warning: org: close own workspace "ws-a": `, wantOut: "disbanded org org-a",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
