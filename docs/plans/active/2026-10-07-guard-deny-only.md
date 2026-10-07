@@ -96,18 +96,18 @@
 ## Acceptance criteria
 
 - [x] AC1: `pre_bash_guard.sh`(root と template、同じ内容)は、どのモード(`permission_mode` なし、`default`、`auto`、`bypassPermissions`)でも ask を返さない。PR #206 のテストで ask を期待していた行(`.git`・`.env` への書き込み、`rm -rf`、`gh pr create`)はすべて none になる
-- [ ] AC2: 次がどのモードでも deny になる。
+- [x] AC2: 次がどのモードでも deny になる。
   - sudo: `sudo ls`、`sudo` + タブ + `ls`、`/usr/bin/sudo ls`、`env FOO=1 sudo ls`、`nohup sudo ls`、`xargs sudo ls`、`sh -c 'sudo ls'`、`if sudo ls; then :; fi`、`{ sudo ls; }`、`! sudo ls`、`2>/dev/null sudo ls`、`find . -exec sudo rm x \;`、`watch sudo ls`、`flock /tmp/l sudo ls`、`chroot /x sudo ls`
   - force push: `</dev/null git push --force`、`git push --force`、`git push origin --force`、`git push -f`、`git push origin -uf main`、`git push --force-with-lease`、`git push origin +main`、`git -C dir push --force`、`git push "--force" origin main`、`bash -lc "git push --force"`、`find . -exec git push --force \;`、`flock /tmp/l git push --force`、`git push --force-with`、`git push --force-with=main`
   - hard reset: `git reset --ha`、`git reset --har`、`git reset --hard`、`git -C dir reset --hard HEAD~1`、`git reset -q --hard`、`eval "git reset --hard"`、`echo "$(git reset --hard)"`、``echo "`git reset --hard`"``、`echo "git reset --hard" | sh`、`sh` に流すヒアドキュメントの本文の `git push --force`
   - コミットメッセージの置換: `git commit -m "$(id)"`、``git commit -m "`id`"``、`git commit -am "$(id)"`、`git commit -m"$(id)"`、`git commit --message "$(id)"`、`git commit --message="$(id)"`、`git commit --mess "$(id)"`、`git commit -m 'x' -m "$(id)"`、`rm -rf x && git commit -m "$(id)"`、`git commit -m "$(cat <<'EOF'; id` で始まる形、区切りに引用符のないヒアドキュメントを `git commit -F -` に流して本文に `$(id)` がある形
   - 文字列ごと実行する形とファイルへの書き込み(S2c): `find . -exec sh -c 'sudo ls' \;`、`watch 'git push --force'`、`csh -c 'sudo ls'`、`tcsh -c 'git reset --hard'`、`source <(echo 'sudo ls')`、`. <(echo 'git push --force')`、`builtin eval 'git push --force'`、`git rebase -x 'git push --force' main`、`git submodule foreach 'git push --force'`、`echo 'sudo ls' | xargs -I{} sh -c {}`、`echo 'sudo ls' > >(sh)`、`echo 'sudo ls' >> ~/.zshrc`、`echo 'git push --force' | tee x.sh`、`cat <<'EOF' | sh` の本文の `sudo ls`、`cat > notes.md <<EOF` の本文の `git push --force`、`=sudo ls`、`=git push --force`
   - `--no-verify`: `git commit --no-veri -m x`、`git commit --no-verify -m x`、`git commit -n -m x`、`git commit -nm x`、`git push --no-verify`、`git merge --no-verify x`、`git -c core.hooksPath=/dev/null commit -m x`、`git -c Core.HooksPath=/dev/null commit -m x`
-- [ ] AC3: 次がどのモードでも none になる。`echo 'never use sudo here'`、`echo sudo ls`、`grep sudo file`、`touch sudo`、`apt-get install sudo`、`visudo -c`、`man sudo`、`git push origin main`、`git push -u origin main`、`git reset --soft HEAD~1`、`git commit -m 'remove -n flag'`、`git commit -m 'drop --force and git reset --hard from docs'`、`git commit -mn`(メッセージ `n`)、`git commit -uno -m x`、`git commit -m 'fix: x' && grep -n foo file`、`git commit -F msg.txt; sed -n 1,5p file`、`git commit -m "$(cat <<'EOF'` で始まる複数行の推奨の形、区切りに引用符のあるヒアドキュメントを `git commit -F -` に流して本文に `git push --force` や `$(id)` と書いた形、`echo never use sudo here`(引用符なし)、`echo hi # sudo ls`(コメント)、`grep -n 'git push --force' docs.md`、`echo 'sudo ls' > /dev/null`、`echo 'git push --force' | grep force`、`git log --no-verify-signatures`、`printf 'a\ngit push --force'`(シングルクォートの中の文字の `\n`)、`ls .git/ 2>&1`、`echo x > .env`、`rm -rf build/`、`gh pr create --title t`
+- [x] AC3: 次がどのモードでも none になる。`echo 'never use sudo here'`、`echo sudo ls`、`grep sudo file`、`touch sudo`、`apt-get install sudo`、`visudo -c`、`man sudo`、`git push origin main`、`git push -u origin main`、`git reset --soft HEAD~1`、`git commit -m 'remove -n flag'`、`git commit -m 'drop --force and git reset --hard from docs'`、`git commit -mn`(メッセージ `n`)、`git commit -uno -m x`、`git commit -m 'fix: x' && grep -n foo file`、`git commit -F msg.txt; sed -n 1,5p file`、`git commit -m "$(cat <<'EOF'` で始まる複数行の推奨の形、区切りに引用符のあるヒアドキュメントを `git commit -F -` に流して本文に `git push --force` や `$(id)` と書いた形、`echo never use sudo here`(引用符なし)、`echo hi # sudo ls`(コメント)、`grep -n 'git push --force' docs.md`、`echo 'sudo ls' > /dev/null`、`echo 'git push --force' | grep force`、`git log --no-verify-signatures`、`printf 'a\ngit push --force'`(シングルクォートの中の文字の `\n`)、`ls .git/ 2>&1`、`echo x > .env`、`rm -rf build/`、`gh pr create --title t`
 - [x] AC4: jq がない環境でも AC1〜AC3 が同じ結果になる。`lib_json.sh` は jq がなくても `\n`・`\t`・`\"`・`\\`・`\/`・ASCII の範囲の `\uXXXX` を戻し(`\u0080` 以上とサロゲートペアはそのまま残す)、本物の改行と文字の `\n` を区別する(`tests/test-lib-json.sh`)。`tests/test-pre-bash-guard.sh` が jq あり・なしの両方で、期待値を none / deny の 2 値で厳密に比べる
 - [x] AC5: `docs/tech-debt/README.md` の 124・127・158・160 行目が、この PR に合わせて解消済みか書き直されている。guard の挙動を説明する文書が ask に触れていない
 - [x] AC6: `./scripts/check-sync.sh`、`./scripts/check-skill-sync.sh`、`./scripts/check-pipeline-sync.sh`、`bash scripts/check-template-purity.sh`、`./scripts/run-verify.sh` が通る
-- [ ] AC7: 旧版(origin/main の guard)が deny にする形は、新版でも deny になる。例外は、見張りの一致がすべてデータ区間の中にある形だけで、テストに入れる例外はすべて AC3 に挙げる。比較の例の集まりには、S3 のあとの self-review が挙げた実行のしかたの種類(上の AC2 の「文字列ごと実行する形」)を入れる。テストが旧版と新版に同じ例の集まり(AC2 と AC3 の全部と、PR #206 のテストの deny の行)を渡して確かめる
+- [x] AC7: 旧版(origin/main の guard)が deny にする形は、新版でも deny になる。例外は、見張りの一致がすべてデータ区間の中にある形だけで、テストに入れる例外はすべて AC3 に挙げる。比較の例の集まりには、S3 のあとの self-review が挙げた実行のしかたの種類(上の AC2 の「文字列ごと実行する形」)を入れる。テストが旧版と新版に同じ例の集まり(AC2 と AC3 の全部と、PR #206 のテストの deny の行)を渡して確かめる
 - [x] AC8: 200 KB のコマンドで、guard が macOS の awk でも 5 秒以内に終わる(PR #206 の記録では、旧版の jq の経路で 28 秒)
 - [x] AC9: 止める側に倒す場合が働く。読み直しの深さ・キュー・入れ子の上限を超えた入力は deny になる。PATH から awk を外すと、旧版の 4 規則で判定する(`sudo ls`、`git push --force`、`git reset --hard`、`git commit -m "$(id)"` が deny になる)。テストで確かめる
 
@@ -165,7 +165,10 @@
   - S3 完了(c133bde5、implementer/sonnet): tech-debt の 124・127・159 行目を解消済みに、158・160 行目を残る限界に書き直した。`.codex/README.md` と `post_edit_verify.sh` のコメントを直した
   - AC1〜AC9: テスト(`tests/test-pre-bash-guard.sh` 1203 件、`tests/test-lib-json.sh` 126 件)と `run-verify.sh` で確かめた(2026-10-07)
   - self-review(511f6382、reviewer/opus): no-merge。HIGH は、例の外の 49 形のうち 44 形を旧版より弱く通すこと(文字列ごと実行する形、csh・tcsh の `-c`、`source`・`.`・プロセス置換、git の `rebase -x`・`submodule foreach` など)。MEDIUM は zsh の `=sudo`。consult と相談し、旧版の一致を見張りに残してデータ区間だけを通す作り(S2c)に変えることにした。AC2・AC3・AC7 を書き直してチェックを外し、ユーザーが再承認(digest bf33328dae82 → 7efd47f36781)
-- [ ] Review artifact created
-- [ ] Verification artifact created
+  - S2c 完了(df0a50d5、implementer/opus): 旧版の 4 規則を見張りとして生の文字列に当て、一致がすべて深さ 0 のデータ区間に収まるときだけ通す。テスト 1508 件(ubuntu でも 1508/0)、AC7 の例外 13 件は AC3 と一致。main を取り込んだ(9eca7573、衝突は `docs/tech-debt/README.md` だけ)
+  - self-review の 2 回目(46c96511、reviewer/opus): merge。1 回目の HIGH・MEDIUM は S2c で解消。LOW 2 件(`my-sudo ls` の差、tech-debt の guard の行が古い)
+  - verify(1346740f、verifier/opus): pass。AC1〜AC9 を満たす。LOW 2 件(V-1 `my-sudo ls`・`x.sudo ls` は AC7 の比較の例に入らない、V-2 テストの上限 10 秒と AC8 の 5 秒)
+- [x] Review artifact created
+- [x] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
