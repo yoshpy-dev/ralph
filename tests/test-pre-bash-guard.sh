@@ -46,12 +46,19 @@
 #      (to cat, to a file, to sh, to git commit -F -, and inside -m
 #      "$(cat ...)"), shells fed through -c, here-strings, pipes and
 #      heredocs, wrappers and unknown runners, comments, ${...}, process
-#      substitution, functions and subshells, a JSON %u escape; and the
-#      data regions of the sentinel: what keeps them (pipes to data readers,
-#      /dev/null, /dev/stderr, fd duplication, git tag -m, comments, the sudo
-#      word boundary) and what breaks them (a pipe to sh or sort, a file,
-#      >&file, >(...), a here-string, a cut-short pipeline, rg --pre,
-#      nesting, an assignment, a backtick after the message)
+#      substitution, functions and subshells, a JSON %u escape; forms only
+#      the lexer denies ($(...), backticks, <(...), ${...}, sh -c, eval,
+#      env -S, here-strings, pipes and heredocs to a shell, git after find
+#      -exec, flock, watch) so that each re-reading is tested without the
+#      sentinel; a here-string to git commit -F -; and the data regions of
+#      the sentinel: what keeps them (pipes to data readers, /dev/null,
+#      /dev/stderr, fd duplication, git tag -m, comments, the sudo word
+#      boundary, a region longer than one 512-character index block) and
+#      what breaks them (a pipe to sh or sort, a file, >&file, >(...) after
+#      > or as an argument, a here-string, a cut-short pipeline, rg --pre,
+#      nesting, an assignment, a backtick after the message), a sentinel
+#      match across the guard's 512-character text window, and the known
+#      false positives of the wrapper scan (tech-debt)
 #   E. Broken input (unclosed quotes, parentheses, substitutions, heredocs
 #      without an end line, operators without operands) -> exit 0 with none
 #      or deny
@@ -68,7 +75,9 @@
 #      guard's runs of the same payloads in A, B, and C. Every case the old
 #      guard denies and the new one lets through must be in
 #      intentional_fixes, which must equal the C cases the old guard denies.
-#      The list is printed.
+#      The list is printed. The sudo word-boundary difference (my-sudo ls,
+#      x.sudo ls: old deny, new none in D) is not a data-region exception;
+#      the old guard's deny of both is pinned separately.
 #   H. AC8: ~200 KB commands on the jq-absent path (a long quoted string,
 #      many short commands, backslashes in backticks) finish in under 10 s
 #      (the measured times are printed)
@@ -625,6 +634,9 @@ edge_deny=(
   $'bash -s <<\\EOF\ngit push --force\nEOF'
   $'git commit -F - <<-EOF\n\t$(id)\n\tEOF'
   $'git commit --file=- <<EOF\n`id`\nEOF'
+  # A here-string read by git commit -F - is the message too.
+  'git commit -F - <<< "$(id)"'
+  'git commit -F - <<< "`id`"'
   # Only the exact recommended form passes; these do not.
   $'git commit -m "$(cat <<EOF\nmsg\nEOF\n)"'
   $'git commit -m "$(cat <<-\'EOF\'\nmsg\nEOF\n)"'
@@ -670,6 +682,34 @@ edge_deny=(
   # Re-reading depth: 4 levels are read (the 5th is denied, in F).
   'eval eval eval eval sudo ls'
   'echo $(echo $(echo $(echo $(sudo ls))))'
+  # Forms only the lexer denies (no text the sentinel matches: the option
+  # stands apart from git push, git -C comes before reset, or the flag is
+  # --no-verify), in each place whose text is read again as commands. These
+  # fail when that re-reading stops; the forms above also hold the old
+  # guard's substrings, so the sentinel would still deny them.
+  'echo "$(git push origin --force)"'
+  'echo `git push origin --force`'
+  'echo "`git push origin -f`"'
+  'x=$(git commit --no-verify -m x)'
+  'diff <(git push origin --force) x'
+  'echo "${x:-$(git push origin --force)}"'
+  $'sh -c \'git push origin --force\''
+  $'bash -lc \'git -C x reset --hard\''
+  $'eval \'git push origin --force\''
+  $'env -S \'git push origin --force\''
+  $'env --split-string=\'git push origin --force\''
+  $'bash <<< \'git push origin --force\''
+  $'echo \'git push origin --force\' | sh'
+  $'sh <<\'EOF\'\ngit push origin --force\nEOF'
+  $'cat <<\'EOF\' | sh\ngit push origin --force\nEOF'
+  $'cat <<EOF\n$(git push origin --force)\nEOF'
+  $'cat <<EOF\n`git push origin --force`\nEOF'
+  $'echo x | xargs sh -c \'git push origin --force\''
+  # The same for git after a command that may run its arguments (the later
+  # words that scan_words reads).
+  $'find . -exec git push origin --force \\;'
+  'flock /tmp/l git push origin -f'
+  'watch git -C dir reset --hard'
 )
 check_modes D deny absent -- "${edge_deny[@]}"
 
@@ -707,6 +747,7 @@ edge_none=(
   'git commit --mess=x'
   $'git commit --mess \'x $(id)\''
   $'git commit --fi - <<\'EOF\'\n$(id)\nEOF'
+  $'git commit -F - <<< \'$(id)\''
   # Heredoc bodies are data when read by a command that only reads data:
   # the five delimiter forms, and an unquoted one whose $( is escaped.
   $'cat <<-EOF\n\tgit push --force\n\tEOF'
@@ -768,6 +809,8 @@ edge_sentinel_deny=(
   'echo sudo ls > out.txt'
   'echo sudo ls >&out.txt'
   'echo sudo ls > >(cat)'
+  # A >(...) given as an argument (not after > ) ends the data region too.
+  'echo sudo ls >(sh)'
   $'grep -r \'sudo \' . | sort'
   $'grep x <<< \'sudo ls\''
   # A heredoc body written to a file, fed to a shell, or with a real $( in
@@ -802,6 +845,13 @@ edge_sentinel_deny=(
   $'flock l git commit -m \'git push --force\''
   'git commit -m "fix" && echo `date`'
   './sudo ls'
+  # Known false positives of the wrapper scan (docs/tech-debt/README.md, the
+  # pre_bash_guard.sh row, (a)): sudo is data here, but the command before
+  # it is not in NOEXEC, so the later word sudo is denied. The old guard
+  # denied all three too. A fix for one of them moves it to edge_none.
+  'apt-get remove sudo -y'
+  $'bash -c \'x\' sudo ls'
+  'flock l git grep sudo file'
 )
 check_modes D deny absent -- "${edge_sentinel_deny[@]}"
 
@@ -821,6 +871,32 @@ check_raw() {
 check_raw "D JSON escape: %u0073udo ls -> deny" deny '%u0073udo ls'
 check_raw "D JSON escape: git push %u002d-force -> deny" deny 'git push %u002d-force'
 check_raw "D JSON escape: git commit -m with %u3042 (kept as written) -> none" none "git commit -m '%u3042'"
+
+# check_named <label> <expected> <command> — as check, with a short label
+# for a long command.
+check_named() {
+  local label="$1" expect="$2" escaped
+  escaped="$(json_escape "$3")"
+  if [ "$have_jq" = yes ]; then
+    enqueue "$label [jq]" "$expect" "$HOOK" "$real_path" "$(payload_json "$escaped")"
+  else
+    record_skip "$label [jq] (jq not on PATH)"
+  fi
+  enqueue "$label [no-jq]" "$expect" "$HOOK" "$minimal_path" "$(payload_json "$escaped")"
+}
+# A data region longer than one 512-character block of the guard's index of
+# data regions (BKW): a match in a later block is still inside the region.
+check_named "D long data region: echo '<600 x> git push --force' -> none" none \
+  "echo '$(repeat_text x 600) git push --force'"
+check_named "D long data region: git commit -m '<600 x> git reset --hard' -> none" none \
+  "git commit -m '$(repeat_text x 600) git reset --hard'"
+# A sentinel match across the end of the guard's 512-character text window
+# (W): git push --force from position 505 and sudo from 511, in text only
+# the sentinel denies (watch runs a string).
+check_named "D window edge: echo '<487 x>' ; watch 'git push --force' (the match starts at 505) -> deny" deny \
+  "echo '$(repeat_text x 487)' ; watch 'git push --force'"
+check_named "D window edge: echo '<493 x>' ; watch 'sudo ls' (the match starts at 511) -> deny" deny \
+  "echo '$(repeat_text x 493)' ; watch 'sudo ls'"
 
 # ── E. Broken input: exit 0, none or deny ───────────────────────────────
 broken=(
@@ -980,6 +1056,22 @@ for ((k = 0; k < ${#corpus[@]}; k++)); do
     else
       enqueue "G. AC7 old [no-jq]: $escaped" - "$OLD_HOOK" "$minimal_path" "$(payload_json "$escaped")"
       corpus_old_nojq[k]=$last_q
+    fi
+  done
+done
+# The sudo word boundary. The old guard matched "sudo " inside a longer
+# name, so it denied my-sudo ls and x.sudo ls; the sentinel's boundary (not
+# a letter, digit, _ . or -, the one that lets visudo -c through) does not
+# match them, and the new guard lets them through (D, edge_none). This is
+# not a data-region exception, so it is outside intentional_fixes and the
+# corpus; the old guard's side of the difference is pinned here.
+for c in 'my-sudo ls' 'x.sudo ls'; do
+  escaped="$(json_escape "$c")"
+  for p in "${ac7_paths[@]}"; do
+    if [ "$p" = jq ]; then
+      enqueue "G. AC7 word boundary: the old guard denies $escaped, the new one does not (D) [jq]" deny "$OLD_HOOK" "$real_path" "$(payload_json "$escaped")"
+    else
+      enqueue "G. AC7 word boundary: the old guard denies $escaped, the new one does not (D) [no-jq]" deny "$OLD_HOOK" "$minimal_path" "$(payload_json "$escaped")"
     fi
   done
 done
