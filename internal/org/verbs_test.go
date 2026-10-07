@@ -399,6 +399,34 @@ func TestOrgDisband_WorkspaceNotFound_CountsAsClosed(t *testing.T) {
 	}
 }
 
+// TestOrgDisband_WorkspaceGoneAtCheck_CountsAsClosed is the not-found case
+// above as a real herdr reports it: the ownership check's `workspace get`
+// already answers workspace_not_found, so Disband records the workspace
+// closed without a close call. seat-1 is stopped first, since a seat whose
+// pane lies in a workspace herdr no longer knows is not confirmed.
+func TestOrgDisband_WorkspaceGoneAtCheck_CountsAsClosed(t *testing.T) {
+	o, h, _ := testOrg(t)
+	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", r)
+	}
+	if r := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-1"}); r.Err != nil {
+		t.Fatalf("stop seat-1: %v", r.Err)
+	}
+	delete(h.workspaceLabels, "ws-1")
+
+	result := o.Disband(DisbandParams{OrgID: "org-a"})
+	if len(result.Errs) != 0 || !result.Disbanded || !slices.Equal(result.ClosedWorkspaces, []string{"ws-1"}) {
+		t.Fatalf("expected a workspace gone at the check to count as closed, got %+v", result)
+	}
+	if len(h.workspaceCloseCalls) != 0 {
+		t.Fatalf("expected no close for a workspace herdr no longer knows, got %v", h.workspaceCloseCalls)
+	}
+	closed := eventsNamed(mustReadEvents(t, o), EventOrgWorkspaceClosed)
+	if len(closed) != 1 || closed[0].Details != "workspace=already closed" {
+		t.Fatalf("expected org_workspace_closed with the already-closed note, got %+v", closed)
+	}
+}
+
 // TestOrgDisband_UnansweredWorkspaceClose_TimesOut covers plan AC11 on the
 // disband side: a workspace close that never answers is cut off by
 // DriverCallTimeout and counts as not closed.
@@ -2048,6 +2076,73 @@ func TestOrgStop_OwnPane_SkipsCtrlCAndClose_ThenClosesLast(t *testing.T) {
 	}
 }
 
+// TestOrgStopDisband_OwnRecordFails_NotHandedBack covers the record-first
+// rule of plan AC12: the caller's own pane and workspace are handed back
+// for the last close only once their record (`stopped`,
+// org_workspace_closed) is in the manifest. With the manifest read-only the
+// record fails, so nothing is handed back and nothing is closed; handing
+// the pane back would let the caller end itself while the ledger still has
+// the seat active or the workspace open.
+func TestOrgStopDisband_OwnRecordFails_NotHandedBack(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores a read-only file's permission bit")
+	}
+	readOnlyManifest := func(t *testing.T, o *Org) {
+		t.Helper()
+		path := o.Manifest.Path()
+		if err := os.Chmod(path, 0o444); err != nil {
+			t.Fatalf("chmod manifest read-only: %v", err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(path, 0o644) })
+	}
+
+	t.Run("stop, own pane", func(t *testing.T) {
+		o, h, _ := testOrg(t)
+		if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+			t.Fatalf("spawn failed: %+v", r)
+		}
+		ownPaneEnv(o, "pane-1", "")
+		readOnlyManifest(t, o)
+
+		result := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-1"})
+		if result.Err == nil {
+			t.Fatal("expected an error when `stopped` cannot be recorded")
+		}
+		if result.DeferredSelfPaneID != "" {
+			t.Fatalf("expected the own pane not to be handed back without its `stopped` record, got %q", result.DeferredSelfPaneID)
+		}
+		if len(h.paneCloseCalls) != 0 {
+			t.Fatalf("expected no close of the own pane, got %v", h.paneCloseCalls)
+		}
+	})
+
+	t.Run("disband, own workspace", func(t *testing.T) {
+		o, h, _ := testOrg(t)
+		if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+			t.Fatalf("spawn failed: %+v", r)
+		}
+		if r := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-1"}); r.Err != nil {
+			t.Fatalf("stop seat-1: %v", r.Err)
+		}
+		ownPaneEnv(o, "pane-own", "ws-1")
+		readOnlyManifest(t, o)
+
+		result := o.Disband(DisbandParams{OrgID: "org-a"})
+		if result.Disbanded || len(result.Errs) == 0 {
+			t.Fatalf("expected the disband to fail when org_workspace_closed cannot be recorded, got %+v", result)
+		}
+		if result.DeferredSelfWorkspaceID != "" || result.DeferredSelfPaneID != "" {
+			t.Fatalf("expected nothing handed back without its record, got workspace %q pane %q", result.DeferredSelfWorkspaceID, result.DeferredSelfPaneID)
+		}
+		if len(result.FailedWorkspaces) != 1 || result.FailedWorkspaces[0].WorkspaceID != "ws-1" || result.FailedWorkspaces[0].Forced {
+			t.Fatalf("expected ws-1 as the one unforced workspace failure, got %+v", result.FailedWorkspaces)
+		}
+		if len(h.workspaceCloseCalls) != 0 {
+			t.Fatalf("expected no close of the own workspace, got %v", h.workspaceCloseCalls)
+		}
+	})
+}
+
 // TestOrgCloseDeferredSelfPane_Outcomes pins CloseDeferredSelfPane's error
 // contract, for seat-1 recorded on pane-9: an empty id makes no call; the
 // recorded pane is checked (plan AC14) and then closed, with closed and
@@ -2164,6 +2259,7 @@ func TestOrgStop_ClosesOnlyTheSeatsRecordedPane(t *testing.T) {
 // records stopped (forced), still with no C-c and no close.
 func TestOrgStop_PaneNotConfirmed_NoCtrlCNoClose(t *testing.T) {
 	refused := errors.New("herdr pane get: connect: connection refused")
+	tabRefused := errors.New("herdr tab get: connect: connection refused")
 	cases := []struct {
 		name     string
 		setup    func(h *fakeHerdr)
@@ -2186,10 +2282,21 @@ func TestOrgStop_PaneNotConfirmed_NoCtrlCNoClose(t *testing.T) {
 			wantText: `herdr has no tab "tab-pane-1" although it has the pane`,
 		},
 		{
+			name:     "workspace gone although the pane was found",
+			setup:    func(h *fakeHerdr) { delete(h.workspaceLabels, "ws-1") },
+			wantText: `pane "pane-1" is not confirmed in org_id "org-a"'s workspace: herdr has no workspace "ws-1"`,
+		},
+		{
 			name:     "pane get fails",
 			setup:    func(h *fakeHerdr) { h.getErrs = map[string]error{"pane-1": refused} },
 			wantText: "connection refused",
 			wantIs:   refused,
+		},
+		{
+			name:     "tab get fails",
+			setup:    func(h *fakeHerdr) { h.getErrs = map[string]error{fakeTabID("pane-1"): tabRefused} },
+			wantText: "herdr tab get: connect: connection refused",
+			wantIs:   tabRefused,
 		},
 	}
 	for _, tc := range cases {
