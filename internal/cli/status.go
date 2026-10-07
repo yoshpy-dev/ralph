@@ -46,11 +46,14 @@ func newStatusCmd() *cobra.Command {
 			"directory has no `.ralph/manifest.toml` (not a ralph project).",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			resolvedStateDir, stateDirSource := org.ResolveOrgStateDir(stateDir, cmd.Flags().Changed("state-dir"))
+			if err := guardLegacyOrgStateDir(cmd, resolvedStateDir, stateDirSource, orgLedgerReadOnly); err != nil {
+				return err
+			}
 			return runStatus(cmd, resolvedStateDir, stateDirSource, orgID, jsonOut)
 		},
 	}
 
-	cmd.Flags().StringVar(&stateDir, "state-dir", "", "org manifest/receipts state directory (default: resolved by org.ResolveOrgStateDir -- env RALPH_ORG_STATE_DIR, else the enclosing git repo's toplevel .harness/state/org, else cwd's .harness/state/org)")
+	cmd.Flags().StringVar(&stateDir, "state-dir", "", "org manifest/receipts state directory (default: resolved by org.ResolveOrgStateDir -- env RALPH_ORG_STATE_DIR, else the main worktree's .harness/state/org (shared by its linked worktrees), else the enclosing git toplevel's .harness/state/org, else cwd's .harness/state/org)")
 	cmd.Flags().StringVar(&orgID, "org-id", "", "filter roster to a single org_id (default: every org found in the manifest)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "machine-readable JSON output")
 
@@ -204,9 +207,9 @@ func readOrgWatchHeartbeat(stateDir, orgID string) (heartbeat orgWatchHeartbeat,
 
 // printStateDirLine prints the resolved org state directory alongside the
 // org.ResolveOrgStateDir precedence tier that produced it (flag/env/
-// git-toplevel/cwd) -- tech-debt "watchdog deferred LOW (1)": the source was
-// being resolved everywhere but discarded (`_`) at every production call
-// site, so an operator debugging "why did `ralph status` read from an
+// git-main-worktree/git-toplevel/cwd) -- tech-debt "watchdog deferred LOW
+// (1)": the source was being resolved everywhere but discarded (`_`) at
+// every production call site, so an operator debugging "why did `ralph status` read from an
 // unexpected directory" had no way to see which tier won without re-deriving
 // ResolveOrgStateDir's precedence by hand.
 func printStateDirLine(out io.Writer, stateDir, stateDirSource string) {

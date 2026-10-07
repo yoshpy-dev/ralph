@@ -39,7 +39,7 @@ func newOrgCmd() *cobra.Command {
 	}
 
 	cmd.PersistentFlags().StringVar(&orgID, "org-id", "", "org execution namespace (required)")
-	cmd.PersistentFlags().StringVar(&stateDir, "state-dir", "", "org manifest/receipts state directory (default: resolved by org.ResolveOrgStateDir -- env RALPH_ORG_STATE_DIR, else the enclosing git repo's toplevel .harness/state/org, else cwd's .harness/state/org)")
+	cmd.PersistentFlags().StringVar(&stateDir, "state-dir", "", "org manifest/receipts state directory (default: resolved by org.ResolveOrgStateDir -- env RALPH_ORG_STATE_DIR, else the main worktree's .harness/state/org (shared by its linked worktrees), else the enclosing git toplevel's .harness/state/org, else cwd's .harness/state/org)")
 	cmd.PersistentFlags().StringVar(&configPath, "config", "", "path to ralph.toml (default: ./ralph.toml if present, else built-in defaults)")
 
 	cmd.AddCommand(
@@ -89,28 +89,35 @@ func requireSeatIdentifier(flag, value string) error {
 // newOrgRuntime constructs an org.Org wired to real driver adapters
 // (driver.ExecRunner, which shells out to the herdr/agmsg binaries on PATH)
 // and manifest/receipt stores rooted at the resolved state directory. cmd is
-// used only to detect whether --state-dir was explicitly passed
+// used to detect whether --state-dir was explicitly passed
 // (cmd.Flags().Changed("state-dir")) for org.ResolveOrgStateDir's flag >
-// env > git-toplevel > cwd precedence -- see that function's doc comment
-// for the full rationale (fixes the leader/operator cwd-split, tech-debt
-// "state-dir の cwd 相対解決"). A caller that also needs the resolved
-// config.OrgConfig for its own purposes beyond wiring (e.g.
-// resolveModelOrWarn's --model default resolution via
-// org.DefaultModelForDriverAndRole) reads it back off the returned *org.Org's
-// exported Config field rather than newOrgRuntime returning a second
-// value.
-func newOrgRuntime(cmd *cobra.Command, stateDir, configPath string) (*org.Org, error) {
-	resolvedStateDir, _ := org.ResolveOrgStateDir(stateDir, cmd.Flags().Changed("state-dir"))
+// env > git-main-worktree > git-toplevel > cwd precedence -- see that
+// function's doc comment for the full rationale (fixes the leader/operator
+// cwd-split, tech-debt "state-dir の cwd 相対解決", and shares one ledger
+// across linked worktrees) -- and to print guardLegacyOrgStateDir's note.
+// access is the calling verb's orgLedgerAccess: a mutating verb gets
+// guardLegacyOrgStateDir's refusal as the error, before any manifest, herdr,
+// or agmsg call. A caller that also needs the resolved config.OrgConfig for
+// its own purposes beyond wiring (e.g. resolveModelOrWarn's --model default
+// resolution via org.DefaultModelForDriverAndRole) reads it back off the
+// returned *org.Org's exported Config field rather than newOrgRuntime
+// returning a second value.
+func newOrgRuntime(cmd *cobra.Command, stateDir, configPath string, access orgLedgerAccess) (*org.Org, error) {
+	resolvedStateDir, stateDirSource := org.ResolveOrgStateDir(stateDir, cmd.Flags().Changed("state-dir"))
+	if err := guardLegacyOrgStateDir(cmd, resolvedStateDir, stateDirSource, access); err != nil {
+		return nil, err
+	}
 	return newOrgRuntimeAt(resolvedStateDir, configPath)
 }
 
 // newOrgRuntimeAt is newOrgRuntime's shared implementation, taking an
 // already-resolved state directory instead of resolving it itself. A caller
 // that also needs the resolved directory for its own purposes beyond wiring
-// (today, only newOrgWatchCmd's banner + WatchParams.StatusDir) resolves it
-// once via org.ResolveOrgStateDir and calls this directly, instead of
-// resolving twice (self-review LOW fix -- each resolution shells out to `git
-// rev-parse --show-toplevel`).
+// (newOrgSendCmd's read hint, newOrgWatchCmd's banner +
+// WatchParams.StatusDir) resolves it once via org.ResolveOrgStateDir, calls
+// guardLegacyOrgStateDir itself, and calls this directly, instead of
+// resolving twice (self-review LOW fix -- each resolution shells out to
+// git).
 func newOrgRuntimeAt(resolvedStateDir, configPath string) (*org.Org, error) {
 	orgCfg, err := resolveOrgConfig(configPath)
 	if err != nil {
@@ -165,20 +172,20 @@ var (
 // --state-dir resolvedStateDir only when stateDirFlagSet is true (--state-dir
 // was explicitly passed to this invocation of `send`): a bare `ralph org
 // read --org-id ... --seat ...` would otherwise resolve the DEFAULT state
-// dir (env/git-toplevel/cwd, see org.ResolveOrgStateDir), which either
-// fails with "seat not found" or -- worse -- silently reads a different
-// seat that happens to share the same org_id/seat_id in that default
-// manifest. An env-resolved or default-resolved state dir is deliberately
+// dir (env/git-main-worktree/git-toplevel/cwd, see org.ResolveOrgStateDir),
+// which either fails with "seat not found" or -- worse -- silently reads a
+// different seat that happens to share the same org_id/seat_id in that
+// default manifest. An env-resolved or default-resolved state dir is deliberately
 // NOT appended: the same shell, run from the same directory with the same
 // environment, resolves it the same way when the operator runs the
 // printed command themselves, so repeating it would be redundant as long
 // as neither changes between the two commands (RALPH_ORG_STATE_DIR can go
-// stale if the env changes; the git-toplevel and cwd fallbacks depend on
-// cwd the same way, since org.ResolveOrgStateDir shells out to `git
-// rev-parse --show-toplevel` in the current directory). resolvedStateDir
-// must be the value org.ResolveOrgStateDir already returned (always
-// absolute), not the raw flag text, so the hint survives a cwd change
-// before the operator acts on it.
+// stale if the env changes; the git-main-worktree, git-toplevel, and cwd
+// fallbacks depend on cwd the same way, since org.ResolveOrgStateDir runs
+// git in the current directory). resolvedStateDir must be the value
+// org.ResolveOrgStateDir already returned (always absolute), not the raw
+// flag text, so the hint survives a cwd change before the operator acts on
+// it.
 //
 // --config is deliberately not included: newOrgReadCmd's RunE loads
 // *configPath into org.Org.Config, but (*org.Org).Read never reads that
@@ -338,7 +345,7 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 				return err
 			}
 
-			rt, err := newOrgRuntime(cmd, *stateDir, *configPath)
+			rt, err := newOrgRuntime(cmd, *stateDir, *configPath, orgLedgerMutating)
 			if err != nil {
 				return err
 			}
@@ -451,7 +458,7 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 				return fmt.Errorf("org: --cwd is required")
 			}
 
-			rt, err := newOrgRuntime(cmd, *stateDir, *configPath)
+			rt, err := newOrgRuntime(cmd, *stateDir, *configPath, orgLedgerMutating)
 			if err != nil {
 				return err
 			}
@@ -523,7 +530,10 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			// printing the raw --state-dir flag text, which breaks if the
 			// operator's cwd differs when they run the printed command).
 			stateDirFlagSet := cmd.Flags().Changed("state-dir")
-			resolvedStateDir, _ := org.ResolveOrgStateDir(*stateDir, stateDirFlagSet)
+			resolvedStateDir, stateDirSource := org.ResolveOrgStateDir(*stateDir, stateDirFlagSet)
+			if err := guardLegacyOrgStateDir(cmd, resolvedStateDir, stateDirSource, orgLedgerMutating); err != nil {
+				return err
+			}
 			rt, err := newOrgRuntimeAt(resolvedStateDir, *configPath)
 			if err != nil {
 				return err
@@ -641,7 +651,7 @@ func newOrgWaitCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err := requireSeatIdentifier("--seat", seat); err != nil {
 				return err
 			}
-			rt, err := newOrgRuntime(cmd, *stateDir, *configPath)
+			rt, err := newOrgRuntime(cmd, *stateDir, *configPath, orgLedgerReadOnly)
 			if err != nil {
 				return err
 			}
@@ -679,7 +689,7 @@ func newOrgReadCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err := requireSeatIdentifier("--seat", seat); err != nil {
 				return err
 			}
-			rt, err := newOrgRuntime(cmd, *stateDir, *configPath)
+			rt, err := newOrgRuntime(cmd, *stateDir, *configPath, orgLedgerReadOnly)
 			if err != nil {
 				return err
 			}
@@ -716,7 +726,7 @@ func newOrgStopCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err := requireSeatIdentifier("--seat", seat); err != nil {
 				return err
 			}
-			rt, err := newOrgRuntime(cmd, *stateDir, *configPath)
+			rt, err := newOrgRuntime(cmd, *stateDir, *configPath, orgLedgerMutating)
 			if err != nil {
 				return err
 			}
@@ -746,7 +756,7 @@ func newOrgStatusCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err := requireOrgID(*orgID); err != nil {
 				return err
 			}
-			rt, err := newOrgRuntime(cmd, *stateDir, *configPath)
+			rt, err := newOrgRuntime(cmd, *stateDir, *configPath, orgLedgerReadOnly)
 			if err != nil {
 				return err
 			}
@@ -841,7 +851,7 @@ func newOrgDisbandCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err := requireOrgID(*orgID); err != nil {
 				return err
 			}
-			rt, err := newOrgRuntime(cmd, *stateDir, *configPath)
+			rt, err := newOrgRuntime(cmd, *stateDir, *configPath, orgLedgerMutating)
 			if err != nil {
 				return err
 			}
@@ -882,7 +892,7 @@ func newOrgReportCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err := requireOrgID(*orgID); err != nil {
 				return err
 			}
-			rt, err := newOrgRuntime(cmd, *stateDir, *configPath)
+			rt, err := newOrgRuntime(cmd, *stateDir, *configPath, orgLedgerReadOnly)
 			if err != nil {
 				return err
 			}
@@ -933,9 +943,12 @@ func newOrgWatchCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			// newOrgRuntime call. stateDirSource (tech-debt: "watchdog
 			// deferred LOW (1)") is surfaced in the startup banner below so
 			// an operator can tell which precedence tier (flag/env/
-			// git-toplevel/cwd) produced resolvedStateDir without re-deriving
-			// ResolveOrgStateDir's logic by hand.
+			// git-main-worktree/git-toplevel/cwd) produced resolvedStateDir
+			// without re-deriving ResolveOrgStateDir's logic by hand.
 			resolvedStateDir, stateDirSource := org.ResolveOrgStateDir(*stateDir, cmd.Flags().Changed("state-dir"))
+			if err := guardLegacyOrgStateDir(cmd, resolvedStateDir, stateDirSource, orgLedgerMutating); err != nil {
+				return err
+			}
 			rt, err := newOrgRuntimeAt(resolvedStateDir, *configPath)
 			if err != nil {
 				return err
