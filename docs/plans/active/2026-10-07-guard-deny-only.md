@@ -1,7 +1,7 @@
 # guard-deny-only
 
 - Status: Approved
-- Approved: 2026-10-07 sha256:87e47b5feb8e
+- Approved: 2026-10-07 sha256:bf33328dae82
 - Owner: Claude Code
 - Date: 2026-10-07
 - Related request: 「guard の残りの穴を塞いでください。そのほかのhooksも含めて、一切確認されないようにしたいです。」(2026-10-07)。ユーザーは「guard の ask を全モードで廃止」「停止する hook は誤検知の分だけ直す」「ECC plugin の block-no-verify はそのまま」を選び、Codex plan advisory の指摘には「Update plan」を選んだ
@@ -37,6 +37,10 @@
     - コミットメッセージのコマンド置換: サブコマンドが `commit` で、`-m` / `--message` / `--message=` / 短いフラグの束の `m` の値(くっついた `-m"..."` も)のもとの文字列が、ダブルクォートの中の `$(` かバッククォート、または引用符の外の `$(` かバッククォートを含む。ただし値が、`"$(cat <<'DELIM'`(`<<"DELIM"`、`<<\DELIM` も)の直後に改行、本文、`DELIM` だけの行、`)"` の順に並ぶ形だけは通す。引用符つきの区切りのヒアドキュメントは中身を展開しないため。`git commit -F -`(`--file=-`)に区切りに引用符のないヒアドキュメントを流し、本文に `$(` かバッククォートがある形も止める
     - `--no-verify`: サブコマンドが `commit`、`push`、`merge`、`rebase`、`am` のどれかで、引数に `--no-verify` がある。`commit` では `-n` と、`n` を含む短いフラグの束も止める。束は左から読み、値を取るフラグ(`m`、`F`、`C`、`c`、`t`、`u`、`S`)が出たらそこで止める(`-nm` は止め、`-mn` はメッセージ `n`、`-uno` は `--untracked-files=no` なので止めない)。`git -c core.hooksPath=…`(キーは大文字小文字を区別しない)の後ろのサブコマンドも止める
   - 閉じない引用符などの壊れた入力でも、エラーにならず exit 0 で終わる
+  - 前置きのコマンドの一覧に頼らない補い(S2 のあとで、`find -exec sudo`、`watch sudo`、`flock … git push --force` などを旧版より弱く通すと分かったため): コマンドの位置の語が「引数を実行しないと分かっているコマンド」(`echo`、`printf`、`man`、`info`、`whatis`、`apropos`、`which`、`type`、`grep` の仲間、`rg`、`ag`、`cat`、`less`、`more`、`head`、`tail`、`wc`、`sort`、`cut`、`jq`、`ls`、`test`、`[`、`cd`、`true`、`false`、`cp`、`mv`、`rm`、`mkdir`、`touch`、`ln`、`chmod`、`stat`、`file`、`diff`、`git`(自分の規則で見る))でなければ、残りの語を調べる。値のパスを外した名前がちょうど `sudo` で、後ろに語が 1 つ以上ある語があれば deny、ちょうど `git` の語があれば、その語から git の規則を当てる
+  - 長いオプションの省略: git は一意な前置きを受け付ける。引数が `--` で始まり、`=` 以降を落として 4 文字以上で、`--force`、`--force-with-lease`、`--hard`、`--no-verify`、`--message`、`--file` のどれかの前置きなら、そのオプションとみなす(git が曖昧として断る形も deny になるが、その形はどうせ失敗する)
+  - 止める側に倒す場合: 読み直しの深さ、キューの上限、入れ子の上限のどれかを超えたら deny にし、理由に「入れ子が深すぎる」と書く
+  - awk が使えない、または 0 以外で終わったときは、旧版の `case` の glob の deny 4 規則で判定する。awk の終了コードは捨てずに別の変数に取る
 - `tests/test-pre-bash-guard.sh`: ask を期待していた行はすべて none にする(モードを変えても none)。AC2・AC3 の形を、jq あり・なしの両方で、none / deny の 2 値で厳密に比べる。旧版の guard との比較(下の AC7)も入れる
 - `tests/test-lib-json.sh`(新規、名前は既存のテストに合わせて決める): jq を外した PATH で `lib_json.sh` を読み、エスケープの戻しを確かめる
 - `docs/tech-debt/README.md`: 124 行目(HEREDOC の誤検知)、127 行目(Codex の ask)、158 行目(ask の取りこぼしと誤検知)、160 行目(テストの穴)を、この PR に合わせて解消済みにするか書き直す
@@ -77,6 +81,8 @@
 - **停止する hook は誤検知の分だけ直す(ユーザー確定)**。ECC の block-no-verify はそのまま残す(ユーザー確定)。誤検知はコミットを単独のコマンドで打てば起きない
 - **deny の判定は、shell に近い awk の字句解析で書く(Codex plan advisory の指摘 1 と consult を受けて、ユーザーが「Update plan」を選択)**。語は引用符を外した値で持ち、引用符でつながった部分は 1 語として扱う。中身が実行される場所(コマンド置換、`sh -c`、`eval`、shell に流すヒアドキュメントとパイプ)は読み直す。最初の案は「引用符の中は数えない」だったが、`git push "--force"` や `echo "$(git reset --hard)"` を見逃すので採らない。正規表現を足していく案も、取りこぼしと誤検知の組み合わせが増え続ける(PR #206 で 3 周かかった)ので採らない
 - **`lib_json.sh` で JSON を正しく戻す(Codex plan advisory の指摘 2)**。改行やタブを字句解析の側で推し量る作りでは、本物の改行と文字の `\n` を区別できない
+- **前置きの一覧に頼らず、引数を実行しないコマンドだけを例外にする(S2 のあとで決めた。consult の確認つき)**。前置きのコマンドは `find -exec`、`watch`、`flock`、`chroot`、`docker run` など切りがなく、一覧を足し続けると取りこぼしが残る。引数を実行しないと分かっているコマンドを一覧にし、それ以外の後ろにある `sudo`・`git` を見る。`sudo` は後ろに語があるときだけ止めるので、ファイル名としての `sudo`(`touch sudo`)は止めない。残る誤検知(`apt-get install sudo vim` のような形)は tech-debt に書く
+- **guard が自分で判定しきれないときは止める側に倒す**。深さやキューの上限を超えた入力は deny、awk が使えないときは旧版の規則に戻す。S2 は awk が失敗すると何も止めずに通していた
 - **HEREDOC の形は、形がそろったときだけ通す**。区切りの直後が改行で、本文のあとに区切りだけの行と `)"` が続くこと。少しでも違えば(区切りに引用符がない、`<<'EOF'; id` のように続きがある、`)"` のあとに続きがある)今までどおり deny にする(consult の指摘)
 - Critical forks: None。字句解析の細部(前置きのコマンドの一覧、値を取る短いフラグの一覧、読み直しの深さ)は 1 slice 以内でやり直せる
 
@@ -84,22 +90,23 @@
 
 - [ ] AC1: `pre_bash_guard.sh`(root と template、同じ内容)は、どのモード(`permission_mode` なし、`default`、`auto`、`bypassPermissions`)でも ask を返さない。PR #206 のテストで ask を期待していた行(`.git`・`.env` への書き込み、`rm -rf`、`gh pr create`)はすべて none になる
 - [ ] AC2: 次がどのモードでも deny になる。
-  - sudo: `sudo ls`、`sudo` + タブ + `ls`、`/usr/bin/sudo ls`、`env FOO=1 sudo ls`、`nohup sudo ls`、`xargs sudo ls`、`sh -c 'sudo ls'`、`if sudo ls; then :; fi`、`{ sudo ls; }`、`! sudo ls`、`2>/dev/null sudo ls`
-  - force push: `</dev/null git push --force`、`git push --force`、`git push origin --force`、`git push -f`、`git push origin -uf main`、`git push --force-with-lease`、`git push origin +main`、`git -C dir push --force`、`git push "--force" origin main`、`bash -lc "git push --force"`
-  - hard reset: `git reset --hard`、`git -C dir reset --hard HEAD~1`、`git reset -q --hard`、`eval "git reset --hard"`、`echo "$(git reset --hard)"`、``echo "`git reset --hard`"``、`echo "git reset --hard" | sh`、`sh` に流すヒアドキュメントの本文の `git push --force`
-  - コミットメッセージの置換: `git commit -m "$(id)"`、``git commit -m "`id`"``、`git commit -am "$(id)"`、`git commit -m"$(id)"`、`git commit --message "$(id)"`、`git commit --message="$(id)"`、`git commit -m 'x' -m "$(id)"`、`rm -rf x && git commit -m "$(id)"`、`git commit -m "$(cat <<'EOF'; id` で始まる形、区切りに引用符のないヒアドキュメントを `git commit -F -` に流して本文に `$(id)` がある形
-  - `--no-verify`: `git commit --no-verify -m x`、`git commit -n -m x`、`git commit -nm x`、`git push --no-verify`、`git merge --no-verify x`、`git -c core.hooksPath=/dev/null commit -m x`、`git -c Core.HooksPath=/dev/null commit -m x`
-- [ ] AC3: 次がどのモードでも none になる。`echo 'never use sudo here'`、`visudo -c`、`man sudo`、`git push origin main`、`git push -u origin main`、`git reset --soft HEAD~1`、`git commit -m 'remove -n flag'`、`git commit -m 'drop --force and git reset --hard from docs'`、`git commit -mn`(メッセージ `n`)、`git commit -uno -m x`、`git commit -m 'fix: x' && grep -n foo file`、`git commit -F msg.txt; sed -n 1,5p file`、`git commit -m "$(cat <<'EOF'` で始まる複数行の推奨の形、区切りに引用符のあるヒアドキュメントを `git commit -F -` に流して本文に `git push --force` や `$(id)` と書いた形、`cat > notes.md <<EOF` の本文に `git push --force` と書いた形(本文はデータ)、`git log --no-verify-signatures`、`printf 'a\ngit push --force'`(シングルクォートの中の文字の `\n`)、`ls .git/ 2>&1`、`echo x > .env`、`rm -rf build/`、`gh pr create --title t`
+  - sudo: `sudo ls`、`sudo` + タブ + `ls`、`/usr/bin/sudo ls`、`env FOO=1 sudo ls`、`nohup sudo ls`、`xargs sudo ls`、`sh -c 'sudo ls'`、`if sudo ls; then :; fi`、`{ sudo ls; }`、`! sudo ls`、`2>/dev/null sudo ls`、`find . -exec sudo rm x \;`、`watch sudo ls`、`flock /tmp/l sudo ls`、`chroot /x sudo ls`
+  - force push: `</dev/null git push --force`、`git push --force`、`git push origin --force`、`git push -f`、`git push origin -uf main`、`git push --force-with-lease`、`git push origin +main`、`git -C dir push --force`、`git push "--force" origin main`、`bash -lc "git push --force"`、`find . -exec git push --force \;`、`flock /tmp/l git push --force`、`git push --force-with`、`git push --force-with=main`
+  - hard reset: `git reset --ha`、`git reset --har`、`git reset --hard`、`git -C dir reset --hard HEAD~1`、`git reset -q --hard`、`eval "git reset --hard"`、`echo "$(git reset --hard)"`、``echo "`git reset --hard`"``、`echo "git reset --hard" | sh`、`sh` に流すヒアドキュメントの本文の `git push --force`
+  - コミットメッセージの置換: `git commit -m "$(id)"`、``git commit -m "`id`"``、`git commit -am "$(id)"`、`git commit -m"$(id)"`、`git commit --message "$(id)"`、`git commit --message="$(id)"`、`git commit --mess "$(id)"`、`git commit -m 'x' -m "$(id)"`、`rm -rf x && git commit -m "$(id)"`、`git commit -m "$(cat <<'EOF'; id` で始まる形、区切りに引用符のないヒアドキュメントを `git commit -F -` に流して本文に `$(id)` がある形
+  - `--no-verify`: `git commit --no-veri -m x`、`git commit --no-verify -m x`、`git commit -n -m x`、`git commit -nm x`、`git push --no-verify`、`git merge --no-verify x`、`git -c core.hooksPath=/dev/null commit -m x`、`git -c Core.HooksPath=/dev/null commit -m x`
+- [ ] AC3: 次がどのモードでも none になる。`echo 'never use sudo here'`、`echo sudo ls`、`grep sudo file`、`touch sudo`、`apt-get install sudo`、`visudo -c`、`man sudo`、`git push origin main`、`git push -u origin main`、`git reset --soft HEAD~1`、`git commit -m 'remove -n flag'`、`git commit -m 'drop --force and git reset --hard from docs'`、`git commit -mn`(メッセージ `n`)、`git commit -uno -m x`、`git commit -m 'fix: x' && grep -n foo file`、`git commit -F msg.txt; sed -n 1,5p file`、`git commit -m "$(cat <<'EOF'` で始まる複数行の推奨の形、区切りに引用符のあるヒアドキュメントを `git commit -F -` に流して本文に `git push --force` や `$(id)` と書いた形、`cat > notes.md <<EOF` の本文に `git push --force` と書いた形(本文はデータ)、`git log --no-verify-signatures`、`printf 'a\ngit push --force'`(シングルクォートの中の文字の `\n`)、`ls .git/ 2>&1`、`echo x > .env`、`rm -rf build/`、`gh pr create --title t`
 - [ ] AC4: jq がない環境でも AC1〜AC3 が同じ結果になる。`lib_json.sh` は jq がなくても `\n`・`\t`・`\"`・`\\`・`\/`・ASCII の範囲の `\uXXXX` を戻し(`\u0080` 以上とサロゲートペアはそのまま残す)、本物の改行と文字の `\n` を区別する(`tests/test-lib-json.sh`)。`tests/test-pre-bash-guard.sh` が jq あり・なしの両方で、期待値を none / deny の 2 値で厳密に比べる
 - [ ] AC5: `docs/tech-debt/README.md` の 124・127・158・160 行目が、この PR に合わせて解消済みか書き直されている。guard の挙動を説明する文書が ask に触れていない
 - [ ] AC6: `./scripts/check-sync.sh`、`./scripts/check-skill-sync.sh`、`./scripts/check-pipeline-sync.sh`、`bash scripts/check-template-purity.sh`、`./scripts/run-verify.sh` が通る
 - [ ] AC7: 旧版(origin/main の guard)が deny にする形は、新版でも deny になる。例外は Assumptions の最後の項目で定めた誤検知の形だけで、テストに入れる例外はすべて AC3 に挙げる。テストが旧版と新版に同じ例の集まり(AC2 と AC3 の全部と、PR #206 のテストの deny の行)を渡して確かめる
 - [ ] AC8: 200 KB のコマンドで、guard が macOS の awk でも 5 秒以内に終わる(PR #206 の記録では、旧版の jq の経路で 28 秒)
+- [ ] AC9: 止める側に倒す場合が働く。読み直しの深さ・キュー・入れ子の上限を超えた入力は deny になる。PATH から awk を外すと、旧版の 4 規則で判定する(`sudo ls`、`git push --force`、`git reset --hard`、`git commit -m "$(id)"` が deny になる)。テストで確かめる
 
 ## Implementation outline
 
 1. S1: `lib_json.sh` の JSON の戻しとテスト(AC4 の前半)
-2. S2: guard の書き直し(ask の廃止、字句解析、deny の規則)とテスト(AC1〜AC4、AC7、AC8)
+2. S2: guard の書き直し(ask の廃止、字句解析、deny の規則)とテスト(AC1〜AC4、AC7、AC8)。S2b: 前置きの一覧に頼らない補い、長いオプションの省略、止める側に倒す場合とテスト(AC2、AC3、AC9)
 3. S3: tech-debt と文書(AC5)。`/sync-docs` と重なる分はそちらで確かめる
 
 ## Verify plan
@@ -142,7 +149,9 @@
 - [x] Plan approved
   - 2026-10-07: ユーザーが承認ゲートで Approve。Codex plan advisory の 2 件は「Update plan」で反映、consult(consult-plan-denyonly)は 2 回目で「進めてよい」
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1 完了(181e1065、implementer/opus): `lib_json.sh` が jq なしでも JSON のエスケープを戻す(512 文字の窓で読む awk)。`tests/test-lib-json.sh`(125 件)。guard のテストの jq なしの PATH に awk を足した(範囲を広げて承認)
+  - S2 完了(e48797a2、implementer/opus): guard を deny だけにし、POSIX awk の字句解析で判定。テスト 1057 件、AC7 の例外 7 件は AC3 と一致、200 KB で macOS の awk 0.28〜0.83 秒。比較用の例の外で、旧版より弱く通す形(`find -exec sudo`、`flock … git push --force`、`git push --force-with`)と、awk が使えないと何も止めないことが分かった。consult(consult-plan-denyonly)と相談して Scope に 4 点を足し、ユーザーが再承認(digest 87e47b5feb8e → bf33328dae82)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
