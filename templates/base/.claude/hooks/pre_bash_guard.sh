@@ -37,7 +37,8 @@ emit_decision() {
 # POSIX ERE classes only (no \b, \s, \w), so BSD grep (macOS) and GNU grep
 # (CI) agree. grep reads the command line by line on the jq path, where
 # newlines are real; on the sed fallback a newline is still the two
-# characters \n, so a backslash ends a target word and a tee argument list.
+# characters \n, so a backslash ends a target word and a tee argument list,
+# and tee_lead accepts \n (and \t) as the boundary before tee.
 # A tab is likewise the two characters \t on the fallback, so a tab between
 # a redirection or tee and its target is not seen there (the jq path sees it).
 q="'"
@@ -49,7 +50,12 @@ word_end="([[:space:]\"${q};&|)<>\\\\]|\$)"
 # >, >> or >|, then optional spaces and an optional opening quote.
 redirect_lead=">[>|]?[[:space:]]*[\"${q}]?"
 # The tee word, then any earlier arguments ending in a space or a quote.
-tee_lead="(^|[[:space:];&|(/])tee[[:space:]]([^;&|)\\\\]*[[:space:]\"${q}])?"
+# Before tee: the start of a line, whitespace, ; & | ( or / (/usr/bin/tee),
+# or the two characters \n or \t (a newline or tab on the sed fallback).
+# The earlier arguments contain no ; & | ) < > or backslash, so the scan
+# stops at a redirection: in `tee /tmp/out < .env` the .env after < is
+# read, not written.
+tee_lead="(^|[[:space:];&|(/]|\\\\[nt])tee[[:space:]]([^;&|)<>\\\\]*[[:space:]\"${q}])?"
 # .git itself (a worktree's .git is a file) or a path under it, either as
 # the whole word or after a /. .github/ and .gitignore do not match.
 git_target="(${word_char}*/)?[.]git(/|${word_end})"

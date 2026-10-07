@@ -21,12 +21,15 @@
 #   C. Reads and non-.git/.env targets (ls .git/ 2>&1, grep ... .git/
 #      2>/dev/null, git status 2>&1 | grep .git/, cat .env.example
 #      2>/dev/null, grep X .env [2>/dev/null], cat > .github/..., echo x >
-#      .gitignore, ...) -> none, with no permission_mode and in
-#      bypassPermissions
+#      .gitignore, tee reading .env or .git/config through <, a redirection
+#      target followed by < .git/..., ...) -> none, with no permission_mode
+#      and in bypassPermissions
 #   D. Write targets into .git or .env (>, >>, >|, no space, 2>, &>, tee -a,
-#      tee with earlier args, .git as a file, absolute path, quoted target,
-#      heredoc into .env, .env.local, .envrc) plus rm -rf and gh pr create
-#      -> ask with no permission_mode, none in bypassPermissions
+#      tee with earlier args, tee with a < input after its target,
+#      /usr/bin/tee, a tab before tee, .git as a file, absolute path,
+#      quoted target, heredoc into .env with and without spaces,
+#      .env.local, .envrc) plus rm -rf and gh pr create -> ask with no
+#      permission_mode, none in bypassPermissions
 #   E. Deny rules (sudo, git push --force / -f, git reset --hard,
 #      git commit -m "$(...)" and "`...`") -> deny with no
 #      permission_mode and in bypassPermissions
@@ -37,7 +40,7 @@
 #      not switch the mode
 #   H. Multi-line commands (real newlines on the jq path, literal \n on the
 #      sed path), including a tee line followed by a line that only reads
-#      .git/
+#      .git/, and a tee into .env or .git/config that starts a new line
 #   I. JSON escapes the old sed fallback stopped at (a quoted string before
 #      a write target, a trailing escaped backslash)
 #   J. lib_json.sh sourced directly: tool_input.file_path, plain and with an
@@ -187,6 +190,11 @@ reads=(
   'echo x > .env/notes.txt'
   'cat .env > out.txt'
   $'ls\t.git/ 2>&1'
+  # tee reads its stdin from .env or .git/config; it writes only /tmp/out.
+  'tee /tmp/out < .env'
+  'tee /tmp/out < .git/config'
+  # The redirection target is /tmp/o; .git/HEAD is only read through <.
+  'cat >/tmp/o</repo/.git/HEAD'
 )
 for c in "${reads[@]}"; do
   check C none "$c"
@@ -206,9 +214,15 @@ writes=(
   $'echo x\t> .git/x'
   'tee -a .git/x'
   'echo x | tee out.txt .git/x'
+  'echo x | tee -a out.txt .env'
+  'tee .env < input.txt'
+  '/usr/bin/tee .git/x'
+  # A tab before tee is the two characters \t on the sed path.
+  $'echo x |\ttee .env'
   'echo x > .git'
   'echo x > /abs/worktree/.git'
   $'cat > .env <<EOF\nA=1\nEOF'
+  $'cat >.env<<EOF\nA=1\nEOF'
   'printf x > .env.local'
   'echo x > .envrc'
   'echo x | tee config/.env'
@@ -264,6 +278,12 @@ check H ask $'echo start\necho x > .git/x'
 check H none $'echo start\necho x > .git/x' bypassPermissions
 check H none $'ls .git/\necho x > out.txt'
 check H none $'echo x | tee out.txt\nls .git/'
+# tee at the start of a line: the sed path sees the two characters \n
+# right before it.
+check H ask $'true\ntee .env </dev/null'
+check H none $'true\ntee .env </dev/null' bypassPermissions
+check H ask $'true\ntee .git/config </dev/null'
+check H none $'true\ntee .git/config </dev/null' bypassPermissions
 check H deny $'git add .\ngit commit -m "$(id)"'
 check H deny $'git add .\ngit commit -m "$(id)"' bypassPermissions
 
