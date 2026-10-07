@@ -70,6 +70,14 @@ func (f *fakeWatchHerdr) PaneRead(_ context.Context, _ string, _ int) (string, e
 	return "", nil
 }
 
+func (f *fakeWatchHerdr) PaneClose(_ context.Context, _ string) error {
+	return nil
+}
+
+func (f *fakeWatchHerdr) WorkspaceClose(_ context.Context, _ string) error {
+	return nil
+}
+
 func (f *fakeWatchHerdr) PaneSendText(_ context.Context, paneID, text string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

@@ -58,6 +58,14 @@ type fakeHerdr struct {
 	// verbs_test.go). Zero (the default) keeps PaneSendText instantaneous,
 	// exactly as before this field existed.
 	paneSendTextDelay time.Duration
+	// paneCloseErrs / workspaceCloseErrs, keyed by pane / workspace id, make
+	// PaneClose / WorkspaceClose return that error for that id; ids without
+	// an entry (and a nil map) succeed. For an "already closed" reply, use
+	// driver.NewHerdrError(driver.HerdrCodePaneNotFound, ...) (or
+	// HerdrCodeWorkspaceNotFound) so driver.IsNotFound recognises it. A test
+	// can delete an entry between calls to model herdr coming back.
+	paneCloseErrs      map[string]error
+	workspaceCloseErrs map[string]error
 
 	workspaceID string
 	paneID      string
@@ -69,6 +77,9 @@ type fakeHerdr struct {
 	agentWaitTargets  []string   // targets AgentWait was invoked with, in order
 	agentWaitUntil    [][]string // until states AgentWait was invoked with, in order
 	agentWaitTimeouts []int      // timeoutMS AgentWait was invoked with, in order
+
+	paneCloseCalls      []string // paneIDs PaneClose was invoked with, in order
+	workspaceCloseCalls []string // workspaceIDs WorkspaceClose was invoked with, in order
 }
 
 func (f *fakeHerdr) WorkspaceCreate(_ context.Context, _, _ string) (string, error) {
@@ -163,6 +174,22 @@ func (f *fakeHerdr) PaneSendKeys(_ context.Context, paneID string, keys ...strin
 		return f.paneSendKeysErr
 	}
 	return nil
+}
+
+func (f *fakeHerdr) PaneClose(_ context.Context, paneID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "pane_close")
+	f.paneCloseCalls = append(f.paneCloseCalls, paneID)
+	return f.paneCloseErrs[paneID]
+}
+
+func (f *fakeHerdr) WorkspaceClose(_ context.Context, workspaceID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "workspace_close")
+	f.workspaceCloseCalls = append(f.workspaceCloseCalls, workspaceID)
+	return f.workspaceCloseErrs[workspaceID]
 }
 
 // fakeAgmsg is a call-recording, in-memory AgmsgClient. joinErrs, keyed by

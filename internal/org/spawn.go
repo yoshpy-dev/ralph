@@ -87,6 +87,12 @@ type HerdrClient interface {
 	PaneRead(ctx context.Context, paneID string, lines int) (string, error)
 	PaneSendText(ctx context.Context, paneID, text string) error
 	PaneSendKeys(ctx context.Context, paneID string, keys ...string) error
+	// PaneClose and WorkspaceClose run `herdr pane close` / `herdr
+	// workspace close` on an id the manifest recorded. An id herdr no
+	// longer knows (already closed) comes back as an error for which
+	// driver.IsNotFound is true; for any other failure it is false.
+	PaneClose(ctx context.Context, paneID string) error
+	WorkspaceClose(ctx context.Context, workspaceID string) error
 }
 
 // AgmsgClient is the subset of driver.Agmsg's methods the spawn saga and the

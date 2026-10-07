@@ -22,6 +22,17 @@ const realAgentListEnvelope = `{"id":"cli:agent:list","result":{"agents":[],"typ
 
 const realErrorEnvelope = `{"error":{"code":"workspace_not_found","message":"workspace not found"},"id":"cli:tab:create"}`
 
+// The close envelopes below were captured live from herdr v0.7.5 on an
+// isolated server (2026-10-07; docs/evidence/herdr-pane-close-2026-10-07.md).
+// The not-found ones come with exit status 1.
+const realPaneCloseOKEnvelope = `{"id":"cli:pane:close","result":{"type":"ok"}}`
+
+const realPaneNotFoundEnvelope = `{"error":{"code":"pane_not_found","message":"pane w99:p99 not found"},"id":"cli:pane:close"}`
+
+const realWorkspaceCloseOKEnvelope = `{"id":"cli:workspace:close","result":{"type":"ok"}}`
+
+const realWorkspaceNotFoundEnvelope = `{"error":{"code":"workspace_not_found","message":"workspace w99 not found"},"id":"cli:workspace:close"}`
+
 func TestParseHerdrEnvelope(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -427,5 +438,121 @@ func TestHerdr_PaneSendText_RunnerErrorPropagates(t *testing.T) {
 
 	if err := h.PaneSendText(context.Background(), "pane-1", "hi"); err == nil {
 		t.Fatal("expected runner error to propagate, got nil")
+	}
+}
+
+// errExit1 mimics ExecRunner's error for a herdr exit status 1 with empty
+// stderr (the not-found replies print their envelope on stdout).
+var errExit1 = errors.New("herdr: exit status 1")
+
+// TestHerdr_PaneClose_WorkspaceClose pins the argv of both close
+// subcommands and the error contract callers use to treat an already-closed
+// target as closed: an ok envelope is success, a not-found envelope that
+// arrives with a non-zero exit is an error IsNotFound recognises (the Runner
+// error stays reachable via errors.Is), and every other failure is an error
+// IsNotFound rejects.
+func TestHerdr_PaneClose_WorkspaceClose(t *testing.T) {
+	closers := []struct {
+		name       string
+		call       func(Herdr) error
+		wantArgs   []string
+		okEnvelope string
+		notFound   string
+	}{
+		{
+			name:       "pane close",
+			call:       func(h Herdr) error { return h.PaneClose(context.Background(), "w3:p2") },
+			wantArgs:   []string{"pane", "close", "w3:p2"},
+			okEnvelope: realPaneCloseOKEnvelope,
+			notFound:   realPaneNotFoundEnvelope,
+		},
+		{
+			name:       "workspace close",
+			call:       func(h Herdr) error { return h.WorkspaceClose(context.Background(), "w3") },
+			wantArgs:   []string{"workspace", "close", "w3"},
+			okEnvelope: realWorkspaceCloseOKEnvelope,
+			notFound:   realWorkspaceNotFoundEnvelope,
+		},
+	}
+	timeoutErr := fmt.Errorf("herdr: timed out: %w", context.DeadlineExceeded)
+	connRefused := errors.New("herdr: exit status 1: connect: connection refused")
+	for _, c := range closers {
+		cases := []struct {
+			name         string
+			out          string
+			runErr       error
+			wantErr      bool
+			wantNotFound bool
+			wantIs       error // when non-nil, errors.Is(err, wantIs) must hold
+		}{
+			{name: "ok envelope", out: c.okEnvelope},
+			{name: "empty stdout from a fake runner", out: ""},
+			{name: "not-found envelope on stdout with exit 1", out: c.notFound, runErr: errExit1, wantErr: true, wantNotFound: true, wantIs: errExit1},
+			{name: "not-found envelope folded into the stderr text", out: "", runErr: fmt.Errorf("herdr: exit status 1: %s", c.notFound), wantErr: true, wantNotFound: true},
+			{name: "not-found envelope with exit 0", out: c.notFound, wantErr: true, wantNotFound: true},
+			{name: "other error code", out: `{"error":{"code":"internal","message":"boom"},"id":"cli:x"}`, runErr: errExit1, wantErr: true, wantIs: errExit1},
+			{name: "connection refused, no envelope", out: "", runErr: connRefused, wantErr: true, wantIs: connRefused},
+			{name: "runner timeout", out: "", runErr: timeoutErr, wantErr: true, wantIs: context.DeadlineExceeded},
+			{name: "malformed envelope with exit 1", out: `{"error":{"code":"pane_not_fou`, runErr: errExit1, wantErr: true, wantIs: errExit1},
+		}
+		for _, tt := range cases {
+			t.Run(c.name+"/"+tt.name, func(t *testing.T) {
+				f := &fakeRunner{outputs: []string{tt.out}, errs: []error{tt.runErr}}
+				err := c.call(Herdr{R: f})
+				if got := f.lastCall(); got.name != "herdr" || !reflect.DeepEqual(got.args, c.wantArgs) {
+					t.Fatalf("argv mismatch: got name=%q args=%v, want name=herdr args=%v", got.name, got.args, c.wantArgs)
+				}
+				if len(f.calls) != 1 {
+					t.Fatalf("want exactly one herdr call, got %d: %v", len(f.calls), f.calls)
+				}
+				if !tt.wantErr {
+					if err != nil {
+						t.Fatalf("unexpected error: %v", err)
+					}
+					return
+				}
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				if got := IsNotFound(err); got != tt.wantNotFound {
+					t.Fatalf("IsNotFound = %v, want %v (err: %v)", got, tt.wantNotFound, err)
+				}
+				if tt.wantIs != nil && !errors.Is(err, tt.wantIs) {
+					t.Fatalf("errors.Is(err, %v) = false, err: %v", tt.wantIs, err)
+				}
+				if !strings.Contains(err.Error(), "herdr "+c.name) {
+					t.Fatalf("expected error to name the subcommand %q, got: %v", c.name, err)
+				}
+			})
+		}
+	}
+}
+
+// TestIsNotFound pins IsNotFound on its own: the two not-found codes match
+// directly and through %w wrapping, while nil, other codes, and a plain error
+// whose text merely contains a not-found code do not. The NewHerdrError
+// cases are the contract internal/org's fakeHerdr builds its "already
+// closed" replies on.
+func TestIsNotFound(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "nil", err: nil, want: false},
+		{name: "pane_not_found", err: NewHerdrError(HerdrCodePaneNotFound, "pane w1:p9 not found"), want: true},
+		{name: "workspace_not_found", err: NewHerdrError(HerdrCodeWorkspaceNotFound, "workspace w9 not found"), want: true},
+		{name: "wrapped pane_not_found", err: fmt.Errorf("stop seat reviewer: %w", NewHerdrError(HerdrCodePaneNotFound, "gone")), want: true},
+		{name: "doubly wrapped workspace_not_found", err: fmt.Errorf("disband: %w", fmt.Errorf("close: %w", NewHerdrError(HerdrCodeWorkspaceNotFound, "gone"))), want: true},
+		{name: "other code", err: NewHerdrError("agent_pane_busy", "busy"), want: false},
+		{name: "plain error text containing the code", err: errors.New("herdr: pane_not_found: pane w1:p9 not found"), want: false},
+		{name: "unrelated sentinel", err: errTest, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsNotFound(tt.err); got != tt.want {
+				t.Fatalf("IsNotFound(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
 	}
 }
