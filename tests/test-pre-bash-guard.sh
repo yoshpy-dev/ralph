@@ -22,11 +22,13 @@
 #      2>/dev/null, git status 2>&1 | grep .git/, cat .env.example
 #      2>/dev/null, grep X .env [2>/dev/null], cat > .github/..., echo x >
 #      .gitignore, tee reading .env or .git/config through <, a redirection
-#      target followed by < .git/..., ...) -> none, with no permission_mode
-#      and in bypassPermissions
+#      target followed by < .git/..., a .env in a comment after tee's
+#      arguments, ...) -> none, with no permission_mode and in
+#      bypassPermissions
 #   D. Write targets into .git or .env (>, >>, >|, no space, 2>, &>, tee -a,
 #      tee with earlier args, tee with a < input after its target,
-#      /usr/bin/tee, a tab before tee, \tee, tee inside backticks, a tee
+#      /usr/bin/tee, a tab before tee, \tee, tee inside backticks, a target
+#      ended by a closing backtick (x=`tee .git`, x=`printf x > .git`), a tee
 #      argument after a 2> redirection, .git as a file, absolute path,
 #      quoted target, heredoc into .env with and without spaces,
 #      .env.local, .envrc) plus rm -rf and gh pr create -> ask with no
@@ -196,6 +198,8 @@ reads=(
   'tee /tmp/out < .git/config'
   # The redirection target is /tmp/o; .git/HEAD is only read through <.
   'cat >/tmp/o</repo/.git/HEAD'
+  # tee's argument scan stops at #: the .env is in a comment.
+  'tee /tmp/build.log # .env is read separately'
 )
 for c in "${reads[@]}"; do
   check C none "$c"
@@ -224,6 +228,12 @@ writes=(
   '\tee .env'
   '\tee .git/x'
   'x=`tee .env </dev/null`'
+  # A closing backtick ends the target word.
+  'x=`tee .git`'
+  'x=`printf x > .git`'
+  'x=`tee .git/x`'
+  'x=`tee .env`'
+  'x=`printf x > .env`'
   # tee still writes the arguments that follow an output redirection.
   'tee out.txt 2>/dev/null .env'
   'tee out.txt 2>/dev/null .env > /dev/null'

@@ -42,30 +42,35 @@ emit_decision() {
 # A tab is likewise the two characters \t on the fallback, so a tab between
 # a redirection or tee and its target is not seen there (the jq path sees it).
 q="'"
-# One character of a target word.
-word_char="[^[:space:]\"${q};&|()<>\\\\]"
+# One character of a target word. A backtick is not one: a closing backtick
+# ends the word, as in x=`tee .git`. So a target built from command
+# substitution, `pwd`/.git/x (like $(pwd)/.git/x), is not seen.
+word_char="[^[:space:]\"${q};&|()<>\`\\\\]"
 # What may follow a target: whitespace, a quote, a shell operator, a
-# backslash, or the end of the line.
-word_end="([[:space:]\"${q};&|)<>\\\\]|\$)"
+# backtick (the end of `...`), a backslash, or the end of the line.
+word_end="([[:space:]\"${q};&|)<>\`\\\\]|\$)"
 # >, >> or >|, then optional spaces and an optional opening quote.
 redirect_lead=">[>|]?[[:space:]]*[\"${q}]?"
 # The tee word, then any earlier arguments ending in a space or a quote.
 # Before tee: the start of a line, whitespace, one of ; & | ( and /
 # (/usr/bin/tee), a backtick (tee inside `...`), a backslash (\tee, which skips an alias),
 # or the two characters \n or \t (a newline or tab on the sed fallback).
-# The earlier arguments contain no ; & | ) < or backslash. The scan stops
+# The earlier arguments contain no ; & | ) < # or backslash. The scan stops
 # at <, because the word after < is tee's input, read and not written: in
 # `tee /tmp/out < .env` the .env does not count (so an argument after the
-# input, as in `tee < in.txt .env`, is not seen either). It does not stop
-# at >, because tee still writes each file argument that follows an output
-# redirection: `tee out.txt 2>/dev/null .env` writes .env.
-tee_lead="(^|[[:space:];&|(/\`\\\\]|\\\\[nt])tee[[:space:]]([^;&|)<\\\\]*[[:space:]\"${q}])?"
+# input, as in `tee < in.txt .env`, is not seen either). It stops at #,
+# which starts a comment: in `tee /tmp/build.log # .env is read separately`
+# the .env does not count (so a file name with # before the target, as in
+# `tee a#b .env`, is not seen either). It does not stop at >, because tee
+# still writes each file argument that follows an output redirection:
+# `tee out.txt 2>/dev/null .env` writes .env.
+tee_lead="(^|[[:space:];&|(/\`\\\\]|\\\\[nt])tee[[:space:]]([^;&|)<#\\\\]*[[:space:]\"${q}])?"
 # .git itself (a worktree's .git is a file) or a path under it, either as
 # the whole word or after a /. .github/ and .gitignore do not match.
 git_target="(${word_char}*/)?[.]git(/|${word_end})"
 # A word whose last path component starts with .env (.env, .env.local,
 # .envrc).
-env_target="(${word_char}*/)?[.]env[^[:space:]\"${q};&|()<>\\\\/]*${word_end}"
+env_target="(${word_char}*/)?[.]env[^[:space:]\"${q};&|()<>\`\\\\/]*${word_end}"
 
 # command_writes_to <target-regex>: true when a redirection target or a tee
 # argument in the command matches <target-regex>.
