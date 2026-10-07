@@ -27,19 +27,31 @@
 #   B. AC2: commands to deny (sudo in command position or after a command
 #      that may run its arguments such as find -exec, watch, flock, chroot;
 #      force push; hard reset; command substitution in a commit message;
-#      --no-verify and core.hooksPath; abbreviated long options) -> deny,
-#      with permission_mode absent and bypassPermissions
-#   C. AC3: false positives of the old guard and look-alikes (sudo as an
-#      argument of echo, grep, touch, or as the last word) -> none, with
+#      --no-verify and core.hooksPath; abbreviated long options; strings run
+#      as commands and files written, which the sentinel denies; zsh =sudo)
+#      -> deny, with permission_mode absent and bypassPermissions. Then the
+#      kinds of command the self-review listed (string runners, other
+#      shells, builtin/source/process substitution, git forms that run
+#      commands, NOEXEC commands that run an argument, env -S attached,
+#      zsh =), at least two each -> deny
+#   C. AC3: false positives of the old guard and look-alikes, all inside
+#      data regions or not matching (sudo as an argument of echo or grep, in
+#      a comment, a commit message, a quoted heredoc fed to git commit -F -,
+#      output to /dev/null or to grep; touch sudo; visudo) -> none, with
 #      permission_mode absent and bypassPermissions
 #   D. Edge cases: quoted and escaped flags and names, line continuations,
 #      nested $(...), backticks in backticks, git -C / -c / --config-env,
 #      short-flag clusters, abbreviated long options and their look-alikes
 #      (--follow-tags, --no-thin, --soft), the five heredoc delimiter forms
-#      (to cat, to sh, to git commit -F -, and inside -m "$(cat ...)"),
-#      shells fed through -c, here-strings, pipes and heredocs, wrappers and
-#      unknown runners, comments, ${...}, process substitution, functions
-#      and subshells, and a JSON %u escape
+#      (to cat, to a file, to sh, to git commit -F -, and inside -m
+#      "$(cat ...)"), shells fed through -c, here-strings, pipes and
+#      heredocs, wrappers and unknown runners, comments, ${...}, process
+#      substitution, functions and subshells, a JSON %u escape; and the
+#      data regions of the sentinel: what keeps them (pipes to data readers,
+#      /dev/null, /dev/stderr, fd duplication, git tag -m, comments, the sudo
+#      word boundary) and what breaks them (a pipe to sh or sort, a file,
+#      >&file, >(...), a here-string, a cut-short pipeline, rg --pre,
+#      nesting, an assignment, a backtick after the message)
 #   E. Broken input (unclosed quotes, parentheses, substitutions, heredocs
 #      without an end line, operators without operands) -> exit 0 with none
 #      or deny
@@ -51,13 +63,15 @@
 #      substring rules decide (these need jq: lib_json.sh's jq-absent path
 #      runs awk itself)
 #   G. AC7: the old guard (tests/fixtures/guard-1c4cea5a/, the version
-#      before this rewrite) decides the corpus of A's deny rows, B, and C on
-#      each path, and is compared with the new guard's runs of the same
-#      payloads in A, B, and C. Every case the old guard denies and the new
-#      one lets through must be in intentional_fixes, which must equal the C
-#      cases the old guard denies. The list is printed.
-#   H. AC8: a ~200 KB command on the jq-absent path finishes in under 10 s
-#      (the measured time is printed)
+#      before this rewrite) decides the corpus of A's deny rows, B (with the
+#      self-review kinds), and C on each path, and is compared with the new
+#      guard's runs of the same payloads in A, B, and C. Every case the old
+#      guard denies and the new one lets through must be in
+#      intentional_fixes, which must equal the C cases the old guard denies.
+#      The list is printed.
+#   H. AC8: ~200 KB commands on the jq-absent path (a long quoted string,
+#      many short commands, backslashes in backticks) finish in under 10 s
+#      (the measured times are printed)
 #   I. lib_json.sh sourced directly: tool_input.file_path, plain and with an
 #      escaped quote and backslash
 
@@ -432,6 +446,25 @@ ac2=(
   'rm -rf x && git commit -m "$(id)"'
   $'git commit -m "$(cat <<\'EOF\'; id\nfeat: x\nEOF\n)"'
   $'git commit -F - <<EOF\nfeat: x\n\n$(id)\nEOF'
+  # strings run as commands, and files written: the sentinel (the old
+  # substring rules outside data regions)
+  $'find . -exec sh -c \'sudo ls\' \\;'
+  $'watch \'git push --force\''
+  $'csh -c \'sudo ls\''
+  $'tcsh -c \'git reset --hard\''
+  $'source <(echo \'sudo ls\')'
+  $'. <(echo \'git push --force\')'
+  $'builtin eval \'git push --force\''
+  $'git rebase -x \'git push --force\' main'
+  $'git submodule foreach \'git push --force\''
+  $'echo \'sudo ls\' | xargs -I{} sh -c {}'
+  $'echo \'sudo ls\' > >(sh)'
+  $'echo \'sudo ls\' >> ~/.zshrc'
+  $'echo \'git push --force\' | tee x.sh'
+  $'cat <<\'EOF\' | sh\nsudo ls\nEOF'
+  $'cat > notes.md <<EOF\n- never run git push --force\nEOF'
+  '=sudo ls'
+  '=git push --force'
   # --no-verify and core.hooksPath
   'git commit --no-veri -m x'
   'git commit --no-verify -m x'
@@ -443,6 +476,53 @@ ac2=(
   'git -c Core.HooksPath=/dev/null commit -m x'
 )
 check_modes B deny absent bypassPermissions -- "${ac2[@]}"
+
+# The kinds of command the self-review found the old guard denying and the
+# lexer alone letting through (docs/reports/self-review-<date>-guard-deny-only.md,
+# H-1 and M-1), at least two of each, outside the AC2 list. The sentinel
+# denies all of them; they join the AC7 corpus.
+self_review_forms=(
+  # runners that take a string
+  $'watch \'sudo ls\''
+  $'find . -name x -exec sh -c \'git push --force\' \\;'
+  $'flock /tmp/l -c \'sudo ls\''
+  $'su -c \'git reset --hard\' root'
+  $'script -q -c \'sudo ls\' /dev/null'
+  $'parallel ::: \'git push --force\''
+  $'tmux new-session -d \'sudo ls\''
+  # shells other than sh bash zsh dash ksh
+  $'fish -c \'sudo ls\''
+  $'ash -c \'git reset --hard\''
+  $'busybox sh -c \'git push --force\''
+  $'mksh -c \'sudo ls\''
+  # builtin, source, ., process substitution and /dev/stdin given to a shell
+  $'builtin eval \'sudo ls\''
+  $'source <(echo \'git reset --hard\')'
+  $'bash <(echo \'sudo ls\')'
+  $'sh <(echo \'git push --force\')'
+  $'. /dev/stdin <<\'EOF\'\nsudo ls\nEOF'
+  $'bash /dev/stdin <<\'EOF\'\ngit push --force\nEOF'
+  # git forms that run commands
+  $'git rebase --exec \'sudo ls\' main'
+  $'git submodule foreach \'git reset --hard\''
+  $'git bisect run sh -c \'git push --force\''
+  $'git filter-branch --tree-filter \'sudo ls\' HEAD'
+  $'git -c alias.x=\'!git push --force\' x'
+  $'git -c core.pager=\'sudo ls\' log'
+  # commands of NOEXEC that run an argument, and LESSOPEN
+  $'man -P \'sudo ls\' git'
+  $'rg --pre \'sudo ls\' pattern file'
+  $'LESSOPEN=\'| git reset --hard %s\' less file'
+  # env -S with the string attached, xargs feeding sh -c
+  $'env -S\'sudo ls\''
+  $'env --split-string=\'git push --force\''
+  $'echo x | xargs sh -c \'git reset --hard\''
+  # zsh = expansion of a command name
+  '=sudo ls'
+  '=git reset --hard'
+  'ls; =sudo ls'
+)
+check_modes B deny absent bypassPermissions -- "${self_review_forms[@]}"
 
 # ── C. AC3: none ────────────────────────────────────────────────────────
 ac3=(
@@ -466,7 +546,13 @@ ac3=(
   # the backticks, $(...), quotes and parentheses in the body are text.
   $'git commit -m "$(cat <<\'EOF\'\nfeat: add a thing\n\nBody with `backticks`, $(dollar parens), don\'t, "quotes" and ) parens.\nEOF\n)"'
   $'git commit -F - <<\'EOF\'\ndocs: never git push --force\n$(id) stays as text\nEOF'
-  $'cat > notes.md <<EOF\n- never run git push --force\nEOF'
+  # data regions: arguments of commands that only read data, a comment, and
+  # pipes and redirections that keep the text off files
+  'echo never use sudo here'
+  'echo hi # sudo ls'
+  $'grep -n \'git push --force\' docs.md'
+  $'echo \'sudo ls\' > /dev/null'
+  $'echo \'git push --force\' | grep force'
   'git log --no-verify-signatures'
   $'printf \'a\\ngit push --force\''
   'ls .git/ 2>&1'
@@ -609,30 +695,51 @@ edge_none=(
   'echo sudo'
   'bash script.sh'
   'sh -n script.sh'
-  $'echo \'sudo ls\' | bash script.sh'
-  # sudo as an argument of a command that runs nothing, or as the last word,
-  # and git as the last word of an unknown command.
-  'cp sudo dest'
-  'apt-get install sudo 2>/dev/null'
+  # sudo as the last word, and git as the last word of an unknown command.
   'brew install git'
   $'find . -exec git status \\;'
   # Long options that only look like the abbreviated ones.
   'git push --follow-tags origin main'
   'git push --no-thin origin main'
-  'git push --force-if-includes origin main'
   'git reset --h'
   'git commit --no-edit'
   'git commit --fixup HEAD'
   'git commit --mess=x'
   $'git commit --mess \'x $(id)\''
   $'git commit --fi - <<\'EOF\'\n$(id)\nEOF'
-  # Heredoc bodies are data: the five delimiter forms.
-  $'cat > notes.md <<-EOF\n\tgit push --force\n\tEOF'
-  $'cat > notes.md <<\'EOF\'\ngit push --force\nEOF'
-  $'cat > notes.md <<"EOF"\ngit push --force\nEOF'
-  $'cat > notes.md <<\\EOF\ngit push --force\nEOF'
-  $'cat <<\'EOF\' > file\n$(sudo ls)\nEOF'
-  $'cat <<EOF > file\n\\$(sudo ls)\nEOF'
+  # Heredoc bodies are data when read by a command that only reads data:
+  # the five delimiter forms, and an unquoted one whose $( is escaped.
+  $'cat <<-EOF\n\tgit push --force\n\tEOF'
+  $'cat <<\'EOF\'\ngit push --force\nEOF'
+  $'cat <<"EOF"\ngit push --force\nEOF'
+  $'cat <<\\EOF\ngit push --force\nEOF'
+  $'cat <<EOF\ngit push --force\nEOF'
+  $'cat <<\'EOF\'\n$(sudo ls)\nEOF'
+  $'cat <<EOF\n\\$(date) sudo ls\nEOF'
+  $'cat <<\'EOF\' | grep x\nsudo ls\nEOF'
+  $'git commit -F - <<EOF\nnever git push --force\nEOF'
+  # Data regions: the arguments of commands that only read data, in
+  # pipelines of such commands, with output off files.
+  $'echo \'sudo ls\' 2>&1 | grep sudo | wc -l'
+  'echo "sudo $(date) ls"'
+  'echo sudo ls > /dev/stderr'
+  'echo sudo ls >&2'
+  $'grep -r \'sudo \' . | head -5'
+  $'rg \'git push --force\' docs'
+  $'git tag -a v1 -m \'never git push --force\''
+  $'git commit -am \'sudo ls is gone\''
+  $'git commit -m \'one\' -m \'two: git reset --hard\''
+  $'git -C dir commit -m \'git push --force\''
+  'ls # sudo ls'
+  '(echo sudo ls)'
+  $'if grep -q \'sudo \' file; then echo ok; fi'
+  'echo sudo ls; ls'
+  'gh pr create --body-file body.md'
+  # sudo after a word character, ., _ or - is another name.
+  'my-sudo ls'
+  'x.sudo ls'
+  # zsh = expansion of a command that only reads data.
+  '=echo sudo ls'
   # git commit -F - with a quoted delimiter expands nothing.
   $'git commit -F - <<"EOF"\n$(id)\nEOF'
   $'git commit -F - <<\\EOF\n$(id)\nEOF'
@@ -650,11 +757,53 @@ edge_none=(
   'echo $((1+2))'
   'for f in *.md; do echo "$f"; done'
   'case "$x" in a) echo a;; esac'
-  # bash reads a heredoc body right after the newline that ends its line,
-  # so here sh is a body line and the pipeline has no last command.
-  $'cat <<\'EOF\' |\nsh\nsudo ls\nEOF'
 )
 check_modes D none absent -- "${edge_none[@]}"
+
+# The sentinel keeps what the old guard denied outside data regions.
+edge_sentinel_deny=(
+  # The output goes to a command that is not a data reader, or to a file.
+  $'echo \'sudo ls\' | bash script.sh'
+  'echo sudo ls | sh'
+  'echo sudo ls > out.txt'
+  'echo sudo ls >&out.txt'
+  'echo sudo ls > >(cat)'
+  $'grep -r \'sudo \' . | sort'
+  $'grep x <<< \'sudo ls\''
+  # A heredoc body written to a file, fed to a shell, or with a real $( in
+  # an unquoted body; the five delimiter forms written to a file.
+  $'cat > notes.md <<-EOF\n\tgit push --force\n\tEOF'
+  $'cat > notes.md <<\'EOF\'\ngit push --force\nEOF'
+  $'cat > notes.md <<"EOF"\ngit push --force\nEOF'
+  $'cat > notes.md <<\\EOF\ngit push --force\nEOF'
+  $'cat <<\'EOF\' > file\n$(sudo ls)\nEOF'
+  $'cat <<EOF > file\n\\$(sudo ls)\nEOF'
+  $'cat <<\'EOF\' > f.sh\nsudo ls\nEOF'
+  $'cat <<EOF\n$(date) sudo ls\nEOF'
+  # bash reads a heredoc body right after the newline that ends its line,
+  # so here sh is a body line and the pipeline has no last command (bash
+  # rejects it); a pipeline cut short has no data regions.
+  $'cat <<\'EOF\' |\nsh\nsudo ls\nEOF'
+  'echo sudo ls |'
+  # Arguments of commands that are not data readers.
+  'cp sudo dest'
+  'apt-get install sudo 2>/dev/null'
+  $'rg --pre x \'git push --force\' docs'
+  'git push --force-if-includes origin main'
+  $'gh pr create --body "$(cat <<\'EOF\'\nnever git push --force\nEOF\n)"'
+  # Not data: a message with a substitution, nested text, an assignment, a
+  # command after the data, a comment inside $(...), and a backtick after
+  # the message (the old guard read the rest of the command).
+  $'git tag -a v1 -m "$(id) git push --force"'
+  $'x=$(echo \'sudo ls\')'
+  $'echo $(true # sudo ls\n)'
+  $'LESSOPEN=\'| sudo ls %s\' cat x'
+  'echo sudo ls; sudo ls'
+  $'flock l git commit -m \'git push --force\''
+  'git commit -m "fix" && echo `date`'
+  './sudo ls'
+)
+check_modes D deny absent -- "${edge_sentinel_deny[@]}"
 
 # A JSON escape in the payload: %u0073 decodes to s on both paths, so the
 # command is sudo ls. (%u stands for backslash-u: editing tools decode a
@@ -805,7 +954,11 @@ intentional_fixes=(
   $'git commit -m \'drop --force and git reset --hard from docs\''
   $'git commit -m "$(cat <<\'EOF\'\nfeat: add a thing\n\nBody with `backticks`, $(dollar parens), don\'t, "quotes" and ) parens.\nEOF\n)"'
   $'git commit -F - <<\'EOF\'\ndocs: never git push --force\n$(id) stays as text\nEOF'
-  $'cat > notes.md <<EOF\n- never run git push --force\nEOF'
+  'echo never use sudo here'
+  'echo hi # sudo ls'
+  $'grep -n \'git push --force\' docs.md'
+  $'echo \'sudo ls\' > /dev/null'
+  $'echo \'git push --force\' | grep force'
   $'printf \'a\\ngit push --force\''
 )
 # The new guard's decisions are those of the corpus runs in A, B and C;
@@ -902,14 +1055,17 @@ fi
 # ── H. AC8: a ~200 KB command ───────────────────────────────────────────
 # A 200,000-character single-quoted string, then a commit message with a
 # command substitution (the payload of the 28 s measurement of the old
-# guard), and 200 KB of short commands with a force push at the end. The
-# JSON is written directly (no character in the commands needs escaping
-# but the quotes around $(id)) and fed on stdin.
+# guard); 200 KB of short commands with a force push at the end; and
+# 200,000 backslashes inside backticks (the text the backticks unescape,
+# which took 2.6 s at this size before the unescaping was made linear).
+# The JSON is written directly (each unit of 8 backslashes in the JSON is 4
+# in the command) and fed on stdin.
 long_cases=(
   "echo '$(repeat_text x 200000)' && git commit -m \\\"\$(id)\\\""
   "$(repeat_text 'echo a b c d; ' 13400)git push --force"
+  'echo `echo '"$(repeat_text '\\\\\\\\' 50000)"'`; git push --force'
 )
-long_names=("a 200,000-character single-quoted string" "13,400 short commands")
+long_names=("a 200,000-character single-quoted string" "13,400 short commands" "200,000 backslashes in backticks")
 for ((k = 0; k < ${#long_cases[@]}; k++)); do
   payload_json "${long_cases[$k]}" > "$workdir/long.json"
   TIMEFORMAT=%R
