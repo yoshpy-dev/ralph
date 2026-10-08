@@ -20,16 +20,17 @@ func testOrgConfig() config.OrgConfig {
 		MaxSeats: 3,
 		// The org-wide limits at config.Default's values, so they never bind
 		// in a test that does not set them lower itself.
-		MaxOrgs:       10,
-		MaxTotalSeats: 30,
+		MaxOrgs:       config.Default().Org.MaxOrgs,
+		MaxTotalSeats: config.Default().Org.MaxTotalSeats,
 	}
 }
 
 // TestValidateOrgWideCapacity pins the two org-wide limits at their
 // boundaries: max_orgs refuses only an org_id that is not running yet once
 // the running count reaches the limit, max_total_seats refuses any new seat
-// once the active total reaches it, both errors point at disband, and a
-// limit of 0 (a hand-built config; config.Load rejects it) is no limit.
+// once the active total reaches it, and both errors point at disband. A
+// limit of 0 (a hand-built config; config.Load rejects it) refuses like
+// max_seats 0 does, rather than meaning no limit.
 func TestValidateOrgWideCapacity(t *testing.T) {
 	req := func(orgID string) SpawnRequest {
 		return SpawnRequest{OrgID: orgID, SeatID: "seat-1", Driver: "claude", Model: "sonnet"}
@@ -51,7 +52,8 @@ func TestValidateOrgWideCapacity(t *testing.T) {
 		{"seat at max_total_seats", 10, 3, "org-a", []string{"org-a"}, 3, "max_total_seats 3 reached: 3 seats are active across all orgs"},
 		{"new org at max_total_seats", 10, 3, "org-c", []string{"org-a"}, 3, "max_total_seats 3 reached"},
 		{"both reached reports max_orgs first", 1, 1, "org-b", []string{"org-a"}, 1, "max_orgs 1 reached"},
-		{"zero limits are not set", 0, 0, "org-z", []string{"org-a", "org-b"}, 99, ""},
+		{"zero max_orgs refuses a new org", 0, 30, "org-a", nil, 0, `max_orgs 0 reached: org_id "org-a" is not running and 0 orgs are (none)`},
+		{"zero max_total_seats refuses any seat", 10, 0, "org-a", []string{"org-a"}, 0, "max_total_seats 0 reached"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

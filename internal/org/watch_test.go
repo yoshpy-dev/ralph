@@ -286,10 +286,14 @@ func (c *fakeClock) Advance(d time.Duration) {
 
 func watchTestConfig() config.OrgConfig {
 	return config.OrgConfig{
-		DriverPool:     []string{"claude"},
-		ModelPool:      []config.OrgModelPoolEntry{{Driver: "claude", Model: "sonnet"}},
-		Roles:          map[string][]string{},
-		MaxSeats:       10,
+		DriverPool: []string{"claude"},
+		ModelPool:  []config.OrgModelPoolEntry{{Driver: "claude", Model: "sonnet"}},
+		Roles:      map[string][]string{},
+		MaxSeats:   10,
+		// The org-wide limits at config.Default's values: spawn refuses at
+		// 0, and no watch test is about them.
+		MaxOrgs:        config.Default().Org.MaxOrgs,
+		MaxTotalSeats:  config.Default().Org.MaxTotalSeats,
 		DeadmanMinutes: 10,
 		Watchdog: config.OrgWatchdogConfig{
 			IntervalSeconds: 30, StallMinutes: 15, WatcherEnabled: true, WatcherModel: "haiku",

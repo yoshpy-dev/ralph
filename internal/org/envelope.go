@@ -85,15 +85,20 @@ const disbandFreesSlotHint = "a finished org frees its slot and seats with ralph
 // way ValidateSpawnCapacity gets activeSeats. A spawn into an org_id that is
 // not in runningOrgs is refused once len(runningOrgs) reaches cfg.MaxOrgs; a
 // spawn into a running org is not limited by MaxOrgs. Any new seat is refused
-// once totalActiveSeats reaches cfg.MaxTotalSeats. A limit of 0 or less
-// means the limit is not set: config.Load rejects such a value and
-// config.Default sets both, so only a hand-built config.OrgConfig has one.
+// once totalActiveSeats reaches cfg.MaxTotalSeats. Like max_seats, a limit
+// of 0 or less is not "no limit": it refuses every spawn the limit covers
+// (config.Load rejects such a value, so only a hand-built config.OrgConfig
+// can carry one).
 func ValidateOrgWideCapacity(cfg config.OrgConfig, req SpawnRequest, runningOrgs []string, totalActiveSeats int) error {
-	if cfg.MaxOrgs > 0 && len(runningOrgs) >= cfg.MaxOrgs && !slices.Contains(runningOrgs, req.OrgID) {
+	if len(runningOrgs) >= cfg.MaxOrgs && !slices.Contains(runningOrgs, req.OrgID) {
+		running := strings.Join(runningOrgs, ", ")
+		if running == "" {
+			running = "none"
+		}
 		return fmt.Errorf("org: max_orgs %d reached: org_id %q is not running and %d orgs are (%s); %s",
-			cfg.MaxOrgs, req.OrgID, len(runningOrgs), strings.Join(runningOrgs, ", "), disbandFreesSlotHint)
+			cfg.MaxOrgs, req.OrgID, len(runningOrgs), running, disbandFreesSlotHint)
 	}
-	if cfg.MaxTotalSeats > 0 && totalActiveSeats >= cfg.MaxTotalSeats {
+	if totalActiveSeats >= cfg.MaxTotalSeats {
 		return fmt.Errorf("org: max_total_seats %d reached: %d seats are active across all orgs; %s",
 			cfg.MaxTotalSeats, totalActiveSeats, disbandFreesSlotHint)
 	}

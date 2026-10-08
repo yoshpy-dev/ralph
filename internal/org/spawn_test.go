@@ -2268,8 +2268,9 @@ func TestOrgSpawn_MinimumControlGate_Autonomous_EmptyScope_RejectedWithEvent(t *
 	if result.Outcome != SpawnOutcomeRejected {
 		t.Fatalf("expected SpawnOutcomeRejected, got %+v", result)
 	}
-	if result.Err == nil || !strings.Contains(result.Err.Error(), "--scope") || !strings.Contains(result.Err.Error(), "--allow-unscoped") {
-		t.Fatalf("expected error naming --scope and --allow-unscoped, got %v", result.Err)
+	if result.Err == nil || !strings.Contains(result.Err.Error(), "--scope") || !strings.Contains(result.Err.Error(), "--reserve") ||
+		!strings.Contains(result.Err.Error(), "--allow-unscoped") {
+		t.Fatalf("expected error naming --scope, --reserve and --allow-unscoped, got %v", result.Err)
 	}
 
 	rr, err := o.Manifest.Read()
@@ -4092,11 +4093,30 @@ func TestOrgSpawn_Reserve_SatisfiesAutonomousScopeGate(t *testing.T) {
 			}
 			p = leaderParams("org-b")
 			p.Scope, p.DryRun = "", dryRun
-			if r := o.Spawn(p); r.Outcome != SpawnOutcomeRejected || r.Err == nil || !strings.Contains(r.Err.Error(), "requires --scope") {
-				t.Fatalf("expected a spawn with neither to be refused by the gate, got %+v", r)
+			if r := o.Spawn(p); r.Outcome != SpawnOutcomeRejected || r.Err == nil || !strings.Contains(r.Err.Error(), "requires --scope or --reserve") {
+				t.Fatalf("expected a spawn with neither to be refused by the gate, naming both, got %+v", r)
 			}
 		})
 	}
+}
+
+// TestOrgSpawn_ZeroOrgWideLimits_Reject: with max_orgs or max_total_seats at
+// 0 (only a hand-built config can carry it; config.Load rejects it), spawn
+// refuses with a `rejected` record, as max_seats 0 does, instead of treating
+// 0 as no limit.
+func TestOrgSpawn_ZeroOrgWideLimits_Reject(t *testing.T) {
+	t.Run("max_orgs 0", func(t *testing.T) {
+		o, _, _ := testOrg(t)
+		o.Config.MaxOrgs = 0
+		assertRejectedRecorded(t, o, o.Spawn(mustSpawnParams("org-a", "seat-1")), "org-a", "seat-1",
+			"max_orgs 0 reached", "0 orgs are (none)")
+	})
+	t.Run("max_total_seats 0", func(t *testing.T) {
+		o, _, _ := testOrg(t)
+		o.Config.MaxTotalSeats = 0
+		assertRejectedRecorded(t, o, o.Spawn(mustSpawnParams("org-a", "seat-1")), "org-a", "seat-1",
+			"max_total_seats 0 reached")
+	})
 }
 
 // TestOrgSpawn_Reserve_DryRunPreviewsAndHoldsNothing: a dry run decides the
