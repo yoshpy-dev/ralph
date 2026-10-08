@@ -127,7 +127,8 @@
 # only the text as written. Shell state set up by an earlier command is
 # invisible the same way a variable is: a function named like a data command,
 # or an exec redirection done in an earlier command, is not seen when the next
-# command is judged. Broken input (an unclosed quote or parenthesis, a heredoc
+# command is judged. So are shell options set in start-up files (with zsh
+# cdablevars, cd looks a non-directory argument up as a variable). Broken input (an unclosed quote or parenthesis, a heredoc
 # without its end line) still exits 0, with or without a deny.
 set -eu
 
@@ -915,8 +916,11 @@ function stage_note(ctx, cid,    i, n, j, k, ro, safe, rs, re, cur, xs, xe, m, t
   ro = (i >= 1 && (J_NM in DATACMD))
   if (ro && J_NM == "rg") for (j = i + 1; j <= n; j++) if (substr(WV[ctx, j], 1, 5) == "--pre") ro = 0
   # printf -v NAME (also attached -vNAME) stores into a variable instead of
-  # printing, so its arguments are not read-only data.
-  if (ro && J_NM == "printf") for (j = i + 1; j <= n; j++) if (substr(WV[ctx, j], 1, 2) == "-v") ro = 0
+  # printing, and in zsh a %n conversion assigns to the variable an argument
+  # names, which evaluates a subscript such as arr[$(cmd)]. So printf only
+  # reads data when no word has -v first, a %, a $ or a backtick (a format
+  # from a variable could hold %n).
+  if (ro && J_NM == "printf") for (j = i + 1; j <= n; j++) if (substr(WV[ctx, j], 1, 2) == "-v" || index(WV[ctx, j], "%") || index(WV[ctx, j], "$") || index(WV[ctx, j], BQ)) ro = 0
   safe = !POUT[ctx]
   for (k = 1; k <= RN[ctx]; k++) if (!redir_safe(RO[ctx, k], RV[ctx, k], RMISS[ctx, k])) safe = 0
   SRO[cid] = ro
@@ -1146,11 +1150,12 @@ function reset_rules(ctx, i, n,    a) {
     if (opt_is(a, "--hard")) deny("hard_reset")
   }
 }
+# no_verify_rules(ctx, i, n): git merge, rebase and am. The scan does not
+# stop at --, since a value-taking option can take -- as its value (git
+# merge -m -- --no-verify still skips the hooks); a later word that only
+# looks like the flag (a message --no-verify) is denied as well.
 function no_verify_rules(ctx, i, n) {
-  for (; i <= n; i++) {
-    if (WV[ctx, i] == "--") return
-    if (opt_is(WV[ctx, i], "--no-verify")) deny("no_verify")
-  }
+  for (; i <= n; i++) if (opt_is(WV[ctx, i], "--no-verify")) deny("no_verify")
 }
 
 # commit_rules(ctx, cid, i, n): git commit with arguments in words i..n.
@@ -1174,7 +1179,9 @@ function commit_rules(ctx, cid, i, n,    a, la, k, f, v) {
       else { if (wv(ctx, i + 1) == "-") CCF[cid] = 1; i += 2 }
       continue
     }
-    if (a == "--author" || a == "--date" || a == "--fixup" || a == "--squash" || a == "--template" || a == "--cleanup" || a == "--trailer" || a == "--reuse-message" || a == "--reedit-message" || a == "--pathspec-from-file") { i += 2; continue }
+    # Other value-taking long options, also abbreviated: the value is after
+    # = or in the next word (even when that word is --).
+    if (opt_is(a, "--author") || opt_is(a, "--date") || opt_is(a, "--fixup") || opt_is(a, "--squash") || opt_is(a, "--template") || opt_is(a, "--cleanup") || opt_is(a, "--trailer") || opt_is(a, "--reuse-message") || opt_is(a, "--reedit-message") || opt_is(a, "--pathspec-from-file")) { i += (index(a, "=") ? 1 : 2); continue }
     if (a ~ /^-[^-]/) {
       # A short-flag cluster, read left to right. n is --no-verify. m F C c
       # t take a value (the rest of the cluster, or the next word), and u
@@ -1340,8 +1347,9 @@ BEGIN {
   for (; nx > 0; nx--) NOEXEC[noexec_list[nx]] = 1
   # Commands that only read data (and print to stdout): their arguments are
   # data regions for the sentinel. sed, awk, man, less, more, sort, tee and
-  # jq can run commands or write files, so they are not here.
-  nx = split("echo printf cat head tail wc cut tr grep egrep fgrep zgrep rg ls stat diff test [ cd true false which type", datacmd_list, " ")
+  # jq can run commands or write files, so they are not here; nor are test
+  # and [, whose -v in zsh evaluates a subscript such as arr[$(cmd)].
+  nx = split("echo printf cat head tail wc cut tr grep egrep fgrep zgrep rg ls stat diff cd true false which type", datacmd_list, " ")
   for (; nx > 0; nx--) DATACMD[datacmd_list[nx]] = 1
   # Reserved words in command position, and the brace-group words, that make
   # a top-level command a compound one with no data region.

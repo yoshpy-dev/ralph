@@ -635,6 +635,15 @@ guard_deny_only_forms=(
   $'$c; echo \'sudo ls\''
   $'>out.txt; echo \'sudo ls\''
   $'echo hi; >out.txt; echo \'sudo ls\''
+  # 9. Cross-review cycle 3: in zsh a printf %n conversion assigns to the
+  # variable an argument names, and test -v and [ -v look a variable up;
+  # both evaluate a subscript such as arr[$(cmd)]. printf only reads data
+  # when no word has a %, a $ or a backtick (a format from a variable could
+  # hold %n), and test and [ are not data commands.
+  $'printf \'%n\' \'arr[$(sudo id; echo 1)]\''
+  $'printf "$fmt" \'arr[$(sudo id; echo 1)]\''
+  $'test -v \'arr[$(sudo id; echo 1)]\''
+  $'[ -v \'arr[$(sudo id; echo 1)]\' ]'
 )
 check_modes B deny absent bypassPermissions -- "${guard_deny_only_forms[@]}"
 
@@ -844,6 +853,15 @@ edge_deny=(
   'git push -ofoo --force origin'
   'git push --push-option=x --force origin'
   'git reset --pathspec-fr -- --hard'
+  # Cross-review cycle 3: a value-taking option can take -- as its value, so
+  # the --no-verify scan of merge, rebase and am does not stop at --, and git
+  # commit reads abbreviated value-taking long options (--trail is --trailer)
+  # with their value. The last one is a false positive kept on purpose: the
+  # message is the text --no-verify (the old guard had no --no-verify rule).
+  'git merge -m -- --no-verify feature'
+  'git rebase --onto -- --no-verify main'
+  'git commit --trail -- --no-verify -m fix'
+  'git merge -m --no-verify feature'
 )
 check_modes D deny absent -- "${edge_deny[@]}"
 
@@ -964,6 +982,10 @@ edge_none=(
   # data command name is that data command. The old guard denies this one (the
   # sudo substring), like the other data-region rows of this array.
   $'"echo" \'sudo ls\''
+  # An abbreviated value-taking commit option consumes its value; a word
+  # after -- is a pathspec, not a flag.
+  $'git commit --trail \'Signed-off-by: x\' -m fix'
+  'git commit --trailer=x -m fix -- --no-verify'
 )
 check_modes D none absent -- "${edge_none[@]}"
 
@@ -1042,6 +1064,12 @@ edge_sentinel_deny=(
   # denied it (the sudo substring), so this moves here from edge_none, not to
   # intentional_fixes.
   '=echo sudo ls'
+  # Cross-review cycle 3: printf with a % (or a $ or a backtick) and test or [
+  # give no data region, so the sentinel decides; the old guard denied these
+  # too.
+  $'printf \'%s\\n\' \'sudo ls\''
+  $'[ -n \'sudo ls\' ]'
+  $'test -n \'git push --force\''
 )
 check_modes D deny absent -- "${edge_sentinel_deny[@]}"
 
