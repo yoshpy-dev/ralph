@@ -115,8 +115,9 @@
 #      quotes, at the end of a line of a quoted heredoc body or a comment,
 #      after an escaped backslash) also drops them, as the previous guard
 #      denied those commands too. A commit message passed in the recommended
-#      heredoc form therefore passes only when its command's first word is git
-#      and no line of the command ends in a backslash.
+#      heredoc form therefore passes only when every command in the same Bash
+#      call starts with a data command or git (in practice: run git commit as
+#      a command of its own) and no line of the call ends in a backslash.
 # Not covered: anything only known at run time (variables such as $cmd,
 # aliases, functions, git aliases, scripts read from a file, remote commands
 # such as ssh host '...'), and shell syntax beyond the above: case
@@ -1134,11 +1135,15 @@ function push_val_opt(a) {
   return opt_is(a, "--repo") || opt_is(a, "--receive-pack") || opt_is(a, "--exec") || opt_is(a, "--recurse-submodules") || opt_is(a, "--push-option")
 }
 # reset_rules(ctx, i, n): git reset with --hard, but everything after -- is a
-# pathspec (a file named --hard is not a flag).
-function reset_rules(ctx, i, n) {
+# pathspec (a file named --hard is not a flag). --pathspec-from-file takes its
+# file in the next word unless it has =, so that word (even --) is skipped
+# first (git reset --pathspec-from-file -- --hard is a hard reset).
+function reset_rules(ctx, i, n,    a) {
   for (; i <= n; i++) {
-    if (WV[ctx, i] == "--") return
-    if (opt_is(WV[ctx, i], "--hard")) deny("hard_reset")
+    a = WV[ctx, i]
+    if (opt_is(a, "--pathspec-from-file")) { if (!index(a, "=")) i++; continue }
+    if (a == "--") return
+    if (opt_is(a, "--hard")) deny("hard_reset")
   }
 }
 function no_verify_rules(ctx, i, n) {
@@ -1421,7 +1426,7 @@ case "$rule" in
     emit_deny "Hard reset is blocked by the scaffold."
     ;;
   commit_message)
-    emit_deny "コミットメッセージのダブルクォート内にバッククォートまたは \$() を検出しました。シェルのコマンド置換として解釈され、環境変数やシークレットが漏洩する恐れがあります。代わりにシングルクォートまたは HEREDOC (<<'EOF') を使用してください。"
+    emit_deny "コミットメッセージのダブルクォート内にバッククォートまたは \$() を検出しました。シェルのコマンド置換として解釈され、環境変数やシークレットが漏洩する恐れがあります。代わりにシングルクォートまたは HEREDOC (<<'EOF') を使用してください。HEREDOC の形は git commit を単独のコマンドで打ったときだけ通ります (同じ呼び出しに make や ./scripts/ などのコマンドを並べると止まります)。"
     ;;
   no_verify)
     emit_deny "--no-verify (and -n on git commit) skips the git hooks and is blocked by the scaffold. Fix what the hook reports instead."

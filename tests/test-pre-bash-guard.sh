@@ -663,18 +663,6 @@ ac3=(
   'echo x > .env'
   'rm -rf build/'
   'gh pr create --title t'
-  # Cycle 2 (P2-4, P2-5): a value-taking push option whose value is read as a
-  # flag, and a hard-reset look-alike after --. git push -h on this machine
-  # lists -o/--push-option, --repo, --receive-pack, --exec and
-  # --recurse-submodules as value-taking; -ofoo is -o with value foo. After
-  # reset's -- everything is a pathspec, so --hard names a file. The old guard
-  # let all of these through.
-  'git push origin -ofoo'
-  'git push -o ci.skip origin main'
-  'git push --push-option=foo origin main'
-  'git push --repo origin main'
-  'git reset -- --hard'
-  'git reset HEAD -- --hard'
 )
 check_modes C none absent bypassPermissions -- "${ac3[@]}"
 collect_corpus=no
@@ -832,6 +820,11 @@ edge_deny=(
   'git push -fo x origin'
   'git push -o x --force origin'
   'git push -uf origin main'
+  # Self-review cycle 3 (C3-2): --pathspec-from-file takes the next word as
+  # its file, even when that word is --, so the --hard after it is a real hard
+  # reset (git does reset --hard there).
+  'git reset --pathspec-from-file -- --hard'
+  'git reset --pathspec-from-file f --hard'
 )
 check_modes D deny absent -- "${edge_deny[@]}"
 
@@ -924,6 +917,22 @@ edge_none=(
   'echo $((1+2))'
   'for f in *.md; do echo "$f"; done'
   'case "$x" in a) echo a;; esac'
+  # Cross-review cycle 2 (P2-4, P2-5): a value-taking push option whose value
+  # is read as a flag, and a hard-reset look-alike after --. git push -h on
+  # this machine lists -o/--push-option, --repo, --receive-pack, --exec and
+  # --recurse-submodules as value-taking; -ofoo is -o with value foo. After
+  # reset's -- everything is a pathspec, so --hard names a file. The old guard
+  # let all of these through. They are not in AC3 (section C), which mirrors
+  # the plan's list.
+  'git push origin -ofoo'
+  'git push -o ci.skip origin main'
+  'git push --push-option=foo origin main'
+  'git push --repo origin main'
+  'git reset -- --hard'
+  'git reset HEAD -- --hard'
+  # --pathspec-from-file=f has its value attached, so the -- after it ends
+  # the options and --hard is a pathspec.
+  'git reset --pathspec-from-file=f -- --hard'
 )
 check_modes D none absent -- "${edge_none[@]}"
 
