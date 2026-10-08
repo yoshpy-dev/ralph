@@ -4163,13 +4163,10 @@ func TestOrgSpawn_Reserve_InactiveLeaderChecksMaxOrgs(t *testing.T) {
 						t.Fatalf("RunningOrgs = %v, want org-a and org-b", got)
 					}
 				} else {
-					if r.Outcome != SpawnOutcomeRejected || r.Err == nil {
-						t.Fatalf("expected a max_orgs rejection for org-a, got %+v", r)
-					}
-					for _, w := range []string{"max_orgs 1 reached", `org_id "org-a" is not running`, "(org-b)", "ralph org disband --org-id <id>"} {
-						if !strings.Contains(r.Err.Error(), w) {
-							t.Errorf("error %q does not contain %q", r.Err, w)
-						}
+					// The same error a new org gets at max_orgs (ValidateOrgWideCapacity).
+					want := `org: max_orgs 1 reached: org_id "org-a" is not running and 1 orgs are (org-b); ` + disbandFreesSlotHint
+					if r.Outcome != SpawnOutcomeRejected || r.Err == nil || r.Err.Error() != want {
+						t.Fatalf("expected the max_orgs rejection %q for org-a, got %+v", want, r)
 					}
 					if ev := lastEvent(t, o); ev.Event != EventDisbanded || ev.OrgID != "org-a" {
 						t.Fatalf("expected no record after the legacy disbanded, got %+v", ev)

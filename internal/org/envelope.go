@@ -90,17 +90,28 @@ const disbandFreesSlotHint = "a finished org frees its slot and seats with ralph
 // (config.Load rejects such a value, so only a hand-built config.OrgConfig
 // can carry one).
 func ValidateOrgWideCapacity(cfg config.OrgConfig, req SpawnRequest, runningOrgs []string, totalActiveSeats int) error {
-	if len(runningOrgs) >= cfg.MaxOrgs && !slices.Contains(runningOrgs, req.OrgID) {
+	if err := validateMaxOrgs(cfg, req.OrgID, runningOrgs); err != nil {
+		return err
+	}
+	if totalActiveSeats >= cfg.MaxTotalSeats {
+		return fmt.Errorf("org: max_total_seats %d reached: %d seats are active across all orgs; %s",
+			cfg.MaxTotalSeats, totalActiveSeats, disbandFreesSlotHint)
+	}
+	return nil
+}
+
+// validateMaxOrgs is the max_orgs half of ValidateOrgWideCapacity: orgID is
+// refused when it is not in runningOrgs and len(runningOrgs) has reached
+// cfg.MaxOrgs. idempotentRespawn (spawn.go) calls it alone, for a
+// reservation that would make an org run without adding a seat.
+func validateMaxOrgs(cfg config.OrgConfig, orgID string, runningOrgs []string) error {
+	if len(runningOrgs) >= cfg.MaxOrgs && !slices.Contains(runningOrgs, orgID) {
 		running := strings.Join(runningOrgs, ", ")
 		if running == "" {
 			running = "none"
 		}
 		return fmt.Errorf("org: max_orgs %d reached: org_id %q is not running and %d orgs are (%s); %s",
-			cfg.MaxOrgs, req.OrgID, len(runningOrgs), running, disbandFreesSlotHint)
-	}
-	if totalActiveSeats >= cfg.MaxTotalSeats {
-		return fmt.Errorf("org: max_total_seats %d reached: %d seats are active across all orgs; %s",
-			cfg.MaxTotalSeats, totalActiveSeats, disbandFreesSlotHint)
+			cfg.MaxOrgs, orgID, len(runningOrgs), running, disbandFreesSlotHint)
 	}
 	return nil
 }

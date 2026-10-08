@@ -1085,10 +1085,11 @@ func spawnCapacityErr(cfg config.OrgConfig, p SpawnParams, req SpawnRequest, eve
 // When the seat is not Active (a legacy ledger where an older ralph's
 // `disbanded` followed the leader's `spawned` with no `stopped`), its org may
 // not be running, and a reservation alone makes an org run (RunningOrgs). So
-// max_orgs is decided first, as ValidateOrgWideCapacity decides it for an
-// org that is not running: once max_orgs other orgs run, the reservation is
-// refused. max_total_seats is not checked, because no seat is added. An
-// Active seat's org is running, so it skips this check.
+// max_orgs is decided first with validateMaxOrgs, the max_orgs half of
+// ValidateOrgWideCapacity: once max_orgs other orgs run, the reservation is
+// refused with the same error a new org gets. max_total_seats is not
+// checked, because no seat is added. An Active seat's org is running, so it
+// skips this check.
 //
 // Every refusal is a plain rejection (no `rejected` event, no receipt): a
 // `rejected` for the seat would replace `spawned` as its latest state event
@@ -1097,12 +1098,8 @@ func spawnCapacityErr(cfg config.OrgConfig, p SpawnParams, req SpawnRequest, eve
 func (o *Org) idempotentRespawn(p SpawnParams, seat SeatStatus, events []ManifestEvent) SpawnResult {
 	if len(p.Reserve) > 0 {
 		if !seat.Active {
-			running := RunningOrgs(events)
-			if len(running) >= o.Config.MaxOrgs && !slices.Contains(running, p.OrgID) {
-				return SpawnResult{Outcome: SpawnOutcomeRejected, Err: fmt.Errorf(
-					"org: max_orgs %d reached: org_id %q is not running and %d orgs are (%s), so its %s seat (spawned, not active) cannot reserve paths; %s",
-					o.Config.MaxOrgs, p.OrgID, len(running), strings.Join(running, ", "), LeaderIdentity, disbandFreesSlotHint,
-				)}
+			if err := validateMaxOrgs(o.Config, p.OrgID, RunningOrgs(events)); err != nil {
+				return SpawnResult{Outcome: SpawnOutcomeRejected, Err: err}
 			}
 		}
 		record, err := reservationDecision(events, p.OrgID, p.Reserve)
