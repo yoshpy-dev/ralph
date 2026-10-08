@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -3222,12 +3223,24 @@ func TestOrgCloseDeferredSelf_Force_NoCompensation(t *testing.T) {
 
 // TestOrgCloseDeferredSelf_NothingRestored_NamesTheManualClose: when a
 // failed deferred close cannot restore the records -- the manifest cannot be
-// read, or the compensating append fails -- the error names the herdr
-// command that closes the pane or workspace by hand, since a retry would not
-// find it, and does not say the records were restored. An unreadable
-// manifest also means no ownership check, so no close.
+// read, the manifest lock cannot be taken, or the compensating append fails
+// -- the error names the herdr command that closes the pane or workspace by
+// hand, since a retry would not find it, and does not say the records were
+// restored. An unreadable manifest also means no ownership check, so no
+// close.
 func TestOrgCloseDeferredSelf_NothingRestored_NamesTheManualClose(t *testing.T) {
 	unreadable := func(t *testing.T, o *Org) { o.Manifest = NewManifestStoreAtPath(t.TempDir()) } // a directory: Read fails
+	// lockUnavailable puts a directory where the lock file goes, so opening
+	// it fails.
+	lockUnavailable := func(t *testing.T, o *Org) {
+		lock := filepath.Join(filepath.Dir(o.Manifest.Path()), manifestLockFile)
+		if err := os.Remove(lock); err != nil && !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("remove the lock file: %v", err)
+		}
+		if err := os.Mkdir(lock, 0o755); err != nil {
+			t.Fatalf("make the lock path a directory: %v", err)
+		}
+	}
 	for _, tc := range []struct {
 		name          string
 		workspace     bool
@@ -3243,6 +3256,14 @@ func TestOrgCloseDeferredSelf_NothingRestored_NamesTheManualClose(t *testing.T) 
 		{
 			name: "pane, compensation append fails", breakManifest: readOnlyManifest, readOnly: true, wantCloses: 1,
 			wantText: []string{`record seat "seat-1" of org_id "org-a" active again: `, "; close it by hand: herdr pane close pane-1"},
+		},
+		{
+			name: "pane, manifest lock unavailable", breakManifest: lockUnavailable, wantCloses: 1,
+			wantText: []string{"; nothing recorded again: org: open manifest lock file ", "; close it by hand: herdr pane close pane-1"},
+		},
+		{
+			name: "workspace, manifest lock unavailable", workspace: true, breakManifest: lockUnavailable, wantCloses: 1,
+			wantText: []string{"; nothing recorded again: org: open manifest lock file ", "; if it is the org's, close it by hand: herdr workspace close ws-1"},
 		},
 		{
 			name: "workspace, manifest unreadable", workspace: true, breakManifest: unreadable,
@@ -3294,6 +3315,216 @@ func TestOrgCloseDeferredSelf_NothingRestored_NamesTheManualClose(t *testing.T) 
 			}
 		})
 	}
+}
+
+// closeHookHerdr is a fakeHerdr that runs during once, on the first
+// PaneClose or WorkspaceClose, before the fake answers: another command
+// writing to the manifest while a deferred self close waits on herdr.
+type closeHookHerdr struct {
+	*fakeHerdr
+	during func()
+}
+
+func (h *closeHookHerdr) runDuring() {
+	if during := h.during; during != nil {
+		h.during = nil
+		during()
+	}
+}
+
+func (h *closeHookHerdr) PaneClose(ctx context.Context, paneID string) error {
+	h.runDuring()
+	return h.fakeHerdr.PaneClose(ctx, paneID)
+}
+
+func (h *closeHookHerdr) WorkspaceClose(ctx context.Context, workspaceID string) error {
+	h.runDuring()
+	return h.fakeHerdr.WorkspaceClose(ctx, workspaceID)
+}
+
+// eventsWithDetailsPrefix returns the events whose Details start with
+// prefix.
+func eventsWithDetailsPrefix(events []ManifestEvent, prefix string) []ManifestEvent {
+	var out []ManifestEvent
+	for _, ev := range events {
+		if strings.HasPrefix(ev.Details, prefix) {
+			out = append(out, ev)
+		}
+	}
+	return out
+}
+
+// TestOrgCloseDeferredSelf_NewerRecordsWhileClosing_Stay: the compensation
+// after a failed deferred self close decides from the manifest read again
+// under the manifest lock, not from the copy read before the herdr calls,
+// so records another command wrote while the close waited stay the latest.
+// A seat spawned again in another pane is not pointed back at the old pane,
+// a reservation of the org started again is not replaced by the old one
+// (nor restored once that later run was disbanded too), and a workspace id
+// herdr gave to another org is not reopened for the old org. What still
+// matches the copy is restored as before. The error names what was not
+// recorded again and the by-hand close, since a retry may not find what is
+// open.
+func TestOrgCloseDeferredSelf_NewerRecordsWhileClosing_Stay(t *testing.T) {
+	t.Run("pane: seat spawned again in another pane", func(t *testing.T) {
+		o, h := deferOwnPaneCloseFailing(t, false)
+		o.Herdr = &closeHookHerdr{fakeHerdr: h, during: func() {
+			spawnSeatIn(t, o, h, "org-a", "seat-1", "ws-1", "pane-2")
+		}}
+
+		err := o.CloseDeferredSelfPane("pane-1", false)
+		if err == nil || !errors.Is(err, errTestCloseRefused) ||
+			!strings.Contains(err.Error(), `did not record seat "seat-1" of org_id "org-a" active again: newer records written to the manifest while the close waited stay as they are`) ||
+			!strings.HasSuffix(err.Error(), "; close it by hand: herdr pane close pane-1") || strings.Contains(err.Error(), "retries the close") {
+			t.Fatalf("expected an error naming the seat not recorded again and the by-hand close, got %v", err)
+		}
+		events := mustReadEvents(t, o)
+		if got := eventsWithDetailsPrefix(events, "reactivated: "); len(got) != 0 {
+			t.Fatalf("expected no compensating spawned, got %+v", got)
+		}
+		if last := events[len(events)-1]; last.Event != EventSpawned || last.PaneID != "pane-2" {
+			t.Fatalf("expected the new spawn in pane-2 to stay the latest record, got %+v", last)
+		}
+		if seat, _ := seatFromEvents(events, "org-a", "seat-1"); !seat.Active || seat.PaneID != "pane-2" {
+			t.Fatalf("expected seat-1 active in pane-2, got %+v", seat)
+		}
+	})
+	t.Run("workspace: org started again with another reservation", func(t *testing.T) {
+		o, h := deferOwnLeaderWorkspaceCloseFailing(t, "internal/auth/")
+		o.Herdr = &closeHookHerdr{fakeHerdr: h, during: func() {
+			spawnLeaderIn(t, o, h, "org-a", "ws-2", "pane-2", "docs/")
+		}}
+
+		err := o.CloseDeferredSelfWorkspace("ws-1", false)
+		if err == nil || !errors.Is(err, errTestWorkspaceCloseRefused) ||
+			!strings.Contains(err.Error(), `; recorded workspace "ws-1" of org_id "org-a" open again, so running the command again retries the close; `+
+				`did not record seat "leader" of org_id "org-a" active and the reservation internal/auth/ of org_id "org-a" again: newer records`) ||
+			!strings.HasSuffix(err.Error(), "; if it is the org's, close it by hand: herdr workspace close ws-1") {
+			t.Fatalf("expected ws-1 reopened, the leader and the reservation not recorded again, and the by-hand close, got %v", err)
+		}
+		events := mustReadEvents(t, o)
+		if got := eventsWithDetailsPrefix(events, "reactivated: "); len(got) != 0 {
+			t.Fatalf("expected no compensating spawned, got %+v", got)
+		}
+		if got := eventsWithDetailsPrefix(events, "paths=internal/auth/ restored: "); len(got) != 0 {
+			t.Fatalf("expected the old reservation not restored, got %+v", got)
+		}
+		if got := ActiveReservation(events, "org-a"); !slices.Equal(got, []string{"docs/"}) {
+			t.Fatalf("ActiveReservation(org-a) = %q, want the new docs/ kept", got)
+		}
+		if seat, _ := seatFromEvents(events, "org-a", LeaderIdentity); !seat.Active || seat.PaneID != "pane-2" {
+			t.Fatalf("expected the leader active in pane-2, got %+v", seat)
+		}
+		if open := openOrgWorkspaces(events, "org-a"); !slices.Contains(open, "ws-1") || !slices.Contains(open, "ws-2") {
+			t.Fatalf("openOrgWorkspaces(org-a) = %v, want the new ws-2 and the reopened ws-1", open)
+		}
+
+		ownPaneEnv(o, "", "")
+		h.workspaceID, h.paneID = "ws-b", "pane-b"
+		if r := o.Spawn(leaderParams("org-b", "internal/auth/")); r.Outcome != SpawnOutcomeSpawned {
+			t.Fatalf("expected org-b to reserve internal/auth/, which org-a no longer holds, got %+v", r)
+		}
+	})
+	t.Run("workspace: org started again and disbanded again", func(t *testing.T) {
+		o, h := deferOwnLeaderWorkspaceCloseFailing(t, "internal/auth/")
+		o.Herdr = &closeHookHerdr{fakeHerdr: h, during: func() {
+			spawnLeaderIn(t, o, h, "org-a", "ws-2", "pane-2", "docs/")
+			ownPaneEnv(o, "", "")
+			if d := o.Disband(DisbandParams{OrgID: "org-a"}); len(d.Errs) != 0 || !d.Disbanded {
+				t.Errorf("disband org-a again from another pane: %+v", d)
+			}
+			ownPaneEnv(o, "pane-1", "ws-1")
+		}}
+
+		err := o.CloseDeferredSelfWorkspace("ws-1", false)
+		if err == nil || !strings.Contains(err.Error(), `did not record seat "leader" of org_id "org-a" active and the reservation internal/auth/ of org_id "org-a" again: newer records`) {
+			t.Fatalf("expected the leader and the reservation not recorded again, got %v", err)
+		}
+		events := mustReadEvents(t, o)
+		if got := eventsWithDetailsPrefix(events, "paths=internal/auth/ restored: "); len(got) != 0 {
+			t.Fatalf("expected the reservation of the earlier run not restored after the later disbanded, got %+v", got)
+		}
+		if got := ActiveReservation(events, "org-a"); got != nil {
+			t.Fatalf("ActiveReservation(org-a) = %q, want none", got)
+		}
+	})
+	t.Run("workspace: herdr gave the id to another org", func(t *testing.T) {
+		o, h := deferOwnWorkspaceCloseFailing(t, false)
+		o.Herdr = &closeHookHerdr{fakeHerdr: h, during: func() {
+			spawnSeatIn(t, o, h, "org-b", "seat-1", "ws-1", "pane-3")
+		}}
+
+		err := o.CloseDeferredSelfWorkspace("ws-1", false)
+		if err == nil || !strings.Contains(err.Error(), `; recorded seat "seat-1" of org_id "org-a" active again, so running the command again retries the close; `+
+			`did not record workspace "ws-1" of org_id "org-a" open again: newer records`) ||
+			!strings.HasSuffix(err.Error(), "; if it is the org's, close it by hand: herdr workspace close ws-1") {
+			t.Fatalf("expected seat-1 reactivated, ws-1 not reopened, and the by-hand close, got %v", err)
+		}
+		events := mustReadEvents(t, o)
+		if got := eventsWithDetailsPrefix(events, "reopened: "); len(got) != 0 {
+			t.Fatalf("expected no compensating org_workspace_created, got %+v", got)
+		}
+		if last, _ := lastWorkspaceEvent(events, "ws-1"); last.OrgID != "org-b" || last.Event != EventOrgWorkspaceCreated {
+			t.Fatalf("expected org-b's org_workspace_created to stay the latest for ws-1, got %+v", last)
+		}
+		if open := openOrgWorkspaces(events, "org-a"); len(open) != 0 {
+			t.Fatalf("openOrgWorkspaces(org-a) = %v, want none", open)
+		}
+		if got := eventsWithDetailsPrefix(events, "reactivated: "); len(got) != 1 || got[0].OrgID != "org-a" || got[0].PaneID != "pane-1" {
+			t.Fatalf("expected org-a's seat-1 reactivated in pane-1, got %+v", got)
+		}
+	})
+	t.Run("workspace: a spawn holds the manifest lock", func(t *testing.T) {
+		o, h := deferOwnLeaderWorkspaceCloseFailing(t, "internal/auth/")
+		held, done := make(chan struct{}), make(chan error, 1)
+		o.Herdr = &closeHookHerdr{fakeHerdr: h, during: func() {
+			go func() {
+				done <- withManifestLock(filepath.Dir(o.Manifest.Path()), func() error {
+					close(held)
+					time.Sleep(200 * time.Millisecond)
+					return o.appendEvent(scopeReservedEvent(o.now(), "org-a", []string{"docs/"}, "", false))
+				})
+			}()
+			select {
+			case <-held:
+			case lockErr := <-done: // the lock was never taken; hand the error to the check below
+				done <- lockErr
+			}
+		}}
+
+		err := o.CloseDeferredSelfWorkspace("ws-1", false)
+		if lockErr := <-done; lockErr != nil {
+			t.Fatalf("the locked reservation: %v", lockErr)
+		}
+		if err == nil || !strings.Contains(err.Error(), `did not record the reservation internal/auth/ of org_id "org-a" again: newer records`) {
+			t.Fatalf("expected the reservation not recorded again, got %v", err)
+		}
+		events := mustReadEvents(t, o)
+		if got := eventsWithDetailsPrefix(events, "paths=internal/auth/ restored: "); len(got) != 0 {
+			t.Fatalf("expected the compensation to wait for the lock and see docs/, got the old reservation restored %+v", got)
+		}
+		if got := ActiveReservation(events, "org-a"); !slices.Equal(got, []string{"docs/"}) {
+			t.Fatalf("ActiveReservation(org-a) = %q, want docs/", got)
+		}
+	})
+	t.Run("workspace: manifest unreadable at the second read", func(t *testing.T) {
+		o, h := deferOwnWorkspaceCloseFailing(t, false)
+		before := len(mustReadEvents(t, o))
+		path := o.Manifest.Path()
+		o.Herdr = &closeHookHerdr{fakeHerdr: h, during: func() {
+			o.Manifest = NewManifestStoreAtPath(t.TempDir()) // a directory: Read fails
+		}}
+
+		err := o.CloseDeferredSelfWorkspace("ws-1", false)
+		if err == nil || !strings.Contains(err.Error(), "; nothing recorded again: read manifest: ") ||
+			!strings.HasSuffix(err.Error(), "; if it is the org's, close it by hand: herdr workspace close ws-1") || strings.Contains(err.Error(), "retries the close") {
+			t.Fatalf("expected nothing recorded again and the by-hand close, got %v", err)
+		}
+		o.Manifest = NewManifestStoreAtPath(path)
+		if got := len(mustReadEvents(t, o)); got != before {
+			t.Fatalf("expected no compensating event, got %v", eventNames(t, o)[before:])
+		}
+	})
 }
 
 // TestOrgWait_HappyPath_ReturnsHerdrOutputAndTargetsNamespacedAgent covers

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -1002,10 +1004,15 @@ func (o *Org) stopSeatPane(p StopParams, paneID string) (ctrlCNote, paneNote str
 // would skip it. After an unconfirmed pane or a failed close, unless force,
 // it therefore appends a compensating `spawned` for that seat
 // (reactivateSeat), and the error says the seat is recorded active again.
-// With force (the CLI's --force) it appends nothing and the seat stays
-// recorded stopped. The error ends with the herdr command that closes the
-// pane by hand whenever a retry would not find it: with force, after a
-// manifest read failure or with no seat recorded on paneID, and when the
+// It decides that from the manifest read again under the manifest lock
+// (compensateUnderLock), not from the copy it read before the herdr calls:
+// when the seat has a newer state event by then (it was spawned again in
+// another pane, say), it appends nothing, and the error says the newer
+// record stays. With force (the CLI's --force) it appends nothing and the
+// seat stays recorded stopped. The error ends with the herdr command that
+// closes the pane by hand whenever a retry would not find it: with force,
+// after a manifest read failure or with no seat recorded on paneID, when a
+// newer record stays, and when the lock, the second read or the
 // compensating append fails.
 func (o *Org) CloseDeferredSelfPane(paneID string, force bool) error {
 	if paneID == "" {
@@ -1028,8 +1035,11 @@ func (o *Org) CloseDeferredSelfPane(paneID string, force bool) error {
 	if force {
 		return fmt.Errorf("%w; seat %q of org_id %q stays recorded stopped (--force); %s", err, seatID, orgID, byHand)
 	}
+	why := "self pane close failed: " + failure.Error()
 	var c selfCompensation
-	c.add(o.reactivateSeat(rr.Events, orgID, seatID, paneID, "self pane close failed: "+failure.Error()))
+	o.compensateUnderLock(&c, func(now []ManifestEvent) {
+		c.add(o.reactivateSeat(rr.Events, now, orgID, seatID, paneID, why))
+	})
 	return c.errorFor(err, byHand)
 }
 
@@ -1075,10 +1085,16 @@ func (o *Org) closeSelfPane(orgID, seatID, paneID string) error {
 // for it (reactivateSeat), so the same disband or disband --all retries
 // both. When the org held a reservation before its `disbanded`, it also
 // appends that reservation again (reserveAgain), so the org that is recorded
-// running again holds its range again. The rest follows
-// CloseDeferredSelfPane: with force it appends nothing, and the error names
-// `herdr workspace close` (to run if the workspace is the org's) in the same
-// cases.
+// running again holds its range again. As in CloseDeferredSelfPane, the
+// three decide from the manifest read again under the manifest lock, and
+// each appends nothing when that read has a newer record than the copy read
+// before the herdr calls: a newer workspace event for workspaceID, a newer
+// state event for the seat, or, for the reservation, one the org holds (it
+// was started again with --reserve) or a different one before its latest
+// `disbanded`. The error then names what it did not record again. The rest
+// follows CloseDeferredSelfPane: with force it appends nothing, and the
+// error names `herdr workspace close` (to run if the workspace is the
+// org's) in the same cases.
 func (o *Org) CloseDeferredSelfWorkspace(workspaceID string, force bool) error {
 	if workspaceID == "" {
 		return nil
@@ -1102,13 +1118,15 @@ func (o *Org) CloseDeferredSelfWorkspace(workspaceID string, force bool) error {
 	}
 	why := "self workspace close failed: " + failure.Error()
 	var c selfCompensation
-	c.add(o.reopenWorkspace(last, why))
-	if ownPane := o.getenv(herdrPaneIDEnv); ownPane != "" {
-		if orgID, seatID, ok := lastSeatOnPane(rr.Events, ownPane); ok && orgID == last.OrgID {
-			c.add(o.reactivateSeat(rr.Events, orgID, seatID, ownPane, why))
+	o.compensateUnderLock(&c, func(now []ManifestEvent) {
+		c.add(o.reopenWorkspace(now, last, why))
+		if ownPane := o.getenv(herdrPaneIDEnv); ownPane != "" {
+			if orgID, seatID, ok := lastSeatOnPane(rr.Events, ownPane); ok && orgID == last.OrgID {
+				c.add(o.reactivateSeat(rr.Events, now, orgID, seatID, ownPane, why))
+			}
 		}
-	}
-	c.add(o.reserveAgain(rr.Events, last.OrgID, why))
+		c.add(o.reserveAgain(rr.Events, now, last.OrgID, why))
+	})
 	return c.errorFor(err, byHand)
 }
 
@@ -1130,17 +1148,24 @@ func (o *Org) closeSelfWorkspace(orgID, workspaceID string) error {
 }
 
 // selfCompensation collects what a failed deferred self close restored in
-// the manifest, and the appends that failed, for the error it returns.
+// the manifest, what it left alone because of a newer record, and the
+// appends that failed, for the error it returns.
 type selfCompensation struct {
 	restored []string
+	skipped  []string
 	failed   []error
 }
 
 // add records one compensation step's outcome: restored names what it
-// recorded ("" when the manifest needed nothing), err a failed append.
-func (c *selfCompensation) add(restored string, err error) {
+// recorded, skipped what it did not record because the manifest has a newer
+// record for it (both "" when the copy read before the close needed
+// nothing), err a failed append.
+func (c *selfCompensation) add(restored, skipped string, err error) {
 	if restored != "" {
 		c.restored = append(c.restored, restored)
+	}
+	if skipped != "" {
+		c.skipped = append(c.skipped, skipped)
 	}
 	if err != nil {
 		c.failed = append(c.failed, err)
@@ -1148,92 +1173,143 @@ func (c *selfCompensation) add(restored string, err error) {
 }
 
 // errorFor returns err, which names the pane or workspace left open and
-// why, followed by what was recorded again, and, when an append failed,
-// that failure and byHand, the herdr command that closes it by hand. With
-// nothing restored and nothing failed, the manifest already had the seat
-// active and the workspace open, and err is returned as is.
+// why, followed by what was recorded again, what was not because newer
+// records stay, and the appends that failed. When something was not
+// recorded or failed, a retry may not find what is open, so it ends with
+// byHand, the herdr command that closes it by hand. With nothing restored,
+// skipped or failed, the copy read before the close needed nothing, and err
+// is returned as is.
 func (c selfCompensation) errorFor(err error, byHand string) error {
 	if len(c.restored) > 0 {
 		err = fmt.Errorf("%w; recorded %s again, so running the command again retries the close", err, strings.Join(c.restored, " and "))
 	}
+	if len(c.skipped) > 0 {
+		err = fmt.Errorf("%w; did not record %s again: newer records written to the manifest while the close waited stay as they are", err, strings.Join(c.skipped, " and "))
+	}
 	for _, failed := range c.failed {
 		err = fmt.Errorf("%w; %w", err, failed)
 	}
-	if len(c.failed) > 0 {
+	if len(c.failed) > 0 || len(c.skipped) > 0 {
 		err = fmt.Errorf("%w; %s", err, byHand)
 	}
 	return err
 }
 
+// compensateUnderLock runs compensate under the manifest lock
+// (withManifestLock) with the manifest as read again there. The copy a
+// deferred self close read before its herdr calls can be several
+// driverCallTimeout deadlines old by the time the close has failed, and
+// another command (a spawn of the same org, say) may have written newer
+// records since; each compensation step compares that copy with this read
+// and appends only what is still missing. The lock keeps a spawn's locked
+// section (its checks, scope_reserved and spawn_started) from running
+// between this read and the appends. When the lock or the read fails,
+// nothing is appended, and c records the failure.
+func (o *Org) compensateUnderLock(c *selfCompensation, compensate func(now []ManifestEvent)) {
+	err := withManifestLock(filepath.Dir(o.Manifest.Path()), func() error {
+		rr, err := o.Manifest.Read()
+		if err != nil {
+			return fmt.Errorf("read manifest: %w", err)
+		}
+		compensate(rr.Events)
+		return nil
+	})
+	if err != nil {
+		c.add("", "", fmt.Errorf("nothing recorded again: %w", err))
+	}
+}
+
 // reactivateSeat appends the compensating `spawned` for seatID of orgID
-// when the manifest has the seat stopped in paneID (its latest real state
-// event is `stopped` with that pane_id), after a deferred close left paneID
-// open and the seat's process running. The event copies the role, driver,
-// model, worktree, pane_id and agmsg team of that `stopped`, and the herdr
-// agent name of the latest event that recorded one (`stopped` does not), so
-// Roster shows the seat as it was, active again, also after a later
-// `disbanded` of the org. Details are `reactivated: <why>`. It does not
-// rejoin agmsg: the record is there so a later stop closes the pane, not to
-// give the seat more work. It returns what it recorded for the error text,
-// "" when the seat was not stopped in paneID.
-func (o *Org) reactivateSeat(events []ManifestEvent, orgID, seatID, paneID, why string) (string, error) {
-	seat, ok := seatFromEvents(events, orgID, seatID)
+// when before, the manifest copy read before the close, has the seat
+// stopped in paneID (its latest real state event is `stopped` with that
+// pane_id), after a deferred close left paneID open and the seat's process
+// running. It appends only when now, the manifest read under the lock, still
+// has that `stopped` as the seat's latest state event. The event copies the
+// role, driver, model, worktree, pane_id and agmsg team of that `stopped`,
+// and the herdr agent name of the latest event that recorded one (`stopped`
+// does not), so Roster shows the seat as it was, active again, also after a
+// later `disbanded` of the org. Details are `reactivated: <why>`. It does
+// not rejoin agmsg: the record is there so a later stop closes the pane, not
+// to give the seat more work. It returns, for the error text, what it
+// recorded, or what it did not record because now has a newer state event
+// for the seat (a spawn in another pane, for one); both are "" when the seat
+// was not stopped in paneID in before.
+func (o *Org) reactivateSeat(before, now []ManifestEvent, orgID, seatID, paneID, why string) (restored, skipped string, err error) {
+	seat, ok := seatFromEvents(before, orgID, seatID)
 	if !ok || seat.Event != EventStopped || seat.PaneID != paneID {
-		return "", nil
+		return "", "", nil
+	}
+	what := fmt.Sprintf("seat %q of org_id %q active", seatID, orgID)
+	if current, _ := seatFromEvents(now, orgID, seatID); current != seat {
+		return "", what, nil
 	}
 	if err := o.appendEvent(ManifestEvent{
 		TS: o.now(), OrgID: orgID, SeatID: seatID, Event: EventSpawned,
 		Role: seat.Role, Driver: seat.Driver, Model: seat.Model, Worktree: seat.Worktree,
-		PaneID: paneID, AgmsgTeam: seat.AgmsgTeam, HerdrAgentName: lastHerdrAgentName(events, orgID, seatID),
+		PaneID: paneID, AgmsgTeam: seat.AgmsgTeam, HerdrAgentName: lastHerdrAgentName(now, orgID, seatID),
 		Details: "reactivated: " + why,
 	}); err != nil {
-		return "", fmt.Errorf("record seat %q of org_id %q active again: %w", seatID, orgID, err)
+		return "", "", fmt.Errorf("record seat %q of org_id %q active again: %w", seatID, orgID, err)
 	}
-	return fmt.Sprintf("seat %q of org_id %q active", seatID, orgID), nil
+	return what, "", nil
 }
 
 // reopenWorkspace appends the compensating org_workspace_created for the
-// workspace of last, its latest real workspace event, when that is
-// org_workspace_closed, after a deferred close left the workspace open.
-// openOrgWorkspaces then lists it again, so Disband and orgsToDisband
-// target the org again (also after its `disbanded`) and resolveWorkspace
-// reuses it. Details are `reopened: <why>`. It returns what it recorded for
-// the error text, "" when the manifest already had the workspace open.
-func (o *Org) reopenWorkspace(last ManifestEvent, why string) (string, error) {
+// workspace of last, its latest real workspace event in the manifest copy
+// read before the close, when that is org_workspace_closed, after a deferred
+// close left the workspace open. It appends only when now, the manifest read
+// under the lock, still has last as the workspace's latest real workspace
+// event. openOrgWorkspaces then lists it again, so Disband and
+// orgsToDisband target the org again (also after its `disbanded`) and
+// resolveWorkspace reuses it. Details are `reopened: <why>`. It returns, for
+// the error text, what it recorded, or what it did not record because now
+// has a newer workspace event for the workspace (herdr gave the id to a new
+// workspace, for one); both are "" when last is not org_workspace_closed.
+func (o *Org) reopenWorkspace(now []ManifestEvent, last ManifestEvent, why string) (restored, skipped string, err error) {
 	if last.Event != EventOrgWorkspaceClosed {
-		return "", nil
+		return "", "", nil
+	}
+	what := fmt.Sprintf("workspace %q of org_id %q open", last.PaneID, last.OrgID)
+	if current, _ := lastWorkspaceEvent(now, last.PaneID); current != last {
+		return "", what, nil
 	}
 	if err := o.appendEvent(ManifestEvent{
 		TS: o.now(), OrgID: last.OrgID, SeatID: "", Event: EventOrgWorkspaceCreated,
 		PaneID: last.PaneID, Details: "reopened: " + why,
 	}); err != nil {
-		return "", fmt.Errorf("record workspace %q of org_id %q open again: %w", last.PaneID, last.OrgID, err)
+		return "", "", fmt.Errorf("record workspace %q of org_id %q open again: %w", last.PaneID, last.OrgID, err)
 	}
-	return fmt.Sprintf("workspace %q of org_id %q open", last.PaneID, last.OrgID), nil
+	return what, "", nil
 }
 
 // reserveAgain appends the compensating scope_reserved for orgID after a
 // deferred close left its workspace open: the reservation the org held right
-// before its latest real `disbanded` (reservationBeforeLastDisband), with the
-// same paths and Details `paths=<paths> restored: <why>`. It does not check
-// the other orgs' reservations or the org-wide limits: another org may have
-// taken the range or the last org slot in the window since `disbanded`, and
-// then they overlap, or max_orgs is exceeded by one, until this org is
-// disbanded again (plan 2026-10-08-org-limits-reserve, Risks). It returns
-// what it recorded for the error text, "" when the org already holds a
-// reservation or held none.
-func (o *Org) reserveAgain(events []ManifestEvent, orgID, why string) (string, error) {
-	if ActiveReservation(events, orgID) != nil {
-		return "", nil
-	}
-	paths := reservationBeforeLastDisband(events, orgID)
+// before its latest real `disbanded` in before, the manifest copy read
+// before the close (reservationBeforeLastDisband), with the same paths and
+// Details `paths=<paths> restored: <why>`. It appends only when now, the
+// manifest read under the lock, has no reservation for the org and the same
+// reservation before its latest `disbanded`; otherwise the org was started
+// again (with --reserve) or disbanded again since, and the newer records
+// stay. It does not check the other orgs' reservations or the org-wide
+// limits: another org may have taken the range or the last org slot in the
+// window since `disbanded`, and then they overlap, or max_orgs is exceeded
+// by one, until this org is disbanded again (plan
+// 2026-10-08-org-limits-reserve, Risks). It returns, for the error text,
+// what it recorded or what it did not record; both are "" when the org held
+// no reservation before its `disbanded` in before.
+func (o *Org) reserveAgain(before, now []ManifestEvent, orgID, why string) (restored, skipped string, err error) {
+	paths := reservationBeforeLastDisband(before, orgID)
 	if paths == nil {
-		return "", nil
+		return "", "", nil
+	}
+	what := fmt.Sprintf("the reservation %s of org_id %q", strings.Join(paths, ","), orgID)
+	if ActiveReservation(now, orgID) != nil || !slices.Equal(reservationBeforeLastDisband(now, orgID), paths) {
+		return "", what, nil
 	}
 	if err := o.appendEvent(scopeReservedEvent(o.now(), orgID, paths, "restored: "+why, false)); err != nil {
-		return "", fmt.Errorf("record the reservation of org_id %q again: %w", orgID, err)
+		return "", "", fmt.Errorf("record the reservation of org_id %q again: %w", orgID, err)
 	}
-	return fmt.Sprintf("the reservation %s of org_id %q", strings.Join(paths, ","), orgID), nil
+	return what, "", nil
 }
 
 // lastSeatOnPane returns the org_id and seat_id of the latest real
