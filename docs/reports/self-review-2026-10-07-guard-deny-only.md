@@ -334,3 +334,84 @@ END の `set_text(IN)` の直後(`.claude/hooks/pre_bash_guard.sh:1305`)で、�
 - 名前が指すもの: Claude Code の Bash ツールは、利用者の shell のスナップショットを読み込む。ここでは `cat` が `bat`、`ls` が `eza -aal --icons` のエイリアスで、`grep` は Claude Code の関数になっている(`type cat grep ls`)。許可リストが見るのは名前で、ヘッダーの Not covered はエイリアスと関数を挙げている。これらのプログラムが引数をどう扱うかは確かめていない
 - git が保存したメッセージを、同じコマンドの中の置換や git の下位コマンドが実行時に読み返す場合(確認したことの 1)。hook では確かめていない。ヘッダーの「実行時にしか分からないもの」に入る
 - テストスイート(1800/0)、mawk・gawk・busybox の awk、ubuntu での実行はしていない。239 行の変異の比較は jq ありの経路だけで回した
+
+## cycle 4 (cap raised to 4)
+
+- Date: 2026-10-08
+- Reviewer: reviewer subagent (Claude)。cross-review の 3 周目のあと、ユーザーが上限を 4 に上げてから回した self-review。`cycle-count.json` は 2 のまま。ユーザーはこれを最後の run とした。ID は `C4-` で始めた
+- 対象: `git diff 48628bd2..HEAD -- .claude tests templates internal`(HEAD fbf3c584)。guard の変更は 849f5411(C3-1 の理由の文とヘッダー、C3-2 の reset)と b3c3fdaa(printf、DATACMD、`no_verify_rules`、`commit_rules`、ヘッダーの Not covered)。テストの変更は 8e94e76b(tester)と b3c3fdaa。`internal/org/prompts/implementer.md` と `git-commit-strategy.md` の差分は /sync-docs(24876df7)の文書の変更。root と template の guard と rule は `cmp` で同一
+- していないこと: テストスイートと静的解析は流していない(1856/0 は orchestrator の申告)。判定の根拠は、hook に行ごとのファイルを渡した結果(scratchpad の `sr6/`)、計測用に写した hook の出力、shell に無害な形を渡した結果。見張りの語を含む形で hook に渡したのは、triage の case ファイルと test ファイルの配列の行だけで、新しい形は作っていない
+
+### 849f5411 と b3c3fdaa が変えたこと
+
+- `reset_rules`(`.claude/hooks/pre_bash_guard.sh:1145-1152`)は、`--` を見る前に `--pathspec-from-file` の値を読み飛ばす(`=` がなければ次の語)
+- `stage_note`(`:923`)は、printf の語のどれかが `-v` で始まるか、`%`・`$`・バッククォートを含めば、引数をデータにしない。判定は語の値(`WV`)で読む
+- DATACMD の一覧(`:1352`)から `test` と `[` を外した
+- `no_verify_rules`(`:1157-1159`)は `--` で止まらない
+- `commit_rules`(`:1184`)は、値を取る長いオプション 10 個を `opt_is` で読み、`=` があれば 1 語、なければ 2 語進む
+- 理由の文(commit_message、`:1437`)とヘッダー(`:117-120`)に「git commit を単独のコマンドで打つ」を足した。ヘッダーの Not covered に、起動ファイルで立てた shell のオプションを足した(`:130-131`)
+
+### 確認したこと
+
+1. triage cycle 3 の 2 件
+   - `xr3/c3p1a`(printf `%n`)と `c3p1b`(`test -v`)は、新版が deny/deny(jq あり/なし)、旧版も deny/deny。`[ -v` は test ファイルの B 節の行で、下の 4 で deny/deny
+   - `c3p2a`(`git merge -m --` の形)、`c3p2b`(`git commit --trail --` の形)、`c3p2c`(メッセージが `--no-verify` の merge)は、新版が deny/deny、旧版が none/none
+   - triage が挙げた形は 2 件とも閉じた。ただし #1 の型は、printf の判定が語の値を読むため、`$'...'` で書くと残る(C4-1)。#2 の型は 1 文字の略記で残る(C4-2)
+2. 正しさ
+   - `i += (index(a, "=") ? 1 : 2)`: `=` で値をつけた形は 1 語、離した形は 2 語進む。`opt_is` は `=` から後ろを外して比べるので、`--date=now` の次の語は読まれる。mawk 1.3.4(ubuntu:24.04、jq なしの経路)でも、commit・printf・merge・rebase・reset を含む 136 行の判定が配列の期待どおりだった
+   - `opt_is` の略記の衝突: 値を取る 10 個のオプションと `--message`・`--file` について、長さ 1 から全長までのすべての接頭辞を git 2.49.0 に渡した(`sr6/abbrev.sh`、使い捨てのリポジトリ)。4 文字以上の接頭辞は、そのオプションに決まるか、git が ambiguous で止める(`--re` は reuse-message と reset-author、`--fi` は file と fixup、`--pathspec-f` までは pathspec-file-nul と重なる)。guard が次の語を値として飛ばし、git がその語をオプションとして読む組み合わせはなかった。`--da` は date だけに決まり、`--dry-run` と重なるのは `--d` から。3 文字の接頭辞の扱いは C4-2
+   - `no_verify_rules` が `--` で止まらないこと: AC2 の `git merge --no-verify x` は deny のまま。AC3 に merge・rebase・am の形はない。止めすぎが増えるのは、`--` の後ろの語が `--no` から `--no-verify` までの接頭辞のとき(`git merge --no` は git も unknown option で止める)と、メッセージの値がちょうど `--no-verify` のとき(test ファイルが意図した止めすぎとして固定している)
+   - printf の規則と AC3: `printf 'a\ngit push --force'` の語の値は `a\ngit push --force` で、`%`・`$`・バッククォートを含まない。計測用の写しで SRO=1、判定は none のまま
+3. DATACMD のほかの名前。置換の中身は `echo HIT-<名前> >&9` だけにした(`sr6/builtins.zsh`、`sr6/builtins.bash`)
+   - zsh 5.9(`zsh -f`): echo、true、false、cd(引数 1 つと 2 つ)、type(`-m`、`-w` も)、which(`-m`、`-p` も)、`/bin/ls`、`/bin/cat` は置換を実行しなかった。cdablevars を立てた cd、extendedglob を立てた `type -m`・`which -m` に glob qualifier を渡した形も実行しなかった。printf は、変換のない書式、`%s`、`%c`、`%b`、書式の中の `\x25n` では実行せず、`%d`、`%x`、`%f`、`%n`、`%1$n` で実行した。数値の変換も引数を算術式として評価する。b3c3fdaa はどの `%` でも外すので、挙動としては閉じている(コメントの話は C4-3)。`test -v` は実行し、`test … -eq` と `[ … -eq ]` は実行しなかった
+   - bash 3.2: どれも実行しなかった(`test -v` も printf の `%n` もない)
+   - bash 5.2(ubuntu:24.04): `printf -v`、`test -v`、`$'\x2dv'` と書いた `printf -v` を実行した
+   - 外部コマンド: shell は引数を評価しない。プログラムが引数を実行に使う道は、rg の `--pre`(`:917` で外している)のほかに見つからなかった。macOS の zgrep、egrep、fgrep、diff、which は Mach-O のバイナリで、diff は Apple diff(FreeBSD diff 由来)。`diff --help` に別のプログラムを走らせるオプションはなかった。GNU 側(zgrep はシェルスクリプト)は調べていない
+   - まとめ: 引数を変数名や添字として評価したのは、zsh の printf の数値変換と `%n`、bash の `printf -v`、zsh と bash の `test -v`(と `[ -v`)だけで、b3c3fdaa はどれもデータから外した。ただし外す判定が語の値を読むので、`$'...'` で書いた書式と引数は外れない(C4-1)
+4. AC7: test ファイルの配列の 489 行を、新旧の guard の jq あり/なしに渡した(`sr6/dump.sh`、`sr6/runall.sh`)。内訳は A の `pr206_deny` 10 行と `former_none` 22 行、B の `ac2`・`self_review_forms`・`guard_deny_only_forms` 156 行、C の `ac3` 29 行、D の 3 配列 259 行、`intentional_fixes` 13 行
+   - 新版の判定は、どの行も配列の期待どおり
+   - コーパス(A の deny、B、C)で旧版 deny・新版 none になるのは C の 13 行で、`intentional_fixes` の 13 行と内容のハッシュで一致した(jq あり/なしとも)
+   - 849f5411 が C から D に移した 6 行は旧版も none なので、この集合は変わらない。D の `edge_none` には旧版が deny にする行が 40 行あるが、D はコーパスに入らない(AC7 の文との照合は /verify の範囲)
+5. コードの質: awk の本文(`:156-1406`)に単一引用符はない。`bash -n` は通る。root と template は同一。`commit_rules` の `:1184` は 326 文字の 1 行の条件で、前の版も 1 行の条件だった。ヘッダーの `:131` が 124 桁(C4-3)
+
+### cycle 4 の findings
+
+| ID | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| C4-1 | HIGH | security | printf の判定(`:923`)は語の値 `WV` を読むが、`$'...'` の値は字句解析と shell で違う。`lex_ansi`(`:443-462`)は `\n`・`\t`・`\r` しか戻さず、ほかのエスケープでは `\` を落とすだけなので、`$'\x25n'` を `x25n`、`$'\x24('` を `x24(` と読む。zsh と bash はそれぞれ `%n`、`$(` と読む。このため `$'...'` で書いた書式と引数は `%` も `$` も含まないことになり、printf の引数がデータ区間になる。zsh は、その引数の添字の中の置換を `%n` で実行する。データ区間の中の見張りの一致は無視されるので、旧版が deny にする形を、shell が実行する位置で新版が通すことになる。triage cycle 3 #1 と同じ型で、b3c3fdaa の閉じ方の外にある。同じ読み違いは、46806dc9 からある `-v` の判定(bash 5.2 の `printf $'\x2dv'`)と、rg の `--pre` の判定(`:917`)にもある。ヘッダーの Not covered(`:125-127`)は、`$'...'` の 16 進と 8 進のエスケープを「字句解析は見落とし、見張りは書かれたとおりの文字を見る」と書く。ここでは見落とした値が見張りの一致を外す側に働くので、この文はこの場合に成り立たない | (1) zsh 5.9: `printf $'\x25n' $'a[\x24(echo HIT >&9; echo 1)]'` と、8 進の `$'\045n'`・`$'\044('` の形で HIT が出た(`sr6/builtins.zsh`)。bash 5.2.21: `printf $'\x2dv' $'a[\x24(echo HIT >&9; echo 1)]' x` で HIT が出た(`sr6/builtins.bash`)。(2) 計測用の写し(`sr6/instr.py`。`stage_note` の `SRO[cid] = ro` の後で `WR`・`WV`・`SRO`・`SSAFE` をファイルに書く): この 2 形の語の値は `x25n`、`a[x24(echo X >&2; echo 1)]`、`x2dv` で、SRO=1、SSAFE=1。`'%n'` の形は SRO=0。(3) `lex_dollar`(`:417`)は `$'` を `lex_ansi` に渡し、`xnote` を呼ばないので、その語の範囲はデータ区間から外れない。見張りの語を入れたこの形は hook に渡していない(probing の約束)。新版が none を返すことは、コードを読んだ結果で、hook では確かめていない | `:923` の `$` の判定を生の語で読む(`index(WR[ctx, j], "$")`)。`$'...'` と `$"..."` の語は生の語に必ず `$` があるので外れ、`\x25` で `%` を作る形も `$'` が要るので一緒に閉じる。この 1 語の変更を入れた写し(`sr6/fx/`)で 489 行を流すと、判定は 1 行も変わらず、AC3 の `printf 'a\ngit push --force'` は SRO=1 のまま、上の `$'...'` の 3 形は SRO=0 になった。`:917` の rg も、`WR` に `$` があれば外す。ヘッダーの `:125-127` に、printf と rg は `$` を含む語があればデータにしないことを書く。B 節に `$'...'` で書いた printf の行を足す(見張りの語は既存の行と同じ `sudo id` を使う) |
+| C4-2 | MEDIUM | security | `opt_is`(`:1105-1111`)は 4 文字以上の略記しか読まない(`:1110` の `k >= 4`)が、git 2.49 は `--` の後ろが 1 文字の略記も、一意なら受け付ける。`git reset --h` は `--hard` に決まり、作業ツリーの変更を捨てる。guard はこれを通し、test ファイルは `edge_none`(`tests/test-pre-bash-guard.sh:893-896`)でこの行を「略記に見えるだけの長いオプション」として none に固定している。この前提は git 2.49 では成り立たない。同じ下限のため、git commit の `--m`(`--message`)と `--c`(`--cleanup`)も読まれない。`--m` は次の `--` を値に取るので、triage cycle 3 #2 の形を `--trail` ではなく `--m` で書くと、`commit_rules` は `--m` を 1 語として飛ばし、`--`(`:1165`)で走査を止める。b3c3fdaa のコメント「also abbreviated」(`:1182`)は 2 文字目からしか成り立たない。旧版はどちらも通す(`git reset --hard` という並びがない)ので、AC7 には反しない。`git reset --h` の行は 5b0b20d5 からある | `sr6/abbrev.sh`(git 2.49.0): `git commit --m` は "option `message' requires a value"、`--c` は "option `cleanup' requires a value"、`git reset --h -- a` は "Cannot do hard reset with paths"。commit のほかの 1 文字の接頭辞(`--a`、`--d`、`--f`、`--p`、`--r`、`--s`、`--t`)は ambiguous。`sr6/reset-h.sh`: 変更した `f` が `git reset --h` で元に戻り、rc 0。`--c` は、値が整理のモードでなければ git が止めるので、`--no-verify` の抜け道にはならない(コードを読んだ結果) | `:1110` を `k >= 3` にする。git 2.49 では、1 文字の接頭辞は一意ならそのオプションに決まり、一意でなければ ambiguous で止まる(push の `--e` は `--exec` に決まり、`--r`・`--p`・`--f`・`--n` は ambiguous。`sr6/abbrev-push.sh`)。guard が値として飛ばした語を git がオプションとして読む組み合わせは増えない。この変更を入れた写し(`sr6/m3/`)で 489 行を流すと、変わるのは `git reset --h` の 1 行(none から deny)だけで、deny の行は減らなかった。その行は `edge_deny` に移し、コメントを直す。ヘッダーの `:59-62` の「at least 4 characters」も直す |
+| C4-3 | LOW | readability | b3c3fdaa のコメントが理由を狭く書いている。(1) `stage_note` のコメント(`:918-922`)は、`%` を外す理由を `%n` だけで説明する。zsh は `%d`・`%x`・`%f` でも引数を算術式として評価し、添字の中の置換を実行する。規則はどの `%` でも外すので挙動は正しいが、次に読む人が `%n` に狭めると開く。(2) DATACMD のコメント(`:1350-1351`)は、`test` と `[` を外す理由を zsh の `-v` とするが、bash 5.2 の `test -v` も同じく実行する。(3) ヘッダーの `:131` は 124 桁で、前後の行は 78 桁前後。足した 1 文が折り返されていない | `sr6/builtins.zsh` の `HIT-printf-d`・`HIT-printf-x`・`HIT-printf-f`。ubuntu:24.04 の bash 5.2.21 で `sr6/builtins.bash` を流した `HIT-test-v`。`awk '{print length}'` で `:131` は 124 | (1) 数値の変換と `%n` は引数を算術式として評価する、の意味に直す。(2) 「in zsh and bash 4.2+」にする。(3) `:130-132` を折り返す。次に guard を変えるときでよい |
+| C4-4 | LOW | security | `--no-verify` の規則は、`git_rules` の振り分け(`:1092`)で merge・rebase・am にだけ当たる。git 2.49 の `git pull` も `--[no-]verify`(pre-merge-commit と commit-msg のフック)を持つが、guard は見ない。ヘッダーの `:53` は commit、push、merge、rebase、am と書いていて、コードとは合っている。旧版には `--no-verify` の規則がないので、後退ではない | `git pull -h` の出力に `--[no-]verify  control use of pre-merge-commit and commit-msg hooks`。`git pull --no-v=x` は no-verify と no-verify-signatures の ambiguous(`sr6/abbrev.out`) | 振り分けに `pull` を足すか、tech-debt の guard の行に、`git pull --no-verify` は見ないと書く |
+
+### 前の節の指摘の状態
+
+| 指摘 | 状態 | 根拠 |
+| --- | --- | --- |
+| C3-1 | 解消 | 849f5411 が理由の文(`:1437`)に「HEREDOC の形は git commit を単独のコマンドで打ったときだけ通る」を足し、ヘッダーの `:117-120` を直した。`implementer.md`、`git-commit-strategy.md`(root と template)、tech-debt の 124・125 行目は 24876df7 が直した |
+| C3-2 | 解消 | `reset_rules` が `--pathspec-from-file` の値を先に読み飛ばす(`:1148`)。`edge_deny` の 3 行(`--pathspec-from-file --`、`--pathspec-from-file f`、`--pathspec-fr --`)は新版 deny/deny、`edge_none` の `--pathspec-from-file=f --` は none/none |
+| C3-3 | 未修正、記録済み | 予約語と exec の規則(`:718`、`:723`)はそのまま。tech-debt の guard の限界の行が、等価な変異として記録している |
+| C3-4 | 未修正、記録済み | 区切りの規則のコメント(`:537-541`)と `data_first_ok` のコメントはそのまま。同じ行に記録されている。C4-1 は同じ値の違いが printf の引数で効く場合 |
+| C3-5 | 一部解消 | (2) は 8e94e76b が直した(`$c` の行のコメントと、許可リストを固定する 3 行)。(1) は残る: `tests/test-pre-bash-guard.sh:836` の「Cycle 2 (P2-4)」、`:957` の「Cross-review cycle 2 (P2-4, P2-5)」(849f5411 が `ac3` から移したときもこの書き方を残した)、`:1061` の「change A」 |
+
+### Tech debt identified
+
+ユーザーはこの run を最後とした。直さない指摘はそのまま持ち越しになる。この commit では `docs/tech-debt/README.md` を変えていない。直さないなら、/sync-docs で guard の限界の行に次をまとめて足してほしい。行の中の「1442 lines at e5c9e6be」「line 154 to its closing quote on line 1399」も、今は 1450 行、155 行目から 1407 行目になっている。
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| b3c3fdaa の閉じ方の残り(C4-1 printf と rg の判定が `$'...'` の語の値を読む、C4-2 `opt_is` の 4 文字の下限と `git reset --h` の行、C4-3 コメント、C4-4 `git pull --no-verify`) | C4-1: 旧版が deny にした形を、zsh(この Bash ツールの shell)と bash 5.2 が実行する位置で通す。C4-2: 1 文字の略記の hard reset と、`--m` を使った `--no-verify` を通す(旧版も通す)。C4-3・C4-4: 次に読む人が規則を狭めたり、規則の届く範囲を読み違えたりする | 上限 4 の最後の run で、guard を 1 行でも変えると self-review から /cross-review までをもう一度回すことになる | 次に guard を変える PR。C4-1 と C4-2 は、どちらも 1 語の変更で、489 行の判定は C4-2 の 1 行のほかに変わらない | この節の C4-1〜C4-4 |
+
+### Recommendation(cycle 4、現時点)
+
+- Merge: no-merge(HIGH 1 件。C4-1 は、旧版が deny にした形を shell が実行する位置で通す AC7 の型で、b3c3fdaa が閉じた triage cycle 3 #1 と同じ。直し方は `:923` の 1 語で、489 行の判定は変わらない。直さずに PR にするなら、既知の穴として tech-debt と PR 本文に書く。CRITICAL はない。MEDIUM の C4-2 は旧版も通す形)
+- 前の節までの Merge 行はそれぞれの時点の判定で、現時点の判定はこの行
+- Follow-ups:
+  - C4-1 を直すなら、guard の変更になるので、パイプラインの規則どおり self-review から回し直す。直さないなら、上の Tech debt の 1 行と PR 本文の既知の穴に書く
+  - /test: C4-1 の型の行(`$'...'` で書いた printf)は test ファイルにない。C4-2 の `git reset --h` の行は、git 2.49 では本物の hard reset を none に固定している
+  - /sync-docs: guard の行数と awk の範囲(1450 行、155〜1407 行目)
+
+### 未確認の点
+
+- C4-1 で新版が none を返すことは、コードと計測用の写しの SRO・SSAFE から読んだ。見張りの語を入れた形は hook に渡していない
+- GNU の zgrep(シェルスクリプト)と、Linux の diff・stat などが引数を実行に使うかは調べていない
+- 489 行の新旧比較は macOS の awk で、mawk では commit・printf・merge・rebase・reset を含む 136 行だけを jq なしの経路で流した。gawk と busybox の awk では流していない
