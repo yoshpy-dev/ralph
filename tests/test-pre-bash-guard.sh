@@ -649,6 +649,14 @@ guard_deny_only_forms=(
   # $'\x25n' is %n, and $'\x2dv' is -v.
   $'printf $\'\\x25n\' \'arr[$(sudo id; echo 1)]\''
   $'printf $\'\\x2dv\' c \'sudo ls\''
+  # Cycle 4 /test (V5-2): the same %n with the subscript also in $'...'
+  # (\x24 is $), so no word holds a literal $ once the lexer has read it;
+  # only the $ of $'...' as written makes printf not a data command (zsh
+  # runs the subscript). For rg, $'\x2d-pre' is --pre to the shell while
+  # the lexer reads \x2d-pre, so only the $' check keeps rg from being a
+  # data command.
+  $'printf $\'\\x25n\' $\'arr[\\x24(sudo id; echo 1)]\''
+  $'rg $\'\\x2d-pre\' sh \'sudo ls\''
 )
 check_modes B deny absent bypassPermissions -- "${guard_deny_only_forms[@]}"
 
@@ -875,6 +883,9 @@ edge_deny=(
   'git reset --h'
   'git commit --m -- --no-verify'
   'git pull --no-verify origin main'
+  # Cycle 4 /test: a value attached with = is one word, so the next word is
+  # read as a flag again.
+  'git commit --trailer=x --no-verify -m fix'
 )
 check_modes D deny absent -- "${edge_deny[@]}"
 
@@ -998,6 +1009,9 @@ edge_none=(
   # after -- is a pathspec, not a flag.
   $'git commit --trail \'Signed-off-by: x\' -m fix'
   'git commit --trailer=x -m fix -- --no-verify'
+  # A bare -- is not an abbreviation of --no-verify: opt_is needs at least
+  # one letter after the two dashes.
+  'git merge --no-ff -- feature'
 )
 check_modes D none absent -- "${edge_none[@]}"
 
@@ -1082,6 +1096,13 @@ edge_sentinel_deny=(
   $'printf \'%s\\n\' \'sudo ls\''
   $'[ -n \'sudo ls\' ]'
   $'test -n \'git push --force\''
+  # Cycle 4 /test: each row pins one condition on its own. A word in locale
+  # quoting ($"...") makes rg not a data command; a backtick in a printf word,
+  # and printf -v without a later $c, do the same for printf (the -v rows of
+  # guard_deny_only_forms also run $c, which the allowlist already denies).
+  'rg $"sudo ls" .'
+  $'printf `echo x` \'sudo ls\''
+  $'printf -v c \'sudo ls\''
 )
 check_modes D deny absent -- "${edge_sentinel_deny[@]}"
 
