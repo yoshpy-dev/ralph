@@ -292,3 +292,130 @@ cycle 1 の記録の訂正: cycle 1 の AC2 の欄の「self-review の種類 33
 - Verified: AC1〜AC9 を、テスト自身の例 572 行を新版の 4 経路に、そのうち比較の例 177 行を旧版の 2 経路にも渡して確かめた。AC7 の例外は 13 件のままで、`intentional_fixes` と一致する。AC3 と `intentional_fixes` の形に `\` と改行の並びはない。F2-1 の形のうち旧版が deny にする 21 件と、`xr3/f1`〜`f7` の 7 件は、新旧とも deny。R2-1〜R2-3 のコメントの直しは、コードと probe の結果に合う。静的解析は `run-static-verify.sh` が rc 0、shellcheck の warning 以上は 0 件、template とバイト単位で一致、plan の digest も一致した
 - Partially verified: LOW の 2 件(V3-1 のテストのコメント、V3-2 の折り返し)。tech-debt の 2 行、`internal/org/prompts/implementer.md:27`、plan の Progress の古い記述(上の一覧。/sync-docs と orchestrator が直す)
 - Not verified: テストスイートの実行、テストファイルと probe にない形での旧版との比較、`sr4/a2` の shell での読み方、ubuntu の mawk・gawk での判定、merge 後の Claude Code での実際の効き目
+
+---
+
+## cycle 3 (cap raised to 3)
+
+- Date: 2026-10-08
+- Verifier: verifier subagent (Claude)。cross-review の 2 周目のあと、ユーザーが上限を 3 に上げてから回した verify。cross-review の手順どおり `cycle-count.json` は 2 のまま。ID は前の節と混ざらないよう `V4-` で始めた
+- Scope: `git diff 3950ffdd..HEAD -- .claude tests templates internal docs/tech-debt`(HEAD 849f5411)。e1dfb422 は main を取り込んだマージで、`internal/` の差分のうち main にないのは `internal/org/prompts/implementer.md` だけ(`git diff --stat origin/main...HEAD`)。guard の判定を変えたのは a9ef82b1(許可リスト、ヒアドキュメントの区切りの規則、push の値を取るオプション、reset の `--`)と 849f5411(reset の `--pathspec-from-file`)。849f5411 は self-review の cycle 3 のあとに書かれたので、それを読んだのはこの verify が初めて。plan の digest は `scripts/plan-visual.sh digest` で計算し直して 7efd47f36781 に一致した
+- 上の 3 つの節の `## Verdict` は、それぞれの時点の判定として残した。いまの判定は、この節の最後の `## Verdict(cycle 3)` にある
+- Evidence: `docs/evidence/verify-2026-10-07-guard-deny-only.log` の末尾(「cycle 3 (cap raised to 3)」の見出しから)。gitignore の対象なので commit しない
+
+### 調べ方(cycle 3)
+
+- テスト自身の例: 前の節と同じ手順で、A〜C 節から例とモードの組 594 行を取り出し、新版の root と template に jq あり・なしで渡した。比較の例の集まりは 188 行(A の deny 行 10、B 149、C 29)で、旧版(`tests/fixtures/guard-1c4cea5a/`)にも 2 つの PATH で渡した。fixture は origin/main(51855166)の guard と `lib_json.sh` にバイト単位で一致する
+- A〜C 節の例を 3950ffdd、a9ef82b1、HEAD から取り出して `diff` した。3950ffdd から HEAD までに増えたのは、B 節の `guard_deny_only_forms` の 11 件(180c7389 の 1 件、a9ef82b1 の 10 件)だけ。a9ef82b1 が C 節に入れた push と reset の 6 件は 849f5411 で D 節の `edge_none` に移り、C 節は 3950ffdd と同じ 29 件に戻った
+- D 節の 3 つの配列(`edge_deny` 118 件、`edge_none` 83 件、`edge_sentinel_deny` 41 件)も、新版の 4 経路と旧版の 2 経路に渡した
+- probe: `xr1/run.sh` で、`xr3/c2p*.txt` の 5 件、`xr1/*.txt` の 54 件、`xr3/q1.txt` と `xr3/f1.txt`〜`f7.txt` を新旧の guard に渡した
+- 849f5411 の reset の規則: 使い捨てのリポジトリ(scratchpad の `vf5/reset-repo`、git 2.49.0)に中身が空の `--` という名前のファイルを置き、`opt_is` が受け付ける `--pathspec-from-file` の前置き 9 通りと `=` つきの 2 形を git に渡した。同じ文字列を guard にも渡した
+- tech-debt の行と implementer の prompt が判定を書いている形を、facd295b、a9ef82b1、HEAD の guard と旧版に渡した(`vf5/docforms.sh`)
+- テストファイル、probe、報告と文書にない新しい形は作っていない
+
+### Spec compliance(cycle 3)
+
+| Acceptance criterion | Status | Evidence |
+| --- | --- | --- |
+| AC1 | 満たす | 594 行 × 4 経路(root・template × jq あり・なし)が、すべて期待値と一致した。A 節の旧 ask 行 44 件は 4 モードで none、deny 行 10 件は 4 モードで deny。新版のどの経路にも、ask、想定外の出力、0 以外の終了コードはない |
+| AC2 | 満たす | B 節の 149 件(`ac2` 75、`self_review_forms` 32、`guard_deny_only_forms` 42)は、2 モードと 4 経路のすべてで deny。`ac2` は 3950ffdd から変わっていない(cycle 1 で plan の AC2 と 1 件ずつ突き合わせたもの) |
+| AC3 | 満たす | `ac3`(`tests/test-pre-bash-guard.sh:632-666`)は 29 件で、plan の AC3 の 29 項目と順番どおり 1 対 1 に対応する。27 項目は plan のコードの書き方と値まで一致し、残る 2 項目(推奨の HEREDOC の形と、引用符つきの区切りのヒアドキュメントを `git commit -F -` に流す形)は plan の説明どおりの形になっている(`vf5/ac3cmp.sh`)。29 件は 2 モードと 4 経路のすべてで none |
+| AC4 | 満たす | A〜C 節の 594 行と D 節の 242 行で、jq あり・なしの判定は全件一致した。`lib_json.sh` は 3950ffdd から変わっていない |
+| AC5 | 満たす(古い記述は /sync-docs で直す) | ask に触れる文書はない。a9ef82b1 で古くなった記述が、tech-debt の 124・125・160・163 行目と `internal/org/prompts/implementer.md:27-30` にある(下の「/sync-docs に渡す一覧」) |
+| AC6 | 静的な 4 つは満たす | 下の Static analysis。`run-verify.sh` の全体は /test で確かめる |
+| AC7 | 満たす | 比較の例 188 行で、旧版 deny から新版 none に変わる形は jq あり・なしとも 13 件だった。`intentional_fixes`(`tests/test-pre-bash-guard.sh:1184-1198`)の 13 件と一致し、C 節で旧版が deny にする 13 件とも一致する。C 節の外には 1 件もない。旧版 none から新版 deny は 25 件、旧版 ask から新版 none は C 節の 3 件で、前の節と同じ。C 節から D 節に移った 6 件は新旧とも none なので、比較の例から外れても例外の集まりは変わらない。`guard_deny_only_forms` の 42 件はすべて比較の例に入り、新旧とも deny。probe は次の小節に書いた |
+| AC8 | 満たす | BWK awk 20200816、jq なしで、H 節と同じ 3 種が 0.29・1.10・0.67 秒(jq ありでは 0.13・0.90・0.38 秒)。行末にバックスラッシュがある 66,000 行の本文(330 KB)は 0.85 秒 |
+| AC9 | 満たす | F 節の形 11 件は前の節と同じ判定(none 4 件、deny 7 件。jq あり・なしとも)。awk を外した PATH では、4 規則が deny、`ls` が none |
+
+### AC7 の probe(cycle 3)
+
+- cross-review の 2 周目の P1 の 3 形(`xr3/c2p1a`〜`c2p1c`: 区切りの `$'\x45'`、`env -S`、`builtin exec`)は、新版・旧版とも deny/deny(jq あり/なし)。3 形はどれも B 節の `guard_deny_only_forms` にバイト単位で同じ例があり、比較の例に入っている
+- WORTH_CONSIDERING の 2 形(`c2p2a` の `git push origin -ofoo`、`c2p2b` の `git reset HEAD -- --hard`)は、新版 none/none、旧版 none/none。2 形とも D 節の `edge_none` に同じ例がある
+- `xr1/*.txt` の 54 件のうち 53 件は、新旧とも deny/deny。残る `v-ml4.txt` は新版 none、旧版 deny で、前の節と同じ(一致した語は、表示するだけの `cat` の引数の中にある)。`xr3/q1.txt` も前の節と同じ none/deny、`xr3/f1.txt`〜`f7.txt` は新旧とも deny/deny
+- D 節の 242 行は、新版の 4 経路のすべてで期待値と一致した。`edge_none` の 83 件のうち 39 件は旧版が deny にする。どれもデータ区間の形か `my-sudo ls`・`x.sudo ls` で、比較の例の外にある(cycle 1 の V-1 のまま)
+
+### 849f5411 の確かめ
+
+1. `reset_rules`(`.claude/hooks/pre_bash_guard.sh:1137-1148`)は、語ごとに `opt_is(a, "--pathspec-from-file")` を `--` の判定より先に見て、`=` がなければ次の語を読み飛ばす。`opt_is`(`:1101-1107`)は `--` で始まり 4 文字以上の語にしか当たらないので、`--` そのものがこの前置きと取り違えられることはない。`--pathspec-file-nul` はこの名前の前置きではないので、値を取らないオプションとしてそのまま進む(`git reset -h` でも値を取らない)
+2. 前置きの照合(git 2.49.0 の実測、`vf5/reset-opt.log`):
+   - `--pa`、`--pat`、`--path`、`--paths`、`--pathspec`、`--pathspec-`、`--pathspec-f` の 7 通りは、git が `ambiguous option` で rc 129 を返し、作業ツリーの変更は残った。guard はこの 7 通りの後ろの `-- --hard` を deny にする。失敗するコマンドを止めるだけなので、害はない
+   - `--pathspec-fr` と `--pathspec-from-file` は、git が `--` をファイル名として読み、rc 0 で hard reset をした(変更が消えた)。guard は 2 つとも deny
+   - `=` つき: `--pathspec-from-file=f --hard` は git が hard reset をし(rc 0)、guard は deny。`--pathspec-from-file=f -- --hard` は git が `'--pathspec-from-file' and pathspec arguments cannot be used together` で rc 128 を返し、guard は none。どちらも git の読み方と合う
+   - 旧版は `git reset --pathspec-from-file -- --hard` と `… f --hard` を none にする(D 節の `edge_deny` の 2 件)。新版はこれを deny にするので、強くなる向き
+3. deny の理由の文(`:1429`)は、シェルのダブルクォートの中にある。バッククォートは 0 個、`$` は既存の `\$()` の 1 か所だけでエスケープされている。ダブルクォートとバックスラッシュも新しく増えていない。commit_message の deny を root・template × jq あり・なしで出させると、4 つとも `jq -e` で読める JSON になり、理由の文は jq あり・なしで同じだった。文の中身は V4-1 を参照
+4. ヘッダーの `:117-120`(推奨の HEREDOC の形は、同じ呼び出しのどのコマンドも読むだけのコマンドか git で始まり、どの行も `\` で終わらないときだけ通る)は、判定と合う。単独の形と `git add a.txt &&` の後ろの形は none、`make test &&` と `./scripts/run-verify.sh && git add a.txt &&` の後ろの形は deny だった(`vf5/docforms.log`。facd295b の guard はどれも none、旧版はどれも deny)
+5. テスト: `ac3` は plan の AC3 と一致した(上の表)。D 節に移した 6 件と新しい `git reset --pathspec-from-file=f -- --hard` は、新版の 4 経路で none(旧版も none)。`edge_deny` に足した 2 件は、新版の 4 経路で deny
+6. awk の本文(`:155-1398`)に単一引用符は 0 個。root と template の guard はバイト単位で同一
+
+### 前の節の指摘の状態(self-review cycle 3)
+
+| 指摘 | 状態 | 根拠 |
+| --- | --- | --- |
+| C3-1 | guard の側は解消。文書の側は /sync-docs で直す | 849f5411 で、ヘッダーの `:117-120` と理由の文(`:1429`)が、HEREDOC の形は git commit を単独のコマンドで打つときだけ通ると書くようになった。`internal/org/prompts/implementer.md:27-30` と tech-debt の 124・125 行目は、まだ行末の `\` だけを条件に挙げている(下の一覧の 1〜3) |
+| C3-2 | 解消 | 上の「849f5411 の確かめ」の 1〜2。git の実測と guard の判定が合う |
+| C3-3 | 残る | `:717` の予約語の規則と `:722` の exec の規則、`EXEC_SEEN`(`:764`、`:773`、`:1367`)は、849f5411 で変わっていない |
+| C3-4 | 残る | 区切りの規則のコメント(`:536-540`)と `data_first_ok` のコメント(`:744-745`)は変わっていない |
+| C3-5 | 一部だけ直った | 849f5411 は push と reset の 6 件を D 節に移したとき、コメントの頭を「Cross-review cycle 2 (P2-4, P2-5)」にし、AC3 に入れない理由を足した(`tests/test-pre-bash-guard.sh:920-926`)。ID の `P2-4`・`P2-5` はそのままで、triage の番号(4・5)と合わない。`:817` の「Cycle 2 (P2-4)」、`:1008` の「change A, cycle 2」、`:616-620` の変数の行の説明も変わっていない |
+
+### Findings(cycle 3)
+
+| ID | Severity | Finding | Recommendation |
+| --- | --- | --- | --- |
+| V4-1 | LOW(理由の文) | 849f5411 の理由の文(`.claude/hooks/pre_bash_guard.sh:1429`)は「HEREDOC の形は git commit を単独のコマンドで打ったときだけ通ります」と書く。判定はこれより広い。`git add a.txt && git commit -m "$(cat <<'EOF'` … の形は none で、`git commit -F - <<'EOF'` の HEREDOC は `make test &&` の後ろでも none だった(`vf5/docforms.log`)。逆に awk がない環境では、単独の形も旧版の規則で deny になる。文のとおりにすれば通る(行末の `\` がなければ)ので、利用者を誤らせることはない | 次に guard を変えるときに、つないだ呼び出しでも通る形として `git commit -F -` か `-F <file>` を挙げる。/sync-docs では、この文の「だけ」をそのまま文書に写さず、判定の条件(同じ呼び出しのトップレベルのコマンドがすべて読むだけのコマンドか git)を書く |
+| V4-2 | LOW(記録) | self-review の cycle 3 の Tech debt の行は 849f5411 より前に書かれ、C3-1 の理由の文とヘッダー、C3-2 の reset の値を、残る項目に挙げている。この 2 つは 849f5411 で直った | /sync-docs では、C3-3・C3-4・C3-5(一部)と、C3-1 の文書の側だけを tech-debt に載せる(下の一覧の 10〜12) |
+| V4-3 | LOW(plan の記録) | plan の Progress は a9ef82b1 の行(182 行目)で止まっていて、self-review の cycle 3(48628bd2)と 849f5411 の行がない。182 行目の「止める側への逸脱」は、つないだ呼び出しの中の推奨のコミット形が deny になること(C3-1)と、reset が `--pathspec-from-file` の値を読み飛ばすことを挙げていない。/verify は plan を直していない | /pr の前に、orchestrator が Progress に足す |
+
+### Static analysis(cycle 3)
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `./scripts/run-static-verify.sh`(changed scope) | rc 0 | `lib_json.sh` を分類できないため full にフォールバックした。shellcheck(hook と verify のスクリプト)、全 hook の `sh -n`(root と template)、check-sync、check-pipeline-sync、check-skill-sync(13 skill)、check-template-purity、tech-debt の plan 参照、gofmt と golangci-lint(0 issues)、branch の secret scan(51855166..849f5411、clean) |
+| `shellcheck -S warning`(guard、`lib_json.sh`、`post_edit_verify.sh`、2 つのテスト) | rc 0 | guard とテストの info は SC2016 が 58 件、SC1003 が 4 件、SC1091 と SC2329 が 1 件ずつで、前の節と同じ |
+| `dash -n`(guard、`lib_json.sh`、`post_edit_verify.sh`)、`bash -n`(2 つのテスト) | OK | |
+| `cmp` root と `templates/base/`(`pre_bash_guard.sh`、`lib_json.sh`、`post_edit_verify.sh`、`.codex/README.md`、`.claude/rules/ralph/git-commit-strategy.md`) | 5 つとも同一 | guard は両方とも実行権つき |
+| `./scripts/check-sync.sh` | rc 0 | IDENTICAL 164、DRIFTED 0、ROOT_ONLY 0 |
+| `./scripts/check-skill-sync.sh` | rc 0 | 13 skill |
+
+### /sync-docs に渡す一覧(cycle 3)
+
+C3-1 の文書の側(推奨の形は通る、と書いている記述):
+
+1. `internal/org/prompts/implementer.md:27-30` は、HEREDOC の形は「コマンドのどの行もバックスラッシュで終わらなければ通る」と書く。a9ef82b1 からは、同じ Bash の呼び出しのトップレベルのコマンドがすべて、読むだけのコマンドか git で始まることも条件になる。この prompt は少し前の行で、検証のコマンドを走らせてから `git add` してコミットする手順を書いている。これを 1 つの呼び出しにつなぐと止まる(`./scripts/run-verify.sh && git add a.txt && git commit -m "$(cat <<'EOF'` … は deny、`git add a.txt &&` の後ろだけなら none)。「コミットは単独のコマンドで打つ(`git add` とはつないでよい)」の意味を足し、つなぐときの形として `-F <ファイル>` か `git commit -F - <<'EOF'` を挙げるとよい(後者は `make test &&` の後ろでも none)。go:embed で読む prompt なので、変えると Go のビルドに入る。`internal/org/*_test.go` にこの文を固定するテストはない
+2. `docs/tech-debt/README.md:124`(RESOLVED のコメント)は「Two remainders」として、awk がない場合と行末の `\` だけを挙げる。3 つ目として、同じ呼び出しに読むだけのコマンドでも git でもないトップレベルのコマンドがあると deny になる場合を足す(例は self-review の C3-1 の `make test &&`、`./scripts/run-verify.sh &&`、`GIT_EDITOR=true git commit …`、後ろの `&& ./scripts/secret-scan-branch.sh --strict`)
+3. `docs/tech-debt/README.md:125` の RESOLVED の括弧書き(「推奨の HEREDOC の形は通る。残るのは、awk がない環境の代替規則と、コマンドのどこかの行末に `\` がある場合の deny」)にも、同じ場合を足す
+4. `.claude/rules/ralph/git-commit-strategy.md`(root と template、同一)は、70 行目の Enforcement が「blocks dangerous patterns at command time」とだけ書き、推奨の形が通るとは書いていないので、古くはない。59〜66 行目で HEREDOC の形を勧めているので、「git commit は単独のコマンドで打つ」と一言足すかどうかは /sync-docs の判断でよい。足すなら root と template を同じに保つ
+
+`docs/tech-debt/README.md:160`(guard の限界の行):
+
+5. 測った時点: 「each probed against the guard on 2026-10-08 at facd295b, where the guard's decisions last changed in 4e829e34 and its comments in 4ffe74fe」。判定を最後に変えたのは 849f5411(その前が a9ef82b1)、コメントも 849f5411。測り直した時点に書き換える
+6. 行数: 「took it to 1372」と (d) の「The guard file is 1372 lines at facd295b … the awk program alone is 1187 lines (from the `awk '` on line 143 to its closing quote on line 1329)」は、849f5411 で 1442 行、awk の本体は 1246 行(154 行目の `awk '` から 1399 行目の閉じる引用符まで)
+7. 許可リスト: (a) のデータ区間の説明に、データ区間が生まれるのは、トップレベルのどの単純コマンドも、1 語目(引用符を外した値。代入と前置きを読み飛ばす前の語)が `/` を含まない `DATACMD` の名前か `git` のときだけ、という条件を足す(`data_first_ok`、`end_cmd` から呼ぶ)。「Three cases have no data region at all」には、許可リストに外れる場合と、ヒアドキュメントの区切りに `$` かバッククォートがある場合(`lex_redir`)を足す。`NODATA` を立てる場所も「set in `lex_cmds` and `end_cmd`」に `lex_redir` を足す
+8. 新しい誤検知(どれも旧版も deny なので AC7 には反しない):
+   - 前置きつきの読むだけのコマンド: `env echo 'sudo ls'`、`command echo 'sudo ls'`、`nice grep 'sudo ' f`、`x=1 echo 'sudo ls'`(B 節で固定)、zsh の `=echo sudo ls`(`edge_sentinel_deny` で固定)、`exec echo 'sudo ls'`(テストにない。`vf5/docforms.log` で deny)
+   - 道のある名前の読むだけのコマンド: `./echo 'sudo ls'`、`/tmp/x/cat 'sudo ls'`(B 節で固定)
+   - 推奨のコミット形と同じ呼び出しに、読むだけのコマンドでも git でもないコマンドがある形(上の 2 の例。テストはない)
+   - いまの行は「`exec echo 'sudo ls'` passes」と書く。facd295b では none だったが、a9ef82b1 から deny になった(旧版も deny)。この文を直す
+9. Why deferred の (a) は、データ区間を与えない作りを「the last pipeline run the default cap allows (`RALPH_STANDARD_MAX_PIPELINE_CYCLES`, 2)」で入れたと書く。許可リストは、上限を 3 に上げた 3 回目の run で、cross-review の 2 周目の P1 の 3 形を受けて入れた。この経緯を足す
+10. (e) のコメントのずれに、C3-3(`end_cmd` の予約語の規則と exec の規則、`EXEC_SEEN` は、許可リストのあとでは判定を変えない。いまの (e) は「`cmd_pos` sets `EXEC_SEEN` as a side effect」と書くが、その副作用はもう判定に効かない)と、C3-4(区切りの規則のコメントと `data_first_ok` のコメントが、`$'...'`・`$"..."` の読み方について shell と合わない。`$'echo'` はデータになる)を足す
+11. (e) に C3-5 の残り(`tests/test-pre-bash-guard.sh:817` の「Cycle 2 (P2-4)」、`:920` の「Cross-review cycle 2 (P2-4, P2-5)」、`:1008` の「change A, cycle 2」、`:616-620` の変数の行の説明)を足す
+12. C3-1 の理由の文とヘッダー、C3-2 の reset の値は 849f5411 で直ったので、載せない(V4-2)。理由の文の言い方は V4-1 のとおりで、載せるなら LOW の 1 文にとどめる
+13. Related の列に、self-review の「cycle 3 (cap raised to 3)」の節、この verify の cycle 3 の節、cross-review の triage の 2 周目を足す
+
+`docs/tech-debt/README.md:163`(テストの穴の行):
+
+14. 「leave all 1730 tests green」と (c) の「1730/0 under mawk 1.3.4 and under gawk 5.2.1」は facd295b の時点の数。a9ef82b1 のあとは 1800 件(plan の Progress)で、849f5411 は C 節の 6 件(2 モードと G 節の旧版の 2 経路)を D 節(1 モード)に移し、3 件を足した。HEAD の件数は /test が数え直す
+15. C3-3 の 2 つの変異(予約語の規則と exec の規則を外す)は、許可リストのあとでは等価になった。/test の確かめのあとで、J02・L03・N02 と同じ「固定できない等価な変異」に足す
+
+### Coverage gaps(cycle 3)
+
+- テストファイル、probe、報告と文書にない形は作っていない。AC7 の「旧版の deny は新版でも deny」を確かめたのは、比較の例 188 行、D 節の 242 行、probe の 67 件(`xr3/c2p*` 5、`xr1` 54、`xr3` 8)、文書に書かれた形 21 件の範囲に限られる
+- self-review の C3-2 が「調べていない」とした、`no_verify_rules`(`:1149-1154`、`git merge`・`rebase`・`am` の `--no-verify`)が `--` で止まる前に値を取るオプションを読み飛ばさない点は、この verify でもコードを読んだだけで、形を渡していない。`commit_rules` は値を取るオプション(`-m`、`--message`、`--file`、`--author` などの長いオプション、短い `m`・`F`・`C`・`c`・`t`)の値の語ごと読み進めるので、値の `--` では止まらない(`:1157-1204`)。旧版には `--no-verify` の規則がないので、AC7 には関わらない
+- ubuntu の mawk・gawk・busybox の awk での判定は見ていない。テストスイートの実行と、a9ef82b1・849f5411 の規則を外す変異は /test の担当
+- このセッションで効いている Bash の guard は main のチェックアウトの旧版なので、新版を Claude Code の実際の呼び出しで確かめることは merge 前にはできない
+
+## Verdict(cycle 3)
+
+- Verdict: pass
+- Verified: AC1〜AC9 を、テスト自身の例 594 行を新版の 4 経路に、そのうち比較の例 188 行を旧版の 2 経路にも渡して確かめた。`ac3` は plan の AC3 の 29 項目と 1 対 1 に戻った。AC7 の例外は 13 件のままで、`intentional_fixes` と一致する。cross-review の 2 周目の P1 の 3 形は新旧とも deny、P2 の 2 形は新版 none。D 節の 242 行も新版の 4 経路で期待値どおり。849f5411 の reset の規則は、git 2.49.0 の実測(前置き 9 通りと `=` つきの 2 形)と合い、理由の文にバッククォートとエスケープしていない `$` はなく、出力は 4 経路とも正しい JSON だった。静的解析は `run-static-verify.sh` が rc 0、shellcheck の warning 以上は 0 件、template とバイト単位で一致、plan の digest も一致した
+- Partially verified: LOW の 3 件(V4-1 の理由の文の言い方、V4-2 の self-review の Tech debt の行が 849f5411 より前のもの、V4-3 の plan の Progress)。self-review の C3-3〜C3-5 は残る。tech-debt の 124・125・160・163 行目と `internal/org/prompts/implementer.md:27-30` の古い記述は、上の一覧で /sync-docs に渡す
+- Not verified: テストスイートの実行(HEAD の件数を含む)、テストファイルと probe と文書にない形での旧版との比較、`no_verify_rules` の値を取るオプション、ubuntu の mawk・gawk での判定、merge 後の Claude Code での実際の効き目
