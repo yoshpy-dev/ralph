@@ -180,6 +180,7 @@
   - main を取り込んだ(e1dfb422、衝突は `docs/tech-debt/README.md` の末尾だけ。両側の行を残した)
   - cross-review の 2 周目(a9af4e05、Codex): ACTION_REQUIRED 3 件(区切りの `$'\x45'` を字句解析が `x45` と読む、`env -S` の後ろの引数、zsh の `builtin exec` のリダイレクト。どれも旧版が deny にした形を通す)と WORTH_CONSIDERING 2 件(`git push -ofoo` と `git reset -- --hard` を新版が止める誤検知)。同じ型の穴は 3 回目。上限に達し、ユーザーは「上限を 3 に上げて直す」を選んだ(`RALPH_STANDARD_MAX_PIPELINE_CYCLES=3`。cross-review の手順どおり cycle-count.json は 2 のまま)。consult(consult-plan-xrfix)と相談し、条件を足すのをやめて許可リストにした
   - 許可リストの修正(a9ef82b1、implementer/opus): トップレベルの単純コマンドの 1 語目(前置きと代入を読み飛ばす前の値)がすべて読むだけのコマンドか `git` で、値に `/` がないときだけデータ区間を与える。ヒアドキュメントの区切りに `$` かバッククォートがあればデータ区間を与えない。git push は値を取るオプション(`--repo`、`--receive-pack`、`--exec`、`--recurse-submodules`、`-o`・`--push-option`)の値を読み飛ばし、git reset は `--` で走査を止める。止める側への逸脱: 前置きつきの読むだけのコマンド(`env echo …`、`nice grep …`)や `/bin/echo` のような道のある 1 語目は、旧版と同じく見張りが決める。none から deny に変わったテストの例は `=echo sudo ls` の 1 件で、旧版も deny。テスト 1800 件
+  - 上限 3 の 3 回目の run: self-review(48628bd2)は merge で MEDIUM 1・LOW 4。C3-1 は推奨の HEREDOC のコミット形が、同じ呼び出しに読むだけでも git でもないコマンドがあると止まること(旧版も deny)。許可リストからこの形だけを外すと、同じ呼び出しの関数定義が置換の中身を変えられるので、外さずに文書と理由の文で「単独のコマンドで打つ」と伝える。849f5411(inline)で理由の文とヘッダーを直し、C3-2(`git reset --pathspec-from-file -- --hard` を通す)を直した。implementer が `ac3` の配列に入れた git の none の 6 件は D 節に移した(`ac3` は plan の AC3 と一致させる)。テスト 1794 件。verify(92dc5df8)は pass で LOW 3
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
