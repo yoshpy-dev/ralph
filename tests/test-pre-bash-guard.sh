@@ -625,6 +625,16 @@ guard_deny_only_forms=(
   $'nice grep \'sudo \' f'
   $'x=1 echo \'sudo ls\''
   $'$c \'sudo ls\''
+  # /test cycle 3 (self-review C3-5): the $c row above denies without the
+  # allowlist too, because $c is not a data reader and its own arguments never
+  # had a data region. A variable command name before a data command pins the
+  # allowlist: the echo after it gets no data region. A command of only
+  # redirections has no first word and drops every data region the same way,
+  # also right after a data command (the first word of the command before it
+  # must not count).
+  $'$c; echo \'sudo ls\''
+  $'>out.txt; echo \'sudo ls\''
+  $'echo hi; >out.txt; echo \'sudo ls\''
 )
 check_modes B deny absent bypassPermissions -- "${guard_deny_only_forms[@]}"
 
@@ -825,6 +835,15 @@ edge_deny=(
   # reset (git does reset --hard there).
   'git reset --pathspec-from-file -- --hard'
   'git reset --pathspec-from-file f --hard'
+  # /test cycle 3: a consumed value must not hide a later force or hard reset.
+  # -ofoo carries its value attached and --push-option=x after =, so the
+  # --force after each is a real force (git 2.49 makes a forced update).
+  # --pathspec-fr is an abbreviation git 2.49 accepts for --pathspec-from-file,
+  # so the -- after it is its file and --hard is a real hard reset. The old
+  # guard lets these three through.
+  'git push -ofoo --force origin'
+  'git push --push-option=x --force origin'
+  'git reset --pathspec-fr -- --hard'
 )
 check_modes D deny absent -- "${edge_deny[@]}"
 
@@ -933,6 +952,18 @@ edge_none=(
   # --pathspec-from-file=f has its value attached, so the -- after it ends
   # the options and --hard is a pathspec.
   'git reset --pathspec-from-file=f -- --hard'
+  # /test cycle 3: -o and --push-option take the next word as their value even
+  # when it looks like a flag, also abbreviated (--push-opt), and -uof is -u
+  # then -o with the value f. git 2.49 rejects all four pushes as
+  # non-fast-forward (no force). The old guard lets them through too.
+  'git push -o --force origin main'
+  'git push --push-option --force origin main'
+  'git push --push-opt --force origin main'
+  'git push -uof origin main'
+  # The allowlist compares the first word with its quotes removed, so a quoted
+  # data command name is that data command. The old guard denies this one (the
+  # sudo substring), like the other data-region rows of this array.
+  $'"echo" \'sudo ls\''
 )
 check_modes D none absent -- "${edge_none[@]}"
 
