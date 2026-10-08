@@ -148,9 +148,9 @@ Critical forks: 予約を任意にするか必須にするかの 1 件で、ユ�
 - [x] Plan approved
 - [x] Branch created
 - [x] Implementation started
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Review artifact created
+- [x] Verification artifact created
+- [x] Test artifact created
 - [ ] PR created
 - 2026-10-08: S1(620458d7)設定。`templates/base/scripts/ralph-config.sh` も同期ゲートの写しなので同じく直した。S2(11fc2261、8fe95acd)org の層。決めたこと: 上限が 0 以下なら拒否する(`max_seats` と同じく fail-closed)。予約の記録は `paths=a/,b.go` の形で、パスにカンマ・空白・制御文字が入ると拒否する。読めない `scope_reserved` は repo 全体として扱う。すでに立っている leader への予約の拒否は `rejected` を書かない(書くと leader の最新の状態が rejected になり、動いているのに inactive と表示されるため)。autonomous の scope のゲートの文に `--reserve` を足した。S3(78e46f36)CLI。全体の上限を main の `ralph.toml` から読むのは spawn と start だけ(ほかの動詞を、main の設定の読み込みエラーで止めないため)。S4(fd3e3b47)文書
 - 2026-10-08: 実装中に見つけて送るもの(sync-docs で tech-debt へ)。(a) pane だけを後回しにした disband の補償は、予約を戻さない。(b) 予約のパスの `*` はそのままファイル名として扱う。(c) 予約だけを渡したとき、役割のプロンプトの `{{SCOPE}}` は空になる。(d) start の `--scope` の help の表示崩れ(既存)
