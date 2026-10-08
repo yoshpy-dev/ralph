@@ -51,3 +51,17 @@ tech-debt の行: 既存の RESOLVED の行(25〜26、148〜149 行)と同じ形
 
 - Merge: 可。CRITICAL、HIGH はない。MEDIUM 1 件(F-1)は doc comment の 1 文が、コードと同じ comment の前の文に反する点。`/verify` の前に直すことを勧める(コードは変わらないので、直しても cycle は増えない)
 - Follow-ups: F-1 を直す。F-2 を同じ編集で直す(段落の書き直しなので、同じ 7 行を触る)。F-3 は不要。PR 本文に、更新をまたぐ窓と「#208 と同じ release に入れる」を書く(計画の進捗にも同じ指示がある)
+
+## Re-check after 3b219fc7
+
+3b219fc7 は `internal/org/watch.go` と `docs/tech-debt/README.md` の 2 ファイルだけを変える(+11/-8)。`git show 3b219fc7 -- internal/org/watch.go docs/tech-debt/README.md` を読んだ。テストは実行していない。
+
+| 指摘 | 結果 | 根拠 |
+| --- | --- | --- |
+| F-1 MEDIUM | 解消 | `watch.go:816-818` が「除外は `case` を共有するので `stop_failed` にも掛かる。`reason=watchdog_` を持つ `stop_failed` は存在しない」と書き、`:818-825` が「互換のための guard は別に要らない。例外の窓は 1 つ」と書く。前の文(`:796-798`)と `:839-840` の `case`、`watch_test.go:1481` の subtest と食い違わない。「no guard」の語は消えた |
+| F-2 LOW | 解消 | 「same release」「the latest release before that」は、`git diff da4dccb0...HEAD -- internal docs/tech-debt` の追加行から消えた(`grep -i 'same release\|latest release\|before that'` は 0 件)。事実は「ralph up to v5.1.0 never writes it」になった。窓は 2 文(古い v5.1.0 の watch が動いている間に新しい stop が `stop_failed` を書くと、警告の基準がそれを含まない。新しいバイナリで watch を立て直すと、数え直しが 1 大きくなって警告が消える)で、前の版と同じ内容。tech-debt の HTML コメント(`README.md:167`)も同じ言い方に揃った |
+| F-3 LOW | 変更なし | 受け入れ済みのまま |
+
+新しい指摘はない。`watch.go` の追加文を計画の進捗(106 行)の窓の説明と突き合わせたが、条件は同じ(v5.1.0 の watch が動いている、新しい stop が書く、新バイナリで立て直す、警告が pending)。
+
+- Merge: 変わらない(可)。F-1 と F-2 は解消し、残る指摘は受け入れ済みの LOW の F-3 だけ。上の「Recommendation」の Merge 行は元のまま残す
