@@ -175,6 +175,8 @@
   - 2 周目の test(6cca4ce4、tester/opus)は fail。F2-1: ダブルクォートの中で `$` と `(` を行継続で分けた形を新版が通す(bash と dash は置換として実行する。旧版は deny)。S2c からある穴。consult(consult-plan-xrfix)と相談し、2 周目の中で直して self-review → verify → test をやり直すことにした(cycle は 2 のまま)
   - F2-1 の修正(4e829e34、inline: 1 行とコメント、テスト 3 形): コマンドのどこかに行継続があれば、データ区間を 1 つも与えない。引用符を見ないので、ただの文字の `\` と改行(単一引用符の中、引用符つきのヒアドキュメントの本文やコメントの行末、`\\` のあと)でも止めすぎるが、どれも旧版と同じ deny。テスト 1716 件
   - 2 周目の self-review のやり直し(373fa29d)は merge で LOW 3 件、verify のやり直し(3950ffdd)は pass で LOW 2 件。どれもコメントのずれで、c61ab2bf と次のコミットで直した
+  - 2 周目の test のやり直し(facd295b、tester/opus): pass。`tests/test-pre-bash-guard.sh` は 1730/0(180c7389 で 14 件を足した。ubuntu の mawk と gawk でも 1730/0)、`tests/test-lib-json.sh` は 126/0、`run-test.sh` と `run-verify.sh` も通る。mutation は 22 個のうち 19 個が赤、残る 3 個(J02、L03、N02)は等価。F2-1 の形は新版・旧版とも deny になった。字句解析だけが止める形(`$` と `(` を行継続で分け、中身が `(id)` や `git push origin --force`)は新旧とも none のままで、tech-debt に記録した
+  - 2 周目の sync-docs(doc-maintainer/sonnet): tech-debt の guard の限界の行とテストの穴の行を 4e829e34 の状態に直した(データ区間が 1 つもなくなる 3 つの場合、それに伴う誤検知、字句解析だけの穴、残るコメントのずれ、1730/0)。124・125 行目の「推奨の形は通る」に行末の `\` の例外を足し、166 行目に再実行の結果を足した。`internal/org/prompts/implementer.md` の guard の説明を、推奨の HEREDOC 形式は通ると直した
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
