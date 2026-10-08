@@ -128,4 +128,3 @@ cycle 1 の self-review の本文のうち、tech-debt の行 172〜176 と veri
 - `internal/org/envelope_summary.go:36`(leader のプロンプトの `{{ENVELOPE}}`)と `internal/cli/doctor.go:788`(doctor の `[org]` の要約)は `max_seats` だけを出し、`max_orgs` と `max_total_seats` は出さない。出す・出さないは判断が要る
 - `.claude/skills/org/SKILL.md:201` の「`--config` を渡したときと、台帳を flag か env で決めたとき、git の外では」は、`ResolveOrgStateDir` の 4 段目(`git-toplevel`、bare repository の linked worktree)も、main の `ralph.toml` を読まない場合に入ることを書いていない(`internal/org/statedir.go:38-44` と `withMainWorktreeOrgLimits` は `source != "git-main-worktree"` のすべてで読まない)
 - 同じ SKILL の「どちらも台帳のロックの下で判定するので、同時に打った `spawn` でも超えない」は、自分の workspace の close が失敗した補償の窓では超える(計画のリスクとテスト `..._RiskWindowClearedByRetry` が固定している)ことを書いていない
-
