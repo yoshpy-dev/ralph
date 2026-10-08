@@ -644,6 +644,11 @@ guard_deny_only_forms=(
   $'printf "$fmt" \'arr[$(sudo id; echo 1)]\''
   $'test -v \'arr[$(sudo id; echo 1)]\''
   $'[ -v \'arr[$(sudo id; echo 1)]\' ]'
+  # Self-review cycle 4 (C4-1): the lexer decodes only \n, \t and \r in
+  # $'...', so printf checks the words as written: a format spelled
+  # $'\x25n' is %n, and $'\x2dv' is -v.
+  $'printf $\'\\x25n\' \'arr[$(sudo id; echo 1)]\''
+  $'printf $\'\\x2dv\' c \'sudo ls\''
 )
 check_modes B deny absent bypassPermissions -- "${guard_deny_only_forms[@]}"
 
@@ -862,6 +867,13 @@ edge_deny=(
   'git rebase --onto -- --no-verify main'
   'git commit --trail -- --no-verify -m fix'
   'git merge -m --no-verify feature'
+  # Self-review cycle 4 (C4-2, C4-4): git accepts a one-letter prefix of a
+  # long option (git 2.49 runs git reset --h as a hard reset, and reads
+  # commit --m as --message), and git pull passes --no-verify to its merge.
+  # The old guard lets these through.
+  'git reset --h'
+  'git commit --m -- --no-verify'
+  'git pull --no-verify origin main'
 )
 check_modes D deny absent -- "${edge_deny[@]}"
 
@@ -893,7 +905,6 @@ edge_none=(
   # Long options that only look like the abbreviated ones.
   'git push --follow-tags origin main'
   'git push --no-thin origin main'
-  'git reset --h'
   'git commit --no-edit'
   'git commit --fixup HEAD'
   'git commit --mess=x'

@@ -128,8 +128,9 @@
 # invisible the same way a variable is: a function named like a data command,
 # or an exec redirection done in an earlier command, is not seen when the next
 # command is judged. So are shell options set in start-up files (with zsh
-# cdablevars, cd looks a non-directory argument up as a variable). Broken input (an unclosed quote or parenthesis, a heredoc
-# without its end line) still exits 0, with or without a deny.
+# cdablevars, cd looks a non-directory argument up as a variable). Broken
+# input (an unclosed quote or parenthesis, a heredoc without its end line)
+# still exits 0, with or without a deny.
 set -eu
 
 HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -914,13 +915,17 @@ function stage_note(ctx, cid,    i, n, j, k, ro, safe, rs, re, cur, xs, xe, m, t
   i = J_I
   n = WN[ctx]
   ro = (i >= 1 && (J_NM in DATACMD))
-  if (ro && J_NM == "rg") for (j = i + 1; j <= n; j++) if (substr(WV[ctx, j], 1, 5) == "--pre") ro = 0
+  # rg --pre runs a program. A word in ANSI-C ($SQ...SQ) or locale ($DQ...DQ)
+  # quoting can spell characters the lexer does not decode (\x2d is -), so
+  # it could hide --pre; such a word also makes rg not a data command.
+  if (ro && J_NM == "rg") for (j = i + 1; j <= n; j++) if (substr(WV[ctx, j], 1, 5) == "--pre" || index(WR[ctx, j], "$" SQ) || index(WR[ctx, j], "$" DQ)) ro = 0
   # printf -v NAME (also attached -vNAME) stores into a variable instead of
-  # printing, and in zsh a %n conversion assigns to the variable an argument
-  # names, which evaluates a subscript such as arr[$(cmd)]. So printf only
-  # reads data when no word has -v first, a %, a $ or a backtick (a format
-  # from a variable could hold %n).
-  if (ro && J_NM == "printf") for (j = i + 1; j <= n; j++) if (substr(WV[ctx, j], 1, 2) == "-v" || index(WV[ctx, j], "%") || index(WV[ctx, j], "$") || index(WV[ctx, j], BQ)) ro = 0
+  # printing (bash and zsh), and in zsh a %n conversion assigns to, and a
+  # numeric one such as %d evaluates, an argument as an arithmetic
+  # expression, which runs a subscript such as arr[$(cmd)]. So printf only
+  # reads data when no word has -v first and no word as written has a %, a $
+  # or a backtick (a format from a variable or in $SQ\x25nSQ could be %n).
+  if (ro && J_NM == "printf") for (j = i + 1; j <= n; j++) if (substr(WV[ctx, j], 1, 2) == "-v" || index(WR[ctx, j], "%") || index(WR[ctx, j], "$") || index(WR[ctx, j], BQ)) ro = 0
   safe = !POUT[ctx]
   for (k = 1; k <= RN[ctx]; k++) if (!redir_safe(RO[ctx, k], RV[ctx, k], RMISS[ctx, k])) safe = 0
   SRO[cid] = ro
@@ -1089,7 +1094,7 @@ function git_rules(ctx, cid, i, n,    a, sc) {
   else if (sc == "reset") reset_rules(ctx, i + 1, n)
   else if (sc == "commit") commit_rules(ctx, cid, i + 1, n)
   else if (sc == "tag") tag_rules(ctx, i + 1, n)
-  else if (sc == "merge" || sc == "rebase" || sc == "am") no_verify_rules(ctx, i + 1, n)
+  else if (sc == "merge" || sc == "rebase" || sc == "am" || sc == "pull") no_verify_rules(ctx, i + 1, n)
 }
 # hooks_key(kv): 1 when the config key of kv (name or name=value) is
 # core.hooksPath; git config keys are case-insensitive.
@@ -1099,15 +1104,17 @@ function hooks_key(kv,    k) {
   return tolower(kv) == "core.hookspath"
 }
 # opt_is(a, full): 1 when the argument a names the long option full. git
-# accepts any unique prefix of a long option, so a counts when it starts
-# with -- and, without its =value, is at least 4 characters long and a
-# prefix of full (--ha is --hard, --force-with=x is --force-with-lease).
+# accepts any unique prefix of a long option, even one letter (git reset
+# --h is a hard reset), so a counts when it starts with --, has at least one
+# more character before any =value, and is a prefix of full (--h is --hard,
+# --force-with=x is --force-with-lease). A prefix that is ambiguous for git
+# makes git stop with an error, so matching it too is harmless.
 function opt_is(a, full,    k) {
   if (substr(a, 1, 2) != "--") return 0
   k = index(a, "=")
   if (k) a = substr(a, 1, k - 1)
   k = length(a)
-  return k >= 4 && k <= length(full) && substr(full, 1, k) == a
+  return k >= 3 && k <= length(full) && substr(full, 1, k) == a
 }
 # push_rules(ctx, i, n): git push. A value-taking option is consumed with its
 # value first, so a value that looks like a flag (--push-option=--force) or a
@@ -1348,7 +1355,8 @@ BEGIN {
   # Commands that only read data (and print to stdout): their arguments are
   # data regions for the sentinel. sed, awk, man, less, more, sort, tee and
   # jq can run commands or write files, so they are not here; nor are test
-  # and [, whose -v in zsh evaluates a subscript such as arr[$(cmd)].
+  # and [, whose -v in zsh and bash 5 evaluates a subscript such as
+  # arr[$(cmd)].
   nx = split("echo printf cat head tail wc cut tr grep egrep fgrep zgrep rg ls stat diff cd true false which type", datacmd_list, " ")
   for (; nx > 0; nx--) DATACMD[datacmd_list[nx]] = 1
   # Reserved words in command position, and the brace-group words, that make
