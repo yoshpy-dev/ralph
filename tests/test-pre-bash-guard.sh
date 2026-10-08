@@ -49,7 +49,8 @@
 #      substitution, functions and subshells, a JSON %u escape; forms only
 #      the lexer denies ($(...), backticks, <(...), ${...}, sh -c, eval,
 #      env -S, here-strings, pipes and heredocs to a shell, git after find
-#      -exec, flock, watch) so that each re-reading is tested without the
+#      -exec, flock, watch, heredoc terminators and delimiters joined by a
+#      backslash-newline) so that each re-reading is tested without the
 #      sentinel; a here-string to git commit -F -; and the data regions of
 #      the sentinel: what keeps them (pipes to data readers, /dev/null,
 #      /dev/stderr, fd duplication, git tag -m, comments, the sudo word
@@ -555,13 +556,18 @@ guard_deny_only_forms=(
   $'(cat <<\'EOF\'\nsudo ls\nEOF\n) | sh'
   '(echo sudo ls)'
   $'if grep -q \'sudo \' file; then echo ok; fi'
-  # 2. A heredoc read across a $(...): the newline inside the substitution
-  # must not start the quoted-delimiter body, so the force push in $(...) runs.
+  # 2. A heredoc read across a $(...) or a backtick: the newline inside the
+  # substitution must not start the quoted-delimiter body, so the force push
+  # in $(...) and the sudo in the backticks run (the body is the x line).
   $'cat <<\'OUT\' "$(\ngit push --force\n)"\nx\nOUT'
+  $'cat <<\'OUT\' `\nsudo ls\n`\nx\nOUT'
   # 3. An unquoted heredoc whose body line ends in a backslash-newline joins
-  # with the next line before the terminator comparison (bash, zsh).
+  # with the next line before the terminator comparison (bash, zsh). The
+  # join also makes $ and ( on two lines one command substitution, which
+  # bash, zsh and dash run, so a joined body is not data.
   $'cat <<EOF\nEO\\\nF\ngit push --force'
   $'cat <<-EOF\n\tEO\\\nF\nsudo ls'
+  $'cat <<EOF\n$\\\n(sudo ls)\nEOF'
   # 4. A backslash-newline in the delimiter word is removed before tokenizing,
   # so the delimiter is unquoted and the body expands.
   $'cat <<EO\\\nF\n$(sudo ls)\nEOF'
@@ -757,6 +763,15 @@ edge_deny=(
   $'cat <<EOF\n$(git push origin --force)\nEOF'
   $'cat <<EOF\n`git push origin --force`\nEOF'
   $'echo x | xargs sh -c \'git push origin --force\''
+  # Heredoc terminators and delimiters with a backslash-newline, where only
+  # the lexer sees the command: the line after a terminator joined from
+  # several lines (bash and zsh join before comparing, also after <<- strips
+  # the tabs; dash does not, and then the line is body text), and a $(...)
+  # in a body whose delimiter word has a backslash-newline (the delimiter is
+  # unquoted, so the body expands).
+  $'cat <<-EOF\n\tEO\\\nF\ngit push origin --force'
+  $'cat <<EOF\nE\\\nO\\\nF\ngit push origin --force'
+  $'cat <<EO\\\nF\n$(git push origin --force)\nEOF'
   # The same for git after a command that may run its arguments (the later
   # words that scan_words reads).
   $'find . -exec git push origin --force \\;'
@@ -881,6 +896,11 @@ edge_sentinel_deny=(
   $'cat <<EOF > file\n\\$(sudo ls)\nEOF'
   $'cat <<\'EOF\' > f.sh\nsudo ls\nEOF'
   $'cat <<EOF\n$(date) sudo ls\nEOF'
+  # The body of a heredoc whose delimiter word has a backslash-newline gets
+  # no data region (the guard header, (6)). bash 3.2, zsh 5.9 and dash read
+  # this body as text, so the deny is a false positive kept on purpose; a
+  # change that gives such a body its data region moves this to edge_none.
+  $'cat <<EO\\\nF\nsudo ls\nEOF'
   # bash reads a heredoc body right after the newline that ends its line,
   # so here sh is a body line and the pipeline has no last command (bash
   # rejects it); a pipeline cut short has no data regions.
