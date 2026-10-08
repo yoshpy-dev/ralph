@@ -1,7 +1,7 @@
 # guard-zsh-data-gaps
 
-- Status: Draft
-- Approved: TBD
+- Status: Approved
+- Approved: 2026-10-09 sha256:7a6840f0ccaf
 - Owner: Claude Code
 - Date: 2026-10-09
 - Related request: PR #210 の後続。`docs/tech-debt/README.md` の「Findings of the last `/cross-review` run of fix/guard-deny-only」の行の (a)〜(c) を直す。ユーザーは残タスクの一覧を見て「はいお願いします」と PR の作成を頼んだ(2026-10-09)
@@ -121,8 +121,9 @@ None (guard の 1 ファイルとその template の写し、テスト、tech-de
 
 ## Progress checklist
 
-- [ ] Plan reviewed
-- [ ] Plan approved
+- [x] Plan reviewed
+- [x] Plan approved
+  - 2026-10-09: ユーザーが承認ゲートで Approve。consult(consult-plan-zshgaps)はヒアドキュメントの本文の `${(e):-\$(…)}` と直す範囲の線引きを、Codex plan advisory は引用符を挟んだメッセージの形(`--message''=${…}`)を挙げた。どちらも承認の前に plan に反映した。図解ページは描いていない(Visual review を参照)
 - [x] Branch created
 - [ ] Implementation started
 - [ ] Review artifact created
