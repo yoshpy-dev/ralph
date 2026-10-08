@@ -53,11 +53,11 @@ Critical forks: None
 
 ## Acceptance criteria
 
-- [ ] AC1: `leaderActivityEventCount` は、その org の `stop_failed` を 1 件として数える。詳細に `reason=watchdog_` を持つ `stop_failed` は数えない(ほかの種類と同じ)
-- [ ] AC2: deadman の警告が出たあと、次の評価までにその org で `stop_failed` が書かれると、警告は消え、人に上げない(`evaluateCycle` を 2 回回すテストで確かめる)
-- [ ] AC3: 別の org の `stop_failed` では、その警告は消えない
-- [ ] AC4: doc comment の (b) の一覧が `stop_failed` を含み、互換のための除外が要らない理由(#208 と同じ release に入る)を書いている。tech-debt の該当行が解決済みになっている
-- [ ] AC5: 今ある watch のテストがすべて通る
+- [x] AC1: `leaderActivityEventCount` は、その org の `stop_failed` を 1 件として数える。詳細に `reason=watchdog_` を持つ `stop_failed` は数えない(ほかの種類と同じ)
+- [x] AC2: deadman の警告が出たあと、次の評価までにその org で `stop_failed` が書かれると、警告は消え、人に上げない(`evaluateCycle` を 2 回回すテストで確かめる)
+- [x] AC3: 別の org の `stop_failed` では、その警告は消えない
+- [x] AC4: doc comment の (b) の一覧が `stop_failed` を含み、互換のための除外が要らない理由(#208 と同じ release に入る)を書いている。tech-debt の該当行が解決済みになっている
+- [x] AC5: 今ある watch のテストがすべて通る
 
 ## Implementation outline
 
@@ -98,8 +98,9 @@ Critical forks: None
 - [x] Plan reviewed
 - [x] Plan approved
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
+- 2026-10-08: S1(2765f002)。テストは、偽の herdr の `PaneGet` を失敗させた本物の `Stop` で `stop_failed` を作る(`fakeWatchHerdr.PaneGetErr` を足した)。mutation で、この直しを戻すと新しいテストが落ちることを確かめた。implementer が前提の 3 つ目の穴を 1 つ見つけた。更新の途中で v5.1.0 の `ralph org watch` が動き続けていると、新しい `ralph org stop` が書いた `stop_failed` を除いた基準で警告を保存しうる。その警告が残ったまま watch を新しいバイナリで立て直すと、数え直しが 1 大きくなって警告が消える。doc comment にこの窓を書き、PR 本文の既知の穴にも書く。更新の前に watch を止めておけば起きない
