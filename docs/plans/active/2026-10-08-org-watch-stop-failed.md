@@ -99,8 +99,8 @@ Critical forks: None
 - [x] Plan approved
 - [x] Branch created
 - [x] Implementation started
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Review artifact created
+- [x] Verification artifact created
+- [x] Test artifact created
 - [ ] PR created
 - 2026-10-08: S1(2765f002)。テストは、偽の herdr の `PaneGet` を失敗させた本物の `Stop` で `stop_failed` を作る(`fakeWatchHerdr.PaneGetErr` を足した)。mutation で、この直しを戻すと新しいテストが落ちることを確かめた。implementer が前提の 3 つ目の穴を 1 つ見つけた。更新の途中で v5.1.0 の `ralph org watch` が動き続けていると、新しい `ralph org stop` が書いた `stop_failed` を除いた基準で警告を保存しうる。その警告が残ったまま watch を新しいバイナリで立て直すと、数え直しが 1 大きくなって警告が消える。doc comment にこの窓を書き、PR 本文の既知の穴にも書く。更新の前に watch を止めておけば起きない
