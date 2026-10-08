@@ -4103,6 +4103,113 @@ func TestOrgSpawn_Reserve_ExistingLeader_Phase2(t *testing.T) {
 	}
 }
 
+// TestOrgSpawn_Reserve_InactiveLeaderChecksMaxOrgs covers plan AC1 and AC14
+// for a legacy ledger: an older ralph's disband could follow the leader's
+// `spawned` with no `stopped`, so the roster shows org-a's leader spawned but
+// not active and org-a not running. A spawn with Reserve reaches
+// idempotentRespawn for that seat, from Phase 1 and from Phase 2 (the seam of
+// TestOrgSpawn_Reserve_ExistingLeader_Phase2), and the reservation would make
+// org-a run, so max_orgs is decided as for an org that is not running: with
+// org-b running and max_orgs 1 it is refused with no record, no receipt and
+// the seat unchanged; with max_orgs 2 the reservation is recorded. An org
+// that runs through another seat is not limited by max_orgs.
+func TestOrgSpawn_Reserve_InactiveLeaderChecksMaxOrgs(t *testing.T) {
+	legacyDisbandedLeader := func(t *testing.T, o *Org) {
+		t.Helper()
+		for _, ev := range []ManifestEvent{
+			{TS: "2026-08-01T00:00:05Z", OrgID: "org-a", SeatID: LeaderIdentity, Event: EventSpawned,
+				Role: LeaderIdentity, Driver: "claude", Model: "sonnet", PaneID: "legacy-pane"},
+			{TS: "2026-08-01T00:00:06Z", OrgID: "org-a", Event: EventDisbanded},
+		} {
+			if err := o.Manifest.Append(ev); err != nil {
+				t.Fatalf("seed legacy %s: %v", ev.Event, err)
+			}
+		}
+	}
+	for _, phase := range []string{"phase 1", "phase 2"} {
+		for _, tc := range []struct {
+			maxOrgs  int
+			recorded bool
+		}{{1, false}, {2, true}} {
+			t.Run(fmt.Sprintf("%s, max_orgs %d", phase, tc.maxOrgs), func(t *testing.T) {
+				o, h, a := testOrg(t)
+				o.Config.MaxOrgs = tc.maxOrgs
+				spawnSeatIn(t, o, h, "org-b", "seat-1", "ws-b", "pane-b1")
+				if phase == "phase 1" {
+					legacyDisbandedLeader(t, o)
+				} else {
+					if err := o.Manifest.Append(ManifestEvent{
+						TS: "2026-08-01T00:00:00Z", OrgID: "org-a", SeatID: LeaderIdentity, Event: EventSpawnStarted,
+						Role: LeaderIdentity, Driver: "claude", Model: "sonnet", PaneID: "stale-pane",
+					}); err != nil {
+						t.Fatalf("seed stale spawn_started: %v", err)
+					}
+					orig := afterStaleCompensation
+					afterStaleCompensation = func() { legacyDisbandedLeader(t, o) }
+					defer func() { afterStaleCompensation = orig }()
+				}
+				receiptsBefore, agmsgBefore := receiptCount(t, o), len(a.calls)
+
+				r := o.Spawn(leaderParams("org-a", "internal/"))
+				events := mustReadEvents(t, o)
+				if tc.recorded {
+					if r.Outcome != SpawnOutcomeIdempotent || r.Err != nil || r.Seat.SeatID != LeaderIdentity {
+						t.Fatalf("expected the existing leader returned, got %+v", r)
+					}
+					if ev := lastEvent(t, o); ev.Event != EventScopeReserved || ev.OrgID != "org-a" || ev.Details != "paths=internal/" {
+						t.Fatalf("expected org-a's scope_reserved, got %+v", ev)
+					}
+					if got := RunningOrgs(events); !slices.Equal(got, []string{"org-a", "org-b"}) {
+						t.Fatalf("RunningOrgs = %v, want org-a and org-b", got)
+					}
+				} else {
+					if r.Outcome != SpawnOutcomeRejected || r.Err == nil {
+						t.Fatalf("expected a max_orgs rejection for org-a, got %+v", r)
+					}
+					for _, w := range []string{"max_orgs 1 reached", `org_id "org-a" is not running`, "(org-b)", "ralph org disband --org-id <id>"} {
+						if !strings.Contains(r.Err.Error(), w) {
+							t.Errorf("error %q does not contain %q", r.Err, w)
+						}
+					}
+					if ev := lastEvent(t, o); ev.Event != EventDisbanded || ev.OrgID != "org-a" {
+						t.Fatalf("expected no record after the legacy disbanded, got %+v", ev)
+					}
+					if seat, ok := seatFromEvents(events, "org-a", LeaderIdentity); !ok || seat.Event != EventSpawned || seat.Active {
+						t.Fatalf("expected org-a's leader still spawned and inactive, got %+v (found=%v)", seat, ok)
+					}
+					if got := ActiveReservation(events, "org-a"); got != nil {
+						t.Fatalf("ActiveReservation(org-a) = %q, want none", got)
+					}
+					if got := RunningOrgs(events); !slices.Equal(got, []string{"org-b"}) {
+						t.Fatalf("RunningOrgs = %v, want only org-b", got)
+					}
+				}
+				if receiptCount(t, o) != receiptsBefore || len(a.calls) != agmsgBefore {
+					t.Fatalf("expected no receipt and no agmsg call, receipts %d -> %d, agmsg %v",
+						receiptsBefore, receiptCount(t, o), a.calls[agmsgBefore:])
+				}
+			})
+		}
+	}
+	// org-a runs again through a seat spawned after the legacy disband, so
+	// with max_orgs 2 reached by org-a and org-b the reservation is not
+	// limited by max_orgs: it is recorded.
+	t.Run("org running through another seat: recorded at the limit", func(t *testing.T) {
+		o, h, _ := testOrg(t)
+		o.Config.MaxOrgs = 2
+		spawnSeatIn(t, o, h, "org-b", "seat-1", "ws-b", "pane-b1")
+		legacyDisbandedLeader(t, o)
+		spawnSeatIn(t, o, h, "org-a", "seat-1", "ws-a", "pane-a1")
+
+		if r := o.Spawn(leaderParams("org-a", "internal/")); r.Outcome != SpawnOutcomeIdempotent || r.Err != nil {
+			t.Fatalf("expected the existing leader returned, got %+v", r)
+		}
+		if ev := lastEvent(t, o); ev.Event != EventScopeReserved || ev.OrgID != "org-a" || ev.Details != "paths=internal/" {
+			t.Fatalf("expected org-a's scope_reserved, got %+v", ev)
+		}
+	})
+}
+
 // TestOrgSpawn_Reserve_DisbandReleasesIt covers the first half of plan AC8:
 // once org-a is disbanded, another org reserves the same paths, and org-a
 // starts again with a reservation of its own.

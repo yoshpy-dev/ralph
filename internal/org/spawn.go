@@ -342,7 +342,8 @@ type SpawnResult struct {
 //     AC-2b scope gate below either -- see that gate's doc comment for the
 //     fix this encodes -- and a retired [org.roles] / [org.permissions.roles]
 //     key added after the seat was spawned cannot reject the retry). With
-//     Reserve, the reservation is decided first (idempotentRespawn).
+//     Reserve, the reservation is decided first, after max_orgs when the
+//     seat is not active (idempotentRespawn).
 //  2. ralph.toml retired-key check (retiredRoleConfigErr): a plain
 //     rejection (no `rejected` event, no receipt), run before stale-seat
 //     compensation and every manifest write, so only a genuinely new spawn
@@ -600,7 +601,8 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 			// max_seats pressure at the at-cap boundary. An idempotent
 			// no-op must not be able to fail validation. A retry that
 			// carries Reserve is the one exception: idempotentRespawn
-			// decides the reservation before returning the seat.
+			// decides the reservation (and, for a seat that is not active,
+			// max_orgs) before returning the seat.
 			r := o.idempotentRespawn(p, *existing, events)
 			early = &r
 			return nil
@@ -1078,12 +1080,31 @@ func spawnCapacityErr(cfg config.OrgConfig, p SpawnParams, req SpawnRequest, eve
 // unless p.Reserve is set (only possible for the leader seat). Then the
 // reservation is decided first against the same locked events
 // (reservationDecision): an org without one records it, the same set passes,
-// and a different set or an overlap with another running org is refused. A
-// refusal is a plain rejection (no `rejected` event, no receipt): a
-// `rejected` for the seat would become its latest state event and show the
-// running leader inactive, and the seat must stay as it is.
+// and a different set or an overlap with another running org is refused.
+//
+// When the seat is not Active (a legacy ledger where an older ralph's
+// `disbanded` followed the leader's `spawned` with no `stopped`), its org may
+// not be running, and a reservation alone makes an org run (RunningOrgs). So
+// max_orgs is decided first, as ValidateOrgWideCapacity decides it for an
+// org that is not running: once max_orgs other orgs run, the reservation is
+// refused. max_total_seats is not checked, because no seat is added. An
+// Active seat's org is running, so it skips this check.
+//
+// Every refusal is a plain rejection (no `rejected` event, no receipt): a
+// `rejected` for the seat would replace `spawned` as its latest state event
+// (for a running leader, showing it inactive), and the seat must stay as it
+// is.
 func (o *Org) idempotentRespawn(p SpawnParams, seat SeatStatus, events []ManifestEvent) SpawnResult {
 	if len(p.Reserve) > 0 {
+		if !seat.Active {
+			running := RunningOrgs(events)
+			if len(running) >= o.Config.MaxOrgs && !slices.Contains(running, p.OrgID) {
+				return SpawnResult{Outcome: SpawnOutcomeRejected, Err: fmt.Errorf(
+					"org: max_orgs %d reached: org_id %q is not running and %d orgs are (%s), so its %s seat (spawned, not active) cannot reserve paths; %s",
+					o.Config.MaxOrgs, p.OrgID, len(running), strings.Join(running, ", "), LeaderIdentity, disbandFreesSlotHint,
+				)}
+			}
+		}
 		record, err := reservationDecision(events, p.OrgID, p.Reserve)
 		if err != nil {
 			return SpawnResult{Outcome: SpawnOutcomeRejected, Err: err}
