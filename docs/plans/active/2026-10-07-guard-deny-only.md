@@ -177,6 +177,9 @@
   - 2 周目の self-review のやり直し(373fa29d)は merge で LOW 3 件、verify のやり直し(3950ffdd)は pass で LOW 2 件。どれもコメントのずれで、c61ab2bf と次のコミットで直した
   - 2 周目の test のやり直し(facd295b、tester/opus): pass。`tests/test-pre-bash-guard.sh` は 1730/0(180c7389 で 14 件を足した。ubuntu の mawk と gawk でも 1730/0)、`tests/test-lib-json.sh` は 126/0、`run-test.sh` と `run-verify.sh` も通る。mutation は 22 個のうち 19 個が赤、残る 3 個(J02、L03、N02)は等価。F2-1 の形は新版・旧版とも deny になった。字句解析だけが止める形(`$` と `(` を行継続で分け、中身が `(id)` や `git push origin --force`)は新旧とも none のままで、tech-debt に記録した
   - 2 周目の sync-docs(doc-maintainer/sonnet): tech-debt の guard の限界の行とテストの穴の行を 4e829e34 の状態に直した(データ区間が 1 つもなくなる 3 つの場合、それに伴う誤検知、字句解析だけの穴、残るコメントのずれ、1730/0)。124・125 行目の「推奨の形は通る」に行末の `\` の例外を足し、166 行目に再実行の結果を足した。`internal/org/prompts/implementer.md` の guard の説明を、推奨の HEREDOC 形式は通ると直した
+  - main を取り込んだ(e1dfb422、衝突は `docs/tech-debt/README.md` の末尾だけ。両側の行を残した)
+  - cross-review の 2 周目(a9af4e05、Codex): ACTION_REQUIRED 3 件(区切りの `$'\x45'` を字句解析が `x45` と読む、`env -S` の後ろの引数、zsh の `builtin exec` のリダイレクト。どれも旧版が deny にした形を通す)と WORTH_CONSIDERING 2 件(`git push -ofoo` と `git reset -- --hard` を新版が止める誤検知)。同じ型の穴は 3 回目。上限に達し、ユーザーは「上限を 3 に上げて直す」を選んだ(`RALPH_STANDARD_MAX_PIPELINE_CYCLES=3`。cross-review の手順どおり cycle-count.json は 2 のまま)。consult(consult-plan-xrfix)と相談し、条件を足すのをやめて許可リストにした
+  - 許可リストの修正(a9ef82b1、implementer/opus): トップレベルの単純コマンドの 1 語目(前置きと代入を読み飛ばす前の値)がすべて読むだけのコマンドか `git` で、値に `/` がないときだけデータ区間を与える。ヒアドキュメントの区切りに `$` かバッククォートがあればデータ区間を与えない。git push は値を取るオプション(`--repo`、`--receive-pack`、`--exec`、`--recurse-submodules`、`-o`・`--push-option`)の値を読み飛ばし、git reset は `--` で走査を止める。止める側への逸脱: 前置きつきの読むだけのコマンド(`env echo …`、`nice grep …`)や `/bin/echo` のような道のある 1 語目は、旧版と同じく見張りが決める。none から deny に変わったテストの例は `=echo sudo ls` の 1 件で、旧版も deny。テスト 1800 件
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
