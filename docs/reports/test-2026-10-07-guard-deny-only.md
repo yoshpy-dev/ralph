@@ -450,3 +450,107 @@ a9ef82b1・849f5411 が変えた判定への変異 27 個(許可リスト 8、�
 - Fail: なし
 - Blocked: なし
 - Known gaps: AL02(等価)・DL02・DL05(防御的)。guard の持ち越し(self-review C3-1〜C3-5、verify V4-1〜V4-3)は次に guard を変える PR で
+
+## cycle 4 (cap raised to 4)
+
+- Date: 2026-10-08
+- Tester: tester subagent (Claude)。cross-review の 3 周目のあと、ユーザーが上限を 4 に上げてから回した /test で、上限 4 の最後の run。`cycle-count.json` は 2 のまま。上の 5 つの Verdict は、それぞれの時点の判定として残した。いまの判定は、この節の最後の `## Verdict(cycle 4)` にある
+- Scope: `git diff e5c9e6be..HEAD -- .claude tests templates`(HEAD 6b1f7acc)と、この /test で足したテスト。guard の判定を変えたのは 2 つのコミット。b3c3fdaa は、printf の `%`・`$`・バッククォートの検査、DATACMD から `test`・`[` を外すこと、merge・rebase・am の `--no-verify` の走査を `--` で止めないこと、commit の値を取る長いオプションを `opt_is` で読むことを入れた。12e9a9ad は、printf を書かれたままの語(`WR`)で見ること、rg の `$'`・`$"` の検査、`opt_is` の下限を 3 文字にすること、`pull` を入れた。6b1f7acc はコメントだけ。root と template の guard は `diff` で同一(`run-verify.sh` の `check-sync.sh` も通る)
+- Evidence: `docs/evidence/test-2026-10-07-guard-deny-only.log` の末尾(「cycle 4 (cap raised to 4)」の見出し、46〜59 節)。gitignore の対象なので commit しない
+- Guard・lib_json は変えていない。足したのは `tests/test-pre-bash-guard.sh` の 7 行だけ(389436de)
+
+### Test execution(cycle 4)
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `./scripts/run-test.sh` 1 回目(テストを足す前、6b1f7acc) | shell 40 本 + Go 8 パッケージ | 40 本 + Go 8 | 0 | 0 | 847 s(probe と並走) |
+| その中の `tests/test-pre-bash-guard.sh` / `tests/test-lib-json.sh` | 1868 / 126 | 1868 / 126 | 0 / 0 | 0 / 0 | — |
+| `./scripts/run-verify.sh` 1 回目(mode all、scope full、テストを足す前) | 静的な検査 + shell 40 本 + Go | すべて | 0 | 0 | 490 s |
+| ubuntu:24.04、mawk 1.3.4、dash、GNU sed 4.9・grep 3.11、jq なし: guard / lib_json(テストを足したあと) | 1875 / 126 | 940 / 87 | 0 / 0 | 935 / 39(jq の経路) | — |
+| ubuntu:24.04、mawk、jq 1.7: guard / lib_json | 1886 / 126 | 1886 / 126 | 0 / 0 | 0 / 0 | — |
+| ubuntu:24.04、gawk 5.2.1、jq 1.7: guard / lib_json | 1886 / 126 | 1886 / 126 | 0 / 0 | 0 / 0 | — |
+| `./scripts/run-test.sh` 2 回目(テストを足したあと) | shell 40 本 + Go 8 パッケージ | 40 本 + Go 8 | 0 | 0 | 635 s |
+| その中の `tests/test-pre-bash-guard.sh` / `tests/test-lib-json.sh` | 1886 / 126 | 1886 / 126 | 0 / 0 | 0 / 0 | — |
+| `./scripts/run-verify.sh` 2 回目(テストを足したあと) | 静的な検査 + shell 40 本 + Go | すべて | 0 | 0 | 421 s |
+
+- `run-test.sh` は 2 回とも `lib_json.sh` を分類できず full にフォールバックした。Go は 1 回目に `internal/cli`(117.6 s)と `internal/org`(16.5 s)、2 回目に `internal/org`(12.0 s)が走り、ほかはキャッシュから。shell は 40 本すべて緑で、assertion の `FAIL` は 0、0 でない `FAIL:` の要約も 0
+- `run-verify.sh` は 2 回とも `All verifiers passed.` で終わった。shellcheck(足した行を含む `tests/test-*.sh`)、golangci-lint(0 issues)、`check-sync.sh`、branch の secret scan(`51855166..6b1f7acc`、clean)が中で通った
+- `tests/test-secret-scan.sh`(固定 `/tmp` パスの既知の flaky)は 4 回とも通った。ほかの実行と重ならないように流した
+- 件数の増え方: 1868 から 1886。`guard_deny_only_forms`(B 節、1 行 4 件)に 2 行で +8、`edge_deny`・`edge_none`・`edge_sentinel_deny`(D 節、1 行 2 件)に 1・1・3 行で +10。macOS の BWK awk で AC8(jq なし)の最大は 1.049 秒(1 回目)と 1.033 秒(2 回目)
+
+### 足したテスト(cycle 4、`tests/test-pre-bash-guard.sh`、7 行)
+
+どの行も新版で期待どおり(jq あり・なし)。旧版は、見張りの語を持つ 5 行を deny、git の 2 行を none にする(`--no-verify` の規則が旧版にないこと、`--` だけの merge に見張りの語がないことによる)。各行の形は、probe に使った候補のファイルとバイト単位で一致させた(evidence 53)。
+
+- `guard_deny_only_forms`(B、deny)に 2 行。verify V5-2 に答える
+  - `printf $'\x25n' $'arr[\x24(sudo id; echo 1)]'`: 添字の置換も `$'...'` で書いたので、字句解析のあとのどの語の値にも `$` が残らない。書かれたままの語の `$` だけが printf をデータコマンドから外す。zsh 5.9 は、見張りの語を無害な `echo` に替えた同じ形で添字の置換を実行した(evidence 54)。既存の `printf $'\x25n' 'arr[$(…)]'` は、2 つ目の引数の値に `$` があるので、`WV` に戻しても deny のまま
+  - `rg $'\x2d-pre' sh 'sudo ls'`: `$'\x2d-pre'` は shell(zsh・bash)には `--pre`、字句解析には `\x2d-pre` なので、`--pre` の検査では外れない。`$'` の検査だけが rg をデータコマンドから外す(evidence 54)
+- `edge_deny`(D、deny)に 1 行: `git commit --trailer=x --no-verify -m fix`。`=` で付けた値は 1 語なので、次の語はまたフラグとして読む。git 2.49 で、失敗する pre-commit hook がこの形では走らないことを確かめた(evidence 55)
+- `edge_none`(D、none)に 1 行: `git merge --no-ff -- feature`。`--` だけでは `--no-verify` の略記にならない(`opt_is` は `--` の後ろに 1 文字以上を求める)。git 2.49 は `git merge --no-ff -m m -- feature` で merge する(evidence 55)
+- `edge_sentinel_deny`(D、deny)に 3 行。どれも 1 つの条件だけを固定する
+  - `rg $"sudo ls" .`: rg の `$"` の検査
+  - ``printf `echo x` 'sudo ls'``: printf のバッククォートの検査
+  - `printf -v c 'sudo ls'`: printf の `-v` の検査。`guard_deny_only_forms` の 7 節の `-v` の 2 行は後ろで `$c` を実行するので、`-v` の検査がなくても許可リストが deny にする
+
+### Mutation の結果(cycle 4)
+
+b3c3fdaa と 12e9a9ad が変えた判定に、依頼の 9 個と、その副条件の 11 個を当てた(printf 6、rg 4、DATACMD 3、`no_verify_rules` 1、commit 3、`opt_is` 2、`pull` 1)。手順は cycle 3 と同じで、使い捨ての写しを作り、system awk で構文を確かめ(evidence 49、構文エラーなし)、A〜D 節の行に渡して期待と違う行を数えた(evidence 50〜52)。
+
+| 変異 | 壊したもの | 足す前(524 行) | 足したあと(531 行、jq / jq なし) | 判定 |
+| --- | --- | --- | --- | --- |
+| P01 | printf の `%`・`$`・バッククォートを `WV` で見る(依頼) | 1 赤 | 2 / 2 赤 | 殺(`$'\x2dv'` の行と、足した `$'\x25n'` の行) |
+| P02 | printf の `%` を落とす(依頼) | 1 赤 | 1 / 1 赤 | 殺(既存 `printf '%s\n' 'sudo ls'`) |
+| P03 | printf の `$` を落とす(依頼) | 3 赤 | 4 / 4 赤 | 殺 |
+| P04 | printf のバッククォートを落とす | **0** | 1 / 1 赤 | 殺(足した ``printf `echo x` …``) |
+| P05 | printf の書式の語を見ない(`j = i + 2`) | 2 赤 | 4 / 4 赤 | 殺 |
+| P06 | printf の `-v` を落とす | **0** | 1 / 1 赤 | 殺(足した `printf -v c 'sudo ls'`) |
+| R01 | rg の `$'`・`$"` を落とす(依頼) | **0** | 2 / 2 赤 | 殺(足した rg の 2 行) |
+| R02 | rg の `$'` だけ落とす | **0** | 1 / 1 赤 | 殺(足した `rg $'\x2d-pre' …`) |
+| R03 | rg の `$"` だけ落とす | **0** | 1 / 1 赤 | 殺(足した `rg $"sudo ls" .`) |
+| R04 | rg の `$'`・`$"` を `WV` で見る | **0** | 2 / 2 赤 | 殺(足した rg の 2 行) |
+| D01 | DATACMD に `test`・`[` を戻す(依頼) | 4 赤 | 4 / 4 赤 | 殺 |
+| D02 | `test` だけ戻す | 2 赤 | 2 / 2 赤 | 殺 |
+| D03 | `[` だけ戻す | 2 赤 | 2 / 2 赤 | 殺 |
+| N01 | `no_verify_rules` を `--` で止める(依頼) | 2 赤 | 2 / 2 赤 | 殺(既存 `git merge -m -- --no-verify feature` など) |
+| CM01 | commit の値オプションを完全一致で比べる(依頼) | 1 赤 | 1 / 1 赤 | 殺(既存 `git commit --trail -- --no-verify -m fix`) |
+| CM02 | `=` つきでも 2 語進む | **0** | 1 / 1 赤 | 殺(足した `--trailer=x --no-verify`) |
+| CM03 | 常に 1 語だけ進む | 2 赤 | 2 / 2 赤 | 殺 |
+| O01 | `opt_is` の下限を `k >= 4` に戻す(依頼) | 2 赤 | 2 / 2 赤 | 殺(既存 `git reset --h`、`git commit --m -- --no-verify`) |
+| O02 | `opt_is` の下限を `k >= 2` にする | **0** | 1 / 1 赤 | 殺(足した `git merge --no-ff -- feature`) |
+| PL01 | `pull` を落とす(依頼) | 1 赤 | 1 / 1 赤 | 殺(既存 `git pull --no-verify origin main`) |
+
+- 20 個すべてが殺。等価な変異はこの周にはない。足す前は 8 個(P04・P06・R01〜R04・CM02・O02)が緑のままで、足した 7 行で閉じた。HEAD は足したあとの 531 行で、jq あり・なしとも期待と違う行が 0
+- 依頼の 9 個のうち、足す前に緑だったのは R01 だけ(V5-2 のとおり、rg と `$'...'` の語を組んだ行がなかった)
+- P06 は前の周からの穴で、この周の変更とは関係しない。`-v` の 2 行は後ろの `$c` が 1 語目なので、a9ef82b1 の許可リストで deny になる。cycle 3 からは、`-v` の検査を外しても判定が変わらなかった(cycle 3 では `-v` の変異を当てていない)。cycle 2 の Lesson と同じで、広い規則が入ると、前からある規則を固定していた行が別の理由で deny になる
+- R03 について: 字句解析は `$"` の `$` を落としてダブルクォートの文字列として読む(`lex_dollar`)。このため `$"--pre"` は、`$"` の検査より前に `--pre` の検査で外れる。`$"` の検査が shell の上で効くのは、bash が翻訳カタログで文字列を置き換えるときだけと思われる(未確認)。guard の判定は `rg $"sudo ls" .` で区別できるので、行を足して固定した
+- 全体を流しての確認(evidence 56): R02 と P04 の写しで `tests/test-pre-bash-guard.sh` 全体を流した。足す前のテストファイルでは 2 つとも 1868/0 で緑、足したあとのファイルでは R02 が 6 件(B の 4 件と、G の AC7 の比較の 2 件)、P04 が 2 件の FAIL。行の probe の予測と一致した
+
+### Failure analysis(cycle 4)
+
+テストの失敗はない。self-review C4-1〜C4-4 の形(`$'...'` で書いた printf の書式、`git reset --h`、`git commit --m -- --no-verify`、`git pull --no-verify`)は、12e9a9ad の行と足した行で新版が deny にする。
+
+### Regression checks(cycle 4)
+
+| Previously broken behavior | Status | Evidence |
+| --- | --- | --- |
+| AC1・AC2・AC3・AC4・AC9 | 通る | `run-test.sh` 2 回。1886 件で ask はなく、jq あり・なしが一致。`tests/test-lib-json.sh` 126/0 |
+| AC6: 静的な検査 | 通る | `run-verify.sh` 2 回とも `All verifiers passed.`。root と template の guard は同一 |
+| AC7: 旧版の deny は新版でも deny | 通る | 足した 7 行のうち見張りの語を持つ 5 行は新旧とも deny。git の 2 行は旧版が none。スイートの G 節は `run-test.sh` で緑 |
+| AC8: 200 KB のコマンドが 5 秒以内 | 通る | macOS BWK awk で最大 1.049 秒、ubuntu の mawk で 0.071〜0.388 秒 |
+| cross-review cycle 3 と self-review cycle 4 の修正(b3c3fdaa、12e9a9ad) | 固定した | 上の mutation の表。足す前は 8 個の変異が緑だった |
+| awk の方言 | 通る | ubuntu の mawk と gawk で guard 1886/0、lib_json 126/0 |
+
+### Test gaps(cycle 4)
+
+- 変異は手で選んだ 20 個で、計測したカバレッジはない。この周は、変異の対象の条件を固定する行だけを足した
+- rg は `$'`・`$"` の語で外れるが、`$x` のような変数の語では外れない。self-review C4-1 は「`WR` に `$` があれば外す」を勧め、verify の cycle 4 の節(rg の検査を述べた 3 項)はこの差を plan の Non-goals の範囲の設計の選び方とした。この /test は今の条件を固定しただけで、その判断は変えていない
+- self-review・verify の持ち越し(C3-3〜C3-5、V4-1、V5-1 のコメントのずれ、V5-3 の記録)は、guard を変えると上限 4 を超えるので直さない
+- このセッションで効いている Bash の guard は main のチェックアウトの旧版なので、新版を Claude Code の実際の呼び出しで確かめるのは merge 後になる
+- `tests/test-secret-scan.sh` の固定パスの問題は、この PR の外の既存の問題として残る(この周では起きなかった)
+
+## Verdict(cycle 4)
+
+- Pass: yes。`./scripts/run-test.sh` 2 回(rc 0、`tests/test-pre-bash-guard.sh` 1868/0 と 1886/0、`tests/test-lib-json.sh` 126/0、Go 8/8、assertion の FAIL 0)、`./scripts/run-verify.sh` 2 回(rc 0、`All verifiers passed.`)、ubuntu:24.04 の mawk(jq あり・なし)と gawk で guard 1886/0(jq なしは 940/0、jq の経路の 935 件は skip)、lib_json 126/0。20 個の mutation はすべて赤。足す前に緑だった 8 個(printf のバッククォートと `-v`、rg の `$'`・`$"`、commit の `=` つきの値、`opt_is` の `--`)を、足した 7 行で閉じた。V5-2 の 2 点(rg の `$'` の行、`WR` だけに頼る printf の行)にも答えた。guard と `lib_json.sh` は変えていない
+- Fail: なし
+- Blocked: なし
+- Known gaps: rg の変数の語(verify の判断のまま)。guard の持ち越し(self-review C3-3〜C3-5、verify V4-1・V5-1・V5-3)は次に guard を変える PR で
