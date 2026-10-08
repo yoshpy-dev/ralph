@@ -79,6 +79,60 @@ func TestExecRunner_Run_TimeoutHonored(t *testing.T) {
 	}
 }
 
+// TestExecRunner_Run_TimeoutNotHeldByGrandchild: a timed-out command whose
+// background child still holds stdout/stderr must not keep Run waiting for
+// that child. The shell is killed at the deadline; without WaitDelay, Wait
+// would block until the `sleep 3` in the background exits.
+func TestExecRunner_Run_TimeoutNotHeldByGrandchild(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not available")
+	}
+	orig := execWaitDelay
+	execWaitDelay = 100 * time.Millisecond
+	defer func() { execWaitDelay = orig }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := ExecRunner{}.Run(ctx, "sh", "-c", "sleep 3 & sleep 3")
+	elapsed := time.Since(start)
+
+	if err == nil || !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("expected a timed-out error, got %v", err)
+	}
+	if elapsed > 2*time.Second {
+		t.Fatalf("Run took %v: it waited for the background child holding the pipes", elapsed)
+	}
+}
+
+// TestExecRunner_Run_SuccessNotFailedByGrandchildHoldingPipes: a command that
+// exits 0 while its background child still holds stdout is a success. Wait
+// closes the pipes after WaitDelay and returns exec.ErrWaitDelay, which
+// os/exec returns only for a successful exit, so Run must return the output
+// read so far and no error, without waiting for the `sleep 5`.
+func TestExecRunner_Run_SuccessNotFailedByGrandchildHoldingPipes(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not available")
+	}
+	orig := execWaitDelay
+	execWaitDelay = 100 * time.Millisecond
+	defer func() { execWaitDelay = orig }()
+
+	start := time.Now()
+	out, err := ExecRunner{}.Run(context.Background(), "sh", "-c", "echo ok; sleep 5 &")
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("expected a successful command to return no error, got %v", err)
+	}
+	if out != "ok" {
+		t.Fatalf("want %q, got %q", "ok", out)
+	}
+	if elapsed > 3*time.Second {
+		t.Fatalf("Run took %v: it waited for the background child holding the pipes", elapsed)
+	}
+}
+
 func TestExecRunner_Run_StderrCaptured(t *testing.T) {
 	r := ExecRunner{}
 	_, err := r.Run(context.Background(), "sh", "-c", "echo err >&2; exit 3")

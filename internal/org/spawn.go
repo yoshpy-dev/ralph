@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -66,12 +67,21 @@ const LeaderIdentity = "leader"
 // default.
 const defaultLeaderDriver = "claude"
 
-// EventOrgWorkspaceCreated is an org-level event (SeatID empty) recorded the
-// first time a herdr workspace is created for an org_id. Later spawns within
+// EventOrgWorkspaceCreated is an org-level event (SeatID empty) recorded
+// whenever a herdr workspace is created for an org_id. Later spawns within
 // the same org_id reuse the recorded PaneID (the workspace id) instead of
 // calling Herdr.WorkspaceCreate again -- one workspace per org, many tabs
-// (one per seat).
+// (one per seat) -- until an EventOrgWorkspaceClosed for that id follows.
 const EventOrgWorkspaceCreated = "org_workspace_created"
+
+// EventOrgWorkspaceClosed is the org-level event (SeatID empty, PaneID = the
+// workspace id) Disband records once the org's workspace is closed, herdr
+// reports it not found, or it is the caller's own workspace whose close
+// Disband leaves to the caller (see DisbandResult.DeferredSelfWorkspaceID).
+// Details say which. With Disband's Force it is also recorded for a close
+// that failed. A spawn after it creates a new workspace (resolveWorkspace).
+// Like EventOrgWorkspaceCreated it is not a state event.
+const EventOrgWorkspaceClosed = "org_workspace_closed"
 
 // HerdrClient is the subset of driver.Herdr's methods the spawn saga and the
 // send/wait/read/stop verbs need. Defined here (consumption side, per
@@ -87,6 +97,23 @@ type HerdrClient interface {
 	PaneRead(ctx context.Context, paneID string, lines int) (string, error)
 	PaneSendText(ctx context.Context, paneID, text string) error
 	PaneSendKeys(ctx context.Context, paneID string, keys ...string) error
+	// PaneClose and WorkspaceClose run `herdr pane close` / `herdr
+	// workspace close` on an id the manifest recorded. An id herdr no
+	// longer knows (already closed) comes back as an error for which
+	// driver.IsNotFound is true; for any other failure it is false.
+	PaneClose(ctx context.Context, paneID string) error
+	WorkspaceClose(ctx context.Context, workspaceID string) error
+	// PaneGet, TabGet and WorkspaceGet run `herdr pane get` / `herdr tab
+	// get` / `herdr workspace get`: the ids of the tab and workspace that
+	// hold a pane, and the label of a tab or workspace. Stop and Disband
+	// read them before a C-c or a close, to confirm a recorded id still
+	// names what spawn created (it labels a seat's tab with the seat id and
+	// the org's workspace with the org_id; see confirmSeatPane in
+	// verbs.go). An unknown id comes back as an error for which
+	// driver.IsNotFound is true.
+	PaneGet(ctx context.Context, paneID string) (tabID, workspaceID string, err error)
+	TabGet(ctx context.Context, tabID string) (label string, err error)
+	WorkspaceGet(ctx context.Context, workspaceID string) (label string, err error)
 }
 
 // AgmsgClient is the subset of driver.Agmsg's methods the spawn saga and the
@@ -180,6 +207,20 @@ type Org struct {
 	// the poll's not-found/timeout path runs fast.
 	CodexModelObserveTimeout  time.Duration
 	CodexModelObserveInterval time.Duration
+	// DriverCallTimeout bounds each herdr / agmsg call Stop makes (the pane,
+	// tab and workspace gets of the ownership check, the C-c, the pane
+	// close, the agmsg Leave), each workspace get and close Disband makes,
+	// and the gets and the close in CloseDeferredSelfPane /
+	// CloseDeferredSelfWorkspace, one fresh deadline per call. Zero (the field's default) means "use
+	// defaultDriverCallTimeout" -- tests set a tiny value so a call that
+	// never answers times out fast.
+	DriverCallTimeout time.Duration
+	// Getenv overrides how Stop and Disband read the caller's herdr
+	// environment (HERDR_PANE_ID and HERDR_WORKSPACE_ID, set by herdr inside
+	// every pane). nil (the field's default) means os.Getenv -- tests set it
+	// so the result does not depend on whether the test process itself runs
+	// inside a herdr pane.
+	Getenv func(string) string
 }
 
 func (o *Org) now() string {
@@ -1654,15 +1695,16 @@ func (o *Org) dryRunSpawn(p SpawnParams, mode string) SpawnResult {
 
 // resolveWorkspace reuses the org's existing herdr workspace (recorded via
 // an EventOrgWorkspaceCreated org-level event, SeatID empty, PaneID =
-// workspace id) if one exists for orgID within events, otherwise creates one
-// and records it. events is the manifest snapshot read at the top of Spawn,
-// before this seat's own spawn_started was appended -- irrelevant to this
-// lookup since org-level workspace events are seat-independent.
+// workspace id) if one is still open for orgID within events -- the first
+// one openOrgWorkspaces returns -- otherwise creates one and records it. A
+// workspace with a later EventOrgWorkspaceClosed (Disband closed it) is
+// never reused: herdr no longer has it, so a tab in it would fail. events
+// is the manifest snapshot read at the top of Spawn, before this seat's own
+// spawn_started was appended -- irrelevant to this lookup since org-level
+// workspace events are seat-independent.
 func (o *Org) resolveWorkspace(ctx context.Context, p SpawnParams, events []ManifestEvent) (string, error) {
-	for _, ev := range events {
-		if ev.OrgID == p.OrgID && ev.SeatID == "" && ev.Event == EventOrgWorkspaceCreated {
-			return ev.PaneID, nil
-		}
+	if open := openOrgWorkspaces(events, p.OrgID); len(open) > 0 {
+		return open[0], nil
 	}
 	workspaceID, err := o.Herdr.WorkspaceCreate(ctx, p.Cwd, p.OrgID)
 	if err != nil {
@@ -1675,6 +1717,30 @@ func (o *Org) resolveWorkspace(ctx context.Context, p SpawnParams, events []Mani
 		return "", err
 	}
 	return workspaceID, nil
+}
+
+// openOrgWorkspaces returns the herdr workspace ids the manifest still
+// records as open for orgID: the PaneID of each real (non-dry-run)
+// org-level EventOrgWorkspaceCreated with no later EventOrgWorkspaceClosed
+// for the same org_id and id, oldest creation first. An org normally has at
+// most one; two concurrent first spawns can each create one. resolveWorkspace
+// reuses the first, Disband closes them all. Events with an empty PaneID
+// name no workspace and are skipped.
+func openOrgWorkspaces(events []ManifestEvent, orgID string) []string {
+	var open []string
+	for _, ev := range events {
+		if ev.OrgID != orgID || ev.SeatID != "" || ev.DryRun || ev.PaneID == "" {
+			continue
+		}
+		if ev.Event != EventOrgWorkspaceCreated && ev.Event != EventOrgWorkspaceClosed {
+			continue
+		}
+		open = slices.DeleteFunc(open, func(id string) bool { return id == ev.PaneID })
+		if ev.Event == EventOrgWorkspaceCreated {
+			open = append(open, ev.PaneID)
+		}
+	}
+	return open
 }
 
 // failStep records a spawn_failed event for a saga step that returned an

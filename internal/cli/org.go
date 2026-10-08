@@ -3,10 +3,12 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -38,7 +40,7 @@ func newOrgCmd() *cobra.Command {
 			"absent or stopped.",
 	}
 
-	cmd.PersistentFlags().StringVar(&orgID, "org-id", "", "org execution namespace (required)")
+	cmd.PersistentFlags().StringVar(&orgID, "org-id", "", "org execution namespace (required, except for stop --all and disband --all)")
 	cmd.PersistentFlags().StringVar(&stateDir, "state-dir", "", "org manifest/receipts state directory (default: resolved by org.ResolveOrgStateDir -- env RALPH_ORG_STATE_DIR, else the main worktree's .harness/state/org (shared by its linked worktrees), else the enclosing git toplevel's .harness/state/org, else cwd's .harness/state/org)")
 	cmd.PersistentFlags().StringVar(&configPath, "config", "", "path to ralph.toml (default: ./ralph.toml if present, else built-in defaults)")
 
@@ -712,14 +714,47 @@ func newOrgReadCmd(orgID, stateDir, configPath *string) *cobra.Command {
 
 func newOrgStopCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	var (
-		seat   string
-		dryRun bool
+		seat               string
+		dryRun, all, force bool
 	)
 
 	cmd := &cobra.Command{
 		Use:   "stop",
-		Short: "Stop a seat",
+		Short: "Stop a seat, or every active seat with --all, and close its herdr pane",
+		Long: "ralph org stop sends C-c to the seat's herdr pane, closes the pane (which\n" +
+			"ends the seat's process and its screen output; read it first with\n" +
+			"`ralph org read` if you need it), leaves agmsg, and records `stopped`.\n" +
+			"Before sending C-c or closing, it checks that herdr has the pane in a tab\n" +
+			"labelled with the seat id, inside a workspace labelled with the org_id (the\n" +
+			"labels spawn gave them). A pane that fails the check (a label differs, or\n" +
+			"herdr cannot be asked) is not sent C-c and is not closed, because its\n" +
+			"recorded id may now name another pane.\n" +
+			"When the pane cannot be closed, the seat stays active (stop_failed) and the\n" +
+			"command exits 1; run it again once herdr answers.\n" +
+			"\n" +
+			"--all stops every active seat of every org_id, without --org-id or --seat.\n" +
+			"It keeps going past a seat it cannot stop, lists each one on stderr, and\n" +
+			"exits 1 if any is left. --force records `stopped` even when the pane could\n" +
+			"not be closed, printing the failure as a warning and exiting 0; a pane that\n" +
+			"failed the check stays open, only the record is written. When the\n" +
+			"command runs inside a pane it stops (HERDR_PANE_ID), that pane is closed\n" +
+			"last, after all output, which ends the command. If that last close fails,\n" +
+			"the seat is recorded active again and the command exits 1, so running it\n" +
+			"again (or stop --all from another pane) retries the close; with --force\n" +
+			"the seat stays recorded stopped and the failure is only a warning.",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if all {
+				if err := rejectFlagsWithAll(cmd, "stop", "org-id", "seat"); err != nil {
+					return err
+				}
+				rt, err := newOrgRuntime(cmd, *stateDir, *configPath, orgLedgerMutating)
+				if err != nil {
+					return err
+				}
+				result := rt.StopAll(org.StopAllParams{DryRun: dryRun, Force: force})
+				runErr := printStopAllResult(cmd, result)
+				return closeDeferredSelf(cmd, rt, "", result.DeferredSelfPaneID, force, runErr)
+			}
 			if err := requireOrgID(*orgID); err != nil {
 				return err
 			}
@@ -730,20 +765,146 @@ func newOrgStopCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			result := rt.Stop(org.StopParams{OrgID: *orgID, Seat: seat, DryRun: dryRun})
-			if result.Err != nil {
-				return fmt.Errorf("org: stop: %w", result.Err)
-			}
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "stopped seat %q\n", seat)
+			result := rt.Stop(org.StopParams{OrgID: *orgID, Seat: seat, DryRun: dryRun, Force: force})
 			printCodexModelMismatchWarning(cmd, seat, result.ModelReceipt)
-			return nil
+			if result.Err != nil {
+				return withPrefixOnce("org: stop: ", result.Err)
+			}
+			if result.CloseErr != nil {
+				printSeatFailure(cmd.ErrOrStderr(), fmt.Sprintf("%q", seat), org.SeatFailure{SeatID: seat, Err: result.CloseErr, Forced: true})
+			} else {
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "stopped seat %q\n", seat)
+			}
+			return closeDeferredSelf(cmd, rt, "", result.DeferredSelfPaneID, force, nil)
 		},
 	}
 
-	cmd.Flags().StringVar(&seat, "seat", "", "seat id to stop (required)")
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "record without sending a real stop signal")
+	cmd.Flags().StringVar(&seat, "seat", "", "seat id to stop (required without --all)")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "record without any herdr or agmsg call")
+	cmd.Flags().BoolVar(&all, "all", false, "stop every active seat of every org_id (cannot be combined with --org-id or --seat)")
+	cmd.Flags().BoolVar(&force, "force", false, "record the seat stopped even when its pane could not be closed (failures become warnings, exit 0)")
 
 	return cmd
+}
+
+// rejectFlagsWithAll returns an error when any of flags was passed next to
+// --all, before the verb resolves a state dir or touches the manifest: --all
+// targets every org_id, so a flag naming one org or seat contradicts it.
+func rejectFlagsWithAll(cmd *cobra.Command, verb string, flags ...string) error {
+	for _, flag := range flags {
+		if cmd.Flags().Changed(flag) {
+			return fmt.Errorf("org: %s: --all cannot be combined with --%s", verb, flag)
+		}
+	}
+	return nil
+}
+
+// withPrefixOnce returns err with prefix in front unless its message already
+// starts with it. (*org.Org).Stop prefixes most of its errors with
+// "org: stop: " itself but returns a manifest append failure bare, so
+// wrapping every error unconditionally printed the prefix twice.
+func withPrefixOnce(prefix string, err error) error {
+	if strings.HasPrefix(err.Error(), prefix) {
+		return err
+	}
+	return fmt.Errorf("%s%w", prefix, err)
+}
+
+// printSeatFailure writes one seat that stop or disband did not stop cleanly
+// to w (stderr). label names the seat: `<org_id>/<seat_id>` for --all,
+// `"<seat_id>"` for one org. A Forced failure was recorded `stopped` anyway
+// and prints as a warning; any other is still active.
+func printSeatFailure(w io.Writer, label string, f org.SeatFailure) {
+	if f.Forced {
+		_, _ = fmt.Fprintf(w, "warning: seat %s recorded stopped (--force), but its pane was not closed: %v\n", label, f.Err)
+		return
+	}
+	_, _ = fmt.Fprintf(w, "seat %s not stopped: %v\n", label, f.Err)
+}
+
+// printWorkspaceFailure is printSeatFailure for a recorded herdr workspace
+// that disband did not close.
+func printWorkspaceFailure(w io.Writer, label string, f org.WorkspaceFailure) {
+	if f.Forced {
+		_, _ = fmt.Fprintf(w, "warning: workspace %s recorded closed (--force), but herdr did not close it: %v\n", label, f.Err)
+		return
+	}
+	_, _ = fmt.Fprintf(w, "workspace %s not closed: %v\n", label, f.Err)
+}
+
+// printOtherErrs writes to w (stderr) each entry of errs that is not one of
+// the already printed failures (shown, matched with errors.Is, which sees
+// through the org_id / seat prefixes StopAll and DisbandAll wrap around a
+// failure's Err): a manifest read or append failure, for example.
+func printOtherErrs(w io.Writer, errs, shown []error) {
+	for _, err := range errs {
+		if !slices.ContainsFunc(shown, func(s error) bool { return errors.Is(err, s) }) {
+			_, _ = fmt.Fprintf(w, "error: %v\n", err)
+		}
+	}
+}
+
+// printStopAllResult prints `ralph org stop --all`'s outcome: one
+// `stopped seat <org_id>/<seat_id>` line on stdout per seat stopped with its
+// pane closed, each failure on stderr (printSeatFailure), any other error,
+// and the codex model-mismatch warning per receipt. It returns the error
+// that makes the command exit 1, nil when every active seat was recorded
+// `stopped` (forced ones included).
+func printStopAllResult(cmd *cobra.Command, r org.StopAllResult) error {
+	out, stderr := cmd.OutOrStdout(), cmd.ErrOrStderr()
+	if len(r.StoppedSeats) == 0 && len(r.FailedSeats) == 0 && len(r.Errs) == 0 {
+		_, _ = fmt.Fprintln(out, "no active seats")
+	}
+	for _, s := range r.StoppedSeats {
+		_, _ = fmt.Fprintf(out, "stopped seat %s/%s\n", s.OrgID, s.SeatID)
+	}
+	var shown []error
+	for _, f := range r.FailedSeats {
+		printSeatFailure(stderr, f.OrgID+"/"+f.SeatID, f.SeatFailure)
+		shown = append(shown, f.Err)
+	}
+	printOtherErrs(stderr, r.Errs, shown)
+	for _, receipt := range r.ModelReceipts {
+		printCodexModelMismatchWarning(cmd, receipt.OrgID+"/"+receipt.SeatID, receipt)
+	}
+	if len(r.Errs) == 0 {
+		return nil
+	}
+	return fmt.Errorf("org: stop --all: %d error(s), listed above", len(r.Errs))
+}
+
+// closeDeferredSelf is stop's and disband's very last action: when the
+// result names the herdr workspace or pane this command runs in (recorded
+// closed or stopped in the manifest but left open, the DeferredSelf* ids),
+// it closes it now, the workspace when both are set since it holds the
+// pane. Closing it ends this process, so the caller prints everything
+// first; os.Stdout and os.Stderr are unbuffered, so nothing written so far
+// is left behind. runErr is the command's own outcome and is returned as is
+// when there is nothing to close or the close succeeds (if the process
+// survives it). A failed close has already recorded the seat active and the
+// workspace open again (CloseDeferredSelfPane / CloseDeferredSelfWorkspace),
+// and is added to runErr, so the command exits 1 and running it again
+// retries the close. With force the records stay as written and the failure
+// is printed as a warning instead, so --force still exits 0 when nothing
+// else failed.
+func closeDeferredSelf(cmd *cobra.Command, rt *org.Org, workspaceID, paneID string, force bool, runErr error) error {
+	var closeErr error
+	switch {
+	case workspaceID != "":
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "note: closing this command's own herdr workspace %s last; this ends the command\n", workspaceID)
+		closeErr = rt.CloseDeferredSelfWorkspace(workspaceID, force)
+	case paneID != "":
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "note: closing this command's own herdr pane %s last; this ends the command\n", paneID)
+		closeErr = rt.CloseDeferredSelfPane(paneID, force)
+	}
+	switch {
+	case closeErr == nil:
+		return runErr
+	case force:
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: %v\n", closeErr)
+		return runErr
+	}
+	return errors.Join(runErr, closeErr)
 }
 
 func newOrgStatusCmd(orgID, stateDir, configPath *string) *cobra.Command {
@@ -842,12 +1003,48 @@ func printStatusTable(cmd *cobra.Command, result org.StatusResult) {
 }
 
 func newOrgDisbandCmd(orgID, stateDir, configPath *string) *cobra.Command {
-	var dryRun bool
+	var dryRun, all, force bool
 
 	cmd := &cobra.Command{
 		Use:   "disband",
-		Short: "Stop every active seat and disband the org",
+		Short: "Stop every active seat, close the org's herdr workspace, and disband the org (every org with --all)",
+		Long: "ralph org disband stops every active seat of --org-id the way `ralph org\n" +
+			"stop` does (closing each seat's pane), then closes the org's herdr\n" +
+			"workspace and records `disbanded`. Before closing a pane or the workspace\n" +
+			"it checks that herdr labels the pane's tab with the seat id and the\n" +
+			"workspace with the org_id; one that fails the check is not closed and\n" +
+			"counts as a failure. When a seat or the workspace cannot be closed, the\n" +
+			"org is not disbanded: each failure is listed on stderr and the command\n" +
+			"exits 1. Run it again to retry what is left.\n" +
+			"\n" +
+			"--all disbands every org_id that still needs it, without --org-id, which\n" +
+			"includes an org that an older ralph disbanded without closing its\n" +
+			"workspace, and keeps going past an org that fails. --force records past\n" +
+			"close failures (`stopped`, the workspace closed, `disbanded`), printing\n" +
+			"them as warnings and exiting 0; a pane or workspace that failed the check\n" +
+			"is not closed itself, only the record is written. Even with --force,\n" +
+			"disband closes the org's workspace once herdr confirms its label, which\n" +
+			"ends every pane in it, including a seat pane that failed the tab check.\n" +
+			"When the command runs inside a pane or workspace it closes\n" +
+			"(HERDR_PANE_ID / HERDR_WORKSPACE_ID), that one is closed last, after all\n" +
+			"output, which ends the command. If that last close fails, the command\n" +
+			"records the pane's seat active again and, when it was closing the\n" +
+			"workspace, the workspace open again, and exits 1, so running it again\n" +
+			"(or disband --all from another pane) retries the close; with --force the\n" +
+			"records stay closed and the failure is only a warning.",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if all {
+				if err := rejectFlagsWithAll(cmd, "disband", "org-id"); err != nil {
+					return err
+				}
+				rt, err := newOrgRuntime(cmd, *stateDir, *configPath, orgLedgerMutating)
+				if err != nil {
+					return err
+				}
+				result := rt.DisbandAll(org.DisbandAllParams{DryRun: dryRun, Force: force})
+				runErr := printDisbandAllResult(cmd, result)
+				return closeDeferredSelf(cmd, rt, result.DeferredSelfWorkspaceID, result.DeferredSelfPaneID, force, runErr)
+			}
 			if err := requireOrgID(*orgID); err != nil {
 				return err
 			}
@@ -855,21 +1052,87 @@ func newOrgDisbandCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			result := rt.Disband(org.DisbandParams{OrgID: *orgID, DryRun: dryRun})
-			for _, seat := range result.StoppedSeats {
-				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "stopped seat %q\n", seat)
-			}
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "disbanded org %q\n", *orgID)
-			if len(result.Errs) > 0 {
-				return fmt.Errorf("org: disband encountered %d error(s), first: %w", len(result.Errs), result.Errs[0])
-			}
-			return nil
+			result := rt.Disband(org.DisbandParams{OrgID: *orgID, DryRun: dryRun, Force: force})
+			runErr := printDisbandResult(cmd, *orgID, result)
+			return closeDeferredSelf(cmd, rt, result.DeferredSelfWorkspaceID, result.DeferredSelfPaneID, force, runErr)
 		},
 	}
 
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "record without stopping real seats")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "record without any herdr or agmsg call")
+	cmd.Flags().BoolVar(&all, "all", false, "disband every org_id that still needs it (cannot be combined with --org-id)")
+	cmd.Flags().BoolVar(&force, "force", false, "record past pane and workspace close failures and disband anyway (failures become warnings, exit 0)")
 
 	return cmd
+}
+
+// printDisbandResult prints one org's `ralph org disband` outcome: a
+// `stopped seat "<seat_id>"` line on stdout per seat stopped with its pane
+// closed, each seat and workspace failure on stderr, any other error, and
+// `disbanded org "<org_id>"` only when the org got `disbanded`. It returns
+// the error that makes the command exit 1, nil when the org was disbanded.
+func printDisbandResult(cmd *cobra.Command, orgID string, r org.DisbandResult) error {
+	out, stderr := cmd.OutOrStdout(), cmd.ErrOrStderr()
+	for _, seat := range r.StoppedSeats {
+		_, _ = fmt.Fprintf(out, "stopped seat %q\n", seat)
+	}
+	var shown []error
+	for _, f := range r.FailedSeats {
+		printSeatFailure(stderr, fmt.Sprintf("%q", f.SeatID), f)
+		shown = append(shown, f.Err)
+	}
+	for _, f := range r.FailedWorkspaces {
+		printWorkspaceFailure(stderr, fmt.Sprintf("%q", f.WorkspaceID), f)
+		shown = append(shown, f.Err)
+	}
+	printOtherErrs(stderr, r.Errs, shown)
+	if r.Disbanded {
+		_, _ = fmt.Fprintf(out, "disbanded org %q\n", orgID)
+	}
+	if len(r.Errs) == 0 {
+		return nil
+	}
+	return fmt.Errorf("org: disband: org_id %q not disbanded: %d error(s), listed above", orgID, len(r.Errs))
+}
+
+// printDisbandAllResult is printDisbandResult for `ralph org disband --all`:
+// seats as `<org_id>/<seat_id>`, workspaces as `<org_id>/<workspace_id>`, and
+// one `disbanded org <org_id>` line per org that got `disbanded`. The error
+// names the org_ids left without `disbanded`, which the next run targets
+// again.
+func printDisbandAllResult(cmd *cobra.Command, r org.DisbandAllResult) error {
+	out, stderr := cmd.OutOrStdout(), cmd.ErrOrStderr()
+	if len(r.Orgs) == 0 && len(r.Errs) == 0 {
+		_, _ = fmt.Fprintln(out, "no orgs to disband")
+	}
+	for _, s := range r.StoppedSeats {
+		_, _ = fmt.Fprintf(out, "stopped seat %s/%s\n", s.OrgID, s.SeatID)
+	}
+	var shown []error
+	for _, f := range r.FailedSeats {
+		printSeatFailure(stderr, f.OrgID+"/"+f.SeatID, f.SeatFailure)
+		shown = append(shown, f.Err)
+	}
+	for _, f := range r.FailedWorkspaces {
+		printWorkspaceFailure(stderr, f.OrgID+"/"+f.WorkspaceID, f.WorkspaceFailure)
+		shown = append(shown, f.Err)
+	}
+	printOtherErrs(stderr, r.Errs, shown)
+	for _, orgID := range r.DisbandedOrgs {
+		_, _ = fmt.Fprintf(out, "disbanded org %s\n", orgID)
+	}
+	if len(r.Errs) == 0 {
+		return nil
+	}
+	var left []string
+	for _, orgID := range r.Orgs {
+		if !slices.Contains(r.DisbandedOrgs, orgID) {
+			left = append(left, orgID)
+		}
+	}
+	if len(left) == 0 {
+		return fmt.Errorf("org: disband --all: %d error(s), listed above", len(r.Errs))
+	}
+	return fmt.Errorf("org: disband --all: %d of %d org(s) not disbanded (%s), errors listed above", len(left), len(r.Orgs), strings.Join(left, ", "))
 }
 
 // newOrgReportCmd wires `ralph org report` (AC-4, FR-9 後半): reads the

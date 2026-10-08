@@ -391,6 +391,30 @@ func TestRenderRolePrompt_Leader_MissionRoutesGateBlocked(t *testing.T) {
 	}
 }
 
+// TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand pins the
+// closing order of plan 2026-10-07-org-stop-all (AC9): disband closes the
+// org's herdr workspace, which holds the leader's own pane, so the leader
+// must run `ralph org report` first and `ralph org disband` as its last
+// command. Each section is checked on its own so the wording of one cannot
+// satisfy the other.
+func TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand(t *testing.T) {
+	text := renderSeatPrompt(t, "leader")
+	const report, disband = "ralph org report --org-id org-a", "ralph org disband --org-id org-a"
+	for _, header := range []string{"## ミッション", "## 運用規律"} {
+		section, found := markdownSection(text, header)
+		if !found {
+			t.Fatalf("expected the leader template to contain a %q section, got:\n%s", header, text)
+		}
+		reportAt, disbandAt := strings.Index(section, report), strings.Index(section, disband)
+		if reportAt < 0 || disbandAt < 0 || reportAt > disbandAt {
+			t.Errorf("expected %q to come before %q in the leader template's %s section, got section:\n%s", report, disband, header, section)
+		}
+		if item, ok := markdownItem(section, disband); !ok || !strings.Contains(item, "最後のコマンド") {
+			t.Errorf("expected the %s item naming %q to make it the last command, got item:\n%s", header, disband, item)
+		}
+	}
+}
+
 func TestRenderRolePrompt_UnknownRole_NoTemplate(t *testing.T) {
 	text, ok, err := RenderRolePrompt("unknown-role", testRolePromptVars())
 	if err != nil {

@@ -164,8 +164,8 @@ toplevel、cwd の順で決まる。「前提」節を参照)、`ralph org statu
 | `wait` | 座席が指定状態(idle/done/blocked など)になるまでブロックして待つ。`--until` 既定は `idle,done`(herdr は入力待ちで休止中の対話エージェントを `idle` ではなく `done` と報告するため、両方を既定で待つ)。`--timeout-ms` 既定は 60000(有界)。無期限待機したい場合のみ明示的に `--timeout-ms 0` を渡す。 | `ralph org wait --org-id X --seat reviewer-1` |
 | `read` | 座席の直近 pane 出力を読む。 | `ralph org read --org-id X --seat reviewer-1 --lines 100` |
 | `status` | 座席台帳(roster)を表示。`--all` で dry-run 座席も含める。 | `ralph org status --org-id X --all` |
-| `stop` | 座席を停止。 | `ralph org stop --org-id X --seat reviewer-1` |
-| `disband` | org の全座席を停止し組織を解散。 | `ralph org disband --org-id X` |
+| `stop` | 座席を停止する。pane に C-c を送ったあと pane を閉じて座席のプロセスを終わらせ(画面の出力も消えるので、要るなら先に `read` で読む)、agmsg から外して `stopped` を記録する。pane が見つからないときは閉じ済みとして扱う。pane を閉じられなかったとき(herdr に繋がらない、1 回 10 秒の期限切れなど)は `stopped` を書かずに `stop_failed` を記録し、座席は active のまま終了コード 1 になる。herdr が戻ってから打ち直せば拾う。C-c を送る前に、pane のある tab の label が座席 id か、workspace の label が org_id かを herdr で確かめ、違えば(herdr のセッションが失われて id が振り直された場合など)C-c も送らず pane も閉じずに `stop_failed` で終了コード 1 にする(`--force` でも閉じない)。`--all` は `--org-id` なしで全 org の active な座席を止め(`--org-id` / `--seat` とは併用不可)、1 つ止められなくても残りを止めて、止められなかった座席を `<org_id>/<seat_id>` と理由で stderr に並べ終了コード 1。`--force` は閉じられなかった座席にも `stopped` を書き、失敗を警告にして終了コード 0(pane は herdr に残っていることがある)。`--dry-run` は herdr / agmsg を呼ばず記録だけ。コマンドを打った pane(`HERDR_PANE_ID`)の座席は、記録と出力を済ませてから最後に閉じる(コマンドもそこで終わる)。`--all` でほかに止められなかった座席があれば、その座席は止めずに残す。最後の close が失敗したときは、座席を active に戻して終了コード 1 にする(打ち直すか別の pane の `--all` で閉じ直せる。`--force` は戻さず警告で終了コード 0)。 | `ralph org stop --org-id X --seat reviewer-1`、`ralph org stop --all` |
+| `disband` | org を解散する。active な座席を `stop` と同じ手順で止めたあと、台帳に記録した org の herdr workspace を閉じて `org_workspace_closed` を記録し、すべて閉じられたときだけ `disbanded` を書く。止められなかった座席か閉じられなかった workspace があれば `disbanded` を書かず、それを stderr に並べて終了コード 1(座席が 1 つでも止まらなければ workspace は閉じない)。打ち直すと残りを片付ける。`--all` は `--org-id` なしで、まだ解散していない全 org を解散する(`--org-id` とは併用不可。解散できなかった org は次の `--all` でまた対象になる。古い ralph の `disband` が workspace を閉じずに残した org も対象になる)。`--force` は閉じられなかった座席にも `stopped`、workspace にも `org_workspace_closed` を書いて `disbanded` まで記録し、失敗を警告にして終了コード 0。`--force` でも、label で org のものと確かめた workspace は閉じるので、tab の確認に落ちた座席の pane も workspace と一緒に終わる。コマンドを打った pane とそれを含む workspace(`HERDR_PANE_ID` / `HERDR_WORKSPACE_ID`)は、ほかがすべて閉じたときだけ、記録と出力を済ませてから最後に閉じる(コマンドもそこで終わる)。ほかに閉じられなかったものがあれば手を付けずに残すので、打ったセッションは失敗の一覧を見られる。最後の close が失敗したときは、その pane の座席を active に、後回しにした workspace を open に戻して終了コード 1 にする(打ち直すか別の pane の `--all` で閉じ直せる。`--force` は戻さず警告で終了コード 0)。閉じるのは台帳に記録した pane と workspace だけで、workspace も label が org_id でなければ閉じずに終了コード 1 にする。解散した org_id でまた `spawn` すると新しい workspace を作る(最後の close の失敗で開き直した workspace は再利用する)。 | `ralph org disband --org-id X`、`ralph org disband --all` |
 | `report` | manifest + receipts から編成履歴を `docs/reports/org-manifest-<org_id>-<date>.md` に書き出す。 | `ralph org report --org-id X` |
 | `watch` | パルス層 Watchdog を起動(決定論監視: stall/生存/スコープ変更の ALERT・デッドマン人間エスカレーション。`--once` で 1 サイクル)。意味判定はトリガー時のみオンデマンド LLM(watcher_model)。 | `ralph org watch --org-id X` |
 | `start` | headless leader 座席を spawn する糖衣(`spawn --role leader` 相当。`leader.md` 雛形にタスクを展開)。leader も他の座席と同じ AC-2b ゲートの対象(autonomous 既定では `--scope` 必須)。 | `ralph org start --org-id X --cwd . --scope "org-a 全体の編成・統括" "<task>"` |
@@ -252,8 +252,12 @@ receipts / 役割雛形)を使うため、手順は共通。
 3. `send` で TASK を委譲する。
 4. `wait` / `status` / `read` で座席の状態を観察する。
 5. 座席からの RESULT / BLOCKED / QUESTION に対して DECISION を送り裁定する。
-6. タスク完了後、座席を `stop` し、組織全体を `disband` する。
-7. `report` で編成履歴を `docs/reports/` に成果物化する(最終責任)。
+6. 座席は作業が終わるたびに `stop` する。
+7. タスク全体が終わったら、`report` で編成履歴を `docs/reports/` に成果物化
+   する(最終責任)。
+8. 最後に `disband` で組織を解散する。disband は org の herdr workspace を
+   閉じるので、その中で動く headless の leader では、disband がそのセッション
+   の最後のコマンドになる(ralph は記録と出力を済ませてから閉じる)。
 
 ## typed protocol
 
@@ -320,9 +324,16 @@ EVIDENCE: docs/reports/self-review-foo.md
 - 長時間運用では `ralph org watch --org-id <id>` を並走させる(停滞/生存/
   スコープ変更の ALERT・デッドマン時の人間エスカレーション)。watch の通知
   は typed `ALERT` として leader に届く。
-- タスク終了時は必ず: 各座席を `stop` → 組織を `disband` →
-  `ralph org report --org-id <id>` で成果物化 → herdr workspace / agmsg
-  team に残留がないか確認、の順で締める。座席を spawn したまま放置しない。
+- タスク終了時は必ず: 各座席を `stop` → `ralph org report --org-id <id>`
+  で成果物化 → 組織を `disband`、の順で締める。disband は org の herdr
+  workspace を閉じるので最後に打つ。止めた座席の pane と org の workspace は
+  ralph が閉じるので、herdr を見て回る必要はほぼない。ただし
+  `ralph org status --org-id <id>` に active な座席がないことは確かめる
+  (headless の leader は disband で終わるので、起動した側が確かめる)。
+  自分の pane や workspace を最後に閉じる close が失敗したときは、先に
+  stdout に出た `stopped seat` / `disbanded org` の行より、終了コードと
+  stderr が正しい。
+  座席を spawn したまま放置しない。
 
 ## 完了条件
 
@@ -331,4 +342,9 @@ EVIDENCE: docs/reports/self-review-foo.md
 - [ ] 全座席が `stop` または `disband` 済み
 - [ ] `ralph org report` が生成済み(`docs/reports/org-manifest-*.md`)
 - [ ] `ralph org status --org-id <id>` に active な座席が存在しない
-- [ ] herdr workspace / agmsg team に残留がない
+- [ ] herdr に残留がない: ralph が台帳に記録した pane と workspace は
+  `stop` / `disband` が閉じる(閉じられなければ終了コード 1 で知らせる)。
+  `--force` で記録したものは herdr に残っていることがあるので確かめる。
+  ralph が記録していない workspace や pane(自分で開いたものなど)は閉じない
+  ので、要らなければ herdr で閉じる
+- [ ] agmsg team に座席の残留がない

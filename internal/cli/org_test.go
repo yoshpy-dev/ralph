@@ -57,13 +57,64 @@ func runOrgCmd(t *testing.T, args ...string) (string, error) {
 // internal/org/spawn_test.go, needed because the CLI drives Send through a
 // real subprocess herdr with no other way to inject a controlled delay
 // (AR-1 CLI coverage, docs/reports/cross-review-triage-org-send-enter-timing.md).
+//
+// ORG_STUB_CLOSE_FAIL_IDS and ORG_STUB_CLOSE_NOT_FOUND_IDS are
+// space-separated pane / workspace ids: a `pane close <id>` or `workspace
+// close <id>` for an id in the first list fails with a plain error (herdr
+// unreachable), and for an id in the second it answers herdr's
+// pane_not_found / workspace_not_found envelope with exit 1 (already
+// closed). Closes of every other id succeed, so one test can fail a single
+// seat's pane among several.
+//
+// ORG_STUB_HERDR_STATE (a directory setupOrgStubPATH makes) holds the stub's
+// view of herdr, so `pane get`, `tab get` and `workspace get` answer like
+// herdr for the ownership check stop and disband make before a C-c or a
+// close (plan AC14): `workspace create` and `tab create` hand out a new id
+// per call (ws-stub-<n>, pane-stub-<n> in tab-stub-<n>; the first ones are
+// ws-stub-1 and pane-stub-1) and record the --label they were given, so the
+// tab is labelled with the seat id and the workspace with the org_id. One
+// file per id: pane-<id> holds "<tab_id> <workspace_id>", tab-<id> and
+// workspace-<id> hold the label. A test that seeds the ledger directly
+// records its panes there too (seedSeat in org_stop_all_test.go). A get for
+// an id with no file answers herdr's *_not_found envelope with exit 1.
 const herdrStub = `#!/bin/sh
 if [ -n "$ORG_HERDR_LOG" ]; then
   echo "$@" >> "$ORG_HERDR_LOG"
 fi
+state="${ORG_STUB_HERDR_STATE:?set by setupOrgStubPATH}"
+label=""
+workspace=""
+prev=""
+for arg in "$@"; do
+  case "$prev" in
+    --label) label="$arg" ;;
+    --workspace) workspace="$arg" ;;
+  esac
+  prev="$arg"
+done
+next_id() {
+  n=$(cat "$state/count-$1" 2>/dev/null || echo 0)
+  n=$((n + 1))
+  echo "$n" > "$state/count-$1"
+  echo "$n"
+}
 if [ -n "$ORG_STUB_FAIL" ] && [ "$1:$2" = "$ORG_STUB_FAIL" ]; then
   echo "stub failure: $1 $2" >&2
   exit 1
+fi
+if [ "$2" = "close" ]; then
+  for id in $ORG_STUB_CLOSE_FAIL_IDS; do
+    if [ "$3" = "$id" ]; then
+      echo "stub failure: $1 close $3" >&2
+      exit 1
+    fi
+  done
+  for id in $ORG_STUB_CLOSE_NOT_FOUND_IDS; do
+    if [ "$3" = "$id" ]; then
+      echo "{\"error\":{\"code\":\"${1}_not_found\",\"message\":\"$1 $3 not found\"}}"
+      exit 1
+    fi
+  done
 fi
 if [ "$1 $2" = "agent wait" ] && [ -n "$ORG_STUB_AGENT_WAIT_CONFIRM_FAIL" ]; then
   for arg in "$@"; do
@@ -77,8 +128,28 @@ if [ "$1 $2" = "pane send-text" ] && [ -n "$ORG_STUB_PANE_SEND_TEXT_SLEEP" ]; th
   sleep "$ORG_STUB_PANE_SEND_TEXT_SLEEP"
 fi
 case "$1 $2" in
-  "workspace create") echo '{"id":"cli:workspace:create","result":{"root_pane":{"pane_id":"ws-stub-1:p1","tab_id":"ws-stub-1:t1","workspace_id":"ws-stub-1"},"tab":{"tab_id":"ws-stub-1:t1"},"type":"workspace_created","workspace":{"active_tab_id":"ws-stub-1:t1","workspace_id":"ws-stub-1"}}}' ;;
-  "tab create") echo '{"id":"cli:tab:create","result":{"root_pane":{"pane_id":"pane-stub-1","tab_id":"ws-stub-1:t2","workspace_id":"ws-stub-1"},"tab":{"tab_id":"ws-stub-1:t2"},"type":"tab_created"}}' ;;
+  "workspace create")
+    ws="ws-stub-$(next_id workspace)"
+    echo "$label" > "$state/workspace-$ws"
+    echo "{\"id\":\"cli:workspace:create\",\"result\":{\"root_pane\":{\"pane_id\":\"$ws:p1\",\"tab_id\":\"$ws:t1\",\"workspace_id\":\"$ws\"},\"tab\":{\"tab_id\":\"$ws:t1\"},\"type\":\"workspace_created\",\"workspace\":{\"active_tab_id\":\"$ws:t1\",\"workspace_id\":\"$ws\"}}}" ;;
+  "tab create")
+    n=$(next_id tab)
+    echo "$label" > "$state/tab-tab-stub-$n"
+    echo "tab-stub-$n $workspace" > "$state/pane-pane-stub-$n"
+    echo "{\"id\":\"cli:tab:create\",\"result\":{\"root_pane\":{\"pane_id\":\"pane-stub-$n\",\"tab_id\":\"tab-stub-$n\",\"workspace_id\":\"$workspace\"},\"tab\":{\"tab_id\":\"tab-stub-$n\"},\"type\":\"tab_created\"}}" ;;
+  "pane get")
+    if [ ! -f "$state/pane-$3" ]; then
+      echo "{\"error\":{\"code\":\"pane_not_found\",\"message\":\"pane $3 not found\"},\"id\":\"cli:pane:get\"}"
+      exit 1
+    fi
+    read -r tab ws < "$state/pane-$3"
+    echo "{\"id\":\"cli:pane:get\",\"result\":{\"pane\":{\"pane_id\":\"$3\",\"tab_id\":\"$tab\",\"workspace_id\":\"$ws\"},\"type\":\"pane_info\"}}" ;;
+  "tab get" | "workspace get")
+    if [ ! -f "$state/$1-$3" ]; then
+      echo "{\"error\":{\"code\":\"${1}_not_found\",\"message\":\"$1 $3 not found\"},\"id\":\"cli:$1:get\"}"
+      exit 1
+    fi
+    echo "{\"id\":\"cli:$1:get\",\"result\":{\"$1\":{\"label\":\"$(cat "$state/$1-$3")\",\"${1}_id\":\"$3\"},\"type\":\"${1}_info\"}}" ;;
   "agent start") echo "agent-stub-1" ;;
   "agent wait") echo "idle" ;;
   "pane read") echo "pane output" ;;
@@ -155,6 +226,7 @@ func setupOrgStubPATH(t *testing.T) (herdrLog, agmsgLog string) {
 	herdrLog = filepath.Join(dir, "herdr.log")
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("ORG_HERDR_LOG", herdrLog)
+	t.Setenv("ORG_STUB_HERDR_STATE", t.TempDir())
 
 	agmsgHome := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(agmsgHome, "scripts"), 0o755); err != nil {
@@ -172,6 +244,13 @@ func setupOrgStubPATH(t *testing.T) (herdrLog, agmsgLog string) {
 
 	t.Setenv("ORG_STUB_FAIL", "")
 	t.Setenv("ORG_STUB_AGENT_WAIT_CONFIRM_FAIL", "")
+	t.Setenv("ORG_STUB_CLOSE_FAIL_IDS", "")
+	t.Setenv("ORG_STUB_CLOSE_NOT_FOUND_IDS", "")
+	// stop and disband treat the pane and workspace these name as the
+	// caller's own and close them last; pin both unset so no test depends on
+	// whether `go test` runs inside a herdr pane.
+	t.Setenv("HERDR_PANE_ID", "")
+	t.Setenv("HERDR_WORKSPACE_ID", "")
 
 	return herdrLog, agmsgLog
 }
