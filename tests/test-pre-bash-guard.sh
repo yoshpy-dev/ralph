@@ -588,6 +588,12 @@ guard_deny_only_forms=(
   # the attached -vNAME form).
   $'printf -v c \'sudo ls\'; $c'
   $'printf -vc \'sudo ls\'; $c'
+  # 8. The shell drops a backslash-newline before reading, also inside
+  # double quotes, so "$\ newline (...)" is a substitution in bash and dash.
+  # Any backslash-newline drops every data region of the command.
+  $'echo "$\\\n(sudo ls)"'
+  $'grep "$\\\n(sudo ls)" file'
+  $'git commit -m "$\\\n(sudo ls)"'
 )
 check_modes B deny absent bypassPermissions -- "${guard_deny_only_forms[@]}"
 

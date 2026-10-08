@@ -99,8 +99,12 @@
 #      command's text ends up, it gives no data region and the previous
 #      guard's rules decide. So a group or compound structure at the top
 #      level (a subshell (...), a brace group { ...; }, a reserved word such
-#      as if, for or case in command position) and an exec with a
-#      redirection each drop every data region of the command. A heredoc
+#      as if, for or case in command position), an exec with a
+#      redirection, and a backslash-newline anywhere in the command (the
+#      shell removes it before reading, even inside double quotes; one
+#      inside single quotes is only text, so that case is denied more than
+#      needed, as the previous guard did) each drop every data region of
+#      the command. A heredoc
 #      body joined by a backslash-newline, or read for a delimiter word that
 #      has one, is not data (only that body loses its region).
 # Not covered: anything only known at run time (variables such as $cmd,
@@ -831,8 +835,9 @@ function add_data(s, e,    k, b, b1) {
   }
 }
 # in_data(a, b): 1 when S[a, b) lies inside one data span. When NODATA is
-# set (a top-level group or compound command, or an exec with a redirection),
-# the command has no data region at all and the sentinel rules decide.
+# set (a top-level group or compound command, an exec with a redirection, or
+# a backslash-newline anywhere), the command has no data region at all and
+# the sentinel rules decide.
 function in_data(a, b,    bk, j, k) {
   if (NODATA) return 0
   bk = int((a - 1) / BKW)
@@ -1293,6 +1298,11 @@ BEGIN {
 { IN = (NR == 1) ? $0 : IN "\001" $0 }
 END {
   set_text(IN)
+  # The shell drops a backslash-newline before it reads the command, also
+  # inside double quotes ("$\ newline (cmd)" is a substitution), while the
+  # lexer sees the two characters. A command that has one gets no data
+  # region, so the sentinel decides as the previous guard did.
+  if (index(IN, BS "\n")) NODATA = 1
   # Re-read text may grow past the command (pipes feed a shell each
   # argument and their join), but not by more than this.
   QMAX = 8 * N + 65536
