@@ -150,6 +150,10 @@ func TestDefaultsLockStep(t *testing.T) {
 
 	check("org.max_seats", "RALPH_ORG_MAX_SEATS",
 		strconv.Itoa(tomlCfg.Org.MaxSeats), strconv.Itoa(goCfg.Org.MaxSeats))
+	check("org.max_orgs", "RALPH_ORG_MAX_ORGS",
+		strconv.Itoa(tomlCfg.Org.MaxOrgs), strconv.Itoa(goCfg.Org.MaxOrgs))
+	check("org.max_total_seats", "RALPH_ORG_MAX_TOTAL_SEATS",
+		strconv.Itoa(tomlCfg.Org.MaxTotalSeats), strconv.Itoa(goCfg.Org.MaxTotalSeats))
 	check("org.deadman_minutes", "RALPH_ORG_DEADMAN_MINUTES",
 		strconv.Itoa(tomlCfg.Org.DeadmanMinutes), strconv.Itoa(goCfg.Org.DeadmanMinutes))
 	check("org.agmsg_home", "RALPH_ORG_AGMSG_HOME",

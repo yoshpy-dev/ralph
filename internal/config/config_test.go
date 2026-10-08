@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -113,7 +114,8 @@ require_go = false
 }
 
 // TestDefault_Org verifies the [org] envelope defaults (AC-6): driver_pool,
-// model_pool, roles, max_seats, and deadman_minutes.
+// model_pool, roles, max_seats, max_orgs, max_total_seats, and
+// deadman_minutes.
 func TestDefault_Org(t *testing.T) {
 	o := Default().Org
 	if len(o.DriverPool) != 2 || o.DriverPool[0] != "claude" || o.DriverPool[1] != "codex" {
@@ -150,6 +152,12 @@ func TestDefault_Org(t *testing.T) {
 	}
 	if o.MaxSeats != 5 {
 		t.Errorf("max_seats = %d, want 5", o.MaxSeats)
+	}
+	if o.MaxOrgs != 10 {
+		t.Errorf("max_orgs = %d, want 10", o.MaxOrgs)
+	}
+	if o.MaxTotalSeats != 30 {
+		t.Errorf("max_total_seats = %d, want 30", o.MaxTotalSeats)
 	}
 	if o.DeadmanMinutes != 10 {
 		t.Errorf("deadman_minutes = %d, want 10", o.DeadmanMinutes)
@@ -195,6 +203,12 @@ model = "opus"
 	if cfg.Org.MaxSeats != want.MaxSeats {
 		t.Errorf("max_seats = %d, want %d", cfg.Org.MaxSeats, want.MaxSeats)
 	}
+	if cfg.Org.MaxOrgs != want.MaxOrgs {
+		t.Errorf("max_orgs = %d, want %d", cfg.Org.MaxOrgs, want.MaxOrgs)
+	}
+	if cfg.Org.MaxTotalSeats != want.MaxTotalSeats {
+		t.Errorf("max_total_seats = %d, want %d", cfg.Org.MaxTotalSeats, want.MaxTotalSeats)
+	}
 	if cfg.Org.DeadmanMinutes != want.DeadmanMinutes {
 		t.Errorf("deadman_minutes = %d, want %d", cfg.Org.DeadmanMinutes, want.DeadmanMinutes)
 	}
@@ -239,6 +253,8 @@ model_pool = [
   { driver = "claude", model = "haiku" },
 ]
 max_seats = 3
+max_orgs = 4
+max_total_seats = 12
 deadman_minutes = 15
 agmsg_home = "~/custom/agmsg-home"
 
@@ -260,6 +276,12 @@ reviewer = ["opus"]
 	}
 	if cfg.Org.MaxSeats != 3 {
 		t.Errorf("max_seats = %d, want 3", cfg.Org.MaxSeats)
+	}
+	if cfg.Org.MaxOrgs != 4 {
+		t.Errorf("max_orgs = %d, want 4", cfg.Org.MaxOrgs)
+	}
+	if cfg.Org.MaxTotalSeats != 12 {
+		t.Errorf("max_total_seats = %d, want 12", cfg.Org.MaxTotalSeats)
 	}
 	if cfg.Org.DeadmanMinutes != 15 {
 		t.Errorf("deadman_minutes = %d, want 15", cfg.Org.DeadmanMinutes)
@@ -546,6 +568,75 @@ max_seats = 1
 		}
 		if cfg.Org.MaxSeats != 1 {
 			t.Errorf("max_seats = %d, want 1", cfg.Org.MaxSeats)
+		}
+	})
+}
+
+// TestLoad_OrgFleetLimitsBoundary verifies the >= 1 boundary of the two
+// limits shared by every org_id in one state dir: an explicit 0 or negative
+// max_orgs / max_total_seats is rejected with an error naming that key, and 1
+// is accepted. Setting one of them leaves the other at its default.
+func TestLoad_OrgFleetLimitsBoundary(t *testing.T) {
+	for _, key := range []string{"max_orgs", "max_total_seats"} {
+		for _, bad := range []int{0, -1} {
+			t.Run(fmt.Sprintf("%s=%d rejected", key, bad), func(t *testing.T) {
+				dir := t.TempDir()
+				path := filepath.Join(dir, "ralph.toml")
+				content := fmt.Sprintf("[org]\n%s = %d\n", key, bad)
+				if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+					t.Fatal(err)
+				}
+				_, err := Load(path)
+				if err == nil {
+					t.Fatalf("Load: expected error for %s = %d, got nil", key, bad)
+				}
+				if want := "[org]." + key + " must be >= 1"; !contains(err.Error(), want) {
+					t.Errorf("error %q does not contain %q", err.Error(), want)
+				}
+			})
+		}
+	}
+
+	t.Run("one accepted", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "ralph.toml")
+		content := `[org]
+max_orgs = 1
+max_total_seats = 1
+`
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatalf("Load: unexpected error for max_orgs = 1, max_total_seats = 1: %v", err)
+		}
+		if cfg.Org.MaxOrgs != 1 {
+			t.Errorf("max_orgs = %d, want 1", cfg.Org.MaxOrgs)
+		}
+		if cfg.Org.MaxTotalSeats != 1 {
+			t.Errorf("max_total_seats = %d, want 1", cfg.Org.MaxTotalSeats)
+		}
+	})
+
+	t.Run("one key set leaves the other at default", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "ralph.toml")
+		content := `[org]
+max_orgs = 2
+`
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if cfg.Org.MaxOrgs != 2 {
+			t.Errorf("max_orgs = %d, want 2", cfg.Org.MaxOrgs)
+		}
+		if want := Default().Org.MaxTotalSeats; cfg.Org.MaxTotalSeats != want {
+			t.Errorf("max_total_seats = %d, want default %d", cfg.Org.MaxTotalSeats, want)
 		}
 	})
 }
