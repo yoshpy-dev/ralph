@@ -415,3 +415,87 @@ END の `set_text(IN)` の直後(`.claude/hooks/pre_bash_guard.sh:1305`)で、�
 - C4-1 で新版が none を返すことは、コードと計測用の写しの SRO・SSAFE から読んだ。見張りの語を入れた形は hook に渡していない
 - GNU の zgrep(シェルスクリプト)と、Linux の diff・stat などが引数を実行に使うかは調べていない
 - 489 行の新旧比較は macOS の awk で、mawk では commit・printf・merge・rebase・reset を含む 136 行だけを jq なしの経路で流した。gawk と busybox の awk では流していない
+
+## cycle 4 re-run (after 12e9a9ad)
+
+- Date: 2026-10-09
+- Reviewer: reviewer subagent (Claude)。cycle 4 の self-review(777f923d)が no-merge だったので、orchestrator が C4-1〜C4-4 を直したあとに回した再実行。`cycle-count.json` は 2 のまま。ID は `C4R-` で始めた。ユーザーとの取り決めで、この run の指摘は直さずに既知の穴として記録する
+- 対象: `git diff 777f923d..HEAD -- .claude tests templates`(HEAD 395639b3)。guard の変更は 12e9a9ad(printf と rg の判定、`opt_is` の下限、`pull`)と 6b1f7acc(ヘッダーのコメント)。テストの変更は 12e9a9ad(C4-1 の 2 行、C4-2 と C4-4 の 3 行、`git reset --h` の移動)と 389436de(tester の 7 行)。root と template の guard は `cmp` で同一
+- していないこと: テストスイートと静的解析は流していない(1886/0 は test 報告の値)。判定の根拠は 3 つある。test ファイルの配列の 500 行を HEAD、777f923d、旧版の guard に渡した結果(scratchpad の `sr7/`)、Write で書いた C4-1 の case ファイルを `xr1/run.sh` に渡した結果、計測用の写しで読んだ SRO。見張りの語を含む形は test ファイルの行と同じものだけを使い、新しい形は作っていない
+
+### 12e9a9ad と 6b1f7acc が変えたこと
+
+- `stage_note` の printf の判定(`.claude/hooks/pre_bash_guard.sh:931`)は、`%`・`$`・バッククォートを書かれたままの語 `WR` で見る。`-v` は値 `WV` で見るまま
+- rg の判定(`:924`)は、`--pre` で始まる語のほかに、書かれたままの語に `$'` か `$"` があるときも、rg を読むだけのコマンドとして扱わない
+- `opt_is`(`:1115-1121`)の下限を 4 文字から 3 文字(`--` のあとに 1 文字)に下げた
+- `git_rules` の振り分け(`:1100`)に `pull` を足し、`no_verify_rules` を当てる
+- コメント: ヘッダーの `:53`、`:59-63`、`:80-83`、`:131-136`、`stage_note` の `:921-930`、`opt_is` の `:1109-1114`、`no_verify_rules` の `:1163`、DATACMD の `:1360-1362`
+- テスト: `guard_deny_only_forms` に 4 行(C4-1 の 2 行と /test の 2 行)、`edge_deny` に 4 行、`edge_sentinel_deny` に 3 行、`edge_none` に 1 行を足した。`git reset --h` は `edge_none` から `edge_deny` に移った
+
+### 確認したこと
+
+1. C4-1
+   - Write で書いた 4 つの case ファイル(`sr7/c41a.txt`〜`c41d.txt`。`guard_deny_only_forms` の 4 行と同じ形)を `xr1/run.sh` に渡した。4 件とも新版 deny/deny(jq あり/なし)、旧版 deny/deny。777f923d の guard では、引数も `$'…'` で書いた形、`$'\x2dv'` の形、rg の `$'\x2d-pre'` の形が none/none だった(500 行の比較の `B-gdo-051`〜`053`)。添字を単一引用符で書いた形(`c41d`)は 777f923d でも deny
+   - 見張りの語のない形を計測用の写し(`sr7/instr.py`、`sr7/benign.txt`)に流した。`printf $'\x25n' $'a[\x24(…)]'`、8 進で書いた `$'\045n'` と `$'\044('` の形、`printf $'\x2dv' $'a[\x24(…)]' x` は、HEAD で SRO=0、777f923d で SRO=1。AC3 の `printf 'a\ngit push --force'` は両方とも SRO=1 のまま
+   - ヘッダーの Not covered(`:128-130`)の「the lexer misses those; the sentinel sees only the text as written」は、cycle 4 では printf と rg で成り立たなかった。読み違えた値がデータ区間を与えていたため。今は両方とも書かれたままの語で判定するので、この食い違いはなくなった。`data_first_ok` の `$'echo'` は C3-4 のままで、記録済み
+   - 閉じた
+2. C4-2
+   - `opt_is` は 11 行から 25 回呼ばれる。cycle 4 の `sr6/abbrev.out`(git 2.49.0)を見直した。guard が 1 文字の接頭辞を値を取るオプションとして読み、次の語を飛ばすのは、push の `--e`・`--r`・`--p`、commit の `--a`・`--c`・`--d`・`--f`・`--m`・`--p`・`--r`・`--s`・`--t`、reset の `--p` である。git はこれらを同じオプションに決める(`--e` は exec、`--c` は cleanup、`--m` は message)か、ambiguous で止める(reset の `--p` は pathspec-from-file と pathspec-file-nul)。guard が値として飛ばした語を git がオプションとして読む組み合わせはない
+   - `--` だけ(長さ 2)と `--=x` は数えない。`edge_none` の `git merge --no-ff -- feature` は none
+   - 閉じた
+3. C4-3
+   - (1) `:925-930` が、`%n` に加えて数値の変換も引数を算術式として評価すると書いた。(2) `:1360-1362` は「in zsh and bash 5」。cycle 4 で測ったのは bash 5.2 と 3.2 なので、測った範囲と合う。(3) `:131-136` を折り返した
+   - 変えたコメントの行はどれも 80 桁以内で、最長は `:53` の 79 桁
+   - 閉じた
+4. C4-4
+   - `:1100` に `pull` が入った。`git pull --no-verify origin main` は 777f923d の none から deny に変わった
+   - `no_verify_rules` は値を読み飛ばさず、すべての語を見る。このため pull で増えるのは止める側だけになる。`--no-verify-signatures` は `opt_is` の長さの条件で当たらない。`sr6/abbrev.out` では、git pull の `--no-v` から `--no-verif` までが `--no-verify-signatures` と ambiguous になる
+   - 閉じた
+5. AC3 と意図した修正
+   - 500 行(A 32、B 160、C 29、D 266、`intentional_fixes` 13)を HEAD の jq あり/なしに渡した。どの行も配列の期待どおりで、jq あり/なしで判定が分かれる行はない
+   - 777f923d と判定が違うのは 7 行で、どれも none から deny に変わった。B の 3 行、`edge_deny` の 3 行(`git reset --h`、`git commit --m -- --no-verify`、`git pull --no-verify origin main`)、`edge_sentinel_deny` の `rg $"…" .` である。deny から none に変わった行はない
+   - コーパス(A の deny、B、C)で旧版 deny・新版 none になるのは C の 13 行で、`intentional_fixes` の 13 行と内容のハッシュで一致した。`ac3` の 29 行はすべて none
+6. コードの質
+   - awk の本文(`:160-1417`)に単一引用符はない(数えて 0 行)。`bash -n` は通る
+   - コメントの `$SQ...SQ`・`$DQ...DQ`・`$SQ\x25nSQ` は、awk の本文に単一引用符を書けないための書き方で、すぐ下のコードが同じ変数 `SQ`・`DQ` を使っているので読める
+   - 関係のない変更、デバッグの残り、秘密情報はない
+
+### cycle 4 re-run の findings
+
+| ID | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| C4R-1 | LOW | maintainability | rg の新しい判定(`:924`)は、書かれたままの語に `$'` か `$"` という 2 文字の並びがあるかを見る。この並びは ANSI-C と locale の引用符のほかに、正規表現の行末の `$` が閉じる引用符の直前にある語にも現れる(`'foo$'`、`"foo$"`、`-e 'bar$'`)。そうした rg はデータ区間を失い、同じ rg の引数に見張りの語があると deny になる。禁止の文字列を行末つきで文書から探す形がこれに当たる。止める側に倒れており、旧版もこの形を deny にするので、AC7 には反しない。食い違いは記述の側にある。コメント(`:921-923`)とヘッダー(`:82`)は「ANSI-C か locale の引用符の語」とだけ書く。tech-debt の guard の限界の行も、rg の誤検知として `rg $"sudo ls" .` しか挙げていない | 計測用の写し(`sr7/benign.txt`): `rg 'foo$' docs/`、`rg "foo$" docs/`、`rg -e 'foo' -e 'bar$' docs/` は HEAD で SRO=0、777f923d で SRO=1。`rg 'a$b' docs/` と `rg -n 'x' docs/` は HEAD でも SRO=1 | 今回は記録だけにする。PR 本文の Known gaps に「行末の `$` を引用符で閉じた rg の正規表現も、読むだけのコマンドとして扱われない」と書く。次に guard を変えるときは、`lex_dollar`(`:421-422`)が引用符の外で `$'` と `$"` を読んだことを語ごとに印として残し、rg の判定はその印を見る。あわせて、tech-debt の行が rg の変数の語に書いた直し方(「`$` を含む語があれば外す」)では、バッククォートの置換の語が外れない。`lex_bq` は置換の元のテキストを値として返す(`:470`、`:492`)。そのため `$(…)` の語と同じく、置換の出力は rg の判定から見えない。値が実行時に決まる語なので、直すときは `$` とバッククォートの両方を見る。ここはコードを読んだ結果で、hook には渡していない |
+| C4R-2 | LOW | readability | テストのコメント `tests/test-pre-bash-guard.sh:656` は「the lexer reads \x2d-pre」と書くが、字句解析の値は `x2d-pre` になる。`lex_ansi` は未知のエスケープの `\` を落とすため。判定には影響しない | 計測用の写しで、`rg $'\x2d-pre' x docs/` の値は `WV=[x2d-pre]` | 次にテストを変えるときに「reads x2d-pre」に直す |
+
+### 前の節の指摘の状態
+
+| 指摘 | 状態 | 根拠 |
+| --- | --- | --- |
+| C4-1 | 解消 | 12e9a9ad が printf の `%`・`$`・バッククォートの判定を `WR` で行い(`:931`)、rg は `$'`・`$"` の語を外す(`:924`)。上の確認 1 |
+| C4-2 | 解消 | `opt_is` の下限が 3 文字になった(`:1120`)。`git reset --h` と `git commit --m -- --no-verify` は `edge_deny` で deny/deny。ヘッダーの `:59-63` と `opt_is` のコメントも直った。上の確認 2 |
+| C4-3 | 解消 | 上の確認 3 |
+| C4-4 | 解消 | 上の確認 4 |
+| C3-5 (1) | 未修正、記録済み | テストのコメントの「Cycle 2 (P2-4)」(`:850`)、「Cross-review cycle 2 (P2-4, P2-5)」(`:980`)、「change A」(`:1087`)はそのまま。tech-debt の guard の限界の行が記録している |
+
+### Tech debt identified
+
+この commit では `docs/tech-debt/README.md` を変えていない。この run の指摘は直さず記録する取り決めなので、C4R-1 は PR 本文の Known gaps に書いてほしい。tech-debt の guard の限界の行に足すかどうかは orchestrator が決める。足すと docs の変更になる。
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| C4R-1 rg の `$'`・`$"` の判定が、行末の `$` を引用符で閉じた正規表現にも当たる。C4R-2 テストのコメントの値の書き方 | C4R-1: `rg 'git push --force$' docs/` のように、禁止の文字列を行末つきで探す rg が deny になる(旧版も deny)。rg の変数の語の直し方は、バッククォートの語を含まない。C4R-2: 次に読む人が字句解析の値を読み違える | 上限 4 の最後の run で、guard を変えると self-review から /cross-review までをもう一度回すことになる | 次に `stage_note` か `lex_dollar` を変える PR | この節の C4R-1 と C4R-2 |
+
+### Recommendation(cycle 4 re-run、現時点)
+
+- Merge: merge(diff の品質では CRITICAL・HIGH・MEDIUM はない。cycle 4 の C4-1〜C4-4 は 12e9a9ad と 6b1f7acc で閉じた。500 行の比較で 777f923d から判定が変わったのは none から deny への 7 行だけで、AC3 の 29 行と `intentional_fixes` の 13 行は none のまま。LOW の 2 件は止める側の誤検知とコメントの書き方。cross-review cycle 4 の 3 件(ACTION_REQUIRED の #1 は旧版が deny にする形を通す AC7 の型)は、取り決めどおり tech-debt に記録済みで、PR 本文の Known gaps にも書くこと)
+- 前の節までの Merge 行はそれぞれの時点の判定で、現時点の判定はこの行
+- Follow-ups:
+  - PR 本文の Known gaps: cross-review cycle 4 の 3 件と C4R-1
+  - 次に guard を変える PR: C4R-1 の語ごとの印と、rg の値が実行時に決まる語(`$` とバッククォート)
+
+### 未確認の点
+
+- C4R-1 の誤検知は、見張りの語のない形で SRO を読んで確かめた。見張りの語を入れた行末つきの rg は hook に渡していない
+- rg のバッククォートの語の扱いは、コードを読んだ結果で、hook では確かめていない
+- 500 行の比較は macOS の awk だけで回した。mawk、gawk、busybox の awk では流していない(test 報告は ubuntu の mawk と gawk で 1886/0)
+- 1 文字の接頭辞の扱いは cycle 4 の git 2.49.0 の計測による。ほかの git の版では確かめていない
