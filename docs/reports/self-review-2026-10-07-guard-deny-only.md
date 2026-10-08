@@ -254,3 +254,83 @@ END の `set_text(IN)` の直後(`.claude/hooks/pre_bash_guard.sh:1305`)で、�
 - Windows: Cygwin の bash の `igncr` のように CR を捨てる設定では、`\<CR><LF>` が行継続になりうる。Git Bash などでの既定値は確かめていない。ralph のリリースは darwin と linux だけを作る
 - 4e829e34 のあとの guard を、mawk・gawk・busybox の awk で流してはいない。`index()` と文字列の連結だけの 1 行で、方言の差はおそらくない。未確認です
 - R2-1 の止めすぎがどれくらいの頻度で起きるかは測っていない
+
+## cycle 3 (cap raised to 3)
+
+- Date: 2026-10-08
+- Reviewer: reviewer subagent (Claude)。cross-review の 2 周目のあと、ユーザーが上限を 3 に上げてから回した self-review。cross-review の手順どおり `cycle-count.json` は 2 のまま。ID は前の節と混ざらないよう `C3-` で始めた
+- 対象: `git diff 373fa29d..HEAD -- .claude tests templates`(HEAD 57bf08f8)。guard とテストの変更は a9ef82b1。ほかに c61ab2bf・4ffe74fe(前の節の R2-1〜R2-3 のコメント修正)と 180c7389(tester が足した 6 形)がある。`.claude/skills/org/`、`templates/base/` の org の skill と `codex-seat-permissions.md` の差分は、e1dfb422 で取り込んだ main の変更で、`git diff origin/main HEAD` で差がない。root と template の guard は `cmp` で同一
+- していないこと: テストスイートと静的解析は流していない。判定は、hook に case ファイルを渡した結果(scratchpad の `sr5/` と `xr1/run.sh`)と、無害な形を shell に渡した結果による。新しい回避の形は作っていない。使ったのは、triage と test ファイルにある形と、見張りの語をデータとして含む形だけ
+
+### a9ef82b1 が変えたこと
+
+- `end_cmd` が `data_first_ok`(`.claude/hooks/pre_bash_guard.sh:742-756`)を呼ぶ。トップレベルの単純コマンドの 1 語目の値が DATACMD の名前でも `git` でもなければ、`NODATA` を立てる(`:727`)。値に `/` があるときと、語がない(リダイレクトだけの)ときも同じ
+- `lex_redir` は、ヒアドキュメントの区切りの生の語に `$` かバッククォートがあれば `NODATA` を立てる(`:540`)
+- `push_rules`(`:1113-1130`)は、値を取る長いオプション(`push_val_opt`、`:1133-1135`)と短い `-o` の値を読み飛ばす。束ねた短いオプションは位置で読む(`:1120-1127`)。`reset_rules` は `--` で止まる(`:1138-1143`)
+- テスト: `guard_deny_only_forms` の 9 に cross-review の 3 形と許可リストの 8 形、`ac3` に push と reset の誤検知の 6 形、`edge_deny` に push の 3 形を足した。`=echo sudo ls` は `edge_none` から `edge_sentinel_deny` に移った
+
+### 確認したこと
+
+1. triage の P1 と、同じ型
+   - triage の case ファイル `xr3/c2p1a`〜`c2p1c` は、新版が deny/deny(jq あり/なし)、旧版も deny/deny。修正の前は新版が none だった(triage の再現)
+   - どの規則が閉じたかを変異体で分けた。規則を 1 つずつ外した写し(`sr5/m_*`)に、テストの 6 つの配列の 239 行(deny が 115 行、none が 124 行。jq ありの経路)を渡した。区切りの規則を外すと、P1-1 の形(区切りが `$'\x45'`)だけが none になる。この形の 1 語目は `cat` なので、許可リストでは閉じない。許可リストを外すと、P1-2・P1-3、許可リストの 6 形、`=echo sudo ls` の 9 行が none になる
+   - 型について(コードを読んだ結果): トップレベルの DATACMD の引数がデータになるのは、出力の行き先が端末、DATACMD の次の段、`/dev/null`、`/dev/stderr`、fd 0〜2 の複製、閉じた fd だけのとき(`stage_note` と `pipe_decide`、`:911-961`)。置換の範囲はデータから外す(`xnote`)。その出力を読めるトップレベルのコマンド(shell、`eval`、前置き、道のある名前)は、許可リストでなくなった。このテキストを shell が実行する道や、実行される場所に書く道は、コードの上では見つからなかった。残るのは 3 つで、どれも hook では確かめていない。名前が実際に指すもの(下の未確認の点)、DATACMD の各コマンドが自分のオプションでする処理(一覧はこの diff で変わっていない)、git が保存したメッセージ(データ区間の (b))を同じコマンドの中の置換が実行時に読み返す場合
+   - triage の case ファイル `xr1/` の 52 件のうち 51 件は、新版・旧版とも deny/deny。`v-ml4.txt`(複数行のダブルクォートの引数の中の語)だけが新版 none、旧版 deny で、前の節と同じ。shell はこの語を実行しない。`xr3/q1.txt`(P2-5 の形)も前の節と同じ none/none
+2. `data_first_ok` の正しさ(`sr5/bn/b01`〜`b32`。新版と旧版、jq あり/なし)
+   - 引用符を外した値で比べる。`"echo"`、`\echo`、`e\cho`、`ec""ho` の後ろの見張りの語は none(`b01`〜`b04`)。shell もこれらを `echo` と読む
+   - `$` のある値: `$c` と `${x:-echo}` は、字句解析の値に `$` がそのまま残るので一致しない(`lex_dollar`、`:398-418`)。`$c` の形は deny。`$'echo'` は none(`b05`)で、これは C3-4
+   - リダイレクトだけのコマンドは `WN < 1` で 0 を返す。`>out.txt` の次の行の `echo` は deny(`b17`)。zsh はリダイレクトだけのコマンドで `NULLCMD`(既定は `cat`)や `READNULLCMD`(既定は `more`)を走らせる(zshparam)ので、データ区間を与えない方が正しい
+   - `|`、`&&`、`||`、`;`、`&`、改行の後ろの 1 語目: どれも `end_cmd` を通り、語の数が 0 に戻るので、段ごと・要素ごとに判定される。全部が DATACMD か git なら none(`b08`〜`b12`、`b21`、`b27`)。1 つでも外れると deny(`b18` の `:`、`b19` の `!`、`b20` の代入、C3-1 の 4 形)。`:` は DATACMD にないので `true` と扱いが違うが、旧版も deny にしていて害はない
+   - ヒアドキュメントだけのコマンド: `cat <<'EOF'`、`<<'EOF' cat`、`cat <<"EOF"`、`git commit -F - <<'EOF'`、推奨のコミット形、`git add … &&` の後ろの推奨のコミット形は none(`b22`〜`b28`)。区切りに `$` があると deny(`b29`)
+3. push と reset
+   - test ファイルの `ac2`・`ac3`・`edge_deny`・`edge_none` から push と reset の 118 行を取り出して新版に渡した(`sr5/rows/`)。jq あり/なしとも期待どおりで、`ac2` の 34 行と `edge_deny` の 52 行は deny、`ac3` の 14 行と `edge_none` の 18 行は none
+   - 束ねた短いオプション: 最初の `f` が最初の `o` より前にあれば deny。`o` が最後の文字なら次の語を値として読む。`-fo x` と `-uf` は deny、`-of` と `-ofoo` は none。git 2.49 の `git push -h` で値を取る短いオプションは `-o` だけなので、`-of` は push option の `f` で、force ではない。`--repo` などが次の語を値に取るのも、git の parse-options が次の語を `-` で始まっていても値に取るのと合う。この読み方の中に force の取りこぼしは見つからなかった
+   - push の `--`: 特に扱わない。`--` の後ろの `+ref` は deny のままで、`--force` という名前の refspec も deny になる。止める側なので、このままでよい
+   - reset の `--`: C3-2
+4. AC3 と意図した修正
+   - a9ef82b1 は `ac3` から行を消しておらず、`intentional_fixes` も変えていない。`edge_none` から消えたのは `=echo sudo ls` の 1 行で、`edge_sentinel_deny` に移った(旧版も deny)
+   - `ac3` の 35 行、`edge_none` の 76 行、`intentional_fixes` の 13 行は、新版の jq ありの経路で none。1800/0 の件数は、スイートを流していないので確かめていない
+5. コードの質
+   - awk の本文(`:153-1394`)に単一引用符はない。root と template の guard は同一
+   - コメントのずれは C3-3〜C3-5
+
+### cycle 3 の findings
+
+| ID | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| C3-1 | MEDIUM | maintainability | 推奨のコミット形 `git commit -m "$(cat <<'EOF' … EOF)"` は、同じ Bash のコマンドに DATACMD でも git でもないコマンドがあると deny になる。本文に見張りの語がなくても止まる。この形はいつも見張りの 4 番目の規則(`-m "` の後ろの `$(`)に当たり、それを外していたのはデータ区間 (b) だけだったため。373fa29d では none、旧版は deny なので、AC7 には反しない。許可リストとしては筋の通った挙動だが、次の 3 点が合っていない。(1) 理由の文は「代わりにシングルクォートまたは HEREDOC (<<'EOF') を使用してください」で、使っている形を勧める。(2) ヘッダーの `:117-119` は、推奨の形が通る条件を「その git が 1 語目で、どの行も `\` で終わらない」とだけ書き、同じコマンドのほかの単純コマンドの条件を書いていない。(3) 配る文書が古くなった。`internal/org/prompts/implementer.md:28-30` は「どの行もバックスラッシュで終わらなければ通る」と書き、その少し前に、検証を走らせてからステージしてコミットする手順を書いている。この手順を 1 つのコマンドにつなぐと止まる。`docs/tech-debt/README.md:125` の解消済みの行は「推奨の HEREDOC の形は通る」とし、残る場合として行末の `\` だけを挙げる。plan の Progress の a9ef82b1 の行の「止める側への逸脱」も、この代価を挙げていない | `sr5/ch/b01`〜`b07`。`git add a.txt && …` の後ろの推奨の形は新版 none。`make test &&`、`./scripts/run-verify.sh &&`、`GIT_EDITOR=true`、後ろに `&& ./scripts/secret-scan-branch.sh --strict` の 4 形は、新版が deny(commit_message)、373fa29d の guard(`sr5/prev/`)が none、旧版が deny。`-F -` の形と単一引用符の `-m` は、`make test &&` の後ろでも 3 つの guard とも none | 挙動は変えない。同じコマンドの前の方にある定義が、メッセージの置換で走るものを変えうるので、この形だけを許可リストから外すことは勧めない。記録を合わせる。/sync-docs で、`implementer.md:28-30` に「コミットは単独のコマンドで実行する(`git add` とはつないでよい)」の意味を足し、tech-debt の 125 行目の「残るのは」と guard の限界の行にこの場合を足す。次に guard を変えるとき、ヘッダーの `:117-119` に「同じコマンドのトップレベルのコマンドがすべて読むだけのコマンドか git のとき」を足し、理由の文に「コミットを単独のコマンドで実行する」を足す |
+| C3-2 | LOW | security | `reset_rules`(`:1138-1143`)は `--` で走査を止めるが、値を取る `--pathspec-from-file` の値を先に読み飛ばさない。git はその直後の `--` をこのオプションの値として読み、続く `--hard` をオプションとして読む。作業ディレクトリに中身が空の `--` という名前のファイルがあると、`git reset --pathspec-from-file -- --hard` は hard reset を行う。新版は none、373fa29d の guard は deny、旧版は none。AC7 には反しないが、a9ef82b1 が足した取りこぼし | `sr5/reset-dd.sh`(scratchpad の使い捨てのリポジトリ、git 2.49)。空の `--` では rc 0 で `HEAD is now at …` と出て、作業ツリーの変更が消えた。パスを書いた `--` では `fatal: Cannot do hard reset with paths.`(rc 128)。hook は `sr5/rs/r1` を新版 none、373fa29d deny、旧版 none とした。`=` で値をつけた `r2` は新版も deny | `push_val_opt` と同じく、`--` を見る前に `opt_is(a, "--pathspec-from-file")` の値を読み飛ばす(`=` がなければ次の語)。`ac3` の `git reset -- --hard` の 2 形は none のまま。`commit_rules`(`:1155`)と `no_verify_rules`(`:1144-1149`)も `--` で止まる。こちらの値を取るオプションは調べていない(a9ef82b1 より前からある形) |
+| C3-3 | LOW | maintainability | 予約語の規則(`:716`)と exec の規則(`:721`)は、許可リスト(`:727`)が入ったあとでは判定を変えない。`:716` が当たるのは 1 語目の生の語が `if` や `{` のときで、その値は DATACMD でも git でもない。`EXEC_SEEN` を立てるのは、`cmd_pos` が前置きをたどって `exec` に着いたとき(`:772`)で、1 語目が DATACMD か git なら `cmd_pos` は 1 を返し、前置きをたどらない。ヘッダー(`:107-110`)と `in_data` のコメント(`:877-882`)は、この 2 つを別の理由として並べている | 変異体 `sr5/m_resw`、`m_exec`、`m_resw_exec` で、239 行のうち判定が変わる行は 0。ほかの規則のうち単独で判定を決めているのは、`(` の規則(`:285`、`(echo sudo ls)` の 1 行)と区切りの規則(`:540`、P1-1 の 1 行) | 2 行と `EXEC_SEEN`(`:763`、`:772`、`:1362`)を消すか、「許可リストに含まれる。許可リストを狭めたときに cycle 1 の形を開け直さないために残す」とコメントする。/test には、この 2 つの変異が等価になったと伝える |
+| C3-4 | LOW | readability | 区切りの規則のコメント(`:535-539`)は、字句解析が「`$"..."`、`${...}`、置換を展開しない」ことを理由に挙げ、shell は展開するように読める。bash・zsh・dash は区切りの中の `$x`、`${x}`、バッククォートを展開しない。字句解析と違うのは、`$'...'` のエスケープと `$"..."` だけ。規則は止める側に倒れているので、ずれはコメントだけにある。`data_first_ok` も同じ字句解析の値を使い、そのコメント(`:743-744`)は「shell が見るとおりの値」と書くが、`$'...'` では成り立たない(`lex_ansi`、`:444-460`)。`$'echo'` はデータになる(`b05`)。コードを読む限り害はない。2 つの値が違うとき、shell の側の名前には制御文字、`\`、先頭の `$` のどれかが入り、その名前のコマンドがすでにある場合にしか動かない(ヘッダーの Not covered の状態) | `sr5/delim-sem.sh`: `${x}`、`$x`、バッククォートの区切りで、3 つの shell とも本文は文字どおりの区切りの行まで続いた(dash はバッククォートの形を構文エラーにした)。`sr5/dq-sem.sh`: `$"abc"` は bash が `abc`、zsh と dash が `$abc`。未知のエスケープ `\l` は、bash が `\` を残し、zsh は落とした(字句解析も落とす) | 区切りのコメントを「`$'...'` と `$"..."` は shell と同じには読まない。ほかの `$` とバッククォートは文字どおりだが、規則を簡単にするため一緒に止める」の意味に直す。`data_first_ok` のコメントに `$'...'` の例外を書くか、区切りの規則とそろえて、`WR[ctx, 1]` に `$` があれば 0 を返す(代価は `$'echo'` と `$"echo"` だけ) |
+| C3-5 | LOW | readability | テストのコメントのずれ。(1) `tests/test-pre-bash-guard.sh:666` の「Cycle 2 (P2-4, P2-5)」と `:829` の「Cycle 2 (P2-4)」は、triage の書き方(1〜5 の番号と、重さの [P1]・[P2])と合わない。この報告では P2-4 と P2-5 は別の指摘(tech-debt の行の行番号と、未読のヒアドキュメント)を指すので、grep すると別のものに着く。`:999` の「change A」は repo のどこにも定義がない。(2) `:616-620` は、許可リストが「a variable as the command name」も閉じると書くが、`$c 'sudo ls'`(`:627`)は許可リストを外しても deny になる。`$c` は読むだけのコマンドではないので、もともとデータ区間がない。この行は許可リストを固定していない | `P2-4`・`P2-5`・`change A` を grep した結果(この報告の P2 の表、`docs/reports/cross-review-triage-guard-deny-only.md` の表)。変異体 `sr5/m_allow` で、`$c` の行は deny のまま、ほかの許可リストの 6 行は none | 「cross-review cycle 2, findings 4 and 5」のように書き、「change A」は「the allowlist (a9ef82b1)」にする。変数の行は前からの deny だと書くか、変数を別のコマンドにして、後ろに読むだけのコマンドを置く形に変える |
+
+### 前の節の指摘の状態
+
+| 指摘 | 状態 | 根拠 |
+| --- | --- | --- |
+| R2-1 | 解消 | c61ab2bf がヘッダーの方針の段落を書き直し、END のコメントを「in bash and dash」にした。plan の Progress の F2-1 の行も直った。誤検知は d5e197de が tech-debt の guard の限界の行に記録した |
+| R2-2 | 解消 | c61ab2bf が「(only that body loses its region)」を消した。4ffe74fe が、テストの 2 か所のコメントに、行継続の規則で deny になることを書いた |
+| R2-3 | 解消 | c61ab2bf が `guard_deny_only_forms` の前のコメントに 8(/test の F2-1)を足した |
+
+### Tech debt identified
+
+この周は、上げた上限 3 の最後の周にあたる。直さない指摘はそのまま持ち越しになる。この commit では `docs/tech-debt/README.md` を変えていない。/sync-docs で次の 1 行にまとめてほしい。C3-1 の記録(`implementer.md`、125 行目、guard の限界の行)は、この周の /sync-docs で直せる。
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| a9ef82b1 の guard の残り(C3-1 の理由の文とヘッダー、C3-2 の reset の値、C3-3 の重なった 2 規則、C3-4 と C3-5 のコメント) | C3-1: つないだコマンドの中の推奨のコミット形が止まり、理由の文が使っている形を勧める。C3-2: 中身が空の `--` という名前のファイルがあるときの hard reset を通す(旧版も通す)。C3-3〜C3-5: 次に guard を変える人が、コメントと変異の結果を読み違える | guard を 1 行でも変えると self-review から /cross-review までをもう一度回すことになり、上限 3 を超える | 次に guard を変える PR | この節の C3-1〜C3-5 |
+
+### Recommendation(cycle 3、現時点)
+
+- Merge: merge(CRITICAL・HIGH はない。cross-review の 2 周目の P1 3 件は閉じた。旧版が deny にした形のうち、確かめた中で新版が none にしたのは、shell が実行しないデータの形だけ。MEDIUM の 1 件は旧版と同じ deny で、理由の文と記録が挙動に合っていない問題。LOW の 4 件は、旧版も通す reset の 1 形と、重なった規則とコメントのずれ)
+- 前の節までの Merge 行はそれぞれの時点の判定で、現時点の判定はこの行
+- Follow-ups:
+  - /sync-docs: C3-1 の 3 か所(`internal/org/prompts/implementer.md:28-30`、`docs/tech-debt/README.md:125`、guard の限界の行)と、上の Tech debt の 1 行。guard は 1437 行になった
+  - /test: C3-3 の 2 つの変異は等価になった。許可リストを外す変異と区切りの規則を外す変異は、この review では 9 行と 1 行で赤になった
+  - C3-2 は旧版も通す形なので、直すなら次の PR で
+
+### 未確認の点
+
+- 名前が指すもの: Claude Code の Bash ツールは、利用者の shell のスナップショットを読み込む。ここでは `cat` が `bat`、`ls` が `eza -aal --icons` のエイリアスで、`grep` は Claude Code の関数になっている(`type cat grep ls`)。許可リストが見るのは名前で、ヘッダーの Not covered はエイリアスと関数を挙げている。これらのプログラムが引数をどう扱うかは確かめていない
+- git が保存したメッセージを、同じコマンドの中の置換や git の下位コマンドが実行時に読み返す場合(確認したことの 1)。hook では確かめていない。ヘッダーの「実行時にしか分からないもの」に入る
+- テストスイート(1800/0)、mawk・gawk・busybox の awk、ubuntu での実行はしていない。239 行の変異の比較は jq ありの経路だけで回した
