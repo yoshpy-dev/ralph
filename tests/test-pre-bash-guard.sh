@@ -566,7 +566,9 @@ guard_deny_only_forms=(
   # 3. An unquoted heredoc whose body line ends in a backslash-newline joins
   # with the next line before the terminator comparison (bash, zsh). The
   # join also makes $ and ( on two lines one command substitution, which
-  # bash, zsh and dash run, so a joined body is not data.
+  # bash, zsh and dash run. Since 4e829e34 any backslash-newline drops every
+  # data region of the command (8 below), so these deny through that rule;
+  # the body-only rule in read_body no longer changes their decision.
   $'cat <<EOF\nEO\\\nF\ngit push --force'
   $'cat <<-EOF\n\tEO\\\nF\nsudo ls'
   $'cat <<EOF\n$\\\n(sudo ls)\nEOF'

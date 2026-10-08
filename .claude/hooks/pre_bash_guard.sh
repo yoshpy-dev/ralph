@@ -1302,8 +1302,8 @@ END {
   set_text(IN)
   # The shell drops a backslash-newline before it reads the command, also
   # inside double quotes ("$\ newline (cmd)" is a substitution in bash and
-  # dash), while the lexer sees the two characters. A command that has one gets no data
-  # region, so the sentinel decides as the previous guard did.
+  # dash), while the lexer sees the two characters. A command that has one
+  # gets no data region, so the sentinel decides as the previous guard did.
   if (index(IN, BS "\n")) NODATA = 1
   # Re-read text may grow past the command (pipes feed a shell each
   # argument and their join), but not by more than this.
