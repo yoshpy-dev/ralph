@@ -182,10 +182,17 @@ toplevel、cwd の順で決まる。「前提」節を参照)、`ralph org statu
   の `spawn` は、合計がこの数に達していると拒否される。すでに立っている座席
   への `spawn` は、これまで通り既存の座席を返す。
 
-どちらも台帳のロックの下で判定するので、同時に打った `spawn` でも超えない。
-拒否された新しい座席の `spawn` は `rejected` を台帳に書き、エラーは、終わった
-org を `ralph org disband --org-id <id>`(全 org なら `--all`)で片付けると
-枠が空くことを示す。
+どちらも台帳のロックの下で判定するので、`spawn` どうしが同時に打たれても超え
+ない。拒否された新しい座席の `spawn` は `rejected` を台帳に書き、エラーは、
+終わった org を `ralph org disband --org-id <id>`(全 org なら `--all`)で
+片付けると枠が空くことを示す。
+
+例外が 1 つある。コマンドを打った自分の pane か workspace を最後に閉じる
+`stop` / `disband` は、その close が失敗すると座席と workspace を「動いている」
+に戻す(`stop` と `disband` の行を参照)。この補償は上限も予約の重なりも見ずに
+戻すので、失敗してから戻すまでの間にほかの org が枠か同じ範囲を取っていると、
+`max_orgs` か `max_total_seats` を 1 つ超えたり、予約が重なったりする。打ち直
+した `stop` / `disband` で解ける。
 
 走っている org は、その org の最後の `disbanded` より後に、動いている座席、
 閉じていない workspace、予約のどれかがある org。`rejected` だけの org と、
@@ -193,13 +200,15 @@ org を `ralph org disband --org-id <id>`(全 org なら `--all`)で片付ける
 しても workspace が開いたままなら数えるので、枠を空けるには `disband` まで
 打つ。
 
-`--config` がなく、台帳が main worktree のもの(`--state-dir` も
-`RALPH_ORG_STATE_DIR` も使っていない)ときは、この 2 つの上限は main worktree
-のルートの `ralph.toml`(なければ既定値)から読む。サブディレクトリや linked
-worktree から打っても同じ上限が掛かるので、feature branch 側の `ralph.toml`
-で変えても効かない。`--config` を渡したときと、台帳を flag か env で決めた
-とき、git の外では、`--config` のファイル(なければ打った場所の `./ralph.toml`)
-を使う。`max_seats` とほかの設定の読み方は変わらない。
+この 2 つの上限を main worktree のルートの `ralph.toml`(なければ既定値)から
+読むのは、`--config` がなく、台帳の置き場所が main worktree のものであるとき
+だけ。サブディレクトリや linked worktree から打っても同じ上限が掛かるので、
+feature branch 側の `ralph.toml` で変えても効かない。それ以外は、`--config`
+のファイル(なければ打った場所の `./ralph.toml`)を使う。`--config` を渡した
+とき、`--state-dir` か `RALPH_ORG_STATE_DIR` で台帳を決めたとき、台帳を git の
+toplevel から決めたとき(main worktree を決められない bare リポジトリの linked
+worktree)、git の外のときがこれに当たる。`max_seats` とほかの設定の読み方は
+変わらない。
 
 ### 担当範囲の予約(`--reserve`)
 
@@ -211,8 +220,10 @@ worktree から打っても同じ上限が掛かるので、feature branch 側�
   下すべて)、そうでなければファイル、`.` は repo 全体。絶対パス、`..` を含む
   もの、空、カンマ・空白・制御文字を含むものは、台帳に何も書かず拒否される。
 - パスは書いた通りに扱う。glob は使えず、`*` はファイル名の文字になる
-  (ディレクトリは `internal/org/` のように書く)。重なりはパスの区切りの単位
-  で比べるので、`internal/auth/` と `internal/authz/` は重ならない。
+  (ディレクトリは `internal/org/` のように書く)。末尾に `/` がないパスは
+  ファイルなので、`--reserve internal/auth` が守るのは `internal/auth` という
+  名前のファイルだけで、ディレクトリの下は守らない。重なりはパスの区切りの
+  単位で比べるので、`internal/auth/` と `internal/authz/` は重ならない。
 - 走っている他の org の予約と重なると拒否され、エラーに相手の org_id と重
   なったパスが出る。
 - 予約は org 単位で、`disband` で解ける。同じ org に同じ一覧を渡し直すと通り、
@@ -220,6 +231,9 @@ worktree から打っても同じ上限が掛かるので、feature branch 側�
   spawn が失敗しても予約は残る。
 - 受け付けるのは leader の座席だけで、ほかの座席に渡すと拒否される。
 - `--reserve` を渡した spawn は、autonomous の `--scope` 必須のゲートを満たす。
+  ただし `--reserve` だけを渡した leader の役割プロンプトでは、`{{SCOPE}}` に
+  予約したパスではなく既定の「未指定」の文言が入る。leader に担当範囲の説明を
+  見せたいときは `--scope` も渡す。
 - 予約は org 同士の担当の重なりを防ぐための記録で、予約の外への書き込みは
   止めない。範囲の外への変更は `ralph org watch` の scope_change ALERT で
   知らせる。

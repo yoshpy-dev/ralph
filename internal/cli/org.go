@@ -43,7 +43,7 @@ func newOrgCmd() *cobra.Command {
 
 	cmd.PersistentFlags().StringVar(&orgID, "org-id", "", "org execution namespace (required, except for stop --all and disband --all)")
 	cmd.PersistentFlags().StringVar(&stateDir, "state-dir", "", "org manifest/receipts state directory (default: resolved by org.ResolveOrgStateDir -- env RALPH_ORG_STATE_DIR, else the main worktree's .harness/state/org (shared by its linked worktrees), else the enclosing git toplevel's .harness/state/org, else cwd's .harness/state/org)")
-	cmd.PersistentFlags().StringVar(&configPath, "config", "", "path to ralph.toml (default: ./ralph.toml if present, else built-in defaults; without --config, spawn and start read max_orgs and max_total_seats from the main worktree's ralph.toml when the ledger is the main worktree's)")
+	cmd.PersistentFlags().StringVar(&configPath, "config", "", "path to ralph.toml (default: ./ralph.toml if present, else built-in defaults; for where spawn and start read the org-wide limits, see ralph org spawn --help)")
 
 	cmd.AddCommand(
 		newOrgSpawnCmd(&orgID, &stateDir, &configPath),
@@ -360,14 +360,16 @@ func resolveLeaderDriver(cmd *cobra.Command, leaderDriver, deprecatedDriver stri
 
 // orgWideLimitsHelp is the paragraph `ralph org spawn --help` and `ralph org
 // start --help` print about the limits a new seat is checked against.
-const orgWideLimitsHelp = "Before starting a seat, spawn checks [org].max_seats for the org and two\n" +
-	"limits every org_id in the ledger shares: [org].max_orgs (running orgs)\n" +
-	"and [org].max_total_seats (active seats across all orgs). When --config\n" +
-	"is not given and the ledger is the main worktree's (no --state-dir or\n" +
-	"RALPH_ORG_STATE_DIR), those two are read from the main worktree's\n" +
+const orgWideLimitsHelp = "Before a seat starts, `ralph org spawn` and `ralph org start` check\n" +
+	"[org].max_seats for the org and two limits every org_id in the ledger\n" +
+	"shares: [org].max_orgs (running orgs) and [org].max_total_seats (active\n" +
+	"seats across all orgs). Only when --config is not given and the ledger\n" +
+	"is the main worktree's, those two are read from the main worktree's\n" +
 	"ralph.toml (built-in defaults when it has none), so every subdirectory\n" +
-	"and linked worktree gets the same limits. A refusal says how to free a\n" +
-	"slot with `ralph org disband`."
+	"and linked worktree gets the same limits. In every other case (--config,\n" +
+	"a ledger chosen with --state-dir or RALPH_ORG_STATE_DIR or found from\n" +
+	"the git toplevel, no git repository) the --config file, else ./ralph.toml,\n" +
+	"is used. A refusal says how to free a slot with `ralph org disband`."
 
 // orgReserveFlagUsage is the --reserve usage `ralph org spawn` and `ralph org
 // start` share. No backticks: pflag would take the first backticked word as
@@ -1000,6 +1002,10 @@ func newOrgStatusCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show org seat roster",
+		Long: "ralph org status shows the seat roster of --org-id (--all adds dry-run\n" +
+			"seats). While the org holds a reservation made with --reserve (released\n" +
+			"by `ralph org disband`), a `reserved: <path>, ...` line follows the\n" +
+			"table and --json adds a `reservation` array.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireOrgID(*orgID); err != nil {
 				return err
