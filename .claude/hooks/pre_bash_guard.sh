@@ -95,29 +95,39 @@
 #      written to) is still denied, as the previous guard did, while the
 #      same words as data (echo 'never use sudo here', a commit message,
 #      grep -n 'git push --force' docs.md) pass.
-#      The guiding principle: when the guard cannot tell where a read-only
-#      command's text ends up, it gives no data region and the previous
-#      guard's rules decide. So a group or compound structure at the top
-#      level (a subshell (...), a brace group { ...; }, a reserved word such
-#      as if, for or case in command position), an exec with a
-#      redirection, and a backslash-newline anywhere in the command (bash
-#      and dash remove it before reading, even inside double quotes) each
-#      drop every data region of the command. The backslash-newline rule
+#      The guiding principle is an allowlist: a data region exists only when
+#      every top-level simple command is one the guard can see is a pure data
+#      reader. So the command gets data regions only when every top-level
+#      command's first word, with quotes removed, is a bare DATACMD name or
+#      git, with no slash in it (/bin/echo and ./echo may be any program),
+#      and none of the other NODATA triggers fire. Any other first word (an
+#      assignment, a wrapper such as env, command, sh, nice, builtin or exec,
+#      a path, a variable or a substitution) or a command of only redirections
+#      drops every data region of the whole command, and the previous guard's
+#      rules decide. The other NODATA triggers are a group or compound
+#      structure at the top level (a subshell (...), a brace group { ...; }, a
+#      reserved word such as if, for or case in command position), an exec
+#      with a redirection, a heredoc whose delimiter word has a dollar sign or
+#      a backtick (the lexer may read it differently from the shell), and a
+#      backslash-newline anywhere in the command (bash and dash remove it
+#      before reading, even inside double quotes). The backslash-newline rule
 #      does not look at quoting, so one that is only text (inside single
 #      quotes, at the end of a line of a quoted heredoc body or a comment,
 #      after an escaped backslash) also drops them, as the previous guard
-#      denied those commands too. A commit message passed in the
-#      recommended heredoc form therefore passes only when no line of the
-#      command ends in a backslash.
+#      denied those commands too. A commit message passed in the recommended
+#      heredoc form therefore passes only when its command's first word is git
+#      and no line of the command ends in a backslash.
 # Not covered: anything only known at run time (variables such as $cmd,
 # aliases, functions, git aliases, scripts read from a file, remote commands
 # such as ssh host '...'), and shell syntax beyond the above: case
 # patterns, arithmetic, arrays, brace expansion ({su,}do), pathname
 # expansion (?udo, [s]udo), and the hex and octal escapes of $'...' (only
 # \n, \t and \r are decoded). The lexer misses those; the sentinel sees
-# only the text as written. Broken input (an unclosed quote or
-# parenthesis, a heredoc without its end line) still exits 0, with or
-# without a deny.
+# only the text as written. Shell state set up by an earlier command is
+# invisible the same way a variable is: a function named like a data command,
+# or an exec redirection done in an earlier command, is not seen when the next
+# command is judged. Broken input (an unclosed quote or parenthesis, a heredoc
+# without its end line) still exits 0, with or without a deny.
 set -eu
 
 HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -522,6 +532,12 @@ function lex_redir(ctx, rs,    c, c2, op, s, k) {
   if (op == "<<" || op == "<<-") {
     HN++
     HDL[HN] = LW_VAL
+    # A delimiter word with a dollar sign or a backtick may be read
+    # differently by the shell than by this lexer, which decodes only the
+    # \n \t \r of an ANSI-C quote and expands no $"...", ${...} or
+    # substitution; the real delimiter can end the body on an earlier line.
+    # Drop every data region of the command then.
+    if (index(LW_RAW, "$") || index(LW_RAW, BQ)) NODATA = 1
     # A backslash-newline in the delimiter word is removed before tokenizing
     # (cat <<EO\<newline>F is the unquoted delimiter EOF), so it does not
     # quote the delimiter; such a body gets no data region (HBSNL).
@@ -703,6 +719,12 @@ function end_cmd(ctx, sep,    cid) {
   # exec with a redirection changes the current shell fds, so what a later
   # command writes may be run; drop every data region.
   if (DCTX[ctx] && EXEC_SEEN && RN[ctx] > 0) NODATA = 1
+  # The allowlist: a data region exists only when every top-level command is
+  # known to be a pure data reader. A command whose first word is not a bare
+  # data command or git (an assignment, a wrapper such as env or command, a
+  # path, a variable, or any other name), or that has only redirections,
+  # drops every data region of the whole command.
+  if (DCTX[ctx] && !data_first_ok(ctx)) NODATA = 1
   if (DCTX[ctx]) { stage_note(ctx, cid); STC[ctx, ++STN[ctx]] = cid }
   if (sep == "|") { PLC[ctx, ++PLN[ctx]] = cid; CPL[cid] = PLID[ctx] }
   else {
@@ -716,6 +738,22 @@ function end_cmd(ctx, sep,    cid) {
   CUR[ctx] = ++CIDN
 }
 function pipe_close(ctx) { PLN[ctx] = 0; STN[ctx] = 0; PLID[ctx] = ++PLSER }
+
+# data_first_ok(ctx): 1 when the command being assembled may give a data
+# region. Its first word, with quotes removed (the value, so "echo", \echo
+# and e\cho are echo as the shell sees them), must be a bare DATACMD name or
+# git. A word with a slash does not qualify, even when its basename is a
+# DATACMD (/bin/echo and ./echo may be any program); a value that still holds
+# a substitution or a variable ($(x), $CMD, ${x:-echo}) does not match; and a
+# command of only redirections has no first word. This first word is read
+# before assignments and wrappers are skipped, so env, command, nice,
+# builtin, exec, sh, an assignment, ! and any other name give 0.
+function data_first_ok(ctx,    v) {
+  if (WN[ctx] < 1) return 0
+  v = WV[ctx, 1]
+  if (index(v, "/")) return 0
+  return (v == "git" || (v in DATACMD))
+}
 
 # cmd_pos(ctx): the index of the command-name word, or 0 when there is none
 # (or the command runs nothing, as command -v).
@@ -837,9 +875,11 @@ function add_data(s, e,    k, b, b1) {
   }
 }
 # in_data(a, b): 1 when S[a, b) lies inside one data span. When NODATA is
-# set (a top-level group or compound command, an exec with a redirection, or
-# a backslash-newline anywhere), the command has no data region at all and
-# the sentinel rules decide.
+# set the command has no data region at all and the sentinel rules decide. It
+# is set when a top-level command has a first word that is not a bare data
+# command or git, has only redirections, is a group or compound command, is an
+# exec with a redirection, has a heredoc delimiter with a dollar sign or a
+# backtick, or when a backslash-newline appears anywhere.
 function in_data(a, b,    bk, j, k) {
   if (NODATA) return 0
   bk = int((a - 1) / BKW)
@@ -1064,17 +1104,42 @@ function opt_is(a, full,    k) {
   k = length(a)
   return k >= 4 && k <= length(full) && substr(full, 1, k) == a
 }
-function push_rules(ctx, i, n,    a) {
+# push_rules(ctx, i, n): git push. A value-taking option is consumed with its
+# value first, so a value that looks like a flag (--push-option=--force) or a
+# refspec is not read as one: the long options of push_val_opt (value after =
+# or in the next word) and the short -o (--push-option; its value is the rest
+# of the cluster, or the next word). Then --force, --force-with-lease, a short
+# cluster whose f comes before any o, and a +refspec deny.
+function push_rules(ctx, i, n,    a, fo, ff) {
   for (; i <= n; i++) {
     a = WV[ctx, i]
+    if (push_val_opt(a)) { if (!index(a, "=")) i++; continue }
     if (opt_is(a, "--no-verify")) deny("no_verify")
     if (opt_is(a, "--force") || opt_is(a, "--force-with-lease")) deny("force_push")
-    if (a ~ /^-[A-Za-z0-9]+$/ && index(a, "f")) deny("force_push")
     if (substr(a, 1, 1) == "+") deny("force_push")
+    if (a ~ /^-[A-Za-z0-9]+$/) {
+      # Read the cluster left to right by position: f (force) before the
+      # first o denies; at o the rest of the cluster is its value, and when
+      # nothing follows o the next word is the value.
+      fo = index(a, "o")
+      ff = index(a, "f")
+      if (ff > 1 && (fo == 0 || ff < fo)) deny("force_push")
+      if (fo > 1 && fo == length(a)) i++
+    }
   }
 }
+# push_val_opt(a): 1 when a is one of the value-taking long options of git
+# push, possibly abbreviated as opt_is allows (git push -h on this machine).
+function push_val_opt(a) {
+  return opt_is(a, "--repo") || opt_is(a, "--receive-pack") || opt_is(a, "--exec") || opt_is(a, "--recurse-submodules") || opt_is(a, "--push-option")
+}
+# reset_rules(ctx, i, n): git reset with --hard, but everything after -- is a
+# pathspec (a file named --hard is not a flag).
 function reset_rules(ctx, i, n) {
-  for (; i <= n; i++) if (opt_is(WV[ctx, i], "--hard")) deny("hard_reset")
+  for (; i <= n; i++) {
+    if (WV[ctx, i] == "--") return
+    if (opt_is(WV[ctx, i], "--hard")) deny("hard_reset")
+  }
 }
 function no_verify_rules(ctx, i, n) {
   for (; i <= n; i++) {

@@ -603,6 +603,28 @@ guard_deny_only_forms=(
   # (bash, dash), so a rule that looks only for $, a backslash-newline and
   # ( right after it would let this through.
   $'echo "$\\\n\\\n(sudo ls)"'
+  # 9. Cycle 2 (docs/reports/cross-review-triage-guard-deny-only.md): text
+  # classified as data that the shell runs. P1-1 reads a heredoc delimiter
+  # $'\x45' as x45 while bash and zsh read E, so the sudo ls after the E line
+  # runs; P1-2 splits env -S and reads the trailing echo as its own data
+  # reader while env runs the split string; P1-3 redirects the shell's stdout
+  # with builtin exec before echo writes the script that sh then runs. The
+  # old guard denies all three.
+  $'cat <<$\'\\x45\'\nE\nsudo ls'
+  $'env -S \'sh -c "eval \\$2" --\' echo \'sudo ls\''
+  $'builtin exec >run.sh; echo \'sudo ls\'; sh run.sh'
+  # The allowlist (every top-level command word is a bare data command or
+  # git) also closes these: a path (slash) as the first word, a wrapper, an
+  # assignment, and a variable as the command name. The data command that
+  # follows no longer gives a data region, so the sentinel denies. The old
+  # guard denies each (the sudo substring is outside any data region there).
+  $'./echo \'sudo ls\''
+  $'/tmp/x/cat \'sudo ls\''
+  $'env echo \'sudo ls\''
+  $'command echo \'sudo ls\''
+  $'nice grep \'sudo \' f'
+  $'x=1 echo \'sudo ls\''
+  $'$c \'sudo ls\''
 )
 check_modes B deny absent bypassPermissions -- "${guard_deny_only_forms[@]}"
 
@@ -641,6 +663,18 @@ ac3=(
   'echo x > .env'
   'rm -rf build/'
   'gh pr create --title t'
+  # Cycle 2 (P2-4, P2-5): a value-taking push option whose value is read as a
+  # flag, and a hard-reset look-alike after --. git push -h on this machine
+  # lists -o/--push-option, --repo, --receive-pack, --exec and
+  # --recurse-submodules as value-taking; -ofoo is -o with value foo. After
+  # reset's -- everything is a pathspec, so --hard names a file. The old guard
+  # let all of these through.
+  'git push origin -ofoo'
+  'git push -o ci.skip origin main'
+  'git push --push-option=foo origin main'
+  'git push --repo origin main'
+  'git reset -- --hard'
+  'git reset HEAD -- --hard'
 )
 check_modes C none absent bypassPermissions -- "${ac3[@]}"
 collect_corpus=no
@@ -792,6 +826,12 @@ edge_deny=(
   $'find . -exec git push origin --force \\;'
   'flock /tmp/l git push origin -f'
   'watch git -C dir reset --hard'
+  # Cycle 2 (P2-4): consuming a push option value must not hide a real force.
+  # -fo has f before o (force); -o x consumes x, then --force denies; -uf is a
+  # cluster whose f is force.
+  'git push -fo x origin'
+  'git push -o x --force origin'
+  'git push -uf origin main'
 )
 check_modes D deny absent -- "${edge_deny[@]}"
 
@@ -867,8 +907,6 @@ edge_none=(
   # sudo after a word character, ., _ or - is another name.
   'my-sudo ls'
   'x.sudo ls'
-  # zsh = expansion of a command that only reads data.
-  '=echo sudo ls'
   # git commit -F - with a quoted delimiter expands nothing.
   $'git commit -F - <<"EOF"\n$(id)\nEOF'
   $'git commit -F - <<\\EOF\n$(id)\nEOF'
@@ -958,6 +996,12 @@ edge_sentinel_deny=(
   'apt-get remove sudo -y'
   $'bash -c \'x\' sudo ls'
   'flock l git grep sudo file'
+  # The allowlist (change A, cycle 2) drops the data region of a zsh =echo:
+  # its value =echo is not a bare data command (cname strips the = for the
+  # rule, but the data-region allowlist reads the raw value). The old guard
+  # denied it (the sudo substring), so this moves here from edge_none, not to
+  # intentional_fixes.
+  '=echo sudo ls'
 )
 check_modes D deny absent -- "${edge_sentinel_deny[@]}"
 
