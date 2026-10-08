@@ -340,3 +340,113 @@ commit は 180c7389。guard と `lib_json.sh` は変えていない。どの例�
 - Pass: yes。cycle 2 の /test は F2-1 で fail だったが、guard を 4e829e34 で直し、cycle 2 の中でこの /test をやり直した。`./scripts/run-test.sh` 2 回、`./scripts/run-verify.sh` 2 回、`tests/test-pre-bash-guard.sh` 1730/0、`tests/test-lib-json.sh` 126/0、ubuntu の mawk・gawk が通る。F2-1 の形は新版・旧版とも deny になり、NODATA の行を消す置換は新しい 3 形を赤にする。22 個の置換のうち 19 個が赤、残る 3 個(J02、L03、N02)は等価。/sync-docs に進んでよい
 - Fail: なし
 - Blocked: なし
+
+## cycle 3 (cap raised to 3)
+
+- Date: 2026-10-08
+- Tester: tester subagent (Claude)。cross-review の 2 周目のあと、ユーザーが上限を 3 に上げてから回した /test。cross-review の手順どおり `cycle-count.json` は 2 のまま。上の 3 つの Verdict は、それぞれの時点の判定として残した。いまの判定は、この節の最後の `## Verdict(cycle 3)` にある
+- Scope: `git diff facd295b..HEAD -- .claude tests templates`(HEAD 14b3fd37)と、この /test で足したテスト。guard の判定を変えたのは a9ef82b1(許可リスト `data_first_ok`、ヒアドキュメントの区切りの `$`・バッククォート規則、git push の値を取るオプション、git reset の `--` 停止)と 849f5411(reset の `--pathspec-from-file` の値の読み飛ばし)。root と template の guard は `cmp` で同一(`run-verify.sh` の `check-sync.sh` で確認)
+- Evidence: `docs/evidence/test-2026-10-07-guard-deny-only.log` の末尾(「cycle 3 (cap raised to 3)」の見出し、31〜45 節)。gitignore の対象なので commit しない
+- Guard・lib_json は変更していない(self-review・verify が報告したバグはそのまま持ち越し。下の Test gaps)。足したのは `tests/test-pre-bash-guard.sh` の 11 行だけ
+
+### Test execution(cycle 3)
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `./scripts/run-test.sh` 1 回目(テストを足す前、14b3fd37) | shell 40 本 + Go 8 パッケージ | 40 本 + Go 8 | 0 | 0 | 723 s(docker・probe と並走した高負荷下) |
+| その中の `tests/test-pre-bash-guard.sh` / `tests/test-lib-json.sh` | 1794 / 126 | 1794 / 126 | 0 / 0 | 0 / 0 | — |
+| `./scripts/run-verify.sh` 1 回目(mode all、scope full、テストを足す前) | 静的な検査 + shell 40 本 + Go | すべて | 0 | 0 | 1556 s(同上) |
+| ubuntu:24.04、mawk 1.3.4、dash、GNU sed 4.9・grep 3.11、jq なし: guard / lib_json(テストを足したあと) | 1811 / 126 | 908 / 87 | 0 / 0 | 903 / 39(jq の経路) | — |
+| ubuntu:24.04、mawk、jq 1.7: guard / lib_json | 1822 / 126 | 1822 / 126 | 0 / 0 | 0 / 0 | — |
+| ubuntu:24.04、gawk 5.2.1、jq 1.7: guard / lib_json | 1822 / 126 | 1822 / 126 | 0 / 0 | 0 / 0 | — |
+| `./scripts/run-test.sh` 2 回目(テストを足したあと) | shell 40 本 + Go 8 パッケージ | 40 本 + Go 8 | 0 | 0 | — |
+| その中の `tests/test-pre-bash-guard.sh` / `tests/test-lib-json.sh` | 1822 / 126 | 1822 / 126 | 0 / 0 | 0 / 0 | — |
+| `./scripts/run-verify.sh` 2 回目(テストを足したあと) | 静的な検査 + shell 40 本 + Go | すべて | 0 | 0 | — |
+
+- `run-test.sh` は 2 回とも `lib_json.sh` を分類できず full にフォールバックした。Go は `internal/org` だけが実際に走り(19〜22 s)、ほかはキャッシュから。shell は 40 本すべて緑で、assertion の `FAIL` は 0、0 でない `FAIL:` の要約も 0
+- `run-verify.sh` は 2 回とも `All verifiers passed.` で終わった。中で shellcheck(`tests/test-*.sh` を含む)、全 hook の `sh -n`、`settings.json` の `jq -e`、`check-sync.sh`、`check-pipeline-sync.sh`、`check-skill-sync.sh`、`check-template-purity.sh`、gofmt、golangci-lint(0 issues)、branch の secret scan が通った
+- `tests/test-secret-scan.sh`(固定 `/tmp` パスの既知の flaky)は 2 回とも通った。ほかの実行と重ならないように流した
+- 件数の増え方: 14b3fd37 の 1794 から、足した 11 行で 1822。`guard_deny_only_forms`(B 節、`absent` と `bypassPermissions` の 2 モード × jq あり・なしの 2 経路 = 1 行 4 件)に 3 行で +12、`edge_deny`・`edge_none`(D 節、1 モード × 2 経路 = 1 行 2 件)にそれぞれ 3 行・5 行で +6・+10。計 +28。macOS の BWK awk で AC8(jq なし)の最大は 1.049 秒(2 回目)
+- `tests/test-lib-json.sh` は変更なし、126/0
+
+### 足したテスト(cycle 3、`tests/test-pre-bash-guard.sh`、11 行)
+
+commit は後述の `test:` コミット。guard と `lib_json.sh` は変えていない。どの行も新版と旧版の両方で期待どおり(新版: 11 行すべて、旧版: deny 6 行は deny、none 5 行のうち push/reset の 4 行は none、`"echo"` の行は旧版 deny→新版 none のデータ区間の例)。各行の形はバイト単位で probe ファイルと一致させた(evidence 42)。
+
+- `guard_deny_only_forms`(B、deny)に 3 行。許可リストを固定する: `$c; echo 'sudo ls'`(変数のコマンドの後ろのデータコマンド)、`>out.txt; echo 'sudo ls'`(リダイレクトだけのコマンドの後ろ)、`echo hi; >out.txt; echo 'sudo ls'`(データコマンドの後ろのリダイレクトだけのコマンド)。self-review C3-5 は、既存の `$c 'sudo ls'` が許可リストを外しても deny(`$c` はデータコマンドでなく、自分の引数にデータ区間がない)なので許可リストを固定しないと指摘した。この 3 行は、後ろのデータコマンドのデータ区間が許可リストで消えることを突く。許可リストを外す変異(AL01)で 3 行とも none になる
+- `edge_deny`(D、deny)に 3 行。値を読み飛ばしても後ろの force・hard reset を見逃さないこと: `git push -ofoo --force origin`、`git push --push-option=x --force origin`、`git reset --pathspec-fr -- --hard`。git 2.49 の実測で、前 2 つは forced update、3 つ目は hard reset(evidence 33)。旧版はこの 3 つを通す
+- `edge_none`(D、none)に 5 行。値を取るオプションがフラグに見える値を読むこと: `git push -o --force origin main`、`git push --push-option --force origin main`、`git push --push-opt --force origin main`(省略形)、`git push -uof origin main`(git 2.49 はこの 4 つを non-fast-forward で拒否、force ではない。evidence 33)。許可リストが引用符を外した値で 1 語目を比べること: `"echo" 'sudo ls'`(旧版はこれを deny にする、データ区間の例)
+
+### Mutation の結果(cycle 3)
+
+a9ef82b1・849f5411 が変えた判定への変異 27 個(許可リスト 8、区切り 5、push 値オプション 4、push の束ねた `-o` 5、reset 5)に、C3-3 で「許可リストのあとでは判定を変えない」とされた予約語・exec の NODATA 規則と、以前の周の規則を加えた。各変異を使い捨ての写しに当て、system awk で構文を確かめ(evidence 37、構文エラーなし)、テストの A〜D 節から取り出した行(足す前 496 行、足したあと 507 行)に新旧の guard を渡して、期待と違う行の数を数えた(jq の経路。evidence 38〜40)。
+
+| 変異 | 壊したもの | 足す前(14b3fd37) | 足したあと(507 行) | 判定 |
+| --- | --- | --- | --- | --- |
+| AL01 | 許可リストの NODATA を外す | 12 赤 | 12 赤 | 殺 |
+| AL02 | 1 語目の `/` を許す | 0 | 0 | **等価**(`/` を含む値は `git` でも DATACMD の名前でもないので、この検査は冗長) |
+| AL03 | リダイレクトだけのコマンドに data を許す | **0** | 2 赤 | 殺(足した redir-only 行) |
+| AL04 | 1 語目を生の語で比べる | **0** | 1 赤 | 殺(足した `"echo"` 行) |
+| AL05 | `git` を許可リストから外す | 12 赤 | 12 赤 | 殺 |
+| AL06 | 許可リストの `DCTX` 条件を外す | 1 赤 | 1 赤 | 殺(既存 `echo "sudo $(date) ls"`) |
+| AL07 | 代入を読み飛ばさない | 1 赤 | 1 赤 | 殺(既存 `x=1 echo …`) |
+| AL08 | `WN<1` の検査を外す | **0** | 1 赤 | 殺(足した `echo hi; >out.txt; echo …`、前のコマンドの古い語を読む) |
+| DL01 | 区切りの規則を丸ごと外す | 1 赤 | 1 赤 | 殺(`cat <<$'\x45'`) |
+| DL02 | `$` だけ見る(バッククォートを落とす) | 0 | 0 | **防御的**(バッククォートの区切りで字句解析と食い違う shell がない。下記) |
+| DL03 | バッククォートだけ見る(`$` を落とす) | 1 赤 | 1 赤 | 殺(`cat <<$'\x45'`) |
+| DL04 | 生の語でなく値を見る | 1 赤 | 1 赤 | 殺(`cat <<$'\x45'`) |
+| DL05 | 区切りの規則に `DCTX` 条件を足す | 0 | 0 | **防御的**(入れ子の区切りのテストがない。下記) |
+| PU01 | 値オプションの読み飛ばしの行を外す | **0** | 2 赤 | 殺(足した長い値オプション + `--force`) |
+| PU02 | 値を読み飛ばさない | **0** | 2 赤 | 殺(同上) |
+| PU03 | `=` つきでも次の語も読み飛ばす | **0** | 1 赤 | 殺(足した `--push-option=x --force`) |
+| PU04 | 値オプションを省略形で受けない | **0** | 1 赤 | 殺(足した `--push-opt --force`) |
+| OC01 | `-o` が末尾のとき次の語を読み飛ばさない | **0** | 1 赤 | 殺(足した `-o --force`) |
+| OC02 | `-o` があれば常に次を読み飛ばす | **0** | 1 赤 | 殺(既存 `-o x --force`) |
+| OC03 | `f` がどこにあっても force | 1 赤 | 2 赤 | 殺(`-ofoo`、`-uof`) |
+| OC04 | `f` が `o` の後ろでも force | 1 赤 | 2 赤 | 殺 |
+| OC05 | `o` は先頭のときだけ | **0** | 1 赤 | 殺(足した `-uof`) |
+| RS01 | reset の `--` 停止を外す | 3 赤 | 3 赤 | 殺 |
+| RS02 | `--pathspec-from-file` の値の読み飛ばしを外す | 1 赤 | 2 赤 | 殺 |
+| RS03 | `--pathspec-from-file` を省略形で受けない | **0** | 1 赤 | 殺(足した `--pathspec-fr -- --hard`) |
+| RS04 | `=` つきでも次の語を読み飛ばす | 1 赤 | 1 赤 | 殺 |
+| RS05 | `--pathspec-from-file` の値を読み飛ばさない | 2 赤 | 2 赤 | 殺 |
+
+- 27 個のうち 24 個が殺、3 個(AL02・DL02・DL05)が生き残る。足す前は 11 個(AL03・AL04・AL08・PU01〜PU04・OC01・OC02・OC05・RS03)が緑のまま(14b3fd37 の時点で穴だった)で、足した 11 行で閉じた
+- C3-3 の再測: 予約語の NODATA(N03)と exec の NODATA(N04)を外す変異は、足したあとの 507 行でも判定を変えない(0 赤)。self-review C3-3 のとおり等価。閉じかっこの NODATA(N02、cycle 2 で等価)も 0。開きかっこ(N01、1 赤)、`in_data` の NODATA ゲート丸ごと(N06、34 赤)は殺せる
+- 以前の周の規則も再測した: 見張りの force の束ね `f`(C02、6 赤)、force の長いオプション(C03、31 赤)、reset `--hard`(C04、11 赤)、`+refspec`(C05、2 赤)、コミットメッセージのバッククォート(C06、1 赤)はすべて殺せる。字句解析なしの代替規則の `sudo`(C01)は、この行が awk が無いときだけ効くため、awk ありの行の probe では判定を変えない(0)。awk 無しの経路(AC9、F 節)はテストスイートに入っていて `run-test.sh` で緑
+
+### 生き残った 3 個の分析
+
+1. **AL02(等価)**: 許可リストは `index(v, "/")` で `/` を含む 1 語目を弾くが、この検査を外しても判定は変わらない。`v == "git"` も `v in DATACMD` も、`/` を含まない値にしか真にならない(DATACMD の名前に `/` はなく、`git` にもない)ので、`/` を含む値はこの検査がなくても 0 を返す。防御のための冗長な行で、deny-only の入力で区別できない
+2. **DL02(防御的、バッククォートの半分)**: 区切りの規則は `LW_RAW` に `$` かバッククォートがあれば NODATA を立てる。`$` の検出は DL01・DL03・DL04 が殺せるので固定されている。バッククォートの検出は、字句解析が区切りの語の生のバッククォート文字列を終端にする一方、shell が違う語を終端にして本文を早く終える、という食い違いを想定した防御。実機で確かめると(evidence 34)、bash 3.2 はバッククォートを含む区切りの語(`cat <<\`echo END\``)を字句どおりに読み、字句解析の終端(生の `` `echo END` ``)と食い違わず、dash は構文エラーにする。zsh もコマンド置換を終端に使わない。どの主要な shell でも「字句解析が本文(データ)と見た行を shell が実行する」食い違いが起きないので、バッククォートの検出を落としても判定が変わる deny-only の形を作れない。既知の gap として記録(下記)
+3. **DL05(防御的)**: 区切りの規則に `DCTX`(トップレベル)条件を足す変異。入れ子の文脈(`$(...)` の中など)のヒアドキュメントの区切りに `$`・バッククォートがある形のテストが無いので判定を変えない。NODATA はコマンド全体に効くグローバルなので、入れ子の区切りが NODATA を立てる現状と、立てない変異で判定が変わるのは、入れ子の区切りと同じコマンドのトップレベルにデータ区間があり、かつ shell がその文字を実行する、という極端な形に限られる。テストにも、この周で作った形にも無い。既知の gap として記録(下記)
+
+### Failure analysis(cycle 3)
+
+テストの失敗はない。cross-review の 2 周目の P1 の 3 形(区切りの `$'\x45'`、`env -S`、`builtin exec`)と、許可リストが閉じた 7 形は、B 節の `guard_deny_only_forms` にあり新旧とも deny(前の周と verify cycle 3 で確認済み)。この周で新たに殺した 11 個の変異は、足した 11 行が閉じた。
+
+### Regression checks(cycle 3)
+
+| Previously broken behavior | Status | Evidence |
+| --- | --- | --- |
+| AC1・AC2・AC3・AC4・AC9 | 通る | `run-test.sh` 2 回。1822 件で ask はなく、jq あり・なしが一致。`tests/test-lib-json.sh` 126/0 |
+| AC6: 静的な検査 | 通る | `run-verify.sh` 2 回とも `All verifiers passed.`。root と template の guard は同一 |
+| AC7: 旧版の deny は新版でも deny | 通る | 足した deny 6 行は新旧とも deny、`"echo"` 行は旧版 deny・新版 none のデータ区間の例(C 節相当の扱い)。スイートの AC7 corpus(F 節)は `run-test.sh` で緑 |
+| AC8: 200 KB のコマンドが 5 秒以内 | 通る | macOS BWK awk で最大 1.049 秒、ubuntu の mawk で 0.071〜0.365 秒 |
+| 許可リスト(a9ef82b1)・reset の値(849f5411)の判定 | 固定した | 上の mutation 表。足す前は 11 個の変異が緑だった |
+| awk の方言 | 通る | ubuntu の mawk と gawk で guard 1822/0、lib_json 126/0 |
+
+### Test gaps(cycle 3)
+
+- AL02・DL02・DL05 は等価または防御的な変異で、deny-only の形では殺せない(上の分析)。DL02・DL05 は guard のバッククォート・入れ子の区切りの防御で、実機の shell では食い違いが起きないか極端な形に限られる
+- self-review・verify が報告した guard の持ち越し(C3-3 の重なった規則、C3-4 と C3-5 のコメントのずれ、`no_verify_rules` の値を取るオプション)は、guard を変えると上限 3 を超えるため直さない。この /test は guard を変えていない
+- 字句解析だけが止める形(`$` と `(` を行継続で分けた中身が `(id)` などの形)は前の周からの既知の穴で、この周の変異とは別。新旧とも none
+- このセッションで効いている Bash の guard は main のチェックアウトの旧版なので、新版を Claude Code の実際の呼び出しで確かめるのは merge 後になる。計測したカバレッジはなく、変異は手で選んだ。入れ子のヒアドキュメントを使う形は、作っても shell ごとの差が大きく脆いので作っていない
+- `tests/test-secret-scan.sh` の固定パスの問題は、この PR の外の既存の問題として残る(この周では起きなかった)
+
+## Verdict(cycle 3)
+
+- Pass: yes。`./scripts/run-test.sh` 2 回(rc 0、`tests/test-pre-bash-guard.sh` 1822/0、`tests/test-lib-json.sh` 126/0、Go 8/8、assertion の FAIL 0)、`./scripts/run-verify.sh` 2 回(rc 0、`All verifiers passed.`)、ubuntu:24.04 の mawk(jq あり・なし)と gawk で guard 1822/0・lib_json 126/0。27 個の mutation のうち 24 個が赤、残る 3 個(AL02 は等価、DL02・DL05 は実機の shell で食い違いが起きない防御的な規則)。足した 11 行で、14b3fd37 の時点で緑だった 11 個の変異(許可リストのデータ区間、push の値オプション、束ねた `-o`、reset の省略形)を閉じ、self-review C3-5(`$c 'sudo ls'` が許可リストを固定しない)に答えた。C3-3 のとおり予約語・exec の NODATA は許可リストのあと等価。guard と `lib_json.sh` は変えていない
+- Fail: なし
+- Blocked: なし
+- Known gaps: AL02(等価)・DL02・DL05(防御的)。guard の持ち越し(self-review C3-1〜C3-5、verify V4-1〜V4-3)は次に guard を変える PR で
