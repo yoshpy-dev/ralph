@@ -289,3 +289,166 @@ shell での確かめ(`echo SUBST-RAN` と `echo HEREDOC-SUBST-RAN` に置き換
 - `cat <<EOF` の本文の `$\<改行>(echo HEREDOC-SUBST-RAN)`: 4 つの shell とも `HEREDOC-SUBST-RAN` を出した
 
 probe の入力は scratchpad の `sd3/`(`a01`〜`g01`、`list1.txt`、`list-c.txt`)に置いた。worktree の guard は変えていない。
+
+---
+
+## Cycle 3 (cap raised to 3)
+
+- Date: 2026-10-08
+- Plan: `docs/plans/active/2026-10-07-guard-deny-only.md`
+- Pipeline cycle: `cycle-count.json` は 2 のまま。cross-review の 2 周目のあと、ユーザーが `RALPH_STANDARD_MAX_PIPELINE_CYCLES` を 3 に上げた 3 回目の run。差分は merge base `f423f230` から branch HEAD `e5c9e6be` まで。cycle 2 の sync-docs は `d5e197de`
+- cycle 2 の sync-docs のあとの変更: `e1dfb422`(main の取り込み)、`a9ef82b1`(許可リスト)、`849f5411`(reset の `--pathspec-from-file` の値の読み飛ばし、理由の文とヘッダー)、`8e94e76b`(テストの追加)。guard の判定とコメントを最後に変えたのは `849f5411` で、`git diff 849f5411 HEAD` は `.claude/hooks/` と `templates/base/.claude/hooks/` に差分を出さない。root と template の guard は `cmp` で同一
+- 先行 report の cycle 3 の節:
+  `docs/reports/self-review-2026-10-07-guard-deny-only.md`(`48628bd2`。merge、MEDIUM 1・LOW 4、C3-1〜C3-5)、
+  `docs/reports/verify-2026-10-07-guard-deny-only.md`(`92dc5df8`。pass、LOW 3、V4-1〜V4-3、/sync-docs に渡す一覧 1〜15)、
+  `docs/reports/test-2026-10-07-guard-deny-only.md`(`e5c9e6be`。pass、1822/0、mutation 27 個のうち 24 個が赤)、
+  `docs/reports/cross-review-triage-guard-deny-only.md`(cycle 2 が先頭、`a9af4e05`)
+
+### Summary
+
+a9ef82b1 の許可リストと 849f5411 で、推奨の HEREDOC のコミット形を説明する 4 か所が実際の判定とずれていた。`internal/org/prompts/implementer.md`、tech-debt の 124・125 行目、guard の限界の行は、通らない場合として行末の `\` だけを挙げていた。実際には、同じ Bash の呼び出しに読むだけのコマンドでも `git` でもないコマンドがあると、本文に見張りの語がなくても deny になる。この 4 か所と `git-commit-strategy.md`(root と template)を直した。
+
+guard の限界の行は、測った時点、行数、データ区間が 1 つもなくなる場合(3 つから 5 つへ)、新しい誤検知、Why deferred の経緯を直した。テストの穴の行は、件数を 1822/0 に、等価・防御的な変異を AL02・DL02・DL05・N02〜N04 に直した。verify の一覧(1〜15)は、書く前にコードとテストに当て直した。一覧と違った点は 4 つある。
+
+- (e) の既存の 6 点は、6 点ともまだ開いていた。`cmd_pos` のコメント、`'` を書けない注意の置き場所、`read_body` の同じループ 2 つ、`new_ctx` の前の配列の一覧、テストのヘッダーの B、`guard_deny_only_forms` の「false none before」を、コードとテストを読んで確かめた
+- C3-5 の `tests/test-pre-bash-guard.sh` の変数の行(許可リストが `$c` も閉じると書く)は、8e94e76b が直後に足したコメントが説明しているので載せていない。残るのは `P2-4`・`P2-5` と「change A」の 3 か所だけ
+- 一覧 8 の `exec echo 'sudo ls'` は、いまの行が「passes」と書いていた。probe で新版 deny、facd295b の guard は none、旧版 deny だった(下の「Probe results」)
+- plan の Progress の 183 行目が「LOW 3」で終わっていたので、「件(V4-1〜V4-3 …)」までを補った
+
+guard が ask を返すと書いた文書は、cycle 2 に続いて残っていない。
+
+### Changes made
+
+| File | Change |
+|------|--------|
+| `internal/org/prompts/implementer.md`(27〜33 行目) | HEREDOC の形が通る条件と、実際の運用を直した。下の「implementer.md と git-commit-strategy.md」 |
+| `.claude/rules/ralph/git-commit-strategy.md`、`templates/base/.claude/rules/ralph/git-commit-strategy.md`(69 行目) | Rules に 1 行足した。root と template は `cmp` で同一 |
+| `docs/tech-debt/README.md`(124 行目、125 行目) | 解消済みの記録に、つないだ呼び出しの deny を足した(124 は英語、125 は日本語) |
+| `docs/tech-debt/README.md`(guard の限界の行、160 行目) | 下の「guard の限界の行」。5 列のまま |
+| `docs/tech-debt/README.md`(テストの穴の行、163 行目) | 下の「テストの穴の行」。5 列のまま |
+| `docs/plans/active/2026-10-07-guard-deny-only.md` | `Progress checklist` の中だけ。/test と /sync-docs の 2 行を足し、183 行目の途切れを補った。digest は `7efd47f36781` のまま |
+| `docs/insights/events/2026-10-08-guard-deny-only.jsonl` | `sync_docs` の event を 1 行追記(verdict pass、`--cycle auto`。cycle は 2) |
+| `docs/reports/sync-docs-2026-10-07-guard-deny-only.md` | この節 |
+
+### implementer.md と git-commit-strategy.md
+
+`internal/org/prompts/implementer.md` の guard の説明は、cycle 2 の「どの行もバックスラッシュで終わらなければ通る」から次の内容に変えた。
+
+- HEREDOC の形は、同じ Bash 呼び出しのどのコマンドも、読むだけのコマンド(`echo` や `grep` など)か `git` で始まり、どの行もバックスラッシュで終わらないときだけ通る
+- 実際には `git commit` を単独のコマンドで実行する
+- 検証のコマンドにつなぐときと、行末にバックスラッシュがある行を書き換えられないときは、`git commit -F <ファイル>` を使う
+
+折り返しの幅は、表示幅 72 以内(この段落の元の行は 76 以内)。go:embed で読まれる prompt だが、この文を固定するテストはない(`git grep` で古い文の一部と `pre_bash_guard` を探した。`internal/cli/migrate*.go` が hook のパスを持つだけ)。`go test ./internal/org/...` は 3 パッケージとも ok。
+
+`git-commit-strategy.md` の Rules には、Single-line messages の次に 1 行を足した。`pre_bash_guard.sh` は、同じ Bash 呼び出しが `git` でも読むだけのコマンド(`echo` や `grep`)でもないコマンドを実行すると HEREDOC の形を deny にするので、そのあとは `git commit -F <file>` を使う、という内容。「同じ呼び出しに別のコマンドがあると deny」と書かず、`git add a.txt && git commit …` の形が通ることに合わせて条件を書いた(verify V4-1 の指示)。
+
+### 124・125 行目
+
+- 124 行目(RESOLVED の記録、英語): 「Two remainders」を「Three remainders」にして、3 つ目に、a9ef82b1 以降は同じ Bash 呼び出しの全トップレベルコマンドが読むだけのコマンドか `git` で始まらないと HEREDOC の形が deny になること(`make test &&` と `./scripts/run-verify.sh && git add a.txt &&` の後ろの形)を足した。単独の形と `git add a.txt &&` の後ろの形は通り、`git commit -F <file>` と引用符つきの heredoc を `-F -` に流す形はどのコマンドの後ろでも通る
+- 125 行目(RESOLVED の記録、日本語): 括弧の中の「残るのは」に 3 つ目を足した(awk がない環境の代替規則、行末の `\`、a9ef82b1 以降のつないだ呼び出し)。回避は「`git commit` を単独で実行するか `-F <ファイル>`」
+
+### guard の限界の行(160 行目)
+
+- 測った時点を 2026-10-08 の `e5c9e6be` にし、判定とコメントの最後の変更は `849f5411` と書いた。行数を 1442 行にし、途中の変更に a9ef82b1 と 849f5411 を足した
+- (a) に許可リストを足した。データ区間は、トップレベルのどの単純コマンドも、1 語目(引用符を外した値。代入と前置きを読み飛ばす前の語)が `/` を含まない `DATACMD` の名前か `git` のときだけ与える(`data_first_ok`、`end_cmd` から呼ぶ)。データ区間が 1 つもなくなる場合は 3 つから 5 つにした。新しい 2 つは、許可リストの外れ(代入、`env` などの前置き、道のある名前、変数、置換、リダイレクトだけのコマンド。`end_cmd` が `NODATA` を立てる)と、ヒアドキュメントの区切りの `$` かバッククォート(`lex_redir` が `NODATA` を立てる)。理由の文に、`env -S`・前置き・道のある名前、区切りの `$'\x45'` を足した
+- (a) の誤検知に、`exec echo 'sudo ls'` が deny になったこと(facd295b では通った)を書き、許可リストの誤検知の段落を足した: 前置きつき(`env echo`、`command echo`、`nice grep`、`x=1 echo`、zsh の `=echo`)、道のある名前(`./echo`、`/tmp/x/cat`、`/bin/echo`)、非データコマンドと同じ呼び出しにある読むだけのコマンド(`make test && echo …`、`python3 x.py; grep …`。この 2 つは一覧になく、追加の probe で確かめた)、同じ呼び出しにある推奨のコミット形。対照として、`git status && echo …` と `cd docs && grep … && ls`、単独と `git add a.txt &&` の後ろの推奨の形、`-F <file>`、`-F - <<'EOF'`、単一引用符の `-m` が通ることを書いた
+- 同じ段落に、self-review C3-1 が許可リストから推奨のコミット形だけを外さなかった理由(同じ呼び出しの前の方の定義が、メッセージの置換で走るものを変えうる)と、理由の文が実際の規則より狭いこと(V4-1。単独でなくても `git add a.txt &&` の後ろは通り、`-F -` の heredoc はどのコマンドの後ろでも通る)を書いた。回避は「`git commit` を単独の Bash コマンドで実行する、または検証につなぐなら `-F <file>`」
+- (a) の「The same form with no such line passes」に、`git commit` が単独のときだけ、と足した
+- (d) の行数を測り直した。guard は 1442 行、awk のプログラムは 154 行目の `awk '` から 1399 行目の閉じる引用符までの 1246 行
+- (e) の書き出しを直し、既存の 6 点は e5c9e6be で確かめ直したと書いた。足した項目:
+  - C3-3: 予約語の規則と `exec` の規則は、許可リストのあと判定を変えない(1 語目が DATACMD でも `git` でもないため。`cmd_pos` は 1 語目が DATACMD か `git` なら前置きをたどらず、`EXEC_SEEN` は 0 のまま)。N03・N04 は、507 行の probe で判定を 1 つも変えず、J02・L03・N02 と同じ等価な変異になる。`(` の規則と区切りの規則は、まだ単独で判定を決める。ヘッダーと `in_data` のコメントは 2 つを別の理由として並べている。cycle 2 の項目 1(`cmd_pos` の副作用)は、この 2 つが消えるまで意味を失う
+  - C3-4: 区切りの規則のコメントが「字句解析は `$"..."`、`${...}`、置換を展開しない」とだけ書き、shell が展開するように読める。実際は `${x}` と `$x` の区切りを bash・zsh・dash が文字どおりに読む(この周で確かめた)。バッククォートの区切りは bash・zsh が文字どおり、dash が構文エラー(self-review)。違うのは `$'...'` の `\n`・`\t`・`\r` 以外のエスケープと `$"..."`。`data_first_ok` のコメントも、`$'...'` では「shell が見るとおりの値」と書けない
+  - C3-5 の残り 3 か所: `edge_deny` の「Cycle 2 (P2-4)」、`edge_none` の「Cross-review cycle 2 (P2-4, P2-5)」(この report の self-review では P2-4・P2-5 は別の指摘で、triage では 4・5 番)、`edge_sentinel_deny` の「(change A, cycle 2)」(どの文書にも定義がない。許可リストのこと)。変数の行の説明は、8e94e76b のコメントが説明しているので外した
+  - 既存の 5 番目(テストのヘッダーの B)に、`guard_deny_only_forms` の前の段落が 8 番で終わり、9 番(cross-review の 2 周目の形と許可リストの形)のコメントが配列の中にしかないことを足した
+- Impact、Why deferred、Trigger、Related をそれに合わせた。Why deferred の (a) には、上限 3 の run で許可リストが条件の積み足しに置き換わったこと(許可リストが `env -S` と `builtin exec` を、区切りの規則が `$'\x45'` を閉じたこと)を書いた。(e) の理由に、上限 3 の run でも pipeline の回数が尽きたことを足した。Related に self-review・verify・test の「cycle 3 (cap raised to 3)」の節と triage の cycle 2 を足した
+- 載せなかったもの: C3-1 の guard の側(理由の文とヘッダー)と C3-2(reset の値)は 849f5411 で直った(V4-2)
+
+### テストの穴の行(163 行目)
+
+- 前書きに「pipeline cycles 2 and 3」を足した
+- (a): 849f5411・a9ef82b1・8e94e76b で pin されたもの(許可リスト、区切りの `$`、push の値を取るオプション、reset の `--` と `--pathspec-from-file`)を足した。27 個の mutation のうち 24 個が赤になり、3 個が生き残る(AL02 は等価、DL02・DL05 は防御的)。足す前は 11 個が緑で、8e94e76b の 11 行が閉じた。N03・N04 は N02 と同じ等価な変異になったので、等価な変異は J02・L03・N02・N03・N04・AL02。J02・L03・N02 の文の「all 1730 tests green」は「(the suite at facd295b)」を足して残した
+- (a): 字句解析だけの穴(`$` と行継続と `(`)は、いまの guard、facd295b の guard、旧版のどれも none なので、テストはこの穴を none としてしか固定できない、と足した
+- (c): 件数を直した。ubuntu:24.04 は mawk 1.3.4(jq あり)と gawk 5.2.1(jq あり)で 1822/0、mawk(jq なし)で 908/0(jq の経路の 903 件は skip)。ubuntu の数は test report の cycle 3 の節によるもので、この sync では流していない。macOS の BWK awk は、この sync の中で `bash tests/test-pre-bash-guard.sh` を流して 1822 passed、0 failed、0 skipped を確かめた(e5c9e6be)
+- Related に test report の「cycle 3 (cap raised to 3)」の節(Mutation、Test gaps)を足した
+
+### verify の一覧との対応
+
+| 一覧 | 状態 |
+|------|------|
+| 1 implementer.md | 反映 |
+| 2 tech-debt 124 行目 | 反映 |
+| 3 tech-debt 125 行目 | 反映 |
+| 4 git-commit-strategy.md | 反映(1 行、root と template は同一) |
+| 5 測った時点 | 反映(`e5c9e6be`。判定とコメントは `849f5411`) |
+| 6 行数 | 反映(1442 行、awk は 154〜1399 行目の 1246 行。`wc -l` と `grep` で測り直した) |
+| 7 許可リスト | 反映((a)。`NODATA` を立てる場所に `lex_redir` も足した) |
+| 8 新しい誤検知 | 反映。`exec echo` の文を直した。一覧にない `make test && echo …` と `python3 x.py; grep …` を probe して足した |
+| 9 Why deferred の (a) | 反映 |
+| 10 (e) の C3-3・C3-4 | 反映 |
+| 11 (e) の C3-5 | 残りの 3 か所だけ反映(変数の行は 8e94e76b が説明している) |
+| 12 C3-1 の guard の側と C3-2 | 載せていない。V4-1 は (a) に 1 文 |
+| 13 Related | 反映 |
+| 14 テストの数 | 反映(1822/0) |
+| 15 C3-3 の等価な変異 | 反映 |
+
+### Surfaces checked for drift
+
+| Surface | Finding |
+|---------|---------|
+| guard の挙動を書く文書(`docs/`(reports、plans、evidence、insights、tech-debt を除く)、`.claude/rules/`、`.claude/skills/`、`.claude/agents/`、`.agents/`、`.codex/`、`AGENTS.md`、`CLAUDE.md`、`README.md`、`templates/base/`、`internal/`、`packs/`) | `pre_bash_guard`、HEREDOC、`cat <<'EOF'`、`-F`、「単独のコマンド」、`deny-only`、「never asks for confirmation」で `git grep` した。間違った記述は `implementer.md` と `git-commit-strategy.md` の 2 か所で、直した。ほかの `cat <<'EOF'` は `internal/cli/org_test.go` と `internal/org/watcher_test.go` の shell の stub で、guard の説明ではない。`docs/specs/2026-04-16-ralph-cli-tool.md` の 1 行は hook のパスの一覧 |
+| `.codex/README.md`(root と template、114〜119 行目) | 「`deny` is the only decision the guard returns: it never asks for confirmation」。コードと一致。変更なし |
+| guard のヘッダー(1〜120 行目) | 現在のコードと一致。許可リストの段落(98〜120 行目)が 5 つの場合と、推奨の形が通る条件(同じ呼び出しのすべてのコマンドが読むだけのコマンドか `git` で始まり、どの行も `\` で終わらない)を書いている。コメントのずれは (e) に載せた |
+| deny の理由の文(`commit_message`、`emit_deny`) | 単独のコマンドで打ったときだけ通る、と書く。規則より狭い(V4-1)ことを (a) に載せた |
+| tech-debt の guard を書く行 | 124・125・160・163 を直した。101・102・128・129・161・162 は RESOLVED の記録で、いまの挙動を書いていない |
+| root と `templates/base/` | guard、`lib_json.sh`、`git-commit-strategy.md` は `cmp` で同一。`check-sync.sh` は PASS |
+
+### Found but left
+
+- guard とテストのコメントのずれ((e) の C3-3〜C3-5 と既存の 6 点)は、guard やテストのコメントを変えると pipeline が最初からやり直しになる(上限 3 は尽きた)ので、触っていない
+- `no_verify_rules` が、`--` で止まる前に値を取るオプションを読み飛ばさない点。verify の Coverage gaps は、コードを読んだだけで形を渡していないと書いている。この sync でも確かめていないので、tech-debt の行には載せていない(旧版に `--no-verify` の規則がなく、AC7 に関わらない)
+- tech-debt の 163 行目 (b) の「jq も awk もない経路」は、2026-10-07 の手での確かめのまま。この周では流していない
+
+### Checks run
+
+| Command | Result |
+|---------|--------|
+| `./scripts/plan-visual.sh digest docs/plans/active/2026-10-07-guard-deny-only.md` | `7efd47f36781`(Progress checklist の編集の後。plan の Approved 行と一致) |
+| tech-debt の 125、160、163 行目の列の数と、124 行目の `-->` の位置 | 5 列、行頭と行末が `\|`。124 行目は `-->` で終わり、足した文に `--` はない(元からある `--message` 1 か所だけ)。4 行とも `file:line` の参照はない(正規表現が拾う 163 行目の `ubuntu:24` は OS のイメージ名) |
+| `./scripts/check-sync.sh` | rc 0、PASS(IDENTICAL 164、DRIFTED 0、ROOT_ONLY 0) |
+| `./scripts/check-skill-sync.sh` | rc 0、PASS(13 skill) |
+| `./scripts/run-static-verify.sh` | rc 0(shellcheck、全 hook の `sh -n`、`settings.json` の `jq -e`、check-sync、check-pipeline-sync、check-skill-sync、check-template-purity、tech-debt の plan 参照、gofmt、golangci-lint 0 issues、branch secret scan は `51855166..e5c9e6be` で clean。この commit は含まない) |
+| `go test ./internal/org/...` | `internal/org`、`internal/org/driver`、`internal/org/protocol` が ok |
+| `bash tests/test-pre-bash-guard.sh`(macOS、BWK awk) | PASS 1822、FAIL 0、SKIP 0 |
+
+### Probe results
+
+新しい guard は worktree の `.claude/hooks/pre_bash_guard.sh`(e5c9e6be)、「前」は `git show facd295b:` で取り出した cycle 2 の sync-docs 時点の guard、「旧」は `tests/fixtures/guard-1c4cea5a/pre_bash_guard.sh`(`origin/main` の guard とバイト単位で一致することを `cmp` で確かめた)。「新」は jq あり/jq なしの順で、どの行も 2 つの経路で同じだった。決定は none か deny で、ask と想定外の出力は 1 件もなかった。79 件を流し、下の表は同じ結果の行をまとめた。
+
+| コマンド | 新 | 前 | 旧 |
+|---------|----|----|----|
+| `env echo 'sudo ls'`、`command echo 'sudo ls'`、`nice grep 'sudo ' f`、`x=1 echo 'sudo ls'`、`=echo sudo ls` | deny | none | deny |
+| `./echo 'sudo ls'`、`/tmp/x/cat 'sudo ls'`、`/bin/echo 'sudo ls'`、`exec echo 'sudo ls'` | deny | none | deny |
+| `make test && echo 'sudo ls'`、`python3 x.py; grep -n 'sudo ' f` | deny | none | deny |
+| `echo 'sudo ls'`、`grep -n 'git push --force' docs.md`、`echo hi && cd docs && grep -rn 'sudo ' .`、`git status && echo 'sudo ls'`、`cd docs && grep -n 'sudo ' f && ls`(対照) | none | none | deny |
+| 推奨のコミット形(単独。本文に `sudo ls` と `git push --force` の語)、`git add a.txt &&` の後ろ | none | none | deny |
+| 推奨のコミット形の `make test &&` の後ろ、`./scripts/run-verify.sh && git add a.txt &&` の後ろ、`GIT_EDITOR=true git commit`、後ろに `&& ./scripts/secret-scan-branch.sh --strict` | deny | none | deny |
+| `make test && git commit -F - <<'EOF'`(引用符つき)、`make test && git commit -F msg.txt`、`make test && git commit -m 'feat: add a thing'` | none | none | none |
+| 推奨の形で本文に行末が `\` の行、`git commit -m "feat: add $(date) stamp"` | deny | deny | deny |
+| ヒアドキュメントの区切りが `"$X"`、バッククォート、`$'\x45'`(本文に `sudo ls`) | deny | none | deny |
+| 区切りが `'EOF'`(対照。本文に `sudo ls`) | none | none | deny |
+| `x=1; echo 'sudo ls'`、`echo hi; env FOO=1 true; echo 'sudo ls'`、`>out.txt; echo 'sudo ls'`、`$c; echo 'sudo ls'` | deny | none | deny |
+| `$'echo' 'sudo ls'`、`$"echo" 'sudo ls'`、`"echo" 'sudo ls'` | none | none | deny |
+| `$c 'sudo ls'` | deny | deny | deny |
+| `env -S 'sh -c "eval \$2" --' echo 'sudo ls'`、`builtin exec >run.sh; echo 'sudo ls'; sh run.sh` | deny | none | deny |
+| `git commit -m "$\<改行>(id)"`、`echo "$\<改行>(git push origin --force)"`(字句解析だけの穴) | none | none | none |
+| `git push origin -ofoo`、`git reset HEAD -- --hard`、`git reset --pathspec-from-file=f -- --hard` | none | deny | none |
+| `git push -ofoo --force origin`、`git reset --pathspec-from-file -- --hard` | deny | deny | none |
+| tech-debt の 160 行目 (a) が deny と書く形(`apt-get remove sudo -y`、`apt-get install sudo vim`、`bash -c 'x' sudo ls`、`flock l git grep sudo file`、`cp sudo dest`、`git grep sudo file`、`git push --force-if-includes origin main`、`echo 'sudo ls' \| sed 's/x/y/'`、`grep -r 'sudo ' . \| sort`、`(echo sudo ls)`、`if grep …`、`for … grep …`、`(cd docs && grep …)`、`exec >run.log; echo 'sudo ls'`、`echo 'sudo ls' &>/dev/null`、`echo 'sudo ls \<改行>x'`、`gh pr create --body` の heredoc、`ssh host 'sudo ls'`) | deny | deny | deny |
+| 同じ行が通ると書く形(`git push origin --force-if-includes`、`apt-get install sudo`、`echo 'sudo ls' \| cat`、`grep -r 'sudo ' . \| grep x`、`cd docs && grep -rn 'sudo ' .`、`echo 'sudo ls' >/dev/null 2>&1`、`git commit -F msg.txt`、`ssh host 'git push origin --force'`) | none | none | 下の注 |
+| `my-sudo ls`、`x.sudo ls`、`visudo -c` | none | none | deny |
+
+「同じ行が通ると書く形」の旧の列は、`git push origin --force-if-includes`、`apt-get install sudo`、`git commit -F msg.txt`、`ssh host 'git push origin --force'` が none、残りの 4 件(`echo … \| cat`、`grep … \| grep x`、`cd docs && grep …`、`>/dev/null 2>&1`)が deny だった。
+
+shell での確かめ(`${x}` と `$x` の区切り、`$'E\x4e\x44'` の区切りを使い、本文に `END` の行と実行すると「command not found」になる行を入れた安全な形): `${x}` と `$x` の区切りは、bash・zsh・dash とも文字どおりに読み、本文は区切りの行まで続いた。`$'E\x4e\x44'` は bash と zsh が `END` と読み、本文を `END` の行で終えて、次の `END` の行をコマンドとして実行した(command not found)。dash は `$'…'` を戻さず、本文がファイルの終わりまで続いた。
+
+probe の入力は scratchpad の `sd4/`(`cases-a.txt`〜`cases-d.txt`、`delim.sh`、`run3.sh`)に置いた。worktree の guard は変えていない。

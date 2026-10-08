@@ -66,6 +66,7 @@ Shell command substitution inside double-quoted `git commit -m "..."` can leak s
   )"
   ```
 - **Single-line messages:** Prefer single quotes: `git commit -m 'fix: description'`
+- **Run the commit as its own command:** `pre_bash_guard.sh` denies the HEREDOC form when the same Bash call also runs a command that is neither `git` nor a read-only one such as `echo` or `grep` (`make test && git commit -m "$(cat <<'EOF' ...`); after such a command use `git commit -F <file>`
 - **Never:** Place backticks or `$(...)` inside double-quoted `-m "..."` arguments
 - **Enforcement:** `pre_bash_guard.sh` blocks dangerous patterns at command time; `commit-msg-guard.sh` scans for leaked secrets at commit time
 
