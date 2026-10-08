@@ -171,6 +171,9 @@
   - test(095af1d7、tester/opus): pass。`tests/test-pre-bash-guard.sh` は 1576/0(39ed2759 で 68 件を足した)、`tests/test-lib-json.sh` は 126/0、`run-test.sh` と `run-verify.sh` も通る。mutation は 44 個すべてが赤になる(足す前は 8 個が緑のまま)。1 回目の `run-test.sh` で落ちた `tests/test-secret-scan.sh` の 1 件は固定の `/tmp` パスに同時実行が重なったもので、この diff とは関係しない(tech-debt に記録)
   - cross-review の 1 周目(f29d4132、Codex): ACTION_REQUIRED 3 件。グループ・複合コマンドの中の単純コマンドにデータ区間を与える、`$(...)` の中の改行で外側のヒアドキュメントを読み始める、引用符のない区切りのヒアドキュメントで行継続をつながない。どれも旧版が deny にした形を通す。ユーザーは「直してやり直す」を選んだ。consult(consult-plan-xrfix)が同じ型の穴をあと 3 つ挙げた(`exec` のリダイレクトと fd 3 以上への複製、`printf -v`、区切り語の中の行継続)。6 つとも probe で再現した
   - cross-review の指摘の修正(46806dc9、implementer/opus): テキストの行き先を guard が見分けられないコマンド(グループ・複合コマンド、`exec` のリダイレクト)では、データ区間を 1 つも与えず、見張りが旧版どおりに決める。ヒアドキュメントの読み始めを文脈ごとに持ち、引用符のない区切りでは行継続をつないでから区切りと比べる。fd の複製で安全とみなすのを 0〜2 に限り、`printf -v` を読むだけのコマンドから外した。45 行目の「fd の複製」を 0〜2 への複製に読み替えたのは、止める側への逸脱。テスト 1688 件。旧版も deny にしていた `(echo sudo ls)` と `if grep -q 'sudo ' file; …` は deny に移した(AC3 には入っていない)。最初の implementer は途中で止まり、何も変えていない(安全側の判定で応答が止められた)。本物の shell で形を探す手順を外して頼み直した
+  - 2 周目: self-review(8f852e4f)は merge で LOW 6 件。P2-1・P2-2・V2-3 のコメントは 0ef6fc4f・63b6743a で直した。P2-5 は bash・zsh・dash で確かめて穴ではなかった(`$(...)` の中のヒアドキュメントは、文脈が閉じると本文なしで終わる)。P2-3(`&>/dev/null` も deny になる。旧版も deny)は直さず記録に回す。verify(7eeefee5)は pass
+  - 2 周目の test(6cca4ce4、tester/opus)は fail。F2-1: ダブルクォートの中で `$` と `(` を行継続で分けた形を新版が通す(bash と dash は置換として実行する。旧版は deny)。S2c からある穴。consult(consult-plan-xrfix)と相談し、2 周目の中で直して self-review → verify → test をやり直すことにした(cycle は 2 のまま)
+  - F2-1 の修正(4e829e34、inline: 1 行とコメント、テスト 3 形): コマンドのどこかに行継続があれば、データ区間を 1 つも与えない。単一引用符の中の行継続(ただの文字)まで含むので止めすぎるが、旧版と同じ deny。テスト 1716 件
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
