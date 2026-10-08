@@ -129,3 +129,111 @@ guard と `lib_json.sh` は変えていない。足したのはテストだけ�
 - Pass: yes。`./scripts/run-test.sh`(2 回目、shell 40 本と Go 8 パッケージ)、`./scripts/run-verify.sh`、`tests/test-pre-bash-guard.sh` 1576/0、`tests/test-lib-json.sh` 126/0、ubuntu の mawk・gawk。mutation 44 個がすべて赤になる。AC1〜AC4、AC6〜AC9 の振る舞いの側を確かめた。/sync-docs に進んでよい
 - Fail: なし。1 回目の `run-test.sh` の `tests/test-secret-scan.sh` の 1 件は、テストの固定パスに同時実行が重なったもので、この diff とは関係しない。単独と 2 回目の実行では通った
 - Blocked: なし
+
+---
+
+## pipeline cycle 2(cross-review の指摘の修正のあと)
+
+- Date: 2026-10-08
+- Tester: tester subagent (Claude)。pipeline の 2 周目で、上限 2 の最後の周
+- Scope: `git diff origin/main...HEAD`(merge-base f423f230、HEAD 63b6743a)と、この周で `tests/test-pre-bash-guard.sh` に足したテスト。この周のコードの変更は 46806dc9(guard とテスト)と、0ef6fc4f・63b6743a(guard のヘッダーのコメントだけ)
+- 上の cycle 1 の節と、その `## Verdict` は、その時点(HEAD adb7eda3)の判定として残した。いまの判定は、この節の最後の `## Verdict(pipeline cycle 2)` にある
+- Evidence: `docs/evidence/test-2026-10-07-guard-deny-only.log` の末尾(「pipeline cycle 2」の見出しから)に足した。gitignore の対象なので commit しない。2 回の `run-test.sh`、`run-verify.sh`、mutation の置換・結果・落ちた assertion、probe、shell での確かめ、Docker の出力が入っている
+
+### Test execution(cycle 2)
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `./scripts/run-test.sh` 1 回目(テストを足す前、63b6743a) | shell 40 本 + Go 8 パッケージ | 40 本 + Go 8 | 0 | 0 | 396 s |
+| 1 回目の中の `tests/test-pre-bash-guard.sh` | 1688 | 1688 | 0 | 0 | — |
+| ubuntu:24.04、mawk 1.3.4、dash、jq なし: guard / lib_json(テストを足したあと) | 1693 / 126 | 849 / 87 | 0 / 0 | 844 / 39(jq の経路) | — |
+| ubuntu:24.04、mawk、jq 1.7: guard / lib_json | 1704 / 126 | 1704 / 126 | 0 / 0 | 0 / 0 | — |
+| ubuntu:24.04、gawk 5.2.1、jq 1.7: guard / lib_json | 1704 / 126 | 1704 / 126 | 0 / 0 | 0 / 0 | — |
+| `./scripts/run-test.sh` 2 回目(テストを足したあと) | shell 40 本 + Go 8 パッケージ | 40 本 + Go 8 | 0 | 0 | 424 s |
+| 2 回目の中の `tests/test-pre-bash-guard.sh` / `tests/test-lib-json.sh` | 1704 / 126 | 1704 / 126 | 0 / 0 | 0 / 0 | — |
+| `./scripts/run-verify.sh`(mode all、scope full、テストを足したあと) | 静的な検査 + shell 40 本 + Go | すべて | 0 | 0 | 434 s |
+
+- `run-test.sh` は 2 回とも、`lib_json.sh` を分類できないので full にフォールバックした(`Language scope: full fallback (unclassified:.claude/hooks/lib_json.sh)`)。Go のテストは `internal/org` だけが実際に走り、ほかはキャッシュから
+- `tests/test-secret-scan.sh` は 2 回の `run-test.sh` と `run-verify.sh` のどれでも通った。cycle 1 の固定パスによる取り違えは、この周では起きなかった。3 回とも、ほかの実行と重ならないように流した
+- `run-verify.sh` は `All verifiers passed.` で終わった。中で shellcheck、全 hook の `sh -n`、`settings.json` の `jq -e`、`check-sync.sh`、`check-pipeline-sync.sh`、`check-skill-sync.sh`、`check-template-purity.sh`、gofmt、golangci-lint(0 issues)、branch の secret scan(f423f230..63b6743a、clean)が通った
+- AC8(H 節、macOS の BWK awk、jq なし): 1 回目 0.285・1.026・0.637 秒、2 回目 0.317・1.063・0.609 秒。ubuntu の mawk では 0.071・0.369・0.182 秒
+
+### Mutation の結果(cycle 2)
+
+46806dc9 が足した仕組みを 1 つずつ止める置換を 19 個作り、hook のコピーで流した(worktree のファイルは変えていない)。置換が当たったことは `diff` の hunk の数で、awk の文法は取り出したプログラムを awk に読ませて確かめた。数字は落ちた assertion の件数で、jq あり・なしの 2 経路を別に数える。「足す前」は 63b6743a のテスト(1688 件)、「足したあと」はこの周で足したテスト(1704 件)で流し直した 6 個だけ。
+
+| Mutation | 依頼の項目 | 何を壊したか | 足す前 | 足したあと |
+| --- | --- | --- | --- | --- |
+| N01 | `(` の NODATA | トップレベルの `(` で NODATA を立てない | 14 | — |
+| N02 | `(` の NODATA(閉じ側) | 対応のない `)` で NODATA を立てない | **0** | 0(等価。下の注) |
+| N03 | RESW の NODATA | 先頭の予約語と `{` `}` で NODATA を立てない | 26 | — |
+| N04 | exec の NODATA | リダイレクトのある `exec` で NODATA を立てない | 6 | — |
+| N06 | 3 つまとめて | `in_data()` が NODATA を見ない | 50 | — |
+| H01 | 文脈ごとのヒアドキュメント | 待ちのヒアドキュメントを 1 つの列にまとめ、どの文脈の改行でも本文を読む(46806dc9 の前の読み方) | 6 | — |
+| J01 | 行継ぎのつなぎ | 本文の行末の `\<改行>` をつながない | 10 | — |
+| J02 | 行継ぎのつなぎ | つないだ本文にもデータ区間を与える(`joined` を見ない) | **0** | 6 |
+| J03 | 行継ぎのつなぎ | つないだ行を `<<-` の区切りと比べるときにタブを落とさない(`lstrip_tabs`) | **0** | 2 |
+| J04 | 行継ぎのつなぎ | 3 行以上をつながない(内側のループを止める) | **0** | 2 |
+| L01 | LW_BSNL | 区切りの語の `\<改行>` を記録しない | 6 | — |
+| L02 | LW_BSNL | `LW_BSNL` を区切りの引用符の判定(`HQ`)に使わない | **0** | 2 |
+| L03 | LW_BSNL | 区切りに `\<改行>` がある本文にもデータ区間を与える(`HBSNL` を見ない) | **0** | 2 |
+| R01 | redir_safe の fd の範囲 | `>&` の複製を、数字なら何でも安全とみなす(46806dc9 の前の範囲) | 6 | — |
+| R05 | redir_safe の fd の範囲 | `>&` の行き先をすべて安全とみなす | 12 | — |
+| R02 | `&>` の読み分け | `&>` を `>` として読む(46806dc9 の前の読み方) | 6 | — |
+| R03 | `&>` の読み分け | `&>` と `&>>` の `/dev/null` を安全とみなす | 6 | — |
+| P01 | printf -v | `printf -v` を読むだけのコマンドから外さない | 10 | — |
+| P02 | printf -v | 離した `-v c` だけを見て、つけた `-vc` を見ない | 6 | — |
+
+依頼の 8 項目は、どれも主な置換(N01、N03、N04、H01、J01、L01、R01、P01)が足す前のテストで赤になった。どの置換も、落ちたのはその仕組みのための B 節の例と、G 節の AC7 の比較だった(evidence の 15)。仕組みの一部だけを止める 5 個(J02、J03、J04、L02、L03)は緑のまま残ったので、テストを足して赤にした。
+
+N02 は等価の置換で、テストでは赤にできない。字句解析は `(` と `)` で語を切り、トップレベルの `(` はすべて深さを上げて NODATA を立てる。深さ 0 で対応のない `)` が出るのは case のパターンだけで、case のコマンドには `case` と `esac` がコマンドの位置にあり、そこで RESW が NODATA を立てる。RESW を止めた N03 では `case x in x) echo 'sudo ls';; esac | sh` が deny のままで、`)` と RESW を両方止めた N06 では赤になった。2 つは case の形で重なっていて、`)` だけが判定を決める正しいシェルの入力はない。対応のない `)` だけの入力は構文エラーになり、何も実行されない。
+
+### 足したテスト(cycle 2、`tests/test-pre-bash-guard.sh`、6 形・16 件)
+
+guard と `lib_json.sh` は変えていない。どの例も今の guard の挙動を固定する。shell での動きは、危ない部分を `echo LINE-RAN` や `echo SUBST-RAN >&2` に置き換えて、macOS の bash 3.2、zsh 5.9、dash で確かめた(evidence の 17)。
+
+- B 節の `guard_deny_only_forms` の 2 に、verify の V2-4 の形(`cat <<'OUT'` の行末にバッククォートを開き、次の行に `sudo ls`、その次の行でバッククォートを閉じ、`x`、`OUT` と続く複数行のコマンド。probe の `v-ml2.txt` とバイト単位で同じ)。3 つの shell とも、バッククォートの中を実行し、本文は `x` の行だけになる。46806dc9 の前の guard(a3103e91 の時点)も deny で、19 個の置換のどれでも deny のままだった。バッククォートの中は待ちの列に入れてあとで読むので、その中の改行は `read_heredocs()` に届かない。バッククォートの読み方を変えたとき(たとえば `$(...)` と同じようにその場で読むとき)に、この例が効く。旧版も deny なので、AC7 の比較の例の集まりに入る
+- B 節の `guard_deny_only_forms` の 3 に `cat <<EOF`、`$\`、`(sudo ls)`、`EOF` の 4 行(J02 を赤にする)。引用符のない本文では `\<改行>` を取ってから展開するので、`$` と `(` が 1 つのコマンド置換になり、3 つの shell とも実行した。46806dc9 の前の guard は none だった。`joined` の印がこの形を止めているのに、テストに例がなかった。旧版も deny
+- D 節の `edge_deny` に、字句解析だけが止める形を 3 つ: `<<-EOF` の本文でタブ・`EO\`・`F` とつないだ終わりの行のあとの `git push origin --force`(J03)、`E\`・`O\`・`F` の 3 行でつないだ終わりの行のあとの `git push origin --force`(J04)、区切りの語を `EO\<改行>F` と書いた本文の `$(git push origin --force)`(L02)。J03 と J04 の形は、bash と zsh がつないだ行を区切りと比べるので最後の行を実行する。dash はつないだ行を区切りとみなさず、最後の行は本文の文字になる(guard は bash と zsh に合わせているので、dash に対しては止めすぎの向き)。L02 の形は 3 つの shell とも置換を実行した。旧版はどれも none
+- D 節の `edge_sentinel_deny` に、区切りの語を `EO\<改行>F` と書いた本文の `sudo ls`(L03)。区切りの語に `\<改行>` があると、本文はデータ区間を持たない(guard のヘッダーの (6))。3 つの shell はこの本文を表示するだけなので、この deny は誤検知で、ヘッダーに書いてあるとおりの止めすぎにあたる。本文にデータ区間を与えるように変えたら `edge_none` に移す、とコメントに書いた
+- ファイルの先頭の D 節の説明に「heredoc terminators and delimiters joined by a backslash-newline」を足した
+
+### Failure analysis(cycle 2)
+
+テストスイートの中に落ちたものはない。テストファイルの外の形で、AC7 に反する穴を 1 つ見つけた。guard は変えないよう依頼されているので、ここに記録する。
+
+| ID | Test | Error | Root cause | Proposed fix |
+| --- | --- | --- | --- | --- |
+| F2-1(HIGH、AC7 違反) | ダブルクォートの中で `$` と `(` のあいだに `\<改行>` を挟んだ形。新版が none、旧版(fixture)が deny になったもの(jq あり・なし、root と template のどれでも同じ): `echo "$\<改行>(sudo ls)"`、`echo "x$\<改行>(sudo ls)"`、`\<改行>` を 2 つ挟んだ形、`printf '%s' "$\<改行>(sudo ls)"`、`grep "$\<改行>(sudo ls)" file`、`echo ... > /dev/null`、`echo ... \| grep x`、中身が `git push --force` と `git reset --hard` の形、`git commit -m "$\<改行>(sudo ls)"`、`git tag -a v1 -m "$\<改行>(sudo ls)"` | guard は none を返す。`bash -c` と `dash -c` は `\<改行>` を取ってから読むので、`"$\<改行>(echo SUBST-RAN)"` で置換を実行した(macOS の bash 3.2、dash)。zsh 5.9 は実行せず、そのまま表示した。bash で Bash の呼び出しを動かす環境では `sudo ls` が走る。Claude Code と Codex がどの shell で動かすかは、ここでは確かめていない | `lex_dollar()`(`.claude/hooks/pre_bash_guard.sh:382-403`)は `$` の次の 1 文字(`:384`)だけで `(` と `{` を判定する。`lex_dq()` は `$` を先に `lex_dollar()` に渡し(`:362`)、`\<改行>` はそのあとで捨てる(`:358`)。`$` はただの文字になり、続く `(sudo ls)` は引数の文字として読まれる。引数に置換がないので (a) のデータ区間になり、見張りの一致がその中に入る。46806dc9 の前の guard(a3103e91)も同じ結果なので、データ区間を入れた S2c(df0a50d5)からある穴で、cycle 1 の /test と /verify は見落とした。引用符のない語は `(` で語が切れてトップレベルの `(` が NODATA を立てるので deny になり、引用符のないヒアドキュメントの本文は `joined` が止める(上で足したテスト) | guard の変更が要る(この /test ではしていない)。(1) `lex_dollar()` の先頭で、`$` の直後の `\<改行>` を読み飛ばしてから `(` と `{` を見る。`lex_dq()`・`lex_brace()`・`lex_hd()`・`lex_word()` はどれもここを通る。(2) 止める側に倒し、ダブルクォートの中の `\<改行>` を置換ありとみなす。直すときは、B 節の `guard_deny_only_forms` に `$'echo "$\\\n(sudo ls)"'`、`$'grep "$\\\n(sudo ls)" file'`、`$'git commit -m "$\\\n(sudo ls)"'` を同じ commit で足す(いまは赤になるので、この周では commit していない)。(1) で直すなら、D 節の `edge_deny` に字句解析だけが止める `$'echo "$\\\n(git push origin --force)"'`、`$'git commit -m "$\\\n(id)"'`、`$'cat <<EOF\n$\\\n(git push origin --force)\nEOF'` も足せる(この 3 つは旧版も none) |
+
+### Regression checks(cycle 2)
+
+| Previously broken behavior | Status | Evidence |
+| --- | --- | --- |
+| AC1: どのモードでも ask を返さない | 通る | A 節。1704 件のどこにも ask や想定外の出力はない |
+| AC2: 列挙した形がどのモードでも deny | 通る | B 節。この周で足した 2 形も、2 モードと 2 経路で deny |
+| AC3: 列挙した形がどのモードでも none | 通る | C 節の 29 件 |
+| AC4: jq がなくても同じ判定 | 通る | 1704 件で jq あり・なしが期待値と一致。`tests/test-lib-json.sh` 126/0。ubuntu の jq なしでも guard 849/0 |
+| AC6: 5 つの検査 | 通る | `run-verify.sh` rc 0 |
+| AC7: 旧版の deny は新版でも deny、例外は AC3 に挙げたものだけ | テストの例の集まりでは通る。テストの外に反例がある | G 節は 2 経路とも、旧版 deny から新版 none に変わる形が `intentional_fixes` の 13 件と一致した(足した 2 形は旧版・新版とも deny)。テストにない F2-1 の形で、旧版 deny から新版 none に変わる |
+| AC8: 200 KB のコマンドが 5 秒以内 | 通る | H 節の最大 1.063 秒(BWK awk、jq なし) |
+| AC9: 止める側に倒す場合 | 通る | F 節 |
+| cross-review と consult が挙げた穴の型(46806dc9) | 通る | B 節の `guard_deny_only_forms` 28 形が 2 モードと 2 経路で deny。8 つの仕組みはどれも置換で赤になる |
+| `post_edit_verify.sh`(`lib_json.sh` のもう 1 つの利用者) | 通る | `tests/test-post-edit-verify.sh` FAIL 0(2 回の `run-test.sh` と `run-verify.sh`) |
+| awk の方言 | 通る | ubuntu の mawk と gawk で guard 1704/0、lib_json 126/0 |
+
+### Test gaps(cycle 2)
+
+- F2-1 の形はテストにない。赤になるので、guard を直す commit と一緒に入れる(上の Proposed fix)
+- `\<改行>` で `$` と `(` を分けた形のうち、旧版の 4 つの文字列を含まないもの(ダブルクォート、引用符のないヒアドキュメントの本文、`git commit -m "..."`、`git commit -F -` へのヒアドキュメント)は、新版も旧版も none。旧版より弱くはないので AC7 の対象ではないが、字句解析は追えていない
+- N02 は等価の置換で、テストで赤にできない(上の注)
+- dash との違い: つないだ行を区切りとみなす読み方は bash と zsh に合わせていて、dash ではその行のあとも本文になる。guard は dash に対して止めすぎる向きなので、穴にはならない
+- 止めすぎの形: L03 の形(テストで固定した)と、本文の途中の行をつないだ形(`cat <<EOF` の本文の `x\` のあとの `EOF` は 3 つの shell とも本文の文字なのに、その次の行の `sudo ls` が deny)。後者はテストに入れていない
+- busybox の awk(alpine)では流していない。Claude Code が実際に呼ぶ hook での効き目は、merge までは確かめられない(このセッションで効いているのは main のチェックアウトの旧版)。計測したカバレッジはなく、19 個の置換は手で選んだもの
+- `tests/test-secret-scan.sh` の固定パスの問題は、この PR の外の既存の問題として残る(この周では起きなかった)
+
+## Verdict(pipeline cycle 2)
+
+- Pass: no。テストスイートは通る(`./scripts/run-test.sh` 2 回、`./scripts/run-verify.sh`、`tests/test-pre-bash-guard.sh` 1704/0、`tests/test-lib-json.sh` 126/0、ubuntu の mawk・gawk)。46806dc9 の 8 つの仕組みは、どれも置換で赤になる(19 個のうち 18 個が赤、残る 1 個は等価)。それでも F2-1 は AC7 の反例で、bash と dash では `sudo ls` が走る形なので、pass にはしない
+- Fail: F2-1(HIGH)。guard の変更が要る。pipeline は上限 2 の 2 周目なので、上限を上げて直すか、既知の穴として記録して /pr に進むかは、orchestrator と人が決める。直す場合は、Proposed fix のテストを同じ commit で入れる
+- Blocked: なし

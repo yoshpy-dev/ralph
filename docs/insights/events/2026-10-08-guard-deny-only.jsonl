@@ -1,0 +1,1 @@
+{"schema":1,"ts":"2026-10-08T02:54:06Z","slug":"guard-deny-only","flow":"standard","phase":"test","cycle":2,"verdict":"fail","findings":{"critical":0,"high":1,"medium":0,"low":0},"triage":{"action_required":0,"worth_considering":0,"dismissed":0},"source":"skill"}
