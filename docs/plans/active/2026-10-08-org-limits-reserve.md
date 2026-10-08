@@ -86,21 +86,21 @@ Critical forks: 予約を任意にするか必須にするかの 1 件で、ユ�
 
 ## Acceptance criteria
 
-- [ ] AC1: 走っている org が `max_orgs` 個あるとき、まだ走っていない org_id への spawn(`ralph org start` を含む)は拒否され、台帳に `rejected` が残る。走っている org への spawn は `max_orgs` の影響を受けない
-- [ ] AC2: 全 org の動いている座席が `max_total_seats` 個あるとき、新しい座席の spawn は拒否され、台帳に `rejected` が残る。すでに立っている座席への spawn は、今どおり既存の座席を返す
-- [ ] AC3: 走っている org として数えるのは、最後の `disbanded` より後に、動いている座席・閉じていない workspace・予約のどれかがある org だけ。`rejected` だけの org、座席が全部止まり workspace も予約もない org、古い ralph が workspace を閉じずに disband した org は数えない
-- [ ] AC4: 同時に打った 2 つの spawn が、`max_orgs` と `max_total_seats` を超えない(今の `max_seats` の競合のテストと同じ形で確かめる)。2 つの org が同時に重なる範囲を予約しようとしても、片方だけが通る
-- [ ] AC5: org A が `internal/auth/` を予約しているとき、`internal/auth/token.go`、`internal/`、`.` のどれかを予約する org B の start は拒否され、理由に org A と重なったパスが出る。`internal/authz/` は通る
-- [ ] AC6: パスの規則。末尾の `/` はディレクトリの接頭辞、それ以外はファイル、`.` は repo 全体。絶対パス、`..` を含むもの、空は、ロックを取る前に拒否される。重なりはパスの区切りの単位で比べる
-- [ ] AC7: すでに予約がある org に同じ一覧を渡すと通り、記録は増えない。違う一覧を渡すと拒否される。予約のない spawn は、予約のある org にも今どおり立つ。leader 以外の座席に `--reserve` を渡すと拒否される
-- [ ] AC8: org を `disband` すると、ほかの org が同じパスを予約できる。予約だけを持つ org も `disband --all` の対象に入る
-- [ ] AC9: `--reserve` を渡した autonomous の spawn は、`--scope` がなくても通る
-- [ ] AC10: `ralph org status` が、その org の予約を表示する
-- [ ] AC11: `max_orgs` と `max_total_seats` の既定は 10 と 30 で、0 以下は設定の読み込みで拒否される。3 面(Go の既定、`templates/base/ralph.toml`、`scripts/ralph-config.sh`)が `defaults_sync_test.go` で揃っている
-- [ ] AC12: `/org` skill(4 面)と `README.md` が上限と予約を説明している。`./scripts/check-skill-sync.sh` と `./scripts/check-sync.sh` が通る
-- [ ] AC13: `--config` を渡さずに、main worktree のルートの `ralph.toml` で `max_orgs = 1` にしたとき、サブディレクトリからも、`ralph.toml` の違う linked worktree からも、2 つ目の org は拒否される(CLI のテストで確かめる)。`--config` を渡したときはその設定を使う
-- [ ] AC14: すでに立っている leader への spawn に `--reserve` を渡すと、その org に予約がなければ予約し(重なれば拒否)、同じ一覧なら通り、違う一覧なら座席の状態を変えずに拒否される。予約のない再試行は既存の座席を返す
-- [ ] AC15: 自分の workspace の close が失敗して補償で戻った org は、`disbanded` の前の予約も持ち直す(`scope_reserved` が書き戻され、ほかの org は同じ範囲を予約できない)
+- [x] AC1: 走っている org が `max_orgs` 個あるとき、まだ走っていない org_id への spawn(`ralph org start` を含む)は拒否され、台帳に `rejected` が残る。走っている org への spawn は `max_orgs` の影響を受けない
+- [x] AC2: 全 org の動いている座席が `max_total_seats` 個あるとき、新しい座席の spawn は拒否され、台帳に `rejected` が残る。すでに立っている座席への spawn は、今どおり既存の座席を返す
+- [x] AC3: 走っている org として数えるのは、最後の `disbanded` より後に、動いている座席・閉じていない workspace・予約のどれかがある org だけ。`rejected` だけの org、座席が全部止まり workspace も予約もない org、古い ralph が workspace を閉じずに disband した org は数えない
+- [x] AC4: 同時に打った 2 つの spawn が、`max_orgs` と `max_total_seats` を超えない(今の `max_seats` の競合のテストと同じ形で確かめる)。2 つの org が同時に重なる範囲を予約しようとしても、片方だけが通る
+- [x] AC5: org A が `internal/auth/` を予約しているとき、`internal/auth/token.go`、`internal/`、`.` のどれかを予約する org B の start は拒否され、理由に org A と重なったパスが出る。`internal/authz/` は通る
+- [x] AC6: パスの規則。末尾の `/` はディレクトリの接頭辞、それ以外はファイル、`.` は repo 全体。絶対パス、`..` を含むもの、空は、ロックを取る前に拒否される。重なりはパスの区切りの単位で比べる
+- [x] AC7: すでに予約がある org に同じ一覧を渡すと通り、記録は増えない。違う一覧を渡すと拒否される。予約のない spawn は、予約のある org にも今どおり立つ。leader 以外の座席に `--reserve` を渡すと拒否される
+- [x] AC8: org を `disband` すると、ほかの org が同じパスを予約できる。予約だけを持つ org も `disband --all` の対象に入る
+- [x] AC9: `--reserve` を渡した autonomous の spawn は、`--scope` がなくても通る
+- [x] AC10: `ralph org status` が、その org の予約を表示する
+- [x] AC11: `max_orgs` と `max_total_seats` の既定は 10 と 30 で、0 以下は設定の読み込みで拒否される。3 面(Go の既定、`templates/base/ralph.toml`、`scripts/ralph-config.sh`)が `defaults_sync_test.go` で揃っている
+- [x] AC12: `/org` skill(4 面)と `README.md` が上限と予約を説明している。`./scripts/check-skill-sync.sh` と `./scripts/check-sync.sh` が通る
+- [x] AC13: `--config` を渡さずに、main worktree のルートの `ralph.toml` で `max_orgs = 1` にしたとき、サブディレクトリからも、`ralph.toml` の違う linked worktree からも、2 つ目の org は拒否される(CLI のテストで確かめる)。`--config` を渡したときはその設定を使う
+- [x] AC14: すでに立っている leader への spawn に `--reserve` を渡すと、その org に予約がなければ予約し(重なれば拒否)、同じ一覧なら通り、違う一覧なら座席の状態を変えずに拒否される。予約のない再試行は既存の座席を返す
+- [x] AC15: 自分の workspace の close が失敗して補償で戻った org は、`disbanded` の前の予約も持ち直す(`scope_reserved` が書き戻され、ほかの org は同じ範囲を予約できない)
 
 ## Implementation outline
 
@@ -147,8 +147,10 @@ Critical forks: 予約を任意にするか必須にするかの 1 件で、ユ�
 - [x] Plan reviewed
 - [x] Plan approved
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
+- 2026-10-08: S1(620458d7)設定。`templates/base/scripts/ralph-config.sh` も同期ゲートの写しなので同じく直した。S2(11fc2261、8fe95acd)org の層。決めたこと: 上限が 0 以下なら拒否する(`max_seats` と同じく fail-closed)。予約の記録は `paths=a/,b.go` の形で、パスにカンマ・空白・制御文字が入ると拒否する。読めない `scope_reserved` は repo 全体として扱う。すでに立っている leader への予約の拒否は `rejected` を書かない(書くと leader の最新の状態が rejected になり、動いているのに inactive と表示されるため)。autonomous の scope のゲートの文に `--reserve` を足した。S3(78e46f36)CLI。全体の上限を main の `ralph.toml` から読むのは spawn と start だけ(ほかの動詞を、main の設定の読み込みエラーで止めないため)。S4(fd3e3b47)文書
+- 2026-10-08: 実装中に見つけて送るもの(sync-docs で tech-debt へ)。(a) pane だけを後回しにした disband の補償は、予約を戻さない。(b) 予約のパスの `*` はそのままファイル名として扱う。(c) 予約だけを渡したとき、役割のプロンプトの `{{SCOPE}}` は空になる。(d) start の `--scope` の help の表示崩れ(既存)
