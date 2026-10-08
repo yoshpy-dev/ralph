@@ -1464,6 +1464,61 @@ func TestWatch_Deadman_CrossOrgStopFailedEvent_DoesNotClearPendingAlert(t *testi
 	}
 }
 
+// TestWatch_Deadman_StopFailedBeforeAlert_DoesNotClearPendingAlert pins the
+// plan's edge case for `stop_failed` (Test plan of
+// docs/plans/active/2026-10-08-org-watch-stop-failed.md): a `stop_failed`
+// written before the ALERT is part of the baseline sendAlert records, so
+// the recount in checkDeadman does not read it as new activity and the
+// alert still escalates at the deadline. The two tests above only write
+// `stop_failed` after the ALERT, so a baseline that left `stop_failed` out
+// while the recount counted it would pass them.
+func TestWatch_Deadman_StopFailedBeforeAlert_DoesNotClearPendingAlert(t *testing.T) {
+	o, h, _, clk := testWatchOrg(t)
+	o.Config.DeadmanMinutes = 5
+	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn seat-1 failed: %+v", r)
+	}
+	if r := o.Spawn(watchSpawnParams("org-a", "seat-2", "worker")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn seat-2 failed: %+v", r)
+	}
+
+	// herdr does not answer while leader tries to stop seat-2, before any
+	// ALERT exists.
+	h.PaneGetErr = errors.New("herdr: no response")
+	if r := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-2"}); r.Err == nil {
+		t.Fatalf("stop seat-2: expected an error while herdr does not answer, got %+v", r)
+	}
+	h.PaneGetErr = nil
+	if failed := eventsNamed(mustReadEvents(t, o), EventStopFailed); len(failed) != 1 || failed[0].OrgID != "org-a" || failed[0].SeatID != "seat-2" {
+		t.Fatalf("setup: expected exactly one stop_failed for org-a/seat-2, got %+v", failed)
+	}
+
+	target := herdrAgentName("org-a", "seat-1")
+	h.AgentGetErrSeq[target] = []error{errors.New("herdr: agent not found")} // sticky liveness ALERT for seat-1
+
+	run, statusPath, escalationsPath := newTestWatchRun(o, nil, nil, &bytes.Buffer{})
+	status, err := loadWatchStatus(statusPath, "org-a")
+	if err != nil {
+		t.Fatalf("loadWatchStatus: %v", err)
+	}
+
+	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		t.Fatalf("cycle 1 (raises seat-1's ALERT): %v", err)
+	}
+	if len(status.PendingAlerts) != 1 {
+		t.Fatalf("expected exactly 1 pending alert after cycle 1 (the earlier stop_failed is in the baseline, so it must not clear the alert), got %+v", status.PendingAlerts)
+	}
+
+	clk.Advance(6 * time.Minute) // past DeadmanMinutes, no activity since the ALERT
+	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		t.Fatalf("cycle 2 (deadman sweep): %v", err)
+	}
+	lines := readJSONLFile(t, escalationsPath)
+	if len(lines) != 1 {
+		t.Fatalf("expected the pending alert to escalate (the stop_failed predates the ALERT, so it is in the baseline), got %d escalation(s): %v", len(lines), lines)
+	}
+}
+
 // TestLeaderActivityEventCount_StopFailed pins how leaderActivityEventCount
 // counts `stop_failed` on its own: one for the watched org, none for a
 // record whose Details carry "reason=watchdog_" (the exclusion that covers
