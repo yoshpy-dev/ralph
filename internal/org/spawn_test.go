@@ -4061,6 +4061,48 @@ func TestOrgSpawn_Reserve_ExistingLeader(t *testing.T) {
 	})
 }
 
+// TestOrgSpawn_Reserve_ExistingLeader_Phase2 covers plan AC14 on Spawn's
+// second idempotent return: a leader spawn with Reserve finds a stale
+// in-flight saga, and a racer spawns the leader while the stale seat is
+// compensated (the seam of
+// TestOrgSpawn_StaleInFlight_RacerCompletesDuringCompensationWindow_Phase2ReturnsIdempotent),
+// so Phase 2's fresh read finds the leader spawned. The reservation is
+// decided there too: the org had none, so it is recorded after the racer's
+// `spawned`, and the racer's leader is returned with no second saga.
+func TestOrgSpawn_Reserve_ExistingLeader_Phase2(t *testing.T) {
+	o, h, _ := testOrg(t)
+	if err := o.Manifest.Append(ManifestEvent{
+		TS: "2026-08-01T00:00:00Z", OrgID: "org-a", SeatID: LeaderIdentity, Event: EventSpawnStarted,
+		Role: LeaderIdentity, Driver: "claude", Model: "sonnet", PaneID: "stale-pane",
+	}); err != nil {
+		t.Fatalf("seed stale spawn_started: %v", err)
+	}
+	orig := afterStaleCompensation
+	afterStaleCompensation = func() {
+		if err := o.Manifest.Append(ManifestEvent{
+			TS: "2026-08-01T00:00:05Z", OrgID: "org-a", SeatID: LeaderIdentity, Event: EventSpawned,
+			Role: LeaderIdentity, Driver: "claude", Model: "sonnet", PaneID: "racer-pane", AgmsgTeam: "team-racer",
+		}); err != nil {
+			t.Fatalf("seed racer spawned event: %v", err)
+		}
+	}
+	defer func() { afterStaleCompensation = orig }()
+
+	r := o.Spawn(leaderParams("org-a", "internal/"))
+	if r.Outcome != SpawnOutcomeIdempotent || r.Err != nil || r.Seat.PaneID != "racer-pane" {
+		t.Fatalf("expected the racer's leader returned by Phase 2, got %+v", r)
+	}
+	if got := eventNames(t, o); !slices.Equal(got, []string{EventSpawnStarted, EventSpawnFailed, EventSpawned, EventScopeReserved}) {
+		t.Fatalf("expected the reservation recorded after the racer's spawned and no second saga, got %v", got)
+	}
+	if got := ActiveReservation(mustReadEvents(t, o), "org-a"); !slices.Equal(got, []string{"internal/"}) {
+		t.Fatalf("ActiveReservation(org-a) = %q, want internal/", got)
+	}
+	if len(h.calls) != 1 || h.calls[0] != "pane_send_keys" {
+		t.Fatalf("expected only the compensation C-c, got %v", h.calls)
+	}
+}
+
 // TestOrgSpawn_Reserve_DisbandReleasesIt covers the first half of plan AC8:
 // once org-a is disbanded, another org reserves the same paths, and org-a
 // starts again with a reservation of its own.

@@ -3080,6 +3080,39 @@ func TestOrgCloseDeferredSelfWorkspace_ReservationRestored_RiskWindowClearedByRe
 	}
 }
 
+// TestOrgCloseDeferredSelfPane_CloseFails_ReactivationCanExceedMaxTotalSeats
+// pins the pane-side window verify V-2 of plan
+// 2026-10-08-org-limits-reserve found by reading the code: the compensating
+// `spawned` for a failed own-pane close does not check max_total_seats, so a
+// seat spawned between the seat's `stopped` and the compensation leaves
+// max_total_seats + 1 seats active. A new seat is still refused, and a
+// retried stop from another pane once herdr answers brings the count back.
+// It records the current behavior, not a requirement: change it together
+// with the compensation if that starts checking the limit.
+func TestOrgCloseDeferredSelfPane_CloseFails_ReactivationCanExceedMaxTotalSeats(t *testing.T) {
+	o, h := deferOwnPaneCloseFailing(t, false)
+	o.Config.MaxTotalSeats = 1
+	spawnSeatIn(t, o, h, "org-b", "seat-1", "ws-b", "pane-b1")
+
+	if err := o.CloseDeferredSelfPane("pane-1", false); err == nil || !strings.Contains(err.Error(), `recorded seat "seat-1" of org_id "org-a" active again`) {
+		t.Fatalf("expected org-a/seat-1 recorded active again, got %v", err)
+	}
+	if got := TotalActiveSeats(mustReadEvents(t, o)); got != 2 {
+		t.Fatalf("TotalActiveSeats = %d, want 2 over max_total_seats 1 (the compensation does not check the limit)", got)
+	}
+	ownPaneEnv(o, "", "")
+	assertRejectedRecorded(t, o, o.Spawn(mustSpawnParams("org-c", "seat-1")), "org-c", "seat-1",
+		"max_total_seats 1 reached", "2 seats are active across all orgs")
+
+	delete(h.paneCloseErrs, "pane-1")
+	if r := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-1"}); r.Err != nil || r.DeferredSelfPaneID != "" {
+		t.Fatalf("expected the retried stop from another pane to close pane-1, got %+v", r)
+	}
+	if got := TotalActiveSeats(mustReadEvents(t, o)); got != 1 {
+		t.Fatalf("TotalActiveSeats = %d, want 1 after the retried stop", got)
+	}
+}
+
 // TestOrgCloseDeferredSelfWorkspace_CloseFails_RetryClosesIt: after the
 // compensation, the org is disbanded again once herdr answers (plan AC16).
 // A disband --all from another pane stops seat-1 (C-c, close), closes ws-1
