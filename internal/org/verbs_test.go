@@ -2959,6 +2959,127 @@ func TestOrgCloseDeferredSelfWorkspace_CloseFails_CallerPaneSeatNotReactivated(t
 	}
 }
 
+// deferOwnLeaderWorkspaceCloseFailing spawns org-a's leader on pane-1 in
+// ws-1, reserving reserve, and disbands org-a from inside pane-1 and ws-1:
+// Disband records the leader stopped, ws-1 closed and org-a disbanded (which
+// releases the reservation) and hands ws-1 back for the deferred close. Then
+// herdr refuses to close ws-1.
+func deferOwnLeaderWorkspaceCloseFailing(t *testing.T, reserve ...string) (*Org, *fakeHerdr) {
+	t.Helper()
+	o, h, _ := testOrg(t)
+	spawnLeaderIn(t, o, h, "org-a", "ws-1", "pane-1", reserve...)
+	ownPaneEnv(o, "pane-1", "ws-1")
+	result := o.Disband(DisbandParams{OrgID: "org-a"})
+	if len(result.Errs) != 0 || !result.Disbanded || result.DeferredSelfWorkspaceID != "ws-1" {
+		t.Fatalf("expected org-a disbanded with ws-1 handed back, got %+v", result)
+	}
+	if got := ActiveReservation(mustReadEvents(t, o), "org-a"); got != nil {
+		t.Fatalf("expected the disband to release org-a's reservation, got %q", got)
+	}
+	h.workspaceCloseErrs = map[string]error{"ws-1": errTestWorkspaceCloseRefused}
+	return o, h
+}
+
+// TestOrgCloseDeferredSelfWorkspace_CloseFails_ReservationRestored covers
+// plan 2026-10-08-org-limits-reserve AC15: after the reopened workspace and
+// the reactivated leader, the compensation appends the reservation org-a held
+// before its disbanded (same paths, `restored: ...` note), the error says so,
+// and another org cannot reserve the range. Under force nothing is appended.
+func TestOrgCloseDeferredSelfWorkspace_CloseFails_ReservationRestored(t *testing.T) {
+	t.Run("restored", func(t *testing.T) {
+		o, h := deferOwnLeaderWorkspaceCloseFailing(t, "internal/auth/", "docs/")
+		before := len(mustReadEvents(t, o))
+
+		err := o.CloseDeferredSelfWorkspace("ws-1", false)
+		if err == nil || !strings.Contains(err.Error(), `recorded workspace "ws-1" of org_id "org-a" open and seat "leader" of org_id "org-a" active `+
+			`and the reservation docs/,internal/auth/ of org_id "org-a" again`) || strings.Contains(err.Error(), "by hand") {
+			t.Fatalf("expected an error naming the reopen, the leader and the reservation, got %v", err)
+		}
+		events := mustReadEvents(t, o)
+		if got := eventNames(t, o)[before:]; !slices.Equal(got, []string{EventOrgWorkspaceCreated, EventSpawned, EventScopeReserved}) {
+			t.Fatalf("expected the reopen, the reactivation and the reservation, got %v", got)
+		}
+		why := "self workspace close failed: " + errTestWorkspaceCloseRefused.Error()
+		if ev := events[before+2]; ev.OrgID != "org-a" || ev.SeatID != "" || ev.DryRun || ev.Details != "paths=docs/,internal/auth/ restored: "+why {
+			t.Fatalf("expected org-a's reservation restored, got %+v", ev)
+		}
+		if got := ActiveReservation(events, "org-a"); !slices.Equal(got, []string{"docs/", "internal/auth/"}) {
+			t.Fatalf("ActiveReservation(org-a) = %q, want docs/ and internal/auth/", got)
+		}
+		if got := RunningOrgs(events); !slices.Equal(got, []string{"org-a"}) {
+			t.Fatalf("RunningOrgs = %v, want org-a again", got)
+		}
+
+		ownPaneEnv(o, "", "")
+		h.workspaceID, h.paneID = "ws-b", "pane-b"
+		assertRejectedRecorded(t, o, o.Spawn(leaderParams("org-b", "internal/auth/token.go")), "org-b", LeaderIdentity,
+			`running org_id "org-a": internal/auth/token.go overlaps internal/auth/`)
+	})
+	t.Run("force appends nothing", func(t *testing.T) {
+		o, _ := deferOwnLeaderWorkspaceCloseFailing(t, "internal/")
+		before := len(mustReadEvents(t, o))
+		if err := o.CloseDeferredSelfWorkspace("ws-1", true); err == nil {
+			t.Fatal("expected the deferred close to fail")
+		}
+		events := mustReadEvents(t, o)
+		if len(events) != before || ActiveReservation(events, "org-a") != nil {
+			t.Fatalf("expected no compensating event and no reservation under force, got %v", eventNames(t, o)[before:])
+		}
+	})
+	t.Run("no reservation, nothing restored", func(t *testing.T) {
+		o, _ := deferOwnLeaderWorkspaceCloseFailing(t)
+		before := len(mustReadEvents(t, o))
+		if err := o.CloseDeferredSelfWorkspace("ws-1", false); err == nil || strings.Contains(err.Error(), "reservation") {
+			t.Fatalf("expected the failure with no reservation named, got %v", err)
+		}
+		if got := eventNames(t, o)[before:]; !slices.Equal(got, []string{EventOrgWorkspaceCreated, EventSpawned}) {
+			t.Fatalf("expected only the reopen and the reactivation, got %v", got)
+		}
+	})
+}
+
+// TestOrgCloseDeferredSelfWorkspace_ReservationRestored_RiskWindowClearedByRetry
+// covers the Risks item of plan 2026-10-08-org-limits-reserve: in the window
+// between org-a's disbanded and its compensation, org-b takes the last org
+// slot and org-a's range. The compensation restores org-a without checking
+// either, so two orgs run under max_orgs 1 and their reservations overlap; a
+// new org is still refused, and a retried disband of org-a (from another
+// pane once herdr answers) clears both.
+func TestOrgCloseDeferredSelfWorkspace_ReservationRestored_RiskWindowClearedByRetry(t *testing.T) {
+	o, h := deferOwnLeaderWorkspaceCloseFailing(t, "internal/auth/")
+	o.Config.MaxOrgs = 1
+	spawnLeaderIn(t, o, h, "org-b", "ws-b", "pane-b", "internal/auth/")
+
+	if err := o.CloseDeferredSelfWorkspace("ws-1", false); err == nil {
+		t.Fatal("expected the deferred close to fail")
+	}
+	events := mustReadEvents(t, o)
+	if got := RunningOrgs(events); !slices.Equal(got, []string{"org-a", "org-b"}) {
+		t.Fatalf("RunningOrgs = %v, want org-a and org-b over max_orgs 1", got)
+	}
+	if pairs := reserveOverlaps(ActiveReservation(events, "org-a"), ActiveReservation(events, "org-b")); len(pairs) == 0 {
+		t.Fatalf("expected org-a's restored reservation to overlap org-b's, got %q and %q",
+			ActiveReservation(events, "org-a"), ActiveReservation(events, "org-b"))
+	}
+	ownPaneEnv(o, "", "")
+	assertRejectedRecorded(t, o, o.Spawn(mustSpawnParams("org-c", "seat-1")), "org-c", "seat-1", "max_orgs 1 reached", "2 orgs are (org-a, org-b)")
+
+	delete(h.workspaceCloseErrs, "ws-1")
+	if d := o.Disband(DisbandParams{OrgID: "org-a"}); len(d.Errs) != 0 || !d.Disbanded {
+		t.Fatalf("expected the retried disband of org-a to succeed, got %+v", d)
+	}
+	events = mustReadEvents(t, o)
+	if got := RunningOrgs(events); !slices.Equal(got, []string{"org-b"}) {
+		t.Fatalf("RunningOrgs = %v, want only org-b", got)
+	}
+	if got := ActiveReservation(events, "org-a"); got != nil {
+		t.Fatalf("expected org-a's reservation released again, got %q", got)
+	}
+	if got := ActiveReservation(events, "org-b"); !slices.Equal(got, []string{"internal/auth/"}) {
+		t.Fatalf("ActiveReservation(org-b) = %q, want internal/auth/ kept", got)
+	}
+}
+
 // TestOrgCloseDeferredSelfWorkspace_CloseFails_RetryClosesIt: after the
 // compensation, the org is disbanded again once herdr answers (plan AC16).
 // A disband --all from another pane stops seat-1 (C-c, close), closes ws-1

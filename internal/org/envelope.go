@@ -3,6 +3,7 @@ package org
 import (
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/yoshpy-dev/ralph/internal/config"
 )
@@ -69,6 +70,32 @@ func ValidateSpawnEnvelope(cfg config.OrgConfig, req SpawnRequest) error {
 func ValidateSpawnCapacity(cfg config.OrgConfig, req SpawnRequest, activeSeats int) error {
 	if activeSeats >= cfg.MaxSeats {
 		return fmt.Errorf("org: max_seats %d reached for org_id %q", cfg.MaxSeats, req.OrgID)
+	}
+	return nil
+}
+
+// disbandFreesSlotHint ends both ValidateOrgWideCapacity errors: the
+// operator's way out is to disband an org that has finished.
+const disbandFreesSlotHint = "a finished org frees its slot and seats with ralph org disband --org-id <id>, or ralph org disband --all for every org"
+
+// ValidateOrgWideCapacity checks req against the limits shared by every
+// org_id in one org state dir. runningOrgs is RunningOrgs and
+// totalActiveSeats TotalActiveSeats of the manifest (reserve.go), both
+// derived by the caller from events read under the manifest lock, the same
+// way ValidateSpawnCapacity gets activeSeats. A spawn into an org_id that is
+// not in runningOrgs is refused once len(runningOrgs) reaches cfg.MaxOrgs; a
+// spawn into a running org is not limited by MaxOrgs. Any new seat is refused
+// once totalActiveSeats reaches cfg.MaxTotalSeats. A limit of 0 or less
+// means the limit is not set: config.Load rejects such a value and
+// config.Default sets both, so only a hand-built config.OrgConfig has one.
+func ValidateOrgWideCapacity(cfg config.OrgConfig, req SpawnRequest, runningOrgs []string, totalActiveSeats int) error {
+	if cfg.MaxOrgs > 0 && len(runningOrgs) >= cfg.MaxOrgs && !slices.Contains(runningOrgs, req.OrgID) {
+		return fmt.Errorf("org: max_orgs %d reached: org_id %q is not running and %d orgs are (%s); %s",
+			cfg.MaxOrgs, req.OrgID, len(runningOrgs), strings.Join(runningOrgs, ", "), disbandFreesSlotHint)
+	}
+	if cfg.MaxTotalSeats > 0 && totalActiveSeats >= cfg.MaxTotalSeats {
+		return fmt.Errorf("org: max_total_seats %d reached: %d seats are active across all orgs; %s",
+			cfg.MaxTotalSeats, totalActiveSeats, disbandFreesSlotHint)
 	}
 	return nil
 }

@@ -1073,9 +1073,12 @@ func (o *Org) closeSelfPane(orgID, seatID, paneID string) error {
 // workspace (reopenWorkspace) and, when HERDR_PANE_ID (read via o.Getenv)
 // is a seat of the same org stopped in that pane, a compensating `spawned`
 // for it (reactivateSeat), so the same disband or disband --all retries
-// both. The rest follows CloseDeferredSelfPane: with force it appends
-// nothing, and the error names `herdr workspace close` (to run if the
-// workspace is the org's) in the same cases.
+// both. When the org held a reservation before its `disbanded`, it also
+// appends that reservation again (reserveAgain), so the org that is recorded
+// running again holds its range again. The rest follows
+// CloseDeferredSelfPane: with force it appends nothing, and the error names
+// `herdr workspace close` (to run if the workspace is the org's) in the same
+// cases.
 func (o *Org) CloseDeferredSelfWorkspace(workspaceID string, force bool) error {
 	if workspaceID == "" {
 		return nil
@@ -1105,6 +1108,7 @@ func (o *Org) CloseDeferredSelfWorkspace(workspaceID string, force bool) error {
 			c.add(o.reactivateSeat(rr.Events, orgID, seatID, ownPane, why))
 		}
 	}
+	c.add(o.reserveAgain(rr.Events, last.OrgID, why))
 	return c.errorFor(err, byHand)
 }
 
@@ -1206,6 +1210,30 @@ func (o *Org) reopenWorkspace(last ManifestEvent, why string) (string, error) {
 		return "", fmt.Errorf("record workspace %q of org_id %q open again: %w", last.PaneID, last.OrgID, err)
 	}
 	return fmt.Sprintf("workspace %q of org_id %q open", last.PaneID, last.OrgID), nil
+}
+
+// reserveAgain appends the compensating scope_reserved for orgID after a
+// deferred close left its workspace open: the reservation the org held right
+// before its latest real `disbanded` (reservationBeforeLastDisband), with the
+// same paths and Details `paths=<paths> restored: <why>`. It does not check
+// the other orgs' reservations or the org-wide limits: another org may have
+// taken the range or the last org slot in the window since `disbanded`, and
+// then they overlap, or max_orgs is exceeded by one, until this org is
+// disbanded again (plan 2026-10-08-org-limits-reserve, Risks). It returns
+// what it recorded for the error text, "" when the org already holds a
+// reservation or held none.
+func (o *Org) reserveAgain(events []ManifestEvent, orgID, why string) (string, error) {
+	if ActiveReservation(events, orgID) != nil {
+		return "", nil
+	}
+	paths := reservationBeforeLastDisband(events, orgID)
+	if paths == nil {
+		return "", nil
+	}
+	if err := o.appendEvent(scopeReservedEvent(o.now(), orgID, paths, "restored: "+why, false)); err != nil {
+		return "", fmt.Errorf("record the reservation of org_id %q again: %w", orgID, err)
+	}
+	return fmt.Sprintf("the reservation %s of org_id %q", strings.Join(paths, ","), orgID), nil
 }
 
 // lastSeatOnPane returns the org_id and seat_id of the latest real
