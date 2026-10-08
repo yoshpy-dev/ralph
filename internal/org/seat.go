@@ -36,6 +36,11 @@ const (
 	EventRejected     = "rejected"
 	EventStopped      = "stopped"
 	EventDisbanded    = "disbanded"
+	// EventStopFailed is a non-state event (deliberately absent from
+	// stateEvents below): Stop records it instead of `stopped` when the
+	// seat's herdr pane could not be closed, so the seat stays active in the
+	// roster and a later stop picks it up again. Details say what failed.
+	EventStopFailed = "stop_failed"
 )
 
 // stateEvents are the event types that drive seat status derivation

@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/yoshpy-dev/ralph/internal/config"
+	"github.com/yoshpy-dev/ralph/internal/org/driver"
 	"github.com/yoshpy-dev/ralph/internal/org/protocol"
 )
 
@@ -35,6 +36,10 @@ type fakeWatchHerdr struct {
 
 	AgentGetSeq    map[string][]string
 	AgentGetErrSeq map[string][]error
+	// PaneGetErr, when set, is what PaneGet returns instead of the
+	// not-found reply: a herdr that does not answer, so a Stop cannot
+	// confirm the seat's pane and records `stop_failed`.
+	PaneGetErr error
 
 	sendKeysCalls    []sendKeysCall
 	paneSendTextCall []paneSendTextCall
@@ -68,6 +73,35 @@ func (f *fakeWatchHerdr) AgentWait(_ context.Context, _ string, _ []string, _ in
 
 func (f *fakeWatchHerdr) PaneRead(_ context.Context, _ string, _ int) (string, error) {
 	return "", nil
+}
+
+func (f *fakeWatchHerdr) PaneClose(_ context.Context, _ string) error {
+	return nil
+}
+
+func (f *fakeWatchHerdr) WorkspaceClose(_ context.Context, _ string) error {
+	return nil
+}
+
+// PaneGet, TabGet and WorkspaceGet answer herdr's not-found reply for every
+// id: this fake does not model herdr's panes, so a Stop in a watch test
+// records the seat's pane as already closed, with no C-c and no close. A
+// set PaneGetErr replaces PaneGet's reply.
+func (f *fakeWatchHerdr) PaneGet(_ context.Context, paneID string) (string, string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.PaneGetErr != nil {
+		return "", "", f.PaneGetErr
+	}
+	return "", "", driver.NewHerdrError(driver.HerdrCodePaneNotFound, "pane "+paneID+" not found")
+}
+
+func (f *fakeWatchHerdr) TabGet(_ context.Context, tabID string) (string, error) {
+	return "", driver.NewHerdrError(driver.HerdrCodeTabNotFound, "tab "+tabID+" not found")
+}
+
+func (f *fakeWatchHerdr) WorkspaceGet(_ context.Context, workspaceID string) (string, error) {
+	return "", driver.NewHerdrError(driver.HerdrCodeWorkspaceNotFound, "workspace "+workspaceID+" not found")
 }
 
 func (f *fakeWatchHerdr) PaneSendText(_ context.Context, paneID, text string) error {
@@ -1333,6 +1367,181 @@ func TestWatch_Deadman_ManualStopOfOtherSeat_ClearsPendingAlert(t *testing.T) {
 	assertNoEscalations(t, escalationsPath)
 	if len(status.PendingAlerts) != 0 {
 		t.Errorf("expected the pending alert to clear after a manual stop of another seat, got %+v", status.PendingAlerts)
+	}
+}
+
+// TestWatch_Deadman_LeaderStopFailedEvent_ClearsPendingAlert pins that a
+// `stop_failed` event counts as leader activity (leaderActivityEventCount's
+// lifecycle set, case (b) of its doc comment). Since PR #208 a stop that
+// could not close the seat's pane writes `stop_failed` instead of
+// `stopped`, so a leader that answers an ALERT by stopping the stuck seat
+// while herdr does not answer leaves only `stop_failed` behind. The event
+// comes from a real Stop: PaneGetErr makes the ownership check fail.
+func TestWatch_Deadman_LeaderStopFailedEvent_ClearsPendingAlert(t *testing.T) {
+	o, h, _, clk := testWatchOrg(t)
+	o.Config.DeadmanMinutes = 5
+	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn seat-1 failed: %+v", r)
+	}
+	target := herdrAgentName("org-a", "seat-1")
+	h.AgentGetErrSeq[target] = []error{errors.New("herdr: agent not found")}
+
+	run, statusPath, escalationsPath := newTestWatchRun(o, nil, nil, &bytes.Buffer{})
+	status, err := loadWatchStatus(statusPath, "org-a")
+	if err != nil {
+		t.Fatalf("loadWatchStatus: %v", err)
+	}
+
+	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		t.Fatalf("cycle 1 (raises seat-1's ALERT): %v", err)
+	}
+
+	// herdr stops answering, and leader tries to stop seat-1.
+	h.PaneGetErr = errors.New("herdr: no response")
+	if r := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-1"}); r.Err == nil {
+		t.Fatalf("stop seat-1: expected an error while herdr does not answer, got %+v", r)
+	}
+	if failed := eventsNamed(mustReadEvents(t, o), EventStopFailed); len(failed) != 1 || failed[0].OrgID != "org-a" || failed[0].SeatID != "seat-1" {
+		t.Fatalf("setup: expected exactly one stop_failed for org-a/seat-1, got %+v", failed)
+	}
+
+	clk.Advance(6 * time.Minute) // past DeadmanMinutes, but leader tried to stop seat-1 in between
+	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		t.Fatalf("cycle 2: %v", err)
+	}
+	assertNoEscalations(t, escalationsPath)
+	if len(status.PendingAlerts) != 0 {
+		t.Errorf("expected the pending alert to clear after leader's stop_failed, got %+v", status.PendingAlerts)
+	}
+}
+
+// TestWatch_Deadman_CrossOrgStopFailedEvent_DoesNotClearPendingAlert is the
+// cross-org counterpart of the test above (the orgID filter of
+// leaderActivityEventCount, cross-review AR-1): a `stop_failed` written in
+// another org of the same manifest is not activity of the watched org, so
+// its pending alert still escalates at the deadline.
+func TestWatch_Deadman_CrossOrgStopFailedEvent_DoesNotClearPendingAlert(t *testing.T) {
+	o, h, _, clk := testWatchOrg(t)
+	o.Config.DeadmanMinutes = 5
+	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn org-a/seat-1 failed: %+v", r)
+	}
+	if r := o.Spawn(watchSpawnParams("org-b", "seat-9", "worker")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn org-b/seat-9 failed: %+v", r)
+	}
+	target := herdrAgentName("org-a", "seat-1")
+	h.AgentGetErrSeq[target] = []error{errors.New("herdr: agent not found")} // sticky liveness ALERT for org-a/seat-1
+
+	run, statusPath, escalationsPath := newTestWatchRun(o, nil, nil, &bytes.Buffer{})
+	status, err := loadWatchStatus(statusPath, "org-a")
+	if err != nil {
+		t.Fatalf("loadWatchStatus: %v", err)
+	}
+
+	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		t.Fatalf("cycle 1 (raises org-a's liveness ALERT): %v", err)
+	}
+	if len(status.PendingAlerts) != 1 {
+		t.Fatalf("expected exactly 1 pending alert after cycle 1, got %+v", status.PendingAlerts)
+	}
+
+	// herdr stops answering, and org-b's leader tries to stop seat-9.
+	h.PaneGetErr = errors.New("herdr: no response")
+	if r := o.Stop(StopParams{OrgID: "org-b", Seat: "seat-9"}); r.Err == nil {
+		t.Fatalf("stop org-b/seat-9: expected an error while herdr does not answer, got %+v", r)
+	}
+	if failed := eventsNamed(mustReadEvents(t, o), EventStopFailed); len(failed) != 1 || failed[0].OrgID != "org-b" {
+		t.Fatalf("setup: expected exactly one stop_failed, in org-b, got %+v", failed)
+	}
+
+	clk.Advance(6 * time.Minute) // past DeadmanMinutes, no activity in org-a
+	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		t.Fatalf("cycle 2 (deadman sweep): %v", err)
+	}
+	lines := readJSONLFile(t, escalationsPath)
+	if len(lines) != 1 {
+		t.Fatalf("expected org-a's pending alert to still escalate (org-b's stop_failed is not org-a's activity), got %d escalation(s): %v", len(lines), lines)
+	}
+}
+
+// TestWatch_Deadman_StopFailedBeforeAlert_DoesNotClearPendingAlert pins the
+// plan's edge case for `stop_failed` (Test plan of
+// docs/plans/active/2026-10-08-org-watch-stop-failed.md): a `stop_failed`
+// written before the ALERT is part of the baseline sendAlert records, so
+// the recount in checkDeadman does not read it as new activity and the
+// alert still escalates at the deadline. The two tests above only write
+// `stop_failed` after the ALERT, so a baseline that left `stop_failed` out
+// while the recount counted it would pass them.
+func TestWatch_Deadman_StopFailedBeforeAlert_DoesNotClearPendingAlert(t *testing.T) {
+	o, h, _, clk := testWatchOrg(t)
+	o.Config.DeadmanMinutes = 5
+	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn seat-1 failed: %+v", r)
+	}
+	if r := o.Spawn(watchSpawnParams("org-a", "seat-2", "worker")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn seat-2 failed: %+v", r)
+	}
+
+	// herdr does not answer while leader tries to stop seat-2, before any
+	// ALERT exists.
+	h.PaneGetErr = errors.New("herdr: no response")
+	if r := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-2"}); r.Err == nil {
+		t.Fatalf("stop seat-2: expected an error while herdr does not answer, got %+v", r)
+	}
+	h.PaneGetErr = nil
+	if failed := eventsNamed(mustReadEvents(t, o), EventStopFailed); len(failed) != 1 || failed[0].OrgID != "org-a" || failed[0].SeatID != "seat-2" {
+		t.Fatalf("setup: expected exactly one stop_failed for org-a/seat-2, got %+v", failed)
+	}
+
+	target := herdrAgentName("org-a", "seat-1")
+	h.AgentGetErrSeq[target] = []error{errors.New("herdr: agent not found")} // sticky liveness ALERT for seat-1
+
+	run, statusPath, escalationsPath := newTestWatchRun(o, nil, nil, &bytes.Buffer{})
+	status, err := loadWatchStatus(statusPath, "org-a")
+	if err != nil {
+		t.Fatalf("loadWatchStatus: %v", err)
+	}
+
+	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		t.Fatalf("cycle 1 (raises seat-1's ALERT): %v", err)
+	}
+	if len(status.PendingAlerts) != 1 {
+		t.Fatalf("expected exactly 1 pending alert after cycle 1 (the earlier stop_failed is in the baseline, so it must not clear the alert), got %+v", status.PendingAlerts)
+	}
+
+	clk.Advance(6 * time.Minute) // past DeadmanMinutes, no activity since the ALERT
+	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		t.Fatalf("cycle 2 (deadman sweep): %v", err)
+	}
+	lines := readJSONLFile(t, escalationsPath)
+	if len(lines) != 1 {
+		t.Fatalf("expected the pending alert to escalate (the stop_failed predates the ALERT, so it is in the baseline), got %d escalation(s): %v", len(lines), lines)
+	}
+}
+
+// TestLeaderActivityEventCount_StopFailed pins how leaderActivityEventCount
+// counts `stop_failed` on its own: one for the watched org, none for a
+// record whose Details carry "reason=watchdog_" (the exclusion that covers
+// the whole lifecycle set), and none for another org's record.
+func TestLeaderActivityEventCount_StopFailed(t *testing.T) {
+	stopFailed := func(orgID, details string) ManifestEvent {
+		return ManifestEvent{TS: "2026-01-01T00:00:00Z", OrgID: orgID, SeatID: "seat-1", Event: EventStopFailed, Role: "worker", Details: details}
+	}
+	tests := []struct {
+		name string
+		ev   ManifestEvent
+		want int
+	}{
+		{"stop_failed in the watched org counts", stopFailed("org-a", "ctrl_c=skipped: pane not confirmed pane=not closed: check pane \"pane-1\": herdr: no response leave=skipped: pane not closed"), 1},
+		{"stop_failed carrying reason=watchdog_ does not count", stopFailed("org-a", "pane=not closed leave=skipped: pane not closed reason=watchdog_cutoff"), 0},
+		{"stop_failed in another org does not count", stopFailed("org-b", "pane=not closed leave=skipped: pane not closed"), 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := leaderActivityEventCount([]ManifestEvent{tt.ev}, "org-a"); got != tt.want {
+				t.Errorf("leaderActivityEventCount = %d, want %d (event %+v)", got, tt.want, tt.ev)
+			}
+		})
 	}
 }
 

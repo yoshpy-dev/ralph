@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/yoshpy-dev/ralph/internal/config"
+	"github.com/yoshpy-dev/ralph/internal/org/driver"
 	"github.com/yoshpy-dev/ralph/internal/org/protocol"
 )
 
@@ -58,6 +59,42 @@ type fakeHerdr struct {
 	// verbs_test.go). Zero (the default) keeps PaneSendText instantaneous,
 	// exactly as before this field existed.
 	paneSendTextDelay time.Duration
+	// paneCloseErrs / workspaceCloseErrs, keyed by pane / workspace id, make
+	// PaneClose / WorkspaceClose return that error for that id; ids without
+	// an entry (and a nil map) succeed. For an "already closed" reply, use
+	// driver.NewHerdrError(driver.HerdrCodePaneNotFound, ...) (or
+	// HerdrCodeWorkspaceNotFound) so driver.IsNotFound recognises it. A test
+	// can delete an entry between calls to model herdr coming back.
+	paneCloseErrs      map[string]error
+	workspaceCloseErrs map[string]error
+	// paneSendKeysBlock / paneCloseBlock / workspaceCloseBlock, when true,
+	// make PaneSendKeys / PaneClose / WorkspaceClose record the call and then
+	// not return until ctx is done, returning ctx.Err() -- a herdr that never
+	// answers, for the per-call timeout tests (plan AC11). The call is still
+	// logged first.
+	paneSendKeysBlock   bool
+	paneCloseBlock      bool
+	workspaceCloseBlock bool
+
+	// herdr's view of what this fake created, which PaneGet / TabGet /
+	// WorkspaceGet answer from: WorkspaceCreate labels the workspace it hands
+	// out, and TabCreate puts the pane it hands out in a tab of its own
+	// (fakeTabID) labelled with the label it was given (the seat id), inside
+	// the workspace it was given. A later TabCreate handing out the same pane
+	// id relabels that tab, so seats meant to be stopped need pane ids of
+	// their own. A test edits these maps to model a recorded id that herdr
+	// now uses for something else (plan AC14), or deletes an entry to model
+	// one herdr no longer knows; an id with no entry is not found.
+	paneTabs        map[string]string // pane id -> tab id
+	paneWorkspaces  map[string]string // pane id -> workspace id
+	tabLabels       map[string]string // tab id -> label
+	workspaceLabels map[string]string // workspace id -> label
+	// getErrs, keyed by pane, tab or workspace id, makes PaneGet / TabGet /
+	// WorkspaceGet return that error for that id. getBlock makes the three
+	// record the call and then not return until ctx is done (see
+	// paneCloseBlock).
+	getErrs  map[string]error
+	getBlock bool
 
 	workspaceID string
 	paneID      string
@@ -69,9 +106,28 @@ type fakeHerdr struct {
 	agentWaitTargets  []string   // targets AgentWait was invoked with, in order
 	agentWaitUntil    [][]string // until states AgentWait was invoked with, in order
 	agentWaitTimeouts []int      // timeoutMS AgentWait was invoked with, in order
+
+	paneCloseCalls      []string // paneIDs PaneClose was invoked with, in order
+	workspaceCloseCalls []string // workspaceIDs WorkspaceClose was invoked with, in order
+	tabCreateWorkspaces []string // workspaceIDs TabCreate was invoked with, in order
+	paneGetCalls        []string // paneIDs PaneGet was invoked with, in order
+	tabGetCalls         []string // tabIDs TabGet was invoked with, in order
+	workspaceGetCalls   []string // workspaceIDs WorkspaceGet was invoked with, in order
 }
 
-func (f *fakeHerdr) WorkspaceCreate(_ context.Context, _, _ string) (string, error) {
+// fakeTabID is the tab id fakeHerdr's TabCreate gives the tab holding
+// paneID.
+func fakeTabID(paneID string) string { return "tab-" + paneID }
+
+// setLabel records id -> label in *m, making the map on first use.
+func setLabel(m *map[string]string, id, label string) {
+	if *m == nil {
+		*m = make(map[string]string)
+	}
+	(*m)[id] = label
+}
+
+func (f *fakeHerdr) WorkspaceCreate(_ context.Context, _, label string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, "workspace_create")
@@ -81,20 +137,77 @@ func (f *fakeHerdr) WorkspaceCreate(_ context.Context, _, _ string) (string, err
 	if f.workspaceID == "" {
 		f.workspaceID = "ws-1"
 	}
+	setLabel(&f.workspaceLabels, f.workspaceID, label)
 	return f.workspaceID, nil
 }
 
-func (f *fakeHerdr) TabCreate(_ context.Context, _, _, _ string) (string, error) {
+func (f *fakeHerdr) TabCreate(_ context.Context, workspaceID, _, label string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, "tab_create")
+	f.tabCreateWorkspaces = append(f.tabCreateWorkspaces, workspaceID)
 	if f.tabCreateErr != nil {
 		return "", f.tabCreateErr
 	}
 	if f.paneID == "" {
 		f.paneID = "pane-1"
 	}
+	setLabel(&f.paneTabs, f.paneID, fakeTabID(f.paneID))
+	setLabel(&f.paneWorkspaces, f.paneID, workspaceID)
+	setLabel(&f.tabLabels, fakeTabID(f.paneID), label)
 	return f.paneID, nil
+}
+
+// fakeGet is the shared body of PaneGet / TabGet / WorkspaceGet: record id
+// in *calls and as call name in f.calls, then block (getBlock), return the
+// injected error (getErrs), or answer lookup(id), run with mu held, with
+// herdr's not-found error (notFoundCode) when it reports no entry.
+func (f *fakeHerdr) fakeGet(ctx context.Context, name string, calls *[]string, id string, lookup func(string) (string, bool), notFoundCode string) (string, error) {
+	f.mu.Lock()
+	f.calls = append(f.calls, name)
+	*calls = append(*calls, id)
+	block := f.getBlock
+	injected := f.getErrs[id]
+	value, ok := lookup(id)
+	f.mu.Unlock()
+	switch {
+	case block:
+		<-ctx.Done()
+		return "", ctx.Err()
+	case injected != nil:
+		return "", injected
+	case !ok:
+		return "", driver.NewHerdrError(notFoundCode, id+" not found")
+	}
+	return value, nil
+}
+
+// PaneGet answers the pane's tab and workspace as TabCreate recorded them.
+func (f *fakeHerdr) PaneGet(ctx context.Context, paneID string) (string, string, error) {
+	var workspaceID string
+	tabID, err := f.fakeGet(ctx, "pane_get", &f.paneGetCalls, paneID, func(id string) (string, bool) {
+		tabID, ok := f.paneTabs[id]
+		workspaceID = f.paneWorkspaces[id]
+		return tabID, ok
+	}, driver.HerdrCodePaneNotFound)
+	if err != nil {
+		return "", "", err
+	}
+	return tabID, workspaceID, nil
+}
+
+func (f *fakeHerdr) TabGet(ctx context.Context, tabID string) (string, error) {
+	return f.fakeGet(ctx, "tab_get", &f.tabGetCalls, tabID, func(id string) (string, bool) {
+		label, ok := f.tabLabels[id]
+		return label, ok
+	}, driver.HerdrCodeTabNotFound)
+}
+
+func (f *fakeHerdr) WorkspaceGet(ctx context.Context, workspaceID string) (string, error) {
+	return f.fakeGet(ctx, "workspace_get", &f.workspaceGetCalls, workspaceID, func(id string) (string, bool) {
+		label, ok := f.workspaceLabels[id]
+		return label, ok
+	}, driver.HerdrCodeWorkspaceNotFound)
 }
 
 func (f *fakeHerdr) AgentStart(_ context.Context, name, _, _ string, _ int, agentArgs []string) (string, error) {
@@ -153,16 +266,47 @@ func (f *fakeHerdr) PaneSendText(_ context.Context, _, _ string) error {
 	return err
 }
 
-func (f *fakeHerdr) PaneSendKeys(_ context.Context, paneID string, keys ...string) error {
+func (f *fakeHerdr) PaneSendKeys(ctx context.Context, paneID string, keys ...string) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.calls = append(f.calls, "pane_send_keys")
 	f.sendKeysCalls = append(f.sendKeysCalls, paneID)
 	f.sendKeysKeys = append(f.sendKeysKeys, keys)
-	if f.paneSendKeysErr != nil {
-		return f.paneSendKeysErr
+	block := f.paneSendKeysBlock
+	err := f.paneSendKeysErr
+	f.mu.Unlock()
+	if block {
+		<-ctx.Done()
+		return ctx.Err()
 	}
-	return nil
+	return err
+}
+
+func (f *fakeHerdr) PaneClose(ctx context.Context, paneID string) error {
+	f.mu.Lock()
+	f.calls = append(f.calls, "pane_close")
+	f.paneCloseCalls = append(f.paneCloseCalls, paneID)
+	block := f.paneCloseBlock
+	err := f.paneCloseErrs[paneID]
+	f.mu.Unlock()
+	if block {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	return err
+}
+
+func (f *fakeHerdr) WorkspaceClose(ctx context.Context, workspaceID string) error {
+	f.mu.Lock()
+	f.calls = append(f.calls, "workspace_close")
+	f.workspaceCloseCalls = append(f.workspaceCloseCalls, workspaceID)
+	block := f.workspaceCloseBlock
+	err := f.workspaceCloseErrs[workspaceID]
+	f.mu.Unlock()
+	if block {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	return err
 }
 
 // fakeAgmsg is a call-recording, in-memory AgmsgClient. joinErrs, keyed by
@@ -180,6 +324,14 @@ type fakeAgmsg struct {
 	joinCalls  []joinCall
 	leaveErr   error
 	leaveCalls []leaveCall
+	// leaveBlock, when true, makes Leave record the call and then not
+	// return until ctx is done, returning ctx.Err() -- an agmsg that never
+	// answers (see fakeHerdr's paneCloseBlock).
+	leaveBlock bool
+	// leaveHook, when non-nil, runs inside Leave (after the call is
+	// recorded, without mu held), so a test can snapshot what had already
+	// happened -- herdr calls, manifest events -- at the moment of the Leave.
+	leaveHook func()
 }
 
 type joinCall struct {
@@ -210,12 +362,22 @@ func (f *fakeAgmsg) Join(_ context.Context, team, agentID, agmsgType, projectPat
 	return nil
 }
 
-func (f *fakeAgmsg) Leave(_ context.Context, team, agentID string) error {
+func (f *fakeAgmsg) Leave(ctx context.Context, team, agentID string) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.calls = append(f.calls, "leave")
 	f.leaveCalls = append(f.leaveCalls, leaveCall{team: team, agentID: agentID})
-	return f.leaveErr
+	block := f.leaveBlock
+	err := f.leaveErr
+	hook := f.leaveHook
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
+	if block {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	return err
 }
 
 // testCodexObserveGenerousBudget is the scan budget a test sets (in place
@@ -283,6 +445,10 @@ func raiseCodexObserveBudgetForStop(o *Org) {
 // (testCodexObserveGenerousBudget, above, for the found case) and/or
 // CodexModelObserveInterval on the returned *Org after construction, the
 // same pattern SendEnterDelay already uses above.
+//
+// Getenv is pinned to report every variable unset, so Stop's own-pane check
+// (HERDR_PANE_ID) never depends on whether `go test` itself runs inside a
+// herdr pane. Self-pane tests replace it on the returned *Org.
 func testOrg(t *testing.T) (*Org, *fakeHerdr, *fakeAgmsg) {
 	t.Helper()
 	dir := t.TempDir()
@@ -298,6 +464,7 @@ func testOrg(t *testing.T) (*Org, *fakeHerdr, *fakeAgmsg) {
 		CodexSessionsDir:          filepath.Join(dir, "codex-sessions"),
 		CodexModelObserveTimeout:  time.Millisecond,
 		CodexModelObserveInterval: time.Millisecond,
+		Getenv:                    func(string) string { return "" },
 	}
 	return o, h, a
 }
@@ -463,6 +630,103 @@ func TestOrgSpawn_WorkspaceReusedForSecondSeat(t *testing.T) {
 	}
 	if orgLevelWorkspaceEvents != 1 {
 		t.Fatalf("expected exactly 1 org_workspace_created event, got %d", orgLevelWorkspaceEvents)
+	}
+}
+
+// TestOrgSpawn_AfterDisbandClosedWorkspace_CreatesNewWorkspace covers plan
+// AC13: once disband closed the org's workspace and recorded
+// org_workspace_closed, the next spawn in the same org_id creates a new
+// workspace and puts its tab there instead of in the closed one, and the
+// spawn after that reuses the new workspace.
+func TestOrgSpawn_AfterDisbandClosedWorkspace_CreatesNewWorkspace(t *testing.T) {
+	o, h, _ := testOrg(t)
+	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("first spawn failed: %+v", r)
+	}
+	if d := o.Disband(DisbandParams{OrgID: "org-a"}); !d.Disbanded || len(d.Errs) != 0 {
+		t.Fatalf("disband failed: %+v", d)
+	}
+	if !slices.Equal(h.workspaceCloseCalls, []string{"ws-1"}) {
+		t.Fatalf("expected disband to close ws-1, got %v", h.workspaceCloseCalls)
+	}
+
+	h.workspaceID = "ws-2"
+	h.paneID = "pane-2"
+	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn after disband failed: %+v", r)
+	}
+	h.paneID = "pane-3"
+	if r := o.Spawn(mustSpawnParams("org-a", "seat-2")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("second spawn after disband failed: %+v", r)
+	}
+
+	if got := countString(h.calls, "workspace_create"); got != 2 {
+		t.Fatalf("expected workspace_create once before and once after the disband, got %d (calls=%v)", got, h.calls)
+	}
+	if want := []string{"ws-1", "ws-2", "ws-2"}; !slices.Equal(h.tabCreateWorkspaces, want) {
+		t.Fatalf("TabCreate workspaces = %v, want %v (no tab in the closed ws-1)", h.tabCreateWorkspaces, want)
+	}
+	var created []string
+	for _, ev := range mustReadEvents(t, o) {
+		if ev.Event == EventOrgWorkspaceCreated {
+			created = append(created, ev.PaneID)
+		}
+	}
+	if !slices.Equal(created, []string{"ws-1", "ws-2"}) {
+		t.Fatalf("org_workspace_created ids = %v, want [ws-1 ws-2]", created)
+	}
+}
+
+func countString(list []string, s string) int {
+	n := 0
+	for _, v := range list {
+		if v == s {
+			n++
+		}
+	}
+	return n
+}
+
+// TestOpenOrgWorkspaces pins which recorded workspaces count as open: a
+// created id stays open until a later real org-level org_workspace_closed
+// for the same org_id and id, and a closed id that is created again is open
+// again.
+func TestOpenOrgWorkspaces(t *testing.T) {
+	created := func(org, id string) ManifestEvent {
+		return ManifestEvent{OrgID: org, Event: EventOrgWorkspaceCreated, PaneID: id}
+	}
+	closed := func(org, id string) ManifestEvent {
+		return ManifestEvent{OrgID: org, Event: EventOrgWorkspaceClosed, PaneID: id}
+	}
+	dryRunClosed := closed("org-a", "ws-1")
+	dryRunClosed.DryRun = true
+	seatLevelClosed := closed("org-a", "ws-1")
+	seatLevelClosed.SeatID = "seat-1"
+
+	tests := []struct {
+		name   string
+		events []ManifestEvent
+		want   []string
+	}{
+		{name: "none recorded", want: nil},
+		{name: "created", events: []ManifestEvent{created("org-a", "ws-1")}, want: []string{"ws-1"}},
+		{name: "created then closed", events: []ManifestEvent{created("org-a", "ws-1"), closed("org-a", "ws-1")}, want: nil},
+		{name: "closed then a new one created", events: []ManifestEvent{created("org-a", "ws-1"), closed("org-a", "ws-1"), created("org-a", "ws-2")}, want: []string{"ws-2"}},
+		{name: "same id created again after close", events: []ManifestEvent{created("org-a", "ws-1"), closed("org-a", "ws-1"), created("org-a", "ws-1")}, want: []string{"ws-1"}},
+		{name: "two created, oldest first", events: []ManifestEvent{created("org-a", "ws-1"), created("org-a", "ws-2")}, want: []string{"ws-1", "ws-2"}},
+		{name: "close of another id", events: []ManifestEvent{created("org-a", "ws-1"), closed("org-a", "ws-9")}, want: []string{"ws-1"}},
+		{name: "close in another org", events: []ManifestEvent{created("org-a", "ws-1"), closed("org-b", "ws-1")}, want: []string{"ws-1"}},
+		{name: "workspace of another org", events: []ManifestEvent{created("org-b", "ws-1")}, want: nil},
+		{name: "dry-run close ignored", events: []ManifestEvent{created("org-a", "ws-1"), dryRunClosed}, want: []string{"ws-1"}},
+		{name: "seat-level close ignored", events: []ManifestEvent{created("org-a", "ws-1"), seatLevelClosed}, want: []string{"ws-1"}},
+		{name: "empty id skipped", events: []ManifestEvent{created("org-a", "")}, want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := openOrgWorkspaces(tt.events, "org-a"); !slices.Equal(got, tt.want) {
+				t.Fatalf("openOrgWorkspaces = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
