@@ -813,13 +813,16 @@ func (w *watchRun) sendAlert(ctx context.Context, status *watchStatusFile, orgID
 //	    or (b) a mixed-version window where an old `ralph org watch`
 //	    appends a cutoff after a new binary recorded the baseline. Keeping
 //	    the exclusion means such a cutoff never counts, so neither case can
-//	    misfire. `stop_failed` gets no guard of this kind: PR #208 added it
-//	    and it is first counted here in the same release, and v5.1.0, the
-//	    latest release before that, never writes it. So a baseline that a
-//	    released `ralph org watch` persisted can miss a `stop_failed` only
-//	    when a newer `ralph org stop` wrote it while that older watch was
-//	    still running, and the recount then clears the alert wrongly only
-//	    if watch is restarted on the new binary while the alert is pending.
+//	    misfire. The exclusion also covers `stop_failed`, only because it
+//	    shares the case below; no `stop_failed` has ever carried
+//	    "reason=watchdog_". Nor does `stop_failed` need a compatibility
+//	    guard of its own: ralph up to v5.1.0 never writes it, so a baseline
+//	    persisted by such a watch has no `stop_failed` to miss, with one
+//	    exception. If a v5.1.0 `ralph org watch` is still running when a
+//	    newer `ralph org stop` writes a `stop_failed`, the alert it saves
+//	    has a baseline without that event. Restarting watch on the newer
+//	    binary while that alert is pending then reads one higher and clears
+//	    it.
 //
 // The orgID filter excludes another org's activity in the same shared
 // manifest: without it, a new event in a different, active org would clear
