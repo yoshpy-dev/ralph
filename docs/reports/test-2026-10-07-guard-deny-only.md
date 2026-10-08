@@ -237,3 +237,106 @@ guard と `lib_json.sh` は変えていない。どの例も今の guard の挙�
 - Pass: no。テストスイートは通る(`./scripts/run-test.sh` 2 回、`./scripts/run-verify.sh`、`tests/test-pre-bash-guard.sh` 1704/0、`tests/test-lib-json.sh` 126/0、ubuntu の mawk・gawk)。46806dc9 の 8 つの仕組みは、どれも置換で赤になる(19 個のうち 18 個が赤、残る 1 個は等価)。それでも F2-1 は AC7 の反例で、bash と dash では `sudo ls` が走る形なので、pass にはしない
 - Fail: F2-1(HIGH)。guard の変更が要る。pipeline は上限 2 の 2 周目なので、上限を上げて直すか、既知の穴として記録して /pr に進むかは、orchestrator と人が決める。直す場合は、Proposed fix のテストを同じ commit で入れる
 - Blocked: なし
+
+---
+
+## pipeline cycle 2 のやり直し(F2-1 の修正のあと)
+
+- Date: 2026-10-08
+- Tester: tester subagent (Claude)
+- 経緯: 上の cycle 2 の /test(6cca4ce4)は F2-1 で fail だった。guard を 4e829e34 で直し、self-review(373fa29d)と verify(3950ffdd)をやり直して、どちらも通った。この節はそのあとにやり直した /test の結果で、cycle 2 の中のやり直しなので cycle の数は 2 のまま。上の 2 つの Verdict は、それぞれの時点の判定として残した。いまの判定は、この節の最後の `## Verdict(pipeline cycle 2 のやり直し)` にある
+- Scope: `git diff 6cca4ce4..4ffe74fe` と、この /test で足したテスト。コードの変更は 4e829e34 だけで、END でコマンドに `\<改行>` があれば NODATA を立てる 1 行と、B 節の 8 の 3 形を足した。ほかの commit はコメントと記録
+- Evidence: `docs/evidence/test-2026-10-07-guard-deny-only.log` の末尾(21 節から)。2 回の `run-test.sh`、2 回の `run-verify.sh`、probe、mutation の置換・結果・落ちた assertion、shell での確かめ、Docker の出力
+
+### Test execution(cycle 2 のやり直し)
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `./scripts/run-test.sh` 1 回目(4ffe74fe、テストを足す前) | shell 40 本 + Go 8 パッケージ | 40 本 + Go 8 | 0 | 0 | 427 s |
+| その中の `tests/test-pre-bash-guard.sh` / `tests/test-lib-json.sh` | 1716 / 126 | 1716 / 126 | 0 / 0 | 0 / 0 | — |
+| `./scripts/run-verify.sh` 1 回目(mode all、scope full、テストを足す前) | 静的な検査 + shell 40 本 + Go | すべて | 0 | 0 | 641 s |
+| ubuntu:24.04、mawk 1.3.4、dash、jq なし: guard / lib_json(テストを足したあと) | 1719 / 126 | 862 / 87 | 0 / 0 | 857 / 39(jq の経路) | — |
+| ubuntu:24.04、mawk、jq 1.7: guard / lib_json | 1730 / 126 | 1730 / 126 | 0 / 0 | 0 / 0 | — |
+| ubuntu:24.04、gawk 5.2.1、jq 1.7: guard / lib_json | 1730 / 126 | 1730 / 126 | 0 / 0 | 0 / 0 | — |
+| `./scripts/run-test.sh` 2 回目(テストを足したあと) | shell 40 本 + Go 8 パッケージ | 40 本 + Go 8 | 0 | 0 | 406 s |
+| その中の `tests/test-pre-bash-guard.sh` / `tests/test-lib-json.sh` | 1730 / 126 | 1730 / 126 | 0 / 0 | 0 / 0 | — |
+| `./scripts/run-verify.sh` 2 回目(テストを足したあと) | 静的な検査 + shell 40 本 + Go | すべて | 0 | 0 | 434 s |
+
+- `run-test.sh` は 2 回とも `lib_json.sh` を分類できず full にフォールバックした。Go は `internal/org` だけが実際に走り、ほかはキャッシュから
+- `run-verify.sh` は 2 回とも `All verifiers passed.` で終わった。中で shellcheck(`tests/test-*.sh` を含む)、全 hook の `sh -n`、`settings.json` の `jq -e`、`check-sync.sh`、`check-pipeline-sync.sh`、`check-skill-sync.sh`、`check-template-purity.sh`、gofmt、golangci-lint(0 issues)、branch の secret scan(2 回とも f423f230..4ffe74fe で clean。足したテストはその時点で commit していないので、push の前の `./scripts/secret-scan-branch.sh --strict` で見る)が通った
+- `tests/test-secret-scan.sh` は 4 回とも通った。ほかの実行と重ならないように流した
+- AC8(H 節、macOS の BWK awk、jq なし)の最大は 1.165 秒(1 回目の `run-verify.sh`)。ubuntu の mawk では 0.074・0.373・0.189 秒
+
+### F2-1 の形の確かめ(cycle 2 のやり直し)
+
+39 個の probe ファイルを、新版(root と template)と旧版(root の fixture と、1c4cea5a の template)に、それぞれ jq あり・なしで読ませた(1 ファイルにつき 8 通り)。39 個は、上の F2-1 の表の形、依頼元の `xr3/f1.txt`〜`f7.txt`、対照の形、字句解析だけが止める形で、どれも期待どおりだった(evidence の 23)。
+
+- F2-1 の 11 形(`echo`・`grep`・`printf`・`git commit -m`・`git tag -a -m`、`x$` の前置き、`\<改行>` 2 つ、`> /dev/null`、`| grep x`、中身が `git push --force` と `git reset --hard`)と `xr3` の 7 個: 新版・旧版とも 8 通りすべて deny。6cca4ce4 の guard では、このうち F2-1 の 11 形と `f1`・`f3` が none だった(`f2`・`f4`〜`f7` は 6cca4ce4 でも deny)
+- 文字だけの `\<改行>` の 3 形(単一引用符の中の `$\<改行>(...)`、`$` のないダブルクォート、`$\<改行>((1+1))` のあとの引数): 6cca4ce4 では none、いまは旧版と同じ deny。shell は何も実行しない
+- 字句解析だけが止める 4 形(`echo "$\<改行>(git push origin --force)"`、`git commit -m "$\<改行>(id)"`、`git commit -F -` へのヒアドキュメントの `$\<改行>(id)`、`cat <<EOF` の本文の `$\<改行>(git push origin --force)`。probe のファイルは 5 個で、`git commit -m` の形が 2 個ある): 新版も旧版も 8 通りすべて none。上の cycle 2 の Test gaps に書いた既知の穴のまま
+- `\` と改行を JSON の `\`・`\u000a` で書いた F2-1 の形(5 通り)も、jq あり・なしとも deny
+- CRLF の `echo "$\<CR><LF>(sudo ls)"` は新版 none・旧版 deny。bash・zsh・dash とも置換を実行せず文字として表示する(evidence の 23)ので、データ区間の中の言及にあたり、穴ではない
+
+### Mutation の結果(cycle 2 のやり直し)
+
+4e829e34 の 1 行に対する置換を 3 個足し、cycle 2 の 19 個と合わせて 22 個を、4ffe74fe のテスト(1716 件)で流した。数字は落ちた assertion の件数。「cycle 2」は上の cycle 2 の表の最後の値(足したあとの値がない置換は足す前の値)。
+
+| Mutation | 何を壊したか | cycle 2 | 4ffe74fe のテスト | 足したあと(1730 件) |
+| --- | --- | --- | --- | --- |
+| F01 | END の NODATA の行を消す | — | 14 | 28 |
+| F02 | `$` の直後の `\<改行>` だけを見る | — | **0** | 10 |
+| F03 | `$`・`\<改行>`・`(` の並びだけを見る | — | **0** | 16 |
+| N06 | `in_data()` が NODATA を見ない | 50 | 62 | — |
+| J01 | 本文の行末の `\<改行>` をつながない | 10 | 4 | — |
+| J02 | つないだ本文にもデータ区間を与える | 6 | **0**(等価) | — |
+| J03 / J04 | `lstrip_tabs` を外す / 3 行以上をつながない | 2 / 2 | 2 / 2 | — |
+| L01 | 区切りの語の `\<改行>` を記録しない | 6 | 2 | — |
+| L02 | `HQ` が `LW_BSNL` を見ない | 2 | 2 | — |
+| L03 | `HBSNL` を見ない | 2 | **0**(等価) | — |
+| N01・N02・N03・N04・H01・R01・R05・R02・R03・P01・P02 | cycle 2 と同じ | 14・0・26・6・6・6・12・6・6・10・6 | 同じ | — |
+
+- F01 で落ちたのは、B 節の 8 の 3 形(2 モード × 2 経路で 12 件)と、G 節の AC7 の比較 2 件だった。新しい 3 形は NODATA の行を消すと赤になる
+- F02 と F03 は、4e829e34 の判定を狭めた置換で、4ffe74fe のテストでは緑のままだった。F03 は `echo "$\<改行>\<改行>(sudo ls)"` を通す。bash 3.2 と dash はこれを置換として実行する(zsh は実行しない)ので、F2-1 と同じ穴が開く。F02 が通すのは文字だけの `\<改行>` で、shell が実行する形はない。ただし guard のヘッダーは、これらも deny になると書いている。下のテストを足し、F02 は 10 件、F03 は 16 件で赤になった
+- J02 と L03 は、4e829e34 のあとは等価になった。`joined` と `HBSNL` が変えるのは `HDZ` だけで、`HDZ` は END の `add_data()` にしか使われない。条件の `DCTX` は MAIN かつ深さ 0 の文脈、つまりコマンドそのものの文字を読んでいるときだけ真になる。そのため、`joined` か `HBSNL` が立つときは、コマンドの文字に `\<改行>` があり、END で NODATA が立って `in_data()` は 0 を返す。cycle 2 で J02 と L03 のために足した例は、いまは NODATA の規則で deny になる。2 つの条件はどの判定も変えない(guard は変えていない。4ffe74fe のテストのコメントにも、本文だけの規則はもう判定を変えないと書いてある)
+- J01 は 10 件から 4 件、L01 は 6 件から 2 件に減った。以前落ちた例のうち B 節の 3 の形は NODATA で deny になり、残るのは字句解析だけが止める D 節の例(J01 は `<<-EOF` のタブと 3 行つなぎの 2 形、L01 は `EO\<改行>F` の本文の `$(git push origin --force)`)。どちらも赤のまま
+- N06 の 12 件の増加は、B 節の 8 の 3 形の分
+- 22 個の置換を小さな probe(83 形)でも流した。テストにある形で判定が変わった置換は 17 個で、全件で赤になった 17 個と一致した。F02 と F03 で判定が変わったのは、テストになかった形だけだった(evidence の 27)
+
+### 足したテスト(cycle 2 のやり直し、`tests/test-pre-bash-guard.sh`、6 形・14 件)
+
+commit は 180c7389。guard と `lib_json.sh` は変えていない。どの例もいまの guard と旧版で deny になる。shell での動きは、危ない部分を `echo SUBST-RAN >&2` や `echo LINE-RAN` に置き換えて、macOS の bash 3.2、zsh 5.9、dash で確かめた(evidence の 23)。
+
+- B 節の `guard_deny_only_forms` の 8 に `echo "$\<改行>\<改行>(sudo ls)"`(F03 を赤にする)。bash と dash は置換を実行する
+- D 節の `edge_sentinel_deny` に、文字だけの `\<改行>` の 5 形(F02 を赤にする): `$` のないダブルクォートの中、単一引用符の中、推奨のコミットの形(引用符つきの区切りのヒアドキュメントを `git commit -F -` に渡す)の本文の行末、コメントの中、`\\` のあと。3 つの shell はどれも文字として読むので、この deny は誤検知で、guard のヘッダーに書いてある止めすぎにあたる。旧版も deny。データ区間を与えるように変えたら `edge_none` に移す、とコメントに書いた
+- ファイルの先頭の D 節の説明に「a backslash-newline anywhere, also one that is only text」を足した
+- 6 形は、テストのファイルの文字列を bash で読み、probe のファイルとバイト単位で一致することを確かめた
+
+### Failure analysis(cycle 2 のやり直し)
+
+テストの失敗はない。F2-1 は解消した。probe で調べた形の中に、旧版が deny で新版が none になる、shell が実行する形は残っていない。
+
+### Regression checks(cycle 2 のやり直し)
+
+| Previously broken behavior | Status | Evidence |
+| --- | --- | --- |
+| F2-1(ダブルクォートの中で `$` と `(` を `\<改行>` で分けた形) | 直った | 11 形と `xr3` の 7 個が、新版・旧版、root・template、jq あり・なしのすべてで deny。B 節の 8 の 4 形が 2 モードと 2 経路で deny |
+| AC1・AC2・AC3・AC4・AC9 | 通る | A・B・C・F 節。1730 件で ask はなく、jq あり・なしが期待値と一致。`tests/test-lib-json.sh` 126/0 |
+| AC6: 5 つの検査 | 通る | `run-verify.sh` 2 回とも rc 0 |
+| AC7: 旧版の deny は新版でも deny、例外は AC3 に挙げたものだけ | テストの例の集まりで通る。probe の 39 形でも反例はない | G 節は 2 経路とも、旧版 deny から新版 none に変わる形が `intentional_fixes` の 13 件と一致した |
+| AC8: 200 KB のコマンドが 5 秒以内 | 通る | H 節の最大 1.165 秒 |
+| `post_edit_verify.sh`(`lib_json.sh` のもう 1 つの利用者) | 通る | `tests/test-post-edit-verify.sh` 24/0 |
+| awk の方言 | 通る | ubuntu の mawk と gawk で guard 1730/0、lib_json 126/0 |
+
+### Test gaps(cycle 2 のやり直し)
+
+- 字句解析だけが止める 4 形は、新版も旧版も none のまま。旧版より弱くはないので AC7 の対象ではない。`lex_dollar()` が `$` の直後の `\<改行>` を読み飛ばせば止められる(cycle 2 の Proposed fix の (1))
+- J02・L03・N02 は等価の置換で、テストで赤にできない。J02 と L03 の条件(`joined`、`HBSNL`)は、4e829e34 のあとはどの判定も変えない
+- 推奨のコミットの形は、本文のどこかの行が `\` で終わると deny になる(旧版も deny)。この止めすぎは D 節で固定した
+- busybox の awk(alpine)では流していない。Claude Code が実際に呼ぶ hook での効き目は、merge までは確かめられない。計測したカバレッジはなく、22 個の置換は手で選んだもの
+- `tests/test-secret-scan.sh` の固定パスの問題は、この PR の外の既存の問題として残る(この周では起きなかった)
+
+## Verdict(pipeline cycle 2 のやり直し)
+
+- Pass: yes。cycle 2 の /test は F2-1 で fail だったが、guard を 4e829e34 で直し、cycle 2 の中でこの /test をやり直した。`./scripts/run-test.sh` 2 回、`./scripts/run-verify.sh` 2 回、`tests/test-pre-bash-guard.sh` 1730/0、`tests/test-lib-json.sh` 126/0、ubuntu の mawk・gawk が通る。F2-1 の形は新版・旧版とも deny になり、NODATA の行を消す置換は新しい 3 形を赤にする。22 個の置換のうち 19 個が赤、残る 3 個(J02、L03、N02)は等価。/sync-docs に進んでよい
+- Fail: なし
+- Blocked: なし
