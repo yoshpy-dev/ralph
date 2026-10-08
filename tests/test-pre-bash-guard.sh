@@ -57,7 +57,8 @@
 #      boundary, a region longer than one 512-character index block) and
 #      what breaks them (a pipe to sh or sort, a file, >&file, >(...) after
 #      > or as an argument, a here-string, a cut-short pipeline, rg --pre,
-#      nesting, an assignment, a backtick after the message), a sentinel
+#      nesting, an assignment, a backtick after the message, a
+#      backslash-newline anywhere, also one that is only text), a sentinel
 #      match across the guard's 512-character text window, and the known
 #      false positives of the wrapper scan (tech-debt)
 #   E. Broken input (unclosed quotes, parentheses, substitutions, heredocs
@@ -598,6 +599,10 @@ guard_deny_only_forms=(
   $'echo "$\\\n(sudo ls)"'
   $'grep "$\\\n(sudo ls)" file'
   $'git commit -m "$\\\n(sudo ls)"'
+  # Two backslash-newlines between $ and ( still make one substitution
+  # (bash, dash), so a rule that looks only for $, a backslash-newline and
+  # ( right after it would let this through.
+  $'echo "$\\\n\\\n(sudo ls)"'
 )
 check_modes B deny absent bypassPermissions -- "${guard_deny_only_forms[@]}"
 
@@ -911,6 +916,19 @@ edge_sentinel_deny=(
   # dash read this body as text, so the deny is a false positive kept on
   # purpose, as the previous guard denied it too.
   $'cat <<EO\\\nF\nsudo ls\nEOF'
+  # The rule does not look at quoting, so a backslash-newline that is only
+  # text drops every data region too: inside double quotes with no $,
+  # inside single quotes, at the end of a line of a quoted heredoc body
+  # (here the recommended commit form), in a comment, and after an escaped
+  # backslash. bash 3.2, zsh 5.9 and dash read all five as text, so these
+  # denies are false positives kept on purpose, as the previous guard
+  # denied them too. A change that gives one of them its data region moves
+  # it to edge_none.
+  $'echo "never \\\nsudo ls"'
+  $'echo \'sudo ls\\\nx\''
+  $'git commit -F - <<\'EOF\'\ndocs: never git push --force\\\nEOF'
+  $'echo hi # sudo ls \\\necho done'
+  $'echo "x\\\\\nsudo ls"'
   # bash reads a heredoc body right after the newline that ends its line,
   # so here sh is a body line and the pipeline has no last command (bash
   # rejects it); a pipeline cut short has no data regions.
