@@ -8,39 +8,36 @@
 - Triager: Claude Code (main context)
 - Reviewer status: complete
 - Self-review cross-ref: yes
-- Cycle: 2/2 (cap reached)
-- Total reviewer findings: 5
-- After triage: ACTION_REQUIRED=3, WORTH_CONSIDERING=2, DISMISSED=0
+- Cycle: 3/3 (cap raised to 3 by the user; cycle-count.json stays at 2, as the cross-review skill prescribes for a cap raise)
+- Total reviewer findings: 2
+- After triage: ACTION_REQUIRED=1, WORTH_CONSIDERING=1, DISMISSED=0
 
 ## Triage context
 
 - Active plan: docs/plans/active/2026-10-07-guard-deny-only.md(AC7: 旧版が deny にする形は新版でも deny。例外は見張りの一致がすべてデータ区間に収まる場合だけ)
-- Self-review report: docs/reports/self-review-2026-10-07-guard-deny-only.md(2 周目とそのやり直しは merge。LOW はコメントのずれで、c61ab2bf・4ffe74fe で直した)
-- Verify report: docs/reports/verify-2026-10-07-guard-deny-only.md(2 周目とそのやり直しは pass)
+- Self-review report: docs/reports/self-review-2026-10-07-guard-deny-only.md(cycle 3 は merge。MEDIUM の C3-1 と LOW の C3-2 は 849f5411 で直した)
+- Verify report: docs/reports/verify-2026-10-07-guard-deny-only.md(cycle 3 は pass)
 - Implementation context summary:
-  - 1 周目の指摘 3 件は、consult が足した 3 件と合わせて 46806dc9 で直した。グループ・複合コマンド・リダイレクトのある `exec` ではデータ区間を与えない、ヒアドキュメントの読み始めを文脈ごとに持つ、fd の複製を 0〜2 に限る、`printf -v` を読むだけのコマンドから外す、の 4 つ
-  - 2 周目の /test が見つけた F2-1(ダブルクォートの中で `$` と `(` を行継続で分ける形)は 4e829e34 で直した。行継続のあるコマンドにはデータ区間を与えない
-  - この回の review は HEAD e1dfb422 に対して、read-only の sandbox で動いた。テストスイートは回していない(本人の申告)
-- 再現(2026-10-08、`scratchpad/xr3/c2p*.txt` の probe、jq あり・なしの両方)
-  - 指摘 1〜3: 新版 none、旧版 deny
-  - 指摘 4・5: 新版 deny、旧版 none
-  - 指摘 1 の区切り `$'\x45'` は、bash でも zsh でも `E` になる。`E` の行のあとのコマンドが実行される(`sem6.sh`)
-- 同じ型の穴が出るのは 3 回目になる。1 周目のレビュー、2 周目の /test(F2-1)、この回。どれも「データ区間と判定したテキストが、実際には実行されるか、実行される場所に書かれる」形で、見つかるたびに条件を 1 つずつ足してきた
+  - cross-review の 2 周目のあと、ユーザーが上限を 3 に上げた。a9ef82b1 で、データ区間を与える条件を許可リストにした。トップレベルの単純コマンドの 1 語目がすべて読むだけのコマンドか `git` で、値に `/` がないときだけ与える
+  - この回の review は HEAD 24876df7 に対して、read-only の sandbox で動いた。テストスイートは回していない(本人の申告)
+- 再現(2026-10-08、`scratchpad/xr3/c3p*.txt` の probe、jq あり・なしの両方)
+  - 指摘 1: `printf '%n' 'arr[$(sudo id; echo 1)]'` は新版 none、旧版 deny
+  - 同じ型(Codex の指摘にはない): `test -v 'arr[$(sudo id; echo 1)]'` も新版 none、旧版 deny
+  - zsh 5.9(`zsh -f`)に、`echo … >&2` だけを置換に入れた無害な形を流した。`printf '%n'`、`test -v`、`[ -v` の 3 つとも置換を実行した。`printf '\x25n'` は `%n` を文字として出しただけで、実行しなかった(`sem7.zsh`)。macOS の bash 3.2 には `test -v` がなく、`printf` は `%n` を受け付けない
+  - 指摘 2: `git merge -m -- --no-verify feature` と `git commit --trail -- --no-verify -m fix` は、新版・旧版とも none。`git merge -m --no-verify feature`(メッセージが `--no-verify` という文字)は、新版 deny、旧版 none
+- 同じ型の穴(データ区間と判定したテキストが実行される)が出るのは 4 回目になる。今回の形は、読むだけのコマンドの一覧に入れた builtin が、zsh では引数を変数の名前や添字として評価する、というもの
 
 ## ACTION_REQUIRED
 
 | # | Reviewer finding | Triage rationale | Affected file(s) |
 |---|-------------------|------------------|-------------------|
-| 1 | [P1] ヒアドキュメントの区切りの `$'\x45'` を字句解析が `x45` と読む。bash は `E` と読むので、`E` の行のあとの `sudo ls` を guard はヒアドキュメントの本文(データ)として扱い、旧版の deny を消す | 再現した(bash・zsh)。字句解析は `$'…'` の中の `\n`・`\t`・`\r` しか戻さない(ヘッダーの Not covered に記載)。区切りの語に `$` があれば(`$'…'` と `$"…"`)データ区間を与えない、とすれば閉じる。旧版より弱くなる形なので AC7 に反する | `.claude/hooks/pre_bash_guard.sh`(lex_redir、ANSI-C の戻し)、`templates/base/.claude/hooks/pre_bash_guard.sh`、`tests/test-pre-bash-guard.sh` |
-| 2 | [P1] `env -S` の分割した文字列と、その後ろの引数を別々に読む。`env -S 'sh -c "eval \$2" --' echo 'sudo ls'` は 2 番目の引数を実行するが、guard は後ろを独立した `echo` と見てデータ区間を与える | 再現した。前置きのコマンド(`env` など)を読み飛ばしたあとのコマンドが読むだけのコマンドでも、前置きがあればデータ区間を与えない(トップレベルの単純コマンドの元の 1 語目で判定する)とすれば、`env -S` も含めて型ごと閉じる。旧版より弱くなる形 | 同上(cmd_pos、stage_note) |
-| 3 | [P1] zsh の `builtin exec >run.sh` は shell の標準出力を付け替えるが、`cmd_pos` は `builtin` で止まるので `EXEC_SEEN` が立たない。`builtin exec >run.sh; echo 'sudo ls'; sh run.sh` が通る | 再現した。2 と同じ直し方(元の 1 語目が読むだけのコマンドでなければデータ区間を与えない)で閉じる。旧版より弱くなる形 | 同上(cmd_pos、end_cmd) |
+| 1 | [P1] zsh の `printf '%n'` は、引数を代入先の名前として読み、配列の添字の中の置換を実行する。`-v` だけを読むだけのコマンドから外していて、`%n` は外していない。引数がデータ区間になり、見張りの `sudo` の一致が消える | 再現した(zsh)。同じ型として、zsh の `test -v` と `[ -v` も添字の中の置換を実行し、guard は通す。旧版はどちらも deny なので AC7 に反する。直し方の候補は、`printf` を読むだけのコマンドとして扱うのを書式に `%` がない場合に限る、`test` と `[` を読むだけのコマンドの一覧から外す、の 2 つ。AC3 の `printf 'a\ngit push --force'` は `%` を含まないので、変わらない | `.claude/hooks/pre_bash_guard.sh`(stage_note、DATACMD の一覧)、`templates/base/.claude/hooks/pre_bash_guard.sh`、`tests/test-pre-bash-guard.sh` |
 
 ## WORTH_CONSIDERING
 
 | # | Reviewer finding | Triage rationale | Affected file(s) |
 |---|-------------------|------------------|-------------------|
-| 4 | [P2] `git push origin -ofoo` を force push として止める。git は `-o` の値(`--push-option=foo`)と読む。別の語で渡した push option の値も、オプションとして調べてしまう | 再現した。旧版は通していた形で、新版の規則が増やした誤検知。push option を使う人は少ないが、止められた agent は言い直しを強いられる。値を取るオプション(`-o`、`--push-option`、`--repo`、`--receive-pack` など)の値を先に読み飛ばせば直る | `.claude/hooks/pre_bash_guard.sh`(git_rules の push)、template、テスト |
-| 5 | [P2] `git reset HEAD -- --hard` を hard reset として止める。`--` のあとは pathspec で、`--hard` という名前のファイルを unstage するだけ | 再現した。旧版は通していた形で、新版の規則が増やした誤検知。`--hard` という名前のファイルはまれ。commit と `--no-verify` の走査と同じように `--` で止めれば直る | 同上(git_rules の reset) |
+| 2 | [P1] `--no-verify` の走査(merge・rebase・am など)と commit の走査が、値を取るオプションの値を先に読み飛ばさずに `--` を区切りとみなす。`git merge -m -- --no-verify feature` と、`--trailer` を略した `git commit --trail -- --no-verify -m fix` が通る。逆に `git merge -m --no-verify feature` を止める | 再現した。旧版には `--no-verify` の規則がなく、どちらの形も旧版も通すので、旧版からの後退ではない。新しく足した規則に抜け道がある、という問題。`-m` の値に `--` をわざわざ書く形なので、偶然には起きにくい。直すなら、`--no-verify` の走査は `--` で止めない(止める側に倒す)、commit の値を取る長いオプションを `opt_is` の略記で読み飛ばす | 同上(no_verify_rules、commit_rules) |
 
 ## DISMISSED
 
@@ -48,6 +45,26 @@
 |---|-------------------|------------------|----------|
 
 Categories: false-positive, already-addressed, style-preference, out-of-scope, context-aware-safe
+
+## 付録: cycle 2(2026-10-08、HEAD e1dfb422 に対する review)
+
+- Cycle: 2/2(上限に達した)。指摘 5 件、分類は ACTION_REQUIRED 3・WORTH_CONSIDERING 2・DISMISSED 0。ユーザーは「上限を 3 に上げて直す」を選び、a9ef82b1 と 849f5411 で直した
+- 再現(`scratchpad/xr3/c2p*.txt` の probe、jq あり・なしの両方)。指摘 1〜3 は新版 none・旧版 deny、指摘 4・5 は新版 deny・旧版 none。指摘 1 の区切り `$'\x45'` は、bash でも zsh でも `E` になり、`E` の行のあとのコマンドが実行される(`sem6.sh`)
+
+### cycle 2 の分類(ACTION_REQUIRED)
+
+| # | Reviewer finding | Triage rationale | Affected file(s) |
+|---|-------------------|------------------|-------------------|
+| 1 | [P1] ヒアドキュメントの区切りの `$'\x45'` を字句解析が `x45` と読む。bash は `E` と読むので、`E` の行のあとの `sudo ls` を guard はヒアドキュメントの本文(データ)として扱い、旧版の deny を消す | 再現した(bash・zsh)。区切りの語に `$` があればデータ区間を与えない、とすれば閉じる | `.claude/hooks/pre_bash_guard.sh`(lex_redir)、template、テスト |
+| 2 | [P1] `env -S` の分割した文字列と、その後ろの引数を別々に読む。`env -S 'sh -c "eval \$2" --' echo 'sudo ls'` は 2 番目の引数を実行するが、guard は後ろを独立した `echo` と見てデータ区間を与える | 再現した。トップレベルの単純コマンドの元の 1 語目で判定する許可リストにすれば閉じる | 同上(cmd_pos、stage_note) |
+| 3 | [P1] zsh の `builtin exec >run.sh` は shell の標準出力を付け替えるが、`cmd_pos` は `builtin` で止まるので `EXEC_SEEN` が立たない | 再現した。2 と同じ直し方で閉じる | 同上(cmd_pos、end_cmd) |
+
+### cycle 2 の分類(WORTH_CONSIDERING)
+
+| # | Reviewer finding | Triage rationale | Affected file(s) |
+|---|-------------------|------------------|-------------------|
+| 4 | [P2] `git push origin -ofoo` を force push として止める。git は `-o` の値と読む | 再現した。旧版は通していた形で、新版の規則が増やした誤検知。値を取るオプションの値を先に読み飛ばせば直る | 同上(git_rules の push) |
+| 5 | [P2] `git reset HEAD -- --hard` を hard reset として止める。`--` のあとは pathspec | 再現した。旧版は通していた形で、新版の規則が増やした誤検知。`--` で止めれば直る | 同上(git_rules の reset) |
 
 ## 付録: cycle 1(2026-10-08、HEAD 27581ff5 に対する review)
 
