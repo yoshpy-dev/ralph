@@ -733,7 +733,8 @@ edge_deny=(
   'git commit -m x -n'
   'git rebase --no-verify main'
   'git am --no-verify x.patch'
-  # Abbreviated long options (at least 4 characters, =value dropped).
+  # Abbreviated long options (-- and at least one more character, =value
+  # dropped).
   'git commit --mess="$(id)"'
   $'git commit --fi - <<EOF\n$(id)\nEOF'
   $'git commit --fi=- <<EOF\n$(id)\nEOF'

@@ -50,17 +50,18 @@
 #        (also <<"EOF" and <<\EOF): a quoted delimiter expands nothing.
 #        git commit -F - (or --file=-) fed a heredoc whose delimiter is not
 #        quoted and whose body has $( or a backtick is denied too.
-#      - --no-verify on git commit, push, merge, rebase, or am; on commit
+#      - --no-verify on git commit, push, merge, rebase, am, or pull; on commit
 #        also -n and a short-flag cluster with n before any flag that takes
 #        a value (m F C c t; u and S take an attached value), so -nm is
 #        denied while -mn (message "n") and -uno are not.
 #      - git -c core.hooksPath=... (key in any case; also --config-env)
 #        before the subcommand.
 #      Long options may be abbreviated, as git allows: an argument that
-#      starts with -- and, without its =value, is at least 4 characters and
-#      a prefix of --force, --force-with-lease, --hard, --no-verify,
-#      --message, or --file counts as that option (--ha is --hard). An
-#      abbreviation git rejects as ambiguous is denied too; it fails anyway.
+#      starts with -- and, without its =value, has at least one more
+#      character and is a prefix of --force, --force-with-lease, --hard,
+#      --no-verify, --message, or --file counts as that option (--h is
+#      --hard). An abbreviation git rejects as ambiguous is denied too; it
+#      fails anyway.
 #   5. Fail closed. Nesting deeper than 4 levels, more re-read text than 8
 #      times the command plus 64 KB, or $(...) and ${...} inside each other
 #      more than 24 levels deep (the command itself counts as one) is denied
@@ -77,8 +78,10 @@
 #      data region, which only the top level of the command has (nothing
 #      inside $(...), backticks, or re-read text is data):
 #      (a) the arguments of a command that only reads data (DATACMD below:
-#          echo, printf, cat, grep, ls, ...; rg without --pre, printf
-#          without -v), from its first argument to the end of the command,
+#          echo, printf, cat, grep, ls, ...; not test or [; rg only without
+#          --pre and without a word in ANSI-C or locale quoting; printf only
+#          without -v and with no %, $ or backtick in any word as written),
+#          from its first argument to the end of the command,
 #          without redirections and substitutions, when the command and
 #          every later stage of its pipeline are such commands and send
 #          output only to the terminal, the next stage, /dev/null,
@@ -1157,7 +1160,7 @@ function reset_rules(ctx, i, n,    a) {
     if (opt_is(a, "--hard")) deny("hard_reset")
   }
 }
-# no_verify_rules(ctx, i, n): git merge, rebase and am. The scan does not
+# no_verify_rules(ctx, i, n): git merge, rebase, am and pull. The scan does not
 # stop at --, since a value-taking option can take -- as its value (git
 # merge -m -- --no-verify still skips the hooks); a later word that only
 # looks like the flag (a message --no-verify) is denied as well.
