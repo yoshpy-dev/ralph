@@ -180,3 +180,77 @@ cycle 1 の Positive notes はそのまま有効。S2c はそれを弱めてい�
 - 依頼の 5 番(同じ型の残り): テストの外で新しい形を作って探すことはしていない。コードを読んで見つけたのは P2-5 だけ
 - `RESW`(`:1269`)は閉じた一覧で、bash の `coproc` など、一覧にない予約語がある。それらが出力の行き先を変えるかどうかは確かめていない
 - P2-5 の形を shell がどう読むか
+
+---
+
+## pipeline cycle 2 の再実行(F2-1 の修正 4e829e34 のあと)
+
+- Date: 2026-10-08
+- Reviewer: reviewer subagent (Claude)。pipeline の 2 周目の中で、/test の F2-1 を直したあとに回し直した self-review。cycle は 2 のまま。ID は前の節と混ざらないよう `R2-` で始めた
+- 対象: `git diff 8f852e4f..HEAD`(HEAD 5f044db2)。guard を変えたのは 0ef6fc4f・63b6743a(ヘッダーのコメントだけ)と 4e829e34(END の 1 行とコメント)。テストは 3e9afad6(tester が足した 6 形)と 4e829e34(B 節の 8 の 3 形)。残りは記録(verify と test の報告、insight、plan の Progress)。root と template の guard は `cmp` で同一
+- していないこと: テストスイートと静的解析は流していない。下の判定は、hook に case ファイルを渡した結果(scratchpad の `sr4/` と `xr1/run.sh`。新版と旧版を、jq あり・なしの両方で比べた)と、`echo` だけの形を shell に渡した結果による。新しい回避の形は探していない
+
+### 4e829e34 が変えたこと
+
+END の `set_text(IN)` の直後(`.claude/hooks/pre_bash_guard.sh:1305`)で、生のコマンドに `\` と改行の並びがあれば `NODATA = 1` にする。`NODATA` を読むのは `in_data()`(`:842`)だけなので、そのコマンドのデータ区間はすべてなくなり、見張りの 4 規則が旧版どおりに決める。ヘッダーの方針の段落(`:98-109`)と `in_data()` のコメント(`:837-840`)にこの理由を書き、`guard_deny_only_forms` の 8 に F2-1 の 3 形を足した。
+
+### 確認したこと
+
+1. `NODATA` の行の位置と範囲
+   - awk は `RS = "\001"`(`:1256`)で読むので、改行はレコードの中に残る。`IN` はレコードを `"\001"` でつなぎ直す(`:1298`)ので、コマンドと同じ文字列になる。違うのは末尾の `\001` が落ちることだけで、行継続には関係しない
+   - 立てる場所は END の最初で、字句解析より前にある。`NODATA` を 0 にするのは BEGIN(`:1295`)だけで、`in_data()` を呼ぶ `sentinel()` は END の最後(`:1325`)に走る。そのため、行継続がコマンドのどこにあっても、全体のデータ区間に効く。働きは区間を消す向きだけで、字句解析の deny は弱めない
+   - `IN` に出ない行継続があるかを 3 つ確かめた。(a) CRLF: `\`・CR・LF の並びは `index` に当たらない。bash 3.2、bash 5.2(ubuntu:24.04)、zsh 5.9、dash に `echo "$\<CR><LF>(echo SUBST-RAN)"` を渡すと、4 つとも置換を実行せず、文字のまま表示した(`sr4/s2-dq-bscrlf.sh`)。CR があると行継続にならないので、guard が見る必要はない。hook は同じ形(`sr4/a2-dq-bscrlf.txt`)を新版 none/none、旧版 deny/deny とする。shell が実行しない形なので、データ区間の扱いとして正しい。(b) jq のない経路: `lib_json.sh` の awk は左から 1 つずつ戻すので、JSON の `\\\n` は `\` と改行になる。JSON の `\\u000a`、`\\n`、`\\\u000a`、大文字の `\\u000A` を payload に直接書いて渡した(`sr4/u1.json`〜`u4.json`)。jq あり・なしとも `\` と改行に戻り、新版・旧版とも deny/deny だった。(c) `command="$(...)"` は末尾の改行を落とすので、コマンドの最後にある行継続は `IN` に出ない。その後ろに文字がないので、shell がつなぐ相手もない
+2. AC3 と、意図した誤検知の修正
+   - `ac3`(`tests/test-pre-bash-guard.sh:601-635`)と `intentional_fixes`(`:1109-1123`)の形には、`\` と改行の並びが 1 つもない(`printf 'a\ngit push --force'` の `\n` は 2 文字のまま)。そのため、この 2 つの判定は 4e829e34 で変わらない。`edge_none` にも行継続を含む形はない
+   - ただし、同じコマンドのどこかに行継続があると、意図した修正が効かなくなる(R2-1)
+3. 3e9afad6 のテストと新しいコメント: R2-2 と R2-3
+4. hook で確かめた形(新版 jq あり/なし、旧版 jq あり/なし)
+   - F2-1 の形: `sr4/a1`(`echo "$\<改行>(...)"`)、`a3`(`printf '%s'`)、`a4`(`git tag -a v1 -m`)、`a5`(`"x$\<改行>\<改行>(...)"`)、orchestrator の `xr3/f1.txt`〜`f7.txt` は、新版・旧版とも deny/deny
+   - 字句解析が止めるべき形: `sr4/d1`(`git commit -m "$\<改行>(id)"`)と `d2`(中身が `git push origin --force`)は、新版・旧版とも none/none。旧版より弱くはない。ただ、bash と dash はこの置換を実行する(`sr4/s1-dq-bsnl.sh`: bash 3.2・bash 5.2・dash は `SUBST-RAN` を出した。zsh は行継続を取ったうえで `$(echo SUBST-RAN)` を文字のまま出した)。/test の Test gaps に挙がっている点なので、下の Tech debt に入れた
+   - triage の case ファイル: `xr1/` の 54 件のうち 53 件は deny/deny で、`v-ml4.txt` だけ none/none(前の節と同じ)。`xr3/q1.txt`(P2-5 の形)は none/none
+   - 止めすぎる側: R2-1 の 7 形は、8f852e4f の guard で none、HEAD で deny、旧版で deny
+   - 確かめた形の中に、旧版より弱くなったものはない
+
+### 再実行の findings
+
+| ID | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| R2-1 | LOW | maintainability | ヘッダーの方針の段落(`.claude/hooks/pre_bash_guard.sh:103-106`)は、行継続でデータ区間を消す代価として、単一引用符の中の行継続だけを挙げている。plan の Progress の F2-1 の行も同じ書き方をしている。実際には `index()` が文字の並びしか見ないので、次の場合もコマンドのデータ区間がすべて消える。shell が取り除き、字句解析も同じに読む引用符の外の行継続(`lex_cmds` の `:253`)。引用符つき区切りのヒアドキュメントの本文の行末の `\`。コメントの行末の `\`。行継続ではない `\\` と改行の並び。AC3 の中心にある推奨のコミット形もこれに当たる。`git add a \<改行>  b && git commit -m "$(cat <<'EOF' …)"` は deny になり、その理由の文は「代わりにシングルクォートまたは HEREDOC (<<'EOF') を使用してください」と、すでに使っている形を勧める。旧版も deny にしていたので、AC7 には反しない。また END のコメント(`:1301-1302`)の「`"$\ newline (cmd)"` is a substitution」は bash と dash にしか当てはまらない。zsh 5.9 は行継続を取るが、置換にはしない(テストの 8 のコメントは「in bash and dash」と書き分けている) | `sr4/` の 7 形。`b1`(力ずくの push の文字列を `grep -n` で探し、行継続のあとにファイル名)、`b2`(行継続のあとの推奨のコミット形。本文に sudo の語)、`b3` と `c3`(推奨のコミット形の本文の行末に `\`)、`b4`(コメントの行末に `\`)、`b5`(`echo foo\\<改行>…`)、`c2`(行継続のあとの、見張りの語を含まない推奨のコミット形)。どれも 8f852e4f の guard では none、HEAD では jq あり・なしとも deny、旧版も deny。行継続のない `b6` と `c1` は、新版で none。shell では、`s3`(`\\` と改行)と `s4`(コメントの行末の `\`)の次の行が、bash・zsh・dash で別のコマンドとして走った。`s5`(推奨の形の本文の行末の `\`)は、bash 5.2・zsh・dash では文字のまま残った | 括弧の中を次の意味に書き直す。「`\` と改行の並びがあればデータ区間を消す。shell がそれを文字として残す場所(単一引用符、引用符つき区切りのヒアドキュメント、コメント、`\\` の後ろ)でも、引用符の外のふつうの行継続でも消すので、行継続で書いた複数行のコマンドは旧版の規則で決まる」。END のコメントは「bash and dash」と書く。plan の Progress も合わせる。/sync-docs では、tech-debt の guard の限界の行の (a) に誤検知の型として足し、回避策(行継続を使わない、コマンドを分ける)を書く。この止めすぎを意図どおりとテストで固定するなら、`c2` の形を `edge_sentinel_deny` に 1 つ足し、規則を狭めたときに `edge_none` へ移すと書く |
+| R2-2 | LOW | maintainability | `read_body` の本文ごとの規則(`:587` の `!joined && !HBSNL[h]`)は、4e829e34 のあとでは判定を変えない。`HDZ` を立てるのはトップレベルの本文だけで、その本文は `IN` の一部にあたる。つないだ本文(`joined`)にも、行継続を含む区切りの語(`HBSNL`)にも `\` と改行の並びがあるので、`NODATA` が先にすべての区間を消す。その結果、3 つのずれが出た。(1) ヘッダーの「(only that body loses its region)」(`:107-109`)は、結果の上では成り立たない。この括弧書きは P2-1 の修正(0ef6fc4f)で入った。4e829e34 のあとは、P2-1 の前の書き方(コマンドのデータ区間をすべて消す)の方が結果に合う。(2) 3e9afad6 が J02 と L03 を赤にするために足した 2 形は、もうその規則を固定していない。`guard_deny_only_forms` の 3 にある、`cat <<EOF` の本文で `$\` と `(…)` をつないだ形(`tests/test-pre-bash-guard.sh:570`)と、`edge_sentinel_deny` にある、区切りの語を `EO\<改行>F` と書いた形(`:909`)の 2 つ。`:905-908` のコメントの「a change that gives such a body its data region moves this to edge_none」も成り立たない。(3) `:107` の行「the command. A heredoc」だけが短く、段落の折り返しが途中で止まっている | 写しの hook で `:587` の条件を `if (DCTX[HX[h]])` に変えた変異体(`sr4/m-hdz/`)では、2 形とも deny のまま。F2-1 の行を消した変異体(`sr4/m-nodata/`)では、8 の 3 形が none になり、この 2 形は deny のまま残った(本文ごとの規則が止める)。2 つの仕組みが重なっているので、片方を外しても 2 形は赤にならない | ヘッダーの括弧書きを「行継続の規則がある間、この本文の規則は判定を変えない。行継続の規則を狭めたときのために残す」という意味に直し、`:107` から折り返し直す。テストの 2 か所のコメントには、いまは行継続の規則でも deny になること、J02 と L03 の変異はこの 2 形では赤にならないことを書く。/test の cycle 2 の mutation の表(J02 と L03 の「足したあと」の 6 件と 2 件)は 4e829e34 の前の値なので、/test の再実行で測り直す |
+| R2-3 | LOW | readability | `guard_deny_only_forms` の前のコメント(`tests/test-pre-bash-guard.sh:537-544`)は、配列にある形の種類を並べているが、4e829e34 が足した 8 の種類(ダブルクォートの中で `$` と `(` を行継続で分けた形)を挙げていない。出どころも「cross-review と follow-up probes」だけで、F2-1 が /test の報告から来たことが分からない | `:537-544`、`:591-596` | 種類の一覧に「a backslash-newline between $ and ( inside double quotes (/test F2-1)」を足す |
+
+### 前の節の指摘の状態
+
+| 指摘 | 状態 | 根拠 |
+| --- | --- | --- |
+| P2-1 | 0ef6fc4f で直したが、4e829e34 のあとは括弧書きが結果に合わない | R2-2 |
+| P2-2 | 解消 | ヘッダーの (6)(a)(`:79-86`)に、fd 0〜2 への複製、`>&-`、`&>` と `&>>` を除くこと、`printf without -v` が入った(0ef6fc4f・63b6743a)。`redir_safe`(`:857-863`)と合う |
+| P2-3 | 直さずに記録へ回すと plan の Progress にある。tech-debt にはまだない | `docs/tech-debt/README.md` は 8f852e4f から変わっていない |
+| P2-4 | 未。/sync-docs の担当 | 同上 |
+| P2-5 | orchestrator が bash・zsh・dash で確かめ、穴ではないとした(plan の Progress)。shell 側は確かめ直していない | hook は `xr3/q1.txt` を新版・旧版とも none/none |
+| P2-6 | 未。この周の commit は (1)〜(4) のどれも変えていない | `git diff 8f852e4f..HEAD -- .claude/hooks/pre_bash_guard.sh` はヘッダーと `in_data()` のコメント、END の 1 行だけ |
+
+### Tech debt identified
+
+この周が上限 2 の最後の周なので、直さない LOW はそのまま持ち越しになる。この commit では `docs/tech-debt/README.md` を変えていない。/sync-docs で、前の節の 3 行と合わせて、guard の限界の行にまとめてほしい。
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| guard のヘッダーとテストのコメントが 4e829e34 の結果とずれている(R2-1 の書き方、R2-2、R2-3) | コメントが実際の判定と違うので、次に行継続の規則を狭める人が、どのテストが本文ごとの規則を守っているかを読み違える | コメントだけの修正でも guard の変更になり、self-review → verify → test をもう一度回すことになる | 次に guard を変える PR | この節の R2-1、R2-2、R2-3 |
+| 行継続を含むコマンドの誤検知(R2-1) | 推奨のコミット形を含め、行継続で書いた複数行のコマンドは、データの中の語でも止まる。理由の文が使っている形を勧める | 旧版も止めていた形で、AC7 には反しない。狭めるには、下の字句解析の修正が先に要る | 誤検知の報告、または下の行を直すとき | この節の R2-1 |
+| 字句解析が `$` の直後の行継続を読み飛ばさない(`lex_dollar` の `:388`) | `git commit -m "$\<改行>(id)"` のような形を、字句解析のコミットの規則が見ない。bash と dash は置換を実行する。旧版も none | 4e829e34 は見張りに任せる方を選んだ(consult と合意)。字句解析の修正(/test の Proposed fix の (1))は `lex_dq`・`lex_brace`・`lex_hd`・`lex_word` からの経路を変えるので、この周では広すぎる | 次に guard を変える PR。直したら、行継続の規則を狭められるかも見直す | /test の cycle 2 の F2-1 と Test gaps、この節の確認の 4 |
+
+### Recommendation(pipeline cycle 2 の再実行、現時点)
+
+- Merge: merge(CRITICAL・HIGH・MEDIUM はない。F2-1 はデータ区間の側で閉じ、確かめた形の中に旧版より弱くなったものはない。LOW の 3 件は、コメントと記録のずれと、旧版と同じ止めすぎ)
+- 前の節までの Merge 行はそれぞれの時点の判定で、現時点の判定はこの行
+- Follow-ups:
+  - /test: cycle 2 の mutation の表を測り直す。J02 と L03 は、4e829e34 のあとは赤にならないはず(R2-2)。F2-1 の行を消す変異が 8 の 3 形で赤になることも見る(この review の `sr4/m-nodata/` では none になった)
+  - /sync-docs: 上の Tech debt の 3 行と、前の節の 3 行を guard の行にまとめる。P2-4 の行番号は 4e829e34 でまた動いた(guard は 1370 行)
+  - R2-1 から R2-3 のコメントは、直すなら次の PR で
+
+### 未確認の点
+
+- Windows: Cygwin の bash の `igncr` のように CR を捨てる設定では、`\<CR><LF>` が行継続になりうる。Git Bash などでの既定値は確かめていない。ralph のリリースは darwin と linux だけを作る
+- 4e829e34 のあとの guard を、mawk・gawk・busybox の awk で流してはいない。`index()` と文字列の連結だけの 1 行で、方言の差はおそらくない。未確認です
+- R2-1 の止めすぎがどれくらいの頻度で起きるかは測っていない
