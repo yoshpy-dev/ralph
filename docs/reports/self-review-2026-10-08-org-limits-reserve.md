@@ -1,23 +1,97 @@
 # Self-review report: org-limits-reserve
 
-- Date: 2026-10-08
+- Date: 2026-10-09 JST(ファイル名は計画の日付)
 - Plan: docs/plans/active/2026-10-08-org-limits-reserve.md
-- Branch: feat/org-limits-reserve(HEAD b5a2ecc6、base 51855166)
-- Reviewer: reviewer subagent (Claude)、パイプライン 1 回目(cycle 1)
-- Scope: diff の品質だけ(命名、読みやすさ、不要な変更、typo、null 安全、デバッグ用コード、秘密情報、例外処理、安全性、保守性、コメントとヘルプ文の正確さ)。対象は `git diff 51855166...HEAD` の 28 ファイル(+2880/-74)。コードは 620458d7(設定)、11fc2261 と 8fe95acd(org の層)、78e46f36(CLI)、文書は fd3e3b47、残りは計画。重点は、`spawn.go` のロックの中の判定の順序と `rejected` の書き分け、idempotent の経路が既存の座席の状態を変えないこと、`reserve.go` のパスの規則と重なりと「走っている org」の導出、`verbs.go` の補償(`reserveAgain`)、CLI の全体の上限の読み元、doc comment・help・`/org` skill とコードの一致。仕様への適合、テストの網羅、文書のずれは見ていない(`/verify`、`/test`、`/sync-docs` の担当)。テスト、linter、型検査、formatter、`check-sync.sh` 類は実行していない
+- Branch: feat/org-limits-reserve(HEAD 710de10d、base 51855166)
+- Reviewer: reviewer subagent (Claude)、パイプライン 2 回目(cycle 2、既定の上限の最後の回)
+- Scope: diff の品質だけ。cycle 1 の self-review(d8ec84da)以降の差分 `git diff d8ec84da..HEAD -- ':!docs'` の 13 ファイル(+348/-81)が対象。コードは 8dd19634(文言)、975df92b と afcbc6c2(cross-review の ACTION_REQUIRED の修正)、c3a95c48(テスト)、文書とヘルプ文は 76d1cf1c(`/sync-docs` の入力)。重点は、`validateMaxOrgs` が `ValidateOrgWideCapacity` の挙動と文言を保つか、動いていない leader の予約が上限の判定なしに記録される経路がほかにあるか、そこを plain rejection にした選択、76d1cf1c のヘルプ文とコードの一致。仕様への適合、テストの網羅、文書のずれは見ていない(`/verify`、`/test`、`/sync-docs` の担当)。テスト、linter、型検査、formatter、mutation は実行していない
+- 番号の付け方: cycle 1 の finding は F-1〜F-11(付録 A に原文を残す。tech-debt の行 172〜176 と verify・plan が F 番号で指している)。この回の finding は `C2-` を付ける。同じ報告の上書きで番号が付け替わらないようにするため
 
 ## Evidence reviewed
 
-- `git diff 51855166...HEAD` の非テストのコードを全行読んだ(`reserve.go`、`spawn.go`、`envelope.go`、`seat.go`、`verbs.go`、`verbs_all.go`、`statedir.go`、`cli/org.go`、`config.go`、`ralph-config.sh`、`templates/base/ralph.toml`)。テストは `verbs_test.go`、`verbs_all_test.go`、`envelope_test.go`、`statedir_test.go`、`config_test.go`、`watch_test.go` の差分と、`spawn_test.go` の `TestOrgSpawn_Reserve_ExistingLeader` を読み、残りは宣言の一覧と先頭を見た。計画は全行読んだ
-- 判定の順序: `spawnCapacityErr`(`spawn.go:1063`)は max_seats、`ValidateOrgWideCapacity`(max_orgs、max_total_seats の順)、`reservationDecision` の順で、本番の経路(`checkCapacityAndStart`、`:1032`)と dry-run(`:500`)が同じ関数を呼ぶ。`rejected` を書く経路は `o.reject` を通る拒否(max_seats、max_orgs、max_total_seats、予約の判定)、書かない経路は入力検査(`:430-441`、書かないと step 0 の doc に明記)と `idempotentRespawn` の拒否(`:1085-1099`、書かない理由が doc にある)で、書き分けは doc comment と合う。`rejected` は状態のイベント、`scope_reserved` は座席 id の空な非状態イベントなので、idempotent の経路が追記する `scope_reserved` は Roster の座席の状態を動かさない(`seat.go:44-50` と `stateEvents`)
-- 予約の記録の位置: `checkCapacityAndStart` はロックの中で `scope_reserved`、次に `spawn_started` を追記する。`Spawn` の locked closure は Phase 1 と Phase 2 の両方でここを通り、stale な座席の Phase 2 でも判定をやり直す。2 回目の `idempotentRespawn`(`:760`)は Phase 2 の新しい `events` を渡している
-- `reserve.go`: `normalizeReservePath` を `.`、`./`、`a//`、`a/.`、`./.`、`a/..`、`...`、絶対パス、空白だけ、制御文字で読み合わせた(`path.Clean` と `HasSuffix` の組み合わせで、正規化は冪等)。`reservePathsOverlap` は区切りの単位で、ファイルとディレクトリは「ファイルがディレクトリの下にあるか」だけを見る。`currentOrgLives` は最後の `disbanded` 以前を `i <= d` で飛ばし、補償で `disbanded` の後に書いた `org_workspace_created` と `scope_reserved` は数える。`reservationBeforeLastDisband` の `events[:d]` は、`d` より前のもう 1 つ前の `disbanded` から数え直すので、その生涯の最後の予約を返す
-- 補償: `CloseDeferredSelfWorkspace`(`verbs.go:1111`)の `reserveAgain` は、今予約があれば何もせず、`disbanded` の前の予約があれば `paths=<paths> restored: <why>` で書く。`reservedPathsFromDetails` は最初の空白で切るので、`restored:` の注記は読み戻しに影響しない。`force` では呼ばれない(`:1100` の `return` が先)
-- CLI の読み元: `withMainWorktreeOrgLimits`(`cli/org.go:148`)は `configPath != ""` と `source != "git-main-worktree"` で何も変えず、main の `ralph.toml` が読めなければエラーで止める。`MainWorktreeRoot` は `.harness/state/org` の 3 要素を `filepath.Dir` で戻し、`Join` で元の dir と一致するかを確かめる。`rt.Spawn` の呼び出し元は `cli/org.go:436` と `:558` の 2 つだけで、どちらも `newOrgSpawnRuntime` を通る
-- `/org` skill: `.claude/skills/org/SKILL.md` の差分を全行読み、コードと突き合わせた。4 面は `diff -q` で `.claude/skills/org/SKILL.md` と `.agents/skills/org/SKILL.md`、`templates/base/` の 2 面が同じ内容
-- 機械的な確認: `git diff --check` は空、追加行に末尾の空白、U+FFFD、`fmt.Print`、`println`、`TODO`、`t.Skip`、`time.Sleep` はない。`scripts/ralph-config.sh` と `templates/base/scripts/ralph-config.sh` は同じ差分。`RALPH_ORG_MAX_ORGS` / `RALPH_ORG_MAX_TOTAL_SEATS` を読む Go 側のコードはなく、`RALPH_ORG_MAX_SEATS` と同じく同期テストのための値
+- `git diff d8ec84da..HEAD -- ':!docs'` の全行。`internal/org/envelope.go`、`internal/org/spawn.go`、`internal/config/config.go`、`internal/cli/org.go`、`AGENTS.md`、`templates/base/ralph.toml`、`templates/base/docs/quality/quality-gates.md`、skill の 4 面、`spawn_test.go` と `verbs_test.go` の追加分。コミットの親子は `git log --format='%h parent=%p'` で確かめ、一直線(8dd19634 → fbb04f83 → c3a95c48 → fff1ec23 → 76d1cf1c → 196205f8 → 6600b3a9 → 975df92b → afcbc6c2 → 710de10d)で、この回のコード変更はすべて上の範囲に入っている
+- `validateMaxOrgs` の同値性: `git show d8ec84da:internal/org/envelope.go` の `ValidateOrgWideCapacity` と HEAD を並べて読んだ。条件(`len(runningOrgs) >= cfg.MaxOrgs && !slices.Contains(runningOrgs, orgID)`)、`running == ""` のときの `none`、`fmt.Errorf` の書式と引数の順、max_orgs → max_total_seats の順序、上限が 0 以下の hand-built config の扱いは同じ。変わったのは仮引数が `req.OrgID` から `orgID` になった点だけ
+- 予約を記録する経路: `grep -rn 'scopeReservedEvent\|EventScopeReserved' internal cmd` で非テストの呼び出しを数えた。`checkCapacityAndStart`(`spawn.go:1040`)、`idempotentRespawn`(`:1110`)、`dryRunSpawn`(`:1704`、dry-run のイベント)、`reserveAgain`(`verbs.go:1233`、補償)の 4 つ。`idempotentRespawn` の呼び出し元は Phase 1(`:606`)と Phase 2(`:762`)の 2 つで、どちらも `Roster` の座席をそのまま渡す
+- `Roster`(`manifest.go:171`)、`currentOrgLives`(`reserve.go:187`)、`RunningOrgs`(`:233`)、`reservationDecision`(`:283`)、`stateEvents` と `activeEvents`(`seat.go:59`、`:77`)、`reject`(`spawn.go:1671`)を読み、plain rejection の理由と、座席が `spawned` なのに Active でない状態を作る経路を確かめた
+- 76d1cf1c のヘルプ文: `orgWideLimitsHelp` を `withMainWorktreeOrgLimits`(`cli/org.go:148`)と `ResolveOrgStateDir`(`statedir.go:59-72`)、`MainWorktreeRoot`(`:81`)に突き合わせた。`status` の `Long` は `printStatusTable` と `orgStatusJSON`(`omitempty`)に突き合わせた
+- skill の差分(補償の例外、設定の読み元、末尾の `/` のないパス、`{{SCOPE}}`)をコードと突き合わせた。4 面は `cmp` で同一、`docs/quality/quality-gates.md` と `templates/base/docs/quality/quality-gates.md` の envelope validation の行は同じ文
+- 機械的な確認: `git diff --check d8ec84da..HEAD` は空。追加行に U+FFFD、`fmt.Print`、`println`、`TODO`、`FIXME` はない。出荷物(`internal`、`templates/base`、`.claude`、`.agents`、`scripts`、`AGENTS.md`)で `director` の語は 0 件
+- tech-debt の行 170、172〜176 を HEAD の内容と突き合わせた。cycle 1 の推奨で足した行で、この回のコミットが事実を変えたものがないかを見た
+
+## 依頼された 4 点の結論
+
+1. `validateMaxOrgs` は `ValidateOrgWideCapacity` と同じ挙動、同じ文言を返す(上の Evidence)。`ValidateOrgWideCapacity` の doc も、まだ合っている。
+2. 動いていない leader の予約は、上限を見ずに記録される経路が残っていない。`idempotentRespawn` は座席が Active でないとき `validateMaxOrgs` を通り、`checkCapacityAndStart` は `spawnCapacityErr` の全判定を通る。残る 2 つは、`reserveAgain`(補償。判定しないことは行 172 に記録済み)と dry-run のイベント(数えられない)。座席が `spawned` のまま Active でなくなるのは、`disbanded` が `stopped` なしで続いた古い台帳だけ。現行の `Disband` は先に `stopped` を書き、`stop_failed` は状態のイベントではないので座席は Active のまま残る。
+3. plain rejection(`rejected` を書かない)の選択は適切。`rejected` は状態のイベント(`stateEvents`)なので、書くと座席の最新の状態が `spawned` から `rejected` に変わり、次の予約なしの再試行が idempotent の返しを失って、新しい spawn に進む。ただし doc の理由はこの枝に当てはまらない(C2-2)。
+4. ヘルプ文は内容がコードと合う。`status` の `Long` は `printStatusTable` と JSON の `reservation`(予約がなければ出ない)に合う。`orgWideLimitsHelp` の読み元の条件は `withMainWorktreeOrgLimits` と合う。直す点は文の組み立てだけ(C2-4)。
 
 ## Findings
+
+<!-- Area recommended values: naming, readability, unnecessary-change, typo,
+     null-safety, debug-code, secrets, exception-handling, security, maintainability -->
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| C2-1 LOW | readability | `idempotentRespawn` の doc で「decided first」が 2 回出て、何が先か読み取れない。1 段落目は「the reservation is decided first against the same locked events」、2 段落目は「max_orgs is decided first with validateMaxOrgs」。コードの順序は max_orgs、予約、座席を返す、の順。`Spawn` の手順 1 の「the reservation is decided first, after max_orgs when the seat is not active」も、1 文の中で「first」と「after」が食い違う。3 か所とも同じ編集で書かれ、互いに矛盾して読める | `spawn.go:345-346`、`:1081`、`:1088`、`:1100-1112` | 「座席を返す前に」の意味で書き直す。`Spawn` の手順 1: 「With Reserve, max_orgs (when the seat is not active) and then the reservation are decided before the seat is returned (idempotentRespawn).」。`idempotentRespawn` は 1 段落目の「first」を「before the seat is returned」に、2 段落目を「max_orgs is decided before the reservation」にする |
+| C2-2 LOW | maintainability | 新しい枝の拒否は plain rejection で、その選択は正しい。ただし理由が書かれていない。doc の理由は「a `rejected` for the seat would replace `spawned` as its latest state event (for a running leader, showing it inactive)」だが、この枝の座席はすでに inactive なので「inactive に見える」は当てはまらない。実際の理由は、`rejected` が状態のイベントなので次の予約なしの再試行が idempotent の返しをせず、新しい spawn を始めてしまうこと。計画側も、AC1 は「台帳に `rejected` が残る」、進捗(156 行)は「AC1 にコードを合わせる直し」と書き、この枝が `rejected` を書かないことには触れていない。AC1 の文字どおりには満たさない経路が、満たしたように読める | `spawn.go:1094-1097`(doc)、`:1100-1103`、`seat.go:59-67`(`stateEvents` に `EventRejected`)、`spawn.go:1671-1676`(`reject` は `SeatID: p.SeatID` で書く)、計画 89 行(AC1)と 156 行 | doc の括弧を「for an inactive seat it would also stop the next retry from being returned as idempotent」の趣旨に差し替える。計画には「この枝は AC14 の拒否と同じく `rejected` を書かない」の 1 行を足す。どちらもコメントと計画の文なので、cap のこの回では tech-debt に送る(Tech debt identified) |
+| C2-3 LOW | maintainability | `if !seat.Active` は、外しても結果が変わらない。Active な座席は `RunningOrgs` の最初のループでその org を「走っている」にするので、`validateMaxOrgs` は `slices.Contains(runningOrgs, orgID)` で nil を返す。分岐が省くのは、通ると決まっている呼び出しだけで、doc の「An Active seat's org is running, so it skips this check」もそれを書いている。そのため、(1) 読み手には Active の有無で規則が分かれるように見える、(2) この条件を外す・間違える変更を落とすテストは書けない(新しいテストは、どちらの条件でも `validateMaxOrgs` が拒否か通すかを決める)、(3) 正しさが `Active` の導出と `RunningOrgs` の定義の両方に寄りかかる。コードを読んだ結論で、条件を外した mutation は回していない(未確認) | `spawn.go:1100-1104`、`reserve.go:233-239`(`RunningOrgs`)、`envelope.go:107-108` | 条件を外し、予約つきの再試行では常に `validateMaxOrgs` を通す(費用は再試行ごとの `RunningOrgs` 1 回)。残すなら、doc の「skips this check」を「skips a call that cannot fail」と言い換え、近道であることを書く |
+| C2-4 LOW | readability | `orgWideLimitsHelp` の「Only when --config is not given and the ledger is the main worktree's, those two are read from ...」は、only が文頭にあるのに語順が平叙文のままで、英文として崩れている。意味の面でも、cycle 1 の版は最初の文の中で「(no --state-dir or RALPH_ORG_STATE_DIR)」と条件を絞っていたが、今の版は後ろの「In every other case (...)」で初めて、`--state-dir <main>/.harness/state/org` のように flag で main の台帳の path を指した場合を外す。コードは source が `git-main-worktree` のときだけ読む(`MainWorktreeRoot`)ので、最初の文だけ読むと、その場合も main の `ralph.toml` を読むように取れる。同じ言い回し(「when the state dir is the main worktree's .harness/state/org」)が、この差分では触れていない `templates/base/ralph.toml` にもあり、そちらは利用者に配られる | `internal/cli/org.go:363-372`、`internal/org/statedir.go:59-72`、`:81-84`、`templates/base/ralph.toml:41-44`、cycle 1 の版は `git show d8ec84da:internal/cli/org.go` の 365-367 行 | 「Those two are read from the main worktree's ralph.toml (built-in defaults when it has none) only when --config is not given and the ledger was resolved by default to the main worktree's (neither --state-dir nor RALPH_ORG_STATE_DIR is set).」の形にして、後ろの「In every other case」は残す。`ralph.toml` のコメントも「resolved by default」を足して同じ条件にする |
+| C2-5 LOW | maintainability | `/verify` と `/test` はこの回、報告を同じパスに上書きする。tech-debt の行と Go のコメントは、その中の番号を指している。行 170 は verify の V-7、V-8、行 172 は V-2、行 174 は V-4、V-5、行 176 は test の Test gaps 3〜5、7、8 と mutation X18、`verbs_test.go` のコメントは「verify V-2」。この報告は付録 A で F 番号を残すが、verify と test に同じ手当てを頼まないと、番号が別の finding に付け替わる。行 176 の(b)の「`idempotentRespawn` (87.5%)」は 975df92b が枝を足す前の値で、今の関数には合わない | `docs/tech-debt/README.md:170`、`:172`、`:174`、`:176`、`internal/org/verbs_test.go:3083-3085`、`docs/reports/verify-2026-10-08-org-limits-reserve.md` の 69、82、86、99、103 行、`docs/reports/test-2026-10-08-org-limits-reserve.md` の 96、132 行 | `/verify` と `/test` の cycle 2 に、V-1〜V-9、Test gaps 1〜8、X18 の番号を残すよう頼む(旧版を付録に残し、新しい指摘は別の接頭辞で採番する)。行 176 のカバレッジの値は関数名だけにする。Go のコメントの「verify V-2」は、挙動(「the pane compensation does not check max_total_seats」)で書き直す |
+| C2-6 LOW | readability | 行 173 の(a)は F-9 を「`--reserve internal/auth` is accepted and protects only a file ... and nothing says so」と書くが、同じ行の見直しの欄は「the help text and the `/org` skill state them」と書き、skill には 76d1cf1c が足した「末尾に `/` がないパスはファイルなので、`--reserve internal/auth` が守るのは `internal/auth` という名前のファイルだけ」がある。行の中で食い違う。言いたいことは「入力したときに警告が出ない」で、その文言なら食い違わない | `docs/tech-debt/README.md:173`(説明の欄と見直しの欄)、`.claude/skills/org/SKILL.md:223-225` | 「and nothing says so」を「and nothing warns when the path is typed」に変える |
+| C2-7 LOW | readability | `AGENTS.md` の repo map の「envelope validation (per-org `max_seats`; org-wide `max_orgs` / `max_total_seats` and scope reservations in `reserve.go`)」は、`in reserve.go` が 3 つ全部にかかるように読める。org-wide の判定そのもの(`ValidateOrgWideCapacity`、`validateMaxOrgs`)は `envelope.go` にあり、`reserve.go` には数え方(`RunningOrgs`、`TotalActiveSeats`)と予約がある。この文書は「map」で、grep で場所に着くことが役割 | `AGENTS.md:90`、`internal/org/envelope.go:92`、`:107`、`internal/org/reserve.go:233`、`:265` | 「org-wide `max_orgs` / `max_total_seats` in `envelope.go`, their counts and scope reservations in `reserve.go`」の形にする |
+
+その他に数えない指摘が 1 つある。`autonomousScopeGateErr` の文(`spawn.go:1207`)は「(--reserve on the leader seat only; or --allow-unscoped to explicitly bypass)」で、セミコロンのあとの `or` が `--reserve` の注記の続きに読める。F-3 の推奨(leader 限定を文に入れる)は満たしているので、直さなくてよい。
+
+## cycle 1 の finding の現況
+
+| F | 重さ | この回の判定 | 根拠 |
+| --- | --- | --- | --- |
+| F-1 | MEDIUM | 直った | 8dd19634 が `config.go` と `templates/base/ralph.toml` から director の文を消した。出荷物で `director` は 0 件 |
+| F-2 | LOW | 繰り越し(行 175 の(a))。悪化なし | 新しいコードの bool は `record`(`idempotentRespawn`)で、`reserve` の二重の意味は増えていない |
+| F-3 | LOW | 直った | 8dd19634。`spawn.go:1207` が「--reserve on the leader seat only」を持つ。上の「その他」を参照 |
+| F-4 | LOW | 繰り越し(行 174 の(a))。skill に断り書きが入った | 76d1cf1c が skill に `{{SCOPE}}` の説明を足し、行 174 の(a)もそれを書く |
+| F-5 | LOW | 繰り越し(行 172 の(a))。悪化なし | `verbs.go` はこの回に触れていない |
+| F-6 | LOW | 繰り越し(行 175 の(b))。悪化なし | `reserve.go` はこの回に触れていない |
+| F-7 | LOW | 繰り越し(行 175 の(c))。悪化なし | `newOrgSpawnRuntime` はこの回に触れていない |
+| F-8 | LOW | 繰り越し(行 173 の(c))。悪化なし | 同上 |
+| F-9 | LOW | 繰り越し(行 173 の(a))。skill が規則を明記した | 76d1cf1c。行の文言との食い違いは C2-6 |
+| F-10 | LOW | 繰り越し(行 172 の(b))。悪化なし | `CloseDeferredSelfPane` はこの回に触れていない |
+| F-11 | LOW | 直った | 76d1cf1c。(1)`--config` の説明から spawn と start の文を外し、(2)`orgWideLimitsHelp` の頭を「`ralph org spawn` and `ralph org start`」にした。新しい文の組み立ては C2-4 |
+
+## Positive notes
+
+- 判定を `validateMaxOrgs` に切り出して、新しい枝と既存の経路が同じ関数、同じ文言を使う。テスト(`TestOrgSpawn_Reserve_InactiveLeaderChecksMaxOrgs`)の期待する文字列は `ValidateOrgWideCapacity` の書式を組み立て直したもので、2 つが食い違えば落ちる
+- 新しいテストは、上限に達した場合に記録なし、receipt なし、agmsg の呼び出しなし、座席が `spawned` のまま inactive、`RunningOrgs` が org-b だけ、を確かめる。Phase 1 と Phase 2 の両方、上限 1 と 2、別の座席で org が走っている場合を含む。修正前のコードなら org-a の `scope_reserved` が増えて `lastEvent` の検査で落ちる(読みによる。mutation は回していない)
+- 判定の順序が、新しい spawn(max_seats、max_orgs、max_total_seats、予約)と idempotent の枝(max_orgs、予約)で同じ向きに並ぶ。走っている org の再試行は max_orgs を通るので、上限が no-op の再試行を拒否することはない
+- 補償の例外を skill に書き、pane 側の窓(`max_total_seats` を 1 つ超える)をテストで固定し、行 172 の見直しの欄に「テストと skill の文を一緒に変える」と書いてある
+- skill の 4 面、`quality-gates.md` の該当行は、ミラーのどちらも同一
+
+## Coverage gaps
+
+- テスト、mutation、`check-sync.sh`、`check-skill-sync.sh` は実行していない(指示による)。C2-3 は読みによる結論
+- ヘルプ文は `ralph org spawn --help` を出して確かめていない。Go の文字列と周辺のコードを読んだ
+- dry-run は idempotent の枝を持たないので、動いていない leader(Active な leader も同じ)への `--reserve --dry-run` は max_seats と max_total_seats まで判定し、本番の枝より厳しい予測になる。cycle 1 から同じ形で、この回の差分で広がってはいない
+- verify の cycle 1 の報告は、V-1(bare リポジトリの列挙)、V-2(補償の断り)、V-3(quality-gates)、V-5(`{{SCOPE}}`)、V-6(F-11)、V-9(チェックボックス)を未対応と書くが、いずれも後続のコミット(76d1cf1c、196205f8、計画の差分)で解けたように見える。この回の `/verify` が HEAD で読み直す前提で、ここでは判定しない
+
+## Tech debt identified
+
+この回は既定の上限の最後なので、C2-1〜C2-7 のうち直さないものは繰り延べにあたる。どれもコメント、ヘルプ文、計画、台帳の文言で、挙動は変わらない。コードのコメントを直すと全パイプラインの再実行になり、上限を超える。1 行にまとめて `docs/tech-debt/README.md` に足す案を次に書く。足すのは `/sync-docs` の担当か、オペレーターの判断。
+
+> org-limits-reserve の文言の LOW(self-review cycle 2 の C2-1〜C2-7)。(a) `idempotentRespawn` と `Spawn` 手順 1 の doc で「decided first」が食い違い、plain rejection の理由が既に inactive な座席に当てはまらない。(b) `if !seat.Active` は `validateMaxOrgs` が org の走っている座席に通す結果と同じなので外せる。(c) `orgWideLimitsHelp` と scaffold の `ralph.toml` の読み元の条件の書き方。(d) 行 170〜176 と `verbs_test.go` が verify の V 番号、test の Test gaps、カバレッジの値を指す。(e) `AGENTS.md` の repo map の `reserve.go` の係り方。トリガー: `idempotentRespawn`、`orgWideLimitsHelp` の次の変更、または verify・test の報告が番号を付け替えたとき
+
+C2-6(行 173 の 1 語)は、台帳の別の編集のついでに直せる。
+
+## Recommendation
+
+- Merge: 可。CRITICAL、HIGH、MEDIUM はない。LOW は 7 件(C2-1〜C2-7)で、いずれもコメント、ヘルプ文、台帳、計画の文言。cross-review の修正(975df92b、afcbc6c2)は挙動、エラー文、順序が正しく、`ValidateOrgWideCapacity` の既存の挙動を変えていない
+- Follow-ups: C2-1〜C2-7 は cap のため直さず、上の 1 行にまとめて tech-debt へ送るのが現実的。C2-5 の番号の保持は、直す・直さないにかかわらず、`/verify` と `/test` の cycle 2 に先に頼む。`/sync-docs` に渡すもの: 行 173 の C2-6、C2-4 の `ralph.toml` のコメント、C2-7 の `AGENTS.md`
+- cycle 1 の F-1(MEDIUM)、F-3、F-11 は直り、F-2、F-4〜F-10 は行 172〜176 に載っていて悪化していない
+
+## 付録 A: cycle 1 の finding、Coverage gaps、Tech debt(d8ec84da 時点の原文)
+
+cycle 1 の self-review の本文のうち、tech-debt の行 172〜176 と verify、計画が F 番号と Coverage gaps の名前で指している部分を、そのまま残す。`file:line` は d8ec84da 時点のもので、`spawn.go` はこの回の差分で行がずれている(関数名で探す)。cycle 1 の `Recommendation` の節は、この回の判定と食い違わないように載せない。
+
+### Findings
 
 <!-- Area recommended values: naming, readability, unnecessary-change, typo,
      null-safety, debug-code, secrets, exception-handling, security, maintainability -->
@@ -36,24 +110,15 @@
 | F-10 LOW | maintainability | 補償は workspace の経路(`CloseDeferredSelfWorkspace`)にしか予約を戻さない。`CloseDeferredSelfPane` は `reactivateSeat` だけで、`disbanded` で解けた予約を戻さない(計画の進捗の(a)と同じ)。その経路の org は、座席が動いている扱いに戻って走っている一方、範囲は誰にも守られない。AC15 は workspace の経路に限っているので計画どおりだが、同じ種類の欠けが片方に残る | `verbs.go:1010-1034`(`CloseDeferredSelfPane`)、`:1111`(`CloseDeferredSelfWorkspace` の `reserveAgain`)、計画の進捗 156 行 | 計画どおり tech-debt に送る。`reserveAgain` の doc に、pane の経路は戻さないことを 1 文足すと、次に読む人が経路の非対称を見落とさない |
 | F-11 LOW | readability | help 文の 2 点。(1) `--config` の persistent flag の説明に、spawn と start だけに関わる文が入り(「without --config, spawn and start read ...」)、`--config` 自身の説明の中で「without --config」と言うので読みにくい。`stop` や `status` の help にも出る。(2) `orgWideLimitsHelp` は「Before starting a seat, spawn checks ...」で始まり、`ralph org start --help` にもそのまま出るので、start の読み手には動詞の `spawn` が何を指すか曖昧 | `cli/org.go:46`、`:361-370`、`:395`、`:531` | (1)は `--config` の説明を元に戻し、限度の読み元は `spawn` と `start` の Long にだけ書く(`orgWideLimitsHelp` に既にある)。(2)は「Before starting a seat, `ralph org spawn` and `ralph org start` check ...」にする |
 
-## Positive notes
 
-- 判定を `spawnCapacityErr` の 1 関数にまとめ、ロックの中の本番の経路と、ロックなしの dry-run の経路が同じ順序で同じ関数を呼ぶ。dry-run が本番の拒否を予測するテスト(`TestOrgSpawn_OrgWideLimits_DryRunPredictsTheSameRejection`)もある
-- idempotent の経路の拒否が `rejected` を書かない理由(状態のイベントなので、動いている leader が inactive に見える)を `idempotentRespawn` の doc に書き、`assertSeatUnchanged` と件数の比較(events、receipts、herdr、agmsg)で固定している。計画の指摘 3 を、コードとテストの両方で守っている
-- `reserve.go` のパスの規則は 1 か所(`normalizeReservePath`)で、書き込み側と読み戻し側(`reservedPathsFromDetails`)が同じ関数を通る。`paths=` の形がカンマと空白を拒否する規則と一致していて、`restored:` の注記を後ろに付けても読み戻しが壊れない
-- 上限が 0 以下の hand-built config を「無制限」ではなく拒否にして、`max_seats` と同じ fail-closed に揃え、`ValidateOrgWideCapacity` の doc とテストに書いている
-- CLI の `--reserve` を `StringArray` にして(`StringSlice` ではなく)、カンマを含む 1 値を分割せず入力検査で拒否する。テスト(`TestOrgReserveFlag_ValueIsOnePath`)が選択を固定している
-- 全体の上限を main worktree の `ralph.toml` から読むのは spawn と start だけにして、ほかの動詞が main の設定の読み込みエラーで止まらないようにしている。`MainWorktreeRoot` は git を再実行せず、解決済みの dir から戻して検算する
-- 3 面(Go の既定、`templates/base/ralph.toml`、`scripts/ralph-config.sh` と `templates/base/scripts/ralph-config.sh`)と同期テストが同じ commit で揃っている
-
-## Coverage gaps
+### Coverage gaps
 
 - テスト、mutation、`check-sync.sh`、`check-skill-sync.sh` は実行していない(指示による)。`/org` skill の 4 面が同じ内容であることは `diff -q` だけで見た
 - 本物の herdr で、補償の窓(`disbanded` から補償までの数十秒)を作った実測はしていない。窓の挙動は `verbs_test.go` の fake で固定されたものを読んだだけ
 - 同時実行のテスト(`TestOrgSpawn_ConcurrentSpawns_*`、`ConcurrentReservations_*`)は名前と構成を見ただけで、flock の下で本当に直列化されているかは再現していない
 - macOS の標準の大文字小文字を区別しないファイルシステムでは、`Internal/` と `internal/` は別のパスとして比べられ、重ならない。パスの正規化は大文字小文字を畳まない。予約は助言であり(範囲外への書き込みは止めない)、計画に書かれていない扱いなので、finding にはせず、`/verify` と `/sync-docs` が判断する材料として残す
 
-## Tech debt identified
+### Tech debt identified
 
 新しい行は `/sync-docs` で足す。計画の進捗が挙げた 4 件のうち、(a)は F-10、(c)は F-4 と同じ。(b)(予約のパスの `*` はそのままファイル名として扱う)は skill に書いてあり、コードの挙動は `normalizeReservePath` が `*` を弾かないことと合う。(d)(start の `--scope` の help の表示崩れ)は既存。このほか、F-5、F-8、F-9 は直さない場合に tech-debt の候補。
 
@@ -64,7 +129,3 @@
 - `.claude/skills/org/SKILL.md:201` の「`--config` を渡したときと、台帳を flag か env で決めたとき、git の外では」は、`ResolveOrgStateDir` の 4 段目(`git-toplevel`、bare repository の linked worktree)も、main の `ralph.toml` を読まない場合に入ることを書いていない(`internal/org/statedir.go:38-44` と `withMainWorktreeOrgLimits` は `source != "git-main-worktree"` のすべてで読まない)
 - 同じ SKILL の「どちらも台帳のロックの下で判定するので、同時に打った `spawn` でも超えない」は、自分の workspace の close が失敗した補償の窓では超える(計画のリスクとテスト `..._RiskWindowClearedByRetry` が固定している)ことを書いていない
 
-## Recommendation
-
-- Merge: 可。CRITICAL、HIGH はない。MEDIUM 1 件(F-1)は、scaffold が配る `ralph.toml` と doc comment が、まだ存在しない director に触れている点。`/verify` の前に直せば、コードは変わらないので cycle は増えない。LOW の 10 件のうち、F-2、F-3、F-11 は同じ編集で直せる
-- Follow-ups: F-1 を直す。F-3 と F-11 は文言の直し。F-4 は今直すか tech-debt に送るかを決める(1 行で直せる)。F-5 は読み直しを足すか、doc に窓を足す。F-6、F-7、F-8、F-9、F-10 は受け入れて tech-debt の候補にしてよい
