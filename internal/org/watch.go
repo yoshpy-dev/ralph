@@ -781,15 +781,21 @@ func (w *watchRun) sendAlert(ctx context.Context, status *watchStatusFile, orgID
 //	    treating leader->seat sends as nothing. See
 //	    TestWatch_Deadman_SeatSentEvent_ClearsPendingAlert_LegacyWatchdogStopDoesNot.)
 //	(b) it is a non-watchdog event from the leader-driven lifecycle set
-//	    (spawned, spawn_started, stopped, disbanded, rejected) that is not
-//	    the watchdog's own enforcement write. Each of these is only
-//	    producible by a `ralph org` verb that leader/the operator runs
+//	    (spawned, spawn_started, stopped, stop_failed, disbanded, rejected)
+//	    that is not the watchdog's own enforcement write. Each of these is
+//	    only producible by a `ralph org` verb that leader/the operator runs
 //	    (spawn/stop/disband), so it is evidence leader is alive and acting,
 //	    even when the event itself names a seat, not leader (e.g. leader
 //	    spawning a replacement seat in response to a stall ALERT, self-review
-//	    cycle-3 M3-1). The exclusion applies to any event in this lifecycle
-//	    set whose Details carry "reason=watchdog_..." -- in practice only
-//	    the pre-#152 watchdog's cutoff `stopped` writes ever carried it.
+//	    cycle-3 M3-1). `stop_failed` is what `ralph org stop` and `ralph org
+//	    disband` (and their `--all` forms) write instead of `stopped` when
+//	    herdr did not close the seat's pane (PR #208). No watchdog code
+//	    writes it, so a leader that keeps retrying a stop while herdr does
+//	    not answer still counts as acting, the same as a stop that closed
+//	    the pane; a stop the operator runs counts too, as `stopped` always
+//	    has. The exclusion applies to any event in this lifecycle set whose
+//	    Details carry "reason=watchdog_..." -- in practice only the pre-#152
+//	    watchdog's cutoff `stopped` writes ever carried it.
 //	    No code path has produced such an event since PR #152 removed the
 //	    org budget concept (2026-09-17): StopParams no longer has a Reason
 //	    field and no pulse-layer condition calls Stop. Why the guard is
@@ -807,7 +813,13 @@ func (w *watchRun) sendAlert(ctx context.Context, status *watchStatusFile, orgID
 //	    or (b) a mixed-version window where an old `ralph org watch`
 //	    appends a cutoff after a new binary recorded the baseline. Keeping
 //	    the exclusion means such a cutoff never counts, so neither case can
-//	    misfire.
+//	    misfire. `stop_failed` gets no guard of this kind: PR #208 added it
+//	    and it is first counted here in the same release, and v5.1.0, the
+//	    latest release before that, never writes it. So a baseline that a
+//	    released `ralph org watch` persisted can miss a `stop_failed` only
+//	    when a newer `ralph org stop` wrote it while that older watch was
+//	    still running, and the recount then clears the alert wrongly only
+//	    if watch is restarted on the new binary while the alert is pending.
 //
 // The orgID filter excludes another org's activity in the same shared
 // manifest: without it, a new event in a different, active org would clear
@@ -824,7 +836,7 @@ func leaderActivityEventCount(events []ManifestEvent, orgID string) int {
 			continue
 		}
 		switch ev.Event {
-		case EventSpawned, EventSpawnStarted, EventStopped, EventDisbanded, EventRejected:
+		case EventSpawned, EventSpawnStarted, EventStopped, EventStopFailed, EventDisbanded, EventRejected:
 			if !strings.Contains(ev.Details, "reason=watchdog_") {
 				n++
 			}
