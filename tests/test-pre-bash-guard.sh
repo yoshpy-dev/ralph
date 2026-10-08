@@ -540,8 +540,10 @@ check_modes B deny absent bypassPermissions -- "${self_review_forms[@]}"
 # compound command (the lexer cannot place the pipe or redirection around it),
 # a heredoc read across a $(...) or a backtick, a heredoc body or delimiter
 # joined by a backslash-newline, an exec with a redirection, an unsafe output
-# redirection, and printf -v (which stores into a variable). The old guard
-# denies all of these too, so they join the AC7 corpus.
+# redirection, printf -v (which stores into a variable), and (8, found by
+# the cycle 2 /test as F2-1) a backslash-newline anywhere, such as between
+# $ and ( inside double quotes. The old guard denies all of these too, so
+# they join the AC7 corpus.
 guard_deny_only_forms=(
   # 1. Groups and compound commands (subshell, brace group, reserved word in
   # command position), including two that were false none before.
@@ -902,10 +904,10 @@ edge_sentinel_deny=(
   $'cat <<EOF > file\n\\$(sudo ls)\nEOF'
   $'cat <<\'EOF\' > f.sh\nsudo ls\nEOF'
   $'cat <<EOF\n$(date) sudo ls\nEOF'
-  # The body of a heredoc whose delimiter word has a backslash-newline gets
-  # no data region (the guard header, (6)). bash 3.2, zsh 5.9 and dash read
-  # this body as text, so the deny is a false positive kept on purpose; a
-  # change that gives such a body its data region moves this to edge_none.
+  # A command with a backslash-newline anywhere gets no data region (the
+  # guard header, (6)), here in the delimiter word. bash 3.2, zsh 5.9 and
+  # dash read this body as text, so the deny is a false positive kept on
+  # purpose, as the previous guard denied it too.
   $'cat <<EO\\\nF\nsudo ls\nEOF'
   # bash reads a heredoc body right after the newline that ends its line,
   # so here sh is a body line and the pipeline has no last command (bash

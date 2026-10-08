@@ -100,13 +100,15 @@
 #      guard's rules decide. So a group or compound structure at the top
 #      level (a subshell (...), a brace group { ...; }, a reserved word such
 #      as if, for or case in command position), an exec with a
-#      redirection, and a backslash-newline anywhere in the command (the
-#      shell removes it before reading, even inside double quotes; one
-#      inside single quotes is only text, so that case is denied more than
-#      needed, as the previous guard did) each drop every data region of
-#      the command. A heredoc
-#      body joined by a backslash-newline, or read for a delimiter word that
-#      has one, is not data (only that body loses its region).
+#      redirection, and a backslash-newline anywhere in the command (bash
+#      and dash remove it before reading, even inside double quotes) each
+#      drop every data region of the command. The backslash-newline rule
+#      does not look at quoting, so one that is only text (inside single
+#      quotes, at the end of a line of a quoted heredoc body or a comment,
+#      after an escaped backslash) also drops them, as the previous guard
+#      denied those commands too. A commit message passed in the
+#      recommended heredoc form therefore passes only when no line of the
+#      command ends in a backslash.
 # Not covered: anything only known at run time (variables such as $cmd,
 # aliases, functions, git aliases, scripts read from a file, remote commands
 # such as ssh host '...'), and shell syntax beyond the above: case
@@ -1299,8 +1301,8 @@ BEGIN {
 END {
   set_text(IN)
   # The shell drops a backslash-newline before it reads the command, also
-  # inside double quotes ("$\ newline (cmd)" is a substitution), while the
-  # lexer sees the two characters. A command that has one gets no data
+  # inside double quotes ("$\ newline (cmd)" is a substitution in bash and
+  # dash), while the lexer sees the two characters. A command that has one gets no data
   # region, so the sentinel decides as the previous guard did.
   if (index(IN, BS "\n")) NODATA = 1
   # Re-read text may grow past the command (pipes feed a shell each
