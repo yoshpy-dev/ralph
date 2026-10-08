@@ -1186,7 +1186,7 @@ func retiredRoleConfigErr(cfg config.OrgConfig) error {
 func autonomousScopeGateErr(p SpawnParams, mode string) error {
 	if mode == PermissionModeAutonomous && p.Scope == "" && len(p.Reserve) == 0 && !p.AllowUnscoped {
 		return fmt.Errorf(
-			"org: autonomous permission mode requires --scope or --reserve (or --allow-unscoped to explicitly bypass)",
+			"org: autonomous permission mode requires --scope or --reserve (--reserve on the leader seat only; or --allow-unscoped to explicitly bypass)",
 		)
 	}
 	return nil

@@ -49,13 +49,11 @@ type OrgConfig struct {
 	MaxSeats int `toml:"max_seats"`
 	// MaxOrgs caps the number of running orgs across every org_id that shares
 	// the same org state dir. `ralph org spawn` enforces it under the manifest
-	// lock when a spawn would start an org that is not running yet. The
-	// director is not a seat and is not counted.
+	// lock when a spawn would start an org that is not running yet.
 	MaxOrgs int `toml:"max_orgs"`
 	// MaxTotalSeats caps the number of active seats summed across every
 	// org_id that shares the same org state dir. `ralph org spawn` enforces
-	// it under the manifest lock, alongside the per-org MaxSeats. The
-	// director is not a seat and is not counted.
+	// it under the manifest lock, alongside the per-org MaxSeats.
 	MaxTotalSeats int `toml:"max_total_seats"`
 	// DeadmanMinutes is a reserved field for the PR④ Watchdog deadman timer.
 	// PR① only stores and round-trips this value; nothing consumes it yet.
