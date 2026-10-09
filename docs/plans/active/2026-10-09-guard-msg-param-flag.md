@@ -123,7 +123,10 @@ None (guard の 1 ファイルとその template の写し、テスト、tech-de
 - [x] Plan approved
   - 2026-10-09: ユーザーが承認ゲートで Approve。Codex plan advisory の HIGH(添字を読み飛ばすと中の置換を読み落とす)と、consult(consult-plan-msgflag)の指摘(`]` まで読むと語の境目を越える、rg に `WS` を足す、`$[…]` を確かめる)を、承認の前に plan に反映した。図解ページは描いていない(Visual review を参照)
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1 完了(1e032dea、implementer/opus): `lex_dollar` が「展開」(`LD_EXP`)、「ANSI-C か locale の引用」(`LD_ANSI`)、添字の始まりの位置(`LD_SUB`)を立て、`lex_word`・`lex_dq`・`add_word` が語ごとに持つ(`WEXP`、`WANSI`)。`msg_check` と rg の判定を印に置き換え、添字は `$` から語の終わりまでを `xnote` した。テスト 2016 件。既存のテストで判定が変わったものはない。印の名前の文字に数字も含めた(zsh は `$0[1]` を添字とする)。rg の `WS` を固定するため、バッククォートの形 `` rg `echo --pre` sh 'sudo ls' `` を B 節に足した
+  - S1b 完了(43e73568、implementer/opus): S1 の implementer が見つけた、特別なパラメータの添字(`$@[…]`、`$*[…]`、`$#x[…]`。zsh で置換の実行を確かめた)を添字の判定に足した。plan の Objective 3(zsh の添字の評価)の範囲で、Scope の書き方(名前 0 文字以上)を広げたもの(止める側)。二重引用符の中で開く添字(`"$arr["'$(…)'"]"`)をテストで固定した。テスト 2032 件
+  - S2 完了(inline、docs だけ): tech-debt の 3 か所を直した。guard の限界の行の rg の変数の語、テストの穴の行の rg、PR #211 の止めすぎの行の (a) を解消済みにし、この PR で増える止めすぎ(`$` の展開のあるメッセージと rg、添字のあとの同じ語)を新しい行に書いた
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
