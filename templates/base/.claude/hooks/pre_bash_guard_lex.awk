@@ -1,3 +1,11 @@
+# pre_bash_guard_lex.awk holds the "Text access" and "Lexing" sections of
+# the awk program of pre_bash_guard.sh. The guard passes its three .awk files
+# to one awk with -f, in the order pre_bash_guard_lex.awk,
+# pre_bash_guard_commands.awk, pre_bash_guard_rules.awk, and awk reads them
+# as one program: functions are shared across the files, and BEGIN and END
+# are in pre_bash_guard_rules.awk. The shell no longer passes the program
+# in single quotes, so a single quote may appear in it.
+
 # ======================================================================
 # Text access
 # ======================================================================
@@ -308,8 +316,6 @@ function lex_dq(ctx,    val, buf, e, c, c2, subst, piece, xp, subp) {
 # All marks are set after the nested lex_cmds or lex_brace call returns, as
 # LD_SUBST is, so a $ read inside them does not overwrite the marks of
 # this one.
-# (No single quote may appear in this awk program: the shell passes it in
-# single quotes.)
 function lex_dollar(ctx, in_dq,    s, c, f, q, v) {
   s = P
   c = at(P + 1)

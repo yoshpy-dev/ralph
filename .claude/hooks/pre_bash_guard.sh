@@ -9,7 +9,11 @@
 # its paths (jq, and the sed + awk fallback when jq is absent), so a newline
 # or a tab in the command is a real newline or tab here.
 #
-# The awk program below decides in two ways, and either one denies:
+# The awk program decides in two ways, and either one denies. It is in
+# three files next to this script, which the awk call below reads as one
+# program: pre_bash_guard_lex.awk (lexing), pre_bash_guard_commands.awk
+# (simple-command assembly and data regions) and pre_bash_guard_rules.awk
+# (the rules, the sentinel, and the command lists NOEXEC and DATACMD).
 #   1. Lexing. Words keep their value with quotes removed: single quotes,
 #      double quotes, and backslashes work as in sh, and quoted and unquoted
 #      parts that touch form one word ("--force" and --for""ce are both
@@ -33,10 +37,11 @@
 #      (and its duration), xargs (and its flags), and stdbuf. Names are
 #      compared without their directory (/usr/bin/sudo is sudo) and without
 #      a leading unquoted = (zsh runs =sudo as sudo). Unless the command is
-#      one known not to run its arguments (NOEXEC below: echo, grep, cat,
-#      cp, git, ...), its later words count as well: a word that is sudo
-#      with another word after it, or a word that is git, is judged as a
-#      command there (find -exec sudo, watch sudo, flock /tmp/l git push).
+#      one known not to run its arguments (NOEXEC in
+#      pre_bash_guard_rules.awk: echo, grep, cat, cp, git, ...), its later
+#      words count as well: a word that is sudo with another word after it,
+#      or a word that is git, is judged as a command there (find -exec sudo,
+#      watch sudo, flock /tmp/l git push).
 #   4. Rules (every permission mode):
 #      - sudo as the command name, or as a later word as in 3.
 #      - git push (after git's -C <dir>, -c <k=v>, --git-dir=... and other
@@ -65,7 +70,8 @@
 #   5. Fail closed. Nesting deeper than 4 levels, more re-read text than 8
 #      times the command plus 64 KB, or $(...) and ${...} inside each other
 #      more than 24 levels deep (the command itself counts as one) is denied
-#      as too deep. When awk is missing or exits non-zero, the four
+#      as too deep. When awk is missing or exits non-zero (as it does when
+#      one of the three .awk files is missing or unreadable), the four
 #      substring rules of the previous guard decide instead: "sudo "
 #      anywhere, git push --force or -f, git reset --hard, and a git commit
 #      -m message that starts with a double quote and holds $( or a
@@ -77,28 +83,29 @@
 #      followed by $( or a backtick. A match denies unless it lies inside a
 #      data region, which only the top level of the command has (nothing
 #      inside $(...), backticks, or re-read text is data):
-#      (a) the arguments of a command that only reads data (DATACMD below:
-#          echo, printf, cat, grep, ls, ...; not test or [, nor stat, whose
-#          zsh -A NAME evaluates the subscript of NAME; rg only without
-#          --pre and without a word that has a substitution, a $ that
-#          expands, or ANSI-C or locale quoting, since its value could be
-#          --pre; printf only without -v and with no %, $ or backtick in any
-#          word as written), from its first argument to the end of the
-#          command, without redirections, substitutions, ${...} (zsh
-#          evaluates the value of ${(e)...} again, which runs a $(...)
-#          written there in single quotes or with an escaped $; the text
-#          around a ${...} stays data), and a zsh subscript from its $ to
-#          the end of its word ($arr[...], $~arr[...], $#x[...] and $@[...]
-#          in zsh, and the arithmetic $[...] in bash and zsh, evaluate the
-#          text in the brackets, which runs a $(...) written there in single
-#          quotes),
+#      (a) the arguments of a command that only reads data (DATACMD in
+#          pre_bash_guard_rules.awk: echo, printf, cat, grep, ls, ...; not
+#          test or [, nor stat, whose zsh -A NAME evaluates the subscript
+#          of NAME; rg only without --pre and without a word that has a
+#          substitution, a $ that expands, or ANSI-C or locale quoting,
+#          since its value could be --pre; printf only without -v and with
+#          no %, $ or backtick in any word as written), from its first
+#          argument to the end of the command, without redirections,
+#          substitutions, ${...} (zsh evaluates the value of ${(e)...}
+#          again, which runs a $(...) written there in single quotes or
+#          with an escaped $; the text around a ${...} stays data), and a
+#          zsh subscript from its $ to the end of its word ($arr[...],
+#          $~arr[...], $#x[...] and $@[...] in zsh, and the arithmetic
+#          $[...] in bash and zsh, evaluate the text in the brackets, which
+#          runs a $(...) written there in single quotes),
 #          when the command and every later stage of its pipeline are such
 #          commands and send output only to the terminal, the next stage,
 #          /dev/null, /dev/stderr, a copy of fd 0, 1 or 2, or a closed fd
 #          (>&-) (no file, no fd 3 or above, no &> or &>>, no >(...));
 #      (b) the -m or --message value of git commit and git tag when it has
 #          no substitution and no $ that expands (one outside single quotes
-#          and ANSI-C strings, not escaped, and not followed by a space, a
+#          and ANSI-C strings, not escaped, not the $ of a locale string
+#          $"..." outside double quotes, and not followed by a space, a
 #          tab, a newline, the end, or a closing double quote; the
 #          recommended heredoc form counts as one, even with a ${ in its
 #          body); a value with such a $ is not denied for that, the other
@@ -166,10 +173,14 @@ emit_deny() {
 [ -n "$command" ] || exit 0
 
 # The command goes to awk on stdin (awk -v would process its backslashes).
-# awk prints the name of the first rule that denies, or nothing. Its exit
-# status goes to awk_status (the status of the assignment is that of the
-# command substitution, whose last command is awk); a missing or failing
-# awk falls back to the previous guard's rules after the program.
+# awk reads the program from the three .awk files next to this script, with
+# -f in the order lex, commands, rules; this script, lib_json.sh and the
+# three .awk files must be installed together. awk prints the name of the
+# first rule that denies, or nothing. Its exit status goes to awk_status
+# (the status of the assignment is that of the command substitution, whose
+# last command is awk). A missing or failing awk, or a missing or
+# unreadable .awk file (awk then exits non-zero), falls back to the
+# previous guard's rules below.
 awk_status=0
 rule="$(printf '%s' "$command" | LC_ALL=C awk -f "$HOOK_DIR/pre_bash_guard_lex.awk" -f "$HOOK_DIR/pre_bash_guard_commands.awk" -f "$HOOK_DIR/pre_bash_guard_rules.awk" 2>/dev/null)" || awk_status=$?
 

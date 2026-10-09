@@ -74,7 +74,10 @@
 #      or alternating with double quotes) are denied, 23 pass. With awk
 #      missing from PATH, or an awk that exits 2, the old guard's four
 #      substring rules decide (these need jq: lib_json.sh's jq-absent path
-#      runs awk itself)
+#      runs awk itself); so they do, on both paths, for a copy of the guard
+#      that lacks pre_bash_guard_rules.awk. The three .awk files, read with
+#      awk -f in the guard's order, parse as one program (no input and ls:
+#      exit 0 and no output; sudo ls: the rule name sudo)
 #   G. AC7: the old guard (tests/fixtures/guard-1c4cea5a/, the version
 #      before this rewrite) decides the corpus of A's deny rows, B (with the
 #      self-review kinds), and C on each path, and is compared with the new
@@ -711,6 +714,13 @@ guard_deny_only_forms=(
   $'echo $#x[\'$(sudo ls)\']'
   $'echo $*[\'$(sudo ls)\']'
   $'echo "$arr["\'$(sudo ls)\'"]"'
+  # The zsh modifiers =, ^ and + before a name start a subscript too
+  # ($=arr[...], $^arr[...], $+arr[...]). These rows pin them in RE_NOTFLAG
+  # (mutation M20 of docs/reports/test-2026-10-09-guard-msg-param-flag.md
+  # drops the =). The old guard denies them as well (the sudo substring).
+  $'echo $=arr[\'$(sudo ls)\']'
+  $'echo $^arr[\'$(sudo ls)\']'
+  $'echo $+arr[\'$(sudo ls)\']'
 )
 check_modes B deny absent bypassPermissions -- "${guard_deny_only_forms[@]}"
 
@@ -1116,6 +1126,16 @@ edge_none=(
   $'rg "foo$" \'sudo \' .'
   $'rg -n \'sudo \' .'
   $'git commit -m \'use ${HOME}\''
+  # A $ followed by a space, a tab, a newline or the end of the text does
+  # not expand, so the message stays data and rg stays a data command. These
+  # rows pin those four conditions of LD_EXP in lex_dollar (the M13 family
+  # of mutations of docs/reports/test-2026-10-09-guard-msg-param-flag.md;
+  # the "5$" row above pins the closing double quote). The old guard denies
+  # all four (the sudo substring).
+  'git commit -m "costs $ 5; never sudo ls"'
+  $'git commit -m "costs $\t5; never sudo ls"'
+  $'git commit -m "costs $\n5; never sudo ls"'
+  $'rg \'sudo \' foo$'
 )
 check_modes D none absent -- "${edge_none[@]}"
 
@@ -1382,6 +1402,51 @@ if [ "$have_jq" = yes ]; then
 else
   record_skip "F. the awk fallback cases (jq not on PATH: lib_json.sh needs awk or jq)"
 fi
+
+# A copy of the guard next to lib_json.sh and only two of its three .awk
+# files (no pre_bash_guard_rules.awk): awk cannot open the missing file and
+# exits non-zero, so the old guard's four substring rules decide. awk itself
+# is on PATH, so this runs on both paths. echo 'never use sudo here' is
+# none on the awk path (C) and deny here, which shows that the fallback
+# decided.
+partial_dir="$workdir/partial-guard"
+mkdir -p "$partial_dir"
+for f in pre_bash_guard.sh lib_json.sh pre_bash_guard_lex.awk pre_bash_guard_commands.awk; do
+  cp "$REPO_ROOT/.claude/hooks/$f" "$partial_dir/$f"
+done
+chmod +x "$partial_dir/pre_bash_guard.sh"
+for c in 'sudo ls' ls $'echo \'never use sudo here\''; do
+  if [ "$c" = ls ]; then expect=none; else expect=deny; fi
+  escaped="$(json_escape "$c")"
+  label="F. guard without pre_bash_guard_rules.awk: $escaped -> $expect"
+  if [ "$have_jq" = yes ]; then
+    enqueue "$label [jq]" "$expect" "$partial_dir/pre_bash_guard.sh" "$real_path" "$(payload_json "$escaped")"
+  else
+    record_skip "$label [jq] (jq not on PATH)"
+  fi
+  enqueue "$label [no-jq]" "$expect" "$partial_dir/pre_bash_guard.sh" "$minimal_path" "$(payload_json "$escaped")"
+done
+
+# The three .awk files, read the way the guard reads them (LC_ALL=C, -f in
+# the order lex, commands, rules), parse as one program: no input and ls
+# give exit 0 and no output, and sudo ls gives the rule name sudo. awk's
+# stderr is kept, so a syntax error shows in the failure.
+guard_awk=(
+  -f "$REPO_ROOT/.claude/hooks/pre_bash_guard_lex.awk"
+  -f "$REPO_ROOT/.claude/hooks/pre_bash_guard_commands.awk"
+  -f "$REPO_ROOT/.claude/hooks/pre_bash_guard_rules.awk"
+)
+for c in '' ls 'sudo ls'; do
+  if [ "$c" = 'sudo ls' ]; then want=sudo; else want=''; fi
+  out="$(printf '%s' "$c" | LC_ALL=C awk "${guard_awk[@]}" 2>&1)"
+  rc=$?
+  label="F. the three .awk files in the guard's order: input [$c] -> exit 0, output [$want]"
+  if [ "$rc" -eq 0 ] && [ "$out" = "$want" ]; then
+    record_pass "$label"
+  else
+    record_fail "$label (got [$out], exit $rc)"
+  fi
+done
 
 # ── G. AC7: the old guard's denies, kept or listed ──────────────────────
 # The cases of C that the old guard denies and the new one lets through:

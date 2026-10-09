@@ -1,3 +1,12 @@
+# pre_bash_guard_rules.awk holds the "Rule judgement", "The sentinel" and
+# "Main" sections of the awk program of pre_bash_guard.sh; Main has BEGIN
+# (with the command lists NOEXEC, DATACMD and RESW) and END. The guard
+# passes its three .awk files to one awk with -f, in the order
+# pre_bash_guard_lex.awk, pre_bash_guard_commands.awk,
+# pre_bash_guard_rules.awk, and awk reads them as one program: functions
+# are shared across the files. The shell no longer passes the program in
+# single quotes.
+
 # ======================================================================
 # Rule judgement
 # ======================================================================

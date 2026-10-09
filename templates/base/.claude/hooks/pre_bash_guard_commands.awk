@@ -1,3 +1,12 @@
+# pre_bash_guard_commands.awk holds the "Simple-command assembly" and
+# "Data regions" sections of the awk program of pre_bash_guard.sh. The guard
+# passes its three .awk files to one awk with -f, in the order
+# pre_bash_guard_lex.awk, pre_bash_guard_commands.awk,
+# pre_bash_guard_rules.awk, and awk reads them as one program: functions
+# are shared across the files, and BEGIN and END are in
+# pre_bash_guard_rules.awk. The shell no longer passes the program in
+# single quotes.
+
 # ======================================================================
 # Simple-command assembly
 # ======================================================================
