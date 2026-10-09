@@ -1,10 +1,12 @@
 # Verify report: org-feature-worktree
 
-- Date: 2026-10-09
+- Date: 2026-10-09(cycle 1)、2026-10-10(cycle 2)
 - Plan: docs/plans/active/2026-10-09-org-feature-worktree.md(承認済み、digest 56e435bfa976)
-- Verifier: verifier subagent (Claude Opus 5.5)、pipeline cycle 1(`cycle-count.json` は 1、上限 2)
-- Scope: 仕様への適合(AC1〜AC14、仕様の FR-4、FR-11 の `/org` skill の部分、受け入れ条件)、静的解析、文書のずれ。対象は `git diff 765da6bd...HEAD`(HEAD a49d38a1、14 コミット、29 ファイル、+6457/-374)。テストは実行していない(`/test` の担当)。テストについては、何を固定しているかを読んで確かめた
-- Evidence: `docs/evidence/verify-2026-10-09-org-feature-worktree.log`(`docs/evidence/*.log` は gitignore の対象なので手元にだけ残る)。runner 自身のログは `docs/evidence/verify-2026-10-09-111530.log`
+- Verifier: verifier subagent (Claude Opus 5.5)。pipeline cycle 1(`cycle-count.json` は 1、上限 2)と、cross-review(cycle 1)の ACTION_REQUIRED 2 件を直したあとの cycle 2(上限の回)。現況は末尾の「Cycle 2」の節と「Verdict」
+- Scope: 仕様への適合(AC1〜AC14、仕様の FR-4、FR-11 の `/org` skill の部分、受け入れ条件)、静的解析、文書のずれ。cycle 1 の対象は `git diff 765da6bd...HEAD`(HEAD a49d38a1、14 コミット、29 ファイル、+6457/-374)。cycle 2 の対象は `git diff 183cb190 HEAD`(HEAD c322e7b3、5 コミット、17 ファイル、+678/-105)で、全体は `git diff 765da6bd...HEAD`(23 コミット、38 ファイル、+7597/-441)。テストは実行していない(`/test` の担当)。テストについては、何を固定しているかを読んで確かめた
+- Evidence: `docs/evidence/verify-2026-10-09-org-feature-worktree.log`(`docs/evidence/*.log` は gitignore の対象なので手元にだけ残る。cycle 2 の出力は末尾の `===== cycle 2` の区切りのあとに足した)。runner 自身のログは cycle 1 が `docs/evidence/verify-2026-10-09-111530.log`、cycle 2 が `docs/evidence/verify-2026-10-09-164603.log`(runner の時刻は UTC)
+
+「Spec compliance」から「Coverage gaps」までの節は cycle 1(HEAD a49d38a1)の記録で、書き換えていない。cycle 2 の確認は「Cycle 2」の節にある。
 
 ## Spec compliance
 
@@ -81,9 +83,87 @@ V-1〜V-4 はどれも挙動を変えず、merge を止めない。self-review �
 - 同じ機能の `start --plan` を同時に 2 つ打つ場合(計画の進捗の (4))は見ていない
 - digest の一致は規則ごとに読んで確かめた。114 個の入力での一致(計画の進捗の S1)は /test の実行で確かめる
 
+## Cycle 2(d49bbc34・07d38e6d・c2a1f8c4・9c1d447f・c322e7b3 のあと)
+
+対象は `git diff 183cb190 HEAD`。`git log --oneline 183cb190..HEAD` は d49bbc34(leader に台帳を渡す、分割計画のコードフェンス)、07d38e6d(`--state-dir` が main の台帳を指すときの全体の上限)、c2a1f8c4(計画の進捗)、9c1d447f(その help の文)、c322e7b3(self-review の cycle 2)の 5 つ。作業ツリーは clean で、`origin/feat/org-feature-worktree` と同じ位置。
+
+### cross-review の ACTION_REQUIRED の確認
+
+| # | 指摘 | 直し(コード) | 固定するテスト(読んで確認) | 判定 |
+| --- | --- | --- | --- | --- |
+| 1 | `--state-dir` か env で立てた start の leader に台帳の場所が渡らず、leader の座席が別の台帳に入る | d49bbc34: `StartFeature` が解決済みの `p.StateDir` を `featureLeaderTask` に渡し(`feature.go:320`)、task の最後のヘッダ行に `- 台帳: <path>(ralph org のコマンドには必ず --state-dir '<path>' を付ける)` を足す(`:347`、引用は `shellQuote` `:358`)。雛形 `leader.md:65-70` が spawn・send・wait・read・status・stop・report・disband のすべてに付けるよう書き、skill の 4 面の 396〜404 行が同じことを書く。07d38e6d: leader の spawn は source が `flag` になるので、`withMainWorktreeOrgLimits`(`internal/cli/org.go:160`)が `org.LedgerMainWorktreeRoot`(`statedir.go:105`)で、指した台帳が打った場所の repository の main worktree の `.harness/state/org` と同じかを見て、同じなら main の `ralph.toml` の上限を使う。9c1d447f: `orgWideLimitsHelp`(`internal/cli/org.go:375`)をこの挙動に合わせた | `TestStartFeature_StartsLeaderInFeatureWorktree`(spawn された leader のプロンプトに、台帳の行が `st.stateDir` で入る)、`TestFeatureLeaderTask`(空白と `'` を含むパス)、`TestFeatureLeaderTask_StateDirIsOneShellWord`(5 つの値を `sh` に通して 1 引数になる)、`TestRenderRolePrompt_Leader_FeatureOrgProcedure`(雛形の導入の段落)、`TestLedgerMainWorktreeRoot`(肯定 4 件と否定 5 件を 3 つの cwd で、git の外)、`TestOrgStart_OrgWideLimits_ReadFromMainWorktreeRalphToml`(linked worktree の `ralph.toml` が `max_orgs = 99` でも、絶対と相対の `--state-dir` と env で main の台帳を指すと拒否、別の台帳を指すと許可)、`TestOrgSpawnAndStartHelp_OrgWideLimitsSource` | コードとテストの上では解消。leader が実際にこの行に従うことは実機で走らせていない(Coverage gaps) |
+| 2 | 機能の本文のコードフェンスの中の `## Usage` などで節が閉じ、承認は通るのに leader に渡る本文が短くなる | d49bbc34: `splitFence`(`split.go:377`)、`read`(`:385`)、`fenceRun`(`:414`)、`unclosedErr`(`:402`)。`parseSplitPlan` はフェンスの中の行を見出しにもフィールドにもせず(`:315`)、機能の中なら本文に足す。閉じていないフェンスは開いた行を指して拒否する。`rejectDigestSkippedLine` はフェンスの判定より前に全行へ掛かるので、digest が読まない行はフェンスの中でも拒否される。`PlanDigest` は cycle 2 の差分にない | `TestLoadSplitPlan_CodeFences`(14 件と、フェンスの中の `## Features` で header が終わらないこと)、`TestLoadSplitPlan_Rejects` に足した 13 件、`TestLoadSplitPlan_FencedBodyIsApproved`(`CheckApproved` が通り、ブロックごと本文に入り、後ろの機能も読まれ、フェンスの中の行の編集で digest が変わる)、`TestPlanDigest_MatchesScript` に足した入力 `code fences`(`split_test.go:791`) | 解消。開閉の規則は、読んで確かめた範囲で CommonMark の fenced code block と合う(字下げは空白 3 つまででタブは不可、バッククォートの info string にバッククォートがあれば開かない、閉じる行は同じ文字で開いた長さ以上、後ろは空白とタブだけ) |
+
+1 件目について、ほかに確かめたこと:
+
+- state dir の source で挙動が変わる所は、`guardLegacyOrgStateDir`(`flag` では何もしない)、`withMainWorktreeOrgLimits`、`FeatureRepoRoot`(start だけ)、`watch` と `status` の表示の 4 か所だけ(`git grep stateDirSource`)。leader が `--state-dir` を付けても、旧台帳の検査が外れるほかに変わる点はない。この版の ralph は feature worktree の中に旧台帳を作らない
+- agmsg の team は org_id だけから決まる(`spawn.go:1424` の `agmsgTeam`)。implementer と reviewer の雛形には `ralph org` のコマンドがないので、台帳の行が要るのは leader だけ
+- skill の「pane の ralph が古い版で台帳を別の場所に決める場合にも、start と同じ台帳を使わせる」は、v5.1.0 の `org` にも persistent flag の `--state-dir` があること(`git show v5.1.0:internal/cli/org.go` の 41 行)まで確かめた。古い版で実際に打つことはしていない
+
+### cycle 2 の差分が触れる AC の再確認
+
+| Acceptance criterion | Status | Evidence |
+| --- | --- | --- |
+| AC1、AC2 | 満たす | フェンスは読み込みの規則に足しただけで、`Rejects` の既存のケースは変わっていない(差分は追加だけ)。AC2 の「digest が読まない書き方の拒否」はフェンスの中でも続く(上の表の 2) |
+| AC3 | 満たす | leader の task に台帳の行が足された。機能の本文はフェンスごと入る(`TestStartFeature_StartsLeaderInFeatureWorktree`、`TestLoadSplitPlan_FencedBodyIsApproved`) |
+| AC4 | 満たす | 承認のあとにフェンスの中へ `- Branch:` を足しても拒否される(`Rejects` の「branch inside a fence」) |
+| AC5〜AC11 | 満たす(cycle 1 のまま) | `spawn.go`・`reserve.go`・`verbs.go` は cycle 2 の差分にない。`internal/cli/org.go` の変更は `withMainWorktreeOrgLimits` の読み口と help の文字列だけ |
+| AC12 | 満たす | `leader.md` の新しい段落は台帳の説明だけで、`Solo`・`Leaded`・`Parallel`・`編成パターン` は 0 件のまま |
+| AC13 | 満たす | skill の 4 面は `cmp` で同一。`check-skill-sync.sh` は 13 skill が lock-step、`check-sync.sh` は DRIFTED 0。`grep -rnw director` は skill・`templates/base`・`internal/org/prompts`・README・AGENTS.md で 0 件 |
+| AC14 | 満たす(cycle 1 の観測のまま) | 実機は af138af6 のバイナリで、そのあと `leader.md` が変わった(`git diff af138af6 HEAD --stat -- internal/org/prompts/` は +18/-6)。Coverage gaps |
+
+計画の承認: `./scripts/plan-visual.sh digest` は HEAD、c2a1f8c4、183cb190 のどれでも `56e435bfa976`。cycle 2 で計画に入った変更は `## Progress checklist` の 1 行(169 行)だけ。
+
+07d38e6d は 3 段目の挙動を 1 つ変えた。`--config` がなく、`--state-dir` か `RALPH_ORG_STATE_DIR` で main の台帳を指したとき、これまでは打った場所の `ralph.toml` を読んでいたが、今は main の `ralph.toml` を読む。理由(leader が `--state-dir` を付けても、feature branch の `ralph.toml` で全体の上限を変えられないようにする)は 07d38e6d のメッセージと計画の進捗 169 行にある。仕様の 41 行の要約(「`--config` がなければ、全 org の上限は main worktree のルートの `ralph.toml` から読む」)は、この変更のあとも成り立つ。
+
+### Static analysis(cycle 2)
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `./scripts/run-static-verify.sh` | pass(rc 0) | shellcheck、hook の `sh -n`、`jq -e` の settings 2 つ、Codex の hook の 3 つのガード、`check-sync.sh`(IDENTICAL 164、DRIFTED 0、ROOT_ONLY 0)、`check-pipeline-sync.sh`、`check-skill-sync.sh`(13 skill)、`check-template-purity.sh`、tech-debt の計画の参照、golang(`gofmt: ok`、`golangci-lint` は `0 issues.`、`go vet` と staticcheck は出力なし)、`secret-scan-branch`(765da6bd..c322e7b3 clean) |
+| `git diff --check 183cb190 HEAD` と `git diff --check 765da6bd...HEAD` | pass | 出力なし |
+| 追加行の U+FFFD(`765da6bd...HEAD`) | pass | 0 件 |
+| コミットメッセージの帰属の行(23 コミット) | pass | `Co-Authored-By` / `Generated with` は 0 件 |
+| `./scripts/plan-visual.sh digest`(計画) | pass | `56e435bfa976` |
+| `go build -o <scratch>/ralph ./cmd/ralph` と `org start --help` / `org spawn --help` | pass | 文書のずれの確認に使った。出力は evidence のログに足した |
+
+### Documentation drift(cycle 2)
+
+| Doc / contract | In sync? | Notes |
+| --- | --- | --- |
+| `ralph org spawn --help` と `ralph org start --help` の全体の上限の段落 | 一致 | 「found by default or named with --state-dir or RALPH_ORG_STATE_DIR」と「a --state-dir or RALPH_ORG_STATE_DIR naming another ledger」が `LedgerMainWorktreeRoot` の分岐と合う |
+| skill の 4 面の「全体の上限」(215〜226 行) | 一致 | symlink を解決して比べることまで書いてある(`samePath`) |
+| skill の台帳の段落(396〜404 行)、`leader.md:65-70`、`featureLeaderTask` | 一致 | 動詞の一覧は 3 か所とも同じ 8 つ。引用は単一引用符。「leader には届かない」の言い切りは self-review の C2-2 (c) |
+| skill のフェンスの説明(334〜336 行、349〜350 行)と `parseSplitPlan` | 一致 | |
+| `templates/base/ralph.toml:42-46` の `max_orgs` のコメント | 不一致 | V2-1 |
+| `docs/tech-debt/README.md` の行 146・184 の (d)・185 の (c)・188 | 古い | V2-2 |
+| 仕様の FR-4 の「4 段目で決めたこと」(48 行)、計画の進捗 | 参考 | V2-3 |
+| `docs/recipes/worktrees.md:57`、`docs/recipes/codex-seat-permissions.md:80` | 一致 | 台帳の置き場所だけを書き、上限の読み元には触れない |
+| cycle 1 の V-1・V-2・V-4 | 解消(6312b5d6) | `start --help` の `--plan` の usage に `--allow-unscoped`、Long と `--org-id` の usage に 20 文字の上限、実機の記録の Run 3 に `hint:` の行。V-3 は `internal/cli/doctor.go:731`・`:761` に残り、台帳に行がある |
+
+### Findings(cycle 2)
+
+| ID | Severity | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| V2-1 | LOW | `ralph init` で配る `templates/base/ralph.toml` の `max_orgs` のコメントが、07d38e6d のあとの挙動と逆のことを書く。コメントは「only when --config is not given, neither --state-dir nor RALPH_ORG_STATE_DIR is set, and the state dir resolves to the main worktree's .harness/state/org」で、今は `--state-dir` か env で main の台帳を指しても main の `ralph.toml` を読む。機能ごとの org の leader は `--state-dir` を必ず付けるので、コメントが外している場合がこの PR の中心の経路に当たる。self-review の C2-1 (b) と同じ | `templates/base/ralph.toml:42-46`、`internal/org/statedir.go:105`、`internal/cli/org.go:160`。help(`:375`)と skill(215〜226 行)は直っている | /sync-docs で、help と同じ条件(「--config がなく、台帳が main worktree の .harness/state/org のとき。既定の解決でも、--state-dir や RALPH_ORG_STATE_DIR で指しても」)に書き直す。値は変えない |
+| V2-2 | LOW | 台帳の 4 行が cycle 2 の直しで古くなった。146 行の「`--config` or `--state-dir` avoids it」は、main の台帳を指す `--state-dir` では成り立たない。184 行の (d) の提案文は「neither --state-dir nor RALPH_ORG_STATE_DIR is set」で、今の挙動と逆。185 行の (c)(help の文を固定するテストがない)は、spawn と start の分を `TestOrgSpawnAndStartHelp_OrgWideLimitsSource` が固定した。188 行の「Nothing in `StartFeature`, in the leader prompt … hands the resolved state dir to the leader」は HEAD では偽。self-review の C2-6 の (a)〜(d) と同じ | `docs/tech-debt/README.md` の 146・184・185・188 行。cycle 2 の差分に台帳はない | /sync-docs で、self-review の C2-6 の最後の列のとおりに直す |
+| V2-3 | 参考 | 仕様の FR-4 の「4 段目で決めたこと」に、フェンスの規則、leader の task の台帳の行、main の台帳を指す `--state-dir` が main の上限を使うこと、の 3 つが書かれていない。仕様は「詳細は 4 段目の計画に書いた」とし、計画の進捗 169 行に 3 つともあるので、食い違いではない。計画の進捗は 9c1d447f(help の文)を挙げていない | 仕様の 48 行、計画の 169 行 | /sync-docs が触れるなら、仕様に 1 文、計画の進捗に 9c1d447f を足す。足さなくても merge は止めない |
+
+### Coverage gaps(cycle 2)
+
+- テストは実行していない。上の表のテスト名は中身を読んで確かめたもので、通ることは /test で確かめる
+- AC14 の実機は af138af6 のバイナリで、そのあと `leader.md` と task の文が変わった。claude の leader が台帳の行に従ってすべての `ralph org` のコマンドに `--state-dir` を付けるか、引用したパスを pane の中でそのまま打てるかは、実機で確かめていない。Run 3 の上限の結果は、既定の解決でも `--state-dir` でも main の `ralph.toml` になるので変わらないと見ている。未確認です
+- pane の ralph が v5.1.0 のとき、flag があることまでは確かめたが、その版で今の台帳のイベントを読ませることはしていない
+- まだない台帳を symlink を含む別名のパスで `--state-dir` に渡すと、`samePath` が文字列の比較になる場合(self-review の「finding にしないもの」)は、試していない
+- `ralph org start <task> --state-dir X` の leader に台帳が渡らない件(self-review の C2-6 (g))は、計画の範囲の外なので見ていない
+
 ## Verdict
 
 - Verdict: pass
-- Verified: AC1〜AC13 をコードとテストの中身で、AC14 を実機の記録で確かめた。計画の承認の digest が HEAD まで一致すること。`run-static-verify.sh` が rc 0 で終わること(Go の gofmt・vet・golangci-lint・staticcheck、同期ゲート、secret scan を含む)。`status --help` と雛形・skill・README・AGENTS.md・仕様がコードと合っていること
-- Partially verified: `start --help` は V-1(`--plan` の usage)と V-2(20 文字の上限)が残る。AC9 の default branch でない場合は fake だけ。どれも merge を止めない
-- Not verified: テストの実行、8aae7ce2 以降のバイナリでの実機、push と `gh pr create` が通る場合、codex の leader、同時の start
+- Verified(cycle 2): cross-review の ACTION_REQUIRED 2 件が、コード(`featureLeaderTask` の台帳の行と `LedgerMainWorktreeRoot`、`splitFence`)とテストの中身で直っていること。cycle 2 の差分が触れる AC(AC1〜AC4、AC12、AC13)を満たし、AC5〜AC11 のコードが cycle 2 の差分にないこと。計画の承認の digest が HEAD まで一致すること。`run-static-verify.sh` が rc 0 で終わること(Go の gofmt・vet・golangci-lint・staticcheck、同期ゲート、765da6bd..c322e7b3 の secret scan を含む)。help・skill の 4 面・雛形が新しい挙動と合っていること
+- Partially verified: 文書は V2-1(配る `ralph.toml` のコメント)と V2-2(台帳の 4 行)が古いまま残る。どちらも挙動を変えず、/sync-docs で直せる
+- Not verified: テストの実行、d49bbc34 以降のバイナリでの実機(leader が `--state-dir` を付けること)、push と `gh pr create` が通る場合、codex の leader、同時の start
+- 参考(cycle 1 の判定、HEAD a49d38a1。V-1・V-2・V-4 はそのあと 6312b5d6 の sync-docs で直った): pass
+  - Verified: AC1〜AC13 をコードとテストの中身で、AC14 を実機の記録で確かめた。計画の承認の digest が HEAD まで一致すること。`run-static-verify.sh` が rc 0 で終わること(Go の gofmt・vet・golangci-lint・staticcheck、同期ゲート、secret scan を含む)。`status --help` と雛形・skill・README・AGENTS.md・仕様がコードと合っていること
+  - Partially verified: `start --help` は V-1(`--plan` の usage)と V-2(20 文字の上限)が残る。AC9 の default branch でない場合は fake だけ。どれも merge を止めない
+  - Not verified: テストの実行、8aae7ce2 以降のバイナリでの実機、push と `gh pr create` が通る場合、codex の leader、同時の start
