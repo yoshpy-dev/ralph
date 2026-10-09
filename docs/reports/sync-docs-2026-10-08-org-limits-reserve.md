@@ -2,20 +2,22 @@
 
 - Date: 2026-10-09 JST(ファイル名は計画の日付)
 - Plan: `docs/plans/active/2026-10-08-org-limits-reserve.md`
-- Pipeline cycle: 2 of 2(既定の上限の最後の回)。差分は merge base `51855166` から、sync-docs 開始時の branch HEAD `6ee9836b`(feat/org-limits-reserve)まで
+- Pipeline cycle: 3(ユーザーが上限を 3 に上げた回。`cycle-count.json` は 2 のままなので、この report と insight event に cycle 3 と書く)。差分は merge base `51855166` から、sync-docs 開始時の branch HEAD `104be58d`(feat/org-limits-reserve)まで
 - 先行 report(それぞれを追加した commit):
-  `docs/reports/self-review-2026-10-08-org-limits-reserve.md`(`a919082a`。Merge 可、C2-1〜C2-7)、
-  `docs/reports/verify-2026-10-08-org-limits-reserve.md`(`f144021d`。pass、V2-1〜V2-5)、
-  `docs/reports/test-2026-10-08-org-limits-reserve.md`(`6ee9836b`。pass、T2-1〜T2-4)
-- cycle 1 のこの report は `196205f8` にある。この回が上書きした。cycle 1 の report の節を指す箇所はほかにないので、付録には残していない(`git grep` で 0 件)
+  `docs/reports/self-review-2026-10-08-org-limits-reserve.md`(`f19df087`。Merge 可、C3-1〜C3-4)、
+  `docs/reports/verify-2026-10-08-org-limits-reserve.md`(`8b83abeb`。pass、V3-1〜V3-4)、
+  `docs/reports/test-2026-10-08-org-limits-reserve.md`(`104be58d`。pass、T3-1〜T3-7。`RulesDiffer` と `ReservationAppendFails_NamesIt` のテストは `066bf282`)
+- cycle 2 のこの report は `27fefc47` にある。この回が上書きした。この report の節を指す箇所はほかにない(`git grep` で 0 件)
 
 ## Summary
 
-verify が渡した V2-1〜V2-5 は、文書で直せる部分をすべて直した。V2-2 のうち Go の help の文字列は直していない。self-review の C2-6 と C2-7 も文書だけの修正なので、同じ commit で直した。
+文書で直せるものは直した。コードの変更は a94c914f だけで、cross-review が今のコードを読むので、Go のコード、コメント、help の文字列には触れていない。
 
-直さずに tech-debt へ送ったのは、`internal/` の変更になるもの(C2-1〜C2-4 の Go の doc comment、条件文、help の文字列)と、C2-5(tech-debt の行と test のコメントが report の番号を指す件)である。`internal/` を変えるとパイプラインが `/self-review` から再実行になり、上限の 2 回を超える。tech-debt には新しい 2 行(177、178 行目)を足した。1 行目は C2-1〜C2-5 と V2-1(文言の LOW)、2 行目は T2-1〜T2-4(test の穴)である。
+- V3-1: plan の Progress checklist に 1 行足した(159 行目)。3 つの補償の規則が「新しい記録」を同じ基準で決めていないこと、`disband` だけの打ち直しと `--reserve` なしの立て直しで何が起きるか、`RulesDiffer` のテストが現状を固定していること、打ち直した `disband` で解けること
+- V3-2、C3-3 のうち skill の分: `/org` skill の `stop` の行、`disband` の行、「例外が 1 つある」の段落に、台帳に新しい記録があるとき、台帳を読み書きできないときは戻さず、エラーが手で閉じる herdr のコマンドを示すことを書いた。`disband` の行には予約も戻すことを足した。4 面は同じ内容(sha256 `64efef31…`)
+- V3-4 と C3-1〜C3-4: tech-debt の 166、170、171、172、176、177 行目を更新し、179 行目を足した。直さなかった C3-1〜C3-4 と test の穴(T3-4〜T3-7)は 179 行目に 1 行でまとめた
 
-`/org` skill の 4 面は変えていない。cycle 2 のコードの変更(動いていない leader への `--reserve` を `max_orgs` で拒否する枝)を書いた箇所が skill にないためである。
+Go の help と doc の「いつも戻す」文(C3-3 の `stop` / `disband` の help、`closeDeferredSelf` と `Disband` の doc)、`compensateUnderLock` の doc(C3-1)、`selfCompensation`・`add`・`errorFor` の doc(C3-2)、skip のエラー文(C3-4 の (b))は、直さずに 179 行目に送った。
 
 commit は 1 つで、この report と同じ commit に入れた。
 
@@ -23,42 +25,46 @@ commit は 1 つで、この report と同じ commit に入れた。
 
 | File | Change |
 |------|--------|
-| `docs/plans/active/2026-10-08-org-limits-reserve.md`(157 行目) | V2-1: Progress checklist に 1 行足した。`975df92b` と `afcbc6c2` の、動いていない leader への `--reserve` を `max_orgs` で拒否する枝は `rejected` を書かない。立っている leader への予約の拒否(AC14)と同じで、`rejected` は状態のイベントなので、書くと座席の最新の状態が `spawned` から変わり、予約なしの再試行が既存の座席を返さなくなる。AC1 の「`rejected` が残る」は新しい座席の spawn に当たる。本文には触れていない。digest は `1a165903b5df` のまま |
-| `templates/base/ralph.toml`(41〜46 行目) | V2-2 と C2-4 の `ralph.toml` 側: `max_orgs` のコメントを、「`ralph org spawn` と `ralph org start` が main worktree の `ralph.toml` を読むのは、`--config` がなく、`--state-dir` も `RALPH_ORG_STATE_DIR` も設定されておらず、state dir が main worktree の `.harness/state/org` に決まったときだけ。それ以外は `--config` のファイル、なければ `./ralph.toml`」に書き直した。値は変えていない。ルートに `ralph.toml` はなく(`check-sync.sh` では TEMPLATE_ONLY)、同じ文を持つファイルはほかにない(`internal/config/config.go` と `scripts/ralph-config.sh` を `git grep` して当たらなかった) |
-| `AGENTS.md`(90 行目、managed block の外) | V2-3 と C2-7: repo map の `internal/org/` の説明を「org-wide `max_orgs` / `max_total_seats` in `envelope.go`, their counts and scope reservations in `reserve.go`」にした。判定(`ValidateOrgWideCapacity`、`validateMaxOrgs`)は `envelope.go`、数え方(`RunningOrgs`、`TotalActiveSeats`)と予約は `reserve.go` にある |
-| `docs/tech-debt/README.md` | V2-4 と C2-6: 173 行目の (a) の「and nothing says so」を「and nothing warns when the path is typed」にした(同じ行の「help と skill が規則を述べる」と食い違わなくなる)。176 行目の (b) の `idempotentRespawn` の 87.5% を「90.9% since the cycle 2 fix」にした(他の 3 つの値は cycle 2 の test report でも同じ)。177、178 行目を新しく足した(下の表) |
-| `docs/reports/self-review-2026-10-08-org-limits-reserve.md` | V2-5: 末尾の空行を 1 つ消した。判定の行(finding の重さと `Merge:`)には触れていない |
-| `docs/insights/events/2026-10-08-org-limits-reserve.jsonl` | `sync_docs` の event を 1 行追記(verdict pass、cycle 2) |
-| `docs/reports/sync-docs-2026-10-08-org-limits-reserve.md` | この report(cycle 1 の版を上書き) |
+| `docs/plans/active/2026-10-08-org-limits-reserve.md`(159 行目) | V3-1: Progress checklist に 1 行足した。座席は最新の状態イベント、workspace はその id の最新の workspace イベント、予約は「今の予約がなく、最後の `disbanded` の前の予約が写しと同じか」で決める。`disband` だけが打ち直されると座席と workspace は戻り予約は戻らない。`--reserve` なしで立て直されると座席は戻らず古い予約が書き戻される。エラーは手で閉じる herdr のコマンドで終わり、打ち直した `disband` で解ける。AC15 の本文は digest の中なので変えていない。digest は `1a165903b5df` のまま |
+| `.claude/skills/org/SKILL.md`(168、169、190〜202 行目)と、`.agents/skills/org/SKILL.md`、`templates/base/.claude/skills/org/SKILL.md`、`templates/base/.agents/skills/org/SKILL.md` | V3-2、C3-3(skill の分)。`stop` の行と `disband` の行の括弧に 1 文ずつ足した(「台帳に新しい記録があるとき、台帳を読み書きできないときは戻さず、エラーが手で閉じる herdr のコマンドを示す」)。`disband` の行は「予約があればそれも戻して」を足した(予約を戻すのは workspace の経路だけなので「あれば」を付けた)。「例外が 1 つある」の段落は、予約も戻すこと(workspace の close が失敗したとき)を 1 文に足し、段落の下に 5 行の段落を足した(台帳のロックの下で読み直してから書く、新しい記録があれば残して戻さない、ロックを取れないときと読み書きできないときも戻さない、どちらもエラーが手で閉じる herdr のコマンドで終わる)。詳細は表のセルでなく段落に置き、セルの伸びを抑えた(F-8)。`scripts/sync-skills.sh` で `.agents` を作り、`templates/base` の 2 面は `cp` した |
+| `docs/tech-debt/README.md` | 下の表 |
+| `docs/insights/events/2026-10-09-org-limits-reserve.jsonl` | `sync_docs` の event を 1 行追記(verdict pass、cycle 3)。UTC の日付が 10-09 に変わったあとで、`/test` の cycle 3 の event と同じファイルに入る。この slug の event は 2026-10-08 と 2026-10-09 の 2 ファイルに分かれる |
+| `docs/reports/sync-docs-2026-10-08-org-limits-reserve.md` | この report(cycle 2 の版を上書き) |
 
-### tech-debt の新しい行
+### tech-debt の変更
 
-| 行 | 内容 |
+| 行 | 変更 |
 |----|------|
-| 177 行目 | cycle 2 の文言の LOW(C2-1〜C2-5、V2-1、V2-2)。(a) C2-1: `idempotentRespawn` の doc で「decided first」が 2 回出る。`Spawn` の doc の手順 1 も「first」と「after」が同じ文にある。(b) C2-2 と V2-1: plain rejection の理由が、すでに inactive な座席に当てはまらない。AC1 の本文(digest の内側)と、quality-gates の 2 面の「Spawn rejected, recorded in manifest」に例外がない。(c) C2-3: `if !seat.Active` は外しても結果が変わらない。(d) C2-4: `orgWideLimitsHelp` の文の組み立てと、`--state-dir` と env の除外が後ろの文にしかないこと。直す文言を Trigger に書いた(`templates/base/ralph.toml` 側はこの回に直済み)。(e) C2-5: 行 144・170・172〜176 の report の番号と、`TestOrgCloseDeferredSelfPane_CloseFails_ReactivationCanExceedMaxTotalSeats` の上のコメントの「verify V-2」。3 つの report は cycle 1 を付録に同じ番号で残しているので、今は指す先が解ける |
-| 178 行目 | cycle 2 の test の穴(T2-1〜T2-4)。(a) T2-1(mutation N8): idempotent の経路で、`max_orgs` と予約の判定の順を固定するテストがない。直すための subtest の内容を Trigger に書いた。(b) T2-2(N3): `if !seat.Active` を外す mutation は等価で、テストでは落とせない。(c) T2-3: help の文言を固定するテストがない。(d) T2-4: 古い台帳が手書きの 2 行で、CLI から古い台帳に `--reserve` を打つテストがない |
+| 166 行目(skill の表のセルが長い、F-8) | `stop` のセルは 919 字から 976 字(2,008 バイト)、`disband` のセルは 1,075 字から 1,142 字になった。数を書き換え、この PR で 1 節ずつ足したことを Impact に書いた。Related に verify の V3-2 を足した |
+| 170 行目(S8 の補償の 4 件) | (a) C2-1 の「写しで決める」半分を取り消し線にし、a94c914f(`compensateUnderLock`)で直ったこと、`seat spawned again in another pane` のケース、mutation S1 で落ちることを書いた。残りは「`reactivateSeat` が 3 つの理由で `""` を返し、`errorFor` は 3 つとも『写しは何も要らなかった』として手で閉じるコマンドなしで元のエラーを返す」こと。(c) C2-5 の `verbs.go` を 1,951 行にし、ブロックの一覧に `compensateUnderLock` と `reserveAgain` を足した。Trigger は C2-1 の「台帳を読み直す」を取り消し線にして(a94c914f で完了)残りの直し方を書き、「次の編集で移す」が a94c914f で来たのに移さなかったことを書いた。Impact の (a) を残りに合わせた |
+| 171 行目(S8 の補償の test の穴) | (b) 座席を立て直す test は a94c914f で入った(`seat spawned again in another pane`)。C2-2 の側(同じ pane id を持つ古い `stopped` の座席)は残る。mutation O1(T3-5)も同じ欠けであることを書いた。Impact と Trigger を C2-2 だけに合わせ、Related に test の T3-5 を足した |
+| 172 行目(補償は上限と重なりを見ない) | (a) F-5 を取り消し線にし、a94c914f と、固定する 3 ケース、mutation G4 と G5 を書いた。見出しの「three gaps」は「two gaps left, (b) and (d)」にした。Risk の「(a) can swap a live org's reservation for an older one」、Why の「All four」(「(b) to (d)」にした)、Trigger の (a) を外した |
+| 176 行目(test の穴) | (a) X18 を取り消し線にし、同じ判定が `ActiveReservation(now, orgID) != nil` になったこと、mutation G4 が `org started again with another reservation` と `a spawn holds the manifest lock` で落ちることを書いた。Impact、Why、Trigger の (a) も取り消し線にした。(b) はカバレッジの値を外して関数名だけにし、`reserveAgain` の追記の失敗は `TestOrgCloseDeferredSelfWorkspace_ReservationAppendFails_NamesIt` で通ることを書いた。(c) に、補償の `a spawn holds the manifest lock` も同じプロセスの goroutine であること(T3-7)を足した |
+| 177 行目(cycle 2 の文言の LOW) | Trigger の「a third pipeline run on this plan」を取り消し線にし、来たこと(cycle 3)、a94c914f は `idempotentRespawn`、`Spawn` の doc、`orgWideLimitsHelp` を変えていないこと、この回の sync-docs は文書だけを変えたので (a)〜(d) は開いたままで、ほかの Trigger も残ることを書いた。Why の「cycle 2 was the last」に、上限を 3 に上げたことと cycle 3 が 3 回目であることを足した。Related に verify の V3-4 を足した |
+| 179 行目(新しい行) | cycle 3 の LOW と test の穴。(a) C3-1: `compensateUnderLock` の doc の「appends only what is still missing」が、テストの固定する規則と合わないこと、ロックの外の書き込み(`spawned`、`spawn_step`、`spawn_failed`、`org_workspace_created`、`Stop` の `stopped` / `stop_failed`、`Disband` の `org_workspace_closed` / `disbanded`)が読み直しと append の間に入りうること。(b) C3-2: ロックと 2 回目の read の失敗も `failed` に積まれるのに、3 つの doc が append に限ること。(c) C3-3: 無条件に戻すと読める文(`stop` / `disband` の help、`closeDeferredSelf` と `Disband` の doc、AC15)。(d) C3-4 と V3-1: 規則の不揃い(`disband` だけの打ち直し、`--reserve` なしの立て直し)と、skip のエラー文の「while the close waited」。(e) T3-4〜T3-7。Trigger に、直す文言と、(d) は規則を先に決めること(mutation Q1、Q2 の形)を書いた |
 
-新しい 2 行は、コードを関数名とテスト名で指し、`file:line` を使っていない。`docs/tech-debt/README.md` の 173、176、177、178 行目に `[A-Za-z_./]*:\d+` を当てて 0 件、列は 5 つ、各列のバッククォートは偶数である。plan は `docs/plans/active/...` で指した(`/pr` の `archive-plan.sh` が書き換える)。
+164〜179 行目のうち触った 166、170〜172、176、177、179 行目に `[A-Za-z_./]*:\d+(?:-\d+)?` を当てて 0 件、列は 5 つ(HEAD の 5 列と同じ)、各列のバッククォートと `~~` は偶数である。新しい 179 行目と書き換えた箇所は、コードを関数名とテスト名で指し、`file:line` を使っていない。plan は `docs/plans/active/...` で指した(`/pr` の `archive-plan.sh` が書き換える)。
 
 ## Surfaces checked for drift
 
 | Surface | Finding |
 |---------|---------|
-| `/org` skill 4 面(`.claude/skills/org/SKILL.md`、`.agents/skills/org/SKILL.md`、`templates/base/` の 2 つ) | 変更なし。cycle 2 のコードの変更は、動いていない leader(古い ralph の台帳で、`spawned` のあとに `stopped` なしで `disbanded` が来たもの)への `--reserve` の拒否だけである。skill は `max_orgs` の拒否を「まだ走っていない org_id への `spawn` / `start`」と書き、`rejected` を書くのは「拒否された新しい座席の `spawn`」と絞っている(186 行目付近)。どちらも新しい枝と食い違わない。skill は idempotent の経路の内側を書いていないので、足す文もない。4 面の sha256 は `771be761…` で同じ |
-| `docs/quality/quality-gates.md`(77 行目)、`templates/base/docs/quality/quality-gates.md`(76 行目) | 「Spawn rejected, recorded in manifest」は、立っている leader への `--reserve` の拒否には当たらない(入力検査の拒否と同じ例外)。verify が「任意」としたので足していない。177 行目の (b) に直し方を書いた |
-| `README.md`(124 行目、247 行目) | verify が「変わっていない」と確認済み。変更なし |
-| `docs/specs/2026-10-07-org-multi-org-director.md`(41 行目) | 「`--config` がなければ、全 org の上限は main worktree のルートの `ralph.toml` から読む」は、詳細を計画に送る要約なので、verify の判断(V2-2)どおり変えていない |
-| `internal/cli/org.go` の `orgWideLimitsHelp` | 変更なし(この回は Go の文字列を変えない)。直す文言は 177 行目の Trigger に書いた |
-| `templates/base/ralph.toml` と `internal/config`、`scripts/ralph-config.sh`、`templates/base/scripts/ralph-config.sh` | コメントだけの変更で、値は同じ。`go test ./internal/config/... ./internal/scaffold/...` が通った(`defaults_sync_test.go` を含む) |
-| plan の Progress checklist と承認の digest | 157 行目だけを足した。`./scripts/plan-visual.sh digest` は `1a165903b5df` で、`- Approved:` の行(4 行目)と一致した |
-| `.claude/rules/`、`docs/recipes/`、`docs/architecture/`、hook、script、language pack | この回の変更(plan の 1 行、`ralph.toml` のコメント、`AGENTS.md` の 1 行、tech-debt、report)が触れないので該当なし |
+| `/org` skill 4 面 | 上の表のとおり直した。補償を書く箇所は `stop` の行、`disband` の行、「例外が 1 つある」の段落の 3 つだけ(`.claude/skills` の全 SKILL.md に `補償`、`戻` を grep した範囲の確認。当たるのは `org` skill だけ)。「全 org の上限と予約」節の最初の段落の「台帳のロックの下で判定する」は、spawn の判定の説明で、補償ではない |
+| `README.md`(124 行目、247 行目) | `stop`、`disband`、`--reserve`、上限の説明で、補償を書いていない。変更なし |
+| `docs/specs/2026-10-07-org-multi-org-director.md` の FR-3 | 「org を disband したら予約を解く」と「3 段目で決めたこと」は、補償を書いていない。FR-2 の `stop` / `disband` の記述にも補償の語はない(`補償`、`戻す` を `git grep`)。変更なし |
+| `docs/quality/quality-gates.md`(77 行目)、`templates/base/docs/quality/quality-gates.md`(76 行目) | a94c914f は補償だけを変えたので、「Spawn rejected, recorded in manifest」の扱いは cycle 2 のとおり(177 行目の (b))。変更なし |
+| `AGENTS.md`(90 行目) | `internal/org/` の説明は `envelope.go` と `reserve.go` の分担で、a94c914f が変えた `verbs.go` の補償を書いていない。変更なし |
+| `.claude/rules/`、`docs/recipes/`、`docs/architecture/`、`.ralph/`、`templates/base/docs/` | 補償の語が当たらない(`git grep` の 0 件)。変更なし |
+| `templates/base/ralph.toml`、`internal/cli/org.go` の help | a94c914f が触れていない。help の「戻す」文は 179 行目の (c) に送った |
+| plan の Progress checklist と承認の digest | 159 行目だけを足した。`./scripts/plan-visual.sh digest` は `1a165903b5df` で、`- Approved:` の行(4 行目)と一致した |
 
 ## Found but left
 
-- quality-gates の 2 面の「recorded in manifest」に例外を足すこと(verify が「任意」としたもの)。177 行目の (b) に送った
-- spec の Rollout の「1. 共通の台帳(FR-1、進行中)」(203 行目)は、cycle 1 から同じ。1 段目がマージされたあとも「進行中」のまま残っている。どの時点で外す慣例かが spec に書かれていないので、触っていない
-- verify の V-4(`{{ENVELOPE}}` と doctor の要約が `max_seats` だけを出す)は、174 行目の (b) にあり、この回に変わっていない
-- C2-1〜C2-4 の Go 側と C2-5 は直していない(上の Summary と 177 行目)
+- `compensateUnderLock`、`selfCompensation`、`add`、`errorFor`、`closeDeferredSelf`、`Disband` の doc、`stop` / `disband` の help、`reserveAgain` の doc(C3-1〜C3-4)は、Go のコメントと文字列なので 179 行目の Trigger に直す文言を書いて送った
+- plan の AC15 の本文(103 行目)は「補償で戻った org は予約も持ち直す」とだけ書き、skip の場合を持たない。digest の中なので変えず、159 行目で補った
+- 規則を揃えるか(V3-1、C3-4)は判断が要る。179 行目の (d) に、mutation Q1、Q2 の形と、そのまま残す場合の doc の文言を書いた
+- skill は `--reserve` なしの立て直しで古い予約が戻ることを書いていない。意図が決まっていない挙動なので、skill に足さなかった(179 行目の (d))
+- 177 行目の (e)(Related の cycle 1 の ID に `appendix, cycle 1:` を付ける)は、cycle 2 から同じ。ID は今も指す先が解ける
 
 ## Checks run
 
@@ -66,15 +72,17 @@ commit は 1 つで、この report と同じ commit に入れた。
 |---------|--------|
 | `./scripts/check-skill-sync.sh` | `[ok] check-skill-sync: 13 skill(s) in lock-step` |
 | `./scripts/check-sync.sh` | `PASS: all files in sync.`(IDENTICAL 164、DRIFTED 0、ROOT_ONLY 0、TEMPLATE_ONLY 11、KNOWN_DIFF 5) |
-| `./scripts/run-static-verify.sh`(tech-debt、plan、`ralph.toml`、`AGENTS.md`、self-review の編集のあと、report と insight の前) | rc 0。`check-sync.sh` PASS、`check-pipeline-sync.sh` OK、`check-skill-sync.sh` OK、`check-template-purity.sh` PASS、tech-debt README plan references OK、`gofmt: ok`、`0 issues.`、branch secret scan clean(`51855166..6ee9836b`) |
-| `go test ./internal/config/... ./internal/scaffold/... -count=1` | `ok` が 2 パッケージ |
+| `./scripts/run-static-verify.sh`(plan、skill、tech-debt の編集のあと、report と insight の前) | rc 0。`check-sync.sh`、`check-pipeline-sync.sh`、`check-skill-sync.sh`、`check-template-purity.sh` が通り、tech-debt README plan references OK、`gofmt: ok`、`0 issues.`、branch secret scan clean(`51855166..104be58d`)。対象は full fallback(`scripts/ralph-config.sh` が差分にあるため) |
 | `./scripts/plan-visual.sh digest docs/plans/active/2026-10-08-org-limits-reserve.md` | `1a165903b5df`(`- Approved:` の行と一致) |
-| `git diff --check` の self-review の編集(作業ツリー) | 出力なし |
+| 4 面の `shasum -a 256` | 4 面とも `64efef313d72…` |
+| `git diff --check`(作業ツリー、commit 前) | 出力なし |
+| tech-debt の行の形(スクリプト) | 166、170〜179 行目: 列 5、バッククォートと `~~` が偶数、`file:line` 0 件 |
 
-commit のあとに走らせる `git diff --check 51855166...HEAD`(verify の V2-5 を直した確認)と `./scripts/secret-scan-branch.sh --strict` の結果は、呼び出し元への報告に書く。この report の commit が入った HEAD でしか確かめられないためである。
+commit のあとに走らせる `git diff --check 51855166...HEAD` と `./scripts/secret-scan-branch.sh --strict` の結果は、呼び出し元への報告に書く。この report の commit が入った HEAD でしか確かめられないためである。
 
 ## Not verified
 
-- `templates/base/ralph.toml` の新しいコメントは、`withMainWorktreeOrgLimits` と `ResolveOrgStateDir`、`MainWorktreeRoot` を読んで書いた。`--state-dir` で main の台帳を指して `ralph org spawn` を打ち、main の `ralph.toml` が読まれないことを実バイナリで確かめてはいない(self-review C2-4 と verify V2-2 も読みによる結論)。未確認です
-- 177、178 行目の「直し方」は、self-review と test の提案を写したもので、実装して試してはいない。T2-1 の subtest は、test report が使い捨てで作り、HEAD で通って N8 で落ちたと書くもので、この回は再現していない(`docs/evidence/` の log は gitignore の対象で、手元にだけある)
-- 「skill に idempotent の経路を書いた箇所がない」は、`org` skill の 4 面で `already spawned`、`idempotent`、`立っている`、`rejected` を `git grep` した範囲の確認である。別の言い方の記述は拾えていない可能性がある
+- skill の新しい文は、`errorFor`、`compensateUnderLock`、`reactivateSeat`、`reopenWorkspace`、`reserveAgain` を読んで書いた。実際の herdr で補償を起こして、エラー文が書いたとおりに出ることは確かめていない(verify と test の cycle 3 も、fake と stub による)
+- 「予約を戻すのは workspace の経路だけ」は、`CloseDeferredSelfPane` が `reactivateSeat` だけを呼ぶことを読んだ結論で、172 行目の (b) と同じ。実行はしていない
+- 179 行目の「直す文言」は、self-review と test の提案を写したもので、実装して試してはいない。T3-4 の probe は test report が使い捨てで作ったもので、この回は再現していない(`docs/evidence/` の log は gitignore の対象で手元にだけある)
+- `ralph org stop --help` と `ralph org disband --help` は出していない
