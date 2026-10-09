@@ -419,7 +419,7 @@ func TestReservationFromEvent_DamagedBindingMatchesNothing(t *testing.T) {
 			if got.Feature == nil || *got.Feature != tt.want {
 				t.Fatalf("feature = %+v, want %+v", got.Feature, tt.want)
 			}
-			if got.Feature.complete() || sameFeature(got.Feature, got.Feature) || sameFeature(got.Feature, nil) {
+			if got.Feature.Complete() || sameFeature(got.Feature, got.Feature) || sameFeature(got.Feature, nil) {
 				t.Fatalf("expected %+v to be incomplete and equal to nothing", got.Feature)
 			}
 			if !strings.HasSuffix(got.Feature.String(), " read from an incomplete record") {

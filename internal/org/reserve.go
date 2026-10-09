@@ -76,10 +76,12 @@ type Reservation struct {
 	Feature *FeatureBinding
 }
 
-// complete reports whether every field of f is set, as Spawn requires of a
+// Complete reports whether every field of f is set, as Spawn requires of a
 // binding it records (validateFeatureBinding). A binding read back from a
-// damaged record (featureBindingFromTokens) may not be.
-func (f *FeatureBinding) complete() bool {
+// damaged record (featureBindingFromTokens) may not be; ActiveFeature
+// returns it as read, and `ralph org status` uses this to say that the
+// record is incomplete.
+func (f *FeatureBinding) Complete() bool {
 	return f.Split != "" && f.Feature != "" && f.Digest != "" && f.Branch != "" && f.Worktree != ""
 }
 
@@ -88,7 +90,7 @@ func (f *FeatureBinding) complete() bool {
 // record.
 func (f *FeatureBinding) String() string {
 	s := fmt.Sprintf("feature %q of split plan %q (digest %q, branch %q, worktree %q)", f.Feature, f.Split, f.Digest, f.Branch, f.Worktree)
-	if !f.complete() {
+	if !f.Complete() {
 		s += " read from an incomplete record"
 	}
 	return s
@@ -102,7 +104,7 @@ func sameFeature(a, b *FeatureBinding) bool {
 	if a == nil || b == nil {
 		return a == nil && b == nil
 	}
-	return a.complete() && *a == *b
+	return a.Complete() && *a == *b
 }
 
 // validateFeatureBinding checks a binding Spawn is asked to record: split,

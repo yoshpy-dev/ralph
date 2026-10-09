@@ -62,13 +62,6 @@ const (
 	maxFeatureOrgIDLen = maxHerdrAgentNameLen - 1 - len(implementerSeatID)
 )
 
-// Complete reports whether every field of the binding f is set (complete,
-// reserve.go). ActiveFeature returns a binding read from a damaged record as
-// read, so `ralph org status` uses this to say that the record is incomplete.
-func (f *FeatureBinding) Complete() bool {
-	return f.complete()
-}
-
 // featureOrgIDLimit says why a feature org's org_id is at most
 // maxFeatureOrgIDLen characters, for the errors of a longer slug or --org-id.
 func featureOrgIDLimit() string {
