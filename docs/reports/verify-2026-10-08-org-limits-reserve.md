@@ -2,12 +2,167 @@
 
 - Date: 2026-10-09 JST(ファイル名は計画の日付)
 - Plan: docs/plans/active/2026-10-08-org-limits-reserve.md
+- Verifier: verifier subagent (Claude Opus 5.5)、パイプライン 4 回目(cycle 4)。ユーザーが上限を 4 に上げた回で、`cycle-count.json` は /cross-review の決まりで 2 のままなので、この報告と insight event に cycle 4 と書く(`insights-append.sh --cycle 4`)
+- Scope: HEAD 83362823。cycle 3 の verify(8b83abeb)からの差分は、066bf282(テスト)、104be58d(test の報告)、736ce19d(sync-docs。`/org` skill の 4 面、tech-debt、plan)、7981e8fb(cross-review の triage、cycle 3)、83aec44e(`reserveAgain` を `releasedReservation` と `startsOrg` で書き直し、pane の経路からも呼ぶ修正。`internal/org/verbs.go` と `verbs_test.go`)、75b009f3(plan の進捗)、83362823(self-review、cycle 4)。重点は、83aec44e のあとの AC15(workspace と pane の 2 経路、disband の打ち直し、立て直し、通常の `stop`)、AC1〜AC14 の退行、静的解析、文書のずれ、self-review C4-1 の判断。テストは実行していない(`/test` の担当)。herdr と agmsg は使っていない
+- Evidence: `docs/evidence/verify-2026-10-08-org-limits-reserve.log` の末尾の「cycle 4」の節(`docs/evidence/*.log` は gitignore の対象なので手元にだけ残る)。runner 自身のログは `docs/evidence/verify-2026-10-09-011937.log`
+- 番号の付け方: cycle 1 の V-1〜V-9 は付録 A に、cycle 2 の V2-1〜V2-5 は付録 B に、cycle 3 の V3-1〜V3-4 は付録 C に原文のまま残す。tech-debt の行 170〜179、plan の進捗、sync-docs と test の報告がその番号を指しているため。この回の指摘は V4-1 から振る。付録は C、B、A の順に置いた(付録 C と付録 B の本文が書く「付録 A」「付録 B」は、この報告の同じ名前の付録を指す)
+
+## Spec compliance
+
+plan の承認: `./scripts/plan-visual.sh digest` は `1a165903b5df` を返し、`- Approved:` の行(`:4`)と一致した。cycle 3 の verify のあとの plan の変更は進捗の節の 2 行(`:159`、`:160`)だけで、digest の対象の外にある。
+
+退行の確認: `git diff --stat 8b83abeb HEAD -- internal cmd scripts templates .claude .agents .codex packs README.md AGENTS.md CLAUDE.md docs/specs docs/quality` が出したのは、`internal/org/verbs.go`、`internal/org/verbs_test.go` と、`/org` skill の 4 面(736ce19d)だけだった。Go のコードは 2 ファイルで、`verbs.go` を変えたのは 83aec44e だけ(066bf282 は `verbs_test.go` だけ)。`verbs.go` の 5 つの hunk は、`CloseDeferredSelfPane` の doc と本体、`CloseDeferredSelfWorkspace` の doc、`compensateUnderLock` の doc、`reserveAgain` とその下に足した `releasedReservation`・`startsOrg` に収まる。`reserveAgain` を呼ぶのは `verbs.go:1048`(pane)と `:1136`(workspace)の 2 か所で、`releasedReservation` と `startsOrg` を呼ぶのは `reserveAgain` と `releasedReservation` だけ。`spawn.go`、`envelope.go`、`reserve.go`、`verbs_all.go`、`internal/cli/`、`internal/config/`、`scripts/` は cycle 3 の HEAD から変わっていない。
+
+| Acceptance criterion | Status | Evidence |
+| --- | --- | --- |
+| AC1〜AC14 | Met(cycle 3 から変わらない) | 上の退行の確認のとおり、AC1〜AC14 の経路のファイルは変わっていない。判定と証拠は付録 C、B、A のとおり |
+| AC15: 自分の workspace の close が失敗して補償で戻った org は、`disbanded` の前の予約も持ち直す | Met。83aec44e で pane の経路(disband が自分の pane を後回しにした場合)にも広がり、close を待つ間に同じ org の `disband` だけが打ち直された角(cycle 3 の V3-1)も直った。止まっている座席への `stop` の打ち直しが先の `disband` の予約を戻す入力が残る(V4-1) | 下の「AC15 と 83aec44e」 |
+
+### AC15 と 83aec44e
+
+83aec44e の規則は 2 段に分かれる。Step A は close の前の写し(`before`)で判断する。`releasedReservation`(`verbs.go:1348-1359`)が、org の最後の real な `disbanded` の添字 d と、その `disbanded` の直前の立ち上げ(`startsOrg`、`:1364-1373`。`scope_reserved`、`spawn_started`、`spawned`)の時点で持っていた予約を返す。d の後ろに立ち上げがあれば何も返さない。Step B はロックの下で読み直した `now` で判断する。`reserveAgain`(`:1324-1338`)は、`len(now) <= d`、`now[d] != before[d]`、`now[d+1:]` に立ち上げがある、のどれかなら書かずに skip を報告する。`ManifestEvent` は string と bool だけの構造体(`manifest.go:20-43`)なので、`!=` は全項目を比べる。型検査も通った(下の Static analysis)。
+
+lead が挙げた入力ごとに、コードとテストの中身を突き合わせた。テストは実行していない。
+
+| 入力 | Step A | Step B | 結果 | 固定するテスト |
+| --- | --- | --- | --- | --- |
+| workspace の経路で、close が失敗しただけ | その run の予約 R | 通る | workspace、leader、R の順に書く | `TestOrgCloseDeferredSelfWorkspace_CloseFails_ReservationRestored` の `restored`(`verbs_test.go:3076`)。org-b の重なる予約が拒まれるところまで見る |
+| pane の経路で、`disband` が自分の pane を後回しにした | R | 通る | leader と R を書く(`[spawned, scope_reserved]`) | `TestOrgCloseDeferredSelfPane_CloseFails_ReservationOnlyAfterDisband` の 1 つめ(`:2861`)。エラー文の末尾と org-b の拒否も見る |
+| close を待つ間に同じ org の `disband` だけが打ち直された | R | `now[d]` は同じで、後ろは `disbanded` だけ | 3 つとも戻す | `..._ReservationUnlessStartedAgain` の `only disband run again`(`:3664`)。打ち直しの disband で `RunningOrgs` が空になるところまで見る |
+| 写しの時点で `disbanded` が 2 つ続く | 2 つめの前の立ち上げの時点の R | 通る | 3 つとも戻す | 同じテストの `disband run again before the close read the manifest`(`:3697`) |
+| 待つ間に `--reserve` 付きで立て直された | R | `scope_reserved`、`spawn_started` | 予約と leader は戻さず、新しい予約 `docs/` が残る | `TestOrgCloseDeferredSelf_NewerRecordsWhileClosing_Stay` の `org started again with another reservation`(`:3502`) |
+| 待つ間に `--reserve` なしで立て直された | R | `spawn_started` | 予約と leader は戻さず、org-b が同じ範囲を予約できる | `..._ReservationUnlessStartedAgain` の `started again without --reserve`(`:3713`) |
+| 前の run が予約し、予約なしの次の run を disband して、自分の close が失敗した | 何も返さない(直前の立ち上げの時点で予約なし) | 呼ばれない | 予約に触れない | `..._CloseFails_ReservationRestored` の `a later run without --reserve`(`:3126`) |
+| 通常の `stop`(一度も disband していない org) | 何も返さない(`disbanded` がない) | 呼ばれない | `spawned` だけを書き、エラー文に予約が出ない | pane のテストの `ordinary stop in an org never disbanded`(`:2899`) |
+| 通常の `stop`(disband のあと `--reserve` なしで立て直した run) | 何も返さない(d の後ろに立ち上げ) | 呼ばれない | 同上 | pane のテストの `ordinary stop in a run started again without --reserve`(`:2903`) |
+| 台帳が消えた、または前に 1 イベント足して置き換えられた | R | `len(now) <= d`、`now[d] != before[d]` | 予約は戻さず skip を報告 | `manifest removed`(`:3771`)、`manifest replaced ...`(`:3746`) |
+
+通常の `stop` が動いている座席を止めるときは、予約について何も書かない。`Roster`(`manifest.go:171`)は、最新の状態イベントが最後の `disbanded` より前にある座席を動いていない扱いにする。そのため、`stop --all` や `stop --seat` が止める動いている座席は d の後ろに状態イベントを持ち、それは `spawn_started` か `spawned` なので、Step A が何も返さない。spawn の途中に `disband` が入り、`spawn_step` だけが後ろに来る競合は除く(self-review の「依頼された点の結論」の 3)。すでに止まっている座席への `stop` の打ち直しは別で、下の V4-1 に書く。
+
+`--force` の経路は、2 つとも補償の前に戻る(`verbs.go:1041`、`:1124`)。補償の 3 つの手順は、`compensateUnderLock`(`:1222`)が 1 回だけ読んだ `now` で判断する。`reactivateSeat` が書く `spawned` は `startsOrg` に数えられるが、`now` には入らないので、同じ呼び出しの `reserveAgain` が座席の復帰を立て直しと読むことはない。この前提がどの doc にも書かれていないことは、self-review C4-4 の (c) のとおり。
+
+plan のリスクの項目(`disbanded` から補償までの間にほかの org が枠か同じ範囲を取ると、上限を 1 つ超えるか予約が重なる)は、pane の経路にも当てはまるようになった。`reserveAgain` は相変わらず自分の org の記録だけを見る。workspace の経路は `TestOrgCloseDeferredSelfWorkspace_ReservationRestored_RiskWindowClearedByRetry`(`:3159`)が固定しているが、pane の経路で重なりができる場合のテストはない(下の V4-3 と Coverage gaps)。
+
+決め方の違いは 1 つ残る。workspace は id ごとの最新の workspace イベントで決めるので、立て直しのあとも ws-1 を開き直す(`started again without --reserve` と `org started again with another reservation` の両方)。ws-1 は close に失敗して実際に開いているので、次の disband が閉じる。立て直したうえで disband し直した場合(`org started again and disbanded again`、`:3538`)は、ws-1 だけが開き直され、org は予約も動いている座席も持たずに ws-1 だけで走っている扱いになる。予約を戻さないのは plan の進捗(`:160`)の「立て直しなら `--reserve` の有無によらず戻さない」のとおりで、戻すとしても終わった run の予約になる。AC15 には反しないと判断した。
+
+### V4-1: 止まっている座席への `stop` の打ち直しが、先の `disband` が解いた予約を戻す(LOW、self-review C4-1 の判断)
+
+self-review C4-1 の入力をコードで追った。`Stop` は台帳に座席があれば状態を見ずに進む(`verbs.go:844`。`Active` を見ない)。`stopSeatPane` は、pane の持ち主を確かめたあと、pane が `HERDR_PANE_ID` なら後回しにする(`:956-962`)。`disband --force` で自分の pane の close が失敗すると、座席は `stopped`、org は `disbanded` のまま、`--force` なので補償はなく、pane は生きている。その pane から `ralph org stop --seat <自分>` を打つと、`stopped` が `disbanded` の後ろに足され、pane が後回しになる。その close がまた失敗すると、`reactivateSeat` が座席を戻し、`reserveAgain` は d の後ろに立ち上げがない(`stopped` は `startsOrg` に入らない)と見て、forced disband が解いた予約を書き戻す。`--force` のほかに、`disband` の補償自体が書けなかった場合(ロック、読み直し、append の失敗)も、手で閉じる代わりに `stop` を打ち直せば同じ入力になる。どちらも読みによる結論で、実行はしていない。
+
+同じ代用(「最後の `disbanded` の後ろに立ち上げがない」で「その `disbanded` はこのコマンドのもの」とみなす)が外れる入力は、workspace の経路にもう 1 つある。新しい ralph が `--reserve` で立てた org を、workspace を閉じない古い ralph の `disband` が解散したあと、その workspace の中から新しい ralph の `disband` を打ち、close が失敗した場合。`openOrgWorkspaces`(`spawn.go:1851`)は `disbanded` を見ないので、古い workspace も閉じる対象になる。Step A は 2 つの `disbanded` の前の立ち上げの時点の予約を返すので、ずっと前に解けた予約が戻る。a94c914f の規則(`reservationBeforeLastDisband`)では戻らなかった。新旧のバイナリが同じ台帳を使っていないと起きない。これも読みによる結論で、未確認です。
+
+挙動の選択は、self-review の推奨どおりオペレーターが決める。
+
+- 戻す(今のコード): この入力でも座席は戻る(2 段目からの挙動)ので、org は走っている扱いに戻る。予約も戻すのは、83aec44e が disband の打ち直しで選んだ「座席、workspace、予約を同じ向きに戻す」と揃う。戻さない側を選ぶと、V3-1 が問題にした「予約なしで走っている org」を、この入力で作ることになる
+- 戻さない: pane の経路だけ、座席の `stopped` が `disbanded` より前のときに限る。`Disband` は自分の座席の `stopped` を `disbanded` より先に書くので、`lastSeatOnPane` が返すイベントの添字を `reserveAgain` に渡せば分けられる。workspace の経路の古い ralph の入力には、別の手当てが要る
+
+私は「戻す」を残すことを勧める。ただし、この入力の窓の長さは plan のリスクの「数十秒」ではない。forced disband から打ち直しの `stop` までの、オペレーター次第の長さになる。その間にほかの org が同じ範囲を予約していれば、戻したあとは次の `disband` まで予約が重なる。座席が戻って `max_total_seats` や `max_orgs` を 1 つ超える形は、2 段目とこの PR の上限から同じようにある。
+
+どちらを選んでも、この PR ではコードを変えられない(4 回目が引き上げた上限)。merge は止めない。記録の仕方を次に書く。
+
+1. plan の進捗の節に 1 行足す(digest の外なので、/sync-docs が書ける)。選んだ挙動と、この入力の窓が「数十秒」に収まらないこと。AC15 の本文とリスクの節は digest の中なので変えない
+2. self-review が案を書いた C4 のまとめの行の (a) を、選んだ挙動に合わせた具体的な直しとして書く。戻すなら、doc を「after an ordinary stop of an active seat」に絞って打ち直しの 1 文を足し、`disband --force`、`stop` の打ち直し、close の失敗の順に組むテストを足す。オペレーターが今決めないなら、2 案を並べ、Trigger に「次に `reserveAgain` か `CloseDeferredSelfPane` を変える前に決める」と書く
+3. 戻すを残すなら、skill の `stop` の行に「`disband` のあとに打ち直した `stop` の close が失敗したときは予約も戻す」の趣旨を足してもよい(任意。4 面を同時に直す)
+
+## Static analysis
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `./scripts/run-static-verify.sh`(scope changed) | rc 0 | ブランチの変更に `scripts/ralph-config.sh` が含まれるので full fallback になり、golang の pack が選ばれた |
+| shellcheck、`sh -n`(hooks 20 本)、`jq -e`(settings.json 2 本)、Codex hook の guard 3 つ | OK | runner の中 |
+| `scripts/check-sync.sh` | PASS | IDENTICAL 164、DRIFTED 0、ROOT_ONLY 0、TEMPLATE_ONLY 11、KNOWN_DIFF 5 |
+| `check-pipeline-sync.sh`、`check-skill-sync.sh`、`check-template-purity.sh`、tech-debt README plan references | OK | 13 skill が一致 |
+| gofmt、go vet、golangci-lint、staticcheck | `gofmt: ok`、出力なし、`0 issues.`、出力なし | Skipping の行がないので 4 つとも走った。`now[d] != before[d]` の構造体の比較もここで型検査を通った |
+| `secret-scan-branch.sh`(runner の中) | clean | 51855166..83362823、origin/main に対して |
+| `git diff --check 51855166...HEAD` | rc 0 | |
+| U+FFFD の検索(`git diff 51855166...HEAD`) | 0 件 | |
+| `git merge-tree --write-tree HEAD origin/main` | rc 0 | origin/main(0931f791)とぶつからない |
+| `/org` skill の 4 面の sha256 | 4 つとも `64efef31…` | 736ce19d のあと変わっていない |
+
+静的解析が拾わないものが 1 つある。`reservationBeforeLastDisband`(`reserve.go:311`)は本番の呼び出しがなくなったが、`reserve_test.go:323` が呼ぶので、golangci-lint の unused は報告しない(self-review C4-3。tech-debt に送る)。
+
+## Documentation drift
+
+| Doc / contract | In sync? | Notes |
+| --- | --- | --- |
+| `/org` skill の 4 面の `disband` の行(`:169`) | Yes | 「その pane の座席を active に、後回しにした workspace を open に、予約があればそれも戻して」は、83aec44e のあと 2 つの経路に合う。736ce19d の時点では、pane の経路について言い過ぎだった |
+| `/org` skill の 4 面の「例外が 1 つある」の段落(`:190-196`) | No(V4-2) | |
+| `/org` skill の 4 面の補償の段落(`:198-202`)と `stop` の行(`:168`) | Yes(V4-1 の入力を除く) | disband の打ち直しは、座席、workspace、予約のどれの新しい記録も足さないので、「新しい記録があるときは戻さない」と食い違わない |
+| plan の AC15 とリスクの節 | Yes(digest の中なので変えない) | AC15 の文は workspace の経路を書き、pane の経路はそれを広げた。V4-1 の入力の窓の長さは進捗に書く |
+| plan の進捗の節 | 一部ずれ(V4-3) | |
+| `ralph org stop --help`、`ralph org disband --help`、`closeDeferredSelf` と `Disband` の doc | 一部ずれ(V4-3。行 179 の (c) の続き) | コードの文字列なので tech-debt に送る |
+| `CloseDeferredSelfPane`、`reserveAgain`、`compensateUnderLock` の doc | 一部ずれ(self-review C4-1、C4-2、C4-4) | コードのコメントなので tech-debt に送る |
+| tech-debt の行 170、172、176、177、179 | No(V4-3) | |
+| `README.md`、仕様 FR-3、`templates/base/ralph.toml`、`AGENTS.md` | Yes | 変わっていない。補償で予約を戻すことは skill だけが書く |
+
+### V4-2: skill の「例外」の段落が、予約を戻すのは workspace の close の失敗だけと書く(LOW)
+
+`/org` skill の 4 面(`.claude/skills/org/SKILL.md:191-193` と 3 つの写し)は、「その close が失敗すると座席と workspace を「動いている」に戻し、workspace の close が失敗したときは `disbanded` の前の予約も戻す」と書く。83aec44e で、`disband` が自分の pane を後回しにして、その close が失敗した場合も予約を戻すようになった(`verbs.go:1048`)。同じ skill の `disband` の行(`:169`)は 2 つの経路を分けずに「予約があればそれも戻して」と書くので、2 つの文が食い違う。
+
+/sync-docs で、「`disband` の最後の close が、pane でも workspace でも、失敗したときは `disbanded` の前の予約も戻す」の趣旨に直す。通常の `stop` は予約を戻さないので、段落の主語の「`stop` / `disband` は」とは書き分けが要る。続く「失敗してから戻すまでの間にほかの org が枠か同じ範囲を取っていると」の文は、2 つの経路にそのまま当てはまる。
+
+### V4-3: tech-debt の行と plan の進捗が 83aec44e に追いついていない(LOW)
+
+736ce19d の tech-debt と plan の進捗は、83aec44e より前に書かれた。self-review の「/sync-docs に渡すもの」と同じ項目を HEAD のコードで確かめ、足りないものを加えた。
+
+- 行 172 の (b)(F-10、進捗の (a)): 83aec44e で直った。`CloseDeferredSelfPane` が `reserveAgain` を呼ぶ(`verbs.go:1048`)。(b) を取り消し線にし、見出しの「two gaps left, (b) and (d)」、Risk の列の「(b) leaves a running org without a protected range」、Trigger の列の「(b): call `reserveAgain` from `CloseDeferredSelfPane`」を直す。(a) の RESOLVED の括弧は、a94c914f の式(「no reservation in the second and the same one before its latest `disbanded`」)と G4・G5 を挙げる。HEAD の条件は `now[d] == before[d]` と `now[d+1:]` の立ち上げの走査で、固定するのは `org started again with another reservation` と `started again without --reserve`。(d) は「The workspace path has the same window」と書くが、pane の経路も重なりを見ずに予約を戻すようになったので、2 つの経路に直し、pane の経路の窓にテストがないことを書く
+- 行 179 の (d)(C3-4、V3-1): 83aec44e で直った。`disband` の打ち直しでは 3 つとも戻し、`--reserve` なしの立て直しでは座席も予約も戻さず、写しにすでにあった立て直しでは Step A が何も返さないので skip を報告しない。テストは `..._RulesDiffer` から `..._ReservationUnlessStartedAgain` に改名された。(d) を取り消し線にし、見出しの「self-review C3-1 to C3-4, verify V3-1 and V3-3」を「C3-1 to C3-3, verify V3-3」に直し、Trigger の (d) と Related の「Q1, Q2」を外す。ただし、(d) の Trigger の最後の提案(skip のエラー文から「written to the manifest while the close waited」を外す)は残る。台帳が消えたか置き換えられた場合(`manifest removed`、`manifest replaced`。手で編集した台帳でだけ起きる)も、エラーは「newer records written to the manifest while the close waited」と書くため。(c) には、`disband --help`(`internal/cli/org.go:1147-1149`)、`closeDeferredSelf` の doc(`:973-974`)、`Disband` の doc(`verbs.go:1844-1846`)が、補償で戻すものに予約を挙げないことを足す。2 つの経路とも予約を戻すようになったので、どちらの経路にも当てはまる
+- 行 176 の (a): RESOLVED の括弧は、「the check `ActiveReservation(now, orgID) != nil`」を cycle 3 の mutation G4 が固定すると書く。HEAD では、その式は同じ条件式の `startsOrg` の走査に含まれ、単独では結果を変えない(self-review C4-2)。`now[d] == before[d]` なら `now` の最後の `disbanded` は d 以降にあり、その後ろの `scope_reserved` は `now[d+1:]` に入るため。cycle 4 の /test が mutation で確かめてから、固定するのは走査の側だと書き直す
+- 行 170: 「org-limits-reserve added `reserveAgain` (workspace path) as a third reader of the same copy」は、pane の経路からも読むようになった。(c)(C2-5)の `verbs.go` は 1,951 行から 2,011 行になった(`wc -l`)。83aec44e は Trigger の列の `CloseDeferredSelfPane` と `reserveAgain` を変えたが、まとまりを別のファイルに移していないので、Trigger はまた使われなかった。「carried over again by 83aec44e」と行数を書く
+- 行 177: Why の列の「the cap was raised to 3 ..., and cycle 3 used the third run」は古い(上限は 4 に上がり、この回が 4 回目)。83aec44e は (a)〜(e) の対象(`idempotentRespawn`、`Spawn` の doc、`orgWideLimitsHelp`)を変えていない
+- self-review が案を書いた C4 のまとめの行(C4-1〜C4-4)はまだない。V4-1 の判断の結果を、その (a) に入れる
+- plan の進捗の `:161` の (a)「pane だけを後回しにした disband の補償は、予約を戻さない」は 83aec44e で解けた。`:160` が 83aec44e を書いているので、`:161` に「(a) は 83aec44e で解決」の 1 文を足せば足りる。V4-1 の選択も同じ節に書く
+
+### cycle 3 の指摘の現況
+
+| V3 | この回の判定 | 根拠 |
+| --- | --- | --- |
+| V3-1 | 解消 | 83aec44e で、close を待つ間に `disband` だけが打ち直されても予約を戻す(`only disband run again`)。立て直してから disband し直した角は、規則どおり予約を戻さない(上の「AC15 と 83aec44e」の最後の段落) |
+| V3-2 | 一部 | skill の 4 面と plan の進捗は 736ce19d で直った。Go の help と doc は行 179 の (c) に残る |
+| V3-3 | 未修正(行 179 の (a)(b)) | 83aec44e は `compensateUnderLock` の doc に予約の規則の 2 文を足したが、「appends only what is still missing」(`verbs.go:1211-1212`)は残り、ロックの外の書き込みも書かない。C3-4 の (b) は直った(写しにすでにあった立て直しでは Step A が何も返さない) |
+| V3-4 | 解消 | 736ce19d が行 170〜177 を直し、行 179 を足した。83aec44e で新しく古くなったものは V4-3 に書いた |
+
+### self-review C4 の確認
+
+C4-1 は V4-1 に書いた。C4-2 は、上の行 176 の項のとおり、読みで同じ結論になった。C4-3 は、`git grep reservationBeforeLastDisband` が定義とテストの 2 か所だけを返し、テストの `held none in its last life`(`reserve_test.go:318`)が `releasedReservation` と逆の答えを固定していることを確かめた。C4-4 の 4 点は comment と式の重複で、挙動は変えない。4 件とも tech-debt に送るのが妥当と判断した。
+
+### /sync-docs に渡すもの(cycle 4)
+
+1. V4-2: skill の 4 面の「例外が 1 つある」の段落の 1 文
+2. V4-3: 行 170、172、176(/test の mutation の結果を待つ)、177、179 の更新と、C4 のまとめの行の追加。plan の進捗の `:161`
+3. V4-1: オペレーターの選択を、plan の進捗と C4 の行の (a) に書く。戻すを残すなら、skill の `stop` の行の 1 文(任意)
+
+## Observational checks
+
+この回も実バイナリを動かしていない。83aec44e が変えた経路は herdr の close が失敗したときにしか通らない。`Stop` も、pane の持ち主を herdr で確かめてからでないと後回しにしない(`verbs.go:956-962`)ので、herdr なしで打てる入口がない。代わりに、上の表のとおり、コードの 2 段の判定と、テスト 5 本(`verbs_test.go:2860`、`:3075`、`:3478`、`:3653`、`:3795` から始まる関数)の中身を読んだ。
+
+## Coverage gaps
+
+- テストは実行していない(`/test` の担当)。83aec44e の新しいケースは中身を読んだだけで、通るかは /test が確かめる
+- V4-1 の 2 つの入力(`disband --force` のあとの `stop` の打ち直し、古い ralph が解散した org の workspace の close の失敗)は、コードを読んだ結論で、テストも再現もない。前者は fake herdr で組めるので、/test に頼む
+- self-review が /test に頼んだ 3 つの mutation(`ActiveReservation(now) != nil` を外す、`startsOrg` の `EventScopeReserved` の枝を外す、`releasedReservation` の d の後ろの走査を外す)は回していない。C4-2 と行 176 の (a) の書き直しは、その結果による
+- pane の経路で、`disbanded` から補償までにほかの org が同じ範囲を取った場合(plan のリスクの窓)のテストはない
+- ロックの外の書き込みが読み直しと append の間に入る窓(行 179 の (a))、別プロセスでの競合、本物の herdr、古い ralph が書いた台帳は、これまでの回と同じく見ていない
+
+## Verdict
+
+- Verdict: pass
+- Verified: plan の承認の digest の一致。cycle 3 のあとのコードの変更が、83aec44e の `verbs.go` の補償のまとまりと `verbs_test.go` に限られ、AC1〜AC14 の経路が変わっていないこと(`git diff --stat`、hunk、呼び出し元の grep)。AC15 が workspace と pane の 2 経路で成り立ち、disband の打ち直しでは予約を戻し、`--reserve` の有無によらず立て直しでは戻さず、動いている座席の通常の `stop` では予約に触れないこと(コードの 2 段の判定とテストの中身)。`run-static-verify.sh` が rc 0 で終わること(gofmt、go vet、golangci-lint、staticcheck、check-sync、check-skill-sync、check-pipeline-sync、check-template-purity、secret scan)。`git diff --check` と U+FFFD の検索が空で、origin/main とぶつからないこと。cycle 3 の V3-1 と V3-4 が解消したこと
+- Partially verified: 止まっている座席への `stop` の打ち直しが先の `disband` の予約を戻す入力(V4-1)は、コードを読んで確かめただけで、挙動の選択はオペレーターに残る。文書の LOW の V4-2 と V4-3 は /sync-docs と tech-debt で扱える。どれも merge を止めない
+- Not verified: テストの実行、mutation、`-race`、V4-1 の 2 つの入力の再現、pane の経路のリスクの窓、ロックの外の書き込みの窓、別プロセスでの競合、本物の herdr と agmsg での動作
+
+## 付録 C: cycle 3 の verify レポート(HEAD f19df087 に対して 8b83abeb で書いた原文)
+
+cycle 3 の本文を、見出しを 1 段下げただけでそのまま残す(`## Verdict` が 2 つにならないようにするため)。tech-debt の行 179、plan の進捗、cycle 3 の sync-docs の報告と cross-review の triage が、ここの V3 番号を指している。`file:line` は f19df087 時点のもので、`internal/org/verbs.go` は 83aec44e で行がずれた(関数名で探す)。本文の中の「付録 B」「付録 A」は、この後ろの同じ名前の付録を指す。
+
+- Date: 2026-10-09 JST(ファイル名は計画の日付)
+- Plan: docs/plans/active/2026-10-08-org-limits-reserve.md
 - Verifier: verifier subagent (Claude Opus 5.5)、パイプライン 3 回目(cycle 3)。ユーザーが上限を 3 に上げた回で、`cycle-count.json` は /cross-review の決まりで 2 のままなので、この報告と insight event に cycle 3 と書く
 - Scope: HEAD f19df087。cycle 2 の verify(f144021d)からの差分は、6ee9836b(test の報告)、27fefc47(sync-docs。`AGENTS.md`、`templates/base/ralph.toml` のコメント、tech-debt、plan)、c4edd978(cross-review の triage、cycle 2)、a94c914f(補償の前に台帳をロックの下で読み直す修正。`internal/org/verbs.go` と `verbs_test.go`)、fc35fee6(plan の進捗)、f19df087(self-review、cycle 3)。重点は、AC15 と plan のリスクの項目が a94c914f のあとも成り立つか、AC1〜AC14 の退行、静的解析、文書のずれ(self-review の C3-1、C3-3、C3-4)。テストは実行していない(`/test` の担当)。herdr と agmsg は使っていない
 - Evidence: `docs/evidence/verify-2026-10-08-org-limits-reserve.log` の末尾の「cycle 3」の節(`docs/evidence/*.log` は gitignore の対象なので手元にだけ残る)。runner 自身のログは `docs/evidence/verify-2026-10-08-232505.log`
 - 番号の付け方: cycle 1 の V-1〜V-9 は付録 A に、cycle 2 の V2-1〜V2-5 は付録 B に原文のまま残す。tech-debt の行、`internal/org/verbs_test.go:3085` のコメント、sync-docs の報告がその番号を指しているため。この回の指摘は V3-1 から振る。付録 B は付録 A より前に置いた(付録 B の本文が書く「付録 A」は、この報告の付録 A を指す)
 
-## Spec compliance
+### Spec compliance
 
 plan の承認: `./scripts/plan-visual.sh digest` は `1a165903b5df` を返し、`- Approved:` の行(`:4`)と一致した。cycle 2 の verify のあとの plan の変更は進捗の節の 2 行(`:157`、`:158`)だけで、digest の対象の外にある。
 
@@ -18,7 +173,7 @@ plan の承認: `./scripts/plan-visual.sh digest` は `1a165903b5df` を返し�
 | AC1〜AC14 | Met(cycle 2 から変わらない) | 上の退行の確認のとおり、`spawn.go`、`envelope.go`、`reserve.go`、`verbs_all.go`、`internal/cli/`、`internal/config/`、`scripts/` は cycle 2 の HEAD(a919082a)から変わっていない。判定と証拠は付録 B と付録 A のとおり。AC1 の `rejected` を書かない枝(V2-1)は、plan の進捗の `:157` に記録された |
 | AC15: 自分の workspace の close が失敗して補償で戻った org は、`disbanded` の前の予約も持ち直す | Met(ふつうの失敗の場合)。close を待つ間に同じ org の新しい記録が台帳に入ると戻さない場合が増え、そのうち 2 つの角では AC15 の文が成り立たない(V3-1) | 下の「AC15 と a94c914f」 |
 
-### AC15 と a94c914f
+#### AC15 と a94c914f
 
 ふつうの失敗(close を待つ間に台帳に新しい記録がない場合)の流れをコードで追った。`CloseDeferredSelfWorkspace` は最初の read(`rr.Events`。`disbanded` まで入っている)で `last`(ws-1 の `org_workspace_closed`)を決める。close が失敗すると、`compensateUnderLock`(`verbs.go:1208`)がロックを取って台帳を読み直す。新しい記録がなければ、読み直した `now` は `rr.Events` と同じ列になる。
 
@@ -34,7 +189,7 @@ plan の承認: `./scripts/plan-visual.sh digest` は `1a165903b5df` を返し�
 
 plan のリスクの項目(`disbanded` から補償までの間にほかの org が枠か同じ範囲を取ると、上限を 1 つ超えるか予約が重なる)は、a94c914f のあとも書かれたとおり。`reserveAgain` の条件は自分の org の予約だけを見て、ほかの org の予約も上限も見ない(`:1306`)。`TestOrgCloseDeferredSelfWorkspace_ReservationRestored_RiskWindowClearedByRetry`(`:3049`)は変わっておらず、超えた状態と重なりが打ち直しの disband で解けることを固定している。ロックで直列化されたのは同じ org の記録との競合で、ほかの org がこの間に取った枠と範囲は前と同じく見ない。
 
-### V3-1: 同じ org の新しい `disbanded` が台帳に入ると、workspace と座席は戻るのに予約は戻らない(LOW、AC15 の角の場合)
+#### V3-1: 同じ org の新しい `disbanded` が台帳に入ると、workspace と座席は戻るのに予約は戻らない(LOW、AC15 の角の場合)
 
 a94c914f の 3 つの規則は、何を「新しい記録」と見るかが揃っていない。座席は最新の状態イベントが、workspace はその id の最新の workspace イベントが、close の前の写しと同じかで決める。予約は「今の予約がなく、最後の `disbanded` の前の予約が写しと同じか」で決める。そのため、close を待つ間に同じ org の `disbanded` が新しく書かれると、予約だけが skip になる。
 
@@ -48,7 +203,7 @@ a94c914f の 3 つの規則は、何を「新しい記録」と見るかが揃�
 - plan の進捗の節に 1 行足す(digest の外)。趣旨は「a94c914f のあと、補償は、同じ org の新しい記録(`--reserve` つきの立て直し、新しい `disbanded`)が台帳にあれば予約を戻さず、エラーに手で閉じるコマンドを出す。新しい `disbanded` の場合も workspace と座席は戻る」
 - 規則を揃えるか(新しい `disbanded` があれば 3 つとも戻さない、または予約もその `disbanded` を見ない)は判断が要る。self-review の C3 のまとめの行に、(d)(C3-4)と一緒に入れる。disband だけを打ち直す場合のテストの欠けも同じ行に書く
 
-## Static analysis
+### Static analysis
 
 | Command | Result | Notes |
 | --- | --- | --- |
@@ -62,7 +217,7 @@ a94c914f の 3 つの規則は、何を「新しい記録」と見るかが揃�
 | U+FFFD の検索(`git diff 51855166...HEAD`) | 0 件 | |
 | `git merge-tree --write-tree HEAD origin/main` | rc 0 | origin/main は 0931f791。衝突なし |
 
-## Documentation drift
+### Documentation drift
 
 | Doc / contract | In sync? | Notes |
 | --- | --- | --- |
@@ -76,7 +231,7 @@ a94c914f の 3 つの規則は、何を「新しい記録」と見るかが揃�
 | tech-debt の行 170〜177 | No(V3-4) | |
 | `README.md:124`、`:247`、仕様 FR-3 | Yes | 変わっていない |
 
-### V3-2: 補償がいつも戻すと読める文が、a94c914f の skip の場合を書いていない(LOW、self-review C3-3)
+#### V3-2: 補償がいつも戻すと読める文が、a94c914f の skip の場合を書いていない(LOW、self-review C3-3)
 
 a94c914f で、補償は台帳に新しい記録があると戻さず、エラーの末尾に手で閉じる herdr のコマンドを付けるようになった(`errorFor`、`verbs.go:1182-1197`)。次の文は「戻す」とだけ書く。
 
@@ -87,7 +242,7 @@ skill は手で閉じるコマンドに触れていない(`手で`、`by hand`�
 
 /sync-docs で skill の 4 面を直せる。`stop` と `disband` の行の括弧に「台帳にその座席・workspace・予約の新しい記録があるとき、または記録を書けないときは戻さず、エラーの最後に手で閉じる herdr のコマンドが出る」の趣旨を足し、`disband` の行に予約も戻すことを足す。plan は進捗の節に 1 文(V3-1 の行と一緒でよい)。Go の help と doc はコードの変更なので、tech-debt の C3 のまとめの行の (c) に入れる。
 
-### V3-3: `compensateUnderLock` の doc の規則の言い方と、ロックの外の書き込み(LOW、self-review C3-1、C3-2、C3-4 の (b))
+#### V3-3: `compensateUnderLock` の doc の規則の言い方と、ロックの外の書き込み(LOW、self-review C3-1、C3-2、C3-4 の (b))
 
 self-review の指摘をコードで確かめた。どれもコメントとエラー文の言い方で、挙動は上の「AC15 と a94c914f」のとおり。
 
@@ -98,7 +253,7 @@ self-review の指摘をコードで確かめた。どれもコメントとエ�
 
 コードのコメントとエラー文なので、tech-debt の C3 のまとめの行に入れる(self-review の案の (a)(b)(d))。
 
-### V3-4: tech-debt の行が a94c914f に追いついていない(LOW)
+#### V3-4: tech-debt の行が a94c914f に追いついていない(LOW)
 
 27fefc47 の tech-debt の行は a94c914f より前に書かれた。self-review の「/sync-docs に渡すもの」と同じ項目を、HEAD のコードで確かめた。
 
@@ -109,7 +264,7 @@ self-review の指摘をコードで確かめた。どれもコメントとエ�
 - 行 177: Trigger の列の「or a third pipeline run on this plan」が、この 3 回目で来た。a94c914f は (a)〜(e) のどれも直していない(`spawn.go` と `internal/cli/org.go` は cycle 2 から変わらない)。Why の列の「which is past the default cap of 2 runs (cycle 2 was the last)」も古くなった。Trigger が来て使われなかったことを書き、次の変更(`idempotentRespawn`、`Spawn` の doc、`orgWideLimitsHelp`)に掛け直す
 - self-review が案を書いた C3 のまとめの行(C3-1〜C3-4)はまだない。V3-1 の規則の不揃いとテストの欠けも、そこに入れる
 
-### cycle 2 の指摘の現況
+#### cycle 2 の指摘の現況
 
 | V2 | この回の判定 | 根拠 |
 | --- | --- | --- |
@@ -119,18 +274,18 @@ self-review の指摘をコードで確かめた。どれもコメントとエ�
 | V2-4 | 一部 | 行 173 の (a) は「nothing warns when the path is typed」になり、行 177 が足された。行 176 の (b) の値は 90.9% に更新されたが、a94c914f で `reserveAgain` の値がまた古くなった(V3-4) |
 | V2-5 | 解消 | `git diff --check 51855166...HEAD` は rc 0。self-review の報告は改行 1 つで終わる |
 
-### /sync-docs に渡すもの(cycle 3)
+#### /sync-docs に渡すもの(cycle 3)
 
 1. V3-1: plan の進捗の節に 1 行。C3 のまとめの行に、規則の不揃いと、disband だけを打ち直す場合のテストの欠け
 2. V3-2: skill の 4 面の `stop` と `disband` の行と、「例外が 1 つある」の段落。plan の進捗(V3-1 と同じ行でよい)。Go の help と doc は C3 の行の (c)
 3. V3-3: C3 の行の (a)(b)(d)
 4. V3-4: 行 170、171、172、176、177 の更新と、C3 の行の追加
 
-## Observational checks
+### Observational checks
 
 この回は実バイナリを動かしていない。`internal/cli/` は cycle 2 から変わらず、a94c914f が変えた経路は herdr の close が失敗したときにしか通らないので、herdr を使わずに打てる入口がない。代わりに、上の「AC15 と a94c914f」のとおり、コードの流れと、テスト 3 本(変わっていない `verbs_test.go:2989` と `:3049`、新しい `:3368`)の中身を読んだ。
 
-## Coverage gaps
+### Coverage gaps
 
 - テストは実行していない(`/test` の担当)。a94c914f の新しいケースは中身を読んだだけで、通るかは /test が確かめる。goroutine とフックを使うので、`-race` での実行も /test に任せる
 - V3-1 の「disband だけを打ち直す」場合は、コードを読んだ結論で、テストも再現もない
@@ -138,7 +293,7 @@ self-review の指摘をコードで確かめた。どれもコメントとエ�
 - ロックの外の書き込みが読み直しと append の間に入る窓(V3-3)は再現していない
 - 別プロセスでの競合、本物の herdr、古い ralph が書いた台帳は、cycle 1 と 2 と同じく見ていない
 
-## Verdict
+### Verdict
 
 - Verdict: pass
 - Verified: plan の承認の digest の一致。cycle 2 のあとのコードの変更が `verbs.go` の補償のまとまりと `verbs_test.go` に限られ、AC1〜AC14 の経路が変わっていないこと(`git diff --stat`、hunk、呼び出し元の grep)。AC15 のふつうの失敗で、3 つの補償が前と同じ順で書かれること(コードの流れと、変わっていないテストの中身)。補償のロックが入れ子にならず、herdr の呼び出しをまたがないこと。plan のリスクの項目が a94c914f のあとも書かれたとおりであること。`run-static-verify.sh` が rc 0 で終わること(gofmt、go vet、golangci-lint、staticcheck、check-sync、check-skill-sync、check-pipeline-sync、check-template-purity、secret scan)。`git diff --check` と U+FFFD の検索が空で、origin/main と衝突しないこと。cycle 2 の V2-1、V2-2、V2-3、V2-5 が解消したこと
