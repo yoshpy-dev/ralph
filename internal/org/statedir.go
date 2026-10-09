@@ -92,6 +92,31 @@ func MainWorktreeRoot(resolvedDir, source string) (root string, ok bool) {
 	return root, true
 }
 
+// LedgerMainWorktreeRoot returns the main worktree root whose ledger
+// resolvedDir is: MainWorktreeRoot for source "git-main-worktree", and for
+// a ledger named by --state-dir or RALPH_ORG_STATE_DIR (source "flag" or
+// "env") the main worktree of the repository containing the current working
+// directory (gitMainWorktree), when resolvedDir is that root's
+// .harness/state/org (compared with samePath). The leader of a feature org
+// passes --state-dir for the ledger start used (featureLeaderTask), so its
+// spawns from the feature worktree still find the main worktree this way.
+// ok is false for any other directory or source, and when git names no main
+// worktree.
+func LedgerMainWorktreeRoot(resolvedDir, source string) (root string, ok bool) {
+	switch source {
+	case "git-main-worktree":
+		return MainWorktreeRoot(resolvedDir, source)
+	case "flag", "env":
+	default:
+		return "", false
+	}
+	root, ok = gitMainWorktree()
+	if !ok || !samePath(resolvedDir, filepath.Join(root, defaultOrgStateDirRelPath)) {
+		return "", false
+	}
+	return root, true
+}
+
 // FeatureRepoRoot returns the main worktree root that `ralph org start --plan`
 // passes as StartFeatureParams.RepoRoot, for the ledger ResolveOrgStateDir
 // returned as resolvedDir and source: MainWorktreeRoot when it names one,

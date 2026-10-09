@@ -145,20 +145,23 @@ func newOrgSpawnRuntimeAt(cmd *cobra.Command, resolvedStateDir, stateDirSource, 
 
 // withMainWorktreeOrgLimits returns cfg with MaxOrgs and MaxTotalSeats taken
 // from <main worktree root>/ralph.toml (built-in defaults when that file does
-// not exist, as config.Load reads it) when configPath is empty and
-// org.ResolveOrgStateDir placed the ledger under the main worktree (source
-// "git-main-worktree", org.MainWorktreeRoot). Every org_id in that ledger then
-// gets the same org-wide limits, whichever subdirectory or linked worktree
-// (with its own ./ralph.toml) spawn runs in (plan
+// not exist, as config.Load reads it) when configPath is empty and the ledger
+// is the main worktree's (org.LedgerMainWorktreeRoot): org.ResolveOrgStateDir
+// placed it there (source "git-main-worktree"), or --state-dir or
+// RALPH_ORG_STATE_DIR names the .harness/state/org of the main worktree of the
+// repository spawn runs in, as a feature org's leader does. Every org_id in
+// that ledger then gets the same org-wide limits, whichever subdirectory or
+// linked worktree (with its own ./ralph.toml) spawn runs in (plan
 // 2026-10-08-org-limits-reserve, Codex plan advisory 2). With --config, a
-// state dir from --state-dir or RALPH_ORG_STATE_DIR, or any other source, cfg
-// is returned unchanged. No other setting is read from the main worktree. A
-// main worktree ralph.toml that fails to load is an error, not a fallback.
+// state dir from --state-dir or RALPH_ORG_STATE_DIR naming another
+// directory, or any other source, cfg is returned unchanged. No other setting
+// is read from the main worktree. A main worktree ralph.toml that fails to
+// load is an error, not a fallback.
 func withMainWorktreeOrgLimits(cfg config.OrgConfig, configPath, resolvedStateDir, stateDirSource string) (config.OrgConfig, error) {
 	if configPath != "" {
 		return cfg, nil
 	}
-	root, ok := org.MainWorktreeRoot(resolvedStateDir, stateDirSource)
+	root, ok := org.LedgerMainWorktreeRoot(resolvedStateDir, stateDirSource)
 	if !ok {
 		return cfg, nil
 	}

@@ -214,13 +214,16 @@ toplevel、cwd の順で決まる。「前提」節を参照)、`ralph org statu
 
 この 2 つの上限を main worktree のルートの `ralph.toml`(なければ既定値)から
 読むのは、`--config` がなく、台帳の置き場所が main worktree のものであるとき
-だけ。サブディレクトリや linked worktree から打っても同じ上限が掛かるので、
-feature branch 側の `ralph.toml` で変えても効かない。それ以外は、`--config`
-のファイル(なければ打った場所の `./ralph.toml`)を使う。`--config` を渡した
-とき、`--state-dir` か `RALPH_ORG_STATE_DIR` で台帳を決めたとき、台帳を git の
-toplevel から決めたとき(main worktree を決められない bare リポジトリの linked
-worktree)、git の外のときがこれに当たる。`max_seats` とほかの設定の読み方は
-変わらない。
+だけ。`--state-dir` か `RALPH_ORG_STATE_DIR` で台帳を指したときも、打った
+場所の repository の main worktree の `.harness/state/org` と同じ場所なら
+(symlink は解決して比べる)同じ扱いになる。機能ごとの org の leader が付ける
+`--state-dir` がこれに当たる。サブディレクトリや linked worktree から打っても
+同じ上限が掛かるので、feature branch 側の `ralph.toml` で変えても効かない。
+それ以外は、`--config` のファイル(なければ打った場所の `./ralph.toml`)を
+使う。`--config` を渡したとき、`--state-dir` か `RALPH_ORG_STATE_DIR` でほかの
+場所の台帳を指したとき、台帳を git の toplevel から決めたとき(main worktree を
+決められない bare リポジトリの linked worktree)、git の外のときがこれに
+当たる。`max_seats` とほかの設定の読み方は変わらない。
 
 ### 担当範囲の予約(`--reserve`)
 
