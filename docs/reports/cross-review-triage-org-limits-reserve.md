@@ -2,22 +2,22 @@
 
 - Date: 2026-10-09
 - Plan: docs/plans/active/2026-10-08-org-limits-reserve.md
-- Base branch: main (merge-base 51855166。main は 0931f791 に進んでいるが、diff は merge-base から取る。`git merge-tree` でぶつからない)
+- Base branch: main (merge-base 51855166。main は c3a9242e に進んでいるが、diff は merge-base から取る。`git merge-tree` でぶつからない)
 - Driver: claude
 - Reviewer: codex
 - Triager: Claude Code (main context)
 - Reviewer status: complete
 - Self-review cross-ref: yes
-- Cycle: 3/3 (cap reached。ユーザーが上限を 3 に上げた回。cross-review の skill の決まりで `cycle-count.json` は 2 のまま)
-- Total reviewer findings: 2
-- After triage: ACTION_REQUIRED=0, WORTH_CONSIDERING=2, DISMISSED=0
+- Cycle: 4/4 (cap reached。ユーザーが上限を 4 に上げた回。cross-review の skill の決まりで `cycle-count.json` は 2 のまま)
+- Total reviewer findings: 0
+- After triage: ACTION_REQUIRED=0, WORTH_CONSIDERING=0, DISMISSED=0
 
 ## Triage context
 
 - Active plan: docs/plans/active/2026-10-08-org-limits-reserve.md(AC1〜AC15、S1〜S4、承認 digest 1a165903b5df)
-- Self-review report: docs/reports/self-review-2026-10-08-org-limits-reserve.md(cycle 3、Merge 可、LOW の C3-1〜C3-4)
-- Verify report: docs/reports/verify-2026-10-08-org-limits-reserve.md(cycle 3、pass、V3-1〜V3-4)
-- Implementation context summary: cycle 2 の WORTH_CONSIDERING は a94c914f で直した。自分の pane か workspace の close が失敗したときの補償は、台帳のロックの下で読み直してから判断し、新しい記録があれば戻さない。この回の review は HEAD 736ce19d に対して read-only の sandbox で動いた。Go のテストは回していない(本人の申告)
+- Self-review report: docs/reports/self-review-2026-10-08-org-limits-reserve.md(cycle 4、Merge 可、LOW の C4-1〜C4-4)
+- Verify report: docs/reports/verify-2026-10-08-org-limits-reserve.md(cycle 4、pass、V4-1〜V4-3)
+- Implementation context summary: cycle 3 の WORTH_CONSIDERING 2 件は 83aec44e で直した。予約を書き戻す規則をそろえ(最後の disbanded がこのコマンドのもので、その後ろに立ち上げがなければ戻す)、pane の経路も同じ規則を呼ぶ。C4-1 の挙動(`disband --force` のあとの stop の打ち直しでも予約を戻す)はユーザーが「戻す」を選び、テストで固定した。この回の review は HEAD 21a3d43d に対して read-only の sandbox で動いた。報告の原文は「No actionable regressions were identified in the capacity checks, reservation lifecycle, CLI integration, or failure compensation」で、テストは回していない(本人の申告)
 
 ## ACTION_REQUIRED
 
@@ -28,10 +28,38 @@
 
 | # | Reviewer finding | Triage rationale | Affected file(s) |
 |---|-------------------|------------------|-------------------|
+
+## DISMISSED
+
+| # | Reviewer finding | Dismissal reason | Category |
+|---|-------------------|------------------|----------|
+
+## 付録 C: cycle 3(2026-10-09、HEAD 736ce19d に対する review)
+
+cycle 3 の triage の原文。件数の行だけ、件数を読むスクリプトが拾わない書き方に変え、見出しを 1 段下げた。cycle 3 の WORTH_CONSIDERING 2 件は 83aec44e で直した。
+
+- Cycle 3 counts: ACTION_REQUIRED=0, WORTH_CONSIDERING=2, DISMISSED=0(Total reviewer findings: 2)
+
+### Triage context
+
+- Active plan: docs/plans/active/2026-10-08-org-limits-reserve.md(AC1〜AC15、S1〜S4、承認 digest 1a165903b5df)
+- Self-review report: docs/reports/self-review-2026-10-08-org-limits-reserve.md(cycle 3、Merge 可、LOW の C3-1〜C3-4)
+- Verify report: docs/reports/verify-2026-10-08-org-limits-reserve.md(cycle 3、pass、V3-1〜V3-4)
+- Implementation context summary: cycle 2 の WORTH_CONSIDERING は a94c914f で直した。自分の pane か workspace の close が失敗したときの補償は、台帳のロックの下で読み直してから判断し、新しい記録があれば戻さない。この回の review は HEAD 736ce19d に対して read-only の sandbox で動いた。Go のテストは回していない(本人の申告)
+
+### ACTION_REQUIRED
+
+| # | Reviewer finding | Triage rationale | Affected file(s) |
+|---|-------------------|------------------|-------------------|
+
+### WORTH_CONSIDERING
+
+| # | Reviewer finding | Triage rationale | Affected file(s) |
+|---|-------------------|------------------|-------------------|
 | 1 | [P2] 自分の workspace の close を待つ間に別の `disband` が打たれると、何も止めずに `disbanded` だけが足される。そのあと元の close が失敗すると、workspace と leader は戻るが、予約は「最後の disbanded の前の予約」が nil になるので戻らない。org は走っている扱いなのに予約を持たず、ほかの org が同じ範囲を予約できる。`TestOrgCloseDeferredSelfWorkspace_NewerRecordsWhileClosing_RulesDiffer` がこの状態を示している | 本物の問題と判断した。verify の V3-1、self-review の C3-4 と同じで、/test が `RulesDiffer` のテストで今の振る舞いを固定した。plan の進捗の節と `docs/tech-debt/README.md` の 179 行目に記録済み。起きるのは、締めの disband の close が失敗し、その数十秒の間に同じ org にもう一度 disband が打たれたときだけ。打ち直しの disband で解ける。3 つの補償の「新しい記録」の判定をそろえる設計の判断が要る(tech-debt の 179 行目の (d)) | internal/org/verbs.go(reserveAgain、compensateUnderLock) |
 | 2 | [P2] 呼んだ pane が org の記録した workspace の外にあるとき、`Disband` は workspace ではなく pane の close を後回しにする。その close が `--force` なしで失敗すると、補償は `disbanded` のあとに座席を戻すが、`disbanded` が解いた予約は戻さない。org は予約を失ったまま走り、ほかの org がその範囲を予約できる | 本物の問題と判断した。plan の進捗の (a) と、1 回目の self-review の F-10 と同じ指摘で、`docs/tech-debt/README.md` の 172 行目の (b) に記録済み。起きるのは、leader の pane が org の workspace の外にある場合だけ(headless の leader は org の workspace の中で立つので、ふつうは当たらない)。ふつうの `stop` と disband から来た pane の補償を分ける必要があり、直すには設計の判断が要る | internal/org/verbs.go(CloseDeferredSelfPane の補償) |
 
-## DISMISSED
+### DISMISSED
 
 | # | Reviewer finding | Dismissal reason | Category |
 |---|-------------------|------------------|----------|
