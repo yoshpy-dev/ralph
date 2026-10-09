@@ -147,7 +147,11 @@ None (1 つのフックの中身を 3 つのファイルに移すだけで、フ
   - S4 完了(この commit、inline、docs だけ): tech-debt の guard の限界の行で、(d) を解消済みにし(Debt と Trigger)、(e) にこの PR で直した項目と残るコードの項目(`read_body` のループ、予約語と `exec` の規則とそれを挙げるコメント、awk のコメントの `SQ`)を書き、Trigger (e) を残る項目に合わせた。Debt (b) に S3 で見つけた `$'\echo' 'sudo ls'` の穴(新版 none、旧版 deny)を足した。`.awk` を言語に分類できず static verify が full の範囲で走る件を、新しい行にした
   - self-review(bbedeabe、reviewer/opus): Merge yes、LOW 7 件(どれもコメントと tech-debt の書き方)。awk のコードは、コメントと空行を除くと base と一致(982 行)。PR #213 で self-review のあとに guard のコメントを直して規則から外れたので、今回は LOW 1〜6 を S5 で直し、verify の前に reviewer に S5 を見せる。LOW 7(tech-debt の Impact (d)、`SQ` の項目と Trigger (e))と、LOW 1 で見つけた `$"echo" 'sudo ls'` の形(新版 none、旧版 deny。分割前の guard も none なので分割の退行ではない)は sync-docs で tech-debt に入れる
   - S5 完了(8c61c6cb、implementer/opus): LOW 1〜6 のコメントの直し(`data_first_ok` に `$"…"` の例外、`new_ctx` の `CPL`、`lex_redir` の dash の説明を実測に合わせた、`.sh` のヘッダーの一覧の位置と printf の書き方、3 つの `.awk` の先頭コメントを短くして読む順の説明を `.sh` の 1 か所に集めた、`check-template.sh` の guard の項目の理由とそのテストのコメント)。コメント以外の行は変わっていない。テストは 2,063/0 と 60/0
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+  - S5 の再 review(6dab8a5d、reviewer): Merge yes。LOW 1〜6 は修正済みで、新しい指摘はない。awk のコードは base と一致のまま(コメントと空行を除いて `cmp`)。LOW 7 だけが sync-docs に残った
+  - verify(3b6cfc9a、verifier/opus): partial-pass。コードの AC(AC1・AC2・AC6・AC7・AC8)は満たした。AC4 と AC5 は静的な確認まで(実行は /test)、AC9 は tech-debt の書き方(V-1 から V-3)が sync-docs に残った。V-4(static verify が `.awk` の構文を見ない)を記録した。指摘は LOW 2 件と情報 2 件
+  - test(1b02beef、tester/opus): pass。`./scripts/run-test.sh` は shell 40 本(3,917 件)と Go 8 packages で rc 0。guard のテストは macOS・mawk・gawk の 3 通りとも 2,063/0。base と HEAD の guard の判定の比較は 991 payload・1,982 runs で違い 0(macOS の BWK awk のみ)。mutation 9 個はどれも足した行で赤。`.awk` が欠けた・読めない写し 6 通りは旧版の 4 規則の fallback になった
+  - sync-docs(この commit): tech-debt の guard の限界の行で、Impact (d) と Why deferred (d) を閉じ(AC7 の結果を書いた)、Debt (b) に `$"echo" 'sudo ls'`(分割前も none)を足し、Debt (d) の行数を 231・616・336・465 にして 8c61c6cb を (e) の一覧に足し、Debt (e) と Trigger (e) を `SQ` の綴りの項目で揃えた。`.awk` を分類できない行に V-4、テストの穴の行に (g) と mawk・gawk の結果を足した。AGENTS.md ほかの文書に、分割で間違いになる記述はなかった(変更なし)
+- [x] Review artifact created
+- [x] Verification artifact created
+- [x] Test artifact created
 - [ ] PR created
