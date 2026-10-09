@@ -1,7 +1,7 @@
 # guard-awk-split
 
-- Status: Draft
-- Approved: TBD
+- Status: Approved
+- Approved: 2026-10-09 sha256:cfb34e566022
 - Owner: Claude Code
 - Date: 2026-10-09
 - Related request: ユーザーの依頼「残っているguard の後続の件を修正できますか？それと、前回の一覧の4~5の着手してください。」(2026-10-09)の 5(guard のファイルが 800 行を超えるので、awk のプログラムを別のファイルに分ける)。4 と guard の後続は PR #213 で済んだ。PR #213 が tech-debt に持ち越した 2 件(guard のヘッダーの `$"…"`、テストの行)と、guard-deny-only から持ち越してきたコメントの項目もここで扱う
@@ -133,8 +133,9 @@ None (1 つのフックの中身を 3 つのファイルに移すだけで、フ
 
 ## Progress checklist
 
-- [ ] Plan reviewed
-- [ ] Plan approved
+- [x] Plan reviewed
+- [x] Plan approved
+  - 2026-10-09: ユーザーが承認ゲートで Approve。承認の前に、Codex の plan advisory の HIGH(revert を配ると `.awk` を消したあとの `.sh` の書き込み失敗で fallback に落ちる窓ができる)を 2 段のロールバックと AC7 の `--no-verify` の形で、consult(consult-plan-awksplit)の指摘 3 点((e) のコメントだけの項目を S3 で直す、`check-template.sh` の `required_files`、AC2 を S1 の素の `cmp` に)を反映した。図解ページは描いていない(Visual review を参照)
 - [x] Branch created
 - [ ] Implementation started
 - [ ] Review artifact created
