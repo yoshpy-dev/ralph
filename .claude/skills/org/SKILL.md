@@ -397,11 +397,12 @@ main worktree からでも linked worktree からでも打てる。`--plan` の�
 `--state-dir`(シェルの単一引用符で囲んだもの)が入る。leader は
 `ralph org` のコマンド(spawn・send・wait・read・status・stop・report・
 disband)のすべてにこの `--state-dir` を付ける。leader の pane は herdr
-サーバーの環境で動くので、start に渡した `--state-dir` も、start を打った
-環境の `RALPH_ORG_STATE_DIR` も leader には届かない。付けないと leader の
-座席が別の台帳に入り、予約と上限の数え方から外れ、start を打った人の status
-と後始末からも見えなくなる。既定の台帳でもこの行を書くのは、pane の ralph が
-古い版で台帳を別の場所に決める場合にも、start と同じ台帳を使わせるため。
+サーバーの環境で動き、start を打った環境と同じとは限らない。ralph は start に
+渡した `--state-dir` も `RALPH_ORG_STATE_DIR` も pane に渡さないので、leader
+の側では当てにできない。付けないと leader の座席が別の台帳に入り、予約と上限
+の数え方から外れ、start を打った人の status と後始末からも見えなくなる。
+既定の台帳でもこの行を書くのは、pane の ralph が古い版で台帳を別の場所に
+決める場合にも、start と同じ台帳を使わせるため。
 
 成功すると spawn の出力に続けて `worktree:` と `branch:` の行を出す。
 `ralph org status --org-id <org_id>` は `reserved:` の行の次に `feature:` の
@@ -454,7 +455,8 @@ leader が動いている間は台帳に何も足さない。disband のあと�
 ### org の終わり方
 
 leader は reviewer が通したら、次の順で締める(leader の雛形の「機能ごとの
-org」と同じ)。
+org」と同じ)。下の `ralph org` のコマンドにも、タスクの `- 台帳:` の行の
+`--state-dir` を付ける。
 
 1. implementer と reviewer を `stop` し、`ralph org report --org-id <org_id>`
    を打つ(report は worktree の `docs/reports/` に書かれる)。

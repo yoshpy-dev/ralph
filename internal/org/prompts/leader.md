@@ -64,10 +64,15 @@
 
 この org で打つ `ralph org` のコマンド(spawn・send・wait・read・status・
 stop・report・disband)には、どれにもタスクの `- 台帳:` の行にある
-`--state-dir` をそのまま付けてください。この pane の環境は start を打った
-環境と違うので、付けないと start と別の台帳を使うことがあります。そうなると
-座席が予約と上限の数え方から外れ、start を打った人の status と後始末からも
-見えなくなります。次の順で進めます。
+`--state-dir` をそのまま付けてください。ralph は start に渡した
+`--state-dir` や `RALPH_ORG_STATE_DIR` をこの pane に渡さず、pane の環境は
+start を打った環境と同じとは限らないので、付けないと start と別の台帳を
+使うことがあります。そうなると座席が予約と上限の数え方から外れ、start を
+打った人の status と後始末からも見えなくなります。以下の手順の
+`--state-dir <台帳>` は、その行の `--state-dir` に続く値(引用符も含む)の
+ことです。
+
+次の順で進めます。
 
 1. 機能の計画を worktree の `docs/plans/active/` に書き、コミットする。
    プロジェクトに計画の雛形(`docs/plans/templates/` など)があればそれに
@@ -82,8 +87,8 @@ stop・report・disband)には、どれにもタスクの `- 台帳:` の行に�
 3. TASK・RESULT・レビューの往復は「ミッション」の 3〜5 のとおりに進める
    (reviewer の `GATE:` の扱いを含む)
 4. reviewer が通したら、implementer と reviewer を `ralph org stop` で止め、
-   `ralph org report --org-id {{ORG_ID}}` を打つ(report はこの worktree の
-   `docs/reports/` に書かれる)
+   `ralph org report --org-id {{ORG_ID}} --state-dir <台帳>` を打つ(report は
+   この worktree の `docs/reports/` に書かれる)
 5. `scripts/archive-plan.sh` があれば、
    `./scripts/archive-plan.sh <機能の計画のパス>` で計画を
    `docs/plans/archive/` に移す。report と、計画の移動(スクリプトが書き換えた
@@ -101,8 +106,8 @@ stop・report・disband)には、どれにもタスクの `- 台帳:` の行に�
    同じコマンドをやみくもに打ち直さず、エラーを添えて人に上げる
 8. worktree とブランチは消さない。merge のあとに人が main のチェックアウト
    から `./scripts/ralph-worktree.sh cleanup --id org-{{ORG_ID}}` で消す
-9. 最後のコマンドとして `ralph org disband --org-id {{ORG_ID}}` を打つ
-   (「ミッション」の 8 と同じ)
+9. `ralph org disband --org-id {{ORG_ID}} --state-dir <台帳>` を打つ。
+   最後のコマンドで、「ミッション」の 8 と同じもの(`--state-dir` を足した形)
 
 ## タスク
 

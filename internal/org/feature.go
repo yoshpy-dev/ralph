@@ -326,11 +326,12 @@ func startFeatureLeaderParams(p StartFeatureParams, plan *SplitPlan, f SplitFeat
 // the branch, the reserved paths, the features it depends on, the procedure
 // to follow, and the ledger stateDir with the --state-dir to pass to every
 // `ralph org` command, then a blank line and f's body as the plan has it.
-// The leader's pane has the herdr server's environment, not the one start
-// ran in, so neither the --state-dir nor the RALPH_ORG_STATE_DIR given to
-// start reaches the leader's own commands; the line names the ledger always,
-// the default one too, so that a pane whose ralph resolves the default
-// ledger otherwise (an older release) stays on start's ledger as well.
+// The leader's pane has the herdr server's environment, which is not
+// necessarily the one start ran in, and ralph passes neither the --state-dir
+// nor the RALPH_ORG_STATE_DIR given to start to the pane, so the leader's own
+// commands cannot count on either; the line names the ledger always, the
+// default one too, so that a pane whose ralph resolves the default ledger
+// otherwise (an older release) stays on start's ledger as well.
 func featureLeaderTask(plan *SplitPlan, f SplitFeature, stateDir, worktree, branch string) string {
 	deps := "なし"
 	if len(f.DependsOn) > 0 {
