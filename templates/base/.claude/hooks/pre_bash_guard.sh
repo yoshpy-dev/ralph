@@ -80,21 +80,28 @@
 #      (a) the arguments of a command that only reads data (DATACMD below:
 #          echo, printf, cat, grep, ls, ...; not test or [, nor stat, whose
 #          zsh -A NAME evaluates the subscript of NAME; rg only without
-#          --pre and without a word in ANSI-C or locale quoting; printf only
-#          without -v and with no %, $ or backtick in any word as written),
-#          from its first argument to the end of the command, without
-#          redirections, substitutions and ${...} (zsh evaluates the value
-#          of ${(e)...} again, which runs a $(...) written there in single
-#          quotes or with an escaped $; the text around a ${...} stays
-#          data), when the command and every later stage of its pipeline
-#          are such commands and send output only to the terminal, the next
-#          stage, /dev/null, /dev/stderr, a copy of fd 0, 1 or 2, or a
-#          closed fd (>&-) (no file, no fd 3 or above, no &> or &>>, no
-#          >(...));
+#          --pre and without a word that has a substitution, a $ that
+#          expands, or ANSI-C or locale quoting, since its value could be
+#          --pre; printf only without -v and with no %, $ or backtick in any
+#          word as written), from its first argument to the end of the
+#          command, without redirections, substitutions, ${...} (zsh
+#          evaluates the value of ${(e)...} again, which runs a $(...)
+#          written there in single quotes or with an escaped $; the text
+#          around a ${...} stays data), and a zsh subscript from its $ to
+#          the end of its word ($arr[...] and $~arr[...] in zsh, and the
+#          arithmetic $[...] in bash and zsh, evaluate the text in the
+#          brackets, which runs a $(...) written there in single quotes),
+#          when the command and every later stage of its pipeline are such
+#          commands and send output only to the terminal, the next stage,
+#          /dev/null, /dev/stderr, a copy of fd 0, 1 or 2, or a closed fd
+#          (>&-) (no file, no fd 3 or above, no &> or &>>, no >(...));
 #      (b) the -m or --message value of git commit and git tag when it has
-#          no substitution and no ${ in its source text (the recommended
-#          heredoc form counts as one, even with a ${ in its body); a value
-#          with a ${ is not denied for that, the other rules decide;
+#          no substitution and no $ that expands (one outside single quotes
+#          and ANSI-C strings, not escaped, and not followed by a space, a
+#          tab, a newline, the end, or a closing double quote; the
+#          recommended heredoc form counts as one, even with a ${ in its
+#          body); a value with such a $ is not denied for that, the other
+#          rules decide;
 #      (c) the body of a heredoc whose delimiter is quoted, or whose body
 #          has no substitution and no ${...}, fed to a command of (a) or to
 #          git commit -F -, under the same conditions as (a);
@@ -130,7 +137,8 @@
 # Not covered: anything only known at run time (variables such as $cmd,
 # aliases, functions, git aliases, scripts read from a file, remote commands
 # such as ssh host '...'), and shell syntax beyond the above: case
-# patterns, arithmetic, arrays, brace expansion ({su,}do), pathname
+# patterns, arithmetic, arrays (beyond keeping a zsh subscript out of the
+# data regions), brace expansion ({su,}do), pathname
 # expansion (?udo, [s]udo), and the hex and octal escapes of $'...' (only
 # \n, \t and \r are decoded). The lexer misses those; the sentinel sees
 # only the text as written. Shell state set up by an earlier command is
@@ -233,7 +241,9 @@ function find_str(p, str,    L, r, k) {
 # top level of the command, the only place with data regions. The words of
 # the simple command being assembled are WV (value, quotes removed), WR
 # (source text), WS (1 when the source has $( or a backtick outside single
-# quotes) and WP0/WP1 (where the word starts and ends in S), indexed
+# quotes), WEXP (1 when it has a $ that expands, see lex_dollar), WANSI (1
+# when it has ANSI-C or locale quoting) and WP0/WP1 (where the word starts
+# and ends in S), indexed
 # [ctx, 1..WN[ctx]]; its redirections are RO (operator), RV/RSB (target
 # value and subst flag) and RMISS (no target), indexed [ctx, 1..RN[ctx]].
 # XS/XE[ctx, 1..XN[ctx]] are the spans of its redirections and
@@ -306,7 +316,7 @@ function lex_cmds(ctx, closer,    c, c2, depth, p0, e) {
       c = at(P)
       # An unquoted number right before < or > is the fd of a redirection.
       if ((c == "<" || c == ">") && LW_RAW ~ /^[0-9]+$/) lex_redir(ctx, p0)
-      else add_word(ctx, LW_VAL, LW_RAW, LW_SUBST, p0, P)
+      else add_word(ctx, LW_VAL, LW_RAW, LW_SUBST, p0, P, LW_EXP, LW_ANSI)
     }
     if (P == p0) P++
   }
@@ -316,14 +326,24 @@ function lex_cmds(ctx, closer,    c, c2, depth, p0, e) {
 
 # lex_word(ctx): read one word at P. Sets LW_VAL (quotes removed), LW_RAW
 # (source text), LW_SUBST (1 when $( or a backtick appears outside single
-# quotes) and LW_QUOTED (1 when any quote or backslash appears).
-function lex_word(ctx,    start, val, buf, c, c2, e, subst, quoted, bsnl, piece) {
+# quotes), LW_QUOTED (1 when any quote or backslash appears), LW_EXP (1
+# when a $ that expands appears, outside quotes or inside double quotes:
+# LD_EXP of lex_dollar) and LW_ANSI (1 when ANSI-C or locale quoting
+# appears: LD_ANSI). When a $ in the word starts a zsh subscript (LD_SUB,
+# also inside double quotes), the span from the first such $ to the end of
+# the word is noted with xnote, so it is never data. The word ends where it
+# always does (an unquoted blank or operator), so an unclosed [ does not
+# reach past it.
+function lex_word(ctx,    start, val, buf, c, c2, e, subst, quoted, bsnl, piece, xp, ansi, subp) {
   start = P
   val = ""
   buf = ""
   subst = 0
   quoted = 0
   bsnl = 0
+  xp = 0
+  ansi = 0
+  subp = 0
   while (P <= N) {
     c = at(P)
     if (c == SQ) {
@@ -336,6 +356,8 @@ function lex_word(ctx,    start, val, buf, c, c2, e, subst, quoted, bsnl, piece)
       P++
       piece = lex_dq(ctx)
       if (DQ_SUBST) subst = 1
+      if (DQ_EXP) xp = 1
+      if (DQ_SUB && !subp) subp = DQ_SUB
     } else if (c == BS) {
       quoted = 1
       c2 = at(P + 1)
@@ -346,6 +368,9 @@ function lex_word(ctx,    start, val, buf, c, c2, e, subst, quoted, bsnl, piece)
       if (c2 == SQ || c2 == DQ) quoted = 1
       piece = lex_dollar(ctx, 0)
       if (LD_SUBST) subst = 1
+      if (LD_EXP) xp = 1
+      if (LD_ANSI) ansi = 1
+      if (LD_SUB && !subp) subp = LD_SUB
     } else if (c == BQ) {
       piece = lex_bq(ctx)
       subst = 1
@@ -360,20 +385,27 @@ function lex_word(ctx,    start, val, buf, c, c2, e, subst, quoted, bsnl, piece)
     buf = buf piece
     if (length(buf) > 512) { val = val buf; buf = "" }
   }
+  if (subp) xnote(ctx, subp, P)
   LW_VAL = val buf
   LW_RAW = text(start, P)
   LW_SUBST = subst
   LW_QUOTED = quoted
   LW_BSNL = bsnl
+  LW_EXP = xp
+  LW_ANSI = ansi
 }
 
 # lex_dq(ctx): P is just after an opening double quote. Reads up to the
 # closing one (P is left after it) and returns the value; DQ_SUBST is 1
-# when a $( or a backtick appeared.
-function lex_dq(ctx,    val, buf, e, c, c2, subst, piece) {
+# when a $( or a backtick appeared, DQ_EXP is 1 when a $ that expands
+# appeared (LD_EXP), and DQ_SUB is the position of the first $ that starts
+# a zsh subscript (LD_SUB), or 0.
+function lex_dq(ctx,    val, buf, e, c, c2, subst, piece, xp, subp) {
   val = ""
   buf = ""
   subst = 0
+  xp = 0
+  subp = 0
   while (P <= N) {
     e = skip(P, RE_DQ)
     piece = text(P, e)
@@ -389,6 +421,8 @@ function lex_dq(ctx,    val, buf, e, c, c2, subst, piece) {
       } else if (c == "$") {
         piece = piece lex_dollar(ctx, 1)
         if (LD_SUBST) subst = 1
+        if (LD_EXP) xp = 1
+        if (LD_SUB && !subp) subp = LD_SUB
       } else {
         piece = piece lex_bq(ctx)
         subst = 1
@@ -398,6 +432,8 @@ function lex_dq(ctx,    val, buf, e, c, c2, subst, piece) {
     if (length(buf) > 512) { val = val buf; buf = "" }
   }
   DQ_SUBST = subst
+  DQ_EXP = xp
+  DQ_SUB = subp
   return val buf
 }
 
@@ -411,11 +447,35 @@ function lex_dq(ctx,    val, buf, e, c, c2, subst, piece) {
 # reads as quoted text (${(e):-SQ$(cmd)SQ}, also with the $ escaped by a
 # backslash). LD_SUBST stays 0 for such a ${...}, and only its own span is
 # excluded, so the text around it keeps its data region (echo "${HOME}"
-# SQsudo lsSQ). A message word (b) and an unquoted heredoc body (c) are
-# added as data whole, so msg_check and lex_hd keep a ${ out of those.
+# SQsudo lsSQ).
+# Three more marks describe the $ just read. This function is called only
+# for a $ outside quotes or inside double quotes (from lex_word, lex_dq and
+# lex_brace) and for a $ in an unquoted heredoc body (lex_hd), so they
+# describe a $ the shell reads: a $ inside single quotes, escaped by a
+# backslash, or inside the value of an ANSI-C string never comes here.
+#   LD_ANSI is 1 for $SQ...SQ and $DQ...DQ outside double quotes (ANSI-C
+#   and locale quoting, which can spell characters the lexer does not
+#   decode, such as \x2d for -).
+#   LD_EXP is 1 for any other $ that expands: every $ except one followed
+#   by the end of the text, a space, a tab, a newline, or (inside double
+#   quotes) the closing double quote. It covers $(...), ${...}, $name, $1,
+#   $@ and the zsh forms with flags such as $~x, and is set on some $ that
+#   only stand for themselves too ($; for one), which only ever drops a
+#   data region. msg_check and the rg check of stage_note read it per word.
+#   LD_SUB is the position of the $ when the $ starts a zsh subscript, else
+#   0: zero or more of the flag characters ~ = ^ +, zero or more name
+#   characters, and then [ ($arr[, $~arr[, and the old arithmetic $[ of
+#   bash and zsh). zsh evaluates the subscript, which runs a $(...) written
+#   there in single quotes ($arr[SQ$(cmd)SQ]), while the lexer reads that
+#   as quoted text. lex_word keeps the span from this $ to the end of its
+#   word out of the argument data region; the subscript is not skipped
+#   here, so lex_word still lexes a $(...) or a backtick inside it.
+# All marks are set after the nested lex_cmds or lex_brace call returns, as
+# LD_SUBST is, so a $ read inside them does not overwrite the marks of
+# this one.
 # (No single quote may appear in this awk program: the shell passes it in
 # single quotes.)
-function lex_dollar(ctx, in_dq,    s, c, f) {
+function lex_dollar(ctx, in_dq,    s, c, f, q, v) {
   s = P
   c = at(P + 1)
   if (c == "(") {
@@ -423,6 +483,9 @@ function lex_dollar(ctx, in_dq,    s, c, f) {
     lex_cmds(new_ctx(CD[ctx] + 1), ")")
     xnote(ctx, s, P)
     LD_SUBST = 1
+    LD_EXP = 1
+    LD_ANSI = 0
+    LD_SUB = 0
     return text(s, P)
   }
   if (c == "{") {
@@ -430,11 +493,25 @@ function lex_dollar(ctx, in_dq,    s, c, f) {
     f = lex_brace(ctx, in_dq)
     xnote(ctx, s, P)
     LD_SUBST = f
+    LD_EXP = 1
+    LD_ANSI = 0
+    LD_SUB = 0
     return text(s, P)
   }
+  if (!in_dq && (c == SQ || c == DQ)) {
+    if (c == SQ) { P += 2; v = lex_ansi() }
+    else { P++; v = "" }
+    LD_SUBST = 0
+    LD_EXP = 0
+    LD_ANSI = 1
+    LD_SUB = 0
+    return v
+  }
   LD_SUBST = 0
-  if (!in_dq && c == SQ) { P += 2; return lex_ansi() }
-  if (!in_dq && c == DQ) { P++; return "" }
+  LD_ANSI = 0
+  LD_EXP = !(c == "" || c == " " || c == "\t" || c == "\n" || (in_dq && c == DQ))
+  q = skip(skip(P + 1, RE_NOTFLAG), RE_NOTNAME)
+  LD_SUB = (at(q) == "[") ? s : 0
   P++
   return "$"
 }
@@ -519,7 +596,7 @@ function lex_redir(ctx, rs,    c, c2, op, s, k) {
     s = P
     P += 2
     lex_cmds(new_ctx(CD[ctx] + 1), ")")
-    add_word(ctx, text(s, P), text(s, P), 1, s, P)
+    add_word(ctx, text(s, P), text(s, P), 1, s, P, 0, 0)
     xnote(ctx, s, P)
     if (c == ">") POUT[ctx] = 1
     return
@@ -685,13 +762,19 @@ function queue(kind, t, d) {
 # ======================================================================
 # Simple-command assembly
 # ======================================================================
-function add_word(ctx, v, r, s, p0, p1,    k) {
+# add_word(ctx, v, r, s, p0, p1, x, a): add a word to the command being
+# assembled: value v, source text r, subst flag s, span p0..p1, and the
+# marks x (a $ that expands, LW_EXP) and a (ANSI-C or locale quoting,
+# LW_ANSI).
+function add_word(ctx, v, r, s, p0, p1, x, a,    k) {
   k = ++WN[ctx]
   WV[ctx, k] = v
   WR[ctx, k] = r
   WS[ctx, k] = s
   WP0[ctx, k] = p0
   WP1[ctx, k] = p1
+  WEXP[ctx, k] = x
+  WANSI[ctx, k] = a
 }
 # wv(ctx, i): the value of word i of the current command, empty past its
 # end.
@@ -936,10 +1019,13 @@ function stage_note(ctx, cid,    i, n, j, k, ro, safe, rs, re, cur, xs, xe, m, t
   i = J_I
   n = WN[ctx]
   ro = (i >= 1 && (J_NM in DATACMD))
-  # rg --pre runs a program. A word in ANSI-C ($SQ...SQ) or locale ($DQ...DQ)
-  # quoting can spell characters the lexer does not decode (\x2d is -), so
-  # it could hide --pre; such a word also makes rg not a data command.
-  if (ro && J_NM == "rg") for (j = i + 1; j <= n; j++) if (substr(WV[ctx, j], 1, 5) == "--pre" || index(WR[ctx, j], "$" SQ) || index(WR[ctx, j], "$" DQ)) ro = 0
+  # rg --pre runs a program. A word whose value is only known at run time
+  # could be --pre too, so a word with a $ that expands ($x, "$x", ${...}),
+  # a substitution, or ANSI-C ($SQ...SQ) or locale ($DQ...DQ) quoting, which
+  # can spell characters the lexer does not decode (\x2d is -), also makes
+  # rg not a data command. The marks come from lex_dollar, so a $ in single
+  # quotes (rg SQfoo$SQ) does not count.
+  if (ro && J_NM == "rg") for (j = i + 1; j <= n; j++) if (substr(WV[ctx, j], 1, 5) == "--pre" || WEXP[ctx, j] || WANSI[ctx, j] || WS[ctx, j]) ro = 0
   # printf -v NAME (also attached -vNAME) stores into a variable instead of
   # printing (bash and zsh), and in zsh a %n conversion assigns to, and a
   # numeric one such as %d evaluates, an argument as an arithmetic
@@ -1284,18 +1370,22 @@ function msg_attached(ctx, i, pre, commit,    r) {
 # msg_check(ctx, j, raw, commit): raw is the source text of a message in
 # word j. A command substitution in it (other than the recommended heredoc
 # form) is denied for git commit; a message without one is data when its
-# git is the command word. A word whose whole source text (WR, not raw:
-# msg_attached gives an empty raw when quotes split the flag, as in
-# --messageSQSQ=${...}) has a ${ is no data either, since zsh re-evaluates
-# the value of ${(e)...}. It is not denied (git commit -m "${msg}" stays
-# allowed); the sentinel decides. The recommended heredoc form expands
-# nothing, so it stays data with a ${ in its body.
+# git is the command word. A word with a $ that expands (WEXP, set by
+# lex_dollar for the whole word, so also when quotes split the flag, as in
+# --messageSQSQ=${...}, where msg_attached gives an empty raw) is no data
+# either: zsh re-evaluates the value of ${(e)...}, and a zsh subscript
+# ($arr[SQ$(cmd)SQ]) runs a $(...) written in single quotes. It is not
+# denied (git commit -m "${msg}" stays allowed); the sentinel decides. A $
+# inside single quotes, escaped by a backslash, or inside an ANSI-C string
+# expands nothing, so SQmention ${HOME}SQ stays data. The recommended
+# heredoc form expands nothing either, so it stays data with a ${ in its
+# body.
 function msg_check(ctx, j, raw, commit) {
   if (WS[ctx, j] && !safe_heredoc_msg(raw)) {
     if (commit) deny("commit_message")
     return
   }
-  if (index(WR[ctx, j], "${") && !safe_heredoc_msg(raw)) return
+  if (WEXP[ctx, j] && !safe_heredoc_msg(raw)) return
   if (DATA_OK) add_data(WP0[ctx, j], WP1[ctx, j])
 }
 # safe_heredoc_msg(r): 1 when the source text r is exactly a double quote,
@@ -1408,6 +1498,10 @@ BEGIN {
   RE_ANSI = "[\\\\" SQ "]"
   RE_BRACE = "[}\\\\$" BQ DQ SQ "]"
   RE_BRACE_DQ = "[}\\\\$" BQ DQ "]"
+  # After a $: the first character that is not a zsh flag character, and
+  # the first one that is not a name character (lex_dollar, subscripts).
+  RE_NOTFLAG = "[^~=^+]"
+  RE_NOTNAME = "[^A-Za-z0-9_]"
   CTX = CIDN = PLSER = QN = QBYTES = HN = RLVL = DN = 0
   MAIN = DATA_OK = CUR_H = J_I = NODATA = EXEC_SEEN = 0
   J_NM = ""

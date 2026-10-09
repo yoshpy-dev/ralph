@@ -29,7 +29,8 @@
 #      force push; hard reset; command substitution in a commit message;
 #      --no-verify and core.hooksPath; abbreviated long options; strings run
 #      as commands and files written, which the sentinel denies; zsh =sudo;
-#      zsh ${(e)...} text and stat -A, which are no data regions)
+#      zsh ${(e)...} text, zsh subscripts, stat -A, and rg with a word whose
+#      value is only known at run time, which are no data regions)
 #      -> deny, with permission_mode absent and bypassPermissions. Then the
 #      kinds of command the self-review listed (string runners, other
 #      shells, builtin/source/process substitution, git forms that run
@@ -58,8 +59,10 @@
 #      boundary, a region longer than one 512-character index block) and
 #      what breaks them (a pipe to sh or sort, a file, >&file, >(...) after
 #      > or as an argument, a here-string, a cut-short pipeline, rg --pre,
-#      nesting, an assignment, a backtick after the message, a
-#      backslash-newline anywhere, also one that is only text), a sentinel
+#      nesting, an assignment, a backtick after the message, a $ that
+#      expands in a message or an rg word but not a $ that is only text, a
+#      zsh subscript, a backslash-newline anywhere, also one that is only
+#      text), a sentinel
 #      match across the guard's 512-character text window, and the known
 #      false positives of the wrapper scan (tech-debt)
 #   E. Broken input (unclosed quotes, parentheses, substitutions, heredocs
@@ -678,6 +681,26 @@ guard_deny_only_forms=(
   $'git commit -"m"${(e):-\'$(sudo ls)\'}'
   $'git tag -a v1 --message\'\'=${(e):-\'$(sudo ls)\'}'
   $'stat -A \'arr[$(sudo id; echo 1)]\' /dev/null'
+  # 11. Plan guard-msg-param-flag (AC2). A word of rg whose value is only
+  # known at run time could be --pre, so a $ that expands ($x, "$x"), a
+  # substitution ($(...), and a backtick, which has no $ and is caught only
+  # by the WS check) makes rg not a data command; the $SQ\x2d-preSQ row of
+  # 9 above covers ANSI-C quoting. zsh evaluates a subscript ($arr[...],
+  # $h[...], $~arr[...], and the arithmetic $[...] of bash and zsh), which
+  # runs a $(...) written there in single quotes, so the span from the $ to
+  # the end of its word is no data, and a message with such a word (a $
+  # that expands) is no data either. The ${(e)...} message rows of 10 above
+  # keep the commit and tag messages with a ${ out of the data regions. The
+  # old guard denies all of these (the sudo substring).
+  'rg $x sudo pat .'
+  $'rg "$x" \'sudo \' .'
+  $'rg $(echo --pre) sh \'sudo ls\''
+  $'rg `echo --pre` sh \'sudo ls\''
+  $'echo $arr[\'$(sudo ls)\']'
+  $'echo $h[\'$(sudo ls)\']'
+  $'echo $~arr[\'$(sudo ls)\']'
+  $'echo $[\'$(sudo ls)\']'
+  $'git commit -m $arr[\'$(sudo ls)\']'
 )
 check_modes B deny absent bypassPermissions -- "${guard_deny_only_forms[@]}"
 
@@ -913,6 +936,15 @@ edge_deny=(
   # deny. --message " is not the -m " the sentinel reads, so only that rule
   # denies this; the old guard lets it through.
   'git commit --message "${msg}$(id)"'
+  # Plan guard-msg-param-flag (AC2b): the lexer does not skip a subscript,
+  # so a $(...) inside one is still read again as commands (commit_message
+  # for the message; sudo as the command name of the substitution, which
+  # quotes split so that the sentinel does not match). A subscript ends with
+  # its word, so an unclosed [ does not hide the command after the ;. The
+  # old guard lets all three through.
+  'git commit -m $arr[$(date)]'
+  $'echo $arr[$(s\'\'udo ls)]'
+  'echo $a[ ; git push origin --force'
 )
 check_modes D deny absent -- "${edge_deny[@]}"
 
@@ -1056,6 +1088,24 @@ edge_none=(
   $'git commit -m "$(cat <<\'EOF\'\nfix: mention ${HOME} and sudo ls in the body\nEOF\n)"'
   $'git commit -F - <<EOF\nuse ${HOME} here\nEOF'
   'stat -f %z file'
+  # Plan guard-msg-param-flag (AC1). A message loses its data region only
+  # for a $ that expands, which lex_dollar marks: a ${ inside single quotes,
+  # escaped by a backslash inside double quotes, or inside an ANSI-C string
+  # is text, so these messages stay data and their sentinel words pass. rg
+  # reads the same marks, so a $ at the end of a single-quoted pattern, or
+  # before the closing double quote, keeps rg a data command. PR #211
+  # denied the four messages and both rg patterns (it looked for ${, $SQ
+  # and $DQ in the source text); the old guard denies all eight rows with a
+  # sentinel word (the sudo substring).
+  $'git commit -m \'mention ${HOME}; never sudo ls\''
+  'git commit -m "mention \${HOME}; never sudo ls"'
+  $'git commit -m $\'mention ${HOME}; never sudo ls\''
+  $'git tag -a v1 -m \'mention ${HOME}; never sudo ls\''
+  $'git commit -m "never sudo ls for 5$"'
+  $'rg \'foo$\' \'sudo \' .'
+  $'rg "foo$" \'sudo \' .'
+  $'rg -n \'sudo \' .'
+  $'git commit -m \'use ${HOME}\''
 )
 check_modes D none absent -- "${edge_none[@]}"
 
@@ -1147,6 +1197,17 @@ edge_sentinel_deny=(
   'rg $"sudo ls" .'
   $'printf `echo x` \'sudo ls\''
   $'printf -v c \'sudo ls\''
+  # Plan guard-msg-param-flag: the edge cases of the expansion mark and the
+  # subscript. A digit ($1) and a special parameter ($@) expand, so rg is no
+  # data command and a message with one is no data (PR #211 gave the message
+  # its data region, as it only looked for ${). A subscript inside a
+  # subscript ($a[$b[1]]) still runs to the end of its word, so the quoted
+  # text attached to it is no data. The old guard denies all four, and PR
+  # #211 let all four through.
+  $'rg $1 \'sudo \' .'
+  $'rg "$@" \'sudo \' .'
+  'git commit -m "use $1 never sudo ls"'
+  $'echo $a[$b[1]]\'sudo ls\''
 )
 check_modes D deny absent -- "${edge_sentinel_deny[@]}"
 
