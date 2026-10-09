@@ -123,6 +123,7 @@ None (検査の段を 1 つ足し、guard の中の判定を変えないコー�
 - [x] Branch created
 - [x] Implementation started
   - S1 完了(f09d8209、inline。1 ファイルに段を 1 つ足すだけで、引き継ぎより安い): `verify.local.sh` に `check_guard_awk` を足し、`run_static_checks` の `sh -n` の段の隣で root と template の両方を読む。static は rc 0(2 つの段とも OK)。scratch に写した木で `pre_bash_guard_commands.awk` に構文エラーを足すと、その段が awk のエラーを出して FAIL、`verify.local.sh` は rc 1(ほかの FAIL は、root だけを壊したので写しと食い違った check-sync の 1 つ)。戻すと rc 0
+  - S2 完了(b312dc80、implementer/sonnet): コメントの 15 行(lex 6、commands 6、rules 3)の `SQ`・`DQ` を本物の引用符に戻した。コードの行は変わっていない(コメントと空行を除くと前後で一致)。テストは 2,063/0、static の `verify.local.sh` は rc 0。AC2 の grep の書き方の誤り: plan の grep は部分一致なので、変数名を指すコメントの `DQ_SUBST`・`DQ_EXP`・`DQ_SUB`(lex の 4 行)にも当たる。引用符の綴りとしての `SQ`・`DQ` は、語の境界を付けた `grep -nE '^[[:space:]]*#.*(^|[^A-Za-z0-9_])(SQ|DQ)([^A-Za-z0-9_]|$)'` で 0 件。AC2 はこの grep で確かめる(AC の意図は変えない)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
