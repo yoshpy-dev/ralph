@@ -207,7 +207,7 @@ func eventOf(t *testing.T, o *Org, orgID, seatID, name string) ManifestEvent {
 // the split plan feature as canonical_ref, in the repo root, after the
 // record lookup; the leader is spawned with that worktree as its cwd, the
 // feature's paths reserved together with the binding, the scope line, and a
-// task holding the feature's body.
+// task holding the ledger and the feature's body.
 func TestStartFeature_StartsLeaderInFeatureWorktree(t *testing.T) {
 	st := newFeatureStart(t)
 	res := st.mustStart(t, st.params("auth-core"), SpawnOutcomeSpawned)
@@ -244,7 +244,7 @@ func TestStartFeature_StartsLeaderInFeatureWorktree(t *testing.T) {
 	}
 
 	feature, _ := res.Split.Feature("auth-core")
-	task := featureLeaderTask(res.Split, feature, wt, "fix/auth-core")
+	task := featureLeaderTask(res.Split, feature, st.stateDir, wt, "fix/auth-core")
 	if !strings.HasSuffix(task, "\n\nObjective: add the token store.\n\n- [ ] AC1: tokens persist") {
 		t.Fatalf("expected the task to end with the feature's body, got %q", task)
 	}
@@ -258,6 +258,11 @@ func TestStartFeature_StartsLeaderInFeatureWorktree(t *testing.T) {
 	}
 	if !strings.Contains(string(prompt), "## タスク\n\n"+task+"\n") || !strings.Contains(string(prompt), "- scope: split auth-split feature auth-core") {
 		t.Fatalf("expected the leader's prompt to hold the task and the scope, got:\n%s", prompt)
+	}
+	// The spawned task names the ledger start recorded the leader in, the
+	// state dir of st.o's manifest.
+	if ledger := "\n- 台帳: " + st.stateDir + "(ralph org のコマンドには必ず --state-dir '" + st.stateDir + "' を付ける)\n"; !strings.Contains(string(prompt), ledger) {
+		t.Fatalf("expected the leader's task to name the ledger with %q, got:\n%s", ledger, prompt)
 	}
 }
 
@@ -354,33 +359,65 @@ func TestStartFeature_SlugAtTheLengthLimit(t *testing.T) {
 }
 
 // TestFeatureLeaderTask pins the leader's task text: the lines naming the
-// split plan, feature, worktree, branch, reserved paths, dependencies and
-// procedure, then the feature's body after a blank line; no dependency
-// reads なし, and an empty body adds nothing.
+// split plan, feature, worktree, branch, reserved paths, dependencies,
+// procedure and ledger, then the feature's body after a blank line; no
+// dependency reads なし, and an empty body adds nothing. The ledger line's
+// --state-dir is one POSIX shell word, also for a path with a space or a
+// single quote.
 func TestFeatureLeaderTask(t *testing.T) {
 	plan := &SplitPlan{ID: "auth-split", Path: "/state/splits/auth-split.md", Digest: "0123456789ab"}
-	head := func(slug, worktree, branch, reserve, deps string) string {
+	head := func(slug, worktree, branch, reserve, deps, ledger string) string {
 		return "- 分割計画: auth-split(/state/splits/auth-split.md、承認の digest 0123456789ab)\n" +
 			"- 機能: " + slug + "\n" +
 			"- worktree: " + worktree + "(leader の cwd)\n" +
 			"- ブランチ: " + branch + "\n" +
 			"- 予約したパス: " + reserve + "\n" +
 			"- 依存する機能: " + deps + "\n" +
-			"- 進め方: `/org` skill の「機能ごとの org」の手順に従う"
+			"- 進め方: `/org` skill の「機能ごとの org」の手順に従う\n" +
+			"- 台帳: " + ledger
 	}
 	withBody := SplitFeature{
 		Slug: "auth-docs", Type: "feat", Reserve: []string{"docs/auth/", "docs/x.md"},
 		DependsOn: []string{"auth-core", "auth-api"}, Body: "Objective: document it.\n\n- [ ] AC1",
 	}
-	got := featureLeaderTask(plan, withBody, "/repo/.claude/worktrees/org-auth-docs", "feat/auth-docs")
-	want := head("auth-docs", "/repo/.claude/worktrees/org-auth-docs", "feat/auth-docs", "docs/auth/, docs/x.md", "auth-core, auth-api") +
+	got := featureLeaderTask(plan, withBody, "/repo/.harness/state/org", "/repo/.claude/worktrees/org-auth-docs", "feat/auth-docs")
+	want := head("auth-docs", "/repo/.claude/worktrees/org-auth-docs", "feat/auth-docs", "docs/auth/, docs/x.md", "auth-core, auth-api",
+		"/repo/.harness/state/org(ralph org のコマンドには必ず --state-dir '/repo/.harness/state/org' を付ける)") +
 		"\n\nObjective: document it.\n\n- [ ] AC1"
 	if got != want {
 		t.Errorf("task =\n%s\nwant\n%s", got, want)
 	}
 	bare := SplitFeature{Slug: "auth-core", Type: "fix", Reserve: []string{"internal/auth/"}}
-	if got, want := featureLeaderTask(plan, bare, "/wt", "fix/auth-core"), head("auth-core", "/wt", "fix/auth-core", "internal/auth/", "なし"); got != want {
-		t.Errorf("task =\n%s\nwant\n%s", got, want)
+	for _, c := range []struct{ stateDir, ledger string }{
+		{"/my ledgers/org", "/my ledgers/org(ralph org のコマンドには必ず --state-dir '/my ledgers/org' を付ける)"},
+		{"/it's/org", `/it's/org(ralph org のコマンドには必ず --state-dir '/it'\''s/org' を付ける)`},
+	} {
+		if got, want := featureLeaderTask(plan, bare, c.stateDir, "/wt", "fix/auth-core"), head("auth-core", "/wt", "fix/auth-core", "internal/auth/", "なし", c.ledger); got != want {
+			t.Errorf("task =\n%s\nwant\n%s", got, want)
+		}
+	}
+}
+
+// TestFeatureLeaderTask_StateDirIsOneShellWord: the --state-dir value of the
+// ledger line, run through sh, is the state dir as one argument, for paths
+// with a space, a single quote, and characters the shell would expand.
+func TestFeatureLeaderTask_StateDirIsOneShellWord(t *testing.T) {
+	plan := &SplitPlan{ID: "s", Path: "/state/splits/s.md", Digest: "0123456789ab"}
+	f := SplitFeature{Slug: "a", Type: "feat", Reserve: []string{"a/"}}
+	for _, dir := range []string{"/plain/org", "/my ledgers/org", "/it's/org", "/a'b'/c", `/$HOME/*/"q"/\x/` + "`id`"} {
+		task := featureLeaderTask(plan, f, dir, "/wt", "feat/a")
+		_, rest, ok := strings.Cut(task, "--state-dir ")
+		word, _, ok2 := strings.Cut(rest, " を付ける)")
+		if !ok || !ok2 {
+			t.Fatalf("no --state-dir <word> を付ける in the task:\n%s", task)
+		}
+		got, err := exec.Command("sh", "-c", "set -- "+word+`; printf '%s|%s' "$#" "$1"`).Output()
+		if err != nil {
+			t.Fatalf("sh with %s: %v", word, err)
+		}
+		if want := "1|" + dir; string(got) != want {
+			t.Errorf("--state-dir %s reads in sh as %q, want %q", word, got, want)
+		}
 	}
 }
 

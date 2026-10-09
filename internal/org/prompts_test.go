@@ -423,7 +423,8 @@ func TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand(t *testing.T) {
 // report, the archive and its commit, the secret scan, the push, gh pr create
 // without the /pr skill, the worktree kept for the cleanup after merge, and
 // disband last. Its intro keeps the feature's changes in the reservation and
-// its steps' own writes outside it, its seats are spawned as implementer and
+// its steps' own writes outside it, has every ralph org command carry the
+// --state-dir of the task's ledger line, its seats are spawned as implementer and
 // reviewer (maxFeatureOrgIDLen counts on the first), and the archive step
 // names its own step 8 for the cleanup. The retired formation patterns are
 // mentioned nowhere.
@@ -441,7 +442,7 @@ func TestRenderRolePrompt_Leader_FeatureOrgProcedure(t *testing.T) {
 	// The template routes on the first line of the task start --plan builds.
 	const routeLine = "- 分割計画:"
 	task := featureLeaderTask(&SplitPlan{ID: "s", Path: "/state/splits/s.md", Digest: "0123456789ab"},
-		SplitFeature{Slug: "a", Type: "feat", Reserve: []string{"a/"}}, "/wt", "feat/a")
+		SplitFeature{Slug: "a", Type: "feat", Reserve: []string{"a/"}}, "/state", "/wt", "feat/a")
 	if !strings.HasPrefix(task, routeLine) {
 		t.Fatalf("featureLeaderTask no longer starts with %q, which the leader template routes on; got:\n%s", routeLine, task)
 	}
@@ -480,6 +481,18 @@ func TestRenderRolePrompt_Leader_FeatureOrgProcedure(t *testing.T) {
 		!strings.Contains(intro, "機能のコードと文書の変更は `- 予約したパス:` の中に収めて") ||
 		!strings.Contains(intro, "手順 1 の\n機能の計画、4 の report、5 の計画の移動は予約の外に書きますが") {
 		t.Errorf("expected the 機能ごとの org intro to keep the feature's changes in the reservation and the steps' own writes outside it, got section:\n%s", section)
+	}
+	// Every ralph org command of the leader carries the --state-dir of the
+	// task's ledger line, since start's ledger does not reach the pane.
+	const ledgerLine = "- 台帳:"
+	if !strings.Contains(task, "\n"+ledgerLine+" /state(") || !strings.Contains(task, "--state-dir '/state'") {
+		t.Fatalf("featureLeaderTask no longer writes the %q line with the --state-dir the leader template points to; got:\n%s", ledgerLine, task)
+	}
+	intro, _, _ := strings.Cut(section, "\n1. ")
+	if joined := strings.ReplaceAll(intro, "\n", ""); !strings.Contains(joined,
+		"`ralph org` のコマンド(spawn・send・wait・read・status・stop・report・disband)には、どれにもタスクの `"+ledgerLine+"` の行にある`--state-dir` をそのまま付けて") ||
+		!strings.Contains(joined, "start と別の台帳を使うことがあります") {
+		t.Errorf("expected the 機能ごとの org intro to have every ralph org command carry the --state-dir of the task's `%s` line, and why, got section:\n%s", ledgerLine, section)
 	}
 	for _, c := range []struct{ marker, want string }{
 		{"1 席ずつ spawn する", "`--id` は `implementer` と\n   `reviewer` にする"},

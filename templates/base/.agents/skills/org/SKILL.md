@@ -328,6 +328,9 @@ worktree のルートの `.harness/state/org/`)の下の `splits/<id>.md` に置
 - フィールドの行は行頭に書き、1 つの機能に各 1 行まで。節のほかの行が機能の
   本文で、leader のタスクになる。`## Features` の外の節(目的や背景など)は
   自由に書ける。
+- バッククォートかチルダ 3 つ以上で囲んだコードブロックの中の行は、見出しや
+  フィールドの形をしていても、囲みの行ごと本文に残る。閉じていないコード
+  ブロックは読み込みで拒否する。
 
 ### 承認
 
@@ -340,7 +343,8 @@ worktree のルートの `.harness/state/org/`)の下の `splits/<id>.md` に置
 承認のあとに中身を変えたら、digest を出し直して `- Approved:` の行を書き直す。
 
 digest が読まない書き方は、承認のあとに書き換えても digest が変わらないので、
-分割計画の読み込みで拒否する。
+分割計画の読み込みで拒否する。digest はコードブロックを区別しないので、
+コードブロックの中でも拒否する。
 
 - 先頭の 1 行ずつ以外の `- Status:` / `- Approved:` の行(先頭の 2 行目と、
   最初の `## ` の見出しより後のもの)
@@ -383,8 +387,18 @@ main worktree からでも linked worktree からでも打てる。`--plan` の�
    `- Reserve:` で、予約の記録に機能との結びつき(分割計画の id、slug、
    digest、ブランチ、worktree)が入る。scope の説明は
    `split <id> feature <slug> (reserve: <paths>)`、タスクは分割計画・機能・
-   worktree・ブランチ・予約・依存の行と機能の本文になる。spawn はロックの
-   下で 2 の判定をやり直す。
+   worktree・ブランチ・予約・依存・台帳の行と機能の本文になる。spawn は
+   ロックの下で 2 の判定をやり直す。
+
+タスクの `- 台帳:` の行には、start が使った台帳の絶対パスと、それを指す
+`--state-dir`(シェルの単一引用符で囲んだもの)が入る。leader は
+`ralph org` のコマンド(spawn・send・wait・read・status・stop・report・
+disband)のすべてにこの `--state-dir` を付ける。leader の pane は herdr
+サーバーの環境で動くので、start に渡した `--state-dir` も、start を打った
+環境の `RALPH_ORG_STATE_DIR` も leader には届かない。付けないと leader の
+座席が別の台帳に入り、予約と上限の数え方から外れ、start を打った人の status
+と後始末からも見えなくなる。既定の台帳でもこの行を書くのは、pane の ralph が
+古い版で台帳を別の場所に決める場合にも、start と同じ台帳を使わせるため。
 
 成功すると spawn の出力に続けて `worktree:` と `branch:` の行を出す。
 `ralph org status --org-id <org_id>` は `reserved:` の行の次に `feature:` の

@@ -155,9 +155,9 @@ func featureWorktreeCleanup(orgID string) string {
 // symlinks resolved, as git prints it). The leader is spawned with the
 // worktree as its cwd, the feature's `- Reserve:` paths, the binding (split
 // plan id, slug, approval digest, branch, worktree), a one-line scope, and a
-// task made of what the org was started for and the feature's body
-// (featureLeaderTask). Running the same start again reuses the worktree and,
-// while the leader is active, records nothing.
+// task made of what the org was started for, the ledger p.StateDir included,
+// and the feature's body (featureLeaderTask). Running the same start again
+// reuses the worktree and, while the leader is active, records nothing.
 func (o *Org) StartFeature(p StartFeatureParams) StartFeatureResult {
 	var res StartFeatureResult
 	refuse := func(err error) StartFeatureResult {
@@ -317,15 +317,21 @@ func startFeatureLeaderParams(p StartFeatureParams, plan *SplitPlan, f SplitFeat
 		Scope:   fmt.Sprintf("split %s feature %s (reserve: %s)", plan.ID, f.Slug, strings.Join(f.Reserve, ", ")),
 		Reserve: f.Reserve,
 		Feature: &FeatureBinding{Split: plan.ID, Feature: f.Slug, Digest: plan.Digest, Branch: branch, Worktree: worktree},
-		Task:    featureLeaderTask(plan, f, worktree, branch),
+		Task:    featureLeaderTask(plan, f, mustAbs(p.StateDir), worktree, branch),
 	}
 }
 
 // featureLeaderTask is the leader's {{TASK}} (prompts/leader.md) for feature
 // f of plan: one line each for the split plan, the feature, the worktree,
-// the branch, the reserved paths, the features it depends on, and the
-// procedure to follow, then a blank line and f's body as the plan has it.
-func featureLeaderTask(plan *SplitPlan, f SplitFeature, worktree, branch string) string {
+// the branch, the reserved paths, the features it depends on, the procedure
+// to follow, and the ledger stateDir with the --state-dir to pass to every
+// `ralph org` command, then a blank line and f's body as the plan has it.
+// The leader's pane has the herdr server's environment, not the one start
+// ran in, so neither the --state-dir nor the RALPH_ORG_STATE_DIR given to
+// start reaches the leader's own commands; the line names the ledger always,
+// the default one too, so that a pane whose ralph resolves the default
+// ledger otherwise (an older release) stays on start's ledger as well.
+func featureLeaderTask(plan *SplitPlan, f SplitFeature, stateDir, worktree, branch string) string {
 	deps := "なし"
 	if len(f.DependsOn) > 0 {
 		deps = strings.Join(f.DependsOn, ", ")
@@ -338,11 +344,19 @@ func featureLeaderTask(plan *SplitPlan, f SplitFeature, worktree, branch string)
 		"- 予約したパス: " + strings.Join(f.Reserve, ", "),
 		"- 依存する機能: " + deps,
 		"- 進め方: `/org` skill の「機能ごとの org」の手順に従う",
+		fmt.Sprintf("- 台帳: %s(ralph org のコマンドには必ず --state-dir %s を付ける)", stateDir, shellQuote(stateDir)),
 	}, "\n")
 	if f.Body != "" {
 		task += "\n\n" + f.Body
 	}
 	return task
+}
+
+// shellQuote returns s as one POSIX shell word: s in single quotes, where
+// each single quote of s closes the quotes, is written escaped, and opens
+// them again.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // checkFeatureWorktreeReuse looks up the ralph-worktree.sh record of orgID's

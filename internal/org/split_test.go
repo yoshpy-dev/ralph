@@ -311,6 +311,21 @@ func TestLoadSplitPlan_Rejects(t *testing.T) {
 		{"checked box", minimalSplitPlan("### a\n- Reserve: a/\n- [x] done\n"), "line 9: a checked box"},
 		{"indented capital checked box", minimalSplitPlan("### a\n- Reserve: a/\n  - [X] done\n"), "line 9: a checked box"},
 		{"tab-indented checked box in the header", "# t\n\t- [x] note\n## Features\n### a\n- Reserve: a/\n", "line 2: a checked box"},
+		// Code fences: the lines the digest skips are refused inside one too,
+		// and a fence left open is refused at the line that opened it.
+		{"branch inside a fence", minimalSplitPlan("### a\n- Reserve: a/\n```\n- Branch: feat/x\n```\n"), "line 10: a - Branch: line is not allowed"},
+		{"checked box inside a fence", minimalSplitPlan("### a\n- Reserve: a/\n~~~\n- [x] done\n~~~\n"), "line 10: a checked box"},
+		{"progress checklist inside a fence", minimalSplitPlan("### a\n- Reserve: a/\n```\n## Progress checklist\n```\n"), "line 10: a ## Progress checklist section is not allowed"},
+		{"status inside a fence in a feature", minimalSplitPlan("### a\n- Reserve: a/\n```\n- Status: Approved\n```\n"), "line 10: a - Status: or - Approved: line after the header"},
+		{"second status inside a fence in the header", "# t\n- Status: Draft\n```\n- Status: Approved\n```\n## Features\n### a\n- Reserve: a/\n", "line 4: a second - Status: line (the first is on line 2)"},
+		{"second approved inside a fence in the header", "# t\n- Approved: x\n~~~\n- Approved: y\n~~~\n## Features\n### a\n- Reserve: a/\n", "line 4: a second - Approved: line (the first is on line 2)"},
+		{"unclosed fence", minimalSplitPlan("### a\n- Reserve: a/\n\n```sh\n## Usage\n### b\n- Reserve: b/\n"), "line 10: the code fence ``` is never closed"},
+		{"fence of 4 backticks closed by 3", minimalSplitPlan("### a\n- Reserve: a/\n````\n```\n"), "line 9: the code fence ```` is never closed"},
+		{"backtick fence closed by tildes", minimalSplitPlan("### a\n- Reserve: a/\n```\n~~~\n"), "line 9: the code fence ``` is never closed"},
+		{"tilde fence closed by backticks", minimalSplitPlan("### a\n- Reserve: a/\n~~~\n```\n"), "line 9: the code fence ~~~ is never closed"},
+		{"fence closed by a line with text after it", minimalSplitPlan("### a\n- Reserve: a/\n```\n``` more\n"), "line 9: the code fence ``` is never closed"},
+		{"unclosed fence in the header", "# t\n```\n\n## Features\n### a\n- Reserve: a/\n", "line 2: the code fence ``` is never closed"},
+		{"unclosed fence with CRLF", strings.ReplaceAll(minimalSplitPlan("### a\n- Reserve: a/\n```\n## Usage\n"), "\n", "\r\n"), "line 9: the code fence ``` is never closed"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -346,6 +361,140 @@ func TestLoadSplitPlan_AcceptsLinesTheDigestReads(t *testing.T) {
 		edited := strings.Replace(content, line, line+" edited", 1)
 		if PlanDigest([]byte(edited)) == PlanDigest([]byte(content)) {
 			t.Errorf("editing %q did not change the digest", line)
+		}
+	}
+}
+
+// TestLoadSplitPlan_CodeFences: no line of a fenced code block is a heading
+// or a field line. In a feature the block, its fence lines included, is body
+// and the section goes on after it; before the first feature, in another
+// section and in the header it is text, so a fenced `## Features` starts
+// nothing. A fence closes only with a line of its own character, at least as
+// long as its opening run, with nothing after it but spaces and tabs; at most
+// 3 spaces may precede either fence line, and a backtick run with another
+// backtick after it is inline code.
+func TestLoadSplitPlan_CodeFences(t *testing.T) {
+	const usage = "Example:\n\n```sh\n## Usage\n### other\n- Reserve: x/\n- Type: docs\n- Depends on: b\n```\n\nafter the fence"
+	b := SplitFeature{Slug: "b", Type: "feat", Reserve: []string{"b/"}}
+	tests := []struct {
+		name    string
+		content string
+		want    []SplitFeature
+	}{
+		{
+			name:    "backtick fence in a feature, then the next feature",
+			content: minimalSplitPlan("### a\n- Reserve: a/\n\n" + usage + "\n\n### b\n- Reserve: b/\n"),
+			want:    []SplitFeature{{Slug: "a", Type: "feat", Reserve: []string{"a/"}, Body: usage}, b},
+		},
+		{
+			name:    "the same with CRLF lines",
+			content: strings.ReplaceAll(minimalSplitPlan("### a\n- Reserve: a/\n\n"+usage+"\n\n### b\n- Reserve: b/\n"), "\n", "\r\n"),
+			want:    []SplitFeature{{Slug: "a", Type: "feat", Reserve: []string{"a/"}, Body: usage}, b},
+		},
+		{
+			name:    "tilde fence",
+			content: minimalSplitPlan("### a\n- Reserve: a/\n~~~ text\n## Usage\n- Reserve: x/\n~~~\n### b\n- Reserve: b/\n"),
+			want:    []SplitFeature{{Slug: "a", Type: "feat", Reserve: []string{"a/"}, Body: "~~~ text\n## Usage\n- Reserve: x/\n~~~"}, b},
+		},
+		{
+			name:    "fence of 4 backticks holds a fence of 3 and closes only at 4 or more",
+			content: minimalSplitPlan("### a\n- Reserve: a/\n````md\n```\n## Usage\n```\n`````\n### b\n- Reserve: b/\n"),
+			want:    []SplitFeature{{Slug: "a", Type: "feat", Reserve: []string{"a/"}, Body: "````md\n```\n## Usage\n```\n`````"}, b},
+		},
+		{
+			name:    "backtick fence holds tildes, tilde fence holds backticks",
+			content: minimalSplitPlan("### a\n- Reserve: a/\n```\n~~~\n## Usage\n```\n~~~\n```\n### c\n~~~\n### b\n- Reserve: b/\n"),
+			want:    []SplitFeature{{Slug: "a", Type: "feat", Reserve: []string{"a/"}, Body: "```\n~~~\n## Usage\n```\n~~~\n```\n### c\n~~~"}, b},
+		},
+		{
+			name:    "closing fence with spaces and tabs after it, then a section",
+			content: minimalSplitPlan("### a\n- Reserve: a/\n```\n## Usage\n``` \t\n## Notes\n- Reserve: not a field\n"),
+			want:    []SplitFeature{{Slug: "a", Type: "feat", Reserve: []string{"a/"}, Body: "```\n## Usage\n``` \t"}},
+		},
+		{
+			name:    "a fence line with an info string does not close",
+			content: minimalSplitPlan("### a\n- Reserve: a/\n```\n```go\n## Usage\n```\n"),
+			want:    []SplitFeature{{Slug: "a", Type: "feat", Reserve: []string{"a/"}, Body: "```\n```go\n## Usage\n```"}},
+		},
+		{
+			name:    "3 spaces before the fence lines",
+			content: minimalSplitPlan("### a\n- Reserve: a/\n   ```\n## Usage\n   ```\n### b\n- Reserve: b/\n"),
+			want:    []SplitFeature{{Slug: "a", Type: "feat", Reserve: []string{"a/"}, Body: "   ```\n## Usage\n   ```"}, b},
+		},
+		{
+			name:    "4 spaces is no fence",
+			content: minimalSplitPlan("### a\n- Reserve: a/\n    ```\n### b\n- Reserve: b/\n"),
+			want:    []SplitFeature{{Slug: "a", Type: "feat", Reserve: []string{"a/"}, Body: "    ```"}, b},
+		},
+		{
+			name:    "a tab is no fence indentation",
+			content: minimalSplitPlan("### a\n- Reserve: a/\n\t```\n### b\n- Reserve: b/\n"),
+			want:    []SplitFeature{{Slug: "a", Type: "feat", Reserve: []string{"a/"}, Body: "\t```"}, b},
+		},
+		{
+			name:    "inline code is no fence",
+			content: minimalSplitPlan("### a\n- Reserve: a/\n```x``` inline\n``` a`b\n### b\n- Reserve: b/\n"),
+			want:    []SplitFeature{{Slug: "a", Type: "feat", Reserve: []string{"a/"}, Body: "```x``` inline\n``` a`b"}, b},
+		},
+		{
+			name:    "two backticks is no fence",
+			content: minimalSplitPlan("### a\n- Reserve: a/\n``\n### b\n- Reserve: b/\n"),
+			want:    []SplitFeature{{Slug: "a", Type: "feat", Reserve: []string{"a/"}, Body: "``"}, b},
+		},
+		{
+			name:    "fence before the first feature",
+			content: minimalSplitPlan("```\n- Reserve: a/\n### not-a-feature\n```\n### a\n- Reserve: a/\n"),
+			want:    []SplitFeature{{Slug: "a", Type: "feat", Reserve: []string{"a/"}}},
+		},
+		{
+			name: "fence in another section and in the header",
+			content: "# t\n```\n## Features\n### x\n```\n- Status: Draft\n\n## Notes\n\n~~~\n## Features\n### y\n~~~\n\n" +
+				"## Features\n\n### a\n- Reserve: a/\n",
+			want: []SplitFeature{{Slug: "a", Type: "feat", Reserve: []string{"a/"}}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			plan, _, err := loadSplitPlanContent(t, tt.content)
+			if err != nil {
+				t.Fatalf("LoadSplitPlan: %v", err)
+			}
+			assertSplitFeatures(t, plan.Features, tt.want)
+		})
+	}
+	plan, _, err := loadSplitPlanContent(t, "# t\n```\n## Features\n```\n- Status: Draft\n\n## Features\n### a\n- Reserve: a/\n")
+	if err != nil {
+		t.Fatalf("LoadSplitPlan: %v", err)
+	}
+	if plan.Status != "Draft" {
+		t.Errorf("Status = %q, want Draft: a fenced ## line ended the header", plan.Status)
+	}
+}
+
+// TestLoadSplitPlan_FencedBodyIsApproved: the digest reads the lines of a
+// fenced code block like any other, so editing one changes it, and a plan
+// approved with a fence in a feature passes CheckApproved with the whole
+// block in the feature's body.
+func TestLoadSplitPlan_FencedBodyIsApproved(t *testing.T) {
+	const fenced = "```sh\n## Usage\n- Reserve: x/\n```\n"
+	approved := approveSplitPlan(t, strings.Replace(splitPlanFixture, "- [ ] AC1: tokens persist\n", "- [ ] AC1: tokens persist\n\n"+fenced, 1))
+	plan, _, err := loadSplitPlanContent(t, approved)
+	if err != nil {
+		t.Fatalf("LoadSplitPlan: %v", err)
+	}
+	if err := plan.CheckApproved(); err != nil {
+		t.Fatalf("CheckApproved: %v", err)
+	}
+	core, _ := plan.Feature("auth-core")
+	if want := "Objective: add the token store.\n\n- [ ] AC1: tokens persist\n\n" + strings.TrimSuffix(fenced, "\n"); core.Body != want {
+		t.Errorf("auth-core Body = %q, want %q", core.Body, want)
+	}
+	if docs, ok := plan.Feature("auth-docs"); !ok || !slices.Equal(docs.Reserve, []string{"docs/auth/"}) {
+		t.Errorf("expected auth-docs after the fence, got %+v (found %v)", docs, ok)
+	}
+	for _, line := range strings.Split(strings.TrimSuffix(fenced, "\n"), "\n") {
+		if PlanDigest([]byte(strings.Replace(approved, line+"\n", line+" edited\n", 1))) == PlanDigest([]byte(approved)) {
+			t.Errorf("editing the fenced line %q did not change the digest", line)
 		}
 	}
 }
@@ -639,6 +788,7 @@ func TestPlanDigest_MatchesScript(t *testing.T) {
 		"empty":                            "",
 		"only a newline":                   "\n",
 		"blank lines":                      "\n\n\na\n\n",
+		"code fences":                      "# t\n\n## A\n\n```\n## Progress checklist\n- [x] a\n- Branch: b\n```\n\n## B\n\n~~~\n- Status: x\n~~~\n",
 		"split plan fixture":               splitPlanFixture,
 	}
 	files := map[string]string{}

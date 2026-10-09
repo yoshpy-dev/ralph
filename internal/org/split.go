@@ -40,6 +40,12 @@ import (
 // hold them anywhere except the one `- Status:` and one `- Approved:` line of
 // its header: every line that could change after the approval is then
 // covered by the digest.
+//
+// A fenced code block (splitFence) is text: no line in it is a heading or a
+// field line, so a feature's body keeps an example such as `## Usage`
+// whole. The digest does not know about fences, so the lines it skips are
+// refused inside one too, and a fence left open at the end of the file is
+// refused rather than guessing where it ends.
 
 // splitIDPattern is the shape of a split plan id, the file name without
 // `.md`. The id goes into the org's reservation record, so it cannot hold
@@ -88,7 +94,7 @@ type SplitFeature struct {
 	Type      string   // default "feat"
 	Reserve   []string // NormalizeReservePaths output
 	DependsOn []string // slugs of other features of the same plan, nil for none
-	Body      string   // the section without its heading and field lines, leading and trailing blank lines trimmed
+	Body      string   // the section without its heading and field lines (fenced code blocks whole), leading and trailing blank lines trimmed
 }
 
 // SplitPlansDirIn returns the directory that holds the split plans of an
@@ -287,7 +293,9 @@ type splitHeader struct {
 }
 
 // parseSplitPlan parses a split plan's bytes. Lines are split on "\n" and
-// lose one trailing "\r". Errors name the line and are wrapped by
+// lose one trailing "\r". A line of a fenced code block is never a heading
+// or a field line: in a feature it is body, elsewhere it is read as any
+// other text there is. Errors name the line and are wrapped by
 // LoadSplitPlan with the plan's path.
 func parseSplitPlan(data []byte) (*SplitPlan, error) {
 	var (
@@ -297,13 +305,15 @@ func parseSplitPlan(data []byte) (*SplitPlan, error) {
 		inFeatures   bool
 		features     []*splitFeatureDraft
 		cur          *splitFeatureDraft
+		fence        splitFence
 	)
 	for i, raw := range planLines(data) {
 		n, line := i+1, strings.TrimSuffix(raw, "\r")
 		if err := rejectDigestSkippedLine(line); err != nil {
 			return nil, fmt.Errorf("line %d: %w", n, err)
 		}
-		if strings.HasPrefix(line, "## ") {
+		fenced := fence.read(line, n)
+		if !fenced && strings.HasPrefix(line, "## ") {
 			inHeader, cur = false, nil
 			inFeatures = strings.TrimRight(line, " \t") == splitFeaturesHeading
 			if inFeatures && featuresLine != 0 {
@@ -327,6 +337,12 @@ func parseSplitPlan(data []byte) (*SplitPlan, error) {
 		if !inFeatures {
 			continue
 		}
+		if fenced {
+			if cur != nil {
+				cur.bodyLines = append(cur.bodyLines, line)
+			}
+			continue
+		}
 		if rest, ok := strings.CutPrefix(line, "### "); ok {
 			f, err := newSplitFeatureDraft(strings.TrimSpace(rest), n, features)
 			if err != nil {
@@ -345,7 +361,66 @@ func parseSplitPlan(data []byte) (*SplitPlan, error) {
 			return nil, err
 		}
 	}
+	if err := fence.unclosedErr(); err != nil {
+		return nil, err
+	}
 	return finishSplitPlan(header, featuresLine, features)
+}
+
+// splitFence is the fenced code block parseSplitPlan is in, after CommonMark:
+// a line opens one when, after at most 3 spaces, it starts with a run of at
+// least 3 backticks or 3 tildes (a backtick run followed by another backtick
+// on the line is inline code, not a fence). The block ends at a line of the
+// same character, at least as long as that run, after at most 3 spaces and
+// with nothing after it but spaces and tabs. The zero value is outside a
+// fence.
+type splitFence struct {
+	char byte // '`' or '~'; 0 outside a fence
+	run  int  // length of the opening run
+	line int  // line of the opening fence
+}
+
+// read takes line n and reports whether it belongs to a fenced code block:
+// a line that opens one, a line inside one, or the line that closes it.
+func (f *splitFence) read(line string, n int) bool {
+	c, run, rest, ok := fenceRun(line)
+	if f.char != 0 {
+		if ok && c == f.char && run >= f.run && strings.Trim(rest, " \t") == "" {
+			*f = splitFence{}
+		}
+		return true
+	}
+	if !ok || (c == '`' && strings.Contains(rest, "`")) {
+		return false
+	}
+	*f = splitFence{char: c, run: run, line: n}
+	return true
+}
+
+// unclosedErr is the error for a fence still open at the end of the file,
+// nil when there is none.
+func (f *splitFence) unclosedErr() error {
+	if f.char == 0 {
+		return nil
+	}
+	return fmt.Errorf("line %d: the code fence %s is never closed: close it with a line of %d or more %c and nothing else, "+
+		"since the lines after an open fence are not read as headings or fields",
+		f.line, strings.Repeat(string(f.char), f.run), f.run, f.char)
+}
+
+// fenceRun returns the fence character, the length of its run and the rest of
+// the line when line starts, after at most 3 spaces, with at least 3
+// backticks or 3 tildes.
+func fenceRun(line string) (c byte, run int, rest string, ok bool) {
+	s := strings.TrimLeft(line, " ")
+	if len(line)-len(s) > 3 || s == "" || (s[0] != '`' && s[0] != '~') {
+		return 0, 0, "", false
+	}
+	rest = strings.TrimLeft(s, s[:1])
+	if run = len(s) - len(rest); run < 3 {
+		return 0, 0, "", false
+	}
+	return s[0], run, rest, true
 }
 
 // rejectDigestSkippedLine refuses the lines PlanDigest skips or rewrites
