@@ -86,7 +86,11 @@ function find_str(p, str,    L, r, k) {
 # id of that command. HPQ[ctx, 1..HPN[ctx]] are the heredocs opened in ctx
 # whose bodies are not read yet (their numbers h, the index of HDL, HQ and
 # the other heredoc arrays, set in lex_redir); read_heredocs reads them at
-# the next newline of ctx.
+# the next newline of ctx. The pipeline being assembled in ctx (set in
+# end_cmd, reset by pipe_close): PLC[ctx, 1..PLN[ctx]] are the ids of its
+# commands that end with |, STC[ctx, 1..STN[ctx]] the ids of its commands
+# at the top level, staged for pipe_decide, and PLID[ctx] the id of the
+# pipeline (CPL[cid] of each command in it).
 function new_ctx(d) {
   if (d > MAXD) deny("too_deep")
   CTX++
