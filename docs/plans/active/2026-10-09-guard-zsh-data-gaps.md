@@ -128,7 +128,11 @@ None (guard の 1 ファイルとその template の写し、テスト、tech-de
 - [x] Implementation started
   - S1 完了(139d6627、implementer/opus): guard の 5 か所(`lex_dollar` の `xnote`、`msg_check` の `WR` の検査、`lex_hd` の HSUB、DATACMD から `stat`、NOEXEC に `tr`)とコメント、テスト。テスト 1946 件(B 節 44 件、D 節 16 件を足した)。既存のテストで判定が変わったものはない。6 つの mutation はどれも AC の形の判定を変える。implementer が範囲外の止めすぎを 1 つ報告した: 単一引用符の中に `${` を文字として書き、見張りの語も含むメッセージ(`git commit -m 'mention ${HOME}; never sudo ls'`)が deny になる(直す前は none、旧版も deny)。`WR` を見る plan の直し方による。語ごとの印で見分ける直し方は plan の範囲外なので、tech-debt に記録した
   - S2 完了(inline、docs だけ): tech-debt の「Findings of the last `/cross-review` run」の行を解消済みにし、この修正で増える止めすぎ(メッセージの単一引用符の中の `${`、ヒアドキュメントの本文の `${…}`、`${…}` の中の見張りの語、`stat` で始まる呼び出し)を新しい行に書いた。どれも旧版も deny で、probe で確かめた
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+  - self-review(ae957fa9、reviewer): Merge yes、LOW 3 件(コメントと tech-debt の言い回し)。e77e2937 で直した
+  - verify(d4c7efd4、verifier): pass。AC1〜AC4 と AC6 を確認(AC5 は /test)。Test plan の「AC1 の 5 形」は古い記述で、AC1 は e40087ef で 8 項目 11 形に広がっている。テストは 11 形とも入っていて、Test plan は digest の範囲なので直さない
+  - test(349d838c、tester): pass。guard のテスト 1948 件、0 失敗(macOS、ubuntu の mawk+jq、gawk+jq。mawk で jq なしは 971 件、0 失敗)。mutation は依頼の 7 個がすべて赤。tester が足した 3 個のうち 1 個(`msg_check` の 2 つの検査の順序の入れ替え)は全件が緑のままで、8e7bfbae の 1 行で赤にした
+  - sync-docs(`docs/reports/sync-docs-2026-10-09-guard-zsh-data-gaps.md`、doc-maintainer): tech-debt の 3 行を直した。guard の限界の行は `stat` を DATACMD の外の例に足し、`${…}` の範囲がデータ区間でないことと、(d) の行数(guard 1487 行、awk 1280 行)、発火した (d)・(e) の Trigger の持ち越しを書いた。テストの穴の行は、この plan が固定した形と件数(1948/0、mawk で jq なしは 971/0)、固定していない限界が残ることを書いた。新しい止めすぎの行は `\${` の形を probe した結果に直した。ほかの文書に DATACMD・NOEXEC・データ区間の記述はなかった。digest は `7a6840f0ccaf` のまま
+- [x] Review artifact created
+- [x] Verification artifact created
+- [x] Test artifact created
 - [ ] PR created
