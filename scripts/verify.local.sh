@@ -209,8 +209,11 @@ run_static_checks() {
     run "sh -n $f" sh -n "$f"
   done
   # The guard's awk program lives in .awk files that shellcheck and sh -n do
-  # not read; parse them together as the guard does.
+  # not read; parse them together as the guard does. A tree without the guard
+  # script (a test fixture) is skipped, like the .sh loops above; with the
+  # script present, a missing .awk file fails the step.
   for d in .claude/hooks templates/base/.claude/hooks; do
+    [ -f "$d/pre_bash_guard.sh" ] || continue
     run "awk parse of the guard in $d" check_guard_awk "$d"
   done
 
