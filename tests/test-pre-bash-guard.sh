@@ -87,12 +87,13 @@
 #      that lacks pre_bash_guard_rules.awk. The three .awk files, read with
 #      awk -f in the guard's order, parse as one program (no input and ls:
 #      exit 0 and no output; sudo ls: the rule name sudo). The DATACMD
-#      invariant: no name of the datacmd_list line of
-#      pre_bash_guard_rules.awk is a reserved word (listed in the test) or
-#      a wrapper that function cmd_pos of pre_bash_guard_commands.awk steps
-#      past (its nm == "..." names), since only the allowlist drops the data
-#      regions of compound commands and of exec with a redirection; a list
-#      that cannot be read fails the check
+#      invariant: no name in DATACMD, read at run time from the three .awk
+#      files, is a reserved word (listed in the test) or a wrapper that
+#      function cmd_pos of pre_bash_guard_commands.awk steps past (its
+#      nm == "..." names), since the allowlist is what drops the data
+#      regions of a command that starts with a reserved word and of exec
+#      with a redirection; awk failing or a list that cannot be read fails
+#      the check
 #   G. AC7: the old guard (tests/fixtures/guard-1c4cea5a/, the version
 #      before this rewrite) decides the corpus of A's deny rows, B (with the
 #      self-review kinds), and C on each path, and is compared with the new
@@ -1486,21 +1487,32 @@ for c in '' ls 'sudo ls'; do
   fi
 done
 
-# The DATACMD invariant. The allowlist in end_cmd is the only rule that
-# drops the data regions of a compound command (if, for, case, { ...) and of
-# an exec with a redirection: their first word is not in DATACMD. So no
-# DATACMD name may be a reserved word or a wrapper that cmd_pos steps past.
-# The names are read from the code: DATACMD from the one
-# split("...", datacmd_list, " ") line of pre_bash_guard_rules.awk, the
-# wrappers from the nm == "..." comparisons inside function cmd_pos of
-# pre_bash_guard_commands.awk. When either cannot be read, the check fails.
-# The reserved words are listed here (the guard keeps no list of them).
-rules_awk="$REPO_ROOT/.claude/hooks/pre_bash_guard_rules.awk"
+# The DATACMD invariant. For a command that starts with a reserved word
+# (if, for, while, until, select, case, { ...) and for an exec with a
+# redirection, the allowlist in end_cmd is what drops the data regions:
+# their first word is not in DATACMD. Some forms meet the ( or ) rule of
+# lex_cmds: a case clause meets the ) rule as well, by the ) after its
+# pattern, and a subshell meets only the ( rule, by its opening (. A brace
+# group, and an if, for, while, until or select with no ( or ) at the top
+# level, meet only the allowlist. So no DATACMD name may be a reserved word
+# or a wrapper that cmd_pos steps past.
+# DATACMD is read at run time, so a name added to it in any way is read:
+# awk runs the three .awk files with guard_awk and then one more file,
+# written to $workdir, whose BEGIN prints the keys of DATACMD and exits. It
+# runs after the guard's BEGIN, which fills DATACMD, and with no input the
+# guard's END prints nothing (the input [] case above), so the output is the
+# names, one per line. The wrappers are read from the nm == "..."
+# comparisons inside function cmd_pos of pre_bash_guard_commands.awk (they
+# are code, not data). When awk exits non-zero or either list is empty, the
+# check fails. The reserved words are listed here (the guard keeps no list
+# of them).
 commands_awk="$REPO_ROOT/.claude/hooks/pre_bash_guard_commands.awk"
 read -r -a reserved_words <<< 'if then elif else fi for while until do done case esac select function { } ! [[ ]] time coproc'
-label="F. DATACMD invariant: no name in datacmd_list (pre_bash_guard_rules.awk) is a reserved word or a wrapper that cmd_pos steps past"
-datacmd_count="$(grep -c 'split("[^"]*", datacmd_list, " ")' "$rules_awk" 2>/dev/null || true)"
-datacmd_names="$(sed -n 's/.*split("\([^"]*\)", datacmd_list, " ").*/\1/p' "$rules_awk" 2>/dev/null)"
+label="F. DATACMD invariant: no name in DATACMD (read at run time from the three .awk files) is a reserved word or a wrapper that cmd_pos steps past"
+datacmd_dump="$workdir/datacmd-dump.awk"
+printf '%s\n' 'BEGIN { for (k in DATACMD) print k; exit }' > "$datacmd_dump"
+datacmd_names="$(LC_ALL=C awk "${guard_awk[@]}" -f "$datacmd_dump" < /dev/null 2> "$workdir/datacmd-dump.err")"
+datacmd_rc=$?
 wrapper_names="$(awk '
   /^function cmd_pos\(/ { inside = 1 }
   inside {
@@ -1512,15 +1524,18 @@ wrapper_names="$(awk '
   }
   inside && /^}/ { exit }
 ' "$commands_awk" 2>/dev/null)"
-read -r -a datacmd_words <<< "$datacmd_names"
+datacmd_words=()
+while IFS= read -r w; do
+  [ -n "$w" ] && datacmd_words+=("$w")
+done <<< "$datacmd_names"
 wrapper_words=()
 while IFS= read -r w; do
   [ -n "$w" ] && wrapper_words+=("$w")
 done <<< "$wrapper_names"
-if [ "$datacmd_count" != 1 ]; then
-  record_fail "$label (the split(\"...\", datacmd_list, \" \") line is found $datacmd_count times in $rules_awk, not once)"
+if [ "$datacmd_rc" -ne 0 ]; then
+  record_fail "$label (awk exited $datacmd_rc reading DATACMD from the three .awk files: $(head -c 300 "$workdir/datacmd-dump.err"))"
 elif [ "${#datacmd_words[@]}" -eq 0 ]; then
-  record_fail "$label (no DATACMD name read from $rules_awk)"
+  record_fail "$label (no DATACMD name read from the three .awk files)"
 elif [ "${#wrapper_words[@]}" -eq 0 ]; then
   record_fail "$label (no wrapper name read from function cmd_pos in $commands_awk)"
 else
@@ -1536,7 +1551,7 @@ else
   if [ -z "$offending" ]; then
     record_pass "$label (${#datacmd_words[@]} names, ${#wrapper_words[@]} wrappers, ${#reserved_words[@]} reserved words)"
   else
-    record_fail "$label (datacmd_list has:$offending)"
+    record_fail "$label (DATACMD has:$offending)"
   fi
 fi
 

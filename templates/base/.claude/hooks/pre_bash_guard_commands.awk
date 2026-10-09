@@ -237,10 +237,10 @@ function add_data(s, e,    k, b, b1) {
 # is set when a top-level command has a first word that is not a bare data
 # command or git (the allowlist in end_cmd, which also covers a compound
 # command such as if, for, case or { and an exec with a redirection), has
-# only redirections, has a ( or ) at the top level (the ( rule of lex_cmds:
-# a subshell, or the () of a function definition), has a heredoc delimiter
-# with a dollar sign or a backtick, or when a backslash-newline appears
-# anywhere.
+# only redirections, has a ( or ) at the top level (the ( and ) rules of
+# lex_cmds: a subshell, the ) after the pattern of a case clause, or the ()
+# of a function definition), has a heredoc delimiter with a dollar sign or a
+# backtick, or when a backslash-newline appears anywhere.
 function in_data(a, b,    bk, j, k) {
   if (NODATA) return 0
   bk = int((a - 1) / BKW)

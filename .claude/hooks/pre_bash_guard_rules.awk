@@ -404,10 +404,14 @@ BEGIN {
   # the same with the subscript of NAME.
   # No reserved word (if, for, case, {, ...) and no wrapper that cmd_pos
   # steps past (env, command, exec, nohup, time, nice, stdbuf, timeout,
-  # xargs) may be listed here: the allowlist in end_cmd is the only rule
-  # that drops the data regions of a compound command and of an exec with a
-  # redirection, and it does so because their first word is not in this
-  # list. tests/test-pre-bash-guard.sh checks this.
+  # xargs) may be listed here. For a command that starts with a reserved
+  # word, and for an exec with a redirection, the allowlist in end_cmd is
+  # what drops the data regions, because their first word is not in this
+  # list. Some forms meet the ( or ) rule of lex_cmds: a case clause meets
+  # the ) rule as well, by the ) after its pattern, and a subshell meets
+  # only the ( rule, by its opening (. A brace group, and an if, for, while,
+  # until or select with no ( or ) at the top level, meet only the
+  # allowlist. tests/test-pre-bash-guard.sh checks this.
   nx = split("echo printf cat head tail wc cut tr grep egrep fgrep zgrep rg ls diff cd true false which type", datacmd_list, " ")
   for (; nx > 0; nx--) DATACMD[datacmd_list[nx]] = 1
   SQ = sprintf("%c", 39)

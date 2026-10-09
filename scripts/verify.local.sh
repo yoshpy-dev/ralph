@@ -4,8 +4,8 @@
 #
 # Honors HARNESS_VERIFY_MODE to match the documented split in
 # docs/quality/quality-gates.md:
-#   - static: shellcheck, sh -n, jq validity, template sync, tech-debt
-#             plan references
+#   - static: shellcheck, sh -n, the awk parse of the guard, jq validity,
+#             template sync, tech-debt plan references
 #   - test  : every tests/test-*.sh (a file without the exec bit, in the
 #             working tree or the git index, counts as a failure)
 #   - all   : everything (default; what run-verify.sh sets)
