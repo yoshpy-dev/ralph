@@ -86,10 +86,32 @@ e0c493b chore: scaffold
 
 確認のあと、外から `ralph org disband --org-id hello` を打った(3 席とも stopped、workspace は 0 個)。隔離サーバーは `herdr server stop` で止めた。
 
+## Run 4: 既定でない台帳で、leader が `--state-dir` を付ける(2026-10-10)
+
+cross-review の cycle 1 の ACTION_REQUIRED #1(leader に台帳の場所が渡らない)の直し(d49bbc34、07d38e6d、9c1d447f)を確かめた。バイナリは 9a2dc5ef をビルドしたもの。Run 3 と同じ形の隔離サーバー(`/tmp/rs6`、`SHELL=/bin/bash`)と、新しく scaffold した repo(`/tmp/rs6/repo`、remote なし)を使った。台帳は repo の外の `/tmp/rs6/ledger` に置き、分割計画もその `splits/s6.md` に置いた。
+
+```
+$ ralph org start --state-dir /tmp/rs6/ledger --plan /tmp/rs6/ledger/splits/s6.md --feature hello --driver claude --model sonnet
+spawned seat "leader" (org_id=hello driver=claude model=sonnet pane_id=w1:p2 dry_run=false)
+worktree: /private/tmp/rs6/repo/.claude/worktrees/org-hello
+branch: docs/hello
+```
+
+leader は初めて開くフォルダの信頼の確認で止まったので、`herdr pane send-keys` で「Yes, I trust this folder」を選んだ。そのあとは人の操作なしに進んだ。
+
+- `ralph org status --state-dir /tmp/rs6/ledger --org-id hello` に、leader(sonnet)、implementer と reviewer(haiku)の 3 席が `spawned (active)` で並び、`reserved:` と `feature: s6/hello ...` の行が出た。3 席の `spawned` の `worktree` は、どれも機能の worktree の絶対パスだった
+- 既定の台帳は作られなかった。`/tmp/rs6/repo/.harness/state/org/` も、worktree の中の `.harness/state/org/` もなかった。leader が `--state-dir` を付けずに `ralph org spawn` を打っていれば、座席はどちらかに記録されていた
+- leader は Run 3 と同じ順に、計画のコミット(58e83a8)、implementer の `docs/hello.md`(864cb22)、reviewer の GATE: pass、座席の stop、report と計画の archive のコミット(d600e37)、secret scan、push(remote がないので失敗)まで進め、失敗を pane に書いて止まった
+- worktree に残った `docs/reports/org-manifest-hello-2026-10-09.md` には 3 席が並んでいた。leader の `ralph org report` も `--state-dir` の台帳を読んだ
+- reviewer のレポートは、Run 3 と同じく `wip: checkpoint before session end`(b884147)でコミットされた
+
+確認のあと、外から `ralph org disband --state-dir /tmp/rs6/ledger --org-id hello` を打ち(workspace は 0 個)、隔離サーバーを止めて `/tmp/rs6` を消した。
+
 ## 結論
 
 - `ralph org start --plan --feature` は、機能の worktree とブランチを作り、その中に headless の leader を立てる。leader は implementer と reviewer を 1 席ずつ立て、台帳は main の 1 つに集まる(AC14)
 - 相対の `--cwd` は herdr サーバーの cwd で解決されていた。af138af6 で、打った場所を基準に絶対パスにするよう直した
+- 既定でない台帳で start しても、leader は task の `- 台帳:` の行に従って `ralph org` のコマンドに `--state-dir` を付け、座席と report は同じ台帳を使った(Run 4)
 - 残すもの: (1) start を打った ralph と pane の中の ralph の版が違うと台帳が分かれうる。(2) reviewer のレポートが Stop hook の `wip:` コミットで入る
 - 確かめていないもの: push と `gh pr create` が通る場合(remote のある repo)。codex の leader
 - 副作用: Claude Code のフォルダの信頼(run 1 で `/private/tmp/rs5/repo/.claude/worktrees/org-hello` を信頼した)が利用者の Claude Code の設定に残る
