@@ -517,7 +517,7 @@ function read_heredocs(ctx,    k) {
 # line equal to the delimiter (after leading tabs for <<-), or to the end
 # of the text. P is left after the delimiter line. At the top level the
 # span of the body is kept (HB0/HB1) for the data regions.
-function read_body(h,    d, dl, b0, ls, le, t, body, joined, bs, q, cmp, p2) {
+function read_body(h,    d, dl, b0, ls, le, t, body, joined, bs, cmp, p2) {
   d = HDL[h]
   dl = length(d)
   b0 = P
@@ -530,18 +530,14 @@ function read_body(h,    d, dl, b0, ls, le, t, body, joined, bs, q, cmp, p2) {
     # backslashes is joined with the next line before the terminator
     # comparison (bash, zsh). A body with such a join gets no data region.
     if (!HQ[h] && le <= N) {
-      bs = 0
-      q = le - 1
-      while (q >= ls && at(q) == BS) { bs++; q-- }
+      bs = trailing_backslashes(ls, le)
       if (bs % 2 == 1) {
         joined = 1
         cmp = text(ls, le - 1)
         p2 = le + 1
         while (1) {
           le = find(p2, "\n")
-          bs = 0
-          q = le - 1
-          while (q >= p2 && at(q) == BS) { bs++; q-- }
+          bs = trailing_backslashes(p2, le)
           if (le <= N && bs % 2 == 1) { cmp = cmp text(p2, le - 1); p2 = le + 1 }
           else { cmp = cmp text(p2, le); break }
         }
@@ -557,6 +553,15 @@ function read_body(h,    d, dl, b0, ls, le, t, body, joined, bs, q, cmp, p2) {
   }
   if (DCTX[HX[h]] && !joined && !HBSNL[h]) { HDZ[h] = 1; HB0[h] = b0; HB1[h] = ls }
   heredoc_done(h, body)
+}
+# trailing_backslashes(a, e): the number of backslashes in a row that end
+# just before position e (at e - 1, e - 2, ...), not reading before
+# position a. read_body uses it on the line from a that ends at e.
+function trailing_backslashes(a, e,    q, cnt) {
+  cnt = 0
+  q = e - 1
+  while (q >= a && at(q) == BS) { cnt++; q-- }
+  return cnt
 }
 # lstrip_tabs(s): s without its leading tabs (for <<- delimiter matching).
 function lstrip_tabs(s,    i) {

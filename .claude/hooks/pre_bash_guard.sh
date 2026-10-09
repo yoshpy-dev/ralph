@@ -125,20 +125,22 @@
 #      assignment, a wrapper such as env, command, sh, nice, builtin or exec,
 #      a path, a variable or a substitution) or a command of only redirections
 #      drops every data region of the whole command, and the previous guard's
-#      rules decide. The other NODATA triggers are a group or compound
-#      structure at the top level (a subshell (...), a brace group { ...; }, a
-#      reserved word such as if, for or case in command position), an exec
-#      with a redirection, a heredoc whose delimiter word has a dollar sign or
-#      a backtick (the lexer may read it differently from the shell), and a
-#      backslash-newline anywhere in the command (bash and dash remove it
-#      before reading, even inside double quotes). The backslash-newline rule
-#      does not look at quoting, so one that is only text (inside single
-#      quotes, at the end of a line of a quoted heredoc body or a comment,
-#      after an escaped backslash) also drops them, as the previous guard
-#      denied those commands too. A commit message passed in the recommended
-#      heredoc form therefore passes only when every command in the same Bash
-#      call starts with a data command or git (in practice: run git commit as
-#      a command of its own) and no line of the call ends in a backslash.
+#      rules decide. This also covers a compound command at the top level
+#      (its first word is a reserved word such as if, for or case, or the {
+#      of a brace group { ...; }) and an exec with a redirection, since their
+#      first word is neither a data command nor git. The other NODATA
+#      triggers are a ( or ) at the top level (a subshell (...)), a heredoc
+#      whose delimiter word has a dollar sign or a backtick (the lexer may
+#      read it differently from the shell), and a backslash-newline anywhere
+#      in the command (bash and dash remove it before reading, even inside
+#      double quotes). The backslash-newline rule does not look at quoting,
+#      so one that is only text (inside single quotes, at the end of a line
+#      of a quoted heredoc body or a comment, after an escaped backslash)
+#      also drops them, as the previous guard denied those commands too. A
+#      commit message passed in the recommended heredoc form therefore passes
+#      only when every command in the same Bash call starts with a data
+#      command or git (in practice: run git commit as a command of its own)
+#      and no line of the call ends in a backslash.
 # Not covered: anything only known at run time (variables such as $cmd,
 # aliases, functions, git aliases, scripts read from a file, remote commands
 # such as ssh host '...'), and shell syntax beyond the above: case
@@ -177,7 +179,7 @@ emit_deny() {
 # globals are shared across the files: pre_bash_guard_lex.awk (text access
 # and lexing), pre_bash_guard_commands.awk (simple-command assembly and data
 # regions) and pre_bash_guard_rules.awk (rule judgement, the sentinel, BEGIN
-# with the command lists NOEXEC, DATACMD and RESW, and END). This script,
+# with the command lists NOEXEC and DATACMD, and END). This script,
 # lib_json.sh and the three .awk files must be installed together. awk
 # prints the name of the first rule that denies, or nothing. Its exit
 # status goes to awk_status (the status of the assignment is that of the

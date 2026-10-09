@@ -1,6 +1,6 @@
 # pre_bash_guard_rules.awk holds the "Rule judgement", "The sentinel" and
 # "Main" sections of the awk program of pre_bash_guard.sh; Main has BEGIN
-# (with the command lists NOEXEC, DATACMD and RESW), the action that
+# (with the command lists NOEXEC and DATACMD), the action that
 # collects the input, and END. How awk reads it together with the other two
 # .awk files is in the comment above the awk call in pre_bash_guard.sh.
 
@@ -402,12 +402,14 @@ BEGIN {
   # and [, whose -v in zsh and bash 5 evaluates a subscript such as
   # arr[$(cmd)], nor stat, whose -A NAME in zsh (the zsh/stat module) does
   # the same with the subscript of NAME.
+  # No reserved word (if, for, case, {, ...) and no wrapper that cmd_pos
+  # steps past (env, command, exec, nohup, time, nice, stdbuf, timeout,
+  # xargs) may be listed here: the allowlist in end_cmd is the only rule
+  # that drops the data regions of a compound command and of an exec with a
+  # redirection, and it does so because their first word is not in this
+  # list. tests/test-pre-bash-guard.sh checks this.
   nx = split("echo printf cat head tail wc cut tr grep egrep fgrep zgrep rg ls diff cd true false which type", datacmd_list, " ")
   for (; nx > 0; nx--) DATACMD[datacmd_list[nx]] = 1
-  # Reserved words in command position, and the brace-group words, that make
-  # a top-level command a compound one with no data region.
-  nx = split("if then elif else fi for while until do done case esac select function { }", resw_list, " ")
-  for (; nx > 0; nx--) RESW[resw_list[nx]] = 1
   SQ = sprintf("%c", 39)
   DQ = "\""
   BS = "\\"
@@ -431,7 +433,7 @@ BEGIN {
   SPECIAL_PARAMS = "@*?!$-"
   RE_NOTNAME = "[^A-Za-z0-9_]"
   CTX = CIDN = PLSER = QN = QBYTES = HN = RLVL = DN = 0
-  MAIN = DATA_OK = CUR_H = J_I = NODATA = EXEC_SEEN = 0
+  MAIN = DATA_OK = CUR_H = J_I = NODATA = 0
   J_NM = ""
 }
 { IN = (NR == 1) ? $0 : IN "\001" $0 }

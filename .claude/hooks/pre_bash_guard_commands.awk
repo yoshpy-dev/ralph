@@ -62,19 +62,18 @@ function end_cmd(ctx, sep,    cid) {
     if (sep != "nl" && sep != "|") pipe_close(ctx)
     return
   }
-  # A reserved word in command position or a brace group at the top level is
-  # a compound command the lexer cannot follow; it drops every data region.
-  if (DCTX[ctx] && WN[ctx] > 0 && (WR[ctx, 1] in RESW)) NODATA = 1
   cid = CUR[ctx]
   judge(ctx, cid, sep)
-  # exec with a redirection changes the current shell fds, so what a later
-  # command writes may be run; drop every data region.
-  if (DCTX[ctx] && EXEC_SEEN && RN[ctx] > 0) NODATA = 1
   # The allowlist: a data region exists only when every top-level command is
   # known to be a pure data reader. A command whose first word is not a bare
   # data command or git (an assignment, a wrapper such as env or command, a
   # path, a variable, or any other name), or that has only redirections,
-  # drops every data region of the whole command.
+  # drops every data region of the whole command. Among the commands it
+  # drops are a compound command (its first word is a reserved word such as
+  # if, for, case or {), which the lexer cannot follow, and an exec with a
+  # redirection, which changes the fds of the current shell so that what a
+  # later command writes may be run: their first word is neither a data
+  # command nor git.
   if (DCTX[ctx] && !data_first_ok(ctx)) NODATA = 1
   if (DCTX[ctx]) { stage_note(ctx, cid); STC[ctx, ++STN[ctx]] = cid }
   if (sep == "|") { PLC[ctx, ++PLN[ctx]] = cid; CPL[cid] = PLID[ctx] }
@@ -106,7 +105,8 @@ function pipe_close(ctx) { PLN[ctx] = 0; STN[ctx] = 0; PLID[ctx] = ++PLSER }
 # variable ($(x), $CMD, ${x:-echo}) does not match; and a command of only
 # redirections has no first word. This first word is read before
 # assignments and wrappers are skipped, so env, command, nice, builtin,
-# exec, sh, an assignment, ! and any other name give 0.
+# exec, sh, an assignment, !, a reserved word (if, for, {) and any other
+# name give 0.
 function data_first_ok(ctx,    v) {
   if (WN[ctx] < 1) return 0
   v = WV[ctx, 1]
@@ -115,14 +115,10 @@ function data_first_ok(ctx,    v) {
 }
 
 # cmd_pos(ctx): the index of the command-name word, or 0 when there is none
-# (or the command runs nothing, as command -v). It also sets EXEC_SEEN: 0
-# at its start, 1 when it steps past an exec (also when it then returns 0,
-# as for exec >log). judge calls it, and end_cmd reads EXEC_SEEN after
-# judge returns (the exec rule).
+# (or the command runs nothing, as command -v or exec >log). judge calls it.
 function cmd_pos(ctx,    i, n, r, nm) {
   n = WN[ctx]
   i = 1
-  EXEC_SEEN = 0
   while (i <= n) {
     r = WR[ctx, i]
     if (r == "if" || r == "then" || r == "else" || r == "elif" || r == "do" || r == "while" || r == "until" || r == "!" || r == "{" || r == "}") { i++; continue }
@@ -131,7 +127,7 @@ function cmd_pos(ctx,    i, n, r, nm) {
     nm = cname(ctx, i)
     if (nm == "env") i = skip_env(ctx, i + 1)
     else if (nm == "command") i = skip_command(ctx, i + 1)
-    else if (nm == "exec") { EXEC_SEEN = 1; i = skip_opts(ctx, i + 1, "a", "") }
+    else if (nm == "exec") i = skip_opts(ctx, i + 1, "a", "")
     else if (nm == "nohup") i = skip_opts(ctx, i + 1, "", "")
     else if (nm == "time") i = skip_opts(ctx, i + 1, "fo", " --format --output ")
     else if (nm == "nice") i = skip_opts(ctx, i + 1, "n", " --adjustment ")
@@ -239,9 +235,12 @@ function add_data(s, e,    k, b, b1) {
 # in_data(a, b): 1 when S[a, b) lies inside one data span. When NODATA is
 # set the command has no data region at all and the sentinel rules decide. It
 # is set when a top-level command has a first word that is not a bare data
-# command or git, has only redirections, is a group or compound command, is an
-# exec with a redirection, has a heredoc delimiter with a dollar sign or a
-# backtick, or when a backslash-newline appears anywhere.
+# command or git (the allowlist in end_cmd, which also covers a compound
+# command such as if, for, case or { and an exec with a redirection), has
+# only redirections, has a ( or ) at the top level (the ( rule of lex_cmds:
+# a subshell, or the () of a function definition), has a heredoc delimiter
+# with a dollar sign or a backtick, or when a backslash-newline appears
+# anywhere.
 function in_data(a, b,    bk, j, k) {
   if (NODATA) return 0
   bk = int((a - 1) / BKW)
