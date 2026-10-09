@@ -149,11 +149,13 @@
 # data regions), brace expansion ({su,}do), pathname
 # expansion (?udo, [s]udo), and the hex and octal escapes of $'...' (only
 # \n, \t and \r are decoded). The lexer misses those; the sentinel sees
-# only the text as written. Shell state set up by an earlier command is
-# invisible the same way a variable is: a function named like a data command,
-# or an exec redirection done in an earlier command, is not seen when the next
-# command is judged. So are shell options set in start-up files (with zsh
-# cdablevars, cd looks a non-directory argument up as a variable). Broken
+# only the text as written. printf reads its words as written (item 6(a)),
+# so a printf with a $'...' word, which holds a $, is no data command. Shell
+# state set up by an earlier command is invisible the same way a variable
+# is: a function named like a data command, or an exec redirection done in
+# an earlier command, is not seen when the next command is judged. So are
+# shell options set in start-up files (with zsh cdablevars, cd looks a
+# non-directory argument up as a variable). Broken
 # input (an unclosed quote or parenthesis, a heredoc without its end line)
 # still exits 0, with or without a deny.
 set -eu

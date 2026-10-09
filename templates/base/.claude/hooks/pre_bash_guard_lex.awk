@@ -83,7 +83,10 @@ function find_str(p, str,    L, r, k) {
 # value and subst flag) and RMISS (no target), indexed [ctx, 1..RN[ctx]].
 # XS/XE[ctx, 1..XN[ctx]] are the spans of its redirections and
 # substitutions, and POUT[ctx] is 1 when it has a >(...). CUR[ctx] is the
-# id of that command.
+# id of that command. HPQ[ctx, 1..HPN[ctx]] are the heredocs opened in ctx
+# whose bodies are not read yet (their numbers h, the index of HDL, HQ and
+# the other heredoc arrays, set in lex_redir); read_heredocs reads them at
+# the next newline of ctx.
 function new_ctx(d) {
   if (d > MAXD) deny("too_deep")
   CTX++
@@ -474,11 +477,17 @@ function lex_redir(ctx, rs,    c, c2, op, s, k) {
   if (op == "<<" || op == "<<-") {
     HN++
     HDL[HN] = LW_VAL
-    # A delimiter word with a dollar sign or a backtick may be read
-    # differently by the shell than by this lexer, which decodes only the
-    # \n \t \r of an ANSI-C quote and expands no $"...", ${...} or
-    # substitution; the real delimiter can end the body on an earlier line.
-    # Drop every data region of the command then.
+    # A delimiter word with a dollar sign or a backtick drops every data
+    # region of the command. The shells read most such words as written, as
+    # this lexer does: bash, zsh and dash take ${x} and $x literally, and
+    # bash and zsh a word in backticks (dash reports a syntax error). Two
+    # forms are read differently: an ANSI-C quote with an escape other than
+    # \n \t \r, which the lexer reads as the character after the backslash
+    # ($SQ\x45SQ is E to bash and zsh, x45 here), and $"...", which the lexer
+    # and bash read as the quoted text and zsh and dash as a $ before it.
+    # The shell can then end the body on a line before the one the lexer
+    # finds, and the lines between are commands. The rule covers every $
+    # and backtick, more than those two forms.
     if (index(LW_RAW, "$") || index(LW_RAW, BQ)) NODATA = 1
     # A backslash-newline in the delimiter word is removed before tokenizing
     # (cat <<EO\<newline>F is the unquoted delimiter EOF), so it does not

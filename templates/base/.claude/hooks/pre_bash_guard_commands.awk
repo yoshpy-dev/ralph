@@ -95,9 +95,13 @@ function end_cmd(ctx, sep,    cid) {
 function pipe_close(ctx) { PLN[ctx] = 0; STN[ctx] = 0; PLID[ctx] = ++PLSER }
 
 # data_first_ok(ctx): 1 when the command being assembled may give a data
-# region. Its first word, with quotes removed (the value, so "echo", \echo
-# and e\cho are echo as the shell sees them), must be a bare DATACMD name or
-# git. A word with a slash does not qualify, even when its basename is a
+# region. Its first word, with quotes removed as this lexer reads it (the
+# value, so "echo", \echo and e\cho are echo), must be a bare DATACMD name or
+# git. That value is what the shell sees, except in an ANSI-C quote with an
+# escape other than \n \t \r, which lex_ansi reads as the character after
+# the backslash: $SQ\x65choSQ is echo to the shell and x65cho here (no
+# DATACMD name), while $SQ\echoSQ is echo here and an ESC and cho to bash
+# and zsh. A word with a slash does not qualify, even when its basename is a
 # DATACMD (/bin/echo and ./echo may be any program); a value that still holds
 # a substitution or a variable ($(x), $CMD, ${x:-echo}) does not match; and a
 # command of only redirections has no first word. This first word is read
@@ -111,7 +115,10 @@ function data_first_ok(ctx,    v) {
 }
 
 # cmd_pos(ctx): the index of the command-name word, or 0 when there is none
-# (or the command runs nothing, as command -v).
+# (or the command runs nothing, as command -v). It also sets EXEC_SEEN: 0
+# at its start, 1 when it steps past an exec (also when it then returns 0,
+# as for exec >log). judge calls it, and end_cmd reads EXEC_SEEN after
+# judge returns (the exec rule).
 function cmd_pos(ctx,    i, n, r, nm) {
   n = WN[ctx]
   i = 1
