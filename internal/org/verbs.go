@@ -1004,6 +1004,12 @@ func (o *Org) stopSeatPane(p StopParams, paneID string) (ctrlCNote, paneNote str
 // would skip it. After an unconfirmed pane or a failed close, unless force,
 // it therefore appends a compensating `spawned` for that seat
 // (reactivateSeat), and the error says the seat is recorded active again.
+// When the stop was part of a disband (Disband defers the caller's pane when
+// it lies outside the org's workspace), that `disbanded` also released the
+// org's reservation, so it appends the reservation again too (reserveAgain,
+// the same rule as in CloseDeferredSelfWorkspace); after an ordinary stop
+// the org has no `disbanded` after its latest start, and nothing about the
+// reservation is written or reported.
 // It decides that from the manifest read again under the manifest lock
 // (compensateUnderLock), not from the copy it read before the herdr calls:
 // when the seat has a newer state event by then (it was spawned again in
@@ -1039,6 +1045,7 @@ func (o *Org) CloseDeferredSelfPane(paneID string, force bool) error {
 	var c selfCompensation
 	o.compensateUnderLock(&c, func(now []ManifestEvent) {
 		c.add(o.reactivateSeat(rr.Events, now, orgID, seatID, paneID, why))
+		c.add(o.reserveAgain(rr.Events, now, orgID, why))
 	})
 	return c.errorFor(err, byHand)
 }
@@ -1089,9 +1096,10 @@ func (o *Org) closeSelfPane(orgID, seatID, paneID string) error {
 // three decide from the manifest read again under the manifest lock, and
 // each appends nothing when that read has a newer record than the copy read
 // before the herdr calls: a newer workspace event for workspaceID, a newer
-// state event for the seat, or, for the reservation, one the org holds (it
-// was started again with --reserve) or a different one before its latest
-// `disbanded`. The error then names what it did not record again. The rest
+// state event for the seat, or, for the reservation, a start of the org
+// after its `disbanded` (a spawn, with or without --reserve); a `disband`
+// run again meanwhile does not count (reserveAgain). The error then names
+// what it did not record again. The rest
 // follows CloseDeferredSelfPane: with force it appends nothing, and the
 // error names `herdr workspace close` (to run if the workspace is the
 // org's) in the same cases.
@@ -1201,10 +1209,16 @@ func (c selfCompensation) errorFor(err error, byHand string) error {
 // driverCallTimeout deadlines old by the time the close has failed, and
 // another command (a spawn of the same org, say) may have written newer
 // records since; each compensation step compares that copy with this read
-// and appends only what is still missing. The lock keeps a spawn's locked
-// section (its checks, scope_reserved and spawn_started) from running
-// between this read and the appends. When the lock or the read fails,
-// nothing is appended, and c records the failure.
+// and appends only what is still missing. The seat and workspace steps
+// compare their latest event in the two reads. The reservation step
+// (reserveAgain, run by both closes) requires the `disbanded` that ended the
+// org's last run in the copy to sit at the same index in this read, with
+// nothing after it that starts the org again, so a `disbanded` added
+// meanwhile by a disband run again does not stop it, while a spawn of the
+// org does. The lock keeps a spawn's locked section (its checks,
+// scope_reserved and spawn_started) from running between this read and the
+// appends. When the lock or the read fails, nothing is appended, and c
+// records the failure.
 func (o *Org) compensateUnderLock(c *selfCompensation, compensate func(now []ManifestEvent)) {
 	err := withManifestLock(filepath.Dir(o.Manifest.Path()), func() error {
 		rr, err := o.Manifest.Read()
@@ -1283,33 +1297,79 @@ func (o *Org) reopenWorkspace(now []ManifestEvent, last ManifestEvent, why strin
 }
 
 // reserveAgain appends the compensating scope_reserved for orgID after a
-// deferred close left its workspace open: the reservation the org held right
-// before its latest real `disbanded` in before, the manifest copy read
-// before the close (reservationBeforeLastDisband), with the same paths and
-// Details `paths=<paths> restored: <why>`. It appends only when now, the
-// manifest read under the lock, has no reservation for the org and the same
-// reservation before its latest `disbanded`; otherwise the org was started
-// again (with --reserve) or disbanded again since, and the newer records
-// stay. It does not check the other orgs' reservations or the org-wide
-// limits: another org may have taken the range or the last org slot in the
-// window since `disbanded`, and then they overlap, or max_orgs is exceeded
-// by one, until this org is disbanded again (plan
-// 2026-10-08-org-limits-reserve, Risks). It returns, for the error text,
-// what it recorded or what it did not record; both are "" when the org held
-// no reservation before its `disbanded` in before.
+// deferred close left the org running past its `disbanded`: the close of
+// the org's own workspace (CloseDeferredSelfWorkspace) or of the caller's
+// pane that a disband deferred (CloseDeferredSelfPane). Both use this one
+// rule. From before, the manifest copy read before the close, it takes the
+// org's latest real `disbanded` and the reservation that `disbanded`
+// released (releasedReservation), and appends it with the same paths and
+// Details `paths=<paths> restored: <why>`. It appends and reports nothing
+// when before has no such `disbanded`, has the org started again after it
+// (the close then belongs to a later run: an ordinary stop of a seat
+// spawned since, for one), or has no reservation before it. It appends only
+// when now, the manifest read under the lock, still has that `disbanded` at
+// the same index (the manifest only grows), has no scope_reserved,
+// spawn_started or spawned of the org after it (the org was started again
+// while the close waited, with or without --reserve), and gives the org no
+// reservation; otherwise it appends nothing and reports the reservation as
+// not recorded again, and the newer records stay. A `disbanded` added after
+// it, by a disband run again while the close waited, releases nothing more
+// and does not stop the restore. It does not check the other orgs'
+// reservations or the org-wide limits: another org may have taken the range
+// or the last org slot in the window since `disbanded`, and then they
+// overlap, or max_orgs is exceeded by one, until this org is disbanded
+// again (plan 2026-10-08-org-limits-reserve, Risks). It returns, for the
+// error text, what it recorded or what it did not record; both are "" when
+// before has nothing to restore.
 func (o *Org) reserveAgain(before, now []ManifestEvent, orgID, why string) (restored, skipped string, err error) {
-	paths := reservationBeforeLastDisband(before, orgID)
+	d, paths := releasedReservation(before, orgID)
 	if paths == nil {
 		return "", "", nil
 	}
 	what := fmt.Sprintf("the reservation %s of org_id %q", strings.Join(paths, ","), orgID)
-	if ActiveReservation(now, orgID) != nil || !slices.Equal(reservationBeforeLastDisband(now, orgID), paths) {
+	if len(now) <= d || now[d] != before[d] || ActiveReservation(now, orgID) != nil ||
+		slices.ContainsFunc(now[d+1:], func(ev ManifestEvent) bool { return startsOrg(ev, orgID) }) {
 		return "", what, nil
 	}
 	if err := o.appendEvent(scopeReservedEvent(o.now(), orgID, paths, "restored: "+why, false)); err != nil {
 		return "", "", fmt.Errorf("record the reservation of org_id %q again: %w", orgID, err)
 	}
 	return what, "", nil
+}
+
+// releasedReservation returns the index d of orgID's latest real `disbanded`
+// in events and the reservation that `disbanded` released: the one the org
+// held at its latest start before d (startsOrg). A `disbanded` that follows
+// another with no start of the org between them releases nothing more, so
+// it changes nothing here, and a run started without --reserve after an
+// earlier run's `disbanded` held no reservation, whatever the earlier run
+// held. paths is nil when the org has no `disbanded`, was started again
+// after d (d belongs to an earlier run), or held no reservation then.
+func releasedReservation(events []ManifestEvent, orgID string) (d int, paths []string) {
+	d, ok := lastDisbandedIndexes(events)[orgID]
+	if !ok || slices.ContainsFunc(events[d+1:], func(ev ManifestEvent) bool { return startsOrg(ev, orgID) }) {
+		return 0, nil
+	}
+	for i := d - 1; i >= 0; i-- {
+		if startsOrg(events[i], orgID) {
+			return d, ActiveReservation(events[:i+1], orgID)
+		}
+	}
+	return 0, nil
+}
+
+// startsOrg reports whether ev is a real (non-dry-run) event that starts a
+// run of orgID, or continues one: the org's scope_reserved, or a
+// spawn_started or spawned of one of its seats.
+func startsOrg(ev ManifestEvent, orgID string) bool {
+	if ev.DryRun || ev.OrgID != orgID {
+		return false
+	}
+	switch ev.Event {
+	case EventScopeReserved, EventSpawnStarted, EventSpawned:
+		return true
+	}
+	return false
 }
 
 // lastSeatOnPane returns the org_id and seat_id of the latest real
