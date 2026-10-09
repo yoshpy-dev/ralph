@@ -332,9 +332,11 @@ function lex_cmds(ctx, closer,    c, c2, depth, p0, e) {
 # LD_EXP of lex_dollar) and LW_ANSI (1 when ANSI-C or locale quoting
 # appears: LD_ANSI). When a $ in the word starts a zsh subscript (LD_SUB,
 # also inside double quotes), the span from the first such $ to the end of
-# the word is noted with xnote, so it is never data. The word ends where it
-# always does (an unquoted blank or operator), so an unclosed [ does not
-# reach past it.
+# the word is noted with xnote, so it is not part of the argument data
+# region of a data command. A message word with a subscript is kept out of
+# the data regions by LW_EXP instead, which every subscript $ also sets.
+# The word ends where it always does (an unquoted blank or operator), so an
+# unclosed [ does not reach past it.
 function lex_word(ctx,    start, val, buf, c, c2, e, subst, quoted, bsnl, piece, xp, ansi, subp) {
   start = P
   val = ""
@@ -1051,8 +1053,9 @@ function stage_note(ctx, cid,    i, n, j, k, ro, safe, rs, re, cur, xs, xe, m, t
   CIN[cid] = 0
   if (!ro || i >= n) return
   # Sort the excluded spans by start (they come nearly sorted: a
-  # redirection is noted after the substitution in its target, and a
-  # ${...} after the substitutions inside it).
+  # redirection is noted after the substitution in its target, a ${...}
+  # after the substitutions inside it, and a subscript span at the end of
+  # its word, after the substitutions in that word).
   for (k = 2; k <= XN[ctx]; k++) {
     ts = XS[ctx, k]
     te = XE[ctx, k]

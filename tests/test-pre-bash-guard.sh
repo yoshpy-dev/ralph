@@ -665,8 +665,9 @@ guard_deny_only_forms=(
   # so a $(...) that the lexer reads as quoted text inside a ${...} (in
   # single quotes, or with the $ escaped) runs. The whole ${...} is no data:
   # as an argument of a data command (lex_dollar notes its span), in a commit
-  # or tag message (msg_check reads the whole source word, also when quotes
-  # split the flag as in --message''= or -"m"), and in an unquoted heredoc
+  # or tag message (msg_check reads the per-word expansion mark, which the
+  # whole word carries also when quotes split the flag as in --message''= or
+  # -"m"), and in an unquoted heredoc
   # body (lex_hd marks any ${ as a substitution). zsh stat -A NAME (the
   # zsh/stat module) evaluates the subscript of NAME, so stat is no data
   # command. The old guard denies all of these (the sudo substring).
