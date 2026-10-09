@@ -93,20 +93,20 @@ Critical forks: None(どの選択も 1 スライスの手戻りで戻せる。`s
 
 ## Acceptance criteria
 
-- [ ] AC1: 分割計画の読み込みが、`Type` の既定(feat)、`Reserve` の正規化、`Depends on` の参照を扱い、`## Features` がない・機能が 0 個・slug の形が違う・slug の重複・知らない `Type`・`Reserve` がないか規則に反する・知らない slug への `Depends on` を、それぞれ拒否する
-- [ ] AC2: digest の Go 実装が、`- Status:` / `- Approved:` / `- Branch:` の行、`## Progress checklist` の節、行頭の `- [x]` / `- [X]`、最後の改行の有無、CRLF の行を含む本文で、`scripts/plan-visual.sh digest` と同じ値を返す。分割計画の読み込みは、先頭の 1 行ずつ以外の `- Status:` / `- Approved:`、`- Branch:`、`## Progress checklist`、行頭の `- [x]` / `- [X]` を拒否する
-- [ ] AC3: 承認済みの分割計画で `ralph org start --plan <path> --feature a` を打つと、`.claude/worktrees/org-a` に `<type>/a` のブランチの worktree が default branch からでき(`ralph-worktree.sh` の記録 `org-a`)、その worktree を cwd にした leader 座席が spawn され、org `a` が機能の `Reserve` を予約し、予約の記録に結びつき(分割計画の id、slug、digest、ブランチ、worktree)が残る。leader の task に機能の本文が入る(仕様の受け入れ条件 FR-4 の前半)
-- [ ] AC4: `Status` が `Approved` でない、`- Approved:` に digest がない、本文が承認のあとに変わった、のどれでも start は拒否され、worktree も台帳の記録もできない(仕様の受け入れ条件 FR-4 の後半)。承認のあとに機能の本文へ `- Branch:` の行を足した場合も拒否される
-- [ ] AC5: `--plan` が台帳の `splits/` の下を指さない、知らない `--feature`、`--plan` と `--feature` の片方だけ、`--cwd` / `--scope` / `--reserve` / `--allow-unscoped` / task の引数との併用は、どれも拒否される。`--plan` なしの `ralph org start <task>` は今のテストのまま通る
-- [ ] AC6: 同じ `--plan` と `--feature` で start を打ち直すと、同じ worktree を使い、予約の記録は増えない。同じ org_id に別の機能か、承認し直した分割計画(digest が違う)で start を打つと拒否される。disband のあと、別の分割計画の同じ slug で start を打つと、残っている worktree を使い回さずに拒否される。記録のブランチと worktree の実際のチェックアウトが違うときも拒否される。同じ分割計画の同じ機能なら、disband のあと承認し直しても同じ worktree を使う
-- [ ] AC7: 結びつきのない走っている org の org_id への `start --plan` は拒否され、worktree も台帳の記録もできない。昇格したセッションの leader の org(leader 座席なしでほかの座席が動いている)、`--plan` なしの start の org、`--reserve` だけの org の 3 つで確かめる。結びつきのある org に結びつきなしの予約を渡した spawn も拒否される
-- [ ] AC8: ロックなしの先読みで `max_orgs`、`max_total_seats`、予約の重なりに当たる start は、worktree を作らずに拒否される。先読みを通ったあとロックの下で拒否されたときは、worktree が残り、エラー文が打ち直しと `ralph-worktree.sh cleanup` を示す
-- [ ] AC9: main のチェックアウトが default branch でないか clean でないとき、start はスクリプトのエラー文と打ち直しの案内を出して終了コード 1 になり、台帳には何も書かない
-- [ ] AC10: 自分の pane か workspace の close が失敗して予約を書き戻すとき、結びつきと worktree も戻る
-- [ ] AC11: `ralph org status` が `feature:` の行を出し、`--json` が `feature` のキーを持つ。結びつきのない org では出ない
-- [ ] AC12: leader の雛形が既定の編成(implementer 1 席・reviewer 1 席)と機能ごとの org の進め方(機能の計画、push の前の secret scan、`gh pr create`、`/pr` を使わない、worktree を消さない、report、disband)を書き、Solo・Leaded・Parallel に触れない
-- [ ] AC13: `/org` skill(4 面)の「編成パターン」の節が「機能ごとの org」になり、動詞の表・2 経路・サイクルが合っている。`README.md`、`AGENTS.md`、仕様の FR-4 が合っている。`./scripts/check-skill-sync.sh` と `./scripts/check-sync.sh` が通る
-- [ ] AC14: 実機で 1 回、分けた herdr のもとで、小さな repo の分割計画から claude の leader を `start --plan` で立て、leader が worktree の中で implementer と reviewer を 1 席ずつ立てることを確かめる(仕様の受け入れ条件 FR-4 の「implementer と reviewer が 1 席ずつ立つ」)
+- [x] AC1: 分割計画の読み込みが、`Type` の既定(feat)、`Reserve` の正規化、`Depends on` の参照を扱い、`## Features` がない・機能が 0 個・slug の形が違う・slug の重複・知らない `Type`・`Reserve` がないか規則に反する・知らない slug への `Depends on` を、それぞれ拒否する
+- [x] AC2: digest の Go 実装が、`- Status:` / `- Approved:` / `- Branch:` の行、`## Progress checklist` の節、行頭の `- [x]` / `- [X]`、最後の改行の有無、CRLF の行を含む本文で、`scripts/plan-visual.sh digest` と同じ値を返す。分割計画の読み込みは、先頭の 1 行ずつ以外の `- Status:` / `- Approved:`、`- Branch:`、`## Progress checklist`、行頭の `- [x]` / `- [X]` を拒否する
+- [x] AC3: 承認済みの分割計画で `ralph org start --plan <path> --feature a` を打つと、`.claude/worktrees/org-a` に `<type>/a` のブランチの worktree が default branch からでき(`ralph-worktree.sh` の記録 `org-a`)、その worktree を cwd にした leader 座席が spawn され、org `a` が機能の `Reserve` を予約し、予約の記録に結びつき(分割計画の id、slug、digest、ブランチ、worktree)が残る。leader の task に機能の本文が入る(仕様の受け入れ条件 FR-4 の前半)
+- [x] AC4: `Status` が `Approved` でない、`- Approved:` に digest がない、本文が承認のあとに変わった、のどれでも start は拒否され、worktree も台帳の記録もできない(仕様の受け入れ条件 FR-4 の後半)。承認のあとに機能の本文へ `- Branch:` の行を足した場合も拒否される
+- [x] AC5: `--plan` が台帳の `splits/` の下を指さない、知らない `--feature`、`--plan` と `--feature` の片方だけ、`--cwd` / `--scope` / `--reserve` / `--allow-unscoped` / task の引数との併用は、どれも拒否される。`--plan` なしの `ralph org start <task>` は今のテストのまま通る
+- [x] AC6: 同じ `--plan` と `--feature` で start を打ち直すと、同じ worktree を使い、予約の記録は増えない。同じ org_id に別の機能か、承認し直した分割計画(digest が違う)で start を打つと拒否される。disband のあと、別の分割計画の同じ slug で start を打つと、残っている worktree を使い回さずに拒否される。記録のブランチと worktree の実際のチェックアウトが違うときも拒否される。同じ分割計画の同じ機能なら、disband のあと承認し直しても同じ worktree を使う
+- [x] AC7: 結びつきのない走っている org の org_id への `start --plan` は拒否され、worktree も台帳の記録もできない。昇格したセッションの leader の org(leader 座席なしでほかの座席が動いている)、`--plan` なしの start の org、`--reserve` だけの org の 3 つで確かめる。結びつきのある org に結びつきなしの予約を渡した spawn も拒否される
+- [x] AC8: ロックなしの先読みで `max_orgs`、`max_total_seats`、予約の重なりに当たる start は、worktree を作らずに拒否される。先読みを通ったあとロックの下で拒否されたときは、worktree が残り、エラー文が打ち直しと `ralph-worktree.sh cleanup` を示す
+- [x] AC9: main のチェックアウトが default branch でないか clean でないとき、start はスクリプトのエラー文と打ち直しの案内を出して終了コード 1 になり、台帳には何も書かない
+- [x] AC10: 自分の pane か workspace の close が失敗して予約を書き戻すとき、結びつきと worktree も戻る
+- [x] AC11: `ralph org status` が `feature:` の行を出し、`--json` が `feature` のキーを持つ。結びつきのない org では出ない
+- [x] AC12: leader の雛形が既定の編成(implementer 1 席・reviewer 1 席)と機能ごとの org の進め方(機能の計画、push の前の secret scan、`gh pr create`、`/pr` を使わない、worktree を消さない、report、disband)を書き、Solo・Leaded・Parallel に触れない
+- [x] AC13: `/org` skill(4 面)の「編成パターン」の節が「機能ごとの org」になり、動詞の表・2 経路・サイクルが合っている。`README.md`、`AGENTS.md`、仕様の FR-4 が合っている。`./scripts/check-skill-sync.sh` と `./scripts/check-sync.sh` が通る
+- [x] AC14: 実機で 1 回、分けた herdr のもとで、小さな repo の分割計画から claude の leader を `start --plan` で立て、leader が worktree の中で implementer と reviewer を 1 席ずつ立てることを確かめる(仕様の受け入れ条件 FR-4 の「implementer と reviewer が 1 席ずつ立つ」)
 
 ## Implementation outline
 
@@ -163,7 +163,9 @@ Critical forks: None(どの選択も 1 スライスの手戻りで戻せる。`s
 - 2026-10-09: S1(a321d1a7)分割計画の読み込み・検査・digest。決めたこと: `SplitPlansDirIn` を足した。`LoadSplitPlan` もファイル名(`<id>.md`)を検査する。`ResolveSplitPlanPath` はファイル自体の symlink も解決し、`splits/` の外を指すものを拒否する。`- Approved:` の digest の形が違えば読み込みでは拒否せず、`CheckApproved` が「digest がない」と返す(Draft の `- Approved: TBD` を読めるように)。slug `none`、`Depends on` の空の項目や重複、最初の `### <slug>` より前のフィールドの行も拒否する。digest は本物のスクリプトと 114 個の入力で一致を確かめた
 - 2026-10-09: S2(9d7a85ae)予約の記録に結びつき。決めたこと: 一部だけ壊れた結びつきの記録は「どれとも一致しない結びつき」として読み、その org への予約は disband まで拒否する。結びつきの worktree は `filepath.Clean` で正規化する。入力検査は制御文字も拒否する
 - 2026-10-09: S3 は org 層の S3a(f27188d7)と CLI の S3b(216b2cdd)の 2 つのコミットに分けた。S3a: 先読みは Spawn の入力検査(`checkSpawnInput`)と既存の leader の判定(`idempotentRespawnDecision`)を切り出して共有し、`TestSpawnPrecheckErr_MatchesSpawn` で先読みと Spawn のエラーが一致することを確かめる。RepoRoot は symlink を解決して使う。worktree の使い回しの検査は kind も比べ、記録の worktree のディレクトリがないときも拒否する。implementer が未追跡の新規テストファイルの 1 行を `sed -i` で直した(追跡済みのファイルではなく、U+FFFD の検査は 0 件)。S3b: `org.FeatureRepoRoot(dir, source)` を足し、`newOrgSpawnRuntime` を解決と構築に分けた。`--plan` / `--feature` の空白の値も拒否する。start の `--scope` の usage にあったバッククォートで `--help` が崩れていたので直した(3 段目の進捗の (d))
-- 2026-10-09: 実装中に見つけて送るもの(sync-docs で tech-debt へ)。同じ機能の `start --plan` を同時に 2 つ打つと、両方が先読みを通って `ensure` まで進み、後の方のエラーに「main を clean にして打ち直す」の案内が付く(この場合は的外れ)。`ralph-worktree.sh` にはロックがない
+- 2026-10-09: S4(aaaef61a)雛形・skill・文書。計画からのずれ: org の締めの順を「座席を stop → report → 機能の計画を archive → コミット → secret scan → push → `gh pr create` → disband」にした(`ralph org report` は worktree の `docs/reports/` に書くので、PR のあとに打つと未追跡のファイルが残り、`ralph-worktree.sh cleanup` が拒否する。implementer の指摘)。雛形に「`/plan` skill は使わない」を足し、skill に `cleanup` で `--force-branch` が要る場合を書いた
+- 2026-10-09: S5(実機、`docs/evidence/org-feature-worktree-live-2026-10-09.md`)。run 2 で、leader が雛形どおり `--cwd .` で立てた implementer と reviewer の pane が、worktree ではなく herdr サーバーの cwd で動いた(ralph が相対の `--cwd` を herdr にそのまま渡していた。4 段目の前からある穴)。計画からのずれとして、af138af6 で spawn の入口で相対の `--cwd` を絶対パスにしてから herdr・agmsg・台帳に渡すよう直した(consult の判定、案 A。雛形の `--cwd .` はこの直しで正しくなるので変えない)。run 3 で、台帳は main の 1 つ、3 席の pane の cwd と台帳の worktree はどれも機能の worktree の絶対パスになり、leader は計画・実装・レビュー・report・archive・push(remote がないので失敗)まで雛形の順に進めた
+- 2026-10-09: 実装中に見つけて送るもの(sync-docs で tech-debt へ)。(1) start を打った ralph と、leader が pane の中で呼ぶ ralph の版が違うと台帳が分かれうる(run 1 で pane の `ralph` が Homebrew の v5.1.0 に解決され、worktree の中に台帳ができた)。(2) reviewer が書いたレポートをコミットしないまま止められると、scaffold の Stop hook が `wip: checkpoint before session end` でコミットし、PR に `wip:` の名前で入る。(3) `start <task>` の leader や昇格した leader が task worktree の中で `ralph org report` を打つと、同じく未追跡のファイルが残る(S4 の implementer の指摘)。(4) 同じ機能の `start --plan` を同時に 2 つ打つと、両方が先読みを通って `ensure` まで進み、後の方のエラーに「main を clean にして打ち直す」の案内が付く(この場合は的外れ)。`ralph-worktree.sh` にはロックがない
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
