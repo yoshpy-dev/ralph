@@ -69,14 +69,14 @@ None (検査の段を 1 つ足し、guard の中の判定を変えないコー�
 
 ## Acceptance criteria
 
-- [ ] AC1: `HARNESS_VERIFY_MODE=static ./scripts/verify.local.sh` が、guard の 3 つの `.awk` を root と template のそれぞれで読む段を回して OK になる。`git archive HEAD` で展開した木で 1 つの `.awk` に構文エラーを入れると、その段が FAIL になり、`verify.local.sh` は 0 以外で終わる
-- [ ] AC2: 3 つの `.awk` のコメントの行に `SQ` も `DQ` も残らない(`grep -n '^[[:space:]]*#.*\(SQ\|DQ\)'` が何も出さない)。S2 の差分はコメントの行だけ
-- [ ] AC3: `read_body` で行末のバックスラッシュを数える処理は 1 つの関数の呼び出しで、`while (q >= … && at(q) == BS)` の形のループは guard に 1 つだけ残る
-- [ ] AC4: `RESW`、`resw_list`、`EXEC_SEEN` が guard の 4 つのファイル(コメントを含む)に残らない。`in_data` の上のコメントとヘッダーの `NODATA` の理由の一覧が、複合コマンドと `exec` のリダイレクトを許可リストの場合として書く。DATACMD の一覧の上に、予約語と包みを入れないことが書いてある
-- [ ] AC5: 判定が変わらない。`bash tests/test-pre-bash-guard.sh` が、今の 2,063 件と足した行・検査を含めて全部通る(jq あり・なし)。base(a0094fe5)の guard とこの PR の guard に、テストの配列の行と PR #213・#214 の probe の行を jq あり・なしで渡し、判定の違いが 0 件
-- [ ] AC5b: 消した規則の前提がテストで守られる。写しの `pre_bash_guard_rules.awk` の DATACMD に `exec` だけを足すと、足した `exec >run.sh; echo 'sudo ls'` の行と不変条件の検査が赤になる。`for` だけを足すと不変条件の検査が赤になる。`if grep -q 'sudo ' file; then echo ok; fi` の行は、許可リストの `NODATA` の行を消した写しで赤になる(これらの行を許可リストだけが止めていることの確認)
-- [ ] AC6: root と `templates/base/` の 4 つの guard のファイルがバイト単位で同じ(`./scripts/check-sync.sh`)。`shellcheck -S warning` と `sh -n` が通り、4 つとも 800 行未満
-- [ ] AC7: `./scripts/run-verify.sh` が rc 0。`docs/tech-debt/README.md` の guard の限界の行の (e) が、コードの 2 項目と `SQ` を含めて解消済みになり、`.awk` の分類の行は、分類は作りどおり、構文の確認は S1 で解消、として閉じる
+- [x] AC1: `HARNESS_VERIFY_MODE=static ./scripts/verify.local.sh` が、guard の 3 つの `.awk` を root と template のそれぞれで読む段を回して OK になる。`git archive HEAD` で展開した木で 1 つの `.awk` に構文エラーを入れると、その段が FAIL になり、`verify.local.sh` は 0 以外で終わる
+- [x] AC2: 3 つの `.awk` のコメントの行に `SQ` も `DQ` も残らない(`grep -n '^[[:space:]]*#.*\(SQ\|DQ\)'` が何も出さない)。S2 の差分はコメントの行だけ
+- [x] AC3: `read_body` で行末のバックスラッシュを数える処理は 1 つの関数の呼び出しで、`while (q >= … && at(q) == BS)` の形のループは guard に 1 つだけ残る
+- [x] AC4: `RESW`、`resw_list`、`EXEC_SEEN` が guard の 4 つのファイル(コメントを含む)に残らない。`in_data` の上のコメントとヘッダーの `NODATA` の理由の一覧が、複合コマンドと `exec` のリダイレクトを許可リストの場合として書く。DATACMD の一覧の上に、予約語と包みを入れないことが書いてある
+- [x] AC5: 判定が変わらない。`bash tests/test-pre-bash-guard.sh` が、今の 2,063 件と足した行・検査を含めて全部通る(jq あり・なし)。base(a0094fe5)の guard とこの PR の guard に、テストの配列の行と PR #213・#214 の probe の行を jq あり・なしで渡し、判定の違いが 0 件
+- [x] AC5b: 消した規則の前提がテストで守られる。写しの `pre_bash_guard_rules.awk` の DATACMD に `exec` だけを足すと、足した `exec >run.sh; echo 'sudo ls'` の行と不変条件の検査が赤になる。`for` だけを足すと不変条件の検査が赤になる。`if grep -q 'sudo ' file; then echo ok; fi` の行は、許可リストの `NODATA` の行を消した写しで赤になる(これらの行を許可リストだけが止めていることの確認)
+- [x] AC6: root と `templates/base/` の 4 つの guard のファイルがバイト単位で同じ(`./scripts/check-sync.sh`)。`shellcheck -S warning` と `sh -n` が通り、4 つとも 800 行未満
+- [x] AC7: `./scripts/run-verify.sh` が rc 0。`docs/tech-debt/README.md` の guard の限界の行の (e) が、コードの 2 項目と `SQ` を含めて解消済みになり、`.awk` の分類の行は、分類は作りどおり、構文の確認は S1 で解消、として閉じる
 
 ## Implementation outline
 
