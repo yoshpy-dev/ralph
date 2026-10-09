@@ -1037,8 +1037,9 @@ edge_none=(
   # so its first set is not read as a command name; the old guard lets both
   # through. A ${...} in a commit message is not denied (it only stops being
   # data), and the text around a ${...} stays data: an echo argument after
-  # it, the body of the recommended heredoc form (its quoted delimiter
-  # expands nothing), and a git commit -F - body with no sentinel word.
+  # it and the body of the recommended heredoc form (its quoted delimiter
+  # expands nothing). A git commit -F - body with a ${...} is not data, but
+  # passes because it has neither a sentinel word nor a $(.
   # stat is no data command now, but has no sentinel word here. The old guard
   # denies the echo row and the heredoc-form row (the sudo substring).
   'tr "sudo" "abcd"'

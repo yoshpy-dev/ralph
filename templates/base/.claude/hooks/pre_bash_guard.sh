@@ -406,12 +406,15 @@ function lex_dq(ctx,    val, buf, e, c, c2, subst, piece) {
 # and a single quote, returning its value) and $"...". A lone $ is
 # returned as itself. LD_SUBST is 1 for $( and for a ${...} that contains
 # one or a backtick. Both $(...) and the whole ${...} are noted with xnote,
-# so neither is ever data: zsh re-evaluates the value of ${(e)...}, which
-# runs a $(...) that the lexer reads as quoted text (${(e):-SQ$(cmd)SQ},
-# also with the $ escaped by a backslash). LD_SUBST stays 0 for such a
-# ${...}, and only its own span is excluded, so the text around it keeps
-# its data region (echo "${HOME}" SQsudo lsSQ). (No single quote may appear
-# in this awk program: the shell passes it in single quotes.)
+# so neither is part of the argument data region (a) of a data command: zsh
+# re-evaluates the value of ${(e)...}, which runs a $(...) that the lexer
+# reads as quoted text (${(e):-SQ$(cmd)SQ}, also with the $ escaped by a
+# backslash). LD_SUBST stays 0 for such a ${...}, and only its own span is
+# excluded, so the text around it keeps its data region (echo "${HOME}"
+# SQsudo lsSQ). A message word (b) and an unquoted heredoc body (c) are
+# added as data whole, so msg_check and lex_hd keep a ${ out of those.
+# (No single quote may appear in this awk program: the shell passes it in
+# single quotes.)
 function lex_dollar(ctx, in_dq,    s, c, f) {
   s = P
   c = at(P + 1)
@@ -952,7 +955,8 @@ function stage_note(ctx, cid,    i, n, j, k, ro, safe, rs, re, cur, xs, xe, m, t
   CIN[cid] = 0
   if (!ro || i >= n) return
   # Sort the excluded spans by start (they come nearly sorted: a
-  # redirection is noted after the substitution in its target).
+  # redirection is noted after the substitution in its target, and a
+  # ${...} after the substitutions inside it).
   for (k = 2; k <= XN[ctx]; k++) {
     ts = XS[ctx, k]
     te = XE[ctx, k]
