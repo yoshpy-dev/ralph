@@ -454,6 +454,28 @@ func TestOrgStart_OrgWideLimits_ReadFromMainWorktreeRalphToml(t *testing.T) {
 	}
 }
 
+// TestOrgSpawnAndStartHelp_OrgWideLimitsSource: `ralph org spawn --help` and
+// `ralph org start --help` say what withMainWorktreeOrgLimits does, that a
+// --state-dir or RALPH_ORG_STATE_DIR naming the main worktree's ledger reads
+// the main worktree's ralph.toml and one naming another ledger does not.
+func TestOrgSpawnAndStartHelp_OrgWideLimitsSource(t *testing.T) {
+	for _, verb := range []string{"spawn", "start"} {
+		out, err := runOrgCmd(t, verb, "--help")
+		if err != nil {
+			t.Fatalf("%s --help: %v", verb, err)
+		}
+		help := strings.Join(strings.Fields(out), " ")
+		for _, want := range []string{
+			"the ledger is the main worktree's .harness/state/org, whether found by default or named with --state-dir or RALPH_ORG_STATE_DIR",
+			"In every other case (--config, a --state-dir or RALPH_ORG_STATE_DIR naming another ledger,",
+		} {
+			if !strings.Contains(help, want) {
+				t.Errorf("%s --help does not say %q:\n%s", verb, want, out)
+			}
+		}
+	}
+}
+
 // TestOrgSpawn_MainWorktreeRalphToml_OnlyOrgWideLimitsTaken checks that only
 // max_orgs and max_total_seats come from the main checkout's ralph.toml: its
 // max_seats = 1 does not limit a spawn from a subdirectory without

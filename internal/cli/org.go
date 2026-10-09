@@ -375,13 +375,15 @@ func resolveLeaderDriver(cmd *cobra.Command, leaderDriver, deprecatedDriver stri
 const orgWideLimitsHelp = "Before a seat starts, `ralph org spawn` and `ralph org start` check\n" +
 	"[org].max_seats for the org and two limits every org_id in the ledger\n" +
 	"shares: [org].max_orgs (running orgs) and [org].max_total_seats (active\n" +
-	"seats across all orgs). Only when --config is not given and the ledger\n" +
-	"is the main worktree's, those two are read from the main worktree's\n" +
-	"ralph.toml (built-in defaults when it has none), so every subdirectory\n" +
-	"and linked worktree gets the same limits. In every other case (--config,\n" +
-	"a ledger chosen with --state-dir or RALPH_ORG_STATE_DIR or found from\n" +
-	"the git toplevel, no git repository) the --config file, else ./ralph.toml,\n" +
-	"is used. A refusal says how to free a slot with `ralph org disband`."
+	"seats across all orgs). Those two are read from the main worktree's\n" +
+	"ralph.toml (built-in defaults when it has none) when --config is not\n" +
+	"given and the ledger is the main worktree's .harness/state/org, whether\n" +
+	"found by default or named with --state-dir or RALPH_ORG_STATE_DIR (as a\n" +
+	"feature org's leader does), so every subdirectory and linked worktree\n" +
+	"gets the same limits. In every other case (--config, a --state-dir or\n" +
+	"RALPH_ORG_STATE_DIR naming another ledger, a ledger found from the git\n" +
+	"toplevel, no git repository) the --config file, else ./ralph.toml, is\n" +
+	"used. A refusal says how to free a slot with `ralph org disband`."
 
 // orgReserveFlagUsage is the --reserve usage `ralph org spawn` and `ralph org
 // start` share. No backticks: pflag would take the first backticked word as
