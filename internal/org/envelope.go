@@ -102,8 +102,9 @@ func ValidateOrgWideCapacity(cfg config.OrgConfig, req SpawnRequest, runningOrgs
 
 // validateMaxOrgs is the max_orgs half of ValidateOrgWideCapacity: orgID is
 // refused when it is not in runningOrgs and len(runningOrgs) has reached
-// cfg.MaxOrgs. idempotentRespawn (spawn.go) calls it alone, for a
-// reservation that would make an org run without adding a seat.
+// cfg.MaxOrgs. idempotentRespawnDecision (spawn.go), which idempotentRespawn
+// and spawnPrecheckErr run, calls it alone, for a reservation that would make
+// an org run without adding a seat.
 func validateMaxOrgs(cfg config.OrgConfig, orgID string, runningOrgs []string) error {
 	if len(runningOrgs) >= cfg.MaxOrgs && !slices.Contains(runningOrgs, orgID) {
 		running := strings.Join(runningOrgs, ", ")

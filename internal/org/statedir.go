@@ -92,6 +92,29 @@ func MainWorktreeRoot(resolvedDir, source string) (root string, ok bool) {
 	return root, true
 }
 
+// FeatureRepoRoot returns the main worktree root that `ralph org start --plan`
+// passes as StartFeatureParams.RepoRoot, for the ledger ResolveOrgStateDir
+// returned as resolvedDir and source: MainWorktreeRoot when it names one,
+// otherwise (a ledger chosen with --state-dir or RALPH_ORG_STATE_DIR) the
+// main worktree of the repository containing the current working directory
+// (gitMainWorktree). Outside a git working tree, and in a repository with no
+// main worktree to name (a linked worktree of a bare repository), it is an
+// error.
+func FeatureRepoRoot(resolvedDir, source string) (string, error) {
+	if root, ok := MainWorktreeRoot(resolvedDir, source); ok {
+		return root, nil
+	}
+	if root, ok := gitMainWorktree(); ok {
+		return root, nil
+	}
+	if top, err := gitToplevel(); err == nil && top != "" {
+		return "", fmt.Errorf("org: start --plan makes the feature worktree from the main worktree, and git names none for %s "+
+			"(a linked worktree of a bare repository has none): run it from a repository with a main worktree", top)
+	}
+	return "", errors.New("org: start --plan makes the feature worktree from the main worktree of a git repository, " +
+		"and the current directory is not in one: run it from the main worktree or one of its linked worktrees")
+}
+
 // LegacyWorktreeStateDir reports the per-worktree org state directory that
 // ResolveOrgStateDir returned from the current working directory before the
 // git-main-worktree tier existed, when it still holds a ledger: cwd is

@@ -1,10 +1,12 @@
 // Package org implements the core library for the `ralph org` verb set
 // (spawn/send/wait/read/stop/status/disband): envelope validation against
 // [org] config, seat/saga state derivation from an org_id-namespaced
-// manifest, and tri-state model receipts. This package is pure library
-// code — no exec.Command, no cobra wiring. Those live in
-// internal/org/driver (herdr/agmsg adapters) and internal/cli/org.go
-// (`ralph org` cobra wiring) respectively.
+// manifest, and tri-state model receipts. It has no cobra wiring, which
+// lives in internal/cli/org.go, and reaches herdr and agmsg only through
+// the adapters in internal/org/driver. It runs a few other commands itself
+// with exec.Command: git (statedir.go, watch.go, feature.go),
+// scripts/ralph-worktree.sh (feature.go), osascript (watch.go) and
+// `claude -p` (watcher.go).
 package org
 
 // Saga/event name constants recorded in ManifestEvent.Event.

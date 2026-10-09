@@ -41,7 +41,7 @@ func newOrgCmd() *cobra.Command {
 			"absent or stopped.",
 	}
 
-	cmd.PersistentFlags().StringVar(&orgID, "org-id", "", "org execution namespace (required, except for stop --all and disband --all)")
+	cmd.PersistentFlags().StringVar(&orgID, "org-id", "", "org execution namespace (required, except for stop --all and disband --all; start --plan defaults it to the feature's slug)")
 	cmd.PersistentFlags().StringVar(&stateDir, "state-dir", "", "org manifest/receipts state directory (default: resolved by org.ResolveOrgStateDir -- env RALPH_ORG_STATE_DIR, else the main worktree's .harness/state/org (shared by its linked worktrees), else the enclosing git toplevel's .harness/state/org, else cwd's .harness/state/org)")
 	cmd.PersistentFlags().StringVar(&configPath, "config", "", "path to ralph.toml (default: ./ralph.toml if present, else built-in defaults; for where spawn and start read the org-wide limits, see ralph org spawn --help)")
 
@@ -120,6 +120,15 @@ func newOrgRuntime(cmd *cobra.Command, stateDir, configPath string, access orgLe
 // one set of limits. Every other verb keeps reading only the caller's config.
 func newOrgSpawnRuntime(cmd *cobra.Command, stateDir, configPath string) (*org.Org, error) {
 	resolvedStateDir, stateDirSource := org.ResolveOrgStateDir(stateDir, cmd.Flags().Changed("state-dir"))
+	return newOrgSpawnRuntimeAt(cmd, resolvedStateDir, stateDirSource, configPath)
+}
+
+// newOrgSpawnRuntimeAt is newOrgSpawnRuntime for a state dir that
+// org.ResolveOrgStateDir already resolved, the same split as newOrgRuntimeAt:
+// `ralph org start --plan` resolves it once, since it also passes the
+// directory and its source on (StartFeatureParams.StateDir and
+// org.FeatureRepoRoot).
+func newOrgSpawnRuntimeAt(cmd *cobra.Command, resolvedStateDir, stateDirSource, configPath string) (*org.Org, error) {
 	if err := guardLegacyOrgStateDir(cmd, resolvedStateDir, stateDirSource, orgLedgerMutating); err != nil {
 		return nil, err
 	}
@@ -509,34 +518,78 @@ func printCodexModelMismatchWarning(cmd *cobra.Command, seatID string, r org.Rec
 // `ralph org spawn` call uses; this command does not special-case the leader
 // runtime object in any way beyond picking its SeatID/Role and required
 // positional task argument.
+//
+// With --plan and --feature it runs runOrgStartPlan instead, which takes the
+// leader's cwd, scope, reservation and task from a split plan feature
+// ((*org.Org).StartFeature, plan
+// docs/plans/active/2026-10-09-org-feature-worktree.md). Without them the
+// command behaves as before.
 func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	var (
 		driverName, model, cwd, scope string
+		plan, feature                 string
 		reserve                       []string
 		timeoutMS                     int
 		allowUnscoped                 bool
 	)
 
 	cmd := &cobra.Command{
-		Use:   "start <task>",
-		Short: "Spawn a headless leader seat (sugar over `ralph org spawn --role leader`)",
-		Long: "ralph org start is a thin wrapper over the same Spawn saga every other\n" +
-			"`ralph org spawn` call uses: it always spawns the org's coordinating\n" +
+		Use:   "start (<task> | --plan <split plan> --feature <slug>)",
+		Short: "Spawn a headless leader seat (with --plan, for one split plan feature in its own worktree)",
+		Long: "ralph org start spawns the org's headless leader seat, in one of two\n" +
+			"forms. Both are a thin wrapper over the same Spawn saga every other\n" +
+			"`ralph org spawn` call uses: each spawns the org's coordinating\n" +
 			"\"leader\" identity itself (seat id \"leader\", role \"leader\"), expands\n" +
-			"internal/org/prompts/leader.md with the task argument substituted for\n" +
+			"internal/org/prompts/leader.md with the task substituted for\n" +
 			"{{TASK}} and a one-line [org] envelope summary substituted for\n" +
 			"{{ENVELOPE}}. Envelope validation, the permission-mode gate, and\n" +
 			"manifest/receipt bookkeeping all flow through Spawn exactly as they\n" +
 			"would for any other seat. See .claude/skills/org/SKILL.md for the\n" +
 			"leader's full operating manual.\n" +
 			"\n" +
-			orgWideLimitsHelp + "\n" +
+			"`ralph org start --plan <split plan> --feature <slug>` starts the org\n" +
+			"for one feature of a split plan. The split plan is a file <id>.md\n" +
+			"directly in <state dir>/splits/ (see --state-dir), approved by writing\n" +
+			"the digest `scripts/plan-visual.sh digest <file>` prints on its\n" +
+			"`- Approved: <date> sha256:<digest>` line; a plan that changed after\n" +
+			"its approval is refused. The org_id is the feature's slug unless\n" +
+			"--org-id is given. From the main worktree, which must be a clean\n" +
+			"checkout of the default branch, scripts/ralph-worktree.sh makes the\n" +
+			"worktree .claude/worktrees/org-<org_id> on the branch <type>/<slug>,\n" +
+			"and the leader runs there. Its reservation (the feature's `- Reserve:`\n" +
+			"paths) and the org's binding to the feature (shown by\n" +
+			"`ralph org status`) come from the plan, and its task from the\n" +
+			"feature's body, so --cwd, --scope, --reserve, --allow-unscoped and a\n" +
+			"task argument are refused. Running the same start again reuses the\n" +
+			"worktree; a start into a running org that was not started for that\n" +
+			"feature is refused. `ralph org disband` leaves the worktree and the\n" +
+			"branch; `./scripts/ralph-worktree.sh cleanup --id org-<org_id>` removes\n" +
+			"them.\n" +
 			"\n" +
-			"--reserve claims paths of the repo for the org until it is disbanded:\n" +
-			"starting the org again with the same paths passes, with different ones\n" +
-			"is refused.",
-		Args: cobra.ExactArgs(1),
+			"`ralph org start <task>` spawns the leader in --cwd with <task> as its\n" +
+			"task, as before --plan existed. It is not tied to a split plan: it\n" +
+			"makes no worktree, and --scope and --reserve give the scope and the\n" +
+			"reservation. --reserve claims paths of the repo for the org until it\n" +
+			"is disbanded: starting the org again with the same paths passes, with\n" +
+			"different ones is refused.\n" +
+			"\n" +
+			orgWideLimitsHelp,
+		Args: func(cmd *cobra.Command, args []string) error {
+			if orgStartUsesPlan(cmd) {
+				return nil // checkOrgStartPlanInput refuses a task argument with its own message
+			}
+			return cobra.ExactArgs(1)(cmd, args)
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if orgStartUsesPlan(cmd) {
+				if err := checkOrgStartPlanInput(cmd, args, *orgID, plan, feature); err != nil {
+					return err
+				}
+				return runOrgStartPlan(cmd, orgStartPlanParams{
+					orgID: *orgID, stateDir: *stateDir, configPath: *configPath, plan: plan, feature: feature,
+					driverName: driverName, model: model, timeoutMS: timeoutMS,
+				})
+			}
 			if err := requireOrgID(*orgID); err != nil {
 				return err
 			}
@@ -573,13 +626,99 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 
 	cmd.Flags().StringVar(&driverName, "driver", "claude", "driver CLI the leader seat runs as: claude|codex")
 	cmd.Flags().StringVar(&model, "model", "", "model name or alias (default: first [org].model_pool entry permitted for the role on --driver, with a warning)")
-	cmd.Flags().StringVar(&cwd, "cwd", "", "working directory for the leader seat (required)")
-	cmd.Flags().StringVar(&scope, "scope", "", "optional scope description (see `ralph org spawn --scope`)")
+	cmd.Flags().StringVar(&cwd, "cwd", "", "working directory for the leader seat (required without --plan)")
+	cmd.Flags().StringVar(&scope, "scope", "", "optional scope description, as for ralph org spawn --scope")
 	cmd.Flags().StringArrayVar(&reserve, "reserve", nil, orgReserveFlagUsage)
 	cmd.Flags().IntVar(&timeoutMS, "timeout-ms", 60000, "per-step herdr timeout in milliseconds")
 	cmd.Flags().BoolVar(&allowUnscoped, "allow-unscoped", false, "explicitly bypass the autonomous-mode --scope requirement")
+	cmd.Flags().StringVar(&plan, "plan", "", "approved split plan, a file <id>.md in <state dir>/splits/, to start one feature of; "+
+		"needs --feature and replaces the task argument, --cwd, --scope and --reserve")
+	cmd.Flags().StringVar(&feature, "feature", "", "slug of the split plan feature (its ### <slug> heading) the org is started for; needs --plan")
 
 	return cmd
+}
+
+// orgStartPlanConflicts are the `ralph org start` flags the --plan form
+// refuses, besides a task argument (checkOrgStartPlanInput).
+var orgStartPlanConflicts = []string{"cwd", "scope", "reserve", "allow-unscoped"}
+
+// orgStartUsesPlan reports whether `ralph org start` was given --plan or
+// --feature, which selects the split plan form (runOrgStartPlan).
+func orgStartUsesPlan(cmd *cobra.Command) bool {
+	return cmd.Flags().Changed("plan") || cmd.Flags().Changed("feature")
+}
+
+// checkOrgStartPlanInput refuses what the --plan form cannot take, before a
+// state dir is resolved: --plan without --feature or the reverse, a blank
+// value for either, a task argument, the flags in orgStartPlanConflicts, and
+// a malformed --org-id. --org-id may be left out (StartFeature then uses the
+// feature's slug).
+func checkOrgStartPlanInput(cmd *cobra.Command, args []string, orgID, plan, feature string) error {
+	if cmd.Flags().Changed("plan") != cmd.Flags().Changed("feature") {
+		return errors.New("org: start: --plan and --feature go together: pass both to start the org for one feature of a split plan, " +
+			"or neither for ralph org start <task>")
+	}
+	if strings.TrimSpace(plan) == "" || strings.TrimSpace(feature) == "" {
+		return errors.New("org: start: --plan and --feature must not be blank")
+	}
+	const supplies = "with --plan the split plan supplies the leader's cwd (the feature worktree), its scope and its reservation"
+	if len(args) > 0 {
+		return fmt.Errorf("org: start: --plan takes no task argument (got %q): %s, and the feature's body is its task", args[0], supplies)
+	}
+	for _, flag := range orgStartPlanConflicts {
+		if cmd.Flags().Changed(flag) {
+			return fmt.Errorf("org: start: --plan cannot be combined with --%s: %s", flag, supplies)
+		}
+	}
+	if orgID != "" {
+		return org.ValidateIdentifier("org_id", orgID)
+	}
+	return nil
+}
+
+// orgStartPlanParams is what runOrgStartPlan takes from the flags of `ralph
+// org start`.
+type orgStartPlanParams struct {
+	orgID, stateDir, configPath string
+	plan, feature               string
+	driverName, model           string
+	timeoutMS                   int
+}
+
+// runOrgStartPlan is `ralph org start --plan <split plan> --feature <slug>`:
+// it resolves the state dir once, builds the spawn runtime on it (the
+// legacy-ledger guard and the main worktree's org-wide limits, as for every
+// start), and runs (*org.Org).StartFeature with that dir and the main
+// worktree root (org.FeatureRepoRoot). The result is printed as a spawn's,
+// followed on success by the worktree, the branch and the status hint; a
+// refusal or failure is returned as StartFeature's error, which already says
+// whether the worktree stays and how to remove it.
+func runOrgStartPlan(cmd *cobra.Command, p orgStartPlanParams) error {
+	resolvedStateDir, stateDirSource := org.ResolveOrgStateDir(p.stateDir, cmd.Flags().Changed("state-dir"))
+	rt, err := newOrgSpawnRuntimeAt(cmd, resolvedStateDir, stateDirSource, p.configPath)
+	if err != nil {
+		return err
+	}
+	repoRoot, err := org.FeatureRepoRoot(resolvedStateDir, stateDirSource)
+	if err != nil {
+		return err
+	}
+	resolvedModel, err := resolveModelOrWarn(rt.Config, p.driverName, org.LeaderIdentity, p.model, cmd.ErrOrStderr())
+	if err != nil {
+		return err
+	}
+
+	res := rt.StartFeature(org.StartFeatureParams{
+		StateDir: resolvedStateDir, RepoRoot: repoRoot, SplitPath: p.plan, Feature: p.feature, OrgID: p.orgID,
+		Driver: p.driverName, Model: resolvedModel, TimeoutMS: p.timeoutMS,
+	})
+	printSpawnResult(cmd, res.Spawn)
+	if res.Spawn.Err != nil {
+		return res.Spawn.Err
+	}
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "worktree: %s\nbranch: %s\n"+
+		"hint: ralph org status --org-id %s ; attach with herdr to observe the leader pane\n", res.Worktree, res.Branch, res.OrgID)
+	return nil
 }
 
 func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
@@ -1003,9 +1142,13 @@ func newOrgStatusCmd(orgID, stateDir, configPath *string) *cobra.Command {
 		Use:   "status",
 		Short: "Show org seat roster",
 		Long: "ralph org status shows the seat roster of --org-id (--all adds dry-run\n" +
-			"seats). While the org holds a reservation made with --reserve (released\n" +
-			"by `ralph org disband`), a `reserved: <path>, ...` line follows the\n" +
-			"table and --json adds a `reservation` array.",
+			"seats). While the org holds a reservation made with --reserve or\n" +
+			"`ralph org start --plan` (released by `ralph org disband`), a\n" +
+			"`reserved: <path>, ...` line follows the table and --json adds a\n" +
+			"`reservation` array. For an org started with --plan, a\n" +
+			"`feature: <split>/<slug> branch <branch> worktree <path>` line follows\n" +
+			"it and --json adds a `feature` object (split, feature, digest, branch,\n" +
+			"worktree).",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireOrgID(*orgID); err != nil {
 				return err
@@ -1018,14 +1161,14 @@ func newOrgStatusCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("org: status: %w", err)
 			}
-			reservation, err := orgReservation(rt, *orgID)
+			reservation, feature, err := orgReservation(rt, *orgID)
 			if err != nil {
 				return fmt.Errorf("org: status: %w", err)
 			}
 			if jsonOut {
-				return printStatusJSON(cmd, result, reservation)
+				return printStatusJSON(cmd, result, reservation, feature)
 			}
-			printStatusTable(cmd, result, reservation)
+			printStatusTable(cmd, result, reservation, feature)
 			return nil
 		},
 	}
@@ -1057,26 +1200,40 @@ type orgSeatJSON struct {
 }
 
 // orgStatusJSON is the --json wire shape for `ralph org status`.
-// Reservation is the org's reservation (orgReservation), omitted when it holds
-// none, so an org without one prints the same JSON as before reservations.
+// Reservation is the org's reservation and Feature the split plan feature it
+// is bound to (orgReservation), each omitted when the org has none, so an org
+// without them prints the same JSON as before reservations and bindings.
 type orgStatusJSON struct {
-	Seats        []orgSeatJSON `json:"seats"`
-	CorruptLines int           `json:"corrupt_lines"`
-	Reservation  []string      `json:"reservation,omitempty"`
+	Seats        []orgSeatJSON   `json:"seats"`
+	CorruptLines int             `json:"corrupt_lines"`
+	Reservation  []string        `json:"reservation,omitempty"`
+	Feature      *orgFeatureJSON `json:"feature,omitempty"`
 }
 
-// orgReservation returns orgID's reservation (org.ActiveReservation) for
-// `ralph org status`, nil when it holds none. (*org.Org).Status returns the
-// roster only, so this reads rt's manifest once more.
-func orgReservation(rt *org.Org, orgID string) ([]string, error) {
+// orgFeatureJSON is the --json wire shape of an org's binding to a split
+// plan feature (org.FeatureBinding, which carries no json tags).
+type orgFeatureJSON struct {
+	Split    string `json:"split"`
+	Feature  string `json:"feature"`
+	Digest   string `json:"digest"`
+	Branch   string `json:"branch"`
+	Worktree string `json:"worktree"`
+}
+
+// orgReservation returns orgID's reservation (org.ActiveReservation) and the
+// split plan feature that reservation is bound to (org.ActiveFeature) for
+// `ralph org status`, each nil when the org has none. (*org.Org).Status
+// returns the roster only, so this reads rt's manifest once more, once for
+// both.
+func orgReservation(rt *org.Org, orgID string) ([]string, *org.FeatureBinding, error) {
 	rr, err := rt.Manifest.Read()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return org.ActiveReservation(rr.Events, orgID), nil
+	return org.ActiveReservation(rr.Events, orgID), org.ActiveFeature(rr.Events, orgID), nil
 }
 
-func printStatusJSON(cmd *cobra.Command, result org.StatusResult, reservation []string) error {
+func printStatusJSON(cmd *cobra.Command, result org.StatusResult, reservation []string, feature *org.FeatureBinding) error {
 	seats := make([]orgSeatJSON, len(result.Seats))
 	for i, s := range result.Seats {
 		seats[i] = orgSeatJSON{
@@ -1086,6 +1243,11 @@ func printStatusJSON(cmd *cobra.Command, result org.StatusResult, reservation []
 		}
 	}
 	payload := orgStatusJSON{Seats: seats, CorruptLines: result.CorruptLines, Reservation: reservation}
+	if feature != nil {
+		payload.Feature = &orgFeatureJSON{
+			Split: feature.Split, Feature: feature.Feature, Digest: feature.Digest, Branch: feature.Branch, Worktree: feature.Worktree,
+		}
+	}
 	enc := json.NewEncoder(cmd.OutOrStdout())
 	enc.SetIndent("", "  ")
 	return enc.Encode(payload)
@@ -1093,8 +1255,10 @@ func printStatusJSON(cmd *cobra.Command, result org.StatusResult, reservation []
 
 // printStatusTable prints the roster, then a `reserved: <path>, <path>` line
 // when the org holds a reservation (also when it has no seat left, e.g. a
-// spawn that failed after reserving), then the corrupt-line warning.
-func printStatusTable(cmd *cobra.Command, result org.StatusResult, reservation []string) {
+// spawn that failed after reserving), then a `feature: <split>/<slug> branch
+// <branch> worktree <path>` line when that reservation is bound to a split
+// plan feature, then the corrupt-line warning.
+func printStatusTable(cmd *cobra.Command, result org.StatusResult, reservation []string, feature *org.FeatureBinding) {
 	out := cmd.OutOrStdout()
 	if len(result.Seats) == 0 {
 		_, _ = fmt.Fprintln(out, "no seats")
@@ -1113,6 +1277,9 @@ func printStatusTable(cmd *cobra.Command, result org.StatusResult, reservation [
 	}
 	if len(reservation) > 0 {
 		_, _ = fmt.Fprintf(out, "reserved: %s\n", strings.Join(reservation, ", "))
+	}
+	if feature != nil {
+		_, _ = fmt.Fprintf(out, "feature: %s/%s branch %s worktree %s\n", feature.Split, feature.Feature, feature.Branch, feature.Worktree)
 	}
 	if result.CorruptLines > 0 {
 		_, _ = fmt.Fprintf(out, "warning: %d corrupt manifest line(s) skipped\n", result.CorruptLines)
