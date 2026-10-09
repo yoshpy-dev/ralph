@@ -137,7 +137,8 @@ None (1 つのフックの中身を 3 つのファイルに移すだけで、フ
 - [x] Plan approved
   - 2026-10-09: ユーザーが承認ゲートで Approve。承認の前に、Codex の plan advisory の HIGH(revert を配ると `.awk` を消したあとの `.sh` の書き込み失敗で fallback に落ちる窓ができる)を 2 段のロールバックと AC7 の `--no-verify` の形で、consult(consult-plan-awksplit)の指摘 3 点((e) のコメントだけの項目を S3 で直す、`check-template.sh` の `required_files`、AC2 を S1 の素の `cmp` に)を反映した。図解ページは描いていない(Visual review を参照)
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1 完了(da3b55d2、implementer/opus): awk のプログラムを `pre_bash_guard_lex.awk`(599 行)、`_commands.awk`(320 行)、`_rules.awk`(459 行)に移し、`.sh`(217 行)は `awk -f` の 1 行で呼ぶ。AC2 の `cmp` は rc 0(orchestrator も取り直した)、base との diff は `174,1553c174` の 1 hunk。テストは 2,032/0、lib-json 126/0、dispatch 33/0、check-sync・check-template・static-verify・go test(scaffold、upgrade、cli)が通った。`.awk` は base から `sed -n` で切り出し(ASCII だけで U+FFFD は 0)、`.sh` は Write で書き直した。気づいたこと: `run-static-verify.sh` が `.awk` を言語に分類できず、このブランチでは毎回 full の範囲で走る(失敗にはならない。S4 で tech-debt に記録する)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
