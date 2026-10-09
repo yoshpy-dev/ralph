@@ -78,20 +78,26 @@
 #      data region, which only the top level of the command has (nothing
 #      inside $(...), backticks, or re-read text is data):
 #      (a) the arguments of a command that only reads data (DATACMD below:
-#          echo, printf, cat, grep, ls, ...; not test or [; rg only without
+#          echo, printf, cat, grep, ls, ...; not test or [, nor stat, whose
+#          zsh -A NAME evaluates the subscript of NAME; rg only without
 #          --pre and without a word in ANSI-C or locale quoting; printf only
 #          without -v and with no %, $ or backtick in any word as written),
-#          from its first argument to the end of the command,
-#          without redirections and substitutions, when the command and
-#          every later stage of its pipeline are such commands and send
-#          output only to the terminal, the next stage, /dev/null,
-#          /dev/stderr, a copy of fd 0, 1 or 2, or a closed fd (>&-) (no
-#          file, no fd 3 or above, no &> or &>>, no >(...));
+#          from its first argument to the end of the command, without
+#          redirections, substitutions and ${...} (zsh evaluates the value
+#          of ${(e)...} again, which runs a $(...) written there in single
+#          quotes or with an escaped $; the text around a ${...} stays
+#          data), when the command and every later stage of its pipeline
+#          are such commands and send output only to the terminal, the next
+#          stage, /dev/null, /dev/stderr, a copy of fd 0, 1 or 2, or a
+#          closed fd (>&-) (no file, no fd 3 or above, no &> or &>>, no
+#          >(...));
 #      (b) the -m or --message value of git commit and git tag when it has
-#          no substitution (the recommended heredoc form counts as one);
+#          no substitution and no ${ in its source text (the recommended
+#          heredoc form counts as one, even with a ${ in its body); a value
+#          with a ${ is not denied for that, the other rules decide;
 #      (c) the body of a heredoc whose delimiter is quoted, or whose body
-#          has no substitution, fed to a command of (a) or to git commit
-#          -F -, under the same conditions as (a);
+#          has no substitution and no ${...}, fed to a command of (a) or to
+#          git commit -F -, under the same conditions as (a);
 #      (d) a comment (# where a word starts, to the end of the line).
 #      So text the lexer cannot follow (watch 'sudo ls', find -exec sh -c
 #      '...', csh -c, source <(...), git rebase -x, a file a script is
@@ -399,8 +405,16 @@ function lex_dq(ctx,    val, buf, e, c, c2, subst, piece) {
 # their source text, and outside double quotes also the ANSI-C string ($
 # and a single quote, returning its value) and $"...". A lone $ is
 # returned as itself. LD_SUBST is 1 for $( and for a ${...} that contains
-# one or a backtick. (No single quote may appear in this awk program: the
-# shell passes it in single quotes.)
+# one or a backtick. Both $(...) and the whole ${...} are noted with xnote,
+# so neither is part of the argument data region (a) of a data command: zsh
+# re-evaluates the value of ${(e)...}, which runs a $(...) that the lexer
+# reads as quoted text (${(e):-SQ$(cmd)SQ}, also with the $ escaped by a
+# backslash). LD_SUBST stays 0 for such a ${...}, and only its own span is
+# excluded, so the text around it keeps its data region (echo "${HOME}"
+# SQsudo lsSQ). A message word (b) and an unquoted heredoc body (c) are
+# added as data whole, so msg_check and lex_hd keep a ${ out of those.
+# (No single quote may appear in this awk program: the shell passes it in
+# single quotes.)
 function lex_dollar(ctx, in_dq,    s, c, f) {
   s = P
   c = at(P + 1)
@@ -414,6 +428,7 @@ function lex_dollar(ctx, in_dq,    s, c, f) {
   if (c == "{") {
     P += 2
     f = lex_brace(ctx, in_dq)
+    xnote(ctx, s, P)
     LD_SUBST = f
     return text(s, P)
   }
@@ -638,14 +653,17 @@ function heredoc_done(h, body,    cid, ctx, d, k, q0) {
 
 # lex_hd(ctx): a heredoc body whose delimiter is not quoted. It is data,
 # except that $(...), ${...} and backticks in it are expanded; finding one
-# marks heredoc CUR_H as having a substitution (HSUB).
+# marks heredoc CUR_H as having a substitution (HSUB). Any ${...} counts,
+# with or without a $( inside it the lexer can see: zsh re-evaluates the
+# value of ${(e):-\$(cmd)}, so the body is no data region. An escaped \${
+# is text.
 function lex_hd(ctx,    c) {
   while (P <= N) {
     P = skip(P, RE_HD)
     if (P > N) break
     c = at(P)
     if (c == BS) P += 2
-    else if (c == "$") { lex_dollar(ctx, 1); if (LD_SUBST) HSUB[CUR_H] = 1 }
+    else if (c == "$") { if (at(P + 1) == "{") HSUB[CUR_H] = 1; lex_dollar(ctx, 1); if (LD_SUBST) HSUB[CUR_H] = 1 }
     else { lex_bq(ctx); HSUB[CUR_H] = 1 }
   }
 }
@@ -937,7 +955,8 @@ function stage_note(ctx, cid,    i, n, j, k, ro, safe, rs, re, cur, xs, xe, m, t
   CIN[cid] = 0
   if (!ro || i >= n) return
   # Sort the excluded spans by start (they come nearly sorted: a
-  # redirection is noted after the substitution in its target).
+  # redirection is noted after the substitution in its target, and a
+  # ${...} after the substitutions inside it).
   for (k = 2; k <= XN[ctx]; k++) {
     ts = XS[ctx, k]
     te = XE[ctx, k]
@@ -1265,12 +1284,18 @@ function msg_attached(ctx, i, pre, commit,    r) {
 # msg_check(ctx, j, raw, commit): raw is the source text of a message in
 # word j. A command substitution in it (other than the recommended heredoc
 # form) is denied for git commit; a message without one is data when its
-# git is the command word.
+# git is the command word. A word whose whole source text (WR, not raw:
+# msg_attached gives an empty raw when quotes split the flag, as in
+# --messageSQSQ=${...}) has a ${ is no data either, since zsh re-evaluates
+# the value of ${(e)...}. It is not denied (git commit -m "${msg}" stays
+# allowed); the sentinel decides. The recommended heredoc form expands
+# nothing, so it stays data with a ${ in its body.
 function msg_check(ctx, j, raw, commit) {
   if (WS[ctx, j] && !safe_heredoc_msg(raw)) {
     if (commit) deny("commit_message")
     return
   }
+  if (index(WR[ctx, j], "${") && !safe_heredoc_msg(raw)) return
   if (DATA_OK) add_data(WP0[ctx, j], WP1[ctx, j])
 }
 # safe_heredoc_msg(r): 1 when the source text r is exactly a double quote,
@@ -1353,14 +1378,15 @@ BEGIN {
   RMAX = 24
   # Commands known not to run their arguments; any other command has its
   # later words checked by scan_words. git has rules of its own.
-  nx = split("echo printf man info whatis apropos which type grep egrep fgrep zgrep rg ag cat less more head tail wc sort cut jq ls test [ cd true false cp mv rm mkdir touch ln chmod stat file diff git", noexec_list, " ")
+  nx = split("echo printf man info whatis apropos which type grep egrep fgrep zgrep rg ag cat less more head tail wc sort cut tr jq ls test [ cd true false cp mv rm mkdir touch ln chmod stat file diff git", noexec_list, " ")
   for (; nx > 0; nx--) NOEXEC[noexec_list[nx]] = 1
   # Commands that only read data (and print to stdout): their arguments are
   # data regions for the sentinel. sed, awk, man, less, more, sort, tee and
   # jq can run commands or write files, so they are not here; nor are test
   # and [, whose -v in zsh and bash 5 evaluates a subscript such as
-  # arr[$(cmd)].
-  nx = split("echo printf cat head tail wc cut tr grep egrep fgrep zgrep rg ls stat diff cd true false which type", datacmd_list, " ")
+  # arr[$(cmd)], nor stat, whose -A NAME in zsh (the zsh/stat module) does
+  # the same with the subscript of NAME.
+  nx = split("echo printf cat head tail wc cut tr grep egrep fgrep zgrep rg ls diff cd true false which type", datacmd_list, " ")
   for (; nx > 0; nx--) DATACMD[datacmd_list[nx]] = 1
   # Reserved words in command position, and the brace-group words, that make
   # a top-level command a compound one with no data region.

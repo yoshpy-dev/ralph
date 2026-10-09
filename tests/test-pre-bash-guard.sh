@@ -28,7 +28,8 @@
 #      that may run its arguments such as find -exec, watch, flock, chroot;
 #      force push; hard reset; command substitution in a commit message;
 #      --no-verify and core.hooksPath; abbreviated long options; strings run
-#      as commands and files written, which the sentinel denies; zsh =sudo)
+#      as commands and files written, which the sentinel denies; zsh =sudo;
+#      zsh ${(e)...} text and stat -A, which are no data regions)
 #      -> deny, with permission_mode absent and bypassPermissions. Then the
 #      kinds of command the self-review listed (string runners, other
 #      shells, builtin/source/process substitution, git forms that run
@@ -657,6 +658,26 @@ guard_deny_only_forms=(
   # data command.
   $'printf $\'\\x25n\' $\'arr[\\x24(sudo id; echo 1)]\''
   $'rg $\'\\x2d-pre\' sh \'sudo ls\''
+  # 10. Plan guard-zsh-data-gaps: zsh evaluates the value of ${(e)...} again,
+  # so a $(...) that the lexer reads as quoted text inside a ${...} (in
+  # single quotes, or with the $ escaped) runs. The whole ${...} is no data:
+  # as an argument of a data command (lex_dollar notes its span), in a commit
+  # or tag message (msg_check reads the whole source word, also when quotes
+  # split the flag as in --message''= or -"m"), and in an unquoted heredoc
+  # body (lex_hd marks any ${ as a substitution). zsh stat -A NAME (the
+  # zsh/stat module) evaluates the subscript of NAME, so stat is no data
+  # command. The old guard denies all of these (the sudo substring).
+  $'echo ${(e):-\'$(sudo ls)\'}'
+  $'echo x${(e):-\'$(sudo ls)\'}y'
+  'echo ${(e):-\$(sudo ls)}'
+  'echo "${(e):-\$(sudo ls)}"'
+  $'cat <<EOF\n${(e):-\\$(sudo ls)}\nEOF'
+  $'git commit -m ${(e):-\'$(sudo ls)\'}'
+  $'git tag -a v1 -m ${(e):-\'$(sudo ls)\'}'
+  $'git commit --message\'\'=${(e):-\'$(sudo ls)\'}'
+  $'git commit -"m"${(e):-\'$(sudo ls)\'}'
+  $'git tag -a v1 --message\'\'=${(e):-\'$(sudo ls)\'}'
+  $'stat -A \'arr[$(sudo id; echo 1)]\' /dev/null'
 )
 check_modes B deny absent bypassPermissions -- "${guard_deny_only_forms[@]}"
 
@@ -886,6 +907,12 @@ edge_deny=(
   # Cycle 4 /test: a value attached with = is one word, so the next word is
   # read as a flag again.
   'git commit --trailer=x --no-verify -m fix'
+  # Plan guard-zsh-data-gaps /test: msg_check looks for a command
+  # substitution before it looks for a ${ (the order the plan keeps), so a
+  # ${...} next to a $(...) in a message does not skip the commit_message
+  # deny. --message " is not the -m " the sentinel reads, so only that rule
+  # denies this; the old guard lets it through.
+  'git commit --message "${msg}$(id)"'
 )
 check_modes D deny absent -- "${edge_deny[@]}"
 
@@ -1012,6 +1039,23 @@ edge_none=(
   # A bare -- is not an abbreviation of --no-verify: opt_is needs at least
   # one letter after the two dashes.
   'git merge --no-ff -- feature'
+  # Plan guard-zsh-data-gaps (AC2). tr does not run its arguments (NOEXEC),
+  # so its first set is not read as a command name; the old guard lets both
+  # through. A ${...} in a commit message is not denied (it only stops being
+  # data), and the text around a ${...} stays data: an echo argument after
+  # it and the body of the recommended heredoc form (its quoted delimiter
+  # expands nothing). A git commit -F - body with a ${...} is not data, but
+  # passes because it has neither a sentinel word nor a $(.
+  # stat is no data command now, but has no sentinel word here. The old guard
+  # denies the echo row and the heredoc-form row (the sudo substring).
+  'tr "sudo" "abcd"'
+  'echo x | tr "sudo" "abcd"'
+  'git commit -m "${msg}"'
+  'git commit -m "$msg"'
+  $'echo "${HOME}" \'sudo ls\''
+  $'git commit -m "$(cat <<\'EOF\'\nfix: mention ${HOME} and sudo ls in the body\nEOF\n)"'
+  $'git commit -F - <<EOF\nuse ${HOME} here\nEOF'
+  'stat -f %z file'
 )
 check_modes D none absent -- "${edge_none[@]}"
 
