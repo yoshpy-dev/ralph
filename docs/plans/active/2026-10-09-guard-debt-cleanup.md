@@ -129,7 +129,11 @@ None (検査の段を 1 つ足し、guard の中の判定を変えないコー�
   - self-review(2583435f、reviewer/opus): Merge yes、LOW 4 件。消した 2 つの規則は、コードの読み込みと 45 形の probe(base と判定が一致)で安全に外せていると確認された。LOW 1(「許可リストは複合コマンドを落とす唯一の規則」は `case` に当てはまらない)、LOW 2(不変条件の検査がソースの `split` の行しか読まない)、LOW 4(`verify.local.sh` の先頭のコメント)は S5 で直し、LOW 3(tech-debt の閉じ方)は sync-docs に回す
   - S5 完了(c7274f3b、implementer/opus): LOW 1 のコメント(`rules.awk`、`in_data`、テスト。予約語で始まるコマンドと `exec` のリダイレクトは許可リストが落とし、`case` の節は `)` の規則にも、サブシェルは `(` の規則にも掛かる。規則を 1 つずつ消した写しで確かめた)、LOW 2 のテスト(実行時の DATACMD を、guard の 3 つの `.awk` の後ろに `BEGIN { for (k in DATACMD) print k; exit }` を足した awk で読む。`DATACMD["exec"] = 1` の行を足した写しも捕まえる。前の方式では素通りした)、LOW 4 のコメント。guard の差分はコメントだけ。テストは 2,068/0(macOS、gawk、mawk)。plan の Scope の S3 と Risks の「`datacmd_list` の文字列を読む」は、実行時の DATACMD を読む形に変わった(結論と AC は変わらない。digest の範囲なので本文は直さない)
   - S4 完了(f435dd5a、inline、docs だけ): tech-debt の guard の限界の行の (e) を解消済みにし(Debt、Why deferred、Trigger)、Related にこの plan を足した。テストの穴の行に N03・N04 がなくなったことを書いた。`.awk` の分類の行を閉じた(分類は作りどおり、`.sh` も同じく全範囲。構文の確認は S1 の `check_guard_awk`)
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+  - S5 の再 review(a709e0bd、reviewer/opus): Merge yes、新しい指摘なし。LOW 1・4 と LOW 2 の (1)・(3) が c7274f3b で直ったことを確かめた。LOW 2 の包みの名前の部分(不変条件の検査が `cmd_pos` の `nm == "…"` を読むので、別の関数に移すと黙って減る)は直さず、記録した穴として残した(tech-debt のテストの穴の行 (h))。LOW 3 は sync-docs に残った
+  - verify(3358013b、verifier/opus): partial-pass。コードの AC(AC1・AC2・AC3・AC4・AC6、AC5b の静的と観察)は満たした。AC5 は静的な確認まで(実行は /test)、AC7 は tech-debt の書き方(V-1〜V-6)が sync-docs に残った。指摘は LOW 6 件と情報 2 件
+  - test(fa3ee868、tester/opus): pass。`./scripts/run-test.sh` rc 0(shell 40 本 3,922 件、Go 8 packages)、guard は 2,068/0(macOS、mawk、gawk のどれでも)。base と HEAD の判定の比較は、固有の payload 3,913 を jq あり・なしで BSD awk、mawk、gawk に渡して違い 0。`read_body` の壊れ方を見分ける 280 行(J)を含み、mutant m1 と m2 は J の行で判定が変わる。AC5b の 4 つの mutation は依頼どおりの検査と行で赤になった。穴は `trailing_backslashes` の下限(m1)をテストスイートが押さえていないこと(base も同じ。tech-debt のテストの穴の行 (i))
+  - sync-docs(この commit): tech-debt の guard の限界の行で、データ区間を定義する段落を今のコードに合わせ(予約語で始まる複合コマンドと `exec` のリダイレクトは許可リストの場合、`(`・`)` の規則は `lex_cmds`、`EXEC_SEEN` の項目を外して「Four cases」に)、(e) の閉じの文と Trigger (e) を実行時の DATACMD の検査に合わせ、Why deferred の現在形の「still open」を過去形にした。テストの穴の行は、N03・N04 を同値 mutant の一覧から外し、Trigger の「F 節の変更」が発火したことを書き、新しい穴 (h)(包みの名前の読み方)と (i)(`trailing_backslashes` の下限)、(c) の mawk・gawk の結果、Related の plan と reports を足した。`.awk` の行は Debt に取り消し線と閉じの文を付け、Why deferred を過去形にした。AGENTS.md、`.claude/rules/ralph/`、README.md、docs/quality、`templates/base/` に、この PR で間違いになる記述はなかった(変更なし)
+- [x] Review artifact created
+- [x] Verification artifact created
+- [x] Test artifact created
 - [ ] PR created
