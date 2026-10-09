@@ -9,11 +9,8 @@
 # its paths (jq, and the sed + awk fallback when jq is absent), so a newline
 # or a tab in the command is a real newline or tab here.
 #
-# The awk program decides in two ways, and either one denies. It is in
-# three files next to this script, which the awk call below reads as one
-# program: pre_bash_guard_lex.awk (lexing), pre_bash_guard_commands.awk
-# (simple-command assembly and data regions) and pre_bash_guard_rules.awk
-# (the rules, the sentinel, and the command lists NOEXEC and DATACMD).
+# The awk program (three .awk files next to this script; see the comment
+# above the awk call below) decides in two ways, and either one denies:
 #   1. Lexing. Words keep their value with quotes removed: single quotes,
 #      double quotes, and backslashes work as in sh, and quoted and unquoted
 #      parts that touch form one word ("--force" and --for""ce are both
@@ -149,13 +146,13 @@
 # data regions), brace expansion ({su,}do), pathname
 # expansion (?udo, [s]udo), and the hex and octal escapes of $'...' (only
 # \n, \t and \r are decoded). The lexer misses those; the sentinel sees
-# only the text as written. printf reads its words as written (item 6(a)),
-# so a printf with a $'...' word, which holds a $, is no data command. Shell
-# state set up by an earlier command is invisible the same way a variable
-# is: a function named like a data command, or an exec redirection done in
-# an earlier command, is not seen when the next command is judged. So are
-# shell options set in start-up files (with zsh cdablevars, cd looks a
-# non-directory argument up as a variable). Broken
+# only the text as written. The guard reads the words of a printf as written
+# (item 6(a)), so a printf with a $'...' word, which holds a $, is no data
+# command. Shell state set up by an earlier command is invisible the same
+# way a variable is: a function named like a data command, or an exec
+# redirection done in an earlier command, is not seen when the next
+# command is judged. So are shell options set in start-up files (with zsh
+# cdablevars, cd looks a non-directory argument up as a variable). Broken
 # input (an unclosed quote or parenthesis, a heredoc without its end line)
 # still exits 0, with or without a deny.
 set -eu
@@ -176,13 +173,17 @@ emit_deny() {
 
 # The command goes to awk on stdin (awk -v would process its backslashes).
 # awk reads the program from the three .awk files next to this script, with
-# -f in the order lex, commands, rules; this script, lib_json.sh and the
-# three .awk files must be installed together. awk prints the name of the
-# first rule that denies, or nothing. Its exit status goes to awk_status
-# (the status of the assignment is that of the command substitution, whose
-# last command is awk). A missing or failing awk, or a missing or
-# unreadable .awk file (awk then exits non-zero), falls back to the
-# previous guard's rules below.
+# -f in the order lex, commands, rules, as one program whose functions and
+# globals are shared across the files: pre_bash_guard_lex.awk (text access
+# and lexing), pre_bash_guard_commands.awk (simple-command assembly and data
+# regions) and pre_bash_guard_rules.awk (rule judgement, the sentinel, BEGIN
+# with the command lists NOEXEC, DATACMD and RESW, and END). This script,
+# lib_json.sh and the three .awk files must be installed together. awk
+# prints the name of the first rule that denies, or nothing. Its exit
+# status goes to awk_status (the status of the assignment is that of the
+# command substitution, whose last command is awk). A missing or failing
+# awk, or a missing or unreadable .awk file (awk then exits non-zero),
+# falls back to the previous guard's rules below.
 awk_status=0
 rule="$(printf '%s' "$command" | LC_ALL=C awk -f "$HOOK_DIR/pre_bash_guard_lex.awk" -f "$HOOK_DIR/pre_bash_guard_commands.awk" -f "$HOOK_DIR/pre_bash_guard_rules.awk" 2>/dev/null)" || awk_status=$?
 

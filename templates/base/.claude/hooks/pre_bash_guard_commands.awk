@@ -1,11 +1,7 @@
 # pre_bash_guard_commands.awk holds the "Simple-command assembly" and
-# "Data regions" sections of the awk program of pre_bash_guard.sh. The guard
-# passes its three .awk files to one awk with -f, in the order
-# pre_bash_guard_lex.awk, pre_bash_guard_commands.awk,
-# pre_bash_guard_rules.awk, and awk reads them as one program: functions
-# are shared across the files, and BEGIN and END are in
-# pre_bash_guard_rules.awk. The shell no longer passes the program in
-# single quotes.
+# "Data regions" sections of the awk program of pre_bash_guard.sh. How awk
+# reads it together with the other two .awk files is in the comment above
+# the awk call in pre_bash_guard.sh.
 
 # ======================================================================
 # Simple-command assembly
@@ -97,16 +93,20 @@ function pipe_close(ctx) { PLN[ctx] = 0; STN[ctx] = 0; PLID[ctx] = ++PLSER }
 # data_first_ok(ctx): 1 when the command being assembled may give a data
 # region. Its first word, with quotes removed as this lexer reads it (the
 # value, so "echo", \echo and e\cho are echo), must be a bare DATACMD name or
-# git. That value is what the shell sees, except in an ANSI-C quote with an
-# escape other than \n \t \r, which lex_ansi reads as the character after
-# the backslash: $SQ\x65choSQ is echo to the shell and x65cho here (no
-# DATACMD name), while $SQ\echoSQ is echo here and an ESC and cho to bash
-# and zsh. A word with a slash does not qualify, even when its basename is a
-# DATACMD (/bin/echo and ./echo may be any program); a value that still holds
-# a substitution or a variable ($(x), $CMD, ${x:-echo}) does not match; and a
-# command of only redirections has no first word. This first word is read
-# before assignments and wrappers are skipped, so env, command, nice,
-# builtin, exec, sh, an assignment, ! and any other name give 0.
+# git. That value is what the shell sees, with two exceptions. One is an
+# ANSI-C quote with an escape other than \n \t \r, which lex_ansi reads as
+# the character after the backslash: $SQ\x65choSQ is echo to the shell and
+# x65cho here (no DATACMD name), while $SQ\echoSQ is echo here and an ESC
+# and cho to bash and zsh. The other is $"...", which the lexer and bash
+# read as the quoted text and zsh and dash as a $ before it: $"echo" is echo
+# here and to bash, and $echo to zsh and dash, so $"echo" SQsudo lsSQ gets a
+# data region where the previous guard denies it. A word with a slash does
+# not qualify, even when its basename is a DATACMD (/bin/echo and ./echo
+# may be any program); a value that still holds a substitution or a
+# variable ($(x), $CMD, ${x:-echo}) does not match; and a command of only
+# redirections has no first word. This first word is read before
+# assignments and wrappers are skipped, so env, command, nice, builtin,
+# exec, sh, an assignment, ! and any other name give 0.
 function data_first_ok(ctx,    v) {
   if (WN[ctx] < 1) return 0
   v = WV[ctx, 1]

@@ -1,10 +1,7 @@
 # pre_bash_guard_lex.awk holds the "Text access" and "Lexing" sections of
-# the awk program of pre_bash_guard.sh. The guard passes its three .awk files
-# to one awk with -f, in the order pre_bash_guard_lex.awk,
-# pre_bash_guard_commands.awk, pre_bash_guard_rules.awk, and awk reads them
-# as one program: functions are shared across the files, and BEGIN and END
-# are in pre_bash_guard_rules.awk. The shell no longer passes the program
-# in single quotes, so a single quote may appear in it.
+# the awk program of pre_bash_guard.sh. How awk reads it together with the
+# other two .awk files is in the comment above the awk call in
+# pre_bash_guard.sh.
 
 # ======================================================================
 # Text access
@@ -90,7 +87,7 @@ function find_str(p, str,    L, r, k) {
 # end_cmd, reset by pipe_close): PLC[ctx, 1..PLN[ctx]] are the ids of its
 # commands that end with |, STC[ctx, 1..STN[ctx]] the ids of its commands
 # at the top level, staged for pipe_decide, and PLID[ctx] the id of the
-# pipeline (CPL[cid] of each command in it).
+# pipeline (CPL[cid] of each of its commands that end with |).
 function new_ctx(d) {
   if (d > MAXD) deny("too_deep")
   CTX++
@@ -484,7 +481,8 @@ function lex_redir(ctx, rs,    c, c2, op, s, k) {
     # A delimiter word with a dollar sign or a backtick drops every data
     # region of the command. The shells read most such words as written, as
     # this lexer does: bash, zsh and dash take ${x} and $x literally, and
-    # bash and zsh a word in backticks (dash reports a syntax error). Two
+    # bash and zsh a word in backticks; dash does too for `x`, but reports a
+    # syntax error when a space or a tab is inside, as in `echo x`. Two
     # forms are read differently: an ANSI-C quote with an escape other than
     # \n \t \r, which the lexer reads as the character after the backslash
     # ($SQ\x45SQ is E to bash and zsh, x45 here), and $"...", which the lexer
