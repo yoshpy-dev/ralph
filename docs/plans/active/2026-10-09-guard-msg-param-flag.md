@@ -127,7 +127,12 @@ None (guard の 1 ファイルとその template の写し、テスト、tech-de
   - S1 完了(1e032dea、implementer/opus): `lex_dollar` が「展開」(`LD_EXP`)、「ANSI-C か locale の引用」(`LD_ANSI`)、添字の始まりの位置(`LD_SUB`)を立て、`lex_word`・`lex_dq`・`add_word` が語ごとに持つ(`WEXP`、`WANSI`)。`msg_check` と rg の判定を印に置き換え、添字は `$` から語の終わりまでを `xnote` した。テスト 2016 件。既存のテストで判定が変わったものはない。印の名前の文字に数字も含めた(zsh は `$0[1]` を添字とする)。rg の `WS` を固定するため、バッククォートの形 `` rg `echo --pre` sh 'sudo ls' `` を B 節に足した
   - S1b 完了(43e73568、implementer/opus): S1 の implementer が見つけた、特別なパラメータの添字(`$@[…]`、`$*[…]`、`$#x[…]`。zsh で置換の実行を確かめた)を添字の判定に足した。plan の Objective 3(zsh の添字の評価)の範囲で、Scope の書き方(名前 0 文字以上)を広げたもの(止める側)。二重引用符の中で開く添字(`"$arr["'$(…)'"]"`)をテストで固定した。テスト 2032 件
   - S2 完了(inline、docs だけ): tech-debt の 3 か所を直した。guard の限界の行の rg の変数の語、テストの穴の行の rg、PR #211 の止めすぎの行の (a) を解消済みにし、この PR で増える止めすぎ(`$` の展開のあるメッセージと rg、添字のあとの同じ語)を新しい行に書いた
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+  - self-review(26a22ee3、reviewer): Merge yes。LOW 3 件。1 件目(tech-debt の guard の限界の行に、rg の変数の語を未解決とする記述と、発火した Trigger の持ち越しの抜けが残る)と 2 件目(新しい行の commit と `$` の範囲の書き方、句点)は sync-docs で直し、3 件目(コメント 3 か所)は次の行の 899fff16 で直した
+  - コメントの直し(899fff16、inline。self-review の後、verify の前): self-review の LOW 3 への対応。guard と template の写し(バイト単位で同じ)とテストのコメントを直した(`lex_word` の添字の説明、`stage_note` の並べ替えの例、テストの group 10 の「whole source word」)。コメントだけの変更で、コードの行は変わっていない
+  - verify(6157d685、verifier): partial-pass。AC1〜AC4 を確認した(AC5 は /test)。AC6 は tech-debt の残りの記述(V-1、V-2)を sync-docs に残した。V-3(guard のヘッダーの (b) が `$"…"` を展開しない `$` に挙げていない)は guard のコメントなので、tech-debt の (e) に持ち越した。V-4: Scope の「PR #211 が D 節の `edge_sentinel_deny` などに置いた、この plan で none になる形は `edge_none` に移す」に当たる行はなく、移す作業は要らなかった(base の行で判定が変わったものはなく、足した行だけが変わった)。Scope は digest の範囲なので直さない
+  - test(a9d255bd、tester): pass。`run-test.sh` は rc 0(shell 40 本で 3,881 件、Go 8 package)。guard のテストは 2,032 件、0 失敗(macOS の BSD awk、ubuntu の mawk と gawk。jq なしは 1,013 件、0 失敗、1,008 件 skip)。mutation は 22 個で 16 個が赤。残った 6 個のうち、穴の側は M20(`=` の修飾。テストに `$=` の行がない)の 1 個で、M13 の系統 4 個は止める側、M17 は等価。Test gaps は tech-debt の (e) に、PR B で足す形として持ち越した
+  - sync-docs(この commit、`docs/reports/sync-docs-2026-10-09-guard-msg-param-flag.md`、doc-maintainer): tech-debt の 3 行を直した。guard の限界の行は、データ区間の定義に `WEXP` の印と zsh の添字の範囲を書き、rg の条件を印に合わせ、rg の変数の語を Impact・Why deferred・Trigger で解消済みにし(固定先は B 節 group 11)、Impact (a) から止めすぎの行を指し、(d) の行数(guard 1596 行、awk 1380 行)と発火した (d)・(e) の持ち越しを書き、(e) に V-3 と test gaps(M20、M13 の系統)を足した。新しい止めすぎの行は commit と `$` の範囲(`5$,` の例)を直し、解消済みにした行は Trigger の句点を足した。ほかの文書に直す箇所はなかった。digest は `ebf5a9ac3a15` のまま
+- [x] Review artifact created
+- [x] Verification artifact created
+- [x] Test artifact created
 - [ ] PR created
