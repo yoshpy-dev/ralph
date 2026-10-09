@@ -121,7 +121,8 @@ None (検査の段を 1 つ足し、guard の中の判定を変えないコー�
 - [x] Plan approved
   - 2026-10-09: ユーザーが承認ゲートで Approve。承認の前に、consult(consult-plan-guarddebt)の指摘(`(echo sudo ls)` は `(` の規則だけでも止まるので許可リストの確かめに使えない)と、Codex の plan advisory の MEDIUM(DATACMD に `exec` を 1 つ足すと穴が開くが、今のテストの行では気づけない)を反映し、テストに不変条件の検査と `exec >run.sh; echo 'sudo ls'` の行を足すことにした(AC5b)。返答で勧めた「4 と 2・3 を分ける」から、1 つの PR にまとめる形に変えたことはユーザーに伝えた。図解ページは描いていない(Visual review を参照)
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1 完了(f09d8209、inline。1 ファイルに段を 1 つ足すだけで、引き継ぎより安い): `verify.local.sh` に `check_guard_awk` を足し、`run_static_checks` の `sh -n` の段の隣で root と template の両方を読む。static は rc 0(2 つの段とも OK)。scratch に写した木で `pre_bash_guard_commands.awk` に構文エラーを足すと、その段が awk のエラーを出して FAIL、`verify.local.sh` は rc 1(ほかの FAIL は、root だけを壊したので写しと食い違った check-sync の 1 つ)。戻すと rc 0
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
