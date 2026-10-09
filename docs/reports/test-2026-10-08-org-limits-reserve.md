@@ -1,5 +1,142 @@
 # Test report: org-limits-reserve
 
+- Date: 2026-10-09(JST。実行の記録は UTC の 2026-10-08 23:36〜23:57。ファイル名は計画の日付)
+- Plan: docs/plans/active/2026-10-08-org-limits-reserve.md
+- Tester: tester subagent (Claude Opus 5.5)、パイプライン 3 回目(cycle 3)。ユーザーが上限を 3 に上げた回で、`cycle-count.json` は /cross-review の決まりで 2 のままなので、この報告と insight event に cycle 3 と書く
+- Scope: HEAD 8b83abeb(テストを足した commit は 066bf282)。cycle 2 の test(6ee9836b)からのコードの差分は a94c914f だけで、`internal/org/verbs.go` の補償(`compensateUnderLock` を足し、`reactivateSeat`・`reopenWorkspace`・`reserveAgain` が close の前の写しとロックの下で読み直した台帳の両方を見る)と、`verbs_test.go` の 8 ケース。ほかは文書の commit で、27fefc47 の `AGENTS.md` と `templates/base/ralph.toml` のコメントを含む。`spawn.go`、`envelope.go`、`reserve.go`、`verbs_all.go`、`manifest.go`、`lockfile.go`、`internal/cli/`、`internal/config/`、`scripts/`、`tests/` は 6ee9836b から変わっていない(`git diff --stat` が空)。behavioral test だけを実行した(静的解析は /verify の担当)。重点は、新しいテストの安定性(`-race`、`-count=10`、負荷の下)、self-review の削除の表の 7 行の mutation、cycle 1 と 2 で生き残った X18 の後継、verify V3-1 の挙動
+- Evidence: `docs/evidence/test-2026-10-08-org-limits-reserve.log` の末尾の「cycle 3」の節(`docs/evidence/*.log` は gitignore の対象なので commit しない)。`run-test.sh` 自身のログは `docs/evidence/verify-2026-10-08-233606.log`
+- 番号の付け方: cycle 1 の Test gaps 1〜8 と mutation の番号(M1〜M14、X1〜X24、P1)は付録 A に、cycle 2 の T2-1〜T2-4 と N1〜N14 は付録 B に、原文のまま残す。tech-debt の行 172 と 176 がその番号を指しているため。この回の mutation は、self-review の表の 7 行を G1〜G7 とし、ほかは S(写しで判断する)、L(ロック)、E(エラー文と黙った skip)、R、H、O、Q(仮の修正)で振る。Test gaps は T3-1 から振る
+
+## Test execution
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh`(8b83abeb、テストを足す前) | shell 39 本(2,047 件)、Go 8 パッケージ | すべて | 0 | shell 1(環境による。下の注) | 434 s、rc 0 |
+| `go test ./... -count=1 -coverprofile`(テストを足したあと) | 8 パッケージ | 8 | 0 | 0(`[no test files]` の 2 パッケージを除く) | 120 s(`internal/cli` 117 s)、rc 0 |
+| `go test -race ./internal/org/... -count=1`(足したあと) | 3 パッケージ | 3 | 0 | 0 | 20 s、rc 0 |
+| `^TestOrgCloseDeferredSelf` を `-count=10`(足したあと、単独) | top-level 180(18 本 × 10)、subtest 450 | 630 | 0 | 0 | 5 s、rc 0 |
+| 同じものを `-race -count=10` | top-level 180、subtest 450 | 630 | 0 | 0 | 7 s、rc 0 |
+| 同じものを、裏で `internal/cli` と `internal/org` の全体を流しながら 3 回(1 回は `-race`) | top-level 540、subtest 1,350 | 1,890 | 0 | 0 | 1 回 4〜7 s、rc 0(裏の実行も rc 0。`internal/cli` 70 s、`internal/org` 13 s) |
+| mutation(`go test -overlay`。HEAD のテストのまま) | 23 件 | red 20 件 | 生き残り 3 件(R1、H1、O1) | - | 1 件 13〜21 s |
+| mutation(足したテストを入れて流し直し) | 25 件(上の 23 件と仮の修正 Q1、Q2) | red 23 件 | 生き残り 2 件(H1、O1) | - | 1 件 13〜16 s |
+| ロックの mutation を `-count=10`(`a spawn holds the manifest lock` の subtest だけ) | 3 件 × 10 回 | G1、L2、L3 とも 10 回中 10 回 red(同じ subtest は HEAD のコードで 10 回とも pass) | - | - | - |
+| 確かめの probe(overlay で足しただけで commit しない) | 1 本 | 結果をログに出すだけ | - | - | 1 s 未満 |
+
+- 足したテストは 2 本(066bf282。`verbs_test.go` に +114 行で、テストのファイルだけ)。`TestOrgCloseDeferredSelfWorkspace_NewerRecordsWhileClosing_RulesDiffer`(subtest 2 つ)と `TestOrgCloseDeferredSelfWorkspace_ReservationAppendFails_NamesIt`。理由は Test gaps の T3-1〜T3-3
+- shell の件数は suite ごとに数えた。cycle 2 の `run-test.sh`(`docs/evidence/verify-2026-10-08-154409.log`)と、39 本すべての pass・fail・skip の数が一致した(`diff` が空)。a94c914f は shell のテストに触れていない
+- Skipped の 1 件は、cycle 2 と同じ `tests/test-secret-scan-branch.sh` の「the real git older than 2.41 case」(手元の git は 2.49.0)。`tests/test-pre-bash-guard.sh` の `SKIP: 0` は集計行なので数えていない
+- `run-test.sh` の中の `go test ./...` は `internal/org` だけを実行し(19.0 s)、ほかはキャッシュの結果だった。そのため 2 行目で全パッケージを `-count=1` で流し直した
+- `-count=10` の正規表現 `^TestOrgCloseDeferredSelf` は、`internal/org` の 18 本(a94c914f の 2 本と足した 2 本を含む)に当たる。`internal/cli` に同じ接頭辞のテストはない(CLI の後回しの close は `TestOrgStopDisband_OwnPaneOrWorkspace_ClosedLastAfterOutput` で、2 行目の全体の実行に入っている)
+- 依頼にあった `tests/test-secret-scan.sh` の flake は出なかった。失敗がないので、単独の再実行はしていない
+- 実行のあと(テストの commit の前)、worktree の `git status --porcelain` は足したテストの 1 ファイルだけで、main のチェックアウトは空、main の `.harness/state/org` もできていない
+
+## Coverage
+
+- Statement: `internal/org` 93.3%。HEAD のテストでは 93.2%、cycle 2 は 93.1%。ほかの 7 パッケージは cycle 2 と同じ(`internal/cli` 85.3%、`internal/config` 92.8%、`insights` 86.1%、`org/driver` 93.1%、`org/protocol` 97.9%、`scaffold` 75.7%、`upgrade` 91.2%)
+- Function(依頼の関数。「HEAD のテスト」は `verbs_test.go` を HEAD の版に戻した overlay で測った値):
+
+| 関数 | 位置 | HEAD のテスト | 足したあと | 通らない文 |
+| --- | --- | --- | --- | --- |
+| `CloseDeferredSelfPane` | `verbs.go:1017` | 100.0% | 100.0% | なし |
+| `CloseDeferredSelfWorkspace` | `verbs.go:1098` | 100.0% | 100.0% | なし |
+| `compensateUnderLock` | `verbs.go:1208` | 100.0% | 100.0% | なし(ロックが取れない枝と、2 回目の read の失敗の枝も通る) |
+| `reactivateSeat` | `verbs.go:1237` | 100.0% | 100.0% | なし |
+| `reopenWorkspace` | `verbs.go:1268` | 100.0% | 100.0% | なし |
+| `reserveAgain` | `verbs.go:1300` | 88.9% | 100.0% | HEAD のテストでは追記の失敗の戻り(`:1309-1311`) |
+| `selfCompensation.add` / `errorFor` | `verbs.go:1163` / `:1182` | 100.0% / 100.0% | 100.0% / 100.0% | なし |
+| (参考)`lastHerdrAgentName` | `verbs.go:1330` | 80.0% | 80.0% | `return ""`(`:1337`)。tech-debt の行 171 の (a) と同じ |
+
+- Branch: Go の標準ツールには branch coverage がないので測っていない
+- Notes: a94c914f の新しい枝(ロックが取れない、2 回目の read の失敗、3 つの skip)の文はすべて HEAD のテストで通る。`reserveAgain` の追記の失敗(`verbs.go:1309-1311`)だけが通らず、足した `ReservationAppendFails_NamesIt` が通す。行の coverage では、各条件の片側を外せるかは分からないので、下の mutation で確かめた。tech-debt の行 176 の (b) が書く `reserveAgain` の 75.0% は a94c914f の前の関数の値で、今は 88.9%(HEAD のテスト)、足したあとは 100.0%
+
+## Mutation
+
+各 mutation は、`internal/org/verbs.go` の写しを scratchpad に作って 1 か所だけ書き換え、`go test -overlay=<json> -count=1 -vet=off ./internal/org/` でパッケージ全体を流した(`-run` で絞っていない)。worktree のファイルは書き換えていない。最初の 23 件は HEAD のテストのまま流し、テストを足したあとで 25 件を流し直した。どの mutation も build は通った。a94c914f は `internal/org` の外を変えていないので、`internal/cli` では流していない(補償の呼び出し元は `internal/cli` の `closeDeferredSelf` だけ)。
+
+self-review の削除の表の 7 行(依頼):
+
+| # | Mutation | HEAD のテスト | Red になった subtest | self-review の読みとの違い |
+| --- | --- | --- | --- | --- |
+| G1 | ロックを外す(`withManifestLock` の代わりに `fn` を直接呼ぶ。読み直しは残す) | red | `NewerRecordsWhileClosing_Stay` の「a spawn holds the manifest lock」、`NothingRestored_NamesTheManualClose` の「pane / workspace, manifest lock unavailable」 | 同じ |
+| G2 | `reactivateSeat` の `current != seat` を外す | red | 「pane: seat spawned again in another pane」「workspace: org started again with another reservation」「workspace: org started again and disbanded again」 | 同じ |
+| G3 | `reopenWorkspace` の `current != last` を外す | red | 「workspace: herdr gave the id to another org」 | 同じ |
+| G4 | `reserveAgain` の `ActiveReservation(now) != nil` を外す(X18 の後継) | red | 「workspace: org started again with another reservation」「workspace: a spawn holds the manifest lock」 | 同じ |
+| G5 | `reserveAgain` の `!slices.Equal(...)` を外す | red | 「workspace: org started again and disbanded again」 | 同じ |
+| G6 | `errorFor` が skip のときに byHand を足さない | red | 「pane: seat spawned again in another pane」「workspace: herdr gave the id to another org」「workspace: org started again with another reservation」 | self-review は「skip の 4 ケース」と書くが、`HasSuffix` で byHand を見る skip のケースは 3 つ。「org started again and disbanded again」と「a spawn holds the manifest lock」は skip の文だけを見る |
+| G7 | `compensateUnderLock` が 2 回目の read の失敗を無視して、空の台帳で補償する | red | 「workspace: manifest unreadable at the second read」 | 同じ |
+| G7b | 2 回目の read の失敗で nil を返す(失敗を記録しない) | red | 同じ subtest | - |
+
+写しで判断する形に戻す、ロック、エラー文:
+
+| # | Mutation | HEAD のテスト | Red になった subtest |
+| --- | --- | --- | --- |
+| S1 | pane の経路の `reactivateSeat` に、`now` の代わりに close の前の写しを渡す | red | 「pane: seat spawned again in another pane」 |
+| S2 | workspace の経路の `reopenWorkspace` に写しを渡す | red | 「herdr gave the id to another org」 |
+| S3 | workspace の経路の `reactivateSeat` に写しを渡す | red | 「org started again with another reservation」「org started again and disbanded again」 |
+| S4 | `reserveAgain` に写しを渡す(cross-review cycle 2 の指摘の形) | red | 「a spawn holds the manifest lock」「org started again with another reservation」「org started again and disbanded again」 |
+| S5 | workspace の経路の 3 つすべてに写しを渡す(ロックは残す。a94c914f の前の判断) | red | `NewerRecordsWhileClosing_Stay` の workspace の 4 ケース |
+| L2 | 台帳をロックを取る前に読む | red | 「a spawn holds the manifest lock」 |
+| L3 | 別のディレクトリの lock file をロックする | red | 「a spawn holds the manifest lock」と、lock unavailable の 2 ケース |
+| E1 | `errorFor` が「did not record ... again」の文を出さない | red | skip の 5 ケース |
+| E2 | `reactivateSeat` が skip を黙って返す(skipped を `""` にする) | red | G2 と同じ 3 ケース |
+| E3 | `reopenWorkspace` が skip を黙って返す | red | 「herdr gave the id to another org」 |
+| E4 | `reserveAgain` が skip を黙って返す | red | 「a spawn holds the manifest lock」「org started again with another reservation」「org started again and disbanded again」 |
+| E5 | `compensateUnderLock` がロックか read の失敗を `c` に積まない | red | 「manifest unreadable at the second read」と lock unavailable の 2 ケース |
+| R1 | `reserveAgain` が追記の失敗を握りつぶす | **生き残り**(HEAD のテスト)。足したテストで red | 足した `ReservationAppendFails_NamesIt` |
+| H1 | `reactivateSeat` の herdr agent name を `now` でなく写しから取る(a94c914f の前の形) | 生き残り(等価) | なし。下の T3-6 |
+| O1 | workspace の経路で、自分の pane の座席を写しでなく `now` から探す | 生き残り | なし。下の T3-5 |
+
+仮の修正(足した記録のテストが、規則をそろえる修正で落ちることの確かめ):
+
+| # | Mutation | 結果 | Red になった subtest |
+| --- | --- | --- | --- |
+| Q1 | `reserveAgain` が、その org が `now` で走っていれば戻さない(`--reserve` なしの立て直しで古い予約を戻さない形) | red | 足した `RulesDiffer` の「started again without --reserve」だけ |
+| Q2 | workspace の経路が、`now` に新しい `disbanded` があれば 3 つとも戻さない | red | 足した `RulesDiffer` の「only disband run again」と、既存の「org started again and disbanded again」(skip の文が変わる) |
+
+- 依頼の 7 行はどれも HEAD のテストで red になった。self-review の表の読みは G6 の数え方を除いて実行と合った
+- X18: cycle 1 と 2 で生き残った「すでに予約を持つなら書かない」の早期 return(写しの `ActiveReservation(events) != nil`)は a94c914f で消え、同じ判定は今の台帳の `ActiveReservation(now, orgID) != nil` だけになった。それを外す G4 は HEAD のテストで red になる(2 つの subtest)。tech-debt の行 176 の (a) は、/sync-docs で取り消し線にできる
+- ロックを外す 3 件(G1、L2、L3)を、時間に頼る subtest(「a spawn holds the manifest lock」。別の goroutine がロックを持って 200 ms 待つ)だけで `-count=10` 流した: G1、L2、L3 とも 10 回中 10 回 red で、同じ subtest は HEAD のコードで 10 回とも pass した。補償は、ロックを持つ goroutine が 200 ms 待つ間に読むので、cycle 1 の M14(ロックを外して 30 回中 29 回 red)のような取りこぼしはなかった。G1 と L3 は lock unavailable の 2 ケースでも決定的に落ちる
+- 足した `RulesDiffer` は、HEAD の挙動を変える mutation のうち G2、G5、G6、S3、S4、S5、E1、E2、E4 でも red になる。記録のテストなので、補償を変えるときには一緒に直す
+
+## Failure analysis
+
+| Test | Error | Root cause | Proposed fix |
+| --- | --- | --- | --- |
+| なし | - | - | - |
+
+## Regression checks
+
+| Previously broken behavior | Status | Evidence |
+| --- | --- | --- |
+| cross-review cycle 2 の指摘(F-5): 補償が close の前の写しで予約を書き戻し、立て直した org の新しい予約を古いものに替える | 直っている | 「org started again with another reservation」「a spawn holds the manifest lock」が通る。写しで判断する S4 と S5 が red |
+| AC15 のふつうの失敗(close を待つ間に台帳に新しい記録がない): workspace、座席、予約の順に書き戻し、ほかの org は同じ範囲を予約できない | 保たれている | 変わっていない `CloseFails_ReservationRestored` が `-count=10` と `-race` で通る |
+| plan のリスクの項目(ほかの org が枠か範囲を取った窓は、打ち直しの disband で解ける) | 保たれている | 変わっていない `ReservationRestored_RiskWindowClearedByRetry` が通る |
+| `--force` は何も書かない | 保たれている | `TestOrgCloseDeferredSelf_Force_NoCompensation` が通る(`--force` はロックを取る前に戻る) |
+| pane の経路の補償(S8)、確かめのあとの close、打ち直しの close | 保たれている | `TestOrgCloseDeferredSelfPane_*` と `TestOrgCloseDeferredSelf_RecheckedBeforeTheClose` が `-count=10` で通る |
+| cycle 1 と 2 の上限と予約の判定 | 変わっていない | 判定のファイルは 6ee9836b から変わっていない(上の Scope)。cycle 2 の mutation(付録 B)は流し直していない |
+
+## Test gaps
+
+この回に見つけたもの。cycle 2 の T2-1〜T2-4 は付録 B に、cycle 1 の Test gaps 1〜8 は付録 A にある。どちらも a94c914f の差分に関係しないので変わらない。ただし、cycle 1 の Test gaps 3 と tech-debt の行 176 の (a)(どちらも X18)は、上の G4 で埋まった。
+
+- T3-1(verify V3-1): close を待つ間に、同じ org の disband だけが打ち直された場合の挙動を、足したテスト `RulesDiffer` の 1 つめの subtest で記録した。verify の読みのとおりだった。座席は最新の状態イベントが変わらない(org の `disbanded` は seat_id を持たないので座席の最新の状態イベントにならず、`stopped` の座席は前後どちらでも Active が false)ので戻り、ws-1 も開き直す。予約は、新しい `disbanded` の前に予約がないので戻らない。org-a は走っている扱い(`RunningOrgs`)に戻り、ほかの org が同じ範囲を予約できる。エラーは workspace と座席を戻したことと、予約を戻さなかったことを書き、手で閉じる herdr のコマンドで終わる。打ち直しの disband で解ける。挙動の記録で、要件ではない。3 つの規則をそろえるか(Q2 の形)は判断が要るので、self-review が案を書いた C3 のまとめの行(tech-debt、/sync-docs の担当)に入れるのがよい
+- T3-2(self-review C3-4 の (a)): `--reserve` なしで org を立て直した場合を、同じテストの 2 つめの subtest で記録した。座席は戻らず、古い予約は立て直した run に書き戻され、ほかの org の重なる予約は拒否される。Q1 で落ちることを確かめた
+- T3-3: `reserveAgain` の追記の失敗の枝にテストがなく、追記の失敗を握りつぶす R1 が生き残った。`ReservationAppendFails_NamesIt` を足して埋めた(manifest を読み取り専用にする既存の `readOnlyManifest` を使い、エラーに予約の追記の失敗が出ることを見る)。これで tech-debt の行 176 の (b) から `reserveAgain` を外せる
+- T3-4(self-review C3-1 の (b)、verify V3-3): ロックを取らない書き込みが、読み直しと append の間に入る窓。overlay だけの probe で確かめた(commit していない)。最初の補償の append の `TS` が `o.Now` を呼ぶ時に disband を打ち直すと、台帳は `disbanded`、`org_workspace_created`、`spawned`、`scope_reserved` の順になり、新しい `disbanded` のあとで 3 つとも戻る。org-a は予約つきで走っている扱いに戻り、エラーは「recorded ... again, so running the command again retries the close」で、手で閉じるコマンドは付かない。同じ disband が読み直しの前に入ると T3-1 の結果(予約だけ戻らない)になるので、結果はどちらの側に入るかで変わる。窓は読み直しから最後の append までで、herdr を待つ時間は含まない。probe は `reopenWorkspace` の中の呼び出しの順に頼るので、テストとしては足していない
+- T3-5(O1): workspace の経路は自分の pane の座席を写し(`rr.Events`)の `lastSeatOnPane` で探す。`now` で探す O1 は生き残った。違いが出るのは、close を待つ間に同じ pane id で別の座席が記録された場合だけで、tech-debt の行 171 の (b) の C2-2 の側(同じ pane id を持つ古い `stopped` の座席)と同じ欠けである。a94c914f の前からある
+- T3-6(H1): `reactivateSeat` の herdr agent name を写しから取っても結果は変わらない。等価な mutation である。`HerdrAgentName` を書くのは `spawned` だけ(`spawn.go:979` と補償の `reactivateSeat`)で、`spawned` は座席の状態イベントなので、新しい名前が台帳にあれば `current != seat` で先に skip する。self-review の「状態イベントが変わらない座席では結果が同じ」の読みは実行でも合った
+- T3-7: ロックの競合は同じプロセスの goroutine だけで見ている。別プロセス、本物の herdr、古い ralph が書いた台帳は、cycle 1 と 2 と同じく見ていない(tech-debt の行 176 の (c)(e))。この回の mutation は `internal/cli` では流していない
+
+## Verdict
+
+- Pass: pass。`run-test.sh`(full)は rc 0(shell 2,047 / 2,047、Go 8 パッケージ)。テストを足したあとの `go test ./... -count=1`、`-race`、`^TestOrgCloseDeferredSelf` の `-count=10`(単独、`-race`、負荷の下)も 0 failed。mutation は HEAD のテストで 23 件のうち 20 件が red で、依頼の 7 行(G1〜G7)はすべて red。X18 の後継の G4 も red になった。生き残りの R1 は足したテストで red になり、H1 は等価、O1 は a94c914f の前からある欠け(T3-5)。V3-1 の挙動は、テストの実行で verify の読みのとおりと確かめ、記録のテストにした
+- Fail: なし
+- Blocked: なし。T3-1〜T3-7、付録 B の T2-1〜T2-4、付録 A の Test gaps 2〜8 は merge を止めない
+
+## 付録 B: cycle 2 の test レポート(6ee9836b 時点の原文)
+
+cycle 2 の本文を、見出しを 1 段下げただけでそのまま残す(`## Verdict` が 2 つにならないようにするため)。この報告の本文が、ここの T2 番号と N 番号を指している。`file:line` と coverage の値は f144021d 時点のもので、`internal/org/verbs.go` は a94c914f で行がずれた(関数名で探す)。`reserveAgain` の 75.0% は a94c914f の前の関数の値で、この回は 88.9%(HEAD のテスト)と 100.0%(テストを足したあと)。本文の中の「付録 A」は、この後ろの付録 A(cycle 1)を指す。
+
 - Date: 2026-10-09(JST。実行の記録は UTC の 2026-10-08 15:44〜16:01。ファイル名は計画の日付)
 - Plan: docs/plans/active/2026-10-08-org-limits-reserve.md
 - Tester: tester subagent (Claude Opus 5.5)、pipeline cycle 2(`cycle-count.json` は 2。既定の上限の最後の回)
@@ -7,7 +144,7 @@
 - Evidence: `docs/evidence/test-2026-10-08-org-limits-reserve.log` の末尾の「cycle 2」の節(`docs/evidence/*.log` は gitignore の対象なので commit しない)。`run-test.sh` 自身のログは `docs/evidence/verify-2026-10-08-154409.log`
 - 番号の付け方: cycle 1 の Test gaps 1〜8 と mutation の番号(M1〜M14、X1〜X24、P1)は、付録 A に原文のまま残す。tech-debt の行 172 と 176 がその番号を指しているため。この回の新しい mutation は N1 から、新しい Test gaps は T2-1 から振る。cycle 1 の mutation を流し直したものは cycle 1 の番号で書く
 
-## Test execution
+### Test execution
 
 | Suite / Command | Tests | Passed | Failed | Skipped | Duration |
 | --- | --- | --- | --- | --- | --- |
@@ -27,7 +164,7 @@
 - 依頼にあった `tests/test-secret-scan.sh` の flake は出なかった。失敗がないので、単独の再実行はしていない
 - 実行のあと、worktree と main のチェックアウトの `git status --porcelain` はどちらも空で、main の `.harness/state/org` もできていない
 
-## Coverage
+### Coverage
 
 - Statement: `internal/org` 93.1%(cycle 1 は 93.0%)。ほかの 7 パッケージは cycle 1 と同じ(`internal/cli` 85.3%、`internal/config` 92.8%、`insights` 86.1%、`org/driver` 93.1%、`org/protocol` 97.9%、`scaffold` 75.7%、`upgrade` 91.2%)
 - Function(依頼の関数と、cycle 1 の一覧):
@@ -53,7 +190,7 @@
 - Branch: Go の標準ツールには branch coverage がないので測っていない
 - Notes: 新しい枝(`spawn.go:1100-1103`)の文はすべて通る。行の coverage からは `if !seat.Active` を外せるかどうかは分からないので、下の N3 で確かめた。tech-debt の行 176 の (b) は `idempotentRespawn` を 87.5% と書くが、今は 90.9% である。通らない文は変わっていない(self-review C2-5 の指摘と同じ)
 
-## Mutation
+### Mutation
 
 各 mutation は、対象のファイルの写しを scratchpad に作って 1 か所だけ書き換え、`go test -overlay=<json> -count=1 -vet=off` でパッケージ全体を流した(`-run` で絞っていない)。まず 26 件すべてを `internal/org` で流した。生き残った N3 と N8、それに N13 は、`internal/org` と `internal/cli` の両方で流し直した。worktree のファイルは書き換えていない。
 
@@ -96,13 +233,13 @@ cycle 1 の mutation の流し直し(依頼の安全側のもの。番号は付�
 - 依頼の 4 件(N1、N2、N3、N4)のうち、N3 だけが生き残った。cycle 1 の安全側の mutation は、X18 を除いてすべて red のまま。
 - N1 を落とすのは新しいテストだけである。新しいテストを戻すと、この回の修正は守られなくなる。
 
-## Failure analysis
+### Failure analysis
 
 | Test | Error | Root cause | Proposed fix |
 | --- | --- | --- | --- |
 | なし | - | - | - |
 
-## Regression checks
+### Regression checks
 
 | Previously broken behavior | Status | Evidence |
 | --- | --- | --- |
@@ -112,7 +249,7 @@ cycle 1 の mutation の流し直し(依頼の安全側のもの。番号は付�
 | help の 3 か所(76d1cf1c) | 表示を確かめた | 実バイナリで、`org spawn --help` と `org start --help` に `orgWideLimitsHelp` の段落が 1 回ずつ出る。`org status --help` に `Long` が出る。4 つの help の `--config` の説明が新しい文になる。どれも rc 0。`status` の `reserved: <path>, ...` の形は、`printStatusTable` の `strings.Join(reservation, ", ")` と、`TestOrgStatus_ShowsReservation` の期待(`reserved: docs/x.md, internal/auth/`)に合う。文言の内容が正しいかは /verify の担当 |
 | 今ある `max_seats`、scope のゲート、spawn の idempotent | 保たれている | `run-test.sh` と `go test ./... -count=1` がすべて通る |
 
-## Test gaps
+### Test gaps
 
 この回に新しく見つけたもの。cycle 1 の Test gaps 1〜8 は付録 A にある。1 で足した 2 本のテストは今も通り、2〜8 はこの回の差分に関係しないので変わらない(X18 は流し直しても生き残る)。
 
@@ -121,7 +258,7 @@ cycle 1 の mutation の流し直し(依頼の安全側のもの。番号は付�
 - T2-3: help の文言(`orgWideLimitsHelp`、`status` の `Long`、`--config` の説明)を固定するテストはない。ほかの help の文も、`HiddenFromHelp` を除いて固定されていない。この回は実バイナリの出力で表示だけを確かめた
 - T2-4: 新しいテストの古い台帳は、`spawned` と `disbanded` の 2 行を手で書いて作っている。古い ralph のバイナリが実際に書いた台帳では確かめていない(verify の Coverage gaps と同じ)。CLI から古い台帳に `ralph org start --reserve` を打つテストもなく、CLI の経路は verify の実バイナリの確認だけである
 
-## Verdict
+### Verdict
 
 - Pass: pass。`run-test.sh`(full)は rc 0(shell 2,047 / 2,047、Go 8 パッケージ)。`go test ./... -count=1`、`-race`、変わったテストの `-count=3` も 0 failed。mutation は 26 件のうち 23 件が red。依頼の 4 件では N1、N2、N4 が red で、N3 は等価なので生き残った(T2-2)。cycle 1 の安全側の mutation は、X18 を除いてすべて red のまま。N8 の生き残り(T2-1)は理由の文の違いだけで、AC の穴ではない。AC1 と AC14 の新しい枝を、Phase 1 と Phase 2 の両方でテストの実行で確かめた
 - Fail: なし
