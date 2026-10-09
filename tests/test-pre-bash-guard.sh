@@ -907,6 +907,12 @@ edge_deny=(
   # Cycle 4 /test: a value attached with = is one word, so the next word is
   # read as a flag again.
   'git commit --trailer=x --no-verify -m fix'
+  # Plan guard-zsh-data-gaps /test: msg_check looks for a command
+  # substitution before it looks for a ${ (the order the plan keeps), so a
+  # ${...} next to a $(...) in a message does not skip the commit_message
+  # deny. --message " is not the -m " the sentinel reads, so only that rule
+  # denies this; the old guard lets it through.
+  'git commit --message "${msg}$(id)"'
 )
 check_modes D deny absent -- "${edge_deny[@]}"
 
