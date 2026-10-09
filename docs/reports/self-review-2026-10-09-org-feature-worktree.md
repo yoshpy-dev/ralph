@@ -2,9 +2,9 @@
 
 - Date: 2026-10-09
 - Plan: docs/plans/active/2026-10-09-org-feature-worktree.md(承認済み、digest 56e435bfa976)
-- Reviewer: reviewer subagent (Claude)、パイプライン 1 回目(cycle 1、上限 2)。初回は 2a544af9 の時点、再実行は 8aae7ce2・2c1bb13b のあと(cross-review の前の直しなので cycle は増えない)
-- Scope: diff の品質だけ。`git diff 765da6bd...HEAD`(9 コミット、27 ファイル、+6040/-367)。テスト・静的解析・仕様適合・文書の整合の検査は /test・/verify・/sync-docs の担当で、ここでは行っていない。ただし依頼された「雛形と /org skill の文言が、コードのしていることと合っているか」は、文言の根拠をコードで確かめた
-- 番号の付け方: 初回の finding は M1〜M2(MEDIUM)、L1〜L5(LOW)、再実行で足した finding は N1〜N3(LOW)。/verify・/test・tech-debt が番号で指す場合は、この報告の番号を使う。報告を上書きしても番号は付け替えない
+- Reviewer: reviewer subagent (Claude)。パイプライン 1 回目(cycle 1、上限 2)は、初回が 2a544af9 の時点、再実行が 8aae7ce2・2c1bb13b のあと(cross-review の前の直しなので cycle は増えない)。パイプライン 2 回目(cycle 2、上限)は、cross-review(cycle 1)の ACTION_REQUIRED を直した d49bbc34・07d38e6d・c2a1f8c4 と、この review の途中で入った 9c1d447f のあと。現況は末尾の「Cycle 2」の節と Recommendation
+- Scope: diff の品質だけ。cycle 1 は `git diff 765da6bd...HEAD`(9 コミット、27 ファイル、+6040/-367)、cycle 2 は `git diff 183cb190 HEAD`(4 コミット、15 ファイル、+592/-99)。テスト・静的解析・仕様適合・文書の整合の検査は /test・/verify・/sync-docs の担当で、ここでは行っていない。ただし依頼された「雛形と /org skill の文言が、コードのしていることと合っているか」は、文言の根拠をコードで確かめた
+- 番号の付け方: 初回の finding は M1〜M2(MEDIUM)、L1〜L5(LOW)、再実行で足した finding は N1〜N3(LOW)、cycle 2 で足した finding は C2-1〜C2-6。cycle 1 の節にある「C2-1」「C2-3」「T2-1」「T2-2」は、台帳の行「Wording findings of org-limits-reserve cycle 2」と「Test gaps left by the org-limits-reserve cycle 2 fix」の項目の番号で、この報告の cycle 2 の C2-n とは別。cycle 2 の節で org-limits-reserve の番号を挙げるときは、その旨を添えた。/verify・/test・tech-debt が番号で指す場合は、この報告の番号を使う。報告を上書きしても番号は付け替えない(cycle 1 の節は、台帳の行が指す番号のためにそのまま残してある)
 
 ## Evidence reviewed
 
@@ -59,7 +59,7 @@
 
 ## Tech debt identified
 
-この回(cycle 1、上限 2)は直す回が 1 回残っているので、新しい行は足さない。M1、M2、L1〜L3 は cycle 2 で直せる大きさ。L4、L5 は挙動を変えない。cycle 2 でも直さずに終わる finding があれば、その回の報告で 1 行にまとめて台帳へ送る。
+(cycle 1 の時点の記述。cycle 2 は上限の回で、扱いは「Cycle 2」の節の「Tech debt identified」に書いた。)この回(cycle 1、上限 2)は直す回が 1 回残っているので、新しい行は足さない。M1、M2、L1〜L3 は cycle 2 で直せる大きさ。L4、L5 は挙動を変えない。cycle 2 でも直さずに終わる finding があれば、その回の報告で 1 行にまとめて台帳へ送る。
 
 | Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
 | --- | --- | --- | --- | --- |
@@ -68,6 +68,8 @@
 計画の進捗メモにある「実装中に見つけて送るもの」4 件((1) start を打った ralph と pane の中の ralph の版が違うと台帳が分かれる、(2) reviewer のレポートが Stop hook の `wip:` コミットで PR に入る、(3) 昇格した leader の `ralph org report` が未追跡のファイルを残す、(4) 同じ機能の `start --plan` の同時実行)は、まだ `docs/tech-debt/README.md` にない。/sync-docs で台帳に入れる予定と計画に書いてあるので、入れ忘れると計画の archive で失われる。
 
 ## /sync-docs に渡すもの
+
+(cycle 1 の分。6312b5d6 の sync-docs で台帳の行・計画の進捗・L5 の行まで入っている。cycle 2 の分は「Cycle 2」の節にある。)
 
 - L2 の台帳の行の更新(再実行後の状態: C2-1 は 8aae7ce2 で直ったので、行の (a) を直した旨にする。C2-3 と T2-1・T2-2 の `if !seat.Active` は `idempotentRespawnDecision` に移った。F-2・F-6 のトリガーは満たされたまま)
 - 上の 4 件の新しい行
@@ -107,7 +109,84 @@
 - skill から director を外したあとの文: 承認の節、2 経路の (A)(B)、「機能ごとの org」の導入のどれも、前後の文とつながっている。「分割計画の機能に結びつくのは `start --plan` で立てた org だけ」という追加文は、`reservationDecision` の挙動と合う
 - `FeatureBinding.Complete` の公開: `String()`、`sameFeature`、CLI から使われ、doc は「ActiveFeature が読めた分だけ返し、status が使う」と理由を書いている。`complete` の旧名は残っていない(2c1bb13b の説明どおり、feature.go の中継も外れた)
 
+## Cycle 2(d49bbc34・07d38e6d・c2a1f8c4・9c1d447f のあと)
+
+対象は `git diff 183cb190 HEAD`(4 コミット、15 ファイル、+592/-99)。cross-review(cycle 1)の ACTION_REQUIRED 2 件(leader に台帳を渡す、分割計画のコードフェンス)の直しと、1 件目の直しで要った全体の上限の読み元の変更、その help の書き直し(9c1d447f)。`git log --format='%h parent=%p'` で 183cb190 → d49bbc34 → 07d38e6d → c2a1f8c4 → 9c1d447f の一直線を確かめた。9c1d447f は、この review を始めたときは作業ツリーの未コミット差分(`internal/cli/org.go` と `internal/cli/org_reserve_test.go`)で、途中でコミットされた。コミットの diff が、作業ツリーで読んだ差分と同じこと(ファイルごとの行数 16 と 22、書き換えた文字列、追加したテスト)を確かめた。`git diff --check` は空、追加行に U+FFFD、デバッグ出力、TODO はなく、4 コミットのメッセージに帰属の行はない。skill の 4 面は `cmp` で同一。テストは実行していない。
+
+読んだもの: `parseSplitPlan` の全体と `splitFence`・`fenceRun`・`rejectDigestSkippedLine`・`planLines`・`checkedBoxIndex`、`LedgerMainWorktreeRoot` と `gitMainWorktree`・`samePath`・`resolvedOrClean`、`featureLeaderTask`・`shellQuote`・`startFeatureLeaderParams`、`newOrgSpawnRuntimeAt`・`withMainWorktreeOrgLimits`、`leader.md` の「機能ごとの org」の節、skill の追加 3 か所、追加・変更したテストの全部(`split_test.go` の 2 関数と `Rejects` の 13 ケース、`statedir_test.go`、`feature_test.go` の 3 関数、`prompts_test.go`、`org_reserve_test.go` の AC13 の表と 9c1d447f の help のテスト)と、`orgWideLimitsHelp` の書き直し。
+
+### 依頼された点の結論
+
+1. フェンスの規則(`split.go` の `splitFence`・`fenceRun`): CommonMark の fenced code block と、読んで確かめた範囲では合っている。開く行は、先頭の空白が 3 つまで(4 つ以上とタブは開かない)で、バッククォートかチルダの 3 つ以上。バッククォートの行は、同じ行に別のバッククォートがあると inline code として開かない(チルダは info string に `~` があっても開く)。閉じる行は同じ文字で、開いた長さ以上、先頭の空白は 3 つまで、あとは空白とタブだけ。list の中に 2〜3 つの空白で字下げしたフェンスは開く行として読む。4 つ以上字下げしたフェンスは開かないが、中の行も字下げされているので、見出しにもフィールドにもならない。開いたままのフェンスはファイルの終わりで拒否し、エラーは開いた行を指す。規則ごとに、その条件を外すと落ちるケースが `TestLoadSplitPlan_CodeFences`(14 ケース)と `Rejects`(13 ケース)にある(読んで確かめた。変異の実行はしていない)
+2. `rejectDigestSkippedLine` との関係: この関数はフェンスの判定より前に全行へ掛かり、header より後の `- Status:` / `- Approved:` の拒否もフェンスの外と中で分けない。digest が読まない行(`- Branch:`、`## Progress checklist`、チェック済みの箱、header 以外の Status・Approved)は、フェンスの中でも拒否される。digest 側がフェンスを知らないこと(`TestPlanDigest_MatchesScript` に足したフェンスの入力で、Go の `PlanDigest` とスクリプトの digest が一致するかを見る)と向きが合う。テストは、フェンスの中の `- Branch:`・チェック済みの箱・`## Progress checklist`・feature の `- Status:` と、header のフェンスの中の 2 つ目の `- Status:`・`- Approved:` を固定する。feature の `- Approved:` は同じ関数を通るがケースはない
+3. header と CRLF: header のフェンスの中の `## ` は見出しにならず、中の `- Status:` は header の行として数える(2 つ目は拒否。テストあり)。CRLF は `strings.TrimSuffix(raw, "\r")` のあとにフェンスを読むので、閉じる行の末尾の `\r` で閉じそこなうことはない。閉じるケースと閉じないケースの両方に CRLF のテストがある
+4. `- 台帳:` の行: 引用は POSIX の単一引用符で、`'` は `'\''` にする(`shellQuote`)。`TestFeatureLeaderTask_StateDirIsOneShellWord` が `sh` を通し、空白・`'`・`$`・`*`・`"`・`\`・バッククォートを含む 5 つの値が 1 語で 1 引数になることを見る。パスは生の形と引用した形で 2 回出るが、`- worktree:` の行の並び(`<パス>(leader の cwd)`)と同じ形。位置は最後のヘッダ行(`- 進め方:` の次、本文の前)で、`- 分割計画:` が先頭のままなので、雛形の分岐(`routeLine`)に響かない。`p.StateDir` は start が `ResolveOrgStateDir` で解決した絶対パスで、leader には start が使った台帳と同じ文字列が渡る
+5. leader.md と skill: 動詞の一覧(spawn・send・wait・read・status・stop・report・disband)は、雛形が leader に打たせる動詞と一致する(`start` と `watch` は雛形に出ない)。`--state-dir` は `org` の persistent flag(`internal/cli/org.go:45`)なので、どの動詞も受け付ける。leader が `--state-dir` を付けても、`guardLegacyOrgStateDir` は source が `git-main-worktree` 以外では何もしない。skill の追加は `featureLeaderTask`・`LedgerMainWorktreeRoot`・`parseSplitPlan` の挙動と合う。直しがあるのは C2-2
+6. `LedgerMainWorktreeRoot`: source が `flag`・`env` のとき、打った場所(cwd)の repository の main worktree(`gitMainWorktree`)を求め、解決済みの state dir がその `.harness/state/org` と `samePath` で同じときだけ root を返す。`samePath` は存在する側の symlink を解決する。相対の `--state-dir` は `ResolveOrgStateDir` が打った場所から絶対にするので、ここへは絶対で届く。flag と env は `ResolveOrgStateDir` の優先順(flag があれば env は見ない)で 1 つに決まったあとなので、この関数に両方が同時に来ることはない。別の repository の台帳、linked worktree 自身の台帳、main の root そのもの、source が `git-toplevel`・`cwd` は false を返し(`TestLedgerMainWorktreeRoot` の否定ケース 5 つを 3 つの cwd で)、これまでと同じ挙動(打った場所の設定)に戻る。git が使えないときも false
+7. AC13 のテスト変更(`TestOrgStart_OrgWideLimits_ReadFromMainWorktreeRalphToml`): 旧版の `--state-dir`・env のケースは「打った場所の設定を使うので許される」を固定していた(test report の M13 の変異で red になるケース)。新版はそれを `refused: true` に反転し、cwd の linked worktree の `ralph.toml` に `max_orgs = 99` を置く(`worktreeAllowing99`)ので、実装が打った場所の設定を読めば許されて落ちる。反転後も判別できる。絶対と相対の `--state-dir` と env の 3 つを足し、否定の対照として「別の台帳を `--state-dir` で指し、そこに org-a が動いている」ケース(許される)を足した。main の `max_orgs = 1` を読む実装なら、この対照は拒否されて落ちる。契約を反転する理由は、`--state-dir` を付ける leader が feature branch の `ralph.toml` で全体の上限を変えられないようにする(3 段目の約束を保つ)ためで、07d38e6d のメッセージと計画の進捗に書いてある
+8. cycle 1 の回帰: `spawn.go`・`reserve.go`・`verbs.go` は cycle 2 の diff にない。M1 の定数と雛形の `--id implementer`・`reviewer`、M2(`grep -rnw director` が skill・README・AGENTS.md・`templates/base`・`internal` で 0 件)、L1・L3・L4 は触れていない。leader.md の冒頭の段落は d49bbc34 で 2 つに分かれたが、L3 の直しの文(手順 1・4・5 の書き込みは予約の外でよい)は残っている。N1 は繰り返された(C2-3)
+
+### 初回・再実行の指摘の現況(cycle 2 の時点)
+
+| ID | 現況 | 備考 |
+| --- | --- | --- |
+| M1 | 直ったまま | cycle 2 は触れていない |
+| M2 | 直ったまま | 同上 |
+| L1 | 直ったまま | 同上 |
+| L2 | 台帳の更新は 6312b5d6 で済み | 台帳の行を cycle 2 の直しに合わせる分が C2-6 に残る |
+| L3 | 直ったまま | 冒頭の段落が 2 つに分かれ、文の位置が変わった。C2-2 の (b) |
+| L4 | 直ったまま | cycle 2 は触れていない |
+| L5 | 残る(登録済み、台帳の行 192) | 変更なし |
+| N1 | 残り、3 つ目の形で増えた | C2-3 |
+| N2 | 残る(登録済み、台帳の行 192 の (g)) | d49bbc34 は同じ節を編集したが直していない |
+| N3 | 直ったまま | c2a1f8c4 が cycle 2 の分の記録を計画の進捗に足した |
+
+### 新しい指摘
+
+| ID | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| C2-1 | LOW | maintainability | 「`--state-dir` か `RALPH_ORG_STATE_DIR` で台帳を決めたときは、打った場所の `ralph.toml` の上限を使う」という説明が、07d38e6d で逆になったあとも 2 か所に残っていた(コードのコメントと skill の 4 面は直っていた)。(a) `orgWideLimitsHelp` は c2a1f8c4 の時点で「Only when --config is not given and the ledger is the main worktree's … In every other case (--config, a ledger chosen with --state-dir or RALPH_ORG_STATE_DIR or found from the git toplevel, …) the --config file, else ./ralph.toml, is used」と書き、`ralph org spawn --help` と `ralph org start --help` に出ていた。9c1d447f が書き直し、2 文を固定するテスト(`TestOrgSpawnAndStartHelp_OrgWideLimitsSource`)も足したので、(a) は直った。書き直しの文は挙動と合う。(b) が残る。`templates/base/ralph.toml` の `max_orgs` のコメントは「only when --config is not given, neither --state-dir nor RALPH_ORG_STATE_DIR is set, and the state dir resolves to the main worktree's .harness/state/org」と書き、`ralph init` で下流の project に出る。`neither … is set` は org-limits-reserve の verify V2-2 で足した条件で、今は逆(main の台帳を `--state-dir` で指しても main の `ralph.toml` を読む)。leader は `--state-dir` を必ず付けるので、この例外が効いていた経路が、この PR の機能の中心の経路になった。同じ文は org-limits-reserve で 2 回直されている(その self-review の C2-4 と verify の V2-2)。c2a1f8c4 の時点では、`--help` と template の 2 か所だったので MEDIUM としていた。(a) が直って 1 か所になり、同じ種類の食い違いを org-limits-reserve では LOW としていたので、LOW に下げた | `git show c2a1f8c4:internal/cli/org.go` の `orgWideLimitsHelp`(375〜384 行)と、直した 9c1d447f。`templates/base/ralph.toml:42-46`。`withMainWorktreeOrgLimits` の doc と skill の「全体の上限」の段落(`.claude/skills/org/SKILL.md:215-226`)は直っている。台帳の行 184 の (d) の提案文にも同じ「neither … is set」がある | (b) を「--config がなく、台帳が main worktree の `.harness/state/org` のとき(既定の解決でも、`--state-dir` や `RALPH_ORG_STATE_DIR` で指しても)main の `ralph.toml` から読む」という趣旨に直す。コメントだけの変更で /sync-docs の範囲。直さずに出すと、下流の project が、linked worktree から `--state-dir` を付ければその worktree の `ralph.toml` で上限を変えられると読む |
+| C2-2 | LOW | readability | leader.md と skill の言い回し 3 点。(a) 「機能ごとの org」の手順 4 の `ralph org report --org-id {{ORG_ID}}`(`leader.md:85`)と手順 9 の `ralph org disband --org-id {{ORG_ID}}`(`:104`)は `--state-dir` のない形で書かれ、手順 9 は「(「ミッション」の 8 と同じ)」とミッションのコマンドと同じものとして示す。導入の段落(`:65-70`)が「どれにも付ける」と言うので規則は足りているが、コピーされやすいのは文字どおりのコマンドで、`disband` は leader 自身の pane を閉じる最後のコマンド。テストが固定するのは導入の段落だけ。(b) 導入の段落の終わりの「次の順で進めます。」(`:70`)は、以前は予約の段落の終わりにあって手順の一覧を導いていた。`--state-dir` の段落を間に入れたため、その段落の最後の文になり、「次の順」が台帳の説明の続きに読める。(c) skill の「start に渡した `--state-dir` も、start を打った環境の `RALPH_ORG_STATE_DIR` も leader には届かない」(`SKILL.md:400-401`)、leader.md の「この pane の環境は start を打った環境と違う」(`:67`)、`featureLeaderTask` の doc の「the herdr server's environment, not the one start ran in」(`feature.go:329`)は、言い切りが証拠より強い。pane の環境は herdr サーバーのものなので、サーバーを start と同じ shell から起こしていれば同じ値が届きうる。実機の記録(Run 1)が示すのは、pane の shell が rc ファイルで PATH を組み直したことで、環境変数が届かないことの確認ではない。leader への指示は届く場合でも正しいので、害は小さい | `internal/org/prompts/leader.md` の 39・41・65-70・85・104 行。`docs/evidence/org-feature-worktree-live-2026-10-09.md` の Run 1。`internal/org/prompts_test.go:491-496`(導入の段落だけを見る) | (a) 文字どおりの 2 コマンドを `--state-dir <台帳の行の値>` つきで書くか、手順の冒頭に「下のコマンドにも付ける」と 1 文足す。(b) 「次の順で進めます。」を、一覧の直前の独立した行にする。(c) 「届かない」を「届くとは限らない」に、doc の「not the one start ran in」を「not necessarily the one start ran in」にする |
+| C2-3 | LOW | maintainability | cycle 1 の N1(雛形のテストが折り返しの位置を含む文字列を固定する)が、d49bbc34 で 3 つ目の形で増えた。`TestRenderRolePrompt_Leader_FeatureOrgProcedure` の新しい固定は、`strings.ReplaceAll(intro, "\n", "")` で改行を消してから「の行にある`--state-dir` をそのまま付けて」を探す。今の折り返しは「にある」と「`--state-dir`」の間(空白のない所)で切れているので通る。「`- 台帳:`」と「の行」の間(原文に空白のある所)で折り直すと、改行を消した結果が「`- 台帳:`の行」になって落ちる。意味が変わらない折り直しで落ちる点は N1 と同じで、改行を消す方式は、同じ PR の 9c1d447f の help のテストが使う `strings.Join(strings.Fields(out), " ")` とも違う。台帳の行 192 の (f) のトリガー(feature-org の節の次の編集)を d49bbc34 が満たしたが、行は更新されず、旧い 2 つの固定もそのまま | `internal/org/prompts_test.go:482`(旧い固定の 1 つ)、`:491-496`(新しい固定)。`leader.md:65-67` は「…の行にある」で改行して次の行が `` `--state-dir` `` で始まる。`docs/tech-debt/README.md` の行 192 の (f) | 新しい固定を `strings.Join(strings.Fields(intro), " ")` にし、期待文字列を空白 1 つの形(「の行にある `--state-dir` をそのまま」)にする。旧い 2 つも同じ形にして N1 を閉じる |
+| C2-4 | LOW | readability | フェンスの説明が 2 か所で実際の挙動より広い。`parseSplitPlan` の doc(`split.go:296-298`)の「A line of a fenced code block is never a heading or a field line: in a feature it is body, elsewhere it is read as any other text there is」と、ファイル冒頭(`:44`)の「no line in it is a heading or a field line」。header のフェンスの中の `- Status:` / `- Approved:` は header の行として読まれ(2 つ目は拒否。テスト「second status inside a fence in the header」)、header より後ろでは拒否される。「any other text there is」は何を指すか読み取れない。コードとテストは正しく、コメントだけが広い | `internal/org/split.go:44` と `:296-298`。`split_test.go` の `Rejects` の「second status inside a fence in the header」「second approved inside a fence in the header」 | 3 つの場所を書き分ける。例: 「In a feature it is body. In the header a `- Status:` or `- Approved:` line still counts, and after the header it is refused, because the digest does not know about fences. Anywhere else it is skipped.」 |
+| C2-5 | LOW | maintainability | (a) `shellQuote`(`feature.go:358`)は `internal/cli/org.go:278` の `shellQuoteIfNeeded` の引用部分(`'` + `ReplaceAll(s, "'", `'\''`)` + `'`)の 2 つ目の写し。`cli` は `org` を import するので、`org` に 1 つ公開して `cli` が呼べる。2 つあると、片方の直しがもう片方に届かない。(b) `featureLeaderTask(plan, f, mustAbs(p.StateDir), …)`(`feature.go:320`)の `mustAbs` は、`StateDir` が解決済みの絶対パス(`StartFeatureParams.StateDir` の doc、呼び出し元は `runOrgStartPlan`)なので何もしない。理由のコメントがなく、`StateDir` が空なら cwd を台帳として書く。今の呼び出しでは起きない | `internal/org/feature.go:320`・`:358`、`internal/cli/org.go:278-283`。`grep -rn "func .*[sS]hellQuote" internal` は 2 件 | (a) `org.ShellQuote` を公開し、`shellQuoteIfNeeded` の引用の分岐から呼ぶ。(b) `mustAbs` を外すか、外さない理由を 1 行書く。どちらも挙動を変えない |
+| C2-6 | LOW | maintainability | 2 つの直しが台帳(`docs/tech-debt/README.md`)の行を古くした。cycle 2 の差分に台帳はない。(a) 行 188「A `ralph` of another version on the pane's `PATH` can split the ledger of a feature org」: Options の最初の「`--state-dir <resolved path>` を `featureLeaderTask` の task に入れる」を d49bbc34 が実装した。Debt の「Nothing in `StartFeature`, in the leader prompt … hands the resolved state dir to the leader」は HEAD で偽。残るのは版の食い違いそのもの(出荷後に台帳の置き場所やイベントの形を変えたとき)だけで、行は閉じるか、そこまで狭める。(b) 行 146「`ralph org` verbs resolve the config and the state dir by different rules」: 「`--config` or `--state-dir` avoids it」は、main の台帳を指す `--state-dir` では偽になった(main の `ralph.toml` が壊れていれば leader の spawn も止まる)。トリガー「`withMainWorktreeOrgLimits` の変更」を 07d38e6d が満たした。(c) 行 184 の (d)(org-limits-reserve の C2-4 の直し方)の提案文に「neither --state-dir nor RALPH_ORG_STATE_DIR is set」があり、新しい挙動と逆。help の文そのものは 9c1d447f が書き直したので、(d) の help の部分は閉じた。(d) 行 185 の (c)「T2-3: no test pins the help text」は、9c1d447f の `TestOrgSpawnAndStartHelp_OrgWideLimitsSource` が spawn と start の `--help` の 2 文を固定するので、半分閉じた(`status` の Long と `--config` の説明は残る)。(e) 行 192 の (f)・(g): N1 のトリガーを d49bbc34 が満たしたが直していない(C2-3)。(f) 行 193 の (g) T-7「nothing re-ran it after 8aae7ce2 and 2c1bb13b」は、d49bbc34・07d38e6d のあとも同じ。task に台帳の行が入ることはテストが見るが、leader がその行に従って `--state-dir` を付ける所は、どのテストも実機も走らせていない。(g) 台帳に行のない同種の穴: `ralph org start <task> --state-dir X` の leader は task を文字どおり受け取る(`internal/cli/org.go` の `start` の `RunE`、`Task: task`)ので、pane の `ralph org` は既定の台帳を使う。skill の既存の決まり(「リポジトリ外で運用する場合のみ `--state-dir` を明示的に揃えること」、`SKILL.md:44-45`)が手で補うだけで、どの行にも書いていない | `docs/tech-debt/README.md` の行 146・184・185・188・192・193。`git diff 183cb190 HEAD --stat -- docs/tech-debt/README.md` は空 | cycle 2 は上限の回なので、直さない LOW は繰り延べになる(下の「Tech debt identified」)。/sync-docs で: 188 を版の食い違いだけに狭めるか閉じ、(g) を 188 に足す。146・184 の (d)・185 の (c) の文を直す。192 に (j) として C2-2〜C2-5 を足し、(f) のトリガーが d49bbc34 で満たされ直していないと書く。193 の (g) に d49bbc34・07d38e6d を足す |
+
+### 9c1d447f(review の途中でコミットされた help の書き直し)
+
+`orgWideLimitsHelp` の書き直し(+9/-7)と、その 2 文を spawn・start の `--help` で固定するテスト(+22)。書き直しの文は `withMainWorktreeOrgLimits` の挙動と合う(`--config` なし、台帳が main worktree の `.harness/state/org` なら、既定の解決でも `--state-dir`・`RALPH_ORG_STATE_DIR` で指しても main の `ralph.toml`。別の台帳を指す、git の toplevel、git の外は打った場所の設定)。テストは `strings.Fields` で空白を詰めて比べるので、折り返しに依存しない。コミットメッセージは変更の内容と合っている。計画の進捗の c2a1f8c4 の行は 9c1d447f を挙げていない(07d38e6d の変更の続きなので、digest の外の 1 行で足せる)。review の途中で HEAD が動いたので、/verify と /test はこのコミットを含む HEAD で走らせる必要がある。この report のコミットでは、report と insight の行だけを add する。
+
+### 確かめたが finding にしないもの
+
+- 台帳がまだない状態で、symlink を含む別名のパスを `--state-dir` に渡すと、`samePath` が文字列の比較に落ちて一致しない(例: macOS で `/tmp/x` と git が返す `/private/tmp/x`)。その spawn だけ打った場所の設定を使い、台帳ができたあとの spawn から main の設定になる。feature org では start が先に台帳を作るので leader には当たらない。`resolvedOrClean` は旧台帳の比較からある関数で、cycle 2 で入った性質ではない
+- 閉じていないフェンスのあとに、digest が読まない行(例: `## Progress checklist`)があると、その行の拒否が先に出て、「閉じていない」というエラーは出ない。エラーは正しい行を指すが、直したあとにもう 1 度フェンスのエラーを受ける。まれなので finding にしない
+- c2a1f8c4 の計画の進捗の行は、時間順では前の 2 行(2026-10-09 の「実装中に見つけて送るもの」と「sync-docs(cycle 1)」)の前に入っている。`## Progress checklist` は digest の外なので承認は崩れない。/sync-docs が触れるなら並べ替えてよい
+
+### Coverage gaps(cycle 2)
+
+- テストは実行していない。フェンスのケース表、AC13 の表、`TestFeatureLeaderTask_StateDirIsOneShellWord` の結果は、読んだだけ
+- leader が `- 台帳:` の行に従って `--state-dir` を付ける所は、実機でも走っていない(C2-6 の (f))。「pane の環境は herdr サーバーのもの」は、実機の記録の読みと cross-review の説明に頼る
+- `gitMainWorktree` の bare repository と `--separate-git-dir` の扱いは、既存の関数を使い回すだけなので読み直していない
+- 9c1d447f は review の途中で入った。作業ツリーの未コミット差分として読んだ内容と、コミットの diff が同じことは確かめたが、コミットの前後でテストは実行していない
+
+### Tech debt identified(cycle 2)
+
+この回は上限(2 回目)なので、直さずに終わる LOW は繰り延べになり、計画は /pr で archive される。cycle 1 で「cycle 2 で直せる」とした L5・N2 と、C2-2〜C2-6 のうち直さないものは、新しい行を作らず既存の行の更新に入れる。台帳の更新は C2-6 の最後の列にまとめた。
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| C2-2〜C2-5(leader.md の言い回しと 2 つの文、N1 の 3 つ目の形、引用の写しと `mustAbs`)。直さない場合の L5・N2 | 読み手が一瞬迷う。N1 は折り直しでテストが落ちる | すべて LOW で挙動を変えず、上限の回に当たる | 行 192 の既存のトリガー(feature-org の節の次の編集)。(j) として足す | `docs/reports/self-review-2026-10-09-org-feature-worktree.md`(C2-2〜C2-5) |
+| `start <task> --state-dir X` の leader が既定の台帳を使う(C2-6 の (g)) | 非既定の台帳で start した leader の座席が、予約と上限の数え方から外れ、start を打った人の status と後始末から見えなくなる | cross-review の指摘は `--plan` の形だけで、計画の Scope 外 | 行 188 のトリガー(status に座席が出ない報告、次の release)。188 に足す | 同上(C2-6 の (g))、`docs/reports/cross-review-triage-org-feature-worktree.md` |
+
+### /sync-docs に渡すもの(cycle 2)
+
+- `templates/base/ralph.toml:42-46` のコメント(C2-1 の (b)。`--state-dir`・`RALPH_ORG_STATE_DIR` で main の台帳を指したときも main の `ralph.toml` を読む)
+- 台帳の行 146・184 の (d)・185 の (c)・188・192・193 の更新(C2-6 の (a)〜(g))。9c1d447f で help が直ったので、184 の (d) の help の部分と 185 の (c) の spawn・start の分は「閉じた」にする
+- (任意)計画の進捗: c2a1f8c4 の行の位置(時間順では 2026-10-09 の 2 行のあと)と、9c1d447f の 1 行
+
 ## Recommendation
 
-- Merge: 可。再実行後の finding は CRITICAL 0、HIGH 0、MEDIUM 0、LOW 4 件(L5、N1、N2、N3)。初回の MEDIUM 2 件(M1、M2)と LOW の L1・L3・L4 は直り、L2 は doc の部分が直った(台帳の行の更新が残る)。直しで入った問題は、LOW の N1〜N3 のほかに見つからなかった。先読みの同一性、結びつきの Details の読み書き、補償の写しには、初回から直すべき欠陥はない(初回の判定は「可(条件付き)」で、条件は M1・M2 の修正だった)
-- Follow-ups: この先は /verify に進んでよい。L5・N1・N2・N3 は挙動を変えない。cross-review の fix の機会があれば N1(テストの折り返しへの依存)と N3 の進捗の 1 行を拾う。直さずに最後の回を終える場合は、その回の報告で 1 行にまとめて台帳へ送る。/sync-docs に渡すもの: 台帳の行の更新(L2 の残り: C2-1 は直った、C2-3・T2-1・T2-2 の関数名、F-2・F-6)、計画の進捗メモにある 4 件の新しい行、L5 のどれか、N3 の進捗の 1 行。`/test` には、M1 の境界(20・21 文字)と ensure の失敗ごとの案内が、実際のスクリプトの文で出ることを頼む(`TestEnsureFailureMessages_InWorktreeScript` はスクリプトの文字列の存在だけを見る)。計画の進捗の「Review artifact created」は未チェックのまま
+- Merge: 可。cycle 2 の時点の finding は CRITICAL 0、HIGH 0、MEDIUM 0、LOW 6(C2-1〜C2-6)。cycle 1 から残る LOW は L5・N1(C2-3 に含む)・N2 で、台帳の行に入っている。cross-review の 2 件の直しそのもの(フェンスの規則、`- 台帳:` の行、`LedgerMainWorktreeRoot`、AC13 のテスト、help の書き直し)に、直すべき欠陥は見つからなかった。LOW の中で優先するのは C2-1 の (b)(契約を逆にした直しの説明が `templates/base/ralph.toml` に旧いまま残り、`ralph init` で下流に出る)で、コメントだけの変更なので /sync-docs で直せる。c2a1f8c4 の時点では、help も旧いままで C2-1 を MEDIUM としていた(9c1d447f で直った)。cycle 2 は上限の回なので、LOW を直さずに終える場合の記録先は台帳で、更新の内容は「Tech debt identified(cycle 2)」と C2-6 に書いた
+- Follow-ups: /verify と /test には、9c1d447f を含む HEAD で、挙動が変わった `TestLoadSplitPlan_CodeFences`・`TestLoadSplitPlan_FencedBodyIsApproved`・`TestPlanDigest_MatchesScript`(フェンスのケースが Go とスクリプトの digest の一致を見る)・`TestLedgerMainWorktreeRoot`・AC13 の表・`TestFeatureLeaderTask_StateDirIsOneShellWord`・`TestOrgSpawnAndStartHelp_OrgWideLimitsSource` を通すことを頼む。/sync-docs には上の「/sync-docs に渡すもの(cycle 2)」を頼む
+- 参考(cycle 1 再実行後の判定): 可。再実行後の finding は CRITICAL 0、HIGH 0、MEDIUM 0、LOW 4 件(L5、N1、N2、N3)。初回の MEDIUM 2 件(M1、M2)と LOW の L1・L3・L4 は直り、L2 は doc の部分が直った(台帳の行の更新が残る)。直しで入った問題は、LOW の N1〜N3 のほかに見つからなかった。先読みの同一性、結びつきの Details の読み書き、補償の写しには、初回から直すべき欠陥はない(初回の判定は「可(条件付き)」で、条件は M1・M2 の修正だった)
+- 参考(cycle 1 再実行後の Follow-ups。済んだ分を含む): この先は /verify に進んでよい。L5・N1・N2・N3 は挙動を変えない。cross-review の fix の機会があれば N1(テストの折り返しへの依存)と N3 の進捗の 1 行を拾う。直さずに最後の回を終える場合は、その回の報告で 1 行にまとめて台帳へ送る。/sync-docs に渡すもの: 台帳の行の更新(L2 の残り: C2-1 は直った、C2-3・T2-1・T2-2 の関数名、F-2・F-6)、計画の進捗メモにある 4 件の新しい行、L5 のどれか、N3 の進捗の 1 行。`/test` には、M1 の境界(20・21 文字)と ensure の失敗ごとの案内が、実際のスクリプトの文で出ることを頼む(`TestEnsureFailureMessages_InWorktreeScript` はスクリプトの文字列の存在だけを見る)。計画の進捗の「Review artifact created」は未チェックのまま
