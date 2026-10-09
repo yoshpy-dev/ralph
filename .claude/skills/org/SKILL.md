@@ -189,11 +189,13 @@ toplevel、cwd の順で決まる。「前提」節を参照)、`ralph org statu
 
 例外が 1 つある。コマンドを打った自分の pane か workspace を最後に閉じる
 `stop` / `disband` は、その close が失敗すると座席と workspace を「動いている」
-に戻し、workspace の close が失敗したときは `disbanded` の前の予約も戻す
-(`stop` と `disband` の行を参照)。この補償は上限も予約の重なりも見ずに戻す
-ので、失敗してから戻すまでの間にほかの org が枠か同じ範囲を取っていると、
-`max_orgs` か `max_total_seats` を 1 つ超えたり、予約が重なったりする。打ち直
-した `stop` / `disband` で解ける。
+に戻す。`disband` の最後の close が失敗したときは、pane の経路でも workspace
+の経路でも、`disbanded` の前の予約を一緒に戻す。動いている座席の通常の
+`stop` は予約を解いていないので、予約は戻さない(`stop` と `disband` の行を
+参照)。この補償は上限も予約の重なりも見ずに戻すので、失敗してから戻すまで
+の間にほかの org が枠か同じ範囲を取っていると、`max_orgs` か
+`max_total_seats` を 1 つ超えたり、予約が重なったりする。打ち直した `stop` /
+`disband` で解ける。
 
 補償は台帳のロックの下で台帳を読み直してから書く。座席、workspace、予約の
 どれかに新しい記録があるとき(失敗を待つ間に同じ org の `spawn` が立て直した
