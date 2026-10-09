@@ -81,14 +81,14 @@ None (1 つのフックの中身を 3 つのファイルに移すだけで、フ
 
 ## Acceptance criteria
 
-- [ ] AC1: 3 つの `.awk` と `pre_bash_guard.sh` が、どれも 800 行未満になる。`pre_bash_guard.sh` に awk のプログラムが残らない(`grep -c "LC_ALL=C awk '"` が 0)
-- [ ] AC2: S1 のコミットで、`cat` で 3 つの `.awk` を `lex`、`commands`、`rules` の順に連結したものが、base(0abfede5)の `pre_bash_guard.sh` の 175〜1552 行目と `cmp` で一致する
-- [ ] AC3: `bash tests/test-pre-bash-guard.sh` が、今の 2,032 件と足した行を含めて全部通る(jq あり・なし)。S1 のコミットでも、足す前の 2,032 件が全部通る
-- [ ] AC4: F 節に足した 2 つが通る。`.awk` が 1 つない写しの guard で、`sudo ls` が deny、`ls` が none。3 つの `.awk` を guard と同じ順で読むと、空の入力で exit 0、出力なし
-- [ ] AC5: B 節 group 11 に足した 3 行が deny、D 節 `edge_none` に足した 4 行が none(jq あり・なし)。PR #213 の test report の mutation M20(`RE_NOTFLAG` から `=` を外す)と M13 の系統(展開しない `$` の条件を 1 つずつ外す)が、足した行で赤になる
-- [ ] AC6: root と `templates/base/` の写し(guard の 4 つ、`check-template.sh`)がバイト単位で同じ(`./scripts/check-sync.sh`)。`./scripts/check-template.sh` が通り、`.awk` を 1 つ消した写しの木では `Missing required file` で失敗する
-- [ ] AC7: `ralph init` で作った新しいプロジェクトと、base の ralph で作ってから分割後の ralph で `ralph upgrade` したプロジェクトの両方に、3 つの `.awk` があり、そこで動く guard が `sudo ls` を deny、`ls` を none、`git commit --no-verify -m x` を deny にする(最後の形は旧版の 4 規則の fallback では none なので、awk の経路が動いていることが分かる)
-- [ ] AC8: S3 の項目のコメントが直っている(tech-debt の (e) の文面と照らす)。S2 と S3 のコミットで、awk のプログラムのコメント以外の行が変わっていない(`git diff` でコメントの行だけ)
+- [x] AC1: 3 つの `.awk` と `pre_bash_guard.sh` が、どれも 800 行未満になる。`pre_bash_guard.sh` に awk のプログラムが残らない(`grep -c "LC_ALL=C awk '"` が 0)
+- [x] AC2: S1 のコミットで、`cat` で 3 つの `.awk` を `lex`、`commands`、`rules` の順に連結したものが、base(0abfede5)の `pre_bash_guard.sh` の 175〜1552 行目と `cmp` で一致する
+- [x] AC3: `bash tests/test-pre-bash-guard.sh` が、今の 2,032 件と足した行を含めて全部通る(jq あり・なし)。S1 のコミットでも、足す前の 2,032 件が全部通る
+- [x] AC4: F 節に足した 2 つが通る。`.awk` が 1 つない写しの guard で、`sudo ls` が deny、`ls` が none。3 つの `.awk` を guard と同じ順で読むと、空の入力で exit 0、出力なし
+- [x] AC5: B 節 group 11 に足した 3 行が deny、D 節 `edge_none` に足した 4 行が none(jq あり・なし)。PR #213 の test report の mutation M20(`RE_NOTFLAG` から `=` を外す)と M13 の系統(展開しない `$` の条件を 1 つずつ外す)が、足した行で赤になる
+- [x] AC6: root と `templates/base/` の写し(guard の 4 つ、`check-template.sh`)がバイト単位で同じ(`./scripts/check-sync.sh`)。`./scripts/check-template.sh` が通り、`.awk` を 1 つ消した写しの木では `Missing required file` で失敗する
+- [x] AC7: `ralph init` で作った新しいプロジェクトと、base の ralph で作ってから分割後の ralph で `ralph upgrade` したプロジェクトの両方に、3 つの `.awk` があり、そこで動く guard が `sudo ls` を deny、`ls` を none、`git commit --no-verify -m x` を deny にする(最後の形は旧版の 4 規則の fallback では none なので、awk の経路が動いていることが分かる)
+- [x] AC8: S3 の項目のコメントが直っている(tech-debt の (e) の文面と照らす)。S2 と S3 のコミットで、awk のプログラムのコメント以外の行が変わっていない(`git diff` でコメントの行だけ)
 - [ ] AC9: `./scripts/run-verify.sh` が rc 0。`docs/tech-debt/README.md` の guard の限界の行で、(d) と、(e) のうち S2・S3 で直した項目が解消済みになり、コードを変える項目だけが残る
 
 ## Implementation outline
@@ -141,6 +141,10 @@ None (1 つのフックの中身を 3 つのファイルに移すだけで、フ
   - S1 完了(da3b55d2、implementer/opus): awk のプログラムを `pre_bash_guard_lex.awk`(599 行)、`_commands.awk`(320 行)、`_rules.awk`(459 行)に移し、`.sh`(217 行)は `awk -f` の 1 行で呼ぶ。AC2 の `cmp` は rc 0(orchestrator も取り直した)、base との diff は `174,1553c174` の 1 hunk。テストは 2,032/0、lib-json 126/0、dispatch 33/0、check-sync・check-template・static-verify・go test(scaffold、upgrade、cli)が通った。`.awk` は base から `sed -n` で切り出し(ASCII だけで U+FFFD は 0)、`.sh` は Write で書き直した。気づいたこと: `run-static-verify.sh` が `.awk` を言語に分類できず、このブランチでは毎回 full の範囲で走る(失敗にはならない。S4 で tech-debt に記録する)
   - S2 完了(7347fa6a、implementer/opus): 各 `.awk` の先頭のコメント、`lex.awk` の単一引用符の注記を消した、`.sh` のヘッダー(3 つの `.awk` と一緒に置くこと、欠けると fallback、item 6(b) の `$"…"`)、テストの行(B 節 group 11 に `$=`・`$^`・`$+` の 3 行、D 節 `edge_none` に展開しない `$` の 4 行、F 節に `rules.awk` のない写しの guard と、3 つの `.awk` の parse の確認)。テストは 2,061/0。`.awk` の差分はコメントの行だけ(orchestrator も確かめた)。mutation M20・M20b・M20c と M13 の系統 4 つは、それぞれ足した行だけをひっくり返した。逸脱: `check-template.sh` の `required_files` を外した。`tests/test-check-template.sh` が `required_files` の写し(`GOLDEN_ENTRIES`)を固定していて、同じコミットで直さないと 9 件落ちる。このテストは plan の Affected areas になかった(plan の見落とし)。AC6 に要る変更なので、S2b で `tests/test-check-template.sh` を足して入れる(Objective と AC は変えない)
   - S2b 完了(dfb8785a、implementer/opus): `check-template.sh`(root と template)の `required_files` に guard の 5 ファイルを足し、`tests/test-check-template.sh` の `GOLDEN_ENTRIES`、`build_fixture` の case(`.claude/hooks/*.sh` も実行できる stub にする)、件数のコメント(前からの誤りの 22 を 23 に)を直した。テストは 60/0。`git archive HEAD` の木から `pre_bash_guard_rules.awk` を消すと `Missing required file` で rc 1
+  - AC7 の証拠(orchestrator、scratchpad の `ac7/`): base(0abfede5)と 644f5c59 の ralph をビルドした。644f5c59 の `ralph init` と、base の `ralph init` のあとの 644f5c59 の `ralph upgrade`(created 3、updated 2、manifest に 4 つの guard のファイル)の両方で、3 つの `.awk` があり、guard は `sudo ls` を deny、`ls` を none、`--no-verify` の commit の形を deny にした(fallback では none の形)
+  - S3 完了(f593bbfc、implementer/opus。途中で利用上限に当たり、同じ agent に続けさせた): (e) のコメントだけの項目(`cmd_pos` の `EXEC_SEEN`、`new_ctx` の `HPQ`・`HPN`、`lex_redir` の区切りの説明、`data_first_ok` の説明、ヘッダーの Not covered の printf、テストのヘッダー item B と配列の前の段落、group 1 のコメント、`edge_deny`・`edge_none`・`edge_sentinel_deny` の出典)。guard の差分はコメントだけ。テストに `git commit -m $"never sudo ls"` の 1 行を足した(S2 で書いた item 6(b) の `$"…"` を固定する。Scope にない 1 行で、Objective 1 の範囲)。`data_first_ok` の説明は、handoff の「字句解析とシェルで読みが違う語は DATACMD の名前にならない」がコードと合わず(`$'\echo'` は字句解析では `echo`)、ずれの向きを両方書いた。テストは 2,063/0
+  - コメントの追加(c3a323aa、inline。S3 の implementer の指摘): `new_ctx` の前の一覧に、パイプラインの配列 `PLC`・`PLN`・`STC`・`STN`・`PLID` を足した。コメントだけ。テストは 2,063/0
+  - S4 完了(この commit、inline、docs だけ): tech-debt の guard の限界の行で、(d) を解消済みにし(Debt と Trigger)、(e) にこの PR で直した項目と残るコードの項目(`read_body` のループ、予約語と `exec` の規則とそれを挙げるコメント、awk のコメントの `SQ`)を書き、Trigger (e) を残る項目に合わせた。Debt (b) に S3 で見つけた `$'\echo' 'sudo ls'` の穴(新版 none、旧版 deny)を足した。`.awk` を言語に分類できず static verify が full の範囲で走る件を、新しい行にした
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
