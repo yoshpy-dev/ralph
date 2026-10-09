@@ -147,6 +147,31 @@ func TestLoadSplitPlan_CRLF(t *testing.T) {
 	assertSplitFeatures(t, crlf.Features, lf.Features)
 }
 
+// TestSplitPlanCheckApproved_CRLF: a split plan with CRLF lines, approved the
+// way a person does it (the digest scripts/plan-visual.sh digest prints for
+// the file, written on its `- Approved:` line), passes CheckApproved.
+func TestSplitPlanCheckApproved_CRLF(t *testing.T) {
+	script := filepath.Join(splitTestRepoRoot(t), "scripts", "plan-visual.sh")
+	crlf := strings.ReplaceAll(splitPlanFixture, "\n", "\r\n")
+	path := writeSplitPlan(t, t.TempDir(), "auth-split.md", crlf)
+	out, err := exec.Command("bash", script, "digest", path).Output()
+	if err != nil {
+		t.Fatalf("plan-visual.sh digest %s: %v", path, err)
+	}
+	digest := strings.TrimSpace(string(out))
+	writeSplitPlan(t, filepath.Dir(path), "auth-split.md", strings.Replace(crlf, "sha256:000000000000", "sha256:"+digest, 1))
+	plan, err := LoadSplitPlan(path)
+	if err != nil {
+		t.Fatalf("LoadSplitPlan: %v", err)
+	}
+	if plan.ApprovedDigest != digest || plan.Digest != digest {
+		t.Errorf("ApprovedDigest, Digest = %q, %q, want the script's %q for both", plan.ApprovedDigest, plan.Digest, digest)
+	}
+	if err := plan.CheckApproved(); err != nil {
+		t.Fatalf("CheckApproved: %v", err)
+	}
+}
+
 // TestLoadSplitPlan_Fields covers each field's accepted forms on its own.
 func TestLoadSplitPlan_Fields(t *testing.T) {
 	tests := []struct {

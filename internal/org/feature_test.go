@@ -311,6 +311,48 @@ func TestStartFeature_OrgIDAtTheLengthLimit(t *testing.T) {
 	}
 }
 
+// TestStartFeature_SlugAtTheLengthLimit is the default org_id's side of
+// maxFeatureOrgIDLen: without --org-id, a feature whose slug has 20
+// characters starts its leader in the org named by the slug, and the leader
+// can then spawn the implementer seat in it. A slug of 21 characters is
+// refused when the split plan is read, before the worktree record is looked
+// up, with nothing recorded.
+func TestStartFeature_SlugAtTheLengthLimit(t *testing.T) {
+	splitWith := func(slug string) string {
+		return "# long slug\n\n- Status: Approved\n- Approved: 2026-10-09 sha256:000000000000\n\n## Features\n\n### " +
+			slug + "\n\n- Reserve: internal/long/\n\nObjective: a long slug.\n"
+	}
+	t.Run("20 characters", func(t *testing.T) {
+		st := newFeatureStart(t)
+		slug := "a" + strings.Repeat("b", maxFeatureOrgIDLen-1)
+		st.plan = st.writePlan(t, "long-split", approveSplitPlan(t, splitWith(slug)))
+		res := st.mustStart(t, st.params(slug), SpawnOutcomeSpawned)
+		if res.OrgID != slug || res.Worktree != st.worktree(slug) || res.Branch != "feat/"+slug {
+			t.Fatalf("unexpected result: org %q worktree %q branch %q", res.OrgID, res.Worktree, res.Branch)
+		}
+		st.h.paneID = "pane-2"
+		impl := mustSpawnParams(slug, implementerSeatID)
+		impl.Role = implementerSeatID
+		if r := st.o.Spawn(impl); r.Outcome != SpawnOutcomeSpawned {
+			t.Fatalf("expected the leader of a %d-character slug to spawn %s, got %+v", len(slug), implementerSeatID, r)
+		}
+	})
+	t.Run("21 characters", func(t *testing.T) {
+		st := newFeatureStart(t)
+		slug := "a" + strings.Repeat("b", maxFeatureOrgIDLen)
+		st.plan = st.writePlan(t, "long-split", approveSplitPlan(t, splitWith(slug)))
+		res := st.o.StartFeature(st.params(slug))
+		assertStartRefused(t, res, `feature slug "`+slug+`" is 21 characters`, "use a shorter slug")
+		if res.Split != nil {
+			t.Errorf("expected the split plan not read, got %+v", res.Split)
+		}
+		st.wantCalls(t)
+		if after := takeSpawnSnapshot(t, st.o, st.h, st.a); after != (spawnSnapshot{}) {
+			t.Fatalf("expected nothing recorded or called, got %+v", after)
+		}
+	})
+}
+
 // TestFeatureLeaderTask pins the leader's task text: the lines naming the
 // split plan, feature, worktree, branch, reserved paths, dependencies and
 // procedure, then the feature's body after a blank line; no dependency
@@ -1003,6 +1045,61 @@ func TestStartFeature_RealWorktreeScript(t *testing.T) {
 	if strings.Contains(res.Spawn.Err.Error(), "clean checkout of the default branch") {
 		t.Errorf("expected no clean-checkout hint for a branch in the way, got %v", res.Spawn.Err)
 	}
+	if _, err := os.Stat(st.worktree("auth-docs")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("expected no worktree at %s, got %v", st.worktree("auth-docs"), err)
+	}
+	if after := takeSpawnSnapshot(t, st.o, st.h, st.a); after != before {
+		t.Fatalf("expected nothing recorded or called, %+v -> %+v", before, after)
+	}
+}
+
+// TestStartFeature_RealWorktreeScript_CheckoutsMoved runs the two checkouts
+// start --plan reads through the real scripts/ralph-worktree.sh and git: a
+// feature worktree whose checkout moved to another branch fails the reuse
+// check on the branch git reports, with nothing recorded, and is reused again
+// once it is back on the feature's branch; a directory left at a feature's
+// worktree path without a record is refused by ensure with the script's
+// message and the hint to remove it; a main checkout on a branch other than
+// the default is refused by ensure with the script's message and the
+// clean-checkout hint, and makes no worktree for the feature.
+func TestStartFeature_RealWorktreeScript_CheckoutsMoved(t *testing.T) {
+	root := worktreeScriptRepo(t)
+	st := newFeatureStart(t)
+	st.o.Worktrees = nil
+	st.root = root
+	st.mustStart(t, st.params("auth-core"), SpawnOutcomeSpawned)
+	wt := st.worktree("auth-core")
+	before := takeSpawnSnapshot(t, st.o, st.h, st.a)
+
+	runGit(t, "-C", wt, "checkout", "--quiet", "-b", "moved")
+	assertStartRefused(t, st.o.StartFeature(st.params("auth-core")),
+		`which has branch "moved" checked out, not "fix/auth-core"`, "cleanup --id org-auth-core")
+	if after := takeSpawnSnapshot(t, st.o, st.h, st.a); after != before {
+		t.Fatalf("expected nothing recorded or called, %+v -> %+v", before, after)
+	}
+	runGit(t, "-C", wt, "checkout", "--quiet", "fix/auth-core")
+	if res := st.mustStart(t, st.params("auth-core"), SpawnOutcomeIdempotent); res.Worktree != wt {
+		t.Fatalf("expected the worktree %s reused, got %q", wt, res.Worktree)
+	}
+
+	left := st.worktree("auth-docs")
+	if err := os.MkdirAll(left, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	assertStartRefused(t, st.o.StartFeature(st.params("auth-docs")),
+		"org: scripts/ralph-worktree.sh ensure: ralph-worktree: worktree path already exists without matching state: "+left,
+		"; remove "+left+" if it is no longer needed (git worktree remove for a worktree), or use another --org-id")
+	if after := takeSpawnSnapshot(t, st.o, st.h, st.a); after != before {
+		t.Fatalf("expected nothing recorded or called, %+v -> %+v", before, after)
+	}
+	if err := os.Remove(left); err != nil {
+		t.Fatal(err)
+	}
+
+	runGit(t, "-C", root, "checkout", "--quiet", "-b", "side")
+	assertStartRefused(t, st.o.StartFeature(st.params("auth-docs")),
+		"org: scripts/ralph-worktree.sh ensure: ralph-worktree: must start from clean default branch 'main' (current: side)",
+		"; make the main worktree "+root+" a clean checkout of the default branch and run start again")
 	if _, err := os.Stat(st.worktree("auth-docs")); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("expected no worktree at %s, got %v", st.worktree("auth-docs"), err)
 	}
