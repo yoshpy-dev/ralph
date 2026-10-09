@@ -298,12 +298,12 @@ function msg_attached(ctx, i, pre, commit,    r) {
 # form) is denied for git commit; a message without one is data when its
 # git is the command word. A word with a $ that expands (WEXP, set by
 # lex_dollar for the whole word, so also when quotes split the flag, as in
-# --messageSQSQ=${...}, where msg_attached gives an empty raw) is no data
+# --message''=${...}, where msg_attached gives an empty raw) is no data
 # either: zsh re-evaluates the value of ${(e)...}, and a zsh subscript
-# ($arr[SQ$(cmd)SQ]) runs a $(...) written in single quotes. It is not
+# ($arr['$(cmd)']) runs a $(...) written in single quotes. It is not
 # denied (git commit -m "${msg}" stays allowed); the sentinel decides. A $
 # inside single quotes, escaped by a backslash, or inside an ANSI-C string
-# expands nothing, so SQmention ${HOME}SQ stays data. The recommended
+# expands nothing, so 'mention ${HOME}' stays data. The recommended
 # heredoc form expands nothing either, so it stays data with a ${ in its
 # body.
 function msg_check(ctx, j, raw, commit) {

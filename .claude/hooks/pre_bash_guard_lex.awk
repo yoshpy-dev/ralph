@@ -285,16 +285,16 @@ function lex_dq(ctx,    val, buf, e, c, c2, subst, piece, xp, subp) {
 # one or a backtick. Both $(...) and the whole ${...} are noted with xnote,
 # so neither is part of the argument data region (a) of a data command: zsh
 # re-evaluates the value of ${(e)...}, which runs a $(...) that the lexer
-# reads as quoted text (${(e):-SQ$(cmd)SQ}, also with the $ escaped by a
+# reads as quoted text (${(e):-'$(cmd)'}, also with the $ escaped by a
 # backslash). LD_SUBST stays 0 for such a ${...}, and only its own span is
 # excluded, so the text around it keeps its data region (echo "${HOME}"
-# SQsudo lsSQ).
+# 'sudo ls').
 # Three more marks describe the $ just read. This function is called only
 # for a $ outside quotes or inside double quotes (from lex_word, lex_dq and
 # lex_brace) and for a $ in an unquoted heredoc body (lex_hd), so they
 # describe a $ the shell reads: a $ inside single quotes, escaped by a
 # backslash, or inside the value of an ANSI-C string never comes here.
-#   LD_ANSI is 1 for $SQ...SQ and $DQ...DQ outside double quotes (ANSI-C
+#   LD_ANSI is 1 for $'...' and $"..." outside double quotes (ANSI-C
 #   and locale quoting, which can spell characters the lexer does not
 #   decode, such as \x2d for -).
 #   LD_EXP is 1 for any other $ that expands: every $ except one followed
@@ -311,9 +311,9 @@ function lex_dq(ctx,    val, buf, e, c, c2, subst, piece, xp, subp) {
 #   $? and the other special parameters, but not $1, which it reads as a
 #   glob, so marking it only drops a data region). zsh evaluates the
 #   subscript, which runs a $(...) written there in single quotes
-#   ($arr[SQ$(cmd)SQ]), while the lexer reads that as quoted text; a
+#   ($arr['$(cmd)']), while the lexer reads that as quoted text; a
 #   subscript opened inside double quotes runs on past the closing quote
-#   ("$arr["SQ$(cmd)SQ"]"), so lex_dq reports its $ too (DQ_SUB). lex_word
+#   ("$arr["'$(cmd)'"]"), so lex_dq reports its $ too (DQ_SUB). lex_word
 #   keeps the span from this $ to the end of its word out of the argument
 #   data region; the subscript is not skipped here, so lex_word still lexes
 #   a $(...) or a backtick inside it.
@@ -485,7 +485,7 @@ function lex_redir(ctx, rs,    c, c2, op, s, k) {
     # syntax error when a space or a tab is inside, as in `echo x`. Two
     # forms are read differently: an ANSI-C quote with an escape other than
     # \n \t \r, which the lexer reads as the character after the backslash
-    # ($SQ\x45SQ is E to bash and zsh, x45 here), and $"...", which the lexer
+    # ($'\x45' is E to bash and zsh, x45 here), and $"...", which the lexer
     # and bash read as the quoted text and zsh and dash as a $ before it.
     # The shell can then end the body on a line before the one the lexer
     # finds, and the lines between are commands. The rule covers every $

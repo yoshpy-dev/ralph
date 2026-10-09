@@ -95,11 +95,11 @@ function pipe_close(ctx) { PLN[ctx] = 0; STN[ctx] = 0; PLID[ctx] = ++PLSER }
 # value, so "echo", \echo and e\cho are echo), must be a bare DATACMD name or
 # git. That value is what the shell sees, with two exceptions. One is an
 # ANSI-C quote with an escape other than \n \t \r, which lex_ansi reads as
-# the character after the backslash: $SQ\x65choSQ is echo to the shell and
-# x65cho here (no DATACMD name), while $SQ\echoSQ is echo here and an ESC
+# the character after the backslash: $'\x65cho' is echo to the shell and
+# x65cho here (no DATACMD name), while $'\echo' is echo here and an ESC
 # and cho to bash and zsh. The other is $"...", which the lexer and bash
 # read as the quoted text and zsh and dash as a $ before it: $"echo" is echo
-# here and to bash, and $echo to zsh and dash, so $"echo" SQsudo lsSQ gets a
+# here and to bash, and $echo to zsh and dash, so $"echo" 'sudo ls' gets a
 # data region where the previous guard denies it. A word with a slash does
 # not qualify, even when its basename is a DATACMD (/bin/echo and ./echo
 # may be any program); a value that still holds a substitution or a
@@ -276,17 +276,17 @@ function stage_note(ctx, cid,    i, n, j, k, ro, safe, rs, re, cur, xs, xe, m, t
   ro = (i >= 1 && (J_NM in DATACMD))
   # rg --pre runs a program. A word whose value is only known at run time
   # could be --pre too, so a word with a $ that expands ($x, "$x", ${...}),
-  # a substitution, or ANSI-C ($SQ...SQ) or locale ($DQ...DQ) quoting, which
+  # a substitution, or ANSI-C ($'...') or locale ($"...") quoting, which
   # can spell characters the lexer does not decode (\x2d is -), also makes
   # rg not a data command. The marks come from lex_dollar, so a $ in single
-  # quotes (rg SQfoo$SQ) does not count.
+  # quotes (rg 'foo$') does not count.
   if (ro && J_NM == "rg") for (j = i + 1; j <= n; j++) if (substr(WV[ctx, j], 1, 5) == "--pre" || WEXP[ctx, j] || WANSI[ctx, j] || WS[ctx, j]) ro = 0
   # printf -v NAME (also attached -vNAME) stores into a variable instead of
   # printing (bash and zsh), and in zsh a %n conversion assigns to, and a
   # numeric one such as %d evaluates, an argument as an arithmetic
   # expression, which runs a subscript such as arr[$(cmd)]. So printf only
   # reads data when no word has -v first and no word as written has a %, a $
-  # or a backtick (a format from a variable or in $SQ\x25nSQ could be %n).
+  # or a backtick (a format from a variable or in $'\x25n' could be %n).
   if (ro && J_NM == "printf") for (j = i + 1; j <= n; j++) if (substr(WV[ctx, j], 1, 2) == "-v" || index(WR[ctx, j], "%") || index(WR[ctx, j], "$") || index(WR[ctx, j], BQ)) ro = 0
   safe = !POUT[ctx]
   for (k = 1; k <= RN[ctx]; k++) if (!redir_safe(RO[ctx, k], RV[ctx, k], RMISS[ctx, k])) safe = 0
