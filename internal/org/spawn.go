@@ -221,6 +221,12 @@ type Org struct {
 	// so the result does not depend on whether the test process itself runs
 	// inside a herdr pane.
 	Getenv func(string) string
+	// Worktrees reads and makes the feature worktrees of StartFeature
+	// (feature.go): the records and `ensure` of scripts/ralph-worktree.sh,
+	// and the branch a worktree has checked out. nil (the field's default)
+	// means the script-backed implementation, scriptFeatureWorktrees; tests
+	// set a fake.
+	Worktrees FeatureWorktrees
 }
 
 func (o *Org) now() string {
@@ -397,80 +403,19 @@ type SpawnResult struct {
 // out-of-pool model *and* a scope-less autonomous spawn) is rejected for
 // the same first cause in both modes, so `--dry-run`'s predicted rejection
 // always matches what a real spawn of the same request would record.
+//
+// `ralph org start --plan` (StartFeature, feature.go) must not make a
+// worktree for a spawn this would refuse, so it first runs checkSpawnInput
+// (step 0) and spawnPrecheckErr, which repeats steps 1 to 6 on an unlocked
+// read without writing anything. A change to the order or to a check of
+// steps 1 to 6 must be made in spawnPrecheckErr too.
 func (o *Org) Spawn(p SpawnParams) SpawnResult {
-	// Identifier shape validation runs first, before any manifest read or
-	// write and before any path is derived from p.OrgID/p.SeatID (see
-	// promptFilePath below). An invalid id is a plain rejection: no
-	// `rejected` manifest event is appended for it (unlike envelope
-	// validation failures further down, via reject()) because a value that
-	// fails this check must never be written into the manifest as if it
-	// were a real seat identifier.
-	if err := ValidateIdentifier("org_id", p.OrgID); err != nil {
+	// The input-only checks (step 0 above) run first, before any manifest
+	// read or write; see checkSpawnInput. From here on p holds the
+	// normalized Reserve and the cleaned Feature it returns.
+	p, err := checkSpawnInput(p)
+	if err != nil {
 		return SpawnResult{Outcome: SpawnOutcomeRejected, Err: err}
-	}
-	if err := ValidateIdentifier("seat_id", p.SeatID); err != nil {
-		return SpawnResult{Outcome: SpawnOutcomeRejected, Err: err}
-	}
-	// herdrAgentName joins org_id and seat_id with a single `_` separator
-	// (len(org)+1+len(seat)); herdr's live-probed agent-name limit is 32
-	// characters, so a combination that individually passes
-	// identifierPattern (max 30 chars each) can still overflow herdr's
-	// limit once joined. Reject that combination here, before any manifest
-	// write, the same way an individually-invalid id is rejected above.
-	if n := len(p.OrgID) + 1 + len(p.SeatID); n > maxHerdrAgentNameLen {
-		return SpawnResult{Outcome: SpawnOutcomeRejected, Err: fmt.Errorf(
-			"org: combined org_id+seat_id length %d exceeds herdr's %d-character agent-name limit (org_id=%q seat_id=%q)",
-			n, maxHerdrAgentNameLen, p.OrgID, p.SeatID,
-		)}
-	}
-	// A retired role name in the request (retiredRoles, prompts.go: a
-	// renamed role's old name as --role or --id, or a removed role spawned
-	// with no --prompt) is a plain rejection too, for the same reason as the
-	// identifier checks above: it is a property of the input alone. It runs
-	// before ResolvePermissionMode and the manifest read, so neither a
-	// `rejected` event nor a receipt is written, in dry-run and real mode
-	// alike. `ralph org start` spawns through here, so it is covered by the
-	// same check. The ralph.toml half of the guard (retiredRoleConfigErr)
-	// depends on the config instead and does NOT run here: it runs after the
-	// idempotent early return (real path) or first in the dry-run branch, so
-	// re-running an already-spawned seat under such a config stays a no-op.
-	if err := RetiredRoleInputErr(p.Role, p.SeatID, p.Prompt); err != nil {
-		return SpawnResult{Outcome: SpawnOutcomeRejected, Err: err}
-	}
-	// Reserve is input too: the org's reservation is taken by its leader seat
-	// only, and its paths must follow NormalizeReservePaths' rules. Both are
-	// plain rejections like the checks above. From here on p.Reserve holds
-	// the normalized paths, so every later comparison and record uses them.
-	if len(p.Reserve) > 0 {
-		if p.SeatID != LeaderIdentity {
-			return SpawnResult{Outcome: SpawnOutcomeRejected, Err: fmt.Errorf(
-				"org: only the %s seat reserves paths for its org; seat_id %q cannot (spawn it without reserve paths)",
-				LeaderIdentity, p.SeatID,
-			)}
-		}
-		reserve, err := NormalizeReservePaths(p.Reserve)
-		if err != nil {
-			return SpawnResult{Outcome: SpawnOutcomeRejected, Err: err}
-		}
-		p.Reserve = reserve
-	}
-	// Feature is input as well: it is recorded with the reservation, so it
-	// needs Reserve (which in turn needs the leader seat), and its fields
-	// must fit the record. p.Feature then points at a copy with Worktree
-	// cleaned, so the caller's value is not changed.
-	if p.Feature != nil {
-		if len(p.Reserve) == 0 {
-			return SpawnResult{Outcome: SpawnOutcomeRejected, Err: fmt.Errorf(
-				"org: a split plan feature is recorded with the org's reservation, so seat_id %q cannot be spawned for one without reserve paths",
-				p.SeatID,
-			)}
-		}
-		if err := validateFeatureBinding(*p.Feature); err != nil {
-			return SpawnResult{Outcome: SpawnOutcomeRejected, Err: err}
-		}
-		feature := *p.Feature
-		feature.Worktree = filepath.Clean(feature.Worktree)
-		p.Feature = &feature
 	}
 
 	// resolvedPermMode is a pure function of cfg+role, computed once here so
@@ -1038,6 +983,133 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	}, ModelReceipt: receipt}
 }
 
+// checkSpawnInput runs Spawn's input-only checks (step 0 of its doc comment)
+// on p and returns p with Reserve normalized and Feature pointing at a copy
+// with Worktree cleaned. They are pure functions of the request, so every
+// error is a plain rejection: Spawn returns it with no manifest event and no
+// receipt, in dry-run and real mode alike. StartFeature (feature.go) runs it
+// too, before it makes a worktree.
+func checkSpawnInput(p SpawnParams) (SpawnParams, error) {
+	// Identifier shape validation runs first, before any manifest read or
+	// write and before any path is derived from p.OrgID/p.SeatID (see
+	// promptFilePath below). An invalid id is a plain rejection: no
+	// `rejected` manifest event is appended for it (unlike envelope
+	// validation failures further down, via reject()) because a value that
+	// fails this check must never be written into the manifest as if it
+	// were a real seat identifier.
+	if err := ValidateIdentifier("org_id", p.OrgID); err != nil {
+		return p, err
+	}
+	if err := ValidateIdentifier("seat_id", p.SeatID); err != nil {
+		return p, err
+	}
+	// herdrAgentName joins org_id and seat_id with a single `_` separator
+	// (len(org)+1+len(seat)); herdr's live-probed agent-name limit is 32
+	// characters, so a combination that individually passes
+	// identifierPattern (max 30 chars each) can still overflow herdr's
+	// limit once joined. Reject that combination here, before any manifest
+	// write, the same way an individually-invalid id is rejected above.
+	if n := len(p.OrgID) + 1 + len(p.SeatID); n > maxHerdrAgentNameLen {
+		return p, fmt.Errorf(
+			"org: combined org_id+seat_id length %d exceeds herdr's %d-character agent-name limit (org_id=%q seat_id=%q)",
+			n, maxHerdrAgentNameLen, p.OrgID, p.SeatID,
+		)
+	}
+	// A retired role name in the request (retiredRoles, prompts.go: a
+	// renamed role's old name as --role or --id, or a removed role spawned
+	// with no --prompt) is a plain rejection too, for the same reason as the
+	// identifier checks above: it is a property of the input alone. It runs
+	// before ResolvePermissionMode and the manifest read, so neither a
+	// `rejected` event nor a receipt is written, in dry-run and real mode
+	// alike. `ralph org start` spawns through here, so it is covered by the
+	// same check. The ralph.toml half of the guard (retiredRoleConfigErr)
+	// depends on the config instead and does NOT run here: it runs after the
+	// idempotent early return (real path) or first in the dry-run branch, so
+	// re-running an already-spawned seat under such a config stays a no-op.
+	if err := RetiredRoleInputErr(p.Role, p.SeatID, p.Prompt); err != nil {
+		return p, err
+	}
+	// Reserve is input too: the org's reservation is taken by its leader seat
+	// only, and its paths must follow NormalizeReservePaths' rules. Both are
+	// plain rejections like the checks above. From here on p.Reserve holds
+	// the normalized paths, so every later comparison and record uses them.
+	if len(p.Reserve) > 0 {
+		if p.SeatID != LeaderIdentity {
+			return p, fmt.Errorf(
+				"org: only the %s seat reserves paths for its org; seat_id %q cannot (spawn it without reserve paths)",
+				LeaderIdentity, p.SeatID,
+			)
+		}
+		reserve, err := NormalizeReservePaths(p.Reserve)
+		if err != nil {
+			return p, err
+		}
+		p.Reserve = reserve
+	}
+	// Feature is input as well: it is recorded with the reservation, so it
+	// needs Reserve (which in turn needs the leader seat), and its fields
+	// must fit the record. p.Feature then points at a copy with Worktree
+	// cleaned, so the caller's value is not changed.
+	if p.Feature != nil {
+		if len(p.Reserve) == 0 {
+			return p, fmt.Errorf(
+				"org: a split plan feature is recorded with the org's reservation, so seat_id %q cannot be spawned for one without reserve paths",
+				p.SeatID,
+			)
+		}
+		if err := validateFeatureBinding(*p.Feature); err != nil {
+			return p, err
+		}
+		feature := *p.Feature
+		feature.Worktree = filepath.Clean(feature.Worktree)
+		p.Feature = &feature
+	}
+	return p, nil
+}
+
+// spawnPrecheckErr returns the error a real Spawn of p would refuse it with
+// against events, or nil when Spawn would go on to its driver calls, and
+// writes nothing. StartFeature (feature.go) runs it on an unlocked read
+// before it makes a worktree, so a start that Spawn would refuse makes none.
+// p must already have passed checkSpawnInput.
+//
+// It runs the checks of Spawn's locked sections (steps 1 to 6 of Spawn's doc
+// comment) in their order: for a seat that is already spawned only
+// idempotentRespawnDecision, the decision of the idempotent return;
+// otherwise retiredRoleConfigErr, ValidateSpawnEnvelope,
+// permissionArgsForDriver, autonomousScopeGateErr and spawnCapacityErr. A
+// stale in-flight seat is counted as compensateStale leaves it (one more
+// `spawn_failed`), since Spawn decides capacity on its read after that
+// compensation. Spawn decides again under the lock, so the two can differ
+// only when another spawn changes the manifest in between.
+// TestSpawnPrecheckErr_MatchesSpawn runs both on the same ledgers.
+func spawnPrecheckErr(cfg config.OrgConfig, p SpawnParams, events []ManifestEvent) error {
+	seat, found := seatFromEvents(events, p.OrgID, p.SeatID)
+	if found && seat.Event == EventSpawned {
+		_, err := idempotentRespawnDecision(cfg, p, seat, events)
+		return err
+	}
+	if err := retiredRoleConfigErr(cfg); err != nil {
+		return err
+	}
+	req := SpawnRequest{OrgID: p.OrgID, SeatID: p.SeatID, Role: p.Role, Driver: p.Driver, Model: p.Model}
+	if err := ValidateSpawnEnvelope(cfg, req); err != nil {
+		return err
+	}
+	mode := ResolvePermissionMode(cfg, p.Role)
+	if _, err := permissionArgsForDriver(cfg, p.Driver, mode); err != nil {
+		return err
+	}
+	if err := autonomousScopeGateErr(p, mode); err != nil {
+		return err
+	}
+	if found && (seat.Event == EventSpawnStarted || seat.Event == EventSpawnStep) {
+		events = append(slices.Clip(events), ManifestEvent{OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnFailed})
+	}
+	_, err := spawnCapacityErr(cfg, p, req, events)
+	return err
+}
+
 // checkCapacityAndStart runs the capacity check + spawn_started append
 // against the given events snapshot for org o, the in-flight spawn params p,
 // and the already-built SpawnRequest req. It takes its dependencies as
@@ -1138,23 +1210,33 @@ func (p SpawnParams) reservation() Reservation {
 // (for a running leader, showing it inactive), and the seat must stay as it
 // is.
 func (o *Org) idempotentRespawn(p SpawnParams, seat SeatStatus, events []ManifestEvent) SpawnResult {
-	if len(p.Reserve) > 0 {
-		if !seat.Active {
-			if err := validateMaxOrgs(o.Config, p.OrgID, RunningOrgs(events)); err != nil {
-				return SpawnResult{Outcome: SpawnOutcomeRejected, Err: err}
-			}
-		}
-		record, err := reservationDecision(events, p.OrgID, p.reservation())
-		if err != nil {
-			return SpawnResult{Outcome: SpawnOutcomeRejected, Err: err}
-		}
-		if record {
-			if err := o.appendEvent(scopeReservedEvent(o.now(), p.OrgID, p.reservation(), "", false)); err != nil {
-				return SpawnResult{Outcome: SpawnOutcomeFailed, Err: fmt.Errorf("org: record %s: %w", EventScopeReserved, err)}
-			}
+	record, err := idempotentRespawnDecision(o.Config, p, seat, events)
+	if err != nil {
+		return SpawnResult{Outcome: SpawnOutcomeRejected, Err: err}
+	}
+	if record {
+		if err := o.appendEvent(scopeReservedEvent(o.now(), p.OrgID, p.reservation(), "", false)); err != nil {
+			return SpawnResult{Outcome: SpawnOutcomeFailed, Err: fmt.Errorf("org: record %s: %w", EventScopeReserved, err)}
 		}
 	}
 	return SpawnResult{Outcome: SpawnOutcomeIdempotent, Seat: seat}
+}
+
+// idempotentRespawnDecision is idempotentRespawn's decision, which writes
+// nothing (spawnPrecheckErr runs it too): with no p.Reserve nothing is
+// decided; otherwise max_orgs when seat is not Active, then the reservation
+// (see idempotentRespawn). record is true when the reservation must be
+// appended.
+func idempotentRespawnDecision(cfg config.OrgConfig, p SpawnParams, seat SeatStatus, events []ManifestEvent) (record bool, err error) {
+	if len(p.Reserve) == 0 {
+		return false, nil
+	}
+	if !seat.Active {
+		if err := validateMaxOrgs(cfg, p.OrgID, RunningOrgs(events)); err != nil {
+			return false, err
+		}
+	}
+	return reservationDecision(events, p.OrgID, p.reservation())
 }
 
 // RetiredRoleInputErr is the input half of Spawn's guard for the role names

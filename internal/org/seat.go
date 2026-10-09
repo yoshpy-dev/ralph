@@ -44,9 +44,13 @@ const (
 	// EventScopeReserved is an org-level, non-state event (SeatID empty,
 	// absent from stateEvents below): a leader spawn with
 	// SpawnParams.Reserve records the org's reservation with it, Details
-	// `paths=<normalized paths, comma-separated>` (see reserve.go). The
-	// latest one after the org's latest `disbanded` is the org's
-	// reservation, and it makes the org count as running for max_orgs.
+	// `paths=<normalized paths, comma-separated>`. For an org started for a
+	// split plan feature (SpawnParams.Feature) the binding follows as
+	// `split=<id> feature=<slug> digest=<hex> branch=<branch>`, and the
+	// feature worktree goes into the event's Worktree field. A note may
+	// come last (see scopeReservedPathsKey in reserve.go). The latest one
+	// after the org's latest `disbanded` is the org's reservation and
+	// binding, and it makes the org count as running for max_orgs.
 	EventScopeReserved = "scope_reserved"
 )
 
