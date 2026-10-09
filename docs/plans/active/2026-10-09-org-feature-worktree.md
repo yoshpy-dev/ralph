@@ -159,7 +159,11 @@ Critical forks: None(どの選択も 1 スライスの手戻りで戻せる。`s
 - [x] Plan reviewed
 - [x] Plan approved
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+- 2026-10-09: S1(a321d1a7)分割計画の読み込み・検査・digest。決めたこと: `SplitPlansDirIn` を足した。`LoadSplitPlan` もファイル名(`<id>.md`)を検査する。`ResolveSplitPlanPath` はファイル自体の symlink も解決し、`splits/` の外を指すものを拒否する。`- Approved:` の digest の形が違えば読み込みでは拒否せず、`CheckApproved` が「digest がない」と返す(Draft の `- Approved: TBD` を読めるように)。slug `none`、`Depends on` の空の項目や重複、最初の `### <slug>` より前のフィールドの行も拒否する。digest は本物のスクリプトと 114 個の入力で一致を確かめた
+- 2026-10-09: S2(9d7a85ae)予約の記録に結びつき。決めたこと: 一部だけ壊れた結びつきの記録は「どれとも一致しない結びつき」として読み、その org への予約は disband まで拒否する。結びつきの worktree は `filepath.Clean` で正規化する。入力検査は制御文字も拒否する
+- 2026-10-09: S3 は org 層の S3a(f27188d7)と CLI の S3b(216b2cdd)の 2 つのコミットに分けた。S3a: 先読みは Spawn の入力検査(`checkSpawnInput`)と既存の leader の判定(`idempotentRespawnDecision`)を切り出して共有し、`TestSpawnPrecheckErr_MatchesSpawn` で先読みと Spawn のエラーが一致することを確かめる。RepoRoot は symlink を解決して使う。worktree の使い回しの検査は kind も比べ、記録の worktree のディレクトリがないときも拒否する。implementer が未追跡の新規テストファイルの 1 行を `sed -i` で直した(追跡済みのファイルではなく、U+FFFD の検査は 0 件)。S3b: `org.FeatureRepoRoot(dir, source)` を足し、`newOrgSpawnRuntime` を解決と構築に分けた。`--plan` / `--feature` の空白の値も拒否する。start の `--scope` の usage にあったバッククォートで `--help` が崩れていたので直した(3 段目の進捗の (d))
+- 2026-10-09: 実装中に見つけて送るもの(sync-docs で tech-debt へ)。同じ機能の `start --plan` を同時に 2 つ打つと、両方が先読みを通って `ensure` まで進み、後の方のエラーに「main を clean にして打ち直す」の案内が付く(この場合は的外れ)。`ralph-worktree.sh` にはロックがない
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
