@@ -21,7 +21,8 @@ Leader(座席の編成・統括を行う識別子)がその機構をどう操作
 - herdr / agmsg が導入済みであること。`ralph doctor` で `herdr` / `agmsg`
   チェックを確認する(座席 0 のソロ実行のみ両ツールなしで動作)。
 - `ralph.toml` の `[org]` エンベロープ(`model_pool` / `max_seats` /
-  `permissions`)が意図通り設定されていること。未設定の場合は既定値
+  `max_orgs` / `max_total_seats` / `permissions`)が意図通り設定されて
+  いること。未設定の場合は既定値
   (`permissions.default = "autonomous"`)で動作する。
 - **bypass 初回承諾(マシンごと 1 回)**: claude の autonomous モード
   (`--permission-mode bypassPermissions`)は初回起動時に承諾ダイアログを
@@ -159,16 +160,94 @@ toplevel、cwd の順で決まる。「前提」節を参照)、`ralph org statu
 
 | 動詞 | 用途 | 代表例 |
 |---|---|---|
-| `spawn` | 座席を起動。`--role`(役割別プロンプト雛形を自動展開)、`--scope`(担当範囲の説明。autonomous では必須)、`--driver`(claude\|codex)、`--model`(運用上必須。省略時はプール先頭へ警告付きフォールバック)、`--dry-run`(実起動せず検証・記録のみ)、`--allow-unscoped`(--scope 省略を明示的に許可。使用は manifest に記録される)、`--leader-driver`(leader 識別子の agmsg type 導出元)。autonomous モードの座席は `--scope` 必須、省略時は fail-closed。 | `ralph org spawn --org-id X --id reviewer-1 --role reviewer --scope "internal/org/**" --driver claude --model sonnet --cwd .` |
+| `spawn` | 座席を起動。`--role`(役割別プロンプト雛形を自動展開)、`--scope`(担当範囲の説明。autonomous では必須)、`--driver`(claude\|codex)、`--model`(運用上必須。省略時はプール先頭へ警告付きフォールバック)、`--dry-run`(実起動せず検証・記録のみ)、`--allow-unscoped`(--scope 省略を明示的に許可。使用は manifest に記録される)、`--leader-driver`(leader 識別子の agmsg type 導出元)、`--reserve`(org の担当範囲を repo ルート相対のパスで予約。末尾 `/` はディレクトリ、`.` は repo 全体。走っている他の org の予約と重なれば拒否、`disband` で解放。leader 座席のみ。`--scope` の要件も満たす。「全 org の上限と予約」節)。autonomous モードの座席は `--scope` 必須、省略時は fail-closed。 | `ralph org spawn --org-id X --id reviewer-1 --role reviewer --scope "internal/org/**" --driver claude --model sonnet --cwd .` |
 | `send` | 座席へ typed protocol メッセージを送る。既定で `.claude/rules/ralph/agent-messaging.md` のプロトコルを検証(TYPE 列挙・TASK_ID 必須チェック・本文 2,000 文字上限)。`--raw` で検証をバイパス(bypass は manifest に `raw=true` で記録される。デバッグ用途以外は使わない)。本文を入力してから 750ms 待って Enter を 1 回送り(`--enter-delay-ms` で変更可。待ちがないと idle の codex 座席で本文が入力欄に残ることがある)、herdr の状態が working / blocked に変わったかで submit を確認する。確認できなければ manifest に `submit_unconfirmed=true` を記録して stderr に注意を出す(exit code は 0)。その場合は `read` で pane を確認し、本文が入力欄に残っているときだけ `herdr pane send-keys <pane> Enter` を送る。ralph は Enter を再送しない(submit 済みの座席が承認ダイアログを出していると、盲目的な Enter がそれを承認してしまうため)。`--timeout-ms` の残りが Enter 前の待ちを賄えないときは何も入力せずエラーで終わる。エラーで終了して stderr に note が出た場合はそれに従う(pane に何も送る前の失敗、たとえば検証エラー・座席なし・`--timeout-ms` の不足では note は出ず、そのまま送り直せる)。note は pane への操作がどこまで進んだかで変わり、どれも先に `read` で pane を確認するよう求める(`--state-dir` を明示していれば、note の `ralph org read` にも付く)。herdr の呼び出しが `--timeout-ms` で打ち切られると、本文や Enter が届いていてもエラーになるため、ralph は推測せず「届いたか分からない」まま note に書く。次に何をすべきかは note の指示に従う。 | `ralph org send --org-id X --to reviewer-1 --text "$(cat task.txt)"` |
 | `wait` | 座席が指定状態(idle/done/blocked など)になるまでブロックして待つ。`--until` 既定は `idle,done`(herdr は入力待ちで休止中の対話エージェントを `idle` ではなく `done` と報告するため、両方を既定で待つ)。`--timeout-ms` 既定は 60000(有界)。無期限待機したい場合のみ明示的に `--timeout-ms 0` を渡す。 | `ralph org wait --org-id X --seat reviewer-1` |
 | `read` | 座席の直近 pane 出力を読む。 | `ralph org read --org-id X --seat reviewer-1 --lines 100` |
-| `status` | 座席台帳(roster)を表示。`--all` で dry-run 座席も含める。 | `ralph org status --org-id X --all` |
-| `stop` | 座席を停止する。pane に C-c を送ったあと pane を閉じて座席のプロセスを終わらせ(画面の出力も消えるので、要るなら先に `read` で読む)、agmsg から外して `stopped` を記録する。pane が見つからないときは閉じ済みとして扱う。pane を閉じられなかったとき(herdr に繋がらない、1 回 10 秒の期限切れなど)は `stopped` を書かずに `stop_failed` を記録し、座席は active のまま終了コード 1 になる。herdr が戻ってから打ち直せば拾う。C-c を送る前に、pane のある tab の label が座席 id か、workspace の label が org_id かを herdr で確かめ、違えば(herdr のセッションが失われて id が振り直された場合など)C-c も送らず pane も閉じずに `stop_failed` で終了コード 1 にする(`--force` でも閉じない)。`--all` は `--org-id` なしで全 org の active な座席を止め(`--org-id` / `--seat` とは併用不可)、1 つ止められなくても残りを止めて、止められなかった座席を `<org_id>/<seat_id>` と理由で stderr に並べ終了コード 1。`--force` は閉じられなかった座席にも `stopped` を書き、失敗を警告にして終了コード 0(pane は herdr に残っていることがある)。`--dry-run` は herdr / agmsg を呼ばず記録だけ。コマンドを打った pane(`HERDR_PANE_ID`)の座席は、記録と出力を済ませてから最後に閉じる(コマンドもそこで終わる)。`--all` でほかに止められなかった座席があれば、その座席は止めずに残す。最後の close が失敗したときは、座席を active に戻して終了コード 1 にする(打ち直すか別の pane の `--all` で閉じ直せる。`--force` は戻さず警告で終了コード 0)。 | `ralph org stop --org-id X --seat reviewer-1`、`ralph org stop --all` |
-| `disband` | org を解散する。active な座席を `stop` と同じ手順で止めたあと、台帳に記録した org の herdr workspace を閉じて `org_workspace_closed` を記録し、すべて閉じられたときだけ `disbanded` を書く。止められなかった座席か閉じられなかった workspace があれば `disbanded` を書かず、それを stderr に並べて終了コード 1(座席が 1 つでも止まらなければ workspace は閉じない)。打ち直すと残りを片付ける。`--all` は `--org-id` なしで、まだ解散していない全 org を解散する(`--org-id` とは併用不可。解散できなかった org は次の `--all` でまた対象になる。古い ralph の `disband` が workspace を閉じずに残した org も対象になる)。`--force` は閉じられなかった座席にも `stopped`、workspace にも `org_workspace_closed` を書いて `disbanded` まで記録し、失敗を警告にして終了コード 0。`--force` でも、label で org のものと確かめた workspace は閉じるので、tab の確認に落ちた座席の pane も workspace と一緒に終わる。コマンドを打った pane とそれを含む workspace(`HERDR_PANE_ID` / `HERDR_WORKSPACE_ID`)は、ほかがすべて閉じたときだけ、記録と出力を済ませてから最後に閉じる(コマンドもそこで終わる)。ほかに閉じられなかったものがあれば手を付けずに残すので、打ったセッションは失敗の一覧を見られる。最後の close が失敗したときは、その pane の座席を active に、後回しにした workspace を open に戻して終了コード 1 にする(打ち直すか別の pane の `--all` で閉じ直せる。`--force` は戻さず警告で終了コード 0)。閉じるのは台帳に記録した pane と workspace だけで、workspace も label が org_id でなければ閉じずに終了コード 1 にする。解散した org_id でまた `spawn` すると新しい workspace を作る(最後の close の失敗で開き直した workspace は再利用する)。 | `ralph org disband --org-id X`、`ralph org disband --all` |
+| `status` | 座席台帳(roster)を表示。`--all` で dry-run 座席も含める。org に予約があれば `reserved:` の行も出す(`--json` は `reservation`)。 | `ralph org status --org-id X --all` |
+| `stop` | 座席を停止する。pane に C-c を送ったあと pane を閉じて座席のプロセスを終わらせ(画面の出力も消えるので、要るなら先に `read` で読む)、agmsg から外して `stopped` を記録する。pane が見つからないときは閉じ済みとして扱う。pane を閉じられなかったとき(herdr に繋がらない、1 回 10 秒の期限切れなど)は `stopped` を書かずに `stop_failed` を記録し、座席は active のまま終了コード 1 になる。herdr が戻ってから打ち直せば拾う。C-c を送る前に、pane のある tab の label が座席 id か、workspace の label が org_id かを herdr で確かめ、違えば(herdr のセッションが失われて id が振り直された場合など)C-c も送らず pane も閉じずに `stop_failed` で終了コード 1 にする(`--force` でも閉じない)。`--all` は `--org-id` なしで全 org の active な座席を止め(`--org-id` / `--seat` とは併用不可)、1 つ止められなくても残りを止めて、止められなかった座席を `<org_id>/<seat_id>` と理由で stderr に並べ終了コード 1。`--force` は閉じられなかった座席にも `stopped` を書き、失敗を警告にして終了コード 0(pane は herdr に残っていることがある)。`--dry-run` は herdr / agmsg を呼ばず記録だけ。コマンドを打った pane(`HERDR_PANE_ID`)の座席は、記録と出力を済ませてから最後に閉じる(コマンドもそこで終わる)。`--all` でほかに止められなかった座席があれば、その座席は止めずに残す。最後の close が失敗したときは、座席を active に戻して終了コード 1 にする(打ち直すか別の pane の `--all` で閉じ直せる。台帳に新しい記録があるとき、台帳を読み書きできないときは戻さず、エラーが手で閉じる herdr のコマンドを示す。`--force` は戻さず警告で終了コード 0)。 | `ralph org stop --org-id X --seat reviewer-1`、`ralph org stop --all` |
+| `disband` | org を解散する。active な座席を `stop` と同じ手順で止めたあと、台帳に記録した org の herdr workspace を閉じて `org_workspace_closed` を記録し、すべて閉じられたときだけ `disbanded` を書く。止められなかった座席か閉じられなかった workspace があれば `disbanded` を書かず、それを stderr に並べて終了コード 1(座席が 1 つでも止まらなければ workspace は閉じない)。打ち直すと残りを片付ける。`--all` は `--org-id` なしで、まだ解散していない全 org を解散する(`--org-id` とは併用不可。解散できなかった org は次の `--all` でまた対象になる。古い ralph の `disband` が workspace を閉じずに残した org も対象になる)。`--force` は閉じられなかった座席にも `stopped`、workspace にも `org_workspace_closed` を書いて `disbanded` まで記録し、失敗を警告にして終了コード 0。`--force` でも、label で org のものと確かめた workspace は閉じるので、tab の確認に落ちた座席の pane も workspace と一緒に終わる。コマンドを打った pane とそれを含む workspace(`HERDR_PANE_ID` / `HERDR_WORKSPACE_ID`)は、ほかがすべて閉じたときだけ、記録と出力を済ませてから最後に閉じる(コマンドもそこで終わる)。ほかに閉じられなかったものがあれば手を付けずに残すので、打ったセッションは失敗の一覧を見られる。最後の close が失敗したときは、その pane の座席を active に、後回しにした workspace を open に、予約があればそれも戻して終了コード 1 にする(打ち直すか別の pane の `--all` で閉じ直せる。台帳に新しい記録があるとき、台帳を読み書きできないときは戻さず、エラーが手で閉じる herdr のコマンドを示す。`--force` は戻さず警告で終了コード 0)。閉じるのは台帳に記録した pane と workspace だけで、workspace も label が org_id でなければ閉じずに終了コード 1 にする。解散した org_id でまた `spawn` すると新しい workspace を作る(最後の close の失敗で開き直した workspace は再利用する)。 | `ralph org disband --org-id X`、`ralph org disband --all` |
 | `report` | manifest + receipts から編成履歴を `docs/reports/org-manifest-<org_id>-<date>.md` に書き出す。 | `ralph org report --org-id X` |
 | `watch` | パルス層 Watchdog を起動(決定論監視: stall/生存/スコープ変更の ALERT・デッドマン人間エスカレーション。`--once` で 1 サイクル)。意味判定はトリガー時のみオンデマンド LLM(watcher_model)。 | `ralph org watch --org-id X` |
-| `start` | headless leader 座席を spawn する糖衣(`spawn --role leader` 相当。`leader.md` 雛形にタスクを展開)。leader も他の座席と同じ AC-2b ゲートの対象(autonomous 既定では `--scope` 必須)。 | `ralph org start --org-id X --cwd . --scope "org-a 全体の編成・統括" "<task>"` |
+| `start` | headless leader 座席を spawn する糖衣(`spawn --role leader` 相当。`leader.md` 雛形にタスクを展開)。leader も他の座席と同じ AC-2b ゲートの対象(autonomous 既定では `--scope` 必須)。`--reserve <path>`(`spawn` と同じ。繰り返し可)で org の担当範囲を予約でき、渡せば `--scope` の代わりになる。 | `ralph org start --org-id X --cwd . --scope "org-a 全体の編成・統括" "<task>"` |
+
+## 全 org の上限と予約
+
+`[org].max_seats`(既定 5)は org_id ごとの上限。これとは別に、同じ台帳を
+使うすべての org が共有する上限が 2 つある。
+
+- `[org].max_orgs`(既定 10): 走っている org の数。まだ走っていない org_id
+  への `spawn` / `start` は、走っている org がこの数に達していると拒否される。
+- `[org].max_total_seats`(既定 30): 全 org の動いている座席の合計。新しい座席
+  の `spawn` は、合計がこの数に達していると拒否される。すでに立っている座席
+  への `spawn` は、これまで通り既存の座席を返す。
+
+どちらも台帳のロックの下で判定するので、`spawn` どうしが同時に打たれても超え
+ない。拒否された新しい座席の `spawn` は `rejected` を台帳に書き、エラーは、
+終わった org を `ralph org disband --org-id <id>`(全 org なら `--all`)で
+片付けると枠が空くことを示す。
+
+例外が 1 つある。コマンドを打った自分の pane か workspace を最後に閉じる
+`stop` / `disband` は、その close が失敗すると座席と workspace を「動いている」
+に戻す。`disband` の最後の close が失敗したときは、pane の経路でも workspace
+の経路でも、`disbanded` の前の予約を一緒に戻す。動いている座席の通常の
+`stop` は予約を解いていないので、予約は戻さない(`stop` と `disband` の行を
+参照)。この補償は上限も予約の重なりも見ずに戻すので、失敗してから戻すまで
+の間にほかの org が枠か同じ範囲を取っていると、`max_orgs` か
+`max_total_seats` を 1 つ超えたり、予約が重なったりする。打ち直した `stop` /
+`disband` で解ける。
+
+補償は台帳のロックの下で台帳を読み直してから書く。座席、workspace、予約の
+どれかに新しい記録があるとき(失敗を待つ間に同じ org の `spawn` が立て直した
+場合など)は、その記録を残して戻さない。ロックを取れないときと、台帳を読め
+ないときや書けないときも戻さない。どちらもエラーが、戻したものと戻さなかった
+ものを挙げて、手で閉じる herdr のコマンドで終わる。
+
+走っている org は、その org の最後の `disbanded` より後に、動いている座席、
+閉じていない workspace、予約のどれかがある org。`rejected` だけの org と、
+座席がすべて止まり workspace も予約もない org は数えない。座席を全部 `stop`
+しても workspace が開いたままなら数えるので、枠を空けるには `disband` まで
+打つ。
+
+この 2 つの上限を main worktree のルートの `ralph.toml`(なければ既定値)から
+読むのは、`--config` がなく、台帳の置き場所が main worktree のものであるとき
+だけ。サブディレクトリや linked worktree から打っても同じ上限が掛かるので、
+feature branch 側の `ralph.toml` で変えても効かない。それ以外は、`--config`
+のファイル(なければ打った場所の `./ralph.toml`)を使う。`--config` を渡した
+とき、`--state-dir` か `RALPH_ORG_STATE_DIR` で台帳を決めたとき、台帳を git の
+toplevel から決めたとき(main worktree を決められない bare リポジトリの linked
+worktree)、git の外のときがこれに当たる。`max_seats` とほかの設定の読み方は
+変わらない。
+
+### 担当範囲の予約(`--reserve`)
+
+`ralph org start` と leader の `ralph org spawn --id leader` は、`--reserve
+<path>`(繰り返し可)で org の担当範囲を台帳に予約できる。予約は任意で、
+付けない org は他の org と重ならない扱いになる。
+
+- パスは repo のルートからの相対で書く。末尾が `/` ならディレクトリ(その
+  下すべて)、そうでなければファイル、`.` は repo 全体。絶対パス、`..` を含む
+  もの、空、カンマ・空白・制御文字を含むものは、台帳に何も書かず拒否される。
+- パスは書いた通りに扱う。glob は使えず、`*` はファイル名の文字になる
+  (ディレクトリは `internal/org/` のように書く)。末尾に `/` がないパスは
+  ファイルなので、`--reserve internal/auth` が守るのは `internal/auth` という
+  名前のファイルだけで、ディレクトリの下は守らない。重なりはパスの区切りの
+  単位で比べるので、`internal/auth/` と `internal/authz/` は重ならない。
+- 走っている他の org の予約と重なると拒否され、エラーに相手の org_id と重
+  なったパスが出る。
+- 予約は org 単位で、`disband` で解ける。同じ org に同じ一覧を渡し直すと通り、
+  違う一覧は拒否される。変えたいときは `disband` して立て直す。予約のあとで
+  spawn が失敗しても予約は残る。
+- 受け付けるのは leader の座席だけで、ほかの座席に渡すと拒否される。
+- `--reserve` を渡した spawn は、autonomous の `--scope` 必須のゲートを満たす。
+  ただし `--reserve` だけを渡した leader の役割プロンプトでは、`{{SCOPE}}` に
+  予約したパスではなく既定の「未指定」の文言が入る。leader に担当範囲の説明を
+  見せたいときは `--scope` も渡す。
+- 予約は org 同士の担当の重なりを防ぐための記録で、予約の外への書き込みは
+  止めない。範囲の外への変更は `ralph org watch` の scope_change ALERT で
+  知らせる。
+- `ralph org status --org-id <id>` が `reserved: <path>, ...` の行を出す
+  (`--json` は `reservation`)。
 
 ## 編成パターン
 

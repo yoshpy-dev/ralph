@@ -260,6 +260,18 @@ type SpawnParams struct {
 	// use is recorded on the spawned event's Details ("allow_unscoped=true")
 	// so an unscoped autonomous seat stays auditable after the fact.
 	AllowUnscoped bool
+	// Reserve lists the paths, relative to the repo root, that this spawn
+	// reserves for the org (plan 2026-10-08-org-limits-reserve): a path
+	// ending in `/` is a directory, any other a file, `.` the whole repo
+	// (NormalizeReservePaths, reserve.go). Only the leader seat
+	// (SeatID == LeaderIdentity) may pass it, and it is optional. Spawn
+	// normalizes it with the input checks and, under the manifest lock,
+	// records it as the org's EventScopeReserved when the org holds no
+	// reservation and no other running org's reservation overlaps it. The
+	// same set again passes, a different set is refused, and the reservation
+	// stays until the org is disbanded, also when the spawn fails later. A
+	// non-empty Reserve satisfies the AC-2b gate like Scope does.
+	Reserve []string
 	// LeaderDriver is the driver (claude|codex) the org's coordinating "leader"
 	// identity itself runs as -- independent of Driver, which names this
 	// seat's own driver. It is only consulted by ensureLeaderJoined to pick
@@ -319,16 +331,19 @@ type SpawnResult struct {
 // docs/plans/active/2026-08-01-org-runtime-mechanism.md. For a non-dry-run
 // call, the ordering is, in this order:
 //  0. Input-only checks (identifier shape, the joined herdr agent-name
-//     length, and RetiredRoleInputErr): pure functions of the request, run
-//     before the manifest is read, each a plain rejection with no manifest
-//     event and no receipt. They run in dry-run mode too.
+//     length, RetiredRoleInputErr, and Reserve: leader seat only, paths
+//     normalized by NormalizeReservePaths): pure functions of the request,
+//     run before the manifest is read, each a plain rejection with no
+//     manifest event and no receipt. They run in dry-run mode too.
 //  1. Idempotent early return: an already-spawned seat returns the existing
 //     seat with no config-dependent validation attempted at all (so an
 //     at-cap org can never reject a respawn-of-active-seat retry, a no-op
 //     retry under the default autonomous mode can never be rejected by the
 //     AC-2b scope gate below either -- see that gate's doc comment for the
 //     fix this encodes -- and a retired [org.roles] / [org.permissions.roles]
-//     key added after the seat was spawned cannot reject the retry).
+//     key added after the seat was spawned cannot reject the retry). With
+//     Reserve, the reservation is decided first, after max_orgs when the
+//     seat is not active (idempotentRespawn).
 //  2. ralph.toml retired-key check (retiredRoleConfigErr): a plain
 //     rejection (no `rejected` event, no receipt), run before stale-seat
 //     compensation and every manifest write, so only a genuinely new spawn
@@ -347,7 +362,11 @@ type SpawnResult struct {
 //     spawn_step never resolved) is best-effort compensated and the
 //     manifest re-read, so it no longer counts toward max_seats.
 //  6. Capacity validation (ValidateSpawnCapacity) against the recomputed
-//     activeSeats.
+//     activeSeats, then the org-wide limits (ValidateOrgWideCapacity:
+//     max_orgs for an org that is not running yet, max_total_seats), then,
+//     with Reserve, the reservation (reservationDecision), all from the same
+//     locked read (spawnCapacityErr). A reservation to record is appended as
+//     EventScopeReserved right before spawn_started.
 //
 // Only then does the saga proceed to (unless DryRun) the workspace/tab/
 // agent/agmsg side effects with a spawn_started -> spawn_step* ->
@@ -356,7 +375,7 @@ type SpawnResult struct {
 // The DryRun path (self-review Cycle-2 M-1 fix) runs steps 0, 2, 3, 4, and
 // 6 in the exact same order as the real path above: the input-only checks,
 // retiredRoleConfigErr, ValidateSpawnEnvelope, then permissionArgsForDriver,
-// then the AC-2b gate, then ValidateSpawnCapacity.
+// then the AC-2b gate, then spawnCapacityErr against the real events.
 // Steps 1 and 5 have no dry-run analogue -- dry-run events are excluded
 // from ActiveSeatCount/roster entirely, so there is no idempotent-respawn
 // case to short-circuit and no stale-in-flight saga to detect or
@@ -405,6 +424,23 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	if err := RetiredRoleInputErr(p.Role, p.SeatID, p.Prompt); err != nil {
 		return SpawnResult{Outcome: SpawnOutcomeRejected, Err: err}
 	}
+	// Reserve is input too: the org's reservation is taken by its leader seat
+	// only, and its paths must follow NormalizeReservePaths' rules. Both are
+	// plain rejections like the checks above. From here on p.Reserve holds
+	// the normalized paths, so every later comparison and record uses them.
+	if len(p.Reserve) > 0 {
+		if p.SeatID != LeaderIdentity {
+			return SpawnResult{Outcome: SpawnOutcomeRejected, Err: fmt.Errorf(
+				"org: only the %s seat reserves paths for its org; seat_id %q cannot (spawn it without reserve paths)",
+				LeaderIdentity, p.SeatID,
+			)}
+		}
+		reserve, err := NormalizeReservePaths(p.Reserve)
+		if err != nil {
+			return SpawnResult{Outcome: SpawnOutcomeRejected, Err: err}
+		}
+		p.Reserve = reserve
+	}
 
 	// resolvedPermMode is a pure function of cfg+role, computed once here so
 	// every later consumer (the AC-2b gate, permissionArgsForDriver, the
@@ -429,14 +465,15 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 		// Dry-run mirrors the real path's ordering exactly (self-review
 		// Cycle-2 M-1 fix): retiredRoleConfigErr, then
 		// ValidateSpawnEnvelope, then permissionArgsForDriver, then the
-		// AC-2b gate, then ValidateSpawnCapacity -- the same
-		// first-cause-wins order the real path's locked closure uses below,
-		// minus the two steps that have no dry-run analogue (the idempotent
-		// early return and stale-in-flight compensation; dry-run events are
-		// excluded from ActiveSeatCount/roster entirely, so neither concept
-		// applies here). No manifest lock is needed either -- dry-run events
-		// never count toward [org].max_seats, so two concurrent dry-runs
-		// cannot race on capacity.
+		// AC-2b gate, then spawnCapacityErr (max_seats, the org-wide limits,
+		// the reservation) -- the same first-cause-wins order the real
+		// path's locked closure uses below, minus the two steps that have no
+		// dry-run analogue (the idempotent early return and stale-in-flight
+		// compensation; dry-run events are excluded from ActiveSeatCount/
+		// roster entirely, so neither concept applies here). No manifest lock
+		// is needed either -- dry-run events never count toward
+		// [org].max_seats, the org-wide limits or the reservations, so two
+		// concurrent dry-runs cannot race on them.
 		//
 		// The ralph.toml retired-key check (retiredRoleConfigErr) is a plain
 		// rejection with no manifest event or receipt, unlike the checks
@@ -461,11 +498,11 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 		if err := autonomousScopeGateErr(p, resolvedPermMode); err != nil {
 			return o.reject(p, err)
 		}
-		activeSeats := ActiveSeatCount(events, p.OrgID, RosterOptions{})
-		if err := ValidateSpawnCapacity(o.Config, req, activeSeats); err != nil {
+		reserve, err := spawnCapacityErr(o.Config, p, req, events)
+		if err != nil {
 			return o.reject(p, err)
 		}
-		return o.dryRunSpawn(p, resolvedPermMode)
+		return o.dryRunSpawn(p, resolvedPermMode, reserve)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(p.TimeoutMS)*time.Millisecond)
@@ -562,8 +599,11 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 			// calls -- checked and returned *before* envelope validation,
 			// so an already-spawned seat can never be rejected by e.g.
 			// max_seats pressure at the at-cap boundary. An idempotent
-			// no-op must not be able to fail validation.
-			r := SpawnResult{Outcome: SpawnOutcomeIdempotent, Seat: *existing}
+			// no-op must not be able to fail validation. A retry that
+			// carries Reserve is the one exception: idempotentRespawn
+			// decides the reservation (and, for a seat that is not active,
+			// max_orgs) before returning the seat.
+			r := o.idempotentRespawn(p, *existing, events)
 			early = &r
 			return nil
 		}
@@ -719,7 +759,7 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 			for i := range roster {
 				if roster[i].OrgID == p.OrgID && roster[i].SeatID == p.SeatID {
 					if roster[i].Event == EventSpawned {
-						r := SpawnResult{Outcome: SpawnOutcomeIdempotent, Seat: roster[i]}
+						r := o.idempotentRespawn(p, roster[i], events)
 						early = &r
 						return nil
 					}
@@ -984,11 +1024,23 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 // correlates against the exact time this saga's own spawn_started was
 // recorded, not a fresh read taken after the workspace/agent/agmsg round
 // trip that follows in Spawn.
+//
+// The capacity check is spawnCapacityErr (max_seats, then the org-wide
+// limits, then the reservation). When it says the reservation is to be
+// recorded, the EventScopeReserved is appended here, before spawn_started,
+// so it is in the manifest before the lock is released and a racing spawn of
+// another org sees it; it stays when the saga fails later.
 func checkCapacityAndStart(o *Org, p SpawnParams, req SpawnRequest, events []ManifestEvent) (*SpawnResult, time.Time) {
-	activeSeats := ActiveSeatCount(events, p.OrgID, RosterOptions{})
-	if err := ValidateSpawnCapacity(o.Config, req, activeSeats); err != nil {
+	reserve, err := spawnCapacityErr(o.Config, p, req, events)
+	if err != nil {
 		r := o.reject(p, err)
 		return &r, time.Time{}
+	}
+	if reserve {
+		if err := o.appendEvent(scopeReservedEvent(o.now(), p.OrgID, p.Reserve, "", false)); err != nil {
+			r := SpawnResult{Outcome: SpawnOutcomeFailed, Err: fmt.Errorf("org: record %s: %w", EventScopeReserved, err)}
+			return &r, time.Time{}
+		}
 	}
 	startedAt := o.nowTime()
 	if err := o.appendEvent(ManifestEvent{
@@ -999,6 +1051,68 @@ func checkCapacityAndStart(o *Org, p SpawnParams, req SpawnRequest, events []Man
 		return &r, time.Time{}
 	}
 	return nil, startedAt
+}
+
+// spawnCapacityErr runs, against events, every check of a new seat that
+// depends on the manifest, in this order: max_seats of the org
+// (ValidateSpawnCapacity), the org-wide max_orgs and max_total_seats
+// (ValidateOrgWideCapacity, from RunningOrgs and TotalActiveSeats), and,
+// when p.Reserve (already normalized) is set, the reservation
+// (reservationDecision). reserve is true when the reservation is new and the
+// caller must record it. The real path calls this under the manifest lock
+// (checkCapacityAndStart); the dry-run path calls it on its unlocked read of
+// the real events and only predicts.
+func spawnCapacityErr(cfg config.OrgConfig, p SpawnParams, req SpawnRequest, events []ManifestEvent) (reserve bool, err error) {
+	if err := ValidateSpawnCapacity(cfg, req, ActiveSeatCount(events, p.OrgID, RosterOptions{})); err != nil {
+		return false, err
+	}
+	if err := ValidateOrgWideCapacity(cfg, req, RunningOrgs(events), TotalActiveSeats(events)); err != nil {
+		return false, err
+	}
+	if len(p.Reserve) == 0 {
+		return false, nil
+	}
+	return reservationDecision(events, p.OrgID, p.Reserve)
+}
+
+// idempotentRespawn is the idempotent return for a spawn of a seat that is
+// already spawned: it returns that seat with no new record, as before,
+// unless p.Reserve is set (only possible for the leader seat). Then the
+// reservation is decided first against the same locked events
+// (reservationDecision): an org without one records it, the same set passes,
+// and a different set or an overlap with another running org is refused.
+//
+// When the seat is not Active (a legacy ledger where an older ralph's
+// `disbanded` followed the leader's `spawned` with no `stopped`), its org may
+// not be running, and a reservation alone makes an org run (RunningOrgs). So
+// max_orgs is decided first with validateMaxOrgs, the max_orgs half of
+// ValidateOrgWideCapacity: once max_orgs other orgs run, the reservation is
+// refused with the same error a new org gets. max_total_seats is not
+// checked, because no seat is added. An Active seat's org is running, so it
+// skips this check.
+//
+// Every refusal is a plain rejection (no `rejected` event, no receipt): a
+// `rejected` for the seat would replace `spawned` as its latest state event
+// (for a running leader, showing it inactive), and the seat must stay as it
+// is.
+func (o *Org) idempotentRespawn(p SpawnParams, seat SeatStatus, events []ManifestEvent) SpawnResult {
+	if len(p.Reserve) > 0 {
+		if !seat.Active {
+			if err := validateMaxOrgs(o.Config, p.OrgID, RunningOrgs(events)); err != nil {
+				return SpawnResult{Outcome: SpawnOutcomeRejected, Err: err}
+			}
+		}
+		record, err := reservationDecision(events, p.OrgID, p.Reserve)
+		if err != nil {
+			return SpawnResult{Outcome: SpawnOutcomeRejected, Err: err}
+		}
+		if record {
+			if err := o.appendEvent(scopeReservedEvent(o.now(), p.OrgID, p.Reserve, "", false)); err != nil {
+				return SpawnResult{Outcome: SpawnOutcomeFailed, Err: fmt.Errorf("org: record %s: %w", EventScopeReserved, err)}
+			}
+		}
+	}
+	return SpawnResult{Outcome: SpawnOutcomeIdempotent, Seat: seat}
 }
 
 // RetiredRoleInputErr is the input half of Spawn's guard for the role names
@@ -1078,17 +1192,19 @@ func retiredRoleConfigErr(cfg config.OrgConfig) error {
 
 // autonomousScopeGateErr reports the AC-2b minimum control gate's error when
 // mode (the already-resolved ResolvePermissionMode(o.Config, p.Role) value)
-// is autonomous, p.Scope is empty, and the caller has not explicitly opted
-// out via p.AllowUnscoped -- nil otherwise. Extracted to a pure function so
-// both call sites (dryRunSpawn's gate-before-record check inside Spawn's
+// is autonomous, p.Scope and p.Reserve are both empty, and the caller has not
+// explicitly opted out via p.AllowUnscoped -- nil otherwise. A reservation
+// names the paths the org works on, so it satisfies the gate the same way a
+// --scope does. Extracted to a pure function so both call sites
+// (dryRunSpawn's gate-before-record check inside Spawn's
 // `if p.DryRun` branch, and the real-spawn path's post-idempotent,
 // post-envelope-validation check inside Spawn's locked closure) share the
 // exact same rejection condition and error text; see those two call sites'
 // doc comments for why each is ordered where it is.
 func autonomousScopeGateErr(p SpawnParams, mode string) error {
-	if mode == PermissionModeAutonomous && p.Scope == "" && !p.AllowUnscoped {
+	if mode == PermissionModeAutonomous && p.Scope == "" && len(p.Reserve) == 0 && !p.AllowUnscoped {
 		return fmt.Errorf(
-			"org: autonomous permission mode requires --scope (or --allow-unscoped to explicitly bypass)",
+			"org: autonomous permission mode requires --scope or --reserve (--reserve on the leader seat only; or --allow-unscoped to explicitly bypass)",
 		)
 	}
 	return nil
@@ -1575,12 +1691,18 @@ func (o *Org) reject(p SpawnParams, cause error) SpawnResult {
 // they carry no real side effects and no [org].max_seats pressure. mode is
 // the permission mode already resolved (and validated via
 // permissionArgsForDriver) by the caller, recorded on the trail's final
-// EventSpawned step the same way the real Spawn path records it.
-func (o *Org) dryRunSpawn(p SpawnParams, mode string) SpawnResult {
+// EventSpawned step the same way the real Spawn path records it. reserve is
+// spawnCapacityErr's verdict that the real spawn would record p.Reserve: the
+// trail then starts with a dry-run EventScopeReserved, as the real one does
+// before spawn_started. Dry-run events never count as a reservation.
+func (o *Org) dryRunSpawn(p SpawnParams, mode string, reserve bool) SpawnResult {
 	team := agmsgTeam(p.OrgID)
 	base := ManifestEvent{OrgID: p.OrgID, SeatID: p.SeatID, Role: p.Role, Driver: p.Driver, Model: p.Model, Worktree: p.Cwd, DryRun: true}
 
-	steps := make([]ManifestEvent, 0, 7)
+	steps := make([]ManifestEvent, 0, 8)
+	if reserve {
+		steps = append(steps, scopeReservedEvent("", p.OrgID, p.Reserve, "", true))
+	}
 	step := base
 	step.Event = EventSpawnStarted
 	steps = append(steps, step)

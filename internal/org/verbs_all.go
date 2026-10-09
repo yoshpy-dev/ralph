@@ -291,11 +291,13 @@ func (o *Org) DisbandAll(p DisbandAllParams) DisbandAllResult {
 // orgsToDisband returns, sorted, the org_ids DisbandAll targets. Only real
 // (non-dry-run) events count. An org needs disbanding when either holds:
 //   - it has a seat state event (isStateEvent: spawn_started through
-//     stopped) or an org_workspace_created / org_workspace_closed after its
-//     latest org-level `disbanded`, or it has such an event and no
-//     `disbanded` at all. This covers every org with an active seat: a
-//     seat is active only while its latest state event comes after the
-//     org's latest `disbanded` (see Roster);
+//     stopped), an org_workspace_created / org_workspace_closed, or a
+//     scope_reserved after its latest org-level `disbanded`, or it has such
+//     an event and no `disbanded` at all. This covers every org with an
+//     active seat: a seat is active only while its latest state event comes
+//     after the org's latest `disbanded` (see Roster). It also covers an org
+//     that holds only a reservation (its spawn failed after reserving), whose
+//     `disbanded` releases the reservation;
 //   - the manifest still records one of its workspaces open
 //     (openOrgWorkspaces), including one that an older ralph's disband,
 //     which did not close workspaces, left open.
@@ -314,7 +316,7 @@ func orgsToDisband(events []ManifestEvent) []string {
 		switch {
 		case ev.SeatID == "" && ev.Event == EventDisbanded:
 			lastDisbanded[ev.OrgID] = i
-		case ev.SeatID == "" && (ev.Event == EventOrgWorkspaceCreated || ev.Event == EventOrgWorkspaceClosed),
+		case ev.SeatID == "" && (ev.Event == EventOrgWorkspaceCreated || ev.Event == EventOrgWorkspaceClosed || ev.Event == EventScopeReserved),
 			ev.SeatID != "" && isStateEvent(ev.Event):
 			lastRecord[ev.OrgID] = i
 		}

@@ -47,6 +47,14 @@ type OrgConfig struct {
 	Roles map[string][]string `toml:"roles"`
 	// MaxSeats caps concurrently spawned seats per org_id namespace.
 	MaxSeats int `toml:"max_seats"`
+	// MaxOrgs caps the number of running orgs across every org_id that shares
+	// the same org state dir. `ralph org spawn` enforces it under the manifest
+	// lock when a spawn would start an org that is not running yet.
+	MaxOrgs int `toml:"max_orgs"`
+	// MaxTotalSeats caps the number of active seats summed across every
+	// org_id that shares the same org state dir. `ralph org spawn` enforces
+	// it under the manifest lock, alongside the per-org MaxSeats.
+	MaxTotalSeats int `toml:"max_total_seats"`
 	// DeadmanMinutes is a reserved field for the PR④ Watchdog deadman timer.
 	// PR① only stores and round-trips this value; nothing consumes it yet.
 	DeadmanMinutes int `toml:"deadman_minutes"`
@@ -150,6 +158,8 @@ func Default() Config {
 			},
 			Roles:          map[string][]string{},
 			MaxSeats:       5,
+			MaxOrgs:        10,
+			MaxTotalSeats:  30,
 			DeadmanMinutes: 10,
 			AgmsgHome:      "~/.agents/skills/agmsg",
 			Permissions: OrgPermissionsConfig{
@@ -300,6 +310,12 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.Org.MaxSeats < 1 {
 		return cfg, fmt.Errorf("[org].max_seats must be >= 1, got %d", cfg.Org.MaxSeats)
+	}
+	if cfg.Org.MaxOrgs < 1 {
+		return cfg, fmt.Errorf("[org].max_orgs must be >= 1, got %d", cfg.Org.MaxOrgs)
+	}
+	if cfg.Org.MaxTotalSeats < 1 {
+		return cfg, fmt.Errorf("[org].max_total_seats must be >= 1, got %d", cfg.Org.MaxTotalSeats)
 	}
 	// AgmsgHome is a string default, so (unlike the strict-validation fields
 	// above) it follows the same explicit zero-value backfill pattern as

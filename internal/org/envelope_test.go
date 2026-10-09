@@ -18,6 +18,63 @@ func testOrgConfig() config.OrgConfig {
 		},
 		Roles:    map[string][]string{},
 		MaxSeats: 3,
+		// The org-wide limits at config.Default's values, so they never bind
+		// in a test that does not set them lower itself.
+		MaxOrgs:       config.Default().Org.MaxOrgs,
+		MaxTotalSeats: config.Default().Org.MaxTotalSeats,
+	}
+}
+
+// TestValidateOrgWideCapacity pins the two org-wide limits at their
+// boundaries: max_orgs refuses only an org_id that is not running yet once
+// the running count reaches the limit, max_total_seats refuses any new seat
+// once the active total reaches it, and both errors point at disband. A
+// limit of 0 (a hand-built config; config.Load rejects it) refuses like
+// max_seats 0 does, rather than meaning no limit.
+func TestValidateOrgWideCapacity(t *testing.T) {
+	req := func(orgID string) SpawnRequest {
+		return SpawnRequest{OrgID: orgID, SeatID: "seat-1", Driver: "claude", Model: "sonnet"}
+	}
+	tests := []struct {
+		name      string
+		maxOrgs   int
+		maxTotal  int
+		orgID     string
+		running   []string
+		total     int
+		wantError string
+	}{
+		{"new org below max_orgs", 2, 30, "org-c", []string{"org-a"}, 1, ""},
+		{"new org at max_orgs", 2, 30, "org-c", []string{"org-a", "org-b"}, 2, `max_orgs 2 reached: org_id "org-c" is not running and 2 orgs are (org-a, org-b)`},
+		{"running org at max_orgs", 2, 30, "org-b", []string{"org-a", "org-b"}, 2, ""},
+		{"running org over max_orgs", 1, 30, "org-a", []string{"org-a", "org-b"}, 2, ""},
+		{"seat below max_total_seats", 10, 3, "org-a", []string{"org-a"}, 2, ""},
+		{"seat at max_total_seats", 10, 3, "org-a", []string{"org-a"}, 3, "max_total_seats 3 reached: 3 seats are active across all orgs"},
+		{"new org at max_total_seats", 10, 3, "org-c", []string{"org-a"}, 3, "max_total_seats 3 reached"},
+		{"both reached reports max_orgs first", 1, 1, "org-b", []string{"org-a"}, 1, "max_orgs 1 reached"},
+		{"zero max_orgs refuses a new org", 0, 30, "org-a", nil, 0, `max_orgs 0 reached: org_id "org-a" is not running and 0 orgs are (none)`},
+		{"zero max_total_seats refuses any seat", 10, 0, "org-a", []string{"org-a"}, 0, "max_total_seats 0 reached"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := testOrgConfig()
+			cfg.MaxOrgs, cfg.MaxTotalSeats = tt.maxOrgs, tt.maxTotal
+			err := ValidateOrgWideCapacity(cfg, req(tt.orgID), tt.running, tt.total)
+			if tt.wantError == "" {
+				if err != nil {
+					t.Fatalf("expected no error, got %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantError) {
+				t.Fatalf("expected an error containing %q, got %v", tt.wantError, err)
+			}
+			for _, hint := range []string{"ralph org disband --org-id <id>", "ralph org disband --all"} {
+				if !strings.Contains(err.Error(), hint) {
+					t.Errorf("expected the error to point at %q, got %v", hint, err)
+				}
+			}
+		})
 	}
 }
 

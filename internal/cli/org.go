@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -42,7 +43,7 @@ func newOrgCmd() *cobra.Command {
 
 	cmd.PersistentFlags().StringVar(&orgID, "org-id", "", "org execution namespace (required, except for stop --all and disband --all)")
 	cmd.PersistentFlags().StringVar(&stateDir, "state-dir", "", "org manifest/receipts state directory (default: resolved by org.ResolveOrgStateDir -- env RALPH_ORG_STATE_DIR, else the main worktree's .harness/state/org (shared by its linked worktrees), else the enclosing git toplevel's .harness/state/org, else cwd's .harness/state/org)")
-	cmd.PersistentFlags().StringVar(&configPath, "config", "", "path to ralph.toml (default: ./ralph.toml if present, else built-in defaults)")
+	cmd.PersistentFlags().StringVar(&configPath, "config", "", "path to ralph.toml (default: ./ralph.toml if present, else built-in defaults; for where spawn and start read the org-wide limits, see ralph org spawn --help)")
 
 	cmd.AddCommand(
 		newOrgSpawnCmd(&orgID, &stateDir, &configPath),
@@ -110,6 +111,55 @@ func newOrgRuntime(cmd *cobra.Command, stateDir, configPath string, access orgLe
 		return nil, err
 	}
 	return newOrgRuntimeAt(resolvedStateDir, configPath)
+}
+
+// newOrgSpawnRuntime is newOrgRuntime for the verbs that start seats
+// (`ralph org spawn` and `ralph org start`), the only ones that check the
+// org-wide limits: it also replaces the config's MaxOrgs and MaxTotalSeats
+// via withMainWorktreeOrgLimits, so the ledger shared by every worktree gets
+// one set of limits. Every other verb keeps reading only the caller's config.
+func newOrgSpawnRuntime(cmd *cobra.Command, stateDir, configPath string) (*org.Org, error) {
+	resolvedStateDir, stateDirSource := org.ResolveOrgStateDir(stateDir, cmd.Flags().Changed("state-dir"))
+	if err := guardLegacyOrgStateDir(cmd, resolvedStateDir, stateDirSource, orgLedgerMutating); err != nil {
+		return nil, err
+	}
+	rt, err := newOrgRuntimeAt(resolvedStateDir, configPath)
+	if err != nil {
+		return nil, err
+	}
+	rt.Config, err = withMainWorktreeOrgLimits(rt.Config, configPath, resolvedStateDir, stateDirSource)
+	if err != nil {
+		return nil, err
+	}
+	return rt, nil
+}
+
+// withMainWorktreeOrgLimits returns cfg with MaxOrgs and MaxTotalSeats taken
+// from <main worktree root>/ralph.toml (built-in defaults when that file does
+// not exist, as config.Load reads it) when configPath is empty and
+// org.ResolveOrgStateDir placed the ledger under the main worktree (source
+// "git-main-worktree", org.MainWorktreeRoot). Every org_id in that ledger then
+// gets the same org-wide limits, whichever subdirectory or linked worktree
+// (with its own ./ralph.toml) spawn runs in (plan
+// 2026-10-08-org-limits-reserve, Codex plan advisory 2). With --config, a
+// state dir from --state-dir or RALPH_ORG_STATE_DIR, or any other source, cfg
+// is returned unchanged. No other setting is read from the main worktree. A
+// main worktree ralph.toml that fails to load is an error, not a fallback.
+func withMainWorktreeOrgLimits(cfg config.OrgConfig, configPath, resolvedStateDir, stateDirSource string) (config.OrgConfig, error) {
+	if configPath != "" {
+		return cfg, nil
+	}
+	root, ok := org.MainWorktreeRoot(resolvedStateDir, stateDirSource)
+	if !ok {
+		return cfg, nil
+	}
+	path := filepath.Join(root, "ralph.toml")
+	mainCfg, err := config.Load(path)
+	if err != nil {
+		return config.OrgConfig{}, fmt.Errorf("org: load max_orgs and max_total_seats from the main worktree's %s: %w", path, err)
+	}
+	cfg.MaxOrgs, cfg.MaxTotalSeats = mainCfg.Org.MaxOrgs, mainCfg.Org.MaxTotalSeats
+	return cfg, nil
 }
 
 // newOrgRuntimeAt is newOrgRuntime's shared implementation, taking an
@@ -308,10 +358,32 @@ func resolveLeaderDriver(cmd *cobra.Command, leaderDriver, deprecatedDriver stri
 	return leaderDriver, nil
 }
 
+// orgWideLimitsHelp is the paragraph `ralph org spawn --help` and `ralph org
+// start --help` print about the limits a new seat is checked against.
+const orgWideLimitsHelp = "Before a seat starts, `ralph org spawn` and `ralph org start` check\n" +
+	"[org].max_seats for the org and two limits every org_id in the ledger\n" +
+	"shares: [org].max_orgs (running orgs) and [org].max_total_seats (active\n" +
+	"seats across all orgs). Only when --config is not given and the ledger\n" +
+	"is the main worktree's, those two are read from the main worktree's\n" +
+	"ralph.toml (built-in defaults when it has none), so every subdirectory\n" +
+	"and linked worktree gets the same limits. In every other case (--config,\n" +
+	"a ledger chosen with --state-dir or RALPH_ORG_STATE_DIR or found from\n" +
+	"the git toplevel, no git repository) the --config file, else ./ralph.toml,\n" +
+	"is used. A refusal says how to free a slot with `ralph org disband`."
+
+// orgReserveFlagUsage is the --reserve usage `ralph org spawn` and `ralph org
+// start` share. No backticks: pflag would take the first backticked word as
+// the flag's value name.
+const orgReserveFlagUsage = "reserve a path for this org, relative to the repo root; repeat the flag for more paths. " +
+	"A path ending in / reserves that directory prefix, any other path one file, and . the whole repo. " +
+	"Refused when it overlaps the reservation of another running org; released by ralph org disband. " +
+	"Satisfies the autonomous-mode --scope requirement"
+
 func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	var (
 		seatID, role, driverName, model, cwd, prompt, scope, leaderDriver string
 		deprecatedDriver                                                  string
+		reserve                                                           []string
 		timeoutMS                                                         int
 		dryRun, allowUnscoped                                             bool
 	)
@@ -319,6 +391,14 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "spawn",
 		Short: "Spawn a new org seat",
+		Long: "ralph org spawn starts one seat of --org-id in a herdr tab and joins it\n" +
+			"to the org's agmsg team, recording each step in the manifest.\n" +
+			"\n" +
+			orgWideLimitsHelp + "\n" +
+			"\n" +
+			"--reserve claims paths of the repo for the org. Only the leader seat\n" +
+			"(--id leader) takes it, and an org keeps one reservation until it is\n" +
+			"disbanded: the same paths again pass, different ones are refused.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireOrgID(*orgID); err != nil {
 				return err
@@ -347,7 +427,7 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 				return err
 			}
 
-			rt, err := newOrgRuntime(cmd, *stateDir, *configPath, orgLedgerMutating)
+			rt, err := newOrgSpawnRuntime(cmd, *stateDir, *configPath)
 			if err != nil {
 				return err
 			}
@@ -357,7 +437,7 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			}
 			result := rt.Spawn(org.SpawnParams{
 				OrgID: *orgID, SeatID: seatID, Role: role, Driver: driverName, Model: resolvedModel,
-				Cwd: cwd, Prompt: prompt, Scope: scope, TimeoutMS: timeoutMS, DryRun: dryRun,
+				Cwd: cwd, Prompt: prompt, Scope: scope, Reserve: reserve, TimeoutMS: timeoutMS, DryRun: dryRun,
 				LeaderDriver: effectiveLeaderDriver, AllowUnscoped: allowUnscoped,
 			})
 			printSpawnResult(cmd, result)
@@ -372,6 +452,7 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	cmd.Flags().StringVar(&cwd, "cwd", "", "working directory for the new seat (required)")
 	cmd.Flags().StringVar(&prompt, "prompt", "", "optional initial prompt passed to the agent")
 	cmd.Flags().StringVar(&scope, "scope", "", "optional scope description (recorded on the spawned event; substituted into --role templates as {{SCOPE}})")
+	cmd.Flags().StringArrayVar(&reserve, "reserve", nil, orgReserveFlagUsage+"; only the leader seat (--id leader) takes it")
 	cmd.Flags().StringVar(&leaderDriver, "leader-driver", "claude", "driver (claude|codex) the org's coordinating leader identity runs as, for the agmsg type registered on ensureLeaderJoined")
 	cmd.Flags().StringVar(&deprecatedDriver, deprecatedLeaderDriverFlag, "", "deprecated alias of --leader-driver")
 	if err := cmd.Flags().MarkDeprecated(deprecatedLeaderDriverFlag, "use --leader-driver"); err != nil {
@@ -431,6 +512,7 @@ func printCodexModelMismatchWarning(cmd *cobra.Command, seatID string, r org.Rec
 func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	var (
 		driverName, model, cwd, scope string
+		reserve                       []string
 		timeoutMS                     int
 		allowUnscoped                 bool
 	)
@@ -446,7 +528,13 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"{{ENVELOPE}}. Envelope validation, the permission-mode gate, and\n" +
 			"manifest/receipt bookkeeping all flow through Spawn exactly as they\n" +
 			"would for any other seat. See .claude/skills/org/SKILL.md for the\n" +
-			"leader's full operating manual.",
+			"leader's full operating manual.\n" +
+			"\n" +
+			orgWideLimitsHelp + "\n" +
+			"\n" +
+			"--reserve claims paths of the repo for the org until it is disbanded:\n" +
+			"starting the org again with the same paths passes, with different ones\n" +
+			"is refused.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireOrgID(*orgID); err != nil {
@@ -460,7 +548,7 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 				return fmt.Errorf("org: --cwd is required")
 			}
 
-			rt, err := newOrgRuntime(cmd, *stateDir, *configPath, orgLedgerMutating)
+			rt, err := newOrgSpawnRuntime(cmd, *stateDir, *configPath)
 			if err != nil {
 				return err
 			}
@@ -472,7 +560,7 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			result := rt.Spawn(org.SpawnParams{
 				OrgID: *orgID, SeatID: org.LeaderIdentity, Role: org.LeaderIdentity,
 				Driver: driverName, Model: resolvedModel, Cwd: cwd, Task: task,
-				Scope: scope, TimeoutMS: timeoutMS, AllowUnscoped: allowUnscoped,
+				Scope: scope, Reserve: reserve, TimeoutMS: timeoutMS, AllowUnscoped: allowUnscoped,
 			})
 			printSpawnResult(cmd, result)
 			if result.Err == nil {
@@ -487,6 +575,7 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	cmd.Flags().StringVar(&model, "model", "", "model name or alias (default: first [org].model_pool entry permitted for the role on --driver, with a warning)")
 	cmd.Flags().StringVar(&cwd, "cwd", "", "working directory for the leader seat (required)")
 	cmd.Flags().StringVar(&scope, "scope", "", "optional scope description (see `ralph org spawn --scope`)")
+	cmd.Flags().StringArrayVar(&reserve, "reserve", nil, orgReserveFlagUsage)
 	cmd.Flags().IntVar(&timeoutMS, "timeout-ms", 60000, "per-step herdr timeout in milliseconds")
 	cmd.Flags().BoolVar(&allowUnscoped, "allow-unscoped", false, "explicitly bypass the autonomous-mode --scope requirement")
 
@@ -913,6 +1002,10 @@ func newOrgStatusCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show org seat roster",
+		Long: "ralph org status shows the seat roster of --org-id (--all adds dry-run\n" +
+			"seats). While the org holds a reservation made with --reserve (released\n" +
+			"by `ralph org disband`), a `reserved: <path>, ...` line follows the\n" +
+			"table and --json adds a `reservation` array.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireOrgID(*orgID); err != nil {
 				return err
@@ -925,10 +1018,14 @@ func newOrgStatusCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("org: status: %w", err)
 			}
-			if jsonOut {
-				return printStatusJSON(cmd, result)
+			reservation, err := orgReservation(rt, *orgID)
+			if err != nil {
+				return fmt.Errorf("org: status: %w", err)
 			}
-			printStatusTable(cmd, result)
+			if jsonOut {
+				return printStatusJSON(cmd, result, reservation)
+			}
+			printStatusTable(cmd, result, reservation)
 			return nil
 		},
 	}
@@ -960,12 +1057,26 @@ type orgSeatJSON struct {
 }
 
 // orgStatusJSON is the --json wire shape for `ralph org status`.
+// Reservation is the org's reservation (orgReservation), omitted when it holds
+// none, so an org without one prints the same JSON as before reservations.
 type orgStatusJSON struct {
 	Seats        []orgSeatJSON `json:"seats"`
 	CorruptLines int           `json:"corrupt_lines"`
+	Reservation  []string      `json:"reservation,omitempty"`
 }
 
-func printStatusJSON(cmd *cobra.Command, result org.StatusResult) error {
+// orgReservation returns orgID's reservation (org.ActiveReservation) for
+// `ralph org status`, nil when it holds none. (*org.Org).Status returns the
+// roster only, so this reads rt's manifest once more.
+func orgReservation(rt *org.Org, orgID string) ([]string, error) {
+	rr, err := rt.Manifest.Read()
+	if err != nil {
+		return nil, err
+	}
+	return org.ActiveReservation(rr.Events, orgID), nil
+}
+
+func printStatusJSON(cmd *cobra.Command, result org.StatusResult, reservation []string) error {
 	seats := make([]orgSeatJSON, len(result.Seats))
 	for i, s := range result.Seats {
 		seats[i] = orgSeatJSON{
@@ -974,13 +1085,16 @@ func printStatusJSON(cmd *cobra.Command, result org.StatusResult) error {
 			Active: s.Active, DryRun: s.DryRun, Details: s.Details, TS: s.TS,
 		}
 	}
-	payload := orgStatusJSON{Seats: seats, CorruptLines: result.CorruptLines}
+	payload := orgStatusJSON{Seats: seats, CorruptLines: result.CorruptLines, Reservation: reservation}
 	enc := json.NewEncoder(cmd.OutOrStdout())
 	enc.SetIndent("", "  ")
 	return enc.Encode(payload)
 }
 
-func printStatusTable(cmd *cobra.Command, result org.StatusResult) {
+// printStatusTable prints the roster, then a `reserved: <path>, <path>` line
+// when the org holds a reservation (also when it has no seat left, e.g. a
+// spawn that failed after reserving), then the corrupt-line warning.
+func printStatusTable(cmd *cobra.Command, result org.StatusResult, reservation []string) {
 	out := cmd.OutOrStdout()
 	if len(result.Seats) == 0 {
 		_, _ = fmt.Fprintln(out, "no seats")
@@ -996,6 +1110,9 @@ func printStatusTable(cmd *cobra.Command, result org.StatusResult) {
 			}
 			_, _ = fmt.Fprintf(out, "%s\t%s\t%s\t%s\t%s\t%s\n", s.SeatID, s.Role, s.Driver, s.Model, state, s.PaneID)
 		}
+	}
+	if len(reservation) > 0 {
+		_, _ = fmt.Fprintf(out, "reserved: %s\n", strings.Join(reservation, ", "))
 	}
 	if result.CorruptLines > 0 {
 		_, _ = fmt.Fprintf(out, "warning: %d corrupt manifest line(s) skipped\n", result.CorruptLines)

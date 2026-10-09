@@ -38,6 +38,7 @@ ralph には LLM を使わない制御層(共通の台帳、全 org の上限、
   - `[org].max_orgs`(既定 10)と `[org].max_total_seats`(既定 30)を、台帳の共通のロックの下で強制する。director は herdr の座席ではないので数えない
   - org の start のときに担当範囲を予約する。担当範囲はディレクトリの接頭辞と明示したファイルで書く。走っている他の org の予約と重なれば start を拒否する。org を disband したら予約を解く
   - 予約が保証するのは「割り当てが重ならないこと」までで、座席が実際に範囲の外へ書くことは止めない。範囲の外への変更は、今の watchdog の検知(ALERT)で知らせる
+  - 3 段目で決めたこと: 予約は任意で、付けない org は誰とも重ならない扱いにする。予約は `ralph org start` と leader の `ralph org spawn --id leader` の `--reserve` だけが受け付け、org ごとに 1 つ持つ(同じ一覧なら通り、違う一覧は拒否、変えるときは disband して立て直す)。走っている org は、最後の `disbanded` より後に、動いている座席・閉じていない workspace・予約のどれかがある org とする。`--config` がなければ、全 org の上限は main worktree のルートの `ralph.toml` から読む。詳細は 3 段目の計画(`2026-10-08-org-limits-reserve.md`)に書いた
 - [ ] **FR-4 機能ごとの org(4 段目)**:
   - `ralph org start --plan <分割計画> --feature <slug>` は、clean な default branch から worktree とブランチを作り(`scripts/ralph-worktree.sh` を使う)、その中で leader を headless の座席として立てる
   - 担当範囲は引数ではなく、承認済みの分割計画から読む。分割計画の digest が承認時の値と一致しなければ start を拒否する

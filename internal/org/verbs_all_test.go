@@ -473,6 +473,19 @@ func TestOrgsToDisband_Definition(t *testing.T) {
 			seat("org-c", "s1", EventSpawned), seat("org-a", "s1", EventSpawned),
 			seat("org-b", "s1", EventSpawned), org("org-b", EventDisbanded, ""),
 		}, []string{"org-a", "org-c"}},
+		{"reservation only, never disbanded", []ManifestEvent{
+			reserveEvent("x", "internal/"),
+		}, []string{"x"}},
+		{"reservation after disbanded", []ManifestEvent{
+			seat("x", "s1", EventSpawned), seat("x", "s1", EventStopped), org("x", EventDisbanded, ""),
+			reserveEvent("x", "internal/"),
+		}, []string{"x"}},
+		{"reservation released by disbanded", []ManifestEvent{
+			reserveEvent("x", "internal/"), org("x", EventDisbanded, ""),
+		}, nil},
+		{"dry-run reservation", []ManifestEvent{
+			dry(reserveEvent("x", "internal/")),
+		}, nil},
 		{"empty manifest", nil, nil},
 	}
 	for _, tt := range tests {
@@ -546,6 +559,52 @@ func TestOrgDisbandAll_TargetsOrgsThatNeedDisbanding(t *testing.T) {
 	if got := len(mustReadEvents(t, o)); got != eventsBefore {
 		t.Fatalf("expected no event from the second DisbandAll, %d -> %d", eventsBefore, got)
 	}
+}
+
+// TestOrgDisbandAll_ReservationOnlyOrgDisbanded covers the second half of
+// plan 2026-10-08-org-limits-reserve AC8: a leader spawn that reserved and
+// then failed (herdr refused the workspace) leaves an org that holds only
+// its reservation. It still runs, keeps its range, and is a disband --all
+// target; disband --all disbands it with no driver call, which releases the
+// range and the slot.
+func TestOrgDisbandAll_ReservationOnlyOrgDisbanded(t *testing.T) {
+	o, h, _ := testOrg(t)
+	o.Config.MaxOrgs = 1
+	h.workspaceCreateErr = errors.New("herdr workspace create: connect: connection refused")
+	if r := o.Spawn(leaderParams("org-a", "internal/")); r.Outcome != SpawnOutcomeFailed {
+		t.Fatalf("expected the spawn to fail at workspace_create, got %+v", r)
+	}
+	h.workspaceCreateErr = nil
+	events := mustReadEvents(t, o)
+	if got := eventNames(t, o); !slices.Equal(got, []string{EventScopeReserved, EventSpawnStarted, EventSpawnFailed}) {
+		t.Fatalf("expected scope_reserved, spawn_started, spawn_failed, got %v", got)
+	}
+	if got := RunningOrgs(events); !slices.Equal(got, []string{"org-a"}) {
+		t.Fatalf("RunningOrgs = %v, want org-a held by its reservation", got)
+	}
+	if got := orgsToDisband(events); !slices.Equal(got, []string{"org-a"}) {
+		t.Fatalf("orgsToDisband = %v, want org-a", got)
+	}
+	assertRejectedRecorded(t, o, o.Spawn(leaderParams("org-b", "internal/x.go")), "org-b", LeaderIdentity, "max_orgs 1 reached")
+
+	// org-b's `rejected` is a seat state event, so org-b is a target too, as
+	// it was before reservations existed (it only gets a `disbanded`).
+	callsBefore := len(h.calls)
+	result := o.DisbandAll(DisbandAllParams{})
+	if len(result.Errs) != 0 || !slices.Equal(result.Orgs, []string{"org-a", "org-b"}) || !slices.Equal(result.DisbandedOrgs, []string{"org-a", "org-b"}) {
+		t.Fatalf("expected disband --all to disband org-a (and the rejected org-b), got %+v", result)
+	}
+	if got := h.calls[callsBefore:]; len(got) != 0 {
+		t.Fatalf("expected no driver call for an org with nothing open, got %v", got)
+	}
+	events = mustReadEvents(t, o)
+	if got := RunningOrgs(events); len(got) != 0 {
+		t.Fatalf("RunningOrgs = %v, want none", got)
+	}
+	if got := ActiveReservation(events, "org-a"); got != nil {
+		t.Fatalf("expected org-a's reservation released, got %q", got)
+	}
+	spawnLeaderIn(t, o, h, "org-b", "ws-b", "pane-b", "internal/x.go")
 }
 
 // TestOrgDisbandAll_FailedOrgNotDisbandedThenRetried covers plan AC5's

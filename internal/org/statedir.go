@@ -72,6 +72,26 @@ func ResolveOrgStateDir(explicit string, explicitSet bool) (dir string, source s
 	return mustAbs(defaultOrgStateDirRelPath), "cwd"
 }
 
+// MainWorktreeRoot returns the main worktree root that ResolveOrgStateDir
+// joined with ".harness/state/org" to produce resolvedDir, when source is
+// "git-main-worktree". It reads the root back from resolvedDir instead of
+// running git again, so it names the root the ledger lives under. ok is
+// false for every other source (flag, env, git-toplevel, cwd), and when
+// resolvedDir does not end with that path.
+func MainWorktreeRoot(resolvedDir, source string) (root string, ok bool) {
+	if source != "git-main-worktree" {
+		return "", false
+	}
+	root = resolvedDir
+	for range strings.Split(defaultOrgStateDirRelPath, "/") {
+		root = filepath.Dir(root)
+	}
+	if filepath.Join(root, defaultOrgStateDirRelPath) != resolvedDir {
+		return "", false
+	}
+	return root, true
+}
+
 // LegacyWorktreeStateDir reports the per-worktree org state directory that
 // ResolveOrgStateDir returned from the current working directory before the
 // git-main-worktree tier existed, when it still holds a ledger: cwd is

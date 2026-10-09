@@ -38,6 +38,16 @@ model_pool = [
 ]
 # max_seats caps concurrently spawned seats per org_id namespace.
 max_seats = 5
+# max_orgs caps running orgs across every org_id sharing the org state dir.
+# ralph org spawn and ralph org start read it from the main worktree's
+# ralph.toml only when --config is not given, neither --state-dir nor
+# RALPH_ORG_STATE_DIR is set, and the state dir resolves to the main
+# worktree's .harness/state/org. Otherwise they read the --config file, or
+# ./ralph.toml.
+max_orgs = 10
+# max_total_seats caps active seats summed across every org_id sharing the
+# org state dir. Read from the same ralph.toml as max_orgs.
+max_total_seats = 30
 # deadman_minutes is reserved for the PR④ Watchdog deadman timer; PR① only
 # stores and round-trips this value.
 deadman_minutes = 10

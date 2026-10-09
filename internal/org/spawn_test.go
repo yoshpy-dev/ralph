@@ -2268,8 +2268,9 @@ func TestOrgSpawn_MinimumControlGate_Autonomous_EmptyScope_RejectedWithEvent(t *
 	if result.Outcome != SpawnOutcomeRejected {
 		t.Fatalf("expected SpawnOutcomeRejected, got %+v", result)
 	}
-	if result.Err == nil || !strings.Contains(result.Err.Error(), "--scope") || !strings.Contains(result.Err.Error(), "--allow-unscoped") {
-		t.Fatalf("expected error naming --scope and --allow-unscoped, got %v", result.Err)
+	if result.Err == nil || !strings.Contains(result.Err.Error(), "--scope") || !strings.Contains(result.Err.Error(), "--reserve") ||
+		!strings.Contains(result.Err.Error(), "--allow-unscoped") {
+		t.Fatalf("expected error naming --scope, --reserve and --allow-unscoped, got %v", result.Err)
 	}
 
 	rr, err := o.Manifest.Read()
@@ -3572,4 +3573,731 @@ func TestOrgSpawn_RetiredLeaderName_ConfigKey_RejectedBeforeStaleCompensation(t 
 	if got := eventNames(t, o); len(got) != 1 || got[0] != EventSpawnStarted {
 		t.Errorf("expected only the seeded spawn_started (no spawn_failed, no rejected), got %v", got)
 	}
+}
+
+// --- org-wide limits and scope reservations (plan 2026-10-08-org-limits-reserve) ---
+
+// leaderParams is mustSpawnParams for orgID's leader seat, reserving reserve
+// (none when empty).
+func leaderParams(orgID string, reserve ...string) SpawnParams {
+	p := mustSpawnParams(orgID, LeaderIdentity)
+	p.Role = LeaderIdentity
+	p.Reserve = reserve
+	return p
+}
+
+// spawnLeaderIn is spawnSeatIn (verbs_all_test.go) for orgID's leader seat,
+// reserving reserve.
+func spawnLeaderIn(t *testing.T, o *Org, h *fakeHerdr, orgID, workspace, pane string, reserve ...string) {
+	t.Helper()
+	h.workspaceID, h.paneID = workspace, pane
+	if r := o.Spawn(leaderParams(orgID, reserve...)); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn %s/%s failed: %+v", orgID, LeaderIdentity, r)
+	}
+}
+
+// lastEvent returns the latest event of o's manifest.
+func lastEvent(t *testing.T, o *Org) ManifestEvent {
+	t.Helper()
+	events := mustReadEvents(t, o)
+	if len(events) == 0 {
+		t.Fatal("expected a manifest event, got none")
+	}
+	return events[len(events)-1]
+}
+
+// receiptCount returns how many receipts o's receipt store holds.
+func receiptCount(t *testing.T, o *Org) int {
+	t.Helper()
+	rr, err := o.Receipts.Read()
+	if err != nil {
+		t.Fatalf("read receipts: %v", err)
+	}
+	return len(rr.Receipts)
+}
+
+// assertRejectedRecorded checks that r is a rejection whose error contains
+// every string in want, recorded through reject(): the latest manifest event
+// is `rejected` for orgID/seatID carrying the error, and r carries the
+// honored=false receipt it appended.
+func assertRejectedRecorded(t *testing.T, o *Org, r SpawnResult, orgID, seatID string, want ...string) {
+	t.Helper()
+	if r.Outcome != SpawnOutcomeRejected || r.Err == nil {
+		t.Fatalf("expected a rejection, got %+v", r)
+	}
+	for _, w := range want {
+		if !strings.Contains(r.Err.Error(), w) {
+			t.Errorf("error %q does not contain %q", r.Err, w)
+		}
+	}
+	if ev := lastEvent(t, o); ev.Event != EventRejected || ev.OrgID != orgID || ev.SeatID != seatID || ev.Details != r.Err.Error() {
+		t.Fatalf("expected a rejected event for %s/%s carrying the error, got %+v", orgID, seatID, ev)
+	}
+	if r.ModelReceipt.Honored != HonoredFalse || r.ModelReceipt.Reason != r.Err.Error() {
+		t.Fatalf("expected an honored=false receipt carrying the error, got %+v", r.ModelReceipt)
+	}
+}
+
+// assertSeatUnchanged checks that orgID's seatID is still the active
+// `spawned` seat it was.
+func assertSeatUnchanged(t *testing.T, o *Org, orgID, seatID string) {
+	t.Helper()
+	seat, ok := seatFromEvents(mustReadEvents(t, o), orgID, seatID)
+	if !ok || !seat.Active || seat.Event != EventSpawned {
+		t.Fatalf("expected %s/%s still active and spawned, got %+v (found=%v)", orgID, seatID, seat, ok)
+	}
+}
+
+// raceSpawns runs o.Spawn(params(i)) for every i in [0, n) concurrently and
+// returns how many spawned and the rejections, failing the test on any other
+// outcome.
+func raceSpawns(t *testing.T, o *Org, n int, params func(i int) SpawnParams) (spawned int, rejected []SpawnResult) {
+	t.Helper()
+	var wg sync.WaitGroup
+	wg.Add(n)
+	results := make([]SpawnResult, n)
+	for i := range n {
+		go func(i int) {
+			defer wg.Done()
+			results[i] = o.Spawn(params(i))
+		}(i)
+	}
+	wg.Wait()
+	for _, r := range results {
+		switch r.Outcome {
+		case SpawnOutcomeSpawned:
+			spawned++
+		case SpawnOutcomeRejected:
+			rejected = append(rejected, r)
+		default:
+			t.Errorf("unexpected outcome %v (err=%v)", r.Outcome, r.Err)
+		}
+	}
+	return spawned, rejected
+}
+
+// TestOrgSpawn_MaxOrgs_NewOrgRejectedAtLimit covers plan AC1: with max_orgs
+// orgs running, a spawn into an org_id that is not running is rejected with a
+// `rejected` record and no driver call, and the error points at disband; a
+// spawn into a running org is not limited by max_orgs. The rejected org_id
+// takes no slot: once another org is disbanded, it spawns.
+func TestOrgSpawn_MaxOrgs_NewOrgRejectedAtLimit(t *testing.T) {
+	o, h, a := testOrg(t)
+	o.Config.MaxOrgs = 2
+	spawnSeatIn(t, o, h, "org-a", "seat-1", "ws-a", "pane-a1")
+	spawnSeatIn(t, o, h, "org-b", "seat-1", "ws-b", "pane-b1")
+	herdrBefore, agmsgBefore := len(h.calls), len(a.calls)
+
+	assertRejectedRecorded(t, o, o.Spawn(mustSpawnParams("org-c", "seat-1")), "org-c", "seat-1",
+		"max_orgs 2 reached", `org_id "org-c" is not running`, "(org-a, org-b)",
+		"ralph org disband --org-id <id>", "ralph org disband --all")
+	if len(h.calls) != herdrBefore || len(a.calls) != agmsgBefore {
+		t.Fatalf("expected no driver call for the rejection, herdr %v agmsg %v", h.calls[herdrBefore:], a.calls[agmsgBefore:])
+	}
+
+	spawnSeatIn(t, o, h, "org-a", "seat-2", "ws-a", "pane-a2")
+	if got := RunningOrgs(mustReadEvents(t, o)); !slices.Equal(got, []string{"org-a", "org-b"}) {
+		t.Fatalf("RunningOrgs = %v, want org-a and org-b (the rejected org-c holds no slot)", got)
+	}
+
+	if d := o.Disband(DisbandParams{OrgID: "org-b"}); !d.Disbanded {
+		t.Fatalf("disband org-b: %+v", d)
+	}
+	spawnSeatIn(t, o, h, "org-c", "seat-1", "ws-c", "pane-c1")
+}
+
+// TestOrgSpawn_MaxOrgs_StoppedOrgHoldsItsSlotUntilDisbanded: an org whose
+// seats are all stopped still has its workspace open, so it keeps its slot
+// (plan Design decisions) until disband closes the workspace.
+func TestOrgSpawn_MaxOrgs_StoppedOrgHoldsItsSlotUntilDisbanded(t *testing.T) {
+	o, h, _ := testOrg(t)
+	o.Config.MaxOrgs = 1
+	spawnSeatIn(t, o, h, "org-a", "seat-1", "ws-a", "pane-a1")
+	if r := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-1"}); r.Err != nil {
+		t.Fatalf("stop org-a/seat-1: %v", r.Err)
+	}
+	assertRejectedRecorded(t, o, o.Spawn(mustSpawnParams("org-b", "seat-1")), "org-b", "seat-1", "max_orgs 1 reached")
+
+	if d := o.Disband(DisbandParams{OrgID: "org-a"}); !d.Disbanded {
+		t.Fatalf("disband org-a: %+v", d)
+	}
+	spawnSeatIn(t, o, h, "org-b", "seat-1", "ws-b", "pane-b1")
+}
+
+// TestOrgSpawn_MaxTotalSeats_Boundary covers plan AC2: with max_total_seats
+// seats active across all orgs, a new seat is rejected with a `rejected`
+// record, in a running org and in a new one, while a respawn of a spawned
+// seat still returns it with no record; a stopped seat frees its place.
+func TestOrgSpawn_MaxTotalSeats_Boundary(t *testing.T) {
+	o, h, _ := testOrg(t)
+	o.Config.MaxTotalSeats = 3
+	spawnSeatIn(t, o, h, "org-a", "seat-1", "ws-a", "pane-a1")
+	spawnSeatIn(t, o, h, "org-a", "seat-2", "ws-a", "pane-a2")
+	spawnSeatIn(t, o, h, "org-b", "seat-1", "ws-b", "pane-b1")
+
+	assertRejectedRecorded(t, o, o.Spawn(mustSpawnParams("org-b", "seat-2")), "org-b", "seat-2",
+		"max_total_seats 3 reached", "3 seats are active across all orgs", "ralph org disband --org-id <id>", "ralph org disband --all")
+	assertRejectedRecorded(t, o, o.Spawn(mustSpawnParams("org-c", "seat-1")), "org-c", "seat-1", "max_total_seats 3 reached")
+
+	before := len(mustReadEvents(t, o))
+	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeIdempotent || r.Err != nil {
+		t.Fatalf("expected the respawn of org-a/seat-1 to return it at max_total_seats, got %+v", r)
+	}
+	if got := len(mustReadEvents(t, o)); got != before {
+		t.Fatalf("expected no event for the idempotent respawn, %d -> %d", before, got)
+	}
+
+	if r := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-1"}); r.Err != nil {
+		t.Fatalf("stop org-a/seat-1: %v", r.Err)
+	}
+	spawnSeatIn(t, o, h, "org-b", "seat-2", "ws-b", "pane-b2")
+}
+
+// TestOrgSpawn_OrgWideLimits_DryRunPredictsTheSameRejection: a dry run checks
+// both org-wide limits against the real orgs and seats, as it does max_seats,
+// and records its rejection as a dry-run `rejected`; dry-run seats never
+// count toward either limit.
+func TestOrgSpawn_OrgWideLimits_DryRunPredictsTheSameRejection(t *testing.T) {
+	o, h, _ := testOrg(t)
+	o.Config.MaxOrgs, o.Config.MaxTotalSeats = 1, 2
+	spawnSeatIn(t, o, h, "org-a", "seat-1", "ws-a", "pane-a1")
+	dryRun := func(orgID, seatID string) SpawnResult {
+		p := mustSpawnParams(orgID, seatID)
+		p.DryRun = true
+		return o.Spawn(p)
+	}
+
+	if r := dryRun("org-b", "seat-1"); r.Outcome != SpawnOutcomeRejected || r.Err == nil || !strings.Contains(r.Err.Error(), "max_orgs 1 reached") {
+		t.Fatalf("expected the dry run into a new org rejected for max_orgs, got %+v", r)
+	}
+	if ev := lastEvent(t, o); ev.Event != EventRejected || !ev.DryRun || ev.OrgID != "org-b" {
+		t.Fatalf("expected a dry-run rejected event for org-b, got %+v", ev)
+	}
+	for _, seatID := range []string{"seat-2", "seat-3"} {
+		if r := dryRun("org-a", seatID); r.Outcome != SpawnOutcomeSpawned {
+			t.Fatalf("expected the dry run of org-a/%s to pass below max_total_seats, got %+v", seatID, r)
+		}
+	}
+	spawnSeatIn(t, o, h, "org-a", "seat-2", "ws-a", "pane-a2")
+	if r := dryRun("org-a", "seat-3"); r.Outcome != SpawnOutcomeRejected || r.Err == nil || !strings.Contains(r.Err.Error(), "max_total_seats 2 reached") {
+		t.Fatalf("expected the dry run rejected for max_total_seats once two real seats are active, got %+v", r)
+	}
+}
+
+// TestOrgSpawn_ConcurrentSpawns_MaxOrgsNeverExceeded covers plan AC4 for
+// max_orgs, in the shape of TestOrgSpawn_ConcurrentSpawns_MaxSeatsNeverExceeded:
+// first spawns into n distinct orgs race, and exactly max_orgs of them spawn.
+func TestOrgSpawn_ConcurrentSpawns_MaxOrgsNeverExceeded(t *testing.T) {
+	o, _, _ := testOrg(t)
+	o.Config.MaxOrgs = 3
+	spawned, rejected := raceSpawns(t, o, 10, func(i int) SpawnParams {
+		return mustSpawnParams(fmt.Sprintf("org-%d", i), "seat-1")
+	})
+	if spawned != o.Config.MaxOrgs {
+		t.Fatalf("expected exactly max_orgs=%d spawns out of 10 racing new orgs, got %d", o.Config.MaxOrgs, spawned)
+	}
+	for _, r := range rejected {
+		if !strings.Contains(r.Err.Error(), "max_orgs 3 reached") {
+			t.Errorf("expected every rejection to be for max_orgs, got %v", r.Err)
+		}
+	}
+	if got := RunningOrgs(mustReadEvents(t, o)); len(got) != o.Config.MaxOrgs {
+		t.Fatalf("RunningOrgs = %v, want exactly %d", got, o.Config.MaxOrgs)
+	}
+}
+
+// TestOrgSpawn_ConcurrentSpawns_MaxTotalSeatsNeverExceeded covers plan AC4
+// for max_total_seats: spawns of three seats in each of four orgs race
+// (max_seats 3, so only the total limits them), and exactly max_total_seats
+// spawn.
+func TestOrgSpawn_ConcurrentSpawns_MaxTotalSeatsNeverExceeded(t *testing.T) {
+	o, _, _ := testOrg(t)
+	o.Config.MaxTotalSeats = 4
+	spawned, rejected := raceSpawns(t, o, 12, func(i int) SpawnParams {
+		return mustSpawnParams(fmt.Sprintf("org-%d", i%4), fmt.Sprintf("seat-%d", i/4))
+	})
+	if spawned != o.Config.MaxTotalSeats {
+		t.Fatalf("expected exactly max_total_seats=%d spawns out of 12 racing seats, got %d", o.Config.MaxTotalSeats, spawned)
+	}
+	for _, r := range rejected {
+		if !strings.Contains(r.Err.Error(), "max_total_seats 4 reached") {
+			t.Errorf("expected every rejection to be for max_total_seats, got %v", r.Err)
+		}
+	}
+	if got := TotalActiveSeats(mustReadEvents(t, o)); got != o.Config.MaxTotalSeats {
+		t.Fatalf("TotalActiveSeats = %d, want exactly %d", got, o.Config.MaxTotalSeats)
+	}
+}
+
+// TestOrgSpawn_ConcurrentReservations_OnlyOneOfOverlappingWins covers plan
+// AC4 for reservations: leader spawns of eight orgs race with reservations
+// that all overlap one another, and exactly one holds a reservation.
+func TestOrgSpawn_ConcurrentReservations_OnlyOneOfOverlappingWins(t *testing.T) {
+	o, _, _ := testOrg(t)
+	nested := []string{".", "internal/", "internal/auth/", "internal/auth/token.go"}
+	spawned, rejected := raceSpawns(t, o, 8, func(i int) SpawnParams {
+		return leaderParams(fmt.Sprintf("org-%d", i), nested[i%len(nested)])
+	})
+	if spawned != 1 {
+		t.Fatalf("expected exactly one of 8 overlapping reservations to win, got %d", spawned)
+	}
+	for _, r := range rejected {
+		if !strings.Contains(r.Err.Error(), "reservation overlaps the reservation of running org_id") {
+			t.Errorf("expected every rejection to be an overlap, got %v", r.Err)
+		}
+	}
+	if n := countString(eventNames(t, o), EventScopeReserved); n != 1 {
+		t.Fatalf("expected exactly one scope_reserved, got %d", n)
+	}
+}
+
+// TestOrgSpawn_Reserve_RecordedBeforeSpawnStarted: a leader spawn with
+// Reserve appends one org-level scope_reserved with the normalized paths
+// right before its spawn_started, and that is the org's reservation.
+func TestOrgSpawn_Reserve_RecordedBeforeSpawnStarted(t *testing.T) {
+	o, _, _ := testOrg(t)
+	if r := o.Spawn(leaderParams("org-a", "./internal//auth/", "docs/", "docs/")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", r)
+	}
+	events := mustReadEvents(t, o)
+	if ev := events[0]; ev.Event != EventScopeReserved || ev.OrgID != "org-a" || ev.SeatID != "" || ev.DryRun || ev.Details != "paths=docs/,internal/auth/" {
+		t.Fatalf("expected the org-level scope_reserved first, got %+v", ev)
+	}
+	if ev := events[1]; ev.Event != EventSpawnStarted || ev.SeatID != LeaderIdentity {
+		t.Fatalf("expected the leader's spawn_started right after it, got %+v", ev)
+	}
+	if n := countString(eventNames(t, o), EventScopeReserved); n != 1 {
+		t.Fatalf("expected one scope_reserved, got %d", n)
+	}
+	if got := ActiveReservation(events, "org-a"); !slices.Equal(got, []string{"docs/", "internal/auth/"}) {
+		t.Fatalf("ActiveReservation = %q, want docs/ and internal/auth/", got)
+	}
+	assertSeatUnchanged(t, o, "org-a", LeaderIdentity)
+}
+
+// TestOrgSpawn_Reserve_InputRejectedBeforeAnyRecord covers plan AC6 and the
+// leader-only rule of AC7: Reserve on a seat other than the leader, or with
+// a path the rules reject, is a plain rejection before the manifest is read
+// (no event, no receipt, no driver call), in real and dry-run mode alike.
+func TestOrgSpawn_Reserve_InputRejectedBeforeAnyRecord(t *testing.T) {
+	worker := mustSpawnParams("org-a", "seat-1")
+	worker.Reserve = []string{"internal/"}
+	for _, tc := range []struct {
+		name string
+		p    SpawnParams
+		want string
+	}{
+		{"a worker seat", worker, `only the leader seat reserves paths for its org; seat_id "seat-1" cannot`},
+		{"an absolute path", leaderParams("org-a", "/etc/"), "is absolute"},
+		{"a dot dot segment", leaderParams("org-a", "internal/../../x"), "has a .. segment"},
+		{"an empty path", leaderParams("org-a", "internal/", ""), "is empty"},
+	} {
+		for _, dryRun := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s dry-run=%v", tc.name, dryRun), func(t *testing.T) {
+				o, h, a := testOrg(t)
+				p := tc.p
+				p.DryRun = dryRun
+				r := o.Spawn(p)
+				if r.Outcome != SpawnOutcomeRejected || r.Err == nil || !strings.Contains(r.Err.Error(), tc.want) {
+					t.Fatalf("expected a rejection containing %q, got %+v", tc.want, r)
+				}
+				if events := mustReadEvents(t, o); len(events) != 0 {
+					t.Fatalf("expected no manifest event, got %+v", events)
+				}
+				if n := receiptCount(t, o); n != 0 {
+					t.Fatalf("expected no receipt, got %d", n)
+				}
+				if len(h.calls) != 0 || len(a.calls) != 0 {
+					t.Fatalf("expected no driver call, herdr %v agmsg %v", h.calls, a.calls)
+				}
+			})
+		}
+	}
+}
+
+// TestOrgSpawn_Reserve_OverlapWithRunningOrgRejected covers plan AC5: while
+// org-a reserves internal/auth/, org-b's start reserving a file under it, a
+// parent directory, or the whole repo is rejected with a `rejected` record
+// naming org-a and the overlapping paths, and holds nothing; a sibling
+// directory with a shared prefix (internal/authz/) spawns.
+func TestOrgSpawn_Reserve_OverlapWithRunningOrgRejected(t *testing.T) {
+	o, h, _ := testOrg(t)
+	spawnLeaderIn(t, o, h, "org-a", "ws-a", "pane-a", "internal/auth/")
+	for _, path := range []string{"internal/auth/token.go", "internal/", "."} {
+		assertRejectedRecorded(t, o, o.Spawn(leaderParams("org-b", path)), "org-b", LeaderIdentity,
+			`reservation overlaps the reservation of running org_id "org-a"`, path+" overlaps internal/auth/")
+	}
+	events := mustReadEvents(t, o)
+	if got := ActiveReservation(events, "org-b"); got != nil {
+		t.Fatalf("expected the rejected org-b to hold no reservation, got %q", got)
+	}
+	if got := RunningOrgs(events); !slices.Equal(got, []string{"org-a"}) {
+		t.Fatalf("RunningOrgs = %v, want only org-a", got)
+	}
+
+	spawnLeaderIn(t, o, h, "org-b", "ws-b", "pane-b", "internal/authz/")
+	if got := ActiveReservation(mustReadEvents(t, o), "org-b"); !slices.Equal(got, []string{"internal/authz/"}) {
+		t.Fatalf("ActiveReservation(org-b) = %q, want internal/authz/", got)
+	}
+}
+
+// TestOrgSpawn_Reserve_SameSetPassesDifferentSetRejected covers plan AC7 for
+// a new leader spawn into an org that holds a reservation (its earlier leader
+// stopped): the same set, however written, passes with no new record, a
+// different set is rejected with a `rejected` record, and a seat spawned
+// without Reserve is not affected by the reservation.
+func TestOrgSpawn_Reserve_SameSetPassesDifferentSetRejected(t *testing.T) {
+	o, h, _ := testOrg(t)
+	stopLeader := func() {
+		t.Helper()
+		if r := o.Stop(StopParams{OrgID: "org-a", Seat: LeaderIdentity}); r.Err != nil {
+			t.Fatalf("stop org-a's leader: %v", r.Err)
+		}
+	}
+	spawnLeaderIn(t, o, h, "org-a", "ws-a", "pane-1", "internal/", "docs/")
+	stopLeader()
+
+	spawnLeaderIn(t, o, h, "org-a", "ws-a", "pane-2", "docs//", "./internal/")
+	if n := countString(eventNames(t, o), EventScopeReserved); n != 1 {
+		t.Fatalf("expected the same set to add no scope_reserved, got %d", n)
+	}
+	stopLeader()
+
+	assertRejectedRecorded(t, o, o.Spawn(leaderParams("org-a", "internal/")), "org-a", LeaderIdentity,
+		`org_id "org-a" already reserves docs/,internal/`, "a different reservation (internal/) is refused", "ralph org disband --org-id org-a")
+
+	spawnSeatIn(t, o, h, "org-a", "seat-1", "ws-a", "pane-3")
+	if got := ActiveReservation(mustReadEvents(t, o), "org-a"); !slices.Equal(got, []string{"docs/", "internal/"}) {
+		t.Fatalf("ActiveReservation = %q, want the first reservation unchanged", got)
+	}
+}
+
+// TestOrgSpawn_Reserve_ExistingLeader covers plan AC14: a spawn with Reserve
+// of a leader that is already spawned decides the reservation before
+// returning the seat. Without a reservation yet it reserves (one
+// scope_reserved, no driver call); the same set passes with no record; a
+// different set, or one overlapping another running org, is refused with no
+// record at all and the seat unchanged; a retry without Reserve returns the
+// seat as before.
+func TestOrgSpawn_Reserve_ExistingLeader(t *testing.T) {
+	type check struct {
+		events, receipts, herdr, agmsg int
+	}
+	snapshot := func(t *testing.T, o *Org, h *fakeHerdr, a *fakeAgmsg) check {
+		return check{len(mustReadEvents(t, o)), receiptCount(t, o), len(h.calls), len(a.calls)}
+	}
+	t.Run("no reservation yet: reserved, seat returned", func(t *testing.T) {
+		o, h, a := testOrg(t)
+		spawnLeaderIn(t, o, h, "org-a", "ws-a", "pane-a")
+		before := snapshot(t, o, h, a)
+
+		r := o.Spawn(leaderParams("org-a", "internal/"))
+		if r.Outcome != SpawnOutcomeIdempotent || r.Err != nil || r.Seat.SeatID != LeaderIdentity || !r.Seat.Active {
+			t.Fatalf("expected the existing leader returned, got %+v", r)
+		}
+		after := snapshot(t, o, h, a)
+		if after.events != before.events+1 || after.receipts != before.receipts || after.herdr != before.herdr || after.agmsg != before.agmsg {
+			t.Fatalf("expected one new event and nothing else, %+v -> %+v", before, after)
+		}
+		if ev := lastEvent(t, o); ev.Event != EventScopeReserved || ev.OrgID != "org-a" || ev.Details != "paths=internal/" {
+			t.Fatalf("expected org-a's scope_reserved, got %+v", ev)
+		}
+		assertSeatUnchanged(t, o, "org-a", LeaderIdentity)
+	})
+	t.Run("same set: passes with no record", func(t *testing.T) {
+		o, h, a := testOrg(t)
+		spawnLeaderIn(t, o, h, "org-a", "ws-a", "pane-a", "internal/")
+		before := snapshot(t, o, h, a)
+		if r := o.Spawn(leaderParams("org-a", "./internal//")); r.Outcome != SpawnOutcomeIdempotent || r.Err != nil {
+			t.Fatalf("expected the existing leader returned, got %+v", r)
+		}
+		if after := snapshot(t, o, h, a); after != before {
+			t.Fatalf("expected nothing recorded or called, %+v -> %+v", before, after)
+		}
+	})
+	for _, tc := range []struct {
+		name    string
+		setup   func(t *testing.T, o *Org, h *fakeHerdr)
+		reserve string
+		want    string
+	}{
+		{"different set: refused, seat unchanged", func(t *testing.T, o *Org, h *fakeHerdr) {
+			spawnLeaderIn(t, o, h, "org-a", "ws-a", "pane-a", "internal/")
+		}, "docs/", `org_id "org-a" already reserves internal/`},
+		{"overlap with another running org: refused, seat unchanged", func(t *testing.T, o *Org, h *fakeHerdr) {
+			spawnLeaderIn(t, o, h, "org-b", "ws-b", "pane-b", "docs/")
+			spawnLeaderIn(t, o, h, "org-a", "ws-a", "pane-a")
+		}, "docs/api/", `running org_id "org-b": docs/api/ overlaps docs/`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			o, h, a := testOrg(t)
+			tc.setup(t, o, h)
+			reservedBefore := ActiveReservation(mustReadEvents(t, o), "org-a")
+			before := snapshot(t, o, h, a)
+
+			r := o.Spawn(leaderParams("org-a", tc.reserve))
+			if r.Outcome != SpawnOutcomeRejected || r.Err == nil || !strings.Contains(r.Err.Error(), tc.want) {
+				t.Fatalf("expected a rejection containing %q, got %+v", tc.want, r)
+			}
+			if after := snapshot(t, o, h, a); after != before {
+				t.Fatalf("expected no event, receipt or driver call, %+v -> %+v", before, after)
+			}
+			assertSeatUnchanged(t, o, "org-a", LeaderIdentity)
+			if got := ActiveReservation(mustReadEvents(t, o), "org-a"); !slices.Equal(got, reservedBefore) {
+				t.Fatalf("ActiveReservation(org-a) = %q, want unchanged %q", got, reservedBefore)
+			}
+		})
+	}
+	t.Run("no reserve: returned as before", func(t *testing.T) {
+		o, h, a := testOrg(t)
+		spawnLeaderIn(t, o, h, "org-a", "ws-a", "pane-a", "internal/")
+		before := snapshot(t, o, h, a)
+		if r := o.Spawn(leaderParams("org-a")); r.Outcome != SpawnOutcomeIdempotent || r.Err != nil {
+			t.Fatalf("expected the existing leader returned, got %+v", r)
+		}
+		if after := snapshot(t, o, h, a); after != before {
+			t.Fatalf("expected nothing recorded or called, %+v -> %+v", before, after)
+		}
+	})
+}
+
+// TestOrgSpawn_Reserve_ExistingLeader_Phase2 covers plan AC14 on Spawn's
+// second idempotent return: a leader spawn with Reserve finds a stale
+// in-flight saga, and a racer spawns the leader while the stale seat is
+// compensated (the seam of
+// TestOrgSpawn_StaleInFlight_RacerCompletesDuringCompensationWindow_Phase2ReturnsIdempotent),
+// so Phase 2's fresh read finds the leader spawned. The reservation is
+// decided there too: the org had none, so it is recorded after the racer's
+// `spawned`, and the racer's leader is returned with no second saga.
+func TestOrgSpawn_Reserve_ExistingLeader_Phase2(t *testing.T) {
+	o, h, _ := testOrg(t)
+	if err := o.Manifest.Append(ManifestEvent{
+		TS: "2026-08-01T00:00:00Z", OrgID: "org-a", SeatID: LeaderIdentity, Event: EventSpawnStarted,
+		Role: LeaderIdentity, Driver: "claude", Model: "sonnet", PaneID: "stale-pane",
+	}); err != nil {
+		t.Fatalf("seed stale spawn_started: %v", err)
+	}
+	orig := afterStaleCompensation
+	afterStaleCompensation = func() {
+		if err := o.Manifest.Append(ManifestEvent{
+			TS: "2026-08-01T00:00:05Z", OrgID: "org-a", SeatID: LeaderIdentity, Event: EventSpawned,
+			Role: LeaderIdentity, Driver: "claude", Model: "sonnet", PaneID: "racer-pane", AgmsgTeam: "team-racer",
+		}); err != nil {
+			t.Fatalf("seed racer spawned event: %v", err)
+		}
+	}
+	defer func() { afterStaleCompensation = orig }()
+
+	r := o.Spawn(leaderParams("org-a", "internal/"))
+	if r.Outcome != SpawnOutcomeIdempotent || r.Err != nil || r.Seat.PaneID != "racer-pane" {
+		t.Fatalf("expected the racer's leader returned by Phase 2, got %+v", r)
+	}
+	if got := eventNames(t, o); !slices.Equal(got, []string{EventSpawnStarted, EventSpawnFailed, EventSpawned, EventScopeReserved}) {
+		t.Fatalf("expected the reservation recorded after the racer's spawned and no second saga, got %v", got)
+	}
+	if got := ActiveReservation(mustReadEvents(t, o), "org-a"); !slices.Equal(got, []string{"internal/"}) {
+		t.Fatalf("ActiveReservation(org-a) = %q, want internal/", got)
+	}
+	if len(h.calls) != 1 || h.calls[0] != "pane_send_keys" {
+		t.Fatalf("expected only the compensation C-c, got %v", h.calls)
+	}
+}
+
+// TestOrgSpawn_Reserve_InactiveLeaderChecksMaxOrgs covers plan AC1 and AC14
+// for a legacy ledger: an older ralph's disband could follow the leader's
+// `spawned` with no `stopped`, so the roster shows org-a's leader spawned but
+// not active and org-a not running. A spawn with Reserve reaches
+// idempotentRespawn for that seat, from Phase 1 and from Phase 2 (the seam of
+// TestOrgSpawn_Reserve_ExistingLeader_Phase2), and the reservation would make
+// org-a run, so max_orgs is decided as for an org that is not running: with
+// org-b running and max_orgs 1 it is refused with no record, no receipt and
+// the seat unchanged; with max_orgs 2 the reservation is recorded. An org
+// that runs through another seat is not limited by max_orgs.
+func TestOrgSpawn_Reserve_InactiveLeaderChecksMaxOrgs(t *testing.T) {
+	legacyDisbandedLeader := func(t *testing.T, o *Org) {
+		t.Helper()
+		for _, ev := range []ManifestEvent{
+			{TS: "2026-08-01T00:00:05Z", OrgID: "org-a", SeatID: LeaderIdentity, Event: EventSpawned,
+				Role: LeaderIdentity, Driver: "claude", Model: "sonnet", PaneID: "legacy-pane"},
+			{TS: "2026-08-01T00:00:06Z", OrgID: "org-a", Event: EventDisbanded},
+		} {
+			if err := o.Manifest.Append(ev); err != nil {
+				t.Fatalf("seed legacy %s: %v", ev.Event, err)
+			}
+		}
+	}
+	for _, phase := range []string{"phase 1", "phase 2"} {
+		for _, tc := range []struct {
+			maxOrgs  int
+			recorded bool
+		}{{1, false}, {2, true}} {
+			t.Run(fmt.Sprintf("%s, max_orgs %d", phase, tc.maxOrgs), func(t *testing.T) {
+				o, h, a := testOrg(t)
+				o.Config.MaxOrgs = tc.maxOrgs
+				spawnSeatIn(t, o, h, "org-b", "seat-1", "ws-b", "pane-b1")
+				if phase == "phase 1" {
+					legacyDisbandedLeader(t, o)
+				} else {
+					if err := o.Manifest.Append(ManifestEvent{
+						TS: "2026-08-01T00:00:00Z", OrgID: "org-a", SeatID: LeaderIdentity, Event: EventSpawnStarted,
+						Role: LeaderIdentity, Driver: "claude", Model: "sonnet", PaneID: "stale-pane",
+					}); err != nil {
+						t.Fatalf("seed stale spawn_started: %v", err)
+					}
+					orig := afterStaleCompensation
+					afterStaleCompensation = func() { legacyDisbandedLeader(t, o) }
+					defer func() { afterStaleCompensation = orig }()
+				}
+				receiptsBefore, agmsgBefore := receiptCount(t, o), len(a.calls)
+
+				r := o.Spawn(leaderParams("org-a", "internal/"))
+				events := mustReadEvents(t, o)
+				if tc.recorded {
+					if r.Outcome != SpawnOutcomeIdempotent || r.Err != nil || r.Seat.SeatID != LeaderIdentity {
+						t.Fatalf("expected the existing leader returned, got %+v", r)
+					}
+					if ev := lastEvent(t, o); ev.Event != EventScopeReserved || ev.OrgID != "org-a" || ev.Details != "paths=internal/" {
+						t.Fatalf("expected org-a's scope_reserved, got %+v", ev)
+					}
+					if got := RunningOrgs(events); !slices.Equal(got, []string{"org-a", "org-b"}) {
+						t.Fatalf("RunningOrgs = %v, want org-a and org-b", got)
+					}
+				} else {
+					// The same error a new org gets at max_orgs (ValidateOrgWideCapacity).
+					want := `org: max_orgs 1 reached: org_id "org-a" is not running and 1 orgs are (org-b); ` + disbandFreesSlotHint
+					if r.Outcome != SpawnOutcomeRejected || r.Err == nil || r.Err.Error() != want {
+						t.Fatalf("expected the max_orgs rejection %q for org-a, got %+v", want, r)
+					}
+					if ev := lastEvent(t, o); ev.Event != EventDisbanded || ev.OrgID != "org-a" {
+						t.Fatalf("expected no record after the legacy disbanded, got %+v", ev)
+					}
+					if seat, ok := seatFromEvents(events, "org-a", LeaderIdentity); !ok || seat.Event != EventSpawned || seat.Active {
+						t.Fatalf("expected org-a's leader still spawned and inactive, got %+v (found=%v)", seat, ok)
+					}
+					if got := ActiveReservation(events, "org-a"); got != nil {
+						t.Fatalf("ActiveReservation(org-a) = %q, want none", got)
+					}
+					if got := RunningOrgs(events); !slices.Equal(got, []string{"org-b"}) {
+						t.Fatalf("RunningOrgs = %v, want only org-b", got)
+					}
+				}
+				if receiptCount(t, o) != receiptsBefore || len(a.calls) != agmsgBefore {
+					t.Fatalf("expected no receipt and no agmsg call, receipts %d -> %d, agmsg %v",
+						receiptsBefore, receiptCount(t, o), a.calls[agmsgBefore:])
+				}
+			})
+		}
+	}
+	// org-a runs again through a seat spawned after the legacy disband, so
+	// with max_orgs 2 reached by org-a and org-b the reservation is not
+	// limited by max_orgs: it is recorded.
+	t.Run("org running through another seat: recorded at the limit", func(t *testing.T) {
+		o, h, _ := testOrg(t)
+		o.Config.MaxOrgs = 2
+		spawnSeatIn(t, o, h, "org-b", "seat-1", "ws-b", "pane-b1")
+		legacyDisbandedLeader(t, o)
+		spawnSeatIn(t, o, h, "org-a", "seat-1", "ws-a", "pane-a1")
+
+		if r := o.Spawn(leaderParams("org-a", "internal/")); r.Outcome != SpawnOutcomeIdempotent || r.Err != nil {
+			t.Fatalf("expected the existing leader returned, got %+v", r)
+		}
+		if ev := lastEvent(t, o); ev.Event != EventScopeReserved || ev.OrgID != "org-a" || ev.Details != "paths=internal/" {
+			t.Fatalf("expected org-a's scope_reserved, got %+v", ev)
+		}
+	})
+}
+
+// TestOrgSpawn_Reserve_DisbandReleasesIt covers the first half of plan AC8:
+// once org-a is disbanded, another org reserves the same paths, and org-a
+// starts again with a reservation of its own.
+func TestOrgSpawn_Reserve_DisbandReleasesIt(t *testing.T) {
+	o, h, _ := testOrg(t)
+	spawnLeaderIn(t, o, h, "org-a", "ws-a", "pane-a", "internal/")
+	assertRejectedRecorded(t, o, o.Spawn(leaderParams("org-b", "internal/")), "org-b", LeaderIdentity, `running org_id "org-a"`)
+
+	if d := o.Disband(DisbandParams{OrgID: "org-a"}); !d.Disbanded {
+		t.Fatalf("disband org-a: %+v", d)
+	}
+	if got := ActiveReservation(mustReadEvents(t, o), "org-a"); got != nil {
+		t.Fatalf("expected disband to release org-a's reservation, got %q", got)
+	}
+	spawnLeaderIn(t, o, h, "org-b", "ws-b", "pane-b", "internal/")
+	spawnLeaderIn(t, o, h, "org-a", "ws-a2", "pane-a2", "docs/")
+}
+
+// TestOrgSpawn_Reserve_SatisfiesAutonomousScopeGate covers plan AC9: under
+// the default autonomous mode, a spawn with Reserve and no Scope passes the
+// AC-2b gate, in real and dry-run mode; without Reserve it is still refused.
+func TestOrgSpawn_Reserve_SatisfiesAutonomousScopeGate(t *testing.T) {
+	for _, dryRun := range []bool{false, true} {
+		t.Run(fmt.Sprintf("dry-run=%v", dryRun), func(t *testing.T) {
+			o, _, _ := testOrg(t)
+			p := leaderParams("org-a", "internal/")
+			p.Scope, p.DryRun = "", dryRun
+			if r := o.Spawn(p); r.Outcome != SpawnOutcomeSpawned {
+				t.Fatalf("expected a spawn with Reserve and no Scope to pass the gate, got %+v", r)
+			}
+			p = leaderParams("org-b")
+			p.Scope, p.DryRun = "", dryRun
+			if r := o.Spawn(p); r.Outcome != SpawnOutcomeRejected || r.Err == nil || !strings.Contains(r.Err.Error(), "requires --scope or --reserve") {
+				t.Fatalf("expected a spawn with neither to be refused by the gate, naming both, got %+v", r)
+			}
+		})
+	}
+}
+
+// TestOrgSpawn_ZeroOrgWideLimits_Reject: with max_orgs or max_total_seats at
+// 0 (only a hand-built config can carry it; config.Load rejects it), spawn
+// refuses with a `rejected` record, as max_seats 0 does, instead of treating
+// 0 as no limit.
+func TestOrgSpawn_ZeroOrgWideLimits_Reject(t *testing.T) {
+	t.Run("max_orgs 0", func(t *testing.T) {
+		o, _, _ := testOrg(t)
+		o.Config.MaxOrgs = 0
+		assertRejectedRecorded(t, o, o.Spawn(mustSpawnParams("org-a", "seat-1")), "org-a", "seat-1",
+			"max_orgs 0 reached", "0 orgs are (none)")
+	})
+	t.Run("max_total_seats 0", func(t *testing.T) {
+		o, _, _ := testOrg(t)
+		o.Config.MaxTotalSeats = 0
+		assertRejectedRecorded(t, o, o.Spawn(mustSpawnParams("org-a", "seat-1")), "org-a", "seat-1",
+			"max_total_seats 0 reached")
+	})
+}
+
+// TestOrgSpawn_Reserve_DryRunPreviewsAndHoldsNothing: a dry run decides the
+// reservation against the real ones (an overlap is a dry-run `rejected`),
+// starts a passing trail with a dry-run scope_reserved, and that record
+// holds nothing: the org does not run and a real org reserves the same paths.
+func TestOrgSpawn_Reserve_DryRunPreviewsAndHoldsNothing(t *testing.T) {
+	o, h, _ := testOrg(t)
+	spawnLeaderIn(t, o, h, "org-a", "ws-a", "pane-a", "internal/auth/")
+	dryRun := func(orgID string, reserve ...string) SpawnResult {
+		p := leaderParams(orgID, reserve...)
+		p.DryRun = true
+		return o.Spawn(p)
+	}
+
+	if r := dryRun("org-b", "internal/"); r.Outcome != SpawnOutcomeRejected || r.Err == nil || !strings.Contains(r.Err.Error(), "internal/ overlaps internal/auth/") {
+		t.Fatalf("expected the dry run rejected for the overlap, got %+v", r)
+	}
+	if ev := lastEvent(t, o); ev.Event != EventRejected || !ev.DryRun || ev.OrgID != "org-b" {
+		t.Fatalf("expected a dry-run rejected event for org-b, got %+v", ev)
+	}
+
+	before := len(mustReadEvents(t, o))
+	if r := dryRun("org-b", "docs/"); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("expected the dry run to pass, got %+v", r)
+	}
+	events := mustReadEvents(t, o)
+	if ev := events[before]; ev.Event != EventScopeReserved || !ev.DryRun || ev.OrgID != "org-b" || ev.SeatID != "" || ev.Details != "paths=docs/" {
+		t.Fatalf("expected the dry-run trail to start with a dry-run scope_reserved, got %+v", ev)
+	}
+	if ev := events[before+1]; ev.Event != EventSpawnStarted || !ev.DryRun {
+		t.Fatalf("expected the dry-run spawn_started next, got %+v", ev)
+	}
+	if got := RunningOrgs(events); !slices.Equal(got, []string{"org-a"}) {
+		t.Fatalf("RunningOrgs = %v, want only org-a", got)
+	}
+	spawnLeaderIn(t, o, h, "org-c", "ws-c", "pane-c", "docs/")
 }

@@ -231,6 +231,51 @@ func TestResolveOrgStateDir_LinkedWorktreeResolvesToMainWorktree(t *testing.T) {
 	}
 }
 
+// TestMainWorktreeRoot covers the accessor `ralph org spawn` uses to read the
+// org-wide limits from the main worktree's ralph.toml: from every worktree of
+// the repository it reads back the main root from the resolved state dir, and
+// no other source has a main root.
+func TestMainWorktreeRoot(t *testing.T) {
+	mainRoot, sibling, nested := newRepoWithLinkedWorktrees(t)
+	for name, cwd := range map[string]string{
+		"main subdirectory":            filepath.Join(mainRoot, "pkg"),
+		"sibling worktree root":        sibling,
+		"nested worktree subdirectory": filepath.Join(nested, "pkg"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			mkdirAll(t, cwd)
+			chdir(t, cwd)
+
+			dir, source := ResolveOrgStateDir("", false)
+			if root, ok := MainWorktreeRoot(dir, source); !ok || root != mainRoot {
+				t.Errorf("MainWorktreeRoot(%q, %q) = %q, %t, want %q, true", dir, source, root, ok, mainRoot)
+			}
+		})
+	}
+
+	stateDir := filepath.Join(mainRoot, defaultOrgStateDirRelPath)
+	for _, tc := range []struct{ name, dir, source string }{
+		{"flag", stateDir, "flag"},
+		{"env", stateDir, "env"},
+		{"git-toplevel", stateDir, "git-toplevel"},
+		{"cwd", stateDir, "cwd"},
+		{"git-main-worktree dir not ending with the state-dir path", filepath.Join(mainRoot, "state"), "git-main-worktree"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if root, ok := MainWorktreeRoot(tc.dir, tc.source); ok || root != "" {
+				t.Errorf("MainWorktreeRoot(%q, %q) = %q, %t, want \"\", false", tc.dir, tc.source, root, ok)
+			}
+		})
+	}
+
+	t.Run("main worktree at the filesystem root", func(t *testing.T) {
+		dir := filepath.Join(string(filepath.Separator), defaultOrgStateDirRelPath)
+		if root, ok := MainWorktreeRoot(dir, "git-main-worktree"); !ok || root != string(filepath.Separator) {
+			t.Errorf("MainWorktreeRoot(%q) = %q, %t, want %q, true", dir, root, ok, string(filepath.Separator))
+		}
+	})
+}
+
 // TestResolveOrgStateDir_BareDotGitWorktreeFallsBackToToplevel covers a
 // bare repository stored as <tmp>/project/.git: git names <tmp>/project as
 // its main worktree but marks the record `bare`, so a linked worktree keeps
