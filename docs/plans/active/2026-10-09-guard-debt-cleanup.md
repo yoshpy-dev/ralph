@@ -1,7 +1,7 @@
 # guard-debt-cleanup
 
-- Status: Draft
-- Approved: TBD
+- Status: Approved
+- Approved: 2026-10-09 sha256:f37da93972d7
 - Owner: Claude Code
 - Date: 2026-10-09
 - Related request: ユーザーの依頼「2,3,4を進めて」(2026-10-09)。直前の「残タスクは?」への返答で挙げた guard の系列の 2(tech-debt (e) のコードの 2 項目)、3(awk のコメントの `SQ` の綴り)、4(`.awk` の検査の抜け)
@@ -117,8 +117,9 @@ None (検査の段を 1 つ足し、guard の中の判定を変えないコー�
 
 ## Progress checklist
 
-- [ ] Plan reviewed
-- [ ] Plan approved
+- [x] Plan reviewed
+- [x] Plan approved
+  - 2026-10-09: ユーザーが承認ゲートで Approve。承認の前に、consult(consult-plan-guarddebt)の指摘(`(echo sudo ls)` は `(` の規則だけでも止まるので許可リストの確かめに使えない)と、Codex の plan advisory の MEDIUM(DATACMD に `exec` を 1 つ足すと穴が開くが、今のテストの行では気づけない)を反映し、テストに不変条件の検査と `exec >run.sh; echo 'sudo ls'` の行を足すことにした(AC5b)。返答で勧めた「4 と 2・3 を分ける」から、1 つの PR にまとめる形に変えたことはユーザーに伝えた。図解ページは描いていない(Visual review を参照)
 - [x] Branch created
 - [ ] Implementation started
 - [ ] Review artifact created
