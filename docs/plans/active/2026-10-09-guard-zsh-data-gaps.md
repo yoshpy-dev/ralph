@@ -125,7 +125,9 @@ None (guard の 1 ファイルとその template の写し、テスト、tech-de
 - [x] Plan approved
   - 2026-10-09: ユーザーが承認ゲートで Approve。consult(consult-plan-zshgaps)はヒアドキュメントの本文の `${(e):-\$(…)}` と直す範囲の線引きを、Codex plan advisory は引用符を挟んだメッセージの形(`--message''=${…}`)を挙げた。どちらも承認の前に plan に反映した。図解ページは描いていない(Visual review を参照)
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1 完了(139d6627、implementer/opus): guard の 5 か所(`lex_dollar` の `xnote`、`msg_check` の `WR` の検査、`lex_hd` の HSUB、DATACMD から `stat`、NOEXEC に `tr`)とコメント、テスト。テスト 1946 件(B 節 44 件、D 節 16 件を足した)。既存のテストで判定が変わったものはない。6 つの mutation はどれも AC の形の判定を変える。implementer が範囲外の止めすぎを 1 つ報告した: 単一引用符の中に `${` を文字として書き、見張りの語も含むメッセージ(`git commit -m 'mention ${HOME}; never sudo ls'`)が deny になる(直す前は none、旧版も deny)。`WR` を見る plan の直し方による。語ごとの印で見分ける直し方は plan の範囲外なので、tech-debt に記録した
+  - S2 完了(inline、docs だけ): tech-debt の「Findings of the last `/cross-review` run」の行を解消済みにし、この修正で増える止めすぎ(メッセージの単一引用符の中の `${`、ヒアドキュメントの本文の `${…}`、`${…}` の中の見張りの語、`stat` で始まる呼び出し)を新しい行に書いた。どれも旧版も deny で、probe で確かめた
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
