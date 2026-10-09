@@ -86,8 +86,10 @@ const EventOrgWorkspaceClosed = "org_workspace_closed"
 // HerdrClient is the subset of driver.Herdr's methods the spawn saga and the
 // send/wait/read/stop verbs need. Defined here (consumption side, per
 // .claude/rules/ralph/architecture.md) rather than in internal/org/driver, so
-// internal/org stays free of any exec.Command dependency -- driver.Herdr
-// satisfies this interface structurally. Wiring lives in internal/cli/org.go:
+// internal/org reaches herdr only through this interface and never runs the
+// herdr CLI with exec.Command itself (it does run git, ralph-worktree.sh,
+// osascript and `claude -p`; see the package comment in seat.go) --
+// driver.Herdr satisfies this interface structurally. Wiring lives in internal/cli/org.go:
 // driver.Herdr{R: driver.ExecRunner{}} is assigned directly to Org.Herdr.
 type HerdrClient interface {
 	WorkspaceCreate(ctx context.Context, cwd, label string) (string, error)
