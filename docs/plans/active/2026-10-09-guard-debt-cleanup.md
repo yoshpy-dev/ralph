@@ -27,6 +27,7 @@ PR #214(a0094fe5)のあとに `docs/tech-debt/README.md` に残った、guard �
   - `pre_bash_guard_lex.awk`: 行末のバックスラッシュの数を返す関数を 1 つ作り、`read_body` の 2 つのループをその呼び出しにする
   - `pre_bash_guard_commands.awk`: `end_cmd` の予約語の規則と `exec` の規則を消す。`cmd_pos` は `exec` を飛ばす処理を残し、`EXEC_SEEN` を立てる処理を消す
   - `pre_bash_guard_rules.awk`: `RESW` の一覧(`resw_list`)と `EXEC_SEEN` の初期化を消す
+  - `tests/test-pre-bash-guard.sh`: 2 つを足す。1 つは不変条件の検査で、`pre_bash_guard_rules.awk` の `datacmd_list` の文字列と、`pre_bash_guard_commands.awk` の `cmd_pos` が飛ばす包みの名前(`nm == "…"` の名前)をコードから読み、DATACMD に包みも予約語(テストに書く一覧: `if then elif else fi for while until do done case esac select function { } ! [[ ]] time coproc`)も入っていないことを確かめる。もう 1 つは B 節の行 `exec >run.sh; echo 'sudo ls'`(後ろに `sh` を置かない形。旧版も deny)
   - コメント: `end_cmd`、`cmd_pos`、`in_data`、`data_first_ok` の上と、`pre_bash_guard.sh` のヘッダー(item 2 の予約語の説明、item 6 の `NODATA` の理由の一覧、awk の呼び出しの上の `RESW`)、`rules.awk` の先頭のコメント。複合コマンドと `exec` のリダイレクトは、1 語目が DATACMD でも `git` でもないので許可リストがデータ区間を落とす、と書く。DATACMD の一覧の上に、予約語と `cmd_pos` が飛ばす包み(env、command、exec など)をこの一覧に入れないこと、入れると許可リストが落とさなくなることを書く
 - 4 つの guard のファイルは、root と `templates/base/` の写しをバイト単位で同じに保つ
 - S4(docs だけ): `docs/tech-debt/README.md` の guard の限界の行の (e) の残り(コードの 2 項目と `SQ`)を解消済みにし、`.awk` の分類の行を見直す(分類は作りどおりとして閉じ、構文の確認は S1 で解消)
@@ -51,6 +52,7 @@ PR #214(a0094fe5)のあとに `docs/tech-debt/README.md` に残った、guard �
 
 - `scripts/verify.local.sh`
 - `.claude/hooks/pre_bash_guard.sh`、`pre_bash_guard_lex.awk`、`pre_bash_guard_commands.awk`、`pre_bash_guard_rules.awk`、それぞれの `templates/base/.claude/hooks/` の写し
+- `tests/test-pre-bash-guard.sh`
 - `docs/tech-debt/README.md`
 
 ## Visual review
@@ -59,7 +61,7 @@ None (検査の段を 1 つ足し、guard の中の判定を変えないコー�
 
 ## Design decisions
 
-- **2 つの規則は残さずに消す**。残して「許可リストの後ろの予備」と書く案もある。消す理由は 3 つ。1 つ目に、Assumptions のとおり、どちらも許可リストが必ず先回りするので、判定を変える道がない。2 つ目に、判定を変えないコードは読む人に「この規則が効く場面がある」と思わせ、tech-debt (e) が指摘したコメントのずれを生んできた。3 つ目に、許可リストを緩める変更があっても、その変更で 2 つの場面を止める行(`(echo sudo ls)`、`if grep -q` の形、`exec >run.sh; echo 'sudo ls'; sh run.sh` などの `exec` の 3 行)がテストで赤になる。DATACMD の一覧の上に、入れてはいけない名前を書いておく
+- **2 つの規則は残さずに消す**。残して「許可リストの後ろの予備」と書く案もある。消す理由は 3 つ。1 つ目に、Assumptions のとおり、どちらも許可リストが必ず先回りするので、判定を変える道がない。2 つ目に、判定を変えないコードは読む人に「この規則が効く場面がある」と思わせ、tech-debt (e) が指摘したコメントのずれを生んできた。3 つ目に、規則が守っていた前提(DATACMD に予約語も `cmd_pos` が飛ばす包みも入らない)を、テストの不変条件の検査が直接確かめる。今あるテストの行だけでは足りない: `exec` を DATACMD に 1 つ足すと `exec >run.sh; echo 'sudo ls'` が通るようになるが、今の `exec` の行は後ろの `sh run.sh` などがほかの理由で止めるので赤にならない(Codex の plan advisory の MEDIUM)。だから不変条件の検査と、後ろに `sh` を置かない `exec` の行を足す。DATACMD の一覧の上にも、入れてはいけない名前を書いておく(`(echo sudo ls)` は `(` の規則だけでも止まるので、許可リストの確かめには使えない)
 - **`verify.local.sh` の段は guard の呼び出しと同じ形にする**。3 つを別々に読むと、ファイルをまたぐ関数の呼び出しを確かめられない。guard と同じ順と引数で、空の入力を渡す
 - **言語の分類は足さない**。shell の言語を足すと、`run-static-verify.sh` に言語ごとの段を足すことになり、この PR の範囲を超える。`.sh` も全範囲で回る今の作りを、tech-debt の行に書いて閉じる
 - **S1 を先に入れる**。同じ PR の S2・S3 で `.awk` を変えるとき、新しい段がその構文を確かめる
@@ -71,7 +73,8 @@ None (検査の段を 1 つ足し、guard の中の判定を変えないコー�
 - [ ] AC2: 3 つの `.awk` のコメントの行に `SQ` も `DQ` も残らない(`grep -n '^[[:space:]]*#.*\(SQ\|DQ\)'` が何も出さない)。S2 の差分はコメントの行だけ
 - [ ] AC3: `read_body` で行末のバックスラッシュを数える処理は 1 つの関数の呼び出しで、`while (q >= … && at(q) == BS)` の形のループは guard に 1 つだけ残る
 - [ ] AC4: `RESW`、`resw_list`、`EXEC_SEEN` が guard の 4 つのファイル(コメントを含む)に残らない。`in_data` の上のコメントとヘッダーの `NODATA` の理由の一覧が、複合コマンドと `exec` のリダイレクトを許可リストの場合として書く。DATACMD の一覧の上に、予約語と包みを入れないことが書いてある
-- [ ] AC5: 判定が変わらない。`bash tests/test-pre-bash-guard.sh` が 2,063 件すべて通る(jq あり・なし)。base(a0094fe5)の guard とこの PR の guard に、テストの配列の行と PR #213・#214 の probe の行を jq あり・なしで渡し、判定の違いが 0 件。許可リストの `NODATA` の行を消した写しでは、`(echo sudo ls)`、`if grep -q` の形、`exec` の 3 行(`exec >run.sh; …`、`exec 3>run.sh; …`、`builtin exec >run.sh; …`)のうち、許可リストのほかに止める規則がない行が赤になる(これらの行を許可リストだけが止めていることの確認)
+- [ ] AC5: 判定が変わらない。`bash tests/test-pre-bash-guard.sh` が、今の 2,063 件と足した行・検査を含めて全部通る(jq あり・なし)。base(a0094fe5)の guard とこの PR の guard に、テストの配列の行と PR #213・#214 の probe の行を jq あり・なしで渡し、判定の違いが 0 件
+- [ ] AC5b: 消した規則の前提がテストで守られる。写しの `pre_bash_guard_rules.awk` の DATACMD に `exec` だけを足すと、足した `exec >run.sh; echo 'sudo ls'` の行と不変条件の検査が赤になる。`for` だけを足すと不変条件の検査が赤になる。`if grep -q 'sudo ' file; then echo ok; fi` の行は、許可リストの `NODATA` の行を消した写しで赤になる(これらの行を許可リストだけが止めていることの確認)
 - [ ] AC6: root と `templates/base/` の 4 つの guard のファイルがバイト単位で同じ(`./scripts/check-sync.sh`)。`shellcheck -S warning` と `sh -n` が通り、4 つとも 800 行未満
 - [ ] AC7: `./scripts/run-verify.sh` が rc 0。`docs/tech-debt/README.md` の guard の限界の行の (e) が、コードの 2 項目と `SQ` を含めて解消済みになり、`.awk` の分類の行は、分類は作りどおり、構文の確認は S1 で解消、として閉じる
 
@@ -79,7 +82,7 @@ None (検査の段を 1 つ足し、guard の中の判定を変えないコー�
 
 1. S1(implementer): `verify.local.sh` の段。AC1
 2. S2(implementer): コメントの `SQ`・`DQ`。AC2、AC6
-3. S3(implementer): `read_body` の関数、2 つの規則と一覧と `EXEC_SEEN` を消す、コメント。AC3、AC4、AC5、AC6
+3. S3(implementer): `read_body` の関数、2 つの規則と一覧と `EXEC_SEEN` を消す、コメント、テストの不変条件の検査と `exec` の行。AC3、AC4、AC5、AC5b、AC6
 4. S4(inline、docs だけ): tech-debt。AC7
 
 ## Verify plan
@@ -91,7 +94,7 @@ None (検査の段を 1 つ足し、guard の中の判定を変えないコー�
 
 ## Test plan
 
-- Unit tests: テストの期待値は変えない。行も足さない(AC5 の 3 つの形はすでにテストにある)
+- Unit tests: 今のテストの期待値は変えない。不変条件の検査と、B 節の `exec >run.sh; echo 'sudo ls'` の行を足す(AC5b)
 - Integration tests: `./scripts/run-test.sh`、`./scripts/run-verify.sh`
 - Regression tests: base と分割後の判定の比較(PR #214 の test で使った入力の集まり、991 件の payload)を、base の a0094fe5 とこの PR の guard で取り直す。mawk と gawk でもテストを回す
 - Edge cases: 予約語で始まるコマンド(`if`、`for`、`{ … }`、`function`)、`exec` のリダイレクト(`exec >log`、`exec 3>f`)、`! exec`、`env exec`、行末のバックスラッシュが偶数・奇数の行が続くヒアドキュメントの本文(`read_body` の 2 つの道)
@@ -99,7 +102,7 @@ None (検査の段を 1 つ足し、guard の中の判定を変えないコー�
 
 ## Risks and mitigations
 
-- 規則を消したあとで、誰かが DATACMD に予約語や包みを足すと、その場面のデータ区間が残り、見張りの一致が無視される。DATACMD の一覧の上に入れてはいけない名前を書き、AC5 の 3 つの形のテストがその変更で赤になることを確かめる
+- 規則を消したあとで、誰かが DATACMD に予約語や包みを足すと、その場面のデータ区間が残り、見張りの一致が無視される。テストの不変条件の検査がその変更で赤になり、DATACMD の一覧の上のコメントにも書く(AC5b)。不変条件の検査が読む文字列の形(`split("…", datacmd_list, " ")`)が変わると検査が読めなくなるので、読めないときは検査を FAIL にする
 - `read_body` の関数化で、境界(本文の最後の行に改行がない、`le > N`)の扱いがずれると、ヒアドキュメントの終わりの判定が変わる。ループの中身は変えず、範囲の始まりと終わりだけを引数にする。テストと判定の比較で確かめる
 - コメントの `SQ` を戻すとき、コードの行の `SQ`(変数)を誤って変えると判定が変わる。S2 の差分がコメントの行だけであることを確かめる
 
