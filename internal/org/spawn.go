@@ -250,6 +250,10 @@ type SpawnParams struct {
 	Role   string
 	Driver string
 	Model  string
+	// Cwd is the seat's working directory. Spawn makes a relative one
+	// absolute against the caller's working directory before herdr, agmsg or
+	// the manifest see it (checkSpawnInput), so `--cwd .` means the directory
+	// the command runs in, not the herdr server's.
 	Cwd    string
 	Prompt string
 	// Scope is a free-text description of what this seat is allowed to
@@ -355,7 +359,9 @@ type SpawnResult struct {
 //     normalized by NormalizeReservePaths, and Feature: only with Reserve,
 //     fields checked by validateFeatureBinding): pure functions of the request,
 //     run before the manifest is read, each a plain rejection with no
-//     manifest event and no receipt. They run in dry-run mode too.
+//     manifest event and no receipt. They run in dry-run mode too. A
+//     non-empty Cwd is resolved against the caller's working directory at
+//     the same point.
 //  1. Idempotent early return: an already-spawned seat returns the existing
 //     seat with no config-dependent validation attempted at all (so an
 //     at-cap org can never reject a respawn-of-active-seat retry, a no-op
@@ -986,11 +992,14 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 }
 
 // checkSpawnInput runs Spawn's input-only checks (step 0 of its doc comment)
-// on p and returns p with Reserve normalized and Feature pointing at a copy
-// with Worktree cleaned. They are pure functions of the request, so every
-// error is a plain rejection: Spawn returns it with no manifest event and no
-// receipt, in dry-run and real mode alike. StartFeature (feature.go) runs it
-// too, before it makes a worktree.
+// on p and returns p with Reserve normalized, Feature pointing at a copy
+// with Worktree cleaned, and a non-empty Cwd resolved against the caller's
+// working directory (mustAbs, statedir.go). The checks are pure functions of
+// the request, so every error is a plain rejection: Spawn returns it with no
+// manifest event and no receipt, in dry-run and real mode alike. Resolving
+// Cwd reads the process's working directory but never refuses a spawn.
+// StartFeature (feature.go) runs it too, before it makes a worktree; its Cwd
+// is already absolute.
 func checkSpawnInput(p SpawnParams) (SpawnParams, error) {
 	// Identifier shape validation runs first, before any manifest read or
 	// write and before any path is derived from p.OrgID/p.SeatID (see
@@ -1065,6 +1074,14 @@ func checkSpawnInput(p SpawnParams) (SpawnParams, error) {
 		feature := *p.Feature
 		feature.Worktree = filepath.Clean(feature.Worktree)
 		p.Feature = &feature
+	}
+	// A relative Cwd is made absolute here, against the caller's working
+	// directory, before herdr, agmsg or the manifest see it: herdr would
+	// resolve it against its server's own cwd, and watch runs `git status`
+	// in the recorded worktree from wherever watch runs. An absolute Cwd is
+	// only cleaned, and an empty one is left empty.
+	if p.Cwd != "" {
+		p.Cwd = mustAbs(p.Cwd)
 	}
 	return p, nil
 }
