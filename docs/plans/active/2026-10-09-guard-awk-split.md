@@ -89,7 +89,7 @@ None (1 つのフックの中身を 3 つのファイルに移すだけで、フ
 - [x] AC6: root と `templates/base/` の写し(guard の 4 つ、`check-template.sh`)がバイト単位で同じ(`./scripts/check-sync.sh`)。`./scripts/check-template.sh` が通り、`.awk` を 1 つ消した写しの木では `Missing required file` で失敗する
 - [x] AC7: `ralph init` で作った新しいプロジェクトと、base の ralph で作ってから分割後の ralph で `ralph upgrade` したプロジェクトの両方に、3 つの `.awk` があり、そこで動く guard が `sudo ls` を deny、`ls` を none、`git commit --no-verify -m x` を deny にする(最後の形は旧版の 4 規則の fallback では none なので、awk の経路が動いていることが分かる)
 - [x] AC8: S3 の項目のコメントが直っている(tech-debt の (e) の文面と照らす)。S2 と S3 のコミットで、awk のプログラムのコメント以外の行が変わっていない(`git diff` でコメントの行だけ)
-- [ ] AC9: `./scripts/run-verify.sh` が rc 0。`docs/tech-debt/README.md` の guard の限界の行で、(d) と、(e) のうち S2・S3 で直した項目が解消済みになり、コードを変える項目だけが残る
+- [x] AC9: `./scripts/run-verify.sh` が rc 0。`docs/tech-debt/README.md` の guard の限界の行で、(d) と、(e) のうち S2・S3 で直した項目が解消済みになり、コードを変える項目だけが残る
 
 ## Implementation outline
 
