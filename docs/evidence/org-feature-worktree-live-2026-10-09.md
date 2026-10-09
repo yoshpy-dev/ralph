@@ -47,6 +47,7 @@ $ ralph org start --plan .harness/state/org/splits/s5.md --feature hello --drive
 spawned seat "leader" (org_id=hello driver=claude model=sonnet pane_id=w3:p2 dry_run=false)
 worktree: /private/tmp/rs5/repo/.claude/worktrees/org-hello
 branch: docs/hello
+hint: ralph org status --org-id hello ; attach with herdr to observe the leader pane
 ```
 
 `ralph org status --org-id hello`(3 席がそろったとき):

@@ -41,7 +41,7 @@ func newOrgCmd() *cobra.Command {
 			"absent or stopped.",
 	}
 
-	cmd.PersistentFlags().StringVar(&orgID, "org-id", "", "org execution namespace (required, except for stop --all and disband --all; start --plan defaults it to the feature's slug)")
+	cmd.PersistentFlags().StringVar(&orgID, "org-id", "", "org execution namespace (required, except for stop --all and disband --all; start --plan defaults it to the feature's slug, and with --plan it is at most 20 characters)")
 	cmd.PersistentFlags().StringVar(&stateDir, "state-dir", "", "org manifest/receipts state directory (default: resolved by org.ResolveOrgStateDir -- env RALPH_ORG_STATE_DIR, else the main worktree's .harness/state/org (shared by its linked worktrees), else the enclosing git toplevel's .harness/state/org, else cwd's .harness/state/org)")
 	cmd.PersistentFlags().StringVar(&configPath, "config", "", "path to ralph.toml (default: ./ralph.toml if present, else built-in defaults; for where spawn and start read the org-wide limits, see ralph org spawn --help)")
 
@@ -458,7 +458,7 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	cmd.Flags().StringVar(&role, "role", "", "seat role (required)")
 	cmd.Flags().StringVar(&driverName, "driver", "", "driver CLI: claude|codex (required)")
 	cmd.Flags().StringVar(&model, "model", "", "model name or alias (default: first [org].model_pool entry permitted for the role on --driver, with a warning)")
-	cmd.Flags().StringVar(&cwd, "cwd", "", "working directory for the new seat (required)")
+	cmd.Flags().StringVar(&cwd, "cwd", "", "working directory for the new seat (required); a relative path is made absolute from the directory this command runs in")
 	cmd.Flags().StringVar(&prompt, "prompt", "", "optional initial prompt passed to the agent")
 	cmd.Flags().StringVar(&scope, "scope", "", "optional scope description (recorded on the spawned event; substituted into --role templates as {{SCOPE}})")
 	cmd.Flags().StringArrayVar(&reserve, "reserve", nil, orgReserveFlagUsage+"; only the leader seat (--id leader) takes it")
@@ -553,7 +553,9 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"the digest `scripts/plan-visual.sh digest <file>` prints on its\n" +
 			"`- Approved: <date> sha256:<digest>` line; a plan that changed after\n" +
 			"its approval is refused. The org_id is the feature's slug unless\n" +
-			"--org-id is given. From the main worktree, which must be a clean\n" +
+			"--org-id is given; it is at most 20 characters, so that the leader can\n" +
+			"spawn its \"implementer\" seat within herdr's 32-character agent name\n" +
+			"<org_id>_<seat_id>. From the main worktree, which must be a clean\n" +
 			"checkout of the default branch, scripts/ralph-worktree.sh makes the\n" +
 			"worktree .claude/worktrees/org-<org_id> on the branch <type>/<slug>,\n" +
 			"and the leader runs there. Its reservation (the feature's `- Reserve:`\n" +
@@ -626,13 +628,13 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 
 	cmd.Flags().StringVar(&driverName, "driver", "claude", "driver CLI the leader seat runs as: claude|codex")
 	cmd.Flags().StringVar(&model, "model", "", "model name or alias (default: first [org].model_pool entry permitted for the role on --driver, with a warning)")
-	cmd.Flags().StringVar(&cwd, "cwd", "", "working directory for the leader seat (required without --plan)")
+	cmd.Flags().StringVar(&cwd, "cwd", "", "working directory for the leader seat (required without --plan); a relative path is made absolute from the directory this command runs in")
 	cmd.Flags().StringVar(&scope, "scope", "", "optional scope description, as for ralph org spawn --scope")
 	cmd.Flags().StringArrayVar(&reserve, "reserve", nil, orgReserveFlagUsage)
 	cmd.Flags().IntVar(&timeoutMS, "timeout-ms", 60000, "per-step herdr timeout in milliseconds")
 	cmd.Flags().BoolVar(&allowUnscoped, "allow-unscoped", false, "explicitly bypass the autonomous-mode --scope requirement")
 	cmd.Flags().StringVar(&plan, "plan", "", "approved split plan, a file <id>.md in <state dir>/splits/, to start one feature of; "+
-		"needs --feature and replaces the task argument, --cwd, --scope and --reserve")
+		"needs --feature and replaces the task argument, --cwd, --scope and --reserve; --allow-unscoped is refused with it")
 	cmd.Flags().StringVar(&feature, "feature", "", "slug of the split plan feature (its ### <slug> heading) the org is started for; needs --plan")
 
 	return cmd
