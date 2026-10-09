@@ -2,9 +2,9 @@
 
 - Date: 2026-10-09
 - Plan: docs/plans/active/2026-10-09-org-feature-worktree.md(承認済み、digest 56e435bfa976)
-- Reviewer: reviewer subagent (Claude)、パイプライン 1 回目(cycle 1、上限 2)
+- Reviewer: reviewer subagent (Claude)、パイプライン 1 回目(cycle 1、上限 2)。初回は 2a544af9 の時点、再実行は 8aae7ce2・2c1bb13b のあと(cross-review の前の直しなので cycle は増えない)
 - Scope: diff の品質だけ。`git diff 765da6bd...HEAD`(9 コミット、27 ファイル、+6040/-367)。テスト・静的解析・仕様適合・文書の整合の検査は /test・/verify・/sync-docs の担当で、ここでは行っていない。ただし依頼された「雛形と /org skill の文言が、コードのしていることと合っているか」は、文言の根拠をコードで確かめた
-- 番号の付け方: この回の finding は M1〜M2(MEDIUM)、L1〜L5(LOW)。/verify・/test・tech-debt が番号で指す場合は、この報告の番号を使う。報告を上書きしても番号は付け替えない
+- 番号の付け方: 初回の finding は M1〜M2(MEDIUM)、L1〜L5(LOW)、再実行で足した finding は N1〜N3(LOW)。/verify・/test・tech-debt が番号で指す場合は、この報告の番号を使う。報告を上書きしても番号は付け替えない
 
 ## Evidence reviewed
 
@@ -25,7 +25,7 @@
 5. スクリプトの呼び出し(`runWorktreeScript`): 引数は argv で渡り(shell を通さない)、`cmd.Dir` は main worktree のルート、stderr は取り込んで終了コードと一緒にエラーに入れる。スクリプトがないときは stat で先に止め、`errors.Is` で案内の文を分けている。`git_common_dir` は絶対パスを返すので、`Lookup` が読む記録のパスも cwd に依存しない
 6. 雛形と skill の文言: 機構の挙動と合っていない点が 2 つある(M1、M2)。細かい食い違いは L3
 
-## Findings
+## Findings(初回、2a544af9 の時点。現況は「再実行」の節)
 
 <!-- Area recommended values: naming, readability, unnecessary-change, typo,
      null-safety, debug-code, secrets, exception-handling, security, maintainability -->
@@ -69,11 +69,45 @@
 
 ## /sync-docs に渡すもの
 
-- L2 の台帳の行(行 C2-1・C2-3、T2-1・T2-2 の関数名、F-2・F-6 のトリガー)の更新
+- L2 の台帳の行の更新(再実行後の状態: C2-1 は 8aae7ce2 で直ったので、行の (a) を直した旨にする。C2-3 と T2-1・T2-2 の `if !seat.Active` は `idempotentRespawnDecision` に移った。F-2・F-6 のトリガーは満たされたまま)
 - 上の 4 件の新しい行
-- M2 を直した場合、skill の 4 面の再生成(`scripts/sync-skills.sh`)と、README の org の節に director の言及がないことの確認(今の README にはない)
+- 再実行で M2 は直った。README と `templates/base/` に director の言及がないことは確認済み
+- N3: 計画の進捗に 8aae7ce2 の 1 行(20 文字の上限、ensure の失敗ごとの案内、status の `incomplete`)
+- L5(`StartFeatureResult.Split`、`ResolveSplitPlanPath` の id、`dependsLine`、`HerdrClient` の comment の幅、`EnsureWorktree` の名前)のうち直すもの
+
+## 再実行(8aae7ce2・2c1bb13b のあと)
+
+対象は `git diff 2a544af9..HEAD`(2 コミット、15 ファイル、+452/-157)。`git log --format='%h parent=%p'` で 2a544af9 → 8aae7ce2 → 2c1bb13b の一直線を確かめた。`git diff --check` は空、追加行に U+FFFD、デバッグ出力、TODO はなく、コミットメッセージに帰属の行はない。skill の 4 面は `cmp` で同一。`grep -n director .claude/skills/org/SKILL.md` は 0 件。テストは実行していない。読んだ追加テストは `TestStartFeature_EnsureFailureRefused`、`TestEnsureFailureMessages_InWorktreeScript`、`TestStartFeature_OrgIDAtTheLengthLimit`、`TestOrgStatus_IncompleteFeatureBinding`、`TestRenderRolePrompt_Leader_FeatureOrgProcedure` の追加分、`split_test.go` の 2 ケース。
+
+### 初回の指摘の現況
+
+| ID | 現況 | 確かめたこと |
+| --- | --- | --- |
+| M1 | 直った | `maxFeatureOrgIDLen = maxHerdrAgentNameLen - 1 - len(implementerSeatID)`(20、定数式)を `newSplitFeatureDraft`(slug)と `readStartFeature`(`--org-id` を含む org_id)の両方で検査し、どちらも副作用の前に拒否する。エラー文は同じ `featureOrgIDLimit()` で上限の理由(32 文字の agent 名と `implementer`)を言う。leader の雛形の手順 2 は `--id` を `implementer` と `reviewer` に決め、理由を添える。skill は slug と `--org-id` の上限を 20 文字に直し、拒否の一覧にも足した。境界は 20 文字(通る、leader が `implementer` を spawn できるところまで)と 21 文字(拒否)をテストが固定する(`TestStartFeature_OrgIDAtTheLengthLimit`、`TestLoadSplitPlan_Fields`、`_Rejects`) |
+| M2 | 直った | skill の 4 面から director の節と 3 か所の言及を外した。残した結びつきの事実(結びつきのない走っている org への `start --plan` は拒否)は、コードの挙動(`reservationDecision`)と合っている。承認の節は「分割計画を承認するのは人」で始まる。README、AGENTS.md、`templates/base/`、`internal/` に director の言及はない(`grep -rnw director` は 0 件) |
+| L1 | 直った | `ensureFailureErr` が、`ensure` の失敗を文言で分ける。clean な default branch を求める失敗(`must start from clean default branch`、`has uncommitted changes`)だけに「main を clean にして打ち直す」を付け、状態の衝突は `cleanup` か別の `--org-id`、記録のないディレクトリは削除か別の `--org-id`、ブランチの衝突は名前の変更か削除(`--org-id` を変えても同じブランチと明記)を案内する。`.codex/config.toml` の書き換え、jq なし、default branch なしは、スクリプトの文のまま返す。照合する 6 つの文字列は定数で、`TestEnsureFailureMessages_InWorktreeScript` がスクリプトの本文にまだあることを見る。本物のスクリプトで、手で作ったブランチに当たる実行も足された。`.codex/config.toml` の文言(`ensureCodexRewriteMsg`)を `has uncommitted changes` より先に判定する順序も正しい |
+| L2 | 一部直った | 書き換えた `idempotentRespawn` の doc と `Spawn` の手順 1 から、2 つの「decided first」が消え、「decided before the seat is returned」「max_orgs is decided before the reservation」になった(台帳の行 C2-1 の提案どおり)。`grep -n 'decided first' internal/org/*.go` は 0 件。台帳の行(C2-1 を直した旨、C2-3・T2-1・T2-2 の `if !seat.Active` が `idempotentRespawnDecision` に移った点、F-2・F-6 のトリガー)は未更新で、/sync-docs に回す |
+| L3 | 直った(N2 が残る) | 冒頭が「機能のコードと文書の変更は予約したパスの中に収める。手順 1・4・5 の書き込みは予約の外でよい」になった。手順 5 は「この節の 8」と書き、折り返しも直った |
+| L4 | 直った | `FeatureBinding.Complete()` を公開し、status の行の末尾に `(incomplete record)`、`--json` の `feature` に `"incomplete": true` を足した。完全な結びつきの JSON は従来の 5 キーのまま(`omitempty`)。`status` の help と skill の 2 か所(動詞の表、予約の節)に書いてあり、「そのような org では disband まで予約を渡す spawn と start がすべて拒否される」は `reservationDecision` の挙動と合う。3 通りの壊れ方のテスト(`TestOrgStatus_IncompleteFeatureBinding`)がある |
+| L5 | 残る(依頼どおり /sync-docs へ) | 変更なし |
+
+### 新しい指摘
+
+| ID | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| N1 | LOW | maintainability | 雛形のテストが、折り返しの位置を含む文字列を固定する。雛形の文を折り直すと、意味が変わらなくても落ちる。初回のテストは 1 行に収まる語句だけを見ていた | `internal/org/prompts_test.go` の `TestRenderRolePrompt_Leader_FeatureOrgProcedure`: `"手順 1 の\n機能の計画、4 の report、5 の計画の移動は予約の外に書きますが"`、`"`--id` は `implementer` と\n   `reviewer` にする"`。同じファイルの既存の固定(`markdownItem` が折り返しを 1 項目にまとめる)は改行を含まない | 改行をまたぐ語句は、`strings.Join(strings.Fields(...), " ")` で空白を 1 つにしてから比べるか、1 行に収まる語句(`implementer` と `reviewer` にする)だけを見る |
+| N2 | LOW | readability | 冒頭の例外は leader 自身の手順 1・4・5 の書き込みだけを挙げる。実機の記録では reviewer が `docs/reports/` に自分の report を書いており、これも「機能のコードと文書」の外にある。座席の役割プロンプトは別にあるので害は小さい | `internal/org/prompts/leader.md` 「機能ごとの org」の冒頭。`docs/evidence/org-feature-worktree-live-2026-10-09.md` の Run 3(reviewer の self-review report) | 「機能の計画・report・計画の移動は予約の対象外」と手順の番号によらずに書く。直さなくても動きは変わらない |
+| N3 | LOW | maintainability | 8aae7ce2 の計画からのずれが、計画の進捗に記録されていない(slug と `--org-id` の 20 文字の上限、ensure の失敗ごとの案内、status の `incomplete`)。計画は /pr で archive されるので、承認済みの Scope の文(「ensure の失敗は main を clean にして打ち直す案内を添える」)だけが残る。`ralph org start --help` と `--org-id` の usage は 20 文字の上限に触れていない(エラー文と skill には書いてある) | `docs/plans/active/2026-10-09-org-feature-worktree.md` の Progress checklist(S1〜S5 の記録のみ)。`internal/cli/org.go` の `newOrgStartCmd` の Long と `--org-id` の説明 | 進捗に 1 行足す(`## Progress checklist` は digest の外なので承認は崩れない)。help は、`--plan` の説明に「org_id は 20 文字まで」と 1 文足すのが最小 |
+
+### 直しで新しく入った問題の確認
+
+- ensure の失敗の分け方: 照合は部分文字列で、スクリプトの文言が変わったときは「何も足さない」側(`default` が err をそのまま返す)に倒れる。誤った案内を出す方向には倒れない。ensure 失敗のうち、`git worktree add` 自体の失敗(スクリプトが `set -e` で落とす)も `default` で、スクリプトの出力と終了コードだけが返る
+- 20 文字の定数: `implementerSeatID` と leader の雛形の `--id implementer` は別々に書かれているが、雛形の文は `TestRenderRolePrompt_Leader_FeatureOrgProcedure` が固定し、テストのコメントが `maxFeatureOrgIDLen` との結びつきを言う。定数だけを変えるとテストが落ちる向きは守られている。雛形の `--id` を変えたときに定数が追いつく向きは、雛形の文の固定が間接的に守る
+- `--org-id` の上限は `start --plan` だけで、`ralph org spawn`・`start <task>` の org_id は従来どおり 30 文字まで。skill は「機能ごとの org」の節に限った書き方になっており、食い違いはない
+- skill から director を外したあとの文: 承認の節、2 経路の (A)(B)、「機能ごとの org」の導入のどれも、前後の文とつながっている。「分割計画の機能に結びつくのは `start --plan` で立てた org だけ」という追加文は、`reservationDecision` の挙動と合う
+- `FeatureBinding.Complete` の公開: `String()`、`sameFeature`、CLI から使われ、doc は「ActiveFeature が読めた分だけ返し、status が使う」と理由を書いている。`complete` の旧名は残っていない(2c1bb13b の説明どおり、feature.go の中継も外れた)
 
 ## Recommendation
 
-- Merge: 可(条件付き)。CRITICAL と HIGH はない。MEDIUM は 2 件(M1、M2)、LOW は 5 件(L1〜L5)。MEDIUM の 2 件は挙動の誤りではなく、出荷する文書が機構の挙動と合わないことと、slug の長さが別の上限に先に当たることで、cycle 2 で直せる。先読みの同一性、結びつきの Details の読み書き、補償の写しには、直すべき欠陥は見つからなかった
-- Follow-ups: cycle 2 で M1(検査を足すか上限を 20 にして skill を直す)、M2(skill から director を外す)、L1(ensure の案内を条件付きにする)、L2(`idempotentRespawn` の doc の 2 語と台帳の関数名)、L3(雛形の冒頭の文)を直す。L4、L5 は余裕があれば。M1 を検査で直すなら、境界の値(20・21・25・26 文字)のテストを `/test` に頼む。M2 を直したあと、skill の 4 面の `cmp` を再確認する。計画の進捗の「Review artifact created」はまだ未チェック
+- Merge: 可。再実行後の finding は CRITICAL 0、HIGH 0、MEDIUM 0、LOW 4 件(L5、N1、N2、N3)。初回の MEDIUM 2 件(M1、M2)と LOW の L1・L3・L4 は直り、L2 は doc の部分が直った(台帳の行の更新が残る)。直しで入った問題は、LOW の N1〜N3 のほかに見つからなかった。先読みの同一性、結びつきの Details の読み書き、補償の写しには、初回から直すべき欠陥はない(初回の判定は「可(条件付き)」で、条件は M1・M2 の修正だった)
+- Follow-ups: この先は /verify に進んでよい。L5・N1・N2・N3 は挙動を変えない。cross-review の fix の機会があれば N1(テストの折り返しへの依存)と N3 の進捗の 1 行を拾う。直さずに最後の回を終える場合は、その回の報告で 1 行にまとめて台帳へ送る。/sync-docs に渡すもの: 台帳の行の更新(L2 の残り: C2-1 は直った、C2-3・T2-1・T2-2 の関数名、F-2・F-6)、計画の進捗メモにある 4 件の新しい行、L5 のどれか、N3 の進捗の 1 行。`/test` には、M1 の境界(20・21 文字)と ensure の失敗ごとの案内が、実際のスクリプトの文で出ることを頼む(`TestEnsureFailureMessages_InWorktreeScript` はスクリプトの文字列の存在だけを見る)。計画の進捗の「Review artifact created」は未チェックのまま
