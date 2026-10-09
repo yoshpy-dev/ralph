@@ -2,10 +2,10 @@
 
 - Date: 2026-10-09(JST。実行は UTC の 11:34〜12:14)
 - Plan: docs/plans/active/2026-10-09-org-feature-worktree.md(承認済み、digest 56e435bfa976)
-- Tester: tester subagent (Claude Opus 5.5)、パイプライン 1 回目(`cycle-count.json` は 1、上限 2)
+- Tester: tester subagent (Claude Opus 5.5)、パイプライン 1 回目(`cycle-count.json` は 1、上限 2)。2 回目(cycle 2、上限の回)は 2026-10-10 に HEAD 9a2dc5ef で行い、末尾の「Cycle 2」の節に書いた。下の Scope から Test gaps までは cycle 1 の記録
 - Scope: HEAD 421719f7(base origin/main 765da6bd)。behavioral test だけを実行した(静的解析は /verify の担当)。重点は 3 つ。self-review が実行での確認を求めた 2 点(M1 の 20 文字と 21 文字の境界、ensure の失敗の案内を本物のスクリプトの文から選ぶこと)、計画の Test plan の edge case にテストがあるか、3 段目の予約と補償と `start <task>` が壊れていないか
 - Evidence: `docs/evidence/test-2026-10-09-org-feature-worktree.log`(`docs/evidence/*.log` は gitignore の対象なので commit しない)。`run-test.sh` 自身のログは `docs/evidence/verify-2026-10-09-113451.log`
-- 足したテスト: `internal/org/feature_test.go` に 2 本、`internal/org/split_test.go` に 1 本(テストのファイルだけ、+122 行)。理由は「依頼された 2 点」と「Edge cases」の節
+- 足したテスト: `internal/org/feature_test.go` に 2 本、`internal/org/split_test.go` に 1 本(テストのファイルだけ、+122 行)。理由は「依頼された 2 点」と「Edge cases」の節。cycle 2 では `TestLoadSplitPlan_CodeFences` に 1 ケースを足した(「Cycle 2」の節の Mutation)
 
 ## Test execution
 
@@ -137,9 +137,150 @@ verify の Coverage gaps にあった「AC9 の default branch でない場合�
 - T-6: `StartFeature` の防御の枝(leader の入力の検査の失敗、台帳の読み込みの失敗)と、`scriptFeatureWorktrees` の出力が空・JSON でない・git が失敗する枝は通っていない(Coverage の表)
 - T-7: 実機の AC14 は打ち直していない。push と `gh pr create` が通る場合と codex の leader は未確認(計画の Non-goals、verify と同じ)
 
+## Cycle 2(d49bbc34・07d38e6d・9c1d447f のあと)
+
+- 実行: 2026-10-10(JST 01:55〜02:15、UTC 16:55〜17:15)。HEAD 9a2dc5ef、パイプライン 2 回目(`cycle-count.json` は 2、上限 2)
+- 対象: `git diff 183cb190 HEAD` のコードとテスト。cross-review の ACTION_REQUIRED の 2 件を直した差分で、leader の task の `- 台帳:` の行(`feature.go`)、分割計画のコードフェンス(`split.go`)、`--state-dir` か env で main の台帳を指したときの全体の上限の読み元(`statedir.go` の `LedgerMainWorktreeRoot`、`internal/cli/org.go`)、その help の文。shell のテストとスクリプトは cycle 1 から変わっていない(`git diff --stat 421719f7 HEAD -- tests/ scripts/` は空)
+- Evidence: `docs/evidence/test-2026-10-10-org-feature-worktree-cycle2.log`(commit しない)。`run-test.sh` 自身のログは `docs/evidence/verify-2026-10-09-165543.log`
+- 足したテスト: `internal/org/split_test.go` の `TestLoadSplitPlan_CodeFences` に 1 ケース(テストのファイルだけ、+6 行とコメントの 1 行)。理由は下の Mutation の F09・F21
+- 負荷: load average は 6〜9 だった(cycle 1 は 90〜110)
+
+### Test execution(cycle 2)
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `./scripts/run-test.sh`(HEAD、変更言語の scope) | shell 40 本(PASS の行 3,807)、Go 8 パッケージ | すべて | 0 | shell 1(cycle 1 と同じ git 2.41 の件) | 9 分 9 秒、rc 0 |
+| `go test ./internal/org/ ./internal/cli/ -count=1 -coverprofile -v`(HEAD) | top-level 962、subtest 1,079 | すべて | 0 | 0 | 1 分 28 秒(`internal/org` 19.2 s、`internal/cli` 86.0 s)、rc 0 |
+| 一時の probe 3 本(`go test -overlay` で `internal/cli` に足した。worktree には書いていない) | top-level 3、subtest 16 | すべて | 0 | 0 | 16.1 s |
+| mutation(`go test -overlay`、worktree のファイルは書き換えていない) | 33 件 | HEAD のテストで red 31 件 | 生き残り 2 件(F09、F21)。ケースを足して 2 件とも red | - | 1 件 17〜22 s |
+| ケースを足したあとの `go test ./internal/org/ -count=1 -coverprofile` | 1 パッケージ | 1 | 0 | 0 | 17.0 s |
+| `go test -race -count=1 ./internal/org/...`(ケースを足したあと) | 3 パッケージ | 3 | 0 | 0 | 22 s |
+| cycle 2 のテストを `internal/org` で `-count=10`(ケースを足したあと) | top-level 160、subtest 2,090 | すべて | 0 | 0 | 17.2 s |
+| 同じく `internal/cli` で `-count=5` | top-level 20、subtest 55 | すべて | 0 | 0 | 31.7 s |
+
+- shell の PASS の行は、`PASS: 29` のような集計行を除いて数えた。cycle 1 の `run-test.sh` のログ(`verify-2026-10-09-113451.log`)を同じ方法で数えても 3,807 になる。cycle 1 の報告にある 3,797 との差は数え方の違いで、テストの増減ではない
+- `run-test.sh` の中の `go test ./...` が実際に流したのは `internal/org` だけで(17.6 s)、ほかはキャッシュの結果だった。そのため表の 2 行目で、2 パッケージを `-count=1` で流し直した
+- `-count=10` の正規表現は `TestLoadSplitPlan|TestPlanDigest_MatchesScript|TestFeatureLeaderTask|TestLedgerMainWorktreeRoot|TestStartFeature_StartsLeaderInFeatureWorktree|TestRenderRolePrompt_Leader_FeatureOrgProcedure|TestSplitPlanCheckApproved_CRLF`。`-count=5` は `TestOrgStart_OrgWideLimits_ReadFromMainWorktreeRalphToml|TestOrgSpawnAndStartHelp_OrgWideLimitsSource|TestOrgSpawn_MainWorktreeRalphToml_OnlyOrgWideLimitsTaken|TestOrgStartPlan_RealWorktreeScript`
+
+### Coverage(cycle 2)
+
+- Statement: `internal/org` 93.8%、`internal/cli` 85.5%(どちらも cycle 1 と同じ。2 パッケージを合わせて 88.9%)。ケースを足す前と後で、`internal/org` の関数ごとの値は 1 つも変わらなかった
+- cycle 2 で足した関数と変えた関数は、どれも 100.0%: `parseSplitPlan`、`splitFence.read`、`unclosedErr`、`fenceRun`(`split.go`)、`featureLeaderTask`、`shellQuote`、`startFeatureLeaderParams`(`feature.go`)、`LedgerMainWorktreeRoot`(`statedir.go`)、`withMainWorktreeOrgLimits`、`newOrgSpawnRuntime`(`internal/cli/org.go`)
+- `newOrgSpawnRuntimeAt` は 88.9% で、通らないのは `newOrgRuntimeAt` の失敗の return(`internal/cli/org.go:136`、3 段目からの行)。`StartFeature` は 92.1%、`FeatureRepoRoot` は `internal/org` の profile で 0.0% のままで、どちらも cycle 1 の表と同じ
+
+### 依頼の 4 点の確認
+
+#### (1) `- 台帳:` の行の引用
+
+| 確かめたこと | 方法 | 結果 |
+| --- | --- | --- |
+| `featureLeaderTask` の行の形 | 既存の `TestFeatureLeaderTask`(空白を含むパスと `'` を含むパス) | 通る(`-count=10`) |
+| `--state-dir` の値が sh で 1 語になる | 既存の `TestFeatureLeaderTask_StateDirIsOneShellWord`(5 つの値を `sh -c 'set -- <語>'` に通す) | 通る |
+| spawn した leader のプロンプトに行が入る | 既存の `TestStartFeature_StartsLeaderInFeatureWorktree` | 通る |
+| CLI から最後まで | probe A。`ralph org start --plan --feature a --state-dir <dir>` を本物の `ralph-worktree.sh` で打ち、`<dir>/prompts/a_leader.md` の `- 台帳:` の行を読む。`<dir>` は `plain/state`、`my ledgers/state`、`it's/state`、`a'b c/$HOME/*/"q"` の 4 つ | 4 つとも、行は生のパスで始まり、`--state-dir` の値は `'` を `'\''` にした単一引用符の 1 語。`sh -c 'set -- <語>'` で引数は 1 つ、値は `<dir>` と同じ |
+| leader が行の語をそのまま打った場合 | probe A の続き。HEAD でビルドした `ralph` を `sh -c "<bin> org status --org-id a --state-dir <語>"` で feature worktree から打つ | 4 つとも `feature: demo/a branch feat/a worktree <wt>` が出る。`--state-dir` を付けずに同じ場所から打つと `no seats`(rc 0)で、既定の解決は main worktree の台帳を指し、start の台帳とは別になる。cross-review の 1 件目が書いた台帳の分かれ方を、実行で見た形 |
+
+#### (2) linked worktree からの spawn と全体の上限
+
+- 既存の AC13 の表(`TestOrgStart_OrgWideLimits_ReadFromMainWorktreeRalphToml`)の 7 ケースが通る。07d38e6d で変わったのは 2 ケース(`--state-dir` と env で main の台帳を指す)で、許可から拒否に反転した。cwd の linked worktree の `ralph.toml` に `max_orgs = 99` を置くので、打った場所の設定を読む実装なら許されて落ちる。足した 2 ケース(相対の `--state-dir`、別の台帳を指す `--state-dir`)も通る
+- AC13 の表が打つのは `start` で、leader が打つのは `spawn` である。どちらも `newOrgSpawnRuntime` を通る(`internal/cli/org.go:444` と `:611`)が、`spawn` で `--state-dir` を付けた実行は既存のテストになかったので、probe B で打った。main の `ralph.toml` は上限 1、cwd の linked worktree の `ralph.toml` は `max_orgs = 99` と `max_total_seats = 99`、org-a の leader が動いている状態から、`spawn` を 9 通り打った
+
+| 台帳の指し方 | max_orgs(新しい org-b の seat) | max_total_seats(org-a に seat を足す。leader が implementer を立てる場合) |
+| --- | --- | --- |
+| 絶対パスの `--state-dir`(main の台帳) | 拒否(`max_orgs 1 reached`) | 拒否(`max_total_seats 1 reached`) |
+| 相対パスの `--state-dir`(main の台帳) | 拒否 | 拒否 |
+| `RALPH_ORG_STATE_DIR`(main の台帳) | 拒否 | 拒否 |
+| 指定なし(既定の解決) | 拒否 | (打っていない。既存の `TestOrgSpawn_MainWorktreeRalphToml_OnlyOrgWideLimitsTaken` が main の subdirectory から見る) |
+| 別の台帳を指す `--state-dir`(org-a が動いている) | 許可(cwd の 99) | 許可(cwd の 99) |
+
+- probe B はテストとして残していない。下の mutation で、probe B を red にした変異(L01〜L04、W01)は、どれも AC13 の表でも red になった。probe B だけが見分ける変異はなかった
+
+#### (3) 分割計画のコードフェンス
+
+- 既存のテストが通る: `TestLoadSplitPlan_CodeFences`(HEAD で 14 ケースと、header のフェンスの中の `## Features` で header が終わらないことの確認。この回に 1 ケース足して 15 ケース)、`TestLoadSplitPlan_Rejects` のフェンスの 13 ケース、`TestLoadSplitPlan_FencedBodyIsApproved`、`TestPlanDigest_MatchesScript` の `code fences`(Go の `PlanDigest` とスクリプトの digest が一致)
+- probe C で CLI から通した。分割計画は本物の `scripts/plan-visual.sh digest` の値で承認した
+  - 機能 a の本文に、`## Usage`・`### other`・`- Reserve: x/`・`- Type: docs`・`- Depends on: b` を入れた ```` ```sh ```` のフェンスと、`## Features` を入れた `~~~` のフェンスを置いた。`start --feature a` は通り、leader のプロンプトに本文がフェンスごと、後ろの文まで入る。a の scope は `reserve: internal/a/` のままで、フェンスの中の `- Reserve:` は入らない。フェンスの後ろの機能 b も start できる
+  - 閉じていないフェンスは「split plan <path>: line 15: the code fence ``` is never closed」で拒否される。フェンスの中の `- Branch:` は「line 16: a - Branch: line is not allowed」で拒否される。どちらも worktree はできず、台帳に何も記録しない
+
+#### (4) cycle 1 のテストの回帰
+
+`go test ./internal/org/ ./internal/cli/ -count=1 -v` の結果を名前で数えた。失敗は 0。
+
+| 名前の一部 | top-level | subtest |
+| --- | --- | --- |
+| `TestStartFeature` | 16 | 39 |
+| `TestSpawnPrecheckErr_MatchesSpawn` | 1 | 16 |
+| `RelativeCwd` | 1 | 3 |
+| `EnsureFailure` | 2 | 8 |
+| `TestOrgStartPlan` | 4 | 14 |
+| `CloseDeferredSelf` | 23 | 58 |
+| `ReleasedReservation` | 2 | 13 |
+| `Reserv`(予約の判定と補償を含む) | 41 | 120 |
+| `TestOrgStart_`(`--plan` なしの start) | 15 | 13 |
+
+`git diff 183cb190 HEAD` で消えたテストの関数はなく、足されたのは 5 本(`TestOrgSpawnAndStartHelp_OrgWideLimitsSource`、`TestFeatureLeaderTask_StateDirIsOneShellWord`、`TestLoadSplitPlan_CodeFences`、`TestLoadSplitPlan_FencedBodyIsApproved`、`TestLedgerMainWorktreeRoot`)。期待を変えたのは AC13 の表の 2 ケースの反転だけで、理由は 07d38e6d のメッセージと計画の進捗にある(feature branch の `ralph.toml` で全体の上限を変えさせない)。反転のあとも見分ける力は残っている(W01 が red)。
+
+### Mutation(cycle 2)
+
+`split.go`・`feature.go`・`statedir.go`・`internal/cli/org.go` の写しを scratchpad で 1 か所だけ書き換え、`go test -overlay=<json> -count=1 -vet=off` で流した。`internal/org` の変異は `internal/org` 全体(`-run` なし)、L01〜L06 と W01 は `internal/cli` を AC13 と上限のテストと probe B の正規表現でも流した。
+
+| # | Mutation | Red になったテスト |
+| --- | --- | --- |
+| F01 | 字下げ 4 つでも開く | `CodeFences/4_spaces_is_no_fence` |
+| F02 | バッククォート 2 つでも開く | `CodeFences/two_backticks_is_no_fence` |
+| F03 | タブの字下げでも開く | `CodeFences/a_tab_is_no_fence_indentation` |
+| F04 | 閉じる行の文字を比べない | `Rejects` の 2 件(`~~~` と ```` ``` ```` の取り違え)、`CodeFences` |
+| F05 | 開いた長さより短い行でも閉じる | `Rejects/fence_of_4_backticks_closed_by_3`、`CodeFences` |
+| F06 | 閉じる行の後ろの文字を見ない | `Rejects/fence_closed_by_a_line_with_text_after_it`、`CodeFences/a_fence_line_with_an_info_string_does_not_close` |
+| F07 | 閉じる行の後ろのタブを許さない | `CodeFences/closing_fence_with_spaces_and_tabs_after_it,_then_a_section` |
+| F08 | inline code の判定を外す | `CodeFences/inline_code_is_no_fence` |
+| F09 | inline code の判定をチルダにも当てる(`~~~ a~b` が開かない) | HEAD のテストでは生き残り。足したケースで red |
+| F21 | バッククォートのある info string を、チルダのフェンスでも開かせない | HEAD のテストでは生き残り。足したケースで red |
+| F10 | 閉じていないフェンスを拒否しない | `Rejects` の閉じていないフェンスの 7 ケース |
+| F11 | 開いた行の番号を 1 つずらす | `Rejects` の同じ 7 ケース(エラーの行番号) |
+| F12 | エラー文の開いた run を 3 文字に固定する | `Rejects/fence_of_4_backticks_closed_by_3` |
+| F13 | フェンスの中の `## ` を見出しとして読む | `CodeFences` の 9 ケース、`FencedBodyIsApproved` |
+| F14 | フェンスの行を本文に足さない | `CodeFences` の 8 ケース、`FencedBodyIsApproved` |
+| F15 | 機能の中のフェンスの行をフィールドと見出しとして読む | `CodeFences` の 5 ケース、`FencedBodyIsApproved` |
+| F16 | `\r` を落とす前の行でフェンスを読む | `CodeFences/the_same_with_CRLF_lines` |
+| F17 | フェンスの中では digest が読まない行を拒否しない | `Rejects` のフェンスの中の `- Branch:`・チェック済みの箱・`## Progress checklist` |
+| F18 | フェンスの中では header より後の `- Status:` を拒否しない | `Rejects/status_inside_a_fence_in_a_feature` |
+| F19 | header のフェンスの中の行を header の行として読まない | `Rejects` の header の 2 件(2 つ目の `- Status:` と `- Approved:`) |
+| F20 | 最初の機能より前のフェンスの行をフィールドの検査に回す | `CodeFences/fence_before_the_first_feature` |
+| Q01 | `shellQuote` が `'` をエスケープしない | `FeatureLeaderTask`、`FeatureLeaderTask_StateDirIsOneShellWord` |
+| Q02 | 二重引用符で囲む | 上の 2 本と `StartsLeaderInFeatureWorktree`、`RenderRolePrompt_Leader_FeatureOrgProcedure` |
+| Q03 | `--state-dir` の値を引用しない | Q02 と同じ 4 本 |
+| Q04 | 台帳の代わりに repo の root を渡す | `StartsLeaderInFeatureWorktree` |
+| Q05 | `'` を `\'` にする | `FeatureLeaderTask`、`FeatureLeaderTask_StateDirIsOneShellWord` |
+| L01 | source が `flag` のとき main の root を返さない | `TestLedgerMainWorktreeRoot`、AC13 の `--state-dir` の 2 件、probe B |
+| L02 | source が `env` のとき返さない | `TestLedgerMainWorktreeRoot`、AC13 の env、probe B |
+| L03 | 台帳のパスを比べない(どの `--state-dir` でも main の上限) | `TestLedgerMainWorktreeRoot`、AC13 の別の台帳、probe B |
+| L04 | 台帳でなく main の root と比べる | `TestLedgerMainWorktreeRoot`、AC13 の 3 件、probe B |
+| L05 | `samePath` を文字列の比較にする | `TestLedgerMainWorktreeRoot`(symlink のケース)だけ。CLI のテストは通る |
+| L06 | source が `git-toplevel` と `cwd` でも返す | `TestLedgerMainWorktreeRoot`(否定のケース)だけ。CLI のテストは通る |
+| W01 | `withMainWorktreeOrgLimits` を cycle 1 の `MainWorktreeRoot` に戻す | AC13 の 3 件、probe B |
+
+- HEAD のテストで 33 件のうち 31 件が red になった。生き残った F09 と F21 は同じ規則の穴で、CommonMark ではチルダのフェンスの info string にチルダもバッククォートも書けるし、コードもそう読む(`splitFence.read` は inline code の判定をバッククォートのフェンスだけに当てる)。その規則を固定するケースがなかった。`TestLoadSplitPlan_CodeFences` に「a tilde fence's info string may hold tildes and backticks」を足した。`~~~` の info string に `~` とバッククォートを 1 つずつ含め、フェンスの中に `## Usage` を置くケースである。HEAD では通り、F09・F21 では「line 11: the code fence ~~~ is never closed」で落ちる
+- `internal/org` 全体の実行は 34 回(L01〜L06 を含む 32 件と、ケースを足したあとの F09・F21)。どの回でも、変えた規則と関係のないテストは 1 本も落ちなかった
+
+### Flaky(cycle 2)
+
+- flake は出なかった。cycle 1 で 1 回落ちた `TestRunDoctorFull_StrictFlipsExitCode_DriftedCore` は、2 行目の uncached の実行で通った。`TestRunWatcher_TimeoutIndependentOfSmallInterval` は 2 行目、`-race`、変異の `internal/org` 全体の 34 回(2 つずつ並べて流した)のどれでも落ちなかった。負荷が cycle 1 より低かったので、flake が出なくなったとは言えない
+
+### Test gaps(cycle 2)
+
+- T2-1: claude の leader が `- 台帳:` の行に従ってすべての `ralph org` のコマンドに `--state-dir` を付けるかは、実機で走らせていない(verify の Coverage gaps と同じ)。probe A で確かめたのは、行の語をそのまま打てば sh を通って本物のバイナリが start の台帳を読むところまで
+- T2-2: herdr の pane に start を打った環境の `RALPH_ORG_STATE_DIR` が届くかどうかは試していない(self-review の C2-2 の (c))
+- T2-3: `--plan` なしの `ralph org start <task> --state-dir X` の leader には台帳が渡らない(self-review の C2-6 の (g))。計画の範囲の外で、テストはない
+- T2-4: まだない台帳を、symlink を含む別名のパスで `--state-dir` に渡す場合(`samePath` が文字列の比較になる。self-review の「finding にしないもの」)はテストがない。`TestLedgerMainWorktreeRoot` の symlink のケースは台帳がある状態だけを見る
+- T2-5: 閉じていないフェンスの後ろに digest が読まない行がある場合、どちらのエラーが先に出るかを固定するテストはない(self-review の「finding にしないもの」)
+- T2-6: probe A〜C はテストとして残していない。probe A と C は、既存のテストが固定する 3 つの部品(`featureLeaderTask` と `sh`、`StartFeature` からプロンプトまで、`LoadSplitPlan` とスクリプトの digest の一致)を CLI でつないで打ったもの。probe B は上の (2) のとおり
+- cycle 1 の T-1〜T-6 は変わらない。T-7(実機の AC14)は、d49bbc34 で leader のプロンプトと task の文が変わったあとも打ち直していない
+
 ## Verdict
 
 - Verdict: pass
-- Pass: `run-test.sh` が rc 0(shell 40 本、PASS の行 3,797、FAIL 0、SKIP 1。Go 8 パッケージ)。`internal/org` と `internal/cli` を `-count=1` で流した 2 回目の実行が rc 0。`-race`、`-count=10`、残りの 6 パッケージも通った。依頼の 2 点は、既存のテストと足した 3 本の実行で確かめた。計画の Test plan の edge case 10 件にはどれもテストがある
-- Fail: なし。HEAD の 1 回目の `internal/cli` の 1 件は、この差分の外の doctor のテストの負荷による flake と判断した(単独 5/5、2 回目の全体実行で通過)。原因の特定は推測で、未確認です
-- Blocked: なし。T-1〜T-7 は merge を止めない
+- Pass(cycle 2): `run-test.sh` が rc 0(shell 40 本、PASS の行 3,807、FAIL 0、SKIP 1。Go 8 パッケージ)。`internal/org` と `internal/cli` を `-count=1` で流した実行が rc 0(top-level 962、subtest 1,079)。`-race`、`-count=10` と `-count=5` も通った。依頼の 4 点は、既存のテストと一時の probe 3 本の実行で確かめた。変異 33 件のうち HEAD のテストで生き残った 2 件は、足した 1 ケースで red になった
+- Fail: なし。flake も出なかった
+- Blocked: なし。T2-1〜T2-6 と cycle 1 の T-1〜T-7 は merge を止めない
+- 参考(cycle 1 の判定、HEAD 421719f7): pass。`run-test.sh` が rc 0、`internal/org` と `internal/cli` の 2 回目の `-count=1` が rc 0。HEAD の 1 回目の `internal/cli` の 1 件は、この差分の外の doctor のテストの負荷による flake と判断した(単独 5/5、2 回目の全体実行で通過。原因の特定は推測で、未確認です)

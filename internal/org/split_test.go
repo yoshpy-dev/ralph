@@ -372,7 +372,8 @@ func TestLoadSplitPlan_AcceptsLinesTheDigestReads(t *testing.T) {
 // nothing. A fence closes only with a line of its own character, at least as
 // long as its opening run, with nothing after it but spaces and tabs; at most
 // 3 spaces may precede either fence line, and a backtick run with another
-// backtick after it is inline code.
+// backtick after it is inline code, while a tilde fence's info string may
+// hold tildes and backticks.
 func TestLoadSplitPlan_CodeFences(t *testing.T) {
 	const usage = "Example:\n\n```sh\n## Usage\n### other\n- Reserve: x/\n- Type: docs\n- Depends on: b\n```\n\nafter the fence"
 	b := SplitFeature{Slug: "b", Type: "feat", Reserve: []string{"b/"}}
@@ -395,6 +396,11 @@ func TestLoadSplitPlan_CodeFences(t *testing.T) {
 			name:    "tilde fence",
 			content: minimalSplitPlan("### a\n- Reserve: a/\n~~~ text\n## Usage\n- Reserve: x/\n~~~\n### b\n- Reserve: b/\n"),
 			want:    []SplitFeature{{Slug: "a", Type: "feat", Reserve: []string{"a/"}, Body: "~~~ text\n## Usage\n- Reserve: x/\n~~~"}, b},
+		},
+		{
+			name:    "a tilde fence's info string may hold tildes and backticks",
+			content: minimalSplitPlan("### a\n- Reserve: a/\n~~~ a~b`c\n## Usage\n~~~\n### b\n- Reserve: b/\n"),
+			want:    []SplitFeature{{Slug: "a", Type: "feat", Reserve: []string{"a/"}, Body: "~~~ a~b`c\n## Usage\n~~~"}, b},
 		},
 		{
 			name:    "fence of 4 backticks holds a fence of 3 and closes only at 4 or more",
