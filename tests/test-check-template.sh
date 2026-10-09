@@ -89,8 +89,8 @@ skip() {
   printf '  SKIP: %s\n' "$1"
 }
 
-# The golden required_files list: the 3 non-script entries in their current
-# order, followed by the 22 scripts/ entries, ordered here to match
+# The golden required_files list: the 8 non-script entries in their current
+# order, followed by the 23 scripts/ entries, ordered here to match
 # internal/scaffold/embed_test.go's requiredTemplateScripts as a
 # readability convention only (the Go test compares both as sets, so
 # reordering either list does not by itself fail anything). Update this
@@ -101,6 +101,11 @@ GOLDEN_ENTRIES=(
   "AGENTS.md"
   "CLAUDE.md"
   ".claude/settings.json"
+  ".claude/hooks/pre_bash_guard.sh"
+  ".claude/hooks/lib_json.sh"
+  ".claude/hooks/pre_bash_guard_lex.awk"
+  ".claude/hooks/pre_bash_guard_commands.awk"
+  ".claude/hooks/pre_bash_guard_rules.awk"
   "scripts/run-verify.sh"
   "scripts/run-static-verify.sh"
   "scripts/run-test.sh"
@@ -148,7 +153,7 @@ build_fixture() {
       .claude/settings.json)
         printf '{}\n' > "$dir/$entry"
         ;;
-      scripts/*.sh)
+      scripts/*.sh|.claude/hooks/*.sh)
         printf '#!/bin/sh\n' > "$dir/$entry"
         chmod +x "$dir/$entry"
         ;;

@@ -31,6 +31,11 @@ required_files="
 AGENTS.md
 CLAUDE.md
 .claude/settings.json
+.claude/hooks/pre_bash_guard.sh
+.claude/hooks/lib_json.sh
+.claude/hooks/pre_bash_guard_lex.awk
+.claude/hooks/pre_bash_guard_commands.awk
+.claude/hooks/pre_bash_guard_rules.awk
 scripts/run-verify.sh
 scripts/run-static-verify.sh
 scripts/run-test.sh
