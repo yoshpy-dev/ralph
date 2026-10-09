@@ -285,16 +285,16 @@ function lex_dq(ctx,    val, buf, e, c, c2, subst, piece, xp, subp) {
 # one or a backtick. Both $(...) and the whole ${...} are noted with xnote,
 # so neither is part of the argument data region (a) of a data command: zsh
 # re-evaluates the value of ${(e)...}, which runs a $(...) that the lexer
-# reads as quoted text (${(e):-SQ$(cmd)SQ}, also with the $ escaped by a
+# reads as quoted text (${(e):-'$(cmd)'}, also with the $ escaped by a
 # backslash). LD_SUBST stays 0 for such a ${...}, and only its own span is
 # excluded, so the text around it keeps its data region (echo "${HOME}"
-# SQsudo lsSQ).
+# 'sudo ls').
 # Three more marks describe the $ just read. This function is called only
 # for a $ outside quotes or inside double quotes (from lex_word, lex_dq and
 # lex_brace) and for a $ in an unquoted heredoc body (lex_hd), so they
 # describe a $ the shell reads: a $ inside single quotes, escaped by a
 # backslash, or inside the value of an ANSI-C string never comes here.
-#   LD_ANSI is 1 for $SQ...SQ and $DQ...DQ outside double quotes (ANSI-C
+#   LD_ANSI is 1 for $'...' and $"..." outside double quotes (ANSI-C
 #   and locale quoting, which can spell characters the lexer does not
 #   decode, such as \x2d for -).
 #   LD_EXP is 1 for any other $ that expands: every $ except one followed
@@ -311,9 +311,9 @@ function lex_dq(ctx,    val, buf, e, c, c2, subst, piece, xp, subp) {
 #   $? and the other special parameters, but not $1, which it reads as a
 #   glob, so marking it only drops a data region). zsh evaluates the
 #   subscript, which runs a $(...) written there in single quotes
-#   ($arr[SQ$(cmd)SQ]), while the lexer reads that as quoted text; a
+#   ($arr['$(cmd)']), while the lexer reads that as quoted text; a
 #   subscript opened inside double quotes runs on past the closing quote
-#   ("$arr["SQ$(cmd)SQ"]"), so lex_dq reports its $ too (DQ_SUB). lex_word
+#   ("$arr["'$(cmd)'"]"), so lex_dq reports its $ too (DQ_SUB). lex_word
 #   keeps the span from this $ to the end of its word out of the argument
 #   data region; the subscript is not skipped here, so lex_word still lexes
 #   a $(...) or a backtick inside it.
@@ -485,7 +485,7 @@ function lex_redir(ctx, rs,    c, c2, op, s, k) {
     # syntax error when a space or a tab is inside, as in `echo x`. Two
     # forms are read differently: an ANSI-C quote with an escape other than
     # \n \t \r, which the lexer reads as the character after the backslash
-    # ($SQ\x45SQ is E to bash and zsh, x45 here), and $"...", which the lexer
+    # ($'\x45' is E to bash and zsh, x45 here), and $"...", which the lexer
     # and bash read as the quoted text and zsh and dash as a $ before it.
     # The shell can then end the body on a line before the one the lexer
     # finds, and the lines between are commands. The rule covers every $
@@ -517,7 +517,7 @@ function read_heredocs(ctx,    k) {
 # line equal to the delimiter (after leading tabs for <<-), or to the end
 # of the text. P is left after the delimiter line. At the top level the
 # span of the body is kept (HB0/HB1) for the data regions.
-function read_body(h,    d, dl, b0, ls, le, t, body, joined, bs, q, cmp, p2) {
+function read_body(h,    d, dl, b0, ls, le, t, body, joined, bs, cmp, p2) {
   d = HDL[h]
   dl = length(d)
   b0 = P
@@ -530,18 +530,14 @@ function read_body(h,    d, dl, b0, ls, le, t, body, joined, bs, q, cmp, p2) {
     # backslashes is joined with the next line before the terminator
     # comparison (bash, zsh). A body with such a join gets no data region.
     if (!HQ[h] && le <= N) {
-      bs = 0
-      q = le - 1
-      while (q >= ls && at(q) == BS) { bs++; q-- }
+      bs = trailing_backslashes(ls, le)
       if (bs % 2 == 1) {
         joined = 1
         cmp = text(ls, le - 1)
         p2 = le + 1
         while (1) {
           le = find(p2, "\n")
-          bs = 0
-          q = le - 1
-          while (q >= p2 && at(q) == BS) { bs++; q-- }
+          bs = trailing_backslashes(p2, le)
           if (le <= N && bs % 2 == 1) { cmp = cmp text(p2, le - 1); p2 = le + 1 }
           else { cmp = cmp text(p2, le); break }
         }
@@ -557,6 +553,15 @@ function read_body(h,    d, dl, b0, ls, le, t, body, joined, bs, q, cmp, p2) {
   }
   if (DCTX[HX[h]] && !joined && !HBSNL[h]) { HDZ[h] = 1; HB0[h] = b0; HB1[h] = ls }
   heredoc_done(h, body)
+}
+# trailing_backslashes(a, e): the number of backslashes in a row that end
+# just before position e (at e - 1, e - 2, ...), not reading before
+# position a. read_body uses it on the line from a that ends at e.
+function trailing_backslashes(a, e,    q, cnt) {
+  cnt = 0
+  q = e - 1
+  while (q >= a && at(q) == BS) { cnt++; q-- }
+  return cnt
 }
 # lstrip_tabs(s): s without its leading tabs (for <<- delimiter matching).
 function lstrip_tabs(s,    i) {

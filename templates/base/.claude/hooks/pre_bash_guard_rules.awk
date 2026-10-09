@@ -1,6 +1,6 @@
 # pre_bash_guard_rules.awk holds the "Rule judgement", "The sentinel" and
 # "Main" sections of the awk program of pre_bash_guard.sh; Main has BEGIN
-# (with the command lists NOEXEC, DATACMD and RESW), the action that
+# (with the command lists NOEXEC and DATACMD), the action that
 # collects the input, and END. How awk reads it together with the other two
 # .awk files is in the comment above the awk call in pre_bash_guard.sh.
 
@@ -298,12 +298,12 @@ function msg_attached(ctx, i, pre, commit,    r) {
 # form) is denied for git commit; a message without one is data when its
 # git is the command word. A word with a $ that expands (WEXP, set by
 # lex_dollar for the whole word, so also when quotes split the flag, as in
-# --messageSQSQ=${...}, where msg_attached gives an empty raw) is no data
+# --message''=${...}, where msg_attached gives an empty raw) is no data
 # either: zsh re-evaluates the value of ${(e)...}, and a zsh subscript
-# ($arr[SQ$(cmd)SQ]) runs a $(...) written in single quotes. It is not
+# ($arr['$(cmd)']) runs a $(...) written in single quotes. It is not
 # denied (git commit -m "${msg}" stays allowed); the sentinel decides. A $
 # inside single quotes, escaped by a backslash, or inside an ANSI-C string
-# expands nothing, so SQmention ${HOME}SQ stays data. The recommended
+# expands nothing, so 'mention ${HOME}' stays data. The recommended
 # heredoc form expands nothing either, so it stays data with a ${ in its
 # body.
 function msg_check(ctx, j, raw, commit) {
@@ -402,12 +402,18 @@ BEGIN {
   # and [, whose -v in zsh and bash 5 evaluates a subscript such as
   # arr[$(cmd)], nor stat, whose -A NAME in zsh (the zsh/stat module) does
   # the same with the subscript of NAME.
+  # No reserved word (if, for, case, {, ...) and no wrapper that cmd_pos
+  # steps past (env, command, exec, nohup, time, nice, stdbuf, timeout,
+  # xargs) may be listed here. For a command that starts with a reserved
+  # word, and for an exec with a redirection, the allowlist in end_cmd is
+  # what drops the data regions, because their first word is not in this
+  # list. Some forms meet the ( or ) rule of lex_cmds: a case clause meets
+  # the ) rule as well, by the ) after its pattern, and a subshell meets
+  # only the ( rule, by its opening (. A brace group, and an if, for, while,
+  # until or select with no ( or ) at the top level, meet only the
+  # allowlist. tests/test-pre-bash-guard.sh checks this.
   nx = split("echo printf cat head tail wc cut tr grep egrep fgrep zgrep rg ls diff cd true false which type", datacmd_list, " ")
   for (; nx > 0; nx--) DATACMD[datacmd_list[nx]] = 1
-  # Reserved words in command position, and the brace-group words, that make
-  # a top-level command a compound one with no data region.
-  nx = split("if then elif else fi for while until do done case esac select function { }", resw_list, " ")
-  for (; nx > 0; nx--) RESW[resw_list[nx]] = 1
   SQ = sprintf("%c", 39)
   DQ = "\""
   BS = "\\"
@@ -431,7 +437,7 @@ BEGIN {
   SPECIAL_PARAMS = "@*?!$-"
   RE_NOTNAME = "[^A-Za-z0-9_]"
   CTX = CIDN = PLSER = QN = QBYTES = HN = RLVL = DN = 0
-  MAIN = DATA_OK = CUR_H = J_I = NODATA = EXEC_SEEN = 0
+  MAIN = DATA_OK = CUR_H = J_I = NODATA = 0
   J_NM = ""
 }
 { IN = (NR == 1) ? $0 : IN "\001" $0 }
