@@ -1,7 +1,7 @@
 # guard-msg-param-flag
 
-- Status: Draft
-- Approved: TBD
+- Status: Approved
+- Approved: 2026-10-09 sha256:ebf5a9ac3a15
 - Owner: Claude Code
 - Date: 2026-10-09
 - Related request: PR #211 の後続。ユーザーの依頼「残っているguard の後続の件を修正できますか?それと、前回の一覧の4~5の着手してください。」(2026-10-09)。この plan は guard の判定の 2 件(止めすぎと `rg $x`)を扱う。一覧の 5(guard のファイルの分割)は別の plan と PR で扱う
@@ -119,8 +119,9 @@ None (guard の 1 ファイルとその template の写し、テスト、tech-de
 
 ## Progress checklist
 
-- [ ] Plan reviewed
-- [ ] Plan approved
+- [x] Plan reviewed
+- [x] Plan approved
+  - 2026-10-09: ユーザーが承認ゲートで Approve。Codex plan advisory の HIGH(添字を読み飛ばすと中の置換を読み落とす)と、consult(consult-plan-msgflag)の指摘(`]` まで読むと語の境目を越える、rg に `WS` を足す、`$[…]` を確かめる)を、承認の前に plan に反映した。図解ページは描いていない(Visual review を参照)
 - [x] Branch created
 - [ ] Implementation started
 - [ ] Review artifact created
