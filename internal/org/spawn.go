@@ -266,12 +266,24 @@ type SpawnParams struct {
 	// (NormalizeReservePaths, reserve.go). Only the leader seat
 	// (SeatID == LeaderIdentity) may pass it, and it is optional. Spawn
 	// normalizes it with the input checks and, under the manifest lock,
-	// records it as the org's EventScopeReserved when the org holds no
-	// reservation and no other running org's reservation overlaps it. The
-	// same set again passes, a different set is refused, and the reservation
-	// stays until the org is disbanded, also when the spawn fails later. A
-	// non-empty Reserve satisfies the AC-2b gate like Scope does.
+	// records it with Feature as the org's EventScopeReserved when the org
+	// holds no reservation and no other running org's reservation overlaps it
+	// (reservationDecision, reserve.go). The same set with the same Feature
+	// again passes, a different set or a different Feature is refused, and the
+	// reservation stays until the org is disbanded, also when the spawn fails
+	// later. A non-empty Reserve satisfies the AC-2b gate like Scope does.
 	Reserve []string
+	// Feature is the split plan feature this spawn starts the org for
+	// (FeatureBinding, reserve.go; plan 2026-10-09-org-feature-worktree), set
+	// by `ralph org start --plan`; nil for every other spawn. It is recorded
+	// in the same EventScopeReserved as Reserve, so it requires a non-empty
+	// Reserve (and so the leader seat), and every field must pass
+	// validateFeatureBinding; Spawn cleans Worktree with filepath.Clean. Both
+	// checks are plain rejections before the manifest is read. Under the lock,
+	// an org already bound passes only for the same paths and the same
+	// binding, and an org that is running without a reservation refuses it
+	// (reservationDecision).
+	Feature *FeatureBinding
 	// LeaderDriver is the driver (claude|codex) the org's coordinating "leader"
 	// identity itself runs as -- independent of Driver, which names this
 	// seat's own driver. It is only consulted by ensureLeaderJoined to pick
@@ -331,8 +343,9 @@ type SpawnResult struct {
 // docs/plans/active/2026-08-01-org-runtime-mechanism.md. For a non-dry-run
 // call, the ordering is, in this order:
 //  0. Input-only checks (identifier shape, the joined herdr agent-name
-//     length, RetiredRoleInputErr, and Reserve: leader seat only, paths
-//     normalized by NormalizeReservePaths): pure functions of the request,
+//     length, RetiredRoleInputErr, Reserve: leader seat only, paths
+//     normalized by NormalizeReservePaths, and Feature: only with Reserve,
+//     fields checked by validateFeatureBinding): pure functions of the request,
 //     run before the manifest is read, each a plain rejection with no
 //     manifest event and no receipt. They run in dry-run mode too.
 //  1. Idempotent early return: an already-spawned seat returns the existing
@@ -440,6 +453,24 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 			return SpawnResult{Outcome: SpawnOutcomeRejected, Err: err}
 		}
 		p.Reserve = reserve
+	}
+	// Feature is input as well: it is recorded with the reservation, so it
+	// needs Reserve (which in turn needs the leader seat), and its fields
+	// must fit the record. p.Feature then points at a copy with Worktree
+	// cleaned, so the caller's value is not changed.
+	if p.Feature != nil {
+		if len(p.Reserve) == 0 {
+			return SpawnResult{Outcome: SpawnOutcomeRejected, Err: fmt.Errorf(
+				"org: a split plan feature is recorded with the org's reservation, so seat_id %q cannot be spawned for one without reserve paths",
+				p.SeatID,
+			)}
+		}
+		if err := validateFeatureBinding(*p.Feature); err != nil {
+			return SpawnResult{Outcome: SpawnOutcomeRejected, Err: err}
+		}
+		feature := *p.Feature
+		feature.Worktree = filepath.Clean(feature.Worktree)
+		p.Feature = &feature
 	}
 
 	// resolvedPermMode is a pure function of cfg+role, computed once here so
@@ -1027,9 +1058,10 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 //
 // The capacity check is spawnCapacityErr (max_seats, then the org-wide
 // limits, then the reservation). When it says the reservation is to be
-// recorded, the EventScopeReserved is appended here, before spawn_started,
-// so it is in the manifest before the lock is released and a racing spawn of
-// another org sees it; it stays when the saga fails later.
+// recorded, the EventScopeReserved (with p.Feature's binding when set) is
+// appended here, before spawn_started, so it is in the manifest before the
+// lock is released and a racing spawn of another org sees it; it stays when
+// the saga fails later.
 func checkCapacityAndStart(o *Org, p SpawnParams, req SpawnRequest, events []ManifestEvent) (*SpawnResult, time.Time) {
 	reserve, err := spawnCapacityErr(o.Config, p, req, events)
 	if err != nil {
@@ -1037,7 +1069,7 @@ func checkCapacityAndStart(o *Org, p SpawnParams, req SpawnRequest, events []Man
 		return &r, time.Time{}
 	}
 	if reserve {
-		if err := o.appendEvent(scopeReservedEvent(o.now(), p.OrgID, p.Reserve, "", false)); err != nil {
+		if err := o.appendEvent(scopeReservedEvent(o.now(), p.OrgID, p.reservation(), "", false)); err != nil {
 			r := SpawnResult{Outcome: SpawnOutcomeFailed, Err: fmt.Errorf("org: record %s: %w", EventScopeReserved, err)}
 			return &r, time.Time{}
 		}
@@ -1057,11 +1089,11 @@ func checkCapacityAndStart(o *Org, p SpawnParams, req SpawnRequest, events []Man
 // depends on the manifest, in this order: max_seats of the org
 // (ValidateSpawnCapacity), the org-wide max_orgs and max_total_seats
 // (ValidateOrgWideCapacity, from RunningOrgs and TotalActiveSeats), and,
-// when p.Reserve (already normalized) is set, the reservation
-// (reservationDecision). reserve is true when the reservation is new and the
-// caller must record it. The real path calls this under the manifest lock
-// (checkCapacityAndStart); the dry-run path calls it on its unlocked read of
-// the real events and only predicts.
+// when p.Reserve (already normalized) is set, the reservation with p.Feature's
+// binding (reservationDecision). reserve is true when the reservation is new
+// and the caller must record it. The real path calls this under the manifest
+// lock (checkCapacityAndStart); the dry-run path calls it on its unlocked
+// read of the real events and only predicts.
 func spawnCapacityErr(cfg config.OrgConfig, p SpawnParams, req SpawnRequest, events []ManifestEvent) (reserve bool, err error) {
 	if err := ValidateSpawnCapacity(cfg, req, ActiveSeatCount(events, p.OrgID, RosterOptions{})); err != nil {
 		return false, err
@@ -1072,15 +1104,25 @@ func spawnCapacityErr(cfg config.OrgConfig, p SpawnParams, req SpawnRequest, eve
 	if len(p.Reserve) == 0 {
 		return false, nil
 	}
-	return reservationDecision(events, p.OrgID, p.Reserve)
+	return reservationDecision(events, p.OrgID, p.reservation())
+}
+
+// reservation is the Reservation p asks for: its normalized Reserve paths
+// and its Feature binding (nil for a plain reservation).
+func (p SpawnParams) reservation() Reservation {
+	return Reservation{Paths: p.Reserve, Feature: p.Feature}
 }
 
 // idempotentRespawn is the idempotent return for a spawn of a seat that is
 // already spawned: it returns that seat with no new record, as before,
 // unless p.Reserve is set (only possible for the leader seat). Then the
-// reservation is decided first against the same locked events
-// (reservationDecision): an org without one records it, the same set passes,
-// and a different set or an overlap with another running org is refused.
+// reservation, with p.Feature's binding, is decided first against the same
+// locked events (reservationDecision): an org without one records it, the
+// same set with the same binding passes, and a different set or binding, an
+// overlap with another running org, or a binding for an org that is running
+// without a reservation is refused. A leader spawned by `ralph org start
+// <task>` with no reservation is such a running org, so a `start --plan`
+// into its org_id stops here.
 //
 // When the seat is not Active (a legacy ledger where an older ralph's
 // `disbanded` followed the leader's `spawned` with no `stopped`), its org may
@@ -1102,12 +1144,12 @@ func (o *Org) idempotentRespawn(p SpawnParams, seat SeatStatus, events []Manifes
 				return SpawnResult{Outcome: SpawnOutcomeRejected, Err: err}
 			}
 		}
-		record, err := reservationDecision(events, p.OrgID, p.Reserve)
+		record, err := reservationDecision(events, p.OrgID, p.reservation())
 		if err != nil {
 			return SpawnResult{Outcome: SpawnOutcomeRejected, Err: err}
 		}
 		if record {
-			if err := o.appendEvent(scopeReservedEvent(o.now(), p.OrgID, p.Reserve, "", false)); err != nil {
+			if err := o.appendEvent(scopeReservedEvent(o.now(), p.OrgID, p.reservation(), "", false)); err != nil {
 				return SpawnResult{Outcome: SpawnOutcomeFailed, Err: fmt.Errorf("org: record %s: %w", EventScopeReserved, err)}
 			}
 		}
@@ -1693,15 +1735,16 @@ func (o *Org) reject(p SpawnParams, cause error) SpawnResult {
 // permissionArgsForDriver) by the caller, recorded on the trail's final
 // EventSpawned step the same way the real Spawn path records it. reserve is
 // spawnCapacityErr's verdict that the real spawn would record p.Reserve: the
-// trail then starts with a dry-run EventScopeReserved, as the real one does
-// before spawn_started. Dry-run events never count as a reservation.
+// trail then starts with a dry-run EventScopeReserved carrying p.Feature's
+// binding, as the real one does before spawn_started. Dry-run events never
+// count as a reservation.
 func (o *Org) dryRunSpawn(p SpawnParams, mode string, reserve bool) SpawnResult {
 	team := agmsgTeam(p.OrgID)
 	base := ManifestEvent{OrgID: p.OrgID, SeatID: p.SeatID, Role: p.Role, Driver: p.Driver, Model: p.Model, Worktree: p.Cwd, DryRun: true}
 
 	steps := make([]ManifestEvent, 0, 8)
 	if reserve {
-		steps = append(steps, scopeReservedEvent("", p.OrgID, p.Reserve, "", true))
+		steps = append(steps, scopeReservedEvent("", p.OrgID, p.reservation(), "", true))
 	}
 	step := base
 	step.Event = EventSpawnStarted
