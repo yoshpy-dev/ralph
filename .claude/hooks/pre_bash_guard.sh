@@ -88,9 +88,10 @@
 #          evaluates the value of ${(e)...} again, which runs a $(...)
 #          written there in single quotes or with an escaped $; the text
 #          around a ${...} stays data), and a zsh subscript from its $ to
-#          the end of its word ($arr[...] and $~arr[...] in zsh, and the
-#          arithmetic $[...] in bash and zsh, evaluate the text in the
-#          brackets, which runs a $(...) written there in single quotes),
+#          the end of its word ($arr[...], $~arr[...], $#x[...] and $@[...]
+#          in zsh, and the arithmetic $[...] in bash and zsh, evaluate the
+#          text in the brackets, which runs a $(...) written there in single
+#          quotes),
 #          when the command and every later stage of its pipeline are such
 #          commands and send output only to the terminal, the next stage,
 #          /dev/null, /dev/stderr, a copy of fd 0, 1 or 2, or a closed fd
@@ -463,13 +464,19 @@ function lex_dq(ctx,    val, buf, e, c, c2, subst, piece, xp, subp) {
 #   only stand for themselves too ($; for one), which only ever drops a
 #   data region. msg_check and the rg check of stage_note read it per word.
 #   LD_SUB is the position of the $ when the $ starts a zsh subscript, else
-#   0: zero or more of the flag characters ~ = ^ +, zero or more name
-#   characters, and then [ ($arr[, $~arr[, and the old arithmetic $[ of
-#   bash and zsh). zsh evaluates the subscript, which runs a $(...) written
-#   there in single quotes ($arr[SQ$(cmd)SQ]), while the lexer reads that
-#   as quoted text. lex_word keeps the span from this $ to the end of its
-#   word out of the argument data region; the subscript is not skipped
-#   here, so lex_word still lexes a $(...) or a backtick inside it.
+#   0: zero or more of the flag characters ~ = ^ + and # (the length of
+#   $#x), then either one special parameter character (@ * ? ! $ -) or
+#   zero or more name characters, and then [ ($arr[, $~arr[, $#x[, $@[,
+#   $*[, and the old arithmetic $[ of bash and zsh; zsh also subscripts $#,
+#   $? and the other special parameters, but not $1, which it reads as a
+#   glob, so marking it only drops a data region). zsh evaluates the
+#   subscript, which runs a $(...) written there in single quotes
+#   ($arr[SQ$(cmd)SQ]), while the lexer reads that as quoted text; a
+#   subscript opened inside double quotes runs on past the closing quote
+#   ("$arr["SQ$(cmd)SQ"]"), so lex_dq reports its $ too (DQ_SUB). lex_word
+#   keeps the span from this $ to the end of its word out of the argument
+#   data region; the subscript is not skipped here, so lex_word still lexes
+#   a $(...) or a backtick inside it.
 # All marks are set after the nested lex_cmds or lex_brace call returns, as
 # LD_SUBST is, so a $ read inside them does not overwrite the marks of
 # this one.
@@ -510,7 +517,10 @@ function lex_dollar(ctx, in_dq,    s, c, f, q, v) {
   LD_SUBST = 0
   LD_ANSI = 0
   LD_EXP = !(c == "" || c == " " || c == "\t" || c == "\n" || (in_dq && c == DQ))
-  q = skip(skip(P + 1, RE_NOTFLAG), RE_NOTNAME)
+  q = skip(P + 1, RE_NOTFLAG)
+  c = at(q)
+  if (c != "" && index(SPECIAL_PARAMS, c)) q++
+  else q = skip(q, RE_NOTNAME)
   LD_SUB = (at(q) == "[") ? s : 0
   P++
   return "$"
@@ -1498,9 +1508,11 @@ BEGIN {
   RE_ANSI = "[\\\\" SQ "]"
   RE_BRACE = "[}\\\\$" BQ DQ SQ "]"
   RE_BRACE_DQ = "[}\\\\$" BQ DQ "]"
-  # After a $: the first character that is not a zsh flag character, and
-  # the first one that is not a name character (lex_dollar, subscripts).
-  RE_NOTFLAG = "[^~=^+]"
+  # After a $: the first character that is not a zsh flag character (or the
+  # # of $#x), the one-character special parameters, and the first
+  # character that is not a name character (lex_dollar, subscripts).
+  RE_NOTFLAG = "[^~=^+#]"
+  SPECIAL_PARAMS = "@*?!$-"
   RE_NOTNAME = "[^A-Za-z0-9_]"
   CTX = CIDN = PLSER = QN = QBYTES = HN = RLVL = DN = 0
   MAIN = DATA_OK = CUR_H = J_I = NODATA = EXEC_SEEN = 0

@@ -701,6 +701,15 @@ guard_deny_only_forms=(
   $'echo $~arr[\'$(sudo ls)\']'
   $'echo $[\'$(sudo ls)\']'
   $'git commit -m $arr[\'$(sudo ls)\']'
+  # zsh subscripts special parameters too ($@[...], $*[...]) and the length
+  # $#x[...], and a subscript opened inside double quotes runs on past the
+  # closing quote, so the single-quoted $(...) after it is in the subscript
+  # (lex_dq reports that $ to lex_word as DQ_SUB). The old guard denies
+  # these as well (the sudo substring).
+  $'echo $@[\'$(sudo ls)\']'
+  $'echo $#x[\'$(sudo ls)\']'
+  $'echo $*[\'$(sudo ls)\']'
+  $'echo "$arr["\'$(sudo ls)\'"]"'
 )
 check_modes B deny absent bypassPermissions -- "${guard_deny_only_forms[@]}"
 
