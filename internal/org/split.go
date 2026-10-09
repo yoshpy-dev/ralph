@@ -399,10 +399,15 @@ func approvedDigestFrom(value string) string {
 
 // newSplitFeatureDraft starts the feature section headed `### <slug>` on
 // line n. The slug becomes the default org_id, so it must be a valid
-// identifier, and it must be new in the plan.
+// identifier of at most maxFeatureOrgIDLen characters, and it must be new in
+// the plan.
 func newSplitFeatureDraft(slug string, n int, seen []*splitFeatureDraft) (*splitFeatureDraft, error) {
 	if err := ValidateIdentifier("feature slug", slug); err != nil {
 		return nil, fmt.Errorf("line %d: feature slug %q: it becomes the default org_id, so it must match %s", n, slug, identifierPattern)
+	}
+	if len(slug) > maxFeatureOrgIDLen {
+		return nil, fmt.Errorf("line %d: feature slug %q is %d characters: it becomes the default org_id, and %s; use a shorter slug",
+			n, slug, len(slug), featureOrgIDLimit())
 	}
 	if slug == splitDependsOnNone {
 		return nil, fmt.Errorf("line %d: feature slug %q is reserved for - Depends on: %s", n, slug, splitDependsOnNone)

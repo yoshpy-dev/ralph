@@ -167,7 +167,7 @@ toplevel、cwd の順で決まる。「前提」節を参照)、`ralph org statu
 | `send` | 座席へ typed protocol メッセージを送る。既定で `.claude/rules/ralph/agent-messaging.md` のプロトコルを検証(TYPE 列挙・TASK_ID 必須チェック・本文 2,000 文字上限)。`--raw` で検証をバイパス(bypass は manifest に `raw=true` で記録される。デバッグ用途以外は使わない)。本文を入力してから 750ms 待って Enter を 1 回送り(`--enter-delay-ms` で変更可。待ちがないと idle の codex 座席で本文が入力欄に残ることがある)、herdr の状態が working / blocked に変わったかで submit を確認する。確認できなければ manifest に `submit_unconfirmed=true` を記録して stderr に注意を出す(exit code は 0)。その場合は `read` で pane を確認し、本文が入力欄に残っているときだけ `herdr pane send-keys <pane> Enter` を送る。ralph は Enter を再送しない(submit 済みの座席が承認ダイアログを出していると、盲目的な Enter がそれを承認してしまうため)。`--timeout-ms` の残りが Enter 前の待ちを賄えないときは何も入力せずエラーで終わる。エラーで終了して stderr に note が出た場合はそれに従う(pane に何も送る前の失敗、たとえば検証エラー・座席なし・`--timeout-ms` の不足では note は出ず、そのまま送り直せる)。note は pane への操作がどこまで進んだかで変わり、どれも先に `read` で pane を確認するよう求める(`--state-dir` を明示していれば、note の `ralph org read` にも付く)。herdr の呼び出しが `--timeout-ms` で打ち切られると、本文や Enter が届いていてもエラーになるため、ralph は推測せず「届いたか分からない」まま note に書く。次に何をすべきかは note の指示に従う。 | `ralph org send --org-id X --to reviewer-1 --text "$(cat task.txt)"` |
 | `wait` | 座席が指定状態(idle/done/blocked など)になるまでブロックして待つ。`--until` 既定は `idle,done`(herdr は入力待ちで休止中の対話エージェントを `idle` ではなく `done` と報告するため、両方を既定で待つ)。`--timeout-ms` 既定は 60000(有界)。無期限待機したい場合のみ明示的に `--timeout-ms 0` を渡す。 | `ralph org wait --org-id X --seat reviewer-1` |
 | `read` | 座席の直近 pane 出力を読む。 | `ralph org read --org-id X --seat reviewer-1 --lines 100` |
-| `status` | 座席台帳(roster)を表示。`--all` で dry-run 座席も含める。org に予約があれば `reserved:` の行も出す(`--json` は `reservation`)。`start --plan` で立てた org には、その次に `feature: <split>/<slug> branch <branch> worktree <path>` の行も出す(`--json` は `feature`。キーは `split`・`feature`・`digest`・`branch`・`worktree`)。 | `ralph org status --org-id X --all` |
+| `status` | 座席台帳(roster)を表示。`--all` で dry-run 座席も含める。org に予約があれば `reserved:` の行も出す(`--json` は `reservation`)。`start --plan` で立てた org には、その次に `feature: <split>/<slug> branch <branch> worktree <path>` の行も出す(`--json` は `feature`。キーは `split`・`feature`・`digest`・`branch`・`worktree`)。壊れた記録から読んだ結びつきは、行の末尾に `(incomplete record)` が付き、`--json` に `"incomplete": true` が足される。 | `ralph org status --org-id X --all` |
 | `stop` | 座席を停止する。pane に C-c を送ったあと pane を閉じて座席のプロセスを終わらせ(画面の出力も消えるので、要るなら先に `read` で読む)、agmsg から外して `stopped` を記録する。pane が見つからないときは閉じ済みとして扱う。pane を閉じられなかったとき(herdr に繋がらない、1 回 10 秒の期限切れなど)は `stopped` を書かずに `stop_failed` を記録し、座席は active のまま終了コード 1 になる。herdr が戻ってから打ち直せば拾う。C-c を送る前に、pane のある tab の label が座席 id か、workspace の label が org_id かを herdr で確かめ、違えば(herdr のセッションが失われて id が振り直された場合など)C-c も送らず pane も閉じずに `stop_failed` で終了コード 1 にする(`--force` でも閉じない)。`--all` は `--org-id` なしで全 org の active な座席を止め(`--org-id` / `--seat` とは併用不可)、1 つ止められなくても残りを止めて、止められなかった座席を `<org_id>/<seat_id>` と理由で stderr に並べ終了コード 1。`--force` は閉じられなかった座席にも `stopped` を書き、失敗を警告にして終了コード 0(pane は herdr に残っていることがある)。`--dry-run` は herdr / agmsg を呼ばず記録だけ。コマンドを打った pane(`HERDR_PANE_ID`)の座席は、記録と出力を済ませてから最後に閉じる(コマンドもそこで終わる)。`--all` でほかに止められなかった座席があれば、その座席は止めずに残す。最後の close が失敗したときは、座席を active に戻して終了コード 1 にする(打ち直すか別の pane の `--all` で閉じ直せる。台帳に新しい記録があるとき、台帳を読み書きできないときは戻さず、エラーが手で閉じる herdr のコマンドを示す。`--force` は戻さず警告で終了コード 0)。 | `ralph org stop --org-id X --seat reviewer-1`、`ralph org stop --all` |
 | `disband` | org を解散する。active な座席を `stop` と同じ手順で止めたあと、台帳に記録した org の herdr workspace を閉じて `org_workspace_closed` を記録し、すべて閉じられたときだけ `disbanded` を書く。止められなかった座席か閉じられなかった workspace があれば `disbanded` を書かず、それを stderr に並べて終了コード 1(座席が 1 つでも止まらなければ workspace は閉じない)。打ち直すと残りを片付ける。`--all` は `--org-id` なしで、まだ解散していない全 org を解散する(`--org-id` とは併用不可。解散できなかった org は次の `--all` でまた対象になる。古い ralph の `disband` が workspace を閉じずに残した org も対象になる)。`--force` は閉じられなかった座席にも `stopped`、workspace にも `org_workspace_closed` を書いて `disbanded` まで記録し、失敗を警告にして終了コード 0。`--force` でも、label で org のものと確かめた workspace は閉じるので、tab の確認に落ちた座席の pane も workspace と一緒に終わる。コマンドを打った pane とそれを含む workspace(`HERDR_PANE_ID` / `HERDR_WORKSPACE_ID`)は、ほかがすべて閉じたときだけ、記録と出力を済ませてから最後に閉じる(コマンドもそこで終わる)。ほかに閉じられなかったものがあれば手を付けずに残すので、打ったセッションは失敗の一覧を見られる。最後の close が失敗したときは、その pane の座席を active に、後回しにした workspace を open に、予約があればそれも戻して終了コード 1 にする(打ち直すか別の pane の `--all` で閉じ直せる。台帳に新しい記録があるとき、台帳を読み書きできないときは戻さず、エラーが手で閉じる herdr のコマンドを示す。`--force` は戻さず警告で終了コード 0)。閉じるのは台帳に記録した pane と workspace だけで、workspace も label が org_id でなければ閉じずに終了コード 1 にする。解散した org_id でまた `spawn` すると新しい workspace を作る(最後の close の失敗で開き直した workspace は再利用する)。 | `ralph org disband --org-id X`、`ralph org disband --all` |
 | `report` | manifest + receipts から編成履歴を `docs/reports/org-manifest-<org_id>-<date>.md` に書き出す。 | `ralph org report --org-id X` |
@@ -257,7 +257,10 @@ worktree)、git の外のときがこれに当たる。`max_seats` とほかの�
 - `ralph org status --org-id <id>` が `reserved: <path>, ...` の行を出す
   (`--json` は `reservation`)。結びつきがあれば、続けて
   `feature: <split>/<slug> branch <branch> worktree <path>` の行を出す
-  (`--json` は `feature`)。
+  (`--json` は `feature`)。記録が壊れていて結びつきの一部が読めないときは、
+  その行の末尾に `(incomplete record)` を付ける(`--json` は
+  `"incomplete": true`)。そのような org では、disband するまで、予約を渡す
+  spawn と start がすべて拒否される。
 
 ## 機能ごとの org
 
@@ -269,7 +272,9 @@ worktree)、git の外のときがこれに当たる。`max_seats` とほかの�
 
 機能ごとの org は、承認済みの分割計画から `ralph org start --plan` で立てる。
 `--plan` なしの `ralph org start <task>` と現セッションの昇格(「Leader 運用
-2 経路」)も使えるが、分割計画にも worktree にも結びつかない。
+2 経路」)も使えるが、分割計画にも worktree にも結びつかない。分割計画の機能に
+結びつくのは `start --plan` で立てた org だけで、結びつきのない org が走って
+いる org_id に `start --plan` を打つと拒否される(「start が拒否するもの」)。
 
 ### 分割計画
 
@@ -309,8 +314,10 @@ worktree のルートの `.harness/state/org/`)の下の `splits/<id>.md` に置
 - 先頭(最初の `## ` の見出しより前)に `- Status:` と `- Approved:` の行を
   1 つずつ置く(書き方は下の「承認」)。
 - 機能は `## Features` の下に `### <slug>` の節で並べる。slug は英小文字で
-  始まり、英小文字・数字・`-` だけで 30 文字まで(既定の org_id になる)。
-  `none` は slug に使えない。
+  始まり、英小文字・数字・`-` だけで 20 文字まで。slug は既定の org_id に
+  なり、herdr の agent 名(`<org_id>_<seat_id>`)は 32 文字までなので、leader
+  が `implementer` の座席を立てられる長さに抑えている(`--org-id` で渡す値も
+  20 文字まで)。`none` は slug に使えない。
 - `- Type:` はブランチの型で、`feat`・`fix`・`docs`・`chore`・`refactor`・
   `test`・`ci`・`build`・`perf`・`release`・`security` のどれか。省略すると
   `feat`。機能のブランチは `<type>/<slug>` になる。
@@ -324,8 +331,7 @@ worktree のルートの `.harness/state/org/`)の下の `splits/<id>.md` に置
 
 ### 承認
 
-分割計画を承認するのは人。今後入る director(複数の org を統括する役割)も、
-分割計画の下書きは書くが承認を代行しない。中身が決まったら
+分割計画を承認するのは人。中身が決まったら
 `scripts/plan-visual.sh digest <分割計画>` を打ち、出た 12 桁を
 `- Approved: <日付> sha256:<digest>` の行に書き、`- Status: Approved` に
 する。digest は `/plan` の承認と同じ規則で、`- Status:` / `- Approved:` /
@@ -392,7 +398,7 @@ leader が動いている間は台帳に何も足さない。disband のあと�
   `Approved` でない分割計画、`- Approved:` に digest がない分割計画。エラーは
   `scripts/plan-visual.sh digest` で承認を記録し直すよう示す。
 - 知らない `--feature`(エラーが分割計画の機能を並べる)、`splits/` の直下に
-  ない `--plan`。
+  ない `--plan`、20 文字を超える `--org-id`(slug と同じ上限。「分割計画」)。
 - その org_id で、その機能のために立てたのではない org が走っているとき。
   昇格したセッションの leader の org、`start <task>` の org、`--reserve` だけで
   予約した org がこれに当たる。disband の前の同じ org_id が、別の機能か、承認
@@ -406,12 +412,20 @@ leader が動いている間は台帳に何も足さない。disband のあと�
   引き継がないようにしている。要らなければ
   `./scripts/ralph-worktree.sh cleanup --id org-<org_id>` で消すか、別の
   `--org-id` を使う。
-- main worktree のチェックアウトが default branch でないか clean でないとき
-  (`ensure` が拒否する。jq がないときも同じ)。スクリプトのエラー文に、main
-  worktree を clean な default branch にして打ち直す案内が付いて終了コード 1
-  になり、台帳には何も書かない。repo に `scripts/ralph-worktree.sh` がないとき、
-  git の外か、main worktree のない repo(bare リポジトリの linked worktree)
-  から打ったときも拒否する。
+- `ensure` が拒否したとき。終了コード 1 で、台帳には何も書かない。エラー文は
+  スクリプトの文に、原因に合った直し方を足す。
+  - main worktree のチェックアウトが default branch でないか clean でない:
+    clean な default branch にして打ち直す。
+  - `.claude/worktrees/org-<org_id>` に記録のないディレクトリがある、または
+    記録 `org-<org_id>` が衝突した: 要らなければ消すか、別の `--org-id` を
+    使う。
+  - 機能のブランチ `<type>/<slug>` が記録なしにすでにある: そのブランチの名前
+    を変えるか、コミットが要らなければ消して打ち直す(`--org-id` を変えても
+    ブランチは同じ)。
+  - `.codex/config.toml` の既知の書き換え(スクリプトの文が戻し方を示す)、
+    jq がない、default branch がない: スクリプトの文だけを出す。
+- repo に `scripts/ralph-worktree.sh` がないとき、git の外か、main worktree
+  のない repo(bare リポジトリの linked worktree)から打ったとき。
 - `max_orgs`、`max_total_seats`、ほかの走っている org の予約との重なり
   (上の手順の 2 の先読みで拒否し、worktree を作らない)。
 
@@ -451,13 +465,6 @@ worktree・ブランチ・記録を消す。`cleanup` は worktree に未コミ�
 
 codex の headless leader が sandbox の中から `git push` と `gh pr create` を
 打てるかは未確認。
-
-### director の配下に置ける org
-
-今後入る director の配下に置けるのは、`start --plan` で立てた org だけになる。
-昇格したセッションの leader の org と、`start <task>` の org は配下に入らない。
-今の start は、結びつきのない走っている org に `start --plan` で結びつきを
-足すことを拒否する(「start が拒否するもの」)。
 
 ### 座席内 fan-out
 
@@ -508,8 +515,7 @@ receipts / 役割雛形)を使うため、手順は共通。
 
 - **(A) 現セッション昇格**: 対話セッションがそのまま Leader になり、
   この skill の動詞リファレンスに従って `ralph org` を実行し座席を編成する。
-  ユーザーとの対話を続けながら編成できる。分割計画には結びつかず、今後入る
-  director の配下にも置けない。
+  ユーザーとの対話を続けながら編成できる。分割計画には結びつかない。
 - **(B) headless**: leader 座席を herdr pane 内の常駐セッションとして起動する。
   `ralph` バイナリに埋め込まれた leader 用の役割プロンプト雛形にタスクと
   エンベロープ要約が展開され、起動した leader が以後この skill の手順に従って
@@ -521,7 +527,7 @@ receipts / 役割雛形)を使うため、手順は共通。
   - `ralph org start --org-id X --cwd . --scope "<担当範囲>" "<task>"` は
     `--cwd` の場所に leader を立てる(`--scope` は他の座席と同じ AC-2b ゲート
     の対象。省略したい場合のみ `--allow-unscoped` を明示する)。分割計画には
-    結びつかず、worktree も作らない。director の配下にも置けない。
+    結びつかず、worktree も作らない。
 
 いずれの経路でも、Leader は以下のサイクルで座席を統括する:
 

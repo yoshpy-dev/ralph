@@ -33,8 +33,9 @@ import (
 //  5. Spawn of the leader, which decides 2 again under the manifest lock.
 //
 // Nothing is written to the manifest before 5, and a start refused before 4
-// makes no worktree. A start refused in 4 has the script's message; one that
-// fails in 5 says that the worktree and the branch stay.
+// makes no worktree. A start refused in 4 has the script's message and,
+// where start can name it, the fix (ensureFailureErr); one that fails in 5
+// says that the worktree and the branch stay.
 
 const (
 	// featureWorktreeDir holds every feature worktree, relative to the repo
@@ -49,7 +50,31 @@ const (
 	featureWorktreeCleanupPolicy = "manual"
 	// worktreeScriptRel is ralph-worktree.sh relative to the repo root.
 	worktreeScriptRel = "scripts/ralph-worktree.sh"
+	// implementerSeatID is the seat id a feature org's leader gives its
+	// implementer seat (prompts/leader.md, 機能ごとの org), the longest seat
+	// id of the default seats (leader, implementer, reviewer).
+	implementerSeatID = "implementer"
+	// maxFeatureOrgIDLen is the longest org_id a feature org can have (20):
+	// herdrAgentName joins the org_id and a seat id with one `_`, herdr takes
+	// at most maxHerdrAgentNameLen characters, and the leader must be able to
+	// spawn implementerSeatID. LoadSplitPlan holds a feature's slug, the
+	// default org_id, to it, and StartFeature holds --org-id to it.
+	maxFeatureOrgIDLen = maxHerdrAgentNameLen - 1 - len(implementerSeatID)
 )
+
+// Complete reports whether every field of the binding f is set (complete,
+// reserve.go). ActiveFeature returns a binding read from a damaged record as
+// read, so `ralph org status` uses this to say that the record is incomplete.
+func (f *FeatureBinding) Complete() bool {
+	return f.complete()
+}
+
+// featureOrgIDLimit says why a feature org's org_id is at most
+// maxFeatureOrgIDLen characters, for the errors of a longer slug or --org-id.
+func featureOrgIDLimit() string {
+	return fmt.Sprintf("a feature org's org_id is at most %d characters, so that its leader can spawn the seat %q "+
+		"within herdr's %d-character agent name <org_id>_<seat_id>", maxFeatureOrgIDLen, implementerSeatID, maxHerdrAgentNameLen)
+}
 
 // StartFeatureParams describes one `ralph org start --plan` invocation.
 type StartFeatureParams struct {
@@ -184,7 +209,7 @@ func (o *Org) StartFeature(p StartFeatureParams) StartFeatureResult {
 		CanonicalRef: want.CanonicalRef, CleanupPolicy: featureWorktreeCleanupPolicy,
 	})
 	if err != nil {
-		return refuse(fmt.Errorf("%w; make the main worktree %s a clean checkout of the default branch and run start again", err, root))
+		return refuse(ensureFailureErr(err, root, orgID, worktree, branch))
 	}
 	if !samePath(made, worktree) {
 		res.Spawn = SpawnResult{Outcome: SpawnOutcomeFailed, Err: fmt.Errorf(
@@ -203,11 +228,56 @@ func (o *Org) StartFeature(p StartFeatureParams) StartFeatureResult {
 	return res
 }
 
+// Parts of the messages `ralph-worktree.sh ensure` dies with, which
+// ensureFailureErr reads to choose its hint. validate_clean_base: the main
+// checkout is not the default branch, or it has uncommitted changes (the
+// message for the known .codex/config.toml rewrite holds that part too, and
+// says itself how to restore the file). ensure_worktree: a state record, a
+// directory or a branch is in the way.
+// TestEnsureFailureMessages_InWorktreeScript checks that the script still
+// says each.
+const (
+	ensureNotDefaultBranchMsg = "must start from clean default branch"
+	ensureUncommittedMsg      = "has uncommitted changes"
+	ensureCodexRewriteMsg     = "has uncommitted changes only in .codex/config.toml"
+	ensureStateCollisionMsg   = "state collision for id"
+	ensurePathExistsMsg       = "worktree path already exists without matching state"
+	ensureBranchExistsMsg     = "branch already exists without matching state"
+)
+
+// ensureFailureErr is StartFeature's error for a failed ensure: err, which
+// holds the script's message, followed by what fixes it. The main checkout
+// is to be made the clean default branch; a state record in the way is
+// removed with the cleanup or avoided with another --org-id, and so is a
+// directory at the worktree's path; a branch in the way is renamed or
+// deleted, since another --org-id keeps the same branch. Any other failure
+// (the .codex/config.toml rewrite, no jq, no default branch) is err as it is.
+func ensureFailureErr(err error, root, orgID, worktree, branch string) error {
+	msg := err.Error()
+	var fix string
+	switch {
+	case strings.Contains(msg, ensureCodexRewriteMsg):
+		return err
+	case strings.Contains(msg, ensureNotDefaultBranchMsg), strings.Contains(msg, ensureUncommittedMsg):
+		fix = fmt.Sprintf("make the main worktree %s a clean checkout of the default branch and run start again", root)
+	case strings.Contains(msg, ensureStateCollisionMsg):
+		fix = fmt.Sprintf("remove the worktree with %s if it is no longer needed, or use another --org-id", featureWorktreeCleanup(orgID))
+	case strings.Contains(msg, ensurePathExistsMsg):
+		fix = fmt.Sprintf("remove %s if it is no longer needed (git worktree remove for a worktree), or use another --org-id", worktree)
+	case strings.Contains(msg, ensureBranchExistsMsg):
+		fix = fmt.Sprintf("the feature's branch is %s whatever the --org-id: rename that branch (git branch -m) or, "+
+			"if its commits are not needed, delete it (git branch -D), and run start again", branch)
+	default:
+		return err
+	}
+	return fmt.Errorf("%w; %s", err, fix)
+}
+
 // readStartFeature is StartFeature's first step, which has no side effect:
 // the repo root is given, the split plan at p.SplitPath is in the state
 // dir's splits/, reads and is approved, it has the feature p.Feature, and
-// the org_id (p.OrgID, or the slug) is valid. plan is returned whenever it
-// was read, also with an error.
+// the org_id (p.OrgID, or the slug) is valid and at most maxFeatureOrgIDLen
+// characters. plan is returned whenever it was read, also with an error.
 func readStartFeature(p StartFeatureParams) (plan *SplitPlan, feature SplitFeature, orgID string, err error) {
 	if p.RepoRoot == "" {
 		return nil, feature, "", errors.New("org: start --plan needs the root of the main worktree, where " + worktreeScriptRel + " runs")
@@ -236,6 +306,10 @@ func readStartFeature(p StartFeatureParams) (plan *SplitPlan, feature SplitFeatu
 	}
 	if err := ValidateIdentifier("org_id", orgID); err != nil {
 		return plan, feature, "", err
+	}
+	if len(orgID) > maxFeatureOrgIDLen {
+		return plan, feature, "", fmt.Errorf("org: org_id %q is %d characters: %s; use a shorter --org-id",
+			orgID, len(orgID), featureOrgIDLimit())
 	}
 	return plan, feature, orgID, nil
 }

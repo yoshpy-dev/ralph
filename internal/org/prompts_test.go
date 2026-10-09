@@ -422,7 +422,11 @@ func TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand(t *testing.T) {
 // section, and that section runs its steps in order: the feature plan, the
 // report, the archive and its commit, the secret scan, the push, gh pr create
 // without the /pr skill, the worktree kept for the cleanup after merge, and
-// disband last. The retired formation patterns are mentioned nowhere.
+// disband last. Its intro keeps the feature's changes in the reservation and
+// its steps' own writes outside it, its seats are spawned as implementer and
+// reviewer (maxFeatureOrgIDLen counts on the first), and the archive step
+// names its own step 8 for the cleanup. The retired formation patterns are
+// mentioned nowhere.
 func TestRenderRolePrompt_Leader_FeatureOrgProcedure(t *testing.T) {
 	text := renderSeatPrompt(t, "leader")
 
@@ -470,7 +474,16 @@ func TestRenderRolePrompt_Leader_FeatureOrgProcedure(t *testing.T) {
 			at = i
 		}
 	}
+	// The reservation holds the feature's code and docs; the steps' own
+	// writes (the feature plan, the report, the plan's move) are outside it.
+	if intro, _, ok := strings.Cut(section, "\n1. "); !ok ||
+		!strings.Contains(intro, "機能のコードと文書の変更は `- 予約したパス:` の中に収めて") ||
+		!strings.Contains(intro, "手順 1 の\n機能の計画、4 の report、5 の計画の移動は予約の外に書きますが") {
+		t.Errorf("expected the 機能ごとの org intro to keep the feature's changes in the reservation and the steps' own writes outside it, got section:\n%s", section)
+	}
 	for _, c := range []struct{ marker, want string }{
+		{"1 席ずつ spawn する", "`--id` は `implementer` と\n   `reviewer` にする"},
+		{"./scripts/archive-plan.sh <", "merge のあとの後始末(この節の 8)が止まる"},
 		{"secret-scan-branch.sh --strict", "push せずに止まり"},
 		{"gh pr create` で PR", "`/pr` skill そのものは実行しない"},
 		{"worktree とブランチは消さない", "ralph-worktree.sh cleanup --id org-org-a"},

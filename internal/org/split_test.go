@@ -195,6 +195,11 @@ func TestLoadSplitPlan_Fields(t *testing.T) {
 			},
 		},
 		{
+			name:     "slug of 20 characters, the longest a feature org's org_id can be",
+			features: "### a" + strings.Repeat("b", 19) + "\n- Reserve: a/\n",
+			want:     []SplitFeature{{Slug: "a" + strings.Repeat("b", 19), Type: "feat", Reserve: []string{"a/"}}},
+		},
+		{
 			name:     "heading with trailing spaces",
 			features: "### a  \n- Reserve: a/\n",
 			want:     []SplitFeature{{Slug: "a", Type: "feat", Reserve: []string{"a/"}}},
@@ -235,6 +240,10 @@ func TestLoadSplitPlan_Rejects(t *testing.T) {
 		{"uppercase slug", minimalSplitPlan("### Auth\n- Reserve: a/\n"), `line 7: feature slug "Auth"`},
 		{"slug with underscore", minimalSplitPlan("### a_b\n- Reserve: a/\n"), `line 7: feature slug "a_b"`},
 		{"slug starting with a digit", minimalSplitPlan("### 1a\n- Reserve: a/\n"), `line 7: feature slug "1a"`},
+		{"slug of 21 characters", minimalSplitPlan("### a" + strings.Repeat("b", 20) + "\n- Reserve: a/\n"),
+			`line 7: feature slug "a` + strings.Repeat("b", 20) + `" is 21 characters: it becomes the default org_id, and a feature org's org_id ` +
+				`is at most 20 characters, so that its leader can spawn the seat "implementer" within herdr's 32-character agent name ` +
+				`<org_id>_<seat_id>; use a shorter slug`},
 		{"slug of 31 characters", minimalSplitPlan("### a" + strings.Repeat("b", 30) + "\n- Reserve: a/\n"), "line 7: feature slug"},
 		{"empty slug", minimalSplitPlan("### \n- Reserve: a/\n"), `line 7: feature slug ""`},
 		{"slug none", minimalSplitPlan("### none\n- Reserve: a/\n"), `line 7: feature slug "none" is reserved`},

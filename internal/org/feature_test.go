@@ -288,6 +288,29 @@ func TestStartFeature_OrgIDAndTypeDefault(t *testing.T) {
 	})
 }
 
+// TestStartFeature_OrgIDAtTheLengthLimit pins maxFeatureOrgIDLen at 20,
+// herdr's 32-character agent name less the `_` and "implementer": a feature
+// org with an --org-id of 20 characters starts its leader, and the leader
+// can then spawn the implementer seat in it. One character more is refused
+// (TestStartFeature_RefusedBeforeAnyRecord).
+func TestStartFeature_OrgIDAtTheLengthLimit(t *testing.T) {
+	if maxFeatureOrgIDLen != 20 || implementerSeatID != "implementer" {
+		t.Fatalf("maxFeatureOrgIDLen, implementerSeatID = %d, %q, want 20, implementer", maxFeatureOrgIDLen, implementerSeatID)
+	}
+	st := newFeatureStart(t)
+	p := st.params("auth-core")
+	p.OrgID = "a" + strings.Repeat("b", maxFeatureOrgIDLen-1)
+	if res := st.mustStart(t, p, SpawnOutcomeSpawned); res.OrgID != p.OrgID || res.Worktree != st.worktree(p.OrgID) {
+		t.Fatalf("unexpected result: org %q worktree %q", res.OrgID, res.Worktree)
+	}
+	st.h.paneID = "pane-2"
+	impl := mustSpawnParams(p.OrgID, implementerSeatID)
+	impl.Role = implementerSeatID
+	if r := st.o.Spawn(impl); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("expected the leader of a %d-character org_id to spawn %s, got %+v", len(p.OrgID), implementerSeatID, r)
+	}
+}
+
 // TestFeatureLeaderTask pins the leader's task text: the lines naming the
 // split plan, feature, worktree, branch, reserved paths, dependencies and
 // procedure, then the feature's body after a blank line; no dependency
@@ -323,9 +346,10 @@ func TestFeatureLeaderTask(t *testing.T) {
 // and the other refusals that need neither the manifest nor a worktree: an
 // unapproved plan, one without an approval digest, one changed after its
 // approval, one with a `- Branch:` line added after its approval, an unknown
-// feature, a plan outside splits/, a bad or too long org_id, a model outside
-// the pool (the pre-check), and no repo root. None looks up or makes a
-// worktree, or writes, receipts or calls anything.
+// feature, a plan outside splits/, a bad org_id, an --org-id one character
+// longer than maxFeatureOrgIDLen, a model outside the pool (the pre-check),
+// and no repo root. None looks up or makes a worktree, or writes, receipts
+// or calls anything.
 func TestStartFeature_RefusedBeforeAnyRecord(t *testing.T) {
 	approved := approveSplitPlan(t, splitPlanFixture)
 	for _, tc := range []struct {
@@ -350,8 +374,9 @@ func TestStartFeature_RefusedBeforeAnyRecord(t *testing.T) {
 		}, []string{"not directly in", "a split plan is a file <id>.md directly in"}, false},
 		{"a bad --org-id", "", func(_ *featureStart, p *StartFeatureParams) { p.OrgID = "Auth" },
 			[]string{`invalid org_id "Auth"`}, true},
-		{"an org_id too long for herdr's agent name", "", func(_ *featureStart, p *StartFeatureParams) { p.OrgID = "a" + strings.Repeat("b", 25) },
-			[]string{"exceeds herdr's 32-character agent-name limit"}, true},
+		{"an --org-id of 21 characters", "", func(_ *featureStart, p *StartFeatureParams) { p.OrgID = "a" + strings.Repeat("b", 20) },
+			[]string{`org: org_id "a` + strings.Repeat("b", 20) + `" is 21 characters: a feature org's org_id is at most 20 characters, ` +
+				`so that its leader can spawn the seat "implementer" within herdr's 32-character agent name <org_id>_<seat_id>; use a shorter --org-id`}, true},
 		{"a model outside the pool", "", func(_ *featureStart, p *StartFeatureParams) { p.Model = "gpt-9" },
 			[]string{`model "gpt-9" not in [org].model_pool for driver "claude"`}, true},
 		{"no repo root", "", func(_ *featureStart, p *StartFeatureParams) { p.RepoRoot = "" },
@@ -624,20 +649,78 @@ func TestStartFeature_AfterDisband(t *testing.T) {
 }
 
 // TestStartFeature_EnsureFailureRefused covers plan AC9 at the org layer: an
-// ensure failure (the main checkout is not the clean default branch) is
-// refused with the script's message and the way to fix it, wrapping the
-// error, with nothing recorded and no worktree in the result.
+// ensure failure is refused with the script's message, wrapping the error,
+// with nothing recorded and no worktree in the result. The fix that follows
+// depends on the failure: a main checkout that is not the clean default
+// branch is to be made one; a state record or a directory in the way is
+// removed or avoided with another --org-id; a branch in the way is renamed
+// or deleted (another --org-id keeps the branch). The .codex/config.toml
+// rewrite message, which says itself how to restore the file, and any other
+// failure come back with nothing added.
 func TestStartFeature_EnsureFailureRefused(t *testing.T) {
-	st := newFeatureStart(t)
-	st.wt.ensureErr = errors.New("org: scripts/ralph-worktree.sh ensure: ralph-worktree: base branch 'main' has uncommitted changes (exit status 1)")
-	res := st.o.StartFeature(st.params("auth-core"))
-	assertStartRefused(t, res, "base branch 'main' has uncommitted changes",
-		"; make the main worktree "+st.root+" a clean checkout of the default branch and run start again")
-	if !errors.Is(res.Spawn.Err, st.wt.ensureErr) {
-		t.Fatalf("expected the ensure error wrapped, got %v", res.Spawn.Err)
+	const prefix = "org: scripts/ralph-worktree.sh ensure: ralph-worktree: "
+	for _, tc := range []struct {
+		name, script string
+		fix          func(st *featureStart) string // "" for nothing added
+	}{
+		{"main has uncommitted changes", "base branch 'main' has uncommitted changes", func(st *featureStart) string {
+			return "make the main worktree " + st.root + " a clean checkout of the default branch and run start again"
+		}},
+		{"main is on another branch", "must start from clean default branch 'main' (current: feat/x)", func(st *featureStart) string {
+			return "make the main worktree " + st.root + " a clean checkout of the default branch and run start again"
+		}},
+		{"a state record in the way", "state collision for id 'org-auth-core': /repo/.git/ralph/worktrees/org-auth-core.json", func(*featureStart) string {
+			return "remove the worktree with ./scripts/ralph-worktree.sh cleanup --id org-auth-core if it is no longer needed, or use another --org-id"
+		}},
+		{"a directory in the way", "worktree path already exists without matching state: /repo/.claude/worktrees/org-auth-core", func(st *featureStart) string {
+			return "remove " + st.worktree("auth-core") + " if it is no longer needed (git worktree remove for a worktree), or use another --org-id"
+		}},
+		{"a branch in the way", "branch already exists without matching state: fix/auth-core", func(*featureStart) string {
+			return "the feature's branch is fix/auth-core whatever the --org-id: rename that branch (git branch -m) or, " +
+				"if its commits are not needed, delete it (git branch -D), and run start again"
+		}},
+		{"the .codex/config.toml rewrite", "base branch 'main' has uncommitted changes only in .codex/config.toml, and they look like the known external rewrite " +
+			"(see docs/recipes/codex-setup.md).\nIf that is the only change, restore it:\n  git -C '/repo' checkout -- .codex/config.toml", nil},
+		{"no jq", "jq not found", nil},
+		{"no default branch", "base branch not found: main", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := newFeatureStart(t)
+			st.wt.ensureErr = errors.New(prefix + tc.script + " (exit status 1)")
+			res := st.o.StartFeature(st.params("auth-core"))
+			want := st.wt.ensureErr.Error()
+			if tc.fix != nil {
+				want += "; " + tc.fix(st)
+			}
+			assertStartRefused(t, res)
+			if res.Spawn.Err.Error() != want {
+				t.Errorf("error =\n%s\nwant\n%s", res.Spawn.Err, want)
+			}
+			if !errors.Is(res.Spawn.Err, st.wt.ensureErr) {
+				t.Fatalf("expected the ensure error wrapped, got %v", res.Spawn.Err)
+			}
+			if after := takeSpawnSnapshot(t, st.o, st.h, st.a); after != (spawnSnapshot{}) {
+				t.Fatalf("expected nothing recorded or called, got %+v", after)
+			}
+		})
 	}
-	if after := takeSpawnSnapshot(t, st.o, st.h, st.a); after != (spawnSnapshot{}) {
-		t.Fatalf("expected nothing recorded or called, got %+v", after)
+}
+
+// TestEnsureFailureMessages_InWorktreeScript keeps the message parts
+// ensureFailureErr reads in step with scripts/ralph-worktree.sh: each is in
+// the script's text.
+func TestEnsureFailureMessages_InWorktreeScript(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(splitTestRepoRoot(t), filepath.FromSlash(worktreeScriptRel)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, msg := range []string{
+		ensureNotDefaultBranchMsg, ensureUncommittedMsg, ensureCodexRewriteMsg,
+		ensureStateCollisionMsg, ensurePathExistsMsg, ensureBranchExistsMsg,
+	} {
+		if !strings.Contains(string(data), msg) {
+			t.Errorf("%s no longer says %q, which ensureFailureErr reads to choose its hint", worktreeScriptRel, msg)
+		}
 	}
 }
 
@@ -865,7 +948,10 @@ func worktreeScriptRepo(t *testing.T) string {
 // main, records canonical_ref, and spawns the leader in it; the same start
 // again passes the reuse check on the real record and checkout and records
 // nothing; with main dirty, a start for another feature is refused with the
-// script's message and records nothing. A repo without the script says so.
+// script's message and records nothing; with main clean again but that
+// feature's branch already made by hand, it is refused with the script's
+// message and the branch fix, and makes no worktree. A repo without the
+// script says so.
 func TestStartFeature_RealWorktreeScript(t *testing.T) {
 	bare := t.TempDir()
 	if _, _, err := (scriptFeatureWorktrees{}).Lookup(bare, "org-a"); !errors.Is(err, errWorktreeScriptMissing) ||
@@ -894,12 +980,32 @@ func TestStartFeature_RealWorktreeScript(t *testing.T) {
 		t.Fatalf("expected the same start to record nothing, %+v -> %+v", before, after)
 	}
 
-	if err := os.WriteFile(filepath.Join(root, "untracked.txt"), []byte("x\n"), 0o644); err != nil {
+	untracked := filepath.Join(root, "untracked.txt")
+	if err := os.WriteFile(untracked, []byte("x\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	assertStartRefused(t, st.o.StartFeature(st.params("auth-docs")),
 		"org: scripts/ralph-worktree.sh ensure: ralph-worktree: base branch 'main' has uncommitted changes",
 		"; make the main worktree "+root+" a clean checkout of the default branch and run start again")
+	if after := takeSpawnSnapshot(t, st.o, st.h, st.a); after != before {
+		t.Fatalf("expected nothing recorded or called, %+v -> %+v", before, after)
+	}
+
+	if err := os.Remove(untracked); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, "-C", root, "branch", "feat/auth-docs")
+	res = st.o.StartFeature(st.params("auth-docs"))
+	assertStartRefused(t, res,
+		"org: scripts/ralph-worktree.sh ensure: ralph-worktree: branch already exists without matching state: feat/auth-docs",
+		"; the feature's branch is feat/auth-docs whatever the --org-id: rename that branch (git branch -m) or, "+
+			"if its commits are not needed, delete it (git branch -D), and run start again")
+	if strings.Contains(res.Spawn.Err.Error(), "clean checkout of the default branch") {
+		t.Errorf("expected no clean-checkout hint for a branch in the way, got %v", res.Spawn.Err)
+	}
+	if _, err := os.Stat(st.worktree("auth-docs")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("expected no worktree at %s, got %v", st.worktree("auth-docs"), err)
+	}
 	if after := takeSpawnSnapshot(t, st.o, st.h, st.a); after != before {
 		t.Fatalf("expected nothing recorded or called, %+v -> %+v", before, after)
 	}

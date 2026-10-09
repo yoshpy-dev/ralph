@@ -57,16 +57,21 @@
 タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
 機能を受け持ちます。1 つの org が持つ worktree・ブランチ・PR は 1 つずつです。
 あなたの cwd がその機能の worktree で、ブランチはタスクの `- ブランチ:` の行に
-あります。変更は `- 予約したパス:` の中に収めてください(予約の外は別の org が
-受け持っていることがあります)。次の順で進めます。
+あります。機能のコードと文書の変更は `- 予約したパス:` の中に収めてください
+(予約の外は別の org が受け持っていることがあります)。この節の手順 1 の
+機能の計画、4 の report、5 の計画の移動は予約の外に書きますが、どれも手順の
+うちなので、予約に入っていなくてかまいません。次の順で進めます。
 
 1. 機能の計画を worktree の `docs/plans/active/` に書き、コミットする。
    プロジェクトに計画の雛形(`docs/plans/templates/` など)があればそれに
    沿い、タスクの本文(機能の目的と受け入れ条件)を計画に写す。`/plan` skill
    は使わない(新しい task worktree を作り、人の承認を求めるため)。計画は
    人の承認を待たずに次へ進む
-2. implementer と reviewer を 1 席ずつ spawn する。どちらにも `--cwd .`
-   (この worktree)と `--model` を渡す。TASK には機能の計画のパスを書く
+2. implementer と reviewer を 1 席ずつ spawn する。`--id` は `implementer` と
+   `reviewer` にする(org_id と seat_id をつないだ herdr の agent 名は 32 文字
+   までで、org_id が長いと、これより長い seat_id は spawn で拒否される)。
+   どちらにも `--cwd .`(この worktree)と `--model` を渡す。TASK には機能の
+   計画のパスを書く
 3. TASK・RESULT・レビューの往復は「ミッション」の 3〜5 のとおりに進める
    (reviewer の `GATE:` の扱いを含む)
 4. reviewer が通したら、implementer と reviewer を `ralph org stop` で止め、
@@ -75,8 +80,8 @@
 5. `scripts/archive-plan.sh` があれば、
    `./scripts/archive-plan.sh <機能の計画のパス>` で計画を
    `docs/plans/archive/` に移す。report と、計画の移動(スクリプトが書き換えた
-   ほかのファイルを含む)をコミットする。report をコミットせずに残すと、worktree に未追跡の
-   ファイルが残り、merge のあとの後始末(8)が止まる
+   ほかのファイルを含む)をコミットする。report をコミットせずに残すと、
+   worktree に未追跡のファイルが残り、merge のあとの後始末(この節の 8)が止まる
 6. `scripts/secret-scan-branch.sh` があれば
    `./scripts/secret-scan-branch.sh --strict` を打つ。終了コードが 0 で
    なければ push せずに止まり、出力を添えて人に上げる

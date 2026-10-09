@@ -369,8 +369,9 @@ type SpawnResult struct {
 //     AC-2b scope gate below either -- see that gate's doc comment for the
 //     fix this encodes -- and a retired [org.roles] / [org.permissions.roles]
 //     key added after the seat was spawned cannot reject the retry). With
-//     Reserve, the reservation is decided first, after max_orgs when the
-//     seat is not active (idempotentRespawn).
+//     Reserve, the reservation is decided before the seat is returned, and
+//     when the seat is not active, max_orgs is decided before the
+//     reservation (idempotentRespawn).
 //  2. ralph.toml retired-key check (retiredRoleConfigErr): a plain
 //     rejection (no `rejected` event, no receipt), run before stale-seat
 //     compensation and every manifest write, so only a genuinely new spawn
@@ -1207,22 +1208,22 @@ func (p SpawnParams) reservation() Reservation {
 // idempotentRespawn is the idempotent return for a spawn of a seat that is
 // already spawned: it returns that seat with no new record, as before,
 // unless p.Reserve is set (only possible for the leader seat). Then the
-// reservation, with p.Feature's binding, is decided first against the same
-// locked events (reservationDecision): an org without one records it, the
-// same set with the same binding passes, and a different set or binding, an
-// overlap with another running org, or a binding for an org that is running
-// without a reservation is refused. A leader spawned by `ralph org start
-// <task>` with no reservation is such a running org, so a `start --plan`
-// into its org_id stops here.
+// reservation, with p.Feature's binding, is decided before the seat is
+// returned, against the same locked events (reservationDecision): an org
+// without one records it, the same set with the same binding passes, and a
+// different set or binding, an overlap with another running org, or a
+// binding for an org that is running without a reservation is refused. A
+// leader spawned by `ralph org start <task>` with no reservation is such a
+// running org, so a `start --plan` into its org_id stops here.
 //
 // When the seat is not Active (a legacy ledger where an older ralph's
 // `disbanded` followed the leader's `spawned` with no `stopped`), its org may
 // not be running, and a reservation alone makes an org run (RunningOrgs). So
-// max_orgs is decided first with validateMaxOrgs, the max_orgs half of
-// ValidateOrgWideCapacity: once max_orgs other orgs run, the reservation is
-// refused with the same error a new org gets. max_total_seats is not
-// checked, because no seat is added. An Active seat's org is running, so it
-// skips this check.
+// max_orgs is decided before the reservation, with validateMaxOrgs, the
+// max_orgs half of ValidateOrgWideCapacity: once max_orgs other orgs run,
+// the reservation is refused with the same error a new org gets.
+// max_total_seats is not checked, because no seat is added. An Active seat's
+// org is running, so it skips this check.
 //
 // Every refusal is a plain rejection (no `rejected` event, no receipt): a
 // `rejected` for the seat would replace `spawned` as its latest state event

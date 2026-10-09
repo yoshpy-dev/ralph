@@ -1148,7 +1148,8 @@ func newOrgStatusCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"`reservation` array. For an org started with --plan, a\n" +
 			"`feature: <split>/<slug> branch <branch> worktree <path>` line follows\n" +
 			"it and --json adds a `feature` object (split, feature, digest, branch,\n" +
-			"worktree).",
+			"worktree). A binding read from a damaged record ends the line with\n" +
+			"`(incomplete record)` and adds `\"incomplete\": true` to the object.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireOrgID(*orgID); err != nil {
 				return err
@@ -1211,14 +1212,22 @@ type orgStatusJSON struct {
 }
 
 // orgFeatureJSON is the --json wire shape of an org's binding to a split
-// plan feature (org.FeatureBinding, which carries no json tags).
+// plan feature (org.FeatureBinding, which carries no json tags). Incomplete
+// is true for a binding read from a damaged record (some fields empty), and
+// omitted for a complete one, so a complete binding prints the five fields
+// only.
 type orgFeatureJSON struct {
-	Split    string `json:"split"`
-	Feature  string `json:"feature"`
-	Digest   string `json:"digest"`
-	Branch   string `json:"branch"`
-	Worktree string `json:"worktree"`
+	Split      string `json:"split"`
+	Feature    string `json:"feature"`
+	Digest     string `json:"digest"`
+	Branch     string `json:"branch"`
+	Worktree   string `json:"worktree"`
+	Incomplete bool   `json:"incomplete,omitempty"`
 }
+
+// incompleteFeatureNote ends the status feature line of a binding read from
+// a damaged record.
+const incompleteFeatureNote = " (incomplete record)"
 
 // orgReservation returns orgID's reservation (org.ActiveReservation) and the
 // split plan feature that reservation is bound to (org.ActiveFeature) for
@@ -1246,6 +1255,7 @@ func printStatusJSON(cmd *cobra.Command, result org.StatusResult, reservation []
 	if feature != nil {
 		payload.Feature = &orgFeatureJSON{
 			Split: feature.Split, Feature: feature.Feature, Digest: feature.Digest, Branch: feature.Branch, Worktree: feature.Worktree,
+			Incomplete: !feature.Complete(),
 		}
 	}
 	enc := json.NewEncoder(cmd.OutOrStdout())
@@ -1257,7 +1267,8 @@ func printStatusJSON(cmd *cobra.Command, result org.StatusResult, reservation []
 // when the org holds a reservation (also when it has no seat left, e.g. a
 // spawn that failed after reserving), then a `feature: <split>/<slug> branch
 // <branch> worktree <path>` line when that reservation is bound to a split
-// plan feature, then the corrupt-line warning.
+// plan feature (ending with incompleteFeatureNote when the binding was read
+// from a damaged record), then the corrupt-line warning.
 func printStatusTable(cmd *cobra.Command, result org.StatusResult, reservation []string, feature *org.FeatureBinding) {
 	out := cmd.OutOrStdout()
 	if len(result.Seats) == 0 {
@@ -1279,7 +1290,11 @@ func printStatusTable(cmd *cobra.Command, result org.StatusResult, reservation [
 		_, _ = fmt.Fprintf(out, "reserved: %s\n", strings.Join(reservation, ", "))
 	}
 	if feature != nil {
-		_, _ = fmt.Fprintf(out, "feature: %s/%s branch %s worktree %s\n", feature.Split, feature.Feature, feature.Branch, feature.Worktree)
+		note := ""
+		if !feature.Complete() {
+			note = incompleteFeatureNote
+		}
+		_, _ = fmt.Fprintf(out, "feature: %s/%s branch %s worktree %s%s\n", feature.Split, feature.Feature, feature.Branch, feature.Worktree, note)
 	}
 	if result.CorruptLines > 0 {
 		_, _ = fmt.Fprintf(out, "warning: %d corrupt manifest line(s) skipped\n", result.CorruptLines)

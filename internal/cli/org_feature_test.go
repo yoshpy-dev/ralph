@@ -477,6 +477,54 @@ func TestOrgStatus_FeatureLineOnlyForBoundReservation(t *testing.T) {
 	}
 }
 
+// TestOrgStatus_IncompleteFeatureBinding: a binding read from a damaged
+// reservation record (a key missing, a key given twice, no worktree) shows
+// the fields read on the feature line, which ends with (incomplete record),
+// and in the JSON feature object, which adds "incomplete": true.
+func TestOrgStatus_IncompleteFeatureBinding(t *testing.T) {
+	setupOrgStubPATH(t)
+	const wt = "/repo/.claude/worktrees/org-x"
+	for _, tc := range []struct {
+		name, details, worktree string
+		wantLine                string
+		wantJSON                map[string]any
+	}{
+		{"no digest", "paths=docs/b.md split=demo feature=b branch=fix/b", wt,
+			"feature: demo/b branch fix/b worktree " + wt + " (incomplete record)",
+			map[string]any{"split": "demo", "feature": "b", "digest": "", "branch": "fix/b", "worktree": wt, "incomplete": true}},
+		{"split twice", "paths=docs/b.md split=demo split=other feature=b digest=0123456789ab branch=fix/b", wt,
+			"feature: /b branch fix/b worktree " + wt + " (incomplete record)",
+			map[string]any{"split": "", "feature": "b", "digest": "0123456789ab", "branch": "fix/b", "worktree": wt, "incomplete": true}},
+		{"no worktree", "paths=docs/b.md split=demo feature=b digest=0123456789ab branch=fix/b", "",
+			"feature: demo/b branch fix/b worktree  (incomplete record)",
+			map[string]any{"split": "demo", "feature": "b", "digest": "0123456789ab", "branch": "fix/b", "worktree": "", "incomplete": true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stateDir := filepath.Join(t.TempDir(), "state")
+			appendSeedEvent(t, stateDir, org.ManifestEvent{OrgID: "x", Event: org.EventScopeReserved, Worktree: tc.worktree, Details: tc.details})
+
+			stdout, _, err := runOrgCmdStreams(t, "status", "--org-id", "x", "--state-dir", stateDir)
+			if err != nil {
+				t.Fatalf("status x: %v", err)
+			}
+			if got, want := outputLines(stdout), []string{"no seats", "reserved: docs/b.md", tc.wantLine}; !slices.Equal(got, want) {
+				t.Errorf("status = %q, want %q", got, want)
+			}
+			stdout, _, err = runOrgCmdStreams(t, "status", "--org-id", "x", "--state-dir", stateDir, "--json")
+			if err != nil {
+				t.Fatalf("status x --json: %v", err)
+			}
+			var feature map[string]any
+			if err := json.Unmarshal(orgStatusPayload(t, stdout)["feature"], &feature); err != nil {
+				t.Fatalf("status --json feature: %v\n%s", err, stdout)
+			}
+			if !maps.Equal(feature, tc.wantJSON) {
+				t.Errorf("feature = %v, want %v", feature, tc.wantJSON)
+			}
+		})
+	}
+}
+
 // latestSeatEventNamed returns the latest manifest event named name of
 // orgID/seatID under stateDir.
 func latestSeatEventNamed(t *testing.T, stateDir, orgID, seatID, name string) org.ManifestEvent {
