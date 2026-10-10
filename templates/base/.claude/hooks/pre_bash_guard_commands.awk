@@ -116,6 +116,9 @@ function data_first_ok(ctx,    v) {
 
 # cmd_pos(ctx): the index of the command-name word, or 0 when there is none
 # (or the command runs nothing, as command -v or exec >log). judge calls it.
+# It steps past reserved words, function and its name, assignments, and the
+# wrappers, which are the names in WRAPPER (pre_bash_guard_rules.awk), each
+# with its own branch below; the first other name is the command name.
 function cmd_pos(ctx,    i, n, r, nm) {
   n = WN[ctx]
   i = 1
@@ -125,6 +128,7 @@ function cmd_pos(ctx,    i, n, r, nm) {
     if (r == "function") { i += 2; continue }
     if (r ~ /^[A-Za-z_][A-Za-z0-9_]*[+]?=/) { i++; continue }
     nm = cname(ctx, i)
+    if (!(nm in WRAPPER)) return i
     if (nm == "env") i = skip_env(ctx, i + 1)
     else if (nm == "command") i = skip_command(ctx, i + 1)
     else if (nm == "exec") i = skip_opts(ctx, i + 1, "a", "")

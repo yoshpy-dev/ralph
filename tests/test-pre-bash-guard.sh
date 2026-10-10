@@ -56,13 +56,15 @@
 #      (--follow-tags, --no-thin, --soft), the five heredoc delimiter forms
 #      (to cat, to a file, to sh, to git commit -F -, and inside -m
 #      "$(cat ...)"), shells fed through -c, here-strings, pipes and
-#      heredocs, wrappers and unknown runners, comments, ${...}, process
-#      substitution, functions and subshells, a JSON %u escape; forms only
-#      the lexer denies ($(...), backticks, <(...), ${...}, sh -c, eval,
-#      env -S, here-strings, pipes and heredocs to a shell, git after find
-#      -exec, flock, watch, heredoc terminators and delimiters joined by a
-#      backslash-newline) so that each re-reading is tested without the
-#      sentinel; a here-string to git commit -F -; and the data regions of
+#      heredocs, wrappers (each name of WRAPPER before sh -c) and unknown
+#      runners, comments, ${...}, process substitution, functions and
+#      subshells, a JSON %u escape; forms only the lexer denies ($(...),
+#      backticks, <(...), ${...}, sh -c, eval, env -S, here-strings, pipes
+#      and heredocs to a shell, git after find -exec, flock, watch, heredoc
+#      terminators and delimiters joined by a backslash-newline) so that
+#      each re-reading is tested without the sentinel; a heredoc body line of
+#      two backslashes alone (it does not join the next line) and of three
+#      (it does); a here-string to git commit -F -; and the data regions of
 #      the sentinel: what keeps them (pipes to data readers, /dev/null,
 #      /dev/stderr, fd duplication, git tag -m, comments, the sudo word
 #      boundary, a region longer than one 512-character index block) and
@@ -87,13 +89,12 @@
 #      that lacks pre_bash_guard_rules.awk. The three .awk files, read with
 #      awk -f in the guard's order, parse as one program (no input and ls:
 #      exit 0 and no output; sudo ls: the rule name sudo). The DATACMD
-#      invariant: no name in DATACMD, read at run time from the three .awk
-#      files, is a reserved word (listed in the test) or a wrapper that
-#      function cmd_pos of pre_bash_guard_commands.awk steps past (its
-#      nm == "..." names), since the allowlist is what drops the data
-#      regions of a command that starts with a reserved word and of exec
-#      with a redirection; awk failing or a list that cannot be read fails
-#      the check
+#      invariant: no name in DATACMD is a reserved word (listed in the test)
+#      or a name in WRAPPER (the wrappers that cmd_pos steps past), both
+#      lists read at run time from the three .awk files, since the allowlist
+#      is what drops the data regions of a command that starts with a
+#      reserved word and of exec with a redirection; awk failing or an empty
+#      list fails the check
 #   G. AC7: the old guard (tests/fixtures/guard-1c4cea5a/, the version
 #      before this rewrite) decides the corpus of A's deny rows, B (with the
 #      self-review kinds), and C on each path, and is compared with the new
@@ -890,6 +891,21 @@ edge_deny=(
   'env -u HOME sudo ls'
   'xargs -I{} sudo ls {}'
   'xargs -n 1 sudo ls'
+  # Each name of WRAPPER (pre_bash_guard_rules.awk) and its branch in
+  # cmd_pos, one row each: the -n is denied (no_verify) only when cmd_pos
+  # steps past the wrapper and finds sh, whose -c string is then read as
+  # commands. Without the name in WRAPPER or without its branch, the wrapper
+  # is the command name, the -c string is not read, and no sentinel rule
+  # matches, so the row turns none.
+  $'env sh -c \'git commit -n -m x\''
+  $'command sh -c \'git commit -n -m x\''
+  $'exec sh -c \'git commit -n -m x\''
+  $'nohup sh -c \'git commit -n -m x\''
+  $'time sh -c \'git commit -n -m x\''
+  $'nice -n 5 sh -c \'git commit -n -m x\''
+  $'stdbuf -o0 sh -c \'git commit -n -m x\''
+  $'timeout 5 sh -c \'git commit -n -m x\''
+  $'xargs sh -c \'git commit -n -m x\''
   # Reserved words, separators, functions, subshells, comments.
   'sudo'
   'if true; then git reset --hard; fi'
@@ -938,6 +954,13 @@ edge_deny=(
   $'cat <<-EOF\n\tEO\\\nF\ngit push origin --force'
   $'cat <<EOF\nE\\\nO\\\nF\ngit push origin --force'
   $'cat <<EO\\\nF\n$(git push origin --force)\nEOF'
+  # A body line of two backslashes alone: the second is escaped by the first,
+  # so the line does not join the next one, EOF ends the body, and the
+  # git commit -n after it is a command. This row and its three-backslash
+  # twin in edge_none pin the lower bound of trailing_backslashes
+  # (pre_bash_guard_lex.awk), which counts the backslash at the start of
+  # the line too.
+  $'cat <<EOF\n\\\\\nEOF\ngit commit -n -m x\nEOF'
   # The same for git after a command that may run its arguments (the later
   # words that scan_words reads).
   $'find . -exec git push origin --force \\;'
@@ -1046,6 +1069,11 @@ edge_none=(
   $'cat <<EOF\n\\$(date) sudo ls\nEOF'
   $'cat <<\'EOF\' | grep x\nsudo ls\nEOF'
   $'git commit -F - <<EOF\nnever git push --force\nEOF'
+  # A body line of three backslashes alone: the third escapes the newline, so
+  # the line joins the EOF after it, which then does not end the body, and
+  # the git commit -n line is body text. The two-backslash twin in edge_deny
+  # is a command; together they pin the lower bound of trailing_backslashes.
+  $'cat <<EOF\n\\\\\\\nEOF\ngit commit -n -m x\nEOF'
   # Data regions: the arguments of commands that only read data, in
   # pipelines of such commands, with output off files.
   $'echo \'sudo ls\' 2>&1 | grep sudo | wc -l'
@@ -1495,54 +1523,42 @@ done
 # pattern, and a subshell meets only the ( rule, by its opening (. A brace
 # group, and an if, for, while, until or select with no ( or ) at the top
 # level, meet only the allowlist. So no DATACMD name may be a reserved word
-# or a wrapper that cmd_pos steps past.
-# DATACMD is read at run time, so a name added to it in any way is read:
-# awk runs the three .awk files with guard_awk and then one more file,
-# written to $workdir, whose BEGIN prints the keys of DATACMD and exits. It
-# runs after the guard's BEGIN, which fills DATACMD, and with no input the
-# guard's END prints nothing (the input [] case above), so the output is the
-# names, one per line. The wrappers are read from the nm == "..."
-# comparisons inside function cmd_pos of pre_bash_guard_commands.awk (they
-# are code, not data). When awk exits non-zero or either list is empty, the
-# check fails. The reserved words are listed here (the guard keeps no list
-# of them).
-commands_awk="$REPO_ROOT/.claude/hooks/pre_bash_guard_commands.awk"
+# or a name in WRAPPER (the wrappers that cmd_pos steps past: cmd_pos
+# returns any name that is not in WRAPPER as the command name).
+# Both lists are read at run time, so a name added to either in any way is
+# read, wherever the wrapper branches of cmd_pos are written: awk runs the
+# three .awk files with guard_awk and then one more file, written to
+# $workdir, whose BEGIN prints each key of DATACMD after "D " and each key
+# of WRAPPER after "W ", and exits. It runs after the guard's BEGIN, which
+# fills both lists, and with no input the guard's END prints nothing (the
+# input [] case above), so the output is the names, one per line. When awk
+# exits non-zero or either list is empty, the check fails. The reserved
+# words are listed here (the guard keeps no list of them).
 read -r -a reserved_words <<< 'if then elif else fi for while until do done case esac select function { } ! [[ ]] time coproc'
-label="F. DATACMD invariant: no name in DATACMD (read at run time from the three .awk files) is a reserved word or a wrapper that cmd_pos steps past"
-datacmd_dump="$workdir/datacmd-dump.awk"
-printf '%s\n' 'BEGIN { for (k in DATACMD) print k; exit }' > "$datacmd_dump"
-datacmd_names="$(LC_ALL=C awk "${guard_awk[@]}" -f "$datacmd_dump" < /dev/null 2> "$workdir/datacmd-dump.err")"
-datacmd_rc=$?
-wrapper_names="$(awk '
-  /^function cmd_pos\(/ { inside = 1 }
-  inside {
-    s = $0
-    while (match(s, /nm == "[^"]*"/)) {
-      print substr(s, RSTART + 7, RLENGTH - 8)
-      s = substr(s, RSTART + RLENGTH)
-    }
-  }
-  inside && /^}/ { exit }
-' "$commands_awk" 2>/dev/null)"
+label="F. DATACMD invariant: no name in DATACMD is a reserved word or a name in WRAPPER (both lists read at run time from the three .awk files)"
+list_dump="$workdir/list-dump.awk"
+printf '%s\n' 'BEGIN { for (k in DATACMD) print "D " k; for (k in WRAPPER) print "W " k; exit }' > "$list_dump"
+list_names="$(LC_ALL=C awk "${guard_awk[@]}" -f "$list_dump" < /dev/null 2> "$workdir/list-dump.err")"
+list_rc=$?
 datacmd_words=()
-while IFS= read -r w; do
-  [ -n "$w" ] && datacmd_words+=("$w")
-done <<< "$datacmd_names"
 wrapper_words=()
 while IFS= read -r w; do
-  [ -n "$w" ] && wrapper_words+=("$w")
-done <<< "$wrapper_names"
-if [ "$datacmd_rc" -ne 0 ]; then
-  record_fail "$label (awk exited $datacmd_rc reading DATACMD from the three .awk files: $(head -c 300 "$workdir/datacmd-dump.err"))"
+  case "$w" in
+    'D '?*) datacmd_words+=("${w#D }") ;;
+    'W '?*) wrapper_words+=("${w#W }") ;;
+  esac
+done <<< "$list_names"
+if [ "$list_rc" -ne 0 ]; then
+  record_fail "$label (awk exited $list_rc reading DATACMD and WRAPPER from the three .awk files: $(head -c 300 "$workdir/list-dump.err"))"
 elif [ "${#datacmd_words[@]}" -eq 0 ]; then
   record_fail "$label (no DATACMD name read from the three .awk files)"
 elif [ "${#wrapper_words[@]}" -eq 0 ]; then
-  record_fail "$label (no wrapper name read from function cmd_pos in $commands_awk)"
+  record_fail "$label (no WRAPPER name read from the three .awk files)"
 else
   offending=""
   for d in "${datacmd_words[@]}"; do
     for w in "${wrapper_words[@]}"; do
-      [ "$d" = "$w" ] && offending+=" $d (a wrapper that cmd_pos steps past);"
+      [ "$d" = "$w" ] && offending+=" $d (a name in WRAPPER);"
     done
     for w in "${reserved_words[@]}"; do
       [ "$d" = "$w" ] && offending+=" $d (a reserved word);"

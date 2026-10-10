@@ -1,6 +1,6 @@
 # pre_bash_guard_rules.awk holds the "Rule judgement", "The sentinel" and
 # "Main" sections of the awk program of pre_bash_guard.sh; Main has BEGIN
-# (with the command lists NOEXEC and DATACMD), the action that
+# (with the command lists NOEXEC, WRAPPER and DATACMD), the action that
 # collects the input, and END. How awk reads it together with the other two
 # .awk files is in the comment above the awk call in pre_bash_guard.sh.
 
@@ -396,22 +396,31 @@ BEGIN {
   # later words checked by scan_words. git has rules of its own.
   nx = split("echo printf man info whatis apropos which type grep egrep fgrep zgrep rg ag cat less more head tail wc sort cut tr jq ls test [ cd true false cp mv rm mkdir touch ln chmod stat file diff git", noexec_list, " ")
   for (; nx > 0; nx--) NOEXEC[noexec_list[nx]] = 1
+  # Wrappers: commands that run the command named after their options (and,
+  # for timeout, after its duration). cmd_pos steps past a word whose name is
+  # here, each wrapper with its own branch, and takes any other name as the
+  # command name. A name here needs its branch in cmd_pos and a branch needs
+  # its name here: without either, the wrapper is taken as the command name
+  # and the command after it is not read (a D row of
+  # tests/test-pre-bash-guard.sh pins each wrapper, and its F section reads
+  # this list).
+  nx = split("env command exec nohup time nice stdbuf timeout xargs", wrapper_list, " ")
+  for (; nx > 0; nx--) WRAPPER[wrapper_list[nx]] = 1
   # Commands that only read data (and print to stdout): their arguments are
   # data regions for the sentinel. sed, awk, man, less, more, sort, tee and
   # jq can run commands or write files, so they are not here; nor are test
   # and [, whose -v in zsh and bash 5 evaluates a subscript such as
   # arr[$(cmd)], nor stat, whose -A NAME in zsh (the zsh/stat module) does
   # the same with the subscript of NAME.
-  # No reserved word (if, for, case, {, ...) and no wrapper that cmd_pos
-  # steps past (env, command, exec, nohup, time, nice, stdbuf, timeout,
-  # xargs) may be listed here. For a command that starts with a reserved
-  # word, and for an exec with a redirection, the allowlist in end_cmd is
-  # what drops the data regions, because their first word is not in this
-  # list. Some forms meet the ( or ) rule of lex_cmds: a case clause meets
-  # the ) rule as well, by the ) after its pattern, and a subshell meets
-  # only the ( rule, by its opening (. A brace group, and an if, for, while,
-  # until or select with no ( or ) at the top level, meet only the
-  # allowlist. tests/test-pre-bash-guard.sh checks this.
+  # No reserved word (if, for, case, {, ...) and no name in WRAPPER may be
+  # listed here. For a command that starts with a reserved word, and for an
+  # exec with a redirection, the allowlist in end_cmd is what drops the data
+  # regions, because their first word is not in this list. Some forms meet
+  # the ( or ) rule of lex_cmds: a case clause meets the ) rule as well, by
+  # the ) after its pattern, and a subshell meets only the ( rule, by its
+  # opening (. A brace group, and an if, for, while, until or select with no
+  # ( or ) at the top level, meet only the allowlist.
+  # tests/test-pre-bash-guard.sh checks this.
   nx = split("echo printf cat head tail wc cut tr grep egrep fgrep zgrep rg ls diff cd true false which type", datacmd_list, " ")
   for (; nx > 0; nx--) DATACMD[datacmd_list[nx]] = 1
   SQ = sprintf("%c", 39)
