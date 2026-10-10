@@ -1,7 +1,7 @@
 # guard-test-gaps
 
-- Status: Draft
-- Approved: TBD
+- Status: Approved
+- Approved: 2026-10-10 sha256:94d656c12780
 - Owner: Claude Code
 - Date: 2026-10-10
 - Related request: ユーザーの依頼「テストの穴が 2 つを修正して」(2026-10-10)。PR #215(49ac046c)で `docs/tech-debt/README.md` のテストの穴の行に (h)(i) として残した 2 つ
@@ -109,10 +109,11 @@ None (guard の中の包みの判定を一覧に置き換え、テストの読�
 
 ## Progress checklist
 
-- [ ] Plan reviewed
-- [ ] Plan approved
+- [x] Plan reviewed
+- [x] Plan approved
+  - 2026-10-10: ユーザーが承認ゲートで Approve。承認の前に、consult(consult-plan-testgaps)の指摘(`CMDSKIP` は検査の網を広げないので外す、包みを散文で並べたコメント 2 か所を S1 で直す、mutation を S1 の確認に入れる)と、Codex の plan advisory の MEDIUM(一覧と分岐がずれると `sh -c` の中の `--no-verify` を見逃すが今のテストでは気づけない。「安全側」は誤り)を反映し、包みごとの 9 行と 18 通りの mutation を AC3 にした。9 行は 49ac046c の guard で deny(jq あり・なし)を確かめた。図解ページは描いていない(Visual review を参照)
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
