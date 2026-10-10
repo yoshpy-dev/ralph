@@ -52,10 +52,10 @@ None (テストに検査を 1 つ足し、tech-debt の 1 文を直すだけで�
 
 ## Acceptance criteria
 
-- [ ] AC1: 新しい検査が、実行時の `WRAPPER` の名前ごとに 2 形を jq あり・なしで guard に渡し、9 つの名前すべてで PASS する。`WRAPPER` が読めないときは FAIL になる
-- [ ] AC2: 写しで `WRAPPER` に 10 個目の名前(分岐のない名前、たとえば `chrt`)を足すと、新しい検査がその名前を出して FAIL になる。写しで `cmd_pos` の分岐を 1 つ消すと(9 通り)、どれも新しい検査が FAIL になる
-- [ ] AC3: `bash tests/test-pre-bash-guard.sh` が、今の 2,090 件と新しい検査を含めて全部通る(macOS の awk、mawk、gawk)。guard のファイルは変わっていない(`git diff` が空)
-- [ ] AC4: `./scripts/run-verify.sh` が rc 0。`docs/tech-debt/README.md` の (h) の閉じの文が、10 個目の包みの行の足し忘れをこの PR で解消した、と書く
+- [x] AC1: 新しい検査が、実行時の `WRAPPER` の名前ごとに 2 形を jq あり・なしで guard に渡し、9 つの名前すべてで PASS する。`WRAPPER` が読めないときは FAIL になる
+- [x] AC2: 写しで `WRAPPER` に 10 個目の名前(分岐のない名前、たとえば `chrt`)を足すと、新しい検査がその名前を出して FAIL になる。写しで `cmd_pos` の分岐を 1 つ消すと(9 通り)、どれも新しい検査が FAIL になる
+- [x] AC3: `bash tests/test-pre-bash-guard.sh` が、今の 2,090 件と新しい検査を含めて全部通る(macOS の awk、mawk、gawk)。guard のファイルは変わっていない(`git diff` が空)
+- [x] AC4: `./scripts/run-verify.sh` が rc 0。`docs/tech-debt/README.md` の (h) の閉じの文が、10 個目の包みの行の足し忘れをこの PR で解消した、と書く
 
 ## Implementation outline
 
