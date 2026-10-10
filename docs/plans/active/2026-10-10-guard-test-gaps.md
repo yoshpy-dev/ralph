@@ -114,6 +114,8 @@ None (guard の中の包みの判定を一覧に置き換え、テストの読�
   - 2026-10-10: ユーザーが承認ゲートで Approve。承認の前に、consult(consult-plan-testgaps)の指摘(`CMDSKIP` は検査の網を広げないので外す、包みを散文で並べたコメント 2 か所を S1 で直す、mutation を S1 の確認に入れる)と、Codex の plan advisory の MEDIUM(一覧と分岐がずれると `sh -c` の中の `--no-verify` を見逃すが今のテストでは気づけない。「安全側」は誤り)を反映し、包みごとの 9 行と 18 通りの mutation を AC3 にした。9 行は 49ac046c の guard で deny(jq あり・なし)を確かめた。図解ページは描いていない(Visual review を参照)
 - [x] Branch created
 - [x] Implementation started
+  - S1 完了(468fc73c、implementer/opus): `rules.awk` の BEGIN に `WRAPPER`、`cmd_pos` に「`WRAPPER` にない名前はその位置を返す」、不変条件の検査は実行時の DATACMD と `WRAPPER` を 1 つの dump で読む(ソースの `nm ==` は読まない)、D 節に包みの 9 行と (i) の 2 行。テストは 2,090/0(macOS、gawk、mawk)。AC2: `exec`・`if` を DATACMD に足すと FAIL、`timeout` の分岐を `cmd_pos` の外に移しても検査に残る(前の読み方では抜けた)。AC3: 18 通りすべて赤。AC4: 下限を `q > a` にすると 2 行とも赤。base との判定の比較は 1,938 回で違い 0。handoff の外で、テストのヘッダーの D 項目に 2 文を足した。plan の AC5 の「PR #215 の test の入力(3,913 件)」での比較は S1 では回していない(/test で回す)
+  - S2 完了(この commit、inline、docs だけ): tech-debt のテストの穴の行の (h)(i) を、Debt・Impact・Why deferred・Trigger の 4 列で解消済みにし、Related にこの plan を足した
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
