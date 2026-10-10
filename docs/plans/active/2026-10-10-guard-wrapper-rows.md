@@ -1,7 +1,7 @@
 # guard-wrapper-rows
 
-- Status: Draft
-- Approved: TBD
+- Status: Approved
+- Approved: 2026-10-10 sha256:595308ce450b
 - Owner: Claude Code
 - Date: 2026-10-10
 - Related request: ユーザーの依頼「残したものを修正して」(2026-10-10)。PR #217(19b06925)で残したもの: 新しい包みを足すときに、`edge_deny` の包みの行を足し忘れても、テストで捕まらない
@@ -93,10 +93,11 @@ None (テストに検査を 1 つ足し、tech-debt の 1 文を直すだけで�
 
 ## Progress checklist
 
-- [ ] Plan reviewed
-- [ ] Plan approved
+- [x] Plan reviewed
+- [x] Plan approved
+  - 2026-10-10: ユーザーが承認ゲートで Approve。承認の前に、consult(consult-plan-wraprows)の指摘(guard を直接動かす前例はない、`decide` と同じ呼び方で動かす)を Assumptions に反映した。Codex の plan advisory は指摘なし。前提(9 つの包みは 2 形のちょうど一方が deny、一覧にない `chrt` は 2 形とも none)は main 382c18c8 の guard で確かめた。図解ページは描いていない(Visual review を参照)
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
