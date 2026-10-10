@@ -161,6 +161,7 @@
 ## Test gaps
 
 - E13: `wait --inbox --timeout-ms 0` が「件が届くまで無期限に待つ」ことを固定するテストがない(上の節)。HEAD の動きは probe と枝のバイナリで確かめた。足すなら、空の受信箱で `WaitInbox(0)` を呼んで、あとから escalate した件を返すことを見る 1 本で足りる(probe がその形)。足すかどうかは orchestrator の判断に任せる
+  - 追記(この報告のあと): orchestrator が足すと決め、a3bd5cff で `TestWaitInbox_NoTimeoutReturnsAnItemThatArrivesLater` を足した。空の受信箱で `WaitInbox(0)` を始め、ポーリング 10 回分の間に返らないことを確かめてから escalate し、e1 が返ることを見る。E13 を `go test -overlay` で当てると、このテストだけが 20 回とも落ちた。HEAD では `go test ./internal/org/ -count=1` と、`-race -count=20` のこのテストが通った
 - 本物の osascript でデスクトップ通知が出ることは確かめていない。依頼どおり osascript のない PATH で打ち、AppleScript の文字列は `osacompile` で構文だけ確かめた。darwin 以外の `skipped` の枝(`TestEscalate_NoDesktopNotificationOffDarwinIsSkipped`)は手元では skip され、Linux の CI でだけ走る
 - プロセスをまたぐ同時の escalate では、HEAD の 1,480 件で ID の重なりはなかった。ただし上の表のとおり、この方法でロックの外し方を落とせるのは 4 回に 1 回ほどなので、プロセスをまたぐロックの保証は、goroutine のテストと、manifest と同じ flock の仕組みであることに頼っている
 - `appendLocked` の open・write・close の失敗、`Inbox == nil` の防御、CLI の受信箱の読み込みの失敗は、テストでは通らない。open の失敗は 0444 の確認でバイナリから通した。ほかは起こしにくい防御の枝
