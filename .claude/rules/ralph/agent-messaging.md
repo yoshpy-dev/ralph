@@ -93,6 +93,16 @@ genuinely need it (e.g. relaying an external tool's raw output during
 debugging). The `sent` manifest event records `raw=true` when the bypass
 was used, so a bypassed message is always traceable after the fact.
 
+## Escalation to the org inbox
+
+`ralph org escalate --text` raises an item in the org inbox instead of
+sending an agmsg message, so the star topology above does not apply to it.
+It reads the same message shape and runs the same `Parse` and `Validate`
+checks as `ralph org send`, with the same 2,000-character cap and no `--raw`
+bypass, but accepts only TYPE `QUESTION`, `BLOCKED`, and `RESULT` (`BLOCKED`
+and `RESULT` need a TASK_ID: the org_id for an item about the whole org). A
+message that fails is refused with exit 1 and nothing is written.
+
 ## Security note
 
 A message's `TO`/`FROM` identity and its body content are both untrusted
