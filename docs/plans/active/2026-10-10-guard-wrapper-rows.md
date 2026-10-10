@@ -101,11 +101,14 @@ None (テストに検査を 1 つ足し、tech-debt の 1 文を直すだけで�
   - S1 完了(0eebc7e7、implementer/opus): F 節の DATACMD の検査のあとに、実行時の `WRAPPER` の名前ごとに 2 形(`W sh -c …`、`W 5 sh -c …`)を jq あり・なしで guard に渡す検査を足した(名前と経路の組ごとに 1 件、9×2=18 件)。guard の実行は `decide` から切り出した `run_guard` を共有する。ヘッダーの F 項目と `edge_deny` の 9 行の上のコメントを直した。テストは 2,108/0(macOS、mawk、gawk)。AC2: `chrt` を `WRAPPER` に足すと新しい検査が `chrt` を出して FAIL(9 行は通ったまま)、分岐を 1 つずつ消した 9 通りもすべて FAIL、`WRAPPER` が空でも FAIL。guard のファイルは変わっていない。handoff の外で、ヘッダーの D 項目の「each name of WRAPPER」を「the nine names」に直した
   - self-review(336f5856、reviewer/sonnet): Merge yes、MEDIUM 1、LOW 4。MEDIUM 1(FAIL の文言が「分岐の足し忘れ」を挙げない)と LOW 1・2(「the nine names」などのコメントの言い過ぎ)は S3 で直す。LOW 3(新しい検査は分岐があることしか見ず、包みの引数の読み方は見ないのに、tech-debt とテストのヘッダーが「名前と分岐だけで足りる」と読める)は、テストのヘッダーを S3b で、tech-debt を sync-docs で直す。LOW 4(検査を関数に出す)は任意なので見送る
   - S3 完了(35f00d33、implementer/sonnet): FAIL の文言に「`WRAPPER` にあって `cmd_pos` に分岐がないなら分岐を足す」を先に書き、コメントの「the nine names」「the same rows」「exact deny JSON」「so the two forms are compared here」を直した。変えたのはコメントと FAIL の文字列だけ。テストは 2,108/0
-  - S3b(この commit、inline、コメントだけ): テストのヘッダーの F 項目に、この検査は包みの引数の読み方を見ない(D の手書きの行が見る)と書いた。テストは 2,108/0
+  - S3b(fc97d108、inline、コメントだけ): テストのヘッダーの F 項目に、この検査は包みの引数の読み方を見ない(D の手書きの行が見る)と書いた。テストは 2,108/0
   - 再 review(65d608b9、reviewer/sonnet): Merge yes。MEDIUM 1 と LOW 1・2 と LOW 3 のテスト側は直った。S3 の書き換えで LOW 6 が入った(`edge_deny` のコメントの「only here are nice -n 5 and stdbuf -o0 run」は偽。`nice -n 5 sudo ls` などの行がほかにある。「a form with a duration」も 8 つの包みでは当たらない)
-  - S3c(この commit、inline、コメントだけ): LOW 6 を直した。2 形は決まった形で、`5` は `timeout` には時間、ほかの 8 つにはコマンド名になる。包みごとの引数(`nice -n 5`、`stdbuf -o0`、`timeout 5`)を `sh -c` の前で動かすのはこの 9 行だけ、と書いた。テストは 2,108/0
+  - S3c(6ae86c5f、inline、コメントだけ): LOW 6 を直した。2 形は決まった形で、`5` は `timeout` には時間、ほかの 8 つにはコマンド名になる。包みごとの引数(`nice -n 5`、`stdbuf -o0`、`timeout 5`)を `sh -c` の前で動かすのはこの 9 行だけ、と書いた。テストは 2,108/0
   - S2 完了(bf3241dc、inline、docs だけ): tech-debt のテストの穴の行の (h) の閉じの文で、10 個目の包みの行の足し忘れをこの PR で解消したと書き、Related にこの plan を足した
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+  - verify(f9127f47、verifier): pass。AC1・AC2 は Met、AC3・AC4 は一部(テスト全件と test mode は /test)。指摘は LOW 2 件と情報 3 件。V-1(`edge_deny` のコメントの「only these rows run each wrapper with arguments of its own」は、B 節の `xargs -I{} sh -c {}` も自分の引数を付けた `xargs` を `sh -c` の前で動かすので、字面どおりには広い)は、中身(引数の読み方を `sh -c` の前で押さえるのは D の 9 行だけ)が保たれるので、このファイルを次に触るときに直すことにして残した。V-2(tech-debt の閉じの文)は sync-docs で直した
+  - test(f55e8a5a、tester): pass。`./scripts/run-test.sh` rc 0(shell 40 本 3,972 件、Go 8 packages)、guard のテストは 2,108/0(macOS の BWK awk、mawk、gawk のどれでも)。AC2 の mutation 11 個は 3 つの awk のすべて(33 runs)で赤。base のテストのファイルは HEAD の guard で 3 つの awk とも 2,090/0 で、節ごとの数は F の 68 だけが新しい 18 件ぶん多く、ほかは同じ
+  - sync-docs(この commit、doc-maintainer): tech-debt のテストの穴の行の (h) の閉じの文を直した(V-2、self-review LOW 3)。新しい検査は分岐があること(2 形が `sh -c` に届くこと)だけを見て、分岐が包みの引数を読む読み方(`timeout` の `+ 1`、`nice` の `n` オプション)は見ない、それは `edge_deny` の手書きの行だけが押さえる、と書き、mutation の結果は残した。Related にテストの report を足した(Mutation、「all caught」の根拠)。ほかの docs に drift はなかった。V-1 は直さず残した(直すのはテストのファイルのコメント 1 文で、この sync-docs の範囲外。次にこのファイルを触るときに直す)
+- [x] Review artifact created
+- [x] Verification artifact created
+- [x] Test artifact created
 - [ ] PR created
