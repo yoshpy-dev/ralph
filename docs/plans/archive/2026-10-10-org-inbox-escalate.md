@@ -160,4 +160,4 @@ Critical forks: 人に届く経路(上の 1 つ目)。consult が案 A を判定
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
-- [ ] PR created
+- [x] PR created(#220)
