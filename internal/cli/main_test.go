@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -26,6 +27,11 @@ import (
 // seam, every runOrg*-based test would silently start reading the
 // developer's real ~/.codex/sessions and waiting out the real 8s poll
 // timeout on every codex spawn/stop.
+//
+// It also pins orgDesktopNotifyOverride to a stub that does nothing, so no
+// runOrg*-based `ralph org escalate` or `ralph org inbox notify` shows a
+// real desktop notification (osascript on darwin). A test that checks the
+// notification swaps in its own stub and restores this one.
 func TestMain(m *testing.M) {
 	doctorShellAliasEnv = func() (shellAliasEnv, error) {
 		return shellAliasEnv{Home: filepath.Join(os.TempDir(), "ralph-cli-test-no-such-home")}, nil
@@ -37,5 +43,6 @@ func TestMain(m *testing.M) {
 	orgCodexSessionsDirOverride = filepath.Join(os.TempDir(), "ralph-cli-test-no-such-home", ".codex-sessions-do-not-exist")
 	orgCodexModelObserveTimeoutOverride = 50 * time.Millisecond
 	orgCodexModelObserveIntervalOverride = 5 * time.Millisecond
+	orgDesktopNotifyOverride = func(context.Context, string) error { return nil }
 	os.Exit(m.Run())
 }

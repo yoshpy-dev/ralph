@@ -263,11 +263,14 @@ type watchStatusFile struct {
 	SeatSnapshots  map[string]*watchSeatSnapshot    `json:"seat_snapshots,omitempty"`
 }
 
-// escalationRecord is one JSON line appended to EscalationsRelName (AC-5).
+// escalationRecord is one JSON line appended to EscalationsRelName: a
+// watch escalation (AC-5) carries alert_id, and an inbox item sent to the
+// human path (escalate.go) carries inbox_id instead.
 type escalationRecord struct {
 	TS      string `json:"ts"`
 	OrgID   string `json:"org_id"`
-	AlertID string `json:"alert_id"`
+	AlertID string `json:"alert_id,omitempty"`
+	InboxID string `json:"inbox_id,omitempty"`
 	Subject string `json:"subject,omitempty"`
 	Reason  string `json:"reason"`
 }
@@ -377,8 +380,22 @@ func realEscalate(ctx context.Context, message string) error {
 	if runtime.GOOS != "darwin" {
 		return nil
 	}
-	script := fmt.Sprintf("display notification %q with title \"ralph org watch\"", message)
-	return exec.CommandContext(ctx, "osascript", "-e", script).Run()
+	return osascriptNotify(ctx, "ralph org watch", message)
+}
+
+// osascriptNotify shows a macOS notification via osascript. realEscalate
+// and the inbox's human path (escalate.go) share it; the error carries
+// osascript's own output, which the inbox records in its notified event.
+func osascriptNotify(ctx context.Context, title, message string) error {
+	script := fmt.Sprintf("display notification %q with title %q", message, title)
+	out, err := exec.CommandContext(ctx, "osascript", "-e", script).CombinedOutput()
+	if err != nil {
+		if detail := strings.TrimSpace(string(out)); detail != "" {
+			return fmt.Errorf("%w: %s", err, detail)
+		}
+		return err
+	}
+	return nil
 }
 
 // ResolveWatchInterval returns the effective pulse-cycle interval RunWatch

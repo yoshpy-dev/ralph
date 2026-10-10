@@ -229,6 +229,25 @@ type Org struct {
 	// means the script-backed implementation, scriptFeatureWorktrees; tests
 	// set a fake.
 	Worktrees FeatureWorktrees
+	// Inbox is the org inbox (inbox.go) Escalate records to and
+	// NotifyInboxItem reads (escalate.go). nil means no inbox: both return
+	// an error.
+	Inbox *InboxStore
+	// EscalationsPath is the escalations.jsonl the inbox's human path
+	// appends to (escalate.go), the same file `ralph org watch` writes:
+	// EscalationsPathIn(<state dir>). Empty means no human-path record, so
+	// an escalate is never reported as notified.
+	EscalationsPath string
+	// DesktopNotify overrides the inbox's best-effort desktop notification.
+	// nil (the field's default) means osascript on darwin and no
+	// notification elsewhere; tests set a stub so no test shows a real
+	// notification.
+	DesktopNotify EscalateFunc
+	// InboxPollInterval overrides how often WaitInbox reads the inbox again
+	// while no item is open. Zero (the field's default) means "use
+	// defaultInboxPollInterval" (1s) -- tests set a tiny value so a wait
+	// for an item that arrives later returns fast.
+	InboxPollInterval time.Duration
 }
 
 func (o *Org) now() string {
