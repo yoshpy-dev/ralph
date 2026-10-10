@@ -56,8 +56,9 @@
 #      (--follow-tags, --no-thin, --soft), the five heredoc delimiter forms
 #      (to cat, to a file, to sh, to git commit -F -, and inside -m
 #      "$(cat ...)"), shells fed through -c, here-strings, pipes and
-#      heredocs, wrappers (nine hand-written rows before sh -c, one for each
-#      name WRAPPER had when they were written) and unknown runners,
+#      heredocs, wrappers (with wrapper_deny: hand-written rows of a
+#      wrapper before sh -c 'git commit -n -m x', one for each name WRAPPER
+#      had when they were written, nine today) and unknown runners,
 #      comments, ${...}, process substitution, functions and
 #      subshells, a JSON %u escape; forms only the lexer denies ($(...),
 #      backticks, <(...), ${...}, sh -c, eval, env -S, here-strings, pipes
@@ -98,11 +99,18 @@
 #      list fails the check. Wrapper rows built from that run-time WRAPPER
 #      list: each name W runs before sh -c 'git commit -n -m x' and before
 #      5 sh -c 'git commit -n -m x' on each path, and at least one of the two
-#      forms must be denied. The nine rows in D catch a name removed from
-#      WRAPPER; this check catches a name in WRAPPER whose branch is missing
-#      from cmd_pos, also for a new wrapper without a hand-written row in D.
-#      It does not check how the branch reads the wrapper's own arguments
-#      (a hand-written row in D does). An empty list fails it too
+#      forms must be denied. This catches a name in WRAPPER whose branch is
+#      missing from cmd_pos, also for a new wrapper without a hand-written
+#      row. It does not check how the branch reads the wrapper's own
+#      arguments (a hand-written row of wrapper_deny in D does). Then the
+#      hand-written rows against the same list: one row or more of
+#      wrapper_deny for each name, the first word of every row in WRAPPER
+#      (so a name removed from WRAPPER fails too), every row ending in
+#      sh -c 'git commit -n -m x', and on each path each row's control (that
+#      ending replaced by sh -c 'git commit -m x') none, so that the row's
+#      deny comes only from the -n inside sh -c. This checks that the rows
+#      exist and their shape, not whether a row puts its wrapper's own
+#      arguments before sh -c. An empty list fails both checks
 #   G. AC7: the old guard (tests/fixtures/guard-1c4cea5a/, the version
 #      before this rewrite) decides the corpus of A's deny rows, B (with the
 #      self-review kinds), and C on each path, and is compared with the new
@@ -909,29 +917,7 @@ edge_deny=(
   'env -u HOME sudo ls'
   'xargs -I{} sudo ls {}'
   'xargs -n 1 sudo ls'
-  # One row for each name WRAPPER had when these rows were written (nine;
-  # pre_bash_guard_rules.awk): the -n is denied (no_verify) only when
-  # cmd_pos steps past the wrapper and finds sh, whose -c string is then
-  # read as commands. Without the name in WRAPPER or without its branch in
-  # cmd_pos, the wrapper is the command name, the -c string is not read, and
-  # no sentinel rule matches, so the row turns none. These rows catch a name
-  # removed from WRAPPER (the check in F only sees the names that are in
-  # it). A name in WRAPPER whose branch is missing from cmd_pos, including a
-  # new wrapper added without a row here, is caught by the wrapper rows of
-  # F. For each name of the WRAPPER list read at run time, those run two
-  # fixed forms, W sh -c ... and W 5 sh -c ... (the 5 is a duration for
-  # timeout and a command name for the other eight), not the rows below:
-  # only these rows run each wrapper with arguments of its own (nice -n 5,
-  # stdbuf -o0, timeout 5) before sh -c.
-  $'env sh -c \'git commit -n -m x\''
-  $'command sh -c \'git commit -n -m x\''
-  $'exec sh -c \'git commit -n -m x\''
-  $'nohup sh -c \'git commit -n -m x\''
-  $'time sh -c \'git commit -n -m x\''
-  $'nice -n 5 sh -c \'git commit -n -m x\''
-  $'stdbuf -o0 sh -c \'git commit -n -m x\''
-  $'timeout 5 sh -c \'git commit -n -m x\''
-  $'xargs sh -c \'git commit -n -m x\''
+  # Wrappers before sh -c: wrapper_deny, after this list.
   # Reserved words, separators, functions, subshells, comments.
   'sudo'
   'if true; then git reset --hard; fi'
@@ -1049,6 +1035,46 @@ edge_deny=(
   'echo $a[ ; git push origin --force'
 )
 check_modes D deny absent -- "${edge_deny[@]}"
+
+# Wrappers before sh -c: one row for each name WRAPPER had when these rows
+# were written (pre_bash_guard_rules.awk; nine today). The -n is denied
+# (no_verify) only when cmd_pos steps past the wrapper and finds sh, whose
+# -c string is then read as commands. Without the name in WRAPPER or without
+# its branch in cmd_pos, the wrapper is the command name, the -c string is
+# not read, and no sentinel rule matches, so the row turns none. Other rows
+# also run a wrapper with arguments of its own (nice -n 5 sudo ls,
+# xargs -I{} sudo ls {} and xargs -I{} flock /tmp/l git push -f in
+# edge_deny; echo 'sudo ls' | xargs -I{} sh -c {} and
+# echo x | xargs sh -c 'git reset --hard' in B), but each holds a match of a
+# sentinel rule (sudo, a force push, a hard reset), so it stays denied even
+# when cmd_pos misreads the wrapper: with the xargs branch of cmd_pos removed
+# from a copy of the guard, the xargs rows among them stayed deny on both
+# paths, while xargs sh -c 'git commit -n -m x' turned none. git commit -n
+# matches no sentinel rule, so in these rows the deny comes only from cmd_pos
+# stepping past the wrapper and reading the sh -c string: only these rows
+# fail when a branch misreads its wrapper's own arguments.
+#
+# A check in F (after the wrapper rows built from the run-time WRAPPER)
+# requires one row or more here for each WRAPPER name, the first word of
+# every row to be in WRAPPER, and every row to end in
+# sh -c 'git commit -n -m x'; each row's control, that ending replaced by
+# sh -c 'git commit -m x', must be none, so that nothing else in the row
+# (the wrapper or its arguments) matches a rule. A wrapper that takes
+# arguments of its own needs a row that puts them before sh -c, as
+# nice -n 5, stdbuf -o0 and timeout 5 do here; the test cannot check that a
+# row does (it does not know the real tool's options).
+wrapper_deny=(
+  $'env sh -c \'git commit -n -m x\''
+  $'command sh -c \'git commit -n -m x\''
+  $'exec sh -c \'git commit -n -m x\''
+  $'nohup sh -c \'git commit -n -m x\''
+  $'time sh -c \'git commit -n -m x\''
+  $'nice -n 5 sh -c \'git commit -n -m x\''
+  $'stdbuf -o0 sh -c \'git commit -n -m x\''
+  $'timeout 5 sh -c \'git commit -n -m x\''
+  $'xargs sh -c \'git commit -n -m x\''
+)
+check_modes D deny absent -- "${wrapper_deny[@]}"
 
 edge_none=(
   'echo \"git reset --hard\"'
@@ -1599,12 +1625,15 @@ fi
 
 # Wrapper rows built from the WRAPPER list read above (wrapper_words). A
 # name in WRAPPER whose branch is missing from cmd_pos is returned by
-# cmd_pos as the command name, so the sh -c after it is not read; the nine
-# wrapper rows of edge_deny (D) are written by hand and miss a new name
-# added that way. Each name W runs here, on each path, in the forms of
-# wrapper_row_forms (W sh -c '...' and W 5 sh -c '...': timeout takes the
-# next word as its duration, the other eight read the next word as the
-# command), and at least one form must be denied with exit 0. The guard
+# cmd_pos as the command name, so the sh -c after it is not read; the rows
+# of wrapper_deny (D) are written by hand, and a new name added without a
+# row there has none (the check after this one fails on that). Each name W
+# runs here, on each path, in the forms of wrapper_row_forms
+# (W sh -c '...' and W 5 sh -c '...': timeout takes the next word as its
+# duration, the other wrappers of today read the next word as the
+# command), and at least one form must be denied with exit 0. The forms
+# give no wrapper an argument of its own (nice -n 5, stdbuf -o0), so they
+# do not pin how a branch reads one; the rows of wrapper_deny do. The guard
 # runs directly, through run_guard as decide runs a queued case, not
 # through the queue: run_queue runs after F and G, and a queued case has one
 # expected decision, while this check needs at least one of two decisions
@@ -1647,6 +1676,87 @@ else
     done
   done
 fi
+
+# The hand-written rows of wrapper_deny (D) against the same run-time
+# WRAPPER list. The names in WRAPPER and the first words of the rows
+# (${row%% *}: each row starts with the bare name) must be the same set: a
+# name with no row is a wrapper added without its hand-written row, and a
+# first word not in WRAPPER is a name removed from the list (its row in D
+# turns none too) or a row for a wrapper the guard does not have. Every row
+# must end in wrapper_row_tail: git commit -n matches no sentinel rule,
+# while a row with other content can hold a sentinel match and stay denied
+# whatever cmd_pos does. Each row's control, that ending replaced by
+# wrapper_row_control, then runs on each path through run_guard as the
+# check above runs its forms, and must be none with exit 0: then the deny
+# of the row comes only from reading git commit -n inside sh -c, not from
+# the wrapper or the wrapper's arguments (time -o 'sudo log' sh -c ... keeps
+# the ending, but its control is denied for the sudo word). This checks
+# that the rows exist and their shape, not that a row pins how its branch
+# reads the wrapper's own arguments: a wrapper that takes arguments of its
+# own needs a row that puts them before sh -c, and the test does not know
+# the real tool's options. All problems are listed in one failure. An empty
+# WRAPPER list fails this check too.
+wrapper_row_tail=$' sh -c \'git commit -n -m x\''
+wrapper_row_control=$' sh -c \'git commit -m x\''
+label="F. hand-written wrapper rows (wrapper_deny) match the run-time WRAPPER: one row or more for each name, every row's first word in it, every row ending in$wrapper_row_tail"
+if [ "${#wrapper_words[@]}" -eq 0 ]; then
+  record_fail "$label (no WRAPPER name was read from the three .awk files, so the rows were not compared)"
+else
+  row_problems=""
+  for w in "${wrapper_words[@]}"; do
+    found=no
+    for row in "${wrapper_deny[@]}"; do
+      [ "${row%% *}" = "$w" ] && found=yes
+    done
+    [ "$found" = yes ] || row_problems+=" $w is in WRAPPER but has no row: add a row for $w to wrapper_deny; if $w takes arguments of its own, put them before sh -c in that row;"
+  done
+  for row in "${wrapper_deny[@]}"; do
+    found=no
+    for w in "${wrapper_words[@]}"; do
+      [ "${row%% *}" = "$w" ] && found=yes
+    done
+    [ "$found" = yes ] || row_problems+=" the row $(json_escape "$row") starts with ${row%% *}, which is not in WRAPPER: the name was removed from WRAPPER, or the row names a wrapper the guard does not have;"
+    case "$row" in
+      *"$wrapper_row_tail") ;;
+      *) row_problems+=" the row $(json_escape "$row") does not end in$wrapper_row_tail: a row with other content can hold a sentinel match and stay denied whatever cmd_pos does;" ;;
+    esac
+  done
+  if [ -z "$row_problems" ]; then
+    record_pass "$label (${#wrapper_words[@]} names, ${#wrapper_deny[@]} rows; this checks only that the rows exist and their shape, not whether a row pins its wrapper's own arguments)"
+  else
+    record_fail "$label (${#wrapper_words[@]} names, ${#wrapper_deny[@]} rows:$row_problems)"
+  fi
+fi
+for row in "${wrapper_deny[@]}"; do
+  case "$row" in
+    *"$wrapper_row_tail") control="${row%"$wrapper_row_tail"}$wrapper_row_control" ;;
+    *) control="" ;;
+  esac
+  for p in jq no-jq; do
+    label="F. control of a wrapper_deny row: $(json_escape "$row") with its ending replaced by$wrapper_row_control -> none [$p]"
+    if [ -z "$control" ]; then
+      record_fail "$label (the row does not end in$wrapper_row_tail, so its control cannot be built)"
+      continue
+    fi
+    if [ "$p" = jq ]; then
+      if [ "$have_jq" != yes ]; then
+        record_skip "$label (jq not on PATH)"
+        continue
+      fi
+      use_path="$real_path"
+    else
+      use_path="$minimal_path"
+    fi
+    escaped="$(json_escape "$control")"
+    payload_json "$escaped" > "$workdir/wrapper-control.json"
+    read -r got rc <<< "$(run_guard "$HOOK" "$use_path" "$workdir/wrapper-control.json")"
+    if [ "$got" = none ] && [ "$rc" = 0 ]; then
+      record_pass "$label (got: $escaped -> $got, exit $rc)"
+    else
+      record_fail "$label (the row $(json_escape "$row"): its control $escaped -> $got (exit $rc), not none: the deny of this row does not come only from reading git commit -n inside sh -c (its wrapper or the wrapper's arguments match a rule), so it pins nothing about cmd_pos; rewrite the row)"
+    fi
+  done
+done
 
 # ── G. AC7: the old guard's denies, kept or listed ──────────────────────
 # The cases of C that the old guard denies and the new one lets through:
