@@ -29,9 +29,10 @@
 #      a command.
 #   3. Simple-command assembly. The command name is the first word after
 #      reserved words (if then else elif do while until ! { }, and function
-#      with its name), NAME=value assignments, and the wrappers env (-i,
-#      -u NAME, NAME=value), command, exec, nohup, time, nice (-n N), timeout
-#      (and its duration), xargs (and its flags), and stdbuf. Names are
+#      with its name), NAME=value assignments, and the wrappers (WRAPPER in
+#      pre_bash_guard_rules.awk) env (-i, -u NAME, NAME=value), command,
+#      exec, nohup, time, nice (-n N), timeout (and its duration), xargs (and
+#      its flags), and stdbuf. Names are
 #      compared without their directory (/usr/bin/sudo is sudo) and without
 #      a leading unquoted = (zsh runs =sudo as sudo). Unless the command is
 #      one known not to run its arguments (NOEXEC in
@@ -179,7 +180,7 @@ emit_deny() {
 # globals are shared across the files: pre_bash_guard_lex.awk (text access
 # and lexing), pre_bash_guard_commands.awk (simple-command assembly and data
 # regions) and pre_bash_guard_rules.awk (rule judgement, the sentinel, BEGIN
-# with the command lists NOEXEC and DATACMD, and END). This script,
+# with the command lists NOEXEC, WRAPPER and DATACMD, and END). This script,
 # lib_json.sh and the three .awk files must be installed together. awk
 # prints the name of the first rule that denies, or nothing. Its exit
 # status goes to awk_status (the status of the assignment is that of the

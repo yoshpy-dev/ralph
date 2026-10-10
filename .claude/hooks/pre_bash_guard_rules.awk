@@ -1,6 +1,6 @@
 # pre_bash_guard_rules.awk holds the "Rule judgement", "The sentinel" and
 # "Main" sections of the awk program of pre_bash_guard.sh; Main has BEGIN
-# (with the command lists NOEXEC and DATACMD), the action that
+# (with the command lists NOEXEC, WRAPPER and DATACMD), the action that
 # collects the input, and END. How awk reads it together with the other two
 # .awk files is in the comment above the awk call in pre_bash_guard.sh.
 

@@ -115,7 +115,9 @@ None (guard の中の包みの判定を一覧に置き換え、テストの読�
 - [x] Branch created
 - [x] Implementation started
   - S1 完了(468fc73c、implementer/opus): `rules.awk` の BEGIN に `WRAPPER`、`cmd_pos` に「`WRAPPER` にない名前はその位置を返す」、不変条件の検査は実行時の DATACMD と `WRAPPER` を 1 つの dump で読む(ソースの `nm ==` は読まない)、D 節に包みの 9 行と (i) の 2 行。テストは 2,090/0(macOS、gawk、mawk)。AC2: `exec`・`if` を DATACMD に足すと FAIL、`timeout` の分岐を `cmd_pos` の外に移しても検査に残る(前の読み方では抜けた)。AC3: 18 通りすべて赤。AC4: 下限を `q > a` にすると 2 行とも赤。base との判定の比較は 1,938 回で違い 0。handoff の外で、テストのヘッダーの D 項目に 2 文を足した。plan の AC5 の「PR #215 の test の入力(3,913 件)」での比較は S1 では回していない(/test で回す)
-  - S2 完了(この commit、inline、docs だけ): tech-debt のテストの穴の行の (h)(i) を、Debt・Impact・Why deferred・Trigger の 4 列で解消済みにし、Related にこの plan を足した
+  - self-review(8f237091、reviewer/opus): Merge yes、LOW 3 件。`WRAPPER` の判定は判定を変えない(base と HEAD に 60,480 形を流して違い 0)、18 組の写しでそれぞれ消した包みの行だけが none になる、ヒアドキュメントの 2 行のバックスラッシュの数はコメントどおり。LOW 1(BEGIN の一覧を説明するコメントに `WRAPPER` がない)と LOW 2(ヘッダーの包みの散文が `WRAPPER` を指していない)は S3 で直し、LOW 3(tech-debt の閉じ方)は sync-docs に回す。LOW 2 のうち `cmd_pos` の上の「sh や builtin も wrapper と呼ぶ」文は base からあり、意味が違う(wrapper の走査の話)ので残す
+  - S3(inline、コメントだけ): `pre_bash_guard.sh` のヘッダーの item 3 に `(WRAPPER in pre_bash_guard_rules.awk)` を足し、awk の呼び出しの上と `rules.awk` の先頭のコメントの一覧に `WRAPPER` を足した。template の写しは同じ。テストは 2,090/0、static は FAIL なし
+  - S2 完了(73486db9、inline、docs だけ): tech-debt のテストの穴の行の (h)(i) を、Debt・Impact・Why deferred・Trigger の 4 列で解消済みにし、Related にこの plan を足した
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
