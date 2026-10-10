@@ -27,11 +27,11 @@
 
 | Severity | Area | Finding | Evidence | Recommendation |
 | --- | --- | --- | --- | --- |
-| LOW | readability | BEGIN の一覧を数えるコメント 2 か所が、`WRAPPER` を足す前のまま「NOEXEC と DATACMD」の 2 つだけを挙げる。どちらも、どのファイルに何があるかを示す案内の文で、`WRAPPER` を探す人はここを読む | `pre_bash_guard.sh:181-182`(「BEGIN with the command lists NOEXEC and DATACMD」)、`pre_bash_guard_rules.awk:2-3`(「Main has BEGIN (with the command lists NOEXEC and DATACMD)」)。`templates/base/` の写しも同じ | 2 か所とも「NOEXEC, WRAPPER and DATACMD」にし、`templates/base/` にも写す |
-| LOW | readability | guard の先頭の item 3 は包みの 9 つの名前を散文で並べる。名前は `WRAPPER` と一致していて正しいが、同じ item の NOEXEC(「NOEXEC in pre_bash_guard_rules.awk」)や item 6 の DATACMD と違って、一覧の名前を挙げていない。また item 6 は `sh` と `builtin` も「a wrapper」と呼ぶが、どちらも `WRAPPER` になく、`cmd_pos` はそこで止まる。この PR で「wrapper」は `WRAPPER` の語を指す名前になったので、ずれが目立つようになった | `pre_bash_guard.sh:32-34`(「the wrappers env (-i, -u NAME, NAME=value), command, exec, nohup, time, nice (-n N), timeout (and its duration), xargs (and its flags), and stdbuf」)、`:125`(「a wrapper such as env, command, sh, nice, builtin or exec」)。`:125` の文は base からあり、diff には入っていない | item 3 に「(WRAPPER in pre_bash_guard_rules.awk)」を足す。`:125` は「a wrapper such as env, command, nice or exec, a shell such as sh, builtin,」のように分ける。急がないので、次に guard の先頭を直すときでよい |
-| LOW | maintainability | tech-debt の行で、(h) と (i) の閉じ方がそろっていない。Debt の列では (h) の本文を `~~` で消しているが、(i) の本文は消さずに「Closed in …」の 1 文を後ろに足しただけで、「No row kills a mutant …」「The test suite stays at 2068/0 under that mutant」が現在形のまま残る。Impact と Trigger の列は (h) と (i) の両方を消している。また Trigger の列に足した「a new wrapper goes into `WRAPPER` and gets its own row of `edge_deny`」は、返済のきっかけではなく決まりごとで、「;」で並ぶきっかけの列挙に混ざると「新しい包みを足すこと」がきっかけのように読める | `docs/tech-debt/README.md:163` の Debt の列の (i)(「(i) No row kills a mutant that changes the lower bound of `trailing_backslashes` … Closed in test/guard-test-gaps (468fc73c): it added those two rows」)、Trigger の列(「(h) and (i) done in test/guard-test-gaps; a new wrapper goes into `WRAPPER` and gets its own row of `edge_deny`; or a report from a gawk or busybox awk host」) | Debt の列の (i) も (h) と同じく本文を `~~…~~` で消してから「Closed in …」を続ける。Trigger の列の決まりごとの文は外す(同じことは `rules.awk:402-406` のコメントに書いてある)か、「(h) and (i) done in test/guard-test-gaps (a new wrapper goes into `WRAPPER` with its own row of `edge_deny`)」のように括弧に入れる |
+| LOW | readability | (1。4f3a4414 で修正済み)BEGIN の一覧を数えるコメント 2 か所が、`WRAPPER` を足す前のまま「NOEXEC と DATACMD」の 2 つだけを挙げる。どちらも、どのファイルに何があるかを示す案内の文で、`WRAPPER` を探す人はここを読む | `pre_bash_guard.sh:181-182`(「BEGIN with the command lists NOEXEC and DATACMD」)、`pre_bash_guard_rules.awk:2-3`(「Main has BEGIN (with the command lists NOEXEC and DATACMD)」)。`templates/base/` の写しも同じ | 2 か所とも「NOEXEC, WRAPPER and DATACMD」にし、`templates/base/` にも写す |
+| LOW | readability | (2。item 3 は 4f3a4414 で修正済み。`:125` の文は意図して残し、それでよい)guard の先頭の item 3 は包みの 9 つの名前を散文で並べる。名前は `WRAPPER` と一致していて正しいが、同じ item の NOEXEC(「NOEXEC in pre_bash_guard_rules.awk」)や item 6 の DATACMD と違って、一覧の名前を挙げていない。また item 6 は `sh` と `builtin` も「a wrapper」と呼ぶが、どちらも `WRAPPER` になく、`cmd_pos` はそこで止まる。この PR で「wrapper」は `WRAPPER` の語を指す名前になったので、ずれが目立つようになった | `pre_bash_guard.sh:32-34`(「the wrappers env (-i, -u NAME, NAME=value), command, exec, nohup, time, nice (-n N), timeout (and its duration), xargs (and its flags), and stdbuf」)、`:125`(「a wrapper such as env, command, sh, nice, builtin or exec」)。`:125` の文は base からあり、diff には入っていない | item 3 に「(WRAPPER in pre_bash_guard_rules.awk)」を足す。`:125` は「a wrapper such as env, command, nice or exec, a shell such as sh, builtin,」のように分ける。急がないので、次に guard の先頭を直すときでよい |
+| LOW | maintainability | (3。未修正。coordinator の判断で /sync-docs に回した)tech-debt の行で、(h) と (i) の閉じ方がそろっていない。Debt の列では (h) の本文を `~~` で消しているが、(i) の本文は消さずに「Closed in …」の 1 文を後ろに足しただけで、「No row kills a mutant …」「The test suite stays at 2068/0 under that mutant」が現在形のまま残る。Impact と Trigger の列は (h) と (i) の両方を消している。また Trigger の列に足した「a new wrapper goes into `WRAPPER` and gets its own row of `edge_deny`」は、返済のきっかけではなく決まりごとで、「;」で並ぶきっかけの列挙に混ざると「新しい包みを足すこと」がきっかけのように読める | `docs/tech-debt/README.md:163` の Debt の列の (i)(「(i) No row kills a mutant that changes the lower bound of `trailing_backslashes` … Closed in test/guard-test-gaps (468fc73c): it added those two rows」)、Trigger の列(「(h) and (i) done in test/guard-test-gaps; a new wrapper goes into `WRAPPER` and gets its own row of `edge_deny`; or a report from a gawk or busybox awk host」) | Debt の列の (i) も (h) と同じく本文を `~~…~~` で消してから「Closed in …」を続ける。Trigger の列の決まりごとの文は外す(同じことは `rules.awk:402-406` のコメントに書いてある)か、「(h) and (i) done in test/guard-test-gaps (a new wrapper goes into `WRAPPER` with its own row of `edge_deny`)」のように括弧に入れる |
 
-CRITICAL、HIGH、MEDIUM はない。3 件とも判定には関係しない。
+CRITICAL、HIGH、MEDIUM はない。3 件とも判定には関係しない。表の Evidence の行番号は、最初に review した 8f237091 のもの。各行の先頭の括弧は、下の「4f3a4414 の再 review」の結果。
 
 細かい点(直さなくてよい): F 節の label の「(both lists read at run time from the three .awk files)」は、直前に DATACMD・予約語・`WRAPPER` の 3 つが出てくるので、「both」がどれを指すか一瞬迷う。予約語はテストの中の一覧なので、「(DATACMD and WRAPPER read at run time …)」と書けば迷わない。テストの先頭の F 項目(`:92-95`)も同じ。
 
@@ -58,8 +58,21 @@ CRITICAL、HIGH、MEDIUM はない。3 件とも判定には関係しない。
 ## Recommendation
 
 - Merge: yes(CRITICAL、HIGH、MEDIUM はない。LOW 3 件はコメントと tech-debt の書き方で、判定には関係しない)
-- Follow-ups: LOW 1 と LOW 3 はこの PR の中で直すことを勧める(コメント 2 か所と、tech-debt の 1 行)。LOW 2 は次に guard の先頭のコメントを直すときでよい。
+- Follow-ups: LOW 1 と LOW 2 は 4f3a4414 で直った(再 review は下の節)。LOW 3(tech-debt の 1 行)は /sync-docs で直す。
 
 ## 差分 probe の結果
 
 20 の名前 × 3,024 形 = 60,480 形で、base と HEAD の出力(規則の名前と終了コード)の違いは 0 だった。9 つの包みの名前も、包みでない 11 の名前も、どの書き方・前置き・`$(…)` の中でも同じ判定になった。macOS の大文字と小文字を区別しないファイルシステムで `env` と `Env` の結果のファイルが重なったので、この 2 つは別の名前のファイルで流し直し、どちらも違いは 0 だった。
+
+## 4f3a4414 の再 review
+
+対象は `git diff 8f237091 4f3a4414`(5 ファイル、+15/-11)。guard の 4 ファイルとその写しで変わった行はどれも `#` で始まり、コメント以外の行の変更は 0 だった。`#` で始まる行を除いた `pre_bash_guard.sh` と `pre_bash_guard_rules.awk` は、8f237091 と 4f3a4414 で一致する。guard の 4 ファイルは root と `templates/base/` で `cmp` が一致し、足したコメント行はどれも 78 桁以内。
+
+- LOW 1: 修正済み。`pre_bash_guard.sh:183` と `pre_bash_guard_rules.awk:3` が「NOEXEC, WRAPPER and DATACMD」になった。並びは BEGIN の中の順(`rules.awk:397`、`:407`、`:424`)と同じ。
+- LOW 2: item 3 は修正済み。`pre_bash_guard.sh:32-33` が「the wrappers (WRAPPER in pre_bash_guard_rules.awk) env …」になり、続く 9 つの名前は `WRAPPER` と一致する。item 6 の文(今は `:126`)を残したことには同意する。この文が言っているのは「1 語目が DATACMD の名前でなければデータ区間がなくなる」ことで、`sh` や `builtin` を `WRAPPER` に入れるべきだとは言っていない。「別のコマンドを動かすコマンド」という広い意味の wrapper として読める。
+- LOW 3: 未修正。/sync-docs に回したので、この再 review では変わっていない。
+- 新しい指摘はない。細かい点が 2 つある(直さなくてよい)。
+  - item 3 を詰め直した段落の最後の行「its flags), and stdbuf. Names are」(`pre_bash_guard.sh:35`)が 40 桁で切れ、その後に元の行「compared without their directory …」が続く。詰め直しが途中で止まっている。
+  - plan の Progress に足した self-review の行は、残した文を「`cmd_pos` の上の」「wrapper の走査の話」と書いている。実際の場所は `pre_bash_guard.sh` の先頭の item 6(`:126`)で、話はデータ区間の許可リストの 1 語目のこと。`scan_words` の wrapper の走査の話ではない。plan を次に直すときに「`pre_bash_guard.sh` の item 6 の」「1 語目の許可リストの話で、wrapper は広い意味」と直すとよい。
+
+Merge の判定は変わらない(yes)。LOW の数も 3 件のままで、未修正は LOW 3 だけ。
