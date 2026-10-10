@@ -64,13 +64,13 @@ None (guard の中の包みの判定を一覧に置き換え、テストの読�
 
 ## Acceptance criteria
 
-- [ ] AC1: `pre_bash_guard_rules.awk` の BEGIN に `WRAPPER` があり、`cmd_pos` は包みの分岐の前に、`WRAPPER` にない名前の位置を返す
-- [ ] AC2: 不変条件の検査が、実行時の DATACMD と `WRAPPER` を読み、ソースの `nm == "…"` を読まない。`WRAPPER` が空なら FAIL。写しで `exec` か `if` を DATACMD に足すと FAIL。写しで包みの分岐を `cmd_pos` の外の関数に移しても、その名前は検査に残る
-- [ ] AC3: D 節の包みの 9 行が jq あり・なしで deny。写しで `WRAPPER` の 9 つの要素を 1 つずつ消すと(9 通り)、どれもテストが赤になる。写しで `cmd_pos` の 9 つの分岐を 1 つずつ消しても(9 通り)、どれもテストが赤になる
-- [ ] AC4: D 節の (i) の 2 行が、jq あり・なしで期待どおり(2 個の行は deny、3 個の行は none)。`trailing_backslashes` の下限を `q > a` に変えた写しで、2 行とも赤になる
+- [x] AC1: `pre_bash_guard_rules.awk` の BEGIN に `WRAPPER` があり、`cmd_pos` は包みの分岐の前に、`WRAPPER` にない名前の位置を返す
+- [x] AC2: 不変条件の検査が、実行時の DATACMD と `WRAPPER` を読み、ソースの `nm == "…"` を読まない。`WRAPPER` が空なら FAIL。写しで `exec` か `if` を DATACMD に足すと FAIL。写しで包みの分岐を `cmd_pos` の外の関数に移しても、その名前は検査に残る
+- [x] AC3: D 節の包みの 9 行が jq あり・なしで deny。写しで `WRAPPER` の 9 つの要素を 1 つずつ消すと(9 通り)、どれもテストが赤になる。写しで `cmd_pos` の 9 つの分岐を 1 つずつ消しても(9 通り)、どれもテストが赤になる
+- [x] AC4: D 節の (i) の 2 行が、jq あり・なしで期待どおり(2 個の行は deny、3 個の行は none)。`trailing_backslashes` の下限を `q > a` に変えた写しで、2 行とも赤になる
 - [ ] AC5: 判定が変わらない。`bash tests/test-pre-bash-guard.sh` が、今の 2,068 件と足した行を含めて全部通る(jq あり・なし)。base(49ac046c)の guard とこの PR の guard に、テストの配列の行と PR #215 の test の比較の入力を渡し、判定の違いが 0 件
-- [ ] AC6: root と `templates/base/` の写しがバイト単位で同じ(`./scripts/check-sync.sh`)。`shellcheck -S warning`、`sh -n`、`HARNESS_VERIFY_MODE=static ./scripts/verify.local.sh`(guard の awk の構文の段を含む)が通る。4 つの guard のファイルは 800 行未満
-- [ ] AC7: `./scripts/run-verify.sh` が rc 0。`docs/tech-debt/README.md` のテストの穴の行の (h)(i) が解消済みになる
+- [x] AC6: root と `templates/base/` の写しがバイト単位で同じ(`./scripts/check-sync.sh`)。`shellcheck -S warning`、`sh -n`、`HARNESS_VERIFY_MODE=static ./scripts/verify.local.sh`(guard の awk の構文の段を含む)が通る。4 つの guard のファイルは 800 行未満
+- [x] AC7: `./scripts/run-verify.sh` が rc 0。`docs/tech-debt/README.md` のテストの穴の行の (h)(i) が解消済みになる
 
 ## Implementation outline
 
