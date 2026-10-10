@@ -386,7 +386,11 @@ main worktree からでも linked worktree からでも打てる。`--plan` の�
    `.claude/worktrees/org-<org_id>` に `<type>/<slug>` のブランチの worktree を
    clean な default branch から作る(記録 `org-<org_id>`、
    `--cleanup-policy manual`)。同じ記録があれば既存の worktree を使う。
-5. その worktree を cwd にして leader を spawn する。予約は機能の
+5. `ensure` が worktree を返したら、記録 `org-<org_id>` をもう一度読み、3 と
+   同じ規則で確かめる。`ensure` は同じパス・ブランチ・種類の記録を
+   `canonical_ref` を見ずに返すので、3 のあとで別の分割計画の start が同じ
+   org_id の記録を作っていれば、ここで分かる(下の「start が拒否するもの」)。
+6. その worktree を cwd にして leader を spawn する。予約は機能の
    `- Reserve:` で、予約の記録に機能との結びつき(分割計画の id、slug、
    digest、ブランチ、worktree)が入る。scope の説明は
    `split <id> feature <slug> (reserve: <paths>)`、タスクは分割計画・機能・
@@ -407,8 +411,9 @@ disband)のすべてにこの `--state-dir` を付ける。leader の pane は h
 成功すると spawn の出力に続けて `worktree:` と `branch:` の行を出す。
 `ralph org status --org-id <org_id>` は `reserved:` の行の次に `feature:` の
 行を出す。同じ `--plan` と `--feature` で打ち直すと同じ worktree を使い、
-leader が動いている間は台帳に何も足さない。disband のあとでも、同じ分割計画の
-同じ機能なら、承認し直したあとでも同じ worktree を使う。
+leader が動いている間は台帳に何も足さない。disband のあとでも、同じ分割計画
+(symlink を解決して同じパスのファイル)の同じ機能なら、承認し直したあとでも
+同じ worktree を使う。
 
 ### start が拒否するもの
 
@@ -423,13 +428,39 @@ leader が動いている間は台帳に何も足さない。disband のあと�
   し直した(digest が違う)同じ機能に結びついているときも拒否する。どちらも、
   別の `--org-id` を使うか、`ralph org disband --org-id <id>` してから立て直す。
 - `ralph-worktree.sh` の記録 `org-<org_id>` が今回と合わないとき。別の分割
-  計画が残した worktree(`canonical_ref` が `split:<id>#<slug>` でない)、パス・
-  ブランチ・種類の違い、worktree のディレクトリがない、その worktree が別の
-  ブランチか detached HEAD をチェックアウトしている、がこれに当たる。disband
-  のあとも worktree は残るので、別の分割計画の同じ slug が古いコミットを
-  引き継がないようにしている。要らなければ
-  `./scripts/ralph-worktree.sh cleanup --id org-<org_id>` で消すか、別の
-  `--org-id` を使う。
+  計画が残した worktree(`canonical_ref` が今回の
+  `split:<分割計画の絶対パス>#<slug>` でない)、パス・ブランチ・種類の違い、
+  worktree のディレクトリがない、その worktree が別のブランチか detached HEAD
+  をチェックアウトしている、記録が読めない、がこれに当たる。`canonical_ref`
+  のパスは分割計画のファイルの symlink を解決したパスなので、`--plan` を
+  相対パスや symlink 経由で書いても同じ計画なら同じになり、別の台帳
+  (`--state-dir`)にある同じ名前の分割計画とは違う。解決は大文字小文字を
+  直さないので、大文字小文字を区別しない FS で `--plan` のパスの大文字小文字
+  を前回と変えて打つと別の値になり、別の計画の記録として拒否される(使い
+  回さない側に倒れる。前回と同じ綴りなら同じ値になる)。disband のあとも
+  worktree は残るので、この台帳か別の台帳の分割計画の同じ slug が古い
+  コミットを引き継がないようにしている。
+  - `canonical_ref` が違う(別の分割計画の機能のための記録など): その
+    worktree とブランチは、相手の org がまだ使っているかもしれない。記録の
+    名前は org_id で決まるので、まずこの機能に別の org_id を持たせ、要れば
+    別のブランチも持たせる。
+    - org_id が slug と同じとき(`--org-id` を渡さない既定。`--org-id` に
+      slug と同じ値を明示した場合も、コードは値が同じかどうかだけを見るので
+      ここに入る): 分割計画でこの機能の slug を変えて承認し直す。slug は
+      org_id の既定でブランチ名の一部なので、別の記録とブランチになる(Type
+      だけを変えても org_id は変わらず、同じ記録に当たる)。別の `--org-id` は
+      ブランチが同じままなので案内しない。明示した org_id は slug を変えても
+      そのままなので、その場合は打ち直したときの拒否が下の枝の案内になる。
+    - `--org-id` で slug と違う org_id を渡したとき: slug を変えても org_id は
+      変わらず、同じ記録に当たる。別の `--org-id` を使うか、`--org-id` を
+      外して slug を org_id にする。その記録の worktree も機能のブランチ
+      `<type>/<slug>` にいるときは、別の `--org-id` でもブランチは同じなので、
+      slug も変えて承認し直す。
+    - どちらでも、その worktree とブランチが要らないときに限り
+      `./scripts/ralph-worktree.sh cleanup --id org-<org_id>` で消す。
+  - それ以外: 要らなければ
+    `./scripts/ralph-worktree.sh cleanup --id org-<org_id>` で消すか、別の
+    `--org-id` を使う。
 - `ensure` が拒否したとき。終了コード 1 で、台帳には何も書かない。エラー文は
   スクリプトの文に、原因に合った直し方を足す。
   - main worktree のチェックアウトが default branch でないか clean でない:
@@ -437,17 +468,36 @@ leader が動いている間は台帳に何も足さない。disband のあと�
   - `.claude/worktrees/org-<org_id>` に記録のないディレクトリがある、または
     記録 `org-<org_id>` が衝突した: 要らなければ消すか、別の `--org-id` を
     使う。
-  - 機能のブランチ `<type>/<slug>` が記録なしにすでにある: そのブランチの名前
-    を変えるか、コミットが要らなければ消して打ち直す(`--org-id` を変えても
-    ブランチは同じ)。
+  - 機能のブランチ `<type>/<slug>` が記録なしにすでにある: ほかの org か
+    worktree がそのブランチを使っているかもしれない(`--org-id` を変えても
+    ブランチは同じ)。まず分割計画でこの機能の slug(か Type)を変えて承認し
+    直す。何も使っていないと確かめたときに限り、そのブランチの名前を変える
+    (`git branch -m`)か、コミットが要らなければ消して(`git branch -D`)、
+    打ち直す。
   - `.codex/config.toml` の既知の書き換え(スクリプトの文が戻し方を示す)、
     jq がない、default branch がない: スクリプトの文だけを出す。
+- `ensure` が worktree を返したあとの照合(上の手順の 5)が合わないとき。
+  終了コード 1 で、leader は立てず、台帳にも何も書かない。
+  - 記録の `canonical_ref` が今回のものと違う: この start が走っている間に、
+    別の分割計画から同じ org_id で打った start が記録を作り、`ensure` が
+    それを返した。直し方は使い回しの拒否で `canonical_ref` が違うときと同じ
+    (org_id が slug と同じなら slug を変えて承認し直す。`--org-id` で slug と
+    違う org_id を渡したなら、別の `--org-id` を使うか `--org-id` を外し、
+    その worktree が機能のブランチにもいれば slug も変える)。または、先の
+    org(同じ org_id)の持ち主が、その org の PR が merge されたあとに
+    worktree を消すのを待ってから打ち直す。エラーは `cleanup` を案内しない。
+    その worktree とブランチは先の start のもので、使っている最中のことが
+    ある。ブランチ名は `<type>/<slug>` で org_id を含まないので、org_id を
+    変えても同じブランチに当たる。そのため org_id が slug と同じときは、別の
+    `--org-id` も案内しない。
+  - 記録が消えた、読めない、ほかの点が合わない: start の間に何かが worktree
+    か記録を変えた。打ち直せば、手順の 3 の照合が何が邪魔をしているかを示す。
 - repo に `scripts/ralph-worktree.sh` がないとき、git の外か、main worktree
   のない repo(bare リポジトリの linked worktree)から打ったとき。
 - `max_orgs`、`max_total_seats`、ほかの走っている org の予約との重なり
   (上の手順の 2 の先読みで拒否し、worktree を作らない)。
 
-手順の 2 の先読みを通ったあと 5 のロックの下で拒否されたとき(その間にほかの org が
+手順の 2 の先読みを通ったあと 6 のロックの下で拒否されたとき(その間にほかの org が
 枠か範囲を取った場合など)は、worktree とブランチが残る。エラー文のとおり、
 同じ start を打ち直せば同じ worktree を使い、要らなければ
 `./scripts/ralph-worktree.sh cleanup --id org-<org_id>` で消せる。
