@@ -243,6 +243,11 @@ type Org struct {
 	// notification elsewhere; tests set a stub so no test shows a real
 	// notification.
 	DesktopNotify EscalateFunc
+	// InboxPollInterval overrides how often WaitInbox reads the inbox again
+	// while no item is open. Zero (the field's default) means "use
+	// defaultInboxPollInterval" (1s) -- tests set a tiny value so a wait
+	// for an item that arrives later returns fast.
+	InboxPollInterval time.Duration
 }
 
 func (o *Org) now() string {

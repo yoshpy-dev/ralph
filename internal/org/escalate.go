@@ -15,8 +15,8 @@ import (
 	"github.com/yoshpy-dev/ralph/internal/org/protocol"
 )
 
-// Escalate and NotifyInboxItem are the org layer of `ralph org escalate`
-// and `ralph org inbox notify` (FR-5 of
+// Escalate, NotifyInboxItem, and WaitInbox are the org layer of `ralph org
+// escalate`, `ralph org inbox notify`, and `ralph org wait --inbox` (FR-5 of
 // docs/specs/2026-10-07-org-multi-org-director.md). There is no way to
 // register a director yet, so every escalated item is also sent at once to
 // the human path, the way the spec treats an org whose director is
@@ -49,6 +49,10 @@ const (
 // inboxDesktopNotifyTimeout bounds one desktop notification call.
 const inboxDesktopNotifyTimeout = 10 * time.Second
 
+// defaultInboxPollInterval is how often WaitInbox reads the inbox again
+// when Org.InboxPollInterval is unset.
+const defaultInboxPollInterval = time.Second
+
 // EscalationsPathIn returns the escalations.jsonl path within an
 // already-resolved org state directory, mirroring InboxPathIn.
 func EscalationsPathIn(stateDir string) string {
@@ -73,6 +77,8 @@ type EscalateParams struct {
 type EscalateResult struct {
 	// ID is the new item's ID (e<N>), set whenever Recorded.
 	ID string
+	// Type is the message's TYPE, set whenever Recorded.
+	Type string
 	// Recorded reports that the escalated event is in the inbox.
 	Recorded bool
 	// Notified reports that the human path was completed: the
@@ -106,7 +112,7 @@ func (o *Org) Escalate(p EscalateParams) EscalateResult {
 		o.alertUnrecordedEscalation(p.OrgID, m.Type, err, banner)
 		return EscalateResult{Err: fmt.Errorf("org: escalate: the item could not be recorded in the inbox: %w", err)}
 	}
-	res := EscalateResult{ID: id, Recorded: true}
+	res := EscalateResult{ID: id, Type: m.Type, Recorded: true}
 	if err := o.sendInboxItemToHuman(p.OrgID, id, m.Type, banner); err != nil {
 		res.Err = fmt.Errorf("org: escalate: the item is recorded as %s, but the notification was not completed (%w): run `ralph org inbox notify %s` to send it again (not escalate, which records another item)", id, err, id)
 		return res
@@ -140,6 +146,58 @@ func (o *Org) NotifyInboxItem(id string, banner io.Writer) error {
 		return fmt.Errorf("org: inbox notify %s: the notification was not completed (%w): run `ralph org inbox notify %s` again", id, err, id)
 	}
 	return nil
+}
+
+// WaitInbox returns the open inbox items (`ralph org wait --inbox`), in ID
+// order. When none is open it reads the inbox again every
+// Org.InboxPollInterval (defaultInboxPollInterval when unset) until one is,
+// or until timeout passes (timeout <= 0 waits without a bound), which is an
+// error. Acked items do not count: an ack records that the item was read,
+// and an acked item that stays unresolved is left to a resolve deadline
+// (stage 6 of the spec's rollout), not to a waiting director. A failed read
+// returns at once.
+func (o *Org) WaitInbox(timeout time.Duration) ([]InboxItem, error) {
+	if o.Inbox == nil {
+		return nil, errors.New("org: wait --inbox: no inbox store is configured")
+	}
+	interval := o.InboxPollInterval
+	if interval <= 0 {
+		interval = defaultInboxPollInterval
+	}
+	var deadline <-chan time.Time
+	if timeout > 0 {
+		timer := time.NewTimer(timeout)
+		defer timer.Stop()
+		deadline = timer.C
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	// expired is set when the deadline fires; the loop then reads once more,
+	// so an item that arrived just before the deadline is still returned.
+	expired := false
+	for {
+		inbox, err := o.Inbox.Read()
+		if err != nil {
+			return nil, fmt.Errorf("org: wait --inbox: %w", err)
+		}
+		var open []InboxItem
+		for _, item := range inbox.Items {
+			if item.State == InboxStateOpen {
+				open = append(open, item)
+			}
+		}
+		if len(open) > 0 {
+			return open, nil
+		}
+		if expired {
+			return nil, fmt.Errorf("org: wait --inbox: no open inbox item arrived within %d ms", timeout.Milliseconds())
+		}
+		select {
+		case <-deadline:
+			expired = true
+		case <-ticker.C:
+		}
+	}
 }
 
 // validateEscalation checks orgID and text before Escalate writes anything

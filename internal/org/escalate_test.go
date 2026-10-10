@@ -147,8 +147,8 @@ func TestEscalate_RefusalsWriteNothingAndNotifyNoOne(t *testing.T) {
 				if tc.wantSub != "" && !strings.Contains(res.Err.Error(), tc.wantSub) {
 					t.Errorf("error %q does not contain %q", res.Err, tc.wantSub)
 				}
-				if res.ID != "" || res.Recorded || res.Notified {
-					t.Errorf("a refusal reported %+v; want no ID, not recorded, not notified", res)
+				if res.ID != "" || res.Type != "" || res.Recorded || res.Notified {
+					t.Errorf("a refusal reported %+v; want no ID or TYPE, not recorded, not notified", res)
 				}
 				if got := fileOrAbsent(t, inboxPath); got != inboxBefore {
 					t.Errorf("inbox.jsonl changed on a refusal:\nbefore: %s\nafter:  %s", inboxBefore, got)
@@ -179,13 +179,14 @@ func TestEscalate_AcceptsQuestionBlockedAndResult(t *testing.T) {
 		"TYPE: RESULT\nTASK_ID: org-a\n\nPR https://example.invalid/pull/1",
 		"TYPE: QUESTION\n\n" + strings.Repeat("y", protocol.DefaultMaxBodyChars),
 	}
+	wantTypes := []string{"QUESTION", "QUESTION", "BLOCKED", "RESULT", "QUESTION"}
 	for i, text := range texts {
 		res := f.escalate("org-a", text)
 		if res.Err != nil {
 			t.Fatalf("Escalate(%q): %v", text, res.Err)
 		}
-		if want := fmt.Sprintf("e%d", i+1); res.ID != want || !res.Recorded || !res.Notified {
-			t.Fatalf("Escalate #%d = %+v; want ID %s, recorded and notified", i+1, res, want)
+		if want := fmt.Sprintf("e%d", i+1); res.ID != want || res.Type != wantTypes[i] || !res.Recorded || !res.Notified {
+			t.Fatalf("Escalate #%d = %+v; want ID %s, TYPE %s, recorded and notified", i+1, res, want, wantTypes[i])
 		}
 	}
 	inbox := mustReadInbox(t, f.o.Inbox)
@@ -343,8 +344,8 @@ func TestEscalate_EscalationsUnwritable_ReportsTheIDAndInboxNotifyCompletesIt(t 
 	if res.Err == nil {
 		t.Fatalf("Escalate = %+v; want an error", res)
 	}
-	if res.ID != "e1" || !res.Recorded || res.Notified {
-		t.Fatalf("Escalate = %+v; want e1 recorded, not notified", res)
+	if res.ID != "e1" || res.Type != "QUESTION" || !res.Recorded || res.Notified {
+		t.Fatalf("Escalate = %+v; want e1 (QUESTION) recorded, not notified", res)
 	}
 	for _, sub := range []string{"recorded as e1", "notification was not completed", "ralph org inbox notify e1", "not escalate"} {
 		if !strings.Contains(res.Err.Error(), sub) {
@@ -570,5 +571,182 @@ func TestEscalationsPathIn(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "org")
 	if got, want := EscalationsPathIn(dir), filepath.Join(dir, EscalationsRelName); got != want {
 		t.Errorf("EscalationsPathIn = %q; want %q", got, want)
+	}
+}
+
+// waitInboxOutcome is what one WaitInbox call returned, and how long it took.
+type waitInboxOutcome struct {
+	items   []InboxItem
+	err     error
+	elapsed time.Duration
+}
+
+// runWaitInbox calls o.WaitInbox(timeout) and fails the test when it has not
+// returned within limit, so a wait that never ends fails instead of hanging
+// the test binary.
+func runWaitInbox(t *testing.T, o *Org, timeout, limit time.Duration) waitInboxOutcome {
+	t.Helper()
+	done := make(chan waitInboxOutcome, 1)
+	start := time.Now()
+	go func() {
+		items, err := o.WaitInbox(timeout)
+		done <- waitInboxOutcome{items: items, err: err, elapsed: time.Since(start)}
+	}()
+	select {
+	case out := <-done:
+		return out
+	case <-time.After(limit):
+		t.Fatalf("WaitInbox(%v) did not return within %v", timeout, limit)
+		return waitInboxOutcome{}
+	}
+}
+
+// escalateLater records a QUESTION from orgID in o's inbox after delay, from
+// another goroutine, the way a leader escalates while a director waits. The
+// test waits for that goroutine before it ends.
+func escalateLater(t *testing.T, o *Org, orgID string, delay time.Duration) {
+	t.Helper()
+	var wg sync.WaitGroup
+	t.Cleanup(wg.Wait)
+	wg.Go(func() {
+		time.Sleep(delay)
+		if _, err := o.Inbox.Escalate(InboxEscalation{OrgID: orgID, Type: "QUESTION", Body: "TYPE: QUESTION\n\nwhich?"}); err != nil {
+			t.Errorf("escalate from the other goroutine: %v", err)
+		}
+	})
+}
+
+func waitInboxItemIDs(items []InboxItem) []string {
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		ids = append(ids, item.ID)
+	}
+	return ids
+}
+
+// An open item already in the inbox returns at once, without a poll: the
+// poll interval is an hour and there is no timeout. Acked and resolved items
+// are left out.
+func TestWaitInbox_ReturnsTheOpenItemsAtOnce(t *testing.T) {
+	f := newEscalateFixture(t)
+	f.o.InboxPollInterval = time.Hour
+	for _, orgID := range []string{"org-a", "org-b", "org-c", "org-d"} {
+		if res := f.escalate(orgID, "TYPE: QUESTION\n\nwhich?"); res.Err != nil {
+			t.Fatal(res.Err)
+		}
+	}
+	if _, err := f.o.Inbox.Ack("e2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.o.Inbox.Resolve("e3", "docs/reports/x.md"); err != nil {
+		t.Fatal(err)
+	}
+
+	out := runWaitInbox(t, f.o, 0, 5*time.Second)
+	if out.err != nil {
+		t.Fatalf("WaitInbox: %v", out.err)
+	}
+	if got := waitInboxItemIDs(out.items); !slices.Equal(got, []string{"e1", "e4"}) {
+		t.Errorf("WaitInbox items = %v; want the open ones, e1 and e4", got)
+	}
+	if out.items[1].OrgID != "org-d" || out.items[1].Type != "QUESTION" {
+		t.Errorf("e4 = %+v; want org-d, QUESTION", out.items[1])
+	}
+}
+
+func TestWaitInbox_ReturnsAnItemThatArrivesWhileWaiting(t *testing.T) {
+	f := newEscalateFixture(t)
+	f.o.InboxPollInterval = 10 * time.Millisecond
+	escalateLater(t, f.o, "org-a", 200*time.Millisecond)
+
+	out := runWaitInbox(t, f.o, 10*time.Second, 5*time.Second)
+	if out.err != nil {
+		t.Fatalf("WaitInbox: %v", out.err)
+	}
+	if got := waitInboxItemIDs(out.items); !slices.Equal(got, []string{"e1"}) {
+		t.Errorf("WaitInbox items = %v; want e1", got)
+	}
+	if out.elapsed < 150*time.Millisecond {
+		t.Errorf("WaitInbox returned after %v, before the item was escalated", out.elapsed)
+	}
+}
+
+// With an hour between polls, the only reads are the first one and the one
+// after the deadline: an item that arrives between them is still returned.
+func TestWaitInbox_ReadsOnceMoreAtTheDeadline(t *testing.T) {
+	f := newEscalateFixture(t)
+	f.o.InboxPollInterval = time.Hour
+	escalateLater(t, f.o, "org-a", 50*time.Millisecond)
+
+	out := runWaitInbox(t, f.o, 300*time.Millisecond, 5*time.Second)
+	if out.err != nil {
+		t.Fatalf("WaitInbox: %v", out.err)
+	}
+	if got := waitInboxItemIDs(out.items); !slices.Equal(got, []string{"e1"}) {
+		t.Errorf("WaitInbox items = %v; want e1, read after the deadline", got)
+	}
+}
+
+func TestWaitInbox_TimesOutWithoutAnOpenItem(t *testing.T) {
+	cases := []struct {
+		name string
+		seed func(t *testing.T, f *escalateFixture)
+	}{
+		{"no_inbox_file", func(*testing.T, *escalateFixture) {}},
+		{"acked_item_only", func(t *testing.T, f *escalateFixture) {
+			if res := f.escalate("org-a", "TYPE: QUESTION\n\nwhich?"); res.Err != nil {
+				t.Fatal(res.Err)
+			}
+			if _, err := f.o.Inbox.Ack("e1"); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"resolved_item_only", func(t *testing.T, f *escalateFixture) {
+			if res := f.escalate("org-a", "TYPE: QUESTION\n\nwhich?"); res.Err != nil {
+				t.Fatal(res.Err)
+			}
+			if err := f.o.Inbox.Resolve("e1", "docs/reports/x.md"); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newEscalateFixture(t)
+			f.o.InboxPollInterval = 10 * time.Millisecond
+			tc.seed(t, f)
+
+			out := runWaitInbox(t, f.o, 300*time.Millisecond, 5*time.Second)
+			if out.err == nil {
+				t.Fatalf("WaitInbox = %v; want a timeout error", waitInboxItemIDs(out.items))
+			}
+			if want := "no open inbox item arrived within 300 ms"; !strings.Contains(out.err.Error(), want) {
+				t.Errorf("error %q does not contain %q", out.err, want)
+			}
+			if out.items != nil {
+				t.Errorf("a timeout returned items %v", waitInboxItemIDs(out.items))
+			}
+			if out.elapsed < 300*time.Millisecond {
+				t.Errorf("WaitInbox timed out after %v; want at least the 300ms timeout", out.elapsed)
+			}
+		})
+	}
+}
+
+// A read that fails returns at once, even without a timeout.
+func TestWaitInbox_ReadFailureReturnsAtOnce(t *testing.T) {
+	f := newEscalateFixture(t)
+	f.o.InboxPollInterval = time.Hour
+	// A directory where inbox.jsonl should be: the read fails.
+	if err := os.MkdirAll(f.o.Inbox.Path(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out := runWaitInbox(t, f.o, 0, 5*time.Second)
+	if out.err == nil || !strings.HasPrefix(out.err.Error(), "org: wait --inbox: ") {
+		t.Fatalf("WaitInbox error = %v; want a read failure prefixed org: wait --inbox:", out.err)
+	}
+
+	if _, err := (&Org{}).WaitInbox(time.Millisecond); err == nil || !strings.Contains(err.Error(), "no inbox store") {
+		t.Errorf("WaitInbox without an inbox store = %v; want an error", err)
 	}
 }
