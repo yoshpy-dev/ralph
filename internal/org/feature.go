@@ -30,12 +30,17 @@ import (
 //  4. `ralph-worktree.sh ensure` in the main worktree, which makes the
 //     worktree and the branch from the clean default branch, or returns the
 //     recorded worktree;
-//  5. Spawn of the leader, which decides 2 again under the manifest lock.
+//  5. the record again, by the rule of 3: ensure returns a recorded worktree
+//     with the same path, branch and kind without looking at its
+//     canonical_ref, so a start of another split plan's feature on the same
+//     org_id that ran at the same time may have made it after 3;
+//  6. Spawn of the leader, which decides 2 again under the manifest lock.
 //
-// Nothing is written to the manifest before 5, and a start refused before 4
+// Nothing is written to the manifest before 6, and a start refused before 4
 // makes no worktree. A start refused in 4 has the script's message and,
-// where start can name it, the fix (ensureFailureErr); one that fails in 5
-// says that the worktree and the branch stay.
+// where start can name it, the fix (ensureFailureErr); one refused in 5
+// leaves the worktree to the start that made it; one that fails in 6 says
+// that the worktree and the branch stay.
 
 const (
 	// featureWorktreeDir holds every feature worktree, relative to the repo
@@ -137,9 +142,13 @@ func featureWorktreeRelPath(orgID string) string {
 }
 
 // featureCanonicalRef is the canonical_ref recorded for the worktree of
-// feature slug of split plan splitID.
-func featureCanonicalRef(splitID, slug string) string {
-	return "split:" + splitID + "#" + slug
+// feature slug of the split plan at splitPath, its absolute path with
+// symlinks resolved (SplitPlan.Path), so the same plan has the same
+// canonical_ref however --plan names it. A split plan is a file directly in
+// <state dir>/splits/, so the path tells apart split plans of the same id in
+// two ledgers of one repo, which the id alone would not.
+func featureCanonicalRef(splitPath, slug string) string {
+	return "split:" + splitPath + "#" + slug
 }
 
 // featureWorktreeCleanup is the command that removes orgID's feature
@@ -157,7 +166,10 @@ func featureWorktreeCleanup(orgID string) string {
 // plan id, slug, approval digest, branch, worktree), a one-line scope, and a
 // task made of what the org was started for, the ledger p.StateDir included,
 // and the feature's body (featureLeaderTask). Running the same start again
-// reuses the worktree and, while the leader is active, records nothing.
+// reuses the worktree and, while the leader is active, records nothing. A
+// worktree whose record was made for another split plan's feature is not
+// used, whether it was there before ensure (checkFeatureWorktreeReuse) or
+// another start made it while this one ran (checkEnsuredFeatureWorktree).
 func (o *Org) StartFeature(p StartFeatureParams) StartFeatureResult {
 	var res StartFeatureResult
 	refuse := func(err error) StartFeatureResult {
@@ -192,7 +204,7 @@ func (o *Org) StartFeature(p StartFeatureParams) StartFeatureResult {
 	worktrees := o.worktrees()
 	want := WorktreeRecord{
 		WorktreePath: worktree, Branch: branch, Kind: featureWorktreeKind,
-		CanonicalRef: featureCanonicalRef(plan.ID, feature.Slug),
+		CanonicalRef: featureCanonicalRef(plan.Path, feature.Slug),
 	}
 	if err := checkFeatureWorktreeReuse(worktrees, root, orgID, want); err != nil {
 		return refuse(err)
@@ -209,6 +221,9 @@ func (o *Org) StartFeature(p StartFeatureParams) StartFeatureResult {
 			"org: %s ensure --id %s printed the worktree %q, not %s; the leader is not started",
 			worktreeScriptRel, featureWorktreeID(orgID), made, worktree)}
 		return res
+	}
+	if err := checkEnsuredFeatureWorktree(worktrees, root, orgID, want); err != nil {
+		return refuse(err)
 	}
 	res.Worktree, res.Branch = worktree, branch
 
@@ -242,8 +257,10 @@ const (
 // holds the script's message, followed by what fixes it. The main checkout
 // is to be made the clean default branch; a state record in the way is
 // removed with the cleanup or avoided with another --org-id, and so is a
-// directory at the worktree's path; a branch in the way is renamed or
-// deleted, since another --org-id keeps the same branch. Any other failure
+// directory at the worktree's path. A branch in the way may be another org's
+// or worktree's, and another --org-id keeps the same branch, so the feature
+// is first given another branch by its slug or Type, and renaming or
+// deleting the branch is only for one that nothing uses. Any other failure
 // (the .codex/config.toml rewrite, no jq, no default branch) is err as it is.
 func ensureFailureErr(err error, root, orgID, worktree, branch string) error {
 	msg := err.Error()
@@ -258,8 +275,10 @@ func ensureFailureErr(err error, root, orgID, worktree, branch string) error {
 	case strings.Contains(msg, ensurePathExistsMsg):
 		fix = fmt.Sprintf("remove %s if it is no longer needed (git worktree remove for a worktree), or use another --org-id", worktree)
 	case strings.Contains(msg, ensureBranchExistsMsg):
-		fix = fmt.Sprintf("the feature's branch is %s whatever the --org-id: rename that branch (git branch -m) or, "+
-			"if its commits are not needed, delete it (git branch -D), and run start again", branch)
+		fix = fmt.Sprintf("another org or worktree may be using the branch %s, which is the feature's branch whatever the --org-id: "+
+			"change this feature's slug (or Type) in the split plan and approve it again; only once you have made sure "+
+			"nothing uses that branch, rename it (git branch -m) or, if its commits are not needed, delete it (git branch -D), "+
+			"and run start again", branch)
 	default:
 		return err
 	}
@@ -361,14 +380,17 @@ func shellQuote(s string) string {
 }
 
 // checkFeatureWorktreeReuse looks up the ralph-worktree.sh record of orgID's
-// feature worktree and returns nil when there is none or it is want: the same
-// canonical_ref (split plan id and slug), worktree path (compared with
-// symlinks resolved), branch and kind, with want's branch checked out in that
-// directory. Anything else, and a record that cannot be read, is refused
-// (plan: Codex plan advisory finding 1): the worktree outlives disband, so
-// another split plan with the same slug must not take over its commits, and
-// a worktree whose checkout moved to another branch is not the feature's.
-// The same split plan feature approved again is still the same record.
+// feature worktree and returns nil when there is none or it is want
+// (featureWorktreeMismatch). Anything else, and a record that cannot be read,
+// is refused (plan: Codex plan advisory finding 1): the worktree outlives
+// disband, so another split plan with the same slug, in this ledger or
+// another, must not take over its commits, and a worktree whose checkout
+// moved to another branch is not the feature's. The same split plan feature
+// approved again is still the same record. A record made for something else
+// may still be in use, and another org_id keeps this feature's branch, which
+// may be that record's too, so its refusal points first at another slug,
+// which gives the feature an org_id and a branch of its own, and at the
+// cleanup only for a worktree that is no longer needed.
 func checkFeatureWorktreeReuse(worktrees FeatureWorktrees, root, orgID string, want WorktreeRecord) error {
 	id := featureWorktreeID(orgID)
 	refuse := func(what string) error {
@@ -385,6 +407,78 @@ func checkFeatureWorktreeReuse(worktrees FeatureWorktrees, root, orgID string, w
 	case !ok:
 		return nil
 	}
+	what := featureWorktreeMismatch(worktrees, rec, want)
+	switch {
+	case what == "":
+		return nil
+	case rec.CanonicalRef != want.CanonicalRef:
+		return fmt.Errorf("org: the worktree record %s %s, so start does not reuse it: it was made for something other than "+
+			"this split plan's feature, which may still be using that worktree and its branch; %s, or, if that worktree and "+
+			"its branch are no longer needed, remove them with %s",
+			id, what, featureSlugChange(want.Branch), featureWorktreeCleanup(orgID))
+	default:
+		return refuse(what)
+	}
+}
+
+// checkEnsuredFeatureWorktree reads the record of orgID's feature worktree
+// again after ensure returned it, and returns nil when it is want by the
+// rule of checkFeatureWorktreeReuse (featureWorktreeMismatch; plan
+// docs/plans/active/2026-10-10-org-feature-worktree-ownership.md). ensure
+// returns a recorded worktree with the same path, branch and kind as it is,
+// whatever its canonical_ref, so a start of another split plan's feature on
+// the same org_id that made the record after this start's
+// checkFeatureWorktreeReuse would otherwise hand its worktree to this
+// start's leader. That worktree and its branch belong to the other start,
+// which may be using them, and another org_id keeps the branch, so the
+// refusal points at another slug or at waiting, and at neither the cleanup
+// nor another org_id. A record that does not match otherwise, is gone or
+// cannot be read was changed by something else while this start ran, and
+// the refusal says to run start again, whose checkFeatureWorktreeReuse says
+// what is in the way.
+func checkEnsuredFeatureWorktree(worktrees FeatureWorktrees, root, orgID string, want WorktreeRecord) error {
+	id := featureWorktreeID(orgID)
+	rec, ok, err := worktrees.Lookup(root, id)
+	var what string
+	switch {
+	case err != nil:
+		what = fmt.Sprintf("cannot be read (%v)", err)
+	case !ok:
+		what = "is gone"
+	default:
+		what = featureWorktreeMismatch(worktrees, rec, want)
+	}
+	switch {
+	case what == "":
+		return nil
+	case err == nil && ok && rec.CanonicalRef != want.CanonicalRef:
+		return fmt.Errorf("org: another start made the worktree record %s for %q (this start's is %q) while this start ran, "+
+			"so this start does not use that worktree and starts no leader: %s, or wait until the other org (org_id %s) "+
+			"is done and its worktree is removed, and run start again",
+			id, rec.CanonicalRef, want.CanonicalRef, featureSlugChange(want.Branch), orgID)
+	default:
+		return fmt.Errorf("org: right after %s ensure returned the worktree, its record %s %s, so this start does not use "+
+			"that worktree and starts no leader: something changed the worktree or its record while this start ran; "+
+			"run start again, which checks the record before it makes or reuses a worktree", worktreeScriptRel, id, what)
+	}
+}
+
+// featureSlugChange is the fix for a worktree record of something else on a
+// feature's org_id, the feature's branch being branch: a new slug, which is
+// the default org_id (so it names another worktree record) and part of the
+// branch. Another Type alone would keep the org_id, and so the record.
+func featureSlugChange(branch string) string {
+	return fmt.Sprintf("change this feature's slug in the split plan and approve it again "+
+		"(the slug is the default org_id and part of the branch %s)", branch)
+}
+
+// featureWorktreeMismatch returns "" when rec is the record want of a
+// feature worktree: the same canonical_ref (split plan path and slug),
+// worktree path (compared with symlinks resolved), branch and kind, with
+// want's branch checked out in that directory. Otherwise it returns what
+// differs, the rest of a sentence that begins with "the worktree record
+// <id>".
+func featureWorktreeMismatch(worktrees FeatureWorktrees, rec, want WorktreeRecord) string {
 	var diffs []string
 	if rec.CanonicalRef != want.CanonicalRef {
 		diffs = append(diffs, fmt.Sprintf("canonical_ref %q, not %q", rec.CanonicalRef, want.CanonicalRef))
@@ -399,23 +493,23 @@ func checkFeatureWorktreeReuse(worktrees FeatureWorktrees, root, orgID string, w
 		diffs = append(diffs, fmt.Sprintf("kind %q, not %q", rec.Kind, want.Kind))
 	}
 	if len(diffs) > 0 {
-		return refuse("records " + strings.Join(diffs, ", "))
+		return "records " + strings.Join(diffs, ", ")
 	}
 	if info, err := os.Stat(want.WorktreePath); err != nil || !info.IsDir() {
-		return refuse(fmt.Sprintf("names %s, which is not an existing directory", want.WorktreePath))
+		return fmt.Sprintf("names %s, which is not an existing directory", want.WorktreePath)
 	}
 	current, err := worktrees.CurrentBranch(want.WorktreePath)
 	if err != nil {
-		return refuse(fmt.Sprintf("names %s, whose checked-out branch cannot be read (%v)", want.WorktreePath, err))
+		return fmt.Sprintf("names %s, whose checked-out branch cannot be read (%v)", want.WorktreePath, err)
 	}
 	if current != want.Branch {
 		checkedOut := fmt.Sprintf("branch %q", current)
 		if current == "" {
 			checkedOut = "a detached HEAD"
 		}
-		return refuse(fmt.Sprintf("names %s, which has %s checked out, not %q", want.WorktreePath, checkedOut, want.Branch))
+		return fmt.Sprintf("names %s, which has %s checked out, not %q", want.WorktreePath, checkedOut, want.Branch)
 	}
-	return nil
+	return ""
 }
 
 // worktrees returns o.Worktrees, or scriptFeatureWorktrees when it is nil.
