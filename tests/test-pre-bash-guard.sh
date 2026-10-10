@@ -56,7 +56,7 @@
 #      (--follow-tags, --no-thin, --soft), the five heredoc delimiter forms
 #      (to cat, to a file, to sh, to git commit -F -, and inside -m
 #      "$(cat ...)"), shells fed through -c, here-strings, pipes and
-#      heredocs, wrappers (each name of WRAPPER before sh -c) and unknown
+#      heredocs, wrappers (the nine names of WRAPPER before sh -c) and unknown
 #      runners, comments, ${...}, process substitution, functions and
 #      subshells, a JSON %u escape; forms only the lexer denies ($(...),
 #      backticks, <(...), ${...}, sh -c, eval, env -S, here-strings, pipes
@@ -94,7 +94,13 @@
 #      lists read at run time from the three .awk files, since the allowlist
 #      is what drops the data regions of a command that starts with a
 #      reserved word and of exec with a redirection; awk failing or an empty
-#      list fails the check
+#      list fails the check. Wrapper rows built from that run-time WRAPPER
+#      list: each name W runs before sh -c 'git commit -n -m x' and before
+#      5 sh -c 'git commit -n -m x' on each path, and at least one of the two
+#      forms must be denied. The nine rows in D catch a name removed from
+#      WRAPPER; this check catches a name in WRAPPER whose branch is missing
+#      from cmd_pos, and it covers a new wrapper without a hand-written row
+#      in D. An empty list fails it too
 #   G. AC7: the old guard (tests/fixtures/guard-1c4cea5a/, the version
 #      before this rewrite) decides the corpus of A's deny rows, B (with the
 #      self-review kinds), and C on each path, and is compared with the new
@@ -239,10 +245,14 @@ enqueue() {
   qn=$((qn + 1))
 }
 
-# decide <index> — run one queued case and write its decision.
-decide() {
-  local i="$1" out rc got
-  out="$(PATH="${q_path[$i]}" "${q_hook[$i]}" < "$workdir/p.$i" 2>/dev/null)"
+# run_guard <hook> <path> <payload file> — run the hook once with PATH set
+# to <path> and the payload on stdin, and print "<decision> <exit status>":
+# none (empty stdout), deny (the exact deny JSON), ask, or unparsed. decide
+# runs every queued case through it, and the wrapper rows of F run the
+# guard directly through it.
+run_guard() {
+  local out rc got
+  out="$(PATH="$2" "$1" < "$3" 2>/dev/null)"
   rc=$?
   case "$out" in
     '') got=none ;;
@@ -250,7 +260,13 @@ decide() {
     *'"permissionDecision":"ask"'*) got=ask ;;
     *) got=unparsed ;;
   esac
-  printf '%s %s\n' "$got" "$rc" > "$workdir/r.$i"
+  printf '%s %s\n' "$got" "$rc"
+}
+
+# decide <index> — run one queued case and write its decision.
+decide() {
+  local i="$1"
+  run_guard "${q_hook[$i]}" "${q_path[$i]}" "$workdir/p.$i" > "$workdir/r.$i"
 }
 
 run_queue() {
@@ -891,12 +907,16 @@ edge_deny=(
   'env -u HOME sudo ls'
   'xargs -I{} sudo ls {}'
   'xargs -n 1 sudo ls'
-  # Each name of WRAPPER (pre_bash_guard_rules.awk) and its branch in
-  # cmd_pos, one row each: the -n is denied (no_verify) only when cmd_pos
-  # steps past the wrapper and finds sh, whose -c string is then read as
-  # commands. Without the name in WRAPPER or without its branch, the wrapper
-  # is the command name, the -c string is not read, and no sentinel rule
-  # matches, so the row turns none.
+  # The nine names of WRAPPER (pre_bash_guard_rules.awk), one row each: the
+  # -n is denied (no_verify) only when cmd_pos steps past the wrapper and
+  # finds sh, whose -c string is then read as commands. Without the name in
+  # WRAPPER or without its branch in cmd_pos, the wrapper is the command
+  # name, the -c string is not read, and no sentinel rule matches, so the
+  # row turns none. These rows catch a name removed from WRAPPER (the check
+  # in F only sees the names that are in it). A name in WRAPPER whose branch
+  # is missing from cmd_pos, including a new wrapper added without a row
+  # here, is caught by the wrapper rows of F, which run the same rows for
+  # each name of the WRAPPER list read at run time.
   $'env sh -c \'git commit -n -m x\''
   $'command sh -c \'git commit -n -m x\''
   $'exec sh -c \'git commit -n -m x\''
@@ -1569,6 +1589,56 @@ else
   else
     record_fail "$label (DATACMD has:$offending)"
   fi
+fi
+
+# Wrapper rows built from the WRAPPER list read above (wrapper_words). A
+# name in WRAPPER whose branch is missing from cmd_pos is returned by
+# cmd_pos as the command name, so the sh -c after it is not read; the nine
+# wrapper rows of edge_deny (D) are written by hand and miss a new name
+# added that way. Each name W runs here, on each path, in the forms of
+# wrapper_row_forms (W sh -c '...' and W 5 sh -c '...': timeout takes the
+# next word as its duration, the other eight read the next word as the
+# command), and at least one form must be denied with exit 0. The guard
+# runs directly, through run_guard as decide runs a queued case, not
+# through the queue, so the two forms are compared here. A wrapper whose
+# arguments neither form covers fails, and needs another form added to
+# wrapper_row_forms. An empty WRAPPER list (the read above failed) fails
+# this check too.
+wrapper_row_forms=(
+  $'sh -c \'git commit -n -m x\''
+  $'5 sh -c \'git commit -n -m x\''
+)
+if [ "${#wrapper_words[@]}" -eq 0 ]; then
+  record_fail "F. wrapper rows from the run-time WRAPPER: no WRAPPER name was read from the three .awk files, so no wrapper row ran"
+else
+  for w in "${wrapper_words[@]}"; do
+    for p in jq no-jq; do
+      label="F. wrapper row from the run-time WRAPPER: $w before each of the ${#wrapper_row_forms[@]} forms, at least one -> deny [$p]"
+      if [ "$p" = jq ]; then
+        if [ "$have_jq" != yes ]; then
+          record_skip "$label (jq not on PATH)"
+          continue
+        fi
+        use_path="$real_path"
+      else
+        use_path="$minimal_path"
+      fi
+      denied=no
+      got_forms=""
+      for ((k = 0; k < ${#wrapper_row_forms[@]}; k++)); do
+        escaped="$(json_escape "$w ${wrapper_row_forms[$k]}")"
+        payload_json "$escaped" > "$workdir/wrapper-row.$k.json"
+        read -r got rc <<< "$(run_guard "$HOOK" "$use_path" "$workdir/wrapper-row.$k.json")"
+        got_forms+="${got_forms:+; }$escaped -> $got (exit $rc)"
+        if [ "$got" = deny ] && [ "$rc" = 0 ]; then denied=yes; fi
+      done
+      if [ "$denied" = yes ]; then
+        record_pass "$label (got: $got_forms)"
+      else
+        record_fail "$label (wrapper $w on the $p path: neither form is denied, got: $got_forms; a wrapper whose arguments neither form covers needs another form added to wrapper_row_forms in this check)"
+      fi
+    done
+  done
 fi
 
 # ── G. AC7: the old guard's denies, kept or listed ──────────────────────
