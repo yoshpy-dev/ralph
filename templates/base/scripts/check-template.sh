@@ -27,10 +27,19 @@ trap 'exit 129' HUP
 # Files a `ralph init` scaffold does not receive are deliberately not
 # listed here (for example, the ralph repository's own README and its
 # docs/research/ and docs/roadmap/ notes).
+# The five .claude/hooks/ entries are listed because pre_bash_guard.sh needs
+# all of them: without one of its three .awk files, awk exits non-zero and
+# the guard falls back to the previous guard's four substring rules without
+# any message.
 required_files="
 AGENTS.md
 CLAUDE.md
 .claude/settings.json
+.claude/hooks/pre_bash_guard.sh
+.claude/hooks/lib_json.sh
+.claude/hooks/pre_bash_guard_lex.awk
+.claude/hooks/pre_bash_guard_commands.awk
+.claude/hooks/pre_bash_guard_rules.awk
 scripts/run-verify.sh
 scripts/run-static-verify.sh
 scripts/run-test.sh

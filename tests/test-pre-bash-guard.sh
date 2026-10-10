@@ -28,13 +28,23 @@
 #      that may run its arguments such as find -exec, watch, flock, chroot;
 #      force push; hard reset; command substitution in a commit message;
 #      --no-verify and core.hooksPath; abbreviated long options; strings run
-#      as commands and files written, which the sentinel denies; zsh =sudo;
-#      zsh ${(e)...} text and stat -A, which are no data regions)
+#      as commands and files written, which the sentinel denies; zsh =sudo)
 #      -> deny, with permission_mode absent and bypassPermissions. Then the
 #      kinds of command the self-review listed (string runners, other
 #      shells, builtin/source/process substitution, git forms that run
 #      commands, NOEXEC commands that run an argument, env -S attached,
-#      zsh =), at least two each -> deny
+#      zsh =), at least two each -> deny. Then guard_deny_only_forms, text
+#      the shell runs that a data region would hide: groups and compound
+#      commands, heredocs read across a substitution or joined by a
+#      backslash-newline, exec with a redirection, unsafe output
+#      redirections, printf -v, and a backslash-newline anywhere (groups 1
+#      to 8); a $'\x45' heredoc delimiter, env -S, builtin exec, and the
+#      allowlist forms (a data command named by a path or behind a wrapper
+#      or an assignment, a variable or only redirections as a first word)
+#      (9); printf with a %, $ or backtick, test -v and [ -v (the second 9);
+#      printf and rg words in $'...' (self-review C4-1, cycle 4 /test); zsh
+#      ${(e)...} text and stat -A (10); rg with a word whose value is only
+#      known at run time, and zsh subscripts (11) -> deny
 #   C. AC3: false positives of the old guard and look-alikes, all inside
 #      data regions or not matching (sudo as an argument of echo or grep, in
 #      a comment, a commit message, a quoted heredoc fed to git commit -F -,
@@ -58,8 +68,10 @@
 #      boundary, a region longer than one 512-character index block) and
 #      what breaks them (a pipe to sh or sort, a file, >&file, >(...) after
 #      > or as an argument, a here-string, a cut-short pipeline, rg --pre,
-#      nesting, an assignment, a backtick after the message, a
-#      backslash-newline anywhere, also one that is only text), a sentinel
+#      nesting, an assignment, a backtick after the message, a $ that
+#      expands in a message or an rg word but not a $ that is only text, a
+#      zsh subscript, a backslash-newline anywhere, also one that is only
+#      text), a sentinel
 #      match across the guard's 512-character text window, and the known
 #      false positives of the wrapper scan (tech-debt)
 #   E. Broken input (unclosed quotes, parentheses, substitutions, heredocs
@@ -71,7 +83,17 @@
 #      or alternating with double quotes) are denied, 23 pass. With awk
 #      missing from PATH, or an awk that exits 2, the old guard's four
 #      substring rules decide (these need jq: lib_json.sh's jq-absent path
-#      runs awk itself)
+#      runs awk itself); so they do, on both paths, for a copy of the guard
+#      that lacks pre_bash_guard_rules.awk. The three .awk files, read with
+#      awk -f in the guard's order, parse as one program (no input and ls:
+#      exit 0 and no output; sudo ls: the rule name sudo). The DATACMD
+#      invariant: no name in DATACMD, read at run time from the three .awk
+#      files, is a reserved word (listed in the test) or a wrapper that
+#      function cmd_pos of pre_bash_guard_commands.awk steps past (its
+#      nm == "..." names), since the allowlist is what drops the data
+#      regions of a command that starts with a reserved word and of exec
+#      with a redirection; awk failing or a list that cannot be read fails
+#      the check
 #   G. AC7: the old guard (tests/fixtures/guard-1c4cea5a/, the version
 #      before this rewrite) decides the corpus of A's deny rows, B (with the
 #      self-review kinds), and C on each path, and is compared with the new
@@ -544,11 +566,21 @@ check_modes B deny absent bypassPermissions -- "${self_review_forms[@]}"
 # joined by a backslash-newline, an exec with a redirection, an unsafe output
 # redirection, printf -v (which stores into a variable), and (8, found by
 # the cycle 2 /test as F2-1) a backslash-newline anywhere, such as between
-# $ and ( inside double quotes. The old guard denies all of these too, so
-# they join the AC7 corpus.
+# $ and ( inside double quotes. Later runs added these groups (the comment
+# of each gives its reason):
+#   9: cross-review cycle 2 ($'\x45' delimiter, env -S, builtin exec), and
+#      the allowlist forms (a path, a wrapper, an assignment, a variable)
+#   9 (the second): cross-review cycle 3, printf with a % or $, test -v, [ -v
+#   self-review C4-1 and cycle 4 /test: printf and rg words in $'...'
+#   10: plan guard-zsh-data-gaps, zsh ${(e)...} text and stat -A
+#   11: plan guard-msg-param-flag, run-time rg words and zsh subscripts
+# The old guard denies all of these too, so they join the AC7 corpus.
 guard_deny_only_forms=(
   # 1. Groups and compound commands (subshell, brace group, reserved word in
-  # command position), including two that were false none before.
+  # command position). The last two rows, (echo sudo ls) and the if grep -q
+  # form, only read or print text: they deny because a group or compound
+  # command at the top level gets no data region, and the old guard denies
+  # them too.
   $'(echo \'git push --force\') | sh'
   $'{ echo \'sudo ls\'; } | sh'
   $'{ echo \'git reset --hard\'; } > run.sh'
@@ -580,6 +612,12 @@ guard_deny_only_forms=(
   # 5. exec with a redirection: a later command writes to the redirected fd.
   $'exec >run.sh; echo \'sudo ls\'; sh run.sh'
   $'exec 3>run.sh; echo \'sudo ls\' >&3; sh run.sh'
+  # No sh after it. The rows above end in sh run.sh, whose first word sh (not
+  # a data command) drops the data regions too, so they would still deny if
+  # exec were in DATACMD. Here only the first word exec makes the allowlist
+  # in end_cmd drop the data region of echo, so this row pins the allowlist
+  # for an exec with a redirection.
+  $'exec >run.sh; echo \'sudo ls\''
   # 6. Unsafe output redirections keep a data region from echo: a dup to fd 3
   # or higher, a dup to a word (a file to bash), &> and &>>, >| and <>, and
   # >> into a file.
@@ -662,8 +700,9 @@ guard_deny_only_forms=(
   # so a $(...) that the lexer reads as quoted text inside a ${...} (in
   # single quotes, or with the $ escaped) runs. The whole ${...} is no data:
   # as an argument of a data command (lex_dollar notes its span), in a commit
-  # or tag message (msg_check reads the whole source word, also when quotes
-  # split the flag as in --message''= or -"m"), and in an unquoted heredoc
+  # or tag message (msg_check reads the per-word expansion mark, which the
+  # whole word carries also when quotes split the flag as in --message''= or
+  # -"m"), and in an unquoted heredoc
   # body (lex_hd marks any ${ as a substitution). zsh stat -A NAME (the
   # zsh/stat module) evaluates the subscript of NAME, so stat is no data
   # command. The old guard denies all of these (the sudo substring).
@@ -678,6 +717,42 @@ guard_deny_only_forms=(
   $'git commit -"m"${(e):-\'$(sudo ls)\'}'
   $'git tag -a v1 --message\'\'=${(e):-\'$(sudo ls)\'}'
   $'stat -A \'arr[$(sudo id; echo 1)]\' /dev/null'
+  # 11. Plan guard-msg-param-flag (AC2). A word of rg whose value is only
+  # known at run time could be --pre, so a $ that expands ($x, "$x"), a
+  # substitution ($(...), and a backtick, which has no $ and is caught only
+  # by the WS check) makes rg not a data command; the $SQ\x2d-preSQ row of
+  # 9 above covers ANSI-C quoting. zsh evaluates a subscript ($arr[...],
+  # $h[...], $~arr[...], and the arithmetic $[...] of bash and zsh), which
+  # runs a $(...) written there in single quotes, so the span from the $ to
+  # the end of its word is no data, and a message with such a word (a $
+  # that expands) is no data either. The ${(e)...} message rows of 10 above
+  # keep the commit and tag messages with a ${ out of the data regions. The
+  # old guard denies all of these (the sudo substring).
+  'rg $x sudo pat .'
+  $'rg "$x" \'sudo \' .'
+  $'rg $(echo --pre) sh \'sudo ls\''
+  $'rg `echo --pre` sh \'sudo ls\''
+  $'echo $arr[\'$(sudo ls)\']'
+  $'echo $h[\'$(sudo ls)\']'
+  $'echo $~arr[\'$(sudo ls)\']'
+  $'echo $[\'$(sudo ls)\']'
+  $'git commit -m $arr[\'$(sudo ls)\']'
+  # zsh subscripts special parameters too ($@[...], $*[...]) and the length
+  # $#x[...], and a subscript opened inside double quotes runs on past the
+  # closing quote, so the single-quoted $(...) after it is in the subscript
+  # (lex_dq reports that $ to lex_word as DQ_SUB). The old guard denies
+  # these as well (the sudo substring).
+  $'echo $@[\'$(sudo ls)\']'
+  $'echo $#x[\'$(sudo ls)\']'
+  $'echo $*[\'$(sudo ls)\']'
+  $'echo "$arr["\'$(sudo ls)\'"]"'
+  # The zsh modifiers =, ^ and + before a name start a subscript too
+  # ($=arr[...], $^arr[...], $+arr[...]). These rows pin them in RE_NOTFLAG
+  # (mutation M20 of docs/reports/test-2026-10-09-guard-msg-param-flag.md
+  # drops the =). The old guard denies them as well (the sudo substring).
+  $'echo $=arr[\'$(sudo ls)\']'
+  $'echo $^arr[\'$(sudo ls)\']'
+  $'echo $+arr[\'$(sudo ls)\']'
 )
 check_modes B deny absent bypassPermissions -- "${guard_deny_only_forms[@]}"
 
@@ -868,9 +943,10 @@ edge_deny=(
   $'find . -exec git push origin --force \\;'
   'flock /tmp/l git push origin -f'
   'watch git -C dir reset --hard'
-  # Cycle 2 (P2-4): consuming a push option value must not hide a real force.
-  # -fo has f before o (force); -o x consumes x, then --force denies; -uf is a
-  # cluster whose f is force.
+  # Cross-review cycle 2, finding 4 (guard-deny-only triage,
+  # docs/reports/cross-review-triage-guard-deny-only.md): consuming a push
+  # option value must not hide a real force. -fo has f before o (force); -o x
+  # consumes x, then --force denies; -uf is a cluster whose f is force.
   'git push -fo x origin'
   'git push -o x --force origin'
   'git push -uf origin main'
@@ -913,6 +989,15 @@ edge_deny=(
   # deny. --message " is not the -m " the sentinel reads, so only that rule
   # denies this; the old guard lets it through.
   'git commit --message "${msg}$(id)"'
+  # Plan guard-msg-param-flag (AC2b): the lexer does not skip a subscript,
+  # so a $(...) inside one is still read again as commands (commit_message
+  # for the message; sudo as the command name of the substitution, which
+  # quotes split so that the sentinel does not match). A subscript ends with
+  # its word, so an unclosed [ does not hide the command after the ;. The
+  # old guard lets all three through.
+  'git commit -m $arr[$(date)]'
+  $'echo $arr[$(s\'\'udo ls)]'
+  'echo $a[ ; git push origin --force'
 )
 check_modes D deny absent -- "${edge_deny[@]}"
 
@@ -1004,13 +1089,14 @@ edge_none=(
   'echo $((1+2))'
   'for f in *.md; do echo "$f"; done'
   'case "$x" in a) echo a;; esac'
-  # Cross-review cycle 2 (P2-4, P2-5): a value-taking push option whose value
-  # is read as a flag, and a hard-reset look-alike after --. git push -h on
-  # this machine lists -o/--push-option, --repo, --receive-pack, --exec and
-  # --recurse-submodules as value-taking; -ofoo is -o with value foo. After
-  # reset's -- everything is a pathspec, so --hard names a file. The old guard
-  # let all of these through. They are not in AC3 (section C), which mirrors
-  # the plan's list.
+  # Cross-review cycle 2, findings 4 and 5 (guard-deny-only triage,
+  # docs/reports/cross-review-triage-guard-deny-only.md): a value-taking push
+  # option whose value is read as a flag, and a hard-reset look-alike after
+  # --. git push -h on this machine lists -o/--push-option, --repo,
+  # --receive-pack, --exec and --recurse-submodules as value-taking; -ofoo is
+  # -o with value foo. After reset's -- everything is a pathspec, so --hard
+  # names a file. The old guard let all of these through. They are not in
+  # AC3 (section C), which mirrors the plan's list.
   'git push origin -ofoo'
   'git push -o ci.skip origin main'
   'git push --push-option=foo origin main'
@@ -1056,6 +1142,39 @@ edge_none=(
   $'git commit -m "$(cat <<\'EOF\'\nfix: mention ${HOME} and sudo ls in the body\nEOF\n)"'
   $'git commit -F - <<EOF\nuse ${HOME} here\nEOF'
   'stat -f %z file'
+  # Plan guard-msg-param-flag (AC1). A message loses its data region only
+  # for a $ that expands, which lex_dollar marks: a ${ inside single quotes,
+  # escaped by a backslash inside double quotes, or inside an ANSI-C string
+  # is text, so these messages stay data and their sentinel words pass. rg
+  # reads the same marks, so a $ at the end of a single-quoted pattern, or
+  # before the closing double quote, keeps rg a data command. PR #211
+  # denied the four messages and both rg patterns (it looked for ${, $SQ
+  # and $DQ in the source text); the old guard denies all eight rows with a
+  # sentinel word (the sudo substring).
+  $'git commit -m \'mention ${HOME}; never sudo ls\''
+  'git commit -m "mention \${HOME}; never sudo ls"'
+  $'git commit -m $\'mention ${HOME}; never sudo ls\''
+  $'git tag -a v1 -m \'mention ${HOME}; never sudo ls\''
+  $'git commit -m "never sudo ls for 5$"'
+  $'rg \'foo$\' \'sudo \' .'
+  $'rg "foo$" \'sudo \' .'
+  $'rg -n \'sudo \' .'
+  $'git commit -m \'use ${HOME}\''
+  # A $ followed by a space, a tab, a newline or the end of the text does
+  # not expand, so the message stays data and rg stays a data command. These
+  # rows pin those four conditions of LD_EXP in lex_dollar (the M13 family
+  # of mutations of docs/reports/test-2026-10-09-guard-msg-param-flag.md;
+  # the "5$" row above pins the closing double quote). The old guard denies
+  # all four (the sudo substring).
+  'git commit -m "costs $ 5; never sudo ls"'
+  $'git commit -m "costs $\t5; never sudo ls"'
+  $'git commit -m "costs $\n5; never sudo ls"'
+  $'rg \'sudo \' foo$'
+  # Item 6(b) of the pre_bash_guard.sh header: the $ of a locale string
+  # $"..." outside double quotes does not expand, so the message stays data
+  # (lex_dollar sets no LD_EXP for it). The old guard denies it (the sudo
+  # substring).
+  $'git commit -m $"never sudo ls"'
 )
 check_modes D none absent -- "${edge_none[@]}"
 
@@ -1128,11 +1247,11 @@ edge_sentinel_deny=(
   'apt-get remove sudo -y'
   $'bash -c \'x\' sudo ls'
   'flock l git grep sudo file'
-  # The allowlist (change A, cycle 2) drops the data region of a zsh =echo:
-  # its value =echo is not a bare data command (cname strips the = for the
-  # rule, but the data-region allowlist reads the raw value). The old guard
-  # denied it (the sudo substring), so this moves here from edge_none, not to
-  # intentional_fixes.
+  # The allowlist (commit a9ef82b1, data_first_ok) drops the data region of
+  # a zsh =echo: its value =echo is not a bare data command (cname strips the
+  # = for the rule, but the data-region allowlist reads the raw value). The
+  # old guard denied it (the sudo substring), so this moves here from
+  # edge_none, not to intentional_fixes.
   '=echo sudo ls'
   # Cross-review cycle 3: printf with a % (or a $ or a backtick) and test or [
   # give no data region, so the sentinel decides; the old guard denied these
@@ -1147,6 +1266,17 @@ edge_sentinel_deny=(
   'rg $"sudo ls" .'
   $'printf `echo x` \'sudo ls\''
   $'printf -v c \'sudo ls\''
+  # Plan guard-msg-param-flag: the edge cases of the expansion mark and the
+  # subscript. A digit ($1) and a special parameter ($@) expand, so rg is no
+  # data command and a message with one is no data (PR #211 gave the message
+  # its data region, as it only looked for ${). A subscript inside a
+  # subscript ($a[$b[1]]) still runs to the end of its word, so the quoted
+  # text attached to it is no data. The old guard denies all four, and PR
+  # #211 let all four through.
+  $'rg $1 \'sudo \' .'
+  $'rg "$@" \'sudo \' .'
+  'git commit -m "use $1 never sudo ls"'
+  $'echo $a[$b[1]]\'sudo ls\''
 )
 check_modes D deny absent -- "${edge_sentinel_deny[@]}"
 
@@ -1310,6 +1440,119 @@ if [ "$have_jq" = yes ]; then
   enqueue "F. awk exits 2: ls -> none" none "$HOOK" "$fakeawk_path" "$(payload_json ls)"
 else
   record_skip "F. the awk fallback cases (jq not on PATH: lib_json.sh needs awk or jq)"
+fi
+
+# A copy of the guard next to lib_json.sh and only two of its three .awk
+# files (no pre_bash_guard_rules.awk): awk cannot open the missing file and
+# exits non-zero, so the old guard's four substring rules decide. awk itself
+# is on PATH, so this runs on both paths. echo 'never use sudo here' is
+# none on the awk path (C) and deny here, which shows that the fallback
+# decided.
+partial_dir="$workdir/partial-guard"
+mkdir -p "$partial_dir"
+for f in pre_bash_guard.sh lib_json.sh pre_bash_guard_lex.awk pre_bash_guard_commands.awk; do
+  cp "$REPO_ROOT/.claude/hooks/$f" "$partial_dir/$f"
+done
+chmod +x "$partial_dir/pre_bash_guard.sh"
+for c in 'sudo ls' ls $'echo \'never use sudo here\''; do
+  if [ "$c" = ls ]; then expect=none; else expect=deny; fi
+  escaped="$(json_escape "$c")"
+  label="F. guard without pre_bash_guard_rules.awk: $escaped -> $expect"
+  if [ "$have_jq" = yes ]; then
+    enqueue "$label [jq]" "$expect" "$partial_dir/pre_bash_guard.sh" "$real_path" "$(payload_json "$escaped")"
+  else
+    record_skip "$label [jq] (jq not on PATH)"
+  fi
+  enqueue "$label [no-jq]" "$expect" "$partial_dir/pre_bash_guard.sh" "$minimal_path" "$(payload_json "$escaped")"
+done
+
+# The three .awk files, read the way the guard reads them (LC_ALL=C, -f in
+# the order lex, commands, rules), parse as one program: no input and ls
+# give exit 0 and no output, and sudo ls gives the rule name sudo. awk's
+# stderr is kept, so a syntax error shows in the failure.
+guard_awk=(
+  -f "$REPO_ROOT/.claude/hooks/pre_bash_guard_lex.awk"
+  -f "$REPO_ROOT/.claude/hooks/pre_bash_guard_commands.awk"
+  -f "$REPO_ROOT/.claude/hooks/pre_bash_guard_rules.awk"
+)
+for c in '' ls 'sudo ls'; do
+  if [ "$c" = 'sudo ls' ]; then want=sudo; else want=''; fi
+  out="$(printf '%s' "$c" | LC_ALL=C awk "${guard_awk[@]}" 2>&1)"
+  rc=$?
+  label="F. the three .awk files in the guard's order: input [$c] -> exit 0, output [$want]"
+  if [ "$rc" -eq 0 ] && [ "$out" = "$want" ]; then
+    record_pass "$label"
+  else
+    record_fail "$label (got [$out], exit $rc)"
+  fi
+done
+
+# The DATACMD invariant. For a command that starts with a reserved word
+# (if, for, while, until, select, case, { ...) and for an exec with a
+# redirection, the allowlist in end_cmd is what drops the data regions:
+# their first word is not in DATACMD. Some forms meet the ( or ) rule of
+# lex_cmds: a case clause meets the ) rule as well, by the ) after its
+# pattern, and a subshell meets only the ( rule, by its opening (. A brace
+# group, and an if, for, while, until or select with no ( or ) at the top
+# level, meet only the allowlist. So no DATACMD name may be a reserved word
+# or a wrapper that cmd_pos steps past.
+# DATACMD is read at run time, so a name added to it in any way is read:
+# awk runs the three .awk files with guard_awk and then one more file,
+# written to $workdir, whose BEGIN prints the keys of DATACMD and exits. It
+# runs after the guard's BEGIN, which fills DATACMD, and with no input the
+# guard's END prints nothing (the input [] case above), so the output is the
+# names, one per line. The wrappers are read from the nm == "..."
+# comparisons inside function cmd_pos of pre_bash_guard_commands.awk (they
+# are code, not data). When awk exits non-zero or either list is empty, the
+# check fails. The reserved words are listed here (the guard keeps no list
+# of them).
+commands_awk="$REPO_ROOT/.claude/hooks/pre_bash_guard_commands.awk"
+read -r -a reserved_words <<< 'if then elif else fi for while until do done case esac select function { } ! [[ ]] time coproc'
+label="F. DATACMD invariant: no name in DATACMD (read at run time from the three .awk files) is a reserved word or a wrapper that cmd_pos steps past"
+datacmd_dump="$workdir/datacmd-dump.awk"
+printf '%s\n' 'BEGIN { for (k in DATACMD) print k; exit }' > "$datacmd_dump"
+datacmd_names="$(LC_ALL=C awk "${guard_awk[@]}" -f "$datacmd_dump" < /dev/null 2> "$workdir/datacmd-dump.err")"
+datacmd_rc=$?
+wrapper_names="$(awk '
+  /^function cmd_pos\(/ { inside = 1 }
+  inside {
+    s = $0
+    while (match(s, /nm == "[^"]*"/)) {
+      print substr(s, RSTART + 7, RLENGTH - 8)
+      s = substr(s, RSTART + RLENGTH)
+    }
+  }
+  inside && /^}/ { exit }
+' "$commands_awk" 2>/dev/null)"
+datacmd_words=()
+while IFS= read -r w; do
+  [ -n "$w" ] && datacmd_words+=("$w")
+done <<< "$datacmd_names"
+wrapper_words=()
+while IFS= read -r w; do
+  [ -n "$w" ] && wrapper_words+=("$w")
+done <<< "$wrapper_names"
+if [ "$datacmd_rc" -ne 0 ]; then
+  record_fail "$label (awk exited $datacmd_rc reading DATACMD from the three .awk files: $(head -c 300 "$workdir/datacmd-dump.err"))"
+elif [ "${#datacmd_words[@]}" -eq 0 ]; then
+  record_fail "$label (no DATACMD name read from the three .awk files)"
+elif [ "${#wrapper_words[@]}" -eq 0 ]; then
+  record_fail "$label (no wrapper name read from function cmd_pos in $commands_awk)"
+else
+  offending=""
+  for d in "${datacmd_words[@]}"; do
+    for w in "${wrapper_words[@]}"; do
+      [ "$d" = "$w" ] && offending+=" $d (a wrapper that cmd_pos steps past);"
+    done
+    for w in "${reserved_words[@]}"; do
+      [ "$d" = "$w" ] && offending+=" $d (a reserved word);"
+    done
+  done
+  if [ -z "$offending" ]; then
+    record_pass "$label (${#datacmd_words[@]} names, ${#wrapper_words[@]} wrappers, ${#reserved_words[@]} reserved words)"
+  else
+    record_fail "$label (DATACMD has:$offending)"
+  fi
 fi
 
 # ── G. AC7: the old guard's denies, kept or listed ──────────────────────

@@ -89,18 +89,25 @@ skip() {
   printf '  SKIP: %s\n' "$1"
 }
 
-# The golden required_files list: the 3 non-script entries in their current
-# order, followed by the 22 scripts/ entries, ordered here to match
-# internal/scaffold/embed_test.go's requiredTemplateScripts as a
-# readability convention only (the Go test compares both as sets, so
-# reordering either list does not by itself fail anything). Update this
-# list in the same commit as any change to required_files in
-# scripts/check-template.sh, templates/base/scripts/check-template.sh, and
-# requiredTemplateScripts in internal/scaffold/embed_test.go.
+# The golden required_files list: the 8 entries outside scripts/ (two of
+# them, .claude/hooks/pre_bash_guard.sh and .claude/hooks/lib_json.sh, are
+# shell scripts) in their current order, followed by the 23 scripts/
+# entries, ordered here to match internal/scaffold/embed_test.go's
+# requiredTemplateScripts as a readability convention only (the Go test
+# compares both as sets, so reordering either list does not by itself fail
+# anything). Update this list in the same commit as any change to
+# required_files in scripts/check-template.sh,
+# templates/base/scripts/check-template.sh, and requiredTemplateScripts in
+# internal/scaffold/embed_test.go.
 GOLDEN_ENTRIES=(
   "AGENTS.md"
   "CLAUDE.md"
   ".claude/settings.json"
+  ".claude/hooks/pre_bash_guard.sh"
+  ".claude/hooks/lib_json.sh"
+  ".claude/hooks/pre_bash_guard_lex.awk"
+  ".claude/hooks/pre_bash_guard_commands.awk"
+  ".claude/hooks/pre_bash_guard_rules.awk"
   "scripts/run-verify.sh"
   "scripts/run-static-verify.sh"
   "scripts/run-test.sh"
@@ -136,10 +143,11 @@ extract_required_files() {
 
 # build_fixture <dir> — populate a minimal project tree that passes
 # check-template.sh: every golden entry exists, .claude/settings.json is
-# "{}", every scripts/*.sh is an executable one-line stub, and the
-# directories check-template.sh scans with `find` exist (even if empty),
-# so every search root is present for the caller to mutate (e.g. making a
-# subtree unreadable) without also having to create the root itself.
+# "{}", every scripts/*.sh and .claude/hooks/*.sh entry is an executable
+# one-line stub, and the directories check-template.sh scans with `find`
+# exist (even if empty), so every search root is present for the caller to
+# mutate (e.g. making a subtree unreadable) without also having to create
+# the root itself.
 build_fixture() {
   local dir="$1" entry
   for entry in "${GOLDEN_ENTRIES[@]}"; do
@@ -148,7 +156,7 @@ build_fixture() {
       .claude/settings.json)
         printf '{}\n' > "$dir/$entry"
         ;;
-      scripts/*.sh)
+      scripts/*.sh|.claude/hooks/*.sh)
         printf '#!/bin/sh\n' > "$dir/$entry"
         chmod +x "$dir/$entry"
         ;;

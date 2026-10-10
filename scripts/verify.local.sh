@@ -4,8 +4,8 @@
 #
 # Honors HARNESS_VERIFY_MODE to match the documented split in
 # docs/quality/quality-gates.md:
-#   - static: shellcheck, sh -n, jq validity, template sync, tech-debt
-#             plan references
+#   - static: shellcheck, sh -n, the awk parse of the guard, jq validity,
+#             template sync, tech-debt plan references
 #   - test  : every tests/test-*.sh (a file without the exec bit, in the
 #             working tree or the git index, counts as a failure)
 #   - all   : everything (default; what run-verify.sh sets)
@@ -153,6 +153,22 @@ check_tech_debt_plan_refs() {
   fi
 }
 
+# check_guard_awk <dir>: read the three .awk files of the Bash guard in <dir>
+# the way pre_bash_guard.sh reads them (one awk, -f in the order lex,
+# commands, rules) with empty input; they must parse (exit 0) and print
+# nothing. A syntax error in any of them would make the guard fall back to
+# the previous guard's four rules without a message.
+check_guard_awk() {
+  awk_out="$(LC_ALL=C awk -f "$1/pre_bash_guard_lex.awk" -f "$1/pre_bash_guard_commands.awk" -f "$1/pre_bash_guard_rules.awk" </dev/null 2>&1)" || {
+    printf '%s\n' "$awk_out"
+    return 1
+  }
+  if [ -n "$awk_out" ]; then
+    printf 'unexpected output: %s\n' "$awk_out"
+    return 1
+  fi
+}
+
 run() {
   label="$1"
   shift
@@ -191,6 +207,14 @@ run_static_checks() {
   for f in .claude/hooks/*.sh templates/base/.claude/hooks/*.sh; do
     [ -f "$f" ] || continue
     run "sh -n $f" sh -n "$f"
+  done
+  # The guard's awk program lives in .awk files that shellcheck and sh -n do
+  # not read; parse them together as the guard does. A tree without the guard
+  # script (a test fixture) is skipped, like the .sh loops above; with the
+  # script present, a missing .awk file fails the step.
+  for d in .claude/hooks templates/base/.claude/hooks; do
+    [ -f "$d/pre_bash_guard.sh" ] || continue
+    run "awk parse of the guard in $d" check_guard_awk "$d"
   done
 
   # 3. JSON validity for settings.json.
