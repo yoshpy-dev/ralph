@@ -98,6 +98,8 @@ None (テストに検査を 1 つ足し、tech-debt の 1 文を直すだけで�
   - 2026-10-10: ユーザーが承認ゲートで Approve。承認の前に、consult(consult-plan-wraprows)の指摘(guard を直接動かす前例はない、`decide` と同じ呼び方で動かす)を Assumptions に反映した。Codex の plan advisory は指摘なし。前提(9 つの包みは 2 形のちょうど一方が deny、一覧にない `chrt` は 2 形とも none)は main 382c18c8 の guard で確かめた。図解ページは描いていない(Visual review を参照)
 - [x] Branch created
 - [x] Implementation started
+  - S1 完了(0eebc7e7、implementer/opus): F 節の DATACMD の検査のあとに、実行時の `WRAPPER` の名前ごとに 2 形(`W sh -c …`、`W 5 sh -c …`)を jq あり・なしで guard に渡す検査を足した(名前と経路の組ごとに 1 件、9×2=18 件)。guard の実行は `decide` から切り出した `run_guard` を共有する。ヘッダーの F 項目と `edge_deny` の 9 行の上のコメントを直した。テストは 2,108/0(macOS、mawk、gawk)。AC2: `chrt` を `WRAPPER` に足すと新しい検査が `chrt` を出して FAIL(9 行は通ったまま)、分岐を 1 つずつ消した 9 通りもすべて FAIL、`WRAPPER` が空でも FAIL。guard のファイルは変わっていない。handoff の外で、ヘッダーの D 項目の「each name of WRAPPER」を「the nine names」に直した
+  - S2 完了(この commit、inline、docs だけ): tech-debt のテストの穴の行の (h) の閉じの文で、10 個目の包みの行の足し忘れをこの PR で解消したと書き、Related にこの plan を足した
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
