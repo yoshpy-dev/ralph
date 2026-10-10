@@ -840,6 +840,44 @@ func TestWaitInbox_ReturnsAnItemThatArrivesWhileWaiting(t *testing.T) {
 	}
 }
 
+// timeout 0 (`ralph org wait --inbox --timeout-ms 0`) has no deadline: with
+// nothing open at the first read, WaitInbox keeps polling instead of
+// returning a timeout, and returns the item escalated later. The test
+// escalates only after WaitInbox has gone ten poll intervals without
+// returning, so the item is not there at the first read; a timer started for
+// a timeout of 0 would fire at once and end the wait before that (mutant E13
+// of the org-inbox-escalate /test report, `timeout > 0` read as `>= 0`).
+func TestWaitInbox_NoTimeoutReturnsAnItemThatArrivesLater(t *testing.T) {
+	f := newEscalateFixture(t)
+	f.o.InboxPollInterval = 10 * time.Millisecond
+
+	done := make(chan waitInboxOutcome, 1)
+	go func() {
+		items, err := f.o.WaitInbox(0)
+		done <- waitInboxOutcome{items: items, err: err}
+	}()
+	select {
+	case out := <-done:
+		t.Fatalf("WaitInbox(0) returned before any item was escalated: items %v, err %v", waitInboxItemIDs(out.items), out.err)
+	case <-time.After(10 * f.o.InboxPollInterval):
+	}
+
+	if _, err := f.o.Inbox.Escalate(InboxEscalation{OrgID: "org-a", Type: "QUESTION", Body: "TYPE: QUESTION\n\nwhich?"}); err != nil {
+		t.Fatalf("escalate while WaitInbox waits: %v", err)
+	}
+	select {
+	case out := <-done:
+		if out.err != nil {
+			t.Fatalf("WaitInbox(0) = %v; want the item escalated while it waited", out.err)
+		}
+		if got := waitInboxItemIDs(out.items); !slices.Equal(got, []string{"e1"}) {
+			t.Errorf("WaitInbox(0) items = %v; want e1", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("WaitInbox(0) did not return within 5s of the escalate")
+	}
+}
+
 // With an hour between polls, the only reads are the first one and the one
 // after the deadline: an item that arrives between them is still returned.
 func TestWaitInbox_ReadsOnceMoreAtTheDeadline(t *testing.T) {
