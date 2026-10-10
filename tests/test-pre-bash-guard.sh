@@ -918,9 +918,11 @@ edge_deny=(
   # removed from WRAPPER (the check in F only sees the names that are in
   # it). A name in WRAPPER whose branch is missing from cmd_pos, including a
   # new wrapper added without a row here, is caught by the wrapper rows of
-  # F. For each name of the WRAPPER list read at run time, those run the
-  # plain form (W sh -c ...) and a form with a duration (W 5 sh -c ...), not
-  # the rows below: only here are nice -n 5 and stdbuf -o0 run.
+  # F. For each name of the WRAPPER list read at run time, those run two
+  # fixed forms, W sh -c ... and W 5 sh -c ... (the 5 is a duration for
+  # timeout and a command name for the other eight), not the rows below:
+  # only these rows run each wrapper with arguments of its own (nice -n 5,
+  # stdbuf -o0, timeout 5) before sh -c.
   $'env sh -c \'git commit -n -m x\''
   $'command sh -c \'git commit -n -m x\''
   $'exec sh -c \'git commit -n -m x\''
