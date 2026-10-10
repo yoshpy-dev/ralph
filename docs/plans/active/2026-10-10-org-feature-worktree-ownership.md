@@ -118,7 +118,9 @@ Critical forks: None(どれも 1 スライスの中で戻せる)
 - 2026-10-10: S1(33271a68)。照合の規則は `featureWorktreeMismatch` にまとめ、使い回しの検査と、新しい `checkEnsuredFeatureWorktree`(`ensure` のあとの照合)の両方がこれを使う。計画からのずれ: 記録がぶつかる 2 つの案内(使い回しの拒否のうち `canonical_ref` が違う場合と、`ensure` のあとの拒否)は、AC3 の「slug(か Type)」ではなく slug の変更だけを案内する。Type だけ変えても org_id(既定は slug)は変わらず、記録の id `org-<org_id>` に同じように当たるため(`TestStartFeature_AfterDisband` のケースで確かめた)。「ブランチがすでにある」の案内は slug か Type。`ensure` のあとの照合は、記録が消えた・読めない・ほかの点が合わない場合も拒否し、打ち直すよう案内する。成功する start ごとに記録の読み出しと git の呼び出しが 1 回ずつ増える
 - 2026-10-10: S2(c8863608)。`/org` skill の 4 面の `start --plan` の手順に 5(`ensure` のあとの照合)を足して番号を 1 つ繰り下げ、拒否の一覧を新しい案内に合わせた。tech-debt の同時の start の行に、別の分割計画からの同時の start は拒否するようになったことと、残る部分(直列化はしていない)を書いた
 - 2026-10-10: self-review(cycle 1、7bd95ebd)の F-1(MEDIUM)・F-2・F-4・F-5 を 52800bae で直した。計画からのずれ: `--org-id` を明示した start(org_id が slug でない)では、記録の id `org-<org_id>` が slug で変わらないので、記録がぶつかる 2 つの案内は別の `--org-id` を勧め(`--org-id` を外して slug を org_id にする道も示す)、先の記録が同じブランチにあるときは slug も変えるよう添える。AC3 の「別の `--org-id` を案内しない」は、既定の org_id(slug)のときだけに当たる。F-2 で、待つ相手を「先の org の持ち主が、その PR の merge のあとに worktree を消す」と書いた。F-3(大文字小文字の違うパスは別の値になる。拒否の側に倒れる)は tech-debt に送る
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- 2026-10-10: verify(9bd90993、pass)の V-3。上の Risks の 2 つ目(分割計画のファイルを移した場合)は「エラー文が `cleanup` か別の `--org-id` を案内する」と書くが、AC3b のあとの使い回しの拒否は、既定の org_id では slug の変更を先に案内し、`cleanup` は要らないときに限り、別の `--org-id` は出さない(`--org-id` を渡した start は別の `--org-id` を案内する)。Risks のこの文は AC3b より前の書き方で、Scope と AC3b が挙動を正しく書いているので、計画の本文は承認のとおりに残す
+- 2026-10-10: sync-docs(cycle 1、この commit)。tech-debt の同時の start の行の注(self-review N1、verify V-1)を 52800bae のあとの案内に合わせ、F-3・N2〜N5・test report の残りの gap を 3 行にして足した。`/org` skill の 4 面は、org_id の条件の言い方を「slug と同じとき」にそろえ(V-4、N3)、「`--plan` をどう書いても同じ」に大文字小文字の例外を足した(V-2)。コードは触っていない
+- [x] Review artifact created
+- [x] Verification artifact created
+- [x] Test artifact created
 - [ ] PR created
