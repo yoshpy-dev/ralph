@@ -276,6 +276,52 @@ func TestMainWorktreeRoot(t *testing.T) {
 	})
 }
 
+// TestLedgerMainWorktreeRoot covers the accessor `ralph org spawn` uses for
+// the org-wide limits: a --state-dir or RALPH_ORG_STATE_DIR naming the main
+// worktree's ledger, as a feature org's leader passes it from its linked
+// worktree, has the main root (also through a symlink to the ledger), the
+// default ledger has it as MainWorktreeRoot does, and any other ledger,
+// source, or a cwd outside git has none.
+func TestLedgerMainWorktreeRoot(t *testing.T) {
+	mainRoot, sibling, nested := newRepoWithLinkedWorktrees(t)
+	stateDir := filepath.Join(mainRoot, defaultOrgStateDirRelPath)
+	mkdirAll(t, stateDir)
+	link := filepath.Join(t.TempDir(), "ledger-link")
+	if err := os.Symlink(stateDir, link); err != nil {
+		t.Fatal(err)
+	}
+	for _, cwd := range []string{sibling, filepath.Join(nested, "pkg"), mainRoot} {
+		mkdirAll(t, cwd)
+		chdir(t, cwd)
+		for _, tc := range []struct{ name, dir, source string }{
+			{"flag", stateDir, "flag"},
+			{"env", stateDir, "env"},
+			{"flag through a symlink", link, "flag"},
+			{"default ledger", stateDir, "git-main-worktree"},
+		} {
+			if root, ok := LedgerMainWorktreeRoot(tc.dir, tc.source); !ok || root != mainRoot {
+				t.Errorf("from %s, %s: LedgerMainWorktreeRoot(%q, %q) = %q, %t, want %q, true", cwd, tc.name, tc.dir, tc.source, root, ok, mainRoot)
+			}
+		}
+		for _, tc := range []struct{ name, dir, source string }{
+			{"flag naming the worktree's own ledger", filepath.Join(sibling, defaultOrgStateDirRelPath), "flag"},
+			{"env naming another directory", filepath.Join(t.TempDir(), "org"), "env"},
+			{"flag naming the main root", mainRoot, "flag"},
+			{"git-toplevel", stateDir, "git-toplevel"},
+			{"cwd", stateDir, "cwd"},
+		} {
+			if root, ok := LedgerMainWorktreeRoot(tc.dir, tc.source); ok || root != "" {
+				t.Errorf("from %s, %s: LedgerMainWorktreeRoot(%q, %q) = %q, %t, want \"\", false", cwd, tc.name, tc.dir, tc.source, root, ok)
+			}
+		}
+	}
+
+	chdir(t, resolved(t, t.TempDir()))
+	if root, ok := LedgerMainWorktreeRoot(stateDir, "flag"); ok || root != "" {
+		t.Errorf("outside git: LedgerMainWorktreeRoot(%q, flag) = %q, %t, want \"\", false", stateDir, root, ok)
+	}
+}
+
 // TestResolveOrgStateDir_BareDotGitWorktreeFallsBackToToplevel covers a
 // bare repository stored as <tmp>/project/.git: git names <tmp>/project as
 // its main worktree but marks the record `bare`, so a linked worktree keeps

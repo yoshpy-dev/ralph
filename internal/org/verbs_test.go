@@ -3286,6 +3286,84 @@ func TestOrgCloseDeferredSelfWorkspace_CloseFails_ReservationRestored(t *testing
 	})
 }
 
+// TestOrgCloseDeferredSelf_CloseFails_BindingRestored covers plan
+// 2026-10-09-org-feature-worktree AC10 on both closes that call reserveAgain:
+// org-a's leader is bound to a split plan feature, a disband from inside its
+// pane defers the close of that pane (the caller's workspace is elsewhere) or
+// of the org's workspace, and the close fails. The restored scope_reserved
+// carries the binding's tokens before the `restored:` note and the worktree
+// in its Worktree field, the error names the feature, and org-a is bound
+// again: the same binding passes with nothing written, and a plain
+// reservation of the same paths is refused.
+func TestOrgCloseDeferredSelf_CloseFails_BindingRestored(t *testing.T) {
+	f := testFeature("split-1", "auth", "0123456789ab")
+	for _, tc := range []struct {
+		name       string
+		ownWS      string
+		deferred   func(d DisbandResult) bool
+		close      func(o *Org, h *fakeHerdr) error
+		wantEvents []string
+		why        string
+	}{
+		{"pane", "ws-elsewhere",
+			func(d DisbandResult) bool { return d.DeferredSelfPaneID == "pane-1" && d.DeferredSelfWorkspaceID == "" },
+			func(o *Org, h *fakeHerdr) error {
+				h.paneCloseErrs = map[string]error{"pane-1": errTestCloseRefused}
+				return o.CloseDeferredSelfPane("pane-1", false)
+			},
+			[]string{EventSpawned, EventScopeReserved}, "self pane close failed: " + errTestCloseRefused.Error()},
+		{"workspace", "ws-1",
+			func(d DisbandResult) bool { return d.DeferredSelfWorkspaceID == "ws-1" },
+			func(o *Org, h *fakeHerdr) error {
+				h.workspaceCloseErrs = map[string]error{"ws-1": errTestWorkspaceCloseRefused}
+				return o.CloseDeferredSelfWorkspace("ws-1", false)
+			},
+			[]string{EventOrgWorkspaceCreated, EventSpawned, EventScopeReserved}, "self workspace close failed: " + errTestWorkspaceCloseRefused.Error()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			o, h, a := testOrg(t)
+			spawnFeatureLeaderIn(t, o, h, "org-a", "ws-1", "pane-1", f, "internal/auth/")
+			ownPaneEnv(o, "pane-1", tc.ownWS)
+			if d := o.Disband(DisbandParams{OrgID: "org-a"}); len(d.Errs) != 0 || !d.Disbanded || !tc.deferred(d) {
+				t.Fatalf("expected org-a disbanded with its own %s handed back, got %+v", tc.name, d)
+			}
+			assertActiveFeature(t, o, "org-a", nil)
+			before := len(mustReadEvents(t, o))
+
+			err := tc.close(o, h)
+			if err == nil || !strings.Contains(err.Error(),
+				`the reservation internal/auth/ of org_id "org-a" for feature "auth" of split plan "split-1" again, so running the command again retries the close`) {
+				t.Fatalf("expected the error to name the restored bound reservation, got %v", err)
+			}
+			if got := eventNames(t, o)[before:]; !slices.Equal(got, tc.wantEvents) {
+				t.Fatalf("expected %v, got %v", tc.wantEvents, got)
+			}
+			want := "paths=internal/auth/ split=split-1 feature=auth digest=0123456789ab branch=feat/auth restored: " + tc.why
+			if ev := lastEvent(t, o); ev.Event != EventScopeReserved || ev.OrgID != "org-a" || ev.SeatID != "" || ev.DryRun ||
+				ev.Details != want || ev.Worktree != f.Worktree {
+				t.Fatalf("expected the reservation restored with its binding (Details %q, Worktree %q), got %+v", want, f.Worktree, ev)
+			}
+			if got := ActiveReservation(mustReadEvents(t, o), "org-a"); !slices.Equal(got, []string{"internal/auth/"}) {
+				t.Fatalf("ActiveReservation(org-a) = %q, want internal/auth/ again", got)
+			}
+			assertActiveFeature(t, o, "org-a", f)
+
+			ownPaneEnv(o, "", "")
+			snap := takeSpawnSnapshot(t, o, h, a)
+			if r := o.Spawn(featureLeaderParams("org-a", f, "internal/auth/")); r.Outcome != SpawnOutcomeIdempotent || r.Err != nil {
+				t.Fatalf("expected the same binding to return the reactivated leader, got %+v", r)
+			}
+			if after := takeSpawnSnapshot(t, o, h, a); after != snap {
+				t.Fatalf("expected nothing recorded or called, %+v -> %+v", snap, after)
+			}
+			if r := o.Spawn(leaderParams("org-a", "internal/auth/")); r.Outcome != SpawnOutcomeRejected || r.Err == nil ||
+				!strings.Contains(r.Err.Error(), "so a reservation without a split plan (internal/auth/) is refused") {
+				t.Fatalf("expected a plain reservation refused for the bound org, got %+v", r)
+			}
+		})
+	}
+}
+
 // TestOrgCloseDeferredSelfWorkspace_ReservationRestored_RiskWindowClearedByRetry
 // covers the Risks item of plan 2026-10-08-org-limits-reserve: in the window
 // between org-a's disbanded and its compensation, org-b takes the last org
@@ -3793,7 +3871,7 @@ func TestOrgCloseDeferredSelf_NewerRecordsWhileClosing_Stay(t *testing.T) {
 				done <- withManifestLock(filepath.Dir(o.Manifest.Path()), func() error {
 					close(held)
 					time.Sleep(200 * time.Millisecond)
-					return o.appendEvent(scopeReservedEvent(o.now(), "org-a", []string{"docs/"}, "", false))
+					return o.appendEvent(scopeReservedEvent(o.now(), "org-a", Reservation{Paths: []string{"docs/"}}, "", false))
 				})
 			}()
 			select {
@@ -4047,14 +4125,38 @@ func TestReleasedReservation(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			d, got := releasedReservation(tt.events, "x")
-			if !slices.Equal(got, tt.want) {
+			d, released := releasedReservation(tt.events, "x")
+			if got := released.Paths; !slices.Equal(got, tt.want) {
 				t.Fatalf("releasedReservation paths = %q, want %q", got, tt.want)
 			}
 			if tt.want != nil && d != tt.wantD {
 				t.Fatalf("releasedReservation d = %d, want %d", d, tt.wantD)
 			}
 		})
+	}
+}
+
+// TestReleasedReservation_KeepsBinding: the reservation a deferred-close
+// compensation takes carries the split plan feature binding of the record
+// the org held (plan 2026-10-09-org-feature-worktree, AC10), and none for a
+// plain reservation.
+func TestReleasedReservation_KeepsBinding(t *testing.T) {
+	f := testFeature("split-1", "auth", "0123456789ab")
+	run := func(reserved ManifestEvent) []ManifestEvent {
+		return []ManifestEvent{
+			reserved,
+			{OrgID: "x", SeatID: LeaderIdentity, Event: EventSpawnStarted},
+			{OrgID: "x", SeatID: LeaderIdentity, Event: EventSpawned},
+			{OrgID: "x", SeatID: LeaderIdentity, Event: EventStopped},
+			{OrgID: "x", Event: EventDisbanded},
+		}
+	}
+	d, released := releasedReservation(run(boundReserveEvent("x", f, "docs/")), "x")
+	if d != 4 || !slices.Equal(released.Paths, []string{"docs/"}) || released.Feature == nil || *released.Feature != *f {
+		t.Fatalf("releasedReservation = %d, %q bound to %+v; want 4, docs/ bound to %+v", d, released.Paths, released.Feature, f)
+	}
+	if _, released := releasedReservation(run(reserveEvent("x", "docs/")), "x"); released.Feature != nil {
+		t.Fatalf("expected a plain reservation released unbound, got %+v", released.Feature)
 	}
 }
 

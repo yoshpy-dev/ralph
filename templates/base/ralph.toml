@@ -40,10 +40,10 @@ model_pool = [
 max_seats = 5
 # max_orgs caps running orgs across every org_id sharing the org state dir.
 # ralph org spawn and ralph org start read it from the main worktree's
-# ralph.toml only when --config is not given, neither --state-dir nor
-# RALPH_ORG_STATE_DIR is set, and the state dir resolves to the main
-# worktree's .harness/state/org. Otherwise they read the --config file, or
-# ./ralph.toml.
+# ralph.toml when --config is not given and the state dir is the main
+# worktree's .harness/state/org, whether found by default or named with
+# --state-dir or RALPH_ORG_STATE_DIR. Otherwise (--config, another state
+# dir, no git repository) they read the --config file, or ./ralph.toml.
 max_orgs = 10
 # max_total_seats caps active seats summed across every org_id sharing the
 # org state dir. Read from the same ralph.toml as max_orgs.

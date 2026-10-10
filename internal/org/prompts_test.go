@@ -415,6 +415,105 @@ func TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand(t *testing.T) {
 	}
 }
 
+// TestRenderRolePrompt_Leader_FeatureOrgProcedure pins AC12 of plan
+// docs/plans/active/2026-10-09-org-feature-worktree.md: the leader template
+// sets the default seats (one implementer, one reviewer), sends a task that
+// starts with the line featureLeaderTask writes first to the 機能ごとの org
+// section, and that section runs its steps in order: the feature plan, the
+// report, the archive and its commit, the secret scan, the push, gh pr create
+// without the /pr skill, the worktree kept for the cleanup after merge, and
+// disband last. Its intro keeps the feature's changes in the reservation and
+// its steps' own writes outside it, has every ralph org command carry the
+// --state-dir of the task's ledger line, its seats are spawned as implementer and
+// reviewer (maxFeatureOrgIDLen counts on the first), and the archive step
+// names its own step 8 for the cleanup. The retired formation patterns are
+// mentioned nowhere.
+func TestRenderRolePrompt_Leader_FeatureOrgProcedure(t *testing.T) {
+	text := renderSeatPrompt(t, "leader")
+
+	mission, found := markdownSection(text, "## ミッション")
+	if !found {
+		t.Fatalf("expected the leader template to contain a '## ミッション' section, got:\n%s", text)
+	}
+	if !strings.Contains(mission, "implementer 1 席と reviewer 1 席を既定") {
+		t.Errorf("expected the leader mission to make one implementer and one reviewer seat the default, got section:\n%s", mission)
+	}
+
+	// The template routes on the first line of the task start --plan builds.
+	const routeLine = "- 分割計画:"
+	task := featureLeaderTask(&SplitPlan{ID: "s", Path: "/state/splits/s.md", Digest: "0123456789ab"},
+		SplitFeature{Slug: "a", Type: "feat", Reserve: []string{"a/"}}, "/state", "/wt", "feat/a")
+	if !strings.HasPrefix(task, routeLine) {
+		t.Fatalf("featureLeaderTask no longer starts with %q, which the leader template routes on; got:\n%s", routeLine, task)
+	}
+	if item, ok := markdownItem(mission, "`"+routeLine+"`"); !ok || !strings.Contains(item, "「機能ごとの org」") {
+		t.Errorf("expected the leader mission item naming `%s` to point to the 機能ごとの org section, got item:\n%s", routeLine, item)
+	}
+
+	section, found := markdownSection(text, "## 機能ごとの org")
+	if !found {
+		t.Fatalf("expected the leader template to contain a '## 機能ごとの org' section, got:\n%s", text)
+	}
+	at := -1
+	for _, step := range []string{
+		"docs/plans/active/",
+		"ralph org report --org-id org-a",
+		"./scripts/archive-plan.sh",
+		"./scripts/secret-scan-branch.sh --strict",
+		"git push -u origin",
+		"gh pr create",
+		"./scripts/ralph-worktree.sh cleanup --id org-org-a",
+		"ralph org disband --org-id org-a",
+	} {
+		i := strings.Index(section, step)
+		switch {
+		case i < 0:
+			t.Errorf("expected the 機能ごとの org section to contain %q, got section:\n%s", step, section)
+		case i < at:
+			t.Errorf("expected %q to come after the steps before it in the 機能ごとの org section, got section:\n%s", step, section)
+		default:
+			at = i
+		}
+	}
+	// The reservation holds the feature's code and docs; the steps' own
+	// writes (the feature plan, the report, the plan's move) are outside it.
+	if intro, _, ok := strings.Cut(section, "\n1. "); !ok ||
+		!strings.Contains(intro, "機能のコードと文書の変更は `- 予約したパス:` の中に収めて") ||
+		!strings.Contains(intro, "手順 1 の\n機能の計画、4 の report、5 の計画の移動は予約の外に書きますが") {
+		t.Errorf("expected the 機能ごとの org intro to keep the feature's changes in the reservation and the steps' own writes outside it, got section:\n%s", section)
+	}
+	// Every ralph org command of the leader carries the --state-dir of the
+	// task's ledger line, since start's ledger does not reach the pane.
+	const ledgerLine = "- 台帳:"
+	if !strings.Contains(task, "\n"+ledgerLine+" /state(") || !strings.Contains(task, "--state-dir '/state'") {
+		t.Fatalf("featureLeaderTask no longer writes the %q line with the --state-dir the leader template points to; got:\n%s", ledgerLine, task)
+	}
+	intro, _, _ := strings.Cut(section, "\n1. ")
+	if joined := strings.ReplaceAll(intro, "\n", ""); !strings.Contains(joined,
+		"`ralph org` のコマンド(spawn・send・wait・read・status・stop・report・disband)には、どれにもタスクの `"+ledgerLine+"` の行にある`--state-dir` をそのまま付けて") ||
+		!strings.Contains(joined, "start と別の台帳を使うことがあります") {
+		t.Errorf("expected the 機能ごとの org intro to have every ralph org command carry the --state-dir of the task's `%s` line, and why, got section:\n%s", ledgerLine, section)
+	}
+	for _, c := range []struct{ marker, want string }{
+		{"1 席ずつ spawn する", "`--id` は `implementer` と\n   `reviewer` にする"},
+		{"./scripts/archive-plan.sh <", "merge のあとの後始末(この節の 8)が止まる"},
+		{"secret-scan-branch.sh --strict", "push せずに止まり"},
+		{"gh pr create` で PR", "`/pr` skill そのものは実行しない"},
+		{"worktree とブランチは消さない", "ralph-worktree.sh cleanup --id org-org-a"},
+		{"ralph org disband --org-id org-a", "最後のコマンド"},
+	} {
+		if item, ok := markdownItem(section, c.marker); !ok || !strings.Contains(item, c.want) {
+			t.Errorf("expected the 機能ごとの org item naming %q to contain %q, got item:\n%s", c.marker, c.want, item)
+		}
+	}
+
+	for _, banned := range []string{"Solo", "Leaded", "Parallel", "編成パターン"} {
+		if strings.Contains(text, banned) {
+			t.Errorf("expected the leader template not to mention the retired formation pattern wording %q, got:\n%s", banned, text)
+		}
+	}
+}
+
 func TestRenderRolePrompt_UnknownRole_NoTemplate(t *testing.T) {
 	text, ok, err := RenderRolePrompt("unknown-role", testRolePromptVars())
 	if err != nil {

@@ -1,10 +1,12 @@
 // Package org implements the core library for the `ralph org` verb set
 // (spawn/send/wait/read/stop/status/disband): envelope validation against
 // [org] config, seat/saga state derivation from an org_id-namespaced
-// manifest, and tri-state model receipts. This package is pure library
-// code — no exec.Command, no cobra wiring. Those live in
-// internal/org/driver (herdr/agmsg adapters) and internal/cli/org.go
-// (`ralph org` cobra wiring) respectively.
+// manifest, and tri-state model receipts. It has no cobra wiring, which
+// lives in internal/cli/org.go, and reaches herdr and agmsg only through
+// the adapters in internal/org/driver. It runs a few other commands itself
+// with exec.Command: git (statedir.go, watch.go, feature.go),
+// scripts/ralph-worktree.sh (feature.go), osascript (watch.go) and
+// `claude -p` (watcher.go).
 package org
 
 // Saga/event name constants recorded in ManifestEvent.Event.
@@ -44,9 +46,13 @@ const (
 	// EventScopeReserved is an org-level, non-state event (SeatID empty,
 	// absent from stateEvents below): a leader spawn with
 	// SpawnParams.Reserve records the org's reservation with it, Details
-	// `paths=<normalized paths, comma-separated>` (see reserve.go). The
-	// latest one after the org's latest `disbanded` is the org's
-	// reservation, and it makes the org count as running for max_orgs.
+	// `paths=<normalized paths, comma-separated>`. For an org started for a
+	// split plan feature (SpawnParams.Feature) the binding follows as
+	// `split=<id> feature=<slug> digest=<hex> branch=<branch>`, and the
+	// feature worktree goes into the event's Worktree field. A note may
+	// come last (see scopeReservedPathsKey in reserve.go). The latest one
+	// after the org's latest `disbanded` is the org's reservation and
+	// binding, and it makes the org count as running for max_orgs.
 	EventScopeReserved = "scope_reserved"
 )
 

@@ -359,50 +359,80 @@ func newOrgLimitsRepo(t *testing.T, mainToml string) legacyLedgerRepo {
 // max_orgs = 1 in the main checkout's ralph.toml and org-a running, a second
 // org is refused from a subdirectory of the main checkout that has no
 // ralph.toml and from a linked worktree whose own ralph.toml says
-// max_orgs = 10. --config, and a ledger chosen by --state-dir or
-// RALPH_ORG_STATE_DIR, keep using the caller's config, which allows it.
+// max_orgs = 10. A --state-dir (absolute or relative) or RALPH_ORG_STATE_DIR
+// naming the main checkout's ledger from a linked worktree whose ralph.toml
+// says max_orgs = 99, as a feature org's leader passes it, is refused the
+// same way. --config, and a --state-dir naming another ledger, keep using the
+// caller's config, which allows it.
 func TestOrgStart_OrgWideLimits_ReadFromMainWorktreeRalphToml(t *testing.T) {
+	// worktreeAllowing99 makes the linked worktree, with max_orgs = 99 in its
+	// own ralph.toml, the cwd.
+	worktreeAllowing99 := func(t *testing.T, r legacyLedgerRepo) {
+		t.Helper()
+		writeTestFile(t, filepath.Join(r.worktree, "ralph.toml"), "[org]\nmax_orgs = 99\n")
+		t.Chdir(r.worktree)
+	}
 	cases := []struct {
-		name    string
-		setup   func(t *testing.T, r legacyLedgerRepo) []string
+		name  string
+		setup func(t *testing.T, r legacyLedgerRepo) (extra []string, ledger string) // ledger "" is the shared one
+		// refused: org-b is refused by the main checkout's max_orgs = 1.
 		refused bool
 	}{
-		{"main checkout subdirectory without ralph.toml", func(t *testing.T, r legacyLedgerRepo) []string {
+		{"main checkout subdirectory without ralph.toml", func(t *testing.T, r legacyLedgerRepo) ([]string, string) {
 			sub := filepath.Join(r.mainRoot, "pkg", "sub")
 			if err := os.MkdirAll(sub, 0o755); err != nil {
 				t.Fatal(err)
 			}
 			t.Chdir(sub)
-			return nil
+			return nil, ""
 		}, true},
-		{"linked worktree whose ralph.toml says max_orgs = 10", func(t *testing.T, r legacyLedgerRepo) []string {
+		{"linked worktree whose ralph.toml says max_orgs = 10", func(t *testing.T, r legacyLedgerRepo) ([]string, string) {
 			writeTestFile(t, filepath.Join(r.worktree, "ralph.toml"), "[org]\nmax_orgs = 10\n")
 			t.Chdir(r.worktree)
-			return nil
+			return nil, ""
 		}, true},
-		{"--config with max_orgs = 10", func(t *testing.T, r legacyLedgerRepo) []string {
+		{"--config with max_orgs = 10", func(t *testing.T, r legacyLedgerRepo) ([]string, string) {
 			path := filepath.Join(t.TempDir(), "ralph.toml")
 			writeTestFile(t, path, "[org]\nmax_orgs = 10\n")
 			t.Chdir(r.worktree)
-			return []string{"--config", path}
+			return []string{"--config", path}, ""
 		}, false},
-		{"--state-dir naming the shared ledger", func(t *testing.T, r legacyLedgerRepo) []string {
-			t.Chdir(r.worktree)
-			return []string{"--state-dir", r.sharedDir}
-		}, false},
-		{"RALPH_ORG_STATE_DIR naming the shared ledger", func(t *testing.T, r legacyLedgerRepo) []string {
+		{"--state-dir naming the shared ledger", func(t *testing.T, r legacyLedgerRepo) ([]string, string) {
+			worktreeAllowing99(t, r)
+			return []string{"--state-dir", r.sharedDir}, ""
+		}, true},
+		{"relative --state-dir naming the shared ledger", func(t *testing.T, r legacyLedgerRepo) ([]string, string) {
+			worktreeAllowing99(t, r)
+			rel, err := filepath.Rel(r.worktree, r.sharedDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return []string{"--state-dir", rel}, ""
+		}, true},
+		{"RALPH_ORG_STATE_DIR naming the shared ledger", func(t *testing.T, r legacyLedgerRepo) ([]string, string) {
 			t.Setenv(org.EnvOrgStateDir, r.sharedDir)
-			t.Chdir(r.worktree)
-			return nil
+			worktreeAllowing99(t, r)
+			return nil, ""
+		}, true},
+		{"--state-dir naming another ledger with org-a running", func(t *testing.T, r legacyLedgerRepo) ([]string, string) {
+			worktreeAllowing99(t, r)
+			other := filepath.Join(t.TempDir(), "org")
+			if _, stderr, err := startOrgLeader(t, "org-a", "--scope", "org-a", "--state-dir", other); err != nil {
+				t.Fatalf("start org-a in %s: %v (stderr: %s)", other, err, stderr)
+			}
+			return []string{"--state-dir", other}, other
 		}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			r := newOrgLimitsRepo(t, "[org]\nmax_orgs = 1\n")
-			extra := tc.setup(t, r)
+			extra, ledger := tc.setup(t, r)
+			if ledger == "" {
+				ledger = r.sharedDir
+			}
 
 			stdout, stderr, err := startOrgLeader(t, "org-b", append([]string{"--scope", "org-b"}, extra...)...)
-			last := lastSeatEvent(t, r.sharedDir, "org-b", org.LeaderIdentity)
+			last := lastSeatEvent(t, ledger, "org-b", org.LeaderIdentity)
 			if !tc.refused {
 				if err != nil || last.Event != org.EventSpawned {
 					t.Fatalf("expected org-b started under the caller's config, got err %v, last event %+v (stdout: %s stderr: %s)", err, last, stdout, stderr)
@@ -421,6 +451,28 @@ func TestOrgStart_OrgWideLimits_ReadFromMainWorktreeRalphToml(t *testing.T) {
 				t.Errorf("expected org-b's leader recorded rejected in the shared ledger, got %+v", last)
 			}
 		})
+	}
+}
+
+// TestOrgSpawnAndStartHelp_OrgWideLimitsSource: `ralph org spawn --help` and
+// `ralph org start --help` say what withMainWorktreeOrgLimits does, that a
+// --state-dir or RALPH_ORG_STATE_DIR naming the main worktree's ledger reads
+// the main worktree's ralph.toml and one naming another ledger does not.
+func TestOrgSpawnAndStartHelp_OrgWideLimitsSource(t *testing.T) {
+	for _, verb := range []string{"spawn", "start"} {
+		out, err := runOrgCmd(t, verb, "--help")
+		if err != nil {
+			t.Fatalf("%s --help: %v", verb, err)
+		}
+		help := strings.Join(strings.Fields(out), " ")
+		for _, want := range []string{
+			"the ledger is the main worktree's .harness/state/org, whether found by default or named with --state-dir or RALPH_ORG_STATE_DIR",
+			"In every other case (--config, a --state-dir or RALPH_ORG_STATE_DIR naming another ledger,",
+		} {
+			if !strings.Contains(help, want) {
+				t.Errorf("%s --help does not say %q:\n%s", verb, want, out)
+			}
+		}
 	}
 }
 

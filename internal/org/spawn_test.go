@@ -110,6 +110,8 @@ type fakeHerdr struct {
 	paneCloseCalls      []string // paneIDs PaneClose was invoked with, in order
 	workspaceCloseCalls []string // workspaceIDs WorkspaceClose was invoked with, in order
 	tabCreateWorkspaces []string // workspaceIDs TabCreate was invoked with, in order
+	tabCreateCwds       []string // cwds TabCreate was invoked with, in order
+	workspaceCreateCwds []string // cwds WorkspaceCreate was invoked with, in order
 	paneGetCalls        []string // paneIDs PaneGet was invoked with, in order
 	tabGetCalls         []string // tabIDs TabGet was invoked with, in order
 	workspaceGetCalls   []string // workspaceIDs WorkspaceGet was invoked with, in order
@@ -127,10 +129,11 @@ func setLabel(m *map[string]string, id, label string) {
 	(*m)[id] = label
 }
 
-func (f *fakeHerdr) WorkspaceCreate(_ context.Context, _, label string) (string, error) {
+func (f *fakeHerdr) WorkspaceCreate(_ context.Context, cwd, label string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, "workspace_create")
+	f.workspaceCreateCwds = append(f.workspaceCreateCwds, cwd)
 	if f.workspaceCreateErr != nil {
 		return "", f.workspaceCreateErr
 	}
@@ -141,11 +144,12 @@ func (f *fakeHerdr) WorkspaceCreate(_ context.Context, _, label string) (string,
 	return f.workspaceID, nil
 }
 
-func (f *fakeHerdr) TabCreate(_ context.Context, workspaceID, _, label string) (string, error) {
+func (f *fakeHerdr) TabCreate(_ context.Context, workspaceID, cwd, label string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, "tab_create")
 	f.tabCreateWorkspaces = append(f.tabCreateWorkspaces, workspaceID)
+	f.tabCreateCwds = append(f.tabCreateCwds, cwd)
 	if f.tabCreateErr != nil {
 		return "", f.tabCreateErr
 	}
@@ -560,6 +564,90 @@ func TestOrgSpawn_HappyPath_EventSequenceAndReceipt(t *testing.T) {
 	}
 	if rr.Receipts[0].CommandedModel != "sonnet" {
 		t.Errorf("expected commanded_model=sonnet, got %q", rr.Receipts[0].CommandedModel)
+	}
+}
+
+// TestOrgSpawn_RelativeCwdResolvedAgainstCallerWorkingDir pins the fix for
+// what the AC14 live run of plan 2026-10-09-org-feature-worktree found: a
+// relative Cwd (`ralph org spawn --cwd .`, as the leader runs it) is made
+// absolute against the caller's working directory before
+// herdr sees it -- herdr would resolve it against its server's own cwd -- so
+// WorkspaceCreate, TabCreate, both agmsg Joins and every manifest event that
+// records the worktree (org_workspace_created, spawn_started, spawned) carry
+// the absolute path. A dry run records the same absolute path.
+func TestOrgSpawn_RelativeCwdResolvedAgainstCallerWorkingDir(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		cwd    string
+		dryRun bool
+	}{
+		{"dot", ".", false},
+		{"subdir", "sub", false},
+		{"dot/dry-run", ".", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Chdir(t.TempDir())
+			if err := os.Mkdir("sub", 0o755); err != nil {
+				t.Fatalf("mkdir sub: %v", err)
+			}
+			wd, err := os.Getwd()
+			if err != nil {
+				t.Fatalf("getwd: %v", err)
+			}
+			want := filepath.Join(wd, tc.cwd)
+
+			o, h, a := testOrg(t)
+			p := mustSpawnParams("org-a", "seat-1")
+			p.Cwd = tc.cwd
+			p.DryRun = tc.dryRun
+			result := o.Spawn(p)
+			if result.Outcome != SpawnOutcomeSpawned || result.Err != nil {
+				t.Fatalf("expected SpawnOutcomeSpawned, got %v (err=%v)", result.Outcome, result.Err)
+			}
+			if result.Seat.Worktree != want {
+				t.Errorf("result seat worktree = %q, want %q", result.Seat.Worktree, want)
+			}
+
+			wantEvents := []string{EventSpawnStarted, EventSpawned}
+			if !tc.dryRun {
+				wantEvents = append(wantEvents, EventOrgWorkspaceCreated)
+				if !slices.Equal(h.workspaceCreateCwds, []string{want}) {
+					t.Errorf("WorkspaceCreate cwds = %v, want [%s]", h.workspaceCreateCwds, want)
+				}
+				if !slices.Equal(h.tabCreateCwds, []string{want}) {
+					t.Errorf("TabCreate cwds = %v, want [%s]", h.tabCreateCwds, want)
+				}
+				if len(a.joinCalls) != 2 {
+					t.Fatalf("expected 2 Join calls (leader then seat), got %+v", a.joinCalls)
+				}
+				for _, jc := range a.joinCalls {
+					if jc.projectPath != want {
+						t.Errorf("Join(%s) project path = %q, want %q", jc.agentID, jc.projectPath, want)
+					}
+				}
+			}
+
+			rr, err := o.Manifest.Read()
+			if err != nil {
+				t.Fatalf("read manifest: %v", err)
+			}
+			recorded := map[string]bool{}
+			for _, ev := range rr.Events {
+				if ev.Worktree == "" {
+					continue
+				}
+				if ev.Worktree != want {
+					t.Errorf("%s event worktree = %q, want %q", ev.Event, ev.Worktree, want)
+					continue
+				}
+				recorded[ev.Event] = true
+			}
+			for _, name := range wantEvents {
+				if !recorded[name] {
+					t.Errorf("expected a %s event recording worktree %q", name, want)
+				}
+			}
+		})
 	}
 }
 

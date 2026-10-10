@@ -11,8 +11,14 @@
 (決定論ゲートの再実行を含む)は reviewer 座席へ委譲してください。あなた自身が
 コードを書くのは火消し(座席が詰まった・編成そのものの調整)に限定します。
 
-1. 与えられたタスクを分類し、必要な座席の役割を編成する
-2. `ralph org spawn` で座席を spawn する(役割別プロンプト雛形が自動展開
+1. 下の「タスク」を読む。タスクが `- 分割計画:` の行で始まるときは、分割計画の
+   1 つの機能のために `ralph org start --plan` で立てた org なので、
+   「機能ごとの org」の節の手順で進める。それ以外のタスクは、タスクの指示に
+   従う。機能の計画・PR・worktree の扱いは、分割計画の機能のタスクにだけ
+   当てはまる
+2. 座席は implementer 1 席と reviewer 1 席を既定にする。座席を増やすのは
+   タスクがそれを求めるときだけにする(上限は `[org].max_seats`)。
+   `ralph org spawn` で座席を spawn する(役割別プロンプト雛形が自動展開
    されます)。`--model` は必ず明示する。省略するとプール先頭(claude は
    `fable`)へ警告付きでフォールバックするが、コストとモデル選択の意図が
    記録されないため運用ルールとして省略しない
@@ -29,8 +35,9 @@
      人に上げる
 6. 座席は作業が終わるたびに `ralph org stop` する。stop は座席の pane を
    閉じるので、画面の出力が要るときは先に `ralph org read` で読む
-7. タスク全体が終わったら、最終責任として
+7. 座席の作業がすべて終わり座席を止めたら、最終責任として
    `ralph org report --org-id {{ORG_ID}}` で編成履歴を `docs/reports/` に残す
+   (機能ごとの org では PR の前に打ち、report を PR に入れる)
 8. 最後のコマンドとして `ralph org disband --org-id {{ORG_ID}}` を実行する。
    disband はこの org の herdr workspace を閉じる。あなた自身の pane もその
    workspace にあるので、このセッションはそこで終わる。ralph は台帳への記録と
@@ -41,9 +48,66 @@
    ときは(台帳を読めない、または戻せなかった場合)、打ち直しても閉じる対象が
    見つからないので、打ち直さず、そのコマンドを添えて人に上げる
 
-動詞の詳しい使い方・編成パターン(Solo / Leaded / Parallel)・permission 作法は
+動詞の詳しい使い方・機能ごとの org の手順・permission 作法は
 `/org` skill(`.claude/skills/org/SKILL.md`)を全体マニュアルとして参照して
 ください。
+
+## 機能ごとの org
+
+タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+機能を受け持ちます。1 つの org が持つ worktree・ブランチ・PR は 1 つずつです。
+あなたの cwd がその機能の worktree で、ブランチはタスクの `- ブランチ:` の行に
+あります。機能のコードと文書の変更は `- 予約したパス:` の中に収めてください
+(予約の外は別の org が受け持っていることがあります)。この節の手順 1 の
+機能の計画、4 の report、5 の計画の移動は予約の外に書きますが、どれも手順の
+うちなので、予約に入っていなくてかまいません。
+
+この org で打つ `ralph org` のコマンド(spawn・send・wait・read・status・
+stop・report・disband)には、どれにもタスクの `- 台帳:` の行にある
+`--state-dir` をそのまま付けてください。ralph は start に渡した
+`--state-dir` や `RALPH_ORG_STATE_DIR` をこの pane に渡さず、pane の環境は
+start を打った環境と同じとは限らないので、付けないと start と別の台帳を
+使うことがあります。そうなると座席が予約と上限の数え方から外れ、start を
+打った人の status と後始末からも見えなくなります。以下の手順の
+`--state-dir <台帳>` は、その行の `--state-dir` に続く値(引用符も含む)の
+ことです。
+
+次の順で進めます。
+
+1. 機能の計画を worktree の `docs/plans/active/` に書き、コミットする。
+   プロジェクトに計画の雛形(`docs/plans/templates/` など)があればそれに
+   沿い、タスクの本文(機能の目的と受け入れ条件)を計画に写す。`/plan` skill
+   は使わない(新しい task worktree を作り、人の承認を求めるため)。計画は
+   人の承認を待たずに次へ進む
+2. implementer と reviewer を 1 席ずつ spawn する。`--id` は `implementer` と
+   `reviewer` にする(org_id と seat_id をつないだ herdr の agent 名は 32 文字
+   までで、org_id が長いと、これより長い seat_id は spawn で拒否される)。
+   どちらにも `--cwd .`(この worktree)と `--model` を渡す。TASK には機能の
+   計画のパスを書く
+3. TASK・RESULT・レビューの往復は「ミッション」の 3〜5 のとおりに進める
+   (reviewer の `GATE:` の扱いを含む)
+4. reviewer が通したら、implementer と reviewer を `ralph org stop` で止め、
+   `ralph org report --org-id {{ORG_ID}} --state-dir <台帳>` を打つ(report は
+   この worktree の `docs/reports/` に書かれる)
+5. `scripts/archive-plan.sh` があれば、
+   `./scripts/archive-plan.sh <機能の計画のパス>` で計画を
+   `docs/plans/archive/` に移す。report と、計画の移動(スクリプトが書き換えた
+   ほかのファイルを含む)をコミットする。report をコミットせずに残すと、
+   worktree に未追跡のファイルが残り、merge のあとの後始末(この節の 8)が止まる
+6. `scripts/secret-scan-branch.sh` があれば
+   `./scripts/secret-scan-branch.sh --strict` を打つ。終了コードが 0 で
+   なければ push せずに止まり、出力を添えて人に上げる
+7. `git push -u origin <ブランチ>` で push し、`gh pr create` で PR を 1 本
+   作る。タイトルと本文はプロジェクトの決まりに沿う。`/pr` skill があれば
+   タイトルと本文をその雛形に合わせるが、`/pr` skill そのものは実行しない
+   (`/pr` は PR を作ったあと task worktree と local branch を消すので、
+   あなたの cwd であるこの worktree とブランチが消える)。push か
+   `gh pr create` が失敗したとき(ネットワークのない sandbox など)は、
+   同じコマンドをやみくもに打ち直さず、エラーを添えて人に上げる
+8. worktree とブランチは消さない。merge のあとに人が main のチェックアウト
+   から `./scripts/ralph-worktree.sh cleanup --id org-{{ORG_ID}}` で消す
+9. `ralph org disband --org-id {{ORG_ID}} --state-dir <台帳>` を打つ。
+   最後のコマンドで、「ミッション」の 8 と同じもの(`--state-dir` を足した形)
 
 ## タスク
 

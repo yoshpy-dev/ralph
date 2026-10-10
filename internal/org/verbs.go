@@ -1302,8 +1302,10 @@ func (o *Org) reopenWorkspace(now []ManifestEvent, last ManifestEvent, why strin
 // pane that a disband deferred (CloseDeferredSelfPane). Both use this one
 // rule. From before, the manifest copy read before the close, it takes the
 // org's latest real `disbanded` and the reservation that `disbanded`
-// released (releasedReservation), and appends it with the same paths and
-// Details `paths=<paths> restored: <why>`. It appends and reports nothing
+// released (releasedReservation), and appends it with the same paths and the
+// same split plan feature binding when it had one (its tokens in the Details
+// and its worktree in the Worktree field, see scopeReservedEvent), Details
+// `paths=<paths>[ <binding>] restored: <why>`. It appends and reports nothing
 // when before has no such `disbanded`, has the org started again after it
 // (the close then belongs to a later run: an ordinary stop of a seat
 // spawned since, for one), or has no reservation before it. It appends only
@@ -1319,43 +1321,48 @@ func (o *Org) reopenWorkspace(now []ManifestEvent, last ManifestEvent, why strin
 // or the last org slot in the window since `disbanded`, and then they
 // overlap, or max_orgs is exceeded by one, until this org is disbanded
 // again (plan 2026-10-08-org-limits-reserve, Risks). It returns, for the
-// error text, what it recorded or what it did not record; both are "" when
-// before has nothing to restore.
+// error text, what it recorded or what it did not record (naming the feature
+// and split plan of a bound reservation); both are "" when before has
+// nothing to restore.
 func (o *Org) reserveAgain(before, now []ManifestEvent, orgID, why string) (restored, skipped string, err error) {
-	d, paths := releasedReservation(before, orgID)
-	if paths == nil {
+	d, released := releasedReservation(before, orgID)
+	if released.Paths == nil {
 		return "", "", nil
 	}
-	what := fmt.Sprintf("the reservation %s of org_id %q", strings.Join(paths, ","), orgID)
+	what := fmt.Sprintf("the reservation %s of org_id %q", strings.Join(released.Paths, ","), orgID)
+	if f := released.Feature; f != nil {
+		what += fmt.Sprintf(" for feature %q of split plan %q", f.Feature, f.Split)
+	}
 	if len(now) <= d || now[d] != before[d] || ActiveReservation(now, orgID) != nil ||
 		slices.ContainsFunc(now[d+1:], func(ev ManifestEvent) bool { return startsOrg(ev, orgID) }) {
 		return "", what, nil
 	}
-	if err := o.appendEvent(scopeReservedEvent(o.now(), orgID, paths, "restored: "+why, false)); err != nil {
+	if err := o.appendEvent(scopeReservedEvent(o.now(), orgID, released, "restored: "+why, false)); err != nil {
 		return "", "", fmt.Errorf("record the reservation of org_id %q again: %w", orgID, err)
 	}
 	return what, "", nil
 }
 
 // releasedReservation returns the index d of orgID's latest real `disbanded`
-// in events and the reservation that `disbanded` released: the one the org
-// held at its latest start before d (startsOrg). A `disbanded` that follows
-// another with no start of the org between them releases nothing more, so
-// it changes nothing here, and a run started without --reserve after an
-// earlier run's `disbanded` held no reservation, whatever the earlier run
-// held. paths is nil when the org has no `disbanded`, was started again
-// after d (d belongs to an earlier run), or held no reservation then.
-func releasedReservation(events []ManifestEvent, orgID string) (d int, paths []string) {
+// in events and the reservation that `disbanded` released, with its split
+// plan feature binding: the one the org held at its latest start before d
+// (startsOrg). A `disbanded` that follows another with no start of the org
+// between them releases nothing more, so it changes nothing here, and a run
+// started without --reserve after an earlier run's `disbanded` held no
+// reservation, whatever the earlier run held. released.Paths is nil when the
+// org has no `disbanded`, was started again after d (d belongs to an earlier
+// run), or held no reservation then.
+func releasedReservation(events []ManifestEvent, orgID string) (d int, released Reservation) {
 	d, ok := lastDisbandedIndexes(events)[orgID]
 	if !ok || slices.ContainsFunc(events[d+1:], func(ev ManifestEvent) bool { return startsOrg(ev, orgID) }) {
-		return 0, nil
+		return 0, Reservation{}
 	}
 	for i := d - 1; i >= 0; i-- {
 		if startsOrg(events[i], orgID) {
-			return d, ActiveReservation(events[:i+1], orgID)
+			return d, activeReservation(events[:i+1], orgID)
 		}
 	}
-	return 0, nil
+	return 0, Reservation{}
 }
 
 // startsOrg reports whether ev is a real (non-dry-run) event that starts a

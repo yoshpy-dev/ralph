@@ -74,6 +74,7 @@ own gates deterministically, independent of any LLM judgment:
 | Gate | Mechanism | On failure |
 |------|-----------|------------|
 | Envelope validation | model pool / role pool / `max_seats` / `max_orgs` / `max_total_seats` / `--reserve` path overlap with another running org, checked by `ralph org spawn` | Spawn rejected, recorded in manifest |
+| Split plan approval | `ralph org start --plan` reads the split plan from `<state dir>/splits/<id>.md`, compares its body digest (the rule of `scripts/plan-visual.sh digest`) with the `- Approved:` line, runs the spawn checks above before any side effect, and reuses a feature worktree only when its `ralph-worktree.sh` record and checkout match | Start refused with the reason, no ledger record, worktree, or herdr call; a refusal after the worktree exists leaves it and the message says how to reuse or remove it |
 | Watchdog pulse layer | stall / liveness / scope-change ALERT and deadman human escalation (`ralph org watch`) | ALERT to leader; unanswered alerts escalate to a human |
 | Quality pipeline gate | impl exit checks → reviewer (re-runs `run-static-verify.sh` / `run-test.sh` first, then reviews the diff) → leader arbitration | Gate fail: the reviewer returns BLOCKED (`GATE: fail`) without reviewing and the leader routes it back to impl; a gate that cannot run (`GATE: unrunnable`) goes to the leader, not impl. This row is driven by the role prompt templates, not enforced mechanically |
 
