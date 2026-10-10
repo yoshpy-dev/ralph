@@ -31,7 +31,7 @@ PR #217 で、guard の包みの名前は `pre_bash_guard_rules.awk` の BEGIN �
 ## Assumptions
 
 - 9 つの包みのうち、`timeout` は次の語を時間として飛ばすので `timeout sh -c …` では `sh` を読まず、`timeout 5 sh -c …` で deny になる。ほかの 8 つは `W sh -c …` で deny になる(`nice`、`stdbuf` は、オプションがなければ次の語をコマンドとして読む)。分岐が `cmd_pos` にない名前は、2 形とも包みとして飛ばされず none になる(PR #217 の test の mutation で、分岐を消すと包みの行が none になった)
-- F 節には、実行時の DATACMD と `WRAPPER` を読む検査がすでにあり、読んだ名前は `wrapper_words` にある。guard を直接動かす書き方は、F 節の fallback の検査(写しの guard を直接動かす)と同じ
+- F 節には、実行時の DATACMD と `WRAPPER` を読む検査がすでにあり、読んだ名前は `wrapper_words` にある。テストの guard の実行はどれもキュー(`enqueue` と `decide`)を通していて、直接動かす前例はない。新しい検査は `decide` と同じ呼び方(`PATH=… hook < payload` と、出力から deny・none を見分ける分岐)で guard を直接動かす。キューは F・G 節のあとに走るので、2 形の「どちらか」をそこで評価するより短い
 - jq なしの経路は `minimal_path`、jq ありは `real_path` で動かす(テストの既存の書き方)
 
 ## Affected areas
