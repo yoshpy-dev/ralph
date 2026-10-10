@@ -67,13 +67,13 @@ Critical forks: None(どれも 1 スライスの中で戻せる)
 
 ## Acceptance criteria
 
-- [ ] AC1: `start --plan` が作る worktree の記録の `canonical_ref` は `split:<分割計画の絶対パス>#<slug>` になる。同じ分割計画(同じパス)の同じ機能は、disband のあと承認し直しても同じ worktree を使う
-- [ ] AC2: 別の台帳にある同じ名前(同じ id)の分割計画の、同じ slug の機能で start すると、残った worktree を使い回さずに拒否される(本物のスクリプトのテスト)
-- [ ] AC3: `ensure` が返したあとに記録が別の分割計画のものになっていると、start は `Spawn` の前に拒否する。leader は立たず、台帳にも何も書かない。エラー文は `cleanup` も別の `--org-id` も案内せず、slug(か Type)を変えて承認し直すか、先の org が終わるのを待つよう案内する
-- [ ] AC3b: 使い回しの拒否と `ensure` の「ブランチがすでにある」の案内は、slug を変えて承認し直す道を先に書き、`cleanup` やブランチの名前の変更・削除は、使っていないと確かめたときに限ると書く。本物のスクリプトで、拒否のあとに slug を変えて承認し直すと start が通り、先の org のブランチ・worktree・記録が変わらない
-- [ ] AC4: 既存の `StartFeature` と CLI のテストは、`canonical_ref` の形の変更に合わせた期待で通る
-- [ ] AC5: `/org` skill(4 面)の拒否の一覧と、tech-debt の同時の start の行が新しい挙動と合っている。`./scripts/check-skill-sync.sh` と `./scripts/check-sync.sh` が通る
-- [ ] AC6: `./scripts/run-verify.sh` が通る
+- [x] AC1: `start --plan` が作る worktree の記録の `canonical_ref` は `split:<分割計画の絶対パス>#<slug>` になる。同じ分割計画(同じパス)の同じ機能は、disband のあと承認し直しても同じ worktree を使う
+- [x] AC2: 別の台帳にある同じ名前(同じ id)の分割計画の、同じ slug の機能で start すると、残った worktree を使い回さずに拒否される(本物のスクリプトのテスト)
+- [x] AC3: `ensure` が返したあとに記録が別の分割計画のものになっていると、start は `Spawn` の前に拒否する。leader は立たず、台帳にも何も書かない。エラー文は `cleanup` も別の `--org-id` も案内せず、slug(か Type)を変えて承認し直すか、先の org が終わるのを待つよう案内する
+- [x] AC3b: 使い回しの拒否と `ensure` の「ブランチがすでにある」の案内は、slug を変えて承認し直す道を先に書き、`cleanup` やブランチの名前の変更・削除は、使っていないと確かめたときに限ると書く。本物のスクリプトで、拒否のあとに slug を変えて承認し直すと start が通り、先の org のブランチ・worktree・記録が変わらない
+- [x] AC4: 既存の `StartFeature` と CLI のテストは、`canonical_ref` の形の変更に合わせた期待で通る
+- [x] AC5: `/org` skill(4 面)の拒否の一覧と、tech-debt の同時の start の行が新しい挙動と合っている。`./scripts/check-skill-sync.sh` と `./scripts/check-sync.sh` が通る
+- [x] AC6: `./scripts/run-verify.sh` が通る
 
 ## Implementation outline
 
@@ -114,7 +114,9 @@ Critical forks: None(どれも 1 スライスの中で戻せる)
 - [x] Plan reviewed
 - [x] Plan approved
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+- 2026-10-10: S1(33271a68)。照合の規則は `featureWorktreeMismatch` にまとめ、使い回しの検査と、新しい `checkEnsuredFeatureWorktree`(`ensure` のあとの照合)の両方がこれを使う。計画からのずれ: 記録がぶつかる 2 つの案内(使い回しの拒否のうち `canonical_ref` が違う場合と、`ensure` のあとの拒否)は、AC3 の「slug(か Type)」ではなく slug の変更だけを案内する。Type だけ変えても org_id(既定は slug)は変わらず、記録の id `org-<org_id>` に同じように当たるため(`TestStartFeature_AfterDisband` のケースで確かめた)。「ブランチがすでにある」の案内は slug か Type。`ensure` のあとの照合は、記録が消えた・読めない・ほかの点が合わない場合も拒否し、打ち直すよう案内する。成功する start ごとに記録の読み出しと git の呼び出しが 1 回ずつ増える
+- 2026-10-10: S2(c8863608)。`/org` skill の 4 面の `start --plan` の手順に 5(`ensure` のあとの照合)を足して番号を 1 つ繰り下げ、拒否の一覧を新しい案内に合わせた。tech-debt の同時の start の行に、別の分割計画からの同時の start は拒否するようになったことと、残る部分(直列化はしていない)を書いた
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
