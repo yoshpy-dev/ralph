@@ -103,7 +103,10 @@ None (テストの行を別の配列に移し、検査を 1 つ足し、コメ�
 - [x] Plan approved
   - 2026-10-11: ユーザーが承認ゲートで Approve。承認の前に、consult(consult-plan-wrapperargs)の判定(案 A、両方向の一致、V-1 も同じ PR、`$'\echo'` は範囲外と明記)を反映した。Codex の plan advisory の指摘 1 件(MEDIUM: 包みの引数に sentinel の語を入れた行は末尾の検査をすり抜ける)は、ユーザーの選択「plan を直す」で、対照の形の検査と AC2 の (e) を足した。前提(`xargs` の分岐を消した写しでの判定、9 行の対照が none、`time -o 'sudo log' …` の対照が deny)は main 577ebeaf の guard で確かめた。図解ページは描いていない(Visual review を参照)
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1 完了(78616500、implementer/opus): 包みの手書きの 9 行を `wrapper_deny` に移し(D 節で同じ引数の `check_modes` で流す)、F 節の PR #219 の検査のあとに新しい検査(集合の両方向の一致と末尾の形で 1 件、行ごとの対照で 9×2=18 件)を足した。V-1 のコメントと、「`edge_deny` の 9 行」を前提にしたヘッダーの D・F 項目、PR #219 の検査のコメントを直した。テストは 2,127/0(macOS の awk、mawk 1.3.4、gawk 5.2.1)、節ごとの件数は F だけが 68 → 87 で、A〜E のラベルは HEAD と一致。shellcheck は指摘なし、run-verify は rc 0。AC2 の mutation (a)〜(e) はどれも新しい検査が FAIL した(写しの木、macOS の awk)。(a) chrt を一覧と分岐に足す: 新しい検査だけが FAIL、PR #219 の chrt の行は PASS (b) nohup の行を消す: FAIL 1 (c) 一覧から nohup を消す: 新しい検査と D の nohup の行 2 件 (d) nohup の行を force push に: 末尾の検査と対照 2 件 (e) time の行を `time -o 'sudo log' …` に: 対照 2 件が deny。`WRAPPER` を空にした写しでも FAIL。handoff からのずれ: V-1 の例に `xargs -I{} flock /tmp/l git push -f` を足した(括弧の「force push」に合う例がなかったため)。末尾の形でない行の対照は jq の SKIP より先に FAIL にした
+  - implementer が範囲外で気づいたこと: `pre_bash_guard_rules.awk` の `WRAPPER` の上のコメント「a D row of tests/test-pre-bash-guard.sh pins each wrapper」は、`wrapper_deny` も D 節で流れるので今も正しい。guard のファイルは Non-goals なので直さない
+  - S2 完了(この commit、inline、docs だけ): tech-debt のテストの穴の行の (h) の閉じの文で、引数を取る包みに行が要ることをこの PR の検査が強制し、行が引数を押さえているかは人の判断に残る、と書き、Related にこの plan を足した。表の中のパイプは `\|` にした(列の数が base と同じ 5 であることを確かめた)。run-verify は rc 0
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
