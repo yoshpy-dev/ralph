@@ -48,13 +48,23 @@ const manifestLockPollInterval = 25 * time.Millisecond
 // minimal -- see Spawn's own doc comment for why only the read-validate-
 // append section is wrapped, not the subsequent herdr/agmsg round trip.
 func withManifestLock(dir string, fn func() error) error {
+	return withFileLock(dir, manifestLockFile, "manifest", fn)
+}
+
+// withFileLock is the flock mechanism behind withManifestLock and the inbox
+// lock (inbox.go's inboxLockFile): it creates dir and <dir>/<name> as
+// needed, takes LOCK_EX on that file within manifestLockTimeout, runs fn,
+// and releases the lock before returning. what names the lock in the error
+// messages ("manifest" gives withManifestLock's messages). Each lock file is
+// independent: holding one never blocks a caller of another.
+func withFileLock(dir, name, what string, fn func() error) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("org: create manifest lock dir %s: %w", dir, err)
+		return fmt.Errorf("org: create %s lock dir %s: %w", what, dir, err)
 	}
-	lockPath := filepath.Join(dir, manifestLockFile)
+	lockPath := filepath.Join(dir, name)
 	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
-		return fmt.Errorf("org: open manifest lock file %s: %w", lockPath, err)
+		return fmt.Errorf("org: open %s lock file %s: %w", what, lockPath, err)
 	}
 	defer func() { _ = f.Close() }()
 
@@ -62,7 +72,7 @@ func withManifestLock(dir string, fn func() error) error {
 	defer cancel()
 
 	if err := acquireFlock(ctx, f); err != nil {
-		return fmt.Errorf("org: acquire manifest lock %s: %w", lockPath, err)
+		return fmt.Errorf("org: acquire %s lock %s: %w", what, lockPath, err)
 	}
 	defer func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN) }()
 
