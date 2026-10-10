@@ -361,7 +361,7 @@ func TestEscalate_EscalationsUnwritable_ReportsTheIDAndInboxNotifyCompletesIt(t 
 		t.Fatal(err)
 	}
 	var banner bytes.Buffer
-	if err := f.o.NotifyInboxItem("e1", &banner); err != nil {
+	if err := f.o.NotifyInboxItem("e1", "", &banner); err != nil {
 		t.Fatalf("NotifyInboxItem: %v", err)
 	}
 	inbox := mustReadInbox(t, f.o.Inbox)
@@ -419,7 +419,7 @@ func TestEscalate_NotifiedUnwritable_ReportsTheIDAndInboxNotifyCompletesIt(t *te
 	if item := inboxItemByID(t, mustReadInbox(t, f.o.Inbox), "e1"); item.Notified {
 		t.Fatalf("e1 = %+v; want not notified before inbox notify", item)
 	}
-	if err := f.o.NotifyInboxItem("e1", &bytes.Buffer{}); err != nil {
+	if err := f.o.NotifyInboxItem("e1", "", &bytes.Buffer{}); err != nil {
 		t.Fatalf("NotifyInboxItem: %v", err)
 	}
 	inbox := mustReadInbox(t, f.o.Inbox)
@@ -480,7 +480,7 @@ func assertUnrecordedEscalation(t *testing.T, f *escalateFixture, res EscalateRe
 func TestNotifyInboxItem_RefusesUnknownAndResolvedItems(t *testing.T) {
 	t.Run("empty inbox", func(t *testing.T) {
 		f := newEscalateFixture(t)
-		err := f.o.NotifyInboxItem("e1", &f.banner)
+		err := f.o.NotifyInboxItem("e1", "", &f.banner)
 		if !errors.Is(err, ErrInboxUnknownID) {
 			t.Fatalf("NotifyInboxItem on an empty inbox = %v; want ErrInboxUnknownID", err)
 		}
@@ -504,12 +504,12 @@ func TestNotifyInboxItem_RefusesUnknownAndResolvedItems(t *testing.T) {
 	f.banner.Reset()
 
 	t.Run("unknown ID", func(t *testing.T) {
-		if err := f.o.NotifyInboxItem("e9", &f.banner); !errors.Is(err, ErrInboxUnknownID) {
+		if err := f.o.NotifyInboxItem("e9", "", &f.banner); !errors.Is(err, ErrInboxUnknownID) {
 			t.Fatalf("NotifyInboxItem(e9) = %v; want ErrInboxUnknownID", err)
 		}
 	})
 	t.Run("resolved item", func(t *testing.T) {
-		err := f.o.NotifyInboxItem("e1", &f.banner)
+		err := f.o.NotifyInboxItem("e1", "", &f.banner)
 		if !errors.Is(err, ErrInboxResolved) {
 			t.Fatalf("NotifyInboxItem on a resolved item = %v; want ErrInboxResolved", err)
 		}
@@ -533,7 +533,7 @@ func TestNotifyInboxItem_SendsAnAckedItemAgain(t *testing.T) {
 	if _, err := f.o.Inbox.Ack("e1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.o.NotifyInboxItem("e1", &f.banner); err != nil {
+	if err := f.o.NotifyInboxItem("e1", "", &f.banner); err != nil {
 		t.Fatalf("NotifyInboxItem on an acked item: %v", err)
 	}
 	item := inboxItemByID(t, mustReadInbox(t, f.o.Inbox), "e1")
@@ -546,6 +546,175 @@ func TestNotifyInboxItem_SendsAnAckedItemAgain(t *testing.T) {
 	if lines := escalationLines(t, f.o.EscalationsPath); len(lines) != 2 {
 		t.Errorf("escalations.jsonl has %d lines; want 2 (escalate, inbox notify)", len(lines))
 	}
+}
+
+// Self-review L9: a hand-edited inbox.jsonl line can put anything in an
+// item's org_id and type. inbox notify escapes them in the banner and does
+// not pass them to the desktop notification (an AppleScript string) unless
+// escalate would have accepted them.
+func TestNotifyInboxItem_HandEditedLineEscapesTheBannerAndKeepsTheNotificationNeutral(t *testing.T) {
+	cases := []struct {
+		name, orgID, typ string
+		wantBanner       []string
+		wantNotification string
+	}{
+		{
+			name: "control characters and quotes in both", orgID: "org-a\x1b[2J\"; beep", typ: "BLOCKED\x07\"",
+			wantBanner:       []string{`org=org-a\x1b[2J"; beep`, `type=BLOCKED\a"`},
+			wantNotification: "org <invalid> raised e1 (<invalid>)",
+		},
+		{
+			name: "a valid org_id and a TYPE escalate refuses", orgID: "org-a", typ: "TASK",
+			wantBanner:       []string{"org=org-a", "type=TASK"},
+			wantNotification: "org org-a raised e1 (<invalid>)",
+		},
+		{
+			name: "an org_id that is not an identifier", orgID: "Org A", typ: "QUESTION",
+			wantBanner:       []string{"org=Org A", "type=QUESTION"},
+			wantNotification: "org <invalid> raised e1 (QUESTION)",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newEscalateFixture(t)
+			line, err := json.Marshal(InboxEvent{
+				TS: inboxTestNow, ID: "e1", Event: InboxEventEscalated,
+				OrgID: tc.orgID, Type: tc.typ, TaskID: "org-a", Body: "TYPE: BLOCKED\nTASK_ID: org-a\n\nstuck",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(f.o.Inbox.Path(), append(line, '\n'), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := f.o.NotifyInboxItem("e1", "", &f.banner); err != nil {
+				t.Fatalf("NotifyInboxItem: %v", err)
+			}
+			banner := f.banner.String()
+			for _, sub := range tc.wantBanner {
+				if !strings.Contains(banner, sub) {
+					t.Errorf("banner %q does not contain %q", banner, sub)
+				}
+			}
+			for _, r := range banner[:len(banner)-1] {
+				if r < 0x20 || r == 0x7f {
+					t.Errorf("banner %q carries the raw control character %U", banner, r)
+				}
+			}
+			if calls := f.notifications(); !slices.Equal(calls, []string{tc.wantNotification}) {
+				t.Errorf("desktop notifications = %q; want [%q]", calls, tc.wantNotification)
+			}
+			if item := inboxItemByID(t, mustReadInbox(t, f.o.Inbox), "e1"); !item.Notified {
+				t.Errorf("e1 = %+v; want notified", item)
+			}
+		})
+	}
+}
+
+func TestInboxCommand(t *testing.T) {
+	for _, tc := range []struct{ verb, id, stateDir, want string }{
+		{"notify", "e3", "", "ralph org inbox notify e3"},
+		{"show", "e3", "/repo/.harness/state/org", "ralph org inbox show e3 --state-dir '/repo/.harness/state/org'"},
+		{"notify", "e12", "/tmp/it's here", `ralph org inbox notify e12 --state-dir '/tmp/it'\''s here'`},
+	} {
+		if got := InboxCommand(tc.verb, tc.id, tc.stateDir); got != tc.want {
+			t.Errorf("InboxCommand(%q, %q, %q) = %q; want %q", tc.verb, tc.id, tc.stateDir, got, tc.want)
+		}
+	}
+}
+
+func TestPrintableInboxText(t *testing.T) {
+	for _, tc := range []struct {
+		in             string
+		keepLineBreaks bool
+		want           string
+	}{
+		{"a\n\tb\r\x1b", true, "a\n\tb\\r\\x1b"},
+		{"a\n\tb\r\x1b", false, `a\n\tb\r\x1b`},
+		{"org-a \"x\" \u0085 é", false, `org-a "x" \u0085 é`},
+	} {
+		if got := PrintableInboxText(tc.in, tc.keepLineBreaks); got != tc.want {
+			t.Errorf("PrintableInboxText(%q, %v) = %q; want %q", tc.in, tc.keepLineBreaks, got, tc.want)
+		}
+	}
+}
+
+// Self-review L2: the recovery commands the banner and the errors name
+// carry --state-dir when the caller passed HintStateDir (the CLI does when
+// --state-dir was given), and stay bare otherwise.
+func TestEscalate_HintStateDirReachesTheBannerAndTheRecoveryCommands(t *testing.T) {
+	for _, hint := range []string{"", "/repo/.harness/state/org"} {
+		t.Run("hint="+hint, func(t *testing.T) {
+			f := newEscalateFixture(t)
+			if err := os.Mkdir(f.o.EscalationsPath, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			res := f.o.Escalate(EscalateParams{OrgID: "org-a", Text: "TYPE: QUESTION\n\nwhich?", Banner: &f.banner, HintStateDir: hint})
+			if res.Err == nil || !res.Recorded || res.Notified {
+				t.Fatalf("Escalate = %+v; want e1 recorded, not notified, with an error", res)
+			}
+			notify := "`" + InboxCommand("notify", "e1", hint) + "`"
+			if !strings.Contains(res.Err.Error(), "run "+notify+" to send it again") {
+				t.Errorf("escalate error %q does not name %s", res.Err, notify)
+			}
+			if show := "read it with: " + InboxCommand("show", "e1", hint) + "\n"; !strings.Contains(f.banner.String(), show) {
+				t.Errorf("banner %q does not end with %q", f.banner.String(), show)
+			}
+
+			f.banner.Reset()
+			err := f.o.NotifyInboxItem("e1", hint, &f.banner)
+			if err == nil || !strings.Contains(err.Error(), "run "+notify+" again") {
+				t.Errorf("inbox notify error = %v; want it to name %s", err, notify)
+			}
+			if show := "read it with: " + InboxCommand("show", "e1", hint) + "\n"; !strings.Contains(f.banner.String(), show) {
+				t.Errorf("inbox notify banner %q does not end with %q", f.banner.String(), show)
+			}
+			if hint == "" && strings.Contains(res.Err.Error()+err.Error()+f.banner.String(), "--state-dir") {
+				t.Errorf("a bare call names --state-dir: %v / %v / %q", res.Err, err, f.banner.String())
+			}
+		})
+	}
+}
+
+// Self-review L1: EscalateNotRecorded, the CLI's path when ralph.toml does
+// not load, checks the message like Escalate and then tells the human the
+// item was not recorded.
+func TestEscalateNotRecorded_ChecksTheMessageThenAlertsTheHuman(t *testing.T) {
+	cause := errors.New("org: load config: toml: line 1: expected '.' or '=', but got 'x' instead")
+
+	t.Run("a refused message notifies no one", func(t *testing.T) {
+		f := newEscalateFixture(t)
+		res := f.o.EscalateNotRecorded(EscalateParams{OrgID: "org-a", Text: "TYPE: BLOCKED\n\nno task id", Banner: &f.banner}, cause)
+		if !errors.Is(res.Err, protocol.ErrMissingTaskID) || res.Recorded {
+			t.Fatalf("EscalateNotRecorded = %+v; want the TASK_ID refusal", res)
+		}
+		if f.banner.Len() != 0 || len(f.notifications()) != 0 {
+			t.Errorf("a refusal notified: banner %q, calls %v", f.banner.String(), f.notifications())
+		}
+		if fileOrAbsent(t, f.o.Inbox.Path()) != "<absent>" || fileOrAbsent(t, f.o.EscalationsPath) != "<absent>" {
+			t.Error("a refusal wrote inbox.jsonl or escalations.jsonl")
+		}
+	})
+
+	t.Run("an accepted message reaches the human as not recorded", func(t *testing.T) {
+		f := newEscalateFixture(t)
+		res := f.o.EscalateNotRecorded(EscalateParams{OrgID: "org-a", Text: "TYPE: BLOCKED\nTASK_ID: org-a\n\nstuck", Banner: &f.banner}, cause)
+		assertUnrecordedEscalation(t, f, res)
+		if !errors.Is(res.Err, cause) {
+			t.Errorf("error %v does not wrap the cause", res.Err)
+		}
+		if !strings.Contains(f.banner.String(), "org: load config") {
+			t.Errorf("banner %q does not carry the cause", f.banner.String())
+		}
+		if got := fileOrAbsent(t, f.o.Inbox.Path()); got != "<absent>" {
+			t.Errorf("inbox.jsonl = %q; want absent", got)
+		}
+		lines := escalationLines(t, f.o.EscalationsPath)
+		if len(lines) != 1 || lines[0]["reason"] != "inbox_not_recorded" {
+			t.Errorf("escalations.jsonl = %v; want one inbox_not_recorded line", lines)
+		}
+	})
 }
 
 // The watch and inbox lines share escalations.jsonl: a watch line keeps its

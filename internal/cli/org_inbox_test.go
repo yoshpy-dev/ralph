@@ -341,6 +341,106 @@ func TestOrgEscalate_InboxUnwritable_AlertsTheHumanAndExitsOne(t *testing.T) {
 	}
 }
 
+// Self-review L1: a ralph.toml that does not load keeps escalate from
+// building the runtime, but the item still reaches the human as not
+// recorded (the banner and the desktop notification), the same outcome as
+// an inbox that cannot be written. A message escalate refuses is still
+// refused first, with no banner and no notification.
+func TestOrgEscalate_BrokenConfig_AlertsTheHumanAndExitsOne(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "ralph.toml")
+	if err := os.WriteFile(configPath, []byte("[org\nmax_seats = = 3\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("an accepted message", func(t *testing.T) {
+		rec := recordDesktopNotify(t, nil)
+		stateDir := filepath.Join(t.TempDir(), "state")
+		stdout, stderr, err := runOrgCmdStreams(t, "escalate", "--org-id", "org-a", "--text", "TYPE: BLOCKED\nTASK_ID: org-a\n\nstuck",
+			"--state-dir", stateDir, "--config", configPath)
+		if err == nil || !strings.Contains(err.Error(), "could not be recorded") || !strings.Contains(err.Error(), "load config") {
+			t.Fatalf("error = %v; want the item could not be recorded, naming the config load", err)
+		}
+		if stdout != "" {
+			t.Errorf("stdout = %q; want no ID for an item that was not recorded", stdout)
+		}
+		for _, sub := range []string{"ORG ESCALATION (NOT RECORDED):", "org=org-a", "type=BLOCKED", "load config"} {
+			if !strings.Contains(stderr, sub) {
+				t.Errorf("stderr %q does not contain %q", stderr, sub)
+			}
+		}
+		if calls := rec.calls(); len(calls) != 1 || !strings.Contains(calls[0], "org-a") || strings.Contains(calls[0], "stuck") {
+			t.Errorf("desktop notifications = %q; want one naming org-a without the body", calls)
+		}
+		if got := inboxFileOrAbsent(t, stateDir); got != "<absent>" {
+			t.Errorf("inbox = %q; want absent", got)
+		}
+	})
+
+	t.Run("a refused message", func(t *testing.T) {
+		rec := recordDesktopNotify(t, nil)
+		stateDir := filepath.Join(t.TempDir(), "state")
+		stdout, stderr, err := runOrgCmdStreams(t, "escalate", "--org-id", "org-a", "--text", "TYPE: BLOCKED\n\nno task id",
+			"--state-dir", stateDir, "--config", configPath)
+		if err == nil || !strings.Contains(err.Error(), "message rejected") {
+			t.Fatalf("error = %v; want the protocol refusal", err)
+		}
+		if stdout != "" || strings.Contains(stderr, "ORG ESCALATION") || len(rec.calls()) != 0 {
+			t.Errorf("a refusal printed stdout %q, stderr %q, notified %q", stdout, stderr, rec.calls())
+		}
+		if _, statErr := os.Stat(stateDir); !errors.Is(statErr, fs.ErrNotExist) {
+			t.Errorf("a refusal created the state dir %s (stat err %v)", stateDir, statErr)
+		}
+	})
+}
+
+// Self-review L2: the `ralph org inbox` commands that escalate, inbox
+// notify, and inbox show print carry --state-dir when it was passed, and
+// stay bare when the ledger came from RALPH_ORG_STATE_DIR (the rule of
+// orgReadCommandHint).
+func TestOrgInbox_RecoveryCommandsRepeatAnExplicitStateDir(t *testing.T) {
+	for _, explicit := range []bool{true, false} {
+		t.Run(map[bool]string{true: "flag", false: "env"}[explicit], func(t *testing.T) {
+			recordDesktopNotify(t, nil)
+			stateDir := t.TempDir()
+			// A directory where escalations.jsonl should be: the item is
+			// recorded but not notified, so every command names a recovery.
+			if err := os.Mkdir(org.EscalationsPathIn(stateDir), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			ledger := []string{"--state-dir", stateDir}
+			suffix := " --state-dir '" + stateDir + "'"
+			if !explicit {
+				t.Setenv(org.EnvOrgStateDir, stateDir)
+				ledger, suffix = nil, ""
+			}
+
+			stdout, stderr, err := runOrgCmdStreams(t, append([]string{"escalate", "--org-id", "org-a", "--text", inboxQuestion("which?")}, ledger...)...)
+			if err == nil || stdout != "escalated e1 (org=org-a type=QUESTION)\n" {
+				t.Fatalf("escalate = %q, %v; want e1 recorded and exit 1", stdout, err)
+			}
+			if want := "run `ralph org inbox notify e1" + suffix + "` to send it again"; !strings.Contains(err.Error(), want) {
+				t.Errorf("escalate error %q does not contain %q", err, want)
+			}
+			if want := "read it with: ralph org inbox show e1" + suffix + "\n"; !strings.Contains(stderr, want) {
+				t.Errorf("escalate banner %q does not contain %q", stderr, want)
+			}
+
+			_, stderr, err = runOrgCmdStreams(t, append([]string{"inbox", "notify", "e1"}, ledger...)...)
+			if want := "run `ralph org inbox notify e1" + suffix + "` again"; err == nil || !strings.Contains(err.Error(), want) {
+				t.Errorf("inbox notify error = %v; want it to contain %q", err, want)
+			}
+			if want := "read it with: ralph org inbox show e1" + suffix + "\n"; !strings.Contains(stderr, want) {
+				t.Errorf("inbox notify banner %q does not contain %q", stderr, want)
+			}
+
+			stdout, _ = runInboxOK(t, append([]string{"inbox", "show", "e1"}, ledger...)...)
+			if want := "notified: no (send it with: ralph org inbox notify e1" + suffix + ")\n"; !strings.Contains(stdout, want) {
+				t.Errorf("inbox show %q does not contain %q", stdout, want)
+			}
+		})
+	}
+}
+
 // seedInboxStates escalates e1 (open), e2 (acked), and e3 (resolved) into
 // stateDir through the CLI.
 func seedInboxStates(t *testing.T, stateDir string) {
@@ -555,8 +655,8 @@ func TestInboxSummary(t *testing.T) {
 			}
 		})
 	}
-	if got, want := printableInboxText("a\n\tb\r\x1b", true), "a\n\tb\\r\\x1b"; got != want {
-		t.Errorf("printableInboxText keeping line breaks = %q; want %q", got, want)
+	if got, want := org.PrintableInboxText("a\n\tb\r\x1b", true), "a\n\tb\\r\\x1b"; got != want {
+		t.Errorf("org.PrintableInboxText keeping line breaks = %q; want %q", got, want)
 	}
 }
 

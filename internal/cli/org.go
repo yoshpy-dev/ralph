@@ -10,12 +10,10 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
-	"unicode"
 
 	"github.com/spf13/cobra"
 
@@ -45,7 +43,7 @@ func newOrgCmd() *cobra.Command {
 			"org inbox, which every org in the ledger shares, next to the manifest.",
 	}
 
-	cmd.PersistentFlags().StringVar(&orgID, "org-id", "", "org execution namespace (required, also by escalate; stop --all, disband --all, the inbox verbs, and wait --inbox refuse it; start --plan defaults it to the feature's slug, and with --plan it is at most 20 characters)")
+	cmd.PersistentFlags().StringVar(&orgID, "org-id", "", "org execution namespace (required by every verb except stop --all, disband --all, wait --inbox, and the inbox verbs, which refuse it, and start --plan, which defaults it to the feature's slug; with --plan it is at most 20 characters)")
 	cmd.PersistentFlags().StringVar(&stateDir, "state-dir", "", "org manifest/receipts/inbox state directory (default: resolved by org.ResolveOrgStateDir -- env RALPH_ORG_STATE_DIR, else the main worktree's .harness/state/org (shared by its linked worktrees), else the enclosing git toplevel's .harness/state/org, else cwd's .harness/state/org)")
 	cmd.PersistentFlags().StringVar(&configPath, "config", "", "path to ralph.toml (default: ./ralph.toml if present, else built-in defaults; for where spawn and start read the org-wide limits, see ralph org spawn --help)")
 
@@ -1711,6 +1709,10 @@ func newWatchdogHooks(ctx context.Context, rt *org.Org, stderr io.Writer) (org.W
 // path with the banner on stderr. The ID goes to stdout whenever the item
 // was recorded, also when its notification was not completed, so the
 // caller can run `ralph org inbox notify <id>` instead of escalating again.
+// When the runtime cannot be built because ralph.toml does not load, the
+// item still reaches the human as not recorded
+// ((*org.Org).EscalateNotRecorded), the same outcome as an inbox that
+// cannot be written; a legacy ledger is refused like every mutating verb.
 func newOrgEscalateCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	var text string
 
@@ -1732,8 +1734,9 @@ func newOrgEscalateCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"the command). When the item is recorded but that notification is not\n"+
 			"completed, the command still prints the ID and exits 1: run\n"+
 			"`ralph org inbox notify <id>` then, not escalate again, which would\n"+
-			"record a second item. When the inbox cannot record the item, the banner\n"+
-			"and the desktop notification still go out and the command exits 1.",
+			"record a second item. When the inbox cannot record the item, or\n"+
+			"ralph.toml does not load, the banner and the desktop notification still\n"+
+			"go out and the command exits 1.",
 			protocol.DefaultMaxBodyChars),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -1743,11 +1746,21 @@ func newOrgEscalateCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if strings.TrimSpace(text) == "" {
 				return fmt.Errorf("org: escalate: --text is required")
 			}
-			rt, err := newOrgRuntime(cmd, *stateDir, *configPath, orgLedgerMutating)
-			if err != nil {
+			// newOrgRuntime's steps, split so that a ralph.toml that does
+			// not load can still reach the human below.
+			resolvedStateDir, stateDirSource := org.ResolveOrgStateDir(*stateDir, cmd.Flags().Changed("state-dir"))
+			if err := guardLegacyOrgStateDir(cmd, resolvedStateDir, stateDirSource, orgLedgerMutating); err != nil {
 				return err
 			}
-			result := rt.Escalate(org.EscalateParams{OrgID: *orgID, Text: text, Banner: cmd.ErrOrStderr()})
+			params := org.EscalateParams{
+				OrgID: *orgID, Text: text, Banner: cmd.ErrOrStderr(),
+				HintStateDir: orgInboxHintStateDir(cmd, *stateDir),
+			}
+			rt, err := newOrgRuntimeAt(resolvedStateDir, *configPath)
+			if err != nil {
+				return newOrgEscalateFallbackRuntime(resolvedStateDir).EscalateNotRecorded(params, err).Err
+			}
+			result := rt.Escalate(params)
 			if result.Recorded {
 				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "escalated %s (org=%s type=%s)\n", result.ID, *orgID, result.Type)
 			}
@@ -1850,7 +1863,7 @@ func newOrgInboxShowCmd(stateDir, configPath *string) *cobra.Command {
 			if jsonOut {
 				return writeIndentedJSON(cmd.OutOrStdout(), inbox.Items[i])
 			}
-			printInboxItem(cmd.OutOrStdout(), inbox.Items[i])
+			printInboxItem(cmd.OutOrStdout(), inbox.Items[i], orgInboxHintStateDir(cmd, *stateDir))
 			return nil
 		},
 	}
@@ -1935,7 +1948,7 @@ func newOrgInboxNotifyCmd(stateDir, configPath *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := rt.NotifyInboxItem(args[0], cmd.ErrOrStderr()); err != nil {
+			if err := rt.NotifyInboxItem(args[0], orgInboxHintStateDir(cmd, *stateDir), cmd.ErrOrStderr()); err != nil {
 				return err
 			}
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "notified %s\n", args[0])
@@ -1953,6 +1966,33 @@ func newOrgInboxRuntime(cmd *cobra.Command, verb, stateDir, configPath string, a
 		return nil, fmt.Errorf("org: %s: --org-id does not apply: the inbox holds the items of every org in the ledger", verb)
 	}
 	return newOrgRuntime(cmd, stateDir, configPath, access)
+}
+
+// orgInboxHintStateDir returns the state dir to repeat as --state-dir in
+// the `ralph org inbox` commands that escalate, inbox notify, and inbox
+// show print (org.InboxCommand): the resolved --state-dir when it was
+// passed to this invocation, and "" otherwise, by orgReadCommandHint's rule
+// and for its reason. The org layer builds the commands, since only
+// (*org.Org).Escalate knows a new item's ID; only the CLI knows whether
+// --state-dir was passed.
+func orgInboxHintStateDir(cmd *cobra.Command, stateDir string) string {
+	if !cmd.Flags().Changed("state-dir") {
+		return ""
+	}
+	resolved, _ := org.ResolveOrgStateDir(stateDir, true)
+	return resolved
+}
+
+// newOrgEscalateFallbackRuntime is the org.Org `ralph org escalate` uses to
+// tell the human about an item it could not record because newOrgRuntimeAt
+// failed (ralph.toml does not load): only the fields of newOrgRuntimeAt's
+// org.Org that (*org.Org).EscalateNotRecorded uses, which need no config.
+func newOrgEscalateFallbackRuntime(resolvedStateDir string) *org.Org {
+	return &org.Org{
+		Inbox:           org.NewInboxStore(resolvedStateDir),
+		EscalationsPath: org.EscalationsPathIn(resolvedStateDir),
+		DesktopNotify:   orgDesktopNotifyOverride,
+	}
 }
 
 // orgInboxJSON is the --json wire shape for `ralph org inbox`: the listed
@@ -2004,8 +2044,10 @@ func printInboxTable(w io.Writer, items []org.InboxItem, all bool) {
 
 // printInboxItem prints `ralph org inbox show`'s text form: one field per
 // line, the whole message indented, then every event. Fields that are not
-// set (acked_at on an open item, for example) are left out.
-func printInboxItem(w io.Writer, item org.InboxItem) {
+// set (acked_at on an open item, for example) are left out. hintStateDir is
+// orgInboxHintStateDir's value for the `inbox notify` command of an item
+// that is not notified.
+func printInboxItem(w io.Writer, item org.InboxItem, hintStateDir string) {
 	field := func(name, value string) {
 		if value != "" {
 			_, _ = fmt.Fprintf(w, "%s: %s\n", name, inboxField(value))
@@ -2026,10 +2068,10 @@ func printInboxItem(w io.Writer, item org.InboxItem) {
 	case item.State == org.InboxStateResolved:
 		_, _ = fmt.Fprintln(w, "notified: no")
 	default:
-		_, _ = fmt.Fprintf(w, "notified: no (send it with: ralph org inbox notify %s)\n", inboxField(item.ID))
+		_, _ = fmt.Fprintf(w, "notified: no (send it with: %s)\n", org.InboxCommand("notify", inboxField(item.ID), hintStateDir))
 	}
 	_, _ = fmt.Fprintln(w, "message:")
-	for _, line := range strings.Split(printableInboxText(item.Body, true), "\n") {
+	for _, line := range strings.Split(org.PrintableInboxText(item.Body, true), "\n") {
 		_, _ = fmt.Fprintf(w, "  %s\n", line)
 	}
 	_, _ = fmt.Fprintln(w, "events:")
@@ -2062,7 +2104,7 @@ func inboxSummary(text string) string {
 		if line == "" {
 			continue
 		}
-		line = printableInboxText(line, false)
+		line = org.PrintableInboxText(line, false)
 		if r := []rune(line); len(r) > inboxSummaryMaxRunes {
 			line = string(r[:inboxSummaryMaxRunes-3]) + "..."
 		}
@@ -2078,27 +2120,7 @@ func inboxField(s string) string {
 	if s == "" {
 		return "-"
 	}
-	return printableInboxText(s, false)
-}
-
-// printableInboxText returns s with each control character written as its
-// Go escape (\x1b, \r, \u0085), keeping newlines and tabs when
-// keepLineBreaks is set. Inbox text is written by a leader and printed to a
-// terminal, so an escape sequence in it must not reach the terminal as one.
-func printableInboxText(s string, keepLineBreaks bool) string {
-	var b strings.Builder
-	for _, r := range s {
-		switch {
-		case keepLineBreaks && (r == '\n' || r == '\t'):
-			b.WriteRune(r)
-		case unicode.IsControl(r):
-			quoted := strconv.QuoteRune(r)
-			b.WriteString(quoted[1 : len(quoted)-1])
-		default:
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
+	return org.PrintableInboxText(s, false)
 }
 
 func yesNo(v bool) string {
