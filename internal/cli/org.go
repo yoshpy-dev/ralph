@@ -194,6 +194,14 @@ func newOrgRuntimeAt(resolvedStateDir, configPath string) (*org.Org, error) {
 		Receipts: org.NewReceiptStoreAtPath(org.ReceiptsPathIn(resolvedStateDir)),
 		Herdr:    driver.Herdr{R: runner},
 		Agmsg:    driver.Agmsg{R: runner, Home: driver.ResolveAgmsgHome(orgCfg.AgmsgHome)},
+		// The inbox and the human path of `ralph org escalate` and `ralph
+		// org inbox notify` live in the same ledger as the manifest.
+		// DesktopNotify is nil in production (osascript on darwin); a test
+		// that escalates through the CLI sets orgDesktopNotifyOverride so it
+		// shows no real notification.
+		Inbox:           org.NewInboxStore(resolvedStateDir),
+		EscalationsPath: org.EscalationsPathIn(resolvedStateDir),
+		DesktopNotify:   orgDesktopNotifyOverride,
 		// The three Codex* fields below are only ever non-zero in tests
 		// (TestMain pins orgCodexSessionsDirOverride to a directory that
 		// does not exist, plus tiny observe timeout/interval, the same
@@ -229,6 +237,10 @@ var (
 	orgCodexModelObserveTimeoutOverride  time.Duration
 	orgCodexModelObserveIntervalOverride time.Duration
 )
+
+// orgDesktopNotifyOverride is copied into every org.Org's DesktopNotify
+// (newOrgRuntimeAt). nil in production, which means osascript on darwin.
+var orgDesktopNotifyOverride org.EscalateFunc
 
 // orgReadCommandHint builds the `ralph org read` recovery command printed
 // in send's post-failure notes and its unconfirmed-submit warning (AR-2,
