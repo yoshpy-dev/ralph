@@ -437,12 +437,20 @@ leader が動いている間は台帳に何も足さない。disband のあと�
   名前の分割計画とは違う。disband のあとも worktree は残るので、この台帳か
   別の台帳の分割計画の同じ slug が古いコミットを引き継がないようにしている。
   - `canonical_ref` が違う(別の分割計画の機能のための記録など): その
-    worktree とブランチは、相手の org がまだ使っているかもしれない。まず
-    分割計画でこの機能の slug を変えて承認し直す。slug は org_id の既定で
-    ブランチ名の一部なので、別の記録とブランチになる(Type だけを変えても
-    org_id は変わらず、同じ記録に当たる)。別の `--org-id` はブランチが同じ
-    ままなので案内しない。その worktree とブランチが要らないときに限り、
-    `./scripts/ralph-worktree.sh cleanup --id org-<org_id>` で消す。
+    worktree とブランチは、相手の org がまだ使っているかもしれない。記録の
+    名前は org_id で決まるので、まずこの機能に別の org_id を持たせ、要れば
+    別のブランチも持たせる。
+    - org_id が slug のとき(`--org-id` を渡さない既定): 分割計画でこの機能の
+      slug を変えて承認し直す。slug は org_id の既定でブランチ名の一部なので、
+      別の記録とブランチになる(Type だけを変えても org_id は変わらず、同じ
+      記録に当たる)。別の `--org-id` はブランチが同じままなので案内しない。
+    - `--org-id` で slug と違う org_id を渡したとき: slug を変えても org_id は
+      変わらず、同じ記録に当たる。別の `--org-id` を使うか、`--org-id` を
+      外して slug を org_id にする。その記録の worktree も機能のブランチ
+      `<type>/<slug>` にいるときは、別の `--org-id` でもブランチは同じなので、
+      slug も変えて承認し直す。
+    - どちらでも、その worktree とブランチが要らないときに限り
+      `./scripts/ralph-worktree.sh cleanup --id org-<org_id>` で消す。
   - それ以外: 要らなければ
     `./scripts/ralph-worktree.sh cleanup --id org-<org_id>` で消すか、別の
     `--org-id` を使う。
@@ -465,12 +473,16 @@ leader が動いている間は台帳に何も足さない。disband のあと�
   終了コード 1 で、leader は立てず、台帳にも何も書かない。
   - 記録の `canonical_ref` が今回のものと違う: この start が走っている間に、
     別の分割計画から同じ org_id で打った start が記録を作り、`ensure` が
-    それを返した。分割計画でこの機能の slug を変えて承認し直すか、先の org
-    (同じ org_id)が終わってその worktree が消えるのを待ってから打ち直す。
-    エラーは `cleanup` も別の `--org-id` も案内しない。その worktree と
-    ブランチは先の start のもので、使っている最中のことがある。ブランチ名は
-    `<type>/<slug>` で org_id を含まないので、org_id を変えても同じブランチに
-    当たる。
+    それを返した。直し方は使い回しの拒否で `canonical_ref` が違うときと同じ
+    (org_id が slug と同じなら slug を変えて承認し直す。`--org-id` で slug と
+    違う org_id を渡したなら、別の `--org-id` を使うか `--org-id` を外し、
+    その worktree が機能のブランチにもいれば slug も変える)。または、先の
+    org(同じ org_id)の持ち主が、その org の PR が merge されたあとに
+    worktree を消すのを待ってから打ち直す。エラーは `cleanup` を案内しない。
+    その worktree とブランチは先の start のもので、使っている最中のことが
+    ある。ブランチ名は `<type>/<slug>` で org_id を含まないので、org_id を
+    変えても同じブランチに当たる。そのため org_id が slug と同じときは、別の
+    `--org-id` も案内しない。
   - 記録が消えた、読めない、ほかの点が合わない: start の間に何かが worktree
     か記録を変えた。打ち直せば、手順の 3 の照合が何が邪魔をしているかを示す。
 - repo に `scripts/ralph-worktree.sh` がないとき、git の外か、main worktree

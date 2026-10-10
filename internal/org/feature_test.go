@@ -12,8 +12,8 @@ import (
 )
 
 // `ralph org start --plan` at the org layer (plan
-// docs/plans/active/2026-10-09-org-feature-worktree.md, AC3, AC4, AC6 to AC9,
-// and plan docs/plans/active/2026-10-10-org-feature-worktree-ownership.md,
+// docs/plans/archive/2026-10-09-org-feature-worktree.md, AC3, AC4, AC6 to AC9,
+// and plan docs/plans/archive/2026-10-10-org-feature-worktree-ownership.md,
 // AC1 to AC3b: a feature worktree stays with the split plan that made it).
 // splitPlanFixture, approveSplitPlan and writeSplitPlan live in
 // split_test.go; testFeature, reserveEvent in reserve_test.go;
@@ -325,7 +325,7 @@ func TestStartFeature_OrgIDAndTypeDefault(t *testing.T) {
 }
 
 // TestStartFeature_CanonicalRefIsTheResolvedPlanPath covers the shape in
-// AC1 of plan docs/plans/active/2026-10-10-org-feature-worktree-ownership.md:
+// AC1 of plan docs/plans/archive/2026-10-10-org-feature-worktree-ownership.md:
 // the canonical_ref is split:<the split plan's absolute path>#<slug>, the
 // path with its symlinks resolved, so a start that names the plan through a
 // symlink to its ledger records the plan's own path, and the same start that
@@ -592,7 +592,7 @@ func TestStartFeature_PrecheckRefusesWithoutWorktree(t *testing.T) {
 
 // TestStartFeature_SameStartAgainReusesWorktree covers the first sentence of
 // plan AC6 (and of AC1 of plan
-// docs/plans/active/2026-10-10-org-feature-worktree-ownership.md): the same
+// docs/plans/archive/2026-10-10-org-feature-worktree-ownership.md): the same
 // start again reuses the worktree (ensure returns it, and the record read
 // again after ensure is still the feature's) and, with the leader active,
 // records and calls nothing; after the leader stopped it spawns a new leader
@@ -667,7 +667,7 @@ func TestStartFeature_OtherBindingRefusedWithoutWorktree(t *testing.T) {
 // canonical_ref held the plan's path), points first at another slug and at
 // the cleanup only for a worktree that is no longer needed, and not at
 // another --org-id, which would keep the branch (AC3b of plan
-// docs/plans/active/2026-10-10-org-feature-worktree-ownership.md); the other
+// docs/plans/archive/2026-10-10-org-feature-worktree-ownership.md); the other
 // refusals name the cleanup. A missing ralph-worktree.sh comes back as it is.
 func TestStartFeature_WorktreeRecordMismatchRefused(t *testing.T) {
 	const cleanup = "so start does not reuse it: remove the worktree with ./scripts/ralph-worktree.sh cleanup --id org-auth-core " +
@@ -768,7 +768,7 @@ func TestStartFeature_WorktreeRecordMismatchRefused(t *testing.T) {
 // refused by the reuse check (no ensure, nothing recorded), while the same
 // split plan feature, approved again with another digest, reuses it and
 // binds the org to the new digest (AC1 of plan
-// docs/plans/active/2026-10-10-org-feature-worktree-ownership.md). Another
+// docs/plans/archive/2026-10-10-org-feature-worktree-ownership.md). Another
 // Type alone gives the other plan's feature another branch but the same
 // org_id, so the same worktree record still refuses it, which is why the
 // refusal points at another slug.
@@ -840,7 +840,7 @@ func TestStartFeature_AfterDisband(t *testing.T) {
 // another org or worktree may be using and another --org-id keeps, is
 // avoided first by another slug or Type, and renamed or deleted only once
 // nothing uses it (AC3b of plan
-// docs/plans/active/2026-10-10-org-feature-worktree-ownership.md). The
+// docs/plans/archive/2026-10-10-org-feature-worktree-ownership.md). The
 // .codex/config.toml rewrite message, which says itself how to restore the
 // file, and any other failure come back with nothing added.
 func TestStartFeature_EnsureFailureRefused(t *testing.T) {
@@ -936,17 +936,18 @@ func TestStartFeature_EnsurePrintsAnotherPath(t *testing.T) {
 }
 
 // TestStartFeature_RecordChangedDuringEnsureRefused covers AC3 of plan
-// docs/plans/active/2026-10-10-org-feature-worktree-ownership.md: ensure
+// docs/plans/archive/2026-10-10-org-feature-worktree-ownership.md: ensure
 // returns a recorded worktree with the same path, branch and kind whatever
 // its canonical_ref, so when another start makes the record for another
 // split plan's feature while this start runs (here inside ensure), start
 // reads the record again after ensure and refuses before the spawn: no
 // leader (no driver call), nothing in this ledger, no worktree in the
 // result, and the other start's record untouched. The message points at
-// another slug or at waiting, and at neither the cleanup nor another
-// --org-id. A record that cannot be read again, that is gone, or that no
-// longer matches otherwise is refused the same way, with the hint to run
-// start again.
+// another slug or at waiting until the other org's owner removes that
+// worktree, and at neither the cleanup nor another --org-id (for a start
+// with --org-id, see TestStartFeature_OtherRecordWithOrgID). A record that
+// cannot be read again, that is gone, or that no longer matches otherwise is
+// refused the same way, with the hint to run start again.
 func TestStartFeature_RecordChangedDuringEnsureRefused(t *testing.T) {
 	boom := errors.New("boom")
 	const otherRef = "split:/other/org/splits/auth-split.md#auth-core"
@@ -969,7 +970,7 @@ func TestStartFeature_RecordChangedDuringEnsureRefused(t *testing.T) {
 			return `org: another start made the worktree record org-auth-core for "` + otherRef + `" (this start's is "` + st.ref("auth-core") +
 				`") while this start ran, so this start does not use that worktree and starts no leader: ` +
 				"change this feature's slug in the split plan and approve it again (the slug is the default org_id and part of the branch fix/auth-core), " +
-				"or wait until the other org (org_id auth-core) is done and its worktree is removed, and run start again"
+				"or wait until the owner of the other org (org_id auth-core) removes that worktree once the org's PR is merged, and run start again"
 		}, true},
 		{"the record cannot be read back", func(_ *testing.T, st *featureStart) { st.wt.lookupErr = boom }, func(*featureStart) string {
 			return "org: right after scripts/ralph-worktree.sh ensure returned the worktree, its record org-auth-core cannot be read (boom)" + runAgain
@@ -999,6 +1000,87 @@ func TestStartFeature_RecordChangedDuringEnsureRefused(t *testing.T) {
 			}
 			if tc.other && st.wt.records["org-auth-core"].CanonicalRef != otherRef {
 				t.Fatalf("expected the other start's record untouched, got %+v", st.wt.records["org-auth-core"])
+			}
+		})
+	}
+}
+
+// TestStartFeature_OtherRecordWithOrgID covers self-review F-1 of plan
+// docs/plans/archive/2026-10-10-org-feature-worktree-ownership.md: the
+// worktree record is named by the org_id, which a new slug does not change
+// for a start with --org-id, so a record of another split plan's feature on
+// that org_id, there before ensure or made by another start inside it, is
+// refused with another --org-id or none, and with a new slug as well only
+// when that record is on the feature's branch too, which another --org-id
+// keeps. The refusal before ensure calls no ensure, and the one after it
+// still names no cleanup; neither records anything or touches the other
+// record.
+// TestStartFeature_RealWorktreeScript_OrgIDOtherPlan follows the fix.
+func TestStartFeature_OtherRecordWithOrgID(t *testing.T) {
+	const otherRef = "split:/other/org/splits/auth-split.md#auth-core"
+	const orgIDFix = "use another --org-id, or drop --org-id so that the slug is the org_id " +
+		"(with --org-id auth-x the record is org-auth-x whatever the slug)"
+	const slugToo = ", and change this feature's slug in the split plan and approve it again as well, " +
+		"since that worktree is on the branch fix/auth-core too, which another --org-id keeps"
+	const notReused = "so start does not reuse it: it was made for something other than this split plan's feature, " +
+		"which may still be using that worktree and its branch; "
+	const cleanup = ", or, if that worktree and its branch are no longer needed, " +
+		"remove them with ./scripts/ralph-worktree.sh cleanup --id org-auth-x"
+	for _, tc := range []struct {
+		name         string
+		branch       string // the other record's branch
+		duringEnsure bool   // the other start makes the record inside this start's ensure
+		want         func(st *featureStart) string
+	}{
+		{"before ensure, on the feature's branch", "fix/auth-core", false, func(st *featureStart) string {
+			return `org: the worktree record org-auth-x records canonical_ref "` + otherRef + `", not "` + st.ref("auth-core") + `", ` +
+				notReused + orgIDFix + slugToo + cleanup
+		}},
+		{"before ensure, on another branch", "feat/auth-core", false, func(st *featureStart) string {
+			return `org: the worktree record org-auth-x records canonical_ref "` + otherRef + `", not "` + st.ref("auth-core") + `", ` +
+				`branch "feat/auth-core", not "fix/auth-core", ` + notReused + orgIDFix + cleanup
+		}},
+		{"made during ensure", "fix/auth-core", true, func(st *featureStart) string {
+			return `org: another start made the worktree record org-auth-x for "` + otherRef + `" (this start's is "` + st.ref("auth-core") +
+				`") while this start ran, so this start does not use that worktree and starts no leader: ` + orgIDFix + slugToo +
+				", or wait until the owner of the other org (org_id auth-x) removes that worktree once the org's PR is merged, and run start again"
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := newFeatureStart(t)
+			wt := st.worktree("auth-x")
+			other := WorktreeRecord{WorktreePath: wt, Branch: tc.branch, Kind: "org", CanonicalRef: otherRef}
+			makeOther := func() {
+				if err := os.MkdirAll(wt, 0o755); err != nil {
+					t.Error(err)
+				}
+				st.wt.records["org-auth-x"] = other
+				st.wt.checkouts[wt] = tc.branch
+			}
+			if tc.duringEnsure {
+				st.wt.ensureHook = makeOther
+			} else {
+				makeOther()
+			}
+			p := st.params("auth-core")
+			p.OrgID = "auth-x"
+			res := st.o.StartFeature(p)
+			assertStartRefused(t, res)
+			if got := res.Spawn.Err.Error(); got != tc.want(st) {
+				t.Errorf("error =\n%s\nwant\n%s", got, tc.want(st))
+			}
+			ensured := slices.ContainsFunc(st.wt.calls, func(c string) bool { return strings.HasPrefix(c, "ensure:") })
+			if ensured != tc.duringEnsure {
+				t.Errorf("expected ensure called %v, got calls %q", tc.duringEnsure, st.wt.calls)
+			}
+			if tc.duringEnsure && strings.Contains(res.Spawn.Err.Error(), "cleanup") {
+				t.Errorf("expected no cleanup in the refusal after ensure, got %v", res.Spawn.Err)
+			}
+			if after := takeSpawnSnapshot(t, st.o, st.h, st.a); after != (spawnSnapshot{}) {
+				t.Fatalf("expected nothing recorded or called, got %+v", after)
+			}
+			if len(st.wt.records) != 1 || st.wt.records["org-auth-x"] != other {
+				t.Fatalf("expected only the other record, untouched, got %+v", st.wt.records)
 			}
 		})
 	}
@@ -1336,6 +1418,9 @@ func TestStartFeature_RealWorktreeScript_CheckoutsMoved(t *testing.T) {
 type spyWorktrees struct {
 	scriptFeatureWorktrees
 	calls []string
+	// ensureHook, when non-nil, runs once in the next Ensure, before the
+	// script: another start racing this one.
+	ensureHook func()
 }
 
 func (s *spyWorktrees) Lookup(repoRoot, id string) (WorktreeRecord, bool, error) {
@@ -1345,6 +1430,10 @@ func (s *spyWorktrees) Lookup(repoRoot, id string) (WorktreeRecord, bool, error)
 
 func (s *spyWorktrees) Ensure(repoRoot string, req EnsureWorktree) (string, error) {
 	s.calls = append(s.calls, "ensure:"+req.ID)
+	if hook := s.ensureHook; hook != nil {
+		s.ensureHook = nil
+		hook()
+	}
 	return s.scriptFeatureWorktrees.Ensure(repoRoot, req)
 }
 
@@ -1379,7 +1468,7 @@ func featureWorktreeState(t *testing.T, root, id, wt, branch string) string {
 }
 
 // TestStartFeature_RealWorktreeScript_OtherLedger covers AC2 and AC3b of plan
-// docs/plans/active/2026-10-10-org-feature-worktree-ownership.md through the
+// docs/plans/archive/2026-10-10-org-feature-worktree-ownership.md through the
 // real scripts/ralph-worktree.sh: two ledgers of one repo each hold a split
 // plan auth-split with the feature auth-core (the same slug and Type). After
 // ledger A's org is started and disbanded, its worktree stays, and ledger
@@ -1433,6 +1522,100 @@ func TestStartFeature_RealWorktreeScript_OtherLedger(t *testing.T) {
 	}
 	b.mustStart(t, b.params("auth-store"), SpawnOutcomeIdempotent)
 	if after := featureWorktreeState(t, root, "org-auth-core", wtA, "fix/auth-core"); after != ownedByA {
+		t.Fatalf("expected ledger A's worktree, branch and record unchanged:\n%s\n->\n%s", ownedByA, after)
+	}
+}
+
+// TestStartFeature_RealWorktreeScript_OrgIDOtherPlan follows the fix of
+// TestStartFeature_OtherRecordWithOrgID through the real
+// scripts/ralph-worktree.sh: two ledgers of one repo each hold a split plan
+// auth-split with the feature auth-core, and both start it with --org-id
+// auth-x. Ledger A's start runs inside ledger B's ensure, so the script
+// returns ledger A's record to ledger B, whose check after ensure refuses it
+// with another --org-id (or none) and a new slug, and with no cleanup; the
+// same start again is refused the same way by the reuse check, with only the
+// record looked up. Another --org-id alone is refused by ensure, since the
+// branch fix/auth-core is ledger A's; another --org-id with the feature
+// renamed and approved again starts in a worktree and on a branch of its
+// own. Ledger A's worktree, branch and record stay as its start made them,
+// but for the record's last_seen_at, which ledger B's ensure refreshed.
+func TestStartFeature_RealWorktreeScript_OrgIDOtherPlan(t *testing.T) {
+	root := worktreeScriptRepo(t)
+	a := newFeatureStart(t)
+	a.o.Worktrees, a.root = nil, root
+	pa := a.params("auth-core")
+	pa.OrgID = "auth-x"
+	wtA := a.worktree("auth-x")
+	var madeByA string
+
+	b := newFeatureStartIn(t, filepath.Join(t.TempDir(), "ledger b", "org"))
+	spy := &spyWorktrees{}
+	b.o.Worktrees, b.root = spy, root
+	spy.ensureHook = func() {
+		a.mustStart(t, pa, SpawnOutcomeSpawned)
+		madeByA = featureWorktreeState(t, root, "org-auth-x", wtA, "fix/auth-core")
+	}
+	const fix = "use another --org-id, or drop --org-id so that the slug is the org_id " +
+		"(with --org-id auth-x the record is org-auth-x whatever the slug), " +
+		"and change this feature's slug in the split plan and approve it again as well, " +
+		"since that worktree is on the branch fix/auth-core too, which another --org-id keeps"
+	pb := b.params("auth-core")
+	pb.OrgID = "auth-x"
+	res := b.o.StartFeature(pb)
+	assertStartRefused(t, res,
+		`org: another start made the worktree record org-auth-x for "`+a.ref("auth-core")+`" (this start's is "`+b.ref("auth-core")+
+			`") while this start ran, so this start does not use that worktree and starts no leader: `+fix+
+			", or wait until the owner of the other org (org_id auth-x) removes that worktree once the org's PR is merged, and run start again")
+	if strings.Contains(res.Spawn.Err.Error(), "cleanup") {
+		t.Errorf("expected no cleanup in the refusal after ensure, got %v", res.Spawn.Err)
+	}
+	if !slices.Equal(spy.calls, []string{"lookup:org-auth-x", "ensure:org-auth-x", "lookup:org-auth-x"}) {
+		t.Fatalf("expected the record read again after ensure, got calls %q", spy.calls)
+	}
+	if after := takeSpawnSnapshot(t, b.o, b.h, b.a); after != (spawnSnapshot{}) {
+		t.Fatalf("expected nothing recorded in ledger B or called, got %+v", after)
+	}
+	// The script's ensure, returning ledger A's record to ledger B, refreshes
+	// only its last_seen_at.
+	ownedByA := featureWorktreeState(t, root, "org-auth-x", wtA, "fix/auth-core")
+	withoutLastSeen := func(state string) string {
+		lines := strings.Split(state, "\n")
+		return strings.Join(slices.DeleteFunc(lines, func(l string) bool { return strings.Contains(l, `"last_seen_at"`) }), "\n")
+	}
+	if madeByA == "" || withoutLastSeen(ownedByA) != withoutLastSeen(madeByA) {
+		t.Fatalf("expected ledger A's worktree, branch and record as its start made them:\n%s\n->\n%s", madeByA, ownedByA)
+	}
+
+	spy.calls = nil
+	assertStartRefused(t, b.o.StartFeature(pb),
+		`org: the worktree record org-auth-x records canonical_ref "`+a.ref("auth-core")+`", not "`+b.ref("auth-core")+`", so start does not reuse it: `,
+		"which may still be using that worktree and its branch; "+fix+
+			", or, if that worktree and its branch are no longer needed, remove them with ./scripts/ralph-worktree.sh cleanup --id org-auth-x")
+	if !slices.Equal(spy.calls, []string{"lookup:org-auth-x"}) {
+		t.Fatalf("expected only the record looked up, no ensure, got calls %q", spy.calls)
+	}
+
+	pb.OrgID = "auth-y"
+	assertStartRefused(t, b.o.StartFeature(pb),
+		"org: scripts/ralph-worktree.sh ensure: ralph-worktree: branch already exists without matching state: fix/auth-core",
+		"; "+branchInTheWayHint("fix/auth-core"))
+	if _, err := os.Stat(b.worktree("auth-y")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("expected no worktree at %s, got %v", b.worktree("auth-y"), err)
+	}
+
+	b.writePlan(t, "auth-split", approveSplitPlan(t, strings.ReplaceAll(splitPlanFixture, "auth-core", "auth-store")))
+	pb = b.params("auth-store")
+	pb.OrgID = "auth-y"
+	started := b.mustStart(t, pb, SpawnOutcomeSpawned)
+	wtB := b.worktree("auth-y")
+	if started.Worktree != wtB || started.Branch != "fix/auth-store" {
+		t.Fatalf("expected ledger B's own worktree %s on fix/auth-store, got %q on %q", wtB, started.Worktree, started.Branch)
+	}
+	rec, ok, err := (scriptFeatureWorktrees{}).Lookup(root, "org-auth-y")
+	if want := (WorktreeRecord{WorktreePath: wtB, Branch: "fix/auth-store", Kind: "org", CanonicalRef: b.ref("auth-store")}); err != nil || !ok || rec != want {
+		t.Fatalf("worktree record = %+v (found %v, err %v), want %+v", rec, ok, err, want)
+	}
+	if after := featureWorktreeState(t, root, "org-auth-x", wtA, "fix/auth-core"); after != ownedByA {
 		t.Fatalf("expected ledger A's worktree, branch and record unchanged:\n%s\n->\n%s", ownedByA, after)
 	}
 }
