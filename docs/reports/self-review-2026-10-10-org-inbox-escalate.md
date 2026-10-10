@@ -2,11 +2,85 @@
 
 - Date: 2026-10-10
 - Plan: docs/plans/active/2026-10-10-org-inbox-escalate.md(承認済み、digest b09718e048cd)
+- Reviewer: reviewer subagent (Claude)。パイプライン 1 回目(cycle 1、上限 2)の再実行で、cross-review の前の直しなので cycle は増えない。最初の結果は 6d803bed の時点のもので、末尾の「付録」に残してある
+- Scope: diff の品質だけ。今回見たのは最初の結果のあとに入った 2 コミット(`git diff 6d803bed..HEAD`。a396db57 の直しと 1d865fdd の計画の記録、7 ファイル、+543/-80)。テスト・静的解析・仕様適合・文書の整合の検査は /test・/verify・/sync-docs の担当で、ここでは行っていない
+- 番号の付け方: 最初の結果の M1〜M2、L1〜L9 はそのまま使う。今回足した finding は N1〜N3
+
+## 最初の結果の指摘の扱い(HEAD 1d865fdd)
+
+| ID | 状態 | 根拠 |
+| --- | --- | --- |
+| M1 | 直った(前提が 2 つ残る、N1) | `internal/org/prompts/leader.md` の 162〜182 行目が、メッセージをファイルに書いて `--text "$(cat ...)"` で渡す 2 ブロックになった。命令のブロックに単一引用符はなく、テストが固定する。skill の動詞表の例(`"$(cat blocked.txt)"`)と同じ形になった。リポジトリ全体の `grep -rn "\-\-text '"` で残るのは、雛形が「単一引用符で囲むと壊れる」と説明する 1 か所と、それを拒むテストだけ |
+| M2 | 未了。/sync-docs に回す | `git diff 6d803bed..HEAD --stat` に `docs/tech-debt/` がなく、台帳 193 行目の (f)(j) は開いたまま。閉じるときは Debt・Impact・Trigger の (f)(j) と、Why deferred の (j) の 4 欄 |
+| L1 | 直った | CLI は旧い台帳の検査のあとで `newOrgRuntimeAt` の失敗を `EscalateNotRecorded` に渡し、検査に通ったメッセージだけを NOT RECORDED の banner・通知・escalations.jsonl の行で人に届けて終了コード 1。断られたメッセージは何も書かない。`TestOrgEscalate_BrokenConfig_AlertsTheHumanAndExitsOne` が 2 ケース(N3 に穴が 1 つ) |
+| L2 | 直った | `org.InboxCommand` が `--state-dir` を明示したときだけ付ける(`orgReadCommandHint` と同じ規則)。escalate のエラー、banner、`inbox notify` のエラー、`inbox show` の notify の案内の 4 か所に通り、flag と env の 2 ケースのテストがある。静的な `--help` の文言は対象外でよい |
+| L3 | 直った | `internal/cli/org.go:46` の説明が「required by every verb except ... which refuse it, and start --plan, which defaults it」になり、「also by escalate」が消えた |
+| L4 | 未了。tech-debt に記録する予定 | 現 HEAD の台帳に行はまだない |
+| L5 | 未了。tech-debt に記録する予定 | 同上 |
+| L6 | 直った | 見出しが「## agmsg の受信箱の運用」に、星型の規則が「agmsg の受信箱で確認し」になった。`leader.md` の「受信箱」は 6 行すべてが org か agmsg を付けて使われている(grep)。テストが「件を上げる」の節の無修飾の「受信箱」を拒む |
+| L7 | 未了。/sync-docs に回す | skill の 453 行目は変わらない |
+| L8 | 未了。tech-debt に記録する予定 | 現 HEAD の台帳に行はまだない |
+| L9 | 直った。勧めた形とは違う | banner は `PrintableInboxText` で escape し、デスクトップ通知は `ValidateIdentifier` と TYPE の列挙を通った値だけで、通らなければ `<invalid>`。勧めたのは送る前に拒否する形だが、手で編集した件でも人に届く点で、この形の方が escalate の趣旨に合う |
+
+## Evidence reviewed
+
+- 全文を読んだ差分: `internal/org/escalate.go`、`internal/cli/org.go`、`internal/org/prompts/leader.md`、`internal/org/escalate_test.go`、`internal/cli/org_inbox_test.go`、`internal/org/prompts_test.go`(いずれも `6d803bed..HEAD`)、計画の進捗の 1 行
+- 前提を確かめたもの: `.gitignore` の 47〜48 行目と `templates/base/.gitignore` の同じ行、`git ls-files .harness`、`.claude/hooks/session_start_context.sh`、`scripts/ralph-worktree.sh` の `cleanup_worktree`、`internal/org/statedir.go` の `ResolveOrgStateDir`(フラグ指定では git を呼ばない)、`internal/org/feature.go` の `shellQuote`
+- 機械的な確認: 追加行にデバッグ出力、TODO、secret らしい文字列はない。`internal/cli/org.go` から外した `strconv` と `unicode` の import に、ほかの使用はない。旧名 `printableInboxText` の残りはない(grep)
+- 確かめていないもの: `pre_bash_guard.sh` が `--text "$(cat ...)"` を通すこと(コミットメッセージと計画の記録は通ると言う。guard の字句解析は読んでいない)。`git worktree remove` が無視されたファイルで止まらないこと(git の仕様の説明で、このリポジトリでは打っていない)
+
+## 依頼された点の結論
+
+1. 新しい雛形の例が機能の worktree で成り立つか: 「無視されるのでコミットされず、後始末も止めない」は成り立つ。`.harness/state/` は root と `templates/base/` の `.gitignore` の両方で無視され、`cleanup_worktree` の汚れの検査は `git status --porcelain` で無視されたファイルを数えない。SessionEnd の `git add -A` も無視されたファイルは足さない。一方 `.harness/state/` は新しい worktree にない。`.gitignore` に `!.harness/state/.gitkeep` があるが、追跡されているのは `.harness/README.md` と `.harness/logs/.gitkeep` だけ。作るのは hook(`session_start_context.sh` の `mkdir -p .harness/state` ほか)で、leader のセッションが動いていれば存在する。Write ツールは親ディレクトリを作る。シェルのリダイレクトで書く leader が、hook の動かない環境にいると `No such file or directory` になる。雛形はファイルの書き方を指定していないので、`echo '...'` で書けば M1 の問題が書く側に移る(N1)。ファイルがないまま打つと `--text` が空で `--text is required` になり、stdout に `escalated` が出ず、stderr に `message rejected` もないので、雛形の分岐は「pane に書いて止まる」に進む。壊れ方は安全
+2. `EscalateNotRecorded` の経路: 検査、`Inbox` の nil の検査、`alertUnrecordedEscalation`(banner、通知、escalations.jsonl の best-effort の行)の順で、記録に失敗した escalate と同じ関数を通る。断られたメッセージは何も書かず何も出さない。`Recorded` が false なので stdout に ID は出ず、終了コード 1。banner の理由の欄に config のエラー文が入る。理由の名前 `inbox_not_recorded` は inbox が書けない場合を指すが、config の場合にも使う。読み手のない欄なので無害。`newOrgEscalateFallbackRuntime` は `newOrgRuntimeAt` の配線の写しで、N3 にまとめた
+3. `InboxCommand` / `PrintableInboxText` の公開範囲: どちらも `internal/cli` が使うので export は要り、package が `internal/org` なので module の外には出ない。名前は既存の `InboxPathIn`・`ValidateInboxNote` と同じ接頭辞の付け方。`InboxCommand` は escalate.go でよい。`PrintableInboxText` は inbox の文字列の補助で、`InboxItem` と同じ inbox.go に置く方が探しやすい(N3)
+4. a396db57 の差分の品質: M1・L1・L2・L3・L6・L9 のどれも、直しは指摘の範囲に収まり、関係のない変更はない。コメントは直しの理由を言い、テストは外すと落ちる形になっている。新しい finding は N1〜N3 の LOW だけ
+
+## Findings
+
+<!-- Area recommended values: naming, readability, unnecessary-change, typo,
+     null-safety, debug-code, secrets, exception-handling, security, maintainability -->
+
+| ID | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| N1 | LOW | exception-handling | M1 の直しで、例が前提を 2 つ置いた。(a) `.harness/state/` の存在: 新しい linked worktree にはなく、hook が作る。雛形は「cwd の `.harness/state/` の下に置きます」と言うだけで、作る手順がない。(b) ファイルの書き方: 指定がなく、`echo '...'` で書くと、エラー文の `'` で M1 と同じ壊れ方が書く側に出る。どちらも壊れ方は「escalate が打てず、pane に書いて止まる」で安全だが、escalate が要るのは失敗の直後で、その経路でさらに 1 つ躓く | `internal/org/prompts/leader.md:162-182`。`.gitignore:47-48`(`!.harness/state/.gitkeep` があるが未追跡。`git ls-files .harness` は `.harness/README.md` と `.harness/logs/.gitkeep`)。`.claude/hooks/session_start_context.sh:4`(`mkdir -p .harness/state`) | 命令のブロックの前に `mkdir -p .harness/state` を 1 行足し、「ファイルは Write ツールか、`<<'EOF'` の heredoc で書く」と 1 文足す。`TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate` は命令のブロックを文字列で固定しているので、そこも合わせる |
+| N2 | LOW | maintainability | `--state-dir` の案内の渡し方が 3 つの点でぎこちない。(a) `NotifyInboxItem(id, hintStateDir string, banner io.Writer)` と `sendInboxItemToHuman(orgID, id, typ, hintStateDir string, banner io.Writer)` は文字列が 2〜4 個並び、取り違えても通る。テストの呼び出しは `""` を位置で渡す。(b) escalate の RunE は `resolvedStateDir` を持つのに、`orgInboxHintStateDir` が同じ値をもう一度求める。(c) 案内の `--state-dir` は `shellQuote` で常に引用符つきだが、規則を借りた `orgReadCommandHint` は `shellQuoteIfNeeded` で要るときだけ付ける | `internal/org/escalate.go:178`(`NotifyInboxItem`)、`:284`(`sendInboxItemToHuman`)。`internal/cli/org.go:1978`(`orgInboxHintStateDir`)。`TestInboxCommand` の 2 行目と 3 行目が引用符つきを固定 | CLI が `Org` を組むときに `HintStateDir` を欄として入れると、`EscalateParams.HintStateDir` と 2 つの関数の引数が要らなくなる。直さないなら L4・L5・L8 の台帳の行に足す |
+| N3 | LOW | maintainability | (a) `PrintableInboxText` は inbox の件の文字列の補助だが escalate.go にあり、そのために `strconv` と `unicode` の import を escalate.go に足した。(b) `newOrgEscalateFallbackRuntime` は `newOrgRuntimeAt` の `Inbox`・`EscalationsPath`・`DesktopNotify` の 3 行の写しで、片方を直してももう片方は気づかない。CLI の config 失敗のテストは escalations.jsonl を見ないので、フォールバックの `EscalationsPath` の配線が落ちても通る(org 層のテストは自分の fixture を使う) | `internal/org/escalate.go:324`(`PrintableInboxText`)、`internal/cli/org.go:1990`(`newOrgEscalateFallbackRuntime`)、`TestOrgEscalate_BrokenConfig_AlertsTheHumanAndExitsOne` | (a) inbox.go に移す。(b) そのテストに「escalations.jsonl に `inbox_not_recorded` の行が 1 行ある」の確認を足す(3 行) |
+
+最初の結果から開いたままのもの: M2(MEDIUM)、L4・L5・L7・L8(LOW)。内容は末尾の付録の表にある。
+
+## Positive notes
+
+- L1 の直しは、組めなかった runtime の代わりに必要な 3 欄だけを持つ `Org` を作り、既存の `alertUnrecordedEscalation` を呼ぶ。人への通知の組み立てが 2 通りに増えていない
+- L9 は書く側ではなく送る側で、banner は escape、通知は検査を通った値だけにした。テストが 3 ケース(制御文字と引用符、検査を通らない TYPE、識別子でない org_id)で、banner に生の制御文字がないことまで確かめる
+- L2 のテストは flag と env の 2 ケースで、env のときに `--state-dir` が付かないことも固定している
+- 雛形のテストは、命令のブロックに `--text '` がないことと、メッセージのブロックが `validateEscalation` を通ることの両方を確かめる
+
+## Tech debt identified
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| (このレビューでは足していない) | | | | |
+
+_(L4・L5・L8 は、依頼どおり台帳に記録される予定だが、現 HEAD にはまだない。/sync-docs の前に行が入っていることを確かめる。N1〜N3 を直さずに cross-review に進む場合は、L4・L5・L8 と同じ行にまとめる。)_
+
+## Recommendation
+
+- Merge: yes(CRITICAL・HIGH なし。MEDIUM は M2 の 1 件で、台帳の行を閉じる記録の作業を /sync-docs が持つ。コードの MEDIUM はない。LOW は開いたものが 7 件で、最初の結果から L4・L5・L7・L8、今回の N1〜N3)
+- Follow-ups:
+  - N1: 直すなら 1 行と 1 文で、雛形とそのテストだけを触る。失敗の直後の経路なので、直してから /verify に進むことを勧める。再実行で見る差分は小さい
+  - /sync-docs に渡す: M2(台帳 193 行目の (f)(j) の 4 欄)、L7(skill の 453 行目、4 面)、L4・L5・L8 の台帳の行。加えて L1 の直しで追記が要る文言: skill の `escalate` の行と「受信箱」節の「受信箱に書けなかったとき」の項、仕様 FR-5 の注記は、人に届く条件を「受信箱に書けなかった escalate」だけで挙げ、`ralph.toml` が読めない場合を言っていない(雛形と `--help` は言っている)
+  - N2・N3: 挙動は変わらない。直さないなら台帳の行にまとめる
+
+## 付録: cycle 1 の最初の結果(6d803bed の時点)
+
+最初の結果の header:
+
 - Reviewer: reviewer subagent (Claude)。パイプライン 1 回目(cycle 1、上限 2)
 - Scope: diff の品質だけ。`git diff 382c18c8...HEAD`(6 コミット、21 ファイル、+4348/-102)。テスト・静的解析・仕様適合・文書の整合の検査は /test・/verify・/sync-docs の担当で、ここでは行っていない。ただし依頼された「雛形と /org skill の文言が、コードのしていることと合っているか」は、文言の根拠をコードで確かめた
 - 番号の付け方: MEDIUM は M1〜M2、LOW は L1〜L9
 
-## Evidence reviewed
+### Evidence reviewed(最初の結果)
 
 - 全文を読んだ非テストのコード: `internal/org/inbox.go`、`internal/org/escalate.go`、`internal/org/lockfile.go`、`internal/org/protocol/protocol.go` の `Parse` / `Validate`(escalate が頼る検査の中身)
 - 差分を読んだ非テストのコード: `internal/cli/org.go`(escalate、inbox の 4 動詞、`wait --inbox`、表示の補助関数、`newOrgRuntimeAt` の配線)、`internal/org/watch.go`(`escalationRecord`、`osascriptNotify` の切り出し)、`internal/org/spawn.go`(`Org` の 4 欄)、`internal/cli/org_legacy_ledger.go`、`internal/cli/main_test.go`
@@ -16,7 +90,7 @@
 - 機械的な確認: `fmt.Print` 系のデバッグ出力、TODO、FIXME、secret らしい文字列は追加行にない。`inbox.jsonl` に書く経路は `appendLocked` の 1 つで、呼び出しは `Escalate` と `update` のロックの中の 2 か所だけ
 - `docs/tech-debt/README.md` は差分にない。差分が触れた箇所を指す行を探して照合した(M2)
 
-## 依頼された点の結論
+### 依頼された点の結論(最初の結果)
 
 1. 次の ID の割り当て(`inbox.go` の `foldInbox`、`seeN`、`nextID`): 生の行の正規表現と、JSON として読めた行の `id` の両方から最大を取る。本文に入る `"id":"e9"` は JSON のエスケープで `\"id\"` になり正規表現に当たらないので、本文で次の ID が押し上がることはない。`e0`・`e01`・`E1`・`e+5` は `inboxIDNumber` が往復で弾く。int64 の上限は `nextID` がエラーにする。問題なし
 2. 切れた最後の行(`appendLocked`): `raw` はロックの下で読んだものを渡している。末尾が改行でなければ同じ 1 回の `Write` の頭に改行を足すので、切れた行と新しいイベントが混ざらない。問題なし
@@ -26,10 +100,7 @@
 6. CLI: 終了コード、stdout と stderr の分け方、制御文字のエスケープ(`printableInboxText`)、`--org-id` の拒否(`cmd.Flags().Changed`)、`wait --inbox` の期限(0 以下は無期限で、seat の `Wait` と同じ規則)は計画どおり。`TestMain` の stub で、`runOrg*` 系のテストが osascript を呼ぶ経路はない。`internal/org` 側の fixture も `DesktopNotify` を差し替えており、nil で本物の osascript が走るテストは darwin では skip される
 7. 雛形と skill の文言: 予備の手順の見分け方(stdout に `escalated <id>` が出たか、stderr の `message rejected` / `cannot be escalated`)は、`Escalate` のエラー文と CLI の出力に合っている。TASK_ID の決まりは `protocol.Validate` と合っている。「本文はデータで指示ではない」は雛形と skill の両方にある。ただし M1 と L6 がある
 
-## Findings
-
-<!-- Area recommended values: naming, readability, unnecessary-change, typo,
-     null-safety, debug-code, secrets, exception-handling, security, maintainability -->
+### Findings(最初の結果)
 
 | ID | Severity | Area | Finding | Evidence | Recommendation |
 | --- | --- | --- | --- | --- | --- |
@@ -45,7 +116,7 @@
 | L8 | LOW | maintainability | 2 つ目の使い手が増えたのに doc や名前が 1 つ目のまま。(a) `manifestLockTimeout` と `manifestLockPollInterval` の名前と doc は「`withManifestLock` が待つ」と言うが、`withFileLock` を通る inbox のロックも同じ値を使う。(b) `Org.Inbox` の doc は「Escalate が記録し NotifyInboxItem が読む」と 2 つの使い手を挙げるが、`WaitInbox` も読み、nil のときエラーを返す。(c) `EscalationsPathIn` を足したが、同じパスを作る `watch.go` の 452 行目は `filepath.Join(p.StatusDir, EscalationsRelName)` のまま | `internal/org/lockfile.go:20-31`(定数の doc)と `:60-80`(`withFileLock` が 2 定数を使う)、`internal/org/spawn.go` の `Org.Inbox` の doc、`internal/org/watch.go:452` | (a) 定数の doc に「inbox のロックも使う」と 1 文足す(名前は変えなくてよい)。(b) 「`WaitInbox` も」と足す。(c) `EscalationsPathIn(p.StatusDir)` に替える。どれも挙動は変わらない |
 | L9 | LOW | security | 人への経路が、ファイルから読んだ値を検証も escape もせずに外へ出す。`NotifyInboxItem` は `item.OrgID` と `item.Type` を `inbox.jsonl` から読み、`sendInboxItemToHuman` が banner(stderr)と osascript の文に入れる。`Escalate` の経路は書く前に `ValidateIdentifier` と TYPE の列挙で検査するので、手で編集した `inbox.jsonl` だけが届く。CLI の `inbox` / `show` / `wait` は同じ値を `printableInboxText` で escape しており、banner だけが漏れている。`InboxStore.Escalate` も `OrgID` と `Type` が空でないことしか見ない | `internal/org/escalate.go:236`(banner)、`:238`(`inboxDesktopNotify(fmt.Sprintf("org %s raised %s (%s)", orgID, id, typ))`)、`:145`(`item.OrgID`、`item.Type` を渡す)。`internal/org/inbox.go:167`(空の検査だけ)。CLI 側の escape: `internal/cli/org.go` の `printableInboxText` | `NotifyInboxItem` で `ValidateIdentifier("org_id", item.OrgID)` と TYPE の列挙を確かめてから送る(通らなければ「手で編集された件」としてエラー)。または `InboxStore.Escalate` に同じ検査を入れて、書く側で守る |
 
-## Positive notes
+### Positive notes(最初の結果)
 
 - ID の割り当てが生の行を読むこと、切れた行の改行、`withFileLock` の共有化が、それぞれ理由つきの doc と、外すと落ちるテストで守られている。`withManifestLock` のエラー文は改称前と一字ずつ同じ
 - escalate の 3 つの結果が `EscalateResult` の 3 つの欄で見分けられ、CLI が `Recorded` だけで stdout を決めるので、leader の予備の手順(stdout の `escalated <id>` の有無で分ける)がコードと 1 対 1 で合っている
@@ -54,17 +125,13 @@
 - `--org-id` を黙って無視せず拒否する決定(計画からのずれ)が、計画の進捗に理由つきで記録され、help・雛形・skill・仕様の 4 か所に書かれている
 - 雛形のテストを空白を除く比較に替えた変更(`squashSpace` / `containsPhrase`)は、それ自体にテストがあり、否定側(「人に上げる」が残っていないこと)の比較も同じ形になっている
 
-## Tech debt identified
+### Tech debt identified(最初の結果)
 
-| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
-| --- | --- | --- | --- | --- |
-| (なし) | | | | |
+_(行は足していない。M1・M2 と LOW 9 件は、直してから cross-review に進むことを勧めた。)_
 
-_(このレビューでは行を足していない。M1・M2 と LOW 9 件は、直してから cross-review に進むことを勧める。M2 は台帳の既存の行を閉じる作業で、新しい行ではない。cycle 2 の時点で直されずに残る LOW は、そのとき 1 行にまとめた tech-debt の行が要る。)_
+### Recommendation(最初の結果)
 
-## Recommendation
-
-- Merge: yes(CRITICAL・HIGH なし。MEDIUM 2 件は PR の前に直すことを勧める。どちらも挙動を変えない文言と記録の直しで、M1 は雛形 1 文と skill の例の合わせ、M2 は台帳の行の閉じ方)
+- 最初の結果の判定: yes(CRITICAL・HIGH なし。MEDIUM 2 件は PR の前に直すことを勧める。どちらも挙動を変えない文言と記録の直しで、M1 は雛形 1 文と skill の例の合わせ、M2 は台帳の行の閉じ方)
 - Follow-ups:
   - M1: leader.md の「件を上げる」の節に、本文に `'` を含むときの書き方を足す(skill の動詞表の例と合わせる)
   - M2: 台帳 193 行目の (f) と (j) を閉じる(`/sync-docs` に回してもよい)
