@@ -99,7 +99,10 @@ None (テストに検査を 1 つ足し、tech-debt の 1 文を直すだけで�
 - [x] Branch created
 - [x] Implementation started
   - S1 完了(0eebc7e7、implementer/opus): F 節の DATACMD の検査のあとに、実行時の `WRAPPER` の名前ごとに 2 形(`W sh -c …`、`W 5 sh -c …`)を jq あり・なしで guard に渡す検査を足した(名前と経路の組ごとに 1 件、9×2=18 件)。guard の実行は `decide` から切り出した `run_guard` を共有する。ヘッダーの F 項目と `edge_deny` の 9 行の上のコメントを直した。テストは 2,108/0(macOS、mawk、gawk)。AC2: `chrt` を `WRAPPER` に足すと新しい検査が `chrt` を出して FAIL(9 行は通ったまま)、分岐を 1 つずつ消した 9 通りもすべて FAIL、`WRAPPER` が空でも FAIL。guard のファイルは変わっていない。handoff の外で、ヘッダーの D 項目の「each name of WRAPPER」を「the nine names」に直した
-  - S2 完了(この commit、inline、docs だけ): tech-debt のテストの穴の行の (h) の閉じの文で、10 個目の包みの行の足し忘れをこの PR で解消したと書き、Related にこの plan を足した
+  - self-review(336f5856、reviewer/sonnet): Merge yes、MEDIUM 1、LOW 4。MEDIUM 1(FAIL の文言が「分岐の足し忘れ」を挙げない)と LOW 1・2(「the nine names」などのコメントの言い過ぎ)は S3 で直す。LOW 3(新しい検査は分岐があることしか見ず、包みの引数の読み方は見ないのに、tech-debt とテストのヘッダーが「名前と分岐だけで足りる」と読める)は、テストのヘッダーを S3b で、tech-debt を sync-docs で直す。LOW 4(検査を関数に出す)は任意なので見送る
+  - S3 完了(35f00d33、implementer/sonnet): FAIL の文言に「`WRAPPER` にあって `cmd_pos` に分岐がないなら分岐を足す」を先に書き、コメントの「the nine names」「the same rows」「exact deny JSON」「so the two forms are compared here」を直した。変えたのはコメントと FAIL の文字列だけ。テストは 2,108/0
+  - S3b(この commit、inline、コメントだけ): テストのヘッダーの F 項目に、この検査は包みの引数の読み方を見ない(D の手書きの行が見る)と書いた。テストは 2,108/0
+  - S2 完了(bf3241dc、inline、docs だけ): tech-debt のテストの穴の行の (h) の閉じの文で、10 個目の包みの行の足し忘れをこの PR で解消したと書き、Related にこの plan を足した
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created

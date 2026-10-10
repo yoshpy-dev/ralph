@@ -100,8 +100,9 @@
 #      5 sh -c 'git commit -n -m x' on each path, and at least one of the two
 #      forms must be denied. The nine rows in D catch a name removed from
 #      WRAPPER; this check catches a name in WRAPPER whose branch is missing
-#      from cmd_pos, and it covers a new wrapper without a hand-written row
-#      in D. An empty list fails it too
+#      from cmd_pos, also for a new wrapper without a hand-written row in D.
+#      It does not check how the branch reads the wrapper's own arguments
+#      (a hand-written row in D does). An empty list fails it too
 #   G. AC7: the old guard (tests/fixtures/guard-1c4cea5a/, the version
 #      before this rewrite) decides the corpus of A's deny rows, B (with the
 #      self-review kinds), and C on each path, and is compared with the new
