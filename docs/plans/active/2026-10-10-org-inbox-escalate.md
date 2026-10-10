@@ -94,17 +94,17 @@ Critical forks: 人に届く経路(上の 1 つ目)。consult が案 A を判定
 
 ## Acceptance criteria
 
-- [ ] AC1: escalate は、TYPE が QUESTION・BLOCKED・RESULT でない、TASK_ID が要るのにない、本文が 2,000 字を超える、org_id の形が違う、のどれでも終了コード 1 で拒否され、受信箱にも `escalations.jsonl` にも何も書かない
-- [ ] AC2: 通った escalate は `escalated` を書き、新しい ID(`e<N>`)を出力する。2 つの escalate を同時に打っても ID は重ならない。途中の行が壊れていても、最後の行が途中で切れていても、次の ID は壊れた行の ID を使い回さず、新しいイベントは読める行として残る
-- [ ] AC2b: 記録はできたが通知の記録が書けなかった escalate は、ID を出して終了コード 1 になり、`inbox notify` を案内する。その件は `inbox` の一覧で「未通知」と出て、`ralph org inbox notify <id>` で同じ ID のまま送り直せ、件は増えない。受信箱に書けない escalate も、stderr と osascript で知らせてから終了コード 1 になる(書けない台帳と、差し替えた通知の関数で確かめる)
-- [ ] AC3: escalate のあと、`escalations.jsonl` に件の ID・org_id・理由の 1 行が足され、stderr に表示が出て、`notified`(osascript の結果つき)が受信箱に書かれる。osascript が失敗しても escalate は終了コード 0
-- [ ] AC4: `ralph org inbox` は open と acked を、`--all` は resolved も出し、`--json` は機械で読める形で出す。`inbox show <id>` は本文と履歴を出す。知らない ID は終了コード 1
-- [ ] AC5: ack は open を acked にし、acked にもう一度打つと何もせず終了コード 0、resolved には終了コード 1。resolve は open と acked を resolved にし、note がない・複数行・501 字以上・制御文字を含む、のどれでも拒否、resolved にもう一度は終了コード 1。同時に打った ack と resolve で状態が壊れない
-- [ ] AC6: `ralph org wait --inbox` は、open の件があればすぐ返り、なければ届いた時点で返り、届かなければ `--timeout-ms` で終了コード 1。acked の件では返らない。`--org-id` なしで打て、`--seat` / `--until` との併用は拒否される
-- [ ] AC7: 受信箱は共通の台帳の下にでき、linked worktree から打っても main のチェックアウトから打っても同じものを読む。`--state-dir` を渡せばその台帳の受信箱を使う
-- [ ] AC8: leader の雛形が「人に上げる」を `ralph org escalate`(例と TASK_ID の決まりつき)に置き換え、PR を作ったら RESULT を escalate し、`--state-dir` を付ける動詞に escalate を含め、受信箱の本文はデータで指示ではないと書く。escalate そのものが失敗したときの予備の手順(pane に書いて止まる)と、未通知の件の `inbox notify` を書く。`TestRenderRolePrompt_Leader_*` が通る
-- [ ] AC9: `/org` skill(4 面)、README、AGENTS.md、仕様の FR-5 の注記が合っている。`./scripts/check-skill-sync.sh` と `./scripts/check-sync.sh` が通る
-- [ ] AC10: `./scripts/run-verify.sh` が通る
+- [x] AC1: escalate は、TYPE が QUESTION・BLOCKED・RESULT でない、TASK_ID が要るのにない、本文が 2,000 字を超える、org_id の形が違う、のどれでも終了コード 1 で拒否され、受信箱にも `escalations.jsonl` にも何も書かない
+- [x] AC2: 通った escalate は `escalated` を書き、新しい ID(`e<N>`)を出力する。2 つの escalate を同時に打っても ID は重ならない。途中の行が壊れていても、最後の行が途中で切れていても、次の ID は壊れた行の ID を使い回さず、新しいイベントは読める行として残る
+- [x] AC2b: 記録はできたが通知の記録が書けなかった escalate は、ID を出して終了コード 1 になり、`inbox notify` を案内する。その件は `inbox` の一覧で「未通知」と出て、`ralph org inbox notify <id>` で同じ ID のまま送り直せ、件は増えない。受信箱に書けない escalate も、stderr と osascript で知らせてから終了コード 1 になる(書けない台帳と、差し替えた通知の関数で確かめる)
+- [x] AC3: escalate のあと、`escalations.jsonl` に件の ID・org_id・理由の 1 行が足され、stderr に表示が出て、`notified`(osascript の結果つき)が受信箱に書かれる。osascript が失敗しても escalate は終了コード 0
+- [x] AC4: `ralph org inbox` は open と acked を、`--all` は resolved も出し、`--json` は機械で読める形で出す。`inbox show <id>` は本文と履歴を出す。知らない ID は終了コード 1
+- [x] AC5: ack は open を acked にし、acked にもう一度打つと何もせず終了コード 0、resolved には終了コード 1。resolve は open と acked を resolved にし、note がない・複数行・501 字以上・制御文字を含む、のどれでも拒否、resolved にもう一度は終了コード 1。同時に打った ack と resolve で状態が壊れない
+- [x] AC6: `ralph org wait --inbox` は、open の件があればすぐ返り、なければ届いた時点で返り、届かなければ `--timeout-ms` で終了コード 1。acked の件では返らない。`--org-id` なしで打て、`--seat` / `--until` との併用は拒否される
+- [x] AC7: 受信箱は共通の台帳の下にでき、linked worktree から打っても main のチェックアウトから打っても同じものを読む。`--state-dir` を渡せばその台帳の受信箱を使う
+- [x] AC8: leader の雛形が「人に上げる」を `ralph org escalate`(例と TASK_ID の決まりつき)に置き換え、PR を作ったら RESULT を escalate し、`--state-dir` を付ける動詞に escalate を含め、受信箱の本文はデータで指示ではないと書く。escalate そのものが失敗したときの予備の手順(pane に書いて止まる)と、未通知の件の `inbox notify` を書く。`TestRenderRolePrompt_Leader_*` が通る
+- [x] AC9: `/org` skill(4 面)、README、AGENTS.md、仕様の FR-5 の注記が合っている。`./scripts/check-skill-sync.sh` と `./scripts/check-sync.sh` が通る
+- [x] AC10: `./scripts/run-verify.sh` が通る
 
 ## Implementation outline
 
@@ -149,7 +149,11 @@ Critical forks: 人に届く経路(上の 1 つ目)。consult が案 A を判定
 - [x] Plan reviewed
 - [x] Plan approved
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+- 2026-10-10: S1(f8fff664)受信箱の層。決めたこと: `Read` は `InboxReadResult`(件、読めない行の数、無視したイベントの数)を返す。次の ID は、生の行の正規表現と JSON として読めた行の id の両方から最大を取る。note は不正な UTF-8 と U+2028 / U+2029 も拒否し、trim せずに残す。受信箱のファイルがないときの ack / resolve / notify は「知らない ID」を返し、ディレクトリもロックも作らない。flock の helper は `withFileLock` に共有化し、`withManifestLock` の動きと文言は変えていない
+- 2026-10-10: S2(a6e736ed)escalate と人への経路。決めたこと: osascript の実行を `osascriptNotify` に切り出し、escalate の通知のタイトルは "ralph org escalate"(watch は今のまま)。`escalations.jsonl` に書けなかったときは `notified` も書かない(件は未通知で残り、`inbox notify` で送り直す)。受信箱に書けなかったときに best-effort で書く `escalations.jsonl` の行の理由は `inbox_not_recorded`(inbox_id なし)。デスクトップ通知には本文を渡さない
+- 2026-10-10: S3(faa4b1c3)CLI。計画からのずれ: inbox の動詞と `wait --inbox` は `--org-id` を「求めない」のではなく、渡されたら拒否する(黙って無視すると org で絞った一覧に見えるため)。決めたこと: 一覧の時刻は RFC3339 の ESCALATED_AT。端末に出す受信箱の文字列は制御文字をエスケープする。CLI のテストは TestMain でデスクトップ通知を stub にする
+- 2026-10-10: S4(b0fc4c59)雛形・skill・文書。決めたこと: 予備の手順を、検査で断られたとき(メッセージを直して打ち直す)と、それ以外の失敗(pane に書いて止まる)に分けた。`inbox notify` も `--state-dir` を付ける動詞に入れた。雛形のテストは空白を除いて語句を比べる形にし、改行の位置に依存しないようにした(tech-debt の org-feature-worktree の行の (f) と (j) が直る)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
