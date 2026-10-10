@@ -164,15 +164,23 @@ org の受信箱に件を上げてください。org の受信箱は台帳の下
 で引用符が閉じてしまい、コマンドが壊れます。ファイルは cwd の
 `.harness/state/` の下に置きます(escalate のたびに書き直してかまいません)。
 `.harness/state/` は git が無視する場所なので、ファイルはコミットされず、
-worktree の後始末も止めません。たとえば
-`.harness/state/escalate-{{ORG_ID}}.txt` に次のメッセージを書きます。
+worktree の後始末も止めません。新しい worktree にはこのディレクトリが
+ないことがあるので、書く前に `mkdir -p .harness/state` を打ちます。
+メッセージは Write ツール(Codex では apply_patch)で書くか、
+`cat > .harness/state/escalate-{{ORG_ID}}.txt <<'EOF'` の heredoc で書きます
+(区切りの `'EOF'` は引用符ごと書く。外すと本文の `$` が展開される)。
+`echo '...'` は使いません。書く側でも同じ単一引用符の問題が起きます。
+たとえば次のコマンドで書きます。
 
 ```
+mkdir -p .harness/state
+cat > .harness/state/escalate-{{ORG_ID}}.txt <<'EOF'
 TYPE: BLOCKED
 TASK_ID: {{ORG_ID}}
 
 SUMMARY: secret scan が通らないので push せずに止めた。
 EVIDENCE: internal/foo/bar_test.go:42(secret-scan-branch.sh --strict が終了コード 1)
+EOF
 ```
 
 書いたら、次のコマンドで上げます。

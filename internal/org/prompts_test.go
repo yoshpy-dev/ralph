@@ -600,26 +600,34 @@ func TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate(t *testing.T) 
 		"メッセージはファイルに書き、`--text \"$(cat <ファイル>)\"` で渡してください",
 		"ファイルは cwd の `.harness/state/` の下に置きます",
 		"`.harness/state/` は git が無視する場所なので、ファイルはコミットされず、worktree の後始末も止めません",
-		"`.harness/state/escalate-org-a.txt` に次のメッセージを書きます",
+		// A new linked worktree may not have .harness/state/ (only
+		// .harness/README.md and .harness/logs/.gitkeep are tracked), and
+		// echo '...' brings the single-quote problem back on the writing
+		// side (self-review N1, cycle 1 re-run).
+		"新しい worktree にはこのディレクトリがないことがあるので、書く前に `mkdir -p .harness/state` を打ちます",
+		"メッセージは Write ツール(Codex では apply_patch)で書くか、`cat > .harness/state/escalate-org-a.txt <<'EOF'` の heredoc で書きます",
+		"区切りの `'EOF'` は引用符ごと書く",
+		"`echo '...'` は使いません",
 	} {
 		if !containsPhrase(section, want) {
 			t.Errorf("expected the 件を上げる section to say %q, got section:\n%s", want, section)
 		}
 	}
 
-	// The message block is one that escalate accepts as it is rendered: a
-	// BLOCKED for the whole org, so its TASK_ID is the org_id.
-	const msgFence = "```\nTYPE: "
-	start := strings.Index(section, msgFence)
+	// The writing block makes the directory and writes the message with a
+	// quoted heredoc; the message is one that escalate accepts as it is
+	// rendered: a BLOCKED for the whole org, so its TASK_ID is the org_id.
+	const writeFence = "```\nmkdir -p .harness/state\ncat > .harness/state/escalate-org-a.txt <<'EOF'\n"
+	start := strings.Index(section, writeFence)
 	if start < 0 {
-		t.Fatalf("expected the 件を上げる section to show the message in a code block starting with %q, got section:\n%s", msgFence, section)
+		t.Fatalf("expected the 件を上げる section to show the writing block starting with %q, got section:\n%s", writeFence, section)
 	}
-	msg, _, ok := strings.Cut(section[start+len("```\n"):], "\n```")
+	msg, _, ok := strings.Cut(section[start+len(writeFence):], "\nEOF\n```")
 	if !ok {
-		t.Fatalf("expected the example message to end with the code fence, got section:\n%s", section)
+		t.Fatalf("expected the example heredoc to end with EOF and the code fence, got section:\n%s", section)
 	}
-	if !strings.Contains(section[start:], "\n```\n\n書いたら、次のコマンドで上げます。\n\n"+escalateCmd) {
-		t.Errorf("expected the command block to follow the message block, got section:\n%s", section)
+	if !strings.Contains(section[start:], "\nEOF\n```\n\n書いたら、次のコマンドで上げます。\n\n"+escalateCmd) {
+		t.Errorf("expected the command block to follow the writing block, got section:\n%s", section)
 	}
 	m, err := validateEscalation("org-a", msg)
 	if err != nil {

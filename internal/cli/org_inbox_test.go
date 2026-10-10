@@ -374,6 +374,22 @@ func TestOrgEscalate_BrokenConfig_AlertsTheHumanAndExitsOne(t *testing.T) {
 		if got := inboxFileOrAbsent(t, stateDir); got != "<absent>" {
 			t.Errorf("inbox = %q; want absent", got)
 		}
+		// The fallback runtime's EscalationsPath is the ledger's
+		// escalations.jsonl, so the best-effort line lands there.
+		escLines := readLogLines(t, org.EscalationsPathIn(stateDir))
+		if len(escLines) != 1 {
+			t.Fatalf("escalations.jsonl has %d lines; want 1 inbox_not_recorded line: %v", len(escLines), escLines)
+		}
+		var esc map[string]any
+		if err := json.Unmarshal([]byte(escLines[0]), &esc); err != nil {
+			t.Fatalf("parse the escalations line: %v", err)
+		}
+		if esc["reason"] != "inbox_not_recorded" || esc["org_id"] != "org-a" {
+			t.Errorf("escalations line = %v; want reason inbox_not_recorded, org_id org-a", esc)
+		}
+		if _, ok := esc["inbox_id"]; ok {
+			t.Errorf("a not-recorded line carries inbox_id: %v", esc)
+		}
 	})
 
 	t.Run("a refused message", func(t *testing.T) {
