@@ -154,6 +154,7 @@ Critical forks: 人に届く経路(上の 1 つ目)。consult が案 A を判定
 - 2026-10-10: S2(a6e736ed)escalate と人への経路。決めたこと: osascript の実行を `osascriptNotify` に切り出し、escalate の通知のタイトルは "ralph org escalate"(watch は今のまま)。`escalations.jsonl` に書けなかったときは `notified` も書かない(件は未通知で残り、`inbox notify` で送り直す)。受信箱に書けなかったときに best-effort で書く `escalations.jsonl` の行の理由は `inbox_not_recorded`(inbox_id なし)。デスクトップ通知には本文を渡さない
 - 2026-10-10: S3(faa4b1c3)CLI。計画からのずれ: inbox の動詞と `wait --inbox` は `--org-id` を「求めない」のではなく、渡されたら拒否する(黙って無視すると org で絞った一覧に見えるため)。決めたこと: 一覧の時刻は RFC3339 の ESCALATED_AT。端末に出す受信箱の文字列は制御文字をエスケープする。CLI のテストは TestMain でデスクトップ通知を stub にする
 - 2026-10-10: S4(b0fc4c59)雛形・skill・文書。決めたこと: 予備の手順を、検査で断られたとき(メッセージを直して打ち直す)と、それ以外の失敗(pane に書いて止まる)に分けた。`inbox notify` も `--state-dir` を付ける動詞に入れた。雛形のテストは空白を除いて語句を比べる形にし、改行の位置に依存しないようにした(tech-debt の org-feature-worktree の行の (f) と (j) が直る)
+- 2026-10-10: self-review cycle 1(6d803bed、Merge: yes、MEDIUM 2・LOW 9)の直し(a396db57)。M1: 雛形の escalate の例を、メッセージを `.harness/state/escalate-{{ORG_ID}}.txt` に書いてから `--text "$(cat …)"` で渡す 2 ブロックに分けた(単一引用符を含むエラー文で壊れないため。guard は通る)。L1: `ralph.toml` が読めないときも NOT RECORDED の banner と通知を出して終了コード 1。L2: 復旧の案内(`inbox notify` / `inbox show`)は `--state-dir` を明示したときにそれを付ける(コマンドの文字列は org 層の `InboxCommand`)。L3: `--org-id` の説明を書き直した。L6: 雛形の agmsg の受信箱と org の受信箱を言い分けた。L9: `inbox notify` は受信箱から読んだ org_id と TYPE を端末向けにエスケープし、通知には検査を通った値だけを渡す。M2 と L7 は sync-docs、L4・L5・L8 は tech-debt に回す
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
