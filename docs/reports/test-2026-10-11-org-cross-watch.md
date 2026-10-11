@@ -247,6 +247,13 @@ mutant の当て方の注:
 - 同時の `--detach` の 1〜2 本が、見張りが動いているのに rc 1 になる(下の「参考」)。テストはこの形を作らない(X3 の probe 7 が作る)
 - `--config` で別の `deadman_minutes` を渡した見張りと、`./ralph.toml` で判定する `ralph status` のずれは、tech-debt の行のとおりでテストはない。self-review の N2(読めない状態ファイルの org を黙って飛ばし続ける)と N3(`--stop` で取り消した watcher の呼び出しを失敗として記録する)も tech-debt にあり、テストはその今の動きを固定している
 - Linux のコンテナには git がないので、`TestOrgWatch_AStopRequestCancelsAnInFlightWatcherCall` だけはコンテナで走らせられなかった(macOS では通る)
+- 追記(このレポートのあと、orchestrator の依頼でテストを足した): 上の本物の穴 5 件は、コミット `test: pin the cross-org watch behaviors that surviving mutants showed unpinned` のテストで閉じた。本番のコードは変えていない。5 本とも HEAD で通り(`-race -count=10` で 10 回とも)、上の probe と同じ overlay の JSON で mutant を当てると落ちる
+  - P2: `TestProbeWatch_ALockFileThatCannotBeOpenedCountsAsHeld`(`internal/org/watchalive_test.go`)。mode 000 の `watch.lock` で、印がないときと stopped の印は stale、新しい running の印は running。P2 では 3 つとも `not_running` になって落ちる
+  - X3: `TestOrgWatchDetach_AWatchStartedByAnotherProcessIsNotTakenForTheChild`(`internal/cli/org_watch_test.go`)。probe 7 の 300 ms の sleep をやめ、子の `exited` を初めから閉じておく。HEAD は pid 4343 の印を自分の子のものとせず、子が終わったことを返す。X3 は最初の確認で `started ralph org watch --all (pid 4242)` を出して落ちる。上の「同時の `--detach`」の形も、このテストが作る
+  - L6b・L6c: `TestRunWatchAll_WritesTheStoppedMarkBeforeReleasingTheLock`(`internal/org/watch_all_test.go`)。probe 4 と同じ 20 周。L6b と L6c は `-count=10` の 10 回とも 1 周目で落ちた(L6c は `-race` でも 10 回とも)。HEAD では順がコードで決まっているので、いつも通る。mutant が落ちるのは、ロックの空きの確認が、ロックを放してから印を書くまでの隙間に入ったときだけなので、mutant の検出は確率による
+  - A6: `TestRunWatchAll_SweepsTheInboxBeforeThePulse`(`internal/org/watch_all_test.go`)。サイクルの最初の herdr の `AgentGet` の時点で、`escalations.jsonl` に期限を過ぎた件の行がもうある。A6 では空のまま落ちる
+  - S6: `TestRunWatchAll_StartedAtIsTakenBeforeWaitingForTheLock`(`internal/org/watch_all_test.go`)。probe 9 の 100 ms の sleep をやめ、`Org.Now` の最初の呼び出し(開始の読み取り)を合図にした。テストは `watch.lock` を持ったまま合図を待ち、時計を 1 分進め、開始と新しい時刻のあいだの頼みを書いてから、ロックを放す。使ったのは既存の `Org.Now` と `WatchAllParams.LockWait` だけ。HEAD は 1 サイクルで止まり、`started_at` は待つ前の時刻になる。S6 はロックを取るまで時計を読まないので合図が来ず、`LockWait` の 10 秒のあとロックを取れずに返り、落ちる
+  - 残り: mutation の生き残りで本物の穴は、もうない。ほかの Test gaps の項目は変わらない
 
 ## 参考(テストの失敗ではない)
 

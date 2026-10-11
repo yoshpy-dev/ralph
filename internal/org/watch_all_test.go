@@ -88,6 +88,18 @@ func (a *hangingWatchAgmsg) History(ctx context.Context, team, agentID string, l
 	return out, err
 }
 
+// beforeAgentGetHerdr is a fakeWatchHerdr that calls before ahead of each
+// AgentGet, the only herdr call of a pulse cycle.
+type beforeAgentGetHerdr struct {
+	*fakeWatchHerdr
+	before func()
+}
+
+func (h *beforeAgentGetHerdr) AgentGet(ctx context.Context, target string) (string, error) {
+	h.before()
+	return h.fakeWatchHerdr.AgentGet(ctx, target)
+}
+
 // watchAllFixture is one ledger for RunWatchAll: the watch test fakes, a
 // manifest, and an inbox with the default deadlines (ack 10 min, resolve
 // 60 min), all in dir, on a frozen clock.
@@ -352,6 +364,35 @@ func TestRunWatchAll_SendsAnInboxItemPastItsDeadlineInTheFirstCycleOnce(t *testi
 	}
 	if n := len(f.notifications()); n != 1 {
 		t.Errorf("desktop notified %d times; want 1", n)
+	}
+}
+
+// The inbox deadlines are swept before any org's pulse (step 1 of
+// RunWatchAll's cycle; mutation survivor A6), so an org whose herdr does
+// not answer cannot hold them back by the length of its cut-off calls: at
+// the first herdr call of the cycle, the item past its deadline is already
+// in escalations.jsonl.
+func TestRunWatchAll_SweepsTheInboxBeforeThePulse(t *testing.T) {
+	f := newWatchAllFixture(t)
+	f.spawn(t, "org-a", "seat-a")
+	e1 := escalateInboxAt(t, f.o.Inbox, f.clk.Now().Add(-11*time.Minute), "org-a")
+	var herdrCalls int
+	var atFirstHerdrCall []string
+	f.o.Herdr = &beforeAgentGetHerdr{fakeWatchHerdr: f.h, before: func() {
+		herdrCalls++
+		if herdrCalls == 1 {
+			atFirstHerdrCall = escalationReasons(t, f.o.EscalationsPath)
+		}
+	}}
+	if err := runWatchAll(t, f.o, context.Background(), f.params(1), WatchHooks{}); err != nil {
+		t.Fatalf("RunWatchAll: %v", err)
+	}
+	if herdrCalls == 0 {
+		t.Fatal("the cycle made no herdr call")
+	}
+	want := []string{e1 + " " + InboxReasonAckDeadline}
+	if !slices.Equal(atFirstHerdrCall, want) {
+		t.Errorf("escalations.jsonl at the first herdr call = %v; want %v already sent", atFirstHerdrCall, want)
 	}
 }
 
@@ -857,6 +898,121 @@ func TestRunWatchAll_FollowsOnlyAStopRequestLaterThanItsStart(t *testing.T) {
 				t.Errorf("stop request after the watch ended: %v; want it removed", err)
 			}
 		})
+	}
+}
+
+// The start is read before the lock wait (mutation survivor S6): a stop
+// request written while this watch waits for watch.lock is later than its
+// started_at, so it is followed after the first cycle, not removed as one
+// left for an earlier watch. The test holds the lock, waits for RunWatchAll's
+// first Org.Now call (its start), then moves the clock on, writes the
+// request between the start and the new time, and only then releases the
+// lock. A start read after the lock would see the new time.
+func TestRunWatchAll_StartedAtIsTakenBeforeWaitingForTheLock(t *testing.T) {
+	f := newWatchAllFixture(t)
+	holder := mustAcquireWatchLock(t, f.dir)
+	t0 := f.clk.Now()
+	startRead := make(chan struct{})
+	var once sync.Once
+	f.o.Now = func() time.Time {
+		now := f.clk.Now()
+		once.Do(func() { close(startRead) })
+		return now
+	}
+	p := f.params(3)
+	p.LockWait = 10 * time.Second
+	var cycles int
+	done := make(chan error, 1)
+	go func() {
+		done <- f.o.RunWatchAll(context.Background(), p, WatchHooks{OnCycle: func(n int, _ time.Time) { cycles = n }})
+	}()
+	select {
+	case <-startRead:
+	case err := <-done:
+		t.Fatalf("RunWatchAll returned %v and read no clock while the test held watch.lock; want its start read before the lock wait", err)
+	case <-time.After(30 * time.Second):
+		t.Fatal("RunWatchAll read no clock within 30s")
+	}
+	f.clk.Advance(time.Minute)
+	if err := WriteWatchStopRequest(f.dir, t0.Add(30*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := holder.Release(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("RunWatchAll: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("RunWatchAll did not return after the lock was released")
+	}
+	if cycles != 1 {
+		t.Errorf("ran %d cycles; want 1 (the request written during the lock wait is followed)", cycles)
+	}
+	if mark := f.mark(t); mark.StartedAt != t0.Format(time.RFC3339Nano) {
+		t.Errorf("started_at = %s; want %s, the clock before the lock wait", mark.StartedAt, t0.Format(time.RFC3339Nano))
+	}
+	if _, err := ReadWatchStopRequest(f.dir); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("stop request after the watch ended: %v; want it removed", err)
+	}
+}
+
+// finish writes the stopped mark before it releases watch.lock (mutation
+// survivor L6): whoever sees the lock free, a --stop or a new watch that
+// takes it, also sees the stopped mark, and the old watch never writes over
+// the running mark of a new one. From the stop request on, the test polls
+// the lock with no pause and reads the mark as soon as the lock is free. A
+// release before the mark shows only when a poll falls between the two, so
+// the test runs 20 watches.
+func TestRunWatchAll_WritesTheStoppedMarkBeforeReleasingTheLock(t *testing.T) {
+	for run := 1; run <= 20; run++ {
+		f := newWatchAllFixture(t)
+		p := f.params(0)
+		p.Interval = time.Hour
+		firstCycle := make(chan struct{})
+		done := make(chan error, 1)
+		go func() {
+			done <- f.o.RunWatchAll(context.Background(), p, WatchHooks{OnCycle: func(n int, _ time.Time) {
+				if n == 1 {
+					close(firstCycle)
+				}
+			}})
+		}()
+		select {
+		case <-firstCycle:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("run %d: the watch ran no cycle", run)
+		}
+		if err := WriteWatchStopRequest(f.dir, f.clk.Now().Add(time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		deadline := time.Now().Add(10 * time.Second)
+		for {
+			held, err := fileLockHeld(WatchLockPathIn(f.dir))
+			if err != nil {
+				t.Fatalf("run %d: check watch.lock: %v", run, err)
+			}
+			if !held {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("run %d: watch.lock still held 10s after the stop request", run)
+			}
+		}
+		mark, err := ReadWatchAlive(f.dir)
+		if err != nil || mark.State != WatchAliveStopped || mark.StoppedAt == "" {
+			t.Fatalf("run %d: mark when watch.lock was free = %+v (%v); want the stopped mark already written", run, mark, err)
+		}
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("run %d: RunWatchAll: %v", run, err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatalf("run %d: RunWatchAll did not return after the lock was free", run)
+		}
 	}
 }
 

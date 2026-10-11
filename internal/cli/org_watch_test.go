@@ -413,6 +413,33 @@ func TestOrgWatchDetach_ChildExitsFirst_ExitsOneNamingTheLog(t *testing.T) {
 	}
 }
 
+// --detach succeeds only on a running mark of its own child's pid
+// (mutation survivor X3). Two --detach on a fresh ledger: the other one's
+// watch takes watch.lock and writes its running mark, and this one's child,
+// refused the lock, exits. This --detach must not take that mark for its
+// child: it exits 1 for the child that exited, and the other watch keeps
+// running.
+func TestOrgWatchDetach_AWatchStartedByAnotherProcessIsNotTakenForTheChild(t *testing.T) {
+	stateDir := filepath.Join(t.TempDir(), "state")
+	setOrgWatchLaunch(t, func([]string, string) (*orgWatchProcess, error) {
+		holdWatchLock(t, stateDir, runningMark(4343, time.Now()))
+		exited := make(chan struct{})
+		close(exited)
+		return &orgWatchProcess{pid: 4242, exited: exited, stop: func() {}}, nil
+	})
+	stdout, _, err := runOrgCmdStreams(t, "watch", "--all", "--detach", "--state-dir", stateDir)
+	want := fmt.Sprintf("the watch (pid 4242) exited before it was running; see %s", filepath.Join(stateDir, org.WatchLogFileName))
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("--detach while another watch runs = %v (stdout %q); want %q", err, stdout, want)
+	}
+	if strings.Contains(stdout, "started") {
+		t.Errorf("stdout = %q; want no started line for a child that exited", stdout)
+	}
+	if got := org.ProbeWatch(stateDir, time.Now(), 10); got.State != org.WatchLivenessRunning || got.Mark == nil || got.Mark.PID != 4343 {
+		t.Errorf("ProbeWatch after --detach = %+v; want the other watch (pid 4343) running", got)
+	}
+}
+
 // AC12b: a child that takes watch.lock but never writes a running mark is
 // stopped by its handle when the deadline passes, and --detach exits 1,
 // naming the log, only once watch.lock is free. When the lock stays held

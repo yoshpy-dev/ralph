@@ -226,6 +226,45 @@ func TestProbeWatch_CreatesNoLockAndLeavesAHolderHolding(t *testing.T) {
 	}
 }
 
+// A watch.lock that cannot be checked counts as held (ProbeWatch's doc;
+// mutation survivor P2): a lock file that cannot be opened (mode 000) makes
+// fileLockHeld fail, and the probe says stale, or running with a fresh
+// running mark, but never not_running, which would say no watch holds the
+// lock.
+func TestProbeWatch_ALockFileThatCannotBeOpenedCountsAsHeld(t *testing.T) {
+	now := watchAliveT0
+	cases := []struct {
+		name string
+		mark string // raw watch-alive.json; "" writes none
+		want string
+	}{
+		{name: "no mark", want: WatchLivenessStale},
+		{name: "stopped mark", mark: markJSON(t, WatchAlive{State: WatchAliveStopped, PID: 7, TS: now.Format(time.RFC3339), StoppedAt: now.Format(time.RFC3339)}), want: WatchLivenessStale},
+		{name: "fresh running mark", mark: markJSON(t, runningMark(7, now)), want: WatchLivenessRunning},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			lockPath := WatchLockPathIn(dir)
+			if err := os.WriteFile(lockPath, nil, 0o000); err != nil {
+				t.Fatal(err)
+			}
+			if f, err := os.Open(lockPath); err == nil {
+				_ = f.Close()
+				t.Skip("a watch.lock of mode 000 can still be opened (running as root?)")
+			}
+			if tc.mark != "" {
+				if err := os.WriteFile(WatchAlivePathIn(dir), []byte(tc.mark), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if got := ProbeWatch(dir, now, 10).State; got != tc.want {
+				t.Errorf("State = %q; want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func markJSON(t *testing.T, mark WatchAlive) string {
 	t.Helper()
 	dir := t.TempDir()
