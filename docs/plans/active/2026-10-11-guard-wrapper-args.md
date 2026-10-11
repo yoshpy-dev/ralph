@@ -132,6 +132,8 @@ None (テストの行を別の配列に移して足し、検査を 1 つ足し�
   - S4 完了(この commit、inline、docs だけ): tech-debt の (h) の閉じの文に、最初の 9 行のうち引数を置くのは 3 行だけだったこと、16 行が押さえる書き方、(f) の結果、分岐が知らないツールの旗はどの行も押さえないことを書いた(LOW 2)。「The nine hand-written rows stay」の文は外した。列の数は 5 のまま
   - self-review の再確認(bf6b12b8、reviewer/sonnet): LOW 1〜6 は修正済み、新しい MEDIUM 7(「分岐ごと・値を読む書き方ごとに 1 行以上」の言い方が 16 行の範囲より広い。写し 31 通りのうち 10 通りが行の不足)。consult(3 往復目)の判定は reviewer の案 (i)(7 行を足す)に、`skip_xargs` の値を取らない長いオプションの道(`xargs --max-args=1`)を足し、基準を plan に字で固定して承認を取り直す。私が `skip_opts` の `-` と数字の旗の道も行がないことに気づき、`nice -5` を足した(macOS の man が古い形としてまだ受けると書く)。9 行は HEAD bf6b12b8 の guard で deny、対照は none
   - 2026-10-11: plan の Scope(25 行)・Assumptions・Design decisions(分岐ごとの基準)・AC1(34 行)・AC2((b) を「1 つの名前の行を全部消す」に、(g) を追加)・AC3・Implementation outline(S5〜S6)を直し、ユーザーが承認ゲートで Approve(digest 5ebd931f0fcc)
+  - S5 完了(20e282be、implementer/opus): 9 行を足し(34 行。最初の 9 行はそのまま、続く 25 行は `WRAPPER` の順に包みごとにまとめた)、`wrapper_deny` の上のコメントを分岐ごとの基準の 3 つの箇条に書き直し、ほかの文(配列の中、集合の検査、案内文、ヘッダーの D・F 項目、PR #219 の検査のコメント)を基準を指す形にした。テストは 2,227/0(3 つの awk)、節ごとに D 678、F 137、ほかは同じ。shellcheck は指摘なし、run-verify は rc 0。(g) の写しのうち、`skip_env` と `skip_xargs` の `--` の行を消したものは、`--` がほかの道(値を取らない旗、値を取らない長いオプション)を通って同じく `sh` で止まるので、どの行も落ちない等価の写しだった。その行を `return i` に替えた写しで `env --`・`xargs --` が落ちた。ほかの (g) の 7 通りは、足した行がそれぞれ jq あり・なしで落ち、9 行を足す前のテスト(b7885236)では 2,191/0 で緑だった。`skip_opts` の `--` の行と `skip_env` の代入の行を消した写しも等価(緑)で、この 4 つの道は「行が区別できない道」としてコメントに書いた。(a)〜(f) は最終の木で再び FAIL した((b) は nohup の 2 行を消した写し)
+  - S6 完了(この commit、inline、docs だけ): tech-debt の (h) の閉じの文を分岐ごとの基準の言い方に揃え、(g) の結果と、基準の外にあるもの(旗に付いた値、`env -S`、行が区別できない道)を書いた。列の数は 5 のまま
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
