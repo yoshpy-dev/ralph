@@ -9,9 +9,12 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/yoshpy-dev/ralph/internal/config"
 	"github.com/yoshpy-dev/ralph/internal/org"
 	"github.com/yoshpy-dev/ralph/internal/scaffold"
 )
@@ -20,10 +23,12 @@ import (
 // status` (which requires --org-id and shows one org's roster), this command
 // summarizes every org found in the manifest at the resolved state
 // directory (or a single org via --org-id), plus the latest `ralph org
-// watch` heartbeat and pending-alert count for each org when available. It
-// reads org.ManifestStore/org.Roster directly (read-only, no herdr/agmsg
-// process required) -- the same derivation `ralph org status` uses, just
-// grouped across every org_id instead of filtered to exactly one.
+// watch` heartbeat and pending-alert count for each org when available, and
+// whether the cross-org watch (`ralph org watch --all`) is running on that
+// state directory. It reads org.ManifestStore/org.Roster directly
+// (read-only, no herdr/agmsg process required) -- the same derivation
+// `ralph org status` uses, just grouped across every org_id instead of
+// filtered to exactly one.
 func newStatusCmd() *cobra.Command {
 	var (
 		stateDir string
@@ -38,6 +43,10 @@ func newStatusCmd() *cobra.Command {
 			"(or a single org via --org-id): seats with role/driver/model/state, active\n" +
 			"seat counts, and -- when `ralph org watch` has run for that org -- the last\n" +
 			"watch heartbeat and pending alert count.\n\n" +
+			"An `org watch:` line shows whether `ralph org watch --all` is running on the\n" +
+			"state directory: running, stale (it holds the lock but its liveness mark is\n" +
+			"not fresh), or not running, with the pid and the time that mark was last\n" +
+			"updated.\n\n" +
 			"Also displays a scaffold-ownership section (FR-12): each `.ralph/manifest.toml`-\n" +
 			"tracked path's owner attribute (core/fork/seed/block) and any unresolved drift.\n" +
 			"This section always reads the current working directory's project (the same\n" +
@@ -116,15 +125,89 @@ func runStatus(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID string,
 	groups := groupSeatsByOrg(seats)
 	realCounts := buildRealSeatCounts(rr.Events, groups)
 
+	// The cross-org watch (`ralph org watch --all`) runs per state dir, not
+	// per org, so it is probed once here and shown on both paths below,
+	// the empty roster included: a watch can run before any org starts.
+	watch := org.ProbeWatch(stateDir, time.Now(), statusDeadmanMinutes(cmd.ErrOrStderr()))
+
 	if len(groups) == 0 {
-		return printStatusEmpty(cmd, stateDir, stateDirSource, filterOrgID, jsonOut, rr.CorruptLines, scaffoldStat)
+		return printStatusEmpty(cmd, stateDir, stateDirSource, filterOrgID, jsonOut, rr.CorruptLines, scaffoldStat, watch)
 	}
 
 	if jsonOut {
-		return printStatusJSONAllOrgs(cmd, stateDir, stateDirSource, filterOrgID, groups, realCounts, rr.CorruptLines, scaffoldStat)
+		return printStatusJSONAllOrgs(cmd, stateDir, stateDirSource, filterOrgID, groups, realCounts, rr.CorruptLines, scaffoldStat, watch)
 	}
-	printStatusTableAllOrgs(cmd, stateDir, stateDirSource, groups, realCounts, rr.CorruptLines, scaffoldStat)
+	printStatusTableAllOrgs(cmd, stateDir, stateDirSource, groups, realCounts, rr.CorruptLines, scaffoldStat, watch)
 	return nil
+}
+
+// statusDeadmanMinutes returns the deadman_minutes `ralph status` judges the
+// watch's liveness mark by (org.ProbeWatch): the [org] table of ./ralph.toml
+// when present, read as the ralph org verbs read it without --config
+// (resolveOrgConfig), else the built-in default. status only reads, so a
+// ralph.toml that does not load falls back to the default with a warning on
+// stderr instead of failing the command.
+func statusDeadmanMinutes(stderr io.Writer) int {
+	cfg, err := resolveOrgConfig("")
+	if err != nil {
+		fallback := config.Default().Org.DeadmanMinutes
+		_, _ = fmt.Fprintf(stderr, "warning: status: load ralph.toml: %v; judging the org watch by the default deadman_minutes (%d)\n", err, fallback)
+		return fallback
+	}
+	return cfg.DeadmanMinutes
+}
+
+// orgWatchLine renders what org.ProbeWatch found about the cross-org watch
+// as the one `org watch:` line `ralph status` prints. The pid and times come
+// from the liveness mark, and each is left out when the mark is missing or
+// does not carry it. Once no one holds watch.lock, the mark only tells how
+// the last watch ended: stopped, or killed with its running mark left.
+func orgWatchLine(probe org.WatchLiveness) string {
+	mark := probe.Mark
+	switch probe.State {
+	case org.WatchLivenessRunning:
+		return "org watch: running" + orgWatchMarkDetails(mark)
+	case org.WatchLivenessStale:
+		return "org watch: stale" + orgWatchMarkDetails(mark) +
+			" -- a watch holds watch.lock, but its liveness mark is missing, stopped, or older than the larger of deadman_minutes (10 when below 1) and two of its intervals"
+	}
+	switch {
+	case mark != nil && mark.State == org.WatchAliveStopped && mark.StoppedAt != "":
+		return "org watch: not running (stopped at " + mark.StoppedAt + ")"
+	case mark != nil && mark.State == org.WatchAliveRunning:
+		left := "a running mark is left"
+		if mark.PID > 0 {
+			left += fmt.Sprintf(" from pid %d", mark.PID)
+		}
+		if mark.TS != "" {
+			left += ", mark updated " + mark.TS
+		}
+		return "org watch: not running (" + left + ")"
+	}
+	return "org watch: not running"
+}
+
+// orgWatchMarkDetails is the " (pid N, mark updated TS[, stopped at TS])" part
+// of orgWatchLine for a watch that holds watch.lock, or "" when the mark
+// carries none of them.
+func orgWatchMarkDetails(mark *org.WatchAlive) string {
+	if mark == nil {
+		return ""
+	}
+	var details []string
+	if mark.PID > 0 {
+		details = append(details, fmt.Sprintf("pid %d", mark.PID))
+	}
+	if mark.TS != "" {
+		details = append(details, "mark updated "+mark.TS)
+	}
+	if mark.State == org.WatchAliveStopped && mark.StoppedAt != "" {
+		details = append(details, "stopped at "+mark.StoppedAt)
+	}
+	if len(details) == 0 {
+		return ""
+	}
+	return " (" + strings.Join(details, ", ") + ")"
 }
 
 // realSeatCount holds one org_id's active/total seat counts derived from
@@ -217,10 +300,10 @@ func printStateDirLine(out io.Writer, stateDir, stateDirSource string) {
 	_, _ = fmt.Fprintf(out, "state-dir: %s (source: %s)\n", stateDir, stateDirSource)
 }
 
-func printStatusEmpty(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID string, jsonOut bool, corruptLines int, scaffoldStat *scaffoldStatus) error {
+func printStatusEmpty(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID string, jsonOut bool, corruptLines int, scaffoldStat *scaffoldStatus, watch org.WatchLiveness) error {
 	out := cmd.OutOrStdout()
 	if jsonOut {
-		payload := statusJSON{StateDir: stateDir, StateDirSource: stateDirSource, OrgID: filterOrgID, Orgs: []statusOrgJSON{}, CorruptLines: corruptLines, Scaffold: buildStatusScaffoldJSON(scaffoldStat)}
+		payload := statusJSON{StateDir: stateDir, StateDirSource: stateDirSource, OrgID: filterOrgID, Orgs: []statusOrgJSON{}, CorruptLines: corruptLines, OrgWatch: buildStatusOrgWatchJSON(watch), Scaffold: buildStatusScaffoldJSON(scaffoldStat)}
 		enc := json.NewEncoder(out)
 		enc.SetIndent("", "  ")
 		return enc.Encode(payload)
@@ -240,6 +323,7 @@ func printStatusEmpty(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID 
 	} else {
 		_, _ = fmt.Fprintf(out, "no org runtime state found (state-dir=%s (source: %s)) — run `ralph org spawn` to start one.\n", stateDir, stateDirSource)
 	}
+	_, _ = fmt.Fprintln(out, orgWatchLine(watch))
 	if corruptLines > 0 {
 		_, _ = fmt.Fprintf(out, "warning: %d corrupt manifest line(s) skipped\n", corruptLines)
 	}
@@ -292,20 +376,51 @@ type statusOrgJSON struct {
 // (printStatusJSONAllOrgs). Keeping one struct for both means a machine
 // consumer never has to branch on which shape it received: `org_id` is only
 // present when --org-id filtered the roster, `corrupt_lines` only when the
-// manifest actually had corrupt lines, and `orgs` is always an array (empty
-// or populated).
+// manifest actually had corrupt lines, `orgs` is always an array (empty
+// or populated), and `org_watch` is always an object.
 type statusJSON struct {
 	StateDir       string          `json:"state_dir"`
 	StateDirSource string          `json:"state_dir_source,omitempty"`
 	OrgID          string          `json:"org_id,omitempty"`
 	Orgs           []statusOrgJSON `json:"orgs"`
 	CorruptLines   int             `json:"corrupt_lines,omitempty"`
+	// OrgWatch is the cross-org watch of the state dir (see
+	// statusOrgWatchJSON), distinct from each org's `watch` heartbeat.
+	OrgWatch statusOrgWatchJSON `json:"org_watch"`
 	// Scaffold is the FR-12 scaffold-ownership section (see
 	// buildStatusScaffoldJSON). Additive to the pre-FR-12 schema above: nil
 	// (omitted) when the current working directory has no
 	// `.ralph/manifest.toml` at all -- every existing key's shape and
 	// meaning is unchanged.
 	Scaffold *statusScaffoldJSON `json:"scaffold,omitempty"`
+}
+
+// statusOrgWatchJSON is the --json wire shape of the cross-org watch: State
+// is what org.ProbeWatch found (running, stale, or not_running), and the
+// rest is copied from the liveness mark it read, all left out when it read
+// none. MarkState is the mark's own running or stopped, which can differ
+// from State: a killed watch leaves a running mark behind with no one
+// holding watch.lock.
+type statusOrgWatchJSON struct {
+	State     string `json:"state"`
+	PID       int    `json:"pid,omitempty"`
+	StartedAt string `json:"started_at,omitempty"`
+	UpdatedAt string `json:"updated_at,omitempty"`
+	StoppedAt string `json:"stopped_at,omitempty"`
+	MarkState string `json:"mark_state,omitempty"`
+}
+
+// buildStatusOrgWatchJSON renders probe into its --json wire shape.
+func buildStatusOrgWatchJSON(probe org.WatchLiveness) statusOrgWatchJSON {
+	result := statusOrgWatchJSON{State: probe.State}
+	if mark := probe.Mark; mark != nil {
+		result.PID = mark.PID
+		result.StartedAt = mark.StartedAt
+		result.UpdatedAt = mark.TS
+		result.StoppedAt = mark.StoppedAt
+		result.MarkState = mark.State
+	}
+	return result
 }
 
 // statusScaffoldFileJSON is one manifest-tracked path's ownership summary,
@@ -356,12 +471,12 @@ func buildStatusScaffoldJSON(s *scaffoldStatus) *statusScaffoldJSON {
 	return &statusScaffoldJSON{Layout: s.Layout, Files: files, Drift: append([]string(nil), s.Drift...)}
 }
 
-func printStatusJSONAllOrgs(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID string, groups []orgGroup, realCounts map[string]realSeatCount, corruptLines int, scaffoldStat *scaffoldStatus) error {
+func printStatusJSONAllOrgs(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID string, groups []orgGroup, realCounts map[string]realSeatCount, corruptLines int, scaffoldStat *scaffoldStatus, watch org.WatchLiveness) error {
 	orgsJSON := make([]statusOrgJSON, 0, len(groups))
 	for _, g := range groups {
 		orgsJSON = append(orgsJSON, buildStatusOrgJSON(stateDir, g, realCounts[g.OrgID]))
 	}
-	payload := statusJSON{StateDir: stateDir, StateDirSource: stateDirSource, OrgID: filterOrgID, Orgs: orgsJSON, CorruptLines: corruptLines, Scaffold: buildStatusScaffoldJSON(scaffoldStat)}
+	payload := statusJSON{StateDir: stateDir, StateDirSource: stateDirSource, OrgID: filterOrgID, Orgs: orgsJSON, CorruptLines: corruptLines, OrgWatch: buildStatusOrgWatchJSON(watch), Scaffold: buildStatusScaffoldJSON(scaffoldStat)}
 	enc := json.NewEncoder(cmd.OutOrStdout())
 	enc.SetIndent("", "  ")
 	return enc.Encode(payload)
@@ -392,15 +507,17 @@ func buildStatusOrgJSON(stateDir string, g orgGroup, realCount realSeatCount) st
 	return result
 }
 
-func printStatusTableAllOrgs(cmd *cobra.Command, stateDir, stateDirSource string, groups []orgGroup, realCounts map[string]realSeatCount, corruptLines int, scaffoldStat *scaffoldStatus) {
+func printStatusTableAllOrgs(cmd *cobra.Command, stateDir, stateDirSource string, groups []orgGroup, realCounts map[string]realSeatCount, corruptLines int, scaffoldStat *scaffoldStatus, watch org.WatchLiveness) {
 	out := cmd.OutOrStdout()
 
 	// Surfaced once at the top of the populated-roster table (tech-debt:
 	// "watchdog deferred LOW (1)") -- the empty-roster path
 	// (printStatusEmpty) folds the same "(source: ...)" annotation into its
 	// existing state-dir=... message instead of a separate line, since that
-	// path has no table to put a header line above.
+	// path has no table to put a header line above. The org watch line
+	// follows it, as it does that message.
 	printStateDirLine(out, stateDir, stateDirSource)
+	_, _ = fmt.Fprintln(out, orgWatchLine(watch))
 	printScaffoldSection(out, scaffoldStat)
 
 	// Deterministic org order for readability, matching Roster's own

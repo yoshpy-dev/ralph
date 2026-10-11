@@ -112,6 +112,28 @@ type InboxItem struct {
 	Events      []InboxEvent `json:"events"`
 }
 
+// PrintableInboxText returns s with each control character written as its
+// Go escape (\x1b, \r, \u0085), keeping newlines and tabs when
+// keepLineBreaks is set. Inbox text is written by a leader (or by hand in
+// inbox.jsonl) and printed to a terminal, so an escape sequence in it must
+// not reach the terminal as one. The human-path banner and every `ralph
+// org inbox` text output use it.
+func PrintableInboxText(s string, keepLineBreaks bool) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case keepLineBreaks && (r == '\n' || r == '\t'):
+			b.WriteRune(r)
+		case unicode.IsControl(r):
+			quoted := strconv.QuoteRune(r)
+			b.WriteString(quoted[1 : len(quoted)-1])
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
 // InboxReadResult is the folded inbox: the items in ID order (e2 before
 // e10), the number of lines that did not parse (skipped, like the
 // manifest's corrupt lines), and the number of parsed events the fold

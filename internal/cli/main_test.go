@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -29,9 +30,18 @@ import (
 // timeout on every codex spawn/stop.
 //
 // It also pins orgDesktopNotifyOverride to a stub that does nothing, so no
-// runOrg*-based `ralph org escalate` or `ralph org inbox notify` shows a
-// real desktop notification (osascript on darwin). A test that checks the
+// runOrg*-based `ralph org escalate`, `ralph org inbox notify`, or `ralph
+// org watch --all` (its inbox deadlines and its deadman) shows a real
+// desktop notification (osascript on darwin). A test that checks the
 // notification swaps in its own stub and restores this one.
+//
+// It also sets orgWatchLaunch, the start of the detached watch of `ralph
+// org watch --all --detach`, to one that panics: in a test, os.Executable is
+// the test binary, so a real launch would exec it. A test of --detach sets
+// its own launcher. And it shortens how long a watch waits for watch.lock
+// and how often it looks for a stop request (orgWatchLockWaitOverride,
+// orgWatchStopPollIntervalOverride), so a refused second watch and a
+// `--stop` take milliseconds instead of seconds.
 func TestMain(m *testing.M) {
 	doctorShellAliasEnv = func() (shellAliasEnv, error) {
 		return shellAliasEnv{Home: filepath.Join(os.TempDir(), "ralph-cli-test-no-such-home")}, nil
@@ -44,5 +54,10 @@ func TestMain(m *testing.M) {
 	orgCodexModelObserveTimeoutOverride = 50 * time.Millisecond
 	orgCodexModelObserveIntervalOverride = 5 * time.Millisecond
 	orgDesktopNotifyOverride = func(context.Context, string) error { return nil }
+	orgWatchLaunch = func(args []string, logPath string) (*orgWatchProcess, error) {
+		panic(fmt.Sprintf("a test tried to launch a real detached ralph org watch (args %q, log %s); set orgWatchLaunch to a fake", args, logPath))
+	}
+	orgWatchLockWaitOverride = 50 * time.Millisecond
+	orgWatchStopPollIntervalOverride = 5 * time.Millisecond
 	os.Exit(m.Run())
 }

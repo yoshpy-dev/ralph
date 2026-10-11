@@ -2693,22 +2693,13 @@ func TestOrgStart_RequiresOrgID(t *testing.T) {
 	}
 }
 
-// TestOrgWatch_RequiresOrgID pins the same --org-id persistent-flag gate
-// (requireOrgID) applying to the new `watch` subcommand.
-func TestOrgWatch_RequiresOrgID(t *testing.T) {
-	out, err := runOrgCmd(t, "watch", "--once")
-	if err == nil {
-		t.Fatalf("expected non-zero exit for a missing --org-id, output: %s", out)
-	}
-	if !strings.Contains(err.Error(), "--org-id") {
-		t.Errorf("expected error to mention --org-id, got: %v", err)
-	}
-}
-
 // TestOrgWatch_Once_RunsExactlyOneCycleAndWritesStatus is the AC-3/--once
-// CLI smoke: one pulse cycle runs against a real (stub) herdr/agmsg PATH and
-// exits zero, having written watch-status.json (cycles=1) to the resolved
-// state directory alongside manifest.jsonl.
+// CLI smoke of `ralph org watch --all --once`: one cycle runs against a real
+// (stub) herdr/agmsg PATH and exits zero, having written the org's
+// watch-status file (cycles=1) to the resolved state directory alongside
+// manifest.jsonl, and the liveness mark as stopped with watch.lock free.
+// (The required --all, and the refused --org-id, are in
+// TestOrgWatch_RefusesFlagCombinationsAndWritesNothing.)
 func TestOrgWatch_Once_RunsExactlyOneCycleAndWritesStatus(t *testing.T) {
 	setupOrgStubPATH(t)
 	stateDir := filepath.Join(t.TempDir(), "state")
@@ -2722,12 +2713,20 @@ func TestOrgWatch_Once_RunsExactlyOneCycleAndWritesStatus(t *testing.T) {
 		t.Fatalf("spawn failed: %v", err)
 	}
 
-	out, err := runOrgCmd(t, "watch", "--org-id", "org-a", "--once", "--state-dir", stateDir)
+	out, err := runOrgCmd(t, "watch", "--all", "--once", "--state-dir", stateDir)
 	if err != nil {
-		t.Fatalf("watch --once failed: %v (output: %s)", err, out)
+		t.Fatalf("watch --all --once failed: %v (output: %s)", err, out)
 	}
-	if !strings.Contains(out, "watching org \"org-a\"") {
+	if !strings.Contains(out, "watching every org (") || !strings.Contains(out, "once=true") {
 		t.Errorf("expected watch banner in output, got: %s", out)
+	}
+
+	mark, err := org.ReadWatchAlive(stateDir)
+	if err != nil || mark.State != org.WatchAliveStopped || mark.PID != os.Getpid() {
+		t.Errorf("liveness mark after --once = %+v (%v); want stopped with this process's pid", mark, err)
+	}
+	if got := org.ProbeWatch(stateDir, time.Now(), 10).State; got != org.WatchLivenessNotRunning {
+		t.Errorf("ProbeWatch after --once = %q; want not_running", got)
 	}
 
 	statusPath := filepath.Join(stateDir, "watch-status-org-a.json")
@@ -2767,9 +2766,9 @@ func TestOrgWatch_Once_BannerShowsStateDirSource(t *testing.T) {
 		t.Fatalf("spawn failed: %v", err)
 	}
 
-	out, err := runOrgCmd(t, "watch", "--org-id", "org-a", "--once", "--state-dir", stateDir)
+	out, err := runOrgCmd(t, "watch", "--all", "--once", "--state-dir", stateDir)
 	if err != nil {
-		t.Fatalf("watch --once failed: %v (output: %s)", err, out)
+		t.Fatalf("watch --all --once failed: %v (output: %s)", err, out)
 	}
 	if !strings.Contains(out, "(source: flag)") {
 		t.Errorf("expected the watch banner to name the state-dir source (\"(source: flag)\" for an explicit --state-dir), got: %s", out)

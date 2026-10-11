@@ -212,10 +212,12 @@ type Org struct {
 	// DriverCallTimeout bounds each herdr / agmsg call Stop makes (the pane,
 	// tab and workspace gets of the ownership check, the C-c, the pane
 	// close, the agmsg Leave), each workspace get and close Disband makes,
-	// and the gets and the close in CloseDeferredSelfPane /
-	// CloseDeferredSelfWorkspace, one fresh deadline per call. Zero (the field's default) means "use
-	// defaultDriverCallTimeout" -- tests set a tiny value so a call that
-	// never answers times out fast.
+	// the gets and the close in CloseDeferredSelfPane /
+	// CloseDeferredSelfWorkspace, and each call of the watch's pulse cycle
+	// (watch.go: the herdr agent gets, the agmsg Join, Send, and History,
+	// and the real git status), one fresh deadline per call. Zero (the
+	// field's default) means "use defaultDriverCallTimeout" -- tests set a
+	// tiny value so a call that never answers times out fast.
 	DriverCallTimeout time.Duration
 	// Getenv overrides how Stop and Disband read the caller's herdr
 	// environment (HERDR_PANE_ID and HERDR_WORKSPACE_ID, set by herdr inside
@@ -230,8 +232,8 @@ type Org struct {
 	// set a fake.
 	Worktrees FeatureWorktrees
 	// Inbox is the org inbox (inbox.go) Escalate records to and
-	// NotifyInboxItem reads (escalate.go). nil means no inbox: both return
-	// an error.
+	// NotifyInboxItem reads (escalate.go); WaitInbox reads it too. nil
+	// means no inbox: all three return an error.
 	Inbox *InboxStore
 	// EscalationsPath is the escalations.jsonl the inbox's human path
 	// appends to (escalate.go), the same file `ralph org watch` writes:
@@ -243,6 +245,13 @@ type Org struct {
 	// notification elsewhere; tests set a stub so no test shows a real
 	// notification.
 	DesktopNotify EscalateFunc
+	// InboxHintStateDir is the --state-dir that the inbox commands
+	// (InboxCommand) named by the banner and the errors of Escalate and
+	// NotifyInboxItem repeat. The CLI sets it to the resolved state dir
+	// only when the ledger was named with --state-dir; it is empty
+	// otherwise, and the printed commands then carry no --state-dir
+	// (InboxCommand's doc says why).
+	InboxHintStateDir string
 	// InboxPollInterval overrides how often WaitInbox reads the inbox again
 	// while no item is open. Zero (the field's default) means "use
 	// defaultInboxPollInterval" (1s) -- tests set a tiny value so a wait

@@ -48,8 +48,11 @@ max_orgs = 10
 # max_total_seats caps active seats summed across every org_id sharing the
 # org state dir. Read from the same ralph.toml as max_orgs.
 max_total_seats = 30
-# deadman_minutes is reserved for the PR④ Watchdog deadman timer; PR① only
-# stores and round-trips this value.
+# deadman_minutes is how long a `ralph org watch` ALERT may go unanswered
+# before it is escalated to the human; 0 means it is never escalated by
+# timeout. The liveness mark of `ralph org watch --all` counts as stale once
+# it is older than the larger of this value (10 when it is below 1) and two
+# watch intervals.
 deadman_minutes = 10
 # agmsg_home points at the agmsg installation -- a directory of scripts
 # (scripts/send.sh, scripts/join.sh, etc.), not a single binary. Env
@@ -103,3 +106,13 @@ interval_seconds = 30
 stall_minutes = 15
 watcher_enabled = true
 watcher_model = "haiku"
+
+# [org.director] sets the inbox deadlines that `ralph org watch --all` checks.
+# ack_minutes: an open inbox item not yet sent to the human is sent this many
+# minutes after it was escalated. resolve_minutes: an item still unresolved
+# this many minutes after it was escalated is sent to the human once more.
+# Both must be >= 1. Absent [org.director] is fully compatible -- Load()
+# backfills these exact defaults.
+[org.director]
+ack_minutes = 10
+resolve_minutes = 60

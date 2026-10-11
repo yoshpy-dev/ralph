@@ -9,10 +9,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/yoshpy-dev/ralph/internal/org/protocol"
 )
@@ -24,8 +22,8 @@ import (
 // the human path, the way the spec treats an org whose director is
 // disabled: one line in escalations.jsonl, a banner on the caller's stderr,
 // and a best-effort desktop notification. The notified event in the inbox
-// records that the item was sent, so a later inbox watcher does not send it
-// again.
+// records that the item was sent, so the ack deadline that `ralph org watch
+// --all` checks (deadline.go) does not send it again.
 
 // escalateTypes are the TYPEs Escalate accepts: a leader raises an item
 // when it needs a decision (QUESTION), cannot proceed (BLOCKED), or has
@@ -34,9 +32,10 @@ import (
 var escalateTypes = []string{protocol.TypeQuestion, protocol.TypeBlocked, protocol.TypeResult}
 
 // Reasons of the human-path records. inboxReasonNoDirector is written to
-// the escalations.jsonl line and the notified event of an item sent to the
-// human path; inboxReasonNotRecorded to the best-effort escalations.jsonl
-// line of an escalate the inbox could not record (it has no inbox_id).
+// the escalations.jsonl line and the notified event of an item escalate or
+// inbox notify sent to the human path; inboxReasonNotRecorded to the
+// best-effort escalations.jsonl line of an escalate the inbox could not
+// record (it has no inbox_id). The deadline reasons are in deadline.go.
 const (
 	inboxReasonNoDirector  = "inbox_no_director"
 	inboxReasonNotRecorded = "inbox_not_recorded"
@@ -48,8 +47,16 @@ const (
 	inboxNotifySkipped = "skipped"
 )
 
-// inboxDesktopNotifyTimeout bounds one desktop notification call.
+// inboxDesktopNotifyTimeout bounds one desktop notification call: the
+// inbox's, and the watch deadman's (escalateAlert, watch.go).
 const inboxDesktopNotifyTimeout = 10 * time.Second
+
+// Titles of the inbox's desktop notifications on the osascript path, named
+// after the command whose process sends them.
+const (
+	inboxNotifyTitleEscalate = "ralph org escalate"
+	inboxNotifyTitleWatch    = "ralph org watch"
+)
 
 // defaultInboxPollInterval is how often WaitInbox reads the inbox again
 // when Org.InboxPollInterval is unset.
@@ -92,10 +99,6 @@ type EscalateParams struct {
 	// Banner is where the one-line human-path banner is written (the CLI
 	// passes stderr); nil means os.Stderr.
 	Banner io.Writer
-	// HintStateDir is the stateDir of the InboxCommand commands that the
-	// banner and the error name: the CLI passes the resolved state dir
-	// when --state-dir was given, and "" otherwise.
-	HintStateDir string
 }
 
 // EscalateResult is Escalate's return value. Err is set on every refusal
@@ -141,8 +144,8 @@ func (o *Org) Escalate(p EscalateParams) EscalateResult {
 		return EscalateResult{Err: fmt.Errorf("org: escalate: the item could not be recorded in the inbox: %w", err)}
 	}
 	res := EscalateResult{ID: id, Type: m.Type, Recorded: true}
-	if err := o.sendInboxItemToHuman(p.OrgID, id, m.Type, p.HintStateDir, banner); err != nil {
-		res.Err = fmt.Errorf("org: escalate: the item is recorded as %s, but the notification was not completed (%w): run `%s` to send it again (not escalate, which records another item)", id, err, InboxCommand("notify", id, p.HintStateDir))
+	if err := o.sendInboxItemToHuman(p.OrgID, id, m.Type, inboxReasonNoDirector, banner); err != nil {
+		res.Err = fmt.Errorf("org: escalate: the item is recorded as %s, but the notification was not completed (%w): run `%s` to send it again (not escalate, which records another item)", id, err, InboxCommand("notify", id, o.InboxHintStateDir))
 		return res
 	}
 	res.Notified = true
@@ -171,11 +174,11 @@ func (o *Org) EscalateNotRecorded(p EscalateParams, cause error) EscalateResult 
 
 // NotifyInboxItem sends inbox item id to the human path again and records
 // another notified event (`ralph org inbox notify`), for an item whose
-// escalate could not complete its notification. hintStateDir is
-// EscalateParams.HintStateDir for the commands the banner and the error
-// name. It returns ErrInboxUnknownID (wrapped) for an unknown ID and
-// refuses a resolved item, which has nothing left to notify.
-func (o *Org) NotifyInboxItem(id, hintStateDir string, banner io.Writer) error {
+// escalate could not complete its notification. The commands the banner and
+// the error name repeat Org.InboxHintStateDir, as Escalate's do. It returns
+// ErrInboxUnknownID (wrapped) for an unknown ID and refuses a resolved item,
+// which has nothing left to notify.
+func (o *Org) NotifyInboxItem(id string, banner io.Writer) error {
 	if o.Inbox == nil {
 		return errors.New("org: inbox notify: no inbox store is configured")
 	}
@@ -191,8 +194,8 @@ func (o *Org) NotifyInboxItem(id, hintStateDir string, banner io.Writer) error {
 	if item.State == InboxStateResolved {
 		return fmt.Errorf("org: inbox notify %s: %w, so nothing is left to notify", id, ErrInboxResolved)
 	}
-	if err := o.sendInboxItemToHuman(item.OrgID, id, item.Type, hintStateDir, bannerOrStderr(banner)); err != nil {
-		return fmt.Errorf("org: inbox notify %s: the notification was not completed (%w): run `%s` again", id, err, InboxCommand("notify", id, hintStateDir))
+	if err := o.sendInboxItemToHuman(item.OrgID, id, item.Type, inboxReasonNoDirector, bannerOrStderr(banner)); err != nil {
+		return fmt.Errorf("org: inbox notify %s: the notification was not completed (%w): run `%s` again", id, err, InboxCommand("notify", id, o.InboxHintStateDir))
 	}
 	return nil
 }
@@ -268,33 +271,62 @@ func validateEscalation(orgID, text string) (protocol.Message, error) {
 	return m, nil
 }
 
-// sendInboxItemToHuman is the human path shared by Escalate and
-// NotifyInboxItem: the escalations.jsonl line, the banner, the desktop
-// notification (org, ID, and TYPE only, never the message body), and then
-// the notified event with the notification's result. The banner and the
-// notification are best-effort. When the escalations.jsonl line cannot be
-// written, the notified event is not written either, so the item stays
-// unnotified in the inbox and `ralph org inbox notify` can complete it.
+// sendInboxItemToHuman is the human path shared by Escalate,
+// NotifyInboxItem, and SweepInboxDeadlines (deadline.go): the
+// escalations.jsonl line, the banner, the desktop notification (org, ID,
+// and TYPE only, never the message body), and then the notified event with
+// the notification's result. reason goes on the escalations.jsonl line and
+// the notified event, and picks the banner and the notification text
+// (inboxHumanTextFor). The banner and the notification are best-effort.
+// When the escalations.jsonl line cannot be written, the notified event is
+// not written either, so the item stays unnotified in the inbox and `ralph
+// org inbox notify` can complete it. The item's state never changes.
 //
-// orgID and typ come from inbox.jsonl when NotifyInboxItem calls, so a
-// hand-edited line can hold anything there: the banner escapes them with
-// PrintableInboxText, and the desktop notification gets them only when
-// they are values Escalate accepts (inboxNotifyInvalid otherwise). The ID
-// is one the inbox fold accepted (e<N>).
-func (o *Org) sendInboxItemToHuman(orgID, id, typ, hintStateDir string, banner io.Writer) error {
+// orgID and typ come from inbox.jsonl when NotifyInboxItem or
+// SweepInboxDeadlines calls, so a hand-edited line can hold anything there:
+// the banner escapes them with PrintableInboxText, and the desktop
+// notification gets them only when they are values Escalate accepts
+// (inboxNotifyInvalid otherwise). The ID is one the inbox fold accepted
+// (e<N>). The banner's `inbox show` command repeats Org.InboxHintStateDir.
+func (o *Org) sendInboxItemToHuman(orgID, id, typ, reason string, banner io.Writer) error {
 	recordErr := errors.New("no escalations.jsonl path is configured")
 	if o.EscalationsPath != "" {
 		recordErr = appendJSONLine(o.EscalationsPath, escalationRecord{
-			TS: o.now(), OrgID: orgID, InboxID: id, Subject: LeaderIdentity, Reason: inboxReasonNoDirector,
+			TS: o.now(), OrgID: orgID, InboxID: id, Subject: LeaderIdentity, Reason: reason,
 		})
 	}
-	_, _ = fmt.Fprintf(banner, "ORG ESCALATION: org=%s item=%s type=%s -- recorded in %s; read it with: %s\n",
-		PrintableInboxText(orgID, false), id, PrintableInboxText(typ, false), o.Inbox.Path(), InboxCommand("show", id, hintStateDir))
-	osascript := o.inboxDesktopNotify(fmt.Sprintf("org %s raised %s (%s)", notifiableOrgID(orgID), id, notifiableType(typ)))
+	text := o.inboxHumanTextFor(orgID, id, typ, reason)
+	_, _ = fmt.Fprintln(banner, text.banner)
+	osascript := o.inboxDesktopNotify(text.title, text.desktop)
 	if recordErr != nil {
 		return recordErr
 	}
-	return o.Inbox.AppendNotified(id, inboxReasonNoDirector, osascript)
+	return o.Inbox.AppendNotified(id, reason, osascript)
+}
+
+// inboxHumanText is what one send of an inbox item to the human path
+// shows: the banner line (without its newline), and the title and the text
+// of the desktop notification.
+type inboxHumanText struct {
+	banner  string
+	title   string
+	desktop string
+}
+
+// inboxHumanTextFor returns the text of a send for reason: the deadline
+// text (inboxDeadlineHumanText) for the two deadline reasons, and the text
+// of an escalated item otherwise. It and inboxDeadlineHumanText take their
+// four strings in sendInboxItemToHuman's order (orgID, id, typ, reason).
+func (o *Org) inboxHumanTextFor(orgID, id, typ, reason string) inboxHumanText {
+	if reason == InboxReasonAckDeadline || reason == InboxReasonResolveDeadline {
+		return o.inboxDeadlineHumanText(orgID, id, typ, reason)
+	}
+	return inboxHumanText{
+		banner: fmt.Sprintf("ORG ESCALATION: org=%s item=%s type=%s -- recorded in %s; read it with: %s",
+			PrintableInboxText(orgID, false), id, PrintableInboxText(typ, false), o.Inbox.Path(), InboxCommand("show", id, o.InboxHintStateDir)),
+		title:   inboxNotifyTitleEscalate,
+		desktop: fmt.Sprintf("org %s raised %s (%s)", notifiableOrgID(orgID), id, notifiableType(typ)),
+	}
 }
 
 // notifiableOrgID returns orgID when it is an identifier
@@ -315,28 +347,6 @@ func notifiableType(typ string) string {
 	return typ
 }
 
-// PrintableInboxText returns s with each control character written as its
-// Go escape (\x1b, \r, \u0085), keeping newlines and tabs when
-// keepLineBreaks is set. Inbox text is written by a leader (or by hand in
-// inbox.jsonl) and printed to a terminal, so an escape sequence in it must
-// not reach the terminal as one. The human-path banner and every `ralph
-// org inbox` text output use it.
-func PrintableInboxText(s string, keepLineBreaks bool) string {
-	var b strings.Builder
-	for _, r := range s {
-		switch {
-		case keepLineBreaks && (r == '\n' || r == '\t'):
-			b.WriteRune(r)
-		case unicode.IsControl(r):
-			quoted := strconv.QuoteRune(r)
-			b.WriteString(quoted[1 : len(quoted)-1])
-		default:
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
-}
-
 // alertUnrecordedEscalation tells the human about an escalate that was not
 // recorded: the banner (marked not recorded, with the cause), the desktop
 // notification, and a best-effort escalations.jsonl line, which is in the
@@ -345,7 +355,7 @@ func PrintableInboxText(s string, keepLineBreaks bool) string {
 func (o *Org) alertUnrecordedEscalation(orgID, typ string, cause error, banner io.Writer) {
 	_, _ = fmt.Fprintf(banner, "ORG ESCALATION (NOT RECORDED): org=%s type=%s -- the item is not in %s: %v\n",
 		orgID, typ, o.Inbox.Path(), cause)
-	_ = o.inboxDesktopNotify(fmt.Sprintf("org %s could not record a %s escalation; see the leader's pane", orgID, typ))
+	_ = o.inboxDesktopNotify(inboxNotifyTitleEscalate, fmt.Sprintf("org %s could not record a %s escalation; see the leader's pane", orgID, typ))
 	if o.EscalationsPath != "" {
 		_ = appendJSONLine(o.EscalationsPath, escalationRecord{
 			TS: o.now(), OrgID: orgID, Subject: LeaderIdentity, Reason: inboxReasonNotRecorded,
@@ -355,15 +365,16 @@ func (o *Org) alertUnrecordedEscalation(orgID, typ string, cause error, banner i
 
 // inboxDesktopNotify sends the desktop notification and returns the result
 // a notified event records: "ok", "failed: <err>", or "skipped" when
-// DesktopNotify is nil off darwin.
-func (o *Org) inboxDesktopNotify(message string) string {
+// DesktopNotify is nil off darwin. title is used on the osascript path
+// only; DesktopNotify gets the message alone.
+func (o *Org) inboxDesktopNotify(title, message string) string {
 	notify := o.DesktopNotify
 	if notify == nil {
 		if runtime.GOOS != "darwin" {
 			return inboxNotifySkipped
 		}
 		notify = func(ctx context.Context, message string) error {
-			return osascriptNotify(ctx, "ralph org escalate", message)
+			return osascriptNotify(ctx, title, message)
 		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), inboxDesktopNotifyTimeout)

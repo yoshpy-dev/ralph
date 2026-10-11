@@ -215,6 +215,9 @@ model = "opus"
 	if cfg.Org.AgmsgHome != want.AgmsgHome {
 		t.Errorf("agmsg_home = %q, want %q", cfg.Org.AgmsgHome, want.AgmsgHome)
 	}
+	if cfg.Org.Director != want.Director {
+		t.Errorf("director = %+v, want %+v", cfg.Org.Director, want.Director)
+	}
 }
 
 // TestLoad_OrgRolesEmpty verifies an explicit, empty [org.roles] table is
@@ -784,6 +787,116 @@ watcher_model = ""
 	}
 	if cfg.Org.Watchdog.WatcherModel != "" {
 		t.Errorf("watchdog.watcher_model = %q, want empty", cfg.Org.Watchdog.WatcherModel)
+	}
+}
+
+// TestDefault_OrgDirector verifies the [org.director] inbox deadline
+// defaults: ack_minutes 10 and resolve_minutes 60.
+func TestDefault_OrgDirector(t *testing.T) {
+	d := Default().Org.Director
+	if d.AckMinutes != 10 {
+		t.Errorf("director.ack_minutes = %d, want 10", d.AckMinutes)
+	}
+	if d.ResolveMinutes != 60 {
+		t.Errorf("director.resolve_minutes = %d, want 60", d.ResolveMinutes)
+	}
+}
+
+// TestLoad_OrgDirectorMissingSectionBackfillsDefault verifies a ralph.toml
+// without [org.director] (but with other [org] tables) loads with the full
+// Director defaults and no error.
+func TestLoad_OrgDirectorMissingSectionBackfillsDefault(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ralph.toml")
+	content := `[org]
+max_seats = 3
+
+[org.watchdog]
+stall_minutes = 20
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Org.Director != Default().Org.Director {
+		t.Errorf("director = %+v, want %+v", cfg.Org.Director, Default().Org.Director)
+	}
+}
+
+// TestLoad_OrgDirectorRoundTrip verifies explicit [org.director] values
+// round-trip through Load() unchanged, including a resolve_minutes shorter
+// than ack_minutes (the two deadlines are independent), and that setting one
+// key leaves the other at its default.
+func TestLoad_OrgDirectorRoundTrip(t *testing.T) {
+	t.Run("both keys", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "ralph.toml")
+		content := `[org.director]
+ack_minutes = 25
+resolve_minutes = 5
+`
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if cfg.Org.Director.AckMinutes != 25 {
+			t.Errorf("director.ack_minutes = %d, want 25", cfg.Org.Director.AckMinutes)
+		}
+		if cfg.Org.Director.ResolveMinutes != 5 {
+			t.Errorf("director.resolve_minutes = %d, want 5", cfg.Org.Director.ResolveMinutes)
+		}
+	})
+
+	t.Run("one key set leaves the other at default", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "ralph.toml")
+		content := `[org.director]
+ack_minutes = 1
+`
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatalf("Load: unexpected error for ack_minutes = 1: %v", err)
+		}
+		if cfg.Org.Director.AckMinutes != 1 {
+			t.Errorf("director.ack_minutes = %d, want 1", cfg.Org.Director.AckMinutes)
+		}
+		if want := Default().Org.Director.ResolveMinutes; cfg.Org.Director.ResolveMinutes != want {
+			t.Errorf("director.resolve_minutes = %d, want default %d", cfg.Org.Director.ResolveMinutes, want)
+		}
+	})
+}
+
+// TestLoad_OrgDirectorRejects verifies an explicit 0 or negative
+// ack_minutes / resolve_minutes is rejected with an error naming that key and
+// the value it got.
+func TestLoad_OrgDirectorRejects(t *testing.T) {
+	for _, key := range []string{"ack_minutes", "resolve_minutes"} {
+		for _, bad := range []int{0, -1} {
+			t.Run(fmt.Sprintf("%s=%d rejected", key, bad), func(t *testing.T) {
+				dir := t.TempDir()
+				path := filepath.Join(dir, "ralph.toml")
+				content := fmt.Sprintf("[org.director]\n%s = %d\n", key, bad)
+				if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+					t.Fatal(err)
+				}
+				_, err := Load(path)
+				if err == nil {
+					t.Fatalf("Load: expected error for %s = %d, got nil", key, bad)
+				}
+				if want := fmt.Sprintf("[org.director].%s must be >= 1, got %d", key, bad); err.Error() != want {
+					t.Errorf("error = %q, want %q", err.Error(), want)
+				}
+			})
+		}
 	}
 }
 
