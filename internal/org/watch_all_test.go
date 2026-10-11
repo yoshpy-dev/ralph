@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1233,6 +1234,81 @@ func TestRunWatchAll_APanicInBeforeStopStillWritesTheStoppedMarkAndReleasesTheLo
 	}
 	if got := ProbeWatch(f.dir, f.clk.Now(), f.o.Config.DeadmanMinutes).State; got != WatchLivenessNotRunning {
 		t.Errorf("ProbeWatch after the panic = %q; want not_running", got)
+	}
+}
+
+// The mark refresher of the drain ends before the lock is released, so no
+// rewrite of the old watch lands after it. A new watch's running mark is
+// written right after RunWatchAll returns (as if a new watch took the lock
+// at once); it must still be there 500 ms later. The clock seam holds the
+// refresher's first rewrite after BeforeStop starts for 300 ms, so a
+// refresher that is not waited for writes after the return. Without -race
+// this is the only test that sees a drain that does not wait for it.
+func TestRunWatchAll_NoMarkRewriteOfTheDrainLandsAfterTheLockIsReleased(t *testing.T) {
+	f := newWatchAllFixture(t)
+	var armed atomic.Bool
+	held := make(chan struct{})
+	var once sync.Once
+	f.o.Now = func() time.Time {
+		if armed.Load() {
+			first := false
+			once.Do(func() { first = true })
+			if first {
+				close(held)
+				time.Sleep(300 * time.Millisecond)
+			}
+		}
+		return f.clk.Now()
+	}
+	hooks := WatchHooks{BeforeStop: func() {
+		armed.Store(true)
+		select {
+		case <-held:
+		case <-time.After(10 * time.Second):
+			t.Error("the refresher did not rewrite the mark within 10s of BeforeStop")
+		}
+	}}
+	if err := runWatchAll(t, f.o, context.Background(), f.params(1), hooks); err != nil {
+		t.Fatalf("RunWatchAll: %v", err)
+	}
+	next := WatchAlive{State: WatchAliveRunning, PID: 4343, StartedAt: f.clk.Now().UTC().Format(time.RFC3339Nano), TS: "2099-01-01T00:00:00Z", IntervalSeconds: 30}
+	if err := writeWatchAlive(f.dir, next); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(500 * time.Millisecond)
+	got := f.mark(t)
+	if got.PID != 4343 || got.State != WatchAliveRunning || got.TS != next.TS {
+		data, _ := os.ReadFile(WatchAlivePathIn(f.dir))
+		t.Errorf("mark 500ms after the next watch wrote its own = %s; want the next watch's (pid 4343): the old watch rewrote it after releasing the lock", data)
+	}
+}
+
+// A take of the stop request that fails for a reason other than "no
+// request" says so on stderr once and the run goes on. A non-empty directory
+// at .watch-stop.json.taken makes the rename of an old watch-stop.json fail
+// (EISDIR on darwin, ENOTEMPTY or EISDIR on Linux). The old request stays
+// where it was and is not followed.
+func TestRunWatchAll_ATakeOfTheStopRequestThatFailsIsSaidOnStderrAndTheRunGoesOn(t *testing.T) {
+	f := newWatchAllFixture(t)
+	if err := os.MkdirAll(filepath.Join(f.dir, watchStopTakenFileName, "child"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteWatchStopRequest(f.dir, f.clk.Now().Add(-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	var cycles int
+	hooks := WatchHooks{OnCycle: func(n int, _ time.Time) { cycles = n }}
+	if err := runWatchAll(t, f.o, context.Background(), f.params(3), hooks); err != nil {
+		t.Fatalf("RunWatchAll: %v", err)
+	}
+	if cycles != 3 {
+		t.Errorf("ran %d cycles; want 3 (the old request is not followed)", cycles)
+	}
+	if want := "watchdog: org: watch: take the stop request: "; strings.Count(f.stderr.String(), want) != 1 {
+		t.Errorf("stderr = %q; want one line %q", f.stderr.String(), want)
+	}
+	if _, err := ReadWatchStopRequest(f.dir); err != nil {
+		t.Errorf("the old request after the run: %v; want it left in place (the take failed)", err)
 	}
 }
 
