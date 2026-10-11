@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/yoshpy-dev/ralph/internal/org"
 )
@@ -464,5 +466,272 @@ func TestStatusCmd_ShowsWatchHeartbeatAndPendingAlertCount(t *testing.T) {
 	}
 	if !strings.Contains(out, "pending alerts: 1") {
 		t.Errorf("expected pending alert count in output, got:\n%s", out)
+	}
+}
+
+// Tests for the `org watch:` line and the org_watch object of `ralph status`
+// (plan 2026-10-11-org-cross-watch, AC14). holdWatchLock and runningMark
+// come from org_watch_test.go.
+
+// writeWatchMark writes mark as the liveness mark in stateDir without taking
+// watch.lock, as a watch that has ended leaves it.
+func writeWatchMark(t *testing.T, stateDir string, mark *org.WatchAlive) {
+	t.Helper()
+	data, err := json.Marshal(mark)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(org.WatchAlivePathIn(stateDir), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// statusOrgWatchLine returns the one `org watch:` line of `ralph status`
+// text output, failing the test when there is not exactly one.
+func statusOrgWatchLine(t *testing.T, out string) string {
+	t.Helper()
+	var found []string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "org watch:") {
+			found = append(found, line)
+		}
+	}
+	if len(found) != 1 {
+		t.Fatalf("want exactly one `org watch:` line, got %d:\n%s", len(found), out)
+	}
+	return found[0]
+}
+
+// statusOrgWatchJSONOf decodes the org_watch object of `ralph status --json`
+// output into a map, so a key left out differs from a zero value.
+func statusOrgWatchJSONOf(t *testing.T, out string) map[string]any {
+	t.Helper()
+	var payload struct {
+		OrgWatch map[string]any `json:"org_watch"`
+	}
+	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+		t.Fatalf("json.Unmarshal: %v\noutput:\n%s", err, out)
+	}
+	if payload.OrgWatch == nil {
+		t.Fatalf("--json carries no org_watch object:\n%s", out)
+	}
+	return payload.OrgWatch
+}
+
+// TestStatusCmd_OrgWatchLineAndJSONPerWatchState runs `ralph status` and
+// `ralph status --json` on a populated roster for each state the cross-org
+// watch can be in, by watch.lock (held by this test or not) and the
+// liveness mark, and pins the whole `org watch:` line and org_watch object.
+func TestStatusCmd_OrgWatchLineAndJSONPerWatchState(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	fresh := runningMark(4244, now)
+	old := runningMark(4245, now.Add(-time.Hour))
+	killed := runningMark(4243, time.Date(2026, 10, 11, 4, 40, 0, 0, time.UTC))
+	stopped := &org.WatchAlive{
+		State: org.WatchAliveStopped, PID: 4242,
+		StartedAt: "2026-10-11T04:00:00.123456789Z", TS: "2026-10-11T04:40:00Z",
+		IntervalSeconds: 30, StoppedAt: "2026-10-11T04:40:05Z",
+	}
+	// markJSON is the org_watch object for state with every field of m.
+	markJSON := func(state string, m *org.WatchAlive) map[string]any {
+		want := map[string]any{
+			"state": state, "pid": float64(m.PID), "started_at": m.StartedAt,
+			"last_cycle_ts": m.TS, "mark_state": m.State,
+		}
+		if m.StoppedAt != "" {
+			want["stopped_at"] = m.StoppedAt
+		}
+		return want
+	}
+	const staleTail = " -- a watch holds watch.lock, but its liveness mark is missing, stopped, or older than deadman_minutes"
+
+	cases := []struct {
+		name     string
+		setup    func(t *testing.T, stateDir string)
+		wantLine string
+		wantJSON map[string]any
+	}{
+		{
+			name:     "not running with no mark",
+			setup:    func(*testing.T, string) {},
+			wantLine: "org watch: not running",
+			wantJSON: map[string]any{"state": "not_running"},
+		},
+		{
+			name:     "not running with a stopped mark",
+			setup:    func(t *testing.T, stateDir string) { writeWatchMark(t, stateDir, stopped) },
+			wantLine: "org watch: not running (stopped at 2026-10-11T04:40:05Z)",
+			wantJSON: markJSON("not_running", stopped),
+		},
+		{
+			name:     "not running with the running mark of a killed watch",
+			setup:    func(t *testing.T, stateDir string) { writeWatchMark(t, stateDir, killed) },
+			wantLine: "org watch: not running (a running mark is left from pid 4243, last cycle 2026-10-11T04:40:00Z)",
+			wantJSON: markJSON("not_running", killed),
+		},
+		{
+			name:     "running",
+			setup:    func(t *testing.T, stateDir string) { holdWatchLock(t, stateDir, fresh) },
+			wantLine: "org watch: running (pid 4244, last cycle " + fresh.TS + ")",
+			wantJSON: markJSON("running", fresh),
+		},
+		{
+			name:     "stale with an old mark",
+			setup:    func(t *testing.T, stateDir string) { holdWatchLock(t, stateDir, old) },
+			wantLine: "org watch: stale (pid 4245, last cycle " + old.TS + ")" + staleTail,
+			wantJSON: markJSON("stale", old),
+		},
+		{
+			name:     "stale with a stopped mark",
+			setup:    func(t *testing.T, stateDir string) { holdWatchLock(t, stateDir, stopped) },
+			wantLine: "org watch: stale (pid 4242, last cycle 2026-10-11T04:40:00Z, stopped at 2026-10-11T04:40:05Z)" + staleTail,
+			wantJSON: markJSON("stale", stopped),
+		},
+		{
+			name:     "stale with no mark",
+			setup:    func(t *testing.T, stateDir string) { holdWatchLock(t, stateDir, nil) },
+			wantLine: "org watch: stale" + staleTail,
+			wantJSON: map[string]any{"state": "stale"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			seedTwoOrgManifest(t, dir)
+			tc.setup(t, dir)
+
+			out, err := runStatusCmd(t, "--state-dir", dir)
+			if err != nil {
+				t.Fatalf("status: %v (output: %s)", err, out)
+			}
+			if got := statusOrgWatchLine(t, out); got != tc.wantLine {
+				t.Errorf("org watch line:\n got %q\nwant %q", got, tc.wantLine)
+			}
+
+			jsonOut, err := runStatusCmd(t, "--state-dir", dir, "--json")
+			if err != nil {
+				t.Fatalf("status --json: %v (output: %s)", err, jsonOut)
+			}
+			if got := statusOrgWatchJSONOf(t, jsonOut); !reflect.DeepEqual(got, tc.wantJSON) {
+				t.Errorf("org_watch:\n got %v\nwant %v", got, tc.wantJSON)
+			}
+		})
+	}
+}
+
+// TestStatusCmd_OrgWatchLineFollowsTheStateDirLine pins where the line goes
+// on the populated path: right below the state-dir line, above the rosters,
+// whose per-org watch heartbeat stays as it was.
+func TestStatusCmd_OrgWatchLineFollowsTheStateDirLine(t *testing.T) {
+	dir := t.TempDir()
+	seedTwoOrgManifest(t, dir)
+
+	out, err := runStatusCmd(t, "--state-dir", dir)
+	if err != nil {
+		t.Fatalf("status: %v (output: %s)", err, out)
+	}
+	lines := strings.Split(out, "\n")
+	if len(lines) < 3 || !strings.HasPrefix(lines[0], "state-dir: ") || lines[1] != "org watch: not running" || !strings.HasPrefix(lines[2], "org_id: ") {
+		t.Errorf("want the state-dir line, then the org watch line, then the first roster, got:\n%s", out)
+	}
+}
+
+// TestStatusCmd_EmptyRosterStillShowsTheOrgWatch: a watch can run before
+// any org starts, so the empty-roster path carries the line and org_watch
+// too.
+func TestStatusCmd_EmptyRosterStillShowsTheOrgWatch(t *testing.T) {
+	dir := t.TempDir() // no manifest ever written here
+	mark := runningMark(4246, time.Now())
+	holdWatchLock(t, dir, mark)
+
+	out, err := runStatusCmd(t, "--state-dir", dir)
+	if err != nil {
+		t.Fatalf("status: %v (output: %s)", err, out)
+	}
+	if !strings.Contains(out, "no org runtime state found") {
+		t.Errorf("expected the empty-state note, got:\n%s", out)
+	}
+	if got, want := statusOrgWatchLine(t, out), "org watch: running (pid 4246, last cycle "+mark.TS+")"; got != want {
+		t.Errorf("org watch line on the empty roster:\n got %q\nwant %q", got, want)
+	}
+
+	jsonOut, err := runStatusCmd(t, "--state-dir", dir, "--json")
+	if err != nil {
+		t.Fatalf("status --json: %v (output: %s)", err, jsonOut)
+	}
+	got := statusOrgWatchJSONOf(t, jsonOut)
+	if got["state"] != "running" || got["pid"] != float64(4246) || got["last_cycle_ts"] != mark.TS {
+		t.Errorf("org_watch on the empty roster = %v, want state running, pid 4246, last_cycle_ts %s", got, mark.TS)
+	}
+}
+
+// TestStatusCmd_OrgWatchJudgesTheMarkByDeadmanMinutesOfRalphToml: status has
+// no --config, so it reads deadman_minutes from ./ralph.toml as the ralph org
+// verbs do without --config. A 30-minute-old mark is stale under the
+// default 10 and running under 60.
+func TestStatusCmd_OrgWatchJudgesTheMarkByDeadmanMinutesOfRalphToml(t *testing.T) {
+	stateDir := t.TempDir()
+	mark := runningMark(4247, time.Now().Add(-30*time.Minute))
+	holdWatchLock(t, stateDir, mark)
+	t.Chdir(t.TempDir())
+
+	out, err := runStatusCmd(t, "--state-dir", stateDir)
+	if err != nil {
+		t.Fatalf("status without ralph.toml: %v (output: %s)", err, out)
+	}
+	if got := statusOrgWatchLine(t, out); !strings.HasPrefix(got, "org watch: stale (pid 4247, ") {
+		t.Errorf("without ralph.toml (deadman_minutes 10), a 30-minute-old mark should be stale, got %q", got)
+	}
+
+	if err := os.WriteFile("ralph.toml", []byte("[org]\ndeadman_minutes = 60\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err = runStatusCmd(t, "--state-dir", stateDir)
+	if err != nil {
+		t.Fatalf("status with ralph.toml: %v (output: %s)", err, out)
+	}
+	if got, want := statusOrgWatchLine(t, out), "org watch: running (pid 4247, last cycle "+mark.TS+")"; got != want {
+		t.Errorf("with deadman_minutes = 60:\n got %q\nwant %q", got, want)
+	}
+}
+
+// TestStatusCmd_OrgWatchFallsBackToTheDefaultDeadmanWhenRalphTomlDoesNotLoad:
+// status only reads, so a ./ralph.toml that does not load warns on stderr
+// and judges the mark by the default deadman_minutes (10) instead of
+// failing. A 5-minute-old mark is running under it (a zero fallback would
+// make it stale), and --json stdout stays one JSON document.
+func TestStatusCmd_OrgWatchFallsBackToTheDefaultDeadmanWhenRalphTomlDoesNotLoad(t *testing.T) {
+	stateDir := t.TempDir()
+	mark := runningMark(4248, time.Now().Add(-5*time.Minute))
+	holdWatchLock(t, stateDir, mark)
+	t.Chdir(t.TempDir())
+	if err := os.WriteFile("ralph.toml", []byte("[org\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	root := NewRootCmd()
+	var stdout, stderr bytes.Buffer
+	root.SetOut(&stdout)
+	root.SetErr(&stderr)
+	root.SetArgs([]string{"status", "--state-dir", stateDir, "--json"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("status --json with a broken ralph.toml: %v (stdout: %s, stderr: %s)", err, stdout.String(), stderr.String())
+	}
+	got := statusOrgWatchJSONOf(t, stdout.String())
+	if got["state"] != "running" {
+		t.Errorf("org_watch state = %v, want running under the default deadman_minutes (10); org_watch = %v", got["state"], got)
+	}
+	for _, want := range []string{"warning: status: load ralph.toml: ", "the default deadman_minutes (10)"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Errorf("stderr should contain %q, got:\n%s", want, stderr.String())
+		}
+	}
+
+	out, err := runStatusCmd(t, "--state-dir", stateDir)
+	if err != nil {
+		t.Fatalf("status with a broken ralph.toml: %v (output: %s)", err, out)
+	}
+	if got, want := statusOrgWatchLine(t, out), "org watch: running (pid 4248, last cycle "+mark.TS+")"; got != want {
+		t.Errorf("org watch line with a broken ralph.toml:\n got %q\nwant %q", got, want)
 	}
 }
