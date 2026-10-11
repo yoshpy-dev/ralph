@@ -173,9 +173,36 @@ CRITICAL、HIGH、MEDIUM はない。LOW 6 件は、判定にも guard の動き
 
 ### Recommendation(再確認 2)
 
-- Merge: yes(CRITICAL、HIGH、MEDIUM なし。指摘 7 は修正済みで、4 組すべての写しで足した行が FAIL に変わった。新しい LOW 2(8、9)は、コメントと tech-debt の文言)
+- Merge: yes(再確認 2 の判定。CRITICAL、HIGH、MEDIUM なし。指摘 7 は修正済みで、4 組すべての写しで足した行が FAIL に変わった。新しい LOW 2(8、9)は、コメントと tech-debt の文言。現在の判定は末尾の「再確認 3」の Merge)
 - Follow-ups:
   - 8 は誤った理由の文なので、直すなら verify の前にテストのコメント 1 文(`:1072-1074`)。tech-debt の閉じの文の同じ文は /sync-docs の段で直す。
   - 9 の (a) は、8 と同じ commit で直せる。(b)(c) は tech-debt の文と基準の 1 語。
+  - 2 の Related の test report の path は、/test の report ができたあとに足す(前のまま)。
+  - 任意(前のまま): `.claude/hooks/pre_bash_guard_rules.awk` のコメントの「a D row … pins each wrapper」。
+
+## 再確認 3(db5134f1)
+
+- Date: 2026-10-11
+- Branch: test/guard-wrapper-args(HEAD db5134f1)
+- Scope: LOW 8・9 の直しだけ。`git diff 8d3624a5..HEAD`(テストのコメント 40 行の差、tech-debt の 1 行、計画の Progress 2 行)。テストは動かしていない。guard のファイルは変わっていない(`git diff 8d3624a5..HEAD --stat -- .claude templates scripts` は空)。変えた行はコメントだけで、`wrapper_deny` の行、検査、文言(FAIL・PASS・案内文)は変わっていない(コメント行を除いた両版の `diff` は空)
+
+### LOW 8・9 の状態
+
+| LOW | 状況 | 確かめた点 |
+| --- | --- | --- |
+| 8(`env -S` の理由の誤り) | 修正済み | テストのコメント(`:1074-1077`)は「the rows of edge_deny that only the lexer denies (env -S 'git push origin --force' and its --split-string= twin) pin that path」。tech-debt の閉じの文は「rows outside `wrapper_deny` pin that path (`env -S 'git push origin --force'` and its `--split-string=` twin in `edge_deny`, which only the lexer denies)」。2 行は `edge_deny` の配列の中(`:955-956`、「Forms only the lexer denies」の群)にあり、前回の写し(`skip_env` が `-S` の文字列を積まない)で none になった行と同じ。基準の外という扱いは変わらず、理由だけが事実に合った |
+| 9 (a)(ヘッダーの「given above it」) | 修正済み | ヘッダーの D 項目(`:61-63`)は「by a per-branch criterion stated in the comment above wrapper_deny」。指す先が分かる |
+| 9 (b)(tech-debt の主語) | 修正済み | 「in mutation (g), where each copy breaks one path that the self-review re-check (MEDIUM 7) or the plan found without a row, every copy fails the row of its path, except those whose path a row cannot tell apart (below)」。主語がつながり、「9 つ」の数も外れた。「except」の対象は、直後の文にある `--` の行と代入の行を消した写し。前回確かめたとおり、これらは落ちない |
+| 9 (c)(`skip_command` の `-v`・`-V`) | 修正済み | 基準は「each path of skip_env, skip_command and skip_xargs that reaches a command (command -v and -V run nothing; edge_none has command -v sudo)」。tech-debt の閉じの文も同じ括弧。`command -v sudo` は `edge_none` にある(`:1160`)。前回、`-v` の行を無効にした写しで none から deny に変わることを確かめた |
+
+### その他
+
+- コメントの行はどれも 78 桁以内、`git diff --check` は空。tech-debt の行は 5 列のまま、`~~` は 16 個で偶数。
+- 新しい指摘はない。見た目だけの点: 折り直しで `:1084-1086` の「run a wrapper with arguments of its own (nice -n 5 sudo ls,」と「xargs -I{} sudo ls {} and」の行が短く残る。直さなくてよい。
+
+### Recommendation(再確認 3)
+
+- Merge: yes(CRITICAL、HIGH、MEDIUM なし。LOW 8・9 は修正済みで、新しい指摘なし。LOW は最初の review の 1〜6 を含め、すべて修正済み)
+- Follow-ups:
   - 2 の Related の test report の path は、/test の report ができたあとに足す(前のまま)。
   - 任意(前のまま): `.claude/hooks/pre_bash_guard_rules.awk` のコメントの「a D row … pins each wrapper」。
