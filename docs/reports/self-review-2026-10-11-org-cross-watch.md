@@ -2,11 +2,90 @@
 
 - Date: 2026-10-11
 - Plan: docs/plans/active/2026-10-11-org-cross-watch.md(承認済み、digest d0a6f2735552)
+- Reviewer: reviewer subagent (Claude)。パイプライン 2 回目(cycle 2、上限 2)。cross-review(triage 7a7e4ea7、cycle 1/2)の ACTION_REQUIRED #1・#2 の直しのあとの実行。cycle 1 の再実行の結果と最初の結果は、末尾の 2 つの「付録」に残してある
+- Scope: diff の品質だけ。主に見たのは直しのコミット 49d8d605(7 ファイル、+584/-54)。そのうえで、cycle 1 のレビューのあとに入ったコミット(94d5248c より後: 4aaef4ed のテスト、04bcb342 の文書の同期、報告と計画の記録)を軽く見直した。ブランチ全体は `git diff 577ebeaf...HEAD`(HEAD 49d8d605)。テスト・静的解析・仕様適合・文書の整合の検査は /test・/verify・/sync-docs の担当で、ここでは行っていない
+- 番号の付け方: 今回の finding は C2-1〜C2-5。cycle 1 の再実行の N1〜N5、最初の結果の M1・L1〜L7 は付録の中でそのまま使う。下の「cross-review #1・#2」は cycle 1 の triage(7a7e4ea7)の番号で、この cycle の `/cross-review` が同じファイルを書き直したあとの番号とは別
+
+## Latest run: cycle 2(HEAD 49d8d605)
+
+| 対象 | 状態 | 根拠 |
+| --- | --- | --- |
+| cross-review #1(watcher の待ちの間もロックを持つ) | 直った | `RunWatchAll` は `defer w.finish(lock)` で終わり、`finish` は `stopAndRelease` を defer してから `drainBeforeStop` を呼ぶ(`internal/org/watch.go:744-747`)。`hooks.BeforeStop` が返るまで、ロックは持ったまま、印は running のまま(`:755-777`)。CLI は BeforeStop の中で watcher を待ち(`--once` でなければ先に取り消す)、`RunWatchAll` のあとの待ちを消した(`internal/cli/org_watch.go:188-193`)。`TestRunWatchAll_CallsBeforeStopWhileItStillHoldsTheLockAndTheMarkSaysRunning`(`internal/org/watch_all_test.go:1122`)は、終わり方 3 通り(Cycles、ctx、止める頼み)で、BeforeStop の間の ProbeWatch が running、2 つ目のロックと 2 つ目の `RunWatchAll` が拒まれること、印の ts が書き直されることを確かめる。CLI の `TestOrgWatch_Once_HoldsTheLockUntilItsInFlightWatcherCallEnds`(`internal/cli/org_watch_test.go:781`)は、本物の `--once` と `--stop` の組で同じことを確かめる。どちらも直す前の順(解放のあとに待つ)では ProbeWatch が not_running になって落ちる |
+| cross-review #2(起動のときの古い頼みの削除が新しい頼みを消す) | 直った | 起動は watch-stop.json を `.watch-stop.json.taken` に rename してから読み(`takeWatchStopRequest`、`internal/org/watchalive.go:228-238`)、消すのは取り出したファイルだけ(`internal/org/watch.go:696-716`)。`started_at` より後の頼みは戻し、戻せなくても `stopTaken` で最初のサイクルのあとに止まる。`TestRunWatchAll_AStopRequestWrittenWhileTheStartTakesAnOldOneIsKept`(`watch_all_test.go:931`)は seam で取り出しの直後に新しい頼みを書き、読んでから消す形に戻すと 3 サイクル回って落ちる。`TestRunWatchAll_AStopRequestThatCannotBePutBackIsStillFollowed`(`:975`)は `stopTaken` を消すと落ちる |
+| cycle 1 の再実行の N1・N4・N5 | 直った(94d5248c) | N1: `OrgConfig.DeadmanMinutes` の doc(`internal/config/config.go:58-62`)、`templates/base/ralph.toml:51-55`、status の stale の行(`internal/cli/status.go:171`)が窓の規則と 0 の意味を書く。N4: `sendAlert` に ctx の引数はない。N5: `writeWatchAlive` の doc は `writeJSONFileAtomic` を指す |
+| cycle 1 の再実行の N2・N3 | tech-debt に記録 | `docs/tech-debt/README.md:204` の「Small leftovers of org-cross-watch」の (c)(d)。(d) の文言は今回の直しで古くなった(C2-5) |
+
+## Evidence reviewed
+
+- 全文を読んだ差分: 49d8d605 の全ファイル(`internal/org/watch.go`、`internal/org/watchalive.go`、`internal/cli/org_watch.go`、3 つのテストファイル、計画の 1 行)と、4aaef4ed のテスト 4 ファイル、04bcb342 の skill・仕様・tech-debt の差分
+- 直しの周りで読んだ今のコード: `RunWatchAll`・`newWatchAllRun`・`cycle`・`writeMark`・`stopRequested`・`waitForNextCycle`・`finish`・`drainBeforeStop`・`stopAndRelease`・`SendWatchdogAlertBounded`(`internal/org/watch.go`)、`WriteWatchStopRequest`・`takeWatchStopRequest`・`RemoveWatchStopRequest`・`AppliesTo`・`writeJSONFileAtomic`・`ProbeWatch`・`AcquireWatchLock`(`internal/org/watchalive.go`)、`runOrgWatchAll`・`runOrgWatchStop`・`waitOrgWatchReleased`・`newWatchdogHooks`(`internal/cli/org_watch.go`)、`orgWatchMarkDetails` と `last_cycle_ts`(`internal/cli/status.go`)、`watcherInvokeTimeout`・`recordWatcherReceipt`(`internal/org/watcher.go`)、`ExecRunner.Run` の `WaitDelay`(`internal/org/driver/driver.go`)、テストの `newWatchAllFixture`・`params`・`runWatchAll`・`fakeClock`、`runOrgCmdStreams`
+- 新しいテストが直す前のコードで落ちるかは、読んで確かめた(上の表と「依頼された点の結論」の 5)。テストは走らせていない
+- 機械的な確認: 直しの追加行にデバッグ出力、TODO、secret らしい文字列はない。追加したコメントで 80 桁を超える行は、構造体の欄の後ろのコメント 1 行だけ。`grep -rn 'takeWatchStopRequest\|watchStopTakenFileName\|afterStopRequestTaken\|BeforeStop'` で、新しい名前の使い手は doc に書かれたとおり(`.taken` を読むのは `takeWatchStopRequest` だけ)。`afterStopRequestTaken` の doc が指す `afterStaleCompensation` は `internal/org/spawn.go:2124` にある。`git log --format='%h parent=%p'` で、直しの親は triage のコミット 7a7e4ea7(このレビューの範囲の外のコミットはない)。証拠ファイル `docs/evidence/org-cross-watch-live-2026-10-11.md` に `$HOME` の生のパスはない
+- 確かめていないもの: BeforeStop が返らない場合の振る舞い(C2-3)、`--once` の drain が 30 秒を超えるときの `--stop` の出力(C2-4)、実機での kill -9 のあとに `.taken` が残る場合
+
+## 依頼された点の結論
+
+1. 終わりの順(panic を含む): 正しい。`defer w.finish(lock)` は取り出しの前に登録され、`finish` は `stopAndRelease` を defer してから drain を呼ぶ。サイクルが panic すると、drain(CLI は watcher を待つ)、stopped の印、解放の順に進み、panic はそのまま外に出る。BeforeStop が panic すると、`drainBeforeStop` の defer が書き直しの goroutine を止めて待ち、そのあと `stopAndRelease` が走る。両方が panic しても `stopAndRelease` は defer なので走る。ロックを取れなかったときは `finish` が登録されないので hook は呼ばれない。その場合はサイクルも回っていないので、watcher の goroutine も始まっていない(`OnSemanticTrigger` はサイクルの中でしか呼ばれない)。だから `RunWatchAll` のあとの待ちを消しても待ち漏れはない。サイクルは BeforeStop と同じ goroutine で終わっているので、`watcherWG.Wait()` の最中に `wg.Go` が走ることもない。`--once` でサイクルが panic した場合、プロセスが落ちるのは watcher の呼び出しが終わってから(最大でおよそ 70 秒)になる。これは「どの終わり方でも待つ」の帰結で、問題にはしない
+2. 印を書き直す goroutine の寿命: beforeStop と同じ長さで、`close(done)` のあと `<-refresherDone` で待つので、最後の書き直しは stopped の印より前に来る。書き直しの goroutine が `w.mark` を触る間、元の goroutine は beforeStop の中にいて `w` に触らない(CLI の BeforeStop は `w` を知らない)ので、データ競合はない。`time.After` の timer は Go 1.25 では止めなくても回収される。長さの上限は beforeStop が返るかどうかだけで決まる(C2-3)
+3. rename の取り出しと戻し: 正しい。`WriteWatchStopRequest` は一時ファイルの rename で書く(`writeJSONFileAtomic`)ので、取り出しが拾うのは古い頼みか新しい頼みのどちらかの全体である。取り出しのあとに `--stop` が書いた頼みは新しい watch-stop.json で、`os.Remove(taken)` は触らない。戻しが、その間に書かれた頼みを上書きしても、どちらも `started_at` より後で、この見張り宛てである。戻せないときも `stopTaken` で最初のサイクルのあとに止まり、`stopAndRelease` は `stopTaken` のときに `RemoveWatchStopRequest` を呼ぶ(ファイルがなければ何もしない)。終わりの削除についての新しいコメント(「removing it loses nothing」、`internal/org/watch.go:779-785`)は、2 つ目の見張りが `AcquireWatchLock` で待っていない(最大 2 秒)限り成り立つ。待っている場合は、解放の直後に 2 つ目がロックを取り、`--stop` は 30 秒待って「頼みは残っている」と答える。ただし頼みの時刻は両方の `started_at` より後なので、この曖昧さは直す前からあり、直しで広がってはいない
+4. 固定の名前 `.watch-stop.json.taken`: rename は既存の宛先を置き換えるので、前の実行が残したファイルは次の取り出しで上書きされる。watch-stop.json がない起動では `ENOENT` で早く返るので、残ったファイルはそのままになる。ただしそれを読むのは `takeWatchStopRequest` だけで、読むのは自分が rename したあとなので、古い中身を読むことはない。残るのは、取り出しから戻しか削除までの数行の間に kill -9 された場合と、削除に失敗した場合(stderr に 1 行)だけ。中の頼みは死んだ見張り宛てなので、失っても、その `--stop` はカーネルがロックを放したのを見て「stopped」と答え、その答えは正しい。`writeJSONFileAtomic` の一時ファイル(`.watch-stop.json.<乱数>.tmp`)とは名前がぶつからない。数バイトの残りなので、片付けは要らない
+5. テストの決定性: org の 5 本と CLI の 1 本とも、待ちはチャンネルか 10 秒の期限つきの poll で、固定の sleep に頼る判定はない。fake clock は mutex つきで、印は atomic な rename で書くので、1 ms ごとの書き直しと読み取りが並んでも途中の内容は読めない。seam は `t.Cleanup` で戻し、`internal/org` の watch のテストに `t.Parallel` はない。どのテストも直しの要の 1 か所を外すと落ちる(読んで確認): 解放を drain の前にすると ProbeWatch が not_running、書き直しを消すと 10 秒の期限切れ、拒まれた見張りが hook を呼ぶと `t.Error`、`stopAndRelease` を defer しないと panic のあとも印が running、取り出しを「読んでから消す」に戻すと 3 サイクル、`stopTaken` を消すと 3 サイクル、CLI で後ろの待ちに戻すと ProbeWatch が not_running
+
+## Findings
+
+<!-- Area recommended values: naming, readability, unnecessary-change, typo,
+     null-safety, debug-code, secrets, exception-handling, security, maintainability -->
+
+| ID | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| C2-1 | LOW | maintainability | 直しで足したコメント 8 か所が、指摘を「cross-review #1」「cross-review #2」とだけ書く。指す先の `docs/reports/cross-review-triage-org-cross-watch.md` は `/cross-review` が cycle ごとに上書きするので、この cycle の `/cross-review` のあとは #1・#2 が別の指摘になる。同じ `watch.go` の古いコメントは「`docs/reports/cross-review-triage-org-runtime-watchdog.md` Cycle 3 #6」のように cycle を書いている。Go の 2 か所は計画を `docs/plans/active/...` で指すが、`/pr` で archive に移る(この書き方は既存のコメントにもある) | `internal/org/watch.go:189-190`、`:688-689`。`internal/cli/org_watch.go:182`、`:467`。`internal/org/watch_all_test.go:926`、`:1116`。`internal/org/watchalive_test.go:378`。`internal/cli/org_watch_test.go:773`。古い書き方は `internal/org/watch.go:1059`、`:1348` | 「cross-review #1 (cycle 1, triage 7a7e4ea7)」の形にそろえる。計画のパスは「the org-cross-watch plan」でよい。この cycle の `/cross-review` が triage を書き直す前に直すのが安い |
+| C2-2 | LOW | readability | drain の間の書き直しで、印の `ts` が「最後のサイクルの終わり」とは限らなくなった。`WatchAlive` の doc は TS を「the end of the latest cycle, or the start before the first」と書き、`ralph status` は `last cycle <ts>`、`--json` は `last_cycle_ts` として出す。`/org` skill の 4 面も「最後のサイクルの時刻」と書く。`--once` の drain は watcher の呼び出し(60 秒)と ALERT(10 秒)のぶん続くので、既定の 30 秒の間隔では 2 回書き直され、`stopAndRelease` は `w.mark` をそのまま使うので stopped の印にも書き直しの時刻が残る。もう 1 点: `WatchHooks` の型の doc は「observe watch-cycle events without changing pulse-layer behavior」と書くが、BeforeStop はロックを持つ時間を延ばす hook で、この一文に収まらない | `internal/org/watchalive.go:72-73`。`internal/cli/status.go:182`、`:201`、`:418`。`.claude/skills/org/SKILL.md:775`(4 面とも同じ行)。`internal/org/watch.go:173-174`、`:767-768`(書き直し)、`:786-788`(stopped の印) | `WatchAlive` の doc の TS を「the end of the latest cycle, the start before the first, or a rewrite every interval while WatchHooks.BeforeStop runs」にする。status の「last cycle」は、doc にそう書けば今のままでよい(変えるなら「last mark」)。`WatchHooks` の doc に「BeforeStop also holds the end of the run (see its doc)」を足す。skill の 775 行目は /sync-docs に渡す |
+| C2-3 | LOW | maintainability | BeforeStop がいつ返るかは、呼び出し側の約束でしかない。`drainBeforeStop` は beforeStop が進んでいるかに関係なく interval ごとに running を書くので、beforeStop が返らないと、見張りはロックを持ち、サイクルを回さないまま、印が running で新しいままになる。その間の印は「サイクルが回っている」を意味しない。今は CLI の BeforeStop が `watcherInvokeTimeout`(60 秒、`WaitDelay` つき)と `DriverCallTimeout`(10 秒)で区切られ、その上限は CLI のコメントにだけ書いてある。`WatchHooks.BeforeStop` の doc にはこの前提がない。後半の PR は running を start・spawn・TASK の許可に使うので、BeforeStop に足す処理が上限を持たないと、止まらない見張りが running に見える | `internal/org/watch.go:185-192`(doc)、`:755-777`(書き直しは beforeStop が返るまで続く)。上限の記述は `internal/cli/org_watch.go:168-187` だけ | `WatchHooks.BeforeStop` の doc に「It must return within a bound: until it does, the mark says running although no cycle runs」を足す。仕組みで縛るなら、書き直しを ProbeWatch の窓の長さで打ち切る(止まらない drain が stale に見える)が、doc の一文で足りる |
+| C2-4 | LOW | exception-handling | `--once` の drain の間は止める頼みが効かない。`--once` の BeforeStop は watcher を取り消さないので、drain の間の `--stop` は watcher の呼び出し(最大でおよそ 70 秒)が終わるまで待つ。30 秒を超えると `--stop` は終了コード 1 で「the stop request stays in …, so it stops when its current cycle ends (a cycle takes longer while herdr calls time out)」と答えるが、待っているのはサイクルではなく watcher の呼び出しで、頼みは止まる理由にならない。`/org` skill の 4 面の「見張りはそのサイクルの終わりに止まる」も同じ。直す前は同じ場面で「not running」とすぐに答えていた(cross-review #1 の指摘)ので、この答えに届く場面は直しでできた。CLI の新しいテストは claude をすぐ放すので、30 秒を超える場合を通らない | `internal/cli/org_watch.go:188-193`(`--once` では取り消さない)、`:394`(メッセージ)。`.claude/skills/org/SKILL.md:780-781`(4 面とも同じ行)。`internal/cli/org_watch_test.go:887-888`(放してから待つ) | どちらかにする。(1) メッセージの括弧に「or, for a --once watch, while its on-demand watcher call ends」を足し、skill も合わせる。(2) `--once` でも止める頼みが来たら watcher を取り消す(書き直しの goroutine が `stopRequested` を見て知らせる口を作る)。`--once` は cron と smoke 用なので (1) で足りる |
+| C2-5 | LOW | maintainability | tech-debt の「Small leftovers of org-cross-watch」の行が、直しで 2 か所古くなった。(d) の括弧「unless `--once`, the watch cancels the hooks' context once `RunWatchAll` returns」は、今は BeforeStop の中で、stopped の印とロックの解放より前に取り消す。(e) の Trigger「the next change to `runOrgWatchAll`」は 49d8d605 で満たされた。しかも (e) が勧める仕組み(「a callback in `WatchAllParams` that `RunWatchAll` calls after `AcquireWatchLock`」)とほぼ同じ形の hook を同じコミットが `WatchHooks` に足したが、banner の位置はそのまま | `docs/tech-debt/README.md:204`。`internal/cli/org_watch.go:188-193`。`internal/org/watch.go:185-192` | この cycle の /sync-docs で、(d) の括弧を「the watch cancels the hooks' context in `WatchHooks.BeforeStop`, before it writes the stopped mark」に直す。(e) は直すか、Trigger を「the second half of stage 6, when start launches the watch」に書き換える |
+
+## Positive notes
+
+- 2 つの指摘を、それぞれ 1 つの仕組み(BeforeStop と rename の取り出し)で直し、`RunWatchAll` のあとの待ちを消して、待つ場所を 1 か所にした。CLI のコメント、`newWatchdogHooks` の doc、`RunWatchAll` の doc の 3 つが同じ順を書く
+- 終わりの順を `finish` → `drainBeforeStop` → (defer の)`stopAndRelease` に分け、panic でも stopped の印と解放が来ることを、BeforeStop の panic のテストで確かめる
+- 既存の表 `TestRunWatchAll_FollowsOnlyAStopRequestLaterThanItsStart` に読めない頼みのケースを足し、どのケースでも `.taken` が残らないことと stderr が空であることを確かめる
+- seam(`afterStopRequestTaken`)は既存の `afterStaleCompensation` と同じ形で、テストは `t.Cleanup` で戻す
+- 計画の Progress の記録(テストの本数、BeforeStop の panic、終わりの削除の理由)はコードと合う
+
+## Coverage gaps
+
+- `--once` の drain が 30 秒を超えるときの `--stop` の答え(C2-4)を通るテストはない
+- BeforeStop が返らない場合の振る舞い(C2-3)は試していない
+- 戻せないテストは、終わりの `RemoveWatchStopRequest` がディレクトリで失敗して stderr に出す行を確かめていない(数えるのは put-back の行だけ)。害はない
+- 実機で kill -9 のあとに `.taken` が残る場合は確かめていない(上の 4 は読んで確かめた)
+
+## Tech debt identified
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| (このレビューでは足していない) | | | | |
+
+_(これが最後の cycle(2/2)なので、直さない LOW は /sync-docs で tech-debt の「Small leftovers of org-cross-watch」の行に 1 つの項目としてまとめる。C2-5 はその行そのものの直し。)_
+
+## Recommendation
+
+- Merge: yes(CRITICAL・HIGH・MEDIUM なし。LOW 5 件(C2-1〜C2-5)。cycle 1 の cross-review #1・#2 は直り、どちらにも直す前のコードで落ちるテストがある)
+- Follow-ups:
+  - C2-1〜C2-3: コメントと doc だけで、合わせて 10 行ほど。直すなら /verify の前に。`.go` を触るので /self-review から回し直す(cross-review の前なので cycle は増えない)。C2-1 は、この cycle の `/cross-review` が triage を書き直す前に直すと、指す先が 1 つに決まる
+  - C2-4: メッセージ 1 行と skill の 4 面の 1 行。直さないなら tech-debt に足す
+  - C2-5 と、C2-2 の skill の 775 行目、C2-4 の skill の 780-781 行目は、この cycle の /sync-docs に渡す
+
+## 付録: cycle 1 の再実行の結果(HEAD 188a640d の時点)
+
+cycle 1 の再実行の header:
+
+- Date: 2026-10-11
+- Plan: docs/plans/active/2026-10-11-org-cross-watch.md(承認済み、digest d0a6f2735552)
 - Reviewer: reviewer subagent (Claude)。パイプライン 1 回目(cycle 1、上限 2)の再実行で、cross-review の前の直しなので cycle は増えない。最初の結果は b25e47da の時点のもので、末尾の「付録」に残してある
 - Scope: diff の品質だけ。主に見たのは、最初の結果のあとに入った 2 コミット(`git diff 6a6976d2..HEAD`。1b64ae2b の直しと、188a640d の status の文言と計画の記録。13 ファイル、+470/-180、HEAD 188a640d)。そのうえでブランチ全体(`git diff 577ebeaf...HEAD`、41 ファイル、+6,018/-1,063)を、最初の結果が見落としたものに絞って軽く見直した。テスト・静的解析・仕様適合・文書の整合の検査は /test・/verify・/sync-docs の担当で、ここでは行っていない
 - 番号の付け方: 最初の結果の M1、L1〜L7 はそのまま使う。今回足した finding は N1〜N5
 
-## Latest run: 最初の結果の指摘の扱い(HEAD 188a640d)
+### 最初の結果の指摘の扱い(cycle 1 の再実行、HEAD 188a640d)
 
 | ID | 状態 | 根拠 |
 | --- | --- | --- |
@@ -19,7 +98,7 @@
 | L6 | 直った | テストは「0644 を超える bit がない」と「所有者が読み書きできる」を確かめる(`internal/cli/org_watch_test.go:636`)。`startDetachedProcess` の doc も「0644 less the umask」になった |
 | L7 | 直った | 計画の S3b の行が、`TestOrgWatch_RequiresOrgID` を消した理由と、拒否を引き継いだテストの名前を書くようになった |
 
-## Evidence reviewed
+### Evidence reviewed(cycle 1 の再実行)
 
 - 全文を読んだ差分: 1b64ae2b と 188a640d の全ファイル(`internal/org/watchalive.go`、`internal/org/watch.go`、`internal/org/escalate.go`、`internal/org/deadline.go`、`internal/cli/org_watch.go`、`internal/cli/status.go`、4 つのテストファイル、`docs/tech-debt/README.md` の 2 行、計画の 2 行)
 - 直しの周りで読んだ今のコード: `RunWatchAll`・`watchAllRun`・`pulseOrg`・`waitForNextCycle`・`finish`(`internal/org/watch.go`)、`sendAlert`・`raiseOrClear`・`SendWatchdogAlert`、`RunWatcher` と `realClaudeInvoke`(`internal/org/watcher.go`)、`callWithTimeout`(`internal/org/verbs.go`)、`writeJSONFileAtomic`・`ProbeWatch`・`AcquireWatchLock`(`internal/org/watchalive.go`)、`acquireHeldFileLock`・`fileLockHeld`(`internal/org/lockfile.go`)、`runOrgWatchAll`・`runOrgWatchDetach`・`runOrgWatchStop`・`newWatchdogHooks`(`internal/cli/org_watch.go`)、`statusDeadmanMinutes`・`orgWatchLine`・`readOrgWatchHeartbeat`(`internal/cli/status.go`)、`OrgConfig.DeadmanMinutes`(`internal/config/config.go`)
@@ -28,7 +107,7 @@
 - 直しの範囲: 1b64ae2b と 188a640d は指摘の範囲に収まり、関係のない変更はない(`git show --stat`)
 - 確かめていないもの: 取り消された `claude -p` が `WaitDelay` の内に終わるか(実機)。`ralph insights` が `watcher_error` の receipt をどう見せるか(N3、`internal/insights/` の集計は読んでいない)
 
-## 依頼された点の結論
+### 依頼された点の結論(cycle 1 の再実行)
 
 1. サイクルの関数から ctx を外したこと: 正しい。サイクルの中で ctx を見るものはなくなり、ctx を見るのはサイクルの間の `waitForNextCycle` だけになった。`sendAlert` の使われない ctx の引数が 1 つ残る(N4)。tech-debt の「Stopping the cross-org watch waits for the current cycle」の行の Trigger(「org の間で止める頼みと loop の ctx を見る」)を実装するときは ctx を `pulse` に通し直すことになるが、行の記述は今も正しい
 2. `SendWatchdogAlertBounded`: `callWithTimeout` と同じ打ち切り方で、親を呼び出し側の ctx にしたもの。止めたときに取り消せるよう、親を `context.Background()` にしていない。パルスの `sendAlert` が Background から作る `callWithTimeout` のままなのは、止める頼みでパルスの ALERT を切らないためで、2 つが違うのは正しい。`internal/cli` が呼ぶので export が要る。テストは期限切れと取り消しの両方を見る
@@ -37,7 +116,7 @@
 5. atomic な保存: `writeJSONFileAtomic` はディレクトリを作り(前の `save` と同じ)、一時ファイルを同じディレクトリに作るので rename は同じファイルシステムの中で済む。一時ファイルの名前(`.watch-status-<org>.json.<乱数>.tmp`)は、名前で状態ファイルを開く `readOrgWatchHeartbeat` に拾われない。ファイルの末尾に改行が付くようになったが、読み手は JSON として読むだけ。rename そのものを見分けるテストはない(Coverage gaps)
 6. `ProbeWatch` の窓の規則: `max(deadman_minutes(1 未満なら 10), 2 × interval_seconds)`、比較は `>`(ちょうどの年齢は running)。印の `interval_seconds` が 0 か負(テストの印、手で書き換えた印)なら deadman だけで決まる。間隔の長い見張りが固まると最大 2 間隔のあいだ running に見えるが、これは窓の決め方から来るもので、計画のずれの記録に書いてある。次の PR の spawn と TASK の検査も同じ規則を受け継ぐ。規則を説明する文の残りは N1
 
-## Findings
+### Findings(cycle 1 の再実行)
 
 <!-- Area recommended values: naming, readability, unnecessary-change, typo,
      null-safety, debug-code, secrets, exception-handling, security, maintainability -->
@@ -50,7 +129,7 @@
 | N4 | LOW | maintainability | サイクルの関数から ctx を外す掃除が 1 つ残った。`sendAlert` はまだ最初の引数に `_ context.Context` を取り、doc は「Its context argument is not used」と書く。本番の呼び出しは `raiseOrClear` の 1 か所で、`context.Background()` を渡す。テストの呼び出しも 1 か所。1b64ae2b が 6 つの関数から ctx を外し、`evaluateCycle` の doc に「So the cycle takes no context」と書いたので、読み手は ctx を取る関数が 1 つだけ残っている理由を探すことになる | `internal/org/watch.go:996-999`(doc の最後の文と signature)、`:923`(呼び出し)。`internal/org/watch_test.go:643` | 引数と doc の最後の文を消し、2 か所の呼び出しから `context.Background()` を外す |
 | N5 | LOW | naming | `writeWatchAlive` の doc が、存在しない関数 `writeFileAtomic` を指す。呼んでいるのは `writeJSONFileAtomic`。996e5c48 からあり、最初の結果は見落とした | `internal/org/watchalive.go:158` | `(writeJSONFileAtomic)` に直す |
 
-## Positive notes
+### Positive notes(cycle 1 の再実行)
 
 - 直しのテストは、どれも直す前のコードで落ちる形になっている(上の表)。L2 のテストは、前の版が「親の ctx から作る」を意図として固定していたことを、名前と doc の両方で書き換えた
 - L2 は `escalateAlert` だけを特別扱いせず、「サイクルは ctx を受け取らない」という規則にまとめた。`evaluateCycle` と `RunWatchAll` の doc がその規則を言うので、次にサイクルへ呼び出しを足す人が迷わない
@@ -58,13 +137,13 @@
 - L3 のテストは 3 サイクル回して、警告が 1 回だけであること、ファイルを消したあとのサイクルでその org の見張りが戻ること、もう一方の org が 3 サイクル進むことを確かめる
 - tech-debt の M1 の行は、解けた部分だけを取り消し線にして、残る場合(`./ralph.toml` の deadman より長いサイクル)を書いた。L5 の行の記述はコードと合う
 
-## Coverage gaps
+### Coverage gaps(cycle 1 の再実行)
 
 - rename で書くことを見分けるテストがない。`TestRunWatchAll_AStatusFileThatCannotBeReadIsSaidOncePerOrg` の「`.tmp` が残らない」の確認は、一時ファイルを使わない直す前の `save` でも通る
 - 取り消された `claude -p` が `WaitDelay` の内に終わるかは、実機で確かめていない(テストの stub は `exec sleep` なので、kill ですぐ終わる)
 - 最初の結果の Coverage gaps(切り離した子の osascript の表示、herdr が止まっているときの 1 サイクルの長さ、Linux での setsid、`watch.log` が切り詰められないこと)は変わっていない
 
-## Tech debt identified
+### Tech debt identified(cycle 1 の再実行)
 
 | Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
 | --- | --- | --- | --- | --- |
@@ -72,9 +151,9 @@
 
 _(N2・N3 を直さずに cross-review に進む場合は、tech-debt の「Small leftovers of org-cross-watch」の行に足す。N1・N4・N5 は数行の直しなので、行にしないで直す方が安い。)_
 
-## Recommendation
+### Recommendation(cycle 1 の再実行)
 
-- Merge: yes(CRITICAL・HIGH・MEDIUM なし。今回の LOW は N1〜N5 の 5 件。最初の結果の M1・L1・L2・L4・L6・L7 は直り、L3 は一部で残りが N2、L5 は tech-debt に記録した)
+- cycle 1 の再実行の判定: yes(CRITICAL・HIGH・MEDIUM なし。今回の LOW は N1〜N5 の 5 件。最初の結果の M1・L1・L2・L4・L6・L7 は直り、L3 は一部で残りが N2、L5 は tech-debt に記録した)
 - Follow-ups:
   - N1・N4・N5: コメント 3 か所と status の 1 行、引数 1 つで、合わせて 15 行ほど。直すなら /verify の前に。`.go` を触るので /self-review から回し直す(cross-review の前なので cycle は増えない)
   - N2・N3: 直すか、tech-debt の行に足す。N2 を直さない場合は、計画の Progress の L3 の記述も合わせる
