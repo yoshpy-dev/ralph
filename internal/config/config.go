@@ -55,8 +55,10 @@ type OrgConfig struct {
 	// org_id that shares the same org state dir. `ralph org spawn` enforces
 	// it under the manifest lock, alongside the per-org MaxSeats.
 	MaxTotalSeats int `toml:"max_total_seats"`
-	// DeadmanMinutes is a reserved field for the PR④ Watchdog deadman timer.
-	// PR① only stores and round-trips this value; nothing consumes it yet.
+	// DeadmanMinutes is how long an ALERT of `ralph org watch` may go
+	// unanswered by the leader before the deadman escalates it to the human,
+	// and the age past which the liveness mark of `ralph org watch --all`
+	// counts as stale.
 	DeadmanMinutes int `toml:"deadman_minutes"`
 	// AgmsgHome is the agmsg installation directory (a collection of
 	// scripts, not a single binary -- see internal/org/driver/agmsg.go).
@@ -72,6 +74,9 @@ type OrgConfig struct {
 	// Watchdog holds the pulse-layer/watcher-layer settings for `ralph org
 	// watch` (PR④). See OrgWatchdogConfig's doc comment.
 	Watchdog OrgWatchdogConfig `toml:"watchdog"`
+	// Director holds the inbox deadlines that `ralph org watch --all` checks.
+	// See OrgDirectorConfig's doc comment.
+	Director OrgDirectorConfig `toml:"director"`
 }
 
 // OrgPermissionsConfig is the `[org.permissions]` envelope: a driver-
@@ -136,6 +141,19 @@ type OrgWatchdogConfig struct {
 	WatcherModel string `toml:"watcher_model"`
 }
 
+// OrgDirectorConfig holds the `[org.director]` settings of the inbox
+// deadlines that `ralph org watch --all` checks (FR-6 of
+// docs/specs/2026-10-07-org-multi-org-director.md). Stage 8a of that spec
+// adds the director's own settings (such as `enabled`) to the same section.
+type OrgDirectorConfig struct {
+	// AckMinutes is the ack deadline: an open inbox item that has not been
+	// sent to the human yet is sent once this long after it was escalated.
+	AckMinutes int `toml:"ack_minutes"`
+	// ResolveMinutes is the resolve deadline: an item that is not resolved
+	// this long after it was escalated is sent to the human once more.
+	ResolveMinutes int `toml:"resolve_minutes"`
+}
+
 // Default returns a Config with sensible defaults.
 func Default() Config {
 	return Config{
@@ -172,6 +190,10 @@ func Default() Config {
 				StallMinutes:    15,
 				WatcherEnabled:  true,
 				WatcherModel:    "haiku",
+			},
+			Director: OrgDirectorConfig{
+				AckMinutes:     10,
+				ResolveMinutes: 60,
 			},
 		},
 	}
@@ -357,6 +379,17 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.Org.Watchdog.WatcherEnabled && cfg.Org.Watchdog.WatcherModel == "" {
 		return cfg, fmt.Errorf("[org.watchdog].watcher_model must be non-empty when watcher_enabled is true")
+	}
+
+	// [org.director] validation. Same strict pattern as [org.watchdog]
+	// above: an absent [org.director] section (or an absent key within a
+	// present one) keeps Default()'s value. resolve_minutes may be shorter
+	// than ack_minutes; the two deadlines are checked independently.
+	if cfg.Org.Director.AckMinutes < 1 {
+		return cfg, fmt.Errorf("[org.director].ack_minutes must be >= 1, got %d", cfg.Org.Director.AckMinutes)
+	}
+	if cfg.Org.Director.ResolveMinutes < 1 {
+		return cfg, fmt.Errorf("[org.director].resolve_minutes must be >= 1, got %d", cfg.Org.Director.ResolveMinutes)
 	}
 
 	return cfg, nil
