@@ -543,7 +543,7 @@ func TestStatusCmd_OrgWatchLineAndJSONPerWatchState(t *testing.T) {
 		}
 		return want
 	}
-	const staleTail = " -- a watch holds watch.lock, but its liveness mark is missing, stopped, or older than deadman_minutes (and two of its intervals)"
+	const staleTail = " -- a watch holds watch.lock, but its liveness mark is missing, stopped, or older than the larger of deadman_minutes (10 when below 1) and two of its intervals"
 
 	cases := []struct {
 		name     string

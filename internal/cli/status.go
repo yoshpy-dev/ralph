@@ -168,7 +168,7 @@ func orgWatchLine(probe org.WatchLiveness) string {
 		return "org watch: running" + orgWatchMarkDetails(mark)
 	case org.WatchLivenessStale:
 		return "org watch: stale" + orgWatchMarkDetails(mark) +
-			" -- a watch holds watch.lock, but its liveness mark is missing, stopped, or older than deadman_minutes (and two of its intervals)"
+			" -- a watch holds watch.lock, but its liveness mark is missing, stopped, or older than the larger of deadman_minutes (10 when below 1) and two of its intervals"
 	}
 	switch {
 	case mark != nil && mark.State == org.WatchAliveStopped && mark.StoppedAt != "":

@@ -155,7 +155,7 @@ func ReadWatchAlive(stateDir string) (*WatchAlive, error) {
 	return &mark, nil
 }
 
-// writeWatchAlive replaces the mark in stateDir (writeFileAtomic).
+// writeWatchAlive replaces the mark in stateDir (writeJSONFileAtomic).
 func writeWatchAlive(stateDir string, mark WatchAlive) error {
 	return writeJSONFileAtomic(WatchAlivePathIn(stateDir), mark)
 }

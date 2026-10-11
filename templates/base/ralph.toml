@@ -49,8 +49,10 @@ max_orgs = 10
 # org state dir. Read from the same ralph.toml as max_orgs.
 max_total_seats = 30
 # deadman_minutes is how long a `ralph org watch` ALERT may go unanswered
-# before it is escalated to the human, and the age past which the liveness
-# mark of `ralph org watch --all` counts as stale.
+# before it is escalated to the human; 0 means it is never escalated by
+# timeout. The liveness mark of `ralph org watch --all` counts as stale once
+# it is older than the larger of this value (10 when it is below 1) and two
+# watch intervals.
 deadman_minutes = 10
 # agmsg_home points at the agmsg installation -- a directory of scripts
 # (scripts/send.sh, scripts/join.sh, etc.), not a single binary. Env

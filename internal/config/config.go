@@ -56,9 +56,11 @@ type OrgConfig struct {
 	// it under the manifest lock, alongside the per-org MaxSeats.
 	MaxTotalSeats int `toml:"max_total_seats"`
 	// DeadmanMinutes is how long an ALERT of `ralph org watch` may go
-	// unanswered by the leader before the deadman escalates it to the human,
-	// and the age past which the liveness mark of `ralph org watch --all`
-	// counts as stale.
+	// unanswered by the leader before the deadman escalates it to the human;
+	// 0 (or any value below 1) means the deadman never escalates by timeout.
+	// The liveness mark of `ralph org watch --all` counts as stale once it is
+	// older than the larger of this value (the default 10 when it is below
+	// 1) and two watch intervals.
 	DeadmanMinutes int `toml:"deadman_minutes"`
 	// AgmsgHome is the agmsg installation directory (a collection of
 	// scripts, not a single binary -- see internal/org/driver/agmsg.go).

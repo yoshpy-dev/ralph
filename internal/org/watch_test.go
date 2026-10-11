@@ -640,7 +640,7 @@ func TestSendAlert_ProtocolValidationFailureFallback_IncludesSeatHeader(t *testi
 
 	oversizedBody := strings.Repeat("x", protocol.DefaultMaxBodyChars+500)
 	msg := fmt.Sprintf("TYPE: ALERT\nORG_ID: org-a\nSEAT: seat-1\nCONDITION: scope_change\n\n%s", oversizedBody)
-	run.sendAlert(context.Background(), status, "org-a", "seat-1", "scope_change", msg, clk.Now())
+	run.sendAlert(status, "org-a", "seat-1", "scope_change", msg, clk.Now())
 
 	alerts := watchdogAlerts(a)
 	if n := len(alerts); n != 1 {

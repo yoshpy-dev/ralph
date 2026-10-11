@@ -920,7 +920,7 @@ func (w *watchRun) raiseOrClear(status *watchStatusFile, orgID, seatID, condType
 			return // already alerted and still active: dedupe
 		}
 		status.Conditions[key] = &watchConditionRecord{Active: true, FirstTS: now.UTC().Format(time.RFC3339)}
-		w.sendAlert(context.Background(), status, orgID, seatID, condType, message, now)
+		w.sendAlert(status, orgID, seatID, condType, message, now)
 		if semantic && w.hooks.OnSemanticTrigger != nil {
 			w.hooks.OnSemanticTrigger(orgID, seatID, condType, message)
 		}
@@ -994,9 +994,8 @@ func (w *watchRun) ensureWatchdogJoined(status *watchStatusFile, orgID string) {
 // aborts the pulse cycle but is logged to w.stderr -- then registers an AC-5
 // pending-alert deadman record regardless of whether Send itself succeeded:
 // the whole point of the deadman clause is to catch the case where leader
-// cannot be reached at all. Its context argument is not used: each call
-// here runs under its own callWithTimeout deadline (see evaluateCycle).
-func (w *watchRun) sendAlert(_ context.Context, status *watchStatusFile, orgID, seatID, condType, message string, now time.Time) {
+// cannot be reached at all.
+func (w *watchRun) sendAlert(status *watchStatusFile, orgID, seatID, condType, message string, now time.Time) {
 	if err := protocol.ValidateText(message, protocol.DefaultMaxBodyChars); err != nil {
 		// SEAT is always included here (tech-debt: "watchdog deferred LOW
 		// (2)"): before this fix, a busy seat whose original message failed

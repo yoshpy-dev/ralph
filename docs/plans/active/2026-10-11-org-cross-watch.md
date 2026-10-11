@@ -206,7 +206,7 @@
   - S4(04f9237b): `ralph status` に `org watch:` の行、`--json` に `org_watch`。deadman は `./ralph.toml`(読めなければ既定の 10 分と stderr の警告)。implementer が一時の台帳で `--detach` と `--stop` を実機で試し、プロセスが残らないことも確かめた。残る穴: `--config` で別の `deadman_minutes` を渡した見張りとは、status の判定がずれうる(S5 で tech-debt に書く)
   - S5(505c58c1): skill の 4 面、README、AGENTS.md、仕様の FR-6 の注、quality-gates、tech-debt((c)〜(h) を閉じ、新しい 4 行)。agent-messaging.md は今も正しいので変えていない。配る側の `templates/base/docs/quality/quality-gates.md` の watch の行は orchestrator が直した(fb52a143、check-sync の KNOWN_DIFF のファイル)
   - 実装は終わり。次はパイプライン(cycle 1/2)
-  - self-review(6a6976d2): Merge yes、MEDIUM 1・LOW 7。1b64ae2b で M1 と L1〜L4・L6・L7 を直し、L5(切り離した子の cwd)は tech-debt に書いた。計画からのずれ(M1): 生存の印の判定の窓は、Scope と AC11 に書いた「`deadman_minutes` 以内」ではなく、`deadman_minutes`(1 未満なら既定の 10)と印の `interval_seconds` の 2 倍の大きいほう。`deadman_minutes = 0`(デッドマンは時間切れで上げない、の意味)の台帳で `--detach` が健全な子を止めないため。設定で 0 を拒む案は、0 を使う設定を壊すので採らなかった。status の stale の文言もこの規則に合わせた(orchestrator が直した)。self-review を回し直す
+  - self-review(6a6976d2): Merge yes、MEDIUM 1・LOW 7。1b64ae2b で M1 と L1・L2・L4・L6・L7 を直し、L3 は一部を直した(状態ファイルの保存は atomic にした。読めないファイルの警告は 1 回だけになったが、その org を黙って飛ばし続ける点は再実行の N2 として tech-debt に書いた)。L5(切り離した子の cwd)は tech-debt に書いた。計画からのずれ(M1): 生存の印の判定の窓は、Scope と AC11 に書いた「`deadman_minutes` 以内」ではなく、`deadman_minutes`(1 未満なら既定の 10)と印の `interval_seconds` の 2 倍の大きいほう。`deadman_minutes = 0`(デッドマンは時間切れで上げない、の意味)の台帳で `--detach` が健全な子を止めないため。設定で 0 を拒む案は、0 を使う設定を壊すので採らなかった。status の stale の文言もこの規則に合わせた(orchestrator が直した)。self-review を回し直す
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
