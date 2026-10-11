@@ -196,7 +196,8 @@
 - [x] Plan reviewed
 - [x] Plan approved
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S0(00e9da99): tech-debt (c)〜(h) の整理。escalate と inbox のコマンドを `internal/cli/org_inbox.go` に移し、`Org.InboxHintStateDir` を足し、受信箱の 3 つのフィールドは `wireOrgInbox` で設定する。internal/cli のテストは無変更。S5 で tech-debt の行を閉じるとき、(a) の `inboxSummary` の場所を `org_inbox.go` に直す
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
