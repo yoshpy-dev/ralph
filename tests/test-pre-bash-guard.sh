@@ -1073,6 +1073,26 @@ wrapper_deny=(
   $'stdbuf -o0 sh -c \'git commit -n -m x\''
   $'timeout 5 sh -c \'git commit -n -m x\''
   $'xargs sh -c \'git commit -n -m x\''
+  # The arguments of today's wrappers, each before sh -c: a short flag and
+  # the next word, a long option and the next word, a long option with = in
+  # one word, the -- terminator, and the options that skip_env,
+  # skip_command and skip_xargs read.
+  $'env -u HOME sh -c \'git commit -n -m x\''
+  $'env -i PATH=/bin sh -c \'git commit -n -m x\''
+  $'env -C /tmp sh -c \'git commit -n -m x\''
+  $'command -p sh -c \'git commit -n -m x\''
+  $'exec -a n sh -c \'git commit -n -m x\''
+  $'time -o f sh -c \'git commit -n -m x\''
+  $'time -f %e sh -c \'git commit -n -m x\''
+  $'time --format %e sh -c \'git commit -n -m x\''
+  $'time --format=%e sh -c \'git commit -n -m x\''
+  $'nice --adjustment 5 sh -c \'git commit -n -m x\''
+  $'stdbuf --output L sh -c \'git commit -n -m x\''
+  $'timeout -s KILL 5s sh -c \'git commit -n -m x\''
+  $'timeout -k 1 5 sh -c \'git commit -n -m x\''
+  $'xargs -I{} sh -c \'git commit -n -m x\''
+  $'xargs -n 1 sh -c \'git commit -n -m x\''
+  $'nohup -- sh -c \'git commit -n -m x\''
 )
 check_modes D deny absent -- "${wrapper_deny[@]}"
 
