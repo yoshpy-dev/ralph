@@ -1,7 +1,7 @@
 # guard-wrapper-args
 
 - Status: Approved
-- Approved: 2026-10-11 sha256:e69b20224a60
+- Approved: 2026-10-11 sha256:5ebd931f0fcc
 - Owner: Claude Code
 - Date: 2026-10-11
 - Related request: ユーザーの依頼「残したものを修正して」(2026-10-11)。PR #219(d41604f1)の完了報告で「残したもの」に挙げた 2 件: (1) 包みの行の検査は分岐があることだけを見て、包みの引数の読み方を見ない。引数を取る包みを足すときに手書きの行が要ることは、文書に書いただけで、テストは強制しない (2) `edge_deny` のコメントの 1 文の字面が広い(verify V-1)
@@ -23,7 +23,7 @@ guard の包み(`pre_bash_guard_rules.awk` の BEGIN の `WRAPPER`)には、`cmd
   - `edge_deny` の包みの手書きの 9 行(926〜934 行)を、新しい配列 `wrapper_deny` に移す。D 節で `edge_deny` と同じ `check_modes D deny absent` で流す(ラベルは節とコマンドだけで作るので、ラベルも件数も変わらない)
   - F 節の PR #219 の検査のあとに、新しい検査を足す。実行時に読んだ `WRAPPER` の名前の集合と、`wrapper_deny` の各行の 1 語目の集合を比べ、どちらかにしかない名前があれば FAIL にする。行のない名前には「`wrapper_deny` に W の行を足す。W が自分の引数を取るなら、その引数を `sh -c` の前に置く」と案内し、一覧にない 1 語目には「名前が `WRAPPER` から消えた」と出す。あわせて、`wrapper_deny` の各行が ` sh -c 'git commit -n -m x'` で終わることを確かめ、行ごとに、その末尾を ` sh -c 'git commit -m x'` に替えた対照の形を jq あり・なしで guard に渡して、none になることを確かめる(Design decisions を参照)。PASS の文言にも「行があることだけを確かめた。行が包みの引数を押さえているかは見ていない」と出す。`WRAPPER` が読めないときは FAIL
   - コメントの直し。`edge_deny` の 9 行の上のコメント(912〜925 行)の V-1 の 1 文を、次の事実に合わせる: 包みに自分の引数を付ける行はほかにもある(D の `nice -n 5 sudo ls`、B の `echo 'sudo ls' | xargs -I{} sh -c {}` など)が、それらは旧版から引き継いだ 4 つの文字列照合(sentinel)に掛かるので、分岐が引数を読み違えても deny のまま。sentinel に掛からない `git commit -n` の手書きの行だけが、そのとき落ちる。ほかに、「`edge_deny` の 9 行」を前提に書いた箇所(ヘッダーの D 項目 59〜60 行、F 項目 98〜105 行、F 節の PR #219 の検査の上のコメント 1600〜1613 行)を、`wrapper_deny` と新しい検査に合わせて直す
-  - 今ある包みの引数の行を `wrapper_deny` に足す。基準は「`cmd_pos` の分岐ごとに、値を取る引数の書き方ごとに 1 行以上」で、man にある形だけを使う。短い旗と次の語(`exec -a n`、`time -o f`、`time -f %e`、`timeout -s KILL 5s`、`timeout -k 1 5`)、長いオプションと次の語(`time --format %e`、`nice --adjustment 5`、`stdbuf --output L`)、長いオプションと `=` の 1 語(`time --format=%e`)、`--` の終端(`nohup --`)、専用の関数で読む包み(`env -u HOME`、`env -i PATH=/bin`、`env -C /tmp`、`command -p`、`xargs -I{}`、`xargs -n 1`)の 16 行。どれも ` sh -c 'git commit -n -m x'` で終わる。足した行にも、新しい検査の末尾の形と対照(none)がそのまま掛かる
+  - 今ある包みの引数の行を `wrapper_deny` に足す。基準は Design decisions の「分岐ごとの基準」で、man にある形だけを使う。短い旗と次の語(`exec -a n`、`time -o f`、`time -f %e`、`timeout -s KILL 5s`、`timeout -k 1 5`、`stdbuf -o L`)、長いオプションと次の語(`time --format %e`、`nice --adjustment 5`、`stdbuf --output L`、`timeout --signal KILL 5s`)、長いオプションと `=` の 1 語(`time --format=%e`)、`-` と数字の旗(`nice -5`。macOS の man が古い形としてまだ受けると書く)、`--` の終端(`nohup --`)、専用の関数で読む包み(`env -u HOME`、`env --unset HOME`、`env -i PATH=/bin`、`env -C /tmp`、`env --`、`command -p`、`command --`、`xargs -I{}`、`xargs -n 1`、`xargs --max-args 1`、`xargs --max-args=1`、`xargs --`)の 25 行。どれも ` sh -c 'git commit -n -m x'` で終わる。足した行にも、新しい検査の末尾の形と対照(none)がそのまま掛かる
   - self-review の LOW 1・3・4・5・6 の直し(コメント、FAIL の文言、変数の名前。判定とテストの結果は変えない)
 - `docs/tech-debt/README.md` のテストの穴の行(163 行)の (h) の閉じの文の「so a wrapper with arguments of its own still needs a row there」を、行があることはこの PR の検査が強制し、行が引数を押さえているかは人の判断に残る、と書き換える。今ある包みについては、足した行が押さえる引数の書き方と、押さえない形(分岐の表にない旗)を書く(self-review の LOW 2)
 
@@ -41,7 +41,7 @@ guard の包み(`pre_bash_guard_rules.awk` の BEGIN の `WRAPPER`)には、`cmd
 - 9 行の 1 語目は、`$'…'` で書いた行でも、配列の要素では名前そのもの(`env`、`nice` など)になる。`${row%% *}` で取れる
 - main 577ebeaf の写しで `cmd_pos` の `xargs` の分岐を消すと、`xargs sh -c 'git commit -n -m x'` と `xargs -I{} sh -c 'git commit -n -m x'` は none になり、`echo 'sudo ls' | xargs -I{} sh -c {}`、`echo x | xargs sh -c 'git reset --hard'`、`xargs -I{} sudo ls {}`、`xargs -n 1 sudo ls`、`xargs -I{} flock /tmp/l git push -f` は jq あり・なしとも deny のままだった(2026-10-11 に確かめた)。V-1 の直しはこの結果に沿って書く
 - 同じ main の guard で、9 行の末尾を ` sh -c 'git commit -m x'` に替えた対照の形は、9 つとも jq あり・なしで none だった。包みの引数に sentinel の語を入れた `time -o 'sudo log' sh -c 'git commit -m x'` は deny だった(2026-10-11 に確かめた)
-- HEAD 76f2f826 の guard(main と同じ)で、足す 16 行は jq あり・なしとも deny、その対照(`-n` を外した形)は 16 行とも none だった(2026-10-11 に確かめた)
+- HEAD 76f2f826 の guard(main と同じ)で、足す 16 行は jq あり・なしとも deny、その対照(`-n` を外した形)は 16 行とも none だった(2026-10-11 に確かめた)。再確認の MEDIUM 7 で足す 9 行(`timeout --signal KILL 5s`、`stdbuf -o L`、`command --`、`xargs --`、`env --`、`xargs --max-args 1`、`env --unset HOME`、`xargs --max-args=1`、`nice -5`)も、HEAD bf6b12b8 の guard で deny、対照は none だった(2026-10-11 に確かめた)
 
 ## Affected areas
 
@@ -56,15 +56,20 @@ None (テストの行を別の配列に移して足し、検査を 1 つ足し�
 
 - **集合の一致を両方向で確かめる**(consult の判定)。`WRAPPER` にあって行のない名前は、手書きの行の足し忘れ。行にあって `WRAPPER` にない名前は、名前が一覧から消えたこと。後者は今も行の deny が none になって捕まるが、新しい検査は理由を直接出す。足す行は数行
 - **行の末尾を決め、末尾を無害にした対照の形が none になることも確かめる**(末尾は Codex の plan advisory の前から、対照の形はその指摘で足した)。sentinel に掛かる中身(sudo、force push など)の行は、分岐が引数を読み違えても deny のままなので、何も押さえない(Assumptions の確かめ)。末尾を ` sh -c 'git commit -n -m x'` に決めると、中のコマンドに sentinel の語を書いた行は FAIL になる。ただ、包みの引数の側に sentinel の語を書いた行(`time -o 'sudo log' sh -c …`)は末尾だけでは捕まらない。対照の形(末尾を ` sh -c 'git commit -m x'` に替えたもの)が none であれば、行の deny は中の `git commit -n` を読んだことからしか来ない
-- **今ある包みの引数の行は、分岐ごと・値を取る引数の書き方ごとに足す**(self-review の LOW 2 を受けた consult の判定)。行を足すと、新しい検査の末尾の形と対照もそのまま掛かる。旗の名前を全部並べるのではなく、分岐が値を読む書き方(短い旗と次の語、長いオプションと次の語、`=` の 1 語、`--`、専用の関数)をそれぞれ 1 行以上で押さえる。man にない形(guard の都合に合わせた形)は足さない
+- **今ある包みの引数の行は、分岐ごとの基準で足す**(self-review の LOW 2 と再確認の MEDIUM 7 を受けた consult の判定)。行を足すと、新しい検査の末尾の形と対照もそのまま掛かる。分岐ごとの基準は次のとおりで、旗ごとではない(同じ道を通る旗は 1 つで押さえる)。
+  - `skip_opts` を呼ぶ分岐(`exec`、`nohup`、`time`、`nice`、`stdbuf`、`timeout`)は、その分岐の値を取る短い旗(次の語を値にする形)と値を取る長いオプション(次の語を値にする形)を、それぞれ 1 行以上。`timeout` は時間も
+  - `skip_opts` が分岐をまたいで共有する道(`--`、`=` の 1 語の長いオプション、`-` と数字の旗)は、どれかの分岐で 1 行
+  - `skip_env`・`skip_command`・`skip_xargs` は、それぞれの関数の道(`--`、値を取る旗の短い形と長い形、値を取らない旗、`=` の 1 語、代入)ごとに 1 行以上
+  - 値が旗に付いた形(`-o0`、`-I{}`)は旗の集合に関係なく同じ道を通るので、基準に数えない。`env -S` の道(文字列をコマンドとして積み直す)は、末尾の形に合わないので枠に入れない(sentinel つきの行だけが押さえる)
+  - man にない形(guard の都合に合わせた形)は足さない
 - **強制できるのは行の存在までと明記する**。行が包みの引数を本当に押さえているかは、包みのツールを知る人の判断に残る。FAIL の文言とコメントでそれを促し、報告でもそう書く
 - Critical forks: None(テストだけの変更で、戻すのも検査と配列を元に戻すだけ。案 A と案 B の選択は consult の判定で決めた)
 
 ## Acceptance criteria
 
-- [ ] AC1: 包みの手書きの 9 行が `wrapper_deny` にあり、D 節で今と同じラベルの deny の行として流れる。Scope の 16 行も `wrapper_deny` にあり、jq あり・なしとも deny になる。新しい検査が、実行時の `WRAPPER` の 9 つの名前と 25 行の 1 語目が一致し、25 行の末尾が決まった形で、25 行の対照の形が jq あり・なしとも none であることで PASS する。`WRAPPER` が読めないときは FAIL になる
-- [ ] AC2: 写しで次の 5 つの変更をすると、どれも新しい検査がその名前か行を出して FAIL になる。(a) `WRAPPER` に分岐つきの 10 個目の名前を足す(たとえば `chrt` と、`cmd_pos` に `skip_opts` の分岐。PR #219 の検査は通る) (b) `wrapper_deny` から 1 行消す (c) `WRAPPER` から名前を 1 つ消す (d) `wrapper_deny` の 1 行の中のコマンドを sentinel に掛かる形にする (e) `wrapper_deny` の 1 行の包みの引数に sentinel の語を入れ、末尾は保つ(たとえば `time -o 'sudo log' sh -c 'git commit -n -m x'`)。さらに、(f) `cmd_pos` の `time` と `exec` の分岐の値を取る旗を空にした写しで、足した行(`time -o f`、`exec -a n` など)が FAIL になる(16 行を足す前は、この写しでテストは緑だった)
-- [ ] AC3: `bash tests/test-pre-bash-guard.sh` が全部通る(macOS の awk、mawk、gawk)。件数は 2,108 に新しい検査の件数と足した行の件数を足したもの(D 節は 16 行×2 経路、F 節は 1 件と 25 行×2 経路の対照)。A〜C と E の件数は変わらない。guard のファイルは変わっていない(`git diff` が空)
+- [ ] AC1: 包みの手書きの 9 行が `wrapper_deny` にあり、D 節で今と同じラベルの deny の行として流れる。Scope の 25 行も `wrapper_deny` にあり、jq あり・なしとも deny になる。新しい検査が、実行時の `WRAPPER` の 9 つの名前と 34 行の 1 語目が一致し、34 行の末尾が決まった形で、34 行の対照の形が jq あり・なしとも none であることで PASS する。`WRAPPER` が読めないときは FAIL になる
+- [ ] AC2: 写しで次の (a)〜(e) の変更をすると、どれも新しい検査がその名前か行を出して FAIL になる。(a) `WRAPPER` に分岐つきの 10 個目の名前を足す(たとえば `chrt` と、`cmd_pos` に `skip_opts` の分岐。PR #219 の検査は通る) (b) `wrapper_deny` から 1 つの名前の行を全部消す(行を足したあとは、どの名前にも行が 2 行以上ある) (c) `WRAPPER` から名前を 1 つ消す (d) `wrapper_deny` の 1 行の中のコマンドを sentinel に掛かる形にする (e) `wrapper_deny` の 1 行の包みの引数に sentinel の語を入れ、末尾は保つ(たとえば `time -o 'sudo log' sh -c 'git commit -n -m x'`)。さらに、(f) `cmd_pos` の `time` と `exec` の分岐の値を取る旗を空にした写しで、足した行(`time -o f`、`exec -a n` など)が FAIL になる(16 行を足す前は、この写しでテストは緑だった)。(g) 再確認の MEDIUM 7 の写し((a) `timeout` の長いオプション (b) `stdbuf` の短い旗と次の語 (c) `env`・`command`・`xargs` の `--` (d) `env --unset` と `xargs` の値を取る長いオプション、のそれぞれの読み方を壊したもの)と、`skip_xargs` の値を取らない長いオプションの道(`=` の 1 語)と `skip_opts` の `-` と数字の旗の道を壊した写しで、足した 9 行のどれかが FAIL になる
+- [ ] AC3: `bash tests/test-pre-bash-guard.sh` が全部通る(macOS の awk、mawk、gawk)。件数は 2,108 に新しい検査の件数と足した行の件数を足したもの(D 節は 25 行×2 経路、F 節は 1 件と 34 行×2 経路の対照)。A〜C と E の件数は変わらない。guard のファイルは変わっていない(`git diff` が空)
 - [ ] AC4: `./scripts/run-verify.sh` が rc 0。コメントの V-1 の文が、sentinel に掛かる行は分岐の読み違えで落ちない、と書く。「`edge_deny` の 9 行」を前提にしたコメントが残っていない。tech-debt の (h) の閉じの文が、行があることはテストが強制し、行が引数を押さえているかは人の判断に残る、と書き、足した行が押さえる引数の書き方を書く。self-review の LOW 1〜6 が直っていることを、reviewer が verify の前に確かめる
 
 ## Implementation outline
@@ -74,6 +79,9 @@ None (テストの行を別の配列に移して足し、検査を 1 つ足し�
 3. S3(implementer): 16 行を足し、self-review の LOW 1・3・4・5・6 を直す(行の追加とコメント・文言・名前の直しで 2 commit)。AC1〜AC3、AC2 の (f)
 4. S4(inline、docs だけ): tech-debt の閉じの文に、足した行が押さえる書き方と押さえない形を書く(LOW 2)。AC4
 5. reviewer に S3・S4 を見せてから verify に進む
+6. S5(implementer): 再確認の MEDIUM 7 の 9 行を足し、テストのコメントの言い方を Design decisions の「分岐ごとの基準」に揃える(1 commit)。AC1〜AC3、AC2 の (g)
+7. S6(inline、docs だけ): tech-debt の閉じの文を同じ基準の言い方に揃え、`env -S` の道は sentinel つきの行だけが押さえると書く。AC4
+8. reviewer に、MEDIUM 7 の写しが FAIL に変わったことと S5・S6 の文言を見せてから verify に進む
 
 ## Verify plan
 
@@ -88,7 +96,7 @@ None (テストの行を別の配列に移して足し、検査を 1 つ足し�
 - Integration tests: `./scripts/run-test.sh`、`./scripts/run-verify.sh`
 - Regression tests: 今の 2,108 件。mawk と gawk でもテストを回す。base のテストのファイルを HEAD の guard で回して、節ごとの件数を比べる
 - Edge cases: `WRAPPER` が空、分岐はあるが行のない名前、行はあるが一覧にない名前、sentinel に掛かる中身の行、包みの引数に sentinel の語を入れた行
-- Evidence to capture: AC2 の 6 つの mutation で FAIL になる名前と文言
+- Evidence to capture: AC2 の 7 つの mutation で FAIL になる名前と文言
 
 ## Risks and mitigations
 
@@ -122,6 +130,8 @@ None (テストの行を別の配列に移して足し、検査を 1 つ足し�
   - AC2 (b) の読み方: 16 行を足したので、どの名前にも行が 2 行以上ある。1 行だけ消しても集合の検査は FAIL しない(素の `nohup` の行を消した写しは 2,187/0)。(b) は承認時の「その名前の行がなくなる」の意味で、`nohup` の 2 行(素の行と `nohup --`)を両方消した写しで確かめ、FAIL した。1 行を消してほかの行が残る場合は、その行が押さえていた引数の書き方が押さえられなくなるだけで、それを捕まえないのは Non-goals(行が引数を押さえているかはテストが判断しない)の範囲
   - LOW 6 の「判定が deny でないとき」の文言は、guard を変えずにその判定を出せないので、実行では確かめていない(読んで確かめた)
   - S4 完了(この commit、inline、docs だけ): tech-debt の (h) の閉じの文に、最初の 9 行のうち引数を置くのは 3 行だけだったこと、16 行が押さえる書き方、(f) の結果、分岐が知らないツールの旗はどの行も押さえないことを書いた(LOW 2)。「The nine hand-written rows stay」の文は外した。列の数は 5 のまま
+  - self-review の再確認(bf6b12b8、reviewer/sonnet): LOW 1〜6 は修正済み、新しい MEDIUM 7(「分岐ごと・値を読む書き方ごとに 1 行以上」の言い方が 16 行の範囲より広い。写し 31 通りのうち 10 通りが行の不足)。consult(3 往復目)の判定は reviewer の案 (i)(7 行を足す)に、`skip_xargs` の値を取らない長いオプションの道(`xargs --max-args=1`)を足し、基準を plan に字で固定して承認を取り直す。私が `skip_opts` の `-` と数字の旗の道も行がないことに気づき、`nice -5` を足した(macOS の man が古い形としてまだ受けると書く)。9 行は HEAD bf6b12b8 の guard で deny、対照は none
+  - 2026-10-11: plan の Scope(25 行)・Assumptions・Design decisions(分岐ごとの基準)・AC1(34 行)・AC2((b) を「1 つの名前の行を全部消す」に、(g) を追加)・AC3・Implementation outline(S5〜S6)を直し、ユーザーが承認ゲートで Approve(digest 5ebd931f0fcc)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
