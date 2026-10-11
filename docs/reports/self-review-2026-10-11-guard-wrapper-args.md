@@ -113,8 +113,69 @@ CRITICAL、HIGH、MEDIUM はない。LOW 6 件は、判定にも guard の動き
 
 ### Recommendation(再確認)
 
-- Merge: yes(CRITICAL、HIGH なし。MEDIUM 1(7)、LOW は 1〜6 がすべて修正済み)
+- Merge: yes(再確認 1 の判定。CRITICAL、HIGH なし。MEDIUM 1(7)、LOW は 1〜6 がすべて修正済み。現在の判定は末尾の「再確認 2」の Merge)
 - Follow-ups:
   - 7 は、verify に進む前に直すのがよい(上の (i) か (ii))。(i) なら行の追加とコメント、(ii) ならコメント 3 か所と tech-debt の閉じの文。どちらも判定を変えない。
   - 2 の Related の test report の path は、/test の report ができたあとに足す。
   - 任意(前のまま): `.claude/hooks/pre_bash_guard_rules.awk`(と `templates/base/` の写し)の「a D row of tests/test-pre-bash-guard.sh pins each wrapper, and its F section reads this list」は、今も偽ではない。guard を次に直す機会に、F が一覧と手書きの行を突き合わせることも書く。
+
+## 再確認 2(20e282be、b515e29a)
+
+- Date: 2026-10-11
+- Branch: test/guard-wrapper-args(HEAD b515e29a)
+- Scope: 指摘 7(MEDIUM)の直しに絞った。`git diff bf6b12b8..HEAD`(テスト 110 行の差、tech-debt の 1 行、計画の Progress)。計画は b7885236 で直り、承認を取り直した(digest 5ebd931f0fcc)。テスト、静的解析、仕様との照合は行っていない。guard のファイルは変わっていない(`git diff bf6b12b8..HEAD --stat -- .claude templates scripts` は空)。probe は scratch に置いた guard の写し(macOS の awk、jq あり)に、行を stdin で直接渡した
+
+### 指摘 7 の 4 組の写しで、足した行が FAIL に変わったか
+
+34 行(元の 9 行と 25 行)を、引数の読み方を変えた写し 36 通りに流して、none になる行を見た。基準行(変えていない guard)は 34 行とも deny。
+
+| 指摘 7 の組 | 壊した読み方(写し) | 前回(25 行) | 今回(34 行)で none になる行 |
+| --- | --- | --- | --- |
+| (a) `timeout` の長いオプション | `timeout` の `" --signal --kill-after "` を空に | どの行も落ちない | `timeout --signal KILL 5s` |
+| (b) `stdbuf` の短い旗と次の語 | `stdbuf` の `"ioe"` を空に | どの行も落ちない | `stdbuf -o L` |
+| (c) `--` | `skip_command`、`skip_xargs`、`skip_env` の `--` を `return i` に | どれも落ちない | `command --`、`xargs --`、`env --`(それぞれ 1 行) |
+| (d) 長いオプション | `skip_env` の `--unset` を落とす、`skip_xargs` の値を取る長いオプションの条件を落とす | どちらも落ちない | `env --unset HOME`、`xargs --max-args 1` |
+| 足した 2 行 | `skip_xargs` の値を取らない長いオプションの道を `i += 2` に、`skip_opts` の数字の旗の行を消す | (行なし) | `xargs --max-args=1`、`nice -5` |
+
+そのほか、最初の 25 行の写し(`exec`、`time`、`nice`、`timeout` の旗の集合と `+ 1`、`skip_opts` の長いオプション・`=`・`--`、`skip_env` の `-u/-C`・値を取らない旗・代入の読み違い、`skip_xargs` の短い旗の道、`skip_command` の `-p`)は、前回と同じ行が落ちた。`stdbuf` の長い一覧を空にした写しは `stdbuf --output L`、`timeout` の `+ 1` を消した写しは `timeout 5`、`timeout -s KILL 5s`、`timeout --signal KILL 5s`、`timeout -k 1 5` が落ちる。
+
+### 「行が区別できない道」の記述
+
+実装者の記述(コメントと tech-debt の閉じの文、計画の S5 の項)を、写しで確かめた。正しい。
+
+- `skip_opts`、`skip_env`、`skip_xargs` の `--` の行を消した写しは、どの行も落ちなかった。`--` が別の道(`skip_opts` と `skip_xargs` は長いオプション、`skip_env` は値を取らない旗)を通って、同じく `sh` で止まる。コメントの「the -- took the path of a flag or a long option」と合う。
+- `skip_env` の代入の行を消した写しも、どの行も落ちなかった(`cmd_pos` のループの先頭が代入を飛ばす)。同じ行を `i += 2` に読み違えた写しでは `env -i PATH=/bin` が落ちるので、行は代入の道の読み違いを押さえている。
+- `skip_command` の `--` は、この組に入っていない。消した写しで `command --` が落ちるので、コメントも入れていない。
+- `env -S` の道は、写し(`skip_env` が `-S` の文字列を積まない)で、どの行も落ちなかった。基準の外という扱いは合う。ただ、理由の文は誤り(下の 8)。
+
+### 新しい指摘
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| LOW | maintainability | (8)`env -S` の道について「only rows with a sentinel match reach it」と書くが、誤り。D の「Forms only the lexer denies」の群に、sentinel の語を含まない `env -S 'git push origin --force'` と `env --split-string='git push origin --force'` の行があり、その群のコメント自身が「no text the sentinel matches」と書く。この 2 行が、`-S` の道を押さえる。同じ記述が 3 か所にある(テストのコメント、tech-debt の閉じの文、計画の S6 の項) | `tests/test-pre-bash-guard.sh:1072-1074`(コメント)、`:955-956`(行)。`skip_env` が `-S` の文字列を積まない写しで、`env -S 'git push origin --force'` と `env --split-string='git push origin --force'` は deny から none に変わり、`env -S 'sudo ls'` は deny のまま。tech-debt の閉じの文: 「`env -S` queues its string as commands again; only rows with a sentinel match reach it」 | 「env -S queues its string as commands again; it is outside the criterion: the lexer-only rows of D (env -S 'git push origin --force') pin that path, and a wrapper_deny row would not reach it」の方向に。計画の Progress は記録なので、書き直さなくてよい。tech-debt の閉じの文は /sync-docs の段で直す |
+| LOW | readability | (9)言い方の細かい点が 3 つ。(a) ヘッダーの D 項目(`:61`)の「by a per-branch criterion given above it」は、基準がファイルの 1000 行ほど下の `wrapper_deny` の上のコメントにあるので、「above it」が何を指すか分からない。(b) tech-debt の閉じの文の「each of the nine copies of the self-review re-check (MEDIUM 7) that broke one more path fails the row of that path」は主語がつながらない(「the nine copies of the guard made for the self-review re-check」か「the nine mutations of the re-check」の意味とみられる)。9 は、(a)〜(d) の 7 通りと足した 2 行の道。(c) 基準の「each path of skip_env, skip_command and skip_xargs」(`:1065` 付近)は、`skip_command` の `-v` と `-V`(コマンドが走らない道)を含まないが、そう書いていない。この道は deny の行にできず、`edge_none` の `command -v sudo`(`:1160`)が押さえる(`-v` を `-p` と同じに扱う写しで、none から deny に変わる)。「each path that reaches a command」と書けば、基準と一致する | `:61`、`:1065`、tech-debt の閉じの文、`:1160`。probe は `-v` の行を `if (0) return n + 1` にした写し | (a)「…by the per-branch criterion in the comment above wrapper_deny」(b) 主語を直す(c) 「each path of skip_env, skip_command and skip_xargs that reaches a command」。いずれも文言だけ |
+
+### その他に確かめたこと
+
+- 25 行(`wrapper_deny` の元の 9 行のあとの行)は、`WRAPPER` の順(`env`、`command`、`exec`、`nohup`、`time`、`nice`、`stdbuf`、`timeout`、`xargs`)に包みごとにまとまり、1 語目はすべて `WRAPPER` の名前、末尾は `sh -c 'git commit -n -m x'`。足した 9 行の対照(末尾を `-m x` に替えた形)は、計画の Assumptions のとおり none。
+- 基準の文(`:1052-1075`)の例は、どれも行にある(`exec -a n`、`time -o f`、`nice -n 5`、`stdbuf -o L`、`timeout -s KILL 5s`、`time --format %e`、`nice --adjustment 5`、`stdbuf --output L`、`timeout --signal KILL 5s`、`nohup --`、`time --format=%e`、`nice -5`、`env --`、`command --`、`xargs --`、`env -u HOME`、`env --unset HOME`、`xargs -n 1`、`xargs --max-args 1`、`env -i`、`command -p`、`xargs --max-args=1`、`env -i PATH=/bin`)。各包みの `skip_opts` の旗(短い旗と長いオプションがあるか、`nohup` は両方なし、`exec` は短い旗だけ)の書き方も、`cmd_pos` と合う。
+- 「`nice -5` は macOS の man が古い形としてまだ受ける」は、`man nice` の COMPATIBILITY(「The traditional -increment option has been deprecated but is still supported」)と、`nice -5 true` の実行(rc 0)で確かめた。コメントの「the man page of nice」は OS を書かないが、誤りではない。
+- 「`stdbuf -o0`、`xargs -I{}` のような旗に付いた値は、旗の集合に関係なく同じ道を通る」は、写し(`stdbuf` の `"ioe"` を空に、`xargs` の旗の集合を空に)で、2 行とも落ちなかったことと合う。`xargs -I{}` の行は、`skip_xargs` の短い旗の道そのものを消した写しでは落ちる(`xargs -n 1` も同じ)ので、行は無駄ではないが、基準の数には入らない。
+- 案内文(`:1782`)は、`skip_opts` の分岐と専用の関数の 2 通りを書き、基準の全部は書かない。コメントを指しているので、これでよい。
+- コメントの足した行はどれも 78 桁以内、`git diff --check` は空。`nine`、`each way`、`one for each` は、行の数を指す箇所(「first nine」)を除いて、テストのファイルから消えた。
+- tech-debt の行は 5 列のまま、`~~` は 16 個で偶数。
+
+### Coverage gaps(再確認 2)
+
+- テストのファイルは動かしていない(この step の範囲外)。件数(D 678、F 137)と 3 つの awk の結果は /test で確かめる。probe は macOS の awk だけ。
+- 写し 36 通りは `cmd_pos` と `skip_*` の引数の読み方の部分だけ。旗の一覧の項目を 1 つずつ落とす写し(`time` の `--output`、`env` の `--chdir`、`xargs` の任意の値の旗 `ile`)は、基準が旗ごとではないので、落ちないまま。前回から変わらない。
+- 1 行を消しても集合の検査は FAIL しない(計画の「AC2 (b) の読み方」)。道ごとに行が 1 行だけの道が多い(たとえば `env --unset HOME`、`xargs --max-args=1`、`nice -5`)ので、その行を消すと、その道は黙って外れる。この PR が決めた範囲。
+
+### Recommendation(再確認 2)
+
+- Merge: yes(CRITICAL、HIGH、MEDIUM なし。指摘 7 は修正済みで、4 組すべての写しで足した行が FAIL に変わった。新しい LOW 2(8、9)は、コメントと tech-debt の文言)
+- Follow-ups:
+  - 8 は誤った理由の文なので、直すなら verify の前にテストのコメント 1 文(`:1072-1074`)。tech-debt の閉じの文の同じ文は /sync-docs の段で直す。
+  - 9 の (a) は、8 と同じ commit で直せる。(b)(c) は tech-debt の文と基準の 1 語。
+  - 2 の Related の test report の path は、/test の report ができたあとに足す(前のまま)。
+  - 任意(前のまま): `.claude/hooks/pre_bash_guard_rules.awk` のコメントの「a D row … pins each wrapper」。
