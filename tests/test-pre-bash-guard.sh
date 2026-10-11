@@ -1081,12 +1081,12 @@ check_modes D deny absent -- "${edge_deny[@]}"
 # copy of the guard, the -- took the path of a flag or a long option and its
 # row stayed deny, and so did env -i PATH=/bin without the assignment line
 # of skip_env (cmd_pos steps past an assignment itself). Other rows also
-# run a wrapper with arguments of its own (nice -n 5 sudo ls,
+# run a wrapper, with arguments of its own (nice -n 5 sudo ls,
 # xargs -I{} sudo ls {} and
 # xargs -I{} flock /tmp/l git push -f in edge_deny;
-# echo 'sudo ls' | xargs -I{} sh -c {} and
-# echo x | xargs sh -c 'git reset --hard' in B), but each holds a match of a
-# sentinel rule (sudo, a force push, a hard reset), so it stays denied even
+# echo 'sudo ls' | xargs -I{} sh -c {} in B) or bare
+# (echo x | xargs sh -c 'git reset --hard' in B), but each holds a match of
+# a sentinel rule (sudo, a force push, a hard reset), so it stays denied even
 # when cmd_pos misreads the wrapper: with the xargs branch of cmd_pos removed
 # from a copy of the guard, the xargs rows among them stayed deny on both
 # paths, while xargs sh -c 'git commit -n -m x' turned none. git commit -n
