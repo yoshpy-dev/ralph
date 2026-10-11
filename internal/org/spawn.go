@@ -212,10 +212,12 @@ type Org struct {
 	// DriverCallTimeout bounds each herdr / agmsg call Stop makes (the pane,
 	// tab and workspace gets of the ownership check, the C-c, the pane
 	// close, the agmsg Leave), each workspace get and close Disband makes,
-	// and the gets and the close in CloseDeferredSelfPane /
-	// CloseDeferredSelfWorkspace, one fresh deadline per call. Zero (the field's default) means "use
-	// defaultDriverCallTimeout" -- tests set a tiny value so a call that
-	// never answers times out fast.
+	// the gets and the close in CloseDeferredSelfPane /
+	// CloseDeferredSelfWorkspace, and each call of the watch's pulse cycle
+	// (watch.go: the herdr agent gets, the agmsg Join, Send, and History,
+	// and the real git status), one fresh deadline per call. Zero (the
+	// field's default) means "use defaultDriverCallTimeout" -- tests set a
+	// tiny value so a call that never answers times out fast.
 	DriverCallTimeout time.Duration
 	// Getenv overrides how Stop and Disband read the caller's herdr
 	// environment (HERDR_PANE_ID and HERDR_WORKSPACE_ID, set by herdr inside

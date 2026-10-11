@@ -217,7 +217,30 @@ func alertsByTeam(a *fakeWatchAgmsg) map[string][]string {
 	return out
 }
 
-// AC7: one RunWatchAll gives each running org what a single-org RunWatch of
+// runSingleOrgCycles runs orgID's pulse cycle the way the retired
+// single-org RunWatch did: its status file loaded once, then evaluateCycle
+// cycles times, with f's git status stub and stderr and no desktop
+// escalation. It is the baseline RunWatchAll is compared with (AC7).
+func (f *watchAllFixture) runSingleOrgCycles(t *testing.T, orgID string, cycles int) {
+	t.Helper()
+	statusPath := filepath.Join(f.dir, WatchStatusFileName(orgID))
+	status, err := loadWatchStatus(statusPath, orgID)
+	if err != nil {
+		t.Fatalf("load the status file of %s: %v", orgID, err)
+	}
+	run := &watchRun{
+		org: f.o, cfg: f.o.Config,
+		gitStatus: f.gitStatus, escalateFn: func(context.Context, string) error { return nil }, stderr: f.stderr,
+		statusPath: statusPath, escalationsPath: EscalationsPathIn(f.dir),
+	}
+	for n := 1; n <= cycles; n++ {
+		if err := run.evaluateCycle(context.Background(), orgID, status); err != nil {
+			t.Fatalf("cycle %d of %s: %v", n, orgID, err)
+		}
+	}
+}
+
+// AC7: one RunWatchAll gives each running org what the single-org cycle of
 // that org gives (the same status file and the same ALERTs), and does not
 // look at a disbanded org.
 func TestRunWatchAll_EachRunningOrgGetsTheSingleOrgCycle_ADisbandedOrgIsNotEvaluated(t *testing.T) {
@@ -242,13 +265,7 @@ func TestRunWatchAll_EachRunningOrgGetsTheSingleOrgCycle_ADisbandedOrgIsNotEvalu
 
 	single := setup(t)
 	for _, orgID := range []string{"org-a", "org-b"} {
-		err := single.o.RunWatch(context.Background(), WatchParams{
-			OrgID: orgID, Interval: time.Millisecond, Cycles: 2, StatusDir: single.dir,
-			GitStatus: single.gitStatus, Escalate: func(context.Context, string) error { return nil }, Stderr: single.stderr,
-		}, WatchHooks{})
-		if err != nil {
-			t.Fatalf("RunWatch %s: %v", orgID, err)
-		}
+		single.runSingleOrgCycles(t, orgID, 2)
 	}
 
 	for _, orgID := range []string{"org-a", "org-b"} {

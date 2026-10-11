@@ -327,7 +327,7 @@ func watchSpawnParams(orgID, seatID, role string) SpawnParams {
 
 // newTestWatchRun builds a watchRun wired to o/gitStatus/escalateFn, with
 // its own scratch StatusDir -- the test drives evaluateCycle directly
-// (rather than going through RunWatch's real select/sleep loop) so a
+// (rather than going through RunWatchAll's real wait between cycles) so a
 // multi-cycle test needs no real time to elapse; only the fakeClock moves.
 func newTestWatchRun(o *Org, gitStatus GitStatusFunc, escalateFn EscalateFunc, stderr *bytes.Buffer) (*watchRun, string, string) {
 	dir, err := os.MkdirTemp("", "watch-status-*")
@@ -770,6 +770,49 @@ func TestWatch_Deadman_LeaderIsAnomalySubject_EscalatesImmediately(t *testing.T)
 	}
 }
 
+// The deadman's desktop notification gets its own deadline,
+// inboxDesktopNotifyTimeout, under the cycle's context: an osascript that
+// does not return cannot hold the cycle until the watch ends.
+func TestWatch_Deadman_EscalateFuncGetsItsOwnDeadline(t *testing.T) {
+	o, _, _, _ := testWatchOrg(t)
+	if r := o.Spawn(watchSpawnParams("org-a", LeaderIdentity, LeaderIdentity)); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn leader failed: %+v", r)
+	}
+	o.Herdr.(*fakeWatchHerdr).AgentGetErrSeq[herdrAgentName("org-a", LeaderIdentity)] = []error{errors.New("herdr: agent not found")}
+
+	type call struct {
+		left        time.Duration
+		hasDeadline bool
+		parentKey   any
+	}
+	var calls []call
+	type ctxKey struct{}
+	escalate := func(ctx context.Context, _ string) error {
+		deadline, ok := ctx.Deadline()
+		calls = append(calls, call{left: time.Until(deadline), hasDeadline: ok, parentKey: ctx.Value(ctxKey{})})
+		return nil
+	}
+	run, statusPath, _ := newTestWatchRun(o, nil, escalate, &bytes.Buffer{})
+	status, err := loadWatchStatus(statusPath, "org-a")
+	if err != nil {
+		t.Fatalf("loadWatchStatus: %v", err)
+	}
+	ctx := context.WithValue(context.Background(), ctxKey{}, "cycle")
+	if err := run.evaluateCycle(ctx, "org-a", status); err != nil {
+		t.Fatalf("evaluateCycle: %v", err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("EscalateFunc called %d times; want 1 for the leader-subject escalation", len(calls))
+	}
+	c := calls[0]
+	if !c.hasDeadline || c.left <= 0 || c.left > inboxDesktopNotifyTimeout {
+		t.Errorf("EscalateFunc context deadline: present %t, %v left; want one within %v", c.hasDeadline, c.left, inboxDesktopNotifyTimeout)
+	}
+	if c.parentKey != "cycle" {
+		t.Errorf("EscalateFunc context does not derive from the cycle's (value %v)", c.parentKey)
+	}
+}
+
 // --- watch-status.json heartbeat --------------------------------------------
 
 func TestWatch_StatusFile_HeartbeatWrittenEveryCycle(t *testing.T) {
@@ -804,70 +847,64 @@ func TestWatch_StatusFile_HeartbeatWrittenEveryCycle(t *testing.T) {
 	}
 }
 
-// --- RunWatch's public loop (Cycles-capped, no real per-interval sleep
-// needed since Cycles > 0 returns before the loop ever selects on the
-// ticker) --------------------------------------------------------------------
+// --- RunWatchAll's public loop (Cycles-capped: Cycles > 0 returns before
+// the wait between cycles) ---------------------------------------------------
 
-func TestRunWatch_Cycles_RunsExactlyNThenReturns(t *testing.T) {
-	o, _, _, _ := testWatchOrg(t)
-	dir := t.TempDir()
+func TestRunWatchAll_Cycles_RunsExactlyNThenReturns(t *testing.T) {
+	f := newWatchAllFixture(t)
+	f.spawn(t, "org-a", "seat-1")
 
 	var onCycleCount int
-	err := o.RunWatch(context.Background(), WatchParams{
-		OrgID: "org-a", Interval: time.Millisecond, Cycles: 2, StatusDir: dir,
-	}, WatchHooks{OnCycle: func(int, time.Time) { onCycleCount++ }})
+	err := runWatchAll(t, f.o, context.Background(), f.params(2), WatchHooks{OnCycle: func(int, time.Time) { onCycleCount++ }})
 	if err != nil {
-		t.Fatalf("RunWatch: %v", err)
+		t.Fatalf("RunWatchAll: %v", err)
 	}
 	if onCycleCount != 2 {
 		t.Fatalf("expected exactly 2 cycles, got %d", onCycleCount)
 	}
-
-	data, err := os.ReadFile(filepath.Join(dir, WatchStatusFileName("org-a")))
-	if err != nil {
-		t.Fatalf("read status file: %v", err)
-	}
-	var status watchStatusFile
-	if err := json.Unmarshal(data, &status); err != nil {
-		t.Fatalf("parse status file: %v", err)
-	}
-	if status.Cycles != 2 {
+	if status := readWatchStatusFile(t, f.dir, "org-a"); status.Cycles != 2 {
 		t.Fatalf("expected cycles=2 in the persisted status, got %d", status.Cycles)
 	}
 }
 
-func TestRunWatch_RequiresOrgIDAndStatusDir(t *testing.T) {
-	o, _, _, _ := testWatchOrg(t)
-	if err := o.RunWatch(context.Background(), WatchParams{StatusDir: t.TempDir()}, WatchHooks{}); err == nil {
-		t.Fatal("expected an error for a blank org_id")
+// RunWatchAll without a StatusDir is refused before it takes any lock or
+// writes anything (a blank dir would put watch.lock in the working
+// directory); org_id is no parameter of it.
+func TestRunWatchAll_RequiresStatusDir(t *testing.T) {
+	f := newWatchAllFixture(t)
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	for _, dir := range []string{"", "  "} {
+		p := f.params(1)
+		p.StatusDir = dir
+		err := f.o.RunWatchAll(context.Background(), p, WatchHooks{OnCycle: func(int, time.Time) {
+			t.Errorf("a watch with StatusDir %q ran a cycle", dir)
+		}})
+		if err == nil || !strings.Contains(err.Error(), "state dir is required") {
+			t.Errorf("RunWatchAll with StatusDir %q = %v; want the state dir required", dir, err)
+		}
 	}
-	if err := o.RunWatch(context.Background(), WatchParams{OrgID: "org-a"}, WatchHooks{}); err == nil {
-		t.Fatal("expected an error for a blank StatusDir")
+	if entries, err := os.ReadDir(cwd); err != nil || len(entries) != 0 {
+		t.Errorf("the working directory after the refusals holds %v (%v); want nothing written", entries, err)
 	}
 }
 
-// TestRunWatch_MultipleOrgs_SeparateStatusFiles pins the self-review H-1 fix:
-// two orgs watched from the same repository (one shared StatusDir, exactly
-// as manifest.jsonl/model-receipts.jsonl are already shared there) must get
-// distinct watch-status files, not silently clobber each other's
-// OrgID/Cycles/WatchdogJoined/SeatSnapshots state via one fixed file name.
-func TestRunWatch_MultipleOrgs_SeparateStatusFiles(t *testing.T) {
-	o, _, _, _ := testWatchOrg(t)
-	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
-		t.Fatalf("spawn org-a failed: %+v", r)
-	}
-	if r := o.Spawn(watchSpawnParams("org-b", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
-		t.Fatalf("spawn org-b failed: %+v", r)
+// TestRunWatchAll_MultipleOrgs_SeparateStatusFiles pins the self-review H-1
+// fix: two orgs watched from the same repository (one shared StatusDir,
+// exactly as manifest.jsonl/model-receipts.jsonl are already shared there),
+// with the same seat id, must get distinct watch-status files, not silently
+// clobber each other's OrgID/Cycles/WatchdogJoined/SeatSnapshots state via
+// one fixed file name.
+func TestRunWatchAll_MultipleOrgs_SeparateStatusFiles(t *testing.T) {
+	f := newWatchAllFixture(t)
+	f.spawn(t, "org-a", "seat-1")
+	f.spawn(t, "org-b", "seat-1")
+
+	if err := runWatchAll(t, f.o, context.Background(), f.params(1), WatchHooks{}); err != nil {
+		t.Fatalf("RunWatchAll: %v", err)
 	}
 
-	dir := t.TempDir()
-	if err := o.RunWatch(context.Background(), WatchParams{OrgID: "org-a", Interval: time.Millisecond, Cycles: 1, StatusDir: dir}, WatchHooks{}); err != nil {
-		t.Fatalf("RunWatch org-a: %v", err)
-	}
-	if err := o.RunWatch(context.Background(), WatchParams{OrgID: "org-b", Interval: time.Millisecond, Cycles: 1, StatusDir: dir}, WatchHooks{}); err != nil {
-		t.Fatalf("RunWatch org-b: %v", err)
-	}
-
+	dir := f.dir
 	pathA := filepath.Join(dir, WatchStatusFileName("org-a"))
 	pathB := filepath.Join(dir, WatchStatusFileName("org-b"))
 	if pathA == pathB {
@@ -1115,7 +1152,7 @@ func TestWatch_Deadman_PersistedAlertBaseline_SurvivesLegacyWatchdogStop(t *test
 
 // TestWatch_Deadman_CrossOrgActivity_DoesNotClearPendingAlert pins the
 // cross-review AR-1 fix: leaderActivityEventCount must be scoped to the
-// watched org. A shared manifest store (RunWatch's normal shape: one
+// watched org. A shared manifest store (the watch's normal shape: one
 // manifest.jsonl for every org in the harness) means an unrelated org's own
 // genuine activity must never clear a different, stalled org's pending
 // deadman alert -- only activity recorded under the watched org's own OrgID

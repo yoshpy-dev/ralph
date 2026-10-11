@@ -21,20 +21,22 @@ import (
 	"github.com/yoshpy-dev/ralph/internal/org/protocol"
 )
 
-// Package note (pulse layer, PR④ Slice 3): RunWatch implements
-// `ralph org watch`'s deterministic pulse layer (see plan
+// Package note (pulse layer, PR④ Slice 3): evaluateCycle below is
+// `ralph org watch`'s deterministic pulse layer for one org (see plan
 // docs/plans/active/2026-08-02-org-runtime-watchdog.md, AC-3/3b/3c/4/5). It
-// evaluates one cycle at a time (evaluateCycle below), never invokes an LLM
-// itself (the on-demand semantic-judgment watcher is a separate Slice 4
-// concern reached only through the WatchHooks.OnSemanticTrigger seam), and
-// persists its own heartbeat/dedupe state to watch-status-<org_id>.json (see
+// evaluates one cycle at a time, never invokes an LLM itself (the on-demand
+// semantic-judgment watcher is a separate Slice 4 concern reached only
+// through the WatchHooks.OnSemanticTrigger seam), and persists its own
+// heartbeat/dedupe state to watch-status-<org_id>.json (see
 // WatchStatusFileName) so a restart does not re-fire already-handled
 // conditions.
 //
-// RunWatchAll (docs/plans/active/2026-10-11-org-cross-watch.md) runs the same
+// RunWatchAll (docs/plans/active/2026-10-11-org-cross-watch.md) runs that
 // per-org cycle for every running org of a ledger in one process, after the
 // inbox deadlines (deadline.go), under watch.lock and the liveness mark
-// (watchalive.go).
+// (watchalive.go). It replaced RunWatch, the loop of the single-org
+// `ralph org watch --org-id`, which was retired so that no org's status file
+// has two writers.
 
 // watchdogIdentity is the agmsg identity `ralph org watch` joins/sends
 // under -- distinct from LeaderIdentity and every seat id, so ALERT traffic
@@ -44,10 +46,10 @@ import (
 const watchdogIdentity = "watchdog"
 
 // WatchStatusFileName returns the file name (within the caller-resolved org
-// state directory, typically ResolveOrgStateDir's result) RunWatch reads and
-// rewrites every cycle for orgID: heartbeat (last_cycle_ts/cycles) plus the
-// AC-3c condition-dedupe and AC-5 deadman state. `ralph org status` never
-// reads this file -- it is watch's own observability record, not seat
+// state directory, typically ResolveOrgStateDir's result) RunWatchAll reads
+// once and rewrites every cycle for orgID: heartbeat (last_cycle_ts/cycles)
+// plus the AC-3c condition-dedupe and AC-5 deadman state. `ralph org status`
+// never reads this file -- it is watch's own observability record, not seat
 // roster.
 //
 // The name is namespaced per org_id (self-review H-1 fix): a single fixed,
@@ -57,11 +59,10 @@ const watchdogIdentity = "watchdog"
 // OrgID/Cycles/LastCycleTS/WatchdogJoined and SeatSnapshots (keyed
 // by bare SeatID) all overwrote across orgs, while Conditions/PendingAlerts/
 // Escalated happened to be safe only because conditionKey already namespaces
-// them by org_id. orgID is guaranteed path-safe here: RunWatch's own
-// strings.TrimSpace(p.OrgID) == "" gate plus every production caller's
-// upstream requireOrgID/ValidateIdentifier check (identifierPattern,
-// identifier.go: ^[a-z][a-z0-9-]{0,29}$) both run before this is ever
-// reached.
+// them by org_id. orgID is path-safe where RunWatchAll names the file: it
+// checks each org_id it reads from the manifest with ValidateIdentifier
+// (identifierPattern, identifier.go: ^[a-z][a-z0-9-]{0,29}$) first
+// (pulseOrg).
 func WatchStatusFileName(orgID string) string {
 	return fmt.Sprintf("watch-status-%s.json", orgID)
 }
@@ -86,9 +87,9 @@ const (
 // implementers (real driver.Herdr, and every pre-Slice-3 test fake) are
 // unaffected. driver.Herdr -- the real implementation
 // internal/cli/org.go's newOrgRuntime wires into every Org.Herdr -- already
-// satisfies this structurally; RunWatch type-asserts Org.Herdr against it
-// per cycle and treats a failed assertion as "probe unavailable" (best
-// effort, never fatal to the pulse loop).
+// satisfies this structurally; the pulse cycle type-asserts Org.Herdr
+// against it per call and treats a failed assertion as "probe unavailable"
+// (best effort, never fatal to the pulse loop).
 type watchHerdrProbe interface {
 	AgentGet(ctx context.Context, target string) (string, error)
 }
@@ -101,9 +102,9 @@ type watchAgmsgHistory interface {
 }
 
 // GitStatusFunc returns `git status --porcelain` output for cwd (the
-// scope-change condition's declared-scope signal). Injectable so watch.go
-// itself never calls exec.Command directly for this and so tests can drive
-// scope changes deterministically without a real git worktree.
+// scope-change condition's declared-scope signal). Injectable so tests can
+// drive scope changes deterministically without a real git worktree; the
+// real one is realGitStatus.
 type GitStatusFunc func(cwd string) (string, error)
 
 // maxScopeChangeLines bounds how many `git status --porcelain` lines the
@@ -163,10 +164,10 @@ func truncateScopeOutput(out string, byteBudget int) string {
 }
 
 // EscalateFunc performs the AC-5 best-effort platform notification beyond
-// the escalations.jsonl record and stderr banner (both of which RunWatch
-// always does itself). The real implementation runs `osascript` on darwin
-// and no-ops elsewhere; tests inject a stub to assert on the call without
-// depending on macOS.
+// the escalations.jsonl record and stderr banner (both of which
+// escalateAlert always writes itself). The real implementation runs
+// `osascript` on darwin and no-ops elsewhere; tests inject a stub to assert
+// on the call without depending on macOS.
 type EscalateFunc func(ctx context.Context, message string) error
 
 // WatchHooks lets a caller observe watch-cycle events without changing
@@ -181,33 +182,6 @@ type WatchHooks struct {
 	// 1-based, and the clock value used for that cycle). Mainly test
 	// observability.
 	OnCycle func(cycleN int, ts time.Time)
-}
-
-// WatchParams describes one `ralph org watch` invocation (see RunWatch).
-type WatchParams struct {
-	OrgID string
-	// Interval is the pulse-cycle wait. <= 0 falls back to
-	// Org.Config.Watchdog.IntervalSeconds, then to 30s if that is also <= 0.
-	Interval time.Duration
-	// Cycles, when > 0, caps RunWatch to exactly that many cycles before
-	// returning nil -- the deterministic test/CLI (`--once` => Cycles: 1)
-	// path that needs no real ticker/sleep. Zero (the default for a real
-	// long-running `ralph org watch`) means "run until ctx is done".
-	Cycles int
-	// StatusDir is the directory watch-status-<org_id>.json (see
-	// WatchStatusFileName) and escalations.jsonl live in (typically the
-	// resolved org state-dir, the same directory the
-	// manifest/receipts stores are rooted at). Required.
-	StatusDir string
-	// GitStatus overrides the scope-change condition's git probe; nil uses
-	// the real `git status --porcelain` (os/exec).
-	GitStatus GitStatusFunc
-	// Escalate overrides the AC-5 platform-notification side channel; nil
-	// uses the real darwin osascript best-effort (no-op elsewhere).
-	Escalate EscalateFunc
-	// Stderr is where the AC-5 escalation banner is written; nil uses
-	// os.Stderr.
-	Stderr io.Writer
 }
 
 // watchConditionRecord is the AC-3c dedupe record for one conditionKey.
@@ -326,7 +300,7 @@ func (s *watchStatusFile) save(path string) error {
 
 // nowTime returns o.Now() (or time.Now() when Org.Now is unset), mirroring
 // (*Org).now's Clock fallback but returning time.Time instead of a
-// formatted string -- RunWatch needs time.Time for duration arithmetic.
+// formatted string -- the watch needs time.Time for duration arithmetic.
 func (o *Org) nowTime() time.Time {
 	if o.Now != nil {
 		return o.Now()
@@ -399,8 +373,8 @@ func (o *Org) realGitStatus(cwd string) (string, error) {
 // realEscalate is EscalateFunc's real implementation: a best-effort darwin
 // notification via osascript. Any other GOOS -- or an osascript failure --
 // is a silent no-op; escalations.jsonl and the stderr banner are always the
-// authoritative escalation record (see RunWatch's doc comment / AC-5's own
-// "tests are file-output-authoritative" assumption).
+// authoritative escalation record (see escalateAlert's doc comment / AC-5's
+// own "tests are file-output-authoritative" assumption).
 func realEscalate(ctx context.Context, message string) error {
 	if runtime.GOOS != "darwin" {
 		return nil
@@ -423,14 +397,14 @@ func osascriptNotify(ctx context.Context, title, message string) error {
 	return nil
 }
 
-// ResolveWatchInterval returns the effective pulse-cycle interval RunWatch
-// will use: requested if positive, else cfg.IntervalSeconds, else a fixed
-// 30s fallback. Exported so a caller that needs to report the effective
-// cadence before RunWatch itself resolves it internally (e.g. `ralph org
-// watch`'s startup banner, self-review LOW fix: the banner used to print the
-// raw --interval-seconds flag value, which is 0 by default, rather than the
-// interval that is actually running) does not have to duplicate this
-// fallback chain.
+// ResolveWatchInterval returns the effective pulse-cycle interval
+// RunWatchAll will use: requested if positive, else cfg.IntervalSeconds,
+// else a fixed 30s fallback. Exported so a caller that needs to report the
+// effective cadence before RunWatchAll itself resolves it internally (e.g.
+// `ralph org watch`'s startup banner, self-review LOW fix: the banner used
+// to print the raw --interval-seconds flag value, which is 0 by default,
+// rather than the interval that is actually running) does not have to
+// duplicate this fallback chain.
 func ResolveWatchInterval(requested time.Duration, cfg config.OrgWatchdogConfig) time.Duration {
 	interval := requested
 	if interval <= 0 {
@@ -442,74 +416,10 @@ func ResolveWatchInterval(requested time.Duration, cfg config.OrgWatchdogConfig)
 	return interval
 }
 
-// RunWatch runs the pulse layer for p.OrgID: one evaluateCycle call per
-// interval, until p.Cycles is reached (p.Cycles > 0) or ctx is done
-// (p.Cycles == 0, the default long-running mode). Every cycle rewrites
-// WatchStatusFileName(p.OrgID) inside p.StatusDir with its heartbeat and
-// dedupe state; a returned error means a cycle itself failed unrecoverably
-// (e.g. manifest read/status write failure) -- individual condition
-// evaluation/ALERT/escalation problems are handled best-effort inside a
-// cycle and never abort the loop.
-func (o *Org) RunWatch(ctx context.Context, p WatchParams, hooks WatchHooks) error {
-	if strings.TrimSpace(p.OrgID) == "" {
-		return fmt.Errorf("org: watch: org_id is required")
-	}
-	if strings.TrimSpace(p.StatusDir) == "" {
-		return fmt.Errorf("org: watch: state dir is required")
-	}
-
-	interval := ResolveWatchInterval(p.Interval, o.Config.Watchdog)
-
-	gitStatus := p.GitStatus
-	if gitStatus == nil {
-		gitStatus = o.realGitStatus
-	}
-	escalateFn := p.Escalate
-	if escalateFn == nil {
-		escalateFn = realEscalate
-	}
-	stderr := p.Stderr
-	if stderr == nil {
-		stderr = os.Stderr
-	}
-
-	statusPath := filepath.Join(p.StatusDir, WatchStatusFileName(p.OrgID))
-	escalationsPath := EscalationsPathIn(p.StatusDir)
-
-	status, err := loadWatchStatus(statusPath, p.OrgID)
-	if err != nil {
-		return err
-	}
-
-	run := &watchRun{
-		org: o, cfg: o.Config, hooks: hooks,
-		gitStatus: gitStatus, escalateFn: escalateFn, stderr: stderr,
-		statusPath: statusPath, escalationsPath: escalationsPath,
-	}
-
-	n := 0
-	for {
-		if err := run.evaluateCycle(ctx, p.OrgID, status); err != nil {
-			return err
-		}
-		n++
-		if hooks.OnCycle != nil {
-			hooks.OnCycle(n, o.nowTime())
-		}
-		if p.Cycles > 0 && n >= p.Cycles {
-			return nil
-		}
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-time.After(interval):
-		}
-	}
-}
-
-// watchRun bundles the per-invocation dependencies evaluateCycle and its
-// helpers need, so RunWatch's own signature stays small and every helper
-// below is a method rather than a long parameter list.
+// watchRun bundles the dependencies one org's evaluateCycle and its helpers
+// need, so every helper below is a method rather than a long parameter
+// list. RunWatchAll builds one per run and copies it for each org with that
+// org's statusPath (pulseOrg).
 type watchRun struct {
 	org             *Org
 	cfg             config.OrgConfig
@@ -534,14 +444,25 @@ type WatchAllParams struct {
 	// escalations.jsonl live in it (the directory of the manifest the Org
 	// reads, in production). Required.
 	StatusDir string
-	// Interval, Cycles, GitStatus, Escalate, and Stderr mean what they mean
-	// in WatchParams. Stderr also gets the inbox deadline banners and one
-	// line for each failure RunWatchAll goes past.
-	Interval  time.Duration
-	Cycles    int
+	// Interval is the pulse-cycle wait (ResolveWatchInterval): <= 0 falls
+	// back to Org.Config.Watchdog.IntervalSeconds, then to 30s if that is
+	// also <= 0.
+	Interval time.Duration
+	// Cycles, when > 0, ends the run after exactly that many cycles -- the
+	// `--once` (Cycles: 1) and test path. Zero (a real long-running
+	// `ralph org watch --all`) means run until ctx is done or a stop request
+	// for this run is there.
+	Cycles int
+	// GitStatus overrides the scope-change condition's git probe; nil uses
+	// the real `git status --porcelain` (realGitStatus).
 	GitStatus GitStatusFunc
-	Escalate  EscalateFunc
-	Stderr    io.Writer
+	// Escalate overrides the AC-5 deadman's platform notification; nil uses
+	// the real darwin osascript best-effort (realEscalate, no-op elsewhere).
+	Escalate EscalateFunc
+	// Stderr gets the AC-5 escalation banners, the inbox deadline banners,
+	// and one line for each failure RunWatchAll goes past; nil uses
+	// os.Stderr.
+	Stderr io.Writer
 	// LockWait is how long to wait for watch.lock (AcquireWatchLock); zero
 	// means defaultWatchLockWait.
 	LockWait time.Duration
@@ -561,9 +482,9 @@ type WatchAllParams struct {
 //     InboxDeadlineMemory for the whole run). It needs no herdr, agmsg, or
 //     git, so no org's pulse can hold it back;
 //  2. runs the pulse cycle (evaluateCycle) of each org in RunningOrgs of
-//     the manifest, in that order, with each org's watch-status file kept
-//     in memory across cycles as RunWatch keeps its one. An org that no
-//     longer runs (disbanded) is not evaluated and is dropped;
+//     the manifest, in that order, with each org's watch-status file read
+//     once and then kept in memory across cycles. An org that no longer
+//     runs (disbanded) is not evaluated and is dropped;
 //  3. rewrites the mark with the cycle's ts;
 //  4. calls hooks.OnCycle.
 //
@@ -794,7 +715,8 @@ func (w *watchAllRun) finish(lock *WatchLock) {
 // one org cannot hold the cycle of the others, and a watch told to stop
 // still finishes its cycle with real answers rather than with cancelled
 // calls that would read as dead seats. ctx reaches only the deadman's
-// EscalateFunc.
+// EscalateFunc, which escalateAlert bounds with inboxDesktopNotifyTimeout
+// as well.
 func (w *watchRun) evaluateCycle(ctx context.Context, orgID string, status *watchStatusFile) error {
 	now := w.org.nowTime()
 
@@ -1012,7 +934,7 @@ func (w *watchRun) raiseOrClear(status *watchStatusFile, orgID, seatID, condType
 // smoke (docs/plans/active/2026-08-02-org-runtime-watchdog.md) found zero
 // ALERTs reaching agmsg history under exactly that shape while escalations
 // still fired. Both this package's own pulse-layer sendAlert and
-// internal/cli/org.go's on-demand watcher-verdict ALERT path
+// internal/cli/org_watch.go's on-demand watcher-verdict ALERT path
 // (newWatchdogHooks) call this so ALERT delivery is identical regardless of
 // which layer produced the finding.
 func (o *Org) SendWatchdogAlert(ctx context.Context, orgID, message string) error {
@@ -1021,7 +943,7 @@ func (o *Org) SendWatchdogAlert(ctx context.Context, orgID, message string) erro
 
 // ensureWatchdogJoined best-effort-joins the "watchdog" mechanism identity
 // (see the const's doc comment) onto the org's agmsg team exactly once per
-// RunWatch's persisted status -- mirrors ensureLeaderJoined's idempotent,
+// org's persisted watch status -- mirrors ensureLeaderJoined's idempotent,
 // best-effort Join semantics in spawn.go, but for the watchdog identity
 // instead of leader.
 //
@@ -1385,7 +1307,11 @@ func (w *watchRun) escalateAlert(ctx context.Context, status *watchStatusFile, a
 	_, _ = fmt.Fprintf(w.stderr, "WATCHDOG ESCALATION: org=%s alert=%s subject=%s reason=%s -- see %s\n",
 		status.OrgID, alertID, pending.Subject, reason, w.escalationsPath)
 
-	_ = w.escalateFn(ctx, fmt.Sprintf("ralph org watch: escalation for org %s (%s)", status.OrgID, reason))
+	// The notification gets its own bound, as the inbox's does: osascript
+	// that does not return would otherwise hold the cycle until ctx ends.
+	notifyCtx, cancel := context.WithTimeout(ctx, inboxDesktopNotifyTimeout)
+	_ = w.escalateFn(notifyCtx, fmt.Sprintf("ralph org watch: escalation for org %s (%s)", status.OrgID, reason))
+	cancel()
 
 	status.Escalated[alertID] = true
 	pruneEscalated(status.Escalated)

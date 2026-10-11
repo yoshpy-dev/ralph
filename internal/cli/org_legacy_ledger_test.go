@@ -129,7 +129,7 @@ func TestOrgLegacyLedger_MutatingVerbsRefusedWhileLegacySeatsActive(t *testing.T
 		{"stop_all_dry_run", func(string) []string { return []string{"stop", "--all", "--dry-run"} }},
 		{"disband", func(string) []string { return []string{"disband", "--org-id", "org-a"} }},
 		{"disband_all", func(string) []string { return []string{"disband", "--all"} }},
-		{"watch", func(string) []string { return []string{"watch", "--org-id", "org-a", "--once"} }},
+		{"watch", func(string) []string { return []string{"watch", "--all", "--once"} }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

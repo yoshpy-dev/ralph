@@ -18,13 +18,13 @@ import (
 // plan docs/plans/active/2026-08-02-org-runtime-watchdog.md, AC-6). It is
 // only ever reached through WatchHooks.OnSemanticTrigger's seam (watch.go)
 // -- the deterministic pulse layer never invokes an LLM itself. The caller
-// wiring that seam (internal/cli/org.go's `ralph org watch` command) is
+// wiring that seam (internal/cli/org_watch.go's `ralph org watch` command) is
 // responsible for running RunWatcher in its own goroutine and for treating
 // an abnormal verdict as an ALERT-worthy finding; RunWatcher itself never
 // sends a message and never blocks the pulse loop by design. Its own ctx
 // timeout (watcherInvokeTimeout, a fixed bound) does not need to stay below
 // one pulse interval: newWatchdogHooks always runs RunWatcher in its own
-// goroutine behind a single-flight guard (internal/cli/org.go), so a slow
+// goroutine behind a single-flight guard (internal/cli/org_watch.go), so a slow
 // judgment call can never delay or overlap the pulse loop that triggered it
 // regardless of how long it takes relative to the interval -- the interval-
 // derived timeout this constant replaced was an obsolete constraint from
@@ -225,9 +225,11 @@ func watcherPrompt(p WatcherParams, paneTail string, events []ManifestEvent) str
 // Loop pipeline used), returning trimmed stdout. This shells out directly
 // (exec.CommandContext) rather than through an injectable interface field --
 // RunWatcher's signature is fixed by the plan with no runner parameter --
-// following the same established in-package pattern as watch.go's
-// realGitStatus/realEscalate (direct exec.Command for a non-herdr/agmsg
-// system dependency, PATH-stubbed in tests rather than dependency-injected).
+// and tests stub `claude` on PATH. watch.go's realGitStatus and
+// realEscalate shell out with exec.CommandContext too (realGitStatus under
+// callWithTimeout's deadline, realEscalate through osascriptNotify), but
+// each is the default behind a seam tests replace (GitStatusFunc,
+// EscalateFunc).
 //
 // WaitDelay bounds a well-known exec/context interaction: when ctx expires,
 // exec.CommandContext kills the direct child (a shell, in the real `claude`
@@ -269,7 +271,7 @@ func realClaudeInvoke(ctx context.Context, model, prompt string) (string, error)
 // a malformed/unknown verdict JSON -- all fold to the same outcome: a
 // watcher_error receipt (Honored: unknown, since no verifiable model
 // observation exists for a failed call) and a non-nil error. The caller
-// (internal/cli/org.go's OnSemanticTrigger wiring) treats any error as "no
+// (internal/cli/org_watch.go's OnSemanticTrigger wiring) treats any error as "no
 // verdict to act on" -- never as itself evidence of an abnormal seat; a
 // broken judge is not evidence of a broken seat.
 func (o *Org) RunWatcher(ctx context.Context, cfg config.OrgWatchdogConfig, p WatcherParams) (WatcherVerdict, error) {

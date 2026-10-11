@@ -47,7 +47,8 @@ const (
 	inboxNotifySkipped = "skipped"
 )
 
-// inboxDesktopNotifyTimeout bounds one desktop notification call.
+// inboxDesktopNotifyTimeout bounds one desktop notification call: the
+// inbox's, and the watch deadman's (escalateAlert, watch.go).
 const inboxDesktopNotifyTimeout = 10 * time.Second
 
 // Titles of the inbox's desktop notifications on the osascript path, named
