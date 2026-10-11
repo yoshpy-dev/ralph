@@ -138,8 +138,12 @@ None (テストの行を別の配列に移して足し、検査を 1 つ足し�
   - S7(db5134f1、inline、コメントと docs だけ): LOW 8・9 を直した(テストのコメント 3 か所と tech-debt の閉じの文。判定と件数は変わらない)。テストは 2,227/0(macOS の awk)、shellcheck は指摘なし、列の数は 5 のまま。コメントの行は 78 桁以内に折り直した
   - self-review の再確認 3(3c5b0066、reviewer/sonnet): LOW 8・9 は修正済み、新しい指摘なし。Merge yes
   - verify(356535bb、verifier/opus): pass。AC1・AC2 は Met(AC2 は (a) と (g) の (a) を抜き取りで流した)、AC3・AC4 は Partially(テスト全件と 3 つの awk は /test)。LOW 2 件(V-1: `wrapper_deny` の上のコメントが「包みに自分の引数を付ける行」の例に、旗のない `echo x | xargs sh -c 'git reset --hard'` を挙げる。V-2: tech-debt の (h) の先頭の「Nine rows of `edge_deny`」が今は行のない配列を指す、「leaves out three things」のあとに文が 4 つ続く)と情報 3 件
-  - S8(この commit、inline、コメントだけ): V-1 を直した。その例を「bare」(引数なしの包み)として分けて挙げた。結論(sentinel つきの行は分岐の読み違えで落ちない)は変わらない。テストは 2,227/0、shellcheck は指摘なし。V-2 は sync-docs で直す。verify の後にテストのファイルを変えたので、reviewer と verifier にこの差分だけを見せてから /test に進む
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+  - S8(10d73d88、inline、コメントだけ): V-1 を直した。その例を「bare」(引数なしの包み)として分けて挙げた。結論(sentinel つきの行は分岐の読み違えで落ちない)は変わらない。テストは 2,227/0、shellcheck は指摘なし。V-2 は sync-docs で直す。verify の後にテストのファイルを変えたので、reviewer と verifier にこの差分だけを見せてから /test に進む
+  - self-review の再確認 4(c34f8604、reviewer/sonnet): V-1 の直しは事実に合い、新しい指摘なし。Merge yes
+  - 再 verify(aafae600、verifier/opus): pass。V-1 は修正済みで、新しい指摘なし。V-2 と I-1 は sync-docs で直す
+  - test(5f54e09b、tester): pass。`./scripts/run-test.sh` rc 0(shell 40 本と Go 8 packages)、guard のテストは macOS の awk、mawk 1.3.4、gawk 5.2.1 のすべてで 2,227/0。base のテストを HEAD の guard で流すと 2,108/0 で、base の結果の行はすべて HEAD に残る。AC2 の (a)〜(g) はどれも記録した行が FAIL し、(f) と (g) は行を足す前のテストでは緑だった。Test gaps は 6 件(行の存在と形だけを見ること、行が区別できない 4 つの道、旗ごとには押さえないこと、など)
+  - sync-docs(この commit、doc-maintainer): tech-debt のテストの穴の行(163 行目)の (h) の閉じを直した。V-2 の 2 点(「Nine rows of `edge_deny`」に `wrapper_deny` へ移ったことを足す。「leaves out three things」のあとの 4 つ目の文を別の点にする)、I-1(Related に test report を足す)、「both its rows in D」を「every row of that name」に直したこと、mutation を流した awk の範囲(gawk 全部、mawk 22 個、macOS の awk 4 個)を足したこと。insight event に self_review と sync_docs を追記した。guard のファイルは触っていない
+- [x] Review artifact created
+- [x] Verification artifact created
+- [x] Test artifact created
 - [ ] PR created
