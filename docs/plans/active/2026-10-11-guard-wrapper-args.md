@@ -134,6 +134,8 @@ None (テストの行を別の配列に移して足し、検査を 1 つ足し�
   - 2026-10-11: plan の Scope(25 行)・Assumptions・Design decisions(分岐ごとの基準)・AC1(34 行)・AC2((b) を「1 つの名前の行を全部消す」に、(g) を追加)・AC3・Implementation outline(S5〜S6)を直し、ユーザーが承認ゲートで Approve(digest 5ebd931f0fcc)
   - S5 完了(20e282be、implementer/opus): 9 行を足し(34 行。最初の 9 行はそのまま、続く 25 行は `WRAPPER` の順に包みごとにまとめた)、`wrapper_deny` の上のコメントを分岐ごとの基準の 3 つの箇条に書き直し、ほかの文(配列の中、集合の検査、案内文、ヘッダーの D・F 項目、PR #219 の検査のコメント)を基準を指す形にした。テストは 2,227/0(3 つの awk)、節ごとに D 678、F 137、ほかは同じ。shellcheck は指摘なし、run-verify は rc 0。(g) の写しのうち、`skip_env` と `skip_xargs` の `--` の行を消したものは、`--` がほかの道(値を取らない旗、値を取らない長いオプション)を通って同じく `sh` で止まるので、どの行も落ちない等価の写しだった。その行を `return i` に替えた写しで `env --`・`xargs --` が落ちた。ほかの (g) の 7 通りは、足した行がそれぞれ jq あり・なしで落ち、9 行を足す前のテスト(b7885236)では 2,191/0 で緑だった。`skip_opts` の `--` の行と `skip_env` の代入の行を消した写しも等価(緑)で、この 4 つの道は「行が区別できない道」としてコメントに書いた。(a)〜(f) は最終の木で再び FAIL した((b) は nohup の 2 行を消した写し)
   - S6 完了(この commit、inline、docs だけ): tech-debt の (h) の閉じの文を分岐ごとの基準の言い方に揃え、(g) の結果と、基準の外にあるもの(旗に付いた値、`env -S`、行が区別できない道)を書いた。列の数は 5 のまま
+  - self-review の再確認 2(8d3624a5、reviewer/sonnet): MEDIUM 7 は修正済み(4 組の写しで足した行がそれぞれ none に、足した 2 行も、道を壊した写しで none に。「行が区別できない道」の記述も正しい)。新しい LOW 2 件。LOW 8(「`env -S` の道は sentinel つきの行だけが押さえる」は誤り。`edge_deny` の、lexer だけが deny する `env -S 'git push origin --force'` と `--split-string=` の行が押さえる)、LOW 9(ヘッダーの「given above it」の指す先、tech-debt の (g) の文の主語、基準の「each path of skip_command」が走らない `-v`・`-V` の道を含んでしまう)
+  - S7(この commit、inline、コメントと docs だけ): LOW 8・9 を直した(テストのコメント 3 か所と tech-debt の閉じの文。判定と件数は変わらない)。テストは 2,227/0(macOS の awk)、shellcheck は指摘なし、列の数は 5 のまま。コメントの行は 78 桁以内に折り直した
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created

@@ -58,8 +58,9 @@
 #      "$(cat ...)"), shells fed through -c, here-strings, pipes and
 #      heredocs, wrappers (wrapper_deny holds the hand-written rows that run
 #      a wrapper before sh -c 'git commit -n -m x', bare or with arguments
-#      of its own by a per-branch criterion given above it; F requires one
-#      row or more for each name of WRAPPER) and unknown runners,
+#      of its own by a per-branch criterion stated in the comment above
+#      wrapper_deny; F requires one row or more for each name of WRAPPER)
+#      and unknown runners,
 #      comments, ${...}, process substitution, functions and
 #      subshells, a JSON %u escape; forms only the lexer denies ($(...),
 #      backticks, <(...), ${...}, sh -c, eval, env -S, here-strings, pipes
@@ -1061,24 +1062,27 @@ check_modes D deny absent -- "${edge_deny[@]}"
 #     (nohup --), a long option with = in one word (time --format=%e), and
 #     a - and digits flag (nice -5, the old form that the man page of nice
 #     still accepts);
-#   - each path of skip_env, skip_command and skip_xargs: -- (env --,
-#     command --, xargs --), a value-taking short flag and long option with
-#     the value in the next word (env -u HOME, env --unset HOME,
-#     xargs -n 1, xargs --max-args 1), a flag without a value (env -i,
-#     command -p), a long option that skip_xargs does not list, here one
-#     with = in one word (xargs --max-args=1), and an assignment
-#     (env -i PATH=/bin).
+#   - each path of skip_env, skip_command and skip_xargs that reaches a
+#     command (command -v and -V run nothing; edge_none has
+#     command -v sudo): -- (env --, command --, xargs --), a value-taking
+#     short flag and long option with the value in the next word
+#     (env -u HOME, env --unset HOME, xargs -n 1, xargs --max-args 1), a
+#     flag without a value (env -i, command -p), a long option that
+#     skip_xargs does not list, here one with = in one word
+#     (xargs --max-args=1), and an assignment (env -i PATH=/bin).
 # A value attached to its flag (stdbuf -o0, xargs -I{}) takes the same path
 # whatever the branch's flag set is, so it does not count. env -S queues its
-# string as commands again; it is outside the criterion, and only rows with
-# a sentinel match reach it. A branch that misreads one of these arguments
-# and stops on a word other than sh turns the row none. A row cannot tell
-# its path from another path that reads the word the same way: with the --
-# line of skip_opts, skip_env or skip_xargs removed from a copy of the
-# guard, the -- took the path of a flag or a long option and its row stayed
-# deny, and so did env -i PATH=/bin without the assignment line of skip_env
-# (cmd_pos steps past an assignment itself). Other rows also run a wrapper
-# with arguments of its own (nice -n 5 sudo ls, xargs -I{} sudo ls {} and
+# string as commands again; it is outside the criterion, and the rows of
+# edge_deny that only the lexer denies (env -S 'git push origin --force' and
+# its --split-string= twin) pin that path. A branch that misreads one of
+# these arguments and stops on a word other than sh turns the row none. A
+# row cannot tell its path from another path that reads the word the same
+# way: with the -- line of skip_opts, skip_env or skip_xargs removed from a
+# copy of the guard, the -- took the path of a flag or a long option and its
+# row stayed deny, and so did env -i PATH=/bin without the assignment line
+# of skip_env (cmd_pos steps past an assignment itself). Other rows also
+# run a wrapper with arguments of its own (nice -n 5 sudo ls,
+# xargs -I{} sudo ls {} and
 # xargs -I{} flock /tmp/l git push -f in edge_deny;
 # echo 'sudo ls' | xargs -I{} sh -c {} and
 # echo x | xargs sh -c 'git reset --hard' in B), but each holds a match of a
