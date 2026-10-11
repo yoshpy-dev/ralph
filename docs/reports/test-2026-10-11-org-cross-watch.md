@@ -137,6 +137,8 @@ cycle 1 の probe 1〜9(付録)に続けて番号を振った。scratchpad の `
 | 10 | `TestZZProbe_NoRefresherRewriteLandsAfterTheLockIsReleased` | 通る(`-count=3`、`-race -count=3`) | 時計の差し替え(`Org.Now`)で、BeforeStop が返る前に始まった印の書き直しを 300 ms 止める。`RunWatchAll` が返った直後に新しい見張りの running の印(pid 4343)を書き、500 ms 後もそのままであることを見る。HEAD は書き直しの終わりを待ってから stopped を書くので通る。B2b と B2c は、古い見張りの stopped の印(pid は test binary のもの)で上書きされて落ちる |
 | 11 | `TestZZProbe_ATakeThatFailsIsSaidOnStderrAndTheRunGoesOn` | 通る(同上) | `.watch-stop.json.taken` に空でないディレクトリを置き、古い頼みの rename を失敗させる(darwin で確かめた)。HEAD は `watchdog: org: watch: take the stop request: …` を 1 行出して 3 サイクル回り、古い頼みはそのまま残る。R5 は stderr が空で落ちる |
 
+追記(この報告のあと、orchestrator): probe 10・11 は 2ccdd11b で `internal/org/watch_all_test.go` に入れた。名前は `TestRunWatchAll_NoMarkRewriteOfTheDrainLandsAfterTheLockIsReleased` と `TestRunWatchAll_ATakeOfTheStopRequestThatFailsIsSaidOnStderrAndTheRunGoesOn` で、本体は probe と同じ。2ccdd11b で `-count=5` と `-race -count=3` のどちらも通り、B2b の写し(`<-refresherDone` を消す)を overlay で当てると 1 本目が 3 回とも落ちた。`./scripts/run-verify.sh` は rc 0。B2b と R5 は、これで普通の `go test` で落ちる。
+
 ### 実機確認
 
 `docs/evidence/org-cross-watch-live-2026-10-11.md` の「cycle 2」の節にコマンドと出力を足した(cycle 1 の記録はそのまま)。HEAD b0a226a9 を `go build` したバイナリを scratchpad に置き、cycle 1 と同じ規則で動かした。台帳は scratchpad の下だけで、すべてのコマンドに `--state-dir` を付けた。manifest も受信箱も置かない(herdr・agmsg・osascript は呼ばれない)。ralph は `env -i` で空の PATH と scratchpad の HOME で起こした。利用者の herdr サーバー、`~/.config/herdr`、本物の台帳には触れていない。始める前と最後の `pgrep -fl 'org watch --all'` は何も返さなかった。
