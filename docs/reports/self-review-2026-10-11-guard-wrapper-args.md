@@ -202,7 +202,31 @@ CRITICAL、HIGH、MEDIUM はない。LOW 6 件は、判定にも guard の動き
 
 ### Recommendation(再確認 3)
 
-- Merge: yes(CRITICAL、HIGH、MEDIUM なし。LOW 8・9 は修正済みで、新しい指摘なし。LOW は最初の review の 1〜6 を含め、すべて修正済み)
+- Merge: yes(再確認 3 の判定。CRITICAL、HIGH、MEDIUM なし。LOW 8・9 は修正済みで、新しい指摘なし。LOW は最初の review の 1〜6 を含め、すべて修正済み。現在の判定は末尾の「再確認 4」の Merge)
+- Follow-ups:
+  - 2 の Related の test report の path は、/test の report ができたあとに足す(前のまま)。
+  - 任意(前のまま): `.claude/hooks/pre_bash_guard_rules.awk` のコメントの「a D row … pins each wrapper」。
+
+## 再確認 4(10d73d88)
+
+- Date: 2026-10-11
+- Branch: test/guard-wrapper-args(HEAD 10d73d88)
+- Scope: verify の V-1 を受けた、テストのコメント 1 か所の直しだけ。`git diff 3c5b0066..10d73d88 -- tests/test-pre-bash-guard.sh`(8 行の差)。テストは動かしていない。この範囲にほかの変更はない(同じ範囲の差分の残りは verify の report、insight event、計画の Progress)
+
+### 確かめたこと
+
+- 変更はコメントだけ。コメント行を除いた両版の `diff` は空で、行、検査、文言は変わっていない。コメントの行は 78 桁以内、`git diff --check` は空。
+- 直した文(`:1084-1090`)は「Other rows also run a wrapper, with arguments of its own (nice -n 5 sudo ls, xargs -I{} sudo ls {} and xargs -I{} flock /tmp/l git push -f in edge_deny; echo 'sudo ls' | xargs -I{} sh -c {} in B) or bare (echo x | xargs sh -c 'git reset --hard' in B), but each holds a match of a sentinel rule」。旗のない `echo x | xargs sh -c …` を「bare」の例に分けたので、「引数付きの例」の括弧に旗のない行が入る問題は解消した。
+- 5 つの例は、どれも書いてある場所にある。引数付きの 4 行は `nice -n 5 sudo ls`(`:916`)、`xargs -I{} sudo ls {}`(`:923`)、`xargs -I{} flock /tmp/l git push -f`(`:883`)が D の `edge_deny`(`:830` 以降)、`echo 'sudo ls' | xargs -I{} sh -c {}`(`:526`)が B(`:458` 以降)。引数なしの 1 行 `echo x | xargs sh -c 'git reset --hard'`(`:585`)も B。包みの旗の有無の分類は、`nice -n 5`、`xargs -I{}` が旗つき、`xargs sh -c` が旗なしで、実際の行と合う。
+- 「each holds a match of a sentinel rule (sudo, a force push, a hard reset)」と、続く「with the xargs branch of cmd_pos removed …, the xargs rows among them stayed deny on both paths」は、5 つの例に引き続き当てはまる(`xargs` の分岐を消した写しで、前回までに確かめた結果。bare の行も deny のまま)。
+
+### 新しい指摘
+
+なし。見た目だけの点: 折り直しで「xargs -I{} sudo ls {} and」の行(`:1085`)が短く残り、「run a wrapper, with arguments」のコンマは、続く「or bare」と対になる区切り。読みにくくはないので、直さなくてよい。
+
+### Recommendation(再確認 4)
+
+- Merge: yes(CRITICAL、HIGH、MEDIUM なし。V-1 の直しに問題なし。新しい指摘なし。LOW は最初の review の 1〜6 を含め、すべて修正済み)
 - Follow-ups:
   - 2 の Related の test report の path は、/test の report ができたあとに足す(前のまま)。
   - 任意(前のまま): `.claude/hooks/pre_bash_guard_rules.awk` のコメントの「a D row … pins each wrapper」。
