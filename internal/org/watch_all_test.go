@@ -234,7 +234,7 @@ func (f *watchAllFixture) runSingleOrgCycles(t *testing.T, orgID string, cycles 
 		statusPath: statusPath, escalationsPath: EscalationsPathIn(f.dir),
 	}
 	for n := 1; n <= cycles; n++ {
-		if err := run.evaluateCycle(context.Background(), orgID, status); err != nil {
+		if err := run.evaluateCycle(orgID, status); err != nil {
 			t.Fatalf("cycle %d of %s: %v", n, orgID, err)
 		}
 	}
@@ -442,17 +442,19 @@ func TestRunWatchAll_EveryHungDriverCallOfTheFirstOrgIsCutOff(t *testing.T) {
 }
 
 // AC7b: the first org's status file cannot be read or written. That org is
-// skipped with one line on stderr, and in the same cycle the inbox item is
-// sent, the second org's cycle runs, and the mark is written.
+// skipped with one line on stderr (the load's own line, or the line of a
+// skipped cycle), and in the same cycle the inbox item is sent, the second
+// org's cycle runs, and the mark is written.
 func TestRunWatchAll_AStatusFileOfTheFirstOrgThatCannotBeWrittenSkipsOnlyThatOrg(t *testing.T) {
 	cases := []struct {
 		name string
 		// blockAt is the cycle before which watch-status-org-a.json becomes
 		// a directory: 1 makes the load fail, 2 makes the save fail.
-		blockAt int
+		blockAt  int
+		wantLine string
 	}{
-		{name: "a directory at the status file from the start", blockAt: 1},
-		{name: "a directory put at the status file after the first cycle", blockAt: 2},
+		{name: "a directory at the status file from the start", blockAt: 1, wantLine: `watchdog: org "org-a" is skipped every cycle until its watch-status file can be read (said once):`},
+		{name: "a directory put at the status file after the first cycle", blockAt: 2, wantLine: `watchdog: org "org-a" skipped this cycle:`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -501,8 +503,8 @@ func TestRunWatchAll_AStatusFileOfTheFirstOrgThatCannotBeWrittenSkipsOnlyThatOrg
 				t.Fatalf("RunWatchAll: %v", err)
 			}
 
-			if lines := strings.Count(f.stderr.String(), `watchdog: org "org-a" skipped this cycle:`); lines != 1 {
-				t.Errorf("stderr = %q; want one line saying org-a was skipped", f.stderr.String())
+			if lines := strings.Count(f.stderr.String(), `watchdog: org "org-a"`); lines != 1 || !strings.Contains(f.stderr.String(), tc.wantLine) {
+				t.Errorf("stderr = %q; want one line saying org-a was skipped, %q", f.stderr.String(), tc.wantLine)
 			}
 			if want := []string{e1 + " " + InboxReasonAckDeadline}; !slices.Equal(escalations, want) {
 				t.Errorf("escalations.jsonl = %v; want %v sent in the same cycle", escalations, want)
@@ -514,6 +516,84 @@ func TestRunWatchAll_AStatusFileOfTheFirstOrgThatCannotBeWrittenSkipsOnlyThatOrg
 				t.Errorf("mark = %+v; want running with the blocked cycle's ts", mark)
 			}
 		})
+	}
+}
+
+// Self-review L3: a status file that cannot be read (here: not JSON) is said
+// on stderr once in the run, not every cycle. The org is skipped and its
+// file left as it is, and the load is tried again each cycle, so once the
+// file is gone the next cycle watches the org again. Status files are
+// written through a rename, so no temporary file is left behind.
+func TestRunWatchAll_AStatusFileThatCannotBeReadIsSaidOncePerOrg(t *testing.T) {
+	f := newWatchAllFixture(t)
+	f.spawn(t, "org-a", "seat-a")
+	f.spawn(t, "org-b", "seat-b")
+	statusA := filepath.Join(f.dir, WatchStatusFileName("org-a"))
+	if err := os.WriteFile(statusA, []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	hooks := WatchHooks{OnCycle: func(n int, _ time.Time) {
+		if n != 2 {
+			return
+		}
+		if data, err := os.ReadFile(statusA); err != nil || string(data) != "{not json" {
+			t.Errorf("org-a status file after 2 cycles = %q (%v); want it left as it was", data, err)
+		}
+		if err := os.Remove(statusA); err != nil {
+			t.Fatal(err)
+		}
+	}}
+	if err := runWatchAll(t, f.o, context.Background(), f.params(3), hooks); err != nil {
+		t.Fatalf("RunWatchAll: %v", err)
+	}
+
+	want := `watchdog: org "org-a" is skipped every cycle until its watch-status file can be read (said once): org: watch: parse ` + statusA + ": "
+	if got := f.stderr.String(); strings.Count(got, `watchdog: org "org-a"`) != 1 || !strings.Contains(got, want) {
+		t.Errorf("stderr = %q; want one line with %q", got, want)
+	}
+	if s := readWatchStatusFile(t, f.dir, "org-a"); s.Cycles != 1 {
+		t.Errorf("org-a status = %+v; want the one cycle run after the file was removed", s)
+	}
+	if s := readWatchStatusFile(t, f.dir, "org-b"); s.Cycles != 3 {
+		t.Errorf("org-b status = %+v; want 3 cycles", s)
+	}
+	for _, name := range dirEntries(t, f.dir) {
+		if strings.HasSuffix(name, ".tmp") {
+			t.Errorf("temporary file %s left in the state dir", name)
+		}
+	}
+}
+
+// Self-review L1: SendWatchdogAlertBounded, the on-demand watcher's ALERT
+// send, is cut off at DriverCallTimeout when agmsg does not answer, and at
+// once when its context is already done.
+func TestSendWatchdogAlertBounded_IsCutOffAtTheDriverCallTimeoutOrByItsContext(t *testing.T) {
+	o, _, a, _ := testWatchOrg(t)
+	o.Agmsg = &hangingWatchAgmsg{fakeWatchAgmsg: a, hang: map[string]bool{agmsgTeam("org-a"): true}}
+	o.DriverCallTimeout = 20 * time.Millisecond
+	const msg = "TYPE: ALERT\nORG_ID: org-a\nSEAT: seat-1\nCONDITION: watcher_stall\n\nwatcher verdict=circular reason=x"
+
+	start := time.Now()
+	err := o.SendWatchdogAlertBounded(context.Background(), "org-a", msg)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("SendWatchdogAlertBounded with a hung agmsg = %v; want context.DeadlineExceeded", err)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("the send took %v; want it cut off at the 20ms DriverCallTimeout", elapsed)
+	}
+
+	o.DriverCallTimeout = time.Hour
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	start = time.Now()
+	if err := o.SendWatchdogAlertBounded(ctx, "org-a", msg); !errors.Is(err, context.Canceled) {
+		t.Errorf("SendWatchdogAlertBounded with a cancelled context = %v; want context.Canceled", err)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("the send took %v with a cancelled context; want it to return at once", elapsed)
+	}
+	if n := len(watchdogAlerts(a)); n != 2 {
+		t.Errorf("agmsg got %d watchdog sends; want 2", n)
 	}
 }
 

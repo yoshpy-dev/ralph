@@ -586,8 +586,8 @@ func waitForFileContains(t *testing.T, path, substr string, count int) string {
 // startDetachedProcess, the launch of the production orgWatchLaunch, run on
 // a shell script instead of ralph: the child leads its own session's
 // process group, reads EOF from stdin, appends stdout and stderr to the log
-// (created 0644 with its directory), and stop ends it, with SIGKILL after
-// the grace when it ignores SIGTERM.
+// (created with 0644 less the umask, with its directory), and stop ends it,
+// with SIGKILL after the grace when it ignores SIGTERM.
 func TestOrgWatchDetach_StartDetachedProcess_NewSessionDevNullStdinAppendedLog(t *testing.T) {
 	setOrgWatchDuration(t, &orgWatchChildStopGrace, 200*time.Millisecond)
 	dir := t.TempDir()
@@ -631,7 +631,114 @@ func TestOrgWatchDetach_StartDetachedProcess_NewSessionDevNullStdinAppendedLog(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if perm := info.Mode().Perm(); perm != 0o644 {
-		t.Errorf("log mode = %v; want 0644", perm)
+	// The log is opened with 0644, which the umask can narrow (self-review
+	// L6): no bit beyond 0644, and the owner can read and write it.
+	if perm := info.Mode().Perm(); perm&^0o644 != 0 || perm&0o600 != 0o600 {
+		t.Errorf("log mode = %v; want no bit beyond 0644 and owner read and write", perm)
+	}
+}
+
+// Self-review M1: --detach on a ledger whose ralph.toml sets
+// deadman_minutes = 0 (the deadman never escalates by timeout) starts a
+// healthy child and exits 0 once its mark says running. ProbeWatch used to
+// call every mark stale under a deadman below 1, so --detach stopped the
+// child after its deadline and failed.
+func TestOrgWatchDetach_DeadmanMinutesZero_StartsTheChild(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "ralph.toml")
+	if err := os.WriteFile(configPath, []byte("[org]\ndeadman_minutes = 0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stateDir := filepath.Join(t.TempDir(), "state")
+	var gotArgs []string
+	var gotLog string
+	setOrgWatchLaunch(t, inProcessLauncher(t, stateDir, &gotArgs, &gotLog))
+
+	stdout, _, err := runOrgCmdStreams(t, "watch", "--all", "--detach", "--config", configPath, "--state-dir", stateDir)
+	if err != nil {
+		t.Fatalf("--detach with deadman_minutes = 0: %v", err)
+	}
+	if want := fmt.Sprintf("started ralph org watch --all (pid %d); log: %s\n", os.Getpid(), filepath.Join(stateDir, org.WatchLogFileName)); stdout != want {
+		t.Errorf("stdout = %q; want %q", stdout, want)
+	}
+	if got := org.ProbeWatch(stateDir, time.Now(), 0).State; got != org.WatchLivenessRunning {
+		t.Errorf("ProbeWatch with deadman 0 after --detach = %q; want running", got)
+	}
+}
+
+// Self-review L1: a long-running watch that a --stop request ends while an
+// on-demand watcher call is in flight (a claude that sleeps 30s) cancels
+// that call and returns within seconds, instead of keeping the process
+// until the call ends. The call starts on the scope change of the seat's
+// worktree from the second cycle on.
+func TestOrgWatch_AStopRequestCancelsAnInFlightWatcherCall(t *testing.T) {
+	setupOrgStubPATH(t)
+	started := filepath.Join(t.TempDir(), "claude-started")
+	writeClaudeStub(t, "#!/bin/sh\n: > '"+started+"'\nexec sleep 30\n")
+	configPath := writeOrgConfigWithExtra(t, t.TempDir(), "[org.watchdog]\nwatcher_enabled = true\nwatcher_model = \"haiku\"\n")
+	worktree := t.TempDir()
+	runLedgerTestGit(t, "init", "--quiet", worktree)
+	stateDir := filepath.Join(t.TempDir(), "state")
+	if _, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
+		"--driver", "claude", "--model", "sonnet", "--cwd", worktree,
+		"--scope", "test-scope", "--state-dir", stateDir,
+	); err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+
+	type result struct {
+		stderr string
+		err    error
+	}
+	done := make(chan result, 1)
+	go func() {
+		_, stderr, err := runOrgCmdStreams(t, "watch", "--all", "--interval-seconds", "1", "--config", configPath, "--state-dir", stateDir)
+		done <- result{stderr, err}
+	}()
+	var res *result
+	t.Cleanup(func() {
+		if res == nil {
+			_ = org.WriteWatchStopRequest(stateDir, time.Now())
+			select {
+			case <-done:
+			case <-time.After(60 * time.Second):
+			}
+		}
+	})
+
+	waitForFileContains(t, filepath.Join(stateDir, "watch-status-org-a.json"), `"cycles": 1`, 1)
+	if err := os.WriteFile(filepath.Join(worktree, "new.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, err := os.Stat(started); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the watcher's claude did not start within 10s of the scope change")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if err := org.WriteWatchStopRequest(stateDir, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	stopAt := time.Now()
+	select {
+	case r := <-done:
+		res = &r
+	case <-time.After(5 * time.Second):
+		t.Fatal("the watch did not return within 5s of the stop request; want the in-flight watcher call cancelled")
+	}
+	if res.err != nil {
+		t.Fatalf("the stopped watch returned %v (stderr %s)", res.err, res.stderr)
+	}
+	t.Logf("the watch returned %v after the stop request", time.Since(stopAt))
+	if want := `watchdog: watcher error for org "org-a" seat "seat-1" condition "scope_change"`; !strings.Contains(res.stderr, want) {
+		t.Errorf("stderr = %q; want %q for the cancelled call", res.stderr, want)
+	}
+	if mark, err := org.ReadWatchAlive(stateDir); err != nil || mark.State != org.WatchAliveStopped {
+		t.Errorf("mark = %+v (%v); want stopped", mark, err)
 	}
 }

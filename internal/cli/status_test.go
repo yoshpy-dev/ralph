@@ -695,6 +695,38 @@ func TestStatusCmd_OrgWatchJudgesTheMarkByDeadmanMinutesOfRalphToml(t *testing.T
 	}
 }
 
+// TestStatusCmd_OrgWatchWithDeadmanMinutesZeroJudgesByTheDefault (self-review
+// M1): deadman_minutes = 0 in ./ralph.toml means the deadman never escalates
+// by timeout, so status judges the mark by the default 10 minutes: a fresh
+// mark is running (it used to be stale under any deadman below 1), and a
+// 30-minute-old one is stale.
+func TestStatusCmd_OrgWatchWithDeadmanMinutesZeroJudgesByTheDefault(t *testing.T) {
+	t.Chdir(t.TempDir())
+	if err := os.WriteFile("ralph.toml", []byte("[org]\ndeadman_minutes = 0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name string
+		age  time.Duration
+		want string
+	}{
+		{name: "fresh mark", want: "org watch: running (pid 4249, "},
+		{name: "30-minute-old mark", age: 30 * time.Minute, want: "org watch: stale (pid 4249, "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stateDir := t.TempDir()
+			holdWatchLock(t, stateDir, runningMark(4249, time.Now().Add(-tc.age)))
+			out, err := runStatusCmd(t, "--state-dir", stateDir)
+			if err != nil {
+				t.Fatalf("status: %v (output: %s)", err, out)
+			}
+			if got := statusOrgWatchLine(t, out); !strings.HasPrefix(got, tc.want) {
+				t.Errorf("with deadman_minutes = 0, org watch line = %q; want it to start %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestStatusCmd_OrgWatchFallsBackToTheDefaultDeadmanWhenRalphTomlDoesNotLoad:
 // status only reads, so a ./ralph.toml that does not load warns on stderr
 // and judges the mark by the default deadman_minutes (10) instead of

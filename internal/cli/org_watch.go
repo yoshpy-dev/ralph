@@ -162,7 +162,9 @@ func runOrgWatchAll(cmd *cobra.Command, rt *org.Org, resolvedStateDir, stateDirS
 	// The inbox deadline banners name `ralph org inbox show`, with
 	// --state-dir when this watch was given one (a --detach child always is).
 	rt.InboxHintStateDir = orgInboxHintStateDir(cmd, resolvedStateDir)
-	hooks, watcherWG := newWatchdogHooks(ctx, rt, cmd.ErrOrStderr())
+	watcherCtx, cancelWatchers := context.WithCancel(ctx)
+	defer cancelWatchers()
+	hooks, watcherWG := newWatchdogHooks(watcherCtx, rt, cmd.ErrOrStderr())
 	err := rt.RunWatchAll(ctx, org.WatchAllParams{
 		StatusDir: resolvedStateDir,
 		Interval:  effectiveInterval,
@@ -180,11 +182,16 @@ func runOrgWatchAll(cmd *cobra.Command, rt *org.Org, resolvedStateDir, stateDirS
 	// soon as cycle 1's synchronous pulse evaluation finished, killing the
 	// process before an OnSemanticTrigger goroutine it had just started
 	// could ever produce a watcher receipt or ALERT. Bounded by RunWatcher's
-	// own watcherInvokeTimeout, and -- for the long-running (non-`--once`)
-	// mode -- by ctx itself: newWatchdogHooks threads ctx into the tracked
-	// goroutine's RunWatcher call (self-review cycle-2 M2-2 fix), so a
-	// SIGINT- or SIGTERM-cancelled context unwinds an in-flight judgment
-	// call immediately instead of running out the full 60s bound.
+	// own watcherInvokeTimeout and the ALERT send's DriverCallTimeout
+	// (SendWatchdogAlertBounded). The long-running (non-`--once`) mode ends
+	// on a signal (ctx done) or on a `--stop` request, which leaves ctx
+	// alive (self-review L1), so it cancels watcherCtx first: newWatchdogHooks
+	// threads it into the tracked goroutine's calls (self-review cycle-2 M2-2
+	// fix), and an in-flight judgment call unwinds at once instead of running
+	// out the full 60s bound after the watch has stopped.
+	if !once {
+		cancelWatchers()
+	}
 	watcherWG.Wait()
 	return err
 }
@@ -252,10 +259,10 @@ func launchOrgWatch(args []string, logPath string) (*orgWatchProcess, error) {
 
 // startDetachedProcess starts path with args in a new session (setsid, so
 // no terminal's signals or hangup reach it), stdin /dev/null, and stdout
-// and stderr appended to logPath (created 0644, with its directory). The
-// process stays this command's unreaped child until exited closes, so the
-// pid stop signals cannot name another process meanwhile. stop sends
-// SIGTERM and, when the process has not exited within
+// and stderr appended to logPath (created with mode 0644 less the umask,
+// with its directory). The process stays this command's unreaped child
+// until exited closes, so the pid stop signals cannot name another process
+// meanwhile. stop sends SIGTERM and, when the process has not exited within
 // orgWatchChildStopGrace, SIGKILL.
 func startDetachedProcess(path string, args []string, logPath string) (*orgWatchProcess, error) {
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
@@ -352,8 +359,8 @@ func runOrgWatchDetach(cmd *cobra.Command, rt *org.Org, stateDir string, args []
 // it can name another process. It writes the stop request instead, which
 // the watch reads between cycles, and waits up to orgWatchStopDeadline for
 // watch.lock to be free. It reads no config: running and stale are handled
-// alike, so deadman_minutes does not matter (ProbeWatch gets 0, which only
-// turns running into stale), and a ralph.toml broken since the watch
+// alike, so deadman_minutes does not matter (ProbeWatch gets 0, which
+// judges by the default deadman), and a ralph.toml broken since the watch
 // started does not keep it from stopping.
 func runOrgWatchStop(cmd *cobra.Command, stateDir string) error {
 	probe := org.ProbeWatch(stateDir, time.Now(), 0)
@@ -436,8 +443,9 @@ func orgWatchKillHint(stateDir string, mark *org.WatchAlive) string {
 // (recorded to stderr, never queued or run concurrently).
 //
 // An abnormal verdict (anything but org.WatcherVerdictNormal) is sent to
-// leader as an ALERT via rt.SendWatchdogAlert (identity-level Agmsg.Send, not
-// the seat-steering Send verb -- see that method's doc comment for why:
+// leader as an ALERT via rt.SendWatchdogAlertBounded (rt.SendWatchdogAlert,
+// identity-level Agmsg.Send, cut off at DriverCallTimeout; not the
+// seat-steering Send verb -- see SendWatchdogAlert's doc comment for why:
 // Send's findSeat lookup fails, silently dropping the message, in the
 // normal "session-promoted leader" org shape where no leader SEAT was ever
 // spawned), in the same message shape watch.go's own (unexported) sendAlert
@@ -453,13 +461,14 @@ func orgWatchKillHint(stateDir string, mark *org.WatchAlive) string {
 // ever added to it, so Wait() returns immediately.
 //
 // ctx is the watch's own context (runOrgWatchAll: the command's context,
-// cancelled by SIGINT or SIGTERM), not context.Background() (self-review
-// cycle-2 M2-2 fix): the tracked goroutine's RunWatcher/SendWatchdogAlert
-// calls are threaded through it so a signal unwinds an in-flight judgment
-// call right away instead of running out RunWatcher's own
-// watcherInvokeTimeout (a fixed 60s bound) first -- that gap regressed the
-// long-running (non-`--once`) `ralph org watch` mode's Ctrl-C
-// responsiveness when the M-5 fix above first added this WaitGroup.
+// cancelled by SIGINT or SIGTERM, and by runOrgWatchAll itself once a
+// long-running watch has stopped), not context.Background() (self-review
+// cycle-2 M2-2 fix): the tracked goroutine's RunWatcher and
+// SendWatchdogAlertBounded calls are threaded through it so a signal or a
+// stop unwinds an in-flight judgment call right away instead of running out
+// RunWatcher's own watcherInvokeTimeout (a fixed 60s bound) first -- that
+// gap regressed the long-running (non-`--once`) `ralph org watch` mode's
+// Ctrl-C responsiveness when the M-5 fix above first added this WaitGroup.
 func newWatchdogHooks(ctx context.Context, rt *org.Org, stderr io.Writer) (org.WatchHooks, *sync.WaitGroup) {
 	var wg sync.WaitGroup
 	if !rt.Config.Watchdog.WatcherEnabled {
@@ -489,7 +498,7 @@ func newWatchdogHooks(ctx context.Context, rt *org.Org, stderr io.Writer) (org.W
 				}
 				msg := fmt.Sprintf("TYPE: ALERT\nORG_ID: %s\nSEAT: %s\nCONDITION: watcher_%s\n\nwatcher verdict=%s reason=%s",
 					orgID, seatID, conditionType, verdict.Verdict, verdict.Reason)
-				if err := rt.SendWatchdogAlert(ctx, orgID, msg); err != nil {
+				if err := rt.SendWatchdogAlertBounded(ctx, orgID, msg); err != nil {
 					_, _ = fmt.Fprintf(stderr, "watchdog: failed to ALERT leader for org %q seat %q verdict %q: %v\n",
 						orgID, seatID, verdict.Verdict, err)
 				}

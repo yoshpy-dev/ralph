@@ -218,7 +218,7 @@ func (o *Org) SweepInboxDeadlines(now time.Time, mem *InboxDeadlineMemory, banne
 // desktop notification, titled after the watch that sends it, names the
 // org, the ID, the TYPE, and the deadline, never the body. orgID and typ
 // are guarded the way sendInboxItemToHuman's doc says.
-func (o *Org) inboxDeadlineHumanText(reason, orgID, id, typ string) inboxHumanText {
+func (o *Org) inboxDeadlineHumanText(orgID, id, typ, reason string) inboxHumanText {
 	missed, minutes := "not acked", o.Config.Director.AckMinutes
 	if reason == InboxReasonResolveDeadline {
 		missed, minutes = "not resolved", o.Config.Director.ResolveMinutes

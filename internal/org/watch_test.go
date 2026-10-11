@@ -370,7 +370,7 @@ func TestWatch_Stall_AlertsOnlyNeverStops_RecoversAndRefires(t *testing.T) {
 	}
 
 	// Cycle 1: baseline snapshot only (no previous value to compare against).
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 1: %v", err)
 	}
 	if n := len(watchdogAlerts(a)); n != 0 {
@@ -380,7 +380,7 @@ func TestWatch_Stall_AlertsOnlyNeverStops_RecoversAndRefires(t *testing.T) {
 	// Cycle 2: same raw text AND >5m elapsed since the (unchanged) manifest
 	// TS -- stalled, exactly 1 ALERT.
 	clk.Advance(10 * time.Minute)
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 2: %v", err)
 	}
 	if n := len(watchdogAlerts(a)); n != 1 {
@@ -395,7 +395,7 @@ func TestWatch_Stall_AlertsOnlyNeverStops_RecoversAndRefires(t *testing.T) {
 
 	// Cycle 3: still stalled (dedupe) -- no second ALERT.
 	clk.Advance(1 * time.Minute)
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 3: %v", err)
 	}
 	if n := len(watchdogAlerts(a)); n != 1 {
@@ -404,7 +404,7 @@ func TestWatch_Stall_AlertsOnlyNeverStops_RecoversAndRefires(t *testing.T) {
 
 	// Cycle 4: raw text changed ("different") -- recovers, clears the key.
 	clk.Advance(1 * time.Minute)
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 4: %v", err)
 	}
 	if n := len(watchdogAlerts(a)); n != 1 {
@@ -413,14 +413,14 @@ func TestWatch_Stall_AlertsOnlyNeverStops_RecoversAndRefires(t *testing.T) {
 
 	// Cycle 5: baseline again ("same-again"), no previous match yet.
 	clk.Advance(1 * time.Minute)
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 5: %v", err)
 	}
 
 	// Cycle 6: matches cycle 5's snapshot again and still >5m stalled since
 	// manifest TS -- re-fires (a second, distinct ALERT).
 	clk.Advance(1 * time.Minute)
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 6: %v", err)
 	}
 	if n := len(watchdogAlerts(a)); n != 2 {
@@ -446,7 +446,7 @@ func TestWatch_Liveness_AlertOnAgentGetError(t *testing.T) {
 		t.Fatalf("loadWatchStatus: %v", err)
 	}
 
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("evaluateCycle: %v", err)
 	}
 	if n := len(watchdogAlerts(a)); n != 1 {
@@ -489,14 +489,14 @@ func TestWatch_ScopeChange_AlertCarriesScopeText_NoStop(t *testing.T) {
 		t.Fatalf("loadWatchStatus: %v", err)
 	}
 
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 1 (baseline): %v", err)
 	}
 	if n := len(watchdogAlerts(a)); n != 0 {
 		t.Fatalf("expected no ALERT on the baseline cycle, got %d", n)
 	}
 
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 2 (scope changed): %v", err)
 	}
 	if n := len(watchdogAlerts(a)); n != 1 {
@@ -552,10 +552,10 @@ func TestWatch_ScopeChange_TruncatesOversizedPorcelainOutput(t *testing.T) {
 		t.Fatalf("loadWatchStatus: %v", err)
 	}
 
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 1 (baseline): %v", err)
 	}
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 2 (scope changed): %v", err)
 	}
 
@@ -673,13 +673,13 @@ func TestWatch_Deadman_NoActivity_EscalatesOnceAfterTimeout(t *testing.T) {
 		t.Fatalf("loadWatchStatus: %v", err)
 	}
 
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 1 (raises ALERT): %v", err)
 	}
 	assertNoEscalations(t, escalationsPath)
 
 	clk.Advance(6 * time.Minute) // past DeadmanMinutes, no manifest/leader/history activity
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 2 (deadman): %v", err)
 	}
 	lines := readJSONLFile(t, escalationsPath)
@@ -693,7 +693,7 @@ func TestWatch_Deadman_NoActivity_EscalatesOnceAfterTimeout(t *testing.T) {
 	// A further cycle (condition still failing, already Active -- no new
 	// ALERT/pending record) must not escalate a second time.
 	clk.Advance(1 * time.Minute)
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 3 (post-escalation): %v", err)
 	}
 	lines = readJSONLFile(t, escalationsPath)
@@ -717,7 +717,7 @@ func TestWatch_Deadman_LeaderActivity_PreventsEscalation(t *testing.T) {
 		t.Fatalf("loadWatchStatus: %v", err)
 	}
 
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 1 (raises ALERT): %v", err)
 	}
 
@@ -727,7 +727,7 @@ func TestWatch_Deadman_LeaderActivity_PreventsEscalation(t *testing.T) {
 	}
 
 	clk.Advance(6 * time.Minute) // past DeadmanMinutes, but leader was active
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 2: %v", err)
 	}
 	assertNoEscalations(t, escalationsPath)
@@ -754,7 +754,7 @@ func TestWatch_Deadman_LeaderIsAnomalySubject_EscalatesImmediately(t *testing.T)
 
 	// Same cycle: ALERT raised (subject=leader) then the deadman sweep
 	// escalates immediately, without waiting for DeadmanMinutes.
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("evaluateCycle: %v", err)
 	}
 	lines := readJSONLFile(t, escalationsPath)
@@ -771,35 +771,35 @@ func TestWatch_Deadman_LeaderIsAnomalySubject_EscalatesImmediately(t *testing.T)
 }
 
 // The deadman's desktop notification gets its own deadline,
-// inboxDesktopNotifyTimeout, under the cycle's context: an osascript that
-// does not return cannot hold the cycle until the watch ends.
-func TestWatch_Deadman_EscalateFuncGetsItsOwnDeadline(t *testing.T) {
-	o, _, _, _ := testWatchOrg(t)
-	if r := o.Spawn(watchSpawnParams("org-a", LeaderIdentity, LeaderIdentity)); r.Outcome != SpawnOutcomeSpawned {
+// inboxDesktopNotifyTimeout, cut from context.Background() like the inbox's
+// (self-review L2): an osascript that does not return cannot hold the cycle,
+// and a watch whose loop context is cancelled before the cycle ends (a
+// SIGINT or SIGTERM mid-cycle) still sends the notification of the
+// escalation it records, which is never sent again. Before L2 this test
+// pinned the opposite: a context derived from the cycle's.
+func TestWatch_Deadman_EscalateFuncGetsItsOwnDeadlineEvenWhenTheLoopIsCancelled(t *testing.T) {
+	f := newWatchAllFixture(t)
+	if r := f.o.Spawn(watchSpawnParams("org-a", LeaderIdentity, LeaderIdentity)); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("spawn leader failed: %+v", r)
 	}
-	o.Herdr.(*fakeWatchHerdr).AgentGetErrSeq[herdrAgentName("org-a", LeaderIdentity)] = []error{errors.New("herdr: agent not found")}
+	f.h.AgentGetErrSeq[herdrAgentName("org-a", LeaderIdentity)] = []error{errors.New("herdr: agent not found")}
 
 	type call struct {
 		left        time.Duration
 		hasDeadline bool
-		parentKey   any
+		err         error
 	}
 	var calls []call
-	type ctxKey struct{}
-	escalate := func(ctx context.Context, _ string) error {
+	p := f.params(1)
+	p.Escalate = func(ctx context.Context, _ string) error {
 		deadline, ok := ctx.Deadline()
-		calls = append(calls, call{left: time.Until(deadline), hasDeadline: ok, parentKey: ctx.Value(ctxKey{})})
+		calls = append(calls, call{left: time.Until(deadline), hasDeadline: ok, err: ctx.Err()})
 		return nil
 	}
-	run, statusPath, _ := newTestWatchRun(o, nil, escalate, &bytes.Buffer{})
-	status, err := loadWatchStatus(statusPath, "org-a")
-	if err != nil {
-		t.Fatalf("loadWatchStatus: %v", err)
-	}
-	ctx := context.WithValue(context.Background(), ctxKey{}, "cycle")
-	if err := run.evaluateCycle(ctx, "org-a", status); err != nil {
-		t.Fatalf("evaluateCycle: %v", err)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // the loop's context is done before the cycle escalates
+	if err := runWatchAll(t, f.o, ctx, p, WatchHooks{}); err != nil {
+		t.Fatalf("RunWatchAll: %v", err)
 	}
 	if len(calls) != 1 {
 		t.Fatalf("EscalateFunc called %d times; want 1 for the leader-subject escalation", len(calls))
@@ -808,8 +808,11 @@ func TestWatch_Deadman_EscalateFuncGetsItsOwnDeadline(t *testing.T) {
 	if !c.hasDeadline || c.left <= 0 || c.left > inboxDesktopNotifyTimeout {
 		t.Errorf("EscalateFunc context deadline: present %t, %v left; want one within %v", c.hasDeadline, c.left, inboxDesktopNotifyTimeout)
 	}
-	if c.parentKey != "cycle" {
-		t.Errorf("EscalateFunc context does not derive from the cycle's (value %v)", c.parentKey)
+	if c.err != nil {
+		t.Errorf("EscalateFunc context is already done (%v); want it not cut off by the cancelled loop context", c.err)
+	}
+	if lines := readJSONLFile(t, f.o.EscalationsPath); len(lines) != 1 {
+		t.Errorf("escalations.jsonl = %v; want the one escalation the notification is for", lines)
 	}
 }
 
@@ -825,7 +828,7 @@ func TestWatch_StatusFile_HeartbeatWrittenEveryCycle(t *testing.T) {
 
 	for i := range 3 {
 		clk.Advance(time.Minute)
-		if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+		if err := run.evaluateCycle("org-a", status); err != nil {
 			t.Fatalf("cycle %d: %v", i+1, err)
 		}
 	}
@@ -954,7 +957,7 @@ func TestWatch_Deadman_LegacyWatchdogStopEvent_DoesNotClearPendingAlert(t *testi
 		t.Fatalf("loadWatchStatus: %v", err)
 	}
 
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 1 (raises seat-1's liveness ALERT): %v", err)
 	}
 	if len(status.PendingAlerts) != 1 {
@@ -973,7 +976,7 @@ func TestWatch_Deadman_LegacyWatchdogStopEvent_DoesNotClearPendingAlert(t *testi
 	}
 
 	clk.Advance(6 * time.Minute) // past DeadmanMinutes, no genuine leader/seat activity
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 2 (deadman sweep): %v", err)
 	}
 
@@ -1110,7 +1113,7 @@ func TestWatch_Deadman_PersistedAlertBaseline_SurvivesLegacyWatchdogStop(t *test
 	t.Run("no new events: alert survives and escalates once at deadline", func(t *testing.T) {
 		f := newFixture(t)
 
-		if err := f.run.evaluateCycle(context.Background(), "org-a", f.status); err != nil {
+		if err := f.run.evaluateCycle("org-a", f.status); err != nil {
 			t.Fatalf("evaluateCycle: %v", err)
 		}
 
@@ -1136,7 +1139,7 @@ func TestWatch_Deadman_PersistedAlertBaseline_SurvivesLegacyWatchdogStop(t *test
 			t.Fatalf("append sent event: %v", err)
 		}
 
-		if err := f.run.evaluateCycle(context.Background(), "org-a", f.status); err != nil {
+		if err := f.run.evaluateCycle("org-a", f.status); err != nil {
 			t.Fatalf("evaluateCycle: %v", err)
 		}
 
@@ -1172,7 +1175,7 @@ func TestWatch_Deadman_CrossOrgActivity_DoesNotClearPendingAlert(t *testing.T) {
 		t.Fatalf("loadWatchStatus: %v", err)
 	}
 
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 1 (raises org-a's liveness ALERT): %v", err)
 	}
 	if len(status.PendingAlerts) != 1 {
@@ -1185,7 +1188,7 @@ func TestWatch_Deadman_CrossOrgActivity_DoesNotClearPendingAlert(t *testing.T) {
 		t.Fatalf("append org-b activity event: %v", err)
 	}
 	clk.Advance(1 * time.Minute) // still within DeadmanMinutes
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 2 (org-b activity must not clear org-a's pending alert): %v", err)
 	}
 	if len(status.PendingAlerts) != 1 {
@@ -1198,7 +1201,7 @@ func TestWatch_Deadman_CrossOrgActivity_DoesNotClearPendingAlert(t *testing.T) {
 		t.Fatalf("append org-a leader-activity event: %v", err)
 	}
 	clk.Advance(1 * time.Minute)
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 3 (org-a's own leader activity clears the pending alert): %v", err)
 	}
 	assertNoEscalations(t, escalationsPath)
@@ -1245,7 +1248,7 @@ func TestWatch_Deadman_SeatSentEvent_ClearsPendingAlert_LegacyWatchdogStopDoesNo
 		t.Fatalf("loadWatchStatus: %v", err)
 	}
 
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 1 (raises seat-1's liveness ALERT): %v", err)
 	}
 	if len(status.PendingAlerts) != 1 {
@@ -1259,7 +1262,7 @@ func TestWatch_Deadman_SeatSentEvent_ClearsPendingAlert_LegacyWatchdogStopDoesNo
 		t.Fatalf("append legacy watchdog stopped event for seat-3: %v", err)
 	}
 	clk.Advance(3 * time.Minute) // still within DeadmanMinutes
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 2 (the legacy watchdog cutoff of seat-3 must not clear seat-1's alert): %v", err)
 	}
 	if len(status.PendingAlerts) != 1 {
@@ -1274,7 +1277,7 @@ func TestWatch_Deadman_SeatSentEvent_ClearsPendingAlert_LegacyWatchdogStopDoesNo
 		t.Fatalf("append sent event: %v", err)
 	}
 	clk.Advance(3 * time.Minute) // now past DeadmanMinutes overall
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 3 (sent event clears seat-1's pending alert): %v", err)
 	}
 	assertNoEscalations(t, escalationsPath)
@@ -1303,7 +1306,7 @@ func TestWatch_Deadman_LeaderSpawnedEvent_ClearsPendingAlert(t *testing.T) {
 		t.Fatalf("loadWatchStatus: %v", err)
 	}
 
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 1 (raises ALERT): %v", err)
 	}
 
@@ -1313,7 +1316,7 @@ func TestWatch_Deadman_LeaderSpawnedEvent_ClearsPendingAlert(t *testing.T) {
 	}
 
 	clk.Advance(6 * time.Minute) // past DeadmanMinutes, but leader spawned in between
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 2: %v", err)
 	}
 	assertNoEscalations(t, escalationsPath)
@@ -1345,7 +1348,7 @@ func TestWatch_Deadman_LeaderSpawnsReplacementSeat_ClearsPendingAlert(t *testing
 		t.Fatalf("loadWatchStatus: %v", err)
 	}
 
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 1 (raises seat-1's ALERT): %v", err)
 	}
 
@@ -1355,7 +1358,7 @@ func TestWatch_Deadman_LeaderSpawnsReplacementSeat_ClearsPendingAlert(t *testing
 	}
 
 	clk.Advance(6 * time.Minute) // past DeadmanMinutes, but leader spawned seat-2 in between
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 2: %v", err)
 	}
 	assertNoEscalations(t, escalationsPath)
@@ -1390,7 +1393,7 @@ func TestWatch_Deadman_ManualStopOfOtherSeat_ClearsPendingAlert(t *testing.T) {
 		t.Fatalf("loadWatchStatus: %v", err)
 	}
 
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 1 (raises seat-1's ALERT): %v", err)
 	}
 
@@ -1402,7 +1405,7 @@ func TestWatch_Deadman_ManualStopOfOtherSeat_ClearsPendingAlert(t *testing.T) {
 	}
 
 	clk.Advance(6 * time.Minute)
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 2: %v", err)
 	}
 	assertNoEscalations(t, escalationsPath)
@@ -1433,7 +1436,7 @@ func TestWatch_Deadman_LeaderStopFailedEvent_ClearsPendingAlert(t *testing.T) {
 		t.Fatalf("loadWatchStatus: %v", err)
 	}
 
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 1 (raises seat-1's ALERT): %v", err)
 	}
 
@@ -1447,7 +1450,7 @@ func TestWatch_Deadman_LeaderStopFailedEvent_ClearsPendingAlert(t *testing.T) {
 	}
 
 	clk.Advance(6 * time.Minute) // past DeadmanMinutes, but leader tried to stop seat-1 in between
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 2: %v", err)
 	}
 	assertNoEscalations(t, escalationsPath)
@@ -1479,7 +1482,7 @@ func TestWatch_Deadman_CrossOrgStopFailedEvent_DoesNotClearPendingAlert(t *testi
 		t.Fatalf("loadWatchStatus: %v", err)
 	}
 
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 1 (raises org-a's liveness ALERT): %v", err)
 	}
 	if len(status.PendingAlerts) != 1 {
@@ -1496,7 +1499,7 @@ func TestWatch_Deadman_CrossOrgStopFailedEvent_DoesNotClearPendingAlert(t *testi
 	}
 
 	clk.Advance(6 * time.Minute) // past DeadmanMinutes, no activity in org-a
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 2 (deadman sweep): %v", err)
 	}
 	lines := readJSONLFile(t, escalationsPath)
@@ -1543,7 +1546,7 @@ func TestWatch_Deadman_StopFailedBeforeAlert_DoesNotClearPendingAlert(t *testing
 		t.Fatalf("loadWatchStatus: %v", err)
 	}
 
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 1 (raises seat-1's ALERT): %v", err)
 	}
 	if len(status.PendingAlerts) != 1 {
@@ -1551,7 +1554,7 @@ func TestWatch_Deadman_StopFailedBeforeAlert_DoesNotClearPendingAlert(t *testing
 	}
 
 	clk.Advance(6 * time.Minute) // past DeadmanMinutes, no activity since the ALERT
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 2 (deadman sweep): %v", err)
 	}
 	lines := readJSONLFile(t, escalationsPath)
@@ -1609,7 +1612,7 @@ func TestWatch_Stall_UsesLatestEventOfAnyType_NotOnlyStateEvents(t *testing.T) {
 
 	// Cycle 1: baseline snapshot only (no previous herdr value to compare
 	// against yet).
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 1: %v", err)
 	}
 
@@ -1628,7 +1631,7 @@ func TestWatch_Stall_UsesLatestEventOfAnyType_NotOnlyStateEvents(t *testing.T) {
 		t.Fatalf("append sent event: %v", err)
 	}
 
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 2: %v", err)
 	}
 	if n := len(watchdogAlerts(a)); n != 0 {
@@ -1690,7 +1693,7 @@ func TestWatch_Deadman_WatchdogAlertHistoryLine_DoesNotClearPendingAlert(t *test
 		t.Fatalf("loadWatchStatus: %v", err)
 	}
 
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 1: %v", err)
 	}
 	if len(status.PendingAlerts) != 1 {
@@ -1698,7 +1701,7 @@ func TestWatch_Deadman_WatchdogAlertHistoryLine_DoesNotClearPendingAlert(t *test
 	}
 
 	clk.Advance(1 * time.Minute)
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 2: %v", err)
 	}
 	if len(status.PendingAlerts) != 1 {
@@ -1734,7 +1737,7 @@ func TestWatch_Deadman_LeaderHistoryLine_ClearsPendingAlert(t *testing.T) {
 		t.Fatalf("loadWatchStatus: %v", err)
 	}
 
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 1: %v", err)
 	}
 	if len(status.PendingAlerts) != 1 {
@@ -1742,7 +1745,7 @@ func TestWatch_Deadman_LeaderHistoryLine_ClearsPendingAlert(t *testing.T) {
 	}
 
 	clk.Advance(1 * time.Minute)
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 2: %v", err)
 	}
 	if len(status.PendingAlerts) != 0 {
@@ -1791,7 +1794,7 @@ func TestWatch_Deadman_HistoryWindowEviction_DoesNotFalselyClearPendingAlert(t *
 		t.Fatalf("loadWatchStatus: %v", err)
 	}
 
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 1: %v", err)
 	}
 	if len(status.PendingAlerts) != 1 {
@@ -1799,7 +1802,7 @@ func TestWatch_Deadman_HistoryWindowEviction_DoesNotFalselyClearPendingAlert(t *
 	}
 
 	clk.Advance(1 * time.Minute)
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 2: %v", err)
 	}
 	if len(status.PendingAlerts) != 1 {
@@ -1848,7 +1851,7 @@ func TestWatch_Deadman_ProbeOutageRecoveryAlone_DoesNotClearPendingAlert(t *test
 		t.Fatalf("loadWatchStatus: %v", err)
 	}
 
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 1 (raises ALERT, probe baseline unavailable): %v", err)
 	}
 	if len(status.PendingAlerts) != 1 {
@@ -1861,7 +1864,7 @@ func TestWatch_Deadman_ProbeOutageRecoveryAlone_DoesNotClearPendingAlert(t *test
 	}
 
 	clk.Advance(1 * time.Minute) // well under DeadmanMinutes
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 2 (probe recovers, no other activity): %v", err)
 	}
 	if len(status.PendingAlerts) != 1 {
@@ -1899,7 +1902,7 @@ func TestWatch_Deadman_ProbeOutageThenGenuineManifestActivity_ClearsPendingAlert
 		t.Fatalf("loadWatchStatus: %v", err)
 	}
 
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 1 (raises ALERT, probe baseline unavailable): %v", err)
 	}
 	if len(status.PendingAlerts) != 1 {
@@ -1907,7 +1910,7 @@ func TestWatch_Deadman_ProbeOutageThenGenuineManifestActivity_ClearsPendingAlert
 	}
 
 	clk.Advance(1 * time.Minute)
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 2 (probe recovers, no other activity): %v", err)
 	}
 	if len(status.PendingAlerts) != 1 {
@@ -1921,7 +1924,7 @@ func TestWatch_Deadman_ProbeOutageThenGenuineManifestActivity_ClearsPendingAlert
 	}
 
 	clk.Advance(1 * time.Minute)
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 3 (genuine manifest activity): %v", err)
 	}
 	if len(status.PendingAlerts) != 0 {
@@ -1973,7 +1976,7 @@ func TestWatch_EnsureWatchdogJoined_TransientFailure_RetriesUntilSuccess(t *test
 		t.Fatalf("loadWatchStatus: %v", err)
 	}
 
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 1 (raises ALERT, Join fails): %v", err)
 	}
 	if status.WatchdogJoined {
@@ -1984,7 +1987,7 @@ func TestWatch_EnsureWatchdogJoined_TransientFailure_RetriesUntilSuccess(t *test
 	}
 
 	clk.Advance(1 * time.Minute)
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 2 (recovers, no ALERT): %v", err)
 	}
 	if status.WatchdogJoined {
@@ -1995,7 +1998,7 @@ func TestWatch_EnsureWatchdogJoined_TransientFailure_RetriesUntilSuccess(t *test
 	}
 
 	clk.Advance(1 * time.Minute)
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 3 (re-raises ALERT, Join retried and succeeds): %v", err)
 	}
 	if !status.WatchdogJoined {
@@ -2081,7 +2084,7 @@ func TestWatch_EscalateAlert_PrunesAt101stEscalation(t *testing.T) {
 	for i := 0; i <= maxEscalatedEntries; i++ { // 101 escalations
 		alertID := fmt.Sprintf("org-a/seat-x/deadman@%d", i)
 		pending := &watchPendingAlert{AlertID: alertID, Subject: "seat-x", TS: clk.Now().UTC().Format(time.RFC3339)}
-		run.escalateAlert(context.Background(), status, alertID, pending, clk.Now())
+		run.escalateAlert(status, alertID, pending, clk.Now())
 	}
 
 	if len(status.Escalated) != maxEscalatedEntries {
@@ -2165,7 +2168,7 @@ func TestWatch_PrunesRetiredBudgetEntriesFromStatus_NoEscalation(t *testing.T) {
 	}
 
 	clk.Advance(time.Minute) // now well past the pending alert's ts + DeadmanMinutes
-	if err := run.evaluateCycle(context.Background(), "org-a", status); err != nil {
+	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("evaluateCycle: %v", err)
 	}
 

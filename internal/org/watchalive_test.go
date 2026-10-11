@@ -134,10 +134,20 @@ func TestAcquireWatchLock_WaitsOutAShortSharedLock(t *testing.T) {
 	}
 }
 
-// AC11: the three states, and every reason for stale.
+// AC11: the three states, and every reason for stale. A deadman_minutes
+// below 1 judges by the default 10 (self-review M1: it used to make every
+// mark stale, so --detach stopped a healthy child under deadman_minutes = 0),
+// and the window is never shorter than two of the mark's interval_seconds.
 func TestProbeWatch_TellsRunningStaleAndNotRunningApart(t *testing.T) {
 	const deadman = 10
 	now := watchAliveT0
+	// slowMark is a running mark of a watch with a 15-minute interval whose
+	// last cycle ended age ago.
+	slowMark := func(age time.Duration) string {
+		mark := runningMark(7, now.Add(-age))
+		mark.IntervalSeconds = 900
+		return markJSON(t, mark)
+	}
 	cases := []struct {
 		name   string
 		locked bool
@@ -155,8 +165,13 @@ func TestProbeWatch_TellsRunningStaleAndNotRunningApart(t *testing.T) {
 		{name: "locked, stopped mark", locked: true, mark: markJSON(t, WatchAlive{State: WatchAliveStopped, PID: 7, TS: now.Format(time.RFC3339), StoppedAt: now.Format(time.RFC3339)}), deadman: deadman, want: WatchLivenessStale, wantMark: true},
 		{name: "locked, running mark older than deadman_minutes", locked: true, mark: markJSON(t, runningMark(7, now.Add(-deadman*time.Minute-time.Second))), deadman: deadman, want: WatchLivenessStale, wantMark: true},
 		{name: "locked, running mark with a ts that does not parse", locked: true, mark: `{"state":"running","pid":7,"ts":"yesterday"}`, deadman: deadman, want: WatchLivenessStale, wantMark: true},
-		{name: "locked, deadman_minutes 0", locked: true, mark: markJSON(t, runningMark(7, now)), deadman: 0, want: WatchLivenessStale, wantMark: true},
-		{name: "locked, deadman_minutes negative", locked: true, mark: markJSON(t, runningMark(7, now)), deadman: -5, want: WatchLivenessStale, wantMark: true},
+		{name: "locked, deadman_minutes 0, fresh running mark", locked: true, mark: markJSON(t, runningMark(7, now)), deadman: 0, want: WatchLivenessRunning, wantMark: true},
+		{name: "locked, deadman_minutes 0, running mark exactly the default 10 minutes old", locked: true, mark: markJSON(t, runningMark(7, now.Add(-10*time.Minute))), deadman: 0, want: WatchLivenessRunning, wantMark: true},
+		{name: "locked, deadman_minutes 0, running mark older than the default 10 minutes", locked: true, mark: markJSON(t, runningMark(7, now.Add(-10*time.Minute-time.Second))), deadman: 0, want: WatchLivenessStale, wantMark: true},
+		{name: "locked, deadman_minutes negative, fresh running mark", locked: true, mark: markJSON(t, runningMark(7, now)), deadman: -5, want: WatchLivenessRunning, wantMark: true},
+		{name: "locked, interval 900s, running mark 12 minutes old", locked: true, mark: slowMark(12 * time.Minute), deadman: deadman, want: WatchLivenessRunning, wantMark: true},
+		{name: "locked, interval 900s, running mark exactly two intervals old", locked: true, mark: slowMark(30 * time.Minute), deadman: deadman, want: WatchLivenessRunning, wantMark: true},
+		{name: "locked, interval 900s, running mark 31 minutes old", locked: true, mark: slowMark(31 * time.Minute), deadman: deadman, want: WatchLivenessStale, wantMark: true},
 		{name: "not locked, fresh running mark (a killed watch)", released: true, mark: markJSON(t, runningMark(7, now)), deadman: deadman, want: WatchLivenessNotRunning, wantMark: true},
 		{name: "not locked, no mark", released: true, deadman: deadman, want: WatchLivenessNotRunning},
 		{name: "no watch.lock, fresh running mark", mark: markJSON(t, runningMark(7, now)), deadman: deadman, want: WatchLivenessNotRunning, wantMark: true},

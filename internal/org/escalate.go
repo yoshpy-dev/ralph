@@ -295,7 +295,7 @@ func (o *Org) sendInboxItemToHuman(orgID, id, typ, reason string, banner io.Writ
 			TS: o.now(), OrgID: orgID, InboxID: id, Subject: LeaderIdentity, Reason: reason,
 		})
 	}
-	text := o.inboxHumanTextFor(reason, orgID, id, typ)
+	text := o.inboxHumanTextFor(orgID, id, typ, reason)
 	_, _ = fmt.Fprintln(banner, text.banner)
 	osascript := o.inboxDesktopNotify(text.title, text.desktop)
 	if recordErr != nil {
@@ -315,10 +315,11 @@ type inboxHumanText struct {
 
 // inboxHumanTextFor returns the text of a send for reason: the deadline
 // text (inboxDeadlineHumanText) for the two deadline reasons, and the text
-// of an escalated item otherwise.
-func (o *Org) inboxHumanTextFor(reason, orgID, id, typ string) inboxHumanText {
+// of an escalated item otherwise. It and inboxDeadlineHumanText take their
+// four strings in sendInboxItemToHuman's order (orgID, id, typ, reason).
+func (o *Org) inboxHumanTextFor(orgID, id, typ, reason string) inboxHumanText {
 	if reason == InboxReasonAckDeadline || reason == InboxReasonResolveDeadline {
-		return o.inboxDeadlineHumanText(reason, orgID, id, typ)
+		return o.inboxDeadlineHumanText(orgID, id, typ, reason)
 	}
 	return inboxHumanText{
 		banner: fmt.Sprintf("ORG ESCALATION: org=%s item=%s type=%s -- recorded in %s; read it with: %s",

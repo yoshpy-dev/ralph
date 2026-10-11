@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/yoshpy-dev/ralph/internal/config"
 )
 
 // One `ralph org watch --all` runs per org state dir (RunWatchAll,
@@ -37,11 +39,12 @@ const (
 // States ProbeWatch returns (WatchLiveness.State).
 const (
 	// WatchLivenessRunning: watch.lock is held and the mark says running
-	// with a ts within deadman_minutes.
+	// with a ts within the window of ProbeWatch.
 	WatchLivenessRunning = "running"
 	// WatchLivenessStale: watch.lock is held, but the mark is missing, does
-	// not parse, says stopped, or is older than deadman_minutes. The holder
-	// may be hung, or may have taken the lock and not written its mark yet.
+	// not parse, says stopped, or is older than the window of ProbeWatch.
+	// The holder may be hung, or may have taken the lock and not written its
+	// mark yet.
 	WatchLivenessStale = "stale"
 	// WatchLivenessNotRunning: no one holds watch.lock, whatever the mark
 	// says (a killed watch leaves a running mark behind).
@@ -161,22 +164,39 @@ func writeWatchAlive(stateDir string, mark WatchAlive) error {
 // WatchLiveness* constants). It checks watch.lock with fileLockHeld, then
 // reads the mark. A lock that cannot be checked counts as held: not_running
 // says no watch holds the lock, which this probe could not tell, and
-// running still needs a fresh running mark. deadmanMinutes below 1 makes
-// every mark stale.
+// running still needs a fresh running mark.
+//
+// A running mark is fresh when its ts is no older than the window
+// watchAliveWindow returns: deadmanMinutes, or the default deadman_minutes
+// (config.Default, 10) when deadmanMinutes is below 1, and never shorter
+// than two of the mark's own interval_seconds. A deadman_minutes of 0 means
+// the deadman never escalates by timeout (checkDeadman), not that no watch
+// is running, and a watch whose interval is longer than deadman_minutes
+// rewrites its mark only once per interval, so it is not stale between two
+// cycles.
 func ProbeWatch(stateDir string, now time.Time, deadmanMinutes int) WatchLiveness {
 	held, err := fileLockHeld(WatchLockPathIn(stateDir))
 	mark, _ := ReadWatchAlive(stateDir)
 	if err == nil && !held {
 		return WatchLiveness{State: WatchLivenessNotRunning, Mark: mark}
 	}
-	if mark == nil || mark.State != WatchAliveRunning || deadmanMinutes < 1 {
+	if mark == nil || mark.State != WatchAliveRunning {
 		return WatchLiveness{State: WatchLivenessStale, Mark: mark}
 	}
 	ts, err := time.Parse(time.RFC3339, mark.TS)
-	if err != nil || now.Sub(ts) > time.Duration(deadmanMinutes)*time.Minute {
+	if err != nil || now.Sub(ts) > watchAliveWindow(deadmanMinutes, mark.IntervalSeconds) {
 		return WatchLiveness{State: WatchLivenessStale, Mark: mark}
 	}
 	return WatchLiveness{State: WatchLivenessRunning, Mark: mark}
+}
+
+// watchAliveWindow is how old a running mark may be and still count as
+// fresh (see ProbeWatch).
+func watchAliveWindow(deadmanMinutes, intervalSeconds int) time.Duration {
+	if deadmanMinutes < 1 {
+		deadmanMinutes = config.Default().Org.DeadmanMinutes
+	}
+	return max(time.Duration(deadmanMinutes)*time.Minute, 2*time.Duration(intervalSeconds)*time.Second)
 }
 
 // WriteWatchStopRequest replaces the stop request in stateDir with one
