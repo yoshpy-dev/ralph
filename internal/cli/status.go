@@ -45,7 +45,8 @@ func newStatusCmd() *cobra.Command {
 			"watch heartbeat and pending alert count.\n\n" +
 			"An `org watch:` line shows whether `ralph org watch --all` is running on the\n" +
 			"state directory: running, stale (it holds the lock but its liveness mark is\n" +
-			"not fresh), or not running, with the pid and last cycle from that mark.\n\n" +
+			"not fresh), or not running, with the pid and the time that mark was last\n" +
+			"updated.\n\n" +
 			"Also displays a scaffold-ownership section (FR-12): each `.ralph/manifest.toml`-\n" +
 			"tracked path's owner attribute (core/fork/seed/block) and any unresolved drift.\n" +
 			"This section always reads the current working directory's project (the same\n" +
@@ -179,14 +180,14 @@ func orgWatchLine(probe org.WatchLiveness) string {
 			left += fmt.Sprintf(" from pid %d", mark.PID)
 		}
 		if mark.TS != "" {
-			left += ", last cycle " + mark.TS
+			left += ", mark updated " + mark.TS
 		}
 		return "org watch: not running (" + left + ")"
 	}
 	return "org watch: not running"
 }
 
-// orgWatchMarkDetails is the " (pid N, last cycle TS[, stopped at TS])" part
+// orgWatchMarkDetails is the " (pid N, mark updated TS[, stopped at TS])" part
 // of orgWatchLine for a watch that holds watch.lock, or "" when the mark
 // carries none of them.
 func orgWatchMarkDetails(mark *org.WatchAlive) string {
@@ -198,7 +199,7 @@ func orgWatchMarkDetails(mark *org.WatchAlive) string {
 		details = append(details, fmt.Sprintf("pid %d", mark.PID))
 	}
 	if mark.TS != "" {
-		details = append(details, "last cycle "+mark.TS)
+		details = append(details, "mark updated "+mark.TS)
 	}
 	if mark.State == org.WatchAliveStopped && mark.StoppedAt != "" {
 		details = append(details, "stopped at "+mark.StoppedAt)
@@ -401,12 +402,12 @@ type statusJSON struct {
 // from State: a killed watch leaves a running mark behind with no one
 // holding watch.lock.
 type statusOrgWatchJSON struct {
-	State       string `json:"state"`
-	PID         int    `json:"pid,omitempty"`
-	StartedAt   string `json:"started_at,omitempty"`
-	LastCycleTS string `json:"last_cycle_ts,omitempty"`
-	StoppedAt   string `json:"stopped_at,omitempty"`
-	MarkState   string `json:"mark_state,omitempty"`
+	State     string `json:"state"`
+	PID       int    `json:"pid,omitempty"`
+	StartedAt string `json:"started_at,omitempty"`
+	UpdatedAt string `json:"updated_at,omitempty"`
+	StoppedAt string `json:"stopped_at,omitempty"`
+	MarkState string `json:"mark_state,omitempty"`
 }
 
 // buildStatusOrgWatchJSON renders probe into its --json wire shape.
@@ -415,7 +416,7 @@ func buildStatusOrgWatchJSON(probe org.WatchLiveness) statusOrgWatchJSON {
 	if mark := probe.Mark; mark != nil {
 		result.PID = mark.PID
 		result.StartedAt = mark.StartedAt
-		result.LastCycleTS = mark.TS
+		result.UpdatedAt = mark.TS
 		result.StoppedAt = mark.StoppedAt
 		result.MarkState = mark.State
 	}

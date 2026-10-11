@@ -536,7 +536,7 @@ func TestStatusCmd_OrgWatchLineAndJSONPerWatchState(t *testing.T) {
 	markJSON := func(state string, m *org.WatchAlive) map[string]any {
 		want := map[string]any{
 			"state": state, "pid": float64(m.PID), "started_at": m.StartedAt,
-			"last_cycle_ts": m.TS, "mark_state": m.State,
+			"updated_at": m.TS, "mark_state": m.State,
 		}
 		if m.StoppedAt != "" {
 			want["stopped_at"] = m.StoppedAt
@@ -566,25 +566,25 @@ func TestStatusCmd_OrgWatchLineAndJSONPerWatchState(t *testing.T) {
 		{
 			name:     "not running with the running mark of a killed watch",
 			setup:    func(t *testing.T, stateDir string) { writeWatchMark(t, stateDir, killed) },
-			wantLine: "org watch: not running (a running mark is left from pid 4243, last cycle 2026-10-11T04:40:00Z)",
+			wantLine: "org watch: not running (a running mark is left from pid 4243, mark updated 2026-10-11T04:40:00Z)",
 			wantJSON: markJSON("not_running", killed),
 		},
 		{
 			name:     "running",
 			setup:    func(t *testing.T, stateDir string) { holdWatchLock(t, stateDir, fresh) },
-			wantLine: "org watch: running (pid 4244, last cycle " + fresh.TS + ")",
+			wantLine: "org watch: running (pid 4244, mark updated " + fresh.TS + ")",
 			wantJSON: markJSON("running", fresh),
 		},
 		{
 			name:     "stale with an old mark",
 			setup:    func(t *testing.T, stateDir string) { holdWatchLock(t, stateDir, old) },
-			wantLine: "org watch: stale (pid 4245, last cycle " + old.TS + ")" + staleTail,
+			wantLine: "org watch: stale (pid 4245, mark updated " + old.TS + ")" + staleTail,
 			wantJSON: markJSON("stale", old),
 		},
 		{
 			name:     "stale with a stopped mark",
 			setup:    func(t *testing.T, stateDir string) { holdWatchLock(t, stateDir, stopped) },
-			wantLine: "org watch: stale (pid 4242, last cycle 2026-10-11T04:40:00Z, stopped at 2026-10-11T04:40:05Z)" + staleTail,
+			wantLine: "org watch: stale (pid 4242, mark updated 2026-10-11T04:40:00Z, stopped at 2026-10-11T04:40:05Z)" + staleTail,
 			wantJSON: markJSON("stale", stopped),
 		},
 		{
@@ -651,7 +651,7 @@ func TestStatusCmd_EmptyRosterStillShowsTheOrgWatch(t *testing.T) {
 	if !strings.Contains(out, "no org runtime state found") {
 		t.Errorf("expected the empty-state note, got:\n%s", out)
 	}
-	if got, want := statusOrgWatchLine(t, out), "org watch: running (pid 4246, last cycle "+mark.TS+")"; got != want {
+	if got, want := statusOrgWatchLine(t, out), "org watch: running (pid 4246, mark updated "+mark.TS+")"; got != want {
 		t.Errorf("org watch line on the empty roster:\n got %q\nwant %q", got, want)
 	}
 
@@ -660,8 +660,8 @@ func TestStatusCmd_EmptyRosterStillShowsTheOrgWatch(t *testing.T) {
 		t.Fatalf("status --json: %v (output: %s)", err, jsonOut)
 	}
 	got := statusOrgWatchJSONOf(t, jsonOut)
-	if got["state"] != "running" || got["pid"] != float64(4246) || got["last_cycle_ts"] != mark.TS {
-		t.Errorf("org_watch on the empty roster = %v, want state running, pid 4246, last_cycle_ts %s", got, mark.TS)
+	if got["state"] != "running" || got["pid"] != float64(4246) || got["updated_at"] != mark.TS {
+		t.Errorf("org_watch on the empty roster = %v, want state running, pid 4246, updated_at %s", got, mark.TS)
 	}
 }
 
@@ -690,7 +690,7 @@ func TestStatusCmd_OrgWatchJudgesTheMarkByDeadmanMinutesOfRalphToml(t *testing.T
 	if err != nil {
 		t.Fatalf("status with ralph.toml: %v (output: %s)", err, out)
 	}
-	if got, want := statusOrgWatchLine(t, out), "org watch: running (pid 4247, last cycle "+mark.TS+")"; got != want {
+	if got, want := statusOrgWatchLine(t, out), "org watch: running (pid 4247, mark updated "+mark.TS+")"; got != want {
 		t.Errorf("with deadman_minutes = 60:\n got %q\nwant %q", got, want)
 	}
 }
@@ -763,7 +763,7 @@ func TestStatusCmd_OrgWatchFallsBackToTheDefaultDeadmanWhenRalphTomlDoesNotLoad(
 	if err != nil {
 		t.Fatalf("status with a broken ralph.toml: %v (output: %s)", err, out)
 	}
-	if got, want := statusOrgWatchLine(t, out), "org watch: running (pid 4248, last cycle "+mark.TS+")"; got != want {
+	if got, want := statusOrgWatchLine(t, out), "org watch: running (pid 4248, mark updated "+mark.TS+")"; got != want {
 		t.Errorf("org watch line with a broken ralph.toml:\n got %q\nwant %q", got, want)
 	}
 }

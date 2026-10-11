@@ -179,7 +179,7 @@ func runOrgWatchAll(cmd *cobra.Command, rt *org.Org, resolvedStateDir, stateDirS
 	// out the full 60s bound after the watch has stopped.
 	//
 	// RunWatchAll calls BeforeStop while it still holds watch.lock and its
-	// mark says running (cross-review #1), so `--stop` and a second
+	// mark says running (cross-review cycle 1 #1), so `--stop` and a second
 	// `watch --all` see this watch running until the goroutines have ended,
 	// rather than a free lock while they can still send an ALERT or write a
 	// receipt. Nothing waits after RunWatchAll returns: it calls BeforeStop
@@ -391,7 +391,7 @@ func runOrgWatchStop(cmd *cobra.Command, stateDir string) error {
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "stopped ralph org watch --all (%s)\n", orgWatchPIDText(mark))
 		return nil
 	}
-	return fmt.Errorf("org: watch --stop: the watch did not stop within %s; the stop request stays in %s, so it stops when its current cycle ends (a cycle takes longer while herdr calls time out); to stop it now, %s",
+	return fmt.Errorf("org: watch --stop: the watch did not stop within %s; the stop request stays in %s, so it stops when its current cycle, or its wait for an in-flight on-demand watcher call, ends (a cycle takes longer while herdr calls time out); to stop it now, %s",
 		orgWatchStopDeadline, org.WatchStopPathIn(stateDir), orgWatchKillHint(stateDir, final.Mark))
 }
 
@@ -464,7 +464,7 @@ func orgWatchKillHint(stateDir string, mark *org.WatchAlive) string {
 // The returned *sync.WaitGroup (self-review M-5 fix) tracks every
 // OnSemanticTrigger goroutine this closure starts; runOrgWatchAll waits on
 // it in WatchHooks.BeforeStop, which RunWatchAll calls after its last cycle
-// and before it releases watch.lock (cross-review #1), so `--once`
+// and before it releases watch.lock (cross-review cycle 1 #1), so `--once`
 // (Cycles: 1) cannot exit the process out from under an in-flight on-demand
 // judgment call before it produces a watcher receipt or ALERT. When
 // WatcherEnabled is false the returned WaitGroup has nothing ever added to

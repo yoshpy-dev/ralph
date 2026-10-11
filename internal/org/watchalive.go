@@ -69,8 +69,11 @@ var ErrWatchRunning = errors.New("another ralph org watch --all is running on th
 // WatchAlive is the liveness mark, watch-alive.json. StartedAt carries
 // nanoseconds because a stop request counts only when it is later than
 // StartedAt, and a `--stop` right after a start falls in the same second.
-// TS (the end of the latest cycle, or the start before the first) and
-// StoppedAt are whole seconds; all are UTC RFC3339.
+// TS is the last time the watch wrote its running mark: at the start, after
+// each cycle, and every interval while it drains its watchers before
+// stopping (WatchHooks.BeforeStop), so it is not always a cycle's end; the
+// stopped mark keeps it. TS and StoppedAt are whole seconds; all are UTC
+// RFC3339.
 type WatchAlive struct {
 	State           string `json:"state"`
 	PID             int    `json:"pid"`

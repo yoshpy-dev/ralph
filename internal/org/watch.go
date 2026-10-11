@@ -170,8 +170,10 @@ func truncateScopeOutput(out string, byteBudget int) string {
 // on the call without depending on macOS.
 type EscalateFunc func(ctx context.Context, message string) error
 
-// WatchHooks lets a caller observe watch-cycle events without changing
-// pulse-layer behavior. Every hook is optional (nil-safe).
+// WatchHooks lets a caller observe watch-cycle events. Every hook is
+// optional (nil-safe). OnSemanticTrigger and OnCycle only observe;
+// BeforeStop also sets when the run ends, because RunWatchAll keeps
+// watch.lock and a running mark until it returns.
 type WatchHooks struct {
 	// OnSemanticTrigger fires when a condition warrants on-demand watcher
 	// judgment (the Slice 4 seam: an on-demand `claude -p` verdict call for
@@ -186,9 +188,14 @@ type WatchHooks struct {
 	// before it writes the stopped mark and releases watch.lock, so the work
 	// a caller started from OnSemanticTrigger (the on-demand watcher
 	// goroutines of `ralph org watch --all`) can end while `--stop` and a
-	// second watch still see this watch running (cross-review #1 of
-	// docs/plans/active/2026-10-11-org-cross-watch.md). RunWatchAll rewrites
-	// the running mark every interval until BeforeStop returns.
+	// second watch still see this watch running (cross-review cycle 1 #1,
+	// docs/reports/cross-review-triage-org-cross-watch.md). RunWatchAll
+	// rewrites the running mark every interval until BeforeStop returns.
+	// BeforeStop must return within a bound: while it runs, the watch keeps
+	// watch.lock and a fresh running mark but runs no cycle, so one that
+	// never returns leaves the watch "running" with no cycles. The CLI's
+	// BeforeStop waits for its watcher goroutines, each bounded by
+	// watcherInvokeTimeout plus the ALERT send's DriverCallTimeout.
 	BeforeStop func()
 }
 
@@ -685,14 +692,14 @@ var afterStopRequestTaken = func() {}
 // takeStopRequestAtStart deals with a stop request that is there at the
 // start. It takes the request with one rename (takeWatchStopRequest)
 // rather than reading and then removing watch-stop.json, which deleted a
-// request a concurrent `--stop` wrote between the two (cross-review #2 of
-// docs/plans/active/2026-10-11-org-cross-watch.md): such a request is a new
-// file this leaves alone. A request later than the start is put back and
-// remembered (stopTaken), so the run follows it after the first cycle even
-// when the put-back fails; a put-back over a request written meanwhile
-// replaces one request for this run with another. A request that is not
-// later than the start (left for an earlier watch), or that cannot be read,
-// is removed.
+// request a concurrent `--stop` wrote between the two (cross-review cycle 1
+// #2, docs/reports/cross-review-triage-org-cross-watch.md): such a request
+// is a new file this leaves alone. A request later than the start is put
+// back and remembered (stopTaken), so the run follows it after the first
+// cycle even when the put-back fails; a put-back over a request written
+// meanwhile replaces one request for this run with another. A request that
+// is not later than the start (left for an earlier watch), or that cannot
+// be read, is removed.
 func (w *watchAllRun) takeStopRequestAtStart() {
 	req, taken, err := takeWatchStopRequest(w.dir)
 	if taken == "" {

@@ -578,6 +578,7 @@ func TestOrgWatchStop_AWatchThatDoesNotStopInTime_ExitsOneSendsNoSignal(t *testi
 	for _, want := range []string{
 		"did not stop within 300ms",
 		"the stop request stays in " + org.WatchStopPathIn(stateDir),
+		"it stops when its current cycle, or its wait for an in-flight on-demand watcher call, ends",
 		fmt.Sprintf("kill %d (the pid in %s", pid, org.WatchAlivePathIn(stateDir)),
 	} {
 		if !strings.Contains(err.Error(), want) {
@@ -770,14 +771,15 @@ func TestOrgWatch_AStopRequestCancelsAnInFlightWatcherCall(t *testing.T) {
 	}
 }
 
-// Cross-review #1 on the CLI: a `watch --all --once` whose on-demand watcher
-// call is still in flight after its one cycle (self-review M-5 lets `--once`
-// wait for it) keeps watch.lock and a running mark until the call has ended.
-// Meanwhile a second `watch --all --once` is refused, and a `--stop` waits
-// for the watch instead of saying it is not running, then reports it
-// stopped. A first `--once` records the seat's worktree status, and a new
-// file in the worktree makes the next one see a scope change and start the
-// watcher: a claude that waits until the test releases it.
+// Cross-review cycle 1 #1 on the CLI: a `watch --all --once` whose
+// on-demand watcher call is still in flight after its one cycle (self-review
+// M-5 lets `--once` wait for it) keeps watch.lock and a running mark until
+// the call has ended. Meanwhile a second `watch --all --once` is refused,
+// and a `--stop` waits for the watch instead of saying it is not running,
+// then reports it stopped. A first `--once` records the seat's worktree
+// status, and a new file in the worktree makes the next one see a scope
+// change and start the watcher: a claude that waits until the test releases
+// it.
 func TestOrgWatch_Once_HoldsTheLockUntilItsInFlightWatcherCallEnds(t *testing.T) {
 	setupOrgStubPATH(t)
 	marks := t.TempDir()

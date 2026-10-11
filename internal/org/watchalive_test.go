@@ -375,8 +375,8 @@ func TestWatchStopRequest_AppliesOnlyToAWatchStartedBeforeIt(t *testing.T) {
 	}
 }
 
-// Cross-review #2 at the request layer: takeWatchStopRequest moves the
-// request out of watch-stop.json with one rename and reads it where it
+// Cross-review cycle 1 #2 at the request layer: takeWatchStopRequest moves
+// the request out of watch-stop.json with one rename and reads it where it
 // moved it, so a request written after the take is a new watch-stop.json
 // that removing the taken one leaves in place. With no request it moves
 // nothing; a request that does not parse is moved and its parse error

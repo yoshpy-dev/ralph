@@ -923,11 +923,11 @@ func setAfterStopRequestTaken(t *testing.T, fn func()) {
 	t.Cleanup(func() { afterStopRequestTaken = orig })
 }
 
-// Cross-review #2: the start takes an old stop request with one rename, so
-// a request a concurrent --stop writes after the take is not removed with
-// the old one. The seam writes the new request in that window: the old
-// request is gone, and the new one, later than the start, is still there
-// after the first cycle and ends the run then.
+// Cross-review cycle 1 #2: the start takes an old stop request with one
+// rename, so a request a concurrent --stop writes after the take is not
+// removed with the old one. The seam writes the new request in that
+// window: the old request is gone, and the new one, later than the start,
+// is still there after the first cycle and ends the run then.
 func TestRunWatchAll_AStopRequestWrittenWhileTheStartTakesAnOldOneIsKept(t *testing.T) {
 	f := newWatchAllFixture(t)
 	if err := WriteWatchStopRequest(f.dir, f.clk.Now().Add(-time.Minute)); err != nil {
@@ -1113,12 +1113,12 @@ func TestRunWatchAll_WritesTheStoppedMarkBeforeReleasingTheLock(t *testing.T) {
 	}
 }
 
-// Cross-review #1: however the run ends after its first cycle, hooks.BeforeStop
-// runs while the watch still holds watch.lock and its mark says running. While
-// BeforeStop blocks, ProbeWatch says running, a second AcquireWatchLock and a
-// second RunWatchAll are refused (the refused one calls no BeforeStop), and
-// the mark's ts is rewritten every interval. Once BeforeStop returns, the mark
-// is stopped and the lock free.
+// Cross-review cycle 1 #1: however the run ends after its first cycle,
+// hooks.BeforeStop runs while the watch still holds watch.lock and its mark
+// says running. While BeforeStop blocks, ProbeWatch says running, a second
+// AcquireWatchLock and a second RunWatchAll are refused (the refused one
+// calls no BeforeStop), and the mark's ts is rewritten every interval. Once
+// BeforeStop returns, the mark is stopped and the lock free.
 func TestRunWatchAll_CallsBeforeStopWhileItStillHoldsTheLockAndTheMarkSaysRunning(t *testing.T) {
 	cases := []struct {
 		name string
