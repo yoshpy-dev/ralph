@@ -48,8 +48,73 @@ CRITICAL、HIGH、MEDIUM はない。LOW 6 件は、判定にも guard の動き
 
 ## Recommendation
 
-- Merge: yes(CRITICAL、HIGH、MEDIUM なし。LOW 6)
+- Merge: yes(最初の review の判定。CRITICAL、HIGH、MEDIUM なし、LOW 6。再確認のあとの判定は末尾の「再確認」の Merge)
 - Follow-ups:
   - 1、3、4、5、6 はテストのコメント、文言、名前の直しで、判定に関係しない。直すなら、pipeline を回し直す前に 1 回の fix commit にまとめるのがよい。直さない場合は、次にこのテストのファイルを触る機会に回してよい。
   - 2 の tech-debt の文と Related の足しは、`docs/tech-debt/README.md` は記録だけの修正の例外の対象外なので、/sync-docs の段で直す。test report の path は /test の後に足す(前の PR と同じ手順)。
   - 任意: `.claude/hooks/pre_bash_guard_rules.awk`(と `templates/base/` の写し)の「a D row of tests/test-pre-bash-guard.sh pins each wrapper, and its F section reads this list」は、今も偽ではない。「pins each wrapper」は、分岐の有無を指す文として読めば正しい。guard を次に直す機会に、F が一覧と手書きの行を突き合わせることも書く。この PR は guard のファイルを変えない決まりなので触れていない。
+
+## 再確認(888ec6f8、160eef84、d2cb7794)
+
+- Date: 2026-10-11
+- Branch: test/guard-wrapper-args(HEAD d2cb7794)
+- Scope: 計画が広がり(23b1ac05、承認 digest e69b20224a60)、LOW 2 を受けて 16 行を足した。`git diff a57b6758..HEAD` を、diff の品質だけで見た(テスト 141 行の差、tech-debt の 1 行、計画の Progress)。テスト、静的解析、仕様との照合は行っていない。guard のファイルは変わっていない(`git diff a57b6758..HEAD -- .claude templates scripts` は空)。probe は scratch に置いた guard の写し(macOS の awk、jq あり)に、行を stdin で直接渡した
+
+### 確かめたこと
+
+- 変更の範囲。足したコメント行はどれも 78 桁以内、`git diff --check` は空。`nine` の語はテストのファイルから消え、`wrapper_row_*` は `wrapper_row_forms` の系統だけになった(`grep -n`)。tech-debt の行は 5 列のまま(`\|` の数は base と同じ)、`~~` は 16 個で偶数、「The nine hand-written rows stay」の文は外れている。
+- 16 行(`:1090-1105`)。1 語目はどれも `WRAPPER` の名前で、末尾は `sh -c 'git commit -n -m x'`、集合の検査と対照(末尾を `-m x` に替えた形)の条件に合う。`%e`、`{}`、`=` は `$'…'` の中で、ラベルとペイロードの組み立て(`printf` の引数渡し、`json_escape`)に支障を出さない形。計画の Assumptions のとおり、HEAD の guard で 16 行とも deny。
+- 引数の読み方を変えた写しを 31 通り作り、25 行(元の 9 行と足した 16 行)を流して、どの行が none になるかを見た。引数なしの行(`env sh -c …`、`command sh -c …`、`nohup sh -c …`、`time sh -c …`、`xargs sh -c …` など)は、31 通りのどれでも落ちなかった。引数を置く行は、その引数だけで落ちる。たとえば `time` の旗の指定を空にすると `time -o f` と `time -f %e`、`exec` の指定を空にすると `exec -a n`、`timeout` の `+ 1` を消すと `timeout 5`、`timeout -s KILL 5s`、`timeout -k 1 5` が落ちた。落ちた写しは 16 通り、どの行も落ちなかった写しは 15 通り(下の 7)。
+- LOW 3 の文「a timeout branch that skipped no duration would deny the first form instead」を写しで確かめた。`timeout` の `+ 1` を消した写しで、`timeout sh -c …`(1 形目)は deny、`timeout 5 sh -c …`(2 形目)は none。コメントのとおり。
+
+### LOW 1〜6 の状況
+
+| LOW | 状況 | 確かめた点 |
+| --- | --- | --- |
+| 1 | 修正済み | `:1065-1067` は「only rows of this kind fail when a branch misreads its wrapper's own arguments, and only for the arguments they put before sh -c」。ヘッダー F 項目は「of the rows of wrapper_deny in D, only those that put such arguments before sh -c do, each for the arguments it puts there」。F 節のコメント(`:1664-1672`)の「the rows of wrapper_deny that put such arguments before sh -c do」も同じ。上の 31 通りの結果(引数なしの行は落ちず、引数を置く行はその引数だけで落ちる)と合う |
+| 2 | 修正済み。ただし閉じの文に新しい指摘がある(7) | 閉じの文が、最初の 9 行のうち引数を置くのは 3 行だけだったこと、`time` と `exec` の旗を空にすると緑だったこと、足した 16 行、(f) の結果(8 件)、「分岐が載せていないツールの旗はどの行も押さえない」ことを書く。残りの Related の test report の path は、/test のあとに足す(前の PR と同じ手順) |
+| 3 | 修正済み | `:1664-1672`。「give no wrapper an option」に直り、`timeout` の 5 の扱いを `+ 1` を消した写しの結果つきで書く。上の確認のとおり正確 |
+| 4 | 修正済み | ヘッダーの D 項目は「wrapper_deny holds the hand-written rows that run a wrapper before sh -c 'git commit -n -m x', bare or with arguments of its own; F requires one row or more for each name of WRAPPER」。`:1040` 付近のコメントは「one row or more for each name of WRAPPER, written by hand (the F check below requires it)」。数が消えた。見た目だけの点: ヘッダーの組み直しで「and unknown runners,」が短い行になる。直さなくてよい |
+| 5 | 修正済み | `wrapper_deny_tail`、`wrapper_deny_control`(`:1736` 付近)。コメント、ラベル、FAIL の文言、`case` の参照まで、旧名は残っていない |
+| 6 | 修正済み | `:1793-1795`。`why=""` を毎回初期化し、`got=deny` のときだけ理由を足す。FAIL の本文は「expected none with exit 0」まで。`got=none` で `rc` が 0 でない場合や `unparsed` の場合は、理由なしで判定と終了コードだけが出る。この分岐は guard を変えずに出せないので、実行では見ていない(計画の Progress も同じ書き方)。コードを読んで確かめた |
+
+### 新しい指摘
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| MEDIUM | maintainability | (7)「分岐ごと、値を取る引数の書き方ごとに 1 行以上」という書き方が、足した 16 行の実際の範囲より広い。同じ書き方が 3 か所にある。行の群の上のコメント(`:1088-1089`)、`wrapper_deny` の上のコメント(`:1049-1056`)、tech-debt の閉じの文。分岐が読む書き方のうち、どの行も押さえないものが 4 組ある(詳細は下) | 引数の読み方を変えた写し 31 通りのうち、15 通りでどの行も落ちなかった。うち 10 通りが行の不足、5 通りは行を足す必要のないもの(詳細は下) | 次のどちらか。(i) 行を 7 行足し、閉じの文を足した範囲に合わせる。(ii) 行を足さず、3 か所の言い方を実際に押さえるものの名指しに直し、押さえないものを閉じの文に書く。verify の前なので、どちらでも再実行の費用は増えない |
+
+#### 指摘 7 の詳細
+
+分岐が読む書き方のうち、どの行も押さえないもの:
+
+- (a) `timeout` の長いオプションと次の語(`--signal KILL`、`--kill-after 1`)。長いオプションの行は `time`、`nice`、`stdbuf` だけ。`timeout` の分岐の一覧(`" --signal --kill-after "`)を空にした写しで、25 行のどれも落ちなかった。
+- (b) `stdbuf` の短い旗と次の語(`-o L`)。`stdbuf -o0` は値が旗に付く形で、`takes_next` は旗の集合に入っていても入っていなくても 0 を返すので、集合 `"ioe"` を空にした写しでも落ちなかった。
+- (c) `env`、`command`、`xargs` の `--`。`nohup --` が押さえるのは `skip_opts` の `--` の読み違い(`return i` にした写し)だけで、その行の削除は、長いオプションの経路が同じ結果を返すので等価の写しになる。`skip_env`、`skip_command`、`skip_xargs` の `--` を `return i` にした写しは、どれも落ちなかった。
+- (d) `env` の長いオプション(`--unset`、`--chdir`)と、`xargs` の値を取る長いオプション(`--max-args` など)。それぞれの判定を落とした写しで落ちなかった。
+- 加えて、`xargs -I{}` と `stdbuf -o0` の行は、31 通りのどれでも落ちなかった。値が旗に付く形は、旗の集合に関係なく同じ結果になる。
+
+どの行も落ちなかった 15 通りのうち、行の不足を示す 10 通りが上の (a)〜(d)。ほかの 5 通りは行を足す必要がない。`skip_opts` の `--` の行の削除(等価)、`skip_env` の代入の分岐の削除(`cmd_pos` のループの先頭が代入を飛ばすので、等価とみられる。未確認)、`skip_opts` の数字の旗(`nice -5` の旧式の形で、計画が足さないと決めた「man にある形」の外とみられる。未確認)、`time` の `--output` の 1 語(同じ一覧の `--format` の行が通る)、`xargs` の任意の値の旗 `ile`。
+
+足す行の候補は、HEAD の guard ですべて deny で、対応する写しですべて none になった(行が押さえることを確かめた)。`timeout --signal KILL 5s sh -c …`、`stdbuf -o L sh -c …`、`env -- sh -c …`、`command -- sh -c …`、`xargs -- sh -c …`、`xargs --max-args 1 sh -c …`、`env --unset HOME sh -c …` の 7 行。
+
+(i) の場合、25 行が 32 行になり、件数は D 節で 14、F 節の対照で 14 増える。足したあとも、一覧の旗を 1 つずつは押さえない(`--kill-after` や `--chdir` など)ので、閉じの文の「each way」は、押さえる範囲(書き方の種類ごと、分岐ごと)に言い直す。(ii) の場合の言い方の例は「a short flag and the next word for exec, time, nice and timeout; a long option and the next word for time, nice and stdbuf」で、押さえないものとして (a)〜(d) を閉じの文に書く。なお、閉じの文の「An option of the real tool that a branch does not list is pinned by no row」は、分岐が載せていない旗の話で、(a)〜(d) は分岐が載せている書き方の話なので、今の文ではカバーされていない。
+
+## 再確認の結果
+
+- 修正は LOW 1〜6 のすべてで確かめた。新しい指摘は MEDIUM 1(7)。判定の変更、guard の変更、テストの結果に関係しない(コメント、tech-debt の文、行の追加の範囲の話)。
+- 足した 16 行そのものは、1 語目、末尾、対照、`$'…'` の書き方に問題がない。名前の揃えと対照は、25 行のどれも新しい検査を満たす形。
+
+### Coverage gaps(再確認)
+
+- テストのファイルは動かしていない(この step の範囲外)。2,191 件が通ることと mawk・gawk の結果は /test で確かめる。probe は macOS の awk だけ。
+- 16 行を足したので、どの名前にも 2 行以上ある。1 行を消しても集合の検査は FAIL せず、その行が押さえていた書き方が黙って外れる。計画の Progress が「AC2 (b) の読み方」として記録している範囲で、この PR が決めたこと。
+- 31 通りの写しは、`cmd_pos` と `skip_*` の引数の読み方の部分だけ。`takes_next` 自体、`$'…'` の引数、`-S` の経路(`queue`)は見ていない。
+
+### Recommendation(再確認)
+
+- Merge: yes(CRITICAL、HIGH なし。MEDIUM 1(7)、LOW は 1〜6 がすべて修正済み)
+- Follow-ups:
+  - 7 は、verify に進む前に直すのがよい(上の (i) か (ii))。(i) なら行の追加とコメント、(ii) ならコメント 3 か所と tech-debt の閉じの文。どちらも判定を変えない。
+  - 2 の Related の test report の path は、/test の report ができたあとに足す。
+  - 任意(前のまま): `.claude/hooks/pre_bash_guard_rules.awk`(と `templates/base/` の写し)の「a D row of tests/test-pre-bash-guard.sh pins each wrapper, and its F section reads this list」は、今も偽ではない。guard を次に直す機会に、F が一覧と手書きの行を突き合わせることも書く。
