@@ -119,26 +119,26 @@
 
 ## Acceptance criteria
 
-- [ ] AC1: `[org.director]` の `ack_minutes` は既定 10、`resolve_minutes` は既定 60 で、`Default()`・`templates/base/ralph.toml`・`scripts/ralph-config.sh` が揃う(lock-step のテスト)。0 以下は設定の検証エラーになる
-- [ ] AC2: 期限の判定は表のとおりになる。open で notified なしで ack の期限を過ぎた → ack。acked → ack の期限は効かない。notified あり(5 段目の即時の通知)→ ack の期限は効かない。resolved → どちらも効かない。resolve の期限を過ぎて resolved でなく、resolve の期限の notified がない → resolve(1 回だけ)。両方が切れている → resolve だけを 1 回。open から直接 resolved になった件 → どちらも効かない
-- [ ] AC3: 期限が切れた件は、`escalations.jsonl` の 1 行(inbox_id、org_id、reason)、見張りの stderr の 1 行、デスクトップ通知(本文なし)、reason と osascript の結果つきの `notified` で人に届き、件の状態は変わらない
-- [ ] AC4: `escalations.jsonl` に書けないとき、`notified` は書かれず、同じプロセスの中では `ack_minutes` に 1 回までしか送り直さない。見張りを起動し直すと、最初のサイクルで送り直す
-- [ ] AC5: 期限を過ぎた件がある台帳で見張りを起動すると、最初のサイクルで届く。すでにその期限の notified がある件は、起動し直しても届かない(仕様 AC 105 行の後半)
-- [ ] AC6: escalate は 5 段目と同じくすぐ人へ送る。その件は ack の期限では二度目が鳴らず、resolve の期限を過ぎても resolved でなければもう一度届く
-- [ ] AC7: `ralph org watch --all` は、走っているすべての org のパルスを 1 プロセスで見る。org ごとの ALERT・デッドマン・`watch-status-<org>.json` は今の 1 org の watch と同じになる。disband した org は見ない
-- [ ] AC7b: 2 つの org のうち先に見る org の herdr の呼び出しが返らないとき(テストで止める)、その呼び出しは `DriverCallTimeout` で打ち切られ、同じサイクルで受信箱の期限の件が届き、もう 1 つの org のパルスが回り、生存の印が書かれる。先に見る org の状態ファイルが書けないときも同じ(Codex plan advisory の指摘 1)
-- [ ] AC8: `ralph org watch` に `--org-id` を付けると断られ、`--all` を付けないと断られる(どちらも終了コード 1、何も書かない)
-- [ ] AC9: 同じ台帳に 2 つ目の `watch --all` を起動すると、1 つ目の pid を添えて終了コード 1 で終わる。1 つ目が終わる(正常終了でも kill でも)とロックが放され、次の起動が通る
-- [ ] AC10: 見張りはロックを取った直後と毎サイクルに `watch-alive.json` を書き(state `running`、pid、started_at、ts)、SIGINT か SIGTERM で `stopped` を書いて終わる
-- [ ] AC11: 判定関数は、ロックあり・印が新しい → `running`、ロックあり・印がないか古い → `stale`、ロックなし(印が running のままでも)→ `not_running` を返す
-- [ ] AC12: `--detach` は子の印が running になってから pid と `watch.log` のパスを出して終了コード 0。すでに running なら起動しない。stale なら起動せず終了コード 1。子には `--state-dir` と、指定されていれば `--config` と `--interval-seconds` が渡る。テストは test binary を exec しない
-- [ ] AC12b: `--detach` が待ちきれなかったとき、起動した子は止められて回収され、ロックが放されてから終了コード 1 になる(テストでは印を書かない子で確かめる。Codex plan advisory の指摘 3)
-- [ ] AC13: `--stop` はシグナルを送らない。running か stale の見張りに止める頼みを書き、見張りが `stopped` を書いてロックを放したら終了コード 0。30 秒ほどで放されなければ pid を示して終了コード 1。動いていなければ終了コード 0 で「動いていない」と言う
-- [ ] AC13b: 見張りは、自分の `started_at` より前に書かれた止める頼みには従わない(起動のときに消す)。印の pid が古いまま(ロックを取った直後の見張りを模す)でも、`--stop` はどのプロセスにもシグナルを送らない(Codex plan advisory の指摘 2)
-- [ ] AC14: `ralph status` は見張りの状態を出し、`--json` には `org_watch` が入る
-- [ ] AC15: spawn・send・start・stop・disband・escalate の動きは変わらない(それらの既存のテストは書き換えずに通る)
-- [ ] AC16: tech-debt の (c)〜(h) の整理は動作を変えない(既存のテストが書き換えずに通る。(h) の helper は escalate の壊れた設定のテストが拾う)
-- [ ] AC17: 文書(skill の 4 面、README、AGENTS.md、仕様の注、quality-gates、agent-messaging)が新しい watch の形に合い、`scripts/check-sync.sh` と `scripts/check-skill-sync.sh` が通る
+- [x] AC1: `[org.director]` の `ack_minutes` は既定 10、`resolve_minutes` は既定 60 で、`Default()`・`templates/base/ralph.toml`・`scripts/ralph-config.sh` が揃う(lock-step のテスト)。0 以下は設定の検証エラーになる
+- [x] AC2: 期限の判定は表のとおりになる。open で notified なしで ack の期限を過ぎた → ack。acked → ack の期限は効かない。notified あり(5 段目の即時の通知)→ ack の期限は効かない。resolved → どちらも効かない。resolve の期限を過ぎて resolved でなく、resolve の期限の notified がない → resolve(1 回だけ)。両方が切れている → resolve だけを 1 回。open から直接 resolved になった件 → どちらも効かない
+- [x] AC3: 期限が切れた件は、`escalations.jsonl` の 1 行(inbox_id、org_id、reason)、見張りの stderr の 1 行、デスクトップ通知(本文なし)、reason と osascript の結果つきの `notified` で人に届き、件の状態は変わらない
+- [x] AC4: `escalations.jsonl` に書けないとき、`notified` は書かれず、同じプロセスの中では `ack_minutes` に 1 回までしか送り直さない。見張りを起動し直すと、最初のサイクルで送り直す
+- [x] AC5: 期限を過ぎた件がある台帳で見張りを起動すると、最初のサイクルで届く。すでにその期限の notified がある件は、起動し直しても届かない(仕様 AC 105 行の後半)
+- [x] AC6: escalate は 5 段目と同じくすぐ人へ送る。その件は ack の期限では二度目が鳴らず、resolve の期限を過ぎても resolved でなければもう一度届く
+- [x] AC7: `ralph org watch --all` は、走っているすべての org のパルスを 1 プロセスで見る。org ごとの ALERT・デッドマン・`watch-status-<org>.json` は今の 1 org の watch と同じになる。disband した org は見ない
+- [x] AC7b: 2 つの org のうち先に見る org の herdr の呼び出しが返らないとき(テストで止める)、その呼び出しは `DriverCallTimeout` で打ち切られ、同じサイクルで受信箱の期限の件が届き、もう 1 つの org のパルスが回り、生存の印が書かれる。先に見る org の状態ファイルが書けないときも同じ(Codex plan advisory の指摘 1)
+- [x] AC8: `ralph org watch` に `--org-id` を付けると断られ、`--all` を付けないと断られる(どちらも終了コード 1、何も書かない)
+- [x] AC9: 同じ台帳に 2 つ目の `watch --all` を起動すると、1 つ目の pid を添えて終了コード 1 で終わる。1 つ目が終わる(正常終了でも kill でも)とロックが放され、次の起動が通る
+- [x] AC10: 見張りはロックを取った直後と毎サイクルに `watch-alive.json` を書き(state `running`、pid、started_at、ts)、SIGINT か SIGTERM で `stopped` を書いて終わる
+- [x] AC11: 判定関数は、ロックあり・印が新しい → `running`、ロックあり・印がないか古い → `stale`、ロックなし(印が running のままでも)→ `not_running` を返す
+- [x] AC12: `--detach` は子の印が running になってから pid と `watch.log` のパスを出して終了コード 0。すでに running なら起動しない。stale なら起動せず終了コード 1。子には `--state-dir` と、指定されていれば `--config` と `--interval-seconds` が渡る。テストは test binary を exec しない
+- [x] AC12b: `--detach` が待ちきれなかったとき、起動した子は止められて回収され、ロックが放されてから終了コード 1 になる(テストでは印を書かない子で確かめる。Codex plan advisory の指摘 3)
+- [x] AC13: `--stop` はシグナルを送らない。running か stale の見張りに止める頼みを書き、見張りが `stopped` を書いてロックを放したら終了コード 0。30 秒ほどで放されなければ pid を示して終了コード 1。動いていなければ終了コード 0 で「動いていない」と言う
+- [x] AC13b: 見張りは、自分の `started_at` より前に書かれた止める頼みには従わない(起動のときに消す)。印の pid が古いまま(ロックを取った直後の見張りを模す)でも、`--stop` はどのプロセスにもシグナルを送らない(Codex plan advisory の指摘 2)
+- [x] AC14: `ralph status` は見張りの状態を出し、`--json` には `org_watch` が入る
+- [x] AC15: spawn・send・start・stop・disband・escalate の動きは変わらない(それらの既存のテストは書き換えずに通る)
+- [x] AC16: tech-debt の (c)〜(h) の整理は動作を変えない(既存のテストが書き換えずに通る。(h) の helper は escalate の壊れた設定のテストが拾う)
+- [x] AC17: 文書(skill の 4 面、README、AGENTS.md、仕様の注、quality-gates、agent-messaging)が新しい watch の形に合い、`scripts/check-sync.sh` と `scripts/check-skill-sync.sh` が通る
 
 ## Implementation outline
 
