@@ -213,4 +213,5 @@
   - verify(a411bb57): pass。AC17 は一部(skill の 4 面と仕様の FR-6 の注に窓の古い規則が残る。sync-docs に回す)。記録のずれ 3 件は妥当と判定
 - [x] Test artifact created
   - test(fd35c1eb): pass。1,368 本で失敗 0、-race も 0。一時の台帳で `--detach`・`kill -9` のあとの判定と起動し直し・2 つ目の見張りの拒否・`--stop` を実機で確かめた(`docs/evidence/org-cross-watch-live-2026-10-11.md`、Linux のコンテナでも)。mutation 82 件のうち生き残った本物の穴 5 件(P2・X3・L6・A6・S6)は、4aaef4ed でテストを足して塞いだ(本番のコードは無変更、テストのあとの追加なので test の報告の Test gaps に追記)。本物の osascript は確かめていない
+  - sync-docs(04bcb342、0d161a80): skill の 4 面と仕様の FR-6 の注を窓の規則に直し、tech-debt に同時の `--detach` の rc 1(後半の PR の start が気をつけること)と、断られる 2 つ目の見張りが先に banner を出すことを足した。計画の Scope と AC11 の窓の書き方は digest を保つため変えていない(ずれは上の self-review の項に記録)
 - [ ] PR created
