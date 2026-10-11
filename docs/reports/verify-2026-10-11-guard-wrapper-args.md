@@ -79,3 +79,41 @@ plan の Scope、Design decisions との照合:
 - Partially verified: AC2 の残り(記録に頼る)、AC3(guard のファイルが変わっていないことは確認済み。テスト全件と件数は /test)、AC4(static 側は rc 0、コメントと tech-debt の文は基準に合い、言い過ぎはない。test mode は /test。書き方の点が V-1、V-2 に残る)
 - Not verified: テスト全件の実行、mawk と gawk、(b)〜(f) の mutation でテストが FAIL を記録すること、マージ後の効き目
 - pass にした理由: コードの AC は満たしている。残りは /test の担当の項目と docs の書き方だけで、指摘は LOW 2 件(V-1 はコメントの例 1 つ、V-2 は tech-debt の 2 点)と情報 3 件。どれも判定とテストの結果に関係しない
+
+## 再 verify(V-1 の修正 10d73d88 のあと)
+
+- Date: 2026-10-11
+- Scope: `git diff 356535bb..10d73d88`(テストのファイルのコメント 4 行の差と plan の Progress)。テストスイートは実行していない
+- Evidence: `docs/evidence/verify-2026-10-11-guard-wrapper-args-recheck-shellcheck.log`、`docs/evidence/verify-2026-10-11-guard-wrapper-args-recheck-static.log`(gitignore の対象)
+
+### V-1 の状態
+
+| 指摘 | 状況 | 確かめた点 |
+| --- | --- | --- |
+| V-1(`wrapper_deny` の上のコメントの例) | 修正済み | `tests/test-pre-bash-guard.sh:1083-1089` は「Other rows also run a wrapper, with arguments of its own (nice -n 5 sudo ls, xargs -I{} sudo ls {} and xargs -I{} flock /tmp/l git push -f in edge_deny; echo 'sudo ls' \| xargs -I{} sh -c {} in B) or bare (echo x \| xargs sh -c 'git reset --hard' in B)」。引数つきに挙げた 4 行は、どれも `sh -c` やコマンドの前に包みの旗を置く(`-n 5`、`-I{}`)。旗のない `xargs sh -c 'git reset --hard'` だけが「bare」に分かれた。括弧の sentinel(sudo、force push、hard reset)は 5 行すべてを覆ったまま。続く結論の文(`xargs` の分岐を消した写しの結果、`git commit -n` の行だけが落ちること)は変わっていない。この結果は最初の verify の V-1 の probe と同じ |
+
+- コメントだけの変更であることを確かめた。356535bb と HEAD で、`#` で始まる行を除いたテストのファイルは `cmp` で一致する。足したコメント行に 79 桁以上のものはなく、`git diff --check 356535bb..HEAD` は空
+- 段落を通して読み、宙に浮いた句はない(「or bare (…)」は「with arguments of its own (…)」と並ぶ)
+- plan の Progress は、S2・S4・S6・S7 の「この commit」が hash(76f2f826、d2cb7794、b515e29a、db5134f1)になり、最初の verify の I-3 の後半が直った。S8 の項は 10d73d88 の中身(V-1 の直し、V-2 は sync-docs に回す)と合う。AC の欄と「Review artifact created」は未チェックのまま(I-3 の前半、情報)。plan の digest は 5ebd931f0fcc のままで、承認は有効
+
+### 静的解析(再 verify)
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `shellcheck -S warning tests/test-pre-bash-guard.sh` | rc 0、0 件 | 単独のコマンドで実行 |
+| `./scripts/run-static-verify.sh` | rc 0 | 単独のコマンドで実行。`Language scope: full fallback (unclassified:tests/test-pre-bash-guard.sh)`、gofmt ok、golangci-lint 0 issues、branch secret scan(577ebeaf..10d73d88 clean)、`All verifiers passed.` |
+| `git diff 577ebeaf -- .claude templates` | 空 | guard のファイルは変わっていない |
+| `./scripts/plan-visual.sh digest docs/plans/active/2026-10-11-guard-wrapper-args.md` | 5ebd931f0fcc | plan の `- Approved:` と一致 |
+
+### 残り
+
+- V-2(tech-debt の 2 点)と I-1(Related に test report の path)は /sync-docs で直す予定で、この再 verify では見ていない
+- テスト全件(2,227 件、3 つの awk)は /test の担当。10d73d88 はコメントだけの変更なので、件数と判定は変わらないとみる。テストを流しての確認はしていない
+
+## Verdict(再 verify)
+
+- Verdict: pass
+- Verified: V-1 の修正(例の分け方が事実に合い、結論の文は変わらない)、コメントだけの変更であること、`shellcheck -S warning` と `run-static-verify.sh` の rc 0、guard のファイルが変わっていないこと、plan の digest
+- Partially verified: 最初の verify と同じ(AC2 の残り、AC3、AC4 の test 側)
+- Not verified: テスト全件の実行、V-2 と I-1 の直し(/sync-docs の段)
+- pass にした理由: V-1 は直り、新しい指摘はない。残る LOW は V-2 の 1 件で、/sync-docs で直す
