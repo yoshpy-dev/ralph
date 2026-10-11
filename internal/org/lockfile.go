@@ -23,11 +23,14 @@ const manifestLockFile = "manifest.lock"
 // closes, so an orphaned lock from a crashed process cannot wedge future
 // spawns forever -- this timeout instead guards against a slow-but-alive
 // holder (e.g. a concurrent spawn's compensateStale call) blocking a caller
-// past a reasonable bound.
+// past a reasonable bound. It also bounds the wait for the inbox lock, since
+// withFileLock serves both locks.
 const manifestLockTimeout = 5 * time.Second
 
 // manifestLockPollInterval is how often withManifestLock retries a
-// non-blocking LOCK_EX attempt while waiting for manifestLockTimeout.
+// non-blocking LOCK_EX attempt while waiting for manifestLockTimeout. The
+// inbox lock is retried at the same interval, since withFileLock serves both
+// locks.
 const manifestLockPollInterval = 25 * time.Millisecond
 
 // withManifestLock serializes fn against every other withManifestLock call

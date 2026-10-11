@@ -361,7 +361,7 @@ func TestEscalate_EscalationsUnwritable_ReportsTheIDAndInboxNotifyCompletesIt(t 
 		t.Fatal(err)
 	}
 	var banner bytes.Buffer
-	if err := f.o.NotifyInboxItem("e1", "", &banner); err != nil {
+	if err := f.o.NotifyInboxItem("e1", &banner); err != nil {
 		t.Fatalf("NotifyInboxItem: %v", err)
 	}
 	inbox := mustReadInbox(t, f.o.Inbox)
@@ -419,7 +419,7 @@ func TestEscalate_NotifiedUnwritable_ReportsTheIDAndInboxNotifyCompletesIt(t *te
 	if item := inboxItemByID(t, mustReadInbox(t, f.o.Inbox), "e1"); item.Notified {
 		t.Fatalf("e1 = %+v; want not notified before inbox notify", item)
 	}
-	if err := f.o.NotifyInboxItem("e1", "", &bytes.Buffer{}); err != nil {
+	if err := f.o.NotifyInboxItem("e1", &bytes.Buffer{}); err != nil {
 		t.Fatalf("NotifyInboxItem: %v", err)
 	}
 	inbox := mustReadInbox(t, f.o.Inbox)
@@ -480,7 +480,7 @@ func assertUnrecordedEscalation(t *testing.T, f *escalateFixture, res EscalateRe
 func TestNotifyInboxItem_RefusesUnknownAndResolvedItems(t *testing.T) {
 	t.Run("empty inbox", func(t *testing.T) {
 		f := newEscalateFixture(t)
-		err := f.o.NotifyInboxItem("e1", "", &f.banner)
+		err := f.o.NotifyInboxItem("e1", &f.banner)
 		if !errors.Is(err, ErrInboxUnknownID) {
 			t.Fatalf("NotifyInboxItem on an empty inbox = %v; want ErrInboxUnknownID", err)
 		}
@@ -504,12 +504,12 @@ func TestNotifyInboxItem_RefusesUnknownAndResolvedItems(t *testing.T) {
 	f.banner.Reset()
 
 	t.Run("unknown ID", func(t *testing.T) {
-		if err := f.o.NotifyInboxItem("e9", "", &f.banner); !errors.Is(err, ErrInboxUnknownID) {
+		if err := f.o.NotifyInboxItem("e9", &f.banner); !errors.Is(err, ErrInboxUnknownID) {
 			t.Fatalf("NotifyInboxItem(e9) = %v; want ErrInboxUnknownID", err)
 		}
 	})
 	t.Run("resolved item", func(t *testing.T) {
-		err := f.o.NotifyInboxItem("e1", "", &f.banner)
+		err := f.o.NotifyInboxItem("e1", &f.banner)
 		if !errors.Is(err, ErrInboxResolved) {
 			t.Fatalf("NotifyInboxItem on a resolved item = %v; want ErrInboxResolved", err)
 		}
@@ -533,7 +533,7 @@ func TestNotifyInboxItem_SendsAnAckedItemAgain(t *testing.T) {
 	if _, err := f.o.Inbox.Ack("e1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.o.NotifyInboxItem("e1", "", &f.banner); err != nil {
+	if err := f.o.NotifyInboxItem("e1", &f.banner); err != nil {
 		t.Fatalf("NotifyInboxItem on an acked item: %v", err)
 	}
 	item := inboxItemByID(t, mustReadInbox(t, f.o.Inbox), "e1")
@@ -588,7 +588,7 @@ func TestNotifyInboxItem_HandEditedLineEscapesTheBannerAndKeepsTheNotificationNe
 				t.Fatal(err)
 			}
 
-			if err := f.o.NotifyInboxItem("e1", "", &f.banner); err != nil {
+			if err := f.o.NotifyInboxItem("e1", &f.banner); err != nil {
 				t.Fatalf("NotifyInboxItem: %v", err)
 			}
 			banner := f.banner.String()
@@ -641,8 +641,8 @@ func TestPrintableInboxText(t *testing.T) {
 }
 
 // Self-review L2: the recovery commands the banner and the errors name
-// carry --state-dir when the caller passed HintStateDir (the CLI does when
-// --state-dir was given), and stay bare otherwise.
+// carry --state-dir when the caller set Org.InboxHintStateDir (the CLI does
+// when --state-dir was given), and stay bare otherwise.
 func TestEscalate_HintStateDirReachesTheBannerAndTheRecoveryCommands(t *testing.T) {
 	for _, hint := range []string{"", "/repo/.harness/state/org"} {
 		t.Run("hint="+hint, func(t *testing.T) {
@@ -650,7 +650,8 @@ func TestEscalate_HintStateDirReachesTheBannerAndTheRecoveryCommands(t *testing.
 			if err := os.Mkdir(f.o.EscalationsPath, 0o755); err != nil {
 				t.Fatal(err)
 			}
-			res := f.o.Escalate(EscalateParams{OrgID: "org-a", Text: "TYPE: QUESTION\n\nwhich?", Banner: &f.banner, HintStateDir: hint})
+			f.o.InboxHintStateDir = hint
+			res := f.o.Escalate(EscalateParams{OrgID: "org-a", Text: "TYPE: QUESTION\n\nwhich?", Banner: &f.banner})
 			if res.Err == nil || !res.Recorded || res.Notified {
 				t.Fatalf("Escalate = %+v; want e1 recorded, not notified, with an error", res)
 			}
@@ -663,7 +664,7 @@ func TestEscalate_HintStateDirReachesTheBannerAndTheRecoveryCommands(t *testing.
 			}
 
 			f.banner.Reset()
-			err := f.o.NotifyInboxItem("e1", hint, &f.banner)
+			err := f.o.NotifyInboxItem("e1", &f.banner)
 			if err == nil || !strings.Contains(err.Error(), "run "+notify+" again") {
 				t.Errorf("inbox notify error = %v; want it to name %s", err, notify)
 			}

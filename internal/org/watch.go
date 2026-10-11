@@ -449,7 +449,7 @@ func (o *Org) RunWatch(ctx context.Context, p WatchParams, hooks WatchHooks) err
 	}
 
 	statusPath := filepath.Join(p.StatusDir, WatchStatusFileName(p.OrgID))
-	escalationsPath := filepath.Join(p.StatusDir, EscalationsRelName)
+	escalationsPath := EscalationsPathIn(p.StatusDir)
 
 	status, err := loadWatchStatus(statusPath, p.OrgID)
 	if err != nil {

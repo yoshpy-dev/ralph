@@ -9,10 +9,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/yoshpy-dev/ralph/internal/org/protocol"
 )
@@ -92,10 +90,6 @@ type EscalateParams struct {
 	// Banner is where the one-line human-path banner is written (the CLI
 	// passes stderr); nil means os.Stderr.
 	Banner io.Writer
-	// HintStateDir is the stateDir of the InboxCommand commands that the
-	// banner and the error name: the CLI passes the resolved state dir
-	// when --state-dir was given, and "" otherwise.
-	HintStateDir string
 }
 
 // EscalateResult is Escalate's return value. Err is set on every refusal
@@ -141,8 +135,8 @@ func (o *Org) Escalate(p EscalateParams) EscalateResult {
 		return EscalateResult{Err: fmt.Errorf("org: escalate: the item could not be recorded in the inbox: %w", err)}
 	}
 	res := EscalateResult{ID: id, Type: m.Type, Recorded: true}
-	if err := o.sendInboxItemToHuman(p.OrgID, id, m.Type, p.HintStateDir, banner); err != nil {
-		res.Err = fmt.Errorf("org: escalate: the item is recorded as %s, but the notification was not completed (%w): run `%s` to send it again (not escalate, which records another item)", id, err, InboxCommand("notify", id, p.HintStateDir))
+	if err := o.sendInboxItemToHuman(p.OrgID, id, m.Type, banner); err != nil {
+		res.Err = fmt.Errorf("org: escalate: the item is recorded as %s, but the notification was not completed (%w): run `%s` to send it again (not escalate, which records another item)", id, err, InboxCommand("notify", id, o.InboxHintStateDir))
 		return res
 	}
 	res.Notified = true
@@ -171,11 +165,11 @@ func (o *Org) EscalateNotRecorded(p EscalateParams, cause error) EscalateResult 
 
 // NotifyInboxItem sends inbox item id to the human path again and records
 // another notified event (`ralph org inbox notify`), for an item whose
-// escalate could not complete its notification. hintStateDir is
-// EscalateParams.HintStateDir for the commands the banner and the error
-// name. It returns ErrInboxUnknownID (wrapped) for an unknown ID and
-// refuses a resolved item, which has nothing left to notify.
-func (o *Org) NotifyInboxItem(id, hintStateDir string, banner io.Writer) error {
+// escalate could not complete its notification. The commands the banner and
+// the error name repeat Org.InboxHintStateDir, as Escalate's do. It returns
+// ErrInboxUnknownID (wrapped) for an unknown ID and refuses a resolved item,
+// which has nothing left to notify.
+func (o *Org) NotifyInboxItem(id string, banner io.Writer) error {
 	if o.Inbox == nil {
 		return errors.New("org: inbox notify: no inbox store is configured")
 	}
@@ -191,8 +185,8 @@ func (o *Org) NotifyInboxItem(id, hintStateDir string, banner io.Writer) error {
 	if item.State == InboxStateResolved {
 		return fmt.Errorf("org: inbox notify %s: %w, so nothing is left to notify", id, ErrInboxResolved)
 	}
-	if err := o.sendInboxItemToHuman(item.OrgID, id, item.Type, hintStateDir, bannerOrStderr(banner)); err != nil {
-		return fmt.Errorf("org: inbox notify %s: the notification was not completed (%w): run `%s` again", id, err, InboxCommand("notify", id, hintStateDir))
+	if err := o.sendInboxItemToHuman(item.OrgID, id, item.Type, bannerOrStderr(banner)); err != nil {
+		return fmt.Errorf("org: inbox notify %s: the notification was not completed (%w): run `%s` again", id, err, InboxCommand("notify", id, o.InboxHintStateDir))
 	}
 	return nil
 }
@@ -280,8 +274,9 @@ func validateEscalation(orgID, text string) (protocol.Message, error) {
 // hand-edited line can hold anything there: the banner escapes them with
 // PrintableInboxText, and the desktop notification gets them only when
 // they are values Escalate accepts (inboxNotifyInvalid otherwise). The ID
-// is one the inbox fold accepted (e<N>).
-func (o *Org) sendInboxItemToHuman(orgID, id, typ, hintStateDir string, banner io.Writer) error {
+// is one the inbox fold accepted (e<N>). The banner's `inbox show` command
+// repeats Org.InboxHintStateDir.
+func (o *Org) sendInboxItemToHuman(orgID, id, typ string, banner io.Writer) error {
 	recordErr := errors.New("no escalations.jsonl path is configured")
 	if o.EscalationsPath != "" {
 		recordErr = appendJSONLine(o.EscalationsPath, escalationRecord{
@@ -289,7 +284,7 @@ func (o *Org) sendInboxItemToHuman(orgID, id, typ, hintStateDir string, banner i
 		})
 	}
 	_, _ = fmt.Fprintf(banner, "ORG ESCALATION: org=%s item=%s type=%s -- recorded in %s; read it with: %s\n",
-		PrintableInboxText(orgID, false), id, PrintableInboxText(typ, false), o.Inbox.Path(), InboxCommand("show", id, hintStateDir))
+		PrintableInboxText(orgID, false), id, PrintableInboxText(typ, false), o.Inbox.Path(), InboxCommand("show", id, o.InboxHintStateDir))
 	osascript := o.inboxDesktopNotify(fmt.Sprintf("org %s raised %s (%s)", notifiableOrgID(orgID), id, notifiableType(typ)))
 	if recordErr != nil {
 		return recordErr
@@ -313,28 +308,6 @@ func notifiableType(typ string) string {
 		return inboxNotifyInvalid
 	}
 	return typ
-}
-
-// PrintableInboxText returns s with each control character written as its
-// Go escape (\x1b, \r, \u0085), keeping newlines and tabs when
-// keepLineBreaks is set. Inbox text is written by a leader (or by hand in
-// inbox.jsonl) and printed to a terminal, so an escape sequence in it must
-// not reach the terminal as one. The human-path banner and every `ralph
-// org inbox` text output use it.
-func PrintableInboxText(s string, keepLineBreaks bool) string {
-	var b strings.Builder
-	for _, r := range s {
-		switch {
-		case keepLineBreaks && (r == '\n' || r == '\t'):
-			b.WriteRune(r)
-		case unicode.IsControl(r):
-			quoted := strconv.QuoteRune(r)
-			b.WriteString(quoted[1 : len(quoted)-1])
-		default:
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
 }
 
 // alertUnrecordedEscalation tells the human about an escalate that was not
