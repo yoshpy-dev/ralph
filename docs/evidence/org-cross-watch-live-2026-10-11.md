@@ -606,3 +606,531 @@ $ cat /tmp/ledger/watch.log
 watching every org (interval=30s once=false state-dir=/tmp/ledger (source: flag))
 watching every org (interval=2s once=false state-dir=/tmp/ledger (source: flag))
 ```
+
+## cycle 2: HEAD b0a226a9 での再確認(2026-10-12)
+
+上の cycle 1 の記録は dd63a414 のビルドの出力なので、`ralph status` の `last cycle …` と `--json` の `last_cycle_ts` が出ている。この 2 つは d2a750ec で `mark updated …` と `updated_at` に名前が変わった。
+
+- Date: 2026-10-12(JST 00:13〜00:15)
+- 報告: docs/reports/test-2026-10-11-org-cross-watch.md の「Latest run: cycle 2」
+- 目的: cross-review の直し(49d8d605: watcher の後始末の間もロックを持つ、起動のときの止める頼みを rename で取り出す)と d2a750ec(`mark updated` と `updated_at`)のあとの HEAD をビルドし、cycle 1 の流れをもう一度回す(verify の cycle 2 の「足すと確度がいちばん上がる確認」)。あわせて、起動の前に台帳に置いた古い止める頼みと、残った `.watch-stop.json.taken` の扱いを見た
+
+### 環境(cycle 2)
+
+| 項目 | 値 |
+|---|---|
+| ralph | このブランチの HEAD b0a226a9 を `go build -o <scratch>/ralph ./cmd/ralph` でビルドしたもの(`ralph version` は `dev`) |
+| 台帳 | `<scratch>/live/ledger` と `<scratch>/live2/ledger`。どちらも初めは存在しないか空で、manifest も受信箱も置いていない(見張りは herdr も agmsg も呼ばず、期限の件もないのでデスクトップ通知は出ない) |
+| ralph の起こし方 | cycle 1 と同じ。すべて `env -i PATH=<空のディレクトリ> HOME=<scratch の下> ralph ... --state-dir <台帳>`。cwd は `ralph.toml` のないディレクトリ(既定の設定) |
+| 触れていないもの | 利用者の herdr サーバー、`~/.config/herdr`、本物の台帳。osascript の本物の経路は確かめていない。seat は置いていない |
+| 片づけ | スクリプトの終わりに、起動した見張りを `kill -9` する trap(どれもすでに終わっていた)。始める前と最後の `pgrep -fl 'org watch --all'` は何も返さなかった |
+
+`<scratch>` は `/private/tmp/claude-502/<セッション>/scratchpad/ocw2`。`ls` の所有者名は `<user>` に置き換えた。`ls -la` は `.` で始まるファイルも出すので、`.watch-stop.json.taken` があれば一覧に出る。
+
+### 結果(cycle 2)
+
+| 確認 | 結果 |
+|---|---|
+| 台帳がないときの `--stop` | rc 0、「not running」 |
+| `--detach`(1 回目) | rc 0、`started ralph org watch --all (pid 41263)`、0.134 s で返った。子は `PGID == PID`、`TTY ??`、`STAT Ss`、`PPID 1` |
+| `ralph status` / `--json` | `org watch: running (pid 41263, mark updated 2026-10-11T15:13:45Z)`。`org_watch` は `updated_at` を持ち、`last_cycle_ts` はない |
+| `kill -9 41263` のあと | 印は running のまま残り、status は `org watch: not running (a running mark is left from pid 41263, mark updated …)`、`--json` は `state: not_running`、`mark_state: running` |
+| `--detach --interval-seconds 2`(2 回目) | rc 0、新しい pid 41370。4.5 s 後に印の `ts` が 15:13:46 から 15:13:50 に進んだ |
+| 動いている間の `--all --once` | rc 1、`another ralph org watch --all is running on this state dir (pid 41370, from …/watch-alive.json)` |
+| `--stop` | rc 0、`stopped ralph org watch --all (pid 41370)`、0.436 s で返った。印は `stopped` で `stopped_at` つき。台帳に `watch-stop.json` も `.watch-stop.json.taken` もない。status は `org watch: not running (stopped at …)` |
+| 古い頼み(`requested_at` 2026-10-01)を手で置いてからの `--detach` | rc 0、pid 42521。起動の直後に `watch-stop.json` は消え、`.taken` も残らない。4.5 s 後もプロセスは動き、`ts` は進んでいた(古い頼みに従わない)。`--stop` で止まった |
+| `.taken` と古い `watch-stop.json` が並ぶ台帳での `--detach` | 起動の取り出しが `.taken` を上書きしてから消すので、どちらも残らない |
+| `.taken` だけが残った台帳での `--detach` | 見張りは普通に動き、`--stop` で止まる。`.taken` は残り続ける(次に頼みのある起動まで消えない。読まれないファイルなので動きには関わらない) |
+| 残ったプロセス | なし |
+
+### 1. live.sh(macOS、cycle 2)
+
+cycle 1 の live.sh に、手順 6(起動の前に置いた古い頼み)と手順 8 の `watch-stop` の数を足したもの。
+
+```bash
+#!/bin/bash
+# Cycle 2 live check of `ralph org watch --all --detach/--stop` at HEAD
+# b0a226a9, on a throw-away ledger. Same rules as cycle 1's live.sh: every
+# ralph command runs under env -i with an empty PATH (no herdr, agmsg, git,
+# or osascript can be found) and a scratch HOME, from a scratch cwd with no
+# ralph.toml; --state-dir on every command; no manifest and no inbox in the
+# ledger, so the watch calls nothing outside itself and shows no
+# notification.
+set -u
+S="$(cd "$(dirname "$0")" && pwd)"
+L="$S/live/ledger"
+B="$S/ralph"
+rm -rf "$S/live"
+mkdir -p "$S/live/cwd" "$S/live/home" "$S/live/emptybin"
+cd "$S/live/cwd" || exit 2
+
+r() { # run a ralph command hermetically, print "$ cmd", output, rc
+  echo "\$ ralph $*"
+  env -i PATH="$S/live/emptybin" HOME="$S/live/home" "$B" "$@" 2>&1
+  local rc=$?
+  echo "[rc=$rc]"
+  return $rc
+}
+sh_() { echo "\$ $*"; eval "$@" 2>&1; echo "[rc=$?]"; }
+pid_of() { sed -n 's/.*(pid \([0-9][0-9]*\)).*/\1/p' | head -1; }
+now() { perl -MTime::HiRes=time -e 'printf "%.3f", time'; }
+
+started=()
+cleanup() {
+  for p in "${started[@]}"; do kill -9 "$p" 2>/dev/null; done
+}
+trap cleanup EXIT
+
+echo "## 0. the ledger does not exist yet"
+sh_ "ls -la '$L'"
+r org watch --stop --state-dir "$L"
+
+echo; echo "## 1. --detach starts the watch"
+t0=$(now)
+out1=$(r org watch --all --detach --state-dir "$L"); echo "$out1"
+t1=$(now)
+echo "(--detach returned after $(echo "$t1 - $t0" | bc) s)"
+pid1=$(echo "$out1" | pid_of); started+=("$pid1")
+echo "pid1=$pid1"
+sh_ "ps -o pid,ppid,pgid,sess,tty,stat,command -p $pid1"
+sh_ "cat '$L/watch-alive.json'"
+sh_ "ls -la '$L'"
+r status --state-dir "$L"
+r status --state-dir "$L" --json
+
+echo; echo "## 2. kill -9 the watch"
+sh_ "kill -9 $pid1"
+sleep 0.3
+sh_ "ps -p $pid1 -o pid,command || true"
+sh_ "cat '$L/watch-alive.json'"
+r status --state-dir "$L"
+r status --state-dir "$L" --json
+
+echo; echo "## 3. --detach again starts a new watch (interval 2 s)"
+out2=$(r org watch --all --detach --interval-seconds 2 --state-dir "$L"); echo "$out2"
+pid2=$(echo "$out2" | pid_of); started+=("$pid2")
+echo "pid2=$pid2"
+sh_ "ps -o pid,ppid,pgid,sess,tty,stat,command -p $pid2"
+sh_ "cat '$L/watch-alive.json'"
+sleep 4.5
+echo "-- 4.5 s later (two more cycles)"
+sh_ "cat '$L/watch-alive.json'"
+r status --state-dir "$L"
+
+echo; echo "## 4. a second foreground watch while it runs"
+r org watch --all --once --state-dir "$L"
+
+echo; echo "## 5. --stop"
+t0=$(now)
+r org watch --stop --state-dir "$L"
+t1=$(now)
+echo "(--stop returned after $(echo "$t1 - $t0" | bc) s)"
+sh_ "ps -p $pid2 -o pid,command || true"
+sh_ "cat '$L/watch-alive.json'"
+sh_ "ls -la '$L'"
+r status --state-dir "$L"
+r status --state-dir "$L" --json
+
+echo; echo "## 6. a stop request left in the ledger before --detach (requested_at older than the start)"
+printf '{\n  "requested_at": "2026-10-01T00:00:00Z"\n}\n' > "$L/watch-stop.json"
+sh_ "cat '$L/watch-stop.json'"
+out3=$(r org watch --all --detach --interval-seconds 2 --state-dir "$L"); echo "$out3"
+pid3=$(echo "$out3" | pid_of); started+=("$pid3")
+echo "pid3=$pid3"
+sh_ "ls -la '$L'"
+sleep 4.5
+echo "-- 4.5 s later: still running, the old request did not stop it"
+sh_ "ps -p $pid3 -o pid,command"
+sh_ "cat '$L/watch-alive.json'"
+r status --state-dir "$L"
+r org watch --stop --state-dir "$L"
+sh_ "ls -la '$L'"
+r status --state-dir "$L"
+
+echo; echo "## 7. watch.log"
+sh_ "cat '$L/watch.log'"
+
+echo; echo "## 8. nothing left"
+sh_ "ls -a '$L' | grep -c 'watch-stop' || true"
+sh_ "pgrep -fl 'org watch --all' || echo '(pgrep: no process)'"
+```
+
+```text
+## 0. the ledger does not exist yet
+$ ls -la '<scratch>/live/ledger'
+ls: <scratch>/live/ledger: No such file or directory
+[rc=1]
+$ ralph org watch --stop --state-dir <scratch>/live/ledger
+ralph org watch --all is not running on <scratch>/live/ledger
+[rc=0]
+
+## 1. --detach starts the watch
+$ ralph org watch --all --detach --state-dir <scratch>/live/ledger
+started ralph org watch --all (pid 41263); log: <scratch>/live/ledger/watch.log
+[rc=0]
+(--detach returned after .134 s)
+pid1=41263
+$ ps -o pid,ppid,pgid,sess,tty,stat,command -p 41263
+  PID  PPID  PGID   SESS TTY      STAT COMMAND
+41263     1 41263      0 ??       Ss   <scratch>/ralph org watch --all --state-dir <scratch>/live/ledger
+[rc=0]
+$ cat '<scratch>/live/ledger/watch-alive.json'
+{
+  "state": "running",
+  "pid": 41263,
+  "started_at": "2026-10-11T15:13:45.723319Z",
+  "ts": "2026-10-11T15:13:45Z",
+  "interval_seconds": 30
+}
+[rc=0]
+$ ls -la '<scratch>/live/ledger'
+total 16
+drwxr-xr-x@ 5 <user>  wheel  160 Oct 12 00:13 .
+drwxr-xr-x@ 6 <user>  wheel  192 Oct 12 00:13 ..
+-rw-r--r--@ 1 <user>  wheel  146 Oct 12 00:13 watch-alive.json
+-rw-r--r--@ 1 <user>  wheel    0 Oct 12 00:13 watch.lock
+-rw-r--r--@ 1 <user>  wheel  216 Oct 12 00:13 watch.log
+[rc=0]
+$ ralph status --state-dir <scratch>/live/ledger
+no org runtime state found (state-dir=<scratch>/live/ledger (source: flag)) — run `ralph org spawn` to start one.
+org watch: running (pid 41263, mark updated 2026-10-11T15:13:45Z)
+Run `ralph doctor` to check environment readiness.
+[rc=0]
+$ ralph status --state-dir <scratch>/live/ledger --json
+{
+  "state_dir": "<scratch>/live/ledger",
+  "state_dir_source": "flag",
+  "orgs": [],
+  "org_watch": {
+    "state": "running",
+    "pid": 41263,
+    "started_at": "2026-10-11T15:13:45.723319Z",
+    "updated_at": "2026-10-11T15:13:45Z",
+    "mark_state": "running"
+  }
+}
+[rc=0]
+
+## 2. kill -9 the watch
+$ kill -9 41263
+[rc=0]
+$ ps -p 41263 -o pid,command || true
+  PID COMMAND
+[rc=0]
+$ cat '<scratch>/live/ledger/watch-alive.json'
+{
+  "state": "running",
+  "pid": 41263,
+  "started_at": "2026-10-11T15:13:45.723319Z",
+  "ts": "2026-10-11T15:13:45Z",
+  "interval_seconds": 30
+}
+[rc=0]
+$ ralph status --state-dir <scratch>/live/ledger
+no org runtime state found (state-dir=<scratch>/live/ledger (source: flag)) — run `ralph org spawn` to start one.
+org watch: not running (a running mark is left from pid 41263, mark updated 2026-10-11T15:13:45Z)
+Run `ralph doctor` to check environment readiness.
+[rc=0]
+$ ralph status --state-dir <scratch>/live/ledger --json
+{
+  "state_dir": "<scratch>/live/ledger",
+  "state_dir_source": "flag",
+  "orgs": [],
+  "org_watch": {
+    "state": "not_running",
+    "pid": 41263,
+    "started_at": "2026-10-11T15:13:45.723319Z",
+    "updated_at": "2026-10-11T15:13:45Z",
+    "mark_state": "running"
+  }
+}
+[rc=0]
+
+## 3. --detach again starts a new watch (interval 2 s)
+$ ralph org watch --all --detach --interval-seconds 2 --state-dir <scratch>/live/ledger
+started ralph org watch --all (pid 41370); log: <scratch>/live/ledger/watch.log
+[rc=0]
+pid2=41370
+$ ps -o pid,ppid,pgid,sess,tty,stat,command -p 41370
+  PID  PPID  PGID   SESS TTY      STAT COMMAND
+41370     1 41370      0 ??       Ss   <scratch>/ralph org watch --all --state-dir <scratch>/live/ledger --interval-seconds 2
+[rc=0]
+$ cat '<scratch>/live/ledger/watch-alive.json'
+{
+  "state": "running",
+  "pid": 41370,
+  "started_at": "2026-10-11T15:13:46.289478Z",
+  "ts": "2026-10-11T15:13:46Z",
+  "interval_seconds": 2
+}
+[rc=0]
+-- 4.5 s later (two more cycles)
+$ cat '<scratch>/live/ledger/watch-alive.json'
+{
+  "state": "running",
+  "pid": 41370,
+  "started_at": "2026-10-11T15:13:46.289478Z",
+  "ts": "2026-10-11T15:13:50Z",
+  "interval_seconds": 2
+}
+[rc=0]
+$ ralph status --state-dir <scratch>/live/ledger
+no org runtime state found (state-dir=<scratch>/live/ledger (source: flag)) — run `ralph org spawn` to start one.
+org watch: running (pid 41370, mark updated 2026-10-11T15:13:50Z)
+Run `ralph doctor` to check environment readiness.
+[rc=0]
+
+## 4. a second foreground watch while it runs
+$ ralph org watch --all --once --state-dir <scratch>/live/ledger
+watching every org (interval=30s once=true state-dir=<scratch>/live/ledger (source: flag))
+org: watch: another ralph org watch --all is running on this state dir (pid 41370, from <scratch>/live/ledger/watch-alive.json)
+[rc=1]
+
+## 5. --stop
+$ ralph org watch --stop --state-dir <scratch>/live/ledger
+stopped ralph org watch --all (pid 41370)
+[rc=0]
+(--stop returned after .436 s)
+$ ps -p 41370 -o pid,command || true
+  PID COMMAND
+[rc=0]
+$ cat '<scratch>/live/ledger/watch-alive.json'
+{
+  "state": "stopped",
+  "pid": 41370,
+  "started_at": "2026-10-11T15:13:46.289478Z",
+  "ts": "2026-10-11T15:13:52Z",
+  "interval_seconds": 2,
+  "stopped_at": "2026-10-11T15:13:53Z"
+}
+[rc=0]
+$ ls -la '<scratch>/live/ledger'
+total 16
+drwxr-xr-x@ 5 <user>  wheel  160 Oct 12 00:13 .
+drwxr-xr-x@ 6 <user>  wheel  192 Oct 12 00:13 ..
+-rw-r--r--@ 1 <user>  wheel  185 Oct 12 00:13 watch-alive.json
+-rw-r--r--@ 1 <user>  wheel    0 Oct 12 00:13 watch.lock
+-rw-r--r--@ 1 <user>  wheel  431 Oct 12 00:13 watch.log
+[rc=0]
+$ ralph status --state-dir <scratch>/live/ledger
+no org runtime state found (state-dir=<scratch>/live/ledger (source: flag)) — run `ralph org spawn` to start one.
+org watch: not running (stopped at 2026-10-11T15:13:53Z)
+Run `ralph doctor` to check environment readiness.
+[rc=0]
+$ ralph status --state-dir <scratch>/live/ledger --json
+{
+  "state_dir": "<scratch>/live/ledger",
+  "state_dir_source": "flag",
+  "orgs": [],
+  "org_watch": {
+    "state": "not_running",
+    "pid": 41370,
+    "started_at": "2026-10-11T15:13:46.289478Z",
+    "updated_at": "2026-10-11T15:13:52Z",
+    "stopped_at": "2026-10-11T15:13:53Z",
+    "mark_state": "stopped"
+  }
+}
+[rc=0]
+
+## 6. a stop request left in the ledger before --detach (requested_at older than the start)
+$ cat '<scratch>/live/ledger/watch-stop.json'
+{
+  "requested_at": "2026-10-01T00:00:00Z"
+}
+[rc=0]
+$ ralph org watch --all --detach --interval-seconds 2 --state-dir <scratch>/live/ledger
+started ralph org watch --all (pid 42521); log: <scratch>/live/ledger/watch.log
+[rc=0]
+pid3=42521
+$ ls -la '<scratch>/live/ledger'
+total 16
+drwxr-xr-x@ 5 <user>  wheel  160 Oct 12 00:13 .
+drwxr-xr-x@ 6 <user>  wheel  192 Oct 12 00:13 ..
+-rw-r--r--@ 1 <user>  wheel  144 Oct 12 00:13 watch-alive.json
+-rw-r--r--@ 1 <user>  wheel    0 Oct 12 00:13 watch.lock
+-rw-r--r--@ 1 <user>  wheel  646 Oct 12 00:13 watch.log
+[rc=0]
+-- 4.5 s later: still running, the old request did not stop it
+$ ps -p 42521 -o pid,command
+  PID COMMAND
+42521 <scratch>/ralph org watch --all --state-dir <scratch>/live/ledger --interval-seconds 2
+[rc=0]
+$ cat '<scratch>/live/ledger/watch-alive.json'
+{
+  "state": "running",
+  "pid": 42521,
+  "started_at": "2026-10-11T15:13:53.48836Z",
+  "ts": "2026-10-11T15:13:57Z",
+  "interval_seconds": 2
+}
+[rc=0]
+$ ralph status --state-dir <scratch>/live/ledger
+no org runtime state found (state-dir=<scratch>/live/ledger (source: flag)) — run `ralph org spawn` to start one.
+org watch: running (pid 42521, mark updated 2026-10-11T15:13:57Z)
+Run `ralph doctor` to check environment readiness.
+[rc=0]
+$ ralph org watch --stop --state-dir <scratch>/live/ledger
+stopped ralph org watch --all (pid 42521)
+[rc=0]
+$ ls -la '<scratch>/live/ledger'
+total 16
+drwxr-xr-x@ 5 <user>  wheel  160 Oct 12 00:13 .
+drwxr-xr-x@ 6 <user>  wheel  192 Oct 12 00:13 ..
+-rw-r--r--@ 1 <user>  wheel  184 Oct 12 00:13 watch-alive.json
+-rw-r--r--@ 1 <user>  wheel    0 Oct 12 00:13 watch.lock
+-rw-r--r--@ 1 <user>  wheel  646 Oct 12 00:13 watch.log
+[rc=0]
+$ ralph status --state-dir <scratch>/live/ledger
+no org runtime state found (state-dir=<scratch>/live/ledger (source: flag)) — run `ralph org spawn` to start one.
+org watch: not running (stopped at 2026-10-11T15:13:58Z)
+Run `ralph doctor` to check environment readiness.
+[rc=0]
+
+## 7. watch.log
+$ cat '<scratch>/live/ledger/watch.log'
+watching every org (interval=30s once=false state-dir=<scratch>/live/ledger (source: flag))
+watching every org (interval=2s once=false state-dir=<scratch>/live/ledger (source: flag))
+watching every org (interval=2s once=false state-dir=<scratch>/live/ledger (source: flag))
+[rc=0]
+
+## 8. nothing left
+$ ls -a '<scratch>/live/ledger' | grep -c 'watch-stop' || true
+0
+[rc=0]
+$ pgrep -fl 'org watch --all' || echo '(pgrep: no process)'
+(pgrep: no process)
+[rc=0]
+```
+
+### 2. live2.sh(macOS、残った `.watch-stop.json.taken`)
+
+```bash
+#!/bin/bash
+# Cycle 2 live check, part 2: a `.watch-stop.json.taken` left in the ledger
+# (as if a watch were killed between its take and the remove) before a
+# --detach, with and without a watch-stop.json next to it. Same hermetic
+# rules as live.sh.
+set -u
+S="$(cd "$(dirname "$0")" && pwd)"
+L="$S/live2/ledger"
+B="$S/ralph"
+rm -rf "$S/live2"
+mkdir -p "$S/live2/cwd" "$S/live2/home" "$S/live2/emptybin" "$L"
+cd "$S/live2/cwd" || exit 2
+
+r() {
+  echo "\$ ralph $*"
+  env -i PATH="$S/live2/emptybin" HOME="$S/live2/home" "$B" "$@" 2>&1
+  local rc=$?
+  echo "[rc=$rc]"
+  return $rc
+}
+sh_() { echo "\$ $*"; eval "$@" 2>&1; echo "[rc=$?]"; }
+pid_of() { sed -n 's/.*(pid \([0-9][0-9]*\)).*/\1/p' | head -1; }
+
+started=()
+cleanup() {
+  for p in "${started[@]}"; do kill -9 "$p" 2>/dev/null; done
+}
+trap cleanup EXIT
+
+echo "## A. a left .taken (old request) and an old watch-stop.json"
+printf '{"requested_at": "2026-09-30T00:00:00Z"}\n' > "$L/.watch-stop.json.taken"
+printf '{"requested_at": "2026-10-01T00:00:00Z"}\n' > "$L/watch-stop.json"
+sh_ "ls -a '$L'"
+out=$(r org watch --all --detach --interval-seconds 2 --state-dir "$L"); echo "$out"
+p=$(echo "$out" | pid_of); started+=("$p")
+sleep 3
+sh_ "ls -a '$L'"
+r status --state-dir "$L"
+r org watch --stop --state-dir "$L"
+
+echo; echo "## B. a left .taken alone (no watch-stop.json)"
+printf '{"requested_at": "2026-09-30T00:00:00Z"}\n' > "$L/.watch-stop.json.taken"
+sh_ "ls -a '$L'"
+out=$(r org watch --all --detach --interval-seconds 2 --state-dir "$L"); echo "$out"
+p=$(echo "$out" | pid_of); started+=("$p")
+sleep 3
+sh_ "ls -a '$L'"
+r status --state-dir "$L"
+r org watch --stop --state-dir "$L"
+sh_ "ls -a '$L'"
+sh_ "grep -c watchdog '$L/watch.log' || true"
+
+echo; echo "## nothing left"
+sh_ "pgrep -fl 'org watch --all' || echo '(pgrep: no process)'"
+```
+
+```text
+## A. a left .taken (old request) and an old watch-stop.json
+$ ls -a '<scratch>/live2/ledger'
+.
+..
+.watch-stop.json.taken
+watch-stop.json
+[rc=0]
+$ ralph org watch --all --detach --interval-seconds 2 --state-dir <scratch>/live2/ledger
+started ralph org watch --all (pid 48807); log: <scratch>/live2/ledger/watch.log
+[rc=0]
+$ ls -a '<scratch>/live2/ledger'
+.
+..
+watch-alive.json
+watch.lock
+watch.log
+[rc=0]
+$ ralph status --state-dir <scratch>/live2/ledger
+no org runtime state found (state-dir=<scratch>/live2/ledger (source: flag)) — run `ralph org spawn` to start one.
+org watch: running (pid 48807, mark updated 2026-10-11T15:14:27Z)
+Run `ralph doctor` to check environment readiness.
+[rc=0]
+$ ralph org watch --stop --state-dir <scratch>/live2/ledger
+stopped ralph org watch --all (pid 48807)
+[rc=0]
+
+## B. a left .taken alone (no watch-stop.json)
+$ ls -a '<scratch>/live2/ledger'
+.
+..
+.watch-stop.json.taken
+watch-alive.json
+watch.lock
+watch.log
+[rc=0]
+$ ralph org watch --all --detach --interval-seconds 2 --state-dir <scratch>/live2/ledger
+started ralph org watch --all (pid 49516); log: <scratch>/live2/ledger/watch.log
+[rc=0]
+$ ls -a '<scratch>/live2/ledger'
+.
+..
+.watch-stop.json.taken
+watch-alive.json
+watch.lock
+watch.log
+[rc=0]
+$ ralph status --state-dir <scratch>/live2/ledger
+no org runtime state found (state-dir=<scratch>/live2/ledger (source: flag)) — run `ralph org spawn` to start one.
+org watch: running (pid 49516, mark updated 2026-10-11T15:14:31Z)
+Run `ralph doctor` to check environment readiness.
+[rc=0]
+$ ralph org watch --stop --state-dir <scratch>/live2/ledger
+stopped ralph org watch --all (pid 49516)
+[rc=0]
+$ ls -a '<scratch>/live2/ledger'
+.
+..
+.watch-stop.json.taken
+watch-alive.json
+watch.lock
+watch.log
+[rc=0]
+$ grep -c watchdog '<scratch>/live2/ledger/watch.log' || true
+0
+[rc=0]
+
+## nothing left
+$ pgrep -fl 'org watch --all' || echo '(pgrep: no process)'
+(pgrep: no process)
+[rc=0]
+```
