@@ -198,6 +198,9 @@
 - [x] Branch created
 - [x] Implementation started
   - S0(00e9da99): tech-debt (c)〜(h) の整理。escalate と inbox のコマンドを `internal/cli/org_inbox.go` に移し、`Org.InboxHintStateDir` を足し、受信箱の 3 つのフィールドは `wireOrgInbox` で設定する。internal/cli のテストは無変更。S5 で tech-debt の行を閉じるとき、(a) の `inboxSummary` の場所を `org_inbox.go` に直す
+  - S1(9cabdeb4): `[org.director]` の `ack_minutes`(10)と `resolve_minutes`(60)、3 面と検証。`deadman_minutes` の古い「予約」の説明も直した
+  - S2(b50d7e03): `internal/org/deadline.go`。`InboxDeadlineDue`(純粋な判定)、`SweepInboxDeadlines`、`InboxDeadlineMemory`。計画からの足し: 設定の分が 1 未満の Org では掃き出しを断る(設定なしで組んだ Org が全件を一度に送らないため)。デスクトップ通知の題は期限のときだけ "ralph org watch"
+  - S3 は 2 つに分ける: S3a(org 層。ロック・生存の印・止める頼み・判定・`RunWatchAll`。CLI は今の `RunWatch` のまま)、S3b(CLI を `RunWatchAll` に切り替え、`--all`・シグナル・`--detach`・`--stop`、1 org の `RunWatch` を消してテストを移す)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
