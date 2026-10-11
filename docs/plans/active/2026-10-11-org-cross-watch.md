@@ -201,6 +201,7 @@
   - S1(9cabdeb4): `[org.director]` の `ack_minutes`(10)と `resolve_minutes`(60)、3 面と検証。`deadman_minutes` の古い「予約」の説明も直した
   - S2(b50d7e03): `internal/org/deadline.go`。`InboxDeadlineDue`(純粋な判定)、`SweepInboxDeadlines`、`InboxDeadlineMemory`。計画からの足し: 設定の分が 1 未満の Org では掃き出しを断る(設定なしで組んだ Org が全件を一度に送らないため)。デスクトップ通知の題は期限のときだけ "ralph org watch"
   - S3 は 2 つに分ける: S3a(org 層。ロック・生存の印・止める頼み・判定・`RunWatchAll`。CLI は今の `RunWatch` のまま)、S3b(CLI を `RunWatchAll` に切り替え、`--all`・シグナル・`--detach`・`--stop`、1 org の `RunWatch` を消してテストを移す)
+  - S3a(996e5c48): `internal/org/watchalive.go`(`AcquireWatchLock`、`ProbeWatch`、印と止める頼み)と `RunWatchAll`。計画からのずれ: `started_at` はロックを待つ前に決め、起動のときに消す頼みは `started_at` より前のものだけ(ロックを取ってから消すまでの間に書かれた `--stop` を消さないため)。時刻はナノ秒つき。呼び出しの打ち切りは loop の ctx ではなく Background から作る(SIGINT がサイクルの途中で来ても偽の liveness ALERT を出さないため)。そのぶん、herdr が止まっていると止まるまでがサイクルの終わりまで延びる。足したこと: manifest の org_id を識別子として確かめてから状態ファイル名にする、読めない状態ファイルの org はそのサイクルだけ飛ばす
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
