@@ -772,9 +772,11 @@ agmsg の受信箱の確認は `/agmsg` skill の手順に従う(未導入環境
   見張りを起動しないので、自分で起動する。watch の通知は typed `ALERT` と
   して各 org の leader に届く。動いているかは `ralph status` の
   `org watch:` の行で確かめる。`running`、`stale`(ロックは持たれているが、
-  生存の印がない・止まっている・`[org].deadman_minutes` より古い)、
-  `not running` のどれかで、`--json` では `org_watch.state` が `running` /
-  `stale` / `not_running` になる。見張りは止めるまで動き続ける。止めるときは
+  生存の印がない・止まっている・古い。古いとは、最後のサイクルの時刻が
+  `[org].deadman_minutes`(1 未満なら 10 分)と見張りの間隔の 2 倍のうち、
+  長いほうより前のこと)、`not running` のどれかで、`--json` では
+  `org_watch.state` が `running` / `stale` / `not_running` になる。見張りは
+  止めるまで動き続ける。止めるときは
   `ralph org watch --stop` を打つ。30 秒で止まらなくても頼みは残り、見張りは
   そのサイクルの終わりに止まる。すぐ止めたいときは、エラーに出る pid が
   まだ `ralph org watch` であることを確かめてから kill する。同じ台帳に
