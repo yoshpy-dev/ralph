@@ -3,12 +3,15 @@ package org
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -27,6 +30,11 @@ import (
 // persists its own heartbeat/dedupe state to watch-status-<org_id>.json (see
 // WatchStatusFileName) so a restart does not re-fire already-handled
 // conditions.
+//
+// RunWatchAll (docs/plans/active/2026-10-11-org-cross-watch.md) runs the same
+// per-org cycle for every running org of a ledger in one process, after the
+// inbox deadlines (deadline.go), under watch.lock and the liveness mark
+// (watchalive.go).
 
 // watchdogIdentity is the agmsg identity `ralph org watch` joins/sends
 // under -- distinct from LeaderIdentity and every seat id, so ALERT traffic
@@ -360,11 +368,28 @@ func isStallByTime(seatTS string, now time.Time, stallMinutes int) bool {
 	return now.Sub(ts) > time.Duration(stallMinutes)*time.Minute
 }
 
-// realGitStatus is GitStatusFunc's real implementation.
-func realGitStatus(cwd string) (string, error) {
-	cmd := exec.Command("git", "status", "--porcelain")
-	cmd.Dir = cwd
-	out, err := cmd.Output()
+// gitStatusWaitDelay is realGitStatus's exec.Cmd.WaitDelay: how long after
+// the kill it waits for the output pipe, which a child of git can hold.
+const gitStatusWaitDelay = time.Second
+
+// realGitStatus is GitStatusFunc's real implementation: `git status
+// --porcelain` in cwd, killed when driverCallTimeout passes like each herdr
+// and agmsg call of the pulse (callWithTimeout), so a git that does not
+// return cannot hold the cycle. An exit 0 whose pipe a child still held is
+// a success, the way driver.ExecRunner reads it.
+func (o *Org) realGitStatus(cwd string) (string, error) {
+	var out []byte
+	err := o.callWithTimeout(func(ctx context.Context) error {
+		cmd := exec.CommandContext(ctx, "git", "status", "--porcelain")
+		cmd.Dir = cwd
+		cmd.WaitDelay = gitStatusWaitDelay
+		var runErr error
+		out, runErr = cmd.Output()
+		if errors.Is(runErr, exec.ErrWaitDelay) && ctx.Err() == nil {
+			runErr = nil
+		}
+		return runErr
+	})
 	if err != nil {
 		return "", err
 	}
@@ -437,7 +462,7 @@ func (o *Org) RunWatch(ctx context.Context, p WatchParams, hooks WatchHooks) err
 
 	gitStatus := p.GitStatus
 	if gitStatus == nil {
-		gitStatus = realGitStatus
+		gitStatus = o.realGitStatus
 	}
 	escalateFn := p.Escalate
 	if escalateFn == nil {
@@ -496,9 +521,280 @@ type watchRun struct {
 	escalationsPath string
 }
 
+// defaultWatchStopPollInterval is the tick of RunWatchAll's wait between
+// cycles when WatchAllParams.StopPollInterval is unset: how often it looks
+// at ctx and the stop request.
+const defaultWatchStopPollInterval = time.Second
+
+// WatchAllParams describes one `ralph org watch --all` run (see
+// RunWatchAll).
+type WatchAllParams struct {
+	// StatusDir is the org state dir: watch.lock, watch-alive.json,
+	// watch-stop.json, each org's watch-status-<org_id>.json, and
+	// escalations.jsonl live in it (the directory of the manifest the Org
+	// reads, in production). Required.
+	StatusDir string
+	// Interval, Cycles, GitStatus, Escalate, and Stderr mean what they mean
+	// in WatchParams. Stderr also gets the inbox deadline banners and one
+	// line for each failure RunWatchAll goes past.
+	Interval  time.Duration
+	Cycles    int
+	GitStatus GitStatusFunc
+	Escalate  EscalateFunc
+	Stderr    io.Writer
+	// LockWait is how long to wait for watch.lock (AcquireWatchLock); zero
+	// means defaultWatchLockWait.
+	LockWait time.Duration
+	// StopPollInterval is the tick of the wait between cycles; zero means
+	// defaultWatchStopPollInterval. Tests shorten it.
+	StopPollInterval time.Duration
+}
+
+// RunWatchAll is `ralph org watch --all`: one process that watches every
+// org of the ledger. It takes watch.lock and holds it until it returns
+// (when another watch holds it, the error wraps ErrWatchRunning and nothing
+// is written), removes a stop request that is not later than its start,
+// and writes the liveness mark (running, its pid, its start) before the
+// first cycle. Each cycle then, in this order:
+//
+//  1. sends the inbox items past a deadline (SweepInboxDeadlines, with one
+//     InboxDeadlineMemory for the whole run). It needs no herdr, agmsg, or
+//     git, so no org's pulse can hold it back;
+//  2. runs the pulse cycle (evaluateCycle) of each org in RunningOrgs of
+//     the manifest, in that order, with each org's watch-status file kept
+//     in memory across cycles as RunWatch keeps its one. An org that no
+//     longer runs (disbanded) is not evaluated and is dropped;
+//  3. rewrites the mark with the cycle's ts;
+//  4. calls hooks.OnCycle.
+//
+// A failure in step 1 or 2 (an inbox that cannot be read or written, the
+// manifest, one org's status file) is one line on Stderr and skips only its
+// own part: the other orgs, the mark, and the loop go on. Between cycles
+// RunWatchAll waits Interval in ticks of StopPollInterval and ends after
+// the cycle when ctx is done or a stop request later than its start is
+// there; Cycles > 0 ends it after that many cycles. However it ends once it
+// holds the lock (a panic included), it writes the mark as stopped with
+// stopped_at, removes a stop request meant for it, and releases the lock.
+// It returns an error only when it does not start (no StatusDir, or
+// watch.lock not taken); every end after the start returns nil.
+func (o *Org) RunWatchAll(ctx context.Context, p WatchAllParams, hooks WatchHooks) error {
+	if strings.TrimSpace(p.StatusDir) == "" {
+		return fmt.Errorf("org: watch: state dir is required")
+	}
+	// The start is read before the lock wait, so a stop request written
+	// while this watch waits for the lock or right after it took it is
+	// later than the start and is not removed below.
+	startedAt := o.nowTime()
+	lock, err := AcquireWatchLock(p.StatusDir, p.LockWait)
+	if err != nil {
+		return err
+	}
+	w := o.newWatchAllRun(p, hooks, startedAt)
+	defer w.finish(lock)
+	w.dropOldStopRequest()
+	w.writeMark()
+
+	for n := 1; ; n++ {
+		w.cycle(ctx)
+		if hooks.OnCycle != nil {
+			hooks.OnCycle(n, o.nowTime())
+		}
+		if p.Cycles > 0 && n >= p.Cycles {
+			return nil
+		}
+		if w.waitForNextCycle(ctx) {
+			return nil
+		}
+	}
+}
+
+// watchAllRun is one RunWatchAll: what every org's cycle shares, and what
+// the run keeps between cycles.
+type watchAllRun struct {
+	org            *Org
+	dir            string
+	stderr         io.Writer
+	interval, tick time.Duration
+	startedAt      time.Time
+	// run holds the dependencies of one org's evaluateCycle; pulseOrg
+	// copies it and sets the org's statusPath.
+	run         watchRun
+	statuses    map[string]*watchStatusFile
+	inboxMemory InboxDeadlineMemory
+	mark        WatchAlive
+}
+
+func (o *Org) newWatchAllRun(p WatchAllParams, hooks WatchHooks, startedAt time.Time) *watchAllRun {
+	interval := ResolveWatchInterval(p.Interval, o.Config.Watchdog)
+	tick := p.StopPollInterval
+	if tick <= 0 {
+		tick = defaultWatchStopPollInterval
+	}
+	gitStatus := p.GitStatus
+	if gitStatus == nil {
+		gitStatus = o.realGitStatus
+	}
+	escalateFn := p.Escalate
+	if escalateFn == nil {
+		escalateFn = realEscalate
+	}
+	stderr := p.Stderr
+	if stderr == nil {
+		stderr = os.Stderr
+	}
+	return &watchAllRun{
+		org: o, dir: p.StatusDir, stderr: stderr,
+		interval: interval, tick: tick, startedAt: startedAt,
+		run: watchRun{
+			org: o, cfg: o.Config, hooks: hooks,
+			gitStatus: gitStatus, escalateFn: escalateFn, stderr: stderr,
+			escalationsPath: EscalationsPathIn(p.StatusDir),
+		},
+		statuses: map[string]*watchStatusFile{},
+		mark: WatchAlive{
+			State: WatchAliveRunning, PID: os.Getpid(),
+			StartedAt:       startedAt.UTC().Format(time.RFC3339Nano),
+			IntervalSeconds: int(interval / time.Second),
+		},
+	}
+}
+
+// cycle runs steps 1 to 3 of RunWatchAll's cycle.
+func (w *watchAllRun) cycle(ctx context.Context) {
+	sweep := w.org.SweepInboxDeadlines(w.org.nowTime(), &w.inboxMemory, w.stderr)
+	if sweep.Err != nil {
+		_, _ = fmt.Fprintf(w.stderr, "watchdog: inbox deadlines skipped this cycle: %v\n", sweep.Err)
+	}
+	for _, f := range sweep.Failed {
+		_, _ = fmt.Fprintf(w.stderr, "watchdog: inbox item %s not sent for %s: %v\n", f.ID, f.Reason, f.Err)
+	}
+	w.pulse(ctx)
+	w.writeMark()
+}
+
+// pulse runs the pulse cycle of every running org.
+func (w *watchAllRun) pulse(ctx context.Context) {
+	rr, err := w.org.Manifest.Read()
+	if err != nil {
+		_, _ = fmt.Fprintf(w.stderr, "watchdog: pulse skipped this cycle: read manifest: %v\n", err)
+		return
+	}
+	running := RunningOrgs(rr.Events)
+	for orgID := range w.statuses {
+		if !slices.Contains(running, orgID) {
+			delete(w.statuses, orgID)
+		}
+	}
+	for _, orgID := range running {
+		if err := w.pulseOrg(ctx, orgID); err != nil {
+			_, _ = fmt.Fprintf(w.stderr, "watchdog: org %q skipped this cycle: %v\n", orgID, err)
+		}
+	}
+}
+
+// pulseOrg runs orgID's pulse cycle, loading its status file the first time.
+// orgID comes from the manifest, so it is checked before it names a file: a
+// hand-edited line could hold a path.
+func (w *watchAllRun) pulseOrg(ctx context.Context, orgID string) error {
+	if err := ValidateIdentifier("org_id", orgID); err != nil {
+		return err
+	}
+	run := w.run
+	run.statusPath = filepath.Join(w.dir, WatchStatusFileName(orgID))
+	status := w.statuses[orgID]
+	if status == nil {
+		loaded, err := loadWatchStatus(run.statusPath, orgID)
+		if err != nil {
+			return err
+		}
+		status = loaded
+		w.statuses[orgID] = status
+	}
+	return run.evaluateCycle(ctx, orgID, status)
+}
+
+// writeMark rewrites the mark with ts now.
+func (w *watchAllRun) writeMark() {
+	w.mark.TS = w.org.nowTime().UTC().Format(time.RFC3339)
+	if err := writeWatchAlive(w.dir, w.mark); err != nil {
+		_, _ = fmt.Fprintf(w.stderr, "watchdog: liveness mark not written: %v\n", err)
+	}
+}
+
+// stopRequested reports whether a stop request for this run is there.
+func (w *watchAllRun) stopRequested() bool {
+	req, err := ReadWatchStopRequest(w.dir)
+	return err == nil && req.AppliesTo(w.startedAt)
+}
+
+// dropOldStopRequest removes a stop request this run is not to follow: one
+// that is not later than the start (left for an earlier watch), or one
+// that cannot be read.
+func (w *watchAllRun) dropOldStopRequest() {
+	req, err := ReadWatchStopRequest(w.dir)
+	if errors.Is(err, fs.ErrNotExist) || (err == nil && req.AppliesTo(w.startedAt)) {
+		return
+	}
+	if err := RemoveWatchStopRequest(w.dir); err != nil {
+		_, _ = fmt.Fprintf(w.stderr, "watchdog: %v\n", err)
+	}
+}
+
+// waitForNextCycle waits the interval in ticks and reports whether the run
+// is to end: ctx is done or a stop request for this run is there. It looks
+// before the first tick too, so a request written during a cycle ends the
+// run right after that cycle. The wait reads the real clock, not Org.Now,
+// which tests freeze.
+func (w *watchAllRun) waitForNextCycle(ctx context.Context) bool {
+	deadline := time.Now().Add(w.interval)
+	for {
+		if ctx.Err() != nil || w.stopRequested() {
+			return true
+		}
+		left := time.Until(deadline)
+		if left <= 0 {
+			return false
+		}
+		select {
+		case <-ctx.Done():
+			return true
+		case <-time.After(min(w.tick, left)):
+		}
+	}
+}
+
+// finish writes the stopped mark, removes a stop request meant for this
+// run (it is being followed now, whatever ended the run), and releases the
+// lock, in that order: a `--stop` that sees the lock free also sees the
+// stopped mark.
+func (w *watchAllRun) finish(lock *WatchLock) {
+	now := w.org.nowTime().UTC().Format(time.RFC3339)
+	w.mark.State, w.mark.StoppedAt = WatchAliveStopped, now
+	if err := writeWatchAlive(w.dir, w.mark); err != nil {
+		_, _ = fmt.Fprintf(w.stderr, "watchdog: stopped mark not written: %v\n", err)
+	}
+	if w.stopRequested() {
+		if err := RemoveWatchStopRequest(w.dir); err != nil {
+			_, _ = fmt.Fprintf(w.stderr, "watchdog: %v\n", err)
+		}
+	}
+	if err := lock.Release(); err != nil {
+		_, _ = fmt.Fprintf(w.stderr, "watchdog: release %s: %v\n", WatchLockFileName, err)
+	}
+}
+
 // evaluateCycle runs exactly one pulse-layer cycle: per-active-seat checks
 // (stall / liveness / scope-change), then the AC-5 deadman sweep over any
 // still-pending alerts, then persists status.
+//
+// Each herdr and agmsg call of the cycle, and the real git status, runs
+// under its own Org.callWithTimeout deadline, not under ctx (Codex plan
+// advisory finding 1 of docs/plans/active/2026-10-11-org-cross-watch.md): a
+// call that does not answer fails like any other failure of that call, so
+// one org cannot hold the cycle of the others, and a watch told to stop
+// still finishes its cycle with real answers rather than with cancelled
+// calls that would read as dead seats. ctx reaches only the deadman's
+// EscalateFunc.
 func (w *watchRun) evaluateCycle(ctx context.Context, orgID string, status *watchStatusFile) error {
 	now := w.org.nowTime()
 
@@ -538,7 +834,7 @@ func (w *watchRun) evaluateCycle(ctx context.Context, orgID string, status *watc
 	}
 
 	for _, s := range activeSeats {
-		w.evaluateSeat(ctx, status, orgID, s, now, rr.Events)
+		w.evaluateSeat(status, orgID, s, now, rr.Events)
 	}
 
 	rr2, err := w.org.Manifest.Read()
@@ -617,7 +913,7 @@ func retiredConditionTypeFromAlertID(alertID string) string {
 // stall, (d) process liveness, (e) worktree scope change. events is the
 // cycle's manifest snapshot (see evaluateCycle), needed by the stall
 // condition's M-6 fix below.
-func (w *watchRun) evaluateSeat(ctx context.Context, status *watchStatusFile, orgID string, s SeatStatus, now time.Time, events []ManifestEvent) {
+func (w *watchRun) evaluateSeat(status *watchStatusFile, orgID string, s SeatStatus, now time.Time, events []ManifestEvent) {
 	snap := status.SeatSnapshots[s.SeatID]
 	if snap == nil {
 		snap = &watchSeatSnapshot{}
@@ -627,16 +923,21 @@ func (w *watchRun) evaluateSeat(ctx context.Context, status *watchStatusFile, or
 	var agentGetOut string
 	var agentGetErr error
 	if probe, ok := w.org.Herdr.(watchHerdrProbe); ok {
-		agentGetOut, agentGetErr = probe.AgentGet(ctx, resolvedHerdrAgentName(s))
+		agentGetErr = w.org.callWithTimeout(func(ctx context.Context) error {
+			var err error
+			agentGetOut, err = probe.AgentGet(ctx, resolvedHerdrAgentName(s))
+			return err
+		})
 	}
 
 	if agentGetErr != nil {
-		// (d) process liveness: herdr agent get failed for an active seat.
-		w.raiseOrClear(ctx, status, orgID, s.SeatID, condLiveness, true, now,
+		// (d) process liveness: herdr agent get failed for an active seat
+		// (a call cut off by the deadline included).
+		w.raiseOrClear(status, orgID, s.SeatID, condLiveness, true, now,
 			fmt.Sprintf("TYPE: ALERT\nORG_ID: %s\nSEAT: %s\nCONDITION: %s\n\nherdr agent get failed for seat %s: %v",
 				orgID, s.SeatID, condLiveness, s.SeatID, agentGetErr), false)
 	} else {
-		w.raiseOrClear(ctx, status, orgID, s.SeatID, condLiveness, false, now, "", false)
+		w.raiseOrClear(status, orgID, s.SeatID, condLiveness, false, now, "", false)
 
 		// (c) heartbeat stall: last manifest event time AND herdr raw probe
 		// text both unchanged since the previous cycle. lastEventTS (self-
@@ -651,7 +952,7 @@ func (w *watchRun) evaluateSeat(ctx context.Context, status *watchStatusFile, or
 		// stay unchanged" semantics (config.go).
 		lastEventTS := latestSeatEventTS(events, orgID, s.SeatID)
 		stalled := snap.AgentGetSeen && snap.AgentGet == agentGetOut && isStallByTime(lastEventTS, now, w.cfg.Watchdog.StallMinutes)
-		w.raiseOrClear(ctx, status, orgID, s.SeatID, condStall, stalled, now,
+		w.raiseOrClear(status, orgID, s.SeatID, condStall, stalled, now,
 			fmt.Sprintf("TYPE: ALERT\nORG_ID: %s\nSEAT: %s\nCONDITION: %s\n\nseat %s heartbeat stalled for over %dm",
 				orgID, s.SeatID, condStall, s.SeatID, w.cfg.Watchdog.StallMinutes), true)
 		snap.AgentGet = agentGetOut
@@ -665,7 +966,7 @@ func (w *watchRun) evaluateSeat(ctx context.Context, status *watchStatusFile, or
 		out, err := w.gitStatus(s.Worktree)
 		if err == nil {
 			changed := snap.GitStatusSeen && snap.GitStatus != out
-			w.raiseOrClear(ctx, status, orgID, s.SeatID, condScopeChange, changed, now,
+			w.raiseOrClear(status, orgID, s.SeatID, condScopeChange, changed, now,
 				fmt.Sprintf("TYPE: ALERT\nORG_ID: %s\nSEAT: %s\nCONDITION: %s\n\nseat %s worktree scope changed:\n%s",
 					orgID, s.SeatID, condScopeChange, s.SeatID, truncateScopeOutput(out, scopeChangeBodyBudget)), true)
 			snap.GitStatus = out
@@ -682,7 +983,7 @@ func (w *watchRun) evaluateSeat(ctx context.Context, status *watchStatusFile, or
 // fires WatchHooks.OnSemanticTrigger (the Slice 4 on-demand-watcher seam) --
 // liveness intentionally passes semantic=false: a dead/unreachable pane
 // gives a watcher nothing useful to judge.
-func (w *watchRun) raiseOrClear(ctx context.Context, status *watchStatusFile, orgID, seatID, condType string, active bool, now time.Time, message string, semantic bool) {
+func (w *watchRun) raiseOrClear(status *watchStatusFile, orgID, seatID, condType string, active bool, now time.Time, message string, semantic bool) {
 	key := conditionKey(orgID, seatID, condType)
 	rec := status.Conditions[key]
 	if active {
@@ -690,7 +991,7 @@ func (w *watchRun) raiseOrClear(ctx context.Context, status *watchStatusFile, or
 			return // already alerted and still active: dedupe
 		}
 		status.Conditions[key] = &watchConditionRecord{Active: true, FirstTS: now.UTC().Format(time.RFC3339)}
-		w.sendAlert(ctx, status, orgID, seatID, condType, message, now)
+		w.sendAlert(context.Background(), status, orgID, seatID, condType, message, now)
 		if semantic && w.hooks.OnSemanticTrigger != nil {
 			w.hooks.OnSemanticTrigger(orgID, seatID, condType, message)
 		}
@@ -732,13 +1033,16 @@ func (o *Org) SendWatchdogAlert(ctx context.Context, orgID, message string) erro
 // SendWatchdogAlert has no membership dependency of its own that would
 // otherwise surface the gap, ALERT delivery would keep failing silently
 // forever after just one bad cycle. Leaving the flag false on error lets
-// the very next cycle retry Join.
-func (w *watchRun) ensureWatchdogJoined(ctx context.Context, status *watchStatusFile, orgID string) {
+// the very next cycle retry Join. A Join cut off by its callWithTimeout
+// deadline is such a failure.
+func (w *watchRun) ensureWatchdogJoined(status *watchStatusFile, orgID string) {
 	if status.WatchdogJoined {
 		return
 	}
 	cwd, _ := os.Getwd()
-	if err := w.org.Agmsg.Join(ctx, agmsgTeam(orgID), watchdogIdentity, "claude-code", cwd); err == nil {
+	if err := w.org.callWithTimeout(func(ctx context.Context) error {
+		return w.org.Agmsg.Join(ctx, agmsgTeam(orgID), watchdogIdentity, "claude-code", cwd)
+	}); err == nil {
 		status.WatchdogJoined = true
 	}
 }
@@ -746,11 +1050,13 @@ func (w *watchRun) ensureWatchdogJoined(ctx context.Context, status *watchStatus
 // sendAlert validates and sends one ALERT to leader via the watchdog identity
 // (SendWatchdogAlert, not the seat-steering Send verb -- see that method's
 // doc comment for why) best-effort -- a Send failure, e.g. agmsg itself is
-// unreachable, never aborts the pulse cycle but is logged to w.stderr -- then
-// registers an AC-5 pending-alert deadman record regardless of whether Send
-// itself succeeded: the whole point of the deadman clause is to catch the
-// case where leader cannot be reached at all.
-func (w *watchRun) sendAlert(ctx context.Context, status *watchStatusFile, orgID, seatID, condType, message string, now time.Time) {
+// unreachable or the Send is cut off by its callWithTimeout deadline, never
+// aborts the pulse cycle but is logged to w.stderr -- then registers an AC-5
+// pending-alert deadman record regardless of whether Send itself succeeded:
+// the whole point of the deadman clause is to catch the case where leader
+// cannot be reached at all. Its context argument is not used: each call
+// here runs under its own callWithTimeout deadline (see evaluateCycle).
+func (w *watchRun) sendAlert(_ context.Context, status *watchStatusFile, orgID, seatID, condType, message string, now time.Time) {
 	if err := protocol.ValidateText(message, protocol.DefaultMaxBodyChars); err != nil {
 		// SEAT is always included here (tech-debt: "watchdog deferred LOW
 		// (2)"): before this fix, a busy seat whose original message failed
@@ -760,8 +1066,10 @@ func (w *watchRun) sendAlert(ctx context.Context, status *watchStatusFile, orgID
 		message = fmt.Sprintf("TYPE: ALERT\nORG_ID: %s\nSEAT: %s\nCONDITION: %s\n\nwatchdog: message failed protocol validation: %v",
 			orgID, seatID, condType, err)
 	}
-	w.ensureWatchdogJoined(ctx, status, orgID)
-	if err := w.org.SendWatchdogAlert(ctx, orgID, message); err != nil {
+	w.ensureWatchdogJoined(status, orgID)
+	if err := w.org.callWithTimeout(func(ctx context.Context) error {
+		return w.org.SendWatchdogAlert(ctx, orgID, message)
+	}); err != nil {
 		_, _ = fmt.Fprintf(w.stderr, "watchdog: failed to ALERT leader for org %q condition %q: %v\n", orgID, condType, err)
 	}
 
@@ -772,8 +1080,8 @@ func (w *watchRun) sendAlert(ctx context.Context, status *watchStatusFile, orgID
 		TS:                 now.UTC().Format(time.RFC3339),
 		Subject:            seatID,
 		ManifestLen:        leaderActivityEventCount(rr.Events, orgID),
-		LeaderAgentGet:     w.leaderProbeSnapshot(ctx, orgID),
-		HistoryLeaderLines: w.historyLeaderLineCount(ctx, orgID),
+		LeaderAgentGet:     w.leaderProbeSnapshot(orgID),
+		HistoryLeaderLines: w.historyLeaderLineCount(orgID),
 	}
 }
 
@@ -866,14 +1174,20 @@ func leaderActivityEventCount(events []ManifestEvent, orgID string) int {
 }
 
 // leaderProbeSnapshot returns the leader seat's current herdr `agent get` raw
-// text, or "" if the probe is unavailable/errors (best-effort deadman
-// information source #2).
-func (w *watchRun) leaderProbeSnapshot(ctx context.Context, orgID string) string {
+// text, or "" if the probe is unavailable/errors, a call cut off by its
+// callWithTimeout deadline included (best-effort deadman information
+// source #2).
+func (w *watchRun) leaderProbeSnapshot(orgID string) string {
 	probe, ok := w.org.Herdr.(watchHerdrProbe)
 	if !ok {
 		return ""
 	}
-	out, err := probe.AgentGet(ctx, herdrAgentName(orgID, LeaderIdentity))
+	var out string
+	err := w.org.callWithTimeout(func(ctx context.Context) error {
+		var err error
+		out, err = probe.AgentGet(ctx, herdrAgentName(orgID, LeaderIdentity))
+		return err
+	})
 	if err != nil {
 		return ""
 	}
@@ -882,8 +1196,9 @@ func (w *watchRun) leaderProbeSnapshot(ctx context.Context, orgID string) string
 
 // historyLeaderLineCount returns the COUNT of the org's agmsg team history
 // lines that are LEADER-authored (leaderHistoryLines), or -1 if the probe is
-// unavailable/errors (best-effort deadman information source #3; -1, not 0,
-// so an unavailable probe is distinguishable from "leader has genuinely never
+// unavailable/errors, a call cut off by its callWithTimeout deadline
+// included (best-effort deadman information source #3; -1, not 0, so an
+// unavailable probe is distinguishable from "leader has genuinely never
 // sent anything yet").
 //
 // Counting rather than comparing the filtered text (self-review cycle-3
@@ -906,12 +1221,17 @@ func (w *watchRun) leaderProbeSnapshot(ctx context.Context, orgID string) string
 // complete fix (and would make the `20` argument here non-dead) but is
 // deferred -- the count comparison alone is sufficient to close the false-
 // activity bug the cycle-3 finding described.
-func (w *watchRun) historyLeaderLineCount(ctx context.Context, orgID string) int {
+func (w *watchRun) historyLeaderLineCount(orgID string) int {
 	probe, ok := w.org.Agmsg.(watchAgmsgHistory)
 	if !ok {
 		return -1
 	}
-	out, err := probe.History(ctx, agmsgTeam(orgID), "", 20)
+	var out string
+	err := w.org.callWithTimeout(func(ctx context.Context) error {
+		var err error
+		out, err = probe.History(ctx, agmsgTeam(orgID), "", 20)
+		return err
+	})
 	if err != nil {
 		return -1
 	}
@@ -1014,12 +1334,12 @@ func (w *watchRun) checkDeadman(ctx context.Context, status *watchStatusFile, rr
 	for alertID, pending := range status.PendingAlerts {
 		activity := leaderActivityEventCount(rr.Events, status.OrgID) > pending.ManifestLen
 		if !activity && pending.LeaderAgentGet != "" {
-			if cur := w.leaderProbeSnapshot(ctx, status.OrgID); cur != "" && cur != pending.LeaderAgentGet {
+			if cur := w.leaderProbeSnapshot(status.OrgID); cur != "" && cur != pending.LeaderAgentGet {
 				activity = true
 			}
 		}
 		if !activity && pending.HistoryLeaderLines >= 0 {
-			if cur := w.historyLeaderLineCount(ctx, status.OrgID); cur >= 0 && cur > pending.HistoryLeaderLines {
+			if cur := w.historyLeaderLineCount(status.OrgID); cur >= 0 && cur > pending.HistoryLeaderLines {
 				activity = true
 			}
 		}

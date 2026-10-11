@@ -2,7 +2,9 @@ package org
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -30,7 +32,7 @@ const manifestLockTimeout = 5 * time.Second
 // manifestLockPollInterval is how often withManifestLock retries a
 // non-blocking LOCK_EX attempt while waiting for manifestLockTimeout. The
 // inbox lock is retried at the same interval, since withFileLock serves both
-// locks.
+// locks, and so is the watch's held lock (acquireHeldFileLock).
 const manifestLockPollInterval = 25 * time.Millisecond
 
 // withManifestLock serializes fn against every other withManifestLock call
@@ -61,13 +63,9 @@ func withManifestLock(dir string, fn func() error) error {
 // messages ("manifest" gives withManifestLock's messages). Each lock file is
 // independent: holding one never blocks a caller of another.
 func withFileLock(dir, name, what string, fn func() error) error {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("org: create %s lock dir %s: %w", what, dir, err)
-	}
-	lockPath := filepath.Join(dir, name)
-	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
+	f, lockPath, err := openLockFile(dir, name, what)
 	if err != nil {
-		return fmt.Errorf("org: open %s lock file %s: %w", what, lockPath, err)
+		return err
 	}
 	defer func() { _ = f.Close() }()
 
@@ -80,6 +78,98 @@ func withFileLock(dir, name, what string, fn func() error) error {
 	defer func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN) }()
 
 	return fn()
+}
+
+// openLockFile creates dir and opens <dir>/<name> (creating it if absent)
+// for withFileLock and acquireHeldFileLock. what names the lock in the
+// error messages.
+func openLockFile(dir, name, what string) (*os.File, string, error) {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, "", fmt.Errorf("org: create %s lock dir %s: %w", what, dir, err)
+	}
+	lockPath := filepath.Join(dir, name)
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, "", fmt.Errorf("org: open %s lock file %s: %w", what, lockPath, err)
+	}
+	return f, lockPath, nil
+}
+
+// errFileLockHeld is wrapped by acquireHeldFileLock's error when the lock
+// was still held by another open file when its wait ran out.
+var errFileLockHeld = errors.New("the lock is held")
+
+// heldFileLock is a flock that outlives the call that took it, unlike
+// withFileLock's: the lock file stays open with LOCK_EX on it until
+// release. The cross-org watch holds one for its lifetime (watchalive.go's
+// watch.lock). The lock is tied to the open file, not the process, so two
+// heldFileLocks on the same file in one process exclude each other too, and
+// the OS releases it when the process exits however it exits.
+type heldFileLock struct {
+	f *os.File
+}
+
+// acquireHeldFileLock takes LOCK_EX on <dir>/<name> (both created as
+// needed) and keeps it. It retries a non-blocking attempt at
+// manifestLockPollInterval for up to wait (at least one attempt), so a
+// short shared lock that fileLockHeld takes does not make it fail. When the
+// lock is still held after wait, the error wraps errFileLockHeld; any other
+// flock error returns at once.
+func acquireHeldFileLock(dir, name, what string, wait time.Duration) (*heldFileLock, error) {
+	f, lockPath, err := openLockFile(dir, name, what)
+	if err != nil {
+		return nil, err
+	}
+	deadline := time.Now().Add(wait)
+	for {
+		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if err == nil {
+			return &heldFileLock{f: f}, nil
+		}
+		if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EINTR) {
+			_ = f.Close()
+			return nil, fmt.Errorf("org: acquire %s lock %s: %w", what, lockPath, err)
+		}
+		left := time.Until(deadline)
+		if left <= 0 {
+			_ = f.Close()
+			return nil, fmt.Errorf("org: acquire %s lock %s: %w after %s", what, lockPath, errFileLockHeld, wait)
+		}
+		time.Sleep(min(manifestLockPollInterval, left))
+	}
+}
+
+// release drops the lock and closes the file.
+func (l *heldFileLock) release() error {
+	_ = syscall.Flock(int(l.f.Fd()), syscall.LOCK_UN)
+	return l.f.Close()
+}
+
+// fileLockHeld reports whether another open file holds a lock on path: it
+// takes LOCK_SH|LOCK_NB on a fresh read-only open of path and drops it at
+// once, so a holder of LOCK_EX shows as held (EWOULDBLOCK) and nothing else
+// does. A missing file is not held. err is set when the check could not be
+// made (path cannot be opened, or flock fails another way).
+func fileLockHeld(path string) (bool, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	defer func() { _ = f.Close() }()
+	fd := int(f.Fd())
+	err = syscall.Flock(fd, syscall.LOCK_SH|syscall.LOCK_NB)
+	switch {
+	case err == nil:
+		_ = syscall.Flock(fd, syscall.LOCK_UN)
+		return false, nil
+	case errors.Is(err, syscall.EWOULDBLOCK):
+		return true, nil
+	default:
+		return false, err
+	}
 }
 
 // acquireFlock polls a non-blocking LOCK_EX attempt (LOCK_EX|LOCK_NB) at
