@@ -182,6 +182,14 @@ type WatchHooks struct {
 	// 1-based, and the clock value used for that cycle). Mainly test
 	// observability.
 	OnCycle func(cycleN int, ts time.Time)
+	// BeforeStop fires once as RunWatchAll ends, after its last cycle and
+	// before it writes the stopped mark and releases watch.lock, so the work
+	// a caller started from OnSemanticTrigger (the on-demand watcher
+	// goroutines of `ralph org watch --all`) can end while `--stop` and a
+	// second watch still see this watch running (cross-review #1 of
+	// docs/plans/active/2026-10-11-org-cross-watch.md). RunWatchAll rewrites
+	// the running mark every interval until BeforeStop returns.
+	BeforeStop func()
 }
 
 // watchConditionRecord is the AC-3c dedupe record for one conditionKey.
@@ -465,9 +473,10 @@ type WatchAllParams struct {
 // RunWatchAll is `ralph org watch --all`: one process that watches every
 // org of the ledger. It takes watch.lock and holds it until it returns
 // (when another watch holds it, the error wraps ErrWatchRunning and nothing
-// is written), removes a stop request that is not later than its start,
-// and writes the liveness mark (running, its pid, its start) before the
-// first cycle. Each cycle then, in this order:
+// is written), removes a stop request that is not later than its start
+// (one that is later is followed after the first cycle;
+// takeStopRequestAtStart), and writes the liveness mark (running, its pid,
+// its start) before the first cycle. Each cycle then, in this order:
 //
 //  1. sends the inbox items past a deadline (SweepInboxDeadlines, with one
 //     InboxDeadlineMemory for the whole run). It needs no herdr, agmsg, or
@@ -487,10 +496,12 @@ type WatchAllParams struct {
 // waits Interval in ticks of StopPollInterval and ends after the cycle when
 // ctx is done or a stop request later than its start is there; Cycles > 0
 // ends it after that many cycles. However it ends once it holds the lock (a
-// panic included), it writes the mark as stopped with stopped_at, removes a
-// stop request meant for it, and releases the lock. It returns an error only
-// when it does not start (no StatusDir, or watch.lock not taken); every end
-// after the start returns nil.
+// panic included), it calls hooks.BeforeStop while it still holds the lock
+// and its mark still says running, then writes the mark as stopped with
+// stopped_at, removes a stop request meant for it, and releases the lock
+// (finish). It returns an error only when it does not start (no StatusDir,
+// or watch.lock not taken), and then calls no hook; every end after the
+// start returns nil.
 func (o *Org) RunWatchAll(ctx context.Context, p WatchAllParams, hooks WatchHooks) error {
 	if strings.TrimSpace(p.StatusDir) == "" {
 		return fmt.Errorf("org: watch: state dir is required")
@@ -505,7 +516,7 @@ func (o *Org) RunWatchAll(ctx context.Context, p WatchAllParams, hooks WatchHook
 	}
 	w := o.newWatchAllRun(p, hooks, startedAt)
 	defer w.finish(lock)
-	w.dropOldStopRequest()
+	w.takeStopRequestAtStart()
 	w.writeMark()
 
 	for n := 1; ; n++ {
@@ -540,6 +551,12 @@ type watchAllRun struct {
 	// not every cycle (pulseOrg).
 	unreadableWarned map[string]bool
 	mark             WatchAlive
+	// beforeStop is WatchHooks.BeforeStop (finish).
+	beforeStop func()
+	// stopTaken is set when a stop request later than the start was there
+	// at the start (takeStopRequestAtStart), so the run follows it even if
+	// it could not be put back.
+	stopTaken bool
 }
 
 func (o *Org) newWatchAllRun(p WatchAllParams, hooks WatchHooks, startedAt time.Time) *watchAllRun {
@@ -575,6 +592,7 @@ func (o *Org) newWatchAllRun(p WatchAllParams, hooks WatchHooks, startedAt time.
 			StartedAt:       startedAt.UTC().Format(time.RFC3339Nano),
 			IntervalSeconds: int(interval / time.Second),
 		},
+		beforeStop: hooks.BeforeStop,
 	}
 }
 
@@ -647,22 +665,53 @@ func (w *watchAllRun) writeMark() {
 	}
 }
 
-// stopRequested reports whether a stop request for this run is there.
+// stopRequested reports whether a stop request for this run is there, or
+// was there at the start (stopTaken).
 func (w *watchAllRun) stopRequested() bool {
+	if w.stopTaken {
+		return true
+	}
 	req, err := ReadWatchStopRequest(w.dir)
 	return err == nil && req.AppliesTo(w.startedAt)
 }
 
-// dropOldStopRequest removes a stop request this run is not to follow: one
-// that is not later than the start (left for an earlier watch), or one
-// that cannot be read.
-func (w *watchAllRun) dropOldStopRequest() {
-	req, err := ReadWatchStopRequest(w.dir)
-	if errors.Is(err, fs.ErrNotExist) || (err == nil && req.AppliesTo(w.startedAt)) {
+// afterStopRequestTaken is a no-op by default; tests reassign it (the
+// package-level seam of afterStaleCompensation in spawn.go) to write a new
+// stop request between takeStopRequestAtStart's take and what it does with
+// the request it took, which is the window a concurrent `--stop` can write
+// in.
+var afterStopRequestTaken = func() {}
+
+// takeStopRequestAtStart deals with a stop request that is there at the
+// start. It takes the request with one rename (takeWatchStopRequest)
+// rather than reading and then removing watch-stop.json, which deleted a
+// request a concurrent `--stop` wrote between the two (cross-review #2 of
+// docs/plans/active/2026-10-11-org-cross-watch.md): such a request is a new
+// file this leaves alone. A request later than the start is put back and
+// remembered (stopTaken), so the run follows it after the first cycle even
+// when the put-back fails; a put-back over a request written meanwhile
+// replaces one request for this run with another. A request that is not
+// later than the start (left for an earlier watch), or that cannot be read,
+// is removed.
+func (w *watchAllRun) takeStopRequestAtStart() {
+	req, taken, err := takeWatchStopRequest(w.dir)
+	if taken == "" {
+		if !errors.Is(err, fs.ErrNotExist) {
+			_, _ = fmt.Fprintf(w.stderr, "watchdog: %v\n", err)
+		}
 		return
 	}
-	if err := RemoveWatchStopRequest(w.dir); err != nil {
-		_, _ = fmt.Fprintf(w.stderr, "watchdog: %v\n", err)
+	afterStopRequestTaken()
+	if err == nil && req.AppliesTo(w.startedAt) {
+		w.stopTaken = true
+		putBackErr := os.Rename(taken, WatchStopPathIn(w.dir))
+		if putBackErr == nil {
+			return
+		}
+		_, _ = fmt.Fprintf(w.stderr, "watchdog: put the stop request back: %v (this watch still stops after its first cycle)\n", putBackErr)
+	}
+	if err := os.Remove(taken); err != nil {
+		_, _ = fmt.Fprintf(w.stderr, "watchdog: remove the stop request taken at the start: %v\n", err)
 	}
 }
 
@@ -689,11 +738,52 @@ func (w *watchAllRun) waitForNextCycle(ctx context.Context) bool {
 	}
 }
 
-// finish writes the stopped mark, removes a stop request meant for this
-// run (it is being followed now, whatever ended the run), and releases the
-// lock, in that order: a `--stop` that sees the lock free also sees the
-// stopped mark.
+// finish ends the run once it holds the lock: drainBeforeStop, then
+// stopAndRelease, which is deferred so that it runs when beforeStop panics
+// too.
 func (w *watchAllRun) finish(lock *WatchLock) {
+	defer w.stopAndRelease(lock)
+	w.drainBeforeStop()
+}
+
+// drainBeforeStop calls beforeStop, if set, while the lock is held and the
+// mark says running. Until beforeStop returns, a goroutine rewrites the
+// running mark every interval (writeMark), so a drain longer than the
+// window of ProbeWatch does not read as stale; drainBeforeStop waits for
+// that goroutine to end before it returns, so its last rewrite comes before
+// the stopped mark.
+func (w *watchAllRun) drainBeforeStop() {
+	if w.beforeStop == nil {
+		return
+	}
+	done := make(chan struct{})
+	refresherDone := make(chan struct{})
+	go func() {
+		defer close(refresherDone)
+		for {
+			select {
+			case <-done:
+				return
+			case <-time.After(w.interval):
+				w.writeMark()
+			}
+		}
+	}()
+	defer func() {
+		close(done)
+		<-refresherDone
+	}()
+	w.beforeStop()
+}
+
+// stopAndRelease writes the stopped mark, removes a stop request meant for
+// this run (it is being followed now, whatever ended the run), and releases
+// the lock, in that order: a `--stop` that sees the lock free also sees the
+// stopped mark. A request a `--stop` writes between stopRequested's read
+// and the remove is one for this run (the lock is still held), and that
+// `--stop` waits for the lock, which is released next, so removing it loses
+// nothing.
+func (w *watchAllRun) stopAndRelease(lock *WatchLock) {
 	now := w.org.nowTime().UTC().Format(time.RFC3339)
 	w.mark.State, w.mark.StoppedAt = WatchAliveStopped, now
 	if err := writeWatchAlive(w.dir, w.mark); err != nil {

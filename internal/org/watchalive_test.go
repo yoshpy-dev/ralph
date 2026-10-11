@@ -374,3 +374,48 @@ func TestWatchStopRequest_AppliesOnlyToAWatchStartedBeforeIt(t *testing.T) {
 		t.Fatalf("ReadWatchStopRequest after remove = %v; want fs.ErrNotExist", err)
 	}
 }
+
+// Cross-review #2 at the request layer: takeWatchStopRequest moves the
+// request out of watch-stop.json with one rename and reads it where it
+// moved it, so a request written after the take is a new watch-stop.json
+// that removing the taken one leaves in place. With no request it moves
+// nothing; a request that does not parse is moved and its parse error
+// returned.
+func TestTakeWatchStopRequest_MovesTheRequestSoALaterOneIsANewFile(t *testing.T) {
+	dir := t.TempDir()
+	if req, taken, err := takeWatchStopRequest(dir); req != nil || taken != "" || !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("takeWatchStopRequest with none = %+v, %q, %v; want nothing taken and fs.ErrNotExist", req, taken, err)
+	}
+
+	if err := WriteWatchStopRequest(dir, watchAliveT0); err != nil {
+		t.Fatal(err)
+	}
+	req, taken, err := takeWatchStopRequest(dir)
+	if err != nil || taken != filepath.Join(dir, watchStopTakenFileName) || req.RequestedAt != watchAliveT0.Format(time.RFC3339Nano) {
+		t.Fatalf("takeWatchStopRequest = %+v, %q, %v; want the request, moved to %s", req, taken, err, watchStopTakenFileName)
+	}
+	if _, err := ReadWatchStopRequest(dir); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("watch-stop.json after the take: %v; want it moved away", err)
+	}
+	later := watchAliveT0.Add(time.Second)
+	if err := WriteWatchStopRequest(dir, later); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(taken); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := ReadWatchStopRequest(dir); err != nil || got.RequestedAt != later.Format(time.RFC3339Nano) {
+		t.Fatalf("stop request after removing the taken one = %+v, %v; want the later one in place", got, err)
+	}
+
+	if err := os.WriteFile(WatchStopPathIn(dir), []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	req, taken, err = takeWatchStopRequest(dir)
+	if req != nil || taken == "" || err == nil || errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("takeWatchStopRequest of a request that is not JSON = %+v, %q, %v; want it moved with a parse error", req, taken, err)
+	}
+	if got := dirEntries(t, dir); !slices.Equal(got, []string{watchStopTakenFileName}) {
+		t.Fatalf("state dir = %v; want only the taken request", got)
+	}
+}

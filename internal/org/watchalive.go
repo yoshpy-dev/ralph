@@ -14,8 +14,10 @@ import (
 
 // One `ralph org watch --all` runs per org state dir (RunWatchAll,
 // watch.go). It holds watch.lock for its lifetime and rewrites
-// watch-alive.json, the liveness mark, before its first cycle and after
-// every cycle. ProbeWatch reads both to tell whether a watch is running.
+// watch-alive.json, the liveness mark, before its first cycle, after every
+// cycle, and every interval while its caller's work ends
+// (WatchHooks.BeforeStop). ProbeWatch reads both to tell whether a watch is
+// running.
 // `ralph org watch --stop` sends no signal: it writes watch-stop.json, which
 // the watch reads between cycles (a signal could reach an unrelated process
 // that reuses the pid of a mark not yet rewritten).
@@ -28,6 +30,10 @@ const (
 	// WatchLogFileName is the file `ralph org watch --all --detach` sends the
 	// detached watch's stdout and stderr to.
 	WatchLogFileName = "watch.log"
+	// watchStopTakenFileName is where a starting watch moves the stop request
+	// to read it (takeWatchStopRequest). Only the holder of watch.lock uses
+	// it.
+	watchStopTakenFileName = "." + WatchStopFileName + ".taken"
 )
 
 // States of the liveness mark (WatchAlive.State).
@@ -208,7 +214,31 @@ func WriteWatchStopRequest(stateDir string, at time.Time) error {
 // ReadWatchStopRequest reads the stop request in stateDir. A missing
 // request is an error that wraps fs.ErrNotExist.
 func ReadWatchStopRequest(stateDir string) (*WatchStopRequest, error) {
-	path := WatchStopPathIn(stateDir)
+	return readWatchStopRequestAt(WatchStopPathIn(stateDir))
+}
+
+// takeWatchStopRequest moves the stop request in stateDir to
+// watchStopTakenFileName with one rename and reads it there, so a request a
+// `--stop` writes after the rename is a new watch-stop.json that the caller
+// does not touch when it removes what it took. taken is the path the
+// request was moved to, which the caller removes or renames back; it is ""
+// when nothing was moved, and then err wraps fs.ErrNotExist when there was
+// no request. An err with taken set is the read of the moved request (it
+// cannot be read or parsed).
+func takeWatchStopRequest(stateDir string) (req *WatchStopRequest, taken string, err error) {
+	taken = filepath.Join(stateDir, watchStopTakenFileName)
+	if err := os.Rename(WatchStopPathIn(stateDir), taken); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, "", err
+		}
+		return nil, "", fmt.Errorf("org: watch: take the stop request: %w", err)
+	}
+	req, err = readWatchStopRequestAt(taken)
+	return req, taken, err
+}
+
+// readWatchStopRequestAt reads a stop request at path (ReadWatchStopRequest).
+func readWatchStopRequestAt(path string) (*WatchStopRequest, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("org: watch: read %s: %w", path, err)

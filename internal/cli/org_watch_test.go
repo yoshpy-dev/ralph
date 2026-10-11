@@ -769,3 +769,137 @@ func TestOrgWatch_AStopRequestCancelsAnInFlightWatcherCall(t *testing.T) {
 		t.Errorf("mark = %+v (%v); want stopped", mark, err)
 	}
 }
+
+// Cross-review #1 on the CLI: a `watch --all --once` whose on-demand watcher
+// call is still in flight after its one cycle (self-review M-5 lets `--once`
+// wait for it) keeps watch.lock and a running mark until the call has ended.
+// Meanwhile a second `watch --all --once` is refused, and a `--stop` waits
+// for the watch instead of saying it is not running, then reports it
+// stopped. A first `--once` records the seat's worktree status, and a new
+// file in the worktree makes the next one see a scope change and start the
+// watcher: a claude that waits until the test releases it.
+func TestOrgWatch_Once_HoldsTheLockUntilItsInFlightWatcherCallEnds(t *testing.T) {
+	setupOrgStubPATH(t)
+	marks := t.TempDir()
+	started := filepath.Join(marks, "claude-started")
+	release := filepath.Join(marks, "claude-release")
+	writeClaudeStub(t, "#!/bin/sh\n: > '"+started+"'\nwhile [ ! -f '"+release+"' ]; do sleep 0.05; done\nexit 1\n")
+	configPath := writeOrgConfigWithExtra(t, t.TempDir(), "[org.watchdog]\nwatcher_enabled = true\nwatcher_model = \"haiku\"\n")
+	worktree := t.TempDir()
+	runLedgerTestGit(t, "init", "--quiet", worktree)
+	stateDir := filepath.Join(t.TempDir(), "state")
+	if _, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
+		"--driver", "claude", "--model", "sonnet", "--cwd", worktree,
+		"--scope", "test-scope", "--state-dir", stateDir,
+	); err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	watchOnce := []string{"watch", "--all", "--once", "--config", configPath, "--state-dir", stateDir}
+	if _, stderr, err := runOrgCmdStreams(t, watchOnce...); err != nil {
+		t.Fatalf("the first watch --all --once: %v (stderr %s)", err, stderr)
+	}
+	if _, err := os.Stat(started); err == nil {
+		t.Fatal("the first watch --all --once started the watcher; want only the worktree status recorded")
+	}
+	if err := os.WriteFile(filepath.Join(worktree, "new.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	type result struct {
+		stdout, stderr string
+		err            error
+	}
+	run := func(args ...string) <-chan result {
+		ch := make(chan result, 1)
+		go func() {
+			stdout, stderr, err := runOrgCmdStreams(t, args...)
+			ch <- result{stdout, stderr, err}
+		}()
+		return ch
+	}
+	releaseClaude := func() {
+		if err := os.WriteFile(release, nil, 0o644); err != nil {
+			t.Error(err)
+		}
+	}
+	// await returns what ch got, failing the test when nothing came within
+	// 10s, and drops ch from pending, which the cleanup waits for.
+	pending := map[<-chan result]bool{}
+	await := func(ch <-chan result, what string) result {
+		t.Helper()
+		select {
+		case r := <-ch:
+			delete(pending, ch)
+			return r
+		case <-time.After(10 * time.Second):
+			t.Fatalf("%s did not end within 10s", what)
+			return result{}
+		}
+	}
+	t.Cleanup(func() {
+		releaseClaude()
+		for ch := range pending {
+			select {
+			case <-ch:
+			case <-time.After(60 * time.Second):
+			}
+		}
+	})
+	watch := run(watchOnce...)
+	pending[watch] = true
+	for deadline := time.Now().Add(10 * time.Second); ; {
+		if _, err := os.Stat(started); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the watcher's claude did not start within 10s of the scope change")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	if got := org.ProbeWatch(stateDir, time.Now(), 10).State; got != org.WatchLivenessRunning {
+		t.Errorf("ProbeWatch while the watcher call is in flight = %q; want running", got)
+	}
+	if _, _, err := runOrgCmdStreams(t, watchOnce...); !errors.Is(err, org.ErrWatchRunning) {
+		t.Errorf("a second watch --all --once while the first waits for its watcher call = %v; want ErrWatchRunning", err)
+	}
+	stop := run("watch", "--stop", "--state-dir", stateDir)
+	pending[stop] = true
+	// --stop writes its request only after its probe found the watch running
+	// or stale.
+	for deadline := time.Now().Add(10 * time.Second); ; {
+		if _, err := org.ReadWatchStopRequest(stateDir); err == nil {
+			break
+		}
+		if len(stop) > 0 {
+			t.Fatalf("--stop while the watcher call is in flight returned %+v before writing a request; want it to wait for the watch", await(stop, "--stop"))
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("--stop wrote no stop request within 10s")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if len(watch) > 0 {
+		t.Fatalf("the watch ended while its watcher call was in flight: %+v", await(watch, "the watch"))
+	}
+
+	releaseClaude()
+	watchRes := await(watch, "the watch")
+	stopRes := await(stop, "--stop")
+	if watchRes.err != nil {
+		t.Fatalf("the watch: %v (stderr %s)", watchRes.err, watchRes.stderr)
+	}
+	if want := `watchdog: watcher error for org "org-a" seat "seat-1" condition "scope_change"`; !strings.Contains(watchRes.stderr, want) {
+		t.Errorf("the watch's stderr = %q; want %q: the call ended before the watch did", watchRes.stderr, want)
+	}
+	if want := fmt.Sprintf("stopped ralph org watch --all (pid %d)\n", os.Getpid()); stopRes.err != nil || stopRes.stdout != want {
+		t.Errorf("--stop = %q, %v; want %q", stopRes.stdout, stopRes.err, want)
+	}
+	if mark, err := org.ReadWatchAlive(stateDir); err != nil || mark.State != org.WatchAliveStopped {
+		t.Errorf("mark = %+v (%v); want stopped", mark, err)
+	}
+	if got := org.ProbeWatch(stateDir, time.Now(), 10).State; got != org.WatchLivenessNotRunning {
+		t.Errorf("ProbeWatch after the watch = %q; want not_running", got)
+	}
+}

@@ -165,7 +165,33 @@ func runOrgWatchAll(cmd *cobra.Command, rt *org.Org, resolvedStateDir, stateDirS
 	watcherCtx, cancelWatchers := context.WithCancel(ctx)
 	defer cancelWatchers()
 	hooks, watcherWG := newWatchdogHooks(watcherCtx, rt, cmd.ErrOrStderr())
-	err := rt.RunWatchAll(ctx, org.WatchAllParams{
+	// Wait for any still-in-flight on-demand watcher goroutine before the
+	// watch ends (self-review M-5 fix): without this, `--once` returned as
+	// soon as cycle 1's synchronous pulse evaluation finished, killing the
+	// process before an OnSemanticTrigger goroutine it had just started
+	// could ever produce a watcher receipt or ALERT. Bounded by RunWatcher's
+	// own watcherInvokeTimeout and the ALERT send's DriverCallTimeout
+	// (SendWatchdogAlertBounded). The long-running (non-`--once`) mode ends
+	// on a signal (ctx done) or on a `--stop` request, which leaves ctx
+	// alive (self-review L1), so it cancels watcherCtx first: newWatchdogHooks
+	// threads it into the tracked goroutine's calls (self-review cycle-2 M2-2
+	// fix), and an in-flight judgment call unwinds at once instead of running
+	// out the full 60s bound after the watch has stopped.
+	//
+	// RunWatchAll calls BeforeStop while it still holds watch.lock and its
+	// mark says running (cross-review #1), so `--stop` and a second
+	// `watch --all` see this watch running until the goroutines have ended,
+	// rather than a free lock while they can still send an ALERT or write a
+	// receipt. Nothing waits after RunWatchAll returns: it calls BeforeStop
+	// on every end after it took the lock, and when it did not take it, no
+	// cycle ran, so no goroutine was started.
+	hooks.BeforeStop = func() {
+		if !once {
+			cancelWatchers()
+		}
+		watcherWG.Wait()
+	}
+	return rt.RunWatchAll(ctx, org.WatchAllParams{
 		StatusDir: resolvedStateDir,
 		Interval:  effectiveInterval,
 		Cycles:    cycles,
@@ -177,23 +203,6 @@ func runOrgWatchAll(cmd *cobra.Command, rt *org.Org, resolvedStateDir, stateDirS
 		LockWait:         orgWatchLockWaitOverride,
 		StopPollInterval: orgWatchStopPollIntervalOverride,
 	}, hooks)
-	// Wait for any still-in-flight on-demand watcher goroutine before
-	// returning (self-review M-5 fix): without this, `--once` returned as
-	// soon as cycle 1's synchronous pulse evaluation finished, killing the
-	// process before an OnSemanticTrigger goroutine it had just started
-	// could ever produce a watcher receipt or ALERT. Bounded by RunWatcher's
-	// own watcherInvokeTimeout and the ALERT send's DriverCallTimeout
-	// (SendWatchdogAlertBounded). The long-running (non-`--once`) mode ends
-	// on a signal (ctx done) or on a `--stop` request, which leaves ctx
-	// alive (self-review L1), so it cancels watcherCtx first: newWatchdogHooks
-	// threads it into the tracked goroutine's calls (self-review cycle-2 M2-2
-	// fix), and an in-flight judgment call unwinds at once instead of running
-	// out the full 60s bound after the watch has stopped.
-	if !once {
-		cancelWatchers()
-	}
-	watcherWG.Wait()
-	return err
 }
 
 // orgWatchProcess is a detached watch that --detach started: pid, exited
@@ -454,16 +463,17 @@ func orgWatchKillHint(stateDir string, mark *org.WatchAlive) string {
 //
 // The returned *sync.WaitGroup (self-review M-5 fix) tracks every
 // OnSemanticTrigger goroutine this closure starts; runOrgWatchAll waits on
-// it after RunWatchAll returns, so `--once` (Cycles: 1, RunWatchAll returns
-// as soon as cycle 1 finishes) cannot exit the process out from under an
-// in-flight on-demand judgment call before it produces a watcher receipt or
-// ALERT. When WatcherEnabled is false the returned WaitGroup has nothing
-// ever added to it, so Wait() returns immediately.
+// it in WatchHooks.BeforeStop, which RunWatchAll calls after its last cycle
+// and before it releases watch.lock (cross-review #1), so `--once`
+// (Cycles: 1) cannot exit the process out from under an in-flight on-demand
+// judgment call before it produces a watcher receipt or ALERT. When
+// WatcherEnabled is false the returned WaitGroup has nothing ever added to
+// it, so Wait() returns immediately.
 //
 // ctx is the watch's own context (runOrgWatchAll: the command's context,
-// cancelled by SIGINT or SIGTERM, and by runOrgWatchAll itself once a
-// long-running watch has stopped), not context.Background() (self-review
-// cycle-2 M2-2 fix): the tracked goroutine's RunWatcher and
+// cancelled by SIGINT or SIGTERM, and by runOrgWatchAll's BeforeStop once a
+// long-running watch has run its last cycle), not context.Background()
+// (self-review cycle-2 M2-2 fix): the tracked goroutine's RunWatcher and
 // SendWatchdogAlertBounded calls are threaded through it so a signal or a
 // stop unwinds an in-flight judgment call right away instead of running out
 // RunWatcher's own watcherInvokeTimeout (a fixed 60s bound) first -- that

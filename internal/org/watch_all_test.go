@@ -856,24 +856,31 @@ func TestRunWatchAll_AStopRequestWrittenWhileItWaitsEndsIt(t *testing.T) {
 }
 
 // AC13b: a stop request not later than the watch's start was left for an
-// earlier watch. It is removed at the start and does not stop this one; a
-// request later than the start that is already there at the start is
-// followed after the first cycle.
+// earlier watch. It is removed at the start and does not stop this one, as
+// is one that does not parse; a request later than the start that is
+// already there at the start is followed after the first cycle. The file
+// the start moves the request to (takeWatchStopRequest) is not left behind.
 func TestRunWatchAll_FollowsOnlyAStopRequestLaterThanItsStart(t *testing.T) {
 	cases := []struct {
 		name       string
 		at         time.Duration // requested_at minus the start
+		raw        string        // written as watch-stop.json instead of a request at at
 		wantCycles int
 		wantRemove bool // removed before the first cycle ends
 	}{
 		{name: "older than the start", at: -time.Minute, wantCycles: 3, wantRemove: true},
 		{name: "at the same instant as the start", at: 0, wantCycles: 3, wantRemove: true},
 		{name: "later than the start", at: time.Nanosecond, wantCycles: 1},
+		{name: "not JSON", raw: "{not json", wantCycles: 3, wantRemove: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newWatchAllFixture(t)
-			if err := WriteWatchStopRequest(f.dir, f.clk.Now().Add(tc.at)); err != nil {
+			if tc.raw != "" {
+				if err := os.WriteFile(WatchStopPathIn(f.dir), []byte(tc.raw), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := WriteWatchStopRequest(f.dir, f.clk.Now().Add(tc.at)); err != nil {
 				t.Fatal(err)
 			}
 			var cycles int
@@ -897,7 +904,97 @@ func TestRunWatchAll_FollowsOnlyAStopRequestLaterThanItsStart(t *testing.T) {
 			if _, err := ReadWatchStopRequest(f.dir); !errors.Is(err, fs.ErrNotExist) {
 				t.Errorf("stop request after the watch ended: %v; want it removed", err)
 			}
+			if names := dirEntries(t, f.dir); slices.Contains(names, watchStopTakenFileName) {
+				t.Errorf("state dir = %v; want no %s left", names, watchStopTakenFileName)
+			}
+			if got := f.stderr.String(); got != "" {
+				t.Errorf("stderr = %q; want nothing", got)
+			}
 		})
+	}
+}
+
+// setAfterStopRequestTaken sets the afterStopRequestTaken seam for the rest
+// of the test.
+func setAfterStopRequestTaken(t *testing.T, fn func()) {
+	t.Helper()
+	orig := afterStopRequestTaken
+	afterStopRequestTaken = fn
+	t.Cleanup(func() { afterStopRequestTaken = orig })
+}
+
+// Cross-review #2: the start takes an old stop request with one rename, so
+// a request a concurrent --stop writes after the take is not removed with
+// the old one. The seam writes the new request in that window: the old
+// request is gone, and the new one, later than the start, is still there
+// after the first cycle and ends the run then.
+func TestRunWatchAll_AStopRequestWrittenWhileTheStartTakesAnOldOneIsKept(t *testing.T) {
+	f := newWatchAllFixture(t)
+	if err := WriteWatchStopRequest(f.dir, f.clk.Now().Add(-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	newAt := f.clk.Now().Add(time.Second)
+	var seamCalls int
+	setAfterStopRequestTaken(t, func() {
+		seamCalls++
+		if err := WriteWatchStopRequest(f.dir, newAt); err != nil {
+			t.Error(err)
+		}
+	})
+	var cycles int
+	var atFirstCycle *WatchStopRequest
+	hooks := WatchHooks{OnCycle: func(n int, _ time.Time) {
+		cycles = n
+		if n == 1 {
+			atFirstCycle, _ = ReadWatchStopRequest(f.dir)
+		}
+	}}
+	if err := runWatchAll(t, f.o, context.Background(), f.params(3), hooks); err != nil {
+		t.Fatalf("RunWatchAll: %v", err)
+	}
+	if seamCalls != 1 {
+		t.Fatalf("the seam ran %d times; want once, after the old request was taken", seamCalls)
+	}
+	if want := newAt.Format(time.RFC3339Nano); atFirstCycle == nil || atFirstCycle.RequestedAt != want {
+		t.Errorf("stop request after the first cycle = %+v; want the one written during the take, requested_at %s", atFirstCycle, want)
+	}
+	if cycles != 1 {
+		t.Errorf("ran %d cycles; want 1 (the request written during the take is followed)", cycles)
+	}
+	if _, err := ReadWatchStopRequest(f.dir); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("stop request after the watch ended: %v; want it removed", err)
+	}
+	if names := dirEntries(t, f.dir); slices.Contains(names, watchStopTakenFileName) {
+		t.Errorf("state dir = %v; want no %s left", names, watchStopTakenFileName)
+	}
+}
+
+// A request later than the start that cannot be put back after the take
+// (here: a directory now stands at watch-stop.json) is still followed after
+// the first cycle (stopTaken), with one line on stderr for the put-back.
+func TestRunWatchAll_AStopRequestThatCannotBePutBackIsStillFollowed(t *testing.T) {
+	f := newWatchAllFixture(t)
+	if err := WriteWatchStopRequest(f.dir, f.clk.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	setAfterStopRequestTaken(t, func() {
+		if err := os.MkdirAll(filepath.Join(WatchStopPathIn(f.dir), "child"), 0o755); err != nil {
+			t.Error(err)
+		}
+	})
+	var cycles int
+	hooks := WatchHooks{OnCycle: func(n int, _ time.Time) { cycles = n }}
+	if err := runWatchAll(t, f.o, context.Background(), f.params(3), hooks); err != nil {
+		t.Fatalf("RunWatchAll: %v", err)
+	}
+	if cycles != 1 {
+		t.Errorf("ran %d cycles; want 1 (the request taken at the start is followed)", cycles)
+	}
+	if want := "watchdog: put the stop request back: "; strings.Count(f.stderr.String(), want) != 1 {
+		t.Errorf("stderr = %q; want one line %q", f.stderr.String(), want)
+	}
+	if names := dirEntries(t, f.dir); slices.Contains(names, watchStopTakenFileName) {
+		t.Errorf("state dir = %v; want no %s left", names, watchStopTakenFileName)
 	}
 }
 
@@ -1013,6 +1110,129 @@ func TestRunWatchAll_WritesTheStoppedMarkBeforeReleasingTheLock(t *testing.T) {
 		case <-time.After(10 * time.Second):
 			t.Fatalf("run %d: RunWatchAll did not return after the lock was free", run)
 		}
+	}
+}
+
+// Cross-review #1: however the run ends after its first cycle, hooks.BeforeStop
+// runs while the watch still holds watch.lock and its mark says running. While
+// BeforeStop blocks, ProbeWatch says running, a second AcquireWatchLock and a
+// second RunWatchAll are refused (the refused one calls no BeforeStop), and
+// the mark's ts is rewritten every interval. Once BeforeStop returns, the mark
+// is stopped and the lock free.
+func TestRunWatchAll_CallsBeforeStopWhileItStillHoldsTheLockAndTheMarkSaysRunning(t *testing.T) {
+	cases := []struct {
+		name string
+		// end ends a run with no Cycles after its first cycle; nil runs
+		// Cycles 1.
+		end func(f *watchAllFixture, cancel context.CancelFunc)
+	}{
+		{name: "Cycles reached"},
+		{name: "context cancelled", end: func(_ *watchAllFixture, cancel context.CancelFunc) { cancel() }},
+		{name: "stop request", end: func(f *watchAllFixture, _ context.CancelFunc) {
+			_ = WriteWatchStopRequest(f.dir, f.clk.Now().Add(time.Second))
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newWatchAllFixture(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			p := f.params(1)
+			if tc.end != nil {
+				p.Cycles = 0
+			}
+			entered := make(chan struct{})
+			release := make(chan struct{})
+			var beforeStopCalls, cycles int
+			hooks := WatchHooks{
+				OnCycle: func(n int, _ time.Time) {
+					cycles = n
+					if n == 1 && tc.end != nil {
+						tc.end(f, cancel)
+					}
+				},
+				BeforeStop: func() {
+					beforeStopCalls++
+					close(entered)
+					<-release
+				},
+			}
+			done := make(chan error, 1)
+			go func() { done <- f.o.RunWatchAll(ctx, p, hooks) }()
+			select {
+			case <-entered:
+			case err := <-done:
+				t.Fatalf("RunWatchAll returned %v without calling BeforeStop", err)
+			case <-time.After(10 * time.Second):
+				t.Fatal("RunWatchAll did not call BeforeStop within 10s")
+			}
+
+			if probe := ProbeWatch(f.dir, f.clk.Now(), f.o.Config.DeadmanMinutes); probe.State != WatchLivenessRunning {
+				t.Errorf("ProbeWatch during BeforeStop = %+v; want running", probe)
+			}
+			if _, err := AcquireWatchLock(f.dir, 20*time.Millisecond); !errors.Is(err, ErrWatchRunning) {
+				t.Errorf("AcquireWatchLock during BeforeStop = %v; want ErrWatchRunning", err)
+			}
+			err := f.o.RunWatchAll(context.Background(), f.params(1), WatchHooks{BeforeStop: func() {
+				t.Error("the refused watch called BeforeStop")
+			}})
+			if !errors.Is(err, ErrWatchRunning) {
+				t.Errorf("a second RunWatchAll during BeforeStop = %v; want ErrWatchRunning", err)
+			}
+			f.clk.Advance(time.Minute)
+			refreshed := f.clk.Now().Format(time.RFC3339)
+			for deadline := time.Now().Add(10 * time.Second); ; {
+				mark := f.mark(t)
+				if mark.State == WatchAliveRunning && mark.TS == refreshed {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("mark during BeforeStop = %+v; want running with ts rewritten to %s", mark, refreshed)
+				}
+				time.Sleep(time.Millisecond)
+			}
+
+			close(release)
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Fatalf("RunWatchAll: %v", err)
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatal("RunWatchAll did not return after BeforeStop returned")
+			}
+			if beforeStopCalls != 1 || cycles != 1 {
+				t.Errorf("BeforeStop called %d times after %d cycles; want once after 1", beforeStopCalls, cycles)
+			}
+			if mark := f.mark(t); mark.State != WatchAliveStopped || mark.StoppedAt != refreshed {
+				t.Errorf("mark after BeforeStop = %+v; want stopped with stopped_at %s", mark, refreshed)
+			}
+			if got := ProbeWatch(f.dir, f.clk.Now(), f.o.Config.DeadmanMinutes).State; got != WatchLivenessNotRunning {
+				t.Errorf("ProbeWatch after BeforeStop = %q; want not_running", got)
+			}
+		})
+	}
+}
+
+// A panic in BeforeStop still ends the run the way every end does: the mark
+// is stopped and the lock free, and the panic goes on out of RunWatchAll.
+func TestRunWatchAll_APanicInBeforeStopStillWritesTheStoppedMarkAndReleasesTheLock(t *testing.T) {
+	f := newWatchAllFixture(t)
+	hooks := WatchHooks{BeforeStop: func() { panic("before stop") }}
+	func() {
+		defer func() {
+			if r := recover(); r != "before stop" {
+				t.Errorf("recovered %v; want the panic of BeforeStop", r)
+			}
+		}()
+		_ = runWatchAll(t, f.o, context.Background(), f.params(1), hooks)
+		t.Error("RunWatchAll returned; want the panic of BeforeStop to go on")
+	}()
+	if mark := f.mark(t); mark.State != WatchAliveStopped || mark.StoppedAt == "" {
+		t.Errorf("mark after the panic = %+v; want stopped", mark)
+	}
+	if got := ProbeWatch(f.dir, f.clk.Now(), f.o.Config.DeadmanMinutes).State; got != WatchLivenessNotRunning {
+		t.Errorf("ProbeWatch after the panic = %q; want not_running", got)
 	}
 }
 
