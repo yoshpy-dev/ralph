@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -204,5 +205,73 @@ func TestValidateText_ParseThenValidate_Convenience(t *testing.T) {
 	err = ValidateText("not a valid header line at all", 0)
 	if !errors.Is(err, ErrMissingType) {
 		t.Fatalf("expected ErrMissingType to propagate through ValidateText for malformed input, got %v", err)
+	}
+}
+
+// TestHeaderValues_CountsEveryHeaderLineOfTheKey covers HeaderValues against
+// Parse's header rules: every line of the key in the header block counts, in
+// order and trimmed; a line of the key in the body (after the blank line, or
+// from the first non-header line on) does not; and text whose first line is
+// not a TYPE header has no header block at all.
+func TestHeaderValues_CountsEveryHeaderLineOfTheKey(t *testing.T) {
+	cases := []struct {
+		name string
+		text string
+		key  string
+		want []string
+	}{
+		{"no line of the key", "TYPE: QUESTION\nTASK_ID: t-1\n\nwhich plan?", "PLAN", nil},
+		{"one line", "TYPE: QUESTION\nPLAN: docs/a.md sha256:0123456789ab\n\nok?", "PLAN", []string{"docs/a.md sha256:0123456789ab"}},
+		{"two lines, in order", "TYPE: TASK\nTASK_ID: t-1\nPLAN: docs/a.md sha256:0123456789ab\nPLAN: docs/b.md sha256:ba9876543210\n\ngo",
+			"PLAN", []string{"docs/a.md sha256:0123456789ab", "docs/b.md sha256:ba9876543210"}},
+		{"values trimmed as Parse trims them", "TYPE: QUESTION\n  PLAN  :   docs/a.md sha256:0123456789ab  \r\n\nok?", "PLAN", []string{"docs/a.md sha256:0123456789ab"}},
+		{"an empty value counts", "TYPE: QUESTION\nPLAN:\n\nok?", "PLAN", []string{""}},
+		{"a line in the body after the blank line", "TYPE: QUESTION\nPLAN: docs/a.md sha256:0123456789ab\n\nPLAN: docs/b.md sha256:ba9876543210", "PLAN",
+			[]string{"docs/a.md sha256:0123456789ab"}},
+		{"a line after the first non-header line", "TYPE: QUESTION\nplease approve\nPLAN: docs/a.md sha256:0123456789ab", "PLAN", nil},
+		{"a key with a space is not a header line and ends the block", "TYPE: QUESTION\nMY PLAN: x\nPLAN: docs/a.md sha256:0123456789ab", "PLAN", nil},
+		{"no TYPE first line", "PLAN: docs/a.md sha256:0123456789ab\nTYPE: QUESTION", "PLAN", nil},
+		{"empty text", "", "PLAN", nil},
+		{"TYPE gives the first line", "TYPE: TASK\nTYPE: RESULT\n\nbody", "TYPE", []string{"TASK", "RESULT"}},
+		{"every TASK_ID line", "TYPE: TASK\nTASK_ID: t-1\nTASK_ID: t-2\n\nbody", "TASK_ID", []string{"t-1", "t-2"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := HeaderValues(tc.text, tc.key)
+			if !slices.Equal(got, tc.want) || (got == nil) != (tc.want == nil) {
+				t.Fatalf("HeaderValues(%q, %q) = %#v, want %#v", tc.text, tc.key, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestHeaderValues_LastValueIsWhatParseKeeps ties HeaderValues to Parse on
+// the same texts: for a key Parse keeps in Fields (or in TaskID), the last
+// value HeaderValues returns is the value Parse keeps, and a key Parse does
+// not see has no values.
+func TestHeaderValues_LastValueIsWhatParseKeeps(t *testing.T) {
+	texts := []string{
+		"TYPE: TASK\nTASK_ID: t-1\nPLAN: docs/a.md sha256:0123456789ab\nPLAN: docs/b.md sha256:ba9876543210\nSEAT: x\n\nPLAN: body",
+		"TYPE: QUESTION\n PLAN : a \nnot a header\nPLAN: b",
+		"TYPE: TASK\nTASK_ID:  t-1 \nTASK_ID: t-2\r\n\n",
+	}
+	for _, text := range texts {
+		m, err := Parse(text)
+		if err != nil {
+			t.Fatalf("Parse(%q): %v", text, err)
+		}
+		for _, key := range []string{"PLAN", "SEAT", "TASK_ID", "NONE"} {
+			values := HeaderValues(text, key)
+			want, ok := m.Fields[key]
+			if key == "TASK_ID" {
+				want, ok = m.TaskID, m.TaskID != ""
+			}
+			switch {
+			case !ok && len(values) != 0:
+				t.Fatalf("text %q key %s: HeaderValues = %q, but Parse kept no value", text, key, values)
+			case ok && (len(values) == 0 || values[len(values)-1] != want):
+				t.Fatalf("text %q key %s: HeaderValues = %q, want the last one to be Parse's %q", text, key, values, want)
+			}
+		}
 	}
 }

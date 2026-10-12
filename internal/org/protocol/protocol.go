@@ -129,6 +129,42 @@ func Parse(text string) (Message, error) {
 	return m, nil
 }
 
+// HeaderValues returns the value of every header line of text whose key is
+// key, in order, reading the header block the way Parse does: the first line
+// must be a "TYPE: value" header (HeaderValues returns nil where Parse
+// returns ErrMissingType), and the block ends at the first blank line or the
+// first line that is not "KEY: value". Each value is trimmed as Parse trims
+// it, and a line after the block, in the body, never counts. Parse keeps only
+// the last value of a key given twice, so a caller that must refuse a
+// repeated header (the PLAN: header of a plan approval, for one) counts the
+// values here instead. key "TYPE" gives the first line's value first, and key
+// "TASK_ID" every TASK_ID line, the lines Parse promotes to Message.TaskID.
+func HeaderValues(text, key string) []string {
+	lines := strings.Split(text, "\n")
+
+	firstKey, firstVal, ok := splitHeaderLine(lines[0])
+	if !ok || firstKey != "TYPE" {
+		return nil
+	}
+	var values []string
+	if key == firstKey {
+		values = append(values, firstVal)
+	}
+	for _, line := range lines[1:] {
+		if strings.TrimSpace(line) == "" {
+			break // the blank separator line ends the header block
+		}
+		k, v, ok := splitHeaderLine(line)
+		if !ok {
+			break // a non-header line ends the header block
+		}
+		if k == key {
+			values = append(values, v)
+		}
+	}
+	return values
+}
+
 // splitHeaderLine reports whether line is a well-formed "KEY: value"
 // header: a non-blank key (no leading/trailing whitespace once trimmed,
 // and no internal whitespace) followed by a colon.
