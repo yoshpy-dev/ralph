@@ -641,6 +641,15 @@ func TestOrgWatchDetach_AnotherWatchRuns_AChildThatDoesNotExitInTimeIsStopped(t 
 	}
 }
 
+// The tests above shorten orgWatchChildExitWait; the production value must
+// outlast the child's own wait for watch.lock, or a child refused the lock
+// is stopped while it still waits for it (survivor K8 of /test cycle 2).
+func TestOrgWatchChildExitWait_OutlastsTheChildsLockWait(t *testing.T) {
+	if orgWatchChildExitWait <= org.DefaultWatchLockWait {
+		t.Errorf("orgWatchChildExitWait = %v; want longer than the child's own lock wait %v", orgWatchChildExitWait, org.DefaultWatchLockWait)
+	}
+}
+
 // Self-review C2-1 of org-watch-gate: the stop of a child still alive at the
 // end of orgWatchChildExitWait can take the rest of its lock wait, and the
 // watch that was running may change meanwhile, so --detach judges by a
