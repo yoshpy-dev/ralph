@@ -249,9 +249,10 @@ var orgWatchLaunch = launchOrgWatch
 // How long and how often ensureOrgWatch (--detach and `ralph org start`) and
 // --stop wait; package vars so tests can shorten them.
 var (
-	// orgWatchDetachDeadline is how long ensureOrgWatch waits for a stale
-	// watch to accept work, and for a watch it launched to.
-	orgWatchDetachDeadline = 10 * time.Second
+	// orgWatchEnsureDeadline is how long ensureOrgWatch waits, for --detach
+	// and start alike, for a stale watch to accept work, and for a watch it
+	// launched to.
+	orgWatchEnsureDeadline = 10 * time.Second
 	// orgWatchReleaseDeadline is how long ensureOrgWatch waits for
 	// watch.lock to be free after it stopped a child that was not running in
 	// time.
@@ -418,14 +419,14 @@ type orgWatchEnsured struct {
 // runs. A watch that accepts work is taken as it is. A stale one may have
 // taken watch.lock and not written its first mark yet (F10), so
 // ensureOrgWatch probes again every orgWatchProbeInterval for up to
-// orgWatchDetachDeadline, taking a watch that comes to accept work and going
+// orgWatchEnsureDeadline, taking a watch that comes to accept work and going
 // on to launch when the holder has ended (not_running). A watch that holds
 // the lock and accepts no work (stale past the deadline, stopping, or a
 // --once run; F9) is e.refuse's error, and nothing is launched while it holds
 // the lock. With no watch running, launchAndAwaitOrgWatch launches one.
 func ensureOrgWatch(e orgWatchEnsure) (orgWatchEnsured, error) {
 	probe := org.ProbeWatch(e.stateDir, time.Now(), e.deadman)
-	for deadline := time.Now().Add(orgWatchDetachDeadline); probe.State == org.WatchLivenessStale; {
+	for deadline := time.Now().Add(orgWatchEnsureDeadline); probe.State == org.WatchLivenessStale; {
 		left := time.Until(deadline)
 		if left <= 0 {
 			break
@@ -443,12 +444,14 @@ func ensureOrgWatch(e orgWatchEnsure) (orgWatchEnsured, error) {
 }
 
 // launchAndAwaitOrgWatch launches e.child (orgWatchLaunch) and waits up to
-// orgWatchDetachDeadline for any watch to accept work: its own child, or the
+// orgWatchEnsureDeadline for any watch to accept work: its own child, or the
 // watch of a concurrent start or --detach whose child won watch.lock
 // (tech-debt 206); orgWatchEnsured.launched tells them apart by the pid of
 // the mark. Once the child has exited, it waits on only while a watch holds
-// the lock with a stale mark (one that has not written its first mark yet),
-// and otherwise returns an error naming watch.log at once. A child that is
+// the lock with a stale mark (one that has not written its first mark yet).
+// Then a watch that holds the lock and accepts no work (stopping, a --once
+// run, or stale at the deadline) is e.refuse's error, as in ensureOrgWatch,
+// and with the lock free the error names watch.log. A child that is
 // not running by the deadline is stopped and reaped, and watch.lock checked
 // free, before the error, so a failed launch leaves no watch behind that
 // would make the next one stale (Codex plan advisory finding 3 of
@@ -463,9 +466,10 @@ func launchAndAwaitOrgWatch(e orgWatchEnsure) (orgWatchEnsured, error) {
 		return orgWatchEnsured{}, fmt.Errorf("%s: %w", e.errPrefix, err)
 	}
 	exited, childExited := child.exited, false
-	deadline := time.Now().Add(orgWatchDetachDeadline)
+	deadline := time.Now().Add(orgWatchEnsureDeadline)
+	var probe org.WatchLiveness
 	for {
-		probe := org.ProbeWatch(e.stateDir, time.Now(), e.deadman)
+		probe = org.ProbeWatch(e.stateDir, time.Now(), e.deadman)
 		if org.WatchAcceptsWork(probe) {
 			return orgWatchEnsured{pid: probe.Mark.PID, launched: probe.Mark.PID == child.pid}, nil
 		}
@@ -480,16 +484,24 @@ func launchAndAwaitOrgWatch(e orgWatchEnsure) (orgWatchEnsured, error) {
 		}
 	}
 	if childExited {
+		// The child no longer holds watch.lock, so a watch that does took
+		// it first: one that is stopping or a --once run refused the child
+		// the lock, or one stayed stale until the deadline. It is refused as
+		// ensureOrgWatch's first probe refuses it (self-review L1 of
+		// org-watch-gate).
+		if probe.State != org.WatchLivenessNotRunning {
+			return orgWatchEnsured{}, e.refuse(probe)
+		}
 		return orgWatchEnsured{}, fmt.Errorf("%s: the watch (pid %d) exited before it was running; see %s", e.errPrefix, child.pid, req.logPath)
 	}
 
 	child.stop()
 	if _, free := waitOrgWatchReleased(e.stateDir, orgWatchReleaseDeadline); !free {
 		return orgWatchEnsured{}, fmt.Errorf("%s: the watch (pid %d) was not running within %s, so it was stopped, but %s is still held; see %s and ralph status",
-			e.errPrefix, child.pid, orgWatchDetachDeadline, org.WatchLockPathIn(e.stateDir), req.logPath)
+			e.errPrefix, child.pid, orgWatchEnsureDeadline, org.WatchLockPathIn(e.stateDir), req.logPath)
 	}
 	return orgWatchEnsured{}, fmt.Errorf("%s: the watch (pid %d) was not running within %s, so it was stopped; see %s",
-		e.errPrefix, child.pid, orgWatchDetachDeadline, req.logPath)
+		e.errPrefix, child.pid, orgWatchEnsureDeadline, req.logPath)
 }
 
 // runOrgWatchDetach is `ralph org watch --all --detach`: ensureOrgWatch with
@@ -527,14 +539,14 @@ func runOrgWatchDetach(cmd *cobra.Command, rt *org.Org, stateDir, stateDirSource
 func orgWatchDetachRefusal(stateDir string, probe org.WatchLiveness) error {
 	if probe.State == org.WatchLivenessStale {
 		return fmt.Errorf("org: watch --detach: a watch holds %s but its liveness mark is not fresh (%s), so nothing was started; stop it with ralph org watch --stop, or %s",
-			org.WatchLockPathIn(stateDir), orgWatchPIDText(probe.Mark), orgWatchKillHint(stateDir, probe.Mark))
+			org.WatchLockPathIn(stateDir), org.WatchPIDText(probe.Mark), org.WatchKillHint(stateDir, probe.Mark))
 	}
 	ends := "is stopping"
 	if probe.State == org.WatchLivenessRunning {
 		ends = "is a --once run, which ends after its cycle"
 	}
 	return fmt.Errorf("org: watch --detach: the watch that holds %s (%s) %s, so nothing was started; run ralph org watch --all --detach again once it has ended",
-		org.WatchLockPathIn(stateDir), orgWatchPIDText(probe.Mark), ends)
+		org.WatchLockPathIn(stateDir), org.WatchPIDText(probe.Mark), ends)
 }
 
 // runOrgWatchStop is `ralph org watch --stop`. It sends no signal (Codex
@@ -563,11 +575,11 @@ func runOrgWatchStop(cmd *cobra.Command, stateDir string) error {
 		if mark == nil || mark.State != org.WatchAliveStopped {
 			mark = probe.Mark
 		}
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "stopped ralph org watch --all (%s)\n", orgWatchPIDText(mark))
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "stopped ralph org watch --all (%s)\n", org.WatchPIDText(mark))
 		return nil
 	}
 	return fmt.Errorf("org: watch --stop: the watch did not stop within %s; the stop request stays in %s, so it stops when its current cycle, or its wait for an in-flight on-demand watcher call, ends (a cycle takes longer while herdr calls time out); to stop it now, %s",
-		orgWatchStopDeadline, org.WatchStopPathIn(stateDir), orgWatchKillHint(stateDir, final.Mark))
+		orgWatchStopDeadline, org.WatchStopPathIn(stateDir), org.WatchKillHint(stateDir, final.Mark))
 }
 
 // waitOrgWatchReleased looks at watch.lock every orgWatchProbeInterval
@@ -586,26 +598,6 @@ func waitOrgWatchReleased(stateDir string, within time.Duration) (org.WatchLiven
 		}
 		time.Sleep(min(orgWatchProbeInterval, left))
 	}
-}
-
-// orgWatchPIDText names the pid of a liveness mark in a message.
-func orgWatchPIDText(mark *org.WatchAlive) string {
-	if mark == nil || mark.PID <= 0 {
-		return "pid unknown"
-	}
-	return fmt.Sprintf("pid %d", mark.PID)
-}
-
-// orgWatchKillHint tells the human how to end a watch that holds
-// watch.lock, by the pid of its liveness mark. That pid comes from the
-// mark, which can be older than the watch holding the lock, so the hint
-// says to check it first.
-func orgWatchKillHint(stateDir string, mark *org.WatchAlive) string {
-	alivePath := org.WatchAlivePathIn(stateDir)
-	if mark == nil || mark.PID <= 0 {
-		return fmt.Sprintf("find the process that holds %s (%s names no pid) and kill it", org.WatchLockPathIn(stateDir), alivePath)
-	}
-	return fmt.Sprintf("kill %d (the pid in %s; check that it is still a ralph org watch first)", mark.PID, alivePath)
 }
 
 // newWatchdogHooks builds the org.WatchHooks `ralph org watch --all` wires

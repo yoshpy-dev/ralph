@@ -49,21 +49,20 @@ func (e *WatchGateError) Error() string {
 		"for a spawn or a TASK send, start one with " + detach + ")"
 	switch e.Liveness.State {
 	case WatchLivenessNotRunning:
+		// An existing org, such as one whose leader is a promoted session,
+		// gets its watch from --detach; ralph org start would add a leader
+		// seat to it (self-review L2 of org-watch-gate).
 		return fmt.Sprintf("org: no ralph org watch --all is running on the org state dir %s, so no new work starts; "+
-			"start one with %s, or start the org with ralph org start, which starts one", e.StateDir, detach)
+			"start one with %s, or, for a new org, start it with ralph org start, which starts one", e.StateDir, detach)
 	case WatchLivenessStale:
-		kill := fmt.Sprintf("find the process that holds %s and kill it", WatchLockPathIn(e.StateDir))
-		if mark != nil && mark.PID > 0 {
-			kill = fmt.Sprintf("check that pid %d is a ralph org watch and kill it", mark.PID)
-		}
 		return fmt.Sprintf("org: the ralph org watch --all that holds the lock of the org state dir %s has not refreshed its liveness mark (%s), "+
-			"so no new work starts; stop it with %s, or %s", e.StateDir, watchGatePIDText(mark), watchGateCommand("--stop", e.HintStateDir), kill)
+			"so no new work starts; stop it with %s, or %s", e.StateDir, WatchPIDText(mark), watchGateCommand("--stop", e.HintStateDir), WatchKillHint(e.StateDir, mark))
 	case WatchLivenessStopping:
 		return fmt.Sprintf("org: the ralph org watch --all on the org state dir %s (%s) is stopping and accepts no new work; %s",
-			e.StateDir, watchGatePIDText(mark), later)
+			e.StateDir, WatchPIDText(mark), later)
 	case WatchLivenessRunning:
 		return fmt.Sprintf("org: the ralph org watch --all on the org state dir %s (%s) is a --once run, which ends after its cycle and accepts no new work; %s",
-			e.StateDir, watchGatePIDText(mark), later)
+			e.StateDir, WatchPIDText(mark), later)
 	}
 	return fmt.Sprintf("org: the ralph org watch --all on the org state dir %s is %q and accepts no new work", e.StateDir, e.Liveness.State)
 }
@@ -79,12 +78,26 @@ func watchGateCommand(args, stateDir string) string {
 	return command
 }
 
-// watchGatePIDText names the pid of a liveness mark in a WatchGateError.
-func watchGatePIDText(mark *WatchAlive) string {
+// WatchPIDText names the pid of a liveness mark in a message: a
+// WatchGateError, and the --detach and --stop messages of the CLI.
+func WatchPIDText(mark *WatchAlive) string {
 	if mark == nil || mark.PID <= 0 {
 		return "pid unknown"
 	}
 	return fmt.Sprintf("pid %d", mark.PID)
+}
+
+// WatchKillHint tells the human how to end the watch that holds watch.lock
+// of stateDir, by the pid of its liveness mark mark, in a WatchGateError and
+// in the --detach and --stop messages of the CLI. That pid comes from the
+// mark, which can be older than the watch holding the lock, so the hint says
+// to check it first.
+func WatchKillHint(stateDir string, mark *WatchAlive) string {
+	alivePath := WatchAlivePathIn(stateDir)
+	if mark == nil || mark.PID <= 0 {
+		return fmt.Sprintf("find the process that holds %s (%s names no pid) and kill it", WatchLockPathIn(stateDir), alivePath)
+	}
+	return fmt.Sprintf("kill %d (the pid in %s; check that it is still a ralph org watch first)", mark.PID, alivePath)
 }
 
 // WatchAcceptsWork reports whether the watch ProbeWatch found accepts new

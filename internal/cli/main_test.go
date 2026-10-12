@@ -66,7 +66,7 @@ func TestMain(m *testing.M) {
 	}
 	orgWatchLockWaitOverride = 50 * time.Millisecond
 	orgWatchStopPollIntervalOverride = 5 * time.Millisecond
-	orgWatchGateOverride = func(string, int) func() error { return func() error { return nil } }
+	orgWatchGateOverride = func() error { return nil }
 	orgWatchGateSettleOverride = 50 * time.Millisecond
 	os.Exit(m.Run())
 }

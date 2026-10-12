@@ -217,6 +217,19 @@ type SendResult struct {
 	PaneID string
 }
 
+// taskNotSentError is Send's error for a TASK the watch gate refused: "org:
+// send: TASK not sent: " and the gate's error, less the "org: " that a
+// *WatchGateError starts with, so the message says "org:" once (self-review
+// L3 of org-watch-gate). It unwraps to the gate's error, so
+// errors.Is(err, ErrNoRunningWatch) holds for it.
+type taskNotSentError struct{ gate error }
+
+func (e taskNotSentError) Error() string {
+	return "org: send: TASK not sent: " + strings.TrimPrefix(e.gate.Error(), "org: ")
+}
+
+func (e taskNotSentError) Unwrap() error { return e.gate }
+
 // Send validates Text against the typed message protocol (unless Raw),
 // waits for the target seat to go idle, then types Text into its pane,
 // waits briefly, and presses Enter exactly once. It then tries to confirm
@@ -236,8 +249,10 @@ type SendResult struct {
 // TYPE is TASK, DryRun included, and a refusal also appends no event and
 // makes no driver call. A Raw message is not validated, but its TYPE is
 // read with protocol.Parse the same way: one whose first line reads as
-// `TYPE: TASK` (spaces trimmed, case kept) is a TASK, and one whose first
-// line is no TYPE header is not (plan 2026-10-12-org-watch-gate, F4 and F5).
+// `TYPE: TASK` (Parse trims the spaces around the key and the value and
+// keeps their case) is a TASK, and one whose first line is no TYPE header is
+// not (plan 2026-10-12-org-watch-gate, F4 and F5). The refusal is a
+// taskNotSentError.
 //
 // No-resend design decision: Send presses Enter at most once, ever, per
 // call -- see confirmSubmitted's doc comment for why a second Enter is
@@ -284,9 +299,9 @@ func (o *Org) Send(p SendParams) SendResult {
 			return SendResult{Err: fmt.Errorf("org: send: message rejected by protocol validation (use --raw to bypass): %w", err)}
 		}
 	}
-	if parseErr == nil && strings.TrimSpace(msg.Type) == protocol.TypeTask {
+	if parseErr == nil && msg.Type == protocol.TypeTask {
 		if err := o.checkWatchGate(); err != nil {
-			return SendResult{Err: fmt.Errorf("org: send: TASK not sent: %w", err)}
+			return SendResult{Err: taskNotSentError{gate: err}}
 		}
 	}
 

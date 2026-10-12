@@ -201,8 +201,11 @@ func TestOrgSend_WatchGate_RefusesATaskOnly(t *testing.T) {
 				}
 				return
 			}
-			if !errors.Is(result.Err, ErrNoRunningWatch) || !strings.Contains(result.Err.Error(), "org: send: TASK not sent: ") {
+			if !errors.Is(result.Err, ErrNoRunningWatch) || !strings.HasPrefix(result.Err.Error(), "org: send: TASK not sent: no ralph org watch --all is running") {
 				t.Fatalf("send = %v; want the gate's refusal of the TASK", result.Err)
+			}
+			if n := strings.Count(result.Err.Error(), "org:"); n != 1 {
+				t.Errorf("send = %q says \"org:\" %d times; want once", result.Err, n)
 			}
 			if result.Progress != SendProgressNothingSent || result.PaneID != "" {
 				t.Errorf("send = %+v; want nothing sent", result)

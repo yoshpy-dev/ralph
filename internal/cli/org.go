@@ -265,7 +265,7 @@ var orgInboxPollIntervalOverride time.Duration
 // rule.
 func wireOrgWatchGate(cmd *cobra.Command, rt *org.Org, resolvedStateDir string) {
 	if orgWatchGateOverride != nil {
-		rt.WatchGate = orgWatchGateOverride(resolvedStateDir, rt.Config.DeadmanMinutes)
+		rt.WatchGate = orgWatchGateOverride
 		return
 	}
 	settle := orgWatchGateSettleOverride
@@ -317,14 +317,13 @@ func wireOrgStartWatchGate(cmd *cobra.Command, rt *org.Org, resolvedStateDir, st
 	}
 }
 
-// orgWatchGateOverride, when not nil, builds the Org.WatchGate that
-// wireOrgWatchGate sets, from the resolved state dir and rt.Config's
-// deadman_minutes, in place of org.NewWatchGate, and makes
-// wireOrgStartWatchGate set only that gate. nil in production. TestMain sets
-// one that always passes, so the tests of spawn, start, and send need no
-// watch and start launches none; a test of the gate itself sets it back to
-// nil.
-var orgWatchGateOverride func(stateDir string, deadmanMinutes int) func() error
+// orgWatchGateOverride, when not nil, is the Org.WatchGate that
+// wireOrgWatchGate sets in place of the one org.NewWatchGate builds, and
+// makes wireOrgStartWatchGate set only that gate. nil in production.
+// TestMain sets one that always passes, so the tests of spawn, start, and
+// send need no watch and start launches none; a test of the gate itself sets
+// it back to nil.
+var orgWatchGateOverride func() error
 
 // orgWatchGateSettleOverride is the settle of the gate wireOrgWatchGate
 // builds: how long it waits for a stale watch to accept work. Zero in

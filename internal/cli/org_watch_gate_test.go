@@ -77,13 +77,14 @@ func gateRefusals() []gateRefusal {
 			setup: func(t *testing.T, stateDir string) {
 				holdWatchLock(t, stateDir, runningMark(4302, time.Now().Add(-time.Hour)))
 			},
-			want: []string{"has not refreshed its liveness mark (pid 4302)", "stop it with ralph org watch --stop", "check that pid 4302 is a ralph org watch and kill it"},
+			want: []string{"has not refreshed its liveness mark (pid 4302)", "stop it with ralph org watch --stop",
+				"kill 4302 (the pid in " + org.WatchAlivePathIn(stateDirPlaceholder) + "; check that it is still a ralph org watch first)"},
 		},
 		{
 			name:  "stale with no mark",
 			setup: func(t *testing.T, stateDir string) { holdWatchLock(t, stateDir, nil) },
 			want: []string{"has not refreshed its liveness mark (pid unknown)", "stop it with ralph org watch --stop",
-				"find the process that holds " + org.WatchLockPathIn(stateDirPlaceholder) + " and kill it"},
+				"find the process that holds " + org.WatchLockPathIn(stateDirPlaceholder) + " (" + org.WatchAlivePathIn(stateDirPlaceholder) + " names no pid) and kill it"},
 		},
 		{
 			name:  "stopping",
@@ -321,7 +322,10 @@ func TestOrgSend_WatchGate_RefusesOnlyATask(t *testing.T) {
 				}
 				return
 			}
-			checkGateRefusal(t, err, stateDir, "org: send: TASK not sent: ", "start one with ralph org watch --all --detach")
+			checkGateRefusal(t, err, stateDir, "org: send: TASK not sent: no ralph org watch --all is running", "start one with ralph org watch --all --detach")
+			if strings.Contains(err.Error(), "TASK not sent: org:") {
+				t.Errorf("error %q repeats \"org:\" after \"TASK not sent:\"; want the gate's refusal without its own prefix", err)
+			}
 			if stdout != "" {
 				t.Errorf("stdout = %q; want nothing", stdout)
 			}
@@ -360,7 +364,7 @@ func TestOrgSend_WatchGate_ATaskPassesARunningWatch(t *testing.T) {
 // every 10ms.
 func shortenOrgWatchDeadline(t *testing.T) {
 	t.Helper()
-	setOrgWatchDuration(t, &orgWatchDetachDeadline, 300*time.Millisecond)
+	setOrgWatchDuration(t, &orgWatchEnsureDeadline, 300*time.Millisecond)
 	setOrgWatchDuration(t, &orgWatchProbeInterval, 10*time.Millisecond)
 }
 

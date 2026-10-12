@@ -318,7 +318,7 @@ func TestOrgWatchDetach_Stale_StartsNothingAndSaysHowToStopIt(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			refuseOrgWatchLaunch(t)
-			setOrgWatchDuration(t, &orgWatchDetachDeadline, 300*time.Millisecond)
+			setOrgWatchDuration(t, &orgWatchEnsureDeadline, 300*time.Millisecond)
 			setOrgWatchDuration(t, &orgWatchProbeInterval, 10*time.Millisecond)
 			stateDir := filepath.Join(t.TempDir(), "state")
 			if err := os.MkdirAll(stateDir, 0o755); err != nil {
@@ -489,6 +489,55 @@ func TestOrgWatchDetach_AChildThatExitsBeforeTheOtherWatchsFirstMark_IsAlreadyRu
 	}
 }
 
+// This --detach's child exits, refused watch.lock by a watch that took it
+// first and accepts no work: one that is stopping, a --once run, or stale
+// until the deadline (shortened). --detach exits 1 with its refusal for that
+// watch, as when the first probe finds it, not with the child's exit
+// (self-review L1 of org-watch-gate).
+func TestOrgWatchDetach_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_IsRefused(t *testing.T) {
+	cases := []struct {
+		name string
+		mark func() *org.WatchAlive
+		want string
+	}{
+		{name: "stopping", mark: func() *org.WatchAlive { return stoppingWatchMark(4305, time.Now()) },
+			want: "(pid 4305) is stopping, so nothing was started; run ralph org watch --all --detach again once it has ended"},
+		{name: "running --once", mark: func() *org.WatchAlive { return onceWatchMark(4306, time.Now()) },
+			want: "(pid 4306) is a --once run, which ends after its cycle, so nothing was started"},
+		{name: "stale until the deadline", mark: func() *org.WatchAlive { return nil },
+			want: "but its liveness mark is not fresh (pid unknown), so nothing was started; stop it with ralph org watch --stop"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			setOrgWatchDuration(t, &orgWatchEnsureDeadline, 300*time.Millisecond)
+			setOrgWatchDuration(t, &orgWatchProbeInterval, 10*time.Millisecond)
+			stateDir := t.TempDir()
+			launches := 0
+			setOrgWatchLaunch(t, func(orgWatchLaunchRequest) (*orgWatchProcess, error) {
+				launches++
+				holdWatchLock(t, stateDir, tc.mark())
+				exited := make(chan struct{})
+				close(exited)
+				return &orgWatchProcess{pid: 4242, exited: exited, stop: func() { t.Error("the child that exited was stopped") }}, nil
+			})
+
+			stdout, _, err := runOrgCmdStreams(t, "watch", "--all", "--detach", "--state-dir", stateDir)
+			if err == nil {
+				t.Fatalf("--detach with a %s watch that holds the lock succeeded (stdout %q); want exit 1", tc.name, stdout)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error %q does not contain %q", err, tc.want)
+			}
+			if strings.Contains(err.Error(), "exited before it was running") {
+				t.Errorf("error = %q; want the refusal of the watch that holds the lock, not the child's exit", err)
+			}
+			if launches != 1 {
+				t.Errorf("launches = %d; want 1", launches)
+			}
+		})
+	}
+}
+
 // AC12b: a child that takes watch.lock but never writes a running mark is
 // stopped by its handle when the deadline passes, and --detach exits 1,
 // naming the log, only once watch.lock is free. When the lock stays held
@@ -505,7 +554,7 @@ func TestOrgWatchDetach_NotRunningInTime_StopsTheChildAndWaitsForTheLock(t *test
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			setOrgWatchDuration(t, &orgWatchDetachDeadline, 300*time.Millisecond)
+			setOrgWatchDuration(t, &orgWatchEnsureDeadline, 300*time.Millisecond)
 			setOrgWatchDuration(t, &orgWatchReleaseDeadline, 100*time.Millisecond)
 			setOrgWatchDuration(t, &orgWatchProbeInterval, 10*time.Millisecond)
 			stateDir := filepath.Join(t.TempDir(), "state")
@@ -563,7 +612,7 @@ func TestOrgWatchDetach_AStoppingOrOnceWatch_StartsNothing(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			refuseOrgWatchLaunch(t)
-			setOrgWatchDuration(t, &orgWatchDetachDeadline, 3*time.Second)
+			setOrgWatchDuration(t, &orgWatchEnsureDeadline, 3*time.Second)
 			stateDir := t.TempDir()
 			holdWatchLock(t, stateDir, tc.mark)
 

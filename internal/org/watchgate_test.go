@@ -107,21 +107,21 @@ func TestNewWatchGate_PassesOnlyAWatchThatAcceptsWork(t *testing.T) {
 				holdWatchWithMark(t, dir, runningMark(4242, time.Now().Add(-time.Hour)))
 			},
 			state: WatchLivenessStale,
-			want:  []string{"has not refreshed its liveness mark (pid 4242)", "ralph org watch --stop", "check that pid 4242 is a ralph org watch and kill it"},
+			want:  []string{"has not refreshed its liveness mark (pid 4242)", "ralph org watch --stop", "kill 4242 (the pid in ", WatchAliveFileName + "; check that it is still a ralph org watch first)"},
 			waits: true,
 		},
 		{
 			name:  "stale with no mark",
 			setup: func(t *testing.T, dir string) { mustAcquireWatchLock(t, dir) },
 			state: WatchLivenessStale,
-			want:  []string{"(pid unknown)", "ralph org watch --stop", "find the process that holds ", WatchLockFileName + " and kill it"},
+			want:  []string{"(pid unknown)", "ralph org watch --stop", "find the process that holds ", WatchLockFileName + " (", WatchAliveFileName + " names no pid) and kill it"},
 			waits: true,
 		},
 		{
 			name:  "not running",
 			setup: func(t *testing.T, dir string) { mustWriteWatchAlive(t, dir, runningMark(4242, time.Now())) },
 			state: WatchLivenessNotRunning,
-			want:  []string{"no ralph org watch --all is running", "ralph org watch --all --detach", "ralph org start"},
+			want:  []string{"no ralph org watch --all is running", "ralph org watch --all --detach", "or, for a new org, start it with ralph org start, which starts one"},
 		},
 	}
 	for _, tc := range cases {

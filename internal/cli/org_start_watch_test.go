@@ -282,7 +282,63 @@ func TestOrgStart_AChildThatExitsWhileAnotherWatchRuns_StartGoesOn(t *testing.T)
 	}
 }
 
-// AC13 and AC14: a watch that holds watch.lock and is stopping, or is a
+// The launched child exits, refused watch.lock by a watch that took it
+// first and accepts no work: one that is stopping, a --once run, or stale
+// until the deadline (shortened). Both forms of start are refused with the
+// gate's refusal for that watch, as when the first probe finds it, not with
+// the child's exit (self-review L1 of org-watch-gate), and launch once,
+// print no started line, and record or make nothing.
+func TestOrgStart_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_IsRefusedAsTheGateRefuses(t *testing.T) {
+	watches := []struct {
+		name string
+		mark func() *org.WatchAlive
+		want []string
+	}{
+		{name: "stopping", mark: func() *org.WatchAlive { return stoppingWatchMark(4408, time.Now()) },
+			want: []string{"(pid 4408) is stopping", "run this again once it has ended"}},
+		{name: "running --once", mark: func() *org.WatchAlive { return onceWatchMark(4409, time.Now()) },
+			want: []string{"(pid 4409) is a --once run", "run this again once it has ended"}},
+		{name: "stale until the deadline", mark: func() *org.WatchAlive { return nil },
+			want: []string{"has not refreshed its liveness mark (pid unknown)", "stop it with ralph org watch --stop"}},
+	}
+	for _, form := range orgStartForms() {
+		for _, w := range watches {
+			t.Run(form.name+" "+w.name, func(t *testing.T) {
+				useRealOrgWatchGate(t)
+				shortenOrgWatchDeadline(t)
+				herdrLog, agmsgLog := setupOrgStubPATH(t)
+				stateDir, run := form.setup(t)
+				launches := 0
+				setOrgWatchLaunch(t, func(orgWatchLaunchRequest) (*orgWatchProcess, error) {
+					launches++
+					holdWatchLock(t, stateDir, w.mark())
+					exited := make(chan struct{})
+					close(exited)
+					return &orgWatchProcess{pid: 4410, exited: exited, stop: func() { t.Error("the child that exited was stopped") }}, nil
+				})
+
+				stdout, stderr, err := run()
+				checkGateRefusal(t, err, stateDir, w.want...)
+				if strings.Contains(err.Error(), "exited before it was running") {
+					t.Errorf("error = %q; want the refusal of the watch that holds the lock, not the child's exit", err)
+				}
+				if launches != 1 {
+					t.Errorf("launches = %d; want 1", launches)
+				}
+				if want := "rejected: " + err.Error() + "\n"; stdout != want {
+					t.Errorf("stdout = %q; want only %q", stdout, want)
+				}
+				if strings.Contains(stderr, "started the cross-org watch") {
+					t.Errorf("stderr = %q; want no started line for a child that exited", stderr)
+				}
+				checkNothingStarted(t, stateDir, herdrLog, agmsgLog)
+				form.noWorktree(t)
+			})
+		}
+	}
+}
+
+// AC13 and AC14:a watch that holds watch.lock and is stopping, or is a
 // --once run, accepts no work and ends soon: both forms of start are
 // refused at once with the gate's refusal, launch nothing, and record or
 // make nothing.
@@ -300,7 +356,7 @@ func TestOrgStart_AStoppingOrOnceWatch_IsRefusedAndNothingLaunched(t *testing.T)
 			t.Run(form.name+" "+w.name, func(t *testing.T) {
 				useRealOrgWatchGate(t)
 				refuseOrgWatchLaunch(t)
-				setOrgWatchDuration(t, &orgWatchDetachDeadline, 3*time.Second)
+				setOrgWatchDuration(t, &orgWatchEnsureDeadline, 3*time.Second)
 				herdrLog, agmsgLog := setupOrgStubPATH(t)
 				stateDir, run := form.setup(t)
 				if err := os.MkdirAll(stateDir, 0o755); err != nil {
