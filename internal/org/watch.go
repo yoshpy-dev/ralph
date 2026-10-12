@@ -476,7 +476,7 @@ type WatchAllParams struct {
 	// os.Stderr.
 	Stderr io.Writer
 	// LockWait is how long to wait for watch.lock (AcquireWatchLock); zero
-	// means defaultWatchLockWait.
+	// means DefaultWatchLockWait.
 	LockWait time.Duration
 	// StopPollInterval is the tick of the wait between cycles; zero means
 	// defaultWatchStopPollInterval. Tests shorten it.

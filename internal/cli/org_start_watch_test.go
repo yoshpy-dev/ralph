@@ -250,6 +250,27 @@ func TestOrgStart_ALaunchedWatchThatNeverRuns_IsStoppedAndTheStartRefused(t *tes
 	}
 }
 
+// A launch that fails (mutation survivor E8 of /test cycle 1 of
+// org-watch-gate) refuses `ralph org start <task>` with start's prefix,
+// which says no leader was started, before the launch's error, and the start
+// records and calls nothing.
+func TestOrgStart_ALaunchThatFails_IsRefusedWithThePrefixAndNothingStarted(t *testing.T) {
+	useRealOrgWatchGate(t)
+	failOrgWatchLaunch(t)
+	herdrLog, agmsgLog := setupOrgStubPATH(t)
+	stateDir := t.TempDir()
+	stdout, _, err := runOrgCmdStreams(t, "start", "--org-id", "org-a", "--driver", "claude", "--model", "sonnet",
+		"--cwd", t.TempDir(), "--scope", "org-wide", "--state-dir", stateDir, "do the task")
+	want := "org: start: the cross-org watch did not start, so no leader was started: start /x/ralph: boom"
+	if err == nil || err.Error() != want {
+		t.Fatalf("start with a launch that fails = %v; want %q", err, want)
+	}
+	if stdout != "rejected: "+want+"\n" {
+		t.Errorf("stdout = %q; want only the rejected line", stdout)
+	}
+	checkNothingStarted(t, stateDir, herdrLog, agmsgLog)
+}
+
 // AC5 (tech-debt 206): the launched child exits first, refused the lock by
 // the watch of a concurrent start or --detach, whose mark says running.
 // start takes that watch, says it launched nothing, and spawns the leader.
@@ -279,6 +300,78 @@ func TestOrgStart_AChildThatExitsWhileAnotherWatchRuns_StartGoesOn(t *testing.T)
 	}
 	if !strings.HasPrefix(stdout, `spawned seat "leader" (org_id=org-a `) {
 		t.Errorf("stdout = %q; want the leader spawned", stdout)
+	}
+}
+
+// The finding of /test cycle 1 for start (see
+// TestOrgWatchDetach_AnotherWatchRuns_ReturnsOnlyOnceItsChildHasExited):
+// another watch runs, and the child this start launched, refused the lock,
+// exits 500ms after its launch. Both forms of start go on only once the
+// child has exited (when it exits, nothing has called herdr, and --plan has
+// made no feature worktree), launch once, print no started line, and spawn
+// the leader.
+func TestOrgStart_AnotherWatchRuns_GoesOnOnlyOnceItsChildHasExited(t *testing.T) {
+	for _, form := range orgStartForms() {
+		t.Run(form.name, func(t *testing.T) {
+			useRealOrgWatchGate(t)
+			setOrgWatchDuration(t, &orgWatchChildExitWait, 3*time.Second)
+			setOrgWatchDuration(t, &orgWatchProbeInterval, 10*time.Millisecond)
+			herdrLog, _ := setupOrgStubPATH(t)
+			stateDir, run := form.setup(t)
+			// The --plan form runs in its repo (setup chdirs there) and makes
+			// the feature worktree before it spawns the leader; no such path
+			// exists for <task>.
+			wd, err := os.Getwd()
+			if err != nil {
+				t.Fatal(err)
+			}
+			worktree := filepath.Join(wd, ".claude", "worktrees", "org-a")
+			launches := 0
+			var exited chan struct{}
+			// wentOnFirst is set before exited closes when the start had
+			// already called herdr or made the worktree then.
+			var wentOnFirst bool
+			setOrgWatchLaunch(t, func(orgWatchLaunchRequest) (*orgWatchProcess, error) {
+				launches++
+				holdWatchLock(t, stateDir, runningMark(4411, time.Now()))
+				ch := make(chan struct{})
+				go func() {
+					time.Sleep(500 * time.Millisecond)
+					_, herdrErr := os.Stat(herdrLog)
+					_, worktreeErr := os.Stat(worktree)
+					wentOnFirst = herdrErr == nil || worktreeErr == nil
+					close(ch)
+				}()
+				exited = ch
+				return &orgWatchProcess{pid: 4412, exited: ch, stop: func() { t.Error("the child that exits on its own was stopped") }}, nil
+			})
+
+			stdout, stderr, err := run()
+			if exited == nil {
+				t.Fatalf("start launched no watch: %v (stdout: %s stderr: %s)", err, stdout, stderr)
+			}
+			select {
+			case <-exited:
+			default:
+				t.Error("start returned while its child was still alive; want it to go on once the child has exited (500ms)")
+			}
+			<-exited
+			if wentOnFirst {
+				t.Error("start called herdr or made the worktree before the child exited; want it to go on only once the child has")
+			}
+			if err != nil {
+				t.Fatalf("start while another watch runs: %v (stdout: %s stderr: %s)", err, stdout, stderr)
+			}
+			if launches != 1 {
+				t.Errorf("launches = %d; want 1", launches)
+			}
+			if strings.Contains(stderr, "started the cross-org watch") {
+				t.Errorf("stderr = %q; want no started line for a child that exited", stderr)
+			}
+			if !strings.HasPrefix(stdout, `spawned seat "leader" `) {
+				t.Errorf("stdout = %q; want the leader spawned", stdout)
+			}
+		})
 	}
 }
 
@@ -413,6 +506,65 @@ func TestOrgStart_WaitsForAWatchThatWritesItsFirstMarkLate(t *testing.T) {
 				t.Errorf("start returned after %v; want it to wait for the mark written after 200ms", elapsed)
 			}
 		})
+	}
+}
+
+// F10 for start (mutation survivor E4 of /test cycle 1 of org-watch-gate):
+// the holder of watch.lock is stale (a mark an hour old) and releases the
+// lock 200ms later, during ensureOrgWatch's wait. Both forms of start then
+// launch the watch once, say so on stderr, and spawn the leader, rather than
+// refusing a watch that has ended.
+func TestOrgStart_AStaleHolderThatEndsDuringTheWait_LaunchesTheWatch(t *testing.T) {
+	for _, form := range orgStartForms() {
+		t.Run(form.name, func(t *testing.T) {
+			useRealOrgWatchGate(t)
+			setOrgWatchDuration(t, &orgWatchEnsureDeadline, 3*time.Second)
+			setOrgWatchDuration(t, &orgWatchProbeInterval, 10*time.Millisecond)
+			setupOrgStubPATH(t)
+			stateDir, run := form.setup(t)
+			if err := os.MkdirAll(stateDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			release := holdWatchLock(t, stateDir, runningMark(4501, time.Now().Add(-time.Hour)))
+			go func() { time.Sleep(200 * time.Millisecond); release() }()
+			var got []orgWatchLaunchRequest
+			setOrgWatchLaunch(t, lateMarkLauncher(t, stateDir, 4502, 50*time.Millisecond, &got))
+
+			stdout, stderr, err := run()
+			if err != nil {
+				t.Fatalf("start: %v (stdout %q stderr %q)", err, stdout, stderr)
+			}
+			if len(got) != 1 {
+				t.Fatalf("launches = %d; want 1", len(got))
+			}
+			if !strings.Contains(stderr, startedWatchLine(stateDir, 4502)) {
+				t.Errorf("stderr = %q; want the started line", stderr)
+			}
+			if !strings.HasPrefix(stdout, `spawned seat "leader" `) {
+				t.Errorf("stdout = %q; want the leader spawned", stdout)
+			}
+		})
+	}
+}
+
+// AC7 for `ralph org start <task>` (mutation survivor E7d of /test cycle 1):
+// ensureOrgWatch judges a mark that carries no deadman_minutes by the
+// caller's config, as the gate does. With deadman_minutes 30, a
+// 20-minute-old mark is running, so start launches nothing and spawns the
+// leader.
+func TestOrgStart_AMarkWithoutDeadmanMinutes_IsJudgedByTheCallersConfig(t *testing.T) {
+	useRealOrgWatchGate(t)
+	refuseOrgWatchLaunch(t)
+	shortenOrgWatchDeadline(t)
+	setupOrgStubPATH(t)
+	stateDir, configPath := ledgerWithAMarkWithoutDeadman(t, 4520, 30, 20*time.Minute)
+	stdout, stderr, err := runOrgCmdStreams(t, "start", "--org-id", "org-a", "--driver", "claude", "--model", "sonnet",
+		"--cwd", t.TempDir(), "--scope", "org-wide", "--state-dir", stateDir, "--config", configPath, "do the task")
+	if err != nil {
+		t.Fatalf("start: %v (stdout %q stderr %q)", err, stdout, stderr)
+	}
+	if !strings.HasPrefix(stdout, `spawned seat "leader" `) {
+		t.Errorf("stdout = %q; want the leader spawned", stdout)
 	}
 }
 

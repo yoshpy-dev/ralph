@@ -242,6 +242,26 @@ func TestOrgSpawn_WatchGate_AStaleWatchThatTurnsRunningWithinTheSettlePasses(t *
 	}
 }
 
+// F10 in production (mutation survivor S4 of /test cycle 1): with no
+// orgWatchGateSettleOverride, the gate waits org.DefaultWatchGateSettle, 2s,
+// for a stale watch before it refuses it.
+func TestOrgSpawn_WatchGate_TheProductionSettleIsTwoSeconds(t *testing.T) {
+	useRealOrgWatchGate(t)
+	setOrgWatchDuration(t, &orgWatchGateSettleOverride, 0)
+	herdrLog, agmsgLog := setupOrgStubPATH(t)
+	stateDir := t.TempDir()
+	holdWatchLock(t, stateDir, runningMark(4510, time.Now().Add(-time.Hour)))
+
+	start := time.Now()
+	_, _, err := runOrgCmdStreams(t, gateSpawnArgs(t, stateDir, "--dry-run")...)
+	elapsed := time.Since(start)
+	checkGateRefusal(t, err, stateDir, "has not refreshed its liveness mark (pid 4510)")
+	if elapsed < 1500*time.Millisecond || elapsed >= 6*time.Second {
+		t.Errorf("spawn refused the stale watch after %v; want about the 2s settle", elapsed)
+	}
+	checkNothingStarted(t, stateDir, herdrLog, agmsgLog)
+}
+
 // AC7 at the gate: a mark that carries the watch's own deadman_minutes is
 // judged by it, and a mark without one by the caller's config. Each mark is
 // 20 minutes old and holds watch.lock.

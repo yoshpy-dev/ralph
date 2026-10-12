@@ -65,10 +65,12 @@ const (
 	WatchLivenessNotRunning = "not_running"
 )
 
-// defaultWatchLockWait is how long AcquireWatchLock waits for watch.lock
+// DefaultWatchLockWait is how long AcquireWatchLock waits for watch.lock
 // when its caller passes no wait: long enough to outlast ProbeWatch's
-// momentary shared lock, short enough that a second watch fails at once.
-const defaultWatchLockWait = 2 * time.Second
+// momentary shared lock, short enough that a second watch fails at once. A
+// watch refused the lock lives that long, which the CLI waits out after it
+// launched one (launchAndAwaitOrgWatch).
+const DefaultWatchLockWait = 2 * time.Second
 
 // ErrWatchRunning is wrapped by AcquireWatchLock's error when another watch
 // holds watch.lock.
@@ -139,13 +141,13 @@ type WatchLock struct {
 }
 
 // AcquireWatchLock takes watch.lock in stateDir and keeps it until Release,
-// waiting up to wait for it (defaultWatchLockWait when wait <= 0). When
+// waiting up to wait for it (DefaultWatchLockWait when wait <= 0). When
 // another watch keeps holding it, the error wraps ErrWatchRunning and names
 // the pid of the mark, or says the pid is unknown when the mark cannot be
 // read.
 func AcquireWatchLock(stateDir string, wait time.Duration) (*WatchLock, error) {
 	if wait <= 0 {
-		wait = defaultWatchLockWait
+		wait = DefaultWatchLockWait
 	}
 	held, err := acquireHeldFileLock(stateDir, WatchLockFileName, "watch", wait)
 	if errors.Is(err, errFileLockHeld) {

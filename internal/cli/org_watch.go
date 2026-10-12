@@ -257,6 +257,11 @@ var (
 	// watch.lock to be free after it stopped a child that was not running in
 	// time.
 	orgWatchReleaseDeadline = 2 * time.Second
+	// orgWatchChildExitWait is how long ensureOrgWatch waits for the child
+	// it launched to exit once another watch accepts work: the child's own
+	// wait for watch.lock (org.DefaultWatchLockWait), plus a second for it to
+	// start and reach that wait.
+	orgWatchChildExitWait = org.DefaultWatchLockWait + time.Second
 	// orgWatchStopDeadline is how long --stop waits for watch.lock to be
 	// free.
 	orgWatchStopDeadline = 30 * time.Second
@@ -423,7 +428,8 @@ type orgWatchEnsured struct {
 // on to launch when the holder has ended (not_running). A watch that holds
 // the lock and accepts no work (stale past the deadline, stopping, or a
 // --once run; F9) is e.refuse's error, and nothing is launched while it holds
-// the lock. With no watch running, launchAndAwaitOrgWatch launches one.
+// the lock. With no watch running, launchAndAwaitOrgWatch launches one, and
+// returns only once the child it launched is no longer waiting for the lock.
 func ensureOrgWatch(e orgWatchEnsure) (orgWatchEnsured, error) {
 	probe := org.ProbeWatch(e.stateDir, time.Now(), e.deadman)
 	for deadline := time.Now().Add(orgWatchEnsureDeadline); probe.State == org.WatchLivenessStale; {
@@ -447,12 +453,21 @@ func ensureOrgWatch(e orgWatchEnsure) (orgWatchEnsured, error) {
 // orgWatchEnsureDeadline for any watch to accept work: its own child, or the
 // watch of a concurrent start or --detach whose child won watch.lock
 // (tech-debt 206); orgWatchEnsured.launched tells them apart by the pid of
-// the mark. Once the child has exited, it waits on only while a watch holds
-// the lock with a stale mark (one that has not written its first mark yet).
-// Then a watch that holds the lock and accepts no work (stopping, a --once
-// run, or stale at the deadline) is e.refuse's error, as in ensureOrgWatch,
-// and with the lock free the error names watch.log. A child that is
-// not running by the deadline is stopped and reaped, and watch.lock checked
+// the mark. When it is another watch, the child, refused the lock, is still
+// alive in its wait for it (org.DefaultWatchLockWait), and if that watch
+// stopped meanwhile, the child would take the lock after the stop had
+// removed its request, and run on past the `--stop` that stopped the other.
+// So the other watch is returned only once the child has exited, waiting up
+// to orgWatchChildExitWait. A mark that comes to name the child meanwhile
+// (the other watch ended and the child took the lock) returns the child, as
+// launched, and a child still alive at the end of the wait is stopped and
+// reaped before the other watch is returned. Once the child has exited, it
+// waits on only while a watch holds the lock with a stale mark (one that has
+// not written its first mark yet). Then a watch that holds the lock and
+// accepts no work (stopping, a --once run, or stale at the deadline) is
+// e.refuse's error, as in ensureOrgWatch, and with the lock free the error
+// names watch.log. A child that is not running by the deadline, with no
+// other watch accepting work, is stopped and reaped, and watch.lock checked
 // free, before the error, so a failed launch leaves no watch behind that
 // would make the next one stale (Codex plan advisory finding 3 of
 // org-cross-watch).
@@ -467,13 +482,26 @@ func launchAndAwaitOrgWatch(e orgWatchEnsure) (orgWatchEnsured, error) {
 	}
 	exited, childExited := child.exited, false
 	deadline := time.Now().Add(orgWatchEnsureDeadline)
+	// exitBy is when the child must have exited, set the first time another
+	// watch accepts work.
+	var exitBy time.Time
 	var probe org.WatchLiveness
 	for {
 		probe = org.ProbeWatch(e.stateDir, time.Now(), e.deadman)
 		if org.WatchAcceptsWork(probe) {
-			return orgWatchEnsured{pid: probe.Mark.PID, launched: probe.Mark.PID == child.pid}, nil
-		}
-		if (childExited && probe.State != org.WatchLivenessStale) || !time.Now().Before(deadline) {
+			if probe.Mark.PID == child.pid {
+				return orgWatchEnsured{pid: child.pid, launched: true}, nil
+			}
+			if childExited {
+				return orgWatchEnsured{pid: probe.Mark.PID}, nil
+			}
+			if exitBy.IsZero() {
+				exitBy = time.Now().Add(orgWatchChildExitWait)
+			} else if !time.Now().Before(exitBy) {
+				child.stop()
+				return orgWatchEnsured{pid: probe.Mark.PID}, nil
+			}
+		} else if (childExited && probe.State != org.WatchLivenessStale) || !time.Now().Before(deadline) {
 			break
 		}
 		select {
