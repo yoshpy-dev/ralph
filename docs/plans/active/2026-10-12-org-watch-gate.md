@@ -175,7 +175,8 @@
 - [x] Plan approved
   - 自動承認(ユーザーの指示「作成したプランは自動承認します」、2026-10-11)。図解ページは `.harness/state/plan-visual/org-watch-gate.html`
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1(20cf6fdf): org 層の検査(`Org.WatchGate`、`WatchAcceptsWork`、`NewWatchGate`、`*WatchGateError` と `ErrNoRunningWatch`、`DefaultWatchGateSettle` 2 秒)、印の `deadman_minutes`・`once`・状態 `stopping`、`ProbeWatch` の `stopping` と印の deadman の窓。スライスの境目のずれ: `ralph status` の `stopping` と `(--once)` の表示を S2 から S1 に移した(状態を足すコミットで、止まりかけの見張りが「not running」と出ないため)。`StartFeature` の検査は `checkSpawnInput` の直後(`Manifest.Read` と `spawnPrecheckErr` の前)に置いた。`worktrees.Ensure` より前で、`Spawn` と同じ順。max_orgs と見張りなしが重なったら見張りのエラーで断る。検査は `Spawn` の打ち直し(冪等の戻り)より前なので、立っている座席の打ち直しも見張りなしでは断られる(F2 の位置の帰結)。期待を変えた 6a のテスト(AC10): `TestRunWatchAll_CallsBeforeStopWhileItStillHoldsTheLockAndTheMarkSaysRunning` を `...TheMarkSaysStopping` に改名して期待を stopping に、`TestOrgWatch_Once_HoldsTheLockUntilItsInFlightWatcherCallEnds` の 1 回の probe を stopping を待つ形に(どちらも F9 で後始末の間の印が stopping になったため)。エラーの次の手に `--state-dir` を付けるかは S2 で決める。mutation 13 体はすべて落ちた
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
