@@ -2,13 +2,89 @@
 
 - Date: 2026-10-12
 - Plan: docs/plans/active/2026-10-12-org-watch-gate.md(承認済み、digest de5ca6b7e6f0)
-- Reviewer: reviewer subagent (Claude)。パイプライン 2 回目(cycle 2、上限 2)。test が実機で見つけた後退を fdfb5b23 で直したあとの、全段のやり直し。cycle 1 の再実行(HEAD 7d2e4bbb)と最初の結果(HEAD 976a0ca9)は末尾の付録に残してある
-- Scope: 前回(264951e6)のあとのコードの変更 2 つ。bda15444(N1〜N3 の直し)と fdfb5b23(同時の `--detach` のあとの `--stop` で、ロックを待っていた負けた子があとを取って動き続けた後退の直しと、test の probe 5 本)。`git diff 264951e6..4893b7e9 -- internal/`(9 ファイル、+481/-41)。4893b7e9 は計画の記録だけ。そのうえでブランチ全体(`git diff dc41c4f5...HEAD`)を、前回のあとで新しく気になる点がないかだけ見直した。テスト・静的解析・仕様適合・文書の整合の検査は行っていない
-- 番号の付け方: cycle 2 の finding は C2-1〜C2-4。N1〜N3 は付録の cycle 1 の再実行、L1〜L6 は付録の最初の結果の番号
+- Reviewer: reviewer subagent (Claude)。パイプライン 3 回目(cycle 3)。上限は `RALPH_STANDARD_MAX_PIPELINE_CYCLES=3` に上げてあり、これが最後の cycle である。`cycle-count.json` は cross-review の規則で 2 のままなので、cycle 3 の番号はここと insight event の `--cycle 3` で付けた。cycle 2 の実行(HEAD 4893b7e9)と、その前の cycle 1 の再実行・最初の結果は末尾の付録に残してある
+- Scope: cycle 2 の自己レビュー(236dc72e、HEAD 4893b7e9 を見た)のあとのコードの変更 4 つ。3fb0fd1b(C2-1〜C2-3 の直し。自己レビューが読むのは今回が初めて)、47635690(`orgWatchChildExitWait` が `org.DefaultWatchLockWait` より長いことを固定するテスト 1 本)、2fada512(sync-docs。コードの変更は `runOrgWatchStop` の doc だけ)、8d8ddbd2(cross-review cycle 2 の指摘の直し。`orgWatchChildAgmsgHome` と、`orgWatchChild` の新しい引数 `cfgAgmsgHome`、テスト 13 ケース)。`git diff 4893b7e9..HEAD -- internal/`(5 ファイル、+481/-43)。そのうえでブランチ全体(`git diff dc41c4f5...HEAD -- internal/`、21 ファイル)を、cycle 2 のあとで新しく気になる点がないかだけ見直した。テスト・静的解析・仕様適合・文書の整合の検査は行っていない
+- 番号の付け方: cycle 3 の finding は C3-1〜。C2-1〜C2-4 は付録の cycle 2 の finding の番号で、`docs/tech-debt/README.md:211` の行がそれを指している。N1〜N3 は付録の cycle 1 の再実行、L1〜L6 は付録の最初の結果の番号
 
-## Latest run: cycle 2(HEAD 4893b7e9)
+## Latest run: cycle 3(HEAD b940c78f)
 
 ### 前の指摘の扱い
+
+| 対象 | 状態 | 根拠 |
+| --- | --- | --- |
+| C2-1(止めた子のあとに、止める前の probe の pid を返す) | 直った(3fb0fd1b) | `launchAndAwaitOrgWatch` は `exitBy` を過ぎて `child.stop()` したあと、`stopped, childExited, exited = true, true, nil` にして `continue` し、probe を取り直す(`internal/cli/org_watch.go:556-558`)。次の判定は、子が自分で終わったときと同じ枝を通る。止めたあとも作業を受け付ける見張りがあれば、それを `launched` なしで返し(`:551`)、ロックを持つ見張りが受け付けなければ `e.refuse(probe)`(`:577`)、ロックが空なら止めたことを言う新しい文(`:580`)になる。`child.stop()` は子が終わるまで返らないので、`childExited` を立てるのは正しい。終わりの `child.stop()`(`:586`)は `childExited` が false のときだけなので、2 回止めることはない。新しいテスト `TestOrgWatchDetach_AnotherWatchRuns_AStoppedChildIsJudgedByAProbeAfterTheStop`(`internal/cli/org_watch_test.go:661`)は 3 ケース(ほかの見張りが終わる、stopping になる、別の見張りがロックを取る)で、直す前のコード(前の probe の pid を返す)ではどれも落ちる。1・2 つ目は exit 0 の `already running (pid 4348)`、3 つ目は pid が 4349 でなく 4348 になる。読んで確かめた |
+| C2-2(`runOrgWatchDetach` の doc) | 直った(3fb0fd1b) | doc は「is refused, and no new watch runs (orgWatchDetachRefusal)」になり、`already running` を出すのは子が終わるか止められてからであることと、エラーの案内が `--state-dir` を繰り返すことを書く(`internal/cli/org_watch.go:595-605`) |
+| C2-3(案内するコマンドに `--state-dir` を付ける) | 直った(3fb0fd1b) | `orgWatchDetachRefusal` は `hintStateDir` を取り、`ralph org watch --stop` と `ralph org watch --all --detach` に、起動の失敗の文は `ralph status` に、`org.CommandWithStateDir` で付ける(`:637-648`、`:589`)。値は `orgInboxHintStateDir` で、`--state-dir` を打ったときだけ入る。start 側も `wireOrgStartWatchGate` が同じ値を渡す(`internal/cli/org.go:296-304`)。テストは `TestOrgWatchDetach_TheCommandsRepeatAnExplicitStateDir`(`org_watch_test.go:880`、3 つの文 × 付ける・付けない)と `TestOrgStart_AStoppedWatchThatKeepsTheLock_NamesRalphStatusWithAnExplicitStateDir`(`org_start_watch_test.go:278`)。非テストのコードで `ralph org …` を名指す文のうち、これで直らないのは `:132` の 1 行だけで、state dir を決める前のフラグの組み合わせの拒否なので、付ける先がない |
+| C2-4(残る穴の tech-debt の行) | 直った(2fada512) | `docs/tech-debt/README.md:211` に新しい行がある。別の端末の `--stop` をロックを待つ側が追い越す穴、C2-1 の現れ方とその直し(3fb0fd1b)、見送った案、Trigger、Related(この報告の C2-1・C2-4)を持つ。エスケープしていない `\|` は 6 本で、列は崩れていない |
+| L5・L6(文書) | 直った(2fada512) | L5 は `docs/tech-debt/README.md:183`(F-7 を 3 か所の `ResolveOrgStateDir` と `newOrgSpawnRuntimeAt` の形に直し、`newOrgSpawnRuntime` を消したことも書く)、`:205`(呼び手に `start <task>` を足す)、`:202`(「still open」に取り消し線と閉じた日を足す)。どれもエスケープしていない `\|` は 6 本。L6 は `README.md:256`(「when the ledger has one; a `--state-dir` outside a repository has none, and the watch then runs where it was typed」を足す)。`git diff 4893b7e9..HEAD -- docs/tech-debt/README.md README.md` で読んだ |
+
+### Evidence reviewed
+
+- 全文を読んだ差分: `git diff 4893b7e9..HEAD -- internal/` の 5 ファイル全部(`internal/cli/org.go`、`internal/cli/org_watch.go`、`internal/org/watchgate.go`、`internal/cli/org_watch_test.go`、`internal/cli/org_start_watch_test.go`)
+- 周りで読んだ今のコード: `launchAndAwaitOrgWatch` の全体(`internal/cli/org_watch.go:528-593`)、`ensureOrgWatch`、`startDetachedProcess` の `stop`、`orgWatchChild` と `orgWatchChildArgs`、`runOrgWatchDetach`・`runOrgWatchStop`、`ProbeWatch` と `AcquireWatchLock`(待ちが ctx を受けない)、`driver.ResolveAgmsgHome` と `expandTilde`(`internal/org/driver/agmsg.go:123-146`)、`resolveOrgConfig` と `withMainWorktreeOrgLimits`(`internal/cli/org.go`)、`orgInboxHintStateDir`、`InboxCommand`(`internal/org/escalate.go:85-91`)
+- 読むだけにした文書: `docs/tech-debt/README.md` の 183・202・205・208・211 行、`README.md:256`、2fada512 と 8d8ddbd2 のコミットの説明、cross-review の triage(`docs/reports/cross-review-triage-org-watch-gate.md`)と `/cross-review` skill の Step 6(`.claude/skills/cross-review/SKILL.md:102-103`)
+- 機械的な確認: 追加行にデバッグ出力・TODO・secret らしい文字列・行末の空白はない。`orgWatchChild(` の呼び手は 2 つ(`internal/cli/org.go:300`、`internal/cli/org_watch.go:611`)で、どちらも `rt.Config.AgmsgHome` を渡す。`orgWatchEnsure{` を組むのも同じ 2 か所で、どちらも `hintStateDir` を入れる。`[org]` で path を値に持つ設定は `agmsg_home` だけ(`internal/config/config.go` の toml の tag)。新しい `func` の直上の doc はどれも直上にあり、あとから挟まった関数で切れていない(テスト側も同じ)。`ralph status`・`ralph org watch --stop`・`--detach` はどれも `--state-dir` を持つ
+- 確かめていないもの: テストは走らせていない。新しいテストが直す前のコードで落ちることは、コードを読んで確かめた。なお `gofmt -l internal/cli internal/org` を 1 回打った(一覧を出すだけで書き換えない。出力は空)。この skill の範囲外の検査なので、結論には使っていない
+
+### コードの確認(3fb0fd1b と 8d8ddbd2)
+
+1. C2-1 の直しの分岐: stop のあとは `childExited` と `exited` を更新するだけで、新しい分岐は止めたことを言う 1 文(`:579-582`)だけである。止めたあとにロックが空なら、`ProbeWatch` は印の中身にかかわらず not_running を返す(`internal/org/watchalive.go` の `ProbeWatch`)ので、止めた子が死んだあとに残った印が `started` になることはない。ロックを持つ見張りが stale のままなら、期限(`deadline`)まで待ってから拒否の文になる。期限を過ぎていればすぐ拒否する。ループが終わらない経路はない
+2. 8d8ddbd2 の条件の順: `RALPH_ORG_AGMSG_HOME`(空は未設定)、なければ `--config` を明示し、空でないときだけ `cfgAgmsgHome`、の順は `driver.ResolveAgmsgHome` の優先順位(`internal/org/driver/agmsg.go:123-132`)と同じである。絶対と `~/` で始まる値は触らない(`expandTilde` は `~/` だけを展開し、子は同じ環境の `HOME` を受け継ぐので、同じ場所になる)。子の作業ディレクトリが変わらないとき(`req.dir == ""`)も触らない。継承した値は落として 1 件だけ足す(`slices.Equal` でテストが 1 件を見る)
+3. 範囲の外に残るもの: `--config` なしで、親の `./ralph.toml` の相対の `agmsg_home` を使う場合は、子が main worktree のルートの `ralph.toml` を読むので、同じファイルの話ではない。計画の F6 と README の「without `--config` it reads that root's `ralph.toml`」のとおりで、`orgWatchChildAgmsgHome` の doc(`internal/cli/org_watch.go:358-368`)にも書いてある。`orgWatchChild` の doc(`:311-324`)は「a relative agmsg home is passed made absolute」と条件なしに言うが、括弧の中の関数名から、条件(変数か、明示した `--config`)を書いた doc に行き着く
+4. 同じ型のほかの入口: cwd に依存する値のうち、子が読むものは `agmsg_home` のほかに state dir(`--state-dir <絶対>` で渡す)、`--config`(`filepath.Abs`)、`PWD`(差し替える)で、どれも手当てがある。`internal/org` が読む環境変数は、`HERDR_PANE_ID` と `HERDR_WORKSPACE_ID`(子の環境から外してある)、`RALPH_ORG_STATE_DIR`(`--state-dir` が勝つ)、`CODEX_HOME`(`internal/org/spawn.go:1510`、codex 座席の receipt の観測)で、`internal/org/driver` が読むのは `RALPH_ORG_AGMSG_HOME` である。`internal/cli/org*.go` の非テストのコードで `os.Getenv` を読むのは 8d8ddbd2 の 1 行だけで、`status.go` など org*.go 以外は見ていない
+5. 8d8ddbd2 のテストが各ガードを見ているか: `Changed("config")` を外すと「no --config, a relative agmsg_home in ./ralph.toml」が落ちる。`configPath == ""` を外すと「an empty --config」が落ちる。`req.dir != ""` を外すと「--state-dir outside the repository」が落ちる。`IsAbs` と `~/` の 2 つはそれぞれ専用のケースがあり、環境変数が空のときは config に回ることも「env empty」が見る。継承した値を落とさなければ、変数が設定されているケース(相対の値、空、相対の値と config の両方)が 2 件になって落ちる。start 側は変数の値と `--config` の中の値の 2 通りを通し、leader が相対の home 経由で起動することも見る。どれも読んで確かめた
+
+### Findings
+
+<!-- Area recommended values: naming, readability, unnecessary-change, typo,
+     null-safety, debug-code, secrets, exception-handling, security, maintainability -->
+
+| ID | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| C3-1 | LOW | maintainability | 8d8ddbd2 が足したコメントのうち 3 か所が「cross-review cycle 2 #1 of org-watch-gate」と、`/cross-review` が書き直す triage の項目番号を指す。triage は slug ごとに 1 ファイル(`docs/reports/cross-review-triage-org-watch-gate.md`、header は「Cycle: 2/2 (cap reached)」)で、skill の Step 6 は同じ path に書く。この cycle の `/cross-review` が書き直すと、cycle 2 の #1 はファイルから消えるか、別の指摘の #1 になる。同じ commit の `self-review C2-1 of org-watch-gate` などは、この報告が C2- の番号を付録に残すので指し先が続く。3 か所のコメントはどれも症状を自分で書いているので、番号がなくても読める | `internal/cli/org_watch.go:322`、`internal/cli/org_start_watch_test.go:682`、`internal/cli/org_watch_test.go:1074`。triage の置き場は `.claude/skills/cross-review/SKILL.md:102-103` | 「cross-review cycle 2 #1 of org-watch-gate」を、直した commit(8d8ddbd2)か症状の説明に替える。commit の説明に同じ言い回しがあるが、commit は消えないので直さなくてよい |
+| C3-2 | LOW | maintainability | 3fb0fd1b が足した `org.CommandWithStateDir` は、`org.InboxCommand` の `--state-dir` を足す 4 行の写しである。doc も「as InboxCommand builds the inbox commands」と写しであることを言う。`watchGateCommand` は `CommandWithStateDir` を呼ぶので、`--state-dir` の足し方(`shellQuote` で引用)を持つ場所は org 層に 2 つになった。次に引用の規則を変える人は、`InboxCommand` が別にあることを doc の一言でしか知れない | `internal/org/watchgate.go:80-85`(`CommandWithStateDir`)、`internal/org/escalate.go:85-91`(`InboxCommand`) | `InboxCommand` の本体を `return CommandWithStateDir("ralph org inbox "+verb+" "+id, stateDir)` にする。挙動は変わらない |
+
+件数: CRITICAL 0、HIGH 0、MEDIUM 0、cycle 3 の LOW 2 件(C3-1、C3-2)。cycle 2 までの finding(C2-1〜C2-4、L5、L6)は、上の表のとおりすべて閉じた。開いているのは C3-1・C3-2 の LOW 2 件だけである。
+
+ブランチ全体(`git diff dc41c4f5...HEAD -- internal/`)で、cycle 2 のあとに新しく気になったのは、上の 2 件のほかにはない。cycle 2 のあとに `internal/` で変わったのは 5 ファイルだけで、`internal/org/` で変わったのは `watchgate.go` の 1 関数の切り出しだけである。
+
+### Positive notes
+
+- C2-1 の直しは、止めたあとの判定を、子が自分で終わったあとの判定と同じ枝に流す形にした。足した分岐は、止めたことを言う文 1 つだけで、`child.stop()` が子の終わりまで返らないことに頼っている。ロックを待つ子の終わりを `stop` が待つので、probe を取り直す時点で子はもう動いていない
+- 8d8ddbd2 は、cross-review が挙げた 2 つの形(変数、`--config` の中の値)に加えて、変数が空のとき、`--config ""` のとき、絶対と `~/`、cwd が変わらない台帳を、それぞれ別のケースにした。「渡さない」側の 7 ケースが、直した分岐の外へ広がらないことを見張る
+- C2-3 の直しで、gate の文と `--detach`・start の文の `--state-dir` の足し方が同じ関数を通るようになった(写しの 1 つは C3-2)。`--state-dir` を打たない台帳には付けないことも、同じテストが見る
+
+### Tech debt identified
+
+最後の cycle(上限 3)なので、C3-1・C3-2 を直さないなら、/sync-docs が次の 1 行を `docs/tech-debt/README.md` に足す。コメントの書き換えと 1 行の整理で、どちらも直すと全段のやり直しになる。
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| Two small leftovers of org-watch-gate. (a) Three comments cite the cross-review finding as "cross-review cycle 2 #1 of org-watch-gate" (`orgWatchChild` in `internal/cli/org_watch.go`, and the tests `TestOrgStart_ARelativeAgmsgHomeIsPassedAbsoluteToTheWatch` and `TestOrgWatchDetach_ARelativeAgmsgHomeIsPassedAbsoluteToTheRelocatedChild`). `docs/reports/cross-review-triage-org-watch-gate.md` is one file per slug that `/cross-review` rewrites each cycle, so the number points at nothing, or at another finding, once the next cycle has written it. (b) `org.CommandWithStateDir` (`internal/org/watchgate.go`) repeats the body of `org.InboxCommand` (`internal/org/escalate.go`); the quoting of `--state-dir` now lives in two places in `internal/org` | None at runtime. (a) The comments still say what they fix, so only the label is lost. (b) A change of the quoting in one function leaves the other behind | Both LOW, found in cycle 3, the last cycle (`RALPH_STANDARD_MAX_PIPELINE_CYCLES=3`); fixing either would restart the whole pipeline | The next change to `orgWatchChild` or to `--state-dir` quoting in `internal/org`: name 8d8ddbd2 or the symptom in the three comments (a), and make `InboxCommand` call `CommandWithStateDir` (b) | `docs/reports/self-review-2026-10-12-org-watch-gate.md` (C3-1, C3-2) |
+
+### Coverage gaps
+
+- テストは走らせていない(/test の担当)。8d8ddbd2 は、/verify・/test がまだ見ていないコミットである。各ガードを外したときに落ちるケースがあることは、コードを読んで確かめただけで、実際に外して走らせてはいない
+- `orgWatchChildAgmsgHome` の `filepath.Abs` が失敗する枝(`os.Getwd` の失敗)のテストはない。cwd がシンボリックリンクの下にあるときの `Abs` も、読んだだけで試していない(`Abs` は `os.Getwd` を使い、親が相対で解く先と同じ directory を指すはずである。未確認)
+- 見張りの経路が `CODEX_HOME`(`internal/org/spawn.go:1510`、codex 座席の receipt の観測)を読むかは確かめていない。相対の `CODEX_HOME` は普通ないので、finding にはしていない
+- 8d8ddbd2 は文書に触れていない。相対の agmsg home を子へ渡すことを README や `/org` skill が言うべきかは、/sync-docs が見る
+- C2-1 の筋の実機での確認は、cycle 2 の test の報告にある 8 本の同時の `--detach` のあとの `--stop` までで、子を止めている間にほかの見張りが終わる場面を実機で再現した記録はない(tech-debt `:211` の行も、C2-1 の拒否は fake の子だけで固定していると書く)
+- 付録の cycle 2 と cycle 1 の 2 つの結果の Coverage gaps は、この 4 つのコミットで変わっていない
+
+### Recommendation
+
+- Merge: yes(CRITICAL・HIGH・MEDIUM なし。C2-1〜C2-4、L5、L6 はすべて直り、C2-1 は直す前のコードで落ちるテストがある。8d8ddbd2 の相対の agmsg home の渡し方は、`ResolveAgmsgHome` の優先順位と同じ順で、ガードごとのテストがある。cycle 3 の LOW は C3-1・C3-2 の 2 件で、どちらも挙動の誤りではなく、コメントの指し先と写しの整理である)
+- Follow-ups: これが最後の cycle なので、C3-1・C3-2 を直すなら上限を上げて全段を回し直すことになる。直さないなら、「Tech debt identified」の 1 行を /sync-docs が台帳に足す
+
+## 付録
+
+### 付録: cycle 2(HEAD 4893b7e9)
+
+- cycle 2 の Reviewer: reviewer subagent (Claude)。パイプライン 2 回目(cycle 2、上限 2)。test が実機で見つけた後退を fdfb5b23 で直したあとの、全段のやり直し。cycle 1 の再実行(HEAD 7d2e4bbb)と最初の結果(HEAD 976a0ca9)は末尾の付録に残してある
+- cycle 2 の Scope: 前回(264951e6)のあとのコードの変更 2 つ。bda15444(N1〜N3 の直し)と fdfb5b23(同時の `--detach` のあとの `--stop` で、ロックを待っていた負けた子があとを取って動き続けた後退の直しと、test の probe 5 本)。`git diff 264951e6..4893b7e9 -- internal/`(9 ファイル、+481/-41)。4893b7e9 は計画の記録だけ。そのうえでブランチ全体(`git diff dc41c4f5...HEAD`)を、前回のあとで新しく気になる点がないかだけ見直した。テスト・静的解析・仕様適合・文書の整合の検査は行っていない
+- cycle 2 の番号の付け方: cycle 2 の finding は C2-1〜C2-4。N1〜N3 は付録の cycle 1 の再実行、L1〜L6 は付録の最初の結果の番号
+
+#### 前の指摘の扱い
 
 | 対象 | 状態 | 根拠 |
 | --- | --- | --- |
@@ -17,7 +93,7 @@
 | N3(CLI の接頭辞の文字列比較) | 直った | dry-run の記録の追記の失敗を `fmt.Errorf("org: send: %w", err)` で包み(`internal/org/verbs.go:314-321`)、CLI は `result.Err` をそのまま返す(`internal/cli/org.go:953-954`)。`Send` の戻り口をもう一度すべて読み、どれも `org: send: ` で始まることを確かめた(`Send` の doc の「Every SendResult.Err starts with "org: send: "」のとおり)。org 層の `TestOrgSend_DryRun_AppendFails_ErrorStartsWithTheSendPrefix` と CLI のテストが、接頭辞が 1 回であることと EISDIR が鎖に残ることを見る |
 | L5・L6 | 開いたまま(/sync-docs) | `docs/tech-debt/README.md` と `README.md` には 976a0ca9 のあとのコミットがない(C2-4) |
 
-### Evidence reviewed
+#### Evidence reviewed
 
 - 全文を読んだ差分: bda15444 と fdfb5b23 の `internal/` の全ファイル(`internal/cli/org_watch.go`、`org.go`、`internal/org/verbs.go`、`watchalive.go`、`watch.go`、テスト 4 ファイル)
 - 周りで読んだ今のコード: `launchAndAwaitOrgWatch`・`ensureOrgWatch`・`runOrgWatchDetach`・`orgWatchDetachRefusal`、`startDetachedProcess` の `stop`(`internal/cli/org_watch.go:385-394`)、`runOrgWatchAll` の signal の扱い(`:153-155`)、`AcquireWatchLock`、`RunWatchAll` の始まり、`wireOrgStartWatchGate`、`Send` のすべての戻り口
@@ -25,7 +101,7 @@
 - 機械的な確認: `defaultWatchLockWait` はコードに残っていない。「nothing was started」はコードとテストから消え、似た言い方は `runOrgWatchDetach` の doc の「nothing started」だけ(C2-2)。`orgWatchChildExitWait` を使うのは `launchAndAwaitOrgWatch` だけ。偽の子を返す launcher のうち、ほかの pid の running の印でロックを取るものは、どれも `exited` を閉じるか `orgWatchChildExitWait` を自分で縮める(grep)。追加行にデバッグ出力・TODO・secret らしい文字列はない
 - 確かめていないもの: テストは走らせていない。実機の確認は test の報告と Progress の記録を読んだだけ
 
-### Findings
+#### Findings
 
 <!-- Area recommended values: naming, readability, unnecessary-change, typo,
      null-safety, debug-code, secrets, exception-handling, security, maintainability -->
@@ -41,7 +117,7 @@
 
 ブランチ全体(`git diff dc41c4f5...HEAD`)で前回のあとに新しく気になったのは C2-3 だけで、ほかにはない。
 
-### 依頼された点の結論(fdfb5b23)
+#### 依頼された点の結論(fdfb5b23)
 
 1. `exitBy` の数え方: ほかの見張りが作業を受け付けているのを初めて見たときに決まり、そのあとは変えない。初めて見るのは起動のあとなので、`exitBy` は起動から 3 秒(`DefaultWatchLockWait` の 2 秒 + 1 秒)より前にはならない。子のロックの待ちは、子が起動して `AcquireWatchLock` に着いてから 2 秒で終わる。起動に 1 秒より長くかからなければ、子は `exitBy` の前に自分で終わる。ほかの見張りの最初の印が遅れて見えたときは `exitBy` も遅れるが、延びるのは待ちだけで、長くても全体の期限(10 秒)のあと 3 秒ほどである。doc(`orgWatchChildExitWait` と `launchAndAwaitOrgWatch`)のとおり
 2. 3 つの分岐の順: 印が子の pid なら `started`、子が終わっていればほかの見張り、`exitBy` を過ぎていれば子を止めてほかの見張り、の順で正しい。待つ間に子がロックを取って印を書けば、`exitBy` の判定より先に `started` になる。作業を受け付ける見張りがないときは、前と同じ else の枝(子が終わって stale でない、または期限)で抜ける。直す前からある判定の限界として、子が印を書いたあとに死に、ほかの見張りがロックを取ってから最初の印を書くまでの一瞬には、子の印が running と読まれて `started` になる。この直しで広がってはいない
@@ -49,32 +125,30 @@
 4. start が同じ経路を通ること: 通る。`ensureOrgWatch` は検査の中から呼ばれるので、待ちは manifest にも worktree にも触れる前に終わる。`TestOrgStart_AnotherWatchRuns_GoesOnOnlyOnceItsChildHasExited` は、子が終わる直前に、herdr が呼ばれておらず worktree もないことを確かめる。`wentOnFirst` は close の前に書いて close のあとで読むので、競合はない。`--plan` の 2 回目の検査は最初の probe でほかの見張りを受け入れるので、子を起動しない
 5. 取り込んだテストの時間への頼り方: 下限はどれも決まった順で成り立つ。子の終わりはチャンネルで見てから返り、印は sleep のあとで書き、`exitBy` は起動のあとで決まる。上限は、子の 300 ms・500 ms や印の 200 ms に対して、3 秒の `orgWatchChildExitWait` か `orgWatchEnsureDeadline` で見ており、余裕は 2.5 秒以上ある。本番の settle のテストは実際に 2 秒待ち、[1.5 秒, 6 秒) で見る。TestMain は `orgWatchChildExitWait` を縮めないので、ほかの見張りが動いていて偽の子が終わらないテストを足すと 3 秒待つ。今そうなるテストはない(launcher を grep した)
 
-### Positive notes
+#### Positive notes
 
 - 後退の直しは、子のロックの待ちを短くする案や止める頼みを残す案ではなく、自分の子が終わるのを待つ形にした。org 層の規則(ロックの待ち、頼みの扱い)を変えずに済み、待ちの長さを org 層の定数から決めているので、片方だけが変わることもない
 - 待つ間に子がロックを取った場合を `started` として扱い、テストで固定した。止めた見張りのあとを子が取る場面が、黙って残る見張りではなく、報告される起動になる
 - N3 の直しで「`Send` のエラーはどれも `org: send: ` で始まる」という決まりが org 層の 1 か所にまとまり、`Send` の doc に書かれた
 
-### Tech debt identified
+#### Tech debt identified
 
 | Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
 | --- | --- | --- | --- | --- |
 
 新しい行はない。C2-4 のとおり、残る穴の行は /sync-docs が足す。
 
-### Coverage gaps
+#### Coverage gaps
 
 - テストは走らせていない(/test の担当)。fdfb5b23 の新しいテストが直す前のコードで落ちることは、コードを読んで確かめた。直す前は、ほかの見張りの印を見た最初の probe で返るので、子の終わりを待つテストと `started` のテストは落ちる
 - 実機の確認(`--stop` が 1 秒ほどで通り、見張りが残らない)は、Progress の記録と test の報告を読んだだけ
 - C2-1 の筋は読んで確かめただけで、再現していない
 - 付録の 2 つの結果の Coverage gaps は、この 2 つのコミットで変わっていない
 
-### Recommendation
+#### Recommendation
 
-- Merge: yes(CRITICAL・HIGH・MEDIUM なし。後退は直り、子の終わりを待つことと待つ間の `started` にテストがある。N1・N3 は直り、N2 は呼び手の doc が残る(C2-2)。cycle 2 の LOW は C2-1〜C2-4 の 4 件で、どれも見張りが残る種類の誤りではない。L5・L6 と残る穴の行は /sync-docs で入れる)
+- cycle 2 の判定: yes(CRITICAL・HIGH・MEDIUM なし。後退は直り、子の終わりを待つことと待つ間の `started` にテストがある。N1・N3 は直り、N2 は呼び手の doc が残る(C2-2)。cycle 2 の LOW は C2-1〜C2-4 の 4 件で、どれも見張りが残る種類の誤りではない。L5・L6 と残る穴の行は /sync-docs で入れる)
 - Follow-ups: 最後の cycle なので、C2-1〜C2-3 を直すなら上限を上げて回し直すことになる。直さないなら、C2-4 のとおり /sync-docs が台帳の行に入れる
-
-## 付録
 
 ### 付録: cycle 1 の再実行(HEAD 7d2e4bbb)
 
