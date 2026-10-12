@@ -281,7 +281,8 @@ func TestOrgSpawn_Feature_RunningUnboundOrgRefused(t *testing.T) {
 // sentence of plan AC7: a leader spawn with a plain --reserve into an org
 // bound to a feature is refused even for the same paths, from the active
 // leader with nothing written and from a new leader through reject(). A seat
-// spawned without Reserve is not affected, and the binding stays.
+// spawned without Reserve (while the leader runs, which a feature org's
+// seats need: spawnFeatureSeatErr) is not affected, and the binding stays.
 func TestOrgSpawn_Feature_PlainReserveIntoBoundOrgRefused(t *testing.T) {
 	f := testFeature("split-1", "auth", "0123456789ab")
 	const want = "so a reservation without a split plan (internal/auth/) is refused"
@@ -295,13 +296,13 @@ func TestOrgSpawn_Feature_PlainReserveIntoBoundOrgRefused(t *testing.T) {
 	if after := takeSpawnSnapshot(t, o, h, a); after != before {
 		t.Fatalf("expected nothing recorded or called, %+v -> %+v", before, after)
 	}
+	spawnSeatIn(t, o, h, "org-a", "seat-1", "ws-a", "pane-2")
 
 	if r := o.Stop(StopParams{OrgID: "org-a", Seat: LeaderIdentity}); r.Err != nil {
 		t.Fatalf("stop org-a's leader: %v", r.Err)
 	}
 	assertRejectedRecorded(t, o, o.Spawn(leaderParams("org-a", "internal/auth/")), "org-a", LeaderIdentity,
 		`org_id "org-a" is bound to feature "auth" of split plan "split-1"`, want)
-	spawnSeatIn(t, o, h, "org-a", "seat-1", "ws-a", "pane-2")
 	assertActiveFeature(t, o, "org-a", f)
 }
 

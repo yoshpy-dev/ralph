@@ -437,7 +437,8 @@ func TestStartFeature_CanonicalRefIsTheResolvedPlanPath(t *testing.T) {
 // TestStartFeature_OrgIDAtTheLengthLimit pins maxFeatureOrgIDLen at 20,
 // herdr's 32-character agent name less the `_` and "implementer": a feature
 // org with an --org-id of 20 characters starts its leader, and the leader
-// can then spawn the implementer seat in it. One character more is refused
+// can then spawn the implementer seat in it (once its plan is approved, the
+// default per-plan mode). One character more is refused
 // (TestStartFeature_RefusedBeforeAnyRecord).
 func TestStartFeature_OrgIDAtTheLengthLimit(t *testing.T) {
 	if maxFeatureOrgIDLen != 20 || implementerSeatID != "implementer" {
@@ -449,6 +450,7 @@ func TestStartFeature_OrgIDAtTheLengthLimit(t *testing.T) {
 	if res := st.mustStart(t, p, SpawnOutcomeSpawned); res.OrgID != p.OrgID || res.Worktree != st.worktree(p.OrgID) {
 		t.Fatalf("unexpected result: org %q worktree %q", res.OrgID, res.Worktree)
 	}
+	approveFeaturePlan(t, st.o, p.OrgID, st.worktree(p.OrgID))
 	st.h.paneID = "pane-2"
 	impl := mustSpawnParams(p.OrgID, implementerSeatID)
 	impl.Role = implementerSeatID
@@ -460,7 +462,8 @@ func TestStartFeature_OrgIDAtTheLengthLimit(t *testing.T) {
 // TestStartFeature_SlugAtTheLengthLimit is the default org_id's side of
 // maxFeatureOrgIDLen: without --org-id, a feature whose slug has 20
 // characters starts its leader in the org named by the slug, and the leader
-// can then spawn the implementer seat in it. A slug of 21 characters is
+// can then spawn the implementer seat in it (once its plan is approved, the
+// default per-plan mode). A slug of 21 characters is
 // refused when the split plan is read, before the worktree record is looked
 // up, with nothing recorded.
 func TestStartFeature_SlugAtTheLengthLimit(t *testing.T) {
@@ -476,6 +479,7 @@ func TestStartFeature_SlugAtTheLengthLimit(t *testing.T) {
 		if res.OrgID != slug || res.Worktree != st.worktree(slug) || res.Branch != "feat/"+slug {
 			t.Fatalf("unexpected result: org %q worktree %q branch %q", res.OrgID, res.Worktree, res.Branch)
 		}
+		approveFeaturePlan(t, st.o, slug, st.worktree(slug))
 		st.h.paneID = "pane-2"
 		impl := mustSpawnParams(slug, implementerSeatID)
 		impl.Role = implementerSeatID
@@ -1236,7 +1240,9 @@ func TestStartFeature_SpawnFailureKeepsWorktree(t *testing.T) {
 // goes on (spawned or idempotent), and otherwise Spawn's own refusal. The
 // cases cover each check of Spawn's locked sections and each path into them:
 // a new seat, the idempotent return (active, and legacy inactive), and a
-// stale in-flight seat, which Spawn compensates before it counts seats.
+// stale in-flight seat, which Spawn compensates before it counts seats. The
+// feature org's checks (its leader and its approval) are among them, for a
+// new seat, an active one and a stale one.
 func TestSpawnPrecheckErr_MatchesSpawn(t *testing.T) {
 	f := testFeature("split-1", "auth", "0123456789ab")
 	bound := featureLeaderParams("org-a", f, "internal/auth/")
@@ -1307,6 +1313,52 @@ func TestSpawnPrecheckErr_MatchesSpawn(t *testing.T) {
 		{"an unverified codex leader", nil, with(bound, func(p *SpawnParams) { p.Driver, p.Model = "codex", "gpt-5-codex" }), "requires [org.permissions].codex_verified=true"},
 		{"an autonomous worker without scope", nil, with(mustSpawnParams("org-a", "seat-1"), func(p *SpawnParams) { p.Scope = "" }),
 			"autonomous permission mode requires --scope or --reserve"},
+		// The feature org's checks (spawnFeatureSeatErr), after the capacity
+		// check: its leader, then, in per-plan mode, its approval.
+		{"a feature org's implementer before any approval", func(t *testing.T, o *Org, h *fakeHerdr) {
+			spawnFeatureLeaderIn(t, o, h, "org-a", "ws-a", "pane-1", f, "internal/auth/")
+		}, implementerParams("org-a"), `no plan of org_id "org-a" has been approved since its last disband`},
+		{"a feature org's implementer, approved", func(t *testing.T, o *Org, h *fakeHerdr) {
+			g := *f
+			g.Worktree = t.TempDir()
+			spawnFeatureLeaderIn(t, o, h, "org-a", "ws-a", "pane-1", &g, "internal/auth/")
+			approveFeaturePlan(t, o, "org-a", g.Worktree)
+			h.paneID = "pane-2"
+		}, implementerParams("org-a"), ""},
+		{"a feature org's reviewer before any approval", func(t *testing.T, o *Org, h *fakeHerdr) {
+			spawnFeatureLeaderIn(t, o, h, "org-a", "ws-a", "pane-1", f, "internal/auth/")
+			h.paneID = "pane-2"
+		}, reviewerParams("org-a"), ""},
+		{"a split feature org's implementer", func(t *testing.T, o *Org, h *fakeHerdr) {
+			g := *f
+			g.Approval = config.ApprovalModeSplit
+			spawnFeatureLeaderIn(t, o, h, "org-a", "ws-a", "pane-1", &g, "internal/auth/")
+			h.paneID = "pane-2"
+		}, implementerParams("org-a"), ""},
+		{"a feature org's reviewer, leader stopped", func(t *testing.T, o *Org, h *fakeHerdr) {
+			spawnFeatureLeaderIn(t, o, h, "org-a", "ws-a", "pane-1", f, "internal/auth/")
+			if r := o.Stop(StopParams{OrgID: "org-a", Seat: LeaderIdentity}); r.Err != nil {
+				t.Fatalf("stop: %v", r.Err)
+			}
+		}, reviewerParams("org-a"), `org_id "org-a" was started with ralph org start --plan and its leader seat is not running`},
+		{"a feature org's active implementer, plan changed since", func(t *testing.T, o *Org, h *fakeHerdr) {
+			g := *f
+			g.Worktree = t.TempDir()
+			spawnFeatureLeaderIn(t, o, h, "org-a", "ws-a", "pane-1", &g, "internal/auth/")
+			approveFeaturePlan(t, o, "org-a", g.Worktree)
+			h.paneID = "pane-2"
+			if r := o.Spawn(implementerParams("org-a")); r.Outcome != SpawnOutcomeSpawned {
+				t.Fatalf("spawn the implementer: %+v", r)
+			}
+			writePlan(t, g.Worktree, testPlanRel, testPlanDraft)
+		}, implementerParams("org-a"), ""},
+		{"a stale implementer of a feature org with no approval", func(t *testing.T, o *Org, h *fakeHerdr) {
+			spawnFeatureLeaderIn(t, o, h, "org-a", "ws-a", "pane-1", f, "internal/auth/")
+			if err := o.Manifest.Append(ManifestEvent{OrgID: "org-a", SeatID: implementerSeatID, Event: EventSpawnStarted,
+				Role: implementerRole, Driver: "claude", Model: "sonnet"}); err != nil {
+				t.Fatal(err)
+			}
+		}, implementerParams("org-a"), `no plan of org_id "org-a" has been approved since its last disband`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			o, h, _ := testOrg(t)

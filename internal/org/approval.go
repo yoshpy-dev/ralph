@@ -52,6 +52,10 @@ const (
 	// approverUnknown is the `by=` value when USER is empty or cannot stand
 	// as one token (it has whitespace or a control character).
 	approverUnknown = "unknown"
+	// implementerRole is the role (prompts/implementer.md) whose spawn and
+	// whose TASKs the approval check covers. Spawn and Send compare a seat's
+	// role with it, not its seat id.
+	implementerRole = "implementer"
 )
 
 // contentHashPattern is the shape of PlanContentHash: 64 lowercase hex digits.
@@ -449,6 +453,29 @@ func checkAnyPlanApproved(events []ManifestEvent, orgID string, f *FeatureBindin
 	return fmt.Errorf("org: none of the %d plan approvals of org_id %q since its last disband passes the check; the latest: %s",
 		len(approvals), orgID, strings.TrimPrefix(latestErr.Error(), "org: "))
 }
+
+// ErrPlanNotApproved is what every refusal of the approval check is
+// (errors.Is): a TASK to an implementer seat (Send) and an implementer spawn
+// (Spawn) in an org whose binding RequiresApproval.
+var ErrPlanNotApproved = errors.New("org: no approved plan passes the approval check")
+
+// planNotApprovedNext ends every refusal of the approval check: what a
+// leader does instead of trying again (the full procedure is in
+// prompts/leader.md).
+const planNotApprovedNext = "; a leader does not retry this, send it with --raw, or run ralph org approve itself, " +
+	"but escalates BLOCKED with ralph org escalate"
+
+// planNotApprovedError is a refusal of the approval check: reason, an "org: "
+// error of ParsePlanHeader, checkPlanApproved or checkAnyPlanApproved, then
+// planNotApprovedNext. errors.Is(err, ErrPlanNotApproved) holds for it, and
+// it unwraps to reason.
+type planNotApprovedError struct{ reason error }
+
+func (e planNotApprovedError) Error() string { return e.reason.Error() + planNotApprovedNext }
+
+func (e planNotApprovedError) Is(target error) bool { return target == ErrPlanNotApproved }
+
+func (e planNotApprovedError) Unwrap() error { return e.reason }
 
 // ApproveParams describes one `ralph org approve` call.
 type ApproveParams struct {

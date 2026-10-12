@@ -166,6 +166,24 @@ func approvedEvent(orgID, inboxID string, ref PlanRef, content string) ManifestE
 	return ManifestEvent{OrgID: orgID, Event: EventPlanApproved, Details: a.details()}
 }
 
+// approveFeaturePlan is a human's approval of testPlanDraft for orgID, whose
+// feature worktree is worktree, as the check then finds it: the record
+// Approve writes for the draft (approvedEvent, with its PlanContentHash), and
+// the plan at testPlanRel with the two header lines the leader writes after
+// it. It returns the plan's ref, for a TASK's PLAN: header. A test whose org
+// is bound in per-plan mode calls it before it spawns an implementer or sends
+// one a TASK.
+func approveFeaturePlan(t *testing.T, o *Org, orgID, worktree string) PlanRef {
+	t.Helper()
+	draft := []byte(testPlanDraft)
+	ref := PlanRef{Path: testPlanRel, Digest: PlanDigest(draft)}
+	if err := o.Manifest.Append(approvedEvent(orgID, "e1", ref, PlanContentHash(draft))); err != nil {
+		t.Fatalf("append the approval of %s: %v", ref, err)
+	}
+	writePlan(t, worktree, testPlanRel, approvedPlanText(testPlanDraft, ref.Digest))
+	return ref
+}
+
 func TestParsePlanHeader(t *testing.T) {
 	const digest = "0123456789ab"
 	msg := func(planLines ...string) string {
