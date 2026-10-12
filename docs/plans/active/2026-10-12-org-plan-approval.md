@@ -160,7 +160,7 @@ critical forks は consult(consult-plan-stage7)に聞いて自分で選んだ(�
 - [x] Plan reviewed
 - [x] Plan approved
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
@@ -170,3 +170,6 @@ critical forks は consult(consult-plan-stage7)に聞いて自分で選んだ(�
 
 - 2026-10-12: 7 段目を 7a(この計画)と 7b に分けること、承認を台帳に記録して計画のファイルと両方で検査すること、受信箱の件の ID でまとめて承認することは consult(consult-plan-stage7)の判定で決めた。approve がファイルを書く案は consult の指摘で外した(A3)
 - 2026-10-12: Codex の計画助言の 2 件(HIGH・MEDIUM)を A8・A9 で直した。計画はユーザーの指示(「作成したプランは自動承認します」)で自動承認した
+- 2026-10-13: 5 つのスライスを implementer に渡し、1 スライス 1 コミットで入れた。S1 f779cc56(設定と結びつき)、S2 c08a1a14(org 層の承認と判定)、S3 e3d34062(spawn と TASK の検査)、S4 5596561a(`ralph org approve`)、S5 36b9d3a3(leader の雛形と文書)
+- 2026-10-13: 逸脱は 1 件。S1 の implementer が `internal/cli/org_feature_test.go` に `gofmt -w` を 1 回かけた(桁揃えだけで、中身は変わらない)。S2 以降は使わせていない
+- 2026-10-13: AC11 の書き換えた既存のテスト。S1 は 11 本と共有の helper `testFeature`(結びつきに承認方式の欄が増え、`String()` と照合の期待が変わったため)。S3 は 3 本(`feature_test.go` の 2 本は per-plan の org で implementer に TASK を送るので承認の記録を足した。`spawn_feature_test.go` の 1 本は leader が動いている状態で seat-1 を spawn するよう直した)。S4 は 0 本。S5 は `TestRenderRolePrompt_Leader_FeatureOrgProcedure` の固定の語句 2 つ(手順の番号が 1〜14 に繰り下がったため)
