@@ -481,16 +481,21 @@ type WatchAllParams struct {
 	// StopPollInterval is the tick of the wait between cycles; zero means
 	// defaultWatchStopPollInterval. Tests shorten it.
 	StopPollInterval time.Duration
+	// OnLocked, when not nil, is called once RunWatchAll holds watch.lock,
+	// before it writes the first mark. A watch refused the lock does not
+	// call it, so `ralph org watch --all` prints its banner there (tech-debt
+	// 204 (e)).
+	OnLocked func()
 }
 
 // RunWatchAll is `ralph org watch --all`: one process that watches every
 // org of the ledger. It takes watch.lock and holds it until it returns
 // (when another watch holds it, the error wraps ErrWatchRunning and nothing
-// is written), removes a stop request that is not later than its start
-// (one that is later is followed after the first cycle;
-// takeStopRequestAtStart), and writes the liveness mark (running, its pid,
-// its start, its deadman_minutes, and once when Cycles > 0) before the
-// first cycle. Each cycle then, in this order:
+// is written or called), calls p.OnLocked, removes a stop request that is
+// not later than its start (one that is later is followed after the first
+// cycle; takeStopRequestAtStart), and writes the liveness mark (running,
+// its pid, its start, its deadman_minutes, and once when Cycles > 0) before
+// the first cycle. Each cycle then, in this order:
 //
 //  1. sends the inbox items past a deadline (SweepInboxDeadlines, with one
 //     InboxDeadlineMemory for the whole run). It needs no herdr, agmsg, or
@@ -531,6 +536,9 @@ func (o *Org) RunWatchAll(ctx context.Context, p WatchAllParams, hooks WatchHook
 	}
 	w := o.newWatchAllRun(p, hooks, startedAt)
 	defer w.finish(lock)
+	if p.OnLocked != nil {
+		p.OnLocked()
+	}
 	w.takeStopRequestAtStart()
 	w.writeMark()
 

@@ -355,16 +355,32 @@ func TestOrgSend_WatchGate_ATaskPassesARunningWatch(t *testing.T) {
 	}
 }
 
-// AC1 for `ralph org start <task>`: the leader's spawn is refused while the
-// watch that holds watch.lock is stale, and nothing is recorded or called.
+// shortenOrgWatchDeadline makes the wait of ensureOrgWatch (start and
+// --detach) for a stale watch, and for a launched one, last 300ms, probing
+// every 10ms.
+func shortenOrgWatchDeadline(t *testing.T) {
+	t.Helper()
+	setOrgWatchDuration(t, &orgWatchDetachDeadline, 300*time.Millisecond)
+	setOrgWatchDuration(t, &orgWatchProbeInterval, 10*time.Millisecond)
+}
+
+// AC1 and AC4 for `ralph org start <task>`: the leader's spawn is refused
+// while the watch that holds watch.lock is stale for the whole deadline
+// (shortened), no watch is launched, and nothing is recorded or called.
 func TestOrgStart_WatchGate_RefusesAStaleWatch(t *testing.T) {
 	useRealOrgWatchGate(t)
+	refuseOrgWatchLaunch(t)
+	shortenOrgWatchDeadline(t)
 	herdrLog, agmsgLog := setupOrgStubPATH(t)
 	stateDir := t.TempDir()
 	holdWatchLock(t, stateDir, runningMark(4330, time.Now().Add(-time.Hour)))
 
+	start := time.Now()
 	stdout, _, err := runOrgCmdStreams(t, "start", "--org-id", "org-a", "--driver", "claude", "--model", "sonnet",
 		"--cwd", t.TempDir(), "--scope", "org-wide", "--state-dir", stateDir, "do the task")
+	if elapsed := time.Since(start); elapsed < 300*time.Millisecond {
+		t.Errorf("start refused the stale watch after %v; want it to wait the 300ms deadline first", elapsed)
+	}
 	checkGateRefusal(t, err, stateDir, "has not refreshed its liveness mark (pid 4330)", "stop it with ralph org watch --stop")
 	if want := "rejected: " + err.Error() + "\n"; stdout != want {
 		t.Errorf("stdout = %q; want only %q", stdout, want)
@@ -372,11 +388,14 @@ func TestOrgStart_WatchGate_RefusesAStaleWatch(t *testing.T) {
 	checkNothingStarted(t, stateDir, herdrLog, agmsgLog)
 }
 
-// AC1 for `ralph org start --plan`: with a stale watch the start is refused
-// before the feature worktree is made, so there is no worktree, no branch,
-// no manifest event, and no herdr or agmsg call.
+// AC1 and AC4 for `ralph org start --plan`: with a watch stale for the whole
+// deadline (shortened) the start is refused before the feature worktree is
+// made, so there is no launched watch, no worktree, no branch, no manifest
+// event, and no herdr or agmsg call.
 func TestOrgStartPlan_WatchGate_RefusesAStaleWatchBeforeTheWorktree(t *testing.T) {
 	useRealOrgWatchGate(t)
+	refuseOrgWatchLaunch(t)
+	shortenOrgWatchDeadline(t)
 	herdrLog, agmsgLog := setupOrgStubPATH(t)
 	root := newFeatureRepo(t, ".claude/worktrees/\n")
 	t.Chdir(root)

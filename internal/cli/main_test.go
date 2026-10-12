@@ -36,19 +36,19 @@ import (
 // notification swaps in its own stub and restores this one.
 //
 // It also sets orgWatchLaunch, the start of the detached watch of `ralph
-// org watch --all --detach`, to one that panics: in a test, os.Executable is
-// the test binary, so a real launch would exec it. A test of --detach sets
-// its own launcher. And it shortens how long a watch waits for watch.lock
-// and how often it looks for a stop request (orgWatchLockWaitOverride,
-// orgWatchStopPollIntervalOverride), so a refused second watch and a
-// `--stop` take milliseconds instead of seconds.
+// org watch --all --detach` and `ralph org start`, to one that panics: in a
+// test, os.Executable is the test binary, so a real launch would exec it. A
+// test that launches a watch sets its own launcher. And it shortens how long
+// a watch waits for watch.lock and how often it looks for a stop request
+// (orgWatchLockWaitOverride, orgWatchStopPollIntervalOverride), so a refused
+// second watch and a `--stop` take milliseconds instead of seconds.
 //
 // It also sets orgWatchGateOverride to a watch gate that always passes, so
 // the tests of spawn, start, and send run as they did before the gate,
-// with no watch on their ledger; a test of the gate sets it back to nil
-// (useRealOrgWatchGate). And it shortens the gate's settle
-// (orgWatchGateSettleOverride), so a refusal of a stale watch comes in
-// milliseconds instead of 2 s.
+// with no watch on their ledger, and start launches none; a test of the
+// gate sets it back to nil (useRealOrgWatchGate). And it shortens the
+// gate's settle (orgWatchGateSettleOverride), so a refusal of a stale watch
+// comes in milliseconds instead of 2 s.
 func TestMain(m *testing.M) {
 	doctorShellAliasEnv = func() (shellAliasEnv, error) {
 		return shellAliasEnv{Home: filepath.Join(os.TempDir(), "ralph-cli-test-no-such-home")}, nil
@@ -61,8 +61,8 @@ func TestMain(m *testing.M) {
 	orgCodexModelObserveTimeoutOverride = 50 * time.Millisecond
 	orgCodexModelObserveIntervalOverride = 5 * time.Millisecond
 	orgDesktopNotifyOverride = func(context.Context, string) error { return nil }
-	orgWatchLaunch = func(args []string, logPath string) (*orgWatchProcess, error) {
-		panic(fmt.Sprintf("a test tried to launch a real detached ralph org watch (args %q, log %s); set orgWatchLaunch to a fake", args, logPath))
+	orgWatchLaunch = func(req orgWatchLaunchRequest) (*orgWatchProcess, error) {
+		panic(fmt.Sprintf("a test tried to launch a real detached ralph org watch (args %q, log %s); set orgWatchLaunch to a fake", req.args, req.logPath))
 	}
 	orgWatchLockWaitOverride = 50 * time.Millisecond
 	orgWatchStopPollIntervalOverride = 5 * time.Millisecond

@@ -730,6 +730,49 @@ func TestRunWatchAll_ASecondWatchIsRefusedUntilTheFirstEnds(t *testing.T) {
 	}
 }
 
+// Tech-debt 204 (e) and AC9 (plan 2026-10-12-org-watch-gate): RunWatchAll
+// calls OnLocked once, while it holds watch.lock and before it writes its
+// first mark or runs a cycle, and a watch refused the lock does not call it.
+func TestRunWatchAll_CallsOnLockedOnceItHoldsTheLock(t *testing.T) {
+	f := newWatchAllFixture(t)
+	calls := 0
+	p := f.params(1)
+	p.OnLocked = func() {
+		calls++
+		if lock, err := AcquireWatchLock(f.dir, 20*time.Millisecond); !errors.Is(err, ErrWatchRunning) {
+			t.Errorf("AcquireWatchLock in OnLocked = %v; want ErrWatchRunning", err)
+			if err == nil {
+				_ = lock.Release()
+			}
+		}
+		if _, err := ReadWatchAlive(f.dir); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("ReadWatchAlive in OnLocked = %v; want no mark yet", err)
+		}
+	}
+	err := runWatchAll(t, f.o, context.Background(), p, WatchHooks{OnCycle: func(int, time.Time) {
+		if calls != 1 {
+			t.Errorf("OnLocked was called %d times before the first cycle; want once", calls)
+		}
+	}})
+	if err != nil {
+		t.Fatalf("RunWatchAll: %v", err)
+	}
+	if calls != 1 {
+		t.Errorf("OnLocked was called %d times; want once", calls)
+	}
+
+	lock, err := AcquireWatchLock(f.dir, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = lock.Release() }()
+	refused := f.params(1)
+	refused.OnLocked = func() { t.Error("a watch refused the lock called OnLocked") }
+	if err := runWatchAll(t, f.o, context.Background(), refused, WatchHooks{}); !errors.Is(err, ErrWatchRunning) {
+		t.Fatalf("RunWatchAll while another holds the lock = %v; want ErrWatchRunning", err)
+	}
+}
+
 // AC10: the mark is written running (own pid, started_at, ts) before the
 // first cycle and after each cycle, ProbeWatch reads it as running, and
 // when the watch ends (its context cancelled, or its Cycles reached) the

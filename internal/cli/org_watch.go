@@ -8,7 +8,9 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -85,7 +87,7 @@ func newOrgWatchCmd(orgID, stateDir, configPath *string) *cobra.Command {
 				return err
 			}
 			if detach {
-				return runOrgWatchDetach(cmd, rt, resolvedStateDir, orgWatchChildArgs(cmd, resolvedStateDir, *configPath, intervalSeconds))
+				return runOrgWatchDetach(cmd, rt, resolvedStateDir, stateDirSource, *configPath, intervalSeconds)
 			}
 			return runOrgWatchAll(cmd, rt, resolvedStateDir, stateDirSource, intervalSeconds, once)
 		},
@@ -157,8 +159,13 @@ func runOrgWatchAll(cmd *cobra.Command, rt *org.Org, resolvedStateDir, stateDirS
 	// RunWatchAll's own fallback chain so the banner reports what will
 	// really execute.
 	effectiveInterval := org.ResolveWatchInterval(time.Duration(intervalSeconds)*time.Second, rt.Config.Watchdog)
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "watching every org (interval=%s once=%t state-dir=%s (source: %s))\n",
-		effectiveInterval, once, resolvedStateDir, stateDirSource)
+	// The banner is printed once this watch holds watch.lock
+	// (WatchAllParams.OnLocked), so a second watch, refused the lock, prints
+	// only its refusal (tech-debt 204 (e)).
+	banner := func() {
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "watching every org (interval=%s once=%t state-dir=%s (source: %s))\n",
+			effectiveInterval, once, resolvedStateDir, stateDirSource)
+	}
 	// The inbox deadline banners name `ralph org inbox show`, with
 	// --state-dir when this watch was given one (a --detach child always is).
 	rt.InboxHintStateDir = orgInboxHintStateDir(cmd, resolvedStateDir)
@@ -179,8 +186,9 @@ func runOrgWatchAll(cmd *cobra.Command, rt *org.Org, resolvedStateDir, stateDirS
 	// out the full 60s bound after the watch has stopped.
 	//
 	// RunWatchAll calls BeforeStop while it still holds watch.lock and its
-	// mark says running (cross-review cycle 1 #1), so `--stop` and a second
-	// `watch --all` see this watch running until the goroutines have ended,
+	// mark says stopping (cross-review cycle 1 #1; plan
+	// 2026-10-12-org-watch-gate F9), so `--stop` and a second `watch --all`
+	// see this watch holding the lock until the goroutines have ended,
 	// rather than a free lock while they can still send an ALERT or write a
 	// receipt. Nothing waits after RunWatchAll returns: it calls BeforeStop
 	// on every end after it took the lock, and when it did not take it, no
@@ -202,97 +210,161 @@ func runOrgWatchAll(cmd *cobra.Command, rt *org.Org, resolvedStateDir, stateDirS
 		Stderr:           cmd.ErrOrStderr(),
 		LockWait:         orgWatchLockWaitOverride,
 		StopPollInterval: orgWatchStopPollIntervalOverride,
+		OnLocked:         banner,
 	}, hooks)
 }
 
-// orgWatchProcess is a detached watch that --detach started: pid, exited
-// (closed once the process has exited and been reaped), and stop (ends the
-// process and returns once it has exited). stop acts on this process, never
-// on a pid read from the liveness mark.
+// orgWatchProcess is a detached watch that --detach or `ralph org start`
+// launched: pid, exited (closed once the process has exited and been
+// reaped), and stop (ends the process and returns once it has exited). stop
+// acts on this process, never on a pid read from the liveness mark.
 type orgWatchProcess struct {
 	pid    int
 	exited <-chan struct{}
 	stop   func()
 }
 
-// orgWatchLaunch starts the detached watch of --detach: the ralph binary
-// with args, its stdout and stderr appended to logPath. It is
-// launchOrgWatch in production. TestMain replaces it with one that panics,
-// so no test execs the test binary; a test of --detach sets its own.
+// orgWatchLaunchRequest is a detached watch to launch (orgWatchChild): the
+// ralph binary with args, its stdout and stderr appended to logPath, run in
+// the working directory dir ("" keeps this process's) with the environment
+// env (nil keeps this process's).
+type orgWatchLaunchRequest struct {
+	args    []string
+	logPath string
+	dir     string
+	env     []string
+}
+
+// orgWatchLaunch starts the detached watch that --detach and `ralph org
+// start` launch (ensureOrgWatch). It is launchOrgWatch in production.
+// TestMain replaces it with one that panics, so no test execs the test
+// binary; a test that launches a watch sets its own.
 var orgWatchLaunch = launchOrgWatch
 
-// How long and how often --detach and --stop wait; package vars so tests
-// can shorten them.
+// How long and how often ensureOrgWatch (--detach and `ralph org start`) and
+// --stop wait; package vars so tests can shorten them.
 var (
-	// orgWatchDetachDeadline is how long --detach waits for its child's
-	// running mark.
+	// orgWatchDetachDeadline is how long ensureOrgWatch waits for a stale
+	// watch to accept work, and for a watch it launched to.
 	orgWatchDetachDeadline = 10 * time.Second
-	// orgWatchReleaseDeadline is how long --detach waits for watch.lock to
-	// be free after it stopped a child that was not running in time.
+	// orgWatchReleaseDeadline is how long ensureOrgWatch waits for
+	// watch.lock to be free after it stopped a child that was not running in
+	// time.
 	orgWatchReleaseDeadline = 2 * time.Second
 	// orgWatchStopDeadline is how long --stop waits for watch.lock to be
 	// free.
 	orgWatchStopDeadline = 30 * time.Second
-	// orgWatchProbeInterval is how often --detach and --stop look again.
+	// orgWatchProbeInterval is how often ensureOrgWatch and --stop look
+	// again.
 	orgWatchProbeInterval = 100 * time.Millisecond
 	// orgWatchChildStopGrace is how long orgWatchProcess.stop waits after
 	// SIGTERM, which ends the watch after its current cycle, before SIGKILL.
 	orgWatchChildStopGrace = 5 * time.Second
 )
 
-// orgWatchChildArgs returns the arguments --detach starts the ralph binary
-// with: the foreground watch of the resolved state dir, plus --config and
-// --interval-seconds when they were given. The child inherits the working
-// directory, so a relative --config and the ./ralph.toml default resolve
-// as they did here.
-func orgWatchChildArgs(cmd *cobra.Command, resolvedStateDir, configPath string, intervalSeconds int) []string {
+// orgWatchChildArgs returns the arguments the detached watch starts the
+// ralph binary with: the foreground watch of the resolved state dir, plus
+// --config, made absolute from this process's working directory, and
+// --interval-seconds when they were given (`ralph org start` has no
+// --interval-seconds). The child runs in another working directory
+// (orgWatchChild), where a relative --config would name another file.
+func orgWatchChildArgs(cmd *cobra.Command, resolvedStateDir, configPath string, intervalSeconds int) ([]string, error) {
 	args := []string{"org", "watch", "--all", "--state-dir", resolvedStateDir}
 	if cmd.Flags().Changed("config") {
+		if configPath != "" {
+			abs, err := filepath.Abs(configPath)
+			if err != nil {
+				return nil, fmt.Errorf("make --config %s absolute: %w", configPath, err)
+			}
+			configPath = abs
+		}
 		args = append(args, "--config", configPath)
 	}
 	if cmd.Flags().Changed("interval-seconds") {
 		args = append(args, "--interval-seconds", strconv.Itoa(intervalSeconds))
 	}
-	return args
+	return args, nil
+}
+
+// orgWatchChildDroppedEnv are the variables the detached watch does not
+// inherit (tech-debt 205): they name the herdr pane, tab, and workspace of
+// the command that launches it, such as a leader's, while the watch runs
+// outside herdr for days. Every other variable stays, among them the XDG
+// ones that can point herdr at an isolated server.
+var orgWatchChildDroppedEnv = []string{"HERDR_PANE_ID", "HERDR_TAB_ID", "HERDR_WORKSPACE_ID", "HERDR_ENV"}
+
+// orgWatchChild returns the detached watch that --detach and `ralph org
+// start` launch (plan 2026-10-12-org-watch-gate, F6): orgWatchChildArgs,
+// logging to watch.log of the state dir, run in the main worktree root of
+// the ledger (org.LedgerMainWorktreeRoot) rather than in the worktree it was
+// launched from, which can be removed while the watch runs, so it reads
+// that root's ralph.toml when no --config was given. A ledger that names no
+// main worktree (a --state-dir outside the repository) keeps this process's
+// working directory. The environment is this process's less
+// orgWatchChildDroppedEnv, with PWD set to the new working directory, as
+// os/exec sets it for a nil Env.
+func orgWatchChild(cmd *cobra.Command, resolvedStateDir, stateDirSource, configPath string, intervalSeconds int) (orgWatchLaunchRequest, error) {
+	args, err := orgWatchChildArgs(cmd, resolvedStateDir, configPath, intervalSeconds)
+	if err != nil {
+		return orgWatchLaunchRequest{}, err
+	}
+	req := orgWatchLaunchRequest{args: args, logPath: filepath.Join(resolvedStateDir, org.WatchLogFileName)}
+	if root, ok := org.LedgerMainWorktreeRoot(resolvedStateDir, stateDirSource); ok {
+		req.dir = root
+	}
+	environ := os.Environ()
+	req.env = make([]string, 0, len(environ)+1)
+	for _, kv := range environ {
+		name, _, _ := strings.Cut(kv, "=")
+		if slices.Contains(orgWatchChildDroppedEnv, name) || (req.dir != "" && name == "PWD") {
+			continue
+		}
+		req.env = append(req.env, kv)
+	}
+	if req.dir != "" {
+		req.env = append(req.env, "PWD="+req.dir)
+	}
+	return req, nil
 }
 
 // launchOrgWatch is orgWatchLaunch in production: the running ralph binary
 // (os.Executable), started by startDetachedProcess.
-func launchOrgWatch(args []string, logPath string) (*orgWatchProcess, error) {
+func launchOrgWatch(req orgWatchLaunchRequest) (*orgWatchProcess, error) {
 	exe, err := os.Executable()
 	if err != nil {
-		return nil, fmt.Errorf("org: watch --detach: find the ralph binary: %w", err)
+		return nil, fmt.Errorf("find the ralph binary: %w", err)
 	}
-	return startDetachedProcess(exe, args, logPath)
+	return startDetachedProcess(exe, req)
 }
 
-// startDetachedProcess starts path with args in a new session (setsid, so
-// no terminal's signals or hangup reach it), stdin /dev/null, and stdout
-// and stderr appended to logPath (created with mode 0644 less the umask,
-// with its directory). The process stays this command's unreaped child
-// until exited closes, so the pid stop signals cannot name another process
-// meanwhile. stop sends SIGTERM and, when the process has not exited within
-// orgWatchChildStopGrace, SIGKILL.
-func startDetachedProcess(path string, args []string, logPath string) (*orgWatchProcess, error) {
-	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
-		return nil, fmt.Errorf("org: watch --detach: create the state dir: %w", err)
+// startDetachedProcess starts path with req.args in a new session (setsid,
+// so no terminal's signals or hangup reach it), in req.dir with req.env,
+// stdin /dev/null, and stdout and stderr appended to req.logPath (created
+// with mode 0644 less the umask, with its directory). The process stays this
+// command's unreaped child until exited closes, so the pid stop signals
+// cannot name another process meanwhile. stop sends SIGTERM and, when the
+// process has not exited within orgWatchChildStopGrace, SIGKILL.
+func startDetachedProcess(path string, req orgWatchLaunchRequest) (*orgWatchProcess, error) {
+	if err := os.MkdirAll(filepath.Dir(req.logPath), 0o755); err != nil {
+		return nil, fmt.Errorf("create the state dir: %w", err)
 	}
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	logFile, err := os.OpenFile(req.logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
-		return nil, fmt.Errorf("org: watch --detach: open the log: %w", err)
+		return nil, fmt.Errorf("open the log: %w", err)
 	}
 	defer func() { _ = logFile.Close() }() // the child has its own copy
 	devNull, err := os.Open(os.DevNull)
 	if err != nil {
-		return nil, fmt.Errorf("org: watch --detach: open %s: %w", os.DevNull, err)
+		return nil, fmt.Errorf("open %s: %w", os.DevNull, err)
 	}
 	defer func() { _ = devNull.Close() }()
 
-	child := exec.Command(path, args...)
+	child := exec.Command(path, req.args...)
+	child.Dir, child.Env = req.dir, req.env
 	child.Stdin, child.Stdout, child.Stderr = devNull, logFile, logFile
 	child.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := child.Start(); err != nil {
-		return nil, fmt.Errorf("org: watch --detach: start %s: %w", path, err)
+		return nil, fmt.Errorf("start %s: %w", path, err)
 	}
 	exited := make(chan struct{})
 	go func() {
@@ -312,54 +384,152 @@ func startDetachedProcess(path string, args []string, logPath string) (*orgWatch
 	return &orgWatchProcess{pid: child.Process.Pid, exited: exited, stop: stop}, nil
 }
 
-// runOrgWatchDetach is `ralph org watch --all --detach`: it starts the
-// foreground watch (args) as a detached process and returns once that
-// process's liveness mark says running with its pid. It starts nothing when
-// a watch is already running (exit 0) or holds watch.lock with a stale mark
-// (exit 1, saying how to stop it). A child that exits first, or is not
-// running within orgWatchDetachDeadline, is an error naming watch.log. In
-// the second case the child is stopped and reaped, and watch.lock checked
-// free, first, so a failed --detach leaves no watch behind that would make
-// the next one stale (Codex plan advisory finding 3).
-func runOrgWatchDetach(cmd *cobra.Command, rt *org.Org, stateDir string, args []string) error {
-	logPath := filepath.Join(stateDir, org.WatchLogFileName)
-	deadman := rt.Config.DeadmanMinutes
-	switch probe := org.ProbeWatch(stateDir, time.Now(), deadman); probe.State {
-	case org.WatchLivenessRunning:
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "ralph org watch --all is already running (pid %d); log: %s\n", probe.Mark.PID, logPath)
-		return nil
-	case org.WatchLivenessStale:
-		return fmt.Errorf("org: watch --detach: a watch holds %s but its liveness mark is not fresh (%s), so nothing was started; stop it with ralph org watch --stop, or %s",
-			org.WatchLockPathIn(stateDir), orgWatchPIDText(probe.Mark), orgWatchKillHint(stateDir, probe.Mark))
-	}
+// orgWatchEnsure is what ensureOrgWatch takes.
+type orgWatchEnsure struct {
+	// stateDir is the ledger; deadman is the deadman_minutes of the
+	// caller's config, by which ProbeWatch judges a mark that carries none.
+	stateDir string
+	deadman  int
+	// child returns the watch to launch (orgWatchChild). It is called only
+	// when ensureOrgWatch launches one.
+	child func() (orgWatchLaunchRequest, error)
+	// errPrefix starts the error of a launch that failed.
+	errPrefix string
+	// refuse returns the error for a watch that holds watch.lock and accepts
+	// no work.
+	refuse func(org.WatchLiveness) error
+}
 
-	child, err := orgWatchLaunch(args, logPath)
-	if err != nil {
-		return err
+// orgWatchEnsured is the watch ensureOrgWatch found accepting work: the pid
+// of its mark, and whether it is the child ensureOrgWatch launched.
+type orgWatchEnsured struct {
+	pid      int
+	launched bool
+}
+
+// ensureOrgWatch makes sure a watch that accepts work (org.WatchAcceptsWork)
+// runs on e.stateDir, for --detach and `ralph org start` (plan
+// 2026-10-12-org-watch-gate, figure 2), and launches one only when none
+// runs. A watch that accepts work is taken as it is. A stale one may have
+// taken watch.lock and not written its first mark yet (F10), so
+// ensureOrgWatch probes again every orgWatchProbeInterval for up to
+// orgWatchDetachDeadline, taking a watch that comes to accept work and going
+// on to launch when the holder has ended (not_running). A watch that holds
+// the lock and accepts no work (stale past the deadline, stopping, or a
+// --once run; F9) is e.refuse's error, and nothing is launched while it holds
+// the lock. With no watch running, launchAndAwaitOrgWatch launches one.
+func ensureOrgWatch(e orgWatchEnsure) (orgWatchEnsured, error) {
+	probe := org.ProbeWatch(e.stateDir, time.Now(), e.deadman)
+	for deadline := time.Now().Add(orgWatchDetachDeadline); probe.State == org.WatchLivenessStale; {
+		left := time.Until(deadline)
+		if left <= 0 {
+			break
+		}
+		time.Sleep(min(orgWatchProbeInterval, left))
+		probe = org.ProbeWatch(e.stateDir, time.Now(), e.deadman)
 	}
+	if org.WatchAcceptsWork(probe) {
+		return orgWatchEnsured{pid: probe.Mark.PID}, nil
+	}
+	if probe.State != org.WatchLivenessNotRunning {
+		return orgWatchEnsured{}, e.refuse(probe)
+	}
+	return launchAndAwaitOrgWatch(e)
+}
+
+// launchAndAwaitOrgWatch launches e.child (orgWatchLaunch) and waits up to
+// orgWatchDetachDeadline for any watch to accept work: its own child, or the
+// watch of a concurrent start or --detach whose child won watch.lock
+// (tech-debt 206); orgWatchEnsured.launched tells them apart by the pid of
+// the mark. Once the child has exited, it waits on only while a watch holds
+// the lock with a stale mark (one that has not written its first mark yet),
+// and otherwise returns an error naming watch.log at once. A child that is
+// not running by the deadline is stopped and reaped, and watch.lock checked
+// free, before the error, so a failed launch leaves no watch behind that
+// would make the next one stale (Codex plan advisory finding 3 of
+// org-cross-watch).
+func launchAndAwaitOrgWatch(e orgWatchEnsure) (orgWatchEnsured, error) {
+	req, err := e.child()
+	if err != nil {
+		return orgWatchEnsured{}, fmt.Errorf("%s: %w", e.errPrefix, err)
+	}
+	child, err := orgWatchLaunch(req)
+	if err != nil {
+		return orgWatchEnsured{}, fmt.Errorf("%s: %w", e.errPrefix, err)
+	}
+	exited, childExited := child.exited, false
 	deadline := time.Now().Add(orgWatchDetachDeadline)
 	for {
-		probe := org.ProbeWatch(stateDir, time.Now(), deadman)
-		if probe.State == org.WatchLivenessRunning && probe.Mark.PID == child.pid {
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "started ralph org watch --all (pid %d); log: %s\n", child.pid, logPath)
-			return nil
+		probe := org.ProbeWatch(e.stateDir, time.Now(), e.deadman)
+		if org.WatchAcceptsWork(probe) {
+			return orgWatchEnsured{pid: probe.Mark.PID, launched: probe.Mark.PID == child.pid}, nil
 		}
-		if !time.Now().Before(deadline) {
+		if (childExited && probe.State != org.WatchLivenessStale) || !time.Now().Before(deadline) {
 			break
 		}
 		select {
-		case <-child.exited:
-			return fmt.Errorf("org: watch --detach: the watch (pid %d) exited before it was running; see %s", child.pid, logPath)
+		case <-exited:
+			// A nil channel blocks, so the next waits are the probe interval's.
+			childExited, exited = true, nil
 		case <-time.After(orgWatchProbeInterval):
 		}
 	}
+	if childExited {
+		return orgWatchEnsured{}, fmt.Errorf("%s: the watch (pid %d) exited before it was running; see %s", e.errPrefix, child.pid, req.logPath)
+	}
 
 	child.stop()
-	if _, free := waitOrgWatchReleased(stateDir, orgWatchReleaseDeadline); !free {
-		return fmt.Errorf("org: watch --detach: the watch (pid %d) was not running within %s, so it was stopped, but %s is still held; see %s and ralph status",
-			child.pid, orgWatchDetachDeadline, org.WatchLockPathIn(stateDir), logPath)
+	if _, free := waitOrgWatchReleased(e.stateDir, orgWatchReleaseDeadline); !free {
+		return orgWatchEnsured{}, fmt.Errorf("%s: the watch (pid %d) was not running within %s, so it was stopped, but %s is still held; see %s and ralph status",
+			e.errPrefix, child.pid, orgWatchDetachDeadline, org.WatchLockPathIn(e.stateDir), req.logPath)
 	}
-	return fmt.Errorf("org: watch --detach: the watch (pid %d) was not running within %s, so it was stopped; see %s", child.pid, orgWatchDetachDeadline, logPath)
+	return orgWatchEnsured{}, fmt.Errorf("%s: the watch (pid %d) was not running within %s, so it was stopped; see %s",
+		e.errPrefix, child.pid, orgWatchDetachDeadline, req.logPath)
+}
+
+// runOrgWatchDetach is `ralph org watch --all --detach`: ensureOrgWatch with
+// the foreground watch of the ledger as the child (orgWatchChild). It prints
+// `started` when the watch that accepts work is its own child, and `already
+// running` for any other (one that was running, or one a concurrent start or
+// --detach launched; tech-debt 206), with the pid of the mark, and exits 0.
+// A watch that holds watch.lock and accepts no work is refused with nothing
+// started (orgWatchDetachRefusal).
+func runOrgWatchDetach(cmd *cobra.Command, rt *org.Org, stateDir, stateDirSource, configPath string, intervalSeconds int) error {
+	got, err := ensureOrgWatch(orgWatchEnsure{
+		stateDir: stateDir, deadman: rt.Config.DeadmanMinutes,
+		child: func() (orgWatchLaunchRequest, error) {
+			return orgWatchChild(cmd, stateDir, stateDirSource, configPath, intervalSeconds)
+		},
+		errPrefix: "org: watch --detach",
+		refuse:    func(probe org.WatchLiveness) error { return orgWatchDetachRefusal(stateDir, probe) },
+	})
+	if err != nil {
+		return err
+	}
+	logPath := filepath.Join(stateDir, org.WatchLogFileName)
+	if got.launched {
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "started ralph org watch --all (pid %d); log: %s\n", got.pid, logPath)
+		return nil
+	}
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "ralph org watch --all is already running (pid %d); log: %s\n", got.pid, logPath)
+	return nil
+}
+
+// orgWatchDetachRefusal is the error of --detach for a watch that holds
+// watch.lock and accepts no work, so nothing was started: for a stale one,
+// how to stop it; for a stopping or --once one, which ends soon, to run
+// --detach again once it has ended.
+func orgWatchDetachRefusal(stateDir string, probe org.WatchLiveness) error {
+	if probe.State == org.WatchLivenessStale {
+		return fmt.Errorf("org: watch --detach: a watch holds %s but its liveness mark is not fresh (%s), so nothing was started; stop it with ralph org watch --stop, or %s",
+			org.WatchLockPathIn(stateDir), orgWatchPIDText(probe.Mark), orgWatchKillHint(stateDir, probe.Mark))
+	}
+	ends := "is stopping"
+	if probe.State == org.WatchLivenessRunning {
+		ends = "is a --once run, which ends after its cycle"
+	}
+	return fmt.Errorf("org: watch --detach: the watch that holds %s (%s) %s, so nothing was started; run ralph org watch --all --detach again once it has ended",
+		org.WatchLockPathIn(stateDir), orgWatchPIDText(probe.Mark), ends)
 }
 
 // runOrgWatchStop is `ralph org watch --stop`. It sends no signal (Codex
