@@ -173,3 +173,13 @@ critical forks は consult(consult-plan-stage7)に聞いて自分で選んだ(�
 - 2026-10-13: 5 つのスライスを implementer に渡し、1 スライス 1 コミットで入れた。S1 f779cc56(設定と結びつき)、S2 c08a1a14(org 層の承認と判定)、S3 e3d34062(spawn と TASK の検査)、S4 5596561a(`ralph org approve`)、S5 36b9d3a3(leader の雛形と文書)
 - 2026-10-13: 逸脱は 1 件。S1 の implementer が `internal/cli/org_feature_test.go` に `gofmt -w` を 1 回かけた(桁揃えだけで、中身は変わらない)。S2 以降は使わせていない
 - 2026-10-13: AC11 の書き換えた既存のテスト。S1 は 11 本と共有の helper `testFeature`(結びつきに承認方式の欄が増え、`String()` と照合の期待が変わったため)。S3 は 3 本(`feature_test.go` の 2 本は per-plan の org で implementer に TASK を送るので承認の記録を足した。`spawn_feature_test.go` の 1 本は leader が動いている状態で seat-1 を spawn するよう直した)。S4 は 0 本。S5 は `TestRenderRolePrompt_Leader_FeatureOrgProcedure` の固定の語句 2 つ(手順の番号が 1〜14 に繰り下がったため)
+- 2026-10-13: self-review の 1 回目(報告は 3d73dbf4、MEDIUM 1 件と LOW 11 件)の指摘は、consult(consult-plan-selfreviewfix)の判定に従って verify の前に直した。54feb287 は approve の動詞を別のファイルに移しただけで、中身は変えていない(L4)。9fb3fafa は M1・L1〜L3・L5〜L11 の直しで、8ad54167 は seat.go のコメントの参照を approve.go に直した。cross-review より前の直しなので、cycle は 1 のまま self-review からやり直す
+- 2026-10-13: 逸脱 1。新しいファイル `internal/org/approve.go` と `internal/org/approve_test.go` を作った。Affected areas(69 行目)と実装の概略の S2(115 行目)は `Org.Approve` を approval.go に置くと書いている。approval.go が 853 行になったので、approve の動詞(`ApproveParams` から `resolveApproved` まで)とそのテストを分けた(L4)。approval.go は 635 行、approve.go は 408 行になった
+- 2026-10-13: 逸脱 2。承認の検査で断られたときの次の手を、断られた理由ごとに 1 つにした(M1、9fb3fafa)。Scope(45 行目)、Risks(145 行目)、AC10 は「BLOCKED を escalate する」と書いているが、理由の文と次の手が食い違っていたため直した。今は、どの拒否にも目印 `refused by the approval check` が付き、その後ろに次の手が 1 つ続く。次の手は次の 5 つ
+  - 承認の記録がない場合: 承認の DECISION をまだ受けていなければ返事を待つ。受けていれば BLOCKED を上げる
+  - 計画の先頭の 2 行が違う場合: 2 行を書いてコミットし、打ち直す
+  - 承認のあとに計画が変わった場合: 変更を戻すか、Draft に戻して新しい QUESTION を上げる
+  - TASK の `PLAN:` がないか、形が違う場合: `TASK_ID:` の次の行に足して送り直す
+  - それ以外: BLOCKED を上げる
+- 2026-10-13: 逸脱 2 の続き。拒否の文は「leader は自分で approve を打たない」で終わる。`--raw` を禁じる一文は TASK の拒否にだけ付く。雛形の手順 7 は「目印の後ろの次の手に従う」に書き直した。AC10 の「BLOCKED を escalate する」は、記録がない場合の後半と、それ以外の場合の次の手として読む。tech-debt の「Small leftovers of org-plan-approval」の行の (d)(spawn の拒否が `--raw` に触れる)は、この直しで閉じた
+- 2026-10-13: 逸脱 3。`- Approved:` の行の形を厳しくした(L2、9fb3fafa)。最初の `##` の見出しより前にある最初の `- Approved:` が、実在する日付の `YYYY-MM-DD` と `sha256:<12 桁>` の 2 語でなければ、digest がないものとして扱う。docs/plans の 22 本では、21 本がこの形だった。残りの 1 本はテンプレートの `- Approved: TBD` である
