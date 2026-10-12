@@ -183,3 +183,10 @@ critical forks は consult(consult-plan-stage7)に聞いて自分で選んだ(�
   - それ以外: BLOCKED を上げる
 - 2026-10-13: 逸脱 2 の続き。拒否の文は「leader は自分で approve を打たない」で終わる。`--raw` を禁じる一文は TASK の拒否にだけ付く。雛形の手順 7 は「目印の後ろの次の手に従う」に書き直した。AC10 の「BLOCKED を escalate する」は、記録がない場合の後半と、それ以外の場合の次の手として読む。tech-debt の「Small leftovers of org-plan-approval」の行の (d)(spawn の拒否が `--raw` に触れる)は、この直しで閉じた
 - 2026-10-13: 逸脱 3。`- Approved:` の行の形を厳しくした(L2、9fb3fafa)。最初の `##` の見出しより前にある最初の `- Approved:` が、実在する日付の `YYYY-MM-DD` と `sha256:<12 桁>` の 2 語でなければ、digest がないものとして扱う。docs/plans の 22 本では、21 本がこの形だった。残りの 1 本はテンプレートの `- Approved: TBD` である
+- 2026-10-13: self-review の 2 回目(報告は 02019f48、MEDIUM 1 件と LOW 4 件、Merge: yes)の指摘は、consult(consult-plan-selfreviewfix)の判定に従って直した。どちらも cross-review より前なので、cycle は 1 のまま
+  - 4b6d0d55 で N1・N2・N3・N5 を直した。N1 は、計画を承認し直したあとに古い digest か打ち間違えた digest の `PLAN:` で TASK を送ると、次の手が「変更を戻す」か「返事を待つ」になっていた件。今の計画が承認済みなら、`PLAN:` をその digest に直す拒否にした
+  - 0326574e で、implementer が見つけた隙間を閉じた。承認し直したあと、先頭の 2 行がまだ古いうちに古い `PLAN:` で送った場合は、新しい digest で 2 行を書かせる拒否にした。2 行を書いて送り直すと `PLAN:` を直す拒否になり、新しい digest で送れば通る
+- 2026-10-13: 逸脱 2 の続き。逸脱 2 で挙げた 5 つの次の手のうち、`PLAN:` の次の手は 2 つに分かれた。ないか形が違えば `TASK_ID:` の次の行に足す。今の承認済みの計画と違う digest なら、その digest に直す
+- 2026-10-13: 逸脱 4。`internal/org/approval.go` の拒否の文から、雛形の手順番号(「step 6」)を外した(N2)。雛形の手順 7 は「原因を直す前に同じコマンドを打ち直さない」に書き換えた
+- 2026-10-13: N4 はコードを変えていない。2 つの fixture(`approval_test.go` の `checkFixture` と `approval_enforce_test.go` の `enforceFixture`)の `record` と `mark` は重なったままにした。9fb3fafa の本文は「L8 を直した」とだけ書いているが、まとめたのは置き換えの helper(`replaceOnce`)だけである
+- 2026-10-13: 3 回目の self-review では、止める条件を HIGH 以上にする(consult の判定)。MEDIUM 以下は tech-debt の行に書いて先へ進む
