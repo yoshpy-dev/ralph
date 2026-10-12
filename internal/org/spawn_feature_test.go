@@ -63,7 +63,7 @@ func TestOrgSpawn_Feature_RecordedWithReservation(t *testing.T) {
 		t.Fatalf("expected the caller's binding unchanged, got worktree %q", given.Worktree)
 	}
 	events := mustReadEvents(t, o)
-	want := "paths=docs/,internal/auth/ split=split-1 feature=auth digest=0123456789ab branch=feat/auth"
+	want := "paths=docs/,internal/auth/ split=split-1 feature=auth digest=0123456789ab branch=feat/auth approval=per-plan"
 	if ev := events[0]; ev.Event != EventScopeReserved || ev.OrgID != "org-a" || ev.SeatID != "" || ev.DryRun ||
 		ev.Details != want || ev.Worktree != f.Worktree {
 		t.Fatalf("expected the bound scope_reserved first (Details %q, Worktree %q), got %+v", want, f.Worktree, ev)
@@ -323,7 +323,7 @@ func TestOrgSpawn_Feature_DryRunPredictsBinding(t *testing.T) {
 		t.Fatalf("expected the dry run to pass, got %+v", r)
 	}
 	events := mustReadEvents(t, o)
-	want := "paths=internal/auth/ split=split-1 feature=auth digest=0123456789ab branch=feat/auth"
+	want := "paths=internal/auth/ split=split-1 feature=auth digest=0123456789ab branch=feat/auth approval=per-plan"
 	if ev := events[0]; ev.Event != EventScopeReserved || !ev.DryRun || ev.OrgID != "org-a" || ev.Details != want || ev.Worktree != f.Worktree {
 		t.Fatalf("expected the dry-run trail to start with the bound dry-run scope_reserved, got %+v", ev)
 	}

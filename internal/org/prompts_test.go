@@ -478,7 +478,7 @@ func TestRenderRolePrompt_Leader_FeatureOrgProcedure(t *testing.T) {
 	// The template routes on the first line of the task start --plan builds.
 	const routeLine = "- 分割計画:"
 	task := featureLeaderTask(&SplitPlan{ID: "s", Path: "/state/splits/s.md", Digest: "0123456789ab"},
-		SplitFeature{Slug: "a", Type: "feat", Reserve: []string{"a/"}}, "/state", "/wt", "feat/a")
+		SplitFeature{Slug: "a", Type: "feat", Reserve: []string{"a/"}}, "/state", "/wt", "feat/a", "per-plan")
 	if !strings.HasPrefix(task, routeLine) {
 		t.Fatalf("featureLeaderTask no longer starts with %q, which the leader template routes on; got:\n%s", routeLine, task)
 	}

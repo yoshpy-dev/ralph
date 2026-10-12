@@ -1,9 +1,12 @@
 package org
 
 import (
+	"maps"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/yoshpy-dev/ralph/internal/config"
 )
 
 // TestNormalizeReservePaths covers plan AC6's path rules: a trailing `/` (or
@@ -330,11 +333,14 @@ func TestReservationBeforeLastDisband(t *testing.T) {
 // --- split plan feature bindings (plan 2026-10-09-org-feature-worktree) ---
 
 // testFeature is a complete binding to feature slug of split plan split,
-// approved with digest, on branch feat/<slug> in a worktree named after it.
+// approved with digest, on branch feat/<slug> in a worktree named after it,
+// with the default approval mode per-plan (validateFeatureBinding requires a
+// mode of every binding Spawn records).
 func testFeature(split, slug, digest string) *FeatureBinding {
 	return &FeatureBinding{
 		Split: split, Feature: slug, Digest: digest,
 		Branch: "feat/" + slug, Worktree: "/repo/.claude/worktrees/org-" + slug,
+		Approval: config.ApprovalModePerPlan,
 	}
 }
 
@@ -353,7 +359,7 @@ func boundReserveEvent(orgID string, f *FeatureBinding, paths ...string) Manifes
 func TestScopeReservedDetails_FeatureRoundTrip(t *testing.T) {
 	f := testFeature("split-1", "auth", "0123456789ab")
 	paths := []string{"docs/", "internal/auth/"}
-	const binding = "paths=docs/,internal/auth/ split=split-1 feature=auth digest=0123456789ab branch=feat/auth"
+	const binding = "paths=docs/,internal/auth/ split=split-1 feature=auth digest=0123456789ab branch=feat/auth approval=per-plan"
 	for _, note := range []string{"", "restored: self workspace close failed: herdr: refused"} {
 		ev := scopeReservedEvent("", "org-a", Reservation{Paths: paths, Feature: f}, note, false)
 		want := binding
@@ -371,6 +377,15 @@ func TestScopeReservedDetails_FeatureRoundTrip(t *testing.T) {
 			t.Fatalf("note %q: reservedPathsFromDetails(%q) = %q, %v; want %q", note, ev.Details, old, ok, paths)
 		}
 	}
+	split := *f
+	split.Approval = config.ApprovalModeSplit
+	ev := scopeReservedEvent("", "org-a", Reservation{Paths: paths, Feature: &split}, "", false)
+	if want := strings.Replace(binding, "approval=per-plan", "approval=split", 1); ev.Details != want {
+		t.Fatalf("split binding: Details = %q, want %q", ev.Details, want)
+	}
+	if got := reservationFromEvent(ev).Feature; got == nil || *got != split || got.RequiresApproval() {
+		t.Fatalf("split binding: read back %+v, want %+v needing no approval", got, split)
+	}
 	for _, details := range []string{
 		"paths=docs/,internal/auth/",
 		"paths=docs/,internal/auth/ restored: self pane close failed: herdr: refused",
@@ -380,6 +395,104 @@ func TestScopeReservedDetails_FeatureRoundTrip(t *testing.T) {
 		if !slices.Equal(got.Paths, paths) || got.Feature != nil {
 			t.Errorf("reservationFromEvent(%q) = %q bound to %+v, want %q unbound", details, got.Paths, got.Feature, paths)
 		}
+	}
+}
+
+// oldBindingTokens is the binding as a binary from before the approval mode
+// reads it (its featureBindingFromTokens): the split, feature, digest and
+// branch tokens up to the first other token, the rest being the note.
+func oldBindingTokens(details string) (read map[string]string, note string) {
+	read = make(map[string]string)
+	fields := strings.Fields(details)[1:]
+	for i, token := range fields {
+		key, value, ok := strings.Cut(token, "=")
+		if !ok || !slices.Contains([]string{"split", "feature", "digest", "branch"}, key) {
+			return read, strings.Join(fields[i:], " ")
+		}
+		read[key] = value
+	}
+	return read, ""
+}
+
+// TestScopeReservedDetails_ApprovalTokenAfterBranch: the approval token is
+// written after the branch token and before the note, so a binary from
+// before the approval mode, which stops at the first key it does not know,
+// still reads the split, feature, digest and branch of a new record, and
+// takes `approval=...` and the note after it as the note. A binding with no
+// mode (a record read back from an older start) writes no approval token.
+func TestScopeReservedDetails_ApprovalTokenAfterBranch(t *testing.T) {
+	const note = "restored: self pane close failed: herdr: refused"
+	for _, mode := range []string{config.ApprovalModePerPlan, config.ApprovalModeSplit} {
+		f := testFeature("split-1", "auth", "0123456789ab")
+		f.Approval = mode
+		details := scopeReservedDetails(Reservation{Paths: []string{"docs/"}, Feature: f}, note)
+		branchAt, approvalAt, noteAt := strings.Index(details, " branch="), strings.Index(details, " approval="+mode), strings.Index(details, " "+note)
+		if branchAt < 0 || approvalAt <= branchAt || noteAt <= approvalAt {
+			t.Fatalf("%s: Details %q, want branch=, then approval=%s, then the note", mode, details, mode)
+		}
+		read, oldNote := oldBindingTokens(details)
+		want := map[string]string{"split": "split-1", "feature": "auth", "digest": "0123456789ab", "branch": "feat/auth"}
+		if !maps.Equal(read, want) || oldNote != "approval="+mode+" "+note {
+			t.Fatalf("%s: an older binary reads %v with note %q, want %v with note %q", mode, read, oldNote, want, "approval="+mode+" "+note)
+		}
+	}
+	legacy := testFeature("split-1", "auth", "0123456789ab")
+	legacy.Approval = ""
+	if details := scopeReservedDetails(Reservation{Paths: []string{"docs/"}, Feature: legacy}, ""); strings.Contains(details, "approval") {
+		t.Fatalf("a binding with no mode wrote %q, want no approval token", details)
+	}
+}
+
+// TestFeatureBinding_ApprovalModeRead covers the approval mode a record
+// reads back as, and what RequiresApproval says of it: a record from before
+// the approval mode (no token) reads as "" and is complete and needs no
+// approval (read as split, also in String); per-plan needs it and split does
+// not; the token given twice, given with an empty value, or with a value
+// that is neither mode reads as a mode that needs the approval, while the
+// binding stays complete. A token after the note is not read.
+func TestFeatureBinding_ApprovalModeRead(t *testing.T) {
+	const wt = "/repo/.claude/worktrees/org-auth"
+	const base = "paths=docs/ split=s feature=auth digest=d branch=feat/auth"
+	tests := []struct {
+		name, details    string
+		wantApproval     string
+		requiresApproval bool
+	}{
+		{"no token (an older start)", base, "", false},
+		{"per-plan", base + " approval=per-plan", config.ApprovalModePerPlan, true},
+		{"split", base + " approval=split", config.ApprovalModeSplit, false},
+		{"split with a note", base + " approval=split restored: why", config.ApprovalModeSplit, false},
+		{"given twice, the same", base + " approval=split approval=split", approvalModeUnreadable, true},
+		{"given twice, different", base + " approval=split approval=per-plan", approvalModeUnreadable, true},
+		{"an empty value", base + " approval=", approvalModeUnreadable, true},
+		{"an unknown value", base + " approval=auto", "auto", true},
+		{"another case", base + " approval=Split", "Split", true},
+		{"before the other tokens", "paths=docs/ approval=split split=s feature=auth digest=d branch=feat/auth", config.ApprovalModeSplit, false},
+		{"after the note", base + " restored: approval=per-plan", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := reservationFromEvent(ManifestEvent{OrgID: "x", Event: EventScopeReserved, Details: tt.details, Worktree: wt}).Feature
+			if got == nil {
+				t.Fatal("expected a binding, got none")
+			}
+			if got.Approval != tt.wantApproval {
+				t.Fatalf("Approval = %q, want %q", got.Approval, tt.wantApproval)
+			}
+			if got.RequiresApproval() != tt.requiresApproval {
+				t.Fatalf("RequiresApproval() = %v, want %v", got.RequiresApproval(), tt.requiresApproval)
+			}
+			if !got.Complete() || !sameFeature(got, got) {
+				t.Fatalf("expected %+v to be complete and equal to itself", got)
+			}
+			if tt.wantApproval == "" && !strings.Contains(got.String(), "no approval mode, read as split") {
+				t.Fatalf("String() = %q, want it to say the mode reads as split", got.String())
+			}
+		})
+	}
+	if approvalModeUnreadable == config.ApprovalModePerPlan || approvalModeUnreadable == config.ApprovalModeSplit || approvalModeUnreadable == "" ||
+		strings.ContainsAny(approvalModeUnreadable, " \t=,") {
+		t.Fatalf("approvalModeUnreadable = %q must be neither mode, non-empty, and fit a Details token", approvalModeUnreadable)
 	}
 }
 
@@ -430,7 +543,8 @@ func TestReservationFromEvent_DamagedBindingMatchesNothing(t *testing.T) {
 }
 
 // TestSameFeature: two bindings are the same only when both are nil or both
-// are complete with all five fields equal.
+// are complete with all six fields equal, the approval mode included (a
+// record with no mode differs from one with per-plan or split).
 func TestSameFeature(t *testing.T) {
 	f := testFeature("split-1", "auth", "0123456789ab")
 	g := *f
@@ -446,6 +560,8 @@ func TestSameFeature(t *testing.T) {
 		"digest":   func(b *FeatureBinding) { b.Digest = "ba9876543210" },
 		"branch":   func(b *FeatureBinding) { b.Branch = "fix/auth" },
 		"worktree": func(b *FeatureBinding) { b.Worktree = "/elsewhere" },
+		"approval": func(b *FeatureBinding) { b.Approval = config.ApprovalModeSplit },
+		"no mode":  func(b *FeatureBinding) { b.Approval = "" },
 	} {
 		other := *f
 		change(&other)
@@ -457,10 +573,16 @@ func TestSameFeature(t *testing.T) {
 
 // TestValidateFeatureBinding: every field is required, split, feature,
 // digest and branch cannot hold what the Details tokens cannot (whitespace,
-// `=`, `,`, control characters), and the worktree must be absolute.
+// `=`, `,`, control characters), the worktree must be absolute, and the
+// approval mode must be per-plan or split (no mode, as an older record
+// reads, approvalModeUnreadable and any other value are refused).
 func TestValidateFeatureBinding(t *testing.T) {
-	if err := validateFeatureBinding(*testFeature("split-1", "auth", "0123456789ab")); err != nil {
-		t.Fatalf("validateFeatureBinding(complete binding) = %v, want nil", err)
+	for _, mode := range []string{config.ApprovalModePerPlan, config.ApprovalModeSplit} {
+		f := testFeature("split-1", "auth", "0123456789ab")
+		f.Approval = mode
+		if err := validateFeatureBinding(*f); err != nil {
+			t.Fatalf("validateFeatureBinding(complete binding, approval %s) = %v, want nil", mode, err)
+		}
 	}
 	tests := []struct {
 		name   string
@@ -478,6 +600,10 @@ func TestValidateFeatureBinding(t *testing.T) {
 		{"control character in split", func(b *FeatureBinding) { b.Split = "a\x01b" }, "control character"},
 		{"empty worktree", func(b *FeatureBinding) { b.Worktree = "" }, `worktree "" is not an absolute path`},
 		{"relative worktree", func(b *FeatureBinding) { b.Worktree = ".claude/worktrees/org-auth" }, "is not an absolute path"},
+		{"no approval mode", func(b *FeatureBinding) { b.Approval = "" }, `feature's approval mode "" is not "per-plan" or "split"`},
+		{"unknown approval mode", func(b *FeatureBinding) { b.Approval = "auto" }, `approval mode "auto" is not "per-plan" or "split"`},
+		{"unreadable approval mode", func(b *FeatureBinding) { b.Approval = approvalModeUnreadable }, `approval mode "unreadable"`},
+		{"approval mode in another case", func(b *FeatureBinding) { b.Approval = "Per-Plan" }, `approval mode "Per-Plan"`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -492,14 +618,15 @@ func TestValidateFeatureBinding(t *testing.T) {
 
 // TestReservationDecision_Feature covers plan AC6 and AC7 at the decision
 // level. An org bound to a feature passes only the same paths with the same
-// binding, and refuses another feature, digest, branch or worktree, other
-// paths, and a reservation without a binding even for the same paths. An org
-// with a plain reservation refuses a binding. An org that is running without
-// a reservation (seats of a promoted session's leader, a leader from `ralph
-// org start <task>`, an open workspace) refuses a binding but still takes a
-// plain reservation. A new or disbanded org takes a binding unless its paths
-// overlap another running org's, and an org whose record is damaged refuses
-// everything.
+// binding, and refuses another feature, digest, branch, worktree or approval
+// mode (an org bound before the approval mode existed refuses one with a
+// mode), other paths, and a reservation without a binding even for the same
+// paths. An org with a plain reservation refuses a binding. An org that is
+// running without a reservation (seats of a promoted session's leader, a
+// leader from `ralph org start <task>`, an open workspace) refuses a binding
+// but still takes a plain reservation. A new or disbanded org takes a
+// binding unless its paths overlap another running org's, and an org whose
+// record is damaged refuses everything.
 func TestReservationDecision_Feature(t *testing.T) {
 	fAuth := testFeature("split-1", "auth", "0123456789ab")
 	withField := func(change func(*FeatureBinding)) *FeatureBinding {
@@ -516,8 +643,9 @@ func TestReservationDecision_Feature(t *testing.T) {
 		boundReserveEvent("org-gone", fAuth, "cmd/"),
 		{OrgID: "org-gone", Event: EventDisbanded},
 		{OrgID: "org-damaged", Event: EventScopeReserved, Details: "paths=damaged/ split=split-1 feature=auth", Worktree: fAuth.Worktree},
+		{OrgID: "org-legacy", Event: EventScopeReserved, Details: "paths=legacy/ split=split-1 feature=auth digest=0123456789ab branch=feat/auth", Worktree: fAuth.Worktree},
 	}
-	const boundTo = `org_id "org-bound" is bound to feature "auth" of split plan "split-1" (digest "0123456789ab", branch "feat/auth", worktree "/repo/.claude/worktrees/org-auth") and reserves internal/auth/`
+	const boundTo = `org_id "org-bound" is bound to feature "auth" of split plan "split-1" (digest "0123456789ab", branch "feat/auth", worktree "/repo/.claude/worktrees/org-auth", approval "per-plan") and reserves internal/auth/`
 	const disbandBound = "ralph org disband --org-id org-bound first, or use another org_id"
 	tests := []struct {
 		name       string
@@ -543,6 +671,15 @@ func TestReservationDecision_Feature(t *testing.T) {
 		{"bound: another worktree is refused", "org-bound",
 			Reservation{Paths: []string{"internal/auth/"}, Feature: withField(func(f *FeatureBinding) { f.Worktree = "/elsewhere" })}, false,
 			[]string{boundTo}},
+		{"bound: another approval mode is refused", "org-bound",
+			Reservation{Paths: []string{"internal/auth/"}, Feature: withField(func(f *FeatureBinding) { f.Approval = config.ApprovalModeSplit })}, false,
+			[]string{boundTo, `worktree "/repo/.claude/worktrees/org-auth", approval "split")`, disbandBound}},
+		{"bound before the approval mode: a mode is refused", "org-legacy",
+			Reservation{Paths: []string{"legacy/"}, Feature: withField(func(*FeatureBinding) {})}, false,
+			[]string{`org_id "org-legacy" is bound to feature "auth" of split plan "split-1"`, "no approval mode, read as split) and reserves legacy/",
+				`approval "per-plan")`}},
+		{"bound before the approval mode: the same binding with no mode passes", "org-legacy",
+			Reservation{Paths: []string{"legacy/"}, Feature: withField(func(f *FeatureBinding) { f.Approval = "" })}, false, nil},
 		{"bound: the same binding with other paths is refused", "org-bound",
 			Reservation{Paths: []string{"internal/"}, Feature: withField(func(*FeatureBinding) {})}, false,
 			[]string{boundTo, "so the reservation internal/ for"}},

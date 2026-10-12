@@ -900,6 +900,60 @@ func TestLoad_OrgDirectorRejects(t *testing.T) {
 	}
 }
 
+// TestDefault_OrgApproval verifies the [org.approval] default: per-plan.
+func TestDefault_OrgApproval(t *testing.T) {
+	if got := Default().Org.Approval.Mode; got != "per-plan" {
+		t.Errorf("approval.mode = %q, want %q", got, "per-plan")
+	}
+	if ApprovalModePerPlan != "per-plan" || ApprovalModeSplit != "split" {
+		t.Errorf("ApprovalModePerPlan, ApprovalModeSplit = %q, %q, want per-plan, split", ApprovalModePerPlan, ApprovalModeSplit)
+	}
+}
+
+// TestLoad_OrgApproval covers [org.approval].mode through Load(): an absent
+// section or an absent key keeps the default per-plan, per-plan and split
+// load as written, and any other value, the empty string and another case
+// included, is an error naming the key and the two modes.
+func TestLoad_OrgApproval(t *testing.T) {
+	tests := []struct {
+		name     string
+		content  string
+		wantMode string // "" means Load must fail
+		wantErr  string
+	}{
+		{"no file content", "", ApprovalModePerPlan, ""},
+		{"absent section with other [org] tables", "[org]\nmax_seats = 3\n\n[org.director]\nack_minutes = 5\n", ApprovalModePerPlan, ""},
+		{"section without the key", "[org.approval]\n", ApprovalModePerPlan, ""},
+		{"per-plan", "[org.approval]\nmode = \"per-plan\"\n", ApprovalModePerPlan, ""},
+		{"split", "[org.approval]\nmode = \"split\"\n", ApprovalModeSplit, ""},
+		{"empty string", "[org.approval]\nmode = \"\"\n", "", `[org.approval].mode "" must be "per-plan" or "split"`},
+		{"unknown value", "[org.approval]\nmode = \"auto\"\n", "", `[org.approval].mode "auto" must be "per-plan" or "split"`},
+		{"another case", "[org.approval]\nmode = \"Split\"\n", "", `[org.approval].mode "Split" must be`},
+		{"surrounding space", "[org.approval]\nmode = \" split\"\n", "", `[org.approval].mode " split" must be`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "ralph.toml")
+			if err := os.WriteFile(path, []byte(tt.content), 0644); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := Load(path)
+			if tt.wantMode == "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("Load: err = %v, want an error containing %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load: unexpected error: %v", err)
+			}
+			if cfg.Org.Approval.Mode != tt.wantMode {
+				t.Errorf("approval.mode = %q, want %q", cfg.Org.Approval.Mode, tt.wantMode)
+			}
+		})
+	}
+}
+
 // TestLoad_DriverPoolOnlyOverride_FiltersInheritedDefaultModelPool verifies
 // that a ralph.toml overriding only [org].driver_pool (leaving model_pool
 // unset) inherits the default model_pool filtered down to the declared

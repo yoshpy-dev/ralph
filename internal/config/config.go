@@ -79,6 +79,9 @@ type OrgConfig struct {
 	// Director holds the inbox deadlines that `ralph org watch --all` checks.
 	// See OrgDirectorConfig's doc comment.
 	Director OrgDirectorConfig `toml:"director"`
+	// Approval holds how a feature org's plan is approved. See
+	// OrgApprovalConfig's doc comment.
+	Approval OrgApprovalConfig `toml:"approval"`
 }
 
 // OrgPermissionsConfig is the `[org.permissions]` envelope: a driver-
@@ -156,6 +159,31 @@ type OrgDirectorConfig struct {
 	ResolveMinutes int `toml:"resolve_minutes"`
 }
 
+// The two values of [org.approval].mode.
+const (
+	// ApprovalModePerPlan makes the implementer of a feature org wait for a
+	// human to approve the feature's own plan (`ralph org approve`).
+	ApprovalModePerPlan = "per-plan"
+	// ApprovalModeSplit lets a feature org proceed on the approval of the
+	// split plan alone, as before [org.approval] existed.
+	ApprovalModeSplit = "split"
+)
+
+// OrgApprovalConfig holds the `[org.approval]` setting of how the plan of a
+// feature org is approved (FR-7 of
+// docs/specs/2026-10-07-org-multi-org-director.md). Only `ralph org start
+// --plan` reads it, and it records the mode in the org's feature binding
+// (internal/org's FeatureBinding.Approval), so a change takes effect from
+// the next org started. spawn, send and approve read the recorded mode, never
+// this setting, so the ralph.toml of the directory a seat runs in cannot turn
+// the approval off for a running org.
+type OrgApprovalConfig struct {
+	// Mode is ApprovalModePerPlan (a human approves each feature's plan
+	// before its implementer starts) or ApprovalModeSplit (the approval of
+	// the split plan is enough).
+	Mode string `toml:"mode"`
+}
+
 // Default returns a Config with sensible defaults.
 func Default() Config {
 	return Config{
@@ -196,6 +224,9 @@ func Default() Config {
 			Director: OrgDirectorConfig{
 				AckMinutes:     10,
 				ResolveMinutes: 60,
+			},
+			Approval: OrgApprovalConfig{
+				Mode: ApprovalModePerPlan,
 			},
 		},
 	}
@@ -392,6 +423,14 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.Org.Director.ResolveMinutes < 1 {
 		return cfg, fmt.Errorf("[org.director].resolve_minutes must be >= 1, got %d", cfg.Org.Director.ResolveMinutes)
+	}
+
+	// [org.approval] validation. Same strict pattern as [org.director]
+	// above: an absent [org.approval] section (or an absent mode) keeps
+	// Default()'s per-plan. Unlike AgmsgHome, an explicit `mode = ""` is not
+	// backfilled: it is an error, like any value other than the two modes.
+	if mode := cfg.Org.Approval.Mode; mode != ApprovalModePerPlan && mode != ApprovalModeSplit {
+		return cfg, fmt.Errorf("[org.approval].mode %q must be %q or %q", mode, ApprovalModePerPlan, ApprovalModeSplit)
 	}
 
 	return cfg, nil

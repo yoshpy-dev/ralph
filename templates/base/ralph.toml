@@ -116,3 +116,15 @@ watcher_model = "haiku"
 [org.director]
 ack_minutes = 10
 resolve_minutes = 60
+
+# [org.approval] sets how the plan of an org started with
+# `ralph org start --plan` is approved. mode = "per-plan" (default): the
+# org's implementer is spawned and given a TASK only after a human approves
+# the feature's own plan with `ralph org approve`. mode = "split": the
+# approval of the split plan is enough, as before this setting existed. Any
+# other value, "" included, is an error. start records the mode with the org,
+# so a change takes effect from the next org started, not for running ones.
+# Absent [org.approval] is fully compatible -- Load() backfills this exact
+# default.
+[org.approval]
+mode = "per-plan"

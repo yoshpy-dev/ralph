@@ -138,20 +138,24 @@ func newOrgSpawnRuntimeAt(cmd *cobra.Command, resolvedStateDir, stateDirSource, 
 	return rt, nil
 }
 
-// withMainWorktreeOrgLimits returns cfg with MaxOrgs and MaxTotalSeats taken
-// from <main worktree root>/ralph.toml (built-in defaults when that file does
-// not exist, as config.Load reads it) when configPath is empty and the ledger
-// is the main worktree's (org.LedgerMainWorktreeRoot): org.ResolveOrgStateDir
-// placed it there (source "git-main-worktree"), or --state-dir or
-// RALPH_ORG_STATE_DIR names the .harness/state/org of the main worktree of the
-// repository spawn runs in, as a feature org's leader does. Every org_id in
-// that ledger then gets the same org-wide limits, whichever subdirectory or
-// linked worktree (with its own ./ralph.toml) spawn runs in (plan
-// 2026-10-08-org-limits-reserve, Codex plan advisory 2). With --config, a
-// state dir from --state-dir or RALPH_ORG_STATE_DIR naming another
-// directory, or any other source, cfg is returned unchanged. No other setting
-// is read from the main worktree. A main worktree ralph.toml that fails to
-// load is an error, not a fallback.
+// withMainWorktreeOrgLimits returns cfg with MaxOrgs, MaxTotalSeats and
+// Approval taken from <main worktree root>/ralph.toml (built-in defaults when
+// that file does not exist, as config.Load reads it) when configPath is empty
+// and the ledger is the main worktree's (org.LedgerMainWorktreeRoot):
+// org.ResolveOrgStateDir placed it there (source "git-main-worktree"), or
+// --state-dir or RALPH_ORG_STATE_DIR names the .harness/state/org of the main
+// worktree of the repository spawn runs in, as a feature org's leader does.
+// Every org_id in that ledger then gets the same org-wide limits, whichever
+// subdirectory or linked worktree (with its own ./ralph.toml) spawn runs in
+// (plan 2026-10-08-org-limits-reserve, Codex plan advisory 2). Approval
+// ([org.approval]) is read only by `ralph org start --plan`, which records it
+// in the org's feature binding, by the same rule, so a feature worktree's
+// copy of ralph.toml, which its leader can change, does not choose the mode
+// (plan 2026-10-12-org-plan-approval, A8); spawn carries it unused. With
+// --config, a state dir from --state-dir or RALPH_ORG_STATE_DIR naming
+// another directory, or any other source, cfg is returned unchanged. No
+// other setting is read from the main worktree. A main worktree ralph.toml
+// that fails to load is an error, not a fallback.
 func withMainWorktreeOrgLimits(cfg config.OrgConfig, configPath, resolvedStateDir, stateDirSource string) (config.OrgConfig, error) {
 	if configPath != "" {
 		return cfg, nil
@@ -163,9 +167,10 @@ func withMainWorktreeOrgLimits(cfg config.OrgConfig, configPath, resolvedStateDi
 	path := filepath.Join(root, "ralph.toml")
 	mainCfg, err := config.Load(path)
 	if err != nil {
-		return config.OrgConfig{}, fmt.Errorf("org: load max_orgs and max_total_seats from the main worktree's %s: %w", path, err)
+		return config.OrgConfig{}, fmt.Errorf("org: load max_orgs, max_total_seats and [org.approval].mode from the main worktree's %s: %w", path, err)
 	}
 	cfg.MaxOrgs, cfg.MaxTotalSeats = mainCfg.Org.MaxOrgs, mainCfg.Org.MaxTotalSeats
+	cfg.Approval = mainCfg.Org.Approval
 	return cfg, nil
 }
 
@@ -679,7 +684,12 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"worktree; a start into a running org that was not started for that\n" +
 			"feature is refused. `ralph org disband` leaves the worktree and the\n" +
 			"branch; `./scripts/ralph-worktree.sh cleanup --id org-<org_id>` removes\n" +
-			"them.\n" +
+			"them. The org's approval mode, [org.approval].mode (per-plan by\n" +
+			"default, or split), is read from the same ralph.toml as max_orgs and\n" +
+			"max_total_seats below, recorded with the org's binding to the feature\n" +
+			"and named in the leader's task, so a change to the setting applies to\n" +
+			"orgs started after it; starting a running feature org again with\n" +
+			"another mode is refused.\n" +
 			"\n" +
 			"`ralph org start <task>` spawns the leader in --cwd with <task> as its\n" +
 			"task, as before --plan existed. It is not tied to a split plan: it\n" +
