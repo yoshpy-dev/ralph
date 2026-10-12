@@ -109,21 +109,21 @@
 
 ## Acceptance criteria
 
-- [ ] AC1: 見張りが `not_running` か `stale` の台帳で `ralph org spawn` を打つと、状態ごとの次の手(起動の仕方か止め方)を添えて終了コード 1 で断られ、manifest(`rejected` も含む)・receipt・herdr・agmsg のどれにも触れない。`--dry-run` も同じ。`running` なら今までどおり進む
-- [ ] AC2: 見張りが `running` でない台帳で、TYPE が `TASK` の `ralph org send` は断られる(型付きのメッセージも `--raw` も、`--dry-run` も)。`TASK` 以外の TYPE と、1 行目が `TYPE:` でない raw のメッセージは、見張りがいなくても今までどおり送れる
-- [ ] AC3: 見張りが `not_running` の台帳で `ralph org start`(`--plan` の形と `<task>` の形)を打つと、見張りが起動し、印が running になってから leader が立つ。stderr に起動した見張りの pid と `watch.log` のパスが出る。起動した見張りは start が終わったあとも動き続ける
-- [ ] AC4: 見張りが `stale` のまま 10 秒たつ台帳で start を打つと、見張りを起動せず、worktree もブランチも作らず、`stale` のエラーで終了コード 1。起動した見張りが 10 秒で running にならないときは、子を止めて回収してから終了コード 1(テストは印を書かない子で確かめる)
-- [ ] AC5: 起動した子が先に終わっても、`ProbeWatch` が running を返すなら、start は進み、`--detach` は `already running (pid N)` を出して終了コード 0。ほかの見張りの印を自分の子のものと取り違えない(pid の照合は今のまま)
-- [ ] AC6: start と `--detach` が起動する子は、台帳の main worktree のルートで動き(求められなければ打った場所)、`--config` は絶対パスで渡され、環境に `HERDR_PANE_ID`・`HERDR_TAB_ID`・`HERDR_WORKSPACE_ID`・`HERDR_ENV` がない(テストは起動の差し替え口で引数・作業ディレクトリ・環境を確かめる)
-- [ ] AC7: 見張りは印に自分の `deadman_minutes` を書き、`ProbeWatch` はそれで窓を決める。値のない印(前半の版)は呼んだ側の値で読む。`ralph status` は `./ralph.toml` と違う `--config` で動く見張りも、その見張りの値で判定する
-- [ ] AC8: 見張りのいない台帳で、`stop`・`stop --all`・`disband`・`disband --all`・`escalate`・`inbox` の動詞・`wait`・`read`・`status`・`report` が今までどおり動く(検査の差し替え口を外したテスト)
-- [ ] AC9: 同じ台帳に 2 つ目の `watch --all` を起動すると、起動の banner を出さずに断られる(stdout に banner がない)。1 つ目の banner は今までどおり出る
-- [ ] AC10: CLI の既存のテストは、TestMain の差し替え口のもとで書き換えずに通る。org 層の既存のテストは、差し込み口が nil のまま書き換えずに通る。書き換えてよいのは 6a の見張りのテストのうち、この計画が変える動きを固定しているものだけで、どれも期待を変えた理由を Progress checklist に書く: AC5 の 1 本の終了コード、後始末の間の印を `running` と見るもの(`TestRunWatchAll_CallsBeforeStopWhileItStillHoldsTheLockAndTheMarkSaysRunning` など。`stopping` に変わる)、`--once` の見張りに `--detach` が `already running` と答えるもの(あれば)
-- [ ] AC11: leader の雛形は、見張りの拒否で打ち直さず、見張りを起動せず、BLOCKED を escalate すると書き、`prompts_test.go` がその語句を固定する。今の固定の語句は崩れない
-- [ ] AC12: 文書(skill の 4 面、README、仕様の注、tech-debt)が新しい動きに合い、`scripts/check-sync.sh` と `scripts/check-skill-sync.sh` が通る
-- [ ] AC13: 見張りが後始末に入ると(テストでは `WatchHooks.BeforeStop` を待たせる)、印は `stopping` になり、ロックは持たれたまま、`ProbeWatch` は `stopping` を返す。その間、spawn と TASK の send は断られ、start と `--detach` は起動せずに終了コード 1、2 つ目の `watch --all` はロックで断られ、`ralph status` は `stopping` を出す。後始末が終わると `stopped` を書いてロックを放す
-- [ ] AC14: `--once` の見張りは印に `once: true` を書き、その見張りが動いている間、spawn と TASK の send は断られ、start と `--detach` は起動せずに終了コード 1。`ralph status` の行に `(--once)` が出る
-- [ ] AC15: ほかの見張りがロックを取ってから最初の印を書くまでを遅らせたテストで、その間に打った start は、断らずに待ち、印が `running` になってから進む(`--detach` は `already running` で終了コード 0)。spawn の検査は 2 秒以内に `running` になれば通る
+- [x] AC1: 見張りが `not_running` か `stale` の台帳で `ralph org spawn` を打つと、状態ごとの次の手(起動の仕方か止め方)を添えて終了コード 1 で断られ、manifest(`rejected` も含む)・receipt・herdr・agmsg のどれにも触れない。`--dry-run` も同じ。`running` なら今までどおり進む
+- [x] AC2: 見張りが `running` でない台帳で、TYPE が `TASK` の `ralph org send` は断られる(型付きのメッセージも `--raw` も、`--dry-run` も)。`TASK` 以外の TYPE と、1 行目が `TYPE:` でない raw のメッセージは、見張りがいなくても今までどおり送れる
+- [x] AC3: 見張りが `not_running` の台帳で `ralph org start`(`--plan` の形と `<task>` の形)を打つと、見張りが起動し、印が running になってから leader が立つ。stderr に起動した見張りの pid と `watch.log` のパスが出る。起動した見張りは start が終わったあとも動き続ける
+- [x] AC4: 見張りが `stale` のまま 10 秒たつ台帳で start を打つと、見張りを起動せず、worktree もブランチも作らず、`stale` のエラーで終了コード 1。起動した見張りが 10 秒で running にならないときは、子を止めて回収してから終了コード 1(テストは印を書かない子で確かめる)
+- [x] AC5: 起動した子が先に終わっても、`ProbeWatch` が running を返すなら、start は進み、`--detach` は `already running (pid N)` を出して終了コード 0。ほかの見張りの印を自分の子のものと取り違えない(pid の照合は今のまま)
+- [x] AC6: start と `--detach` が起動する子は、台帳の main worktree のルートで動き(求められなければ打った場所)、`--config` は絶対パスで渡され、環境に `HERDR_PANE_ID`・`HERDR_TAB_ID`・`HERDR_WORKSPACE_ID`・`HERDR_ENV` がない(テストは起動の差し替え口で引数・作業ディレクトリ・環境を確かめる)
+- [x] AC7: 見張りは印に自分の `deadman_minutes` を書き、`ProbeWatch` はそれで窓を決める。値のない印(前半の版)は呼んだ側の値で読む。`ralph status` は `./ralph.toml` と違う `--config` で動く見張りも、その見張りの値で判定する
+- [x] AC8: 見張りのいない台帳で、`stop`・`stop --all`・`disband`・`disband --all`・`escalate`・`inbox` の動詞・`wait`・`read`・`status`・`report` が今までどおり動く(検査の差し替え口を外したテスト)
+- [x] AC9: 同じ台帳に 2 つ目の `watch --all` を起動すると、起動の banner を出さずに断られる(stdout に banner がない)。1 つ目の banner は今までどおり出る
+- [x] AC10: CLI の既存のテストは、TestMain の差し替え口のもとで書き換えずに通る。org 層の既存のテストは、差し込み口が nil のまま書き換えずに通る。書き換えてよいのは 6a の見張りのテストのうち、この計画が変える動きを固定しているものだけで、どれも期待を変えた理由を Progress checklist に書く: AC5 の 1 本の終了コード、後始末の間の印を `running` と見るもの(`TestRunWatchAll_CallsBeforeStopWhileItStillHoldsTheLockAndTheMarkSaysRunning` など。`stopping` に変わる)、`--once` の見張りに `--detach` が `already running` と答えるもの(あれば)
+- [x] AC11: leader の雛形は、見張りの拒否で打ち直さず、見張りを起動せず、BLOCKED を escalate すると書き、`prompts_test.go` がその語句を固定する。今の固定の語句は崩れない
+- [x] AC12: 文書(skill の 4 面、README、仕様の注、tech-debt)が新しい動きに合い、`scripts/check-sync.sh` と `scripts/check-skill-sync.sh` が通る
+- [x] AC13: 見張りが後始末に入ると(テストでは `WatchHooks.BeforeStop` を待たせる)、印は `stopping` になり、ロックは持たれたまま、`ProbeWatch` は `stopping` を返す。その間、spawn と TASK の send は断られ、start と `--detach` は起動せずに終了コード 1、2 つ目の `watch --all` はロックで断られ、`ralph status` は `stopping` を出す。後始末が終わると `stopped` を書いてロックを放す
+- [x] AC14: `--once` の見張りは印に `once: true` を書き、その見張りが動いている間、spawn と TASK の send は断られ、start と `--detach` は起動せずに終了コード 1。`ralph status` の行に `(--once)` が出る
+- [x] AC15: ほかの見張りがロックを取ってから最初の印を書くまでを遅らせたテストで、その間に打った start は、断らずに待ち、印が `running` になってから進む(`--detach` は `already running` で終了コード 0)。spawn の検査は 2 秒以内に `running` になれば通る
 
 ## Implementation outline
 
@@ -202,4 +202,6 @@
   - verify の cycle 3(d9321812): pass。8d8ddbd2 のあとも AC6 は成り立ち、優先順位は `driver.ResolveAgmsgHome` と同じ。実機で、相対の env と `--config` の相対の `agmsg_home` のどちらでも子が絶対パスの値を 1 つだけ受け取ることを見た。sync-docs に回す文書のずれ: D11(README)、D12(skill の 4 面)、D13(tech-debt 205 の注)、D14(C3-2 の新しい行)
   - test の cycle 3(b28ad4e0): pass(top-level 1,444 本、-race -count=5 で DATA RACE 0)。mutation 18 件中 17 件が落ち、生き残りの A8a は等価。実機で、相対の agmsg home の子が stub の agmsg を呼べること(対照の 755e082d では `No such file`)と、8 本の同時 `--detach` のあとの `--stop` が 0.9 秒で通ることを見た。cycle 1・2 の報告の「shell の SKIP 3」は数え違いで、本当は 1(cycle 3 の報告に書いた)
   - sync-docs の cycle 3(073e9119): D11〜D15 をすべて入れた(README と skill の 4 面と仕様の注に、相対の agmsg home を打った場所から絶対パスにして渡すことを足し、tech-debt 205 の注にその直しとテスト 2 本を、新しい行に C3-2 を書いた)。run-verify は rc 0
+  - cross-review の cycle 3(c5ada513): 指摘 0 件。cycle 2 の triage は、3 つのコメントが番号を指すので付録に残した
+  - consult(done)は /pr に進んでよいと判定した。AC1〜AC15 に印を付けた。AC8 は、座席の `wait` と inbox の show・ack・resolve・notify については検査の配線がないことを grep で見ただけで、PR の本文の known gaps に書く(ほかに、`start --plan` の起動と同時の start は実機で見ていないこと、stopping の間の拒否は手で置いた印で確かめたこと)
 - [ ] PR created
