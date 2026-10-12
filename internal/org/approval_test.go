@@ -495,6 +495,28 @@ func (fx *checkFixture) markApproved(t *testing.T, edit func(string) string) {
 	writePlan(t, fx.worktree, testPlanRel, plan)
 }
 
+// reapprove leaves the plan as a leader and a human do when the plan is
+// revised and approved again after fx.ref's approval: the record of fx.ref,
+// the record of the revision, and the revision with its two header lines
+// naming the revision's digest. It returns the revision's ref; fx.ref keeps
+// the first approval's digest.
+func (fx *checkFixture) reapprove(t *testing.T) PlanRef {
+	t.Helper()
+	fx.record(t)
+	revised := replaceOnce("Add the login form.", "Add the signup form.")(testPlanDraft)
+	next := PlanRef{Path: testPlanRel, Digest: PlanDigest([]byte(revised))}
+	if next.Digest == fx.ref.Digest {
+		t.Fatal("the revision did not change the digest")
+	}
+	fx.appendEvents(t, approvedEvent("org-a", "e2", next, PlanContentHash([]byte(revised))))
+	writePlan(t, fx.worktree, testPlanRel, approvedPlanText(revised, next.Digest))
+	return next
+}
+
+// mistypedDigest is a digest of the shape PLAN: takes that no test plan has
+// and no record names.
+const mistypedDigest = "0f0f0f0f0f0f"
+
 func TestCheckPlanApproved(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -717,23 +739,38 @@ func TestCheckAnyPlanApproved(t *testing.T) {
 }
 
 // nextStepSignatures holds, for each approvalRefusalKind, a phrase that only
-// the next step of that kind says (approvalNextStep).
+// the next step of that kind says (approvalNextStep). Both forms of the
+// approvalRefusalTaskHeader step end with its phrase.
 var nextStepSignatures = map[approvalRefusalKind]string{
 	approvalRefusalNoApproval:  "waits for the answer to its QUESTION",
 	approvalRefusalPlanHeader:  "commits them, and tries again",
 	approvalRefusalPlanChanged: "asks for a new approval with a new QUESTION",
-	approvalRefusalTaskHeader:  "on the line right after TASK_ID:",
+	approvalRefusalTaskHeader:  "and sends the TASK again",
 	approvalRefusalOther:       "cannot fix this itself",
 }
 
-// TestPlanNotApprovedError_OneNextStepPerKind covers self-review M1 of
+// The two forms of the approvalRefusalTaskHeader next step: put a PLAN:
+// header on the TASK, or change the one it has to the plan's current
+// approved digest (taskHeaderRestated, then the PLAN: value).
+const (
+	taskHeaderAdded    = "on the line right after TASK_ID:"
+	taskHeaderRestated = "the leader changes the TASK's PLAN: header to PLAN: "
+)
+
+// stepNumber matches a step number of the leader template ("step 6"), which
+// no next step names (self-review N2 of org-plan-approval).
+var stepNumber = regexp.MustCompile(`(?i)\bsteps? [0-9]`)
+
+// TestPlanNotApprovedError_OneNextStepPerKind covers self-review M1 and N1 of
 // org-plan-approval. Each way the approval check refuses a TASK
 // (checkTaskPlanApproved) or a spawn (checkAnyPlanApproved) has its kind; the
 // reason says only what the check found; and the refusal, after
 // planNotApprovedMarker, names the next step of that kind and of no other
-// (only kinds 1 and 5 escalate a BLOCKED, and kind 2 names the approved
-// digest to write), then ends with what a leader never does, --raw only for
-// a TASK. Every kind has a case.
+// (only kinds 1 and 5 escalate a BLOCKED, kind 2 names the approved digest to
+// write, and kind 4 names the plan's current approved digest when the TASK's
+// PLAN: names another one), with no step number of the leader template, then
+// ends with what a leader never does, --raw only for a TASK. Every kind has a
+// case, and kind 4 has a case of each form.
 func TestPlanNotApprovedError_OneNextStepPerKind(t *testing.T) {
 	task := func(text func(fx *checkFixture) string) func(t *testing.T, fx *checkFixture) error {
 		return func(t *testing.T, fx *checkFixture) error {
@@ -795,6 +832,10 @@ func TestPlanNotApprovedError_OneNextStepPerKind(t *testing.T) {
 			task(func(*checkFixture) string {
 				return "TYPE: TASK\nTASK_ID: t-1\nPLAN: " + testPlanRel + "\n\nimplement the plan"
 			}), approvalRefusalTaskHeader},
+		{"TASK: the PLAN digest of the first approval after the plan was approved again",
+			func(t *testing.T, fx *checkFixture) { fx.reapprove(t) }, task(planTaskOf), approvalRefusalTaskHeader},
+		{"TASK: a mistyped PLAN digest", recordAndMark(nil),
+			task(func(*checkFixture) string { return planTask(PlanRef{Path: testPlanRel, Digest: mistypedDigest}) }), approvalRefusalTaskHeader},
 
 		{"TASK: the plan file removed", removePlan, task(planTaskOf), approvalRefusalOther},
 		{"TASK: no complete binding", recordAndMark(nil), func(t *testing.T, fx *checkFixture) error {
@@ -803,6 +844,7 @@ func TestPlanNotApprovedError_OneNextStepPerKind(t *testing.T) {
 		{"spawn: the latest approval's plan file removed", removePlan, spawn, approvalRefusalOther},
 	}
 	covered := make(map[approvalRefusalKind]bool)
+	taskHeaderForms := make(map[string]bool)
 	for _, tc := range cases {
 		covered[tc.kind] = true
 		t.Run(tc.name, func(t *testing.T) {
@@ -842,6 +884,28 @@ func TestPlanNotApprovedError_OneNextStepPerKind(t *testing.T) {
 				if tc.kind == approvalRefusalPlanHeader && !strings.Contains(next, "- Approved: <YYYY-MM-DD> sha256:"+fx.ref.Digest+" before") {
 					t.Errorf("next step %q: want it to name the approved digest %s for the - Approved: line", next, fx.ref.Digest)
 				}
+				if tc.kind == approvalRefusalTaskHeader {
+					// The reason's digest picks the form; it must be the
+					// plan's digest now, which the step then names.
+					form, want, notWant := "added", taskHeaderAdded, taskHeaderRestated
+					if r := approvalCheckErrorOf(reason); r.digest != "" {
+						data, err := os.ReadFile(filepath.Join(fx.worktree, filepath.FromSlash(testPlanRel)))
+						if err != nil {
+							t.Fatal(err)
+						}
+						if current := PlanDigest(data); r.digest != current || r.plan != testPlanRel {
+							t.Errorf("reason %q names plan %s sha256:%s; want the plan's current %s sha256:%s", reason, r.plan, r.digest, testPlanRel, current)
+						}
+						form, want, notWant = "restated", taskHeaderRestated+testPlanRel+" sha256:"+r.digest+" and sends the TASK again", taskHeaderAdded
+					}
+					if !strings.Contains(next, want) || strings.Contains(next, notWant) {
+						t.Errorf("next step %q: want %q and not %q", next, want, notWant)
+					}
+					taskHeaderForms[form] = true
+				}
+				if stepNumber.MatchString(next) {
+					t.Errorf("next step %q names a step number of the leader template", next)
+				}
 				never := planNotApprovedNever
 				if isTask {
 					never += planNotApprovedNeverRaw
@@ -855,6 +919,100 @@ func TestPlanNotApprovedError_OneNextStepPerKind(t *testing.T) {
 	if len(covered) != len(nextStepSignatures) {
 		t.Fatalf("the cases cover the kinds %v; want all %d", covered, len(nextStepSignatures))
 	}
+	if !taskHeaderForms["added"] || !taskHeaderForms["restated"] {
+		t.Fatalf("the TASK-header cases gave the step forms %v; want both added and restated", taskHeaderForms)
+	}
+}
+
+// TestCheckTaskPlanApproved_StaleOrMistypedDigest covers self-review N1 of
+// org-plan-approval at the check: a TASK whose PLAN: names a digest the plan
+// does not have now, while the plan's current digest passes the check, is
+// refused as a TASK-header reason that names the current approved digest,
+// whose next step is to change the header to it: (a) the digest of the first
+// approval after the plan was approved again, (b) a mistyped digest. (c) A
+// plan changed after its approval with no approval of the change keeps the
+// plan-changed refusal of checkPlanApproved, word for word, and (d) a TASK
+// with no PLAN: header keeps the step to put one on the TASK.
+func TestCheckTaskPlanApproved_StaleOrMistypedDigest(t *testing.T) {
+	refusal := func(t *testing.T, fx *checkFixture, text string) (approvalCheckError, string) {
+		t.Helper()
+		reason := checkTaskPlanApproved(mustReadEvents(t, fx.o), "org-a", fx.f, text)
+		if reason == nil {
+			t.Fatal("the approval check passed; want a refusal")
+		}
+		return approvalCheckErrorOf(reason), planNotApprovedError{reason: reason, task: true}.Error()
+	}
+	assertRestated := func(t *testing.T, r approvalCheckError, msg, named, current string) {
+		t.Helper()
+		if r.kind != approvalRefusalTaskHeader || r.plan != testPlanRel || r.digest != current {
+			t.Fatalf("reason %q: kind %d plan %q digest %q; want kind %d (TASK header) naming %s sha256:%s",
+				r, r.kind, r.plan, r.digest, approvalRefusalTaskHeader, testPlanRel, current)
+		}
+		for _, want := range []string{
+			`org: the TASK's PLAN: header names sha256:` + named + " of plan " + testPlanRel + ` of org_id "org-a", ` +
+				"and the plan's current approved digest is sha256:" + current + "; ",
+			planNotApprovedMarker + ": the leader changes the TASK's PLAN: header to PLAN: " + testPlanRel + " sha256:" + current +
+				" and sends the TASK again; " + planNotApprovedNever,
+		} {
+			if !strings.Contains(msg, want) {
+				t.Errorf("refusal %q; want it to contain %q", msg, want)
+			}
+		}
+		if strings.Contains(msg, taskHeaderAdded) {
+			t.Errorf("refusal %q: want only the step that changes the header", msg)
+		}
+	}
+
+	t.Run("(a) approved again, the PLAN digest of the first approval", func(t *testing.T) {
+		fx := newCheckFixture(t)
+		next := fx.reapprove(t)
+		r, msg := refusal(t, fx, planTask(fx.ref))
+		assertRestated(t, r, msg, fx.ref.Digest, next.Digest)
+		// The digest the step names passes.
+		if err := checkTaskPlanApproved(mustReadEvents(t, fx.o), "org-a", fx.f, planTask(next)); err != nil {
+			t.Fatalf("a TASK naming the digest the refusal names = %v; want it to pass", err)
+		}
+	})
+	t.Run("(b) a mistyped PLAN digest", func(t *testing.T) {
+		fx := newCheckFixture(t)
+		if fx.ref.Digest == mistypedDigest {
+			t.Fatal("the test plan has the mistyped digest")
+		}
+		fx.record(t)
+		fx.markApproved(t, nil)
+		r, msg := refusal(t, fx, planTask(PlanRef{Path: testPlanRel, Digest: mistypedDigest}))
+		assertRestated(t, r, msg, mistypedDigest, fx.ref.Digest)
+	})
+	t.Run("(c) changed after the approval, the change not approved", func(t *testing.T) {
+		fx := newCheckFixture(t)
+		fx.record(t)
+		fx.markApproved(t, replaceOnce("Add the login form.", "Add the signup form."))
+		events := mustReadEvents(t, fx.o)
+		want := checkPlanApproved(events, "org-a", fx.f, fx.ref)
+		if want == nil {
+			t.Fatal("checkPlanApproved passed a plan changed after its approval")
+		}
+		r, msg := refusal(t, fx, planTask(fx.ref))
+		if r.kind != approvalRefusalPlanChanged || r.digest != "" || r.Error() != want.Error() {
+			t.Fatalf("reason %q of kind %d, digest %q; want checkPlanApproved's %q of kind %d (plan changed)",
+				r, r.kind, r.digest, want, approvalRefusalPlanChanged)
+		}
+		if strings.Contains(msg, taskHeaderRestated) || !strings.Contains(msg, nextStepSignatures[approvalRefusalPlanChanged]) {
+			t.Errorf("refusal %q: want the plan-changed step only", msg)
+		}
+	})
+	t.Run("(d) no PLAN header", func(t *testing.T) {
+		fx := newCheckFixture(t)
+		fx.reapprove(t)
+		r, msg := refusal(t, fx, "TYPE: TASK\nTASK_ID: t-1\n\nimplement the plan")
+		if r.kind != approvalRefusalTaskHeader || r.digest != "" || r.plan != "" {
+			t.Fatalf("reason %q of kind %d, plan %q, digest %q; want a TASK-header reason with no digest", r, r.kind, r.plan, r.digest)
+		}
+		if want := planNotApprovedMarker + ": the leader puts one PLAN: <path> sha256:<digest> header naming the approved plan " +
+			taskHeaderAdded + " and sends the TASK again; "; !strings.Contains(msg, want) || strings.Contains(msg, taskHeaderRestated) {
+			t.Errorf("refusal %q; want it to contain %q and not %q", msg, want, taskHeaderRestated)
+		}
+	})
 }
 
 // TestPlanApprovedEvent_IsNotASeat: a manifest with a plan_approved line

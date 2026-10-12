@@ -376,11 +376,15 @@ func ApprovalDecisionCommand(orgID string, ref PlanRef, stateDir string) string 
 // Resolved on it. A resolve that fails keeps the approval record. An item
 // someone else resolved after Approve read the inbox (ErrInboxResolved) has
 // nothing left to resolve, so the error names it and says the approval is
-// recorded all the same, with no command. For any other failure the error
+// recorded all the same, with no resolve command. Whoever resolved it may
+// have done so to ask for changes, so the error also says not to send the
+// leader the approval DECISION yet, and names the `ralph org inbox show`
+// command (InboxCommand) that shows the note the item was resolved with
+// (self-review N3 of org-plan-approval). For any other failure the error
 // names the items and the `ralph org inbox resolve` command (InboxCommand
 // with --note) that finishes each.
 func (o *Org) resolveApproved(approved []ApprovedPlan) error {
-	var elsewhere, failed, commands []string
+	var elsewhere, shows, failed, commands []string
 	for i := range approved {
 		a := &approved[i]
 		note := approveNote(PlanRef{Path: a.Plan, Digest: a.Digest})
@@ -390,6 +394,7 @@ func (o *Org) resolveApproved(approved []ApprovedPlan) error {
 			a.Resolved = true
 		case errors.Is(err, ErrInboxResolved):
 			elsewhere = append(elsewhere, a.ID)
+			shows = append(shows, "`"+InboxCommand("show", a.ID, o.InboxHintStateDir)+"`")
 		default:
 			failed = append(failed, fmt.Sprintf("%s (%v)", a.ID, err))
 			commands = append(commands, "`"+InboxCommand("resolve", a.ID, o.InboxHintStateDir)+" --note "+shellQuote(note)+"`")
@@ -398,7 +403,9 @@ func (o *Org) resolveApproved(approved []ApprovedPlan) error {
 	var errs []error
 	if len(elsewhere) > 0 {
 		errs = append(errs, fmt.Errorf("org: approve: the approval is recorded all the same, but the inbox item was already "+
-			"resolved by someone else after approve read the inbox, so nothing is left to resolve: %s", strings.Join(elsewhere, ", ")))
+			"resolved by someone else after approve read the inbox, so nothing is left to resolve: %s; whoever resolved it "+
+			"may have asked for changes, so do not send the leader the approval DECISION yet: first run %s to read the note "+
+			"it was resolved with", strings.Join(elsewhere, ", "), strings.Join(shows, " and ")))
 	}
 	if len(failed) > 0 {
 		errs = append(errs, fmt.Errorf("org: approve: the approval is recorded, but the inbox item could not be resolved: %s; run %s to finish",

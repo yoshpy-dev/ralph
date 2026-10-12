@@ -67,7 +67,12 @@ func newOrgApproveCmd(stateDir, configPath *string) *cobra.Command {
 			// res.Approved is what the manifest holds, also when res.Err is
 			// set (a resolve or an append that failed after a record), so
 			// those items are printed before the error. A refusal records
-			// nothing and prints nothing on stdout.
+			// nothing and prints nothing on stdout. An item someone else
+			// resolved in the meantime is printed with its DECISION command
+			// too, since its approval is recorded; res.Err, which goes to
+			// stderr after it, says not to send that DECISION before reading
+			// the note the item was resolved with, and names the
+			// `ralph org inbox show` command for it (org's resolveApproved).
 			printApprovedPlans(cmd.OutOrStdout(), cmd.ErrOrStderr(), res.Approved, rt.InboxHintStateDir)
 			return res.Err
 		},

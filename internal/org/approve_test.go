@@ -422,13 +422,16 @@ func TestOrgApprove_ResolveFailureKeepsTheRecord(t *testing.T) {
 	}
 }
 
-// TestOrgApprove_ResolvedBySomeoneElse covers self-review L3 of
+// TestOrgApprove_ResolvedBySomeoneElse covers self-review L3 and N3 of
 // org-plan-approval: when someone else resolves an item between approve's
 // read of the inbox and its own resolve (Inbox.Resolve wraps
 // ErrInboxResolved), the record stays, the error says the item was already
 // resolved by someone else and the approval is recorded all the same, and it
-// prints no `ralph org inbox resolve` command, which would fail. The other
-// item of the batch is resolved as usual.
+// prints no `ralph org inbox resolve` command, which would fail. Since the
+// other resolve may have asked for changes, the error says not to send the
+// leader the approval DECISION yet, and names the `ralph org inbox show`
+// command, with the state-dir hint, that shows the note the item was
+// resolved with. The other item of the batch is resolved as usual.
 func TestOrgApprove_ResolvedBySomeoneElse(t *testing.T) {
 	s := newApproveSetup(t)
 	s.o.InboxHintStateDir = s.stateDir
@@ -459,11 +462,16 @@ func TestOrgApprove_ResolvedBySomeoneElse(t *testing.T) {
 		t.Fatalf("Approve = %+v, want both recorded, only %s resolved by approve, and an error", res, second)
 	}
 	msg := res.Err.Error()
+	show := "`ralph org inbox show " + s.id + " --state-dir " + shellQuote(s.stateDir) + "`"
 	if want := "the approval is recorded all the same, but the inbox item was already resolved by someone else " +
-		"after approve read the inbox, so nothing is left to resolve: " + s.id; !strings.Contains(msg, want) {
+		"after approve read the inbox, so nothing is left to resolve: " + s.id + "; whoever resolved it may have asked for " +
+		"changes, so do not send the leader the approval DECISION yet: first run " + show + " to read the note it was resolved with"; !strings.Contains(msg, want) {
 		t.Fatalf("Err = %q, want it to contain %q", msg, want)
 	}
-	if strings.Contains(msg, "ralph org inbox resolve") || strings.Contains(msg, "--note") || strings.Contains(msg, second) {
+	// The state dir is a temp dir whose name can hold the other item's ID
+	// ("...Else2..." holds e2), so it is left out of that check.
+	if rest := strings.ReplaceAll(msg, show, ""); strings.Contains(rest, "ralph org inbox resolve") || strings.Contains(rest, "--note") ||
+		strings.Contains(rest, second) {
 		t.Fatalf("Err = %q, want no resolve command and no word of the item approve resolved", msg)
 	}
 	if got := planApprovedEvents(t, s.o); len(got) != 2 {

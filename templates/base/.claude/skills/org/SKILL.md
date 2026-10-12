@@ -676,10 +676,13 @@ per-plan の org では、次の検査がかかる。
     QUESTION で承認を頼み直す。
   - TASK の `PLAN:` のヘッダがない、2 行ある、形が違う: `TASK_ID:` の次の行に
     1 行付けて送り直す。
+  - TASK の `PLAN:` の digest が今のファイルのものと違い(承認し直す前の
+    digest か打ち間違い)、今の digest なら照合を通る: 拒否の文がその digest を
+    書くので、ヘッダを `PLAN: <path> sha256:<その digest>` に直して送り直す。
   - そのほか(結びつきが不完全、計画のファイルがない、worktree の外を
     指す): BLOCKED を escalate する。
 
-  断られた leader はその次の手に従い、同じコマンドをそのまま打ち直さず、
+  断られた leader はその次の手に従い、原因を直す前に同じコマンドを打ち直さず、
   `--raw` にもせず、自分で approve も打たない(leader の雛形)。spawn の拒否は
   `--raw` に触れない(spawn に `--raw` はない)。
 

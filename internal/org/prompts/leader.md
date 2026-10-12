@@ -135,12 +135,12 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
    org_id が長いと、これより長い seat_id は spawn で拒否される)。どちらにも
    `--cwd .`(この worktree)と `--model` を渡す。TASK には機能の計画の
    パスを書く。per-plan では、implementer への TASK にいつも
-   `PLAN: <計画のパス> sha256:<digest>` のヘッダ(手順 4 で承認された digest)
-   を 1 行付ける。ヘッダは `TASK_ID:` の次の行に書く(空行のあとの本文に
-   書いたものはヘッダとして読まれない)。台帳で leader の座席が動いていない
-   (止められた)ときは、leader 以外の spawn はどの承認方式でも断られる。
-   そのときは打ち直さず、エラーを本文に書いて `ralph org escalate` で
-   BLOCKED を上げる
+   `PLAN: <計画のパス> sha256:<digest>` のヘッダ(最後に承認された digest。
+   計画の `- Approved:` の行の digest)を 1 行付ける。ヘッダは `TASK_ID:` の
+   次の行に書く(空行のあとの本文に書いたものはヘッダとして読まれない)。
+   台帳で leader の座席が動いていない(止められた)ときは、leader 以外の
+   spawn はどの承認方式でも断られる。そのときは打ち直さず、エラーを本文に
+   書いて `ralph org escalate` で BLOCKED を上げる
 6. (per-plan)承認のあとは、計画の先頭の 2 行と checkbox の印のほかを
    変えない。`## Progress checklist` の節にメモを足すことも、ここでいう変更に
    入る(承認のあとに計画が変わると、implementer の spawn と TASK が
@@ -151,12 +151,12 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
 7. (per-plan)spawn か TASK の送信が承認の検査で断られたら(終了コードは
    1 で、エラーの文に `refused by the approval check` が入る。spawn では
    stdout の `rejected:` の行に出る)、その後ろに書かれた次の手(断られた
-   理由ごとに 1 つ)に従う。どの場合も、同じコマンドをそのまま打ち直さず、
-   `--raw` にせず、自分で `ralph org approve` を打たない。承認は人が記録する
-   もので、あなたが打つと人の承認ではなくなる。次の手が BLOCKED を上げる
-   ことなら、エラーを本文に書き、BLOCKED(TASK_ID は org_id の
-   `{{ORG_ID}}`)を `ralph org escalate` で上げ、返事が来るまで implementer の
-   spawn と TASK を打たずに待つ
+   理由ごとに 1 つ)に従う。どの場合も、原因を直す前に同じコマンドを
+   打ち直さず、`--raw` にせず、自分で `ralph org approve` を打たない。承認は
+   人が記録するもので、あなたが打つと人の承認ではなくなる。次の手が
+   BLOCKED を上げることなら、エラーを本文に書き、BLOCKED(TASK_ID は
+   org_id の `{{ORG_ID}}`)を `ralph org escalate` で上げ、返事が来るまで
+   implementer の spawn と TASK を打たずに待つ
 8. TASK・RESULT・レビューの往復は「ミッション」の 3〜5 のとおりに進める
    (reviewer の `GATE:` の扱いを含む)
 9. reviewer が通したら、implementer と reviewer を `ralph org stop` で止め、
