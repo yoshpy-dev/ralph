@@ -510,6 +510,48 @@ func TestOrgSend_ApprovalCheck_StaleOrMistypedPlanDigest(t *testing.T) {
 	}
 }
 
+// TestOrgSend_WatchGateBeforeApprovalCheck pins the order the plan's Scope
+// sets for Send: the approval check comes after the watch gate. With no
+// watch that accepts work and no approval of the plan, a TASK to the
+// implementer, typed, raw and dry-run alike, gets the watch gate's refusal,
+// not the approval check's (the mutation survivor R03 of the test report of
+// org-plan-approval).
+func TestOrgSend_WatchGateBeforeApprovalCheck(t *testing.T) {
+	for _, v := range sendVariants {
+		t.Run(v.name, func(t *testing.T) {
+			fx := newEnforceFixture(t, config.ApprovalModePerPlan)
+			seedSeat(t, fx.o, "org-a", implementerSeatID, implementerRole, "pane-2")
+			fx.mark(t, nil)
+			gate := refusingWatchGate()
+			fx.o.WatchGate = gate.gate
+			r := fx.o.Send(SendParams{OrgID: "org-a", To: implementerSeatID, Text: planTask(fx.ref), Raw: v.raw, DryRun: v.dryRun})
+			if !errors.Is(r.Err, ErrNoRunningWatch) || errors.Is(r.Err, ErrPlanNotApproved) {
+				t.Fatalf("send = %v; want the watch gate's refusal, not the approval check's", r.Err)
+			}
+		})
+	}
+}
+
+// TestOrgSpawn_CapacityCheckBeforeFeatureOrgChecks pins the order the plan's
+// Scope sets for Spawn: the feature org's checks (its leader, then its
+// approval) come after the capacity check (spawnCapacityErr), in the dry run
+// and on the real path alike. With max_seats reached and no approval, an
+// implementer spawn gets the max_seats refusal, not the approval check's
+// (the mutation survivors R04 and R05 of the test report of
+// org-plan-approval).
+func TestOrgSpawn_CapacityCheckBeforeFeatureOrgChecks(t *testing.T) {
+	for _, dryRun := range []bool{true, false} {
+		fx := newEnforceFixture(t, config.ApprovalModePerPlan)
+		fx.o.Config.MaxSeats = 1 // the leader holds the one seat
+		p := implementerParams("org-a")
+		p.DryRun = dryRun
+		r := fx.o.Spawn(p)
+		if r.Outcome != SpawnOutcomeRejected || errors.Is(r.Err, ErrPlanNotApproved) || r.Err == nil || !strings.Contains(r.Err.Error(), "max_seats 1 reached") {
+			t.Fatalf("dry_run=%t: spawn = %+v; want the max_seats refusal, not the approval check's", dryRun, r)
+		}
+	}
+}
+
 // TestOrgSend_ApprovalCheck_NotApplied covers AC6: with no approval at all,
 // a TASK to the reviewer of an org bound in per-plan mode, a QUESTION or a
 // DECISION to its implementer, and a TASK to the implementer of an org bound

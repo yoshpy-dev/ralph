@@ -290,6 +290,35 @@ func TestOrgApprove_AllOrNothing(t *testing.T) {
 	})
 }
 
+// TestOrgApprove_RefusesAnItemItCannotResolve pins the edge of AC3's all or
+// nothing: approve refuses, before it records anything, a QUESTION whose
+// resolve note ("approved <path> sha256:<digest>") would be longer than the
+// inbox accepts (InboxNoteMaxRunes), here for a plan path of about 490
+// characters, so no plan_approved is left behind by a resolve that fails
+// (the mutation survivor R11 of the test report of org-plan-approval).
+func TestOrgApprove_RefusesAnItemItCannotResolve(t *testing.T) {
+	fx := newApprovalFixture(t)
+	worktree := t.TempDir()
+	fx.bind(t, "org-a", worktree, config.ApprovalModePerPlan)
+	rel := "docs/" + strings.Repeat("a", 200) + "/" + strings.Repeat("b", 200) + "/" + strings.Repeat("c", 80) + ".md"
+	ref := PlanRef{Path: rel, Digest: PlanDigest(writePlan(t, worktree, rel, testPlanDraft))}
+	if n := len("approved " + ref.String()); n <= InboxNoteMaxRunes {
+		t.Fatalf("the note is %d characters; the test needs more than %d", n, InboxNoteMaxRunes)
+	}
+	id := fx.ask(t, "org-a", "QUESTION", planQuestion(ref))
+	before := fx.ledgerBytes(t)
+	res := fx.o.Approve(ApproveParams{IDs: []string{id}})
+	if res.Err == nil || len(res.Refused) != 1 || len(res.Approved) != 0 {
+		t.Fatalf("Approve = %+v; want the item refused", res)
+	}
+	if !strings.Contains(res.Err.Error(), "could not be resolved with the note") {
+		t.Fatalf("Approve error = %v; want the note refusal", res.Err)
+	}
+	if after := fx.ledgerBytes(t); after != before {
+		t.Fatalf("a refused approve changed the ledger")
+	}
+}
+
 func TestOrgApprove_IDList(t *testing.T) {
 	s := newApproveSetup(t)
 	before := s.ledgerBytes(t)
